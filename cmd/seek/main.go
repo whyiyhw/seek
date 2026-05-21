@@ -24,6 +24,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
+	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
@@ -35,7 +36,8 @@ import (
 const systemPromptTpl = `You are seek, a DeepSeek-powered coding agent.
 
 Available tools:
-- read(path, offset?, limit?): read a file with line numbers.
+- read(path, offset?, limit?): read a file with line numbers. Files only — use list_dir for directories.
+- list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Prefer over 'bash ls'.
 - write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
 - bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
@@ -89,6 +91,7 @@ func run() error {
 
 	reg := tools.New().
 		Add(read.New()).
+		Add(listdir.New()).
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
@@ -157,6 +160,7 @@ func run() error {
 				_ = sessionPolicy // referenced — keeps lint happy
 				sessionReg = tools.New().
 					Add(read.New()).
+					Add(listdir.New()).
 					Add(write.New(sessionPolicy)).
 					Add(edit.New(sessionPolicy)).
 					Add(bash.New(sessionPolicy)).

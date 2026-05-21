@@ -105,6 +105,8 @@ func cmdHelp(m *Model, _ string) tea.Cmd {
 	sb.WriteString("  Ctrl+J      newline in input\n")
 	sb.WriteString("  Ctrl+L      same as /clear\n")
 	sb.WriteString("  Ctrl+R      toggle reasoning visibility for assistant messages\n")
+	sb.WriteString("  PgUp/PgDn   scroll conversation by a page\n")
+	sb.WriteString("  Ctrl+U/D    scroll conversation by half a page (handy without PgUp keys)\n")
 	sb.WriteString("  Ctrl+C      quit\n")
 	m.history = append(m.history, historyItem{role: "system", text: sb.String()})
 	return nil

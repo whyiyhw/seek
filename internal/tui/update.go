@@ -19,50 +19,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m = m.relayout()
+		// Forward to viewport so it can reflow its own internal state.
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(msg)
+		cmds = append(cmds, vpCmd)
 
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyCtrlC:
-			return m, tea.Quit
-		case tea.KeyEnter:
-			if m.streaming {
-				// Refuse to queue follow-ups in M4. The model isn't
-				// designed for it yet; we'd silently lose them.
-				return m, nil
-			}
-			text := strings.TrimSpace(m.input.Value())
-			if text == "" {
-				return m, nil
-			}
-			m.input.Reset()
-
-			// Slash command? Handle locally instead of sending to LLM.
-			if handled, cmd := dispatchCommand(&m, text); handled {
-				m.viewport.SetContent(m.renderConversation())
-				m.viewport.GotoBottom()
-				return m, cmd
-			}
-			return m.submit(text)
-		case tea.KeyCtrlL:
-			cmdClear(&m, "")
-			return m, nil
-		case tea.KeyCtrlR:
-			m.showReasoning = !m.showReasoning
-			m.viewport.SetContent(m.renderConversation())
-			return m, nil
-		default:
-			if !m.streaming {
-				var cmd tea.Cmd
-				m.input, cmd = m.input.Update(msg)
-				cmds = append(cmds, cmd)
-			}
-		}
+		// Key dispatch is explicit: each key reaches exactly one of
+		// {global, viewport, textarea}. Without this split, forwarding
+		// every key to both textarea AND viewport meant typing a space
+		// scrolled the conversation a page (viewport's default
+		// PageDown binding is " ") while also inserting a space — and
+		// PgUp/etc. only worked by accident.
+		return m.handleKey(msg)
 
 	case agentEventMsg:
+		// Auto-scroll only when the user is already pinned to the
+		// bottom. If they've scrolled up to read history, leave them
+		// there — streamed deltas shouldn't yank them back.
+		stickBottom := m.viewport.AtBottom()
 		m.applyAgentEvent(msg.Event)
 		m.viewport.SetContent(m.renderConversation())
-		m.viewport.GotoBottom()
-		// Pull the next event off the stream channel.
+		if stickBottom {
+			m.viewport.GotoBottom()
+		}
 		cmds = append(cmds, waitForAgentEvent(m.stream))
 
 	case streamEndMsg:
@@ -76,15 +56,75 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusTickMsg:
 		m.now = time.Now()
 		cmds = append(cmds, tickStatusEvery(time.Minute))
+
+	default:
+		// Non-Key, non-Window messages (mouse off; ticks; bubble
+		// internals) — let the viewport peek so its blink/animation
+		// states stay current.
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(msg)
+		cmds = append(cmds, vpCmd)
 	}
 
-	// Always refresh the viewport scroll position via its own update,
-	// so PgUp/PgDn etc. work even mid-stream.
-	var vpCmd tea.Cmd
-	m.viewport, vpCmd = m.viewport.Update(msg)
-	cmds = append(cmds, vpCmd)
-
 	return m, tea.Batch(cmds...)
+}
+
+// handleKey owns all KeyMsg routing so each key reaches exactly one of
+// {global handler, viewport scroller, textarea editor}. Returning
+// directly from here (rather than falling through to a viewport.Update
+// at the bottom of Update) is what stops space/b/f from secretly
+// scrolling while the user is just typing.
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	// --- global keys ---
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	case tea.KeyEnter:
+		if m.streaming {
+			// Refuse to queue follow-ups in M4. The model isn't
+			// designed for it yet; we'd silently lose them.
+			return m, nil
+		}
+		text := strings.TrimSpace(m.input.Value())
+		if text == "" {
+			return m, nil
+		}
+		m.input.Reset()
+		// Slash command? Handle locally instead of sending to LLM.
+		if handled, cmd := dispatchCommand(&m, text); handled {
+			m.viewport.SetContent(m.renderConversation())
+			m.viewport.GotoBottom()
+			return m, cmd
+		}
+		return m.submit(text)
+	case tea.KeyCtrlL:
+		cmdClear(&m, "")
+		return m, nil
+	case tea.KeyCtrlR:
+		m.showReasoning = !m.showReasoning
+		m.viewport.SetContent(m.renderConversation())
+		return m, nil
+
+	// --- scroll keys: viewport-only ---
+	//
+	// PgUp/PgDn for full-page scroll; Ctrl+U/Ctrl+D for half-page
+	// (handy on laptops without dedicated Page keys, and the vim
+	// muscle memory is widespread among CLI users). Arrow keys stay
+	// with the textarea — they're for cursor movement in the input,
+	// not history scrolling.
+	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
+		var vpCmd tea.Cmd
+		m.viewport, vpCmd = m.viewport.Update(msg)
+		return m, vpCmd
+	}
+
+	// --- everything else: textarea (when accepting input) ---
+	if m.streaming {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
