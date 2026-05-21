@@ -66,12 +66,16 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Approval prompt takes precedence over the slash menu — both can
-	// never be active simultaneously (approval blurs the input).
-	if m.pendingApproval != nil {
+	// Approval prompt takes precedence — blurs the input, blocks
+	// everything else. After that, command menu and path picker are
+	// mutually exclusive in practice (different trigger chars).
+	switch {
+	case m.pendingApproval != nil:
 		sb.WriteString(m.renderApprovalPrompt())
-	} else if m.commandMenuOpen {
+	case m.commandMenuOpen:
 		sb.WriteString(m.renderCommandMenu())
+	case m.pathPicker.open:
+		sb.WriteString(m.renderPathPicker())
 	}
 
 	// Input area.
@@ -125,6 +129,27 @@ func (m Model) renderStatusBar() string {
 
 // renderCommittedUser renders the user's prompt for scrollback. Called
 // before tea.Println.
+// renderPathPicker draws the @-completion dropdown. Same vertical
+// shape as the slash menu so the input doesn't jump when the user
+// switches between "@" and "/".
+func (m Model) renderPathPicker() string {
+	if len(m.pathPicker.filtered) == 0 {
+		return styleMuted.Render("  (no files match — Esc to dismiss)") + "\n"
+	}
+	var sb strings.Builder
+	for i, p := range m.pathPicker.filtered {
+		if i == m.pathPicker.selected {
+			sb.WriteString(styleMenuSelected.Render("▸ " + p))
+		} else {
+			sb.WriteString(styleMenuItem.Render("  " + p))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(styleMuted.Render("  Tab to insert · ↑/↓ to navigate · Esc to dismiss"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 // renderApprovalPrompt draws the inline y/N/a chooser shown while a
 // dangerous tool waits for a decision. Layout is intentionally compact
 // — same vertical real estate as the slash menu so the input doesn't

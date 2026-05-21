@@ -88,6 +88,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleApprovalKey(msg)
 	}
 
+	// @-path picker has the same priority as the slash menu; the
+	// trigger character ("@" vs "/") makes them mutually exclusive
+	// in practice.
+	if m.pathPicker.open {
+		switch msg.Type {
+		case tea.KeyTab:
+			m.applyPathCompletion()
+			return m, nil
+		case tea.KeyUp:
+			if m.pathPicker.selected > 0 {
+				m.pathPicker.selected--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.pathPicker.selected < len(m.pathPicker.filtered)-1 {
+				m.pathPicker.selected++
+			}
+			return m, nil
+		case tea.KeyEsc:
+			m.pathPicker.open = false
+			m.pathPicker.filtered = nil
+			m.pathPicker.selected = 0
+			return m, nil
+		}
+		// Other keys fall through (typing more chars refines the
+		// filter via updatePathCompleter at end of handleKey).
+	}
+
 	// Slash-command menu takes priority when open. It can only open
 	// when input is focused (i.e. not streaming), so menu navigation
 	// and stream cancellation never compete for the same key.
@@ -187,6 +215,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandMenu()
+	m.updatePathCompleter()
 	return m, cmd
 }
 

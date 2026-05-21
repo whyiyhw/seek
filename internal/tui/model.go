@@ -128,6 +128,9 @@ type Model struct {
 	// is buffered so we never block).
 	pendingApproval *permission.ApprovalRequest
 
+	// pathPicker drives the "@" file-path autocomplete dropdown.
+	pathPicker pathCompleterState
+
 	// md renders committed assistant messages as Markdown before they
 	// go to scrollback. Initialised on first WindowSizeMsg.
 	md      *glamour.TermRenderer
@@ -153,13 +156,21 @@ func New(opts Options) Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(colourTool)
 
-	return Model{
+	m := Model{
 		opts:       opts,
 		input:      ta,
 		spinner:    sp,
 		now:        time.Now(),
 		historyIdx: -1,
 	}
+	// Warm-up: scan workspace once for @-completer paths. Cost is
+	// O(files), capped by pathScanLimit, runs synchronously here so
+	// the first "@" feels instant. For huge repos this may take a
+	// couple hundred ms — acceptable on TUI startup.
+	if opts.CWD != "" {
+		m.pathPicker.all = scanWorkspace(opts.CWD)
+	}
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
