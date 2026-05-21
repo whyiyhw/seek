@@ -65,11 +65,37 @@ func TestRead_NotExist(t *testing.T) {
 	}
 }
 
-func TestRead_Directory(t *testing.T) {
+func TestRead_DirectoryDegradesToListing(t *testing.T) {
 	dir := t.TempDir()
-	_, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+dir+`"}`))
-	if err == nil || !strings.Contains(err.Error(), "directory") {
-		t.Errorf("err = %v", err)
+	mustWrite := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("alpha.txt", "hi")
+	mustWrite(".hidden", "secret")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+dir+`"}`))
+	if err != nil {
+		t.Fatalf("read on a directory should NOT error any more: %v", err)
+	}
+	for _, frag := range []string{"(directory)", "alpha.txt", "sub/", "list_dir"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("missing %q in listing:\n%s", frag, out)
+		}
+	}
+	if strings.Contains(out, ".hidden") {
+		t.Errorf("dotfiles should be excluded by default: %s", out)
+	}
+	// Sanity: directories appear before files in the body. We grab
+	// the section between the header line and the trailing summary.
+	body := strings.TrimSpace(strings.SplitN(out, "\n\n", 2)[0])
+	if idx := strings.Index(body, "sub/"); idx == -1 || strings.Index(body, "alpha.txt") < idx {
+		t.Errorf("expected sub/ before alpha.txt:\n%s", body)
 	}
 }
 

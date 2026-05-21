@@ -38,8 +38,8 @@ import (
 const systemPromptTpl = `You are seek, a DeepSeek-powered coding agent.
 
 Available tools:
-- read(path, offset?, limit?): read a file with line numbers. Files only — use list_dir for directories.
-- list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Prefer over 'bash ls'.
+- read(path, offset?, limit?): read a file with line numbers. If path is a directory it falls back to a shallow listing — that's enough for most explorations. Use list_dir when you need depth>1 or hidden files.
+- list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Use this instead of 'bash ls' when you need depth or dotfiles.
 - write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
 - bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).

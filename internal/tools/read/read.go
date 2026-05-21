@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -27,7 +28,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Read a file from the local filesystem. Returns the contents with 1-based line numbers prefixed to each line. Use offset/limit for large files; if the file exceeds the limit, the response notes truncation."
+const description = "Read a file from the local filesystem (with 1-based line numbers), OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly. offset/limit only apply to file reads; they're ignored on directories."
 
 // Args is the decoded argument struct for `read`.
 type Args struct {
@@ -83,7 +84,14 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("read: stat: %w", err)
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("read: %s is a directory", clean)
+		// Match Claude Code's "Read does what I mean": rather than
+		// erroring and forcing the model to retry with list_dir, do
+		// the obvious thing and return a shallow listing. list_dir is
+		// still the right answer when the caller needs recursion or
+		// hidden files, but the default behaviour is the one that
+		// avoids an extra LLM round-trip.
+		f.Close()
+		return listDirShallow(clean)
 	}
 
 	var (
@@ -123,4 +131,46 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	}
 	header += ")\n"
 	return header + out.String(), nil
+}
+
+// listDirShallow is the directory fallback for Read. Same shape as
+// list_dir at depth=1: skips dotfiles (use list_dir with show_hidden
+// if you want them), dirs-before-files alphabetical order, file sizes
+// in bytes. Output ends with a one-line nudge so the model knows that
+// list_dir is the right tool for deeper exploration.
+func listDirShallow(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("read: %w", err)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		di, dj := entries[i].IsDir(), entries[j].IsDir()
+		if di != dj {
+			return di // directories first
+		}
+		return entries[i].Name() < entries[j].Name()
+	})
+
+	var (
+		sb      strings.Builder
+		visible int
+	)
+	fmt.Fprintf(&sb, "%s (directory)\n", dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		visible++
+		if e.IsDir() {
+			fmt.Fprintf(&sb, "%s/\n", e.Name())
+		} else {
+			size := int64(0)
+			if info, err := e.Info(); err == nil {
+				size = info.Size()
+			}
+			fmt.Fprintf(&sb, "%s  %d B\n", e.Name(), size)
+		}
+	}
+	fmt.Fprintf(&sb, "\n%d entries shown (hidden files excluded; call list_dir with show_hidden=true or depth>1 for more)\n", visible)
+	return sb.String(), nil
 }
