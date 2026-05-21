@@ -109,6 +109,19 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+### Approval callback that blocks on a channel needs ctx-aware select on BOTH ends
+- **Saw**: implementing per-call approval (M4.5.5), the agent goroutine occasionally hung when Ctrl+C fired during a tool's permission.Check — the askFn was already past its send and blocked on `<-resp`, with no way to escape
+- **Why**: a naïve `askFn := func(a) { ch <- a; return <-resp }` has TWO blocking ops. SIGINT cancels the outer ctx, but the goroutine sitting on either send or receive doesn't notice unless we explicitly select on `ctx.Done()` at each step
+- **Fix**: wrap both the send and the receive in `select { case ... : ; case <-ctx.Done(): return false }`. The "deny if cancelled" semantics also matches user expectation — Ctrl+C means stop, not "block forever waiting for me to decide". Commit `7c96bd7`
+- **Lesson**: any blocking channel op in a host-supplied callback needs ctx-aware select on every step. The convenience of `ch <- x; <-resp` syntax hides two deadlock points
+- **Refs**: `cmd/seek/main.go` askFn closure, `internal/permission/permission.go` ApprovalRequest
+
+### Go's constant float→int conversion isn't auto-applied
+- **Saw**: `cannot convert 65536 * WarnFraction (constant 52428.8) to type int` when writing budget test boundaries
+- **Why**: Go's constant folding refuses to silently truncate a constant float result to an int, even when both operands are known at compile time. The test had `int(65536 * WarnFraction)` where WarnFraction was a `const 0.80`
+- **Fix**: convert one operand to a runtime value first (`int(float64(65536) * frac)`), or use a tiny helper that does the conversion at runtime. Commit `d038455`
+- **Lesson**: when you see "constant X.X of type float64" cannot convert, the answer isn't to add more parentheses — it's to make the expression non-constant
+
 ## Go language
 
 ### Backticks in raw string literals close the string

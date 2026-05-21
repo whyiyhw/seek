@@ -619,7 +619,7 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M2 工具 + FIM** | `write` / `edit` / `bash` + 权限框架；`pkg/deepseek` FIM；`fim_complete` 工具 | ✅ `2af3b62` |
 | **M3 Reasoner + 缓存** | `cache.Tracker` + `pricing` + `think` 工具（reasoner 基础） | ✅ `8264f52` |
 | **M4 TUI** | bubbletea；状态栏；slash 命令；reasoning 折叠；Markdown 渲染 | ✅ `9be599b` + polish |
-| **M4.5 TUI 稳定化（NEW）** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；prompt 历史；spinner；@ 路径补全；token 预算告警 | 🟡 进行中（~2 周） |
+| **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
 | **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ⏳ 待启动（~2 周） |
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ⏳ 待启动（~2.5 周） |
 | **M7 打磨** | RPC / JSON 模式；多行 paste 折叠；主题；帮助 overlay；自举 + benchmark；文档 | ⏳ 待启动（~1 周） |
@@ -627,17 +627,17 @@ M4 用了 `tea.WithAltScreen()`，导致：
 
 ### 5.1 M4.5 子任务展开
 
-| 子任务 | 估时 | 备注 |
+| 子任务 | 状态 | commit |
 |---|---|---|
-| inline 模式改造 + 适配 bubbletea 输入区 | 4 天 | §4.9；最大改动，先做 |
-| Esc 中断 + agent.Cancel + ctx 传播 | 1 天 | §4.11 |
-| per-call 审批（inline y/n） | 2 天 | §4.10 |
-| ↑/↓ prompt 历史 | 0.5 天 | textarea KeyMap 扩展 |
-| tool 执行 spinner | 0.5 天 | `bubbles/spinner` |
-| @ 文件路径补全 | 2 天 | 自己写下拉组件 + fuzzy match |
-| token 预算告警（依赖 model context 长度表） | 0.5 天 | 阈值 80% / 95% 两档 |
-| 测试 + 真实 API smoke + 文档 | 1.5 天 | |
-| **合计** | **~12 天 ≈ 2 周** | |
+| inline 模式改造（替代 alt-screen） | ✅ | `5d1c78c` |
+| tool 计时（live spinner + committed `· Xs` tail） | ✅ | `a38bfd0` |
+| Esc 中断 + ctx 传播（覆盖 chat / bash / reasoner） | ✅ | `a38bfd0` |
+| `/` slash 命令补全菜单 | ✅ | `5f6b316` |
+| ↑/↓ prompt 历史 + token 预算告警 | ✅ | `d038455` |
+| per-call 审批（policy.Mode 三态 + inline y/N/a） | ✅ | `7c96bd7` |
+| `@` 文件路径补全 | ✅ | `edf443c` |
+| PRD / pitfalls / README 同步 | ✅ | 本次 commit |
+| **总计** | **8 个 commit，~2 周分散完成** | |
 
 ---
 

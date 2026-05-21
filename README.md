@@ -3,11 +3,14 @@
 DeepSeek-first Go coding agent harness. Architecture inspired by
 [`earendil-works/pi`](https://github.com/earendil-works/pi).
 
-Status: **M4** — Adds the Bubble Tea TUI (interactive multi-turn
-session, live status bar with cache ratio + cost + off-peak countdown,
-streaming render, tool indicators). Print mode preserved for piping
-and scripting. MCP, skills, and second-class providers (Anthropic /
-OpenAI / Gemini) land in subsequent milestones. See [`PRD.md`](./PRD.md).
+Status: **M4.5 done** — TUI is daily-driver quality. Inline mode (no
+alt-screen) so the terminal owns scrollback / copy / history; Esc
+interrupts the agent mid-stream; per-call inline y/N approval for
+bash and out-of-CWD writes; slash-command completion menu; `@`
+file-path completion; ↑/↓ prompt history; tool spinners with
+elapsed-time tails; token budget warning at 80% / 95% of model
+context. Next: M5 (sessions + Skill loader + MCP). See
+[`PRD.md`](./PRD.md).
 
 ## Quick start
 
@@ -30,25 +33,41 @@ go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
 
 In the TUI:
 
-- **Enter** to submit, **Ctrl+J** for a newline
-- **Ctrl+L** or `/clear` — wipe the visible history (agent state preserved)
-- **Ctrl+R** — toggle reasoning visibility for assistant messages
-- **Ctrl+C** quits
+- **Enter** submits · **Ctrl+J** newline · **Ctrl+C** quits
+- **Esc** — interrupt the agent mid-stream (or dismiss a menu, or deny an approval)
+- **Ctrl+L** / `/clear` — clear the visible screen (your terminal keeps scrollback)
+- **Ctrl+R** — toggle reasoning visibility on assistant messages
+- **PgUp / PgDn / Ctrl+U / Ctrl+D** — scroll the terminal (or just use the mouse wheel)
+- **↑ / ↓** — when input is empty, recall previous prompts; otherwise move the cursor
+- **`/`** — opens the slash-command menu (Tab completes, ↑/↓ pick, Esc dismiss)
+- **`@`** — opens the file-path picker over the current workspace (same Tab/↑/↓/Esc)
 
-Slash commands (type `/help` in the TUI for the full list):
+Slash commands (full list with `/help`):
 
 | Command | What it does |
 |---|---|
 | `/help` | Show all commands and key bindings |
-| `/clear` | Wipe visible history (agent state kept) |
+| `/clear` | Wipe the visible screen (agent state kept; scrollback preserved by the terminal) |
 | `/reset` | Start a fresh conversation (agent state rebuilt) |
 | `/model <id>` | Switch model mid-session (e.g. `/model deepseek-reasoner`) |
 | `/yolo` | Toggle `--yolo` for the rest of the session |
 | `/exit` | Quit |
 
-The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · pricing tier with off-peak countdown. Assistant messages are rendered with Markdown via Glamour after they finish streaming.
+When seek is started without `--yolo` it runs in **ask mode**: any `bash`
+or write outside the working directory pops up an inline prompt:
 
-**Copy/paste**: mouse selection works normally — seek does not capture mouse events, so click-and-drag in the terminal copies as expected.
+```
+⚠ approve bash "rm -rf node_modules"?
+  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny
+```
+
+The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · `ctx N%` (model context utilisation; tints yellow above 80%, red above 95%) · pricing tier with off-peak countdown. Assistant messages are rendered with Markdown via Glamour after they finish streaming.
+
+**Inline mode**: seek does not enter alt-screen and does not capture
+mouse events, so your terminal's native scrollback, mouse wheel,
+click-and-drag selection, and Cmd+C copy all work across the entire
+conversation. When you quit (`/exit` or Ctrl+C) the session stays
+visible in the terminal.
 
 When the response finishes, seek prints a stats footer on stderr:
 
