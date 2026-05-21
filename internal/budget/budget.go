@@ -11,11 +11,19 @@ package budget
 
 // contextLimits is the input+context size (in tokens) for the models
 // seek can talk to. Values reflect what each provider advertises as of
-// 2026-05; they should be bumped explicitly when the vendor publishes
-// a new limit, not auto-discovered.
+// 2026-05; bump them explicitly when the vendor publishes a new limit
+// (no auto-discovery — see the package comment for why).
+//
+// DeepSeek V4 (Jan 2026 launch) ships with a 1M context for both
+// flash and pro. The legacy `deepseek-chat` / `deepseek-reasoner`
+// names route to V4 server-side, so they inherit the new ceiling too.
 var contextLimits = map[string]int{
-	"deepseek-chat":     65_536,
-	"deepseek-reasoner": 65_536,
+	// DeepSeek V4 — current lineup.
+	"deepseek-v4-flash": 1_000_000,
+	"deepseek-v4-pro":   1_000_000,
+	// Legacy aliases (still served by DeepSeek, mapped to V4-class).
+	"deepseek-chat":     1_000_000,
+	"deepseek-reasoner": 1_000_000,
 	// M6 additions (already declared so the surface doesn't shift
 	// when the second-tier providers light up).
 	"claude-3-5-sonnet-20241022": 200_000,
@@ -26,9 +34,12 @@ var contextLimits = map[string]int{
 	"gemini-1.5-pro":             2_000_000,
 }
 
-// Default is returned when an unknown model is queried. Picked
-// conservatively so the warning fires sooner rather than later.
-const Default = 65_536
+// Default is returned when an unknown model is queried. Since most
+// modern coding models now sit in the 100K+ range, a conservative
+// default of 128K avoids spurious warnings for models we haven't
+// catalogued yet, while still firing the budget warning before a
+// genuinely small model overflows.
+const Default = 128_000
 
 // Limit returns the context window size for a model. Unknown models
 // fall back to Default.

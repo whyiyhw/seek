@@ -94,8 +94,9 @@ func TestStatusBar_CountsAndCost(t *testing.T) {
 	if !strings.Contains(bar, "turns:5") || !strings.Contains(bar, "tools:3") {
 		t.Errorf("counters missing: %q", bar)
 	}
-	// 1M miss * $0.27 + 1M completion * $1.10 = $1.37
-	if !strings.Contains(bar, "$1.3700") {
+	// V4-Flash rates: 1M miss * $0.14 + 1M completion * $0.28 = $0.42.
+	// (deepseek-chat aliases to V4-Flash post the 2026-01 V4 launch.)
+	if !strings.Contains(bar, "$0.4200") {
 		t.Errorf("cost missing: %q", bar)
 	}
 }

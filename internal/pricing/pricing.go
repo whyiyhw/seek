@@ -30,18 +30,44 @@ type ModelPricing struct {
 	OutputPerMTok    float64
 }
 
-// standardRates is the price card for each supported model during the
-// standard pricing window. Off-peak is derived via offPeakDiscount.
+// standardRates is the price card per model during the standard
+// (non-off-peak) window. Off-peak is derived via offPeakDiscount.
+//
+// Numbers track DeepSeek's V4 launch (api-docs.deepseek.com 2026-01):
+//
+//	V4-Flash: $0.14 miss · $0.0028 hit · $0.28 output (per 1M tokens)
+//	V4-Pro:   $0.435 miss · $0.003625 hit · $0.87 output
+//	          (these are V4-Pro's CURRENT 75%-off promo rates; full
+//	           rack rate is 4× higher — $1.74 / $0.0145 / $3.48)
+//
+// Legacy aliases (deepseek-chat, deepseek-reasoner) are routed by
+// DeepSeek to V4-class models; we keep them in the table mapped to
+// the corresponding V4 tier so existing cmd/seek configs keep working
+// without a code change.
 var standardRates = map[string]ModelPricing{
-	deepseek.ModelChat: {
-		InputMissPerMTok: 0.27,
-		InputHitPerMTok:  0.014,
-		OutputPerMTok:    1.10,
+	deepseek.ModelV4Flash: {
+		InputMissPerMTok: 0.14,
+		InputHitPerMTok:  0.0028,
+		OutputPerMTok:    0.28,
 	},
+	deepseek.ModelV4Pro: {
+		InputMissPerMTok: 0.435,
+		InputHitPerMTok:  0.003625,
+		OutputPerMTok:    0.87,
+	},
+	// Legacy alias → V4-Flash (the closest match in capability and
+	// price tier; if DeepSeek formally retires this alias we'll need
+	// to point cmd/seek at ModelV4Flash directly).
+	deepseek.ModelChat: {
+		InputMissPerMTok: 0.14,
+		InputHitPerMTok:  0.0028,
+		OutputPerMTok:    0.28,
+	},
+	// Legacy alias → V4-Pro (reasoning workloads).
 	deepseek.ModelReasoner: {
-		InputMissPerMTok: 0.55,
-		InputHitPerMTok:  0.14,
-		OutputPerMTok:    2.19,
+		InputMissPerMTok: 0.435,
+		InputHitPerMTok:  0.003625,
+		OutputPerMTok:    0.87,
 	},
 }
 

@@ -3,6 +3,18 @@ package deepseek
 import "encoding/json"
 
 const (
+	// V4 lineup (current — as of api-docs.deepseek.com/quick_start/pricing).
+	// Both support thinking mode as a parameter rather than as a
+	// separate model ID; both have a 1M context window.
+	ModelV4Flash = "deepseek-v4-flash"
+	ModelV4Pro   = "deepseek-v4-pro"
+
+	// Legacy aliases — DeepSeek still routes these to V4-class models
+	// for backwards compatibility, but new code should prefer the V4
+	// names so the model surface is unambiguous. We use "chat" as the
+	// default in seek because callers were already using it; cmd/seek
+	// can be flipped to ModelV4Flash when the alias is officially
+	// retired.
 	ModelChat     = "deepseek-chat"
 	ModelReasoner = "deepseek-reasoner"
 

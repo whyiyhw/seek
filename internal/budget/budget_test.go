@@ -10,8 +10,13 @@ func pct(limit int, frac float64) int {
 }
 
 func TestLimit_KnownModelAndFallback(t *testing.T) {
-	if got := Limit("deepseek-chat"); got != 65_536 {
-		t.Errorf("deepseek-chat = %d", got)
+	// V4 launched with a 1M window for both flash and pro; the legacy
+	// chat/reasoner names route to V4 server-side.
+	if got := Limit("deepseek-chat"); got != 1_000_000 {
+		t.Errorf("deepseek-chat = %d, want 1M", got)
+	}
+	if got := Limit("deepseek-v4-flash"); got != 1_000_000 {
+		t.Errorf("deepseek-v4-flash = %d, want 1M", got)
 	}
 	if got := Limit("unknown-model-x"); got != Default {
 		t.Errorf("fallback = %d, want %d", got, Default)
@@ -19,30 +24,31 @@ func TestLimit_KnownModelAndFallback(t *testing.T) {
 }
 
 func TestClassify_Boundaries(t *testing.T) {
-	m := "deepseek-chat" // limit 65536
+	m := "deepseek-chat"
+	limit := Limit(m) // 1M after V4
 	cases := []struct {
 		used int
 		want Severity
 	}{
 		{0, SeverityOK},
-		// Using values strictly above the threshold so int truncation
-		// in pct() doesn't put us a fraction-of-a-token below the
-		// boundary and flip a tier.
-		{pct(65536, 0.79), SeverityOK},                   // just below warn
-		{pct(65536, 0.81), SeverityWarn},                 // just into warn
-		{pct(65536, 0.90), SeverityWarn},                 // mid-warn band
-		{pct(65536, 0.96), SeverityCritical},             // just into critical
-		{99_999, SeverityCritical},                       // over the limit
+		// Strictly above the threshold so int truncation in pct()
+		// doesn't put us a fraction-of-a-token below the boundary.
+		{pct(limit, 0.79), SeverityOK},
+		{pct(limit, 0.81), SeverityWarn},
+		{pct(limit, 0.90), SeverityWarn},
+		{pct(limit, 0.96), SeverityCritical},
+		{limit + 1, SeverityCritical},
 	}
 	for _, c := range cases {
 		if got := Classify(m, c.used); got != c.want {
-			t.Errorf("Classify(%d/%d) = %v, want %v", c.used, Limit(m), got, c.want)
+			t.Errorf("Classify(%d/%d) = %v, want %v", c.used, limit, got, c.want)
 		}
 	}
 }
 
 func TestFraction(t *testing.T) {
-	if got := Fraction("deepseek-chat", 65_536); got != 1.0 {
+	limit := Limit("deepseek-chat")
+	if got := Fraction("deepseek-chat", limit); got != 1.0 {
 		t.Errorf("at limit = %v, want 1.0", got)
 	}
 	if got := Fraction("unknown", 0); got != 0 {

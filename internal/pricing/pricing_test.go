@@ -68,14 +68,14 @@ func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 
 func TestCost_TypicalChatCall(t *testing.T) {
 	// Mixed-cache turn: 800 miss + 200 hit + 100 completion under
-	// standard chat pricing.
+	// the V4-Flash rate card (which deepseek-chat aliases to).
 	u := deepseek.Usage{
 		PromptTokens:          1000,
 		PromptCacheMissTokens: 800,
 		PromptCacheHitTokens:  200,
 		CompletionTokens:      100,
 	}
-	want := 800*0.27/1e6 + 200*0.014/1e6 + 100*1.10/1e6
+	want := 800*0.14/1e6 + 200*0.0028/1e6 + 100*0.28/1e6
 	got := Cost(deepseek.ModelChat, TierStandard, u)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("Cost = %v, want %v", got, want)
