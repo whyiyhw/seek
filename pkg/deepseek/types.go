@@ -27,8 +27,12 @@ type Message struct {
 }
 
 type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"`
+	// Index is set in streaming delta chunks so the consumer can merge
+	// partial argument strings keyed by call index. Final/non-stream
+	// responses omit it; omitempty keeps round-trips clean.
+	Index    int          `json:"index,omitempty"`
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
 	Function ToolCallFunc `json:"function"`
 }
 

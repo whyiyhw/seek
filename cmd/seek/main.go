@@ -1,9 +1,9 @@
 // Command seek is the DeepSeek-first coding agent CLI.
 //
-// M0 scope: read a prompt from stdin or -p flag, stream a chat completion to
-// stdout, print prefix-cache hit ratio when the response finishes. Tool calls,
-// interactive TUI, MCP, skills, and the second-class providers (Anthropic /
-// OpenAI / Gemini) land in subsequent milestones.
+// M1 wires cmd/seek through pkg/agent with one tool (`read`) and a system
+// prompt. The CLI is still single-turn print mode — interactive TUI lands
+// in M4. Subsequent milestones add write/edit/bash tools, MCP servers,
+// skills, sessions, and the second-tier Anthropic/OpenAI/Gemini providers.
 package main
 
 import (
@@ -16,8 +16,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/tools"
+	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+const systemPrompt = `You are seek, a DeepSeek-powered coding agent.
+You have the following tools available:
+- read(path, offset?, limit?): read a file from disk with line numbers.
+
+When the user asks about file contents, code, or anything that requires
+inspecting the workspace, call the read tool first. Quote relevant lines
+in your answer. Keep responses concise.`
 
 func main() {
 	if err := run(); err != nil {
@@ -28,8 +39,9 @@ func main() {
 
 func run() error {
 	var (
-		prompt = flag.String("p", "", "prompt text; if empty, read from stdin")
-		model  = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-reasoner)")
+		prompt   = flag.String("p", "", "prompt text; if empty, read from stdin")
+		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-reasoner)")
+		maxTurns = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
 	)
 	flag.Parse()
 
@@ -49,52 +61,74 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	client := deepseek.New(deepseek.WithAPIKey(apiKey))
+	reg := tools.New().Add(read.New())
 
-	start := time.Now()
-	ch, err := client.ChatStream(ctx, &deepseek.ChatRequest{
-		Model: *model,
-		Messages: []deepseek.Message{
-			{Role: deepseek.RoleUser, Content: text},
-		},
+	ag, err := agent.New(agent.Config{
+		Client:       deepseek.New(deepseek.WithAPIKey(apiKey)),
+		Model:        *model,
+		SystemPrompt: systemPrompt,
+		Tools:        reg,
+		MaxTurns:     *maxTurns,
 	})
 	if err != nil {
 		return err
 	}
 
+	start := time.Now()
 	var (
 		firstByte time.Duration
 		gotFirst  bool
-		usage     deepseek.Usage
-		finish    string
+		final     deepseek.Usage
+		turns     int
+		toolCalls int
 	)
-	for ev := range ch {
-		switch ev.Type {
-		case deepseek.EventDelta:
+
+	for ev := range ag.Prompt(ctx, text) {
+		switch e := ev.(type) {
+		case agent.MessageDelta:
 			if !gotFirst {
 				firstByte = time.Since(start)
 				gotFirst = true
 			}
-			fmt.Print(ev.Delta)
-		case deepseek.EventReasoningDelta:
-			// Dim the reasoner's CoT so it's visually distinct from the
-			// final answer when the user pipes deepseek-reasoner.
-			fmt.Fprint(os.Stderr, "\x1b[2m"+ev.Delta+"\x1b[0m")
-		case deepseek.EventDone:
-			usage = ev.Usage
-			finish = ev.FinishReason
+			if e.Reasoning {
+				// Dim CoT to stderr so it doesn't pollute stdout when
+				// the user pipes output downstream.
+				fmt.Fprint(os.Stderr, "\x1b[2m"+e.Delta+"\x1b[0m")
+			} else {
+				fmt.Print(e.Delta)
+			}
+
+		case agent.ToolExecStart:
+			fmt.Fprintf(os.Stderr, "\n\x1b[36m[tool] → %s %s\x1b[0m\n", e.Name, truncate(e.Args, 200))
+
+		case agent.ToolExecEnd:
+			if e.Err != nil {
+				fmt.Fprintf(os.Stderr, "\x1b[31m[tool] ← %s ERROR: %v\x1b[0m\n", e.Name, e.Err)
+			} else {
+				fmt.Fprintf(os.Stderr, "\x1b[36m[tool] ← %s (%d bytes)\x1b[0m\n", e.Name, len(e.Result))
+			}
+
+		case agent.AgentEnd:
+			final = e.Usage
+			turns = e.Turns
+			toolCalls = e.ToolCalls
+
+		case agent.ErrorEvent:
+			fmt.Println()
+			return e.Err
 		}
 	}
-	fmt.Println()
 
+	fmt.Println()
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
-	fmt.Fprintf(os.Stderr, "finish:      %s\n", finish)
-	fmt.Fprintf(os.Stderr, "ttfb:        %s\n", firstByte.Round(time.Millisecond))
-	fmt.Fprintf(os.Stderr, "elapsed:     %s\n", time.Since(start).Round(time.Millisecond))
-	fmt.Fprintf(os.Stderr, "prompt tok:  %d (cache hit %d / miss %d, ratio %s)\n",
-		usage.PromptTokens, usage.PromptCacheHitTokens, usage.PromptCacheMissTokens,
-		deepseek.FormatHitRatio(usage))
-	fmt.Fprintf(os.Stderr, "completion:  %d tok\n", usage.CompletionTokens)
+	fmt.Fprintf(os.Stderr, "turns:        %d\n", turns)
+	fmt.Fprintf(os.Stderr, "tool calls:   %d\n", toolCalls)
+	fmt.Fprintf(os.Stderr, "ttfb:         %s\n", firstByte.Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "elapsed:      %s\n", time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "prompt tok:   %d (cache hit %d / miss %d, ratio %s)\n",
+		final.PromptTokens, final.PromptCacheHitTokens, final.PromptCacheMissTokens,
+		deepseek.FormatHitRatio(final))
+	fmt.Fprintf(os.Stderr, "completion:   %d tok\n", final.CompletionTokens)
 	return nil
 }
 
@@ -106,8 +140,6 @@ func resolvePrompt(flagPrompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// If stdin is a TTY (no piped input), don't block waiting for input —
-	// surface a clearer error.
 	if stat.Mode()&os.ModeCharDevice != 0 {
 		return "", nil
 	}
@@ -116,4 +148,11 @@ func resolvePrompt(flagPrompt string) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
