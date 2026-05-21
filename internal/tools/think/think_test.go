@@ -12,18 +12,22 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// reasonerServer mimics deepseek-reasoner's non-stream response, including
-// the reasoning_content field on the assistant message.
-func reasonerServer(t *testing.T, wantSystem string, reasoning, answer string) *httptest.Server {
+// thinkingServer mimics a V4 chat response with thinking enabled —
+// reasoning_content alongside content. Verifies that the think tool
+// sends Model=V4-Flash, thinking={type:enabled}, reasoning_effort=high.
+func thinkingServer(t *testing.T, wantSystem string, reasoning, answer string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body deepseek.ChatRequest
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Model != deepseek.ModelReasoner {
-			t.Errorf("model = %q, want reasoner", body.Model)
+		if body.Model != deepseek.ModelV4Flash {
+			t.Errorf("model = %q, want V4-Flash", body.Model)
 		}
-		if len(body.Tools) != 0 {
-			t.Errorf("reasoner call should not include tools, got %d", len(body.Tools))
+		if body.Thinking == nil || body.Thinking.Type != "enabled" {
+			t.Errorf("expected Thinking.Type=enabled, got %+v", body.Thinking)
+		}
+		if body.ReasoningEffort != "high" {
+			t.Errorf("expected reasoning_effort=high, got %q", body.ReasoningEffort)
 		}
 		if wantSystem != "" {
 			if len(body.Messages) == 0 || body.Messages[0].Role != deepseek.RoleSystem || !strings.Contains(body.Messages[0].Content, wantSystem) {
@@ -35,7 +39,7 @@ func reasonerServer(t *testing.T, wantSystem string, reasoning, answer string) *
 			"id":      "x",
 			"object":  "chat.completion",
 			"created": 1,
-			"model":   deepseek.ModelReasoner,
+			"model":   deepseek.ModelV4Flash,
 			"choices": []map[string]any{{
 				"index": 0,
 				"message": map[string]any{
@@ -60,7 +64,7 @@ func reasonerServer(t *testing.T, wantSystem string, reasoning, answer string) *
 }
 
 func TestThink_HappyPath(t *testing.T) {
-	srv := reasonerServer(t, "step-by-step reasoner", "step 1 ... step 2 ...", "do X then Y")
+	srv := thinkingServer(t, "step-by-step reasoner", "step 1 ... step 2 ...", "do X then Y")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
@@ -78,7 +82,7 @@ func TestThink_HappyPath(t *testing.T) {
 }
 
 func TestThink_ReflectUsesReviewSystem(t *testing.T) {
-	srv := reasonerServer(t, "code-review reasoner", "looks fine", "no issues")
+	srv := thinkingServer(t, "code-review reasoner", "looks fine", "no issues")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
@@ -126,7 +130,7 @@ func TestThink_MissingTask(t *testing.T) {
 
 func TestThink_TruncatesLongReasoning(t *testing.T) {
 	long := strings.Repeat("a", reasoningCap+500)
-	srv := reasonerServer(t, "", long, "short")
+	srv := thinkingServer(t, "", long, "short")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))

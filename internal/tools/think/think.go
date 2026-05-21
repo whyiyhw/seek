@@ -1,16 +1,24 @@
 // Package think implements the `Think` tool: a DeepSeek-specific bridge
-// from the main chat loop into deepseek-reasoner (PRD §4.8.2 Level 1).
+// that asks a V4 model to reason harder than a normal chat turn would
+// (PRD §4.8.2 Level 1).
 //
-// The tool runs a fresh, history-less reasoner call so that:
-//   - reasoner's no-tools / no-temperature constraints don't interact
-//     with the main chat loop's tools and parameters, and
-//   - the prior assistant's `reasoning_content` field is never sent back
-//     to the API (DeepSeek rejects requests that retain it).
+// Post-V4 (2026-01), DeepSeek collapsed reasoning into a parameter:
+// instead of switching to a separate `deepseek-reasoner` model, we
+// call ModelV4Flash with Thinking.Type="enabled" and
+// ReasoningEffort="high". Cheaper, larger context (1M), and the
+// thinking-mode side of V4 still returns `reasoning_content`
+// alongside the final content — same field, same stripping rule.
 //
-// The reasoning + final answer are returned together as the tool result,
-// which then enters the next deepseek-chat turn as a normal `tool` role
-// message. From the chat model's perspective Think looks like any other
-// information-retrieval tool.
+// The tool still runs a FRESH, history-less call so the reasoning
+// pass isn't contaminated by the calling chat's tool schemas and the
+// prior assistant's reasoning_content isn't accidentally echoed back
+// (DeepSeek rejects requests that retain it; see
+// StripReasoningContent).
+//
+// The reasoning + final answer are returned together as the tool
+// result, which then enters the next chat turn as a normal `tool`
+// role message. From the calling chat model's perspective Think
+// looks like any other information-retrieval tool.
 package think
 
 import (
@@ -83,11 +91,13 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}
 
 	resp, err := t.client.Chat(ctx, &deepseek.ChatRequest{
-		Model: deepseek.ModelReasoner,
+		Model: deepseek.ModelV4Flash,
 		Messages: []deepseek.Message{
 			{Role: deepseek.RoleSystem, Content: sys},
 			{Role: deepseek.RoleUser, Content: strings.Join(userParts, "\n")},
 		},
+		Thinking:        &deepseek.ThinkingMode{Type: "enabled"},
+		ReasoningEffort: "high",
 	})
 	if err != nil {
 		return "", fmt.Errorf("think: reasoner call: %w", err)

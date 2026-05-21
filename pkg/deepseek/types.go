@@ -81,6 +81,30 @@ type ChatRequest struct {
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 
 	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+
+	// Thinking opts a V4-class model into reasoning mode. Replaces the
+	// pre-V4 pattern of calling a separate "deepseek-reasoner" model:
+	// just set {"type":"enabled"} on a V4 chat request and you get
+	// reasoning_content alongside content in the response.
+	//
+	// The reasoning_content from prior turns MUST be stripped before
+	// resending history — same constraint as the old reasoner; see
+	// StripReasoningContent.
+	Thinking *ThinkingMode `json:"thinking,omitempty"`
+
+	// ReasoningEffort tunes how hard the model thinks when Thinking is
+	// enabled. Mirrors OpenAI's o-series knob. Values: "low" |
+	// "medium" | "high". Higher = more reasoning tokens = higher
+	// quality / slower / more expensive. Empty = model default.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+}
+
+// ThinkingMode controls V4's thinking parameter. As of 2026-01 the
+// only fields documented are Type ∈ {"enabled", "disabled"}; the
+// wire shape is an object rather than a bare string so DeepSeek can
+// extend it without breaking clients.
+type ThinkingMode struct {
+	Type string `json:"type"` // "enabled" | "disabled"
 }
 
 type StreamOptions struct {
