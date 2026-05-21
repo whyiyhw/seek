@@ -42,6 +42,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streaming = false
 		m.stream = nil
 		m.input.Focus()
+		// Stream ended — turn count / cache ratio changed; pick a new
+		// placeholder so the user sees a fresh hint when the input
+		// blinks back into focus.
+		m.refreshPlaceholder()
 		if m.cancelStream != nil {
 			m.cancelStream()
 			m.cancelStream = nil
@@ -63,6 +67,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case statusTickMsg:
 		m.now = time.Now()
+		// A minute passed — off-peak window may have just opened or
+		// closed. Repick the placeholder so e.g. "🌙 off-peak" shows
+		// up the moment the discount kicks in.
+		m.refreshPlaceholder()
 		cmds = append(cmds, tickStatusEvery(time.Minute))
 
 	case spinner.TickMsg:
@@ -271,6 +279,9 @@ func (m Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if always && m.opts.SetYolo != nil {
 		m.opts.SetYolo(true)
 		m.opts.Yolo = true
+		// Yolo just turned on via "always" — refresh so the next
+		// idle moment shows the YOLO warning placeholder.
+		m.refreshPlaceholder()
 	}
 	m.pendingApproval = nil
 	m.input.Focus()

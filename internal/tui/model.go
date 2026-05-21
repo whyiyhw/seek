@@ -143,7 +143,10 @@ type Model struct {
 // tea.NewProgram WITHOUT tea.WithAltScreen() (see PRD §4.9).
 func New(opts Options) Model {
 	ta := textarea.New()
-	ta.Placeholder = "Ask seek anything — Enter to send, Ctrl+J for newline, Ctrl+C to quit."
+	// Initial placeholder is filled in by refreshPlaceholder() below
+	// once the Model is fully assembled. We set a neutral fallback in
+	// case construction errors out mid-flight.
+	ta.Placeholder = "Ask seek anything — Enter sends"
 	ta.Prompt = "▌ "
 	ta.SetHeight(3)
 	ta.SetWidth(80)
@@ -170,6 +173,9 @@ func New(opts Options) Model {
 	if opts.CWD != "" {
 		m.pathPicker.all = scanWorkspace(opts.CWD)
 	}
+	// Seed the placeholder with a state-aware hint (first-turn welcome,
+	// or yolo warning if --yolo was passed).
+	m.refreshPlaceholder()
 	return m
 }
 

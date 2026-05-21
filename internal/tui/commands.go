@@ -137,6 +137,9 @@ func cmdYolo(m *Model, _ string) cmdResult {
 	if m.opts.SetYolo != nil {
 		m.opts.SetYolo(m.opts.Yolo)
 	}
+	// Yolo state directly affects placeholder priority — refresh so
+	// the warning appears/disappears immediately.
+	m.refreshPlaceholder()
 	state := "off"
 	if m.opts.Yolo {
 		state = "on"
