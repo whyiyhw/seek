@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -19,70 +21,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m = m.relayout()
-		// Forward to viewport so it can reflow its own internal state.
-		var vpCmd tea.Cmd
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		cmds = append(cmds, vpCmd)
 
 	case tea.KeyMsg:
-		// Key dispatch is explicit: each key reaches exactly one of
-		// {global, viewport, textarea}. Without this split, forwarding
-		// every key to both textarea AND viewport meant typing a space
-		// scrolled the conversation a page (viewport's default
-		// PageDown binding is " ") while also inserting a space — and
-		// PgUp/etc. only worked by accident.
+		// Inline mode has no in-process scrollable region — the
+		// terminal does that natively. So we don't intercept PgUp/PgDn
+		// for an internal viewport; they go to the terminal's
+		// scrollback like in any normal shell.
 		return m.handleKey(msg)
 
 	case agentEventMsg:
-		// Auto-scroll only when the user is already pinned to the
-		// bottom. If they've scrolled up to read history, leave them
-		// there — streamed deltas shouldn't yank them back.
-		stickBottom := m.viewport.AtBottom()
-		m.applyAgentEvent(msg.Event)
-		m.viewport.SetContent(m.renderConversation())
-		if stickBottom {
-			m.viewport.GotoBottom()
-		}
+		// applyAgentEvent may emit Println commands for committed
+		// content. We collect them and let Bubble Tea write them above
+		// the live region.
+		printCmds := m.applyAgentEvent(msg.Event)
+		cmds = append(cmds, printCmds...)
 		cmds = append(cmds, waitForAgentEvent(m.stream))
 
 	case streamEndMsg:
 		m.streaming = false
 		m.stream = nil
 		m.input.Focus()
+		// At this point all completed messages are already in
+		// scrollback (committed during MessageEnd/ToolExecEnd). Clear
+		// any residual live state.
 		m.curContent = ""
 		m.curReasoning = ""
-		m.curToolActive = map[string]string{}
+		m.activeTools = nil
 
 	case statusTickMsg:
 		m.now = time.Now()
 		cmds = append(cmds, tickStatusEvery(time.Minute))
 
-	default:
-		// Non-Key, non-Window messages (mouse off; ticks; bubble
-		// internals) — let the viewport peek so its blink/animation
-		// states stay current.
-		var vpCmd tea.Cmd
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		cmds = append(cmds, vpCmd)
+	case spinner.TickMsg:
+		var spCmd tea.Cmd
+		m.spinner, spCmd = m.spinner.Update(msg)
+		cmds = append(cmds, spCmd)
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
-// handleKey owns all KeyMsg routing so each key reaches exactly one of
-// {global handler, viewport scroller, textarea editor}. Returning
-// directly from here (rather than falling through to a viewport.Update
-// at the bottom of Update) is what stops space/b/f from secretly
-// scrolling while the user is just typing.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
-	// --- global keys ---
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+
 	case tea.KeyEnter:
 		if m.streaming {
-			// Refuse to queue follow-ups in M4. The model isn't
-			// designed for it yet; we'd silently lose them.
 			return m, nil
 		}
 		text := strings.TrimSpace(m.input.Value())
@@ -90,35 +75,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.input.Reset()
-		// Slash command? Handle locally instead of sending to LLM.
 		if handled, cmd := dispatchCommand(&m, text); handled {
-			m.viewport.SetContent(m.renderConversation())
-			m.viewport.GotoBottom()
 			return m, cmd
 		}
 		return m.submit(text)
+
 	case tea.KeyCtrlL:
-		cmdClear(&m, "")
-		return m, nil
+		// "clear" no longer maps to a viewport reset — in inline mode
+		// the terminal owns the scrollback. We print a clear-screen
+		// escape via tea.ClearScreen, then redraw.
+		return m, tea.ClearScreen
+
 	case tea.KeyCtrlR:
 		m.showReasoning = !m.showReasoning
-		m.viewport.SetContent(m.renderConversation())
 		return m, nil
-
-	// --- scroll keys: viewport-only ---
-	//
-	// PgUp/PgDn for full-page scroll; Ctrl+U/Ctrl+D for half-page
-	// (handy on laptops without dedicated Page keys, and the vim
-	// muscle memory is widespread among CLI users). Arrow keys stay
-	// with the textarea — they're for cursor movement in the input,
-	// not history scrolling.
-	case tea.KeyPgUp, tea.KeyPgDown, tea.KeyCtrlU, tea.KeyCtrlD:
-		var vpCmd tea.Cmd
-		m.viewport, vpCmd = m.viewport.Update(msg)
-		return m, vpCmd
 	}
 
-	// --- everything else: textarea (when accepting input) ---
+	// Everything else: feed the textarea (when not streaming).
 	if m.streaming {
 		return m, nil
 	}
@@ -127,24 +100,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// submit kicks off an agent.Prompt for the given user text. Before
+// streaming begins we commit the user's message to scrollback via
+// tea.Println so it survives in native terminal history.
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
-	m.history = append(m.history, historyItem{role: "user", text: text})
+	// Record in the prompt-history ring (used by ↑/↓ recall — landing
+	// in a follow-up commit).
+	m.promptHistory = append(m.promptHistory, text)
+
 	m.curContent = ""
 	m.curReasoning = ""
-	m.curToolActive = map[string]string{}
+	m.activeTools = nil
 	m.streaming = true
 	m.input.Blur()
 
 	ch := m.opts.Agent.Prompt(m.opts.Ctx, text)
 	m.stream = ch
 
-	m.viewport.SetContent(m.renderConversation())
-	m.viewport.GotoBottom()
-
-	return m, waitForAgentEvent(ch)
+	printUser := tea.Println(renderCommittedUser(text, m.width))
+	return m, tea.Batch(printUser, waitForAgentEvent(ch))
 }
 
-func (m *Model) applyAgentEvent(ev agent.Event) {
+// applyAgentEvent updates Model state for an agent event and returns
+// any tea.Cmds needed to commit content to scrollback. Pointer receiver
+// so we can mutate m without returning a copy.
+func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
+	var cmds []tea.Cmd
+
 	switch e := ev.(type) {
 	case agent.AgentStart, agent.TurnStart, agent.MessageStart:
 		// no UI change
@@ -157,53 +139,45 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		}
 
 	case agent.MessageEnd:
-		switch e.Message.Role {
-		case deepseek.RoleAssistant:
-			// Persist the assembled assistant message and pre-render
-			// its Markdown (cached on the historyItem to avoid running
-			// glamour every redraw). ToolCalls embedded here are
-			// handled by the subsequent ToolExec* events; we don't
-			// render the raw call_ids.
-			if m.curContent != "" || m.curReasoning != "" {
-				m.history = append(m.history, historyItem{
-					role:      "assistant",
-					text:      m.curContent,
-					reasoning: m.curReasoning,
-					rendered:  renderMarkdown(m.md, m.curContent),
-				})
+		if e.Message.Role == deepseek.RoleAssistant && (m.curContent != "" || m.curReasoning != "") {
+			// Commit the assistant message to scrollback. The live
+			// region's curContent buffer is cleared so the next
+			// streamed chunk starts a fresh ghost.
+			rendered := renderMarkdown(m.md, m.curContent)
+			if rendered == "" {
+				rendered = m.curContent
 			}
+			cmds = append(cmds, tea.Println(renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)))
 			m.curContent = ""
 			m.curReasoning = ""
-		case deepseek.RoleTool:
-			// Tool result messages are already represented by the
-			// ToolExecEnd line we appended; skip duplicating.
 		}
+		// MessageEnd for RoleTool: skip, ToolExecEnd already committed.
 
 	case agent.ToolExecStart:
-		argsTrim := truncateOneLine(e.Args, 80)
-		m.curToolActive[e.CallID] = fmt.Sprintf("%s(%s)", e.Name, argsTrim)
-		m.history = append(m.history, historyItem{
-			role:     "tool",
-			toolName: e.Name,
-			toolArgs: argsTrim,
-			text:     "…",
+		m.activeTools = append(m.activeTools, activeTool{
+			callID: e.CallID,
+			name:   e.Name,
+			args:   truncateOneLine(e.Args, 80),
 		})
 
 	case agent.ToolExecEnd:
-		// Locate the most recent matching tool entry (by name) and fill
-		// in the result/error.
-		for i := len(m.history) - 1; i >= 0; i-- {
-			if m.history[i].role == "tool" && m.history[i].toolName == e.Name && m.history[i].text == "…" {
-				if e.Err != nil {
-					m.history[i].toolErr = true
-					m.history[i].text = "ERROR: " + e.Err.Error()
-				} else {
-					m.history[i].text = fmt.Sprintf("%d bytes", len(e.Result))
-				}
+		// ToolExecEnd carries Name/Result/Err but not Args — look the
+		// args back up from the active list before we remove it.
+		var args string
+		for i, t := range m.activeTools {
+			if t.callID == e.CallID {
+				args = t.args
+				m.activeTools = append(m.activeTools[:i], m.activeTools[i+1:]...)
 				break
 			}
 		}
-		delete(m.curToolActive, e.CallID)
+		var line string
+		if e.Err != nil {
+			line = renderCommittedToolErr(e.Name, args, e.Err.Error())
+		} else {
+			line = renderCommittedToolOk(e.Name, args, len(e.Result))
+		}
+		cmds = append(cmds, tea.Println(line))
 
 	case agent.TurnEnd:
 		m.turns++
@@ -211,15 +185,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 		m.toolCalls += e.ToolCalls
 
 	case agent.AgentEnd:
-		// Counters already accumulated via TurnEnd. Nothing further.
+		// Stats footer at turn boundary — print a thin separator with
+		// running totals so a long session has visible "checkpoints"
+		// in the scrollback.
+		cmds = append(cmds, tea.Println(m.renderTurnFooter()))
 
 	case agent.ErrorEvent:
 		m.lastErr = e.Err
-		m.history = append(m.history, historyItem{
-			role: "system",
-			text: "ERROR: " + e.Err.Error(),
-		})
+		cmds = append(cmds, tea.Println(styleErr.Render("  ! error: "+e.Err.Error())))
 	}
+
+	return cmds
 }
 
 // truncateOneLine collapses newlines and clips the result to n chars.
@@ -229,4 +205,12 @@ func truncateOneLine(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func (m Model) renderTurnFooter() string {
+	c := m.opts.Tracker.Cumulative()
+	cost := pricing.FormatCost(pricing.Cost(m.opts.Model, pricing.CurrentTier(m.now), c))
+	return styleMuted.Render(fmt.Sprintf(
+		"  · turn %d · %d tool · cache %s · %s",
+		m.turns, m.toolCalls, deepseek.FormatHitRatio(c), cost))
 }

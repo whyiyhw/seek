@@ -4,20 +4,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Run starts the seek TUI program. It blocks until the user quits
-// (Ctrl+C / Ctrl+Q) or the underlying context is cancelled.
+// Run starts the seek TUI program in inline mode (PRD §4.9). It blocks
+// until the user quits or the underlying context is cancelled.
+//
+// Architectural note: NO tea.WithAltScreen() — we want the terminal's
+// native scrollback to own committed conversation history (so Cmd+C
+// works across the entire session and the conversation survives exit).
+// NO tea.WithMouseCellMotion() either — that captures mouse events
+// and breaks native click-and-drag selection. Both choices are
+// deliberate; flipping them re-introduces fixed bugs.
 func Run(opts Options) error {
+	// The welcome banner goes directly to stdout before bubbletea
+	// takes over so it ends up in scrollback above the live region.
+	PrintWelcomeBanner(opts)
+
 	m := New(opts)
-	// NOTE: deliberately NO tea.WithMouseCellMotion() — capturing mouse
-	// events breaks the terminal's native click-and-drag selection,
-	// which means users can't copy any text out of seek. PgUp/PgDn and
-	// arrow keys cover scroll; losing mouse scroll is a cheap trade for
-	// keeping copy/paste functional. (Hold Option on macOS terminals to
-	// force selection if a future feature needs mouse events back.)
-	p := tea.NewProgram(
-		m,
-		tea.WithAltScreen(),
-	)
+	p := tea.NewProgram(m)
 	_, err := p.Run()
 	return err
 }

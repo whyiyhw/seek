@@ -3,23 +3,168 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/pricing"
 )
 
-// newMarkdownRenderer builds a glamour renderer at the given width.
-// style is "dark" / "light" / "" (auto fallback). When non-empty we
-// use the explicit standard style — this avoids glamour's auto-style
-// path which fires an OSC 11 background-colour query at construction
-// time. Under bubbletea that query's response gets routed into the
-// textarea as raw text (e.g. "]11;rgb:fae0/fae0/fae0\\[1;1R"). cmd/seek
-// pre-detects the style via termenv BEFORE entering the alt-screen so
-// we get auto-behaviour without the leak.
+// View renders the LIVE region only (no scrollback — that belongs to
+// the terminal). Layout:
 //
-// Returns nil if construction fails — callers must handle that as a
-// signal to fall back to raw text.
+//   [active tools]    ← one line each, with a spinner
+//   [streaming assistant text]
+//   [streaming reasoning, when showReasoning]
+//   ── separator ─────────────────
+//   > input
+//   status: …
+func (m Model) View() string {
+	if !m.ready {
+		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
+		// blank screen if bubbletea takes a moment to size up.
+		return styleMuted.Render("starting…") + "\n"
+	}
+
+	var sb strings.Builder
+
+	// Active tool lines.
+	for _, t := range m.activeTools {
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(fmt.Sprintf("%s(%s) …", t.name, t.args)))
+	}
+
+	// Streaming assistant text (volatile — committed at MessageEnd).
+	if m.curContent != "" {
+		body := styleAssistantText.Render(wrap(m.curContent, m.width-2))
+		fmt.Fprintf(&sb, "%s\n%s\n", styleAssistantLabel.Render("▸ seek"), body)
+	}
+
+	// Streaming reasoning.
+	if m.curReasoning != "" {
+		if m.showReasoning {
+			sb.WriteString(styleReasoning.Render("🧠 reasoning:\n" + indent(m.curReasoning, "    ")))
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString(styleReasoning.Render("🧠 reasoning… (Ctrl+R to expand)"))
+			sb.WriteString("\n")
+		}
+	}
+
+	// Separator only when there's live content above it — keeps idle
+	// state clean.
+	if sb.Len() > 0 {
+		sb.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
+		sb.WriteString("\n")
+	}
+
+	// Input area.
+	sb.WriteString(m.input.View())
+	sb.WriteString("\n")
+
+	// Status line (single, not pinned — it scrolls with content).
+	sb.WriteString(m.renderStatusBar())
+
+	return sb.String()
+}
+
+// relayout adapts to a new terminal width. No viewport in inline mode,
+// so this is just resizing the textarea and (re)building the Markdown
+// renderer.
+func (m Model) relayout() Model {
+	if m.width == 0 || m.height == 0 {
+		return m
+	}
+	m.input.SetWidth(m.width - 2)
+
+	if m.md == nil || m.mdWidth != m.width {
+		m.md = newMarkdownRenderer(m.width, m.opts.GlamourStyle)
+		m.mdWidth = m.width
+	}
+	m.ready = true
+	return m
+}
+
+func (m Model) renderStatusBar() string {
+	now := m.now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	tier := pricing.CurrentTier(now)
+	nextTier, nextAt := pricing.NextTransition(now)
+	return RenderStatusBar(StatusSnapshot{
+		Model:     m.opts.Model,
+		Yolo:      m.opts.Yolo,
+		Tier:      tier,
+		NextTier:  nextTier,
+		NextAt:    nextAt,
+		Turns:     m.turns,
+		ToolCalls: m.toolCalls,
+		Usage:     m.opts.Tracker.Cumulative(),
+		Streaming: m.streaming,
+		Now:       now,
+		Width:     m.width,
+	})
+}
+
+// renderCommittedUser renders the user's prompt for scrollback. Called
+// before tea.Println.
+func renderCommittedUser(text string, width int) string {
+	label := styleUserLabel.Render("▌ you")
+	body := styleUserText.Render(wrap(text, width-2))
+	return "\n" + label + "\n" + body
+}
+
+// renderCommittedAssistant renders a completed assistant message for
+// scrollback. content is already Markdown-rendered when md was
+// available.
+func renderCommittedAssistant(content, reasoning string, showReasoning bool, width int) string {
+	label := styleAssistantLabel.Render("▸ seek")
+	body := content
+	if body == "" {
+		body = styleMuted.Render("(no content)")
+	}
+	out := label + "\n" + body
+	if reasoning != "" {
+		if showReasoning {
+			out += "\n" + styleReasoning.Render("🧠 reasoning:\n"+indent(reasoning, "    "))
+		} else {
+			out += "\n" + styleReasoning.Render("🧠 reasoning hidden — Ctrl+R during streaming to expand")
+		}
+	}
+	_ = width // wrap is already applied via the Markdown renderer
+	return out
+}
+
+func renderCommittedToolOk(name, args string, resultBytes int) string {
+	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes", name, args, resultBytes))
+}
+
+func renderCommittedToolErr(name, args, err string) string {
+	return styleToolError.Render(fmt.Sprintf("  ↳ %s(%s) → ERROR: %s", name, args, err))
+}
+
+func indent(s, prefix string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		lines[i] = prefix + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+func wrap(s string, width int) string {
+	if width <= 4 {
+		return s
+	}
+	return lipgloss.NewStyle().Width(width).Render(s)
+}
+
+// ---- Markdown rendering ----------------------------------------------
+
+// newMarkdownRenderer builds a glamour renderer at the given width.
+// style is "dark" / "light" / "" (auto fallback). The host pre-detects
+// the style via termenv BEFORE the program starts (cmd/seek does this)
+// to avoid the OSC 11 query leaking into the textarea — see PRD §4.9
+// and docs/pitfalls.md.
 func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	if width < 20 {
 		width = 20
@@ -31,9 +176,6 @@ func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	if style != "" {
 		opts = append(opts, glamour.WithStandardStyle(style))
 	} else {
-		// No host-provided detection — fall back to glamour's auto.
-		// Risk: OSC 11 leak if invoked under bubbletea. We log nothing
-		// here; cmd/seek should always set GlamourStyle.
 		opts = append(opts, glamour.WithAutoStyle())
 	}
 	r, err := glamour.NewTermRenderer(opts...)
@@ -43,8 +185,6 @@ func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	return r
 }
 
-// renderMarkdown is glamour with safe defaults: empty input returns
-// empty, a nil renderer is a no-op, render errors fall back to raw.
 func renderMarkdown(r *glamour.TermRenderer, text string) string {
 	if text == "" || r == nil {
 		return text
@@ -56,181 +196,3 @@ func renderMarkdown(r *glamour.TermRenderer, text string) string {
 	return strings.TrimRight(out, "\n")
 }
 
-func (m Model) View() string {
-	// Pre-WindowSizeMsg path: bubbletea sends sizing automatically once
-	// alt-screen is up, but the first View() call typically fires
-	// before that arrives. We render the welcome banner instead of a
-	// placeholder so the very first frame already says something
-	// meaningful — same content the viewport will hold once we know
-	// the actual dimensions.
-	if !m.ready {
-		return welcomeText(m.opts)
-	}
-
-	header := m.renderHeader()
-	body := m.viewport.View()
-	input := m.input.View()
-	status := m.renderStatusBar()
-
-	separator := styleMuted.Render(strings.Repeat("─", m.width))
-	return strings.Join([]string{header, body, separator, input, status}, "\n")
-}
-
-func (m Model) renderHeader() string {
-	left := styleHeader.Render("seek")
-	right := styleMuted.Render(m.opts.CWD)
-	pad := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
-	if pad < 1 {
-		pad = 1
-	}
-	return " " + left + strings.Repeat(" ", pad+2) + right + " "
-}
-
-func (m Model) renderStatusBar() string {
-	tier := pricing.CurrentTier(m.now)
-	nextTier, nextAt := pricing.NextTransition(m.now)
-	return RenderStatusBar(StatusSnapshot{
-		Model:     m.opts.Model,
-		Yolo:      m.opts.Yolo,
-		Tier:      tier,
-		NextTier:  nextTier,
-		NextAt:    nextAt,
-		Turns:     m.turns,
-		ToolCalls: m.toolCalls,
-		Usage:     m.opts.Tracker.Cumulative(),
-		Streaming: m.streaming,
-		Now:       m.now,
-		Width:     m.width,
-	})
-}
-
-// renderConversation produces the viewport's content. It's a complete
-// rebuild on every change — fine for the conversation lengths we
-// realistically see; if it becomes a perf problem we can switch to an
-// incremental buffer.
-func (m Model) renderConversation() string {
-	var sb strings.Builder
-
-	// Stable history items.
-	for _, h := range m.history {
-		sb.WriteString(m.renderItem(h, false))
-		sb.WriteString("\n")
-	}
-
-	// In-flight assistant content (still streaming). Rendered as a
-	// "ghost" assistant message — raw text only (no markdown reflow
-	// while the bytes are still arriving).
-	if m.streaming && (m.curContent != "" || m.curReasoning != "") {
-		ghost := historyItem{
-			role:      "assistant",
-			text:      m.curContent,
-			reasoning: m.curReasoning,
-		}
-		sb.WriteString(m.renderItem(ghost, true))
-	}
-
-	if m.lastErr != nil {
-		sb.WriteString("\n" + styleErr.Render("error: "+m.lastErr.Error()))
-	}
-
-	return sb.String()
-}
-
-// renderItem formats a single history entry. ghost=true means the entry
-// is still streaming and should be rendered without markdown styling
-// (which reflows badly across partial input).
-func (m Model) renderItem(h historyItem, ghost bool) string {
-	width := m.viewport.Width
-	switch h.role {
-	case "user":
-		label := styleUserLabel.Render("▌ you")
-		body := styleUserText.Render(wrap(h.text, width-2))
-		return label + "\n" + body + "\n"
-
-	case "assistant":
-		label := styleAssistantLabel.Render("▸ seek")
-		body := h.rendered
-		if body == "" || ghost {
-			body = styleAssistantText.Render(wrap(h.text, width-2))
-		}
-		var rea string
-		if h.reasoning != "" {
-			if m.showReasoning {
-				rea = "\n" + styleReasoning.Render("🧠 reasoning:\n"+indent(h.reasoning, "    ")) + "\n"
-			} else {
-				rea = "\n" + styleReasoning.Render("🧠 reasoning hidden — Ctrl+R to expand") + "\n"
-			}
-		}
-		return label + "\n" + body + rea + "\n"
-
-	case "tool":
-		base := fmt.Sprintf("  ↳ %s(%s) → %s", h.toolName, h.toolArgs, h.text)
-		if h.toolErr {
-			return styleToolError.Render(base)
-		}
-		return styleToolLine.Render(base)
-
-	case "system":
-		return styleMuted.Render("  ! " + h.text)
-
-	default:
-		return h.text
-	}
-}
-
-func indent(s, prefix string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = prefix + l
-	}
-	return strings.Join(lines, "\n")
-}
-
-// wrap is a very thin word-wrapper that breaks on whitespace at the
-// soft column. It's purposely naïve — lipgloss has WordWrap but using
-// it on streaming text introduces visible reflow churn; raw text with
-// hard breaks every `width` characters is what we ship in M4.
-func wrap(s string, width int) string {
-	if width <= 4 {
-		return s
-	}
-	return lipgloss.NewStyle().Width(width).Render(s)
-}
-
-// relayout is called by Update on every WindowSizeMsg. It (re)sizes the
-// viewport + input, (re)builds the markdown renderer at the current
-// width, and re-renders previously committed assistant messages.
-func (m Model) relayout() Model {
-	if m.width == 0 || m.height == 0 {
-		return m
-	}
-	// Layout budget: header(1) + separator(1) + input(3) + status(1) = 6 lines
-	// for non-viewport content.
-	const chrome = 6
-	vpHeight := m.height - chrome
-	if vpHeight < 3 {
-		vpHeight = 3
-	}
-	m.viewport.Width = m.width
-	m.viewport.Height = vpHeight
-	m.input.SetWidth(m.width - 2)
-
-	if m.md == nil || m.mdWidth != m.viewport.Width {
-		m.md = newMarkdownRenderer(m.viewport.Width, m.opts.GlamourStyle)
-		m.mdWidth = m.viewport.Width
-		// Width changed: stale `rendered` caches need to be regenerated.
-		for i := range m.history {
-			if m.history[i].role == "assistant" && m.history[i].text != "" {
-				m.history[i].rendered = renderMarkdown(m.md, m.history[i].text)
-			}
-		}
-	}
-
-	if !m.ready {
-		m.viewport.SetContent(welcomeText(m.opts))
-	} else {
-		m.viewport.SetContent(m.renderConversation())
-	}
-	m.ready = true
-	return m
-}
