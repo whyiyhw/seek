@@ -3,10 +3,10 @@
 DeepSeek-first Go coding agent harness. Architecture inspired by
 [`earendil-works/pi`](https://github.com/earendil-works/pi).
 
-Status: **M2** — DeepSeek streaming client, agent loop, five tools
-(`read` / `write` / `edit` / `bash` / `fim_complete`), permission gating.
-TUI, MCP, skills, and second-class providers (Anthropic / OpenAI / Gemini)
-land in subsequent milestones. See [`PRD.md`](./PRD.md).
+Status: **M3** — Adds session-level cache tracking, off-peak / cost
+estimation, and the `think` tool (deepseek-reasoner bridge). Six tools
+total. TUI, MCP, skills, and second-class providers (Anthropic / OpenAI
+/ Gemini) land in subsequent milestones. See [`PRD.md`](./PRD.md).
 
 ## Quick start
 
@@ -25,13 +25,16 @@ When the response finishes, seek prints a stats footer on stderr:
 
 ```
 --- seek stats ---
-yolo:         true
-turns:        4
-tool calls:   3
+yolo:         false
+model:        deepseek-chat
+tier:         standard
+turns:        5
+tool calls:   4
 ttfb:         1.273s
-elapsed:      8.183s
-prompt tok:   6868 (cache hit 4864 / miss 2004, ratio 70.8%)
-completion:   381 tok
+elapsed:      8.2s
+prompt tok:   10987 (cache hit 7680 / miss 3307, ratio 69.9%)
+completion:   864 tok
+est. cost:    $0.0020 (saved ~7680 input tok via cache)
 ```
 
 The `cache hit` / `miss` / `ratio` line is the DeepSeek prefix-cache
@@ -48,6 +51,7 @@ turns.
 | `edit` | exact `old_string`→`new_string` substitution (Claude Code style) | edits outside CWD need `--yolo` |
 | `bash` | run a shell command with timeout | needs `--yolo` |
 | `fim_complete` | DeepSeek FIM endpoint — cheap gap-fill, returns text without applying | — |
+| `think` | deepseek-reasoner bridge: multi-step planning or `reflect=true` self-review | — |
 
 ## Layout
 

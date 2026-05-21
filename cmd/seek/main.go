@@ -1,11 +1,9 @@
 // Command seek is the DeepSeek-first coding agent CLI.
 //
-// M2 wires the four core tools (read / write / edit / bash) plus the
-// DeepSeek-specific fim_complete fast path. Bash and writes outside CWD
-// are gated by the permission package; pass --yolo to bypass.
-//
-// Interactive TUI, sessions, MCP, skills, and the second-tier
-// Anthropic/OpenAI/Gemini providers land in subsequent milestones.
+// M3 wires in cache.Tracker (session-level prefix-cache stats), pricing
+// (off-peak tier awareness + per-call cost), and the Think tool that
+// bridges the chat loop into deepseek-reasoner. Interactive TUI lands in
+// M4; full reasoner-then-chat skill arrives with skill loading in M5.
 package main
 
 import (
@@ -19,12 +17,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -38,12 +39,15 @@ Available tools:
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
 - bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
+- think(task, reflect?, context?): call deepseek-reasoner for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
 
 Workflow:
 1. Inspect the workspace with read before changing anything.
-2. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
-3. For permission denials, surface the message to the user and stop — do not loop.
-4. Working directory: %s. Default --yolo is %v.
+2. For multi-step or risky tasks, call think first to plan; for non-trivial changes, call think(reflect=true) after to self-review.
+3. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
+4. For permission denials, surface the message to the user and stop — do not loop.
+
+Working directory: %s. --yolo: %v.
 `
 
 func main() {
@@ -88,16 +92,26 @@ func run() error {
 	defer cancel()
 
 	client := deepseek.New(deepseek.WithAPIKey(apiKey))
+	tracker := cache.New()
+
+	tier := pricing.CurrentTier(time.Now())
+	nextTier, nextAt := pricing.NextTransition(time.Now())
 
 	reg := tools.New().
 		Add(read.New()).
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
-		Add(fimcomplete.New(client, *model))
+		Add(fimcomplete.New(client, *model)).
+		Add(think.New(client))
 
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
+
+	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
+		pricing.TierLabel(tier),
+		pricing.TierLabel(nextTier),
+		nextAt.In(pricing.Shanghai).Format("2006-01-02 15:04 MST"))
 
 	ag, err := agent.New(agent.Config{
 		Client:       client,
@@ -114,7 +128,6 @@ func run() error {
 	var (
 		firstByte time.Duration
 		gotFirst  bool
-		final     deepseek.Usage
 		turns     int
 		toolCalls int
 	)
@@ -142,8 +155,10 @@ func run() error {
 				fmt.Fprintf(os.Stderr, "\x1b[36m[tool] ← %s (%d bytes)\x1b[0m\n", e.Name, len(e.Result))
 			}
 
+		case agent.TurnEnd:
+			tracker.Record(e.Usage)
+
 		case agent.AgentEnd:
-			final = e.Usage
 			turns = e.Turns
 			toolCalls = e.ToolCalls
 
@@ -154,16 +169,22 @@ func run() error {
 	}
 
 	fmt.Println()
+	c := tracker.Cumulative()
+	cost := pricing.Cost(*model, tier, c)
+
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
 	fmt.Fprintf(os.Stderr, "yolo:         %v\n", *yolo)
+	fmt.Fprintf(os.Stderr, "model:        %s\n", *model)
+	fmt.Fprintf(os.Stderr, "tier:         %s\n", pricing.TierLabel(tier))
 	fmt.Fprintf(os.Stderr, "turns:        %d\n", turns)
 	fmt.Fprintf(os.Stderr, "tool calls:   %d\n", toolCalls)
 	fmt.Fprintf(os.Stderr, "ttfb:         %s\n", firstByte.Round(time.Millisecond))
 	fmt.Fprintf(os.Stderr, "elapsed:      %s\n", time.Since(start).Round(time.Millisecond))
 	fmt.Fprintf(os.Stderr, "prompt tok:   %d (cache hit %d / miss %d, ratio %s)\n",
-		final.PromptTokens, final.PromptCacheHitTokens, final.PromptCacheMissTokens,
-		deepseek.FormatHitRatio(final))
-	fmt.Fprintf(os.Stderr, "completion:   %d tok\n", final.CompletionTokens)
+		c.PromptTokens, c.PromptCacheHitTokens, c.PromptCacheMissTokens, deepseek.FormatHitRatio(c))
+	fmt.Fprintf(os.Stderr, "completion:   %d tok\n", c.CompletionTokens)
+	fmt.Fprintf(os.Stderr, "est. cost:    %s (saved ~%d input tok via cache)\n",
+		pricing.FormatCost(cost), tracker.SavedTokens())
 	return nil
 }
 
