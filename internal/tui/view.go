@@ -10,17 +10,33 @@ import (
 )
 
 // newMarkdownRenderer builds a glamour renderer at the given width.
+// style is "dark" / "light" / "" (auto fallback). When non-empty we
+// use the explicit standard style — this avoids glamour's auto-style
+// path which fires an OSC 11 background-colour query at construction
+// time. Under bubbletea that query's response gets routed into the
+// textarea as raw text (e.g. "]11;rgb:fae0/fae0/fae0\\[1;1R"). cmd/seek
+// pre-detects the style via termenv BEFORE entering the alt-screen so
+// we get auto-behaviour without the leak.
+//
 // Returns nil if construction fails — callers must handle that as a
 // signal to fall back to raw text.
-func newMarkdownRenderer(width int) *glamour.TermRenderer {
+func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	if width < 20 {
 		width = 20
 	}
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width-2),
+	opts := []glamour.TermRendererOption{
+		glamour.WithWordWrap(width - 2),
 		glamour.WithEmoji(),
-	)
+	}
+	if style != "" {
+		opts = append(opts, glamour.WithStandardStyle(style))
+	} else {
+		// No host-provided detection — fall back to glamour's auto.
+		// Risk: OSC 11 leak if invoked under bubbletea. We log nothing
+		// here; cmd/seek should always set GlamourStyle.
+		opts = append(opts, glamour.WithAutoStyle())
+	}
+	r, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
 		return nil
 	}
@@ -200,7 +216,7 @@ func (m Model) relayout() Model {
 	m.input.SetWidth(m.width - 2)
 
 	if m.md == nil || m.mdWidth != m.viewport.Width {
-		m.md = newMarkdownRenderer(m.viewport.Width)
+		m.md = newMarkdownRenderer(m.viewport.Width, m.opts.GlamourStyle)
 		m.mdWidth = m.viewport.Width
 		// Width changed: stale `rendered` caches need to be regenerated.
 		for i := range m.history {

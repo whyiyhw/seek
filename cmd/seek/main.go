@@ -31,6 +31,8 @@ import (
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
+
+	"github.com/muesli/termenv"
 )
 
 const systemPromptTpl = `You are seek, a DeepSeek-powered coding agent.
@@ -133,12 +135,13 @@ func run() error {
 	sessionReg := reg
 
 	return tui.Run(tui.Options{
-		Agent:   ag,
-		Tracker: tracker,
-		Model:   sessionModel,
-		Yolo:    sessionYolo,
-		CWD:     abs,
-		Ctx:     ctx,
+		Agent:        ag,
+		Tracker:      tracker,
+		Model:        sessionModel,
+		Yolo:         sessionYolo,
+		CWD:          abs,
+		Ctx:          ctx,
+		GlamourStyle: detectGlamourStyle(),
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			return agent.New(agent.Config{
@@ -278,4 +281,23 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// detectGlamourStyle picks "dark" or "light" for the TUI's Markdown
+// renderer. We do this BEFORE entering bubbletea's alt-screen so that
+// termenv's OSC 11 background-colour query/response handshake
+// completes synchronously while we still own stdin. If we let glamour
+// do the equivalent under bubbletea, the terminal's response (e.g.
+// "]11;rgb:fae0/fae0/fae0\[1;1R") leaks straight into the textarea as
+// garbage text.
+//
+// SEEK_STYLE=dark|light overrides the detection.
+func detectGlamourStyle() string {
+	if v := os.Getenv("SEEK_STYLE"); v != "" {
+		return v
+	}
+	if termenv.NewOutput(os.Stdout).HasDarkBackground() {
+		return "dark"
+	}
+	return "light"
 }

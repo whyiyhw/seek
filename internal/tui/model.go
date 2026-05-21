@@ -46,6 +46,13 @@ type Options struct {
 	CWD     string
 	Ctx     context.Context // cancelled on SIGINT
 
+	// GlamourStyle is "dark", "light", or "" (auto). The host
+	// pre-detects this BEFORE constructing Options so we never let
+	// glamour run its own OSC 11 background query under bubbletea —
+	// the query response leaks straight into the textarea. See
+	// cmd/seek/main.go for the detection.
+	GlamourStyle string
+
 	// RebuildAgent returns a fresh Agent for /reset. Nil disables /reset.
 	RebuildAgent func() (*agent.Agent, error)
 	// SetModel notifies the host that the user picked a new model via
