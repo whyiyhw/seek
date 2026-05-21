@@ -1,9 +1,11 @@
 // Command seek is the DeepSeek-first coding agent CLI.
 //
-// M1 wires cmd/seek through pkg/agent with one tool (`read`) and a system
-// prompt. The CLI is still single-turn print mode — interactive TUI lands
-// in M4. Subsequent milestones add write/edit/bash tools, MCP servers,
-// skills, sessions, and the second-tier Anthropic/OpenAI/Gemini providers.
+// M2 wires the four core tools (read / write / edit / bash) plus the
+// DeepSeek-specific fim_complete fast path. Bash and writes outside CWD
+// are gated by the permission package; pass --yolo to bypass.
+//
+// Interactive TUI, sessions, MCP, skills, and the second-tier
+// Anthropic/OpenAI/Gemini providers land in subsequent milestones.
 package main
 
 import (
@@ -13,22 +15,36 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
+	"github.com/whyiyhw/seek/internal/tools/bash"
+	"github.com/whyiyhw/seek/internal/tools/edit"
+	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-const systemPrompt = `You are seek, a DeepSeek-powered coding agent.
-You have the following tools available:
-- read(path, offset?, limit?): read a file from disk with line numbers.
+const systemPromptTpl = `You are seek, a DeepSeek-powered coding agent.
 
-When the user asks about file contents, code, or anything that requires
-inspecting the workspace, call the read tool first. Quote relevant lines
-in your answer. Keep responses concise.`
+Available tools:
+- read(path, offset?, limit?): read a file with line numbers.
+- write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
+- edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
+- bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
+- fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
+
+Workflow:
+1. Inspect the workspace with read before changing anything.
+2. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
+3. For permission denials, surface the message to the user and stop — do not loop.
+4. Working directory: %s. Default --yolo is %v.
+`
 
 func main() {
 	if err := run(); err != nil {
@@ -42,6 +58,7 @@ func run() error {
 		prompt   = flag.String("p", "", "prompt text; if empty, read from stdin")
 		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-reasoner)")
 		maxTurns = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
+		yolo     = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 	)
 	flag.Parse()
 
@@ -58,13 +75,32 @@ func run() error {
 		return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
 	}
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	policy, err := permission.New(cwd, *yolo)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	reg := tools.New().Add(read.New())
+	client := deepseek.New(deepseek.WithAPIKey(apiKey))
+
+	reg := tools.New().
+		Add(read.New()).
+		Add(write.New(policy)).
+		Add(edit.New(policy)).
+		Add(bash.New(policy)).
+		Add(fimcomplete.New(client, *model))
+
+	abs, _ := filepath.Abs(cwd)
+	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
 
 	ag, err := agent.New(agent.Config{
-		Client:       deepseek.New(deepseek.WithAPIKey(apiKey)),
+		Client:       client,
 		Model:        *model,
 		SystemPrompt: systemPrompt,
 		Tools:        reg,
@@ -91,8 +127,6 @@ func run() error {
 				gotFirst = true
 			}
 			if e.Reasoning {
-				// Dim CoT to stderr so it doesn't pollute stdout when
-				// the user pipes output downstream.
 				fmt.Fprint(os.Stderr, "\x1b[2m"+e.Delta+"\x1b[0m")
 			} else {
 				fmt.Print(e.Delta)
@@ -121,6 +155,7 @@ func run() error {
 
 	fmt.Println()
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
+	fmt.Fprintf(os.Stderr, "yolo:         %v\n", *yolo)
 	fmt.Fprintf(os.Stderr, "turns:        %d\n", turns)
 	fmt.Fprintf(os.Stderr, "tool calls:   %d\n", toolCalls)
 	fmt.Fprintf(os.Stderr, "ttfb:         %s\n", firstByte.Round(time.Millisecond))

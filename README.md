@@ -3,7 +3,8 @@
 DeepSeek-first Go coding agent harness. Architecture inspired by
 [`earendil-works/pi`](https://github.com/earendil-works/pi).
 
-Status: **M0** — `pkg/deepseek` streaming client + minimal CLI. Tool calling,
+Status: **M2** — DeepSeek streaming client, agent loop, five tools
+(`read` / `write` / `edit` / `bash` / `fim_complete`), permission gating.
 TUI, MCP, skills, and second-class providers (Anthropic / OpenAI / Gemini)
 land in subsequent milestones. See [`PRD.md`](./PRD.md).
 
@@ -11,8 +12,12 @@ land in subsequent milestones. See [`PRD.md`](./PRD.md).
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
-go run ./cmd/seek -p "Say hi in one sentence."
-echo "What is 2+2?" | go run ./cmd/seek
+go run ./cmd/seek -p "Read README.md and summarise it in one sentence."
+
+# Allow bash and writes outside the working directory:
+go run ./cmd/seek --yolo -p "Write a Go hello world to /tmp/h.go and run it."
+
+# Use the reasoner (CoT prints dim to stderr):
 go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
 ```
 
@@ -20,15 +25,29 @@ When the response finishes, seek prints a stats footer on stderr:
 
 ```
 --- seek stats ---
-finish:      stop
-ttfb:        612ms
-elapsed:     2.314s
-prompt tok:  42 (cache hit 0 / miss 42, ratio 0.0%)
-completion:  31 tok
+yolo:         true
+turns:        4
+tool calls:   3
+ttfb:         1.273s
+elapsed:      8.183s
+prompt tok:   6868 (cache hit 4864 / miss 2004, ratio 70.8%)
+completion:   381 tok
 ```
 
 The `cache hit` / `miss` / `ratio` line is the DeepSeek prefix-cache
-accounting — seek's main optimisation target (see PRD §4.8.1).
+accounting — seek's main optimisation target (PRD §4.8.1). Stable
+system prompt + tool schema + history is what lets the ratio climb across
+turns.
+
+## Tools
+
+| Tool | What it does | Gated by |
+|---|---|---|
+| `read` | read a file with line numbers | — |
+| `write` | create / overwrite a file | writes outside CWD need `--yolo` |
+| `edit` | exact `old_string`→`new_string` substitution (Claude Code style) | edits outside CWD need `--yolo` |
+| `bash` | run a shell command with timeout | needs `--yolo` |
+| `fim_complete` | DeepSeek FIM endpoint — cheap gap-fill, returns text without applying | — |
 
 ## Layout
 
