@@ -65,6 +65,12 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 	}
 
+	// Slash-command menu sits directly above the input so it reads
+	// like a completion popup attached to the typing cursor.
+	if m.commandMenuOpen {
+		sb.WriteString(m.renderCommandMenu())
+	}
+
 	// Input area.
 	sb.WriteString(m.input.View())
 	sb.WriteString("\n")
@@ -116,6 +122,28 @@ func (m Model) renderStatusBar() string {
 
 // renderCommittedUser renders the user's prompt for scrollback. Called
 // before tea.Println.
+// renderCommandMenu renders the slash-command dropdown. Selected row
+// is highlighted with a ▸ marker and an accent colour; others get a
+// neutral two-space indent so the visual rhythm matches.
+func (m Model) renderCommandMenu() string {
+	if len(m.commandMenuFiltered) == 0 {
+		return styleMuted.Render("  (no commands match — Esc to dismiss)") + "\n"
+	}
+	var sb strings.Builder
+	for i, c := range m.commandMenuFiltered {
+		row := fmt.Sprintf("%-22s  %s", c.usage, c.description)
+		if i == m.commandMenuSelected {
+			sb.WriteString(styleMenuSelected.Render("▸ " + row))
+		} else {
+			sb.WriteString(styleMenuItem.Render("  " + row))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(styleMuted.Render("  Tab to complete · ↑/↓ to navigate · Esc to dismiss"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
 func renderCommittedUser(text string, width int) string {
 	label := styleUserLabel.Render("▌ you")
 	body := styleUserText.Render(wrap(text, width-2))

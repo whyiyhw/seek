@@ -75,6 +75,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Slash-command menu takes priority when open. It can only open
+	// when input is focused (i.e. not streaming), so menu navigation
+	// and stream cancellation never compete for the same key.
+	if m.commandMenuOpen {
+		switch msg.Type {
+		case tea.KeyTab:
+			if len(m.commandMenuFiltered) > 0 {
+				name := m.commandMenuFiltered[m.commandMenuSelected].names[0]
+				m.input.SetValue(name + " ")
+				m.commandMenuOpen = false
+				m.commandMenuFiltered = nil
+				m.commandMenuSelected = 0
+			}
+			return m, nil
+		case tea.KeyUp:
+			if m.commandMenuSelected > 0 {
+				m.commandMenuSelected--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.commandMenuSelected < len(m.commandMenuFiltered)-1 {
+				m.commandMenuSelected++
+			}
+			return m, nil
+		case tea.KeyEsc:
+			// Menu open & not streaming: Esc closes the menu without
+			// affecting input contents.
+			m.commandMenuOpen = false
+			m.commandMenuFiltered = nil
+			m.commandMenuSelected = 0
+			return m, nil
+		}
+		// Other keys fall through to the normal switch (Enter still
+		// submits, character keys still type into the textarea — which
+		// then refreshes the filter via updateCommandMenu).
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
@@ -123,7 +160,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.updateCommandMenu()
 	return m, cmd
+}
+
+// updateCommandMenu recomputes the slash-command dropdown state from
+// the current input value. Called after every textarea-bound key.
+//
+// Open conditions: value starts with "/" AND contains no space yet
+// (space means the user is past the command name and into arguments).
+func (m *Model) updateCommandMenu() {
+	v := strings.TrimRight(m.input.Value(), "\n")
+	if !strings.HasPrefix(v, "/") || strings.Contains(v, " ") {
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		return
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = filterCommands(allCommands(), v)
+	if m.commandMenuSelected >= len(m.commandMenuFiltered) {
+		m.commandMenuSelected = 0
+	}
+}
+
+// filterCommands returns the subset of cmds whose canonical name OR
+// any alias starts with prefix. Empty prefix → return everything.
+// Order is preserved (allCommands() order is intentional).
+func filterCommands(cmds []command, prefix string) []command {
+	if prefix == "" || prefix == "/" {
+		return cmds
+	}
+	var out []command
+	for _, c := range cmds {
+		for _, name := range c.names {
+			if strings.HasPrefix(name, prefix) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // submit kicks off an agent.Prompt for the given user text. Before

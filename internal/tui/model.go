@@ -106,6 +106,13 @@ type Model struct {
 
 	showReasoning bool
 
+	// Slash-command menu state. Open when the input starts with "/" and
+	// contains no space yet; refreshed in handleKey's default branch
+	// after every key that reached the textarea.
+	commandMenuOpen     bool
+	commandMenuFiltered []command
+	commandMenuSelected int
+
 	// md renders committed assistant messages as Markdown before they
 	// go to scrollback. Initialised on first WindowSizeMsg.
 	md      *glamour.TermRenderer

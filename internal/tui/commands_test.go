@@ -148,6 +148,47 @@ func TestReset_ReportsHookErrors(t *testing.T) {
 	}
 }
 
+func TestFilterCommands_EmptyOrSlashReturnsAll(t *testing.T) {
+	all := allCommands()
+	for _, prefix := range []string{"", "/"} {
+		if got := filterCommands(all, prefix); len(got) != len(all) {
+			t.Errorf("prefix=%q: got %d, want %d (all)", prefix, len(got), len(all))
+		}
+	}
+}
+
+func TestFilterCommands_PrefixMatch(t *testing.T) {
+	all := allCommands()
+	got := filterCommands(all, "/m")
+	if len(got) != 1 || got[0].names[0] != "/model" {
+		t.Errorf("/m → %v, want just /model", names(got))
+	}
+}
+
+func TestFilterCommands_MatchesAlias(t *testing.T) {
+	// /q is an alias of /exit — should be findable by alias prefix.
+	all := allCommands()
+	got := filterCommands(all, "/q")
+	if len(got) != 1 || got[0].names[0] != "/exit" {
+		t.Errorf("/q → %v, want /exit (matched via alias)", names(got))
+	}
+}
+
+func TestFilterCommands_NoMatch(t *testing.T) {
+	got := filterCommands(allCommands(), "/zz")
+	if len(got) != 0 {
+		t.Errorf("expected empty, got %v", names(got))
+	}
+}
+
+func names(cs []command) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.names[0]
+	}
+	return out
+}
+
 func TestReset_NoHook(t *testing.T) {
 	m := emptyModel()
 	res := runHandler(t, m, "/reset")
