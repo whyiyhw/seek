@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -41,6 +42,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.streaming = false
 		m.stream = nil
 		m.input.Focus()
+		if m.cancelStream != nil {
+			m.cancelStream()
+			m.cancelStream = nil
+		}
+		// If the user pressed Esc, commit a visible interrupt notice
+		// so it's clear something was aborted (any partial assistant
+		// text already in m.curContent is still committable, but for
+		// simplicity we drop it — the next prompt can re-ask).
+		if m.userCanceled {
+			cmds = append(cmds, tea.Println(styleMuted.Render("  ↰ interrupted")))
+			m.userCanceled = false
+		}
 		// At this point all completed messages are already in
 		// scrollback (committed during MessageEnd/ToolExecEnd). Clear
 		// any residual live state.
@@ -65,6 +78,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+
+	case tea.KeyEsc:
+		// Esc only does something when there's an active stream — at
+		// rest we leave it alone so the textarea / future overlays can
+		// claim it for their own purposes.
+		if m.streaming && m.cancelStream != nil {
+			m.userCanceled = true
+			m.cancelStream()
+			// Don't clear m.cancelStream here — streamEndMsg will do
+			// it after the stream channel actually drains, otherwise
+			// the next Esc within the same race window double-cancels.
+		}
+		return m, nil
 
 	case tea.KeyEnter:
 		if m.streaming {
@@ -103,18 +129,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // submit kicks off an agent.Prompt for the given user text. Before
 // streaming begins we commit the user's message to scrollback via
 // tea.Println so it survives in native terminal history.
+//
+// We derive a cancelable context from opts.Ctx so Esc can cancel the
+// in-flight call without tearing down the outer SIGINT context.
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
-	// Record in the prompt-history ring (used by ↑/↓ recall — landing
-	// in a follow-up commit).
 	m.promptHistory = append(m.promptHistory, text)
 
 	m.curContent = ""
 	m.curReasoning = ""
 	m.activeTools = nil
+	m.userCanceled = false
 	m.streaming = true
 	m.input.Blur()
 
-	ch := m.opts.Agent.Prompt(m.opts.Ctx, text)
+	ctx, cancel := context.WithCancel(m.opts.Ctx)
+	m.cancelStream = cancel
+
+	ch := m.opts.Agent.Prompt(ctx, text)
 	m.stream = ch
 
 	printUser := tea.Println(renderCommittedUser(text, m.width))
@@ -155,27 +186,32 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 
 	case agent.ToolExecStart:
 		m.activeTools = append(m.activeTools, activeTool{
-			callID: e.CallID,
-			name:   e.Name,
-			args:   truncateOneLine(e.Args, 80),
+			callID:  e.CallID,
+			name:    e.Name,
+			args:    truncateOneLine(e.Args, 80),
+			started: time.Now(),
 		})
 
 	case agent.ToolExecEnd:
-		// ToolExecEnd carries Name/Result/Err but not Args — look the
-		// args back up from the active list before we remove it.
-		var args string
+		// ToolExecEnd carries Name/Result/Err but not Args/started —
+		// look both back up from the active list before we remove it.
+		var (
+			args     string
+			duration time.Duration
+		)
 		for i, t := range m.activeTools {
 			if t.callID == e.CallID {
 				args = t.args
+				duration = time.Since(t.started)
 				m.activeTools = append(m.activeTools[:i], m.activeTools[i+1:]...)
 				break
 			}
 		}
 		var line string
 		if e.Err != nil {
-			line = renderCommittedToolErr(e.Name, args, e.Err.Error())
+			line = renderCommittedToolErr(e.Name, args, e.Err.Error(), duration)
 		} else {
-			line = renderCommittedToolOk(e.Name, args, len(e.Result))
+			line = renderCommittedToolOk(e.Name, args, len(e.Result), duration)
 		}
 		cmds = append(cmds, tea.Println(line))
 

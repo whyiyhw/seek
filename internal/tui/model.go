@@ -60,11 +60,14 @@ type Options struct {
 }
 
 // activeTool is a tool whose ToolExecStart has fired but ToolExecEnd
-// hasn't yet. Rendered inline in the live region with a spinner.
+// hasn't yet. Rendered inline in the live region with a spinner and an
+// elapsed-time tail (e.g. "think(...) · 12s") so long-running reasoner
+// calls don't look like the program froze.
 type activeTool struct {
-	callID string
-	name   string
-	args   string
+	callID  string
+	name    string
+	args    string
+	started time.Time
 }
 
 type Model struct {
@@ -86,6 +89,13 @@ type Model struct {
 
 	stream    <-chan agent.Event
 	streaming bool
+
+	// cancelStream cancels the context that backs the in-flight
+	// agent.Prompt. Triggered by Esc; cleared on streamEndMsg.
+	cancelStream context.CancelFunc
+	// userCanceled distinguishes "user pressed Esc" from "stream
+	// ended naturally" so streamEndMsg can print an interrupt notice.
+	userCanceled bool
 
 	turns     int
 	toolCalls int

@@ -28,9 +28,17 @@ func (m Model) View() string {
 
 	var sb strings.Builder
 
-	// Active tool lines.
+	// Active tool lines — each shows a spinner and an elapsed-time
+	// tail. The spinner ticks ~80 ms which is also what drives the
+	// elapsed-time refresh; without that the user can't tell whether
+	// a long `think` call is alive or hung.
 	for _, t := range m.activeTools {
-		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(fmt.Sprintf("%s(%s) …", t.name, t.args)))
+		elapsed := formatToolElapsed(time.Since(t.started))
+		label := fmt.Sprintf("%s(%s) …", t.name, t.args)
+		if elapsed != "" {
+			label += " · " + elapsed
+		}
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
 	}
 
 	// Streaming assistant text (volatile — committed at MessageEnd).
@@ -135,12 +143,50 @@ func renderCommittedAssistant(content, reasoning string, showReasoning bool, wid
 	return out
 }
 
-func renderCommittedToolOk(name, args string, resultBytes int) string {
-	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes", name, args, resultBytes))
+func renderCommittedToolOk(name, args string, resultBytes int, d time.Duration) string {
+	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s",
+		name, args, resultBytes, durationTail(d)))
 }
 
-func renderCommittedToolErr(name, args, err string) string {
-	return styleToolError.Render(fmt.Sprintf("  ↳ %s(%s) → ERROR: %s", name, args, err))
+func renderCommittedToolErr(name, args, err string, d time.Duration) string {
+	return styleToolError.Render(fmt.Sprintf("  ↳ %s(%s) → ERROR: %s%s",
+		name, args, err, durationTail(d)))
+}
+
+// durationTail is the trailing " · 0.8s" / " · 1m23s" we hang off
+// completed tool lines. Empty for sub-100ms operations (read of a
+// small file etc.) since the noise outweighs the info there.
+func durationTail(d time.Duration) string {
+	s := formatCommittedDuration(d)
+	if s == "" {
+		return ""
+	}
+	return " · " + s
+}
+
+func formatCommittedDuration(d time.Duration) string {
+	switch {
+	case d < 100*time.Millisecond:
+		return ""
+	case d < time.Second:
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	default:
+		mins := int(d.Minutes())
+		secs := int(d.Seconds()) % 60
+		return fmt.Sprintf("%dm%ds", mins, secs)
+	}
+}
+
+// formatToolElapsed is the live counterpart for in-flight tools. Same
+// shape as the committed version but empty for sub-1s — no point
+// flickering "0s ←→ 1s" right at the start.
+func formatToolElapsed(d time.Duration) string {
+	if d < time.Second {
+		return ""
+	}
+	return formatCommittedDuration(d)
 }
 
 func indent(s, prefix string) string {
