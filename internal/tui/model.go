@@ -32,6 +32,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
+	"golang.org/x/term"
 )
 
 // Options bundles everything cmd/seek hands the TUI. The hook fields
@@ -133,7 +134,27 @@ func New(opts Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(textarea.Blink, tickStatusEvery(time.Minute))
+	return tea.Batch(textarea.Blink, tickStatusEvery(time.Minute), initialSizeCmd())
+}
+
+// initialSizeCmd reads the terminal dimensions directly via the tty and
+// emits a synthetic WindowSizeMsg. Bubble Tea is supposed to send this
+// on startup, but on some terminal/tmux/go-run combinations the first
+// real WindowSizeMsg can be delayed or even dropped — without it the
+// TUI stays stuck at the "not ready" placeholder. The synthetic one
+// guarantees we get sane dimensions before the user sees anything; the
+// real one (if/when it arrives) just re-runs relayout, which is
+// idempotent.
+func initialSizeCmd() tea.Cmd {
+	return func() tea.Msg {
+		w, h, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil || w <= 0 || h <= 0 {
+			// Fall back to a conservative default. Anything is better
+			// than the placeholder lingering forever.
+			w, h = 80, 24
+		}
+		return tea.WindowSizeMsg{Width: w, Height: h}
+	}
 }
 
 // tickStatusEvery returns a Cmd that re-fires every d as a
