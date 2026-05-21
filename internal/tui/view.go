@@ -66,6 +66,16 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 	}
 
+	// Input area FIRST (above any dropdown) — autocomplete popups
+	// attach BELOW the input, matching IDE / shell completer
+	// convention. With dropdowns above the input we were visually
+	// pushing the in-flight conversation upward when the user typed
+	// "/" or "@", obscuring whatever they were reading. Below-the-
+	// input keeps the upper conversation steady; the menu grows
+	// downward into the space just above the status bar.
+	sb.WriteString(m.input.View())
+	sb.WriteString("\n")
+
 	// Approval prompt takes precedence — blurs the input, blocks
 	// everything else. After that, command menu and path picker are
 	// mutually exclusive in practice (different trigger chars).
@@ -77,10 +87,6 @@ func (m Model) View() string {
 	case m.pathPicker.open:
 		sb.WriteString(m.renderPathPicker())
 	}
-
-	// Input area.
-	sb.WriteString(m.input.View())
-	sb.WriteString("\n")
 
 	// Status line (single, not pinned — it scrolls with content).
 	sb.WriteString(m.renderStatusBar())
