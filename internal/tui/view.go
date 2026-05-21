@@ -41,8 +41,14 @@ func renderMarkdown(r *glamour.TermRenderer, text string) string {
 }
 
 func (m Model) View() string {
+	// Pre-WindowSizeMsg path: bubbletea sends sizing automatically once
+	// alt-screen is up, but the first View() call typically fires
+	// before that arrives. We render the welcome banner instead of a
+	// placeholder so the very first frame already says something
+	// meaningful — same content the viewport will hold once we know
+	// the actual dimensions.
 	if !m.ready {
-		return "starting seek …"
+		return welcomeText(m.opts)
 	}
 
 	header := m.renderHeader()
