@@ -57,6 +57,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any library that auto-probes the terminal must run before your TUI grabs the TTY, or its probe responses will leak as input. Env override `SEEK_STYLE=dark|light` for users with weird terminals
 - **Refs**: `cmd/seek/main.go:detectGlamourStyle`
 
+### Alt-screen mode breaks scrollback, copy, and content persistence
+- **Saw**: in M4 we ran with `tea.WithAltScreen()`. Symptoms accumulated: terminal scrollback dead (only an in-app viewport had history), copy worked only within the visible viewport, exiting seek wiped the whole conversation, OSC query responses had nowhere to land cleanly
+- **Why**: alt-screen swaps the terminal to a secondary buffer. That buffer has no scrollback by design — it's meant for full-screen apps (vim, less) where you accept "what's on screen is all there is". For a chat-style coding agent the trade is wrong: users expect to scroll back arbitrarily, copy any prior message, and have the conversation remain in the shell after they exit
+- **Fix**: M4.5.1 switches to inline mode. `tea.WithAltScreen()` removed; committed history (user prompts, tool results, completed assistant messages) is published to the terminal's native scrollback via `tea.Println`. The bubbletea live region holds only volatile state (active tools, streaming assistant text, input, status). Commit `5d1c78c`
+- **Lesson**: alt-screen is the wrong default for any "conversation that has history". Use it only for genuinely full-screen modal UIs (file pickers, log viewers). Inline mode + `tea.Println` for committed content matches Claude Code, gh, gemini CLI — and it's not an accident
+- **Refs**: PRD §4.9, `internal/tui/run.go`, related entry "Mouse drag-to-select did nothing"
+
 ### `View()` rendered "starting seek …" for a frame
 - **Saw**: a brief flash of the literal string "starting seek …" on launch
 - **Why**: `View()` returned a placeholder string when `m.ready == false` (i.e. before the first WindowSizeMsg); even the synthetic one needs one Update cycle
