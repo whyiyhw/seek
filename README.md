@@ -30,10 +30,25 @@ go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
 
 In the TUI:
 
-- Type your prompt, **Enter** to submit, **Ctrl+J** for a newline
-- **Ctrl+L** clears the visible conversation (history-only — agent state preserved)
+- **Enter** to submit, **Ctrl+J** for a newline
+- **Ctrl+L** or `/clear` — wipe the visible history (agent state preserved)
+- **Ctrl+R** — toggle reasoning visibility for assistant messages
 - **Ctrl+C** quits
-- The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · pricing tier with off-peak countdown
+
+Slash commands (type `/help` in the TUI for the full list):
+
+| Command | What it does |
+|---|---|
+| `/help` | Show all commands and key bindings |
+| `/clear` | Wipe visible history (agent state kept) |
+| `/reset` | Start a fresh conversation (agent state rebuilt) |
+| `/model <id>` | Switch model mid-session (e.g. `/model deepseek-reasoner`) |
+| `/yolo` | Toggle `--yolo` for the rest of the session |
+| `/exit` | Quit |
+
+The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · pricing tier with off-peak countdown. Assistant messages are rendered with Markdown via Glamour after they finish streaming.
+
+**Copy/paste**: mouse selection works normally — seek does not capture mouse events, so click-and-drag in the terminal copies as expected.
 
 When the response finishes, seek prints a stats footer on stderr:
 

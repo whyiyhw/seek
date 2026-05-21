@@ -35,10 +35,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
+
+			// Slash command? Handle locally instead of sending to LLM.
+			if handled, cmd := dispatchCommand(&m, text); handled {
+				m.viewport.SetContent(m.renderConversation())
+				m.viewport.GotoBottom()
+				return m, cmd
+			}
 			return m.submit(text)
 		case tea.KeyCtrlL:
-			m.viewport.SetContent(welcomeText(m.opts))
-			m.viewport.GotoTop()
+			cmdClear(&m, "")
+			return m, nil
+		case tea.KeyCtrlR:
+			m.showReasoning = !m.showReasoning
+			m.viewport.SetContent(m.renderConversation())
 			return m, nil
 		default:
 			if !m.streaming {
@@ -109,14 +119,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) {
 	case agent.MessageEnd:
 		switch e.Message.Role {
 		case deepseek.RoleAssistant:
-			// Persist the assembled assistant message. ToolCalls
-			// embedded here are handled by the subsequent ToolExec*
-			// events; we don't render the raw call_ids.
+			// Persist the assembled assistant message and pre-render
+			// its Markdown (cached on the historyItem to avoid running
+			// glamour every redraw). ToolCalls embedded here are
+			// handled by the subsequent ToolExec* events; we don't
+			// render the raw call_ids.
 			if m.curContent != "" || m.curReasoning != "" {
 				m.history = append(m.history, historyItem{
 					role:      "assistant",
 					text:      m.curContent,
 					reasoning: m.curReasoning,
+					rendered:  renderMarkdown(m.md, m.curContent),
 				})
 			}
 			m.curContent = ""

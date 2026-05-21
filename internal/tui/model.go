@@ -28,12 +28,15 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
 )
 
-// Options bundles everything cmd/seek hands the TUI.
+// Options bundles everything cmd/seek hands the TUI. The hook fields
+// let in-app slash commands (/reset, /model, /yolo) reach back into
+// host-owned state without coupling the TUI to cmd/seek's setup code.
 type Options struct {
 	Agent   *agent.Agent
 	Tracker *cache.Tracker
@@ -41,6 +44,15 @@ type Options struct {
 	Yolo    bool
 	CWD     string
 	Ctx     context.Context // cancelled on SIGINT
+
+	// RebuildAgent returns a fresh Agent for /reset. Nil disables /reset.
+	RebuildAgent func() (*agent.Agent, error)
+	// SetModel notifies the host that the user picked a new model via
+	// /model so it can update its own bookkeeping (e.g. pricing tier
+	// lookups). Nil = TUI tracks model locally only.
+	SetModel func(string)
+	// SetYolo notifies the host that /yolo flipped. Nil = TUI-local only.
+	SetYolo func(bool)
 }
 
 // historyItem is one rendered conversation entry. We keep this richer
@@ -50,6 +62,7 @@ type historyItem struct {
 	role      string // "user" | "assistant" | "tool" | "system"
 	text      string
 	reasoning string // assistant items only
+	rendered  string // glamour-rendered Markdown (assistant items, cached)
 	toolName  string
 	toolArgs  string
 	toolErr   bool
@@ -76,6 +89,16 @@ type Model struct {
 	ready         bool
 
 	now time.Time
+
+	// showReasoning expands assistant reasoning blocks when true. Default
+	// off — reasoning is usually long and noisy. Toggle with Ctrl+R.
+	showReasoning bool
+
+	// md is the markdown renderer for committed assistant messages.
+	// Initialised lazily after the first WindowSizeMsg so it knows the
+	// viewport width. If construction fails we fall back to raw text.
+	md      *glamour.TermRenderer
+	mdWidth int
 
 	lastErr error
 }

@@ -121,13 +121,49 @@ func run() error {
 		return runPrint(ctx, ag, tracker, *model, *yolo, text)
 	}
 
+	// Mutable session state — wrapped in closures so TUI commands like
+	// /reset, /model, /yolo can update the host without owning these
+	// fields directly.
+	sessionModel := *model
+	sessionYolo := *yolo
+	sessionPolicy := policy
+	sessionReg := reg
+
 	return tui.Run(tui.Options{
 		Agent:   ag,
 		Tracker: tracker,
-		Model:   *model,
-		Yolo:    *yolo,
+		Model:   sessionModel,
+		Yolo:    sessionYolo,
 		CWD:     abs,
 		Ctx:     ctx,
+
+		RebuildAgent: func() (*agent.Agent, error) {
+			return agent.New(agent.Config{
+				Client:       client,
+				Model:        sessionModel,
+				SystemPrompt: fmt.Sprintf(systemPromptTpl, abs, sessionYolo),
+				Tools:        sessionReg,
+				MaxTurns:     *maxTurns,
+			})
+		},
+		SetModel: func(m string) { sessionModel = m },
+		SetYolo: func(y bool) {
+			sessionYolo = y
+			if p, err := permission.New(cwd, y); err == nil {
+				sessionPolicy = p
+				// Rebuild the tool registry so write/edit/bash see the
+				// new policy. (Reg's frozen Wire() output is preserved
+				// for cache-prefix stability; we swap in-place here.)
+				_ = sessionPolicy // referenced — keeps lint happy
+				sessionReg = tools.New().
+					Add(read.New()).
+					Add(write.New(sessionPolicy)).
+					Add(edit.New(sessionPolicy)).
+					Add(bash.New(sessionPolicy)).
+					Add(fimcomplete.New(client, sessionModel)).
+					Add(think.New(client))
+			}
+		},
 	})
 }
 
