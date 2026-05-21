@@ -46,6 +46,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// placeholder so the user sees a fresh hint when the input
 		// blinks back into focus.
 		m.refreshPlaceholder()
+		// Snapshot the current agent state into the session and
+		// persist. Failures are logged via a system Println rather
+		// than fatal — losing a save is annoying but shouldn't tear
+		// down the TUI.
+		m.persistSession()
 		if m.cancelStream != nil {
 			m.cancelStream()
 			m.cancelStream = nil
@@ -496,6 +501,30 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	}
 
 	return cmds
+}
+
+// persistSession snapshots the agent's current message history,
+// counters, and usage into Options.Session and saves via Options.Store.
+// No-op when either is nil (ephemeral run / --no-save).
+func (m *Model) persistSession() {
+	if m.opts.Session == nil || m.opts.Store == nil || m.opts.Agent == nil {
+		return
+	}
+	m.opts.Session.Messages = m.opts.Agent.Messages()
+	m.opts.Session.Turns = m.turns
+	m.opts.Session.ToolCalls = m.toolCalls
+	m.opts.Session.Usage = m.opts.Tracker.Cumulative()
+	m.opts.Session.Model = m.opts.Model
+	m.opts.Session.Yolo = m.opts.Yolo
+	if err := m.opts.Store.Save(m.opts.Session); err != nil {
+		// Surface to scrollback so the user knows persistence broke;
+		// they can keep working but should investigate before losing
+		// the session.
+		// We can't tea.Println from a pointer-receiver helper without
+		// returning a Cmd — so just stash on lastErr and let View
+		// pick it up on next render.
+		m.lastErr = err
+	}
 }
 
 // truncateOneLine collapses newlines and clips the result to n chars.

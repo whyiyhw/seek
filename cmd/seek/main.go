@@ -20,6 +20,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
@@ -65,20 +66,72 @@ func main() {
 func run() error {
 	var (
 		prompt   = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
-		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-reasoner)")
+		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-v4-flash | deepseek-reasoner | …)")
 		maxTurns = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
 		yolo     = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
+		resume   = flag.String("resume", "", "load a saved session by ID (see seek -list)")
+		cont     = flag.Bool("continue", false, "load the most-recently-updated session")
+		noSave   = flag.Bool("no-save", false, "do not persist this session to disk")
+		list     = flag.Bool("list", false, "list saved sessions and exit")
 	)
 	flag.Parse()
+
+	// Session store is needed for -list / -resume / -continue and for
+	// auto-save. Construct early so we can short-circuit on -list
+	// before hitting the API-key check.
+	store, err := session.NewStore()
+	if err != nil {
+		return err
+	}
+
+	if *list {
+		return printSessionList(store)
+	}
 
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
 		return fmt.Errorf("DEEPSEEK_API_KEY is not set")
 	}
 
+	// Resolve which session we're operating on. Priority:
+	//   -resume <id>  → load that session (error if missing)
+	//   -continue     → load latest (error if no sessions yet)
+	//   else          → new session, fresh history
+	var loaded *session.Session
+	if *resume != "" {
+		loaded, err = store.Load(*resume)
+		if err != nil {
+			return fmt.Errorf("resume %s: %w", *resume, err)
+		}
+	} else if *cont {
+		loaded, err = store.Latest()
+		if err != nil {
+			return fmt.Errorf("continue: %w", err)
+		}
+		if loaded == nil {
+			return fmt.Errorf("continue: no saved sessions in %s", store.Dir())
+		}
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
+	}
+
+	// If we loaded a session, its Model/Yolo override the flag defaults
+	// (sessions are sticky — resuming with different settings would be
+	// surprising). The flags can still override explicitly: set them
+	// AFTER -resume on the command line and they win.
+	if loaded != nil {
+		if *model == deepseek.ModelChat {
+			// User didn't override the model flag; honour the saved one.
+			*model = loaded.Model
+		}
+		if !*yolo {
+			// Inherit yolo state from the saved session if user didn't
+			// pass --yolo explicitly.
+			*yolo = loaded.Yolo
+		}
 	}
 	// Print mode (-p / piped stdin) can't realistically interrupt to
 	// ask, so it stays in deny mode unless --yolo is explicit. The TUI
@@ -111,12 +164,31 @@ func run() error {
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
 
+	// Build (or restore) the persistence session. -no-save makes
+	// activeSession nil so the TUI auto-save no-ops.
+	var activeSession *session.Session
+	var initialMsgs []deepseek.Message
+	if !*noSave {
+		if loaded != nil {
+			activeSession = loaded
+			initialMsgs = loaded.Messages
+			// Replay accumulated stats into the tracker so the status
+			// bar shows cumulative figures, not just this run's.
+			if loaded.Usage.TotalTokens > 0 {
+				tracker.Record(loaded.Usage)
+			}
+		} else {
+			activeSession = session.New(*model, abs, systemPrompt, *yolo)
+		}
+	}
+
 	ag, err := agent.New(agent.Config{
-		Client:       client,
-		Model:        *model,
-		SystemPrompt: systemPrompt,
-		Tools:        reg,
-		MaxTurns:     *maxTurns,
+		Client:          client,
+		Model:           *model,
+		SystemPrompt:    systemPrompt,
+		Tools:           reg,
+		MaxTurns:        *maxTurns,
+		InitialMessages: initialMsgs,
 	})
 	if err != nil {
 		return err
@@ -131,7 +203,7 @@ func run() error {
 		if text == "" {
 			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
 		}
-		return runPrint(ctx, ag, tracker, *model, *yolo, text)
+		return runPrint(ctx, ag, tracker, *model, *yolo, text, activeSession, store)
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
@@ -171,6 +243,8 @@ func run() error {
 		Ctx:          ctx,
 		GlamourStyle: detectGlamourStyle(),
 		ApprovalCh:   approvalCh,
+		Session:      activeSession,
+		Store:        store,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			return agent.New(agent.Config{
@@ -207,7 +281,10 @@ func stdinIsPiped() bool {
 
 // runPrint preserves the M3 print-mode behaviour: stream to stdout,
 // tool indicators + stats footer to stderr. Suitable for piping.
-func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string) error {
+// When activeSession + store are both non-nil, the session is saved
+// after the agent loop finishes — same persistence guarantee as the
+// TUI's auto-save on streamEnd.
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
 	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
@@ -276,6 +353,53 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 	fmt.Fprintf(os.Stderr, "completion:   %d tok\n", c.CompletionTokens)
 	fmt.Fprintf(os.Stderr, "est. cost:    %s (saved ~%d input tok via cache)\n",
 		pricing.FormatCost(cost), tracker.SavedTokens())
+
+	// Persist the session for -continue / -resume next time. Failure
+	// is reported but doesn't fail the whole command — the response
+	// was already printed.
+	if activeSession != nil && store != nil {
+		activeSession.Messages = ag.Messages()
+		activeSession.Turns = turns
+		activeSession.ToolCalls = toolCalls
+		activeSession.Usage = c
+		activeSession.Model = model
+		activeSession.Yolo = yolo
+		if err := store.Save(activeSession); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to save session: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "session:      %s (--resume to continue)\n", activeSession.ID)
+		}
+	}
+	return nil
+}
+
+// printSessionList renders the saved-sessions inventory to stdout
+// for -list. Tabular but plain-text (no lipgloss) so it pipes cleanly
+// into grep / awk.
+func printSessionList(store *session.Store) error {
+	infos, err := store.List()
+	if err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		fmt.Println("no saved sessions in", store.Dir())
+		return nil
+	}
+	fmt.Printf("%-25s  %-22s  %-10s  %5s  %5s  %s\n",
+		"ID", "UPDATED (UTC)", "MODEL", "TURNS", "TOOLS", "PARENT")
+	for _, s := range infos {
+		parent := "-"
+		if s.ParentID != "" {
+			parent = s.ParentID
+		}
+		fmt.Printf("%-25s  %-22s  %-10s  %5d  %5d  %s\n",
+			s.ID,
+			s.UpdatedAt.Format("2006-01-02 15:04:05"),
+			truncate(s.Model, 10),
+			s.Turns,
+			s.ToolCalls,
+			parent)
+	}
 	return nil
 }
 

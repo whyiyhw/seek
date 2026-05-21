@@ -37,6 +37,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"golang.org/x/term"
 )
@@ -59,6 +60,12 @@ type Options struct {
 	// permission policy. nil = no inline approval (e.g. --yolo at
 	// startup); the TUI just won't listen.
 	ApprovalCh <-chan permission.ApprovalRequest
+
+	// Session + Store, when both non-nil, enable auto-save: after
+	// every agent stream ends the current Session snapshot is
+	// persisted via Store.Save. nil for ephemeral runs (--no-save).
+	Session *session.Session
+	Store   *session.Store
 
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)

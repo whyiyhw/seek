@@ -21,10 +21,16 @@ import (
 // Config configures a new Agent.
 type Config struct {
 	Client       *deepseek.Client
-	Model        string         // defaults to deepseek.ModelChat
-	SystemPrompt string         // optional
+	Model        string          // defaults to deepseek.ModelChat
+	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
-	MaxTurns     int            // safety bound; defaults to 8
+	MaxTurns     int             // safety bound; defaults to 8
+
+	// InitialMessages, if non-empty, seeds the agent's history.
+	// Used by --resume / --continue to restore a saved session. The
+	// SystemPrompt is still placed first; InitialMessages are
+	// appended after, in order.
+	InitialMessages []deepseek.Message
 }
 
 // Agent holds the persistent state for one conversation. It is NOT safe for
@@ -51,6 +57,16 @@ func New(cfg Config) (*Agent, error) {
 			Role:    deepseek.RoleSystem,
 			Content: cfg.SystemPrompt,
 		})
+	}
+	// Restore prior conversation when resuming a session. We skip any
+	// system message in the seed (we already added the current one
+	// above; the saved one was for a previous run and may have
+	// drifted — e.g. yolo state changed, CWD changed).
+	for _, m := range cfg.InitialMessages {
+		if m.Role == deepseek.RoleSystem {
+			continue
+		}
+		a.messages = append(a.messages, m)
 	}
 	return a, nil
 }
