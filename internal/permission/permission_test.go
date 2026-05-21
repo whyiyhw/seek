@@ -7,7 +7,7 @@ import (
 )
 
 func TestYoloAllowsEverything(t *testing.T) {
-	p, err := New(t.TempDir(), true)
+	p, err := New(t.TempDir(), ModeYolo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestYoloAllowsEverything(t *testing.T) {
 }
 
 func TestBashRequiresYolo(t *testing.T) {
-	p, _ := New(t.TempDir(), false)
+	p, _ := New(t.TempDir(), ModeDeny)
 	err := p.Check(Action{Kind: KindBash, Command: "ls"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -32,7 +32,7 @@ func TestBashRequiresYolo(t *testing.T) {
 
 func TestWriteInsideCWD(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, false)
+	p, _ := New(root, ModeDeny)
 	for _, path := range []string{
 		filepath.Join(root, "a.txt"),
 		filepath.Join(root, "deep", "nested", "b.txt"),
@@ -47,7 +47,7 @@ func TestWriteInsideCWD(t *testing.T) {
 func TestWriteOutsideCWD(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir() // different dir
-	p, _ := New(root, false)
+	p, _ := New(root, ModeDeny)
 	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(other, "x")})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -56,7 +56,7 @@ func TestWriteOutsideCWD(t *testing.T) {
 
 func TestEditAlsoCWDGated(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, false)
+	p, _ := New(root, ModeDeny)
 	err := p.Check(Action{Kind: KindEdit, Path: "/etc/hosts"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -64,7 +64,7 @@ func TestEditAlsoCWDGated(t *testing.T) {
 }
 
 func TestUnknownKind(t *testing.T) {
-	p, _ := New(t.TempDir(), false)
+	p, _ := New(t.TempDir(), ModeDeny)
 	err := p.Check(Action{Kind: "voodoo"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)

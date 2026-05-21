@@ -69,12 +69,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var spCmd tea.Cmd
 		m.spinner, spCmd = m.spinner.Update(msg)
 		cmds = append(cmds, spCmd)
+
+	case approvalRequestMsg:
+		// New approval prompt — grab focus.
+		req := msg.req
+		m.pendingApproval = &req
+		m.input.Blur()
 	}
 
 	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// An open approval prompt grabs ALL keys — the agent goroutine is
+	// blocked waiting on this answer, so nothing else can usefully
+	// happen until the user picks y / n / a.
+	if m.pendingApproval != nil {
+		return m.handleApprovalKey(msg)
+	}
+
 	// Slash-command menu takes priority when open. It can only open
 	// when input is focused (i.e. not streaming), so menu navigation
 	// and stream cancellation never compete for the same key.
@@ -175,6 +188,81 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandMenu()
 	return m, cmd
+}
+
+// handleApprovalKey is the inline-prompt key handler. While
+// pendingApproval is set, every key reaches here. Keys:
+//
+//	y / Y / Enter  → reply true (allow once)
+//	n / N / Esc    → reply false (deny once)
+//	a / A          → reply true AND upgrade session to ModeYolo
+//	Ctrl+C         → reply false then quit (so the agent unblocks)
+//
+// Replies on req.Reply are non-blocking because the channel is
+// buffered to 1; we still wrap in a select to be defensive.
+func (m Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingApproval == nil {
+		return m, nil
+	}
+	allow := false
+	always := false
+	answered := true
+
+	switch msg.Type {
+	case tea.KeyEnter:
+		allow = true
+	case tea.KeyEsc:
+		allow = false
+	case tea.KeyCtrlC:
+		// Reply deny, then quit. Without this the agent goroutine
+		// would block forever on the reply channel.
+		m.replyApproval(false)
+		return m, tea.Quit
+	default:
+		// Character keys.
+		s := strings.ToLower(msg.String())
+		switch s {
+		case "y", "yes":
+			allow = true
+		case "n", "no":
+			allow = false
+		case "a", "always":
+			allow = true
+			always = true
+		default:
+			answered = false
+		}
+	}
+
+	if !answered {
+		return m, nil
+	}
+
+	m.replyApproval(allow)
+	if always && m.opts.SetYolo != nil {
+		m.opts.SetYolo(true)
+		m.opts.Yolo = true
+	}
+	m.pendingApproval = nil
+	m.input.Focus()
+	// Re-arm the approval listener so the next dangerous tool call
+	// triggers a fresh prompt.
+	return m, waitForApproval(m.opts.ApprovalCh)
+}
+
+// replyApproval is a small wrapper around the buffered send. We use
+// non-blocking semantics so a missing reader (shouldn't happen, but
+// defensive) doesn't deadlock the UI.
+func (m *Model) replyApproval(allow bool) {
+	if m.pendingApproval == nil {
+		return
+	}
+	select {
+	case m.pendingApproval.Reply <- allow:
+	default:
+		// Buffered channel was already written or no reader — either
+		// way nothing more we can do here.
+	}
 }
 
 // tryHistoryUp moves backwards through the prompt history. Returns

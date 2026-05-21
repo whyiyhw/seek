@@ -14,7 +14,7 @@ import (
 
 func TestWrite_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, false)
+	p, _ := permission.New(dir, permission.ModeDeny)
 	w := New(p)
 
 	target := filepath.Join(dir, "hello.txt")
@@ -37,7 +37,7 @@ func TestWrite_CreatesFile(t *testing.T) {
 
 func TestWrite_CreatesParents(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, false)
+	p, _ := permission.New(dir, permission.ModeDeny)
 	target := filepath.Join(dir, "a", "b", "c", "deep.txt")
 	args, _ := json.Marshal(Args{Path: target, Content: "x"})
 	if _, err := New(p).Execute(context.Background(), args); err != nil {
@@ -50,7 +50,7 @@ func TestWrite_CreatesParents(t *testing.T) {
 
 func TestWrite_Overwrites(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, false)
+	p, _ := permission.New(dir, permission.ModeDeny)
 	target := filepath.Join(dir, "f.txt")
 	os.WriteFile(target, []byte("original"), 0o644)
 
@@ -67,7 +67,7 @@ func TestWrite_Overwrites(t *testing.T) {
 func TestWrite_RefusesOutsideCWD(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
-	p, _ := permission.New(dir, false)
+	p, _ := permission.New(dir, permission.ModeDeny)
 	args, _ := json.Marshal(Args{Path: filepath.Join(other, "evil"), Content: "x"})
 	_, err := New(p).Execute(context.Background(), args)
 	if !errors.Is(err, permission.ErrDenied) {
@@ -78,7 +78,7 @@ func TestWrite_RefusesOutsideCWD(t *testing.T) {
 func TestWrite_YoloAllowsOutsideCWD(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
-	p, _ := permission.New(dir, true)
+	p, _ := permission.New(dir, permission.ModeYolo)
 	target := filepath.Join(other, "ok")
 	args, _ := json.Marshal(Args{Path: target, Content: "x"})
 	if _, err := New(p).Execute(context.Background(), args); err != nil {
@@ -87,7 +87,7 @@ func TestWrite_YoloAllowsOutsideCWD(t *testing.T) {
 }
 
 func TestWrite_MissingPath(t *testing.T) {
-	p, _ := permission.New(t.TempDir(), false)
+	p, _ := permission.New(t.TempDir(), permission.ModeDeny)
 	_, err := New(p).Execute(context.Background(), json.RawMessage(`{"content":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "path is required") {
 		t.Errorf("err = %v", err)

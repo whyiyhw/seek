@@ -1,6 +1,16 @@
 package tui
 
-import "github.com/whyiyhw/seek/pkg/agent"
+import (
+	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/pkg/agent"
+)
+
+// approvalRequestMsg carries an inline approval prompt from the policy
+// askFn. The TUI takes over input until the user answers, then writes
+// the boolean to req.Reply.
+type approvalRequestMsg struct {
+	req permission.ApprovalRequest
+}
 
 // agentEventMsg wraps a single event from agent.Prompt's channel. The
 // TUI polls one event per tea.Cmd to stay friendly with Bubble Tea's

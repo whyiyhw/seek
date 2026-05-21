@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 )
 
@@ -65,9 +66,11 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 	}
 
-	// Slash-command menu sits directly above the input so it reads
-	// like a completion popup attached to the typing cursor.
-	if m.commandMenuOpen {
+	// Approval prompt takes precedence over the slash menu — both can
+	// never be active simultaneously (approval blurs the input).
+	if m.pendingApproval != nil {
+		sb.WriteString(m.renderApprovalPrompt())
+	} else if m.commandMenuOpen {
 		sb.WriteString(m.renderCommandMenu())
 	}
 
@@ -122,6 +125,27 @@ func (m Model) renderStatusBar() string {
 
 // renderCommittedUser renders the user's prompt for scrollback. Called
 // before tea.Println.
+// renderApprovalPrompt draws the inline y/N/a chooser shown while a
+// dangerous tool waits for a decision. Layout is intentionally compact
+// — same vertical real estate as the slash menu so the input doesn't
+// jump around.
+func (m Model) renderApprovalPrompt() string {
+	req := m.pendingApproval
+	if req == nil {
+		return ""
+	}
+	var subject string
+	switch req.Action.Kind {
+	case permission.KindBash:
+		subject = fmt.Sprintf("bash %q", truncateOneLine(req.Action.Command, 100))
+	default:
+		subject = fmt.Sprintf("%s %q (outside CWD)", req.Action.Kind, req.Action.Path)
+	}
+	header := styleApprovalHeader.Render("⚠ approve " + subject + "?")
+	hint := styleMuted.Render("  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny")
+	return header + "\n" + hint + "\n"
+}
+
 // renderCommandMenu renders the slash-command dropdown. Selected row
 // is highlighted with a ▸ marker and an accent colour; others get a
 // neutral two-space indent so the visual rhythm matches.

@@ -80,7 +80,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	policy, err := permission.New(cwd, *yolo)
+	// Print mode (-p / piped stdin) can't realistically interrupt to
+	// ask, so it stays in deny mode unless --yolo is explicit. The TUI
+	// path overrides to Ask further down so per-call approval kicks
+	// in. --yolo always wins.
+	initialMode := permission.ModeDeny
+	if *yolo {
+		initialMode = permission.ModeYolo
+	}
+	policy, err := permission.New(cwd, initialMode)
 	if err != nil {
 		return err
 	}
@@ -126,49 +134,62 @@ func run() error {
 		return runPrint(ctx, ag, tracker, *model, *yolo, text)
 	}
 
-	// Mutable session state — wrapped in closures so TUI commands like
-	// /reset, /model, /yolo can update the host without owning these
-	// fields directly.
+	// Now that we know we're entering the TUI, upgrade the policy
+	// from Deny → Ask unless --yolo was passed. This is what gives us
+	// inline y/N prompts on bash and out-of-CWD writes.
+	if !*yolo {
+		policy.SetMode(permission.ModeAsk)
+	}
+
+	// Approval channel: askFn pushes a request, blocks on its reply.
+	// Buffered so a slow TUI doesn't deadlock a fast tool dispatcher
+	// (the agent loop is sequential today, but the buffer is cheap).
+	approvalCh := make(chan permission.ApprovalRequest, 4)
+	policy.SetAskFn(func(a permission.Action) bool {
+		resp := make(chan bool, 1)
+		select {
+		case approvalCh <- permission.ApprovalRequest{Action: a, Reply: resp}:
+		case <-ctx.Done():
+			return false
+		}
+		select {
+		case ok := <-resp:
+			return ok
+		case <-ctx.Done():
+			return false
+		}
+	})
+
 	sessionModel := *model
-	sessionYolo := *yolo
-	sessionPolicy := policy
-	sessionReg := reg
 
 	return tui.Run(tui.Options{
 		Agent:        ag,
 		Tracker:      tracker,
 		Model:        sessionModel,
-		Yolo:         sessionYolo,
+		Yolo:         policy.Yolo(),
 		CWD:          abs,
 		Ctx:          ctx,
 		GlamourStyle: detectGlamourStyle(),
+		ApprovalCh:   approvalCh,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			return agent.New(agent.Config{
 				Client:       client,
 				Model:        sessionModel,
-				SystemPrompt: fmt.Sprintf(systemPromptTpl, abs, sessionYolo),
-				Tools:        sessionReg,
+				SystemPrompt: fmt.Sprintf(systemPromptTpl, abs, policy.Yolo()),
+				Tools:        reg,
 				MaxTurns:     *maxTurns,
 			})
 		},
 		SetModel: func(m string) { sessionModel = m },
 		SetYolo: func(y bool) {
-			sessionYolo = y
-			if p, err := permission.New(cwd, y); err == nil {
-				sessionPolicy = p
-				// Rebuild the tool registry so write/edit/bash see the
-				// new policy. (Reg's frozen Wire() output is preserved
-				// for cache-prefix stability; we swap in-place here.)
-				_ = sessionPolicy // referenced — keeps lint happy
-				sessionReg = tools.New().
-					Add(read.New()).
-					Add(listdir.New()).
-					Add(write.New(sessionPolicy)).
-					Add(edit.New(sessionPolicy)).
-					Add(bash.New(sessionPolicy)).
-					Add(fimcomplete.New(client, sessionModel)).
-					Add(think.New(client))
+			// policy is the single source of truth now — mode flip is
+			// observed by every tool's permission.Check call
+			// immediately, no registry rebuild needed.
+			if y {
+				policy.SetMode(permission.ModeYolo)
+			} else {
+				policy.SetMode(permission.ModeAsk)
 			}
 		},
 	})

@@ -49,6 +49,13 @@ var (
 			Foreground(colourAccent).
 			Bold(true)
 
+	// Approval prompt header — high-contrast warning style so the
+	// inline y/N chooser is obviously different from a normal
+	// streaming line.
+	styleApprovalHeader = lipgloss.NewStyle().
+				Foreground(colourToolErr).
+				Bold(true)
+
 	// Slash-command menu rows. Selected gets the accent colour + bold;
 	// non-selected sits on the muted palette so the user's eye is
 	// drawn to the highlight rather than the whole list.

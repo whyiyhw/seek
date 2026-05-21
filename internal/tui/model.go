@@ -35,6 +35,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"golang.org/x/term"
@@ -53,6 +54,11 @@ type Options struct {
 	// GlamourStyle is pre-detected by cmd/seek so we don't trigger an
 	// OSC 11 query under bubbletea (see PRD §4.9 / pitfalls #5).
 	GlamourStyle string
+
+	// ApprovalCh delivers per-call approval requests from the
+	// permission policy. nil = no inline approval (e.g. --yolo at
+	// startup); the TUI just won't listen.
+	ApprovalCh <-chan permission.ApprovalRequest
 
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
@@ -116,6 +122,12 @@ type Model struct {
 	commandMenuFiltered []command
 	commandMenuSelected int
 
+	// pendingApproval, when non-nil, means the agent goroutine is
+	// blocked on a permission decision and the TUI is showing an
+	// inline y/N prompt. Reply is sent on the channel pointer (which
+	// is buffered so we never block).
+	pendingApproval *permission.ApprovalRequest
+
 	// md renders committed assistant messages as Markdown before they
 	// go to scrollback. Initialised on first WindowSizeMsg.
 	md      *glamour.TermRenderer
@@ -151,12 +163,29 @@ func New(opts Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		textarea.Blink,
 		tickStatusEvery(time.Minute),
 		initialSizeCmd(),
 		m.spinner.Tick,
-	)
+	}
+	if m.opts.ApprovalCh != nil {
+		cmds = append(cmds, waitForApproval(m.opts.ApprovalCh))
+	}
+	return tea.Batch(cmds...)
+}
+
+// waitForApproval pulls one approval request off the channel and
+// emits an approvalRequestMsg. Mirrors waitForAgentEvent — bubbletea's
+// "one event per Cmd" polling idiom.
+func waitForApproval(ch <-chan permission.ApprovalRequest) tea.Cmd {
+	return func() tea.Msg {
+		req, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return approvalRequestMsg{req: req}
+	}
 }
 
 // initialSizeCmd queries the terminal directly and emits a synthetic
