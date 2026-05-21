@@ -27,6 +27,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
+	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -59,7 +60,7 @@ func main() {
 
 func run() error {
 	var (
-		prompt   = flag.String("p", "", "prompt text; if empty, read from stdin")
+		prompt   = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
 		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-reasoner)")
 		maxTurns = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
 		yolo     = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
@@ -69,14 +70,6 @@ func run() error {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	if apiKey == "" {
 		return fmt.Errorf("DEEPSEEK_API_KEY is not set")
-	}
-
-	text, err := resolvePrompt(*prompt)
-	if err != nil {
-		return err
-	}
-	if text == "" {
-		return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
 	}
 
 	cwd, err := os.Getwd()
@@ -94,9 +87,6 @@ func run() error {
 	client := deepseek.New(deepseek.WithAPIKey(apiKey))
 	tracker := cache.New()
 
-	tier := pricing.CurrentTier(time.Now())
-	nextTier, nextAt := pricing.NextTransition(time.Now())
-
 	reg := tools.New().
 		Add(read.New()).
 		Add(write.New(policy)).
@@ -108,11 +98,6 @@ func run() error {
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
 
-	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
-		pricing.TierLabel(tier),
-		pricing.TierLabel(nextTier),
-		nextAt.In(pricing.Shanghai).Format("2006-01-02 15:04 MST"))
-
 	ag, err := agent.New(agent.Config{
 		Client:       client,
 		Model:        *model,
@@ -123,6 +108,48 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	// Route: explicit -p flag OR piped stdin → print mode; otherwise TUI.
+	if *prompt != "" || stdinIsPiped() {
+		text, err := resolvePrompt(*prompt)
+		if err != nil {
+			return err
+		}
+		if text == "" {
+			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
+		}
+		return runPrint(ctx, ag, tracker, *model, *yolo, text)
+	}
+
+	return tui.Run(tui.Options{
+		Agent:   ag,
+		Tracker: tracker,
+		Model:   *model,
+		Yolo:    *yolo,
+		CWD:     abs,
+		Ctx:     ctx,
+	})
+}
+
+// stdinIsPiped returns true when stdin is not a terminal (i.e. data is
+// being piped or redirected in). When false, seek launches the TUI.
+func stdinIsPiped() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return stat.Mode()&os.ModeCharDevice == 0
+}
+
+// runPrint preserves the M3 print-mode behaviour: stream to stdout,
+// tool indicators + stats footer to stderr. Suitable for piping.
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string) error {
+	tier := pricing.CurrentTier(time.Now())
+	nextTier, nextAt := pricing.NextTransition(time.Now())
+	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
+		pricing.TierLabel(tier),
+		pricing.TierLabel(nextTier),
+		nextAt.In(pricing.Shanghai).Format("2006-01-02 15:04 MST"))
 
 	start := time.Now()
 	var (
@@ -170,11 +197,11 @@ func run() error {
 
 	fmt.Println()
 	c := tracker.Cumulative()
-	cost := pricing.Cost(*model, tier, c)
+	cost := pricing.Cost(model, tier, c)
 
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
-	fmt.Fprintf(os.Stderr, "yolo:         %v\n", *yolo)
-	fmt.Fprintf(os.Stderr, "model:        %s\n", *model)
+	fmt.Fprintf(os.Stderr, "yolo:         %v\n", yolo)
+	fmt.Fprintf(os.Stderr, "model:        %s\n", model)
 	fmt.Fprintf(os.Stderr, "tier:         %s\n", pricing.TierLabel(tier))
 	fmt.Fprintf(os.Stderr, "turns:        %d\n", turns)
 	fmt.Fprintf(os.Stderr, "tool calls:   %d\n", toolCalls)

@@ -1,0 +1,21 @@
+package tui
+
+import "github.com/whyiyhw/seek/pkg/agent"
+
+// agentEventMsg wraps a single event from agent.Prompt's channel. The
+// TUI polls one event per tea.Cmd to stay friendly with Bubble Tea's
+// single-msg-per-Cmd model.
+type agentEventMsg struct{ Event agent.Event }
+
+// streamEndMsg fires when the agent's event channel is closed (turn
+// complete, error, or context cancellation).
+type streamEndMsg struct{}
+
+// promptSubmittedMsg fires when the user pressed Enter in the input
+// area, carrying the trimmed text.
+type promptSubmittedMsg struct{ Text string }
+
+// statusTickMsg keeps the status bar live so the off-peak window shifts
+// in real time. We tick once a minute — enough resolution given the
+// off-peak boundary is a minute granularity.
+type statusTickMsg struct{}

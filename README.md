@@ -3,23 +3,37 @@
 DeepSeek-first Go coding agent harness. Architecture inspired by
 [`earendil-works/pi`](https://github.com/earendil-works/pi).
 
-Status: **M3** — Adds session-level cache tracking, off-peak / cost
-estimation, and the `think` tool (deepseek-reasoner bridge). Six tools
-total. TUI, MCP, skills, and second-class providers (Anthropic / OpenAI
-/ Gemini) land in subsequent milestones. See [`PRD.md`](./PRD.md).
+Status: **M4** — Adds the Bubble Tea TUI (interactive multi-turn
+session, live status bar with cache ratio + cost + off-peak countdown,
+streaming render, tool indicators). Print mode preserved for piping
+and scripting. MCP, skills, and second-class providers (Anthropic /
+OpenAI / Gemini) land in subsequent milestones. See [`PRD.md`](./PRD.md).
 
 ## Quick start
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
+
+# Interactive TUI (when stdin is a TTY and no -p flag):
+go run ./cmd/seek
+
+# Print mode (when -p is set OR stdin is piped):
 go run ./cmd/seek -p "Read README.md and summarise it in one sentence."
+echo "What is 2+2?" | go run ./cmd/seek
 
 # Allow bash and writes outside the working directory:
-go run ./cmd/seek --yolo -p "Write a Go hello world to /tmp/h.go and run it."
+go run ./cmd/seek --yolo
 
-# Use the reasoner (CoT prints dim to stderr):
+# Use the reasoner (CoT prints dim):
 go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
 ```
+
+In the TUI:
+
+- Type your prompt, **Enter** to submit, **Ctrl+J** for a newline
+- **Ctrl+L** clears the visible conversation (history-only — agent state preserved)
+- **Ctrl+C** quits
+- The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · pricing tier with off-peak countdown
 
 When the response finishes, seek prints a stats footer on stderr:
 
