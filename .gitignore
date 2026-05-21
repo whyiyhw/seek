@@ -1,0 +1,24 @@
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.txt
+
+# Build artifacts
+/seek
+/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local secrets / sessions (not yet implemented, future-proofing)
+.env
+.env.*
+!/.env.example
+~/.config/seek/

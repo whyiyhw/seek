@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./...
+
+  layer-lint:
+    name: layer-lint (pkg/deepseek must not import pkg/llm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: forbid pkg/deepseek -> pkg/llm imports
+        run: |
+          if grep -rnE 'github\.com/whyiyhw/seek/pkg/llm' pkg/deepseek; then
+            echo "::error::pkg/deepseek must not import pkg/llm (see PRD §4.1)"
+            exit 1
+          fi
