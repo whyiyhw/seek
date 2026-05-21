@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/whyiyhw/seek/internal/budget"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -80,8 +81,29 @@ func rightSegments(s StatusSnapshot) []string {
 	cost := pricing.FormatCost(pricing.Cost(s.Model, s.Tier, s.Usage))
 	out = append(out, "cost "+cost)
 
+	out = append(out, formatBudget(s))
 	out = append(out, formatTier(s))
 	return out
+}
+
+// formatBudget renders the context-window utilisation. Stays muted in
+// the safe zone; tints yellow above 80%; tints red above 95% with a
+// `/compact` nudge.
+func formatBudget(s StatusSnapshot) string {
+	used := s.Usage.PromptTokens
+	limit := budget.Limit(s.Model)
+	frac := budget.Fraction(s.Model, used)
+	pct := int(frac * 100)
+	label := fmt.Sprintf("ctx %d%% (%d/%d)", pct, used, limit)
+
+	switch budget.Classify(s.Model, used) {
+	case budget.SeverityCritical:
+		return lipgloss.NewStyle().Foreground(colourToolErr).Bold(true).Render("⚠ " + label + " — /compact soon")
+	case budget.SeverityWarn:
+		return lipgloss.NewStyle().Foreground(colourTool).Render("⚠ " + label)
+	default:
+		return styleMuted.Render(label)
+	}
 }
 
 func formatTier(s StatusSnapshot) string {

@@ -82,10 +82,13 @@ type Model struct {
 	curReasoning string
 	activeTools  []activeTool
 
-	// Prompt history for ↑/↓ (M4.5 next step — buffer wired up here so
-	// the field exists from the start, navigation lands in a follow-up
-	// commit).
+	// Prompt history for ↑/↓. historyIdx == -1 means "at the live
+	// input"; while navigating, savedDraft holds whatever the user
+	// had typed before they started recalling so ↓-past-the-latest
+	// restores it.
 	promptHistory []string
+	historyIdx    int
+	savedDraft    string
 
 	stream    <-chan agent.Event
 	streaming bool
@@ -139,10 +142,11 @@ func New(opts Options) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(colourTool)
 
 	return Model{
-		opts:    opts,
-		input:   ta,
-		spinner: sp,
-		now:     time.Now(),
+		opts:       opts,
+		input:      ta,
+		spinner:    sp,
+		now:        time.Now(),
+		historyIdx: -1,
 	}
 }
 

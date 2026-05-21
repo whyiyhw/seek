@@ -152,6 +152,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlR:
 		m.showReasoning = !m.showReasoning
 		return m, nil
+
+	case tea.KeyUp:
+		// History recall — only when the textarea is empty (so it
+		// doesn't fight cursor-up in a multi-line draft) OR when
+		// we're already navigating history.
+		if m.tryHistoryUp() {
+			return m, nil
+		}
+
+	case tea.KeyDown:
+		if m.tryHistoryDown() {
+			return m, nil
+		}
 	}
 
 	// Everything else: feed the textarea (when not streaming).
@@ -162,6 +175,50 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandMenu()
 	return m, cmd
+}
+
+// tryHistoryUp moves backwards through the prompt history. Returns
+// true if the input was updated (so the caller skips forwarding the
+// key to the textarea), false to fall through to normal cursor-up.
+//
+// Eligibility: textarea empty OR we're already in history-nav mode.
+// Without this guard, ↑ in a multi-line draft would clobber the
+// draft.
+func (m *Model) tryHistoryUp() bool {
+	if len(m.promptHistory) == 0 {
+		return false
+	}
+	if m.historyIdx == -1 {
+		if strings.TrimSpace(m.input.Value()) != "" {
+			return false
+		}
+		m.savedDraft = m.input.Value()
+		m.historyIdx = len(m.promptHistory) - 1
+		m.input.SetValue(m.promptHistory[m.historyIdx])
+		return true
+	}
+	if m.historyIdx > 0 {
+		m.historyIdx--
+		m.input.SetValue(m.promptHistory[m.historyIdx])
+	}
+	return true
+}
+
+// tryHistoryDown is the mirror — moves forwards, restoring the saved
+// draft once we pass the end of history.
+func (m *Model) tryHistoryDown() bool {
+	if m.historyIdx == -1 {
+		return false
+	}
+	if m.historyIdx < len(m.promptHistory)-1 {
+		m.historyIdx++
+		m.input.SetValue(m.promptHistory[m.historyIdx])
+	} else {
+		m.historyIdx = -1
+		m.input.SetValue(m.savedDraft)
+		m.savedDraft = ""
+	}
+	return true
 }
 
 // updateCommandMenu recomputes the slash-command dropdown state from
@@ -211,6 +268,8 @@ func filterCommands(cmds []command, prefix string) []command {
 // in-flight call without tearing down the outer SIGINT context.
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.promptHistory = append(m.promptHistory, text)
+	m.historyIdx = -1
+	m.savedDraft = ""
 
 	m.curContent = ""
 	m.curReasoning = ""
