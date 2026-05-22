@@ -434,6 +434,10 @@ func run() error {
 		if memProject != nil && dsClient != nil {
 			memHook.Distiller = &memory.Distiller{Client: dsClient}
 			memHook.HistoryProvider = ag.Messages
+			// M5.8 auto-dream uses the same DeepSeek client. Wired
+			// unconditionally; $SEEK_AUTO_DREAM is the gate
+			// (off by default).
+			memHook.Dreamer = &memory.Dreamer{Client: dsClient}
 		}
 		hooksReg.Register(memHook)
 	}

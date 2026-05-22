@@ -40,6 +40,15 @@ type Hook struct {
 	// intact while we tune satisfaction-signal thresholds.
 	Distiller *Distiller
 
+	// Dreamer, when non-nil and $SEEK_AUTO_DREAM=1, drives the M5.8
+	// auto-dream SessionStart path: cadence in DreamState is checked
+	// (every N sessions OR K days, default 20 / 14); if due, a dream
+	// pass runs in a background goroutine and any L candidates that
+	// pass the ≥2-source filter get appended to Soul.Pending.
+	//
+	// Off by default — same gating philosophy as auto-distill.
+	Dreamer *Dreamer
+
 	// HistoryProvider returns the session history at SessionEnd.
 	// nil disables auto-distill regardless of Distiller — we can't
 	// extract decisions from a session we don't have access to.
@@ -51,6 +60,11 @@ type Hook struct {
 	// Now overrides the SessionStart timestamp for testing. Production
 	// callers leave it zero and the hook uses time.Now().UTC().
 	Now func() time.Time
+
+	// autoDreamRan is set by tests that need to wait for the
+	// auto-dream goroutine. Production callers ignore it (the
+	// channel is nil and the goroutine is fire-and-forget).
+	autoDreamDone chan struct{}
 }
 
 // envAutoDistill is the env-var name gating M5.7's auto-distill. Set
@@ -107,15 +121,104 @@ func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePro
 // swallowed — a failed GC degrades the index (might show stale entries
 // or omit recently-recalled ones for one session) but should not block
 // the user from talking to the model.
-func (h *Hook) OnSessionStart(_ context.Context, _ hooks.SessionStartEvent) {
-	if h.Project == nil {
-		return
-	}
+//
+// Also fires M5.8 auto-dream cadence check: if $SEEK_AUTO_DREAM is on
+// and the cadence (every N sessions / K days) has tripped, launches a
+// background dream pass. SessionStart MUST NOT block — the user's
+// first Prompt is moments away — so the dream runs in a goroutine,
+// writes its L-pending update if successful, and is otherwise
+// fire-and-forget.
+func (h *Hook) OnSessionStart(ctx context.Context, _ hooks.SessionStartEvent) {
 	now := time.Now().UTC()
 	if h.Now != nil {
 		now = h.Now()
 	}
-	_, _ = h.Project.RunGC(now)
+	if h.Project != nil {
+		_, _ = h.Project.RunGC(now)
+	}
+	h.maybeAutoDream(ctx, now)
+}
+
+// maybeAutoDream checks cadence and, if due, spawns the dream
+// goroutine. Cadence state (SessionsSinceDream++) is incremented
+// every SessionStart regardless of whether dream actually fires —
+// that's how the next session's check knows where we stand.
+func (h *Hook) maybeAutoDream(ctx context.Context, now time.Time) {
+	if !autoDreamEnabled() {
+		return
+	}
+	if h.Dreamer == nil {
+		return
+	}
+
+	state, err := LoadDreamState()
+	if err != nil {
+		return
+	}
+	state.SessionsSinceDream++
+	due := state.IsDreamDue(now)
+	if !due.Due {
+		_ = state.Save()
+		return
+	}
+
+	// Reset the counter NOW (before spawning the goroutine) so a
+	// crash mid-dream doesn't re-trigger on every subsequent start.
+	// The dream's actual completion bumps LastDreamAt — partial work
+	// loses its candidate write but doesn't loop.
+	state.SessionsSinceDream = 0
+	state.LastDreamAt = now
+	_ = state.Save()
+
+	done := h.autoDreamDone
+	go func() {
+		if done != nil {
+			defer close(done)
+		}
+		h.runAutoDream(ctx)
+	}()
+}
+
+// runAutoDream gathers cross-project + recent-session input, runs the
+// reasoner, and appends any candidates to Soul.Pending. Errors silently
+// swallowed — auto-dream is best-effort enhancement.
+func (h *Hook) runAutoDream(ctx context.Context) {
+	projects, err := ListProjects()
+	if err != nil || len(projects) == 0 {
+		return
+	}
+	in := DreamInput{}
+	for _, p := range projects {
+		entries := p.Entries()
+		if len(entries) == 0 {
+			continue
+		}
+		in.Projects = append(in.Projects, DreamProject{ID: p.ID, Entries: entries})
+	}
+	if len(in.Projects) == 0 {
+		return
+	}
+
+	rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	cands, err := h.Dreamer.Dream(rctx, in)
+	if err != nil || len(cands) == 0 {
+		return
+	}
+
+	soul, err := LoadSoul()
+	if err != nil {
+		return
+	}
+	addition := FormatLCandidatesMarkdown(cands)
+	pending := strings.TrimSpace(soul.Pending)
+	if pending == "" {
+		pending = addition
+	} else {
+		pending = pending + "\n\n" + addition
+	}
+	soul.SetSections(soul.Stable, pending)
+	_ = soul.Save()
 }
 
 // OnSessionEnd is the M5.7 auto-distill trigger. Gated on the env var
