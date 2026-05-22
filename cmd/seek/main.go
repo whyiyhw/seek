@@ -82,7 +82,7 @@ func run() error {
 	var (
 		prompt       = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
 		model        = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
-		maxTurns     = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
+		maxTurns     = flag.Int("max-turns", 32, "safety bound on agent loop iterations")
 		yolo         = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		jsonOut      = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
 		resume       = flag.String("resume", "", "load a saved session by ID (see seek -list)")
@@ -299,6 +299,7 @@ func run() error {
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
 		MaxTurns:        *maxTurns,
+		AutoContinue:    true,
 		InitialMessages: initialMsgs,
 	})
 	if err != nil {
@@ -385,6 +386,7 @@ func run() error {
 				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTurns:     *maxTurns,
+				AutoContinue: true,
 			})
 		},
 		SetModel: func(m string) { sessionModel = m },
