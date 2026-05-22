@@ -4,22 +4,40 @@
 
 ## Why seek?
 
-**Single binary, ~5 MB** — zero runtime dependencies, download and run.
+seek overlaps a lot with Claude Code / Aider / Cursor on features — MCP, session management, IDE integration, custom skills, permission systems all exist there too. This section only lists the things that are actually **differentiated**; the rest is mentioned at the end as "on par, not a differentiator" instead of forcing checkmarks against competitors.
 
-| Feature | seek | Claude Code | Aider |
-|---------|------|-------------|-------|
-| Binary size | ~5 MB ✅ 95%+ smaller | ~100 MB (npm) | ~50 MB (pip) |
-| Input cost / 1M tokens | $0.14 (miss) / $0.0028 (hit) — 99% cheaper | $3.00 (Sonnet) | Bring your own API key |
-| TUI experience | ✅ inline mode + queue & interject | ⚠️ alt-screen fullscreen | ❌ CLI-only |
-| Session management (branch / compact / resume) | ✅ full commands | ❌ limited | ❌ |
-| Cache hit ratio visualization | ✅ real-time in status bar | ❌ | ❌ |
-| FIM (fill-in-the-middle) | ✅ standalone cheap endpoint | ❌ | ❌ |
-| Off-peak pricing countdown | ✅ visible countdown | ❌ | ❌ |
-| Dual-model reasoning (think + chat) | ✅ think tool + dual-model skill | ❌ | ❌ |
-| Permission system | ✅ fine-grained control | ❌ | ❌ |
-| MCP support | ✅ native | ✅ supported | ❌ |
-| Custom skills | ✅ defined via .md files | ✅ Slash commands | ❌ |
-| IDE integration | ✅ JSON-RPC 2.0 server | ❌ | ⚠️ plugins, non-standard |
+### 1. An order of magnitude cheaper
+
+DeepSeek V4-Flash input pricing (from `internal/pricing/pricing.go`):
+
+| | seek (DeepSeek V4-Flash) | Claude Sonnet 4 |
+|---|---|---|
+| Input (cache miss) | **$0.14 / 1M tokens** | $3 / 1M tokens |
+| Input (prefix-cache hit) | **$0.0028 / 1M tokens** | $0.30 / 1M tokens |
+| Output | **$0.28 / 1M tokens** | $15 / 1M tokens |
+| Off-peak window (00:30–08:30 Beijing time) | **50% off all of the above** | — |
+
+Self-hosting benchmark measures 95.7% cache hit (97% after turn 5) — the engineering discipline that keeps the prefix-cache stable (byte-stable schemas, system prompt, history) pays out in real cost savings. The status bar shows the hit ratio and saved-token count in real time.
+
+### 2. Single binary, zero runtime deps
+
+`~5 MB`, no Python / Node runtime, no `npm install` / `pip install`.
+`go install github.com/whyiyhw/seek/cmd/seek@latest` — or grab a tarball from the Releases page — for macOS / Linux / Windows.
+
+### 3. DeepSeek-specific affordances
+
+- **V4 reasoning mode** (`Thinking.Type=enabled`): exposed as the `think` tool; the built-in `dual-model` skill chains reasoner → execute → reasoner-review for non-trivial multi-step tasks
+- **FIM endpoint** (`fim_complete` tool): small-range edits go through DeepSeek's fill-in-the-middle endpoint, 5–10× cheaper than equivalent chat completions
+- **Cache-hit visibility**: status bar shows hit ratio and saved tokens live, so "write cache-friendly prompts" becomes an observable optimization target instead of a vague best-practice
+- **Off-peak countdown**: status bar shows the current pricing tier and how long until the next switch
+
+### 4. Chinese-friendly defaults
+
+Tool descriptions, system prompt phrasing, and error messages are tuned for Chinese-language interaction (English still works, of course).
+
+### On par (not a differentiator)
+
+These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), session persistence / fork (`/branch`) / compact (`/compact`), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
 
 ## Quick start
 
