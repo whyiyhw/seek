@@ -38,7 +38,7 @@ type Tool interface {
 
 这是全书最违反直觉的一个约定，但它对性能的影响很大。
 
-前面讲过，DeepSeek 会缓存 prompt 的前缀部分。System prompt 加工具 Schema 通常有 2-3 KB，如果每次请求都能命中缓存，这部分的 token 成本降至 1/10。
+前面讲过，DeepSeek 会缓存 prompt 的前缀部分。System prompt 加工具 Schema 通常有 2-3 KB，如果每次请求都能命中缓存，这部分的 token 成本降至约 1/50（V4-Flash 价格：命中 $0.0028/M，未命中 $0.14/M）。
 
 命中缓存的前提：**前缀字节必须完全一致**。
 

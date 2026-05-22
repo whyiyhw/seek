@@ -181,7 +181,7 @@ for _, p := range accumulator {
 
 ### 前缀缓存
 
-DeepSeek 会缓存每个请求的 prompt 前缀。如果下一个请求和上一个请求的 prompt 前缀相同，这部分 token 的计算成本降至 1/10。
+DeepSeek 会缓存每个请求的 prompt 前缀。如果下一个请求和上一个请求的 prompt 前缀相同，这部分 token 的计算成本降至约 1/50（V4-Flash 价格：命中 $0.0028/M，未命中 $0.14/M）。
 
 缓存命中的条件：
 - 前缀至少约 64 个 token（太短的前缀不会被缓存）

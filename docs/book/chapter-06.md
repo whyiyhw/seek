@@ -13,6 +13,8 @@
 
 ## 6.1 为什么要"工具化"reasoner
 
+> **时间线脚注**：DeepSeek 一度有一个独立的 `deepseek-reasoner` 模型——要拿到推理链，你得发请求到它的端点。V4（2026-01 发布）把推理能力折叠成了普通模型上的一个开关：`Thinking.Type = "enabled"`。从此 reasoner 不再是一个"模型"，而是一种"模式"。本章后面的代码示例已经是 V4 写法（`ModelV4Flash` + `Thinking.Type=enabled` + `ReasoningEffort=high`，commit `aa5e532`）。如果你在仓库历史里看到对 `deepseek-reasoner` 模型常量的引用，那是 V3 时代的遗物——学习要点（隔离历史、`reasoning_content` 不能回传、`thinking` 与 `tools` 不能同时用）在两个时代是完全一样的，本章不需要因为 V4 推翻任何结论。
+
 DeepSeek 的 reasoner 能力（`thinking` 参数）有一个重要的约束：**开启 `thinking` 的请求不支持 `tools` 字段**。
 
 这意味着你不能这样用：
