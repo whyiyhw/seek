@@ -74,14 +74,13 @@ const (
 
 // Execute runs think in non-streaming mode. The agent prefers
 // ExecuteStream when wiring a streaming-capable tool, so this is the
-// fallback path for callers (and tests) that don't want a delta
-// channel — same semantics, same returned string.
+// fallback path for callers (and tests) that don't want a push
+// callback — same semantics, same returned string.
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	a, sys, userMsg, err := parseArgs(raw)
+	sys, userMsg, err := parseArgs(raw)
 	if err != nil {
 		return "", err
 	}
-	_ = a
 
 	resp, err := t.client.Chat(ctx, buildRequest(sys, userMsg))
 	if err != nil {
@@ -95,17 +94,17 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 }
 
 // ExecuteStream is the same call as Execute but uses ChatStream so the
-// reasoner's chain-of-thought reaches the TUI as it arrives. Deltas
-// land on `deltas` with Reasoning=true for reasoning_content chunks
-// and Reasoning=false for final-answer content chunks. The returned
-// string is byte-identical to what Execute would have produced for the
-// same model output, so the tool result message in history is
-// unaffected by whether the agent took the streaming path.
+// reasoner's chain-of-thought reaches the TUI as it arrives. push is
+// called once per delta: Reasoning=true for reasoning_content chunks,
+// Reasoning=false for final-answer content chunks. A non-nil error
+// from push means ctx was cancelled — we propagate it instead of
+// blocking on the next delta.
 //
-// The caller (agent.dispatchTool) owns the deltas channel and closes
-// it after we return.
-func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, deltas chan<- tools.StreamDelta) (string, error) {
-	_, sys, userMsg, err := parseArgs(raw)
+// The returned string is byte-identical to what Execute would have
+// produced for the same model output, so the tool result message in
+// history is unaffected by which dispatch path the agent took.
+func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, push func(tools.StreamDelta) error) (string, error) {
+	sys, userMsg, err := parseArgs(raw)
 	if err != nil {
 		return "", err
 	}
@@ -124,17 +123,13 @@ func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, deltas cha
 		switch ev.Type {
 		case deepseek.EventReasoningDelta:
 			reasoning.WriteString(ev.Delta)
-			select {
-			case deltas <- tools.StreamDelta{Delta: ev.Delta, Reasoning: true}:
-			case <-ctx.Done():
-				return "", ctx.Err()
+			if err := push(tools.StreamDelta{Delta: ev.Delta, Reasoning: true}); err != nil {
+				return "", err
 			}
 		case deepseek.EventDelta:
 			content.WriteString(ev.Delta)
-			select {
-			case deltas <- tools.StreamDelta{Delta: ev.Delta, Reasoning: false}:
-			case <-ctx.Done():
-				return "", ctx.Err()
+			if err := push(tools.StreamDelta{Delta: ev.Delta, Reasoning: false}); err != nil {
+				return "", err
 			}
 		case deepseek.EventDone:
 			usage = ev.Usage
@@ -148,21 +143,20 @@ func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, deltas cha
 	return formatResult(reasoning.String(), content.String(), usage), nil
 }
 
-// parseArgs unmarshals and validates the tool's JSON arguments,
-// returning the structured Args plus the assembled (system prompt,
-// user message) pair both Execute paths use. Pulled out so Execute
-// and ExecuteStream stay byte-identical in their wire formatting —
-// which is what keeps the prefix cache happy when an agent toggles
-// between the two paths.
-func parseArgs(raw json.RawMessage) (Args, string, string, error) {
+// parseArgs unmarshals and validates the tool's JSON arguments and
+// returns the assembled (system prompt, user message) pair. Shared
+// between Execute and ExecuteStream so request bytes match across
+// the two paths — the cache prefix stays stable when the agent
+// toggles between them.
+func parseArgs(raw json.RawMessage) (sys, userMsg string, err error) {
 	var a Args
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return a, "", "", fmt.Errorf("think: bad arguments: %w", err)
+		return "", "", fmt.Errorf("think: bad arguments: %w", err)
 	}
 	if a.Task == "" {
-		return a, "", "", fmt.Errorf("think: task is required")
+		return "", "", fmt.Errorf("think: task is required")
 	}
-	sys := planSystem
+	sys = planSystem
 	if a.Reflect {
 		sys = reflectSystem
 	}
@@ -170,7 +164,7 @@ func parseArgs(raw json.RawMessage) (Args, string, string, error) {
 	if a.Context != "" {
 		userParts = append(userParts, "\n--- context ---\n"+a.Context)
 	}
-	return a, sys, strings.Join(userParts, "\n"), nil
+	return sys, strings.Join(userParts, "\n"), nil
 }
 
 func buildRequest(sys, userMsg string) *deepseek.ChatRequest {

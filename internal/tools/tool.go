@@ -54,14 +54,19 @@ type StreamDelta struct {
 // when the tool implements this interface and falls back to Execute
 // otherwise.
 //
-// ExecuteStream pushes StreamDelta values onto the supplied channel.
-// The caller owns the channel — never close it from inside the tool.
-// The final return value is the same string that Execute would have
-// produced, and is what lands in the tool result message that feeds
-// the next chat turn.
+// ExecuteStream pushes StreamDelta values via the supplied `push`
+// callback. push returns a non-nil error when the agent's context has
+// been cancelled; the tool should propagate it (`return "", err`)
+// rather than ignoring it, otherwise an Esc interrupt won't be felt
+// until the underlying stream finishes naturally.
+//
+// The returned string is the same value Execute would have produced
+// for the same model output — it becomes the tool result message in
+// history, so streaming vs non-streaming dispatch produces byte-
+// identical conversation prefixes (keeps DeepSeek's prefix cache hot).
 type StreamingTool interface {
 	Tool
-	ExecuteStream(ctx context.Context, raw json.RawMessage, deltas chan<- StreamDelta) (string, error)
+	ExecuteStream(ctx context.Context, raw json.RawMessage, push func(StreamDelta) error) (string, error)
 }
 
 // Registry is the set of tools available to an Agent. Build it once at

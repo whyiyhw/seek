@@ -164,17 +164,20 @@ func thinkingSSE(t *testing.T, reasoningDeltas, contentDeltas []string) *httptes
 	}))
 }
 
-// drain collects every delta off the channel until it closes, returning
-// them split by their Reasoning flag. Both slices preserve order.
-func drainDeltas(ch <-chan tools.StreamDelta) (reasoning, content []string) {
-	for d := range ch {
+// collectingPusher returns a push callback that records every delta
+// it sees, plus the slices the recorder writes into. Order is
+// preserved across calls.
+func collectingPusher() (push func(tools.StreamDelta) error, reasoning, content *[]string) {
+	var r, c []string
+	push = func(d tools.StreamDelta) error {
 		if d.Reasoning {
-			reasoning = append(reasoning, d.Delta)
+			r = append(r, d.Delta)
 		} else {
-			content = append(content, d.Delta)
+			c = append(c, d.Delta)
 		}
+		return nil
 	}
-	return
+	return push, &r, &c
 }
 
 func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
@@ -187,28 +190,16 @@ func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
 
-	deltas := make(chan tools.StreamDelta, 16)
-	var (
-		reasoning []string
-		content   []string
-		drained   = make(chan struct{})
-	)
-	go func() {
-		defer close(drained)
-		reasoning, content = drainDeltas(deltas)
-	}()
-
-	out, err := New(c).ExecuteStream(context.Background(), args, deltas)
+	push, reasoning, content := collectingPusher()
+	out, err := New(c).ExecuteStream(context.Background(), args, push)
 	if err != nil {
 		t.Fatal(err)
 	}
-	close(deltas)
-	<-drained
 
-	if got := strings.Join(reasoning, ""); got != "step 1... step 2..." {
+	if got := strings.Join(*reasoning, ""); got != "step 1... step 2..." {
 		t.Errorf("reasoning stream = %q", got)
 	}
-	if got := strings.Join(content, ""); got != "do X then Y" {
+	if got := strings.Join(*content, ""); got != "do X then Y" {
 		t.Errorf("content stream = %q", got)
 	}
 	// Final return string must still match the formatResult shape so
@@ -221,41 +212,43 @@ func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
 	}
 }
 
-func TestThink_ExecuteStream_RespectsCtxCancel(t *testing.T) {
+func TestThink_ExecuteStream_PropagatesPushError(t *testing.T) {
+	// A push callback that returns ctx.Canceled on the first delta
+	// must cause ExecuteStream to return that error immediately,
+	// without waiting for the underlying stream to finish. This is
+	// exactly the Esc-interrupt path: the agent's push fails fast,
+	// the tool propagates, dispatchTool moves on.
+	//
+	// Server keeps emitting deltas indefinitely; if the push-error
+	// propagation works the test returns in milliseconds, otherwise
+	// it would hang until the httptest server is torn down.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"reasoning_content":"thinking..."}}]}`+"\n\n")
-		if flusher != nil {
-			flusher.Flush()
+		for i := 0; i < 100; i++ {
+			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"reasoning_content":"thinking..."}}]}`+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(time.Millisecond):
+			}
 		}
-		<-r.Context().Done()
 	}))
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "x"})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	deltas := make(chan tools.StreamDelta, 16)
-	go func() {
-		for range deltas {
-		}
-	}()
+	wantErr := context.Canceled
+	push := func(_ tools.StreamDelta) error { return wantErr }
 
-	go func() {
-		// Cancel shortly after kick-off — the server holds the
-		// connection open, so without the cancel the test would
-		// stall until httptest tears down.
-		<-time.After(50 * time.Millisecond)
-		cancel()
-	}()
-
-	_, err := New(c).ExecuteStream(ctx, args, deltas)
-	if err == nil {
-		t.Errorf("expected ctx.Canceled, got nil")
+	_, err := New(c).ExecuteStream(context.Background(), args, push)
+	if err != wantErr {
+		t.Errorf("err = %v, want %v", err, wantErr)
 	}
-	close(deltas)
 }
 
 func TestThink_TruncatesLongReasoning(t *testing.T) {

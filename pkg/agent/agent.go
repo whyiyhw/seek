@@ -377,25 +377,25 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		err    error
 	)
 	if st, ok := tool.(tools.StreamingTool); ok {
-		// Buffered so a slow TUI doesn't backpressure the tool. 64
-		// covers the typical reasoner trace (few thousand deltas
-		// stretched over ~30s) without leaking memory on faster tools.
-		deltas := make(chan tools.StreamDelta, 64)
-		pumpDone := make(chan struct{})
-		go func() {
-			defer close(pumpDone)
-			for d := range deltas {
-				out <- ToolDelta{
-					CallID:    tc.ID,
-					Name:      tc.Function.Name,
-					Delta:     d.Delta,
-					Reasoning: d.Reasoning,
-				}
+		// push is the tool's only way to surface intermediate output.
+		// The select makes the call ctx-aware: if the agent's event
+		// channel is full AND ctx gets cancelled (Esc), push returns
+		// the cancel error so the tool can bail. No pump goroutine
+		// needed — the callback IS the pump.
+		push := func(d tools.StreamDelta) error {
+			select {
+			case out <- ToolDelta{
+				CallID:    tc.ID,
+				Name:      tc.Function.Name,
+				Delta:     d.Delta,
+				Reasoning: d.Reasoning,
+			}:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
 			}
-		}()
-		result, err = st.ExecuteStream(ctx, args, deltas)
-		close(deltas)
-		<-pumpDone
+		}
+		result, err = st.ExecuteStream(ctx, args, push)
 	} else {
 		result, err = tool.Execute(ctx, args)
 	}

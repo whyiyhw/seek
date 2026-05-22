@@ -466,9 +466,21 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 
 	case agent.ToolDelta:
 		// Streaming output from a long-running tool (currently only
-		// `think`). Route into the same live-region buffers the chat
-		// model uses — there's no concurrent chat stream while a tool
-		// is running, so collision is impossible by construction.
+		// `think`). Routed into the same live-region buffers the
+		// chat model uses — sequential agent dispatch makes the
+		// aliasing safe:
+		//   1. chat model streams content → MessageEnd commits +
+		//      clears the buffers
+		//   2. then tool dispatch loop runs → ToolDelta refills the
+		//      buffers with tool output
+		//   3. ToolExecEnd clears the buffers again before the next
+		//      chat turn streams in
+		// NOTE: this aliasing breaks the moment parallel tool dispatch
+		// lands (see PRD §3.1 — currently flagged as a post-v1.0 item:
+		// "M1: sequential tool dispatch. Parallel via errgroup lands
+		// with the parallel-execution work in a later milestone"). At
+		// that point ToolDelta routing must move to a per-CallID live
+		// region keyed off m.activeTools.
 		if e.Reasoning {
 			m.curReasoning += e.Delta
 		} else {
@@ -476,10 +488,16 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		}
 
 	case agent.ToolExecEnd:
-		// The tool's full result is about to land in scrollback via
-		// the committed tool line; the live buffers we used for the
-		// stream are now stale and would bleed into the next chat
-		// turn's display if we didn't clear them.
+		// If this was a streaming tool (only `think` today), the live
+		// buffers hold what we showed during execution; the tool's
+		// full result is about to land in scrollback as a single
+		// committed line, so the live preview is now stale and would
+		// bleed into the next chat turn's display.
+		//
+		// Unconditional clear is intentional: a non-streaming tool
+		// leaves both buffers empty (nothing ever pushed via
+		// ToolDelta), so the assignment is a no-op rather than a
+		// bug. Cheaper than adding a "did we stream?" flag.
 		m.curContent = ""
 		m.curReasoning = ""
 		// ToolExecEnd carries Name/Result/Err but not Args/started —

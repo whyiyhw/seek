@@ -445,9 +445,11 @@ type streamingStub struct {
 	chunks []tools.StreamDelta
 }
 
-func (s *streamingStub) ExecuteStream(_ context.Context, _ json.RawMessage, deltas chan<- tools.StreamDelta) (string, error) {
+func (s *streamingStub) ExecuteStream(_ context.Context, _ json.RawMessage, push func(tools.StreamDelta) error) (string, error) {
 	for _, d := range s.chunks {
-		deltas <- d
+		if err := push(d); err != nil {
+			return "", err
+		}
 	}
 	return "final result", nil
 }
