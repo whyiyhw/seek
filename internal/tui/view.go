@@ -48,7 +48,7 @@ func (m Model) View() string {
 	// alive during those windows.
 	if m.streaming &&
 		m.curContent == "" && m.curReasoning == "" && len(m.activeTools) == 0 {
-		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render("thinking…"))
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render(m.streamingLabel()))
 	}
 
 	// Active tool lines — each shows a spinner and an elapsed-time
@@ -158,19 +158,54 @@ func (m Model) renderStatusBar() string {
 	}
 	tier := pricing.CurrentTier(now)
 	nextTier, nextAt := pricing.NextTransition(now)
+
+	var streamElapsed time.Duration
+	if m.streaming && !m.streamStartTime.IsZero() {
+		streamElapsed = time.Since(m.streamStartTime)
+	}
+
 	return RenderStatusBar(StatusSnapshot{
-		Model:     m.opts.Model,
-		Yolo:      m.opts.Yolo,
-		Tier:      tier,
-		NextTier:  nextTier,
-		NextAt:    nextAt,
-		Turns:     m.turns,
-		ToolCalls: m.toolCalls,
-		Usage:     m.opts.Tracker.Cumulative(),
-		Streaming: m.streaming,
-		Now:       now,
-		Width:     m.width,
+		Model:            m.opts.Model,
+		Yolo:             m.opts.Yolo,
+		Tier:             tier,
+		NextTier:         nextTier,
+		NextAt:           nextAt,
+		Turns:            m.turns,
+		ToolCalls:        m.toolCalls,
+		Usage:            m.opts.Tracker.Cumulative(),
+		Streaming:        m.streaming,
+		Now:              now,
+		Width:            m.width,
+		StreamElapsed:    streamElapsed,
+		StreamDeltaBytes: m.streamDeltaBytes,
 	})
+}
+
+// streamingLabel returns the "thinking…" placeholder text for the live
+// region. After the first second it appends the elapsed time so the user
+// knows the agent is alive during slow first-token or tool-gap windows.
+func (m Model) streamingLabel() string {
+	if m.streamStartTime.IsZero() {
+		return "thinking…"
+	}
+	elapsed := time.Since(m.streamStartTime)
+	if elapsed < time.Second {
+		return "thinking…"
+	}
+	s := int(elapsed.Seconds())
+	if s < 60 {
+		return fmt.Sprintf("thinking… %ds", s)
+	}
+	return fmt.Sprintf("thinking… %dm%ds", s/60, s%60)
+}
+
+// formatTokensK renders a token count as a compact string: raw below
+// 1000, one-decimal "Xk" above (e.g. 99600 → "99.6k").
+func formatTokensK(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
 // renderCommittedUser renders the user's prompt for scrollback. Called

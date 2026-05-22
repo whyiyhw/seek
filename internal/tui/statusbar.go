@@ -26,6 +26,12 @@ type StatusSnapshot struct {
 	Streaming bool           // "thinking" indicator state
 	Now       time.Time      // for "until next tier" countdown
 	Width     int            // for right-padding
+
+	// StreamElapsed and StreamDeltaBytes drive the live "Ns · ↓~Xtok"
+	// counter. Both are zero when Streaming is false or the stream just
+	// started (< 1 s elapsed).
+	StreamElapsed    time.Duration
+	StreamDeltaBytes int
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -44,9 +50,7 @@ func RenderStatusBar(s StatusSnapshot) string {
 	leftWidth := lipgloss.Width(leftText)
 	rightWidth := lipgloss.Width(rightText)
 	gap := s.Width - leftWidth - rightWidth
-	if gap < 1 {
-		gap = 1
-	}
+	gap = max(gap, 1)
 	full := leftText + strings.Repeat(" ", gap) + rightText
 	return styleStatusBar.Width(s.Width).Render(full)
 }
@@ -60,11 +64,43 @@ func leftSegments(s StatusSnapshot) []string {
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"))
 	}
 	if s.Streaming {
-		out = append(out, styleMuted.Render("● streaming"))
+		out = append(out, styleMuted.Render(streamingStatusLabel(s)))
 	} else {
 		out = append(out, styleMuted.Render("○ idle"))
 	}
 	return out
+}
+
+// streamingStatusLabel builds the "● Ns · ↓~Xtok" live indicator.
+// Falls back to "● streaming" in the first second or before any
+// completion bytes have arrived (e.g. waiting for first content token).
+func streamingStatusLabel(s StatusSnapshot) string {
+	if s.StreamElapsed < time.Second {
+		return "● streaming"
+	}
+	el := formatStreamElapsed(s.StreamElapsed)
+	if s.StreamDeltaBytes == 0 {
+		return "● " + el
+	}
+	return fmt.Sprintf("● %s · ↓~%s", el, formatTokenEst(s.StreamDeltaBytes))
+}
+
+func formatStreamElapsed(d time.Duration) string {
+	s := int(d.Seconds())
+	if s < 60 {
+		return fmt.Sprintf("%ds", s)
+	}
+	return fmt.Sprintf("%dm%ds", s/60, s%60)
+}
+
+// formatTokenEst converts a byte count to a readable token estimate.
+// Approximation: 1 token ≈ 4 UTF-8 bytes for typical code/prose.
+func formatTokenEst(bytes int) string {
+	tok := bytes / 4
+	if tok < 1000 {
+		return fmt.Sprintf("%dtok", tok)
+	}
+	return fmt.Sprintf("%.1fktok", float64(tok)/1000)
 }
 
 func rightSegments(s StatusSnapshot) []string {

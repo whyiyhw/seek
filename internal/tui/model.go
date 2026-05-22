@@ -116,6 +116,14 @@ type Model struct {
 	// ended naturally" so streamEndMsg can print an interrupt notice.
 	userCanceled bool
 
+	// streamStartTime is set in submit() and used to compute elapsed
+	// time for the live streaming indicator. Zero when not streaming.
+	streamStartTime time.Time
+	// streamDeltaBytes accumulates the byte length of non-reasoning
+	// MessageDelta chunks in the current stream. Used to estimate
+	// completion token count before the final Usage arrives.
+	streamDeltaBytes int
+
 	turns     int
 	toolCalls int
 

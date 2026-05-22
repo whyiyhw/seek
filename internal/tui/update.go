@@ -412,6 +412,8 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.activeTools = nil
 	m.userCanceled = false
 	m.streaming = true
+	m.streamStartTime = time.Now()
+	m.streamDeltaBytes = 0
 	m.input.Blur()
 
 	ctx, cancel := context.WithCancel(m.opts.Ctx)
@@ -439,6 +441,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.curReasoning += e.Delta
 		} else {
 			m.curContent += e.Delta
+			m.streamDeltaBytes += len(e.Delta)
 		}
 
 	case agent.MessageEnd:
@@ -616,7 +619,16 @@ func truncateOneLine(s string, n int) string {
 func (m Model) renderTurnFooter() string {
 	c := m.opts.Tracker.Cumulative()
 	cost := pricing.FormatCost(pricing.Cost(m.opts.Model, pricing.CurrentTier(m.now), c))
+
+	var cacheNote string
+	if c.PromptTokens > 0 && c.PromptCacheHitTokens > 0 {
+		pct := int(float64(c.PromptCacheHitTokens) / float64(c.PromptTokens) * 100)
+		cacheNote = fmt.Sprintf(" (%d%% cache)", pct)
+	}
+
 	return styleMuted.Render(fmt.Sprintf(
-		"  · turn %d · %d tool · cache %s · %s",
-		m.turns, m.toolCalls, deepseek.FormatHitRatio(c), cost))
+		"  · turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s",
+		m.turns, m.toolCalls,
+		formatTokensK(c.PromptTokens), cacheNote,
+		formatTokensK(c.CompletionTokens), cost))
 }
