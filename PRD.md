@@ -109,7 +109,7 @@
 | 缺口 | 影响 | 状态 |
 |---|---|---|
 | **主题切换** | 颜色只能等环境检测 | ⏳ 待做 |
-| **多行 paste 折叠显示** | 粘大段代码会撑爆历史 | ⏳ 待做 |
+| **多行 paste 折叠显示** | 粘大段代码会撑爆历史 | ✅ 已做 |
 | **帮助 overlay (?)** | 全靠 `/help` 文本输出 | ⏳ 待做 |
 
 > M4.5 已补齐：inline 模式、Esc 中断、per-call 审批、↑/↓ prompt 历史、tool 执行 spinner、edit 应用前 diff 预览、@ 文件路径补全、token 预算告警 + `/compact` 建议、持久会话、`/branch` 分支会话。
@@ -628,7 +628,7 @@ M4 用了 `tea.WithAltScreen()`，导致：
 
 - **↑/↓ prompt 历史**：当前会话内的所有用户消息按时间存入环形缓冲，textarea 空时 ↑ 回放上一条
 - **`@` 文件路径补全**：输入到 `@` 时弹出基于 `find . -type f` 的下拉，模糊匹配；选中后插入相对路径
-- **多行 paste 折叠** ⏳：detect 一次 paste 行数 > 5 → 在显示层折叠成 `… [pasted 23 lines, hidden] …`，但发给 LLM 时仍是完整内容
+- **多行 paste 折叠** ✅：detect 一次 paste 行数 > 5 → 在显示层折叠成 `📋 [pasted 23 lines, hidden]`，textarea 内仍保持完整内容，提交时发给 LLM（`view.go` `renderPastedPlaceholder` + `update.go` `handlePasteFolding`）。输入任何字符即展开。
 - **tool 执行 spinner**：每个 in-flight tool 旁边 bubble 默认 spinner（`bubbles/spinner`，~6 行集成）
 - **`edit` 应用前 diff 预览**（M5 已交付，与 per-call 审批配合显示 unified diff）
 
@@ -646,7 +646,7 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
 | **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ✅ 全部交付（见 §5.2） |
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ✅ 全部交付（见 §5.3） |
-| **M7 打磨** | RPC / JSON 模式（`internal/rpc`）；多行 paste 折叠；主题切换；帮助 overlay；自举 + benchmark；文档同步 | ⏳ 进行中 |
+| **M7 打磨** | RPC / JSON 模式（`internal/rpc`）；多行 paste 折叠 ✅；主题切换；帮助 overlay；自举 + benchmark；文档同步 | ⏳ 进行中 |
 | **v1.0 发布** | | ≈ 当前进度 + 1 周 |
 | **Post-v1.0** | LSP 语义导航；并行工具调用；... | ⏳ 待规划 |
 
@@ -777,7 +777,7 @@ M0–M6 全部交付。M7 剩余子任务按依赖排序：
 1. **RPC/JSON 模式**（§4）— `internal/rpc` 骨架已建，实现 stdio JSON-RPC 的子进程模式，覆盖 `seek --rpc` 入口
 2. **文档完善** — 更新 PRD（本文）与代码同步；编写 MCP/Skill/会话管理用户文档
 3. **自举 benchmark** — 让 seek 自己读、改、运行自己的仓库，验证缓存命中率 ≥ 60%
-4. **多行 paste 折叠**（§4.12）— detect 一次 paste >5 行时折叠显示
+4. **多行 paste 折叠**（§4.12）✅ — detect 一次 paste >5 行时折叠显示
 5. **主题切换** — 亮色/暗色主题手动切换
 
 完成后进入 **v1.0 发布**。

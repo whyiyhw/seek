@@ -257,6 +257,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandMenu()
 	m.updatePathCompleter()
+
+	// Multi-line paste folding: if the input has >5 lines, collapse the
+	// display to a placeholder so the terminal scrollback isn't flooded,
+	// but keep the full content for submission (see submit() below).
+	m = m.handlePasteFolding()
 	return m, cmd
 }
 
@@ -402,6 +407,38 @@ func (m *Model) updateCommandMenu() {
 	}
 }
 
+// handlePasteFolding detects multi-line pastes (>5 lines) and stores
+// the full content in m.pastedContent. The display is collapsed to a
+// placeholder in View(); the full content is sent on submit (see
+// submit() below). Once folded, any subsequent keypress clears the
+// folding flag so the user can edit normally.
+//
+// When unfolding, the trigger character is discarded and the original
+// pasted content is restored to the textarea — the user's intent is
+// "show me the content", not "append this character to the hidden text".
+func (m Model) handlePasteFolding() Model {
+	const thresholdLines = 5
+	val := m.input.Value()
+
+	if m.pastedContent != "" {
+		// Already folded — any keypress by the user unfolds.
+		// Restore the stored content to the textarea, discarding
+		// the trigger character (user wanted to unfold, not to type).
+		m.input.Reset()
+		m.input.SetValue(m.pastedContent)
+		m.pastedContent = ""
+		return m
+	}
+
+	// Not folded — count lines and fold if content is large enough.
+	// This catches both pastes and typed multi-line blocks.
+	lines := strings.Count(val, "\n") + 1
+	if lines > thresholdLines {
+		m.pastedContent = val
+	}
+	return m
+}
+
 // filterCommands returns the subset of cmds whose canonical name OR
 // any alias starts with prefix. Empty prefix → return everything.
 // Order is preserved (allCommands() order is intentional).
@@ -427,6 +464,13 @@ func filterCommands(cmds []command, prefix string) []command {
 //
 // We derive a cancelable context from opts.Ctx so Esc can cancel the
 // in-flight call without tearing down the outer SIGINT context.
+//
+// NOTE: text is already the full user input — view-time paste folding
+// (handlePasteFolding + renderPastedPlaceholder) keeps the complete
+// content in the textarea at all times; only the View() layer shows a
+// placeholder. If the folding strategy is changed to replace the
+// textarea value with a placeholder, re-add a pastedContent override
+// here as the single source of truth.
 func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.promptHistory = append(m.promptHistory, text)
 	m.historyIdx = -1
