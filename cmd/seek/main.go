@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -83,6 +84,7 @@ func run() error {
 		model        = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
 		maxTurns     = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
 		yolo         = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
+		jsonOut      = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
 		resume       = flag.String("resume", "", "load a saved session by ID (see seek -list)")
 		cont         = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave       = flag.Bool("no-save", false, "do not persist this session to disk")
@@ -303,14 +305,17 @@ func run() error {
 		return err
 	}
 
-	// Route: explicit -p flag OR piped stdin → print mode; otherwise TUI.
-	if *prompt != "" || stdinIsPiped() {
+	// Route: -json / -p / piped stdin → print mode; otherwise TUI.
+	if *jsonOut || *prompt != "" || stdinIsPiped() {
 		text, err := resolvePrompt(*prompt)
 		if err != nil {
 			return err
 		}
 		if text == "" {
 			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
+		}
+		if *jsonOut {
+			return runJSON(ctx, ag, tracker, *model, *yolo, text, activeSession, store)
 		}
 		return runPrint(ctx, ag, tracker, *model, *yolo, text, activeSession, store)
 	}
@@ -503,6 +508,143 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 	if activeSession != nil {
 		fmt.Fprintf(os.Stderr, "session:      %s (--resume to continue)\n", activeSession.ID)
 	}
+	return nil
+}
+
+// jsonLine is the flat envelope for every JSONL event. Fields are
+// omitempty so absent data doesn't clutter the output. Consumers should
+// branch on Type; all other fields are type-specific.
+//
+// Type values (stable contract — breaking changes = major version bump):
+//
+//	agent_start      — one per run
+//	turn_start       — one per LLM call; index is 0-based
+//	text_delta       — incremental assistant text; delta is the new chunk
+//	reasoning_delta  — incremental CoT text from deepseek-reasoner
+//	tool_start       — a tool call is about to execute; id/name/args set
+//	tool_delta       — intermediate output from a streaming tool (think)
+//	tool_end         — tool finished; result set on success, error on failure
+//	turn_end         — LLM call settled; token counts + tool_calls count
+//	agent_end        — run complete; cumulative stats; session_id if saved
+//	error            — fatal error; message is the error string
+type jsonLine struct {
+	Type  string `json:"type"`
+	Index int    `json:"index,omitempty"`
+	// text_delta / reasoning_delta / tool_delta
+	Delta     string `json:"delta,omitempty"`
+	Reasoning bool   `json:"reasoning,omitempty"`
+	// tool_start / tool_delta / tool_end
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Args   string `json:"args,omitempty"`
+	Result string `json:"result,omitempty"`
+	Bytes  int    `json:"bytes,omitempty"`
+	// error field for tool_end and error events
+	Error string `json:"error,omitempty"`
+	// turn_end / agent_end token accounting
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	CacheHitTokens   int `json:"cache_hit_tokens,omitempty"`
+	ToolCalls        int `json:"tool_calls,omitempty"`
+	// agent_end only
+	Turns     int    `json:"turns,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// runJSON is the machine-readable output mode: one JSON object per line
+// on stdout. Human-readable diagnostics (tier, stats footer) go to
+// stderr so stdout stays parse-clean.
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string, activeSession *session.Session, store *session.Store) error {
+	enc := json.NewEncoder(os.Stdout)
+
+	emit := func(line jsonLine) {
+		_ = enc.Encode(line) // json.Encoder always writes a trailing \n
+	}
+
+	var (
+		turns     int
+		toolCalls int
+	)
+
+	saveTurn := func() {
+		if activeSession == nil || store == nil {
+			return
+		}
+		activeSession.Messages = ag.Messages()
+		activeSession.Turns = turns
+		activeSession.ToolCalls = toolCalls
+		activeSession.Usage = tracker.Cumulative()
+		activeSession.Model = model
+		activeSession.Yolo = yolo
+		if err := store.Save(activeSession); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to save session after turn %d: %v\n", turns, err)
+		}
+	}
+
+	emit(jsonLine{Type: "agent_start"})
+
+	for ev := range ag.Prompt(ctx, text) {
+		switch e := ev.(type) {
+
+		case agent.TurnStart:
+			emit(jsonLine{Type: "turn_start", Index: e.Index})
+
+		case agent.MessageDelta:
+			t := "text_delta"
+			if e.Reasoning {
+				t = "reasoning_delta"
+			}
+			emit(jsonLine{Type: t, Delta: e.Delta})
+
+		case agent.ToolExecStart:
+			emit(jsonLine{Type: "tool_start", ID: e.CallID, Name: e.Name, Args: e.Args})
+
+		case agent.ToolDelta:
+			emit(jsonLine{Type: "tool_delta", ID: e.CallID, Name: e.Name, Delta: e.Delta, Reasoning: e.Reasoning})
+
+		case agent.ToolExecEnd:
+			line := jsonLine{Type: "tool_end", ID: e.CallID, Name: e.Name}
+			if e.Err != nil {
+				line.Error = e.Err.Error()
+			} else {
+				line.Result = e.Result
+				line.Bytes = len(e.Result)
+			}
+			emit(line)
+
+		case agent.TurnEnd:
+			tracker.Record(e.Usage)
+			turns++
+			toolCalls += e.ToolCalls
+			emit(jsonLine{
+				Type:             "turn_end",
+				Index:            e.Index,
+				PromptTokens:     e.Usage.PromptTokens,
+				CompletionTokens: e.Usage.CompletionTokens,
+				CacheHitTokens:   e.Usage.PromptCacheHitTokens,
+				ToolCalls:        e.ToolCalls,
+			})
+			saveTurn()
+
+		case agent.ErrorEvent:
+			emit(jsonLine{Type: "error", Error: e.Err.Error()})
+			return e.Err
+		}
+	}
+
+	c := tracker.Cumulative()
+	end := jsonLine{
+		Type:             "agent_end",
+		Turns:            turns,
+		ToolCalls:        toolCalls,
+		PromptTokens:     c.PromptTokens,
+		CompletionTokens: c.CompletionTokens,
+		CacheHitTokens:   c.PromptCacheHitTokens,
+	}
+	if activeSession != nil {
+		end.SessionID = activeSession.ID
+	}
+	emit(end)
 	return nil
 }
 
