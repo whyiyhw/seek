@@ -71,6 +71,15 @@ type StreamingTool interface {
 	ExecuteStream(ctx context.Context, raw json.RawMessage, push func(StreamDelta) error) (string, error)
 }
 
+// ReadOnlyTool is an opt-in marker for tools that only read data and
+// never mutate the filesystem, shell, or any external state. The agent
+// dispatches a batch of ReadOnlyTools concurrently when all calls in a
+// turn implement this interface.
+type ReadOnlyTool interface {
+	Tool
+	ReadOnly() bool
+}
+
 // Registry is the set of tools available to an Agent. Build it once at
 // startup; it is safe for concurrent reads after the first Wire() call.
 type Registry struct {

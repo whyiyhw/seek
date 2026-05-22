@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -306,21 +307,51 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 
 			totalToolCalls += toolCount
 
-			// M1: sequential tool dispatch. Parallel via errgroup lands
-			// with the parallel-execution work in a later milestone.
-			for _, tc := range assistant.ToolCalls {
-				result, terr := a.dispatchTool(ctx, tc, out)
-				toolMsg := deepseek.Message{
-					Role:       deepseek.RoleTool,
-					ToolCallID: tc.ID,
-					Content:    result,
+			if allReadOnly(assistant.ToolCalls, a.cfg.Tools) {
+				// All calls are read-only: dispatch concurrently and
+				// collect results into a pre-sized slice (safe — each
+				// goroutine writes to its own index). MessageStart/End
+				// are emitted in original order after Wait so the
+				// conversation prefix stays deterministic.
+				toolMsgs := make([]deepseek.Message, len(assistant.ToolCalls))
+				var wg sync.WaitGroup
+				for i, tc := range assistant.ToolCalls {
+					wg.Add(1)
+					go func(i int, tc deepseek.ToolCall) {
+						defer wg.Done()
+						result, terr := a.dispatchTool(ctx, tc, out)
+						msg := deepseek.Message{
+							Role:       deepseek.RoleTool,
+							ToolCallID: tc.ID,
+							Content:    result,
+						}
+						if terr != nil {
+							msg.Content = fmt.Sprintf("tool error: %v", terr)
+						}
+						toolMsgs[i] = msg
+					}(i, tc)
 				}
-				if terr != nil {
-					toolMsg.Content = fmt.Sprintf("tool error: %v", terr)
+				wg.Wait()
+				for _, msg := range toolMsgs {
+					out <- MessageStart{Message: msg}
+					a.messages = append(a.messages, msg)
+					out <- MessageEnd{Message: msg}
 				}
-				out <- MessageStart{Message: toolMsg}
-				a.messages = append(a.messages, toolMsg)
-				out <- MessageEnd{Message: toolMsg}
+			} else {
+				for _, tc := range assistant.ToolCalls {
+					result, terr := a.dispatchTool(ctx, tc, out)
+					toolMsg := deepseek.Message{
+						Role:       deepseek.RoleTool,
+						ToolCallID: tc.ID,
+						Content:    result,
+					}
+					if terr != nil {
+						toolMsg.Content = fmt.Sprintf("tool error: %v", terr)
+					}
+					out <- MessageStart{Message: toolMsg}
+					a.messages = append(a.messages, toolMsg)
+					out <- MessageEnd{Message: toolMsg}
+				}
 			}
 
 			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}
@@ -591,6 +622,23 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Err:    err,
 	}
 	return result, err
+}
+
+// allReadOnly returns true when every tool call in tcs is backed by a
+// tools.ReadOnlyTool — meaning the batch can be dispatched concurrently
+// without ordering constraints. Returns false for batches of size < 2
+// (no parallelism benefit) and when reg is nil.
+func allReadOnly(tcs []deepseek.ToolCall, reg *tools.Registry) bool {
+	if reg == nil || len(tcs) < 2 {
+		return false
+	}
+	for _, tc := range tcs {
+		t := reg.Lookup(tc.Function.Name)
+		if _, ok := t.(tools.ReadOnlyTool); !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func sumUsage(a, b deepseek.Usage) deepseek.Usage {

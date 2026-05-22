@@ -62,6 +62,7 @@ func New() Tool { return Tool{} }
 func (Tool) Name() string            { return "grep" }
 func (Tool) Description() string     { return description }
 func (Tool) Schema() json.RawMessage { return schemaBytes }
+func (Tool) ReadOnly() bool          { return true }
 
 func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a Args

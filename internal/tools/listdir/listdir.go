@@ -43,6 +43,7 @@ func New() Tool { return Tool{} }
 func (Tool) Name() string            { return "list_dir" }
 func (Tool) Description() string     { return description }
 func (Tool) Schema() json.RawMessage { return schemaBytes }
+func (Tool) ReadOnly() bool          { return true }
 
 const (
 	defaultDepth = 1

@@ -15,6 +15,28 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
+// slowReadTool is a read-only tool that sleeps for latency before
+// returning so tests can distinguish parallel from sequential dispatch
+// by measuring wall-clock time.
+type slowReadTool struct {
+	latency time.Duration
+	called  atomic.Int32
+}
+
+func (t *slowReadTool) Name() string                         { return "slow_read" }
+func (t *slowReadTool) Description() string                  { return "slow read" }
+func (t *slowReadTool) Schema() json.RawMessage              { return json.RawMessage(`{"type":"object"}`) }
+func (t *slowReadTool) ReadOnly() bool                       { return true }
+func (t *slowReadTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	t.called.Add(1)
+	select {
+	case <-time.After(t.latency):
+		return "contents", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
 // stubTool records the args it received and returns a canned response.
 type stubTool struct {
 	name   string
@@ -996,5 +1018,104 @@ func TestAgent_UnknownToolErrorsCleanly(t *testing.T) {
 	}
 	if !strings.Contains(toolEnd.Err.Error(), "unknown tool") {
 		t.Errorf("err = %v, want unknown tool", toolEnd.Err)
+	}
+}
+
+// TestAgent_ParallelReadOnlyDispatch proves that when the LLM returns
+// multiple read-only tool calls in one turn the agent dispatches them
+// concurrently. With toolCount tools each sleeping toolLatency the
+// total elapsed time must be less than toolCount×toolLatency — a bound
+// that would be violated if dispatch were sequential.
+func TestAgent_ParallelReadOnlyDispatch(t *testing.T) {
+	const (
+		toolCount   = 3
+		toolLatency = 50 * time.Millisecond
+	)
+
+	// Backend turn 1: emit three slow_read tool calls.
+	// Turn 2: final text answer.
+	var backendCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		n := backendCalls.Add(1)
+		switch n {
+		case 1:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_p1","type":"function","function":{"name":"slow_read","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_p2","type":"function","function":{"name":"slow_read","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"call_p3","type":"function","function":{"name":"slow_read","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		default:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":1,"total_tokens":21}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	tool := &slowReadTool{latency: toolLatency}
+	reg := tools.New().Add(tool)
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:  reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	start := time.Now()
+	res := drainAgent(ag.Prompt(context.Background(), "read three files"))
+	elapsed := time.Since(start)
+
+	if len(res.errors) > 0 {
+		t.Fatalf("unexpected errors: %v", res.errors)
+	}
+
+	// All three tools must have been called.
+	if got := tool.called.Load(); got != toolCount {
+		t.Errorf("tool called %d times, want %d", got, toolCount)
+	}
+
+	// Parallel: elapsed must be less than sequential lower bound.
+	sequential := time.Duration(toolCount) * toolLatency
+	if elapsed >= sequential {
+		t.Errorf("dispatch appears sequential: elapsed=%v >= sequential_bound=%v", elapsed, sequential)
+	}
+
+	// Tool results must appear in the original call order (call_p1, p2, p3).
+	hist := ag.Messages()
+	assertNoOrphanToolCalls(t, hist)
+	var toolIDs []string
+	for _, m := range hist {
+		if m.Role == deepseek.RoleTool {
+			toolIDs = append(toolIDs, m.ToolCallID)
+		}
+	}
+	want := []string{"call_p1", "call_p2", "call_p3"}
+	if len(toolIDs) != len(want) {
+		t.Fatalf("tool result count = %d, want %d", len(toolIDs), len(want))
+	}
+	for i, id := range toolIDs {
+		if id != want[i] {
+			t.Errorf("tool result[%d] = %q, want %q", i, id, want[i])
+		}
 	}
 }
