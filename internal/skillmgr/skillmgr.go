@@ -156,7 +156,9 @@ func Install(opts InstallOptions) (*InstallResult, error) {
 			return nil, fmt.Errorf("skillmgr: %w", err)
 		}
 	case SourceGit:
-		return nil, errors.New("skillmgr: git install is not yet implemented (M8.1c)")
+		if err := stageGit(opts, staging); err != nil {
+			return nil, fmt.Errorf("skillmgr: %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("skillmgr: unsupported source type %v", typ)
 	}
@@ -291,7 +293,11 @@ func detectSourceType(src string) SourceType {
 	}
 	switch {
 	case strings.HasPrefix(s, "git://"),
-		strings.HasPrefix(s, "ssh://"):
+		strings.HasPrefix(s, "ssh://"),
+		strings.HasPrefix(s, "file://"):
+		// file:// is a git transport too — git clone file:///path works.
+		// Most useful for tests and local mirrors; production users
+		// will overwhelmingly use https://github.com/... here.
 		return SourceGit
 	}
 	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {

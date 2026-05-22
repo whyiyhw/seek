@@ -250,21 +250,6 @@ func TestInstall_Project_SkipsSidecar(t *testing.T) {
 	}
 }
 
-// ---------- Install: git stub (M8.1c) ----------
-
-func TestInstall_Git_NotImplementedYet(t *testing.T) {
-	// HTTPS-tarball was lifted out of this stub in M8.1b. Git is the
-	// last remaining "not implemented" — exists so users don't think
-	// install silently no-op'd if they hand it a git URL today.
-	_, err := Install(InstallOptions{
-		Source:  "https://github.com/foo/bar",
-		UserDir: t.TempDir(),
-	})
-	if err == nil {
-		t.Fatal("expected not-implemented error")
-	}
-}
-
 // ---------- Uninstall ----------
 
 func TestUninstall_HappyPath_Package(t *testing.T) {
