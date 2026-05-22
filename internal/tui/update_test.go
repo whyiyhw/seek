@@ -284,6 +284,38 @@ func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 	}
 }
 
+func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
+	// User flow: type "/model" → slash menu opens with /model highlighted →
+	// press Enter. The expected result is that the model picker opens
+	// immediately (not on the NEXT keystroke). Before the handoff fix,
+	// accepting a slash-menu candidate set the textarea to "/model "
+	// but didn't trigger updateCommandMenu, leaving the screen empty
+	// until something else moved the input.
+	m := emptyModel()
+	m.opts.Model = "deepseek-chat"
+	m.input.SetValue("/model")
+	m.updateCommandMenu() // simulate the state after typing "/model"
+	if !m.commandMenuOpen {
+		t.Fatalf("setup: slash menu should be open for '/model'")
+	}
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.commandMenuOpen {
+		t.Error("slash menu should be closed after accept")
+	}
+	if !m2.modelPickerOpen {
+		t.Error("model picker should auto-open right after /model is accepted")
+	}
+	if m2.pickerPurpose != "model" {
+		t.Errorf("pickerPurpose = %q, want 'model'", m2.pickerPurpose)
+	}
+	if got := m2.input.Value(); got != "/model " {
+		t.Errorf("textarea after accept = %q, want '/model '", got)
+	}
+}
+
 func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 	// Regression: when the user types "/model<space>" the model picker
 	// should auto-open. Before this fix, the slash menu closed (because

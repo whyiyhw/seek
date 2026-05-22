@@ -216,6 +216,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.commandMenuOpen = false
 				m.commandMenuFiltered = nil
 				m.commandMenuSelected = 0
+				// Accepting a command that takes args (e.g. /model)
+				// should immediately hand off to its argument picker.
+				// updateCommandMenu's state machine reads the new
+				// textarea value and opens the model picker when it
+				// sees "/model<space>" — without this call the user
+				// gets a stuck "/model " with no candidates until
+				// the next keystroke.
+				m.updateCommandMenu()
 			}
 			return m, nil
 		case tea.KeyEnter:
@@ -231,6 +239,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.commandMenuOpen = false
 				m.commandMenuFiltered = nil
 				m.commandMenuSelected = 0
+				// Same handoff as the Tab branch above — see comment there.
+				m.updateCommandMenu()
 				return m, nil
 			}
 		case tea.KeyUp:
