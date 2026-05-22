@@ -17,6 +17,9 @@ coverage.txt
 .vscode/
 *.swp
 
+# Benchmark output reports
+bench-*.json
+
 # Local secrets / sessions (not yet implemented, future-proofing)
 .env
 .env.*
