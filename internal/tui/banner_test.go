@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime/debug"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -142,3 +143,159 @@ func TestRenderPixelBanner_PreservesLayout(t *testing.T) {
 }
 
 // (stripANSI lives in statusbar_test.go and is reused here.)
+
+// --- Letter-reveal animation frames --------------------------------
+
+// TestBannerWithLettersRevealed_EmptyShowsNoBlocks pins the n=0 frame:
+// the frame must be intact but ZERO blocks visible anywhere. If a
+// future edit accidentally lets blocks bleed through, this catches it
+// before the animation flashes "garbage frame" to users on startup.
+func TestBannerWithLettersRevealed_EmptyShowsNoBlocks(t *testing.T) {
+	got := bannerWithLettersRevealed(0)
+	if blocks := strings.Count(got, "█"); blocks != 0 {
+		t.Errorf("n=0 frame has %d blocks, want 0:\n%s", blocks, got)
+	}
+	// Frame chars must still be there — the animation only blanks
+	// content, never the frame.
+	if !strings.Contains(got, "╭") || !strings.Contains(got, "╯") {
+		t.Errorf("n=0 frame lost border chars:\n%s", got)
+	}
+}
+
+func TestBannerWithLettersRevealed_FullEqualsSource(t *testing.T) {
+	// n>=4 must produce the exact final wordmark. If this drifts,
+	// the animation's last frame won't match the static banner the
+	// rest of the app shows.
+	if got := bannerWithLettersRevealed(4); got != SeekPixelBanner {
+		t.Errorf("n=4 frame differs from SeekPixelBanner:\n--- got ---\n%s\n--- want ---\n%s",
+			got, SeekPixelBanner)
+	}
+	// n much larger than the letter count clamps to "full" — the
+	// loop in animateBanner relies on this so callers don't have to
+	// be precise about the upper bound.
+	if got := bannerWithLettersRevealed(99); got != SeekPixelBanner {
+		t.Errorf("n=99 should clamp to full, got:\n%s", got)
+	}
+}
+
+func TestBannerWithLettersRevealed_PartialKeepsLeftHidesRight(t *testing.T) {
+	// n=2 = S and E1 visible, E2 and K hidden. This is the middle
+	// frame of the animation; visually you'd see "SE" with empty
+	// space to the right.
+	got := bannerWithLettersRevealed(2)
+	lines := strings.Split(got, "\n")
+
+	// Row 1 of the wordmark is "███ ███ ███ █ █" — at n=2 only the
+	// first two letter-cells (cols 1-8) keep their blocks; cols 9-17
+	// blanket to spaces.
+	row1 := lines[1] // index 0 is the top border
+	// Inner content of row1: from rune 1 to rune len-2 (skip frame).
+	runes := []rune(row1)
+	visiblePart := string(runes[1:9]) // cols 1..8 (S + gap + E1)
+	hiddenPart := string(runes[9 : len(runes)-1])
+
+	// First 8 cols must contain blocks (S and E1 are visible).
+	if !strings.Contains(visiblePart, "█") {
+		t.Errorf("n=2 row 1 visible part missing blocks: %q", visiblePart)
+	}
+	// Cols 9..17 must have NO blocks (E2 and K are hidden).
+	if strings.Contains(hiddenPart, "█") {
+		t.Errorf("n=2 row 1 hidden part has blocks (E2/K should be blank): %q", hiddenPart)
+	}
+}
+
+// --- Version string -------------------------------------------------
+
+// TestFormatVersion_TaggedRelease pins the "user installed via
+// `go install …@v0.1.0`" path: clean version + short hash, no dirty
+// marker. This is the format we expect when shipping releases.
+func TestFormatVersion_TaggedRelease(t *testing.T) {
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "v0.1.0"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abc1234deadbeef"},
+			{Key: "vcs.modified", Value: "false"},
+		},
+	}
+	got := formatVersion(info)
+	want := "v0.1.0 · abc1234"
+	if got != want {
+		t.Errorf("formatVersion = %q, want %q", got, want)
+	}
+}
+
+func TestFormatVersion_PseudoVersionCollapsesToDev(t *testing.T) {
+	// Go emits "v0.0.0-YYYYMMDDHHMMSS-<hash>[+dirty]" for un-tagged
+	// builds installed via @latest. The timestamp+hash duplicates
+	// the vcs.revision we ALREADY show, and the long string just
+	// pushes everything else off-screen. Verify we collapse it to
+	// "dev" so the visible line stays clean.
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "v0.0.0-20260522030436-1b028a40fcc5+dirty"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "1b028a40fcc5"},
+			{Key: "vcs.modified", Value: "true"},
+		},
+	}
+	got := formatVersion(info)
+	want := "dev · 1b028a4+"
+	if got != want {
+		t.Errorf("formatVersion = %q, want %q (pseudo-version should collapse)", got, want)
+	}
+}
+
+func TestFormatVersion_DevelNoVCS(t *testing.T) {
+	// "go build" outside a git checkout (or with -buildvcs=false)
+	// gives us "(devel)" and no settings. Verify we still produce a
+	// readable string — never panic on missing data.
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "(devel)"},
+	}
+	if got := formatVersion(info); got != "dev" {
+		t.Errorf("formatVersion = %q, want %q", got, "dev")
+	}
+}
+
+func TestFormatVersion_DevelWithDirtyVCS(t *testing.T) {
+	// Standard local dev experience: working on a feature branch
+	// with uncommitted changes. The "+" marker is how we signal
+	// "this binary doesn't correspond to a specific commit".
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "(devel)"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "1234567abcdef"},
+			{Key: "vcs.modified", Value: "true"},
+		},
+	}
+	got := formatVersion(info)
+	want := "dev · 1234567+"
+	if got != want {
+		t.Errorf("formatVersion = %q, want %q", got, want)
+	}
+}
+
+func TestFormatVersion_ShortRevisionStillTruncates(t *testing.T) {
+	// A 6-char revision shouldn't be partially truncated to 5; we
+	// require ≥7 chars before slicing, otherwise we drop the rev.
+	info := &debug.BuildInfo{
+		Main: debug.Module{Version: "(devel)"},
+		Settings: []debug.BuildSetting{
+			{Key: "vcs.revision", Value: "abc123"}, // only 6 chars
+		},
+	}
+	if got := formatVersion(info); got != "dev" {
+		t.Errorf("formatVersion with short rev = %q, want %q (rev dropped)", got, "dev")
+	}
+}
+
+// --- shouldAnimate environment gate ---------------------------------
+
+// TestShouldAnimate_SkippedWhenEnvSet pins the SEEK_NO_ANIM kill-switch.
+// CI and scripted invocations rely on it; if the precedence ever flips
+// to "TTY check wins", every script-driven seek run gets a 320ms penalty.
+func TestShouldAnimate_SkippedWhenEnvSet(t *testing.T) {
+	t.Setenv("SEEK_NO_ANIM", "1")
+	if shouldAnimate() {
+		t.Errorf("SEEK_NO_ANIM=1 should suppress animation")
+	}
+}
