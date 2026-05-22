@@ -1,7 +1,7 @@
 // Package session persists seek conversations to disk so they can be
 // resumed across runs, branched, and summarised. One session = one
-// JSONL file in ~/.config/seek/sessions/ (or $SEEK_SESSIONS_DIR if
-// overridden).
+// JSONL file in ~/.seek/sessions/ (or $SEEK_SESSIONS_DIR if overridden;
+// see NewStore for the full precedence ladder).
 //
 // File format (JSONL, one JSON object per line):
 //
@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -171,16 +172,23 @@ func (s *Session) Fork() *Session {
 type Store struct{ dir string }
 
 // NewStore returns a Store rooted at the seek sessions directory.
-// $SEEK_SESSIONS_DIR overrides the default XDG/home path. The
-// directory is created if missing.
+// Path resolution (precedence high→low):
+//
+//  1. $SEEK_SESSIONS_DIR — fine-grain override for the sessions dir
+//     alone, useful when a user wants per-project session stores
+//     while keeping mcp.json / skills under the shared root.
+//  2. $SEEK_HOME/sessions — explicit root override (see paths.Home).
+//  3. ~/.seek/sessions — the default.
+//
+// The directory is created if missing.
 func NewStore() (*Store, error) {
 	dir := os.Getenv("SEEK_SESSIONS_DIR")
 	if dir == "" {
-		base, err := userConfigDir()
+		resolved, err := paths.Sessions()
 		if err != nil {
 			return nil, err
 		}
-		dir = filepath.Join(base, "seek", "sessions")
+		dir = resolved
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("session: mkdir %q: %w", dir, err)
@@ -190,17 +198,6 @@ func NewStore() (*Store, error) {
 
 // Dir returns the resolved storage directory.
 func (s *Store) Dir() string { return s.dir }
-
-func userConfigDir() (string, error) {
-	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
-		return v, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".config"), nil
-}
 
 // Save writes the session as JSONL atomically (write tmp, rename).
 //

@@ -1,14 +1,15 @@
-// Package mcpconfig parses ~/.config/seek/mcp.json — the MCP server
-// configuration file whose format is compatible with Claude Code and
-// Cursor so users can migrate their server lists without changes.
+// Package mcpconfig parses ~/.seek/mcp.json — the MCP server
+// configuration file. The format is compatible with Claude Code and
+// Cursor so users can copy their server lists across tools without
+// rewriting them; only the file location is seek-specific now.
 package mcpconfig
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
+
+	"github.com/whyiyhw/seek/internal/paths"
 )
 
 // ServerEntry is one entry in the mcpServers map.
@@ -23,11 +24,12 @@ type Config struct {
 	MCPServers map[string]ServerEntry `json:"mcpServers"`
 }
 
-// Load reads the config from the default platform path.
+// Load reads the config from the default path (~/.seek/mcp.json, or
+// $SEEK_HOME/mcp.json if SEEK_HOME is set).
 // Returns an empty Config (not an error) when the file does not exist —
 // having no MCP servers configured is a normal, valid state.
 func Load() (Config, error) {
-	path, err := defaultPath()
+	path, err := paths.MCPConfig()
 	if err != nil {
 		return Config{}, err
 	}
@@ -51,30 +53,9 @@ func LoadFrom(path string) (Config, error) {
 	return cfg, nil
 }
 
-// DefaultPath returns the platform-specific config path.
+// DefaultPath returns the path where mcp.json is read from. Kept as a
+// thin wrapper around paths.MCPConfig for callers (tests, --help text)
+// that already used this symbol.
 func DefaultPath() (string, error) {
-	return defaultPath()
-}
-
-func defaultPath() (string, error) {
-	var base string
-	switch runtime.GOOS {
-	case "windows":
-		base = os.Getenv("APPDATA")
-		if base == "" {
-			return "", fmt.Errorf("mcpconfig: %%APPDATA%% is not set")
-		}
-	default:
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("mcpconfig: home dir: %w", err)
-		}
-		xdg := os.Getenv("XDG_CONFIG_HOME")
-		if xdg != "" {
-			base = xdg
-		} else {
-			base = filepath.Join(home, ".config")
-		}
-	}
-	return filepath.Join(base, "seek", "mcp.json"), nil
+	return paths.MCPConfig()
 }

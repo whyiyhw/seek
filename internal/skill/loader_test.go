@@ -21,13 +21,12 @@ func writeSkill(t *testing.T, path, name, desc, body string) {
 }
 
 func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
-	// Use an empty temp dir as both project + home so on-disk slots
-	// resolve to nothing. The embedded skill should still load.
+	// Use an empty temp dir for both slots so on-disk discovery
+	// finds nothing. The embedded skill should still load.
 	tmp := t.TempDir()
 	set, stats, err := Load(LoadOptions{
-		ProjectDir: tmp,
-		HomeDir:    tmp,
-		XDGConfig:  tmp, // also empty
+		ProjectDir:    tmp,
+		UserSkillsDir: filepath.Join(tmp, "user-skills"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -60,25 +59,21 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 }
 
 func TestLoad_PriorityCascade(t *testing.T) {
-	// Project .seek wins over project .claude wins over user .config wins
-	// over user .claude wins over builtin. Verify by overriding the SAME
-	// name in each layer and checking Source.
+	// Project .seek wins over user ~/.seek wins over builtin. Verify by
+	// overriding the SAME name in each layer and checking Source.
 	proj := t.TempDir()
-	home := t.TempDir()
+	userSkills := t.TempDir()
 
 	// Pick a name that does NOT collide with the embedded built-ins so
 	// the builtin tier never enters the race for this name.
 	const n = "my-skill"
 
-	writeSkill(t, filepath.Join(home, ".claude", "skills", n+".md"), n, "user-claude", "u1")
-	writeSkill(t, filepath.Join(home, ".config", "seek", "skills", n+".md"), n, "user-config", "u2")
-	writeSkill(t, filepath.Join(proj, ".claude", "skills", n+".md"), n, "project-claude", "p1")
+	writeSkill(t, filepath.Join(userSkills, n+".md"), n, "user-seek", "u1")
 	writeSkill(t, filepath.Join(proj, ".seek", "skills", n+".md"), n, "project-seek", "p2")
 
 	set, _, err := Load(LoadOptions{
-		ProjectDir: proj,
-		HomeDir:    home,
-		XDGConfig:  filepath.Join(home, ".config"),
+		ProjectDir:    proj,
+		UserSkillsDir: userSkills,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,15 +92,14 @@ func TestLoad_PriorityCascade(t *testing.T) {
 
 func TestLoad_LowerPriorityFillsIn(t *testing.T) {
 	proj := t.TempDir()
-	home := t.TempDir()
+	userSkills := t.TempDir()
 
 	writeSkill(t, filepath.Join(proj, ".seek", "skills", "alpha.md"), "alpha", "from project", "")
-	writeSkill(t, filepath.Join(home, ".claude", "skills", "beta.md"), "beta", "from user", "")
+	writeSkill(t, filepath.Join(userSkills, "beta.md"), "beta", "from user", "")
 
 	set, _, err := Load(LoadOptions{
-		ProjectDir: proj,
-		HomeDir:    home,
-		XDGConfig:  filepath.Join(home, ".config"),
+		ProjectDir:    proj,
+		UserSkillsDir: userSkills,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +111,7 @@ func TestLoad_LowerPriorityFillsIn(t *testing.T) {
 
 func TestLoad_MalformedFileGoesIntoErrorsNotFatal(t *testing.T) {
 	proj := t.TempDir()
-	home := t.TempDir()
+	userSkills := t.TempDir()
 
 	// File without frontmatter — should be reported but not stop the load.
 	bad := filepath.Join(proj, ".seek", "skills", "broken.md")
@@ -131,8 +125,8 @@ func TestLoad_MalformedFileGoesIntoErrorsNotFatal(t *testing.T) {
 	writeSkill(t, filepath.Join(proj, ".seek", "skills", "good.md"), "good", "ok", "")
 
 	set, stats, err := Load(LoadOptions{
-		ProjectDir: proj,
-		HomeDir:    home,
+		ProjectDir:    proj,
+		UserSkillsDir: userSkills,
 	})
 	if err != nil {
 		t.Fatal(err)

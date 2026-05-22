@@ -9,26 +9,30 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/whyiyhw/seek/internal/paths"
 )
 
 //go:embed builtin/*.md
 var builtinFS embed.FS
 
 // LoadStats is what cmd/seek prints at startup so the user knows their
-// .seek/.claude/builtin directories were actually read. PRD §4.6.2
-// specifies the format.
+// skill directories were actually read.
 type LoadStats struct {
-	BySource map[string]int // e.g. {"project .seek": 2, "user .claude": 1, "builtin": 4}
+	BySource map[string]int // e.g. {"project .seek": 2, "user ~/.seek": 1, "builtin": 4}
 	Errors   []error        // non-fatal: a malformed file shouldn't keep the agent from launching
 }
 
 // LoadOptions controls Load — kept tiny on purpose. ProjectDir defaults
-// to "." (cwd). HomeDir defaults to os.UserHomeDir(). Tests inject
-// fakes via these fields.
+// to "." (cwd). UserSkillsDir defaults to paths.UserSkills() (~/.seek/skills/).
+// Tests inject fakes via these fields.
+//
+// Note: pre-v1.0 versions also read $XDG_CONFIG_HOME/seek/skills/ and
+// ~/.claude/skills/ as additional priority tiers. Those are gone —
+// migrate with `mv ~/.claude/skills ~/.seek/skills` (or symlink).
 type LoadOptions struct {
-	ProjectDir string
-	HomeDir    string
-	XDGConfig  string // overrides $XDG_CONFIG_HOME; empty = real env / default
+	ProjectDir    string
+	UserSkillsDir string // overrides the default ~/.seek/skills/ path; empty = default
 }
 
 // sourceDir is one slot in the priority cascade. Lower priority number
@@ -36,41 +40,39 @@ type LoadOptions struct {
 type sourceDir struct {
 	priority int
 	label    string // human-readable, shown in LoadStats and /skills
-	path     string // may be empty if HomeDir/ProjectDir weren't known
+	path     string // may be empty if a directory couldn't be resolved
 }
 
-// Load discovers and parses skills from the documented locations,
-// merging with PRD §4.6.2 priority semantics. The returned Set is
-// safe to use even if some files failed to parse — bad files are
-// recorded in stats.Errors and skipped.
+// Load discovers and parses skills from two on-disk locations plus the
+// embedded built-ins:
+//
+//  1. <project>/.seek/skills/   — project-level, checked-in
+//  2. ~/.seek/skills/           — user-level (or $SEEK_HOME/skills)
+//  3. embedded builtin/*.md     — shipped with the binary
+//
+// First writer wins on name collision, so project skills override
+// user skills, which override built-ins. Bad files are recorded in
+// stats.Errors and skipped — they don't block startup.
 func Load(opts LoadOptions) (*Set, LoadStats, error) {
 	stats := LoadStats{BySource: map[string]int{}}
 
 	if opts.ProjectDir == "" {
 		opts.ProjectDir = "."
 	}
-	if opts.HomeDir == "" {
-		// Best-effort — if we can't find the home dir, just skip the
-		// user-level slots; project-level + builtin still work.
-		opts.HomeDir, _ = os.UserHomeDir()
-	}
-	xdg := opts.XDGConfig
-	if xdg == "" {
-		xdg = os.Getenv("XDG_CONFIG_HOME")
-	}
-	if xdg == "" && opts.HomeDir != "" {
-		xdg = filepath.Join(opts.HomeDir, ".config")
+	userSkillsDir := opts.UserSkillsDir
+	if userSkillsDir == "" {
+		// Best-effort: if we can't resolve the home dir, skip the user
+		// slot entirely — project-level + builtin still work.
+		if p, err := paths.UserSkills(); err == nil {
+			userSkillsDir = p
+		}
 	}
 
 	dirs := []sourceDir{
 		{1, "project .seek", filepath.Join(opts.ProjectDir, ".seek", "skills")},
-		{2, "project .claude", filepath.Join(opts.ProjectDir, ".claude", "skills")},
 	}
-	if xdg != "" {
-		dirs = append(dirs, sourceDir{3, "user .config/seek", filepath.Join(xdg, "seek", "skills")})
-	}
-	if opts.HomeDir != "" {
-		dirs = append(dirs, sourceDir{4, "user .claude", filepath.Join(opts.HomeDir, ".claude", "skills")})
+	if userSkillsDir != "" {
+		dirs = append(dirs, sourceDir{2, "user ~/.seek", userSkillsDir})
 	}
 
 	set := NewSet()
