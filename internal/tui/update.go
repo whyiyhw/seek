@@ -165,6 +165,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case tea.KeyTab:
 			m.applyPathCompletion()
 			return m, nil
+		case tea.KeyEnter:
+			// Picker open with results: Enter accepts the highlighted
+			// path, same as Tab. Two Enters total reach a "submit with
+			// path inserted" outcome (accept → submit), matching IDE
+			// convention. With zero results we fall through so the user
+			// can still submit / queue plain text starting with @.
+			if len(m.pathPicker.filtered) > 0 {
+				m.applyPathCompletion()
+				return m, nil
+			}
 		case tea.KeyUp:
 			if m.pathPicker.selected > 0 {
 				m.pathPicker.selected--
@@ -199,6 +209,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.commandMenuSelected = 0
 			}
 			return m, nil
+		case tea.KeyEnter:
+			// Menu open with candidates: Enter accepts the highlighted
+			// command, same as Tab — avoids the surprise where typing
+			// "/h" + Enter submits the literal string "/h" instead of
+			// the /help command the menu was clearly suggesting. With
+			// zero candidates (user typed "/xxxxx"), fall through so
+			// they can still queue / submit the literal text.
+			if len(m.commandMenuFiltered) > 0 {
+				name := m.commandMenuFiltered[m.commandMenuSelected].names[0]
+				m.input.SetValue(name + " ")
+				m.commandMenuOpen = false
+				m.commandMenuFiltered = nil
+				m.commandMenuSelected = 0
+				return m, nil
+			}
 		case tea.KeyUp:
 			if m.commandMenuSelected > 0 {
 				m.commandMenuSelected--

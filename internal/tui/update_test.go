@@ -257,6 +257,55 @@ func TestHandleKey_StreamingEnter_ClearsPasteFoldFlag(t *testing.T) {
 	}
 }
 
+func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
+	// When the slash-command menu is open and has candidates, Enter
+	// should fill in the highlighted command (same as Tab) — NOT
+	// submit the partial literal text and queue/dispatch on that.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/h")
+	// Force the menu state directly rather than driving it via key events.
+	cmds := filterCommands(allCommands(), "/h")
+	if len(cmds) == 0 {
+		t.Fatalf("setup: filterCommands returned 0 candidates for '/h'")
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.commandMenuOpen {
+		t.Error("Enter on candidate should close the menu")
+	}
+	want := cmds[0].names[0] + " "
+	if got := m2.input.Value(); got != want {
+		t.Errorf("textarea should be filled with the candidate, got %q want %q", got, want)
+	}
+}
+
+func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
+	// Picker open with candidates: Enter accepts (same as Tab). The
+	// user then presses Enter again to submit.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("@RE")
+	m.pathPicker.open = true
+	m.pathPicker.filtered = []string{"README.md"}
+	m.pathPicker.selected = 0
+	m.pathPicker.tokenStart = 0
+	m.pathPicker.token = "RE"
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.pathPicker.open {
+		t.Error("Enter on candidate should close the picker")
+	}
+	if !strings.Contains(m2.input.Value(), "README.md") {
+		t.Errorf("textarea should contain the chosen path, got %q", m2.input.Value())
+	}
+}
+
 func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
 	// Regression: while streaming, typing "/help" and pressing Enter
 	// must open the help overlay immediately — NOT stash "/help" into
