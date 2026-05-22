@@ -21,6 +21,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
+	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
@@ -96,6 +97,7 @@ func run() error {
 		baseURL      = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
 		providerName = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag    = flag.String("theme", "auto", "color theme: auto|dark|light")
+		rpcMode      = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
 		benchmarkTask = flag.String("benchmark", "", "run a benchmark task (self-hosting | fim-patch) and report metrics")
 		benchmarkOut = flag.String("benchmark-out", "", "write benchmark JSON report to this file (default: stdout)")
 	)
@@ -327,7 +329,11 @@ func run() error {
 			ag, tracker, *model, activeSession, store)
 	}
 
-	// Route: -json / -p / piped stdin → print mode; otherwise TUI.
+	if *rpcMode {
+		return runRPC(ctx, ag, tracker, *model, *yolo, activeSession, store)
+	}
+
+	// Route: --rpc → JSON-RPC 2.0 server; -json / -p / piped stdin → print; otherwise TUI.
 	if *jsonOut || *prompt != "" || stdinIsPiped() {
 		text, err := resolvePrompt(*prompt)
 		if err != nil {
@@ -679,6 +685,16 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 	}
 	emit(end)
 	return nil
+}
+
+// runRPC starts a JSON-RPC 2.0 server over stdin/stdout. The server accepts
+// requests for agent/prompt, agent/info, and session/list methods. Suitable
+// for IDE integrations and scripted automation that need more control than the
+// simple -p / --json modes.
+func runRPC(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, activeSession *session.Session, store *session.Store) error {
+	fmt.Fprintf(os.Stderr, "seek rpc: listening on stdin (JSON-RPC 2.0)\n")
+	srv := seekrpc.New(ag, tracker, store, activeSession, model, yolo)
+	return srv.Serve(ctx, os.Stdin, os.Stdout)
 }
 
 // printSessionList renders the saved-sessions inventory to stdout
