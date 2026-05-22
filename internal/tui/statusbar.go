@@ -32,6 +32,13 @@ type StatusSnapshot struct {
 	// started (< 1 s elapsed).
 	StreamElapsed    time.Duration
 	StreamDeltaBytes int
+
+	// LastUsage is the most recent completed turn's usage. Used by
+	// formatBudget so the context-window indicator shows the size of the
+	// CURRENT context (last turn's prompt tokens), not the cumulative sum
+	// of all turns' prompt tokens which grows quadratically and is
+	// meaningless as a context-limit signal.
+	LastUsage deepseek.Usage
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -126,7 +133,10 @@ func rightSegments(s StatusSnapshot) []string {
 // the safe zone; tints yellow above 80%; tints red above 95% with a
 // `/compact` nudge.
 func formatBudget(s StatusSnapshot) string {
-	used := s.Usage.PromptTokens
+	// Use the last turn's prompt tokens, not the cumulative sum.
+	// Cumulative grows quadratically (each turn re-sends the full history)
+	// and hits 1M+ in ~55 turns even when the actual context is only 20k.
+	used := s.LastUsage.PromptTokens
 	limit := budget.Limit(s.Model)
 	frac := budget.Fraction(s.Model, used)
 	pct := int(frac * 100)

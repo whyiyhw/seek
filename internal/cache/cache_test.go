@@ -46,6 +46,25 @@ func TestTracker_CumulativeAcrossTurns(t *testing.T) {
 	}
 }
 
+func TestTracker_Last(t *testing.T) {
+	tr := New()
+	// Empty tracker returns zero usage.
+	if got := tr.Last(); got.PromptTokens != 0 {
+		t.Errorf("Last() on empty = %+v, want zero", got)
+	}
+	tr.Record(deepseek.Usage{PromptTokens: 100})
+	tr.Record(deepseek.Usage{PromptTokens: 200})
+	tr.Record(deepseek.Usage{PromptTokens: 50})
+	// Last() returns the most recent turn, NOT the cumulative.
+	if got := tr.Last().PromptTokens; got != 50 {
+		t.Errorf("Last().PromptTokens = %d, want 50", got)
+	}
+	// Cumulative should still be 350.
+	if got := tr.Cumulative().PromptTokens; got != 350 {
+		t.Errorf("Cumulative().PromptTokens = %d, want 350", got)
+	}
+}
+
 func TestTracker_TurnsReturnsCopy(t *testing.T) {
 	tr := New()
 	tr.Record(deepseek.Usage{PromptTokens: 1})

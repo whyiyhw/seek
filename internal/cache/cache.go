@@ -47,6 +47,19 @@ func (t *Tracker) Cumulative() deepseek.Usage {
 	return sum
 }
 
+// Last returns the most recently recorded turn's Usage, or a zero
+// value if no turns have been recorded yet. Used by the budget indicator
+// to show the current context-window utilisation (last turn's prompt
+// size) rather than the cumulative sum across all turns.
+func (t *Tracker) Last() deepseek.Usage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.turns) == 0 {
+		return deepseek.Usage{}
+	}
+	return t.turns[len(t.turns)-1]
+}
+
 // Turns returns a copy of per-turn Usage history.
 func (t *Tracker) Turns() []deepseek.Usage {
 	t.mu.Lock()

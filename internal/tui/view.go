@@ -173,6 +173,7 @@ func (m Model) renderStatusBar() string {
 		Turns:            m.turns,
 		ToolCalls:        m.toolCalls,
 		Usage:            m.opts.Tracker.Cumulative(),
+		LastUsage:        m.opts.Tracker.Last(),
 		Streaming:        m.streaming,
 		Now:              now,
 		Width:            m.width,

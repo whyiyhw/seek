@@ -1,11 +1,13 @@
 // Package agent is the DeepSeek-aware agent runtime: an LLM call + tool
 // dispatch loop that emits a stream of typed Events on a channel.
 //
-// M1 wires the agent directly to *deepseek.Client. A future milestone (M6)
-// will introduce a thin pkg/llm.Provider routing layer for the second-tier
-// Anthropic/OpenAI/Gemini providers — but DeepSeek-specific code paths
-// (cache stats, reasoner handoff, FIM) stay rooted here, not in the
-// generic interface (PRD §4.1).
+// Two provider paths coexist (PRD §4.1):
+//   - DeepSeek first-class: Config.Client != nil → full specialised path
+//     with cache stats, reasoner stripping, and streaming tool-call assembly.
+//   - Second-tier via llm.Provider: Config.Provider != nil → translates
+//     deepseek.Message ↔ llm.Message and drives the generic ChatStream API.
+//     DeepSeek-exclusive features (cache hit ratio, FIM, Reasoner) are not
+//     available on this path; the TUI renders a banner to make that clear.
 package agent
 
 import (
@@ -13,18 +15,29 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
+	"github.com/whyiyhw/seek/pkg/llm"
 )
 
-// Config configures a new Agent.
+
+// Config configures a new Agent. Exactly one of Client or Provider must
+// be set; they are mutually exclusive provider paths.
 type Config struct {
-	Client       *deepseek.Client
-	Model        string          // defaults to deepseek.ModelChat
+	// Client is the DeepSeek first-class path (PRD §4.1). Set this for
+	// DeepSeek models; all DeepSeek-specific features are available.
+	Client *deepseek.Client
+	// Provider is the second-tier path (Anthropic / OpenAI / Gemini /
+	// compatible). DeepSeek-exclusive features are unavailable on this path.
+	Provider llm.Provider
+
+	Model        string          // defaults to deepseek.ModelChat / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
 	MaxTurns     int             // safety bound; defaults to 8
+	MaxTokens    int             // completion token cap per call; 0 → defaultMaxTokens
 
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
@@ -42,14 +55,23 @@ type Agent struct {
 
 // New constructs an Agent and seeds the system prompt (if any).
 func New(cfg Config) (*Agent, error) {
-	if cfg.Client == nil {
-		return nil, errors.New("agent: Config.Client is required")
+	if cfg.Client == nil && cfg.Provider == nil {
+		return nil, errors.New("agent: Config.Client or Config.Provider is required")
+	}
+	if cfg.Client != nil && cfg.Provider != nil {
+		return nil, errors.New("agent: Config.Client and Config.Provider are mutually exclusive")
 	}
 	if cfg.Model == "" {
-		cfg.Model = deepseek.ModelChat
+		if cfg.Client != nil {
+			cfg.Model = deepseek.ModelChat
+		}
+		// Provider callers must set Model explicitly — no universal default.
 	}
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = 8
+	}
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = 8192
 	}
 	a := &Agent{cfg: cfg}
 	if cfg.SystemPrompt != "" {
@@ -118,6 +140,9 @@ Keep it under ~400 words. Bullet points where they help. Do not narrate that you
 // are intentionally omitted from the request: we want prose, not a
 // function call.
 func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
+	if a.cfg.Provider != nil {
+		return a.summariseLLM(ctx)
+	}
 	history := append([]deepseek.Message{}, a.messages...)
 	history = append(history, deepseek.Message{
 		Role:    deepseek.RoleUser,
@@ -136,6 +161,41 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 		return "", resp.Usage, errors.New("agent: summarise returned no choices")
 	}
 	return resp.Choices[0].Message.Content, resp.Usage, nil
+}
+
+// summariseLLM is the second-tier path for Summarise: uses ChatStream
+// (no non-streaming equivalent in the llm.Provider interface).
+func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error) {
+	msgs := msgsToLLM(a.messages)
+	msgs = append(msgs, llm.Message{Role: "user", Content: summariserPrompt})
+	req := llm.ChatRequest{Model: a.cfg.Model, Messages: msgs}
+
+	stream, err := a.cfg.Provider.ChatStream(ctx, req)
+	if err != nil {
+		return "", deepseek.Usage{}, err
+	}
+	var sb strings.Builder
+	var inputTokens, outputTokens int
+	for ev := range stream {
+		switch e := ev.(type) {
+		case llm.TextDelta:
+			sb.WriteString(e.Delta)
+		case llm.TurnDone:
+			inputTokens = e.InputTokens
+			outputTokens = e.OutputTokens
+		case llm.ErrorEvent:
+			return "", deepseek.Usage{}, e.Err
+		}
+	}
+	if ctx.Err() != nil {
+		return "", deepseek.Usage{}, ctx.Err()
+	}
+	usage := deepseek.Usage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
+	}
+	return sb.String(), usage, nil
 }
 
 // Prompt appends a user message and runs the agent loop. Events are emitted
@@ -214,6 +274,15 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			a.messages = append(a.messages, assistant)
 			out <- MessageEnd{Message: assistant}
 
+			// Surface a visible notice when the completion was cut by
+			// the token limit so the user knows the response is
+			// incomplete rather than seeing a silent truncation.
+			if finish == "length" {
+				out <- ErrorEvent{Err: fmt.Errorf(
+					"agent: response truncated (finish_reason=length, max_tokens=%d) — use /compact to free context or ask me to continue",
+					a.cfg.MaxTokens)}
+			}
+
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
 				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
@@ -248,13 +317,21 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 	return out
 }
 
-// runTurn streams one LLM call and assembles the final assistant message.
-// It emits MessageStart on the first delta and MessageDelta for every text
-// chunk; MessageEnd is emitted by the caller after history is updated.
+// runTurn routes to the DeepSeek or second-tier path depending on which
+// provider was configured.
 func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
+	if a.cfg.Provider != nil {
+		return a.runTurnLLM(ctx, out)
+	}
+	return a.runTurnDeepSeek(ctx, out)
+}
+
+// runTurnDeepSeek is the original DeepSeek-specific streaming path.
+func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	req := &deepseek.ChatRequest{
-		Model:    a.cfg.Model,
-		Messages: deepseek.StripReasoningContent(a.messages),
+		Model:     a.cfg.Model,
+		Messages:  deepseek.StripReasoningContent(a.messages),
+		MaxTokens: a.cfg.MaxTokens,
 	}
 	if a.cfg.Tools != nil {
 		req.Tools = a.cfg.Tools.Wire()
@@ -359,6 +436,77 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 		return assistant, usage, finish, err
 	}
 
+	return assistant, usage, finish, nil
+}
+
+// runTurnLLM is the second-tier streaming path using llm.Provider.
+// It translates messages to/from the generic format and reassembles the
+// assistant turn as a deepseek.Message so the rest of the agent loop
+// (history, session save, TUI rendering) is unchanged.
+func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
+	req := llm.ChatRequest{
+		Model:    a.cfg.Model,
+		Messages: msgsToLLM(a.messages),
+		Tools:    toolsToLLM(a.cfg.Tools),
+	}
+
+	stream, err := a.cfg.Provider.ChatStream(ctx, req)
+	if err != nil {
+		return deepseek.Message{}, deepseek.Usage{}, "", err
+	}
+
+	assistant := deepseek.Message{Role: deepseek.RoleAssistant}
+	started := false
+	var finish string
+	var inputTokens, outputTokens int
+
+	for ev := range stream {
+		switch e := ev.(type) {
+		case llm.TextDelta:
+			if !started {
+				out <- MessageStart{Message: assistant}
+				started = true
+			}
+			assistant.Content += e.Delta
+			out <- MessageDelta{Delta: e.Delta, Reasoning: false}
+
+		case llm.ToolCallDone:
+			if !started {
+				out <- MessageStart{Message: assistant}
+				started = true
+			}
+			assistant.ToolCalls = append(assistant.ToolCalls, deepseek.ToolCall{
+				ID:   e.ID,
+				Type: "function",
+				Function: deepseek.ToolCallFunc{
+					Name:      e.Name,
+					Arguments: e.Arguments,
+				},
+			})
+
+		case llm.TurnDone:
+			finish = e.FinishReason
+			inputTokens = e.InputTokens
+			outputTokens = e.OutputTokens
+
+		case llm.ErrorEvent:
+			return assistant, deepseek.Usage{}, "", e.Err
+		}
+	}
+
+	if !started {
+		out <- MessageStart{Message: assistant}
+	}
+
+	if ctx.Err() != nil {
+		return assistant, deepseek.Usage{}, finish, ctx.Err()
+	}
+
+	usage := deepseek.Usage{
+		PromptTokens:     inputTokens,
+		CompletionTokens: outputTokens,
+		TotalTokens:      inputTokens + outputTokens,
+	}
 	return assistant, usage, finish, nil
 }
 
