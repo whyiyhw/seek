@@ -135,9 +135,9 @@ Contributor guide: See [`AGENTS.md`](../AGENTS.md) for architecture conventions.
 
 ## Open source & contributing
 
-MIT (planned). The repo is public — developers from anywhere in the world are welcome to use it, file issues, and send pull requests. No region lock, no signup, no mandatory telemetry.
+Licensed under the [MIT License](../LICENSE). The repo is public — developers from anywhere in the world are welcome to use it, file issues, and send pull requests. No region lock, no signup, no mandatory telemetry.
 
-Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT). Architecture conventions in [`AGENTS.md`](../AGENTS.md); ongoing pitfall log in [`docs/pitfalls.md`](./pitfalls.md).
+Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT); attribution in [`NOTICE`](../NOTICE). Architecture conventions in [`AGENTS.md`](../AGENTS.md); ongoing pitfall log in [`docs/pitfalls.md`](./pitfalls.md).
 
 ---
 

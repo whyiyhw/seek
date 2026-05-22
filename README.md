@@ -136,9 +136,9 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 
 ## 开源 & 贡献
 
-MIT 协议（计划中）。仓库公开：欢迎世界上所有地区的开发者使用、提 issue、提 PR——无地区限制，无身份审核，无强制 telemetry。
+[MIT 协议](./LICENSE)。仓库公开：欢迎世界上所有地区的开发者使用、提 issue、提 PR——无地区限制，无身份审核，无强制 telemetry。
 
-灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）。架构约定见 [`AGENTS.md`](./AGENTS.md)，踩坑记录见 [`docs/pitfalls.md`](./docs/pitfalls.md)。
+灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）；归属说明见 [`NOTICE`](./NOTICE)。架构约定见 [`AGENTS.md`](./AGENTS.md)，踩坑记录见 [`docs/pitfalls.md`](./docs/pitfalls.md)。
 
 ---
 

@@ -1,0 +1,15 @@
+seek
+Copyright (c) 2026 whyiyhw
+Licensed under the MIT License (see LICENSE).
+
+This software is an independent reimplementation in Go, inspired by:
+
+  - earendil-works/pi  (https://github.com/earendil-works/pi, MIT)
+    Architecture reference for the event-stream model, tool-call loop,
+    Skill file format, and TUI shape. No code was copied; the Go
+    rewrite is a clean-room implementation following the same shape.
+
+Third-party Go dependencies are listed in go.mod with their respective
+licenses; the build embeds their copyright notices via standard Go
+module resolution. Run `go mod download` then `go mod why <package>`
+or inspect $GOMODCACHE for individual module LICENSE files.
