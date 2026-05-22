@@ -23,6 +23,7 @@ import (
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
+	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
@@ -36,6 +37,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
+	"github.com/whyiyhw/seek/internal/tools/memorytool"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
@@ -330,6 +332,29 @@ func run() error {
 	}
 
 	abs, _ := filepath.Abs(cwd)
+
+	// M layer + L layer. Without session persistence (--no-save) we
+	// also skip memory persistence — they share the "this is a
+	// throwaway run" intent. Load failures are non-fatal: a broken
+	// or read-only ~/.seek/projects/ degrades the session (no memory
+	// injection, no recall, no remember) but should not block startup.
+	var memProject *memory.Project
+	var memSoul *memory.Soul
+	if !*noSave {
+		if proj, err := memory.LoadOrCreate(abs); err != nil {
+			fmt.Fprintln(os.Stderr, "memory:", err)
+		} else {
+			memProject = proj
+		}
+		if soul, err := memory.LoadSoul(); err != nil {
+			fmt.Fprintln(os.Stderr, "memory soul:", err)
+		} else {
+			memSoul = soul
+		}
+		reg.Add(memorytool.NewRecall(memProject)).
+			Add(memorytool.NewRemember(memProject, policy))
+	}
+
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
 	// Project instructions go BEFORE the skill manifest: they describe
 	// "how this repo expects you to work" while skills are workflow
@@ -359,13 +384,16 @@ func run() error {
 		}
 	}
 
-	// Lifecycle hooks. The registry is empty today — v1 memory will
-	// register PrePrompt + SessionStart handlers here. Passing the
-	// registry through agent.Config wires the in-loop hooks; the
-	// session-lifecycle ones (SessionStart / SessionEnd) are fired
+	// Lifecycle hooks. v1 memory plugs in PrePromptHook (inject L+M
+	// <context> blocks) + SessionStartObserver (run GC) from one
+	// struct registered into the same registry — see internal/memory.
+	// Session-lifecycle hooks (SessionStart / SessionEnd) are fired
 	// from main.go because the agent doesn't know when its host
 	// program is "done".
 	hooksReg := hooks.NewRegistry()
+	if memProject != nil || memSoul != nil {
+		hooksReg.Register(&memory.Hook{Project: memProject, Soul: memSoul})
+	}
 
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
