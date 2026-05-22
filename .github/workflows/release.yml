@@ -1,5 +1,9 @@
 name: release
 
+# Triggered only by version tags. The "tag must be on main" rule is
+# enforced inside the job (see the first step) — GitHub doesn't let
+# `on.push.tags` filter by source branch directly, because a tag is
+# an independent ref that isn't tied to a branch at the protocol level.
 on:
   push:
     tags:
@@ -14,7 +18,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # GoReleaser needs full history for changelog
+          fetch-depth: 0   # GoReleaser needs full history for changelog;
+                           # the ancestor check below also needs it.
+
+      # Refuse to release a tag that doesn't sit on main's history.
+      # Blocks "I accidentally tagged a feature branch and pushed it" —
+      # the release would otherwise happily ship whatever the tag
+      # points at.
+      #
+      # The explicit fetch is needed because actions/checkout leaves the
+      # runner in a detached state on the tag's SHA and doesn't bring
+      # main along. `merge-base --is-ancestor` exits 0 when the commit
+      # is reachable from origin/main, non-zero otherwise.
+      - name: ensure tag is on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (commit ${GITHUB_SHA}) is not on main — refusing to release. Re-tag from a main commit."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} verified on main."
 
       - uses: actions/setup-go@v5
         with:
