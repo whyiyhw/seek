@@ -257,6 +257,24 @@ func TestHandleKey_StreamingEnter_ClearsPasteFoldFlag(t *testing.T) {
 	}
 }
 
+func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
+	// Regression: while streaming, typing "/help" and pressing Enter
+	// must open the help overlay immediately — NOT stash "/help" into
+	// queuedText and dispatch it as a user message to the model when
+	// the turn ends. Slash commands are TUI-side, not LLM-bound.
+	m := streamingModel(t, "/help")
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.queuedText != "" {
+		t.Errorf("/help during stream must not queue, got queuedText=%q", m2.queuedText)
+	}
+	if !m2.helpOverlayOpen {
+		t.Error("/help during stream should open the help overlay immediately")
+	}
+}
+
 func TestRenderQueueHint_States(t *testing.T) {
 	cases := []struct {
 		name    string

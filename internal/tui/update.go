@@ -260,6 +260,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// View() still renders the "[pasted N lines, hidden]"
 			// placeholder because it keys off m.pastedContent.
 			m.pastedContent = ""
+			// Slash commands are TUI-side, not bound for the agent.
+			// Execute immediately rather than queueing/steering —
+			// otherwise "/help" while streaming would arrive as the
+			// next user message to the model instead of opening the
+			// overlay. Commands that genuinely shouldn't run mid-
+			// stream (/branch, /compact, /new) already self-reject
+			// with a "wait for the current turn to finish" notice.
+			if handled, cmd := dispatchCommand(&m, text); handled {
+				return m, cmd
+			}
 			if msg.Alt {
 				// Steer: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
@@ -316,16 +326,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	}
 
-	// Everything else: feed the textarea. While streaming we still want
-	// the user to be able to type — they're composing a queue or steer
-	// message — but we skip the slash-menu / path-picker hookups since
-	// those commands don't apply mid-stream.
+	// Everything else: feed the textarea. The completion affordances (/
+	// menu and @ path picker) are pure display — keep them live during
+	// streaming too, since a queued/steered message routinely references
+	// files ("also look at @internal/server.go") or invokes a TUI-side
+	// slash command ("/help" to peek at bindings without stopping the
+	// agent). Commands that genuinely don't apply mid-stream (/branch,
+	// /compact, /new, …) self-reject at dispatch time with their own
+	// "wait for the current turn to finish" notice.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	if !m.streaming {
-		m.updateCommandMenu()
-		m.updatePathCompleter()
-	}
+	m.updateCommandMenu()
+	m.updatePathCompleter()
 
 	// Multi-line paste folding: if the input has >5 lines, collapse the
 	// display to a placeholder so the terminal scrollback isn't flooded,
