@@ -646,9 +646,9 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | 会话持久化（`--resume` / `--continue` / `--list` / `--no-save`） | ✅ | `f13ec3f` |
 | `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | `3a0b6bf` |
 | `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | `3a0b6bf` |
-| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | 本次 |
+| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | `2c53248` |
+| 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成（待真 API 验证） | 本次 |
 | MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
-| 双模型协作 skill（内置 `dual-model`，依赖 Skill loader） | ⏳ | |
 | `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
 
 ---
@@ -710,9 +710,9 @@ v1.0 发布前必须满足：
 
 M0–M4.5 已交付。M5 已启动，剩余子任务按依赖排序：
 
-1. **双模型协作 skill** — 依赖 Skill loader（✅）；落地 PRD §1.5 提到的「reasoner-then-chat」差异化护城河
-2. **MCP client**（§4.4）— 最大、最独立的一块；JSON-RPC over stdio
-3. **`edit` diff 预览** — 与 per-call 审批（§4.10）配合
+1. **MCP client**（§4.4）— 最大、最独立的一块；JSON-RPC over stdio
+2. **`edit` diff 预览** — 与 per-call 审批（§4.10）配合
+3. **dual-model 真 API 验证** — 跑通 think→execute→think(reflect) 端到端，确认 reasoner 调用次数和 token 预算符合 §7 设想（可与下一次自举测试合并）
 
 完成 M5 后进入 M6（二等 Provider）。
 

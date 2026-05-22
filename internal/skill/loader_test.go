@@ -40,6 +40,23 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 	if set.Get("go-test-runner") == nil {
 		t.Errorf("builtin go-test-runner not present; loaded: %v", listNames(set))
 	}
+	// dual-model is PRD §4.8.2 Level 2 — its presence is an
+	// acceptance criterion for v1.0, so a deletion or rename must
+	// trip a test, not just a code review.
+	dm := set.Get("dual-model")
+	if dm == nil {
+		t.Fatalf("builtin dual-model not present; loaded: %v", listNames(set))
+	}
+	// Description copy is load-bearing: the model only sees this
+	// line in the system prompt manifest, so it has to mention
+	// triggering conditions (when to invoke). If someone shortens
+	// the description to a generic "use for planning", the skill
+	// will fire on every trivial task — exactly the PRD §7 risk we
+	// flagged.
+	if !strings.Contains(dm.Description, "non-trivial") &&
+		!strings.Contains(dm.Description, "multi-step") {
+		t.Errorf("dual-model description should signal trigger conditions; got %q", dm.Description)
+	}
 }
 
 func TestLoad_PriorityCascade(t *testing.T) {
