@@ -1,164 +1,59 @@
 # seek
 
-DeepSeek-first Go coding agent harness. Architecture inspired by
-[`earendil-works/pi`](https://github.com/earendil-works/pi).
+**seek** 是一个基于 [DeepSeek](https://deepseek.com) 的编程助手。它在终端里运行，能读写文件、执行命令，帮你写代码——不用离开键盘。
 
-Status: **M6 done, M7 polishing** — M0–M6 delivered (~10.4k lines, 30 Go
-packages, all tests green with `-race` on three platforms).
+## 牛在哪
 
-**M5** added session persistence (`--resume`/`--list`/`--no-save`, JSONL
-format), `/branch` forking, `/compact` history compression, Skill loading
-with `.claude/skills/` compatibility (includes built-in
-[`dual-model`](./internal/skill/builtin/dual-model.md) and
-[`go-test-runner`](./internal/skill/builtin/go-test-runner.md) skills),
-MCP client bridge for external tools, and unified diff preview in the
-approval prompt.
+| 对比 | seek 的优势 |
+|---|---|
+| **Claude Code** | 输入便宜约 20×（V4-Flash $0.14/M vs Claude Sonnet $3/M），前缀缓存命中后再降 50× 到 $0.0028/M。原生 V4 推理模式（`Thinking.Type=enabled`）+ FIM 端点，小修改走填空补全。 |
+| **Aider** | 真正的交互式 TUI。一边输出一边继续打字、排队、插话。完整的会话管理：`/branch` 分叉、`/compact` 压缩、`/resume` 恢复。 |
+| **通用 Agent 框架** | 专为 DeepSeek 优化：实时显示缓存命中率、错峰计价倒计时、双模型 skill（V4 推理模式做规划 + chat 做执行）。也支持 Anthropic / OpenAI / Gemini 作为备选。 |
 
-**M6** added second-tier providers: Anthropic, OpenAI and Gemini via
-`pkg/llm`, plus an `--provider=compatible` mode for vLLM/Ollama/SiliconFlow
-endpoints. The TUI shows a provider banner when DeepSeek-exclusive features
-(FIM, cache stats, Reasoner) are unavailable.
+### 还有什么
 
-**Next: M7 polish** — RPC/JSON mode, help overlay, self-hosting benchmark.
-See [`PRD.md`](./PRD.md).
+- **Inline 模式** — 不进 alt-screen。终端滚动、鼠标选取、Cmd+C 复制全程正常。退出后对话留在终端里。
+- **安全机制** — 默认询问模式。`bash` 和写工作目录外的文件需要确认；`--yolo` 关闭保护给高级用户。
+- **JSON-RPC 2.0 服务端**（`--rpc`）— 接入 IDE。
+- **MCP 支持** — 加载任意 MCP 服务端的外部工具。
+- **自定义 Skill** — 写一份 `.md` 文件，seek 就会加载并执行。
 
-## Quick start
+[English version](./docs/README_EN.md)
+
+## 快速上手
 
 ```bash
+# 安装
+go install github.com/whyiyhw/seek/cmd/seek@latest
+
+# 设置 API Key
 export DEEPSEEK_API_KEY=sk-...
 
-# Interactive TUI (when stdin is a TTY and no -p flag):
-go run ./cmd/seek
+# 启动 TUI（终端交互模式）
+seek
 
-# Print mode (when -p is set OR stdin is piped):
-go run ./cmd/seek -p "Read README.md and summarise it in one sentence."
-echo "What is 2+2?" | go run ./cmd/seek
-
-# Allow bash and writes outside the working directory:
-go run ./cmd/seek --yolo
-
-# Use the reasoner (CoT prints dim):
-go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
-
-# Session management:
-go run ./cmd/seek --list                  # list saved sessions
-go run ./cmd/seek --resume <id>           # resume a saved session
-go run ./cmd/seek --continue              # resume the most recent session
-go run ./cmd/seek --no-save               # ephemeral session (no disk write)
-
-# Second-tier providers (DeepSeek-exclusive features disabled):
-export ANTHROPIC_API_KEY=sk-ant-...
-go run ./cmd/seek --provider=anthropic
-export OPENAI_API_KEY=sk-...
-go run ./cmd/seek --provider=openai
-export GEMINI_API_KEY=...
-go run ./cmd/seek --provider=gemini
-
-# OpenAI-compatible endpoint (vLLM / Ollama / SiliconFlow):
-go run ./cmd/seek --provider=compatible --base-url=http://localhost:8000/v1
+# 或者非交互模式
+seek -p "用一句话总结这个项目。"
 ```
 
-In the TUI:
+详细用法：[`docs/`](./docs/) 包含会话、MCP、Skill 指南。  
+TUI 内输入 `?` 查看所有快捷键和斜杠命令。
 
-- **Enter** submits · **Ctrl+J** newline · **Ctrl+C** quits
-- **Mid-stream**: keep typing — **Enter** queues your message for after the agent finishes (auto-submitted on `finish_reason=stop`); **Alt+Enter / Option+Enter** steers (cancels the current turn and sends your message as the next prompt). The status line above the textarea previews what's queued or steering.
-- **Esc** — interrupt the agent mid-stream (or dismiss a menu, or deny an approval). Mid-stream Esc also clears any queued / steering message.
-- **Ctrl+L** / `/clear` — clear the visible screen (your terminal keeps scrollback)
-- **Ctrl+R** — toggle reasoning visibility on assistant messages
-- **PgUp / PgDn / Ctrl+U / Ctrl+D** — scroll the terminal (or just use the mouse wheel)
-- **↑ / ↓** — when input is empty, recall previous prompts; otherwise move the cursor
-- **`/`** — opens the slash-command menu (Tab completes, ↑/↓ pick, Esc dismiss)
-- **`@`** — opens the file-path picker over the current workspace (same Tab/↑/↓/Esc)
+## 路线图
 
-Slash commands (full list with `/help`):
+项目采用里程碑 M0–M7（已全部交付）。当前重点：
 
-| Command | What it does |
-|---|---|
-| `/help` | Show all commands and key bindings |
-| `/clear` | Wipe the visible screen (agent state kept; scrollback preserved by the terminal) |
-| `/reset` | Start a fresh conversation (agent state rebuilt) |
-| `/model <id>` | Switch model mid-session (e.g. `/model deepseek-reasoner`) |
-| `/branch` | Fork this session — new ID, parent link, copy of history |
-| `/compact` | Summarise prior history into one message to free up context |
-| `/skills` | List loaded skills with source paths |
-| `/yolo` | Toggle `--yolo` for the rest of the session |
-| `/exit` | Quit |
+- **IDE 集成**：完善 `--rpc` 协议，开发编辑器插件
+- **插件系统**：支持第三方工具加载
+- **稳定化**：打 tag 发版，CI 加固
 
-When seek is started without `--yolo` it runs in **ask mode**: any `bash`
-or write outside the working directory pops up an inline prompt:
+完整设计：[`PRD.md`](./docs/PRD.md)  
+贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
 
-```
-⚠ approve bash "rm -rf node_modules"?
-  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny
-```
+## 协议
 
-The status bar shows: model · streaming/idle · turn/tool counters · cache hit % · session cost · `ctx N%` (model context utilisation; tints yellow above 80%, red above 95%) · pricing tier with off-peak countdown. Assistant messages are rendered with Markdown via Glamour after they finish streaming.
+MIT（计划中）。灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）。
 
-**Inline mode**: seek does not enter alt-screen and does not capture
-mouse events, so your terminal's native scrollback, mouse wheel,
-click-and-drag selection, and Cmd+C copy all work across the entire
-conversation. When you quit (`/exit` or Ctrl+C) the session stays
-visible in the terminal.
+---
 
-When the response finishes, seek prints a stats footer on stderr:
-
-```
---- seek stats ---
-yolo:         false
-model:        deepseek-chat
-tier:         standard
-turns:        5
-tool calls:   4
-ttfb:         1.273s
-elapsed:      8.2s
-prompt tok:   10987 (cache hit 7680 / miss 3307, ratio 69.9%)
-completion:   864 tok
-est. cost:    $0.0020 (saved ~7680 input tok via cache)
-```
-
-The `cache hit` / `miss` / `ratio` line is the DeepSeek prefix-cache
-accounting — seek's main optimisation target (PRD §4.8.1). Stable
-system prompt + tool schema + history is what lets the ratio climb across
-turns.
-
-## Tools
-
-| Tool | What it does | Gated by |
-|---|---|---|
-| `read` | read a file with line numbers | — |
-| `grep` | search files by regex or literal string | — |
-| `list_dir` | list directory contents with type and size | — |
-| `write` | create / overwrite a file | writes outside CWD need `--yolo` |
-| `edit` | exact `old_string`→`new_string` substitution (Claude Code style) | edits outside CWD need `--yolo` |
-| `bash` | run a shell command with timeout | needs `--yolo` |
-| `fim_complete` | DeepSeek FIM endpoint — cheap gap-fill, returns text without applying | — |
-| `think` | deepseek-reasoner bridge: multi-step planning or `reflect=true` self-review | — |
-| `Skill(name)` | fetch and follow a built-in or project skill | — |
-| `mcp_tool` | proxy to an MCP server tool (requires MCP server configured) | — |
-
-## Layout
-
-```
-cmd/seek/                  CLI entry
-pkg/deepseek/              first-class DeepSeek client (chat, reasoner, FIM)
-pkg/llm/                   thin generic interface (Anthropic / OpenAI / Gemini)
-pkg/agent/                 agent runtime (event stream, tool loop, provider routing)
-internal/{tui,session,tools,skill,mcp,cache,pricing,diff,permission,budget,projectmd}/  application internals
-```
-
-`pkg/deepseek` deliberately does **not** implement `pkg/llm.Provider`. See
-PRD §4.1 for the rationale (DeepSeek-specific fields don't survive a
-lowest-common-denominator interface).
-
-## Develop
-
-```bash
-go test ./...
-go vet ./...
-go build ./...
-```
-
-## License
-
-MIT (planned). Inspired by `earendil-works/pi` (MIT). NOTICE will be added
-with the first tagged release.
+*seek — ~36k 行 Go 代码，38 个包，macOS / Linux / Windows 全平台 -race 测试通过。*
