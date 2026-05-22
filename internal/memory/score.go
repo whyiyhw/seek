@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"strconv"
@@ -18,6 +19,18 @@ const defaultHalfLife = 30 * 24 * time.Hour
 // a 30-day-old entry recalled ≥1 times sits at ~1.0 (kept), a 60-day-old
 // entry recalled once sits at ~0.27 (stale).
 const stalenessThreshold = 0.5
+
+// archiveThreshold is the second cliff from PRD §6: an entry that has
+// been stale AND scored below this for archiveStalePersistence gets
+// moved to archived.jsonl and removed from the active set. At half_life=
+// 30d, score=0.1 corresponds roughly to "single-recall + ~100 days
+// idle" — by then the entry hasn't proven its keep.
+const archiveThreshold = 0.1
+
+// archiveStalePersistence is the "must have been continuously stale for
+// at least this long" gate. PRD §6 sets it at 60 days so a short cold
+// spell doesn't bin an entry that just hasn't been needed lately.
+const archiveStalePersistence = 60 * 24 * time.Hour
 
 // gracePeriod blocks GC evaluation for entries younger than this. PRD §6:
 // fresh entries with recall_count=0 should not be evaluated for staleness;
@@ -74,6 +87,7 @@ type GCReport struct {
 	Skipped       int // pinned + grace-period (kept untouched)
 	MarkedStale   int
 	UnmarkedStale int // entries that came back above threshold via recall
+	Archived      int // moved from memory.jsonl → archived.jsonl
 	HalfLife      time.Duration
 }
 
@@ -92,6 +106,7 @@ func (p *Project) RunGC(now time.Time) (GCReport, error) {
 	halfLife := halfLifeFromEnv()
 	report := GCReport{HalfLife: halfLife}
 
+	var toArchive []Entry
 	dirty := false
 	for name, e := range p.entries {
 		report.Examined++
@@ -105,20 +120,63 @@ func (p *Project) RunGC(now time.Time) (GCReport, error) {
 			continue
 		}
 
-		score := Score(e, now, halfLife)
-		wantStale := score < stalenessThreshold
-		if wantStale == e.Stale {
-			continue
+		// Legacy data backfill: existing stale entries from before the
+		// StaleSince field existed have stale=true + StaleSince zero.
+		// Treat them as "just marked stale this GC pass" so they get
+		// a fresh 60-day archive clock instead of being archived
+		// immediately on upgrade.
+		if e.Stale && e.StaleSince.IsZero() {
+			e.StaleSince = now
+			p.entries[name] = e
+			dirty = true
 		}
 
-		e.Stale = wantStale
-		p.entries[name] = e
-		dirty = true
-		if wantStale {
+		score := Score(e, now, halfLife)
+		wantStale := score < stalenessThreshold
+
+		switch {
+		case !e.Stale && wantStale:
+			e.Stale = true
+			e.StaleSince = now
+			p.entries[name] = e
+			dirty = true
 			report.MarkedStale++
-		} else {
+		case e.Stale && !wantStale:
+			e.Stale = false
+			e.StaleSince = time.Time{}
+			p.entries[name] = e
+			dirty = true
 			report.UnmarkedStale++
+		case e.Stale && wantStale:
+			// Sustained-stale path: eligible for archive once score
+			// has fallen below archiveThreshold AND the entry has
+			// been continuously stale for archiveStalePersistence.
+			if score < archiveThreshold && !e.StaleSince.IsZero() &&
+				now.Sub(e.StaleSince) >= archiveStalePersistence {
+				toArchive = append(toArchive, e)
+			}
 		}
+	}
+
+	// Archive happens after the iteration: appending to archived.jsonl
+	// then removing from the live entries+order is a two-step write,
+	// so we batch all archives + persist in one writeEntries pass.
+	for _, e := range toArchive {
+		if err := p.appendArchive(e); err != nil {
+			// Surface the failure so callers can log it, but keep the
+			// entry in active set rather than deleting without a
+			// durable archive copy.
+			return report, fmt.Errorf("memory: archive %q: %w", e.Name, err)
+		}
+		delete(p.entries, e.Name)
+		for i, n := range p.order {
+			if n == e.Name {
+				p.order = append(p.order[:i], p.order[i+1:]...)
+				break
+			}
+		}
+		report.Archived++
+		dirty = true
 	}
 
 	if !dirty {

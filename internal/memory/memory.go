@@ -33,17 +33,27 @@ const SchemaVersion = 1
 // so the decay-score computation in PRD §6 has a stable last_active_at
 // to anchor against — never null.
 type Entry struct {
-	SchemaVersion   int       `json:"schema_version"`
-	Name            string    `json:"name"`
-	Tagline         string    `json:"tagline"`
-	Content         string    `json:"content"`
-	Tags            []string  `json:"tags,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
-	LastRecalledAt  time.Time `json:"last_recalled_at"`
-	RecallCount     int       `json:"recall_count"`
-	Pinned          bool      `json:"pinned,omitempty"`
-	Stale           bool      `json:"stale,omitempty"`
+	SchemaVersion  int       `json:"schema_version"`
+	Name           string    `json:"name"`
+	Tagline        string    `json:"tagline"`
+	Content        string    `json:"content"`
+	Tags           []string  `json:"tags,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	LastRecalledAt time.Time `json:"last_recalled_at"`
+	RecallCount    int       `json:"recall_count"`
+	Pinned         bool      `json:"pinned,omitempty"`
+	Stale          bool      `json:"stale,omitempty"`
+	// StaleSince is the timestamp at which Stale was first flipped to
+	// true by GC. Used by the archive rule (PRD §6) to require the
+	// entry has been continuously stale for archiveStalePersistence
+	// before being moved to archived.jsonl. Cleared (zero) when GC
+	// recovers an entry back to non-stale.
+	//
+	// `omitzero` (Go 1.24+) is the correct elision for time.Time —
+	// `omitempty` does nothing for struct types, which would leak
+	// the "0001-01-01T00:00:00Z" zero value into every fresh entry.
+	StaleSince      time.Time `json:"stale_since,omitzero"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
 }
 

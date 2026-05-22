@@ -336,6 +336,68 @@ func ListProjects() ([]*Project, error) {
 	return out, nil
 }
 
+// archiveFileName is the file holding entries that have been deeply
+// stale long enough to retire from the active set (PRD §6). The active
+// set lives in memory.jsonl; archived.jsonl is grep-only by design —
+// no tool path reads it back into Project.
+const archiveFileName = "archived.jsonl"
+
+// appendArchive writes one Entry to <Dir>/archived.jsonl as a new
+// JSONL record. Append-mode rather than the full atomic-rewrite path
+// used by memory.jsonl: archived entries are write-once, and the
+// failure modes are different — partial write here means a duplicate
+// archive line on the next GC, which is harmless (archived.jsonl is
+// not authoritative for anything; memory.jsonl is the source of truth
+// for what's "active").
+func (p *Project) appendArchive(e Entry) error {
+	if err := os.MkdirAll(p.Dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(p.Dir, archiveFileName)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(&e)
+}
+
+// LoadArchived reads <Dir>/archived.jsonl for inspection / debugging.
+// Returns nil when the file doesn't exist (no entries have ever been
+// archived in this project). Per PRD §6 the active surface NEVER
+// reaches archived entries — this exposes the data for grep-like
+// tooling only; production code paths (Index, Get, Entries) keep
+// ignoring them.
+func (p *Project) LoadArchived() ([]Entry, error) {
+	f, err := os.Open(filepath.Join(p.Dir, archiveFileName))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+
+	var out []Entry
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var e Entry
+		if err := json.Unmarshal(line, &e); err != nil {
+			continue // tolerant: same recovery semantics as loadEntries
+		}
+		out = append(out, e)
+	}
+	return out, scanner.Err()
+}
+
 // loadProjectReadOnly reads a project's manifest + entries from disk
 // without creating or modifying anything. Used by ListProjects.
 // Returns os.ErrNotExist when the manifest is missing — callers
