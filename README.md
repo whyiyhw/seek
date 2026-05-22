@@ -61,7 +61,8 @@ go run ./cmd/seek --provider=compatible --base-url=http://localhost:8000/v1
 In the TUI:
 
 - **Enter** submits · **Ctrl+J** newline · **Ctrl+C** quits
-- **Esc** — interrupt the agent mid-stream (or dismiss a menu, or deny an approval)
+- **Mid-stream**: keep typing — **Enter** queues your message for after the agent finishes (auto-submitted on `finish_reason=stop`); **Alt+Enter / Option+Enter** steers (cancels the current turn and sends your message as the next prompt). The status line above the textarea previews what's queued or steering.
+- **Esc** — interrupt the agent mid-stream (or dismiss a menu, or deny an approval). Mid-stream Esc also clears any queued / steering message.
 - **Ctrl+L** / `/clear` — clear the visible screen (your terminal keeps scrollback)
 - **Ctrl+R** — toggle reasoning visibility on assistant messages
 - **PgUp / PgDn / Ctrl+U / Ctrl+D** — scroll the terminal (or just use the mouse wheel)

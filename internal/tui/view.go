@@ -121,6 +121,16 @@ func (m Model) View() string {
 		}
 	}
 
+	// Queue / steer hint — only meaningful mid-stream. Sits ABOVE the
+	// textarea so the user can see "what's already queued" and "what
+	// I'm currently typing" without the two visually merging.
+	if m.streaming {
+		if hint := m.renderQueueHint(); hint != "" {
+			sb.WriteString(hint)
+			sb.WriteString("\n")
+		}
+	}
+
 	// Input area FIRST (above any dropdown) — autocomplete popups
 	// attach BELOW the input, matching IDE / shell completer
 	// convention. With dropdowns above the input we were visually
@@ -202,6 +212,27 @@ func (m Model) renderStatusBar() string {
 		StreamElapsed:    streamElapsed,
 		StreamDeltaBytes: m.streamDeltaBytes,
 	})
+}
+
+// renderQueueHint returns a one-line indicator for queued / steering
+// state during a stream. Returns "" when there's nothing to show. The
+// hint sits above the textarea so the user can see "what's already
+// queued for after this turn" vs "what I'm currently typing".
+//
+// Priority: pendingSteerText (transitive — only set while cancelStream
+// is propagating) > queuedText. Both states are mutually exclusive
+// during steady-state but the steer path briefly holds both before
+// streamEndMsg clears queuedText, so the precedence matters.
+func (m Model) renderQueueHint() string {
+	switch {
+	case m.pendingSteerText != "":
+		preview := truncateOneLine(m.pendingSteerText, 60)
+		return styleMuted.Render("↪ steering: ") + styleMuted.Render(preview)
+	case m.queuedText != "":
+		preview := truncateOneLine(m.queuedText, 60)
+		return styleMuted.Render("↰ queued: ") + styleMuted.Render(preview)
+	}
+	return ""
 }
 
 // streamingLabel returns the "thinking…" placeholder text for the live

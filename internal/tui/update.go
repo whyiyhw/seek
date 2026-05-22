@@ -70,6 +70,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.curReasoning = ""
 		m.activeTools = nil
 
+		// Queue / steer dispatch — exactly one of these fires per
+		// streamEndMsg, in priority order.
+		//
+		// pendingSteerText: set by Alt+Enter during the previous
+		// stream; that path already called cancelStream(), so we
+		// arrive here promptly. Repair() is implicit — the agent
+		// loop's invariant check already dropped the half-baked
+		// turn before we got here.
+		//
+		// queuedText: set by Enter during the previous stream. Only
+		// auto-fires when the stream ended naturally (not via Esc),
+		// otherwise the user's "Esc stops everything" expectation
+		// would be violated.
+		// Queue / steer dispatch — exactly one of these fires per
+		// streamEndMsg, in priority order. We capture submit()'s
+		// new Model so the streaming=true / streamStartTime reset
+		// it performs isn't lost when this case returns.
+		switch {
+		case m.pendingSteerText != "":
+			text := m.pendingSteerText
+			m.pendingSteerText = ""
+			m.queuedText = "" // a steer supersedes any queue
+			cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ steered")))
+			newM, cmd := m.submit(text)
+			cmds = append(cmds, cmd)
+			return newM, tea.Batch(cmds...)
+		case m.queuedText != "":
+			text := m.queuedText
+			m.queuedText = ""
+			cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
+			newM, cmd := m.submit(text)
+			cmds = append(cmds, cmd)
+			return newM, tea.Batch(cmds...)
+		}
+
 	case statusTickMsg:
 		m.now = time.Now()
 		// A minute passed — off-peak window may have just opened or
@@ -198,6 +233,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
 			m.cancelStream()
+			// "Esc stops everything" — also clear queued/pending steer
+			// so the user isn't surprised by a follow-up prompt firing
+			// from a queue they thought they cancelled.
+			m.queuedText = ""
+			m.pendingSteerText = ""
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
 			// the next Esc within the same race window double-cancels.
@@ -205,7 +245,31 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// Streaming branch: Enter = queue, Alt+Enter = steer.
+		// (Ctrl+Enter and Ctrl+J retain their textarea-newline behaviour
+		// because the textarea sees those events directly via its own
+		// Update — Bubble Tea's KeyMsg.Type for them is NOT KeyEnter.)
 		if m.streaming {
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				return m, nil
+			}
+			m.input.Reset()
+			if msg.Alt {
+				// Steer: cancel current stream and stash text for
+				// streamEndMsg to submit once the channel drains.
+				m.pendingSteerText = text
+				if m.cancelStream != nil {
+					m.userCanceled = false
+					m.cancelStream()
+				}
+			} else {
+				// Queue: stash text; streamEndMsg auto-submits when the
+				// agent loop reaches its natural end (not userCanceled).
+				// Second Enter during the same stream replaces — last
+				// thing you said is what you meant.
+				m.queuedText = text
+			}
 			return m, nil
 		}
 		text := strings.TrimSpace(m.input.Value())
@@ -243,14 +307,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	}
 
-	// Everything else: feed the textarea (when not streaming).
-	if m.streaming {
-		return m, nil
-	}
+	// Everything else: feed the textarea. While streaming we still want
+	// the user to be able to type — they're composing a queue or steer
+	// message — but we skip the slash-menu / path-picker hookups since
+	// those commands don't apply mid-stream.
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	m.updateCommandMenu()
-	m.updatePathCompleter()
+	if !m.streaming {
+		m.updateCommandMenu()
+		m.updatePathCompleter()
+	}
 
 	// Multi-line paste folding: if the input has >5 lines, collapse the
 	// display to a placeholder so the terminal scrollback isn't flooded,
@@ -477,7 +543,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.streaming = true
 	m.streamStartTime = time.Now()
 	m.streamDeltaBytes = 0
-	m.input.Blur()
+	// Leave the textarea focused — the user may want to type a
+	// queue/steer message during the stream (see handleKey's
+	// streaming branch on KeyEnter).
 
 	ctx, cancel := context.WithCancel(m.opts.Ctx)
 	m.cancelStream = cancel

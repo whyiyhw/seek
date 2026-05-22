@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/charmbracelet/bubbles/textarea"
 )
 
@@ -104,5 +106,153 @@ func TestRenderPastedPlaceholder_Formatting(t *testing.T) {
 		if !strings.Contains(result, "📋") {
 			t.Errorf("placeholder should contain emoji indicator, got %q", result)
 		}
+	}
+}
+
+// streamingModel returns a Model in the streaming state, with a textarea
+// pre-populated. Used by the queue/steer tests below.
+func streamingModel(t *testing.T, input string) Model {
+	t.Helper()
+	m := Model{input: textarea.New(), streaming: true}
+	m.input.SetValue(input)
+	return m
+}
+
+func TestHandleKey_StreamingEnter_QueuesText(t *testing.T) {
+	m := streamingModel(t, "  follow-up: also check main.go  ")
+
+	// Enter (no modifier) during a stream → queue, do NOT submit.
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, ok := out.(Model)
+	if !ok {
+		t.Fatalf("handleKey did not return a Model, got %T", out)
+	}
+
+	if m2.queuedText != "follow-up: also check main.go" {
+		t.Errorf("queuedText: got %q, want trimmed user text", m2.queuedText)
+	}
+	if m2.pendingSteerText != "" {
+		t.Errorf("Enter must not set pendingSteerText (got %q)", m2.pendingSteerText)
+	}
+	if got := m2.input.Value(); got != "" {
+		t.Errorf("textarea should be reset after queue, got %q", got)
+	}
+}
+
+func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
+	m := streamingModel(t, "wait, undo that change")
+
+	// Wire a cancel func so we can observe it being called.
+	canceled := false
+	m.cancelStream = func() { canceled = true }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m2 := out.(Model)
+
+	if !canceled {
+		t.Error("Alt+Enter must call cancelStream so streamEndMsg can dispatch")
+	}
+	if m2.pendingSteerText != "wait, undo that change" {
+		t.Errorf("pendingSteerText: got %q", m2.pendingSteerText)
+	}
+	if m2.queuedText != "" {
+		t.Errorf("Alt+Enter must not populate queuedText (got %q)", m2.queuedText)
+	}
+	// userCanceled must stay false — steer is NOT a user cancel; the
+	// "↰ interrupted" notice in streamEndMsg must NOT fire.
+	if m2.userCanceled {
+		t.Error("steer must leave userCanceled=false so streamEndMsg dispatches the next prompt")
+	}
+}
+
+func TestHandleKey_StreamingEnter_EmptyInputIsNoOp(t *testing.T) {
+	m := streamingModel(t, "   ") // whitespace-only
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.queuedText != "" {
+		t.Errorf("empty input should not queue, got %q", m2.queuedText)
+	}
+}
+
+func TestHandleKey_StreamingEnter_SecondPressReplacesQueue(t *testing.T) {
+	// First Enter queues "first"; second Enter (with new textarea
+	// content) replaces — "last thing you said is what you meant".
+	m := streamingModel(t, "first message")
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m = out.(Model)
+	if m.queuedText != "first message" {
+		t.Fatalf("setup: queuedText=%q, want %q", m.queuedText, "first message")
+	}
+
+	m.input.SetValue("second message — disregard the first")
+	out, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m = out.(Model)
+
+	if m.queuedText != "second message — disregard the first" {
+		t.Errorf("second Enter should replace queue; got %q", m.queuedText)
+	}
+}
+
+func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
+	// Esc during a stream cancels AND clears both queue and pending
+	// steer — "Esc stops everything" must include latent state.
+	m := streamingModel(t, "")
+	m.queuedText = "stale queue"
+	m.pendingSteerText = "stale steer"
+	canceled := false
+	m.cancelStream = func() { canceled = true }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if !canceled {
+		t.Error("Esc must call cancelStream")
+	}
+	if !m2.userCanceled {
+		t.Error("Esc must set userCanceled so streamEndMsg prints '↰ interrupted'")
+	}
+	if m2.queuedText != "" || m2.pendingSteerText != "" {
+		t.Errorf("Esc must clear queuedText and pendingSteerText, got queue=%q steer=%q",
+			m2.queuedText, m2.pendingSteerText)
+	}
+}
+
+func TestRenderQueueHint_States(t *testing.T) {
+	cases := []struct {
+		name    string
+		setup   func(*Model)
+		wantSub string // substring that must appear; "" = empty hint
+	}{
+		{"empty", func(*Model) {}, ""},
+		{"queued",
+			func(m *Model) { m.queuedText = "look at server.go" },
+			"queued"},
+		{"steering",
+			func(m *Model) { m.pendingSteerText = "stop, undo" },
+			"steering"},
+		{"steer_supersedes_queue",
+			func(m *Model) {
+				m.queuedText = "do A"
+				m.pendingSteerText = "no, do B"
+			},
+			"steering"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{input: textarea.New()}
+			tc.setup(&m)
+			got := m.renderQueueHint()
+			if tc.wantSub == "" {
+				if got != "" {
+					t.Errorf("expected empty hint, got %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.wantSub) {
+				t.Errorf("hint %q should contain %q", got, tc.wantSub)
+			}
+		})
 	}
 }

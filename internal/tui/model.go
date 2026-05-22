@@ -126,6 +126,19 @@ type Model struct {
 	// ended naturally" so streamEndMsg can print an interrupt notice.
 	userCanceled bool
 
+	// queuedText holds a user message submitted via Enter while a stream
+	// is in flight. Auto-sent as the next prompt once the agent loop
+	// reaches finish_reason=stop (i.e. streamEndMsg fires WITHOUT
+	// userCanceled). Cleared by Esc, by being sent, or by being
+	// overwritten by a subsequent Enter during the same stream.
+	queuedText string
+	// pendingSteerText holds a user message submitted via Alt+Enter
+	// while a stream is in flight. Triggers cancelStream() immediately;
+	// streamEndMsg then submits this text as the next prompt — i.e.
+	// the current turn is dropped (Repair() cleans any orphan tool_calls
+	// in the agent's history) and the steer message replaces it.
+	pendingSteerText string
+
 	// streamStartTime is set in submit() and used to compute elapsed
 	// time for the live streaming indicator. Zero when not streaming.
 	streamStartTime time.Time
