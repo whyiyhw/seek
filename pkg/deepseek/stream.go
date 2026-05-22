@@ -16,7 +16,7 @@ type StreamEventType string
 const (
 	// EventDelta carries an incremental token chunk in Delta.
 	EventDelta StreamEventType = "delta"
-	// EventReasoningDelta carries a CoT chunk from deepseek-reasoner.
+	// EventReasoningDelta carries a CoT chunk from a V4 thinking-mode response.
 	EventReasoningDelta StreamEventType = "reasoning_delta"
 	// EventToolCallDelta carries a partial tool-call construction. Wired up
 	// in a later milestone — included here so the event surface is stable.
@@ -39,15 +39,15 @@ type StreamEvent struct {
 
 // streamChunk is the wire shape of one SSE data: {...} line.
 type streamChunk struct {
-	ID      string        `json:"id"`
+	ID      string         `json:"id"`
 	Choices []streamChoice `json:"choices"`
 	Usage   *Usage         `json:"usage,omitempty"`
 }
 
 type streamChoice struct {
-	Index        int          `json:"index"`
-	Delta        streamDelta  `json:"delta"`
-	FinishReason string       `json:"finish_reason,omitempty"`
+	Index        int         `json:"index"`
+	Delta        streamDelta `json:"delta"`
+	FinishReason string      `json:"finish_reason,omitempty"`
 }
 
 type streamDelta struct {
@@ -204,4 +204,3 @@ func FormatHitRatio(u Usage) string {
 	}
 	return fmt.Sprintf("%.1f%%", u.HitRatio()*100)
 }
-

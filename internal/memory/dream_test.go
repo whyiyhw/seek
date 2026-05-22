@@ -139,8 +139,13 @@ func TestDreamer_EndToEnd(t *testing.T) {
 	if !strings.Contains(fake.lastReq.Messages[0].Content, "dream mode") {
 		t.Errorf("system prompt should be DreamSystemPrompt, got %q", fake.lastReq.Messages[0].Content)
 	}
-	if fake.lastReq.Model != deepseek.ModelReasoner {
-		t.Errorf("Dreamer should default to ModelReasoner, got %q", fake.lastReq.Model)
+	if fake.lastReq.Model != deepseek.ModelV4Flash {
+		t.Errorf("Dreamer should default to ModelV4Flash, got %q", fake.lastReq.Model)
+	}
+	// V4-Flash needs Thinking opted in explicitly — Dreamer must set it
+	// because the prior implicit-via-alias path is sunsetting 2026-07-24.
+	if fake.lastReq.Thinking == nil || fake.lastReq.Thinking.Type != "enabled" {
+		t.Errorf("Dreamer should set Thinking.Type=enabled, got %+v", fake.lastReq.Thinking)
 	}
 }
 

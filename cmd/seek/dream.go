@@ -19,19 +19,19 @@ import (
 const dreamRecentSessions = 30
 
 // dreamSessionTail is how many trailing messages per session to ship
-// to the reasoner. The tail is where session conclusions live ("we
+// to the thinker. The tail is where session conclusions live ("we
 // decided to use X"). Earlier messages are usually exploratory and
 // mostly noise for L-extraction.
 const dreamSessionTail = 10
 
-// dreamReasonerTimeout caps one dream round-trip. Reasoner latency on
+// dreamReasonerTimeout caps one dream round-trip. Thinking-mode latency on
 // a fully-loaded prompt (30 sessions × 10 messages + N projects worth
 // of M entries) is observed around 30-60 s; 3 minutes gives plenty of
 // headroom for slow networks without hanging indefinitely.
 const dreamReasonerTimeout = 3 * time.Minute
 
 // runDream is the -dream CLI handler. Scans all project memory + recent
-// session tails, calls the reasoner, prints candidates to stdout, and
+// session tails, calls thinking mode, prints candidates to stdout, and
 // (when write=true) appends them to ~/.seek/soul.md's Pending section.
 //
 // Default (write=false) is preview-only by design: the user gets to
@@ -73,10 +73,10 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling reasoner …\n",
+	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling V4-Flash thinking …\n",
 		len(in.Projects), len(in.Sessions))
 
-	// 3. Run the reasoner round-trip.
+	// 3. Run the thinking-mode round-trip.
 	rctx, cancel := context.WithTimeout(ctx, dreamReasonerTimeout)
 	defer cancel()
 	dreamer := &memory.Dreamer{Client: client}
@@ -123,7 +123,7 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 // collectRecentSessions pulls the last dreamRecentSessions session
 // summaries from the store, loads each, and trims to the last
 // dreamSessionTail messages. Best-effort: any single-session failure
-// is skipped silently — the reasoner can work with whatever survives.
+// is skipped silently — the thinker can work with whatever survives.
 func collectRecentSessions() []memory.DreamSession {
 	store, err := session.NewStore()
 	if err != nil {
@@ -146,8 +146,8 @@ func collectRecentSessions() []memory.DreamSession {
 		if len(msgs) > dreamSessionTail {
 			msgs = msgs[len(msgs)-dreamSessionTail:]
 		}
-		// Drop any reasoning_content — long, low-signal, and the
-		// reasoner doesn't need its own prior thoughts to extract
+		// Drop any reasoning_content — long, low-signal, and
+		// thinking mode doesn't need its own prior thoughts to extract
 		// user traits.
 		msgs = deepseek.StripReasoningContent(msgs)
 		out = append(out, memory.DreamSession{ID: sess.ID, Messages: msgs})

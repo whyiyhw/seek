@@ -15,7 +15,7 @@ import (
 var rotatingTips = []string{
 	"💡 type @ to reference a file",
 	"💡 type / for slash commands",
-	"💡 /think <task> for deep reasoning (deepseek-reasoner)",
+	"💡 /think <task> for deep reasoning (V4-Flash thinking mode)",
 	"💡 Esc interrupts a runaway response without losing history",
 	"💡 ↑ recalls your previous prompt when the input is empty",
 	"💡 Ctrl+R toggles reasoning visibility on assistant messages",

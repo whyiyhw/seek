@@ -43,11 +43,11 @@ func allCommands() []command {
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
 		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
 		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
-		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-reasoner).", handler: cmdModel},
+		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
-		{names: []string{"/distill"}, usage: "/distill", description: "Reasoner-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
+		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
@@ -167,9 +167,16 @@ type modelChoice struct {
 func knownModelsForProvider(providerName string) []modelChoice {
 	switch strings.ToLower(providerName) {
 	case "", "deepseek":
+		// The legacy "deepseek-reasoner" alias still works via
+		// /model deepseek-reasoner and --model deepseek-reasoner
+		// (see pkg/deepseek.ShouldEnableThinking), but the picker
+		// surfaces the explicit V4 name so users see what they're
+		// actually buying instead of relying on DeepSeek's server-side
+		// alias routing (which has silently demoted reasoner→V4-Flash
+		// in the past).
 		return []modelChoice{
 			{"deepseek-chat", "DeepSeek V4-Flash — fast chat + tools (default)"},
-			{"deepseek-reasoner", "DeepSeek V4-Pro — Thinking-enabled reasoning"},
+			{"deepseek-v4-pro", "DeepSeek V4-Pro — Thinking-enabled reasoning (explicit)"},
 		}
 	case "anthropic":
 		return []modelChoice{
@@ -588,7 +595,7 @@ func cmdDistill(m *Model, _ string) cmdResult {
 	}
 
 	return cmdResult{
-		text:  styleMuted.Render(fmt.Sprintf("distilling %d messages — calling deepseek-reasoner …", len(msgs)-1)),
+		text:  styleMuted.Render(fmt.Sprintf("distilling %d messages — calling V4-Flash thinking …", len(msgs)-1)),
 		extra: startDistillCmd(m),
 	}
 }

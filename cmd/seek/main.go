@@ -2,8 +2,8 @@
 //
 // M3 wires in cache.Tracker (session-level prefix-cache stats), pricing
 // (off-peak tier awareness + per-call cost), and the Think tool that
-// bridges the chat loop into deepseek-reasoner. Interactive TUI lands in
-// M4; full reasoner-then-chat skill arrives with skill loading in M5.
+// bridges the chat loop into V4-Flash thinking mode. Interactive TUI lands
+// in M4; full think-then-chat skill arrives with skill loading in M5.
 package main
 
 import (
@@ -74,7 +74,7 @@ Available tools:
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
 - bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
-- think(task, reflect?, context?): call deepseek-reasoner for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
+- think(task, reflect?, context?): call deepseek-v4-flash in thinking mode for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
 - Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
 
 Workflow:
@@ -97,7 +97,7 @@ func main() {
 func run() error {
 	var (
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
-		model         = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
+		model         = flag.String("model", "", "model id; default depends on provider (deepseek-v4-flash for DeepSeek, etc.)")
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
@@ -257,7 +257,7 @@ func run() error {
 	defer cancel()
 
 	// -dream short-circuits before session / agent / TUI setup. Needs a
-	// DeepSeek client only (the reasoner call uses the Chat API);
+	// DeepSeek client only (the thinking-mode call uses the Chat API);
 	// second-tier providers don't currently expose a non-streaming Chat
 	// on the llm.Provider interface, so -dream is DeepSeek-only for now.
 	if *dreamFlag {
@@ -427,7 +427,7 @@ func run() error {
 	// below.
 	if memProject != nil || memSoul != nil {
 		memHook := &memory.Hook{Project: memProject, Soul: memSoul}
-		// Auto-distill needs the reasoner (DeepSeek-only path) + the
+		// Auto-distill needs the thinking-mode call (DeepSeek-only path) + the
 		// agent's history. Both wired unconditionally; the env var
 		// $SEEK_AUTO_DISTILL stays the load-bearing on/off gate
 		// (off by default).
@@ -524,7 +524,7 @@ func run() error {
 	}
 
 	// /distill needs both the Project (where saved candidates land)
-	// and a Distiller (the reasoner round-trip). The Distiller is only
+	// and a Distiller (the thinking-mode round-trip). The Distiller is only
 	// constructible when we have a DeepSeek client — second-tier
 	// providers don't currently expose a Chat method on the same
 	// interface, so /distill is DeepSeek-only for now.
@@ -709,7 +709,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 //	agent_start      — one per run
 //	turn_start       — one per LLM call; index is 0-based
 //	text_delta       — incremental assistant text; delta is the new chunk
-//	reasoning_delta  — incremental CoT text from deepseek-reasoner
+//	reasoning_delta  — incremental CoT text from thinking-mode responses
 //	tool_start       — a tool call is about to execute; id/name/args set
 //	tool_delta       — intermediate output from a streaming tool (think)
 //	tool_end         — tool finished; result set on success, error on failure
@@ -1033,7 +1033,7 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no DeepSeek API key — set DEEPSEEK_API_KEY or run seek once to use the setup wizard")
 		}
-		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelChat, nil
+		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelV4Flash, nil
 
 	case "anthropic":
 		apiKey := config.KeyFor(cfg, "anthropic")

@@ -103,10 +103,10 @@ func runSetupWizard(ctx context.Context, in io.Reader, out io.Writer) (provider 
 
 // providerOption is one row in the wizard's provider menu.
 type providerOption struct {
-	id       string // matches --provider flag values + config keys
-	label    string
-	keyHint  string // example key prefix shown next to the prompt
-	docsURL  string // where to get a key
+	id      string // matches --provider flag values + config keys
+	label   string
+	keyHint string // example key prefix shown next to the prompt
+	docsURL string // where to get a key
 }
 
 var providerOptions = []providerOption{
@@ -174,7 +174,7 @@ func promptAPIKey(out io.Writer, scanner *bufio.Scanner, provider string) (strin
 func pingDeepSeek(ctx context.Context, apiKey string) error {
 	c := deepseek.New(deepseek.WithAPIKey(apiKey))
 	_, err := c.Chat(ctx, &deepseek.ChatRequest{
-		Model: deepseek.ModelChat,
+		Model: deepseek.ModelV4Flash,
 		Messages: []deepseek.Message{
 			{Role: deepseek.RoleUser, Content: "ping"},
 		},

@@ -32,7 +32,7 @@ type TurnEnd struct {
 type MessageStart struct{ Message deepseek.Message }
 
 // MessageDelta carries an incremental text chunk for the in-flight assistant
-// message. Reasoning=true means the chunk is from deepseek-reasoner's
+// message. Reasoning=true means the chunk is from a V4 thinking-mode
 // `reasoning_content` stream (CoT), not the final answer.
 type MessageDelta struct {
 	Delta     string

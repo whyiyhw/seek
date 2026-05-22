@@ -3,11 +3,12 @@
 // (PRD §4.8.2 Level 1).
 //
 // Post-V4 (2026-01), DeepSeek collapsed reasoning into a parameter:
-// instead of switching to a separate `deepseek-reasoner` model, we
-// call ModelV4Flash with Thinking.Type="enabled" and
-// ReasoningEffort="high". Cheaper, larger context (1M), and the
-// thinking-mode side of V4 still returns `reasoning_content`
-// alongside the final content — same field, same stripping rule.
+// instead of switching to a separate `deepseek-reasoner` model (since
+// deprecated, sunset 2026-07-24), we call ModelV4Flash with
+// Thinking.Type="enabled" and ReasoningEffort="high". Cheaper, larger
+// context (1M), and the thinking-mode side of V4 still returns
+// `reasoning_content` alongside the final content — same field, same
+// stripping rule.
 //
 // The tool still runs a FRESH, history-less call so the reasoning
 // pass isn't contaminated by the calling chat's tool schemas and the
@@ -34,7 +35,7 @@ import (
 var schemaBytes = []byte(`{
   "type": "object",
   "properties": {
-    "task":    {"type": "string", "description": "The question or task to reason about. Be specific and self-contained — the reasoner sees no prior conversation."},
+    "task":    {"type": "string", "description": "The question or task to reason about. Be specific and self-contained — the thinker sees no prior conversation."},
     "reflect": {"type": "boolean", "description": "Set to true for a self-review pass on recent work. The system prompt is then framed as evaluation rather than planning."},
     "context": {"type": "string", "description": "Optional context (e.g. code snippets, the diff under review). Pasted verbatim into the reasoner's user message."}
   },
@@ -42,7 +43,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Call deepseek-reasoner to think hard about a problem. Returns the reasoning trace and the final answer as a single string. Use for: multi-step planning before complex edits; self-review (reflect=true) after a non-trivial change; any decision where the chat model is likely to be wrong on the first pass. DeepSeek-only."
+const description = "Call deepseek-v4-flash in thinking mode to reason hard about a problem. Returns the reasoning trace and the final answer as a single string. Use for: multi-step planning before complex edits; self-review (reflect=true) after a non-trivial change; any decision where the chat model is likely to be wrong on the first pass. DeepSeek-only."
 
 type Args struct {
 	Task    string `json:"task"`
@@ -182,7 +183,7 @@ func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
 func formatResult(reasoning, content string, u deepseek.Usage) string {
 	var sb strings.Builder
 
-	sb.WriteString("=== Think (deepseek-reasoner) ===\n")
+	sb.WriteString("=== Think (deepseek-v4-flash · thinking) ===\n")
 	sb.WriteString(fmt.Sprintf("usage: prompt %d, completion %d, cache hit %d / miss %d\n\n",
 		u.PromptTokens, u.CompletionTokens, u.PromptCacheHitTokens, u.PromptCacheMissTokens))
 

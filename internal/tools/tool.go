@@ -42,7 +42,7 @@ type Tool interface {
 // implement Tool — most do.
 //
 // Reasoning=true marks the delta as a chain-of-thought trace (e.g. from
-// deepseek-reasoner's reasoning_content stream) so the TUI can route it
+// V4 thinking-mode's reasoning_content stream) so the TUI can route it
 // to the foldable reasoning region rather than the main answer area.
 type StreamDelta struct {
 	Delta     string
@@ -51,7 +51,7 @@ type StreamDelta struct {
 
 // StreamingTool is an opt-in extension to Tool for tools whose
 // execution takes long enough that intermediate output is valuable
-// (think: deepseek-reasoner calls, which routinely take 10-60s before
+// (think: V4 thinking-mode calls, which routinely take 10-60s before
 // returning anything from Execute). The agent prefers ExecuteStream
 // when the tool implements this interface and falls back to Execute
 // otherwise.
@@ -83,7 +83,7 @@ type ReadOnlyTool interface {
 // Registry is the set of tools available to an Agent. Build it once at
 // startup; it is safe for concurrent reads after the first Wire() call.
 type Registry struct {
-	tools []Tool
+	tools  []Tool
 	byName map[string]Tool
 
 	once   sync.Once

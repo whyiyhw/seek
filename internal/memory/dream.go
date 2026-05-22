@@ -20,7 +20,7 @@ import (
 // from ≥2 different projects") is enforced after parse: anything with
 // fewer than 2 distinct project sources is dropped before write.
 //
-// JSON tags match the reasoner's output schema.
+// JSON tags match thinking mode's output schema.
 type LCandidate struct {
 	Trait   string   `json:"trait"`
 	Why     string   `json:"why"`
@@ -29,11 +29,11 @@ type LCandidate struct {
 
 // DreamSystemPrompt frames the cross-project distillation task. The
 // project-fact vs user-trait distinction is PRD §6's load-bearing
-// requirement — without it the reasoner happily produces "this project
+// requirement — without it thinking mode happily produces "this project
 // uses JSONL" as a "user trait", which is the wrong abstraction layer.
 //
 // The N≥2 explicit instruction lives here too so a single-source
-// reasoner output looks like the reasoner ignoring the rule rather
+// reasoner output looks like thinking mode ignoring the rule rather
 // than something we have to filter silently downstream.
 const DreamSystemPrompt = `You are a user-trait distillation engine ("dream mode").
 
@@ -76,8 +76,8 @@ candidates to fill a quota.
 Respond with ONLY a JSON array of objects matching the schema. No
 prose, no markdown fences, no commentary.`
 
-// DreamInput is what gets stuffed into the reasoner's user message.
-// Projects holds {id, entries[]} so the reasoner can attribute each
+// DreamInput is what gets stuffed into thinking mode's user message.
+// Projects holds {id, entries[]} so thinking mode can attribute each
 // trait to specific projects. Sessions is optional context — recent
 // session message tails for cross-checking patterns the M layer
 // hasn't captured yet.
@@ -88,7 +88,7 @@ type DreamInput struct {
 
 // DreamProject is a compact snapshot of one project's M entries —
 // just name + tagline + content per active (non-stale) entry. We don't
-// pass timestamps because the reasoner doesn't need to reason about
+// pass timestamps because thinking mode doesn't need to reason about
 // recency for trait extraction.
 type DreamProject struct {
 	ID      string
@@ -105,7 +105,7 @@ type DreamSession struct {
 
 // BuildDreamUserMessage renders the per-call user message. Format
 // mirrors BuildDistillUserMessage's "human-readable transcript"
-// philosophy: the reasoner reads prose, not wire schemas.
+// philosophy: thinking mode reads prose, not wire schemas.
 func BuildDreamUserMessage(in DreamInput) string {
 	var sb strings.Builder
 	sb.WriteString("Identify user-trait candidates from the following cross-project material. Remember: ≥2 distinct project sources per candidate.\n\n")
@@ -207,15 +207,15 @@ func FilterByEvidence(in []LCandidate, minDistinctSources int) []LCandidate {
 }
 
 // Dreamer orchestrates one `seek -dream` round-trip. Mirrors Distiller's
-// shape — chatClient interface, reasoner default — so the testing path
-// is the same.
+// shape — chatClient interface, V4-Flash-thinking default — so the
+// testing path is the same.
 type Dreamer struct {
 	Client     chatClient
-	Model      string // default deepseek.ModelReasoner
+	Model      string // default deepseek.ModelV4Flash (+ Thinking)
 	MinSources int    // default 2 per PRD §6
 }
 
-// Dream runs the prompt construction → reasoner call → parse → filter
+// Dream runs the prompt construction → thinking-mode call → parse → filter
 // pipeline. The returned slice has been filtered to MinSources; callers
 // can use it directly without additional gating.
 func (d *Dreamer) Dream(ctx context.Context, in DreamInput) ([]LCandidate, error) {
@@ -224,7 +224,7 @@ func (d *Dreamer) Dream(ctx context.Context, in DreamInput) ([]LCandidate, error
 	}
 	model := d.Model
 	if model == "" {
-		model = deepseek.ModelReasoner
+		model = deepseek.ModelV4Flash
 	}
 	minSrc := d.MinSources
 	if minSrc <= 0 {
@@ -237,6 +237,12 @@ func (d *Dreamer) Dream(ctx context.Context, in DreamInput) ([]LCandidate, error
 			{Role: deepseek.RoleSystem, Content: DreamSystemPrompt},
 			{Role: deepseek.RoleUser, Content: BuildDreamUserMessage(in)},
 		}),
+	}
+	// Dream is a one-shot reasoning extraction — opt into thinking
+	// explicitly. The legacy deepseek-reasoner alias used to provide
+	// this implicitly; the explicit V4 names do not.
+	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
+		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}
 
 	resp, err := d.Client.Chat(ctx, req)

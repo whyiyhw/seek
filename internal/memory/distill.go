@@ -28,7 +28,7 @@ type Candidate struct {
 // model starts grasping at straws.
 const DefaultMaxCandidates = 3
 
-// DistillSystemPrompt frames the reasoner's task. Bilingual reflects
+// DistillSystemPrompt frames thinking mode's task. Bilingual reflects
 // PRD §6's intent and keeps the rule list specific enough that the
 // model rejects user-trait noise instead of leaking it into M.
 //
@@ -64,7 +64,7 @@ prose, no markdown fences, no commentary. The orchestrator will
 parse your output directly.`
 
 // BuildDistillUserMessage renders the user-role message that goes to
-// the reasoner. The system prompt is fixed (DistillSystemPrompt); this
+// thinking mode. The system prompt is fixed (DistillSystemPrompt); this
 // is the per-call variant carrying the conversation transcript + the
 // candidate cap.
 //
@@ -107,7 +107,7 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// ParseCandidates extracts candidates from the reasoner's raw response.
+// ParseCandidates extracts candidates from thinking mode's raw response.
 // Tolerant of formatting variations the model produces despite the
 // "JSON only" instruction: markdown ` ```json ` fences, single object
 // instead of an array, leading "Here are the candidates:" prose.
@@ -185,15 +185,17 @@ type chatClient interface {
 }
 
 // Distiller orchestrates one /distill pass: prompt construction →
-// reasoner call → response parse → return Candidate slice.
+// thinking-mode call → response parse → return Candidate slice.
 //
-// Model defaults to ModelReasoner per PRD §6 — distillation explicitly
-// asks for the reasoner because picking which decisions are worth
-// preserving is exactly the chain-of-thought work the reasoner is good
-// at.
+// Model defaults to ModelV4Flash with Thinking enabled per PRD §6 —
+// distillation explicitly asks for chain-of-thought because picking
+// which decisions are worth preserving is exactly the reasoning
+// work thinking mode is good at. (Pre-2026-05 this used the
+// deepseek-reasoner alias, which routes to the same backend; the
+// switch is so callers survive the 2026-07-24 alias sunset.)
 type Distiller struct {
 	Client chatClient
-	Model  string // default deepseek.ModelReasoner
+	Model  string // default deepseek.ModelV4Flash (+ Thinking)
 	Max    int    // default DefaultMaxCandidates
 }
 
@@ -205,7 +207,7 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 	}
 	model := d.Model
 	if model == "" {
-		model = deepseek.ModelReasoner
+		model = deepseek.ModelV4Flash
 	}
 	maxN := d.Max
 	if maxN <= 0 {
@@ -218,6 +220,12 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 			{Role: deepseek.RoleSystem, Content: DistillSystemPrompt},
 			{Role: deepseek.RoleUser, Content: BuildDistillUserMessage(history, maxN)},
 		}),
+	}
+	// Distillation is a single-shot reasoning call — opt the model into
+	// thinking mode explicitly. The legacy deepseek-reasoner alias used
+	// to provide this implicitly; the explicit V4 names do not.
+	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
+		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}
 
 	resp, err := d.Client.Chat(ctx, req)

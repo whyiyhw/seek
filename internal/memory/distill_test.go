@@ -196,8 +196,14 @@ func TestDistiller_EndToEnd_HappyPath(t *testing.T) {
 	}
 
 	// Verify the request shape.
-	if fake.lastReq.Model != deepseek.ModelReasoner {
-		t.Errorf("Distiller should default to ModelReasoner, got %q", fake.lastReq.Model)
+	if fake.lastReq.Model != deepseek.ModelV4Flash {
+		t.Errorf("Distiller should default to ModelV4Flash, got %q", fake.lastReq.Model)
+	}
+	// V4-Flash needs Thinking opted in explicitly — Distiller must set
+	// it because the prior implicit-via-reasoner-alias path sunsets
+	// 2026-07-24.
+	if fake.lastReq.Thinking == nil || fake.lastReq.Thinking.Type != "enabled" {
+		t.Errorf("Distiller should set Thinking.Type=enabled, got %+v", fake.lastReq.Thinking)
 	}
 	if len(fake.lastReq.Messages) != 2 {
 		t.Fatalf("expected system+user messages, got %d", len(fake.lastReq.Messages))

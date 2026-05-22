@@ -82,7 +82,7 @@ func TestRenderPastedPlaceholder_Formatting(t *testing.T) {
 	}{
 		{6, "pasted 6 lines"},
 		{100, "pasted 100 lines"},
-		{1, "pasted 1 line"},   // edge case: unlikely but should still format
+		{1, "pasted 1 line"}, // edge case: unlikely but should still format
 	}
 
 	for _, tc := range tests {
@@ -415,7 +415,7 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	// /model with no args should open the picker for a curated provider
 	// (DeepSeek), with the current model preselected.
 	m := &Model{}
-	m.opts.Model = "deepseek-reasoner"
+	m.opts.Model = "deepseek-v4-pro"
 	m.opts.ProviderName = "" // DeepSeek
 
 	res := cmdModel(m, "")
@@ -426,14 +426,37 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	if len(m.modelPickerFiltered) < 2 {
 		t.Fatalf("expected at least 2 DeepSeek candidates, got %d", len(m.modelPickerFiltered))
 	}
-	// Preselect "deepseek-reasoner" since it matches the current model.
+	// Preselect "deepseek-v4-pro" since it matches the current model
+	// AND it is the explicit reasoning entry in the curated list (the
+	// legacy "deepseek-reasoner" alias is intentionally not surfaced).
 	got := m.modelPickerFiltered[m.modelPickerSelected].id
-	if got != "deepseek-reasoner" {
+	if got != "deepseek-v4-pro" {
 		t.Errorf("expected current model preselected, got %q", got)
 	}
 	// No surface text when opening — the picker is the response.
 	if res.text != "" {
 		t.Errorf("expected empty text on picker open, got %q", res.text)
+	}
+}
+
+// TestCmdModel_LegacyReasonerNotInPicker pins the policy decision: the
+// picker no longer lists "deepseek-reasoner" — the explicit V4 name
+// replaced it (see knownModelsForProvider). If someone re-adds reasoner
+// to the curated list this test fails on purpose. Direct-id use via
+// /model deepseek-reasoner is still valid (covered elsewhere) — the
+// alias is hidden, not removed.
+func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
+	m := &Model{}
+	m.opts.Model = "deepseek-chat"
+	m.opts.ProviderName = ""
+
+	cmdModel(m, "")
+
+	for _, mc := range m.modelPickerFiltered {
+		if mc.id == "deepseek-reasoner" {
+			t.Errorf("deepseek-reasoner should not appear in the curated picker, found in: %+v",
+				m.modelPickerFiltered)
+		}
 	}
 }
 
@@ -482,7 +505,7 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	m.pickerPurpose = "model"
 	m.modelPickerFiltered = []modelChoice{
 		{"deepseek-chat", "current"},
-		{"deepseek-reasoner", "Thinking mode"},
+		{"deepseek-v4-pro", "Thinking mode"},
 	}
 	m.modelPickerSelected = 1 // user arrowed down to the second row
 	// The user arrived here by typing "/model " — textarea still
@@ -495,7 +518,7 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	if m2.modelPickerOpen {
 		t.Error("Enter on a picker row should close the picker")
 	}
-	if m2.opts.Model != "deepseek-reasoner" {
+	if m2.opts.Model != "deepseek-v4-pro" {
 		t.Errorf("model should have switched, got %q", m2.opts.Model)
 	}
 	if m2.input.Value() != "" {
@@ -624,7 +647,7 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	m.modelPickerOpen = true
 	m.modelPickerFiltered = []modelChoice{
 		{"deepseek-chat", "current"},
-		{"deepseek-reasoner", "Thinking mode"},
+		{"deepseek-v4-pro", "Thinking mode"},
 	}
 	m.modelPickerSelected = 1
 

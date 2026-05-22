@@ -40,10 +40,13 @@ type ModelPricing struct {
 //	          (these are V4-Pro's CURRENT 75%-off promo rates; full
 //	           rack rate is 4× higher — $1.74 / $0.0145 / $3.48)
 //
-// Legacy aliases (deepseek-chat, deepseek-reasoner) are routed by
-// DeepSeek to V4-class models; we keep them in the table mapped to
-// the corresponding V4 tier so existing cmd/seek configs keep working
-// without a code change.
+// Legacy aliases (deepseek-chat, deepseek-reasoner) are scheduled for
+// removal on 2026-07-24 per api-docs.deepseek.com. Until then, both
+// alias names route to the V4-Flash backend — deepseek-chat with
+// thinking disabled, deepseek-reasoner with thinking enabled — so they
+// share V4-Flash's rate card (NOT V4-Pro's). An earlier version of
+// this file mistakenly priced ModelReasoner at V4-Pro rates, which
+// overstated session cost by ~3.1×.
 var standardRates = map[string]ModelPricing{
 	deepseek.ModelV4Flash: {
 		InputMissPerMTok: 0.14,
@@ -55,19 +58,20 @@ var standardRates = map[string]ModelPricing{
 		InputHitPerMTok:  0.003625,
 		OutputPerMTok:    0.87,
 	},
-	// Legacy alias → V4-Flash (the closest match in capability and
-	// price tier; if DeepSeek formally retires this alias we'll need
-	// to point cmd/seek at ModelV4Flash directly).
+	// Legacy alias → V4-Flash (no thinking). Sunset 2026-07-24.
 	deepseek.ModelChat: {
 		InputMissPerMTok: 0.14,
 		InputHitPerMTok:  0.0028,
 		OutputPerMTok:    0.28,
 	},
-	// Legacy alias → V4-Pro (reasoning workloads).
+	// Legacy alias → V4-Flash with thinking enabled. Sunset 2026-07-24.
+	// Same per-token rate as V4-Flash; the "reasoner" name historically
+	// implied higher cost, but DeepSeek prices V4-Flash thinking output
+	// identically to non-thinking.
 	deepseek.ModelReasoner: {
-		InputMissPerMTok: 0.435,
-		InputHitPerMTok:  0.003625,
-		OutputPerMTok:    0.87,
+		InputMissPerMTok: 0.14,
+		InputHitPerMTok:  0.0028,
+		OutputPerMTok:    0.28,
 	},
 }
 
@@ -134,9 +138,10 @@ func TierLabel(t Tier) string {
 // which it begins. Use this to power "wait for off-peak?" prompts.
 //
 // Examples (all Beijing time):
-//   at 09:00 standard → (off-peak, tomorrow 00:30)
-//   at 00:15 standard → (off-peak, today 00:30)
-//   at 03:00 off-peak → (standard, today 08:30)
+//
+//	at 09:00 standard → (off-peak, tomorrow 00:30)
+//	at 00:15 standard → (off-peak, today 00:30)
+//	at 03:00 off-peak → (standard, today 08:30)
 func NextTransition(now time.Time) (Tier, time.Time) {
 	b := now.In(Shanghai)
 	today0030 := time.Date(b.Year(), b.Month(), b.Day(), 0, 30, 0, 0, Shanghai)

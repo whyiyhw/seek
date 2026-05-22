@@ -76,7 +76,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.Model == "" {
 		if cfg.Client != nil {
-			cfg.Model = deepseek.ModelChat
+			cfg.Model = deepseek.ModelV4Flash
 		}
 		// Provider callers must set Model explicitly — no universal default.
 	}
