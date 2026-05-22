@@ -28,7 +28,7 @@ If you're not sure: log it. Cheap to add, expensive to recover from memory month
 
 - **DeepSeek-first, two-tier providers**. `pkg/deepseek` is a first-class client with DeepSeek-specific fields (cache metadata, FIM endpoint, reasoner content). `pkg/llm` is a thin generic interface for second-tier providers (Anthropic / OpenAI / Gemini — landing in M6).
 - **`pkg/deepseek` must not import `pkg/llm`** (CI lint enforces this — see `.github/workflows/ci.yml`). The whole point of the split is that DeepSeek-specific optimisations don't get lowered into a generic interface.
-- See [`PRD.md`](PRD.md) for the full design and the milestone plan.
+- See [`PRD.md`](docs/PRD.md) for the full design and the milestone plan.
 
 ## Tool usage workflow (load-bearing)
 
