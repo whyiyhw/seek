@@ -117,6 +117,18 @@ func run() error {
 			return fmt.Errorf("continue: no saved sessions in %s", store.Dir())
 		}
 	}
+	// Defensive repair: older sessions written before the orphan-
+	// tool_calls fix may have a trailing assistant tool_calls message
+	// with no matching tool results. The API rejects that on the next
+	// turn — repair drops the offending tail so the user can continue
+	// instead of being permanently locked out of the session.
+	if loaded != nil {
+		if n := loaded.Repair(); n > 0 {
+			fmt.Fprintf(os.Stderr,
+				"session %s: repaired %d trailing message(s) with orphan tool_calls — re-ask your last question if needed\n",
+				loaded.ID, n)
+		}
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {

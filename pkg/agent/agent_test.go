@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -313,6 +314,127 @@ func TestAgent_Summarise_ReturnsContentDoesNotMutateHistory(t *testing.T) {
 	}
 	if len(ag.messages) != before {
 		t.Errorf("Summarise mutated history: len %d → %d", before, len(ag.messages))
+	}
+}
+
+// TestAgent_CancelDuringToolCallStreamDoesNotPoisonHistory guards the
+// "An assistant message with 'tool_calls' must be followed by tool
+// messages" regression. The server streams an assistant message that
+// is mid-way through emitting a tool_call delta; the test cancels
+// ctx before [DONE] arrives. We then verify that:
+//
+//   - the agent's history does NOT end with a tool_calls-bearing
+//     assistant message (which would orphan tool_call_ids); and
+//   - a follow-up Prompt against a normal server succeeds, proving
+//     the session is still usable.
+func TestAgent_CancelDuringToolCallStreamDoesNotPoisonHistory(t *testing.T) {
+	// First server: streams a tool_call delta then blocks forever.
+	// The test cancels ctx to trigger the cleanup path.
+	firstBlock := make(chan struct{})
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"think","arguments":"{\"task\":\""}}]}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// Hold the connection open until the test cancels.
+		select {
+		case <-firstBlock:
+		case <-r.Context().Done():
+		}
+	}))
+	defer first.Close()
+	defer close(firstBlock)
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(first.URL)),
+		SystemPrompt: "sys",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := ag.Prompt(ctx, "do something that triggers a tool call")
+
+	// Wait until we see the tool-call delta, then cancel — that's
+	// the exact race the bug fired in.
+	gotToolCallDelta := make(chan struct{})
+	go func() {
+		for ev := range stream {
+			if _, ok := ev.(MessageStart); ok {
+				close(gotToolCallDelta)
+				return
+			}
+		}
+	}()
+	select {
+	case <-gotToolCallDelta:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("never saw MessageStart from blocking server")
+	}
+	cancel()
+
+	// Drain the channel.
+	for range stream {
+	}
+
+	hist := ag.Messages()
+	if n := len(hist); n == 0 {
+		t.Fatalf("history empty after cancel")
+	}
+	last := hist[len(hist)-1]
+	if last.Role == deepseek.RoleAssistant && len(last.ToolCalls) > 0 {
+		t.Errorf("history left with orphan tool_calls assistant message: %+v", last)
+	}
+	// The user message MAY or MAY NOT be in history depending on
+	// where exactly the cancel landed; the load-bearing assertion is
+	// just "no orphan tool_calls". If the user message is present
+	// without an assistant reply, that's fine — the next turn will
+	// send it together with a new prompt.
+
+	// Second server: a normal happy-path turn. If the history above
+	// is well-formed, this Prompt should succeed without DeepSeek
+	// rejecting it.
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		body, _ := io.ReadAll(r.Body)
+		// Sanity: the request body MUST NOT contain a dangling
+		// assistant tool_calls message. Test the literal field name
+		// — that's what DeepSeek would reject on.
+		if strings.Contains(string(body), `"role":"assistant"`) &&
+			strings.Contains(string(body), `"tool_calls"`) {
+			t.Errorf("follow-up request includes orphan assistant tool_calls: %s", string(body))
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer second.Close()
+
+	// Point the client at the second server. We do this by
+	// rebuilding the agent with the same history — same shape as
+	// what would happen if the user saved + resumed.
+	ag2, _ := New(Config{
+		Client:          deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(second.URL)),
+		SystemPrompt:    "sys",
+		InitialMessages: hist,
+	})
+
+	var sawError bool
+	for ev := range ag2.Prompt(context.Background(), "still there?") {
+		if _, ok := ev.(ErrorEvent); ok {
+			sawError = true
+		}
+	}
+	if sawError {
+		t.Errorf("follow-up Prompt errored after cancel cleanup")
 	}
 }
 

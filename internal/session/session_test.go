@@ -208,6 +208,90 @@ func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
 	}
 }
 
+func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "go do thing"},
+		{
+			Role: deepseek.RoleAssistant,
+			ToolCalls: []deepseek.ToolCall{
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "think", Arguments: `{"task":"x"}`}},
+			},
+		},
+		// ↑ orphan: no matching tool message follows.
+	}
+	dropped := sess.Repair()
+	if dropped != 1 {
+		t.Errorf("dropped = %d, want 1", dropped)
+	}
+	if got := len(sess.Messages); got != 1 {
+		t.Errorf("len(Messages) = %d, want 1", got)
+	}
+	if sess.Messages[0].Role != deepseek.RoleUser {
+		t.Errorf("user message should survive: %+v", sess.Messages[0])
+	}
+}
+
+func TestRepair_LeavesValidHistoryAlone(t *testing.T) {
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "u"},
+		{
+			Role: deepseek.RoleAssistant,
+			ToolCalls: []deepseek.ToolCall{
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "read"}},
+			},
+		},
+		{Role: deepseek.RoleTool, ToolCallID: "call_1", Content: "result"},
+		{Role: deepseek.RoleAssistant, Content: "all done"},
+	}
+	before := len(sess.Messages)
+	dropped := sess.Repair()
+	if dropped != 0 {
+		t.Errorf("dropped = %d, want 0 (history is fine)", dropped)
+	}
+	if len(sess.Messages) != before {
+		t.Errorf("Repair shouldn't have touched a valid history")
+	}
+}
+
+func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
+	// Two tool_calls, only one gets a matching tool message —
+	// still orphan because DeepSeek requires ALL of them satisfied.
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "u"},
+		{
+			Role: deepseek.RoleAssistant,
+			ToolCalls: []deepseek.ToolCall{
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "a"}},
+				{ID: "call_2", Function: deepseek.ToolCallFunc{Name: "b"}},
+			},
+		},
+		{Role: deepseek.RoleTool, ToolCallID: "call_1", Content: "result"},
+		// call_2 result missing — orphan.
+	}
+	dropped := sess.Repair()
+	if dropped == 0 {
+		t.Errorf("expected partial-fulfilment to be flagged as orphan")
+	}
+	// The whole tail from the assistant message onward should be gone.
+	if len(sess.Messages) != 1 || sess.Messages[0].Role != deepseek.RoleUser {
+		t.Errorf("expected [user] after repair, got %+v", sess.Messages)
+	}
+}
+
+func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "u"},
+		{Role: deepseek.RoleAssistant, Content: "a"},
+	}
+	if d := sess.Repair(); d != 0 {
+		t.Errorf("repair touched a plain-text history: dropped %d", d)
+	}
+}
+
 func mustSave(t *testing.T, s *Store, sess *Session) {
 	t.Helper()
 	if err := s.Save(sess); err != nil {

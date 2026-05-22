@@ -29,6 +29,22 @@ func (m Model) View() string {
 
 	var sb strings.Builder
 
+	// "thinking…" placeholder for the gap between submit and the
+	// first user-visible byte. There are two such gaps in a typical
+	// turn:
+	//   1. Submit → first content delta (network + TTFT on the
+	//      server). On a large cached prompt this can still be 2-5s.
+	//   2. Last content delta → ToolExecStart, when the model is
+	//      streaming tool_call argument deltas (these don't surface
+	//      as TUI events — the assistant is still working but the
+	//      live region looks frozen).
+	// Without this line the user has no signal that the agent is
+	// alive during those windows.
+	if m.streaming &&
+		m.curContent == "" && m.curReasoning == "" && len(m.activeTools) == 0 {
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render("thinking…"))
+	}
+
 	// Active tool lines — each shows a spinner and an elapsed-time
 	// tail. The spinner ticks ~80 ms which is also what drives the
 	// elapsed-time refresh; without that the user can't tell whether

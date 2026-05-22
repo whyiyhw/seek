@@ -172,6 +172,19 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 
 			assistant, usage, finish, err := a.runTurn(ctx, out)
 			if err != nil {
+				// User-initiated cancellation (Esc / Ctrl+C) is the
+				// common case here. We must NOT append the partial
+				// assistant message: if it contains tool_calls (even
+				// half-streamed ones), the conversation history ends
+				// up with orphan tool_call_ids that have no matching
+				// tool result messages, and DeepSeek rejects every
+				// subsequent turn with "tool_calls must be followed
+				// by tool messages". Drop the turn entirely and let
+				// the user continue from the prior valid state.
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					out <- AgentEnd{Usage: totalUsage, Turns: turns - 1, ToolCalls: totalToolCalls}
+					return
+				}
 				out <- ErrorEvent{Err: err}
 				return
 			}
@@ -313,6 +326,16 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 			tc.Index = 0
 			assistant.ToolCalls = append(assistant.ToolCalls, *tc)
 		}
+	}
+
+	// Surface context cancellation as an explicit error so the agent
+	// loop can drop the partial turn (see the user-cancel branch in
+	// Prompt). Without this, a stream interrupted by Esc returns a
+	// nil error here, the partial assistant message gets appended,
+	// and any tool_calls it contains have no matching tool results —
+	// poisoning the next API request.
+	if err := ctx.Err(); err != nil {
+		return assistant, usage, finish, err
 	}
 
 	return assistant, usage, finish, nil

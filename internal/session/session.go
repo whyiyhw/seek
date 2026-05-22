@@ -74,6 +74,61 @@ func generateID(t time.Time) string {
 // Touch updates UpdatedAt to now.
 func (s *Session) Touch() { s.UpdatedAt = time.Now().UTC() }
 
+// Repair trims trailing orphan tool_calls shapes from the message
+// history. Returns the number of messages dropped (0 == no repair
+// needed).
+//
+// This exists because of a real-world failure mode: if seek was
+// interrupted (Esc, crash, ctx cancel) while the model was streaming
+// a tool_call, prior to the fix in pkg/agent/agent.go the assistant
+// message was persisted with tool_calls but no matching tool result
+// messages. Every subsequent API call then fails with "An assistant
+// message with 'tool_calls' must be followed by tool messages
+// responding to each 'tool_call_id'", leaving the user with a session
+// they can't continue without manual JSON surgery.
+//
+// Repair walks the history from the end and drops any trailing
+// assistant tool_calls message whose tool_call_ids aren't all
+// satisfied by tool messages later in the slice. The preceding user
+// message (if any) is kept so the user knows what they asked.
+func (s *Session) Repair() int {
+	repaired, dropped := repairMessages(s.Messages)
+	s.Messages = repaired
+	return dropped
+}
+
+// repairMessages is the pure-function core of Repair, broken out so
+// it's testable without constructing a Session.
+func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
+			continue
+		}
+		needed := make(map[string]bool, len(m.ToolCalls))
+		for _, tc := range m.ToolCalls {
+			needed[tc.ID] = true
+		}
+		for j := i + 1; j < len(msgs); j++ {
+			if msgs[j].Role == deepseek.RoleTool {
+				delete(needed, msgs[j].ToolCallID)
+			}
+		}
+		if len(needed) == 0 {
+			// All tool_calls satisfied — this assistant message is
+			// well-formed. Stop scanning; anything before it is fine
+			// by API contract (earlier orphans would have broken the
+			// session long before now).
+			return msgs, 0
+		}
+		// Orphan: drop the assistant message and any partial tool
+		// messages that came after it (they're useless without the
+		// assistant header).
+		return msgs[:i], len(msgs) - i
+	}
+	return msgs, 0
+}
+
 // Fork returns a new Session that branches off s: fresh ID, ParentID
 // pointing at s, an independent copy of the message slice, and reset
 // counters/usage. Model / Yolo / CWD / SystemPrompt are inherited so
