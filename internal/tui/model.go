@@ -70,6 +70,12 @@ type Options struct {
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
 
+	// ProviderName, when non-empty, means a second-tier provider is active
+	// (Anthropic, OpenAI, Gemini, or a compatible endpoint). The TUI
+	// renders a banner warning that DeepSeek-exclusive features are disabled.
+	// Empty string = DeepSeek (no banner).
+	ProviderName string
+
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
 	SetYolo      func(bool)

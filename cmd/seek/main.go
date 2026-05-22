@@ -38,6 +38,11 @@ import (
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
+	"github.com/whyiyhw/seek/pkg/llm"
+	"github.com/whyiyhw/seek/pkg/llm/compatible"
+	anthropicprov "github.com/whyiyhw/seek/pkg/llm/provider/anthropic"
+	geminiprov "github.com/whyiyhw/seek/pkg/llm/provider/gemini"
+	openaiprov "github.com/whyiyhw/seek/pkg/llm/provider/openai"
 
 	"github.com/muesli/termenv"
 )
@@ -74,15 +79,18 @@ func main() {
 
 func run() error {
 	var (
-		prompt   = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
-		model    = flag.String("model", deepseek.ModelChat, "model id (deepseek-chat | deepseek-v4-flash | deepseek-reasoner | …)")
-		maxTurns = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
-		yolo     = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
-		resume   = flag.String("resume", "", "load a saved session by ID (see seek -list)")
-		cont     = flag.Bool("continue", false, "load the most-recently-updated session")
-		noSave   = flag.Bool("no-save", false, "do not persist this session to disk")
-		list     = flag.Bool("list", false, "list saved sessions and exit")
-		noProj   = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
+		prompt       = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
+		model        = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
+		maxTurns     = flag.Int("max-turns", 8, "safety bound on agent loop iterations")
+		yolo         = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
+		resume       = flag.String("resume", "", "load a saved session by ID (see seek -list)")
+		cont         = flag.Bool("continue", false, "load the most-recently-updated session")
+		noSave       = flag.Bool("no-save", false, "do not persist this session to disk")
+		list         = flag.Bool("list", false, "list saved sessions and exit")
+		noProj       = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
+		providerFlag = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
+		baseURL      = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
+		providerName = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 	)
 	flag.Parse()
 
@@ -98,9 +106,13 @@ func run() error {
 		return printSessionList(store)
 	}
 
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("DEEPSEEK_API_KEY is not set")
+	// Provider detection. --provider overrides auto-detect; otherwise we
+	// check env vars in priority order: DeepSeek first, then second-tier.
+	provider, dsClient, provLabel, modelDefault, err := buildProvider(
+		*providerFlag, *baseURL, *providerName,
+	)
+	if err != nil {
+		return err
 	}
 
 	// Resolve which session we're operating on. Priority:
@@ -145,7 +157,7 @@ func run() error {
 	// surprising). The flags can still override explicitly: set them
 	// AFTER -resume on the command line and they win.
 	if loaded != nil {
-		if *model == deepseek.ModelChat {
+		if *model == modelDefault {
 			// User didn't override the model flag; honour the saved one.
 			*model = loaded.Model
 		}
@@ -171,7 +183,9 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	client := deepseek.New(deepseek.WithAPIKey(apiKey))
+	if *model == "" {
+		*model = modelDefault
+	}
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -208,9 +222,14 @@ func run() error {
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
-		Add(fimcomplete.New(client, *model)).
-		Add(think.New(client)).
 		Add(skilltool.New(skills))
+
+	// DeepSeek-exclusive tools: FIM and Reasoner are only available
+	// when using the DeepSeek client directly.
+	if dsClient != nil {
+		reg.Add(fimcomplete.New(dsClient, *model)).
+			Add(think.New(dsClient))
+	}
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
 	// a broken MCP server should not prevent seek from starting.
@@ -272,7 +291,8 @@ func run() error {
 	}
 
 	ag, err := agent.New(agent.Config{
-		Client:          client,
+		Client:          dsClient,
+		Provider:        provider,
 		Model:           *model,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
@@ -335,6 +355,7 @@ func run() error {
 		Session:      activeSession,
 		Store:        store,
 		Skills:       skills,
+		ProviderName: provLabel,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project
@@ -353,7 +374,8 @@ func run() error {
 				sp = sp + "\n" + manifest
 			}
 			return agent.New(agent.Config{
-				Client:       client,
+				Client:       dsClient,
+				Provider:     provider,
 				Model:        sessionModel,
 				SystemPrompt: sp,
 				Tools:        reg,
@@ -566,4 +588,72 @@ func detectGlamourStyle() string {
 		return "dark"
 	}
 	return "light"
+}
+
+// buildProvider selects and constructs the LLM provider based on the
+// --provider flag and env vars. Returns:
+//
+//	provider    llm.Provider — non-nil for second-tier providers
+//	dsClient    *deepseek.Client — non-nil for DeepSeek (first-class path)
+//	provLabel   string — human name for TUI banner ("" = DeepSeek, no banner)
+//	modelDefault string — sensible default model for the chosen provider
+func buildProvider(provFlag, baseURLFlag, provName string) (
+	provider llm.Provider, dsClient *deepseek.Client, provLabel, modelDefault string, err error,
+) {
+	// Determine effective provider name.
+	if provFlag == "" {
+		switch {
+		case os.Getenv("ANTHROPIC_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+			provFlag = "anthropic"
+		case os.Getenv("OPENAI_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+			provFlag = "openai"
+		case os.Getenv("GEMINI_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+			provFlag = "gemini"
+		default:
+			provFlag = "deepseek"
+		}
+	}
+
+	switch provFlag {
+	case "deepseek":
+		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("DEEPSEEK_API_KEY is not set")
+		}
+		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelChat, nil
+
+	case "anthropic":
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("ANTHROPIC_API_KEY is not set (needed for --provider=anthropic)")
+		}
+		return anthropicprov.New(apiKey), nil, "Anthropic", "claude-sonnet-4-20250514", nil
+
+	case "openai":
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("OPENAI_API_KEY is not set (needed for --provider=openai)")
+		}
+		return openaiprov.New(apiKey), nil, "OpenAI", "gpt-4o", nil
+
+	case "gemini":
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("GEMINI_API_KEY is not set (needed for --provider=gemini)")
+		}
+		return geminiprov.New(apiKey), nil, "Gemini", "gemini-2.0-flash", nil
+
+	case "compatible":
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			apiKey = os.Getenv("DEEPSEEK_API_KEY") // compatible endpoints often share key env
+		}
+		if baseURLFlag == "" {
+			return nil, nil, "", "", fmt.Errorf("--base-url is required for --provider=compatible")
+		}
+		return compatible.New(apiKey, baseURLFlag, provName), nil, provName, "", nil
+
+	default:
+		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | compatible", provFlag)
+	}
 }

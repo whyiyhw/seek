@@ -35,6 +35,16 @@ func (m Model) View() string {
 
 	var sb strings.Builder
 
+	// Second-tier provider banner: warn that DeepSeek-exclusive features
+	// (cache stats, FIM, Reasoner) are disabled.
+	if m.opts.ProviderName != "" {
+		banner := lipgloss.NewStyle().
+			Foreground(colourTool).
+			Render("⚠ Provider: " + m.opts.ProviderName + " — FIM / cache stats / Reasoner disabled")
+		sb.WriteString(banner)
+		sb.WriteString("\n")
+	}
+
 	// "thinking…" placeholder for the gap between submit and the
 	// first user-visible byte. There are two such gaps in a typical
 	// turn:
