@@ -36,7 +36,7 @@ type Config struct {
 	Model        string          // defaults to deepseek.ModelChat / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
-	MaxTurns     int             // safety bound; defaults to 32
+	MaxTurns     int             // safety bound; defaults to 200
 	MaxTokens    int             // completion token cap per call; 0 → defaultMaxTokens
 	AutoContinue bool           // inject "continue" on text-only turns so the model resumes without user input
 
@@ -69,7 +69,7 @@ func New(cfg Config) (*Agent, error) {
 		// Provider callers must set Model explicitly — no universal default.
 	}
 	if cfg.MaxTurns <= 0 {
-		cfg.MaxTurns = 32
+		cfg.MaxTurns = 200
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = 8192
