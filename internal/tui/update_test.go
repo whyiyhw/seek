@@ -284,6 +284,54 @@ func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 	}
 }
 
+func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
+	// Regression: when the user types "/model<space>" the model picker
+	// should auto-open. Before this fix, the slash menu closed (because
+	// it forbids spaces in args mode) and nothing replaced it — the
+	// user saw nothing until they hit Enter.
+	m := emptyModel()
+	m.opts.Model = "deepseek-chat"
+	m.input.SetValue("/model ")
+
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen {
+		t.Fatal("model picker should auto-open on '/model '")
+	}
+	if m.pickerPurpose != "model" {
+		t.Errorf("pickerPurpose = %q, want 'model'", m.pickerPurpose)
+	}
+	if m.commandMenuOpen {
+		t.Error("slash menu should be closed when picker is open (mutually exclusive)")
+	}
+	// Current model preselected.
+	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek-chat" {
+		t.Errorf("expected current model preselected, got %q",
+			m.modelPickerFiltered[m.modelPickerSelected].id)
+	}
+}
+
+func TestUpdateCommandMenu_ClosesAutoPickerOnBackspace(t *testing.T) {
+	// Once the input is no longer "/model<space>..." (e.g. user
+	// backspaced the space back to "/model"), the auto-opened picker
+	// must close so the regular slash menu can re-appear.
+	m := emptyModel()
+	m.opts.Model = "deepseek-chat"
+	m.modelPickerOpen = true
+	m.pickerPurpose = "model"
+	m.modelPickerFiltered = knownModelsForProvider("")
+
+	m.input.SetValue("/model") // space deleted
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Error("picker should close after backspace deletes the space trigger")
+	}
+	if !m.commandMenuOpen {
+		t.Error("slash menu should re-open on '/model' (no space)")
+	}
+}
+
 func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	// /model with no args should open the picker for a curated provider
 	// (DeepSeek), with the current model preselected.

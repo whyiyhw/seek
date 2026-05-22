@@ -256,10 +256,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// then refreshes the filter via updateCommandMenu).
 	}
 
-	// Model picker (opened by /model with no args). Same key vocabulary
-	// as the slash menu / path picker: Tab + Enter accept the highlighted
-	// row, Up/Down navigate, Esc dismisses. Other keys are swallowed —
-	// the picker is modal: candidate list is fixed, no live filtering.
+	// Model / setup picker. Same key vocabulary as the slash menu /
+	// path picker: Tab + Enter accept, Up/Down navigate, Esc dismisses.
+	//
+	// Two opening paths affect what other keys do:
+	//
+	//   - /setup picker: fully modal. The textarea is empty (cmdSetup
+	//     opens a fresh picker on a clean input), there's nothing for
+	//     stray characters to mean.
+	//   - /model picker auto-opened from "/model " in updateCommandMenu:
+	//     the textarea still holds "/model ..." and the user might want
+	//     to back out (Backspace deletes the space → picker closes via
+	//     updateCommandMenu's "stale picker" branch → slash menu reopens)
+	//     OR type a freeform model id (characters flow through; once
+	//     the input no longer starts with "/model ", the picker also
+	//     auto-closes).
+	//
+	// So Backspace and printable characters fall through to the
+	// textarea when purpose=="model"; for purpose=="setup-provider"
+	// (and any future modal picker) we swallow them to stay modal.
 	if m.modelPickerOpen {
 		switch msg.Type {
 		case tea.KeyTab, tea.KeyEnter:
@@ -279,12 +294,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modelPickerOpen = false
 			m.modelPickerFiltered = nil
 			m.modelPickerSelected = 0
+			m.pickerPurpose = ""
 			return m, nil
 		}
-		// Other keys are swallowed (no fall-through). The picker is
-		// short-lived and modal — accidentally typing characters
-		// while it's open shouldn't mix into the input.
-		return m, nil
+		// auto-opened /model picker: Backspace + printable chars fall
+		// through so the user can keep editing the textarea.
+		if m.pickerPurpose == "model" {
+			switch msg.Type {
+			case tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
+				// fall through to textarea Update at the end of handleKey
+			default:
+				return m, nil
+			}
+		} else {
+			// Modal picker (e.g. /setup): swallow all other keys.
+			return m, nil
+		}
 	}
 
 	switch msg.Type {
@@ -554,10 +579,57 @@ func (m *Model) tryHistoryDown() bool {
 // updateCommandMenu recomputes the slash-command dropdown state from
 // the current input value. Called after every textarea-bound key.
 //
-// Open conditions: value starts with "/" AND contains no space yet
-// (space means the user is past the command name and into arguments).
+// State machine:
+//
+//	"/"             → command menu (filters as you type)
+//	"/model "       → model picker (typing "/model<space>" hands off
+//	                  to the model dropdown; the user no longer needs
+//	                  to commit with Enter just to see what's available)
+//	anything else   → both closed
+//
+// The handoff at "/model " keeps the screen from going visually
+// empty in the half-second between "/" menu (closes on first space)
+// and an Enter that opens the model picker explicitly.
 func (m *Model) updateCommandMenu() {
 	v := strings.TrimRight(m.input.Value(), "\n")
+
+	// Branch 1: "/model<space>..." — auto-open the model picker. Close
+	// any open command menu first; they're mutually exclusive.
+	if strings.HasPrefix(v, "/model ") || v == "/model " {
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		// Only (re)populate if not already open for this purpose —
+		// avoids resetting the user's arrow-key position on every keypress.
+		if !m.modelPickerOpen || m.pickerPurpose != "model" {
+			m.modelPickerFiltered = knownModelsForProvider(m.opts.ProviderName)
+			if len(m.modelPickerFiltered) == 0 {
+				// Uncurated provider — no candidates to show; leave the
+				// picker closed and let the user type a freeform id.
+				return
+			}
+			m.modelPickerSelected = 0
+			for i, mc := range m.modelPickerFiltered {
+				if mc.id == m.opts.Model {
+					m.modelPickerSelected = i
+					break
+				}
+			}
+			m.modelPickerOpen = true
+			m.pickerPurpose = "model"
+		}
+		return
+	}
+	// Branch 2: not in "/model " state but a stale auto-opened model
+	// picker is still showing (e.g. user backspaced the space). Close it.
+	if m.modelPickerOpen && m.pickerPurpose == "model" {
+		m.modelPickerOpen = false
+		m.modelPickerFiltered = nil
+		m.modelPickerSelected = 0
+		m.pickerPurpose = ""
+	}
+
+	// Branch 3: standard slash-command menu (no space yet).
 	if !strings.HasPrefix(v, "/") || strings.Contains(v, " ") {
 		m.commandMenuOpen = false
 		m.commandMenuFiltered = nil
