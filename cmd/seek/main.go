@@ -97,6 +97,16 @@ func main() {
 }
 
 func run() error {
+	// Skill subcommand surface (PRD v2 §5.1). Dispatched ahead of
+	// every global flag and provider/session probe so `seek skill
+	// install ./foo` doesn't need API keys, doesn't load sessions,
+	// doesn't touch ~/.seek/projects/. The first positional arg is
+	// the discriminator — flag.Parse() would already have consumed
+	// it if we waited.
+	if len(os.Args) >= 2 && os.Args[1] == "skill" {
+		return runSkillCmd(os.Args[2:], os.Stdout, os.Stderr)
+	}
+
 	var (
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
 		model         = flag.String("model", "", "model id; default depends on provider (deepseek-v4-flash for DeepSeek, etc.)")
