@@ -2,12 +2,17 @@ package tui
 
 import (
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // emptyModel returns a Model with just enough wiring for command tests.
@@ -194,5 +199,145 @@ func TestReset_NoHook(t *testing.T) {
 	res := runHandler(t, m, "/reset")
 	if !strings.Contains(res.text, "unsupported") {
 		t.Errorf("text = %q", res.text)
+	}
+}
+
+func TestBranch_NoSessionReportsUnavailable(t *testing.T) {
+	res := runHandler(t, emptyModel(), "/branch")
+	if !strings.Contains(res.text, "unavailable") || !strings.Contains(res.text, "--no-save") {
+		t.Errorf("text = %q", res.text)
+	}
+}
+
+func TestBranch_ForksAndSwitchesSession(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SEEK_SESSIONS_DIR", dir)
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := session.New("deepseek-v4-flash", "/tmp", "sys", false)
+	parent.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "hi"},
+		{Role: deepseek.RoleAssistant, Content: "hello"},
+	}
+	if err := store.Save(parent); err != nil {
+		t.Fatal(err)
+	}
+
+	// /branch reads the agent's Messages() in persistSession before
+	// forking — we need a real Agent for that path. No LLM call is
+	// made by /branch itself, so the client baseURL can be a stub.
+	ag, err := agent.New(agent.Config{
+		Client:          deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
+		SystemPrompt:    "sys",
+		InitialMessages: parent.Messages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := emptyModel()
+	m.opts.Agent = ag
+	m.opts.Session = parent
+	m.opts.Store = store
+	m.turns = 2
+	m.toolCalls = 1
+
+	res := runHandler(t, m, "/branch")
+	if !strings.Contains(res.text, "branched") {
+		t.Errorf("expected branched feedback, got %q", res.text)
+	}
+
+	if m.opts.Session == parent {
+		t.Fatalf("session pointer did not switch")
+	}
+	if m.opts.Session.ParentID != parent.ID {
+		t.Errorf("child ParentID = %q, want %q", m.opts.Session.ParentID, parent.ID)
+	}
+	if m.turns != 0 || m.toolCalls != 0 {
+		t.Errorf("counters not reset: turns=%d tools=%d", m.turns, m.toolCalls)
+	}
+	// Both parent and child should exist on disk after the fork.
+	if _, err := store.Load(parent.ID); err != nil {
+		t.Errorf("parent missing after /branch: %v", err)
+	}
+	if _, err := store.Load(m.opts.Session.ID); err != nil {
+		t.Errorf("child missing after /branch: %v", err)
+	}
+}
+
+func TestCompact_ShortHistoryIsNoOp(t *testing.T) {
+	ag, _ := agent.New(agent.Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
+		SystemPrompt: "sys",
+	})
+	m := emptyModel()
+	m.opts.Agent = ag
+	res := runHandler(t, m, "/compact")
+	if !strings.Contains(res.text, "already short") {
+		t.Errorf("text = %q", res.text)
+	}
+	if res.extra != nil {
+		t.Errorf("expected no async cmd for short history")
+	}
+}
+
+func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "Summarise the conversation") {
+			t.Errorf("missing summariser prompt in body: %s", string(body))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{
+			"id":"x","model":"deepseek-chat",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"BRIEFING"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}
+		}`)
+	}))
+	defer srv.Close()
+
+	ag, _ := agent.New(agent.Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		InitialMessages: []deepseek.Message{
+			{Role: deepseek.RoleUser, Content: "u1"},
+			{Role: deepseek.RoleAssistant, Content: "a1"},
+			{Role: deepseek.RoleUser, Content: "u2"},
+			{Role: deepseek.RoleAssistant, Content: "a2"},
+		},
+	})
+	m := emptyModel()
+	m.opts.Agent = ag
+
+	res := runHandler(t, m, "/compact")
+	if res.extra == nil {
+		t.Fatalf("expected async cmd, got nil")
+	}
+	msg := res.extra()
+	done, ok := msg.(compactDoneMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type: %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("compact err: %v", done.err)
+	}
+	if !strings.Contains(done.summary, "BRIEFING") {
+		t.Errorf("summary = %q", done.summary)
+	}
+
+	// Feed it back through the handler to verify history swap.
+	cmds := m.handleCompactDone(done)
+	if len(cmds) == 0 {
+		t.Errorf("expected confirmation cmd")
+	}
+	hist := ag.Messages()
+	// system + user(summary) + assistant(ack) = 3.
+	if len(hist) != 3 {
+		t.Fatalf("post-compact history len = %d, want 3: %+v", len(hist), hist)
+	}
+	if !strings.Contains(hist[1].Content, "BRIEFING") {
+		t.Errorf("summary not folded into history: %q", hist[1].Content)
 	}
 }

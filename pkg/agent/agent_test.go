@@ -227,6 +227,95 @@ func TestAgent_NoTools_StraightAnswer(t *testing.T) {
 	}
 }
 
+func TestAgent_Reset_PreservesSystemDropsSystemInHistory(t *testing.T) {
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
+		SystemPrompt: "you are seek",
+	})
+	// Seed the agent with messages as if a few turns ran.
+	ag.messages = append(ag.messages,
+		deepseek.Message{Role: deepseek.RoleUser, Content: "first"},
+		deepseek.Message{Role: deepseek.RoleAssistant, Content: "reply"},
+	)
+
+	ag.Reset([]deepseek.Message{
+		{Role: deepseek.RoleSystem, Content: "should-be-dropped"},
+		{Role: deepseek.RoleUser, Content: "summary"},
+		{Role: deepseek.RoleAssistant, Content: "ack"},
+	})
+
+	got := ag.Messages()
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3 (system + 2)", len(got))
+	}
+	if got[0].Role != deepseek.RoleSystem || got[0].Content != "you are seek" {
+		t.Errorf("system prompt not preserved: %+v", got[0])
+	}
+	if got[1].Content != "summary" || got[2].Content != "ack" {
+		t.Errorf("history mismatch: %+v", got)
+	}
+}
+
+func TestAgent_Reset_EmptyHistoryLeavesJustSystem(t *testing.T) {
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
+		SystemPrompt: "sys",
+	})
+	ag.messages = append(ag.messages, deepseek.Message{Role: deepseek.RoleUser, Content: "x"})
+	ag.Reset(nil)
+	got := ag.Messages()
+	if len(got) != 1 || got[0].Role != deepseek.RoleSystem {
+		t.Errorf("expected [system], got %+v", got)
+	}
+}
+
+func TestAgent_Summarise_ReturnsContentDoesNotMutateHistory(t *testing.T) {
+	// Non-streaming Chat endpoint returns one assistant message.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify request body has both the real history AND the appended
+		// summariser user turn — i.e. Summarise didn't accidentally
+		// truncate context before asking.
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "earlier work") {
+			t.Errorf("request body missing seeded history: %s", string(body))
+		}
+		if !strings.Contains(string(body), "Summarise the conversation") {
+			t.Errorf("request body missing summariser prompt: %s", string(body))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{
+			"id":"x","model":"deepseek-chat",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"## briefing\n- goal: X"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":50,"completion_tokens":12,"total_tokens":62}
+		}`)
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	ag.messages = append(ag.messages,
+		deepseek.Message{Role: deepseek.RoleUser, Content: "do earlier work"},
+		deepseek.Message{Role: deepseek.RoleAssistant, Content: "ok"},
+	)
+	before := len(ag.messages)
+
+	summary, usage, err := ag.Summarise(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "briefing") {
+		t.Errorf("summary = %q", summary)
+	}
+	if usage.PromptTokens != 50 || usage.CompletionTokens != 12 {
+		t.Errorf("usage = %+v", usage)
+	}
+	if len(ag.messages) != before {
+		t.Errorf("Summarise mutated history: len %d → %d", before, len(ag.messages))
+	}
+}
+
 func TestAgent_UnknownToolErrorsCleanly(t *testing.T) {
 	// LLM asks to call a tool we didn't register.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

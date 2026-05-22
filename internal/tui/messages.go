@@ -3,6 +3,7 @@ package tui
 import (
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // approvalRequestMsg carries an inline approval prompt from the policy
@@ -29,3 +30,12 @@ type promptSubmittedMsg struct{ Text string }
 // in real time. We tick once a minute — enough resolution given the
 // off-peak boundary is a minute granularity.
 type statusTickMsg struct{}
+
+// compactDoneMsg fires when /compact's async Summarise call returns.
+// Update() handles it by swapping the agent's history via Reset and
+// persisting the now-compacted session.
+type compactDoneMsg struct {
+	summary string
+	usage   deepseek.Usage
+	err     error
+}

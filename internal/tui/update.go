@@ -88,6 +88,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		req := msg.req
 		m.pendingApproval = &req
 		m.input.Blur()
+
+	case compactDoneMsg:
+		cmds = append(cmds, m.handleCompactDone(msg)...)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -501,6 +504,45 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	}
 
 	return cmds
+}
+
+// handleCompactDone reacts to the summariser's response: on success,
+// swaps the agent's message history for a short user+assistant pair
+// that re-introduces the prior conversation as context, then persists.
+// On failure, surfaces the error and leaves history alone.
+func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
+	if msg.err != nil {
+		return []tea.Cmd{tea.Println(styleErr.Render("  ! compact failed: " + msg.err.Error()))}
+	}
+	if m.opts.Agent == nil {
+		return nil
+	}
+	// Fold the summariser's own usage into the cumulative tracker so
+	// the cost line in the status bar stays honest — the compact call
+	// is a real billed request.
+	if m.opts.Tracker != nil {
+		m.opts.Tracker.Record(msg.usage)
+	}
+
+	// The user→assistant bootstrap pair is what upstream pi / Claude
+	// Code does: the next real user message slots in cleanly after an
+	// assistant turn, no role-ordering weirdness for the API.
+	m.opts.Agent.Reset([]deepseek.Message{
+		{
+			Role:    deepseek.RoleUser,
+			Content: "Here is a summary of our earlier conversation. Continue from this context:\n\n" + msg.summary,
+		},
+		{
+			Role:    deepseek.RoleAssistant,
+			Content: "Understood — I have the context. Ready to continue.",
+		},
+	})
+
+	m.persistSession()
+
+	return []tea.Cmd{tea.Println(styleMuted.Render(fmt.Sprintf(
+		"compacted: history replaced with summary (compact call used %d prompt + %d completion tokens)",
+		msg.usage.PromptTokens, msg.usage.CompletionTokens)))}
 }
 
 // persistSession snapshots the agent's current message history,

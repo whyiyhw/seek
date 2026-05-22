@@ -74,6 +74,30 @@ func generateID(t time.Time) string {
 // Touch updates UpdatedAt to now.
 func (s *Session) Touch() { s.UpdatedAt = time.Now().UTC() }
 
+// Fork returns a new Session that branches off s: fresh ID, ParentID
+// pointing at s, an independent copy of the message slice, and reset
+// counters/usage. Model / Yolo / CWD / SystemPrompt are inherited so
+// the branch picks up where the parent left off.
+//
+// The parent is left untouched in memory; callers that want it on disk
+// at the fork point should Save it before forking.
+func (s *Session) Fork() *Session {
+	now := time.Now().UTC()
+	msgs := make([]deepseek.Message, len(s.Messages))
+	copy(msgs, s.Messages)
+	return &Session{
+		ID:           generateID(now),
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		Model:        s.Model,
+		Yolo:         s.Yolo,
+		CWD:          s.CWD,
+		SystemPrompt: s.SystemPrompt,
+		Messages:     msgs,
+		ParentID:     s.ID,
+	}
+}
+
 // Store reads and writes Sessions to a directory.
 type Store struct {
 	dir string

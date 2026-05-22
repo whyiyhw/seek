@@ -620,7 +620,7 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M3 Reasoner + 缓存** | `cache.Tracker` + `pricing` + `think` 工具（reasoner 基础） | ✅ `8264f52` |
 | **M4 TUI** | bubbletea；状态栏；slash 命令；reasoning 折叠；Markdown 渲染 | ✅ `9be599b` + polish |
 | **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
-| **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ⏳ 待启动（~2 周） |
+| **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | 🚧 进行中（见 §5.2） |
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ⏳ 待启动（~2.5 周） |
 | **M7 打磨** | RPC / JSON 模式；多行 paste 折叠；主题；帮助 overlay；自举 + benchmark；文档 | ⏳ 待启动（~1 周） |
 | **v1.0 发布** | | ≈ 当前进度 + 6.5 周 |
@@ -638,6 +638,18 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | `@` 文件路径补全 | ✅ | `edf443c` |
 | PRD / pitfalls / README 同步 | ✅ | 本次 commit |
 | **总计** | **8 个 commit，~2 周分散完成** | |
+
+### 5.2 M5 子任务展开
+
+| 子任务 | 状态 | commit |
+|---|---|---|
+| 会话持久化（`--resume` / `--continue` / `--list` / `--no-save`） | ✅ | `f13ec3f` |
+| `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | 本次 |
+| `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | 本次 |
+| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入） | ⏳ | |
+| MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
+| 双模型协作 skill（内置 `dual-model`，依赖 Skill loader） | ⏳ | |
+| `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
 
 ---
 
@@ -694,19 +706,16 @@ v1.0 发布前必须满足：
 
 ---
 
-## 8. 下一步（M4.5 启动）
+## 8. 下一步（M5 推进中）
 
-M0–M4 已交付（见 §5 状态列）。下一段工作是 **M4.5 TUI 稳定化**——其余里程碑（M5/M6/M7）依次顺延。
+M0–M4.5 已交付。M5 已启动，剩余子任务按依赖排序：
 
-M4.5 启动顺序建议（依赖关系排序）：
+1. **Skill loader**（§4.6）— 解锁内置 `dual-model` skill；多优先级目录扫描 + 内置 `Skill` 工具
+2. **双模型协作 skill** — 依赖 Skill loader；落地 PRD §1.5 提到的「reasoner-then-chat」差异化护城河
+3. **MCP client**（§4.4）— 最大、最独立的一块；JSON-RPC over stdio
+4. **`edit` diff 预览** — 与 per-call 审批（§4.10）配合
 
-1. **inline 模式改造**（§4.9）— 最大、最架构性的改动，先做。完成后所有后续 TUI 工作都基于 inline 模式
-2. **Esc 中断**（§4.11）— 短，与 inline 模式无强依赖，但放第二便于联调
-3. **per-call 审批**（§4.10）— 在 inline 之后做，y/N 提示本质上是 inline 模式下的特殊输入轮
-4. **↑/↓ 历史 + spinner + token 告警**— 一个迭代搞定
-5. **@ 路径补全**— 自己写下拉组件，单独一个迭代
-
-完成后开 M5（会话 + Skill + MCP）。
+完成 M5 后进入 M6（二等 Provider）。
 
 ## 9. 历史决策回顾（已落地）
 

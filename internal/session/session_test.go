@@ -153,6 +153,61 @@ func TestGenerateID_IsSortable(t *testing.T) {
 	}
 }
 
+func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
+	parent := New("deepseek-v4-flash", "/tmp", "sys", true)
+	parent.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "first"},
+		{Role: deepseek.RoleAssistant, Content: "answer"},
+	}
+	parent.Turns = 3
+	parent.ToolCalls = 2
+	parent.Usage = deepseek.Usage{PromptTokens: 100, CompletionTokens: 40}
+
+	child := parent.Fork()
+
+	if child.ID == parent.ID {
+		t.Errorf("child reused parent ID %s", child.ID)
+	}
+	if child.ParentID != parent.ID {
+		t.Errorf("ParentID = %q, want %q", child.ParentID, parent.ID)
+	}
+	if child.Model != parent.Model || child.CWD != parent.CWD ||
+		child.Yolo != parent.Yolo || child.SystemPrompt != parent.SystemPrompt {
+		t.Errorf("inherited metadata mismatch: %+v", child)
+	}
+	if child.Turns != 0 || child.ToolCalls != 0 || child.Usage.TotalTokens != 0 {
+		t.Errorf("counters not reset: turns=%d tools=%d usage=%+v",
+			child.Turns, child.ToolCalls, child.Usage)
+	}
+	if len(child.Messages) != len(parent.Messages) {
+		t.Fatalf("messages len: %d vs %d", len(child.Messages), len(parent.Messages))
+	}
+	// Mutating the child must not bleed into the parent — the whole
+	// point of forking is independent branches.
+	child.Messages[0].Content = "mutated"
+	if parent.Messages[0].Content != "first" {
+		t.Errorf("parent message leaked: %s", parent.Messages[0].Content)
+	}
+}
+
+func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
+	store := newStoreIn(t)
+	parent := New("m", ".", "", false)
+	parent.Messages = []deepseek.Message{{Role: deepseek.RoleUser, Content: "hi"}}
+	mustSave(t, store, parent)
+
+	child := parent.Fork()
+	mustSave(t, store, child)
+
+	loaded, err := store.Load(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ParentID != parent.ID {
+		t.Errorf("loaded ParentID = %q, want %q", loaded.ParentID, parent.ID)
+	}
+}
+
 func mustSave(t *testing.T, s *Store, sess *Session) {
 	t.Helper()
 	if err := s.Save(sess); err != nil {

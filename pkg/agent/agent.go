@@ -78,6 +78,66 @@ func (a *Agent) Messages() []deepseek.Message {
 	return out
 }
 
+// Reset replaces the agent's non-system message history with the
+// provided slice. The configured SystemPrompt is re-prepended verbatim;
+// any system messages in `history` are dropped (mirrors New()'s rule
+// — system role belongs to the agent config, not the conversation).
+//
+// Used by /compact to swap a long history for a short summary, and
+// any future "rewind" UI. NOT safe to call while a Prompt is in flight.
+func (a *Agent) Reset(history []deepseek.Message) {
+	a.messages = a.messages[:0]
+	if a.cfg.SystemPrompt != "" {
+		a.messages = append(a.messages, deepseek.Message{
+			Role:    deepseek.RoleSystem,
+			Content: a.cfg.SystemPrompt,
+		})
+	}
+	for _, m := range history {
+		if m.Role == deepseek.RoleSystem {
+			continue
+		}
+		a.messages = append(a.messages, m)
+	}
+}
+
+// summariserPrompt is appended as a user turn for the one-shot Chat
+// call that produces a /compact summary. Tuned for ~400 words — long
+// enough to preserve goals and decisions, short enough that the
+// compacted history fits comfortably in the cache prefix.
+const summariserPrompt = `Summarise the conversation so far into a compact briefing that lets a fresh assistant pick up where we left off:
+- The user's overall goal and any constraints they mentioned.
+- Key files, commands, or decisions made — name them explicitly.
+- Outstanding questions or next steps.
+
+Keep it under ~400 words. Bullet points where they help. Do not narrate that you are summarising; output only the briefing.`
+
+// Summarise runs a one-shot non-tool Chat over the current history and
+// returns the model's summary plus usage. The agent's own history is
+// NOT modified — callers decide whether to swap in via Reset(). Tools
+// are intentionally omitted from the request: we want prose, not a
+// function call.
+func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
+	history := append([]deepseek.Message{}, a.messages...)
+	history = append(history, deepseek.Message{
+		Role:    deepseek.RoleUser,
+		Content: summariserPrompt,
+	})
+
+	req := &deepseek.ChatRequest{
+		Model:    a.cfg.Model,
+		Messages: deepseek.StripReasoningContent(history),
+	}
+	resp, err := a.cfg.Client.Chat(ctx, req)
+	if err != nil {
+		return "", deepseek.Usage{}, err
+	}
+	if len(resp.Choices) == 0 {
+		return "", resp.Usage, errors.New("agent: summarise returned no choices")
+	}
+	return resp.Choices[0].Message.Content, resp.Usage, nil
+}
+
 // Prompt appends a user message and runs the agent loop. Events are emitted
 // on the returned channel; the channel is closed when the loop terminates
 // (final answer reached, max turns hit, ctx cancelled, or fatal error).
