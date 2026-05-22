@@ -1,0 +1,6 @@
+{
+  "description": "think tool must not be called with unknown fields (depth/levels/steps); strict-decode rejects them and a healthy model recovers on the next call.",
+  "max_turns": 15,
+  "max_unknown_field_errors": 0,
+  "min_think_calls": 1
+}

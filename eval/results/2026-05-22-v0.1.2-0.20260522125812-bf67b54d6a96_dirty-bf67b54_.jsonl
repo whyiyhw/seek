@@ -1,0 +1,76 @@
+{
+  "case": "redundant-tool-calls",
+  "pass": true,
+  "metrics": {
+    "unknown_field_errors": 0,
+    "think_calls": 0,
+    "total_tool_calls": 1,
+    "read_calls": 0,
+    "grep_calls": 1,
+    "list_dir_calls": 0,
+    "turns": 2
+  },
+  "prompt_tokens": 9137,
+  "completion_tokens": 102,
+  "elapsed_s": 4,
+  "failures": [],
+  "binary_version": "v0.1.2-0.20260522125812-bf67b54d6a96+dirty · bf67b54+",
+  "ran_at": "2026-05-22T13:00:16Z"
+}
+{
+  "case": "instruction-following",
+  "pass": true,
+  "metrics": {
+    "unknown_field_errors": 0,
+    "think_calls": 0,
+    "total_tool_calls": 2,
+    "read_calls": 1,
+    "grep_calls": 1,
+    "list_dir_calls": 0,
+    "turns": 3
+  },
+  "prompt_tokens": 14817,
+  "completion_tokens": 213,
+  "elapsed_s": 6,
+  "failures": [],
+  "binary_version": "v0.1.2-0.20260522125812-bf67b54d6a96+dirty · bf67b54+",
+  "ran_at": "2026-05-22T13:00:32Z"
+}
+{
+  "case": "redundant-tool-calls",
+  "pass": true,
+  "metrics": {
+    "unknown_field_errors": 0,
+    "think_calls": 0,
+    "total_tool_calls": 1,
+    "read_calls": 0,
+    "grep_calls": 1,
+    "list_dir_calls": 0,
+    "turns": 2
+  },
+  "prompt_tokens": 9220,
+  "completion_tokens": 109,
+  "elapsed_s": 4,
+  "failures": [],
+  "binary_version": "v0.1.2-0.20260522125812-bf67b54d6a96+dirty · bf67b54+",
+  "ran_at": "2026-05-22T13:00:36Z"
+}
+{
+  "case": "tool-args-hallucination",
+  "pass": true,
+  "metrics": {
+    "unknown_field_errors": 0,
+    "think_calls": 2,
+    "total_tool_calls": 16,
+    "read_calls": 12,
+    "grep_calls": 0,
+    "list_dir_calls": 1,
+    "turns": 15
+  },
+  "prompt_tokens": 190535,
+  "completion_tokens": 2112,
+  "elapsed_s": 94,
+  "failures": [],
+  "binary_version": "v0.1.2-0.20260522125812-bf67b54d6a96+dirty · bf67b54+",
+  "ran_at": "2026-05-22T13:02:10Z"
+}

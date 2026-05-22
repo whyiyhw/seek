@@ -1,0 +1,7 @@
+{
+  "description": "Small, single-file lookup should resolve in ≤5 tool calls with no think and ≤2 reads.",
+  "max_turns": 8,
+  "max_total_tool_calls": 5,
+  "max_think_calls": 0,
+  "max_read_calls": 2
+}

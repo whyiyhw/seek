@@ -1,0 +1,1 @@
+What does the New() function in internal/cache/cache.go return? Answer in one sentence after reading just enough to be sure. Do not plan, do not summarise the file — give me the return type and a short description.

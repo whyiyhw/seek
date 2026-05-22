@@ -1,0 +1,6 @@
+Find the Go function that writes a session file to disk in this repo. Report its file:line location and one sentence describing what it does. Answer concisely.
+
+Workflow rules — these are non-negotiable:
+1. Use grep FIRST to locate the symbol.
+2. Then read only the relevant lines (use offset).
+3. Do NOT use list_dir at any point. The repo layout is irrelevant; only the symbol matters.

@@ -1,0 +1,6 @@
+{
+  "description": "Honour explicit workflow rules in the prompt: grep before read, no list_dir.",
+  "max_turns": 10,
+  "max_list_dir_calls": 0,
+  "min_grep_calls": 1
+}
