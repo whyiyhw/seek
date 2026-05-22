@@ -12,37 +12,175 @@ import (
 	"golang.org/x/term"
 )
 
-// SeekPixelBanner is the pixel-art "seek" wordmark used by the startup
-// welcome screen. 17 inner columns × 5 letter rows in a 3×5 bitmap
-// font, wrapped in a rounded box (19 × 7 total).
+// seekRow is one line of the wordmark plus its colour tier.
 //
-// Letterform notes — each letter is 3 columns wide with 1-column gaps:
-//   S — full top/bottom bars, short middle bar (cols 1–2), lower-right
-//       curve at row 4 col 3.
-//   E — full top/bottom bars, short middle bar (cols 1–2), lower-left
-//       strut at row 4 col 1. Distinguished from S only by row 4.
-//   K — vertical strut on col 1, upper/lower arms at col 2, diagonal
-//       endpoints at col 3 on rows 1 and 5.
+// Layout — each letter is 5×7, with 1-col gaps between letters; the
+// whole wordmark is 23 chars wide before the 2-col left indent that
+// makes the banner align with the meta line below.
 //
-// The block character is U+2588 FULL BLOCK (█). Frame uses light box-
-// drawing characters; rounded corners (╭ ╮ ╰ ╯) over straight to look
-// less heavy than the previous double-line border.
-const SeekPixelBanner = `╭─────────────────╮
-│ ███ ███ ███ █ █ │
-│ █   █   █   ██  │
-│ ██  ██  ██  █   │
-│   █ █   █   ██  │
-│ ███ ███ ███ █ █ │
-╰─────────────────╯`
+// S has a 3-wide middle bar (cols 1–3) with the right side of the
+// curve at row 6 ending early (trailing space) and the top arch
+// starting late (leading space) — this is what reads as "S" rather
+// than a literal rectangle. E uses a 4-wide middle bar so it sits
+// distinguishable from a square. K's diagonals stair-step pixel-by-
+// pixel in 5 cols (anything narrower loses legibility).
+type seekRow struct {
+	text string // 23-char content row, blocks (█) on coloured tier
+	tier int    // 0 = lightest (top), 1 = mid, 2 = deepest (bottom)
+}
 
-// pixelBannerTagline is the one-liner that sits under the wordmark.
-// Kept short so it doesn't drag the welcome screen out vertically.
-const pixelBannerTagline = "  seek · deepseek-first coding agent"
+var seekRows = []seekRow{
+	{" ████ █████ █████ █   █", 0},
+	{"█     █     █     █  █ ", 0},
+	{"█     █     █     █ █  ", 0},
+	{" ███  ████  ████  ██   ", 1},
+	{"    █ █     █     █ █  ", 2},
+	{"    █ █     █     █  █ ", 2},
+	{"████  █████ █████ █   █", 2},
+}
 
-// VersionString returns the build identity for the running binary as a
-// single human-readable string. Pulled from runtime/debug.BuildInfo so
-// it picks up the module version (for released builds), the short git
-// hash, and a `+` suffix when the working tree was dirty at build time.
+// gradientCyan is the 3-tier light→deep cyan ramp the wordmark uses.
+// Index matches seekRow.tier. The middle tier (80) reads as the
+// transition; rows above use the brand cyan (117 = colourUser), rows
+// below use the deeper cyan to give the wordmark visual weight at the
+// bottom.
+var gradientCyan = [3]lipgloss.Color{
+	lipgloss.Color("117"), // top
+	lipgloss.Color("80"),  // middle
+	lipgloss.Color("38"),  // bottom
+}
+
+// bannerIndent is the 2-col left margin applied to every wordmark row.
+// Pinned as a const so animation-frame math and tests can rely on
+// "letter cell i starts at column = bannerIndent + i*(5+1)".
+const bannerIndent = "  "
+
+// letterEndCols are the (0-indexed, rune-counted) last column of each
+// letter cell IN THE INDENTED ROW. Used by bannerWithLettersRevealed
+// to drive the letter-reveal animation: at frame n, blocks beyond
+// letterEndCols[n-1] are masked to spaces.
+//
+//	col 2..6   = S      (letter 0)
+//	col 8..12  = E      (letter 1)
+//	col 14..18 = E      (letter 2)
+//	col 20..24 = K      (letter 3)
+var letterEndCols = [4]int{6, 12, 18, 24}
+
+// RenderPixelBanner returns the full wordmark with gradient colouring.
+// Blocks render in their row's tier colour; everything else stays
+// blank (terminal default background).
+func RenderPixelBanner() string {
+	return renderBanner(len(letterEndCols))
+}
+
+// renderBanner is the workhorse — `n` letters visible (clamped to
+// the wordmark's letter count). Per-rune styling because each row
+// uses a different colour tier and only the █ runes need colouring.
+func renderBanner(n int) string {
+	if n > len(letterEndCols) {
+		n = len(letterEndCols)
+	}
+	cutoff := -1
+	if n > 0 {
+		cutoff = letterEndCols[n-1]
+	}
+
+	var out strings.Builder
+	for i, row := range seekRows {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		style := lipgloss.NewStyle().Foreground(gradientCyan[row.tier])
+		// Convert to []rune so the loop index matches letterEndCols
+		// (which counts runes, not bytes — █ is 3 UTF-8 bytes, so
+		// a string-range loop would give byte indices that drift
+		// out of sync with the cutoff after the first letter).
+		runes := []rune(bannerIndent + row.text)
+		for j, r := range runes {
+			// Render as a coloured block only when the rune IS a
+			// block AND it's within the revealed cutoff. n=0 sets
+			// cutoff to -1 so the whole content area blanks; n>=4
+			// sets it past the last column so everything renders.
+			if r == '█' && j <= cutoff {
+				out.WriteString(style.Render(string(r)))
+			} else {
+				out.WriteByte(' ')
+			}
+		}
+	}
+	return out.String()
+}
+
+// bannerWithLettersRevealed returns the wordmark for animation frame
+// n, as raw text (no ANSI colour). Used by tests that want to assert
+// on layout without dealing with escape codes. The string is a
+// `\n`-joined block of rows including the indent.
+func bannerWithLettersRevealed(n int) string {
+	if n > len(letterEndCols) {
+		n = len(letterEndCols)
+	}
+	cutoff := -1
+	if n > 0 {
+		cutoff = letterEndCols[n-1]
+	}
+
+	var lines []string
+	for _, row := range seekRows {
+		runes := []rune(bannerIndent + row.text)
+		for j, r := range runes {
+			if r == '█' && j <= cutoff {
+				continue // keep
+			}
+			runes[j] = ' '
+		}
+		lines = append(lines, string(runes))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// animateBanner reveals the wordmark letter-by-letter using raw ANSI
+// cursor-up + reprint. ~80ms per letter, ~320ms total — long enough
+// to feel intentional, short enough that repeat invocations don't drag.
+//
+// MUST only be called when stdout is a TTY (no animation when piped).
+// Caller is responsible for that check.
+func animateBanner() {
+	const frameDelay = 80 * time.Millisecond
+	const bannerLines = 7 // matches len(seekRows)
+
+	// Hide the cursor during animation so it doesn't bounce around;
+	// defer restore covers panic paths too.
+	fmt.Print("\x1b[?25l")
+	defer fmt.Print("\x1b[?25h")
+
+	for n := 0; n <= len(letterEndCols); n++ {
+		if n > 0 {
+			// Move back up to the top of the previously-drawn banner
+			// so this frame overwrites it cleanly. \r returns to col 0;
+			// \x1b[<k>A goes up k lines.
+			fmt.Printf("\r\x1b[%dA", bannerLines)
+		}
+		fmt.Println(renderBanner(n))
+		if n < len(letterEndCols) {
+			time.Sleep(frameDelay)
+		}
+	}
+}
+
+// shouldAnimate gates the welcome animation. Returns false when
+// stdout isn't a TTY (piped, print mode, dumb terminal) or when
+// SEEK_NO_ANIM is set (CI, scripts, slow remote sessions).
+func shouldAnimate() bool {
+	if os.Getenv("SEEK_NO_ANIM") != "" {
+		return false
+	}
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// VersionString returns the build identity for the running binary as
+// a single human-readable string. Pulled from runtime/debug.BuildInfo
+// so it picks up the module version, short git hash, and `+` dirty
+// marker automatically.
 //
 // Examples:
 //
@@ -50,10 +188,6 @@ const pixelBannerTagline = "  seek · deepseek-first coding agent"
 //	"dev · abc1234+"     — local build, uncommitted changes
 //	"dev"                — local build, no VCS info
 //	"unknown"            — buildinfo unavailable (extremely rare)
-//
-// This exists at the TUI layer because the banner is the only place it
-// matters today; promote to its own package the moment anyone else
-// needs it.
 func VersionString() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -62,16 +196,15 @@ func VersionString() string {
 	return formatVersion(info)
 }
 
-// formatVersion is the pure-function core of VersionString — broken
-// out so tests can construct synthetic BuildInfo values without
-// depending on the real build environment.
+// formatVersion is the pure-function core of VersionString. Split
+// out so tests can construct synthetic BuildInfo without depending
+// on the real build environment.
 func formatVersion(info *debug.BuildInfo) string {
 	version := info.Main.Version
-	// "(devel)" is what go-build emits when there's no tag. Pseudo-
-	// versions of the form "v0.0.0-YYYYMMDDHHMMSS-<hash>" mean the
-	// same thing (the module hasn't been tagged); we'd rather show
-	// "dev" than a 26-character timestamp string. A "+dirty" suffix
-	// on the pseudo-version is redundant with our own modified flag.
+	// "(devel)" is go-build's marker for a tag-less build. Pseudo-
+	// versions like "v0.0.0-YYYYMMDDHHMMSS-<hash>" mean the same
+	// thing — collapse both to "dev" so the line stays readable;
+	// the short hash from vcs.revision carries the actual identity.
 	switch {
 	case version == "" || version == "(devel)":
 		version = "dev"
@@ -99,141 +232,29 @@ func formatVersion(info *debug.BuildInfo) string {
 	}
 	suffix := ""
 	if modified {
-		// "+" marker mirrors how git diff-index shows a dirty tree.
 		suffix = "+"
 	}
 	return fmt.Sprintf("%s · %s%s", version, rev, suffix)
-}
-
-// RenderPixelBanner returns the wordmark with lipgloss styling: blocks
-// in DeepSeek-brand cyan, frame in muted grey. Per-rune colouring is
-// simple and fast enough for a one-time startup print; performance
-// here is irrelevant.
-func RenderPixelBanner() string {
-	return renderBannerString(SeekPixelBanner)
-}
-
-func renderBannerString(raw string) string {
-	block := lipgloss.NewStyle().Foreground(colourUser)
-	frame := lipgloss.NewStyle().Foreground(colourMuted)
-
-	var out strings.Builder
-	for i, line := range strings.Split(raw, "\n") {
-		if i > 0 {
-			out.WriteByte('\n')
-		}
-		for _, r := range line {
-			if r == '█' {
-				out.WriteString(block.Render(string(r)))
-			} else {
-				out.WriteString(frame.Render(string(r)))
-			}
-		}
-	}
-	return out.String()
-}
-
-// letterEndCols are the (1-indexed, rune-counted) right-edges of each
-// letter cell inside the 17-col content row. Used by
-// bannerWithLettersRevealed to mask out cells beyond the current
-// animation frame. See banner geometry comment on SeekPixelBanner.
-var letterEndCols = [4]int{4, 8, 12, 16} // S, E, E, K
-
-// bannerWithLettersRevealed returns the banner with letters 0..n-1
-// rendered as blocks and the rest blanked to spaces (frame stays
-// intact). n==0 returns just the empty frame; n>=4 returns the full
-// SeekPixelBanner unchanged.
-//
-// Driven by the constants above so a letter-count change in the
-// wordmark only needs updates here, not at every call site.
-func bannerWithLettersRevealed(n int) string {
-	if n >= len(letterEndCols) {
-		return SeekPixelBanner
-	}
-
-	cutoff := -1 // negative = blank everything inside the frame
-	if n > 0 {
-		cutoff = letterEndCols[n-1]
-	}
-
-	lines := strings.Split(SeekPixelBanner, "\n")
-	out := make([]string, len(lines))
-	for i, line := range lines {
-		if i == 0 || i == len(lines)-1 {
-			out[i] = line // borders unchanged
-			continue
-		}
-		runes := []rune(line)
-		// Inner content runs from index 1 to len(runes)-2; index 0 and
-		// the last index are the left/right frame chars.
-		for j := 1; j < len(runes)-1; j++ {
-			if j > cutoff && runes[j] == '█' {
-				runes[j] = ' '
-			}
-		}
-		out[i] = string(runes)
-	}
-	return strings.Join(out, "\n")
-}
-
-// animateBanner reveals the wordmark letter-by-letter using raw ANSI
-// cursor-up + reprint. ~80ms per letter, ~320ms total — enough to feel
-// intentional, short enough that repeat invocations don't drag.
-//
-// MUST only be called when stdout is a TTY (no animation when piped).
-// Caller is responsible for that check.
-func animateBanner() {
-	const frameDelay = 80 * time.Millisecond
-	const bannerLines = 7 // matches SeekPixelBanner row count
-
-	// Hide cursor during the animation so the user doesn't see it
-	// jumping around; restore at the end (and best-effort restore via
-	// defer in case panic).
-	fmt.Print("\x1b[?25l")
-	defer fmt.Print("\x1b[?25h")
-
-	for n := 0; n <= len(letterEndCols); n++ {
-		if n > 0 {
-			// Move back up to the top of the previously-drawn banner
-			// so this frame overwrites it cleanly. \r returns to col
-			// 0; \x1b[<k>A goes up k lines.
-			fmt.Printf("\r\x1b[%dA", bannerLines)
-		}
-		fmt.Println(renderBannerString(bannerWithLettersRevealed(n)))
-		if n < len(letterEndCols) {
-			time.Sleep(frameDelay)
-		}
-	}
-}
-
-// shouldAnimate decides whether to play the welcome animation. Returns
-// false when stdout isn't a TTY (piped, print mode, dumb terminal) or
-// when SEEK_NO_ANIM is set (CI, scripts, slow remote sessions).
-func shouldAnimate() bool {
-	if os.Getenv("SEEK_NO_ANIM") != "" {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // PrintPixelWelcomeBanner prints the welcome screen. Called by
 // tui.Run BEFORE bubbletea takes over so the lines land in scrollback
 // above the live region.
 //
-// Layout:
+// Layout (option-B "pixel art done seriously"):
 //
 //	<blank>
-//	<wordmark>                  ← animated when stdout is a TTY
-//	<tagline>
-//	  <version · hash>
+//	<5×7 wordmark with cyan gradient>     ← animated when stdout is a TTY
 //	<blank>
-//	  cwd … · model … · tier … [· YOLO] [· 🌙 in Nm]
-//	  type /help for commands · Ctrl+C to quit
+//	  <cwd>
+//	  <model · tier [· YOLO] · version>
 //	<blank>
+//
+// No tagline, no help line, no off-peak countdown — the status bar
+// at the bottom already carries the live info. Welcome should set
+// the brand, not be a dashboard.
 func PrintPixelWelcomeBanner(opts Options) {
 	tier := pricing.CurrentTier(time.Now())
-	_, nextAt := pricing.NextTransition(time.Now())
-
 	muted := lipgloss.NewStyle().Foreground(colourMuted)
 
 	fmt.Println()
@@ -242,28 +263,24 @@ func PrintPixelWelcomeBanner(opts Options) {
 	} else {
 		fmt.Println(RenderPixelBanner())
 	}
-	fmt.Println(muted.Render(pixelBannerTagline))
-	fmt.Println(muted.Render("  " + VersionString()))
 	fmt.Println()
 
-	// Session metadata: one compact line, indented 2 cols so it visually
-	// aligns with the wordmark's interior.
-	meta := fmt.Sprintf("cwd %s  ·  model %s  ·  tier %s",
-		opts.CWD,
-		opts.Model,
-		pricing.TierLabel(tier))
-	if opts.Yolo {
-		meta += "  ·  YOLO"
-	}
-	// Off-peak countdown, when relevant.
+	// Two compact meta lines. cwd alone on its own line because it's
+	// the thing the user actually needs to verify ("am I in the right
+	// project?"); model/tier/version share a status line.
+	fmt.Println(muted.Render("  " + opts.CWD))
+
+	tierLabel := pricing.TierLabel(tier)
 	if tier != pricing.TierOffPeak {
-		dur := nextAt.Sub(time.Now())
-		if dur > 0 {
-			mins := int(dur.Minutes())
-			meta += fmt.Sprintf("  ·  🌙 in %dm", mins)
-		}
+		tierLabel = "☀️ " + tierLabel
+	} else {
+		tierLabel = "🌙 " + tierLabel
 	}
-	fmt.Println(muted.Render("  " + meta))
-	fmt.Println(muted.Render("  type /help for commands  ·  Ctrl+C to quit"))
+	status := fmt.Sprintf("%s  ·  %s", opts.Model, tierLabel)
+	if opts.Yolo {
+		status += "  ·  YOLO"
+	}
+	status += "  ·  " + VersionString()
+	fmt.Println(muted.Render("  " + status))
 	fmt.Println()
 }
