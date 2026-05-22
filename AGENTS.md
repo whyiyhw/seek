@@ -37,8 +37,23 @@ If you're not sure: log it. Cheap to add, expensive to recover from memory month
 - **New tools** live at `internal/tools/<name>/` with a `New(...)` constructor. If the tool can mutate the filesystem or shell, inject a `*permission.Policy`.
 - **Permission denials are tool results, not fatal errors** (`internal/permission.ErrDenied`). The agent feeds the message back to the LLM so it can ask the user — never bypass that flow.
 
-## Testing
+## Testing (load-bearing)
 
+Tests are how seek stays trustworthy. Treat coverage of failure paths as part of the deliverable, not a follow-up.
+
+**The bar: test the failure modes, not just the happy path.** Happy-path-only suites give false confidence and have already let real bugs ship — commit `986a485` was an orphan-tool_calls regression that sat in `pkg/agent` under green CI for weeks because nothing exercised mid-stream cancellation. Every released feature ships with tests for, where applicable:
+
+- **Cancellation** — any ctx-aware function gets a `ctx.Done` test
+- **Mid-loop interruption** — streams/event-loops cut at a partial state
+- **Malformed input** — LLM-produced JSON, partial SSE, missing required fields
+- **Concurrent access** — `-race` is on by default in CI; if a function can be hit concurrently, verify it
+- **Persistence round-trip + recovery** — write, reload, AND verify corrupt-state repair (see `session.Repair`)
+
+If one of these doesn't apply, fine. If you skipped a test for one that does, say why in the PR description. "Real-API behaviour only" is valid; "didn't have time" is not.
+
+Coverage is a weak signal but 0% on a function is a strong one. Before claiming a feature done: `go test -cover ./...` and look at anything you touched that's not exercised.
+
+Procedurally:
 - `go test ./...` before every commit. CI runs `-race` on three OSes.
 - Tests use `httptest` fake DeepSeek backends — no real API key required for the suite.
 - For real-API smokes, write the key to `.env` (gitignored) and source it; never put it on the command line.
