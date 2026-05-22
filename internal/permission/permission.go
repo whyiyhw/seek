@@ -30,6 +30,11 @@ type Action struct {
 	Kind    Kind
 	Path    string // for write/edit
 	Command string // for bash; only first ~80 chars are shown in errors
+
+	// Diff is an optional unified diff string populated by the edit tool
+	// before it calls Check. When non-empty the TUI renders it alongside
+	// the y/N approval prompt so the user can see exactly what will change.
+	Diff string
 }
 
 // ApprovalRequest is what the TUI consumes when ModeAsk needs a user

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/diff"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
 )
@@ -65,10 +66,6 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		a.ExpectedReplacements = 1
 	}
 
-	if err := t.policy.Check(permission.Action{Kind: permission.KindEdit, Path: a.Path}); err != nil {
-		return "", err
-	}
-
 	clean := filepath.Clean(a.Path)
 	orig, err := os.ReadFile(clean)
 	if err != nil {
@@ -83,6 +80,20 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	}
 
 	updated := strings.ReplaceAll(content, a.OldString, a.NewString)
+
+	// Compute unified diff BEFORE writing so the approval prompt can show
+	// exactly what will change. The diff is also included in the tool result
+	// so the model gets a structured summary of the change it just made.
+	udiff := diff.Unified(content, updated, filepath.Base(clean))
+
+	if err := t.policy.Check(permission.Action{
+		Kind: permission.KindEdit,
+		Path: a.Path,
+		Diff: udiff,
+	}); err != nil {
+		return "", err
+	}
+
 	if err := os.WriteFile(clean, []byte(updated), 0o644); err != nil {
 		return "", fmt.Errorf("edit: %w", err)
 	}
@@ -91,21 +102,11 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	if err != nil {
 		abs = clean
 	}
-	return fmt.Sprintf("edited %s: %d replacement(s), %d -> %d bytes\n%s",
-		abs, got, len(orig), len(updated), diffPreview(a.OldString, a.NewString)), nil
-}
-
-// diffPreview renders a short summary of the change. For long strings we
-// truncate to keep the tool result compact (tool results enter the next
-// turn's prompt, so verbose previews directly inflate token cost).
-func diffPreview(oldS, newS string) string {
-	return fmt.Sprintf("- %s\n+ %s", shortenInline(oldS, 200), shortenInline(newS, 200))
-}
-
-func shortenInline(s string, n int) string {
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	if len(s) <= n {
-		return s
+	result := fmt.Sprintf("edited %s: %d replacement(s), %d → %d bytes",
+		abs, got, len(orig), len(updated))
+	if udiff != "" {
+		result += "\n" + udiff
 	}
-	return s[:n] + "…"
+	return result, nil
 }
+

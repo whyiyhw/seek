@@ -197,9 +197,8 @@ func (m Model) renderPathPicker() string {
 }
 
 // renderApprovalPrompt draws the inline y/N/a chooser shown while a
-// dangerous tool waits for a decision. Layout is intentionally compact
-// — same vertical real estate as the slash menu so the input doesn't
-// jump around.
+// dangerous tool waits for a decision. For edit actions it also renders
+// the unified diff so the user can see exactly what will change.
 func (m Model) renderApprovalPrompt() string {
 	req := m.pendingApproval
 	if req == nil {
@@ -212,9 +211,49 @@ func (m Model) renderApprovalPrompt() string {
 	default:
 		subject = fmt.Sprintf("%s %q (outside CWD)", req.Action.Kind, req.Action.Path)
 	}
-	header := styleApprovalHeader.Render("⚠ approve " + subject + "?")
-	hint := styleMuted.Render("  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny")
-	return header + "\n" + hint + "\n"
+
+	var sb strings.Builder
+	sb.WriteString(styleApprovalHeader.Render("⚠ approve " + subject + "?"))
+	sb.WriteString("\n")
+
+	if req.Action.Diff != "" {
+		sb.WriteString(renderDiff(req.Action.Diff, m.width))
+	}
+
+	sb.WriteString(styleMuted.Render("  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// renderDiff colourises a unified diff for inline display in the TUI.
+// Lines starting with '+' are green, '-' are red, '@' are cyan, others muted.
+// Capped at maxDiffLines to avoid shoving the input box off screen.
+func renderDiff(udiff string, _ int) string {
+	const maxDiffLines = 24
+	lines := strings.Split(strings.TrimRight(udiff, "\n"), "\n")
+	if len(lines) > maxDiffLines {
+		lines = lines[:maxDiffLines]
+		lines = append(lines, styleMuted.Render(fmt.Sprintf("  … (%d more lines)", len(strings.Split(udiff, "\n"))-maxDiffLines)))
+	}
+	styleAdd := lipgloss.NewStyle().Foreground(colourOk)
+	styleDel := lipgloss.NewStyle().Foreground(colourToolErr)
+	styleAt  := lipgloss.NewStyle().Foreground(colourUser)
+
+	var sb strings.Builder
+	for _, l := range lines {
+		switch {
+		case strings.HasPrefix(l, "+"):
+			sb.WriteString(styleAdd.Render(l))
+		case strings.HasPrefix(l, "-"):
+			sb.WriteString(styleDel.Render(l))
+		case strings.HasPrefix(l, "@"):
+			sb.WriteString(styleAt.Render(l))
+		default:
+			sb.WriteString(styleMuted.Render(l))
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // renderCommandMenu renders the slash-command dropdown. Selected row
