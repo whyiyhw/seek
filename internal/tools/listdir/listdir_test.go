@@ -117,6 +117,37 @@ func TestListDir_MissingPath(t *testing.T) {
 	}
 }
 
+// TestListDir_UnknownFieldSurfacesActionableError is the regression
+// for the real-world failure where the model called
+//
+//	list_dir({"directory": "/path", "depth": 1})
+//
+// — using `directory` instead of `path`. Pre-fix the error was the
+// useless "list_dir: path is required" (because Go's json.Unmarshal
+// silently drops unknown fields). With DisallowUnknownFields the
+// model now sees `unknown field "directory"` plus a list of the
+// valid fields, and the next call gets it right.
+func TestListDir_UnknownFieldSurfacesActionableError(t *testing.T) {
+	_, err := New().Execute(context.Background(),
+		json.RawMessage(`{"directory":"/tmp","depth":1}`))
+	if err == nil {
+		t.Fatal("expected unknown-field error")
+	}
+	msg := err.Error()
+	// Must name the bad field — that's the diagnostic the model
+	// needs to self-correct.
+	if !strings.Contains(msg, "directory") {
+		t.Errorf("error should name the unknown field 'directory': %q", msg)
+	}
+	// Must enumerate the valid fields so the model knows what to
+	// send next.
+	for _, valid := range []string{"path", "depth", "show_hidden"} {
+		if !strings.Contains(msg, valid) {
+			t.Errorf("error should list valid field %q: %q", valid, msg)
+		}
+	}
+}
+
 func TestListDir_DirsBeforeFiles(t *testing.T) {
 	root := setup(t)
 	out, err := run(t, Args{Path: root})

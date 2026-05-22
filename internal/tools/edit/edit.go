@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 var schemaBytes = []byte(`{
@@ -48,14 +49,14 @@ func (Tool) Schema() json.RawMessage { return schemaBytes }
 
 func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("edit: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("edit", raw, &a, "path", "old_string", "new_string", "expected_replacements"); err != nil {
+		return "", err
 	}
 	if a.Path == "" {
-		return "", fmt.Errorf("edit: path is required")
+		return "", tools.MissingField("edit", "path", raw, "path", "old_string", "new_string", "expected_replacements")
 	}
 	if a.OldString == "" {
-		return "", fmt.Errorf("edit: old_string is required and must be non-empty")
+		return "", tools.MissingField("edit", "old_string (must be non-empty)", raw, "path", "old_string", "new_string", "expected_replacements")
 	}
 	if a.OldString == a.NewString {
 		return "", fmt.Errorf("edit: old_string equals new_string — no-op")

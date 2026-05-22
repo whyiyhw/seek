@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -70,14 +71,14 @@ const (
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("fim_complete: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("fim_complete", raw, &a, "path", "before_marker", "after_marker", "max_tokens"); err != nil {
+		return "", err
 	}
 	if a.Path == "" {
-		return "", fmt.Errorf("fim_complete: path is required")
+		return "", tools.MissingField("fim_complete", "path", raw, "path", "before_marker", "after_marker", "max_tokens")
 	}
 	if a.BeforeMarker == "" {
-		return "", fmt.Errorf("fim_complete: before_marker is required")
+		return "", tools.MissingField("fim_complete", "before_marker", raw, "path", "before_marker", "after_marker", "max_tokens")
 	}
 	if a.MaxTokens <= 0 {
 		a.MaxTokens = defaultMaxTokens

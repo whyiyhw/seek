@@ -11,10 +11,10 @@ package skilltool
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 // Tool name kept TitleCased ("Skill") to match the convention in
@@ -57,11 +57,11 @@ type args struct {
 
 func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("Skill: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("Skill", raw, &a, "name"); err != nil {
+		return "", err
 	}
 	if a.Name == "" {
-		return "", errors.New("Skill: `name` is required")
+		return "", tools.MissingField("Skill", "name", raw, "name")
 	}
 	if t.set == nil {
 		return "", fmt.Errorf("Skill: no skills are loaded in this session")

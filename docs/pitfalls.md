@@ -102,6 +102,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: a permission gate is a synchronization primitive whether you designed it as one or not. The moment any field is mutable post-construction, it needs the mutex. Discovered by writing a `-race` test specifically for the concurrent path, which is exactly the discipline AGENTS.md now requires
 - **Refs**: `internal/permission/permission.go:Policy`; test `TestCheck_ConcurrentCallsRaceFree`
 
+### `json.Unmarshal` silently drops unknown fields — LLM typos produce useless errors
+- **Saw**: model called `list_dir({"directory": "/path", "depth": 1})` (wrong field name). Error returned: `list_dir: path is required` — no mention of `directory` being unknown, no hint about valid fields. Model retried with identical args and hit the same wall
+- **Why**: Go's `json.Unmarshal` drops unknown fields silently. The `directory` key was ignored, `path` stayed zero-value, and the following nil check produced the generic "required" error with zero diagnostic value
+- **Fix**: `internal/tools/tool.go` introduces `UnmarshalStrict` (uses `json.Decoder.DisallowUnknownFields`) and `MissingField` helpers. Error now reads: `list_dir: bad arguments: json: unknown field "directory". Got: {"directory":...}. Valid fields: path, depth, show_hidden`. All eight tool `Execute` methods updated. Regression test: `TestListDir_UnknownFieldSurfacesActionableError`. Commit (this one)
+- **Lesson**: any `json.Unmarshal` target in an LLM tool boundary must use `DisallowUnknownFields`. Silent drops make self-correction loops impossible — the model has no information to act on
+- **Refs**: `internal/tools/tool.go:UnmarshalStrict`; `internal/tools/listdir/listdir_test.go`
+
 ## DeepSeek API
 
 ### Reasoner rejects requests that retain prior `reasoning_content`

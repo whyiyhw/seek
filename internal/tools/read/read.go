@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 // schemaBytes is the JSON Schema for the `read` tool's arguments. Frozen
@@ -53,11 +55,11 @@ const (
 
 func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("read: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset", "limit"); err != nil {
+		return "", err
 	}
 	if a.Path == "" {
-		return "", fmt.Errorf("read: path is required")
+		return "", tools.MissingField("read", "path", raw, "path", "offset", "limit")
 	}
 	if a.Offset < 0 {
 		return "", fmt.Errorf("read: offset must be >= 0")

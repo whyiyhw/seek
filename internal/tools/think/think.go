@@ -150,11 +150,11 @@ func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, push func(
 // toggles between them.
 func parseArgs(raw json.RawMessage) (sys, userMsg string, err error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", "", fmt.Errorf("think: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("think", raw, &a, "task", "reflect", "context"); err != nil {
+		return "", "", err
 	}
 	if a.Task == "" {
-		return "", "", fmt.Errorf("think: task is required")
+		return "", "", tools.MissingField("think", "task", raw, "task", "reflect", "context")
 	}
 	sys = planSystem
 	if a.Reflect {

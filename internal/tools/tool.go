@@ -8,11 +8,13 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -136,6 +138,49 @@ func (r *Registry) Names() []string {
 // not in the registry. Distinguished from execution errors so the agent can
 // feed back a clear hint.
 var ErrUnknownTool = errors.New("unknown tool")
+
+// UnmarshalStrict decodes raw into v with DisallowUnknownFields, the
+// shape every tool's Execute uses for its argument parse. The reason
+// it's strict (vs. encoding/json's default of silently dropping
+// unknown fields):
+//
+// LLMs occasionally guess field names — "directory" instead of "path",
+// "file" instead of "path", "query" instead of "task". With the loose
+// default, those typos drop on the floor and surface as "required
+// field X is empty", which doesn't point at the actual mistake. The
+// model wastes a turn guessing what to change.
+//
+// With strict parsing the error becomes `json: unknown field "..."`,
+// and we wrap it with the truncated raw input + the list of valid
+// fields so the next call gets it right in one shot.
+//
+// validFields is informational only — used to build the error
+// message; not enforced beyond the json struct tags on v.
+func UnmarshalStrict(toolName string, raw json.RawMessage, v any, validFields ...string) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("%s: bad arguments: %v. Got: %s. Valid fields: %s",
+			toolName, err, truncateArgs(string(raw), 200), strings.Join(validFields, ", "))
+	}
+	return nil
+}
+
+// MissingField is the standard "required field X is empty/missing"
+// error used after a successful UnmarshalStrict. Same rationale as
+// the strict parse: include the raw input + valid field list so the
+// model has everything it needs to recover in one turn.
+func MissingField(toolName, field string, raw json.RawMessage, validFields ...string) error {
+	return fmt.Errorf("%s: %s is required. Got: %s. Valid fields: %s",
+		toolName, field, truncateArgs(string(raw), 200), strings.Join(validFields, ", "))
+}
+
+func truncateArgs(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
 
 // Dispatch runs a single tool call and returns its result (or error).
 // Lookup-fail is wrapped with ErrUnknownTool so callers can distinguish.

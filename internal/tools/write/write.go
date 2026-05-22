@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 var schemaBytes = []byte(`{
@@ -43,11 +44,11 @@ func (Tool) Schema() json.RawMessage { return schemaBytes }
 
 func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("write: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("write", raw, &a, "path", "content"); err != nil {
+		return "", err
 	}
 	if a.Path == "" {
-		return "", fmt.Errorf("write: path is required")
+		return "", tools.MissingField("write", "path", raw, "path", "content")
 	}
 
 	if err := t.policy.Check(permission.Action{Kind: permission.KindWrite, Path: a.Path}); err != nil {

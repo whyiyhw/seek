@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 var schemaBytes = []byte(`{
@@ -50,11 +52,11 @@ const (
 
 func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("list_dir: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("list_dir", raw, &a, "path", "depth", "show_hidden"); err != nil {
+		return "", err
 	}
 	if a.Path == "" {
-		return "", fmt.Errorf("list_dir: path is required")
+		return "", tools.MissingField("list_dir", "path", raw, "path", "depth", "show_hidden")
 	}
 	if a.Depth <= 0 {
 		a.Depth = defaultDepth

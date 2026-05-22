@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/tools"
 )
 
 var schemaBytes = []byte(`{
@@ -52,11 +53,11 @@ func (Tool) Schema() json.RawMessage { return schemaBytes }
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("bash: bad arguments: %w", err)
+	if err := tools.UnmarshalStrict("bash", raw, &a, "command", "timeout_ms"); err != nil {
+		return "", err
 	}
 	if a.Command == "" {
-		return "", fmt.Errorf("bash: command is required")
+		return "", tools.MissingField("bash", "command", raw, "command", "timeout_ms")
 	}
 
 	if err := t.policy.Check(permission.Action{Kind: permission.KindBash, Command: a.Command}); err != nil {
