@@ -20,9 +20,10 @@ import (
 type Kind string
 
 const (
-	KindBash  Kind = "bash"
-	KindWrite Kind = "write"
-	KindEdit  Kind = "edit"
+	KindBash           Kind = "bash"
+	KindWrite          Kind = "write"
+	KindEdit           Kind = "edit"
+	KindMemoryRemember Kind = "memory_remember"
 )
 
 // Action describes one attempt to perform a guarded operation.
@@ -35,6 +36,13 @@ type Action struct {
 	// before it calls Check. When non-empty the TUI renders it alongside
 	// the y/N approval prompt so the user can see exactly what will change.
 	Diff string
+
+	// MemoryName / MemoryTagline are populated by memory_remember so the
+	// TUI can render "save memory: NAME — TAGLINE" alongside the y/N
+	// prompt. The full content body is intentionally NOT here — name +
+	// tagline is enough decision context, and content can be paragraphs.
+	MemoryName    string
+	MemoryTagline string
 }
 
 // ApprovalRequest is what the TUI consumes when ModeAsk needs a user
@@ -176,6 +184,14 @@ func (p *Policy) Check(a Action) error {
 		if !inside {
 			dangerous = true
 		}
+	case KindMemoryRemember:
+		// Memory writes are always dangerous — there is no "safe"
+		// path equivalent. The TUI shows name+tagline so the user
+		// can decide; yolo skips the ask, ModeDeny refuses.
+		if a.MemoryName == "" {
+			return fmt.Errorf("%w: memory_remember requires a name", ErrDenied)
+		}
+		dangerous = true
 	default:
 		return fmt.Errorf("%w: unknown action kind %q", ErrDenied, a.Kind)
 	}
@@ -196,6 +212,9 @@ func (p *Policy) Check(a Action) error {
 	case KindBash:
 		return fmt.Errorf("%w: bash is gated; re-run seek with --yolo, or run the command yourself: %s",
 			ErrDenied, shorten(a.Command, 80))
+	case KindMemoryRemember:
+		return fmt.Errorf("%w: memory_remember %q is gated; re-run seek with --yolo, or save the entry yourself",
+			ErrDenied, a.MemoryName)
 	default:
 		return fmt.Errorf("%w: %s on %q is outside the working directory %q — re-run with --yolo to allow",
 			ErrDenied, a.Kind, a.Path, cwd)

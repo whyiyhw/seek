@@ -15,18 +15,18 @@ import (
 // View renders the LIVE region only (no scrollback — that belongs to
 // the terminal). Layout (idle welcome):
 //
-//   [padding lines — fill terminal height]
-//   > input
-//   status: …
+//	[padding lines — fill terminal height]
+//	> input
+//	status: …
 //
 // Layout (active):
 //
-//   [active tools]    ← one line each, with a spinner
-//   [streaming assistant text]
-//   [streaming reasoning, when showReasoning]
-//   ── separator ─────────────────
-//   > input
-//   status: …
+//	[active tools]    ← one line each, with a spinner
+//	[streaming assistant text]
+//	[streaming reasoning, when showReasoning]
+//	── separator ─────────────────
+//	> input
+//	status: …
 func (m Model) View() string {
 	if !m.ready {
 		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
@@ -319,6 +319,17 @@ func (m Model) renderApprovalPrompt() string {
 	switch req.Action.Kind {
 	case permission.KindBash:
 		subject = fmt.Sprintf("bash %q", truncateOneLine(req.Action.Command, 100))
+	case permission.KindMemoryRemember:
+		// Tagline is the one-line summary — show it next to the name so
+		// the user knows what they're committing to project memory
+		// without having to read the (possibly long) content body.
+		if req.Action.MemoryTagline != "" {
+			subject = fmt.Sprintf("save memory %q — %s",
+				req.Action.MemoryName,
+				truncateOneLine(req.Action.MemoryTagline, 100))
+		} else {
+			subject = fmt.Sprintf("save memory %q", req.Action.MemoryName)
+		}
 	default:
 		subject = fmt.Sprintf("%s %q (outside CWD)", req.Action.Kind, req.Action.Path)
 	}
@@ -348,7 +359,7 @@ func renderDiff(udiff string, _ int) string {
 	}
 	styleAdd := lipgloss.NewStyle().Foreground(colourOk)
 	styleDel := lipgloss.NewStyle().Foreground(colourToolErr)
-	styleAt  := lipgloss.NewStyle().Foreground(colourUser)
+	styleAt := lipgloss.NewStyle().Foreground(colourUser)
 
 	var sb strings.Builder
 	for _, l := range lines {
@@ -664,4 +675,3 @@ func (m Model) renderPastedPlaceholder() string {
 	}
 	return styleMuted.Render("> " + label)
 }
-
