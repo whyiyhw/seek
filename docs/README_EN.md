@@ -1,4 +1,12 @@
-# seek
+```
+ ████ █████ █████ █   █
+█     █     █     █  █
+█     █     █     █ █
+ ███  ████  ████  ██
+    █ █     █     █ █
+    █ █     █     █  █
+████  █████ █████ █   █
+```
 
 **seek** is a coding agent powered by [DeepSeek](https://deepseek.com). It runs in your terminal, reads/writes files, executes commands, and helps you get work done — without leaving your keyboard.
 
