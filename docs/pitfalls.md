@@ -136,6 +136,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: renamed to `clip`. Commit `8264f52`
 - **Lesson**: check `go doc builtin` before naming a function. Builtins that are also common English words (`cap`, `len`, `new`, `make`, `copy`, `close`) are easy to step on
 
+### Literal UTF-8 BOM in a Go string literal is a compile error
+- **Saw**: `internal/skill/skill.go` failed to build with `illegal byte order mark (syntax)` at the line `strings.TrimPrefix(string(data), "<BOM>")`
+- **Why**: Go's scanner permits a BOM only at the very start of a source file. Anywhere else — even inside a string literal — it's rejected as a stray BOM, not a Unicode codepoint
+- **Fix**: use the escape `"﻿"` instead of pasting the BOM byte. Commit `<this one>`
+- **Lesson**: when you need a special invisible character in source, write it as an escape. Pasting "the thing" from a doc is exactly the foot-gun the scanner is protecting you from
+- **Refs**: `internal/skill/skill.go:Parse`
+
 ### Top-level `var` slice and `func` that reference each other → init cycle
 - **Saw**: `internal/tui/commands.go` failed `go vet` with `initialization cycle for commands` after I made cmdHelp read from a top-level `commands` slice
 - **Why**: `var commands = []command{ {handler: cmdHelp}, ... }` references `cmdHelp` at init time; `cmdHelp` reads `commands` — Go's initialiser can't sequence both

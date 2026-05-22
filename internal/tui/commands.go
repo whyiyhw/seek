@@ -42,6 +42,7 @@ func allCommands() []command {
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
+		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
 	}
 }
@@ -161,6 +162,22 @@ func cmdYolo(m *Model, _ string) cmdResult {
 
 func cmdQuit(_ *Model, _ string) cmdResult {
 	return cmdResult{quit: true}
+}
+
+// cmdSkills prints the loaded skill inventory grouped by source. The
+// model already sees the manifest in its system prompt, so this command
+// exists for humans who want to verify what got loaded.
+func cmdSkills(m *Model, _ string) cmdResult {
+	if m.opts.Skills == nil || m.opts.Skills.Len() == 0 {
+		return cmdResult{text: styleMuted.Render("no skills loaded")}
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("loaded %d skill(s):\n", m.opts.Skills.Len()))
+	for _, sk := range m.opts.Skills.List() {
+		fmt.Fprintf(&b, "  %-24s  %s\n", sk.Name, sk.Source)
+		fmt.Fprintf(&b, "    %s\n", sk.Description)
+	}
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
 }
 
 // cmdBranch forks the active session: a new session is created with

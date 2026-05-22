@@ -21,12 +21,14 @@ import (
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
@@ -46,6 +48,7 @@ Available tools:
 - bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
 - think(task, reflect?, context?): call deepseek-reasoner for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
+- Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
 
 Workflow:
 1. Inspect the workspace with read before changing anything.
@@ -152,6 +155,17 @@ func run() error {
 	client := deepseek.New(deepseek.WithAPIKey(apiKey))
 	tracker := cache.New()
 
+	// Load skills before the system prompt is rendered — the manifest
+	// is appended below. Errors are non-fatal: a malformed user skill
+	// shouldn't lock the agent out of running.
+	skills, skillStats, _ := skill.Load(skill.LoadOptions{ProjectDir: cwd})
+	for _, err := range skillStats.Errors {
+		fmt.Fprintln(os.Stderr, "skills:", err)
+	}
+	if summary := skillStats.FormatLoadSummary(); summary != "" {
+		fmt.Fprintln(os.Stderr, summary)
+	}
+
 	reg := tools.New().
 		Add(read.New()).
 		Add(listdir.New()).
@@ -159,10 +173,14 @@ func run() error {
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
 		Add(fimcomplete.New(client, *model)).
-		Add(think.New(client))
+		Add(think.New(client)).
+		Add(skilltool.New(skills))
 
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
+	if manifest := skills.Manifest(); manifest != "" {
+		systemPrompt = systemPrompt + "\n" + manifest
+	}
 
 	// Build (or restore) the persistence session. -no-save makes
 	// activeSession nil so the TUI auto-save no-ops.
@@ -245,12 +263,20 @@ func run() error {
 		ApprovalCh:   approvalCh,
 		Session:      activeSession,
 		Store:        store,
+		Skills:       skills,
 
 		RebuildAgent: func() (*agent.Agent, error) {
+			// /reset rebuilds the agent; we have to re-apply the skill
+			// manifest, otherwise the model would forget which skills
+			// exist after a reset.
+			sp := fmt.Sprintf(systemPromptTpl, abs, policy.Yolo())
+			if manifest := skills.Manifest(); manifest != "" {
+				sp = sp + "\n" + manifest
+			}
 			return agent.New(agent.Config{
 				Client:       client,
 				Model:        sessionModel,
-				SystemPrompt: fmt.Sprintf(systemPromptTpl, abs, policy.Yolo()),
+				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTurns:     *maxTurns,
 			})

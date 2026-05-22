@@ -38,6 +38,7 @@ import (
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"golang.org/x/term"
 )
@@ -66,6 +67,10 @@ type Options struct {
 	// persisted via Store.Save. nil for ephemeral runs (--no-save).
 	Session *session.Session
 	Store   *session.Store
+
+	// Skills is the loaded skill registry — used by /skills to print
+	// the inventory. nil = no skills available; /skills handles that.
+	Skills *skill.Set
 
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)

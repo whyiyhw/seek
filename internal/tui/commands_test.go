@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -280,6 +281,40 @@ func TestCompact_ShortHistoryIsNoOp(t *testing.T) {
 	}
 	if res.extra != nil {
 		t.Errorf("expected no async cmd for short history")
+	}
+}
+
+func TestSkills_EmptyReportsNoneLoaded(t *testing.T) {
+	res := runHandler(t, emptyModel(), "/skills")
+	if !strings.Contains(res.text, "no skills loaded") {
+		t.Errorf("text = %q", res.text)
+	}
+}
+
+func TestSkills_ListsLoadedSkillsWithSource(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{
+		Name: "alpha", Description: "use for A", Source: "project .seek/alpha.md",
+	})
+	set.Add(&skill.Skill{
+		Name: "beta", Description: "use for B", Source: "builtin:beta",
+	})
+
+	m := emptyModel()
+	m.opts.Skills = set
+
+	res := runHandler(t, m, "/skills")
+	for _, want := range []string{
+		"loaded 2 skill",
+		"alpha",
+		"project .seek/alpha.md",
+		"use for A",
+		"beta",
+		"builtin:beta",
+	} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("missing %q in output:\n%s", want, res.text)
+		}
 	}
 }
 

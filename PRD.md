@@ -644,9 +644,9 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | 子任务 | 状态 | commit |
 |---|---|---|
 | 会话持久化（`--resume` / `--continue` / `--list` / `--no-save`） | ✅ | `f13ec3f` |
-| `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | 本次 |
-| `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | 本次 |
-| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入） | ⏳ | |
+| `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | `3a0b6bf` |
+| `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | `3a0b6bf` |
+| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | 本次 |
 | MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
 | 双模型协作 skill（内置 `dual-model`，依赖 Skill loader） | ⏳ | |
 | `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
@@ -710,10 +710,9 @@ v1.0 发布前必须满足：
 
 M0–M4.5 已交付。M5 已启动，剩余子任务按依赖排序：
 
-1. **Skill loader**（§4.6）— 解锁内置 `dual-model` skill；多优先级目录扫描 + 内置 `Skill` 工具
-2. **双模型协作 skill** — 依赖 Skill loader；落地 PRD §1.5 提到的「reasoner-then-chat」差异化护城河
-3. **MCP client**（§4.4）— 最大、最独立的一块；JSON-RPC over stdio
-4. **`edit` diff 预览** — 与 per-call 审批（§4.10）配合
+1. **双模型协作 skill** — 依赖 Skill loader（✅）；落地 PRD §1.5 提到的「reasoner-then-chat」差异化护城河
+2. **MCP client**（§4.4）— 最大、最独立的一块；JSON-RPC over stdio
+3. **`edit` diff 预览** — 与 per-call 审批（§4.10）配合
 
 完成 M5 后进入 M6（二等 Provider）。
 
