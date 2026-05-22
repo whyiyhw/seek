@@ -2,6 +2,7 @@ package skill
 
 import (
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -110,10 +111,28 @@ func loadFromDir(set *Set, dir, label string) (int, []error) {
 		errs  []error
 	)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+		name := e.Name()
+		// Skip dotfiles/dotdirs (.install.json, .gitkeep, editor
+		// scratch, etc). Skill names can't start with `.` anyway —
+		// the kebab regex rejects it.
+		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			sk, warnings := loadPackage(filepath.Join(dir, name))
+			errs = append(errs, warnings...)
+			if sk == nil {
+				continue
+			}
+			if set.Add(sk) {
+				added++
+			}
+			continue
+		}
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("skills: %s: %w", path, err))
@@ -124,11 +143,97 @@ func loadFromDir(set *Set, dir, label string) (int, []error) {
 			errs = append(errs, err)
 			continue
 		}
+		sk.Type = TypeSingleFile
 		if set.Add(sk) {
 			added++
 		}
 	}
 	return added, errs
+}
+
+// loadPackage reads a directory-package skill (PRD v2 §4.1). Returns
+// (nil, warnings) when the directory doesn't contain a SKILL.md /
+// skill.md — that's not fatal, the caller skips and surfaces the
+// warning via LoadStats.
+//
+// Resolution rules:
+//   - SKILL.md (uppercase) is the canonical Anthropic Agent Skills
+//     entry point — preferred when present.
+//   - skill.md (lowercase) is a tolerated fallback so users migrating
+//     a v0 single-file skill into a directory don't have to rename.
+//   - Both present → take SKILL.md and warn so the user can clean up.
+//   - Neither present → warn and skip (an empty subdir is more often
+//     a mistake than an intentional placeholder).
+func loadPackage(dir string) (*Skill, []error) {
+	upper := filepath.Join(dir, "SKILL.md")
+	lower := filepath.Join(dir, "skill.md")
+	hasUpper := fileExists(upper)
+	hasLower := fileExists(lower)
+
+	var warnings []error
+	var entry string
+	switch {
+	case hasUpper && hasLower:
+		entry = upper
+		warnings = append(warnings, fmt.Errorf(
+			"skills: %s: both SKILL.md and skill.md present; using SKILL.md (Anthropic Agent Skills canonical form)", dir))
+	case hasUpper:
+		entry = upper
+	case hasLower:
+		entry = lower
+	default:
+		return nil, []error{fmt.Errorf(
+			"skills: %s: directory has no SKILL.md or skill.md; skipped", dir)}
+	}
+
+	data, err := os.ReadFile(entry)
+	if err != nil {
+		warnings = append(warnings, fmt.Errorf("skills: %s: %w", entry, err))
+		return nil, warnings
+	}
+	sk, err := Parse(data, entry)
+	if err != nil {
+		warnings = append(warnings, err)
+		return nil, warnings
+	}
+	sk.Type = TypePackage
+
+	// Sibling .install.json (PRD v2 §4.2) — absence is the common case
+	// for manual `cp` installs. A malformed file is surfaced as a
+	// warning so `seek skill status` can show why update doesn't work.
+	if src, err := readInstallSource(filepath.Join(dir, ".install.json")); err != nil {
+		warnings = append(warnings, fmt.Errorf("skills: %s: %w", filepath.Join(dir, ".install.json"), err))
+	} else {
+		sk.InstallSource = src // nil when the file isn't there — fine
+	}
+
+	return sk, warnings
+}
+
+// fileExists is a tiny helper kept inline rather than promoted to
+// internal/paths so the loader doesn't grow a dependency for a single
+// stat call.
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
+
+// readInstallSource returns the parsed sidecar or nil if the file
+// doesn't exist. A malformed file is an error — silent omission would
+// mask why update isn't working.
+func readInstallSource(path string) (*InstallSource, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var src InstallSource
+	if err := json.Unmarshal(data, &src); err != nil {
+		return nil, fmt.Errorf("parse .install.json: %w", err)
+	}
+	return &src, nil
 }
 
 func loadEmbedded(set *Set) (int, []error) {
@@ -160,6 +265,7 @@ func loadEmbedded(set *Set) (int, []error) {
 			errs = append(errs, err)
 			continue
 		}
+		sk.Type = TypeBuiltin
 		if set.Add(sk) {
 			added++
 		}
