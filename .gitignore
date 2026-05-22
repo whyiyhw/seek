@@ -26,3 +26,12 @@ bench-*.json
 !/.env.example
 ~/.config/seek/
 .claude/
+
+# Per-project memory pointer (M5.0 / PRD v1 §4). seek auto-generates
+# <project>/.seek/project-id on first run; it's a sha256(abs_path)[:16]
+# string used to recover M after a directory move. Per-machine state
+# by design — committing it would propagate one user's path-derived
+# hash to everyone else's clone, creating a "shared but meaningless"
+# directory name under each clone's ~/.seek/projects/. Each user's
+# clone should re-derive its own ID from its own abs_path.
+.seek/project-id
