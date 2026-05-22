@@ -98,37 +98,34 @@ func TestLatest_EmptyStoreReturnsNil(t *testing.T) {
 func TestLatest_PicksMostRecent(t *testing.T) {
 	store := newStoreIn(t)
 
-	a := New("m", ".", "", false)
-	a.UpdatedAt = time.Now().Add(-2 * time.Hour)
+	// Use fixed timestamps at least 1 second apart so the ID prefix is
+	// strictly ordered regardless of the random suffix.
+	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a := &Session{ID: generateID(base), CreatedAt: base, UpdatedAt: base, Model: "m", SchemaVersion: CurrentSchemaVersion}
+	b := &Session{ID: generateID(base.Add(time.Hour)), CreatedAt: base.Add(time.Hour), UpdatedAt: base.Add(time.Hour), Model: "m", SchemaVersion: CurrentSchemaVersion}
+	c := &Session{ID: generateID(base.Add(2 * time.Hour)), CreatedAt: base.Add(2 * time.Hour), UpdatedAt: base.Add(2 * time.Hour), Model: "m", SchemaVersion: CurrentSchemaVersion}
+
 	mustSave(t, store, a)
-
-	b := New("m", ".", "", false)
-	b.UpdatedAt = time.Now().Add(-1 * time.Hour)
 	mustSave(t, store, b)
-
-	c := New("m", ".", "", false)
-	c.UpdatedAt = time.Now() // most recent — but Save overwrites with now()
 	mustSave(t, store, c)
 
 	got, err := store.Latest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Save Touch()'es UpdatedAt to "now" so the order is determined by
-	// save order — last save wins.
+	// Latest uses ID lexicographic order (timestamp prefix), so c wins.
 	if got.ID != c.ID {
-		t.Errorf("got %s, want %s (latest)", got.ID, c.ID)
+		t.Errorf("got %s, want %s (latest by ID)", got.ID, c.ID)
 	}
 }
 
 func TestList_SortedByRecency(t *testing.T) {
 	store := newStoreIn(t)
-	for i := 0; i < 3; i++ {
-		s := New("m", ".", "", false)
-		mustSave(t, store, s)
+	for range 3 {
+		mustSave(t, store, New("m", ".", "", false))
 		time.Sleep(2 * time.Millisecond) // ensure UpdatedAt differs
 	}
-	infos, err := store.List()
+	infos, _, err := store.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,6 +286,49 @@ func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
 	}
 	if d := sess.Repair(); d != 0 {
 		t.Errorf("repair touched a plain-text history: dropped %d", d)
+	}
+}
+
+func TestFork_DeepCopiesToolCalls(t *testing.T) {
+	parent := New("m", ".", "", false)
+	parent.Messages = []deepseek.Message{
+		{
+			Role: deepseek.RoleAssistant,
+			ToolCalls: []deepseek.ToolCall{
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "bash", Arguments: `{"cmd":"ls"}`}},
+			},
+		},
+	}
+
+	child := parent.Fork()
+
+	// Mutate the child's ToolCall — must not bleed into the parent.
+	child.Messages[0].ToolCalls[0].ID = "call_mutated"
+	if parent.Messages[0].ToolCalls[0].ID != "call_1" {
+		t.Errorf("parent ToolCall.ID was mutated by child: got %q", parent.Messages[0].ToolCalls[0].ID)
+	}
+}
+
+func TestList_CollectsLoadErrors(t *testing.T) {
+	store := newStoreIn(t)
+	good := New("m", ".", "", false)
+	mustSave(t, store, good)
+
+	// Write a corrupt JSON file that looks like a session file.
+	corrupt := filepath.Join(store.Dir(), "20260101-000000-aabbcc.json")
+	if err := os.WriteFile(corrupt, []byte("not json {{{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	infos, loadErrs, err := store.List()
+	if err != nil {
+		t.Fatalf("List fatal error: %v", err)
+	}
+	if len(infos) != 1 {
+		t.Errorf("got %d infos, want 1 (only the good session)", len(infos))
+	}
+	if len(loadErrs) != 1 {
+		t.Errorf("got %d load errors, want 1 (the corrupt file)", len(loadErrs))
 	}
 }
 

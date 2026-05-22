@@ -27,21 +27,27 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
+// CurrentSchemaVersion is incremented whenever the on-disk JSON layout
+// changes in a backward-incompatible way. Sessions written before
+// versioning was added have SchemaVersion == 0 and are still valid.
+const CurrentSchemaVersion = 1
+
 // Session is the on-disk representation of one conversation. All time
 // fields are UTC; SessionID is sortable by creation time so a simple
 // directory listing is already ordered.
 type Session struct {
-	ID           string             `json:"id"`
-	CreatedAt    time.Time          `json:"created_at"`
-	UpdatedAt    time.Time          `json:"updated_at"`
-	Model        string             `json:"model"`
-	Yolo         bool               `json:"yolo"`
-	CWD          string             `json:"cwd"`
-	SystemPrompt string             `json:"system_prompt,omitempty"`
-	Messages     []deepseek.Message `json:"messages"`
-	Turns        int                `json:"turns"`
-	ToolCalls    int                `json:"tool_calls"`
-	Usage        deepseek.Usage     `json:"usage"`
+	SchemaVersion int                `json:"schema_version"`
+	ID            string             `json:"id"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	Model         string             `json:"model"`
+	Yolo          bool               `json:"yolo"`
+	CWD           string             `json:"cwd"`
+	SystemPrompt  string             `json:"system_prompt,omitempty"`
+	Messages      []deepseek.Message `json:"messages"`
+	Turns         int                `json:"turns"`
+	ToolCalls     int                `json:"tool_calls"`
+	Usage         deepseek.Usage     `json:"usage"`
 	// ParentID is set for sessions created by /branch — points at the
 	// session this one was forked from.
 	ParentID string `json:"parent_id,omitempty"`
@@ -51,13 +57,14 @@ type Session struct {
 func New(model, cwd, systemPrompt string, yolo bool) *Session {
 	now := time.Now().UTC()
 	return &Session{
-		ID:           generateID(now),
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Model:        model,
-		Yolo:         yolo,
-		CWD:          cwd,
-		SystemPrompt: systemPrompt,
+		SchemaVersion: CurrentSchemaVersion,
+		ID:            generateID(now),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Model:         model,
+		Yolo:          yolo,
+		CWD:           cwd,
+		SystemPrompt:  systemPrompt,
 	}
 }
 
@@ -139,17 +146,23 @@ func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int)
 func (s *Session) Fork() *Session {
 	now := time.Now().UTC()
 	msgs := make([]deepseek.Message, len(s.Messages))
-	copy(msgs, s.Messages)
+	for i, m := range s.Messages {
+		if len(m.ToolCalls) > 0 {
+			m.ToolCalls = append([]deepseek.ToolCall(nil), m.ToolCalls...)
+		}
+		msgs[i] = m
+	}
 	return &Session{
-		ID:           generateID(now),
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Model:        s.Model,
-		Yolo:         s.Yolo,
-		CWD:          s.CWD,
-		SystemPrompt: s.SystemPrompt,
-		Messages:     msgs,
-		ParentID:     s.ID,
+		SchemaVersion: CurrentSchemaVersion,
+		ID:            generateID(now),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Model:         s.Model,
+		Yolo:          s.Yolo,
+		CWD:           s.CWD,
+		SystemPrompt:  s.SystemPrompt,
+		Messages:      msgs,
+		ParentID:      s.ID,
 	}
 }
 
@@ -244,29 +257,32 @@ func (s *Store) Load(id string) (*Session, error) {
 
 // Latest returns the session with the most-recent UpdatedAt, or nil
 // with a nil error when the store is empty. Used by --continue.
+//
+// IDs are timestamp-prefixed (generateID), so lexical order equals
+// creation order. ReadDir returns entries sorted by name, meaning the
+// last .json entry is always the newest. One ReadDir + one Load — O(1)
+// regardless of how many sessions exist.
+//
+// If the newest file is unreadable (corrupt JSON, permissions), Latest
+// tries the next-oldest rather than failing outright.
 func (s *Store) Latest() (*Session, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, err
 	}
-	var newest *Session
-	for _, e := range entries {
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
 		sess, err := s.Load(id)
 		if err != nil {
-			// Skip unreadable files rather than fail outright — a
-			// botched session shouldn't lock the user out of every
-			// other one.
-			continue
+			continue // skip corrupt file, try next-oldest
 		}
-		if newest == nil || sess.UpdatedAt.After(newest.UpdatedAt) {
-			newest = sess
-		}
+		return sess, nil
 	}
-	return newest, nil
+	return nil, nil
 }
 
 // SessionInfo is the cheap metadata view returned by List.
@@ -281,14 +297,17 @@ type SessionInfo struct {
 }
 
 // List returns metadata for every session in the store, newest first.
-// Loading all files is fine for a personal tool — even 1000 sessions
-// is a single millisecond of work.
-func (s *Store) List() ([]SessionInfo, error) {
+// The second return value collects per-file load errors so callers can
+// surface warnings without aborting the whole listing. The third return
+// value is a fatal error (e.g. ReadDir failed); in that case the other
+// two values are nil/empty.
+func (s *Store) List() ([]SessionInfo, []error, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []SessionInfo
+	var errs []error
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -296,6 +315,7 @@ func (s *Store) List() ([]SessionInfo, error) {
 		id := strings.TrimSuffix(e.Name(), ".json")
 		sess, err := s.Load(id)
 		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		out = append(out, SessionInfo{
@@ -311,5 +331,5 @@ func (s *Store) List() ([]SessionInfo, error) {
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
-	return out, nil
+	return out, errs, nil
 }
