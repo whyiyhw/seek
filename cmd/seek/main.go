@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/permission"
@@ -145,6 +146,23 @@ func run() error {
 
 	if *list {
 		return printSessionList(store)
+	}
+
+	// First-run setup wizard. Only fires when there's truly no auth
+	// anywhere (env + config both empty) AND stdin is a TTY (otherwise
+	// scripts get an honest error instead of a hung interactive prompt).
+	// User flags like --provider don't suppress the wizard — if the
+	// chosen provider's key isn't anywhere, buildProvider would error
+	// out anyway, and an interactive paste is friendlier than a 1-liner
+	// "X is not set" line.
+	if *providerFlag == "" && shouldTriggerWizard() {
+		// The wizard runs before the SIGINT-bound ctx is established
+		// (that lives further down, after auth is resolved). Using a
+		// background ctx is fine — the wizard itself is driven by
+		// bufio.Scanner, and pingDeepSeek derives its own 10s timeout.
+		if _, werr := runSetupWizard(context.Background(), os.Stdin, os.Stderr); werr != nil {
+			return werr
+		}
 	}
 
 	// Provider detection. --provider overrides auto-detect; otherwise we
@@ -858,24 +876,45 @@ func runUpgradeCheck() error {
 }
 
 // buildProvider selects and constructs the LLM provider based on the
-// --provider flag and env vars. Returns:
+// --provider flag, env vars, and ~/.seek/config.json (in that order).
+// Returns:
 //
 //	provider    llm.Provider — non-nil for second-tier providers
 //	dsClient    *deepseek.Client — non-nil for DeepSeek (first-class path)
 //	provLabel   string — human name for TUI banner ("" = DeepSeek, no banner)
 //	modelDefault string — sensible default model for the chosen provider
+//
+// Auth resolution (per provider): the canonical env var beats the
+// config-file entry — see config.KeyFor. That order means CI and
+// short-lived `KEY=... seek` invocations always win over what got
+// written to disk by a previous setup wizard.
 func buildProvider(provFlag, baseURLFlag, provName string) (
 	provider llm.Provider, dsClient *deepseek.Client, provLabel, modelDefault string, err error,
 ) {
-	// Determine effective provider name.
+	// Load config once; ignore parse errors here so a malformed file
+	// degrades to "env-only" rather than blocking startup. (Save() is
+	// the place that aggressively reports config issues.)
+	cfg, _ := config.Load()
+
+	// Determine effective provider name. Order:
+	//   1. --provider flag (explicit user intent)
+	//   2. DeepSeek if its key is anywhere (env or config)
+	//   3. Second-tier whose key is set, if no DeepSeek key
+	//   4. cfg.DefaultProvider (the setup wizard writes this)
+	//   5. "deepseek" as final fallback (errors out later if no key)
 	if provFlag == "" {
+		deepseekHas := config.KeyFor(cfg, "deepseek") != ""
 		switch {
-		case os.Getenv("ANTHROPIC_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+		case deepseekHas:
+			provFlag = "deepseek"
+		case config.KeyFor(cfg, "anthropic") != "":
 			provFlag = "anthropic"
-		case os.Getenv("OPENAI_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+		case config.KeyFor(cfg, "openai") != "":
 			provFlag = "openai"
-		case os.Getenv("GEMINI_API_KEY") != "" && os.Getenv("DEEPSEEK_API_KEY") == "":
+		case config.KeyFor(cfg, "gemini") != "":
 			provFlag = "gemini"
+		case cfg.DefaultProvider != "":
+			provFlag = cfg.DefaultProvider
 		default:
 			provFlag = "deepseek"
 		}
@@ -883,37 +922,44 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 
 	switch provFlag {
 	case "deepseek":
-		apiKey := os.Getenv("DEEPSEEK_API_KEY")
+		apiKey := config.KeyFor(cfg, "deepseek")
 		if apiKey == "" {
-			return nil, nil, "", "", fmt.Errorf("DEEPSEEK_API_KEY is not set")
+			return nil, nil, "", "", fmt.Errorf("no DeepSeek API key — set DEEPSEEK_API_KEY or run seek once to use the setup wizard")
 		}
 		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelChat, nil
 
 	case "anthropic":
-		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		apiKey := config.KeyFor(cfg, "anthropic")
 		if apiKey == "" {
-			return nil, nil, "", "", fmt.Errorf("ANTHROPIC_API_KEY is not set (needed for --provider=anthropic)")
+			return nil, nil, "", "", fmt.Errorf("no Anthropic API key — set ANTHROPIC_API_KEY or save one via the setup wizard")
 		}
 		return anthropicprov.New(apiKey), nil, "Anthropic", "claude-sonnet-4-20250514", nil
 
 	case "openai":
-		apiKey := os.Getenv("OPENAI_API_KEY")
+		apiKey := config.KeyFor(cfg, "openai")
 		if apiKey == "" {
-			return nil, nil, "", "", fmt.Errorf("OPENAI_API_KEY is not set (needed for --provider=openai)")
+			return nil, nil, "", "", fmt.Errorf("no OpenAI API key — set OPENAI_API_KEY or save one via the setup wizard")
 		}
 		return openaiprov.New(apiKey), nil, "OpenAI", "gpt-4o", nil
 
 	case "gemini":
-		apiKey := os.Getenv("GEMINI_API_KEY")
+		apiKey := config.KeyFor(cfg, "gemini")
 		if apiKey == "" {
-			return nil, nil, "", "", fmt.Errorf("GEMINI_API_KEY is not set (needed for --provider=gemini)")
+			return nil, nil, "", "", fmt.Errorf("no Gemini API key — set GEMINI_API_KEY or save one via the setup wizard")
 		}
 		return geminiprov.New(apiKey), nil, "Gemini", "gemini-2.0-flash", nil
 
 	case "compatible":
+		// Compatible endpoints don't have a canonical env var, so we
+		// accept OPENAI_API_KEY or DEEPSEEK_API_KEY (common shapes for
+		// vLLM/Ollama deployments) before checking config under the
+		// provider's display name.
 		apiKey := os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {
-			apiKey = os.Getenv("DEEPSEEK_API_KEY") // compatible endpoints often share key env
+			apiKey = os.Getenv("DEEPSEEK_API_KEY")
+		}
+		if apiKey == "" {
+			apiKey = config.KeyFor(cfg, provName)
 		}
 		if baseURLFlag == "" {
 			return nil, nil, "", "", fmt.Errorf("--base-url is required for --provider=compatible")
