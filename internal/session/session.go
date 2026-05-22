@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
@@ -308,16 +309,30 @@ func (s *Store) Latest() (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	ids := collectIDs(entries)
+	type result struct {
+		id string
+		at time.Time
+	}
+	results := make([]result, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			meta, err := s.loadMeta(id)
+			if err == nil {
+				results[i] = result{id: id, at: meta.UpdatedAt}
+			}
+		}(i, id)
+	}
+	wg.Wait()
 	var bestID string
 	var bestAt time.Time
-	for _, id := range collectIDs(entries) {
-		meta, err := s.loadMeta(id)
-		if err != nil {
-			continue
-		}
-		if meta.UpdatedAt.After(bestAt) {
-			bestAt = meta.UpdatedAt
-			bestID = id
+	for _, r := range results {
+		if r.id != "" && r.at.After(bestAt) {
+			bestAt = r.at
+			bestID = r.id
 		}
 	}
 	if bestID == "" {
@@ -345,15 +360,30 @@ func (s *Store) List() ([]SessionInfo, []error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	ids := collectIDs(entries)
+	type result struct {
+		info SessionInfo
+		err  error
+	}
+	results := make([]result, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			meta, err := s.loadMeta(id)
+			results[i] = result{info: meta, err: err}
+		}(i, id)
+	}
+	wg.Wait()
 	var out []SessionInfo
 	var errs []error
-	for _, id := range collectIDs(entries) {
-		meta, err := s.loadMeta(id)
-		if err != nil {
-			errs = append(errs, err)
+	for _, r := range results {
+		if r.err != nil {
+			errs = append(errs, r.err)
 			continue
 		}
-		out = append(out, meta)
+		out = append(out, r.info)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
