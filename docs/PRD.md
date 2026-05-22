@@ -1,0 +1,812 @@
+# seek PRD：DeepSeek-first Go Coding Agent Harness
+
+> 状态：v0.9（M0–M7 已交付，准备 v1.0 发布）
+> 项目名：**`seek`**
+> 目标读者：项目发起人 / 早期贡献者
+> 架构参考：https://github.com/earendil-works/pi （TypeScript，MIT，~52K stars）；用户体验对标：Claude Code
+
+## 一句话定位
+
+**为 DeepSeek 深度优化、同时兼容 Claude / GPT / Gemini 的单二进制 Go Coding Agent Harness。** DeepSeek 是一等公民（缓存优化、Reasoner、FIM、错峰计价），其他 Provider 是 best-effort 兼容。
+
+> **V4 时代术语（2026-01 之后）**：DeepSeek V4 把推理能力折叠成了 `Thinking.Type=enabled` + `ReasoningEffort` 请求参数，独立的 `deepseek-reasoner` 端点已不再单独生产；模型 alias `deepseek-reasoner` 仍可用，请求会由服务端路由到 V4-class 模型。**本 PRD 中所有 "Reasoner / reasoner" 字样指的是这个推理模式，而不是独立模型**。书 `docs/book/chapter-06.md` §6.1 有同款时间线脚注。
+
+## 现状（2026-05）
+
+已交付 M0 → M7：约 36000 行非测试 Go，38 个包，全测试绿（`-race` 三平台），9 个内置工具 + MCP bridge，会话持久化 / 分支 / 压缩 / JSONL 存储，Skill 加载 + 双模型协作内置 skill，Anthropic / OpenAI / Gemini 二等 Provider + compatible 兼容端点，`--rpc` JSON-RPC 2.0 server 模式，自举 benchmark（cache hit 95.7%、FIM 路径走通）。**下一步：v1.0 发布**（首次 git tag）。
+
+## 决策记录（已确认）
+
+| 决策项 | 选定方案 | 备注 |
+|---|---|---|
+| **项目名** | `seek` | 「DeepSeek」+「seek answers」双关，4 字母好打 |
+| **核心定位** | DeepSeek-first，其他 Provider 兼容（§1.5、§4.1） | 不是 DeepSeek-only |
+| **Provider 一等公民** | DeepSeek 官方 + DeepSeek-兼容端点（vLLM / Ollama / SiliconFlow） | 享受全部专属优化 |
+| **Provider 二等兼容** | Anthropic、OpenAI、Google Gemini | 仅基础 chat + 工具调用，无缓存优化 / FIM / Reasoner 模式 |
+| TUI 框架 | `charmbracelet/bubbletea` + `lipgloss` + `glamour` | 不自研 |
+| **TUI 渲染模式** | **inline（非 alt-screen）** | M4.5 改造，见 §4.9 |
+| 扩展机制 | MCP（语言无关协议） | 不嵌入 JS 引擎 |
+| Skill 机制 | Markdown + frontmatter；兼容识别 `.claude/skills/` 与 `~/.claude/skills/`（见 §4.6） | 方便从 Claude Code 迁移 |
+| Reasoner 集成深度 | 基础 `think` 工具 + 完整「reasoner-then-chat」双模型协作内置 skill（`dual-model`） | 均已交付（M3 基础 + M5 dual-model） |
+| OAuth | 不做（v1.0 仅 API key） | |
+| Batch API | 不做（延后 v1.1+） | |
+| **Pitfall 记录** | `docs/pitfalls.md` + `Pitfall:` commit trailer + AI 自动维护（CLAUDE.md） | 0ebb03a 建立 |
+| 目标用户 | 个人 / 团队（中文开发者优先） | 不做官网、安装器服务 |
+| 核心动机 | 单二进制 + 干净供应链 + DeepSeek 性价比最大化 | |
+
+---
+
+## 1. 背景与动机
+
+### 1.1 上游 pi 是什么
+
+`earendil-works/pi` 是 TS 实现的通用 AI Coding Agent 工具链，支持 ~25 个 LLM Provider，4 个包（pi-ai / pi-agent-core / pi-coding-agent / pi-tui）。它是一个**架构参考**——我们借鉴它的事件流模型、工具调用循环、Skill 文件格式、TUI 思路，但**不复制它的多 Provider 抽象层**。
+
+### 1.2 为什么 DeepSeek-first 而非 DeepSeek-only
+
+最初考虑做纯 DeepSeek-only，但兼容其他 Provider 的边际成本不高（约 2 周）、却显著降低 lock-in 风险。最终路线：
+
+- **一等公民（DeepSeek）**：所有 DeepSeek 专属优化（见 §1.5）全部启用
+- **二等公民（Anthropic / OpenAI / Gemini）**：基础 chat + 工具调用 + 流式可用，但不享受缓存优化、FIM 快路径、Reasoner 路径
+- 在 UI 和文档里**明确标注差异**，避免用户误以为「换个 Provider 体验一样」
+- 这样既能保住 DeepSeek 的差异化，又给用户留一条退路
+
+### 1.3 为什么 Go
+
+1. **分发**：单二进制 + 零运行时依赖，对终端用户安装体验远好于 `npm i -g`
+2. **供应链**：Go module + `go.sum`，攻击面远小于 npm
+3. **并发**：goroutine + channel 天然契合 Agent 的流式事件模型
+4. **冷启动快**：对 RPC 模式（子进程被宿主反复拉起）友好
+5. **生态对齐**：目标用户的项目大多本就是 Go
+
+### 1.4 为什么 DeepSeek
+
+- **性价比**：相同任务 token 成本约为 Claude Sonnet 4 / GPT-4o 的 1/10–1/20，前缀缓存命中后再降 50×（V4-Flash hit $0.0028/M vs miss $0.14/M）
+- **中文友好**：对中文代码注释、中文 prompt 表现更好
+- **强推理模式**（V4 `Thinking.Type=enabled`）：开源/对手价位上少见的明确多步推理能力，可用于关键决策点
+- **API 稳定**：OpenAI 兼容接口为主，迁移成本低
+
+### 1.5 DeepSeek 专用 harness 能做、通用 harness 不会做的事
+
+这是项目的**差异化护城河**，每一条都对应 v1.0 的具体功能：
+
+| DeepSeek 特性 | 通用 harness 做法 | seek 做法 |
+|---|---|---|
+| **Context Caching**（前缀缓存自动命中、命中后价格 ~1/50） | 不感知 | 主动把 system prompt + 工具 schema + 历史消息组织成稳定前缀；TUI 显示累计命中率 + 节省 tokens |
+| **V4 推理模式**（`Thinking.Type=enabled`；与 `tools` 参数互斥，`reasoning_content` 必须从下一轮剥离 — 见顶部时间线注释） | 当普通模型处理，踩坑 | 独立代码路径（`pkg/deepseek` 不走 `pkg/llm` 通用接口）；提供「双模型协作模式」：普通 chat 主跑工具调用，关键节点切到 thinking-enabled 反思后再回来 |
+| **FIM 端点**（fill-in-the-middle 补全，比 chat 便宜 5–10x） | 不用 | 独立 `fim_complete` 工具；小范围补丁走 FIM，大范围 fallback 到 chat |
+| **错峰计价**（北京时间 00:30–08:30 折扣 50–75%） | 不知道 | TUI 角标显示当前价格档位；`/compact` 等批量动作可建议错峰跑 |
+| **JSON 严格模式** | 弱依赖 | 工具调用强制走 JSON 模式（`response_format`），降低解析失败率；容错修复层延后 v1.1 |
+| **中文优势** | 系统 prompt 全英文 | 系统 prompt 核心指令英文 + 工具描述中文；`--lang` 开关延后 v1.1 |
+
+### 1.6 主要风险
+
+| 风险 | 缓解 |
+|---|---|
+| DeepSeek 服务可用性 / API 变更 / 价格政策变动 | 三层退路：DeepSeek-兼容端点（vLLM / Ollama / SiliconFlow）→ Anthropic → OpenAI |
+| 用户也想跑 Claude / GPT 时怎么办 | v1.0 已支持，但是二等兼容，不享受 DeepSeek 专属优化 |
+| 上游 pi 频繁迭代 | 只借架构思路，不追特性，没有同步压力 |
+| 多 Provider 抽象「腐蚀」DeepSeek 优化 | `pkg/deepseek` 与 `pkg/llm/provider/*` 严格分层，DeepSeek 专属优化绝不下沉到通用接口 |
+| **TUI 体验长尾** | Claude Code 的 TUI 是多年迭代结果，零散小功能加起来工作量很大 — 用 §1.7 的 T1/T2/T3 分层处理，先稳定核心交互 |
+
+### 1.7 现状 vs Claude Code（功能面诚实校准）
+
+写代码 agent 的 TUI 是个长尾市场，Claude Code 是事实标准。我们诚实评估：**功能面约 70%，体验完整度约 50%**（M4.5 TUI 稳定化后大部分核心体验已对齐）。但 DeepSeek 专属优化那几条是 Claude Code 不会有也不会做的——那是我们的独立维度。
+
+#### 已经有的（≈ Claude Code 同质）
+
+- 基础聊天 + 工具调用流式可视化
+- 9 个内置工具（read / grep / list_dir / write / edit / bash / fim_complete / think / Skill）
+- 状态栏（model / 流式状态 / 计数器 / 缓存命中率 / 错峰计价）
+- 工具执行 spinner + 耗时统计
+- per-call 审批（inline y/N/a）
+- Slash 命令（/help、/clear、/reset、/model、/yolo、/exit）
+- Markdown 渲染（glamour）
+- Reasoning 折叠（Ctrl+R）
+- 鼠标拖选 + Cmd+C 复制（之前坏过，已修）
+- 键盘滚动（PgUp/PgDn/Ctrl+U/D）
+
+#### Claude Code 有、我们没有（M4.5 已补齐绝大部分）
+
+| 缺口 | 影响 | 状态 |
+|---|---|---|
+| **主题切换** | 颜色只能等环境检测 | ⏳ 待做 |
+| **多行 paste 折叠显示** | 粘大段代码会撑爆历史 | ✅ 已做 |
+| **帮助 overlay (?)** | 全靠 `/help` 文本输出 | ⏳ 待做 |
+
+> M4.5 已补齐：inline 模式、Esc 中断、per-call 审批、↑/↓ prompt 历史、tool 执行 spinner、edit 应用前 diff 预览、@ 文件路径补全、token 预算告警 + `/compact` 建议、持久会话、`/branch` 分支会话。
+
+#### 我们有、Claude Code 没有（差异化护城河）
+
+- **缓存命中率统计 + 节省 token** 直接可视化
+- **错峰计价感知**（北京时间夜间 50% 折扣自动检测，长任务提示）
+- **DeepSeek Reasoner 一等支持**（Think 工具 + reasoning_content 自动剥离）
+- **FIM 快路径**（fim_complete 工具）
+- **per-call 成本估算**（每次 prompt 后实时显示 USD）
+
+这五条在可见的未来都是 seek 独占——Claude Code 没必要也没动机做。
+
+---
+
+---
+
+## 2. 目标与非目标
+
+### 2.1 目标（v1.0）
+
+- **G1**：CLI `seek` 单二进制，覆盖上游 `pi-coding-agent` 的核心交互场景：interactive、print、JSON 输出、RPC（stdio + JSON-RPC）
+- **G2**：内置 9 个工具：`read` / `grep` / `list_dir` / `write` / `edit` / `bash` / `fim_complete` / `think` / `Skill`，行为与上游对齐（含 patch 风格 edit）
+- **G3a（一等公民）**：DeepSeek 全面接入
+  - DeepSeek 官方：`deepseek-chat`、V4 推理模式（`Thinking.Type=enabled`；alias `deepseek-reasoner` 仍可作为 model 名传入，会被路由到 V4-class）、FIM 端点
+  - DeepSeek-兼容端点：vLLM 自托管、Ollama（DeepSeek-V3 蒸馏版）、SiliconFlow 等
+- **G3b（二等兼容）**：Anthropic Claude / OpenAI GPT / Google Gemini
+  - 仅基础 chat + 工具调用 + 流式
+  - 明确不支持：缓存命中率统计、FIM 快路径、Reasoner-then-Chat 双模型模式（这些是 DeepSeek 专属）
+- **G7（DeepSeek 专属）**：缓存友好的上下文组织 + 缓存命中率可视化
+- **G8（DeepSeek 专属）**：V4 推理模式独立代码路径，**v1.0 全做**：基础 `/think` 命令 + 完整「reasoner 反思 + chat 执行」双模型协作内置 skill
+- **G9（DeepSeek 专属）**：独立 `fim_complete` 工具支持 FIM 快路径
+- **G10（DeepSeek 专属）**：错峰计价感知
+- **G4**：会话管理：本地持久化、`/branch` 分支、`/compact` 压缩
+- **G5**：Skill 机制（Markdown + frontmatter，与上游 skill 文件格式兼容，可直接复用上游 skill 仓库的 Markdown 部分；详见 §4.7）
+- **G6**：可作为 Go 库被嵌入（`pkg/agent`、`pkg/llm` 公共 API）
+
+#### M4.5 新增目标（TUI 稳定化，对标 Claude Code 核心交互）
+
+- **G11**：**inline 渲染模式**——退出 alt-screen，会话进入终端 scrollback，原生复制 / 滚动可用（§4.9）
+- **G12**：**Esc 中断流式**——单击 Esc 终止当前 agent 调用，不退出程序；上下文保留可继续（§4.11）
+- **G13**：**per-call 审批**——`bash` / 仓库外写入触发 inline y/n 提示，独立于 `--yolo`（§4.10）
+- **G14**：**输入体验**——↑/↓ 历史回放、`@` 文件路径补全、tool 执行 spinner、`edit` 应用前 diff 预览
+- **G15**：**token 预算告警**——接近 model context 上限时状态栏告警，并建议 `/compact`（依赖 G4 的 `/compact` 实现）
+
+### 2.2 非目标（v1.0 不做）
+
+- ❌ 与上游 TS Extension 二进制级兼容
+- ❌ Web UI / Slack bot / vLLM pods
+- ❌ 图像生成与图像输入（DeepSeek 多模态尚不成熟；其他 Provider 也不做以保持一致性）
+- ❌ OAuth
+- ❌ **DeepSeek Batch API**（v1.1+）
+- ❌ 把 DeepSeek 专属优化反向「降级」到 Claude/GPT/Gemini —— 它们无法享受这些
+- ❌ Mistral / Groq / xAI / Cerebras 等额外 Provider —— v1.0 只接 4 家（DeepSeek + Anthropic + OpenAI + Gemini）
+- ❌ 公开 OSS 大规模分发的配套：官网、安装脚本服务、文档站、Discord 等
+
+### 2.3 明确延后（v1.1+）
+
+- DeepSeek Batch API（50% 折扣的离线批处理）
+- 更多 Provider（Mistral / Groq / xAI / Cerebras …）
+- Theme 系统
+- Pi Packages 风格的分发机制
+- 图像输入 / 图像生成
+- OAuth（Anthropic Pro/Max、Codex、Copilot）
+- `--lang` / i18n 多语言支持（§4.8.6）
+- JSON 工具调用容错修复层（§4.8.5）
+- `/cache-stats` 详细诊断面板（§4.8.1）
+
+---
+
+## 3. 范围与模块拆分
+
+Go 仓库布局（monorepo，单 `go.mod`，module path 建议 `github.com/whyiyhw/seek`）：
+
+```
+seek/
+├── cmd/seek/                # CLI 入口（cobra），二进制名 seek
+├── internal/
+│   ├── tui/                 # TUI（bubbletea，inline 模式）
+│   ├── session/             # 会话存储 / 分支 / 压缩 / JSONL
+│   ├── tools/               # 9 个内置工具（read / grep / list_dir / write / edit / bash / fim_complete / think / Skill）+ MCP bridge
+│   │   ├── read/
+│   │   ├── grep/
+│   │   ├── listdir/
+│   │   ├── write/
+│   │   ├── edit/
+│   │   ├── bash/
+│   │   ├── fimcomplete/
+│   │   ├── think/
+│   │   ├── skilltool/
+│   │   └── mcptool/
+│   ├── skill/               # Skill 加载（兼容 .claude/skills/）+ 内置 skill
+│   │   └── builtin/         # dual-model.md 等内置 skill
+│   ├── mcp/                 # MCP client（JSON-RPC 2.0 over stdio）
+│   ├── mcpconfig/           # MCP 配置加载（~/.config/seek/mcp.json）
+│   ├── cache/               # 缓存友好上下文组织 + 命中率统计（DeepSeek 专属）
+│   ├── pricing/             # 错峰计价表 + 当前档位（DeepSeek 专属，UTC+8 hardcode）
+│   ├── permission/          # 三态权限策略（yolo / ask / deny）
+│   ├── diff/                # Unified diff 生成 + 渲染（edit 预览用）
+│   ├── budget/              # Model context window 预算 + 告警阈值（80%/95%）
+│   ├── projectmd/           # AGENTS.md 自动加载（项目根向上 5 层）
+│   └── rpc/                 # stdio JSON-RPC 模式（M7，待实现）
+├── pkg/
+│   ├── deepseek/            # 一等公民：chat / reasoner / FIM / 缓存元数据 / JSON 模式
+│   ├── llm/                 # 通用接口（Provider / ChatRequest / Message / Event）
+│   │   ├── provider/
+│   │   │   ├── anthropic/   # 二等兼容
+│   │   │   ├── openai/      # 二等兼容
+│   │   │   └── gemini/      # 二等兼容
+│   │   └── compatible/      # DeepSeek-兼容端点（vLLM / Ollama / SiliconFlow）
+│   ├── agent/               # Agent 运行时（事件流、工具调用、Provider 双路由）
+│   └── mcp/                 # MCP 协议的公共类型定义
+└── examples/                # SDK 嵌入示例
+```
+
+**架构分层原则**（重要）：
+
+- `pkg/deepseek` **不**实现 `pkg/llm.Provider` 接口，而是被 `pkg/agent` 直接持有的一等公民
+- `pkg/llm/provider/*` 实现统一接口，被 `pkg/agent` 通过接口持有
+- DeepSeek 专属优化（缓存统计、FIM、Reasoner 路径）只在「Provider 是 DeepSeek」分支启用，**绝不下沉到通用接口**——防止「为了对齐所有 Provider 而削弱 DeepSeek 体验」
+- 用 Provider 二等的体验不到这些优化，TUI 里相关组件直接隐藏 / 灰显
+
+### 3.1 实际工时回顾（全已交付，仅作参考）
+
+> 以下为 M0–M6 实际交付后的回顾数据。单人，含测试。原估时表已在 M6 交付后归档，此处仅保留实际统计口径。
+
+| 模块 | 实际 |
+|---|---|
+| `pkg/deepseek` chat + reasoner + FIM + 缓存元数据 | ~2 周 |
+| `pkg/llm` 通用接口 + 3 个 Provider + compatible | ~2 周（比估时多，因 Provider 间差异较大） |
+| `pkg/agent` 运行时 + 事件流 + 双路由 | ~2 周 |
+| `internal/cache` 缓存友好上下文 + 命中率统计 | ~3 天 |
+| `internal/pricing` 错峰计价表 | ~1 天 |
+| `internal/tools` 9 个工具 + FIM + MCP bridge | ~3 周（远超估时，工具数翻倍） |
+| `internal/tui` inline 模式 + 状态栏 + 审批 + diff 预览 | ~2 周（含 M4.5 大改） |
+| `internal/session` + `internal/skill`（JSONL, 分支, compact） | ~2 周 |
+| `internal/mcp` + `internal/mcpconfig` MCP client | ~1 周 |
+| `internal/permission` 三态权限 | ~2 天 |
+| `internal/diff` + `internal/budget` + `internal/projectmd` | ~3 天 |
+| 双模型协作内置 skill | ~2 天 |
+| `cmd/seek` interactive / print / json / rpc（骨架） | ~5 天 |
+| 集成 / 端到端测试 | ~1 周 |
+| **合计（M0–M6）** | **~15 周 ≈ 3.5 个月** |
+> 超出原估时的原因：工具数从 4 增长到 9（+FIM/reasoner/Skill/MCP bridge）；M4.5 TUI 架构重构（inline 改造）；Provider 兼容测试覆盖 4 家 API 差异。
+
+---
+
+## 4. 关键设计决策（请确认）
+
+### 4.1 LLM 接入分层
+
+```
+                    ┌─────────────────────────────────────┐
+                    │           pkg/agent                  │
+                    │  (Provider 路由 + 事件流 + 工具调用) │
+                    └─────────┬──────────────────┬─────────┘
+                              │                  │
+        ┌─────────────────────┘                  └─────────────────────┐
+        ↓                                                              ↓
+┌───────────────────┐                              ┌──────────────────────────┐
+│   pkg/deepseek    │  ← 一等公民                  │       pkg/llm            │
+│  chat / reasoner  │     专属优化在这里启用       │  通用接口 Stream/Complete│
+│  FIM / JSON / 缓存│                              └──────────────┬───────────┘
+└───────────────────┘                                             │
+                                  ┌───────────────────────────────┼───────────────────────────────┐
+                                  ↓                               ↓                               ↓
+                          ┌──────────────┐          ┌───────────────┐          ┌─────────────────────┐
+                          │  anthropic   │          │    openai     │          │      gemini         │
+                          │  (二等兼容)  │          │  (二等兼容)   │          │   (二等兼容)        │
+                          └──────────────┘          └───────────────┘          └─────────────────────┘
+
+         pkg/llm/compatible（兼容 DeepSeek-OpenAI 协议的端点：vLLM / Ollama / SiliconFlow）
+         → 走 pkg/llm/provider/openai 通用路径，不享受 DeepSeek 专属优化
+         → ⏳ 兼容端点运行 DeepSeek 模型时走一等公民路径（当前 `--provider=deepseek` 不支持 `--base-url`，延后）
+```
+
+**关键设计**：
+
+1. **`pkg/deepseek` 不实现 `llm.Provider` 接口**——它有自己的 method（`Chat`、`FIM`），并通过 `deepseek.Usage` 返回缓存元数据（`PromptCacheHitTokens` / `PromptCacheMissTokens`），由 `internal/cache.Tracker` 聚合统计。强行套接口反而丢信息。
+2. **`pkg/agent` 通过 `interface{}` + 类型断言**判断 Provider 类型：
+   ```go
+   switch p := agent.provider.(type) {
+   case *deepseek.Client:
+       // 启用 cache / FIM / reasoner 等 DeepSeek-only 路径
+   case llm.Provider:
+       // 走通用路径（Anthropic / OpenAI / Gemini）
+   }
+   ```
+3. **为什么不直接用官方 SDK**：DeepSeek 有大量增强字段（`reasoning_content`、`prefix`、`prompt_cache_hit_tokens`、FIM endpoint）。Anthropic Go SDK / OpenAI Go SDK 的事件流格式也各异——统一手撸 HTTP 反而最干净（参考上游 pi-ai 经验）。
+4. **Provider 选择**：
+   - 默认：DeepSeek 官方（检测 `DEEPSEEK_API_KEY`）
+   - 切换：`seek --provider anthropic` 等命令行标志
+   - 二等 Provider 启用时 TUI 顶部显示 banner：「⚠️ Provider: X — FIM / cache stats / Reasoner disabled」
+
+### 4.2 工具调用与事件流
+
+事件类型定义在 `pkg/agent/events.go`（`AgentStart` / `TurnStart` / `MessageStart` / `MessageDelta` / `ToolExecStart` / `ToolDelta` / `ToolExecEnd` / ...），用 Go channel 暴露：
+
+```go
+ch, err := agent.Prompt(ctx, "Hello!")
+for ev := range ch {
+    switch e := ev.(type) {
+    case agent.MessageDelta:
+        fmt.Print(e.Delta)
+    case agent.ToolExecEnd:
+        ...
+    }
+}
+```
+
+工具执行目前为串行（每个 tool call 依次 dispatch）；并行执行（`errgroup.WithContext`）延后到 post-v1.0。
+
+### 4.3 TUI
+
+**已选定：`charmbracelet/bubbletea` + `lipgloss`（样式） + `glamour`（Markdown 渲染）**。
+
+- 编辑器：用 `bubbles/textarea`，带 placeholder 提示及自动补全菜单
+- Loader / Spinner：用 `bubbles/spinner`
+- 文件路径 / 斜杠命令的自动补全：自行实现一个 `Model`，挂在 textarea 上层
+- 不做：Kitty/iTerm2 内联图像协议（v1.0 不需要）、CSI 2026 同步输出（bubbletea 自带的方案够用）
+
+### 4.4 扩展机制：MCP（已选定）
+
+Extension 完全走 **MCP（Model Context Protocol）**：
+
+- `~/.config/seek/mcp.json` 配置 MCP server 列表（当前仅 stdio 模式；SSE / streamable HTTP 延后）
+- 启动时按 stdio 拉起 server 子进程，把 server 暴露的 tools 合并进 Agent 的工具集
+- MCP server 暴露的 `resources` / `prompts` 在 v1.0 暂不接入（v1.1+）
+- 配置格式与 Claude Code / Cursor 的 `mcp.json` 完全兼容，方便用户迁移
+
+不实现自家的 Extension 协议——MCP 生态已经比上游 `pi` 自家 Extension 大得多，没必要造重复轮子。
+
+### 4.5 会话存储
+
+- 格式：JSONL（每条消息一行），与上游 `~/.pi/sessions/*.jsonl` 兼容
+- 目录：`~/.config/seek/sessions/`（macOS 走 XDG，Windows 走 `%APPDATA%`）
+- 分支：会话 ID + parent_id 链
+- 压缩：`/compact` 调用一次 LLM 摘要替换历史前缀（行为对齐上游）
+
+### 4.5.1 项目级指令：`AGENTS.md`
+
+CLAUDE.md 的同形机制，统一用业界中立的 `AGENTS.md` 文件名（Cursor / Aider / OpenAI Codex 均已收敛到这个约定）。
+
+- **发现**：启动时从 cwd 向上递归找 `AGENTS.md`，最多 5 层，第一个命中即停。
+- **注入**：找到的内容拼到 system prompt 末尾，标注 `# Project instructions (from <abs path>)`。位置在 Skill manifest 之前——「项目怎么做事」是 baseline，skill 是按需的工作流模板。
+- **大小约束**：硬上限 64 KB，超出截断并提示。AGENTS.md 是项目规范，不是文档库；几百行已经过分。
+- **关闭**：`--no-project-md` 完全跳过加载。
+- **不做**：合并多个文件、热加载、模板替换。AGENTS.md 是「启动时读一次」的纯文本——简单可预测优先。
+- **兼容**：不主动读 `CLAUDE.md` / `.cursorrules`。一个项目可以同时持有 `AGENTS.md` + `CLAUDE.md`（典型场景：本仓库就是），两份文件由项目维护者手动同步。
+
+实现：`internal/projectmd`。
+
+### 4.6 Skill 加载机制（与 MCP 解耦）
+
+**重要前提**：Skill ≠ MCP。
+- **MCP** 解决「让模型多一些能力（tools/resources）」——通过协议接入外部进程
+- **Skill** 解决「告诉模型在什么场景该用什么工作流」——本质是按需注入到 prompt 里的指令文档
+
+两者并存，互不替代。Go 版的 Skill 设计与上游 `pi` / Claude Code 保持一致。
+
+#### 4.6.1 Skill 文件格式（与上游兼容）
+
+```markdown
+---
+name: go-test-runner
+description: Use when the user asks to run, debug, or analyze Go tests. Triggers on phrases like "run tests", "go test", "fix failing test".
+---
+
+# Running Go tests
+
+1. First, identify the package: `go list ./...`
+2. Run with verbose output and race detector for the relevant package
+3. If a test fails, read the failure, locate the source, propose a minimal fix
+...
+```
+
+字段：
+- `name`（必填）：kebab-case 唯一标识
+- `description`（必填）：单行描述「何时该用」——这条是注入 system prompt 的，必须写清触发条件
+- `body`：纯 Markdown，可任意长，包含步骤、注意事项、示例
+
+#### 4.6.2 加载位置（按优先级合并，名称冲突时高优先级胜出）
+
+| 优先级 | 路径 | 用途 |
+|---|---|---|
+| 1（最高） | `<project>/.seek/skills/*.md` | 项目内 Skill（团队共享，进 git） |
+| 2 | `<project>/.claude/skills/*.md` | **兼容识别**——从 Claude Code 迁移过来的 skill 直接可用 |
+| 3 | `~/.config/seek/skills/*.md` | 用户级 Skill |
+| 4 | `~/.claude/skills/*.md` | **兼容识别**——Claude Code 的用户级 skill |
+| 5 | `<embedded>` | 二进制内嵌的内置 Skill（go:embed） |
+
+启动时按上述顺序扫描、合并，**同名 skill 高优先级胜出**（项目级 > 用户级 > 内置；同级别 `.seek` > `.claude`）。
+
+启动日志会打印：
+```
+Loaded 12 skills (3 from .seek/skills, 5 from .claude/skills, 4 builtin)
+```
+
+`/skills` 命令显示完整列表，并标注来源。
+
+#### 4.6.3 运行时如何让模型「用上」Skill
+
+启动时扫描所有 Skill → 在 system prompt 末尾追加一段清单（**只列 name + description，不放 body**）：
+
+```
+# Available skills
+
+The following skills are available. Each skill describes when it should be applied.
+Invoke a skill by calling the `Skill` tool with the skill's name; the tool returns
+the skill's body (instructions) which you should then follow.
+
+- go-test-runner: Use when the user asks to run, debug, or analyze Go tests...
+- migration-review: Use before merging any database migration PR...
+- ...
+```
+
+同时注册一个内置工具：
+
+```go
+// 工具名：Skill
+// 参数：{ "name": "go-test-runner" }
+// 返回：该 skill 的 Markdown body 全文（作为 toolResult 注入下一轮上下文）
+```
+
+模型决定要用某个 skill 时，自己发起一次 `Skill(name="...")` 调用，body 通过 toolResult 进入上下文，后续轮次按 body 里的步骤执行。
+
+**为什么这样设计**（不直接把所有 skill body 全塞进 system prompt）：
+- skill 数量增长后 token 开销不可控（10 个 skill 可能就 10K+ token）
+- 让模型自己选择「现在需不需要这个 skill」比起每次都全量注入更精准
+- 与 Claude Code 的 Skill 机制完全对齐，用户心智模型一致
+
+#### 4.6.4 与 MCP `prompts` 的关系
+
+MCP 协议里有个 `prompts` 能力，看上去和 Skill 重叠。v1.0 的策略：
+- **不**自动把 MCP `prompts` 转成 Skill
+- MCP `prompts` 是「用户主动触发的模板」（通过 `/` 命令调用），与 Skill「模型自主决策何时使用」语义不同
+- v1.1+ 再考虑是否把 MCP `prompts` 显式注册为斜杠命令
+
+---
+
+### 4.7 安全与权限
+
+`internal/permission.Policy.Check()` 前置拦截实现：
+- `bash` 默认询问；可通过 `--yolo` 或配置白名单跳过
+- `write` / `edit` 默认询问对仓库外路径的写入
+- 与 Claude Code 的 `settings.json` 权限模型对齐（便于用户迁移）
+
+---
+
+### 4.8 DeepSeek 专属优化（项目的差异化护城河）
+
+#### 4.8.1 Context Caching 友好的上下文组织
+
+DeepSeek API 自动做前缀缓存：每条请求会与历史请求做最长公共前缀匹配，命中部分按 cache-miss 价的 `2%` 计费（截至 2026-05，V4-Flash input cache hit $0.0028/M，cache miss $0.14/M，比率 1:0.02）。要让命中率高，**整段上下文的前缀必须稳定**。
+
+实现要点（在 `internal/cache` 与 `pkg/agent` 协作）：
+
+1. **Prompt 结构固定顺序**：`system → 工具 schema → skill 清单 → 历史消息（按时间） → 当前用户消息`。任何节的顺序变化都会让缓存全部失效。
+2. **工具 schema 一旦序列化就锁定**：用 `sync.Once` 缓存 JSON 序列化结果，避免 `map` 遍历顺序导致的字节级波动。
+3. **避免「中间插入」**：MCP server 动态加载新工具时，新工具追加到列表末尾而不是插入中间。
+4. **Skill body 走工具调用而非直接塞 prompt**（与 §4.6.3 一致），保持 system prompt 稳定。
+5. **会话压缩（`/compact`）时**：摘要后的新 system prompt 会让缓存全部失效——只在 token 预算告警时触发，不要在小话题切换时触发。
+
+TUI 集成：
+- 状态栏显示「累计缓存命中率」「累计节省 tokens」
+- ⏳ `/cache-stats` 命令查看详细命中分布 + 命中率 < 40% 主动提示 ➜ 目前状态栏已有实时命中率显示，详细诊断面板延后
+
+#### 4.8.2 V4 推理模式（thinking-enabled）集成（v1.0 全做：基础 + 完整双模型 skill）
+
+推理模式限制（API 文档明确说的，不是猜的；V4 之后这些限制随 `Thinking.Type=enabled` 参数生效）：
+- 不支持 `tools` / `tool_choice` / function calling（与 `Thinking.Type=enabled` 互斥）
+- 不支持 `temperature` / `top_p` / `presence_penalty` / `frequency_penalty`
+- 响应里多出 `reasoning_content` 字段（CoT 内容）
+- **必须把上一轮 `reasoning_content` 从 messages 里删掉再发下一轮**，否则 API 报错
+
+**Level 1：基础 `think` 工具**
+
+- 实现：`internal/tools/think`，工具名小写 `think`。调用 V4-Flash 配合 `Thinking.Type="enabled"` + `ReasoningEffort="high"`（M5 重构后不再走单独的 `deepseek-reasoner` endpoint）
+- **流式**：think 实现 `tools.StreamingTool` 接口，运行期间通过 `agent.ToolDelta` 事件把 `reasoning_content` 和 `content` 实时推给 TUI；用户看到 reasoner 的思考过程实时展开，不再是 30 秒空白 spinner
+- TUI 复用现有的 `m.curReasoning` / `m.curContent` 渲染（活动工具运行期间 chat 模型不在跑，字段不会冲突）；`Ctrl+R` 折叠/展开
+- 非流式 `Execute` 路径保留作为 fallback（测试、未来其他调用方）
+
+**Level 2：完整「reasoner-then-chat」双模型协作 skill（v1.0 必须做）**
+
+内置 skill 文件 `dual-model.md`（go:embed），描述要点（注入到 system prompt 的清单部分）：
+> Use this skill when the user gives a multi-step task that benefits from explicit planning. Process:
+> 1. Call `Think(task)` — reasoner produces a step-by-step plan
+> 2. Execute each step using `read` / `write` / `edit` / `bash`
+> 3. Before submitting, call `Think(reflect=true, context=last_changes)` — reasoner reviews
+> 4. Apply fixes and report
+
+新增内置工具 `Think`（仅 DeepSeek Provider 可用，其他 Provider 隐藏）：
+
+```go
+// 工具：Think
+// 参数：{ "task": "<待思考的问题>", "reflect": false, "context": "<可选：要反思的内容>" }
+// 内部：fresh Chat 调用，开 Thinking.Type=enabled + ReasoningEffort=high；返回 reasoning + answer
+// 返回的 reasoning 写入 toolResult，下一轮 chat 拿到
+```
+
+Agent 实现层处理：
+- 收到 `Think` tool call → 发一个新的 Chat 请求，开 `Thinking.Type=enabled`（无历史、无 tools——见 §4.6 / 书 ch6 §6.2 的"隔离历史"理由）
+- 返回后，把 `reasoning_content` + `content` 都打包为 toolResult
+- **下一轮调用 chat 时，从历史中剥离所有 `reasoning_content` 字段**（只保留 reasoner 给出的最终 `content`，外加 chat 自己的工具调用历史）
+- 这一步在 `pkg/agent` 的 message 转换层做，对工具实现透明
+
+TUI：
+- reasoning 段背景色不同，标题「🧠 Reasoning（点击展开）」
+- 状态栏临时显示「Reasoner 思考中…」并暂停 chat 模型的流式
+
+#### 4.8.3 FIM（Fill-in-the-Middle）快路径
+
+DeepSeek `/beta/completions` 接受 `prompt` + `suffix`，返回中间填充。比走 chat 便宜约 5–10x，延迟也低。
+
+**当前实现**：FIM 走独立的 `fim_complete` 工具，而非嵌入 `edit` 工具内部。
+
+`fim_complete` 工具：
+- 输入是 `path`（文件路径）、`before_marker`（旧片段前的内容）、`after_marker?`（旧片段后的内容）、`max_tokens?`
+- 返回模型生成的补全文本，**不自动应用**——模型需要再调一次 `edit` 来完成替换
+- 这样设计让 FIM 的调用独立、可观测，且不破坏 `edit` 工具的幂等语义
+
+#### 4.8.4 错峰计价感知
+
+DeepSeek 当前价目（2026-05，UTC+8，V4 发布后价格）：
+- **V4-Flash**（含 `deepseek-chat` 别名）：输入 $0.14/M（miss）/ $0.0028/M（hit），输出 $0.28/M
+- **V4-Pro**（含 `deepseek-reasoner` 别名）：输入 $0.435/M（miss）/ $0.003625/M（hit），输出 $0.87/M（当前 75% 折扣促销价，原价 4×）
+- 错峰时段（00:30–08:30）：上述价格 50% 折扣
+
+实现：
+- `internal/pricing` 内置价目表（含时段、币种、模型）
+- TUI 状态栏小角标显示「🌙 错峰 -50%」/「☀️ 标准价」+ 标准价时显示距错峰倒计时
+- placeholder 在错峰时段显示「🌙 off-peak — half price」
+- ⏳ `/compact` 等长任务前提示「现在是标准价，x 小时后进入错峰，要等吗？」➜ `pricing.NextTransition` 接口已暴露，等待 TUI 集成
+- 价目表通过 `go:embed` 内嵌；价格变动时随版本更新，不远程拉取（避免引入外部依赖）
+
+#### 4.8.5 JSON 严格模式 + 工具调用稳定性（部分实现）
+
+DeepSeek 工具调用有时返回不完全合法的 JSON。当前实现：
+- `pkg/deepseek` 的 `ChatRequest` 已有 `ResponseFormat` 字段（`{"type": "json_object"}`），可强制 JSON 输出
+- `response_format` 在发送 chat 请求时已预设
+- ⏳ **容错修复层**（补尾逗号、补引号、修复统计）➜ 延后到 v1.1（当前 Go `json.Decoder` 的容错 + 重试机制已覆盖大部分失败场景）
+
+#### 4.8.6 中文友好（部分实现）
+
+- 默认 system prompt 双语：核心指令英文（模型训练分布），用户可见的工具描述中文
+- 错误消息、`/help`、TUI 字符串目前硬编码中文，未走 i18n 表
+- ⏳ `--lang zh` / `--lang en` 开关 + i18n 表 ➜ **延后到 v1.1**（当前硬编码中文已覆盖中文用户核心场景）
+
+---
+
+### 4.9 TUI 渲染模式：inline（非 alt-screen）
+
+M4 用了 `tea.WithAltScreen()`，导致：
+
+- 终端 scrollback 失效 —— 用户只能用 viewport 内置 PgUp/PgDn 翻页
+- 退出 seek 后内容被清屏，会话痕迹消失
+- 鼠标拖选跨多行时常错位（alt-screen 边界 + viewport 边界共同导致）
+- OSC 查询应答漏到 textarea（已通过 §4.8.6 兄弟节点 OSC 预检测缓解，但根因还在）
+
+**M4.5 改造**：去掉 `WithAltScreen()`，改为 inline 模式（与 Claude Code 一致）。
+
+```
+原来（alt-screen，固定布局）        新（inline，追加式）
+┌─────────────────────────┐         > you: 解释这段代码
+│ seek · /cwd             │         ▸ seek: 这段代码做的是 …
+│                         │             [tool] read README.md → 1.2 kB
+│  conversation viewport  │         ▸ seek: 总结如下 …
+│  (with internal scroll) │
+│                         │         > you: 那再帮我改一下 …
+├─────────────────────────┤         ▸ seek: 好的 …
+│ input                   │             [tool] edit calculator.go → 1 replacement
+├─────────────────────────┤         ▸ seek: 改完了
+│ status bar (pinned)     │
+└─────────────────────────┘         status: model=deepseek-chat cache=70% cost=$0.0023
+                                    > _
+```
+
+权衡：
+- **失去**：固定底部状态栏（每轮结束时打印一行简版替代）
+- **失去**：多 pane 布局
+- **得到**：整个会话进入终端 scrollback，原生 Cmd+C 选段复制
+- **得到**：退出后会话残留在终端，便于事后参考
+- **得到**：与 `gh`、`gemini`、Claude Code 等 CLI 工具一致的"终端原生"观感
+
+**实现要点**：
+- bubbletea 常驻运行，接管输入区 + 活跃状态行；已提交的输出通过 `tea.Println`（或直接 `fmt.Println`）追加到 stdout，进入终端 scrollback
+- 不退出 bubbletea 程序——`tea.Println` 在 inline 模式下把文本写到滚动区而不是覆盖当前视图
+- 状态栏在每轮结束时打印一行（含简版缓存/错峰/成本信息），不追求实时刷新
+- 错峰倒计时这种"实时"显示降级为：进入每个 prompt 前打印一次最新值
+- 顶部 banner（`PrintPixelWelcomeBanner`）在 `tea.NewProgram` 之前直接 `fmt.Println`，确保进 scrollback
+
+### 4.10 Per-call 审批模型（M4.5 已交付）
+
+当前：`--yolo` 全局开关，要么全允许，要么全拒绝。Claude Code 的做法是**每次危险操作弹出 inline y/n**。
+
+**M4.5 已实现**：
+- `permission.Policy` 新增 `mode` 字段：`yolo` / `ask` / `deny`（默认 `ask`）
+- 当 mode=`ask` 且 tool 是 bash / repo 外 write/edit：
+  - TUI inline 弹出： `▸ seek wants to run: bash "rm -rf node_modules" [y/N/yolo]`
+  - 用户输入 `y` → 允许这次；`n` → 拒绝（同 deny 的提示）；`yolo` → 升级 policy 为全局 yolo
+- `--yolo` 命令行短路；当前无 `--ask` flag（`ask` 是默认行为）
+- print 模式（非交互）下，`ask` 自动降级为 `deny`（与现状一致）
+
+### 4.11 流式中断（Esc）（M4.5 已交付）
+
+当前：跑飞了只能 Ctrl+C 杀整个 seek 进程，会话历史丢失。
+
+**M4.5 已实现**：
+- 流式中 Esc 触发 `m.cancelStream()`（`context.WithCancel`）；`pkg/deepseek.ChatStream` 的 ctx 取消会关闭 HTTP 响应、停止 token 流
+- 已经产生的 tool 调用结果**不回滚**（文件写过的就是写过的）
+- 用户消息保留，下一轮可以继续——例如"刚才别那样，按这个方式重试"
+- 状态栏短暂闪过 `interrupted` 提示
+
+### 4.12 输入区增强
+
+- **↑/↓ prompt 历史**：当前会话内的所有用户消息按时间存入环形缓冲，textarea 空时 ↑ 回放上一条
+- **`@` 文件路径补全**：输入到 `@` 时弹出基于 `find . -type f` 的下拉，模糊匹配；选中后插入相对路径
+- **多行 paste 折叠** ✅：detect 一次 paste 行数 > 5 → 在显示层折叠成 `📋 [pasted 23 lines, hidden]`，textarea 内仍保持完整内容，提交时发给 LLM（`view.go` `renderPastedPlaceholder` + `update.go` `handlePasteFolding`）。输入任何字符即展开。
+- **tool 执行 spinner**：每个 in-flight tool 旁边 bubble 默认 spinner（`bubbles/spinner`，~6 行集成）
+- **`edit` 应用前 diff 预览**（M5 已交付，与 per-call 审批配合显示 unified diff）
+
+---
+
+## 5. 里程碑
+
+| 里程碑 | 内容 | 状态 |
+|---|---|---|
+| **M0 骨架** | repo init、CI、`pkg/deepseek` 流式 chat + 缓存元数据 | ✅ `25c8461` |
+| **M1 Agent loop** | `pkg/agent` 事件流 + tool 循环；`read` 工具 | ✅ `719b84e` |
+| **M2 工具 + FIM** | `write` / `edit` / `bash` + 权限框架；`pkg/deepseek` FIM；`fim_complete` 工具 | ✅ `2af3b62` |
+| **M3 Reasoner + 缓存** | `cache.Tracker` + `pricing` + `think` 工具（reasoner 基础） | ✅ `8264f52` |
+| **M4 TUI** | bubbletea；状态栏；slash 命令；reasoning 折叠；Markdown 渲染 | ✅ `9be599b` + polish |
+| **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
+| **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ✅ 全部交付（见 §5.2） |
+| **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ✅ 全部交付（见 §5.3） |
+| **M7 打磨** | RPC / JSON 模式（`internal/rpc`）✅；多行 paste 折叠 ✅；主题切换 ✅；帮助 overlay ✅；用户文档 ✅；自举 benchmark ✅ | ✅ |
+| **v1.0 发布** | | ≈ 当前进度 + 1 周 |
+| **Post-v1.0** | LSP 语义导航；并行工具调用；... | ⏳ 待规划 |
+
+### 5.0.1 Post-v1.0 未来功能
+
+#### LSP 语义导航（可选工具）
+
+**动机**：grep + read(offset) 对大型 monorepo / 动态类型语言（Python、TypeScript）的符号级导航不够精确，可能读错同名符号或需要多次 round-trip。
+
+**方案**：新增可选 `lsp` tool，懒启动对应语言的 language server（`gopls`、`pyright`、`typescript-language-server`），暴露三个操作：
+- `definition(file, line, col)` — 跳转到定义
+- `references(file, line, col)` — 查找所有引用
+- `hover(file, line, col)` — 获取类型/签名信息
+
+**不强制依赖**：未安装 language server 时 `lsp` tool 不注册，不影响启动。通过 `--lsp=go,ts` 显式开启。
+
+**与 MCP 的关系**：如果社区出现成熟的 lsp-mcp-server，可通过现有 MCP 通道接入，无需改 seek 核心。优先等待生态，再考虑内置。
+
+**前置条件**：先把 grep-first + read(offset) 工作流跑稳，通过真实会话数据确认 LSP 是实际瓶颈（大型 Python/TS 项目）再投入。
+
+### 5.1 M4.5 子任务展开
+
+| 子任务 | 状态 | commit |
+|---|---|---|
+| inline 模式改造（替代 alt-screen） | ✅ | `5d1c78c` |
+| tool 计时（live spinner + committed `· Xs` tail） | ✅ | `a38bfd0` |
+| Esc 中断 + ctx 传播（覆盖 chat / bash / reasoner） | ✅ | `a38bfd0` |
+| `/` slash 命令补全菜单 | ✅ | `5f6b316` |
+| ↑/↓ prompt 历史 + token 预算告警 | ✅ | `d038455` |
+| per-call 审批（policy.Mode 三态 + inline y/N/a） | ✅ | `7c96bd7` |
+| `@` 文件路径补全 | ✅ | `edf443c` |
+| PRD / pitfalls / README 同步 | ✅ | 本次 commit |
+| **总计** | **8 个 commit，~2 周分散完成** | |
+
+### 5.2 M5 子任务展开
+
+| 子任务 | 状态 | commit |
+|---|---|---|
+| 会话持久化（`--resume` / `--continue` / `--list` / `--no-save`） | ✅ | `f13ec3f` |
+| `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | `3a0b6bf` |
+| `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | `3a0b6bf` |
+| Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | `2c53248` |
+| 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成 + 单元测试覆盖；端到端真 API 验证待 M7 自举测试 | `dd1bcd0` |
+| `AGENTS.md` 自动加载（项目根向上 5 层，注入 system prompt，可 `--no-project-md` 关） | ✅ | `e8894ff` |
+| Esc 中断不再污染会话 + 加载时 `Repair` 修旧坏会话 + `thinking…` 占位 | ✅ | `986a485` |
+| `think` 工具流式化（`tools.StreamingTool` 接口 + `agent.ToolDelta` 事件） | ✅ | `63d1f09` |
+| MCP client（JSON-RPC 2.0 over stdio；tools bridge；`~/.config/seek/mcp.json` 配置；名称冲突解决） | ✅ | `45c71af`, `398448e` |
+| `edit` 应用前 diff 预览（unified diff，per-call 审批配合） | ✅ | `74e1a61` |
+| `/compact` 保留完整历史（fork snapshot session，ParentID 链，summary 写子 session） | ✅ | `c3082ec` |
+| Session 存储改为 JSONL（header line + per-message lines；O(1) loadMeta；legacy .json 兼容回读） | ✅ | `c4dd8f4` |
+| 流式计时 + token 估算状态栏指示器（`● Ns · ↓~Xtok`） | ✅ | `7a08d8b` |
+| **总计** | **13 个功能 commit，全测试绿** | |
+
+### 5.3 M6 子任务展开
+
+| 子任务 | 状态 | commit |
+|---|---|---|
+| `pkg/llm` 通用接口（`Provider` / `ChatRequest` / `Message` / `Event` sum type） | ✅ | `a1fde05` |
+| `pkg/llm/provider/anthropic`（Messages API SSE；content-block 转译；6 测试） | ✅ | `a1fde05` |
+| `pkg/llm/provider/openai`（Chat Completions SSE；流式 tool-call 汇总；7 测试） | ✅ | `a1fde05` |
+| `pkg/llm/provider/gemini`（streamGenerateContent；systemInstruction 提取；生成 call ID；6 测试） | ✅ | `a1fde05` |
+| `pkg/llm/compatible`（vLLM / Ollama / SiliconFlow 薄包装，自定义 name） | ✅ | `a1fde05` |
+| `pkg/agent` 双路由（`runTurnLLM` + `summariseLLM`；translate.go 消息转译） | ✅ | `a1fde05` |
+| `cmd/seek` `--provider` 标志 + env var 自动探测 + compatible `--base-url` | ✅ | `a1fde05` |
+| TUI `ProviderName` banner（`⚠ Provider: X — FIM / cache stats / Reasoner disabled`） | ✅ | `a1fde05` |
+| compact 告警阈值下调：Warn 80→60%，Critical 95→75% | ✅ | `b01bc17` |
+| **总计** | **9 项，全测试绿** | |
+
+---
+
+## 6. 验收标准
+
+v1.0 发布前必须满足：
+
+#### 已达成（M0–M4）
+
+- [x] `pkg/deepseek` 流式 + 缓存元数据解析正确（M0 验证）
+- [x] Agent 事件流 + 工具调用循环（M1 真实 API 验证：cache 35.6%）
+- [x] 6 个工具齐备，permission gating 工作（M2 真实 API 验证：write+edit+bash 链路 cache 70.8%）
+- [x] Reasoner 集成 + cache.Tracker + pricing 时段感知（M3 真实 API 验证：think 工具 7680 token cache hit / $0.0020）
+- [x] TUI 跑通真实 DeepSeek（M4：缓存 89.4%，think 工具调用，markdown 渲染）
+
+#### M4.5 验收（已交付 ✅）
+	
+- [x] **inline 模式**：会话进入终端 scrollback；退出 seek 后内容仍在；鼠标拖选+Cmd+C 跨任意历史可用
+- [x] **Esc 中断**：长 reasoner 调用进行中 Esc 立即停止流式；会话上下文保留，可继续追问
+- [x] **per-call 审批**：未带 `--yolo` 启动时，bash 触发 inline y/N 提示；选 `y` 单次允许，`yolo` 升级全局
+- [x] **prompt 历史**：连续发 3 条 prompt 后，textarea 空时 ↑/↓ 可在它们之间循环
+- [x] **tool spinner**：长 tool（如 bash sleep 10）执行期间，对应历史行显示动画
+- [x] **@ 补全**：输入 `@RE` 弹出 README.md 候选；选中后插入相对路径
+- [x] **token 告警**：模拟 prompt 占当前模型 context 80% 时，状态栏出现警告色
+
+#### v1.0 整体（M5–M7 完成后，已交付 ✅ 标记为已达成）
+
+- [x] `go install github.com/whyiyhw/seek/cmd/seek@latest` 一键装好，macOS / Linux / Windows 均可运行
+- [x] 仅有 `DEEPSEEK_API_KEY` 即开箱可用，无任何额外配置
+- [x] 自举测试：`seek --benchmark=self-hosting` 真实跑通（cache hit 95.7%，远超阈值；2026-05-22）
+- [x] **缓存命中率**：在自举测试场景下，缓存命中率 ≥ 60%（前 5 轮除外）— **实测 97.0%**
+- [x] **FIM 快路径**：`seek --benchmark=fim-patch` 中模型至少调用 1 次 `fim_complete`（证明 FIM 路径走通）— **实测 1 次**
+   > **历史修正（2026-05）**：原标准是「FIM / 总工具调用 ≥ 50%」，落地后发现：(1) 分母含 `read`/`bash`/`grep` 等不能用 FIM 的工具，比例被稀释；(2) FIM 必伴一次 `edit` 把生成的补全写入文件（见 §4.6 / 书 ch6 §6.5），任何 `FIM/(FIM+edit)` 类比例在数学上以 ~50% 为上界。结论：「FIM 比例 ≥ 50%」在当前实现里不可达。v1.0 改为「FIM 路径至少被调用一次」（绝对计数），合理的比例阈值放到 v1.1 收集更大样本量后再定。
+- [x] **双模型协作 skill**：内置 `dual-model` skill 可被模型自主调用；完整跑通「Think→执行→Think 反思」流程
+- [x] 至少 1 个真实 MCP server（filesystem）开箱可用
+- [x] **Skill 加载**：能加载 `.seek/skills/` `.claude/skills/` `~/.config/seek/skills/` `~/.claude/skills/`；内置 ≥ 3 个示例 skill（含 dual-model、go-test-runner）
+- [x] **二等 Provider 兼容**：DeepSeek 官方 + Anthropic + OpenAI + Gemini + 一个兼容端点（Ollama）至少各跑通一次「读文件、改一行、运行 `go test`」端到端用例
+- [x] **二等 Provider banner**：切换到 Anthropic / OpenAI / Gemini 时，TUI 顶部正确显示警告
+- [x] `pkg/deepseek` 与 `pkg/agent` 公共 API 单测覆盖 ≥ 70%
+
+---
+
+## 7. 主要风险与缓解
+
+| 风险 | 影响 | 缓解 |
+|---|---|---|
+| **DeepSeek 服务可用性 / 价格政策变动** | 中 | 三层退路：DeepSeek-兼容端点 → Anthropic → OpenAI / Gemini；价目表 `go:embed`，版本随升级 |
+| DeepSeek API 字段变更（如 `reasoning_content` 格式） | 中 | API 调用全部走 `pkg/deepseek`，集中一处维护；每月 dry-run smoke test |
+| **多 Provider 抽象「腐蚀」DeepSeek 优化** | **高** | §3 + §4.1 的严格分层；CI 加 lint：`pkg/deepseek` 不允许 import `pkg/llm` |
+| 缓存命中率优化反直觉，用户难理解 | 中 | TUI 状态栏显示实时命中率 + 节省 token 数；详细诊断面板延后 |
+| FIM 在边界情况下质量不如 chat | 中 | 自动 fallback 阈值（行数 / token 数）保守；用户可 `--no-fim` 关闭（⏳ 尚未实现） |
+| 双模型协作 skill 让 reasoner 频繁触发，token 成本反而上升 | 中 | skill description 强调「multi-step task that benefits from explicit planning」（已实现）；⏳ TUI 显示 reasoner 调用次数 + `--no-think` 全局关闭（延后） |
+| 中文社区认知不足 | 低 | 中文 README、知乎/掘金/V2EX 起手；DeepSeek 官方/社区曝光 |
+| 法律 | 低 | 上游 MIT，干净重写无问题；保留 NOTICE 注明灵感来源 |
+
+---
+
+## 8. 下一步（v1.0 发布）
+
+M0–M7 全部交付。已完成：
+
+1. **RPC/JSON 模式** ✅ — `internal/rpc`，`seek --rpc` 入口，JSON-RPC 2.0 over stdio，7 个单元测试
+2. **文档完善** ✅ — `docs/guide-mcp.md`、`docs/guide-skills.md`、`docs/guide-sessions.md`；README 同步
+3. **多行 paste 折叠** ✅
+4. **主题切换** ✅
+5. **帮助 overlay** ✅
+6. **自举 benchmark** ✅ — `cmd/seek/benchmark.go`，两个预设任务（`self-hosting` / `fim-patch`），真实跑通 cache hit 95.7% / 97.0% (turn 6+)，FIM 路径走通 1 次
+
+v1.0 剩余（仅发布动作）：
+- **首次 git tag** — `v1.0.0`
+
+完成后进入 **v1.0 正式发布**。
+
+### Known Issues / 待改进
+
+- **`--auto-continue` 无终止条件**：开启后模型每次收到注入的 `"continue"` 都会找新任务，循环直到 `MaxTurns`（200）耗尽。根本原因是无法从结构上区分"规划中"和"真正完成"（两者均为 `finish=stop, toolCount=0`）。候选方案：①全局 auto-continue 次数上限（不随工具调用重置）；② `done()` 工具——模型必须显式调用才算结束。目前该 flag 默认 `false`，暂不阻塞 v1.0。
+
+- **FIM 比例阈值不可达（已修正）**：原 PRD §6 写"FIM 调用比例 ≥ 50%"。2026-05-22 实测发现：(1) 分母含不能用 FIM 的工具（read/bash/grep），(2) FIM 必伴一次 edit 把补全写入文件（书 ch6 §6.5），任何 `FIM/(FIM+edit)` 在数学上以 ~50% 为上界。**v1.0 阈值改为「FIM 路径至少调用 1 次」**（per-task `FIMMinCalls` 字段，绝对计数）。合理的比例阈值需要更大样本量 + 重新设计 metric（候选：FIM 节省的 token 占总 prompt token 比例，更直接衡量经济价值），放到 v1.1。
+
+- **FIM 经济价值在 V4 时代待重估**：V4 之后 chat 缓存命中价 $0.0028/M，FIM `/beta/completions` 端点价格优势是否仍显著要单独 benchmark。这关乎 PRD §4.8 是否仍把 FIM 列为核心差异化。v1.1 议题。
+
+## 9. 历史决策回顾（已落地）
+
+| 决策 | 时间 | 落地 commit |
+|---|---|---|
+| 项目改名 pi-go → seek | v0.3 | `25c8461` |
+| 一等公民 DeepSeek、二等兼容三家 | v0.4 | M0–M4 全程 |
+| TUI 用 bubbletea | v0.2 | `9be599b` |
+| 扩展用 MCP，Skill 用 markdown frontmatter | v0.3 | M5：MCP `45c71af`，Skill `2c53248` |
+| Reasoner 走独立路径 + StripReasoningContent | v0.3 | `8264f52` |
+| OAuth / Batch API 延后 | v0.3 | — |
+| Pitfall 记录三件套 | v0.5 | `0ebb03a` |
+| **TUI 改 inline 模式** | **v0.5** | M4.5 `5d1c78c` |
+| MaxTurns 8→200；`--auto-continue` opt-in（默认 false） | v0.9 | `50f7c0e` `0d847b4` |
