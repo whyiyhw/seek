@@ -31,6 +31,7 @@ import (
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/tools/bash"
@@ -104,7 +105,7 @@ func run() error {
 	// the discriminator — flag.Parse() would already have consumed
 	// it if we waited.
 	if len(os.Args) >= 2 && os.Args[1] == "skill" {
-		return runSkillCmd(os.Args[2:], os.Stdout, os.Stderr)
+		return skillcli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 
 	var (

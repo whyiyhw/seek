@@ -1,13 +1,19 @@
-// Skill subcommand surface — the `seek skill ...` family from
-// PRD v2 §5.1. Dispatched from run() ahead of the heavy startup so
-// these never pay for provider detection / session loading they
-// don't use.
+// Package skillcli is the `seek skill ...` command dispatcher
+// (PRD v2 §5.1). It's shared between two consumers:
+//
+//   - cmd/seek for the `seek skill ...` CLI invocation
+//   - internal/tui for the `/skill ...` slash command
+//
+// Both call Run(args, stdout, stderr); the TUI buffers the writers
+// so the output renders as scrollback text. Keeping the dispatcher
+// in one place is what makes the PRD §5.2 promise ("TUI mirrors
+// CLI, same flags + output") cheap to maintain.
 //
 // Each subcommand owns its own flag.FlagSet (instead of leaning on
 // the global flag package) — `seek skill install --force` mustn't
 // share flag namespace with the top-level binary's --force etc.,
 // and FlagSet's per-call usage strings give cleaner help.
-package main
+package skillcli
 
 import (
 	"flag"
@@ -18,9 +24,14 @@ import (
 	"github.com/whyiyhw/seek/internal/skillmgr"
 )
 
-// runSkillCmd dispatches `seek skill <verb> [args...]`. stdout /
-// stderr are injected (rather than hardcoded to os.Stdout / os.Stderr)
-// so tests can capture output without redirecting global IO.
+// Run is the public entry point. stdout / stderr are injected so the
+// TUI can swap real terminal handles for in-memory buffers.
+func Run(args []string, stdout, stderr io.Writer) error {
+	return runSkillCmd(args, stdout, stderr)
+}
+
+// runSkillCmd dispatches `seek skill <verb> [args...]`. Unexported so
+// callers go through Run, which keeps the entry-point surface clean.
 func runSkillCmd(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		printSkillHelp(stdout)

@@ -1,4 +1,4 @@
-package main
+package skillcli
 
 // Read-side `seek skill` subcommands: list / status / stats. The
 // install / uninstall / update commands live in skill.go alongside

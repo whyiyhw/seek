@@ -439,6 +439,42 @@ func TestSkills_ListsLoadedSkillsWithSource(t *testing.T) {
 	}
 }
 
+func TestSkillCLI_HelpRendersDispatcherText(t *testing.T) {
+	// `/skill` with no args should hit skillcli's help printer. The
+	// TUI rendering shouldn't lose the command list.
+	m := emptyModel()
+	res := runHandler(t, m, "/skill")
+	for _, want := range []string{"install", "uninstall", "update", "list", "status"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("/skill help missing %q:\n%s", want, res.text)
+		}
+	}
+}
+
+func TestSkillCLI_UnknownVerbSurfaces(t *testing.T) {
+	// skillcli.Run returns an error for unknown verbs. The TUI
+	// command should fold that error into the rendered text rather
+	// than swallowing it — silent failure is the worst UX here.
+	m := emptyModel()
+	res := runHandler(t, m, "/skill frobnicate")
+	if !strings.Contains(res.text, "unknown") {
+		t.Errorf("expected error message in output, got:\n%s", res.text)
+	}
+}
+
+func TestSkillCLI_WhitespaceSplitsArgs(t *testing.T) {
+	// Verifies the args parser does the right thing for the
+	// vanilla case (subcommand + flag + value). We trip a known
+	// error path (uninstall a non-existent skill) and confirm the
+	// name we passed shows up in the message — proves the tokens
+	// reached skillcli intact.
+	m := emptyModel()
+	res := runHandler(t, m, "/skill uninstall does-not-exist")
+	if !strings.Contains(res.text, "does-not-exist") {
+		t.Errorf("token didn't reach skillcli; output was:\n%s", res.text)
+	}
+}
+
 func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
