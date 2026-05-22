@@ -27,6 +27,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
+	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
@@ -198,6 +199,7 @@ func run() error {
 
 	reg := tools.New().
 		Add(read.New()).
+		Add(grep.New()).
 		Add(listdir.New()).
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
