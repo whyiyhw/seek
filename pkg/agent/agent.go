@@ -36,9 +36,8 @@ type Config struct {
 	Model        string          // defaults to deepseek.ModelChat / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
-	MaxTurns     int             // safety bound; defaults to 200
-	MaxTokens    int             // completion token cap per call; 0 → defaultMaxTokens
-	AutoContinue bool           // inject "continue" on text-only turns so the model resumes without user input
+	MaxTurns  int // safety bound; defaults to 200
+	MaxTokens int // completion token cap per call; 0 → defaultMaxTokens
 
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
@@ -232,15 +231,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			totalUsage     deepseek.Usage
 			totalToolCalls int
 			turns          int
-			// consecutiveIdle counts back-to-back turns where the model
-			// produced text only (no tool_calls). A non-zero count usually
-			// means the model is narrating mid-task ("Now let me check …")
-			// rather than signalling completion. We inject a "continue"
-			// stimulus and keep the loop alive, up to maxConsecutiveIdle
-			// times before treating the silence as a genuine stop.
-			consecutiveIdle int
 		)
-		const maxConsecutiveIdle = 2
 
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 			turns = turn + 1
@@ -302,27 +293,9 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
 				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
-
-				// Auto-continue: model produced text with no tools (a
-				// narration turn). Inject a lightweight "continue" stimulus
-				// and keep the loop alive so the model can resume without
-				// the user having to type "继续". Only fires when:
-				//   - finish=="stop" (not a token-limit truncation)
-				//   - we still have turns left in the budget
-				//   - we haven't already auto-continued maxConsecutiveIdle
-				//     times in a row (guards against infinite idle loops)
-				if a.cfg.AutoContinue && finish == "stop" && consecutiveIdle < maxConsecutiveIdle && turn < a.cfg.MaxTurns-1 {
-					consecutiveIdle++
-					a.messages = append(a.messages, deepseek.Message{
-						Role:    deepseek.RoleUser,
-						Content: "continue",
-					})
-					continue
-				}
 				break
 			}
 
-			consecutiveIdle = 0
 			totalToolCalls += toolCount
 
 			// M1: sequential tool dispatch. Parallel via errgroup lands

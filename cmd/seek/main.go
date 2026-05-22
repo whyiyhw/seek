@@ -299,7 +299,6 @@ func run() error {
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
 		MaxTurns:        *maxTurns,
-		AutoContinue:    true,
 		InitialMessages: initialMsgs,
 	})
 	if err != nil {
@@ -386,7 +385,7 @@ func run() error {
 				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTurns:     *maxTurns,
-				AutoContinue: true,
+		
 			})
 		},
 		SetModel: func(m string) { sessionModel = m },
