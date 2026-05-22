@@ -39,6 +39,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
+	"github.com/whyiyhw/seek/internal/upgrade"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -100,8 +101,32 @@ func run() error {
 		rpcMode      = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
 		benchmarkTask = flag.String("benchmark", "", "run a benchmark task (self-hosting | fim-patch) and report metrics")
 		benchmarkOut = flag.String("benchmark-out", "", "write benchmark JSON report to this file (default: stdout)")
+		showVersion   = flag.Bool("version", false, "print version info and exit")
+		upgradeFlag   = flag.Bool("upgrade", false, "download the latest release from GitHub and replace this binary")
+		upgradeForce  = flag.Bool("upgrade-force", false, "with -upgrade: proceed even when the current build is a dev build (overwrites local builds)")
+		upgradeDryRun = flag.Bool("upgrade-dry-run", false, "with -upgrade: download + verify checksum but do not replace the binary")
+		upgradeCheck  = flag.Bool("upgrade-check", false, "check for a newer release on GitHub and print the result; never modifies the binary")
 	)
 	flag.Parse()
+
+	// -version / -upgrade short-circuit before any provider / session
+	// machinery is touched: these subcommands don't need API keys.
+	if *showVersion {
+		fmt.Println(tui.VersionString())
+		return nil
+	}
+	if *upgradeFlag || *upgradeDryRun || *upgradeForce {
+		return runUpgrade(*upgradeForce, *upgradeDryRun)
+	}
+	if *upgradeCheck {
+		return runUpgradeCheck()
+	}
+
+	// Best-effort cleanup of a stale ".old" file left by a previous
+	// Windows upgrade. No-op on Unix.
+	if exe, err := os.Executable(); err == nil {
+		upgrade.CleanupStaleOld(exe)
+	}
 
 	// Validate --theme before doing anything else.
 	switch strings.ToLower(*themeFlag) {
@@ -783,6 +808,53 @@ func detectGlamourStyle(theme string) string {
 		return "dark"
 	}
 	return "light"
+}
+
+// runUpgrade resolves the latest GitHub release, downloads the asset
+// for this platform, verifies its sha256 against the release's
+// checksums.txt, and atomically replaces this binary. dryRun stops
+// after the checksum verification step.
+func runUpgrade(force, dryRun bool) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	_, err := upgrade.Run(ctx, upgrade.Options{
+		Owner:    "whyiyhw",
+		Repo:     "seek",
+		Current:  tui.VersionString(),
+		AllowDev: force,
+		DryRun:   dryRun,
+		Stderr:   os.Stderr,
+		Stdout:   os.Stdout,
+	})
+	// ErrAlreadyLatest is not a failure; the orchestrator already
+	// printed a friendly note to stderr.
+	if err == upgrade.ErrAlreadyLatest {
+		return nil
+	}
+	return err
+}
+
+// runUpgradeCheck prints whether a newer release is available, without
+// downloading or modifying anything. Exits 0 in both "up to date" and
+// "newer available" cases; non-zero only on transport / parse errors.
+func runUpgradeCheck() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	rel, err := upgrade.Check(ctx, upgrade.Options{
+		Owner:   "whyiyhw",
+		Repo:    "seek",
+		Current: tui.VersionString(),
+	})
+	if err != nil {
+		return err
+	}
+	if rel == nil {
+		fmt.Printf("seek is up to date (%s)\n", tui.VersionString())
+		return nil
+	}
+	fmt.Printf("seek update available: %s → %s\n", tui.VersionString(), rel.TagName)
+	fmt.Println("Run `seek -upgrade` to install.")
+	return nil
 }
 
 // buildProvider selects and constructs the LLM provider based on the
