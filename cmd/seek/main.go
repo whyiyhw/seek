@@ -21,6 +21,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -358,6 +359,14 @@ func run() error {
 		}
 	}
 
+	// Lifecycle hooks. The registry is empty today — v1 memory will
+	// register PrePrompt + SessionStart handlers here. Passing the
+	// registry through agent.Config wires the in-loop hooks; the
+	// session-lifecycle ones (SessionStart / SessionEnd) are fired
+	// from main.go because the agent doesn't know when its host
+	// program is "done".
+	hooksReg := hooks.NewRegistry()
+
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
 		Provider:        provider,
@@ -367,10 +376,28 @@ func run() error {
 		MaxTurns:        *maxTurns,
 		AutoContinue:    *autoContinue,
 		InitialMessages: initialMsgs,
+		Hooks:           hooksReg,
 	})
 	if err != nil {
 		return err
 	}
+
+	var sessionID string
+	if activeSession != nil {
+		sessionID = activeSession.ID
+	}
+	hooksReg.NotifySessionStart(ctx, hooks.SessionStartEvent{
+		ID:      sessionID,
+		Model:   *model,
+		CWD:     abs,
+		Resumed: loaded != nil,
+	})
+	defer func() {
+		hooksReg.NotifySessionEnd(context.Background(), hooks.SessionEndEvent{
+			ID:    sessionID,
+			Usage: tracker.Cumulative(),
+		})
+	}()
 
 	// Benchmark mode: short-circuit before normal routing. Forces --yolo
 	// so the agent can run bash/go-test without interactive approval.

@@ -18,11 +18,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 	"github.com/whyiyhw/seek/pkg/llm"
 )
-
 
 // Config configures a new Agent. Exactly one of Client or Provider must
 // be set; they are mutually exclusive provider paths.
@@ -37,15 +37,26 @@ type Config struct {
 	Model        string          // defaults to deepseek.ModelChat / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
-	MaxTurns     int  // safety bound; defaults to 200
-	MaxTokens    int  // completion token cap per call; 0 → defaultMaxTokens
-	AutoContinue bool // if true, inject "continue" on text-only turns so the model resumes mid-task without user input
+	MaxTurns     int             // safety bound; defaults to 200
+	MaxTokens    int             // completion token cap per call; 0 → defaultMaxTokens
+	AutoContinue bool            // if true, inject "continue" on text-only turns so the model resumes mid-task without user input
 
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
 	// SystemPrompt is still placed first; InitialMessages are
 	// appended after, in order.
 	InitialMessages []deepseek.Message
+
+	// Hooks, when non-nil, receive lifecycle callbacks: PrePrompt /
+	// PreToolUse decorators (synchronous, ordered, can mutate the
+	// request) and PreTurn / PostTurn / PostToolUse observers
+	// (read-only). nil is a zero-cost no-op — Registry's dispatch
+	// helpers are nil-receiver safe.
+	//
+	// Session lifecycle hooks (SessionStart / SessionEnd) are fired
+	// by the caller (typically cmd/seek/main.go), not by the agent —
+	// the agent doesn't know when its host program is "done".
+	Hooks *hooks.Registry
 }
 
 // Agent holds the persistent state for one conversation. It is NOT safe for
@@ -212,20 +223,35 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 // (final answer reached, max turns hit, ctx cancelled, or fatal error).
 //
 // The loop:
-//   1. Append the user message.
-//   2. Call ChatStream; assemble assistant message + any tool_call deltas.
-//   3. If finish_reason="tool_calls": dispatch tools sequentially, append
-//      tool result messages, loop.
-//   4. Otherwise: terminate.
+//  1. Append the user message.
+//  2. Call ChatStream; assemble assistant message + any tool_call deltas.
+//  3. If finish_reason="tool_calls": dispatch tools sequentially, append
+//     tool result messages, loop.
+//  4. Otherwise: terminate.
 func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 	out := make(chan Event, 32)
 
 	go func() {
 		defer close(out)
 
+		// PrePromptHook: memory injection, context blocks, prompt
+		// rewriting. Decorators are synchronous and ordered; an error
+		// from any hook aborts the prompt before the user message is
+		// committed to history.
+		prePrompt, err := a.cfg.Hooks.ApplyPrePrompt(ctx, hooks.PrePromptIn{
+			UserText: userText,
+			History:  append([]deepseek.Message{}, a.messages...),
+		})
+		if err != nil {
+			out <- ErrorEvent{Err: err}
+			return
+		}
+		for _, m := range prePrompt.Prepend {
+			a.messages = append(a.messages, m)
+		}
 		a.messages = append(a.messages, deepseek.Message{
 			Role:    deepseek.RoleUser,
-			Content: userText + workflowReminder,
+			Content: prePrompt.UserText + workflowReminder,
 		})
 		out <- AgentStart{}
 
@@ -238,6 +264,10 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 			turns = turn + 1
 			out <- TurnStart{Index: turn}
+			a.cfg.Hooks.NotifyPreTurn(ctx, hooks.PreTurnEvent{
+				Index:   turn,
+				History: append([]deepseek.Message{}, a.messages...),
+			})
 
 			assistant, usage, finish, err := a.runTurn(ctx, out)
 			if err != nil {
@@ -295,6 +325,12 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
 				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
+				a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
+					Index:     turn,
+					Usage:     usage,
+					ToolCalls: 0,
+					Finish:    finish,
+				})
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
 					a.messages = append(a.messages, deepseek.Message{
 						Role:    deepseek.RoleUser,
@@ -355,6 +391,12 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			}
 
 			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}
+			a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
+				Index:     turn,
+				Usage:     usage,
+				ToolCalls: toolCount,
+				Finish:    finish,
+			})
 		}
 
 		out <- AgentEnd{Usage: totalUsage, Turns: turns, ToolCalls: totalToolCalls}
@@ -587,6 +629,30 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		return "", err
 	}
 
+	// PreToolUseHook: permission gates, audit, secret redaction. Deny
+	// short-circuits — the deny text becomes the tool result (mirrors
+	// permission.ErrDenied flow). Args rewrite is reserved for narrow
+	// uses like redacting secrets out of bash commands.
+	preTool, hookErr := a.cfg.Hooks.ApplyPreToolUse(ctx, hooks.PreToolUseIn{
+		CallID: tc.ID,
+		Name:   tc.Function.Name,
+		Args:   args,
+	})
+	if hookErr != nil {
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: hookErr}
+		return "", hookErr
+	}
+	if preTool.Deny != "" {
+		a.cfg.Hooks.NotifyPostToolUse(ctx, hooks.PostToolUseEvent{
+			CallID: tc.ID, Name: tc.Function.Name, Args: args, Result: preTool.Deny,
+		})
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Result: preTool.Deny}
+		return preTool.Deny, nil
+	}
+	if preTool.Args != nil {
+		args = preTool.Args
+	}
+
 	var (
 		result string
 		err    error
@@ -615,6 +681,13 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		result, err = tool.Execute(ctx, args)
 	}
 
+	a.cfg.Hooks.NotifyPostToolUse(ctx, hooks.PostToolUseEvent{
+		CallID: tc.ID,
+		Name:   tc.Function.Name,
+		Args:   args,
+		Result: result,
+		Err:    err,
+	})
 	out <- ToolExecEnd{
 		CallID: tc.ID,
 		Name:   tc.Function.Name,
