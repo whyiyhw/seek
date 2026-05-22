@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Kind is the category of a guarded action.
@@ -60,7 +61,16 @@ const (
 )
 
 // Policy is the per-process permission policy. Construct via New.
+//
+// Concurrency: `mode` and `askFn` can be updated at runtime (via
+// SetMode / SetAskFn) — most commonly when /yolo flips Ask→Yolo
+// mid-session from the TUI goroutine while a tool dispatch is calling
+// Check on the agent goroutine. The mutex serialises those transitions
+// so concurrent Check + SetMode is race-free. `cwd` is set at
+// construction and never changes; the mutex covers it anyway because
+// it's cheap and avoids a footgun if that assumption ever changes.
 type Policy struct {
+	mu    sync.RWMutex
 	mode  Mode
 	cwd   string // absolute path; used to decide "inside vs outside"
 	askFn func(Action) bool
@@ -82,9 +92,12 @@ func New(cwd string, mode Mode) (*Policy, error) {
 // called from the tool's goroutine, NOT the TUI's — so the callback
 // can safely use blocking channel ops to coordinate with the UI.
 func (p *Policy) SetAskFn(fn func(Action) bool) {
-	if p != nil {
-		p.askFn = fn
+	if p == nil {
+		return
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.askFn = fn
 }
 
 // Mode returns the current mode.
@@ -92,15 +105,21 @@ func (p *Policy) Mode() Mode {
 	if p == nil {
 		return ModeDeny
 	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.mode
 }
 
 // SetMode updates the active mode. Used by /yolo to upgrade Ask→Yolo
-// mid-session.
+// mid-session — called from the TUI goroutine while tool dispatch may
+// concurrently be in Check on the agent goroutine, hence the mutex.
 func (p *Policy) SetMode(m Mode) {
-	if p != nil {
-		p.mode = m
+	if p == nil {
+		return
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mode = m
 }
 
 // ErrDenied is returned when an action is blocked by policy. Callers should
@@ -121,7 +140,17 @@ func (p *Policy) Check(a Action) error {
 	if p == nil {
 		return fmt.Errorf("%w: no policy configured", ErrDenied)
 	}
-	if p.mode == ModeYolo {
+	// Snapshot the mutable fields under the lock and release before
+	// any potentially slow work (isWithin does I/O via filepath.Abs;
+	// askFn blocks on the user). Holding the lock across either would
+	// turn a brief read-side lock into a session-long write barrier.
+	p.mu.RLock()
+	mode := p.mode
+	cwd := p.cwd
+	askFn := p.askFn
+	p.mu.RUnlock()
+
+	if mode == ModeYolo {
 		return nil
 	}
 
@@ -135,7 +164,7 @@ func (p *Policy) Check(a Action) error {
 		if a.Path == "" {
 			return fmt.Errorf("%w: %s requires a path", ErrDenied, a.Kind)
 		}
-		inside, err := isWithin(p.cwd, a.Path)
+		inside, err := isWithin(cwd, a.Path)
 		if err != nil {
 			return fmt.Errorf("%w: resolve path %q: %v", ErrDenied, a.Path, err)
 		}
@@ -151,8 +180,8 @@ func (p *Policy) Check(a Action) error {
 	}
 
 	// Dangerous: ask if we can, otherwise deny.
-	if p.mode == ModeAsk && p.askFn != nil {
-		if p.askFn(a) {
+	if mode == ModeAsk && askFn != nil {
+		if askFn(a) {
 			return nil
 		}
 		return fmt.Errorf("%w: user declined %s", ErrDenied, a.Kind)
@@ -164,15 +193,29 @@ func (p *Policy) Check(a Action) error {
 			ErrDenied, shorten(a.Command, 80))
 	default:
 		return fmt.Errorf("%w: %s on %q is outside the working directory %q — re-run with --yolo to allow",
-			ErrDenied, a.Kind, a.Path, p.cwd)
+			ErrDenied, a.Kind, a.Path, cwd)
 	}
 }
 
 // CWD returns the resolved working directory the policy is anchored to.
-func (p *Policy) CWD() string { return p.cwd }
+func (p *Policy) CWD() string {
+	if p == nil {
+		return ""
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cwd
+}
 
 // Yolo reports whether the policy is in unrestricted mode.
-func (p *Policy) Yolo() bool { return p != nil && p.mode == ModeYolo }
+func (p *Policy) Yolo() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mode == ModeYolo
+}
 
 // isWithin reports whether target resolves to a path inside root (inclusive
 // of root itself). Both paths are made absolute before comparison.

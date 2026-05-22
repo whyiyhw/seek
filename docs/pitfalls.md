@@ -88,6 +88,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when fixing a bug whose symptom is a state-shape violation, write the test against the SHAPE not the cause. "Pressed Esc → history broken" is the cause-shaped test; "any path that produces tool_calls without finish=tool_calls → history broken" is the shape-shaped one. The shape-shaped version generalises and catches the regressions the cause-shaped one misses
 - **Refs**: `pkg/agent/agent.go` Prompt invariant check; test battery `TestAgent_StreamTruncatedMidToolCall`, `TestAgent_FinishReasonMismatch_DropsOrphanToolCalls`, `TestAgent_DecodeErrorMidStream_DropsTurn`, `TestAgent_MultiTurn_RoundTripsCleanHistory`
 
+### Symlinks inside CWD let `write`/`edit` escape the CWD gate
+- **Saw**: a symlink `<cwd>/escape → /tmp/other` accepts writes via `Check(KindWrite, Path: "<cwd>/escape/x")` even in `ModeDeny`. The file lands at `/tmp/other/x` — outside the working directory the policy is supposed to protect
+- **Why**: `permission.isWithin` works on path strings (filepath.Abs + filepath.Rel). It does NOT resolve symlinks via `filepath.EvalSymlinks` before comparing, so the policy sees "this path starts with cwd → allow". The subsequent `os.WriteFile` follows the symlink and writes outside
+- **Fix**: NOT fixed in this commit — pinned by `permission.TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed` and `write.TestWrite_SymlinkInsideCWDLetsContentEscape`. Rationale: seek's threat model is single-user local tool (a user who wanted to write outside cwd could run `bash` directly anyway), AND symlinked vendor/build/cache dirs are legitimate workflows that EvalSymlinks would break
+- **Lesson**: path-based access control sees a graph different from what the filesystem layer below it walks. For a hardened multi-tenant tool this would be a CVE; for seek it's a documented limitation. Either way, pin the current behaviour so any tightening is deliberate
+- **Refs**: `internal/permission/permission.go:isWithin`; test cross-references above
+
+### `Policy.mode` was raced by /yolo flips against concurrent `Check`
+- **Saw**: a `-race` test on concurrent Check + SetMode lit up four data-race warnings on the `Policy.mode` field. In production this could fire when the user pressed `/yolo` while a tool dispatch was in flight (TUI goroutine writes mode, agent goroutine reads it via Check)
+- **Why**: the Policy struct held `mode` and `askFn` as plain fields with no synchronization. The bug never manifested before because tool dispatch is sequential and `/yolo` between dispatches was the common case — but `-race` catches the *contract* violation regardless of timing luck
+- **Fix**: `sync.RWMutex` on Policy; Check snapshots mode/askFn/cwd under RLock and releases BEFORE calling askFn (which blocks on the user for arbitrary time). Commit `<this one>`
+- **Lesson**: a permission gate is a synchronization primitive whether you designed it as one or not. The moment any field is mutable post-construction, it needs the mutex. Discovered by writing a `-race` test specifically for the concurrent path, which is exactly the discipline AGENTS.md now requires
+- **Refs**: `internal/permission/permission.go:Policy`; test `TestCheck_ConcurrentCallsRaceFree`
+
 ## DeepSeek API
 
 ### Reasoner rejects requests that retain prior `reasoning_content`
