@@ -55,6 +55,10 @@ type Options struct {
 	// OSC 11 query under bubbletea (see PRD §4.9 / pitfalls #5).
 	GlamourStyle string
 
+	// Theme is the resolved color theme: "dark" or "light" (never "auto").
+	// Controls both glamour and lipgloss palettes.
+	Theme string
+
 	// ApprovalCh delivers per-call approval requests from the
 	// permission policy. nil = no inline approval (e.g. --yolo at
 	// startup); the TUI just won't listen.

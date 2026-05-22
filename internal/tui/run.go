@@ -14,6 +14,10 @@ import (
 // and breaks native click-and-drag selection. Both choices are
 // deliberate; flipping them re-introduces fixed bugs.
 func Run(opts Options) error {
+	// Apply the colour theme before anything renders (banner, styles,
+	// etc.) so every package-level style var picks up the right palette.
+	SetTheme(opts.Theme)
+
 	// The welcome banner goes directly to stdout before bubbletea
 	// takes over so it ends up in scrollback above the live region.
 	PrintPixelWelcomeBanner(opts)

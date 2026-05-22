@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -94,8 +95,16 @@ func run() error {
 		providerFlag = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
 		baseURL      = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
 		providerName = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
+		themeFlag    = flag.String("theme", "auto", "color theme: auto|dark|light")
 	)
 	flag.Parse()
+
+	// Validate --theme before doing anything else.
+	switch strings.ToLower(*themeFlag) {
+	case "auto", "dark", "light":
+	default:
+		return fmt.Errorf("--theme must be auto, dark, or light (got %q)", *themeFlag)
+	}
 
 	// Session store is needed for -list / -resume / -continue and for
 	// auto-save. Construct early so we can short-circuit on -list
@@ -350,6 +359,14 @@ func run() error {
 
 	sessionModel := *model
 
+	// Resolve the effective theme for the TUI.
+	effectiveTheme := strings.ToLower(*themeFlag)
+	glamourStyle := detectGlamourStyle(effectiveTheme)
+	// If auto, resolve to the concrete dark/light value.
+	if effectiveTheme == "auto" {
+		effectiveTheme = glamourStyle
+	}
+
 	return tui.Run(tui.Options{
 		Agent:        ag,
 		Tracker:      tracker,
@@ -357,7 +374,8 @@ func run() error {
 		Yolo:         policy.Yolo(),
 		CWD:          abs,
 		Ctx:          ctx,
-		GlamourStyle: detectGlamourStyle(),
+		Theme:        effectiveTheme,
+		GlamourStyle: glamourStyle,
 		ApprovalCh:   approvalCh,
 		Session:      activeSession,
 		Store:        store,
@@ -725,8 +743,12 @@ func truncMarker(t bool) string {
 // "]11;rgb:fae0/fae0/fae0\[1;1R") leaks straight into the textarea as
 // garbage text.
 //
-// SEEK_STYLE=dark|light overrides the detection.
-func detectGlamourStyle() string {
+// --theme overrides the detection. SEEK_STYLE=dark|light is a fallback
+// when --theme=auto (the default).
+func detectGlamourStyle(theme string) string {
+	if theme == "dark" || theme == "light" {
+		return theme
+	}
 	if v := os.Getenv("SEEK_STYLE"); v != "" {
 		return v
 	}
