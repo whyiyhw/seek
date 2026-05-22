@@ -36,7 +36,7 @@ When exploring code, follow this order — skipping steps costs tokens and break
 
 1. **grep first** — find exact file + line before reading anything.
 2. **read(offset=N) second** — read only the relevant window, not the whole file.
-3. `read` has **no `limit` parameter** — it was intentionally removed from the schema so the model cannot bypass the fixed 20-line window. Passing `limit` is rejected as an unknown field. Use `offset=N` to page through larger files.
+3. `read` has **no `limit` parameter** — it was intentionally removed from the schema so the model cannot bypass the fixed 50-line window. Passing `limit` is rejected as an unknown field. Use `offset=N` to page through larger files.
 4. `grep` caps at 20 matches by default (`max_matches` can be raised, but rarely should be).
 
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.

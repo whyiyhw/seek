@@ -36,7 +36,7 @@ func TestRead_Basic(t *testing.T) {
 
 func TestRead_LimitParamRejected(t *testing.T) {
 	// limit is intentionally absent from the schema — the model must not
-	// be able to override the fixed 20-line window. UnmarshalStrict must
+	// be able to override the fixed 50-line window. UnmarshalStrict must
 	// reject any call that includes "limit".
 	p := writeFile(t, "line1\nline2\n")
 	args, _ := json.Marshal(map[string]any{"path": p, "limit": 100})

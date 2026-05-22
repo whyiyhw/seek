@@ -29,7 +29,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Read up to 20 lines from a file (with 1-based line numbers). Use offset to page through larger files. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
+const description = "Read up to 50 lines from a file (with 1-based line numbers). Use offset to page through larger files. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
 
 // Args is the decoded argument struct for `read`.
 type Args struct {
@@ -46,7 +46,7 @@ func (Tool) Name() string                 { return "read" }
 func (Tool) Description() string          { return description }
 func (Tool) Schema() json.RawMessage      { return schemaBytes }
 
-const defaultLimit = 20
+const defaultLimit = 50
 
 func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
