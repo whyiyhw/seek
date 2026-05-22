@@ -121,7 +121,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 ### Prefix cache hits are best-effort and short prompts don't trigger
 - **Saw**: three back-to-back identical short prompts (110 tokens each) all showed `prompt_cache_hit_tokens=0`
 - **Why**: DeepSeek's prefix cache is disk-backed and "best effort". A prefix needs to be at least ~64 tokens (and there's no SLA — the server may evict even longer ones)
-- **Fix**: nothing to "fix" code-wise; documented in `PRD.md §4.8.1`. Our M2 smoke (system prompt + 5 tools = ~2KB prefix) consistently hits 70%+ across turns; the M0 11-token smoke can't
+- **Fix**: nothing to "fix" code-wise; documented in `docs/prd/v0.md §4.8.1`. Our M2 smoke (system prompt + 5 tools = ~2KB prefix) consistently hits 70%+ across turns; the M0 11-token smoke can't
 - **Lesson**: "cache hit ratio" benchmarks should always use realistic-sized prompts; otherwise you'll conclude "the cache doesn't work" when it does
 
 ### FIM endpoint is at `/beta/completions` with legacy OpenAI shape
@@ -143,7 +143,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Why**: two compounding causes. (1) Denominator: ratio was `fimCalls / totalToolCalls`, which counts `read`/`bash`/`grep` — tools that *can't* use FIM — diluting the numerator. (2) Pairing constraint: a `fim_complete` call doesn't write to disk; its output must be applied by a subsequent `edit` (book ch6 §6.5). So `FIM / (FIM+edit)` caps at ~50% even when the model takes the FIM path every chance it gets. (3) The model's training corpus also biases toward `edit`/`write` for general-purpose tools, but that's secondary to the math.
 - **Fix**: PRD §6 acceptance criterion was revised in commit `0e4153e` from "ratio ≥ 50%" to per-task absolute count `FIMMinCalls` (`self-hosting: 0`, `fim-patch: 1`). The ratio still appears in the JSON report for visibility but no longer participates in the pass/fail verdict. Designing a meaningful ratio metric (candidate: FIM-saved tokens / total prompt tokens) was deferred to v1.1, when there's more real-world usage data to anchor it.
 - **Lesson**: when a metric's denominator includes terms that can never be the numerator, the ceiling is structurally lower than you think. Verify the upper bound of any "X / Y ≥ Z%" metric *before* setting Z, especially for pairing constraints like "every FIM needs a follow-up edit". An aspirational threshold that turns out to be mathematically unreachable trains everyone to ignore the metric.
-- **Refs**: `cmd/seek/benchmark.go`, `docs/PRD.md §6 / §8`, commit `0e4153e`
+- **Refs**: `cmd/seek/benchmark.go`, `docs/prd/v0.md §6 / §8`, commit `0e4153e`
 
 ### Streamed tool calls arrive as deltas keyed by `index`
 - **Saw**: first attempt at handling tool calls assumed each chunk contained a complete `tool_call` — wound up with split, garbled JSON in arguments
