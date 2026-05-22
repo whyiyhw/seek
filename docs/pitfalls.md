@@ -215,6 +215,27 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: prefer `go build -o /tmp/seek ./cmd/seek && /tmp/seek` (or `go install` once + run the installed binary) during iteration
 - **Lesson**: `go run` is for one-shot scripts. For anything you launch repeatedly, build once
 
+### `omitempty` on a slice field omits both nil AND empty (`[]T{}`)
+- **Saw**: the JSONL header line was supposed to omit the `messages` key when serialising the session header. The slice was set to `nil` before encoding — but `json:",omitempty"` would also silently omit it if it were an empty (`len==0`) non-nil slice
+- **Why**: Go's JSON encoder treats `omitempty` on a slice as "omit when nil or len==0". Distinct from a pointer: a non-nil pointer to an empty struct is NOT omitted. Easy to assume "omitempty = omit-when-nil" and get bitten when the slice is zeroed via `append` returning nil vs `[]T{}`
+- **Fix**: relies on this behaviour deliberately — `header.Messages = nil` before encoding ensures omission. The test suite verifies the header line has no `messages` key
+- **Lesson**: `omitempty` on slice means "absent when nil OR empty". If you need to distinguish nil-vs-empty on the wire, don't use omitempty — use a pointer to a slice (`*[]T`)
+- **Refs**: `internal/session/session.go:Save`
+
+### `json.Encoder.Encode()` always appends `\n` — the JSONL primitive
+- **Saw**: building JSONL output, we needed each JSON object on its own line. `json.MarshalIndent` + manual `\n` write looked like the obvious path
+- **Why**: `json.Encoder.Encode()` is documented to write exactly one JSON value followed by a newline character. This is the built-in JSONL primitive — no manual newline needed, and the decoder's `dec.More()` + `dec.Decode()` loop reads one object at a time regardless of line boundaries
+- **Fix**: JSONL writer uses `enc.Encode(&obj)` in a loop; reader uses `dec.More()` loop. Zero manual newline handling anywhere
+- **Lesson**: `json.Encoder` is the JSONL encoder — it's in the name of the object, not in a library. If you find yourself writing `json.Marshal` + `"\n"`, step back and use `Encoder` instead
+- **Refs**: `internal/session/session.go:Save`, `internal/session/session.go:decodeJSONL`
+
+### `/compact` panicked with nil Session on `--no-save` path
+- **Saw**: running `/compact` in a session started with `--no-save` caused a nil-pointer dereference in `handleCompactDone`: `m.opts.Session.ID` evaluated before the nil guard
+- **Why**: `handleCompactDone` was written assuming `m.opts.Session` is always set. On the `--no-save` path `m.opts.Session` stays `nil` by design (no persistence configured). The code tried `snapshotID = m.opts.Session.ID` outside the `if m.opts.Session != nil` guard
+- **Fix**: guard the entire fork+persist block with `if m.opts.Session != nil && m.opts.Store != nil`; the notice message also branches on whether `snapshotID` is set. Commit `c3082ec`
+- **Lesson**: when a struct field can be nil by design (not by bug), every method that touches it must check. Naming it `opts.Session` suggests "optional" — treat it as such everywhere, not just at startup
+- **Refs**: `internal/tui/update.go:handleCompactDone`
+
 ---
 
 ## Reading order for newcomers
