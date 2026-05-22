@@ -22,10 +22,10 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
-	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
+	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -93,24 +93,24 @@ func main() {
 
 func run() error {
 	var (
-		prompt       = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
-		model        = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
-		maxTurns     = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
-		autoContinue = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
-		yolo         = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
-		jsonOut      = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
-		resume       = flag.String("resume", "", "load a saved session by ID (see seek -list)")
-		cont         = flag.Bool("continue", false, "load the most-recently-updated session")
-		noSave       = flag.Bool("no-save", false, "do not persist this session to disk")
-		list         = flag.Bool("list", false, "list saved sessions and exit")
-		noProj       = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
-		providerFlag = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
-		baseURL      = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
-		providerName = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
-		themeFlag    = flag.String("theme", "auto", "color theme: auto|dark|light")
-		rpcMode      = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
+		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
+		model         = flag.String("model", "", "model id; default depends on provider (deepseek-chat for DeepSeek, etc.)")
+		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
+		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
+		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
+		jsonOut       = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
+		resume        = flag.String("resume", "", "load a saved session by ID (see seek -list)")
+		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
+		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
+		list          = flag.Bool("list", false, "list saved sessions and exit")
+		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
+		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
+		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
+		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
+		themeFlag     = flag.String("theme", "auto", "color theme: auto|dark|light")
+		rpcMode       = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
 		benchmarkTask = flag.String("benchmark", "", "run a benchmark task (self-hosting | fim-patch) and report metrics")
-		benchmarkOut = flag.String("benchmark-out", "", "write benchmark JSON report to this file (default: stdout)")
+		benchmarkOut  = flag.String("benchmark-out", "", "write benchmark JSON report to this file (default: stdout)")
 		showVersion   = flag.Bool("version", false, "print version info and exit")
 		upgradeFlag   = flag.Bool("upgrade", false, "download the latest release from GitHub and replace this binary")
 		upgradeForce  = flag.Bool("upgrade-force", false, "with -upgrade: proceed even when the current build is a dev build (overwrites local builds)")
@@ -475,7 +475,6 @@ func run() error {
 				Tools:        reg,
 				MaxTurns:     *maxTurns,
 				AutoContinue: *autoContinue,
-		
 			})
 		},
 		SetModel: func(m string) { sessionModel = m },
