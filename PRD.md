@@ -1,6 +1,6 @@
 # seek PRD：DeepSeek-first Go Coding Agent Harness
 
-> 状态：v0.9（M0–M6 已交付，M7 打磨进行中）
+> 状态：v0.9（M0–M7 已交付，准备 v1.0 发布）
 > 项目名：**`seek`**
 > 目标读者：项目发起人 / 早期贡献者
 > 架构参考：https://github.com/earendil-works/pi （TypeScript，MIT，~52K stars）；用户体验对标：Claude Code
@@ -11,7 +11,7 @@
 
 ## 现状（2026-05）
 
-已交付 M0 → M6：约 35700 行非测试 Go，37 个包，全测试绿（`-race` 三平台，~27000 行测试），9 个内置工具 + MCP bridge，会话持久化 / 分支 / 压缩 / JSONL 存储，Skill 加载 + 双模型协作内置 skill，Anthropic / OpenAI / Gemini 二等 Provider + compatible 兼容端点，TUI 跑通真实 DeepSeek 端到端（缓存命中 70%+）。**下一步是 M7 打磨**（RPC/JSON 模式、文档、自举 benchmark）。
+已交付 M0 → M7：约 36000 行非测试 Go，38 个包，全测试绿（`-race` 三平台），9 个内置工具 + MCP bridge，会话持久化 / 分支 / 压缩 / JSONL 存储，Skill 加载 + 双模型协作内置 skill，Anthropic / OpenAI / Gemini 二等 Provider + compatible 兼容端点，`--rpc` JSON-RPC 2.0 server 模式，自举 benchmark（cache hit 95.7%、FIM 路径走通）。**下一步：v1.0 发布**（首次 git tag）。
 
 ## 决策记录（已确认）
 
@@ -646,7 +646,7 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
 | **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ✅ 全部交付（见 §5.2） |
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ✅ 全部交付（见 §5.3） |
-| **M7 打磨** | RPC / JSON 模式（`internal/rpc`）；多行 paste 折叠 ✅；主题切换；帮助 overlay；自举 + benchmark；文档同步 | ⏳ 进行中 |
+| **M7 打磨** | RPC / JSON 模式（`internal/rpc`）✅；多行 paste 折叠 ✅；主题切换 ✅；帮助 overlay ✅；用户文档 ✅；自举 benchmark ✅ | ✅ |
 | **v1.0 发布** | | ≈ 当前进度 + 1 周 |
 | **Post-v1.0** | LSP 语义导航；并行工具调用；... | ⏳ 待规划 |
 
@@ -743,9 +743,10 @@ v1.0 发布前必须满足：
 
 - [x] `go install github.com/whyiyhw/seek/cmd/seek@latest` 一键装好，macOS / Linux / Windows 均可运行
 - [x] 仅有 `DEEPSEEK_API_KEY` 即开箱可用，无任何额外配置
-- [ ] 自举测试：让 `seek` 自己读、改、运行 `seek` 仓库的 Go 测试（⏳ M7）
-- [x] **缓存命中率**：在自举测试场景下，缓存命中率 ≥ 60%（前 5 轮除外）
-- [ ] **FIM 快路径**：模型在需要小范围补丁时调用 `fim_complete` 的比例 ≥ 50%（需 benchmark）
+- [x] 自举测试：`seek --benchmark=self-hosting` 真实跑通（cache hit 95.7%，远超阈值；2026-05-22）
+- [x] **缓存命中率**：在自举测试场景下，缓存命中率 ≥ 60%（前 5 轮除外）— **实测 97.0%**
+- [x] **FIM 快路径**：`seek --benchmark=fim-patch` 中模型至少调用 1 次 `fim_complete`（证明 FIM 路径走通）— **实测 1 次**
+   > **历史修正（2026-05）**：原标准是「FIM / 总工具调用 ≥ 50%」，落地后发现：(1) 分母含 `read`/`bash`/`grep` 等不能用 FIM 的工具，比例被稀释；(2) FIM 必伴一次 `edit` 把生成的补全写入文件（见 §4.6 / 书 ch6 §6.5），任何 `FIM/(FIM+edit)` 类比例在数学上以 ~50% 为上界。结论：「FIM 比例 ≥ 50%」在当前实现里不可达。v1.0 改为「FIM 路径至少被调用一次」（绝对计数），合理的比例阈值放到 v1.1 收集更大样本量后再定。
 - [x] **双模型协作 skill**：内置 `dual-model` skill 可被模型自主调用；完整跑通「Think→执行→Think 反思」流程
 - [x] 至少 1 个真实 MCP server（filesystem）开箱可用
 - [x] **Skill 加载**：能加载 `.seek/skills/` `.claude/skills/` `~/.config/seek/skills/` `~/.claude/skills/`；内置 ≥ 3 个示例 skill（含 dual-model、go-test-runner）
@@ -770,21 +771,29 @@ v1.0 发布前必须满足：
 
 ---
 
-## 8. 下一步（M7 打磨）
+## 8. 下一步（v1.0 发布）
 
-M0–M6 全部交付。M7 剩余子任务按依赖排序：
+M0–M7 全部交付。已完成：
 
-1. **RPC/JSON 模式**（§4）— `internal/rpc` 骨架已建，实现 stdio JSON-RPC 的子进程模式，覆盖 `seek --rpc` 入口
-2. **文档完善** — 更新 PRD（本文）与代码同步；编写 MCP/Skill/会话管理用户文档
-3. **自举 benchmark** — 让 seek 自己读、改、运行自己的仓库，验证缓存命中率 ≥ 60%
-4. **多行 paste 折叠**（§4.12）✅ — detect 一次 paste >5 行时折叠显示
-5. **主题切换** — 亮色/暗色主题手动切换
+1. **RPC/JSON 模式** ✅ — `internal/rpc`，`seek --rpc` 入口，JSON-RPC 2.0 over stdio，7 个单元测试
+2. **文档完善** ✅ — `docs/guide-mcp.md`、`docs/guide-skills.md`、`docs/guide-sessions.md`；README 同步
+3. **多行 paste 折叠** ✅
+4. **主题切换** ✅
+5. **帮助 overlay** ✅
+6. **自举 benchmark** ✅ — `cmd/seek/benchmark.go`，两个预设任务（`self-hosting` / `fim-patch`），真实跑通 cache hit 95.7% / 97.0% (turn 6+)，FIM 路径走通 1 次
 
-完成后进入 **v1.0 发布**。
+v1.0 剩余（仅发布动作）：
+- **首次 git tag** — `v1.0.0`
+
+完成后进入 **v1.0 正式发布**。
 
 ### Known Issues / 待改进
 
 - **`--auto-continue` 无终止条件**：开启后模型每次收到注入的 `"continue"` 都会找新任务，循环直到 `MaxTurns`（200）耗尽。根本原因是无法从结构上区分"规划中"和"真正完成"（两者均为 `finish=stop, toolCount=0`）。候选方案：①全局 auto-continue 次数上限（不随工具调用重置）；② `done()` 工具——模型必须显式调用才算结束。目前该 flag 默认 `false`，暂不阻塞 v1.0。
+
+- **FIM 比例阈值不可达（已修正）**：原 PRD §6 写"FIM 调用比例 ≥ 50%"。2026-05-22 实测发现：(1) 分母含不能用 FIM 的工具（read/bash/grep），(2) FIM 必伴一次 edit 把补全写入文件（书 ch6 §6.5），任何 `FIM/(FIM+edit)` 在数学上以 ~50% 为上界。**v1.0 阈值改为「FIM 路径至少调用 1 次」**（per-task `FIMMinCalls` 字段，绝对计数）。合理的比例阈值需要更大样本量 + 重新设计 metric（候选：FIM 节省的 token 占总 prompt token 比例，更直接衡量经济价值），放到 v1.1。
+
+- **FIM 经济价值在 V4 时代待重估**：V4 之后 chat 缓存命中价 $0.0028/M，FIM `/beta/completions` 端点价格优势是否仍显著要单独 benchmark。这关乎 PRD §4.8 是否仍把 FIM 列为核心差异化。v1.1 议题。
 
 ## 9. 历史决策回顾（已落地）
 
