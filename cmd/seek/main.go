@@ -96,6 +96,8 @@ func run() error {
 		baseURL      = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
 		providerName = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag    = flag.String("theme", "auto", "color theme: auto|dark|light")
+		benchmarkTask = flag.String("benchmark", "", "run a benchmark task (self-hosting | fim-patch) and report metrics")
+		benchmarkOut = flag.String("benchmark-out", "", "write benchmark JSON report to this file (default: stdout)")
 	)
 	flag.Parse()
 
@@ -314,6 +316,15 @@ func run() error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// Benchmark mode: short-circuit before normal routing. Forces --yolo
+	// so the agent can run bash/go-test without interactive approval.
+	if *benchmarkTask != "" {
+		*yolo = true
+		policy.SetMode(permission.ModeYolo)
+		return runBenchmark(ctx, *benchmarkTask, *benchmarkOut,
+			ag, tracker, *model, activeSession, store)
 	}
 
 	// Route: -json / -p / piped stdin → print mode; otherwise TUI.
