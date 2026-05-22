@@ -151,6 +151,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: `pkg/agent` accumulates a `map[int]*ToolCall` during the stream, finalising on `EventDone`. Added `Index` field to `deepseek.ToolCall` (omitempty so it doesn't leak into request bodies). Commit `719b84e`
 - **Lesson**: streaming tool calls need explicit assembly state. Read the streaming spec, not just the non-streaming one
 
+### "Respond with JSON only" instructions to the reasoner are unreliable
+- **Saw**: `/distill` and `seek -dream` both ask the reasoner for a strict JSON array via system prompt. The reasoner happily produces ` ```json\n[...]\n``` ` fences, "Here are the candidates:" prose preambles, or a single `{...}` object when there's exactly one candidate — despite the instruction
+- **Why**: chain-of-thought training pulls the model toward "explain itself" output. The system prompt is a strong nudge but not a hard constraint — and there's no JSON-mode flag on `deepseek-reasoner` (it doesn't accept the standard `response_format` parameter most chat models take)
+- **Fix**: every reasoner-output parser ships with three tolerances: strip leading ` ``` ` / ` ```json ` fence + trailing ` ``` `; trim leading prose up to the first `[`/`{`; accept single objects as 1-element arrays. See `internal/memory/distill.go:ParseCandidates` and `dream.go:ParseLCandidates`
+- **Lesson**: never rely on a "respond with JSON only" instruction alone, especially for reasoner-class models. Build the tolerant parser the moment you wire the first reasoner call; the fence wrap and prose preamble WILL show up
+- **Refs**: `internal/memory/distill.go`, `internal/memory/dream.go`
+
+### PrePromptHook output must be byte-stable across runs or prefix-cache collapses
+- **Saw**: while testing the M-index injection (M5.2), early implementations iterated over `map[string]Entry` directly. Two consecutive sessions with identical on-disk M produced *different* injected bytes (map iteration order in Go is randomised per-process) and `prompt_cache_hit_tokens` dropped to near-zero on the second turn
+- **Why**: DeepSeek's prefix cache keys on the exact byte sequence of the prompt history. Decorator hooks (PrePromptHook) sit BEFORE the cache lookup — their output becomes part of the prefix. If the bytes vary across runs at the same logical state, every Prompt is a cache miss on every old message
+- **Fix**: `Project.Index()` sorts by Name; `FormatLCandidatesMarkdown` sorts + dedupes its sources; integration test `TestHook_OnPrePrompt_ByteStable` SHA-256-checks two `Hook.OnPrePrompt` invocations against the same disk state and fails the build if they diverge
+- **Lesson**: every byte produced by a `PrePromptHook` must be deterministic from on-disk content. Map iteration, time.Now()-stamping, and "let the LLM format it" are all silent prefix-cache killers. Lock in determinism at the source (sorts, sums, content-addressed renders) and assert it with a round-trip hash test
+- **Refs**: `internal/memory/hook.go`, `internal/memory/project.go:Index`, `internal/memory/hook_test.go:TestHook_OnPrePrompt_ByteStable`
+
 ---
 
 ### Approval callback that blocks on a channel needs ctx-aware select on BOTH ends
@@ -199,6 +213,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Why**: `var commands = []command{ {handler: cmdHelp}, ... }` references `cmdHelp` at init time; `cmdHelp` reads `commands` — Go's initialiser can't sequence both
 - **Fix**: turned `commands` into `func allCommands() []command { return ... }` so the slice is built lazily on first call. Commit `08449cd`
 - **Lesson**: when a top-level `var` and the functions it lists reference each other, demote the var to a func. Initialisation order isn't worth fighting
+
+### `json:",omitempty"` is silently ineffective on `time.Time` and other struct types
+- **Saw**: added `StaleSince time.Time` with `,omitempty` to `internal/memory.Entry`. Every fresh entry's memory.jsonl line still contained `"stale_since": "0001-01-01T00:00:00Z"` — the omitempty tag did nothing
+- **Why**: `encoding/json`'s omitempty checks for the Go *zero value* of a few specific kinds (false, 0, "", nil, empty array/map/slice). For struct values like `time.Time`, the zero value is a *struct*, not any of those — so omitempty never fires and the (non-zero-bit-pattern) struct is always emitted. `time.Time{}.IsZero()` returns true at runtime, but encoding/json doesn't call IsZero
+- **Fix**: switched to `json:",omitzero"`, added in Go 1.24+. omitzero specifically checks IsZero() for types that implement it, including time.Time. Project's go.mod is already 1.25.x so this is free
+- **Lesson**: omitempty on `time.Time` or any struct field is a no-op. Use `,omitzero` (Go 1.24+), or `*time.Time` pointer if you need backwards-compatible behaviour. Eyeballing a JSON file after every schema change catches this fast
+- **Refs**: `internal/memory/memory.go:Entry.StaleSince`
 
 ---
 
