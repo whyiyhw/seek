@@ -222,6 +222,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: prefer `go build -o /tmp/seek ./cmd/seek && /tmp/seek` (or `go install` once + run the installed binary) during iteration
 - **Lesson**: `go run` is for one-shot scripts. For anything you launch repeatedly, build once
 
+### macOS bash 3.2 has no `mapfile` / `readarray`
+- **Saw**: `.githooks/pre-commit` died with `mapfile: command not found` on a fresh clone, blocking every commit
+- **Why**: `mapfile` and its alias `readarray` are bash 4+ builtins. Apple stopped shipping newer bash with macOS (post-3.2 is GPLv3-licensed); `/bin/bash` is permanently 3.2 and `#!/usr/bin/env bash` happily resolves to it unless the user has Homebrew bash first in PATH
+- **Fix**: replaced both `mapfile -t arr < <(...)` calls with `arr=(); while IFS= read ...; do arr+=("$line"); done < <(...)` — bash 3.2 supports arrays + process substitution, just not `mapfile`
+- **Lesson**: any `#!/usr/bin/env bash` script that ships to a team with macOS users must stick to bash 3.2 features. Reach for `read` loops; avoid `mapfile`/`readarray`, `${var^^}`/`${var,,}`, `declare -n` namerefs, and `BASH_REMATCH` in extglob contexts
+- **Refs**: `.githooks/pre-commit`
+
 ### `omitempty` on a slice field omits both nil AND empty (`[]T{}`)
 - **Saw**: the JSONL header line was supposed to omit the `messages` key when serialising the session header. The slice was set to `nil` before encoding — but `json:",omitempty"` would also silently omit it if it were an empty (`len==0`) non-nil slice
 - **Why**: Go's JSON encoder treats `omitempty` on a slice as "omit when nil or len==0". Distinct from a pointer: a non-nil pointer to an empty struct is NOT omitted. Easy to assume "omitempty = omit-when-nil" and get bitten when the slice is zeroed via `append` returning nil vs `[]T{}`
