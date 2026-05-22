@@ -100,6 +100,53 @@ func (w *Writer) Append(e Entry) error {
 	return nil
 }
 
+// Read loads every line of the stats file at path. Missing file is
+// not an error — returns an empty slice (the common "no skill calls
+// recorded yet" state). Malformed lines are skipped silently because
+// .stats.jsonl is append-only and an interrupted write could leave a
+// truncated tail; pulling the rest of the file is more useful than
+// failing the whole query.
+func Read(path string) ([]Entry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("skillstats: read %s: %w", path, err)
+	}
+	var entries []Entry
+	for _, line := range splitLines(data) {
+		if len(line) == 0 {
+			continue
+		}
+		var e Entry
+		if err := json.Unmarshal(line, &e); err != nil {
+			// Skip malformed — see comment above.
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+// splitLines is bytes.Split(data, []byte{'\n'}) without the empty
+// trailing slice from a final newline. Kept inline so the reader
+// has no bytes import dependency for one call site.
+func splitLines(data []byte) [][]byte {
+	var out [][]byte
+	start := 0
+	for i, b := range data {
+		if b == '\n' {
+			out = append(out, data[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(data) {
+		out = append(out, data[start:])
+	}
+	return out
+}
+
 // ensureParent creates the parent directory of w.path on first
 // invocation. Subsequent calls are a no-op — we cache the success
 // flag rather than stat'ing every time. A failed mkdir is retried

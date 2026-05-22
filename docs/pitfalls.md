@@ -249,6 +249,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Tooling / environment
 
+### Go's `time.ParseDuration` rejects "30d" / "1w" — only ns…h
+- **Saw**: a `flag.Duration` with default `30*24*time.Hour` accepted `--since=720h` but choked on `--since=30d` with "parse error" — the natural unit a CLI user would write
+- **Why**: `time.ParseDuration` (since 1.0) only supports `ns`, `us`/`µs`, `ms`, `s`, `m`, `h`. There is no day or week unit because they're not exactly 24h / 7d (DST, leap seconds), and the stdlib won't fake it
+- **Fix**: document the limitation in the flag help text (`--since DURATION (e.g. 24h, 168h, 720h)`), and have tests use hour-based values. Don't reinvent parsing on top — too many edge cases. M8.4b commit
+- **Lesson**: when exposing a duration flag, either accept Go's surface and tell the user, or write a custom parser that handles `d`/`w` explicitly. Half-measures (silently approximating "30d" as 720h) confuse users who write `31d` and don't see what they expected
+- **Refs**: `cmd/seek/skill_query.go:cmdSkillStats`
+
 ### macOS APFS made `SKILL.md` + `skill.md` tests collide silently
 - **Saw**: a loader test that wrote both `SKILL.md` and `skill.md` into one directory and expected the uppercase to win failed with "uppercase didn't win" — the second write silently overwrote the first, and `fileExists` for both names returned true (same inode)
 - **Why**: APFS (and HFS+ before it) are case-insensitive by default; `SKILL.md` and `skill.md` resolve to the same file. The "two files coexisting" scenario the loader has to handle is only reachable on case-sensitive filesystems (Linux ext4/btrfs, macOS APFS formatted case-sensitive explicitly)

@@ -401,6 +401,10 @@ func unquote(v string) string {
 type Set struct {
 	byName map[string]*Skill
 	order  []string // insertion order, used for stable List output
+	// shadowed tracks lower-priority skills rejected because a
+	// same-named higher-priority entry won. Powers
+	// `seek skill status <name>` (PRD v2 §7 acceptance #5).
+	shadowed map[string][]string
 }
 
 // NewSet returns an empty Set.
@@ -408,12 +412,17 @@ func NewSet() *Set { return &Set{byName: map[string]*Skill{}} }
 
 // Add inserts s into the set if no skill with that name is already
 // present. Returns true if the skill was added, false if it was shadowed
-// by an earlier (higher-priority) entry.
+// by an earlier (higher-priority) entry. Shadowed entries' Source
+// paths are remembered so `status` can show them.
 func (s *Set) Add(sk *Skill) bool {
 	if sk == nil || sk.Name == "" {
 		return false
 	}
 	if _, exists := s.byName[sk.Name]; exists {
+		if s.shadowed == nil {
+			s.shadowed = map[string][]string{}
+		}
+		s.shadowed[sk.Name] = append(s.shadowed[sk.Name], sk.Source)
 		return false
 	}
 	s.byName[sk.Name] = sk
@@ -423,6 +432,11 @@ func (s *Set) Add(sk *Skill) bool {
 
 // Get returns the skill for name, or nil if not found.
 func (s *Set) Get(name string) *Skill { return s.byName[name] }
+
+// Shadowed returns the Source paths of skills sharing `name` that
+// were rejected because the priority cascade landed them below the
+// winner. Empty when no collision occurred.
+func (s *Set) Shadowed(name string) []string { return s.shadowed[name] }
 
 // List returns skills in insertion order — stable for tests and for
 // the /skills command's rendering.

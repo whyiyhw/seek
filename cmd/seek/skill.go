@@ -34,6 +34,12 @@ func runSkillCmd(args []string, stdout, stderr io.Writer) error {
 		return cmdSkillUninstall(rest, stdout, stderr)
 	case "update":
 		return cmdSkillUpdate(rest, stdout, stderr)
+	case "list", "ls":
+		return cmdSkillList(rest, stdout, stderr)
+	case "status":
+		return cmdSkillStatus(rest, stdout, stderr)
+	case "stats":
+		return cmdSkillStats(rest, stdout, stderr)
 	case "help", "--help", "-h":
 		printSkillHelp(stdout)
 		return nil
@@ -55,6 +61,9 @@ Commands:
   uninstall <name>       Remove an installed skill
   update <name>          Re-fetch an installed skill from its recorded source
   update --all           Re-fetch every managed skill
+  list                   Show every loaded skill (source, type, call count, last used)
+  status <name>          Detailed view of one skill: source path, install record, shadowing, stats
+  stats                  Top-N skills by call count (default --top 10 --since 30d)
 
 Run 'seek skill <command> --help' for command-specific flags.`)
 }
