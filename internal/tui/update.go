@@ -97,6 +97,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Help overlay grabs keys when open — user can dismiss it.
+	if m.helpOverlayOpen {
+		switch msg.Type {
+		case tea.KeyCtrlC:
+			return m, tea.Quit
+		case tea.KeyEsc, tea.KeyEnter:
+			m.helpOverlayOpen = false
+			return m, nil
+		case tea.KeyRunes:
+			// Use case-insensitive check for "q" close.
+			if len(msg.Runes) == 1 && (msg.Runes[0] == 'q' || msg.Runes[0] == 'Q') {
+				m.helpOverlayOpen = false
+				return m, nil
+			}
+		}
+		return m, nil
+	}
+
 	// An open approval prompt grabs ALL keys — the agent goroutine is
 	// blocked waiting on this answer, so nothing else can usefully
 	// happen until the user picks y / n / a.
@@ -220,6 +238,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyDown:
 		if m.tryHistoryDown() {
+			return m, nil
+		}
+
+	case tea.KeyRunes:
+		// ? opens the help overlay when idle and input is empty.
+		if !m.streaming && m.input.Value() == "" && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
+			m.helpOverlayOpen = true
 			return m, nil
 		}
 	}

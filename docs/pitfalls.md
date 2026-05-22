@@ -269,6 +269,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: read the Gemini API shape end-to-end, not the OpenAI-compat docs. Function calling and system instructions are different enough that assuming an OpenAI mental model will bite you on both
 - **Refs**: `pkg/llm/provider/gemini/client.go:buildRequest`, `client.go` SSE parser
 
+### New overlay panel consumed Ctrl+C — user couldn't quit while help was open
+- **Saw**: after opening the help overlay (`/help` or `?`), pressing Ctrl+C had no effect — the overlay stayed open and the app wouldn't quit
+- **Why**: the overlay's key handler in `handleKey` returned `m, nil` for any key that didn't match Esc/Enter/q, accidentally swallowing Ctrl+C before it reached the `case tea.KeyCtrlC: return m, tea.Quit` branch below
+- **Fix**: added explicit `case tea.KeyCtrlC` in the overlay's key switch before the generic fallback, plus case-insensitive `q` close check. Commit (this one)
+- **Lesson**: every modal/key-grabbing layer in a TUI needs its own Ctrl+C path — don't rely on a downstream switch that the layer's early-return bypasses
+- **Refs**: `internal/tui/update.go:handleKey`
+
 ### OpenAI streaming token counts require `stream_options: {include_usage: true}`
 - **Saw**: the `TurnDone.InputTokens / OutputTokens` fields were always 0 when using the OpenAI provider over a streaming call
 - **Why**: by default, OpenAI's streaming endpoint does not include a usage chunk. You must explicitly opt in with `"stream_options": {"include_usage": true}` in the request body; only then does a final data chunk arrive with the `usage` field populated

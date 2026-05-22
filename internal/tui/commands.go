@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -95,22 +94,9 @@ func resultToCmd(r cmdResult) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func cmdHelp(_ *Model, _ string) cmdResult {
-	var sb strings.Builder
-	sb.WriteString("commands:\n")
-	sorted := allCommands()
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].usage < sorted[j].usage })
-	for _, c := range sorted {
-		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", c.usage, c.description))
-	}
-	sb.WriteString("\nkeys:\n")
-	sb.WriteString("  Enter       send prompt\n")
-	sb.WriteString("  Ctrl+J      newline in input\n")
-	sb.WriteString("  Ctrl+L      clear visible screen (same as /clear)\n")
-	sb.WriteString("  Ctrl+R      toggle reasoning visibility on streaming + committed messages\n")
-	sb.WriteString("  Ctrl+C      quit\n")
-	sb.WriteString("\nscroll: use your terminal's native scrollback (mouse wheel, Shift+PgUp, etc.) — seek does not capture mouse events.\n")
-	return cmdResult{text: sb.String()}
+func cmdHelp(m *Model, _ string) cmdResult {
+	m.helpOverlayOpen = true
+	return cmdResult{}
 }
 
 func cmdClear(_ *Model, _ string) cmdResult {

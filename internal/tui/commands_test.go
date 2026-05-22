@@ -70,12 +70,17 @@ func TestDispatch_Unknown(t *testing.T) {
 	}
 }
 
-func TestHelp_TextHasKeys(t *testing.T) {
-	res := runHandler(t, emptyModel(), "/help")
-	for _, frag := range []string{"/help", "/clear", "/new", "/exit", "Ctrl+R", "scrollback"} {
-		if !strings.Contains(res.text, frag) {
-			t.Errorf("help missing %q: %s", frag, res.text)
-		}
+func TestHelp_SetsOverlayFlag(t *testing.T) {
+	m := emptyModel()
+	if m.helpOverlayOpen {
+		t.Fatal("should start with overlay closed")
+	}
+	res := runHandler(t, m, "/help")
+	if !m.helpOverlayOpen {
+		t.Errorf("help should set helpOverlayOpen")
+	}
+	if res.text != "" {
+		t.Errorf("help should produce no text, got %q", res.text)
 	}
 }
 

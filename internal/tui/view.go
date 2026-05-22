@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,10 @@ func (m Model) View() string {
 		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
 		// blank screen if bubbletea takes a moment to size up.
 		return styleMuted.Render("starting…") + "\n"
+	}
+
+	if m.helpOverlayOpen {
+		return m.renderHelpOverlay()
 	}
 
 	var sb strings.Builder
@@ -448,5 +453,110 @@ func renderMarkdown(r *glamour.TermRenderer, text string) string {
 		return text
 	}
 	return strings.TrimRight(out, "\n")
+}
+
+// ---- Help overlay ---------------------------------------------------------
+
+// renderHelpOverlay builds a floating centered panel showing all slash
+// commands and keybindings. Called from View when helpOverlayOpen is true.
+func (m Model) renderHelpOverlay() string {
+	// Collect content: commands + keys.
+	var content strings.Builder
+	content.WriteString(styleHeader.Render("Help — seek"))
+	content.WriteString("\n\n")
+
+	// Slash commands.
+	content.WriteString(styleStatusOffPeak.Render(" Commands "))
+	content.WriteString("\n")
+	sorted := allCommands()
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].usage < sorted[j].usage })
+	for _, c := range sorted {
+		names := strings.Join(c.names, ", ")
+		content.WriteString(fmt.Sprintf("  %-22s  %s\n", names, c.description))
+	}
+	content.WriteString("\n")
+
+	// Key bindings.
+	content.WriteString(styleStatusOffPeak.Render(" Keys "))
+	content.WriteString("\n")
+	type binding struct{ key, desc string }
+	bindings := []binding{
+		{"/help, /? or ?", "Show this help overlay"},
+		{"Enter", "Send prompt"},
+		{"↑ / ↓", "Recall prompt history (when input is empty)"},
+		{"Esc", "Cancel ongoing assistant response"},
+		{"Ctrl+J", "Insert newline in input"},
+		{"Ctrl+L", "Clear visible screen (same as /clear)"},
+		{"Ctrl+R", "Toggle reasoning visibility"},
+		{"Ctrl+C", "Quit seek"},
+	}
+	for _, b := range bindings {
+		content.WriteString(fmt.Sprintf("  %-22s  %s\n", b.key, b.desc))
+	}
+	content.WriteString("\n")
+	content.WriteString(styleMuted.Render("Scrollback: use your terminal's native scrollback (not captured by seek)."))
+	content.WriteString("\n\n")
+	content.WriteString(styleMuted.Render("Esc / Enter / q  to close"))
+
+	// Panel width: 60% of terminal width, with sensible bounds.
+	panelW := int(float64(m.width) * 0.6)
+	if panelW < 50 {
+		if m.width > 54 {
+			panelW = 50
+		} else {
+			panelW = m.width - 4 // leave 2-char margin on each side
+		}
+	}
+	if panelW > 80 {
+		panelW = 80
+	}
+	if panelW < 30 {
+		panelW = 30 // absolute minimum — still readable
+	}
+
+	// Panel height: content-driven; let lipgloss handle wrapping and
+	// we measure the actual rendered line count for centering.
+	contentStr := content.String()
+	panel := lipgloss.NewStyle().
+		Width(panelW).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colourAccent).
+		Padding(1, 2).
+		Render(contentStr)
+
+	// Center the panel vertically. Use the actual rendered line count.
+	panelLines := strings.Count(strings.TrimRight(panel, "\n"), "\n") + 1
+	available := m.height - 3 // reserve for input line + status bar + margin
+	padTop := (available - panelLines) / 2
+	if padTop < 0 {
+		padTop = 0
+	}
+	padBottom := available - panelLines - padTop
+	if padBottom < 0 {
+		padBottom = 0
+	}
+
+	// Pad the panel horizontally — lipgloss already centers via Width,
+	// but we add left padding to shift it toward center.
+	leftPad := (m.width - panelW) / 2
+	if leftPad < 0 {
+		leftPad = 0
+	}
+
+	var sb strings.Builder
+	sb.WriteString(strings.Repeat("\n", padTop))
+	for _, line := range strings.Split(strings.TrimRight(panel, "\n"), "\n") {
+		sb.WriteString(strings.Repeat(" ", leftPad))
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+	sb.WriteString(strings.Repeat("\n", padBottom))
+
+	// Input area and status bar still visible at the bottom.
+	sb.WriteString(m.input.View())
+	sb.WriteString("\n")
+	sb.WriteString(m.renderStatusBar())
+
+	return sb.String()
 }
 

@@ -143,6 +143,10 @@ type Model struct {
 
 	showReasoning bool
 
+	// helpOverlayOpen is set by /help or the ? key. When true, View
+	// renders a floating overlay panel with all commands and keybindings.
+	helpOverlayOpen bool
+
 	// Slash-command menu state. Open when the input starts with "/" and
 	// contains no space yet; refreshed in handleKey's default branch
 	// after every key that reached the textarea.
