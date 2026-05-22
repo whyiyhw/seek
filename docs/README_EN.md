@@ -2,6 +2,8 @@
 
 **seek** is a coding agent powered by [DeepSeek](https://deepseek.com). It runs in your terminal, reads/writes files, executes commands, and helps you get work done — without leaving your keyboard.
 
+**Open source (MIT) · no region lock · no telemetry · welcome from anywhere in the world**. All you need is an API key from one LLM provider — DeepSeek is the primary target, Anthropic / OpenAI / Gemini also supported.
+
 ## Why seek?
 
 seek overlaps a lot with Claude Code / Aider / Cursor on features — MCP, session management, IDE integration, custom skills, permission systems all exist there too. This section only lists the things that are actually **differentiated**; the rest is mentioned at the end as "on par, not a differentiator" instead of forcing checkmarks against competitors.
@@ -31,9 +33,9 @@ Self-hosting benchmark measures 95.7% cache hit (97% after turn 5) — the engin
 - **Cache-hit visibility**: status bar shows hit ratio and saved tokens live, so "write cache-friendly prompts" becomes an observable optimization target instead of a vague best-practice
 - **Off-peak countdown**: status bar shows the current pricing tier and how long until the next switch
 
-### 4. Chinese-friendly defaults
+### 4. Bilingual (Chinese + English)
 
-Tool descriptions, system prompt phrasing, and error messages are tuned for Chinese-language interaction (English still works, of course).
+Tool descriptions, system prompts, and error messages are provided in both English and Chinese; Chinese prompting on DeepSeek tends to outperform Western models on the same input, which is one of seek's core use cases. The English workflow has no limitations — and the other providers (Anthropic / OpenAI / Gemini) default to English paths regardless.
 
 ### On par (not a differentiator)
 
@@ -123,9 +125,11 @@ The project follows milestones M0–M7 (all delivered). Current focus:
 Detailed design: [`PRD.md`](./PRD.md).  
 Contributor guide: See [`AGENTS.md`](../AGENTS.md) for architecture conventions.
 
-## License
+## Open source & contributing
 
-MIT (planned). Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT).
+MIT (planned). The repo is public — developers from anywhere in the world are welcome to use it, file issues, and send pull requests. No region lock, no signup, no mandatory telemetry.
+
+Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT). Architecture conventions in [`AGENTS.md`](../AGENTS.md); ongoing pitfall log in [`docs/pitfalls.md`](./pitfalls.md).
 
 ---
 

@@ -2,6 +2,8 @@
 
 **seek** 是一个基于 [DeepSeek](https://deepseek.com) 的编程助手。它在终端里运行，能读写文件、执行命令，帮你写代码——不用离开键盘。
 
+**开源 (MIT) · 无地区限制 · 不收 telemetry · 欢迎全球用户**。你只需要一个 LLM provider 的 API key（DeepSeek 主力，也支持 Anthropic / OpenAI / Gemini）。
+
 ## 为什么选 seek
 
 seek 跟 Claude Code / Aider / Cursor 在功能面上大量重叠——MCP、会话管理、IDE 集成、自定义 skill、权限系统都有。下面只列**真正差异化**的几项，其它能力作为"持平"列在最后，不强行打钩。
@@ -30,9 +32,9 @@ DeepSeek V4-Flash 的输入价格（来自 `internal/pricing/pricing.go`）：
 - **缓存命中率实时可见**：状态栏显示 hit ratio + 节省 token 数，让"如何写出缓存友好的 prompt"变成可观测的优化目标
 - **错峰倒计时**：状态栏显示当前是否在 5 折时段，以及距下次切换还有多久
 
-### 4. 中文友好
+### 4. 中英文都流畅
 
-工具描述用中文写，系统 prompt 对中文 prompt 调过，错误信息中文。
+工具描述、系统 prompt、错误信息提供中英双语；中文 prompt 在 DeepSeek 上响应优于多数欧美模型，是 seek 的核心使用场景之一。英文工作流没有任何限制——其它 provider（Anthropic / OpenAI / Gemini）默认英文路径，自然衔接。
 
 ### 通用能力（持平，非差异化）
 
@@ -124,9 +126,11 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 完整设计：[`PRD.md`](./docs/PRD.md)  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
 
-## 协议
+## 开源 & 贡献
 
-MIT（计划中）。灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）。
+MIT 协议（计划中）。仓库公开：欢迎世界上所有地区的开发者使用、提 issue、提 PR——无地区限制，无身份审核，无强制 telemetry。
+
+灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）。架构约定见 [`AGENTS.md`](./AGENTS.md)，踩坑记录见 [`docs/pitfalls.md`](./docs/pitfalls.md)。
 
 ---
 
