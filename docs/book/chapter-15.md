@@ -421,7 +421,84 @@ if strings.TrimRight(lines[i], "\r") == "---" { ... }
 
 ---
 
-## 15.6 v1.0 验收：每条都对得上
+## 15.6 M7 polish：浮动 help、`/new`、`--theme`
+
+JSON 模式（§15.1）是 M7 里"对外可见"的大功能。M7 还顺手做了三件**对内可见**的小事——分别解决一个具体的"用着觉得不对"——这一节按"被什么烦到 → 怎么修"的形式快速过一下。
+
+### `/help` 从滚屏文本变成浮动 overlay
+
+旧的 `/help` 把命令表打进 scrollback——20 行内容把刚才的对话冲到屏幕外。每次想查个键位绑定都要往上滚回来再翻回去。
+
+M7 把它改成**浮动 overlay**（commit `b479187`）：
+
+- `/help` 或者 `?` 热键（idle、input 为空、不在流式时）打开
+- 居中浮窗，圆角边框，60% 终端宽度（clamp 在 [30, 80]）
+- 命令列表 + 键位对照，两栏布局
+- Esc / Enter / q / Q 任一键关闭，所有其它键被消费——**不会有幽灵输入串到 textarea 里**
+- 关闭后底下的对话历史一字不动——浮窗只是"借用"屏幕空间，不污染 scrollback
+
+`?` 热键是 vim / less 风格——idle 状态下按 `?` 看帮助是终端工具的肌肉记忆。
+
+修这个 polish 时撞到一个意料外的小坑：
+
+**新 overlay 偷了 Ctrl+C**。Overlay 打开时所有键都被 handle，但漏判了 Ctrl+C——用户没法在 help 打开时退出程序，只能 Esc 关闭 overlay 再 Ctrl+C。
+
+```go
+// 修复：Ctrl+C 在 overlay 路径里要早于 fallthrough 处理
+case tea.KeyCtrlC:
+    return m, tea.Quit
+case tea.KeyEsc, tea.KeyEnter:
+    m.helpOpen = false
+    return m, nil
+default:
+    return m, nil  // 其它键全部 consume
+```
+
+这跟第 8 章 §8.3 那条 "Ctrl+C 在 approval 模式里必须先 reply 再 quit" 是同一类教训：**任何接管了键盘的临时 UI（modal、overlay、approval prompt）都要先把 Ctrl+C 的退出路径单独走通**，再写 `default: consume`。Ctrl+C 不是普通键，是用户唯一的逃生通道。
+
+### `/reset` → `/new` + `/clear`
+
+旧的 `/reset` 命令有两个问题：
+
+1. 它**静默丢弃当前对话历史**——按下 `/reset`，agent 状态被清空，磁盘上的当前 session 也不再 touch，用户回头 `--list` 找不到刚才的工作
+2. **名字和 `/clear` 混淆**——很多用户分不清 `/reset` 和 `/clear` 哪个是清屏哪个是清状态
+
+修法（commit `393d6b7`）：
+
+- **删掉 `/reset`**。`/clear` 保留原义（**只清屏**，agent 状态不动；终端 scrollback 由系统管，不动）
+- **加 `/new`**：先 `persistSession()` 把当前会话刷到磁盘（用户不丢工作），再创建一个全新会话（新 ID，**没有 ParentID** ——不是 `/branch`，是真正的新对话），清 tracker 和 agent 状态，清屏
+- `--no-save` 路径下跳过会话创建（保持 `m.opts.Session == nil` 的 ephemeral 形态）
+
+这条修改是非常典型的"重命名 + 行为修正"双重变更——之前混在一起的两个语义被拆成两个命令，每个语义对应一个动词。`/clear` 处理屏幕，`/new` 处理对话。两个动词，两个责任，零歧义。
+
+### `--theme dark|light|auto`
+
+OSC 11 探针（第 7 章 §7.3）已经能用来让 glamour 选 dark / light 主题——但**只对 Markdown 渲染生效**。状态栏、菜单、banner 这些用 lipgloss 写的 UI chrome，颜色永远按 dark 终端调好，到 light 终端上对比度直接掉到看不清。
+
+修法（commit `56b9df8`）：
+
+- `--theme` 标志（`auto` / `dark` / `light`，默认 `auto`）
+- 两套调色板：`darkPalette`（原来的）和 `lightPalette`（针对浅色背景重新调过）
+- `SetTheme()` 在启动时一次性重建所有 package-level style 变量
+- glamour 和 lipgloss **共享同一个解析后的主题**——避免"Markdown 是 light、状态栏是 dark"的撕裂
+
+主题决策有三个来源，按优先级：
+
+1. `--theme` flag 显式指定
+2. `SEEK_STYLE` 环境变量（早期的逃生口，留作兼容）
+3. termenv 检测终端背景色
+
+三条路径都有 table-driven 测试覆盖——保证用户无论怎么配，最终拿到的 palette 是一致的。
+
+### 共同点：M7 polish 是"自举驱动"的
+
+这三个修改没一个是 PRD 里写的"v1.0 要做"的功能。它们都是这本书第 15.2 节讲的**自举副产品**——作者自己用 seek 写代码时，撞到了 `/help` 滚屏的烦躁、`/reset` 丢工作的恼火、light 终端看不清状态栏的眯眼——立刻动手修。
+
+PRD 里"M7 polish"那一行原本是空的；这三个 commit 是把"polish"填满的具体动作。**自举不是验收测试，是产品需求来源**。
+
+---
+
+## 15.7 v1.0 验收：每条都对得上
 
 回到 PRD §6——v1.0 之前要满足的验收标准。截至本章写完，状态大致：
 
@@ -446,8 +523,11 @@ if strings.TrimRight(lines[i], "\r") == "---" { ... }
 | **多 provider** | Anthropic / OpenAI / Gemini | ✅ M6 |
 | | compatible 端点（vLLM / Ollama） | ✅ M6 |
 | | CI lint 强制分层 | ✅ M6 |
-| **M7** | JSON 输出模式 | ✅ M7（dd5db84） |
-| | 自举：用 seek 改 seek | ✅ 进行中 |
+| **M7** | JSON 输出模式 | ✅ M7（`dd5db84`） |
+| | 自举：用 seek 改 seek | ✅ 进行中（`1467be8` 等） |
+| | `/help` 浮动 overlay + `?` 热键 | ✅ M7 polish（`b479187`） |
+| | `/new` 替代 `/reset`（自动保存） | ✅ M7 polish（`393d6b7`） |
+| | `--theme` flag + light palette | ✅ M7 polish（`56b9df8`） |
 | | `go install` + 版本号 | ✅ 当前 |
 | **跨平台** | 三 OS CI 全绿 | ✅ 全程 |
 
@@ -455,7 +535,7 @@ if strings.TrimRight(lines[i], "\r") == "---" { ... }
 
 ---
 
-## 15.7 这本书是怎么停的
+## 15.8 这本书是怎么停的
 
 你读到这里，意味着你已经走完了 seek 从一行 Go 代码到 v1.0 候选发布的整个过程。15 章 + 前言 + 附录，每一章对应至少一个真实的 commit、一段真实的 bug、一组真实的取舍。
 
@@ -481,8 +561,9 @@ if strings.TrimRight(lines[i], "\r") == "---" { ... }
 - `go install` + 单二进制是从第 1 章开始就埋伏的承诺——零外部依赖、零 cgo、`go:embed` 自带资源、`FixedZone` 不要 tzdata，加起来兑现
 - 版本号用 `runtime/debug.BuildInfo`，自动捕获 git revision + dirty 标记；把读 BuildInfo 和格式化字符串分开，纯函数可测
 - 跨平台细节：windows 用 `APPDATA`、unix 用 XDG、`time.FixedZone` 不依赖 tzdata、`TrimRight(\r)` 是按行处理的肌肉记忆
+- M7 polish（浮动 help / `/new` / `--theme`）三件小事都源于自举撞坑——再次印证 §15.2 的论点：自举不是验收测试，是产品需求来源
 - v1.0 验收清单几乎全绿；剩下的是文档收口 + 正式 tag
 
 ---
 
-*这本书到此结束。对应 commit：`dd5db84`（M7 JSON 模式）、`1467be8`（首次自举：README 同步）、`5b23e55`（pitfalls 回填）。整个项目的最新进度：`git log --oneline | head -20`。*
+*这本书到此结束。对应 commit：`dd5db84`（M7 JSON 模式）、`1467be8`（首次自举：README 同步）、`5b23e55`（pitfalls 回填）、`b479187`（`/help` overlay + `?` 热键）、`393d6b7`（`/new` 替代 `/reset`）、`56b9df8`（`--theme` flag）。整个项目的最新进度：`git log --oneline | head -20`。*
