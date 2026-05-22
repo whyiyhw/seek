@@ -638,6 +638,24 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ⏳ 待启动（~2.5 周） |
 | **M7 打磨** | RPC / JSON 模式；多行 paste 折叠；主题；帮助 overlay；自举 + benchmark；文档 | ⏳ 待启动（~1 周） |
 | **v1.0 发布** | | ≈ 当前进度 + 6.5 周 |
+| **Post-v1.0** | LSP 语义导航；并行工具调用；... | ⏳ 待规划 |
+
+### 5.0.1 Post-v1.0 未来功能
+
+#### LSP 语义导航（可选工具）
+
+**动机**：grep + read(offset) 对大型 monorepo / 动态类型语言（Python、TypeScript）的符号级导航不够精确，可能读错同名符号或需要多次 round-trip。
+
+**方案**：新增可选 `lsp` tool，懒启动对应语言的 language server（`gopls`、`pyright`、`typescript-language-server`），暴露三个操作：
+- `definition(file, line, col)` — 跳转到定义
+- `references(file, line, col)` — 查找所有引用
+- `hover(file, line, col)` — 获取类型/签名信息
+
+**不强制依赖**：未安装 language server 时 `lsp` tool 不注册，不影响启动。通过 `--lsp=go,ts` 显式开启。
+
+**与 MCP 的关系**：如果社区出现成熟的 lsp-mcp-server，可通过现有 MCP 通道接入，无需改 seek 核心。优先等待生态，再考虑内置。
+
+**前置条件**：先把 grep-first + read(offset) 工作流跑稳，通过真实会话数据确认 LSP 是实际瓶颈（大型 Python/TS 项目）再投入。
 
 ### 5.1 M4.5 子任务展开
 
