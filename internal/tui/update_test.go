@@ -219,6 +219,44 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 	}
 }
 
+func TestHandleKey_StreamingEnter_ClearsPasteFoldFlag(t *testing.T) {
+	// Regression: after folding a multi-line paste, pressing Enter (or
+	// Alt+Enter) mid-stream must clear m.pastedContent — otherwise
+	// View() keeps rendering "[pasted N lines, hidden]" while the
+	// agent is busy with the new turn, even though the textarea has
+	// already been Reset().
+	//
+	// We only cover the two streaming-branch paths here because they
+	// don't invoke submit() (which would require a mocked Agent +
+	// Context). The non-streaming path's clear lives on the same line
+	// of update.go, visible at review time.
+	cases := []struct {
+		name string
+		alt  bool
+	}{
+		{"streaming queue (Enter)", false},
+		{"streaming steer (Alt+Enter)", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{input: textarea.New(), streaming: true}
+			m.input.SetValue("line 1\nline 2\nline 3\nline 4\nline 5\nline 6")
+			m = m.handlePasteFolding()
+			if m.pastedContent == "" {
+				t.Fatalf("setup: paste should have folded")
+			}
+			m.cancelStream = func() {} // wired for Alt+Enter path
+
+			out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: tc.alt})
+			m2 := out.(Model)
+
+			if m2.pastedContent != "" {
+				t.Errorf("pastedContent should be cleared after Enter, got %q", m2.pastedContent)
+			}
+		})
+	}
+}
+
 func TestRenderQueueHint_States(t *testing.T) {
 	cases := []struct {
 		name    string

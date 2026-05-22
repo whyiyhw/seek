@@ -255,6 +255,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.input.Reset()
+			// Clear the paste-fold flag too: if the user just folded a
+			// long paste and hit Enter, the textarea is reset but the
+			// View() still renders the "[pasted N lines, hidden]"
+			// placeholder because it keys off m.pastedContent.
+			m.pastedContent = ""
 			if msg.Alt {
 				// Steer: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
@@ -277,6 +282,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.input.Reset()
+		// See the streaming-branch note above: the paste-fold flag
+		// would otherwise outlive the submit and re-render the
+		// placeholder on the next frame.
+		m.pastedContent = ""
 		if handled, cmd := dispatchCommand(&m, text); handled {
 			return m, cmd
 		}

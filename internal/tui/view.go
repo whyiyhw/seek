@@ -163,6 +163,15 @@ func (m Model) View() string {
 	// Status line (single, not pinned — it scrolls with content).
 	sb.WriteString(m.renderStatusBar())
 
+	// Bottom rule — closes seek's live region visually so the next line
+	// in the terminal (shell prompt, neighbouring tmux pane bleed-through,
+	// etc.) doesn't appear to belong to seek. Muted so it recedes; full
+	// width so it acts as a clean horizontal seal.
+	if m.width > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
+	}
+
 	return sb.String()
 }
 
