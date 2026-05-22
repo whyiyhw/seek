@@ -165,7 +165,10 @@ func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
 	}
 }
 
-func TestHandleKey_StreamingEnter_EmptyInputIsNoOp(t *testing.T) {
+func TestHandleKey_StreamingEnter_EmptyInputNothingToWithdrawIsNoOp(t *testing.T) {
+	// Empty textarea + empty queue + empty pending steer + Enter → no-op.
+	// (When something IS pending, the withdraw path runs — see the
+	// next two tests.)
 	m := streamingModel(t, "   ") // whitespace-only
 
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
@@ -173,6 +176,50 @@ func TestHandleKey_StreamingEnter_EmptyInputIsNoOp(t *testing.T) {
 
 	if m2.queuedText != "" {
 		t.Errorf("empty input should not queue, got %q", m2.queuedText)
+	}
+}
+
+func TestHandleKey_StreamingEnter_EmptyInputWithdrawsQueue(t *testing.T) {
+	// User typed "do A", queued it (Enter), then changed their mind —
+	// pressing Enter on an empty textarea should withdraw the queued
+	// message without cancelling the in-flight stream.
+	m := streamingModel(t, "") // empty textarea
+	m.queuedText = "look at server.go"
+	// Wire a no-op cancel so we can verify it does NOT get called —
+	// withdrawing a queue must not touch the stream.
+	cancelCalled := false
+	m.cancelStream = func() { cancelCalled = true }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.queuedText != "" {
+		t.Errorf("queue should be empty after withdraw, got %q", m2.queuedText)
+	}
+	if cancelCalled {
+		t.Error("withdraw must NOT cancel the in-flight stream")
+	}
+	if m2.userCanceled {
+		t.Error("withdraw must NOT set userCanceled (no '↰ interrupted' notice)")
+	}
+}
+
+func TestHandleKey_StreamingEnter_EmptyInputWithdrawsSteer(t *testing.T) {
+	// Same shape, steer instead of queue. A pending steer means
+	// cancelStream has already been called (it's how steer works) —
+	// withdrawal here just clears the about-to-fire submission, the
+	// stream is already on its way out.
+	m := streamingModel(t, "")
+	m.pendingSteerText = "wait, undo that"
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.pendingSteerText != "" {
+		t.Errorf("pending steer should clear, got %q", m2.pendingSteerText)
+	}
+	if m2.queuedText != "" {
+		t.Errorf("queue should remain empty, got %q", m2.queuedText)
 	}
 }
 

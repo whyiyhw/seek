@@ -110,6 +110,8 @@ $ seek
 
 Need to switch keys / providers later? Type `/setup` inside the TUI to re-run the wizard, or hand-edit `~/.seek/config.json`.
 
+> Pressing Enter mid-stream **queues** a follow-up message (auto-sent when the current turn finishes). To **withdraw** a queued message, leave the textarea empty and press Enter again — softer than Esc, and the in-flight stream keeps running.
+
 See [`docs/`](./) for sessions, MCP, and skills guides.  
 See `?` inside the TUI for all key bindings and slash commands.
 
@@ -132,7 +134,7 @@ The project follows milestones M0–M7 (all delivered). Current focus:
 - **Plugin system**: third-party tool loading
 - **Stabilization**: tagged releases, CI hardening
 
-Detailed design: [`PRD.md`](./PRD.md).  
+Detailed design: [`docs/prd/`](./prd/) (v0 initial · v1 current development).  
 Contributor guide: See [`AGENTS.md`](../AGENTS.md) for architecture conventions.
 
 ## Open source & contributing

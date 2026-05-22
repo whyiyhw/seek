@@ -109,6 +109,8 @@ $ seek
 
 之后想换 key / 切 provider：TUI 内输入 `/setup` 重跑向导，或直接编辑 `~/.seek/config.json`。
 
+> 流式过程中按 Enter 可以**排队**一条后续消息（agent 跑完当前轮自动发出）；想**撤回**已排队的消息？让输入框留空再按一次 Enter——比按 Esc 温和，不会 cancel 当前 stream。
+
 详细用法：[`docs/`](./docs/) 包含会话、MCP、Skill 指南。  
 TUI 内输入 `?` 查看所有快捷键和斜杠命令。
 
@@ -131,7 +133,7 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 - **插件系统**：支持第三方工具加载
 - **稳定化**：打 tag 发版，CI 加固
 
-完整设计：[`PRD.md`](./docs/PRD.md)  
+完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 当前开发）  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
 
 ## 开源 & 贡献

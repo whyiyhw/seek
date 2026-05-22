@@ -370,6 +370,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.streaming {
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
+				// Empty Enter on an empty textarea has no submission
+				// meaning, so we reuse it as the "withdraw the pending
+				// queue / steer" gesture. Without this, the only way
+				// to clear a queued message was Esc, which ALSO
+				// cancels the in-flight stream — too coarse when the
+				// agent is already 30 seconds into a useful turn.
+				if m.queuedText != "" || m.pendingSteerText != "" {
+					wasSteer := m.pendingSteerText != ""
+					m.queuedText = ""
+					m.pendingSteerText = ""
+					label := "↰ withdrew queued message"
+					if wasSteer {
+						label = "↰ withdrew pending steer"
+					}
+					return m, tea.Println(styleMuted.Render("  " + label))
+				}
 				return m, nil
 			}
 			m.input.Reset()
