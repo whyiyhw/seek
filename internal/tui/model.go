@@ -3,19 +3,19 @@
 //
 // Architecture (M4.5 — inline mode):
 //
-//   scrollback (terminal-native, immutable once committed)
-//   ├── welcome banner             ← printed once before tea starts
-//   ├── > user prompt              ← committed via tea.Println on submit
-//   ├── [tool] read main.go → ok   ← committed via tea.Println on ToolExecEnd
-//   ├── ▸ seek: complete reply…    ← committed via tea.Println on MessageEnd
-//   └── > next prompt
+//	scrollback (terminal-native, immutable once committed)
+//	├── welcome banner             ← printed once before tea starts
+//	├── > user prompt              ← committed via tea.Println on submit
+//	├── [tool] read main.go → ok   ← committed via tea.Println on ToolExecEnd
+//	├── ▸ seek: complete reply…    ← committed via tea.Println on MessageEnd
+//	└── > next prompt
 //
-//   live region (View(), redrawn each Update — volatile)
-//   ├── ↳ read("main.go") …        ← active tools, removed on completion
-//   ├── ▸ seek: streaming text…    ← growing assistant response
-//   ├── ──────────────────
-//   ├── > _                        ← input
-//   └── status: …                  ← single status line
+//	live region (View(), redrawn each Update — volatile)
+//	├── ↳ read("main.go") …        ← active tools, removed on completion
+//	├── ▸ seek: streaming text…    ← growing assistant response
+//	├── ──────────────────
+//	├── > _                        ← input
+//	└── status: …                  ← single status line
 //
 // The split lets us reuse the terminal's native scrollback for history
 // (no in-memory viewport, no PgUp/PgDn juggling, mouse selection works
@@ -34,6 +34,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
@@ -83,6 +84,15 @@ type Options struct {
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
 	SetYolo      func(bool)
+
+	// MemoryProject is the M-layer handle for this session. nil = memory
+	// is unavailable (e.g. --no-save, load failure); /distill surfaces a
+	// helpful error instead of running.
+	MemoryProject *memory.Project
+
+	// Distiller runs the reasoner pass that turns history → candidates.
+	// nil disables /distill (same effect as MemoryProject being nil).
+	Distiller *memory.Distiller
 }
 
 // activeTool is a tool whose ToolExecStart has fired but ToolExecEnd
@@ -195,6 +205,26 @@ type Model struct {
 	// is buffered so we never block).
 	pendingApproval *permission.ApprovalRequest
 
+	// Distill review state. When distillReviewOpen is true, all keys
+	// are intercepted by handleDistillKey: y saves the current
+	// candidate, n drops it, e enters edit mode (distillEditing
+	// true; the main input collects new content), q aborts the
+	// review. distillIdx advances on y/n/e-commit; when it reaches
+	// len(distillCandidates) the modal closes and a summary line
+	// prints to scrollback.
+	distillReviewOpen bool
+	distillCandidates []memory.Candidate
+	distillIdx        int
+	distillSaved      int
+	distillDropped    int
+
+	// distillEditing means 'e' was pressed on the current candidate
+	// and the main input area is collecting an edited content body
+	// (prefilled with the candidate's current Content). Enter
+	// commits (calls Project.Add with the edited content), Esc
+	// cancels and returns to the y/n/e/q prompt.
+	distillEditing bool
+
 	// pastedContent stores the full input when multi-line paste folding
 	// is active (paste > 5 lines → display collapses to a placeholder,
 	// but the full text is sent to the LLM on submit). Empty = not folded.
@@ -229,6 +259,9 @@ func (m Model) isWelcomeScreen() bool {
 		return false
 	}
 	if m.pendingApproval != nil {
+		return false
+	}
+	if m.distillReviewOpen {
 		return false
 	}
 	if m.commandMenuOpen || m.pathPicker.open {
@@ -334,4 +367,3 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 		return agentEventMsg{Event: ev}
 	}
 }
-

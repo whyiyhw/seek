@@ -164,6 +164,8 @@ func (m Model) View() string {
 	switch {
 	case m.pendingApproval != nil:
 		sb.WriteString(m.renderApprovalPrompt())
+	case m.distillReviewOpen:
+		sb.WriteString(m.renderDistillReview())
 	case m.commandMenuOpen:
 		sb.WriteString(m.renderCommandMenu())
 	case m.modelPickerOpen:

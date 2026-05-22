@@ -127,6 +127,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case compactDoneMsg:
 		cmds = append(cmds, m.handleCompactDone(msg)...)
 
+	case distillDoneMsg:
+		cmds = append(cmds, m.handleDistillDone(msg)...)
+
 	case versionCheckDoneMsg:
 		// Store the newer tag for the status-bar segment. Idempotent —
 		// the cmd never re-fires within a session, but a second run
@@ -164,6 +167,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// happen until the user picks y / n / a.
 	if m.pendingApproval != nil {
 		return m.handleApprovalKey(msg)
+	}
+
+	// Distill review modal grabs all keys until the user finishes the
+	// pass. Edit-mode (one of the y/n/e/q states) reuses the main
+	// input area for textarea-style content editing.
+	if m.distillReviewOpen {
+		return m.handleDistillKey(msg)
 	}
 
 	// @-path picker has the same priority as the slash menu; the

@@ -491,20 +491,32 @@ func run() error {
 		effectiveTheme = glamourStyle
 	}
 
+	// /distill needs both the Project (where saved candidates land)
+	// and a Distiller (the reasoner round-trip). The Distiller is only
+	// constructible when we have a DeepSeek client — second-tier
+	// providers don't currently expose a Chat method on the same
+	// interface, so /distill is DeepSeek-only for now.
+	var distiller *memory.Distiller
+	if memProject != nil && dsClient != nil {
+		distiller = &memory.Distiller{Client: dsClient}
+	}
+
 	return tui.Run(tui.Options{
-		Agent:        ag,
-		Tracker:      tracker,
-		Model:        sessionModel,
-		Yolo:         policy.Yolo(),
-		CWD:          abs,
-		Ctx:          ctx,
-		Theme:        effectiveTheme,
-		GlamourStyle: glamourStyle,
-		ApprovalCh:   approvalCh,
-		Session:      activeSession,
-		Store:        store,
-		Skills:       skills,
-		ProviderName: provLabel,
+		Agent:         ag,
+		Tracker:       tracker,
+		Model:         sessionModel,
+		Yolo:          policy.Yolo(),
+		CWD:           abs,
+		Ctx:           ctx,
+		Theme:         effectiveTheme,
+		GlamourStyle:  glamourStyle,
+		ApprovalCh:    approvalCh,
+		Session:       activeSession,
+		Store:         store,
+		Skills:        skills,
+		ProviderName:  provLabel,
+		MemoryProject: memProject,
+		Distiller:     distiller,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project

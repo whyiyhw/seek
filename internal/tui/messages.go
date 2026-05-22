@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -38,6 +39,15 @@ type compactDoneMsg struct {
 	summary string
 	usage   deepseek.Usage
 	err     error
+}
+
+// distillDoneMsg fires when /distill's reasoner pass returns. On
+// success, candidates is the list to review (possibly empty — the
+// reasoner can legitimately decide nothing is worth keeping). On error,
+// err is non-nil and the TUI prints the message to scrollback.
+type distillDoneMsg struct {
+	candidates []memory.Candidate
+	err        error
 }
 
 // versionCheckDoneMsg fires after the startup background upgrade probe.

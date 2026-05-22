@@ -47,6 +47,7 @@ func allCommands() []command {
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
+		{names: []string{"/distill"}, usage: "/distill", description: "Reasoner-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
@@ -561,5 +562,53 @@ func startCompactCmd(m *Model) tea.Cmd {
 		defer cancel()
 		summary, usage, err := ag.Summarise(ctx)
 		return compactDoneMsg{summary: summary, usage: usage, err: err}
+	}
+}
+
+// cmdDistill runs the reasoner pass that extracts ≤3 project-level
+// decisions from the current session and surfaces them for y/n/e
+// review (PRD §6). Refuses to run mid-stream — the reasoner needs the
+// full settled history, not a half-streamed turn. Refuses on
+// unavailable memory (--no-save, project load failure) so the user
+// gets a clear message instead of a silent no-op.
+func cmdDistill(m *Model, _ string) cmdResult {
+	if m.streaming {
+		return cmdResult{text: styleMuted.Render("/distill: wait for the current turn to finish")}
+	}
+	if m.opts.Distiller == nil || m.opts.MemoryProject == nil {
+		return cmdResult{text: styleMuted.Render(
+			"/distill: project memory is unavailable in this session (--no-save or load failure)")}
+	}
+	msgs := m.opts.Agent.Messages()
+	// A bare [system, one user message] history has nothing to
+	// distill — the model would just produce noise. Cut early.
+	if len(msgs) <= 2 {
+		return cmdResult{text: styleMuted.Render(
+			"/distill: session is too short to extract decisions yet — keep going and try again later")}
+	}
+
+	return cmdResult{
+		text:  styleMuted.Render(fmt.Sprintf("distilling %d messages — calling deepseek-reasoner …", len(msgs)-1)),
+		extra: startDistillCmd(m),
+	}
+}
+
+// startDistillCmd runs the reasoner round-trip in a tea.Cmd. The 90s
+// timeout matches reasoner latency observed in benchmark runs —
+// distillation is bounded compute (one round-trip, no tool loop) so a
+// minute-and-a-half should be plenty. Parent ctx cancellation
+// (SIGINT) propagates so Ctrl+C still kills the call.
+func startDistillCmd(m *Model) tea.Cmd {
+	distiller := m.opts.Distiller
+	history := m.opts.Agent.Messages()
+	parentCtx := m.opts.Ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(parentCtx, 90*time.Second)
+		defer cancel()
+		candidates, err := distiller.Distill(ctx, history)
+		return distillDoneMsg{candidates: candidates, err: err}
 	}
 }
