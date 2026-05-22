@@ -72,7 +72,7 @@ func TestDispatch_Unknown(t *testing.T) {
 
 func TestHelp_TextHasKeys(t *testing.T) {
 	res := runHandler(t, emptyModel(), "/help")
-	for _, frag := range []string{"/help", "/clear", "/reset", "/exit", "Ctrl+R", "scrollback"} {
+	for _, frag := range []string{"/help", "/clear", "/new", "/exit", "Ctrl+R", "scrollback"} {
 		if !strings.Contains(res.text, frag) {
 			t.Errorf("help missing %q: %s", frag, res.text)
 		}
@@ -127,30 +127,98 @@ func TestYolo_TogglesAndFiresHook(t *testing.T) {
 	}
 }
 
-func TestReset_UsesHook(t *testing.T) {
+func TestNew_UsesHook(t *testing.T) {
 	m := emptyModel()
 	called := false
 	m.opts.RebuildAgent = func() (*agent.Agent, error) {
 		called = true
 		return nil, nil
 	}
-	res := runHandler(t, m, "/reset")
+	res := runHandler(t, m, "/new")
 	if !called {
 		t.Error("RebuildAgent hook not invoked")
 	}
 	if !res.clear {
-		t.Errorf("reset should also clear the screen")
+		t.Errorf("/new should also clear the screen")
 	}
 }
 
-func TestReset_ReportsHookErrors(t *testing.T) {
+func TestNew_ReportsHookErrors(t *testing.T) {
 	m := emptyModel()
 	m.opts.RebuildAgent = func() (*agent.Agent, error) {
 		return nil, errors.New("network down")
 	}
-	res := runHandler(t, m, "/reset")
-	if !strings.Contains(res.text, "reset failed") || !strings.Contains(res.text, "network down") {
+	res := runHandler(t, m, "/new")
+	if !strings.Contains(res.text, "/new failed") || !strings.Contains(res.text, "network down") {
 		t.Errorf("text = %q", res.text)
+	}
+}
+
+func TestNew_EphemeralNoSession_StaysEphemeral(t *testing.T) {
+	// --no-save mode: Session == nil, Store == nil.
+	// /new must NOT create a session (would convert ephemeral to persisted).
+	m := emptyModel()
+	m.opts.RebuildAgent = func() (*agent.Agent, error) { return nil, nil }
+	res := runHandler(t, m, "/new")
+	if m.opts.Session != nil {
+		t.Error("/new created a Session in ephemeral mode")
+	}
+	if !strings.Contains(res.text, "previous session saved") {
+		t.Errorf("text = %q", res.text)
+	}
+}
+
+func TestNew_SessionCreatedAndSaved(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SEEK_SESSIONS_DIR", dir)
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := session.New("deepseek-chat", "/tmp", "sys", false)
+	// /new needs a real agent so persistSession can read Messages().
+	ag, err := agent.New(agent.Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
+		SystemPrompt: "sys",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := emptyModel()
+	m.opts.RebuildAgent = func() (*agent.Agent, error) { return nil, nil }
+	m.opts.Agent = ag
+	m.opts.Session = old
+	m.opts.Store = store
+	m.turns = 2
+	m.toolCalls = 1
+
+	res := runHandler(t, m, "/new")
+
+	// Old session should be on disk.
+	if _, err := store.Load(old.ID); err != nil {
+		t.Errorf("old session not saved after /new: %v", err)
+	}
+	// New session should be set on the model.
+	if m.opts.Session == nil {
+		t.Fatal("Session is nil after /new")
+	}
+	if m.opts.Session.ID == old.ID {
+		t.Errorf("Session ID unchanged: %s", m.opts.Session.ID)
+	}
+	if m.opts.Session.ParentID != "" {
+		t.Errorf("new session should not have a parent link, got %q", m.opts.Session.ParentID)
+	}
+	// New session should be on disk too.
+	if _, err := store.Load(m.opts.Session.ID); err != nil {
+		t.Errorf("new session not saved: %v", err)
+	}
+	// Counters should be reset.
+	if m.turns != 0 || m.toolCalls != 0 {
+		t.Errorf("counters not reset after /new: turns=%d tools=%d", m.turns, m.toolCalls)
+	}
+	if !res.clear {
+		t.Errorf("/new should clear the screen")
 	}
 }
 
@@ -195,9 +263,9 @@ func names(cs []command) []string {
 	return out
 }
 
-func TestReset_NoHook(t *testing.T) {
+func TestNew_NoHook(t *testing.T) {
 	m := emptyModel()
-	res := runHandler(t, m, "/reset")
+	res := runHandler(t, m, "/new")
 	if !strings.Contains(res.text, "unsupported") {
 		t.Errorf("text = %q", res.text)
 	}

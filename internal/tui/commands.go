@@ -8,6 +8,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/session"
 )
 
 // cmdResult captures the effect of a slash command. The text (if any)
@@ -37,7 +39,7 @@ func allCommands() []command {
 	return []command{
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
 		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
-		{names: []string{"/reset"}, usage: "/reset", description: "Start a fresh conversation (resets the agent's message history).", handler: cmdReset},
+		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model <id>", description: "Switch the active model. Example: /model deepseek-reasoner", handler: cmdModel},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
@@ -115,13 +117,30 @@ func cmdClear(_ *Model, _ string) cmdResult {
 	return cmdResult{clear: true}
 }
 
-func cmdReset(m *Model, _ string) cmdResult {
+func cmdNew(m *Model, _ string) cmdResult {
 	if m.opts.RebuildAgent == nil {
-		return cmdResult{text: styleMuted.Render("reset unsupported (rebuild hook not wired)")}
+		return cmdResult{text: styleMuted.Render("/new unsupported (rebuild hook not wired)")}
 	}
+	// Save the current session before starting fresh.
+	m.persistSession()
+
+	// Create a brand-new session (clean slate, no parent link).
+	// Guard against --no-save mode where session persistence is off:
+	// don't silently convert an ephemeral run to a persisted one.
+	if m.opts.Session != nil && m.opts.Store != nil {
+		sess := session.New(m.opts.Model, m.opts.CWD, "", m.opts.Yolo)
+		m.opts.Session = sess
+		// The Save below is best-effort; the session will also be saved
+		// on the next auto-save cycle.
+		_ = m.opts.Store.Save(sess)
+	}
+
+	// Reset the usage tracker so the new session starts clean.
+	m.opts.Tracker = cache.New()
+
 	newAgent, err := m.opts.RebuildAgent()
 	if err != nil {
-		return cmdResult{text: styleErr.Render("reset failed: " + err.Error())}
+		return cmdResult{text: styleErr.Render("/new failed: " + err.Error())}
 	}
 	m.opts.Agent = newAgent
 	m.turns = 0
@@ -129,7 +148,7 @@ func cmdReset(m *Model, _ string) cmdResult {
 	m.curContent = ""
 	m.curReasoning = ""
 	m.activeTools = nil
-	return cmdResult{clear: true, text: styleMuted.Render("agent reset — new conversation")}
+	return cmdResult{clear: true, text: styleMuted.Render("new conversation — previous session saved")}
 }
 
 func cmdModel(m *Model, args string) cmdResult {
