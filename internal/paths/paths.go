@@ -72,3 +72,26 @@ func UserSkills() (string, error) {
 	}
 	return filepath.Join(root, "skills"), nil
 }
+
+// Projects returns the parent directory holding per-project memory
+// (~/.seek/projects/). Each project has its own subdirectory keyed by a
+// 16-char SHA-256 prefix of its absolute path; layout details live in
+// internal/memory.
+func Projects() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "projects"), nil
+}
+
+// Soul returns the path to the L-layer (long-term / cross-project user
+// traits) markdown file at ~/.seek/soul.md. The file may not exist —
+// that's the steady state until `seek -dream` produces L candidates.
+func Soul() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "soul.md"), nil
+}
