@@ -241,12 +241,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case tea.KeyRunes:
-		// ? opens the help overlay when idle and input is empty.
-		if !m.streaming && m.input.Value() == "" && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
-			m.helpOverlayOpen = true
-			return m, nil
-		}
 	}
 
 	// Everything else: feed the textarea (when not streaming).
