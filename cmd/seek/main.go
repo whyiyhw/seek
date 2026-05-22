@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
@@ -29,6 +30,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
+	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
@@ -209,6 +211,35 @@ func run() error {
 		Add(fimcomplete.New(client, *model)).
 		Add(think.New(client)).
 		Add(skilltool.New(skills))
+
+	// Load MCP servers and register their tools. Errors are non-fatal:
+	// a broken MCP server should not prevent seek from starting.
+	if mcpCfg, err := mcpconfig.Load(); err != nil {
+		fmt.Fprintln(os.Stderr, "mcp config:", err)
+	} else if len(mcpCfg.MCPServers) > 0 {
+		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
+		for name, e := range mcpCfg.MCPServers {
+			servers[name] = mcptool.ServerConfig{
+				Command: e.Command,
+				Args:    e.Args,
+				Env:     mcptool.EnvMapToSlice(e.Env),
+			}
+		}
+		existing := make(map[string]bool, len(reg.Names()))
+		for _, n := range reg.Names() {
+			existing[n] = true
+		}
+		lr := mcptool.LoadServers(ctx, servers, existing)
+		for _, e := range lr.Errors {
+			fmt.Fprintln(os.Stderr, "mcp:", e)
+		}
+		for _, b := range lr.Bridges {
+			reg.Add(b)
+		}
+		if len(lr.Bridges) > 0 {
+			fmt.Fprintf(os.Stderr, "mcp: loaded %d tool(s)\n", len(lr.Bridges))
+		}
+	}
 
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
