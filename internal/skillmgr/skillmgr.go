@@ -400,24 +400,44 @@ func resolveUserDir(override string) (string, error) {
 }
 
 // writeInstallSidecar serialises the install state to .install.json
-// inside the target directory.
+// inside the target directory. The recorded fields are exactly what
+// Update needs to re-fetch — store too little here and `seek skill
+// update` can't tell what to do; store too much and the format
+// becomes a private migration burden.
 func writeInstallSidecar(target string, opts *InstallOptions, typ SourceType) error {
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
 	src := &skill.InstallSource{
-		SchemaVersion:  1,
-		InstalledAt:    now().UTC().Format(time.RFC3339),
-		Type:           typ.String(),
-		URL:            opts.Source,
-		Ref:            "", // set by git fetcher when M8.1c lands
-		Subpath:        opts.Subpath,
-		ChecksumSHA256: opts.SHA256,
+		SchemaVersion: 1,
+		InstalledAt:   now().UTC().Format(time.RFC3339),
+		Type:          typ.String(),
+		Subpath:       opts.Subpath,
 	}
-	// For local sources, the "URL" stored in the sidecar is the
-	// original path — useful for `update` (re-copy from the same
-	// path) once that command lands.
+	switch typ {
+	case SourceGit:
+		// Split the user-facing URL into the bare repo URL and ref.
+		// Re-fetch in Update needs both as separate fields so a
+		// tag/branch can be replayed accurately.
+		url, ref := splitRefFragment(opts.Source)
+		src.URL = url
+		src.Ref = ref
+	case SourceLocal:
+		// Resolve the path to absolute so a future `update` from a
+		// different cwd still locates the source. Best-effort — if
+		// resolution fails, fall back to the raw input.
+		if abs, err := filepath.Abs(opts.Source); err == nil {
+			src.URL = abs
+		} else {
+			src.URL = opts.Source
+		}
+	case SourceHTTPS:
+		src.URL = opts.Source
+		src.ChecksumSHA256 = opts.SHA256
+	default:
+		src.URL = opts.Source
+	}
 	data, err := json.MarshalIndent(src, "", "  ")
 	if err != nil {
 		return err
