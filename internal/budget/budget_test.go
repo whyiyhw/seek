@@ -31,12 +31,12 @@ func TestClassify_Boundaries(t *testing.T) {
 		want Severity
 	}{
 		{0, SeverityOK},
-		// Strictly above the threshold so int truncation in pct()
-		// doesn't put us a fraction-of-a-token below the boundary.
-		{pct(limit, 0.79), SeverityOK},
-		{pct(limit, 0.81), SeverityWarn},
-		{pct(limit, 0.90), SeverityWarn},
-		{pct(limit, 0.96), SeverityCritical},
+		// Strictly above/below the threshold so int truncation in pct()
+		// doesn't put us a fraction-of-a-token across the boundary.
+		{pct(limit, 0.59), SeverityOK},
+		{pct(limit, 0.61), SeverityWarn},
+		{pct(limit, 0.70), SeverityWarn},
+		{pct(limit, 0.76), SeverityCritical},
 		{limit + 1, SeverityCritical},
 	}
 	for _, c := range cases {

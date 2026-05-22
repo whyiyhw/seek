@@ -62,15 +62,17 @@ const (
 
 // Thresholds (as fractions of the limit).
 //
-//	OK       → 0.00–0.80  no warning
-//	Warn     → 0.80–0.95  status bar tinted; user notices
-//	Critical → ≥0.95      explicit "consider /compact" prompt
+//	OK       → 0.00–0.60  no warning
+//	Warn     → 0.60–0.75  status bar tinted; user notices
+//	Critical → ≥0.75      explicit "consider /compact" prompt
 //
-// 0.80 is conservative on purpose — long-running coding sessions with
-// big tool results can spike fast.
+// Lowered from 0.80/0.95 → 0.60/0.75 so the /compact nudge fires
+// early enough to actually act on: with a 1M context model, 95% is
+// 950K tokens — by then the summary call itself costs real money and
+// the model quality is already degraded by the huge context.
 const (
-	WarnFraction     = 0.80
-	CriticalFraction = 0.95
+	WarnFraction     = 0.60
+	CriticalFraction = 0.75
 )
 
 // Classify returns the severity for usedTokens against the given
