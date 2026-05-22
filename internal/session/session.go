@@ -258,31 +258,33 @@ func (s *Store) Load(id string) (*Session, error) {
 // Latest returns the session with the most-recent UpdatedAt, or nil
 // with a nil error when the store is empty. Used by --continue.
 //
-// IDs are timestamp-prefixed (generateID), so lexical order equals
-// creation order. ReadDir returns entries sorted by name, meaning the
-// last .json entry is always the newest. One ReadDir + one Load — O(1)
-// regardless of how many sessions exist.
-//
-// If the newest file is unreadable (corrupt JSON, permissions), Latest
-// tries the next-oldest rather than failing outright.
+// Scans all session files via loadMeta (no message-body allocation) and
+// returns the one with the largest UpdatedAt. O(N) but cheap per file.
 func (s *Store) Latest() (*Session, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, err
 	}
-	for i := len(entries) - 1; i >= 0; i-- {
-		e := entries[i]
+	var bestID string
+	var bestAt time.Time
+	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
-		sess, err := s.Load(id)
+		meta, err := s.loadMeta(id)
 		if err != nil {
-			continue // skip corrupt file, try next-oldest
+			continue
 		}
-		return sess, nil
+		if meta.UpdatedAt.After(bestAt) {
+			bestAt = meta.UpdatedAt
+			bestID = id
+		}
 	}
-	return nil, nil
+	if bestID == "" {
+		return nil, nil
+	}
+	return s.Load(bestID)
 }
 
 // SessionInfo is the cheap metadata view returned by List.
@@ -294,6 +296,89 @@ type SessionInfo struct {
 	Turns     int
 	ToolCalls int
 	ParentID  string
+}
+
+// loadMeta reads only the scalar metadata fields from a session file,
+// skipping the messages array. Avoids allocating the full message history
+// when only session info is needed (for List and Latest).
+func (s *Store) loadMeta(id string) (SessionInfo, error) {
+	if strings.ContainsAny(id, "/\\.") {
+		return SessionInfo{}, fmt.Errorf("session: invalid id %q", id)
+	}
+	f, err := os.Open(filepath.Join(s.dir, id+".json"))
+	if err != nil {
+		return SessionInfo{}, fmt.Errorf("session: open %s: %w", id, err)
+	}
+	defer f.Close()
+
+	dec := json.NewDecoder(f)
+	tok, err := dec.Token()
+	if err != nil || tok != json.Delim('{') {
+		return SessionInfo{}, fmt.Errorf("session: invalid json in %s", id)
+	}
+	var info SessionInfo
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return info, fmt.Errorf("session: key in %s: %w", id, err)
+		}
+		switch key.(string) {
+		case "id":
+			_ = dec.Decode(&info.ID)
+		case "created_at":
+			_ = dec.Decode(&info.CreatedAt)
+		case "updated_at":
+			_ = dec.Decode(&info.UpdatedAt)
+		case "model":
+			_ = dec.Decode(&info.Model)
+		case "turns":
+			_ = dec.Decode(&info.Turns)
+		case "tool_calls":
+			_ = dec.Decode(&info.ToolCalls)
+		case "parent_id":
+			_ = dec.Decode(&info.ParentID)
+		default:
+			// Skip unknown / large fields (messages, system_prompt, etc.)
+			// without allocating Go objects for their content.
+			if err := skipJSONValue(dec); err != nil {
+				return info, err
+			}
+		}
+	}
+	return info, nil
+}
+
+// skipJSONValue advances the decoder past the next JSON value without
+// allocating any Go objects. Handles all JSON types including nested
+// objects and arrays.
+func skipJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	d, ok := tok.(json.Delim)
+	if !ok {
+		return nil // scalar: already consumed
+	}
+	var closing json.Delim
+	if d == '{' {
+		closing = '}'
+	} else {
+		closing = ']'
+	}
+	for dec.More() {
+		if err := skipJSONValue(dec); err != nil {
+			return err
+		}
+	}
+	endTok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if endTok.(json.Delim) != closing {
+		return fmt.Errorf("session: mismatched delimiters")
+	}
+	return nil
 }
 
 // List returns metadata for every session in the store, newest first.
@@ -313,20 +398,12 @@ func (s *Store) List() ([]SessionInfo, []error, error) {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
-		sess, err := s.Load(id)
+		meta, err := s.loadMeta(id)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		out = append(out, SessionInfo{
-			ID:        sess.ID,
-			CreatedAt: sess.CreatedAt,
-			UpdatedAt: sess.UpdatedAt,
-			Model:     sess.Model,
-			Turns:     sess.Turns,
-			ToolCalls: sess.ToolCalls,
-			ParentID:  sess.ParentID,
-		})
+		out = append(out, meta)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)

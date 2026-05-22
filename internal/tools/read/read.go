@@ -23,20 +23,18 @@ var schemaBytes = []byte(`{
   "type": "object",
   "properties": {
     "path":   {"type": "string", "description": "Absolute or repo-relative path to the file."},
-    "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1.", "minimum": 1},
-    "limit":  {"type": "integer", "description": "Max number of lines to return. Defaults to 20. Pass a larger value only when you know you need more.", "minimum": 1, "maximum": 5000}
+    "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1. Use with successive calls to page through a file.", "minimum": 1}
   },
   "required": ["path"],
   "additionalProperties": false
 }`)
 
-const description = "Read a file from the local filesystem (with 1-based line numbers), OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly. offset/limit only apply to file reads; they're ignored on directories."
+const description = "Read up to 20 lines from a file (with 1-based line numbers). Use offset to page through larger files. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
 
 // Args is the decoded argument struct for `read`.
 type Args struct {
 	Path   string `json:"path"`
 	Offset int    `json:"offset,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
 }
 
 // Tool is the read tool implementation. Construct via New.
@@ -48,30 +46,21 @@ func (Tool) Name() string                 { return "read" }
 func (Tool) Description() string          { return description }
 func (Tool) Schema() json.RawMessage      { return schemaBytes }
 
-const (
-	defaultLimit = 20
-	maxLimit     = 5000
-)
+const defaultLimit = 20
 
 func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset", "limit"); err != nil {
+	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset"); err != nil {
 		return "", err
 	}
 	if a.Path == "" {
-		return "", tools.MissingField("read", "path", raw, "path", "offset", "limit")
+		return "", tools.MissingField("read", "path", raw, "path", "offset")
 	}
 	if a.Offset < 0 {
 		return "", fmt.Errorf("read: offset must be >= 0")
 	}
 	if a.Offset == 0 {
 		a.Offset = 1
-	}
-	if a.Limit <= 0 {
-		a.Limit = defaultLimit
-	}
-	if a.Limit > maxLimit {
-		a.Limit = maxLimit
 	}
 
 	clean := filepath.Clean(a.Path)
@@ -112,7 +101,7 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 		if lineNo < a.Offset {
 			continue
 		}
-		if emitted >= a.Limit {
+		if emitted >= defaultLimit {
 			truncated = true
 			break
 		}

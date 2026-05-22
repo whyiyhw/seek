@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,27 +96,30 @@ func TestLatest_EmptyStoreReturnsNil(t *testing.T) {
 	}
 }
 
-func TestLatest_PicksMostRecent(t *testing.T) {
+func TestLatest_PicksMostRecentlyUpdated(t *testing.T) {
 	store := newStoreIn(t)
 
-	// Use fixed timestamps at least 1 second apart so the ID prefix is
-	// strictly ordered regardless of the random suffix.
 	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
-	a := &Session{ID: generateID(base), CreatedAt: base, UpdatedAt: base, Model: "m", SchemaVersion: CurrentSchemaVersion}
+	// a was created first AND updated most recently (simulates resuming an
+	// old session after creating newer ones). Use saveDirect to preserve
+	// the controlled UpdatedAt timestamps (Save calls Touch which would
+	// overwrite them with time.Now()).
+	a := &Session{ID: generateID(base), CreatedAt: base, UpdatedAt: base.Add(3 * time.Hour), Model: "m", SchemaVersion: CurrentSchemaVersion}
 	b := &Session{ID: generateID(base.Add(time.Hour)), CreatedAt: base.Add(time.Hour), UpdatedAt: base.Add(time.Hour), Model: "m", SchemaVersion: CurrentSchemaVersion}
 	c := &Session{ID: generateID(base.Add(2 * time.Hour)), CreatedAt: base.Add(2 * time.Hour), UpdatedAt: base.Add(2 * time.Hour), Model: "m", SchemaVersion: CurrentSchemaVersion}
 
-	mustSave(t, store, a)
-	mustSave(t, store, b)
-	mustSave(t, store, c)
+	saveDirect(t, store, a)
+	saveDirect(t, store, b)
+	saveDirect(t, store, c)
 
 	got, err := store.Latest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Latest uses ID lexicographic order (timestamp prefix), so c wins.
-	if got.ID != c.ID {
-		t.Errorf("got %s, want %s (latest by ID)", got.ID, c.ID)
+	// Latest must pick by UpdatedAt, not by creation order — a has the
+	// most recent UpdatedAt even though it was created first.
+	if got.ID != a.ID {
+		t.Errorf("got %s, want %s (latest by UpdatedAt)", got.ID, a.ID)
 	}
 }
 
@@ -335,6 +339,21 @@ func TestList_CollectsLoadErrors(t *testing.T) {
 func mustSave(t *testing.T, s *Store, sess *Session) {
 	t.Helper()
 	if err := s.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// saveDirect writes session JSON directly to the store directory without
+// calling Touch(), preserving controlled timestamps for tests that need
+// to set UpdatedAt to a specific value.
+func saveDirect(t *testing.T, s *Store, sess *Session) {
+	t.Helper()
+	data, err := json.MarshalIndent(sess, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Dir(), sess.ID+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }

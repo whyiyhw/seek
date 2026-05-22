@@ -34,21 +34,31 @@ func TestRead_Basic(t *testing.T) {
 	}
 }
 
-func TestRead_OffsetAndLimit(t *testing.T) {
+func TestRead_LimitParamRejected(t *testing.T) {
+	// limit is intentionally absent from the schema — the model must not
+	// be able to override the fixed 20-line window. UnmarshalStrict must
+	// reject any call that includes "limit".
+	p := writeFile(t, "line1\nline2\n")
+	args, _ := json.Marshal(map[string]any{"path": p, "limit": 100})
+	_, err := New().Execute(context.Background(), args)
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("expected unknown-field error for 'limit', got: %v", err)
+	}
+}
+
+func TestRead_OffsetNavigates(t *testing.T) {
+	// offset alone (no limit) must navigate a multi-page file correctly.
 	p := writeFile(t, "1\n2\n3\n4\n5\n")
-	args, _ := json.Marshal(map[string]any{"path": p, "offset": 2, "limit": 2})
+	args, _ := json.Marshal(map[string]any{"path": p, "offset": 3})
 	out, err := New().Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "     2\t2") || !strings.Contains(out, "     3\t3") {
-		t.Errorf("expected lines 2 and 3:\n%s", out)
+	if !strings.Contains(out, "     3\t3") || !strings.Contains(out, "     5\t5") {
+		t.Errorf("expected lines 3-5:\n%s", out)
 	}
-	if strings.Contains(out, "     4\t4") {
-		t.Errorf("limit not enforced:\n%s", out)
-	}
-	if !strings.Contains(out, "TRUNCATED") {
-		t.Errorf("expected truncation note:\n%s", out)
+	if strings.Contains(out, "     2\t2") {
+		t.Errorf("offset=3 should skip line 2:\n%s", out)
 	}
 }
 
