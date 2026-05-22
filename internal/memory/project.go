@@ -295,3 +295,60 @@ func (p *Project) Entries() []Entry {
 	}
 	return out
 }
+
+// ListProjects walks ~/.seek/projects/ and returns a read-only handle
+// for every subdirectory that contains a valid manifest.json. Unlike
+// LoadOrCreate this has NO side effects — no manifest LastSeen bump,
+// no .seek/project-id pointer write — so it's safe for `seek -dream`
+// to scan without disturbing the M-layer state.
+//
+// Subdirs without a parseable manifest are silently skipped (could be
+// half-written, foreign tool, or an in-progress migration). The
+// returned slice is sorted by ProjectID for deterministic iteration.
+func ListProjects() ([]*Project, error) {
+	root, err := paths.Projects()
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("memory: read projects: %w", err)
+	}
+	var out []*Project
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		id := e.Name()
+		if !isValidProjectID(id) {
+			continue
+		}
+		p, err := loadProjectReadOnly(filepath.Join(root, id))
+		if err != nil {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// loadProjectReadOnly reads a project's manifest + entries from disk
+// without creating or modifying anything. Used by ListProjects.
+// Returns os.ErrNotExist when the manifest is missing — callers
+// (currently just ListProjects) skip those.
+func loadProjectReadOnly(dir string) (*Project, error) {
+	p := &Project{Dir: dir, entries: map[string]Entry{}}
+	if err := p.loadManifest(); err != nil {
+		return nil, err
+	}
+	p.ID = p.Manifest.ProjectID
+	p.AbsPath = p.Manifest.AbsPath
+	if err := p.loadEntries(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}

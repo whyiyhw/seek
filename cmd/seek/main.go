@@ -119,6 +119,8 @@ func run() error {
 		upgradeForce  = flag.Bool("upgrade-force", false, "with -upgrade: proceed even when the current build is a dev build (overwrites local builds)")
 		upgradeDryRun = flag.Bool("upgrade-dry-run", false, "with -upgrade: download + verify checksum but do not replace the binary")
 		upgradeCheck  = flag.Bool("upgrade-check", false, "check for a newer release on GitHub and print the result; never modifies the binary")
+		dreamFlag     = flag.Bool("dream", false, "M→L distillation: scan project memory, print L-pending candidates without writing")
+		dreamWrite    = flag.Bool("dream-write", false, "with -dream: actually append the candidates to ~/.seek/soul.md's Pending section")
 	)
 	flag.Parse()
 
@@ -253,6 +255,17 @@ func run() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// -dream short-circuits before session / agent / TUI setup. Needs a
+	// DeepSeek client only (the reasoner call uses the Chat API);
+	// second-tier providers don't currently expose a non-streaming Chat
+	// on the llm.Provider interface, so -dream is DeepSeek-only for now.
+	if *dreamFlag {
+		if dsClient == nil {
+			return fmt.Errorf("-dream requires a DeepSeek API key (DEEPSEEK_API_KEY); set one or use --provider=deepseek explicitly")
+		}
+		return runDream(ctx, dsClient, *dreamWrite)
+	}
 
 	if *model == "" {
 		*model = modelDefault

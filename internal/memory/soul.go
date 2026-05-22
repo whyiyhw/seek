@@ -2,6 +2,7 @@ package memory
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -131,4 +132,45 @@ func (s *Soul) Save() error {
 		path = p
 	}
 	return atomicWrite(path, []byte(s.Raw))
+}
+
+// SetSections regenerates Raw from the given Stable + Pending section
+// bodies, bumps SchemaVersion + UpdatedAt, and updates the parsed
+// fields to match. Used by `seek -dream` to land new L-pending
+// candidates without trashing existing Stable.
+//
+// NOTE: this is a full re-render — any markdown content the user
+// inserted outside the two recognised sections (intro paragraphs,
+// hand-typed notes between Stable and Pending, extra `##` headers)
+// is LOST. v1 makes this trade because the alternative — surgical
+// in-place section edits that preserve arbitrary surrounding markdown —
+// is significantly harder to get right, and the file format is
+// documented as auto-managed.
+func (s *Soul) SetSections(stable, pending string) {
+	s.Stable = stable
+	s.Pending = pending
+	s.SchemaVersion = 1
+	s.UpdatedAt = time.Now().UTC()
+	s.Raw = renderSoul(s.SchemaVersion, s.UpdatedAt, stable, pending)
+}
+
+// renderSoul builds the on-disk markdown layout. Section headers match
+// what parseSoul / extractSoulSection expect (HasPrefix on "## Stable"
+// / "## Pending") so round-tripping (parse → SetSections → save → parse)
+// is invariant.
+func renderSoul(version int, updatedAt time.Time, stable, pending string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "---\nschema_version: %d\nupdated_at: %s\n---\n\n", version, updatedAt.Format(time.RFC3339))
+	sb.WriteString("# User profile\n\n")
+	sb.WriteString("## Stable\n\n")
+	if s := strings.TrimSpace(stable); s != "" {
+		sb.WriteString(s)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("## Pending\n\n")
+	if p := strings.TrimSpace(pending); p != "" {
+		sb.WriteString(p)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
