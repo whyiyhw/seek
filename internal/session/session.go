@@ -1,15 +1,27 @@
 // Package session persists seek conversations to disk so they can be
 // resumed across runs, branched, and summarised. One session = one
-// JSON file in ~/.config/seek/sessions/ (or $SEEK_SESSIONS_DIR if
+// JSONL file in ~/.config/seek/sessions/ (or $SEEK_SESSIONS_DIR if
 // overridden).
 //
-// Trade-offs:
+// File format (JSONL, one JSON object per line):
 //
-//   - JSON-per-session, not JSONL across all sessions. Atomic write
-//     (temp + rename) is simple; sessions are small (~MB at most).
-//   - Save on every TurnEnd. Cheap enough not to bother batching.
-//   - No locking. seek is single-user / single-process; concurrent
-//     writes to the same session ID would be a bug, not a use case.
+//	line 1:    session header — all metadata fields, no messages key
+//	line 2..N: one deepseek.Message per line, in order
+//
+// Benefits over a single JSON blob:
+//   - Append-friendly: new messages can be streamed without rewriting
+//     the header (future optimisation).
+//   - Partial-crash safety: a truncated write loses at most one message
+//     line; earlier lines are always valid.
+//   - grep/tail/jq friendly: standard ML dataset format.
+//
+// Legacy .json files (schema_version ≤ 1) are transparently loaded and
+// migrated on next Save.
+//
+// Trade-offs:
+//   - Save still rewrites the whole file atomically (temp + rename).
+//     True append optimisation is a follow-up; correctness first.
+//   - No locking. seek is single-user / single-process.
 package session
 
 import (
@@ -18,6 +30,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,14 +40,13 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// CurrentSchemaVersion is incremented whenever the on-disk JSON layout
-// changes in a backward-incompatible way. Sessions written before
-// versioning was added have SchemaVersion == 0 and are still valid.
-const CurrentSchemaVersion = 1
+// CurrentSchemaVersion is incremented whenever the on-disk layout
+// changes in a backward-incompatible way. JSONL format = version 2.
+const CurrentSchemaVersion = 2
 
-// Session is the on-disk representation of one conversation. All time
-// fields are UTC; SessionID is sortable by creation time so a simple
-// directory listing is already ordered.
+// Session is the in-memory (and on-disk) representation of one
+// conversation. All time fields are UTC; ID is sortable by creation
+// time so a directory listing is naturally ordered.
 type Session struct {
 	SchemaVersion int                `json:"schema_version"`
 	ID            string             `json:"id"`
@@ -44,12 +56,15 @@ type Session struct {
 	Yolo          bool               `json:"yolo"`
 	CWD           string             `json:"cwd"`
 	SystemPrompt  string             `json:"system_prompt,omitempty"`
-	Messages      []deepseek.Message `json:"messages"`
-	Turns         int                `json:"turns"`
-	ToolCalls     int                `json:"tool_calls"`
-	Usage         deepseek.Usage     `json:"usage"`
-	// ParentID is set for sessions created by /branch — points at the
-	// session this one was forked from.
+	// Messages is omitted from the JSONL header line and written as
+	// individual lines 2..N instead. omitempty ensures the key is
+	// absent from the header even when the slice is non-nil.
+	Messages  []deepseek.Message `json:"messages,omitempty"`
+	Turns     int                `json:"turns"`
+	ToolCalls int                `json:"tool_calls"`
+	Usage     deepseek.Usage     `json:"usage"`
+	// ParentID is set for sessions created by /branch or /compact —
+	// points at the session this one was forked from.
 	ParentID string `json:"parent_id,omitempty"`
 }
 
@@ -68,8 +83,8 @@ func New(model, cwd, systemPrompt string, yolo bool) *Session {
 	}
 }
 
-// generateID returns a sortable ID like "20260121-103045-a1b2c3":
-// timestamp + 6 hex chars. Lexical order = creation order.
+// generateID returns a sortable ID: "20260121-103045-a1b2c3"
+// (timestamp + 6 random hex chars). Lexical order == creation order.
 func generateID(t time.Time) string {
 	var rnd [3]byte
 	_, _ = rand.Read(rnd[:])
@@ -86,26 +101,18 @@ func (s *Session) Touch() { s.UpdatedAt = time.Now().UTC() }
 // needed).
 //
 // This exists because of a real-world failure mode: if seek was
-// interrupted (Esc, crash, ctx cancel) while the model was streaming
-// a tool_call, prior to the fix in pkg/agent/agent.go the assistant
+// interrupted while the model was streaming a tool_call, the assistant
 // message was persisted with tool_calls but no matching tool result
 // messages. Every subsequent API call then fails with "An assistant
 // message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'", leaving the user with a session
-// they can't continue without manual JSON surgery.
-//
-// Repair walks the history from the end and drops any trailing
-// assistant tool_calls message whose tool_call_ids aren't all
-// satisfied by tool messages later in the slice. The preceding user
-// message (if any) is kept so the user knows what they asked.
+// they can't continue without manual surgery.
 func (s *Session) Repair() int {
 	repaired, dropped := repairMessages(s.Messages)
 	s.Messages = repaired
 	return dropped
 }
 
-// repairMessages is the pure-function core of Repair, broken out so
-// it's testable without constructing a Session.
 func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int) {
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]
@@ -122,27 +129,19 @@ func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int)
 			}
 		}
 		if len(needed) == 0 {
-			// All tool_calls satisfied — this assistant message is
-			// well-formed. Stop scanning; anything before it is fine
-			// by API contract (earlier orphans would have broken the
-			// session long before now).
 			return msgs, 0
 		}
-		// Orphan: drop the assistant message and any partial tool
-		// messages that came after it (they're useless without the
-		// assistant header).
 		return msgs[:i], len(msgs) - i
 	}
 	return msgs, 0
 }
 
-// Fork returns a new Session that branches off s: fresh ID, ParentID
-// pointing at s, an independent copy of the message slice, and reset
-// counters/usage. Model / Yolo / CWD / SystemPrompt are inherited so
-// the branch picks up where the parent left off.
+// Fork returns a new Session branching off s: fresh ID, ParentID
+// pointing at s, independent copy of the message slice, reset
+// counters/usage. Model / Yolo / CWD / SystemPrompt are inherited.
 //
-// The parent is left untouched in memory; callers that want it on disk
-// at the fork point should Save it before forking.
+// The parent is untouched in memory; callers that want it on disk at
+// the fork point should Save it before calling Fork.
 func (s *Session) Fork() *Session {
 	now := time.Now().UTC()
 	msgs := make([]deepseek.Message, len(s.Messages))
@@ -166,15 +165,14 @@ func (s *Session) Fork() *Session {
 	}
 }
 
+// ---------- Store ----------
+
 // Store reads and writes Sessions to a directory.
-type Store struct {
-	dir string
-}
+type Store struct{ dir string }
 
 // NewStore returns a Store rooted at the seek sessions directory.
-// $SEEK_SESSIONS_DIR overrides the default $XDG_CONFIG_HOME/seek/sessions
-// (falling back to ~/.config/seek/sessions/). The directory is created
-// if missing.
+// $SEEK_SESSIONS_DIR overrides the default XDG/home path. The
+// directory is created if missing.
 func NewStore() (*Store, error) {
 	dir := os.Getenv("SEEK_SESSIONS_DIR")
 	if dir == "" {
@@ -190,8 +188,7 @@ func NewStore() (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
-// Dir returns the resolved storage directory (useful for error
-// messages and CLI display).
+// Dir returns the resolved storage directory.
 func (s *Store) Dir() string { return s.dir }
 
 func userConfigDir() (string, error) {
@@ -205,9 +202,10 @@ func userConfigDir() (string, error) {
 	return filepath.Join(home, ".config"), nil
 }
 
-// Save writes the session atomically: write to <id>.json.tmp, then
-// rename. On POSIX, rename is atomic — a concurrent reader either
-// sees the old version or the new one, never a partial file.
+// Save writes the session as JSONL atomically (write tmp, rename).
+//
+//	line 1:    session header (all fields except messages)
+//	line 2..N: one deepseek.Message per line
 func (s *Store) Save(sess *Session) error {
 	if sess == nil {
 		return errors.New("session: Save nil")
@@ -217,25 +215,46 @@ func (s *Store) Save(sess *Session) error {
 	}
 	sess.Touch()
 
-	data, err := json.MarshalIndent(sess, "", "  ")
-	if err != nil {
-		return fmt.Errorf("session: encode %s: %w", sess.ID, err)
-	}
-
-	final := filepath.Join(s.dir, sess.ID+".json")
+	final := filepath.Join(s.dir, sess.ID+".jsonl")
 	tmp := final + ".tmp"
 
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("session: write tmp: %w", err)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return fmt.Errorf("session: open tmp %s: %w", sess.ID, err)
+	}
+	enc := json.NewEncoder(f)
+
+	// Line 1: header — Session with Messages nil so omitempty drops it.
+	header := *sess
+	header.Messages = nil
+	if err := enc.Encode(&header); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("session: encode header %s: %w", sess.ID, err)
+	}
+
+	// Lines 2..N: messages.
+	for i := range sess.Messages {
+		if err := enc.Encode(&sess.Messages[i]); err != nil {
+			f.Close()
+			os.Remove(tmp)
+			return fmt.Errorf("session: encode message %d of %s: %w", i, sess.ID, err)
+		}
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("session: close tmp %s: %w", sess.ID, err)
 	}
 	if err := os.Rename(tmp, final); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("session: rename: %w", err)
+		os.Remove(tmp)
+		return fmt.Errorf("session: rename %s: %w", sess.ID, err)
 	}
 	return nil
 }
 
-// Load reads a session by ID.
+// Load reads a session by ID. Tries the new .jsonl format first; falls
+// back to the legacy .json format for sessions written by older builds.
 func (s *Store) Load(id string) (*Session, error) {
 	if id == "" {
 		return nil, errors.New("session: Load empty id")
@@ -243,8 +262,20 @@ func (s *Store) Load(id string) (*Session, error) {
 	if strings.ContainsAny(id, "/\\.") {
 		return nil, fmt.Errorf("session: invalid id %q", id)
 	}
-	path := filepath.Join(s.dir, id+".json")
-	data, err := os.ReadFile(path)
+
+	path := filepath.Join(s.dir, id+".jsonl")
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		return decodeJSONL(f, id)
+	}
+	if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("session: open %s.jsonl: %w", id, err)
+	}
+
+	// Legacy .json fallback.
+	legacyPath := filepath.Join(s.dir, id+".json")
+	data, err := os.ReadFile(legacyPath)
 	if err != nil {
 		return nil, fmt.Errorf("session: read %s: %w", id, err)
 	}
@@ -255,11 +286,26 @@ func (s *Store) Load(id string) (*Session, error) {
 	return &out, nil
 }
 
+// decodeJSONL decodes a JSONL session file: line 1 → header,
+// remaining lines → messages appended to header.Messages.
+func decodeJSONL(r io.Reader, id string) (*Session, error) {
+	dec := json.NewDecoder(r)
+	var sess Session
+	if err := dec.Decode(&sess); err != nil {
+		return nil, fmt.Errorf("session: decode header %s: %w", id, err)
+	}
+	for dec.More() {
+		var msg deepseek.Message
+		if err := dec.Decode(&msg); err != nil {
+			return nil, fmt.Errorf("session: decode message in %s: %w", id, err)
+		}
+		sess.Messages = append(sess.Messages, msg)
+	}
+	return &sess, nil
+}
+
 // Latest returns the session with the most-recent UpdatedAt, or nil
-// with a nil error when the store is empty. Used by --continue.
-//
-// Scans all session files via loadMeta (no message-body allocation) and
-// returns the one with the largest UpdatedAt. O(N) but cheap per file.
+// when the store is empty. Used by --continue.
 func (s *Store) Latest() (*Session, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -267,11 +313,7 @@ func (s *Store) Latest() (*Session, error) {
 	}
 	var bestID string
 	var bestAt time.Time
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(e.Name(), ".json")
+	for _, id := range collectIDs(entries) {
 		meta, err := s.loadMeta(id)
 		if err != nil {
 			continue
@@ -298,16 +340,101 @@ type SessionInfo struct {
 	ParentID  string
 }
 
-// loadMeta reads only the scalar metadata fields from a session file,
-// skipping the messages array. Avoids allocating the full message history
-// when only session info is needed (for List and Latest).
+// List returns metadata for every session in the store, newest first.
+// The second return value collects per-file load errors; the third is
+// a fatal error (e.g. ReadDir failed).
+func (s *Store) List() ([]SessionInfo, []error, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []SessionInfo
+	var errs []error
+	for _, id := range collectIDs(entries) {
+		meta, err := s.loadMeta(id)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		out = append(out, meta)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, errs, nil
+}
+
+// collectIDs returns the unique session IDs present in the directory.
+// .jsonl files take precedence over .json: if both exist for the same
+// ID only one entry is returned (using the .jsonl version).
+func collectIDs(entries []os.DirEntry) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	// First pass: .jsonl (canonical format).
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".jsonl")
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	// Second pass: legacy .json files not already covered by .jsonl.
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// loadMeta reads only the session header (line 1 for JSONL; incremental
+// parse for legacy JSON) without allocating the full message history.
 func (s *Store) loadMeta(id string) (SessionInfo, error) {
 	if strings.ContainsAny(id, "/\\.") {
 		return SessionInfo{}, fmt.Errorf("session: invalid id %q", id)
 	}
+
+	// Try JSONL: only decode line 1 — messages not loaded.
+	path := filepath.Join(s.dir, id+".jsonl")
+	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		var sess Session
+		if decErr := json.NewDecoder(f).Decode(&sess); decErr != nil {
+			return SessionInfo{}, fmt.Errorf("session: decode header %s: %w", id, decErr)
+		}
+		return SessionInfo{
+			ID:        sess.ID,
+			CreatedAt: sess.CreatedAt,
+			UpdatedAt: sess.UpdatedAt,
+			Model:     sess.Model,
+			Turns:     sess.Turns,
+			ToolCalls: sess.ToolCalls,
+			ParentID:  sess.ParentID,
+		}, nil
+	}
+	if !os.IsNotExist(err) {
+		return SessionInfo{}, fmt.Errorf("session: open %s.jsonl: %w", id, err)
+	}
+
+	// Legacy .json fallback: incremental parse skips messages array.
+	return s.loadMetaLegacyJSON(id)
+}
+
+// loadMetaLegacyJSON is the incremental-parser path for old .json
+// sessions. It skips the messages array without allocating it.
+func (s *Store) loadMetaLegacyJSON(id string) (SessionInfo, error) {
 	f, err := os.Open(filepath.Join(s.dir, id+".json"))
 	if err != nil {
-		return SessionInfo{}, fmt.Errorf("session: open %s: %w", id, err)
+		return SessionInfo{}, fmt.Errorf("session: open %s.json: %w", id, err)
 	}
 	defer f.Close()
 
@@ -338,8 +465,6 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		case "parent_id":
 			_ = dec.Decode(&info.ParentID)
 		default:
-			// Skip unknown / large fields (messages, system_prompt, etc.)
-			// without allocating Go objects for their content.
 			if err := skipJSONValue(dec); err != nil {
 				return info, err
 			}
@@ -349,8 +474,7 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 }
 
 // skipJSONValue advances the decoder past the next JSON value without
-// allocating any Go objects. Handles all JSON types including nested
-// objects and arrays.
+// allocating Go objects. Handles nested objects and arrays.
 func skipJSONValue(dec *json.Decoder) error {
 	tok, err := dec.Token()
 	if err != nil {
@@ -358,12 +482,10 @@ func skipJSONValue(dec *json.Decoder) error {
 	}
 	d, ok := tok.(json.Delim)
 	if !ok {
-		return nil // scalar: already consumed
+		return nil // scalar already consumed
 	}
-	var closing json.Delim
-	if d == '{' {
-		closing = '}'
-	} else {
+	closing := json.Delim('}')
+	if d == '[' {
 		closing = ']'
 	}
 	for dec.More() {
@@ -379,34 +501,4 @@ func skipJSONValue(dec *json.Decoder) error {
 		return fmt.Errorf("session: mismatched delimiters")
 	}
 	return nil
-}
-
-// List returns metadata for every session in the store, newest first.
-// The second return value collects per-file load errors so callers can
-// surface warnings without aborting the whole listing. The third return
-// value is a fatal error (e.g. ReadDir failed); in that case the other
-// two values are nil/empty.
-func (s *Store) List() ([]SessionInfo, []error, error) {
-	entries, err := os.ReadDir(s.dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	var out []SessionInfo
-	var errs []error
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(e.Name(), ".json")
-		meta, err := s.loadMeta(id)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		out = append(out, meta)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].UpdatedAt.After(out[j].UpdatedAt)
-	})
-	return out, errs, nil
 }

@@ -63,7 +63,7 @@ func TestSave_AtomicViaTempThenRename(t *testing.T) {
 	if err := store.Save(sess); err != nil {
 		t.Fatal(err)
 	}
-	tmp := filepath.Join(store.Dir(), sess.ID+".json.tmp")
+	tmp := filepath.Join(store.Dir(), sess.ID+".jsonl.tmp")
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
 		t.Errorf("tmp file left behind: err=%v", err)
 	}
@@ -136,6 +136,7 @@ func TestList_SortedByRecency(t *testing.T) {
 	if len(infos) != 3 {
 		t.Fatalf("got %d sessions, want 3", len(infos))
 	}
+
 	for i := 1; i < len(infos); i++ {
 		if infos[i].UpdatedAt.After(infos[i-1].UpdatedAt) {
 			t.Errorf("List not newest-first: %+v", infos)
