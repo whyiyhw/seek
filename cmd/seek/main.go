@@ -24,12 +24,14 @@ import (
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
+	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
@@ -300,6 +302,35 @@ func run() error {
 		fmt.Fprintln(os.Stderr, summary)
 	}
 
+	// memProject + activeSession are forward-declared so the Skill tool's
+	// stats EnvFn can read them by reference — both are set further
+	// down (memProject by memory.LoadOrCreate, activeSession by
+	// session.New / Store.Load). Until those run the env fn returns
+	// empty strings, which skillstats omits from the JSONL anyway.
+	var memProject *memory.Project
+	var activeSession *session.Session
+
+	// Wire the skill call-stats writer (PRD v2 §4.3). Failure to
+	// resolve the path is non-fatal — we just disable stats for this
+	// session rather than refusing to start.
+	var statsWriter *skillstats.Writer
+	if path, err := paths.UserSkillStats(); err == nil {
+		statsWriter = skillstats.New(path)
+	}
+	statsEnv := func() skilltool.Env {
+		env := skilltool.Env{
+			Model:    *model,
+			Provider: provLabel,
+		}
+		if activeSession != nil {
+			env.SessionID = activeSession.ID
+		}
+		if memProject != nil {
+			env.ProjectID = memProject.ID
+		}
+		return env
+	}
+
 	reg := tools.New().
 		Add(read.New()).
 		Add(grep.New()).
@@ -307,7 +338,7 @@ func run() error {
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
-		Add(skilltool.New(skills))
+		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv))
 
 	// DeepSeek-exclusive tools: FIM and Reasoner are only available
 	// when using the DeepSeek client directly.
@@ -352,7 +383,8 @@ func run() error {
 	// throwaway run" intent. Load failures are non-fatal: a broken
 	// or read-only ~/.seek/projects/ degrades the session (no memory
 	// injection, no recall, no remember) but should not block startup.
-	var memProject *memory.Project
+	// memProject is forward-declared above (the Skill stats env fn
+	// captures it by reference); only the assignment lives here.
 	var memSoul *memory.Soul
 	if !*noSave {
 		if proj, err := memory.LoadOrCreate(abs); err != nil {
@@ -381,8 +413,9 @@ func run() error {
 	}
 
 	// Build (or restore) the persistence session. -no-save makes
-	// activeSession nil so the TUI auto-save no-ops.
-	var activeSession *session.Session
+	// activeSession nil so the TUI auto-save no-ops. activeSession
+	// is forward-declared above (Skill stats env fn captures it);
+	// only the assignment lives here.
 	var initialMsgs []deepseek.Message
 	if !*noSave {
 		if loaded != nil {
