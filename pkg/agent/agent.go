@@ -36,8 +36,9 @@ type Config struct {
 	Model        string          // defaults to deepseek.ModelChat / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
-	MaxTurns  int // safety bound; defaults to 200
-	MaxTokens int // completion token cap per call; 0 → defaultMaxTokens
+	MaxTurns     int  // safety bound; defaults to 200
+	MaxTokens    int  // completion token cap per call; 0 → defaultMaxTokens
+	AutoContinue bool // if true, inject "continue" on text-only turns so the model resumes mid-task without user input
 
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
@@ -293,6 +294,13 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
 				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
+				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
+					a.messages = append(a.messages, deepseek.Message{
+						Role:    deepseek.RoleUser,
+						Content: "continue",
+					})
+					continue
+				}
 				break
 			}
 
