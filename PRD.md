@@ -1,6 +1,6 @@
 # seek PRD：DeepSeek-first Go Coding Agent Harness
 
-> 状态：v0.5（M0–M4 已交付，新增 M4.5 TUI 稳定化，与 Claude Code 对比校准）
+> 状态：v0.5（M0–M5 已交付，M6 二等 Provider 待启动）
 > 项目名：**`seek`**
 > 目标读者：项目发起人 / 早期贡献者
 > 架构参考：https://github.com/earendil-works/pi （TypeScript，MIT，~52K stars）；用户体验对标：Claude Code
@@ -11,7 +11,7 @@
 
 ## 现状（2026-05）
 
-已交付 M0 → M4 + 一轮 polish：约 6000 行 Go，13 个包，11 个测试包全绿，6 个内置工具，TUI 跑通真实 DeepSeek 端到端（缓存命中 70%+）。**剩余主要差距是 TUI 体验**——见 §1.7 的 Claude Code 对比，以及新加入的 **M4.5 TUI 稳定化** 里程碑。
+已交付 M0 → M5：约 8300 行 Go，23 个包，全测试绿（`-race` 三平台），7 个内置工具 + MCP bridge，会话持久化 / 分支 / 压缩 / JSONL 存储，Skill 加载，TUI 跑通真实 DeepSeek 端到端（缓存命中 70%+）。**下一步是 M6 二等 Provider**（Anthropic / OpenAI / Gemini）。
 
 ## 决策记录（已确认）
 
@@ -634,10 +634,10 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | **M3 Reasoner + 缓存** | `cache.Tracker` + `pricing` + `think` 工具（reasoner 基础） | ✅ `8264f52` |
 | **M4 TUI** | bubbletea；状态栏；slash 命令；reasoning 折叠；Markdown 渲染 | ✅ `9be599b` + polish |
 | **M4.5 TUI 稳定化** | inline 模式（§4.9）；Esc 中断（§4.11）；per-call 审批（§4.10）；slash 命令补全；↑/↓ prompt 历史；tool spinner + 计时；@ 路径补全；token 预算告警 | ✅ 全部交付（见 §5.1） |
-| **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | 🚧 进行中（见 §5.2） |
+| **M5 会话 + Skill + MCP** | 会话持久化 / `/branch` / `/compact`；Skill 加载（含 `.claude/skills/` 兼容）；MCP client；**双模型协作 skill**；edit 应用前 diff 预览 | ✅ 全部交付（见 §5.2） |
 | **M6 二等 Provider** | Anthropic / OpenAI / Gemini 通过 `pkg/llm`；`pkg/llm/compatible` 兼容端点；TUI 二等 banner | ⏳ 待启动（~2.5 周） |
 | **M7 打磨** | RPC / JSON 模式；多行 paste 折叠；主题；帮助 overlay；自举 + benchmark；文档 | ⏳ 待启动（~1 周） |
-| **v1.0 发布** | | ≈ 当前进度 + 6.5 周 |
+| **v1.0 发布** | | ≈ 当前进度 + 3.5 周 |
 | **Post-v1.0** | LSP 语义导航；并行工具调用；... | ⏳ 待规划 |
 
 ### 5.0.1 Post-v1.0 未来功能
@@ -682,9 +682,13 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成（待真 API 验证） | `dd1bcd0` |
 | `AGENTS.md` 自动加载（项目根向上 5 层，注入 system prompt，可 `--no-project-md` 关） | ✅ | `e8894ff` |
 | Esc 中断不再污染会话 + 加载时 `Repair` 修旧坏会话 + `thinking…` 占位 | ✅ | `986a485` |
-| `think` 工具流式化（`tools.StreamingTool` 接口 + `agent.ToolDelta` 事件） | ✅ | 本次 |
-| MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
-| `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
+| `think` 工具流式化（`tools.StreamingTool` 接口 + `agent.ToolDelta` 事件） | ✅ | `63d1f09` |
+| MCP client（JSON-RPC 2.0 over stdio；tools bridge；`~/.config/seek/mcp.json` 配置；名称冲突解决） | ✅ | `45c71af`, `398448e` |
+| `edit` 应用前 diff 预览（unified diff，per-call 审批配合） | ✅ | `74e1a61` |
+| `/compact` 保留完整历史（fork snapshot session，ParentID 链，summary 写子 session） | ✅ | `c3082ec` |
+| Session 存储改为 JSONL（header line + per-message lines；O(1) loadMeta；legacy .json 兼容回读） | ✅ | `c4dd8f4` |
+| 流式计时 + token 估算状态栏指示器（`● Ns · ↓~Xtok`） | ✅ | `7a08d8b` |
+| **总计** | **13 个功能 commit，全测试绿** | |
 
 ---
 
