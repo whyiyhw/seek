@@ -421,6 +421,16 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		Messages:  deepseek.StripReasoningContent(a.messages),
 		MaxTokens: a.cfg.MaxTokens,
 	}
+	// V4 shipped Thinking as a request parameter rather than a separate
+	// model id, but DeepSeek kept the old "deepseek-reasoner" alias
+	// alive and silently routes it to a V4 model. Without explicitly
+	// setting Thinking the alias falls back to a non-reasoning V4 (in
+	// practice V4-Flash), which is the bug users hit when they pick
+	// "reasoner" expecting CoT and get fast-chat behaviour. Opt
+	// reasoning models in here so the picker label matches reality.
+	if deepseek.ShouldEnableThinking(a.cfg.Model) {
+		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
+	}
 	if a.cfg.Tools != nil {
 		req.Tools = a.cfg.Tools.Wire()
 	}

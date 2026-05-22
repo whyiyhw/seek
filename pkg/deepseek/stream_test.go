@@ -136,6 +136,25 @@ func TestStripReasoningContent(t *testing.T) {
 	}
 }
 
+func TestShouldEnableThinking(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		{ModelV4Pro, true},
+		{ModelReasoner, true},
+		{ModelV4Flash, false},
+		{ModelChat, false},
+		{"", false},
+		{"some-future-custom-model", false},
+	}
+	for _, c := range cases {
+		if got := ShouldEnableThinking(c.model); got != c.want {
+			t.Errorf("ShouldEnableThinking(%q) = %v, want %v", c.model, got, c.want)
+		}
+	}
+}
+
 func TestUsage_HitRatio(t *testing.T) {
 	cases := []struct {
 		hit, miss int

@@ -23,10 +23,10 @@ type slowReadTool struct {
 	called  atomic.Int32
 }
 
-func (t *slowReadTool) Name() string                         { return "slow_read" }
-func (t *slowReadTool) Description() string                  { return "slow read" }
-func (t *slowReadTool) Schema() json.RawMessage              { return json.RawMessage(`{"type":"object"}`) }
-func (t *slowReadTool) ReadOnly() bool                       { return true }
+func (t *slowReadTool) Name() string            { return "slow_read" }
+func (t *slowReadTool) Description() string     { return "slow read" }
+func (t *slowReadTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t *slowReadTool) ReadOnly() bool          { return true }
 func (t *slowReadTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
 	t.called.Add(1)
 	select {
@@ -45,9 +45,9 @@ type stubTool struct {
 	reply  string
 }
 
-func (t *stubTool) Name() string                         { return t.name }
-func (t *stubTool) Description() string                  { return "test tool " + t.name }
-func (t *stubTool) Schema() json.RawMessage              { return json.RawMessage(t.schema) }
+func (t *stubTool) Name() string            { return t.name }
+func (t *stubTool) Description() string     { return "test tool " + t.name }
+func (t *stubTool) Schema() json.RawMessage { return json.RawMessage(t.schema) }
 func (t *stubTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	s := string(raw)
 	t.gotArg.Store(&s)
@@ -247,6 +247,56 @@ func TestAgent_NoTools_StraightAnswer(t *testing.T) {
 	}
 	if end.Turns != 1 || end.ToolCalls != 0 {
 		t.Errorf("Turns=%d ToolCalls=%d", end.Turns, end.ToolCalls)
+	}
+}
+
+// TestAgent_ThinkingParamForReasoningModels verifies the agent sends
+// {"thinking":{"type":"enabled"}} for reasoning models and omits it
+// for fast-chat models. This is the wire-level pin for the V4 routing
+// fix — without it, deepseek-reasoner silently falls back to V4-Flash
+// (the bug that motivated pkg/deepseek.ShouldEnableThinking).
+func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
+	cases := []struct {
+		model       string
+		wantEnabled bool
+	}{
+		{deepseek.ModelReasoner, true},
+		{deepseek.ModelV4Pro, true},
+		{deepseek.ModelV4Flash, false},
+		{deepseek.ModelChat, false},
+	}
+	for _, c := range cases {
+		t.Run(c.model, func(t *testing.T) {
+			var captured struct {
+				Thinking *deepseek.ThinkingMode `json:"thinking"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&captured)
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, strings.Join([]string{
+					`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+					``,
+					`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					``,
+					`data: [DONE]`,
+					``,
+				}, "\n"))
+			}))
+			defer srv.Close()
+
+			ag, _ := New(Config{
+				Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+				Model:  c.model,
+			})
+			for range ag.Prompt(context.Background(), "hi") {
+			}
+
+			gotEnabled := captured.Thinking != nil && captured.Thinking.Type == "enabled"
+			if gotEnabled != c.wantEnabled {
+				t.Errorf("model=%s: thinking enabled = %v (raw=%+v), want %v",
+					c.model, gotEnabled, captured.Thinking, c.wantEnabled)
+			}
+		})
 	}
 }
 

@@ -107,6 +107,21 @@ type ThinkingMode struct {
 	Type string `json:"type"` // "enabled" | "disabled"
 }
 
+// ShouldEnableThinking reports whether the given model name is a
+// reasoning model that should implicitly receive Thinking.Type="enabled"
+// when the agent constructs a ChatRequest. Returns true for the V4-Pro
+// reasoning model and the legacy "deepseek-reasoner" alias (which the
+// TUI surfaces as Thinking-enabled). Returns false for fast-chat models
+// (deepseek-v4-flash, deepseek-chat) and unknown custom names — those
+// callers must opt in explicitly via ChatRequest.Thinking.
+func ShouldEnableThinking(model string) bool {
+	switch model {
+	case ModelV4Pro, ModelReasoner:
+		return true
+	}
+	return false
+}
+
 type StreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }

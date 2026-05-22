@@ -158,6 +158,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: never rely on a "respond with JSON only" instruction alone, especially for reasoner-class models. Build the tolerant parser the moment you wire the first reasoner call; the fence wrap and prose preamble WILL show up
 - **Refs**: `internal/memory/distill.go`, `internal/memory/dream.go`
 
+### `deepseek-reasoner` without `Thinking` parameter silently behaves like fast-chat
+- **Saw**: picking `deepseek-reasoner` produced fast-chat output — no chain-of-thought, no `reasoning_content` field in responses despite the model id selecting the reasoner
+- **Why**: V4 made thinking a request-level parameter (`Thinking.Type="enabled"`) rather than a separate model id. DeepSeek kept the legacy `deepseek-reasoner` alias alive for backwards compat but it silently routes to a V4 fast-chat backend unless the request also sets `Thinking`. Same behaviour for `deepseek-v4-pro` — Thinking is opt-in, not implicit
+- **Fix**: `pkg/deepseek.ShouldEnableThinking(model)` is the canonical "is this a reasoning model" predicate (currently `ModelV4Pro` + `ModelReasoner`). `pkg/agent.runTurnDeepSeek` consults it and sets `req.Thinking = &ThinkingMode{Type: "enabled"}` for those models; fast-chat models stay opt-out by default
+- **Lesson**: backward-compat aliases that route through a parameterised backend can change semantics silently. When a provider exposes the same feature as both "model id" AND "request parameter", normalise to one shape at the boundary — don't let the alias's old name promise behaviour the new shape doesn't deliver by default
+- **Refs**: `pkg/deepseek/types.go:ShouldEnableThinking`, `pkg/agent/agent.go:runTurnDeepSeek`
+
 ### PrePromptHook output must be byte-stable across runs or prefix-cache collapses
 - **Saw**: while testing the M-index injection (M5.2), early implementations iterated over `map[string]Entry` directly. Two consecutive sessions with identical on-disk M produced *different* injected bytes (map iteration order in Go is randomised per-process) and `prompt_cache_hit_tokens` dropped to near-zero on the second turn
 - **Why**: DeepSeek's prefix cache keys on the exact byte sequence of the prompt history. Decorator hooks (PrePromptHook) sit BEFORE the cache lookup — their output becomes part of the prefix. If the bytes vary across runs at the same logical state, every Prompt is a cache miss on every old message
