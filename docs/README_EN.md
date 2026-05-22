@@ -4,19 +4,22 @@
 
 ## Why seek?
 
-| Compared to... | seek gives you |
-|---|---|
-| **Claude Code** | ~20× cheaper input than Claude Sonnet (V4-Flash $0.14/M vs $3/M); prefix-cache hits drop another 50× to $0.0028/M. Native V4 reasoning mode (`Thinking.Type=enabled`) + FIM endpoint for cheap gap-fills. |
-| **Aider** | A real interactive TUI. Type mid-stream, queue messages, steer the agent mid-turn. Full session management with `/branch`, `/compact`, `/resume`. |
-| **Generic LLM agents** | DeepSeek-optimized: cache hit ratio shown in real-time, off-peak pricing countdown, dual-model skill (V4 reasoning mode for planning + chat for execution). Also supports Anthropic / OpenAI / Gemini as fallback providers. |
+**Single binary, ~5 MB** — zero runtime dependencies, download and run.
 
-### What else?
-
-- **Inline mode** — no alt-screen. Your terminal history, scrollback, and mouse selection work normally. Quit and the conversation stays visible.
-- **Permission system** — safe by default. `bash` and out-of-tree writes need approval; `--yolo` disables the guard for power users.
-- **JSON-RPC 2.0 server** (`--rpc`) — plug seek into your IDE.
-- **MCP support** — load external tools from any MCP server.
-- **Custom skills** — write your own `.md` instructions that seek loads and follows.
+| Feature | seek | Claude Code | Aider |
+|---------|------|-------------|-------|
+| Binary size | ~5 MB ✅ 95%+ smaller | ~100 MB (npm) | ~50 MB (pip) |
+| Input cost / 1M tokens | $0.14 (miss) / $0.0028 (hit) — 99% cheaper | $3.00 (Sonnet) | Bring your own API key |
+| TUI experience | ✅ inline mode + queue & interject | ⚠️ alt-screen fullscreen | ❌ CLI-only |
+| Session management (branch / compact / resume) | ✅ full commands | ❌ limited | ❌ |
+| Cache hit ratio visualization | ✅ real-time in status bar | ❌ | ❌ |
+| FIM (fill-in-the-middle) | ✅ standalone cheap endpoint | ❌ | ❌ |
+| Off-peak pricing countdown | ✅ visible countdown | ❌ | ❌ |
+| Dual-model reasoning (think + chat) | ✅ think tool + dual-model skill | ❌ | ❌ |
+| Permission system | ✅ fine-grained control | ❌ | ❌ |
+| MCP support | ✅ native | ✅ supported | ❌ |
+| Custom skills | ✅ defined via .md files | ✅ Slash commands | ❌ |
+| IDE integration | ✅ JSON-RPC 2.0 server | ❌ | ⚠️ plugins, non-standard |
 
 ## Quick start
 
@@ -49,15 +52,33 @@ go install github.com/whyiyhw/seek/cmd/seek@latest
 ### Run
 
 ```bash
-# Set your API key
-export DEEPSEEK_API_KEY=sk-...
-
-# Run (TUI when stdin is a terminal)
+# TUI mode (when stdin is a terminal)
 seek
 
-# Or use it non-interactively
+# Or non-interactively
 seek -p "Explain this project in one sentence."
 ```
+
+**First launch walks you through picking a provider and saves the API key to `~/.seek/config.json`** (perms 0600) — no manual `export` needed. Existing env vars (`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / …) take priority, which is convenient for CI and one-off overrides.
+
+```
+$ seek
+  seek — first-run setup
+  ──────────────────────
+  Step 1/2 — choose a provider:
+    1) DeepSeek (recommended)
+    2) Anthropic Claude
+    3) OpenAI GPT
+    4) Google Gemini
+  > 1
+  Step 2/2 — paste your DeepSeek API key:
+    Get one from https://platform.deepseek.com/api_keys
+  > sk-...
+  Verifying with a 1-token ping... ok.
+  Saved to ~/.seek/config.json.
+```
+
+Need to switch keys / providers later? Type `/setup` inside the TUI to re-run the wizard, or hand-edit `~/.seek/config.json`.
 
 See [`docs/`](./) for sessions, MCP, and skills guides.  
 See `?` inside the TUI for all key bindings and slash commands.

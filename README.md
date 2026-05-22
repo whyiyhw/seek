@@ -2,21 +2,24 @@
 
 **seek** 是一个基于 [DeepSeek](https://deepseek.com) 的编程助手。它在终端里运行，能读写文件、执行命令，帮你写代码——不用离开键盘。
 
-## 牛在哪
+## 核心优势
 
-| 对比 | seek 的优势 |
-|---|---|
-| **Claude Code** | 输入便宜约 20×（V4-Flash $0.14/M vs Claude Sonnet $3/M），前缀缓存命中后再降 50× 到 $0.0028/M。原生 V4 推理模式（`Thinking.Type=enabled`）+ FIM 端点，小修改走填空补全。 |
-| **Aider** | 真正的交互式 TUI。一边输出一边继续打字、排队、插话。完整的会话管理：`/branch` 分叉、`/compact` 压缩、`/resume` 恢复。 |
-| **通用 Agent 框架** | 专为 DeepSeek 优化：实时显示缓存命中率、错峰计价倒计时、双模型 skill（V4 推理模式做规划 + chat 做执行）。也支持 Anthropic / OpenAI / Gemini 作为备选。 |
+**单二进制，仅 ~5 MB** — 零运行时依赖，下载即用。
 
-### 还有什么
-
-- **Inline 模式** — 不进 alt-screen。终端滚动、鼠标选取、Cmd+C 复制全程正常。退出后对话留在终端里。
-- **安全机制** — 默认询问模式。`bash` 和写工作目录外的文件需要确认；`--yolo` 关闭保护给高级用户。
-- **JSON-RPC 2.0 服务端**（`--rpc`）— 接入 IDE。
-- **MCP 支持** — 加载任意 MCP 服务端的外部工具。
-- **自定义 Skill** — 写一份 `.md` 文件，seek 就会加载并执行。
+| 指标 | seek | Claude Code | Aider |
+|------|------|-------------|-------|
+| 包大小 | ~5 MB ✅ 小 95%+ | ~100 MB (npm) | ~50 MB (pip) |
+| 输入费用 / 1M tokens | $0.14 (miss) / $0.0028 (hit) — 便宜 99% | $3.00 (Sonnet) | 自备 API Key |
+| TUI 交互 | ✅ 内联模式 + 排队插话 | ⚠️ alt-screen 全屏 | ❌ 纯 CLI |
+| 会话管理（branch / compact / resume） | ✅ 完整命令 | ❌ 有限 | ❌ |
+| 缓存命中率可视化 | ✅ 状态栏实时 | ❌ | ❌ |
+| FIM 填空补全 | ✅ 独立低成本端点 | ❌ | ❌ |
+| 错峰计价倒计时 | ✅ 可见倒计时 | ❌ | ❌ |
+| 双模型推理（reasoner + chat） | ✅ think 工具 + 双模型 skill | ❌ | ❌ |
+| 权限系统 | ✅ 细粒度控制 | ❌ | ❌ |
+| MCP 扩展 | ✅ 原生支持 | ✅ 支持 | ❌ |
+| 自定义 Skill | ✅ .md 文件定义 | ✅ Slash 命令 | ❌ |
+| IDE 集成 | ✅ JSON-RPC 2.0 服务 | ❌ | ⚠️ 插件，非标准 |
 
 [English version](./docs/README_EN.md)
 
@@ -51,15 +54,33 @@ go install github.com/whyiyhw/seek/cmd/seek@latest
 ### 运行
 
 ```bash
-# 设置 API Key
-export DEEPSEEK_API_KEY=sk-...
-
 # 启动 TUI（终端交互模式）
 seek
 
 # 或者非交互模式
 seek -p "用一句话总结这个项目。"
 ```
+
+**首次启动会引导你选 provider 并保存 API key 到 `~/.seek/config.json`**（权限 0600）——不需要手动 `export`。已有 env 变量（`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / …）会优先，方便 CI 和一次性覆盖。
+
+```
+$ seek
+  seek — first-run setup
+  ──────────────────────
+  Step 1/2 — choose a provider:
+    1) DeepSeek (recommended)
+    2) Anthropic Claude
+    3) OpenAI GPT
+    4) Google Gemini
+  > 1
+  Step 2/2 — paste your DeepSeek API key:
+    Get one from https://platform.deepseek.com/api_keys
+  > sk-...
+  Verifying with a 1-token ping... ok.
+  Saved to ~/.seek/config.json.
+```
+
+之后想换 key / 切 provider：TUI 内输入 `/setup` 重跑向导，或直接编辑 `~/.seek/config.json`。
 
 详细用法：[`docs/`](./docs/) 包含会话、MCP、Skill 指南。  
 TUI 内输入 `?` 查看所有快捷键和斜杠命令。

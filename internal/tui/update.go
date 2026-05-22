@@ -306,10 +306,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
 			// the next Esc within the same race window double-cancels.
+			return m, nil
+		}
+		// Esc in setup key-entry mode cancels the wizard without saving.
+		// Checked AFTER the streaming branch above so an in-flight
+		// stream isn't accidentally bypassed.
+		if m.setupKeyEntry {
+			cmd := m.cancelSetup()
+			return m, cmd
 		}
 		return m, nil
 
 	case tea.KeyEnter:
+		// Setup key-entry mode: Enter saves the typed key to config
+		// and exits setup. Comes BEFORE the streaming branch because
+		// /setup can't be opened while streaming (slash menu is
+		// closed during streams), so there's no ambiguity.
+		if m.setupKeyEntry {
+			key := strings.TrimSpace(m.input.Value())
+			m.input.Reset()
+			cmd := m.finishSetup(key)
+			return m, cmd
+		}
 		// Streaming branch: Enter = queue, Alt+Enter = steer.
 		// (Ctrl+Enter and Ctrl+J retain their textarea-newline behaviour
 		// because the textarea sees those events directly via its own

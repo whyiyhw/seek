@@ -131,6 +131,16 @@ func (m Model) View() string {
 		}
 	}
 
+	// Setup key-entry banner — same slot as the queue hint (mutually
+	// exclusive: /setup can't be opened mid-stream so we never need
+	// both at once).
+	if m.setupKeyEntry {
+		sb.WriteString(styleMuted.Render(fmt.Sprintf(
+			"✎ paste API key for %s — Enter to save, Esc to cancel",
+			m.setupProvider)))
+		sb.WriteString("\n")
+	}
+
 	// Input area FIRST (above any dropdown) — autocomplete popups
 	// attach BELOW the input, matching IDE / shell completer
 	// convention. With dropdowns above the input we were visually

@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
@@ -47,6 +48,7 @@ func allCommands() []command {
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
+		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
 	}
@@ -223,33 +225,122 @@ func cmdModel(m *Model, args string) cmdResult {
 	return cmdResult{}
 }
 
-// applyModelChoice switches to the selected model. Called from
-// handleKey's modelPicker branch on Tab / Enter accept.
+// applyModelChoice consumes the picker selection. Called from
+// handleKey's modelPicker branch on Tab / Enter accept; branches on
+// m.pickerPurpose because two flows share the same picker UI.
 func (m *Model) applyModelChoice(idx int) {
 	if idx < 0 || idx >= len(m.modelPickerFiltered) {
 		return
 	}
 	choice := m.modelPickerFiltered[idx]
-	prev := m.opts.Model
-	m.opts.Model = choice.id
-	if m.opts.SetModel != nil {
-		m.opts.SetModel(choice.id)
-	}
+	purpose := m.pickerPurpose
+
+	// Always close the picker before branching — both flows finish with
+	// the dropdown gone.
 	m.modelPickerOpen = false
 	m.modelPickerFiltered = nil
 	m.modelPickerSelected = 0
-	if prev != choice.id {
-		// Surface the transition to scrollback the same way cmdModel
-		// did before — users want a record that the switch took.
-		// (View() doesn't have a Println channel, so we stash a
-		// muted line in lastErr's neighbour: the next View frame
-		// won't show it, but the agent footer at AgentEnd will be
-		// labelled with the new model anyway. For an explicit
-		// inline notice we'd need a tea.Println path — left as a
-		// follow-up; the status bar's "model:" segment updates
-		// immediately so the change is visible.)
-		_ = prev
+	m.pickerPurpose = ""
+
+	switch purpose {
+	case "setup-provider":
+		// Selected a provider for /setup — move into key-entry mode.
+		// The textarea now collects the API key; Enter saves, Esc
+		// cancels (handled in handleKey).
+		m.setupProvider = choice.id
+		m.setupKeyEntry = true
+		m.input.Reset()
+
+	case "model", "":
+		// Switch the active model. Status bar's "model:" segment
+		// updates on the next View() frame; an explicit Println would
+		// require a tea.Cmd return — left for follow-up.
+		m.opts.Model = choice.id
+		if m.opts.SetModel != nil {
+			m.opts.SetModel(choice.id)
+		}
 	}
+}
+
+// setupProviderChoices returns the provider list shown by /setup. We
+// pull it from cmd/seek's wizard table indirectly — but tui can't
+// import cmd/seek, so this list lives here and stays in sync via
+// code review. The four provider names match config.KeyFor's
+// canonical IDs.
+func setupProviderChoices() []modelChoice {
+	return []modelChoice{
+		{"deepseek", "DeepSeek — full feature set (recommended)"},
+		{"anthropic", "Anthropic Claude"},
+		{"openai", "OpenAI GPT"},
+		{"gemini", "Google Gemini"},
+	}
+}
+
+func cmdSetup(m *Model, _ string) cmdResult {
+	// Open the picker pre-loaded with provider choices and tagged
+	// with the setup purpose so applyModelChoice routes correctly.
+	m.modelPickerFiltered = setupProviderChoices()
+	m.modelPickerSelected = 0
+	// Preselect the currently-active provider when we can identify
+	// it. m.opts.ProviderName is non-empty only for second-tier
+	// providers; empty string means DeepSeek.
+	want := strings.ToLower(m.opts.ProviderName)
+	if want == "" {
+		want = "deepseek"
+	}
+	for i, p := range m.modelPickerFiltered {
+		if p.id == want {
+			m.modelPickerSelected = i
+			break
+		}
+	}
+	m.modelPickerOpen = true
+	m.pickerPurpose = "setup-provider"
+	return cmdResult{text: styleMuted.Render("setup: choose a provider (Tab/Enter to accept · Esc to cancel)")}
+}
+
+// finishSetup is called by handleKey when the user presses Enter on
+// the key-entry textarea. Saves the key to ~/.seek/config.json (perms
+// 0600) and clears setup state. Returns a Println for the scrollback.
+//
+// Errors surface as muted/error text via the returned tea.Cmd. Verify
+// step is deliberately skipped here (the standalone wizard validates
+// with a ping; doing the same here would need a tea.Cmd and async
+// state — a follow-up if real users find post-setup typo'd keys
+// painful enough).
+func (m *Model) finishSetup(key string) tea.Cmd {
+	provider := m.setupProvider
+	m.setupKeyEntry = false
+	m.setupProvider = ""
+
+	if key == "" {
+		return tea.Println(styleMuted.Render("  setup: empty key — cancelled."))
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return tea.Println(styleErr.Render("  setup: load config: " + err.Error()))
+	}
+	config.SetKey(&cfg, provider, key)
+	if cfg.DefaultProvider == "" {
+		cfg.DefaultProvider = provider
+	}
+	if err := config.Save(cfg); err != nil {
+		return tea.Println(styleErr.Render("  setup: save: " + err.Error()))
+	}
+	path, _ := config.Path()
+	return tea.Println(styleMuted.Render(fmt.Sprintf(
+		"  setup: saved %s key to %s — restart seek or /new to apply",
+		provider, path)))
+}
+
+// cancelSetup clears in-flight setup state without saving. Called
+// by handleKey when Esc is pressed in key-entry mode.
+func (m *Model) cancelSetup() tea.Cmd {
+	m.setupKeyEntry = false
+	m.setupProvider = ""
+	m.input.Reset()
+	return tea.Println(styleMuted.Render("  setup: cancelled (no changes)"))
 }
 
 func cmdYolo(m *Model, _ string) cmdResult {

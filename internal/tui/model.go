@@ -167,12 +167,27 @@ type Model struct {
 	commandMenuFiltered []command
 	commandMenuSelected int
 
-	// modelPickerOpen / etc. drive the /model dropdown — same UI shape
-	// as the slash-command menu but scoped to model IDs of the current
-	// provider. Opened by `/model` (no args); accepts via Tab or Enter.
+	// modelPickerOpen / etc. drive the dropdown that /model and /setup
+	// share — same UI shape as the slash-command menu but scoped to
+	// "pick one ID from a curated list". Two purposes use it today:
+	//
+	//   ""              → unused / closed
+	//   "model"         → /model: candidates are model IDs of the
+	//                     active provider, accept switches the model
+	//   "setup-provider"→ /setup: candidates are providers, accept
+	//                     moves the flow into key-entry mode
+	//
+	// The purpose discriminates applyModelChoice's branch.
 	modelPickerOpen     bool
 	modelPickerFiltered []modelChoice
 	modelPickerSelected int
+	pickerPurpose       string
+
+	// Setup flow state — entered via /setup. setupKeyEntry == true
+	// means the textarea is currently collecting an API key for
+	// setupProvider; Enter saves to ~/.seek/config.json, Esc cancels.
+	setupKeyEntry bool
+	setupProvider string
 
 	// pendingApproval, when non-nil, means the agent goroutine is
 	// blocked on a permission decision and the TUI is showing an

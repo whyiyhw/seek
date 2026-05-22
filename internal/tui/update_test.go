@@ -369,6 +369,120 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	}
 }
 
+func TestCmdSetup_OpensProviderPicker(t *testing.T) {
+	// /setup should open the picker pre-loaded with the four known
+	// providers and tagged with the setup purpose so accept routes
+	// correctly. emptyModel has ProviderName="" → DeepSeek preselected.
+	m := emptyModel()
+	res := cmdSetup(m, "")
+
+	if !m.modelPickerOpen {
+		t.Fatal("/setup should open the picker")
+	}
+	if m.pickerPurpose != "setup-provider" {
+		t.Errorf("pickerPurpose = %q, want 'setup-provider'", m.pickerPurpose)
+	}
+	if len(m.modelPickerFiltered) != 4 {
+		t.Errorf("expected 4 provider choices, got %d", len(m.modelPickerFiltered))
+	}
+	// DeepSeek should be preselected (provider id of "" defaults to DeepSeek).
+	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek" {
+		t.Errorf("expected DeepSeek preselected, got %q",
+			m.modelPickerFiltered[m.modelPickerSelected].id)
+	}
+	if res.text == "" {
+		t.Error("setup should print an intro line so the user sees why textarea changed")
+	}
+}
+
+func TestApplyModelChoice_RoutesByPurpose(t *testing.T) {
+	// Verify the picker dispatcher splits "model" vs "setup-provider":
+	// model purpose → updates m.opts.Model; setup purpose → enters
+	// key-entry mode without touching m.opts.Model.
+	tests := []struct {
+		name              string
+		purpose           string
+		wantModelChanged  bool
+		wantKeyEntry      bool
+		wantSetupProvider string
+	}{
+		{"model_purpose_switches_model", "model", true, false, ""},
+		{"setup_purpose_enters_key_entry", "setup-provider", false, true, "anthropic"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := emptyModel()
+			m.opts.Model = "deepseek-chat"
+			m.modelPickerOpen = true
+			m.pickerPurpose = tc.purpose
+			m.modelPickerFiltered = []modelChoice{
+				{"anthropic", "Anthropic Claude"},
+			}
+			m.modelPickerSelected = 0
+
+			m.applyModelChoice(0)
+
+			if m.modelPickerOpen {
+				t.Error("picker should close after accept")
+			}
+			if m.pickerPurpose != "" {
+				t.Errorf("purpose should clear, got %q", m.pickerPurpose)
+			}
+			modelChanged := m.opts.Model != "deepseek-chat"
+			if modelChanged != tc.wantModelChanged {
+				t.Errorf("modelChanged = %v, want %v (now %q)", modelChanged, tc.wantModelChanged, m.opts.Model)
+			}
+			if m.setupKeyEntry != tc.wantKeyEntry {
+				t.Errorf("setupKeyEntry = %v, want %v", m.setupKeyEntry, tc.wantKeyEntry)
+			}
+			if m.setupProvider != tc.wantSetupProvider {
+				t.Errorf("setupProvider = %q, want %q", m.setupProvider, tc.wantSetupProvider)
+			}
+		})
+	}
+}
+
+func TestHandleKey_SetupKeyEntry_EscCancels(t *testing.T) {
+	// Esc during key entry should clear the wizard state without
+	// hitting Store.Save (no config file written).
+	m := emptyModel()
+	m.setupKeyEntry = true
+	m.setupProvider = "anthropic"
+	m.input.SetValue("sk-ant-partial")
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if m2.setupKeyEntry {
+		t.Error("Esc should exit key-entry mode")
+	}
+	if m2.setupProvider != "" {
+		t.Errorf("setupProvider should clear, got %q", m2.setupProvider)
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be reset on cancel, got %q", m2.input.Value())
+	}
+}
+
+func TestHandleKey_SetupKeyEntry_EnterEmptyDoesNotSave(t *testing.T) {
+	// Pressing Enter with an empty key shouldn't save garbage to
+	// config — finishSetup returns a "cancelled" Println and clears
+	// state. We verify state-clear here; config side-effect-absence
+	// is covered structurally (empty key short-circuits before Save).
+	m := emptyModel()
+	m.setupKeyEntry = true
+	m.setupProvider = "deepseek"
+	m.input.SetValue("   ") // whitespace-only — trimmed to empty
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.setupKeyEntry {
+		t.Error("Enter should exit key-entry mode even when key is empty")
+	}
+}
+
 func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	// Esc closes the picker WITHOUT switching the model.
 	m := Model{input: textarea.New()}
