@@ -8,6 +8,8 @@
 ████  █████ █████ █   █
 ```
 
+**Languages**: [中文](../README.md) · English
+
 **seek** is a coding agent powered by [DeepSeek](https://deepseek.com). It runs in your terminal, reads/writes files, executes commands, and helps you get work done — without leaving your keyboard.
 
 **Open source (MIT) · no region lock · no telemetry · welcome from anywhere in the world**. All you need is an API key from one LLM provider — DeepSeek is the primary target, Anthropic / OpenAI / Gemini also supported.

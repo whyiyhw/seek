@@ -8,6 +8,8 @@
 ████  █████ █████ █   █
 ```
 
+**Languages**: 中文 · [English](./docs/README_EN.md)
+
 **seek** 是一个基于 [DeepSeek](https://deepseek.com) 的编程助手。它在终端里运行，能读写文件、执行命令，帮你写代码——不用离开键盘。
 
 **开源 (MIT) · 无地区限制 · 不收 telemetry · 欢迎全球用户**。你只需要一个 LLM provider 的 API key（DeepSeek 主力，也支持 Anthropic / OpenAI / Gemini）。
@@ -47,8 +49,6 @@ DeepSeek V4-Flash 的输入价格（来自 `internal/pricing/pricing.go`）：
 ### 通用能力（持平，非差异化）
 
 下面这些 Claude Code / Cursor / Codex CLI 也有，列出来只是说明 seek 不缺：MCP 服务端接入、自定义 skill (`.md` + frontmatter)、会话持久化 / 分叉 (`/branch`) / 压缩 (`/compact`)、文件系统权限系统（默认询问 / `--yolo` 跳过 / 路径白名单）、JSON-RPC 2.0 服务模式（IDE 接入）、多 LLM provider（Anthropic / OpenAI / Gemini / OpenAI 兼容端点）。
-
-[English version](./docs/README_EN.md)
 
 ## 快速上手
 
