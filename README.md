@@ -22,10 +22,35 @@
 
 ## 快速上手
 
-```bash
-# 安装
-go install github.com/whyiyhw/seek/cmd/seek@latest
+### 安装
 
+**方式 1：预编译二进制（推荐，无需 Go 环境）**
+
+macOS / Linux 一键下载最新 release：
+
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+VER=$(curl -fsSL https://api.github.com/repos/whyiyhw/seek/releases/latest | sed -nE 's/.*"tag_name":[[:space:]]*"v([^"]+)".*/\1/p')
+curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER}_${OS}_${ARCH}.tar.gz" \
+  | sudo tar -xz -C /usr/local/bin seek
+```
+
+不想用 `sudo`？换成你 PATH 里能写入的路径，比如 `tar -xz -C ~/.local/bin seek`。后续 `seek -upgrade` 会就地原子替换，再也不用走 curl 那一行。
+
+Windows：从 [Releases 页面](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压即用。
+
+> **macOS 浏览器下载提示**：用 Safari/Chrome 下载会被 Gatekeeper 加 quarantine 属性，第一次运行会报错。`curl | tar` 管道提取不会触发；如果已经被打上，执行 `xattr -d com.apple.quarantine seek` 即可。
+
+**方式 2：源码安装（需要 Go 1.25+）**
+
+```bash
+go install github.com/whyiyhw/seek/cmd/seek@latest
+```
+
+### 运行
+
+```bash
 # 设置 API Key
 export DEEPSEEK_API_KEY=sk-...
 
