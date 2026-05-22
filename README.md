@@ -3,14 +3,24 @@
 DeepSeek-first Go coding agent harness. Architecture inspired by
 [`earendil-works/pi`](https://github.com/earendil-works/pi).
 
-Status: **M4.5 done** — TUI is daily-driver quality. Inline mode (no
-alt-screen) so the terminal owns scrollback / copy / history; Esc
-interrupts the agent mid-stream; per-call inline y/N approval for
-bash and out-of-CWD writes; slash-command completion menu; `@`
-file-path completion; ↑/↓ prompt history; tool spinners with
-elapsed-time tails; token budget warning at 80% / 95% of model
-context. Next: M5 (sessions + Skill loader + MCP). See
-[`PRD.md`](./PRD.md).
+Status: **M6 done, M7 polishing** — M0–M6 delivered (~10.4k lines, 30 Go
+packages, all tests green with `-race` on three platforms).
+
+**M5** added session persistence (`--resume`/`--list`/`--no-save`, JSONL
+format), `/branch` forking, `/compact` history compression, Skill loading
+with `.claude/skills/` compatibility (includes built-in
+[`dual-model`](./internal/skill/builtin/dual-model.md) and
+[`go-test-runner`](./internal/skill/builtin/go-test-runner.md) skills),
+MCP client bridge for external tools, and unified diff preview in the
+approval prompt.
+
+**M6** added second-tier providers: Anthropic, OpenAI and Gemini via
+`pkg/llm`, plus an `--provider=compatible` mode for vLLM/Ollama/SiliconFlow
+endpoints. The TUI shows a provider banner when DeepSeek-exclusive features
+(FIM, cache stats, Reasoner) are unavailable.
+
+**Next: M7 polish** — RPC/JSON mode, help overlay, self-hosting benchmark.
+See [`PRD.md`](./PRD.md).
 
 ## Quick start
 
@@ -29,6 +39,23 @@ go run ./cmd/seek --yolo
 
 # Use the reasoner (CoT prints dim):
 go run ./cmd/seek -model deepseek-reasoner -p "Prove sqrt(2) is irrational."
+
+# Session management:
+go run ./cmd/seek --list                  # list saved sessions
+go run ./cmd/seek --resume <id>           # resume a saved session
+go run ./cmd/seek --continue              # resume the most recent session
+go run ./cmd/seek --no-save               # ephemeral session (no disk write)
+
+# Second-tier providers (DeepSeek-exclusive features disabled):
+export ANTHROPIC_API_KEY=sk-ant-...
+go run ./cmd/seek --provider=anthropic
+export OPENAI_API_KEY=sk-...
+go run ./cmd/seek --provider=openai
+export GEMINI_API_KEY=...
+go run ./cmd/seek --provider=gemini
+
+# OpenAI-compatible endpoint (vLLM / Ollama / SiliconFlow):
+go run ./cmd/seek --provider=compatible --base-url=http://localhost:8000/v1
 ```
 
 In the TUI:
@@ -50,6 +77,9 @@ Slash commands (full list with `/help`):
 | `/clear` | Wipe the visible screen (agent state kept; scrollback preserved by the terminal) |
 | `/reset` | Start a fresh conversation (agent state rebuilt) |
 | `/model <id>` | Switch model mid-session (e.g. `/model deepseek-reasoner`) |
+| `/branch` | Fork this session — new ID, parent link, copy of history |
+| `/compact` | Summarise prior history into one message to free up context |
+| `/skills` | List loaded skills with source paths |
 | `/yolo` | Toggle `--yolo` for the rest of the session |
 | `/exit` | Quit |
 
@@ -95,11 +125,15 @@ turns.
 | Tool | What it does | Gated by |
 |---|---|---|
 | `read` | read a file with line numbers | — |
+| `grep` | search files by regex or literal string | — |
+| `list_dir` | list directory contents with type and size | — |
 | `write` | create / overwrite a file | writes outside CWD need `--yolo` |
 | `edit` | exact `old_string`→`new_string` substitution (Claude Code style) | edits outside CWD need `--yolo` |
 | `bash` | run a shell command with timeout | needs `--yolo` |
 | `fim_complete` | DeepSeek FIM endpoint — cheap gap-fill, returns text without applying | — |
 | `think` | deepseek-reasoner bridge: multi-step planning or `reflect=true` self-review | — |
+| `Skill(name)` | fetch and follow a built-in or project skill | — |
+| `mcp_tool` | proxy to an MCP server tool (requires MCP server configured) | — |
 
 ## Layout
 
@@ -108,7 +142,7 @@ cmd/seek/                  CLI entry
 pkg/deepseek/              first-class DeepSeek client (chat, reasoner, FIM)
 pkg/llm/                   thin generic interface (Anthropic / OpenAI / Gemini)
 pkg/agent/                 agent runtime (event stream, tool loop, provider routing)
-internal/{tui,session,tools,skill,mcp,cache,pricing,rpc}/  application internals
+internal/{tui,session,tools,skill,mcp,cache,pricing,diff,permission,budget,projectmd}/  application internals
 ```
 
 `pkg/deepseek` deliberately does **not** implement `pkg/llm.Provider`. See
