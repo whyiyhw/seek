@@ -111,12 +111,15 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## DeepSeek API
 
-### Reasoner rejects requests that retain prior `reasoning_content`
-- **Saw**: after using `deepseek-reasoner` once, the next call returned 400 if the assistant message's `reasoning_content` was still in the history
-- **Why**: DeepSeek's reasoner API explicitly requires that `reasoning_content` from previous turns be stripped before sending history back. It's not a "you can leave it, we'll ignore it" kind of API
-- **Fix**: `pkg/deepseek/StripReasoningContent(msgs)` returns a copy with the field cleared; `pkg/agent` runs it on every request. Commits `25c8461` (initial), `8264f52` (used by think tool)
-- **Lesson**: when reading provider docs, mark every "must" requirement — they'll hit you the moment you string two calls together
-- **Refs**: `pkg/deepseek/stream.go:StripReasoningContent`
+### `reasoning_content` rule for V4 thinking is the OPPOSITE of the old reasoner — conditional on tool_calls
+- **Saw**: a multi-turn V4 thinking-mode session with a tool_call in turn 1 hit a 400 on turn 2: `The 'reasoning_content' in the thinking mode must be passed back to the API`. We had `pkg/deepseek.StripReasoningContent` unconditionally clearing the field on every assistant message — exactly the wrong shape for V4
+- **Why**: V4 changed the contract (api-docs.deepseek.com/guides/thinking_mode). Pre-V4 `deepseek-reasoner` REJECTED requests that retained prior `reasoning_content`. V4 thinking REVERSES that for tool-call turns specifically: "if the model performed a tool call, the intermediate assistant's `reasoning_content` must participate in the context concatenation and must be passed back to the API in all subsequent user interaction turns." For plain assistant turns (no tool_calls) `reasoning_content` may still be dropped to save prompt tokens
+- **Fix**: `StripReasoningContent` is now conditional — keeps `reasoning_content` on assistant messages where `len(ToolCalls) > 0`, strips it everywhere else. Wire-level test in `TestAgent_PreservesReasoningContentOnToolCallTurns` pins both branches by asserting the resend body. Earlier "always strip" pitfall (previous text of this entry) was correct for pre-V4 and is now archived inline below
+- **Lesson**: provider contracts can REVERSE between major versions of the same vendor's models. A pitfall that was load-bearing for one generation can be 100% wrong for the next. When upgrading model families, re-validate every "must" you previously wrote down — don't trust the old guide. The doc reference matters more than the symptom file when it's been a year
+- **Refs**: `pkg/deepseek/stream.go:StripReasoningContent`, `pkg/agent/agent_test.go:TestAgent_PreservesReasoningContentOnToolCallTurns`, api-docs.deepseek.com/guides/thinking_mode
+
+  Archived pre-V4 rule (kept for historical context, do NOT re-apply unconditionally):
+  > `deepseek-reasoner` (pre-V4 standalone model, retired 2026-07-24) rejected requests that retained prior `reasoning_content`. That was true at the time. V4 thinking mode flipped it for tool-call turns.
 
 ### Prefix cache hits are best-effort and short prompts don't trigger
 - **Saw**: three back-to-back identical short prompts (110 tokens each) all showed `prompt_cache_hit_tokens=0`

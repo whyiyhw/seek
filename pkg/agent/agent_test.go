@@ -250,6 +250,114 @@ func TestAgent_NoTools_StraightAnswer(t *testing.T) {
 	}
 }
 
+// TestAgent_PreservesReasoningContentOnToolCallTurns is the wire-level
+// pin for the V4 thinking-mode contract: when a prior assistant turn
+// performed tool_calls, its reasoning_content MUST be replayed in
+// subsequent requests (api-docs.deepseek.com/guides/thinking_mode).
+// Stripping it would yield a 400 from DeepSeek and brick the session.
+//
+// The test runs a two-request agent loop. Request 1 returns a
+// tool_call + reasoning_content; the agent dispatches the (stub) tool
+// and immediately fires Request 2. Request 2's body is captured and
+// the prior assistant message inside its `messages` array is asserted
+// to STILL carry reasoning_content. Companion check: an earlier
+// assistant turn WITHOUT tool_calls in the same history (we inject
+// one via InitialMessages) has its reasoning_content STRIPPED, since
+// the contract only protects tool-call turns.
+func TestAgent_PreservesReasoningContentOnToolCallTurns(t *testing.T) {
+	var (
+		callCount int32
+		req2Body  struct {
+			Messages []deepseek.Message `json:"messages"`
+		}
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&callCount, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n == 2 {
+			_ = json.NewDecoder(r.Body).Decode(&req2Body)
+		}
+		switch n {
+		case 1:
+			// Stream a tool_call delta WITH reasoning_content interleaved.
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"I should read the file."}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"stub","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		default:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	reg := tools.New().Add(&stubTool{name: "stub", schema: `{"type":"object"}`, reply: "ok"})
+	ag, _ := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV4Pro,
+		Tools:  reg,
+		InitialMessages: []deepseek.Message{
+			// Plain assistant turn (no tool_calls) with reasoning — should
+			// be STRIPPED on the wire. Pins the negative case.
+			{Role: deepseek.RoleUser, Content: "earlier prompt"},
+			{Role: deepseek.RoleAssistant, Content: "earlier answer",
+				ReasoningContent: "earlier CoT (drop me)"},
+		},
+	})
+
+	for range ag.Prompt(context.Background(), "do it") {
+	}
+
+	if atomic.LoadInt32(&callCount) != 2 {
+		t.Fatalf("expected 2 backend calls (turn 1 → tool, turn 2 → final), got %d", callCount)
+	}
+
+	// Locate the two assistant turns in req2Body.Messages and check both contracts.
+	var (
+		toolCallAssistant *deepseek.Message
+		plainAssistant    *deepseek.Message
+	)
+	for i := range req2Body.Messages {
+		m := &req2Body.Messages[i]
+		if m.Role != deepseek.RoleAssistant {
+			continue
+		}
+		if len(m.ToolCalls) > 0 {
+			toolCallAssistant = m
+		} else {
+			plainAssistant = m
+		}
+	}
+
+	if toolCallAssistant == nil {
+		t.Fatalf("turn-2 request body missing the tool-call assistant turn; got messages=%+v", req2Body.Messages)
+	}
+	if toolCallAssistant.ReasoningContent != "I should read the file." {
+		t.Errorf("tool-call assistant turn LOST reasoning_content on resend — would 400 from DeepSeek; got %q",
+			toolCallAssistant.ReasoningContent)
+	}
+
+	if plainAssistant == nil {
+		t.Fatalf("turn-2 request body missing the plain assistant turn from InitialMessages; got messages=%+v", req2Body.Messages)
+	}
+	if plainAssistant.ReasoningContent != "" {
+		t.Errorf("plain assistant turn (no tool_calls) should have reasoning_content stripped to save tokens; got %q",
+			plainAssistant.ReasoningContent)
+	}
+}
+
 // TestAgent_ThinkingParamForReasoningModels verifies the agent sends
 // {"thinking":{"type":"enabled"}} for reasoning models and omits it
 // for fast-chat models. This is the wire-level pin for the V4 routing

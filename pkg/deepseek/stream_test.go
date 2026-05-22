@@ -122,17 +122,38 @@ func TestChatStream_ReasoningDelta(t *testing.T) {
 }
 
 func TestStripReasoningContent(t *testing.T) {
+	// V4 thinking-mode contract (api-docs.deepseek.com/guides/thinking_mode):
+	//  - assistant w/o tool_calls → reasoning_content can be stripped
+	//  - assistant w/  tool_calls → reasoning_content MUST be preserved
+	//    (replaying without it returns 400 from the API)
+	//  - user / tool / system → reasoning_content N/A, no behaviour change
 	in := []Message{
 		{Role: RoleUser, Content: "q"},
 		{Role: RoleAssistant, Content: "a", ReasoningContent: "because..."},
+		{Role: RoleAssistant, ReasoningContent: "planning a tool call",
+			ToolCalls: []ToolCall{{ID: "c1", Type: "function",
+				Function: ToolCallFunc{Name: "read", Arguments: `{"path":"x"}`}}}},
+		{Role: RoleTool, Content: "tool result", ToolCallID: "c1"},
+		{Role: RoleAssistant, Content: "final", ReasoningContent: "wrap-up CoT"},
 	}
 	out := StripReasoningContent(in)
+
+	// [1] assistant w/o tool_calls: stripped
 	if out[1].ReasoningContent != "" {
-		t.Errorf("ReasoningContent not stripped")
+		t.Errorf("[1] assistant w/o tool_calls: ReasoningContent should be stripped, got %q", out[1].ReasoningContent)
 	}
-	// Original must be untouched (function returns a copy).
-	if in[1].ReasoningContent != "because..." {
-		t.Errorf("input was mutated")
+	// [2] assistant w/ tool_calls: KEPT (this is the load-bearing case)
+	if out[2].ReasoningContent != "planning a tool call" {
+		t.Errorf("[2] assistant w/ tool_calls: ReasoningContent MUST be preserved per V4 API contract, got %q", out[2].ReasoningContent)
+	}
+	// [4] another assistant w/o tool_calls: stripped
+	if out[4].ReasoningContent != "" {
+		t.Errorf("[4] final assistant w/o tool_calls: ReasoningContent should be stripped, got %q", out[4].ReasoningContent)
+	}
+
+	// Original must be untouched (function returns a copy, never mutates input).
+	if in[1].ReasoningContent != "because..." || in[2].ReasoningContent != "planning a tool call" || in[4].ReasoningContent != "wrap-up CoT" {
+		t.Errorf("input was mutated: %+v", in)
 	}
 }
 

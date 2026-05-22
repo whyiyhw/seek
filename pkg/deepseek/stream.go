@@ -181,16 +181,37 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-// stripReasoningContent returns a copy of msgs with ReasoningContent cleared.
-// DeepSeek's reasoner API rejects messages that retain a previous turn's
-// reasoning_content field; callers MUST normalise history before resending.
+// StripReasoningContent returns a copy of msgs with ReasoningContent
+// cleared on assistant messages WHERE SAFE per the V4 thinking-mode
+// contract (api-docs.deepseek.com/guides/thinking_mode):
 //
-// Exported for use by pkg/agent when it stitches reasoner output into a
-// subsequent chat call.
+//   - assistant message had tool_calls → reasoning_content MUST be
+//     preserved and replayed on every subsequent turn, otherwise the
+//     API returns 400 ("reasoning_content in the thinking mode must
+//     be passed back to the API"). The rationale, per DeepSeek, is
+//     that the model's choice to call a tool is causally tied to its
+//     CoT for that turn; replaying the conversation without it changes
+//     what the model "knows about itself".
+//
+//   - assistant message had no tool_calls → reasoning_content can be
+//     dropped freely. The next turn re-derives reasoning from scratch;
+//     keeping the old trace just inflates prompt tokens.
+//
+// NOTE: this contract is the OPPOSITE of the pre-V4 deepseek-reasoner
+// model, which rejected any request that retained prior
+// reasoning_content. The pitfall is documented in docs/pitfalls.md.
+//
+// Callers should always run history through this function before
+// resending — the conditional logic lives here so individual call
+// sites don't need to track which assistant turns had tool_calls.
 func StripReasoningContent(msgs []Message) []Message {
 	out := make([]Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = m
+		if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
+			// Required by the API — keep reasoning_content intact.
+			continue
+		}
 		out[i].ReasoningContent = ""
 	}
 	return out
