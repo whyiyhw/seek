@@ -123,6 +123,13 @@ func (a *Agent) Reset(history []deepseek.Message) {
 	}
 }
 
+// workflowReminder is appended to every user message before it is sent to
+// the LLM. Placing it at the end of the user turn keeps it in the recent
+// context (recency bias makes it more effective than a system-prompt-only
+// rule) while remaining a CONSTANT string so DeepSeek's prefix cache is
+// not perturbed — the bytes are identical across every turn.
+const workflowReminder = "\n\n[Workflow rule: before asserting any fact about code behaviour or values, grep/read the source to confirm. Do not rely on memory from earlier turns. No grep/read evidence → label it a guess.]"
+
 // summariserPrompt is appended as a user turn for the one-shot Chat
 // call that produces a /compact summary. Tuned for ~400 words — long
 // enough to preserve goals and decisions, short enough that the
@@ -216,7 +223,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 
 		a.messages = append(a.messages, deepseek.Message{
 			Role:    deepseek.RoleUser,
-			Content: userText,
+			Content: userText + workflowReminder,
 		})
 		out <- AgentStart{}
 
