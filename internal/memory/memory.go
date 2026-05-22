@@ -55,6 +55,13 @@ type Entry struct {
 	// the "0001-01-01T00:00:00Z" zero value into every fresh entry.
 	StaleSince      time.Time `json:"stale_since,omitzero"`
 	SourceSessionID string    `json:"source_session_id,omitempty"`
+
+	// AutoSourced flags entries written by the auto-distill path
+	// (M5.7) — distilled at SessionEnd without going through the
+	// y/n/e review modal. The next manual /distill pass surfaces
+	// these for the user to confirm or revoke, preventing silent
+	// drift from the model's own perceptions.
+	AutoSourced bool `json:"auto_sourced,omitempty"`
 }
 
 // Manifest is the project identity record at <projectDir>/manifest.json.

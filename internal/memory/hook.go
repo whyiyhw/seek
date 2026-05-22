@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -29,9 +30,38 @@ type Hook struct {
 	Project *Project
 	Soul    *Soul
 
+	// Distiller, when non-nil and $SEEK_AUTO_DISTILL=1, drives the
+	// M5.7 auto-distill SessionEnd path: at session end, if the
+	// satisfaction signal clears the threshold, the reasoner is
+	// asked for ≤3 candidates and any that come back land in M
+	// with AutoSourced=true (skipping the y/n review modal).
+	//
+	// Off by default — gated on the env var to keep the safety net
+	// intact while we tune satisfaction-signal thresholds.
+	Distiller *Distiller
+
+	// HistoryProvider returns the session history at SessionEnd.
+	// nil disables auto-distill regardless of Distiller — we can't
+	// extract decisions from a session we don't have access to.
+	// Injected (not captured at hook construction) because the
+	// agent owns the messages slice and we want a fresh snapshot
+	// at end-of-session, not a stale capture.
+	HistoryProvider func() []deepseek.Message
+
 	// Now overrides the SessionStart timestamp for testing. Production
 	// callers leave it zero and the hook uses time.Now().UTC().
 	Now func() time.Time
+}
+
+// envAutoDistill is the env-var name gating M5.7's auto-distill. Set
+// to "1" / "true" / "yes" to opt in. Default (empty / any other value)
+// = off, because hallucinated entries are the explicit risk PRD §3
+// originally barred this feature over.
+const envAutoDistill = "SEEK_AUTO_DISTILL"
+
+func autoDistillEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(envAutoDistill)))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 // OnPrePrompt builds the deterministic <context> Prepend messages from
@@ -86,6 +116,50 @@ func (h *Hook) OnSessionStart(_ context.Context, _ hooks.SessionStartEvent) {
 		now = h.Now()
 	}
 	_, _ = h.Project.RunGC(now)
+}
+
+// OnSessionEnd is the M5.7 auto-distill trigger. Gated on the env var
+// + the satisfaction signal + having all the wiring (Project + Distiller
+// + HistoryProvider). Failure mode: log and move on — auto-distill is
+// best-effort enhancement, never load-bearing.
+//
+// Why SessionEnd and not periodic-during-session: a settled history is
+// the right substrate to distill from. Mid-session decisions can still
+// be reversed; end-of-session is when we know what stuck.
+func (h *Hook) OnSessionEnd(ctx context.Context, _ hooks.SessionEndEvent) {
+	if h.Project == nil || h.Distiller == nil || h.HistoryProvider == nil {
+		return
+	}
+	if !autoDistillEnabled() {
+		return
+	}
+
+	history := h.HistoryProvider()
+	sig := ScoreSatisfaction(history)
+	if !IsSatisfied(sig) {
+		return
+	}
+
+	// Bound the reasoner call so SessionEnd doesn't hang process
+	// shutdown indefinitely if the network is slow.
+	rctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	cands, err := h.Distiller.Distill(rctx, history)
+	if err != nil {
+		// Swallow — same philosophy as RunGC failure. We don't
+		// want a dud auto-distill to make session exit fail.
+		return
+	}
+	for _, c := range cands {
+		_ = h.Project.Add(Entry{
+			Name:        c.Name,
+			Tagline:     c.Tagline,
+			Content:     c.Content,
+			Tags:        c.Tags,
+			AutoSourced: true,
+		})
+	}
 }
 
 // wrapContext renders a single <context source="X">...</context> block.

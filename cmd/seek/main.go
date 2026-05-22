@@ -404,9 +404,6 @@ func run() error {
 	// from main.go because the agent doesn't know when its host
 	// program is "done".
 	hooksReg := hooks.NewRegistry()
-	if memProject != nil || memSoul != nil {
-		hooksReg.Register(&memory.Hook{Project: memProject, Soul: memSoul})
-	}
 
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
@@ -421,6 +418,24 @@ func run() error {
 	})
 	if err != nil {
 		return err
+	}
+
+	// Register the memory hook AFTER agent.New so the M5.7 auto-distill
+	// HistoryProvider can close over ag.Messages. The Registry stores a
+	// pointer and dispatches at call-time, so deferring registration
+	// past agent.New is safe — no events fire until NotifySessionStart
+	// below.
+	if memProject != nil || memSoul != nil {
+		memHook := &memory.Hook{Project: memProject, Soul: memSoul}
+		// Auto-distill needs the reasoner (DeepSeek-only path) + the
+		// agent's history. Both wired unconditionally; the env var
+		// $SEEK_AUTO_DISTILL stays the load-bearing on/off gate
+		// (off by default).
+		if memProject != nil && dsClient != nil {
+			memHook.Distiller = &memory.Distiller{Client: dsClient}
+			memHook.HistoryProvider = ag.Messages
+		}
+		hooksReg.Register(memHook)
 	}
 
 	var sessionID string
