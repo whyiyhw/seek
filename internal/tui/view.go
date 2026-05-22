@@ -156,6 +156,8 @@ func (m Model) View() string {
 		sb.WriteString(m.renderApprovalPrompt())
 	case m.commandMenuOpen:
 		sb.WriteString(m.renderCommandMenu())
+	case m.modelPickerOpen:
+		sb.WriteString(m.renderModelPicker())
 	case m.pathPicker.open:
 		sb.WriteString(m.renderPathPicker())
 	}
@@ -373,6 +375,35 @@ func (m Model) renderCommandMenu() string {
 		sb.WriteString("\n")
 	}
 	sb.WriteString(styleMuted.Render("  Tab to complete · ↑/↓ to navigate · Esc to dismiss"))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// renderModelPicker renders the /model dropdown. Same visual shape as
+// the slash-command menu — same indent, same ▸ marker, same footer
+// hint — so users don't need to learn a second affordance.
+func (m Model) renderModelPicker() string {
+	if len(m.modelPickerFiltered) == 0 {
+		return styleMuted.Render("  (no models — Esc to dismiss)") + "\n"
+	}
+	var sb strings.Builder
+	for i, mc := range m.modelPickerFiltered {
+		marker := "  "
+		idLabel := mc.id
+		if mc.id == m.opts.Model {
+			// Annotate the active model so Enter on a fresh picker is
+			// visibly a no-op rather than a silent commit to the same id.
+			idLabel = idLabel + " (current)"
+		}
+		row := fmt.Sprintf("%-32s  %s", idLabel, mc.description)
+		if i == m.modelPickerSelected {
+			sb.WriteString(styleMenuSelected.Render("▸ " + row))
+		} else {
+			sb.WriteString(styleMenuItem.Render(marker + row))
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(styleMuted.Render("  Tab/Enter to switch · ↑/↓ to navigate · Esc to dismiss"))
 	sb.WriteString("\n")
 	return sb.String()
 }

@@ -167,6 +167,13 @@ type Model struct {
 	commandMenuFiltered []command
 	commandMenuSelected int
 
+	// modelPickerOpen / etc. drive the /model dropdown — same UI shape
+	// as the slash-command menu but scoped to model IDs of the current
+	// provider. Opened by `/model` (no args); accepts via Tab or Enter.
+	modelPickerOpen     bool
+	modelPickerFiltered []modelChoice
+	modelPickerSelected int
+
 	// pendingApproval, when non-nil, means the agent goroutine is
 	// blocked on a permission decision and the TUI is showing an
 	// inline y/N prompt. Reply is sent on the channel pointer (which

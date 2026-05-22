@@ -98,10 +98,19 @@ func TestClear_SetsClear(t *testing.T) {
 	}
 }
 
-func TestModel_NoArg_ShowsCurrent(t *testing.T) {
-	res := runHandler(t, emptyModel(), "/model")
-	if !strings.Contains(res.text, "current model") {
-		t.Errorf("text = %q", res.text)
+func TestModel_NoArg_OpensPicker(t *testing.T) {
+	// Behaviour change: `/model` with no args opens the model picker
+	// for curated providers (emptyModel has ProviderName="" → DeepSeek
+	// path → curated list). Full picker behaviour (preselect, accept,
+	// Esc) is covered in update_test.go's TestCmdModel_NoArgsOpensPicker
+	// and TestHandleKey_ModelPicker_*.
+	m := emptyModel()
+	res := runHandler(t, m, "/model")
+	if !m.modelPickerOpen {
+		t.Error("/model with no args should open the picker on a curated provider")
+	}
+	if res.text != "" {
+		t.Errorf("opening picker should not emit text, got %q", res.text)
 	}
 }
 

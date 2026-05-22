@@ -284,6 +284,113 @@ func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 	}
 }
 
+func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
+	// /model with no args should open the picker for a curated provider
+	// (DeepSeek), with the current model preselected.
+	m := &Model{}
+	m.opts.Model = "deepseek-reasoner"
+	m.opts.ProviderName = "" // DeepSeek
+
+	res := cmdModel(m, "")
+
+	if !m.modelPickerOpen {
+		t.Fatal("expected /model to open the picker")
+	}
+	if len(m.modelPickerFiltered) < 2 {
+		t.Fatalf("expected at least 2 DeepSeek candidates, got %d", len(m.modelPickerFiltered))
+	}
+	// Preselect "deepseek-reasoner" since it matches the current model.
+	got := m.modelPickerFiltered[m.modelPickerSelected].id
+	if got != "deepseek-reasoner" {
+		t.Errorf("expected current model preselected, got %q", got)
+	}
+	// No surface text when opening — the picker is the response.
+	if res.text != "" {
+		t.Errorf("expected empty text on picker open, got %q", res.text)
+	}
+}
+
+func TestCmdModel_ArgsPathStillWorks(t *testing.T) {
+	// /model <id> should bypass the picker — used by power users and
+	// for compatible-provider freeform ids.
+	m := &Model{}
+	m.opts.Model = "deepseek-chat"
+
+	res := cmdModel(m, "deepseek-reasoner")
+
+	if m.modelPickerOpen {
+		t.Error("/model <id> must not open the picker")
+	}
+	if m.opts.Model != "deepseek-reasoner" {
+		t.Errorf("model not switched: got %q", m.opts.Model)
+	}
+	if !strings.Contains(res.text, "deepseek-reasoner") {
+		t.Errorf("transition message should mention new model: %q", res.text)
+	}
+}
+
+func TestCmdModel_UnknownProviderFallsBackToHint(t *testing.T) {
+	// For --provider=compatible (or any uncurated provider name), we
+	// have no candidate list — fall back to the "type the id" hint
+	// instead of opening an empty picker.
+	m := &Model{}
+	m.opts.Model = "llama3-8b"
+	m.opts.ProviderName = "Local Ollama" // not in knownModelsForProvider
+
+	res := cmdModel(m, "")
+
+	if m.modelPickerOpen {
+		t.Error("uncurated provider should NOT open an empty picker")
+	}
+	if !strings.Contains(res.text, "llama3-8b") {
+		t.Errorf("fallback should mention current model: %q", res.text)
+	}
+}
+
+func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
+	// Picker open + Enter on a different row → model switches, picker closes.
+	m := Model{input: textarea.New()}
+	m.opts.Model = "deepseek-chat"
+	m.modelPickerOpen = true
+	m.modelPickerFiltered = []modelChoice{
+		{"deepseek-chat", "current"},
+		{"deepseek-reasoner", "Thinking mode"},
+	}
+	m.modelPickerSelected = 1 // user arrowed down to the second row
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.modelPickerOpen {
+		t.Error("Enter on a picker row should close the picker")
+	}
+	if m2.opts.Model != "deepseek-reasoner" {
+		t.Errorf("model should have switched, got %q", m2.opts.Model)
+	}
+}
+
+func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
+	// Esc closes the picker WITHOUT switching the model.
+	m := Model{input: textarea.New()}
+	m.opts.Model = "deepseek-chat"
+	m.modelPickerOpen = true
+	m.modelPickerFiltered = []modelChoice{
+		{"deepseek-chat", "current"},
+		{"deepseek-reasoner", "Thinking mode"},
+	}
+	m.modelPickerSelected = 1
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if m2.modelPickerOpen {
+		t.Error("Esc should close the picker")
+	}
+	if m2.opts.Model != "deepseek-chat" {
+		t.Errorf("Esc must not switch the model; got %q", m2.opts.Model)
+	}
+}
+
 func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
 	// Picker open with candidates: Enter accepts (same as Tab). The
 	// user then presses Enter again to submit.

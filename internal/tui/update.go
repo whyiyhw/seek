@@ -256,6 +256,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// then refreshes the filter via updateCommandMenu).
 	}
 
+	// Model picker (opened by /model with no args). Same key vocabulary
+	// as the slash menu / path picker: Tab + Enter accept the highlighted
+	// row, Up/Down navigate, Esc dismisses. Other keys are swallowed —
+	// the picker is modal: candidate list is fixed, no live filtering.
+	if m.modelPickerOpen {
+		switch msg.Type {
+		case tea.KeyTab, tea.KeyEnter:
+			m.applyModelChoice(m.modelPickerSelected)
+			return m, nil
+		case tea.KeyUp:
+			if m.modelPickerSelected > 0 {
+				m.modelPickerSelected--
+			}
+			return m, nil
+		case tea.KeyDown:
+			if m.modelPickerSelected < len(m.modelPickerFiltered)-1 {
+				m.modelPickerSelected++
+			}
+			return m, nil
+		case tea.KeyEsc:
+			m.modelPickerOpen = false
+			m.modelPickerFiltered = nil
+			m.modelPickerSelected = 0
+			return m, nil
+		}
+		// Other keys are swallowed (no fall-through). The picker is
+		// short-lived and modal — accidentally typing characters
+		// while it's open shouldn't mix into the input.
+		return m, nil
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit

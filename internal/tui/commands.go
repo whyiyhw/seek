@@ -141,17 +141,115 @@ func cmdNew(m *Model, _ string) cmdResult {
 	return cmdResult{clear: true, text: styleMuted.Render("new conversation — previous session saved")}
 }
 
+// modelChoice is one row in the /model picker — wire-name + human
+// description. Kept here (not in pricing/budget) because this is a
+// UI concern: the picker wants a curated list, not the full pricing
+// table.
+type modelChoice struct {
+	id          string
+	description string
+}
+
+// knownModelsForProvider returns the picker candidates for the active
+// provider. Empty list means "no curated list for this provider" —
+// callers should fall back to the freeform `/model <id>` form (used
+// for --provider=compatible where the model id is whatever the
+// endpoint declares).
+//
+// We deliberately hard-code these here rather than syncing with
+// internal/pricing / internal/budget — those tables index by model id
+// for cost / context-window lookups, but the picker wants a curated,
+// ordered, human-labelled list. Decoupling lets each table evolve
+// at its own pace.
+func knownModelsForProvider(providerName string) []modelChoice {
+	switch strings.ToLower(providerName) {
+	case "", "deepseek":
+		return []modelChoice{
+			{"deepseek-chat", "DeepSeek V4-Flash — fast chat + tools (default)"},
+			{"deepseek-reasoner", "DeepSeek V4-Pro — Thinking-enabled reasoning"},
+		}
+	case "anthropic":
+		return []modelChoice{
+			{"claude-sonnet-4-20250514", "Claude Sonnet 4 — flagship"},
+			{"claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet — previous gen"},
+		}
+	case "openai":
+		return []modelChoice{
+			{"gpt-4o", "GPT-4o — flagship"},
+			{"gpt-4o-mini", "GPT-4o mini — fast / cheap"},
+		}
+	case "gemini":
+		return []modelChoice{
+			{"gemini-2.0-flash", "Gemini 2.0 Flash — fast"},
+			{"gemini-1.5-pro", "Gemini 1.5 Pro — large context (2M)"},
+		}
+	default:
+		return nil
+	}
+}
+
 func cmdModel(m *Model, args string) cmdResult {
-	if args == "" {
+	// Args path: keep the original "type the id directly" flow for
+	// power users and for providers we don't curate (compatible).
+	if args != "" {
+		prev := m.opts.Model
+		m.opts.Model = args
+		if m.opts.SetModel != nil {
+			m.opts.SetModel(args)
+		}
+		return cmdResult{text: styleMuted.Render(fmt.Sprintf("model: %s → %s (effective on next prompt)", prev, args))}
+	}
+
+	// No args: open the picker if we have a curated list for this
+	// provider; otherwise fall back to the old "print current + usage"
+	// message (compatible endpoints have freeform model ids).
+	models := knownModelsForProvider(m.opts.ProviderName)
+	if len(models) == 0 {
 		return cmdResult{text: styleMuted.Render(fmt.Sprintf(
-			"current model: %s\nusage: /model <deepseek-chat|deepseek-reasoner|...>", m.opts.Model))}
+			"current model: %s\nusage: /model <id>  (no curated list for provider %q)",
+			m.opts.Model, m.opts.ProviderName))}
 	}
+	m.modelPickerFiltered = models
+	m.modelPickerSelected = 0
+	// Preselect the row matching the current model so Enter without
+	// any arrow-key motion is a safe no-op.
+	for i, mc := range models {
+		if mc.id == m.opts.Model {
+			m.modelPickerSelected = i
+			break
+		}
+	}
+	m.modelPickerOpen = true
+	return cmdResult{}
+}
+
+// applyModelChoice switches to the selected model. Called from
+// handleKey's modelPicker branch on Tab / Enter accept.
+func (m *Model) applyModelChoice(idx int) {
+	if idx < 0 || idx >= len(m.modelPickerFiltered) {
+		return
+	}
+	choice := m.modelPickerFiltered[idx]
 	prev := m.opts.Model
-	m.opts.Model = args
+	m.opts.Model = choice.id
 	if m.opts.SetModel != nil {
-		m.opts.SetModel(args)
+		m.opts.SetModel(choice.id)
 	}
-	return cmdResult{text: styleMuted.Render(fmt.Sprintf("model: %s → %s (effective on next prompt)", prev, args))}
+	m.modelPickerOpen = false
+	m.modelPickerFiltered = nil
+	m.modelPickerSelected = 0
+	if prev != choice.id {
+		// Surface the transition to scrollback the same way cmdModel
+		// did before — users want a record that the switch took.
+		// (View() doesn't have a Println channel, so we stash a
+		// muted line in lastErr's neighbour: the next View frame
+		// won't show it, but the agent footer at AgentEnd will be
+		// labelled with the new model anyway. For an explicit
+		// inline notice we'd need a tea.Println path — left as a
+		// follow-up; the status bar's "model:" segment updates
+		// immediately so the change is visible.)
+		_ = prev
+	}
 }
 
 func cmdYolo(m *Model, _ string) cmdResult {
