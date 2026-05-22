@@ -227,6 +227,63 @@ func TestFormatVersion_ShortRevisionDroppedNotPartial(t *testing.T) {
 	}
 }
 
+// --- Welcome padding ------------------------------------------------
+
+// TestWelcomePadding_ZeroOrNegativeHeightReturnsZero pins the safety
+// path: when term.GetSize fails (very rare) or returns an absurd
+// value, we must NOT print padding. Negative or zero `pad := h-used`
+// would have us either print 0 lines (fine) or, if the math drifted,
+// negative — which would panic the loop. Defensive.
+func TestWelcomePadding_ZeroOrNegativeHeightReturnsZero(t *testing.T) {
+	for _, h := range []int{0, -1, -100} {
+		if got := welcomePadding(h); got != 0 {
+			t.Errorf("welcomePadding(%d) = %d, want 0", h, got)
+		}
+	}
+}
+
+// TestWelcomePadding_BelowMinimumReturnsZero locks "no padding on
+// small terminals". On a 15-row window the banner ALREADY fills the
+// screen; pushing the input further down would just make it scroll
+// off the bottom.
+func TestWelcomePadding_BelowMinimumReturnsZero(t *testing.T) {
+	// Exactly the minimum (banner + live region fills the screen) →
+	// no pad needed.
+	if got := welcomePadding(welcomeFixedLines + welcomeBelowLines); got != 0 {
+		t.Errorf("at minimum height: got %d, want 0", got)
+	}
+	// Smaller than minimum → still 0, never negative.
+	if got := welcomePadding(welcomeFixedLines + welcomeBelowLines - 5); got != 0 {
+		t.Errorf("below minimum: got %d, want 0", got)
+	}
+}
+
+func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
+	// 30-row terminal is the modal case (default iTerm/Terminal.app
+	// window). Want a clear, non-zero pad that's well under the cap.
+	pad := welcomePadding(30)
+	if pad <= 0 {
+		t.Errorf("30-row pad = %d, want > 0", pad)
+	}
+	if pad > welcomePadMax {
+		t.Errorf("30-row pad = %d, want ≤ welcomePadMax (%d)", pad, welcomePadMax)
+	}
+	// Sanity: 30 = 14 fixed + 4 live + 12 pad. Should be 12.
+	if pad != 12 {
+		t.Errorf("30-row pad = %d, want 12 (30 - %d - %d)",
+			pad, welcomeFixedLines, welcomeBelowLines)
+	}
+}
+
+func TestWelcomePadding_HugeTerminalCapsAtMax(t *testing.T) {
+	// A 100-row terminal would otherwise get 82 lines of padding —
+	// the input would float in mid-screen with the banner pinned to
+	// the top. The cap exists to keep things proportional.
+	if got := welcomePadding(1000); got != welcomePadMax {
+		t.Errorf("welcomePadding(1000) = %d, want %d (capped)", got, welcomePadMax)
+	}
+}
+
 // --- Animation gate ------------------------------------------------
 
 // TestShouldAnimate_SkippedWhenEnvSet pins the SEEK_NO_ANIM kill-

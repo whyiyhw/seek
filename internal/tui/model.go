@@ -149,6 +149,26 @@ type Model struct {
 	lastErr error
 }
 
+// isWelcomeScreen returns true when the live region is "idle" —
+// no streaming content, no active tools, no pending approval, no
+// command menu or path picker showing. In this state we add vertical
+// padding to push the input area to the bottom of the terminal.
+func (m Model) isWelcomeScreen() bool {
+	if m.streaming {
+		return false
+	}
+	if len(m.activeTools) > 0 {
+		return false
+	}
+	if m.pendingApproval != nil {
+		return false
+	}
+	if m.commandMenuOpen || m.pathPicker.open {
+		return false
+	}
+	return true
+}
+
 // New constructs the initial Model. The caller should pass it to
 // tea.NewProgram WITHOUT tea.WithAltScreen() (see PRD §4.9).
 func New(opts Options) Model {

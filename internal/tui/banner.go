@@ -177,6 +177,50 @@ func shouldAnimate() bool {
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
+// Padding constants for welcomePadding. Tracked centrally so a future
+// banner layout change (e.g. dropping the cwd line) updates the
+// padding math in one place instead of drifting.
+const (
+	// welcomeFixedLines is how many lines PrintPixelWelcomeBanner
+	// actually prints: 1 leading blank + 7 banner rows + 1 blank +
+	// cwd + meta + 1 trailing blank = 12. Plus 2 system-output lines
+	// printed by cmd/seek BEFORE the banner (skills loader,
+	// projectmd loader) = 14 total above the live region.
+	welcomeFixedLines = 14
+
+	// welcomeBelowLines is the bubbletea live region's typical
+	// height — 3-row textarea + 1-row status bar. Approximate;
+	// ±1 line of pad isn't a visible problem.
+	welcomeBelowLines = 4
+
+	// welcomePadMax caps the pad so a 60-row terminal doesn't shove
+	// the input 40 lines down. ~20 lines of breathing room is
+	// already plenty; beyond that the screen feels wasteful.
+	welcomePadMax = 20
+)
+
+// welcomePadding returns the number of blank lines to insert between
+// the meta line and the live region so the welcome screen feels like
+// it sits on the bottom edge of the terminal instead of clustered at
+// the top.
+//
+// Pulled out of PrintPixelWelcomeBanner as a pure function so tests
+// can hit it for known heights without mocking the actual terminal.
+func welcomePadding(termHeight int) int {
+	if termHeight <= 0 {
+		return 0
+	}
+	used := welcomeFixedLines + welcomeBelowLines
+	pad := termHeight - used
+	if pad <= 0 {
+		return 0
+	}
+	if pad > welcomePadMax {
+		pad = welcomePadMax
+	}
+	return pad
+}
+
 // VersionString returns the build identity for the running binary as
 // a single human-readable string. Pulled from runtime/debug.BuildInfo
 // so it picks up the module version, short git hash, and `+` dirty
@@ -283,4 +327,10 @@ func PrintPixelWelcomeBanner(opts Options) {
 	status += "  ·  " + VersionString()
 	fmt.Println(muted.Render("  " + status))
 	fmt.Println()
+
+	// Vertical padding to push the input toward the bottom of the
+	// terminal is applied INSIDE View() via welcomePadding, not
+	// here. Doing it pre-bubbletea would lock the layout to the
+	// initial terminal size and not re-apply after /reset; doing it
+	// at View() level lets isWelcomeScreen drive it dynamically.
 }

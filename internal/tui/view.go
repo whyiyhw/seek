@@ -12,7 +12,13 @@ import (
 )
 
 // View renders the LIVE region only (no scrollback — that belongs to
-// the terminal). Layout:
+// the terminal). Layout (idle welcome):
+//
+//   [padding lines — fill terminal height]
+//   > input
+//   status: …
+//
+// Layout (active):
 //
 //   [active tools]    ← one line each, with a spinner
 //   [streaming assistant text]
@@ -80,6 +86,24 @@ func (m Model) View() string {
 	if sb.Len() > 0 {
 		sb.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
 		sb.WriteString("\n")
+	}
+
+	// When the live region is idle (no streaming, no tools, no menus,
+	// no approval prompt), push the input toward the bottom of the
+	// terminal so the welcome screen fills the height. m.height is
+	// the FULL terminal height (from tea.WindowSizeMsg), but bubbletea
+	// only owns the bottom slice — the welcome banner above us takes
+	// welcomeFixedLines rows we can't reclaim. welcomePadding handles
+	// the bookkeeping (and caps at welcomePadMax so a 60-row window
+	// doesn't end up with 40 lines of empty space).
+	//
+	// Gated on m.turns == 0 so that once the conversation starts —
+	// tea.Println pushes content above us — we stop adding pad and
+	// the input glides up to sit right under the last response.
+	if m.isWelcomeScreen() && m.turns == 0 {
+		if pad := welcomePadding(m.height); pad > 0 {
+			sb.WriteString(strings.Repeat("\n", pad))
+		}
 	}
 
 	// Input area FIRST (above any dropdown) — autocomplete popups
