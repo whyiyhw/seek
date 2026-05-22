@@ -25,7 +25,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -36,7 +35,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
-	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -246,17 +244,3 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 	}
 }
 
-// printWelcomeBanner is called by cmd/seek BEFORE the bubbletea program
-// starts. We use a plain fmt.Println rather than tea.Println so that
-// the banner is established before tea takes over the terminal —
-// otherwise tea would treat it as part of the live region.
-func PrintWelcomeBanner(opts Options) {
-	tier := pricing.CurrentTier(time.Now())
-	fmt.Println()
-	fmt.Println(styleAssistantLabel.Render("seek") + " · " + styleMuted.Render(opts.CWD))
-	fmt.Println(styleMuted.Render(fmt.Sprintf(
-		"model %s · tier %s · yolo %v · style %s",
-		opts.Model, pricing.TierLabel(tier), opts.Yolo, opts.GlamourStyle)))
-	fmt.Println(styleMuted.Render("type /help for commands · Ctrl+C to quit"))
-	fmt.Println()
-}

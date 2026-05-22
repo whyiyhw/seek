@@ -16,7 +16,7 @@ import (
 func Run(opts Options) error {
 	// The welcome banner goes directly to stdout before bubbletea
 	// takes over so it ends up in scrollback above the live region.
-	PrintWelcomeBanner(opts)
+	PrintPixelWelcomeBanner(opts)
 
 	m := New(opts)
 	p := tea.NewProgram(m)
