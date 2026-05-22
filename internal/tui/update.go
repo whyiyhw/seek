@@ -545,9 +545,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 }
 
 // handleCompactDone reacts to the summariser's response: on success,
-// swaps the agent's message history for a short user+assistant pair
-// that re-introduces the prior conversation as context, then persists.
-// On failure, surfaces the error and leaves history alone.
+// forks the session to preserve the full history, then resets the
+// agent to a two-message summary so the conversation can continue
+// with a fresh context window.
+//
+// Session chain after compact:
+//
+//	<old-id>  (full history, preserved on disk) ← ParentID
+//	<new-id>  (summary pair, active session)    → continues here
+//
+// The chain is traversable via --resume and visible in --list, so no
+// history is ever permanently lost.
 func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	if msg.err != nil {
 		return []tea.Cmd{tea.Println(styleErr.Render("  ! compact failed: " + msg.err.Error()))}
@@ -560,6 +568,25 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	// is a real billed request.
 	if m.opts.Tracker != nil {
 		m.opts.Tracker.Record(msg.usage)
+	}
+
+	var snapshotID string
+
+	// When session persistence is active: flush the full history to disk
+	// under the current session ID (the "snapshot"), then fork a child
+	// session that will hold only the compact summary. This preserves every
+	// message ever exchanged and makes the chain inspectable via --list.
+	if m.opts.Session != nil && m.opts.Store != nil {
+		// 1. Write full history to the current (snapshot) session.
+		m.persistSession()
+		snapshotID = m.opts.Session.ID
+
+		// 2. Fork: new session, ParentID → snapshot. Counters reset to 0
+		//    so the child's stats reflect only post-compact activity.
+		child := m.opts.Session.Fork()
+		m.opts.Session = child
+		m.turns = 0
+		m.toolCalls = 0
 	}
 
 	// The user→assistant bootstrap pair is what upstream pi / Claude
@@ -576,11 +603,22 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 		},
 	})
 
+	// 3. Write summary messages to the child session.
 	m.persistSession()
 
-	return []tea.Cmd{tea.Println(styleMuted.Render(fmt.Sprintf(
-		"compacted: history replaced with summary (compact call used %d prompt + %d completion tokens)",
-		msg.usage.PromptTokens, msg.usage.CompletionTokens)))}
+	var notice string
+	if snapshotID != "" && m.opts.Session != nil {
+		notice = fmt.Sprintf(
+			"compacted: snapshot %s → continuing on %s (%d prompt + %d completion tokens)",
+			snapshotID, m.opts.Session.ID,
+			msg.usage.PromptTokens, msg.usage.CompletionTokens)
+	} else {
+		// --no-save: no fork, just report token cost.
+		notice = fmt.Sprintf(
+			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
+			msg.usage.PromptTokens, msg.usage.CompletionTokens)
+	}
+	return []tea.Cmd{tea.Println(styleMuted.Render(notice))}
 }
 
 // persistSession snapshots the agent's current message history,

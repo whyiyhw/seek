@@ -376,3 +376,87 @@ func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
 		t.Errorf("summary not folded into history: %q", hist[1].Content)
 	}
 }
+
+// TestCompact_ForkPreservesFullHistory verifies that handleCompactDone
+// writes the full history to a snapshot session and creates a child
+// session (ParentID → snapshot) containing only the summary pair.
+func TestCompact_ForkPreservesFullHistory(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{
+			"id":"x","model":"deepseek-chat",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"SUMMARY"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}
+		}`)
+	}))
+	defer srv.Close()
+
+	ag, _ := agent.New(agent.Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		InitialMessages: []deepseek.Message{
+			{Role: deepseek.RoleUser, Content: "msg1"},
+			{Role: deepseek.RoleAssistant, Content: "reply1"},
+			{Role: deepseek.RoleUser, Content: "msg2"},
+			{Role: deepseek.RoleAssistant, Content: "reply2"},
+		},
+	})
+
+	t.Setenv("SEEK_SESSIONS_DIR", t.TempDir())
+	store, err := session.NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	snap := session.New("deepseek-chat", "/tmp", "sys", false)
+	snap.Messages = ag.Messages()
+	if err := store.Save(snap); err != nil {
+		t.Fatalf("save initial session: %v", err)
+	}
+
+	m := emptyModel()
+	m.opts.Agent = ag
+	m.opts.Session = snap
+	m.opts.Store = store
+
+	// Run compact.
+	res := runHandler(t, m, "/compact")
+	done := res.extra().(compactDoneMsg)
+	if done.err != nil {
+		t.Fatalf("compact err: %v", done.err)
+	}
+
+	cmds := m.handleCompactDone(done)
+	if len(cmds) == 0 {
+		t.Error("expected at least one cmd from handleCompactDone")
+	}
+
+	// Child session should now be active with ParentID → snapshot.
+	child := m.opts.Session
+	if child.ID == snap.ID {
+		t.Fatal("session ID should have changed after compact fork")
+	}
+	if child.ParentID != snap.ID {
+		t.Errorf("child.ParentID = %q, want %q", child.ParentID, snap.ID)
+	}
+
+	// Agent history should be exactly the summary pair (+ system).
+	hist := ag.Messages()
+	if len(hist) != 3 {
+		t.Fatalf("post-compact history len = %d, want 3", len(hist))
+	}
+
+	// Snapshot session on disk must still hold the original full history.
+	loaded, err := store.Load(snap.ID)
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	// system + 4 conversation messages = 5
+	if len(loaded.Messages) != 5 {
+		t.Errorf("snapshot messages = %d, want 5", len(loaded.Messages))
+	}
+
+	// Counters reset to 0 after fork.
+	if m.turns != 0 || m.toolCalls != 0 {
+		t.Errorf("turns/toolCalls should reset after fork, got %d/%d", m.turns, m.toolCalls)
+	}
+}
