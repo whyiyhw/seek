@@ -250,25 +250,12 @@ func TestInstall_Project_SkipsSidecar(t *testing.T) {
 	}
 }
 
-// ---------- Install: stub for non-local types (M8.1b/c) ----------
-
-func TestInstall_HTTPS_NotImplementedYet(t *testing.T) {
-	// Until M8.1b lands, requesting an HTTPS source should fail
-	// loudly so users don't think it silently no-op'd.
-	_, err := Install(InstallOptions{
-		Source:  "https://example.com/foo.tar.gz",
-		UserDir: t.TempDir(),
-	})
-	if err == nil {
-		t.Fatal("expected not-implemented error")
-	}
-	if !strings.Contains(err.Error(), "not yet") &&
-		!strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("err = %v, want it to say not yet implemented", err)
-	}
-}
+// ---------- Install: git stub (M8.1c) ----------
 
 func TestInstall_Git_NotImplementedYet(t *testing.T) {
+	// HTTPS-tarball was lifted out of this stub in M8.1b. Git is the
+	// last remaining "not implemented" — exists so users don't think
+	// install silently no-op'd if they hand it a git URL today.
 	_, err := Install(InstallOptions{
 		Source:  "https://github.com/foo/bar",
 		UserDir: t.TempDir(),

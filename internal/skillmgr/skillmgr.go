@@ -152,9 +152,9 @@ func Install(opts InstallOptions) (*InstallResult, error) {
 			return nil, err
 		}
 	case SourceHTTPS:
-		// M8.1b will fill this in. Refuse loudly until then so users
-		// don't think their install silently succeeded.
-		return nil, errors.New("skillmgr: HTTPS tarball install is not yet implemented (M8.1b)")
+		if err := stageHTTPS(opts, staging); err != nil {
+			return nil, fmt.Errorf("skillmgr: %w", err)
+		}
 	case SourceGit:
 		return nil, errors.New("skillmgr: git install is not yet implemented (M8.1c)")
 	default:
