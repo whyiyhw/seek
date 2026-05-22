@@ -209,3 +209,132 @@ func TestSkillCmd_Update_AllEmpty(t *testing.T) {
 		t.Errorf("expected 'no managed skills' message; got %q", out)
 	}
 }
+
+// ---------- end-to-end ----------
+
+// TestEndToEnd_AnthropicStyleZeroSkillsLayout exercises PRD v2 §7
+// acceptance #11b: an Anthropic Agent Skills layout — SKILL.md +
+// references/ + examples/ — installs zero-modification, loads with
+// extended frontmatter parsed, and survives uninstall cleanly.
+//
+// The fixture mirrors what `zero-skills/` and similar published
+// packages look like in the wild. If a future change breaks this
+// path, the loader is no longer compatible with the ecosystem we
+// promised in PRD v2 §3 ("zero format invention").
+func TestEndToEnd_AnthropicStyleZeroSkillsLayout(t *testing.T) {
+	withSeekHome(t)
+	// loadAll uses CWD as ProjectDir; pin to a tempdir so the test
+	// doesn't pull in a real .seek/skills/ from the dev tree.
+	prev, _ := os.Getwd()
+	defer os.Chdir(prev)
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+
+	src := filepath.Join(t.TempDir(), "go-zero-skills")
+	files := map[string]string{
+		"SKILL.md": `---
+name: e2e-skill
+description: |
+  When the user asks how to integrate this knowledge base,
+  use the references and examples below.
+version: 1.2.3
+license: MIT
+author: e2e@example.com
+allowed-tools:
+  - Read
+  - Grep
+  - Bash
+keywords: [go, testing]
+---
+
+# Body
+
+See [API reference](references/api.md) and [example](examples/hello.md).
+`,
+		"references/api.md": "# API\nSome API docs.\n",
+		"examples/hello.md": "# Hello\nExample code.\n",
+		"README.md":         "# go-zero-skills\nUser-facing readme.\n",
+	}
+	for rel, content := range files {
+		full := filepath.Join(src, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// install
+	stdout, _, err := runSkill("install", src)
+	if err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+	if !strings.Contains(stdout, "installed e2e-skill") {
+		t.Errorf("install confirmation missing: %s", stdout)
+	}
+
+	skillsDir := filepath.Join(os.Getenv("SEEK_HOME"), "skills", "e2e-skill")
+	for _, rel := range []string{"SKILL.md", "references/api.md", "examples/hello.md", "README.md"} {
+		if _, err := os.Stat(filepath.Join(skillsDir, rel)); err != nil {
+			t.Errorf("post-install missing %s: %v", rel, err)
+		}
+	}
+
+	// list
+	stdout, _, err = runSkill("list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "e2e-skill") {
+		t.Errorf("list didn't surface e2e-skill:\n%s", stdout)
+	}
+
+	// status — every recognised frontmatter field must round-trip
+	// to the report. This is the regression catch if anything in the
+	// parser, loader, or status renderer drops a field.
+	stdout, _, err = runSkill("status", "e2e-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"e2e-skill",
+		"package",         // Type
+		"1.2.3",           // Version
+		"MIT",             // License
+		"e2e@example.com", // Author
+		"Read",            // AllowedTools (recorded only)
+		"Grep",
+		"install_source", // .install.json was written
+		"local",          // source type
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("status missing %q:\n%s", want, stdout)
+		}
+	}
+
+	// SKILL.md body should preserve the markdown links pointing at
+	// references/ and examples/ — those subdirectories aren't
+	// flattened by the installer.
+	body, err := os.ReadFile(filepath.Join(skillsDir, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "[API reference](references/api.md)") {
+		t.Errorf("SKILL.md links to references/ broken:\n%s", body)
+	}
+
+	// uninstall round-trips cleanly — the install record's source
+	// path doesn't leak into the user's working directory.
+	stdout, _, err = runSkill("uninstall", "e2e-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "uninstalled e2e-skill") {
+		t.Errorf("uninstall confirmation missing: %s", stdout)
+	}
+	if _, err := os.Stat(skillsDir); !os.IsNotExist(err) {
+		t.Errorf("skill dir still present after uninstall: %v", err)
+	}
+}
