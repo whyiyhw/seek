@@ -43,7 +43,8 @@ import (
 const systemPromptTpl = `You are seek, a DeepSeek-powered coding agent.
 
 Available tools:
-- read(path, offset?, limit?): read a file with line numbers. If path is a directory it falls back to a shallow listing — that's enough for most explorations. Use list_dir when you need depth>1 or hidden files.
+- read(path, offset?, limit?): read a file with line numbers. Always pass limit when reading an unfamiliar file; use grep first to find the relevant line range.
+- grep(pattern, path, context_lines?): search files by regex or literal string; returns matching lines with line numbers and surrounding context. Use this to locate a symbol or section, then follow up with read(offset, limit) for the precise range — avoids reading entire files into context.
 - list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Use this instead of 'bash ls' when you need depth or dotfiles.
 - write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
@@ -53,10 +54,11 @@ Available tools:
 - Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
 
 Workflow:
-1. Inspect the workspace with read before changing anything.
-2. For multi-step or risky tasks, call think first to plan; for non-trivial changes, call think(reflect=true) after to self-review.
-3. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
-4. For permission denials, surface the message to the user and stop — do not loop.
+1. Explore before reading: use grep to locate relevant symbols or sections, then read(offset, limit) for the specific range. Never read an entire file without a limit unless every line is needed.
+2. Inspect the workspace with read before changing anything.
+3. For multi-step or risky tasks, call think first to plan; for non-trivial changes, call think(reflect=true) after to self-review.
+4. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
+5. For permission denials, surface the message to the user and stop — do not loop.
 
 Working directory: %s. --yolo: %v.
 `
@@ -353,9 +355,8 @@ func stdinIsPiped() bool {
 
 // runPrint preserves the M3 print-mode behaviour: stream to stdout,
 // tool indicators + stats footer to stderr. Suitable for piping.
-// When activeSession + store are both non-nil, the session is saved
-// after the agent loop finishes — same persistence guarantee as the
-// TUI's auto-save on streamEnd.
+// The session is saved after every TurnEnd so a crash or interrupt
+// mid-run preserves progress up to the last completed turn.
 func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
@@ -371,6 +372,24 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		turns     int
 		toolCalls int
 	)
+
+	// saveTurn snapshots the current agent state to disk. Called after
+	// each TurnEnd so an interrupt preserves progress. Failures are
+	// warnings only — the answer already printed to stdout.
+	saveTurn := func() {
+		if activeSession == nil || store == nil {
+			return
+		}
+		activeSession.Messages = ag.Messages()
+		activeSession.Turns = turns
+		activeSession.ToolCalls = toolCalls
+		activeSession.Usage = tracker.Cumulative()
+		activeSession.Model = model
+		activeSession.Yolo = yolo
+		if err := store.Save(activeSession); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to save session after turn %d: %v\n", turns, err)
+		}
+	}
 
 	for ev := range ag.Prompt(ctx, text) {
 		switch e := ev.(type) {
@@ -397,10 +416,12 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 
 		case agent.TurnEnd:
 			tracker.Record(e.Usage)
+			turns++
+			toolCalls += e.ToolCalls
+			saveTurn()
 
 		case agent.AgentEnd:
-			turns = e.Turns
-			toolCalls = e.ToolCalls
+			// turns/toolCalls already accumulated via TurnEnd above.
 
 		case agent.ErrorEvent:
 			fmt.Println()
@@ -426,21 +447,8 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 	fmt.Fprintf(os.Stderr, "est. cost:    %s (saved ~%d input tok via cache)\n",
 		pricing.FormatCost(cost), tracker.SavedTokens())
 
-	// Persist the session for -continue / -resume next time. Failure
-	// is reported but doesn't fail the whole command — the response
-	// was already printed.
-	if activeSession != nil && store != nil {
-		activeSession.Messages = ag.Messages()
-		activeSession.Turns = turns
-		activeSession.ToolCalls = toolCalls
-		activeSession.Usage = c
-		activeSession.Model = model
-		activeSession.Yolo = yolo
-		if err := store.Save(activeSession); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: failed to save session: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "session:      %s (--resume to continue)\n", activeSession.ID)
-		}
+	if activeSession != nil {
+		fmt.Fprintf(os.Stderr, "session:      %s (--resume to continue)\n", activeSession.ID)
 	}
 	return nil
 }
@@ -449,9 +457,12 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 // for -list. Tabular but plain-text (no lipgloss) so it pipes cleanly
 // into grep / awk.
 func printSessionList(store *session.Store) error {
-	infos, err := store.List()
+	infos, loadErrs, err := store.List()
 	if err != nil {
 		return err
+	}
+	for _, le := range loadErrs {
+		fmt.Fprintf(os.Stderr, "warning: skipped unreadable session: %v\n", le)
 	}
 	if len(infos) == 0 {
 		fmt.Println("no saved sessions in", store.Dir())

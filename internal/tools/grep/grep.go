@@ -27,7 +27,7 @@ var schemaBytes = []byte(`{
     "context_lines": {"type": "integer", "description": "Lines of context before and after each match. Default 3, max 10.", "minimum": 0, "maximum": 10},
     "fixed":         {"type": "boolean", "description": "Treat pattern as a literal string, not a regex. Default false."},
     "ignore_case":   {"type": "boolean", "description": "Case-insensitive matching. Default false."},
-    "max_matches":   {"type": "integer", "description": "Stop after this many matches. Default 50, max 200.", "minimum": 1, "maximum": 200}
+    "max_matches":   {"type": "integer", "description": "Stop after this many matches. Default 20, max 200. Increase only when a broad pattern returns too few results.", "minimum": 1, "maximum": 200}
   },
   "required": ["pattern", "path"],
   "additionalProperties": false
@@ -49,7 +49,7 @@ type Args struct {
 
 const (
 	defaultContextLines = 3
-	defaultMaxMatches   = 50
+	defaultMaxMatches   = 20
 	maxAllowedMatches   = 200
 	maxFileSizeBytes    = 2 * 1024 * 1024 // 2 MiB — skip binary/generated blobs
 )
@@ -126,6 +126,12 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		}
 		totalHits += countHits(blocks)
 		results = append(results, fileResult{path: f, matches: blocks})
+	}
+	// A single file can exhaust the quota without triggering the loop-top
+	// check. Catch it here so the LLM always gets a "capped" notice when
+	// results were cut short.
+	if totalHits >= a.MaxMatches {
+		capped = true
 	}
 
 	if totalHits == 0 {

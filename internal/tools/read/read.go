@@ -24,7 +24,7 @@ var schemaBytes = []byte(`{
   "properties": {
     "path":   {"type": "string", "description": "Absolute or repo-relative path to the file."},
     "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1.", "minimum": 1},
-    "limit":  {"type": "integer", "description": "Max number of lines to return. Defaults to 2000.", "minimum": 1, "maximum": 5000}
+    "limit":  {"type": "integer", "description": "Max number of lines to return. Defaults to 200. Pass a larger value only when you know you need more.", "minimum": 1, "maximum": 5000}
   },
   "required": ["path"],
   "additionalProperties": false
@@ -49,7 +49,7 @@ func (Tool) Description() string          { return description }
 func (Tool) Schema() json.RawMessage      { return schemaBytes }
 
 const (
-	defaultLimit = 2000
+	defaultLimit = 200
 	maxLimit     = 5000
 )
 

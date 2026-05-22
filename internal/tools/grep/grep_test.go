@@ -205,6 +205,40 @@ func TestGrep_UnknownFieldError(t *testing.T) {
 	}
 }
 
+func TestGrep_DefaultMaxMatchesCapsAt20(t *testing.T) {
+	// Build a file with defaultMaxMatches+5 matching lines.
+	// Calling grep without an explicit max_matches must stop at defaultMaxMatches
+	// and include a "capped" notice so the LLM knows there are more results.
+	root := t.TempDir()
+	total := defaultMaxMatches + 5
+	var sb strings.Builder
+	for i := range total {
+		fmt.Fprintf(&sb, "func Hit%d() {}\n", i)
+	}
+	p := filepath.Join(root, "hits.go")
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, Args{Pattern: "func Hit", Path: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "capped") {
+		t.Errorf("expected capped notice for %d matches with default limit %d:\n%s", total, defaultMaxMatches, out)
+	}
+	// Count match lines (lines starting with '>') — must equal defaultMaxMatches.
+	matchLines := 0
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, ">") {
+			matchLines++
+		}
+	}
+	if matchLines != defaultMaxMatches {
+		t.Errorf("got %d match lines, want %d:\n%s", matchLines, defaultMaxMatches, out)
+	}
+}
+
 func TestGrep_MatchLineMarkedWithArrow(t *testing.T) {
 	root := setup(t)
 	out, err := run(t, Args{Pattern: "func Foo", Path: filepath.Join(root, "a.go")})

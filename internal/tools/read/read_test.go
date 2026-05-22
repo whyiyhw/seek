@@ -3,6 +3,7 @@ package read
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,34 @@ func TestRead_DirectoryDegradesToListing(t *testing.T) {
 	body := strings.TrimSpace(strings.SplitN(out, "\n\n", 2)[0])
 	if idx := strings.Index(body, "sub/"); idx == -1 || strings.Index(body, "alpha.txt") < idx {
 		t.Errorf("expected sub/ before alpha.txt:\n%s", body)
+	}
+}
+
+func TestRead_DefaultLimitTruncatesLargeFile(t *testing.T) {
+	// Build a file with defaultLimit+10 lines — reading without an explicit
+	// limit must stop at defaultLimit and emit a TRUNCATED notice.
+	var sb strings.Builder
+	total := defaultLimit + 10
+	for i := range total {
+		fmt.Fprintf(&sb, "line%d\n", i+1)
+	}
+	p := writeFile(t, sb.String())
+
+	out, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+p+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "TRUNCATED") {
+		t.Errorf("expected TRUNCATED notice for %d-line file with default limit %d:\n%s", total, defaultLimit, out)
+	}
+	// The last emitted line should be defaultLimit, not total.
+	wantLast := fmt.Sprintf("%6d\tline%d", defaultLimit, defaultLimit)
+	if !strings.Contains(out, wantLast) {
+		t.Errorf("expected last emitted line %q:\n%s", wantLast, out)
+	}
+	unwanted := fmt.Sprintf("line%d", defaultLimit+1)
+	if strings.Contains(out, unwanted) {
+		t.Errorf("output should not contain line beyond default limit: %s", out)
 	}
 }
 
