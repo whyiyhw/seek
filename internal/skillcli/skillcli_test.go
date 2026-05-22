@@ -210,6 +210,69 @@ func TestSkillCmd_Update_AllEmpty(t *testing.T) {
 	}
 }
 
+// ---------- create ----------
+
+func TestSkillCmd_Create_HappyPath(t *testing.T) {
+	skillsDir := withSeekHome(t)
+	stdout, _, err := runSkill("create", "my-fresh", "--description", "trigger summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "scaffolded my-fresh") {
+		t.Errorf("output didn't confirm scaffold: %s", stdout)
+	}
+	for _, rel := range []string{"SKILL.md", "README.md", "references/.gitkeep"} {
+		if _, err := os.Stat(filepath.Join(skillsDir, "my-fresh", rel)); err != nil {
+			t.Errorf("missing %s: %v", rel, err)
+		}
+	}
+}
+
+func TestSkillCmd_Create_RequiresDescription(t *testing.T) {
+	withSeekHome(t)
+	_, _, err := runSkill("create", "naked")
+	if err == nil || !strings.Contains(err.Error(), "--description") {
+		t.Errorf("err = %v, want it to flag missing --description", err)
+	}
+}
+
+func TestSkillCmd_Create_RequiresName(t *testing.T) {
+	withSeekHome(t)
+	_, _, err := runSkill("create", "--description", "x")
+	if err == nil || !strings.Contains(err.Error(), "<name>") {
+		t.Errorf("err = %v, want it to flag missing name", err)
+	}
+}
+
+func TestSkillCmd_Create_RefusesExisting(t *testing.T) {
+	skillsDir := withSeekHome(t)
+	if _, _, err := runSkill("create", "dup", "--description", "first"); err != nil {
+		t.Fatal(err)
+	}
+	// Marker file inside the existing skill dir — proves the
+	// second create didn't touch the directory.
+	marker := filepath.Join(skillsDir, "dup", "MARKER")
+	if err := os.WriteFile(marker, []byte("untouched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runSkill("create", "dup", "--description", "second")
+	if err == nil {
+		t.Fatal("expected refusal for existing target")
+	}
+	if data, _ := os.ReadFile(marker); string(data) != "untouched" {
+		t.Errorf("create overwrote existing dir; marker=%q", data)
+	}
+}
+
+func TestSkillCmd_Create_Alias_New(t *testing.T) {
+	// `new` as a synonym — matches `cargo new` / `npm init` /
+	// `git init` muscle memory.
+	withSeekHome(t)
+	if _, _, err := runSkill("new", "alias-pkg", "--description", "x"); err != nil {
+		t.Errorf("`seek skill new` aliasing broke: %v", err)
+	}
+}
+
 // ---------- end-to-end ----------
 
 // TestEndToEnd_AnthropicStyleZeroSkillsLayout exercises PRD v2 §7

@@ -51,6 +51,8 @@ func runSkillCmd(args []string, stdout, stderr io.Writer) error {
 		return cmdSkillStatus(rest, stdout, stderr)
 	case "stats":
 		return cmdSkillStats(rest, stdout, stderr)
+	case "create", "new":
+		return cmdSkillCreate(rest, stdout, stderr)
 	case "help", "--help", "-h":
 		printSkillHelp(stdout)
 		return nil
@@ -75,6 +77,7 @@ Commands:
   list                   Show every loaded skill (source, type, call count, last used)
   status <name>          Detailed view of one skill: source path, install record, shadowing, stats
   stats                  Top-N skills by call count (default --top 10 --since 30d)
+  create <name>          Scaffold a new skill package (SKILL.md + references/ + README.md)
 
 Run 'seek skill <command> --help' for command-specific flags.`)
 }
