@@ -319,8 +319,8 @@ func TestList_CollectsLoadErrors(t *testing.T) {
 	good := New("m", ".", "", false)
 	mustSave(t, store, good)
 
-	// Write a corrupt JSON file that looks like a session file.
-	corrupt := filepath.Join(store.Dir(), "20260101-000000-aabbcc.json")
+	// Write a corrupt JSONL file that looks like a session file.
+	corrupt := filepath.Join(store.Dir(), "20260101-000000-aabbcc.jsonl")
 	if err := os.WriteFile(corrupt, []byte("not json {{{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -344,17 +344,30 @@ func mustSave(t *testing.T, s *Store, sess *Session) {
 	}
 }
 
-// saveDirect writes session JSON directly to the store directory without
-// calling Touch(), preserving controlled timestamps for tests that need
-// to set UpdatedAt to a specific value.
+// saveDirect writes a session as JSONL directly to the store directory
+// without calling Touch(), preserving controlled timestamps for tests
+// that need to set UpdatedAt to a specific value (Store.Save would
+// otherwise overwrite UpdatedAt with time.Now()).
+//
+// Mirrors Store.Save's wire format: line 1 is the header (Messages
+// nil so omitempty drops the key), lines 2..N are one message each.
 func saveDirect(t *testing.T, s *Store, sess *Session) {
 	t.Helper()
-	data, err := json.MarshalIndent(sess, "", "  ")
+	path := filepath.Join(s.Dir(), sess.ID+".jsonl")
+	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(s.Dir(), sess.ID+".json")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	header := *sess
+	header.Messages = nil
+	if err := enc.Encode(&header); err != nil {
 		t.Fatal(err)
+	}
+	for i := range sess.Messages {
+		if err := enc.Encode(&sess.Messages[i]); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

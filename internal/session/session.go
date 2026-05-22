@@ -15,9 +15,6 @@
 //     line; earlier lines are always valid.
 //   - grep/tail/jq friendly: standard ML dataset format.
 //
-// Legacy .json files (schema_version ≤ 1) are transparently loaded and
-// migrated on next Save.
-//
 // Trade-offs:
 //   - Save still rewrites the whole file atomically (temp + rename).
 //     True append optimisation is a follow-up; correctness first.
@@ -251,8 +248,7 @@ func (s *Store) Save(sess *Session) error {
 	return nil
 }
 
-// Load reads a session by ID. Tries the new .jsonl format first; falls
-// back to the legacy .json format for sessions written by older builds.
+// Load reads a session by ID.
 func (s *Store) Load(id string) (*Session, error) {
 	if id == "" {
 		return nil, errors.New("session: Load empty id")
@@ -263,25 +259,11 @@ func (s *Store) Load(id string) (*Session, error) {
 
 	path := filepath.Join(s.dir, id+".jsonl")
 	f, err := os.Open(path)
-	if err == nil {
-		defer f.Close()
-		return decodeJSONL(f, id)
-	}
-	if !os.IsNotExist(err) {
+	if err != nil {
 		return nil, fmt.Errorf("session: open %s.jsonl: %w", id, err)
 	}
-
-	// Legacy .json fallback.
-	legacyPath := filepath.Join(s.dir, id+".json")
-	data, err := os.ReadFile(legacyPath)
-	if err != nil {
-		return nil, fmt.Errorf("session: read %s: %w", id, err)
-	}
-	var out Session
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("session: decode %s: %w", id, err)
-	}
-	return &out, nil
+	defer f.Close()
+	return decodeJSONL(f, id)
 }
 
 // decodeJSONL decodes a JSONL session file: line 1 → header,
@@ -392,140 +374,41 @@ func (s *Store) List() ([]SessionInfo, []error, error) {
 }
 
 // collectIDs returns the unique session IDs present in the directory.
-// .jsonl files take precedence over .json: if both exist for the same
-// ID only one entry is returned (using the .jsonl version).
 func collectIDs(entries []os.DirEntry) []string {
-	seen := make(map[string]bool)
 	var ids []string
-	// First pass: .jsonl (canonical format).
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".jsonl")
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	// Second pass: legacy .json files not already covered by .jsonl.
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		id := strings.TrimSuffix(e.Name(), ".json")
-		if !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
+		ids = append(ids, strings.TrimSuffix(e.Name(), ".jsonl"))
 	}
 	return ids
 }
 
-// loadMeta reads only the session header (line 1 for JSONL; incremental
-// parse for legacy JSON) without allocating the full message history.
+// loadMeta reads only the session header (JSONL line 1) without
+// allocating the full message history.
 func (s *Store) loadMeta(id string) (SessionInfo, error) {
 	if strings.ContainsAny(id, "/\\.") {
 		return SessionInfo{}, fmt.Errorf("session: invalid id %q", id)
 	}
 
-	// Try JSONL: only decode line 1 — messages not loaded.
 	path := filepath.Join(s.dir, id+".jsonl")
 	f, err := os.Open(path)
-	if err == nil {
-		defer f.Close()
-		var sess Session
-		if decErr := json.NewDecoder(f).Decode(&sess); decErr != nil {
-			return SessionInfo{}, fmt.Errorf("session: decode header %s: %w", id, decErr)
-		}
-		return SessionInfo{
-			ID:        sess.ID,
-			CreatedAt: sess.CreatedAt,
-			UpdatedAt: sess.UpdatedAt,
-			Model:     sess.Model,
-			Turns:     sess.Turns,
-			ToolCalls: sess.ToolCalls,
-			ParentID:  sess.ParentID,
-		}, nil
-	}
-	if !os.IsNotExist(err) {
+	if err != nil {
 		return SessionInfo{}, fmt.Errorf("session: open %s.jsonl: %w", id, err)
 	}
-
-	// Legacy .json fallback: incremental parse skips messages array.
-	return s.loadMetaLegacyJSON(id)
-}
-
-// loadMetaLegacyJSON is the incremental-parser path for old .json
-// sessions. It skips the messages array without allocating it.
-func (s *Store) loadMetaLegacyJSON(id string) (SessionInfo, error) {
-	f, err := os.Open(filepath.Join(s.dir, id+".json"))
-	if err != nil {
-		return SessionInfo{}, fmt.Errorf("session: open %s.json: %w", id, err)
-	}
 	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	tok, err := dec.Token()
-	if err != nil || tok != json.Delim('{') {
-		return SessionInfo{}, fmt.Errorf("session: invalid json in %s", id)
+	var sess Session
+	if decErr := json.NewDecoder(f).Decode(&sess); decErr != nil {
+		return SessionInfo{}, fmt.Errorf("session: decode header %s: %w", id, decErr)
 	}
-	var info SessionInfo
-	for dec.More() {
-		key, err := dec.Token()
-		if err != nil {
-			return info, fmt.Errorf("session: key in %s: %w", id, err)
-		}
-		switch key.(string) {
-		case "id":
-			_ = dec.Decode(&info.ID)
-		case "created_at":
-			_ = dec.Decode(&info.CreatedAt)
-		case "updated_at":
-			_ = dec.Decode(&info.UpdatedAt)
-		case "model":
-			_ = dec.Decode(&info.Model)
-		case "turns":
-			_ = dec.Decode(&info.Turns)
-		case "tool_calls":
-			_ = dec.Decode(&info.ToolCalls)
-		case "parent_id":
-			_ = dec.Decode(&info.ParentID)
-		default:
-			if err := skipJSONValue(dec); err != nil {
-				return info, err
-			}
-		}
-	}
-	return info, nil
-}
-
-// skipJSONValue advances the decoder past the next JSON value without
-// allocating Go objects. Handles nested objects and arrays.
-func skipJSONValue(dec *json.Decoder) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	d, ok := tok.(json.Delim)
-	if !ok {
-		return nil // scalar already consumed
-	}
-	closing := json.Delim('}')
-	if d == '[' {
-		closing = ']'
-	}
-	for dec.More() {
-		if err := skipJSONValue(dec); err != nil {
-			return err
-		}
-	}
-	endTok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	if endTok.(json.Delim) != closing {
-		return fmt.Errorf("session: mismatched delimiters")
-	}
-	return nil
+	return SessionInfo{
+		ID:        sess.ID,
+		CreatedAt: sess.CreatedAt,
+		UpdatedAt: sess.UpdatedAt,
+		Model:     sess.Model,
+		Turns:     sess.Turns,
+		ToolCalls: sess.ToolCalls,
+		ParentID:  sess.ParentID,
+	}, nil
 }
