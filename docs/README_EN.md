@@ -20,10 +20,35 @@
 
 ## Quick start
 
-```bash
-# Install
-go install github.com/whyiyhw/seek/cmd/seek@latest
+### Install
 
+**Option 1: prebuilt binary (recommended — no Go toolchain needed)**
+
+macOS / Linux one-liner that pulls the latest release:
+
+```bash
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+VER=$(curl -fsSL https://api.github.com/repos/whyiyhw/seek/releases/latest | sed -nE 's/.*"tag_name":[[:space:]]*"v([^"]+)".*/\1/p')
+curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER}_${OS}_${ARCH}.tar.gz" \
+  | sudo tar -xz -C /usr/local/bin seek
+```
+
+Don't want `sudo`? Pick a writable directory on your `PATH`, e.g. `tar -xz -C ~/.local/bin seek`. Subsequent updates use `seek -upgrade` for an atomic in-place replace — no need to re-run the curl line.
+
+Windows: grab `seek_*_windows_amd64.zip` from the [Releases page](https://github.com/whyiyhw/seek/releases/latest) and unpack it.
+
+> **macOS Gatekeeper note**: Safari/Chrome downloads get the `com.apple.quarantine` xattr and Gatekeeper will block first-run. The `curl | tar` pipeline above does **not** trigger this; if you already hit it, run `xattr -d com.apple.quarantine seek` to clear it.
+
+**Option 2: install from source (requires Go 1.25+)**
+
+```bash
+go install github.com/whyiyhw/seek/cmd/seek@latest
+```
+
+### Run
+
+```bash
 # Set your API key
 export DEEPSEEK_API_KEY=sk-...
 
@@ -34,8 +59,19 @@ seek
 seek -p "Explain this project in one sentence."
 ```
 
-See [`docs/`](./docs/) for sessions, MCP, and skills guides.  
+See [`docs/`](./) for sessions, MCP, and skills guides.  
 See `?` inside the TUI for all key bindings and slash commands.
+
+## Upgrade
+
+```bash
+seek -upgrade-check   # is a newer release out? read-only, never touches the binary
+seek -upgrade         # pull the latest release, verify sha256, replace in place
+seek -upgrade-dry-run # run download + checksum verification, skip the final replace
+```
+
+`seek -upgrade` downloads the platform binary directly from [GitHub Releases](https://github.com/whyiyhw/seek/releases), verifies its sha256 against the release's `checksums.txt`, and atomically replaces the running binary. Local `go build`-style dev binaries are refused by default (use `-upgrade-force` to override). From inside the TUI you can also type `/upgrade`.  
+Disable the startup version-check probe: `export SEEK_NO_UPGRADE_CHECK=1`.
 
 ## Roadmap
 
