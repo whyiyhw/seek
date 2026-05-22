@@ -238,6 +238,46 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+### Cumulative prompt tokens are meaningless as a context-limit signal
+- **Saw**: the ctx% indicator in the status bar climbed past 100% after ~55 turns even though the actual context window (the most recent full prompt) was well within the 1M limit
+- **Why**: `Tracker.Cumulative().PromptTokens` is the sum of ALL turns' prompt tokens. Because each turn resends the full history, this sum grows as O(turns²): turn 1 = 10k, turn 2 = 20k, … turn 55 = 550k, sum = 15M. The actual per-turn cost grows linearly, not exponentially
+- **Fix**: status bar now uses `Tracker.Last().PromptTokens` — the most recently completed turn's prompt token count, which is the correct "how full is the window right now?" signal. Commit `e240ea5`
+- **Lesson**: when a multi-turn LLM client re-sends full history every time, "cumulative prompt tokens" is not a budget signal — it's an accounting artifact. Always budget against the per-turn value
+- **Refs**: `internal/cache/cache.go:Tracker`, `internal/tui/view.go:renderStatusBar`
+
+### `finish_reason="length"` looks like a normal stop
+- **Saw**: long analysis responses were silently truncated; the TUI appeared to finish normally, the model's answer was mid-sentence, and the user had no indication that the response was cut
+- **Why**: `finish_reason="length"` means the model hit `max_tokens` and stopped generating — not that the answer was complete. The original code treated `"length"` identically to `"stop"`
+- **Fix**: `runTurnDeepSeek` now emits an `ErrorEvent` on `finish_reason="length"`: "response truncated (finish_reason=length, max_tokens=N) — use /compact to free context or ask me to continue". Also raised `MaxTokens` default from server default (~4096) to 8192. Commit `e240ea5`
+- **Lesson**: check every possible `finish_reason` value against the API docs; "stop" is the only one that means "normal completion". All others need surfacing
+
+---
+
+## LLM provider quirks (M6)
+
+### Anthropic requires consecutive tool results merged into ONE user message
+- **Saw**: sending separate `role="user"` messages each containing a single `tool_result` block returned 400: "tool_result blocks must all appear in the same user message"
+- **Why**: Anthropic's Messages API has a uniqueness constraint: a `tool_result` content block can only appear inside a user message, AND all `tool_result` blocks that respond to the same assistant turn must be in a single user message. Separate messages violate this even if they are logically sequential
+- **Fix**: `buildRequest()` in `pkg/llm/provider/anthropic/client.go` scans ahead: when it sees a `role="tool"` message, it collects ALL consecutive `role="tool"` messages and folds them into one user message with a `[]contentBlock` array. Commit `a1fde05`
+- **Lesson**: Anthropic's message format is not the same shape as OpenAI's even where they look similar. Tool results in particular have hard structural constraints — don't assume "one message per tool result" works
+- **Refs**: `pkg/llm/provider/anthropic/client.go:buildRequest`
+
+### Gemini omits tool call IDs; system message is `systemInstruction`, not a messages-array entry
+- **Saw**: two surprises at once when wiring Gemini: (1) function calls in the SSE stream had no `id` field, breaking the call-result pairing that every other provider relies on; (2) sending a `role="system"` message in the `contents` array returned 400
+- **Why**: (1) Gemini's `functionCall` part schema has `name` and `args` but no ID field — it assumes you correlate by turn position. (2) System context goes in a separate top-level `systemInstruction` field, not in `contents`
+- **Fix**: (1) IDs are generated deterministically as `gemini_0`, `gemini_1`, … by incrementing a `toolIdx` counter during SSE parsing. (2) `buildGeminiRequest` inspects the first message: if `role=="system"` it extracts the content to `SystemInstruction` and shifts the rest into `contents`. Commit `a1fde05`
+- **Lesson**: read the Gemini API shape end-to-end, not the OpenAI-compat docs. Function calling and system instructions are different enough that assuming an OpenAI mental model will bite you on both
+- **Refs**: `pkg/llm/provider/gemini/client.go:buildRequest`, `client.go` SSE parser
+
+### OpenAI streaming token counts require `stream_options: {include_usage: true}`
+- **Saw**: the `TurnDone.InputTokens / OutputTokens` fields were always 0 when using the OpenAI provider over a streaming call
+- **Why**: by default, OpenAI's streaming endpoint does not include a usage chunk. You must explicitly opt in with `"stream_options": {"include_usage": true}` in the request body; only then does a final data chunk arrive with the `usage` field populated
+- **Fix**: all `openAIRequest` bodies include `StreamOptions: streamOptions{IncludeUsage: true}`. Commit `a1fde05`
+- **Lesson**: OpenAI-compatible providers often require explicit opt-in for features that other providers include by default. Scan the request body options for anything labelled "include_*" or "with_*"
+- **Refs**: `pkg/llm/provider/openai/client.go:openAIRequest`
+
+---
+
 ## Reading order for newcomers
 
 If you're new to the project, skim entries in this order:
