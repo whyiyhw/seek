@@ -339,6 +339,19 @@ Extension 完全走 **MCP（Model Context Protocol）**：
 - 分支：会话 ID + parent_id 链
 - 压缩：`/compact` 调用一次 LLM 摘要替换历史前缀（行为对齐上游）
 
+### 4.5.1 项目级指令：`AGENTS.md`
+
+CLAUDE.md 的同形机制，统一用业界中立的 `AGENTS.md` 文件名（Cursor / Aider / OpenAI Codex 均已收敛到这个约定）。
+
+- **发现**：启动时从 cwd 向上递归找 `AGENTS.md`，最多 5 层，第一个命中即停。
+- **注入**：找到的内容拼到 system prompt 末尾，标注 `# Project instructions (from <abs path>)`。位置在 Skill manifest 之前——「项目怎么做事」是 baseline，skill 是按需的工作流模板。
+- **大小约束**：硬上限 64 KB，超出截断并提示。AGENTS.md 是项目规范，不是文档库；几百行已经过分。
+- **关闭**：`--no-project-md` 完全跳过加载。
+- **不做**：合并多个文件、热加载、模板替换。AGENTS.md 是「启动时读一次」的纯文本——简单可预测优先。
+- **兼容**：不主动读 `CLAUDE.md` / `.cursorrules`。一个项目可以同时持有 `AGENTS.md` + `CLAUDE.md`（典型场景：本仓库就是），两份文件由项目维护者手动同步。
+
+实现：`internal/projectmd`。
+
 ### 4.6 Skill 加载机制（与 MCP 解耦）
 
 **重要前提**：Skill ≠ MCP。
@@ -647,7 +660,8 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | `/branch` 分叉（ParentID 链 + 独立消息副本 + 父 session 落盘） | ✅ | `3a0b6bf` |
 | `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | `3a0b6bf` |
 | Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | `2c53248` |
-| 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成（待真 API 验证） | 本次 |
+| 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成（待真 API 验证） | `dd1bcd0` |
+| `AGENTS.md` 自动加载（项目根向上 5 层，注入 system prompt，可 `--no-project-md` 关） | ✅ | 本次 |
 | MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
 | `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
 

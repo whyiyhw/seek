@@ -1,6 +1,6 @@
 # seek — project guide for AI assistants
 
-This file is read at the start of every Claude Code session in this repo. It mirrors [`AGENTS.md`](AGENTS.md), which **seek** itself auto-loads at startup; keep both in sync when editing either.
+This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here. [`CLAUDE.md`](CLAUDE.md) mirrors this content for Claude Code; keep both in sync.
 
 Treat the instructions below as mandatory project conventions.
 

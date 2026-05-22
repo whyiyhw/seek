@@ -20,6 +20,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/projectmd"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -76,6 +77,7 @@ func run() error {
 		cont     = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave   = flag.Bool("no-save", false, "do not persist this session to disk")
 		list     = flag.Bool("list", false, "list saved sessions and exit")
+		noProj   = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
 	)
 	flag.Parse()
 
@@ -155,6 +157,22 @@ func run() error {
 	client := deepseek.New(deepseek.WithAPIKey(apiKey))
 	tracker := cache.New()
 
+	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
+	// (permission denied on a real file) are reported but non-fatal —
+	// the rest of seek still works without project instructions.
+	var projMD projectmd.Result
+	if !*noProj {
+		pm, perr := projectmd.Load(cwd)
+		if perr != nil {
+			fmt.Fprintln(os.Stderr, "project-md:", perr)
+		}
+		projMD = pm
+		if projMD.Path != "" {
+			fmt.Fprintf(os.Stderr, "Loaded project instructions from %s (%d bytes%s)\n",
+				projMD.Path, projMD.Bytes, truncMarker(projMD.Truncate))
+		}
+	}
+
 	// Load skills before the system prompt is rendered — the manifest
 	// is appended below. Errors are non-fatal: a malformed user skill
 	// shouldn't lock the agent out of running.
@@ -178,6 +196,12 @@ func run() error {
 
 	abs, _ := filepath.Abs(cwd)
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
+	// Project instructions go BEFORE the skill manifest: they describe
+	// "how this repo expects you to work" while skills are workflow
+	// templates. Ordering matches the model's likely reading priority.
+	if section := projMD.Section(); section != "" {
+		systemPrompt = systemPrompt + "\n" + section
+	}
 	if manifest := skills.Manifest(); manifest != "" {
 		systemPrompt = systemPrompt + "\n" + manifest
 	}
@@ -266,10 +290,18 @@ func run() error {
 		Skills:       skills,
 
 		RebuildAgent: func() (*agent.Agent, error) {
-			// /reset rebuilds the agent; we have to re-apply the skill
-			// manifest, otherwise the model would forget which skills
-			// exist after a reset.
+			// /reset rebuilds the agent; we have to re-apply project
+			// instructions AND the skill manifest, otherwise the model
+			// would forget both after a reset. AGENTS.md is loaded
+			// once at startup and reused (re-reading on /reset would
+			// surprise users who edit the file mid-session — we want
+			// the file's behaviour to be "loaded at launch", not "hot-
+			// reloaded"; documented behaviour is easier to reason
+			// about than clever).
 			sp := fmt.Sprintf(systemPromptTpl, abs, policy.Yolo())
+			if section := projMD.Section(); section != "" {
+				sp = sp + "\n" + section
+			}
 			if manifest := skills.Manifest(); manifest != "" {
 				sp = sp + "\n" + manifest
 			}
@@ -452,6 +484,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+func truncMarker(t bool) string {
+	if t {
+		return ", truncated"
+	}
+	return ""
 }
 
 // detectGlamourStyle picks "dark" or "light" for the TUI's Markdown
