@@ -190,6 +190,27 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			}
 			totalUsage = sumUsage(totalUsage, usage)
 
+			// Invariant: tool_calls in the assistant message MUST be
+			// confirmed by finish_reason="tool_calls". Anything else
+			// (server hang-up before [DONE], SSE decode error, server
+			// emitting finish="stop" alongside tool_calls) means the
+			// tool_call_ids are unverified and persisting them would
+			// orphan them — DeepSeek then rejects every subsequent
+			// turn with "An assistant message with 'tool_calls' must
+			// be followed by tool messages …". Drop the whole turn
+			// and surface an error; the user can retry.
+			//
+			// The ctx-cancel path above is the gentle case (no error
+			// surfaced because the user already knows they hit Esc);
+			// this branch handles every other path to the same bad
+			// state.
+			if len(assistant.ToolCalls) > 0 && finish != "tool_calls" {
+				out <- ErrorEvent{Err: fmt.Errorf(
+					"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
+					len(assistant.ToolCalls), finish)}
+				return
+			}
+
 			a.messages = append(a.messages, assistant)
 			out <- MessageEnd{Message: assistant}
 

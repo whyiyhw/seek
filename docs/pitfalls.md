@@ -81,6 +81,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when an LLM message carries `tool_calls`, it's a paired structure with matching `tool` messages — never persist the head without the tail. Any code path that can be interrupted between "assistant tool_calls emitted" and "all tools dispatched" needs to either complete the pair (synthesize stub tool results) or discard the head
 - **Refs**: `pkg/agent/agent.go:runTurn`, `internal/session/session.go:Repair`
 
+### Followup: ctx-cancel was one of FOUR paths to the same orphan state
+- **Saw**: the original 986a485 fix only covered user-cancel. Boundary stress tests added later proved three more routes to identical corruption: server hangs up without `[DONE]`, SSE chunk fails JSON decode, server emits `finish_reason="stop"` alongside `tool_calls` (against spec but possible through proxies). All produced the same orphan `tool_calls` in history; all were undetectable by the original cancel-path test alone
+- **Why**: the invariant lives at the `tool_calls ↔ finish_reason` coupling, not at "ctx was cancelled". Any path that returns from `runTurn` with `len(ToolCalls)>0 && finish != "tool_calls"` is corrupt. The original fix happened to address one cause (ctx-cancel sets `finish=""` indirectly via the stream's premature close); the others share the symptom but not the cause
+- **Fix**: explicit invariant check in `Prompt` between `runTurn` and the append: refuse to commit a turn whose tool_calls don't match its finish_reason, emit `ErrorEvent` instead. Commit `<this one>`
+- **Lesson**: when fixing a bug whose symptom is a state-shape violation, write the test against the SHAPE not the cause. "Pressed Esc → history broken" is the cause-shaped test; "any path that produces tool_calls without finish=tool_calls → history broken" is the shape-shaped one. The shape-shaped version generalises and catches the regressions the cause-shaped one misses
+- **Refs**: `pkg/agent/agent.go` Prompt invariant check; test battery `TestAgent_StreamTruncatedMidToolCall`, `TestAgent_FinishReasonMismatch_DropsOrphanToolCalls`, `TestAgent_DecodeErrorMidStream_DropsTurn`, `TestAgent_MultiTurn_RoundTripsCleanHistory`
+
 ## DeepSeek API
 
 ### Reasoner rejects requests that retain prior `reasoning_content`
