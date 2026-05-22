@@ -359,6 +359,137 @@ ctxPct = 100 * tracker.Cumulative().PromptTokens / contextLimit
 
 ---
 
+## 8.8 mid-stream 输入：queue 与 steer
+
+§8.2 给了用户一个"完全停下"的开关——Esc。但用 seek 用久了会发现：很多时候你**不想停**，你想**加点东西**。
+
+具体场景：
+
+> 你让 seek 实现一个新功能，它读了 5 个文件，调了 `grep` 几次，正在写第一个 Go 函数。你看到一半，意识到："等等，先别动 `internal/server/`，那个文件下午要 freeze。" 现在按 Esc → cancel 所有进度→ 重新打整段需求，浪费两分钟。
+
+或者反过来：
+
+> 你让 seek 跑一个长任务。中途你想到："对了，做完之后跑一下 `go test ./...` 确认没坏。" 你不想现在打断它，但又怕等它跑完忘了说。
+
+第一种是**改向**——立刻打断当前 turn，把新指令作为下一条 user 消息。第二种是**排队**——不打断，等当前 agent loop 跑到 `finish_reason=stop` 自动把新指令作为下一轮发出。
+
+两个动作语义上正交，键位上需要区分。
+
+### 复用 §8.2 的闭环
+
+好消息：**改向**这条路径上需要的所有基础设施 §8.2 已经搭好了——`cancelStream()` 触发 ctx 取消、agent 在 `ctx.Err()` 上 bail、不变量检查砍掉半截 `tool_calls`、加载时 `Repair` 兜底。**改向只是"Esc + 自动发新 prompt"**——不需要新闭环，需要的是一个 callback：
+
+```go
+// pseudo: streamEndMsg 处理时
+if m.pendingSteerText != "" {
+    cmds = append(cmds, tea.Println("  ↪ steered"))
+    return m.submit(m.pendingSteerText)
+}
+```
+
+`pendingSteerText` 在用户按 Alt+Enter 时被 set，同时调 `cancelStream()`。等流真正排空（`streamEndMsg` 触发），第 8.2 节那条"等 streamEndMsg 才清 cancelStream"的纪律保证此时 agent 已经干净退出，submit 一个新 prompt 是从干净历史开始的。
+
+**排队**则更简单——它跟 §8.2 的中断毫不相关。`queuedText` 在用户按 Enter 时被 set；`streamEndMsg` 在 agent 自然结束（**不是 userCanceled**）时检查这个字段，非空就 submit。
+
+```go
+switch {
+case m.pendingSteerText != "":  // steer 优先
+    // ...
+case m.queuedText != "":        // 自然结束才 dispatch
+    // ...
+}
+```
+
+两个状态在同一个 dispatch 点处理，优先级明确——steer 覆盖 queue（用户敲了"不、改方向"之后，之前 queue 的内容就过时了）。
+
+### 键位选择：一个真实的设计迭代
+
+这一节背后有一个值得记的小教训。
+
+初版设计是：
+
+> Enter = queue（温和）、**Ctrl+Enter** = steer（显式打断）、Shift+Enter = 换行
+
+逻辑听起来合理：危险操作要有意触发，Ctrl 是修饰键，符合"需要明确意图"的纪律。
+
+落地之后立刻被反馈打回来——**Ctrl+Enter 在很多终端是 de-facto 换行**（终端把它映射成 LF / Ctrl+J）。把它改成 steer 意味着所有"按 Ctrl+Enter 换行"的肌肉记忆瞬间失效，用户敲一下当场打断 agent。即使 README 里写明了，第一次撞到的人都会想"为什么这破工具把我的 Ctrl+Enter 偷了"。
+
+最终键位：
+
+```
+streaming 中：
+  Enter         → queue（排队）
+  Alt+Enter     → steer（立刻打断）   ← 选这个，不是 Ctrl+Enter
+  Ctrl+Enter    → 换行（不动）
+  Ctrl+J        → 换行（不动）
+  Esc           → cancel + 清 queue + 清 steer
+```
+
+教训：**键位重叠是默认设计的隐性税**。一个看起来"对"的键位映射，可能踩在用户已经投资了多年肌肉记忆的另一个动作上。你不会从设计文档里发现它——文档不告诉你"用户的食指已经知道 Ctrl+Enter 是什么"。
+
+发现这种冲突的唯一办法是**真的让人用一下**——这正是第 15.2 节讲的自举的价值。这一节也是 polish-via-bootstrapping 的一个具体例子（commit `ae99baf`）。
+
+### Textarea 在 streaming 中不再 Blur
+
+要让 queue/steer 有意义，用户必须能**在 streaming 期间打字**。M4 期的 `submit` 在启动流时立刻调用 `m.input.Blur()`——把光标从输入框移开，textarea 不再接受字符。**这一行必须删**：
+
+```go
+func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+    // ...
+    m.streaming = true
+    m.streamStartTime = time.Now()
+    // m.input.Blur()   ← 这一行删掉
+    // ...
+}
+```
+
+同时 `handleKey` 末尾的 `if m.streaming { return m, nil }` 也要拆——streaming 中其它键要 forward 到 textarea 让用户能组合 queue/steer 内容；只有命令菜单 / 路径补全的 hookup 在 streaming 时跳过（那些命令 mid-stream 没意义）：
+
+```go
+var cmd tea.Cmd
+m.input, cmd = m.input.Update(msg)
+if !m.streaming {
+    m.updateCommandMenu()
+    m.updatePathCompleter()
+}
+```
+
+这是 §8.2 的延伸——§8.2 让 streaming 中能 cancel，§8.8 让 streaming 中能**编辑下一步**。两者都把"streaming 时 TUI 是只读"这个早期假设逐步翻掉。
+
+### `Esc 停一切` 的语义扩展
+
+§8.2 里 Esc 的语义是"cancel 当前 stream"。queue/steer 落地后，这条语义要扩展：
+
+```go
+case tea.KeyEsc:
+    if m.streaming && m.cancelStream != nil {
+        m.userCanceled = true
+        m.cancelStream()
+        m.queuedText = ""           // 新加
+        m.pendingSteerText = ""     // 新加
+    }
+```
+
+为什么要清？因为"Esc 停一切"是用户已经习惯的心智模型。如果 Esc 只 cancel 当前 stream 但留着 queue，用户的下一步操作可能是想着"我停了"，然后 agent loop 因为 queue 自动发了下一条——他会觉得 seek 在背后偷偷做事。
+
+**任何"latent state"（暂存但等会儿才会生效的状态）都必须在用户做出明确 stop 动作时被清空**。这跟第 13 章会讲的"诚实显示成本"是同一个家族的规则——用户看到的状态必须是真的。
+
+### 状态栏的视觉持续可见
+
+§8.7 讲过 status bar。queue/steer 多出一行 hint，放在 textarea **上方**：
+
+```
+↰ queued: 还要跑一下 go test 确认没坏
+> _                                              ← textarea
+status: ● 4.2s · ↓~312tok · ctx 28% · ...
+```
+
+上方而不是下方是有意的——状态栏是关于 agent 的，textarea 是关于"我现在在打什么"，hint 是关于"我已经打完准备发的"。三层从下往上对应"系统状态 / 现在 / 即将发生"——读者的视觉扫描方向自然。
+
+streamEndMsg 派发时另外打印一行 `↪ <preview>`（queue）或 `↪ steered`（steer）到 scrollback——hint 是"暂存中"的指示器，scrollback 那一行是"已发生"的永久记录。两个层次，不重复也不遗漏。
+
+---
+
 ## 本章小结
 
 - Esc 中断的闭环有三层：TUI 持有子 ctx 的 cancel，Agent 在 ctx.Err 上 bail，加载时 Repair 兜底。`userCanceled` 标志让 TUI 能正确处理"取消后到流真正结束"之间的尾巴 event
@@ -367,9 +498,11 @@ ctxPct = 100 * tracker.Cumulative().PromptTokens / contextLimit
 - top-level `var` slice + 互相引用的 func = init cycle。把 var 降级为 func 是最干净的解
 - `/` 命令菜单和 `@` 路径补全用同一套打开/过滤/接受的模式，差异只在数据源
 - 状态栏的"4.2s"靠 `tea.Tick` 自维持周期；`ctx%` 必须用 `Last()` 而非 `Cumulative()`，原因第 13 章讲
+- mid-stream queue / steer 复用 §8.2 的 cancel 闭环 + 一个 callback；Enter = 排队等 `finish_reason=stop`，Alt+Enter = 立刻打断重发；不抢 Ctrl+Enter 的换行肌肉记忆是被用户反馈纠正出来的，**键位重叠是默认设计的隐性税**
+- 任何 "latent state"（queue / pending steer 这类暂存状态）必须在用户按 Esc 时一起清空——否则"我停了" 这条心智模型会撒谎
 
 下一章进入 M5.1：会话持久化。我们会看到为什么单文件 JSON 是错的、为什么 JSONL 是对的、schema_version 怎么把旧文件透明迁移过去，以及 `loadMeta` 这个"只读第一行"的小优化为什么让 `--list` 子命令的延迟从感知得到变成感知不到。
 
 ---
 
-*对应 commit：`a38bfd0` (Esc + tool 计时)、`7c96bd7` (per-call 审批)、`5f6b316` (slash 菜单)、`edf443c` (@ 路径补全)、`d038455` (历史 + token 告警)、`08449cd` (init cycle 修复)、`73c5f3d` (Policy race fix)。运行 `go test -race ./internal/tui/... ./internal/permission/...` 验证。*
+*对应 commit：`a38bfd0` (Esc + tool 计时)、`7c96bd7` (per-call 审批)、`5f6b316` (slash 菜单)、`edf443c` (@ 路径补全)、`d038455` (历史 + token 告警)、`08449cd` (init cycle 修复)、`73c5f3d` (Policy race fix)、`ae99baf` (mid-stream queue / steer)。运行 `go test -race ./internal/tui/... ./internal/permission/...` 验证。*

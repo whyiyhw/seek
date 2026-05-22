@@ -95,6 +95,7 @@
 - 8.5 `@` 路径补全
 - 8.6 prompt 历史：上下方向键翻
 - 8.7 状态栏：streaming 计时 + token 估算
+- 8.8 mid-stream 输入：queue 与 steer
 
 ---
 
