@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -71,34 +72,18 @@ const (
 	contentCap   = 4000
 )
 
+// Execute runs think in non-streaming mode. The agent prefers
+// ExecuteStream when wiring a streaming-capable tool, so this is the
+// fallback path for callers (and tests) that don't want a delta
+// channel — same semantics, same returned string.
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a Args
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("think: bad arguments: %w", err)
+	a, sys, userMsg, err := parseArgs(raw)
+	if err != nil {
+		return "", err
 	}
-	if a.Task == "" {
-		return "", fmt.Errorf("think: task is required")
-	}
+	_ = a
 
-	sys := planSystem
-	if a.Reflect {
-		sys = reflectSystem
-	}
-
-	userParts := []string{a.Task}
-	if a.Context != "" {
-		userParts = append(userParts, "\n--- context ---\n"+a.Context)
-	}
-
-	resp, err := t.client.Chat(ctx, &deepseek.ChatRequest{
-		Model: deepseek.ModelV4Flash,
-		Messages: []deepseek.Message{
-			{Role: deepseek.RoleSystem, Content: sys},
-			{Role: deepseek.RoleUser, Content: strings.Join(userParts, "\n")},
-		},
-		Thinking:        &deepseek.ThinkingMode{Type: "enabled"},
-		ReasoningEffort: "high",
-	})
+	resp, err := t.client.Chat(ctx, buildRequest(sys, userMsg))
 	if err != nil {
 		return "", fmt.Errorf("think: reasoner call: %w", err)
 	}
@@ -106,8 +91,98 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return "", fmt.Errorf("think: reasoner returned no choices")
 	}
 	msg := resp.Choices[0].Message
-
 	return formatResult(msg.ReasoningContent, msg.Content, resp.Usage), nil
+}
+
+// ExecuteStream is the same call as Execute but uses ChatStream so the
+// reasoner's chain-of-thought reaches the TUI as it arrives. Deltas
+// land on `deltas` with Reasoning=true for reasoning_content chunks
+// and Reasoning=false for final-answer content chunks. The returned
+// string is byte-identical to what Execute would have produced for the
+// same model output, so the tool result message in history is
+// unaffected by whether the agent took the streaming path.
+//
+// The caller (agent.dispatchTool) owns the deltas channel and closes
+// it after we return.
+func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, deltas chan<- tools.StreamDelta) (string, error) {
+	_, sys, userMsg, err := parseArgs(raw)
+	if err != nil {
+		return "", err
+	}
+
+	stream, err := t.client.ChatStream(ctx, buildRequest(sys, userMsg))
+	if err != nil {
+		return "", fmt.Errorf("think: reasoner call: %w", err)
+	}
+
+	var (
+		reasoning strings.Builder
+		content   strings.Builder
+		usage     deepseek.Usage
+	)
+	for ev := range stream {
+		switch ev.Type {
+		case deepseek.EventReasoningDelta:
+			reasoning.WriteString(ev.Delta)
+			select {
+			case deltas <- tools.StreamDelta{Delta: ev.Delta, Reasoning: true}:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		case deepseek.EventDelta:
+			content.WriteString(ev.Delta)
+			select {
+			case deltas <- tools.StreamDelta{Delta: ev.Delta, Reasoning: false}:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		case deepseek.EventDone:
+			usage = ev.Usage
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	return formatResult(reasoning.String(), content.String(), usage), nil
+}
+
+// parseArgs unmarshals and validates the tool's JSON arguments,
+// returning the structured Args plus the assembled (system prompt,
+// user message) pair both Execute paths use. Pulled out so Execute
+// and ExecuteStream stay byte-identical in their wire formatting —
+// which is what keeps the prefix cache happy when an agent toggles
+// between the two paths.
+func parseArgs(raw json.RawMessage) (Args, string, string, error) {
+	var a Args
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return a, "", "", fmt.Errorf("think: bad arguments: %w", err)
+	}
+	if a.Task == "" {
+		return a, "", "", fmt.Errorf("think: task is required")
+	}
+	sys := planSystem
+	if a.Reflect {
+		sys = reflectSystem
+	}
+	userParts := []string{a.Task}
+	if a.Context != "" {
+		userParts = append(userParts, "\n--- context ---\n"+a.Context)
+	}
+	return a, sys, strings.Join(userParts, "\n"), nil
+}
+
+func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
+	return &deepseek.ChatRequest{
+		Model: deepseek.ModelV4Flash,
+		Messages: []deepseek.Message{
+			{Role: deepseek.RoleSystem, Content: sys},
+			{Role: deepseek.RoleUser, Content: userMsg},
+		},
+		Thinking:        &deepseek.ThinkingMode{Type: "enabled"},
+		ReasoningEffort: "high",
+	}
 }
 
 func formatResult(reasoning, content string, u deepseek.Usage) string {

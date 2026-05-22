@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -126,6 +128,134 @@ func TestThink_MissingTask(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "task is required") {
 		t.Errorf("err = %v", err)
 	}
+}
+
+// thinkingSSE serves a deepseek-style SSE stream that interleaves
+// reasoning_content and content deltas, then a final usage chunk and
+// [DONE]. Mirrors what a real V4-Flash with thinking=enabled emits.
+func thinkingSSE(t *testing.T, reasoningDeltas, contentDeltas []string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body deepseek.ChatRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if !body.Stream {
+			t.Errorf("ExecuteStream did not set Stream=true on the request")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+
+		for _, d := range reasoningDeltas {
+			b, _ := json.Marshal(d)
+			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"reasoning_content":`+string(b)+`}}]}`+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		for _, d := range contentDeltas {
+			b, _ := json.Marshal(d)
+			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"content":`+string(b)+`}}]}`+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[],"usage":{"prompt_tokens":50,"completion_tokens":30,"total_tokens":80,"prompt_cache_hit_tokens":10,"prompt_cache_miss_tokens":40}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+}
+
+// drain collects every delta off the channel until it closes, returning
+// them split by their Reasoning flag. Both slices preserve order.
+func drainDeltas(ch <-chan tools.StreamDelta) (reasoning, content []string) {
+	for d := range ch {
+		if d.Reasoning {
+			reasoning = append(reasoning, d.Delta)
+		} else {
+			content = append(content, d.Delta)
+		}
+	}
+	return
+}
+
+func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
+	srv := thinkingSSE(t,
+		[]string{"step 1...", " step 2..."},
+		[]string{"do X", " then Y"},
+	)
+	defer srv.Close()
+
+	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
+	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
+
+	deltas := make(chan tools.StreamDelta, 16)
+	var (
+		reasoning []string
+		content   []string
+		drained   = make(chan struct{})
+	)
+	go func() {
+		defer close(drained)
+		reasoning, content = drainDeltas(deltas)
+	}()
+
+	out, err := New(c).ExecuteStream(context.Background(), args, deltas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(deltas)
+	<-drained
+
+	if got := strings.Join(reasoning, ""); got != "step 1... step 2..." {
+		t.Errorf("reasoning stream = %q", got)
+	}
+	if got := strings.Join(content, ""); got != "do X then Y" {
+		t.Errorf("content stream = %q", got)
+	}
+	// Final return string must still match the formatResult shape so
+	// downstream behaviour (history persistence, follow-up chat turn)
+	// is identical to the non-streaming path.
+	for _, frag := range []string{"step 1...", "do X then Y", "reasoning ---", "answer ---", "usage:"} {
+		if !strings.Contains(out, frag) {
+			t.Errorf("return string missing %q:\n%s", frag, out)
+		}
+	}
+}
+
+func TestThink_ExecuteStream_RespectsCtxCancel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"reasoning_content":"thinking..."}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
+	args, _ := json.Marshal(Args{Task: "x"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	deltas := make(chan tools.StreamDelta, 16)
+	go func() {
+		for range deltas {
+		}
+	}()
+
+	go func() {
+		// Cancel shortly after kick-off — the server holds the
+		// connection open, so without the cancel the test would
+		// stall until httptest tears down.
+		<-time.After(50 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := New(c).ExecuteStream(ctx, args, deltas)
+	if err == nil {
+		t.Errorf("expected ctx.Canceled, got nil")
+	}
+	close(deltas)
 }
 
 func TestThink_TruncatesLongReasoning(t *testing.T) {

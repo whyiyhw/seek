@@ -438,6 +438,102 @@ func TestAgent_CancelDuringToolCallStreamDoesNotPoisonHistory(t *testing.T) {
 	}
 }
 
+// streamingStub is a Tool that also implements tools.StreamingTool —
+// used to verify the agent routes deltas through as ToolDelta events.
+type streamingStub struct {
+	stubTool
+	chunks []tools.StreamDelta
+}
+
+func (s *streamingStub) ExecuteStream(_ context.Context, _ json.RawMessage, deltas chan<- tools.StreamDelta) (string, error) {
+	for _, d := range s.chunks {
+		deltas <- d
+	}
+	return "final result", nil
+}
+
+// TestAgent_StreamingTool_RoutesToolDeltaEvents pins the contract
+// dispatchTool relies on: when a tool implements tools.StreamingTool,
+// the agent must surface its intermediate output as ToolDelta events
+// in-order between the matching ToolExecStart and ToolExecEnd.
+func TestAgent_StreamingTool_RoutesToolDeltaEvents(t *testing.T) {
+	// Server: emits one tool_call delta for "stream_me" then closes.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_z","type":"function","function":{"name":"stream_me","arguments":"{}"}}]}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	streamer := &streamingStub{
+		stubTool: stubTool{name: "stream_me", schema: `{}`},
+		chunks: []tools.StreamDelta{
+			{Delta: "thinking...", Reasoning: true},
+			{Delta: " more thoughts", Reasoning: true},
+			{Delta: "the answer", Reasoning: false},
+		},
+	}
+	reg := tools.New().Add(streamer)
+
+	ag, _ := New(Config{
+		Client:   deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:    reg,
+		MaxTurns: 1,
+	})
+
+	var (
+		seen     []string // event-type names in order
+		deltas   []ToolDelta
+		startCID string
+		endCID   string
+	)
+	for ev := range ag.Prompt(context.Background(), "go") {
+		switch e := ev.(type) {
+		case ToolExecStart:
+			seen = append(seen, "start")
+			startCID = e.CallID
+		case ToolDelta:
+			seen = append(seen, "delta")
+			deltas = append(deltas, e)
+		case ToolExecEnd:
+			seen = append(seen, "end")
+			endCID = e.CallID
+		}
+	}
+
+	// Event order must be start → delta* → end (no reordering across
+	// goroutine boundaries — the pump goroutine in dispatchTool MUST
+	// fully drain before ToolExecEnd lands).
+	if got := strings.Join(seen, ","); got != "start,delta,delta,delta,end" {
+		t.Errorf("event order = %q, want start,delta×3,end", got)
+	}
+	if startCID != "call_z" || endCID != "call_z" {
+		t.Errorf("CallIDs mismatched: start=%q end=%q", startCID, endCID)
+	}
+	if len(deltas) != 3 ||
+		deltas[0].Delta != "thinking..." || !deltas[0].Reasoning ||
+		deltas[1].Delta != " more thoughts" || !deltas[1].Reasoning ||
+		deltas[2].Delta != "the answer" || deltas[2].Reasoning {
+		t.Errorf("delta sequence wrong: %+v", deltas)
+	}
+	for _, d := range deltas {
+		if d.CallID != "call_z" {
+			t.Errorf("delta CallID = %q, want call_z", d.CallID)
+		}
+		if d.Name != "stream_me" {
+			t.Errorf("delta Name = %q, want stream_me", d.Name)
+		}
+	}
+}
+
 func TestAgent_UnknownToolErrorsCleanly(t *testing.T) {
 	// LLM asks to call a tool we didn't register.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

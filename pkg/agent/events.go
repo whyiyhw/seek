@@ -49,6 +49,19 @@ type ToolExecStart struct {
 	Args   string // raw JSON the LLM produced
 }
 
+// ToolDelta is an intermediate output chunk from a long-running
+// streaming tool (currently only `think`). The CallID and Name match
+// the surrounding ToolExecStart/ToolExecEnd pair so the TUI can route
+// deltas to the right live region. Reasoning=true means the delta is
+// chain-of-thought (foldable); false means it's the tool's actual
+// answer text.
+type ToolDelta struct {
+	CallID    string
+	Name      string
+	Delta     string
+	Reasoning bool
+}
+
 // ToolExecEnd fires once per tool call when the tool has produced a result
 // (or errored). Result is fed back to the LLM in the next turn.
 type ToolExecEnd struct {
@@ -70,5 +83,6 @@ func (MessageStart) isEvent()  {}
 func (MessageDelta) isEvent()  {}
 func (MessageEnd) isEvent()    {}
 func (ToolExecStart) isEvent() {}
+func (ToolDelta) isEvent()     {}
 func (ToolExecEnd) isEvent()   {}
 func (ErrorEvent) isEvent()    {}

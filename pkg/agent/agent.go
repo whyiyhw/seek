@@ -341,7 +341,10 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 	return assistant, usage, finish, nil
 }
 
-// dispatchTool emits ToolExecStart/End around a single Registry.Dispatch.
+// dispatchTool emits ToolExecStart/End around a single tool invocation.
+// When the tool implements tools.StreamingTool, intermediate output is
+// piped through as ToolDelta events so the TUI can render reasoner
+// chain-of-thought live instead of staring at a spinner for 30+ seconds.
 func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan<- Event) (string, error) {
 	out <- ToolExecStart{
 		CallID: tc.ID,
@@ -362,7 +365,41 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		return "", err
 	}
 
-	result, err := a.cfg.Tools.Dispatch(ctx, tc.Function.Name, args)
+	tool := a.cfg.Tools.Lookup(tc.Function.Name)
+	if tool == nil {
+		err := fmt.Errorf("%w: %s (known: %v)", tools.ErrUnknownTool, tc.Function.Name, a.cfg.Tools.Names())
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err}
+		return "", err
+	}
+
+	var (
+		result string
+		err    error
+	)
+	if st, ok := tool.(tools.StreamingTool); ok {
+		// Buffered so a slow TUI doesn't backpressure the tool. 64
+		// covers the typical reasoner trace (few thousand deltas
+		// stretched over ~30s) without leaking memory on faster tools.
+		deltas := make(chan tools.StreamDelta, 64)
+		pumpDone := make(chan struct{})
+		go func() {
+			defer close(pumpDone)
+			for d := range deltas {
+				out <- ToolDelta{
+					CallID:    tc.ID,
+					Name:      tc.Function.Name,
+					Delta:     d.Delta,
+					Reasoning: d.Reasoning,
+				}
+			}
+		}()
+		result, err = st.ExecuteStream(ctx, args, deltas)
+		close(deltas)
+		<-pumpDone
+	} else {
+		result, err = tool.Execute(ctx, args)
+	}
+
 	out <- ToolExecEnd{
 		CallID: tc.ID,
 		Name:   tc.Function.Name,

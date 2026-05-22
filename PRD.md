@@ -476,11 +476,12 @@ Reasoner 限制（API 文档明确说的，不是猜的）：
 - 返回 `reasoning_content` 字段（CoT 内容）
 - **必须把上一轮 `reasoning_content` 从 messages 里删掉再发下一轮**，否则 API 报错
 
-**Level 1：基础 `/think` 命令**
+**Level 1：基础 `think` 工具**
 
-- `pkg/deepseek` 暴露 `Reasoner(ctx, messages)` 与 `Chat(ctx, messages, tools)` 两个独立函数
-- 用户输入 `/think <问题>`：临时切到 reasoner，结果写回上下文（带 `<reasoning>...</reasoning>` 标记），然后继续 chat
-- TUI 渲染 reasoning 段用淡色折叠显示，可 `Ctrl+R` 展开/收起
+- 实现：`internal/tools/think`，工具名小写 `think`。调用 V4-Flash 配合 `Thinking.Type="enabled"` + `ReasoningEffort="high"`（M5 重构后不再走单独的 `deepseek-reasoner` endpoint）
+- **流式**：think 实现 `tools.StreamingTool` 接口，运行期间通过 `agent.ToolDelta` 事件把 `reasoning_content` 和 `content` 实时推给 TUI；用户看到 reasoner 的思考过程实时展开，不再是 30 秒空白 spinner
+- TUI 复用现有的 `m.curReasoning` / `m.curContent` 渲染（活动工具运行期间 chat 模型不在跑，字段不会冲突）；`Ctrl+R` 折叠/展开
+- 非流式 `Execute` 路径保留作为 fallback（测试、未来其他调用方）
 
 **Level 2：完整「reasoner-then-chat」双模型协作 skill（v1.0 必须做）**
 
@@ -661,7 +662,9 @@ M4 用了 `tea.WithAltScreen()`，导致：
 | `/compact` 摘要（一次非流式 Chat，user+assistant 双消息引导）| ✅ | `3a0b6bf` |
 | Skill loader（多优先级目录扫描 + `Skill` 工具 + system prompt 清单注入 + `/skills`） | ✅ | `2c53248` |
 | 双模型协作 skill（内置 `dual-model`，think→执行→think reflect） | ✅ 代码完成（待真 API 验证） | `dd1bcd0` |
-| `AGENTS.md` 自动加载（项目根向上 5 层，注入 system prompt，可 `--no-project-md` 关） | ✅ | 本次 |
+| `AGENTS.md` 自动加载（项目根向上 5 层，注入 system prompt，可 `--no-project-md` 关） | ✅ | `e8894ff` |
+| Esc 中断不再污染会话 + 加载时 `Repair` 修旧坏会话 + `thinking…` 占位 | ✅ | `986a485` |
+| `think` 工具流式化（`tools.StreamingTool` 接口 + `agent.ToolDelta` 事件） | ✅ | 本次 |
 | MCP client（JSON-RPC over stdio，tools/resources） | ⏳ | |
 | `edit` 应用前 diff 预览（per-call 审批配合） | ⏳ | |
 

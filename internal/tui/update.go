@@ -464,7 +464,24 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			started: time.Now(),
 		})
 
+	case agent.ToolDelta:
+		// Streaming output from a long-running tool (currently only
+		// `think`). Route into the same live-region buffers the chat
+		// model uses — there's no concurrent chat stream while a tool
+		// is running, so collision is impossible by construction.
+		if e.Reasoning {
+			m.curReasoning += e.Delta
+		} else {
+			m.curContent += e.Delta
+		}
+
 	case agent.ToolExecEnd:
+		// The tool's full result is about to land in scrollback via
+		// the committed tool line; the live buffers we used for the
+		// stream are now stale and would bleed into the next chat
+		// turn's display if we didn't clear them.
+		m.curContent = ""
+		m.curReasoning = ""
 		// ToolExecEnd carries Name/Result/Err but not Args/started —
 		// look both back up from the active list before we remove it.
 		var (

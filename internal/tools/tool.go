@@ -35,6 +35,35 @@ type Tool interface {
 	Execute(ctx context.Context, raw json.RawMessage) (string, error)
 }
 
+// StreamDelta is one incremental chunk emitted by a StreamingTool while
+// it works. Tools without anything live-worthy to say should just
+// implement Tool — most do.
+//
+// Reasoning=true marks the delta as a chain-of-thought trace (e.g. from
+// deepseek-reasoner's reasoning_content stream) so the TUI can route it
+// to the foldable reasoning region rather than the main answer area.
+type StreamDelta struct {
+	Delta     string
+	Reasoning bool
+}
+
+// StreamingTool is an opt-in extension to Tool for tools whose
+// execution takes long enough that intermediate output is valuable
+// (think: deepseek-reasoner calls, which routinely take 10-60s before
+// returning anything from Execute). The agent prefers ExecuteStream
+// when the tool implements this interface and falls back to Execute
+// otherwise.
+//
+// ExecuteStream pushes StreamDelta values onto the supplied channel.
+// The caller owns the channel — never close it from inside the tool.
+// The final return value is the same string that Execute would have
+// produced, and is what lands in the tool result message that feeds
+// the next chat turn.
+type StreamingTool interface {
+	Tool
+	ExecuteStream(ctx context.Context, raw json.RawMessage, deltas chan<- StreamDelta) (string, error)
+}
+
 // Registry is the set of tools available to an Agent. Build it once at
 // startup; it is safe for concurrent reads after the first Wire() call.
 type Registry struct {
