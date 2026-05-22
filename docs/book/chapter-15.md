@@ -173,7 +173,7 @@ seek -p '...' -json 2>warnings.log | jq '...'
 
 > v1.0 之前：用 seek 完成至少一个非平凡的 seek 自身修改。
 
-不是"能跑通"的验收，是**写代码**的验收。`README.md` 这次同步到 M6-done state 的版本——是 seek 自己跑出来的（commit `1467be8` "docs(README): sync to M6-done state via first self-hosted seek run"）。这本书的第 8-15 章——也是 seek 自己写的。
+不是"能跑通"的验收，是**写代码**的验收。`README.md` 这次同步到 M6-done state 的版本——是 seek 自己跑出来的（commit `1467be8` "docs(README): sync to M6-done state via first self-hosted seek run"）。M7 polish 的三个 commit（§15.6 讲的浮动 help、`/new`、`--theme`）也是——作者描述需求，seek 跑代码。**这本书的第 8-15 章不在这个统计里**——它们走的是另一条协作链路（Claude / Anthropic），详见前言"关于写作过程"。
 
 为什么这个测试重要？
 
@@ -190,28 +190,40 @@ seek -p '...' -json 2>warnings.log | jq '...'
 
 每一个都是用户哪天用 seek 时也会遇到的——但**只有当工具的用户是工具的作者本人**，作者才会立刻动手修而不是写进 backlog。
 
-### 自举测试的副产品：本书
+### 自举的副产品：一份 papercut 清单
 
 按时间线，事情大致这样发生的：
 
-1. M0-M5 期间，author 自己手写代码、手写 commit message、手写 README
-2. M6 完成后，author 决定"今天起，凡是不需要保密的写作，先让 seek 试一遍"
-3. seek 跑出来的第一份产物是 `README.md` 的 M6-done 状态同步——大概对了，作者改一改 commit
-4. 接下来是 `docs/pitfalls.md` 的回填（commit `5b23e55` "backfill 4 entries from M6 provider work"）
-5. 再接下来是本书第 8 章往后所有章节——边写边发现 seek 的不足，比如：
-   - "auto-continue 偶尔会在任务完成后多跑一轮无意义的迭代" → commit `aff27da` revert / `0d847b4` restore as opt-in
+1. **M0–M5 期间**：作者自己手写代码、手写 commit message、手写 README、手写本书第 1–7 章
+2. **M6 完成后**，作者开始把 seek 真正放进自己的日常工作流——不是 demo，是"今天的活就用它干"
+3. **第一份自举产物**：`README.md` 同步到 M6-done state（commit `1467be8`）。大致对了，作者过一遍 commit。**这是 seek 第一次帮自己更新自己的 README**
+4. **接下来**：`docs/pitfalls.md` 回填 4 条（commit `5b23e55`），同样是 seek 跑出草稿、作者校对
+5. **再接下来**：作者一边用 seek 干非保密的小活，一边发现 seek 自身的几个 papercut：
+   - "auto-continue 偶尔会在任务完成后多跑一轮无意义迭代" → commit `aff27da` 先 revert / `0d847b4` 改成 opt-in flag
    - "MaxTurns 默认 32 不够长链调用" → commit `50f7c0e` 提到 200
    - "read 默认 20 行太少" → commit `ad0cf28` 提到 50
+   - "/help 滚屏冲掉对话" → commit `b479187` 改成浮动 overlay（§15.6 讲过）
+   - "/reset 静默丢历史" → commit `393d6b7` 改成 `/new` 自动保存
+   - "light 终端状态栏看不清" → commit `56b9df8` 加 `--theme` flag
 
 每一个修复都来自"我用 seek 的过程中被这件事卡住了"。这种反馈循环是测试套件给不了的——测试验证"代码做了它应该做的"，自举验证"做的事是用户实际想要的"。
+
+### 一个澄清：什么是 seek 自举，什么不是
+
+要诚实划一下边界——这本书反复讲"诚实大于神秘"，自己的写作过程不能撒谎。
+
+- **是 seek 自举**：上面 5 条列出的 README 同步、pitfalls 回填、6 个代码 papercut 的修复——作者描述需求，seek（DeepSeek 后端）跑代码并写 commit message，作者审阅 / 改 / 合并
+- **不是 seek 自举**：你正在读的第 8–15 章和附录 A。它们是另一条 LLM 协作链路的产物（Claude / Anthropic API），不在 "用 seek 写 seek" 的统计里。**前言"关于写作过程"一节**把这件事讲清楚
+
+这条区分重要——如果把"作者请另一个 LLM 帮忙写书"也算成"seek 自举"，自举的论据就稀释了：那是任何带 API 的 LLM 工具都能做到的事，不是 seek 本身可信度的证据。**seek 自举的证据**是 seek 改它自己的代码这一段，**这一段是货真价实的**——M7 polish 的三个 commit + auto-continue / MaxTurns / read 三个旧 papercut 修复都有具体 hash 摆在 git log 里。
 
 ### 自举的负面教训
 
 也不是没有发现"不该做"的事情：
 
-- **某些章节让 seek 一气写完会让风格漂浮**——节奏、举例密度、callout 的频率会偏向 LLM 的平均偏好，而不是这本书前几章建立的语气。**对策**：作者每章都过一遍重写关键段，把"AI 标记"洗掉
-- **代码风格细节 seek 不擅长保持一致**——比如 commit message 的"why not what"原则在长 PR description 里容易丢
-- **seek 不会主动质疑前提**——你告诉它"写第 X 章"，它就写；不会说"等等，第 X 章和第 Y 章其实可以合并"
+- **某些代码改动让 seek 一气写完会让风格漂浮**——比如新加的工具如果不约束 prompt，seek 会随机选择"verbose 还是 terse"。**对策**：作者过 diff，把"AI 标记"洗掉再 commit
+- **commit message 的 "why not what" 原则 seek 容易丢**——seek 倾向写"做了 X、改了 Y"，而 PRD 里规定 commit body 要解释"为什么"。**对策**：作者改写 message 再提交，或者把 "why" 在描述需求时就明确说出来
+- **seek 不会主动质疑前提**——你说"加一个 `/foo` 命令"，它就加；不会说"等等，`/foo` 跟现有 `/bar` 其实可以合并"
 
 自举不是"让 seek 全自动接管"，是"让 seek 加速大段重复劳动，作者做 judgement"。
 
