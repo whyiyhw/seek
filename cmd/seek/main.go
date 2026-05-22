@@ -270,6 +270,7 @@ func run() error {
 	if *model == "" {
 		*model = modelDefault
 	}
+	sessionModel := *model
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -518,7 +519,7 @@ func run() error {
 		}
 	})
 
-	sessionModel := *model
+	sessionModel = *model
 
 	// Resolve the effective theme for the TUI.
 	effectiveTheme := strings.ToLower(*themeFlag)

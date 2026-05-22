@@ -2,13 +2,11 @@
 // that asks a V4 model to reason harder than a normal chat turn would
 // (PRD §4.8.2 Level 1).
 //
-// Post-V4 (2026-01), DeepSeek collapsed reasoning into a parameter:
-// instead of switching to a separate `deepseek-reasoner` model (since
-// deprecated, sunset 2026-07-24), we call ModelV4Flash with
-// Thinking.Type="enabled" and ReasoningEffort="high". Cheaper, larger
-// context (1M), and the thinking-mode side of V4 still returns
-// `reasoning_content` alongside the final content — same field, same
-// stripping rule.
+// The tool uses the caller's current model (via modelFunc) with
+// Thinking.Type="enabled" and ReasoningEffort="high", so the reasoning
+// depth and pricing match what the user has selected. When the current
+// model is V4-Pro the think call uses V4-Pro; when it's V4-Flash the
+// think call uses V4-Flash — no hardcoded model default.
 //
 // The tool still runs a FRESH, history-less call so the reasoning
 // pass isn't contaminated by the calling chat's tool schemas and the
@@ -43,7 +41,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Call deepseek-v4-flash in thinking mode to reason hard about a problem. Returns the reasoning trace and the final answer as a single string. Use for: multi-step planning before complex edits; self-review (reflect=true) after a non-trivial change; any decision where the chat model is likely to be wrong on the first pass. DeepSeek-only."
+const description = "Call a DeepSeek model in thinking mode to reason hard about a problem. Returns the reasoning trace and the final answer as a single string. Use for: multi-step planning before complex edits; self-review (reflect=true) after a non-trivial change; any decision where the chat model is likely to be wrong on the first pass. DeepSeek-only."
 
 type Args struct {
 	Task    string `json:"task"`
@@ -52,10 +50,17 @@ type Args struct {
 }
 
 type Tool struct {
-	client *deepseek.Client
+	client    *deepseek.Client
+	modelFunc func() string
 }
 
-func New(c *deepseek.Client) Tool { return Tool{client: c} }
+// New creates a Think tool. modelFunc is called at execution time to
+// determine which DeepSeek model to use for the reasoning call — it's
+// a function so the model can change at runtime (e.g. via /model).
+// If modelFunc returns "" or nil, ModelV4Flash is used as fallback.
+func New(c *deepseek.Client, modelFunc func() string) Tool {
+	return Tool{client: c, modelFunc: modelFunc}
+}
 
 func (Tool) Name() string            { return "think" }
 func (Tool) Description() string     { return description }
@@ -83,7 +88,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return "", err
 	}
 
-	resp, err := t.client.Chat(ctx, buildRequest(sys, userMsg))
+	resp, err := t.client.Chat(ctx, t.buildRequest(sys, userMsg))
 	if err != nil {
 		return "", fmt.Errorf("think: reasoner call: %w", err)
 	}
@@ -91,7 +96,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return "", fmt.Errorf("think: reasoner returned no choices")
 	}
 	msg := resp.Choices[0].Message
-	return formatResult(msg.ReasoningContent, msg.Content, resp.Usage), nil
+	return formatResult(msg.ReasoningContent, msg.Content, resp.Usage, t.modelName()), nil
 }
 
 // ExecuteStream is the same call as Execute but uses ChatStream so the
@@ -110,7 +115,7 @@ func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, push func(
 		return "", err
 	}
 
-	stream, err := t.client.ChatStream(ctx, buildRequest(sys, userMsg))
+	stream, err := t.client.ChatStream(ctx, t.buildRequest(sys, userMsg))
 	if err != nil {
 		return "", fmt.Errorf("think: reasoner call: %w", err)
 	}
@@ -141,7 +146,7 @@ func (t Tool) ExecuteStream(ctx context.Context, raw json.RawMessage, push func(
 		return "", err
 	}
 
-	return formatResult(reasoning.String(), content.String(), usage), nil
+	return formatResult(reasoning.String(), content.String(), usage, t.modelName()), nil
 }
 
 // parseArgs unmarshals and validates the tool's JSON arguments and
@@ -168,9 +173,21 @@ func parseArgs(raw json.RawMessage) (sys, userMsg string, err error) {
 	return sys, strings.Join(userParts, "\n"), nil
 }
 
-func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
+// modelName returns the current model to use for the think call. Falls
+// back to deepseek-v4-flash if modelFunc is nil or returns empty string.
+func (t Tool) modelName() string {
+	if t.modelFunc != nil {
+		if m := t.modelFunc(); m != "" {
+			return m
+		}
+	}
+	return deepseek.ModelV4Flash
+}
+
+func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {
+	model := t.modelName()
 	return &deepseek.ChatRequest{
-		Model: deepseek.ModelV4Flash,
+		Model: model,
 		Messages: []deepseek.Message{
 			{Role: deepseek.RoleSystem, Content: sys},
 			{Role: deepseek.RoleUser, Content: userMsg},
@@ -180,10 +197,10 @@ func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
 	}
 }
 
-func formatResult(reasoning, content string, u deepseek.Usage) string {
+func formatResult(reasoning, content string, u deepseek.Usage, model string) string {
 	var sb strings.Builder
 
-	sb.WriteString("=== Think (deepseek-v4-flash · thinking) ===\n")
+	sb.WriteString(fmt.Sprintf("=== Think (%s · thinking) ===\n", model))
 	sb.WriteString(fmt.Sprintf("usage: prompt %d, completion %d, cache hit %d / miss %d\n\n",
 		u.PromptTokens, u.CompletionTokens, u.PromptCacheHitTokens, u.PromptCacheMissTokens))
 
