@@ -138,6 +138,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: a "model" in the API can be a parameter-restricted variant. Maintain a per-model capability map if you switch between them programmatically
 - **Refs**: `internal/tools/think/think.go`
 
+### FIM usage ratio is inherently low — model prefers edit/write over fim_complete
+- **Saw**: both benchmark tasks (`self-hosting`, `fim-patch`) showed FIM ratio well below 50% (0% and 11% respectively) despite `fim-patch` being explicitly designed as a small inline edit. The model consistently chose `edit`/`write` instead of `fim_complete`.
+- **Why**: two compounding causes. (1) Denominator: ratio was `fimCalls / totalToolCalls`, which counts `read`/`bash`/`grep` — tools that *can't* use FIM — diluting the numerator. (2) Pairing constraint: a `fim_complete` call doesn't write to disk; its output must be applied by a subsequent `edit` (book ch6 §6.5). So `FIM / (FIM+edit)` caps at ~50% even when the model takes the FIM path every chance it gets. (3) The model's training corpus also biases toward `edit`/`write` for general-purpose tools, but that's secondary to the math.
+- **Fix**: PRD §6 acceptance criterion was revised in commit `0e4153e` from "ratio ≥ 50%" to per-task absolute count `FIMMinCalls` (`self-hosting: 0`, `fim-patch: 1`). The ratio still appears in the JSON report for visibility but no longer participates in the pass/fail verdict. Designing a meaningful ratio metric (candidate: FIM-saved tokens / total prompt tokens) was deferred to v1.1, when there's more real-world usage data to anchor it.
+- **Lesson**: when a metric's denominator includes terms that can never be the numerator, the ceiling is structurally lower than you think. Verify the upper bound of any "X / Y ≥ Z%" metric *before* setting Z, especially for pairing constraints like "every FIM needs a follow-up edit". An aspirational threshold that turns out to be mathematically unreachable trains everyone to ignore the metric.
+- **Refs**: `cmd/seek/benchmark.go`, `docs/PRD.md §6 / §8`, commit `0e4153e`
+
 ### Streamed tool calls arrive as deltas keyed by `index`
 - **Saw**: first attempt at handling tool calls assumed each chunk contained a complete `tool_call` — wound up with split, garbled JSON in arguments
 - **Why**: DeepSeek streams tool calls in fragments: chunk N might emit `{"index":0, "id":"call_1", "function":{"name":"read", "arguments":"{\"pa"}}` and chunk N+1 emits `{"index":0, "function":{"arguments":"th\":\"x\"}"}}`. They must be merged by `index`
