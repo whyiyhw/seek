@@ -3,12 +3,15 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
 // cmdResult captures the effect of a slash command. The text (if any)
@@ -44,6 +47,7 @@ func allCommands() []command {
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
+		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
 	}
 }
@@ -246,6 +250,105 @@ func cmdCompact(m *Model, _ string) cmdResult {
 		text:  styleMuted.Render(fmt.Sprintf("compacting %d messages — calling %s …", len(msgs)-1, m.opts.Model)),
 		extra: startCompactCmd(m),
 	}
+}
+
+// cmdUpgrade triggers the same self-replace flow as `seek -upgrade`
+// from inside the TUI. The actual download runs in a tea.Cmd so the
+// UI stays responsive; when it finishes an upgradeDoneMsg is routed
+// back into Update().
+//
+// Args: --force allows upgrading from a dev build; --dry-run stops
+// after checksum verification. Unknown flags get a usage hint.
+func cmdUpgrade(m *Model, args string) cmdResult {
+	if m.streaming {
+		return cmdResult{text: styleMuted.Render("/upgrade: wait for the current turn to finish")}
+	}
+	var force, dryRun bool
+	for _, tok := range strings.Fields(args) {
+		switch tok {
+		case "--force", "-force":
+			force = true
+		case "--dry-run", "-dry-run":
+			dryRun = true
+		default:
+			return cmdResult{text: styleMuted.Render(
+				fmt.Sprintf("/upgrade: unknown flag %q — usage: /upgrade [--force] [--dry-run]", tok))}
+		}
+	}
+	prefix := "/upgrade: checking GitHub for the latest release…"
+	if dryRun {
+		prefix = "/upgrade: dry run — will verify checksum but skip replace"
+	}
+	return cmdResult{
+		text:  styleMuted.Render(prefix),
+		extra: startUpgradeCmd(force, dryRun),
+	}
+}
+
+// startUpgradeCmd builds the tea.Cmd that runs upgrade.Run in the
+// background. We use context.Background() rather than m.opts.Ctx
+// because cancelling here on Ctrl+C is awkward — most of the work
+// is a single HTTP body read and an atomic rename, neither of which
+// benefits from cancellation. If the user really wants to stop, they
+// can Ctrl+C-quit the TUI; the temp file will be cleaned up on
+// Run's defer.
+func startUpgradeCmd(force, dryRun bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		// Stderr is suppressed — Run's pretty progress lines would
+		// fight with bubbletea's render. We surface only the final
+		// success/failure message via upgradeDoneMsg.
+		res, err := upgrade.Run(ctx, upgrade.Options{
+			Owner:    "whyiyhw",
+			Repo:     "seek",
+			Current:  VersionString(),
+			AllowDev: force,
+			DryRun:   dryRun,
+			Stderr:   io.Discard,
+			Stdout:   io.Discard,
+		})
+		out := upgradeDoneMsg{}
+		switch {
+		case err == upgrade.ErrAlreadyLatest:
+			out.AlreadyLatest = true
+			if res != nil {
+				out.NewTag = res.To
+			}
+		case err != nil:
+			out.Err = err
+		default:
+			out.DryRun = res.DryRun
+			out.NewTag = res.To
+		}
+		return out
+	}
+}
+
+// handleUpgradeDone renders the result of /upgrade as a one-line
+// status into scrollback. On a successful install we add a "restart
+// seek to run v…" nudge — the running process still has the OLD
+// binary mapped, only the next launch picks up the new one.
+func (m *Model) handleUpgradeDone(msg upgradeDoneMsg) []tea.Cmd {
+	var line string
+	switch {
+	case msg.Err != nil:
+		line = lipgloss.NewStyle().Foreground(colourToolErr).Render(
+			fmt.Sprintf("/upgrade failed: %v", msg.Err))
+	case msg.AlreadyLatest:
+		line = styleMuted.Render(fmt.Sprintf("/upgrade: already on the latest release (%s)", msg.NewTag))
+		// We're on the latest — clear any stale "↑ tag" status hint.
+		m.upgradeAvailable = ""
+	case msg.DryRun:
+		line = styleMuted.Render(fmt.Sprintf("/upgrade dry-run OK: checksum verified for %s (binary not replaced)", msg.NewTag))
+	default:
+		line = lipgloss.NewStyle().Foreground(colourOk).Render(
+			fmt.Sprintf("/upgrade: installed %s — restart seek to run the new binary", msg.NewTag))
+		// We just wrote the new binary; clear the nudge so the bar
+		// doesn't keep advertising the upgrade after it's done.
+		m.upgradeAvailable = ""
+	}
+	return []tea.Cmd{tea.Println(line)}
 }
 
 // startCompactCmd returns the tea.Cmd that actually runs Summarise. We

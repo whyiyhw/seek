@@ -28,6 +28,29 @@ func stripANSI(s string) string {
 	return sb.String()
 }
 
+// TestStatusBar_UpgradeAvailable verifies the "↑ <tag>" segment lands
+// in the bar when a newer release was detected at startup. Empty
+// UpgradeAvailable must produce no upgrade segment — otherwise we'd
+// leave a stray "↑" with no version.
+func TestStatusBar_UpgradeAvailable(t *testing.T) {
+	with := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:            "deepseek-chat",
+		UpgradeAvailable: "v0.2.0",
+		Width:            120,
+	}))
+	if !strings.Contains(with, "↑ v0.2.0") {
+		t.Errorf("expected upgrade hint, bar = %q", with)
+	}
+
+	without := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model: "deepseek-chat",
+		Width: 120,
+	}))
+	if strings.Contains(without, "↑") {
+		t.Errorf("upgrade segment leaked when UpgradeAvailable is empty: %q", without)
+	}
+}
+
 func TestStatusBar_Idle_Standard(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai) // standard
 	nt, na := pricing.NextTransition(at)

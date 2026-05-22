@@ -39,6 +39,17 @@ seek -p "用一句话总结这个项目。"
 详细用法：[`docs/`](./docs/) 包含会话、MCP、Skill 指南。  
 TUI 内输入 `?` 查看所有快捷键和斜杠命令。
 
+## 升级
+
+```bash
+seek -upgrade-check   # 是否有新版？只读，不改动二进制
+seek -upgrade         # 拉取最新 release，校验 sha256，原地替换
+seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
+```
+
+`seek -upgrade` 从 [GitHub Releases](https://github.com/whyiyhw/seek/releases) 直接下载对应平台的二进制，sha256 对照 `checksums.txt` 验签后原子替换当前文件。本地 `go build` 出的开发版本默认会被拒绝覆盖（用 `-upgrade-force` 强制）。TUI 内也可输入 `/upgrade`。  
+关闭启动时的版本检查：`export SEEK_NO_UPGRADE_CHECK=1`。
+
 ## 路线图
 
 项目采用里程碑 M0–M7（已全部交付）。当前重点：

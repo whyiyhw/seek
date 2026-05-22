@@ -121,6 +121,45 @@ func TestModel_WithArg_SwitchesAndFiresHook(t *testing.T) {
 	}
 }
 
+func TestUpgrade_RefusesWhileStreaming(t *testing.T) {
+	m := emptyModel()
+	m.streaming = true
+	res := runHandler(t, m, "/upgrade")
+	if !strings.Contains(res.text, "wait for the current turn") {
+		t.Errorf("expected refusal text, got %q", res.text)
+	}
+	if res.extra != nil {
+		t.Error("must not start the upgrade goroutine while streaming")
+	}
+}
+
+func TestUpgrade_RejectsUnknownFlag(t *testing.T) {
+	m := emptyModel()
+	res := runHandler(t, m, "/upgrade --garbage")
+	if !strings.Contains(res.text, "unknown flag") {
+		t.Errorf("expected unknown-flag hint, got %q", res.text)
+	}
+	if res.extra != nil {
+		t.Error("must not start the upgrade goroutine after a flag error")
+	}
+}
+
+func TestUpgrade_AcceptsKnownFlags(t *testing.T) {
+	cases := []string{"/upgrade", "/upgrade --force", "/upgrade --dry-run", "/upgrade --force --dry-run"}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			m := emptyModel()
+			res := runHandler(t, m, in)
+			if res.text == "" {
+				t.Error("expected a status line in scrollback")
+			}
+			if res.extra == nil {
+				t.Error("expected a background tea.Cmd for the upgrade work")
+			}
+		})
+	}
+}
+
 func TestYolo_TogglesAndFiresHook(t *testing.T) {
 	m := emptyModel()
 	var seen []bool

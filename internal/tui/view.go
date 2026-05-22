@@ -220,6 +220,7 @@ func (m Model) renderStatusBar() string {
 		Width:            m.width,
 		StreamElapsed:    streamElapsed,
 		StreamDeltaBytes: m.streamDeltaBytes,
+		UpgradeAvailable: m.upgradeAvailable,
 	})
 }
 

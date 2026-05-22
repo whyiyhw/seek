@@ -39,3 +39,22 @@ type compactDoneMsg struct {
 	usage   deepseek.Usage
 	err     error
 }
+
+// versionCheckDoneMsg fires after the startup background upgrade probe.
+// NewerTag is empty when the running binary is up to date OR the check
+// silently failed (network down, GitHub rate-limit) — the TUI never
+// surfaces failures, only successful "you have an older version" hits.
+type versionCheckDoneMsg struct {
+	NewerTag string
+}
+
+// upgradeDoneMsg fires after a /upgrade slash command finishes its
+// async download + replace flow. Err is set when the upgrade failed.
+// AlreadyLatest is true on the "nothing to do" no-op; the TUI prints
+// a muted note rather than an error in that case.
+type upgradeDoneMsg struct {
+	NewTag        string
+	AlreadyLatest bool
+	DryRun        bool
+	Err           error
+}

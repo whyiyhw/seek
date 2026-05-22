@@ -126,6 +126,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case compactDoneMsg:
 		cmds = append(cmds, m.handleCompactDone(msg)...)
+
+	case versionCheckDoneMsg:
+		// Store the newer tag for the status-bar segment. Idempotent —
+		// the cmd never re-fires within a session, but a second run
+		// after /upgrade would simply overwrite this field.
+		m.upgradeAvailable = msg.NewerTag
+
+	case upgradeDoneMsg:
+		cmds = append(cmds, m.handleUpgradeDone(msg)...)
 	}
 
 	return m, tea.Batch(cmds...)

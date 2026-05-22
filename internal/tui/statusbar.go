@@ -39,6 +39,11 @@ type StatusSnapshot struct {
 	// of all turns' prompt tokens which grows quadratically and is
 	// meaningless as a context-limit signal.
 	LastUsage deepseek.Usage
+
+	// UpgradeAvailable is the tag of a newer release (e.g. "v0.2.0") found
+	// by the startup probe. Empty when up-to-date or the probe was
+	// skipped — in which case no segment is rendered.
+	UpgradeAvailable string
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -74,6 +79,9 @@ func leftSegments(s StatusSnapshot) []string {
 		out = append(out, styleMuted.Render(streamingStatusLabel(s)))
 	} else {
 		out = append(out, styleMuted.Render("○ idle"))
+	}
+	if s.UpgradeAvailable != "" {
+		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render("↑ "+s.UpgradeAvailable))
 	}
 	return out
 }

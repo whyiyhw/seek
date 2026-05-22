@@ -187,6 +187,12 @@ type Model struct {
 	mdWidth int
 
 	lastErr error
+
+	// upgradeAvailable is the tag of a newer release found by the
+	// startup probe, e.g. "v0.2.0". Empty when up-to-date or the
+	// probe was skipped. Surfaced in the status bar as a "↑ <tag>"
+	// segment so the user can see they're behind without a popup.
+	upgradeAvailable string
 }
 
 // isWelcomeScreen returns true when the live region is "idle" —
@@ -258,6 +264,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.opts.ApprovalCh != nil {
 		cmds = append(cmds, waitForApproval(m.opts.ApprovalCh))
+	}
+	if c := versionCheckCmd("whyiyhw", "seek", VersionString()); c != nil {
+		cmds = append(cmds, c)
 	}
 	return tea.Batch(cmds...)
 }
