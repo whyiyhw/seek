@@ -432,11 +432,15 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	m := Model{input: textarea.New()}
 	m.opts.Model = "deepseek-chat"
 	m.modelPickerOpen = true
+	m.pickerPurpose = "model"
 	m.modelPickerFiltered = []modelChoice{
 		{"deepseek-chat", "current"},
 		{"deepseek-reasoner", "Thinking mode"},
 	}
 	m.modelPickerSelected = 1 // user arrowed down to the second row
+	// The user arrived here by typing "/model " — textarea still
+	// holds that. Verify the accept cleans it up.
+	m.input.SetValue("/model ")
 
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := out.(Model)
@@ -446,6 +450,9 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	}
 	if m2.opts.Model != "deepseek-reasoner" {
 		t.Errorf("model should have switched, got %q", m2.opts.Model)
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be cleared after accept; got %q", m2.input.Value())
 	}
 }
 

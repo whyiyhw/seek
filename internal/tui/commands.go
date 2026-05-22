@@ -259,6 +259,11 @@ func (m *Model) applyModelChoice(idx int) {
 		if m.opts.SetModel != nil {
 			m.opts.SetModel(choice.id)
 		}
+		// Clear the textarea — the user got to the picker by typing
+		// "/model " or "/model<Enter>", and after accept the leftover
+		// "/model " would otherwise sit there until they backspace it
+		// or submit it as garbage to the agent.
+		m.input.Reset()
 	}
 }
 
