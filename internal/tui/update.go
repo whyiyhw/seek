@@ -655,7 +655,7 @@ func truncateOneLine(s string, n int) string {
 }
 
 func (m Model) renderTurnFooter() string {
-	c := m.opts.Tracker.Cumulative()
+	c := m.opts.Tracker.Last()
 	cost := pricing.FormatCost(pricing.Cost(m.opts.Model, pricing.CurrentTier(m.now), c))
 
 	var cacheNote string

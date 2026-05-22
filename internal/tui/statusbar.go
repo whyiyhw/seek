@@ -136,7 +136,7 @@ func formatBudget(s StatusSnapshot) string {
 	// Use the last turn's prompt tokens, not the cumulative sum.
 	// Cumulative grows quadratically (each turn re-sends the full history)
 	// and hits 1M+ in ~55 turns even when the actual context is only 20k.
-	used := s.LastUsage.PromptTokens
+	used := s.LastUsage.PromptTokens + s.LastUsage.CompletionTokens
 	limit := budget.Limit(s.Model)
 	frac := budget.Fraction(s.Model, used)
 	pct := int(frac * 100)
