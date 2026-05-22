@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/agent"
 )
@@ -185,7 +186,7 @@ func (s *Server) handlePrompt(ctx context.Context, req rpcRequest) {
 			s.sendNotify("agent/event", line)
 
 		case agent.TurnEnd:
-			s.tracker.Record(e.Usage)
+			s.tracker.Record(e.Usage, s.model, pricing.CurrentTier(time.Now()))
 			turns++
 			toolCalls += e.ToolCalls
 			s.sendNotify("agent/event", eventLine{

@@ -86,7 +86,7 @@ func TestRenderTurnFooter_Format(t *testing.T) {
 		PromptCacheHitTokens:  82000,
 		PromptCacheMissTokens: 17600,
 		CompletionTokens:      1700,
-	})
+	}, deepseek.ModelV4Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
 			Model:   deepseek.ModelChat,
@@ -117,7 +117,7 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 		PromptCacheHitTokens:  0,
 		PromptCacheMissTokens: 5000,
 		CompletionTokens:      200,
-	})
+	}, deepseek.ModelV4Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
 			Model:   deepseek.ModelChat,

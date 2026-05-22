@@ -103,6 +103,11 @@ func TestStatusBar_OffPeak(t *testing.T) {
 
 func TestStatusBar_CountsAndCost(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	// CumulativeCost is now a pre-computed input into the bar, not
+	// re-derived from Usage × current rates at render time. The bar
+	// just formats whatever number the tracker locked in. Tests for
+	// the locked-in math live in internal/cache/cache_test.go
+	// (TestTracker_CumulativeCostLockedInAtRecord).
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:     deepseek.ModelChat,
 		Turns:     5,
@@ -112,13 +117,12 @@ func TestStatusBar_CountsAndCost(t *testing.T) {
 			PromptCacheMissTokens: 1_000_000,
 			CompletionTokens:      1_000_000,
 		},
-		Now: at,
+		CumulativeCost: 0.42,
+		Now:            at,
 	}))
 	if !strings.Contains(bar, "turns:5") || !strings.Contains(bar, "tools:3") {
 		t.Errorf("counters missing: %q", bar)
 	}
-	// V4-Flash rates: 1M miss * $0.14 + 1M completion * $0.28 = $0.42.
-	// (deepseek-chat aliases to V4-Flash post the 2026-01 V4 launch.)
 	if !strings.Contains(bar, "$0.4200") {
 		t.Errorf("cost missing: %q", bar)
 	}

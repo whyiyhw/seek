@@ -16,7 +16,7 @@ import (
 func modelAt(now time.Time, turns int, yolo bool, usage deepseek.Usage) *Model {
 	tr := cache.New()
 	if usage != (deepseek.Usage{}) {
-		tr.Record(usage)
+		tr.Record(usage, deepseek.ModelChat, pricing.TierStandard)
 	}
 	return &Model{
 		opts: Options{

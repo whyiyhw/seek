@@ -40,6 +40,15 @@ type StatusSnapshot struct {
 	// meaningless as a context-limit signal.
 	LastUsage deepseek.Usage
 
+	// CumulativeCost is the session's total dollar cost, with each
+	// turn priced at the (model, tier) that were active when it ran.
+	// The status bar reads this directly rather than recomputing via
+	// pricing.Cost(s.Model, s.Tier, s.Usage) — that derivation broke
+	// when the user switched models mid-session because the cumulative
+	// usage would silently re-price at the new model's rate. See
+	// internal/cache.Tracker.CumulativeCost.
+	CumulativeCost float64
+
 	// UpgradeAvailable is the tag of a newer release (e.g. "v0.2.0") found
 	// by the startup probe. Empty when up-to-date or the probe was
 	// skipped — in which case no segment is rendered.
@@ -129,7 +138,7 @@ func rightSegments(s StatusSnapshot) []string {
 	}
 	out = append(out, cache)
 
-	cost := pricing.FormatCost(pricing.Cost(s.Model, s.Tier, s.Usage))
+	cost := pricing.FormatCost(s.CumulativeCost)
 	out = append(out, "cost "+cost)
 
 	out = append(out, formatBudget(s))

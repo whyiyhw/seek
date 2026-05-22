@@ -312,7 +312,7 @@ func run() error {
 	// when using the DeepSeek client directly.
 	if dsClient != nil {
 		reg.Add(fimcomplete.New(dsClient, *model)).
-			Add(think.New(dsClient))
+			Add(think.New(dsClient, func() string { return sessionModel }))
 	}
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
@@ -388,9 +388,14 @@ func run() error {
 			activeSession = loaded
 			initialMsgs = loaded.Messages
 			// Replay accumulated stats into the tracker so the status
-			// bar shows cumulative figures, not just this run's.
+			// bar shows cumulative figures, not just this run's. The
+			// session file stores only aggregate Usage (no per-turn
+			// breakdown), so we attribute the whole thing to the
+			// current model+tier — an approximation when a session
+			// spans multiple models or tier transitions. Subsequent
+			// turns are priced accurately at their own (model, tier).
 			if loaded.Usage.TotalTokens > 0 {
-				tracker.Record(loaded.Usage)
+				tracker.Record(loaded.Usage, *model, pricing.CurrentTier(time.Now()))
 			}
 		} else {
 			activeSession = session.New(*model, abs, systemPrompt, *yolo)
@@ -662,7 +667,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 			}
 
 		case agent.TurnEnd:
-			tracker.Record(e.Usage)
+			tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
 			turns++
 			toolCalls += e.ToolCalls
 			saveTurn()
@@ -678,7 +683,11 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 
 	fmt.Println()
 	c := tracker.Cumulative()
-	cost := pricing.Cost(model, tier, c)
+	// Cumulative cost is summed from per-turn locked-in amounts in the
+	// tracker, not re-derived from cumulative tokens at the current
+	// (model, tier). Matters when the session straddled a /model
+	// switch or the 00:30/08:30 tier boundary; see internal/cache doc.
+	cost := tracker.CumulativeCost()
 
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
 	fmt.Fprintf(os.Stderr, "yolo:         %v\n", yolo)
@@ -802,7 +811,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 			emit(line)
 
 		case agent.TurnEnd:
-			tracker.Record(e.Usage)
+			tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
 			turns++
 			toolCalls += e.ToolCalls
 			emit(jsonLine{

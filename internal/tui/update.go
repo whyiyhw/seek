@@ -870,7 +870,15 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 
 	case agent.TurnEnd:
 		m.turns++
-		m.opts.Tracker.Record(e.Usage)
+		// Lock in cost at the (model, tier) active when the turn settled
+		// — see internal/cache doc. Using m.opts.Model rather than a
+		// model captured at TurnStart is a deliberate small race: a
+		// /model switch while the previous turn is still streaming
+		// would mis-attribute that turn's cost. /model is gated to
+		// non-streaming state in handleKey so the race is mostly
+		// theoretical; the alternative (carry model on TurnEnd events)
+		// would propagate plumbing into pkg/agent for negligible win.
+		m.opts.Tracker.Record(e.Usage, m.opts.Model, pricing.CurrentTier(time.Now()))
 		m.toolCalls += e.ToolCalls
 
 	case agent.AgentEnd:
@@ -910,7 +918,7 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	// the cost line in the status bar stays honest — the compact call
 	// is a real billed request.
 	if m.opts.Tracker != nil {
-		m.opts.Tracker.Record(msg.usage)
+		m.opts.Tracker.Record(msg.usage, m.opts.Model, pricing.CurrentTier(time.Now()))
 	}
 
 	var snapshotID string
@@ -999,7 +1007,10 @@ func truncateOneLine(s string, n int) string {
 
 func (m Model) renderTurnFooter() string {
 	c := m.opts.Tracker.Last()
-	cost := pricing.FormatCost(pricing.Cost(m.opts.Model, pricing.CurrentTier(m.now), c))
+	// Cost is the locked-in amount from when this turn was recorded —
+	// not a re-derivation against the current model/tier. Avoids the
+	// "switched model mid-turn → footer shows wrong dollars" race.
+	cost := pricing.FormatCost(m.opts.Tracker.LastCost())
 
 	var cacheNote string
 	if c.PromptTokens > 0 && c.PromptCacheHitTokens > 0 {

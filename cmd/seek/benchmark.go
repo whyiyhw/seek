@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -55,13 +56,13 @@ var benchmarkPresets = map[string]benchmarkTask{
 	"self-hosting": {
 		Name:        "self-hosting",
 		Description: "Read internal/cache/cache.go, add GetHitRatio(), run go test",
-		Prompt: `Read internal/cache/cache.go. Add a new exported method GetHitRatio() float64 that returns the cumulative prefix-cache hit ratio across all recorded turns (it should delegate to t.Cumulative().HitRatio()). Then run go test ./internal/cache/ to verify the code compiles and tests pass. After the tests pass, revert your change so the workspace is clean (use 'git checkout -- internal/cache/cache.go').`,
+		Prompt:      `Read internal/cache/cache.go. Add a new exported method GetHitRatio() float64 that returns the cumulative prefix-cache hit ratio across all recorded turns (it should delegate to t.Cumulative().HitRatio()). Then run go test ./internal/cache/ to verify the code compiles and tests pass. After the tests pass, revert your change so the workspace is clean (use 'git checkout -- internal/cache/cache.go').`,
 		FIMMinCalls: 0, // self-hosting is a cache-prefix test; FIM not required
 	},
 	"fim-patch": {
 		Name:        "fim-patch",
 		Description: "Read pkg/deepseek/types.go, add a String() method to Usage via FIM, run go vet",
-		Prompt: `Read pkg/deepseek/types.go. The Usage struct has a HitRatio() method. Add a String() method to Usage that returns a human-readable summary like 'prompt=100 hit=80 miss=20 ratio=80.0%'. Place it directly after the HitRatio() method body. Use fim_complete to fill in the gap if the edit is small and well-defined. Then run 'go vet ./pkg/deepseek/' to verify the code compiles. Finally, revert your changes with 'git checkout -- pkg/deepseek/types.go'.`,
+		Prompt:      `Read pkg/deepseek/types.go. The Usage struct has a HitRatio() method. Add a String() method to Usage that returns a human-readable summary like 'prompt=100 hit=80 miss=20 ratio=80.0%'. Place it directly after the HitRatio() method body. Use fim_complete to fill in the gap if the edit is small and well-defined. Then run 'go vet ./pkg/deepseek/' to verify the code compiles. Finally, revert your changes with 'git checkout -- pkg/deepseek/types.go'.`,
 		FIMMinCalls: 1, // one small edit; one FIM call = FIM path traversed
 	},
 }
@@ -111,10 +112,10 @@ type benchmarkReport struct {
 // ---------------------------------------------------------------------------
 
 type turnSnapshot struct {
-	Turn         int
-	Usage        deepseek.Usage
-	FIMCalls     int
-	ToolCalls    int
+	Turn      int
+	Usage     deepseek.Usage
+	FIMCalls  int
+	ToolCalls int
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +164,7 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 			toolCalls++
 
 		case agent.TurnEnd:
-			tracker.Record(e.Usage)
+			tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
 			turns++
 			// Record a snapshot for after-turn-5 computation.
 			cum := tracker.Cumulative()

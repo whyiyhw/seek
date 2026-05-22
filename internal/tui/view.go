@@ -229,6 +229,7 @@ func (m Model) renderStatusBar() string {
 		ToolCalls:        m.toolCalls,
 		Usage:            m.opts.Tracker.Cumulative(),
 		LastUsage:        m.opts.Tracker.Last(),
+		CumulativeCost:   m.opts.Tracker.CumulativeCost(),
 		Streaming:        m.streaming,
 		Now:              now,
 		Width:            m.width,
