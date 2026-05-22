@@ -26,10 +26,6 @@ type LoadStats struct {
 // LoadOptions controls Load — kept tiny on purpose. ProjectDir defaults
 // to "." (cwd). UserSkillsDir defaults to paths.UserSkills() (~/.seek/skills/).
 // Tests inject fakes via these fields.
-//
-// Note: pre-v1.0 versions also read $XDG_CONFIG_HOME/seek/skills/ and
-// ~/.claude/skills/ as additional priority tiers. Those are gone —
-// migrate with `mv ~/.claude/skills ~/.seek/skills` (or symlink).
 type LoadOptions struct {
 	ProjectDir    string
 	UserSkillsDir string // overrides the default ~/.seek/skills/ path; empty = default

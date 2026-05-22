@@ -10,19 +10,6 @@
 //  2. ~/.seek/  — the default. Cross-platform: on Unix it's
 //     /home/<user>/.seek/, on macOS /Users/<user>/.seek/, on
 //     Windows C:\Users\<user>\.seek\.
-//
-// Pre-v1.0 history (for users reading the source after upgrading):
-//
-//   - Sessions used to live in $XDG_CONFIG_HOME/seek/sessions/
-//     (default ~/.config/seek/sessions/) with a $SEEK_SESSIONS_DIR
-//     fine-grain override.
-//   - MCP config used to live in $XDG_CONFIG_HOME/seek/mcp.json on
-//     Unix and %APPDATA%\seek\mcp.json on Windows.
-//   - User skills used to live in $XDG_CONFIG_HOME/seek/skills/ AND
-//     ~/.claude/skills/ (Claude Code compatibility fallback).
-//
-// All three are gone. Migration is documented in the release notes:
-// `mv ~/.config/seek ~/.seek && mv ~/.claude/skills ~/.seek/skills`.
 package paths
 
 import (
