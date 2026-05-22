@@ -43,7 +43,7 @@ func allCommands() []command {
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
 		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
 		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
-		{names: []string{"/model"}, usage: "/model <id>", description: "Switch the active model. Example: /model deepseek-reasoner", handler: cmdModel},
+		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-reasoner).", handler: cmdModel},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
