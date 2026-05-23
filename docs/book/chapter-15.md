@@ -547,9 +547,20 @@ PRD 里"M7 polish"那一行原本是空的；这三个 commit 是把"polish"填�
 
 ---
 
-## 15.8 这本书是怎么停的
+## 15.8 v1.0 之后:这本书没停, 只是换了个版本号
 
-你读到这里，意味着你已经走完了 seek 从一行 Go 代码到 v1.0 候选发布的整个过程。15 章 + 前言 + 附录，每一章对应至少一个真实的 commit、一段真实的 bug、一组真实的取舍。
+v1.0 不是终点, 是节奏的换挡。第 15.7 节那份验收清单全绿之后, seek 在不到半年里走完了两个独立的大版本:
+
+- **v0.2.x — 三层认知记忆子系统**(M5.0–M5.8, PRD v1)。L/M/S 三层架构、`memory_recall` / `memory_remember` 工具、`/distill` 蒸馏、`seek -dream` 做梦、自动化的 S→M / M→L 流水线。**第 16 章**讲完整故事。
+- **v0.3.x — Skill 生命周期管理**(M8.0–M8.7, PRD v2)。目录包对齐 Anthropic Agent Skills、`seek skill install/uninstall/update/list/status/stats/create` 子命令族、`.install.json` sidecar、调用统计 `.stats.jsonl`、TUI `/skill` 镜像。**第 17 章**讲完整故事。
+
+这两条线没有任何一条出现在原 PRD v0 §6 的验收清单里——v1.0 验收只覆盖了"agent 能用"的最小集合。v0.2 和 v0.3 是 seek 自举到一定规模后, 作者自己用着觉得"差点意思", 才反推出来的。这跟 §15.6 讲过的"M7 polish 是自举驱动的"是同一回事, 只是规模放大了:**当工具够好用以后, 用户(包括作者自己)开始提的需求会换一个层级**——不再是"这个按键能不能改"或者"状态栏漏算了几分钱", 而是"我下次还要不要再说一遍我的代码风格偏好"、"我给同事推荐 skill 时, 让他抄哪几个文件、扔到哪个目录?"。
+
+这两类需求的共同点是:**它们都是关于"工具如何延续"的, 不是关于"工具如何运行"的**。v0 解决了运行;v1/v2 解决了延续。
+
+### 现在你读到这里, 意味着什么
+
+走完了 seek 从一行 Go 代码到 v0.3.x 的整个过程。15 章原作 + 两章续作(16、17) + 前言 + 附录, 每一章对应至少一个真实的 commit、一段真实的 bug、一组真实的取舍。
 
 我希望你带走的不是任何一个具体的 API 选择（那些都会随着 DeepSeek / Anthropic / OpenAI 协议演进而过时），而是**做这件事时的工作姿态**：
 
@@ -578,4 +589,4 @@ PRD 里"M7 polish"那一行原本是空的；这三个 commit 是把"polish"填�
 
 ---
 
-*这本书到此结束。对应 commit：`dd5db84`（M7 JSON 模式）、`1467be8`（首次自举：README 同步）、`5b23e55`（pitfalls 回填）、`b479187`（`/help` overlay + `?` 热键）、`393d6b7`（`/new` 替代 `/reset`）、`56b9df8`（`--theme` flag）。整个项目的最新进度：`git log --oneline | head -20`。*
+*第 1–15 章对应 commit:`dd5db84`(M7 JSON 模式)、`1467be8`(首次自举:README 同步)、`5b23e55`(pitfalls 回填)、`b479187`(`/help` overlay + `?` 热键)、`393d6b7`(`/new` 替代 `/reset`)、`56b9df8`(`--theme` flag)。第 16、17 章覆盖 v0.2.x / v0.3.x 的两套大版本——继续读下去, 整个项目的最新进度始终是 `git log --oneline | head -20` + `docs/prd/` 目录。*

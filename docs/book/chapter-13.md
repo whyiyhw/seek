@@ -18,51 +18,68 @@
 
 ---
 
-## 13.1 `cache.Tracker`：什么都不做的核心
+## 13.1 `cache.Tracker`：每轮一条记录, 成本在 Record 时锁定
 
 ```go
-type Tracker struct {
-    mu    sync.Mutex
-    turns []deepseek.Usage
+// 每轮一条 turnRecord——usage 是事实, cost 是当时按 (model, tier) 算好的
+type turnRecord struct {
+    Usage deepseek.Usage
+    Model string
+    Tier  pricing.Tier
+    Cost  float64  // 在 Record 时定格, 之后不再重算
 }
 
-func (t *Tracker) Record(u deepseek.Usage) {
+type Tracker struct {
+    mu    sync.Mutex
+    turns []turnRecord
+}
+
+func (t *Tracker) Record(u deepseek.Usage, model string, tier pricing.Tier) {
+    cost := pricing.Cost(model, tier, u)
     t.mu.Lock()
-    t.turns = append(t.turns, u)
+    t.turns = append(t.turns, turnRecord{Usage: u, Model: model, Tier: tier, Cost: cost})
     t.mu.Unlock()
 }
 ```
 
-整个 Tracker 干的事情只有"append 到一个切片"。没有滑动窗口、没有 ring buffer、没有累计字段。
+整个 Tracker 干的事情依旧很少:append 一个结构体。没有滑动窗口、没有 ring buffer、没有累计字段。
 
-为什么？因为我们**到底要什么聚合**这件事并不固定。一开始以为只要 cumulative；后来发现要 last-turn；之后又想要 hit ratio over time、saved tokens、平均轮长……每加一个聚合就改 Record 一次的设计在不到一周里就会乱掉。
-
-**保留原始数据 + 按需聚合**：每轮一条 `Usage` 进切片，需要什么聚合就遍历切片现算。聚合代价 O(N)，N 是轮数（典型 < 100），完全可以接受。
+**保留原始数据 + 按需聚合**:每轮的 `Usage` + 当时计算好的 `Cost` 一并存进切片, 需要什么 token 聚合就遍历现算。聚合代价 O(N), N 是轮数(典型 < 100), 完全可以接受。
 
 ```go
 func (t *Tracker) Cumulative() deepseek.Usage {
-    t.mu.Lock(); defer t.mu.Unlock()
-    var sum deepseek.Usage
-    for _, u := range t.turns {
-        sum.PromptTokens += u.PromptTokens
-        sum.CompletionTokens += u.CompletionTokens
-        sum.PromptCacheHitTokens += u.PromptCacheHitTokens
-        sum.PromptCacheMissTokens += u.PromptCacheMissTokens
-        // ...
-    }
-    return sum
+    // 累加 PromptTokens / CompletionTokens / Hit / Miss / Total
+    // ...
 }
 
 func (t *Tracker) Last() deepseek.Usage {
-    t.mu.Lock(); defer t.mu.Unlock()
-    if len(t.turns) == 0 { return deepseek.Usage{} }
-    return t.turns[len(t.turns)-1]
+    // 最近一条 turnRecord 的 Usage
+    // ...
+}
+
+// 钱不是从 Cumulative 推出来的——必须用 CumulativeCost
+func (t *Tracker) CumulativeCost() float64 {
+    var sum float64
+    for _, r := range t.turns { sum += r.Cost }
+    return sum
+}
+
+func (t *Tracker) LastCost() float64 {
+    if len(t.turns) == 0 { return 0 }
+    return t.turns[len(t.turns)-1].Cost
 }
 ```
 
-`Cumulative` 和 `Last` 是同一份数据上的两种视图。如果将来要"过去 10 轮的命中率"，加一个 `RecentN(n int)` 函数就行——底层数据不动。
+> **为什么不在 render 时按当前 (model, tier) 重算？**
+>
+> 早期版本只存 `[]deepseek.Usage`, 状态栏每帧调一次 `pricing.Cost(currentModel, currentTier, cumulative)`。直到 commit `064a37a` 这条路径出问题:
+>
+> - 用户在 V4-Flash 跑了 30 轮, `/model deepseek-v4-pro` 切到 V4-Pro。下一帧渲染时, 前面 30 轮的 token 全部被按 V4-Pro 价格(~3.1× 贵)重新计价——累计成本数字突然跳一大截, 但 DeepSeek 那边其实已经按 V4-Flash 价格扣过钱了。
+> - 同样地, 跨过 00:30 北京时间的离峰窗口边界, 历史成本会被整段从 standard 价拉到 5 折——状态栏的"已花"和真实账单永远对不上。
+>
+> 修法:Record 时就锁定 cost。`Usage` 还是事实, 但 `Cost` 是"那一刻按 (model, tier) 算出来"的不可变快照。Cumulative 还是 token 聚合视图; **成本不再是 token 的派生量, 而是一个独立的, 按事件流追加的数。**
 
-这种"数据是事实，聚合是视图"的分离让模块非常稳定。Tracker 写完之后基本没大改过——所有需求都在外部加视图函数实现。
+这种"数据是事实, 聚合是视图"的分离让模块非常稳定。Tracker 在重写为 `turnRecord` 后, 外部调用方只需要在原来 `Cost(...,Cumulative())` 的地方换成 `CumulativeCost()`——所有视图都迁移完。
 
 ---
 
@@ -152,6 +169,21 @@ var standardRates = map[string]ModelPricing{
 - **就算有，也不该用**：成本显示是 seek 的**纯防御性功能**——它不是核心路径，但反过来如果它依赖网络抓取，就给启动路径加了一个失败模式。"网络断了 → 启动失败 → 用户看不见错误就一直在打字" 是真实可发生的坏体验
 
 PRD §4.8.4 把这件事写明白了：**embedded rates, bump them with each release**。每次发版核对一次价目表，刷新这个 map 的值，commit。代价是低频维护，换来"没网络也能启动"的可靠性。
+
+> **V4 别名 sunset 与一次错误定价的教训**(commit `94d8cbc`)
+>
+> DeepSeek 在 2026-01 发 V4 时, 同时保留了两个 legacy 别名:`deepseek-chat`(对应 V4-Flash, thinking 关)和 `deepseek-reasoner`(对应 V4-Flash, thinking 开)。官方公告:**2026-07-24 这两个别名下线**, 之后必须直接写 `deepseek-v4-flash` / `deepseek-v4-pro`。
+>
+> seek 的 pricing 表对这两个别名做了显式映射, 共享 V4-Flash 的费率(`$0.14` miss / `$0.0028` hit / `$0.28` output, 全部按每百万 token):
+>
+> ```go
+> deepseek.ModelChat:     { 0.14, 0.0028, 0.28 },  // → V4-Flash, sunset 2026-07-24
+> deepseek.ModelReasoner: { 0.14, 0.0028, 0.28 },  // → V4-Flash + thinking, sunset 同上
+> ```
+>
+> 早期版本曾经把 `ModelReasoner` 错配成 V4-Pro 的费率(`$0.435` miss / `$0.87` output)——理由是"reasoner 听起来比 chat 贵"。结果一个用 `deepseek-reasoner` 跑了几小时的会话, 状态栏显示 $1.30+, 实际 DeepSeek 那边只扣 $0.42, **大约 3.1× 的虚高**。修法不只是改两个数字, 而是把"别名 → 真实后端"的映射在 pricing.go 注释里写明白:**reasoner 本质是 thinking-on 的 V4-Flash**, 不是另一档定价。
+>
+> 教训:**当两个 SKU 名字暗示价格差异但底层是同一引擎时, 你的定价表必须显式记录这个事实, 否则未来某个人会按命名直觉再踩一次**。
 
 ### 缓存命中 / 未命中分别计价
 
@@ -369,8 +401,8 @@ ctx := budgetCtx{
 事件流向：
 
 - Agent 每轮结束发 `TurnEnd{Usage: ...}` 事件
-- TUI 收到，调 `tracker.Record(e.Usage)`
-- 下一次 statusTick / 下一帧 View 时，从 tracker 取 Last / Cumulative 算各项指标
+- TUI 收到，调 `tracker.Record(e.Usage, currentModel, pricing.CurrentTier(time.Now()))`
+- 下一次 statusTick / 下一帧 View 时，从 tracker 取 `Last` / `Cumulative` 看 token, 取 `LastCost` / `CumulativeCost` 看钱
 
 整个数据流是单向的——Agent 只写 Tracker，TUI 只读 Tracker。中间没有共享状态、没有 race。
 
@@ -383,13 +415,17 @@ ctx := budgetCtx{
 ```go
 // internal/tui/update.go: handleCompactDone
 if m.opts.Tracker != nil {
-    m.opts.Tracker.Record(msg.usage)
+    // 注意:这里要传当时调用 Summarise 用的 model + tier, 不是"现在的"——
+    // /compact 是同步调用, 通常就一瞬间, 但纪律要保持一致
+    m.opts.Tracker.Record(msg.usage, msg.model, msg.tier)
 }
 ```
 
 这一行不在 Agent 的正常事件流里——`Summarise` 是个一次性同步调用，不发 TurnEnd。需要手工 Record。如果忘了：每次 compact 之后状态栏的成本数字都会少几分钱，越长的会话偏差越大。
 
 这种"在主路径之外的额外用量"是状态栏数据准确性的常见坑。`/branch` 没有额外 LLM 调用，所以不用记；`/compact` 有，必须记。**任何花 token 的动作都要走过 tracker**——这是一条简单的纪律，但漏一处状态栏就开始撒谎。
+
+> 同样的纪律也覆盖了 v0.2.x 加进来的 memory 子系统:`/distill`(S→M 蒸馏)和 `seek -dream`(M→L 做梦)都跑独立 LLM 调用, 它们的 usage 也走 `tracker.Record`——第 16 章会专门讲。
 
 ---
 
@@ -407,8 +443,9 @@ if m.opts.Tracker != nil {
 
 ## 本章小结
 
-- `cache.Tracker` 只存每轮原始 `Usage`，所有聚合都按需算——"数据是事实，聚合是视图"，让模块写完之后基本不动
-- **`Cumulative` 用来算钱，`Last` 用来算空间**——这是 multi-turn 客户端最容易踩的指标错配（**坑 #15**）。把 cumulative 当 context 利用率，50 轮后开始撒谎
+- `cache.Tracker` 每轮一条 `turnRecord`(Usage + Model + Tier + Cost)——token 是事实, 钱是 Record 时锁定的快照, 切 `/model` 或跨离峰边界不会回溯改写历史(commit `064a37a`)
+- **Token 聚合用 `Cumulative` / `Last`, 钱聚合用 `CumulativeCost` / `LastCost`**——成本不再是 token × 当前费率的派生量
+- **`Cumulative` 用来算 token 已花总量，`Last` 用来算 context 利用率**——这是 multi-turn 客户端最容易踩的指标错配（**坑 #15**）。把 cumulative 当 context 利用率，50 轮后开始撒谎
 - `pricing` 表 hardcoded，每次发版手动核对——纯防御性功能不该给启动路径加网络失败模式
 - 缓存命中/未命中分开计价，把 `Schema 必须是 []byte 常量` 这条贯穿全书的约束最终兑现成可见的省钱数字
 - 时区用 `FixedZone` 不用 `LoadLocation`——避免最小容器没有 tzdata 的常见故障
@@ -421,4 +458,4 @@ if m.opts.Tracker != nil {
 
 ---
 
-*对应 commit：`e240ea5`（`Last()` + `finish_reason=length` + `MaxTokens` 默认值修复）、`b01bc17`（compact 阈值 80/95 → 60/75）。运行 `go test -race ./internal/cache/... ./internal/pricing/... ./internal/budget/...` 验证。*
+*对应 commit：`e240ea5`（`Last()` + `finish_reason=length` + `MaxTokens` 默认值修复）、`b01bc17`（compact 阈值 80/95 → 60/75）、`064a37a`（per-turn 成本在 Record 时锁定, 不再 render 时重算）、`94d8cbc`（V4 别名 routing + 2026-07-24 sunset 备忘 + 修正 reasoner 错误定价）。运行 `go test -race ./internal/cache/... ./internal/pricing/... ./internal/budget/...` 验证。*

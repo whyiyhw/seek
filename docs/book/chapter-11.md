@@ -33,9 +33,13 @@
 
 ---
 
-## 11.2 文件格式：Markdown + 简化的 frontmatter
+## 11.2 文件格式：Markdown + 4 种 frontmatter 形状
 
-一个 skill 长这样：
+> **本节描述的是 v2 (M8) 之后的格式**。M5.3 上线时, skill 是单文件 `foo.md` + 只识别 `name` / `description` 两个字段。M8.0 (commit `b7d7996`) 引入目录包形态——`foo/SKILL.md` + 可选 `references/` / `examples/` / `scripts/`——以及对齐 Anthropic Agent Skills 规范的 frontmatter 字段。单文件 `.md` **永远兼容**, 同目录下 `foo.md` 和 `bar/SKILL.md` 共存正常加载。
+>
+> 第 17 章会展开 M8 的完整生命周期(install / uninstall / update / 调用统计 / `seek skill create` 脚手架)。本章先讲格式本身。
+
+一个 v0 风格的单文件 skill 长这样：
 
 ```markdown
 ---
@@ -46,44 +50,85 @@ description: Use when the user asks to fix a bug. Reproduces the bug as a failin
 # Bug fix protocol
 
 1. Read the bug report. If unclear, ask for the exact failing input or stack trace.
-2. Identify the smallest test case that reproduces it. Write it as a failing test...
-
-(rest of the markdown body)
+2. ...
 ```
 
-YAML frontmatter + Markdown body——Jekyll/Hugo/Obsidian/Claude Code 用的都是这套格式。它已经是社区事实标准了，没必要发明新的。
+一个 v2 风格的目录包 skill 长这样:
 
-### 不用完整 YAML 库
+```
+fix-bug-first-test/
+├── SKILL.md            ← 必需。Frontmatter + body, 加载器只读这一个
+├── references/         ← 可选。SKILL.md body 用 [link](references/foo.md) 引用
+├── examples/           ← 可选。代码片段、示例数据
+├── scripts/            ← 可选。SKILL.md 引用的辅助脚本(模型读到指令后调 bash 工具跑)
+├── .install.json       ← 由 `seek skill install` 写, 加载器读, 作者不动 (第 17 章)
+└── README.md           ← 可选。给人看, 加载器不读
+```
 
-`internal/skill/skill.go` 自己手写了一个**严格简化的 frontmatter 解析器**：
+`SKILL.md` 里的 frontmatter 在 v2 加了一组可选字段:
+
+```yaml
+---
+name: fix-bug-first-test
+description: |
+  Use when the user asks to fix a bug. Reproduces the
+  bug as a failing test first, then implements the fix.
+version: 1.2.0
+license: MIT
+author: whyiyhw <williexue@drayeasy.com>
+keywords: [testing, debugging, tdd]
+allowed-tools:
+  - read
+  - edit
+  - bash
+---
+```
+
+`name` + `description` 仍然是必填且唯一影响**加载行为**的字段。其余字段 v2 **记录但不强制**——`version` / `license` / `author` 用于 `seek skill status` 展示和 `seek skill update` 决策, `keywords` 留给未来的 search, `allowed-tools` 显示在 status 里但 v2 不实际收紧工具集(留给 v3 的工具裁剪机制)。
+
+未识别的 key 不会让加载失败——它们落进 `Skill.Extra map[string]string`, 让 seek 不影响未来 Anthropic 规范追加字段(PRD v2 §3 目标 #2 "零格式发明")。
+
+### 仍然不用完整 YAML 库
+
+`internal/skill/skill.go` 把 frontmatter 解析器从 v0 的单形态扩到 v2 的四种形状(PRD v2 §4.1 全部覆盖):
+
+| 形状 | 例子 | 解析后落到 |
+|---|---|---|
+| 1. scalar | `version: 1.2.0` | `scalars["version"]` |
+| 2. 带引号 scalar | `description: "use when..."` | `scalars["description"]`(去引号) |
+| 3. 行内列表 | `keywords: [tdd, "test driven"]` | `lists["keywords"]` |
+| 4a. 块标量 | `description: \|\n  line 1\n  line 2` | `scalars["description"]`(多行合并) |
+| 4b. 块列表 | `allowed-tools:\n  - read\n  - edit` | `lists["allowed-tools"]` |
 
 ```go
-func parseFrontmatter(lines []string) map[string]string {
-    out := map[string]string{}
-    for _, raw := range lines {
-        line := strings.TrimRight(raw, "\r")
-        if t := strings.TrimSpace(line); t == "" || strings.HasPrefix(t, "#") {
+// parseFrontmatter 走一遍 lines, 在每个 top-level key 处分发到对应形状的子解析器
+for i := 0; i < len(lines); i++ {
+    // ... 找到 "key:" 这一行
+    val := strings.TrimSpace(raw[idx+1:])
+
+    if val == "|" || val == "|-" {            // 形状 4a
+        block, next := readBlockScalar(lines, i+1)
+        scalars[key] = block; i = next - 1
+        continue
+    }
+    if val == "" {                            // 形状 4b 或空值
+        if items, next, ok := readBlockList(lines, i+1); ok {
+            lists[key] = items; i = next - 1
             continue
         }
-        idx := strings.Index(line, ":")
-        if idx <= 0 { continue }
-        key := strings.TrimSpace(line[:idx])
-        val := strings.TrimSpace(line[idx+1:])
-        // 剥除外层引号
-        if len(val) >= 2 &&
-            ((val[0] == '"'  && val[len(val)-1] == '"') ||
-             (val[0] == '\'' && val[len(val)-1] == '\'')) {
-            val = val[1 : len(val)-1]
-        }
-        out[key] = val
+        scalars[key] = ""; continue
     }
-    return out
+    if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {  // 形状 3
+        lists[key] = splitInlineList(val[1 : len(val)-1])
+        continue
+    }
+    scalars[key] = unquote(val)               // 形状 1/2
 }
 ```
 
-只支持 top-level `key: value`，不支持嵌套 map、列表、多行 block scalar。理由就一条：**PRD 规定 skill 的 frontmatter 只用 `name` 和 `description`**。把完整 YAML 拉进来意味着引入 `gopkg.in/yaml.v3` 这个依赖（七位数行代码，编译变慢，CVE 面增大），换来的能力 0% 使用。
+四种形状全部是 YAML 真子集——任何符合 Anthropic Agent Skills 规范的 SKILL.md 都能不改一行 zero-shot 加载。但**仍然不引入 `gopkg.in/yaml.v3`**:整套规则压缩在 ~170 行 Go 里, 编译时间 + CVE 面 + 依赖图全部按零外部依赖原则维持。
 
-注意 `idx <= 0` 而不是 `idx < 0`——`<= 0` 拦截了"行以冒号开头"的情况（无 key 名），这种数据是错的，跳过比静默接受好。
+历史上的 `idx <= 0` 拦截依然在(行以冒号开头时无 key 名, 这种数据是错的, 跳过比静默接受好), 且**无法分类的行被静默丢弃**——frontmatter 是开发者面向的, 在每个 typo 上 fail-startup 会让人挫败。错误状态在 `seek skill status <name>` 里集中展示。
 
 ### 容忍 BOM 与前导空行
 
@@ -396,7 +441,9 @@ RebuildAgent: func() (*agent.Agent, error) {
 ## 本章小结
 
 - Skill = "任务说明书"，AGENTS.md = "项目宪法"。看起来重叠，但服务的"指令覆盖面"不同
-- Skill 文件 = Markdown + 极简 YAML frontmatter（只 `name` + `description`）；name 必须 kebab-case 以避免多种规范形式
+- Skill 文件 = Markdown + YAML frontmatter; v0 只识别 `name` + `description`, v2(M8.0) 加上 `version` / `license` / `author` / `keywords` / `allowed-tools`, 未识别字段进 `Skill.Extra` 以保持向前兼容; name 必须 kebab-case 以避免多种规范形式
+- Skill 既可以是单文件 `foo.md`(v0 兼容), 也可以是目录包 `foo/SKILL.md` + 可选子目录(v2, 对齐 Anthropic Agent Skills 规范, commit `b7d7996`); 同目录下两种形态共存
+- frontmatter 解析器扩到 4 种形状(scalar / 带引号 / 行内列表 / 块标量 + 块列表), 全部在 ~170 行 Go 里实现, 仍然零外部依赖
 - 4+1 层优先级扫描：项目 `.seek` > 项目 `.claude` > 用户 `.config/seek` > 用户 `.claude` > `go:embed` 内置；first-writer-wins
 - 同目录内文件名排序，让"不该发生但发生了"的同名冲突有确定胜者
 - manifest 进 system prompt，body 等 `Skill` 工具调用时才返回——避免新增/编辑 skill 把整个缓存前缀打掉
@@ -407,6 +454,8 @@ RebuildAgent: func() (*agent.Agent, error) {
 
 下一章进入 M5.4 — MCP client。我们会看到 JSON-RPC 2.0 over stdio 是怎么 spawn 一个子进程并和它对话的、外部 server 的工具如何动态注入到 Agent 的工具表里、以及 `filesystem` MCP server 端到端跑通的样子。
 
+> **本章覆盖的是 v0 的 Skill 加载逻辑(M5.3)**, 它在 v1.0 release 时已经稳定。v0.3.x(PRD v2)扩出了完整的 Skill 生命周期管理:install / uninstall / update / 调用统计 / `seek skill create` 脚手架——单文件兼容、目录包并存、`.install.json` sidecar、`/skill` TUI slash 命令。**这部分写在第 17 章。**
+
 ---
 
-*对应 commit：`2c53248`（Skill loader + 多优先级 + Skill 工具）、`dd1bcd0`（内置 dual-model skill）、`e8894ff`（AGENTS.md 自动加载）。运行 `go test ./internal/skill/... ./internal/projectmd/... ./internal/tools/skilltool/...` 验证。*
+*对应 commit：`2c53248`（Skill loader + 多优先级 + Skill 工具）、`dd1bcd0`（内置 dual-model skill）、`e8894ff`（AGENTS.md 自动加载）、`b7d7996`(M8.0 目录包 + 4 形态 frontmatter, 第 17 章详)。运行 `go test ./internal/skill/... ./internal/projectmd/... ./internal/tools/skilltool/...` 验证。*
