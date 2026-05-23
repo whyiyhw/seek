@@ -249,6 +249,27 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Tooling / environment
 
+### Path-string assertions / raw paths in JSON literals broke on windows-latest CI
+- **Saw**: `go test ./...` red on windows-latest with three failure shapes: (1) `strings.HasSuffix(p, "/foo")` failing because Windows gives `\foo`; (2) `strings.Contains(p, ".seek/skills")` for the same reason; (3) `read: bad arguments: invalid character 'U' in string escape code` when a test built JSON via `json.RawMessage(`{"path":"`+p+`"}`)` and `p` was `C:\Users\...` — `\U` is an invalid JSON string escape
+- **Why**: macOS/Linux developers writing tests against `filepath.Join` outputs and then asserting via Unix-style literals (`/foo`) or embedding paths directly into JSON without escaping. Both work locally; both blow up the moment a Windows runner sees them. The `\U` case is sneakier — JSON requires backslashes to be escaped (`\\`), but raw concatenation skips that step
+- **Fix**: (1)+(2) use `filepath.Base(p)` for last-segment checks or `filepath.ToSlash(p)` when substring matching; (3) build JSON via `json.Marshal(map[string]string{"path": p})` instead of string concat — the marshaller escapes backslashes correctly
+- **Lesson**: any test that touches paths needs to be reviewed with "what does this do on Windows?" in mind. Three antipatterns to grep for periodically: `HasSuffix(.*"/`, `Contains(.*"/`, `json.RawMessage(.*+.*+`. Especially the JSON one — it looks like obviously-correct test setup until a backslash lands inside
+- **Refs**: `internal/skillmgr/skillmgr_test.go` `update_test.go`, `internal/skill/loader_test.go`, `internal/tools/read/read_test.go`, `internal/tui/filepicker_test.go`
+
+### Go's `time.ParseDuration` rejects "30d" / "1w" — only ns…h
+- **Saw**: a `flag.Duration` with default `30*24*time.Hour` accepted `--since=720h` but choked on `--since=30d` with "parse error" — the natural unit a CLI user would write
+- **Why**: `time.ParseDuration` (since 1.0) only supports `ns`, `us`/`µs`, `ms`, `s`, `m`, `h`. There is no day or week unit because they're not exactly 24h / 7d (DST, leap seconds), and the stdlib won't fake it
+- **Fix**: document the limitation in the flag help text (`--since DURATION (e.g. 24h, 168h, 720h)`), and have tests use hour-based values. Don't reinvent parsing on top — too many edge cases. M8.4b commit
+- **Lesson**: when exposing a duration flag, either accept Go's surface and tell the user, or write a custom parser that handles `d`/`w` explicitly. Half-measures (silently approximating "30d" as 720h) confuse users who write `31d` and don't see what they expected
+- **Refs**: `cmd/seek/skill_query.go:cmdSkillStats`
+
+### macOS APFS made `SKILL.md` + `skill.md` tests collide silently
+- **Saw**: a loader test that wrote both `SKILL.md` and `skill.md` into one directory and expected the uppercase to win failed with "uppercase didn't win" — the second write silently overwrote the first, and `fileExists` for both names returned true (same inode)
+- **Why**: APFS (and HFS+ before it) are case-insensitive by default; `SKILL.md` and `skill.md` resolve to the same file. The "two files coexisting" scenario the loader has to handle is only reachable on case-sensitive filesystems (Linux ext4/btrfs, macOS APFS formatted case-sensitive explicitly)
+- **Fix**: probe the temp dir for case sensitivity (write FS_CASE_PROBE / fs_case_probe, read back) and `t.Skip` when insensitive. Commit lands in M8.0
+- **Lesson**: cross-platform filesystem tests need to detect the property they depend on, not assume Linux. The classic candidate set is: case sensitivity, symlink permissions, executable bit, mtime resolution
+- **Refs**: `internal/skill/loader_test.go:caseSensitiveFS`
+
 ### Auto-mode classifier blocked inline API keys on the command line
 - **Saw**: tried to run `DEEPSEEK_API_KEY=sk-... go run ...` and got the action denied; reason cited shell history exposure
 - **Why**: the harness's safety classifier flags any command that embeds a credential-looking string. Even one-off smoke tests with a real key trigger it

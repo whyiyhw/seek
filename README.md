@@ -125,6 +125,39 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 `seek -upgrade` 从 [GitHub Releases](https://github.com/whyiyhw/seek/releases) 直接下载对应平台的二进制，sha256 对照 `checksums.txt` 验签后原子替换当前文件。本地 `go build` 出的开发版本默认会被拒绝覆盖（用 `-upgrade-force` 强制）。TUI 内也可输入 `/upgrade`。  
 关闭启动时的版本检查：`export SEEK_NO_UPGRADE_CHECK=1`。
 
+## Skills 管理
+
+seek v0.3 起把 skill 升级为**目录包**——`<dir>/SKILL.md` + frontmatter 内联元数据，兼容 Anthropic Agent Skills 格式（任何 Claude Code skill 仓库都可零修改安装）。单文件 `.md` skill 永久兼容。
+
+```bash
+# 本地路径 / Git URL / HTTPS 压缩包，三种源开箱即用
+seek skill install ./my-skill
+seek skill install https://github.com/foo/bar#v1.0.0
+seek skill install https://example.com/foo.tar.gz --sha256 a3b9...
+
+# 同名冲突：默认拒绝；--force 替换
+seek skill install ./my-skill --force
+
+# 项目级共享（拷到 <cwd>/.seek/skills/，进 git；不写 .install.json）
+seek skill install ./my-skill --project
+
+# 查看已加载 / 单个详情 / 调用排行
+seek skill list
+seek skill status <name>
+seek skill stats --top 5 --since 720h
+
+# 重新拉取（git: 按记录的 ref；https: 重新下载校验 sha256；local: 重 cp）
+seek skill update <name>
+seek skill update --all
+
+# 卸载
+seek skill uninstall <name>
+```
+
+所有命令都在 TUI 内可用：`/skill <verb> [args]` 镜像 CLI（共享同一份 dispatcher）。`/skills` 仍可用（pre-v2 muscle memory）。
+
+每次模型调用 `Skill(name=...)` 工具时会在 `~/.seek/skills/.stats.jsonl` 追加一行（ts/name/session/project/model/provider），用于 `seek skill stats` 排行。纯本地、append-only、零远端。
+
 ## 路线图
 
 项目采用里程碑 M0–M7（已全部交付）。当前重点：
@@ -133,7 +166,7 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 - **插件系统**：支持第三方工具加载
 - **稳定化**：打 tag 发版，CI 加固
 
-完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 当前开发）  
+完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 Memory · v2 Skill 生命周期）  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
 
 ## 开源 & 贡献

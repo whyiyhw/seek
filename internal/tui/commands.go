@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
@@ -49,6 +51,7 @@ func allCommands() []command {
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
+		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Manage skill packages (mirrors the `seek skill` CLI: install, uninstall, update, list, status, stats, help).", handler: cmdSkillCLI},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
@@ -375,9 +378,50 @@ func cmdQuit(_ *Model, _ string) cmdResult {
 	return cmdResult{quit: true}
 }
 
+// cmdSkillCLI mirrors the `seek skill ...` CLI (PRD v2 §5.2) inside
+// the TUI. Args are whitespace-split into a tokens slice and handed
+// to skillcli.Run with buffered IO; the captured stdout / stderr are
+// rendered as scrollback text.
+//
+// Limitation (documented): args are whitespace-split. Skill names
+// can't contain spaces (kebab-case regex enforces that), and install
+// sources with spaces in the path are rare. If a user hits one,
+// they can drop to the real CLI — same dispatcher, same behaviour.
+//
+// Long operations (git clone, HTTPS download) block the TUI for the
+// duration of the call. Acceptable because the user deliberately
+// typed /skill install — for any v3 polish round we can promote to
+// a tea.Cmd with a spinner, but keeping it synchronous in v2 keeps
+// the implementation honest about what the dispatcher does.
+func cmdSkillCLI(_ *Model, args string) cmdResult {
+	tokens := strings.Fields(args)
+	var stdout, stderr bytes.Buffer
+	err := skillcli.Run(tokens, &stdout, &stderr)
+	var b strings.Builder
+	if s := strings.TrimRight(stdout.String(), "\n"); s != "" {
+		b.WriteString(s)
+	}
+	if s := strings.TrimRight(stderr.String(), "\n"); s != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(s))
+	}
+	if err != nil {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(err.Error()))
+	}
+	return cmdResult{text: b.String()}
+}
+
 // cmdSkills prints the loaded skill inventory grouped by source. The
 // model already sees the manifest in its system prompt, so this command
 // exists for humans who want to verify what got loaded.
+//
+// Kept alongside /skill (mirror of CLI list) because /skills is the
+// pre-v2 muscle memory; deleting it would break existing user habits.
 func cmdSkills(m *Model, _ string) cmdResult {
 	if m.opts.Skills == nil || m.opts.Skills.Len() == 0 {
 		return cmdResult{text: styleMuted.Render("no skills loaded")}

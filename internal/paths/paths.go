@@ -73,6 +73,20 @@ func UserSkills() (string, error) {
 	return filepath.Join(root, "skills"), nil
 }
 
+// UserSkillStats returns the path to the global call-statistics
+// JSONL file (~/.seek/skills/.stats.jsonl). Per PRD v2 §4.3 the
+// stats file lives inside UserSkills so it ships alongside the
+// skills it describes. Filename starts with `.` so the skill
+// loader skips it during directory scans (single source of truth
+// for that filter rule).
+func UserSkillStats() (string, error) {
+	dir, err := UserSkills()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ".stats.jsonl"), nil
+}
+
 // Projects returns the parent directory holding per-project memory
 // (~/.seek/projects/). Each project has its own subdirectory keyed by a
 // 16-char SHA-256 prefix of its absolute path; layout details live in

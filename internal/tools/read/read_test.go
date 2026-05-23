@@ -22,7 +22,11 @@ func writeFile(t *testing.T, content string) string {
 
 func TestRead_Basic(t *testing.T) {
 	p := writeFile(t, "alpha\nbeta\ngamma\n")
-	out, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+p+`"}`))
+	// json.Marshal so Windows backslashes in `p` get escaped properly —
+	// raw concatenation produced invalid JSON ("\Users" isn't a valid
+	// escape) and broke this test on windows-latest CI.
+	args, _ := json.Marshal(map[string]string{"path": p})
+	out, err := New().Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +94,8 @@ func TestRead_DirectoryDegradesToListing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+dir+`"}`))
+	args, _ := json.Marshal(map[string]string{"path": dir})
+	out, err := New().Execute(context.Background(), args)
 	if err != nil {
 		t.Fatalf("read on a directory should NOT error any more: %v", err)
 	}
@@ -120,7 +125,8 @@ func TestRead_DefaultLimitTruncatesLargeFile(t *testing.T) {
 	}
 	p := writeFile(t, sb.String())
 
-	out, err := New().Execute(context.Background(), json.RawMessage(`{"path":"`+p+`"}`))
+	args, _ := json.Marshal(map[string]string{"path": p})
+	out, err := New().Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
