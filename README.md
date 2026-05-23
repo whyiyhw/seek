@@ -20,14 +20,16 @@ seek 跟 Claude Code / Aider / Cursor 在功能面上大量重叠——MCP、会
 
 ### 1. 便宜一个数量级
 
-DeepSeek V4-Flash 的输入价格（来自 `internal/pricing/pricing.go`）：
+DeepSeek 的输入价格（来自 `internal/pricing/pricing.go`）：
 
-| | seek (DeepSeek V4-Flash) | Claude Sonnet 4 |
-|---|---|---|
-| 输入（无缓存） | **$0.14 / 1M token** | $3 / 1M token |
-| 输入（前缀缓存命中） | **$0.0028 / 1M token** | $0.30 / 1M token |
-| 输出 | **$0.28 / 1M token** | $15 / 1M token |
-| 错峰时段（北京时间 00:30–08:30） | **再 5 折** | — |
+| | seek (DeepSeek V4-Flash) | seek (DeepSeek V4-Pro) | Claude Sonnet 4 |
+|---|---|---|---|
+| 输入（无缓存） | **$0.14 / 1M token** | **$0.435 / 1M token**（promo 价）¹ | $3 / 1M token |
+| 输入（前缀缓存命中） | **$0.0028 / 1M token** | **$0.003625 / 1M token** | $0.30 / 1M token |
+| 输出 | **$0.28 / 1M token** | **$0.87 / 1M token** | $15 / 1M token |
+| 错峰时段（北京时间 00:30–08:30） | **再 5 折** | **再 5 折** | — |
+
+> ¹ V4-Pro 目前为 75% 折扣 promo 价；全价为 $1.74 / $0.0145 / $3.48（见 `internal/pricing/pricing.go`）。DeepSeek-chat / deepseek-reasoner 别名走 V4-Flash 定价（非 V4-Pro）。
 
 实测自举 benchmark cache hit 95.7%（前 5 轮除外 97%）——前缀缓存稳定的工程纪律换来真实的成本节约。状态栏实时显示命中率和节省的 token 数。
 
@@ -130,6 +132,9 @@ seek -upgrade-dry-run # 走完下载+校验流程，跳过最后一步替换
 seek v0.3 起把 skill 升级为**目录包**——`<dir>/SKILL.md` + frontmatter 内联元数据，兼容 Anthropic Agent Skills 格式（任何 Claude Code skill 仓库都可零修改安装）。单文件 `.md` skill 永久兼容。
 
 ```bash
+# 从模板创建一个新 skill 目录包
+seek skill create <name> --description "<trigger summary>"
+
 # 本地路径 / Git URL / HTTPS 压缩包，三种源开箱即用
 seek skill install ./my-skill
 seek skill install https://github.com/foo/bar#v1.0.0
@@ -160,11 +165,11 @@ seek skill uninstall <name>
 
 ## 路线图
 
-项目采用里程碑 M0–M7（已全部交付）。当前重点：
+项目采用里程碑 M0–M7（已全部交付），当前 **M8（Skill 生命周期管理）** 正在收尾：
 
-- **IDE 集成**：完善 `--rpc` 协议，开发编辑器插件
-- **插件系统**：支持第三方工具加载
-- **稳定化**：打 tag 发版，CI 加固
+- **Skill CLI**：`seek skill create / install / list / status / stats / update / uninstall`
+- **目录包格式**：`<dir>/SKILL.md` + frontmatter，兼容 Anthropic Agent Skills 生态
+- **文档与稳定性**：补充指南、完善测试、打 tag 发版
 
 完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 Memory · v2 Skill 生命周期）  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。

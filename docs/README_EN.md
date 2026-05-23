@@ -20,14 +20,16 @@ seek overlaps a lot with Claude Code / Aider / Cursor on features — MCP, sessi
 
 ### 1. An order of magnitude cheaper
 
-DeepSeek V4-Flash input pricing (from `internal/pricing/pricing.go`):
+DeepSeek input pricing (from `internal/pricing/pricing.go`):
 
-| | seek (DeepSeek V4-Flash) | Claude Sonnet 4 |
-|---|---|---|
-| Input (cache miss) | **$0.14 / 1M tokens** | $3 / 1M tokens |
-| Input (prefix-cache hit) | **$0.0028 / 1M tokens** | $0.30 / 1M tokens |
-| Output | **$0.28 / 1M tokens** | $15 / 1M tokens |
-| Off-peak window (00:30–08:30 Beijing time) | **50% off all of the above** | — |
+| | seek (DeepSeek V4-Flash) | seek (DeepSeek V4-Pro) | Claude Sonnet 4 |
+|---|---|---|---|
+| Input (cache miss) | **$0.14 / 1M tokens** | **$0.435 / 1M tokens** (promo)¹ | $3 / 1M tokens |
+| Input (prefix-cache hit) | **$0.0028 / 1M tokens** | **$0.003625 / 1M tokens** | $0.30 / 1M tokens |
+| Output | **$0.28 / 1M tokens** | **$0.87 / 1M tokens** | $15 / 1M tokens |
+| Off-peak window (00:30–08:30 Beijing time) | **50% off all of the above** | **50% off all of the above** | — |
+
+> ¹ V4-Pro is currently at a 75%-off promotional rate; the full rack rate is $1.74 / $0.0145 / $3.48 (see `internal/pricing/pricing.go`). The `deepseek-chat` / `deepseek-reasoner` aliases route to V4-Flash pricing, not V4-Pro.
 
 Self-hosting benchmark measures 95.7% cache hit (97% after turn 5) — the engineering discipline that keeps the prefix-cache stable (byte-stable schemas, system prompt, history) pays out in real cost savings. The status bar shows the hit ratio and saved-token count in real time.
 
