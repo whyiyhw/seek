@@ -180,7 +180,21 @@ func (m Model) View() string {
 		sb.WriteString(m.renderPathPicker())
 	}
 
-	// Status line (single, not pinned — it scrolls with content).
+	// Pin the status bar to the bottom of the terminal window.
+	// cursorRow = welcomeFixedLines + total tea.Println scrollback lines.
+	// Add padding to fill remaining vertical space so the status bar
+	// always sits on the terminal's last visible line.
+	if m.scrollbackLines > 0 && m.height > 0 {
+		contentHeight := strings.Count(sb.String(), "\n") + 1
+		cursorRow := welcomeFixedLines + m.scrollbackLines
+		remaining := m.height - cursorRow
+		pad := remaining - contentHeight - 2 // -2 for status bar + bottom rule
+		if pad > 0 {
+			sb.WriteString(strings.Repeat("\n", pad))
+		}
+	}
+
+	// Status line.
 	sb.WriteString(m.renderStatusBar())
 
 	// Bottom rule — closes seek's live region visually so the next line

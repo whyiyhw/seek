@@ -67,9 +67,16 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 ### Esc-cancelled stream silently dropped the user's prompt
 - **Saw**: pressing Esc mid-stream to cancel an assistant's response also erased the user's prompt from the input box. The user had to re-type it to re-submit
 - **Why**: the Esc handler in `handleKey` cleared `queuedText` ("" = empty string) to "stop everything", but the user's submitted prompt was already sitting in `queuedText` at that point. The textarea had been cleared on Enter, so nothing was recoverable
-- **Fix**: Esc now restores `queuedText` into the textarea before clearing it; `streamEndMsg` also restores `promptHistory` into the textarea if the stream was cancelled and the input is still empty. Commit (this one)
+- **Fix**: Esc now restores `queuedText` into the textarea before clearing it; `streamEndMsg` also restores `promptHistory` into the textarea if the stream was cancelled and the input is still empty. Commit `af4b4d0`
 - **Lesson**: when you clear volatile state on user-cancel, check whether that state contains something the user would want back. "Cancel the current operation" and "clear the edit buffer" are different intents — treat them separately
 - **Refs**: `internal/tui/update.go:handleKey`, `internal/tui/update.go:streamEndMsg`
+
+### Status bar scrolled away with live content instead of staying pinned to the terminal bottom
+- **Saw**: after a few turns, the status bar drifted upward from the terminal's bottom edge. In long sessions it could be several lines above the bottom, making it hard to spot at a glance
+- **Why**: inline mode replaces the previous View() in-place, but `tea.Println` lines accumulate above the live region, pushing the cursor (and thus the View() output) downward. The status bar, rendered at the end of View(), moved with everything else — the comment said "not pinned" but the user expectation was that a status bar stays at the screen edge
+- **Fix**: added `scrollbackLines` counter to Model, incremented at every `tea.Println` call site (counting actual newlines). `View()` now calculates `cursorRow = welcomeFixedLines + scrollbackLines` and adds padding before the status bar to fill the remaining terminal height, pinning it to the bottom. Commit (this one)
+- **Lesson**: "status bar at the bottom" requires knowing where the cursor is in the terminal. In inline bubbletea, `tea.Println` moves the cursor; you must track the cumulative offset to compute remaining vertical space. A `scrollbackLineCount` helper and explicit counting at each print site is verbose but reliable
+- **Refs**: `internal/tui/model.go:scrollbackLines`, `internal/tui/view.go:View()`
 
 ### `View()` rendered "starting seek …" for a frame
 - **Saw**: a brief flash of the literal string "starting seek …" on launch

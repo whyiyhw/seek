@@ -72,6 +72,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		wasCanceled := m.userCanceled
 		if m.userCanceled {
 			cmds = append(cmds, tea.Println(styleMuted.Render("  ↰ interrupted")))
+			m.scrollbackLines++
 			m.userCanceled = false
 		}
 		// At this point all completed messages are already in
@@ -112,6 +113,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.queuedText = "" // a steer supersedes any queue
 			cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ steered")))
 			newM, cmd := m.submit(text)
+			m2 := newM.(Model)
+			m2.scrollbackLines++
+			newM = m2
 			cmds = append(cmds, cmd)
 			return newM, tea.Batch(cmds...)
 		case m.queuedText != "":
@@ -119,6 +123,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.queuedText = ""
 			cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
 			newM, cmd := m.submit(text)
+			m2 := newM.(Model)
+			m2.scrollbackLines++
+			newM = m2
 			cmds = append(cmds, cmd)
 			return newM, tea.Batch(cmds...)
 		}
@@ -424,6 +431,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if wasSteer {
 						label = "↰ withdrew pending steer"
 					}
+					m.scrollbackLines++
 					return m, tea.Println(styleMuted.Render("  " + label))
 				}
 				return m, nil
@@ -795,8 +803,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	ch := m.opts.Agent.Prompt(ctx, text)
 	m.stream = ch
 
-	printUser := tea.Println(renderCommittedUser(text, m.width))
-	return m, tea.Batch(printUser, waitForAgentEvent(ch))
+	printUser := renderCommittedUser(text, m.width)
+	m.scrollbackLines += scrollbackLineCount(printUser)
+	return m, tea.Batch(tea.Println(printUser), waitForAgentEvent(ch))
 }
 
 // applyAgentEvent updates Model state for an agent event and returns
@@ -826,7 +835,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			if rendered == "" {
 				rendered = m.curContent
 			}
-			cmds = append(cmds, tea.Println(renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)))
+			line := renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)
+			cmds = append(cmds, tea.Println(line))
+			m.scrollbackLines += scrollbackLineCount(line)
 			m.curContent = ""
 			m.curReasoning = ""
 		}
@@ -915,6 +926,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			line = renderCommittedToolOk(e.Name, args, len(e.Result), duration, tokenTail)
 		}
 		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
 
 	case agent.TurnEnd:
 		m.turns++
@@ -934,10 +946,13 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		// running totals so a long session has visible "checkpoints"
 		// in the scrollback.
 		cmds = append(cmds, tea.Println(m.renderTurnFooter()))
+		m.scrollbackLines++
 
 	case agent.ErrorEvent:
 		m.lastErr = e.Err
-		cmds = append(cmds, tea.Println(styleErr.Render("  ! error: "+e.Err.Error())))
+		errLine := styleErr.Render("  ! error: " + e.Err.Error())
+		cmds = append(cmds, tea.Println(errLine))
+		m.scrollbackLines += scrollbackLineCount(errLine)
 	}
 
 	return cmds
@@ -957,7 +972,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 // history is ever permanently lost.
 func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	if msg.err != nil {
-		return []tea.Cmd{tea.Println(styleErr.Render("  ! compact failed: " + msg.err.Error()))}
+		line := styleErr.Render("  ! compact failed: " + msg.err.Error())
+		m.scrollbackLines += scrollbackLineCount(line)
+		return []tea.Cmd{tea.Println(line)}
 	}
 	if m.opts.Agent == nil {
 		return nil
@@ -1017,6 +1034,7 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
 			msg.usage.PromptTokens, msg.usage.CompletionTokens)
 	}
+	m.scrollbackLines += scrollbackLineCount(styleMuted.Render(notice))
 	return []tea.Cmd{tea.Println(styleMuted.Render(notice))}
 }
 

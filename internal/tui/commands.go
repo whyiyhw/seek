@@ -76,12 +76,16 @@ func dispatchCommand(m *Model, input string) (handled bool, cmd tea.Cmd) {
 	for _, c := range allCommands() {
 		for _, n := range c.names {
 			if n == name {
-				return true, resultToCmd(c.handler(m, args))
+				res := c.handler(m, args)
+				m.scrollbackLines += scrollbackLineCount(res.text)
+				return true, resultToCmd(res)
 			}
 		}
 	}
 
-	return true, resultToCmd(cmdResult{text: styleMuted.Render(fmt.Sprintf("unknown command %s — try /help", name))})
+	text := styleMuted.Render(fmt.Sprintf("unknown command %s — try /help", name))
+	m.scrollbackLines += scrollbackLineCount(text)
+	return true, resultToCmd(cmdResult{text: text})
 }
 
 func resultToCmd(r cmdResult) tea.Cmd {
@@ -330,24 +334,32 @@ func (m *Model) finishSetup(key string) tea.Cmd {
 	m.setupProvider = ""
 
 	if key == "" {
-		return tea.Println(styleMuted.Render("  setup: empty key — cancelled."))
+		line := styleMuted.Render("  setup: empty key — cancelled.")
+		m.scrollbackLines += scrollbackLineCount(line)
+		return tea.Println(line)
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		return tea.Println(styleErr.Render("  setup: load config: " + err.Error()))
+		line := styleErr.Render("  setup: load config: " + err.Error())
+		m.scrollbackLines += scrollbackLineCount(line)
+		return tea.Println(line)
 	}
 	config.SetKey(&cfg, provider, key)
 	if cfg.DefaultProvider == "" {
 		cfg.DefaultProvider = provider
 	}
 	if err := config.Save(cfg); err != nil {
-		return tea.Println(styleErr.Render("  setup: save: " + err.Error()))
+		line := styleErr.Render("  setup: save: " + err.Error())
+		m.scrollbackLines += scrollbackLineCount(line)
+		return tea.Println(line)
 	}
 	path, _ := config.Path()
-	return tea.Println(styleMuted.Render(fmt.Sprintf(
+	line := styleMuted.Render(fmt.Sprintf(
 		"  setup: saved %s key to %s — restart seek or /new to apply",
-		provider, path)))
+		provider, path))
+	m.scrollbackLines += scrollbackLineCount(line)
+	return tea.Println(line)
 }
 
 // cancelSetup clears in-flight setup state without saving. Called
@@ -356,7 +368,9 @@ func (m *Model) cancelSetup() tea.Cmd {
 	m.setupKeyEntry = false
 	m.setupProvider = ""
 	m.input.Reset()
-	return tea.Println(styleMuted.Render("  setup: cancelled (no changes)"))
+	line := styleMuted.Render("  setup: cancelled (no changes)")
+	m.scrollbackLines += scrollbackLineCount(line)
+	return tea.Println(line)
 }
 
 func cmdYolo(m *Model, _ string) cmdResult {
@@ -594,6 +608,7 @@ func (m *Model) handleUpgradeDone(msg upgradeDoneMsg) []tea.Cmd {
 		// doesn't keep advertising the upgrade after it's done.
 		m.upgradeAvailable = ""
 	}
+	m.scrollbackLines += scrollbackLineCount(line)
 	return []tea.Cmd{tea.Println(line)}
 }
 

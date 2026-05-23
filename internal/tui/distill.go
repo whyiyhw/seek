@@ -14,11 +14,14 @@ import (
 // and the next keypress flows into handleDistillKey.
 func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	if msg.err != nil {
-		return []tea.Cmd{tea.Println(styleErr.Render("  ! distill failed: " + msg.err.Error()))}
+		line := styleErr.Render("  ! distill failed: " + msg.err.Error())
+		m.scrollbackLines += scrollbackLineCount(line)
+		return []tea.Cmd{tea.Println(line)}
 	}
 	if len(msg.candidates) == 0 {
-		return []tea.Cmd{tea.Println(styleMuted.Render(
-			"  · distill: the reasoner found nothing project-specific worth saving"))}
+		line := styleMuted.Render("  · distill: the reasoner found nothing project-specific worth saving")
+		m.scrollbackLines += scrollbackLineCount(line)
+		return []tea.Cmd{tea.Println(line)}
 	}
 	m.distillCandidates = msg.candidates
 	m.distillIdx = 0
@@ -27,9 +30,9 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	m.distillEditing = false
 	m.distillReviewOpen = true
 	m.input.Blur()
-	return []tea.Cmd{tea.Println(styleMuted.Render(fmt.Sprintf(
-		"  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [q] quit",
-		len(msg.candidates))))}
+	line := styleMuted.Render(fmt.Sprintf("  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [q] quit", len(msg.candidates)))
+	m.scrollbackLines += scrollbackLineCount(line)
+	return []tea.Cmd{tea.Println(line)}
 }
 
 // handleDistillKey is the review-modal key handler. Two sub-modes:
@@ -91,8 +94,9 @@ func (m Model) distillAcceptCurrent() tea.Model {
 	cand := m.distillCandidates[m.distillIdx]
 	if err := saveDistillCandidate(m.opts.MemoryProject, cand); err != nil {
 		// Print and continue. The candidate is NOT counted as saved.
-		_ = tea.Println(styleErr.Render(
-			fmt.Sprintf("  ! save %q failed: %v", cand.Name, err)))
+		line := styleErr.Render(fmt.Sprintf("  ! save %q failed: %v", cand.Name, err))
+		m.scrollbackLines += scrollbackLineCount(line)
+		_ = tea.Println(line)
 		m.distillDropped++
 	} else {
 		m.distillSaved++
@@ -196,6 +200,7 @@ func (m Model) exitDistillReview(aborted bool) tea.Model {
 	line := styleMuted.Render(fmt.Sprintf(
 		"  · distill review done: %d saved, %d dropped%s",
 		m.distillSaved, m.distillDropped, suffix))
+	m.scrollbackLines += scrollbackLineCount(line)
 	_ = tea.Println(line) // best effort; review state cleanup is the priority
 	return m
 }

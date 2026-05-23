@@ -26,6 +26,7 @@ package tui
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -171,6 +172,11 @@ type Model struct {
 
 	turns     int
 	toolCalls int
+	// scrollbackLines tracks the total number of lines printed above the
+	// live region via tea.Println (including the welcome banner). Used by
+	// View() to calculate remaining terminal height for pinning the
+	// status bar to the bottom of the window.
+	scrollbackLines int
 
 	width, height int
 	ready         bool
@@ -378,4 +384,13 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 		}
 		return agentEventMsg{Event: ev}
 	}
+}
+
+// scrollbackLineCount returns the number of terminal lines s occupies
+// (used to track scrollback position for status-bar pinning).
+func scrollbackLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
