@@ -68,3 +68,12 @@ type upgradeDoneMsg struct {
 	DryRun        bool
 	Err           error
 }
+
+// observeDoneMsg fires when an async memory_observe filter completes.
+// The TUI renders a scrollback notification line.
+type observeDoneMsg struct {
+	Name    string
+	Tagline string
+	OK      bool
+	Err     string
+}

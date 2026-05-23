@@ -37,6 +37,14 @@ const archiveStalePersistence = 60 * 24 * time.Hour
 // they haven't had a chance to be useful yet.
 const gracePeriod = 7 * 24 * time.Hour
 
+// autoSourcedGracePeriod is the extended grace period for AutoSourced
+// entries. 30 days gives users a reasonable window to /distill-review
+// new observations before GC acts on them. After the grace period,
+// auto-sourced entries participate in normal score-based GC — an entry
+// the user never reviewed and never recalled will naturally decay out,
+// preventing the unbounded growth that a hard exemption would cause.
+const autoSourcedGracePeriod = 30 * 24 * time.Hour
+
 // halfLifeFromEnv resolves SEEK_MEMORY_HALFLIFE_DAYS to a Duration,
 // falling back to defaultHalfLife on absent / unparseable / non-positive.
 // Misconfiguration silently degrades rather than failing the session —
@@ -112,6 +120,14 @@ func (p *Project) RunGC(now time.Time) (GCReport, error) {
 		report.Examined++
 
 		if e.Pinned {
+			report.Skipped++
+			continue
+		}
+		// AutoSourced entries get an extended grace period (30 days)
+		// instead of a hard exemption. After that they participate in
+		// normal score-based GC — unreviewed entries the model never
+		// recalls will naturally decay out, preventing unbounded growth.
+		if e.AutoSourced && now.Sub(e.CreatedAt) < autoSourcedGracePeriod {
 			report.Skipped++
 			continue
 		}

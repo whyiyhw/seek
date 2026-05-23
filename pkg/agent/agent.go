@@ -66,6 +66,12 @@ type Agent struct {
 	messages []deepseek.Message
 }
 
+// SetModel changes the active model. Safe to call between (not during) turns.
+// The change takes effect on the next Prompt call.
+func (a *Agent) SetModel(model string) {
+	a.cfg.Model = model
+}
+
 // New constructs an Agent and seeds the system prompt (if any).
 func New(cfg Config) (*Agent, error) {
 	if cfg.Client == nil && cfg.Provider == nil {
@@ -534,6 +540,17 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		return assistant, usage, finish, err
 	}
 
+	// Empty-response guard: if the model streamed reasoning tokens but
+	// no content or tool_calls, the assistant message has nothing to say.
+	// Committing it would leave an orphan assistant turn with no content
+	// and no tool_calls, which DeepSeek rejects on the next request as
+	// "Invalid assistant message: content or tool_calls must be set"
+	// (PRD §4.5.1, pitfalls/message-contract.md).
+	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
+		return assistant, usage, finish,
+			errors.New("agent: model returned an empty response (no content and no tool calls)")
+	}
+
 	return assistant, usage, finish, nil
 }
 
@@ -598,6 +615,14 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 
 	if ctx.Err() != nil {
 		return assistant, deepseek.Usage{}, finish, ctx.Err()
+	}
+
+	// Empty-response guard: same rationale as runTurnDeepSeek — an
+	// assistant message with no content and no tool_calls poisons the
+	// next API request.
+	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
+		return assistant, deepseek.Usage{}, finish,
+			errors.New("agent: model returned an empty response (no content and no tool calls)")
 	}
 
 	usage := deepseek.Usage{

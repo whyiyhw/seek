@@ -237,3 +237,124 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 	}
 	return ParseCandidates(resp.Choices[0].Message.Content)
 }
+
+// FilterResult is the outcome of an async observe filter pass.
+type FilterResult int
+
+const (
+	FilterAccept FilterResult = iota
+	FilterReject
+)
+
+// FilterReason is a human-readable explanation of the filter's decision.
+type FilterReason string
+
+const (
+	FilterReasonOK      FilterReason = "accepted"
+	FilterReasonDup     FilterReason = "duplicate of existing entry"
+	FilterReasonTooVague FilterReason = "too vague — not a concrete project decision"
+	FilterReasonUserTrait FilterReason = "user preference — belongs in L layer via dream"
+	FilterReasonTemp     FilterReason = "temporary state, not a lasting decision"
+)
+
+// FilterPrompt frames the V4-Flash thinking call for observe filtering.
+const FilterPrompt = `You are a memory quality filter. You are given:
+1. Existing project memory entries (name + tagline + content)
+2. A new candidate entry that the chat model wants to save
+
+Decide: ACCEPT or REJECT.
+
+REJECT if:
+- The candidate duplicates an existing entry (same decision, different wording)
+- The candidate is too vague to be useful in a future session
+- The candidate describes a temporary state, not a lasting project decision
+- The candidate is a personal preference about the user — those belong in the L (soul) layer and should be recorded by "seek -dream", not here
+
+ACCEPT if:
+- The candidate captures a concrete, project-specific decision with clear rationale
+- It adds information not already covered by existing entries
+- Future sessions in this project would benefit from knowing this
+
+Respond with valid JSON only. No prose, no markdown fences:
+{"decision": "ACCEPT", "reason": "..."}
+{"decision": "REJECT", "reason": "duplicate of <name>"}`
+
+// Filter evaluates a candidate entry against the existing project memory.
+// Returns ACCEPT if the entry is valuable and non-duplicate; REJECT otherwise.
+// This is a single-shot V4-Flash thinking call — no streaming, no retry.
+func (d *Distiller) Filter(ctx context.Context, existing []Entry, candidate Entry) (FilterResult, FilterReason, error) {
+	if d.Client == nil {
+		return FilterReject, "", errors.New("filter: Client is required")
+	}
+	model := d.Model
+	if model == "" {
+		model = deepseek.ModelV4Flash
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Existing project memory entries:\n")
+	if len(existing) == 0 {
+		sb.WriteString("(none)\n")
+	}
+	for _, e := range existing {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", e.Name, e.Tagline))
+		if e.Content != "" {
+			// Truncate content to avoid blowing the prompt
+			content := e.Content
+			if len(content) > 300 {
+				content = content[:300] + "…"
+			}
+			sb.WriteString(fmt.Sprintf("  content: %s\n", content))
+		}
+	}
+	sb.WriteString(fmt.Sprintf("\nNew candidate:\nname: %s\ntagline: %s\ncontent: %s\n",
+		candidate.Name, candidate.Tagline, candidate.Content))
+
+	req := &deepseek.ChatRequest{
+		Model: model,
+		Messages: []deepseek.Message{
+			{Role: deepseek.RoleSystem, Content: FilterPrompt},
+			{Role: deepseek.RoleUser, Content: sb.String()},
+		},
+	}
+	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
+		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
+	}
+
+	resp, err := d.Client.Chat(ctx, req)
+	if err != nil {
+		return FilterReject, "", fmt.Errorf("filter: chat: %w", err)
+	}
+	if len(resp.Choices) == 0 {
+		return FilterReject, "", errors.New("filter: no choices returned")
+	}
+
+	return parseFilterResult(resp.Choices[0].Message.Content)
+}
+
+type filterResponse struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func parseFilterResult(raw string) (FilterResult, FilterReason, error) {
+	raw = strings.TrimSpace(raw)
+	// Strip markdown fence if present
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
+
+	var fr filterResponse
+	if err := json.Unmarshal([]byte(raw), &fr); err != nil {
+		return FilterReject, "", fmt.Errorf("filter: parse: %w (raw: %q)", err, raw)
+	}
+	switch fr.Decision {
+	case "ACCEPT":
+		return FilterAccept, FilterReason(fr.Reason), nil
+	case "REJECT":
+		return FilterReject, FilterReason(fr.Reason), nil
+	default:
+		return FilterReject, "", fmt.Errorf("filter: unknown decision %q", fr.Decision)
+	}
+}

@@ -85,6 +85,17 @@ func (m Model) View() string {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
 	}
 
+	// Distill spinner — shown while /distill's reasoner call is
+	// in-flight (10-90s). Same pattern as active tool lines above.
+	if m.distilling {
+		elapsed := formatToolElapsed(time.Since(m.distillSince))
+		label := fmt.Sprintf("distilling %d messages …", m.distillMsgCount)
+		if elapsed != "" {
+			label += " · " + elapsed
+		}
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
+	}
+
 	// Streaming assistant text (volatile — committed at MessageEnd).
 	if m.curContent != "" {
 		body := styleAssistantText.Render(wrap(m.curContent, m.width-2))

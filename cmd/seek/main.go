@@ -475,21 +475,33 @@ func run() error {
 	// pointer and dispatches at call-time, so deferring registration
 	// past agent.New is safe — no events fire until NotifySessionStart
 	// below.
+	var memHook *memory.Hook
 	if memProject != nil || memSoul != nil {
-		memHook := &memory.Hook{Project: memProject, Soul: memSoul}
-		// Auto-distill needs the thinking-mode call (DeepSeek-only path) + the
-		// agent's history. Both wired unconditionally; the env var
-		// $SEEK_AUTO_DISTILL stays the load-bearing on/off gate
-		// (off by default).
+		memHook = &memory.Hook{
+			Project:    memProject,
+			Soul:       memSoul,
+			ResultChan: make(chan memory.ObserveResult, 20),
+		}
 		if memProject != nil && dsClient != nil {
 			memHook.Distiller = &memory.Distiller{Client: dsClient}
 			memHook.HistoryProvider = ag.Messages
-			// M5.8 auto-dream uses the same DeepSeek client. Wired
-			// unconditionally; $SEEK_AUTO_DREAM is the gate
-			// (off by default).
 			memHook.Dreamer = &memory.Dreamer{Client: dsClient}
+
+			// Register memory_observe tool gated on $SEEK_AUTO_DISTILL.
+			// Default (unset / 1/true/yes/on) → registered so the model
+			// can save decisions in real time. Set to 0/false/no/off to
+			// disable (PRD §6 v2).
+			if autoDistillEnabled() {
+				enqueue := memHook.ObserveEnqueue()
+				reg.Add(memorytool.NewObserve(memProject, enqueue))
+			}
 		}
 		hooksReg.Register(memHook)
+	}
+
+	var observeResultChan <-chan memory.ObserveResult
+	if memHook != nil {
+		observeResultChan = memHook.ResultChan
 	}
 
 	var sessionID string
@@ -599,6 +611,7 @@ func run() error {
 		ProviderName:  provLabel,
 		MemoryProject: memProject,
 		Distiller:     distiller,
+		ObserveResultChan: observeResultChan,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project
@@ -1130,4 +1143,16 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 	default:
 		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | compatible", provFlag)
 	}
+}
+
+// autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
+// a truthy value (1/true/yes/on). Controls memory_observe tool registration;
+// default enabled because real-time notifications provide the safety net
+// (PRD §6 v2).
+func autoDistillEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SEEK_AUTO_DISTILL")))
+	if v == "" {
+		return true // default: enabled
+	}
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }

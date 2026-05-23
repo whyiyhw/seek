@@ -155,6 +155,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case distillDoneMsg:
 		cmds = append(cmds, m.handleDistillDone(msg)...)
 
+	case observeDoneMsg:
+		cmds = append(cmds, m.handleObserveDone(msg)...)
+		if m.opts.ObserveResultChan != nil {
+			cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
+		}
+
 	case versionCheckDoneMsg:
 		// Store the newer tag for the status-bar segment. Idempotent —
 		// the cmd never re-fires within a session, but a second run

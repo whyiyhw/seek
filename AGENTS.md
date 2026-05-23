@@ -42,6 +42,8 @@ When exploring code, follow this order — skipping steps costs tokens and break
 
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
 
+5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
+
 ## Token & prefix-cache constraints (non-negotiable)
 
 DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact byte sequence** of the entire prior message history. This means:

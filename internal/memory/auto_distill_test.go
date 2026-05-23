@@ -2,216 +2,276 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// happyHistory returns a session that clears the satisfaction
-// threshold (long-enough, no rejection, no tool errors).
-func happyHistory() []deepseek.Message {
-	return []deepseek.Message{
-		{Role: deepseek.RoleSystem, Content: "sys"},
-		{Role: deepseek.RoleUser, Content: "refactor X"},
-		{Role: deepseek.RoleAssistant, Content: "plan"},
-		{Role: deepseek.RoleUser, Content: "go ahead"},
-		{Role: deepseek.RoleAssistant, Content: "step 1 done"},
-		{Role: deepseek.RoleUser, Content: "now step 2"},
-		{Role: deepseek.RoleAssistant, Content: "step 2 done"},
-		{Role: deepseek.RoleUser, Content: "great, wrap up"},
-		{Role: deepseek.RoleAssistant, Content: "wrapped"},
-	}
-}
-
 func TestAutoDistill_GatedOffByDefault(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DISTILL", "") // ensure off
+	t.Setenv("SEEK_AUTO_DISTILL", "")
 	cwd, _ := withMemoryEnv(t)
 	p, _ := LoadOrCreate(cwd)
-
-	fake := &fakeChatClient{
-		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
-			Content: `[{"name":"would-have-saved","tagline":"x","content":"y"}]`,
-		}}}},
-	}
-	h := &Hook{
-		Project:         p,
-		Distiller:       &Distiller{Client: fake},
-		HistoryProvider: happyHistory,
-	}
-	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	if _, ok := p.Get("would-have-saved"); ok {
-		t.Errorf("auto-distill should be off by default; entry was written anyway")
-	}
-	if fake.lastReq != nil {
-		t.Errorf("reasoner should NOT be called when auto-distill is off")
-	}
-}
-
-func TestAutoDistill_OnHappySessionWritesAutoSourced(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DISTILL", "1")
-	cwd, _ := withMemoryEnv(t)
-	p, _ := LoadOrCreate(cwd)
-
-	fake := &fakeChatClient{
-		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
-			Content: `[
-				{"name":"step-1-pattern","tagline":"observed","content":"body","tags":["arch"]},
-				{"name":"step-2-pattern","tagline":"also observed","content":"body2"}
-			]`,
-		}}}},
-	}
-	h := &Hook{
-		Project:         p,
-		Distiller:       &Distiller{Client: fake},
-		HistoryProvider: happyHistory,
-	}
-	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	if fake.lastReq == nil {
-		t.Fatalf("reasoner should have been called on a happy session with auto-distill on")
-	}
-	for _, name := range []string{"step-1-pattern", "step-2-pattern"} {
-		got, ok := p.Get(name)
-		if !ok {
-			t.Errorf("expected auto-distilled entry %q in M", name)
-			continue
-		}
-		if !got.AutoSourced {
-			t.Errorf("entry %q should have AutoSourced=true", name)
-		}
-	}
-}
-
-func TestAutoDistill_SkipsRejectedSession(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DISTILL", "1")
-	cwd, _ := withMemoryEnv(t)
-	p, _ := LoadOrCreate(cwd)
-
-	fake := &fakeChatClient{
-		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
-			Content: `[{"name":"x","tagline":"y","content":"z"}]`,
-		}}}},
-	}
-	rejected := []deepseek.Message{
-		{Role: deepseek.RoleSystem, Content: "sys"},
-		{Role: deepseek.RoleUser, Content: "do X"},
-		{Role: deepseek.RoleAssistant, Content: "trying"},
-		{Role: deepseek.RoleUser, Content: "no, that's wrong"},
-		{Role: deepseek.RoleAssistant, Content: "OK fixing"},
-		{Role: deepseek.RoleUser, Content: "still broken"},
-		{Role: deepseek.RoleAssistant, Content: "trying again"},
-		{Role: deepseek.RoleUser, Content: "undo that"},
-		{Role: deepseek.RoleAssistant, Content: "reverted"},
-	}
 
 	h := &Hook{
-		Project:         p,
-		Distiller:       &Distiller{Client: fake},
-		HistoryProvider: func() []deepseek.Message { return rejected },
-	}
-	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	if fake.lastReq != nil {
-		t.Errorf("reasoner should NOT be called on a rejection-heavy session")
-	}
-	if _, ok := p.Get("x"); ok {
-		t.Errorf("no entries should be written from a rejected session")
-	}
-}
-
-func TestAutoDistill_SkipsTooShortSession(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DISTILL", "1")
-	cwd, _ := withMemoryEnv(t)
-	p, _ := LoadOrCreate(cwd)
-
-	fake := &fakeChatClient{
-		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
-			Content: `[{"name":"x","tagline":"y","content":"z"}]`,
-		}}}},
-	}
-	short := []deepseek.Message{
-		{Role: deepseek.RoleSystem, Content: "sys"},
-		{Role: deepseek.RoleUser, Content: "quick question"},
-		{Role: deepseek.RoleAssistant, Content: "answer"},
-	}
-
-	h := &Hook{
-		Project:         p,
-		Distiller:       &Distiller{Client: fake},
-		HistoryProvider: func() []deepseek.Message { return short },
-	}
-	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	if fake.lastReq != nil {
-		t.Errorf("reasoner should NOT be called on a too-short session")
-	}
-}
-
-func TestAutoDistill_NilDistillerOrHistoryIsSafe(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DISTILL", "1")
-	cwd, _ := withMemoryEnv(t)
-	p, _ := LoadOrCreate(cwd)
-
-	// Missing Distiller: hook should no-op.
-	(&Hook{
-		Project:         p,
-		HistoryProvider: happyHistory,
-	}).OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	// Missing HistoryProvider: hook should no-op.
-	(&Hook{
 		Project:   p,
 		Distiller: &Distiller{Client: &fakeChatClient{}},
-	}).OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
-
-	// Both missing project AND distiller: still safe.
-	(&Hook{}).OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
+	}
+	// OnSessionEnd is a no-op in v2.
+	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
+	if len(p.Entries()) != 0 {
+		t.Errorf("v2 OnSessionEnd is no-op; expected 0 entries, got %d", len(p.Entries()))
+	}
 }
 
-func TestAutoDistill_ReasonerErrorIsSwallowed(t *testing.T) {
-	// Auto-distill is best-effort enhancement. A reasoner failure
-	// (network, rate limit, malformed response) must NOT propagate —
-	// session shutdown should complete cleanly.
-	t.Setenv("SEEK_AUTO_DISTILL", "1")
+func TestObserveEnqueue_RejectsConfirmedEntry(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	_ = p.Add(Entry{Name: "existing", Tagline: "t", Content: "c", AutoSourced: false})
+
+	fake := &fakeChatClient{
+		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
+			Content: `{"decision": "ACCEPT", "reason": "new info"}`,
+		}}}},
+	}
+
+	resultChan := make(chan ObserveResult, 5)
+	h := &Hook{
+		Project:    p,
+		Distiller:  &Distiller{Client: fake},
+		ResultChan: resultChan,
+	}
+
+	enqueue := h.ObserveEnqueue()
+	enqueue(context.Background(), Entry{Name: "existing", Tagline: "new", Content: "should be rejected"})
+
+	result := <-resultChan
+	if result.OK {
+		t.Errorf("expected rejection for confirmed entry, got OK=true")
+	}
+	if result.Err == "" {
+		t.Errorf("expected error message for confirmed entry rejection")
+	}
+}
+
+func TestObserveEnqueue_WritesAutoSourcedOnAccept(t *testing.T) {
 	cwd, _ := withMemoryEnv(t)
 	p, _ := LoadOrCreate(cwd)
 
 	fake := &fakeChatClient{
 		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
-			Content: "this is not JSON at all", // will fail ParseCandidates
+			Content: `{"decision": "ACCEPT", "reason": "new project decision"}`,
 		}}}},
 	}
-	h := &Hook{
-		Project:         p,
-		Distiller:       &Distiller{Client: fake},
-		HistoryProvider: happyHistory,
-	}
-	// Must not panic / not propagate (observers can't surface errors
-	// anyway, but our internal swallowing must hold).
-	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
 
-	if len(p.Entries()) != 0 {
-		t.Errorf("no entries should be written when parsing fails")
+	resultChan := make(chan ObserveResult, 5)
+	h := &Hook{
+		Project:    p,
+		Distiller:  &Distiller{Client: fake},
+		ResultChan: resultChan,
+	}
+
+	enqueue := h.ObserveEnqueue()
+	enqueue(context.Background(), Entry{Name: "new-decision", Tagline: "new decision", Content: "detailed rationale"})
+
+	result := <-resultChan
+	if !result.OK {
+		t.Errorf("expected ACCEPT, got OK=false err=%q", result.Err)
+	}
+
+	entry, ok := p.Get("new-decision")
+	if !ok {
+		t.Fatal("expected entry to be written to M")
+	}
+	if !entry.AutoSourced {
+		t.Errorf("entry should have AutoSourced=true")
 	}
 }
 
-func TestAutoDistill_EnvVarTruthyValues(t *testing.T) {
-	for _, v := range []string{"1", "true", "yes", "on", "TRUE", "Yes"} {
-		t.Run(v, func(t *testing.T) {
-			t.Setenv("SEEK_AUTO_DISTILL", v)
-			if !autoDistillEnabled() {
-				t.Errorf("%q should enable auto-distill", v)
-			}
-		})
+func TestObserveEnqueue_RespectsSessionCap(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	fake := &fakeChatClient{
+		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
+			Content: `{"decision": "ACCEPT", "reason": "new info"}`,
+		}}}},
 	}
-	for _, v := range []string{"", "0", "false", "no", "off", "maybe"} {
-		t.Run("off-"+v, func(t *testing.T) {
-			t.Setenv("SEEK_AUTO_DISTILL", v)
-			if autoDistillEnabled() {
-				t.Errorf("%q should NOT enable auto-distill", v)
+
+	resultChan := make(chan ObserveResult, 20)
+	h := &Hook{
+		Project:    p,
+		Distiller:  &Distiller{Client: fake},
+		ResultChan: resultChan,
+		observeMax: 2,
+	}
+
+	enqueue := h.ObserveEnqueue()
+
+	for i := 0; i < 2; i++ {
+		name := fmt.Sprintf("entry-%d", i)
+		enqueue(context.Background(), Entry{Name: name, Tagline: name, Content: name})
+		r := <-resultChan
+		if !r.OK {
+			t.Errorf("entry %q should be accepted", name)
+		}
+	}
+
+	// Third call: over cap, silent discard.
+	enqueue(context.Background(), Entry{Name: "over-cap", Tagline: "x", Content: "x"})
+	select {
+	case r := <-resultChan:
+		t.Errorf("over-cap entry should not produce a result, got %+v", r)
+	default:
+	}
+}
+
+func TestAutoDistill_NilDistillerOrHistorySafety(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	// Missing Distiller: ObserveEnqueue returns nil.
+	h := &Hook{Project: p}
+	if fn := h.ObserveEnqueue(); fn != nil {
+		t.Errorf("ObserveEnqueue should return nil when Distiller is nil")
+	}
+}
+
+func TestObserveEnqueue_OverwritesUnconfirmedEntry(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	// Plant an existing auto_sourced entry (unconfirmed).
+	old := time.Now().UTC().Add(-24 * time.Hour)
+	plantEntry(t, p, Entry{
+		Name:           "auto-decision",
+		Tagline:        "old title",
+		Content:        "old content",
+		CreatedAt:      old,
+		UpdatedAt:      old,
+		LastRecalledAt: old,
+		AutoSourced:    true,
+	})
+
+	fake := &fakeChatClient{
+		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
+			Content: `{"decision": "ACCEPT", "reason": "updated rationale"}`,
+		}}}},
+	}
+
+	resultChan := make(chan ObserveResult, 5)
+	h := &Hook{
+		Project:    p,
+		Distiller:  &Distiller{Client: fake},
+		ResultChan: resultChan,
+	}
+
+	enqueue := h.ObserveEnqueue()
+	enqueue(context.Background(), Entry{Name: "auto-decision", Tagline: "updated title", Content: "updated content"})
+
+	result := <-resultChan
+	if !result.OK {
+		t.Fatalf("expected ACCEPT for overwriting unconfirmed entry, got OK=false err=%q", result.Err)
+	}
+
+	got, ok := p.Get("auto-decision")
+	if !ok {
+		t.Fatal("entry should still exist after overwrite")
+	}
+	if got.Tagline != "updated title" {
+		t.Errorf("tagline should be updated, got %q", got.Tagline)
+	}
+	if got.Content != "updated content" {
+		t.Errorf("content should be updated, got %q", got.Content)
+	}
+	if !got.AutoSourced {
+		t.Errorf("entry should remain AutoSourced=true")
+	}
+	if got.UpdatedAt.Equal(old) {
+		t.Errorf("UpdatedAt should be refreshed after overwrite")
+	}
+}
+
+func TestObserveEnqueue_PerNameDedup(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	block := make(chan struct{})
+	fake := &fakeChatClient{
+		resp: &deepseek.ChatResponse{Choices: []deepseek.Choice{{Message: deepseek.Message{
+			Content: `{"decision": "ACCEPT", "reason": "new info"}`,
+		}}}},
+		block: block,
+	}
+
+	resultChan := make(chan ObserveResult, 5)
+	h := &Hook{
+		Project:    p,
+		Distiller:  &Distiller{Client: fake},
+		ResultChan: resultChan,
+		observeMax: 10,
+	}
+
+	enqueue := h.ObserveEnqueue()
+
+	// First call: launches a goroutine that blocks in fake.Chat()
+	// (because block channel is not yet closed). Per-name lock is held
+	// for the duration of the block.
+	enqueue(context.Background(), Entry{Name: "dedup-name", Tagline: "first", Content: "first call"})
+
+	// Second call with same name: per-name lock is still held by the
+	// blocked goroutine → tryLock fails → silent merge, no goroutine.
+	enqueue(context.Background(), Entry{Name: "dedup-name", Tagline: "second", Content: "second call"})
+
+	// Release the first goroutine so it can complete.
+	close(block)
+
+	// Only one result should arrive (first goroutine).
+	result := <-resultChan
+	if !result.OK {
+		t.Errorf("first goroutine should have written, got OK=false err=%q", result.Err)
+	}
+	if result.Tagline != "first" {
+		t.Errorf("should be the first call's result, got tagline=%q", result.Tagline)
+	}
+
+	// No second result — the second call was silently merged.
+	select {
+	case r := <-resultChan:
+		t.Errorf("second call should not produce a result, got %+v", r)
+	default:
+	}
+}
+
+func TestObserve_FilterParse(t *testing.T) {
+	tests := []struct {
+		raw      string
+		want     FilterResult
+		wantErr  bool
+	}{
+		{`{"decision": "ACCEPT", "reason": "good"}`, FilterAccept, false},
+		{`{"decision": "REJECT", "reason": "duplicate"}`, FilterReject, false},
+		{`garbage`, FilterReject, true},
+		{`{}`, FilterReject, true},
+	}
+
+	for _, tt := range tests {
+		got, _, err := parseFilterResult(tt.raw)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("parseFilterResult(%q) expected error", tt.raw)
 			}
-		})
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseFilterResult(%q) unexpected error: %v", tt.raw, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("parseFilterResult(%q) = %v, want %v", tt.raw, got, tt.want)
+		}
 	}
 }

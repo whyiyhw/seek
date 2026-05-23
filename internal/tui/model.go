@@ -94,6 +94,10 @@ type Options struct {
 	// Distiller runs the reasoner pass that turns history → candidates.
 	// nil disables /distill (same effect as MemoryProject being nil).
 	Distiller *memory.Distiller
+
+	// ObserveResultChan receives async memory_observe filter results
+	// from background goroutines. nil = observe unavailable.
+	ObserveResultChan <-chan memory.ObserveResult
 }
 
 // activeTool is a tool whose ToolExecStart has fired but ToolExecEnd
@@ -243,6 +247,13 @@ type Model struct {
 	// cancels and returns to the y/n/e/q prompt.
 	distillEditing bool
 
+	// distilling is true while the asynchronous reasoner call for
+	// /distill is in-flight. View() renders a spinner line with
+	// elapsed time so the user knows the TUI hasn't hung.
+	distilling      bool
+	distillSince    time.Time
+	distillMsgCount int
+
 	// pastedContent stores the full input when multi-line paste folding
 	// is active (paste > 5 lines → display collapses to a placeholder,
 	// but the full text is sent to the LLM on submit). Empty = not folded.
@@ -337,6 +348,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.opts.ApprovalCh != nil {
 		cmds = append(cmds, waitForApproval(m.opts.ApprovalCh))
+	}
+	if m.opts.ObserveResultChan != nil {
+		cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
 	}
 	if c := versionCheckCmd("whyiyhw", "seek", VersionString()); c != nil {
 		cmds = append(cmds, c)

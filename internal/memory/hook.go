@@ -4,12 +4,23 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+// ObserveResult is the outcome of one async memory_observe filter pass,
+// sent from the background goroutine to the TUI via ResultChan.
+type ObserveResult struct {
+	Name    string
+	Tagline string
+	OK      bool   // true = written to M (ACCEPT), false = rejected/failed
+	Err     string // failure reason (empty on success)
+}
 
 // Hook is the memory subsystem's manifestation on the agent's
 // lifecycle. It implements:
@@ -21,6 +32,9 @@ import (
 //     flags. GC failure is non-fatal (logged at debug level later;
 //     for now silently tolerated — a session without GC is degraded
 //     but functional).
+//   - PostToolUseObserver — captures memory_observe calls for async
+//     filter dedup and session cap tracking (the tool itself launches
+//     the goroutine, but the hook tracks metadata).
 //
 // Both Project and Soul may be nil: callers (cmd/seek/main.go) load
 // what they can and pass nils for the rest. A Hook with both nil is a
@@ -30,14 +44,9 @@ type Hook struct {
 	Project *Project
 	Soul    *Soul
 
-	// Distiller, when non-nil and $SEEK_AUTO_DISTILL=1, drives the
-	// M5.7 auto-distill SessionEnd path: at session end, if the
-	// satisfaction signal clears the threshold, the reasoner is
-	// asked for ≤3 candidates and any that come back land in M
-	// with AutoSourced=true (skipping the y/n review modal).
-	//
-	// Off by default — gated on the env var to keep the safety net
-	// intact while we tune satisfaction-signal thresholds.
+	// Distiller drives the async observe filter (V4-Flash thinking).
+	// nil = filtering unavailable (memory_observe still returns empty but
+	// no goroutine is launched — no writes happen).
 	Distiller *Distiller
 
 	// Dreamer, when non-nil and $SEEK_AUTO_DREAM=1, drives the M5.8
@@ -57,26 +66,65 @@ type Hook struct {
 	// at end-of-session, not a stale capture.
 	HistoryProvider func() []deepseek.Message
 
-	// Now overrides the SessionStart timestamp for testing. Production
-	// callers leave it zero and the hook uses time.Now().UTC().
+	// Now overrides timestamps for testing. Production callers leave it
+	// zero and the hook uses time.Now().UTC().
 	Now func() time.Time
 
 	// autoDreamRan is set by tests that need to wait for the
 	// auto-dream goroutine. Production callers ignore it (the
 	// channel is nil and the goroutine is fire-and-forget).
 	autoDreamDone chan struct{}
+
+	// ResultChan delivers observe filter results from background
+	// goroutines to the TUI event loop. Buffered (capacity 20) so
+	// fast filter passes don't block the goroutine. The TUI selects
+	// on this channel in its main loop and renders scrollback
+	// notifications.
+	ResultChan chan ObserveResult
+
+	// observeLocks guards concurrent memory_observe calls for the same
+	// name. The tool's Execute calls TryLock before launching the
+	// goroutine; if another goroutine is already in-flight for the same
+	// name, the second call is silently merged (no new goroutine).
+	observeLocks observeLockMap
+
+	// observeCount tracks how many filter goroutines have been launched
+	// this session. Capped at observeMax (default 10). Exceeding the
+	// cap causes silent discard (no goroutine, no error).
+	observeCount int
+	observeMax   int // configured via $SEEK_OBSERVE_MAX, default 10
 }
 
-// envAutoDistill is the env-var name gating M5.7's auto-distill. Set
-// to "1" / "true" / "yes" to opt in. Default (empty / any other value)
-// = off, because hallucinated entries are the explicit risk PRD §3
-// originally barred this feature over.
-const envAutoDistill = "SEEK_AUTO_DISTILL"
-
-func autoDistillEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(envAutoDistill)))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
+// observeLockMap is a simple per-name mutex for concurrent dedup.
+type observeLockMap struct {
+	mu    sync.Mutex
+	locks map[string]struct{}
 }
+
+func (m *observeLockMap) tryLock(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.locks == nil {
+		m.locks = make(map[string]struct{})
+	}
+	if _, ok := m.locks[name]; ok {
+		return false // already locked
+	}
+	m.locks[name] = struct{}{}
+	return true
+}
+
+func (m *observeLockMap) unlock(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.locks, name)
+}
+
+// defaultObserveMax is the per-session cap on filter goroutines.
+const defaultObserveMax = 10
+
+// envObserveMax is the env-var name for configuring observe max.
+const envObserveMax = "SEEK_OBSERVE_MAX"
 
 // OnPrePrompt builds the deterministic <context> Prepend messages from
 // the current L+M state. Empty inputs produce no message — an empty L
@@ -217,48 +265,124 @@ func (h *Hook) runAutoDream(ctx context.Context) {
 	_ = soul.Save()
 }
 
-// OnSessionEnd is the M5.7 auto-distill trigger. Gated on the env var
-// + the satisfaction signal + having all the wiring (Project + Distiller
-// + HistoryProvider). Failure mode: log and move on — auto-distill is
-// best-effort enhancement, never load-bearing.
+// OnSessionEnd is a no-op in v2. The v1 auto-distill path (heuristic
+// satisfaction detection + reasoner call) has been removed. Memory writes
+// now happen in real-time via memory_observe during the conversation.
+func (h *Hook) OnSessionEnd(_ context.Context, _ hooks.SessionEndEvent) {
+	// No-op: all memory writes happen via memory_observe during the session.
+}
+
+// ObserveEnqueue returns the function that the memory_observe tool calls to
+// start the async filter. It handles per-name dedup, session cap, and
+// launches the background goroutine. The returned function is non-blocking
+// (the goroutine does all the work).
 //
-// Why SessionEnd and not periodic-during-session: a settled history is
-// the right substrate to distill from. Mid-session decisions can still
-// be reversed; end-of-session is when we know what stuck.
-func (h *Hook) OnSessionEnd(ctx context.Context, _ hooks.SessionEndEvent) {
-	if h.Project == nil || h.Distiller == nil || h.HistoryProvider == nil {
-		return
+// Called by memory_observe.Execute after argument validation.
+func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
+	if h.Project == nil || h.Distiller == nil {
+		return nil
 	}
-	if !autoDistillEnabled() {
-		return
-	}
+	return func(ctx context.Context, entry Entry) {
+		// Per-name dedup: if a goroutine for this name is already
+		// in-flight, silently merge (no duplicate filter calls).
+		if !h.observeLocks.tryLock(entry.Name) {
+			return
+		}
 
-	history := h.HistoryProvider()
-	sig := ScoreSatisfaction(history)
-	if !IsSatisfied(sig) {
+		// Session cap: check observeMax, resolve from env on first call.
+		if h.observeMax == 0 {
+			h.observeMax = defaultObserveMax
+			if v := os.Getenv(envObserveMax); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					h.observeMax = n
+				}
+			}
+		}
+		h.observeCount++
+		if h.observeCount > h.observeMax {
+			h.observeLocks.unlock(entry.Name)
+			return
+		}
+
+		// Launch filter goroutine.
+		go func() {
+			defer h.observeLocks.unlock(entry.Name)
+
+			// Non-blocking send: if the TUI has exited and nobody is
+			// reading ResultChan, we drop the notification rather than
+			// blocking the goroutine indefinitely. The channel send is
+			// fire-and-forget — the goroutine must not stall on it.
+			send := func(r ObserveResult) {
+				if h.ResultChan == nil {
+					return
+				}
+				select {
+				case h.ResultChan <- r:
+				default:
+					// TUI exited or channel full; drop silently.
+				}
+			}
+
+			// 10-second timeout for the filter call.
+			fctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
+			// Collect existing entries for context.
+			existing := h.Project.Entries()
+
+			// Check coverage rule first: if an entry with this name
+			// exists and is already confirmed, reject immediately.
+			if existingEntry, ok := h.Project.Get(entry.Name); ok && !existingEntry.AutoSourced {
+				send(ObserveResult{
+					Name:    entry.Name,
+					Tagline: entry.Tagline,
+					OK:      false,
+					Err:     "entry '" + entry.Name + "' already confirmed — use memory_remember to update",
+				})
+				return
+			}
+
+			// Run V4-Flash filter.
+			result, _, err := h.Distiller.Filter(fctx, existing, entry)
+			if err != nil {
+				// Timeout or network error → silent discard.
+				return
+			}
+
+			if result == FilterReject {
+				// Silent discard — no TUI notification.
+				return
+			}
+
+			// ACCEPT: write to M.
+			entry.AutoSourced = true
+			if err := h.Project.Add(entry); err != nil {
+				send(ObserveResult{
+					Name:    entry.Name,
+					Tagline: entry.Tagline,
+					OK:      false,
+					Err:     fmt.Sprintf("write failed: %v", err),
+				})
+				return
+			}
+
+			send(ObserveResult{
+				Name:    entry.Name,
+				Tagline: entry.Tagline,
+				OK:      true,
+			})
+		}()
+	}
+}
+
+// OnPostToolUse tracks memory_observe calls for observability. The actual
+// async filter is launched by ObserveEnqueue (called from the tool's Execute);
+// this observer is a no-op placeholder for future telemetry (call counts, etc.).
+func (h *Hook) OnPostToolUse(_ context.Context, ev hooks.PostToolUseEvent) {
+	if ev.Name != "memory_observe" {
 		return
 	}
-
-	// Bound the reasoner call so SessionEnd doesn't hang process
-	// shutdown indefinitely if the network is slow.
-	rctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-
-	cands, err := h.Distiller.Distill(rctx, history)
-	if err != nil {
-		// Swallow — same philosophy as RunGC failure. We don't
-		// want a dud auto-distill to make session exit fail.
-		return
-	}
-	for _, c := range cands {
-		_ = h.Project.Add(Entry{
-			Name:        c.Name,
-			Tagline:     c.Tagline,
-			Content:     c.Content,
-			Tags:        c.Tags,
-			AutoSourced: true,
-		})
-	}
+	// Future: increment telemetry counter, log call stats.
 }
 
 // wrapContext renders a single <context source="X">...</context> block.

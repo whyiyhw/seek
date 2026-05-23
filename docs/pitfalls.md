@@ -91,6 +91,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: `_ = tea.Println(s)` is a silent no-op pattern that looks like it prints but doesn't. Any function returning `tea.Model` that calls `tea.Println` is a pre-existing bug — the callers pass `nil` as the cmd, so the line is lost. When adding instrumentation that depends on side effects at the same call site (like `scrollbackLines`), check whether the print actually fires or you're counting ghosts
 - **Refs**: `internal/tui/distill.go:exitDistillReview`, `internal/tui/distill.go:distillAcceptCurrent`, `internal/tui/banner.go:welcomeFixedLines`, `internal/tui/banner_test.go:TestWelcomeBannerLineCount`
 
+### `/model` updated the display but not the Agent's model — API calls still used the old model
+- **Saw**: user ran `/model deepseek-v4-pro` in the TUI; status bar showed `deepseek-v4-pro`, but DeepSeek's backend stats showed all calls as `deepseek-v4-flash`. The model switch had zero effect on actual API requests
+- **Why**: `cmdModel` (and `applyModelChoice` for the picker) only updated `m.opts.Model` (status bar display) and called `SetModel(args)` (updated `sessionModel` in main.go). But the Agent's `a.cfg.Model` is frozen at creation time (`agent.New`), and `/model` never rebuilt the agent or updated its config. `RebuildAgent` is only called on `/new`. So every subsequent API call still used the original model from startup
+- **Fix**: added `Agent.SetModel(model)` in `pkg/agent/agent.go` that mutates `a.cfg.Model` in place (safe between turns). Both `cmdModel` and `applyModelChoice` now call `m.opts.Agent.SetModel(args)` after updating the display. Commit (this one)
+- **Lesson**: any struct whose config is baked at construction and read on every operation must expose a mutator if a CLI/TUI command claims to change the config at runtime. "Effective on next prompt" requires the agent's copy changed, not just the host variable and status bar
+- **Refs**: `pkg/agent/agent.go:SetModel`, `internal/tui/commands.go:cmdModel`, `internal/tui/commands.go:applyModelChoice`
+
 ---
 
 ## Agent loop
@@ -226,6 +233,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when you see "constant X.X of type float64" cannot convert, the answer isn't to add more parentheses — it's to make the expression non-constant
 
 ## Go language
+
+### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`
+- **Saw**: after a model streaming turn produced only `reasoning_content` (thinking) but no actual content or tool_calls, every subsequent API call failed with `invalid_request_error: Invalid assistant message: content or tool_calls must be set`
+- **Why**: `runTurnDeepSeek` and `runTurnLLM` construct `assistant := Message{Role: RoleAssistant}` with empty fields, then stream content/tool_calls into it. If the model only emitted reasoning tokens (or nothing at all) before `[DONE]`, the returned assistant has `Content=""` and `ToolCalls=nil`. On the next turn, `StripReasoningContent` strips the (absent) reasoning_content, leaving role=assistant with no fields at all — DeepSeek's API requires every assistant message to carry either content or tool_calls
+- **Fix**: added an empty-response guard in both `runTurnDeepSeek` and `runTurnLLM`: if `assistant.Content == "" && len(assistant.ToolCalls) == 0`, return an error instead of the empty message. The Prompt loop then surfaces the error and drops the turn without corrupting history. Updated `TestAgent_EmptyChoicesUsageOnly` to expect the error (it previously asserted empty responses were safe). Commit (this one)
+- **Lesson**: a streaming response with only reasoning_content is not a valid assistant turn — guard both the DeepSeek and LLM provider paths. The "model said nothing" edge case is not an error to tolerate; it poisons subsequent requests
+- **Refs**: `pkg/agent/agent.go:runTurnDeepSeek`, `pkg/agent/agent.go:runTurnLLM`, `pkg/agent/agent_test.go:TestAgent_EmptyChoicesUsageOnly`
 
 ### Backticks in raw string literals close the string
 - **Saw**: `cmd/seek/main.go:40` suddenly failed `go vet` with `expected ';', found bash` after I added a string mentioning `` `bash ls` ``

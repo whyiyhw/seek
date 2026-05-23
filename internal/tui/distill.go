@@ -13,6 +13,8 @@ import (
 // and stay idle. On a non-empty candidate list we open the review modal
 // and the next keypress flows into handleDistillKey.
 func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
+	m.distilling = false
+
 	if msg.err != nil {
 		line := styleErr.Render("  ! distill failed: " + msg.err.Error())
 		m.scrollbackLines += scrollbackLineCount(line)

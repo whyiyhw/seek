@@ -214,6 +214,9 @@ func cmdModel(m *Model, args string) cmdResult {
 		if m.opts.SetModel != nil {
 			m.opts.SetModel(args)
 		}
+		if m.opts.Agent != nil {
+			m.opts.Agent.SetModel(args)
+		}
 		return cmdResult{text: styleMuted.Render(fmt.Sprintf("model: %s → %s (effective on next prompt)", prev, args))}
 	}
 
@@ -273,6 +276,9 @@ func (m *Model) applyModelChoice(idx int) {
 		m.opts.Model = choice.id
 		if m.opts.SetModel != nil {
 			m.opts.SetModel(choice.id)
+		}
+		if m.opts.Agent != nil {
+			m.opts.Agent.SetModel(choice.id)
 		}
 		// Clear the textarea — the user got to the picker by typing
 		// "/model " or "/model<Enter>", and after accept the leftover
@@ -654,8 +660,12 @@ func cmdDistill(m *Model, _ string) cmdResult {
 	}
 
 	return cmdResult{
-		text:  styleMuted.Render(fmt.Sprintf("distilling %d messages — calling V4-Flash thinking …", len(msgs)-1)),
-		extra: startDistillCmd(m),
+		extra: func() tea.Msg {
+			m.distilling = true
+			m.distillSince = time.Now()
+			m.distillMsgCount = len(msgs) - 1
+			return startDistillCmd(m)()
+		},
 	}
 }
 

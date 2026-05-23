@@ -160,13 +160,26 @@ func TestParseCandidates_SingleObjectMissingNameReturnsNil(t *testing.T) {
 // fakeChatClient wraps a canned ChatResponse so Distiller can be tested
 // without a real DeepSeek backend. Captures the request so tests can
 // assert on what was sent (model id, system prompt, etc.).
+//
+// When block is non-nil, Chat blocks on <-block before returning. This
+// lets concurrent tests (e.g. per-name dedup) hold the goroutine until
+// all enqueue calls are sequenced, preventing a fast synchronous Chat
+// from releasing the lock before the second call checks it.
 type fakeChatClient struct {
 	lastReq *deepseek.ChatRequest
 	resp    *deepseek.ChatResponse
 	err     error
+	block   <-chan struct{}
 }
 
-func (f *fakeChatClient) Chat(_ context.Context, req *deepseek.ChatRequest) (*deepseek.ChatResponse, error) {
+func (f *fakeChatClient) Chat(ctx context.Context, req *deepseek.ChatRequest) (*deepseek.ChatResponse, error) {
+	if f.block != nil {
+		select {
+		case <-f.block:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	f.lastReq = req
 	return f.resp, f.err
 }

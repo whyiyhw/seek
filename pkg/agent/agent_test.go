@@ -946,10 +946,12 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 	assertNoOrphanToolCalls(t, ag.Messages())
 }
 
-// TestAgent_EmptyChoicesUsageOnly is the happy-edge case: a stream
-// that yields no content and no tool_calls but completes cleanly with
-// finish=stop. The agent should NOT error — there's no orphan state
-// to defend against, just a (rare) "model said nothing" response.
+// TestAgent_EmptyChoicesUsageOnly verifies that a stream yielding no
+// content and no tool_calls produces an error. The empty assistant message
+// would otherwise poison the next request: on the following turn,
+// StripReasoningContent removes the (absent) reasoning_content, leaving
+// role=assistant with no content and no tool_calls, which DeepSeek
+// rejects with "content or tool_calls must be set".
 func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -969,11 +971,13 @@ func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 		SystemPrompt: "sys",
 	})
 	res := drainAgent(ag.Prompt(context.Background(), "hello"))
-	if len(res.errors) > 0 {
-		t.Errorf("unexpected error for clean empty response: %v", res.errors)
+	if len(res.errors) == 0 {
+		t.Fatal("expected error for empty response (no content, no tool_calls), got none")
 	}
-	// History should have system + user + (empty) assistant — a
-	// follow-up turn must remain possible.
+	if !strings.Contains(res.errors[0].Error(), "empty response") {
+		t.Errorf("error should mention empty response, got: %v", res.errors[0])
+	}
+	// No orphan tool_calls — the empty message is NOT committed.
 	assertNoOrphanToolCalls(t, ag.Messages())
 }
 

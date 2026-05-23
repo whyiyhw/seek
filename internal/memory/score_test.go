@@ -187,6 +187,57 @@ func TestRunGC_PinnedSkipped(t *testing.T) {
 	}
 }
 
+func TestRunGC_AutoSourcedGracePeriod(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	now := time.Now().UTC()
+	young := now.Add(-20 * day) // inside the 30-day extended grace
+	old := now.Add(-1000 * day) // well past the 30-day window
+
+	// Entry within extended grace period → skipped.
+	plantEntry(t, p, Entry{
+		Name:           "auto-recent",
+		Tagline:        "recent auto entry",
+		Content:        "x",
+		CreatedAt:      young,
+		UpdatedAt:      young,
+		LastRecalledAt: young,
+		AutoSourced:    true,
+	})
+
+	// Entry past grace period with no recall → evaluated (should go stale).
+	plantEntry(t, p, Entry{
+		Name:           "auto-old",
+		Tagline:        "old auto entry",
+		Content:        "x",
+		CreatedAt:      old,
+		UpdatedAt:      old,
+		LastRecalledAt: old,
+		RecallCount:    0,
+		AutoSourced:    true,
+	})
+
+	report, err := p.RunGC(now)
+	if err != nil {
+		t.Fatalf("RunGC: %v", err)
+	}
+
+	// Recent entry should be skipped (grace period).
+	recent, _ := p.Get("auto-recent")
+	if recent.Stale {
+		t.Errorf("auto_sourced entry within grace period should not be stale")
+	}
+
+	// Old entry with no recall should be marked stale — no hard exemption.
+	oldEntry, _ := p.Get("auto-old")
+	if !oldEntry.Stale {
+		t.Errorf("auto_sourced entry past grace period with no recall should be marked stale, got Stale=%v", oldEntry.Stale)
+	}
+
+	_ = report
+}
+
 func TestRunGC_GracePeriodSkipped(t *testing.T) {
 	cwd, _ := withMemoryEnv(t)
 	p, _ := LoadOrCreate(cwd)
