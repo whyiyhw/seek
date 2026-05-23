@@ -41,19 +41,24 @@ seek 选择 B，把 reasoner 包装成一个普通工具。
 ## 6.2 think 工具的关键设计：完全隔离历史
 
 ```go
+type Tool struct {
+    client    *deepseek.Client
+    modelFunc func() string  // 调用方当前选用的模型；运行时解析
+}
+
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
     sys, userMsg, err := parseArgs(raw)
     if err != nil { return "", err }
 
     // 注意：这里发起的是一个全新的 Chat 调用
     // 没有历史消息，没有工具声明，只有 [system, user]
-    resp, err := t.client.Chat(ctx, buildRequest(sys, userMsg))
+    resp, err := t.client.Chat(ctx, t.buildRequest(sys, userMsg))
     // ...
 }
 
-func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
+func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {
     return &deepseek.ChatRequest{
-        Model: deepseek.ModelV4Flash,
+        Model: t.modelName(),  // ← 跟随调用方的 /model 选择
         Messages: []deepseek.Message{
             {Role: deepseek.RoleSystem, Content: sys},
             {Role: deepseek.RoleUser,   Content: userMsg},
@@ -62,7 +67,25 @@ func buildRequest(sys, userMsg string) *deepseek.ChatRequest {
         ReasoningEffort: "high",
     }
 }
+
+// modelName 在执行时解析当前 /model；返回空时回退到 V4-Flash。
+func (t Tool) modelName() string {
+    if t.modelFunc != nil {
+        if m := t.modelFunc(); m != "" {
+            return m
+        }
+    }
+    return deepseek.ModelV4Flash
+}
 ```
+
+> **为什么 `modelFunc` 而不是 `model string`？**
+>
+> 早期版本把模型名直接写死成 `ModelV4Flash`(commit 早于 `cc73860`)——理由是"反正 think 内部用什么模型对用户透明"。后来用户报告:跑 V4-Pro 的会话里, think 工具出来的推理质量明显比主模型差;同时定价表上 think 算的钱是 V4-Flash, 实际计费应该是 V4-Pro——状态栏的成本数偷偷少算。
+>
+> 修法(commit `cc73860`):构造时传入一个 `func() string`,Execute 时再调用。这样 `/model` 切到 V4-Pro 之后, 后续 think 调用就跟着切。**回调而不是固定值**是因为 Tool 对象在 Agent 启动时构造一次, 但 `/model` 可以会话中任意切换——必须运行时解析。
+>
+> 还有一个相关的改动(commit `a2b095a`):**reasoning 模型上 `Thinking.Type=enabled` 由 `pkg/deepseek` 自动加**。调用方不再需要手动在请求里写 thinking 开关——只要选了 reasoner 系的模型, 自动开。这跟 think 工具的取舍是一致的:**减少调用方需要记的事**。
 
 **为什么必须是全新的调用，而不是把历史一起发过去？**
 
@@ -226,6 +249,8 @@ FIM 工具本身是只读的——它返回补全文本，不直接应用到文�
 
 - reasoner 被包装成工具而不是直接集成，因为 `thinking` 和 `tools` 参数不能同时使用
 - `think` 工具发起完全隔离的 Chat 调用，不带历史，避免 `reasoning_content` 回传问题
+- 模型选择是**运行时回调**——`modelFunc func() string` 让 `think` 跟随调用方的 `/model`，而不是写死 V4-Flash(commit `cc73860`)
+- reasoning 系模型的 `Thinking.Type=enabled` 由 `pkg/deepseek` 自动加, 调用方不必显式写(commit `a2b095a`)
 - `StreamingTool` 接口让工具支持流式输出，两条路径（Execute / ExecuteStream）产生完全一致的字符串结果
 - 推理结果需要截断，截断时附带提示让模型知道如何获取完整内容
 - FIM 使用独立端点和独立格式，返回文本而不直接写文件，权限管控保持在 `edit` 里

@@ -146,9 +146,9 @@
 ### 第五部分：走向生产
 
 **[第 13 章：成本与上下文预算](chapter-13.md)**
-- 13.1 `cache.Tracker`：什么都不做的核心
+- 13.1 `cache.Tracker`：每轮一条记录, 成本在 Record 时锁定
 - 13.2 cumulative vs last-turn：埋了三章的反直觉
-- 13.3 `pricing`：定价表 + 离峰窗口
+- 13.3 `pricing`：定价表 + 离峰窗口 + V4 别名 sunset
 - 13.4 `budget`：把 token 数翻译成"几分严重"
 - 13.5 `finish_reason="length"`：一条没人提就静默的错误
 - 13.6 三个模块怎么 wire 到一起
@@ -166,7 +166,7 @@
 - 14.9 TUI Provider banner：能力降级的可视化
 - 14.10 一个测试观察：每个 provider 都有 6-7 个 buildRequest 测试
 
-**[第 15 章：M7 与发布](chapter-15.md)**
+**[第 15 章：M7 与 v1.0 发布](chapter-15.md)**
 - 15.1 JSON 输出模式：让脚本能用 seek
 - 15.2 自举：用 seek 写 seek
 - 15.3 `go install`：单二进制发布的最小工作姿势
@@ -174,7 +174,32 @@
 - 15.5 跨平台：三条主要差异
 - 15.6 M7 polish：浮动 help、`/new`、`--theme`
 - 15.7 v1.0 验收：每条都对得上
-- 15.8 这本书是怎么停的
+- 15.8 v1.0 之后:这本书没停, 只是换了个版本号
+
+---
+
+### 第六部分：v1.0 之后
+
+**[第 16 章：M5 — 三层认知记忆 (L/M/S)](chapter-16.md)** *(v0.2.x, PRD v1)*
+- 16.1 为什么需要"记忆", 不只是"会话历史"
+- 16.2 数据模型: 三层用三种不同的形态
+- 16.3 注入机制: PrePromptHook 与 prefix-cache 的死结
+- 16.4 调用面:两个工具 + 两个命令 + 一组自动化
+- 16.5 GC: 衰减打分 + 双悬崖归档
+- 16.6 项目身份: 用 `abs path → sha256[:16]` 哈希作目录名
+- 16.7 把所有这些 wire 进 agent: 一行 Config
+- 16.8 一个观察: 记忆是 seek 从"工具"到"伙伴"的换挡
+
+**[第 17 章：M8 — Skill 生命周期管理](chapter-17.md)** *(v0.3.x, PRD v2)*
+- 17.1 v0 Skill 的三个缺口
+- 17.2 三个并行的变化
+- 17.3 目录包: 与 Anthropic Agent Skills 规范对齐
+- 17.4 安装来源:local / git / https 三条路径
+- 17.5 `.install.json` sidecar:为什么不和 SKILL.md frontmatter 合并
+- 17.6 `seek skill update`:三种来源各自的"刷新"语义
+- 17.7 调用统计: `.stats.jsonl` 与 PIPE_BUF 单写原子性
+- 17.8 CLI / TUI 子命令族
+- 17.9 一个观察:可观测性是 v0 到 v1 的换挡
 
 ---
 
