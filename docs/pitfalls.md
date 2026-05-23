@@ -98,6 +98,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any struct whose config is baked at construction and read on every operation must expose a mutator if a CLI/TUI command claims to change the config at runtime. "Effective on next prompt" requires the agent's copy changed, not just the host variable and status bar
 - **Refs**: `pkg/agent/agent.go:SetModel`, `internal/tui/commands.go:cmdModel`, `internal/tui/commands.go:applyModelChoice`
 
+### Ctrl+J newline inserts via `InsertString("\n")` broke cursor/viewport scrolling
+- **Saw**: typing Ctrl+J (multi-line newline) when the textarea had 3+ lines of content caused the cursor to disappear or appear at the wrong position — the first line didn't scroll up as new content was added below
+- **Why**: `handleKey` intercepted `tea.KeyCtrlJ` and called `m.input.InsertString("\n")` to insert a newline. `InsertString` writes the character but bypasses the textarea's `Update()` method entirely, so it never updated the internal cursor position, line tracking, or viewport scroll offset. The cursor ended up off-screen
+- **Fix**: removed the `case tea.KeyCtrlJ:` intercept entirely. The textarea already has `ta.KeyMap.InsertNewline.SetKeys("ctrl+j")` configured (model.go:311), so Ctrl+J now falls through to `m.input.Update(msg)` and the textarea handles it natively, including viewport scrolling and cursor tracking. Commit (this one)
+- **Lesson**: never bypass a bubbletea component's `Update()` for key-driven mutations — `InsertString` is a data-level operation that skips the component's state machine (cursor, scroll, visual offsets). If a key binding already exists on the component (`InsertNewline`), let the event reach it naturally
+- **Refs**: `internal/tui/update.go:handleKey` (removed KeyCtrlJ case), `internal/tui/model.go:311`
+
 ---
 
 ## Agent loop

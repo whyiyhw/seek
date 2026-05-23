@@ -254,11 +254,6 @@ type Model struct {
 	distillSince    time.Time
 	distillMsgCount int
 
-	// pastedContent stores the full input when multi-line paste folding
-	// is active (paste > 5 lines → display collapses to a placeholder,
-	// but the full text is sent to the LLM on submit). Empty = not folded.
-	pastedContent string
-
 	// pathPicker drives the "@" file-path autocomplete dropdown.
 	pathPicker pathCompleterState
 

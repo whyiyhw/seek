@@ -165,14 +165,7 @@ func (m Model) View() string {
 	// "/" or "@", obscuring whatever they were reading. Below-the-
 	// input keeps the upper conversation steady; the menu grows
 	// downward into the space just above the status bar.
-	if m.pastedContent != "" {
-		// Multi-line paste folded — show a compact placeholder instead
-		// of the full content in the textarea. The full content is still
-		// stored and will be sent to the LLM on submit.
-		sb.WriteString(m.renderPastedPlaceholder())
-	} else {
-		sb.WriteString(m.input.View())
-	}
+	sb.WriteString(m.input.View())
 	sb.WriteString("\n")
 
 	// Approval prompt takes precedence — blurs the input, blocks
@@ -702,20 +695,4 @@ func (m Model) renderHelpOverlay() string {
 	sb.WriteString(m.renderStatusBar())
 
 	return sb.String()
-}
-
-// renderPastedPlaceholder returns a compact one-line representation of
-// a folded multi-line paste, styled to look like a textarea prompt line.
-func (m Model) renderPastedPlaceholder() string {
-	lines := strings.Count(m.pastedContent, "\n") + 1
-	label := fmt.Sprintf("📋 [pasted %d lines, hidden] — type any key to edit", lines)
-	// Style it like an input line (same width, muted foreground).
-	w := m.width - 2
-	if w < 0 {
-		w = 0
-	}
-	if w > len(label) {
-		label += strings.Repeat(" ", w-len(label))
-	}
-	return styleMuted.Render("> " + label)
 }
