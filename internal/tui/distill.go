@@ -56,11 +56,11 @@ func (m Model) handleDistillKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyCtrlC:
-		return m.exitDistillReview(true), nil
+		return m.exitDistillReview(true)
 	case tea.KeyEsc:
 		// Esc behaves the same as 'q' — abort. Less surprising than
 		// "Esc does nothing here" in a modal context.
-		return m.exitDistillReview(true), nil
+		return m.exitDistillReview(true)
 	case tea.KeyEnter:
 		// Enter on the review prompt with no key first is ambiguous —
 		// reject it so the user must explicitly say y/n/e/q.
@@ -72,13 +72,13 @@ func (m Model) handleDistillKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch strings.ToLower(string(msg.Runes)) {
 	case "y":
-		return m.distillAcceptCurrent(), nil
+		return m.distillAcceptCurrent()
 	case "n":
-		return m.distillDropCurrent(), nil
+		return m.distillDropCurrent()
 	case "e":
-		return m.enterDistillEdit(), nil
+		return m.enterDistillEdit()
 	case "q":
-		return m.exitDistillReview(true), nil
+		return m.exitDistillReview(true)
 	}
 	return m, nil
 }
@@ -87,28 +87,31 @@ func (m Model) handleDistillKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // pointer, and closes the modal if that was the last one. Project.Add
 // failures are surfaced to scrollback but don't kill the review — the
 // user can still answer y/n/e for the remaining candidates.
-func (m Model) distillAcceptCurrent() tea.Model {
+func (m Model) distillAcceptCurrent() (tea.Model, tea.Cmd) {
 	if m.distillIdx >= len(m.distillCandidates) {
 		return m.exitDistillReview(false)
 	}
 	cand := m.distillCandidates[m.distillIdx]
+	var cmds []tea.Cmd
 	if err := saveDistillCandidate(m.opts.MemoryProject, cand); err != nil {
 		// Print and continue. The candidate is NOT counted as saved.
 		line := styleErr.Render(fmt.Sprintf("  ! save %q failed: %v", cand.Name, err))
 		m.scrollbackLines += scrollbackLineCount(line)
-		_ = tea.Println(line)
+		cmds = append(cmds, tea.Println(line))
 		m.distillDropped++
 	} else {
 		m.distillSaved++
 	}
 	m.distillIdx++
 	if m.distillIdx >= len(m.distillCandidates) {
-		return m.exitDistillReview(false)
+		m2, cmd := m.exitDistillReview(false)
+		cmds = append(cmds, cmd)
+		return m2, tea.Batch(cmds...)
 	}
-	return m
+	return m, tea.Batch(cmds...)
 }
 
-func (m Model) distillDropCurrent() tea.Model {
+func (m Model) distillDropCurrent() (tea.Model, tea.Cmd) {
 	if m.distillIdx >= len(m.distillCandidates) {
 		return m.exitDistillReview(false)
 	}
@@ -117,14 +120,14 @@ func (m Model) distillDropCurrent() tea.Model {
 	if m.distillIdx >= len(m.distillCandidates) {
 		return m.exitDistillReview(false)
 	}
-	return m
+	return m, nil
 }
 
 // enterDistillEdit switches to edit-mode: the main input area becomes
 // a multi-line content editor prefilled with the candidate's current
 // Content. Enter commits, Esc cancels back to the review prompt with
 // no changes.
-func (m Model) enterDistillEdit() tea.Model {
+func (m Model) enterDistillEdit() (tea.Model, tea.Cmd) {
 	if m.distillIdx >= len(m.distillCandidates) {
 		return m.exitDistillReview(false)
 	}
@@ -134,7 +137,7 @@ func (m Model) enterDistillEdit() tea.Model {
 	// without scrolling; reduces to 3 (default) when edit-mode exits.
 	m.input.SetHeight(5)
 	m.input.Focus()
-	return m
+	return m, nil
 }
 
 // handleDistillEditKey is the edit-mode key handler. Enter commits the
@@ -145,7 +148,7 @@ func (m Model) handleDistillEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		// Abort the whole review including the in-flight edit.
-		return m.exitDistillReview(true), nil
+		return m.exitDistillReview(true)
 	case tea.KeyEsc:
 		m.distillEditing = false
 		m.input.Reset()
@@ -164,14 +167,14 @@ func (m Model) handleDistillEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.input.SetHeight(3)
 			m.input.Blur()
-			return m.distillDropCurrent(), nil
+			return m.distillDropCurrent()
 		}
 		m.distillCandidates[m.distillIdx].Content = edited
 		m.distillEditing = false
 		m.input.Reset()
 		m.input.SetHeight(3)
 		m.input.Blur()
-		return m.distillAcceptCurrent(), nil
+		return m.distillAcceptCurrent()
 	}
 	// Forward everything else to the textarea so typing / arrow keys /
 	// backspace work normally.
@@ -184,7 +187,7 @@ func (m Model) handleDistillEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // to scrollback. aborted=true means the user hit q / Ctrl+C / Esc; the
 // summary suffix reflects that so the user knows remaining candidates
 // were skipped on purpose.
-func (m Model) exitDistillReview(aborted bool) tea.Model {
+func (m Model) exitDistillReview(aborted bool) (tea.Model, tea.Cmd) {
 	remaining := len(m.distillCandidates) - m.distillIdx
 	m.distillReviewOpen = false
 	m.distillEditing = false
@@ -201,8 +204,7 @@ func (m Model) exitDistillReview(aborted bool) tea.Model {
 		"  · distill review done: %d saved, %d dropped%s",
 		m.distillSaved, m.distillDropped, suffix))
 	m.scrollbackLines += scrollbackLineCount(line)
-	_ = tea.Println(line) // best effort; review state cleanup is the priority
-	return m
+	return m, tea.Println(line)
 }
 
 // saveDistillCandidate copies an approved candidate into M. The

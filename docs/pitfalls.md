@@ -84,6 +84,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: render the welcome banner in the not-ready branch instead of the placeholder — same content the viewport will hold once we know the dimensions, so no visual jump. Commit `766a045`
 - **Lesson**: a "loading" message that shows for less than one frame should just be a softer first frame, not a string change
 
+### `_ = tea.Println(line)` silently discards the cmd — scrollbackLines count drifts
+- **Saw**: functions returning `tea.Model` (not `(tea.Model, tea.Cmd)`) called `_ = tea.Println(line)` and incremented `scrollbackLines` — but the line never appeared in the terminal because discarding `tea.Println`'s return discards the print itself. The phantom `scrollbackLines` count shifted the status bar padding calculation in `View()` by the number of discarded prints
+- **Why**: `tea.Println` returns a `tea.Cmd`. Assigning it to `_` means bubbletea never executes it. The pattern in `distillAcceptCurrent` and `exitDistillReview` existed before the `scrollbackLines` counter was added (commit bb27684), but the new counter made the bug visible: phantom lines were counted in `scrollbackLines` but never rendered, causing `cursorRow = welcomeFixedLines + m.scrollbackLines` to over-count and the status bar to sit lower than it should after distill review
+- **Fix**: changed `distillAcceptCurrent`, `distillDropCurrent`, `enterDistillEdit`, and `exitDistillReview` from `tea.Model` → `(tea.Model, tea.Cmd)` so the `tea.Println` cmd propagates through the key handler to `tea.Batch`. Added `TestWelcomeBannerLineCount` to pin the `welcomeFixedLines` constant against the actual banner output. Commit (this one)
+- **Lesson**: `_ = tea.Println(s)` is a silent no-op pattern that looks like it prints but doesn't. Any function returning `tea.Model` that calls `tea.Println` is a pre-existing bug — the callers pass `nil` as the cmd, so the line is lost. When adding instrumentation that depends on side effects at the same call site (like `scrollbackLines`), check whether the print actually fires or you're counting ghosts
+- **Refs**: `internal/tui/distill.go:exitDistillReview`, `internal/tui/distill.go:distillAcceptCurrent`, `internal/tui/banner.go:welcomeFixedLines`, `internal/tui/banner_test.go:TestWelcomeBannerLineCount`
+
 ---
 
 ## Agent loop

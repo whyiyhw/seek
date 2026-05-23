@@ -284,6 +284,48 @@ func TestWelcomePadding_HugeTerminalCapsAtMax(t *testing.T) {
 	}
 }
 
+// TestWelcomeBannerLineCount pins the physical line count of the
+// welcome banner AND the pre-banner system output lines in
+// welcomeFixedLines. If the banner layout changes (more/fewer
+// wordmark rows, extra meta lines, dropped blank lines) this test
+// fails — the constant must be updated to keep status-bar pinning
+// correct.
+//
+// Layout from PrintPixelWelcomeBanner:
+//
+//	1 leading blank
+//	7 wordmark rows (RenderPixelBanner)
+//	1 blank after banner
+//	cwd line
+//	meta line (model · tier · YOLO · version)
+//	1 trailing blank
+//	= 12 banner lines
+//
+// Plus 2 pre-banner lines printed by cmd/seek (skills loader +
+// projectmd loader) = welcomeFixedLines (14).
+func TestWelcomeBannerLineCount(t *testing.T) {
+	// Count wordmark rows from RenderPixelBanner.
+	bannerWordmarkLines := strings.Count(RenderPixelBanner(), "\n") + 1
+	if bannerWordmarkLines != 7 {
+		t.Errorf("RenderPixelBanner() = %d line(s), want 7 — wordmark height changed", bannerWordmarkLines)
+	}
+
+	// Surrounding blank + meta lines in PrintPixelWelcomeBanner.
+	const surrounding = 5 // leading blank, post-banner blank, cwd, meta, trailing blank
+	bannerTotal := bannerWordmarkLines + surrounding
+	if bannerTotal != 12 {
+		t.Errorf("PrintPixelWelcomeBanner prints %d line(s), want 12 — banner layout changed", bannerTotal)
+	}
+
+	// Pre-banner lines from cmd/seek/main.go (skills loader + projectmd loader).
+	const preBanner = 2
+	want := bannerTotal + preBanner
+	if welcomeFixedLines != want {
+		t.Errorf("welcomeFixedLines = %d, want %d (banner %d + pre-banner %d) — update the constant",
+			welcomeFixedLines, want, bannerTotal, preBanner)
+	}
+}
+
 // --- Animation gate ------------------------------------------------
 
 // TestShouldAnimate_SkippedWhenEnvSet pins the SEEK_NO_ANIM kill-
