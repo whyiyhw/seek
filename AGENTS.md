@@ -84,5 +84,5 @@ Procedurally:
 
 - Subject in conventional-commit style: `feat(M3): ...`, `fix(tui): ...`, `chore: ...`.
 - Body explains **why**, not what. The diff already shows what.
-- `Co-Authored-By: <model name> <noreply@anthropic.com>` trailer on AI-written commits.
+- `Co-Authored-By: seek (DeepSeek) <service@deepseek.com>` trailer on AI-written commits.
 - `Pitfall: <summary>` trailer when fixing a non-obvious bug (see above).
