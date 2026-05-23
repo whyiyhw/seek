@@ -22,6 +22,19 @@ import (
 // Raw holds the full file contents so Save() round-trips bytes that
 // sit outside the recognised sections (intro text, comments,
 // hand-edited annotations).
+//
+// TODO(M8+): PRD v1 §4 specifies two L-layer constraints, both now
+// enforced:
+//
+//  1. ✅ Injection limit — handled by hook.go:OnPrePrompt via
+//     truncateSoulStable (tokens.go); keeps injected L ≤~500 tokens
+//     by dropping trailing bullet entries at deterministic boundaries.
+//
+//  2. ✅ Dream-time merging — MergeIntoL (merge.go)
+//     consolidates near-duplicate L candidates by word-level Jaccard
+//     similarity (≥0.55) and falls back to Levenshtein for CJK;
+//     sources are merged, why evidence extended, and the output is
+//     capped at maxPendingTokens (2000) via truncateSoulStable.
 type Soul struct {
 	Path          string
 	SchemaVersion int

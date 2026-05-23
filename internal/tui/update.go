@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,15 @@ import (
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+// completionRe extracts "completion <number>" from think tool result text.
+// formatResult in internal/tools/think produces:
+//
+//	usage: prompt 956, completion 2345, cache hit 0 / miss 956
+//
+// This is a TUI-level coupling to the think tool's output format — keep in
+// sync if formatResult changes.
+var completionRe = regexp.MustCompile(`completion (\d+)`)
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -138,6 +148,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case upgradeDoneMsg:
 		cmds = append(cmds, m.handleUpgradeDone(msg)...)
+
+	case cleanupToolMsg:
+		for i, t := range m.activeTools {
+			if t.callID == msg.callID {
+				m.activeTools = append(m.activeTools[:i], m.activeTools[i+1:]...)
+				break
+			}
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -847,24 +865,42 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.curContent = ""
 		m.curReasoning = ""
 		// ToolExecEnd carries Name/Result/Err but not Args/started —
-		// look both back up from the active list before we remove it.
+		// look both back up from the active list.
 		var (
-			args     string
-			duration time.Duration
+			args             string
+			duration         time.Duration
+			completionTokens int
 		)
 		for i, t := range m.activeTools {
 			if t.callID == e.CallID {
 				args = t.args
 				duration = time.Since(t.started)
-				m.activeTools = append(m.activeTools[:i], m.activeTools[i+1:]...)
+				// Parse completion tokens from result and set on the
+				// active tool so View() can show them for one frame
+				// before cleanupToolMsg removes it.
+				if e.Result != "" {
+					matches := completionRe.FindStringSubmatch(e.Result)
+					if len(matches) >= 2 {
+						fmt.Sscanf(matches[1], "%d", &completionTokens)
+						if completionTokens > 0 {
+							m.activeTools[i].completionTokens = completionTokens
+						}
+					}
+				}
+				// Defer removal — queue cleanup for next frame so
+				// View() renders the final token count once.
+				cmds = append(cmds, func() tea.Msg {
+					return cleanupToolMsg{callID: e.CallID}
+				})
 				break
 			}
 		}
 		var line string
+		tokenTail := formatTokenTail(completionTokens)
 		if e.Err != nil {
 			line = renderCommittedToolErr(e.Name, args, e.Err.Error(), duration)
 		} else {
-			line = renderCommittedToolOk(e.Name, args, len(e.Result), duration)
+			line = renderCommittedToolOk(e.Name, args, len(e.Result), duration, tokenTail)
 		}
 		cmds = append(cmds, tea.Println(line))
 

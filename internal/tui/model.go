@@ -99,11 +99,23 @@ type Options struct {
 // hasn't yet. Rendered inline in the live region with a spinner and an
 // elapsed-time tail (e.g. "think(...) · 12s") so long-running reasoner
 // calls don't look like the program froze.
+//
+// When ToolExecEnd fires, the tool is NOT removed immediately — instead
+// completionTokens is set and a cleanupToolMsg is queued, giving View()
+// one frame to show the final token count on the live line.
 type activeTool struct {
-	callID  string
-	name    string
-	args    string
-	started time.Time
+	callID           string
+	name             string
+	args             string
+	started          time.Time
+	completionTokens int // set at ToolExecEnd; 0 before that
+}
+
+// cleanupToolMsg is sent after ToolExecEnd to remove a finished tool
+// from activeTools on the next frame, so View() renders one frame with
+// the final token count visible.
+type cleanupToolMsg struct {
+	callID string
 }
 
 type Model struct {

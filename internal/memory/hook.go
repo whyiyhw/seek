@@ -85,15 +85,17 @@ func autoDistillEnabled() bool {
 //
 // Byte-stability requirement (PRD §8 #7): identical L+M disk state →
 // identical Prepend bytes. The map iteration in Project.Index is
-// already sorted by Name; L's section body comes straight from the
-// file. Both flow through here without further transformation.
+// already sorted by Name; L's section body is truncated at bullet
+// boundaries (truncateSoulStable is deterministic — same input →
+// same output), so the prefix cache is preserved as long as the
+// on-disk soul.md doesn't change.
 func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePromptOut, error) {
 	var prepend []deepseek.Message
 
 	if h.Soul != nil && strings.TrimSpace(h.Soul.Stable) != "" {
 		prepend = append(prepend, deepseek.Message{
 			Role:    deepseek.RoleUser,
-			Content: wrapContext("memory.soul", h.Soul.Stable),
+			Content: wrapContext("memory.soul", truncateSoulStable(h.Soul.Stable)),
 		})
 	}
 
@@ -210,13 +212,7 @@ func (h *Hook) runAutoDream(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	addition := FormatLCandidatesMarkdown(cands)
-	pending := strings.TrimSpace(soul.Pending)
-	if pending == "" {
-		pending = addition
-	} else {
-		pending = pending + "\n\n" + addition
-	}
+	pending := MergeIntoL(soul.Pending, cands)
 	soul.SetSections(soul.Stable, pending)
 	_ = soul.Save()
 }

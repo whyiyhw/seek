@@ -245,6 +245,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: omitempty on `time.Time` or any struct field is a no-op. Use `,omitzero` (Go 1.24+), or `*time.Time` pointer if you need backwards-compatible behaviour. Eyeballing a JSON file after every schema change catches this fast
 - **Refs**: `internal/memory/memory.go:Entry.StaleSince`
 
+### Word-level vs character-level similarity for LLM-produced trait merging
+- **Saw**: using Levenshtein character edit distance (threshold ≥0.75) to merge dream candidates caused false positives — "low evidence trait" vs "high evidence trait" scored 0.84 (3 char edits / 19 chars) and got merged despite being semantically different. At the same time, genuine rephrasings like "prefers explicit error handling over panic" vs "prefers explicit error handling" scored 0.74 and falsely stayed separate
+- **Why**: Short trait descriptions from the LLM often share long template substrings ("evidence trait") while differing on the actual preference word. Character-level edit distance is blind to word boundaries — it treats "low vs high" as 3 edits out of 19, which looks "similar" by ratio. Conversely, a real rephrasing with extra words ("over panic") adds 11 edits to a 42-char base, depressing the ratio below the threshold
+- **Fix**: switched to Jaccard word-overlap similarity (threshold ≥0.55). Words split on spaces handle English natural language rephrasings correctly. For CJK text (no spaces), fall back to Levenshtein character ratio — CJK characters carry semantic weight individually, so char-level comparison is appropriate there
+- **Lesson**: no single string-similarity metric works equally well for multi-word English and CJK. Use word-level for space-delimited languages (the common case for LLM output) and character-level for scripts without word boundaries. Test border cases on both
+- **Refs**: `internal/memory/merge.go:traitSimilarity`
+
 ---
 
 ## Tooling / environment

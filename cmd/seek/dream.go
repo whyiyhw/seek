@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/memory"
@@ -105,13 +104,7 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 	if err != nil {
 		return fmt.Errorf("dream: load soul: %w", err)
 	}
-	newPending := strings.TrimSpace(soul.Pending)
-	addition := memory.FormatLCandidatesMarkdown(candidates)
-	if newPending == "" {
-		newPending = addition
-	} else {
-		newPending = newPending + "\n\n" + addition
-	}
+	newPending := memory.MergeIntoL(soul.Pending, candidates)
 	soul.SetSections(soul.Stable, newPending)
 	if err := soul.Save(); err != nil {
 		return fmt.Errorf("dream: save soul: %w", err)

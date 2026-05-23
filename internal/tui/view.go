@@ -70,11 +70,17 @@ func (m Model) View() string {
 	// tail. The spinner ticks ~80 ms which is also what drives the
 	// elapsed-time refresh; without that the user can't tell whether
 	// a long `think` call is alive or hung.
+	// When completionTokens > 0 (set at ToolExecEnd, before deferred
+	// cleanup), the final token count is shown for one frame.
 	for _, t := range m.activeTools {
 		elapsed := formatToolElapsed(time.Since(t.started))
 		label := fmt.Sprintf("%s(%s) …", t.name, t.args)
 		if elapsed != "" {
 			label += " · " + elapsed
+		}
+		tok := formatTokenTail(t.completionTokens)
+		if tok != "" {
+			label += " · " + tok
 		}
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
 	}
@@ -459,9 +465,9 @@ func renderCommittedAssistant(content, reasoning string, showReasoning bool, wid
 	return out
 }
 
-func renderCommittedToolOk(name, args string, resultBytes int, d time.Duration) string {
-	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s",
-		name, args, resultBytes, durationTail(d)))
+func renderCommittedToolOk(name, args string, resultBytes int, d time.Duration, tokenTail string) string {
+	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s%s",
+		name, args, resultBytes, durationTail(d), tokenTail))
 }
 
 func renderCommittedToolErr(name, args, err string, d time.Duration) string {
@@ -503,6 +509,16 @@ func formatToolElapsed(d time.Duration) string {
 		return ""
 	}
 	return formatCommittedDuration(d)
+}
+
+// formatTokenTail formats a completion token count for display after the
+// elapsed-time tail on both the live spinner line and the committed line.
+// Returns e.g. " · ↓2.3ktok" or " · ↓489tok". Empty string when n == 0.
+func formatTokenTail(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return " · ↓" + formatTokensK(n) + "tok"
 }
 
 func indent(s, prefix string) string {
