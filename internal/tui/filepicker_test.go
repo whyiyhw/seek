@@ -62,9 +62,12 @@ func TestScanWorkspace_SkipsHiddenAndCommonNoise(t *testing.T) {
 	must(os.WriteFile(filepath.Join(root, ".env"), []byte("x"), 0o644))
 
 	got := scanWorkspace(root)
+	// scanWorkspace returns OS-native paths (backslashes on Windows).
+	// Normalise via filepath.ToSlash so the substring assertions below
+	// stay portable.
 	gotSet := map[string]bool{}
 	for _, p := range got {
-		gotSet[p] = true
+		gotSet[filepath.ToSlash(p)] = true
 	}
 	if !gotSet["src/main.go"] || !gotSet["README.md"] {
 		t.Errorf("missing expected files in %v", got)

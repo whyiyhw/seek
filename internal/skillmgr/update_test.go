@@ -51,8 +51,8 @@ func TestInstall_Local_SidecarRecordsAbsoluteSource(t *testing.T) {
 	if !filepath.IsAbs(url) {
 		t.Errorf("sidecar url should be absolute for local sources, got %q", url)
 	}
-	if !strings.HasSuffix(url, "/pkg") {
-		t.Errorf("sidecar url = %q, want suffix /pkg", url)
+	if got := filepath.Base(url); got != "pkg" {
+		t.Errorf("filepath.Base(url) = %q, want pkg (full url: %s)", got, url)
 	}
 }
 

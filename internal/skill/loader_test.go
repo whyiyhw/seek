@@ -107,7 +107,9 @@ func TestLoad_PriorityCascade(t *testing.T) {
 	if got == nil {
 		t.Fatalf("skill %q not loaded", n)
 	}
-	if !strings.Contains(got.Source, ".seek/skills") {
+	// filepath.ToSlash normalises Windows path separators so the
+	// substring check works on every supported OS.
+	if !strings.Contains(filepath.ToSlash(got.Source), ".seek/skills") {
 		t.Errorf("project .seek didn't win: source=%s", got.Source)
 	}
 	if got.Description != "project-seek" {

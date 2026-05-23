@@ -266,8 +266,10 @@ func TestUninstall_HappyPath_Package(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(res.Path, "/foo") {
-		t.Errorf("Path = %q, want suffix /foo", res.Path)
+	// filepath.Base instead of HasSuffix("/foo") so the assertion
+	// is cross-platform — Windows hands us \foo, not /foo.
+	if got := filepath.Base(res.Path); got != "foo" {
+		t.Errorf("filepath.Base(Path) = %q, want foo (full path: %s)", got, res.Path)
 	}
 	if _, err := os.Stat(filepath.Join(userDir, "foo")); !os.IsNotExist(err) {
 		t.Errorf("directory still present; stat err=%v", err)
@@ -286,8 +288,8 @@ func TestUninstall_HappyPath_SingleFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(res.Path, "/lone.md") {
-		t.Errorf("Path = %q, want suffix /lone.md", res.Path)
+	if got := filepath.Base(res.Path); got != "lone.md" {
+		t.Errorf("filepath.Base(Path) = %q, want lone.md (full path: %s)", got, res.Path)
 	}
 	if _, err := os.Stat(filepath.Join(userDir, "lone.md")); !os.IsNotExist(err) {
 		t.Errorf("file still present; stat err=%v", err)
