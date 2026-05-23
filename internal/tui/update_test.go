@@ -264,6 +264,13 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 		t.Errorf("Esc must clear queuedText and pendingSteerText, got queue=%q steer=%q",
 			m2.queuedText, m2.pendingSteerText)
 	}
+	// Esc restores queued text into the textarea so the user can
+	// edit and re-submit, but does NOT restore steer text (steer
+	// is "cancel and replace" — cancelling the replacement means
+	// the user changed their mind entirely).
+	if got := m2.input.Value(); got != "stale queue" {
+		t.Errorf("Esc should restore queued text into input, got %q", got)
+	}
 }
 
 func TestHandleKey_StreamingEnter_ClearsPasteFoldFlag(t *testing.T) {

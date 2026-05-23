@@ -69,6 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// so it's clear something was aborted (any partial assistant
 		// text already in m.curContent is still committable, but for
 		// simplicity we drop it — the next prompt can re-ask).
+		wasCanceled := m.userCanceled
 		if m.userCanceled {
 			cmds = append(cmds, tea.Println(styleMuted.Render("  ↰ interrupted")))
 			m.userCanceled = false
@@ -79,6 +80,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.curContent = ""
 		m.curReasoning = ""
 		m.activeTools = nil
+		// Restore the user's last submitted prompt into the textarea
+		// after an Esc-cancelled stream, so they can edit and re-send.
+		// Only when the textarea is still empty — the Esc handler may
+		// have already restored queuedText into it.
+		if wasCanceled && m.input.Value() == "" && len(m.promptHistory) > 0 {
+			m.input.SetValue(m.promptHistory[len(m.promptHistory)-1])
+		}
 
 		// Queue / steer dispatch — exactly one of these fires per
 		// streamEndMsg, in priority order.
@@ -361,10 +369,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
 			m.cancelStream()
-			// "Esc stops everything" — also clear queued/pending steer
-			// so the user isn't surprised by a follow-up prompt firing
-			// from a queue they thought they cancelled.
-			m.queuedText = ""
+			// "Esc stops everything" — clear steer, but restore
+			// queued text into the textarea so the user can edit
+			// and re-submit (the textarea was already cleared on
+			// Enter, so this doesn't overwrite anything).
+			if m.queuedText != "" {
+				m.input.SetValue(m.queuedText)
+				m.queuedText = ""
+			}
 			m.pendingSteerText = ""
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
