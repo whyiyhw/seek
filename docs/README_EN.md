@@ -53,6 +53,42 @@ Tool descriptions, system prompts, and error messages are provided in both Engli
 
 These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), session persistence / fork (`/branch`) / compact (`/compact`), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
 
+## Skills management
+
+Since v0.3, seek upgraded skills to **directory packages** — `<dir>/SKILL.md` + frontmatter with inline metadata, compatible with the Anthropic Agent Skills format (any Claude Code skill repo can be installed zero-modification). Single-file `.md` skills remain fully supported.
+
+```bash
+# Create a new skill package from a template
+seek skill create <name> --description "<trigger summary>"
+
+# Three source types — local path, Git URL, HTTPS archive, all work out of the box
+seek skill install ./my-skill
+seek skill install https://github.com/foo/bar#v1.0.0
+seek skill install https://example.com/foo.tar.gz --sha256 a3b9...
+
+# Name conflict: deny by default; --force to replace
+seek skill install ./my-skill --force
+
+# Project-level sharing (copies to <cwd>/.seek/skills/, tracked in git; no .install.json written)
+seek skill install ./my-skill --project
+
+# List loaded / show details / view call stats
+seek skill list
+seek skill status <name>
+seek skill stats --top 5 --since 720h
+
+# Re-pull (git: uses recorded ref; https: re-download and verify sha256; local: re-cp)
+seek skill update <name>
+seek skill update --all
+
+# Uninstall
+seek skill uninstall <name>
+```
+
+All commands are also available inside the TUI: `/skill <verb> [args]` mirrors the CLI (shared dispatcher). `/skills` still works (pre-v2 muscle memory).
+
+Every time the model calls the `Skill(name=...)` tool, a line is appended to `~/.seek/skills/.stats.jsonl` (ts/name/session/project/model/provider), used by `seek skill stats`. Fully local, append-only, zero network.
+
 ## Quick start
 
 ### Install
@@ -130,14 +166,14 @@ Disable the startup version-check probe: `export SEEK_NO_UPGRADE_CHECK=1`.
 
 ## Roadmap
 
-The project follows milestones M0–M7 (all delivered). Current focus:
+The project follows milestones M0–M7 (all delivered). Current milestone: **M8 (Skill lifecycle management)** wrapping up:
 
-- **IDE integration**: refine `--rpc` protocol, add editor plugins
-- **Plugin system**: third-party tool loading
-- **Stabilization**: tagged releases, CI hardening
+- **Skill CLI**: `seek skill create / install / list / status / stats / update / uninstall`
+- **Directory package format**: `<dir>/SKILL.md` + frontmatter, compatible with Anthropic Agent Skills ecosystem
+- **Documentation & stability**: guides, tests, tagged releases
 
-Detailed design: [`docs/prd/`](./prd/) (v0 initial · v1 current development).  
-Contributor guide: See [`AGENTS.md`](../AGENTS.md) for architecture conventions.
+Full design: [`docs/prd/`](./prd/) (v0 initial · v1 Memory · v2 Skill lifecycle)  
+Contributor guide: [`AGENTS.md`](../AGENTS.md) for architecture conventions.
 
 ## Open source & contributing
 
