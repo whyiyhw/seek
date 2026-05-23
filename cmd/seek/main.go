@@ -112,6 +112,7 @@ func run() error {
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
 		model         = flag.String("model", "", "model id; default depends on provider (deepseek-v4-flash for DeepSeek, etc.)")
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
+		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → default (16384)")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		jsonOut       = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
@@ -461,6 +462,7 @@ func run() error {
 		Model:           *model,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
+		MaxTokens:       *maxTokens,
 		MaxTurns:        *maxTurns,
 		AutoContinue:    *autoContinue,
 		InitialMessages: initialMsgs,
@@ -596,21 +598,21 @@ func run() error {
 	}
 
 	return tui.Run(tui.Options{
-		Agent:         ag,
-		Tracker:       tracker,
-		Model:         sessionModel,
-		Yolo:          policy.Yolo(),
-		CWD:           abs,
-		Ctx:           ctx,
-		Theme:         effectiveTheme,
-		GlamourStyle:  glamourStyle,
-		ApprovalCh:    approvalCh,
-		Session:       activeSession,
-		Store:         store,
-		Skills:        skills,
-		ProviderName:  provLabel,
-		MemoryProject: memProject,
-		Distiller:     distiller,
+		Agent:             ag,
+		Tracker:           tracker,
+		Model:             sessionModel,
+		Yolo:              policy.Yolo(),
+		CWD:               abs,
+		Ctx:               ctx,
+		Theme:             effectiveTheme,
+		GlamourStyle:      glamourStyle,
+		ApprovalCh:        approvalCh,
+		Session:           activeSession,
+		Store:             store,
+		Skills:            skills,
+		ProviderName:      provLabel,
+		MemoryProject:     memProject,
+		Distiller:         distiller,
 		ObserveResultChan: observeResultChan,
 
 		RebuildAgent: func() (*agent.Agent, error) {
@@ -635,6 +637,7 @@ func run() error {
 				Model:        sessionModel,
 				SystemPrompt: sp,
 				Tools:        reg,
+				MaxTokens:    *maxTokens,
 				MaxTurns:     *maxTurns,
 				AutoContinue: *autoContinue,
 			})

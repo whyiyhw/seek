@@ -90,7 +90,7 @@ func New(cfg Config) (*Agent, error) {
 		cfg.MaxTurns = 200
 	}
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 8192
+		cfg.MaxTokens = 16384
 	}
 	a := &Agent{cfg: cfg}
 	if cfg.SystemPrompt != "" {

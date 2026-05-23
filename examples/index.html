@@ -1,61 +1,186 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>seek — terminal-native AI coding agent</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek — a DeepSeek-native terminal AI coding agent. 5 MB single binary, zero dependencies, open source (MIT)." />
+<meta property="og:title" content="seek — DeepSeek native AI coding agent" />
+<meta property="og:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT). 10–100× cheaper than Claude." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://github.com/whyiyhw/seek" />
+<meta property="og:image" content="https://opengraph.githubassets.com/1/github/whyiyhw/seek" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="seek — DeepSeek native AI coding agent" />
+<meta name="twitter:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT)." />
+<title data-lang="en">seek — DeepSeek native AI coding agent</title>
+<title data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap" rel="stylesheet" />
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" rel="stylesheet" />
 <style>
-  :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --border: #1e1e2a;
-    --text: #c8c8d0;
-    --text-dim: #6a6a7a;
-    --amber: #f5a623;
-    --amber-glow: rgba(245,166,35,.35);
-    --teal: #00d4ff;
-    --teal-glow: rgba(0,212,255,.3);
-    --font-mono: 'JetBrains Mono', 'Courier New', monospace;
-    --font-sans: 'DM Sans', system-ui, sans-serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
+  /* ============ RESET & BASE ============ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; }
   body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font-sans);
-    line-height: 1.7;
+    font-family: "JetBrains Mono", monospace;
+    background: #0b0b0e;
+    color: #d0d0d8;
+    line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
+    position: relative;
   }
-  /* grain overlay */
-  body::before {
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+
+  /* ============ SKIP LINK (accessibility) ============ */
+  .skip-link {
+    position: fixed;
+    top: -100%;
+    left: 16px;
+    z-index: 10001;
+    background: var(--amber);
+    color: #0b0b0e;
+    padding: 10px 20px;
+    font-size: .85rem;
+    font-weight: 700;
+    border-radius: 0 0 4px 4px;
+    transition: top .25s ease;
+  }
+  .skip-link:focus {
+    top: 0;
+    outline: none;
+  }
+
+  /* ============ FOCUS VISIBLE ============ */
+  :focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+  .btn:focus-visible,
+  .lang-toggle:focus-visible,
+  .install-block:focus-visible,
+  .install-option code:focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+
+  /* ============ CRT SCANLINE OVERLAY ============ */
+  body::after {
     content: '';
-    position: fixed; inset: 0;
-    background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.03'/%3E%3C/svg%3E");
+    position: fixed;
+    inset: 0;
     pointer-events: none;
-    z-index: 0;
+    z-index: 9999;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(0,0,0,.035) 1px,
+      rgba(0,0,0,.035) 2px
+    );
   }
+
+  /* ============ COLOR ============ */
+  :root {
+    --bg:        #0b0b0e;
+    --surface:   #12121a;
+    --border:    #1e1e2a;
+    --text:      #d0d0d8;
+    --dim:       #6a6a7a;
+    --amber:     #f5a623;
+    --amber-dim: rgba(245,166,35,.15);
+    --teal:      #00d4ff;
+    --teal-dim:  rgba(0,212,255,.12);
+    --green:     #22c55e;
+    --red:       #ff5f56;
+    --yellow:    #ffbd2e;
+  }
+
+  /* ============ TYPOGRAPHY ============ */
+  h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(2rem, 7vw, 4.8rem); }
+  h2 { font-size: clamp(1.3rem, 3.5vw, 2.4rem); }
+  h3 { font-size: clamp(1rem, 2vw, 1.3rem); }
+  p  { max-width: 64ch; color: var(--dim); }
+  .text-amber { color: var(--amber); }
+  .text-teal  { color: var(--teal); }
+  .text-dim   { color: var(--dim); }
+
+  /* ============ LANGUAGE TOGGLE ============ */
+  .lang-toggle {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    z-index: 100;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .75rem;
+    color: var(--dim);
+    cursor: pointer;
+    transition: all .25s ease;
+    letter-spacing: .04em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    min-width: 44px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .lang-toggle:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .lang-toggle .globe { font-size: .85rem; }
+
+  /* ============ LAYOUT ============ */
   .container {
-    max-width: 1040px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 0 24px;
     position: relative;
     z-index: 1;
   }
+  section {
+    padding: 100px 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  section:last-of-type { border-bottom: none; }
 
-  /* -------- HERO -------- */
+  /* ============ ANCHOR SCROLL OFFSET ============ */
+  section[id] {
+    scroll-margin-top: 80px;
+  }
+
+  /* ============ TERMINAL PROMPT LABEL ============ */
+  .label {
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--amber);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .label::before { content: '$ '; }
+
+  .section-head { margin-bottom: 48px; }
+  .section-head h2 { margin-bottom: 12px; }
+  .section-head p { font-size: 1.05rem; }
+
+  /* ============ HERO ============ */
   .hero {
-    min-height: 90vh;
+    min-height: 85vh;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    align-items: center;
-    text-align: center;
-    padding: 60px 0 80px;
+    padding: 80px 0 60px;
     position: relative;
   }
   .hero::after {
@@ -63,84 +188,149 @@
     position: absolute;
     bottom: 0; left: 50%;
     transform: translateX(-50%);
-    width: 1px; height: 80px;
+    width: 1px; height: 60px;
     background: linear-gradient(to bottom, var(--amber), transparent);
   }
   .ascii-logo {
-    font-family: var(--font-mono);
-    font-size: clamp(1.1rem, 3.5vw, 2.8rem);
+    font-size: clamp(1.1rem, 3.2vw, 2.6rem);
     font-weight: 700;
     line-height: 1.15;
     color: var(--amber);
-    text-shadow: 0 0 20px var(--amber-glow), 0 0 60px var(--amber-glow);
+    text-shadow: 0 0 20px rgba(245,166,35,.3), 0 0 60px rgba(245,166,35,.15);
     white-space: pre;
-    letter-spacing: .02em;
-    margin-bottom: 32px;
-    animation: logoFadeIn 1.6s ease-out both;
+    letter-spacing: 0;
+    font-kerning: none;
+    font-variant-ligatures: none;
+    font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Courier New", monospace;
+    margin-bottom: 24px;
+    animation: logoIn 1.4s ease-out both;
   }
-  @keyframes logoFadeIn {
-    0% { opacity: 0; transform: scale(.92); filter: blur(4px); }
-    100% { opacity: 1; transform: scale(1); filter: blur(0); }
+  @keyframes logoIn {
+    0%   { opacity: 0; transform: scale(.9); filter: blur(5px); }
+    100% { opacity: 1; transform: scale(1);  filter: blur(0); }
   }
-  .hero-tagline {
-    font-size: clamp(1.05rem, 2vw, 1.35rem);
-    color: var(--text-dim);
-    max-width: 540px;
-    margin-bottom: 12px;
-    animation: fadeUp .8s .4s both;
+  .hero h1 {
+    margin-bottom: 8px;
+    animation: fadeUp .8s .2s both;
   }
-  .hero-cursor {
-    font-family: var(--font-mono);
-    font-size: clamp(1rem, 1.8vw, 1.2rem);
+  .hero .sub {
+    font-size: clamp(1rem, 2vw, 1.3rem);
+    color: var(--dim);
+    margin-bottom: 8px;
+    animation: fadeUp .8s .35s both;
+  }
+  .hero .sub strong { color: var(--text); font-weight: 600; }
+  .hero .meta {
+    font-size: .85rem;
+    color: var(--dim);
+    margin-bottom: 36px;
+    animation: fadeUp .8s .5s both;
+  }
+  .hero .meta .sep { color: var(--border); }
+
+  /* Install command block — typing effect */
+  .install-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    font-size: .85rem;
+    animation: fadeUp .8s .65s both;
+    transition: border-color .25s;
+    cursor: pointer;
+    position: relative;
+    min-height: 52px;
+    overflow: hidden;
+  }
+  .install-block:hover { border-color: var(--amber); }
+  .install-block .prompt {
+    color: var(--amber);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .install-block .cmd {
     color: var(--teal);
-    margin-bottom: 48px;
-    min-height: 1.6em;
-    animation: fadeUp .8s .6s both;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-height: 1.2em;
   }
-  .hero-cursor span {
+  .install-block .cursor {
     display: inline-block;
-    width: 10px; height: 1.2em;
+    width: 8px;
+    height: 1.15em;
     background: var(--teal);
-    margin-left: 4px;
+    margin-left: 2px;
     vertical-align: text-bottom;
     animation: blink 1s step-end infinite;
   }
-  @keyframes blink { 50% { opacity: 0; } }
-  @keyframes fadeUp {
-    0% { opacity: 0; transform: translateY(16px); }
-    100% { opacity: 1; transform: translateY(0); }
+  .install-block .cursor.done {
+    animation: none;
+    opacity: 0;
+    transition: opacity .3s;
   }
+  @keyframes blink { 50% { opacity: 0; } }
+  .install-block .copy-hint {
+    font-size: .7rem;
+    color: var(--dim);
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity .5s ease;
+  }
+  .install-block .copy-hint.show { opacity: 1; }
+  .install-block:hover .copy-hint.show { color: var(--teal); }
+  .install-block.copied .copy-hint { color: var(--green); opacity: 1; }
+
+  /* Ripple effect */
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255,255,255,.15);
+    transform: scale(0);
+    animation: rippleAnim .5s ease-out;
+    pointer-events: none;
+  }
+  @keyframes rippleAnim {
+    to { transform: scale(4); opacity: 0; }
+  }
+
   .btn-group {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
-    justify-content: center;
+    gap: 14px;
+    margin-top: 36px;
     animation: fadeUp .8s .8s both;
   }
   .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
-    padding: 14px 32px;
-    font-family: var(--font-mono);
-    font-size: .95rem;
-    font-weight: 700;
-    text-decoration: none;
+    padding: 12px 28px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: .85rem;
+    font-weight: 600;
     border-radius: 4px;
     transition: all .25s ease;
     cursor: pointer;
     border: none;
     background: transparent;
     position: relative;
+    min-height: 44px;
+    min-width: 44px;
+    overflow: hidden;
   }
   .btn-primary {
     background: var(--teal);
-    color: #0a0a0f;
-    box-shadow: 0 0 24px var(--teal-glow);
+    color: #0b0b0e;
+    box-shadow: 0 0 20px var(--teal-dim);
   }
   .btn-primary:hover {
     background: #33ddff;
-    box-shadow: 0 0 40px var(--teal-glow);
+    box-shadow: 0 0 36px var(--teal-dim);
     transform: translateY(-2px);
   }
   .btn-outline {
@@ -152,40 +342,58 @@
     background: rgba(255,255,255,.04);
     transform: translateY(-2px);
   }
-  .btn .arrow { transition: transform .2s; }
+  .btn .arrow { transition: transform .2s; display: inline-block; }
   .btn:hover .arrow { transform: translateX(4px); }
+  .btn:active { transform: translateY(0) scale(.97); }
 
-  /* -------- SECTION -------- */
-  section { padding: 100px 0; }
-  .section-label {
-    font-family: var(--font-mono);
-    font-size: .8rem;
+  @keyframes fadeUp {
+    0%   { opacity: 0; transform: translateY(18px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ============ BACK TO TOP ============ */
+  .back-top {
+    position: fixed;
+    bottom: 28px;
+    right: 24px;
+    z-index: 100;
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all .3s ease;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(12px);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .back-top.show {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .back-top:hover {
+    border-color: var(--amber);
     color: var(--amber);
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    margin-bottom: 8px;
+    transform: translateY(-3px);
   }
-  .section-label::before { content: '$ '; }
-  .section-title {
-    font-size: clamp(1.6rem, 3vw, 2.2rem);
-    font-weight: 700;
-    letter-spacing: -.02em;
-    margin-bottom: 12px;
-  }
-  .section-sub {
-    color: var(--text-dim);
-    max-width: 600px;
-    font-size: 1.05rem;
-  }
+  .back-top svg { width: 18px; height: 18px; }
 
-  /* -------- WHY GRID -------- */
-  .why-grid {
+  /* ============ DIFFERENTIATORS (asymmetric grid) ============ */
+  .diff-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: 1fr 1.3fr;
     gap: 24px;
-    margin-top: 48px;
+    align-items: start;
   }
-  .why-card {
+  .diff-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -194,49 +402,125 @@
     position: relative;
     overflow: hidden;
   }
-  .why-card::before {
+  .diff-card::before {
     content: '';
     position: absolute;
     top: 0; left: 0;
     width: 3px; height: 100%;
-    background: var(--teal);
+    background: var(--amber);
     opacity: 0;
     transition: opacity .3s;
   }
-  .why-card:hover::before { opacity: 1; }
-  .why-card:hover {
-    border-color: var(--teal);
-    transform: translateY(-4px);
-    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  .diff-card:hover::before { opacity: 1; }
+  .diff-card:hover {
+    border-color: var(--amber);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
   }
-  .why-card .icon {
-    font-family: var(--font-mono);
-    font-size: 1.8rem;
-    color: var(--amber);
-    margin-bottom: 12px;
+  .diff-card .metric {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--teal);
+    line-height: 1.1;
+    margin-bottom: 6px;
   }
-  .why-card h3 {
-    font-size: 1.1rem;
-    margin-bottom: 8px;
+  .diff-card .metric-label {
+    font-size: .85rem;
+    color: var(--dim);
+    margin-bottom: 10px;
   }
-  .why-card p {
-    color: var(--text-dim);
-    font-size: .92rem;
+  .diff-card p { font-size: .88rem; color: var(--dim); }
+
+  /* Terminal window frame */
+  .term-window {
+    background: #0e0e14;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: .82rem;
+    line-height: 1.5;
+    font-family: "JetBrains Mono", monospace;
+    transition: border-color .3s;
+  }
+  .term-window:hover { border-color: var(--amber); }
+  .term-titlebar {
+    background: #1a1a24;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
+  }
+  .term-dots { display: flex; gap: 6px; flex-shrink: 0; }
+  .term-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    transition: opacity .2s;
+  }
+  .term-dot:hover { opacity: .7; }
+  .term-dot.red    { background: var(--red); }
+  .term-dot.yellow { background: var(--yellow); }
+  .term-dot.green  { background: var(--green); }
+  .term-title {
+    font-size: .72rem;
+    color: var(--dim);
+    flex: 1;
+    text-align: center;
+    letter-spacing: .02em;
+  }
+  .term-body {
+    padding: 18px 20px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .term-body .highlight     { color: var(--amber); font-weight: 600; }
+  .term-body .highlight-teal { color: var(--teal); }
+
+  /* Line-by-line reveal */
+  .term-line {
+    display: block;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity .35s ease, transform .35s ease;
+  }
+  .term-line.visible {
+    opacity: 1;
+    transform: translateY(0);
   }
 
-  /* -------- PRICING TABLE -------- */
+  .diff-card.feature-list { padding: 24px 28px; }
+  .diff-card.feature-list li {
+    list-style: none;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: .88rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .diff-card.feature-list li:last-child { border-bottom: none; }
+  .diff-card.feature-list .check { color: var(--amber); flex-shrink: 0; }
+  .diff-card.feature-list .label-sm { color: var(--dim); font-size: .75rem; }
+
+  @media (max-width: 800px) {
+    .diff-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ============ PRICING TABLE ============ */
   .price-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 6px;
     overflow-x: auto;
-    margin-top: 40px;
+    margin-top: 12px;
+    -webkit-overflow-scrolling: touch;
   }
   .price-wrap table {
     width: 100%;
+    min-width: 520px;
     border-collapse: collapse;
-    font-family: var(--font-mono);
-    font-size: .85rem;
+    font-size: .82rem;
   }
   .price-wrap th {
     background: #181825;
@@ -245,8 +529,8 @@
     padding: 14px 16px;
     border-bottom: 2px solid var(--border);
     text-transform: uppercase;
-    letter-spacing: .08em;
-    font-size: .75rem;
+    letter-spacing: .06em;
+    font-size: .72rem;
   }
   .price-wrap td {
     padding: 14px 16px;
@@ -254,210 +538,627 @@
   }
   .price-wrap tr:last-child td { border-bottom: none; }
   .price-wrap tr:hover td { background: rgba(0,212,255,.03); }
-  .price-highlight td {
-    color: var(--teal);
-    font-weight: 700;
-  }
+  .price-highlight td { color: var(--teal); font-weight: 700; }
   .price-note {
-    text-align: center;
     margin-top: 20px;
-    font-size: .85rem;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
+    font-size: .82rem;
+    color: var(--dim);
   }
-  .price-note .blink {
+  .price-note .dot {
     display: inline-block;
     width: 8px; height: 8px;
-    background: #22c55e;
+    background: var(--green);
     border-radius: 50%;
     margin-right: 6px;
     animation: pulse 2s ease-in-out infinite;
   }
   @keyframes pulse { 50% { opacity: .4; } }
 
-  /* -------- FEATURES -------- */
-  .features-grid {
+  /* ============ COST VISUALIZATION BARS ============ */
+  .cost-bars {
+    margin-top: 32px;
+    padding: 24px 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .cost-bars h3 {
+    font-size: .85rem;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+  .cost-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .cost-bar-row:last-child { margin-bottom: 0; }
+  .cost-bar-label {
+    width: 130px;
+    flex-shrink: 0;
+    font-size: .75rem;
+    color: var(--text);
+    text-align: right;
+  }
+  .cost-bar-track {
+    flex: 1;
+    height: 20px;
+    background: #1a1a24;
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cost-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 1s ease;
+    position: relative;
+  }
+  .cost-bar-fill.amber {
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber-dim);
+    width: 0%;
+  }
+  .cost-bar-fill.teal {
+    background: var(--teal);
+    box-shadow: 0 0 8px var(--teal-dim);
+    width: 0%;
+  }
+  .cost-bar-fill.claude {
+    background: #6b4fbb;
+    box-shadow: 0 0 8px rgba(107,79,187,.3);
+    width: 0%;
+  }
+  .cost-bar-fill .val {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: .65rem;
+    font-weight: 700;
+    color: #0b0b0e;
+    white-space: nowrap;
+  }
+  .cost-bar-fill.claude .val { color: #fff; }
+  .cost-bar-desc {
+    font-size: .65rem;
+    color: var(--dim);
+    margin-top: 10px;
+    text-align: center;
+    font-style: italic;
+  }
+  .cost-bars.reveal .cost-bar-fill.amber  { width: 1.2%; }
+  .cost-bars.reveal .cost-bar-fill.teal   { width: 1.6%; }
+  .cost-bars.reveal .cost-bar-fill.claude { width: 100%; }
+
+  /* ============ FEATURES ============ */
+  .feat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 16px;
-    margin-top: 40px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
   }
   .feat {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 20px 24px;
+    padding: 20px 22px;
     display: flex;
     align-items: flex-start;
     gap: 14px;
-    transition: border-color .2s;
+    transition: border-color .2s, background .2s;
   }
-  .feat:hover { border-color: var(--amber); }
+  .feat:hover {
+    border-color: var(--teal);
+    background: rgba(0,212,255,.03);
+  }
   .feat-marker {
-    font-family: var(--font-mono);
     color: var(--amber);
     font-size: .9rem;
     flex-shrink: 0;
     margin-top: 2px;
+    font-weight: 600;
   }
   .feat h4 {
-    font-size: .92rem;
-    margin-bottom: 4px;
+    font-size: .88rem;
+    font-weight: 600;
+    margin-bottom: 3px;
+    color: var(--text);
   }
-  .feat p {
-    color: var(--text-dim);
-    font-size: .82rem;
+  .feat p { font-size: .8rem; color: var(--dim); line-height: 1.5; }
+
+  /* ============ INSTALL SECTION ============ */
+  .install-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .install-option {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    transition: border-color .25s;
+  }
+  .install-option:hover { border-color: var(--amber); }
+  .install-option h4 { font-size: .9rem; margin-bottom: 4px; }
+  .install-option .detail {
+    font-size: .8rem;
+    color: var(--dim);
+    margin-bottom: 14px;
+  }
+  .install-option code {
+    display: block;
+    background: #0e0e14;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    font-size: .78rem;
+    color: var(--teal);
+    overflow-x: auto;
+    cursor: pointer;
+    transition: border-color .2s;
+    min-height: 44px;
+  }
+  .install-option code:hover { border-color: var(--teal); }
+  .install-option code .prompt-inline { color: var(--amber); }
+
+  @media (max-width: 640px) {
+    .install-grid { grid-template-columns: 1fr; }
   }
 
-  /* -------- FOOTER -------- */
+  /* ============ FOOTER ============ */
   footer {
     border-top: 1px solid var(--border);
-    padding: 40px 0;
+    padding: 48px 0;
     text-align: center;
-    color: var(--text-dim);
-    font-size: .82rem;
   }
-  footer a {
-    color: var(--teal);
-    text-decoration: none;
+  footer p {
+    font-size: .8rem;
+    color: var(--dim);
+    margin: 0 auto 4px;
   }
-  footer a:hover { text-decoration: underline; }
+  footer a { color: var(--teal); transition: color .2s; }
+  footer a:hover { color: var(--amber); }
 
-  /* -------- SCROLL REVEAL -------- */
-  .reveal { opacity: 0; transform: translateY(28px); transition: all .7s ease; }
-  .reveal.visible { opacity: 1; transform: translateY(0); }
+  /* ============ SCROLL REVEAL ============ */
+  .reveal {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
 
-  /* -------- RESPONSIVE -------- */
+  /* ============ RESPONSIVE ============ */
   @media (max-width: 640px) {
-    .hero { min-height: auto; padding: 40px 0 60px; }
     section { padding: 60px 0; }
-    .why-grid { grid-template-columns: 1fr; }
-    .features-grid { grid-template-columns: 1fr; }
-    .price-wrap table { font-size: .75rem; }
+    section[id] { scroll-margin-top: 60px; }
+    .hero {
+      min-height: auto;
+      padding: 48px 0 40px;
+      align-items: stretch;
+    }
+    .hero h1 { font-size: clamp(1.8rem, 8vw, 2.8rem); }
+    .hero .btn-group { flex-direction: column; align-items: stretch; }
+    .hero .btn { justify-content: center; }
+    .install-block { width: 100%; justify-content: space-between; font-size: .78rem; }
+    .install-block .cmd { font-size: .75rem; }
+    .diff-card { padding: 24px 20px; }
+    .diff-card .metric { font-size: 1.6rem; }
+    .lang-toggle { top: 12px; right: 12px; font-size: .7rem; padding: 6px 12px; }
+    .back-top { bottom: 16px; right: 12px; width: 40px; height: 40px; }
+    .cost-bar-label { width: 80px; font-size: .65rem; }
+    .price-wrap table { font-size: .72rem; }
     .price-wrap th, .price-wrap td { padding: 10px 10px; }
+    .cost-bars { padding: 18px 16px; }
+    .term-body { padding: 14px 14px; font-size: .75rem; }
+  }
+
+  /* ============ PRINT STYLES ============ */
+  @media print {
+    body { background: #fff; color: #111; }
+    body::after { display: none; }
+    .lang-toggle, .back-top, .skip-link { display: none !important; }
+    .hero { min-height: auto; padding: 20px 0; }
+    .ascii-logo { color: #333; text-shadow: none; }
+    .btn-primary { background: #333; color: #fff; box-shadow: none; }
+    .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .install-block, .term-window {
+      background: #f5f5f5;
+      border-color: #ddd;
+      break-inside: avoid;
+    }
+    .section-head p, .diff-card p, .feat p { color: #555; }
+    section { padding: 30px 0; border-color: #eee; }
+    .cost-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .term-dot { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .price-wrap th { background: #e8e8e8; color: #333; }
+    .price-wrap td { border-color: #ddd; }
+    .cost-bar-track { background: #e8e8e8; }
+    .price-note .dot { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   }
 </style>
 </head>
 <body>
 
-<div class="container">
+<a class="skip-link" href="#main-content">
+  <span data-lang="en">Skip to content</span>
+  <span data-lang="zh" hidden>跳转到内容</span>
+</a>
+
+<button class="lang-toggle" id="langToggle" aria-label="Switch language">
+  <span class="globe">🌐</span>
+  <span data-lang="en">中文</span>
+  <span data-lang="zh" hidden>English</span>
+</button>
+
+<button class="back-top" id="backTop" aria-label="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 15l-6-6-6 6"/>
+  </svg>
+</button>
+
+<div class="container" id="main-content">
 
 <!-- ============ HERO ============ -->
 <header class="hero">
   <pre class="ascii-logo">
-   ███████╗ ███████╗ ███████╗ ██╗  ██╗
-   ██╔════╝ ██╔════╝ ██╔════╝ ██║ ██╔╝
-   ███████╗ █████╗   █████╗   █████╔╝
-   ╚════██║ ██╔══╝   ██╔══╝   ██╔═██╗
-   ███████║ ███████╗ ███████╗ ██║  ██╗
-   ╚══════╝ ╚══════╝ ╚══════╝ ╚═╝  ╚═╝
+   █████ █████ █████ ██  ██
+   ██    ██    ██    ██ ██
+   █████ █████ █████ ████
+      ██ ██    ██    ██ ██
+   █████ █████ █████ ██  ██
   </pre>
-  <p class="hero-tagline">terminal-native AI coding agent<br/>5 MB · zero deps · open source</p>
-  <div class="hero-cursor">
-    <span class="prompt">$ </span>go install github.com/whyiyhw/seek/cmd/seek@latest<span class="cursor-block"></span>
+  <h1>
+    <span data-lang="en">DeepSeek native<br />AI coding agent</span>
+    <span data-lang="zh" hidden>DeepSeek 原生<br />AI 编程助手</span>
+  </h1>
+  <p class="sub">
+    <span data-lang="en">Open source <strong>seek</strong> —&nbsp;powered by&nbsp;DeepSeek.</span>
+    <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;由 DeepSeek&nbsp;驱动。</span>
+  </p>
+  <p class="meta">
+    <span data-lang="en">5 MB · zero deps</span>
+    <span data-lang="zh" hidden>5 MB · 零依赖</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">MIT licensed</span>
+    <span data-lang="zh" hidden>MIT 开源</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">no telemetry</span>
+    <span data-lang="zh" hidden>无遥测</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">multi-provider</span>
+    <span data-lang="zh" hidden>多模型支持</span>
+  </p>
+
+  <!-- Typing effect install command -->
+  <div class="install-block" id="install-cmd" title="Click to copy" tabindex="0" role="button" aria-label="Copy install command">
+    <span class="prompt">$</span>
+    <span class="cmd" id="cmd-text"></span>
+    <span class="cursor" id="cmd-cursor"></span>
+    <span class="copy-hint" id="cmd-hint" data-lang="en">copy</span>
+    <span class="copy-hint" id="cmd-hint-zh" data-lang="zh" hidden>复制</span>
   </div>
+
   <div class="btn-group">
     <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
       GitHub <span class="arrow">→</span>
     </a>
     <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
-      Download release <span class="arrow">→</span>
+      <span data-lang="en">Releases <span class="arrow">→</span></span>
+      <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
+    </a>
+    <a class="btn btn-outline" href="#install">
+      <span data-lang="en">Install <span class="arrow">↓</span></span>
+      <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
     </a>
   </div>
 </header>
 
 <!-- ============ WHY SEEK ============ -->
 <section>
-  <div class="reveal">
-    <p class="section-label">why seek</p>
-    <h2 class="section-title">Built different.</h2>
-    <p class="section-sub">DeepSeek-native, not a generic LLM wrapper. Every line of the stack optimises for cost, speed, and minimalism.</p>
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">why seek</span>
+      <span data-lang="zh" hidden>为何选择</span>
+    </p>
+    <h2>
+      <span data-lang="en">Built different.</span>
+      <span data-lang="zh" hidden>生而不同。</span>
+    </h2>
+    <p>
+      <span data-lang="en">DeepSeek-native, not a generic LLM wrapper. Every line optimises for cost, speed, and minimalism.</span>
+      <span data-lang="zh" hidden>DeepSeek 原生，不是泛用 LLM 封装。每一行代码都为成本、速度和极简优化。</span>
+    </p>
   </div>
-  <div class="why-grid">
-    <div class="why-card reveal">
-      <div class="icon">$</div>
-      <h3>10–100× cheaper</h3>
-      <p>DeepSeek V4-Flash at $0.14/M input, $0.0028/M on cache hit (97% rate). Off-peak 50% discount (UTC+8 00:30–08:30). Real savings, not marketing.</p>
+
+  <div class="diff-grid">
+    <div class="diff-card reveal">
+      <div class="metric">$0.0028</div>
+      <div class="metric-label">
+        <span data-lang="en">per 1M tokens on cache hit</span>
+        <span data-lang="zh" hidden>每百万 token（缓存命中）</span>
+      </div>
+      <p>
+        <span data-lang="en">DeepSeek V4-Flash prefix-cache pricing. 97% hit rate after turn 5 — the cache discipline pays out in real savings. Off-peak window (UTC+8 00:30–08:30) takes another 50% off.</span>
+        <span data-lang="zh" hidden>DeepSeek V4-Flash 前缀缓存定价。第 5 轮后命中率 97%——缓存纪律带来真实节约。错峰时段（北京时间 00:30–08:30）再打 5 折。</span>
+      </p>
     </div>
-    <div class="why-card reveal">
-      <div class="icon">📦</div>
-      <h3>Single 5 MB binary</h3>
-      <p>No Python, no Node, no npm install. Drop it anywhere — macOS, Linux, Windows. Go-built, statically linked, dependency-free.</p>
+    <div class="diff-card reveal" style="transition-delay:.1s">
+      <div class="metric">5 MB</div>
+      <div class="metric-label">
+        <span data-lang="en">single static binary</span>
+        <span data-lang="zh" hidden>单文件静态二进制</span>
+      </div>
+      <p>
+        <span data-lang="en">Go-built, no Python/Node runtime, no npm install. Drop it on macOS, Linux, or Windows and it works. <code style="background:transparent;color:var(--teal);font-size:.8rem">go install</code> or grab a tarball.</span>
+        <span data-lang="zh" hidden>Go 编译，无需 Python/Node 运行时，无需 npm install。放到 macOS、Linux 或 Windows 上就能用。<code style="background:transparent;color:var(--teal);font-size:.8rem">go install</code> 或下载压缩包即可。</span>
+      </p>
     </div>
-    <div class="why-card reveal">
-      <div class="icon">⚡</div>
-      <h3>DeepSeek superpowers</h3>
-      <p>V4 reasoning mode, FIM endpoint for cheap fill-in edits, real-time cache hit rate in the status bar, off-peak countdown. Not available through generic LLM clients.</p>
+    <div class="diff-card feature-list reveal" style="transition-delay:.2s">
+      <li>
+        <span data-lang="en"><span class="check">✓</span> V4 reasoning mode — <span class="label-sm">think tool</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> V4 推理模式 — <span class="label-sm">think 工具</span></span>
+      </li>
+      <li>
+        <span data-lang="en"><span class="check">✓</span> FIM endpoint — <span class="label-sm">5–10× cheaper fill-in edits</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> FIM 端点 — <span class="label-sm">便宜 5–10 倍的填空补全</span></span>
+      </li>
+      <li>
+        <span data-lang="en"><span class="check">✓</span> Real-time cache hit rate — <span class="label-sm">status bar</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> 实时缓存命中率 — <span class="label-sm">状态栏</span></span>
+      </li>
+      <li>
+        <span data-lang="en"><span class="check">✓</span> Off-peak countdown — <span class="label-sm">live in TUI</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> 错峰倒计时 — <span class="label-sm">TUI 实时显示</span></span>
+      </li>
+      <li>
+        <span data-lang="en"><span class="check">✓</span> Anthropic / OpenAI / Gemini — <span class="label-sm">multi-provider</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> Anthropic / OpenAI / Gemini — <span class="label-sm">多模型支持</span></span>
+      </li>
+      <li>
+        <span data-lang="en"><span class="check">✓</span> Bilingual (中文 + EN) — <span class="label-sm">tool descriptions, prompts, errors</span></span>
+        <span data-lang="zh" hidden><span class="check">✓</span> 双语（中文 + EN） — <span class="label-sm">工具描述、提示、错误信息</span></span>
+      </li>
+    </div>
+    <div class="term-window reveal" id="term-demo" style="transition-delay:.3s">
+      <div class="term-titlebar">
+        <div class="term-dots">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+        </div>
+        <div class="term-title">seek@agent:~/project</div>
+      </div>
+      <div class="term-body">
+<span class="term-line"><span class="highlight">$</span> <span class="highlight-teal">seek</span> <span data-lang="en">"explain the routing in this Go project"</span><span data-lang="zh" hidden>"解释这个 Go 项目的路由"</span></span>
+<span class="term-line" style="transition-delay:.12s"><span style="color:var(--dim)">  ○ idle  ─── <span data-lang="en">Thinking</span><span data-lang="zh" hidden>思考中</span> ───</span></span>
+<span class="term-line" style="transition-delay:.24s"><span style="color:var(--dim)">  Model: deepseek-v4-flash</span></span>
+<span class="term-line" style="transition-delay:.36s"><span style="color:var(--teal)">  cache 98.9%  cost $0.0202</span></span>
+<span class="term-line" style="transition-delay:.48s"><span style="color:var(--dim)">  ctx 12% (123640/1000000)  🌙 off-peak -50%</span></span>
+<span class="term-line" style="transition-delay:.6s"><span style="color:var(--dim)">  ───────────────</span></span>
+<span class="term-line" style="transition-delay:.72s"><span data-lang="en">The project uses a chi router in</span><span data-lang="zh" hidden">这个项目使用 chi 路由，在</span></span>
+<span class="term-line" style="transition-delay:.78s"><span data-lang="en">`cmd/server/main.go` with three</span><span data-lang="zh" hidden">`cmd/server/main.go` 中注册了</span></span>
+<span class="term-line" style="transition-delay:.84s"><span data-lang="en">handler groups: API, webhook, admin.</span><span data-lang="zh" hidden">三组处理器：API、webhook、admin。</span></span>
+<span class="term-line" style="transition-delay:.96s"><span class="highlight">$</span> <span style="color:var(--dim)">▊</span></span>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- ============ PRICING ============ -->
 <section>
-  <div class="reveal">
-    <p class="section-label">pricing</p>
-    <h2 class="section-title">Cost per 1M tokens.</h2>
-    <p class="section-sub">Real API pricing. No hidden tiers. Cache hit rate is live-visible in the status bar — so you can optimise for it.</p>
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">pricing</span>
+      <span data-lang="zh" hidden>定价</span>
+    </p>
+    <h2>
+      <span data-lang="en">Cost per 1M tokens.</span>
+      <span data-lang="zh" hidden>每百万 token 成本。</span>
+    </h2>
+    <p>
+      <span data-lang="en">Real API pricing, not marketing. Cache hit rate is visible in the status bar so you can optimise for it.</span>
+      <span data-lang="zh" hidden>真实 API 价格，不是营销话术。缓存命中率在状态栏实时可见，方便你针对性优化。</span>
+    </p>
   </div>
+
   <div class="price-wrap reveal">
     <table>
       <thead>
         <tr>
           <th></th>
           <th>seek (V4-Flash)</th>
+          <th>seek (V4-Pro)</th>
           <th>Claude Sonnet 4</th>
-          <th>Savings</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Input (no cache)</td>
+          <td>
+            <span data-lang="en">Input (cache miss)</span>
+            <span data-lang="zh" hidden>输入（未命中缓存）</span>
+          </td>
           <td><strong>$0.14</strong></td>
+          <td>$0.435¹</td>
           <td>$3.00</td>
-          <td class="price-highlight">21×</td>
         </tr>
         <tr class="price-highlight">
-          <td>Input (prefix cache hit)</td>
+          <td>
+            <span data-lang="en">Input (prefix cache hit)</span>
+            <span data-lang="zh" hidden>输入（前缀缓存命中）</span>
+          </td>
           <td><strong>$0.0028</strong></td>
+          <td>$0.0036</td>
           <td>$0.30</td>
-          <td>107×</td>
         </tr>
         <tr>
-          <td>Output</td>
+          <td>
+            <span data-lang="en">Output</span>
+            <span data-lang="zh" hidden>输出</span>
+          </td>
           <td><strong>$0.28</strong></td>
+          <td>$0.87</td>
           <td>$15.00</td>
-          <td class="price-highlight">53×</td>
         </tr>
         <tr>
-          <td>Off-peak discount</td>
-          <td><strong>50% off</strong></td>
+          <td>
+            <span data-lang="en">Off-peak discount</span>
+            <span data-lang="zh" hidden>错峰折扣</span>
+          </td>
+          <td><strong>
+            <span data-lang="en">50% off</span>
+            <span data-lang="zh" hidden>5 折</span>
+          </strong></td>
+          <td><strong>
+            <span data-lang="en">50% off</span>
+            <span data-lang="zh" hidden>5 折</span>
+          </strong></td>
           <td>—</td>
-          <td class="price-highlight">—</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <div class="price-note reveal">
-    <span class="blink"></span> Cache hit rate: <strong>95.7%</strong> on bootstrap benchmark &middot; live in status bar
+
+  <!-- Cost visualization bars -->
+  <div class="cost-bars reveal" id="cost-bars">
+    <h3>
+      <span data-lang="en">Cache-hit cost comparison · per 1M input tokens</span>
+      <span data-lang="zh" hidden>缓存命中成本对比 · 每百万输入 token</span>
+    </h3>
+    <div class="cost-bar-row">
+      <span class="cost-bar-label">seek V4-Flash</span>
+      <div class="cost-bar-track">
+        <div class="cost-bar-fill amber"><span class="val">$0.0028</span></div>
+      </div>
+    </div>
+    <div class="cost-bar-row">
+      <span class="cost-bar-label">seek V4-Pro</span>
+      <div class="cost-bar-track">
+        <div class="cost-bar-fill teal"><span class="val">$0.0036</span></div>
+      </div>
+    </div>
+    <div class="cost-bar-row">
+      <span class="cost-bar-label">Claude Sonnet 4</span>
+      <div class="cost-bar-track">
+        <div class="cost-bar-fill claude"><span class="val">$0.30</span></div>
+      </div>
+    </div>
+    <div class="cost-bar-desc">
+      <span data-lang="en"> * Bars are proportional — Claude is ~107× the cost of V4-Flash</span>
+      <span data-lang="zh" hidden> * 长度按比例——Claude 是 V4-Flash 的约 107 倍</span>
+    </div>
+  </div>
+
+  <div class="price-note reveal" style="margin-top:24px;">
+    <span class="dot"></span>
+    <span data-lang="en">Cache hit rate: <strong>95.7%</strong> on bootstrap benchmark · live in status bar</span>
+    <span data-lang="zh" hidden>缓存命中率：自举基准测试 <strong>95.7%</strong> · 状态栏实时显示</span>
+    <br style="margin-top:4px" />
+    <span style="font-size:.75rem">
+      <span data-lang="en">¹ V4-Pro at 75%-off promo rate; full rack: $1.74 / $0.0145 / $3.48</span>
+      <span data-lang="zh" hidden>¹ V4-Pro 为 75% 折扣促销价；全价：$1.74 / $0.0145 / $3.48</span>
+    </span>
   </div>
 </section>
 
 <!-- ============ FEATURES ============ -->
 <section>
-  <div class="reveal">
-    <p class="section-label">capabilities</p>
-    <h2 class="section-title">What you get.</h2>
-    <p class="section-sub">Everything you expect from a modern coding agent, none of the bloat.</p>
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">capabilities</span>
+      <span data-lang="zh" hidden>能力</span>
+    </p>
+    <h2>
+      <span data-lang="en">What you get.</span>
+      <span data-lang="zh" hidden>功能一览。</span>
+    </h2>
+    <p>
+      <span data-lang="en">Everything you expect from a modern coding agent — none of the bloat.</span>
+      <span data-lang="zh" hidden>现代编程助手该有的都有——没有臃肿。</span>
+    </p>
   </div>
-  <div class="features-grid">
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>MCP server</h4><p>Extend with any MCP-compatible tool server</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Custom skills</h4><p>`.md` + frontmatter — compatible with Claude Code skills</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Session persistence</h4><p>Save, fork, branch, compact — full session lifecycle</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Multi-provider</h4><p>DeepSeek + Anthropic + OpenAI + Gemini + compatible</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>JSON-RPC 2.0</h4><p>Headless mode for IDE integration</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Permissions</h4><p>Granular filesystem & shell access control</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Bilingual</h4><p>Chinese & English — tool descriptions, prompts, errors</p></div></div>
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>Privacy</h4><p>Zero telemetry. Your API key, your data, your terminal.</p></div></div>
+
+  <div class="feat-grid">
+    <div class="feat reveal"><span class="feat-marker">></span><div><h4>MCP server</h4><p><span data-lang="en">Extend with any MCP-compatible tool server</span><span data-lang="zh" hidden>集成任意 MCP 兼容工具服务</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.05s"><span class="feat-marker">></span><div><h4><span data-lang="en">Custom skills</span><span data-lang="zh" hidden>自定义技能</span></h4><p><code>.md</code> + frontmatter — <span data-lang="en">compatible with Claude Code skills</span><span data-lang="zh" hidden>兼容 Claude Code 技能</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.1s"><span class="feat-marker">></span><div><h4><span data-lang="en">Session persistence</span><span data-lang="zh" hidden>会话持久化</span></h4><p><span data-lang="en">Save, fork, branch, compact — full lifecycle</span><span data-lang="zh" hidden>保存、分叉、分支、压缩——完整生命周期</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.15s"><span class="feat-marker">></span><div><h4><span data-lang="en">Multi-provider</span><span data-lang="zh" hidden>多模型支持</span></h4><p>DeepSeek + Anthropic + OpenAI + Gemini + <span data-lang="en">compatible</span><span data-lang="zh" hidden>兼容</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.2s"><span class="feat-marker">></span><div><h4>JSON-RPC 2.0</h4><p><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden>无头模式，用于 IDE 集成</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.25s"><span class="feat-marker">></span><div><h4><span data-lang="en">Permission system</span><span data-lang="zh" hidden>权限系统</span></h4><p><span data-lang="en">Granular filesystem &amp; shell access control</span><span data-lang="zh" hidden>细粒度的文件系统和 shell 访问控制</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.3s"><span class="feat-marker">></span><div><h4><span data-lang="en">Bilingual</span><span data-lang="zh" hidden>双语</span></h4><p><span data-lang="en">Chinese &amp; English — prompts, errors, docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示、错误、文档</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.35s"><span class="feat-marker">></span><div><h4><span data-lang="en">Zero telemetry</span><span data-lang="zh" hidden>零遥测</span></h4><p><span data-lang="en">Your API key, your data, your terminal.</span><span data-lang="zh" hidden>你的 API key、你的数据、你的终端。</span></p></div></div>
+  </div>
+</section>
+
+<!-- ============ INSTALL ============ -->
+<section id="install">
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">install</span>
+      <span data-lang="zh" hidden>安装</span>
+    </p>
+    <h2>
+      <span data-lang="en">One binary, anywhere.</span>
+      <span data-lang="zh" hidden>一个二进制，随处可用。</span>
+    </h2>
+    <p>
+      <span data-lang="en">No runtime deps, no package manager required. Pick your path.</span>
+      <span data-lang="zh" hidden>无需运行时依赖，无需包管理器。选一种方式。</span>
+    </p>
+  </div>
+
+  <div class="install-grid">
+    <div class="install-option reveal">
+      <h4>
+        <span data-lang="en">macOS / Linux (curl pipe)</span>
+        <span data-lang="zh" hidden>macOS / Linux（curl 管道）</span>
+      </h4>
+      <p class="detail">
+        <span data-lang="en">Pulls the latest release — no Go toolchain needed.</span>
+        <span data-lang="zh" hidden>拉取最新版本——无需 Go 工具链。</span>
+      </p>
+      <code id="code-curl" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> curl -fsSL https://github.com/whyiyhw/seek/releases/latest/download/seek_$(uname -s)_$(uname -m).tar.gz | tar -xz -C /usr/local/bin seek</code>
+    </div>
+    <div class="install-option reveal" style="transition-delay:.1s">
+      <h4>
+        <span data-lang="en">Go install (from source)</span>
+        <span data-lang="zh" hidden>Go 安装（从源码）</span>
+      </h4>
+      <p class="detail">
+        <span data-lang="en">Requires Go 1.25+. Installs to <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>.</span>
+        <span data-lang="zh" hidden>需要 Go 1.25+。安装到 <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>。</span>
+      </p>
+      <code id="code-go" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> go install github.com/whyiyhw/seek/cmd/seek@latest</code>
+    </div>
+    <div class="install-option reveal" style="transition-delay:.2s">
+      <h4>Windows</h4>
+      <p class="detail">
+        <span data-lang="en">Download the zip from the releases page and unpack it.</span>
+        <span data-lang="zh" hidden>从发布页下载 zip 并解压。</span>
+      </p>
+      <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> <span data-lang="en"># Grab seek_*_windows_amd64.zip from github.com/whyiyhw/seek/releases</span><span data-lang="zh" hidden># 从 github.com/whyiyhw/seek/releases 下载 seek_*_windows_amd64.zip</span></code>
+    </div>
+    <div class="install-option reveal" style="transition-delay:.3s">
+      <h4>
+        <span data-lang="en">Upgrade</span>
+        <span data-lang="zh" hidden>升级</span>
+      </h4>
+      <p class="detail">
+        <span data-lang="en">Built-in atomic in-place update — no re-download needed.</span>
+        <span data-lang="zh" hidden>内置原子级原地更新——无需重新下载。</span>
+      </p>
+      <code id="code-upgrade" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> seek -upgrade       <span data-lang="en"># replaces the running binary atomically</span><span data-lang="zh" hidden># 原子替换正在运行的二进制</span></code>
+    </div>
+  </div>
+
+  <div class="price-note reveal" style="margin-top:28px;">
+    <span class="dot"></span>
+    <span data-lang="en">First run walks you through provider setup — no manual <code style="font-size:.78rem">export</code> needed.</span>
+    <span data-lang="zh" hidden>首次运行会引导你配置 provider——无需手动 <code style="font-size:.78rem">export</code>。</span>
   </div>
 </section>
 
@@ -466,17 +1167,16 @@
 <!-- ============ FOOTER ============ -->
 <footer>
   <div class="container">
+    <p><strong>seek</strong> · <span data-lang="en">MIT licensed</span><span data-lang="zh" hidden>MIT 开源</span> · <a href="https://github.com/whyiyhw/seek">GitHub</a> · <a href="https://github.com/whyiyhw/seek/blob/main/docs/README_EN.md"><span data-lang="en">Docs</span><span data-lang="zh" hidden>文档</span></a></p>
     <p>
-      <strong>seek</strong> &middot; MIT licensed &middot;
-      <a href="https://github.com/whyiyhw/seek">GitHub</a> &middot;
-      <a href="https://github.com/whyiyhw/seek/blob/main/docs/README_EN.md">Docs</a>
+      <span data-lang="en">Built with Go · Powered by DeepSeek · Made for terminal</span>
+      <span data-lang="zh" hidden>Go 构建 · DeepSeek 驱动 · 终端原生</span>
     </p>
-    <p style="margin-top:8px">Built with Go · Powered by DeepSeek · Made for terminal</p>
   </div>
 </footer>
 
 <script>
-  // Intersection Observer for scroll reveal
+  // ============ SCROLL REVEAL ============
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
@@ -485,31 +1185,179 @@
       }
     });
   }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
-
   document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 
-  // Typing effect for hero cursor line
-  (function typeWriter() {
-    const el = document.querySelector('.hero-cursor');
-    if (!el) return;
-    const text = '$ go install github.com/whyiyhw/seek/cmd/seek@latest';
-    const prompt = '$ ';
-    const cmd = text.slice(prompt.length);
-    el.innerHTML = `<span style="color:var(--teal)">${prompt}</span>`;
-    const cursor = document.createElement('span');
-    cursor.className = 'cursor-block';
-    cursor.style.cssText = 'display:inline-block;width:10px;height:1.2em;background:var(--teal);margin-left:4px;vertical-align:text-bottom;animation:blink 1s step-end infinite;';
-    el.appendChild(cursor);
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+  }
+
+  document.getElementById('langToggle').addEventListener('click', () => {
+    setLang(currentLang === 'en' ? 'zh' : 'en');
+  });
+
+  setLang(currentLang);
+
+  // ============ HERO TYPING EFFECT ============
+  (function typeInstall() {
+    const cmdEl = document.getElementById('cmd-text');
+    const cursor = document.getElementById('cmd-cursor');
+    const hint = document.getElementById('cmd-hint');
+    const hintZh = document.getElementById('cmd-hint-zh');
+    const fullCmd = 'go install github.com/whyiyhw/seek/cmd/seek@latest';
     let i = 0;
+
     function type() {
-      if (i < cmd.length) {
-        cursor.before(cmd[i]);
+      if (i < fullCmd.length) {
+        cmdEl.textContent += fullCmd[i];
         i++;
-        setTimeout(type, 40 + Math.random() * 30);
+        const delay = fullCmd[i - 1] === ' ' ? 60 : 25 + Math.random() * 20;
+        setTimeout(type, delay);
+      } else {
+        cursor.classList.add('done');
+        if (hint) hint.classList.add('show');
+        if (hintZh) hintZh.classList.add('show');
       }
     }
-    setTimeout(type, 1200);
+    setTimeout(type, 800);
   })();
+
+  // ============ LINE-BY-LINE TERMINAL REVEAL ============
+  (function termReveal() {
+    const termWindow = document.getElementById('term-demo');
+    if (!termWindow) return;
+
+    const termObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const lines = entry.target.querySelectorAll('.term-line');
+          lines.forEach((line, idx) => {
+            setTimeout(() => { line.classList.add('visible'); }, idx * 140);
+          });
+          termObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.3 });
+
+    termObserver.observe(termWindow);
+  })();
+
+  // ============ COST BAR ANIMATION ============
+  (function animateCostBars() {
+    const bars = document.getElementById('cost-bars');
+    if (!bars) return;
+
+    const barObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          barObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.4 });
+
+    barObserver.observe(bars);
+  })();
+
+  // ============ BACK TO TOP ============
+  (function backToTop() {
+    const btn = document.getElementById('backTop');
+    if (!btn) return;
+
+    let ticking = false;
+    window.addEventListener('scroll', () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          btn.classList.toggle('show', window.scrollY > 300);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    });
+
+    btn.addEventListener('click', () => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  })();
+
+  // ============ RIPPLE EFFECT ============
+  function createRipple(e, el) {
+    const rect = el.getBoundingClientRect();
+    const size = Math.max(rect.width, rect.height);
+    const x = e.clientX - rect.left - size / 2;
+    const y = e.clientY - rect.top - size / 2;
+    const ripple = document.createElement('span');
+    ripple.className = 'ripple';
+    ripple.style.width = ripple.style.height = size + 'px';
+    ripple.style.left = x + 'px';
+    ripple.style.top = y + 'px';
+    el.appendChild(ripple);
+    ripple.addEventListener('animationend', () => ripple.remove());
+  }
+
+  document.querySelectorAll('.btn, .install-block, .install-option code').forEach(el => {
+    el.addEventListener('click', function (e) {
+      createRipple(e, this);
+    });
+  });
+
+  // ============ COPY TO CLIPBOARD ============
+  function copyText(text, el) {
+    navigator.clipboard.writeText(text).then(() => {
+      el.classList.add('copied');
+      const hints = el.querySelectorAll('.copy-hint');
+      hints.forEach(h => {
+        const orig = h.textContent;
+        h.textContent = h.getAttribute('data-lang') === 'en' ? 'copied!' : '已复制！';
+        setTimeout(() => { h.textContent = orig; }, 1800);
+      });
+      setTimeout(() => el.classList.remove('copied'), 1800);
+    });
+  }
+
+  function visibleText(el) {
+    let result = '';
+    el.childNodes.forEach(node => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        result += node.textContent;
+      } else if (node.nodeType === Node.ELEMENT_NODE && !node.hidden) {
+        result += visibleText(node);
+      }
+    });
+    return result;
+  }
+
+  // Hero install block
+  const installCmd = document.getElementById('install-cmd');
+  if (installCmd) {
+    installCmd.addEventListener('click', function (e) {
+      createRipple(e, this);
+      const text = 'go install github.com/whyiyhw/seek/cmd/seek@latest';
+      copyText(text, this);
+    });
+  }
+
+  // Install section code blocks
+  document.querySelectorAll('.install-option code').forEach(el => {
+    el.addEventListener('click', function (e) {
+      createRipple(e, this);
+      let text = visibleText(this).trim();
+      text = text.replace(/^\$\s*/, '');
+      text = text.replace(/\s+#.*$/, '').trim();
+      const origBorder = this.style.borderColor;
+      this.style.borderColor = 'var(--green)';
+      this.style.transition = 'border-color .2s';
+      setTimeout(() => { this.style.borderColor = origBorder || ''; }, 1200);
+      navigator.clipboard.writeText(text);
+    });
+  });
 </script>
 
 </body>
