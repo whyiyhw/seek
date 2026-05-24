@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +24,16 @@ type ObserveResult struct {
 	OK      bool   // true = written to M (ACCEPT), false = rejected/failed
 	Err     string // failure reason (empty on success)
 }
+
+// observeStats records per-session memory_observe outcomes for the M5.13
+// feedback loop. Written to <projectDir>/observe-stats.json at SessionEnd
+// and injected into the next session's M-index snapshot.
+type observeStats struct {
+	Launched int `json:"launched"` // goroutines started (observeCount)
+	Saved    int `json:"saved"`    // successfully written to M
+}
+
+const observeStatsFile = "observe-stats.json"
 
 // entryInfo is the intermediate representation for M-index rendering:
 // one non-stale entry with its tags for group-by-tag layout.
@@ -105,6 +117,11 @@ type Hook struct {
 	// cap causes silent discard (no goroutine, no error).
 	observeCount int
 	observeMax   int // configured via $SEEK_OBSERVE_MAX, default 10
+
+	// observeAcceptCt tracks how many memory_observe calls resulted in
+	// a successful write to M this session. Used with observeCount to
+	// compute aggregate stats for the M5.13 feedback loop.
+	observeAcceptCt int
 
 	// snapshotInjected is set after the first OnPrePrompt call delivers
 	// the session-start L+M snapshot. Subsequent calls skip snapshot
@@ -190,6 +207,13 @@ func (h *Hook) injectSnapshot() (hooks.PrePromptOut, error) {
 	if h.Project != nil {
 		msg, names := h.buildMIndex()
 		if msg != nil {
+			// M5.13: append observe stats from previous session.
+			if stats := readObserveStats(h.Project.Dir); stats != nil && stats.Launched > 0 {
+				msg.Content = msg.Content + fmt.Sprintf(
+					"\n\n最近 memory_observe 统计：%d 次调用，%d 条保存",
+					stats.Launched, stats.Saved,
+				)
+			}
 			prepend = append(prepend, *msg)
 		}
 		h.snapshotEntryNames = names
@@ -549,7 +573,39 @@ func (h *Hook) runAutoDream(ctx context.Context) {
 // satisfaction detection + reasoner call) has been removed. Memory writes
 // now happen in real-time via memory_observe during the conversation.
 func (h *Hook) OnSessionEnd(_ context.Context, _ hooks.SessionEndEvent) {
-	// No-op: all memory writes happen via memory_observe during the session.
+	// M5.13: persist observe stats for the next session's feedback loop.
+	h.writeObserveStats()
+}
+
+// writeObserveStats writes observe-stats.json to the project directory
+// if there were any observe calls this session. Best-effort: errors are
+// silently swallowed (stats are a nice-to-have, not correctness-critical).
+func (h *Hook) writeObserveStats() {
+	if h.Project == nil || h.observeCount == 0 {
+		return
+	}
+	data, err := json.Marshal(observeStats{
+		Launched: h.observeCount,
+		Saved:    h.observeAcceptCt,
+	})
+	if err != nil {
+		return
+	}
+	_ = atomicWrite(filepath.Join(h.Project.Dir, observeStatsFile), data)
+}
+
+// readObserveStats reads the previous session's observe-stats.json.
+// Missing / corrupt file returns nil.
+func readObserveStats(dir string) *observeStats {
+	data, err := os.ReadFile(filepath.Join(dir, observeStatsFile))
+	if err != nil {
+		return nil
+	}
+	var s observeStats
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil
+	}
+	return &s
 }
 
 // ObserveEnqueue returns the function that the memory_observe tool calls to
@@ -652,6 +708,7 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 				Tagline: entry.Tagline,
 				OK:      true,
 			})
+			h.observeAcceptCt++ // M5.13: successful save → stats counter
 		}()
 	}
 }

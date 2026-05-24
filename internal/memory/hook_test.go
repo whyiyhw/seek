@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -515,5 +517,78 @@ func TestHook_OnPrePrompt_DeltaByteStableWithAutoSourced(t *testing.T) {
 	}
 	if first != second {
 		t.Errorf("delta with auto_sourced entries not byte-stable:\n first=%s\n second=%s", first, second)
+	}
+}
+
+// ----- M5.13: observe stats feedback tests -----
+
+// TestOnSessionEnd_WritesObserveStats verifies that OnSessionEnd persists
+// observe-stats.json with the session's accept count.
+func TestOnSessionEnd_WritesObserveStats(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "existing", Tagline: "t"})
+
+	h := &Hook{Project: p}
+	h.observeCount = 5
+	h.observeAcceptCt = 3
+	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
+
+	// Verify the file was written.
+	data, err := os.ReadFile(filepath.Join(p.Dir, observeStatsFile))
+	if err != nil {
+		t.Fatalf("read observe-stats.json: %v", err)
+	}
+	if !strings.Contains(string(data), `"launched":5`) {
+		t.Errorf("expected launched=5, got %s", data)
+	}
+	if !strings.Contains(string(data), `"saved":3`) {
+		t.Errorf("expected saved=3, got %s", data)
+	}
+}
+
+// TestOnPrePrompt_InjectsObserveStats verifies that the M-index snapshot
+// includes observe stats when a previous session's stats file exists.
+func TestOnPrePrompt_InjectsObserveStats(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "entry", Tagline: "t"})
+
+	// Plant observe-stats.json from a previous session.
+	_ = atomicWrite(filepath.Join(p.Dir, observeStatsFile),
+		[]byte(`{"launched":4,"saved":2}`))
+
+	h := &Hook{Project: p}
+	out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out.Prepend) != 1 {
+		t.Fatalf("expected 1 prepend (index), got %d", len(out.Prepend))
+	}
+	content := out.Prepend[0].Content
+	if !strings.Contains(content, "memory_observe") {
+		t.Errorf("M-index should contain observe stats, got:\n%s", content)
+	}
+	if !strings.Contains(content, "4 次调用") {
+		t.Errorf("stats should mention launched count, got:\n%s", content)
+	}
+	if !strings.Contains(content, "2 条保存") {
+		t.Errorf("stats should mention saved count, got:\n%s", content)
+	}
+}
+
+// TestOnPrePrompt_NoStatsWhenNoFile verifies that the M-index omits
+// observe stats when no previous stats file exists (normal first run).
+func TestOnPrePrompt_NoStatsWhenNoFile(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "entry", Tagline: "t"})
+
+	h := &Hook{Project: p}
+	out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out.Prepend) != 1 {
+		t.Fatalf("expected 1 prepend (index), got %d", len(out.Prepend))
+	}
+	content := out.Prepend[0].Content
+	if strings.Contains(content, "memory_observe") {
+		t.Errorf("M-index should NOT contain observe stats when no stats file exists, got:\n%s", content)
 	}
 }
