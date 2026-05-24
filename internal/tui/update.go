@@ -820,8 +820,14 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	switch e := ev.(type) {
-	case agent.AgentStart, agent.TurnStart, agent.MessageStart:
+	case agent.AgentStart, agent.TurnStart:
 		// no UI change
+	case agent.MessageStart:
+		// A new message is starting — discard any residual live state
+		// from a prior failed attempt (e.g. stream_error that triggered
+		// an agent-level retry of the same turn).
+		m.curContent = ""
+		m.curReasoning = ""
 
 	case agent.MessageDelta:
 		if e.Reasoning {

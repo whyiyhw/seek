@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -302,7 +303,54 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 				History: append([]deepseek.Message{}, a.messages...),
 			})
 
-			assistant, usage, finish, err := a.runTurn(ctx, out)
+			// Retry loop: transient stream interruptions (unexpected
+			// EOF, SSE decode failures) that cut off mid-tool-call are
+			// safe to retry — the model's tool_call_ids are unverified,
+			// so the partial turn is NOT committed to history. We match
+			// the stream-layer retry budget (1 retry = 2 attempts) and
+			// backoff. Plain text streams cut off are NOT retried here;
+			// the partial text is already visible and the user can say
+			// "continue".
+			const agentStreamRetries = 1
+			const agentRetryBackoff = 500 * time.Millisecond
+
+			var (
+				assistant deepseek.Message
+				usage     deepseek.Usage
+				finish    string
+				err       error
+			)
+
+			for attempt := 0; attempt <= agentStreamRetries; attempt++ {
+				assistant, usage, finish, err = a.runTurn(ctx, out)
+				if err != nil {
+					break
+				}
+
+				// Only retry when the stream died while the model was
+				// emitting tool calls.
+				canRetry := len(assistant.ToolCalls) > 0 &&
+					finish != "tool_calls" &&
+					(strings.HasPrefix(finish, "stream_error:") ||
+						strings.HasPrefix(finish, "decode_error:")) &&
+					attempt < agentStreamRetries &&
+					ctx.Err() == nil
+
+				if !canRetry {
+					break
+				}
+
+				// Brief backoff so the upstream can recover.
+				select {
+				case <-ctx.Done():
+					err = ctx.Err()
+				case <-time.After(agentRetryBackoff):
+				}
+				if err != nil {
+					break
+				}
+			}
+
 			if err != nil {
 				// User-initiated cancellation (Esc / Ctrl+C) is the
 				// common case here. We must NOT append the partial
@@ -335,7 +383,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			// The ctx-cancel path above is the gentle case (no error
 			// surfaced because the user already knows they hit Esc);
 			// this branch handles every other path to the same bad
-			// state.
+			// state (including exhausted retries).
 			if len(assistant.ToolCalls) > 0 && finish != "tool_calls" {
 				out <- ErrorEvent{Err: fmt.Errorf(
 					"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
