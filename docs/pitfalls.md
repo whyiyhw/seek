@@ -22,6 +22,15 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+## Hook / memory
+
+### OnSessionStart must reset snapshot state for --resume correctness
+- **Saw**: after implementing the M5.9 snapshot+delta strategy, `--resume` would inject a stale snapshot based on the previous session's first `OnPrePrompt` call, because `snapshotInjected` was still `true` from the prior agent lifetime
+- **Why**: the Hook struct fields `snapshotInjected` and `snapshotEntryNames` survive across agent lifetimes when the registry is reused (which happens on `--resume`). Without explicit reset, the second session's first `OnPrePrompt` would skip `injectSnapshot()` and produce no soul/index context at all — the model would lose all memory context
+- **Fix**: `OnSessionStart` now resets `snapshotInjected = false` and `snapshotEntryNames = nil` before running GC. This ensures the first `OnPrePrompt` after every session boundary (fresh or resume) rebuilds the snapshot from current data. Commit (M5.9)
+- **Lesson**: any Hook struct field that tracks per-session state MUST be reset in `OnSessionStart`. The Hook is reusable across agent lifetimes (--resume), not 1:1 with sessions. Don't assume zero-init at construction covers all paths
+- **Refs**: `internal/memory/hook.go:OnSessionStart`, `internal/memory/hook.go:Hook.snapshotInjected`
+
 ## TUI / terminal
 
 ### "starting seek …" placeholder stuck for seconds (or forever)
@@ -517,3 +526,17 @@ If you're new to the project, skim entries in this order:
 - **Fix**: replaced the time-dependent Score sort with a TIME-INDEPENDENT key: `pinned desc → recall_count desc → name asc`. This changes byte output only when entry metadata changes (add/remove/recall/GC), not on every prompt. Documented the trade in `buildMIndex`'s byte-stability doc
 - **Lesson**: any sort or filter key used in a prompt-injection path must be time-independent unless you're willing to pay the cache-miss cost. Score-based ranking is better for quality but worse for caching; the right choice depends on which axis is more constrained. For M-index at 1500 token budget, the cache hit is worth more than the marginal ranking improvement
 - **Refs**: `internal/memory/hook.go:buildMIndex`
+
+### System prompt advertised non-existent `limit` parameter → resolved by accepting `limit` with max-50 enforcement
+- **Saw**: every `read` call that passed `"limit": N` was rejected with `json: unknown field "limit"`, causing a wasted model round-trip and confusing the agent
+- **Why**: `cmd/seek/main.go` (the system prompt template) listed `read(path, offset?, limit?)` and told the model to "Always pass limit when reading an unfamiliar file". But `limit` had been removed from the `read` tool's JSON Schema (AGENTS.md §Tool usage workflow, item 3) to enforce the 50-line maximum without exposing a bypass. Prompt and implementation were out of sync
+- **Fix**: added `limit` back to the schema with `maximum: 50` + server-side rejection of values > 50 with a clear error message. Schema's `maximum: 50` tells the LLM the constraint; if the LLM ignores it, the Go code returns `"read: limit must be at most 50, got %d"`. Model gets one round-trip to retry with a valid value, which also trains it to respect the schema. Changes: `internal/tools/read/read.go` (schema, Args, validation), `internal/tools/read/read_test.go` (replaced rejection test with valid + error cases), `cmd/seek/main.go` (prompt mentions limit/max/error), `AGENTS.md`/`CLAUDE.md` (updated convention docs)
+- **Lesson**: when the model systematically wants to pass a parameter, accept it in the schema (with a max) and **reject invalid values with a clear error** rather than `additionalProperties: false` (which gives a generic unknown-field error) or silent clamping (which hides the mistake). The model gets one round-trip to retry, which is acceptable. The key insight: the schema's `maximum` constraint is informational to the LLM; server-side validation is the actual enforcement
+- **Refs**: `cmd/seek/main.go:74` (before/after), `internal/tools/read/read.go:23-31,68-78`, `AGENTS.md:40,59`, commit (this one)
+
+### Paste-folding "any key to expand" UX shock → marker persists, resolved on Enter
+- **Saw**: pasting >5 lines into the textarea folded the content into a placeholder `"📋 pasted N lines — press any key to expand"`. Typing ANY character (even a single letter) would instantly restore the full multi-line content, causing a jarring "explosion" of the input area
+- **Why**: the restore block in `handleKey` ran unconditionally on every keypress when `m.pastedContent != ""`. The design assumed "first keypress = user is ready to edit/submit", but the implementation was too aggressive — any key (even typing to continue the sentence) triggered the expansion
+- **Fix**: removed the restore block entirely. The marker now persists in the textarea on every non-Enter keypress. On Enter (submit/queue/steer), the marker is replaced with the actual pasted content via `strings.Replace(val, marker, m.pastedContent, 1)` before the text is sent. If the user edits/deletes the marker, the paste is silently discarded
+- **Lesson**: when a fold/placeholder is needed for stability (large paste in fixed-height textarea), the UNFOLD trigger should be narrow (Enter = submission) rather than broad (any key). "Any key" feels like a bug to the user because no explicit action should silently inject multiline content. The trade-off: if the user wants to edit the pasted content before sending, they can't see it — they have to trust the marker. For the LLM-prompt use case (paste-first, edit-rarely), the Enter-only trigger is the right UX
+- **Refs**: `internal/tui/update.go:handlePasteFolding`, `internal/tui/update.go:handleKey` (streaming + non-streaming submit paths), `internal/tui/model.go:pastedContent/pastedLineCount`
