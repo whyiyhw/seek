@@ -42,8 +42,9 @@ seek 选择 B，把 reasoner 包装成一个普通工具。
 
 ```go
 type Tool struct {
-    client    *deepseek.Client
-    modelFunc func() string  // 调用方当前选用的模型；运行时解析
+    client     *deepseek.Client
+    modelFunc  func() string  // 调用方当前选用的模型；运行时解析
+    effortFunc func() string  // 会话当前 /effort 设置；运行时解析
 }
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -64,8 +65,29 @@ func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {
             {Role: deepseek.RoleUser,   Content: userMsg},
         },
         Thinking:        &deepseek.ThinkingMode{Type: "enabled"},
-        ReasoningEffort: "high",
+        ReasoningEffort: t.bumpEffort(),  // ← 跟随 /effort，一步提升
     }
+}
+
+// bumpEffort 返回 think 工具应该使用的 reasoning_effort，
+// 总是比会话当前的 /effort 高一级：
+//
+//	""     → "high"  （默认/off：think 比 chat 高一档）
+//	"high" → "max"   （会话 high → think max）
+//	"max"  → "max"   （已在最高级，不变）
+func (t Tool) bumpEffort() string {
+	var sessionEffort string
+	if t.effortFunc != nil {
+		sessionEffort = t.effortFunc()
+	}
+	switch sessionEffort {
+	case "max":
+		return "max"
+	case "high":
+		return "max"
+	default: // ""（off）或其他未知值
+		return "high"
+	}
 }
 
 // modelName 在执行时解析当前 /model；返回空时回退到 V4-Flash。
@@ -86,6 +108,14 @@ func (t Tool) modelName() string {
 > 修法(commit `cc73860`):构造时传入一个 `func() string`,Execute 时再调用。这样 `/model` 切到 V4-Pro 之后, 后续 think 调用就跟着切。**回调而不是固定值**是因为 Tool 对象在 Agent 启动时构造一次, 但 `/model` 可以会话中任意切换——必须运行时解析。
 >
 > 还有一个相关的改动(commit `a2b095a`):**reasoning 模型上 `Thinking.Type=enabled` 由 `pkg/deepseek` 自动加**。调用方不再需要手动在请求里写 thinking 开关——只要选了 reasoner 系的模型, 自动开。这跟 think 工具的取舍是一致的:**减少调用方需要记的事**。
+>
+> **`effortFunc`：跟随 `/effort` 的推理深度**
+>
+> 与 `modelFunc` 同源的设计模式：`think` 工具的推理深度应该跟随会话当前设置的 `/effort`。如果用户在会话中把 effort 从 `high` 调到 `max`，之后的 think 调用也应该更深——再加一级，在更高一档的水平上运行。
+>
+> 规则（`bumpEffort`）：`"" → "high"`（off 或者未设置时用 high 作为最低档）、`"high" → "max"`（会话已经主动选了 high，think 就上到 max）、`"max" → "max"`（已经在顶，不能再升）。这个"高一档"的设计动机是：用户调用 think 就是为了获得比默认更深的推理，所以即使会话是 off，think 仍然跑 high；会话已经在 high，think 就上到 max。
+>
+> 默认会话 effort 是 `"max"`（`cmd/seek/main.go`），所以开箱即用时 think 也是 max——`bumpEffort("max") = "max"`。用户可以通过 `/effort off` 或 `/effort high` 把会话调到更低档来节约花费。
 
 **为什么必须是全新的调用，而不是把历史一起发过去？**
 
@@ -251,6 +281,7 @@ FIM 工具本身是只读的——它返回补全文本，不直接应用到文�
 - `think` 工具发起完全隔离的 Chat 调用，不带历史，避免 `reasoning_content` 回传问题
 - 模型选择是**运行时回调**——`modelFunc func() string` 让 `think` 跟随调用方的 `/model`，而不是写死 V4-Flash(commit `cc73860`)
 - reasoning 系模型的 `Thinking.Type=enabled` 由 `pkg/deepseek` 自动加, 调用方不必显式写(commit `a2b095a`)
+- `ReasoningEffort` 不再是固定值 `"high"`——`think` 工具通过 `effortFunc func() string` 跟随会话的 `/effort` 设置，并执行 `bumpEffort` 高一档规则。TUI 里敲 `/effort off|high|max` 可实时切换推理深度
 - `StreamingTool` 接口让工具支持流式输出，两条路径（Execute / ExecuteStream）产生完全一致的字符串结果
 - 推理结果需要截断，截断时附带提示让模型知道如何获取完整内容
 - FIM 使用独立端点和独立格式，返回文本而不直接写文件，权限管控保持在 `edit` 里

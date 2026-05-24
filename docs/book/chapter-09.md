@@ -39,6 +39,7 @@ type Session struct {
     UpdatedAt     time.Time          `json:"updated_at"`
     Model         string             `json:"model"`
     Yolo          bool               `json:"yolo"`
+    Effort        string             `json:"effort,omitempty"`
     CWD           string             `json:"cwd"`
     SystemPrompt  string             `json:"system_prompt,omitempty"`
     Messages      []deepseek.Message `json:"messages,omitempty"`
@@ -50,6 +51,8 @@ type Session struct {
 ```
 
 `ParentID` 这个字段下一章 `/branch` / `/compact` 会用到，本章先存着不展开。
+
+`Effort` 是 `/effort` 命令的持久化结果——空字符串表示"不覆盖，由模型和 Agent 自行决定"；`"high"` 或 `"max"` 表示强制开启 Thinking 并指定推理深度。每次会话的开始、恢复、切换都能读到正确的 Effort，使得上一轮手调的推理深度不会意外泄漏到新会话。默认运行时的 Effort 是 `"max"`（`cmd/seek/main.go`），但磁盘上 `omitempty` 保证空值时 JSONL header 不出现 `effort` 键。
 
 ### ID 设计：可排序就是免费索引
 

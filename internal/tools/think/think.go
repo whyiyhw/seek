@@ -3,10 +3,14 @@
 // (PRD §4.8.2 Level 1).
 //
 // The tool uses the caller's current model (via modelFunc) with
-// Thinking.Type="enabled" and ReasoningEffort="high", so the reasoning
-// depth and pricing match what the user has selected. When the current
-// model is V4-Pro the think call uses V4-Pro; when it's V4-Flash the
-// think call uses V4-Flash — no hardcoded model default.
+// Thinking.Type="enabled" and a ReasoningEffort one level above the
+// session's /effort setting — so a session at "off" thinks at "high",
+// and a session at "high" gets a "max" think call. The intent is that
+// invoking `think` always deepens the reasoning relative to the
+// surrounding chat, matching the tool's "reason harder than a normal
+// turn would" semantics. When the current model is V4-Pro the think
+// call uses V4-Pro; when it's V4-Flash the think call uses V4-Flash —
+// no hardcoded model default.
 //
 // The tool still runs a FRESH, history-less call so the reasoning
 // pass isn't contaminated by the calling chat's tool schemas and the
@@ -50,16 +54,42 @@ type Args struct {
 }
 
 type Tool struct {
-	client    *deepseek.Client
-	modelFunc func() string
+	client     *deepseek.Client
+	modelFunc  func() string
+	effortFunc func() string
 }
 
 // New creates a Think tool. modelFunc is called at execution time to
 // determine which DeepSeek model to use for the reasoning call — it's
 // a function so the model can change at runtime (e.g. via /model).
 // If modelFunc returns "" or nil, ModelV4Flash is used as fallback.
-func New(c *deepseek.Client, modelFunc func() string) Tool {
-	return Tool{client: c, modelFunc: modelFunc}
+//
+// effortFunc may be nil; when non-nil, it returns the session's current
+// /effort setting ("" | "high" | "max") and Think uses one level above
+// it (see bumpEffort). nil is treated as a session at "" → think runs
+// at "high", which preserves the pre-/effort default.
+func New(c *deepseek.Client, modelFunc func() string, effortFunc func() string) Tool {
+	return Tool{client: c, modelFunc: modelFunc, effortFunc: effortFunc}
+}
+
+// bumpEffort returns the effort think should run at given the session's
+// current /effort setting. Rules:
+//
+//	""     → "high"   (default: think one level above chat)
+//	"high" → "max"    (escalate to the top documented level)
+//	"max"  → "max"    (already at the ceiling — can't escalate further)
+//
+// Keeping this exhaustive (rather than a default-case fallthrough)
+// lets future DeepSeek levels surface as a compile/review concern.
+func bumpEffort(sessionEffort string) string {
+	switch sessionEffort {
+	case "max":
+		return "max"
+	case "high":
+		return "max"
+	default:
+		return "high"
+	}
 }
 
 func (Tool) Name() string            { return "think" }
@@ -186,6 +216,10 @@ func (t Tool) modelName() string {
 
 func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {
 	model := t.modelName()
+	var sessionEffort string
+	if t.effortFunc != nil {
+		sessionEffort = t.effortFunc()
+	}
 	return &deepseek.ChatRequest{
 		Model: model,
 		Messages: []deepseek.Message{
@@ -193,7 +227,7 @@ func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {
 			{Role: deepseek.RoleUser, Content: userMsg},
 		},
 		Thinking:        &deepseek.ThinkingMode{Type: "enabled"},
-		ReasoningEffort: "high",
+		ReasoningEffort: bumpEffort(sessionEffort),
 	}
 }
 

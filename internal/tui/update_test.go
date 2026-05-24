@@ -7,6 +7,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // streamingModel returns a Model in the streaming state, with a textarea
@@ -16,6 +18,94 @@ func streamingModel(t *testing.T, input string) Model {
 	m := Model{input: textarea.New(), streaming: true}
 	m.input.SetValue(input)
 	return m
+}
+
+// TestApplyAgentEvent_PureToolCallTurnSkipsCommit covers the
+// "no (no content) blocks" UX rule: when an assistant turn carries
+// only reasoning + tool_calls (no narrative text), MessageEnd must
+// NOT emit a scrollback line. Without this guard the live region
+// would render `▸ seek\n(no content)` for every silent tool round —
+// noisy when the model chains several greps before answering.
+//
+// Buffers must still be reset so the next turn's commit doesn't
+// inherit this turn's reasoning text.
+func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
+	m := emptyModel()
+	beforeLines := m.scrollbackLines
+
+	// Simulate the stream: reasoning deltas arrive, content stays empty,
+	// then MessageEnd fires for the assistant turn (with tool_calls on
+	// the wire, though we don't need to populate them for the rendering
+	// branch under test — applyAgentEvent's MessageEnd path only reads
+	// Role + the model's curContent/curReasoning buffers).
+	m.applyAgentEvent(agent.MessageDelta{Delta: "thinking about it…", Reasoning: true})
+	cmds := m.applyAgentEvent(agent.MessageEnd{
+		Message: deepseek.Message{Role: deepseek.RoleAssistant},
+	})
+
+	if len(cmds) != 0 {
+		t.Errorf("expected no tea.Cmds (no scrollback commit), got %d", len(cmds))
+	}
+	if m.scrollbackLines != beforeLines {
+		t.Errorf("scrollbackLines changed: was %d, now %d", beforeLines, m.scrollbackLines)
+	}
+	if m.curContent != "" || m.curReasoning != "" {
+		t.Errorf("live buffers not reset: content=%q reasoning=%q",
+			m.curContent, m.curReasoning)
+	}
+}
+
+// TestApplyAgentEvent_TextTurnCommits is the positive control for the
+// guard above: when content is non-empty, MessageEnd MUST commit a
+// `▸ seek` block to scrollback (one tea.Println cmd) and reset the
+// live buffers.
+func TestApplyAgentEvent_TextTurnCommits(t *testing.T) {
+	m := emptyModel()
+	beforeLines := m.scrollbackLines
+
+	m.applyAgentEvent(agent.MessageDelta{Delta: "here is the answer", Reasoning: false})
+	cmds := m.applyAgentEvent(agent.MessageEnd{
+		Message: deepseek.Message{Role: deepseek.RoleAssistant},
+	})
+
+	if len(cmds) != 1 {
+		t.Fatalf("expected exactly 1 tea.Cmd (the scrollback Println), got %d", len(cmds))
+	}
+	if m.scrollbackLines <= beforeLines {
+		t.Errorf("scrollbackLines should advance after commit: was %d, now %d",
+			beforeLines, m.scrollbackLines)
+	}
+	if m.curContent != "" || m.curReasoning != "" {
+		t.Errorf("live buffers not reset: content=%q reasoning=%q",
+			m.curContent, m.curReasoning)
+	}
+}
+
+// TestApplyAgentEvent_ToolMessageEndIgnored covers the unchanged
+// invariant that MessageEnd for a tool-role message is a no-op at the
+// rendering layer (ToolExecEnd is the commit point for tool lines).
+// Including this test means a future MessageEnd refactor that
+// accidentally widened the role guard would fail loudly.
+func TestApplyAgentEvent_ToolMessageEndIgnored(t *testing.T) {
+	m := emptyModel()
+	m.curContent = "stale"
+	m.curReasoning = "stale"
+	beforeLines := m.scrollbackLines
+
+	cmds := m.applyAgentEvent(agent.MessageEnd{
+		Message: deepseek.Message{Role: deepseek.RoleTool, ToolCallID: "x"},
+	})
+
+	if len(cmds) != 0 {
+		t.Errorf("tool MessageEnd should not emit cmds, got %d", len(cmds))
+	}
+	if m.scrollbackLines != beforeLines {
+		t.Errorf("scrollbackLines moved on tool MessageEnd")
+	}
+	if m.curContent != "stale" || m.curReasoning != "stale" {
+		t.Errorf("tool MessageEnd must not touch the assistant live buffers; got content=%q reasoning=%q",
+			m.curContent, m.curReasoning)
+	}
 }
 
 func TestHandleKey_StreamingEnter_QueuesText(t *testing.T) {

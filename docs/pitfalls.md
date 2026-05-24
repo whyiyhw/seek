@@ -162,6 +162,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: nothing to "fix" code-wise; documented in `docs/prd/v0.md §4.8.1`. Our M2 smoke (system prompt + 5 tools = ~2KB prefix) consistently hits 70%+ across turns; the M0 11-token smoke can't
 - **Lesson**: "cache hit ratio" benchmarks should always use realistic-sized prompts; otherwise you'll conclude "the cache doesn't work" when it does
 
+### Empty tool result + `omitempty` on `Message.Content` → "missing field `content`" from DeepSeek
+- **Saw**: a session crashed mid-loop with `deepseek api error: invalid_request_error: Failed to deserialize the JSON body into the target type: messages[15]: missing field 'content'` right after a `memory_observe(...) → 0 bytes` call
+- **Why**: `memorytool.Observe.Execute` returns `("", nil)` by design — its enqueue is async, so the synchronous return is a "succeed silently" signal. But `deepseek.Message.Content` is tagged `json:"content,omitempty"`, so the tool-result message with `Content=""` serialised with no `content` key at all. DeepSeek strictly requires the field on tool-role messages and rejects the whole turn. Removing `omitempty` isn't an option — assistant messages that only carry `tool_calls` legitimately omit content
+- **Fix**: centralise tool-result message creation in `pkg/agent.buildToolResultMsg` and substitute `"(no output)"` when the tool returns empty + nil error (error path still wins via the `tool error: ...` prefix). Retrofit `session.Session.Repair` with `backfillEmptyToolContent` so historical sessions saved before this guard can still resume. Pinned by `TestBuildToolResultMsg`, `TestAgent_EmptyToolResult_WirePresent`, and `TestRepair_BackfillsEmptyToolContent`
+- **Lesson**: `omitempty` on a shared struct field is a hidden contract risk — a field that's legitimately optional in one role/context can be mandatory in another. When designing a "silent success" return value, also check what the *next* serialisation step does with an empty string
+- **Refs**: `pkg/agent/agent.go:buildToolResultMsg`, `internal/session/session.go:backfillEmptyToolContent`, `internal/tools/memorytool/observe.go`
+
+### `reasoning_effort` values are `high|max` on DeepSeek V4 — not OpenAI's `low|medium|high`
+- **Saw**: while wiring the `/effort` TUI command, the existing comment on `ChatRequest.ReasoningEffort` claimed `"low"|"medium"|"high"` (an OpenAI o-series carry-over). Building a 3-rung picker against that surface would have exposed values DeepSeek may silently ignore or reject
+- **Why**: DeepSeek V4 documents only two `reasoning_effort` levels — `high` and `max` — alongside the `thinking.type` toggle. The earlier OpenAI-style trio looked correct because the field name matches, but the value sets are not interchangeable
+- **Fix**: corrected `pkg/deepseek/types.go:103` comment to document `high|max`; `/effort` exposes `off|high|max` only; `internal/tools/think` keeps `high` as its baseline and bumps to `max` when the session is already at `high`. Wire pins in `TestAgent_EffortOverridesThinking` and `TestThink_BumpEffort`
+- **Lesson**: when a Go field's name matches a sibling provider's parameter, the **value enum is not** part of the name match. Re-read the vendor's doc page for the value set every time, even when the field looks "the same"
+- **Refs**: `pkg/deepseek/types.go`, `internal/tools/think/think.go:bumpEffort`, `internal/tui/commands.go:effortChoices`
+
 ### FIM endpoint is at `/beta/completions` with legacy OpenAI shape
 - **Saw**: when wiring the FIM client I tried to send it to `/chat/completions` with a `prompt` field — got 400 back
 - **Why**: DeepSeek's fill-in-the-middle lives at `/beta/completions` (note the path) and uses the **legacy OpenAI text-completion schema**: `{prompt, suffix, ...}` → `{choices[0].text, ...}` — not the chat/messages shape

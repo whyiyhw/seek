@@ -85,6 +85,16 @@ type Options struct {
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
 	SetYolo      func(bool)
+	// SetEffort updates the host-owned sessionEffort. The TUI mirrors the
+	// new value into m.opts.Effort + Session.Effort (via persistSession)
+	// so the status bar refreshes and the next save captures the choice.
+	// nil disables /effort; the command surfaces an unsupported message.
+	SetEffort func(string)
+
+	// Effort mirrors the session's reasoning_effort override ("" |
+	// "high" | "max"). Read by the status bar and the /effort command;
+	// written by /effort through SetEffort.
+	Effort string
 
 	// MemoryProject is the M-layer handle for this session. nil = memory
 	// is unavailable (e.g. --no-save, load failure); /distill surfaces a

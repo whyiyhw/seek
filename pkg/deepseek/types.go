@@ -97,9 +97,12 @@ type ChatRequest struct {
 	Thinking *ThinkingMode `json:"thinking,omitempty"`
 
 	// ReasoningEffort tunes how hard the model thinks when Thinking is
-	// enabled. Mirrors OpenAI's o-series knob. Values: "low" |
-	// "medium" | "high". Higher = more reasoning tokens = higher
-	// quality / slower / more expensive. Empty = model default.
+	// enabled. DeepSeek V4 documents two levels: "high" and "max".
+	// Higher = more reasoning tokens = higher quality / slower / more
+	// expensive. Empty = model default. (The TUI's /effort command
+	// only exposes "high"/"max" — the older OpenAI-style "low"/"medium"
+	// values are not documented for V4 and may be silently ignored;
+	// internal callers like the `think` tool also stick to high/max.)
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 

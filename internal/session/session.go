@@ -47,14 +47,14 @@ const CurrentSchemaVersion = 2
 // conversation. All time fields are UTC; ID is sortable by creation
 // time so a directory listing is naturally ordered.
 type Session struct {
-	SchemaVersion int                `json:"schema_version"`
-	ID            string             `json:"id"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
-	Model         string             `json:"model"`
-	Yolo          bool               `json:"yolo"`
-	CWD           string             `json:"cwd"`
-	SystemPrompt  string             `json:"system_prompt,omitempty"`
+	SchemaVersion int       `json:"schema_version"`
+	ID            string    `json:"id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Model         string    `json:"model"`
+	Yolo          bool      `json:"yolo"`
+	CWD           string    `json:"cwd"`
+	SystemPrompt  string    `json:"system_prompt,omitempty"`
 	// Messages is omitted from the JSONL header line and written as
 	// individual lines 2..N instead. omitempty ensures the key is
 	// absent from the header even when the slice is non-nil.
@@ -65,6 +65,13 @@ type Session struct {
 	// ParentID is set for sessions created by /branch or /compact —
 	// points at the session this one was forked from.
 	ParentID string `json:"parent_id,omitempty"`
+	// Effort overrides the reasoning_effort sent to DeepSeek. Empty
+	// (the on-disk default) means "do not override" — the agent falls
+	// back to ShouldEnableThinking() on the active model. Values: "" |
+	// "high" | "max". Persists per-session so a one-off escalation
+	// doesn't silently leak to future sessions; omitempty keeps the
+	// JSONL header tidy for the common no-override case.
+	Effort string `json:"effort,omitempty"`
 }
 
 // New constructs a fresh Session with a timestamp-based ID.
@@ -95,21 +102,50 @@ func generateID(t time.Time) string {
 // Touch updates UpdatedAt to now.
 func (s *Session) Touch() { s.UpdatedAt = time.Now().UTC() }
 
-// Repair trims trailing orphan tool_calls shapes from the message
-// history. Returns the number of messages dropped (0 == no repair
-// needed).
+// Repair fixes two replay-blocking shapes in the message history and
+// returns the number of trailing messages dropped (0 == no trimming
+// done — empty-content backfills are silent because they don't change
+// history length).
 //
-// This exists because of a real-world failure mode: if seek was
-// interrupted while the model was streaming a tool_call, the assistant
-// message was persisted with tool_calls but no matching tool result
-// messages. Every subsequent API call then fails with "An assistant
-// message with 'tool_calls' must be followed by tool messages
-// responding to each 'tool_call_id'", leaving the user with a session
-// they can't continue without manual surgery.
+// Failure modes covered:
+//
+//  1. Trailing orphan tool_calls: if seek was interrupted while the
+//     model was streaming a tool_call, the assistant message was
+//     persisted with tool_calls but no matching tool result messages.
+//     Every subsequent API call then fails with "An assistant message
+//     with 'tool_calls' must be followed by tool messages responding
+//     to each 'tool_call_id'", leaving the user with a session they
+//     can't continue without manual surgery.
+//  2. Empty tool-role Content: an earlier seek build let tools that
+//     "succeed silently" (memory_observe) persist tool messages with
+//     Content="". `deepseek.Message.Content` has `omitempty`, so the
+//     `content` field disappears from the wire body and DeepSeek
+//     rejects the next call with `messages[N]: missing field
+//     'content'`. We backfill those in place; the live agent path now
+//     prevents new ones via buildToolResultMsg in pkg/agent.
 func (s *Session) Repair() int {
+	backfillEmptyToolContent(s.Messages)
 	repaired, dropped := repairMessages(s.Messages)
 	s.Messages = repaired
 	return dropped
+}
+
+// emptyToolContentPlaceholder mirrors pkg/agent.emptyToolContentPlaceholder.
+// Duplicated rather than imported because internal/session must not
+// depend on pkg/agent (the dependency goes the other way). The two
+// constants are tested for byte-equality in session_test.go via a
+// reference string check so a future drift is caught.
+const emptyToolContentPlaceholder = "(no output)"
+
+// backfillEmptyToolContent mutates msgs in place: tool-role messages
+// with empty Content get a neutral placeholder so the wire body
+// produced by the next API call has a `content` field present.
+func backfillEmptyToolContent(msgs []deepseek.Message) {
+	for i := range msgs {
+		if msgs[i].Role == deepseek.RoleTool && msgs[i].Content == "" {
+			msgs[i].Content = emptyToolContentPlaceholder
+		}
+	}
 }
 
 func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int) {

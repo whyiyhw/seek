@@ -54,6 +54,48 @@ func TestSaveLoad_Roundtrip(t *testing.T) {
 	}
 }
 
+// TestSaveLoad_PreservesEffort covers /effort persistence:
+//   - non-empty values ("high" / "max") round-trip exactly
+//   - empty Effort is omitted from the JSONL header (omitempty), so a
+//     fresh session and an explicitly-cleared one are byte-equivalent
+//     on disk — important for prefix-cache stability of any future
+//     header-byte tooling and for the JSONL grep-friendly contract
+func TestSaveLoad_PreservesEffort(t *testing.T) {
+	for _, want := range []string{"", "high", "max"} {
+		t.Run("effort="+want, func(t *testing.T) {
+			store := newStoreIn(t)
+			sess := New("deepseek-v4-flash", "/tmp", "", false)
+			sess.Effort = want
+
+			if err := store.Save(sess); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.Load(sess.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Effort != want {
+				t.Errorf("Effort round-trip: got %q, want %q", got.Effort, want)
+			}
+
+			// When Effort is empty, the JSONL header must not contain
+			// the key at all — omitempty contract.
+			raw, err := os.ReadFile(filepath.Join(store.Dir(), sess.ID+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			header := strings.SplitN(string(raw), "\n", 2)[0]
+			hasKey := strings.Contains(header, `"effort"`)
+			if want == "" && hasKey {
+				t.Errorf("empty Effort leaked into header JSON: %s", header)
+			}
+			if want != "" && !hasKey {
+				t.Errorf("non-empty Effort missing from header JSON: %s", header)
+			}
+		})
+	}
+}
+
 func TestSave_AtomicViaTempThenRename(t *testing.T) {
 	// After Save, only <id>.json exists in the directory — no stray
 	// .tmp file. Atomic-write contract verified by absence of tmp on
@@ -280,6 +322,63 @@ func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
 	// The whole tail from the assistant message onward should be gone.
 	if len(sess.Messages) != 1 || sess.Messages[0].Role != deepseek.RoleUser {
 		t.Errorf("expected [user] after repair, got %+v", sess.Messages)
+	}
+}
+
+// TestRepair_BackfillsEmptyToolContent covers the resume path for
+// sessions saved before pkg/agent's buildToolResultMsg guard landed:
+// a memory_observe call (or any tool that returned "") persisted a
+// tool-role message with Content="". On reload + send, omitempty
+// stripped `content` from the wire body and DeepSeek rejected with
+// `messages[N]: missing field 'content'`. Repair must backfill those
+// in place without touching well-formed entries or changing the
+// history length (orphan-trim and backfill are independent concerns).
+func TestRepair_BackfillsEmptyToolContent(t *testing.T) {
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "u"},
+		{
+			Role: deepseek.RoleAssistant,
+			ToolCalls: []deepseek.ToolCall{
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "memory_observe"}},
+				{ID: "call_2", Function: deepseek.ToolCallFunc{Name: "read"}},
+			},
+		},
+		{Role: deepseek.RoleTool, ToolCallID: "call_1", Content: ""},     // ← bug shape
+		{Role: deepseek.RoleTool, ToolCallID: "call_2", Content: "real"}, // valid — must be left alone
+		{Role: deepseek.RoleAssistant, Content: "all done"},
+	}
+	beforeLen := len(sess.Messages)
+	if dropped := sess.Repair(); dropped != 0 {
+		t.Errorf("dropped = %d, want 0 (history is well-formed apart from empty content)", dropped)
+	}
+	if len(sess.Messages) != beforeLen {
+		t.Errorf("Repair changed history length: was %d, now %d", beforeLen, len(sess.Messages))
+	}
+	if got := sess.Messages[2].Content; got == "" {
+		t.Errorf("empty tool message was not backfilled")
+	}
+	if got := sess.Messages[3].Content; got != "real" {
+		t.Errorf("non-empty tool message was clobbered: got %q, want %q", got, "real")
+	}
+}
+
+// TestRepair_BackfillDoesNotTouchOtherRoles pins the role guard: an
+// empty-Content user/assistant/system message is none of Repair's
+// business (those have their own validity contracts handled elsewhere
+// — e.g., the agent's empty-response guard for assistants).
+func TestRepair_BackfillDoesNotTouchOtherRoles(t *testing.T) {
+	sess := New("m", ".", "", false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: ""},
+		{Role: deepseek.RoleAssistant, Content: ""},
+		{Role: deepseek.RoleSystem, Content: ""},
+	}
+	sess.Repair()
+	for i, m := range sess.Messages {
+		if m.Content != "" {
+			t.Errorf("msg[%d] role=%s was mutated: %q", i, m.Role, m.Content)
+		}
 	}
 }
 

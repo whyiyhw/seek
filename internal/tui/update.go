@@ -782,17 +782,27 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		}
 
 	case agent.MessageEnd:
-		if e.Message.Role == deepseek.RoleAssistant && (m.curContent != "" || m.curReasoning != "") {
-			// Commit the assistant message to scrollback. The live
-			// region's curContent buffer is cleared so the next
-			// streamed chunk starts a fresh ghost.
-			rendered := renderMarkdown(m.md, m.curContent)
-			if rendered == "" {
-				rendered = m.curContent
+		if e.Message.Role == deepseek.RoleAssistant {
+			// Only commit a `▸ seek` scrollback block when the model
+			// actually produced narrative text. Pure tool-call turns
+			// (reasoning + tool_calls, no content) used to render as
+			// "(no content)" — that's noise: the `↳ tool(...)` lines
+			// directly below already convey what happened on that
+			// turn, and the reasoning was visible mid-stream via
+			// Ctrl+R. Skipping the commit collapses N consecutive
+			// silent reasoning rounds into just their tool lines.
+			if m.curContent != "" {
+				rendered := renderMarkdown(m.md, m.curContent)
+				if rendered == "" {
+					rendered = m.curContent
+				}
+				line := renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)
+				cmds = append(cmds, tea.Println(line))
+				m.scrollbackLines += scrollbackLineCount(line)
 			}
-			line := renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)
-			cmds = append(cmds, tea.Println(line))
-			m.scrollbackLines += scrollbackLineCount(line)
+			// Always reset the live-region buffers — leaving them
+			// populated would leak this turn's reasoning/content into
+			// the next turn's commit and produce a confusing splice.
 			m.curContent = ""
 			m.curReasoning = ""
 		}
@@ -1006,6 +1016,7 @@ func (m *Model) persistSession() {
 	m.opts.Session.Usage = m.opts.Tracker.Cumulative()
 	m.opts.Session.Model = m.opts.Model
 	m.opts.Session.Yolo = m.opts.Yolo
+	m.opts.Session.Effort = m.opts.Effort
 	if err := m.opts.Store.Save(m.opts.Session); err != nil {
 		// Surface to scrollback so the user knows persistence broke;
 		// they can keep working but should investigate before losing

@@ -245,6 +245,7 @@ func (m Model) renderStatusBar() string {
 
 	return RenderStatusBar(StatusSnapshot{
 		Model:            m.opts.Model,
+		Effort:           m.opts.Effort,
 		Yolo:             m.opts.Yolo,
 		Tier:             tier,
 		NextTier:         nextTier,
@@ -464,14 +465,13 @@ func renderCommittedUser(text string, width int) string {
 
 // renderCommittedAssistant renders a completed assistant message for
 // scrollback. content is already Markdown-rendered when md was
-// available.
+// available. The caller (applyAgentEvent on MessageEnd) only invokes
+// this when content is non-empty — pure tool-call turns no longer get
+// a `▸ seek` block — so we do not bother with an empty-content
+// placeholder here.
 func renderCommittedAssistant(content, reasoning string, showReasoning bool, width int) string {
 	label := styleAssistantLabel.Render("▸ seek")
-	body := content
-	if body == "" {
-		body = styleMuted.Render("(no content)")
-	}
-	out := label + "\n" + body
+	out := label + "\n" + content
 	if reasoning != "" {
 		if showReasoning {
 			out += "\n" + styleReasoning.Render("🧠 reasoning:\n"+indent(reasoning, "    "))

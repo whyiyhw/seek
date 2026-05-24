@@ -13,8 +13,7 @@
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="seek — DeepSeek native AI coding agent" />
 <meta name="twitter:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT)." />
-<title data-lang="en">seek — DeepSeek native AI coding agent</title>
-<title data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</title>
+<title>seek — DeepSeek native AI coding agent</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" />
@@ -34,6 +33,17 @@
   }
   a { color: inherit; text-decoration: none; }
   img { max-width: 100%; display: block; }
+
+  /* ============ SCREEN READER ONLY ============ */
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
 
   /* ============ SKIP LINK (accessibility) ============ */
   .skip-link {
@@ -174,23 +184,7 @@
   .section-head h2 { margin-bottom: 12px; }
   .section-head p { font-size: 1.05rem; }
 
-  /* ============ HERO ============ */
-  .hero {
-    min-height: 85vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    padding: 80px 0 60px;
-    position: relative;
-  }
-  .hero::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 50%;
-    transform: translateX(-50%);
-    width: 1px; height: 60px;
-    background: linear-gradient(to bottom, var(--amber), transparent);
-  }
+  /* ============ ASCII LOGO ============ */
   .ascii-logo {
     font-size: clamp(1.1rem, 3.2vw, 2.6rem);
     font-weight: 700;
@@ -203,30 +197,11 @@
     font-variant-ligatures: none;
     font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Courier New", monospace;
     margin-bottom: 24px;
-    animation: logoIn 1.4s ease-out both;
   }
   @keyframes logoIn {
     0%   { opacity: 0; transform: scale(.9); filter: blur(5px); }
     100% { opacity: 1; transform: scale(1);  filter: blur(0); }
   }
-  .hero h1 {
-    margin-bottom: 8px;
-    animation: fadeUp .8s .2s both;
-  }
-  .hero .sub {
-    font-size: clamp(1rem, 2vw, 1.3rem);
-    color: var(--dim);
-    margin-bottom: 8px;
-    animation: fadeUp .8s .35s both;
-  }
-  .hero .sub strong { color: var(--text); font-weight: 600; }
-  .hero .meta {
-    font-size: .85rem;
-    color: var(--dim);
-    margin-bottom: 36px;
-    animation: fadeUp .8s .5s both;
-  }
-  .hero .meta .sep { color: var(--border); }
 
   /* Install command block — typing effect */
   .install-block {
@@ -238,7 +213,6 @@
     align-items: center;
     gap: 14px;
     font-size: .85rem;
-    animation: fadeUp .8s .65s both;
     transition: border-color .25s;
     cursor: pointer;
     position: relative;
@@ -302,7 +276,6 @@
     flex-wrap: wrap;
     gap: 14px;
     margin-top: 36px;
-    animation: fadeUp .8s .8s both;
   }
   .btn {
     display: inline-flex;
@@ -477,17 +450,33 @@
   .term-body .highlight     { color: var(--amber); font-weight: 600; }
   .term-body .highlight-teal { color: var(--teal); }
 
-  /* Line-by-line reveal */
-  .term-line {
-    display: block;
+  /* Typing cursor */
+  .typing-cursor {
+    display: inline;
+    color: var(--teal);
+    font-size: .9em;
+  }
+  .typing-cursor.blink {
+    animation: blink 1s step-end infinite;
+  }
+  .typing-cursor.done {
+    animation: none;
     opacity: 0;
-    transform: translateY(4px);
-    transition: opacity .35s ease, transform .35s ease;
   }
-  .term-line.visible {
-    opacity: 1;
-    transform: translateY(0);
+  #term-output {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
   }
+  .term-out-line {
+    display: block;
+    min-height: 1.2em;
+  }
+  .term-out-line.dim  { color: var(--dim); }
+  .term-out-line.teal { color: var(--teal); }
+  .term-out-line.prompt { color: var(--dim); }
+  .term-out-line .hl  { color: var(--amber); font-weight: 600; }
+  .term-out-line .ht  { color: var(--teal); }
+  .tool-spinner { color: var(--amber); display: inline-block; width: 1.2em; }
 
   .diff-card.feature-list { padding: 24px 28px; }
   .diff-card.feature-list li {
@@ -737,14 +726,6 @@
   @media (max-width: 640px) {
     section { padding: 60px 0; }
     section[id] { scroll-margin-top: 60px; }
-    .hero {
-      min-height: auto;
-      padding: 48px 0 40px;
-      align-items: stretch;
-    }
-    .hero h1 { font-size: clamp(1.8rem, 8vw, 2.8rem); }
-    .hero .btn-group { flex-direction: column; align-items: stretch; }
-    .hero .btn { justify-content: center; }
     .install-block { width: 100%; justify-content: space-between; font-size: .78rem; }
     .install-block .cmd { font-size: .75rem; }
     .diff-card { padding: 24px 20px; }
@@ -763,7 +744,6 @@
     body { background: #fff; color: #111; }
     body::after { display: none; }
     .lang-toggle, .back-top, .skip-link { display: none !important; }
-    .hero { min-height: auto; padding: 20px 0; }
     .ascii-logo { color: #333; text-shadow: none; }
     .btn-primary { background: #333; color: #fff; box-shadow: none; }
     .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .install-block, .term-window {
@@ -780,7 +760,138 @@
     .cost-bar-track { background: #e8e8e8; }
     .price-note .dot { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   }
+
+  /* ============ TERMINAL HERO ============ */
+  .terminal-hero {
+    min-height: 90vh;
+    display: flex;
+    align-items: center;
+    padding: 40px 0;
+    position: relative;
+  }
+  .terminal-hero .container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .terminal-hero::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 1px; height: 60px;
+    background: linear-gradient(to bottom, var(--amber), transparent);
+  }
+  .term-hero-window {
+    width: 780px;
+    height: 420px;
+    animation: logoIn 1.2s ease-out both;
+  }
+  .term-hero-window .term-body {
+    height: 340px;
+    overflow-y: hidden;
+    padding: 24px 28px;
+    font-size: .9rem;
+  }
+  .terminal-hero .ascii-logo {
+    margin-bottom: 20px;
+  }
+
+  /* Status bar at the bottom of the terminal window */
+  .term-statusbar {
+    height: 28px;
+    border-top: 1px solid var(--border);
+    background: #0e0e14;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+    font-size: .72rem;
+    color: var(--dim);
+    flex-shrink: 0;
+  }
+  .term-statusbar .status-right {
+    color: var(--teal);
+    opacity: 0.85;
+  }
+
+  .terminal-hero-tagline {
+    margin-top: 28px;
+    font-size: 1.1rem;
+    color: var(--dim);
+    text-align: center;
+    max-width: 64ch;
+  }
+  .terminal-hero-tagline strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .terminal-hero-btns {
+    margin-top: 24px;
+  }
+
+  /* ============ DIFF GRID 3-COL ============ */
+  .diff-grid.diff-grid--three {
+    grid-template-columns: 1fr 1fr 1.2fr;
+  }
+  @media (max-width: 800px) {
+    .diff-grid.diff-grid--three { grid-template-columns: 1fr; }
+  }
+
+  /* ============ BRAND SECTION ============ */
+  .brand-hero {
+    text-align: center;
+    padding: 80px 0 60px;
+  }
+  .brand-hero .meta {
+    max-width: none;
+    text-align: center;
+    margin-bottom: 20px;
+    font-size: .85rem;
+  }
+  .brand-hero .install-block {
+    margin: 0 auto;
+    display: inline-flex;
+  }
+
+  @media (max-width: 640px) {
+    .terminal-hero {
+      min-height: auto;
+      padding: 32px 0 24px;
+    }
+    .term-hero-window {
+      width: 100%;
+      height: auto;
+    }
+    .term-hero-window .term-body {
+      height: 280px;
+      padding: 16px 16px;
+      font-size: .78rem;
+    }
+    .terminal-hero .ascii-logo {
+      font-size: clamp(.75rem, 4vw, 1.1rem);
+      margin-bottom: 12px;
+    }
+    .terminal-hero-tagline {
+      font-size: .95rem;
+    }
+    .terminal-hero .btn-group {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .terminal-hero .btn {
+      justify-content: center;
+    }
+  }
 </style>
+<noscript>
+  <style>
+    .reveal { opacity: 1; transform: none; }
+    [data-lang] { display: none !important; }
+    [data-lang="en"] { display: initial !important; }
+    .lang-toggle { display: none !important; }
+  </style>
+</noscript>
 </head>
 <body>
 
@@ -801,62 +912,61 @@
   </svg>
 </button>
 
+<!-- ============ TERMINAL HERO ============ -->
+<section class="terminal-hero" aria-label="seek demo">
+  <div class="container">
+    <h1 class="sr-only">
+      <span data-lang="en">seek — DeepSeek native AI coding agent</span>
+      <span data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</span>
+    </h1>
+    <pre class="ascii-logo reveal">
+   ████ █████ █████ █   █
+  █     █     █     █  █
+  █     █     █     █ █
+   ███  ████  ████  ██
+      █ █     █     █ █
+      █ █     █     █  █
+  ████  █████ █████ █   █
+    </pre>
+    <div class="term-window term-hero-window" id="term-demo">
+      <div class="term-titlebar">
+        <div class="term-dots">
+          <div class="term-dot red"></div>
+          <div class="term-dot yellow"></div>
+          <div class="term-dot green"></div>
+        </div>
+        <div class="term-title">seek@agent:~/project</div>
+      </div>
+      <div class="term-body" id="term-body">
+        <div id="term-output"></div>
+        <span class="typing-cursor blink" id="typing-cursor">▊</span>
+      </div>
+      <div class="term-statusbar" id="term-statusbar">
+        <span class="status-left"></span>
+        <span class="status-right"></span>
+      </div>
+    </div>
+    <p class="terminal-hero-tagline reveal">
+      <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek native AI coding agent.</span>
+      <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手。</span>
+    </p>
+    <div class="btn-group terminal-hero-btns reveal">
+      <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
+        GitHub <span class="arrow">→</span>
+      </a>
+      <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
+        <span data-lang="en">Releases <span class="arrow">→</span></span>
+        <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
+      </a>
+      <a class="btn btn-outline" href="#install">
+        <span data-lang="en">Install <span class="arrow">↓</span></span>
+        <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
+      </a>
+    </div>
+  </div>
+</section>
+
 <div class="container" id="main-content">
-
-<!-- ============ HERO ============ -->
-<header class="hero">
-  <pre class="ascii-logo">
-   █████ █████ █████ ██  ██
-   ██    ██    ██    ██ ██
-   █████ █████ █████ ████
-      ██ ██    ██    ██ ██
-   █████ █████ █████ ██  ██
-  </pre>
-  <h1>
-    <span data-lang="en">DeepSeek native<br />AI coding agent</span>
-    <span data-lang="zh" hidden>DeepSeek 原生<br />AI 编程助手</span>
-  </h1>
-  <p class="sub">
-    <span data-lang="en">Open source <strong>seek</strong> —&nbsp;powered by&nbsp;DeepSeek.</span>
-    <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;由 DeepSeek&nbsp;驱动。</span>
-  </p>
-  <p class="meta">
-    <span data-lang="en">5 MB · zero deps</span>
-    <span data-lang="zh" hidden>5 MB · 零依赖</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">MIT licensed</span>
-    <span data-lang="zh" hidden>MIT 开源</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">no telemetry</span>
-    <span data-lang="zh" hidden>无遥测</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">multi-provider</span>
-    <span data-lang="zh" hidden>多模型支持</span>
-  </p>
-
-  <!-- Typing effect install command -->
-  <div class="install-block" id="install-cmd" title="Click to copy" tabindex="0" role="button" aria-label="Copy install command">
-    <span class="prompt">$</span>
-    <span class="cmd" id="cmd-text"></span>
-    <span class="cursor" id="cmd-cursor"></span>
-    <span class="copy-hint" id="cmd-hint" data-lang="en">copy</span>
-    <span class="copy-hint" id="cmd-hint-zh" data-lang="zh" hidden>复制</span>
-  </div>
-
-  <div class="btn-group">
-    <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
-      GitHub <span class="arrow">→</span>
-    </a>
-    <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
-      <span data-lang="en">Releases <span class="arrow">→</span></span>
-      <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
-    </a>
-    <a class="btn btn-outline" href="#install">
-      <span data-lang="en">Install <span class="arrow">↓</span></span>
-      <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
-    </a>
-  </div>
-</header>
 
 <!-- ============ WHY SEEK ============ -->
 <section>
@@ -875,7 +985,7 @@
     </p>
   </div>
 
-  <div class="diff-grid">
+  <div class="diff-grid diff-grid--three">
     <div class="diff-card reveal">
       <div class="metric">$0.0028</div>
       <div class="metric-label">
@@ -923,28 +1033,6 @@
         <span data-lang="en"><span class="check">✓</span> Bilingual (中文 + EN) — <span class="label-sm">tool descriptions, prompts, errors</span></span>
         <span data-lang="zh" hidden><span class="check">✓</span> 双语（中文 + EN） — <span class="label-sm">工具描述、提示、错误信息</span></span>
       </li>
-    </div>
-    <div class="term-window reveal" id="term-demo" style="transition-delay:.3s">
-      <div class="term-titlebar">
-        <div class="term-dots">
-          <div class="term-dot red"></div>
-          <div class="term-dot yellow"></div>
-          <div class="term-dot green"></div>
-        </div>
-        <div class="term-title">seek@agent:~/project</div>
-      </div>
-      <div class="term-body">
-<span class="term-line"><span class="highlight">$</span> <span class="highlight-teal">seek</span> <span data-lang="en">"explain the routing in this Go project"</span><span data-lang="zh" hidden>"解释这个 Go 项目的路由"</span></span>
-<span class="term-line" style="transition-delay:.12s"><span style="color:var(--dim)">  ○ idle  ─── <span data-lang="en">Thinking</span><span data-lang="zh" hidden>思考中</span> ───</span></span>
-<span class="term-line" style="transition-delay:.24s"><span style="color:var(--dim)">  Model: deepseek-v4-flash</span></span>
-<span class="term-line" style="transition-delay:.36s"><span style="color:var(--teal)">  cache 98.9%  cost $0.0202</span></span>
-<span class="term-line" style="transition-delay:.48s"><span style="color:var(--dim)">  ctx 12% (123640/1000000)  🌙 off-peak -50%</span></span>
-<span class="term-line" style="transition-delay:.6s"><span style="color:var(--dim)">  ───────────────</span></span>
-<span class="term-line" style="transition-delay:.72s"><span data-lang="en">The project uses a chi router in</span><span data-lang="zh" hidden">这个项目使用 chi 路由，在</span></span>
-<span class="term-line" style="transition-delay:.78s"><span data-lang="en">`cmd/server/main.go` with three</span><span data-lang="zh" hidden">`cmd/server/main.go` 中注册了</span></span>
-<span class="term-line" style="transition-delay:.84s"><span data-lang="en">handler groups: API, webhook, admin.</span><span data-lang="zh" hidden">三组处理器：API、webhook、admin。</span></span>
-<span class="term-line" style="transition-delay:.96s"><span class="highlight">$</span> <span style="color:var(--dim)">▊</span></span>
-      </div>
     </div>
   </div>
 </section>
@@ -1094,6 +1182,31 @@
   </div>
 </section>
 
+<!-- ============ BRAND ============ -->
+<section class="brand-hero">
+  <p class="meta reveal" style="max-width:none;text-align:center;">
+    <span data-lang="en">5 MB · zero deps</span>
+    <span data-lang="zh" hidden>5 MB · 零依赖</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">MIT licensed</span>
+    <span data-lang="zh" hidden>MIT 开源</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">no telemetry</span>
+    <span data-lang="zh" hidden>无遥测</span>
+    <span class="sep"> · </span>
+    <span data-lang="en">multi-provider</span>
+    <span data-lang="zh" hidden>多模型支持</span>
+  </p>
+
+  <div class="install-block reveal" id="install-cmd" title="Click to copy" tabindex="0" role="button" aria-label="Copy install command">
+    <span class="prompt">$</span>
+    <span class="cmd" id="cmd-text"></span>
+    <span class="cursor" id="cmd-cursor"></span>
+    <span class="copy-hint" id="cmd-hint" data-lang="en">copy</span>
+    <span class="copy-hint" id="cmd-hint-zh" data-lang="zh" hidden>复制</span>
+  </div>
+</section>
+
 <!-- ============ INSTALL ============ -->
 <section id="install">
   <div class="section-head reveal">
@@ -1198,6 +1311,9 @@
     currentLang = lang;
     localStorage.setItem('seek-lang', lang);
     document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.title = lang === 'en'
+      ? 'seek — DeepSeek native AI coding agent'
+      : 'seek — DeepSeek 原生 AI 编程助手';
     document.querySelectorAll('[data-lang]').forEach(el => {
       el.hidden = el.getAttribute('data-lang') !== lang;
     });
@@ -1209,14 +1325,16 @@
 
   setLang(currentLang);
 
-  // ============ HERO TYPING EFFECT ============
+  // ============ INSTALL COMMAND TYPING (fires when brand section scrolls in) ============
   (function typeInstall() {
     const cmdEl = document.getElementById('cmd-text');
     const cursor = document.getElementById('cmd-cursor');
     const hint = document.getElementById('cmd-hint');
     const hintZh = document.getElementById('cmd-hint-zh');
+    const brandSection = document.querySelector('.brand-hero');
     const fullCmd = 'go install github.com/whyiyhw/seek/cmd/seek@latest';
     let i = 0;
+    let started = false;
 
     function type() {
       if (i < fullCmd.length) {
@@ -1230,26 +1348,136 @@
         if (hintZh) hintZh.classList.add('show');
       }
     }
-    setTimeout(type, 800);
+
+    function startTyping() {
+      if (started) return;
+      started = true;
+      setTimeout(type, 400);
+    }
+
+    if (brandSection) {
+      const obs = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+          startTyping();
+          obs.unobserve(brandSection);
+        }
+      }, { threshold: 0.15 });
+      obs.observe(brandSection);
+    }
   })();
 
-  // ============ LINE-BY-LINE TERMINAL REVEAL ============
-  (function termReveal() {
+  // ============ TERMINAL TYPEWRITER ============
+  (function termTyper() {
     const termWindow = document.getElementById('term-demo');
-    if (!termWindow) return;
+    const output = document.getElementById('term-output');
+    const cursor = document.getElementById('typing-cursor');
+    const statusLeft = document.querySelector('.term-statusbar .status-left');
+    const statusRight = document.querySelector('.term-statusbar .status-right');
+    if (!termWindow || !output || !cursor || !statusLeft || !statusRight) return;
 
-    const termObserver = new IntersectionObserver((entries) => {
-      entries.forEach(entry => {
+    const responseChars = 'The project uses a chi router in `cmd/server/main.go` with three handler groups: **API**, **webhook**, and **admin**.\n\n$ ';
+
+    const spinnerFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+
+    const statusLabels = [
+      { l: 'turns:0  tools:0', r: 'cache 0.0%' },
+      { l: 'turns:1  tools:1', r: 'cache 75.0%' },
+      { l: 'turns:1  tools:1', r: 'cache 89.5%  cost $0.0001' },
+      { l: 'turns:2  tools:3', r: 'cache 97.3%  cost $0.0028  ctx 12%  🌙' },
+    ];
+
+    function setStatus(n) {
+      statusLeft.textContent = statusLabels[n].l;
+      statusRight.textContent = statusLabels[n].r;
+    }
+
+    function typeChars(text, cls, cb, speed) {
+      speed = speed || 22;
+      let container = document.createElement('span');
+      container.className = 'term-out-line' + (cls ? ' ' + cls : '');
+      output.appendChild(container);
+      let textSpan = document.createElement('span');
+      container.appendChild(textSpan);
+      container.appendChild(cursor);
+      let i = 0;
+      let accum = '';
+      (function tick() {
+        if (i < text.length) {
+          const ch = text[i];
+          if (ch === '\n') {
+            const br = document.createElement('br');
+            output.appendChild(br);
+            container = document.createElement('span');
+            container.className = 'term-out-line' + (cls ? ' ' + cls : '');
+            output.appendChild(container);
+            textSpan = document.createElement('span');
+            container.appendChild(textSpan);
+            container.appendChild(cursor);
+            accum = '';
+          } else {
+            accum += ch;
+            textSpan.textContent = accum;
+          }
+          i++;
+          setTimeout(tick, i === 1 ? 300 : speed + Math.random() * 12);
+        } else {
+          const br = document.createElement('br');
+          output.appendChild(br);
+          output.appendChild(cursor);
+          if (cb) setTimeout(function() { cb(container); }, 300);
+        }
+      })();
+    }
+
+    function showToolCall(cb) {
+      const el = document.createElement('span');
+      el.className = 'term-out-line';
+      output.appendChild(el);
+      el.appendChild(cursor);
+      const sp = document.createElement('span');
+      sp.className = 'tool-spinner';
+      sp.textContent = '\u25B6';
+      el.insertBefore(sp, cursor);
+      el.insertBefore(document.createTextNode(' read cmd/server/main.go'), cursor);
+      let n = 0;
+      const iv = setInterval(function() {
+        sp.textContent = spinnerFrames[n % spinnerFrames.length];
+        n++;
+        if (n >= 10) {
+          clearInterval(iv);
+          sp.textContent = '\u25B6';
+          const br = document.createElement('br');
+          output.appendChild(br);
+          output.appendChild(cursor);
+          setStatus(2);
+          if (cb) setTimeout(cb, 400);
+        }
+      }, 100);
+    }
+
+    function startDemo() {
+      cursor.classList.remove('blink');
+      setStatus(0);
+      typeChars('$ seek "explain the routing in this Go project"', 'prompt', function(container) {
+        if (container) container.innerHTML = '<span class="hl">$</span> <span class="ht">seek</span> "explain the routing in this Go project"';
+        setStatus(1);
+        showToolCall(function() {
+          typeChars(responseChars, '', function() {
+            setStatus(3);
+            cursor.classList.add('done');
+          }, 10);
+        });
+      });
+    }
+
+    const termObserver = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
         if (entry.isIntersecting) {
-          const lines = entry.target.querySelectorAll('.term-line');
-          lines.forEach((line, idx) => {
-            setTimeout(() => { line.classList.add('visible'); }, idx * 140);
-          });
+          setTimeout(startDemo, 500);
           termObserver.unobserve(entry.target);
         }
       });
-    }, { threshold: 0.3 });
-
+    });
     termObserver.observe(termWindow);
   })();
 

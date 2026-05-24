@@ -169,6 +169,108 @@ func TestUpgrade_AcceptsKnownFlags(t *testing.T) {
 	}
 }
 
+// TestEffort_WithArg_SetsAndFiresHook covers the three accepted levels
+// plus the "off"/"none" aliases. Each must (a) update opts.Effort to
+// the wire value, (b) fire SetEffort with the same value, and (c) emit
+// a transition Println so the user sees the change.
+func TestEffort_WithArg_SetsAndFiresHook(t *testing.T) {
+	cases := []struct {
+		input string
+		wire  string // expected on-wire value ("" for off/none)
+	}{
+		{"/effort high", "high"},
+		{"/effort max", "max"},
+		{"/effort off", ""},
+		{"/effort none", ""},
+		{"/effort HIGH", "high"}, // case-insensitive
+	}
+	for _, c := range cases {
+		t.Run(c.input, func(t *testing.T) {
+			m := emptyModel()
+			var captured string
+			var fired bool
+			m.opts.SetEffort = func(e string) { captured = e; fired = true }
+
+			res := runHandler(t, m, c.input)
+			if !fired {
+				t.Errorf("SetEffort not called")
+			}
+			if captured != c.wire {
+				t.Errorf("SetEffort got %q, want %q", captured, c.wire)
+			}
+			if m.opts.Effort != c.wire {
+				t.Errorf("opts.Effort = %q, want %q", m.opts.Effort, c.wire)
+			}
+			if res.text == "" {
+				t.Errorf("expected a feedback line; got empty")
+			}
+		})
+	}
+}
+
+func TestEffort_RejectsUnknownLevel(t *testing.T) {
+	m := emptyModel()
+	var fired bool
+	m.opts.SetEffort = func(string) { fired = true }
+	res := runHandler(t, m, "/effort bananas")
+	if fired {
+		t.Errorf("SetEffort fired for invalid level — should be rejected before hook")
+	}
+	if !strings.Contains(res.text, "unknown level") {
+		t.Errorf("expected an unknown-level hint, got %q", res.text)
+	}
+}
+
+func TestEffort_NoArg_OpensPicker(t *testing.T) {
+	m := emptyModel()
+	m.opts.SetEffort = func(string) {}
+	res := runHandler(t, m, "/effort")
+	if !m.modelPickerOpen {
+		t.Errorf("/effort no-arg should open the picker")
+	}
+	if m.pickerPurpose != "effort" {
+		t.Errorf("pickerPurpose = %q, want %q", m.pickerPurpose, "effort")
+	}
+	if res.text != "" {
+		t.Errorf("opening picker should not emit text, got %q", res.text)
+	}
+}
+
+// TestEffort_PickerPreselectsCurrent pins the affordance that Enter
+// without arrow-key motion is a safe no-op — the picker lands on the
+// row matching the current setting. Without this a user opening
+// /effort to inspect their state could accidentally flip to "off" by
+// pressing Enter.
+func TestEffort_PickerPreselectsCurrent(t *testing.T) {
+	cases := map[string]int{
+		"":     0, // off
+		"high": 1,
+		"max":  2,
+	}
+	for cur, wantIdx := range cases {
+		t.Run("current="+cur, func(t *testing.T) {
+			m := emptyModel()
+			m.opts.Effort = cur
+			m.opts.SetEffort = func(string) {}
+			runHandler(t, m, "/effort")
+			if m.modelPickerSelected != wantIdx {
+				t.Errorf("preselect index = %d, want %d", m.modelPickerSelected, wantIdx)
+			}
+		})
+	}
+}
+
+func TestEffort_UnavailableWithoutHook(t *testing.T) {
+	m := emptyModel()
+	// SetEffort intentionally nil — TUI was launched in a build that
+	// doesn't wire host-side state (shouldn't happen with cmd/seek but
+	// the contract is documented and tested).
+	res := runHandler(t, m, "/effort high")
+	if !strings.Contains(res.text, "unavailable") {
+		t.Errorf("expected unavailable message, got %q", res.text)
+	}
+}
+
 func TestYolo_TogglesAndFiresHook(t *testing.T) {
 	m := emptyModel()
 	var seen []bool

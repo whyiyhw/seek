@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -405,6 +406,253 @@ func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
 					c.model, gotEnabled, captured.Thinking, c.wantEnabled)
 			}
 		})
+	}
+}
+
+// TestBuildToolResultMsg covers the empty-content contract directly.
+// The helper exists for exactly this case, so a unit test against it
+// (no HTTP, no stream) is the right level of detail to pin the rule:
+//
+//   - non-empty result → passes through unchanged
+//   - empty result + nil error → "(no output)" placeholder
+//   - error → "tool error: ..." takes precedence over result
+//   - error wins even when the partial result is non-empty
+func TestBuildToolResultMsg(t *testing.T) {
+	cases := []struct {
+		name string
+		id   string
+		res  string
+		err  error
+		want string
+	}{
+		{"normal", "c1", "real content", nil, "real content"},
+		{"empty success", "c2", "", nil, emptyToolContentPlaceholder},
+		{"error wins over empty result", "c3", "", errors.New("boom"), "tool error: boom"},
+		{"error wins over partial result", "c4", "partial", errors.New("boom"), "tool error: boom"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := buildToolResultMsg(c.id, c.res, c.err)
+			if msg.Role != deepseek.RoleTool {
+				t.Errorf("Role = %q, want %q", msg.Role, deepseek.RoleTool)
+			}
+			if msg.ToolCallID != c.id {
+				t.Errorf("ToolCallID = %q, want %q", msg.ToolCallID, c.id)
+			}
+			if msg.Content != c.want {
+				t.Errorf("Content = %q, want %q", msg.Content, c.want)
+			}
+		})
+	}
+}
+
+// TestAgent_EmptyToolResult_WirePresent is the end-to-end regression
+// for the "messages[N]: missing field `content`" failure mode we hit
+// in the wild: memory_observe returned ("", nil), the agent persisted
+// a tool message with Content="", and on the next turn DeepSeek
+// rejected the request because omitempty stripped the `content` key
+// from the wire body. This test captures the second-turn request and
+// asserts the tool message has a `content` field with the placeholder.
+func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
+	var (
+		callCount     int32
+		secondReqBody []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&callCount, 1)
+		if n == 2 {
+			secondReqBody, _ = io.ReadAll(r.Body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch n {
+		case 1:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"memory_observe","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		default:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	silent := &stubTool{name: "memory_observe", schema: `{"type":"object"}`, reply: ""}
+	reg := tools.New().Add(silent)
+
+	ag, _ := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelChat,
+		Tools:  reg,
+	})
+	for ev := range ag.Prompt(context.Background(), "go") {
+		if e, ok := ev.(ErrorEvent); ok {
+			t.Fatalf("unexpected error event: %v", e.Err)
+		}
+	}
+
+	// In-memory history must already have the placeholder so a session
+	// save/resume round-trip doesn't re-introduce the bug.
+	var toolMsgs int
+	for _, m := range ag.Messages() {
+		if m.Role == deepseek.RoleTool {
+			toolMsgs++
+			if m.Content == "" {
+				t.Errorf("in-memory tool message has empty Content")
+			}
+		}
+	}
+	if toolMsgs != 1 {
+		t.Fatalf("expected exactly 1 tool message in history, got %d", toolMsgs)
+	}
+
+	// The wire body for turn 2 must contain a `content` field on the
+	// tool message. We do a structural decode rather than a substring
+	// match so a future Message field reorder can't false-pass.
+	var body struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(secondReqBody, &body); err != nil {
+		t.Fatalf("decode 2nd req body: %v\n%s", err, secondReqBody)
+	}
+	var sawToolWithContent bool
+	for _, m := range body.Messages {
+		role, _ := m["role"]
+		if string(role) != `"tool"` {
+			continue
+		}
+		content, present := m["content"]
+		if !present {
+			t.Errorf("tool message on the wire is missing `content` field: %+v", m)
+			continue
+		}
+		if len(content) == 0 || string(content) == `""` {
+			t.Errorf("tool message `content` is empty on the wire: %s", content)
+			continue
+		}
+		sawToolWithContent = true
+	}
+	if !sawToolWithContent {
+		t.Errorf("no tool-role message with non-empty content in 2nd request body")
+	}
+}
+
+// TestAgent_EffortOverridesThinking covers the /effort wire contract:
+//   - Effort="" sends no reasoning_effort and only enables Thinking when
+//     ShouldEnableThinking(Model) returns true (the old behaviour).
+//   - Effort="high"/"max" forces Thinking on AND sets reasoning_effort —
+//     even on V4-Flash, which is normally non-reasoning. The explicit
+//     user intent ("I want this turn to think harder") trumps the
+//     model's stock default.
+//   - SetEffort changes the value visible on the very next prompt,
+//     without rebuilding the agent.
+func TestAgent_EffortOverridesThinking(t *testing.T) {
+	cases := []struct {
+		name              string
+		model             string
+		effort            string
+		wantThinking      bool
+		wantReasoningSent string // "" means field absent
+	}{
+		{"empty effort on flash → no thinking", deepseek.ModelV4Flash, "", false, ""},
+		{"empty effort on pro → thinking on, no effort", deepseek.ModelV4Pro, "", true, ""},
+		{"high on flash → thinking on, effort=high", deepseek.ModelV4Flash, "high", true, "high"},
+		{"max on flash → thinking on, effort=max", deepseek.ModelV4Flash, "max", true, "max"},
+		{"max on pro → thinking on, effort=max", deepseek.ModelV4Pro, "max", true, "max"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var captured struct {
+				Thinking        *deepseek.ThinkingMode `json:"thinking"`
+				ReasoningEffort string                 `json:"reasoning_effort"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&captured)
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, strings.Join([]string{
+					`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+					``,
+					`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					``,
+					`data: [DONE]`,
+					``,
+				}, "\n"))
+			}))
+			defer srv.Close()
+
+			ag, _ := New(Config{
+				Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+				Model:  c.model,
+				Effort: c.effort,
+			})
+			for range ag.Prompt(context.Background(), "hi") {
+			}
+
+			gotThinking := captured.Thinking != nil && captured.Thinking.Type == "enabled"
+			if gotThinking != c.wantThinking {
+				t.Errorf("thinking enabled = %v, want %v (Thinking=%+v)",
+					gotThinking, c.wantThinking, captured.Thinking)
+			}
+			if captured.ReasoningEffort != c.wantReasoningSent {
+				t.Errorf("reasoning_effort = %q, want %q",
+					captured.ReasoningEffort, c.wantReasoningSent)
+			}
+		})
+	}
+}
+
+// TestAgent_SetEffortVisibleNextPrompt pins that flipping effort
+// between turns takes effect immediately (no rebuild needed). Without
+// this, /effort would feel "sticky" — the user toggles max, sends a
+// prompt, and the agent quietly keeps running at the prior level.
+func TestAgent_SetEffortVisibleNextPrompt(t *testing.T) {
+	var lastEffort string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		lastEffort = body.ReasoningEffort
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV4Flash,
+	})
+	for range ag.Prompt(context.Background(), "hi") {
+	}
+	if lastEffort != "" {
+		t.Errorf("turn 1: expected no effort, got %q", lastEffort)
+	}
+
+	ag.SetEffort("max")
+	if got := ag.Effort(); got != "max" {
+		t.Errorf("Effort() after SetEffort: got %q, want %q", got, "max")
+	}
+	for range ag.Prompt(context.Background(), "again") {
+	}
+	if lastEffort != "max" {
+		t.Errorf("turn 2: expected effort=max, got %q", lastEffort)
 	}
 }
 

@@ -15,7 +15,11 @@ import (
 // renders. Extracted into a struct so the formatter is testable without
 // a live bubbletea program.
 type StatusSnapshot struct {
-	Model     string
+	Model string
+	// Effort mirrors the session's /effort selection: "" | "high" |
+	// "max". An empty string suppresses the badge so the default
+	// (off) is silent — only the explicit escalations show up.
+	Effort    string
 	Yolo      bool
 	Tier      pricing.Tier
 	NextTier  pricing.Tier
@@ -83,6 +87,16 @@ func leftSegments(s StatusSnapshot) []string {
 	}
 	if s.Yolo {
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"))
+	}
+	// Effort badge: "high" is muted (the user opted in but it's the
+	// cheaper of the two escalations); "max" is tinted to make the
+	// cost premium visible at a glance, mirroring how a /compact
+	// warning escalates on the right side.
+	switch s.Effort {
+	case "high":
+		out = append(out, styleMuted.Render("effort:high"))
+	case "max":
+		out = append(out, lipgloss.NewStyle().Foreground(colourTool).Bold(true).Render("effort:max"))
 	}
 	if s.Streaming {
 		out = append(out, styleMuted.Render(streamingStatusLabel(s)))
@@ -154,10 +168,14 @@ func formatBudget(s StatusSnapshot) string {
 	// Cumulative grows quadratically (each turn re-sends the full history)
 	// and hits 1M+ in ~55 turns even when the actual context is only 20k.
 	used := s.LastUsage.PromptTokens + s.LastUsage.CompletionTokens
-	limit := budget.Limit(s.Model)
 	frac := budget.Fraction(s.Model, used)
 	pct := int(frac * 100)
-	label := fmt.Sprintf("ctx %d%% (%d/%d)", pct, used, limit)
+	// Pure-percent label: the percentage is the only actionable signal
+	// (colour tints + the /compact nudge cover urgency), and the
+	// model's context limit is a static value that doesn't change
+	// turn-to-turn. The raw token counts were noise in the steady
+	// state.
+	label := fmt.Sprintf("ctx %d%%", pct)
 
 	switch budget.Classify(s.Model, used) {
 	case budget.SeverityCritical:

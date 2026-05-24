@@ -41,6 +41,15 @@ type Config struct {
 	MaxTokens    int             // completion token cap per call; 0 → defaultMaxTokens
 	AutoContinue bool            // if true, inject "continue" on text-only turns so the model resumes mid-task without user input
 
+	// Effort, when non-empty, overrides the per-request
+	// reasoning_effort sent to DeepSeek and force-enables Thinking
+	// regardless of ShouldEnableThinking(Model). Values: "" (no
+	// override) | "high" | "max". Sourced from the session header
+	// so a /effort selection persists across resume. Only honoured
+	// on the DeepSeek path (Client != nil) — second-tier providers
+	// expose their own thinking knobs out of band.
+	Effort string
+
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
 	// SystemPrompt is still placed first; InitialMessages are
@@ -70,6 +79,20 @@ type Agent struct {
 // The change takes effect on the next Prompt call.
 func (a *Agent) SetModel(model string) {
 	a.cfg.Model = model
+}
+
+// SetEffort changes the reasoning_effort override. Empty string clears
+// the override (model default behaviour). Safe to call between (not
+// during) turns; takes effect on the next Prompt call.
+func (a *Agent) SetEffort(effort string) {
+	a.cfg.Effort = effort
+}
+
+// Effort returns the current reasoning_effort override ("" when none).
+// Exposed so adjacent components (e.g. the think tool) can mirror the
+// session-level setting without holding a second copy of the state.
+func (a *Agent) Effort() string {
+	return a.cfg.Effort
 }
 
 // New constructs an Agent and seeds the system prompt (if any).
@@ -362,15 +385,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 					go func(i int, tc deepseek.ToolCall) {
 						defer wg.Done()
 						result, terr := a.dispatchTool(ctx, tc, out)
-						msg := deepseek.Message{
-							Role:       deepseek.RoleTool,
-							ToolCallID: tc.ID,
-							Content:    result,
-						}
-						if terr != nil {
-							msg.Content = fmt.Sprintf("tool error: %v", terr)
-						}
-						toolMsgs[i] = msg
+						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
 					}(i, tc)
 				}
 				wg.Wait()
@@ -382,14 +397,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			} else {
 				for _, tc := range assistant.ToolCalls {
 					result, terr := a.dispatchTool(ctx, tc, out)
-					toolMsg := deepseek.Message{
-						Role:       deepseek.RoleTool,
-						ToolCallID: tc.ID,
-						Content:    result,
-					}
-					if terr != nil {
-						toolMsg.Content = fmt.Sprintf("tool error: %v", terr)
-					}
+					toolMsg := buildToolResultMsg(tc.ID, result, terr)
 					out <- MessageStart{Message: toolMsg}
 					a.messages = append(a.messages, toolMsg)
 					out <- MessageEnd{Message: toolMsg}
@@ -435,6 +443,14 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	// "reasoner" expecting CoT and get fast-chat behaviour. Opt
 	// reasoning models in here so the picker label matches reality.
 	if deepseek.ShouldEnableThinking(a.cfg.Model) {
+		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
+	}
+	// /effort overrides the model-implied default: a user pick of
+	// high/max wins over ShouldEnableThinking's silence on V4-Flash,
+	// because the explicit intent ("I want this turn to think harder")
+	// trumps the model's stock behaviour. Empty Effort = no override.
+	if a.cfg.Effort != "" {
+		req.ReasoningEffort = a.cfg.Effort
 		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}
 	if a.cfg.Tools != nil {
@@ -730,6 +746,37 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Err:    err,
 	}
 	return result, err
+}
+
+// emptyToolContentPlaceholder is the substitute for tool results that
+// resolve to "". DeepSeek strictly requires the `content` field on
+// tool-role messages, but `deepseek.Message.Content` is tagged
+// `omitempty` — an empty string disappears from the wire body and the
+// next API call fails with `messages[N]: missing field 'content'`.
+// memory_observe is the canonical offender (returns "" by design as a
+// "succeeds silently" signal); any future tool that does the same gets
+// the same treatment for free. A short, neutral string keeps the
+// LLM's history readable without faking a meaningful return value.
+const emptyToolContentPlaceholder = "(no output)"
+
+// buildToolResultMsg constructs the deepseek.Message for a tool result.
+// Centralised so the two dispatch paths (concurrent read-only batch +
+// sequential mixed batch) can't drift, and so the empty-content guard
+// has exactly one home. Errors always win: a non-nil terr formats into
+// the message regardless of what result the tool partially produced.
+func buildToolResultMsg(callID, result string, terr error) deepseek.Message {
+	msg := deepseek.Message{
+		Role:       deepseek.RoleTool,
+		ToolCallID: callID,
+		Content:    result,
+	}
+	if terr != nil {
+		msg.Content = fmt.Sprintf("tool error: %v", terr)
+	}
+	if msg.Content == "" {
+		msg.Content = emptyToolContentPlaceholder
+	}
+	return msg
 }
 
 // allReadOnly returns true when every tool call in tcs is backed by a

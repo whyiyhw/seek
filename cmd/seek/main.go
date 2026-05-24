@@ -285,6 +285,13 @@ func run() error {
 		*model = modelDefault
 	}
 	sessionModel := *model
+	// sessionEffort mirrors session.Effort: "" (model default) | "high" |
+	// "max". The /effort TUI command updates it through SetEffort below;
+	// the think tool reads it through its effortFunc closure so its
+	// bumped-by-one-level rule (see think.bumpEffort) reflects the
+	// session-level choice at call time.
+	// Default is "max" — the deepest reasoning level.
+	var sessionEffort = "max"
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -356,7 +363,7 @@ func run() error {
 	// when using the DeepSeek client directly.
 	if dsClient != nil {
 		reg.Add(fimcomplete.New(dsClient, *model)).
-			Add(think.New(dsClient, func() string { return sessionModel }))
+			Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
 	}
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
@@ -446,6 +453,16 @@ func run() error {
 		} else {
 			activeSession = session.New(*model, abs, systemPrompt, *yolo)
 		}
+		// A resumed session may carry an /effort selection from the prior
+		// run — restore it before the agent is built so the very first
+		// turn after --continue honours the user's choice.
+		// NB: guard on loaded, not activeSession — activeSession is always
+		// non-nil (either loaded or a fresh session.New), so checking it
+		// would overwrite the "max" default with the empty string from a
+		// brand-new session (see commit <fill>).
+		if loaded != nil {
+			sessionEffort = activeSession.Effort
+		}
 	}
 
 	// Lifecycle hooks. v1 memory plugs in PrePromptHook (inject L+M
@@ -460,6 +477,7 @@ func run() error {
 		Client:          dsClient,
 		Provider:        provider,
 		Model:           *model,
+		Effort:          sessionEffort,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
 		MaxTokens:       *maxTokens,
@@ -601,6 +619,7 @@ func run() error {
 		Agent:             ag,
 		Tracker:           tracker,
 		Model:             sessionModel,
+		Effort:            sessionEffort,
 		Yolo:              policy.Yolo(),
 		CWD:               abs,
 		Ctx:               ctx,
@@ -635,6 +654,7 @@ func run() error {
 				Client:       dsClient,
 				Provider:     provider,
 				Model:        sessionModel,
+				Effort:       sessionEffort,
 				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTokens:    *maxTokens,
@@ -643,6 +663,13 @@ func run() error {
 			})
 		},
 		SetModel: func(m string) { sessionModel = m },
+		SetEffort: func(e string) {
+			// Mirror into the closures the think tool and agent.Config
+			// builds read from. The TUI separately calls Agent.SetEffort
+			// on the live agent so the change is visible on the very
+			// next prompt without a /reset / RebuildAgent.
+			sessionEffort = e
+		},
 		SetYolo: func(y bool) {
 			// policy is the single source of truth now — mode flip is
 			// observed by every tool's permission.Check call
@@ -699,6 +726,11 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		activeSession.Usage = tracker.Cumulative()
 		activeSession.Model = model
 		activeSession.Yolo = yolo
+		// In non-TUI runs (runPrint / runJSON / runRPC) there is no
+		// /effort command, so the agent's Effort is constant for the
+		// lifetime of the process. Reading it off the agent keeps the
+		// helper signature stable instead of growing another param.
+		activeSession.Effort = ag.Effort()
 		if err := store.Save(activeSession); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to save session after turn %d: %v\n", turns, err)
 		}
@@ -835,6 +867,11 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 		activeSession.Usage = tracker.Cumulative()
 		activeSession.Model = model
 		activeSession.Yolo = yolo
+		// In non-TUI runs (runPrint / runJSON / runRPC) there is no
+		// /effort command, so the agent's Effort is constant for the
+		// lifetime of the process. Reading it off the agent keeps the
+		// helper signature stable instead of growing another param.
+		activeSession.Effort = ag.Effort()
 		if err := store.Save(activeSession); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to save session after turn %d: %v\n", turns, err)
 		}

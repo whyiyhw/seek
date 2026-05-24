@@ -72,7 +72,7 @@ func TestThink_HappyPath(t *testing.T) {
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
 
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }).Execute(context.Background(), args)
+	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestThink_ReflectUsesReviewSystem(t *testing.T) {
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "Review my diff", Reflect: true, Context: "some code"})
 
-	_, err := New(c, func() string { return deepseek.ModelV4Flash }).Execute(context.Background(), args)
+	_, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,14 +117,14 @@ func TestThink_ContextIsPasted(t *testing.T) {
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "evaluate", Context: "MAGIC_TOKEN_4242"})
-	if _, err := New(c, func() string { return deepseek.ModelV4Flash }).Execute(context.Background(), args); err != nil {
+	if _, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestThink_MissingTask(t *testing.T) {
 	c := deepseek.New(deepseek.WithAPIKey("t"))
-	_, err := New(c, nil).Execute(context.Background(), json.RawMessage(`{}`))
+	_, err := New(c, nil, nil).Execute(context.Background(), json.RawMessage(`{}`))
 	if err == nil || !strings.Contains(err.Error(), "task is required") {
 		t.Errorf("err = %v", err)
 	}
@@ -194,7 +194,7 @@ func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
 	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
 
 	push, reasoning, content := collectingPusher()
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }).ExecuteStream(context.Background(), args, push)
+	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).ExecuteStream(context.Background(), args, push)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestThink_ExecuteStream_PropagatesPushError(t *testing.T) {
 	wantErr := context.Canceled
 	push := func(_ tools.StreamDelta) error { return wantErr }
 
-	_, err := New(c, func() string { return deepseek.ModelV4Flash }).ExecuteStream(context.Background(), args, push)
+	_, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).ExecuteStream(context.Background(), args, push)
 	if err != wantErr {
 		t.Errorf("err = %v, want %v", err, wantErr)
 	}
@@ -261,12 +261,71 @@ func TestThink_TruncatesLongReasoning(t *testing.T) {
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "x"})
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }).Execute(context.Background(), args)
+	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "truncated") {
 		t.Errorf("expected truncation marker: ...%s", out[len(out)-200:])
+	}
+}
+
+// TestThink_BumpEffort is a direct unit test for the one-level-up rule.
+// Keeping it as a plain function test (no HTTP server) means a future
+// change to the rule must touch this file — a deliberate alarm bell.
+func TestThink_BumpEffort(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", "high"},
+		{"off", "high"}, // off should not reach this function but be defensive
+		{"high", "max"},
+		{"max", "max"},
+		{"garbage", "high"}, // unknown values fall to the safe default
+	}
+	for _, c := range cases {
+		if got := bumpEffort(c.in); got != c.want {
+			t.Errorf("bumpEffort(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestThink_EffortFromSession verifies that the effortFunc closure
+// flows into the request body. The session-level "high" must become
+// the think-call "max" — the whole point of the linkage is that
+// invoking think always escalates relative to the surrounding chat.
+func TestThink_EffortFromSession(t *testing.T) {
+	cases := []struct {
+		sessionEffort string
+		wantThink     string
+	}{
+		{"", "high"},
+		{"high", "max"},
+		{"max", "max"},
+	}
+	for _, tc := range cases {
+		t.Run("session="+tc.sessionEffort, func(t *testing.T) {
+			var captured string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body deepseek.ChatRequest
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				captured = body.ReasoningEffort
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"ok","reasoning_content":"r"},"finish_reason":"stop"}],"usage":{}}`)
+			}))
+			defer srv.Close()
+
+			client := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
+			args, _ := json.Marshal(Args{Task: "x"})
+			sess := tc.sessionEffort
+			_, err := New(client, func() string { return deepseek.ModelV4Flash },
+				func() string { return sess }).Execute(context.Background(), args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if captured != tc.wantThink {
+				t.Errorf("session=%q → think effort=%q, want %q",
+					tc.sessionEffort, captured, tc.wantThink)
+			}
+		})
 	}
 }
 
@@ -279,7 +338,7 @@ func TestThink_UsesCurrentModel(t *testing.T) {
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "complex analysis"})
 
-	out, err := New(c, func() string { return deepseek.ModelV4Pro }).Execute(context.Background(), args)
+	out, err := New(c, func() string { return deepseek.ModelV4Pro }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}

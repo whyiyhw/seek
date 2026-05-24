@@ -46,6 +46,7 @@ func allCommands() []command {
 		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
 		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
+		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
@@ -269,6 +270,16 @@ func (m *Model) applyModelChoice(idx int) {
 		m.setupKeyEntry = true
 		m.input.Reset()
 
+	case "effort":
+		// Map the displayed "off" label back to the wire-empty value;
+		// "high" / "max" pass through verbatim.
+		value := choice.id
+		if value == "off" {
+			value = ""
+		}
+		m.applyEffortChoice(value)
+		m.input.Reset()
+
 	case "model", "":
 		// Switch the active model. Status bar's "model:" segment
 		// updates on the next View() frame; an explicit Println would
@@ -286,6 +297,106 @@ func (m *Model) applyModelChoice(idx int) {
 		// or submit it as garbage to the agent.
 		m.input.Reset()
 	}
+}
+
+// effortChoices is the curated picker for /effort. Order matters: the
+// picker preselects the row matching the current setting, so listing
+// "off" first means a fresh session lands on the safe default rather
+// than on an expensive level. We deliberately omit "low" / "medium" —
+// they are not part of DeepSeek's documented V4 levels and the user
+// settled on the three-rung surface in design discussion.
+func effortChoices() []modelChoice {
+	return []modelChoice{
+		{"off", "off — no override; uses the model's default thinking behaviour"},
+		{"high", "high — force Thinking on; reasoning_effort=high"},
+		{"max", "max — force Thinking on; reasoning_effort=max (slowest / most expensive)"},
+	}
+}
+
+// applyEffortChoice writes the new /effort value through SetEffort and
+// updates the live agent so the next prompt picks up the change. Pulled
+// out of cmdEffort so both the arg-path and picker-path land here with
+// identical semantics (mirrors applyModelChoice).
+func (m *Model) applyEffortChoice(value string) {
+	prev := m.opts.Effort
+	m.opts.Effort = value
+	if m.opts.SetEffort != nil {
+		m.opts.SetEffort(value)
+	}
+	if m.opts.Agent != nil {
+		m.opts.Agent.SetEffort(value)
+	}
+	if m.opts.Session != nil {
+		// Persist to the in-memory session immediately. The on-disk
+		// header is rewritten by the next persistSession (auto-save
+		// after the next TurnEnd, or /branch / /new). Updating Session
+		// here keeps the Save call cheap and keeps SetEffort callers
+		// from needing to know about Store at all.
+		m.opts.Session.Effort = value
+	}
+	// Refresh the placeholder hint — when effort flips between off and
+	// non-off, the right-hand "effort:" indicator in the textarea help
+	// line should reflect reality without waiting for the next render
+	// trigger from a keystroke.
+	m.refreshPlaceholder()
+	_ = prev // reserved for a future "/effort: high → max" Println
+}
+
+func cmdEffort(m *Model, args string) cmdResult {
+	if m.opts.SetEffort == nil {
+		return cmdResult{text: styleMuted.Render("/effort unavailable in this build (SetEffort hook not wired)")}
+	}
+
+	// Arg path: accept "off" | "high" | "max" verbatim, reject anything
+	// else with a usage hint. "off" is normalised to "" on the wire so
+	// the JSONL header drops the field via omitempty when no override
+	// is active — keeps resumed sessions byte-clean.
+	if args != "" {
+		var value string
+		switch strings.ToLower(args) {
+		case "off", "none", "":
+			value = ""
+		case "high":
+			value = "high"
+		case "max":
+			value = "max"
+		default:
+			return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+				"/effort: unknown level %q — try off|high|max", args))}
+		}
+		prev := displayEffort(m.opts.Effort)
+		m.applyEffortChoice(value)
+		return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+			"effort: %s → %s (effective on next prompt)", prev, displayEffort(value)))}
+	}
+
+	// No args: open the picker. Preselect the row matching the current
+	// setting so Enter without motion is a no-op.
+	choices := effortChoices()
+	m.modelPickerFiltered = choices
+	m.modelPickerSelected = 0
+	current := m.opts.Effort
+	if current == "" {
+		current = "off"
+	}
+	for i, c := range choices {
+		if c.id == current {
+			m.modelPickerSelected = i
+			break
+		}
+	}
+	m.modelPickerOpen = true
+	m.pickerPurpose = "effort"
+	return cmdResult{}
+}
+
+// displayEffort formats the wire value ("" | "high" | "max") for
+// human-facing strings. "" is shown as "off" so messages stay readable.
+func displayEffort(v string) string {
+	if v == "" {
+		return "off"
+	}
+	return v
 }
 
 // setupProviderChoices returns the provider list shown by /setup. We
