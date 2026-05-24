@@ -19,6 +19,7 @@ var rotatingTips = []string{
 	"💡 Esc interrupts a runaway response without losing history",
 	"💡 ↑ recalls your previous prompt when the input is empty",
 	"💡 Ctrl+R toggles reasoning visibility on assistant messages",
+	"💡 Shift+Tab cycles mode: ask → plan → yolo",
 }
 
 // refreshPlaceholder updates the textarea's hint text based on the

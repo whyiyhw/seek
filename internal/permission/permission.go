@@ -72,6 +72,11 @@ const (
 	// ModeYolo permits every action. Set by --yolo or by an "always
 	// approve" answer at an inline prompt.
 	ModeYolo
+	// ModePlan is read-only exploration. All mutations (bash, write,
+	// edit, memory_remember) are denied unconditionally — even writes
+	// inside CWD that ModeDeny would allow. Reads inside CWD are
+	// permitted. Set by --plan or /plan toggle.
+	ModePlan
 )
 
 // Policy is the per-process permission policy. Construct via New.
@@ -145,10 +150,12 @@ var ErrDenied = errors.New("permission denied")
 //
 // Resolution order:
 //  1. ModeYolo  → always allow.
-//  2. Action is "safe" (write/edit inside CWD; nothing else reaches
+//  2. ModePlan  → read-only: deny bash/write/edit/memory_remember
+//     unconditionally; allow reads within CWD only.
+//  3. Action is "safe" (write/edit inside CWD; nothing else reaches
 //     Check today) → allow.
-//  3. ModeAsk + askFn set → consult the callback; allow if true.
-//  4. Otherwise → return ErrDenied with a clear message the model
+//  4. ModeAsk + askFn set → consult the callback; allow if true.
+//  5. Otherwise → return ErrDenied with a clear message the model
 //     can pass back to the user.
 func (p *Policy) Check(a Action) error {
 	if p == nil {
@@ -166,6 +173,38 @@ func (p *Policy) Check(a Action) error {
 
 	if mode == ModeYolo {
 		return nil
+	}
+
+	// ModePlan: strict read-only. All writes, edits, bash, and
+	// memory writes are denied unconditionally — even inside CWD.
+	// Reads are allowed only within CWD.
+	if mode == ModePlan {
+		switch a.Kind {
+		case KindRead:
+			if a.Path == "" {
+				return fmt.Errorf("%w: %s requires a path", ErrDenied, a.Kind)
+			}
+			inside, err := isWithin(cwd, a.Path)
+			if err != nil {
+				return fmt.Errorf("%w: resolve path %q: %v", ErrDenied, a.Path, err)
+			}
+			if !inside {
+				return fmt.Errorf("%w: plan mode: %s outside working directory %q",
+					ErrDenied, a.Kind, cwd)
+			}
+			return nil
+		case KindBash:
+			return fmt.Errorf("%w: plan mode: bash is not allowed — explore with read/grep/list_dir instead",
+				ErrDenied)
+		case KindWrite, KindEdit:
+			return fmt.Errorf("%w: plan mode: %s is not allowed — produce a plan in your response instead",
+				ErrDenied, a.Kind)
+		case KindMemoryRemember:
+			return fmt.Errorf("%w: plan mode: memory_remember is not allowed",
+				ErrDenied)
+		default:
+			return fmt.Errorf("%w: plan mode: unknown action kind %q", ErrDenied, a.Kind)
+		}
 	}
 
 	// First: is this action even dangerous? Safe actions return nil
@@ -251,6 +290,16 @@ func (p *Policy) Yolo() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.mode == ModeYolo
+}
+
+// Plan reports whether the policy is in read-only plan mode.
+func (p *Policy) Plan() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mode == ModePlan
 }
 
 // isWithin reports whether target resolves to a path inside root (inclusive

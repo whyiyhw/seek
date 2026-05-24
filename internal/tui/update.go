@@ -356,16 +356,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickerPurpose = ""
 			return m, nil
 		}
-		// auto-opened /model picker: Backspace + printable chars fall
-		// through so the user can keep editing the textarea.
-		if m.pickerPurpose == "model" {
+		// Auto-opened pickers (/model, /effort, /lang with trailing space):
+		// Backspace + printable chars fall through so the user can keep
+		// editing the textarea (backspace the space to dismiss, or type
+		// a full id to bypass the picker). Modal pickers (e.g. /setup,
+		// or Enter-opened with empty input) swallow all other keys.
+		// Backspace on an already-empty input is a harmless no-op, so
+		// it's safe to allow unconditionally.
+		switch m.pickerPurpose {
+		case "model", "effort", "lang":
 			switch msg.Type {
 			case tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
 				// fall through to textarea Update at the end of handleKey
 			default:
 				return m, nil
 			}
-		} else {
+		default:
 			// Modal picker (e.g. /setup): swallow all other keys.
 			return m, nil
 		}
@@ -511,6 +517,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showReasoning = !m.showReasoning
 		return m, nil
 
+	case tea.KeyShiftTab:
+		m.cycleMode()
+		m.scrollbackLines++
+		return m, tea.Println(styleMuted.Render("  " + m.modeLabel()))
+
 	case tea.KeyUp:
 		// History recall — only when the textarea is empty (so it
 		// doesn't fight cursor-up in a multi-line draft) OR when
@@ -548,6 +559,52 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, cmd
+}
+
+// cycleMode advances through the three permission modes in order:
+// Ask → Plan → Yolo → Ask → ...
+// Triggered by Shift+Tab.
+func (m *Model) cycleMode() {
+	switch {
+	case m.opts.Yolo:
+		// Yolo → Ask: turn off yolo, stay in Ask
+		m.opts.Yolo = false
+		m.opts.Plan = false
+		if m.opts.SetYolo != nil {
+			m.opts.SetYolo(false)
+		}
+	case m.opts.Plan:
+		// Plan → Yolo: turn off plan, turn on yolo
+		m.opts.Plan = false
+		m.opts.Yolo = true
+		if m.opts.SetPlan != nil {
+			m.opts.SetPlan(false)
+		}
+		if m.opts.SetYolo != nil {
+			m.opts.SetYolo(true)
+		}
+	default:
+		// Ask → Plan: turn on plan
+		m.opts.Plan = true
+		m.opts.Yolo = false
+		if m.opts.SetPlan != nil {
+			m.opts.SetPlan(true)
+		}
+	}
+	m.refreshPlaceholder()
+}
+
+// modeLabel returns a human-readable label for the current permission
+// mode, used by Shift+Tab feedback.
+func (m *Model) modeLabel() string {
+	switch {
+	case m.opts.Yolo:
+		return "mode: yolo"
+	case m.opts.Plan:
+		return "mode: plan"
+	default:
+		return "mode: ask"
+	}
 }
 
 // handleApprovalKey is the inline-prompt key handler. While
@@ -689,19 +746,17 @@ func (m *Model) tryHistoryDown() bool {
 func (m *Model) updateCommandMenu() {
 	v := strings.TrimRight(m.input.Value(), "\n")
 
-	// Branch 1: "/model<space>..." — auto-open the model picker. Close
-	// any open command menu first; they're mutually exclusive.
-	if strings.HasPrefix(v, "/model ") || v == "/model " {
+	// Branch 1: "<cmd><space>..." — auto-open pickers for model / effort / lang.
+	// Close any open command menu first; they're mutually exclusive.
+	// Stale cleanup (Branch 2 below) handles closing when the user backspaces.
+	switch {
+	case strings.HasPrefix(v, "/model ") || v == "/model ":
 		m.commandMenuOpen = false
 		m.commandMenuFiltered = nil
 		m.commandMenuSelected = 0
-		// Only (re)populate if not already open for this purpose —
-		// avoids resetting the user's arrow-key position on every keypress.
 		if !m.modelPickerOpen || m.pickerPurpose != "model" {
 			m.modelPickerFiltered = knownModelsForProvider(m.opts.ProviderName)
 			if len(m.modelPickerFiltered) == 0 {
-				// Uncurated provider — no candidates to show; leave the
-				// picker closed and let the user type a freeform id.
 				return
 			}
 			m.modelPickerSelected = 0
@@ -715,10 +770,57 @@ func (m *Model) updateCommandMenu() {
 			m.pickerPurpose = "model"
 		}
 		return
+
+	case strings.HasPrefix(v, "/effort ") || v == "/effort ":
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		if !m.modelPickerOpen || m.pickerPurpose != "effort" {
+			choices := effortChoices()
+			m.modelPickerFiltered = choices
+			m.modelPickerSelected = 0
+			current := m.opts.Effort
+			if current == "" {
+				current = "off"
+			}
+			for i, c := range choices {
+				if c.id == current {
+					m.modelPickerSelected = i
+					break
+				}
+			}
+			m.modelPickerOpen = true
+			m.pickerPurpose = "effort"
+		}
+		return
+
+	case strings.HasPrefix(v, "/lang ") || v == "/lang ":
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		if !m.modelPickerOpen || m.pickerPurpose != "lang" {
+			choices := langChoices()
+			m.modelPickerFiltered = choices
+			m.modelPickerSelected = 0
+			current := m.opts.Lang
+			if current == "" {
+				current = "auto"
+			}
+			for i, c := range choices {
+				if c.id == current {
+					m.modelPickerSelected = i
+					break
+				}
+			}
+			m.modelPickerOpen = true
+			m.pickerPurpose = "lang"
+		}
+		return
 	}
-	// Branch 2: not in "/model " state but a stale auto-opened model
-	// picker is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && m.pickerPurpose == "model" {
+
+	// Branch 2: not in a known auto-open state but a stale auto-opened picker
+	// is still showing (e.g. user backspaced the space). Close it.
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang") {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0

@@ -27,7 +27,7 @@ func newStoreIn(t *testing.T) *Store {
 
 func TestSaveLoad_Roundtrip(t *testing.T) {
 	store := newStoreIn(t)
-	sess := New("deepseek-v4-flash", "/tmp", "sys", true)
+	sess := New("deepseek-v4-flash", "/tmp", "sys", true, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "hi"},
 		{Role: deepseek.RoleAssistant, Content: "hello"},
@@ -64,7 +64,7 @@ func TestSaveLoad_PreservesEffort(t *testing.T) {
 	for _, want := range []string{"", "high", "max"} {
 		t.Run("effort="+want, func(t *testing.T) {
 			store := newStoreIn(t)
-			sess := New("deepseek-v4-flash", "/tmp", "", false)
+			sess := New("deepseek-v4-flash", "/tmp", "", false, false)
 			sess.Effort = want
 
 			if err := store.Save(sess); err != nil {
@@ -101,7 +101,7 @@ func TestSave_AtomicViaTempThenRename(t *testing.T) {
 	// .tmp file. Atomic-write contract verified by absence of tmp on
 	// success.
 	store := newStoreIn(t)
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	if err := store.Save(sess); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestLatest_PicksMostRecentlyUpdated(t *testing.T) {
 func TestList_SortedByRecency(t *testing.T) {
 	store := newStoreIn(t)
 	for range 3 {
-		mustSave(t, store, New("m", ".", "", false))
+		mustSave(t, store, New("m", ".", "", false, false))
 		time.Sleep(2 * time.Millisecond) // ensure UpdatedAt differs
 	}
 	infos, _, err := store.List()
@@ -198,7 +198,7 @@ func TestGenerateID_IsSortable(t *testing.T) {
 }
 
 func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
-	parent := New("deepseek-v4-flash", "/tmp", "sys", true)
+	parent := New("deepseek-v4-flash", "/tmp", "sys", true, false)
 	parent.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "first"},
 		{Role: deepseek.RoleAssistant, Content: "answer"},
@@ -216,7 +216,8 @@ func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
 		t.Errorf("ParentID = %q, want %q", child.ParentID, parent.ID)
 	}
 	if child.Model != parent.Model || child.CWD != parent.CWD ||
-		child.Yolo != parent.Yolo || child.SystemPrompt != parent.SystemPrompt {
+		child.Yolo != parent.Yolo || child.Plan != parent.Plan ||
+		child.SystemPrompt != parent.SystemPrompt {
 		t.Errorf("inherited metadata mismatch: %+v", child)
 	}
 	if child.Turns != 0 || child.ToolCalls != 0 || child.Usage.TotalTokens != 0 {
@@ -236,7 +237,7 @@ func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
 
 func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
 	store := newStoreIn(t)
-	parent := New("m", ".", "", false)
+	parent := New("m", ".", "", false, false)
 	parent.Messages = []deepseek.Message{{Role: deepseek.RoleUser, Content: "hi"}}
 	mustSave(t, store, parent)
 
@@ -253,7 +254,7 @@ func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
 }
 
 func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "go do thing"},
 		{
@@ -277,7 +278,7 @@ func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
 }
 
 func TestRepair_LeavesValidHistoryAlone(t *testing.T) {
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
 		{
@@ -302,7 +303,7 @@ func TestRepair_LeavesValidHistoryAlone(t *testing.T) {
 func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
 	// Two tool_calls, only one gets a matching tool message —
 	// still orphan because DeepSeek requires ALL of them satisfied.
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
 		{
@@ -334,7 +335,7 @@ func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
 // in place without touching well-formed entries or changing the
 // history length (orphan-trim and backfill are independent concerns).
 func TestRepair_BackfillsEmptyToolContent(t *testing.T) {
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
 		{
@@ -368,7 +369,7 @@ func TestRepair_BackfillsEmptyToolContent(t *testing.T) {
 // business (those have their own validity contracts handled elsewhere
 // — e.g., the agent's empty-response guard for assistants).
 func TestRepair_BackfillDoesNotTouchOtherRoles(t *testing.T) {
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: ""},
 		{Role: deepseek.RoleAssistant, Content: ""},
@@ -383,7 +384,7 @@ func TestRepair_BackfillDoesNotTouchOtherRoles(t *testing.T) {
 }
 
 func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
-	sess := New("m", ".", "", false)
+	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
 		{Role: deepseek.RoleAssistant, Content: "a"},
@@ -394,7 +395,7 @@ func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
 }
 
 func TestFork_DeepCopiesToolCalls(t *testing.T) {
-	parent := New("m", ".", "", false)
+	parent := New("m", ".", "", false, false)
 	parent.Messages = []deepseek.Message{
 		{
 			Role: deepseek.RoleAssistant,
@@ -415,7 +416,7 @@ func TestFork_DeepCopiesToolCalls(t *testing.T) {
 
 func TestList_CollectsLoadErrors(t *testing.T) {
 	store := newStoreIn(t)
-	good := New("m", ".", "", false)
+	good := New("m", ".", "", false, false)
 	mustSave(t, store, good)
 
 	// Write a corrupt JSONL file that looks like a session file.

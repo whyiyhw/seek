@@ -898,6 +898,72 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	}
 }
 
+// TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped covers
+// the behaviour where the auto-opened picker captures Enter. When the
+// user types "/effort high" while the picker is showing, pressing Enter
+// applies the picker's highlighted row — NOT the typed "high". The
+// textarea shows "/effort high" but Enter selects whatever row is
+// highlighted (e.g. "off" or "max"). This is the current behaviour for
+// all auto-open pickers (/model, /effort, /lang); the test documents it
+// so any future change to "Enter takes the typed value" is deliberate.
+func TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped(t *testing.T) {
+	m := Model{input: textarea.New()}
+	m.opts.Effort = "" // current = off
+	m.modelPickerOpen = true
+	m.pickerPurpose = "effort"
+	m.modelPickerFiltered = effortChoices()
+	m.modelPickerSelected = 0 // picker highlights "off"
+	// User typed "/effort high" — typed value disagrees with picker.
+	m.input.SetValue("/effort high")
+
+	var captured string
+	m.opts.SetEffort = func(e string) { captured = e }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.modelPickerOpen {
+		t.Error("Enter should close the picker")
+	}
+	// The picker's selected row ("off" → "") wins, not the typed "high".
+	if captured != "" {
+		t.Errorf("SetEffort called with %q, want %q (picker row wins over typed text)", captured, "")
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be cleared after accept; got %q", m2.input.Value())
+	}
+}
+
+// TestHandleKey_EffortPicker_AutoOpened_EnterAppliesMaxWhenHighlighted
+// complements the test above: when the user arrows to "max" and presses
+// Enter, the highlighted row wins regardless of what's in the textarea.
+func TestHandleKey_EffortPicker_AutoOpened_EnterAppliesMaxWhenHighlighted(t *testing.T) {
+	m := Model{input: textarea.New()}
+	m.opts.Effort = "" // current = off
+	m.modelPickerOpen = true
+	m.pickerPurpose = "effort"
+	m.modelPickerFiltered = effortChoices()
+	m.modelPickerSelected = 2       // picker highlights "max"
+	m.input.SetValue("/effort off") // typed value disagrees
+
+	var captured string
+	m.opts.SetEffort = func(e string) { captured = e }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.modelPickerOpen {
+		t.Error("Enter should close the picker")
+	}
+	// Picker row "max" wins, not the typed "off".
+	if captured != "max" {
+		t.Errorf("SetEffort called with %q, want %q (picker row wins over typed text)", captured, "max")
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be cleared after accept; got %q", m2.input.Value())
+	}
+}
+
 func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
 	// Picker open with candidates: Enter accepts (same as Tab). The
 	// user then presses Enter again to submit.
@@ -973,5 +1039,45 @@ func TestRenderQueueHint_States(t *testing.T) {
 				t.Errorf("hint %q should contain %q", got, tc.wantSub)
 			}
 		})
+	}
+}
+
+func TestShiftTab_CyclesModes(t *testing.T) {
+	m := emptyModel()
+	var yoloCalls, planCalls []bool
+	m.opts.SetYolo = func(b bool) { yoloCalls = append(yoloCalls, b) }
+	m.opts.SetPlan = func(b bool) { planCalls = append(planCalls, b) }
+
+	// Start in Ask mode (default): Yolo=false, Plan=false
+	if m.opts.Yolo || m.opts.Plan {
+		t.Fatal("expected default Ask mode")
+	}
+
+	// Shift+Tab 1: Ask → Plan
+	m.cycleMode()
+	if !m.opts.Plan || m.opts.Yolo {
+		t.Errorf("after 1st cycle: want Plan, got Plan=%v Yolo=%v", m.opts.Plan, m.opts.Yolo)
+	}
+
+	// Shift+Tab 2: Plan → Yolo
+	m.cycleMode()
+	if !m.opts.Yolo || m.opts.Plan {
+		t.Errorf("after 2nd cycle: want Yolo, got Plan=%v Yolo=%v", m.opts.Plan, m.opts.Yolo)
+	}
+
+	// Shift+Tab 3: Yolo → Ask
+	m.cycleMode()
+	if m.opts.Yolo || m.opts.Plan {
+		t.Errorf("after 3rd cycle: want Ask, got Plan=%v Yolo=%v", m.opts.Plan, m.opts.Yolo)
+	}
+
+	// Verify hooks were called with correct values.
+	// Plan was set: false→true (call 0), true→false (call 1)
+	if len(planCalls) != 2 || planCalls[0] != true || planCalls[1] != false {
+		t.Errorf("planCalls = %v, want [true, false]", planCalls)
+	}
+	// Yolo was set: false→true (call 0), true→false (call 1)
+	if len(yoloCalls) != 2 || yoloCalls[0] != true || yoloCalls[1] != false {
+		t.Errorf("yoloCalls = %v, want [true, false]", yoloCalls)
 	}
 }

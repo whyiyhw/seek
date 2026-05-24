@@ -21,6 +21,7 @@ type StatusSnapshot struct {
 	// (off) is silent — only the explicit escalations show up.
 	Effort    string
 	Yolo      bool
+	Plan      bool
 	Tier      pricing.Tier
 	NextTier  pricing.Tier
 	NextAt    time.Time
@@ -87,6 +88,8 @@ func leftSegments(s StatusSnapshot) []string {
 	}
 	if s.Yolo {
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"))
+	} else if s.Plan {
+		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourOk).Bold(true).Padding(0, 1).Render("PLAN"))
 	}
 	// Effort badge: "high" is muted (the user opted in but it's the
 	// cheaper of the two escalations); "max" is tinted to make the

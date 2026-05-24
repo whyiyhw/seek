@@ -236,6 +236,24 @@ func TestEffort_NoArg_OpensPicker(t *testing.T) {
 	}
 }
 
+// TestEffort_DescriptionHasPickerHint ensures the /effort description
+// mentions the picker — same as /model and /lang. Without this the
+// usage text reads as if only manual typing is supported (see
+// picker-over-typed-input memory entry).
+func TestEffort_DescriptionHasPickerHint(t *testing.T) {
+	for _, c := range allCommands() {
+		for _, n := range c.names {
+			if n == "/effort" {
+				if !strings.Contains(c.description, "No args opens a picker") {
+					t.Errorf("/effort description should mention the picker, got:\n  %s", c.description)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("/effort not found in allCommands()")
+}
+
 // TestEffort_PickerPreselectsCurrent pins the affordance that Enter
 // without arrow-key motion is a safe no-op — the picker lands on the
 // row matching the current setting. Without this a user opening
@@ -277,6 +295,17 @@ func TestYolo_TogglesAndFiresHook(t *testing.T) {
 	m.opts.SetYolo = func(b bool) { seen = append(seen, b) }
 	runHandler(t, m, "/yolo")
 	runHandler(t, m, "/yolo")
+	if len(seen) != 2 || seen[0] != true || seen[1] != false {
+		t.Errorf("toggle: %v", seen)
+	}
+}
+
+func TestPlan_TogglesAndFiresHook(t *testing.T) {
+	m := emptyModel()
+	var seen []bool
+	m.opts.SetPlan = func(b bool) { seen = append(seen, b) }
+	runHandler(t, m, "/plan")
+	runHandler(t, m, "/plan")
 	if len(seen) != 2 || seen[0] != true || seen[1] != false {
 		t.Errorf("toggle: %v", seen)
 	}
@@ -330,7 +359,7 @@ func TestNew_SessionCreatedAndSaved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := session.New("deepseek-chat", "/tmp", "sys", false)
+	old := session.New("deepseek-chat", "/tmp", "sys", false, false)
 	// /new needs a real agent so persistSession can read Messages().
 	ag, err := agent.New(agent.Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
@@ -440,7 +469,7 @@ func TestBranch_ForksAndSwitchesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := session.New("deepseek-v4-flash", "/tmp", "sys", false)
+	parent := session.New("deepseek-v4-flash", "/tmp", "sys", false, false)
 	parent.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "hi"},
 		{Role: deepseek.RoleAssistant, Content: "hello"},
@@ -666,7 +695,7 @@ func TestCompact_ForkPreservesFullHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	snap := session.New("deepseek-chat", "/tmp", "sys", false)
+	snap := session.New("deepseek-chat", "/tmp", "sys", false, false)
 	snap.Messages = ag.Messages()
 	if err := store.Save(snap); err != nil {
 		t.Fatalf("save initial session: %v", err)

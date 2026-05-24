@@ -323,6 +323,8 @@ func PrintPixelWelcomeBanner(opts Options) {
 	status := fmt.Sprintf("%s  ·  %s", opts.Model, tierLabel)
 	if opts.Yolo {
 		status += "  ·  YOLO"
+	} else if opts.Plan {
+		status += "  ·  PLAN"
 	}
 	status += "  ·  " + VersionString()
 	fmt.Println(muted.Render("  " + status))

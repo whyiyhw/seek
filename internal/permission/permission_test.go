@@ -253,3 +253,75 @@ func TestIsWithin_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 		t.Error("symlink-in-cwd write allowed — symlink resolution not working")
 	}
 }
+
+// --- ModePlan tests ---------------------------------------------------
+
+func TestModePlan_AllowsReadInsideCWD(t *testing.T) {
+	root := t.TempDir()
+	p, _ := New(root, ModePlan)
+	err := p.Check(Action{Kind: KindRead, Path: filepath.Join(root, "foo.go")})
+	if err != nil {
+		t.Errorf("plan mode should allow read inside CWD, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesReadOutsideCWD(t *testing.T) {
+	root := t.TempDir()
+	other := t.TempDir()
+	p, _ := New(root, ModePlan)
+	err := p.Check(Action{Kind: KindRead, Path: filepath.Join(other, "secret")})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny read outside CWD, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesBash(t *testing.T) {
+	p, _ := New(t.TempDir(), ModePlan)
+	err := p.Check(Action{Kind: KindBash, Command: "ls"})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny bash, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesWriteInsideCWD(t *testing.T) {
+	root := t.TempDir()
+	p, _ := New(root, ModePlan)
+	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(root, "x.go")})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny write even inside CWD, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesEdit(t *testing.T) {
+	p, _ := New(t.TempDir(), ModePlan)
+	err := p.Check(Action{Kind: KindEdit, Path: "/some/file"})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny edit, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesMemoryRemember(t *testing.T) {
+	p, _ := New(t.TempDir(), ModePlan)
+	err := p.Check(Action{Kind: KindMemoryRemember, MemoryName: "test"})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny memory_remember, got %v", err)
+	}
+}
+
+func TestModePlan_DeniesUnknownKind(t *testing.T) {
+	p, _ := New(t.TempDir(), ModePlan)
+	err := p.Check(Action{Kind: "voodoo"})
+	if !errors.Is(err, ErrDenied) {
+		t.Errorf("plan mode should deny unknown kind, got %v", err)
+	}
+}
+
+func TestPlan_Method(t *testing.T) {
+	p, _ := New(t.TempDir(), ModePlan)
+	if !p.Plan() {
+		t.Error("Plan() should return true in ModePlan")
+	}
+	if p.Yolo() {
+		t.Error("Yolo() should return false in ModePlan")
+	}
+}

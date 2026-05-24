@@ -50,6 +50,7 @@ type Options struct {
 	Tracker *cache.Tracker
 	Model   string
 	Yolo    bool
+	Plan    bool
 	CWD     string
 	Ctx     context.Context // cancelled on SIGINT
 
@@ -85,6 +86,7 @@ type Options struct {
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
 	SetYolo      func(bool)
+	SetPlan      func(bool)
 	// SetEffort updates the host-owned sessionEffort. The TUI mirrors the
 	// new value into m.opts.Effort + Session.Effort (via persistSession)
 	// so the status bar refreshes and the next save captures the choice.
@@ -95,6 +97,16 @@ type Options struct {
 	// "high" | "max"). Read by the status bar and the /effort command;
 	// written by /effort through SetEffort.
 	Effort string
+
+	// SetLang updates the host-owned sessionLang. The TUI mirrors the
+	// new value into m.opts.Lang + Session.Lang so the next save
+	// captures the choice. nil disables /lang; the command surfaces
+	// an unsupported message.
+	SetLang func(string)
+
+	// Lang mirrors the session's response language preference ("" |
+	// "en" | "zh"). Read by /lang; written through SetLang.
+	Lang string
 
 	// MemoryProject is the M-layer handle for this session. nil = memory
 	// is unavailable (e.g. --no-save, load failure); /distill surfaces a

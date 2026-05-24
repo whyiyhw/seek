@@ -85,6 +85,25 @@ func TestStatusBar_Streaming_Yolo(t *testing.T) {
 	}
 }
 
+func TestStatusBar_Idle_Plan(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	bar := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model: deepseek.ModelChat,
+		Plan:  true,
+		Tier:  pricing.CurrentTier(at),
+		Now:   at,
+	}))
+	for _, frag := range []string{"PLAN", "idle"} {
+		if !strings.Contains(bar, frag) {
+			t.Errorf("missing %q in: %q", frag, bar)
+		}
+	}
+	// PLAN and YOLO are mutually exclusive — PLAN badge means no YOLO badge.
+	if strings.Contains(bar, "YOLO") {
+		t.Error("PLAN mode should not show YOLO badge")
+	}
+}
+
 func TestStatusBar_OffPeak(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 3, 0, 0, 0, pricing.Shanghai) // off-peak
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{

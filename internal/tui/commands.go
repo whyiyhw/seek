@@ -47,7 +47,7 @@ func allCommands() []command {
 		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
 		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
-		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
+		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. No args opens a picker. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
 		{names: []string{"/lang"}, usage: "/lang [en|zh|auto]", description: "Set response language preference. No args opens a picker. Switching invalidates the prefix cache; effective after /new.", handler: cmdLang},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/plan"}, usage: "/plan", description: "Toggle plan mode (read-only exploration) for the rest of this session.", handler: cmdPlan},

@@ -249,6 +249,7 @@ func (m Model) renderStatusBar() string {
 		Model:            m.opts.Model,
 		Effort:           m.opts.Effort,
 		Yolo:             m.opts.Yolo,
+		Plan:             m.opts.Plan,
 		Tier:             tier,
 		NextTier:         nextTier,
 		NextAt:           nextAt,

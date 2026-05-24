@@ -53,6 +53,7 @@ type Session struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	Model         string    `json:"model"`
 	Yolo          bool      `json:"yolo"`
+	Plan          bool      `json:"plan,omitempty"`
 	CWD           string    `json:"cwd"`
 	SystemPrompt  string    `json:"system_prompt,omitempty"`
 	// Messages is omitted from the JSONL header line and written as
@@ -72,10 +73,16 @@ type Session struct {
 	// doesn't silently leak to future sessions; omitempty keeps the
 	// JSONL header tidy for the common no-override case.
 	Effort string `json:"effort,omitempty"`
+	// Lang records the response language preference for this session.
+	// "" or "auto" = detect from system locale; "en" = English;
+	// "zh" = Chinese. Stored per-session so a one-off switch doesn't
+	// leak to future sessions; omitempty keeps the JSONL header tidy
+	// for the common auto-detect case.
+	Lang string `json:"lang,omitempty"`
 }
 
 // New constructs a fresh Session with a timestamp-based ID.
-func New(model, cwd, systemPrompt string, yolo bool) *Session {
+func New(model, cwd, systemPrompt string, yolo, plan bool) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		SchemaVersion: CurrentSchemaVersion,
@@ -84,6 +91,7 @@ func New(model, cwd, systemPrompt string, yolo bool) *Session {
 		UpdatedAt:     now,
 		Model:         model,
 		Yolo:          yolo,
+		Plan:          plan,
 		CWD:           cwd,
 		SystemPrompt:  systemPrompt,
 	}
@@ -181,7 +189,7 @@ func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int)
 
 // Fork returns a new Session branching off s: fresh ID, ParentID
 // pointing at s, independent copy of the message slice, reset
-// counters/usage. Model / Yolo / CWD / SystemPrompt are inherited.
+// counters/usage. Model / Yolo / Plan / CWD / SystemPrompt are inherited.
 //
 // The parent is untouched in memory; callers that want it on disk at
 // the fork point should Save it before calling Fork.
@@ -201,10 +209,12 @@ func (s *Session) Fork() *Session {
 		UpdatedAt:     now,
 		Model:         s.Model,
 		Yolo:          s.Yolo,
+		Plan:          s.Plan,
 		CWD:           s.CWD,
 		SystemPrompt:  s.SystemPrompt,
 		Messages:      msgs,
 		ParentID:      s.ID,
+		Lang:          s.Lang,
 	}
 }
 
