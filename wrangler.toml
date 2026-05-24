@@ -1,0 +1,6 @@
+name = "seek"
+compatibility_date = "2025-01-01"
+
+[pages]
+build_command = ""
+output_dir = "examples"
