@@ -262,6 +262,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: a streaming response with only reasoning_content is not a valid assistant turn — guard both the DeepSeek and LLM provider paths. The "model said nothing" edge case is not an error to tolerate; it poisons subsequent requests
 - **Refs**: `pkg/agent/agent.go:runTurnDeepSeek`, `pkg/agent/agent.go:runTurnLLM`, `pkg/agent/agent_test.go:TestAgent_EmptyChoicesUsageOnly`
 
+### DeepSeek HTTP 5xx and empty SSE bodies are transient — retry once before failing
+- **Saw**: two failure modes were showing up in normal use without any retry: (a) `deepseek api error: internal_error: Internal Server Error` returned synchronously from `ChatStream`; (b) the stream completed cleanly but emitted no deltas, so the agent's empty-response guard (see entry above) fired and the user had to manually re-send. Both correlated with DeepSeek-side blips — the same underlying outage class
+- **Why**: `pkg/deepseek.ChatStream` had no retry layer at all. Every transient upstream failure surfaced as a hard error to the agent and forced the user to "继续" by hand. The empty-stream case was particularly bad because it looked like a model behaviour bug, not an infrastructure one
+- **Fix**: added a one-shot retry in `pkg/deepseek/stream.go` covering both (a) HTTP 5xx + transport errors during request setup (sync, before the channel exists), and (b) SSE bodies that close without producing any data delta (in the goroutine, before any event reaches the caller). Fixed 500ms backoff. The retry is gated on `emittedAny == false` — once a single delta has been pushed to the output channel, retry is permanently off because the caller's UI/state has committed to the partial stream and a re-send would duplicate content. 4xx codes are not retried (those are auth/config, not transient). Tests cover both retry triggers, the cap (no infinite loops), the post-emit lockout, the 4xx pass-through, and ctx-cancel during backoff. Commit (this one)
+- **Lesson**: when the same outage class manifests as both a sync HTTP error AND a clean-but-empty stream, you need retry at both layers — not just the obvious one. The `emittedAny` flag is what makes "transparent" retry safe vs. dangerous: never retry after the caller has seen anything. Prefix cache makes the cost of retry near-zero (byte-identical request), so the policy can be aggressive on the trigger side as long as the safety gate holds. Also: do NOT retry 4xx — quotas, auth, schema errors don't get better with time
+- **Refs**: `pkg/deepseek/stream.go:openChatStream`, `pkg/deepseek/stream.go:pumpChatStream`, `pkg/deepseek/stream_test.go:TestChatStream_RetryOn500`, related entry above on the empty-response guard
+
 ### Backticks in raw string literals close the string
 - **Saw**: `cmd/seek/main.go:40` suddenly failed `go vet` with `expected ';', found bash` after I added a string mentioning `` `bash ls` ``
 - **Why**: the system prompt is a raw string literal (backtick-delimited). The inner backticks closed the string mid-sentence, then the surrounding text became Go syntax
@@ -489,3 +496,24 @@ If you're new to the project, skim entries in this order:
 - **Fix**: updated the test expectation from `["/model"]` to `["/model", "/memory"]`
 - **Lesson**: tests that assert on exact command-match sets are brittle to new command additions. Either use a unique prefix (`/mo` instead of `/m`) or explicitly document that such tests need updating when commands are added
 - **Refs**: `internal/tui/commands_test.go:TestFilterCommands_PrefixMatch`
+
+### Go slice aliasing: a returned struct with a slice field shares the backing array
+- **Saw**: `Project.Entries()` returned `[]Entry` where each `Entry` had a `Tags []string`. A caller doing `entries[0].Tags = append(entries[0].Tags, "x")` could silently mutate the project's internal entry map when the backing array had spare capacity, or silently appear to work when it didn't — non-deterministic behaviour
+- **Why**: Go's slice header is a (ptr, len, cap) triplet. Copying an `Entry` struct copies the `Tags` header, but the header points to the same underlying array. `append` with spare capacity writes into that shared array; without spare capacity, it allocates a new one. The result depends on the exact capacity at call time
+- **Fix**: added defensive `make+copy` in both `Entries()` (on read-out) and `Add()` (on store-in). Three lines each, zero runtime cost for entries without Tags
+- **Lesson**: any exported method that returns a struct containing a slice, or accepts one and stores it, must defensively copy the slice to prevent non-deterministic aliasing. The bug class is invisible when callers never mutate the slice — and explodes the first time they do
+- **Refs**: `internal/memory/project.go:Entries`, `project.go:Add`
+
+### LLM thinking-mode artifact tokens leaked into generated source code
+- **Saw**: a comment line ended with `// changes there. response` — the word "response" was actually a fragment of DeepSeek's thinking-mode output token `｜end▁of▁thinking｜>` that had leaked into the code. The token was invisible in the editor (rendered as whitespace/punctuation) but was present as raw UTF-8 in the file
+- **Why**: the model (DeepSeek V4-Flash with thinking enabled) occasionally emits its internal thinking-mode delimiters as part of tool calls or generated content. When the thinking output is captured into a file write (via the `write` tool), the delimiter tokens get embedded as literal bytes. They look like normal characters in most editors but are semantically wrong
+- **Fix**: `grep -r 'end▁of▁thinking'` or equivalent to find and remove leaked tokens. Then audit the writing tool to post-strip known artifact patterns. Alternatively, catch via CI: `grep -rn 'end▁of▁thinking' --include='*.go'` would catch any future leaks
+- **Lesson**: when using thinking-mode models in an agent that writes code, set up a post-write filter for known delimiter tokens. The artifacts are rare (1 in ~hundreds of tool calls) but when they land in a source file they're invisible to human review and silent to the compiler (they look like comments). Automated grep in CI is the cheapest insurance
+- **Refs**: `internal/memorycli/memorycli.go:358` (before fix)
+
+### Time-dependent sort key breaks prefix-cache byte-stability
+- **Saw**: M-index truncation path sorted entries by `Score(e, now, halfLife)` where `now` changed on every prompt. Two adjacent prompts with identical disk state could produce different M-index byte sequences, causing a full prefix-cache miss
+- **Why**: `Score()` uses `exp(-(now - lastActive) / halfLife)`. Even when no entry metadata changes, the passage of time between prompts shifts scores slightly, potentially pushing a borderline entry into or out of the top-K budget window. The byte sequence changes → cache miss on the entire prior conversation
+- **Fix**: replaced the time-dependent Score sort with a TIME-INDEPENDENT key: `pinned desc → recall_count desc → name asc`. This changes byte output only when entry metadata changes (add/remove/recall/GC), not on every prompt. Documented the trade in `buildMIndex`'s byte-stability doc
+- **Lesson**: any sort or filter key used in a prompt-injection path must be time-independent unless you're willing to pay the cache-miss cost. Score-based ranking is better for quality but worse for caching; the right choice depends on which axis is more constrained. For M-index at 1500 token budget, the cache hit is worth more than the marginal ranking improvement
+- **Refs**: `internal/memory/hook.go:buildMIndex`

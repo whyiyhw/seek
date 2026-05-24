@@ -16,7 +16,7 @@ var observeSchema = []byte(`{
     "name":    {"type": "string", "description": "kebab-case unique key for this entry (e.g. session-storage-format)."},
     "tagline": {"type": "string", "description": "One-line summary shown in the M-index. Make it specific."},
     "content": {"type": "string", "description": "Full rationale: what was decided, why, what alternatives were rejected. ≤500 words."},
-    "tags":    {"type": "array",  "items": {"type": "string"}, "description": "Optional categorisation tags."}
+    "tags":    {"type": "array",  "items": {"type": "string"}, "description": "Optional categorisation tags. The FIRST tag determines the entry's group in the M-index; put the most representative one first."}
   },
   "required": ["name", "tagline", "content"],
   "additionalProperties": false
@@ -33,7 +33,7 @@ Use this when you detect strong signals in the conversation:
 Do NOT use for:
 - Casual conversation ("thanks", "good morning")
 - Undecided states ("maybe", "let's see")
-- Topics already captured under the same name (memory_observe overwrites by name)
+- Topics already captured under the same name (memory_observe overwrites by name; use memory_amend to append instead)
 
 This tool returns immediately without blocking. The entry goes through an async
 V4-Flash dedup + value check before being written. Only passes are persisted;
@@ -105,5 +105,3 @@ func (t Observe) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 	// show a notification if the filter passes (via ResultChan).
 	return "", nil
 }
-
-

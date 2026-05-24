@@ -111,6 +111,41 @@ func LoadOrCreate(cwd string) (*Project, error) {
 	return p, nil
 }
 
+// LoadReadOnly returns the Project for cwd WITHOUT creating or modifying
+// anything on disk. It finds the project by resolving the project ID from
+// the absolute path of cwd, then checks whether the project directory
+// exists under ~/.seek/projects/<id>/. If it doesn't exist (first visit,
+// never had memory), returns (nil, nil) — this is NOT an error.
+//
+// Use this for read-only commands (list, show, search) where accidentally
+// creating an empty project directory would be a side effect.
+func LoadReadOnly(cwd string) (*Project, error) {
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("memory: abs(%q): %w", cwd, err)
+	}
+
+	id, err := resolveProjectID(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	projectsRoot, err := paths.Projects()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(projectsRoot, id)
+
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // no project yet — not an error
+		}
+		return nil, fmt.Errorf("memory: stat %q: %w", dir, err)
+	}
+
+	return loadProjectReadOnly(dir)
+}
+
 // resolveProjectID picks the project's ID following PRD §4 priority.
 func resolveProjectID(abs string) (string, error) {
 	pointer := filepath.Join(abs, ".seek", "project-id")
@@ -206,9 +241,9 @@ func (p *Project) writeEntries() error {
 	return atomicWrite(filepath.Join(p.Dir, "memory.jsonl"), buf.Bytes())
 }
 
-// Save persists manifest + memory.jsonl. Add / Remove / TouchRecall
-// already write on each mutation; Save exists for callers that batched
-// changes externally (e.g. a future migration tool).
+// Save persists manifest + memory.jsonl. Add / Remove / TouchRecall /
+// Archive / Amend all write on each mutation; Save exists for callers
+// that batched changes externally (e.g. a future migration tool).
 func (p *Project) Save() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -239,6 +274,13 @@ func (p *Project) Add(e Entry) error {
 	}
 	if _, exists := p.entries[e.Name]; !exists {
 		p.order = append(p.order, e.Name)
+	}
+	// Defensive copy of Tags: the caller's slice shares backing array
+	// with ours if we store it as-is.
+	if len(e.Tags) > 0 {
+		tags := make([]string, len(e.Tags))
+		copy(tags, e.Tags)
+		e.Tags = tags
 	}
 	p.entries[e.Name] = e
 	return p.writeEntries()
@@ -359,6 +401,8 @@ func (p *Project) Index() []IndexEntry {
 }
 
 // Entries returns all entries (stale included) in insertion order.
+// Each entry's Tags slice is defensively copied so callers cannot
+// mutate the project's internal state via slice aliasing.
 // Used by /distill and GC; callers that want the injection-ready list
 // should call Index() instead.
 func (p *Project) Entries() []Entry {
@@ -366,7 +410,13 @@ func (p *Project) Entries() []Entry {
 	defer p.mu.RUnlock()
 	out := make([]Entry, 0, len(p.entries))
 	for _, name := range p.order {
-		out = append(out, p.entries[name])
+		e := p.entries[name]
+		if len(e.Tags) > 0 {
+			tags := make([]string, len(e.Tags))
+			copy(tags, e.Tags)
+			e.Tags = tags
+		}
+		out = append(out, e)
 	}
 	return out
 }

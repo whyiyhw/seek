@@ -552,6 +552,12 @@ func cmdSkillCLI(_ *Model, args string) cmdResult {
 // cmdMemoryCLI mirrors the `seek memory ...` CLI inside the TUI. Same
 // wiring as cmdSkillCLI: whitespace-split args, buffered IO, rendered as
 // scrollback.
+//
+// Limitation (documented): args are whitespace-split via strings.Fields,
+// so values containing spaces (e.g. -tagline "hello world") are split into
+// separate tokens. The underlying CLI's FlagSet only sees the first token,
+// causing unexpected parse errors. This matches the identical limitation
+// in cmdSkillCLI — both use the same dispatcher pattern.
 func cmdMemoryCLI(_ *Model, args string) cmdResult {
 	tokens := strings.Fields(args)
 	var stdout, stderr bytes.Buffer

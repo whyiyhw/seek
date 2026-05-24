@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeSSE serves a canned SSE stream so we can exercise the parser without a
@@ -226,5 +228,230 @@ func TestChat_MissingKey(t *testing.T) {
 	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelChat})
 	if err == nil || !strings.Contains(err.Error(), "missing api key") {
 		t.Errorf("expected missing-key error, got %v", err)
+	}
+}
+
+// validStream is a canned SSE body that produces exactly one delta
+// "ok" and finishes with reason="stop". Used as the "happy" payload by
+// the retry tests below.
+const validStreamBody = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+	"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+	"data: [DONE]\n\n"
+
+func drainStream(t *testing.T, ch <-chan StreamEvent) (text, finish string) {
+	t.Helper()
+	for ev := range ch {
+		switch ev.Type {
+		case EventDelta:
+			text += ev.Delta
+		case EventDone:
+			finish = ev.FinishReason
+		}
+	}
+	return text, finish
+}
+
+// TestChatStream_RetryOn500 verifies that an HTTP 500 from DeepSeek is
+// transparently retried once. This is the canonical case the retry was
+// added for — an `internal_error: Internal Server Error` from the
+// initial request would otherwise bubble up as a hard failure to the
+// agent layer and force the user to manually re-send.
+func TestChatStream_RetryOn500(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"Internal Server Error"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, validStreamBody)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	ch, err := c.ChatStream(context.Background(), &ChatRequest{
+		Model:    ModelChat,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	text, finish := drainStream(t, ch)
+	if text != "ok" {
+		t.Errorf("text = %q, want %q", text, "ok")
+	}
+	if finish != "stop" {
+		t.Errorf("finish = %q, want stop", finish)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want 2 (first=500, second=200)", got)
+	}
+}
+
+// TestChatStream_RetryOnEmptyBody covers the second retry trigger: the
+// HTTP response is 200 but the SSE body closes without producing any
+// delta. This is what happens when DeepSeek's upstream closes the
+// connection mid-thinking — the stream is technically clean, but the
+// caller would otherwise see an empty assistant turn (which then trips
+// the agent's empty-response guard).
+func TestChatStream_RetryOnEmptyBody(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if n == 1 {
+			// Empty body — emulates a stream that closes before any
+			// data: line is sent.
+			return
+		}
+		_, _ = io.WriteString(w, validStreamBody)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	ch, err := c.ChatStream(context.Background(), &ChatRequest{
+		Model:    ModelChat,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	text, finish := drainStream(t, ch)
+	if text != "ok" {
+		t.Errorf("text = %q, want %q (retry should have succeeded)", text, "ok")
+	}
+	if finish != "stop" {
+		t.Errorf("finish = %q, want stop", finish)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want 2", got)
+	}
+}
+
+// TestChatStream_RetryBudgetCapped pins the "one retry, not infinite"
+// invariant. If the upstream is genuinely down, surface the error
+// rather than burning tokens (and the user's time) on an infinite loop.
+func TestChatStream_RetryBudgetCapped(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"boom"}}`)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.ChatStream(context.Background(), &ChatRequest{
+		Model:    ModelChat,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected error after retry exhausted")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error should preserve original message, got %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
+	}
+}
+
+// TestChatStream_NoRetryAfterEmit is the load-bearing safety property:
+// once any delta has reached the caller, the partial state is committed
+// to whatever rendered it (TUI viewport, session history, accumulating
+// tool_call args). A retry at this point would duplicate or contradict
+// content the user has already seen.
+//
+// The fixture emits a valid delta first, then a malformed JSON chunk.
+// With retry, the test would observe two emits of "ok"; without, it
+// observes one emit plus a decode_error finish reason — matching the
+// pre-retry behaviour relied on by agent_test.go:TestAgent_DecodeError
+// MidStream_DropsTurn.
+func TestChatStream_NoRetryAfterEmit(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// Malformed chunk: terminates the stream with a decode error
+		// without ever sending [DONE]. After emit, this must NOT retry.
+		_, _ = io.WriteString(w, "data: {not json\n\n")
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	ch, err := c.ChatStream(context.Background(), &ChatRequest{
+		Model:    ModelChat,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	text, finish := drainStream(t, ch)
+	if text != "ok" {
+		t.Errorf("text = %q, want %q (retry would have duplicated content)", text, "ok")
+	}
+	if !strings.HasPrefix(finish, "decode_error:") {
+		t.Errorf("finish = %q, want decode_error:... (sentinel relied on by agent layer)", finish)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("server hits = %d, want exactly 1 (must not retry post-emit)", got)
+	}
+}
+
+// TestChatStream_4xxNoRetry: 4xx codes are configuration / auth / quota
+// errors, not transients. Retrying just delays the inevitable. Pin
+// behaviour so a future change to retry policy doesn't accidentally
+// widen the trigger.
+func TestChatStream_4xxNoRetry(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"type":"authentication_error","message":"bad key"}}`)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.ChatStream(context.Background(), &ChatRequest{Model: ModelChat})
+	if err == nil {
+		t.Fatalf("expected auth error")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("server hits = %d, want 1 (no retry on 4xx)", got)
+	}
+}
+
+// TestChatStream_CtxCancelDuringBackoff verifies that a cancellation
+// arriving while we're sleeping between attempts returns cleanly
+// instead of pressing on with a doomed retry.
+func TestChatStream_CtxCancelDuringBackoff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"x"}}`)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel shortly after the first request lands, while openChatStream
+	// is waiting out its backoff before retrying.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.ChatStream(ctx, &ChatRequest{Model: ModelChat})
+	if err == nil {
+		t.Fatalf("expected error from cancelled context")
 	}
 }

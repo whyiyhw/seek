@@ -39,6 +39,8 @@ func runMemoryCmd(args []string, stdout, stderr io.Writer) error {
 		return cmdSearch(rest, stdout, stderr)
 	case "archive", "forget":
 		return cmdArchive(rest, stdout, stderr)
+	case "add", "remember":
+		return cmdAdd(rest, stdout, stderr)
 	case "help", "--help", "-h":
 		printHelp(stdout)
 		return nil
@@ -53,9 +55,10 @@ func printHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage: seek memory <verb> [args]
 
 Verbs:
-  list                List active (non-stale) entries with score
+  list                List active (non-stale) entries with score (--all for stale, --archived for archived)
   show    <name>      Show full content of one entry
   search  <query>     Search entries by tagline or tags
+  add                 Add a new entry (name, tagline, content, tags)
   archive <name>      Archive an entry (move to archived.jsonl)
   help                Show this help
 
@@ -77,18 +80,34 @@ func loadCurrentProject() (*memory.Project, error) {
 	return p, nil
 }
 
+// loadReadOnlyProject is like loadCurrentProject but uses LoadReadOnly
+// so it does NOT create a project directory or write a manifest on first
+// visit. Use this for read-only verbs (list, show, search, archive).
+func loadReadOnlyProject() (*memory.Project, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("getwd: %w", err)
+	}
+	return memory.LoadReadOnly(cwd)
+}
+
 func cmdList(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("memory list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, "include stale entries")
+	archived := fs.Bool("archived", false, "list archived entries instead of active ones")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	p, err := loadCurrentProject()
+	p, err := loadReadOnlyProject()
 	if err != nil {
 		fmt.Fprintln(stderr, "memory:", err)
 		return nil
+	}
+
+	if *archived {
+		return ListArchived(stdout, p)
 	}
 
 	entries := p.Entries()
@@ -146,7 +165,7 @@ func cmdShow(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	p, err := loadCurrentProject()
+	p, err := loadReadOnlyProject()
 	if err != nil {
 		fmt.Fprintln(stderr, "memory:", err)
 		return nil
@@ -165,7 +184,12 @@ func cmdShow(args []string, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprintf(stdout, "Created:   %s\n", e.CreatedAt.Format(time.RFC3339))
 	fmt.Fprintf(stdout, "Updated:   %s\n", e.UpdatedAt.Format(time.RFC3339))
-	fmt.Fprintf(stdout, "Recalled:  %d times (last: %s)\n", e.RecallCount, e.LastRecalledAt.Format(time.RFC3339))
+	fmt.Fprintf(stdout, "Recalled:  %d times", e.RecallCount)
+	if e.LastRecalledAt.IsZero() {
+		fmt.Fprintf(stdout, " (last: never)\n")
+	} else {
+		fmt.Fprintf(stdout, " (last: %s)\n", e.LastRecalledAt.Format(time.RFC3339))
+	}
 	if e.Stale {
 		fmt.Fprintf(stdout, "Stale:     true (since %s)\n", e.StaleSince.Format(time.RFC3339))
 	}
@@ -192,7 +216,7 @@ func cmdSearch(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	p, err := loadCurrentProject()
+	p, err := loadReadOnlyProject()
 	if err != nil {
 		fmt.Fprintln(stderr, "memory:", err)
 		return nil
@@ -235,13 +259,72 @@ func cmdArchive(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("memory archive", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	reason := fs.String("reason", "manual archive", "archive reason")
-	if err := fs.Parse(args); err != nil {
-		return err
+
+	// Try flags-first ordering: `archive -reason "foo" name`.
+	if err := fs.Parse(args); err == nil && fs.NArg() > 0 {
+		name := fs.Arg(0)
+		if name != "" && !strings.HasPrefix(name, "-") {
+			return doArchive(stdout, stderr, name, *reason)
+		}
 	}
 
-	name := strings.TrimSpace(fs.Arg(0))
-	if name == "" {
-		fmt.Fprintln(stderr, "usage: seek memory archive [-reason 'why'] <name>")
+	// Try name-first ordering: `archive name -reason "foo"`.
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name := args[0]
+		fs2 := flag.NewFlagSet("memory archive", flag.ContinueOnError)
+		fs2.SetOutput(stderr)
+		reason2 := fs2.String("reason", "manual archive", "")
+		if err := fs2.Parse(args[1:]); err == nil {
+			return doArchive(stdout, stderr, name, *reason2)
+		}
+	}
+
+	fmt.Fprintln(stderr, "usage: seek memory archive <name> [-reason 'why']")
+	return nil
+}
+
+func doArchive(stdout, stderr io.Writer, name, reason string) error {
+	p, err := loadReadOnlyProject()
+	if err != nil {
+		fmt.Fprintln(stderr, "memory:", err)
+		return nil
+	}
+
+	_, ok := p.Get(name)
+	if !ok {
+		fmt.Fprintf(stderr, "memory: entry %q not found\n", name)
+		return nil
+	}
+
+	if err := p.Archive(name, reason); err != nil {
+		fmt.Fprintf(stderr, "memory: archive %q: %v\n", name, err)
+		return nil
+	}
+
+	fmt.Fprintf(stdout, "archived %q (reason: %s)\n", name, reason)
+	return nil
+}
+
+// cmdAdd adds a new entry to project memory. Flags mirror the
+// memory_remember tool fields. Name is positional (first arg),
+// followed by flags, matching the seek skill create convention.
+func cmdAdd(args []string, stdout, stderr io.Writer) error {
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(stderr, "usage: seek memory add <name> -tagline '...' -content '...' [-tags 'a,b,c']")
+		return nil
+	}
+	name := args[0]
+
+	fs := flag.NewFlagSet("memory add", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	tagline := fs.String("tagline", "", "One-line summary (required)")
+	content := fs.String("content", "", "Full rationale (required)")
+	tags := fs.String("tags", "", "Comma-separated tags (optional)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if *tagline == "" || *content == "" {
+		fmt.Fprintln(stderr, "usage: seek memory add <name> -tagline '...' -content '...' [-tags 'a,b,c']")
 		return nil
 	}
 
@@ -251,24 +334,38 @@ func cmdArchive(args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	e, ok := p.Get(name)
-	if !ok {
-		fmt.Fprintf(stderr, "memory: entry %q not found\n", name)
+	var tagList []string
+	if *tags != "" {
+		for _, t := range strings.Split(*tags, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tagList = append(tagList, t)
+			}
+		}
+	}
+
+	entry := memory.Entry{
+		Name:    name,
+		Tagline: *tagline,
+		Content: *content,
+		Tags:    tagList,
+	}
+	if err := p.Add(entry); err != nil {
+		// CLI bypasses permission.Policy intentionally — the user IS
+		// the authority when typing a command directly. The model-facing
+		// memory_remember tool still goes through Policy for inline y/N
+		// approval. Keep them consistent: changes here should inform
+		// changes there.
+		fmt.Fprintf(stderr, "memory: add %q: %v\n", name, err)
 		return nil
 	}
 
-	if err := p.Archive(name, *reason); err != nil {
-		fmt.Fprintf(stderr, "memory: archive %q: %v\n", name, err)
-		return nil
-	}
-
-	fmt.Fprintf(stdout, "archived %q (reason: %s)\n", name, *reason)
-	_ = e
+	fmt.Fprintf(stdout, "added %q to project memory\n", name)
 	return nil
 }
 
 // ListArchived reads archived.jsonl for the current project and prints
-// each entry. Used by `seek memory list --archived`.
+// each entry. Exported for programmatic use (e.g. TUI integration).
 func ListArchived(w io.Writer, p *memory.Project) error {
 	archived, err := p.LoadArchived()
 	if err != nil {

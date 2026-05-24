@@ -26,9 +26,11 @@ type ObserveResult struct {
 // entryInfo is the intermediate representation for M-index rendering:
 // one non-stale entry with its tags for group-by-tag layout.
 type entryInfo struct {
-	name    string
-	tagline string
-	tags    []string
+	name        string
+	tagline     string
+	tags        []string
+	pinned      bool
+	recallCount int
 }
 
 // Hook is the memory subsystem's manifestation on the agent's
@@ -167,23 +169,24 @@ func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePro
 
 // buildMIndex builds the M-index <context> block with tag-grouped layout
 // and token-budget truncation. When the index exceeds maxMIndexTokens,
-// low-score entries are dropped first (scores computed via Score()).
+// low-score entries are dropped first.
 // Returns nil when there are no non-stale entries.
 //
 // Grouping: entries are grouped by their first tag value. Untagged entries
 // go under a "general" section. Groups are sorted alphabetically with
 // "general" last. Within each group, entries are sorted by name.
 //
-// Byte-stability: given identical L+M disk state + same env, the output
-// is deterministic — sort orders are all stable, and estimateTokens is a
-// pure function of the input string.
+// Byte-stability (fast path — under budget): given identical L+M disk state
+// + same env, the output is byte-identical across prompts — sort order is
+// deterministic (alphabetical by name) and estimateTokens is pure.
+//
+// Byte-stability (slow path — over budget): the truncation sort uses a
+// TIME-INDEPENDENT key (pinned desc → recall_count desc → name asc) so
+// the byte output changes ONLY when entry metadata changes (add/remove/
+// recall/touch/GC), NOT on every prompt. This is a deliberate trade —
+// prefix-cache stability outweighs the marginal ranking improvement from
+// time-dependent Score().
 func (h *Hook) buildMIndex() *deepseek.Message {
-	now := time.Now().UTC()
-	if h.Now != nil {
-		now = h.Now()
-	}
-	halfLife := HalfLifeFromEnv()
-
 	// Collect non-stale entries with tags.
 	all := h.Project.Entries()
 	entries := make([]entryInfo, 0, len(all))
@@ -192,9 +195,11 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 			continue
 		}
 		entries = append(entries, entryInfo{
-			name:    e.Name,
-			tagline: e.Tagline,
-			tags:    e.Tags,
+			name:        e.Name,
+			tagline:     e.Tagline,
+			tags:        e.Tags,
+			pinned:      e.Pinned,
+			recallCount: e.RecallCount,
 		})
 	}
 	if len(entries) == 0 {
@@ -209,55 +214,47 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 		}
 	}
 
-	// Over budget — rebuild by score descending.
-	type scoredEntry struct {
-		name    string
-		tagline string
-		tags    []string
-		score   float64
-	}
+	// Over budget — rebuild with time-independent sort key.
+	// Sort order: pinned desc → recall_count desc → name asc.
+	// This keeps the byte output stable across prompts (see byte-stability
+	// doc on buildMIndex). The order correlates well with Score() —
+	// pinned entries always win, then frequently-recalled entries, then
+	// alphabetical — without depending on time.Now().
 
-	// Build a lookup by name for scores.
-	scoreMap := make(map[string]float64, len(all))
-	for _, e := range all {
-		if !e.Stale {
-			scoreMap[e.Name] = Score(e, now, halfLife)
+	// Sort by static key: pinned desc → recall_count desc → name asc.
+	// This is TIME-INDEPENDENT so the byte output is stable across prompts
+	// (see byte-stability doc on buildMIndex).
+	sort.SliceStable(entries, func(i, j int) bool {
+		// Pinned entries always first.
+		if entries[i].pinned != entries[j].pinned {
+			return entries[i].pinned
 		}
-	}
-
-	scored := make([]scoredEntry, len(entries))
-	for i, e := range entries {
-		scored[i] = scoredEntry{
-			name:    e.name,
-			tagline: e.tagline,
-			tags:    e.tags,
-			score:   scoreMap[e.name],
+		// Then by recall count descending.
+		if entries[i].recallCount != entries[j].recallCount {
+			return entries[i].recallCount > entries[j].recallCount
 		}
-	}
-
-	// Sort descending by score; stable tie-break by name for determinism.
-	sort.SliceStable(scored, func(i, j int) bool {
-		if scored[i].score != scored[j].score {
-			return scored[i].score > scored[j].score
-		}
-		return scored[i].name < scored[j].name
+		// Alphabetical tiebreak.
+		return entries[i].name < entries[j].name
 	})
 
 	// Greedily take entries until we hit budget.
 	var within []entryInfo
-	for _, s := range scored {
+	for _, e := range entries {
 		candidate := entryInfo{
-			name:    s.name,
-			tagline: s.tagline,
-			tags:    s.tags,
+			name:        e.name,
+			tagline:     e.tagline,
+			tags:        e.tags,
+			pinned:      e.pinned,
+			recallCount: e.recallCount,
 		}
-		testEntries := append(within, candidate)
+		// Build a fresh slice to avoid aliasing within's backing array.
+		testEntries := make([]entryInfo, len(within)+1)
+		copy(testEntries, within)
+		testEntries[len(within)] = candidate
 		testBody := buildGroupedIndexString(testEntries)
 		if estimateTokens(testBody) <= maxMIndexTokens {
 			within = append(within, candidate)
 		} else {
-			// Need to check if even adding this one line exceeds budget.
-			// If so, just stop — the remaining entries are lower-scored.
 			break
 		}
 	}
@@ -278,6 +275,9 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 }
 
 // buildGroupedIndexString renders entries grouped by their first tag.
+// Entries are placed in exactly one group — the first element of their
+// Tags slice determines the group. Multi-tag entries appear only under
+// their primary (first) tag to avoid consuming budget on duplicates.
 // Untagged entries go under "### general". Groups are alphabetically
 // sorted; within each group entries are sorted by name.
 func buildGroupedIndexString(entries []entryInfo) string {

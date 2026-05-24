@@ -31,7 +31,7 @@ Use this when:
 
 This is the "active forgetting" counterpart to memory_observe. Together they let you curate the M-index without waiting for the decay-score GC to act.
 
-Archived entries are NOT shown in the M-index and are NOT returned by memory_recall. They can still be inspected offline via 'seek memory list --archived'.`
+Archived entries are NOT shown in the M-index and are NOT returned by memory_recall. They can still be inspected via 'seek memory list --archived' or by reading ~/.seek/projects/<id>/archived.jsonl directly.`
 
 // Archive is the memory_archive tool.
 type Archive struct {

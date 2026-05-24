@@ -8,6 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Retry policy for transient DeepSeek stream failures (HTTP 5xx,
+// transport errors, or an SSE body that completes without emitting any
+// data). One retry catches the common upstream-blip case; more would
+// just amplify cost when the model genuinely produced nothing. Safe
+// because retry only fires before any event has reached the caller,
+// and the re-sent body is byte-identical so prefix-cache stays hot.
+const (
+	maxStreamRetries   = 1
+	streamRetryBackoff = 500 * time.Millisecond
 )
 
 // StreamEventType discriminates the events emitted by ChatStream.
@@ -60,6 +74,13 @@ type streamDelta struct {
 // ChatStream issues a streaming chat completion and returns a channel of
 // StreamEvent. The channel is closed when the stream terminates. The caller
 // must drain the channel — cancelling ctx is the way to abort early.
+//
+// Retry: transient failures (HTTP 5xx, transport errors, an SSE body that
+// closes without producing any data) trigger ONE silent retry with a fixed
+// 500ms backoff. Retry only fires while emittedAny == false — once any
+// delta has reached the caller, the partial state is committed and a
+// stream interruption surfaces normally (as decode_error: / stream_error:
+// finish reasons, matching pre-retry behaviour).
 func (c *Client) ChatStream(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	if req == nil {
 		return nil, errors.New("deepseek: nil request")
@@ -70,108 +91,204 @@ func (c *Client) ChatStream(ctx context.Context, req *ChatRequest) (<-chan Strea
 		r.StreamOptions = &StreamOptions{IncludeUsage: true}
 	}
 
-	resp, err := c.do(ctx, endpointChat, &r)
+	resp, err := c.openChatStream(ctx, &r)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode/100 != 2 {
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		return nil, parseAPIError(resp.StatusCode, body)
-	}
 
 	out := make(chan StreamEvent, 16)
-	go func() {
-		defer close(out)
-		defer resp.Body.Close()
+	go c.pumpChatStream(ctx, &r, resp, out)
+	return out, nil
+}
 
-		var (
-			lastFinish string
-			lastUsage  Usage
-		)
-
-		sc := bufio.NewScanner(resp.Body)
-		// Allow lines up to 1 MiB to handle very large tool-call argument
-		// chunks without truncation.
-		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-		for sc.Scan() {
-			line := sc.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-			// SSE format: each event is `data: <payload>` lines, separated
-			// by blank lines. DeepSeek sends one chunk per `data:` line.
-			if !bytes.HasPrefix(line, []byte("data:")) {
-				continue
-			}
-			payload := bytes.TrimSpace(line[len("data:"):])
-			if len(payload) == 0 {
-				continue
-			}
-			if string(payload) == "[DONE]" {
-				break
-			}
-
-			var chunk streamChunk
-			if err := json.Unmarshal(payload, &chunk); err != nil {
-				out <- StreamEvent{
-					Type:  EventDone,
-					Usage: lastUsage,
-					// Surface decode failure via a sentinel finish reason
-					// for now — proper error event lives in pkg/agent layer.
-					FinishReason: "decode_error:" + truncate(err.Error(), 80),
-				}
-				return
-			}
-
-			if chunk.Usage != nil {
-				lastUsage = *chunk.Usage
-			}
-
-			for _, ch := range chunk.Choices {
-				if ch.Delta.ReasoningContent != "" {
-					out <- StreamEvent{
-						Type:  EventReasoningDelta,
-						Delta: ch.Delta.ReasoningContent,
-					}
-				}
-				if ch.Delta.Content != "" {
-					out <- StreamEvent{
-						Type:  EventDelta,
-						Delta: ch.Delta.Content,
-					}
-				}
-				for i := range ch.Delta.ToolCalls {
-					tc := ch.Delta.ToolCalls[i]
-					out <- StreamEvent{
-						Type:     EventToolCallDelta,
-						ToolCall: &tc,
-					}
-				}
-				if ch.FinishReason != "" {
-					lastFinish = ch.FinishReason
-				}
+// openChatStream issues the streaming request, returning the response
+// once a 2xx is observed. Transport errors, 5xx, and 429 (Too Many
+// Requests) are retried once with a fixed backoff; other 4xx is fatal
+// (those are configuration problems, not transients).
+func (c *Client) openChatStream(ctx context.Context, req *ChatRequest) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt <= maxStreamRetries; attempt++ {
+		if attempt > 0 {
+			if err := sleepCtx(ctx, streamRetryBackoff); err != nil {
+				return nil, err
 			}
 		}
-
-		if err := sc.Err(); err != nil && !errors.Is(err, context.Canceled) {
-			out <- StreamEvent{
-				Type:         EventDone,
-				Usage:        lastUsage,
-				FinishReason: "stream_error:" + truncate(err.Error(), 80),
+		resp, err := c.do(ctx, endpointChat, req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return nil, err
 			}
+			continue
+		}
+		if resp.StatusCode/100 == 2 {
+			return resp, nil
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		apiErr := parseAPIError(resp.StatusCode, body)
+		if resp.StatusCode/100 == 5 || resp.StatusCode == 429 {
+			lastErr = apiErr
+			continue
+		}
+		return nil, apiErr
+	}
+	return nil, lastErr
+}
+
+// pumpChatStream owns the response body and drives one or more
+// readChatStream passes. If the first pass produces no events at all
+// (transport break, malformed first chunk, or a clean [DONE] with no
+// deltas) we re-open the request once — the same conditions that cause
+// upstream 5xx also produce SSE bodies that close before producing data,
+// and a one-shot retry resolves both without surfacing them to the agent
+// layer (which would otherwise hit the empty-response guard).
+func (c *Client) pumpChatStream(ctx context.Context, req *ChatRequest, initial *http.Response, out chan<- StreamEvent) {
+	defer close(out)
+
+	resp := initial
+	for attempt := 0; attempt <= maxStreamRetries; attempt++ {
+		result := c.readChatStream(resp.Body, out)
+
+		canRetry := !result.emittedAny &&
+			attempt < maxStreamRetries &&
+			ctx.Err() == nil &&
+			(result.streamErr != nil || result.isEmpty())
+
+		if !canRetry {
+			emitTerminalDone(out, result, nil)
 			return
 		}
 
-		out <- StreamEvent{
-			Type:         EventDone,
-			Usage:        lastUsage,
-			FinishReason: lastFinish,
+		if err := sleepCtx(ctx, streamRetryBackoff); err != nil {
+			emitTerminalDone(out, result, nil)
+			return
 		}
-	}()
+		newResp, err := c.openChatStream(ctx, req)
+		if err != nil {
+			emitTerminalDone(out, result, err)
+			return
+		}
+		resp = newResp
+	}
+}
 
-	return out, nil
+// streamReadResult collects the outcome of a single SSE read pass.
+// emittedAny is the load-bearing field: once true, the caller's UI/state
+// has committed to the partial stream and retry is no longer safe.
+type streamReadResult struct {
+	emittedAny   bool
+	lastUsage    Usage
+	finishReason string
+	streamErr    error // populated on decode failure or transport read error
+}
+
+// isEmpty reports whether the stream completed cleanly but produced
+// nothing the caller could act on. This is the "model said nothing"
+// case that the agent layer's empty-response guard exists to catch —
+// we retry here so callers don't see it on the first attempt.
+func (r streamReadResult) isEmpty() bool {
+	return r.streamErr == nil && !r.emittedAny && r.finishReason == ""
+}
+
+// readChatStream parses one SSE body. It does NOT close out (the caller
+// owns the channel lifetime) and only emits data events — terminal
+// EventDone is emitted by the caller after retry policy has been
+// applied.
+func (c *Client) readChatStream(body io.ReadCloser, out chan<- StreamEvent) streamReadResult {
+	defer body.Close()
+
+	var result streamReadResult
+	sc := bufio.NewScanner(body)
+	// Allow lines up to 1 MiB to handle very large tool-call argument
+	// chunks without truncation.
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		// SSE format: each event is `data: <payload>` lines, separated
+		// by blank lines. DeepSeek sends one chunk per `data:` line.
+		if !bytes.HasPrefix(line, []byte("data:")) {
+			continue
+		}
+		payload := bytes.TrimSpace(line[len("data:"):])
+		if len(payload) == 0 {
+			continue
+		}
+		if string(payload) == "[DONE]" {
+			break
+		}
+
+		var chunk streamChunk
+		if err := json.Unmarshal(payload, &chunk); err != nil {
+			result.streamErr = fmt.Errorf("decode: %w", err)
+			return result
+		}
+
+		if chunk.Usage != nil {
+			result.lastUsage = *chunk.Usage
+		}
+
+		for _, ch := range chunk.Choices {
+			if ch.Delta.ReasoningContent != "" {
+				out <- StreamEvent{Type: EventReasoningDelta, Delta: ch.Delta.ReasoningContent}
+				result.emittedAny = true
+			}
+			if ch.Delta.Content != "" {
+				out <- StreamEvent{Type: EventDelta, Delta: ch.Delta.Content}
+				result.emittedAny = true
+			}
+			for i := range ch.Delta.ToolCalls {
+				tc := ch.Delta.ToolCalls[i]
+				out <- StreamEvent{Type: EventToolCallDelta, ToolCall: &tc}
+				result.emittedAny = true
+			}
+			if ch.FinishReason != "" {
+				result.finishReason = ch.FinishReason
+			}
+		}
+	}
+
+	if err := sc.Err(); err != nil && !errors.Is(err, context.Canceled) {
+		result.streamErr = err
+	}
+	return result
+}
+
+// emitTerminalDone synthesises the final EventDone. The finish_reason
+// sentinels ("decode_error:..." / "stream_error:...") match the pre-
+// retry wire shape so callers (e.g. agent_test.go:TestAgent_DecodeError
+// MidStream_DropsTurn) continue to recognise them.
+func emitTerminalDone(out chan<- StreamEvent, result streamReadResult, openErr error) {
+	finish := result.finishReason
+	switch {
+	case openErr != nil:
+		finish = "stream_error:" + truncate(openErr.Error(), 80)
+	case result.streamErr != nil:
+		msg := result.streamErr.Error()
+		if rest, ok := strings.CutPrefix(msg, "decode: "); ok {
+			finish = "decode_error:" + truncate(rest, 80)
+		} else {
+			finish = "stream_error:" + truncate(msg, 80)
+		}
+	}
+	out <- StreamEvent{
+		Type:         EventDone,
+		Usage:        result.lastUsage,
+		FinishReason: finish,
+	}
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 func truncate(s string, n int) string {
