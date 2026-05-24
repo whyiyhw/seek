@@ -18,10 +18,9 @@ import (
 )
 
 const (
-	defaultBaseURL      = "https://api.anthropic.com"
-	endpointMessages    = "/v1/messages"
-	anthropicVersion    = "2023-06-01"
-	defaultMaxTokens    = 8192
+	defaultBaseURL   = "https://api.anthropic.com"
+	endpointMessages = "/v1/messages"
+	anthropicVersion = "2023-06-01"
 )
 
 // Client is the Anthropic provider. Create with New or newWithBase (tests).
@@ -62,18 +61,18 @@ type anthropicRequest struct {
 }
 
 type anthropicMessage struct {
-	Role    string      `json:"role"`
-	Content any `json:"content"` // string or []contentBlock
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string or []contentBlock
 }
 
 type contentBlock struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text,omitempty"`
-	ID         string          `json:"id,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	ToolUseID  string          `json:"tool_use_id,omitempty"`
-	Content    string          `json:"content,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   string          `json:"content,omitempty"`
 }
 
 type anthropicTool struct {
@@ -96,7 +95,7 @@ type anthropicTool struct {
 func buildRequest(req llm.ChatRequest) anthropicRequest {
 	ar := anthropicRequest{
 		Model:     req.Model,
-		MaxTokens: defaultMaxTokens,
+		MaxTokens: req.MaxTokens,
 		Stream:    true,
 	}
 

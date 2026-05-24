@@ -176,11 +176,6 @@ func TestWrite_LargeContent(t *testing.T) {
 	}
 }
 
-// TestWrite_SymlinkInsideCWDLetsContentEscape is the cross-reference
-// to permission.TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed.
-// The policy lets the path string through (it appears to be inside
-// CWD), the write tool follows the symlink, and the bytes land OUTSIDE
-// CWD. Pinned behaviour, NOT fixed in this commit. See pitfalls log.
 // TestWrite_SchemaIsByteStable pins PRD §4.8.1's cache-stability rule:
 // every Schema() call must return identical bytes so DeepSeek's prefix
 // cache hits across turns. If we ever switch from a package-level
@@ -201,7 +196,11 @@ func TestWrite_SchemaIsByteStable(t *testing.T) {
 	}
 }
 
-func TestWrite_SymlinkInsideCWDLetsContentEscape(t *testing.T) {
+// TestWrite_SymlinkInsideCWDPointingOutsideIsDenied cross-references
+// permission.TestIsWithin_SymlinkInsideCWDPointingOutsideIsDenied.
+// The policy now resolves symlinks so a symlink inside CWD that points
+// outside is correctly denied.
+func TestWrite_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	link := filepath.Join(root, "escape")
@@ -212,15 +211,8 @@ func TestWrite_SymlinkInsideCWDLetsContentEscape(t *testing.T) {
 	p, _ := permission.New(root, permission.ModeDeny)
 	target := filepath.Join(link, "leaked.txt")
 	args, _ := json.Marshal(Args{Path: target, Content: "leaked content"})
-	if _, err := New(p).Execute(context.Background(), args); err != nil {
-		t.Fatalf("symlink-escape write failed: %v", err)
-	}
-	// The bytes landed at outside/leaked.txt — proving the escape.
-	got, err := os.ReadFile(filepath.Join(outside, "leaked.txt"))
-	if err != nil {
-		t.Fatalf("file didn't escape to outside dir: %v", err)
-	}
-	if string(got) != "leaked content" {
-		t.Errorf("content = %q, want 'leaked content'", got)
+	_, err := New(p).Execute(context.Background(), args)
+	if err == nil {
+		t.Error("symlink-escape write was allowed — symlink resolution not working")
 	}
 }

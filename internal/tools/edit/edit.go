@@ -129,7 +129,13 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		return "", err
 	}
 
-	if err := os.WriteFile(clean, []byte(updated), 0o644); err != nil {
+	// Preserve the original file's permission bits so +x on scripts,
+	// special group perms, etc. survive the rewrite. New files get 0o644.
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(clean); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := os.WriteFile(clean, []byte(updated), mode); err != nil {
 		return "", fmt.Errorf("edit: %w", err)
 	}
 

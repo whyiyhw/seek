@@ -32,9 +32,10 @@ type Provider interface {
 
 // ChatRequest is the provider-agnostic request sent to ChatStream.
 type ChatRequest struct {
-	Model    string
-	Messages []Message
-	Tools    []ToolDef
+	Model     string
+	Messages  []Message
+	Tools     []ToolDef
+	MaxTokens int // completion token cap; 0 = provider default
 }
 
 // Message is the canonical provider-agnostic message type.

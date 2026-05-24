@@ -91,9 +91,17 @@ func New(model, cwd, systemPrompt string, yolo bool) *Session {
 
 // generateID returns a sortable ID: "20260121-103045-a1b2c3"
 // (timestamp + 6 random hex chars). Lexical order == creation order.
+// On entropy exhaustion it falls back to a nanosecond-granularity suffix
+// so sessions never collide from a zero-valued random buffer.
 func generateID(t time.Time) string {
 	var rnd [3]byte
-	_, _ = rand.Read(rnd[:])
+	if _, err := rand.Read(rnd[:]); err != nil {
+		// Fallback: nanosecond-precision hex suffix from the timestamp.
+		// The fractional seconds make IDs unique even at high concurrency.
+		return fmt.Sprintf("%s-%s",
+			t.Format("20060102-150405"),
+			fmt.Sprintf("%06x", t.Nanosecond()/1000))
+	}
 	return fmt.Sprintf("%s-%s",
 		t.Format("20060102-150405"),
 		hex.EncodeToString(rnd[:]))
@@ -273,6 +281,11 @@ func (s *Store) Save(sess *Session) error {
 		}
 	}
 
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return fmt.Errorf("session: sync tmp %s: %w", sess.ID, err)
+	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("session: close tmp %s: %w", sess.ID, err)

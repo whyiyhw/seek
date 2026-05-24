@@ -419,6 +419,136 @@ func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 	}
 }
 
+// ---- Paste folding tests ----------------------------------------------
+
+func TestPasteFolding_FoldOnMultiLinePaste(t *testing.T) {
+	// Paste with >5 lines should fold into a placeholder.
+	m := Model{input: textarea.New(), opts: Options{}}
+	lines := "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+	m.input.SetValue(lines)
+
+	out := m.handlePasteFolding()
+	if out.pastedContent != lines {
+		t.Errorf("pastedContent = %q, want full paste", out.pastedContent)
+	}
+	if out.input.Value() == lines {
+		t.Errorf("textarea should show placeholder, not full content")
+	}
+	if !strings.Contains(out.input.Value(), "pasted") {
+		t.Errorf("placeholder should contain 'pasted', got %q", out.input.Value())
+	}
+}
+
+func TestPasteFolding_NoFoldOnShortPaste(t *testing.T) {
+	// Paste with ≤5 lines should NOT fold.
+	m := Model{input: textarea.New(), opts: Options{}}
+	lines := "line1\nline2\nline3"
+	m.input.SetValue(lines)
+
+	out := m.handlePasteFolding()
+	if out.pastedContent != "" {
+		t.Errorf("pastedContent should be empty, got %q", out.pastedContent)
+	}
+	if out.input.Value() != lines {
+		t.Errorf("textarea should keep original content, got %q", out.input.Value())
+	}
+}
+
+func TestPasteFolding_NoFoldOnSingleLine(t *testing.T) {
+	// Single-line paste should NOT fold.
+	m := Model{input: textarea.New(), opts: Options{}}
+	text := "hello world"
+	m.input.SetValue(text)
+
+	out := m.handlePasteFolding()
+	if out.pastedContent != "" {
+		t.Errorf("pastedContent should be empty for single line")
+	}
+	if out.input.Value() != text {
+		t.Errorf("textarea value changed unexpectedly")
+	}
+}
+
+func TestPasteFolding_RestoreOnAnyKey(t *testing.T) {
+	// When folded, any keypress should restore the full content.
+	lines := "line1\nline2\nline3\nline4\nline5\nline6"
+	m := Model{input: textarea.New(), opts: Options{}}
+	m.pastedContent = lines
+	m.input.SetValue("📋 pasted 6 lines — press any key to expand")
+
+	// Simulate a character key press — the restore block in handleKey
+	// should run BEFORE the main switch, restoring content.
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m2 := out.(Model)
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be cleared after restore, got %q", m2.pastedContent)
+	}
+	if !strings.Contains(m2.input.Value(), "line1") {
+		t.Errorf("textarea value should contain restored content, got %q", m2.input.Value())
+	}
+}
+
+func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
+	// The placeholder should include the line count.
+	m := Model{input: textarea.New()}
+	lines := "one\ntwo\nthree\nfour\nfive\nsix\nseven\n" // 8 lines
+	m.input.SetValue(lines)
+	out := m.handlePasteFolding()
+	want := "8 lines"
+	if !strings.Contains(out.input.Value(), want) {
+		t.Errorf("placeholder %q should contain %q", out.input.Value(), want)
+	}
+}
+
+func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
+	// handlePasteFolding is ONLY called when msg.Paste is true. Verify
+	// the guard in handleKey: a non-paste KeyRunes event should NOT fold
+	// even if the textarea has >5 lines.
+	//
+	// We simulate this by calling handleKey with a Paste=false event after
+	// setting up multi-line content.
+	lines := "line1\nline2\nline3\nline4\nline5\nline6"
+	m := Model{input: textarea.New(), opts: Options{}}
+	m.input.SetValue(lines)
+
+	// handleKey only calls handlePasteFolding when msg.Paste is true,
+	// but the restore block checks m.pastedContent non-conditionally.
+	// With a non-paste event pastedContent stays empty, and the fold
+	// check at the end is skipped — content should remain as-is.
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Paste: false})
+	m2 := out.(Model)
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be empty (not a paste), got %q", m2.pastedContent)
+	}
+	// Content should still be the multi-line text (with 'x' appended via
+	// the textarea Update at the end of handleKey).
+	if !strings.Contains(m2.input.Value(), "line6") {
+		t.Errorf("textarea should still contain multi-line content, got %q", m2.input.Value())
+	}
+}
+
+func TestPasteFolding_ExactThreshold(t *testing.T) {
+	// 5 lines = threshold. 6 lines should fold, 5 should not.
+	t.Run("six lines fold", func(t *testing.T) {
+		m := Model{input: textarea.New()}
+		m.input.SetValue("a\nb\nc\nd\ne\nf") // 6 lines
+		out := m.handlePasteFolding()
+		if out.pastedContent == "" {
+			t.Error("6 lines should fold")
+		}
+	})
+	t.Run("five lines no fold", func(t *testing.T) {
+		m := Model{input: textarea.New()}
+		m.input.SetValue("a\nb\nc\nd\ne") // 5 lines
+		out := m.handlePasteFolding()
+		if out.pastedContent != "" {
+			t.Error("5 lines should NOT fold")
+		}
+	})
+}
+
 func TestCmdModel_ArgsPathStillWorks(t *testing.T) {
 	// /model <id> should bypass the picker — used by power users and
 	// for compatible-provider freeform ids.

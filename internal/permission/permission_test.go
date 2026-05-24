@@ -235,23 +235,11 @@ func TestCheck_ConcurrentCallsRaceFree(t *testing.T) {
 	wg.Wait()
 }
 
-// --- Symlink behaviour pin (security note) --------------------------
+// --- Symlink resolution (security) ------------------------------------
 //
-// permission.isWithin works on path strings, not the resolved symlink
-// target. A symlink INSIDE cwd that points OUTSIDE cwd therefore
-// PASSES the check — and the downstream write/edit tool then follows
-// the symlink and escapes. We're pinning the current behaviour rather
-// than fixing it because:
-//
-//  1. seek's threat model is "single user, local tool" — a user who
-//     wanted to write outside cwd could run `bash` directly anyway.
-//  2. A symlinked vendor / build / cache directory is a legitimate
-//     pattern; resolving symlinks would break valid workflows.
-//
-// If we ever tighten this (filepath.EvalSymlinks before isWithin),
-// the assertion below flips — and the change becomes deliberate
-// instead of silent.
-func TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed(t *testing.T) {
+// permission.isWithin now resolves symlinks (filepath.EvalSymlinks) so a
+// symlink INSIDE cwd that points OUTSIDE cwd is correctly caught.
+func TestIsWithin_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	link := filepath.Join(root, "escape")
@@ -261,7 +249,7 @@ func TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed(t *testing.T) {
 
 	p, _ := New(root, ModeDeny)
 	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(link, "x")})
-	if err != nil {
-		t.Errorf("symlink-in-cwd write denied — has the policy started resolving symlinks? %v", err)
+	if err == nil {
+		t.Error("symlink-in-cwd write allowed — symlink resolution not working")
 	}
 }

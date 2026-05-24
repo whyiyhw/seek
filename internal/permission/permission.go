@@ -23,6 +23,7 @@ const (
 	KindBash           Kind = "bash"
 	KindWrite          Kind = "write"
 	KindEdit           Kind = "edit"
+	KindRead           Kind = "read"
 	KindMemoryRemember Kind = "memory_remember"
 )
 
@@ -184,6 +185,17 @@ func (p *Policy) Check(a Action) error {
 		if !inside {
 			dangerous = true
 		}
+	case KindRead:
+		if a.Path == "" {
+			return fmt.Errorf("%w: %s requires a path", ErrDenied, a.Kind)
+		}
+		inside, err := isWithin(cwd, a.Path)
+		if err != nil {
+			return fmt.Errorf("%w: resolve path %q: %v", ErrDenied, a.Path, err)
+		}
+		if !inside {
+			dangerous = true
+		}
 	case KindMemoryRemember:
 		// Memory writes are always dangerous — there is no "safe"
 		// path equivalent. The TUI shows name+tagline so the user
@@ -242,13 +254,31 @@ func (p *Policy) Yolo() bool {
 }
 
 // isWithin reports whether target resolves to a path inside root (inclusive
-// of root itself). Both paths are made absolute before comparison.
+// of root itself). Both paths are made absolute and their symlinks are
+// resolved before comparison so a symlink inside root that points outside
+// is caught.
+//
+// For non-existent paths (e.g. a new file about to be created) we walk up
+// the directory tree until finding an existing ancestor, resolve its
+// symlinks, then append the non-existent suffix — preserving the guard.
 func isWithin(root, target string) (bool, error) {
-	absTarget, err := filepath.Abs(target)
+	// Resolve the root first so symlinks in root-level paths (e.g.
+	// /var → /private/var on macOS) don't cause false denials.
+	absRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false, fmt.Errorf("resolve root %q: %w", root, err)
+	}
+
+	// Resolve symlinks in the target path, walking up if needed.
+	resolved, err := resolveClosest(target)
 	if err != nil {
 		return false, err
 	}
-	rel, err := filepath.Rel(root, absTarget)
+	absTarget, err := filepath.Abs(resolved)
+	if err != nil {
+		return false, err
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
 	if err != nil {
 		return false, err
 	}
@@ -261,6 +291,28 @@ func isWithin(root, target string) (bool, error) {
 	// On non-Unix filesystems Rel can return paths like "..\foo". The
 	// prefix check above covers that. Anything else is "inside".
 	return true, nil
+}
+
+// resolveClosest resolves symlinks on the deepest existing ancestor of path,
+// then appends the non-existent suffix. This handles both existing paths
+// (full EvalSymlinks) and new paths (partial resolution up to the nearest
+// existing directory).
+func resolveClosest(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	// Walk up until we find a parent that exists.
+	parent := filepath.Dir(path)
+	if parent == path {
+		// Reached the root without finding anything — return path as-is.
+		return path, nil
+	}
+	resolvedParent, err := resolveClosest(parent)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolvedParent, filepath.Base(path)), nil
 }
 
 func shorten(s string, n int) string {

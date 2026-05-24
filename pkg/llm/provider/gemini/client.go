@@ -43,6 +43,11 @@ type geminiRequest struct {
 	Contents          []geminiContent  `json:"contents"`
 	Tools             []geminiToolList `json:"tools,omitempty"`
 	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
+}
+
+type geminiGenConfig struct {
+	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
 }
 
 type geminiContent struct {
@@ -57,12 +62,12 @@ type geminiPart struct {
 }
 
 type geminiFuncCall struct {
-	Name string                 `json:"name"`
+	Name string         `json:"name"`
 	Args map[string]any `json:"args"`
 }
 
 type geminiFuncResp struct {
-	Name     string                 `json:"name"`
+	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
 }
 
@@ -167,6 +172,9 @@ func buildRequest(req llm.ChatRequest) ([]byte, error) {
 			decls[i] = geminiFuncDecl{Name: t.Name, Description: t.Description, Parameters: t.Schema}
 		}
 		gr.Tools = []geminiToolList{{FunctionDeclarations: decls}}
+	}
+	if req.MaxTokens > 0 {
+		gr.GenerationConfig = &geminiGenConfig{MaxOutputTokens: req.MaxTokens}
 	}
 	return json.Marshal(gr)
 }

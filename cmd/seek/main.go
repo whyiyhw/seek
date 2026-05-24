@@ -355,7 +355,7 @@ func run() error {
 	}
 
 	reg := tools.New().
-		Add(read.New()).
+		Add(read.New(policy)).
 		Add(grep.New()).
 		Add(listdir.New()).
 		Add(write.New(policy)).

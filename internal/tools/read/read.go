@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
 )
 
@@ -38,18 +39,20 @@ type Args struct {
 }
 
 // Tool is the read tool implementation. Construct via New.
-type Tool struct{}
+type Tool struct {
+	policy *permission.Policy
+}
 
-func New() Tool { return Tool{} }
+func New(p *permission.Policy) Tool { return Tool{policy: p} }
 
-func (Tool) Name() string                 { return "read" }
-func (Tool) Description() string          { return description }
-func (Tool) Schema() json.RawMessage      { return schemaBytes }
-func (Tool) ReadOnly() bool               { return true }
+func (Tool) Name() string            { return "read" }
+func (Tool) Description() string     { return description }
+func (Tool) Schema() json.RawMessage { return schemaBytes }
+func (Tool) ReadOnly() bool          { return true }
 
 const defaultLimit = 50
 
-func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset"); err != nil {
 		return "", err
@@ -65,6 +68,14 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	}
 
 	clean := filepath.Clean(a.Path)
+
+	if err := t.policy.Check(permission.Action{
+		Kind: permission.KindRead,
+		Path: a.Path,
+	}); err != nil {
+		return "", err
+	}
+
 	f, err := os.Open(clean)
 	if err != nil {
 		return "", fmt.Errorf("read: %w", err)

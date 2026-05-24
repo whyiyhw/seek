@@ -217,7 +217,11 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error) {
 	msgs := msgsToLLM(a.messages)
 	msgs = append(msgs, llm.Message{Role: "user", Content: summariserPrompt})
-	req := llm.ChatRequest{Model: a.cfg.Model, Messages: msgs}
+	req := llm.ChatRequest{
+		Model:     a.cfg.Model,
+		Messages:  msgs,
+		MaxTokens: a.cfg.MaxTokens,
+	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)
 	if err != nil {
@@ -576,9 +580,10 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 // (history, session save, TUI rendering) is unchanged.
 func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	req := llm.ChatRequest{
-		Model:    a.cfg.Model,
-		Messages: msgsToLLM(a.messages),
-		Tools:    toolsToLLM(a.cfg.Tools),
+		Model:     a.cfg.Model,
+		Messages:  msgsToLLM(a.messages),
+		Tools:     toolsToLLM(a.cfg.Tools),
+		MaxTokens: a.cfg.MaxTokens,
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)

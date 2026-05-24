@@ -42,6 +42,7 @@ func (c *Client) Name() string { return "OpenAI" }
 type openAIRequest struct {
 	Model         string          `json:"model"`
 	Messages      []openAIMessage `json:"messages"`
+	MaxTokens     int             `json:"max_tokens,omitempty"`
 	Tools         []openAITool    `json:"tools,omitempty"`
 	Stream        bool            `json:"stream"`
 	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
@@ -60,9 +61,9 @@ type openAIMessage struct {
 }
 
 type openAIToolCall struct {
-	ID       string            `json:"id"`
-	Type     string            `json:"type"`
-	Function openAIToolCallFn  `json:"function"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function openAIToolCallFn `json:"function"`
 }
 
 type openAIToolCallFn struct {
@@ -71,8 +72,8 @@ type openAIToolCallFn struct {
 }
 
 type openAITool struct {
-	Type     string          `json:"type"`
-	Function openAIToolFn    `json:"function"`
+	Type     string       `json:"type"`
+	Function openAIToolFn `json:"function"`
 }
 
 type openAIToolFn struct {
@@ -92,14 +93,14 @@ type streamChoice struct {
 }
 
 type streamDelta struct {
-	Content   *string          `json:"content"`
-	ToolCalls []tcDeltaChunk   `json:"tool_calls,omitempty"`
+	Content   *string        `json:"content"`
+	ToolCalls []tcDeltaChunk `json:"tool_calls,omitempty"`
 }
 
 type tcDeltaChunk struct {
-	Index    int         `json:"index"`
-	ID       string      `json:"id,omitempty"`
-	Function *tcFnChunk  `json:"function,omitempty"`
+	Index    int        `json:"index"`
+	ID       string     `json:"id,omitempty"`
+	Function *tcFnChunk `json:"function,omitempty"`
 }
 
 type tcFnChunk struct {
@@ -163,7 +164,8 @@ func convertTools(tools []llm.ToolDef) []openAITool {
 func (c *Client) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Event, error) {
 	buf, err := json.Marshal(openAIRequest{
 		Model: req.Model, Messages: convertMessages(req.Messages),
-		Tools: convertTools(req.Tools), Stream: true,
+		MaxTokens: req.MaxTokens, Tools: convertTools(req.Tools),
+		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	})
 	if err != nil {
