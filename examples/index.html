@@ -71,7 +71,6 @@
   }
   .btn:focus-visible,
   .lang-toggle:focus-visible,
-  .install-block:focus-visible,
   .install-option code:focus-visible {
     outline: 2px solid var(--teal);
     outline-offset: 2px;
@@ -202,61 +201,6 @@
     0%   { opacity: 0; transform: scale(.9); filter: blur(5px); }
     100% { opacity: 1; transform: scale(1);  filter: blur(0); }
   }
-
-  /* Install command block — typing effect */
-  .install-block {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 16px 20px;
-    display: inline-flex;
-    align-items: center;
-    gap: 14px;
-    font-size: .85rem;
-    transition: border-color .25s;
-    cursor: pointer;
-    position: relative;
-    min-height: 52px;
-    overflow: hidden;
-  }
-  .install-block:hover { border-color: var(--amber); }
-  .install-block .prompt {
-    color: var(--amber);
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-  .install-block .cmd {
-    color: var(--teal);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-height: 1.2em;
-  }
-  .install-block .cursor {
-    display: inline-block;
-    width: 8px;
-    height: 1.15em;
-    background: var(--teal);
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    animation: blink 1s step-end infinite;
-  }
-  .install-block .cursor.done {
-    animation: none;
-    opacity: 0;
-    transition: opacity .3s;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-  .install-block .copy-hint {
-    font-size: .7rem;
-    color: var(--dim);
-    flex-shrink: 0;
-    opacity: 0;
-    transition: opacity .5s ease;
-  }
-  .install-block .copy-hint.show { opacity: 1; }
-  .install-block:hover .copy-hint.show { color: var(--teal); }
-  .install-block.copied .copy-hint { color: var(--green); opacity: 1; }
 
   /* Ripple effect */
   .ripple {
@@ -689,12 +633,27 @@
     cursor: pointer;
     transition: border-color .2s;
     min-height: 44px;
+    position: relative;
   }
   .install-option code:hover { border-color: var(--teal); }
   .install-option code .prompt-inline { color: var(--amber); }
+  .install-option code::after {
+    content: "📋";
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: .3;
+    transition: opacity .2s;
+    font-size: .8rem;
+    pointer-events: none;
+  }
+  .install-option code:hover::after { opacity: 1; }
+  .install-option code:active::after { opacity: 1; }
 
   @media (max-width: 640px) {
     .install-grid { grid-template-columns: 1fr; }
+    .install-option code::after { display: none; }
   }
 
   /* ============ FOOTER ============ */
@@ -726,9 +685,8 @@
   @media (max-width: 640px) {
     section { padding: 60px 0; }
     section[id] { scroll-margin-top: 60px; }
-    .install-block { width: 100%; justify-content: space-between; font-size: .78rem; }
-    .install-block .cmd { font-size: .75rem; }
-    .diff-card { padding: 24px 20px; }
+    .container { padding: 0 16px; }
+    .diff-card { padding: 20px 16px; }
     .diff-card .metric { font-size: 1.6rem; }
     .lang-toggle { top: 12px; right: 12px; font-size: .7rem; padding: 6px 12px; }
     .back-top { bottom: 16px; right: 12px; width: 40px; height: 40px; }
@@ -737,6 +695,8 @@
     .price-wrap th, .price-wrap td { padding: 10px 10px; }
     .cost-bars { padding: 18px 16px; }
     .term-body { padding: 14px 14px; font-size: .75rem; }
+    .install-option { padding: 16px; }
+    .feat { padding: 14px 16px; }
   }
 
   /* ============ PRINT STYLES ============ */
@@ -746,7 +706,7 @@
     .lang-toggle, .back-top, .skip-link { display: none !important; }
     .ascii-logo { color: #333; text-shadow: none; }
     .btn-primary { background: #333; color: #fff; box-shadow: none; }
-    .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .install-block, .term-window {
+    .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .term-window {
       background: #f5f5f5;
       border-color: #ddd;
       break-inside: avoid;
@@ -836,22 +796,6 @@
   }
   @media (max-width: 800px) {
     .diff-grid.diff-grid--three { grid-template-columns: 1fr; }
-  }
-
-  /* ============ BRAND SECTION ============ */
-  .brand-hero {
-    text-align: center;
-    padding: 80px 0 60px;
-  }
-  .brand-hero .meta {
-    max-width: none;
-    text-align: center;
-    margin-bottom: 20px;
-    font-size: .85rem;
-  }
-  .brand-hero .install-block {
-    margin: 0 auto;
-    display: inline-flex;
   }
 
   @media (max-width: 640px) {
@@ -1182,31 +1126,6 @@
   </div>
 </section>
 
-<!-- ============ BRAND ============ -->
-<section class="brand-hero">
-  <p class="meta reveal" style="max-width:none;text-align:center;">
-    <span data-lang="en">5 MB · zero deps</span>
-    <span data-lang="zh" hidden>5 MB · 零依赖</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">MIT licensed</span>
-    <span data-lang="zh" hidden>MIT 开源</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">no telemetry</span>
-    <span data-lang="zh" hidden>无遥测</span>
-    <span class="sep"> · </span>
-    <span data-lang="en">multi-provider</span>
-    <span data-lang="zh" hidden>多模型支持</span>
-  </p>
-
-  <div class="install-block reveal" id="install-cmd" title="Click to copy" tabindex="0" role="button" aria-label="Copy install command">
-    <span class="prompt">$</span>
-    <span class="cmd" id="cmd-text"></span>
-    <span class="cursor" id="cmd-cursor"></span>
-    <span class="copy-hint" id="cmd-hint" data-lang="en">copy</span>
-    <span class="copy-hint" id="cmd-hint-zh" data-lang="zh" hidden>复制</span>
-  </div>
-</section>
-
 <!-- ============ INSTALL ============ -->
 <section id="install">
   <div class="section-head reveal">
@@ -1264,7 +1183,7 @@
         <span data-lang="en">Built-in atomic in-place update — no re-download needed.</span>
         <span data-lang="zh" hidden>内置原子级原地更新——无需重新下载。</span>
       </p>
-      <code id="code-upgrade" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> seek -upgrade       <span data-lang="en"># replaces the running binary atomically</span><span data-lang="zh" hidden># 原子替换正在运行的二进制</span></code>
+      <code id="code-upgrade" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> sudo seek -upgrade <span data-lang="en"># replaces the running binary atomically</span><span data-lang="zh" hidden># 原子替换正在运行的二进制</span></code>
     </div>
   </div>
 
@@ -1324,47 +1243,6 @@
   });
 
   setLang(currentLang);
-
-  // ============ INSTALL COMMAND TYPING (fires when brand section scrolls in) ============
-  (function typeInstall() {
-    const cmdEl = document.getElementById('cmd-text');
-    const cursor = document.getElementById('cmd-cursor');
-    const hint = document.getElementById('cmd-hint');
-    const hintZh = document.getElementById('cmd-hint-zh');
-    const brandSection = document.querySelector('.brand-hero');
-    const fullCmd = 'go install github.com/whyiyhw/seek/cmd/seek@latest';
-    let i = 0;
-    let started = false;
-
-    function type() {
-      if (i < fullCmd.length) {
-        cmdEl.textContent += fullCmd[i];
-        i++;
-        const delay = fullCmd[i - 1] === ' ' ? 60 : 25 + Math.random() * 20;
-        setTimeout(type, delay);
-      } else {
-        cursor.classList.add('done');
-        if (hint) hint.classList.add('show');
-        if (hintZh) hintZh.classList.add('show');
-      }
-    }
-
-    function startTyping() {
-      if (started) return;
-      started = true;
-      setTimeout(type, 400);
-    }
-
-    if (brandSection) {
-      const obs = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) {
-          startTyping();
-          obs.unobserve(brandSection);
-        }
-      }, { threshold: 0.15 });
-      obs.observe(brandSection);
-    }
-  })();
 
   // ============ TERMINAL TYPEWRITER ============
   (function termTyper() {
@@ -1534,26 +1412,13 @@
     ripple.addEventListener('animationend', () => ripple.remove());
   }
 
-  document.querySelectorAll('.btn, .install-block, .install-option code').forEach(el => {
+  document.querySelectorAll('.btn, .install-option code').forEach(el => {
     el.addEventListener('click', function (e) {
       createRipple(e, this);
     });
   });
 
   // ============ COPY TO CLIPBOARD ============
-  function copyText(text, el) {
-    navigator.clipboard.writeText(text).then(() => {
-      el.classList.add('copied');
-      const hints = el.querySelectorAll('.copy-hint');
-      hints.forEach(h => {
-        const orig = h.textContent;
-        h.textContent = h.getAttribute('data-lang') === 'en' ? 'copied!' : '已复制！';
-        setTimeout(() => { h.textContent = orig; }, 1800);
-      });
-      setTimeout(() => el.classList.remove('copied'), 1800);
-    });
-  }
-
   function visibleText(el) {
     let result = '';
     el.childNodes.forEach(node => {
@@ -1564,16 +1429,6 @@
       }
     });
     return result;
-  }
-
-  // Hero install block
-  const installCmd = document.getElementById('install-cmd');
-  if (installCmd) {
-    installCmd.addEventListener('click', function (e) {
-      createRipple(e, this);
-      const text = 'go install github.com/whyiyhw/seek/cmd/seek@latest';
-      copyText(text, this);
-    });
   }
 
   // Install section code blocks

@@ -422,9 +422,10 @@ func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 // ---- Paste folding tests ----------------------------------------------
 
 func TestPasteFolding_FoldOnMultiLinePaste(t *testing.T) {
-	// Paste with >5 lines should fold into a placeholder.
+	// Paste with lines exceeding textarea height should fold.
 	m := Model{input: textarea.New(), opts: Options{}}
-	lines := "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+	m.input.SetHeight(3)
+	lines := "line1\nline2\nline3\nline4" // 4 lines > 3 height
 	m.input.SetValue(lines)
 
 	out := m.handlePasteFolding()
@@ -440,9 +441,10 @@ func TestPasteFolding_FoldOnMultiLinePaste(t *testing.T) {
 }
 
 func TestPasteFolding_NoFoldOnShortPaste(t *testing.T) {
-	// Paste with ≤5 lines should NOT fold.
+	// Paste with lines ≤ textarea height should NOT fold.
 	m := Model{input: textarea.New(), opts: Options{}}
-	lines := "line1\nline2\nline3"
+	m.input.SetHeight(3)
+	lines := "line1\nline2\nline3" // 3 lines ≤ 3 height
 	m.input.SetValue(lines)
 
 	out := m.handlePasteFolding()
@@ -469,29 +471,35 @@ func TestPasteFolding_NoFoldOnSingleLine(t *testing.T) {
 	}
 }
 
-func TestPasteFolding_RestoreOnAnyKey(t *testing.T) {
-	// When folded, any keypress should restore the full content.
+func TestPasteFolding_MarkerPersistsOnNonEnterKey(t *testing.T) {
+	// When folded, a non-Enter keypress should NOT restore content.
+	// The marker stays in place and the user can type around it.
 	lines := "line1\nline2\nline3\nline4\nline5\nline6"
 	m := Model{input: textarea.New(), opts: Options{}}
 	m.pastedContent = lines
-	m.input.SetValue("📋 pasted 6 lines — press any key to expand")
+	m.pastedLineCount = 6
+	m.input.SetValue("📋 pasted 6 lines — press Enter to send")
 
-	// Simulate a character key press — the restore block in handleKey
-	// should run BEFORE the main switch, restoring content.
+	// Simulate a character key press — without the old restore block,
+	// pastedContent should remain set and the marker should still be visible.
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	m2 := out.(Model)
 
-	if m2.pastedContent != "" {
-		t.Errorf("pastedContent should be cleared after restore, got %q", m2.pastedContent)
+	if m2.pastedContent != lines {
+		t.Errorf("pastedContent should be preserved on non-Enter key, got %q", m2.pastedContent)
 	}
-	if !strings.Contains(m2.input.Value(), "line1") {
-		t.Errorf("textarea value should contain restored content, got %q", m2.input.Value())
+	if strings.Contains(m2.input.Value(), "line1") {
+		t.Errorf("textarea should still show marker, not restored content, got %q", m2.input.Value())
+	}
+	if !strings.Contains(m2.input.Value(), "press Enter to send") {
+		t.Errorf("textarea should still contain marker text, got %q", m2.input.Value())
 	}
 }
 
 func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
 	// The placeholder should include the line count.
 	m := Model{input: textarea.New()}
+	m.input.SetHeight(3)
 	lines := "one\ntwo\nthree\nfour\nfive\nsix\nseven\n" // 8 lines
 	m.input.SetValue(lines)
 	out := m.handlePasteFolding()
@@ -504,7 +512,7 @@ func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
 func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
 	// handlePasteFolding is ONLY called when msg.Paste is true. Verify
 	// the guard in handleKey: a non-paste KeyRunes event should NOT fold
-	// even if the textarea has >5 lines.
+	// even if the textarea has >3 lines.
 	//
 	// We simulate this by calling handleKey with a Paste=false event after
 	// setting up multi-line content.
@@ -512,10 +520,9 @@ func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
 	m := Model{input: textarea.New(), opts: Options{}}
 	m.input.SetValue(lines)
 
-	// handleKey only calls handlePasteFolding when msg.Paste is true,
-	// but the restore block checks m.pastedContent non-conditionally.
-	// With a non-paste event pastedContent stays empty, and the fold
-	// check at the end is skipped — content should remain as-is.
+	// handleKey only calls handlePasteFolding when msg.Paste is true.
+	// With a non-paste event, folding is skipped and pastedContent stays
+	// empty — content should remain as-is.
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Paste: false})
 	m2 := out.(Model)
 
@@ -530,23 +537,163 @@ func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
 }
 
 func TestPasteFolding_ExactThreshold(t *testing.T) {
-	// 5 lines = threshold. 6 lines should fold, 5 should not.
-	t.Run("six lines fold", func(t *testing.T) {
+	// textarea height = threshold. 4 lines should fold, 3 should not.
+	t.Run("four lines fold", func(t *testing.T) {
 		m := Model{input: textarea.New()}
-		m.input.SetValue("a\nb\nc\nd\ne\nf") // 6 lines
+		m.input.SetHeight(3)
+		m.input.SetValue("a\nb\nc\nd") // 4 lines
 		out := m.handlePasteFolding()
 		if out.pastedContent == "" {
-			t.Error("6 lines should fold")
+			t.Error("4 lines should fold")
 		}
 	})
-	t.Run("five lines no fold", func(t *testing.T) {
+	t.Run("three lines no fold", func(t *testing.T) {
 		m := Model{input: textarea.New()}
-		m.input.SetValue("a\nb\nc\nd\ne") // 5 lines
+		m.input.SetHeight(3)
+		m.input.SetValue("a\nb\nc") // 3 lines
 		out := m.handlePasteFolding()
 		if out.pastedContent != "" {
-			t.Error("5 lines should NOT fold")
+			t.Error("3 lines should NOT fold")
 		}
 	})
+}
+
+// ---- Paste resolution on Enter ----------------------------------------
+
+func TestPasteFolding_StreamingEnterResolvesPaste(t *testing.T) {
+	// Streaming + Enter: folded paste should be resolved before queueing.
+	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7"
+	m := streamingModel(t, "")
+	m.streaming = true
+	m.pastedContent = content
+	m.pastedLineCount = 7
+	m.input.SetValue("📋 pasted 7 lines — press Enter to send")
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be cleared after Enter, got %q", m2.pastedContent)
+	}
+	if m2.pastedLineCount != 0 {
+		t.Errorf("pastedLineCount should be 0 after Enter, got %d", m2.pastedLineCount)
+	}
+	if m2.queuedText != content {
+		t.Errorf("queuedText should be the full paste content, got %q", m2.queuedText)
+	}
+}
+
+func TestPasteFolding_StreamingEnterResolvesPasteWithTyping(t *testing.T) {
+	// Streaming + Enter: user typed additional text after the marker,
+	// both the paste and the extra text should appear in queuedText.
+	content := "line1\nline2\nline3\nline4\nline5\nline6"
+	m := streamingModel(t, "")
+	m.streaming = true
+	m.pastedContent = content
+	m.pastedLineCount = 6
+	m.input.SetValue("📋 pasted 6 lines — press Enter to send and also fix this")
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	want := content + " and also fix this"
+	if m2.queuedText != want {
+		t.Errorf("queuedText should combine paste + typed text:\ngot:  %q\nwant: %q",
+			m2.queuedText, want)
+	}
+}
+
+func TestPasteFolding_StreamingAltEnterResolvesPaste(t *testing.T) {
+	// Streaming + Alt+Enter: folded paste should be resolved for steer.
+	content := "fix this:\nremove the panic\nadd error handling"
+	m := streamingModel(t, "")
+	m.streaming = true
+	m.pastedContent = content
+	m.pastedLineCount = 3
+	m.input.SetValue("📋 pasted 3 lines — press Enter to send")
+	m.cancelStream = func() {} // no-op, just needs to be non-nil
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m2 := out.(Model)
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be cleared after Alt+Enter, got %q", m2.pastedContent)
+	}
+	if m2.pendingSteerText != content {
+		t.Errorf("pendingSteerText should be the full paste, got %q", m2.pendingSteerText)
+	}
+}
+
+func TestPasteFolding_StreamingEnterPasteNotEmptyOnEmptyTyping(t *testing.T) {
+	// Streaming + Enter with only the marker in the textarea (no extra
+	// typing) should produce a non-empty queuedText = the pasted content.
+	// Regression: the old empty-text check must not fire when the
+	// resolved value is the paste itself.
+	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8"
+	m := streamingModel(t, "")
+	m.streaming = true
+	m.pastedContent = content
+	m.pastedLineCount = 8
+	m.input.SetValue("📋 pasted 8 lines — press Enter to send")
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.queuedText == "" {
+		t.Error("queuedText should be non-empty (the paste content)")
+	}
+	if m2.queuedText != content {
+		t.Errorf("queuedText = %q, want paste content %q", m2.queuedText, content)
+	}
+}
+
+func TestPasteFolding_NonStreamingEnterConsumesPasteState(t *testing.T) {
+	// Non-streaming + Enter: even though submit will fail (no agent),
+	// the paste state should be consumed and the input cleared.
+	content := "a\nb\nc\nd\ne\nf"
+	m := Model{input: textarea.New()}
+	m.pastedContent = content
+	m.pastedLineCount = 6
+	m.input.SetValue("📋 pasted 6 lines — press Enter to send")
+
+	// handleKey will reach m.submit() which panics on nil agent.
+	// We catch the panic and verify the paste state was already consumed.
+	var m2 Model
+	func() {
+		defer func() { recover() }()
+		out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m2 = out.(Model)
+	}()
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be cleared after Enter, got %q", m2.pastedContent)
+	}
+	if m2.pastedLineCount != 0 {
+		t.Errorf("pastedLineCount should be 0 after Enter, got %d", m2.pastedLineCount)
+	}
+}
+
+func TestPasteFolding_NonStreamingEnterWithExtraTextConsumesPaste(t *testing.T) {
+	// Non-streaming: paste marker + extra text → paste state consumed.
+	content := "errors.go:\nfunc handleErr"
+	m := Model{input: textarea.New()}
+	m.pastedContent = content
+	m.pastedLineCount = 2
+	m.input.SetValue("📋 pasted 2 lines — press Enter to send and add context")
+
+	var m2 Model
+	func() {
+		defer func() { recover() }()
+		out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		m2 = out.(Model)
+	}()
+
+	if m2.pastedContent != "" {
+		t.Errorf("pastedContent should be cleared, got %q", m2.pastedContent)
+	}
+	if m2.pastedLineCount != 0 {
+		t.Errorf("pastedLineCount should be 0, got %d", m2.pastedLineCount)
+	}
 }
 
 func TestCmdModel_ArgsPathStillWorks(t *testing.T) {

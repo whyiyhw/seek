@@ -215,17 +215,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDistillKey(msg)
 	}
 
-	// Paste-fold restore: when the textarea is folded (pastedContent != "")
-	// ANY keypress restores the full pasted content and clears the flag.
-	// The key then proceeds to normal handling — Enter submits, Esc/char
-	// continues editing, Ctrl+C quits, etc.
-	if m.pastedContent != "" {
-		m.input.SetValue(m.pastedContent)
-		m.pastedContent = ""
-		// Fall through — the current key is processed against the restored
-		// content (e.g. Enter submits, a character key inserts at the end).
-	}
-
 	// @-path picker has the same priority as the slash menu; the
 	// trigger character ("@" vs "/") makes them mutually exclusive
 	// in practice.
@@ -433,6 +422,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// falls through to m.input.Update(msg) at the end of handleKey
 		// and the textarea handles it natively.
 		if m.streaming {
+			// Resolve folded paste: replace marker with actual content before sending.
+			if m.pastedContent != "" {
+				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
+				val := m.input.Value()
+				if strings.Contains(val, marker) {
+					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
+				}
+				m.pastedContent = ""
+				m.pastedLineCount = 0
+			}
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				// Empty Enter on an empty textarea has no submission
@@ -482,6 +481,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Resolve folded paste: replace marker with actual content before sending.
+		if m.pastedContent != "" {
+			marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
+			val := m.input.Value()
+			if strings.Contains(val, marker) {
+				m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
+			}
+			m.pastedContent = ""
+			m.pastedLineCount = 0
+		}
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
 			return m, nil
@@ -530,9 +539,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.updateCommandMenu()
 	m.updatePathCompleter()
 
-	// Paste folding: when pasted content exceeds 5 lines, fold it into
-	// a compact placeholder to keep the small textarea manageable. Only
-	// fires on paste events (msg.Paste) so normal typing never triggers it.
+	// Paste folding: when pasted content exceeds textarea height, fold
+	// it into a compact placeholder to keep the small textarea manageable.
+	// Only fires on paste events (msg.Paste) so normal typing never
+	// triggers it.
 	if msg.Paste {
 		m = m.handlePasteFolding()
 	}
@@ -748,22 +758,23 @@ func filterCommands(cmds []command, prefix string) []command {
 	return out
 }
 
-// handlePasteFolding checks if the textarea content exceeds 5 lines and,
-// if so, replaces the display with a compact placeholder. The full content
-// is preserved in m.pastedContent and restored on the next keypress (see
-// the restore block at the top of handleKey).
+// handlePasteFolding checks if the textarea content exceeds its visible
+// height and, if so, replaces the display with a compact marker placeholder.
+// The full content is preserved in m.pastedContent and is substituted at
+// submit time (Enter) when the marker is replaced with the actual pasted
+// content.
 //
 // Only called on paste events (msg.Paste == true) so normal typing or
 // Ctrl+J newlines never trigger folding.
 func (m Model) handlePasteFolding() Model {
-	const thresholdLines = 5
 	val := m.input.Value()
 	lines := strings.Count(val, "\n") + 1
-	if lines > thresholdLines {
+	if lines > m.input.Height() {
 		m.pastedContent = val
+		m.pastedLineCount = lines
 		m.input.Reset()
 		m.input.SetValue(fmt.Sprintf(
-			"📋 pasted %d lines — press any key to expand", lines,
+			"📋 pasted %d lines — press Enter to send", lines,
 		))
 	}
 	return m
