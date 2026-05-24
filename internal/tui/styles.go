@@ -10,19 +10,19 @@ import "github.com/charmbracelet/lipgloss"
 // light backgrounds. SetTheme() picks the right one and rebuilds
 // the package-level style vars.
 type palette struct {
-	User       lipgloss.Color
-	Assistant  lipgloss.Color
-	Tool       lipgloss.Color
-	ToolErr    lipgloss.Color
-	Reasoning  lipgloss.Color
-	Muted      lipgloss.Color
-	Accent     lipgloss.Color
-	Ok         lipgloss.Color
-	StatusBg   lipgloss.Color
-	StatusFg   lipgloss.Color
-	BannerFg   lipgloss.Color
-	BannerBg   lipgloss.Color
-	MenuSel    lipgloss.Color
+	User      lipgloss.Color
+	Assistant lipgloss.Color
+	Tool      lipgloss.Color
+	ToolErr   lipgloss.Color
+	Reasoning lipgloss.Color
+	Muted     lipgloss.Color
+	Accent    lipgloss.Color
+	Ok        lipgloss.Color
+	StatusBg  lipgloss.Color
+	StatusFg  lipgloss.Color
+	BannerFg  lipgloss.Color
+	BannerBg  lipgloss.Color
+	MenuSel   lipgloss.Color
 }
 
 var darkPalette = palette{
@@ -82,6 +82,11 @@ var (
 
 	styleToolLine  = lipgloss.NewStyle().Foreground(colourTool)
 	styleToolError = lipgloss.NewStyle().Foreground(colourToolErr)
+
+	// Diff-block accents used by colorizeDiffBlocks (view.go). Applied to
+	// `+`/`-` lines inside ```diff fences embedded in tool error messages.
+	// `-` lines reuse styleToolError; only `+` (add) needs a separate style.
+	styleDiffAdd = lipgloss.NewStyle().Foreground(colourOk)
 
 	styleReasoning = lipgloss.NewStyle().Foreground(colourReasoning).Italic(true)
 
@@ -153,6 +158,7 @@ func SetTheme(theme string) {
 
 	styleToolLine = lipgloss.NewStyle().Foreground(colourTool)
 	styleToolError = lipgloss.NewStyle().Foreground(colourToolErr)
+	styleDiffAdd = lipgloss.NewStyle().Foreground(colourOk)
 
 	styleReasoning = lipgloss.NewStyle().Foreground(colourReasoning).Italic(true)
 
@@ -160,26 +166,26 @@ func SetTheme(theme string) {
 	styleErr = lipgloss.NewStyle().Foreground(colourToolErr).Bold(true)
 
 	styleStatusBar = lipgloss.NewStyle().
-			Background(colourStatusBg).
-			Foreground(colourStatusFg)
+		Background(colourStatusBg).
+		Foreground(colourStatusFg)
 
 	styleStatusOffPeak = lipgloss.NewStyle().
-				Background(colourBannerBg).
-				Foreground(colourBannerFg).
-				Bold(true).
-				Padding(0, 1)
+		Background(colourBannerBg).
+		Foreground(colourBannerFg).
+		Bold(true).
+		Padding(0, 1)
 
 	styleHeader = lipgloss.NewStyle().
-			Foreground(colourAccent).
-			Bold(true)
+		Foreground(colourAccent).
+		Bold(true)
 
 	styleApprovalHeader = lipgloss.NewStyle().
-				Foreground(colourToolErr).
-				Bold(true)
+		Foreground(colourToolErr).
+		Bold(true)
 
 	styleMenuSelected = lipgloss.NewStyle().
-				Foreground(colourMenuSel).
-				Bold(true)
+		Foreground(colourMenuSel).
+		Bold(true)
 	styleMenuItem = lipgloss.NewStyle().
-			Foreground(colourMuted)
+		Foreground(colourMuted)
 }

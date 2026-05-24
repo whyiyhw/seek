@@ -1,14 +1,29 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+// forceColor pins lipgloss to a colour-emitting profile for the duration of
+// a test. Without this, lipgloss detects "not a TTY" in `go test` and
+// silently strips all SGR codes — which makes any assertion about colour
+// output trivially fail.
+func forceColor(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
 
 func TestFormatCommittedDuration(t *testing.T) {
 	cases := []struct {
@@ -151,5 +166,229 @@ func TestStreamingLabel_OverSecond(t *testing.T) {
 	}
 	if !strings.Contains(got, "s") {
 		t.Errorf("should contain elapsed seconds, got %q", got)
+	}
+}
+
+// ANSI SGR for 256-colour foreground "n" is "\x1b[38;5;Nm". The palette
+// values are defined in styles.go (darkPalette: Ok=114, ToolErr=203,
+// Muted=241). When lipgloss is pinned to ANSI256 these are deterministic.
+const (
+	sgrOk      = "\x1b[38;5;114m" // styleDiffAdd / colourOk
+	sgrToolErr = "\x1b[38;5;203m" // styleToolError / `-` lines
+	sgrMuted   = "\x1b[38;5;241m" // styleMuted / fence + context
+)
+
+func TestColorizeDiffBlocks_NoFenceIsTransparent(t *testing.T) {
+	forceColor(t)
+	in := "plain error message\nsecond line"
+	got := colorizeDiffBlocks(in, styleToolError)
+	// Without a ```diff fence the helper takes the fast path and wraps
+	// the whole input in defaultStyle — equivalent to the pre-existing
+	// renderer's behaviour. Single-style render is what we want here.
+	if !strings.Contains(got, sgrToolErr) {
+		t.Errorf("plain error should be rendered with toolErr colour, got: %q", got)
+	}
+	if strings.Contains(got, sgrOk) {
+		t.Errorf("no diff fence → no add-line colour should appear, got: %q", got)
+	}
+}
+
+func TestColorizeDiffBlocks_PerLineColors(t *testing.T) {
+	forceColor(t)
+	in := strings.Join([]string{
+		"edit: 0 matches",
+		"",
+		"closest candidate at lines 487-490:",
+		"```diff",
+		"--- a/lines 487-490",
+		"+++ b/lines 487-490",
+		"@@ -1,4 +1,4 @@",
+		"-    .typing-cursor.done {",
+		"+  .typing-cursor.done {",
+		" unchanged context",
+		"```",
+		"Tip: copy `+` lines verbatim.",
+	}, "\n")
+
+	got := colorizeDiffBlocks(in, styleToolError)
+
+	// The two load-bearing assertions: `+` and `-` lines must end up with
+	// DIFFERENT colours, otherwise the whole point of this change is lost.
+	if !strings.Contains(got, sgrOk+"+  .typing-cursor.done {") {
+		t.Errorf("`+` add line should use ok/green colour. Output:\n%q", got)
+	}
+	if !strings.Contains(got, sgrToolErr+"-    .typing-cursor.done {") {
+		t.Errorf("`-` del line should use toolErr/red colour. Output:\n%q", got)
+	}
+
+	// Structural lines (fence open/close, file headers, context, hunk
+	// header) get muted so the eye is drawn to +/- instead.
+	mutedLines := []string{
+		"```diff",
+		"--- a/lines 487-490",
+		"+++ b/lines 487-490",
+		"@@ -1,4 +1,4 @@",
+		" unchanged context",
+	}
+	for _, ln := range mutedLines {
+		if !strings.Contains(got, sgrMuted+ln) {
+			t.Errorf("structural line %q should be muted. Output:\n%q", ln, got)
+		}
+	}
+
+	// Text outside the fence uses the default (tool-error) style.
+	if !strings.Contains(got, sgrToolErr+"edit: 0 matches") {
+		t.Errorf("text before fence should use defaultStyle. Output:\n%q", got)
+	}
+	if !strings.Contains(got, sgrToolErr+"Tip: copy `+` lines verbatim.") {
+		t.Errorf("text after fence should use defaultStyle. Output:\n%q", got)
+	}
+
+	// Sanity: the `+++` file-header MUST come out muted, not green.
+	// HasPrefix("+++", "+") is true; the switch order in the helper
+	// handles file headers first to avoid mis-classifying them as adds.
+	if strings.Contains(got, sgrOk+"+++") {
+		t.Errorf("`+++` file header must not be rendered as an add line. Output:\n%q", got)
+	}
+	if strings.Contains(got, sgrToolErr+"---") {
+		// styleToolError is the `-` line colour — `---` must not collide.
+		// `---` appears inside the diff block as a file header; outside it,
+		// the only `-` would be at start of a needle line, but our fixture
+		// has none. So any sgrToolErr+`---` means the file header was
+		// mis-classified.
+		t.Errorf("`---` file header must not be rendered as a del line. Output:\n%q", got)
+	}
+}
+
+func TestColorizeDiffBlocks_MultipleFences(t *testing.T) {
+	forceColor(t)
+	in := strings.Join([]string{
+		"first error",
+		"```diff",
+		"-old1",
+		"+new1",
+		"```",
+		"between fences (plain)",
+		"```diff",
+		"-old2",
+		"+new2",
+		"```",
+		"tail",
+	}, "\n")
+	got := colorizeDiffBlocks(in, styleToolError)
+	// Both fences should colourise their `+` lines.
+	if !strings.Contains(got, sgrOk+"+new1") {
+		t.Errorf("first fence `+` line missing colour: %q", got)
+	}
+	if !strings.Contains(got, sgrOk+"+new2") {
+		t.Errorf("second fence `+` line missing colour: %q", got)
+	}
+	// Between-fences text must use defaultStyle (not stuck in diff mode).
+	if !strings.Contains(got, sgrToolErr+"between fences (plain)") {
+		t.Errorf("text between fences should use defaultStyle, got: %q", got)
+	}
+}
+
+func TestRenderCommittedToolErr_PlainErrorUnchangedShape(t *testing.T) {
+	forceColor(t)
+	got := renderCommittedToolErr("edit", "args", "0 matches found", 250*time.Millisecond)
+	// Structural invariants from the old single-Render version: the chrome
+	// is present, the body is present, the duration tail is present.
+	for _, want := range []string{"↳ edit(args)", "ERROR:", "0 matches found", " · 0.2s"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q: %q", want, got)
+		}
+	}
+}
+
+func TestRenderCommittedToolErr_DiffBlockGetsColored(t *testing.T) {
+	forceColor(t)
+	err := "0 matches\n\n```diff\n-old\n+new\n```\nTip: copy +."
+	got := renderCommittedToolErr("edit", "args", err, time.Second)
+	if !strings.Contains(got, sgrOk+"+new") {
+		t.Errorf("`+` line inside embedded diff should be green. Output:\n%q", got)
+	}
+	if !strings.Contains(got, sgrToolErr+"-old") {
+		t.Errorf("`-` line inside embedded diff should be red. Output:\n%q", got)
+	}
+}
+
+func TestExtractDiffSection_StripsFence(t *testing.T) {
+	in := "edited /tmp/x: 1 replacement, 10 → 12 bytes\n" +
+		"```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n```"
+	body := extractDiffSection(in)
+	if body == "" {
+		t.Fatal("expected diff body, got empty")
+	}
+	// Fence lines themselves must be stripped — the TUI shouldn't show
+	// markdown delimiters to the user.
+	if strings.Contains(body, "```") {
+		t.Errorf("body should not contain fence markers, got: %q", body)
+	}
+	// The diff content must survive intact.
+	for _, want := range []string{"--- a/x", "+++ b/x", "@@ -1 +1 @@", "-old", "+new"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q: %q", want, body)
+		}
+	}
+	// The pre-fence header line must NOT leak through — the TUI's
+	// summary line already covers it.
+	if strings.Contains(body, "edited /tmp/x") {
+		t.Errorf("body should not include pre-fence header, got: %q", body)
+	}
+}
+
+func TestExtractDiffSection_ReturnsEmptyForNoFence(t *testing.T) {
+	// Non-edit tools (read, grep, bash, …) return text without any ```diff
+	// fence. extractDiffSection must report "no diff" so renderCommittedToolOk
+	// stays on the one-line summary path.
+	if got := extractDiffSection("just some output\nno fences here"); got != "" {
+		t.Errorf("expected empty for non-fenced input, got %q", got)
+	}
+	if got := extractDiffSection(""); got != "" {
+		t.Errorf("expected empty for empty input, got %q", got)
+	}
+}
+
+func TestRenderCommittedToolOk_DiffResultShowsColoredDiff(t *testing.T) {
+	forceColor(t)
+	result := "edited /tmp/x: 1 replacement(s), 10 → 12 bytes\n" +
+		"```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n```"
+	got := renderCommittedToolOk("edit", "/tmp/x", result, 200*time.Millisecond, "")
+	// Summary line stays on top.
+	if !strings.Contains(got, "↳ edit(/tmp/x)") {
+		t.Errorf("summary line missing: %q", got)
+	}
+	// Coloured diff body sits beneath it.
+	if !strings.Contains(got, sgrOk+"+new") {
+		t.Errorf("`+` line should be green under success line. Output:\n%q", got)
+	}
+	if !strings.Contains(got, sgrToolErr+"-old") {
+		t.Errorf("`-` line should be red under success line. Output:\n%q", got)
+	}
+	// The markdown fence itself must NOT appear in the rendered output —
+	// it's a parsing artifact, not user-facing content.
+	if strings.Contains(got, "```diff") {
+		t.Errorf("rendered output should not contain ```diff fence marker. Output:\n%q", got)
+	}
+}
+
+func TestRenderCommittedToolOk_NonDiffResultStaysOneLine(t *testing.T) {
+	forceColor(t)
+	// Simulate a non-edit tool's result (e.g. `read`, `grep`). Should
+	// render exactly as before — a single summary line with no extra rows.
+	result := "found 3 matches in /tmp/x\n  /tmp/x:10:hit one\n  /tmp/x:14:hit two\n  /tmp/x:22:hit three"
+	got := renderCommittedToolOk("grep", "pattern", result, 50*time.Millisecond, "")
+	if strings.Count(got, "\n") != 0 {
+		t.Errorf("non-diff result should render as single line, got %d newlines:\n%q",
+			strings.Count(got, "\n"), got)
+	}
+	if !strings.Contains(got, "↳ grep(pattern)") {
+		t.Errorf("summary line missing: %q", got)
+	}
+	// And the byte count must be the FULL result length, not just the
+	// summary-line length — the signature now derives from len(result).
+	if !strings.Contains(got, fmt.Sprintf("%d bytes", len(result))) {
+		t.Errorf("byte count should be len(result)=%d: %q", len(result), got)
 	}
 }

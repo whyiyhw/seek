@@ -878,7 +878,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		if e.Err != nil {
 			line = renderCommittedToolErr(e.Name, args, e.Err.Error(), duration)
 		} else {
-			line = renderCommittedToolOk(e.Name, args, len(e.Result), duration, tokenTail)
+			line = renderCommittedToolOk(e.Name, args, e.Result, duration, tokenTail)
 		}
 		cmds = append(cmds, tea.Println(line))
 		m.scrollbackLines += scrollbackLineCount(line)

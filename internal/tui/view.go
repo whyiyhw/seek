@@ -483,14 +483,136 @@ func renderCommittedAssistant(content, reasoning string, showReasoning bool, wid
 	return out
 }
 
-func renderCommittedToolOk(name, args string, resultBytes int, d time.Duration, tokenTail string) string {
-	return styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s%s",
-		name, args, resultBytes, durationTail(d), tokenTail))
+func renderCommittedToolOk(name, args, result string, d time.Duration, tokenTail string) string {
+	head := styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s%s",
+		name, args, len(result), durationTail(d), tokenTail))
+	// If the result carries a ```diff fenced section (today: only emitted
+	// by the edit tool), surface the diff coloured under the summary line
+	// so the human can verify the change without leaving the TUI. Other
+	// tools' results have no fence and stay one-line.
+	body := extractDiffSection(result)
+	if body == "" {
+		return head
+	}
+	return head + "\n" + colorizeDiffBody(body)
+}
+
+// extractDiffSection returns the body of the first ```diff ... ``` fence
+// found in s, with the fence delimiters themselves stripped. Returns ""
+// when no fence is present.
+//
+// This is intentionally narrow: it pulls only the diff portion, dropping
+// anything that came before (e.g. the edit tool's "edited /path: N
+// replacements" header — which the TUI already shows in its own summary
+// line). What's left is raw unified-diff text ready for line-by-line
+// colouring.
+func extractDiffSection(s string) string {
+	const open = "```diff\n"
+	start := strings.Index(s, open)
+	if start == -1 {
+		return ""
+	}
+	body := s[start+len(open):]
+	if end := strings.Index(body, "\n```"); end != -1 {
+		body = body[:end]
+	}
+	return body
+}
+
+// colorizeDiffBody renders a block of de-fenced unified-diff text. Caller
+// must have already stripped the ```diff / ``` delimiters (see
+// extractDiffSection). Per-line colours match colorizeDiffBlocks so the
+// success and failure paths look the same.
+func colorizeDiffBody(s string) string {
+	var out strings.Builder
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		var rendered string
+		switch {
+		case strings.HasPrefix(ln, "---"), strings.HasPrefix(ln, "+++"):
+			rendered = styleMuted.Render(ln)
+		case strings.HasPrefix(ln, "+"):
+			rendered = styleDiffAdd.Render(ln)
+		case strings.HasPrefix(ln, "-"):
+			rendered = styleToolError.Render(ln)
+		default:
+			rendered = styleMuted.Render(ln)
+		}
+		out.WriteString(rendered)
+		if i < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 func renderCommittedToolErr(name, args, err string, d time.Duration) string {
-	return styleToolError.Render(fmt.Sprintf("  ↳ %s(%s) → ERROR: %s%s",
-		name, args, err, durationTail(d)))
+	// Split the message into [chrome] + [body] + [tail] so the body can
+	// receive per-line styling while the framing keeps the uniform error
+	// colour. The body recogniser is in colorizeDiffBlocks — outside any
+	// ```diff fence it falls back to styleToolError, so a plain-text
+	// error renders byte-for-byte the way it always did.
+	head := fmt.Sprintf("  ↳ %s(%s) → ERROR: ", name, args)
+	body := colorizeDiffBlocks(err, styleToolError)
+	tail := durationTail(d)
+	return styleToolError.Render(head) + body + styleToolError.Render(tail)
+}
+
+// colorizeDiffBlocks scans s for ```diff ... ``` fenced code blocks and
+// renders the lines inside with per-line colour: `+` green (styleDiffAdd),
+// `-` red (styleToolError), and structural lines (fence, `---`/`+++` file
+// headers, `@@` hunks, context) muted. Everything OUTSIDE any fence is
+// wrapped in defaultStyle.
+//
+// This is a TUI-display-only transformation. The tool's own result string
+// — what the LLM sees — stays plain text; colours are added at scrollback-
+// commit time and never travel back through the API. That separation is
+// the load-bearing property: the model gets clean bytes, the human gets
+// visual differentiation.
+//
+// Inputs without any ```diff fence take a fast path (single Render call).
+func colorizeDiffBlocks(s string, defaultStyle lipgloss.Style) string {
+	if !strings.Contains(s, "```diff") {
+		return defaultStyle.Render(s)
+	}
+	lines := strings.Split(s, "\n")
+	var out strings.Builder
+	inDiff := false
+	for i, ln := range lines {
+		var rendered string
+		switch {
+		case !inDiff && strings.HasPrefix(ln, "```diff"):
+			inDiff = true
+			rendered = styleMuted.Render(ln)
+		case inDiff && strings.HasPrefix(ln, "```"):
+			inDiff = false
+			rendered = styleMuted.Render(ln)
+		case inDiff:
+			switch {
+			// `---` / `+++` file headers come BEFORE `-` / `+` add/del
+			// detection — otherwise HasPrefix("---", "-") would mis-classify
+			// them as deletions.
+			case strings.HasPrefix(ln, "---"), strings.HasPrefix(ln, "+++"):
+				rendered = styleMuted.Render(ln)
+			case strings.HasPrefix(ln, "+"):
+				rendered = styleDiffAdd.Render(ln)
+			case strings.HasPrefix(ln, "-"):
+				rendered = styleToolError.Render(ln)
+			default:
+				// Hunk headers (`@@ ...`) and unchanged context lines go
+				// here. Muted keeps them readable but pushes the eye to
+				// the `+`/`-` differences, which is where the signal is.
+				rendered = styleMuted.Render(ln)
+			}
+		default:
+			rendered = defaultStyle.Render(ln)
+		}
+		out.WriteString(rendered)
+		if i < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 // durationTail is the trailing " · 0.8s" / " · 1m23s" we hang off
