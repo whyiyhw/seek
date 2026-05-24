@@ -48,7 +48,9 @@ func allCommands() []command {
 		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
 		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
+		{names: []string{"/lang"}, usage: "/lang [en|zh|auto]", description: "Set response language preference. No args opens a picker. Switching invalidates the prefix cache; effective after /new.", handler: cmdLang},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
+		{names: []string{"/plan"}, usage: "/plan", description: "Toggle plan mode (read-only exploration) for the rest of this session.", handler: cmdPlan},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
@@ -131,7 +133,7 @@ func cmdNew(m *Model, _ string) cmdResult {
 	// Guard against --no-save mode where session persistence is off:
 	// don't silently convert an ephemeral run to a persisted one.
 	if m.opts.Session != nil && m.opts.Store != nil {
-		sess := session.New(m.opts.Model, m.opts.CWD, "", m.opts.Yolo)
+		sess := session.New(m.opts.Model, m.opts.CWD, "", m.opts.Yolo, m.opts.Plan)
 		m.opts.Session = sess
 		// The Save below is best-effort; the session will also be saved
 		// on the next auto-save cycle.
@@ -282,6 +284,14 @@ func (m *Model) applyModelChoice(idx int) {
 		m.applyEffortChoice(value)
 		m.input.Reset()
 
+	case "lang":
+		selected := choice.id
+		if selected == "auto" {
+			selected = ""
+		}
+		m.applyLangChoice(selected)
+		m.input.Reset()
+
 	case "model", "":
 		// Switch the active model. Status bar's "model:" segment
 		// updates on the next View() frame; an explicit Println would
@@ -401,6 +411,88 @@ func displayEffort(v string) string {
 	return v
 }
 
+func cmdLang(m *Model, args string) cmdResult {
+	if m.opts.SetLang == nil {
+		return cmdResult{text: styleMuted.Render("/lang unavailable in this build (SetLang hook not wired)")}
+	}
+
+	// Arg path: accept "en" | "zh" | "auto" directly.
+	if args != "" {
+		var value string
+		switch strings.ToLower(args) {
+		case "en":
+			value = "en"
+		case "zh":
+			value = "zh"
+		case "auto", "":
+			value = ""
+		default:
+			return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+				"/lang: unknown %q — try en|zh|auto", args))}
+		}
+		prev := displayLang(m.opts.Lang)
+		m.applyLangChoice(value)
+		return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+			"language: %s → %s (effective on next prompt)", prev, displayLang(value)))}
+	}
+
+	// No args: open the picker. Preselect the row matching the current
+	// setting so Enter without motion is a no-op.
+	choices := langChoices()
+	m.modelPickerFiltered = choices
+	m.modelPickerSelected = 0
+	current := m.opts.Lang
+	if current == "" {
+		current = "auto"
+	}
+	for i, c := range choices {
+		if c.id == current {
+			m.modelPickerSelected = i
+			break
+		}
+	}
+	m.modelPickerOpen = true
+	m.pickerPurpose = "lang"
+	return cmdResult{}
+}
+
+// langChoices is the curated picker for /lang.
+func langChoices() []modelChoice {
+	return []modelChoice{
+		{"auto", "auto — detect from system locale"},
+		{"en", "en — English"},
+		{"zh", "zh — 中文"},
+	}
+}
+
+// displayLang formats the wire value ("" | "en" | "zh") for display.
+// "" is shown as "auto".
+func displayLang(v string) string {
+	if v == "" {
+		return "auto"
+	}
+	return v
+}
+
+// applyLangChoice writes the new /lang value through SetLang and
+// persists to the in-memory session. Mirrors applyEffortChoice.
+func (m *Model) applyLangChoice(value string) {
+	prev := m.opts.Lang
+	m.opts.Lang = value
+	if m.opts.SetLang != nil {
+		m.opts.SetLang(value)
+	}
+	if m.opts.Agent != nil {
+		m.opts.Agent.SetLang(value)
+	}
+	if m.opts.Session != nil {
+		m.opts.Session.Lang = value
+	}
+	_ = prev // reserved for a future Println
+
+	m.refreshPlaceholder()
+}
+
 // setupProviderChoices returns the provider list shown by /setup. We
 // pull it from cmd/seek's wizard table indirectly — but tui can't
 // import cmd/seek, so this list lives here and stays in sync via
@@ -505,6 +597,19 @@ func cmdYolo(m *Model, _ string) cmdResult {
 		state = "on"
 	}
 	return cmdResult{text: styleMuted.Render("yolo " + state)}
+}
+
+func cmdPlan(m *Model, _ string) cmdResult {
+	m.opts.Plan = !m.opts.Plan
+	if m.opts.SetPlan != nil {
+		m.opts.SetPlan(m.opts.Plan)
+	}
+	m.refreshPlaceholder()
+	state := "off"
+	if m.opts.Plan {
+		state = "on"
+	}
+	return cmdResult{text: styleMuted.Render("plan " + state)}
 }
 
 func cmdQuit(_ *Model, _ string) cmdResult {
