@@ -45,6 +45,19 @@ const gracePeriod = 7 * 24 * time.Hour
 // preventing the unbounded growth that a hard exemption would cause.
 const autoSourcedGracePeriod = 30 * 24 * time.Hour
 
+// autoPromoteObservations is the M5.11 threshold: when memory_observe
+// has written (or overwritten) the same auto_sourced entry ≥3 times
+// across independent sessions, auto-flip AutoSourced to false —
+// repeated independent observation is as strong a signal as explicit
+// user confirmation.
+const autoPromoteObservations = 3
+
+// autoPromoteRecalls is the M5.11 threshold: when the model has called
+// memory_recall on an auto_sourced entry ≥3 times (meaning it actively
+// depends on the entry), auto-flip AutoSourced to false — the model
+// "voting with its feet" is the strongest signal of quality.
+const autoPromoteRecalls = 3
+
 // HalfLifeFromEnv resolves SEEK_MEMORY_HALFLIFE_DAYS to a Duration,
 // falling back to defaultHalfLife on absent / unparseable / non-positive.
 // Misconfiguration silently degrades rather than failing the session —

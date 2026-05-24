@@ -196,3 +196,324 @@ func TestHook_OnSessionStart_NilProjectIsSafe(t *testing.T) {
 	// Must not panic; observers can't surface errors anyway.
 	h.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
 }
+
+// ----- M5.9: snapshot + delta tests -----
+
+// TestHook_OnPrePrompt_SecondCallEmptyWhenNoChanges verifies that turn 2+
+// OnPrePrompt returns no Prepend when no entries were added mid-session.
+func TestHook_OnPrePrompt_SecondCallEmptyWhenNoChanges(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "existing", Tagline: "stays"})
+
+	h := &Hook{Project: p}
+
+	// Turn 1: inject snapshot → gets index.
+	out1, err := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if len(out1.Prepend) == 0 {
+		t.Fatal("first call should inject snapshot (index)")
+	}
+	if !h.snapshotInjected {
+		t.Fatal("snapshotInjected should be true after first call")
+	}
+
+	// Turn 2: no changes → empty Prepend.
+	out2, err := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(out2.Prepend) != 0 {
+		t.Errorf("second call with no changes should produce 0 Prepend, got %d messages: %v",
+			len(out2.Prepend), out2.Prepend)
+	}
+}
+
+// TestHook_OnPrePrompt_DeltaAfterNewEntry verifies that a new entry added
+// after the snapshot produces a <context type="memory.delta"> on the next
+// OnPrePrompt call.
+func TestHook_OnPrePrompt_DeltaAfterNewEntry(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "alpha", Tagline: "original"})
+
+	h := &Hook{Project: p}
+
+	// Turn 1: inject snapshot.
+	out1, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out1.Prepend) != 1 {
+		t.Fatalf("expected 1 prepend (index), got %d", len(out1.Prepend))
+	}
+	if !strings.Contains(out1.Prepend[0].Content, `<context source="memory.index">`) {
+		t.Fatalf("turn 1 should inject memory.index, got %q", out1.Prepend[0].Content)
+	}
+
+	// Add a new entry mid-session.
+	_ = p.Add(Entry{Name: "beta", Tagline: "added later"})
+
+	// Turn 2: should get a delta.
+	out2, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out2.Prepend) != 1 {
+		t.Fatalf("expected 1 delta message, got %d", len(out2.Prepend))
+	}
+	delta := out2.Prepend[0]
+	if !strings.Contains(delta.Content, `<context source="memory.delta">`) {
+		t.Errorf("should wrap memory.delta, got %q", delta.Content)
+	}
+	if !strings.Contains(delta.Content, "beta: added later") {
+		t.Errorf("delta should mention new entry, got %q", delta.Content)
+	}
+	if strings.Contains(delta.Content, "alpha") {
+		t.Errorf("delta should NOT mention original snapshot entry, got %q", delta.Content)
+	}
+}
+
+// TestHook_OnPrePrompt_DeltaOnlyNewEntries verifies that delta only
+// lists additions since snapshot, not pre-existing entries.
+func TestHook_OnPrePrompt_DeltaOnlyNewEntries(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "keep", Tagline: "in snapshot"})
+
+	h := &Hook{Project: p}
+
+	// Turn 1.
+	_, _ = h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+
+	// Add two new entries.
+	_ = p.Add(Entry{Name: "new1", Tagline: "first addition"})
+	_ = p.Add(Entry{Name: "new2", Tagline: "second addition"})
+
+	out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out.Prepend) != 1 {
+		t.Fatalf("expected 1 delta, got %d", len(out.Prepend))
+	}
+	content := out.Prepend[0].Content
+	if !strings.Contains(content, "new1") || !strings.Contains(content, "new2") {
+		t.Errorf("delta should include both new entries: %q", content)
+	}
+	if strings.Contains(content, "keep") {
+		t.Errorf("delta should NOT include 'keep' (was in snapshot): %q", content)
+	}
+}
+
+// TestHook_OnPrePrompt_DeltaByteStable verifies that two consecutive
+// delta calls with the same set of additions produce identical bytes.
+func TestHook_OnPrePrompt_DeltaByteStable(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "old", Tagline: "from snapshot"})
+
+	hashDelta := func(h *Hook) string {
+		out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+		if len(out.Prepend) == 0 {
+			return ""
+		}
+		m := sha256.Sum256([]byte(out.Prepend[0].Content))
+		return hex.EncodeToString(m[:])
+	}
+
+	h := &Hook{Project: p}
+	_, _ = h.OnPrePrompt(context.Background(), hooks.PrePromptIn{}) // snapshot
+
+	// Add entries in non-alphabetical order to exercise sort.
+	_ = p.Add(Entry{Name: "zeta", Tagline: "last"})
+	_ = p.Add(Entry{Name: "alpha", Tagline: "first"})
+
+	first := hashDelta(h)
+	second := hashDelta(h)
+
+	if first == "" {
+		t.Fatal("expected non-empty delta hash")
+	}
+	if first != second {
+		t.Errorf("delta not byte-stable across consecutive calls:\n first=%s\n second=%s", first, second)
+	}
+}
+
+// ----- M5.11: auto_sourced flexibility tests -----
+
+// TestHook_OnPrePrompt_AutoSourcedPrefixInIndex verifies that auto_sourced
+// entries get an [auto] prefix in the M-index, while confirmed entries do not.
+func TestHook_OnPrePrompt_AutoSourcedPrefixInIndex(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "confirmed", Tagline: "user reviewed", AutoSourced: false})
+	// Plant an auto_sourced entry directly.
+	plantEntry(t, p, Entry{
+		Name:        "auto-entry",
+		Tagline:     "model observed",
+		AutoSourced: true,
+	})
+
+	h := &Hook{Project: p}
+	out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out.Prepend) != 1 {
+		t.Fatalf("expected 1 prepend (index), got %d", len(out.Prepend))
+	}
+	content := out.Prepend[0].Content
+
+	if !strings.Contains(content, "[auto] auto-entry: model observed") {
+		t.Errorf("auto_sourced entry should have [auto] prefix, got:\n%s", content)
+	}
+	if strings.Contains(content, "[auto] confirmed:") {
+		t.Errorf("confirmed entry should NOT have [auto] prefix, got:\n%s", content)
+	}
+}
+
+// TestHook_OnPrePrompt_AutoSourcedPrefixInDelta verifies that auto_sourced
+// entries added mid-session get [auto] prefix in the delta.
+func TestHook_OnPrePrompt_AutoSourcedPrefixInDelta(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "existing", Tagline: "from snapshot"})
+
+	h := &Hook{Project: p}
+	_, _ = h.OnPrePrompt(context.Background(), hooks.PrePromptIn{}) // snapshot
+
+	// Add an auto_sourced entry mid-session.
+	_ = p.Add(Entry{Name: "new-auto", Tagline: "fresh observe", AutoSourced: true})
+
+	out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if len(out.Prepend) != 1 {
+		t.Fatalf("expected 1 delta, got %d", len(out.Prepend))
+	}
+	content := out.Prepend[0].Content
+	if !strings.Contains(content, "[auto] new-auto: fresh observe") {
+		t.Errorf("delta should have [auto] prefix for auto_sourced entry, got:\n%s", content)
+	}
+}
+
+// TestHook_OnPrePrompt_ByteStableWithAutoSourced verifies that the snapshot
+// is byte-stable across reloads when entries have AutoSourced=true —
+// the [auto] prefix must be deterministic, not a source of drift.
+func TestHook_OnPrePrompt_ByteStableWithAutoSourced(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	// Mix of auto_sourced and confirmed entries.
+	_ = p.Add(Entry{Name: "confirmed", Tagline: "t-confirmed", AutoSourced: false})
+	plantEntry(t, p, Entry{
+		Name:        "auto-one",
+		Tagline:     "t-auto-one",
+		AutoSourced: true,
+	})
+	plantEntry(t, p, Entry{
+		Name:        "auto-two",
+		Tagline:     "t-auto-two",
+		AutoSourced: true,
+	})
+
+	hash := func(h *Hook) string {
+		out, err := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+		if err != nil {
+			t.Fatalf("OnPrePrompt: %v", err)
+		}
+		var sb strings.Builder
+		for _, m := range out.Prepend {
+			sb.WriteString(m.Role)
+			sb.WriteString("\x1f")
+			sb.WriteString(m.Content)
+			sb.WriteString("\x1e")
+		}
+		sum := sha256.Sum256([]byte(sb.String()))
+		return hex.EncodeToString(sum[:])
+	}
+
+	first := hash(&Hook{Project: p})
+	p2, _ := LoadOrCreate(cwd)
+	second := hash(&Hook{Project: p2})
+
+	if first != second {
+		t.Errorf("snapshot not byte-stable with auto_sourced entries:\n first=%s\n second=%s", first, second)
+	}
+}
+
+// TestHook_OnPrePrompt_AutoSourcedFlipChangesHash verifies a deliberate
+// cross-session invariant: when an auto_sourced entry is promoted to
+// confirmed between sessions, the snapshot hash changes (because the
+// [auto] prefix is removed). This is expected and documents the design.
+func TestHook_OnPrePrompt_AutoSourcedFlipChangesHash(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	plantEntry(t, p, Entry{
+		Name:        "will-promote",
+		Tagline:     "t",
+		AutoSourced: true,
+	})
+
+	hash := func(p *Project) string {
+		h := &Hook{Project: p}
+		out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+		var sb strings.Builder
+		for _, m := range out.Prepend {
+			sb.WriteString(m.Content)
+		}
+		sum := sha256.Sum256([]byte(sb.String()))
+		return hex.EncodeToString(sum[:])
+	}
+
+	autoHash := hash(p)
+
+	// Simulate user y-confirming the entry between sessions.
+	p3, _ := LoadOrCreate(cwd)
+	_ = p3.Add(Entry{Name: "will-promote", Tagline: "t", AutoSourced: false})
+
+	confirmedHash := hash(p3)
+
+	if autoHash == confirmedHash {
+		t.Error("snapshot hash should differ when auto_sourced status changes between sessions")
+		return
+	}
+	// Verify the source of the difference is the [auto] prefix:
+	// the auto_sourced snapshot should contain [auto], the confirmed
+	// should not.
+	hAuto := &Hook{Project: p}
+	outAuto, _ := hAuto.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if !strings.Contains(outAuto.Prepend[0].Content, "[auto] will-promote") {
+		t.Error("auto_sourced snapshot should contain [auto] will-promote")
+	}
+	hConfirmed := &Hook{Project: p3}
+	outConfirmed, _ := hConfirmed.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+	if strings.Contains(outConfirmed.Prepend[0].Content, "[auto] will-promote") {
+		t.Error("confirmed snapshot should NOT contain [auto] will-promote")
+	}
+}
+
+// TestHook_OnPrePrompt_DeltaByteStableWithAutoSourced verifies that delta
+// output is byte-stable when the added entry is auto_sourced — the [auto]
+// prefix must not introduce non-determinism.
+func TestHook_OnPrePrompt_DeltaByteStableWithAutoSourced(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+	_ = p.Add(Entry{Name: "snap", Tagline: "in snapshot"})
+
+	hashDelta := func(h *Hook) string {
+		out, _ := h.OnPrePrompt(context.Background(), hooks.PrePromptIn{})
+		if len(out.Prepend) == 0 {
+			return ""
+		}
+		m := sha256.Sum256([]byte(out.Prepend[0].Content))
+		return hex.EncodeToString(m[:])
+	}
+
+	h := &Hook{Project: p}
+	_, _ = h.OnPrePrompt(context.Background(), hooks.PrePromptIn{}) // snapshot
+
+	// Add auto_sourced entries in non-alphabetical order.
+	_ = p.Add(Entry{Name: "z", Tagline: "last-alpha", AutoSourced: true})
+	_ = p.Add(Entry{Name: "a", Tagline: "first-alpha", AutoSourced: true})
+
+	first := hashDelta(h)
+	second := hashDelta(h)
+
+	if first == "" {
+		t.Fatal("expected non-empty delta hash with auto_sourced entries")
+	}
+	if first != second {
+		t.Errorf("delta with auto_sourced entries not byte-stable:\n first=%s\n second=%s", first, second)
+	}
+}

@@ -367,3 +367,135 @@ func errorsContains(err, target error) bool {
 	}
 	return false
 }
+
+// ----- M5.11: auto_sourced flexibility tests -----
+
+func TestAdd_AutoSourcedObserveCountIncrement(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	// First observe: observe_count should be 1.
+	_ = p.Add(Entry{
+		Name:         "obs-entry",
+		Tagline:      "t",
+		Content:      "c",
+		AutoSourced:  true,
+		ObserveCount: 1,
+	})
+	e, _ := p.Get("obs-entry")
+	if e.ObserveCount != 1 {
+		t.Fatalf("first add: expected ObserveCount=1, got %d", e.ObserveCount)
+	}
+
+	// Second observe (same name): should increment to 2.
+	_ = p.Add(Entry{
+		Name:         "obs-entry",
+		Tagline:      "t-updated",
+		Content:      "c2",
+		AutoSourced:  true,
+		ObserveCount: 1,
+	})
+	e2, _ := p.Get("obs-entry")
+	if e2.ObserveCount != 2 {
+		t.Errorf("second add: expected ObserveCount=2, got %d", e2.ObserveCount)
+	}
+	if e2.Tagline != "t-updated" {
+		t.Errorf("content should be updated, got %q", e2.Tagline)
+	}
+}
+
+func TestAdd_AutoSourcedPromotionOnObservations(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	plantEntry(t, p, Entry{
+		Name:         "promo-entry",
+		Tagline:      "t",
+		Content:      "c",
+		AutoSourced:  true,
+		ObserveCount: 2,
+	})
+
+	_ = p.Add(Entry{
+		Name:         "promo-entry",
+		Tagline:      "t-v3",
+		Content:      "c3",
+		AutoSourced:  true,
+		ObserveCount: 1,
+	})
+	e, _ := p.Get("promo-entry")
+	if e.AutoSourced {
+		t.Errorf("expected auto-promotion (AutoSourced=false) after 3 observations")
+	}
+	if e.ObserveCount != 3 {
+		t.Errorf("expected ObserveCount=3, got %d", e.ObserveCount)
+	}
+}
+
+func TestTouchRecall_AutoSourcedPromotionOnRecalls(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	now := time.Now().UTC()
+	plantEntry(t, p, Entry{
+		Name:           "recall-promo",
+		Tagline:        "t",
+		Content:        "c",
+		AutoSourced:    true,
+		RecallCount:    2,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LastRecalledAt: now,
+	})
+
+	if err := p.TouchRecall("recall-promo", now); err != nil {
+		t.Fatalf("TouchRecall: %v", err)
+	}
+	e, _ := p.Get("recall-promo")
+	if e.AutoSourced {
+		t.Errorf("expected auto-promotion (AutoSourced=false) after 3 recalls")
+	}
+	if e.RecallCount != 3 {
+		t.Errorf("expected RecallCount=3, got %d", e.RecallCount)
+	}
+}
+
+func TestTouchRecall_NoPromotionBeforeThreshold(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	now := time.Now().UTC()
+	plantEntry(t, p, Entry{
+		Name:           "no-promo",
+		Tagline:        "t",
+		Content:        "c",
+		AutoSourced:    true,
+		RecallCount:    1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		LastRecalledAt: now,
+	})
+
+	if err := p.TouchRecall("no-promo", now); err != nil {
+		t.Fatalf("TouchRecall: %v", err)
+	}
+	e, _ := p.Get("no-promo")
+	if !e.AutoSourced {
+		t.Errorf("entry with recall_count=2 should still be AutoSourced=true")
+	}
+}
+
+func TestAdd_NonAutoSourcedNoObserveIncrement(t *testing.T) {
+	cwd, _ := withMemoryEnv(t)
+	p, _ := LoadOrCreate(cwd)
+
+	_ = p.Add(Entry{Name: "confirmed", Tagline: "t", Content: "c"})
+	_ = p.Add(Entry{Name: "confirmed", Tagline: "t2", Content: "c2"})
+	e, _ := p.Get("confirmed")
+	if e.ObserveCount != 0 {
+		t.Errorf("confirmed entry should have ObserveCount=0, got %d", e.ObserveCount)
+	}
+	if e.AutoSourced {
+		t.Errorf("confirmed entry should have AutoSourced=false")
+	}
+}

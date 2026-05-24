@@ -89,6 +89,9 @@ func TestObserveEnqueue_WritesAutoSourcedOnAccept(t *testing.T) {
 	if !entry.AutoSourced {
 		t.Errorf("entry should have AutoSourced=true")
 	}
+	if entry.ObserveCount != 1 {
+		t.Errorf("first observe should have ObserveCount=1, got %d", entry.ObserveCount)
+	}
 }
 
 func TestObserveEnqueue_RespectsSessionCap(t *testing.T) {
@@ -193,6 +196,10 @@ func TestObserveEnqueue_OverwritesUnconfirmedEntry(t *testing.T) {
 	if got.UpdatedAt.Equal(old) {
 		t.Errorf("UpdatedAt should be refreshed after overwrite")
 	}
+	// After overwriting an auto_sourced entry, ObserveCount is incremented.
+	if got.ObserveCount < 1 {
+		t.Errorf("ObserveCount should be ≥1 after overwrite, got %d", got.ObserveCount)
+	}
 }
 
 func TestObserveEnqueue_PerNameDedup(t *testing.T) {
@@ -248,9 +255,9 @@ func TestObserveEnqueue_PerNameDedup(t *testing.T) {
 
 func TestObserve_FilterParse(t *testing.T) {
 	tests := []struct {
-		raw      string
-		want     FilterResult
-		wantErr  bool
+		raw     string
+		want    FilterResult
+		wantErr bool
 	}{
 		{`{"decision": "ACCEPT", "reason": "good"}`, FilterAccept, false},
 		{`{"decision": "REJECT", "reason": "duplicate"}`, FilterReject, false},

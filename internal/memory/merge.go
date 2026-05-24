@@ -3,6 +3,7 @@ package memory
 import (
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -83,9 +84,9 @@ func MergeIntoL(existingMarkdown string, incoming []LCandidate) string {
 //
 // Expected format per candidate:
 //
-//	- **trait text**
-//	  - 来源 / why: evidence
-//	  - sources: proj-a, proj-b
+//   - **trait text**
+//   - 来源 / why: evidence
+//   - sources: proj-a, proj-b
 //
 // The 来源 / why and sources lines are optional.
 func parseLMarkdown(s string) []LCandidate {
@@ -134,6 +135,26 @@ func parseLMarkdown(s string) []LCandidate {
 					if s != "" {
 						current.Sources = append(current.Sources, s)
 					}
+				}
+			}
+			continue
+		}
+
+		// Indented sub-bullet: "- 首次观察：<date>" (M5.10)
+		if strings.HasPrefix(line, "- ") && strings.Contains(line, "首次观察") {
+			if _, after, ok := strings.Cut(line, "："); ok {
+				if t, err := time.Parse("2006-01-02", strings.TrimSpace(after)); err == nil {
+					current.FirstSeen = t
+				}
+			}
+			continue
+		}
+
+		// Indented sub-bullet: "- 最近确认：<date>" (M5.10)
+		if strings.HasPrefix(line, "- ") && strings.Contains(line, "最近确认") {
+			if _, after, ok := strings.Cut(line, "："); ok {
+				if t, err := time.Parse("2006-01-02", strings.TrimSpace(after)); err == nil {
+					current.LastSeen = t
 				}
 			}
 			continue
@@ -218,8 +239,8 @@ func levenshtein(a, b string) int {
 				cost = 1
 			}
 			curr[j] = min3(
-				prev[j]+1,     // delete
-				curr[j-1]+1,   // insert
+				prev[j]+1,      // delete
+				curr[j-1]+1,    // insert
 				prev[j-1]+cost, // substitute
 			)
 		}

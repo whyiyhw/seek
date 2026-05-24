@@ -31,6 +31,7 @@ type entryInfo struct {
 	tags        []string
 	pinned      bool
 	recallCount int
+	autoSourced bool
 }
 
 // Hook is the memory subsystem's manifestation on the agent's
@@ -104,6 +105,16 @@ type Hook struct {
 	// cap causes silent discard (no goroutine, no error).
 	observeCount int
 	observeMax   int // configured via $SEEK_OBSERVE_MAX, default 10
+
+	// snapshotInjected is set after the first OnPrePrompt call delivers
+	// the session-start L+M snapshot. Subsequent calls skip snapshot
+	// injection and only emit a delta if new entries were added.
+	snapshotInjected bool
+
+	// snapshotEntryNames records the set of non-stale M entry names at
+	// snapshot time. Used by buildDelta to detect new entries added
+	// mid-session (memory_remember / memory_observe / /distill).
+	snapshotEntryNames map[string]struct{}
 }
 
 // observeLockMap is a simple per-name mutex for concurrent dedup.
@@ -137,18 +148,36 @@ const defaultObserveMax = 10
 // envObserveMax is the env-var name for configuring observe max.
 const envObserveMax = "SEEK_OBSERVE_MAX"
 
-// OnPrePrompt builds the deterministic <context> Prepend messages from
-// the current L+M state. Empty inputs produce no message — an empty L
-// section should not inject a "<context>(empty)</context>" wrapper
-// because that's still bytes the prefix cache has to absorb.
+// OnPrePrompt implements the session-start snapshot + mid-session delta
+// strategy (PRD v1 §5 M5.9):
 //
-// Byte-stability requirement (PRD §8 #7): identical L+M disk state →
-// identical Prepend bytes. The map iteration in Project.Index is
-// already sorted by Name; L's section body is truncated at bullet
-// boundaries (truncateSoulStable is deterministic — same input →
-// same output), so the prefix cache is preserved as long as the
-// on-disk soul.md doesn't change.
+//   - Turn 1: inject the full L stable section + M index as user-role
+//     <context> blocks (the session-start snapshot). Record the set of
+//     entry names for delta detection.
+//   - Turns 2+: if the M has new entries since snapshot time, inject a
+//     <context type="memory.delta"> block listing only the additions.
+//     Otherwise emit nothing — the snapshot is already in history.
+//
+// This ensures the byte prefix (system prompt + turn-1 snapshot) never
+// changes within a session, maximising prefix-cache hit rate.
 func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePromptOut, error) {
+	if !h.snapshotInjected {
+		return h.injectSnapshot()
+	}
+
+	var prepend []deepseek.Message
+	if h.Project != nil {
+		if msg := h.buildDelta(); msg != nil {
+			prepend = append(prepend, *msg)
+		}
+	}
+	return hooks.PrePromptOut{Prepend: prepend}, nil
+}
+
+// injectSnapshot builds the session-start snapshot: L stable section +
+// M index. Records snapshot entry names for later delta detection.
+// Called once per session — on the first OnPrePrompt call.
+func (h *Hook) injectSnapshot() (hooks.PrePromptOut, error) {
 	var prepend []deepseek.Message
 
 	if h.Soul != nil && strings.TrimSpace(h.Soul.Stable) != "" {
@@ -159,12 +188,62 @@ func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePro
 	}
 
 	if h.Project != nil {
-		if msg := h.buildMIndex(); msg != nil {
+		msg, names := h.buildMIndex()
+		if msg != nil {
 			prepend = append(prepend, *msg)
 		}
+		h.snapshotEntryNames = names
 	}
 
+	h.snapshotInjected = true
 	return hooks.PrePromptOut{Prepend: prepend}, nil
+}
+
+// buildDelta returns a <context type="memory.delta"> message listing
+// entries added since the session-start snapshot. Returns nil when
+// there are no new non-stale entries.
+//
+// The delta is appended at the end of the conversation (before the
+// current user message) — it does not modify the prefix bytes, so the
+// prefix cache is unaffected.
+//
+// Entries are sorted by name for byte stability across calls with the
+// same set of additions.
+func (h *Hook) buildDelta() *deepseek.Message {
+	if h.snapshotEntryNames == nil {
+		return nil
+	}
+
+	var newEntries []Entry
+	for _, e := range h.Project.Entries() {
+		if e.Stale {
+			continue
+		}
+		if _, known := h.snapshotEntryNames[e.Name]; !known {
+			newEntries = append(newEntries, e)
+		}
+	}
+	if len(newEntries) == 0 {
+		return nil
+	}
+
+	sort.Slice(newEntries, func(i, j int) bool {
+		return newEntries[i].Name < newEntries[j].Name
+	})
+
+	var sb strings.Builder
+	sb.WriteString("New entries added since session start:\n")
+	for _, e := range newEntries {
+		if e.AutoSourced {
+			fmt.Fprintf(&sb, "- [auto] %s: %s\n", e.Name, e.Tagline)
+		} else {
+			fmt.Fprintf(&sb, "- %s: %s\n", e.Name, e.Tagline)
+		}
+	}
+	return &deepseek.Message{
+		Role:    deepseek.RoleUser,
+		Content: wrapContext("memory.delta", strings.TrimRight(sb.String(), "\n")),
+	}
 }
 
 // buildMIndex builds the M-index <context> block with tag-grouped layout
@@ -186,7 +265,7 @@ func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePro
 // recall/touch/GC), NOT on every prompt. This is a deliberate trade —
 // prefix-cache stability outweighs the marginal ranking improvement from
 // time-dependent Score().
-func (h *Hook) buildMIndex() *deepseek.Message {
+func (h *Hook) buildMIndex() (*deepseek.Message, map[string]struct{}) {
 	// Collect non-stale entries with tags.
 	all := h.Project.Entries()
 	entries := make([]entryInfo, 0, len(all))
@@ -200,18 +279,20 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 			tags:        e.Tags,
 			pinned:      e.Pinned,
 			recallCount: e.RecallCount,
+			autoSourced: e.AutoSourced,
 		})
 	}
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	body := buildGroupedIndexString(entries)
 	if estimateTokens(body) <= maxMIndexTokens {
+		names := nameSetFrom(entries)
 		return &deepseek.Message{
 			Role:    deepseek.RoleUser,
 			Content: wrapContext("memory.index", body),
-		}
+		}, names
 	}
 
 	// Over budget — rebuild with time-independent sort key.
@@ -246,6 +327,7 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 			tags:        e.tags,
 			pinned:      e.pinned,
 			recallCount: e.recallCount,
+			autoSourced: e.autoSourced,
 		}
 		// Build a fresh slice to avoid aliasing within's backing array.
 		testEntries := make([]entryInfo, len(within)+1)
@@ -268,10 +350,11 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 		}
 	}
 
+	names := nameSetFrom(within)
 	return &deepseek.Message{
 		Role:    deepseek.RoleUser,
 		Content: wrapContext("memory.index", body),
-	}
+	}, names
 }
 
 // buildGroupedIndexString renders entries grouped by their first tag.
@@ -282,15 +365,16 @@ func (h *Hook) buildMIndex() *deepseek.Message {
 // sorted; within each group entries are sorted by name.
 func buildGroupedIndexString(entries []entryInfo) string {
 	type namedEntry struct {
-		name    string
-		tagline string
+		name        string
+		tagline     string
+		autoSourced bool
 	}
 
 	groups := make(map[string][]namedEntry) // tag → entries
 	var general []namedEntry
 
 	for _, e := range entries {
-		ne := namedEntry{name: e.name, tagline: e.tagline}
+		ne := namedEntry{name: e.name, tagline: e.tagline, autoSourced: e.autoSourced}
 		if len(e.tags) > 0 && e.tags[0] != "" {
 			groups[e.tags[0]] = append(groups[e.tags[0]], ne)
 		} else {
@@ -315,7 +399,11 @@ func buildGroupedIndexString(entries []entryInfo) string {
 		})
 		fmt.Fprintf(&sb, "### %s\n", tag)
 		for _, e := range entries {
-			fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+			if e.autoSourced {
+				fmt.Fprintf(&sb, "- [auto] %s: %s\n", e.name, e.tagline)
+			} else {
+				fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+			}
 		}
 		sb.WriteByte('\n')
 	}
@@ -326,12 +414,28 @@ func buildGroupedIndexString(entries []entryInfo) string {
 		})
 		fmt.Fprintf(&sb, "### general\n")
 		for _, e := range general {
-			fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+			if e.autoSourced {
+				fmt.Fprintf(&sb, "- [auto] %s: %s\n", e.name, e.tagline)
+			} else {
+				fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+			}
 		}
 		sb.WriteByte('\n')
 	}
 
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// nameSetFrom extracts the name set from a slice of entryInfo. Used by
+// buildMIndex to return the set of entries actually included in the
+// snapshot (which may be fewer than Project.Entries() when the token
+// budget forces truncation).
+func nameSetFrom(entries []entryInfo) map[string]struct{} {
+	out := make(map[string]struct{}, len(entries))
+	for _, e := range entries {
+		out[e.name] = struct{}{}
+	}
+	return out
 }
 
 // OnSessionStart runs a GC pass once per session. Stale flips happen
@@ -348,6 +452,12 @@ func buildGroupedIndexString(entries []entryInfo) string {
 // writes its L-pending update if successful, and is otherwise
 // fire-and-forget.
 func (h *Hook) OnSessionStart(ctx context.Context, _ hooks.SessionStartEvent) {
+	// Reset snapshot state so the first OnPrePrompt call rebuilds the
+	// snapshot from fresh GC'd data. This handles both fresh sessions
+	// and --resume (where the Hook is reused across agent lifetimes).
+	h.snapshotInjected = false
+	h.snapshotEntryNames = nil
+
 	now := time.Now().UTC()
 	if h.Now != nil {
 		now = h.Now()
@@ -430,8 +540,9 @@ func (h *Hook) runAutoDream(ctx context.Context) {
 		return
 	}
 	pending := MergeIntoL(soul.Pending, cands)
-	soul.SetSections(soul.Stable, pending)
-	_ = soul.Save()
+	// M5.10: evaluate and maintain.
+	promoted, kept := EvaluatePending(pending, time.Now())
+	_ = soul.ApplyMaintenance(promoted, kept)
 }
 
 // OnSessionEnd is a no-op in v2. The v1 auto-distill path (heuristic
@@ -525,6 +636,7 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 
 			// ACCEPT: write to M.
 			entry.AutoSourced = true
+			entry.ObserveCount = 1 // M5.11: first observation → count=1
 			if err := h.Project.Add(entry); err != nil {
 				send(ObserveResult{
 					Name:    entry.Name,

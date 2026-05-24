@@ -105,11 +105,16 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 		return fmt.Errorf("dream: load soul: %w", err)
 	}
 	newPending := memory.MergeIntoL(soul.Pending, candidates)
-	soul.SetSections(soul.Stable, newPending)
-	if err := soul.Save(); err != nil {
-		return fmt.Errorf("dream: save soul: %w", err)
+	// M5.10: evaluate existing Pending candidates for promotion / expiry.
+	promoted, kept := memory.EvaluatePending(newPending, time.Now())
+	if err := soul.ApplyMaintenance(promoted, kept); err != nil {
+		return fmt.Errorf("dream: maintenance: %w", err)
 	}
-	fmt.Printf("\nwrote %d candidate(s) to %s (Pending section)\n", len(candidates), soul.Path)
+	fmt.Printf("\nwrote %d candidate(s) to %s (Pending section)", len(candidates), soul.Path)
+	if len(promoted) > 0 {
+		fmt.Printf(" + promoted %d to Stable", len(promoted))
+	}
+	fmt.Println()
 	return nil
 }
 

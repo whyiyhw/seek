@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -20,11 +21,18 @@ import (
 // from ≥2 different projects") is enforced after parse: anything with
 // fewer than 2 distinct project sources is dropped before write.
 //
-// JSON tags match thinking mode's output schema.
+// FirstSeen and LastSeen are set by parseLMarkdown when reading existing
+// Pending entries from soul.md. Dream-reasoner output sets neither — they
+// are maintenance-only fields (M5.10 evaluatePending).
+//
+// JSON tags match thinking mode's output schema; FirstSeen/LastSeen are
+// omitempty so they don't leak into the dream API call.
 type LCandidate struct {
-	Trait   string   `json:"trait"`
-	Why     string   `json:"why"`
-	Sources []string `json:"sources"`
+	Trait     string    `json:"trait"`
+	Why       string    `json:"why"`
+	Sources   []string  `json:"sources"`
+	FirstSeen time.Time `json:"first_seen,omitempty"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
 }
 
 // DreamSystemPrompt frames the cross-project distillation task. The
@@ -296,6 +304,12 @@ func FormatLCandidatesMarkdown(candidates []LCandidate) string {
 			}
 			sort.Strings(uniq)
 			fmt.Fprintf(&sb, "  - sources: %s\n", strings.Join(uniq, ", "))
+		}
+		if !c.FirstSeen.IsZero() {
+			fmt.Fprintf(&sb, "  - 首次观察：%s\n", c.FirstSeen.Format("2006-01-02"))
+		}
+		if !c.LastSeen.IsZero() {
+			fmt.Fprintf(&sb, "  - 最近确认：%s\n", c.LastSeen.Format("2006-01-02"))
 		}
 	}
 	return sb.String()

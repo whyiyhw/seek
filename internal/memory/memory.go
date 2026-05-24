@@ -62,6 +62,14 @@ type Entry struct {
 	// these for the user to confirm or revoke, preventing silent
 	// drift from the model's own perceptions.
 	AutoSourced bool `json:"auto_sourced,omitempty"`
+
+	// ObserveCount tracks how many times memory_observe has written
+	// (or overwritten) this entry across independent sessions.
+	// Incremented by Add() when replacing an existing auto_sourced
+	// entry. When ObserveCount reaches autoPromoteObservations (3),
+	// Add auto-flips AutoSourced=false (M5.11 auto-promotion).
+	// Zero for non-auto_sourced entries.
+	ObserveCount int `json:"observe_count,omitempty"`
 }
 
 // Manifest is the project identity record at <projectDir>/manifest.json.

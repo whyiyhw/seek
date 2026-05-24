@@ -272,6 +272,18 @@ func (p *Project) Add(e Entry) error {
 	if e.LastRecalledAt.IsZero() {
 		e.LastRecalledAt = e.CreatedAt
 	}
+	if existing, ok := p.entries[e.Name]; ok {
+		// M5.11: if the model re-observes an auto_sourced entry,
+		// carry forward and increment observe_count. This is the
+		// cross-session confidence accumulation path.
+		if existing.AutoSourced && e.AutoSourced {
+			e.ObserveCount = existing.ObserveCount + 1
+		}
+		// M5.11: auto-promotion — observe_count ≥ threshold.
+		if e.AutoSourced && e.ObserveCount >= autoPromoteObservations {
+			e.AutoSourced = false
+		}
+	}
 	if _, exists := p.entries[e.Name]; !exists {
 		p.order = append(p.order, e.Name)
 	}
@@ -379,6 +391,12 @@ func (p *Project) TouchRecall(name string, t time.Time) error {
 	}
 	e.RecallCount++
 	e.LastRecalledAt = t.UTC()
+	// M5.11: recall-driven auto-promotion. If the model has recalled
+	// this auto_sourced entry ≥3 times, it's actively depending on
+	// it — a stronger signal than user confirmation.
+	if e.AutoSourced && e.RecallCount >= autoPromoteRecalls {
+		e.AutoSourced = false
+	}
 	p.entries[name] = e
 	return p.writeEntries()
 }
