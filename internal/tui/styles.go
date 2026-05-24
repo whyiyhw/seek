@@ -122,6 +122,18 @@ var (
 				Bold(true)
 	styleMenuItem = lipgloss.NewStyle().
 			Foreground(colourMuted)
+
+	// Match-highlight for @-completion: accent colour + bold so the
+	// matching characters in a filename pop against the muted item text.
+	styleMatchHighlight = lipgloss.NewStyle().
+				Foreground(colourAccent).
+				Bold(true)
+
+	// styleRefHighlight is used in committed user messages to highlight
+	// @-prefixed file references (e.g. @CLAUDE.md) in the accent colour.
+	styleRefHighlight = lipgloss.NewStyle().
+				Foreground(colourAccent).
+				Bold(true)
 )
 
 // SetTheme switches between "dark" and "light" palettes and rebuilds
@@ -188,4 +200,12 @@ func SetTheme(theme string) {
 		Bold(true)
 	styleMenuItem = lipgloss.NewStyle().
 		Foreground(colourMuted)
+
+	styleMatchHighlight = lipgloss.NewStyle().
+		Foreground(colourAccent).
+		Bold(true)
+
+	styleRefHighlight = lipgloss.NewStyle().
+		Foreground(colourAccent).
+		Bold(true)
 }

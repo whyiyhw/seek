@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -165,7 +167,7 @@ func (m Model) View() string {
 	// "/" or "@", obscuring whatever they were reading. Below-the-
 	// input keeps the upper conversation steady; the menu grows
 	// downward into the space just above the status bar.
-	sb.WriteString(m.input.View())
+	sb.WriteString(m.renderInput())
 	sb.WriteString("\n")
 
 	// Approval prompt takes precedence — blurs the input, blocks
@@ -323,16 +325,70 @@ func (m Model) renderPathPicker() string {
 	}
 	var sb strings.Builder
 	for i, p := range m.pathPicker.filtered {
-		if i == m.pathPicker.selected {
-			sb.WriteString(styleMenuSelected.Render("▸ " + p))
+		if m.pathPicker.token != "" {
+			sb.WriteString(m.renderHighlightedPath(p, i == m.pathPicker.selected))
 		} else {
-			sb.WriteString(styleMenuItem.Render("  " + p))
+			// No token — plain list (empty @ prompt).
+			if i == m.pathPicker.selected {
+				sb.WriteString(styleMenuSelected.Render("▸ " + p))
+			} else {
+				sb.WriteString(styleMenuItem.Render("  " + p))
+			}
 		}
 		sb.WriteString("\n")
 	}
 	sb.WriteString(styleMuted.Render("  Tab to insert · ↑/↓ to navigate · Esc to dismiss"))
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+// renderHighlightedPath renders a single @-completion list item with the
+// matching portion of the path highlighted. token is the text after "@".
+// Matches follow filterPaths: basename-prefix first (tier 1), then full-path
+// substring (tier 2). The matching characters get an accent colour.
+func (m Model) renderHighlightedPath(path string, selected bool) string {
+	token := m.pathPicker.token
+	if token == "" {
+		if selected {
+			return styleMenuSelected.Render("▸ " + path)
+		}
+		return styleMenuItem.Render("  " + path)
+	}
+
+	q := strings.ToLower(token)
+	base := filepath.Base(path)
+	matchIdx := -1
+
+	// Tier 1: basename prefix (case-insensitive).
+	if strings.HasPrefix(strings.ToLower(base), q) {
+		matchIdx = len(path) - len(base)
+	}
+	// Tier 2: full-path substring.
+	if matchIdx < 0 {
+		matchIdx = strings.Index(strings.ToLower(path), q)
+	}
+	if matchIdx < 0 {
+		// Should not happen since filtered paths all match, but be safe.
+		if selected {
+			return styleMenuSelected.Render("▸ " + path)
+		}
+		return styleMenuItem.Render("  " + path)
+	}
+
+	matchEnd := matchIdx + len(token)
+	before := path[:matchIdx]
+	matched := path[matchIdx:matchEnd]
+	after := path[matchEnd:]
+
+	itemStyle := styleMenuItem
+	prefix := "  "
+	if selected {
+		itemStyle = styleMenuSelected
+		prefix = "▸ "
+	}
+	// The matched portion gets the accent highlight style regardless of
+	// selection state, so the matching characters always stand out.
+	return itemStyle.Render(prefix+before) + styleMatchHighlight.Render(matched) + itemStyle.Render(after)
 }
 
 // renderApprovalPrompt draws the inline y/N/a chooser shown while a
@@ -431,6 +487,28 @@ func (m Model) renderCommandMenu() string {
 // renderModelPicker renders the /model dropdown. Same visual shape as
 // the slash-command menu — same indent, same ▸ marker, same footer
 // hint — so users don't need to learn a second affordance.
+// isCurrentPickerItem returns true when id matches the currently-active
+// value for the open picker. This lets the picker annotate the preselected
+// row with "(current)" — works for model / lang / effort pickers.
+func (m Model) isCurrentPickerItem(id string) bool {
+	switch m.pickerPurpose {
+	case "lang":
+		current := m.opts.Lang
+		if current == "" {
+			current = "auto"
+		}
+		return id == current
+	case "effort":
+		current := m.opts.Effort
+		if current == "" {
+			current = "off"
+		}
+		return id == current
+	default: // "model", "", "setup-provider"
+		return id == m.opts.Model
+	}
+}
+
 func (m Model) renderModelPicker() string {
 	if len(m.modelPickerFiltered) == 0 {
 		return styleMuted.Render("  (no models — Esc to dismiss)") + "\n"
@@ -439,9 +517,7 @@ func (m Model) renderModelPicker() string {
 	for i, mc := range m.modelPickerFiltered {
 		marker := "  "
 		idLabel := mc.id
-		if mc.id == m.opts.Model {
-			// Annotate the active model so Enter on a fresh picker is
-			// visibly a no-op rather than a silent commit to the same id.
+		if m.isCurrentPickerItem(mc.id) {
 			idLabel = idLabel + " (current)"
 		}
 		row := fmt.Sprintf("%-32s  %s", idLabel, mc.description)
@@ -457,9 +533,40 @@ func (m Model) renderModelPicker() string {
 	return sb.String()
 }
 
+// highlightRefs finds @-prefixed file references in text and wraps each
+// with the accent highlight style so they visually pop against the base
+// user-message colour. Uses a regex matching @ followed by word, dot, slash,
+// hyphen, or underscore characters (common file path patterns).
+func highlightRefs(text string) string {
+	re := regexp.MustCompile(`(@[\w.\-/]+)`)
+	parts := re.Split(text, -1)
+	matches := re.FindAllString(text, -1)
+
+	var styled strings.Builder
+	for i, part := range parts {
+		if part != "" {
+			styled.WriteString(styleUserText.Render(part))
+		}
+		if i < len(matches) {
+			styled.WriteString(styleRefHighlight.Render(matches[i]))
+		}
+	}
+	return styled.String()
+}
+
+// renderInput returns the textarea's view with @-prefixed file references
+// highlighted in the accent colour. It post-processes the textarea.View()
+// output so the user sees purple @-refs as they type.
+func (m Model) renderInput() string {
+	re := regexp.MustCompile(`@[\w.\-/]+`)
+	return re.ReplaceAllStringFunc(m.input.View(), func(match string) string {
+		return styleRefHighlight.Render(match)
+	})
+}
+
 func renderCommittedUser(text string, width int) string {
 	label := styleUserLabel.Render("▌ you")
-	body := styleUserText.Render(wrap(text, width-2))
+	body := lipgloss.NewStyle().Width(width - 2).Render(highlightRefs(text))
 	return "\n" + label + "\n" + body
 }
 
@@ -744,6 +851,7 @@ func (m Model) renderHelpOverlay() string {
 		{"Enter", "Send prompt"},
 		{"↑ / ↓", "Recall prompt history (when input is empty)"},
 		{"Esc", "Cancel ongoing assistant response"},
+		{"Shift+Tab", "Cycle mode: ask → plan → yolo → ask"},
 		{"Ctrl+J", "Insert newline in input"},
 		{"Ctrl+L", "Clear visible screen (same as /clear)"},
 		{"Ctrl+R", "Toggle reasoning visibility"},
@@ -812,7 +920,7 @@ func (m Model) renderHelpOverlay() string {
 	sb.WriteString(strings.Repeat("\n", padBottom))
 
 	// Input area and status bar still visible at the bottom.
-	sb.WriteString(m.input.View())
+	sb.WriteString(m.renderInput())
 	sb.WriteString("\n")
 	sb.WriteString(m.renderStatusBar())
 

@@ -373,6 +373,209 @@ func TestRenderCommittedToolOk_DiffResultShowsColoredDiff(t *testing.T) {
 	}
 }
 
+func TestHighlightRefs_HighlightsAtRefs(t *testing.T) {
+	forceColor(t)
+	// Structural check: the @-prefixed token must be separated from adjacent
+	// text by ANSI escapes on both sides.
+	got := highlightRefs("see @CLAUDE.md for details")
+
+	if !strings.Contains(got, "@CLAUDE.md") {
+		t.Fatalf("output must contain the reference text: %q", got)
+	}
+	// The output should have at least 4 ANSI escape sequences: one opening
+	// "see ", one reset+reopen for "@CLAUDE.md", then another for " for ...".
+	// Count \x1b occurrences as a proxy.
+	if n := strings.Count(got, "\x1b"); n < 4 {
+		t.Errorf("expected >=4 ANSI escapes (2 user-text segments + 1 ref), got %d in %q", n, got)
+	}
+	// The whole output must be wrapped in ANSI styling (starts with escape).
+	if !strings.HasPrefix(got, "\x1b[") {
+		t.Errorf("output should start with an ANSI escape for user colour")
+	}
+}
+
+func TestHighlightRefs_PlainTextHasNoChange(t *testing.T) {
+	got := highlightRefs("hello world, no references here")
+	if !strings.Contains(got, "hello world") {
+		t.Errorf("plain text must be preserved, got %q", got)
+	}
+}
+
+func TestHighlightRefs_MultipleRefsAllHighlighted(t *testing.T) {
+	forceColor(t)
+	got := highlightRefs("check @a.go and @b_test.go")
+	if !strings.Contains(got, "@a.go") || !strings.Contains(got, "@b_test.go") {
+		t.Errorf("both references should appear, got %q", got)
+	}
+	// Both @-refs should have ANSI escapes before them, but the joining text
+	// " and " should be between two reset+reopen sequences.
+	count := strings.Count(got, "\x1b[")
+	if count < 4 {
+		t.Errorf("expected at least 4 ANSI sequences (two for user text, two for highlights), got %d", count)
+	}
+}
+
+func TestHighlightRefs_StyleCorrectness(t *testing.T) {
+	forceColor(t)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "no refs",
+			in:   "hello world",
+			want: styleUserText.Render("hello world"),
+		},
+		{
+			name: "single ref",
+			in:   "see @file.txt here",
+			want: styleUserText.Render("see ") +
+				styleRefHighlight.Render("@file.txt") +
+				styleUserText.Render(" here"),
+		},
+		{
+			name: "multiple refs",
+			in:   "@a and @b",
+			want: styleRefHighlight.Render("@a") +
+				styleUserText.Render(" and ") +
+				styleRefHighlight.Render("@b"),
+		},
+		{
+			name: "adjacent refs",
+			in:   "@first@second",
+			want: styleRefHighlight.Render("@first") +
+				styleRefHighlight.Render("@second"),
+		},
+		{
+			name: "refs with dots and slashes",
+			in:   "path @my.project/file@v1.0 here",
+			want: styleUserText.Render("path ") +
+				styleRefHighlight.Render("@my.project/file") +
+				styleRefHighlight.Render("@v1.0") +
+				styleUserText.Render(" here"),
+		},
+		{
+			name: "empty string",
+			in:   "",
+			want: "",
+		},
+		{
+			name: "ref at start",
+			in:   "@start mid",
+			want: styleRefHighlight.Render("@start") +
+				styleUserText.Render(" mid"),
+		},
+		{
+			name: "ref at end",
+			in:   "end @ref",
+			want: styleUserText.Render("end ") +
+				styleRefHighlight.Render("@ref"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := highlightRefs(tt.in)
+			if got != tt.want {
+				t.Errorf("highlightRefs(%q):\ngot:  %q\nwant: %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderHighlightedPath(t *testing.T) {
+	forceColor(t)
+	tests := []struct {
+		name     string
+		token    string
+		path     string
+		selected bool
+		want     string
+	}{
+		{
+			name:  "empty token",
+			token: "",
+			path:  "/some/file.txt",
+			want:  styleMenuItem.Render("  /some/file.txt"),
+		},
+		{
+			name:     "empty token selected",
+			token:    "",
+			path:     "/some/file.txt",
+			selected: true,
+			want:     styleMenuSelected.Render("▸ /some/file.txt"),
+		},
+		{
+			name:  "basename prefix match",
+			token: "file",
+			path:  "/some/file.txt",
+			want: styleMenuItem.Render("  /some/") +
+				styleMatchHighlight.Render("file") +
+				styleMenuItem.Render(".txt"),
+		},
+		{
+			name:     "basename prefix selected",
+			token:    "file",
+			path:     "/some/file.txt",
+			selected: true,
+			want: styleMenuSelected.Render("▸ /some/") +
+				styleMatchHighlight.Render("file") +
+				styleMenuSelected.Render(".txt"),
+		},
+		{
+			name:  "full path substring",
+			token: "some",
+			path:  "/some/file.txt",
+			want: styleMenuItem.Render("  /") +
+				styleMatchHighlight.Render("some") +
+				styleMenuItem.Render("/file.txt"),
+		},
+		{
+			name:  "no match plain",
+			token: "xyz",
+			path:  "/some/file.txt",
+			want:  styleMenuItem.Render("  /some/file.txt"),
+		},
+		{
+			name:     "no match selected",
+			token:    "xyz",
+			path:     "/some/file.txt",
+			selected: true,
+			want:     styleMenuSelected.Render("▸ /some/file.txt"),
+		},
+		{
+			name:  "case mismatch",
+			token: "FILE",
+			path:  "/some/file.txt",
+			want: styleMenuItem.Render("  /some/") +
+				styleMatchHighlight.Render("file") +
+				styleMenuItem.Render(".txt"),
+		},
+		{
+			name:     "basename match at root",
+			token:    "main",
+			path:     "main.go",
+			selected: true,
+			want: styleMenuSelected.Render("▸ ") +
+				styleMatchHighlight.Render("main") +
+				styleMenuSelected.Render(".go"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := Model{
+				pathPicker: pathCompleterState{
+					token: tt.token,
+				},
+			}
+			got := m.renderHighlightedPath(tt.path, tt.selected)
+			if got != tt.want {
+				t.Errorf("renderHighlightedPath(%q, %v):\ngot:  %q\nwant: %q", tt.path, tt.selected, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRenderCommittedToolOk_NonDiffResultStaysOneLine(t *testing.T) {
 	forceColor(t)
 	// Simulate a non-edit tool's result (e.g. `read`, `grep`). Should
