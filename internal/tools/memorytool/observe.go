@@ -14,7 +14,7 @@ var observeSchema = []byte(`{
   "type": "object",
   "properties": {
     "name":    {"type": "string", "description": "kebab-case unique key for this entry (e.g. session-storage-format)."},
-    "tagline": {"type": "string", "description": "One-line summary shown in the M-index. Make it specific."},
+    "tagline": {"type": "string", "description": "One-line summary shown in the M-index. Frame it as a lesson or decision, not a bug report."},
     "content": {"type": "string", "description": "Full rationale: what was decided, why, what alternatives were rejected. ≤500 words."},
     "tags":    {"type": "array",  "items": {"type": "string"}, "description": "Optional categorisation tags. The FIRST tag determines the entry's group in the M-index; put the most representative one first."}
   },
@@ -22,17 +22,18 @@ var observeSchema = []byte(`{
   "additionalProperties": false
 }`)
 
-const observeDescription = `Save a project-specific decision to M by observing strong signals during conversation.
+const observeDescription = `Save a durable project lesson or decision to M by observing strong signals during conversation.
 
 Use this when you detect strong signals in the conversation:
-- User confirmed a specific decision ("use JSONL", "let's go with option A")
+- User confirmed a specific design decision ("use JSONL", "let's go with option A")
 - User corrected you and settled on an alternative ("no, use this API instead")
 - User provided a critical constraint ("note this API has a rate limit")
-- User expressed clear satisfaction after a resolved discussion
+- You discovered a reusable lesson from fixing something (record the lesson, not the bug)
 
 Do NOT use for:
 - Casual conversation ("thanks", "good morning")
 - Undecided states ("maybe", "let's see")
+- Bug discoveries that haven't been fixed yet — M is for lessons, not a bug tracker
 - Topics already captured under the same name (memory_observe overwrites by name; use memory_amend to append instead)
 
 This tool returns immediately without blocking. The entry goes through an async

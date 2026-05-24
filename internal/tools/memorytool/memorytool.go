@@ -142,7 +142,7 @@ var rememberSchema = []byte(`{
   "type": "object",
   "properties": {
     "name":    {"type": "string", "description": "kebab-case unique key for this entry (e.g. session-storage-format)."},
-    "tagline": {"type": "string", "description": "One-line summary shown in the M-index. Make it specific."},
+    "tagline": {"type": "string", "description": "One-line summary shown in the M-index. Frame it as a lesson or decision, not a bug report. Example: 'write-tmp-rename pattern must Sync before Close' (good, reusable lesson); 'Save is missing Sync' (bad, that's a bug to fix, not an M entry)."},
     "content": {"type": "string", "description": "Full rationale: what was decided, why, what alternatives were rejected. ≤500 words."},
     "tags":    {"type": "array",  "items": {"type": "string"}, "description": "Optional categorisation tags. The FIRST tag determines the entry's group in the M-index; put the most representative one first."}
   },
@@ -150,7 +150,7 @@ var rememberSchema = []byte(`{
   "additionalProperties": false
 }`)
 
-const rememberDescription = "Save a project-specific decision + rationale to project memory (M layer). Requires user approval per call (inline y/N prompt). Use this when you've learned something the next session in this project would benefit from knowing — not user preferences (those live in L), not session-scoped facts (those stay in conversation history). Re-calling with the same name updates the existing entry."
+const rememberDescription = "Save a durable project lesson, design decision, or discovered constraint to project memory (M layer). Requires user approval per call (inline y/N prompt).\n\nUse this for knowledge that will help future sessions in this project:\n- Design decisions and their rationale (\"chose JSONL over protobuf for session storage because...\")\n- Reusable lessons from bugs you already fixed (\"when using write-tmp-rename, always f.Sync() before f.Close()\")\n- Non-obvious constraints discovered during development (\"this API has a rate limit of 10 req/s\")\n- Recurring patterns the project follows (\"tests use behaviour comparison, not golden files\")\n\nDo NOT use M as a bug tracker or todo list:\n- If you discover a bug, fix it first, then record the reusable lesson (not the bug itself)\n- Do not create entries like \"X is broken\" or \"need to implement Y\" — those are transient\n- Use memory_archive when a lesson becomes outdated (superseded by a newer decision)\n\nRe-calling with the same name updates the existing entry."
 
 type Remember struct {
 	project *memory.Project
