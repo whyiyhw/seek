@@ -105,10 +105,10 @@ func (m Model) View() string {
 	// Streaming reasoning.
 	if m.curReasoning != "" {
 		if m.showReasoning {
-			sb.WriteString(styleReasoning.Render("🧠 reasoning:\n" + indent(m.curReasoning, "    ")))
+			sb.WriteString(styleReasoning.Render("▸ reasoning:\n" + indent(m.curReasoning, "    ")))
 			sb.WriteString("\n")
 		} else {
-			sb.WriteString(styleReasoning.Render("🧠 reasoning… (Ctrl+R to expand)"))
+			sb.WriteString(styleReasoning.Render("▸ reasoning… (Ctrl+R to expand)"))
 			sb.WriteString("\n")
 		}
 	}
@@ -474,9 +474,9 @@ func renderCommittedAssistant(content, reasoning string, showReasoning bool, wid
 	out := label + "\n" + content
 	if reasoning != "" {
 		if showReasoning {
-			out += "\n" + styleReasoning.Render("🧠 reasoning:\n"+indent(reasoning, "    "))
+			out += "\n" + styleReasoning.Render("▸ reasoning:\n"+indent(reasoning, "    "))
 		} else {
-			out += "\n" + styleReasoning.Render("🧠 reasoning hidden — Ctrl+R during streaming to expand")
+			out += "\n" + styleReasoning.Render("▸ reasoning hidden — Ctrl+R during streaming to expand")
 		}
 	}
 	_ = width // wrap is already applied via the Markdown renderer
