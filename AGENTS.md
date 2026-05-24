@@ -37,7 +37,7 @@ When exploring code, follow this order — skipping steps costs tokens and break
 
 1. **grep first** — find exact file + line before reading anything.
 2. **read(offset=N) second** — read only the relevant window, not the whole file.
-3. `read` has **no `limit` parameter** — it was intentionally removed from the schema so the model cannot bypass the fixed 50-line window. Passing `limit` is rejected as an unknown field. Use `offset=N` to page through larger files.
+3. `read` accepts an optional `limit` parameter (default 50, max 50 — values above 50 error). Use `offset=N` to page through larger files.
 4. `grep` caps at 20 matches by default (`max_matches` can be raised, but rarely should be).
 
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
@@ -56,7 +56,7 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 
 - **Stdlib first**. `pkg/deepseek` has zero external deps and should stay that way. New deps live behind sensible boundaries.
 - **Tool JSON schemas are package-level `[]byte` constants**, not built at call time. Identical bytes across turns is what lets DeepSeek's prefix cache hit (`PRD §4.8.1`).
-- **Tool schemas must not expose parameters that let the model bypass output size limits.** Example: `read` has no `limit` field; `grep` has `max_matches` but it defaults to a conservative 20. If a limit is safety-critical, make it non-overridable.
+- **Tool schemas must not expose parameters that let the model bypass output size limits.** Example: `read` has a `limit` field (max 50, rejected server-side if exceeded); `grep` has `max_matches` but it defaults to a conservative 20. If a limit is safety-critical, reject values above the max with a clear error.
 - **New tools** live at `internal/tools/<name>/` with a `New(...)` constructor. If the tool can mutate the filesystem or shell, inject a `*permission.Policy`.
 - **Permission denials are tool results, not fatal errors** (`internal/permission.ErrDenied`). The agent feeds the message back to the LLM so it can ask the user — never bypass that flow.
 - **Session format is JSONL** (`schema_version=2`, `.jsonl` extension): line 1 is the header (all scalar metadata), lines 2..N are one `deepseek.Message` per line. Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`. `loadMeta()` reads only line 1 — do not call `Load()` when you only need metadata.

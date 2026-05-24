@@ -24,18 +24,20 @@ var schemaBytes = []byte(`{
   "type": "object",
   "properties": {
     "path":   {"type": "string", "description": "Absolute or repo-relative path to the file."},
-    "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1. Use with successive calls to page through a file.", "minimum": 1}
+    "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1. Use with successive calls to page through a file.", "minimum": 1},
+    "limit":  {"type": "integer", "minimum": 1, "maximum": 50, "default": 50, "description": "Maximum lines to return (capped at 50). Defaults to 50."}
   },
   "required": ["path"],
   "additionalProperties": false
 }`)
 
-const description = "Read up to 50 lines from a file (with 1-based line numbers). There is no limit parameter — every read returns at most 50 lines. Use grep to locate the exact range first, then read(offset=N) to retrieve it. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
+const description = "Read up to 50 lines from a file (with 1-based line numbers). Accepts an optional limit parameter (default 50, max 50 — values above 50 error). Use grep to locate the exact range first, then read(offset=N, limit=N) to retrieve it. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
 
 // Args is the decoded argument struct for `read`.
 type Args struct {
 	Path   string `json:"path"`
 	Offset int    `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
 }
 
 // Tool is the read tool implementation. Construct via New.
@@ -54,7 +56,7 @@ const defaultLimit = 50
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset"); err != nil {
+	if err := tools.UnmarshalStrict("read", raw, &a, "path", "offset", "limit"); err != nil {
 		return "", err
 	}
 	if a.Path == "" {
@@ -65,6 +67,14 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}
 	if a.Offset == 0 {
 		a.Offset = 1
+	}
+	// Default limit to 50 if omitted (omitempty drops 0 from JSON, so Go
+	// zero-value is 0). Reject values above 50 — the schema's maximum:50
+	// should catch this, but if the model ignores it, error clearly.
+	if a.Limit == 0 {
+		a.Limit = defaultLimit
+	} else if a.Limit > defaultLimit {
+		return "", fmt.Errorf("read: limit=%d exceeds maximum (%d). Valid: 1-%d, or omit the parameter for the default.", a.Limit, defaultLimit, defaultLimit)
 	}
 
 	clean := filepath.Clean(a.Path)
@@ -113,7 +123,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		if lineNo < a.Offset {
 			continue
 		}
-		if emitted >= defaultLimit {
+		if emitted >= a.Limit {
 			truncated = true
 			break
 		}

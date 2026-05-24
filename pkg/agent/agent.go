@@ -170,7 +170,7 @@ func (a *Agent) Reset(history []deepseek.Message) {
 // context (recency bias makes it more effective than a system-prompt-only
 // rule) while remaining a CONSTANT string so DeepSeek's prefix cache is
 // not perturbed — the bytes are identical across every turn.
-const workflowReminder = "\n\n[Workflow rule: before asserting any fact about code behaviour or values, grep/read the source to confirm. Do not rely on memory from earlier turns. No grep/read evidence → label it a guess. Before calling edit, read the target lines first to capture exact whitespace — never guess indent from memory.]"
+const workflowReminder = "\n\n[Workflow: read→grep→read(limit≤50). edit→read first.]"
 
 // summariserPrompt is appended as a user turn for the one-shot Chat
 // call that produces a /compact summary. Tuned for ~400 words — long

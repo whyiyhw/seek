@@ -177,9 +177,12 @@ type Model struct {
 	pendingSteerText string
 
 	// pastedContent stores the full content of a multi-line paste when
-	// the textarea display is folded to a placeholder. Restored on the
-	// next keypress. Empty = not folded.
-	pastedContent string
+	// the textarea display is folded to a placeholder. The marker text
+	// stays in the input until Enter is pressed, at which point the
+	// marker is replaced with pastedContent before submission.
+	// Empty = not folded.
+	pastedContent   string
+	pastedLineCount int
 
 	// streamStartTime is set in submit() and used to compute elapsed
 	// time for the live streaming indicator. Zero when not streaming.

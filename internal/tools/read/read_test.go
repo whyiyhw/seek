@@ -49,14 +49,73 @@ func TestRead_Basic(t *testing.T) {
 	}
 }
 
-func TestRead_LimitParamRejected(t *testing.T) {
+func TestRead_LimitParamValidation(t *testing.T) {
 	tool, dir := testReadTool(t)
-	p := writeFileIn(t, dir, "line1\nline2\n")
-	args, _ := json.Marshal(map[string]any{"path": p, "limit": 100})
-	_, err := tool.Execute(context.Background(), args)
-	if err == nil || !strings.Contains(err.Error(), "limit") {
-		t.Errorf("expected unknown-field error for 'limit', got: %v", err)
+	// Build a file with 60 lines (beyond default limit).
+	var sb strings.Builder
+	for i := range 60 {
+		fmt.Fprintf(&sb, "line%d\n", i+1)
 	}
+	p := writeFileIn(t, dir, sb.String())
+
+	// Cases that should succeed.
+	t.Run("valid", func(t *testing.T) {
+		cases := []struct {
+			name      string
+			limit     int // -1 = omit from JSON
+			wantLines int
+		}{
+			{"limit=50 (at cap)", 50, 50},
+			{"limit=10 explicit", 10, 10},
+			{"limit=1 explicit", 1, 1},
+			{"limit=0 defaults to 50", 0, 50},
+			{"no limit param defaults to 50", -1, 50},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				args := map[string]any{"path": p}
+				if tc.limit >= 0 {
+					args["limit"] = tc.limit
+				}
+				raw, _ := json.Marshal(args)
+				out, err := tool.Execute(context.Background(), raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(out, fmt.Sprintf("%d lines emitted", tc.wantLines)) {
+					t.Errorf("expected %d lines emitted, got:\n%s", tc.wantLines, out)
+				}
+				// File has 60 lines; any limit < 60 should show TRUNCATED.
+				if tc.wantLines < 60 && !strings.Contains(out, "TRUNCATED") {
+					t.Errorf("expected TRUNCATED for limit=%d on 60-line file:\n%s", tc.limit, out)
+				}
+			})
+		}
+	})
+
+	// Cases that should error.
+	t.Run("over_max_errors", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			limit int
+		}{
+			{"limit=100", 100},
+			{"limit=51", 51},
+			{"limit=999", 999},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				raw, _ := json.Marshal(map[string]any{"path": p, "limit": tc.limit})
+				_, err := tool.Execute(context.Background(), raw)
+				if err == nil {
+					t.Fatal("expected error for limit > 50")
+				}
+				if !strings.Contains(err.Error(), "exceeds maximum (50)") {
+					t.Errorf("wrong error message: %v", err)
+				}
+			})
+		}
+	})
 }
 
 func TestRead_OffsetNavigates(t *testing.T) {
