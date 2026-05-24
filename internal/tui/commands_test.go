@@ -389,8 +389,8 @@ func TestFilterCommands_EmptyOrSlashReturnsAll(t *testing.T) {
 func TestFilterCommands_PrefixMatch(t *testing.T) {
 	all := allCommands()
 	got := filterCommands(all, "/m")
-	if len(got) != 1 || got[0].names[0] != "/model" {
-		t.Errorf("/m → %v, want just /model", names(got))
+	if len(got) != 2 || got[0].names[0] != "/model" || got[1].names[0] != "/memory" {
+		t.Errorf("/m → %v, want [/model /memory]", names(got))
 	}
 }
 

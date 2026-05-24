@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -53,6 +54,7 @@ func allCommands() []command {
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
 		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
 		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Manage skill packages (mirrors the `seek skill` CLI: install, uninstall, update, list, status, stats, help).", handler: cmdSkillCLI},
+		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", handler: cmdMemoryCLI},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
@@ -528,6 +530,32 @@ func cmdSkillCLI(_ *Model, args string) cmdResult {
 	tokens := strings.Fields(args)
 	var stdout, stderr bytes.Buffer
 	err := skillcli.Run(tokens, &stdout, &stderr)
+	var b strings.Builder
+	if s := strings.TrimRight(stdout.String(), "\n"); s != "" {
+		b.WriteString(s)
+	}
+	if s := strings.TrimRight(stderr.String(), "\n"); s != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(s))
+	}
+	if err != nil {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(err.Error()))
+	}
+	return cmdResult{text: b.String()}
+}
+
+// cmdMemoryCLI mirrors the `seek memory ...` CLI inside the TUI. Same
+// wiring as cmdSkillCLI: whitespace-split args, buffered IO, rendered as
+// scrollback.
+func cmdMemoryCLI(_ *Model, args string) cmdResult {
+	tokens := strings.Fields(args)
+	var stdout, stderr bytes.Buffer
+	err := memorycli.Run(tokens, &stdout, &stderr)
 	var b strings.Builder
 	if s := strings.TrimRight(stdout.String(), "\n"); s != "" {
 		b.WriteString(s)

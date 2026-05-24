@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,14 @@ type ObserveResult struct {
 	Tagline string
 	OK      bool   // true = written to M (ACCEPT), false = rejected/failed
 	Err     string // failure reason (empty on success)
+}
+
+// entryInfo is the intermediate representation for M-index rendering:
+// one non-stale entry with its tags for group-by-tag layout.
+type entryInfo struct {
+	name    string
+	tagline string
+	tags    []string
 }
 
 // Hook is the memory subsystem's manifestation on the agent's
@@ -148,21 +157,181 @@ func (h *Hook) OnPrePrompt(_ context.Context, _ hooks.PrePromptIn) (hooks.PrePro
 	}
 
 	if h.Project != nil {
-		idx := h.Project.Index()
-		if len(idx) > 0 {
-			var sb strings.Builder
-			sb.WriteString("Project memory index — call memory_recall(name) to fetch full content for any entry below.\n\n")
-			for _, e := range idx {
-				fmt.Fprintf(&sb, "- %s: %s\n", e.Name, e.Tagline)
-			}
-			prepend = append(prepend, deepseek.Message{
-				Role:    deepseek.RoleUser,
-				Content: wrapContext("memory.index", strings.TrimRight(sb.String(), "\n")),
-			})
+		if msg := h.buildMIndex(); msg != nil {
+			prepend = append(prepend, *msg)
 		}
 	}
 
 	return hooks.PrePromptOut{Prepend: prepend}, nil
+}
+
+// buildMIndex builds the M-index <context> block with tag-grouped layout
+// and token-budget truncation. When the index exceeds maxMIndexTokens,
+// low-score entries are dropped first (scores computed via Score()).
+// Returns nil when there are no non-stale entries.
+//
+// Grouping: entries are grouped by their first tag value. Untagged entries
+// go under a "general" section. Groups are sorted alphabetically with
+// "general" last. Within each group, entries are sorted by name.
+//
+// Byte-stability: given identical L+M disk state + same env, the output
+// is deterministic — sort orders are all stable, and estimateTokens is a
+// pure function of the input string.
+func (h *Hook) buildMIndex() *deepseek.Message {
+	now := time.Now().UTC()
+	if h.Now != nil {
+		now = h.Now()
+	}
+	halfLife := HalfLifeFromEnv()
+
+	// Collect non-stale entries with tags.
+	all := h.Project.Entries()
+	entries := make([]entryInfo, 0, len(all))
+	for _, e := range all {
+		if e.Stale {
+			continue
+		}
+		entries = append(entries, entryInfo{
+			name:    e.Name,
+			tagline: e.Tagline,
+			tags:    e.Tags,
+		})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	body := buildGroupedIndexString(entries)
+	if estimateTokens(body) <= maxMIndexTokens {
+		return &deepseek.Message{
+			Role:    deepseek.RoleUser,
+			Content: wrapContext("memory.index", body),
+		}
+	}
+
+	// Over budget — rebuild by score descending.
+	type scoredEntry struct {
+		name    string
+		tagline string
+		tags    []string
+		score   float64
+	}
+
+	// Build a lookup by name for scores.
+	scoreMap := make(map[string]float64, len(all))
+	for _, e := range all {
+		if !e.Stale {
+			scoreMap[e.Name] = Score(e, now, halfLife)
+		}
+	}
+
+	scored := make([]scoredEntry, len(entries))
+	for i, e := range entries {
+		scored[i] = scoredEntry{
+			name:    e.name,
+			tagline: e.tagline,
+			tags:    e.tags,
+			score:   scoreMap[e.name],
+		}
+	}
+
+	// Sort descending by score; stable tie-break by name for determinism.
+	sort.SliceStable(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
+		}
+		return scored[i].name < scored[j].name
+	})
+
+	// Greedily take entries until we hit budget.
+	var within []entryInfo
+	for _, s := range scored {
+		candidate := entryInfo{
+			name:    s.name,
+			tagline: s.tagline,
+			tags:    s.tags,
+		}
+		testEntries := append(within, candidate)
+		testBody := buildGroupedIndexString(testEntries)
+		if estimateTokens(testBody) <= maxMIndexTokens {
+			within = append(within, candidate)
+		} else {
+			// Need to check if even adding this one line exceeds budget.
+			// If so, just stop — the remaining entries are lower-scored.
+			break
+		}
+	}
+
+	body = buildGroupedIndexString(within)
+	if len(within) < len(entries) {
+		truncated := len(entries) - len(within)
+		note := fmt.Sprintf("\n... and %d more (truncated to fit token budget)", truncated)
+		if estimateTokens(note) <= maxMIndexTokens-estimateTokens(body) {
+			body += note
+		}
+	}
+
+	return &deepseek.Message{
+		Role:    deepseek.RoleUser,
+		Content: wrapContext("memory.index", body),
+	}
+}
+
+// buildGroupedIndexString renders entries grouped by their first tag.
+// Untagged entries go under "### general". Groups are alphabetically
+// sorted; within each group entries are sorted by name.
+func buildGroupedIndexString(entries []entryInfo) string {
+	type namedEntry struct {
+		name    string
+		tagline string
+	}
+
+	groups := make(map[string][]namedEntry) // tag → entries
+	var general []namedEntry
+
+	for _, e := range entries {
+		ne := namedEntry{name: e.name, tagline: e.tagline}
+		if len(e.tags) > 0 && e.tags[0] != "" {
+			groups[e.tags[0]] = append(groups[e.tags[0]], ne)
+		} else {
+			general = append(general, ne)
+		}
+	}
+
+	// Collect and sort tag names.
+	tagNames := make([]string, 0, len(groups))
+	for tag := range groups {
+		tagNames = append(tagNames, tag)
+	}
+	sort.Strings(tagNames)
+
+	var sb strings.Builder
+	sb.WriteString("Project memory index — call memory_recall(name) to fetch full content for any entry below.\n\n")
+
+	for _, tag := range tagNames {
+		entries := groups[tag]
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].name < entries[j].name
+		})
+		fmt.Fprintf(&sb, "### %s\n", tag)
+		for _, e := range entries {
+			fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+		}
+		sb.WriteByte('\n')
+	}
+
+	if len(general) > 0 {
+		sort.Slice(general, func(i, j int) bool {
+			return general[i].name < general[j].name
+		})
+		fmt.Fprintf(&sb, "### general\n")
+		for _, e := range general {
+			fmt.Fprintf(&sb, "- %s: %s\n", e.name, e.tagline)
+		}
+		sb.WriteByte('\n')
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // OnSessionStart runs a GC pass once per session. Stale flips happen

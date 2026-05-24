@@ -10,6 +10,13 @@ import (
 // safety margin for the <context> wrapper and estimation error.
 const maxSoulTokens = 450
 
+// maxMIndexTokens is the token budget for the M-index injected by
+// PrePromptHook. 1500 tokens is generous enough to hold ~75–100 taglines
+// (the expected ceiling for a single project) while bounding worst-case
+// injection. When the index exceeds this budget, low-score entries are
+// dropped first.
+const maxMIndexTokens = 1500
+
 // estimateTokens returns a rough token count for a string.
 // DeepSeek has no public tokenizer; this is a CJK-aware character
 // approximation: ASCII/Latin ~4 chars/token, CJK ~3 chars/token

@@ -10,14 +10,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
 )
 
-// Project is the M-layer handle for a single project. NOT safe for
-// concurrent calls — callers serialise through the agent loop.
+// Project is the M-layer handle for a single project.
+// Safe for concurrent reads; write methods must be externally serialised
+// (the agent loop provides this — see note on concurrent access below).
+//
+// The embedded sync.RWMutex guards entries and order against the async
+// memory_observe goroutine (ObserveEnqueue) racing with OnPrePrompt or
+// OnSessionStart (RunGC). Read paths (Index, Get, Entries) take RLock;
+// write paths (Add, Remove, TouchRecall, RunGC) take Lock.
 type Project struct {
+	mu sync.RWMutex
+
 	ID       string
 	Dir      string
 	AbsPath  string
@@ -201,6 +210,8 @@ func (p *Project) writeEntries() error {
 // already write on each mutation; Save exists for callers that batched
 // changes externally (e.g. a future migration tool).
 func (p *Project) Save() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if err := p.writeManifest(); err != nil {
 		return err
 	}
@@ -212,6 +223,8 @@ func (p *Project) Save() error {
 // is always bumped to now. The on-disk file is rewritten before Add
 // returns — callers don't need to remember to Save.
 func (p *Project) Add(e Entry) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if e.Name == "" {
 		return errors.New("memory: Entry.Name is required")
 	}
@@ -234,6 +247,8 @@ func (p *Project) Add(e Entry) error {
 // Get returns the entry by name. Stale entries are still returned —
 // stale only affects index injection (PRD §6), not direct memory_recall.
 func (p *Project) Get(name string) (Entry, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	e, ok := p.entries[name]
 	return e, ok
 }
@@ -242,6 +257,8 @@ func (p *Project) Get(name string) (Entry, bool) {
 // entry is not an error. Returns the deleted entry's existence so
 // callers can distinguish "removed something" from "no-op".
 func (p *Project) Remove(name string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if _, ok := p.entries[name]; !ok {
 		return false, nil
 	}
@@ -255,11 +272,65 @@ func (p *Project) Remove(name string) (bool, error) {
 	return true, p.writeEntries()
 }
 
+// Archive moves an entry from the active set to archived.jsonl and
+// removes it from the in-memory map. The reason is recorded alongside
+// the entry in the archive. Returns ErrNotFound when name doesn't exist.
+func (p *Project) Archive(name, reason string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	e, ok := p.entries[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+
+	if err := p.appendArchive(e); err != nil {
+		return fmt.Errorf("archive append: %w", err)
+	}
+
+	delete(p.entries, name)
+	for i, n := range p.order {
+		if n == name {
+			p.order = append(p.order[:i], p.order[i+1:]...)
+			break
+		}
+	}
+	return p.writeEntries()
+}
+
+// Amend appends new content to an existing entry's rationale. The
+// appended text is separated with a horizontal rule and timestamp.
+// UpdatedAt and LastRecalledAt are bumped to now. Returns ErrNotFound
+// when name doesn't exist.
+func (p *Project) Amend(name, appendContent string, now time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	e, ok := p.entries[name]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNotFound, name)
+	}
+
+	var sb strings.Builder
+	sb.WriteString(e.Content)
+	sb.WriteString("\n\n---\n")
+	sb.WriteString(now.Format(time.RFC3339))
+	sb.WriteString("\n\n")
+	sb.WriteString(appendContent)
+	e.Content = sb.String()
+	e.UpdatedAt = now
+	e.LastRecalledAt = now
+	p.entries[name] = e
+	return p.writeEntries()
+}
+
 // TouchRecall increments recall_count and updates last_recalled_at,
 // then persists. Returns ErrNotFound for missing names so callers can
 // distinguish a typo from a successful no-op (Add/Remove are idempotent
 // because there's a single sensible behaviour; TouchRecall isn't).
 func (p *Project) TouchRecall(name string, t time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	e, ok := p.entries[name]
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNotFound, name)
@@ -274,6 +345,8 @@ func (p *Project) TouchRecall(name string, t time.Time) error {
 // is what makes PrePromptHook injection byte-stable across runs — PRD
 // §5 acceptance #7 (SHA-256 round-trip equality) depends on this.
 func (p *Project) Index() []IndexEntry {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out := make([]IndexEntry, 0, len(p.entries))
 	for name, e := range p.entries {
 		if e.Stale {
@@ -289,6 +362,8 @@ func (p *Project) Index() []IndexEntry {
 // Used by /distill and GC; callers that want the injection-ready list
 // should call Index() instead.
 func (p *Project) Entries() []Entry {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out := make([]Entry, 0, len(p.entries))
 	for _, name := range p.order {
 		out = append(out, p.entries[name])

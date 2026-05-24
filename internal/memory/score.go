@@ -45,11 +45,11 @@ const gracePeriod = 7 * 24 * time.Hour
 // preventing the unbounded growth that a hard exemption would cause.
 const autoSourcedGracePeriod = 30 * 24 * time.Hour
 
-// halfLifeFromEnv resolves SEEK_MEMORY_HALFLIFE_DAYS to a Duration,
+// HalfLifeFromEnv resolves SEEK_MEMORY_HALFLIFE_DAYS to a Duration,
 // falling back to defaultHalfLife on absent / unparseable / non-positive.
 // Misconfiguration silently degrades rather than failing the session —
 // a broken env var is annoying, but blocking startup over it is worse.
-func halfLifeFromEnv() time.Duration {
+func HalfLifeFromEnv() time.Duration {
 	v := os.Getenv("SEEK_MEMORY_HALFLIFE_DAYS")
 	if v == "" {
 		return defaultHalfLife
@@ -111,7 +111,9 @@ type GCReport struct {
 // halfLife of 0 falls back to defaultHalfLife (configurable via
 // SEEK_MEMORY_HALFLIFE_DAYS).
 func (p *Project) RunGC(now time.Time) (GCReport, error) {
-	halfLife := halfLifeFromEnv()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	halfLife := HalfLifeFromEnv()
 	report := GCReport{HalfLife: halfLife}
 
 	var toArchive []Entry

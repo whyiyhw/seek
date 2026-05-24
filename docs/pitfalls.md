@@ -464,3 +464,28 @@ If you're new to the project, skim entries in this order:
 1. **DeepSeek API** first — the optimisation surface that justifies the whole project
 2. **TUI / terminal** second — that's where most of the user-visible polish lives
 3. **Go / tooling** as needed when you trip on them
+
+---
+
+## Go
+
+### Function-local type can't be referenced from another function
+- **Saw**: attempted to call `buildGroupedIndexString([]entryInfo{...})` where `entryInfo` was defined inside `buildMIndex()`. Go compiler rejected: "undefined: entryInfo"
+- **Why**: Go type declarations inside function bodies are scoped to that function only. Unlike closures (which capture values, not types), the type itself is invisible outside its declaring function, even from another function in the same package
+- **Fix**: moved `entryInfo` to package-level type. The struct is used by two functions (`buildMIndex` and `buildGroupedIndexString`), so it cannot be local to either
+- **Lesson**: Go's scoping rules for types follow the same lexical block rules as variables — a type declared inside a function is as private as a variable there. If two functions share a type, it must live at package or file level
+- **Refs**: `internal/memory/hook.go:entryInfo`
+
+### RWMutex not reentrant — unexported helpers can't lock if caller holds lock
+- **Saw**: added `p.mu.Lock()` to public methods like `Project.Add()`, which calls `p.writeEntries()` internally. If `writeEntries()` also called `p.mu.Lock()`, the goroutine would deadlock on the second acquisition
+- **Why**: Go's `sync.RWMutex` is not reentrant (unlike Java's `synchronized`). A goroutine that already holds a `Lock()` and tries to `Lock()` again will block forever waiting for itself to release the first lock. Same applies to `RLock()` after `Lock()` — that's a write-lock upgrade attempt, which also deadlocks
+- **Fix**: unexported helper methods (`writeEntries`, `appendArchive`) do NOT acquire locks — callers (the public methods) hold the lock for the entire duration of the operation. Documented in the `Project` type comment
+- **Lesson**: when adding `sync.RWMutex` to an existing struct, audit every internal call path. The convention is: public methods lock, private helpers don't. Inline documentation ("caller must hold mu.Lock") prevents future deadlocks
+- **Refs**: `internal/memory/project.go:Project`
+
+### Adding a slash command changes `/m` prefix-match test expectations
+- **Saw**: after adding `/memory` command, `TestFilterCommands_PrefixMatch` failed because `/m` prefix matched both `/model` and `/memory` instead of just `/model`
+- **Why**: the prefix-match test hardcoded the expected match count and command name. Adding a new command whose prefix overlapped with an existing one naturally expanded the match set
+- **Fix**: updated the test expectation from `["/model"]` to `["/model", "/memory"]`
+- **Lesson**: tests that assert on exact command-match sets are brittle to new command additions. Either use a unique prefix (`/mo` instead of `/m`) or explicitly document that such tests need updating when commands are added
+- **Refs**: `internal/tui/commands_test.go:TestFilterCommands_PrefixMatch`

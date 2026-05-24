@@ -24,6 +24,7 @@ import (
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
+	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -106,6 +107,9 @@ func run() error {
 	// it if we waited.
 	if len(os.Args) >= 2 && os.Args[1] == "skill" {
 		return skillcli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "memory" {
+		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 
 	var (
@@ -417,7 +421,9 @@ func run() error {
 			memSoul = soul
 		}
 		reg.Add(memorytool.NewRecall(memProject)).
-			Add(memorytool.NewRemember(memProject, policy))
+			Add(memorytool.NewRemember(memProject, policy)).
+			Add(memorytool.NewArchive(memProject)).
+			Add(memorytool.NewAmend(memProject))
 	}
 
 	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
