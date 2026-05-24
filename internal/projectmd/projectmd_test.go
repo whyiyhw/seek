@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func writeMD(t *testing.T, path, body string) {
@@ -142,5 +143,76 @@ func TestSection_LabelsSource(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("Section missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestLoad_Truncates4ByteEmojiAtBoundary(t *testing.T) {
+	root := t.TempDir()
+	// Emoji "🚀" (U+1F680) is 4 bytes in UTF-8: F0 9F 9A 80.
+	// Fill to maxBytes-3, then append the emoji → total = maxBytes+1.
+	body := strings.Repeat("a", maxBytes-3) + "🚀"
+	writeMD(t, filepath.Join(root, "AGENTS.md"), body)
+
+	got, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Truncate {
+		t.Errorf("Truncate flag not set")
+	}
+	if !utf8.ValidString(got.Content) {
+		t.Errorf("Content is not valid UTF-8 after truncation (raw bytes): %#v",
+			[]byte(got.Content))
+	}
+	if strings.Contains(got.Content, "🚀") {
+		t.Errorf("4-byte emoji leaked through truncation")
+	}
+}
+
+func TestLoad_TruncatesMultiByteAtBoundary(t *testing.T) {
+	root := t.TempDir()
+	// Fill to maxBytes-2 then append a 3-byte Chinese character "界" (U+754C).
+	// Total = maxBytes+1 → triggers truncation.
+	// Byte-level cut at maxBytes would split "界" into 0xE7 0x95 | 0x8C.
+	body := strings.Repeat("a", maxBytes-2) + "界"
+	writeMD(t, filepath.Join(root, "AGENTS.md"), body)
+
+	got, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Truncate {
+		t.Errorf("Truncate flag not set")
+	}
+	// The entire Content must be valid UTF-8 — no broken runes.
+	if !utf8.ValidString(got.Content) {
+		t.Errorf("Content is not valid UTF-8 after truncation (raw bytes): %#v",
+			[]byte(got.Content))
+	}
+	// The multi-byte character "界" should be completely removed,
+	// not partially present as garbled bytes.
+	if strings.Contains(got.Content, "界") {
+		t.Errorf("Multi-byte character leaked through truncation")
+	}
+}
+
+func TestLoad_TruncatesExactBoundary_NoMultiByteSplit(t *testing.T) {
+	root := t.TempDir()
+	// Exactly maxBytes bytes of ASCII — no multi-byte boundary issue.
+	body := strings.Repeat("x", maxBytes)
+	writeMD(t, filepath.Join(root, "AGENTS.md"), body)
+
+	got, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Truncate {
+		t.Errorf("Truncate flag should be false for exact boundary")
+	}
+	if !utf8.ValidString(got.Content) {
+		t.Errorf("Content is not valid UTF-8")
+	}
+	if len(got.Content) != maxBytes {
+		t.Errorf("Content length = %d, want %d", len(got.Content), maxBytes)
 	}
 }

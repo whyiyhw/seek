@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
@@ -59,7 +60,9 @@ import (
 	"github.com/muesli/termenv"
 )
 
-const systemPromptTpl = `You are seek, an open-source terminal coding agent.
+const systemPromptTpl = `%s
+
+You are seek, an open-source terminal coding agent.
 
 About yourself (use these facts when the user asks who you are, who built you, what license, etc. — do NOT speculate beyond them):
 - Project: seek — https://github.com/whyiyhw/seek
@@ -88,8 +91,64 @@ Workflow:
 4. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
 5. For permission denials, surface the message to the user and stop — do not loop.
 
-Working directory: %s. --yolo: %v.
+Working directory: %s. Mode: %s.
 `
+
+// buildLangDirective returns the language directive text to inject at
+// the top of the system prompt. lang is "en", "zh", or "" (auto).
+func buildLangDirective(lang string) string {
+	switch lang {
+	case "en":
+		return "Language: English. Always respond in English."
+	case "zh":
+		return "Language: 中文。请始终用中文回复。"
+	default:
+		// Auto-detect from OS locale.
+		if detected := detectLangFromEnv(); detected == "zh" {
+			return "Language: 中文。请始终用中文回复。"
+		}
+		return "Language: English. Always respond in English."
+	}
+}
+
+// detectLangFromEnv checks locale environment variables for a zh prefix.
+// Order: LC_ALL > LC_MESSAGES > LANG. Returns "en" if no match.
+func detectLangFromEnv() string {
+	for _, env := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
+		if v := os.Getenv(env); strings.HasPrefix(strings.ToLower(v), "zh") {
+			return "zh"
+		}
+	}
+	return "en"
+}
+
+// resolveLang converts a --lang flag value ("en", "zh", "auto")
+// to the resolved language ("en" or "zh"). "auto" detects from env.
+func resolveLang(raw string) string {
+	switch strings.ToLower(raw) {
+	case "en":
+		return "en"
+	case "zh":
+		return "zh"
+	default: // "auto" or anything else
+		return detectLangFromEnv()
+	}
+}
+
+// modeLabel returns the human-readable label for a permission mode,
+// used in the system prompt status line.
+func modeLabel(m permission.Mode) string {
+	switch m {
+	case permission.ModeYolo:
+		return "yolo"
+	case permission.ModePlan:
+		return "plan"
+	case permission.ModeAsk:
+		return "ask"
+	default:
+		return "deny"
+	}
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -119,6 +178,7 @@ func run() error {
 		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → default (16384)")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
+		plan          = flag.Bool("plan", false, "read-only exploration: no bash/writes/edits; produce a plan to review before executing")
 		jsonOut       = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
 		resume        = flag.String("resume", "", "load a saved session by ID (see seek -list)")
 		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
@@ -139,8 +199,15 @@ func run() error {
 		upgradeCheck  = flag.Bool("upgrade-check", false, "check for a newer release on GitHub and print the result; never modifies the binary")
 		dreamFlag     = flag.Bool("dream", false, "M→L distillation: scan project memory, print L-pending candidates without writing")
 		dreamWrite    = flag.Bool("dream-write", false, "with -dream: actually append the candidates to ~/.seek/soul.md's Pending section")
+		langFlag      = flag.String("lang", "auto", "response language: en|zh|auto (auto = detect from system locale)")
 	)
 	flag.Parse()
+
+	// --yolo and --plan are mutually exclusive: yolo allows everything,
+	// plan denies everything — combining them makes no sense.
+	if *yolo && *plan {
+		return fmt.Errorf("--yolo and --plan are mutually exclusive")
+	}
 
 	// -version / -upgrade short-circuit before any provider / session
 	// machinery is touched: these subcommands don't need API keys.
@@ -257,14 +324,21 @@ func run() error {
 			// pass --yolo explicitly.
 			*yolo = loaded.Yolo
 		}
+		if !*plan {
+			// Inherit plan state from the saved session if user didn't
+			// pass --plan explicitly.
+			*plan = loaded.Plan
+		}
 	}
 	// Print mode (-p / piped stdin) can't realistically interrupt to
 	// ask, so it stays in deny mode unless --yolo is explicit. The TUI
 	// path overrides to Ask further down so per-call approval kicks
-	// in. --yolo always wins.
+	// in. --yolo and --plan always win.
 	initialMode := permission.ModeDeny
 	if *yolo {
 		initialMode = permission.ModeYolo
+	} else if *plan {
+		initialMode = permission.ModePlan
 	}
 	policy, err := permission.New(cwd, initialMode)
 	if err != nil {
@@ -296,6 +370,10 @@ func run() error {
 	// session-level choice at call time.
 	// Default is "max" — the deepest reasoning level.
 	var sessionEffort = "max"
+	// sessionLang mirrors session.Lang: "" (auto-detect) | "en" | "zh".
+	// The /lang TUI command updates it through SetLang below; the system
+	// prompt builder reads it to inject the language directive.
+	sessionLang := resolveLang(*langFlag)
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -426,7 +504,7 @@ func run() error {
 			Add(memorytool.NewAmend(memProject))
 	}
 
-	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, *yolo)
+	systemPrompt := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(initialMode))
 	// Project instructions go BEFORE the skill manifest: they describe
 	// "how this repo expects you to work" while skills are workflow
 	// templates. Ordering matches the model's likely reading priority.
@@ -457,7 +535,7 @@ func run() error {
 				tracker.Record(loaded.Usage, *model, pricing.CurrentTier(time.Now()))
 			}
 		} else {
-			activeSession = session.New(*model, abs, systemPrompt, *yolo)
+			activeSession = session.New(*model, abs, systemPrompt, *yolo, *plan)
 		}
 		// A resumed session may carry an /effort selection from the prior
 		// run — restore it before the agent is built so the very first
@@ -468,6 +546,12 @@ func run() error {
 		// brand-new session (see commit <fill>).
 		if loaded != nil {
 			sessionEffort = activeSession.Effort
+		}
+		// Language override: if the user explicitly set --lang=en|zh,
+		// that wins (already resolved in resolveLang above). If the
+		// flag is "auto" and the session has a saved preference, use it.
+		if loaded != nil && *langFlag == "auto" && activeSession.Lang != "" {
+			sessionLang = activeSession.Lang
 		}
 	}
 
@@ -557,7 +641,7 @@ func run() error {
 	}
 
 	if *rpcMode {
-		return runRPC(ctx, ag, tracker, *model, *yolo, activeSession, store)
+		return runRPC(ctx, ag, tracker, *model, *yolo, *plan, activeSession, store)
 	}
 
 	// Route: --rpc → JSON-RPC 2.0 server; -json / -p / piped stdin → print; otherwise TUI.
@@ -570,15 +654,16 @@ func run() error {
 			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
 		}
 		if *jsonOut {
-			return runJSON(ctx, ag, tracker, *model, *yolo, text, activeSession, store)
+			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, activeSession, store)
 		}
-		return runPrint(ctx, ag, tracker, *model, *yolo, text, activeSession, store)
+		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, activeSession, store)
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
-	// from Deny → Ask unless --yolo was passed. This is what gives us
-	// inline y/N prompts on bash and out-of-CWD writes.
-	if !*yolo {
+	// from Deny → Ask unless --yolo or --plan was passed. This is
+	// what gives us inline y/N prompts on bash and out-of-CWD writes.
+	// Plan mode stays Plan — read-only, no prompts needed.
+	if !*yolo && !*plan {
 		policy.SetMode(permission.ModeAsk)
 	}
 
@@ -626,7 +711,9 @@ func run() error {
 		Tracker:           tracker,
 		Model:             sessionModel,
 		Effort:            sessionEffort,
+		Lang:              sessionLang,
 		Yolo:              policy.Yolo(),
+		Plan:              policy.Plan(),
 		CWD:               abs,
 		Ctx:               ctx,
 		Theme:             effectiveTheme,
@@ -649,7 +736,7 @@ func run() error {
 			// the file's behaviour to be "loaded at launch", not "hot-
 			// reloaded"; documented behaviour is easier to reason
 			// about than clever).
-			sp := fmt.Sprintf(systemPromptTpl, abs, policy.Yolo())
+			sp := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(policy.Mode()))
 			if section := projMD.Section(); section != "" {
 				sp = sp + "\n" + section
 			}
@@ -676,12 +763,28 @@ func run() error {
 			// next prompt without a /reset / RebuildAgent.
 			sessionEffort = e
 		},
+		SetLang: func(l string) {
+			// Mirror into sessionLang so RebuildAgent picks up the
+			// change on the next /new. The TUI separately updates
+			// Session.Lang so the next save captures the choice.
+			sessionLang = l
+		},
 		SetYolo: func(y bool) {
 			// policy is the single source of truth now — mode flip is
 			// observed by every tool's permission.Check call
 			// immediately, no registry rebuild needed.
 			if y {
 				policy.SetMode(permission.ModeYolo)
+			} else {
+				policy.SetMode(permission.ModeAsk)
+			}
+		},
+		SetPlan: func(p bool) {
+			// Flip between Plan and Ask modes. The system prompt is NOT
+			// rebuilt (same as /yolo) — the plan instruction stays as it
+			// was at startup. The permission gate takes effect immediately.
+			if p {
+				policy.SetMode(permission.ModePlan)
 			} else {
 				policy.SetMode(permission.ModeAsk)
 			}
@@ -703,7 +806,7 @@ func stdinIsPiped() bool {
 // tool indicators + stats footer to stderr. Suitable for piping.
 // The session is saved after every TurnEnd so a crash or interrupt
 // mid-run preserves progress up to the last completed turn.
-func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string, activeSession *session.Session, store *session.Store) error {
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
 	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
@@ -732,6 +835,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		activeSession.Usage = tracker.Cumulative()
 		activeSession.Model = model
 		activeSession.Yolo = yolo
+		activeSession.Plan = plan
 		// In non-TUI runs (runPrint / runJSON / runRPC) there is no
 		// /effort command, so the agent's Effort is constant for the
 		// lifetime of the process. Reading it off the agent keeps the
@@ -790,6 +894,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 
 	fmt.Fprintf(os.Stderr, "\n--- seek stats ---\n")
 	fmt.Fprintf(os.Stderr, "yolo:         %v\n", yolo)
+	fmt.Fprintf(os.Stderr, "plan:         %v\n", plan)
 	fmt.Fprintf(os.Stderr, "model:        %s\n", model)
 	fmt.Fprintf(os.Stderr, "tier:         %s\n", pricing.TierLabel(tier))
 	fmt.Fprintf(os.Stderr, "turns:        %d\n", turns)
@@ -851,7 +956,7 @@ type jsonLine struct {
 // runJSON is the machine-readable output mode: one JSON object per line
 // on stdout. Human-readable diagnostics (tier, stats footer) go to
 // stderr so stdout stays parse-clean.
-func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, text string, activeSession *session.Session, store *session.Store) error {
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, activeSession *session.Session, store *session.Store) error {
 	enc := json.NewEncoder(os.Stdout)
 
 	emit := func(line jsonLine) {
@@ -873,6 +978,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 		activeSession.Usage = tracker.Cumulative()
 		activeSession.Model = model
 		activeSession.Yolo = yolo
+		activeSession.Plan = plan
 		// In non-TUI runs (runPrint / runJSON / runRPC) there is no
 		// /effort command, so the agent's Effort is constant for the
 		// lifetime of the process. Reading it off the agent keeps the
@@ -954,7 +1060,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 // requests for agent/prompt, agent/info, and session/list methods. Suitable
 // for IDE integrations and scripted automation that need more control than the
 // simple -p / --json modes.
-func runRPC(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo bool, activeSession *session.Session, store *session.Store) error {
+func runRPC(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, activeSession *session.Session, store *session.Store) error {
 	fmt.Fprintf(os.Stderr, "seek rpc: listening on stdin (JSON-RPC 2.0)\n")
 	srv := seekrpc.New(ag, tracker, store, activeSession, model, yolo)
 	return srv.Serve(ctx, os.Stdin, os.Stdout)
@@ -1015,7 +1121,13 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	// Don't split a multi-byte character at the boundary.
+	// The loop caps at 3 iterations (max continuation bytes in a 4-byte rune).
+	b := []byte(s[:n])
+	for i := 0; i < 3 && len(b) > 0 && !utf8.Valid(b); i++ {
+		b = b[:len(b)-1]
+	}
+	return string(b) + "…"
 }
 
 func truncMarker(t bool) string {

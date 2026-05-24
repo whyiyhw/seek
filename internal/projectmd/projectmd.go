@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 )
 
 // Filename is the conventional file we look for. Exported so tests
@@ -97,9 +98,17 @@ func shape(path string, data []byte) Result {
 		Bytes: len(data),
 	}
 	if len(data) > maxBytes {
-		r.Content = string(data[:maxBytes]) +
+		b := data[:maxBytes]
+		// Drop trailing bytes to avoid splitting a multi-byte UTF-8
+		// character. The loop caps at 3 iterations (max continuation
+		// bytes for a 4-byte rune) and bails if the input contains
+		// invalid UTF-8 beyond a simple truncated rune.
+		for i := 0; i < 3 && len(b) > 0 && !utf8.Valid(b); i++ {
+			b = b[:len(b)-1]
+		}
+		r.Content = string(b) +
 			fmt.Sprintf("\n\n…[truncated %d bytes; AGENTS.md is too large — keep it under %d KB]\n",
-				len(data)-maxBytes, maxBytes/1024)
+				len(data)-len(b), maxBytes/1024)
 		r.Truncate = true
 	} else {
 		r.Content = string(data)
