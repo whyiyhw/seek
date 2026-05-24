@@ -144,13 +144,13 @@ func TestIsDreamDue_InvalidEnvFallsBack(t *testing.T) {
 }
 
 func TestAutoDreamEnabled_TruthyValues(t *testing.T) {
-	for _, v := range []string{"1", "true", "yes", "on", "TRUE", "Yes"} {
+	for _, v := range []string{"", "1", "true", "yes", "on", "TRUE", "Yes"} {
 		t.Setenv("SEEK_AUTO_DREAM", v)
 		if !autoDreamEnabled() {
 			t.Errorf("%q should enable", v)
 		}
 	}
-	for _, v := range []string{"", "0", "false", "maybe"} {
+	for _, v := range []string{"0", "false", "no", "off", "maybe"} {
 		t.Setenv("SEEK_AUTO_DREAM", v)
 		if autoDreamEnabled() {
 			t.Errorf("%q should NOT enable", v)
@@ -158,8 +158,13 @@ func TestAutoDreamEnabled_TruthyValues(t *testing.T) {
 	}
 }
 
-func TestAutoDream_OffByDefault(t *testing.T) {
-	t.Setenv("SEEK_AUTO_DREAM", "")
+// TestAutoDream_SingleProjectNoop verifies that auto-dream doesn't waste
+// a reasoner call when there's only one project — the N≥2 filter would
+// reject everything anyway. The goroutine still starts (default-on) but
+// returns before calling the reasoner.
+func TestAutoDream_SingleProjectNoop(t *testing.T) {
+	t.Setenv("SEEK_AUTO_DREAM", "1")
+	t.Setenv("SEEK_AUTO_DREAM_SESSIONS", "1")
 	cwd, _ := withMemoryEnv(t)
 	p, _ := LoadOrCreate(cwd)
 	_ = p.Add(Entry{Name: "anchor", Tagline: "x", Content: "y"})
@@ -176,16 +181,15 @@ func TestAutoDream_OffByDefault(t *testing.T) {
 	}
 	h.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
 
-	// No goroutine should have started; close-on-completion never fires
-	// if no auto-dream attempted.
+	// Goroutine runs but returns immediately (<2 projects → skip reasoner).
 	select {
 	case <-h.autoDreamDone:
-		t.Errorf("auto-dream should not run when env var unset")
-	case <-time.After(50 * time.Millisecond):
-		// Good — nothing happened.
+		// Good: goroutine ran but skipped the reasoner.
+	case <-time.After(500 * time.Millisecond):
+		t.Error("goroutine should have completed (skipping reasoner)")
 	}
 	if fake.lastReq != nil {
-		t.Errorf("reasoner should NOT be called with auto-dream off")
+		t.Errorf("reasoner should NOT be called with <2 projects")
 	}
 }
 

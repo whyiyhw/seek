@@ -535,9 +535,11 @@ func (h *Hook) maybeAutoDream(ctx context.Context, now time.Time) {
 // runAutoDream gathers cross-project + recent-session input, runs the
 // reasoner, and appends any candidates to Soul.Pending. Errors silently
 // swallowed — auto-dream is best-effort enhancement.
+// Skips the reasoner call entirely when there are <2 projects with
+// entries, since the N≥2 filter would reject everything anyway.
 func (h *Hook) runAutoDream(ctx context.Context) {
 	projects, err := ListProjects()
-	if err != nil || len(projects) == 0 {
+	if err != nil || len(projects) < 2 {
 		return
 	}
 	in := DreamInput{}

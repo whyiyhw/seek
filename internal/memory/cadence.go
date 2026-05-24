@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
@@ -161,13 +162,15 @@ func readIntEnv(name string, fallback int) int {
 	return n
 }
 
-// autoDreamEnabled mirrors autoDistillEnabled — gate via env var so
-// the safety net (manual `seek -dream`) stays the default.
+// autoDreamEnabled returns true when $SEEK_AUTO_DREAM is unset or set to
+// a truthy value (1/true/yes/on). Default enabled — dream is low-frequency
+// (every ~14 days) with a pre-check that skips the reasoner call when
+// there are <2 projects with entries. Controls auto-dream cadence check;
+// manual `seek -dream` is always available regardless.
 func autoDreamEnabled() bool {
-	v := os.Getenv(envAutoDream)
-	switch v {
-	case "1", "true", "yes", "on", "TRUE", "Yes", "ON", "True":
-		return true
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(envAutoDream)))
+	if v == "" {
+		return true // default: enabled
 	}
-	return false
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
