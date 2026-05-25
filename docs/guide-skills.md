@@ -74,7 +74,7 @@ Seek provides a full lifecycle CLI under `seek skill` (also available in the TUI
 | Command | Description |
 |---|---|
 | `seek skill create <name>` | Scaffold a new skill package with `SKILL.md` template |
-| `seek skill install <path>` | Install from local path, Git URL, or HTTPS tarball |
+| `seek skill install <path>` | Install from local path, Git URL, or HTTPS tarball (`--project` for project scope, shared via git) |
 | `seek skill list` | List all loaded skills with source and version |
 | `seek skill status <name>` | Show detailed info for one skill |
 | `seek skill stats` | Show usage statistics (call count, last used, etc.) |
@@ -82,3 +82,21 @@ Seek provides a full lifecycle CLI under `seek skill` (also available in the TUI
 | `seek skill uninstall <name>` | Remove a skill |
 
 > **Migrating from Claude Code**: Single-file `.md` skills from `~/.claude/skills/` or `<project>/.claude/skills/` use the same frontmatter format and work after `seek skill install <path>`. The v2 loader no longer auto-scans `.claude` directories, nor does it scan `~/.config/seek/skills/`. Move any skills from those old paths to `~/.seek/skills/` (or `$SEEK_HOME/skills` if you use that override).
+
+## AI-driven install (model-invokable)
+
+Since v0.3.x, the agent (the AI model you're chatting with) can also install skills for you, using two special tools:
+
+1. **`skill_fetch(source)`** — the agent fetches a skill package from a local path, Git URL, or HTTPS tarball and stages it under `/tmp/` for your inspection. The agent can read the skill's `SKILL.md` and any bundled files so you can judge whether it's legitimate before committing.
+2. **`skill_commit(staging, name, source, scope)`** — after you've reviewed the staged content and chosen a **scope** (see below), the agent finalises the install. The system asks for your interactive approval before touching the filesystem.
+
+### Scope: user vs project
+
+When installing, you'll be asked to pick a scope — it's your call:
+
+| Scope | Location | Available in | Shared via git |
+|---|---|---|---|
+| **user** | `~/.seek/skills/<name>/` | Every seek session on this machine | No (private to you) |
+| **project** | `<cwd>/.seek/skills/<name>/` | Anyone who clones this repo | Yes (committed to git) |
+
+The agent cannot guess this — it must ask. After install, the new skill is on disk but won't be available until you run `/new` (or restart seek), because the skill manifest is loaded at startup.

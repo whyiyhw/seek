@@ -34,6 +34,7 @@ seek --no-save -p "scratch work"
 | `/lang` | Set response language: `en`, `zh`, or `auto` |
 | `/yolo` | Toggle `--yolo` (bypass permission prompts) for this session |
 | `/plan` | Toggle plan mode (read-only exploration) for this session |
+| `/steer`, `/s` | Mid-stream steer: `/steer <text>` lines up text to send right after current response; bare `/steer` promotes a queued message to steer (Mac-friendly Alt+Enter alternative) |
 | `/review` | Code review working-tree changes — no arg opens a picker, or pass a branch |
 | `/branch` | Fork this session — new ID, parent link, copy of history |
 | `/compact` | Summarise prior history into one message to free up context |

@@ -57,6 +57,17 @@ seek 拥有**长期（Soul）/ 中期（Project）/ 短期（Session）**三层�
 
 Claude Code / Cursor 仅有会话持久化，缺少跨会话的项目级记忆和用户级偏好归纳。
 
+### 6. TUI 原生交互流
+
+seek 引入了一些其他工具少见的终端-代理交互模式：
+
+- **`/plan` 模式** — 只读探索模式，审计 agent 计划做什么而不让它动文件
+- **`/steer`** — 流中插入指令：输入 `/steer <text>` 在 agent 生成的同时排好下一条指令；裸 `/steer` 把已排队消息升级为 steer（macOS 友好，Alt+Enter 不可靠的替代方案）
+- **`/review`** — 一键代码审查：激活 plan 模式 + 针对工作区变更提交审查 prompt
+- **`ask_user` 工具** — 模型自身可以打开 TUI 选择器（↑↓ Enter）在需要你做决定时直接问，而不是猜测或发文字
+- **`@-highlight`** — 消息和路径补全中的路径/引用高亮显示
+- **空 Enter 撤回** — 有排队消息时，输入框为空按 Enter 撤回排队消息而不取消当前流（比 Esc 温和）
+
 ### 通用能力（持平，非差异化）
 
 下面这些 Claude Code / Cursor / Codex CLI 也有，列出来只是说明 seek 不缺：MCP 服务端接入、自定义 skill (`.md` + frontmatter)、文件系统权限系统（默认询问 / `--yolo` 跳过 / 路径白名单）、JSON-RPC 2.0 服务模式（IDE 接入）、多 LLM provider（Anthropic / OpenAI / Gemini / OpenAI 兼容端点）。
@@ -176,6 +187,18 @@ seek skill uninstall <name>
 
 里程碑进度：M0–M7 ✅ 已交付 | M8（Skill 生命周期管理）✅ 已交付
 
+### 最近交付（v0.3.x+）
+
+| 功能 | 说明 |
+|---|---|
+| `ask_user` 工具 | 模型可以打开 TUI 选择器征求你的决定，不再猜 |
+| `skill_fetch` / `skill_commit` | 模型可以直接获取并安装 skill（需你审批） |
+| `/plan` 模式 | 只读探索——agent 能看不能动 |
+| `/steer` | 流中插入指令（macOS 友好的 Alt+Enter 替代方案） |
+| `/review` | 一键代码审查：plan 模式 + 审查 prompt |
+| `@-highlight` | 路径/引用高亮显示 |
+| Skill v2 目录包安装 | Git URL / HTTPS 压缩包 / 本地路径，CLI 和 TUI 均可 |
+
 完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 Memory · v2 Skill 生命周期）  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
 
@@ -187,4 +210,4 @@ seek skill uninstall <name>
 
 ---
 
-*seek — ~36k 行 Go 代码，38 个包，macOS / Linux / Windows 全平台 -race 测试通过。*
+*seek — ~49k 行 Go 代码（25k 非测试），44 个包，macOS / Linux / Windows 全平台 -race 测试通过。*

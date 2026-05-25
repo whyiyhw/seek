@@ -58,6 +58,17 @@ seek has **Soul (long-term) / Project (mid-term) / Session (short-term)** memory
 
 Claude Code / Cursor only have session persistence — no cross-session project memory or user-level preference induction.
 
+### 6. TUI-native interaction flow
+
+seek introduces terminal-agent interaction patterns found in few other tools:
+
+- **`/plan` mode** — read-only exploration mode that lets you audit what the agent would do without letting it touch files
+- **`/steer`** — mid-stream steering: type `/steer <text>` to line up a follow-up instruction while the agent is still generating; bare `/steer` promotes a queued message. Works on every terminal (unlike Alt+Enter which chokes on macOS)
+- **`/review`** — one-shot code review: activates plan mode + submits a review prompt against working-tree changes
+- **`ask_user` tool** — the model itself can open an inline TUI picker (↑↓ Enter) when it needs a discrete decision from you, instead of guessing or asking in free text
+- **`@-highlight`** — accent-colour highlighting for paths, refs, and mentions in both messages and path-completion matches
+- **Empty-Enter withdraw** — with a queued message, pressing Enter on an empty textarea withdraws it without cancelling the active stream (gentler than Esc)
+
 ### On par (not a differentiator)
 
 These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
@@ -177,6 +188,18 @@ Disable the startup version-check probe: `export SEEK_NO_UPGRADE_CHECK=1`.
 
 Milestone progress: M0–M7 ✅ delivered | M8 (Skill lifecycle management) ✅ delivered
 
+### Recently shipped (v0.3.x+)
+
+| Feature | What it does |
+|---|---|
+| `ask_user` tool | The model can open an inline TUI picker for decisions — no more guessing |
+| `skill_fetch` / `skill_commit` | The model can fetch and install skills directly (with your approval) |
+| `/plan` mode | Read-only exploration — the agent can look but not touch |
+| `/steer` | Mid-stream instruction insertion (Mac-friendly Alt+Enter alternative) |
+| `/review` | One-shot code review: plan mode + review prompt in one command |
+| `@-highlight` | Accent-colour path/ref highlighting in messages |
+| Skill v2 package install | Git URL, HTTPS tarball, local path — all installable via CLI or TUI |
+
 Full design: [`docs/prd/`](./prd/) (v0 initial · v1 Memory · v2 Skill lifecycle)  
 Contributor guide: [`AGENTS.md`](../AGENTS.md) for architecture conventions.
 
@@ -188,4 +211,4 @@ Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT); a
 
 ---
 
-*seek — ~36k lines of Go, 38 packages, tested with -race on macOS / Linux / Windows.*
+*seek — ~49k lines of Go (25k non-test), 44 packages, tested with -race on macOS / Linux / Windows.*
