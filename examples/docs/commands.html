@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek command reference — slash commands, key bindings, and CLI flags." />
+<title>Commands — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg:        #0b0b0e;
+    --surface:   #12121a;
+    --surface-2: #0e0e14;
+    --surface-3: #1a1a24;
+    --border:    #1e1e2a;
+    --text:      #d0d0d8;
+    --text-body: #d0d0d8;
+    --dim:       #6a6a7a;
+    --amber:     #f5a623;
+    --amber-dim: rgba(245,166,35,.15);
+    --teal:      #00d4ff;
+    --teal-dim:  rgba(0,212,255,.12);
+    --green:     #22c55e;
+    --red:       #ff5f56;
+    --hover-bg:  rgba(255,255,255,.04);
+    --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg:        #f4f3ef;
+    --surface:   #ffffff;
+    --surface-2: #e8e7e2;
+    --surface-3: #dddcd6;
+    --border:    #dddcd6;
+    --text:      #1a1a1e;
+    --text-body: #1a1a1e;
+    --dim:       #7a7a82;
+    --amber:     #c9861a;
+    --amber-dim: rgba(201,134,26,.12);
+    --teal:      #009e9e;
+    --teal-dim:  rgba(0,158,158,.10);
+    --hover-bg:  rgba(0,0,0,.04);
+    --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin-bottom: 20px; }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 32px 0 12px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  .section-head { margin-bottom: 16px; }
+  .label {
+    font-size: .8rem; font-weight: 500; color: var(--amber);
+    letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  .label::before { content: '$ '; }
+
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  /* Tables */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow-x: auto;
+    margin-bottom: 36px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table {
+    width: 100%;
+    min-width: 500px;
+    border-collapse: collapse;
+    font-size: .82rem;
+  }
+  .table-wrap th {
+    background: var(--surface-3);
+    color: var(--amber);
+    text-align: left;
+    padding: 12px 14px;
+    border-bottom: 2px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-size: .7rem;
+    white-space: nowrap;
+  }
+  .table-wrap td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+  .table-wrap .alias { color: var(--dim); font-size: .75rem; }
+  .table-wrap .flag-key { color: var(--teal); white-space: nowrap; }
+  .table-wrap .flag-type { color: var(--dim); font-size: .75rem; }
+  .table-wrap .flag-default { color: var(--dim); font-size: .75rem; }
+  .table-wrap .mono { font-family: "JetBrains Mono", monospace; }
+
+  /* Note box */
+  .note {
+    background: var(--surface);
+    border-left: 3px solid var(--amber);
+    padding: 16px 20px;
+    border-radius: 0 4px 4px 0;
+    font-size: .82rem;
+    color: var(--dim);
+    margin-bottom: 36px;
+  }
+  .note code { font-size: .78rem; }
+
+  .page-footer {
+    border-top: 1px solid var(--border);
+    padding: 28px 0;
+    text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  /* Utility bar */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    .page-header { padding: 28px 0 20px; }
+    .table-wrap table { font-size: .75rem; }
+    .table-wrap th, .table-wrap td { padding: 10px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:960px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Commands</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Commands Reference</h1>
+    <h1 data-lang="zh" hidden>命令参考</h1>
+    <p class="subtitle" data-lang="en">All slash commands, key bindings, and CLI flags.</p>
+    <p class="subtitle" data-lang="zh" hidden">全部斜杠命令、快捷键和 CLI 参数。</p>
+  </div>
+
+  <!-- ============ SLASH COMMANDS ============ -->
+  <div class="reveal">
+    <h3>Slash Commands <span data-lang="en" class="label" style="display:inline;text-transform:none;margin:0;">(TUI)</span></h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Command</th>
+            <th data-lang="zh" hidden>命令</th>
+            <th>Usage</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">/help</td><td class="alias">/help, /?</td><td>Show this help</td></tr>
+          <tr><td class="cmd">/clear</td><td>/clear</td><td data-lang="en">Clear visible screen (scrollback preserved)</td><td data-lang="zh" hidden>清屏（保留终端回滚）</td></tr>
+          <tr><td class="cmd">/new</td><td>/new</td><td data-lang="en">Start a fresh conversation (saves current first)</td><td data-lang="zh" hidden>新建对话（先保存当前会话）</td></tr>
+          <tr><td class="cmd">/model</td><td>/model [id]</td><td data-lang="en">Switch model — no arg opens a picker</td><td data-lang="zh" hidden>切换模型——无参数打开选择器</td></tr>
+          <tr><td class="cmd">/effort</td><td>/effort [off|high|max]</td><td data-lang="en">Set DeepSeek reasoning effort</td><td data-lang="zh" hidden>设置推理深度</td></tr>
+          <tr><td class="cmd">/lang</td><td>/lang [en|zh|auto]</td><td data-lang="en">Set response language</td><td data-lang="zh" hidden>设置回复语言</td></tr>
+          <tr><td class="cmd">/yolo</td><td>/yolo</td><td data-lang="en">Toggle --yolo (bypass permission prompts)</td><td data-lang="zh" hidden>切换 yolo 模式（跳过权限提示）</td></tr>
+          <tr><td class="cmd">/plan</td><td>/plan</td><td data-lang="en">Toggle plan mode (read-only exploration)</td><td data-lang="zh" hidden>切换规划模式（只读探索）</td></tr>
+          <tr><td class="cmd">/review</td><td>/review [branch]</td><td data-lang="en">Code review working-tree changes</td><td data-lang="zh" hidden>审查工作树变更</td></tr>
+          <tr><td class="cmd">/branch</td><td>/branch</td><td data-lang="en">Fork this session (new ID, parent link)</td><td data-lang="zh" hidden">分叉当前会话</td></tr>
+          <tr><td class="cmd">/compact</td><td>/compact</td><td data-lang="en">Summarise prior history to free up context</td><td data-lang="zh" hidden>压缩历史以释放上下文</td></tr>
+          <tr><td class="cmd">/distill</td><td>/distill</td><td data-lang="en">Extract project decisions → M memory</td><td data-lang="zh" hidden>提炼会话决策到 M 记忆</td></tr>
+          <tr><td class="cmd">/skills</td><td>/skills</td><td data-lang="en">List loaded skills with source paths</td><td data-lang="zh" hidden>列出已加载的技能</td></tr>
+          <tr><td class="cmd">/skill</td><td>/skill &lt;verb&gt; [args]</td><td data-lang="en">Manage skill packages (install, uninstall, list, …)</td><td data-lang="zh" hidden>管理 Skill 包</td></tr>
+          <tr><td class="cmd">/memory</td><td>/memory &lt;verb&gt; [args]</td><td data-lang="en">Inspect project memory (list, show, search, archive)</td><td data-lang="zh" hidden>查看项目记忆</td></tr>
+          <tr><td class="cmd">/setup</td><td>/setup</td><td data-lang="en">Re-run the API-key configuration wizard</td><td data-lang="zh" hidden>重新运行 API key 配置向导</td></tr>
+          <tr><td class="cmd">/upgrade</td><td>/upgrade [--force] [--dry-run]</td><td data-lang="en">Download latest release and replace binary</td><td data-lang="zh" hidden>下载最新版本并替换二进制</td></tr>
+          <tr><td class="cmd">/exit</td><td class="alias">/exit, /quit, /q</td><td data-lang="en">Quit seek</td><td data-lang="zh" hidden>退出 seek</td></tr>
+          <tr><td class="cmd">/steer</td><td class="alias">/steer, /s</td><td data-lang="en">Interrupt and send new instructions</td><td data-lang="zh" hidden>中断当前回复并发送新指令</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ KEY BINDINGS ============ -->
+  <div class="reveal">
+    <h3 data-lang="en">Key Bindings</h3>
+    <h3 data-lang="zh" hidden>快捷键</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Key</th>
+            <th data-lang="zh" hidden>键</th>
+            <th data-lang="en">Action</th>
+            <th data-lang="zh" hidden>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">Enter</td><td data-lang="en">Send prompt</td><td data-lang="zh" hidden">发送 prompt</td></tr>
+          <tr><td>↑ / ↓</td><td data-lang="en">Recall prompt history (input empty)</td><td data-lang="zh" hidden">回滚 prompt 历史（输入框为空）</td></tr>
+          <tr><td>Esc</td><td data-lang="en">Cancel ongoing assistant response</td><td data-lang="zh" hidden">取消 assistant 响应</td></tr>
+          <tr><td>Shift+Tab</td><td data-lang="en">Cycle mode: ask → plan → yolo → ask</td><td data-lang="zh" hidden">循环切换模式</td></tr>
+          <tr><td>Ctrl+J</td><td data-lang="en">Insert newline in input</td><td data-lang="zh" hidden">输入框内换行</td></tr>
+          <tr><td>Ctrl+L</td><td data-lang="en">Clear visible screen (same as /clear)</td><td data-lang="zh" hidden">清屏（同 /clear）</td></tr>
+          <tr><td>Ctrl+R</td><td data-lang="en">Toggle reasoning visibility</td><td data-lang="zh" hidden">切换推理过程显示</td></tr>
+          <tr><td>Ctrl+C</td><td data-lang="en">Quit seek</td><td data-lang="zh" hidden">退出 seek</td></tr>
+          <tr><td>Alt+Enter</td><td data-lang="en">Interrupt with new instructions (/steer)</td><td data-lang="zh" hidden">中断并发送新指令</td></tr>
+          <tr><td>?</td><td data-lang="en">Open this help overlay (/help)</td><td data-lang="zh" hidden">打开帮助面板</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ CLI FLAGS ============ -->
+  <div class="reveal">
+    <h3 data-lang="en">CLI Flags</h3>
+    <h3 data-lang="zh" hidden>命令行参数</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Flag</th>
+            <th data-lang="zh" hidden>参数</th>
+            <th>Type</th>
+            <th>Default</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="flag-key">-p</td><td>string</td><td class="flag-default">""</td><td data-lang="en">Prompt text; non-empty → print mode</td><td data-lang="zh" hidden>提示文本；非空则进入打印模式</td></tr>
+          <tr><td class="flag-key">-model</td><td>string</td><td class="flag-default">""</td><td data-lang="en">Model ID override</td><td data-lang="zh" hidden>模型 ID 覆盖</td></tr>
+          <tr><td class="flag-key">-max-turns</td><td>int</td><td class="flag-default">200</td><td data-lang="en">Agent loop safety bound</td><td data-lang="zh" hidden">Agent 循环安全上限</td></tr>
+          <tr><td class="flag-key">-max-tokens</td><td>int</td><td class="flag-default">0</td><td data-lang="en">Completion token cap (0 → default 16384)</td><td data-lang="zh" hidden">输出 token 上限</td></tr>
+          <tr><td class="flag-key">-auto-continue</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Auto-inject 'continue' on text-only turns</td><td data-lang="zh" hidden">自动注入 'continue'</td></tr>
+          <tr><td class="flag-key">-yolo</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Allow bash + writes outside CWD without prompting</td><td data-lang="zh" hidden">允许 bash 和写入当前目录外</td></tr>
+          <tr><td class="flag-key">-plan</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Read-only: no bash/writes/edits</td><td data-lang="zh" hidden">只读模式：禁止 bash/写入/编辑</td></tr>
+          <tr><td class="flag-key">-json</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Emit agent events as JSONL on stdout</td><td data-lang="zh" hidden">以 JSONL 格式输出事件</td></tr>
+          <tr><td class="flag-key">-resume</td><td>string</td><td class="flag-default">""</td><td data-lang="en">Load a saved session by ID</td><td data-lang="zh" hidden">通过 ID 恢复会话</td></tr>
+          <tr><td class="flag-key">-continue</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Resume most recent session</td><td data-lang="zh" hidden>恢复最近的会话</td></tr>
+          <tr><td class="flag-key">-no-save</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Ephemeral session (don't persist)</td><td data-lang="zh" hidden>不持久化会话</td></tr>
+          <tr><td class="flag-key">-list</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">List saved sessions and exit</td><td data-lang="zh" hidden>列出保存的会话</td></tr>
+          <tr><td class="flag-key">-no-project-md</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Skip AGENTS.md auto-load</td><td data-lang="zh" hidden>跳过 AGENTS.md 自动加载</td></tr>
+          <tr><td class="flag-key">-provider</td><td>string</td><td class="flag-default">"deepseek"</td><td data-lang="en">LLM provider (deepseek | anthropic | openai | gemini | compatible)</td><td data-lang="zh" hidden>LLM 提供商</td></tr>
+          <tr><td class="flag-key">-base-url</td><td>string</td><td class="flag-default">""</td><td data-lang="en">Base URL for --provider=compatible</td><td data-lang="zh" hidden>兼容端点的 Base URL</td></tr>
+          <tr><td class="flag-key">-theme</td><td>string</td><td class="flag-default">"auto"</td><td data-lang="en">Color theme (auto | dark | light)</td><td data-lang="zh" hidden>颜色主题</td></tr>
+          <tr><td class="flag-key">-rpc</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">JSON-RPC 2.0 server over stdio</td><td data-lang="zh" hidden>JSON-RPC 2.0 服务模式</td></tr>
+          <tr><td class="flag-key">-version</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Print version info</td><td data-lang="zh" hidden>打印版本信息</td></tr>
+          <tr><td class="flag-key">-upgrade</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Download latest release and replace binary</td><td data-lang="zh" hidden>下载最新版本并替换</td></tr>
+          <tr><td class="flag-key">-upgrade-force</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Force upgrade even for dev builds</td><td data-lang="zh" hidden>强制升级开发版本</td></tr>
+          <tr><td class="flag-key">-upgrade-dry-run</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Download + verify, do not replace</td><td data-lang="zh" hidden">下载 + 校验，不替换</td></tr>
+          <tr><td class="flag-key">-upgrade-check</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Check for newer release, never modify</td><td data-lang="zh" hidden">检查新版本，不改动</td></tr>
+          <tr><td class="flag-key">-dream</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">M→L distillation scan (read-only)</td><td data-lang="zh" hidden">M→L 蒸馏扫描（只读）</td></tr>
+          <tr><td class="flag-key">-dream-write</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Write dream candidates to soul.md</td><td data-lang="zh" hidden">写入 dream 候选到 soul.md</td></tr>
+          <tr><td class="flag-key">-lang</td><td>string</td><td class="flag-default">"auto"</td><td data-lang="en">Response language (en | zh | auto)</td><td data-lang="zh" hidden>回复语言</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span data-lang="en">💡 Use <code>seek --help</code> for the most up-to-date flag list. The table above reflects the source at <code>cmd/seek/main.go</code>.</span>
+      <span data-lang="zh" hidden>💡 使用 <code>seek --help</code> 获取最新参数列表。上表反映 <code>cmd/seek/main.go</code> 中的定义。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek architecture — memory tiers, permission system, tool system, caching, provider layer." />
+<title>Architecture — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg:        #0b0b0e;
+    --surface:   #12121a;
+    --surface-2: #0e0e14;
+    --surface-3: #1a1a24;
+    --border:    #1e1e2a;
+    --text:      #d0d0d8;
+    --text-body: #d0d0d8;
+    --dim:       #6a6a7a;
+    --amber:     #f5a623;
+    --amber-dim: rgba(245,166,35,.15);
+    --teal:      #00d4ff;
+    --teal-dim:  rgba(0,212,255,.12);
+    --green:     #22c55e;
+    --hover-bg:  rgba(255,255,255,.04);
+    --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg:        #f4f3ef;
+    --surface:   #ffffff;
+    --surface-2: #e8e7e2;
+    --surface-3: #dddcd6;
+    --border:    #dddcd6;
+    --text:      #1a1a1e;
+    --text-body: #1a1a1e;
+    --dim:       #7a7a82;
+    --amber:     #c9861a;
+    --amber-dim: rgba(201,134,26,.12);
+    --teal:      #009e9e;
+    --teal-dim:  rgba(0,158,158,.10);
+    --hover-bg:  rgba(0,0,0,.04);
+    --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin-bottom: 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin-bottom: 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  li strong { color: var(--teal); }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  /* Architecture cards */
+  .arch-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 28px 28px;
+    margin-bottom: 20px;
+    transition: border-color .25s;
+  }
+  .arch-card:hover { border-color: var(--amber); }
+  .arch-card .num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    border-radius: 4px;
+    background: var(--amber-dim);
+    color: var(--amber);
+    font-weight: 700;
+    font-size: .8rem;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  .arch-card .arch-title {
+    display: flex;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+  .arch-card .arch-title h3 { margin-bottom: 0; }
+  .arch-card p { font-size: .85rem; }
+  .arch-card .dir {
+    font-size: .78rem;
+    color: var(--dim);
+    margin-top: 10px;
+    border-top: 1px solid var(--border-dim);
+    padding-top: 10px;
+  }
+  .arch-card .dir code { background: transparent; padding: 0; font-size: .78rem; }
+
+  /* Note box */
+  .note {
+    background: var(--surface);
+    border-left: 3px solid var(--teal);
+    padding: 16px 20px;
+    border-radius: 0 4px 4px 0;
+    font-size: .82rem;
+    color: var(--dim);
+    margin: 24px 0 36px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border);
+    padding: 28px 0;
+    text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* Utility bar */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    .arch-card { padding: 20px 18px; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Architecture</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Architecture &amp; Design</h1>
+    <h1 data-lang="zh" hidden>设计与架构</h1>
+    <p class="subtitle" data-lang="en">How seek works under the hood.</p>
+    <p class="subtitle" data-lang="zh" hidden">seek 的底层工作原理。</p>
+  </div>
+
+  <!-- 1. Three-Tier Memory -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">1</span>
+      <h3 data-lang="en">Three-Tier Memory (L / M / S)</h3>
+      <h3 data-lang="zh" hidden>三层记忆 (L / M / S)</h3>
+    </div>
+    <p data-lang="en">seek doesn't start from zero every session. Three layers of persistence capture knowledge at different timescales:</p>
+    <p data-lang="zh" hidden>seek 不会每次会话从零开始。三层持久化以不同时间尺度捕捉知识：</p>
+    <ul>
+      <li><strong>Soul (L)</strong> — <code>~/.seek/soul.md</code>. Cross-project user preferences and thinking habits. ~500 token hard cap, resident in system prompt. Written by <code>seek -dream</code> → user review.</li>
+      <li><strong>Project (M)</strong> — <code>~/.seek/projects/&lt;hash&gt;/memory.jsonl</code>. Key decisions and rationale per project. Index injected into every prompt; full content fetched on demand via <code>memory_recall</code>.</li>
+      <li><strong>Session (S)</strong> — <code>~/.local/share/seek/sessions/&lt;id&gt;.jsonl</code>. Full message history with auto-save. <code>/distill</code> at session end extracts reusable decisions into M.</li>
+    </ul>
+    <div class="dir">📁 <code>pkg/agent/memory/</code> · <code>internal/memory/</code> · <code>docs/guide-memory.md</code></div>
+  </div>
+
+  <!-- 2. Permission System -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">2</span>
+      <h3 data-lang="en">Permission System</h3>
+      <h3 data-lang="zh" hidden>权限系统</h3>
+    </div>
+    <p data-lang="en">Three modes control what the agent can do. Set at startup or toggled mid-session with <code>/yolo</code> or <code>/plan</code>:</p>
+    <p data-lang="zh" hidden">三种模式控制 agent 的权限范围。可在启动时设置，也可在会话中通过 <code>/yolo</code> 或 <code>/plan</code> 切换：</p>
+    <ul>
+      <li><strong>ask</strong> (default) — Every filesystem write and shell command prompts for confirmation. Granular path whitelists available.</li>
+      <li><strong>yolo</strong> (<code>--yolo</code>) — Bypass all permission prompts. Use in trusted environments or CI.</li>
+      <li><strong>plan</strong> (<code>--plan</code>) — Read-only. Writes and shell commands are denied. Use for exploration.</li>
+    </ul>
+    <p data-lang="en">Permission denials are <strong>tool results, not errors</strong> — the agent sees the denial message and asks the user, rather than crashing the loop.</p>
+    <p data-lang="zh" hidden">权限拒绝是<strong>工具结果，而非错误</strong>——agent 看到拒绝消息后会询问用户，而非中断循环。</p>
+    <div class="dir">📁 <code>internal/permission/</code></div>
+  </div>
+
+  <!-- 3. Tool System -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">3</span>
+      <h3 data-lang="en">Tool System</h3>
+      <h3 data-lang="zh" hidden>工具系统</h3>
+    </div>
+    <p data-lang="en">seek exposes tools to the LLM as JSON schema definitions. Current tools:</p>
+    <p data-lang="zh" hidden>seek 以 JSON schema 定义向 LLM 暴露工具。当前工具列表：</p>
+    <ul>
+      <li><code>read</code> / <code>grep</code> / <code>list_dir</code> — filesystem exploration (grep first, read offset-limited segments)</li>
+      <li><code>write</code> / <code>edit</code> — file mutation (edit requires exact <code>old_string</code>, unique match)</li>
+      <li><code>bash</code> — shell execution (denied without <code>--yolo</code>)</li>
+      <li><code>fim_complete</code> — DeepSeek-specific fill-in-the-middle (cheaper than chat for small gaps)</li>
+      <li><code>think</code> — DeepSeek reasoning mode for planning and self-review</li>
+      <li><code>Skill</code> — fetch a named skill's instructions and follow them</li>
+      <li><code>memory_observe</code> / <code>memory_recall</code> / <code>memory_amend</code> / <code>memory_archive</code> / <code>memory_remember</code> — M-layer read/write</li>
+    </ul>
+    <p data-lang="en"><strong>Key constraint</strong>: Tool schemas are <code>[]byte</code> constants at package level (built once at init, not at call time). This ensures identical bytes across turns → DeepSeek's prefix cache hits.</p>
+    <p data-lang="zh" hidden"><strong>关键约束</strong>：工具 schema 是包级别的 <code>[]byte</code> 常量（在 init 时构建一次，而非每次调用）。这确保跨轮次的字节一致性，从而命中 DeepSeek 的前缀缓存。</p>
+    <div class="dir">📁 <code>internal/tools/</code> · each tool in its own package with a <code>New(...)</code> constructor</div>
+  </div>
+
+  <!-- 4. Prefix Cache Optimization -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">4</span>
+      <h3 data-lang="en">Prefix Cache Optimization</h3>
+      <h3 data-lang="zh" hidden">前缀缓存优化</h3>
+    </div>
+    <p data-lang="en">DeepSeek charges ~10× less per token on cache hits. The cache key is an <strong>exact byte sequence</strong> of the entire prior message history. This drives several architecture decisions:</p>
+    <p data-lang="zh" hidden">DeepSeek 对缓存命中收取约 1/10 的价格。缓存键是完整历史消息的<strong>精确字节序列</strong>。这驱动了以下架构决策：</p>
+    <ul>
+      <li><strong>System prompt is immutable</strong> within a session — changing it invalidates the prefix cache for the entire history.</li>
+      <li><strong>No in-transit message mutation</strong> — even "compression" of old tool results would break byte identity.</li>
+      <li><strong>Token optimisation happens at write-time</strong> (tool output size limits), not at send-time.</li>
+      <li><strong>Status bar</strong> shows real-time cache hit ratio + saved tokens, making cache-friendly prompts an observable optimisation target.</li>
+      <li><strong>Off-peak countdown</strong> — 50% discount during 00:30–08:30 Beijing time, shown in the status bar.</li>
+    </ul>
+    <div class="dir">📁 <code>internal/pricing/</code> · <code>pkg/deepseek/</code> (cache stats in API response)</div>
+  </div>
+
+  <!-- 5. Multi-Provider Layer -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">5</span>
+      <h3 data-lang="en">Multi-Provider Layer</h3>
+      <h3 data-lang="zh" hidden">多 Provider 层</h3>
+    </div>
+    <p data-lang="en">seek is DeepSeek-first but provider-agnostic. The architecture splits into two tiers:</p>
+    <p data-lang="zh" hidden">seek 以 DeepSeek 为第一优先，但与 Provider 无关。架构分为两层：</p>
+    <ul>
+      <li><strong><code>pkg/deepseek</code></strong> — first-class client with DeepSeek-specific fields: cache metadata, FIM endpoint, reasoner content. <strong>Zero external dependencies.</strong></li>
+      <li><strong><code>pkg/llm</code></strong> — thin generic interface for Anthropic, OpenAI, Gemini, and OpenAI-compatible endpoints.</li>
+    </ul>
+    <p data-lang="en"><strong>Critical rule (CI-enforced)</strong>: <code>pkg/deepseek</code> must not import <code>pkg/llm</code>. DeepSeek-specific optimisations must never be lowered into a generic interface.</p>
+    <p data-lang="zh" hidden"><strong>关键规则（CI 强制）</strong>：<code>pkg/deepseek</code> 不能导入 <code>pkg/llm</code>。DeepSeek 专属优化绝不能被降级到通用接口中。</p>
+    <div class="dir">📁 <code>pkg/deepseek/</code> · <code>pkg/llm/</code> · <code>pkg/agent/</code> (type switch between tiers)</div>
+  </div>
+
+  <!-- 6. Session Persistence -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">6</span>
+      <h3 data-lang="en">Session Persistence</h3>
+      <h3 data-lang="zh" hidden">会话持久化</h3>
+    </div>
+    <p data-lang="en">Sessions are stored as JSONL files (<code>schema_version=2</code>):</p>
+    <p data-lang="zh" hidden">会话以 JSONL 格式存储（<code>schema_version=2</code>）：</p>
+    <ul>
+      <li><strong>Line 1</strong> — header with all scalar metadata (model, timestamps, token counts). <code>loadMeta()</code> reads only this line — no need to load the full file for the session list.</li>
+      <li><strong>Lines 2..N</strong> — one <code>deepseek.Message</code> per line in JSON.</li>
+      <li><strong>Auto-save</strong> after every turn. <code>/branch</code> forks to a new file; <code>/compact</code> summarises old history.</li>
+      <li><strong>Durability</strong>: write-tmp-rename pattern with <code>f.Sync()</code> before <code>f.Close()</code>.</li>
+    </ul>
+    <div class="dir">📁 <code>internal/session/</code> · <code>docs/guide-sessions.md</code></div>
+  </div>
+
+  <div class="note">
+    <span data-lang="en">📖 For the full design rationale, see <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/v0.md" style="color:var(--teal);text-decoration:underline;">docs/prd/v0.md</a> and the <a href="https://github.com/whyiyhw/seek/blob/main/docs/book/" style="color:var(--teal);text-decoration:underline;">book series</a>.</span>
+    <span data-lang="zh" hidden">📖 完整设计原理见 <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/v0.md" style="color:var(--teal);text-decoration:underline;">docs/prd/v0.md</a> 和 <a href="https://github.com/whyiyhw/seek/blob/main/docs/book/" style="color:var(--teal);text-decoration:underline;">系列丛书</a>。</span>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

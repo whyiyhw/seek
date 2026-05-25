@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek memory system — three-tier L/M/S memory, tools, and commands." />
+<title>Memory — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg); color: var(--text-body); line-height: 1.65;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+  .table-wrap .dim { color: var(--dim); font-size: .75rem; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* Utility bar */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Memory</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Memory System (L / M / S)</h1>
+    <h1 data-lang="zh" hidden>记忆系统 (L / M / S)</h1>
+    <p class="subtitle" data-lang="en">Three-tier memory that persists knowledge across sessions.</p>
+    <p class="subtitle" data-lang="zh" hidden">跨会话持久化知识的三层记忆系统。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">Unlike session history (which saves raw message logs), memory captures <strong>curated decisions, preferences, and project conventions</strong> so the agent doesn't start from zero every time.</p>
+    <p data-lang="zh" hidden">与会话历史（保存原始消息日志）不同，记忆捕获<strong>经过筛选的决策、偏好和项目约定</strong>，使 agent 不必每次从零开始。</p>
+
+    <h2 data-lang="en">Architecture Overview</h2>
+    <h2 data-lang="zh" hidden">架构概览</h2>
+
+    <pre>L  Long-term / Soul     ~/.seek/soul.md
+   Cross-project user preferences, thinking habits.
+   Resident in system prompt (~500 token hard cap).
+   Written by `seek -dream` → user review.
+                        ↑ Dream (M → L distillation)
+M  Mid-term / Project   ~/.seek/projects/&lt;hash&gt;/memory.jsonl
+   Key decisions + rationale per project.
+   Index injected into every prompt;
+   full content fetched on demand via `memory_recall`.
+                        ↑ Distill (S → M)
+S  Short-term / Session ~/.local/share/seek/sessions/&lt;id&gt;.jsonl
+   Full message history (auto-save).
+   `/distill` at session end extracts reusable decisions into M.</pre>
+
+    <h2 data-lang="en">Agent Tools (M-layer)</h2>
+    <h2 data-lang="zh" hidden">Agent 工具（M 层）</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Tool</th>
+            <th data-lang="zh" hidden">工具</th>
+            <th data-lang="en">Purpose</th>
+            <th data-lang="zh" hidden">用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">memory_observe</td><td data-lang="en">Save a new observation. Async V4-Flash dedup + value check. Overwrites by name.</td><td data-lang="zh" hidden">保存新观察。异步 V4-Flash 去重 + 价值检查。同名覆盖。</td></tr>
+          <tr><td class="cmd">memory_remember</td><td data-lang="en">Same as observe but requires inline user y/N confirmation per call.</td><td data-lang="zh" hidden">同 observe，但每次需要用户 y/N 确认。</td></tr>
+          <tr><td class="cmd">memory_recall</td><td data-lang="en">Fetch full content by name, or search by query substring. Bumps recall count on name lookup.</td><td data-lang="zh" hidden">按名称获取完整内容，或按子串搜索。名称查询会提升召回计数。</td></tr>
+          <tr><td class="cmd">memory_amend</td><td data-lang="en">Append to an existing entry's rationale. Preserves original + timestamps new content.</td><td data-lang="zh" hidden">追加到现有条目的说明中。保留原文 + 新内容时间戳。</td></tr>
+          <tr><td class="cmd">memory_archive</td><td data-lang="en">Move an entry to archive. Removed from active M-index, preserved in archived.jsonl.</td><td data-lang="zh" hidden">归档条目。从活跃 M 索引移除，保留在 archived.jsonl。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">User Commands</h2>
+    <h2 data-lang="zh" hidden">用户命令</h2>
+
+    <h3 data-lang="en">TUI Slash Commands</h3>
+    <h3 data-lang="zh" hidden">TUI 斜杠命令</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Command</th><th data-lang="en">What it does</th><th data-lang="zh" hidden">功能</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">/distill</td><td data-lang="en">Extract ≤3 project decisions from session → user y/n/e review → M layer</td><td data-lang="zh" hidden">从会话提炼 ≤3 条项目决策 → 用户审查 → 写入 M 层</td></tr>
+          <tr><td class="cmd">/memory list</td><td data-lang="en">List all active M entries for current project</td><td data-lang="zh" hidden">列出当前项目所有活跃 M 条目</td></tr>
+          <tr><td class="cmd">/memory show</td><td data-lang="en">Show full content of one entry</td><td data-lang="zh" hidden">显示条目完整内容</td></tr>
+          <tr><td class="cmd">/memory search</td><td data-lang="en">Search entries by tagline/tags</td><td data-lang="zh" hidden">按标签搜索条目</td></tr>
+          <tr><td class="cmd">/memory archive</td><td data-lang="en">Archive a stale entry (with --reason)</td><td data-lang="zh" hidden">归档过期条目（带 --reason）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 data-lang="en">CLI</h3>
+    <h3 data-lang="zh" hidden">命令行</h3>
+    <pre><span class="prompt">$</span> seek -dream                      # Read-only M→L scan (show candidates)
+<span class="prompt">$</span> seek -dream --write              # Generate + append to ~/.seek/soul.md
+<span class="prompt">$</span> seek memory list                  # List active entries (project at cwd)
+<span class="prompt">$</span> seek memory show &lt;name&gt;
+<span class="prompt">$</span> seek memory search &lt;query&gt;
+<span class="prompt">$</span> seek memory archive &lt;name&gt; --reason "..."</pre>
+
+    <h2 data-lang="en">Forgetting (Decay-Score GC)</h2>
+    <h2 data-lang="zh" hidden">遗忘机制（衰减分数 GC）</h2>
+    <p data-lang="en">M entries have a decay score that drops with time and low recall activity. The GC pass runs at session start:</p>
+    <p data-lang="zh" hidden">M 条目具有衰减分数，随时间和低召回活动而下降。GC 在会话启动时运行：</p>
+    <ul>
+      <li><strong>Grace period</strong>: first 7 days — score stays at 1.0</li>
+      <li><strong>Staleness threshold</strong>: score drops below 0.50 → excluded from M-index</li>
+      <li><strong>Hard delete</strong>: stale for ≥60 days → moved to <code>archived.jsonl</code></li>
+    </ul>
+    <p data-lang="en">This prevents M-index bloat while keeping truly unused entries recoverable.</p>
+    <p data-lang="zh" hidden">这防止 M 索引膨胀，同时保留真正未使用的条目可恢复。</p>
+
+    <h2 data-lang="en">Storage Locations</h2>
+    <h2 data-lang="zh" hidden">存储位置</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th data-lang="en">Layer</th><th data-lang="zh" hidden">层</th><th>Path</th><th>Format</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>L (Soul)</td><td><code>~/.seek/soul.md</code></td><td>Plain Markdown + frontmatter</td></tr>
+          <tr><td>M (Project)</td><td><code>~/.seek/projects/&lt;hash&gt;/memory.jsonl</code></td><td>JSONL</td></tr>
+          <tr><td>M Archive</td><td><code>~/.seek/projects/&lt;hash&gt;/archived.jsonl</code></td><td>JSONL</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span data-lang="en">📖 Full design rationale in <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/v1.md" style="color:var(--teal);text-decoration:underline;">docs/prd/v1.md</a>.</span>
+      <span data-lang="zh" hidden">📖 完整设计原理见 <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/v1.md" style="color:var(--teal);text-decoration:underline;">docs/prd/v1.md</a>。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek skills — create, install, update, uninstall, and invoke skills." />
+<title>Skills — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg); color: var(--text-body); line-height: 1.65;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* Utility bar */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Skills</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Skills Lifecycle</h1>
+    <h1 data-lang="zh" hidden>Skill 生命周期</h1>
+    <p class="subtitle" data-lang="en">Create, install, update, uninstall, and invoke reusable skill packages.</p>
+    <p class="subtitle" data-lang="zh" hidden">创建、安装、更新、卸载和调用可复用的技能包。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">Skills are reusable instruction sets stored as Markdown files. The agent can fetch a skill's body on demand via the <code>Skill</code> tool, then follow its steps. Think of them as named workflows: "run Go tests", "do a dual-model review", etc.</p>
+    <p data-lang="zh" hidden">Skill 是以 Markdown 文件存储的可复用指令集。agent 可以通过 <code>Skill</code> 工具按需获取技能内容并执行步骤。可以理解为命名的工作流：「运行 Go 测试」、「进行双模型审查」等。</p>
+
+    <h2 data-lang="en">Search Order</h2>
+    <h2 data-lang="zh" hidden">搜索顺序</h2>
+    <p data-lang="en">seek discovers skills from three locations (lower number wins on name collision):</p>
+    <p data-lang="zh" hidden">seek 从三个位置发现技能（编号越小优先级越高）：</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th data-lang="en">Location</th><th data-lang="zh" hidden">位置</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td><code>&lt;project&gt;/.seek/skills/</code></td><td data-lang="en">Project-local, committed to git</td><td data-lang="zh" hidden">项目本地，提交到 git</td></tr>
+          <tr><td>2</td><td><code>~/.seek/skills/</code> (or <code>$SEEK_HOME/skills</code>)</td><td data-lang="en">User-global</td><td data-lang="zh" hidden">用户全局</td></tr>
+          <tr><td>3</td><td>Built-in</td><td data-lang="en">Bundled with seek; always available</td><td data-lang="zh" hidden">内置于 seek，始终可用</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Built-in Skills</h2>
+    <h2 data-lang="zh" hidden">内置技能</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th data-lang="en">Name</th><th data-lang="zh" hidden">名称</th><th data-lang="en">When to use</th><th data-lang="zh" hidden">使用时机</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">dual-model</td><td data-lang="en">Non-trivial multi-step tasks — plans with V4 reasoning, executes with chat, then reviews</td><td data-lang="zh" hidden">非平凡多步骤任务——先用 V4 推理规划，再用聊天执行，最后审查</td></tr>
+          <tr><td class="cmd">go-test-runner</td><td data-lang="en">Running, debugging, or analyzing Go test failures</td><td data-lang="zh" hidden">运行、调试或分析 Go 测试失败</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Writing a Skill</h2>
+    <h2 data-lang="zh" hidden">编写 Skill</h2>
+    <p data-lang="en">Create a <code>.md</code> file with YAML frontmatter:</p>
+    <p data-lang="zh" hidden">创建一个包含 YAML frontmatter 的 <code>.md</code> 文件：</p>
+    <pre>---
+name: my-deploy
+description: Deploy the service to staging. Use when asked to deploy.
+---
+
+1. Run `bash("make build")` to produce the binary.
+2. Run `bash("make deploy-staging")` to push.
+3. Confirm with `curl https://staging.example.com/health`.</pre>
+
+    <h2 data-lang="en">Directory-Package Format (v2)</h2>
+    <h2 data-lang="zh" hidden">目录包格式 (v2)</h2>
+    <p data-lang="en">Since seek v0.3, a skill can be a <strong>directory package</strong> (<code>&lt;name&gt;/SKILL.md</code> + frontmatter), aligned with the Anthropic Agent Skills format. This enables extra metadata (version, license, allowed tools) and bundling of reference files:</p>
+    <p data-lang="zh" hidden">自 seek v0.3 起，skill 可以是<strong>目录包</strong>格式（<code>&lt;name&gt;/SKILL.md</code> + frontmatter），与 Anthropic Agent Skills 格式兼容。支持额外元数据和参考文件：</p>
+    <pre>my-skill/
+├── SKILL.md          # skill body with frontmatter
+├── references/       # optional reference docs
+├── examples/         # optional usage examples
+└── scripts/          # optional helper scripts</pre>
+
+    <h2 data-lang="en">Managing Skills (CLI)</h2>
+    <h2 data-lang="zh" hidden">管理 Skill（CLI）</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Command</th><th data-lang="en">Description</th><th data-lang="zh" hidden">说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">seek skill create &lt;name&gt;</td><td data-lang="en">Scaffold a new skill package with SKILL.md template</td><td data-lang="zh" hidden">用模板创建新 skill 包</td></tr>
+          <tr><td class="cmd">seek skill install &lt;path&gt;</td><td data-lang="en">Install from local path, Git URL, or HTTPS tarball</td><td data-lang="zh" hidden">从本地路径/Git URL/HTTPS 压缩包安装</td></tr>
+          <tr><td class="cmd">seek skill list</td><td data-lang="en">List all loaded skills with source and version</td><td data-lang="zh" hidden">列出所有已加载 skill</td></tr>
+          <tr><td class="cmd">seek skill status &lt;name&gt;</td><td data-lang="en">Show detailed info for one skill</td><td data-lang="zh" hidden">查看单个 skill 详情</td></tr>
+          <tr><td class="cmd">seek skill stats</td><td data-lang="en">Show usage statistics (call count, last used)</td><td data-lang="zh" hidden">查看使用统计</td></tr>
+          <tr><td class="cmd">seek skill update &lt;name&gt;</td><td data-lang="en">Re-pull a skill from its install source</td><td data-lang="zh" hidden">从安装源重新拉取</td></tr>
+          <tr><td class="cmd">seek skill uninstall &lt;name&gt;</td><td data-lang="en">Remove a skill</td><td data-lang="zh" hidden">卸载 skill</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p data-lang="en">All commands are also available in the TUI via <code>/skill &lt;verb&gt; [args]</code>, which mirrors the CLI (shared dispatcher).</p>
+    <p data-lang="zh" hidden">所有命令也可以通过 TUI 的 <code>/skill &lt;verb&gt; [args]</code> 使用（共享同一份 dispatcher）。</p>
+
+    <div class="note">
+      <span data-lang="en">📖 For migration details and examples, see <code>docs/guide-skills.md</code>.</span>
+      <span data-lang="zh" hidden">📖 迁移细节和示例见 <code>docs/guide-skills.md</code>。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

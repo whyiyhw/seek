@@ -1,0 +1,10 @@
+# Cloudflare Pages _redirects
+# /docs without trailing slash → /docs/  (serves docs/index.html)
+/docs                /docs/                         301
+
+# Ensure .html files are served at clean URLs
+/docs/commands       /docs/commands.html            200
+/docs/architecture   /docs/architecture.html        200
+/docs/sessions       /docs/sessions.html            200
+/docs/memory         /docs/memory.html              200
+/docs/skills         /docs/skills.html              200

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<title>404 — seek</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: #0b0b0e;
+    color: #d0d0d8;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+    text-align: center;
+  }
+  h1 { font-size: 4rem; font-weight: 800; color: #f5a623; margin-bottom: 8px; letter-spacing: -.04em; }
+  p  { color: #6a6a7a; max-width: 48ch; margin-bottom: 12px; }
+  a  { color: #00d4ff; text-decoration: none; transition: color .2s; }
+  a:hover { color: #f5a623; }
+  .cursor { color: #00d4ff; animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .links { margin-top: 24px; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+  .links a { font-size: .85rem; }
+</style>
+</head>
+<body>
+  <h1>404</h1>
+  <p>This page was not found in the working tree.</p>
+  <p><span class="cursor">▊</span></p>
+  <div class="links">
+    <a href="/">← Home</a>
+    <a href="/docs/">Docs</a>
+    <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</body>
+</html>

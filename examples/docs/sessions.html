@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek session management — save, resume, fork, compact, and distil." />
+<title>Sessions — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  /* Utility bar */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Sessions</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Session Management</h1>
+    <h1 data-lang="zh" hidden>会话管理</h1>
+    <p class="subtitle" data-lang="en">Save, resume, fork, compact, and distil sessions.</p>
+    <p class="subtitle" data-lang="zh" hidden">保存、恢复、分叉、压缩和提炼会话。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">seek automatically saves every conversation to disk. Sessions store the full message history, token usage, model, and metadata so you can resume, fork, or review any past run.</p>
+    <p data-lang="zh" hidden">seek 自动将每次对话保存到磁盘。会话存储完整的消息历史、token 用量、模型和元数据，以便恢复、分叉或审查任何历史记录。</p>
+
+    <h2 data-lang="en">Storage Location</h2>
+    <h2 data-lang="zh" hidden">存储位置</h2>
+    <p data-lang="en">Sessions are stored as JSONL files in:</p>
+    <p data-lang="zh" hidden">会话以 JSONL 文件存储在：</p>
+    <ul>
+      <li><strong>Linux / macOS</strong>: <code>~/.local/share/seek/sessions/</code></li>
+      <li><strong>Windows</strong>: <code>%LOCALAPPDATA%\seek\sessions\</code></li>
+    </ul>
+    <p data-lang="en">Each session is one file named by its ID, e.g. <code>20240522-143201-abc.jsonl</code>.</p>
+    <p data-lang="zh" hidden">每个会话是一个以 ID 命名的文件</p>
+
+    <h2 data-lang="en">Basic Operations</h2>
+    <h2 data-lang="zh" hidden">基本操作</h2>
+
+    <pre><span class="prompt">$</span> seek --list                      # List saved sessions (most recent first)
+<span class="prompt">$</span> seek --continue                  # Resume the most recent session
+<span class="prompt">$</span> seek --resume 20240522-143201-abc # Resume a specific session by ID
+<span class="prompt">$</span> seek --no-save -p "scratch work" # Ephemeral session (no save)</pre>
+
+    <h2 data-lang="en">Forking with /branch</h2>
+    <h2 data-lang="zh" hidden">用 /branch 分叉</h2>
+    <p data-lang="en"><code>/branch</code> creates a child session that shares the same history up to the fork point. The original session is preserved unchanged. Useful for exploring two approaches from the same starting point. The new session ID is printed; use <code>--resume &lt;id&gt;</code> to switch between branches.</p>
+    <p data-lang="zh" hidden"><code>/branch</code> 创建一个子会话，共享分叉点之前的历史。原始会话保持不变。适用于从同一起点探索两种方案。打印新会话 ID；用 <code>--resume &lt;id&gt;</code> 在分支间切换。</p>
+
+    <h2 data-lang="en">Compacting with /compact</h2>
+    <h2 data-lang="zh" hidden">用 /compact 压缩</h2>
+    <p data-lang="en">Long sessions accumulate token cost. <code>/compact</code> summarises the older portion of the history into a single assistant message, then continues. Run <code>/compact</code> before a long task if you're near your context limit.</p>
+    <p data-lang="zh" hidden">长会话会累积 token 成本。<code>/compact</code> 将较早的历史摘要为一条助手消息。接近上下文限制时运行它。</p>
+
+    <h2 data-lang="en">Distilling with /distill</h2>
+    <h2 data-lang="zh" hidden">用 /distill 提炼</h2>
+    <p data-lang="en"><code>/distill</code> scans the current session's conversation history and uses the DeepSeek reasoning model to propose ≤3 project-level decisions worth remembering. Each candidate is presented for y/n/e review before being written to project memory (M layer). This is the primary feed mechanism for the M index — run it at the end of a session when you've made non-obvious decisions.</p>
+    <p data-lang="zh" hidden"><code>/distill</code> 扫描当前会话历史，使用 DeepSeek 推理模型提出 ≤3 条值得记忆的项目级决策。每条候选需要 y/n/e 审查后写入项目记忆（M 层）。这是 M 索引的主要输入机制——在做出非显而易见决策的会话结束时运行。</p>
+
+    <h2 data-lang="en">Token Accounting</h2>
+    <h2 data-lang="zh" hidden">Token 统计</h2>
+    <p data-lang="en">The status bar shows cumulative token counts across the session:</p>
+    <p data-lang="zh" hidden">状态栏显示会话累计 token 统计：</p>
+    <ul>
+      <li><strong>prompt</strong> — tokens sent to the model (cached + uncached)</li>
+      <li><strong>hit</strong> — tokens served from DeepSeek's prefix cache (~50× cheaper)</li>
+      <li><strong>gen</strong> — generated completion tokens</li>
+    </ul>
+
+    <h2 data-lang="en">RPC Mode (IDE Integration)</h2>
+    <h2 data-lang="zh" hidden">RPC 模式（IDE 集成）</h2>
+    <p data-lang="en"><code>seek --rpc</code> starts a JSON-RPC 2.0 server over stdin/stdout. Host processes send requests and receive streaming responses without a terminal.</p>
+    <p data-lang="zh" hidden"><code>seek --rpc</code> 启动一个 JSON-RPC 2.0 服务（stdin/stdout）。宿主进程发送请求并接收流式响应，无需终端。</p>
+    <pre><span class="prompt">$</span> seek --rpc</pre>
+
+    <div class="note">
+      <span data-lang="en">📖 Detailed RPC protocol documentation is in <code>docs/guide-sessions.md</code>.</span>
+      <span data-lang="zh" hidden">📖 详细 RPC 协议文档见 <code>docs/guide-sessions.md</code>。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

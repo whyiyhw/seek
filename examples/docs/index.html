@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek documentation — commands, architecture, sessions, memory, and skills." />
+<title>docs — seek</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg:        #0b0b0e;
+    --surface:   #12121a;
+    --surface-2: #0e0e14;
+    --surface-3: #1a1a24;
+    --border:    #1e1e2a;
+    --text:      #d0d0d8;
+    --text-body: #d0d0d8;
+    --dim:       #6a6a7a;
+    --amber:     #f5a623;
+    --amber-dim: rgba(245,166,35,.15);
+    --teal:      #00d4ff;
+    --teal-dim:  rgba(0,212,255,.12);
+    --green:     #22c55e;
+    --red:       #ff5f56;
+    --yellow:    #ffbd2e;
+    --hover-bg:  rgba(255,255,255,.04);
+    --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg:        #f4f3ef;
+    --surface:   #ffffff;
+    --surface-2: #e8e7e2;
+    --surface-3: #dddcd6;
+    --border:    #dddcd6;
+    --text:      #1a1a1e;
+    --text-body: #1a1a1e;
+    --dim:       #7a7a82;
+    --amber:     #c9861a;
+    --amber-dim: rgba(201,134,26,.12);
+    --teal:      #009e9e;
+    --teal-dim:  rgba(0,158,158,.10);
+    --hover-bg:  rgba(0,0,0,.04);
+    --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.1rem, 2.5vw, 1.5rem); }
+  p  { max-width: 64ch; color: var(--dim); }
+
+  .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    padding: 20px 0 0;
+    font-size: .8rem;
+    color: var(--dim);
+  }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+
+  /* Header */
+  .page-header {
+    padding: 60px 0 40px;
+    border-bottom: 1px solid var(--border);
+  }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  /* Card grid */
+  .doc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    padding: 48px 0;
+  }
+  .doc-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 28px 24px;
+    transition: border-color .25s, transform .25s, box-shadow .25s;
+    cursor: pointer;
+    display: block;
+    position: relative;
+    overflow: hidden;
+  }
+  .doc-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px; height: 100%;
+    background: var(--amber);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .doc-card:hover::before { opacity: 1; }
+  .doc-card:hover {
+    border-color: var(--amber);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  }
+  .doc-card .label {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--amber);
+    margin-bottom: 8px;
+  }
+  .doc-card h3 { font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .doc-card p  { font-size: .82rem; color: var(--dim); line-height: 1.55; }
+  .doc-card .arrow { color: var(--teal); font-size: .8rem; margin-top: 10px; display: inline-block; }
+
+  /* Footer */
+  .page-footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 0;
+    text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+
+  @media (max-width: 640px) {
+    .doc-grid { grid-template-columns: 1fr; }
+    .page-header { padding: 40px 0 28px; }
+    .doc-card { padding: 20px 18px; }
+  }
+
+  /* Utility bar (theme + lang toggle) */
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  /* reveal animation */
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:900px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <span>Docs</span>
+  </div>
+
+  <div class="page-header">
+    <h1>📖 seek docs</h1>
+    <p class="subtitle">
+      <span data-lang="en" id="sub-en">Everything you need to use and understand seek.</span>
+      <span data-lang="zh" id="sub-zh" hidden>使用和理解 seek 所需的一切。</span>
+    </p>
+  </div>
+
+  <div class="doc-grid" id="doc-grid">
+    <!-- filled by JS -->
+  </div>
+
+  <div class="page-footer">
+    <a href="/">← Back to home</a>
+  </div>
+</div>
+
+<script>
+  // ============ THEME TOGGLE ============
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  // ============ LANGUAGE TOGGLE ============
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.title = lang === 'en' ? 'docs — seek' : '文档 — seek';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  // Docs cards data
+  const cards = [
+    { en: 'Commands',      zh: '命令参考',      href: 'commands.html',
+      enDesc: 'All slash commands, key bindings, and CLI flags.',
+      zhDesc: '全部斜杠命令、快捷键和 CLI 参数。' },
+    { en: 'Architecture',  zh: '设计架构',      href: 'architecture.html',
+      enDesc: 'Memory tiers, permission system, tools, caching, providers.',
+      zhDesc: '三层记忆、权限系统、工具系统、缓存策略、多 Provider。' },
+    { en: 'Sessions',      zh: '会话管理',      href: 'sessions.html',
+      enDesc: 'Save, resume, fork, compact, and distil sessions.',
+      zhDesc: '保存、恢复、分叉、压缩和提炼会话。' },
+    { en: 'Memory',        zh: '记忆系统 (L/M/S)', href: 'memory.html',
+      enDesc: 'Three-tier memory: Soul, Project, and Session layers.',
+      zhDesc: '三层记忆：Soul（长期）、Project（中期）、Session（短期）。' },
+    { en: 'Skills',        zh: 'Skill 生命周期', href: 'skills.html',
+      enDesc: 'Create, install, update, uninstall, and invoke skills.',
+      zhDesc: '创建、安装、更新、卸载和调用技能。' },
+  ];
+
+  const grid = document.getElementById('doc-grid');
+  cards.forEach(c => {
+    const a = document.createElement('a');
+    a.className = 'doc-card reveal';
+    a.href = c.href;
+    a.innerHTML = `
+      <div class="label">${c.en}</div>
+      <h3 data-lang="en">${c.en}</h3>
+      <h3 data-lang="zh" hidden>${c.zh}</h3>
+      <p data-lang="en">${c.enDesc}</p>
+      <p data-lang="zh" hidden>${c.zhDesc}</p>
+      <span class="arrow">→ read</span>
+    `;
+    grid.appendChild(a);
+  });
+
+  // Re-apply language preference to newly created cards
+  setLang(currentLang);
+
+  // Scroll reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
