@@ -1,121 +1,23 @@
-```
- ████ █████ █████ █   █
-█     █     █     █  █
-█     █     █     █ █
- ███  ████  ████  ██
-    █ █     █     █ █
-    █ █     █     █  █
-████  █████ █████ █   █
-```
+<p align="center">
+  <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go Version">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+  <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI">
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome">
+</p>
 
 **Languages**: [中文](../README.md) · English
 
-**seek** is a coding agent powered by [DeepSeek](https://deepseek.com). It runs in your terminal, reads/writes files, executes commands, and helps you get work done — without leaving your keyboard.
+# seek
 
-**Open source (MIT) · no region lock · no telemetry · welcome from anywhere in the world**. All you need is an API key from one LLM provider — DeepSeek is the primary target, Anthropic / OpenAI / Gemini also supported.
+**A coding agent that runs in your terminal** — powered by DeepSeek / Anthropic / OpenAI. Reads files, writes code, runs commands. You never leave the keyboard.
 
-## Why seek?
+> Open source (MIT) · no region lock · no telemetry · welcome from anywhere in the world
 
-seek overlaps a lot with Claude Code / Aider / Cursor on features — MCP, session management, IDE integration, custom skills, permission systems all exist there too. This section only lists the things that are actually **differentiated**; the rest is mentioned at the end as "on par, not a differentiator" instead of forcing checkmarks against competitors.
+---
 
-### 1. An order of magnitude cheaper
+## ⚡ Quick start
 
-DeepSeek input pricing (from `internal/pricing/pricing.go`):
-
-| | seek (DeepSeek V4-Flash) | seek (DeepSeek V4-Pro) | Claude Sonnet 4 |
-|---|---|---|---|
-| Input (cache miss) | **$0.14 / 1M tokens** | **$0.435 / 1M tokens** (promo)¹ | $3 / 1M tokens |
-| Input (prefix-cache hit) | **$0.0028 / 1M tokens** | **$0.003625 / 1M tokens** | $0.30 / 1M tokens |
-| Output | **$0.28 / 1M tokens** | **$0.87 / 1M tokens** | $15 / 1M tokens |
-| Off-peak window (00:30–08:30 Beijing time) | **50% off all of the above** | **50% off all of the above** | — |
-
-> ¹ V4-Pro is currently at a 75%-off promotional rate; the full rack rate is $1.74 / $0.0145 / $3.48 (see `internal/pricing/pricing.go`). The `deepseek-chat` / `deepseek-reasoner` aliases route to V4-Flash pricing, not V4-Pro.
-
-Self-hosting benchmark measures 95.7% cache hit (97% after turn 5) — the engineering discipline that keeps the prefix-cache stable (byte-stable schemas, system prompt, history) pays out in real cost savings. The status bar shows the hit ratio and saved-token count in real time.
-
-### 2. Single binary, zero runtime deps
-
-`~5 MB`, no Python / Node runtime, no `npm install` / `pip install`.
-`go install github.com/whyiyhw/seek/cmd/seek@latest` — or grab a tarball from the Releases page — for macOS / Linux / Windows.
-
-### 3. DeepSeek-specific affordances
-
-- **V4 reasoning mode** (`Thinking.Type=enabled`): exposed as the `think` tool; the built-in `dual-model` skill chains reasoner → execute → reasoner-review for non-trivial multi-step tasks
-- **FIM endpoint** (`fim_complete` tool): small-range edits go through DeepSeek's fill-in-the-middle endpoint, 5–10× cheaper than equivalent chat completions
-- **Cache-hit visibility**: status bar shows hit ratio and saved tokens live, so "write cache-friendly prompts" becomes an observable optimization target instead of a vague best-practice
-- **Off-peak countdown**: status bar shows the current pricing tier and how long until the next switch
-
-### 4. Bilingual (Chinese + English)
-
-Tool descriptions, system prompts, and error messages are provided in both English and Chinese; Chinese prompting on DeepSeek tends to outperform Western models on the same input, which is one of seek's core use cases. The English workflow has no limitations — and the other providers (Anthropic / OpenAI / Gemini) default to English paths regardless.
-
-### 5. Three-tier memory (L/M/S): cross-session persistence
-
-seek has **Soul (long-term) / Project (mid-term) / Session (short-term)** memory:
-- **S (session memory)**: full message history auto-saved, with `/branch` fork and `/compact` compression
-- **M (project memory)**: `memory_observe` / `memory_remember` write key decisions, `memory_recall` retrieves on demand, decay-score GC auto-forgets
-- **L (soul memory)**: `seek -dream` cross-project preference distillation, resident in system prompt
-
-Claude Code / Cursor only have session persistence — no cross-session project memory or user-level preference induction.
-
-### 6. TUI-native interaction flow
-
-seek introduces terminal-agent interaction patterns found in few other tools:
-
-- **`/plan` mode** — read-only exploration mode that lets you audit what the agent would do without letting it touch files
-- **`/steer`** — mid-stream steering: type `/steer <text>` to line up a follow-up instruction while the agent is still generating; bare `/steer` promotes a queued message. Works on every terminal (unlike Alt+Enter which chokes on macOS)
-- **`/review`** — one-shot code review: activates plan mode + submits a review prompt against working-tree changes
-- **`ask_user` tool** — the model itself can open an inline TUI picker (↑↓ Enter) when it needs a discrete decision from you, instead of guessing or asking in free text
-- **`@-highlight`** — accent-colour highlighting for paths, refs, and mentions in both messages and path-completion matches
-- **Empty-Enter withdraw** — with a queued message, pressing Enter on an empty textarea withdraws it without cancelling the active stream (gentler than Esc)
-
-### On par (not a differentiator)
-
-These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
-
-## Skills management
-
-Since v0.3, seek upgraded skills to **directory packages** — `<dir>/SKILL.md` + frontmatter with inline metadata, compatible with the Anthropic Agent Skills format (any Claude Code skill repo can be installed zero-modification). Single-file `.md` skills remain fully supported.
-
-```bash
-# Create a new skill package from a template
-seek skill create <name> --description "<trigger summary>"
-
-# Three source types — local path, Git URL, HTTPS archive, all work out of the box
-seek skill install ./my-skill
-seek skill install https://github.com/foo/bar#v1.0.0
-seek skill install https://example.com/foo.tar.gz --sha256 a3b9...
-
-# Name conflict: deny by default; --force to replace
-seek skill install ./my-skill --force
-
-# Project-level sharing (copies to <cwd>/.seek/skills/, tracked in git; no .install.json written)
-seek skill install ./my-skill --project
-
-# List loaded / show details / view call stats
-seek skill list
-seek skill status <name>
-seek skill stats --top 5 --since 720h
-
-# Re-pull (git: uses recorded ref; https: re-download and verify sha256; local: re-cp)
-seek skill update <name>
-seek skill update --all
-
-# Uninstall
-seek skill uninstall <name>
-```
-
-All commands are also available inside the TUI: `/skill <verb> [args]` mirrors the CLI (shared dispatcher). `/skills` still works (pre-v2 muscle memory).
-
-Every time the model calls the `Skill(name=...)` tool, a line is appended to `~/.seek/skills/.stats.jsonl` (ts/name/session/project/model/provider), used by `seek skill stats`. Fully local, append-only, zero network.
-
-## Quick start
-
-### Install
-
-**Option 1: prebuilt binary (recommended — no Go toolchain needed)**
-
-macOS / Linux one-liner that pulls the latest release:
+**macOS / Linux** (no Go toolchain needed — ~5 MB single binary):
 
 ```bash
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -123,91 +25,110 @@ ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 VER=$(curl -fsSL https://api.github.com/repos/whyiyhw/seek/releases/latest | sed -nE 's/.*"tag_name":[[:space:]]*"v([^"]+)".*/\1/p')
 curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER}_${OS}_${ARCH}.tar.gz" \
   | sudo tar -xz -C /usr/local/bin seek
-```
-
-Don't want `sudo`? Pick a writable directory on your `PATH`, e.g. `tar -xz -C ~/.local/bin seek`. Subsequent updates use `seek -upgrade` for an atomic in-place replace — no need to re-run the curl line.
-
-Windows: grab `seek_*_windows_amd64.zip` from the [Releases page](https://github.com/whyiyhw/seek/releases/latest) and unpack it.
-
-> **macOS Gatekeeper note**: Safari/Chrome downloads get the `com.apple.quarantine` xattr and Gatekeeper will block first-run. The `curl | tar` pipeline above does **not** trigger this; if you already hit it, run `xattr -d com.apple.quarantine seek` to clear it.
-
-**Option 2: install from source (requires Go 1.25+)**
-
-```bash
-go install github.com/whyiyhw/seek/cmd/seek@latest
-```
-
-### Run
-
-```bash
-# TUI mode (when stdin is a terminal)
 seek
-
-# Or non-interactively
-seek -p "Explain this project in one sentence."
 ```
 
-**First launch walks you through picking a provider and saves the API key to `~/.seek/config.json`** (perms 0600) — no manual `export` needed. Existing env vars (`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / …) take priority, which is convenient for CI and one-off overrides.
+First launch walks you through picking a provider and saving the API key — that's it. Detailed walkthrough: [`docs/`](./).
 
-```
-$ seek
-  seek — first-run setup
-  ──────────────────────
-  Step 1/2 — choose a provider:
-    1) DeepSeek (recommended)
-    2) Anthropic Claude
-    3) OpenAI GPT
-    4) Google Gemini
-  > 1
-  Step 2/2 — paste your DeepSeek API key:
-    Get one from https://platform.deepseek.com/api_keys
-  > sk-...
-  Verifying with a 1-token ping... ok.
-  Saved to ~/.seek/config.json.
-```
+**Windows**: grab `seek_*_windows_amd64.zip` from [Releases](https://github.com/whyiyhw/seek/releases/latest) and unpack.
 
-Need to switch keys / providers later? Type `/setup` inside the TUI to re-run the wizard, or hand-edit `~/.seek/config.json`.
+> **macOS Gatekeeper**: `curl | tar` doesn't trigger the quarantine xattr. If your browser download is blocked, run `xattr -d com.apple.quarantine seek`.
 
-> Pressing Enter mid-stream **queues** a follow-up message (auto-sent when the current turn finishes). To **withdraw** a queued message, leave the textarea empty and press Enter again — softer than Esc, and the in-flight stream keeps running.
+**Upgrade**: `seek -upgrade` pulls the latest release, verifies sha256, atomically replaces the binary. Or `/upgrade` inside the TUI.
 
-See [`docs/`](./) for sessions, MCP, memory, and skills guides.  
-See `?` inside the TUI for all key bindings and slash commands.
+---
 
-## Upgrade
+## 🎯 Why seek?
+
+### 💰 An order of magnitude cheaper
+
+DeepSeek input pricing (from `internal/pricing/pricing.go`):
+
+| Metric | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
+|---|---|---|---|
+| Input (cache miss) | **$0.14** / 1M tok | **$0.435** / 1M tok¹ | $3 / 1M tok |
+| Input (prefix-cache hit) | **$0.0028** / 1M tok | **$0.003625** / 1M tok | $0.30 / 1M tok |
+| Output | **$0.28** / 1M tok | **$0.87** / 1M tok | $15 / 1M tok |
+| Off-peak window² | **50% off all of the above** | **50% off all of the above** | — |
+
+> ¹ V4-Pro is currently at a 75%-off promotional rate; the full rack rate is $1.74 / $0.0145 / $3.48.  
+> ² 00:30–08:30 Beijing time.
+
+Measured prefix-cache hit rate: **95.7%** (97% after turn 5) — real engineering discipline paying out in real cost savings. The status bar shows hit ratio and saved tokens live.
+
+### 📦 Single binary, zero runtime deps
+
+`~5 MB`, no Python / Node runtime, no `npm install` / `pip install`. `go install github.com/whyiyhw/seek/cmd/seek@latest` or grab a release tarball. macOS / Linux / Windows.
+
+### 🧠 Three-tier memory (L/M/S)
+
+| Tier | Name | What it does |
+|---|---|---|
+| **S** (short-term) | Session memory | Full message history auto-saved; `/branch` fork and `/compact` compression |
+| **M** (mid-term) | Project memory | `memory_observe` writes key decisions; `memory_recall` retrieves; decay-score GC auto-forgets |
+| **L** (long-term) | Soul memory | `seek -dream` cross-project preference distillation, resident in system prompt |
+
+Claude Code / Cursor only have session persistence — no cross-session project memory or user-level preference induction.
+
+### 🎯 DeepSeek-specific affordances
+
+- **V4 reasoning mode** (`Thinking.Type=enabled`): exposed as the `think` tool; the built-in `dual-model` skill chains reasoner → execute → reasoner-review
+- **FIM endpoint** (`fim_complete`): fill-in-the-middle for small-range edits, 5–10× cheaper than chat
+- **Cache-hit visibility live**: status bar shows hit ratio and saved tokens in real time
+- **Off-peak countdown**: status bar shows the current pricing tier and time to next switch
+
+### 🖥️ TUI-native interaction flow
+
+- **`/plan`** — read-only exploration: audit what the agent would do without touching files
+- **`/steer`** — mid-stream instruction insertion (Mac-friendly Alt+Enter alternative)
+- **`/review`** — one-shot code review: plan mode + review prompt in one command
+- **`ask_user`** — the model opens an inline TUI picker when it needs a decision from you
+- **Empty-Enter withdraw** — with a queued message, pressing Enter on an empty textarea withdraws it
+
+### 🌏 Bilingual (Chinese + English)
+
+Tool descriptions, system prompts, and error messages in both languages. Chinese prompting on DeepSeek tends to outperform Western models on the same input — a core use case. English workflow has no limitations; other providers (Anthropic / OpenAI / Gemini) default to English.
+
+---
+
+## 📚 Skills & ecosystem
+
+Compatible with the [Anthropic Agent Skills format](https://docs.anthropic.com/en/docs/claude-code/skills) (`<dir>/SKILL.md` + frontmatter). Any Claude Code skill repo installs without modification.
 
 ```bash
-seek -upgrade-check   # is a newer release out? read-only, never touches the binary
-seek -upgrade         # pull the latest release, verify sha256, replace in place
-seek -upgrade-dry-run # run download + checksum verification, skip the final replace
+seek skill create <name>              # Create a skill
+seek skill install ./my-skill         # Local path
+seek skill install https://github.com/foo/bar#v1.0.0  # Git URL
+seek skill list                       # List loaded skills
+seek skill stats --top 5              # Call statistics
 ```
 
-`seek -upgrade` downloads the platform binary directly from [GitHub Releases](https://github.com/whyiyhw/seek/releases), verifies its sha256 against the release's `checksums.txt`, and atomically replaces the running binary. Local `go build`-style dev binaries are refused by default (use `-upgrade-force` to override). From inside the TUI you can also type `/upgrade`.  
-Disable the startup version-check probe: `export SEEK_NO_UPGRADE_CHECK=1`.
+All commands available inside the TUI: `/skill <verb>`. Single-file `.md` skills remain fully supported.
 
-## Roadmap
+**Other ecosystem features**: MCP server integration · filesystem permission system (ask-by-default, `--yolo`, path scoping) · JSON-RPC 2.0 server mode (IDE integration) · multi-provider (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
 
-Milestone progress: M0–M7 ✅ delivered | M8 (Skill lifecycle management) ✅ delivered
+---
 
-### Recently shipped (v0.3.x+)
+## 📖 Roadmap
+
+Milestones **M0–M8 all delivered**. Recently shipped (v0.3.x+):
 
 | Feature | What it does |
 |---|---|
-| `ask_user` tool | The model can open an inline TUI picker for decisions — no more guessing |
-| `skill_fetch` / `skill_commit` | The model can fetch and install skills directly (with your approval) |
-| `/plan` mode | Read-only exploration — the agent can look but not touch |
-| `/steer` | Mid-stream instruction insertion (Mac-friendly Alt+Enter alternative) |
-| `/review` | One-shot code review: plan mode + review prompt in one command |
-| `@-highlight` | Accent-colour path/ref highlighting in messages |
-| Skill v2 package install | Git URL, HTTPS tarball, local path — all installable via CLI or TUI |
+| `ask_user` tool | Model opens a TUI picker when it needs a decision from you |
+| `skill_fetch` / `skill_commit` | Model can fetch and install skills directly (with your approval) |
+| `/plan` · `/steer` · `/review` | TUI interaction upgrades |
+| Skill v2 package install | Git URL, HTTPS tarball, local path |
 
-Full design: [`docs/prd/`](./prd/) (v0 initial · v1 Memory · v2 Skill lifecycle)  
-Contributor guide: [`AGENTS.md`](../AGENTS.md) for architecture conventions.
+Full design docs: [`docs/prd/`](./prd/) | Contributor guide: [`AGENTS.md`](../AGENTS.md)
 
-## Open source & contributing
+---
 
-Licensed under the [MIT License](../LICENSE). The repo is public — developers from anywhere in the world are welcome to use it, file issues, and send pull requests. No region lock, no signup, no mandatory telemetry.
+## 🔓 Open source & contributing
 
-Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT); attribution in [`NOTICE`](../NOTICE). Architecture conventions in [`AGENTS.md`](../AGENTS.md); ongoing pitfall log in [`docs/pitfalls.md`](./pitfalls.md).
+Licensed under the [MIT License](../LICENSE). Developers from anywhere in the world are welcome — no region lock, no signup, no mandatory telemetry.
+
+Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT); attribution in [`NOTICE`](../NOTICE). Architecture conventions in [`AGENTS.md`](../AGENTS.md); pitfall log in [`docs/pitfalls.md`](./pitfalls.md).
 
 ---
 
