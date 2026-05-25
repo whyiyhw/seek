@@ -14,6 +14,7 @@
 <meta name="twitter:title" content="seek — DeepSeek native AI coding agent" />
 <meta name="twitter:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT)." />
 <title>seek — DeepSeek native AI coding agent</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28' font-family='monospace' fill='%23f5a623'%3E▊%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" />
@@ -23,7 +24,7 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; }
   body {
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-body);
     background: var(--bg);
     color: var(--text-body);
     line-height: 1.65;
@@ -111,29 +112,31 @@
     --yellow:    #ffbd2e;
     --hover-bg:  rgba(255,255,255,.04);
     --border-dim: rgba(255,255,255,.04);
+    --font-display: "JetBrains Mono", "SF Mono", "Fira Code", "Courier New", monospace;
+    --font-body:    system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
   [data-theme="light"] {
-    --bg:        #f4f3ef;
-    --surface:   #ffffff;
-    --surface-2: #e8e7e2;
-    --surface-3: #dddcd6;
-    --border:    #dddcd6;
-    --text:      #1a1a1e;
-    --text-body: #1a1a1e;
-    --dim:       #7a7a82;
-    --amber:     #c9861a;
-    --amber-dim: rgba(201,134,26,.12);
-    --teal:      #009e9e;
-    --teal-dim:  rgba(0,158,158,.10);
-    --green:     #15803d;
-    --red:       #dc2626;
-    --yellow:    #ca8a04;
+    --bg:        #f7f3ec;
+    --surface:   #fdfcfa;
+    --surface-2: #efebe4;
+    --surface-3: #e3ded6;
+    --border:    #d9d3c9;
+    --text:      #1a1c23;
+    --text-body: #2a2c33;
+    --dim:       #7a7570;
+    --amber:     #ba3d0a;
+    --amber-dim: rgba(186,61,10,.10);
+    --teal:      #1a7a7a;
+    --teal-dim:  rgba(26,122,122,.08);
+    --green:     #2d6a2d;
+    --red:       #b33a3a;
+    --yellow:    #a67c00;
     --hover-bg:  rgba(0,0,0,.04);
     --border-dim: rgba(0,0,0,.04);
   }
 
   /* ============ TYPOGRAPHY ============ */
-  h1, h2, h3, h4 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
   h1 { font-size: clamp(2rem, 7vw, 4.8rem); }
   h2 { font-size: clamp(1.3rem, 3.5vw, 2.4rem); }
   h3 { font-size: clamp(1rem, 2vw, 1.3rem); }
@@ -170,13 +173,16 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    body, .term-window, .diff-card, .feat, .install-option,
+    body, .term-window, .diff-card, .feat-line, .install-option,
     .price-wrap table, .cost-bar, .btn, .lang-toggle,
     .theme-toggle, code, footer, section, .back-top {
       transition: background-color .35s ease,
                   border-color .35s ease,
                   color .35s ease;
     }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .section-frame { animation: none; }
   }
 
   /* ============ LANGUAGE TOGGLE ============ */
@@ -215,19 +221,69 @@
     z-index: 1;
   }
   section {
-    padding: 100px 0;
-    border-bottom: 1px solid var(--border);
+    padding: 60px 0;
     position: relative;
   }
-  section:last-of-type { border-bottom: none; }
 
   /* ============ ANCHOR SCROLL OFFSET ============ */
   section[id] {
     scroll-margin-top: 80px;
   }
 
+  /* ============ SECTION FRAME (terminal box-drawing) ============ */
+  .section-frame {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 88px 32px 72px;
+    margin-bottom: 48px;
+    position: relative;
+    animation: frameIn .7s ease-out both;
+  }
+  .section-frame:nth-of-type(1) { animation-delay: .05s; }
+  .section-frame:nth-of-type(2) { animation-delay: .15s; }
+  .section-frame:nth-of-type(3) { animation-delay: .25s; }
+  .section-frame:nth-of-type(4) { animation-delay: .35s; }
+  @keyframes frameIn {
+    0%   { border-color: transparent; box-shadow: 0 0 0 transparent; }
+    100% { border-color: var(--border); box-shadow: 0 0 0 transparent; }
+  }
+  .section-frame::before {
+    content: "┌─ " attr(data-title) " ──┐";
+    position: absolute;
+    top: -0.7rem;
+    left: 28px;
+    background: var(--bg);
+    padding: 0 10px;
+    font-family: var(--font-display);
+    font-size: .72rem;
+    font-weight: 500;
+    color: var(--dim);
+    white-space: nowrap;
+    line-height: 1.4;
+    letter-spacing: .06em;
+  }
+  .section-frame::after {
+    content: "└──┘";
+    position: absolute;
+    bottom: -0.7rem;
+    left: 28px;
+    background: var(--bg);
+    padding: 0 10px;
+    font-family: var(--font-display);
+    font-size: .72rem;
+    color: var(--dim);
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+  @media (max-width: 640px) {
+    .section-frame { padding: 68px 16px 56px; margin-bottom: 32px; }
+    .section-frame::before { left: 12px; }
+    .section-frame::after { left: 12px; }
+  }
+
   /* ============ TERMINAL PROMPT LABEL ============ */
   .label {
+    font-family: var(--font-display);
     font-size: .8rem;
     font-weight: 500;
     color: var(--amber);
@@ -390,7 +446,7 @@
   .diff-card:hover {
     border-color: var(--amber);
     transform: translateY(-3px);
-    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    box-shadow: 0 8px 32px rgba(0,0,0,.5), 0 0 24px var(--amber-dim);
   }
   .diff-card .metric {
     font-size: 2rem;
@@ -496,6 +552,58 @@
 
   @media (max-width: 800px) {
     .diff-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ============ PRICING HERO METRIC BAR ============ */
+  .price-hero {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 32px 0 28px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .price-hero-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 16px;
+    text-align: center;
+    gap: 4px;
+  }
+  .price-hero-num {
+    font-family: var(--font-display);
+    font-size: clamp(1.4rem, 2.5vw, 2rem);
+    font-weight: 800;
+    color: var(--amber);
+    line-height: 1.1;
+    letter-spacing: -.02em;
+  }
+  .price-hero-num--sm {
+    font-size: clamp(1rem, 1.8vw, 1.4rem);
+  }
+  .price-hero-label {
+    font-size: .72rem;
+    color: var(--dim);
+    line-height: 1.3;
+  }
+  .price-hero:hover {
+    border-color: var(--amber);
+    box-shadow: 0 0 24px var(--amber-dim);
+  }
+  .price-hero-divider {
+    width: 1px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  @media (max-width: 640px) {
+    .price-hero { flex-direction: column; }
+    .price-hero-divider { width: auto; height: 1px; }
+    .price-hero-stat { padding: 14px 12px; }
   }
 
   /* ============ PRICING TABLE ============ */
@@ -623,41 +731,69 @@
   .cost-bars.reveal .cost-bar-fill.teal   { width: 1.6%; }
   .cost-bars.reveal .cost-bar-fill.claude { width: 100%; }
 
-  /* ============ FEATURES ============ */
+  /* ============ FEATURES (terminal module list) ============ */
   .feat-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 12px;
-    margin-top: 8px;
-  }
-  .feat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 20px 22px;
     display: flex;
-    align-items: flex-start;
-    gap: 14px;
-    transition: border-color .2s, background .2s;
+    gap: 18px;
+    margin-top: 8px;
+    align-items: stretch;
   }
-  .feat:hover {
-    border-color: var(--teal);
-    background: rgba(0,212,255,.03);
+  .feat-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
   }
-  .feat-marker {
+  .feat-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 3px;
+    font-family: var(--font-display);
+    font-size: .76rem;
+    line-height: 1.35;
+    transition: background .12s;
+    cursor: default;
+    min-height: 32px;
+  }
+  .feat-line:hover {
+    background: var(--hover-bg);
+  }
+  .feat-line:active {
+    background: var(--amber-dim);
+  }
+  .feat-status {
     color: var(--amber);
-    font-size: .9rem;
     flex-shrink: 0;
-    margin-top: 2px;
-    font-weight: 600;
+    font-size: .6rem;
+    opacity: .8;
   }
-  .feat h4 {
-    font-size: .88rem;
+  .feat-name {
+    color: var(--teal);
     font-weight: 600;
-    margin-bottom: 3px;
-    color: var(--text);
+    flex-shrink: 0;
+    white-space: nowrap;
   }
-  .feat p { font-size: .8rem; color: var(--dim); line-height: 1.5; }
+  .feat-desc {
+    color: var(--dim);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .feat-badge {
+    color: var(--green);
+    font-size: .6rem;
+    flex-shrink: 0;
+    font-weight: 500;
+    opacity: .8;
+  }
+  @media (max-width: 800px) {
+    .feat-grid { flex-direction: column; gap: 0; }
+  }
 
   /* ============ INSTALL SECTION ============ */
   .install-grid {
@@ -740,9 +876,36 @@
     transform: translateY(0);
   }
 
+  /* ============ MICRO DETAILS ============ */
+  ::selection {
+    background: var(--amber);
+    color: #0b0b0e;
+  }
+  /* Custom scrollbar — terminal vibe */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+    border: 2px solid var(--bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--dim);
+  }
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
   /* ============ RESPONSIVE ============ */
   @media (max-width: 640px) {
-    section { padding: 60px 0; }
+    section { padding: 40px 0; }
     section[id] { scroll-margin-top: 60px; }
     .container { padding: 0 16px; }
     .diff-card { padding: 20px 16px; }
@@ -754,7 +917,7 @@
     .cost-bars { padding: 18px 16px; }
     .term-body { padding: 14px 14px; font-size: .75rem; }
     .install-option { padding: 16px; }
-    .feat { padding: 14px 16px; }
+    .feat-line { padding: 5px 8px; font-size: .7rem; }
   }
 
   /* ============ PRINT STYLES ============ */
@@ -764,13 +927,18 @@
     .lang-toggle, .theme-toggle, .back-top, .skip-link { display: none !important; }
     .ascii-logo { color: #333; text-shadow: none; }
     .btn-primary { background: #333; color: #fff; box-shadow: none; }
-    .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .term-window {
+    .price-wrap, .cost-bars, .diff-card, .feat-line, .install-option, .term-window {
       background: #f5f5f5;
       border-color: #ddd;
       break-inside: avoid;
     }
-    .section-head p, .diff-card p, .feat p { color: #555; }
-    section { padding: 30px 0; border-color: #eee; }
+    .section-head p, .diff-card p, .feat-desc { color: #555; }
+    section { padding: 30px 0; }
+    .section-frame { border-color: #ddd; background: #f5f5f5; }
+    .section-frame::before,
+    .section-frame::after { background: #f5f5f5 !important; color: #666; }
+    .price-hero { border-color: #ddd; background: #f5f5f5; }
+    .price-hero-divider { background: #ddd; }
     .cost-bar-fill { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     .term-dot { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     .price-wrap th { background: #e8e8e8; color: #333; }
@@ -981,7 +1149,7 @@
 <div class="container" id="main-content">
 
 <!-- ============ WHY SEEK ============ -->
-<section>
+<section class="section-frame" data-title="WHY SEEK">
   <div class="section-head reveal">
     <p class="label">
       <span data-lang="en">why seek</span>
@@ -999,7 +1167,7 @@
 
   <div class="diff-grid diff-grid--three">
     <div class="diff-card reveal">
-      <div class="metric">$0.0028</div>
+      <div class="metric" data-target="0.0028">$0.0028</div>
       <div class="metric-label">
         <span data-lang="en">per 1M tokens on cache hit</span>
         <span data-lang="zh" hidden>每百万 token（缓存命中）</span>
@@ -1010,7 +1178,7 @@
       </p>
     </div>
     <div class="diff-card reveal" style="transition-delay:.1s">
-      <div class="metric">5 MB</div>
+      <div class="metric" data-target="5">5 MB</div>
       <div class="metric-label">
         <span data-lang="en">single static binary</span>
         <span data-lang="zh" hidden>单文件静态二进制</span>
@@ -1035,7 +1203,7 @@
 </section>
 
 <!-- ============ PRICING ============ -->
-<section>
+<section class="section-frame" data-title="PRICING">
   <div class="section-head reveal">
     <p class="label">
       <span data-lang="en">pricing</span>
@@ -1049,6 +1217,24 @@
       <span data-lang="en">Real API pricing, not marketing. Cache hit rate is visible in the status bar so you can optimise for it.</span>
       <span data-lang="zh" hidden>真实 API 价格，不是营销话术。缓存命中率在状态栏实时可见，方便你针对性优化。</span>
     </p>
+  </div>
+
+  <!-- ============ PRICING HERO METRIC ============ -->
+  <div class="price-hero reveal">
+    <div class="price-hero-stat">
+      <span class="price-hero-num" data-target="0.0028">$0.0028</span>
+      <span class="price-hero-label"><span data-lang="en">per 1M tokens (cache hit)</span><span data-lang="zh" hidden">每百万 token（缓存命中）</span></span>
+    </div>
+    <div class="price-hero-divider"></div>
+    <div class="price-hero-stat">
+      <span class="price-hero-num" data-target="97">97%</span>
+      <span class="price-hero-label"><span data-lang="en">cache hit rate after turn 5</span><span data-lang="zh" hidden>第 5 轮后缓存命中率</span></span>
+    </div>
+    <div class="price-hero-divider"></div>
+    <div class="price-hero-stat">
+      <span class="price-hero-num price-hero-num--sm" data-target="107">107×</span>
+      <span class="price-hero-label"><span data-lang="en">cheaper than Claude Sonnet 4</span><span data-lang="zh" hidden">比 Claude Sonnet 4 便宜</span></span>
+    </div>
   </div>
 
   <div class="price-wrap reveal">
@@ -1151,7 +1337,7 @@
 </section>
 
 <!-- ============ FEATURES ============ -->
-<section>
+<section class="section-frame" data-title="CAPABILITIES">
   <div class="section-head reveal">
     <p class="label">
       <span data-lang="en">capabilities</span>
@@ -1167,24 +1353,93 @@
     </p>
   </div>
 
-  <div class="feat-grid">
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4><span data-lang="en">Three-tier memory</span><span data-lang="zh" hidden>三层记忆 L/M/S</span></h4><p><span data-lang="en">Soul (cross-project) · Project decisions · Session history — with <span class="label-sm">memory_observe / recall / archive</span></span><span data-lang="zh" hidden">长期偏好 · 项目决策 · 会话历史 — 支持 <span class="label-sm">memory_observe / recall / archive</span></span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.05s"><span class="feat-marker">></span><div><h4>MCP server</h4><p><span data-lang="en">Extend with any MCP-compatible tool server</span><span data-lang="zh" hidden">集成任意 MCP 兼容工具服务</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.1s"><span class="feat-marker">></span><div><h4><span data-lang="en">Skill lifecycle CLI</span><span data-lang="zh" hidden">Skill 生命周期管理</span></h4><p><span data-lang="en">Create / install / update / uninstall — directory package format</span><span data-lang="zh" hidden">创建 / 安装 / 更新 / 卸载 — 目录包格式</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.15s"><span class="feat-marker">></span><div><h4><span data-lang="en">Session persistence</span><span data-lang="zh" hidden>会话持久化</span></h4><p><span data-lang="en">Auto-save, resume, fork, compact, distill — full lifecycle</span><span data-lang="zh" hidden">自动保存、恢复、分叉、压缩、提炼——完整生命周期</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.2s"><span class="feat-marker">></span><div><h4><span data-lang="en">Multi-provider</span><span data-lang="zh" hidden>多模型支持</span></h4><p>DeepSeek + Anthropic + OpenAI + Gemini + <span data-lang="en">compatible</span><span data-lang="zh" hidden>兼容</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.25s"><span class="feat-marker">></span><div><h4><span data-lang="en">Plan &amp; review modes</span><span data-lang="zh" hidden>规划与审查模式</span></h4><p><span data-lang="en">Read-only <span class="label-sm">/plan</span> exploration · Working-tree <span class="label-sm">/review</span></span><span data-lang="zh" hidden">只读型 <span class="label-sm">/plan</span> 探索 · 工作树 <span class="label-sm">/review</span> 审查</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.3s"><span class="feat-marker">></span><div><h4>JSON-RPC 2.0</h4><p><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden">无头模式，用于 IDE 集成</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.35s"><span class="feat-marker">></span><div><h4><span data-lang="en">Permission system</span><span data-lang="zh" hidden">权限系统</span></h4><p><span data-lang="en">Granular filesystem &amp; shell access control</span><span data-lang="zh" hidden">细粒度的文件系统和 shell 访问控制</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.4s"><span class="feat-marker">></span><div><h4><span data-lang="en">In-session commands</span><span data-lang="zh" hidden>会话内命令</span></h4><p><span data-lang="en">Switch model · set effort · toggle lang / yolo / plan — all via <span class="label-sm">/slash</span></span><span data-lang="zh" hidden">切换模型 · 设置推理强度 · 语言 / yolo / plan — 全部通过 <span class="label-sm">/斜杠命令</span></span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.45s"><span class="feat-marker">></span><div><h4><span data-lang="en">Self-upgrade</span><span data-lang="zh" hidden">自动升级</span></h4><p><span data-lang="en">Atomic in-place update — <span class="label-sm">seek -upgrade</span> or <span class="label-sm">/upgrade</span> in TUI</span><span data-lang="zh" hidden">原子级原地更新 — <span class="label-sm">seek -upgrade</span> 或 TUI <span class="label-sm">/upgrade</span></span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.5s"><span class="feat-marker">></span><div><h4><span data-lang="en">Bilingual</span><span data-lang="zh" hidden>双语</span></h4><p><span data-lang="en">Chinese &amp; English — prompts, errors, docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示、错误、文档</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.55s"><span class="feat-marker">></span><div><h4><span data-lang="en">Zero telemetry</span><span data-lang="zh" hidden>零遥测</span></h4><p><span data-lang="en">Your API key, your data, your terminal.</span><span data-lang="zh" hidden>你的 API key、你的数据、你的终端。</span></p></div></div>
+    <div class="feat-grid">
+    <!-- col 1: core -->
+    <div class="feat-col">
+      <div class="feat-line reveal">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">memory-ls</span>
+        <span class="feat-desc"><span data-lang="en">Three-tier L/M/S — soul · project · session</span><span data-lang="zh" hidden>三层记忆 L/M/S — 长期 · 项目 · 会话</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.05s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">mcp-bridge</span>
+        <span class="feat-desc"><span data-lang="en">MCP-compatible tool server</span><span data-lang="zh" hidden>MCP 兼容工具服务</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.1s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">skill-mgr</span>
+        <span class="feat-desc"><span data-lang="en">Create / install / update / uninstall</span><span data-lang="zh" hidden>创建 / 安装 / 更新 / 卸载</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.15s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">session-store</span>
+        <span class="feat-desc"><span data-lang="en">Auto-save · resume · fork · compact · distill</span><span data-lang="zh" hidden>自动保存 · 恢复 · 分叉 · 压缩 · 提炼</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+    </div>
+    <!-- col 2: integration -->
+    <div class="feat-col">
+      <div class="feat-line reveal" style="transition-delay:.2s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">multi-pvd</span>
+        <span class="feat-desc">DeepSeek + Anthropic + OpenAI + Gemini</span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.25s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">plan-review</span>
+        <span class="feat-desc"><span data-lang="en">Read-only <span class="label-sm">/plan</span> · working-tree <span class="label-sm">/review</span></span><span data-lang="zh" hidden>只读 <span class="label-sm">/plan</span> · 工作树 <span class="label-sm">/review</span></span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.3s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">json-rpc</span>
+        <span class="feat-desc"><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden>无头模式，用于 IDE 集成</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.35s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">fs-permit</span>
+        <span class="feat-desc"><span data-lang="en">Granular filesystem &amp; shell ACL</span><span data-lang="zh" hidden>细粒度文件系统和 shell 权限</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+    </div>
+    <!-- col 3: UX -->
+    <div class="feat-col">
+      <div class="feat-line reveal" style="transition-delay:.4s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">slash-cmd</span>
+        <span class="feat-desc"><span data-lang="en"><span class="label-sm">/model</span> · <span class="label-sm">/effort</span> · <span class="label-sm">/lang</span> · <span class="label-sm">/yolo</span></span><span data-lang="zh" hidden>切换模型 · 推理强度 · 语言 · 权限</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.45s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">self-upgrade</span>
+        <span class="feat-desc"><span data-lang="en">Atomic in-place <span class="label-sm">/upgrade</span></span><span data-lang="zh" hidden>原子级原地 <span class="label-sm">/upgrade</span></span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.5s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">i18n</span>
+        <span class="feat-desc"><span data-lang="en">Chinese &amp; English — prompts · errors · docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示 · 错误 · 文档</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+      <div class="feat-line reveal" style="transition-delay:.55s">
+        <span class="feat-status">◆</span>
+        <span class="feat-name">telemetry-off</span>
+        <span class="feat-desc"><span data-lang="en">Your API key · your data · your terminal</span><span data-lang="zh" hidden>你的 API key · 你的数据 · 你的终端</span></span>
+        <span class="feat-badge">active</span>
+      </div>
+    </div>
   </div>
 </section>
 
 <!-- ============ INSTALL ============ -->
-<section id="install">
+<section class="section-frame" id="install" data-title="INSTALL">
   <div class="section-head reveal">
     <p class="label">
       <span data-lang="en">install</span>
@@ -1328,7 +1583,7 @@
     document.documentElement.setAttribute('data-theme', theme);
     themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
     document.querySelector('meta[name="theme-color"]').content =
-      theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+      theme === 'dark' ? '#0b0b0e' : '#f7f3ec';
   }
 
   themeBtn.addEventListener('click', () => {
@@ -1390,7 +1645,8 @@
             textSpan.textContent = accum;
           }
           i++;
-          setTimeout(tick, i === 1 ? 300 : speed + Math.random() * 12);
+          const pause = ',.;:!?'.includes(text[i-1]) ? 80 : 0;
+          setTimeout(tick, i === 1 ? 300 : speed + Math.random() * 18 + pause);
         } else {
           const br = document.createElement('br');
           output.appendChild(br);
@@ -1538,6 +1794,49 @@
       navigator.clipboard.writeText(text);
     });
   });
+
+  // ============ COUNTER ANIMATION ============
+  (function animateCounters() {
+    const els = document.querySelectorAll('[data-target]');
+    if (!els.length) return;
+
+    function parseDisplay(text) {
+      const match = text.match(/^([^\d.]*)([\d.]+)(.*)$/);
+      if (!match) return { prefix: '', num: parseFloat(text) || 0, suffix: '' };
+      return { prefix: match[1], num: parseFloat(match[2]), suffix: match[3] };
+    }
+
+    function animate(el, target, duration) {
+      const display = parseDisplay(el.textContent);
+      const startTime = performance.now();
+      const isDecimal = target % 1 !== 0;
+      const decimals = isDecimal ? String(target).split('.')[1].length : 0;
+
+      function tick(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const current = eased * target;
+        el.textContent = display.prefix + current.toFixed(decimals) + display.suffix;
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    const counterObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const target = parseFloat(entry.target.getAttribute('data-target'));
+          if (!isNaN(target)) {
+            animate(entry.target, target, 1200);
+          }
+          counterObserver.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.5 });
+
+    els.forEach(el => counterObserver.observe(el));
+  })();
 </script>
 
 </body>
