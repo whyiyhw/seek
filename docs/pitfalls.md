@@ -576,3 +576,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: changed `truncateOneLine` to use `[]rune(s)` for length comparison and slicing — rune-level slicing never splits a multi-byte character. Commit (this commit)
 - **Lesson**: any Go code that truncates, clips, or paginates user-visible text by length must use `[]rune` for the count and the slice operation. `string` indexing is byte-level; multi-byte characters (Chinese, emoji, CJK punctuation) will be silently corrupted. The function signature says "n chars" — make sure the implementation actually counts chars, not bytes
 - **Refs**: `internal/tui/update.go:truncateOneLine`, `docs/pitfalls.md:300` (same root cause, different surface)
+
+### Alt+Enter steer doesn't work on macOS terminals
+- **Saw**: pressing Option+Enter during a stream queued the text instead of steering it — same behaviour as plain Enter. The `Alt` modifier was lost before it reached bubbletea
+- **Why**: `msg.Alt` depends on the terminal sending `\x1b\r` (ESC prefix + Enter) as the raw byte sequence. macOS terminal emulators (Terminal.app, iTerm2, Warp) typically send Option+Enter as a bare `\r` unless "Use Option as Meta key" is enabled. Without the ESC prefix, `msg.Alt` is false and the code falls into the queue branch (update.go:502)
+- **Fix**: added `/steer [text]` slash command (alias `/s`) with queue promotion: bare `/steer` promotes a queued message to steer, and `/steer <text>` is equivalent to Alt+Enter. Commit `0e5b275`
+- **Lesson**: modifier-key-dependent keybindings (Alt+key) are unreliable across platforms because terminal emulators vary in how they encode the Alt/Option modifier. For any action gated by a modifier key, provide a text-based alternative (slash command) so users whose terminal doesn't forward the modifier can still trigger the action. The "queue first, then promote" workflow is a particularly Mac-friendly pattern because it doesn't require any modifier key at all
+- **Refs**: `internal/tui/update.go:502` (msg.Alt check), `internal/tui/commands.go:cmdSteer`, commit `0e5b275`
