@@ -49,9 +49,18 @@ Self-hosting benchmark measures 95.7% cache hit (97% after turn 5) — the engin
 
 Tool descriptions, system prompts, and error messages are provided in both English and Chinese; Chinese prompting on DeepSeek tends to outperform Western models on the same input, which is one of seek's core use cases. The English workflow has no limitations — and the other providers (Anthropic / OpenAI / Gemini) default to English paths regardless.
 
+### 5. Three-tier memory (L/M/S): cross-session persistence
+
+seek has **Soul (long-term) / Project (mid-term) / Session (short-term)** memory:
+- **S (session memory)**: full message history auto-saved, with `/branch` fork and `/compact` compression
+- **M (project memory)**: `memory_observe` / `memory_remember` write key decisions, `memory_recall` retrieves on demand, decay-score GC auto-forgets
+- **L (soul memory)**: `seek -dream` cross-project preference distillation, resident in system prompt
+
+Claude Code / Cursor only have session persistence — no cross-session project memory or user-level preference induction.
+
 ### On par (not a differentiator)
 
-These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), session persistence / fork (`/branch`) / compact (`/compact`), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
+These are listed only to confirm seek isn't missing them — Claude Code / Cursor / Codex CLI have all of these too: MCP server integration, custom skills (`.md` + frontmatter), filesystem permission system (ask-by-default, `--yolo` to bypass, path scoping), JSON-RPC 2.0 server mode for IDE integration, multi-provider support (Anthropic / OpenAI / Gemini / OpenAI-compatible endpoints).
 
 ## Skills management
 
@@ -150,7 +159,7 @@ Need to switch keys / providers later? Type `/setup` inside the TUI to re-run th
 
 > Pressing Enter mid-stream **queues** a follow-up message (auto-sent when the current turn finishes). To **withdraw** a queued message, leave the textarea empty and press Enter again — softer than Esc, and the in-flight stream keeps running.
 
-See [`docs/`](./) for sessions, MCP, and skills guides.  
+See [`docs/`](./) for sessions, MCP, memory, and skills guides.  
 See `?` inside the TUI for all key bindings and slash commands.
 
 ## Upgrade
@@ -166,11 +175,7 @@ Disable the startup version-check probe: `export SEEK_NO_UPGRADE_CHECK=1`.
 
 ## Roadmap
 
-The project follows milestones M0–M7 (all delivered). Current milestone: **M8 (Skill lifecycle management)** wrapping up:
-
-- **Skill CLI**: `seek skill create / install / list / status / stats / update / uninstall`
-- **Directory package format**: `<dir>/SKILL.md` + frontmatter, compatible with Anthropic Agent Skills ecosystem
-- **Documentation & stability**: guides, tests, tagged releases
+Milestone progress: M0–M7 ✅ delivered | M8 (Skill lifecycle management) ✅ delivered
 
 Full design: [`docs/prd/`](./prd/) (v0 initial · v1 Memory · v2 Skill lifecycle)  
 Contributor guide: [`AGENTS.md`](../AGENTS.md) for architecture conventions.

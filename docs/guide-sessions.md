@@ -26,9 +26,24 @@ seek --no-save -p "scratch work"
 
 | Command | What it does |
 |---|---|
+| `/help`, `/?` | Show this help |
+| `/clear` | Clear visible screen (scrollback preserved by terminal) |
 | `/new` | Start a fresh conversation (saves the current one first) |
-| `/branch` | Fork the current session — new ID, keeps the full history |
-| `/compact` | Compress history: summarises older turns to save tokens |
+| `/model` | Switch model — no arg opens a picker; pass an id to skip it |
+| `/effort` | Set DeepSeek reasoning effort: `off`, `high`, or `max` |
+| `/lang` | Set response language: `en`, `zh`, or `auto` |
+| `/yolo` | Toggle `--yolo` (bypass permission prompts) for this session |
+| `/plan` | Toggle plan mode (read-only exploration) for this session |
+| `/review` | Code review working-tree changes — no arg opens a picker, or pass a branch |
+| `/branch` | Fork this session — new ID, parent link, copy of history |
+| `/compact` | Summarise prior history into one message to free up context |
+| `/distill` | Extract project-level decisions from this session into M memory |
+| `/skills` | List loaded skills with source paths |
+| `/skill` | Manage skill packages: `install`, `uninstall`, `update`, `list`, `status`, `stats`, `help` |
+| `/memory` | Inspect project memory: `list`, `show`, `search`, `archive` |
+| `/setup` | Re-run the API-key configuration wizard |
+| `/upgrade` | Download the latest release and replace the binary in place |
+| `/exit`, `/quit`, `/q` | Quit seek |
 
 ## Forking with /branch
 
@@ -45,6 +60,12 @@ seek prints the new session ID. Use `--resume <id>` to switch between branches.
 Long sessions accumulate token cost. `/compact` summarises the older portion of the history into a single assistant message, then continues. The summary is appended to the session — the original turns are gone after a save.
 
 Run `/compact` before a long task if you're near your context limit.
+
+## Distilling with /distill
+
+`/distill` scans the current session's conversation history and uses the DeepSeek reasoning model to propose ≤3 project-level decisions worth remembering. Each candidate is presented for y/n/e review before being written to project memory (M layer).
+
+This is the primary feed mechanism for the M index — run it at the end of a session when you've made non-obvious decisions you want the agent to remember next time.
 
 ## Token accounting
 

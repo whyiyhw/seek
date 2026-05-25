@@ -48,9 +48,18 @@ DeepSeek 的输入价格（来自 `internal/pricing/pricing.go`）：
 
 工具描述、系统 prompt、错误信息提供中英双语；中文 prompt 在 DeepSeek 上响应优于多数欧美模型，是 seek 的核心使用场景之一。英文工作流没有任何限制——其它 provider（Anthropic / OpenAI / Gemini）默认英文路径，自然衔接。
 
+### 5. 三层记忆（L/M/S）：跨会话持久化
+
+seek 拥有**长期（Soul）/ 中期（Project）/ 短期（Session）**三层记忆：
+- **S（会话记忆）**：自动保存完整消息历史，支持 `/branch` 分叉和 `/compact` 压缩
+- **M（项目记忆）**：`memory_observe` / `memory_remember` 写入关键决策，`memory_recall` 按需检索，decay-score GC 自动遗忘
+- **L（用户本源）**：`seek -dream` 跨项目归纳用户偏好，常驻 system prompt
+
+Claude Code / Cursor 仅有会话持久化，缺少跨会话的项目级记忆和用户级偏好归纳。
+
 ### 通用能力（持平，非差异化）
 
-下面这些 Claude Code / Cursor / Codex CLI 也有，列出来只是说明 seek 不缺：MCP 服务端接入、自定义 skill (`.md` + frontmatter)、会话持久化 / 分叉 (`/branch`) / 压缩 (`/compact`)、文件系统权限系统（默认询问 / `--yolo` 跳过 / 路径白名单）、JSON-RPC 2.0 服务模式（IDE 接入）、多 LLM provider（Anthropic / OpenAI / Gemini / OpenAI 兼容端点）。
+下面这些 Claude Code / Cursor / Codex CLI 也有，列出来只是说明 seek 不缺：MCP 服务端接入、自定义 skill (`.md` + frontmatter)、文件系统权限系统（默认询问 / `--yolo` 跳过 / 路径白名单）、JSON-RPC 2.0 服务模式（IDE 接入）、多 LLM provider（Anthropic / OpenAI / Gemini / OpenAI 兼容端点）。
 
 ## 快速上手
 
@@ -113,7 +122,7 @@ $ seek
 
 > 流式过程中按 Enter 可以**排队**一条后续消息（agent 跑完当前轮自动发出）；想**撤回**已排队的消息？让输入框留空再按一次 Enter——比按 Esc 温和，不会 cancel 当前 stream。
 
-详细用法：[`docs/`](./docs/) 包含会话、MCP、Skill 指南。  
+详细用法：[`docs/`](./docs/) 包含会话、MCP、记忆、Skill 指南。  
 TUI 内输入 `?` 查看所有快捷键和斜杠命令。
 
 ## 升级
@@ -165,11 +174,7 @@ seek skill uninstall <name>
 
 ## 路线图
 
-项目采用里程碑 M0–M7（已全部交付），当前 **M8（Skill 生命周期管理）** 正在收尾：
-
-- **Skill CLI**：`seek skill create / install / list / status / stats / update / uninstall`
-- **目录包格式**：`<dir>/SKILL.md` + frontmatter，兼容 Anthropic Agent Skills 生态
-- **文档与稳定性**：补充指南、完善测试、打 tag 发版
+里程碑进度：M0–M7 ✅ 已交付 | M8（Skill 生命周期管理）✅ 已交付
 
 完整设计：[`docs/prd/`](./docs/prd/)（v0 初始版本 · v1 Memory · v2 Skill 生命周期）  
 贡献者指南：[`AGENTS.md`](./AGENTS.md) 说明了架构约定。
