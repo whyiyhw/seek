@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="zh" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -24,8 +24,8 @@
   html { scroll-behavior: smooth; font-size: 16px; -webkit-text-size-adjust: 100%; }
   body {
     font-family: "JetBrains Mono", monospace;
-    background: #0b0b0e;
-    color: #d0d0d8;
+    background: var(--bg);
+    color: var(--text-body);
     line-height: 1.65;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
@@ -96,8 +96,11 @@
   :root {
     --bg:        #0b0b0e;
     --surface:   #12121a;
+    --surface-2: #0e0e14;
+    --surface-3: #1a1a24;
     --border:    #1e1e2a;
     --text:      #d0d0d8;
+    --text-body: #d0d0d8;
     --dim:       #6a6a7a;
     --amber:     #f5a623;
     --amber-dim: rgba(245,166,35,.15);
@@ -106,6 +109,27 @@
     --green:     #22c55e;
     --red:       #ff5f56;
     --yellow:    #ffbd2e;
+    --hover-bg:  rgba(255,255,255,.04);
+    --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg:        #f4f3ef;
+    --surface:   #ffffff;
+    --surface-2: #e8e7e2;
+    --surface-3: #dddcd6;
+    --border:    #dddcd6;
+    --text:      #1a1a1e;
+    --text-body: #1a1a1e;
+    --dim:       #7a7a82;
+    --amber:     #c9861a;
+    --amber-dim: rgba(201,134,26,.12);
+    --teal:      #009e9e;
+    --teal-dim:  rgba(0,158,158,.10);
+    --green:     #15803d;
+    --red:       #dc2626;
+    --yellow:    #ca8a04;
+    --hover-bg:  rgba(0,0,0,.04);
+    --border-dim: rgba(0,0,0,.04);
   }
 
   /* ============ TYPOGRAPHY ============ */
@@ -118,6 +142,43 @@
   .text-teal  { color: var(--teal); }
   .text-dim   { color: var(--dim); }
 
+  /* ============ UTILITY BAR (top-right) ============ */
+  .util-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    font-size: .9rem;
+    transition: all .2s ease;
+    flex-shrink: 0;
+    color: var(--dim);
+  }
+  .theme-toggle:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    body, .term-window, .diff-card, .feat, .install-option,
+    .price-wrap table, .cost-bar, .btn, .lang-toggle,
+    .theme-toggle, code, footer, section, .back-top {
+      transition: background-color .35s ease,
+                  border-color .35s ease,
+                  color .35s ease;
+    }
+  }
+
   /* ============ LANGUAGE TOGGLE ============ */
   .lang-toggle {
     display: inline-flex;
@@ -125,11 +186,12 @@
     border-radius: 4px;
     overflow: hidden;
     font-family: "JetBrains Mono", monospace;
-    font-size: .75rem;
+    font-size: .78rem;
     line-height: 1;
+    flex-shrink: 0;
   }
   .lang-toggle span {
-    padding: 5px 12px;
+    padding: 6px 14px;
     cursor: pointer;
     transition: all .2s ease;
     color: var(--dim);
@@ -252,7 +314,7 @@
   }
   .btn-outline:hover {
     border-color: var(--text);
-    background: rgba(255,255,255,.04);
+    background: var(--hover-bg);
     transform: translateY(-2px);
   }
   .btn .arrow { transition: transform .2s; display: inline-block; }
@@ -346,7 +408,7 @@
 
   /* Terminal window frame */
   .term-window {
-    background: #0e0e14;
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
@@ -357,7 +419,7 @@
   }
   .term-window:hover { border-color: var(--amber); }
   .term-titlebar {
-    background: #1a1a24;
+    background: var(--surface-3);
     padding: 10px 14px;
     display: flex;
     align-items: center;
@@ -422,7 +484,7 @@
   .diff-card.feature-list li {
     list-style: none;
     padding: 10px 0;
-    border-bottom: 1px solid rgba(255,255,255,.04);
+    border-bottom: 1px solid var(--border-dim);
     font-size: .88rem;
     display: flex;
     align-items: center;
@@ -452,7 +514,7 @@
     font-size: .82rem;
   }
   .price-wrap th {
-    background: #181825;
+    background: var(--surface-3);
     color: var(--amber);
     text-align: left;
     padding: 14px 16px;
@@ -513,7 +575,7 @@
   .cost-bar-track {
     flex: 1;
     height: 20px;
-    background: #1a1a24;
+    background: var(--surface-3);
     border-radius: 3px;
     position: relative;
     overflow: hidden;
@@ -619,7 +681,7 @@
   }
   .install-option code {
     display: block;
-    background: #0e0e14;
+    background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 12px 14px;
@@ -699,7 +761,7 @@
   @media print {
     body { background: #fff; color: #111; }
     body::after { display: none; }
-    .lang-toggle, .back-top, .skip-link { display: none !important; }
+    .lang-toggle, .theme-toggle, .back-top, .skip-link { display: none !important; }
     .ascii-logo { color: #333; text-shadow: none; }
     .btn-primary { background: #333; color: #fff; box-shadow: none; }
     .price-wrap, .cost-bars, .diff-card, .feat, .install-option, .term-window {
@@ -757,7 +819,7 @@
   .term-statusbar {
     height: 28px;
     border-top: 1px solid var(--border);
-    background: #0e0e14;
+    background: var(--surface-2);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -846,6 +908,16 @@
   </svg>
 </button>
 
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:1100px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
 <!-- ============ TERMINAL HERO ============ -->
 <section class="terminal-hero" aria-label="seek demo">
   <div class="container">
@@ -884,24 +956,20 @@
       <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek native AI coding agent.</span>
       <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手。</span>
     </p>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
-      <div class="lang-toggle" id="langToggle">
-        <span data-lang-val="en">EN</span>
-        <span data-lang-val="zh">中文</span>
+    <div style="display:flex;justify-content:center;margin-top:20px;">
+      <div class="btn-group terminal-hero-btns reveal">
+        <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
+          GitHub <span class="arrow">→</span>
+        </a>
+        <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
+          <span data-lang="en">Releases <span class="arrow">→</span></span>
+          <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
+        </a>
+        <a class="btn btn-outline" href="#install">
+          <span data-lang="en">Install <span class="arrow">↓</span></span>
+          <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
+        </a>
       </div>
-    </div>
-    <div class="btn-group terminal-hero-btns reveal">
-      <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
-        GitHub <span class="arrow">→</span>
-      </a>
-      <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
-        <span data-lang="en">Releases <span class="arrow">→</span></span>
-        <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
-      </a>
-      <a class="btn btn-outline" href="#install">
-        <span data-lang="en">Install <span class="arrow">↓</span></span>
-        <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
-      </a>
     </div>
   </div>
 </section>
@@ -1245,6 +1313,25 @@
 
   setLang(currentLang);
   updateSegments(currentLang);
+
+  // ============ THEME TOGGLE ============
+  const themeBtn = document.getElementById('themeToggle');
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    document.querySelector('meta[name="theme-color"]').content =
+      theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+
+  themeBtn.addEventListener('click', () => {
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  setTheme(currentTheme);
 
   // ============ TERMINAL TYPEWRITER ============
   (function termTyper() {
