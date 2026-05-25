@@ -924,8 +924,8 @@
       <span data-lang="zh" hidden>生而不同。</span>
     </h2>
     <p>
-      <span data-lang="en">DeepSeek-native, not a generic LLM wrapper. Every line optimises for cost, speed, and minimalism.</span>
-      <span data-lang="zh" hidden>DeepSeek 原生，不是泛用 LLM 封装。每一行代码都为成本、速度和极简优化。</span>
+      <span data-lang="en">DeepSeek-native, not a generic LLM wrapper. Every line optimises for cost, speed, and minimalism — with the only structured persistent memory in a coding agent.</span>
+      <span data-lang="zh" hidden">DeepSeek 原生，不是泛用 LLM 封装。每一行代码都为成本、速度和极简优化——外加编程助手中唯一的结构化持久记忆。</span>
     </p>
   </div>
 
@@ -952,31 +952,16 @@
         <span data-lang="zh" hidden>Go 编译，无需 Python/Node 运行时，无需 npm install。放到 macOS、Linux 或 Windows 上就能用。<code style="background:transparent;color:var(--teal);font-size:.8rem">go install</code> 或下载压缩包即可。</span>
       </p>
     </div>
-    <div class="diff-card feature-list reveal" style="transition-delay:.2s">
-      <li>
-        <span data-lang="en"><span class="check">✓</span> V4 reasoning mode — <span class="label-sm">think tool</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> V4 推理模式 — <span class="label-sm">think 工具</span></span>
-      </li>
-      <li>
-        <span data-lang="en"><span class="check">✓</span> FIM endpoint — <span class="label-sm">5–10× cheaper fill-in edits</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> FIM 端点 — <span class="label-sm">便宜 5–10 倍的填空补全</span></span>
-      </li>
-      <li>
-        <span data-lang="en"><span class="check">✓</span> Real-time cache hit rate — <span class="label-sm">status bar</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> 实时缓存命中率 — <span class="label-sm">状态栏</span></span>
-      </li>
-      <li>
-        <span data-lang="en"><span class="check">✓</span> Off-peak countdown — <span class="label-sm">live in TUI</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> 错峰倒计时 — <span class="label-sm">TUI 实时显示</span></span>
-      </li>
-      <li>
-        <span data-lang="en"><span class="check">✓</span> Anthropic / OpenAI / Gemini — <span class="label-sm">multi-provider</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> Anthropic / OpenAI / Gemini — <span class="label-sm">多模型支持</span></span>
-      </li>
-      <li>
-        <span data-lang="en"><span class="check">✓</span> Bilingual (中文 + EN) — <span class="label-sm">tool descriptions, prompts, errors</span></span>
-        <span data-lang="zh" hidden><span class="check">✓</span> 双语（中文 + EN） — <span class="label-sm">工具描述、提示、错误信息</span></span>
-      </li>
+    <div class="diff-card reveal" style="transition-delay:.2s">
+      <div class="metric"><span data-lang="en">L · M · S</span><span data-lang="zh" hidden>长 · 中 · 短</span></div>
+      <div class="metric-label">
+        <span data-lang="en">three-tier memory</span>
+        <span data-lang="zh" hidden">三层记忆</span>
+      </div>
+      <p>
+        <span data-lang="en"><strong>Soul (L)</strong> — cross-project user preferences, resident in system prompt. <strong>Project (M)</strong> — key decisions per project, <span class="label-sm">memory_observe / recall / archive</span>. <strong>Session (S)</strong> — full history with distill extraction. The only coding agent with structured persistent memory.</span>
+        <span data-lang="zh" hidden"><strong>长期 Soul</strong> — 跨项目用户偏好，常驻 system prompt。<strong>中期 Project</strong> — 项目内关键决策，支持 <span class="label-sm">memory_observe / recall / archive</span>。<strong>短期 Session</strong> — 完整历史 + <span class="label-sm">/distill</span> 提炼。唯一具备结构化持久记忆的编程助手。</span>
+      </p>
     </div>
   </div>
 </section>
@@ -1115,14 +1100,18 @@
   </div>
 
   <div class="feat-grid">
-    <div class="feat reveal"><span class="feat-marker">></span><div><h4>MCP server</h4><p><span data-lang="en">Extend with any MCP-compatible tool server</span><span data-lang="zh" hidden>集成任意 MCP 兼容工具服务</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.05s"><span class="feat-marker">></span><div><h4><span data-lang="en">Custom skills</span><span data-lang="zh" hidden>自定义技能</span></h4><p><code>.md</code> + frontmatter — <span data-lang="en">compatible with Claude Code skills</span><span data-lang="zh" hidden>兼容 Claude Code 技能</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.1s"><span class="feat-marker">></span><div><h4><span data-lang="en">Session persistence</span><span data-lang="zh" hidden>会话持久化</span></h4><p><span data-lang="en">Save, fork, branch, compact — full lifecycle</span><span data-lang="zh" hidden>保存、分叉、分支、压缩——完整生命周期</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.15s"><span class="feat-marker">></span><div><h4><span data-lang="en">Multi-provider</span><span data-lang="zh" hidden>多模型支持</span></h4><p>DeepSeek + Anthropic + OpenAI + Gemini + <span data-lang="en">compatible</span><span data-lang="zh" hidden>兼容</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.2s"><span class="feat-marker">></span><div><h4>JSON-RPC 2.0</h4><p><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden>无头模式，用于 IDE 集成</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.25s"><span class="feat-marker">></span><div><h4><span data-lang="en">Permission system</span><span data-lang="zh" hidden>权限系统</span></h4><p><span data-lang="en">Granular filesystem &amp; shell access control</span><span data-lang="zh" hidden>细粒度的文件系统和 shell 访问控制</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.3s"><span class="feat-marker">></span><div><h4><span data-lang="en">Bilingual</span><span data-lang="zh" hidden>双语</span></h4><p><span data-lang="en">Chinese &amp; English — prompts, errors, docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示、错误、文档</span></p></div></div>
-    <div class="feat reveal" style="transition-delay:.35s"><span class="feat-marker">></span><div><h4><span data-lang="en">Zero telemetry</span><span data-lang="zh" hidden>零遥测</span></h4><p><span data-lang="en">Your API key, your data, your terminal.</span><span data-lang="zh" hidden>你的 API key、你的数据、你的终端。</span></p></div></div>
+    <div class="feat reveal"><span class="feat-marker">></span><div><h4><span data-lang="en">Three-tier memory</span><span data-lang="zh" hidden>三层记忆 L/M/S</span></h4><p><span data-lang="en">Soul (cross-project) · Project decisions · Session history — with <span class="label-sm">memory_observe / recall / archive</span></span><span data-lang="zh" hidden">长期偏好 · 项目决策 · 会话历史 — 支持 <span class="label-sm">memory_observe / recall / archive</span></span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.05s"><span class="feat-marker">></span><div><h4>MCP server</h4><p><span data-lang="en">Extend with any MCP-compatible tool server</span><span data-lang="zh" hidden">集成任意 MCP 兼容工具服务</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.1s"><span class="feat-marker">></span><div><h4><span data-lang="en">Skill lifecycle CLI</span><span data-lang="zh" hidden">Skill 生命周期管理</span></h4><p><span data-lang="en">Create / install / update / uninstall — directory package format</span><span data-lang="zh" hidden">创建 / 安装 / 更新 / 卸载 — 目录包格式</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.15s"><span class="feat-marker">></span><div><h4><span data-lang="en">Session persistence</span><span data-lang="zh" hidden>会话持久化</span></h4><p><span data-lang="en">Auto-save, resume, fork, compact, distill — full lifecycle</span><span data-lang="zh" hidden">自动保存、恢复、分叉、压缩、提炼——完整生命周期</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.2s"><span class="feat-marker">></span><div><h4><span data-lang="en">Multi-provider</span><span data-lang="zh" hidden>多模型支持</span></h4><p>DeepSeek + Anthropic + OpenAI + Gemini + <span data-lang="en">compatible</span><span data-lang="zh" hidden>兼容</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.25s"><span class="feat-marker">></span><div><h4><span data-lang="en">Plan &amp; review modes</span><span data-lang="zh" hidden>规划与审查模式</span></h4><p><span data-lang="en">Read-only <span class="label-sm">/plan</span> exploration · Working-tree <span class="label-sm">/review</span></span><span data-lang="zh" hidden">只读型 <span class="label-sm">/plan</span> 探索 · 工作树 <span class="label-sm">/review</span> 审查</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.3s"><span class="feat-marker">></span><div><h4>JSON-RPC 2.0</h4><p><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden">无头模式，用于 IDE 集成</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.35s"><span class="feat-marker">></span><div><h4><span data-lang="en">Permission system</span><span data-lang="zh" hidden">权限系统</span></h4><p><span data-lang="en">Granular filesystem &amp; shell access control</span><span data-lang="zh" hidden">细粒度的文件系统和 shell 访问控制</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.4s"><span class="feat-marker">></span><div><h4><span data-lang="en">In-session commands</span><span data-lang="zh" hidden>会话内命令</span></h4><p><span data-lang="en">Switch model · set effort · toggle lang / yolo / plan — all via <span class="label-sm">/slash</span></span><span data-lang="zh" hidden">切换模型 · 设置推理强度 · 语言 / yolo / plan — 全部通过 <span class="label-sm">/斜杠命令</span></span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.45s"><span class="feat-marker">></span><div><h4><span data-lang="en">Self-upgrade</span><span data-lang="zh" hidden">自动升级</span></h4><p><span data-lang="en">Atomic in-place update — <span class="label-sm">seek -upgrade</span> or <span class="label-sm">/upgrade</span> in TUI</span><span data-lang="zh" hidden">原子级原地更新 — <span class="label-sm">seek -upgrade</span> 或 TUI <span class="label-sm">/upgrade</span></span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.5s"><span class="feat-marker">></span><div><h4><span data-lang="en">Bilingual</span><span data-lang="zh" hidden>双语</span></h4><p><span data-lang="en">Chinese &amp; English — prompts, errors, docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示、错误、文档</span></p></div></div>
+    <div class="feat reveal" style="transition-delay:.55s"><span class="feat-marker">></span><div><h4><span data-lang="en">Zero telemetry</span><span data-lang="zh" hidden>零遥测</span></h4><p><span data-lang="en">Your API key, your data, your terminal.</span><span data-lang="zh" hidden>你的 API key、你的数据、你的终端。</span></p></div></div>
   </div>
 </section>
 
