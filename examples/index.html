@@ -120,10 +120,6 @@
 
   /* ============ LANGUAGE TOGGLE ============ */
   .lang-toggle {
-    position: fixed;
-    top: 20px;
-    right: 24px;
-    z-index: 100;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -139,8 +135,6 @@
     gap: 6px;
     min-height: 40px;
     min-width: 44px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
   }
   .lang-toggle:hover {
     border-color: var(--amber);
@@ -689,7 +683,7 @@
     .container { padding: 0 16px; }
     .diff-card { padding: 20px 16px; }
     .diff-card .metric { font-size: 1.6rem; }
-    .lang-toggle { top: 12px; right: 12px; font-size: .7rem; padding: 6px 12px; }
+    .lang-toggle { font-size: .7rem; padding: 6px 12px; }
     .back-top { bottom: 16px; right: 12px; width: 40px; height: 40px; }
     .cost-bar-label { width: 80px; font-size: .65rem; }
     .price-wrap table { font-size: .72rem; }
@@ -845,12 +839,6 @@
   <span data-lang="zh" hidden>跳转到内容</span>
 </a>
 
-<button class="lang-toggle" id="langToggle" aria-label="Switch language">
-  <span class="globe">🌐</span>
-  <span data-lang="en">中文</span>
-  <span data-lang="zh" hidden>English</span>
-</button>
-
 <button class="back-top" id="backTop" aria-label="Back to top">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M18 15l-6-6-6 6"/>
@@ -860,6 +848,13 @@
 <!-- ============ TERMINAL HERO ============ -->
 <section class="terminal-hero" aria-label="seek demo">
   <div class="container">
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+      <button class="lang-toggle" id="langToggle" aria-label="Switch language">
+        <span class="globe">🌐</span>
+        <span data-lang="en">中文</span>
+        <span data-lang="zh" hidden>English</span>
+      </button>
+    </div>
     <h1 class="sr-only">
       <span data-lang="en">seek — DeepSeek native AI coding agent</span>
       <span data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</span>
