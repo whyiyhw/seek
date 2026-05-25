@@ -488,6 +488,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: download + extract straight into `filepath.Dir(exePath)`. See `internal/upgrade/upgrade.go:downloadAsset`
 - **Lesson**: "atomic replace" always means "same directory". If you're touching a Windows running-exe, that's a separate problem (see `replace_windows.go`: rename-current-to-.old first)
 
+### `<br>` inside `<code>` survives display but `textContent` drops it — copy-paste silently corrupts multi-line install commands
+- **Saw**: clicking the "copy" button on the macOS/Linux install card and pasting into a shell produced one giant line; bash parsed `OS=$(...)$ ARCH=$(...)$ VER=$(...)$ curl ...` as a 3-var env-prefix to `curl`, with each value carrying a trailing literal `$`. The fetched URL became `…/v0.2.7$/seek_0.2.7$_darwin$_arm64$.tar.gz` → 404
+- **Why**: the install snippet used `<br>` for visual line breaks. `Element.textContent` only concatenates **text nodes**; `<br>` is an element node and contributes the empty string, so all lines collapsed. The `^(\$|PS>)` strip regex had the `m` flag, but with no real `\n` it only stripped the leading prompt on the very first line
+- **Fix**: walk `code.childNodes` and emit `\n` when the node is a `BR`, otherwise its `textContent`. Then the existing per-line prompt-strip works. `examples/index.html:1575`
+- **Lesson**: any time you build a multi-line code block with `<br>` for layout, your copy handler must reconstruct newlines from the DOM — `textContent` / `innerText` / `outerText` all lose them in different ways. Better: use `<pre>` + real `\n` and avoid the trap entirely
+- **Refs**: `examples/index.html` install section copy-to-clipboard handler
+
 ---
 
 ## Reading order for newcomers

@@ -1574,8 +1574,15 @@
   // ============ COPY TO CLIPBOARD ============
   document.querySelectorAll('.install-option code[role="button"]').forEach(code => {
     code.addEventListener('click', async () => {
-      // Get text content, strip prompt markers ($ or PS>) for clean copy
-      const raw = code.textContent || '';
+      // Walk children so <br> becomes a real newline — textContent would drop it
+      // and concatenate every line into one, which silently breaks multi-line
+      // shell snippets (e.g. OS=...$ ARCH=...$ VER=... gets parsed as env-var
+      // prefixes to the final curl, with trailing literal "$" in each value).
+      let raw = '';
+      code.childNodes.forEach(node => {
+        if (node.nodeName === 'BR') raw += '\n';
+        else raw += node.textContent || '';
+      });
       const cleaned = raw.replace(/^(\$|PS>)\s*/gm, '').trim();
       try {
         await navigator.clipboard.writeText(cleaned);
