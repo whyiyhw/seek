@@ -63,6 +63,7 @@ func allCommands() []command {
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
+		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 	}
 }
 
@@ -951,6 +952,27 @@ func submitOrSteer(m *Model, prompt string) cmdResult {
 	newM, cmd := m.submit(prompt)
 	*m = newM.(Model)
 	return cmdResult{extra: cmd}
+}
+
+// cmdSteer handles /steer [text]. With a text arg it submits immediately
+// (or steers the current stream). Without an arg it promotes the queued
+// message (if any) to an interrupt.
+func cmdSteer(m *Model, args string) cmdResult {
+	if args != "" {
+		return submitOrSteer(m, args)
+	}
+	// Bare /steer: promote queue to steer, or info if already steering.
+	switch {
+	case m.pendingSteerText != "":
+		return cmdResult{text: styleMuted.Render("  ↪ already steering — waiting for the current turn to drain")}
+	case m.queuedText != "":
+		text := m.queuedText
+		m.queuedText = ""
+		steerStream(m, text)
+		return cmdResult{text: styleMuted.Render("  ↰ promoted queue to interrupt")}
+	default:
+		return cmdResult{text: styleErr.Render("steer: nothing to steer (type /steer <message> or queue a message first with Enter)")}
+	}
 }
 
 // handleReviewPick processes a selection from the /review picker and

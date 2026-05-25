@@ -857,6 +857,7 @@ func (m Model) renderHelpOverlay() string {
 		{"Ctrl+L", "Clear visible screen (same as /clear)"},
 		{"Ctrl+R", "Toggle reasoning visibility"},
 		{"Ctrl+C", "Quit seek"},
+		{"/steer or Alt+Enter", "Interrupt current response with new instructions"},
 	}
 	for _, b := range bindings {
 		content.WriteString(fmt.Sprintf("  %-22s  %s\n", b.key, b.desc))
