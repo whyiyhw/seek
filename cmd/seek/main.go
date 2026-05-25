@@ -46,6 +46,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/internal/tools/memorytool"
+	"github.com/whyiyhw/seek/internal/tools/propose"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
@@ -165,6 +166,25 @@ func modeLabel(m permission.Mode) string {
 	default:
 		return "deny"
 	}
+}
+
+// proposeAgentSink bridges the propose tool's Sink interface to the
+// agent's event channel. Holds a getAgent closure (not a *Agent
+// directly) so the sink follows the live agent across /reset rebuilds
+// — see run()'s RebuildAgent callback where `ag = newAg`. v1 just
+// emits the typed events; the TUI consumes them in P4 to flip
+// permission policy / mode label / status bar substate. See
+// docs/prd/feature-plan-mode.md §2.3.
+type proposeAgentSink struct{ getAgent func() *agent.Agent }
+
+func (s proposeAgentSink) Approved(steps []string) {
+	s.getAgent().EmitEvent(agent.PlanProposalApproved{Steps: steps})
+}
+func (s proposeAgentSink) AdjustRequested(feedback string) {
+	s.getAgent().EmitEvent(agent.PlanProposalAdjustRequested{Feedback: feedback})
+}
+func (s proposeAgentSink) Cancelled() {
+	s.getAgent().EmitEvent(agent.PlanProposalCancelled{})
 }
 
 func main() {
@@ -606,6 +626,13 @@ func run() error {
 		return err
 	}
 
+	// Register the propose tool AFTER agent.New so its Sink can route
+	// approve/adjust/cancel into ag.EmitEvent. Same deferred-registration
+	// pattern as memorytool.NewObserve below (the Registry's tool list
+	// isn't frozen until Wire() runs on the first Prompt). See PRD
+	// docs/prd/feature-plan-mode.md for the full plan-mode flow.
+	reg.Add(propose.New(askPolicy, proposeAgentSink{getAgent: func() *agent.Agent { return ag }}))
+
 	// Register the memory hook AFTER agent.New so the M5.7 auto-distill
 	// HistoryProvider can close over ag.Messages. The Registry stores a
 	// pointer and dispatches at call-time, so deferring registration
@@ -847,10 +874,32 @@ func run() error {
 		SetPlan: func(p bool) {
 			// Same as SetYolo — permission gate flips immediately;
 			// modeReminder tells the model on the next user turn.
+			// Entering /plan starts in the analyze substate (plan
+			// mode v2; PRD §2.4). The legacy "plan" label still
+			// works in modeReminder for back-compat.
 			if p {
 				policy.SetMode(permission.ModePlan)
-				ag.SetModeLabel("plan")
+				ag.SetModeLabel("plan-analyze")
 			} else {
+				policy.SetMode(permission.ModeAsk)
+				ag.SetModeLabel("")
+			}
+		},
+		SetPlanSubstate: func(s string) {
+			// Driven by propose tool events flowing through
+			// applyAgentEvent. "execute" unlocks writes (ModeAsk)
+			// but keeps the plan-execute reminder so the model
+			// stays within the approved scope. "" is symmetric
+			// with SetPlan(false) — not used by current callers
+			// but kept defensive.
+			switch s {
+			case "execute":
+				policy.SetMode(permission.ModeAsk)
+				ag.SetModeLabel("plan-execute")
+			case "analyze":
+				policy.SetMode(permission.ModePlan)
+				ag.SetModeLabel("plan-analyze")
+			case "":
 				policy.SetMode(permission.ModeAsk)
 				ag.SetModeLabel("")
 			}

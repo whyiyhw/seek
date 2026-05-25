@@ -1405,6 +1405,54 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		errLine := styleErr.Render("  ! error: " + e.Err.Error())
 		cmds = append(cmds, tea.Println(errLine))
 		m.scrollbackLines += scrollbackLineCount(errLine)
+
+	case agent.PlanProposalApproved:
+		// User approved the proposed plan via the propose tool's
+		// picker. Flip into plan-execute substate: permission policy
+		// becomes ModeAsk (writes prompt per call) and the mode
+		// reminder switches to "plan-execute". Status bar shows
+		// PLAN:EXEC in warning colour so the user can see the gate
+		// is open. See PRD §2.5.
+		_ = e // Steps field reserved for v2 panel rendering
+		m.opts.PlanSubstate = "execute"
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("execute")
+		}
+		line := styleMuted.Render("  ▸ plan approved — write/edit/bash now ask per call")
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+
+	case agent.PlanProposalAdjustRequested:
+		// User declined the proposed plan with optional free-text
+		// feedback. Stay in plan-analyze (permission policy unchanged
+		// at ModePlan). The propose tool's result string already
+		// instructs the model to re-think; nothing else to wire here.
+		m.opts.PlanSubstate = "analyze"
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("analyze")
+		}
+		msg := "  ▸ plan rejected — re-thinking"
+		if e.Feedback != "" {
+			msg += " (feedback: " + truncateOneLine(e.Feedback, 60) + ")"
+		}
+		line := styleMuted.Render(msg)
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+
+	case agent.PlanProposalCancelled:
+		// User aborted /plan entirely from the propose picker. Same
+		// effect as toggling /plan off manually: permission to
+		// ModeAsk, mode label cleared, status bar drops the PLAN
+		// badge.
+		m.opts.Plan = false
+		m.opts.PlanSubstate = ""
+		if m.opts.SetPlan != nil {
+			m.opts.SetPlan(false)
+		}
+		m.refreshPlaceholder()
+		line := styleMuted.Render("  ▸ plan cancelled — exited /plan mode")
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
 	}
 
 	return cmds

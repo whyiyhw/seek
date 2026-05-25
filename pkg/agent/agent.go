@@ -90,6 +90,19 @@ type Config struct {
 type Agent struct {
 	cfg      Config
 	messages []deepseek.Message
+
+	// currentEvents is the event sink for the in-flight Prompt call.
+	// Set at the start of Prompt's goroutine, cleared (via defer) when
+	// the goroutine exits. EmitEvent reads this field to forward
+	// out-of-band events from tools (e.g. propose's approve/adjust/
+	// cancel side effects). nil when no Prompt is active — EmitEvent
+	// is then a no-op.
+	//
+	// Concurrency: Prompt is single-threaded by contract (see type
+	// comment); the goroutine that sets/clears this field is the same
+	// one that dispatches tools and therefore the same one that calls
+	// EmitEvent. No mutex needed.
+	currentEvents chan<- Event
 }
 
 // SetModel changes the active model. Safe to call between (not during) turns.
@@ -127,17 +140,52 @@ func (a *Agent) SetModeLabel(label string) {
 	a.cfg.ModeLabel = label
 }
 
+// EmitEvent forwards an out-of-band event from a tool's Execute path
+// into the active Prompt's event channel. Used by tools whose normal
+// `Result` return value is insufficient to convey their side effects
+// — propose's approve/adjust/cancel is the canonical case: the TUI
+// needs to switch permission policy / mode reminder, which can't be
+// derived from the tool result string alone.
+//
+// Safe to call from inside a tool's Execute. Outside an active Prompt
+// the call is a no-op (currentEvents is nil); the agent loop's
+// single-threaded contract (see Agent type comment) means there's no
+// race between checking and using the field.
+//
+// The send is blocking — same semantics as the agent's own internal
+// event emissions (ToolExecStart / ToolExecEnd / etc.). A slow
+// consumer therefore back-pressures the tool's Execute, which is the
+// intended behaviour.
+func (a *Agent) EmitEvent(e Event) {
+	ch := a.currentEvents
+	if ch == nil {
+		return
+	}
+	ch <- e
+}
+
 // modeReminder returns a per-message mode reminder suffix for the
 // current permission mode. Empty string = no reminder needed (the
 // system-prompt tool descriptions already cover Ask/Deny behaviour).
 // The reminder is placed at the end of the user turn so recency bias
 // makes it effective immediately after a /yolo or /plan toggle.
+//
+// Plan substates ("plan-analyze" / "plan-execute") are emitted by the
+// plan-mode workflow in PRD docs/prd/feature-plan-mode.md. The TUI
+// flips the label on PlanProposalApproved / PlanProposalAdjustRequested
+// events from the propose tool. The literal "plan" label is preserved
+// for back-compat with sessions and tests that pre-date the substate
+// split — it's equivalent to plan-analyze.
 func modeReminder(label string) string {
 	switch label {
 	case "yolo":
 		return "\n\n[Mode: yolo — write, edit, and bash are unrestricted.]"
 	case "plan":
 		return "\n\n[Mode: plan — read-only. Do not call write, edit, or bash; produce a plan instead.]"
+	case "plan-analyze":
+		return "\n\n[Mode: plan-analyze — read context to define the problem and design a solution. Call propose(problem, steps) when you have enough context; use ask_user to clarify ambiguity. No writes until the user approves a plan.]"
+	case "plan-execute":
+		return "\n\n[Mode: plan-execute — the user approved your plan. Execute it step by step, narrating progress in chat. If the user signals disagreement, first summarize what's already done in chat, then call propose() again to re-plan. Stay within the approved scope; if you need to do something the plan didn't cover, re-propose before doing it.]"
 	default:
 		return ""
 	}
@@ -325,6 +373,12 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 
 	go func() {
 		defer close(out)
+		// Expose the channel so tools can EmitEvent during their
+		// Execute (e.g. propose pushes Plan* events on user choice).
+		// Cleared before close(out) runs (LIFO defer order) so a
+		// stale EmitEvent can't write to a soon-to-be-closed channel.
+		a.currentEvents = out
+		defer func() { a.currentEvents = nil }()
 
 		// PrePromptHook: memory injection, context blocks, prompt
 		// rewriting. Decorators are synchronous and ordered; an error

@@ -268,6 +268,7 @@ func (m Model) renderStatusBar() string {
 		Effort:           m.opts.Effort,
 		Yolo:             m.opts.Yolo,
 		Plan:             m.opts.Plan,
+		PlanSubstate:     m.opts.PlanSubstate,
 		Tier:             tier,
 		NextTier:         nextTier,
 		NextAt:           nextAt,

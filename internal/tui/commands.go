@@ -728,9 +728,18 @@ func cmdPlan(m *Model, _ string) cmdResult {
 	// (policy, mode label) are symmetric with cycleMode.
 	if m.opts.Plan {
 		m.opts.Yolo = false
+		// Entering /plan always starts in the analyze substate; the
+		// propose tool flips it to "execute" on approval. Mirrors
+		// PRD §2.1 state machine.
+		m.opts.PlanSubstate = "analyze"
 		if wasYolo && m.opts.SetYolo != nil {
 			m.opts.SetYolo(false)
 		}
+	} else {
+		// Leaving /plan clears the substate so the status bar stops
+		// rendering "PLAN:..." and any stale substate doesn't leak
+		// into the next /plan entry.
+		m.opts.PlanSubstate = ""
 	}
 	if m.opts.SetPlan != nil {
 		m.opts.SetPlan(m.opts.Plan)

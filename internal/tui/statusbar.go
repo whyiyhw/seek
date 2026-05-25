@@ -19,18 +19,23 @@ type StatusSnapshot struct {
 	// Effort mirrors the session's /effort selection: "" | "high" |
 	// "max". An empty string suppresses the badge so the default
 	// (off) is silent — only the explicit escalations show up.
-	Effort    string
-	Yolo      bool
-	Plan      bool
-	Tier      pricing.Tier
-	NextTier  pricing.Tier
-	NextAt    time.Time
-	Turns     int
-	ToolCalls int
-	Usage     deepseek.Usage // cumulative
-	Streaming bool           // "thinking" indicator state
-	Now       time.Time      // for "until next tier" countdown
-	Width     int            // for right-padding
+	Effort string
+	Yolo   bool
+	Plan   bool
+	// PlanSubstate is "analyze" / "execute" / "" — only meaningful
+	// when Plan=true. Empty substate renders the original "PLAN"
+	// badge (back-compat with sessions / callers that pre-date the
+	// substate split). See PRD docs/prd/feature-plan-mode.md §2.6.
+	PlanSubstate string
+	Tier         pricing.Tier
+	NextTier     pricing.Tier
+	NextAt       time.Time
+	Turns        int
+	ToolCalls    int
+	Usage        deepseek.Usage // cumulative
+	Streaming    bool           // "thinking" indicator state
+	Now          time.Time      // for "until next tier" countdown
+	Width        int            // for right-padding
 
 	// StreamElapsed and StreamDeltaBytes drive the live "Ns · ↓~Xtok"
 	// counter. Both are zero when Streaming is false or the stream just
@@ -89,7 +94,23 @@ func leftSegments(s StatusSnapshot) []string {
 	if s.Yolo {
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"))
 	} else if s.Plan {
-		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourOk).Bold(true).Padding(0, 1).Render("PLAN"))
+		// Substate decides the badge text + background:
+		//   ""        → "PLAN" (legacy / no-substate callers)
+		//   "analyze" → "PLAN:ANALYZE" green — read-only exploration
+		//   "execute" → "PLAN:EXEC"    orange — writes unlocked; user
+		//                                       should be visually
+		//                                       warned the permission
+		//                                       gate is now Ask not Plan
+		label := "PLAN"
+		bg := colourOk
+		switch s.PlanSubstate {
+		case "analyze":
+			label = "PLAN:ANALYZE"
+		case "execute":
+			label = "PLAN:EXEC"
+			bg = colourTool
+		}
+		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label))
 	}
 	// Effort badge: "high" is muted (the user opted in but it's the
 	// cheaper of the two escalations); "max" is tinted to make the

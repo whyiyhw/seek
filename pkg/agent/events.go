@@ -75,14 +75,42 @@ type ToolExecEnd struct {
 // still be closed after the event is delivered.
 type ErrorEvent struct{ Err error }
 
-func (AgentStart) isEvent()    {}
-func (AgentEnd) isEvent()      {}
-func (TurnStart) isEvent()     {}
-func (TurnEnd) isEvent()       {}
-func (MessageStart) isEvent()  {}
-func (MessageDelta) isEvent()  {}
-func (MessageEnd) isEvent()    {}
-func (ToolExecStart) isEvent() {}
-func (ToolDelta) isEvent()     {}
-func (ToolExecEnd) isEvent()   {}
-func (ErrorEvent) isEvent()    {}
+// PlanProposalApproved fires when the propose tool returns and the user
+// picked "approve". TUI consumers MUST switch permission policy to
+// ModeAsk and update the mode reminder label to "plan-execute".
+// Steps is the proposal verbatim (the same slice the model passed to
+// propose.Tool); v2 panel rendering will subscribe to this event to
+// render the approved scope.
+//
+// See docs/prd/feature-plan-mode.md §2.3 for the broader contract.
+type PlanProposalApproved struct {
+	Steps []string
+}
+
+// PlanProposalAdjustRequested fires when the user picked "adjust" or
+// typed free-text feedback via the Other row. Permission policy and
+// mode label stay in plan-analyze; the propose tool's result string
+// already instructs the model to re-think and re-propose.
+type PlanProposalAdjustRequested struct {
+	Feedback string
+}
+
+// PlanProposalCancelled fires when the user picked "cancel" or pressed
+// Esc on the propose picker. TUI consumers MUST toggle /plan off
+// (permission → ModeAsk, mode label → "").
+type PlanProposalCancelled struct{}
+
+func (AgentStart) isEvent()                  {}
+func (AgentEnd) isEvent()                    {}
+func (TurnStart) isEvent()                   {}
+func (TurnEnd) isEvent()                     {}
+func (MessageStart) isEvent()                {}
+func (MessageDelta) isEvent()                {}
+func (MessageEnd) isEvent()                  {}
+func (ToolExecStart) isEvent()               {}
+func (ToolDelta) isEvent()                   {}
+func (ToolExecEnd) isEvent()                 {}
+func (ErrorEvent) isEvent()                  {}
+func (PlanProposalApproved) isEvent()        {}
+func (PlanProposalAdjustRequested) isEvent() {}
+func (PlanProposalCancelled) isEvent()       {}

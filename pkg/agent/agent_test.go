@@ -1562,11 +1562,35 @@ func TestModeReminder(t *testing.T) {
 		{"unknown", ""},
 		{"yolo", "\n\n[Mode: yolo — write, edit, and bash are unrestricted.]"},
 		{"plan", "\n\n[Mode: plan — read-only. Do not call write, edit, or bash; produce a plan instead.]"},
+		{"plan-analyze", "\n\n[Mode: plan-analyze — read context to define the problem and design a solution. Call propose(problem, steps) when you have enough context; use ask_user to clarify ambiguity. No writes until the user approves a plan.]"},
+		{"plan-execute", "\n\n[Mode: plan-execute — the user approved your plan. Execute it step by step, narrating progress in chat. If the user signals disagreement, first summarize what's already done in chat, then call propose() again to re-plan. Stay within the approved scope; if you need to do something the plan didn't cover, re-propose before doing it.]"},
 	}
 	for _, tt := range tests {
 		got := modeReminder(tt.label)
 		if got != tt.want {
 			t.Errorf("modeReminder(%q) = %q, want %q", tt.label, got, tt.want)
+		}
+	}
+}
+
+// TestModeReminder_PlanSubstateMentionsLoadBearingKeywords pins the
+// load-bearing semantic content of the plan substate reminders without
+// over-coupling to exact wording. If the wording changes, these checks
+// surface drift on the bits that drive model behaviour (tool names,
+// "no writes", "summarize what's already done").
+func TestModeReminder_PlanSubstateMentionsLoadBearingKeywords(t *testing.T) {
+	t.Parallel()
+	analyze := modeReminder("plan-analyze")
+	for _, kw := range []string{"propose", "ask_user", "No writes"} {
+		if !strings.Contains(analyze, kw) {
+			t.Errorf("plan-analyze reminder must mention %q (it tells the model what to do)\nreminder: %s", kw, analyze)
+		}
+	}
+
+	execute := modeReminder("plan-execute")
+	for _, kw := range []string{"approved", "summarize what's already done", "re-propose", "scope"} {
+		if !strings.Contains(execute, kw) {
+			t.Errorf("plan-execute reminder must mention %q (it tells the model how to behave when interrupted)\nreminder: %s", kw, execute)
 		}
 	}
 }

@@ -362,6 +362,33 @@ func TestPlan_TogglesAndFiresHook(t *testing.T) {
 	}
 }
 
+// TestPlan_TogglesSetsAndClearsSubstate pins the v2 contract: /plan
+// entry seeds substate to "analyze" (default state of the plan-mode
+// state machine, PRD §2.1); /plan off clears it so a stale value
+// doesn't leak into the next session's status bar or into a future
+// re-entry that should default to analyze.
+func TestPlan_TogglesSetsAndClearsSubstate(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.SetPlan = func(b bool) {}
+
+	runHandler(t, m, "/plan") // on
+	if !m.opts.Plan {
+		t.Fatal("Plan should be on after /plan")
+	}
+	if m.opts.PlanSubstate != "analyze" {
+		t.Errorf("entry substate = %q, want %q", m.opts.PlanSubstate, "analyze")
+	}
+
+	runHandler(t, m, "/plan") // off
+	if m.opts.Plan {
+		t.Fatal("Plan should be off after second /plan")
+	}
+	if m.opts.PlanSubstate != "" {
+		t.Errorf("exit substate = %q, want \"\"", m.opts.PlanSubstate)
+	}
+}
+
 func TestYolo_ToggleTurnsOffPlan(t *testing.T) {
 	t.Parallel()
 	m := emptyModel()

@@ -102,6 +102,61 @@ func TestStatusBar_Idle_Plan(t *testing.T) {
 	if strings.Contains(bar, "YOLO") {
 		t.Error("PLAN mode should not show YOLO badge")
 	}
+	// No substate = legacy callers / pre-substate test fixtures should
+	// see the plain "PLAN" badge, not "PLAN:ANALYZE" or "PLAN:EXEC".
+	if strings.Contains(bar, "ANALYZE") || strings.Contains(bar, "EXEC") {
+		t.Errorf("empty substate must render plain PLAN badge, got: %q", bar)
+	}
+}
+
+func TestStatusBar_Idle_PlanAnalyze(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	bar := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:        deepseek.ModelChat,
+		Plan:         true,
+		PlanSubstate: "analyze",
+		Tier:         pricing.CurrentTier(at),
+		Now:          at,
+	}))
+	if !strings.Contains(bar, "PLAN:ANALYZE") {
+		t.Errorf("missing PLAN:ANALYZE badge in: %q", bar)
+	}
+	if strings.Contains(bar, "EXEC") {
+		t.Errorf("analyze substate must not show EXEC: %q", bar)
+	}
+}
+
+func TestStatusBar_Idle_PlanExecute(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	bar := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:        deepseek.ModelChat,
+		Plan:         true,
+		PlanSubstate: "execute",
+		Tier:         pricing.CurrentTier(at),
+		Now:          at,
+	}))
+	if !strings.Contains(bar, "PLAN:EXEC") {
+		t.Errorf("missing PLAN:EXEC badge in: %q", bar)
+	}
+	if strings.Contains(bar, "ANALYZE") {
+		t.Errorf("execute substate must not show ANALYZE: %q", bar)
+	}
+}
+
+func TestStatusBar_PlanSubstateIgnoredWhenPlanOff(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	// Plan=false should suppress any substate badge — defensive against
+	// a stale substate value lingering after /plan off.
+	bar := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:        deepseek.ModelChat,
+		Plan:         false,
+		PlanSubstate: "execute",
+		Tier:         pricing.CurrentTier(at),
+		Now:          at,
+	}))
+	if strings.Contains(bar, "PLAN") {
+		t.Errorf("Plan=false must not show any PLAN badge: %q", bar)
+	}
 }
 
 func TestStatusBar_OffPeak(t *testing.T) {

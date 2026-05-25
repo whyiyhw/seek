@@ -94,6 +94,24 @@ type Options struct {
 	SetModel     func(string)
 	SetYolo      func(bool)
 	SetPlan      func(bool)
+	// SetPlanSubstate notifies the host about plan-mode substate
+	// transitions triggered by the propose tool (PRD §2.5):
+	//
+	//   "analyze" → permission stays ModePlan, reminder = plan-analyze
+	//   "execute" → permission flips to ModeAsk,   reminder = plan-execute
+	//   ""        → equivalent to SetPlan(false)
+	//
+	// The host (cmd/seek) is responsible for the actual permission /
+	// mode-label side effects; this callback is just the signal.
+	// nil = no host integration (status bar still updates locally).
+	SetPlanSubstate func(string)
+
+	// PlanSubstate mirrors the live substate ("" | "analyze" |
+	// "execute"). Updated by /plan (cmdPlan sets "analyze" on entry,
+	// "" on exit) and by the propose tool's events flowing through
+	// applyAgentEvent. Read by the status bar; only meaningful when
+	// Plan=true.
+	PlanSubstate string
 	// SetEffort updates the host-owned sessionEffort. The TUI mirrors the
 	// new value into m.opts.Effort + Session.Effort (via persistSession)
 	// so the status bar refreshes and the next save captures the choice.

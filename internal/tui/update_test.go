@@ -1776,3 +1776,140 @@ func TestHandleQuestionKey_CursorBoundsClamped(t *testing.T) {
 		t.Errorf("Down should clamp at Other index %d, got %d", otherIdx, m2.pendingQuestionCursor)
 	}
 }
+
+// --- Plan substate event handlers (P4 of feature-plan-mode) -------
+
+// TestApplyAgentEvent_PlanProposalApproved verifies that the propose
+// tool's "user approved" signal flips the TUI into plan-execute
+// substate and notifies the host (cmd/seek) so it can switch the
+// permission policy from ModePlan to ModeAsk. The host wiring itself
+// lives in cmd/seek; this test only pins the TUI's contract.
+func TestApplyAgentEvent_PlanProposalApproved(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	m.opts.PlanSubstate = "analyze"
+	var hostSeen []string
+	m.opts.SetPlanSubstate = func(s string) { hostSeen = append(hostSeen, s) }
+
+	cmds := m.applyAgentEvent(agent.PlanProposalApproved{Steps: []string{"a", "b"}})
+
+	if m.opts.PlanSubstate != "execute" {
+		t.Errorf("substate = %q, want %q", m.opts.PlanSubstate, "execute")
+	}
+	if !m.opts.Plan {
+		t.Error("Plan should stay true after approve (it's a substate change, not exit)")
+	}
+	if len(hostSeen) != 1 || hostSeen[0] != "execute" {
+		t.Errorf("host callback got %v, want [execute]", hostSeen)
+	}
+	if len(cmds) == 0 {
+		t.Error("expected a tea.Println for scrollback feedback")
+	}
+}
+
+// TestApplyAgentEvent_PlanProposalAdjustRequested verifies the
+// "adjust" path: substate snaps back to analyze (in case it was
+// somehow on execute), Plan stays on, and the optional free-text
+// feedback gets surfaced in the scrollback line so the user can see
+// what their picker selection conveyed.
+func TestApplyAgentEvent_PlanProposalAdjustRequested(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	m.opts.PlanSubstate = "execute" // simulate already-executing then user clicks adjust
+	var hostSeen []string
+	m.opts.SetPlanSubstate = func(s string) { hostSeen = append(hostSeen, s) }
+
+	cmds := m.applyAgentEvent(agent.PlanProposalAdjustRequested{Feedback: "step 3 is wrong"})
+
+	if m.opts.PlanSubstate != "analyze" {
+		t.Errorf("substate = %q, want %q", m.opts.PlanSubstate, "analyze")
+	}
+	if !m.opts.Plan {
+		t.Error("Plan should stay true after adjust (still in plan mode, just re-thinking)")
+	}
+	if len(hostSeen) != 1 || hostSeen[0] != "analyze" {
+		t.Errorf("host callback got %v, want [analyze]", hostSeen)
+	}
+	if len(cmds) == 0 {
+		t.Error("expected a tea.Println for scrollback feedback")
+	}
+}
+
+// TestApplyAgentEvent_PlanProposalAdjustRequested_NoFeedback covers
+// the "user clicked Adjust without typing" branch — the scrollback
+// line must not include an empty parenthetical.
+func TestApplyAgentEvent_PlanProposalAdjustRequested_NoFeedback(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	m.opts.SetPlanSubstate = func(s string) {}
+
+	cmds := m.applyAgentEvent(agent.PlanProposalAdjustRequested{Feedback: ""})
+
+	if len(cmds) == 0 {
+		t.Fatal("expected a tea.Println for scrollback feedback")
+	}
+	// We can't read the rendered string out of tea.Cmd easily without
+	// executing it; cmds presence + substate check is sufficient.
+	if m.opts.PlanSubstate != "analyze" {
+		t.Errorf("substate = %q, want %q", m.opts.PlanSubstate, "analyze")
+	}
+}
+
+// TestApplyAgentEvent_PlanProposalCancelled verifies that cancellation
+// from inside the propose picker is equivalent to /plan off: Plan
+// flips to false, substate clears, and the host is notified via
+// SetPlan (not SetPlanSubstate — full exit, not substate change).
+func TestApplyAgentEvent_PlanProposalCancelled(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	m.opts.PlanSubstate = "analyze"
+	var planSeen []bool
+	var substateSeen []string
+	m.opts.SetPlan = func(b bool) { planSeen = append(planSeen, b) }
+	m.opts.SetPlanSubstate = func(s string) { substateSeen = append(substateSeen, s) }
+
+	cmds := m.applyAgentEvent(agent.PlanProposalCancelled{})
+
+	if m.opts.Plan {
+		t.Error("Plan should be false after cancel")
+	}
+	if m.opts.PlanSubstate != "" {
+		t.Errorf("substate = %q, want empty", m.opts.PlanSubstate)
+	}
+	if len(planSeen) != 1 || planSeen[0] != false {
+		t.Errorf("SetPlan got %v, want [false]", planSeen)
+	}
+	// Cancel exits plan entirely → no substate callback (would be
+	// ambiguous since the substate is now meaningless).
+	if len(substateSeen) != 0 {
+		t.Errorf("SetPlanSubstate should NOT fire on cancel, got %v", substateSeen)
+	}
+	if len(cmds) == 0 {
+		t.Error("expected a tea.Println for scrollback feedback")
+	}
+}
+
+// TestApplyAgentEvent_PlanProposalApproved_NilHostCallbackSafe pins
+// that the TUI updates its local state even when the host (cmd/seek)
+// hasn't wired the SetPlanSubstate callback. The status bar should
+// still reflect the new substate; only the permission-policy
+// side-effect is lost (which is the host's responsibility anyway).
+func TestApplyAgentEvent_PlanProposalApproved_NilHostCallbackSafe(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	// No SetPlanSubstate wired — simulates tests / embedders that
+	// don't fully wire the host callbacks.
+	cmds := m.applyAgentEvent(agent.PlanProposalApproved{Steps: []string{"a"}})
+
+	if m.opts.PlanSubstate != "execute" {
+		t.Errorf("substate = %q, want %q (local state must update even without host callback)", m.opts.PlanSubstate, "execute")
+	}
+	if len(cmds) == 0 {
+		t.Error("expected scrollback feedback regardless of callback wiring")
+	}
+}
