@@ -136,7 +136,7 @@ func newAskPolicy(t *testing.T, ask *stubAskFn) *permission.Policy {
 	return p
 }
 
-func TestCommit_HappyPath(t *testing.T) {
+func TestCommit_UserScope(t *testing.T) {
 	pinUserSkillsDir(t)
 	src := stageLocalSkill(t, "happy-skill")
 
@@ -159,6 +159,7 @@ func TestCommit_HappyPath(t *testing.T) {
 		"staging_path": fr.StagingPath,
 		"name":         fr.Name,
 		"source":       fr.Source,
+		"scope":        "user",
 	}))
 	if err != nil {
 		t.Fatalf("commit: %v", err)
@@ -174,10 +175,10 @@ func TestCommit_HappyPath(t *testing.T) {
 	if ask.last.SkillSource != src {
 		t.Errorf("approval action SkillSource = %q, want %q", ask.last.SkillSource, src)
 	}
-	if !strings.Contains(ask.last.SkillTarget, "happy-skill") {
-		t.Errorf("approval target should mention skill name, got %q", ask.last.SkillTarget)
+	// User scope: approval target shown with the ~/ tilde form.
+	if !strings.HasPrefix(ask.last.SkillTarget, "~/.seek/skills/") {
+		t.Errorf("user-scope approval target should start with ~/.seek/skills/, got %q", ask.last.SkillTarget)
 	}
-
 	// Result text MUST include the /new hint — that's the user's
 	// only signal that they need to restart for the skill to load.
 	if !strings.Contains(out, "/new") {
@@ -185,6 +186,117 @@ func TestCommit_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(out, "happy-skill") {
 		t.Errorf("result must name the installed skill, got:\n%s", out)
+	}
+	// Result text should make the scope explicit so the model can
+	// tell the user "this is just for you" vs "this is in the repo".
+	if !strings.Contains(out, "user scope") {
+		t.Errorf("result should declare 'user scope' explicitly, got:\n%s", out)
+	}
+}
+
+func TestCommit_ProjectScope(t *testing.T) {
+	// Project scope lands the skill under <cwd>/.seek/skills/<name>/
+	// instead of ~/.seek/skills/. Run the commit from a tempdir so
+	// we don't actually write into the seek repo we're testing in.
+	cwd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	projectDir := t.TempDir()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	src := stageLocalSkill(t, "project-skill")
+	fetchOut, _ := NewFetch().Execute(context.Background(), mustJSON(map[string]string{"source": src}))
+	var fr fetchResult
+	_ = json.Unmarshal([]byte(fetchOut), &fr)
+
+	ask := &stubAskFn{allow: true}
+	commit := NewCommit(newAskPolicy(t, ask))
+
+	out, err := commit.Execute(context.Background(), mustJSON(map[string]any{
+		"staging_path": fr.StagingPath,
+		"name":         fr.Name,
+		"source":       fr.Source,
+		"scope":        "project",
+	}))
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Approval shows the project dir, not the home dir.
+	if !strings.Contains(ask.last.SkillTarget, projectDir) {
+		t.Errorf("project-scope approval target should point at <cwd>, got %q (cwd=%q)", ask.last.SkillTarget, projectDir)
+	}
+	// File landed in the project dir.
+	installed := filepath.Join(projectDir, ".seek", "skills", "project-skill", "SKILL.md")
+	if _, err := os.Stat(installed); err != nil {
+		t.Errorf("expected project-scope install at %s: %v", installed, err)
+	}
+	// Project installs MUST NOT write a .install.json sidecar
+	// (PRD v2 §4.2: they're git-shared and shouldn't carry local state).
+	sidecar := filepath.Join(projectDir, ".seek", "skills", "project-skill", ".install.json")
+	if _, err := os.Stat(sidecar); err == nil {
+		t.Errorf("project-scope must NOT write .install.json, but found %s", sidecar)
+	}
+	// Scope hint in the result text.
+	if !strings.Contains(out, "project scope") {
+		t.Errorf("result should declare 'project scope' explicitly, got:\n%s", out)
+	}
+}
+
+func TestCommit_RejectsMissingScope(t *testing.T) {
+	pinUserSkillsDir(t)
+	src := stageLocalSkill(t, "needs-scope")
+
+	fetchOut, _ := NewFetch().Execute(context.Background(),
+		mustJSON(map[string]string{"source": src}))
+	var fr fetchResult
+	_ = json.Unmarshal([]byte(fetchOut), &fr)
+
+	ask := &stubAskFn{allow: true}
+	commit := NewCommit(newAskPolicy(t, ask))
+
+	// No scope passed — the schema requires it; UnmarshalStrict
+	// should refuse before we ever reach the approval prompt.
+	_, err := commit.Execute(context.Background(), mustJSON(map[string]any{
+		"staging_path": fr.StagingPath,
+		"name":         fr.Name,
+		"source":       fr.Source,
+	}))
+	if err == nil {
+		t.Fatal("commit must refuse missing scope — the model can't choose for the user")
+	}
+	if ask.called {
+		t.Errorf("approval prompt fired despite missing scope — should be caught earlier")
+	}
+}
+
+func TestCommit_RejectsInvalidScope(t *testing.T) {
+	pinUserSkillsDir(t)
+	src := stageLocalSkill(t, "bad-scope-skill")
+
+	fetchOut, _ := NewFetch().Execute(context.Background(),
+		mustJSON(map[string]string{"source": src}))
+	var fr fetchResult
+	_ = json.Unmarshal([]byte(fetchOut), &fr)
+
+	ask := &stubAskFn{allow: true}
+	commit := NewCommit(newAskPolicy(t, ask))
+
+	_, err := commit.Execute(context.Background(), mustJSON(map[string]any{
+		"staging_path": fr.StagingPath,
+		"name":         fr.Name,
+		"source":       fr.Source,
+		"scope":        "global", // invalid — only user/project accepted
+	}))
+	if err == nil {
+		t.Fatal("commit must reject invalid scope values")
+	}
+	if !strings.Contains(err.Error(), "user") || !strings.Contains(err.Error(), "project") {
+		t.Errorf("error should list valid scope values, got: %v", err)
+	}
+	if ask.called {
+		t.Errorf("approval prompt fired despite invalid scope")
 	}
 }
 
@@ -208,6 +320,7 @@ func TestCommit_Denied(t *testing.T) {
 		"staging_path": fr.StagingPath,
 		"name":         fr.Name,
 		"source":       fr.Source,
+		"scope":        "user",
 	}))
 	if err == nil {
 		t.Fatal("commit must return an error when the user declines")
@@ -236,6 +349,7 @@ func TestCommit_RejectsBogusStagingPath(t *testing.T) {
 		"staging_path": "/etc/passwd",
 		"name":         "evil",
 		"source":       "/etc",
+		"scope":        "user",
 	}))
 	if err == nil {
 		t.Fatal("commit must refuse paths outside the staging prefix")
@@ -264,6 +378,7 @@ func TestCommit_NameMismatch(t *testing.T) {
 		"staging_path": fr.StagingPath,
 		"name":         "wrong-name",
 		"source":       src,
+		"scope":        "user",
 	}))
 	if err == nil {
 		t.Fatal("commit must refuse mismatched name")
@@ -282,9 +397,10 @@ func TestCommit_MissingRequiredArgs(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"missing staging_path", map[string]any{"name": "x", "source": "y"}},
-		{"missing name", map[string]any{"staging_path": "/tmp/seek-skill-staging-x/pkg", "source": "y"}},
-		{"missing source", map[string]any{"staging_path": "/tmp/seek-skill-staging-x/pkg", "name": "x"}},
+		{"missing staging_path", map[string]any{"name": "x", "source": "y", "scope": "user"}},
+		{"missing name", map[string]any{"staging_path": "/tmp/seek-skill-staging-x/pkg", "source": "y", "scope": "user"}},
+		{"missing source", map[string]any{"staging_path": "/tmp/seek-skill-staging-x/pkg", "name": "x", "scope": "user"}},
+		{"missing scope", map[string]any{"staging_path": "/tmp/seek-skill-staging-x/pkg", "name": "x", "source": "y"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

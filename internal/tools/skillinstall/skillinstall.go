@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -152,16 +153,21 @@ var commitSchema = []byte(`{
       "type": "string",
       "description": "The original source string the user provided. Shown in the approval prompt so the user can confirm the URL/path that's about to be installed."
     },
+    "scope": {
+      "type": "string",
+      "enum": ["user", "project"],
+      "description": "Where to install. 'user' = ~/.seek/skills/<name>/ — available in every seek session on this machine, private to this user. 'project' = <cwd>/.seek/skills/<name>/ — shared via git with anyone who clones the repo, no .install.json sidecar (PRD v2 §4.2). REQUIRED: ASK THE USER FIRST. You cannot infer this; do not pick a default. The two scopes have very different consequences (private vs shared with the team)."
+    },
     "force": {
       "type": "boolean",
       "description": "When true, overwrite an existing skill of the same name. Default false: a conflict returns an error so the user can decide whether to replace."
     }
   },
-  "required": ["staging_path", "name", "source"],
+  "required": ["staging_path", "name", "source", "scope"],
   "additionalProperties": false
 }`)
 
-const commitDesc = "Install a previously-staged skill into ~/.seek/skills/<name>/. REQUIRES the user's interactive approval (ModeAsk → y/N prompt). On success the result text tells you to instruct the user to run /new (or restart) before the new skill is available — the running session's skill manifest is fixed at startup by design."
+const commitDesc = "Install a previously-staged skill. REQUIRES (1) you have asked the user whether to install at user scope (~/.seek/skills/) or project scope (<cwd>/.seek/skills/, shared via git) and they answered, and (2) the user's interactive approval at the y/N prompt. On success the result text tells you to instruct the user to run /new (or restart) before the new skill is available — the running session's skill manifest is fixed at startup by design."
 
 // CommitTool wraps skillmgr.Commit with a permission check. The
 // policy is injected — same pattern as bash/edit/write — so the
@@ -184,22 +190,27 @@ type commitArgs struct {
 	StagingPath string `json:"staging_path"`
 	Name        string `json:"name"`
 	Source      string `json:"source"`
+	Scope       string `json:"scope"`
 	Force       bool   `json:"force"`
 }
 
 func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a commitArgs
-	if err := tools.UnmarshalStrict(commitName, raw, &a, "staging_path", "name", "source", "force"); err != nil {
+	if err := tools.UnmarshalStrict(commitName, raw, &a, "staging_path", "name", "source", "scope", "force"); err != nil {
 		return "", err
 	}
 	for _, m := range []struct{ name, val string }{
 		{"staging_path", a.StagingPath},
 		{"name", a.Name},
 		{"source", a.Source},
+		{"scope", a.Scope},
 	} {
 		if m.val == "" {
-			return "", tools.MissingField(commitName, m.name, raw, "staging_path", "name", "source", "force")
+			return "", tools.MissingField(commitName, m.name, raw, "staging_path", "name", "source", "scope", "force")
 		}
+	}
+	if a.Scope != "user" && a.Scope != "project" {
+		return "", fmt.Errorf("%s: scope must be 'user' or 'project', got %q. Ask the user which they want before calling skill_commit", commitName, a.Scope)
 	}
 	if t.policy == nil {
 		return "", errors.New(commitName + ": no permission policy configured")
@@ -215,7 +226,10 @@ func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("%s: %w", commitName, err)
 	}
 
-	target := computeTarget(stage)
+	target, err := computeTarget(stage)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", commitName, err)
+	}
 	if err := t.policy.Check(permission.Action{
 		Kind:        permission.KindSkillInstall,
 		SkillName:   stage.Name,
@@ -234,11 +248,15 @@ func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 	// it through to the user; without this hint, install completes
 	// silently and the user later calls Skill(name=...) and hits
 	// "not found", confused.
+	scopeHint := "at user scope (~/.seek/skills/, available in every seek session on this machine)"
+	if a.Scope == "project" {
+		scopeHint = "at project scope (<cwd>/.seek/skills/, shared via git with anyone who clones this repo)"
+	}
 	body := fmt.Sprintf(
-		"Installed skill %q to %s.\n\nIMPORTANT: This running session's skill manifest is fixed at startup. "+
+		"Installed skill %q to %s — %s.\n\nIMPORTANT: This running session's skill manifest is fixed at startup. "+
 			"The new skill is NOT available in this conversation. "+
 			"Tell the user to run /new (TUI) or restart seek before they can call Skill(name=%q).",
-		res.Name, res.Dir, res.Name,
+		res.Name, res.Dir, scopeHint, res.Name,
 	)
 	return body, nil
 }
@@ -247,7 +265,7 @@ func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 // skillmgr.Commit needs, by parsing what's already in the staging
 // dir. We don't re-run Stage (which would re-fetch from the network)
 // — we trust the directory the previous fetch left behind. The
-// Source / Name / Force fields come from the caller's args.
+// Source / Name / Force / Scope fields come from the caller's args.
 func loadStagedForCommit(a commitArgs) (*skillmgr.StageResult, error) {
 	// Quick read of SKILL.md to confirm the name matches what the
 	// model passed — guards against the model passing one staging
@@ -263,17 +281,25 @@ func loadStagedForCommit(a commitArgs) (*skillmgr.StageResult, error) {
 			skName, a.Name,
 		)
 	}
-	return &skillmgr.StageResult{
+	stage := &skillmgr.StageResult{
 		Name:       a.Name,
 		Source:     a.Source,
 		Type:       srcType,
 		StagingDir: a.StagingPath,
 		Force:      a.Force,
-		// Project / UserDir / Subpath / SHA256 are left zero — the
-		// tool-mediated install always targets the user's skills
-		// dir (~/.seek/skills/) and the sidecar's source-type
-		// detection re-runs from Source on commit.
-	}, nil
+	}
+	// Scope routing: "project" lands under <cwd>/.seek/skills/ and
+	// suppresses the .install.json sidecar (PRD v2 §4.2). "user" goes
+	// to ~/.seek/skills/ (the default resolveTargetParent behaviour).
+	if a.Scope == "project" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("resolve project dir: %w", err)
+		}
+		stage.Project = true
+		stage.ProjectDir = cwd
+	}
+	return stage, nil
 }
 
 // peekStagedName parses the SKILL.md frontmatter in staging just
@@ -302,16 +328,18 @@ func peekStagedName(stagingDir string) (string, skillmgr.SourceType, error) {
 }
 
 // computeTarget renders the install path string for the approval
-// prompt. Mirrors skillmgr's logic without re-implementing it (since
-// the real computation happens inside Commit anyway).
-func computeTarget(stage *skillmgr.StageResult) string {
-	// We always target the user-level skills dir for tool-driven
-	// installs — project-level installs are a CLI/TUI feature
-	// (PRD v2 §4.2 — project installs are git-shared and the user
-	// types the command themselves). Hard-code the path shape for
-	// the approval prompt; the actual filesystem call inside
-	// Commit resolves paths.UserSkills() at execution time.
-	return "~/.seek/skills/" + stage.Name + "/"
+// prompt. The path the user sees in the y/N prompt MUST match where
+// Commit will actually write — otherwise the approval is for a
+// different action than the one that runs.
+//
+// Project scope: <cwd>/.seek/skills/<name>/. User scope: shown as
+// "~/.seek/skills/<name>/" (the tilde is friendlier than the absolute
+// path; Commit itself does the real path resolution via paths.UserSkills).
+func computeTarget(stage *skillmgr.StageResult) (string, error) {
+	if stage.Project {
+		return filepath.Join(stage.ProjectDir, ".seek", "skills", stage.Name) + "/", nil
+	}
+	return "~/.seek/skills/" + stage.Name + "/", nil
 }
 
 // readFile + frontmatterName are tiny duplications of skill package
