@@ -25,6 +25,12 @@ const (
 	KindEdit           Kind = "edit"
 	KindRead           Kind = "read"
 	KindMemoryRemember Kind = "memory_remember"
+	// KindSkillInstall guards the skill_commit tool — the moment a
+	// staged skill package gets moved into ~/.seek/skills/<name>/.
+	// Fetching to /tmp is not gated; only the actual install step is,
+	// because that's the irreversible filesystem mutation that puts
+	// model-influenced content on the user's machine.
+	KindSkillInstall Kind = "skill_install"
 )
 
 // Action describes one attempt to perform a guarded operation.
@@ -44,6 +50,17 @@ type Action struct {
 	// tagline is enough decision context, and content can be paragraphs.
 	MemoryName    string
 	MemoryTagline string
+
+	// SkillName / SkillSource / SkillTarget are populated by
+	// skill_commit so the TUI can render "install <name> from <source>
+	// to <target>?" — the three things the user actually needs to
+	// decide on. Body / scripts content stays out: the model has
+	// already inspected them via read/grep before getting here, and
+	// dumping the full body into the approval prompt would push it
+	// off-screen.
+	SkillName   string
+	SkillSource string
+	SkillTarget string
 }
 
 // ApprovalRequest is what the TUI consumes when ModeAsk needs a user
@@ -202,6 +219,9 @@ func (p *Policy) Check(a Action) error {
 		case KindMemoryRemember:
 			return fmt.Errorf("%w: plan mode: memory_remember is not allowed",
 				ErrDenied)
+		case KindSkillInstall:
+			return fmt.Errorf("%w: plan mode: skill_install is not allowed — plan mode is read-only",
+				ErrDenied)
 		default:
 			return fmt.Errorf("%w: plan mode: unknown action kind %q", ErrDenied, a.Kind)
 		}
@@ -243,6 +263,15 @@ func (p *Policy) Check(a Action) error {
 			return fmt.Errorf("%w: memory_remember requires a name", ErrDenied)
 		}
 		dangerous = true
+	case KindSkillInstall:
+		// Skill installs are always dangerous: the source is model-
+		// influenced (a URL the model parsed from chat) and the
+		// destination is the user's persistent home dir. Yolo skips
+		// the ask, ModeDeny refuses.
+		if a.SkillName == "" {
+			return fmt.Errorf("%w: skill_install requires a skill name", ErrDenied)
+		}
+		dangerous = true
 	default:
 		return fmt.Errorf("%w: unknown action kind %q", ErrDenied, a.Kind)
 	}
@@ -266,6 +295,9 @@ func (p *Policy) Check(a Action) error {
 	case KindMemoryRemember:
 		return fmt.Errorf("%w: memory_remember %q is gated; re-run seek with --yolo, or save the entry yourself",
 			ErrDenied, a.MemoryName)
+	case KindSkillInstall:
+		return fmt.Errorf("%w: skill_install %q from %q is gated; re-run seek with --yolo, or install the skill yourself with `seek skill install %s`",
+			ErrDenied, a.SkillName, a.SkillSource, a.SkillSource)
 	default:
 		return fmt.Errorf("%w: %s on %q is outside the working directory %q — re-run with --yolo to allow",
 			ErrDenied, a.Kind, a.Path, cwd)

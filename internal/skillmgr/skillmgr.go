@@ -106,6 +106,37 @@ type InstallResult struct {
 	Type SourceType
 }
 
+// StageResult is the output of Stage(). It carries everything Commit
+// needs to finish the install without re-fetching, plus the metadata
+// the model uses to decide whether to commit at all.
+//
+// StagingDir lives under os.TempDir() with a "seek-skill-staging-"
+// prefix; the caller passes it back into Commit. The skill's body has
+// already been parsed and validated; Description and BodyPreview are
+// surfaced so the LLM has enough context to judge legitimacy without
+// re-reading from disk (though it can: the staging files are real
+// files at StagingDir).
+type StageResult struct {
+	Name        string     // resolved kebab-case name (frontmatter / override / dir)
+	Description string     // from frontmatter (single line)
+	Source      string     // verbatim Source from StageOptions, for sidecar + approval display
+	Type        SourceType // local / git / https
+	StagingDir  string     // absolute path under os.TempDir(); fed back to Commit
+	Files       []string   // relative paths in the package, sorted; model uses for read/grep targeting
+	BodyPreview string     // first ~500 chars of SKILL.md body; spec hint for the model
+
+	// Internal: fields Commit needs that aren't useful to the caller.
+	// Kept exported so Commit's contract is a value pass, not a hidden
+	// state bag.
+	Force      bool   // mirrors StageOptions.Force; surfaced for the approval prompt
+	Project    bool   // mirrors StageOptions.Project
+	ProjectDir string // mirrors StageOptions.ProjectDir
+	UserDir    string // mirrors StageOptions.UserDir
+	SHA256     string // mirrors StageOptions.SHA256 (for sidecar)
+	Subpath    string // mirrors StageOptions.Subpath (for sidecar)
+	NowFn      func() time.Time
+}
+
 // UninstallOptions controls Uninstall.
 type UninstallOptions struct {
 	Name     string
@@ -123,28 +154,92 @@ type UninstallResult struct {
 
 // Install fetches and lays down a skill. Side effects are gated on
 // success: a failed fetch or validation leaves the target untouched.
+//
+// Implementation is the Stage + Commit pair — kept as a single entry
+// point for the CLI path where the user has already opted in at the
+// shell. The interactive (tool-driven) path goes Stage → human
+// approval → Commit so the user sees the staged skill before it lands
+// on disk.
 func Install(opts InstallOptions) (*InstallResult, error) {
+	stage, err := Stage(StageOptions{
+		Source:     opts.Source,
+		Type:       opts.Type,
+		Name:       opts.Name,
+		Force:      opts.Force,
+		Project:    opts.Project,
+		ProjectDir: opts.ProjectDir,
+		UserDir:    opts.UserDir,
+		Subpath:    opts.Subpath,
+		SHA256:     opts.SHA256,
+		HTTP:       opts.HTTP,
+		Now:        opts.Now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Stage may have created the temp dir; if Commit refuses or
+	// fails we still want it gone. On Commit success the staging
+	// dir is consumed by the rename, so RemoveAll is a no-op.
+	defer os.RemoveAll(filepath.Dir(stage.StagingDir))
+	return Commit(stage)
+}
+
+// StageOptions mirrors InstallOptions but is the input to Stage —
+// the half of the flow that fetches and validates. The two structs
+// stay in sync deliberately: the only thing CallSite-the-tool needs
+// that CallSite-the-CLI doesn't is the ability to pause between
+// these two phases for human approval.
+type StageOptions struct {
+	Source     string
+	Type       SourceType
+	Name       string
+	Force      bool
+	Project    bool
+	ProjectDir string
+	UserDir    string
+	Subpath    string
+	SHA256     string
+	HTTP       *http.Client
+	Now        func() time.Time
+}
+
+// Stage fetches and validates a skill package without writing to the
+// user's skills directory. Output is a *StageResult that can be:
+//
+//   - displayed to a human for approval (Source / Name / Description),
+//   - inspected by an LLM via the staged filesystem path (StagingDir),
+//   - handed back to Commit verbatim to finish the install.
+//
+// The staging directory lives under os.TempDir() with a
+// "seek-skill-staging-" prefix; callers SHOULD treat the path as
+// opaque and only re-feed it through Commit. The directory survives
+// until Commit consumes it (via rename) or the OS cleans /tmp.
+func Stage(opts StageOptions) (*StageResult, error) {
 	if opts.Source == "" {
-		return nil, errors.New("skillmgr: install: Source is required")
+		return nil, errors.New("skillmgr: stage: Source is required")
 	}
 	typ := opts.Type
 	if typ == SourceAuto {
 		typ = detectSourceType(opts.Source)
 	}
 
-	stagingParent, err := os.MkdirTemp("", "seek-install-*")
+	// stagingParent gets a distinct prefix so Commit can validate
+	// the path it receives is a real staging dir and not, say, /etc.
+	stagingParent, err := os.MkdirTemp("", "seek-skill-staging-*")
 	if err != nil {
 		return nil, fmt.Errorf("skillmgr: create staging: %w", err)
 	}
-	// Best-effort cleanup. On success the directory will be empty
-	// (its contents were moved into the final target).
-	defer os.RemoveAll(stagingParent)
-
-	// staging is the directory the source-specific fetcher populates.
-	// Every fetcher MUST produce a layout that looks like a valid
-	// skill package — SKILL.md / skill.md at the top, optional
-	// supporting files alongside.
 	staging := filepath.Join(stagingParent, "pkg")
+
+	// On any error from here down, the staging tree is dead weight —
+	// remove it before returning so /tmp doesn't accumulate detritus
+	// from failed fetches. Success returns before this fires.
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(stagingParent)
+		}
+	}()
 
 	switch typ {
 	case SourceLocal:
@@ -152,21 +247,17 @@ func Install(opts InstallOptions) (*InstallResult, error) {
 			return nil, err
 		}
 	case SourceHTTPS:
-		if err := stageHTTPS(opts, staging); err != nil {
+		if err := stageHTTPS(installOptsFromStage(opts), staging); err != nil {
 			return nil, fmt.Errorf("skillmgr: %w", err)
 		}
 	case SourceGit:
-		if err := stageGit(opts, staging); err != nil {
+		if err := stageGit(installOptsFromStage(opts), staging); err != nil {
 			return nil, fmt.Errorf("skillmgr: %w", err)
 		}
 	default:
 		return nil, fmt.Errorf("skillmgr: unsupported source type %v", typ)
 	}
 
-	// Parse the staged skill to extract name + validate it's a real
-	// skill package (PRD v2 §4.1). This is the only place we read
-	// SKILL.md during install — we trust internal/skill for the
-	// frontmatter contract.
 	sk, err := loadStagedSkill(staging)
 	if err != nil {
 		return nil, fmt.Errorf("skillmgr: source is not a valid skill package: %w", err)
@@ -176,53 +267,208 @@ func Install(opts InstallOptions) (*InstallResult, error) {
 		return nil, errors.New("skillmgr: could not resolve skill name (no --name, no frontmatter name, no usable directory name)")
 	}
 
-	// Resolve the target. Project installs land in
-	// <ProjectDir>/.seek/skills/<name>/ ; user installs in <UserDir>/<name>/.
-	targetParent, err := resolveTargetParent(opts)
+	files, err := listPackageFiles(staging)
+	if err != nil {
+		return nil, fmt.Errorf("skillmgr: list staged files: %w", err)
+	}
+	preview := bodyPreview(sk.Body, 500)
+
+	success = true
+	return &StageResult{
+		Name:        name,
+		Description: strings.ReplaceAll(sk.Description, "\n", " "),
+		Source:      opts.Source,
+		Type:        typ,
+		StagingDir:  staging,
+		Files:       files,
+		BodyPreview: preview,
+		Force:       opts.Force,
+		Project:     opts.Project,
+		ProjectDir:  opts.ProjectDir,
+		UserDir:     opts.UserDir,
+		SHA256:      opts.SHA256,
+		Subpath:     opts.Subpath,
+		NowFn:       opts.Now,
+	}, nil
+}
+
+// Commit moves a staged skill into its final location and writes the
+// .install.json sidecar. Idempotent against the staging dir: if the
+// rename fails we leave the staging intact for retry.
+//
+// The staging dir is REQUIRED to live under os.TempDir() with the
+// "seek-skill-staging-" prefix produced by Stage; arbitrary paths are
+// refused. This is the defence in depth that keeps a misbehaving tool
+// caller from asking Commit to move /etc/passwd into ~/.seek/skills/.
+func Commit(stage *StageResult) (*InstallResult, error) {
+	if stage == nil {
+		return nil, errors.New("skillmgr: commit: nil stage")
+	}
+	if err := validateStagingPath(stage.StagingDir); err != nil {
+		return nil, err
+	}
+
+	targetParent, err := resolveTargetParent(InstallOptions{
+		Project:    stage.Project,
+		ProjectDir: stage.ProjectDir,
+		UserDir:    stage.UserDir,
+	})
 	if err != nil {
 		return nil, err
 	}
-	target := filepath.Join(targetParent, name)
+	target := filepath.Join(targetParent, stage.Name)
 
-	// Conflict check.
 	if _, err := os.Stat(target); err == nil {
-		if !opts.Force {
-			return nil, fmt.Errorf("skillmgr: %q already exists at %s (use --force to replace)", name, target)
+		if !stage.Force {
+			return nil, fmt.Errorf("skillmgr: %q already exists at %s (use force=true to replace)", stage.Name, target)
 		}
 		if err := os.RemoveAll(target); err != nil {
-			return nil, fmt.Errorf("skillmgr: --force replace: %w", err)
+			return nil, fmt.Errorf("skillmgr: force replace: %w", err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("skillmgr: stat target: %w", err)
 	}
 
-	// Make sure the parent exists. MkdirAll is idempotent — safe to
-	// call even when the dir is already there.
 	if err := os.MkdirAll(targetParent, 0o755); err != nil {
 		return nil, fmt.Errorf("skillmgr: mkdir target parent: %w", err)
 	}
 
-	// Atomic-ish rename. Same filesystem (both under TempDir or
-	// inside the user's home tree on most setups) → atomic. Cross-
-	// filesystem → fallback copy.
-	if err := os.Rename(staging, target); err != nil {
-		if err := copyTree(staging, target); err != nil {
+	// Atomic-ish rename across same-fs; copy-fallback for cross-fs
+	// (e.g. /tmp on a different mount than $HOME).
+	if err := os.Rename(stage.StagingDir, target); err != nil {
+		if err := copyTree(stage.StagingDir, target); err != nil {
 			return nil, fmt.Errorf("skillmgr: install copy fallback: %w", err)
 		}
 	}
 
-	// Write .install.json sidecar, unless this is a project install.
-	if !opts.Project {
-		if err := writeInstallSidecar(target, &opts, typ); err != nil {
-			// Sidecar failure is non-fatal — the skill is installed.
-			// We warn via the returned error wrapper but leave it
-			// up to the CLI to decide whether to log / continue.
-			return &InstallResult{Name: name, Dir: target, Type: typ},
+	if !stage.Project {
+		// Reconstruct the install options needed by the sidecar
+		// writer from the StageResult — we don't carry the full
+		// InstallOptions through, only what's relevant.
+		sideOpts := &InstallOptions{
+			Source:  stage.Source,
+			Subpath: stage.Subpath,
+			SHA256:  stage.SHA256,
+			Now:     stage.NowFn,
+		}
+		if err := writeInstallSidecar(target, sideOpts, stage.Type); err != nil {
+			return &InstallResult{Name: stage.Name, Dir: target, Type: stage.Type},
 				fmt.Errorf("skillmgr: write .install.json (skill installed, but update tracking unavailable): %w", err)
 		}
 	}
 
-	return &InstallResult{Name: name, Dir: target, Type: typ}, nil
+	return &InstallResult{Name: stage.Name, Dir: target, Type: stage.Type}, nil
+}
+
+// installOptsFromStage converts a StageOptions back into the shape
+// the source-specific stagers (stageHTTPS / stageGit) expect. Keeping
+// the legacy InstallOptions input on those helpers avoids touching
+// the four files they live in for a refactor that doesn't change
+// behaviour.
+func installOptsFromStage(s StageOptions) InstallOptions {
+	return InstallOptions{
+		Source:     s.Source,
+		Type:       s.Type,
+		Name:       s.Name,
+		Force:      s.Force,
+		Project:    s.Project,
+		ProjectDir: s.ProjectDir,
+		UserDir:    s.UserDir,
+		Subpath:    s.Subpath,
+		SHA256:     s.SHA256,
+		HTTP:       s.HTTP,
+		Now:        s.Now,
+	}
+}
+
+// validateStagingPath refuses anything that isn't a "seek-skill-
+// staging-<random>/pkg" path under the system temp dir. This is the
+// hardening that lets us trust StagingDir as a tool argument without
+// auditing every caller.
+func validateStagingPath(p string) error {
+	if p == "" {
+		return errors.New("skillmgr: commit: StagingDir is empty")
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return fmt.Errorf("skillmgr: commit: resolve staging path: %w", err)
+	}
+	tmpDir, err := filepath.Abs(os.TempDir())
+	if err != nil {
+		return fmt.Errorf("skillmgr: commit: resolve tempdir: %w", err)
+	}
+	// The staging dir is `<TempDir>/seek-skill-staging-XYZ/pkg`.
+	rel, err := filepath.Rel(tmpDir, abs)
+	if err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return fmt.Errorf("skillmgr: commit: staging path %q is not under temp dir %q", abs, tmpDir)
+	}
+	// Walk up one level: must be "seek-skill-staging-*".
+	parent := filepath.Base(filepath.Dir(abs))
+	if !strings.HasPrefix(parent, "seek-skill-staging-") {
+		return fmt.Errorf("skillmgr: commit: staging path %q does not have the expected seek-skill-staging-* prefix", abs)
+	}
+	if filepath.Base(abs) != "pkg" {
+		return fmt.Errorf("skillmgr: commit: staging path %q does not end in /pkg", abs)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return fmt.Errorf("skillmgr: commit: staging dir not found: %w", err)
+	}
+	return nil
+}
+
+// listPackageFiles walks the staging dir and returns relative paths
+// (forward-slash) in sorted order. Capped at 200 entries — anything
+// more is suspicious for a skill package and would push the tool
+// result past useful sizes anyway.
+func listPackageFiles(root string) ([]string, error) {
+	var out []string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		out = append(out, filepath.ToSlash(rel))
+		if len(out) > 200 {
+			return errors.New("too many files (>200) — refusing to stage; this looks like a non-skill repo")
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// filepath.Walk returns lexicographic order on most platforms,
+	// but make it explicit so the tool result is byte-stable across
+	// OSes (prefix-cache friendliness).
+	sortStrings(out)
+	return out, nil
+}
+
+// bodyPreview returns the first n runes (NOT bytes) of body, trimmed
+// so the preview doesn't end in the middle of a multi-byte character.
+// Appends an ellipsis hint when truncated.
+func bodyPreview(body string, n int) string {
+	body = strings.TrimSpace(body)
+	if len([]rune(body)) <= n {
+		return body
+	}
+	runes := []rune(body)
+	return string(runes[:n]) + "\n… [truncated]"
+}
+
+func sortStrings(s []string) {
+	// stdlib sort would be one import for one call site — inline
+	// insertion sort is fine for the ≤200 entries cap above.
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j-1] > s[j]; j-- {
+			s[j-1], s[j] = s[j], s[j-1]
+		}
+	}
 }
 
 // Uninstall removes an installed skill. Builtins (when the optional

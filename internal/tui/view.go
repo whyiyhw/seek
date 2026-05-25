@@ -427,6 +427,16 @@ func (m Model) renderApprovalPrompt() string {
 		} else {
 			subject = fmt.Sprintf("save memory %q", req.Action.MemoryName)
 		}
+	case permission.KindSkillInstall:
+		// Three load-bearing pieces of info: which skill, from where,
+		// to where. The source is what the model deduced from the
+		// user's request — surfacing it gives the user the chance to
+		// catch hallucinated URLs ("I asked for X, why is it pulling
+		// from Y?") before files land on disk.
+		subject = fmt.Sprintf("install skill %q from %s to %s",
+			req.Action.SkillName,
+			truncateOneLine(req.Action.SkillSource, 80),
+			req.Action.SkillTarget)
 	default:
 		subject = fmt.Sprintf("%s %q (outside CWD)", req.Action.Kind, req.Action.Path)
 	}

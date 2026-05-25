@@ -44,6 +44,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/internal/tools/memorytool"
 	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/write"
@@ -83,6 +84,8 @@ Available tools:
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
 - think(task, reflect?, context?): call deepseek-v4-flash in thinking mode for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
 - Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
+- skill_fetch(source, name?, subpath?, sha256?): when the user asks to INSTALL a skill, fetch + validate it into a /tmp staging dir. Returns name, description, files, body preview, and a staging_path. Inspect the staged files (read SKILL.md, scripts/ if any) BEFORE committing — judge whether the source matches user intent.
+- skill_commit(staging_path, name, source, force?): finalise the install. Requires user approval (y/N prompt). On success, the new skill is on disk but NOT loaded into this session — tell the user to run /new (TUI) or restart so the manifest picks it up.
 
 Workflow:
 1. Explore before reading: use grep to locate relevant symbols or sections, then read(offset=N) for the specific range. Never read an entire file — it wastes tokens and breaks prefix cache.
@@ -439,7 +442,9 @@ func run() error {
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
-		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv))
+		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
+		Add(skillinstall.NewFetch()).
+		Add(skillinstall.NewCommit(policy))
 
 	// DeepSeek-exclusive tools: FIM and Reasoner are only available
 	// when using the DeepSeek client directly.
