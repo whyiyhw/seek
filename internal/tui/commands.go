@@ -125,7 +125,14 @@ func cmdHelp(m *Model, _ string) cmdResult {
 	return cmdResult{}
 }
 
-func cmdClear(_ *Model, _ string) cmdResult {
+func cmdClear(m *Model, _ string) cmdResult {
+	// tea.ClearScreen wipes the visible viewport and parks the cursor at
+	// (1,1). Layout math in view.go locates the live region using
+	// m.scrollbackLines (rows of tea.Println output above us). After a
+	// clear the truthful value is 0 — without this reset, the padding
+	// math thinks ~47 phantom rows still sit above the cursor and never
+	// pushes the input back to the bottom of the terminal.
+	m.scrollbackLines = 0
 	return cmdResult{clear: true}
 }
 

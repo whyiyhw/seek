@@ -120,6 +120,29 @@ func TestHelp_SetsOverlayFlag(t *testing.T) {
 	}
 }
 
+// TestClear_ResetsScrollbackLines locks in the "input stays at the
+// bottom after /clear" invariant. tea.ClearScreen wipes the viewport
+// and parks the cursor at (1,1); view.go's layout math uses
+// m.scrollbackLines to locate the live region. Before this fix the
+// counter stayed at its pre-clear value (say 47), so welcome-padding
+// didn't fire and the bottom-pin branch computed a negative `pad` —
+// the input ended up at the TOP of the terminal until the next turn
+// scrolled it back down.
+func TestClear_ResetsScrollbackLines(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.scrollbackLines = 47
+
+	res := runHandler(t, m, "/clear")
+
+	if !res.clear {
+		t.Errorf("/clear must request tea.ClearScreen via cmdResult.clear")
+	}
+	if m.scrollbackLines != 0 {
+		t.Errorf("scrollbackLines after /clear: got %d, want 0", m.scrollbackLines)
+	}
+}
+
 func TestExit_SetsQuit(t *testing.T) {
 	t.Parallel()
 	res := runHandler(t, emptyModel(), "/exit")

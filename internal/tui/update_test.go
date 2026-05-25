@@ -277,6 +277,23 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 	}
 }
 
+// TestHandleKey_CtrlL_ResetsScrollbackLines is the keyboard-path mirror
+// of TestClear_ResetsScrollbackLines. Ctrl+L bypasses cmdClear and goes
+// directly to tea.ClearScreen in update_key.go, so this is a separate
+// path that must independently keep the layout counter truthful.
+func TestHandleKey_CtrlL_ResetsScrollbackLines(t *testing.T) {
+	t.Parallel()
+	m := *emptyModel()
+	m.scrollbackLines = 47
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m2 := out.(Model)
+
+	if m2.scrollbackLines != 0 {
+		t.Errorf("scrollbackLines after Ctrl+L: got %d, want 0", m2.scrollbackLines)
+	}
+}
+
 func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 	t.Parallel()
 	// When the slash-command menu is open and has candidates, Enter

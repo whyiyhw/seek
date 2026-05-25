@@ -132,10 +132,14 @@ func (m Model) View() string {
 	// the bookkeeping (and caps at welcomePadMax so a 60-row window
 	// doesn't end up with 40 lines of empty space).
 	//
-	// Gated on m.turns == 0 so that once the conversation starts —
-	// tea.Println pushes content above us — we stop adding pad and
-	// the input glides up to sit right under the last response.
-	if m.isWelcomeScreen() && m.turns == 0 {
+	// Gated on scrollbackLines == 0 — i.e. "nothing has been Println'd
+	// above us". This covers BOTH first-launch (no turns yet) AND
+	// post-/clear (turns > 0 but the visible viewport is empty because
+	// tea.ClearScreen wiped it and cmdClear reset the counter). Using
+	// m.turns as the gate was a proxy that broke after /clear: input
+	// rendered at the TOP of the terminal until the next streamed turn
+	// scrolled it back down.
+	if m.isWelcomeScreen() && m.scrollbackLines == 0 {
 		if pad := welcomePadding(m.height); pad > 0 {
 			sb.WriteString(strings.Repeat("\n", pad))
 		}

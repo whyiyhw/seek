@@ -375,7 +375,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyCtrlL:
 		// "clear" no longer maps to a viewport reset — in inline mode
 		// the terminal owns the scrollback. We print a clear-screen
-		// escape via tea.ClearScreen, then redraw.
+		// escape via tea.ClearScreen, then redraw. Same scrollbackLines
+		// reset as cmdClear — keep both paths in sync.
+		m.scrollbackLines = 0
 		return m, tea.ClearScreen
 
 	case tea.KeyCtrlR:
