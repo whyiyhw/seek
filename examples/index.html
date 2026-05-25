@@ -120,22 +120,28 @@
 
   /* ============ LANGUAGE TOGGLE ============ */
   .lang-toggle {
-    background: none;
-    border: none;
-    padding: 0;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
     font-family: "JetBrains Mono", monospace;
-    font-size: .82rem;
-    color: var(--dim);
-    cursor: pointer;
-    transition: color .25s ease;
-    display: inline;
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-underline-offset: 3px;
+    font-size: .75rem;
+    line-height: 1;
   }
-  .lang-toggle:hover {
+  .lang-toggle span {
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: all .2s ease;
+    color: var(--dim);
+    user-select: none;
+  }
+  .lang-toggle span.active {
+    background: var(--teal);
+    color: #0b0b0e;
+    font-weight: 700;
+  }
+  .lang-toggle span:not(.active):hover {
     color: var(--teal);
-    text-decoration-style: solid;
   }
 
   /* ============ LAYOUT ============ */
@@ -878,6 +884,12 @@
       <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek native AI coding agent.</span>
       <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手。</span>
     </p>
+    <div style="display:flex;justify-content:flex-end;margin:-8px 0 16px;">
+      <div class="lang-toggle" id="langToggle">
+        <span data-lang-val="en">EN</span>
+        <span data-lang-val="zh">中文</span>
+      </div>
+    </div>
     <div class="btn-group terminal-hero-btns reveal">
       <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
         GitHub <span class="arrow">→</span>
@@ -1172,7 +1184,7 @@
 <!-- ============ FOOTER ============ -->
 <footer>
   <div class="container">
-    <p><strong>seek</strong> · <span data-lang="en">MIT licensed</span><span data-lang="zh" hidden>MIT 开源</span> · <a href="https://github.com/whyiyhw/seek">GitHub</a> · <a href="https://github.com/whyiyhw/seek/blob/main/docs/README_EN.md"><span data-lang="en">Docs</span><span data-lang="zh" hidden>文档</span></a> · <button class="lang-toggle" id="langToggle" aria-label="Switch language"><span data-lang="en">中文</span><span data-lang="zh" hidden>English</span></button></p>
+    <p><strong>seek</strong> · <span data-lang="en">MIT licensed</span><span data-lang="zh" hidden>MIT 开源</span> · <a href="https://github.com/whyiyhw/seek">GitHub</a> · <a href="https://github.com/whyiyhw/seek/blob/main/docs/README_EN.md"><span data-lang="en">Docs</span><span data-lang="zh" hidden>文档</span></a></p>
     <p>
       <span data-lang="en">Built with Go · Powered by DeepSeek · Made for terminal</span>
       <span data-lang="zh" hidden>Go 构建 · DeepSeek 驱动 · 终端原生</span>
@@ -1211,11 +1223,28 @@
     });
   }
 
-  document.getElementById('langToggle').addEventListener('click', () => {
-    setLang(currentLang === 'en' ? 'zh' : 'en');
+  // ============ LANGUAGE TOGGLE (segmented) ============
+  const toggle = document.getElementById('langToggle');
+  const segments = toggle.querySelectorAll('span');
+
+  function updateSegments(lang) {
+    segments.forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+
+  segments.forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) {
+        setLang(lang);
+        updateSegments(lang);
+      }
+    });
   });
 
   setLang(currentLang);
+  updateSegments(currentLang);
 
   // ============ TERMINAL TYPEWRITER ============
   (function termTyper() {
