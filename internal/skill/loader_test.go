@@ -81,6 +81,20 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 		!strings.Contains(dm.Description, "multi-step") {
 		t.Errorf("dual-model description should signal trigger conditions; got %q", dm.Description)
 	}
+
+	// plan-mode (PRD docs/prd/feature-plan-mode.md, P5) describes the
+	// analyze → propose → execute loop the propose tool participates
+	// in. Same load-bearing test as dual-model: presence + trigger
+	// keywords in the description.
+	pm := set.Get("plan-mode")
+	if pm == nil {
+		t.Fatalf("builtin plan-mode not present; loaded: %v", listNames(set))
+	}
+	if !strings.Contains(pm.Description, "plan-analyze") &&
+		!strings.Contains(pm.Description, "plan-execute") &&
+		!strings.Contains(pm.Description, "/plan") {
+		t.Errorf("plan-mode description should mention the mode-reminder substates or the /plan command so the model loads it at the right time; got %q", pm.Description)
+	}
 }
 
 func TestLoad_PriorityCascade(t *testing.T) {
