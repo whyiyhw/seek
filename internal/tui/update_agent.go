@@ -1,0 +1,501 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
+)
+
+// completionRe extracts "completion <number>" from think tool result text.
+// formatResult in internal/tools/think produces:
+//
+//	usage: prompt 956, completion 2345, cache hit 0 / miss 956
+//
+// This is a TUI-level coupling to the think tool's output format — keep in
+// sync if formatResult changes.
+var completionRe = regexp.MustCompile(`completion (\d+)`)
+
+// handleStreamEnd is the streamEndMsg case lifted out of Update(). It
+// finalises a stream (clears live buffers, persists session, restores
+// the user's last prompt on cancel) and then dispatches a queued or
+// steered message if one is waiting. Returns batched cmds for Println
+// output (interrupt notice, queue/steer marker) plus any submit-driven
+// cmds when a queued message auto-fires.
+func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	m.streaming = false
+	m.stream = nil
+	m.input.Focus()
+	// Stream ended — turn count / cache ratio changed; pick a new
+	// placeholder so the user sees a fresh hint when the input
+	// blinks back into focus.
+	m.refreshPlaceholder()
+	// Snapshot the current agent state into the session and
+	// persist. Failures are logged via a system Println rather
+	// than fatal — losing a save is annoying but shouldn't tear
+	// down the TUI.
+	m.persistSession()
+	if m.cancelStream != nil {
+		m.cancelStream()
+		m.cancelStream = nil
+	}
+	// If the user pressed Esc, commit a visible interrupt notice
+	// so it's clear something was aborted (any partial assistant
+	// text already in m.curContent is still committable, but for
+	// simplicity we drop it — the next prompt can re-ask).
+	wasCanceled := m.userCanceled
+	if m.userCanceled {
+		cmds = append(cmds, tea.Println(styleMuted.Render("  ↰ interrupted")))
+		m.scrollbackLines++
+		m.userCanceled = false
+	}
+	// At this point all completed messages are already in
+	// scrollback (committed during MessageEnd/ToolExecEnd). Clear
+	// any residual live state.
+	m.curContent = ""
+	m.curReasoning = ""
+	m.activeTools = nil
+	// Restore the user's last submitted prompt into the textarea
+	// after an Esc-cancelled stream, so they can edit and re-send.
+	// Only when the textarea is still empty — the Esc handler may
+	// have already restored queuedText into it.
+	if wasCanceled && m.input.Value() == "" && len(m.promptHistory) > 0 {
+		m.input.SetValue(m.promptHistory[len(m.promptHistory)-1])
+	}
+
+	// Queue / steer dispatch — exactly one of these fires per
+	// streamEndMsg, in priority order.
+	//
+	// pendingSteerText: set by Alt+Enter during the previous
+	// stream; that path already called cancelStream(), so we
+	// arrive here promptly. Repair() is implicit — the agent
+	// loop's invariant check already dropped the half-baked
+	// turn before we got here.
+	//
+	// queuedText: set by Enter during the previous stream. Only
+	// auto-fires when the stream ended naturally (not via Esc),
+	// otherwise the user's "Esc stops everything" expectation
+	// would be violated.
+	// Queue / steer dispatch — exactly one of these fires per
+	// streamEndMsg, in priority order. We capture submit()'s
+	// new Model so the streaming=true / streamStartTime reset
+	// it performs isn't lost when this case returns.
+	switch {
+	case m.pendingSteerText != "":
+		text := m.pendingSteerText
+		m.pendingSteerText = ""
+		m.queuedText = "" // a steer supersedes any queue
+		cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ steered")))
+		newM, cmd := m.submit(text)
+		m2 := newM.(Model)
+		m2.scrollbackLines++
+		newM = m2
+		cmds = append(cmds, cmd)
+		return newM, tea.Batch(cmds...)
+	case m.queuedText != "":
+		text := m.queuedText
+		m.queuedText = ""
+		cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
+		newM, cmd := m.submit(text)
+		m2 := newM.(Model)
+		m2.scrollbackLines++
+		newM = m2
+		cmds = append(cmds, cmd)
+		return newM, tea.Batch(cmds...)
+	}
+
+	_ = msg
+	return m, tea.Batch(cmds...)
+}
+
+// submit kicks off an agent.Prompt for the given user text. Before
+// streaming begins we commit the user's message to scrollback via
+// tea.Println so it survives in native terminal history.
+//
+// We derive a cancelable context from opts.Ctx so Esc can cancel the
+// in-flight call without tearing down the outer SIGINT context.
+func (m Model) submit(text string) (tea.Model, tea.Cmd) {
+	m.promptHistory = append(m.promptHistory, text)
+	m.historyIdx = -1
+	m.savedDraft = ""
+
+	m.curContent = ""
+	m.curReasoning = ""
+	m.activeTools = nil
+	m.userCanceled = false
+	m.streaming = true
+	m.streamStartTime = time.Now()
+	m.streamDeltaBytes = 0
+	// Leave the textarea focused — the user may want to type a
+	// queue/steer message during the stream (see handleKey's
+	// streaming branch on KeyEnter).
+
+	ctx, cancel := context.WithCancel(m.opts.Ctx)
+	m.cancelStream = cancel
+
+	ch := m.opts.Agent.Prompt(ctx, text)
+	m.stream = ch
+
+	printUser := renderCommittedUser(text, m.width)
+	m.scrollbackLines += scrollbackLineCount(printUser)
+	return m, tea.Batch(tea.Println(printUser), waitForAgentEvent(ch))
+}
+
+// applyAgentEvent updates Model state for an agent event and returns
+// any tea.Cmds needed to commit content to scrollback. Pointer receiver
+// so we can mutate m without returning a copy.
+func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	switch e := ev.(type) {
+	case agent.AgentStart, agent.TurnStart:
+		// no UI change
+	case agent.MessageStart:
+		// A new message is starting — discard any residual live state
+		// from a prior failed attempt (e.g. stream_error that triggered
+		// an agent-level retry of the same turn).
+		m.curContent = ""
+		m.curReasoning = ""
+
+	case agent.MessageDelta:
+		if e.Reasoning {
+			m.curReasoning += e.Delta
+		} else {
+			m.curContent += e.Delta
+			m.streamDeltaBytes += len(e.Delta)
+		}
+
+	case agent.MessageEnd:
+		if e.Message.Role == deepseek.RoleAssistant {
+			// Only commit a `▸ seek` scrollback block when the model
+			// actually produced narrative text. Pure tool-call turns
+			// (reasoning + tool_calls, no content) used to render as
+			// "(no content)" — that's noise: the `↳ tool(...)` lines
+			// directly below already convey what happened on that
+			// turn, and the reasoning was visible mid-stream via
+			// Ctrl+R. Skipping the commit collapses N consecutive
+			// silent reasoning rounds into just their tool lines.
+			if m.curContent != "" {
+				rendered := renderMarkdown(m.md, m.curContent)
+				if rendered == "" {
+					rendered = m.curContent
+				}
+				line := renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)
+				cmds = append(cmds, tea.Println(line))
+				m.scrollbackLines += scrollbackLineCount(line)
+			}
+			// Always reset the live-region buffers — leaving them
+			// populated would leak this turn's reasoning/content into
+			// the next turn's commit and produce a confusing splice.
+			m.curContent = ""
+			m.curReasoning = ""
+		}
+		// MessageEnd for RoleTool: skip, ToolExecEnd already committed.
+
+	case agent.ToolExecStart:
+		m.activeTools = append(m.activeTools, activeTool{
+			callID:  e.CallID,
+			name:    e.Name,
+			args:    truncateOneLine(e.Args, 80),
+			started: time.Now(),
+		})
+
+	case agent.ToolDelta:
+		// Streaming output from a long-running tool (currently only
+		// `think`). Routed into the same live-region buffers the
+		// chat model uses — sequential agent dispatch makes the
+		// aliasing safe:
+		//   1. chat model streams content → MessageEnd commits +
+		//      clears the buffers
+		//   2. then tool dispatch loop runs → ToolDelta refills the
+		//      buffers with tool output
+		//   3. ToolExecEnd clears the buffers again before the next
+		//      chat turn streams in
+		// NOTE: this aliasing breaks the moment parallel tool dispatch
+		// lands (see PRD §3.1 — currently flagged as a post-v1.0 item:
+		// "M1: sequential tool dispatch. Parallel via errgroup lands
+		// with the parallel-execution work in a later milestone"). At
+		// that point ToolDelta routing must move to a per-CallID live
+		// region keyed off m.activeTools.
+		if e.Reasoning {
+			m.curReasoning += e.Delta
+		} else {
+			m.curContent += e.Delta
+		}
+
+	case agent.ToolExecEnd:
+		// If this was a streaming tool (only `think` today), the live
+		// buffers hold what we showed during execution; the tool's
+		// full result is about to land in scrollback as a single
+		// committed line, so the live preview is now stale and would
+		// bleed into the next chat turn's display.
+		//
+		// Unconditional clear is intentional: a non-streaming tool
+		// leaves both buffers empty (nothing ever pushed via
+		// ToolDelta), so the assignment is a no-op rather than a
+		// bug. Cheaper than adding a "did we stream?" flag.
+		m.curContent = ""
+		m.curReasoning = ""
+		// ToolExecEnd carries Name/Result/Err but not Args/started —
+		// look both back up from the active list.
+		var (
+			args             string
+			duration         time.Duration
+			completionTokens int
+		)
+		for i, t := range m.activeTools {
+			if t.callID == e.CallID {
+				args = t.args
+				duration = time.Since(t.started)
+				// Parse completion tokens from result and set on the
+				// active tool so View() can show them for one frame
+				// before cleanupToolMsg removes it.
+				if e.Result != "" {
+					matches := completionRe.FindStringSubmatch(e.Result)
+					if len(matches) >= 2 {
+						fmt.Sscanf(matches[1], "%d", &completionTokens)
+						if completionTokens > 0 {
+							m.activeTools[i].completionTokens = completionTokens
+						}
+					}
+				}
+				// Defer removal — queue cleanup for next frame so
+				// View() renders the final token count once.
+				cmds = append(cmds, func() tea.Msg {
+					return cleanupToolMsg{callID: e.CallID}
+				})
+				break
+			}
+		}
+		var line string
+		tokenTail := formatTokenTail(completionTokens)
+		if e.Err != nil {
+			line = renderCommittedToolErr(e.Name, args, e.Err.Error(), duration)
+		} else {
+			line = renderCommittedToolOk(e.Name, args, e.Result, duration, tokenTail)
+		}
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+
+	case agent.TurnEnd:
+		m.turns++
+		// Lock in cost at the (model, tier) active when the turn settled
+		// — see internal/cache doc. Using m.opts.Model rather than a
+		// model captured at TurnStart is a deliberate small race: a
+		// /model switch while the previous turn is still streaming
+		// would mis-attribute that turn's cost. /model is gated to
+		// non-streaming state in handleKey so the race is mostly
+		// theoretical; the alternative (carry model on TurnEnd events)
+		// would propagate plumbing into pkg/agent for negligible win.
+		m.opts.Tracker.Record(e.Usage, m.opts.Model, pricing.CurrentTier(time.Now()))
+		m.toolCalls += e.ToolCalls
+
+	case agent.AgentEnd:
+		// Stats footer at turn boundary — print a thin separator with
+		// running totals so a long session has visible "checkpoints"
+		// in the scrollback.
+		cmds = append(cmds, tea.Println(m.renderTurnFooter()))
+		m.scrollbackLines++
+
+	case agent.ErrorEvent:
+		m.lastErr = e.Err
+		errLine := styleErr.Render("  ! error: " + e.Err.Error())
+		cmds = append(cmds, tea.Println(errLine))
+		m.scrollbackLines += scrollbackLineCount(errLine)
+
+	case agent.PlanProposalApproved:
+		// User approved the proposed plan via the propose tool's
+		// picker. Flip into plan-execute substate: permission policy
+		// becomes ModeAsk (writes prompt per call) and the mode
+		// reminder switches to "plan-execute". Status bar shows
+		// PLAN:EXEC in warning colour so the user can see the gate
+		// is open. See PRD §2.5.
+		_ = e // Steps field reserved for v2 panel rendering
+		m.opts.PlanSubstate = "execute"
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("execute")
+		}
+		line := styleMuted.Render("  ▸ plan approved — write/edit/bash now ask per call")
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+
+	case agent.PlanProposalAdjustRequested:
+		// User declined the proposed plan with optional free-text
+		// feedback. Stay in plan-analyze (permission policy unchanged
+		// at ModePlan). The propose tool's result string already
+		// instructs the model to re-think; nothing else to wire here.
+		m.opts.PlanSubstate = "analyze"
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("analyze")
+		}
+		msg := "  ▸ plan rejected — re-thinking"
+		if e.Feedback != "" {
+			msg += " (feedback: " + truncateOneLine(e.Feedback, 60) + ")"
+		}
+		line := styleMuted.Render(msg)
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+
+	case agent.PlanProposalCancelled:
+		// User aborted /plan entirely from the propose picker. Same
+		// effect as toggling /plan off manually: permission to
+		// ModeAsk, mode label cleared, status bar drops the PLAN
+		// badge.
+		m.opts.Plan = false
+		m.opts.PlanSubstate = ""
+		if m.opts.SetPlan != nil {
+			m.opts.SetPlan(false)
+		}
+		m.refreshPlaceholder()
+		line := styleMuted.Render("  ▸ plan cancelled — exited /plan mode")
+		cmds = append(cmds, tea.Println(line))
+		m.scrollbackLines += scrollbackLineCount(line)
+	}
+
+	return cmds
+}
+
+// handleCompactDone reacts to the summariser's response: on success,
+// forks the session to preserve the full history, then resets the
+// agent to a two-message summary so the conversation can continue
+// with a fresh context window.
+//
+// Session chain after compact:
+//
+//	<old-id>  (full history, preserved on disk) ← ParentID
+//	<new-id>  (summary pair, active session)    → continues here
+//
+// The chain is traversable via --resume and visible in --list, so no
+// history is ever permanently lost.
+func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
+	if msg.err != nil {
+		line := styleErr.Render("  ! compact failed: " + msg.err.Error())
+		m.scrollbackLines += scrollbackLineCount(line)
+		return []tea.Cmd{tea.Println(line)}
+	}
+	if m.opts.Agent == nil {
+		return nil
+	}
+	// Fold the summariser's own usage into the cumulative tracker so
+	// the cost line in the status bar stays honest — the compact call
+	// is a real billed request.
+	if m.opts.Tracker != nil {
+		m.opts.Tracker.Record(msg.usage, m.opts.Model, pricing.CurrentTier(time.Now()))
+	}
+
+	var snapshotID string
+
+	// When session persistence is active: flush the full history to disk
+	// under the current session ID (the "snapshot"), then fork a child
+	// session that will hold only the compact summary. This preserves every
+	// message ever exchanged and makes the chain inspectable via --list.
+	if m.opts.Session != nil && m.opts.Store != nil {
+		// 1. Write full history to the current (snapshot) session.
+		m.persistSession()
+		snapshotID = m.opts.Session.ID
+
+		// 2. Fork: new session, ParentID → snapshot. Counters reset to 0
+		//    so the child's stats reflect only post-compact activity.
+		child := m.opts.Session.Fork()
+		m.opts.Session = child
+		m.turns = 0
+		m.toolCalls = 0
+	}
+
+	// The user→assistant bootstrap pair is what upstream pi / Claude
+	// Code does: the next real user message slots in cleanly after an
+	// assistant turn, no role-ordering weirdness for the API.
+	m.opts.Agent.Reset([]deepseek.Message{
+		{
+			Role:    deepseek.RoleUser,
+			Content: "Here is a summary of our earlier conversation. Continue from this context:\n\n" + msg.summary,
+		},
+		{
+			Role:    deepseek.RoleAssistant,
+			Content: "Understood — I have the context. Ready to continue.",
+		},
+	})
+
+	// 3. Write summary messages to the child session.
+	m.persistSession()
+
+	var notice string
+	if snapshotID != "" && m.opts.Session != nil {
+		notice = fmt.Sprintf(
+			"compacted: snapshot %s → continuing on %s (%d prompt + %d completion tokens)",
+			snapshotID, m.opts.Session.ID,
+			msg.usage.PromptTokens, msg.usage.CompletionTokens)
+	} else {
+		// --no-save: no fork, just report token cost.
+		notice = fmt.Sprintf(
+			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
+			msg.usage.PromptTokens, msg.usage.CompletionTokens)
+	}
+	m.scrollbackLines += scrollbackLineCount(styleMuted.Render(notice))
+	return []tea.Cmd{tea.Println(styleMuted.Render(notice))}
+}
+
+// persistSession snapshots the agent's current message history,
+// counters, and usage into Options.Session and saves via Options.Store.
+// No-op when either is nil (ephemeral run / --no-save).
+func (m *Model) persistSession() {
+	if m.opts.Session == nil || m.opts.Store == nil || m.opts.Agent == nil {
+		return
+	}
+	m.opts.Session.Messages = m.opts.Agent.Messages()
+	m.opts.Session.Turns = m.turns
+	m.opts.Session.ToolCalls = m.toolCalls
+	m.opts.Session.Usage = m.opts.Tracker.Cumulative()
+	m.opts.Session.Model = m.opts.Model
+	m.opts.Session.Yolo = m.opts.Yolo
+	m.opts.Session.Effort = m.opts.Effort
+	if err := m.opts.Store.Save(m.opts.Session); err != nil {
+		// Surface to scrollback so the user knows persistence broke;
+		// they can keep working but should investigate before losing
+		// the session.
+		// We can't tea.Println from a pointer-receiver helper without
+		// returning a Cmd — so just stash on lastErr and let View
+		// pick it up on next render.
+		m.lastErr = err
+	}
+}
+
+// truncateOneLine collapses newlines and clips the result to n chars.
+// Uses rune-level slicing so multi-byte UTF-8 characters (Chinese, emoji,
+// etc.) are never split mid-sequence — see docs/pitfalls.md "s[:n] on a
+// multi-byte UTF-8 string produces broken runes".
+func truncateOneLine(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+func (m Model) renderTurnFooter() string {
+	c := m.opts.Tracker.Last()
+	// Cost is the locked-in amount from when this turn was recorded —
+	// not a re-derivation against the current model/tier. Avoids the
+	// "switched model mid-turn → footer shows wrong dollars" race.
+	cost := pricing.FormatCost(m.opts.Tracker.LastCost())
+
+	var cacheNote string
+	if c.PromptTokens > 0 && c.PromptCacheHitTokens > 0 {
+		pct := int(float64(c.PromptCacheHitTokens) / float64(c.PromptTokens) * 100)
+		cacheNote = fmt.Sprintf(" (%d%% cache)", pct)
+	}
+
+	return styleMuted.Render(fmt.Sprintf(
+		"  · turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s",
+		m.turns, m.toolCalls,
+		formatTokensK(c.PromptTokens), cacheNote,
+		formatTokensK(c.CompletionTokens), cost))
+}
