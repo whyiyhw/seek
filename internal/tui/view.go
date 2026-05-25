@@ -143,13 +143,28 @@ func (m Model) View() string {
 		}
 	}
 
+	// "Bottom block" — everything pinned to the bottom of the viewport:
+	// queue hint, setup banner, skill armed badge, INPUT, autocomplete
+	// dropdowns. Rendered into a separate buffer so its height is
+	// known BEFORE we decide where to place the bottom-pin pad — that
+	// way the input + status pin to the terminal bottom regardless of
+	// how tall the live region above grows during streaming.
+	//
+	// Historical note: this used to be written directly into sb and
+	// padded AFTER input/dropdowns (pad sat between input and status).
+	// Result: as agent output streamed in, the input slid DOWN with
+	// the live content while status stayed pinned — input "followed
+	// the output" instead of staying with the status bar. Putting
+	// the pad BEFORE this block fixes that.
+	var bottomBuf strings.Builder
+
 	// Queue / steer hint — only meaningful mid-stream. Sits ABOVE the
 	// textarea so the user can see "what's already queued" and "what
 	// I'm currently typing" without the two visually merging.
 	if m.streaming {
 		if hint := m.renderQueueHint(); hint != "" {
-			sb.WriteString(hint)
-			sb.WriteString("\n")
+			bottomBuf.WriteString(hint)
+			bottomBuf.WriteString("\n")
 		}
 	}
 
@@ -157,10 +172,10 @@ func (m Model) View() string {
 	// exclusive: /setup can't be opened mid-stream so we never need
 	// both at once).
 	if m.setupKeyEntry {
-		sb.WriteString(styleMuted.Render(fmt.Sprintf(
+		bottomBuf.WriteString(styleMuted.Render(fmt.Sprintf(
 			"✎ paste API key for %s — Enter to save, Esc to cancel",
 			m.setupProvider)))
-		sb.WriteString("\n")
+		bottomBuf.WriteString("\n")
 	}
 
 	// Skill-armed badge — sits directly above the input so the user
@@ -169,9 +184,9 @@ func (m Model) View() string {
 	// above (mid-stream + armed is legitimate — the armed wrapping
 	// applies to whatever message gets queued).
 	if m.pendingSkill != "" {
-		sb.WriteString(styleToolSkill.Render(fmt.Sprintf("✦ skill armed: %s", m.pendingSkill)))
-		sb.WriteString(styleMuted.Render(" — next message uses this skill (/skill use clear to cancel)"))
-		sb.WriteString("\n")
+		bottomBuf.WriteString(styleToolSkill.Render(fmt.Sprintf("✦ skill armed: %s", m.pendingSkill)))
+		bottomBuf.WriteString(styleMuted.Render(" — next message uses this skill (/skill use clear to cancel)"))
+		bottomBuf.WriteString("\n")
 	}
 
 	// Input area FIRST (above any dropdown) — autocomplete popups
@@ -181,8 +196,8 @@ func (m Model) View() string {
 	// "/" or "@", obscuring whatever they were reading. Below-the-
 	// input keeps the upper conversation steady; the menu grows
 	// downward into the space just above the status bar.
-	sb.WriteString(m.renderInput())
-	sb.WriteString("\n")
+	bottomBuf.WriteString(m.renderInput())
+	bottomBuf.WriteString("\n")
 
 	// Approval prompt takes precedence — blurs the input, blocks
 	// everything else. After that, command menu and path picker are
@@ -193,32 +208,35 @@ func (m Model) View() string {
 	// active because they both block the agent goroutine.
 	switch {
 	case m.pendingApproval != nil:
-		sb.WriteString(m.renderApprovalPrompt())
+		bottomBuf.WriteString(m.renderApprovalPrompt())
 	case m.pendingQuestion != nil:
-		sb.WriteString(m.renderUserQuestion())
+		bottomBuf.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
-		sb.WriteString(m.renderDistillReview())
+		bottomBuf.WriteString(m.renderDistillReview())
 	case m.commandMenuOpen:
-		sb.WriteString(m.renderCommandMenu())
+		bottomBuf.WriteString(m.renderCommandMenu())
 	case m.modelPickerOpen:
-		sb.WriteString(m.renderModelPicker())
+		bottomBuf.WriteString(m.renderModelPicker())
 	case m.pathPicker.open:
-		sb.WriteString(m.renderPathPicker())
+		bottomBuf.WriteString(m.renderPathPicker())
 	}
 
-	// Pin the status bar to the bottom of the terminal window.
-	// cursorRow = welcomeFixedLines + total tea.Println scrollback lines.
-	// Add padding to fill remaining vertical space so the status bar
-	// always sits on the terminal's last visible line.
+	// Bottom-pin pad — fills space BETWEEN live content and the bottom
+	// block so the whole input+status assembly sits on the terminal's
+	// last rows. Gated on scrollbackLines > 0 so we don't double-pad
+	// over welcomePadding (which fires in the idle scrollback==0 case).
 	if m.scrollbackLines > 0 && m.height > 0 {
-		contentHeight := strings.Count(sb.String(), "\n") + 1
+		liveHeight := strings.Count(sb.String(), "\n") + 1
+		bottomHeight := strings.Count(bottomBuf.String(), "\n") + 1
 		cursorRow := welcomeFixedLines + m.scrollbackLines
 		remaining := m.height - cursorRow
-		pad := remaining - contentHeight - 2 // -2 for status bar + bottom rule
+		pad := remaining - liveHeight - bottomHeight - 2 // -2 for status bar + bottom rule
 		if pad > 0 {
 			sb.WriteString(strings.Repeat("\n", pad))
 		}
 	}
+
+	sb.WriteString(bottomBuf.String())
 
 	// Status line.
 	sb.WriteString(m.renderStatusBar())
