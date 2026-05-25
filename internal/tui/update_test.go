@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -1200,5 +1201,79 @@ func TestReviewBranchEntry_EnterSubmitsCommand(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("Enter with a branch name should return a tea.Cmd")
+	}
+}
+
+func TestTruncateOneLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{
+			name: "ascii_under_limit",
+			s:    "hello world",
+			n:    20,
+			want: "hello world",
+		},
+		{
+			name: "ascii_exact_limit",
+			s:    "hello world",
+			n:    11,
+			want: "hello world",
+		},
+		{
+			name: "ascii_over_limit",
+			s:    "hello world this is long",
+			n:    11,
+			want: "hello world…",
+		},
+		{
+			name: "chinese_under_limit",
+			s:    "你好世界",
+			n:    10,
+			want: "你好世界",
+		},
+		{
+			name: "chinese_over_limit_cut_at_char_boundary",
+			s:    "跑一下 go test 确认没坏",
+			n:    12,
+			want: "跑一下 go test …",
+		},
+		{
+			name: "emoji_4byte",
+			s:    "hello 🫠 world",
+			n:    8,
+			want: "hello 🫠 …",
+		},
+		{
+			name: "newlines_collapsed",
+			s:    "line1\nline2\nline3",
+			n:    15,
+			want: "line1 line2 lin…",
+		},
+		{
+			name: "mixed_multi_byte_cut_between_bytes_old_bug",
+			s:    "abcdefghijklmnopqrstuvwxyz一的二三四五六七八九十",
+			n:    30,
+			// Byte 30 would land mid-character for '的' (3-byte).
+			// Rune-level slicing gives 30 code points = "abcdefghijklmnopqrstuvwxyz一的二三"
+			want: "abcdefghijklmnopqrstuvwxyz一的二三…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateOneLine(tt.s, tt.n)
+			if got != tt.want {
+				t.Errorf("truncateOneLine(%q, %d) = %q, want %q", tt.s, tt.n, got, tt.want)
+			}
+			// The result must always be valid UTF-8.
+			if !utf8.ValidString(got) {
+				t.Errorf("truncateOneLine(%q, %d) produced invalid UTF-8: %q", tt.s, tt.n, got)
+			}
+		})
 	}
 }

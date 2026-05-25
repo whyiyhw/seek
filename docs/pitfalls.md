@@ -569,3 +569,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: moved the `m.reviewBranchEntry` check to the top of the Esc handler, before the streaming check. Now Esc in branch-entry mode always cancels the entry regardless of stream state. The streaming path is only reached when reviewBranchEntry is false
 - **Lesson**: when adding a modal sub-state (reviewBranchEntry, setupKeyEntry) that uses the textarea, its Esc handler must come BEFORE the streaming Esc handler. Otherwise, Esc during an active stream can't exit the modal state. General rule: all modal-state Esc guards go first, streaming-cancel second, fallback third
 - **Refs**: `internal/tui/update.go:handleKey` (`case tea.KeyEsc`), `internal/tui/commands.go:handleReviewPick`, commit (this commit)
+
+### `s[:n]` on a multi-byte UTF-8 string produces broken runes
+- **Saw**: queued Chinese text (Enter during a stream) showed garbled characters in the "↰ queued:" preview, and any Chinese text clipped by `truncateOneLine` rendered as invalid UTF-8 (� characters) wherever it appeared (tool args, permission prompts)
+- **Why**: `truncateOneLine` used `len(s)` (byte count) and `s[:n]` (byte slicing) on a UTF-8 string. Chinese characters are 3 bytes in UTF-8; when `n` landed in the middle of a 3-byte sequence, the resulting string contained an incomplete/invalid UTF-8 sequence. Same root cause as the banner bug — byte-level indexing on a multi-byte string
+- **Fix**: changed `truncateOneLine` to use `[]rune(s)` for length comparison and slicing — rune-level slicing never splits a multi-byte character. Commit (this commit)
+- **Lesson**: any Go code that truncates, clips, or paginates user-visible text by length must use `[]rune` for the count and the slice operation. `string` indexing is byte-level; multi-byte characters (Chinese, emoji, CJK punctuation) will be silently corrupted. The function signature says "n chars" — make sure the implementation actually counts chars, not bytes
+- **Refs**: `internal/tui/update.go:truncateOneLine`, `docs/pitfalls.md:300` (same root cause, different surface)

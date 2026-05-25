@@ -1233,12 +1233,16 @@ func (m *Model) persistSession() {
 }
 
 // truncateOneLine collapses newlines and clips the result to n chars.
+// Uses rune-level slicing so multi-byte UTF-8 characters (Chinese, emoji,
+// etc.) are never split mid-sequence — see docs/pitfalls.md "s[:n] on a
+// multi-byte UTF-8 string produces broken runes".
 func truncateOneLine(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(runes[:n]) + "…"
 }
 
 func (m Model) renderTurnFooter() string {
