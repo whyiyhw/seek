@@ -189,7 +189,8 @@ func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int)
 
 // Fork returns a new Session branching off s: fresh ID, ParentID
 // pointing at s, independent copy of the message slice, reset
-// counters/usage. Model / Yolo / Plan / CWD / SystemPrompt are inherited.
+// counters/usage. Model / Yolo / Plan / CWD / SystemPrompt
+// are inherited.
 //
 // The parent is untouched in memory; callers that want it on disk at
 // the fork point should Save it before calling Fork.

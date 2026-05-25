@@ -96,6 +96,7 @@ func twoTurnBackend(t *testing.T) (*httptest.Server, *int32) {
 }
 
 func TestAgent_ToolCallFlow(t *testing.T) {
+	t.Parallel()
 	srv, calls := twoTurnBackend(t)
 	defer srv.Close()
 
@@ -214,6 +215,7 @@ func TestAgent_ToolCallFlow(t *testing.T) {
 }
 
 func TestAgent_NoTools_StraightAnswer(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
@@ -266,6 +268,7 @@ func TestAgent_NoTools_StraightAnswer(t *testing.T) {
 // one via InitialMessages) has its reasoning_content STRIPPED, since
 // the contract only protects tool-call turns.
 func TestAgent_PreservesReasoningContentOnToolCallTurns(t *testing.T) {
+	t.Parallel()
 	var (
 		callCount int32
 		req2Body  struct {
@@ -365,6 +368,7 @@ func TestAgent_PreservesReasoningContentOnToolCallTurns(t *testing.T) {
 // fix — without it, deepseek-reasoner silently falls back to V4-Flash
 // (the bug that motivated pkg/deepseek.ShouldEnableThinking).
 func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		model       string
 		wantEnabled bool
@@ -418,6 +422,7 @@ func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
 //   - error → "tool error: ..." takes precedence over result
 //   - error wins even when the partial result is non-empty
 func TestBuildToolResultMsg(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		id   string
@@ -454,6 +459,7 @@ func TestBuildToolResultMsg(t *testing.T) {
 // from the wire body. This test captures the second-turn request and
 // asserts the tool message has a `content` field with the placeholder.
 func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
+	t.Parallel()
 	var (
 		callCount     int32
 		secondReqBody []byte
@@ -557,6 +563,7 @@ func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
 //   - SetEffort changes the value visible on the very next prompt,
 //     without rebuilding the agent.
 func TestAgent_EffortOverridesThinking(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name              string
 		model             string
@@ -616,6 +623,7 @@ func TestAgent_EffortOverridesThinking(t *testing.T) {
 // this, /effort would feel "sticky" — the user toggles max, sends a
 // prompt, and the agent quietly keeps running at the prior level.
 func TestAgent_SetEffortVisibleNextPrompt(t *testing.T) {
+	t.Parallel()
 	var lastEffort string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -657,6 +665,7 @@ func TestAgent_SetEffortVisibleNextPrompt(t *testing.T) {
 }
 
 func TestAgent_Reset_PreservesSystemDropsSystemInHistory(t *testing.T) {
+	t.Parallel()
 	ag, _ := New(Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
 		SystemPrompt: "you are seek",
@@ -686,6 +695,7 @@ func TestAgent_Reset_PreservesSystemDropsSystemInHistory(t *testing.T) {
 }
 
 func TestAgent_Reset_EmptyHistoryLeavesJustSystem(t *testing.T) {
+	t.Parallel()
 	ag, _ := New(Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
 		SystemPrompt: "sys",
@@ -699,6 +709,7 @@ func TestAgent_Reset_EmptyHistoryLeavesJustSystem(t *testing.T) {
 }
 
 func TestAgent_Summarise_ReturnsContentDoesNotMutateHistory(t *testing.T) {
+	t.Parallel()
 	// Non-streaming Chat endpoint returns one assistant message.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify request body has both the real history AND the appended
@@ -756,6 +767,7 @@ func TestAgent_Summarise_ReturnsContentDoesNotMutateHistory(t *testing.T) {
 //   - a follow-up Prompt against a normal server succeeds, proving
 //     the session is still usable.
 func TestAgent_CancelDuringToolCallStreamDoesNotPoisonHistory(t *testing.T) {
+	t.Parallel()
 	// First server: streams a tool_call delta then blocks forever.
 	// The test cancels ctx to trigger the cleanup path.
 	firstBlock := make(chan struct{})
@@ -887,6 +899,7 @@ func (s *streamingStub) ExecuteStream(_ context.Context, _ json.RawMessage, push
 // the agent must surface its intermediate output as ToolDelta events
 // in-order between the matching ToolExecStart and ToolExecEnd.
 func TestAgent_StreamingTool_RoutesToolDeltaEvents(t *testing.T) {
+	t.Parallel()
 	// Server: emits one tool_call delta for "stream_me" then closes.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1086,6 +1099,7 @@ func happyChatServer(t *testing.T) *httptest.Server {
 // user cancellation. Pre-fix, the agent appended the orphan assistant
 // and the session was bricked.
 func TestAgent_StreamTruncatedMidToolCall(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -1128,6 +1142,7 @@ func TestAgent_StreamTruncatedMidToolCall(t *testing.T) {
 // finish_reason in the same stream — should never happen per spec
 // but we don't trust the spec to hold across proxies / SDKs.
 func TestAgent_FinishReasonMismatch_DropsOrphanToolCalls(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
@@ -1169,6 +1184,7 @@ func TestAgent_FinishReasonMismatch_DropsOrphanToolCalls(t *testing.T) {
 // "decode_error:..." in that case, which the new invariant treats as
 // "anything that isn't 'tool_calls' means drop the tool_calls".
 func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
@@ -1201,6 +1217,7 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 // role=assistant with no content and no tool_calls, which DeepSeek
 // rejects with "content or tool_calls must be set".
 func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
@@ -1236,6 +1253,7 @@ func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 // as a tool result message so the next turn carries it back to the
 // model, which can then correct itself.
 func TestAgent_MalformedToolArgs_RecordedAsToolError(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
@@ -1311,6 +1329,7 @@ func (t *strictArgsTool) Execute(_ context.Context, raw json.RawMessage) (string
 // earlier tests in this file regress, this one catches the end-to-end
 // effect for the user.
 func TestAgent_MultiTurn_RoundTripsCleanHistory(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -1391,6 +1410,7 @@ func TestAgent_MultiTurn_RoundTripsCleanHistory(t *testing.T) {
 }
 
 func TestAgent_UnknownToolErrorsCleanly(t *testing.T) {
+	t.Parallel()
 	// LLM asks to call a tool we didn't register.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1437,6 +1457,7 @@ func TestAgent_UnknownToolErrorsCleanly(t *testing.T) {
 // total elapsed time must be less than toolCount×toolLatency — a bound
 // that would be violated if dispatch were sequential.
 func TestAgent_ParallelReadOnlyDispatch(t *testing.T) {
+	t.Parallel()
 	const (
 		toolCount   = 3
 		toolLatency = 50 * time.Millisecond
@@ -1527,5 +1548,98 @@ func TestAgent_ParallelReadOnlyDispatch(t *testing.T) {
 		if id != want[i] {
 			t.Errorf("tool result[%d] = %q, want %q", i, id, want[i])
 		}
+	}
+}
+
+func TestModeReminder(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		label string
+		want  string
+	}{
+		{"", ""},
+		{"ask", ""},
+		{"unknown", ""},
+		{"yolo", "\n\n[Mode: yolo — write, edit, and bash are unrestricted.]"},
+		{"plan", "\n\n[Mode: plan — read-only. Do not call write, edit, or bash; produce a plan instead.]"},
+	}
+	for _, tt := range tests {
+		got := modeReminder(tt.label)
+		if got != tt.want {
+			t.Errorf("modeReminder(%q) = %q, want %q", tt.label, got, tt.want)
+		}
+	}
+}
+
+// TestAgent_SetModeLabelVisibleNextPrompt pins that flipping the mode label
+// between turns takes effect immediately — the reminder appears in the next
+// user message sent to the API. This is the per-message equivalent of
+// TestAgent_SetEffortVisibleNextPrompt.
+func TestAgent_SetModeLabelVisibleNextPrompt(t *testing.T) {
+	t.Parallel()
+	var lastUserContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		// Grab the content of the last user message.
+		for i := len(body.Messages) - 1; i >= 0; i-- {
+			if body.Messages[i].Role == "user" {
+				lastUserContent = body.Messages[i].Content
+				break
+			}
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV4Flash,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// Turn 1: no mode label set → no reminder.
+	for range ag.Prompt(context.Background(), "hi") {
+	}
+	if strings.Contains(lastUserContent, "[Mode:") {
+		t.Errorf("turn 1: unexpected mode reminder in user content: %q", lastUserContent)
+	}
+
+	// Set mode to yolo — reminder should appear in turn 2.
+	ag.SetModeLabel("yolo")
+	for range ag.Prompt(context.Background(), "again") {
+	}
+	if !strings.Contains(lastUserContent, "[Mode: yolo — write, edit, and bash are unrestricted.]") {
+		t.Errorf("turn 2: expected yolo reminder in user content, got: %q", lastUserContent)
+	}
+
+	// Switch to plan — reminder should change.
+	ag.SetModeLabel("plan")
+	for range ag.Prompt(context.Background(), "once more") {
+	}
+	if !strings.Contains(lastUserContent, "[Mode: plan — read-only.") {
+		t.Errorf("turn 3: expected plan reminder in user content, got: %q", lastUserContent)
+	}
+
+	// Clear the label — reminder should disappear.
+	ag.SetModeLabel("")
+	for range ag.Prompt(context.Background(), "final") {
+	}
+	if strings.Contains(lastUserContent, "[Mode:") {
+		t.Errorf("turn 4: unexpected mode reminder after clear: %q", lastUserContent)
 	}
 }

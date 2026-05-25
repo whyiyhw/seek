@@ -11,6 +11,7 @@ import (
 )
 
 func TestFIM_HappyPath(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != endpointFIM {
 			t.Errorf("path = %s, want %s", r.URL.Path, endpointFIM)
@@ -47,6 +48,7 @@ func TestFIM_HappyPath(t *testing.T) {
 }
 
 func TestFIM_RequiresPrompt(t *testing.T) {
+	t.Parallel()
 	c := New(WithAPIKey("t"))
 	_, err := c.FIM(context.Background(), &FIMRequest{})
 	if err == nil || !strings.Contains(err.Error(), "non-empty Prompt") {
@@ -55,6 +57,7 @@ func TestFIM_RequiresPrompt(t *testing.T) {
 }
 
 func TestFIM_APIErrorPropagates(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = io.WriteString(w, `{"error":{"type":"invalid_request","message":"prompt too long"}}`)

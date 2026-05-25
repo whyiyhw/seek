@@ -90,6 +90,7 @@ Workflow:
 3. For multi-step or risky tasks, call think first to plan; for non-trivial changes, call think(reflect=true) after to self-review.
 4. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
 5. For permission denials, surface the message to the user and stop — do not loop.
+6. Never run git commit without explicit user confirmation. The workflow is: modify → review → user commits.
 
 Working directory: %s. Mode: %s.
 `
@@ -203,8 +204,7 @@ func run() error {
 	)
 	flag.Parse()
 
-	// --yolo and --plan are mutually exclusive: yolo allows everything,
-	// plan denies everything — combining them makes no sense.
+	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
 		return fmt.Errorf("--yolo and --plan are mutually exclusive")
 	}
@@ -743,7 +743,7 @@ func run() error {
 			if manifest := skills.Manifest(); manifest != "" {
 				sp = sp + "\n" + manifest
 			}
-			return agent.New(agent.Config{
+			newAg, err := agent.New(agent.Config{
 				Client:       dsClient,
 				Provider:     provider,
 				Model:        sessionModel,
@@ -754,6 +754,17 @@ func run() error {
 				MaxTurns:     *maxTurns,
 				AutoContinue: *autoContinue,
 			})
+			if err != nil {
+				return nil, err
+			}
+			// Keep the closure-captured ag in sync so SetYolo /
+			// SetPlan callbacks update the live agent's
+			// ModeLabel, not a stale copy.
+			ag = newAg
+			// Rebuilt system prompt already has the correct mode
+			// label — clear per-message reminder.
+			ag.SetModeLabel("")
+			return newAg, nil
 		},
 		SetModel: func(m string) { sessionModel = m },
 		SetEffort: func(e string) {
@@ -770,23 +781,27 @@ func run() error {
 			sessionLang = l
 		},
 		SetYolo: func(y bool) {
-			// policy is the single source of truth now — mode flip is
-			// observed by every tool's permission.Check call
-			// immediately, no registry rebuild needed.
+			// policy.SetMode takes effect immediately for every
+			// tool's permission.Check call. The agent's per-message
+			// modeReminder keeps the model in sync without touching
+			// the system prompt (prefix-cache safe).
 			if y {
 				policy.SetMode(permission.ModeYolo)
+				ag.SetModeLabel("yolo")
 			} else {
 				policy.SetMode(permission.ModeAsk)
+				ag.SetModeLabel("")
 			}
 		},
 		SetPlan: func(p bool) {
-			// Flip between Plan and Ask modes. The system prompt is NOT
-			// rebuilt (same as /yolo) — the plan instruction stays as it
-			// was at startup. The permission gate takes effect immediately.
+			// Same as SetYolo — permission gate flips immediately;
+			// modeReminder tells the model on the next user turn.
 			if p {
 				policy.SetMode(permission.ModePlan)
+				ag.SetModeLabel("plan")
 			} else {
 				policy.SetMode(permission.ModeAsk)
+				ag.SetModeLabel("")
 			}
 		},
 	})

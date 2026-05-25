@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +53,7 @@ func allCommands() []command {
 		{names: []string{"/lang"}, usage: "/lang [en|zh|auto]", description: "Set response language preference. No args opens a picker. Switching invalidates the prefix cache; effective after /new.", handler: cmdLang},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/plan"}, usage: "/plan", description: "Toggle plan mode (read-only exploration) for the rest of this session.", handler: cmdPlan},
+		{names: []string{"/review"}, usage: "/review [branch]", description: "Code review working-tree changes. No args opens a picker; pass a branch name to diff against it instead.", handler: cmdReview},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
@@ -585,7 +588,18 @@ func (m *Model) cancelSetup() tea.Cmd {
 }
 
 func cmdYolo(m *Model, _ string) cmdResult {
+	wasPlan := m.opts.Plan
 	m.opts.Yolo = !m.opts.Yolo
+	// Yolo and Plan are mutually exclusive — toggle off Plan when
+	// entering yolo so the permission policy and status bar badge
+	// are consistent. Fire the opposing callback so side effects
+	// (policy, mode label) are symmetric with cycleMode.
+	if m.opts.Yolo {
+		m.opts.Plan = false
+		if wasPlan && m.opts.SetPlan != nil {
+			m.opts.SetPlan(false)
+		}
+	}
 	if m.opts.SetYolo != nil {
 		m.opts.SetYolo(m.opts.Yolo)
 	}
@@ -600,7 +614,18 @@ func cmdYolo(m *Model, _ string) cmdResult {
 }
 
 func cmdPlan(m *Model, _ string) cmdResult {
+	wasYolo := m.opts.Yolo
 	m.opts.Plan = !m.opts.Plan
+	// Plan and Yolo are mutually exclusive — toggle off Yolo when
+	// entering plan so the permission policy and status bar badge
+	// are consistent. Fire the opposing callback so side effects
+	// (policy, mode label) are symmetric with cycleMode.
+	if m.opts.Plan {
+		m.opts.Yolo = false
+		if wasYolo && m.opts.SetYolo != nil {
+			m.opts.SetYolo(false)
+		}
+	}
 	if m.opts.SetPlan != nil {
 		m.opts.SetPlan(m.opts.Plan)
 	}
@@ -610,6 +635,371 @@ func cmdPlan(m *Model, _ string) cmdResult {
 		state = "on"
 	}
 	return cmdResult{text: styleMuted.Render("plan " + state)}
+}
+
+func cmdReview(m *Model, args string) cmdResult {
+	// Submit a review prompt. We do NOT force plan mode — the prompt
+	// itself instructs the model to stay read-only ("Do NOT write or
+	// edit files"). Keeping the current permission mode lets the model
+	// use bash for git diff/git log in ModeAsk (with user approval) or
+	// ModeYolo, which makes review far more efficient than grep/read
+	// over every changed file. If the user is already in plan mode
+	// (explicit /plan toggle), that is respected and bash stays denied.
+
+	args = strings.TrimSpace(args)
+
+	if args == "" {
+		// No args: open a picker so the user can choose between
+		// working-tree review or diffing against a specific branch.
+		choices := reviewChoices(m.opts.CWD)
+		if len(choices) == 0 {
+			// Not a git repo or no branches at all — fall back to
+			// a generic code-review prompt.
+			return submitOrSteer(m, fallbackReviewPrompt())
+		}
+		m.modelPickerFiltered = choices
+		m.modelPickerSelected = 0
+		m.modelPickerOpen = true
+		m.pickerPurpose = "review"
+		return cmdResult{}
+	}
+
+	// args is a branch name: diff against it.
+	// If we can determine the current branch and the target matches,
+	// fall back to working-tree review (no diff needed).
+	// Use a 5-second timeout so a hung git doesn't freeze the TUI.
+	gitCtx, gitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer gitCancel()
+	current := currentGitBranch(gitCtx, m.opts.CWD)
+	if current != "" && args == current {
+		if changes, ok := gatherChangedFiles(m.opts.CWD); ok {
+			return submitOrSteer(m, workingTreeReviewPrompt(changes))
+		}
+		return submitOrSteer(m, fallbackReviewPrompt())
+	}
+	if diffContent, ok := gatherBranchDiff(m.opts.CWD, args); ok {
+		return submitOrSteer(m, branchDiffReviewPrompt(args, diffContent))
+	}
+	return cmdResult{text: styleErr.Render("no diff found between current branch and " + args)}
+}
+
+// reviewChoices builds the picker options for /review.
+// The first option is "Review working tree changes" (if there are any).
+// Then the list of local branches to diff against, followed by
+// "Type a branch name…" for manual entry.
+//
+// Each git invocation is wrapped with a short timeout (2 s) to prevent
+// a hung git process from freezing the TUI. If any command times out
+// the function returns nil and the caller falls back gracefully.
+func reviewChoices(cwd string) []modelChoice {
+	if cwd == "" {
+		return nil
+	}
+
+	// Short timeout so a hung git (network fs, auth prompt) doesn't
+	// freeze the TUI. Called from updateCommandMenu on the UI goroutine.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Check if this is a git repo at all.
+	gitCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
+	gitCmd.Dir = cwd
+	if err := gitCmd.Run(); err != nil {
+		return nil
+	}
+
+	var choices []modelChoice
+
+	// Option 1: working tree changes (if any).
+	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	statusCmd.Dir = cwd
+	if out, err := statusCmd.Output(); err == nil && len(strings.TrimSpace(string(out))) > 0 {
+		choices = append(choices, modelChoice{
+			id:          "working-tree",
+			description: "Review uncommitted changes in the working tree",
+		})
+	}
+
+	// Option 2..N: local branches.
+	branchCmd := exec.CommandContext(ctx, "git", "branch", "--format=%(refname:short)")
+	branchCmd.Dir = cwd
+	if out, err := branchCmd.Output(); err == nil {
+		var branches []string
+		for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if b != "" {
+				branches = append(branches, b)
+			}
+		}
+		sort.Strings(branches)
+		current := currentGitBranch(ctx, cwd)
+		for _, b := range branches {
+			if b == current {
+				continue // diff against yourself is a no-op
+			}
+			choices = append(choices, modelChoice{
+				id:          "branch:" + b,
+				description: "Diff against " + b,
+			})
+		}
+	}
+
+	// Last option: manual entry.
+	choices = append(choices, modelChoice{
+		id:          "type-branch",
+		description: "Type a branch name…",
+	})
+
+	return choices
+}
+
+// workingTreeReviewPrompt builds the working-tree code-review prompt
+// with the changed-files summary appended.
+func workingTreeReviewPrompt(changes string) string {
+	return "Review the current git working-tree changes. " +
+		"Examine the changed files for bugs, security vulnerabilities, " +
+		"style violations, and design problems. " +
+		"Categorise findings by severity. " +
+		"Use bash for git diff to inspect line-level changes, " +
+		"then explore specific files with read/grep as needed. " +
+		"Do NOT write or edit files.\n\n" +
+		"Changed files:\n" + changes
+}
+
+// fallbackReviewPrompt returns a generic code-review prompt for when
+// git info isn't available (not a repo, no changes, etc.).
+func fallbackReviewPrompt() string {
+	return "Review the code in the current working directory. " +
+		"Examine the files for bugs, security vulnerabilities, " +
+		"style violations, and design problems. " +
+		"Categorise findings by severity. " +
+		"Use bash for git exploration (diff, log, show), " +
+		"then read/grep specific files as needed. " +
+		"Do NOT write or edit files."
+}
+
+// branchDiffReviewPrompt builds the branch-diff code-review prompt
+// with the full diff output appended.
+func branchDiffReviewPrompt(target, diff string) string {
+	return "Review the git diff between the current branch and " +
+		target + ". Examine the changes for bugs, security vulnerabilities, " +
+		"style violations, and design problems. " +
+		"Categorise findings by severity. " +
+		"The full diff is included below. Use read/grep " +
+		"to explore surrounding context in changed files. " +
+		"Do NOT write or edit files.\n\n" +
+		diff
+}
+
+// gatherChangedFiles runs git status --porcelain and collects a diff-stat
+// summary for the combined changes from HEAD. Returns a compact summary
+// string, or false when git isn't available / cwd is empty / the directory
+// isn't a git repo — callers should fall back to a generic prompt.
+//
+// For the rare case where changes are fully staged and the working tree
+// has been reverted (git diff HEAD --stat is empty but staged changes
+// exist), the function falls back to git diff --cached --stat.
+//
+// NOTE: git status and diff are separate invocations, so there is a
+// TOCTOU race — the working tree could change between calls. This is
+// acceptable for an interactive /review command where the user isn't
+// simultaneously editing files.
+func gatherChangedFiles(cwd string) (string, bool) {
+	if cwd == "" {
+		return "", false
+	}
+
+	gitCmd := func(args ...string) (string, bool) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = cwd
+		out, err := cmd.Output()
+		if err != nil {
+			return "", false
+		}
+		s := strings.TrimSpace(string(out))
+		return s, s != ""
+	}
+
+	summary, ok := gitCmd("status", "--porcelain")
+	if !ok {
+		return "", false
+	}
+
+	// Diff stat: git diff HEAD --stat gives the combined diff from
+	// HEAD (includes both staged and unstaged).
+	stat, statOk := gitCmd("diff", "HEAD", "--stat")
+	if !statOk {
+		// Fallback: staged-only changes when working tree was
+		// reverted to match HEAD (git diff HEAD is empty but
+		// git diff --cached shows the staged work).
+		// If both fail, stat stays empty — we still return the
+		// status summary.
+		stat, _ = gitCmd("diff", "--cached", "--stat")
+	}
+
+	var sb strings.Builder
+	sb.WriteString(summary)
+	if stat != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(stat)
+	}
+	return sb.String(), true
+}
+
+// currentGitBranch returns the current branch name, or "" on error.
+// Callers are responsible for providing a timeout context (5 s is typical).
+func currentGitBranch(ctx context.Context, cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// maxDiffBytes is the maximum inline diff size for branch-review
+// prompts. Diffs larger than this are summarised as a stat only,
+// and the model is told to fetch individual file diffs via bash.
+// 15 KiB ≈ 4–5K tokens, leaving room for system prompt + analysis
+// in a long session (especially for models with 32K-64K context).
+const maxDiffBytes = 15000
+
+// gatherBranchDiff runs a git diff target...HEAD in cwd and returns a
+// compact stat summary plus (if under maxDiffBytes) the full diff.
+// The bool is false on error or empty diff.
+//
+// The stat is obtained from a dedicated git diff --stat invocation
+// (accurate even for binary files, renames, and other edge cases).
+// Large diffs (>maxDiffBytes) truncate the inline diff to the stat
+// summary only, preventing token-limit blowups.
+//
+// target must not start with "-" to prevent flag injection.
+func gatherBranchDiff(cwd, target string) (string, bool) {
+	if cwd == "" || target == "" {
+		return "", false
+	}
+	// Reject flag-like branch names (e.g. "--all") to prevent git
+	// from interpreting them as options rather than revisions.
+	if strings.HasPrefix(target, "-") {
+		return "", false
+	}
+
+	// Full diff (may be large). Each git invocation uses its own timeout
+	// so an earlier slow command doesn't eat into the budget of later ones.
+	diffCtx, diffCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer diffCancel()
+	diffCmd := exec.CommandContext(diffCtx, "git", "diff", target+"...HEAD")
+	diffCmd.Dir = cwd
+	out, err := diffCmd.Output()
+	if err != nil {
+		return "", false
+	}
+	diff := strings.TrimSpace(string(out))
+	if diff == "" {
+		return "", false
+	}
+
+	// Accurate stat from the CLI (handles binary files, renames, etc.).
+	statCtx, statCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer statCancel()
+	statCmd := exec.CommandContext(statCtx, "git", "diff", "--stat", target+"...HEAD")
+	statCmd.Dir = cwd
+	statOut, err := statCmd.Output()
+	if err != nil {
+		return "", false
+	}
+	stat := strings.TrimSpace(string(statOut))
+
+	var sb strings.Builder
+	sb.WriteString("Diff against " + target + ":\n")
+	sb.WriteString(stat)
+	if len(diff) <= maxDiffBytes {
+		sb.WriteString("\n\n")
+		sb.WriteString(diff)
+	} else {
+		sb.WriteString("\n\n(diff is too large to include inline — " +
+			"use bash with git diff/git show to inspect individual files)")
+	}
+	return sb.String(), true
+}
+
+// steerStream stashes text as a pending steer and cancels the current
+// stream so streamEndMsg can submit it. Sets userCanceled=false so the
+// cancellation is treated as a steer, not a user-initiated stop.
+// Shared helper used by cmdReview and the Alt+Enter path in update.go.
+func steerStream(m *Model, text string) {
+	m.pendingSteerText = text
+	if m.cancelStream != nil {
+		m.userCanceled = false
+		m.cancelStream()
+	}
+}
+
+// submitOrSteer submits a prompt directly (if not streaming) or stashes
+// it as a steer text (if streaming). Shared helper used by cmdReview and
+// any future one-shot commands that need to submit text.
+func submitOrSteer(m *Model, prompt string) cmdResult {
+	if m.streaming {
+		steerStream(m, prompt)
+		return cmdResult{}
+	}
+	newM, cmd := m.submit(prompt)
+	*m = newM.(Model)
+	return cmdResult{extra: cmd}
+}
+
+// handleReviewPick processes a selection from the /review picker and
+// returns the (possibly updated) model and a tea.Cmd. Called from
+// handleKey when pickerPurpose == "review".
+func (m Model) handleReviewPick() (Model, tea.Cmd) {
+	idx := m.modelPickerSelected
+	if idx < 0 || idx >= len(m.modelPickerFiltered) {
+		// Invalid state — close picker and return.
+		m.modelPickerOpen = false
+		m.modelPickerFiltered = nil
+		m.modelPickerSelected = 0
+		m.pickerPurpose = ""
+		return m, nil
+	}
+
+	choice := m.modelPickerFiltered[idx].id
+	m.modelPickerOpen = false
+	m.modelPickerFiltered = nil
+	m.modelPickerSelected = 0
+	m.pickerPurpose = ""
+	m.input.Reset()
+
+	switch {
+	case choice == "working-tree":
+		changes, ok := gatherChangedFiles(m.opts.CWD)
+		if !ok {
+			return m, tea.Println(styleErr.Render("review: no changes to review"))
+		}
+		res := submitOrSteer(&m, workingTreeReviewPrompt(changes))
+		return m, res.extra
+
+	case strings.HasPrefix(choice, "branch:"):
+		branch := strings.TrimPrefix(choice, "branch:")
+		diffContent, ok := gatherBranchDiff(m.opts.CWD, branch)
+		if !ok {
+			return m, tea.Println(styleErr.Render("review: no diff found between current branch and " + branch))
+		}
+		res := submitOrSteer(&m, branchDiffReviewPrompt(branch, diffContent))
+		return m, res.extra
+
+	case choice == "type-branch":
+		// Enter key-entry mode: user types a branch name and hits Enter.
+		m.reviewBranchEntry = true
+		m.input.Reset()
+		return m, nil
+	}
+
+	return m, nil
 }
 
 func cmdQuit(_ *Model, _ string) cmdResult {

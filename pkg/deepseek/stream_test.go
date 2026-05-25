@@ -27,6 +27,7 @@ func fakeSSE(t *testing.T, body string) *httptest.Server {
 }
 
 func TestChatStream_ParsesDeltasAndUsage(t *testing.T) {
+	t.Parallel()
 	body := strings.Join([]string{
 		`data: {"id":"1","choices":[{"index":0,"delta":{"role":"assistant","content":"Hel"}}]}`,
 		``,
@@ -83,6 +84,7 @@ func TestChatStream_ParsesDeltasAndUsage(t *testing.T) {
 }
 
 func TestChatStream_ReasoningDelta(t *testing.T) {
+	t.Parallel()
 	body := strings.Join([]string{
 		`data: {"choices":[{"index":0,"delta":{"reasoning_content":"Let me think..."}}]}`,
 		``,
@@ -124,6 +126,7 @@ func TestChatStream_ReasoningDelta(t *testing.T) {
 }
 
 func TestStripReasoningContent(t *testing.T) {
+	t.Parallel()
 	// V4 thinking-mode contract (api-docs.deepseek.com/guides/thinking_mode):
 	//  - assistant w/o tool_calls → reasoning_content can be stripped
 	//  - assistant w/  tool_calls → reasoning_content MUST be preserved
@@ -160,6 +163,7 @@ func TestStripReasoningContent(t *testing.T) {
 }
 
 func TestShouldEnableThinking(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		model string
 		want  bool
@@ -179,6 +183,7 @@ func TestShouldEnableThinking(t *testing.T) {
 }
 
 func TestUsage_HitRatio(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		hit, miss int
 		want      float64
@@ -197,6 +202,7 @@ func TestUsage_HitRatio(t *testing.T) {
 }
 
 func TestChat_NonStream(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{
@@ -224,6 +230,7 @@ func TestChat_NonStream(t *testing.T) {
 }
 
 func TestChat_MissingKey(t *testing.T) {
+	t.Parallel()
 	c := New() // no key
 	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelChat})
 	if err == nil || !strings.Contains(err.Error(), "missing api key") {
@@ -257,6 +264,7 @@ func drainStream(t *testing.T, ch <-chan StreamEvent) (text, finish string) {
 // initial request would otherwise bubble up as a hard failure to the
 // agent layer and force the user to manually re-send.
 func TestChatStream_RetryOn500(t *testing.T) {
+	t.Parallel()
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&hits, 1)
@@ -298,6 +306,7 @@ func TestChatStream_RetryOn500(t *testing.T) {
 // caller would otherwise see an empty assistant turn (which then trips
 // the agent's empty-response guard).
 func TestChatStream_RetryOnEmptyBody(t *testing.T) {
+	t.Parallel()
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := atomic.AddInt32(&hits, 1)
@@ -336,6 +345,7 @@ func TestChatStream_RetryOnEmptyBody(t *testing.T) {
 // invariant. If the upstream is genuinely down, surface the error
 // rather than burning tokens (and the user's time) on an infinite loop.
 func TestChatStream_RetryBudgetCapped(t *testing.T) {
+	t.Parallel()
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -372,6 +382,7 @@ func TestChatStream_RetryBudgetCapped(t *testing.T) {
 // pre-retry behaviour relied on by agent_test.go:TestAgent_DecodeError
 // MidStream_DropsTurn.
 func TestChatStream_NoRetryAfterEmit(t *testing.T) {
+	t.Parallel()
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -413,6 +424,7 @@ func TestChatStream_NoRetryAfterEmit(t *testing.T) {
 // behaviour so a future change to retry policy doesn't accidentally
 // widen the trigger.
 func TestChatStream_4xxNoRetry(t *testing.T) {
+	t.Parallel()
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -435,6 +447,7 @@ func TestChatStream_4xxNoRetry(t *testing.T) {
 // arriving while we're sleeping between attempts returns cleanly
 // instead of pressing on with a doomed retry.
 func TestChatStream_CtxCancelDuringBackoff(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"x"}}`)

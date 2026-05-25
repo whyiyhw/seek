@@ -57,6 +57,16 @@ type Config struct {
 	// model honours a /lang switch immediately without requiring /new.
 	Lang string
 
+	// ModeLabel is the current permission mode label for per-message
+	// injection. Empty string → no reminder (the system-prompt tool
+	// descriptions already cover Ask/Deny behaviour). Non-empty values
+	// ("yolo", "plan") append a short mode reminder to every
+	// user turn so the model immediately knows when /yolo or /plan
+	// has changed the policy without invalidating the prefix
+	// cache (the reminder is at the tail of the user message — only
+	// those few bytes differ across turns).
+	ModeLabel string
+
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
 	// SystemPrompt is still placed first; InitialMessages are
@@ -107,6 +117,30 @@ func (a *Agent) Effort() string {
 // or "en" to clear a prior override (revert to system-prompt directive).
 func (a *Agent) SetLang(lang string) {
 	a.cfg.Lang = lang
+}
+
+// SetModeLabel sets the per-message mode reminder label. Safe between
+// turns; takes effect on the next Prompt call. Call with "" to clear
+// (no reminder — the system-prompt tool descriptions suffice for
+// Ask/Deny behaviour).
+func (a *Agent) SetModeLabel(label string) {
+	a.cfg.ModeLabel = label
+}
+
+// modeReminder returns a per-message mode reminder suffix for the
+// current permission mode. Empty string = no reminder needed (the
+// system-prompt tool descriptions already cover Ask/Deny behaviour).
+// The reminder is placed at the end of the user turn so recency bias
+// makes it effective immediately after a /yolo or /plan toggle.
+func modeReminder(label string) string {
+	switch label {
+	case "yolo":
+		return "\n\n[Mode: yolo — write, edit, and bash are unrestricted.]"
+	case "plan":
+		return "\n\n[Mode: plan — read-only. Do not call write, edit, or bash; produce a plan instead.]"
+	default:
+		return ""
+	}
 }
 
 // langReminder returns a per-message language reminder suffix.
@@ -307,7 +341,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 		for _, m := range prePrompt.Prepend {
 			a.messages = append(a.messages, m)
 		}
-		userContent := prePrompt.UserText + langReminder(a.cfg.Lang) + workflowReminder
+		userContent := prePrompt.UserText + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel) + workflowReminder
 		a.messages = append(a.messages, deepseek.Message{
 			Role:    deepseek.RoleUser,
 			Content: userContent,
@@ -440,7 +474,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
 					a.messages = append(a.messages, deepseek.Message{
 						Role:    deepseek.RoleUser,
-						Content: "continue" + langReminder(a.cfg.Lang),
+						Content: "continue" + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel),
 					})
 					continue
 				}

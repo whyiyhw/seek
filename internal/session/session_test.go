@@ -26,6 +26,7 @@ func newStoreIn(t *testing.T) *Store {
 }
 
 func TestSaveLoad_Roundtrip(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	sess := New("deepseek-v4-flash", "/tmp", "sys", true, false)
 	sess.Messages = []deepseek.Message{
@@ -61,6 +62,10 @@ func TestSaveLoad_Roundtrip(t *testing.T) {
 //     on disk — important for prefix-cache stability of any future
 //     header-byte tooling and for the JSONL grep-friendly contract
 func TestSaveLoad_PreservesEffort(t *testing.T) {
+	// Note: no t.Parallel() here — subtests call newStoreIn(t) which calls
+	// t.Setenv(), and Go's testing package panics if a parallel parent's
+	// subtrees call Setenv (the subtest's *testing.T inherits the parallel
+	// flag from the parent).
 	for _, want := range []string{"", "high", "max"} {
 		t.Run("effort="+want, func(t *testing.T) {
 			store := newStoreIn(t)
@@ -97,6 +102,7 @@ func TestSaveLoad_PreservesEffort(t *testing.T) {
 }
 
 func TestSave_AtomicViaTempThenRename(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	// After Save, only <id>.json exists in the directory — no stray
 	// .tmp file. Atomic-write contract verified by absence of tmp on
 	// success.
@@ -112,6 +118,7 @@ func TestSave_AtomicViaTempThenRename(t *testing.T) {
 }
 
 func TestSave_RejectsEmptyID(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	if err := store.Save(&Session{}); err == nil {
 		t.Errorf("expected error for empty ID")
@@ -119,6 +126,7 @@ func TestSave_RejectsEmptyID(t *testing.T) {
 }
 
 func TestLoad_RejectsTraversal(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	for _, bad := range []string{"", "../etc/passwd", "a/b", "x.y"} {
 		if _, err := store.Load(bad); err == nil {
@@ -128,6 +136,7 @@ func TestLoad_RejectsTraversal(t *testing.T) {
 }
 
 func TestLatest_EmptyStoreReturnsNil(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	got, err := store.Latest()
 	if err != nil {
@@ -139,6 +148,7 @@ func TestLatest_EmptyStoreReturnsNil(t *testing.T) {
 }
 
 func TestLatest_PicksMostRecentlyUpdated(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 
 	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -166,6 +176,7 @@ func TestLatest_PicksMostRecentlyUpdated(t *testing.T) {
 }
 
 func TestList_SortedByRecency(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	for range 3 {
 		mustSave(t, store, New("m", ".", "", false, false))
@@ -187,6 +198,7 @@ func TestList_SortedByRecency(t *testing.T) {
 }
 
 func TestGenerateID_IsSortable(t *testing.T) {
+	t.Parallel()
 	a := generateID(time.Date(2026, 1, 21, 10, 30, 0, 0, time.UTC))
 	b := generateID(time.Date(2026, 1, 21, 10, 30, 1, 0, time.UTC))
 	if !(a < b) {
@@ -198,6 +210,7 @@ func TestGenerateID_IsSortable(t *testing.T) {
 }
 
 func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
+	t.Parallel()
 	parent := New("deepseek-v4-flash", "/tmp", "sys", true, false)
 	parent.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "first"},
@@ -236,6 +249,7 @@ func TestFork_NewIDParentLinkAndIndependentMessages(t *testing.T) {
 }
 
 func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
 	parent := New("m", ".", "", false, false)
 	parent.Messages = []deepseek.Message{{Role: deepseek.RoleUser, Content: "hi"}}
@@ -254,6 +268,7 @@ func TestFork_SaveRoundtripPreservesParent(t *testing.T) {
 }
 
 func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
+	t.Parallel()
 	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "go do thing"},
@@ -278,6 +293,7 @@ func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
 }
 
 func TestRepair_LeavesValidHistoryAlone(t *testing.T) {
+	t.Parallel()
 	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
@@ -301,6 +317,7 @@ func TestRepair_LeavesValidHistoryAlone(t *testing.T) {
 }
 
 func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
+	t.Parallel()
 	// Two tool_calls, only one gets a matching tool message —
 	// still orphan because DeepSeek requires ALL of them satisfied.
 	sess := New("m", ".", "", false, false)
@@ -335,6 +352,7 @@ func TestRepair_PartialMultiCallStillCountsAsOrphan(t *testing.T) {
 // in place without touching well-formed entries or changing the
 // history length (orphan-trim and backfill are independent concerns).
 func TestRepair_BackfillsEmptyToolContent(t *testing.T) {
+	t.Parallel()
 	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
@@ -369,6 +387,7 @@ func TestRepair_BackfillsEmptyToolContent(t *testing.T) {
 // business (those have their own validity contracts handled elsewhere
 // — e.g., the agent's empty-response guard for assistants).
 func TestRepair_BackfillDoesNotTouchOtherRoles(t *testing.T) {
+	t.Parallel()
 	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: ""},
@@ -384,6 +403,7 @@ func TestRepair_BackfillDoesNotTouchOtherRoles(t *testing.T) {
 }
 
 func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
+	t.Parallel()
 	sess := New("m", ".", "", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "u"},
@@ -395,6 +415,7 @@ func TestRepair_HappyPathNoToolCallsAnywhere(t *testing.T) {
 }
 
 func TestFork_DeepCopiesToolCalls(t *testing.T) {
+	t.Parallel()
 	parent := New("m", ".", "", false, false)
 	parent.Messages = []deepseek.Message{
 		{

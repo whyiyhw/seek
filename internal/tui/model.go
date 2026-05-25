@@ -251,6 +251,12 @@ type Model struct {
 	setupKeyEntry bool
 	setupProvider string
 
+	// reviewBranchEntry is set when the user selects "Type a branch name…"
+	// from the /review picker. The textarea is focused; the next Enter
+	// submits /review <typed-text> (dispatched through dispatchCommand
+	// so no dedicated handler is needed). Esc cancels back to idle.
+	reviewBranchEntry bool
+
 	// pendingApproval, when non-nil, means the agent goroutine is
 	// blocked on a permission decision and the TUI is showing an
 	// inline y/N prompt. Reply is sent on the channel pointer (which

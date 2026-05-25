@@ -1,12 +1,16 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
@@ -15,6 +19,34 @@ import (
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+// initGitRepo creates a temporary git repo with an initial commit on main.
+// The caller should use t.Cleanup to remove the dir (t.TempDir handles it).
+// Returns the path to the repo root.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+		}
+	}
+	run("git", "init")
+	run("git", "config", "user.email", "test@test")
+	run("git", "config", "user.name", "test")
+	run("git", "checkout", "-b", "main")
+	run("git", "commit", "--allow-empty", "-m", "initial")
+	return dir
+}
+
+// requireGit skips the test if git is not available.
+func requireGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+}
 
 // emptyModel returns a Model with just enough wiring for command tests.
 // No viewport (inline mode); no real agent.
@@ -52,6 +84,7 @@ func runHandler(t *testing.T, m *Model, input string) cmdResult {
 }
 
 func TestDispatch_RejectsNonCommands(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	handled, _ := dispatchCommand(m, "hello world")
 	if handled {
@@ -60,6 +93,7 @@ func TestDispatch_RejectsNonCommands(t *testing.T) {
 }
 
 func TestDispatch_Unknown(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	handled, cmd := dispatchCommand(m, "/foobar")
 	if !handled {
@@ -71,6 +105,7 @@ func TestDispatch_Unknown(t *testing.T) {
 }
 
 func TestHelp_SetsOverlayFlag(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	if m.helpOverlayOpen {
 		t.Fatal("should start with overlay closed")
@@ -85,6 +120,7 @@ func TestHelp_SetsOverlayFlag(t *testing.T) {
 }
 
 func TestExit_SetsQuit(t *testing.T) {
+	t.Parallel()
 	res := runHandler(t, emptyModel(), "/exit")
 	if !res.quit {
 		t.Errorf("expected quit=true")
@@ -92,6 +128,7 @@ func TestExit_SetsQuit(t *testing.T) {
 }
 
 func TestClear_SetsClear(t *testing.T) {
+	t.Parallel()
 	res := runHandler(t, emptyModel(), "/clear")
 	if !res.clear {
 		t.Errorf("expected clear=true")
@@ -99,6 +136,7 @@ func TestClear_SetsClear(t *testing.T) {
 }
 
 func TestModel_NoArg_OpensPicker(t *testing.T) {
+	t.Parallel()
 	// Behaviour change: `/model` with no args opens the model picker
 	// for curated providers (emptyModel has ProviderName="" → DeepSeek
 	// path → curated list). Full picker behaviour (preselect, accept,
@@ -115,6 +153,7 @@ func TestModel_NoArg_OpensPicker(t *testing.T) {
 }
 
 func TestModel_WithArg_SwitchesAndFiresHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	var captured string
 	m.opts.SetModel = func(s string) { captured = s }
@@ -131,6 +170,7 @@ func TestModel_WithArg_SwitchesAndFiresHook(t *testing.T) {
 }
 
 func TestUpgrade_RefusesWhileStreaming(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	m.streaming = true
 	res := runHandler(t, m, "/upgrade")
@@ -143,6 +183,7 @@ func TestUpgrade_RefusesWhileStreaming(t *testing.T) {
 }
 
 func TestUpgrade_RejectsUnknownFlag(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	res := runHandler(t, m, "/upgrade --garbage")
 	if !strings.Contains(res.text, "unknown flag") {
@@ -154,6 +195,7 @@ func TestUpgrade_RejectsUnknownFlag(t *testing.T) {
 }
 
 func TestUpgrade_AcceptsKnownFlags(t *testing.T) {
+	t.Parallel()
 	cases := []string{"/upgrade", "/upgrade --force", "/upgrade --dry-run", "/upgrade --force --dry-run"}
 	for _, in := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -174,6 +216,7 @@ func TestUpgrade_AcceptsKnownFlags(t *testing.T) {
 // the wire value, (b) fire SetEffort with the same value, and (c) emit
 // a transition Println so the user sees the change.
 func TestEffort_WithArg_SetsAndFiresHook(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input string
 		wire  string // expected on-wire value ("" for off/none)
@@ -209,6 +252,7 @@ func TestEffort_WithArg_SetsAndFiresHook(t *testing.T) {
 }
 
 func TestEffort_RejectsUnknownLevel(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	var fired bool
 	m.opts.SetEffort = func(string) { fired = true }
@@ -222,6 +266,7 @@ func TestEffort_RejectsUnknownLevel(t *testing.T) {
 }
 
 func TestEffort_NoArg_OpensPicker(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	m.opts.SetEffort = func(string) {}
 	res := runHandler(t, m, "/effort")
@@ -241,6 +286,7 @@ func TestEffort_NoArg_OpensPicker(t *testing.T) {
 // usage text reads as if only manual typing is supported (see
 // picker-over-typed-input memory entry).
 func TestEffort_DescriptionHasPickerHint(t *testing.T) {
+	t.Parallel()
 	for _, c := range allCommands() {
 		for _, n := range c.names {
 			if n == "/effort" {
@@ -260,6 +306,7 @@ func TestEffort_DescriptionHasPickerHint(t *testing.T) {
 // /effort to inspect their state could accidentally flip to "off" by
 // pressing Enter.
 func TestEffort_PickerPreselectsCurrent(t *testing.T) {
+	t.Parallel()
 	cases := map[string]int{
 		"":     0, // off
 		"high": 1,
@@ -279,6 +326,7 @@ func TestEffort_PickerPreselectsCurrent(t *testing.T) {
 }
 
 func TestEffort_UnavailableWithoutHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	// SetEffort intentionally nil — TUI was launched in a build that
 	// doesn't wire host-side state (shouldn't happen with cmd/seek but
@@ -290,6 +338,7 @@ func TestEffort_UnavailableWithoutHook(t *testing.T) {
 }
 
 func TestYolo_TogglesAndFiresHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	var seen []bool
 	m.opts.SetYolo = func(b bool) { seen = append(seen, b) }
@@ -301,6 +350,7 @@ func TestYolo_TogglesAndFiresHook(t *testing.T) {
 }
 
 func TestPlan_TogglesAndFiresHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	var seen []bool
 	m.opts.SetPlan = func(b bool) { seen = append(seen, b) }
@@ -311,7 +361,47 @@ func TestPlan_TogglesAndFiresHook(t *testing.T) {
 	}
 }
 
+func TestYolo_ToggleTurnsOffPlan(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Plan = true
+	m.opts.SetYolo = func(b bool) {}
+	m.opts.SetPlan = func(b bool) {}
+	runHandler(t, m, "/yolo")
+	if !m.opts.Yolo {
+		t.Error("/yolo should set Yolo=true")
+	}
+	if m.opts.Plan {
+		t.Error("/yolo should turn Plan off (mutual exclusion)")
+	}
+}
+
+func TestPlan_ToggleTurnsOffYolo(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.Yolo = true
+	m.opts.SetYolo = func(b bool) {}
+	m.opts.SetPlan = func(b bool) {}
+	runHandler(t, m, "/plan")
+	if !m.opts.Plan {
+		t.Error("/plan should set Plan=true")
+	}
+	if m.opts.Yolo {
+		t.Error("/plan should turn Yolo off (mutual exclusion)")
+	}
+}
+
+func TestReview_UnknownArgsError(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	res := runHandler(t, m, "/review no-such-branch")
+	if !strings.Contains(res.text, "no diff found") {
+		t.Errorf("expected error about no diff found, got %q", res.text)
+	}
+}
+
 func TestNew_UsesHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	called := false
 	m.opts.RebuildAgent = func() (*agent.Agent, error) {
@@ -328,6 +418,7 @@ func TestNew_UsesHook(t *testing.T) {
 }
 
 func TestNew_ReportsHookErrors(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	m.opts.RebuildAgent = func() (*agent.Agent, error) {
 		return nil, errors.New("network down")
@@ -339,6 +430,7 @@ func TestNew_ReportsHookErrors(t *testing.T) {
 }
 
 func TestNew_EphemeralNoSession_StaysEphemeral(t *testing.T) {
+	t.Parallel()
 	// --no-save mode: Session == nil, Store == nil.
 	// /new must NOT create a session (would convert ephemeral to persisted).
 	m := emptyModel()
@@ -407,6 +499,7 @@ func TestNew_SessionCreatedAndSaved(t *testing.T) {
 }
 
 func TestFilterCommands_EmptyOrSlashReturnsAll(t *testing.T) {
+	t.Parallel()
 	all := allCommands()
 	for _, prefix := range []string{"", "/"} {
 		if got := filterCommands(all, prefix); len(got) != len(all) {
@@ -416,6 +509,7 @@ func TestFilterCommands_EmptyOrSlashReturnsAll(t *testing.T) {
 }
 
 func TestFilterCommands_PrefixMatch(t *testing.T) {
+	t.Parallel()
 	all := allCommands()
 	got := filterCommands(all, "/m")
 	if len(got) != 2 || got[0].names[0] != "/model" || got[1].names[0] != "/memory" {
@@ -424,6 +518,7 @@ func TestFilterCommands_PrefixMatch(t *testing.T) {
 }
 
 func TestFilterCommands_MatchesAlias(t *testing.T) {
+	t.Parallel()
 	// /q is an alias of /exit — should be findable by alias prefix.
 	all := allCommands()
 	got := filterCommands(all, "/q")
@@ -433,6 +528,7 @@ func TestFilterCommands_MatchesAlias(t *testing.T) {
 }
 
 func TestFilterCommands_NoMatch(t *testing.T) {
+	t.Parallel()
 	got := filterCommands(allCommands(), "/zz")
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %v", names(got))
@@ -448,6 +544,7 @@ func names(cs []command) []string {
 }
 
 func TestNew_NoHook(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	res := runHandler(t, m, "/new")
 	if !strings.Contains(res.text, "unsupported") {
@@ -456,6 +553,7 @@ func TestNew_NoHook(t *testing.T) {
 }
 
 func TestBranch_NoSessionReportsUnavailable(t *testing.T) {
+	t.Parallel()
 	res := runHandler(t, emptyModel(), "/branch")
 	if !strings.Contains(res.text, "unavailable") || !strings.Contains(res.text, "--no-save") {
 		t.Errorf("text = %q", res.text)
@@ -521,6 +619,7 @@ func TestBranch_ForksAndSwitchesSession(t *testing.T) {
 }
 
 func TestCompact_ShortHistoryIsNoOp(t *testing.T) {
+	t.Parallel()
 	ag, _ := agent.New(agent.Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
 		SystemPrompt: "sys",
@@ -537,6 +636,7 @@ func TestCompact_ShortHistoryIsNoOp(t *testing.T) {
 }
 
 func TestSkills_EmptyReportsNoneLoaded(t *testing.T) {
+	t.Parallel()
 	res := runHandler(t, emptyModel(), "/skills")
 	if !strings.Contains(res.text, "no skills loaded") {
 		t.Errorf("text = %q", res.text)
@@ -544,6 +644,7 @@ func TestSkills_EmptyReportsNoneLoaded(t *testing.T) {
 }
 
 func TestSkills_ListsLoadedSkillsWithSource(t *testing.T) {
+	t.Parallel()
 	set := skill.NewSet()
 	set.Add(&skill.Skill{
 		Name: "alpha", Description: "use for A", Source: "project .seek/alpha.md",
@@ -571,6 +672,7 @@ func TestSkills_ListsLoadedSkillsWithSource(t *testing.T) {
 }
 
 func TestSkillCLI_HelpRendersDispatcherText(t *testing.T) {
+	t.Parallel()
 	// `/skill` with no args should hit skillcli's help printer. The
 	// TUI rendering shouldn't lose the command list.
 	m := emptyModel()
@@ -583,6 +685,7 @@ func TestSkillCLI_HelpRendersDispatcherText(t *testing.T) {
 }
 
 func TestSkillCLI_UnknownVerbSurfaces(t *testing.T) {
+	t.Parallel()
 	// skillcli.Run returns an error for unknown verbs. The TUI
 	// command should fold that error into the rendered text rather
 	// than swallowing it — silent failure is the worst UX here.
@@ -594,6 +697,7 @@ func TestSkillCLI_UnknownVerbSurfaces(t *testing.T) {
 }
 
 func TestSkillCLI_WhitespaceSplitsArgs(t *testing.T) {
+	t.Parallel()
 	// Verifies the args parser does the right thing for the
 	// vanilla case (subcommand + flag + value). We trip a known
 	// error path (uninstall a non-existent skill) and confirm the
@@ -607,6 +711,7 @@ func TestSkillCLI_WhitespaceSplitsArgs(t *testing.T) {
 }
 
 func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if !strings.Contains(string(body), "Summarise the conversation") {
@@ -746,5 +851,236 @@ func TestCompact_ForkPreservesFullHistory(t *testing.T) {
 	// Counters reset to 0 after fork.
 	if m.turns != 0 || m.toolCalls != 0 {
 		t.Errorf("turns/toolCalls should reset after fork, got %d/%d", m.turns, m.toolCalls)
+	}
+}
+
+// --- Git utility function tests -----------------------------------------
+
+func TestCurrentGitBranch(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	got := currentGitBranch(context.Background(), dir)
+	if got != "main" {
+		t.Errorf("currentGitBranch = %q, want %q", got, "main")
+	}
+}
+
+func TestCurrentGitBranch_EmptyCWD(t *testing.T) {
+	t.Parallel()
+	if got := currentGitBranch(context.Background(), ""); got != "" {
+		t.Errorf("currentGitBranch('') = %q, want ''", got)
+	}
+}
+
+func TestGatherChangedFiles_WithChanges(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	git := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Create an untracked file and a modified (then committed) file.
+	git("commit", "--allow-empty", "-m", "base")
+	os.WriteFile(dir+"/newfile.go", []byte("untracked\n"), 0o644)
+	os.WriteFile(dir+"/modified.go", []byte("v1\n"), 0o644)
+	git("add", "modified.go")
+	git("commit", "-m", "add modified.go")
+
+	// Modify modified.go after the commit (different content).
+	os.WriteFile(dir+"/modified.go", []byte("v2\n"), 0o644)
+
+	result, ok := gatherChangedFiles(dir)
+	if !ok {
+		t.Fatal("gatherChangedFiles returned false, expected true")
+	}
+	if !strings.Contains(result, "newfile.go") {
+		t.Errorf("result should mention newfile.go, got:\n%s", result)
+	}
+}
+
+func TestGatherChangedFiles_NoChanges(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	_, ok := gatherChangedFiles(dir)
+	if ok {
+		t.Error("gatherChangedFiles should return false for clean repo")
+	}
+}
+
+func TestGatherChangedFiles_EmptyCWD(t *testing.T) {
+	t.Parallel()
+	_, ok := gatherChangedFiles("")
+	if ok {
+		t.Error("gatherChangedFiles('') should return false")
+	}
+}
+
+func TestGatherBranchDiff_WithBranch(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	git := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Create a feature branch with a commit, then add a divergent commit
+	// on main so target...HEAD is non-empty. Use actual file changes so
+	// git diff has content to show (--allow-empty produces no diff).
+	git("checkout", "-b", "feature")
+	git("commit", "--allow-empty", "-m", "feature work")
+	git("checkout", "main")
+	os.WriteFile(dir+"/main-only.go", []byte("package main\n"), 0o644)
+	git("add", "main-only.go")
+	git("commit", "-m", "main work after branch")
+
+	result, ok := gatherBranchDiff(dir, "feature")
+	if !ok {
+		t.Fatal("gatherBranchDiff returned false, expected true")
+	}
+	if !strings.Contains(result, "Diff against feature") {
+		t.Errorf("result should mention target branch, got:\n%s", result)
+	}
+}
+
+func TestGatherBranchDiff_UnknownBranch(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	_, ok := gatherBranchDiff(dir, "no-such-branch")
+	if ok {
+		t.Error("gatherBranchDiff should return false for unknown branch")
+	}
+}
+
+func TestGatherBranchDiff_FlagInjectionGuard(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	_, ok := gatherBranchDiff(dir, "--all")
+	if ok {
+		t.Error("gatherBranchDiff should reject flag-like branch names")
+	}
+}
+
+func TestGatherBranchDiff_EmptyCWD(t *testing.T) {
+	t.Parallel()
+	_, ok := gatherBranchDiff("", "main")
+	if ok {
+		t.Error("gatherBranchDiff('', 'main') should return false")
+	}
+}
+
+func TestGatherBranchDiff_EmptyTarget(t *testing.T) {
+	t.Parallel()
+	_, ok := gatherBranchDiff("/tmp", "")
+	if ok {
+		t.Error("gatherBranchDiff('/tmp', '') should return false")
+	}
+}
+
+func TestReviewChoices_WithChanges(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+
+	dir := initGitRepo(t)
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// Create a branch so there's a non-working-tree option.
+	run("checkout", "-b", "other")
+	run("checkout", "main")
+
+	choices := reviewChoices(dir)
+	if len(choices) == 0 {
+		t.Fatal("reviewChoices returned empty, expected at least 'Type a branch name...'")
+	}
+	// Should have "type-branch" as the last option.
+	last := choices[len(choices)-1]
+	if last.id != "type-branch" {
+		t.Errorf("last choice id = %q, want %q", last.id, "type-branch")
+	}
+}
+
+func TestReviewChoices_EmptyCWD(t *testing.T) {
+	t.Parallel()
+	choices := reviewChoices("")
+	if choices != nil {
+		t.Errorf("reviewChoices('') should return nil, got %v", choices)
+	}
+}
+
+func TestReviewChoices_NonGitDir(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	choices := reviewChoices(dir)
+	if choices != nil {
+		t.Errorf("reviewChoices(non-git-dir) should return nil, got %v", choices)
+	}
+}
+
+// --- review prompt tests ------------------------------------------------
+
+func TestWorkingTreeReviewPrompt_IncludesChanges(t *testing.T) {
+	t.Parallel()
+	prompt := workingTreeReviewPrompt("M  foo.go\n?? bar.go")
+	if !strings.Contains(prompt, "foo.go") {
+		t.Error("prompt should contain file from changes")
+	}
+	if !strings.Contains(prompt, "Do NOT write or edit files") {
+		t.Error("prompt should contain read-only instruction")
+	}
+}
+
+func TestFallbackReviewPrompt(t *testing.T) {
+	t.Parallel()
+	prompt := fallbackReviewPrompt()
+	if !strings.Contains(prompt, "Review the code") {
+		t.Errorf("unexpected prompt: %q", prompt)
+	}
+	if !strings.Contains(prompt, "Do NOT write or edit files") {
+		t.Error("prompt should contain read-only instruction")
+	}
+}
+
+func TestBranchDiffReviewPrompt_IncludesDiff(t *testing.T) {
+	t.Parallel()
+	prompt := branchDiffReviewPrompt("main", "diff --git a/x.go b/x.go")
+	if !strings.Contains(prompt, "main") {
+		t.Error("prompt should mention target branch")
+	}
+	if !strings.Contains(prompt, "diff --git") {
+		t.Error("prompt should include diff content")
+	}
+}
+
+// --- Helper behaviour (timeout sanity) ----------------------------------
+
+func TestCurrentGitBranch_Timeout(t *testing.T) {
+	// Not parallel: tests that a cancelled context returns "" immediately.
+	ctx, cancel := context.WithTimeout(context.Background(), -1*time.Nanosecond)
+	defer cancel()
+
+	got := currentGitBranch(ctx, "/nonexistent")
+	if got != "" {
+		t.Errorf("expected empty for cancelled context, got %q", got)
 	}
 }

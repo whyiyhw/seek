@@ -337,6 +337,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.modelPickerOpen {
 		switch msg.Type {
 		case tea.KeyTab, tea.KeyEnter:
+			if m.pickerPurpose == "review" {
+				return m.handleReviewPick()
+			}
 			m.applyModelChoice(m.modelPickerSelected)
 			return m, nil
 		case tea.KeyUp:
@@ -382,6 +385,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case tea.KeyEsc:
+		// Esc in review branch-entry mode cancels without action.
+		// Checked BEFORE the streaming branch so a streaming user
+		// in branch-entry mode can cancel the entry, not the stream.
+		if m.reviewBranchEntry {
+			m.reviewBranchEntry = false
+			m.input.Reset()
+			return m, tea.Println(styleMuted.Render("  review: cancelled"))
+		}
 		// Esc only does something when there's an active stream — at
 		// rest we leave it alone so the textarea / future overlays can
 		// claim it for their own purposes.
@@ -412,6 +423,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// Review branch-entry mode: Enter submits /review <typed>.
+		// Comes BEFORE setupKeyEntry — both set a flag and use the
+		// textarea, and review is stateless so there's no ambiguity.
+		if m.reviewBranchEntry {
+			branch := strings.TrimSpace(m.input.Value())
+			m.reviewBranchEntry = false
+			m.input.Reset()
+			if branch == "" {
+				return m, tea.Println(styleErr.Render("review: no branch name entered"))
+			}
+			// Re-dispatch through dispatchCommand so the existing
+			// arg-handling path (/review <branch>) is reused.
+			handled, cmd := dispatchCommand(&m, "/review "+branch)
+			if !handled {
+				return m, tea.Println(styleErr.Render("review: invalid branch name"))
+			}
+			return m, cmd
+		}
 		// Setup key-entry mode: Enter saves the typed key to config
 		// and exits setup. Comes BEFORE the streaming branch because
 		// /setup can't be opened while streaming (slash menu is
@@ -473,11 +502,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if msg.Alt {
 				// Steer: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
-				m.pendingSteerText = text
-				if m.cancelStream != nil {
-					m.userCanceled = false
-					m.cancelStream()
-				}
+				steerStream(&m, text)
 			} else {
 				// Queue: stash text; streamEndMsg auto-submits when the
 				// agent loop reaches its natural end (not userCanceled).
@@ -572,6 +597,9 @@ func (m *Model) cycleMode() {
 		m.opts.Plan = false
 		if m.opts.SetYolo != nil {
 			m.opts.SetYolo(false)
+		}
+		if m.opts.SetPlan != nil {
+			m.opts.SetPlan(false)
 		}
 	case m.opts.Plan:
 		// Plan → Yolo: turn off plan, turn on yolo
@@ -816,11 +844,29 @@ func (m *Model) updateCommandMenu() {
 			m.pickerPurpose = "lang"
 		}
 		return
+
+	case strings.HasPrefix(v, "/review "):
+		// Auto-open the review picker when the user types "/review "
+		// (trailing space). Mirrors the /model /effort /lang pattern.
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		if !m.modelPickerOpen || m.pickerPurpose != "review" {
+			choices := reviewChoices(m.opts.CWD)
+			if len(choices) == 0 {
+				return
+			}
+			m.modelPickerFiltered = choices
+			m.modelPickerSelected = 0
+			m.modelPickerOpen = true
+			m.pickerPurpose = "review"
+		}
+		return
 	}
 
 	// Branch 2: not in a known auto-open state but a stale auto-opened picker
 	// is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang") {
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review") {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0

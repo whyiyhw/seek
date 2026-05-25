@@ -14,6 +14,7 @@ import (
 // right edge, and gradient colouring would land on different columns
 // for the same letter at different rows.
 func TestSeekRows_AllSameWidth(t *testing.T) {
+	t.Parallel()
 	const wantWidth = 23
 	for i, row := range seekRows {
 		got := utf8.RuneCountInString(row.text)
@@ -28,6 +29,7 @@ func TestSeekRows_AllSameWidth(t *testing.T) {
 // updating this test. The gradient is the wordmark's main bit of
 // designed-feel — it shouldn't drift unnoticed.
 func TestSeekRows_GradientTiersCoverTopMiddleBottom(t *testing.T) {
+	t.Parallel()
 	seen := map[int]int{}
 	for _, row := range seekRows {
 		seen[row.tier]++
@@ -47,6 +49,7 @@ func TestSeekRows_GradientTiersCoverTopMiddleBottom(t *testing.T) {
 // animation's cursor-up count and ToolDelta clearing assumptions
 // from the broader TUI.
 func TestSeekRows_LineCount(t *testing.T) {
+	t.Parallel()
 	const want = 7
 	if got := len(seekRows); got != want {
 		t.Fatalf("len(seekRows) = %d, want %d", got, want)
@@ -60,6 +63,7 @@ func TestSeekRows_LineCount(t *testing.T) {
 // columns without updating letterEndCols, the animation reveals would
 // blank or extend the wrong cells.
 func TestSeekRows_LetterCellsCanBeIsolated(t *testing.T) {
+	t.Parallel()
 	// Pick a row that has blocks in every letter — row 0 (all tops).
 	row := bannerIndent + seekRows[0].text
 	runes := []rune(row)
@@ -89,6 +93,7 @@ func TestSeekRows_LetterCellsCanBeIsolated(t *testing.T) {
 // as the first "I'm about to draw" frame — it must be visually empty,
 // not "letter 0 already half-visible".
 func TestBannerWithLettersRevealed_EmptyShowsNoBlocks(t *testing.T) {
+	t.Parallel()
 	got := bannerWithLettersRevealed(0)
 	if blocks := strings.Count(got, "█"); blocks != 0 {
 		t.Errorf("n=0 frame has %d blocks, want 0:\n%s", blocks, got)
@@ -96,6 +101,7 @@ func TestBannerWithLettersRevealed_EmptyShowsNoBlocks(t *testing.T) {
 }
 
 func TestBannerWithLettersRevealed_FullEqualsAllBlocks(t *testing.T) {
+	t.Parallel()
 	// n>=4 must include every block from every row. Summing block
 	// counts: S=15, E=18, E=18, K=14 → 65 total. If a letter loses
 	// a block, that letter visibly degrades — pin the totals.
@@ -110,6 +116,7 @@ func TestBannerWithLettersRevealed_FullEqualsAllBlocks(t *testing.T) {
 }
 
 func TestBannerWithLettersRevealed_PartialKeepsLeftHidesRight(t *testing.T) {
+	t.Parallel()
 	// n=2 = S and first E visible; second E and K hidden. Use the
 	// letter-cell boundaries to verify exactly which columns survive.
 	got := bannerWithLettersRevealed(2)
@@ -140,6 +147,7 @@ func TestBannerWithLettersRevealed_PartialKeepsLeftHidesRight(t *testing.T) {
 // layout — same row count, same column positions for blocks, only
 // the colour differs. Catches any drift between the two code paths.
 func TestRenderBanner_StrippedEqualsBannerWithLettersRevealed(t *testing.T) {
+	t.Parallel()
 	for n := 0; n <= len(letterEndCols); n++ {
 		styled := renderBanner(n)
 		stripped := stripANSI(styled)
@@ -154,6 +162,7 @@ func TestRenderBanner_StrippedEqualsBannerWithLettersRevealed(t *testing.T) {
 // --- Version string -------------------------------------------------
 
 func TestFormatVersion_TaggedRelease(t *testing.T) {
+	t.Parallel()
 	info := &debug.BuildInfo{
 		Main: debug.Module{Version: "v0.1.0"},
 		Settings: []debug.BuildSetting{
@@ -169,6 +178,7 @@ func TestFormatVersion_TaggedRelease(t *testing.T) {
 }
 
 func TestFormatVersion_PseudoVersionCollapsesToDev(t *testing.T) {
+	t.Parallel()
 	// `go install …@latest` against an untagged repo produces a
 	// "v0.0.0-YYYYMMDDHHMMSS-<hash>" pseudo-version. The timestamp+
 	// hash duplicates vcs.revision and the 26-char string crowds the
@@ -188,6 +198,7 @@ func TestFormatVersion_PseudoVersionCollapsesToDev(t *testing.T) {
 }
 
 func TestFormatVersion_DevelNoVCS(t *testing.T) {
+	t.Parallel()
 	// `go build` outside a git checkout (or with -buildvcs=false).
 	// No settings → we must still produce a readable string.
 	info := &debug.BuildInfo{
@@ -199,6 +210,7 @@ func TestFormatVersion_DevelNoVCS(t *testing.T) {
 }
 
 func TestFormatVersion_DevelWithDirtyVCS(t *testing.T) {
+	t.Parallel()
 	info := &debug.BuildInfo{
 		Main: debug.Module{Version: "(devel)"},
 		Settings: []debug.BuildSetting{
@@ -214,6 +226,7 @@ func TestFormatVersion_DevelWithDirtyVCS(t *testing.T) {
 }
 
 func TestFormatVersion_ShortRevisionDroppedNotPartial(t *testing.T) {
+	t.Parallel()
 	// A 6-char rev shouldn't be sliced to 5 — we require ≥7 chars
 	// before truncating, otherwise the rev gets dropped entirely.
 	info := &debug.BuildInfo{
@@ -235,6 +248,7 @@ func TestFormatVersion_ShortRevisionDroppedNotPartial(t *testing.T) {
 // would have us either print 0 lines (fine) or, if the math drifted,
 // negative — which would panic the loop. Defensive.
 func TestWelcomePadding_ZeroOrNegativeHeightReturnsZero(t *testing.T) {
+	t.Parallel()
 	for _, h := range []int{0, -1, -100} {
 		if got := welcomePadding(h); got != 0 {
 			t.Errorf("welcomePadding(%d) = %d, want 0", h, got)
@@ -247,6 +261,7 @@ func TestWelcomePadding_ZeroOrNegativeHeightReturnsZero(t *testing.T) {
 // screen; pushing the input further down would just make it scroll
 // off the bottom.
 func TestWelcomePadding_BelowMinimumReturnsZero(t *testing.T) {
+	t.Parallel()
 	// Exactly the minimum (banner + live region fills the screen) →
 	// no pad needed.
 	if got := welcomePadding(welcomeFixedLines + welcomeBelowLines); got != 0 {
@@ -259,6 +274,7 @@ func TestWelcomePadding_BelowMinimumReturnsZero(t *testing.T) {
 }
 
 func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
+	t.Parallel()
 	// 30-row terminal is the modal case (default iTerm/Terminal.app
 	// window). Want a clear, non-zero pad that's well under the cap.
 	pad := welcomePadding(30)
@@ -276,6 +292,7 @@ func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
 }
 
 func TestWelcomePadding_HugeTerminalCapsAtMax(t *testing.T) {
+	t.Parallel()
 	// A 100-row terminal would otherwise get 82 lines of padding —
 	// the input would float in mid-screen with the banner pinned to
 	// the top. The cap exists to keep things proportional.
@@ -304,6 +321,7 @@ func TestWelcomePadding_HugeTerminalCapsAtMax(t *testing.T) {
 // Plus 2 pre-banner lines printed by cmd/seek (skills loader +
 // projectmd loader) = welcomeFixedLines (14).
 func TestWelcomeBannerLineCount(t *testing.T) {
+	t.Parallel()
 	// Count wordmark rows from RenderPixelBanner.
 	bannerWordmarkLines := strings.Count(RenderPixelBanner(), "\n") + 1
 	if bannerWordmarkLines != 7 {

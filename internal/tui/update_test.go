@@ -30,6 +30,7 @@ func streamingModel(t *testing.T, input string) Model {
 // Buffers must still be reset so the next turn's commit doesn't
 // inherit this turn's reasoning text.
 func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	beforeLines := m.scrollbackLines
 
@@ -60,6 +61,7 @@ func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
 // `▸ seek` block to scrollback (one tea.Println cmd) and reset the
 // live buffers.
 func TestApplyAgentEvent_TextTurnCommits(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	beforeLines := m.scrollbackLines
 
@@ -87,6 +89,7 @@ func TestApplyAgentEvent_TextTurnCommits(t *testing.T) {
 // Including this test means a future MessageEnd refactor that
 // accidentally widened the role guard would fail loudly.
 func TestApplyAgentEvent_ToolMessageEndIgnored(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	m.curContent = "stale"
 	m.curReasoning = "stale"
@@ -109,6 +112,7 @@ func TestApplyAgentEvent_ToolMessageEndIgnored(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEnter_QueuesText(t *testing.T) {
+	t.Parallel()
 	m := streamingModel(t, "  follow-up: also check main.go  ")
 
 	// Enter (no modifier) during a stream → queue, do NOT submit.
@@ -130,6 +134,7 @@ func TestHandleKey_StreamingEnter_QueuesText(t *testing.T) {
 }
 
 func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
+	t.Parallel()
 	m := streamingModel(t, "wait, undo that change")
 
 	// Wire a cancel func so we can observe it being called.
@@ -156,6 +161,7 @@ func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEnter_EmptyInputNothingToWithdrawIsNoOp(t *testing.T) {
+	t.Parallel()
 	// Empty textarea + empty queue + empty pending steer + Enter → no-op.
 	// (When something IS pending, the withdraw path runs — see the
 	// next two tests.)
@@ -170,6 +176,7 @@ func TestHandleKey_StreamingEnter_EmptyInputNothingToWithdrawIsNoOp(t *testing.T
 }
 
 func TestHandleKey_StreamingEnter_EmptyInputWithdrawsQueue(t *testing.T) {
+	t.Parallel()
 	// User typed "do A", queued it (Enter), then changed their mind —
 	// pressing Enter on an empty textarea should withdraw the queued
 	// message without cancelling the in-flight stream.
@@ -195,6 +202,7 @@ func TestHandleKey_StreamingEnter_EmptyInputWithdrawsQueue(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEnter_EmptyInputWithdrawsSteer(t *testing.T) {
+	t.Parallel()
 	// Same shape, steer instead of queue. A pending steer means
 	// cancelStream has already been called (it's how steer works) —
 	// withdrawal here just clears the about-to-fire submission, the
@@ -214,6 +222,7 @@ func TestHandleKey_StreamingEnter_EmptyInputWithdrawsSteer(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEnter_SecondPressReplacesQueue(t *testing.T) {
+	t.Parallel()
 	// First Enter queues "first"; second Enter (with new textarea
 	// content) replaces — "last thing you said is what you meant".
 	m := streamingModel(t, "first message")
@@ -233,6 +242,7 @@ func TestHandleKey_StreamingEnter_SecondPressReplacesQueue(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
+	t.Parallel()
 	// Esc during a stream cancels AND clears both queue and pending
 	// steer — "Esc stops everything" must include latent state.
 	m := streamingModel(t, "")
@@ -264,6 +274,7 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 }
 
 func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
+	t.Parallel()
 	// When the slash-command menu is open and has candidates, Enter
 	// should fill in the highlighted command (same as Tab) — NOT
 	// submit the partial literal text and queue/dispatch on that.
@@ -291,6 +302,7 @@ func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 }
 
 func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
+	t.Parallel()
 	// User flow: type "/model" → slash menu opens with /model highlighted →
 	// press Enter. The expected result is that the model picker opens
 	// immediately (not on the NEXT keystroke). Before the handoff fix,
@@ -323,6 +335,7 @@ func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
 }
 
 func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
+	t.Parallel()
 	// Regression: when the user types "/model<space>" the model picker
 	// should auto-open. Before this fix, the slash menu closed (because
 	// it forbids spaces in args mode) and nothing replaced it — the
@@ -350,6 +363,7 @@ func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 }
 
 func TestUpdateCommandMenu_ClosesAutoPickerOnBackspace(t *testing.T) {
+	t.Parallel()
 	// Once the input is no longer "/model<space>..." (e.g. user
 	// backspaced the space back to "/model"), the auto-opened picker
 	// must close so the regular slash menu can re-appear.
@@ -371,6 +385,7 @@ func TestUpdateCommandMenu_ClosesAutoPickerOnBackspace(t *testing.T) {
 }
 
 func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
+	t.Parallel()
 	// /model with no args should open the picker for a curated provider
 	// (DeepSeek), with the current model preselected.
 	m := &Model{}
@@ -405,6 +420,7 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 // /model deepseek-reasoner is still valid (covered elsewhere) — the
 // alias is hidden, not removed.
 func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
+	t.Parallel()
 	m := &Model{}
 	m.opts.Model = "deepseek-chat"
 	m.opts.ProviderName = ""
@@ -422,6 +438,7 @@ func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 // ---- Paste folding tests ----------------------------------------------
 
 func TestPasteFolding_FoldOnMultiLinePaste(t *testing.T) {
+	t.Parallel()
 	// Paste with lines exceeding textarea height should fold.
 	m := Model{input: textarea.New(), opts: Options{}}
 	m.input.SetHeight(3)
@@ -441,6 +458,7 @@ func TestPasteFolding_FoldOnMultiLinePaste(t *testing.T) {
 }
 
 func TestPasteFolding_NoFoldOnShortPaste(t *testing.T) {
+	t.Parallel()
 	// Paste with lines ≤ textarea height should NOT fold.
 	m := Model{input: textarea.New(), opts: Options{}}
 	m.input.SetHeight(3)
@@ -457,6 +475,7 @@ func TestPasteFolding_NoFoldOnShortPaste(t *testing.T) {
 }
 
 func TestPasteFolding_NoFoldOnSingleLine(t *testing.T) {
+	t.Parallel()
 	// Single-line paste should NOT fold.
 	m := Model{input: textarea.New(), opts: Options{}}
 	text := "hello world"
@@ -472,6 +491,7 @@ func TestPasteFolding_NoFoldOnSingleLine(t *testing.T) {
 }
 
 func TestPasteFolding_MarkerPersistsOnNonEnterKey(t *testing.T) {
+	t.Parallel()
 	// When folded, a non-Enter keypress should NOT restore content.
 	// The marker stays in place and the user can type around it.
 	lines := "line1\nline2\nline3\nline4\nline5\nline6"
@@ -497,6 +517,7 @@ func TestPasteFolding_MarkerPersistsOnNonEnterKey(t *testing.T) {
 }
 
 func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
+	t.Parallel()
 	// The placeholder should include the line count.
 	m := Model{input: textarea.New()}
 	m.input.SetHeight(3)
@@ -510,6 +531,7 @@ func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
 }
 
 func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
+	t.Parallel()
 	// handlePasteFolding is ONLY called when msg.Paste is true. Verify
 	// the guard in handleKey: a non-paste KeyRunes event should NOT fold
 	// even if the textarea has >3 lines.
@@ -537,6 +559,7 @@ func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
 }
 
 func TestPasteFolding_ExactThreshold(t *testing.T) {
+	t.Parallel()
 	// textarea height = threshold. 4 lines should fold, 3 should not.
 	t.Run("four lines fold", func(t *testing.T) {
 		m := Model{input: textarea.New()}
@@ -561,6 +584,7 @@ func TestPasteFolding_ExactThreshold(t *testing.T) {
 // ---- Paste resolution on Enter ----------------------------------------
 
 func TestPasteFolding_StreamingEnterResolvesPaste(t *testing.T) {
+	t.Parallel()
 	// Streaming + Enter: folded paste should be resolved before queueing.
 	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7"
 	m := streamingModel(t, "")
@@ -584,6 +608,7 @@ func TestPasteFolding_StreamingEnterResolvesPaste(t *testing.T) {
 }
 
 func TestPasteFolding_StreamingEnterResolvesPasteWithTyping(t *testing.T) {
+	t.Parallel()
 	// Streaming + Enter: user typed additional text after the marker,
 	// both the paste and the extra text should appear in queuedText.
 	content := "line1\nline2\nline3\nline4\nline5\nline6"
@@ -604,6 +629,7 @@ func TestPasteFolding_StreamingEnterResolvesPasteWithTyping(t *testing.T) {
 }
 
 func TestPasteFolding_StreamingAltEnterResolvesPaste(t *testing.T) {
+	t.Parallel()
 	// Streaming + Alt+Enter: folded paste should be resolved for steer.
 	content := "fix this:\nremove the panic\nadd error handling"
 	m := streamingModel(t, "")
@@ -625,6 +651,7 @@ func TestPasteFolding_StreamingAltEnterResolvesPaste(t *testing.T) {
 }
 
 func TestPasteFolding_StreamingEnterPasteNotEmptyOnEmptyTyping(t *testing.T) {
+	t.Parallel()
 	// Streaming + Enter with only the marker in the textarea (no extra
 	// typing) should produce a non-empty queuedText = the pasted content.
 	// Regression: the old empty-text check must not fire when the
@@ -648,6 +675,7 @@ func TestPasteFolding_StreamingEnterPasteNotEmptyOnEmptyTyping(t *testing.T) {
 }
 
 func TestPasteFolding_NonStreamingEnterConsumesPasteState(t *testing.T) {
+	t.Parallel()
 	// Non-streaming + Enter: even though submit will fail (no agent),
 	// the paste state should be consumed and the input cleared.
 	content := "a\nb\nc\nd\ne\nf"
@@ -674,6 +702,7 @@ func TestPasteFolding_NonStreamingEnterConsumesPasteState(t *testing.T) {
 }
 
 func TestPasteFolding_NonStreamingEnterWithExtraTextConsumesPaste(t *testing.T) {
+	t.Parallel()
 	// Non-streaming: paste marker + extra text → paste state consumed.
 	content := "errors.go:\nfunc handleErr"
 	m := Model{input: textarea.New()}
@@ -697,6 +726,7 @@ func TestPasteFolding_NonStreamingEnterWithExtraTextConsumesPaste(t *testing.T) 
 }
 
 func TestCmdModel_ArgsPathStillWorks(t *testing.T) {
+	t.Parallel()
 	// /model <id> should bypass the picker — used by power users and
 	// for compatible-provider freeform ids.
 	m := &Model{}
@@ -716,6 +746,7 @@ func TestCmdModel_ArgsPathStillWorks(t *testing.T) {
 }
 
 func TestCmdModel_UnknownProviderFallsBackToHint(t *testing.T) {
+	t.Parallel()
 	// For --provider=compatible (or any uncurated provider name), we
 	// have no candidate list — fall back to the "type the id" hint
 	// instead of opening an empty picker.
@@ -734,6 +765,7 @@ func TestCmdModel_UnknownProviderFallsBackToHint(t *testing.T) {
 }
 
 func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
+	t.Parallel()
 	// Picker open + Enter on a different row → model switches, picker closes.
 	m := Model{input: textarea.New()}
 	m.opts.Model = "deepseek-chat"
@@ -763,6 +795,7 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 }
 
 func TestCmdSetup_OpensProviderPicker(t *testing.T) {
+	t.Parallel()
 	// /setup should open the picker pre-loaded with the four known
 	// providers and tagged with the setup purpose so accept routes
 	// correctly. emptyModel has ProviderName="" → DeepSeek preselected.
@@ -789,6 +822,7 @@ func TestCmdSetup_OpensProviderPicker(t *testing.T) {
 }
 
 func TestApplyModelChoice_RoutesByPurpose(t *testing.T) {
+	t.Parallel()
 	// Verify the picker dispatcher splits "model" vs "setup-provider":
 	// model purpose → updates m.opts.Model; setup purpose → enters
 	// key-entry mode without touching m.opts.Model.
@@ -837,6 +871,7 @@ func TestApplyModelChoice_RoutesByPurpose(t *testing.T) {
 }
 
 func TestHandleKey_SetupKeyEntry_EscCancels(t *testing.T) {
+	t.Parallel()
 	// Esc during key entry should clear the wizard state without
 	// hitting Store.Save (no config file written).
 	m := emptyModel()
@@ -859,6 +894,7 @@ func TestHandleKey_SetupKeyEntry_EscCancels(t *testing.T) {
 }
 
 func TestHandleKey_SetupKeyEntry_EnterEmptyDoesNotSave(t *testing.T) {
+	t.Parallel()
 	// Pressing Enter with an empty key shouldn't save garbage to
 	// config — finishSetup returns a "cancelled" Println and clears
 	// state. We verify state-clear here; config side-effect-absence
@@ -877,6 +913,7 @@ func TestHandleKey_SetupKeyEntry_EnterEmptyDoesNotSave(t *testing.T) {
 }
 
 func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
+	t.Parallel()
 	// Esc closes the picker WITHOUT switching the model.
 	m := Model{input: textarea.New()}
 	m.opts.Model = "deepseek-chat"
@@ -907,6 +944,7 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 // all auto-open pickers (/model, /effort, /lang); the test documents it
 // so any future change to "Enter takes the typed value" is deliberate.
 func TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped(t *testing.T) {
+	t.Parallel()
 	m := Model{input: textarea.New()}
 	m.opts.Effort = "" // current = off
 	m.modelPickerOpen = true
@@ -938,6 +976,7 @@ func TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped(t *testing.T)
 // complements the test above: when the user arrows to "max" and presses
 // Enter, the highlighted row wins regardless of what's in the textarea.
 func TestHandleKey_EffortPicker_AutoOpened_EnterAppliesMaxWhenHighlighted(t *testing.T) {
+	t.Parallel()
 	m := Model{input: textarea.New()}
 	m.opts.Effort = "" // current = off
 	m.modelPickerOpen = true
@@ -965,6 +1004,7 @@ func TestHandleKey_EffortPicker_AutoOpened_EnterAppliesMaxWhenHighlighted(t *tes
 }
 
 func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
+	t.Parallel()
 	// Picker open with candidates: Enter accepts (same as Tab). The
 	// user then presses Enter again to submit.
 	m := Model{input: textarea.New()}
@@ -987,6 +1027,7 @@ func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
 }
 
 func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
+	t.Parallel()
 	// Regression: while streaming, typing "/help" and pressing Enter
 	// must open the help overlay immediately — NOT stash "/help" into
 	// queuedText and dispatch it as a user message to the model when
@@ -1005,6 +1046,7 @@ func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
 }
 
 func TestRenderQueueHint_States(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		setup   func(*Model)
@@ -1043,6 +1085,7 @@ func TestRenderQueueHint_States(t *testing.T) {
 }
 
 func TestShiftTab_CyclesModes(t *testing.T) {
+	t.Parallel()
 	m := emptyModel()
 	var yoloCalls, planCalls []bool
 	m.opts.SetYolo = func(b bool) { yoloCalls = append(yoloCalls, b) }
@@ -1072,12 +1115,90 @@ func TestShiftTab_CyclesModes(t *testing.T) {
 	}
 
 	// Verify hooks were called with correct values.
-	// Plan was set: false→true (call 0), true→false (call 1)
-	if len(planCalls) != 2 || planCalls[0] != true || planCalls[1] != false {
-		t.Errorf("planCalls = %v, want [true, false]", planCalls)
+	// Plan: false→true (Ask→Plan), true→false (Plan→Yolo),
+	//       false→false (Yolo→Ask, no-op for symmetry with cmdYolo)
+	if len(planCalls) != 3 || planCalls[0] != true || planCalls[1] != false || planCalls[2] != false {
+		t.Errorf("planCalls = %v, want [true, false, false]", planCalls)
 	}
-	// Yolo was set: false→true (call 0), true→false (call 1)
+	// Yolo: false→true (Plan→Yolo), true→false (Yolo→Ask)
 	if len(yoloCalls) != 2 || yoloCalls[0] != true || yoloCalls[1] != false {
 		t.Errorf("yoloCalls = %v, want [true, false]", yoloCalls)
+	}
+}
+
+func TestReviewBranchEntry_EscCancels_BeforeStreaming(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.reviewBranchEntry = true
+	m.input.SetValue("my-feature")
+
+	// Esc should clear reviewBranchEntry even without a stream.
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if m2.reviewBranchEntry {
+		t.Error("reviewBranchEntry should be false after Esc")
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be reset after Esc, got %q", m2.input.Value())
+	}
+}
+
+func TestReviewBranchEntry_EscCancels_WithStream(t *testing.T) {
+	t.Parallel()
+	m := streamingModel(t, "my-feature")
+	m.reviewBranchEntry = true
+
+	// Wire a cancel func so we can observe it being called.
+	canceled := false
+	m.cancelStream = func() { canceled = true }
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if m2.reviewBranchEntry {
+		t.Error("reviewBranchEntry should be false after Esc")
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be reset after Esc, got %q", m2.input.Value())
+	}
+	// Esc in reviewBranchEntry must NOT cancel the stream — the review
+	// entry guard fires before the streaming guard.
+	if canceled {
+		t.Error("Esc in reviewBranchEntry must not cancel the stream")
+	}
+}
+
+func TestReviewBranchEntry_EnterEmptyShowsError(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.reviewBranchEntry = true
+	// Textarea is empty (default).
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.reviewBranchEntry {
+		t.Error("reviewBranchEntry should be false after Enter")
+	}
+}
+
+func TestReviewBranchEntry_EnterSubmitsCommand(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.reviewBranchEntry = true
+	m.input.SetValue("some-branch")
+
+	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := out.(Model)
+
+	if m2.reviewBranchEntry {
+		t.Error("reviewBranchEntry should be false after Enter")
+	}
+	if m2.input.Value() != "" {
+		t.Errorf("textarea should be reset after Enter, got %q", m2.input.Value())
+	}
+	if cmd == nil {
+		t.Error("Enter with a branch name should return a tea.Cmd")
 	}
 }
