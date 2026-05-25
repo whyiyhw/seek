@@ -17,6 +17,7 @@ import (
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -319,7 +320,104 @@ func (m *Model) applyModelChoice(idx int) {
 		// "/model " would otherwise sit there until they backspace it
 		// or submit it as garbage to the agent.
 		m.input.Reset()
+
+	case "skill-verb":
+		// Completion-style insert (no command dispatch): replace the
+		// textarea contents with `/skill <verb> ` so the user keeps
+		// composing. The trailing space matters — for verb `use` it
+		// re-triggers updateCommandMenu which immediately opens the
+		// skill-name picker, giving the user a seamless two-step
+		// completion without any extra keystrokes.
+		m.input.SetValue("/skill " + choice.id + " ")
+		// Re-run the menu state machine so the inserted text immediately
+		// drives the next picker (use→name handoff). Without this the
+		// user would see "/skill use " sitting in the textarea with no
+		// dropdown until the next keystroke.
+		m.updateCommandMenu()
+
+	case "skill-name":
+		// Completion-style insert: `/skill use <name>` with NO trailing
+		// space. The missing space is load-bearing — updateCommandMenu
+		// reads the trailing-space-or-not as "user is composing the
+		// name" vs "user is composing the inline task". Without the
+		// space the picker closes; the user can hit Enter immediately
+		// to arm, or type ` <task>` to fire with extras.
+		//
+		// Critically, we do NOT call updateCommandMenu here. The inserted
+		// value `/skill use dual-model` would still partial-match the
+		// picker filter against itself ("dual-model" is a prefix of
+		// "dual-model"), re-opening the picker on the same row the user
+		// just accepted. Accept is "I'm done with this picker"; the next
+		// genuine keystroke will re-evaluate.
+		m.input.SetValue("/skill use " + choice.id)
 	}
+}
+
+// skillVerbChoices is the curated picker shown after the user types
+// `/skill ` (with a trailing space). Mirrors the subcommands accepted
+// by skillcli.Run plus the TUI-only `use` verb. Order is "the verbs
+// you'll reach for most often" first — list/status above the heavier
+// install/update operations.
+//
+// Descriptions stay short so the picker fits without wrapping; the
+// inline status line in the picker pane is the right depth-of-detail
+// for "which verb does what". Anything richer belongs in /skill help.
+func skillVerbChoices() []modelChoice {
+	return []modelChoice{
+		{"use", "use <name> [task] — arm next message, or fire immediately with a task"},
+		{"list", "list — show loaded skills with sources and descriptions"},
+		{"status", "status <name> — diagnostic detail for one skill"},
+		{"stats", "stats — historical call counts across all sessions"},
+		{"install", "install <source> — local path / git URL / https tarball"},
+		{"update", "update <name>|--all — refetch installed skills"},
+		{"uninstall", "uninstall <name> — remove a skill from ~/.seek/skills/"},
+		{"help", "help — full skill CLI help"},
+	}
+}
+
+// skillNameChoices returns one picker row per loaded skill — name +
+// (truncated) description. Used by the second-level picker when the
+// user has typed `/skill use ` and is choosing which skill to arm /
+// fire. Returns nil when no skills are loaded so the caller can fall
+// through to "no candidates → don't open".
+//
+// The description is collapsed to one line and clipped: the picker
+// row is single-line per established convention, and a multi-line
+// skill description would push the rest of the picker off-screen.
+func skillNameChoices(set *skill.Set) []modelChoice {
+	if set == nil || set.Len() == 0 {
+		return nil
+	}
+	out := make([]modelChoice, 0, set.Len())
+	for _, sk := range set.List() {
+		desc := strings.ReplaceAll(sk.Description, "\n", " ")
+		if len(desc) > 64 {
+			desc = desc[:61] + "..."
+		}
+		out = append(out, modelChoice{id: sk.Name, description: sk.Name + " — " + desc})
+	}
+	return out
+}
+
+// filterChoicesByPrefix narrows a curated picker to entries whose id
+// has the given (lower-cased) prefix. Empty prefix returns the input
+// unchanged. Used by the /skill <verb> and /skill use <name> pickers
+// so typing past the trigger space narrows candidates instead of
+// stranding the user with a fixed list — the existing /model picker
+// doesn't filter, but verb / skill-name lists are short and curated
+// enough that the IDE-style narrowing feels right here.
+func filterChoicesByPrefix(choices []modelChoice, prefix string) []modelChoice {
+	if prefix == "" {
+		return choices
+	}
+	p := strings.ToLower(prefix)
+	var out []modelChoice
+	for _, c := range choices {
+		if strings.HasPrefix(strings.ToLower(c.id), p) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // effortChoices is the curated picker for /effort. Order matters: the

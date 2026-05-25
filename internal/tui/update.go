@@ -871,11 +871,101 @@ func (m *Model) updateCommandMenu() {
 			m.pickerPurpose = "review"
 		}
 		return
+
+	// `/skill use <partial>` — second-level picker for loaded skill
+	// names. Check this BEFORE the `/skill ` branch below: prefix
+	// "/skill use " also matches "/skill " naively, and we want the
+	// name picker to win once the user has committed to the `use`
+	// verb. We close the picker once the user types a space after the
+	// name (i.e. they're moving on to the inline task), so candidates
+	// don't keep showing up under unrelated text.
+	case strings.HasPrefix(v, "/skill use ") || v == "/skill use ":
+		tail := strings.TrimPrefix(v, "/skill use ")
+		if strings.Contains(tail, " ") {
+			// User has moved past the name into the inline-task
+			// position. Close any stale name picker and fall through
+			// so the live region returns to plain composition.
+			if m.modelPickerOpen && m.pickerPurpose == "skill-name" {
+				m.modelPickerOpen = false
+				m.modelPickerFiltered = nil
+				m.modelPickerSelected = 0
+				m.pickerPurpose = ""
+			}
+			m.commandMenuOpen = false
+			m.commandMenuFiltered = nil
+			m.commandMenuSelected = 0
+			return
+		}
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		all := skillNameChoices(m.opts.Skills)
+		filtered := filterChoicesByPrefix(all, tail)
+		if len(filtered) == 0 {
+			// Nothing to pick. Close any prior open picker; the user
+			// keeps typing into a plain textarea (cmdSkillUse will
+			// give a clear error if they Enter with an unknown name).
+			if m.modelPickerOpen && m.pickerPurpose == "skill-name" {
+				m.modelPickerOpen = false
+				m.modelPickerFiltered = nil
+				m.modelPickerSelected = 0
+				m.pickerPurpose = ""
+			}
+			return
+		}
+		m.modelPickerFiltered = filtered
+		// Reset selection to top — keystrokes that change the filter
+		// shouldn't strand the highlight on a row that's no longer
+		// in the candidate set.
+		m.modelPickerSelected = 0
+		m.modelPickerOpen = true
+		m.pickerPurpose = "skill-name"
+		return
+
+	// `/skill <verb-partial>` — first-level picker for sub-verbs.
+	// Triggered by the space after `/skill`; closes once the user has
+	// typed past the verb (any second space). The handoff into the
+	// name picker for `use` happens on the next updateCommandMenu
+	// cycle: applyModelChoice replaces the textarea contents with
+	// "/skill use " which then matches the branch above.
+	case strings.HasPrefix(v, "/skill ") || v == "/skill ":
+		tail := strings.TrimPrefix(v, "/skill ")
+		if strings.Contains(tail, " ") {
+			// Past the verb — close.
+			if m.modelPickerOpen && m.pickerPurpose == "skill-verb" {
+				m.modelPickerOpen = false
+				m.modelPickerFiltered = nil
+				m.modelPickerSelected = 0
+				m.pickerPurpose = ""
+			}
+			m.commandMenuOpen = false
+			m.commandMenuFiltered = nil
+			m.commandMenuSelected = 0
+			return
+		}
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		filtered := filterChoicesByPrefix(skillVerbChoices(), tail)
+		if len(filtered) == 0 {
+			if m.modelPickerOpen && m.pickerPurpose == "skill-verb" {
+				m.modelPickerOpen = false
+				m.modelPickerFiltered = nil
+				m.modelPickerSelected = 0
+				m.pickerPurpose = ""
+			}
+			return
+		}
+		m.modelPickerFiltered = filtered
+		m.modelPickerSelected = 0
+		m.modelPickerOpen = true
+		m.pickerPurpose = "skill-verb"
+		return
 	}
 
 	// Branch 2: not in a known auto-open state but a stale auto-opened picker
 	// is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review") {
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name") {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/whyiyhw/seek/internal/skill"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -1276,4 +1278,243 @@ func TestTruncateOneLine(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- /skill verb + name pickers -----------------------------------------
+//
+// The "auto-open on trailing space" pattern matches /model /effort /lang
+// /review; these tests verify the new /skill branches follow the same
+// state-machine rules: open on `/skill `, narrow as you type, hand off
+// to the name picker on `use`, close once you compose past the name.
+
+func attachSkills(m *Model, names ...string) {
+	set := skill.NewSet()
+	for _, n := range names {
+		set.Add(&skill.Skill{Name: n, Description: "desc for " + n, Source: "builtin"})
+	}
+	m.opts.Skills = set
+}
+
+func TestUpdateCommandMenu_SkillVerbPickerOpensOnSpace(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/skill ")
+
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen {
+		t.Fatal("expected skill-verb picker open on '/skill '")
+	}
+	if m.pickerPurpose != "skill-verb" {
+		t.Errorf("pickerPurpose = %q, want skill-verb", m.pickerPurpose)
+	}
+	// All verbs visible.
+	if len(m.modelPickerFiltered) < 6 {
+		t.Errorf("expected full verb list, got %d entries", len(m.modelPickerFiltered))
+	}
+}
+
+func TestUpdateCommandMenu_SkillVerbPickerFiltersByPrefix(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/skill us")
+
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen || m.pickerPurpose != "skill-verb" {
+		t.Fatalf("expected skill-verb picker, got open=%v purpose=%q", m.modelPickerOpen, m.pickerPurpose)
+	}
+	// "us" should narrow to just "use".
+	if len(m.modelPickerFiltered) != 1 || m.modelPickerFiltered[0].id != "use" {
+		t.Errorf("expected sole 'use' candidate, got %d entries", len(m.modelPickerFiltered))
+	}
+}
+
+func TestUpdateCommandMenu_SkillVerbPickerEmptyFilterDoesNotOpen(t *testing.T) {
+	t.Parallel()
+	// Typo: no verb starts with "zzz" → no candidates → picker stays
+	// closed so the user isn't stranded with an empty dropdown.
+	m := emptyModel()
+	m.input.SetValue("/skill zzz")
+
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Errorf("picker should be closed when filter matches no verbs")
+	}
+}
+
+func TestUpdateCommandMenu_SkillVerbPickerClosesPastVerb(t *testing.T) {
+	t.Parallel()
+	// Once the user types past the verb (a second space), the verb
+	// picker is no longer relevant — the user is moving into sub-args
+	// (which themselves may have a picker, like skill-name for `use`).
+	m := emptyModel()
+	m.input.SetValue("/skill list ") // verb done + a trailing space
+
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Errorf("verb picker must close once user moves past the verb token")
+	}
+}
+
+func TestUpdateCommandMenu_SkillNamePickerOpensAfterUseSpace(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	attachSkills(m, "dual-model", "go-test-runner")
+	m.input.SetValue("/skill use ")
+
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen {
+		t.Fatal("expected skill-name picker open on '/skill use '")
+	}
+	if m.pickerPurpose != "skill-name" {
+		t.Errorf("pickerPurpose = %q, want skill-name", m.pickerPurpose)
+	}
+	if len(m.modelPickerFiltered) != 2 {
+		t.Errorf("expected 2 skill candidates, got %d", len(m.modelPickerFiltered))
+	}
+}
+
+func TestUpdateCommandMenu_SkillNamePickerFiltersByPrefix(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	attachSkills(m, "dual-model", "go-test-runner")
+	m.input.SetValue("/skill use du")
+
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen || m.pickerPurpose != "skill-name" {
+		t.Fatalf("expected skill-name picker, got open=%v purpose=%q", m.modelPickerOpen, m.pickerPurpose)
+	}
+	if len(m.modelPickerFiltered) != 1 || m.modelPickerFiltered[0].id != "dual-model" {
+		t.Errorf("expected only dual-model, got %v", pickerIDs(m.modelPickerFiltered))
+	}
+}
+
+func TestUpdateCommandMenu_SkillNamePickerClosesWhenComposingTask(t *testing.T) {
+	t.Parallel()
+	// Once the user types a space AFTER the skill name, they're
+	// composing the inline task — the name picker must get out of the
+	// way so Enter doesn't snap their selection back to a picker row.
+	m := emptyModel()
+	attachSkills(m, "dual-model")
+	m.input.SetValue("/skill use dual-model 帮我重构")
+
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Errorf("skill-name picker must close once user composes the inline task")
+	}
+}
+
+func TestUpdateCommandMenu_SkillNamePickerNoSkillsLoaded(t *testing.T) {
+	t.Parallel()
+	// No skills loaded — picker has no candidates; must not open. The
+	// user still gets a clear error from cmdSkillUse if they Enter.
+	m := emptyModel() // opts.Skills nil
+	m.input.SetValue("/skill use ")
+
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Errorf("picker must not open when no skills are loaded")
+	}
+}
+
+func TestApplyModelChoice_SkillVerbInsertsAndHandsOffOnUse(t *testing.T) {
+	t.Parallel()
+	// Accepting `use` from the verb picker must (a) write `/skill use `
+	// into the textarea — the trailing space is what triggers the
+	// re-evaluation — and (b) immediately open the name picker on the
+	// same Update tick so the user doesn't see a dead "/skill use "
+	// with no dropdown.
+	m := emptyModel()
+	attachSkills(m, "dual-model", "go-test-runner")
+	// Simulate the state at the moment of accept.
+	m.modelPickerFiltered = skillVerbChoices()
+	m.modelPickerOpen = true
+	m.pickerPurpose = "skill-verb"
+	// "use" is the first entry in skillVerbChoices.
+	m.modelPickerSelected = 0
+
+	m.applyModelChoice(0)
+
+	if got := m.input.Value(); got != "/skill use " {
+		t.Errorf("input after verb accept = %q, want '/skill use '", got)
+	}
+	if !m.modelPickerOpen || m.pickerPurpose != "skill-name" {
+		t.Errorf("expected name picker to open via re-trigger; got open=%v purpose=%q",
+			m.modelPickerOpen, m.pickerPurpose)
+	}
+}
+
+func TestApplyModelChoice_SkillVerbNonUseClosesPicker(t *testing.T) {
+	t.Parallel()
+	// Verbs other than `use` have no second-level picker. After
+	// accept the textarea sits at `/skill <verb> ` and no picker is
+	// open — user is composing free-form args.
+	m := emptyModel()
+	choices := skillVerbChoices()
+	m.modelPickerFiltered = choices
+	m.modelPickerOpen = true
+	m.pickerPurpose = "skill-verb"
+	// Pick "list" — first non-use entry.
+	idx := -1
+	for i, c := range choices {
+		if c.id == "list" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("test setup: skillVerbChoices missing 'list'")
+	}
+	m.modelPickerSelected = idx
+
+	m.applyModelChoice(idx)
+
+	if got := m.input.Value(); got != "/skill list " {
+		t.Errorf("input after verb accept = %q, want '/skill list '", got)
+	}
+	if m.modelPickerOpen {
+		t.Errorf("no second-level picker for 'list'; expected closed, got open=%v purpose=%q",
+			m.modelPickerOpen, m.pickerPurpose)
+	}
+}
+
+func TestApplyModelChoice_SkillNameInsertsWithoutTrailingSpace(t *testing.T) {
+	t.Parallel()
+	// Skill-name accept lands at "/skill use <name>" with no trailing
+	// space — the picker closes, but the user can hit Enter to arm or
+	// keep typing " <task>" to fire with extras. The missing space is
+	// the affordance that picker-handoff rules read.
+	m := emptyModel()
+	attachSkills(m, "dual-model", "go-test-runner")
+	m.modelPickerFiltered = skillNameChoices(m.opts.Skills)
+	m.modelPickerOpen = true
+	m.pickerPurpose = "skill-name"
+	m.modelPickerSelected = 0 // dual-model (insertion order)
+
+	m.applyModelChoice(0)
+
+	if got := m.input.Value(); got != "/skill use dual-model" {
+		t.Errorf("input after name accept = %q, want '/skill use dual-model'", got)
+	}
+	if m.modelPickerOpen {
+		t.Errorf("no further picker after name; expected closed, got open=%v purpose=%q",
+			m.modelPickerOpen, m.pickerPurpose)
+	}
+}
+
+// pickerIDs is a test helper that pulls just the id field out of a
+// picker filter slice, for readable failure messages.
+func pickerIDs(choices []modelChoice) []string {
+	out := make([]string, 0, len(choices))
+	for _, c := range choices {
+		out = append(out, c.id)
+	}
+	return out
 }
