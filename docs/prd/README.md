@@ -11,6 +11,8 @@
 | [`v2.md`](v2.md) | seek v0.3.x（目标） | ✅ 已交付 | Skill 生命周期管理：目录包、install/uninstall/update CLI、本地调用统计。M8.0–M8.7 全部交付，commit `b7d7996` → `75dae10`。 |
 | — | seek v0.3.x+（扩展） | ✅ 已交付 | AI 侧 skill 安装（`skill_fetch`/`skill_commit` 工具）、`ask_user` TUI picker 工具、`/plan` 只读模式、`/steer`/`/review` 命令、`@-highlight`、skill 安装 scope 选择（user vs project）。 |
 | [`feature-mcp-client.md`](feature-mcp-client.md) | M5.4（已交付）+ 规划中 | ✅ MCP infra 已交付 / 📐 深度集成设计中 | MCP 客户端（pkg/mcp/）已于 M5.4 交付。本文是后续深度集成设计：以 Semble 为第一验证目标，定义 prompt 引导、工具路由、效果评估方案。参见 `docs/book/chapter-12.md`。 |
+| [`feature-plan-mode.md`](feature-plan-mode.md) | 规划中 | 📐 设计稿 | Plan 模式 v2：把 `/plan` 从单向只读 toggle 演化为带显式用户确认门的闭环工作流（ANALYZE → propose → approve → EXECUTE → 异议 → re-plan）。新 `propose` 工具承载审批门，permission policy 在 approve 后从 ModePlan 切到 ModeAsk。task list 可视化推到 v2，本 PRD 留好接口。 |
+| [`feature-plan-tasklist.md`](feature-plan-tasklist.md) | 已废弃 | ❌ 被取代 | 旧 PRD，scope 误判（只覆盖执行追踪可视化），被 `feature-plan-mode.md` 取代。保留作设计推演审计：为什么 `.md` checkpoint 文件方案被否决、为什么事件驱动 cache 是正确架构。 |
 
 ## 阅读指引
 
