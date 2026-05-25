@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -12,6 +13,14 @@ import (
 // the boolean to req.Reply.
 type approvalRequestMsg struct {
 	req permission.ApprovalRequest
+}
+
+// askUserRequestMsg carries an LLM-driven choice picker. Same shape
+// as approvalRequestMsg but the reply is a structured Answer instead
+// of a bool, and the TUI surfaces a Space-toggle multi-select
+// picker (when MultiSelect=true) or a single-select picker (false).
+type askUserRequestMsg struct {
+	req askuser.Request
 }
 
 // agentEventMsg wraps a single event from agent.Prompt's channel. The

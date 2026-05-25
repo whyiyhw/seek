@@ -185,9 +185,15 @@ func (m Model) View() string {
 	// Approval prompt takes precedence — blurs the input, blocks
 	// everything else. After that, command menu and path picker are
 	// mutually exclusive in practice (different trigger chars).
+	// pendingQuestion sits one rank below pendingApproval: approvals
+	// gate filesystem mutations, so they outrank a model's "which
+	// option?" — though in practice only one of the two is ever
+	// active because they both block the agent goroutine.
 	switch {
 	case m.pendingApproval != nil:
 		sb.WriteString(m.renderApprovalPrompt())
+	case m.pendingQuestion != nil:
+		sb.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
 		sb.WriteString(m.renderDistillReview())
 	case m.commandMenuOpen:
@@ -402,6 +408,97 @@ func (m Model) renderHighlightedPath(path string, selected bool) string {
 	// The matched portion gets the accent highlight style regardless of
 	// selection state, so the matching characters always stand out.
 	return itemStyle.Render(prefix+before) + styleMatchHighlight.Render(matched) + itemStyle.Render(after)
+}
+
+// renderUserQuestion draws the inline picker shown while ask_user is
+// waiting for a choice. Two modes:
+//
+//	single-select: ▸ marks the cursor. Enter on cursor accepts.
+//	multi-select:  [x] / [ ] left of each row. Space toggles, Enter
+//	               confirms the toggled set.
+//
+// The auto-appended "Other / type your own" row sits at index
+// len(options); when the user picks it, pendingQuestionFreeText
+// flips true and the textarea collects their reply until the next
+// Enter.
+func (m Model) renderUserQuestion() string {
+	if m.pendingQuestion == nil {
+		return ""
+	}
+	q := m.pendingQuestion.Question
+	var sb strings.Builder
+
+	sb.WriteString(styleApprovalHeader.Render("? " + q.Question))
+	sb.WriteString("\n")
+
+	// Free-text capture mode: picker collapses to a single line
+	// echoing the user's typing. The textarea above the picker
+	// renders the live input; this line just reminds the user
+	// what mode they're in.
+	if m.pendingQuestionFreeText {
+		sb.WriteString(styleMuted.Render("  ✎ typing your own answer — Enter to submit · Esc to go back to choices"))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	otherIdx := len(q.Options)
+	for i, opt := range q.Options {
+		sb.WriteString(formatQuestionRow(i, opt.Label, opt.Description,
+			i == m.pendingQuestionCursor,
+			q.MultiSelect,
+			m.pendingQuestionSelected[i],
+		))
+		sb.WriteString("\n")
+	}
+	// Auto-appended Other row. Slightly different label so the
+	// user reads it as "I want to write my own answer" rather
+	// than picking a fifth option.
+	sb.WriteString(formatQuestionRow(otherIdx, "Other — type your own answer", "",
+		otherIdx == m.pendingQuestionCursor,
+		q.MultiSelect,
+		m.pendingQuestionSelected[otherIdx],
+	))
+	sb.WriteString("\n")
+
+	hint := "  ↑/↓ navigate · Enter accept · Esc cancel"
+	if q.MultiSelect {
+		hint = "  ↑/↓ navigate · Space toggle · Enter confirm · Esc cancel"
+	}
+	sb.WriteString(styleMuted.Render(hint))
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// formatQuestionRow renders one picker row. selected applies only in
+// multi-select mode (Space toggle); cursor applies in both.
+func formatQuestionRow(_ int, label, description string, cursor, multi, selected bool) string {
+	// Marker column: cursor arrow + (multi-select only) checkbox.
+	marker := "  "
+	if cursor {
+		marker = "▸ "
+	}
+	box := ""
+	if multi {
+		if selected {
+			box = "[x] "
+		} else {
+			box = "[ ] "
+		}
+	}
+	row := marker + box + label
+	if description != "" {
+		row += "  " + description
+	}
+	if cursor {
+		return styleMenuSelected.Render(row)
+	}
+	if multi && selected {
+		// Toggled-on rows in multi-select stand out even when the
+		// cursor isn't on them, so the user can scan the page and
+		// see "what have I picked so far?".
+		return styleAssistantLabel.Render(row)
+	}
+	return styleMenuItem.Render(row)
 }
 
 // renderApprovalPrompt draws the inline y/N/a chooser shown while a

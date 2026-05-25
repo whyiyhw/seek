@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -149,6 +150,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingApproval = &req
 		m.input.Blur()
 
+	case askUserRequestMsg:
+		// New ask_user request — grab focus and reset picker state.
+		req := msg.req
+		m.pendingQuestion = &req
+		m.pendingQuestionSelected = map[int]bool{}
+		m.pendingQuestionCursor = 0
+		m.pendingQuestionFreeText = false
+		// Single-select picker uses keyboard nav, not textarea; blur.
+		// We re-focus when the user picks "Other" so they can type.
+		m.input.Blur()
+
 	case compactDoneMsg:
 		cmds = append(cmds, m.handleCompactDone(msg)...)
 
@@ -206,6 +218,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// happen until the user picks y / n / a.
 	if m.pendingApproval != nil {
 		return m.handleApprovalKey(msg)
+	}
+
+	// An open ask_user picker also grabs everything for the same
+	// reason: the tool's goroutine is parked on the Reply channel.
+	if m.pendingQuestion != nil {
+		return m.handleQuestionKey(msg)
 	}
 
 	// Distill review modal grabs all keys until the user finishes the
@@ -720,6 +738,172 @@ func (m *Model) replyApproval(allow bool) {
 		// Buffered channel was already written or no reader — either
 		// way nothing more we can do here.
 	}
+}
+
+// handleQuestionKey drives the ask_user picker. Two states:
+//
+//   - choice mode (free-text bool false): ↑/↓ moves the cursor,
+//     Space toggles in multi-select, Enter accepts (single-select)
+//     or confirms toggled set (multi). Picking the "Other" row
+//     transitions to free-text mode.
+//   - free-text mode: the textarea is focused; Enter submits the
+//     typed content as FreeText; Esc reverts to choice mode.
+//
+// Esc at top level cancels: Answer{Cancelled: true} goes back, the
+// tool returns {cancelled: true} to the model. The model is
+// expected to gracefully step down to plain-text questioning when
+// it sees that.
+func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingQuestion == nil {
+		return m, nil
+	}
+	q := m.pendingQuestion.Question
+	otherIdx := len(q.Options)
+
+	if m.pendingQuestionFreeText {
+		switch msg.Type {
+		case tea.KeyEsc:
+			// Back to choices.
+			m.pendingQuestionFreeText = false
+			m.input.Blur()
+			m.input.Reset()
+			return m, nil
+		case tea.KeyEnter:
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				return m, nil // Empty Enter is a no-op — don't submit blank.
+			}
+			m.input.Reset()
+			return m.completeQuestion(askuser.Answer{FreeText: text})
+		case tea.KeyCtrlC:
+			// Reply cancelled before quitting so the agent unblocks.
+			return m.completeQuestion(askuser.Answer{Cancelled: true})
+		}
+		// Otherwise pass through to the textarea (typing).
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+	}
+
+	// Choice mode.
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.pendingQuestionCursor > 0 {
+			m.pendingQuestionCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.pendingQuestionCursor < otherIdx {
+			m.pendingQuestionCursor++
+		}
+		return m, nil
+	case tea.KeySpace:
+		if !q.MultiSelect {
+			return m, nil
+		}
+		// Toggle current row. The "Other" row is mutually exclusive
+		// with the option rows: picking Other clears everything else,
+		// picking anything else clears Other. This matches the
+		// "free-text replaces structured choices" semantic from the
+		// design — you wouldn't say "ids: A, B + free_text: ..." at
+		// the same time, the reply schema is one-or-the-other.
+		if m.pendingQuestionCursor == otherIdx {
+			if m.pendingQuestionSelected[otherIdx] {
+				delete(m.pendingQuestionSelected, otherIdx)
+			} else {
+				m.pendingQuestionSelected = map[int]bool{otherIdx: true}
+			}
+		} else {
+			if m.pendingQuestionSelected[m.pendingQuestionCursor] {
+				delete(m.pendingQuestionSelected, m.pendingQuestionCursor)
+			} else {
+				delete(m.pendingQuestionSelected, otherIdx)
+				m.pendingQuestionSelected[m.pendingQuestionCursor] = true
+			}
+		}
+		return m, nil
+	case tea.KeyEnter:
+		// Single-select: accept the cursor row.
+		// Multi-select:  if nothing toggled, treat current row as
+		//                the single pick (a one-line shortcut for
+		//                "I just want this one"); otherwise confirm
+		//                the toggled set.
+		if !q.MultiSelect {
+			if m.pendingQuestionCursor == otherIdx {
+				return m.enterFreeText()
+			}
+			id := q.Options[m.pendingQuestionCursor].ID
+			return m.completeQuestion(askuser.Answer{ChosenIDs: []string{id}})
+		}
+		// Multi-select.
+		selected := m.toggledIDs(q)
+		if len(selected) == 0 {
+			// Empty Enter on cursor row: same as toggling that
+			// single row and confirming. The shortcut keeps the
+			// common "I just want this one" case to one keypress.
+			if m.pendingQuestionCursor == otherIdx {
+				return m.enterFreeText()
+			}
+			return m.completeQuestion(askuser.Answer{ChosenIDs: []string{q.Options[m.pendingQuestionCursor].ID}})
+		}
+		// If "Other" was toggled (alone, by the exclusivity rule),
+		// flip into free-text mode instead of returning an empty
+		// ChosenIDs answer.
+		if m.pendingQuestionSelected[otherIdx] {
+			return m.enterFreeText()
+		}
+		return m.completeQuestion(askuser.Answer{ChosenIDs: selected})
+	case tea.KeyEsc:
+		return m.completeQuestion(askuser.Answer{Cancelled: true})
+	case tea.KeyCtrlC:
+		// Reply cancelled before quitting so the agent unblocks.
+		return m.completeQuestion(askuser.Answer{Cancelled: true})
+	}
+	return m, nil
+}
+
+// enterFreeText flips the picker into "Other / type your own"
+// mode: textarea takes focus, the picker collapses to a single
+// status line. The Answer flows back via the next Enter handled
+// in the free-text branch above.
+func (m Model) enterFreeText() (tea.Model, tea.Cmd) {
+	m.pendingQuestionFreeText = true
+	m.input.Reset()
+	m.input.Focus()
+	return m, nil
+}
+
+// toggledIDs returns the picker's selected option ids (excluding the
+// auto-Other row, which is handled separately). Order matches the
+// option order, not the order the user toggled.
+func (m *Model) toggledIDs(q askuser.Question) []string {
+	var out []string
+	for i, opt := range q.Options {
+		if m.pendingQuestionSelected[i] {
+			out = append(out, opt.ID)
+		}
+	}
+	return out
+}
+
+// completeQuestion sends Answer back through the reply channel,
+// clears all pending state, and re-arms the listener for the next
+// ask_user call.
+func (m Model) completeQuestion(ans askuser.Answer) (tea.Model, tea.Cmd) {
+	if m.pendingQuestion == nil {
+		return m, nil
+	}
+	select {
+	case m.pendingQuestion.Reply <- ans:
+	default:
+		// Buffered to 1 — should always succeed on first send.
+	}
+	m.pendingQuestion = nil
+	m.pendingQuestionSelected = nil
+	m.pendingQuestionCursor = 0
+	m.pendingQuestionFreeText = false
+	m.input.Focus()
+	return m, waitForAskUser(m.opts.AskUserCh)
 }
 
 // tryHistoryUp moves backwards through the prompt history. Returns

@@ -35,6 +35,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
@@ -67,6 +68,11 @@ type Options struct {
 	// permission policy. nil = no inline approval (e.g. --yolo at
 	// startup); the TUI just won't listen.
 	ApprovalCh <-chan permission.ApprovalRequest
+
+	// AskUserCh delivers per-call ask_user requests from the
+	// askuser.Policy. nil = the ask_user tool is unavailable; the
+	// tool returns ErrDisabled when called.
+	AskUserCh <-chan askuser.Request
 
 	// Session + Store, when both non-nil, enable auto-save: after
 	// every agent stream ends the current Session snapshot is
@@ -273,6 +279,30 @@ type Model struct {
 	// is buffered so we never block).
 	pendingApproval *permission.ApprovalRequest
 
+	// pendingQuestion, when non-nil, means the agent goroutine is
+	// blocked on an ask_user request and the TUI is showing a
+	// choice picker. Mutually exclusive with pendingApproval (only
+	// one tool blocks at a time). Reply travels through req.Reply,
+	// which is buffered to 1 so we never deadlock the TUI on send.
+	pendingQuestion *askuser.Request
+
+	// pendingQuestionSelected tracks which option indexes the user
+	// has toggled on in multi-select mode. Single-select doesn't
+	// use it; Enter on the highlighted row commits via the cursor
+	// index alone.
+	pendingQuestionSelected map[int]bool
+
+	// pendingQuestionCursor is the highlighted row index. Bounds:
+	// [0, len(options)] — the extra slot is the auto-appended
+	// "Other" row, which sits at index len(options).
+	pendingQuestionCursor int
+
+	// pendingQuestionFreeText, when true, means the user picked the
+	// "Other" row and the textarea is now collecting their free-text
+	// reply. Enter on the textarea sends the typed content as
+	// Answer.FreeText.
+	pendingQuestionFreeText bool
+
 	// Distill review state. When distillReviewOpen is true, all keys
 	// are intercepted by handleDistillKey: y saves the current
 	// candidate, n drops it, e enters edit mode (distillEditing
@@ -329,6 +359,9 @@ func (m Model) isWelcomeScreen() bool {
 		return false
 	}
 	if m.pendingApproval != nil {
+		return false
+	}
+	if m.pendingQuestion != nil {
 		return false
 	}
 	if m.distillReviewOpen {
@@ -390,6 +423,9 @@ func (m Model) Init() tea.Cmd {
 	if m.opts.ApprovalCh != nil {
 		cmds = append(cmds, waitForApproval(m.opts.ApprovalCh))
 	}
+	if m.opts.AskUserCh != nil {
+		cmds = append(cmds, waitForAskUser(m.opts.AskUserCh))
+	}
 	if m.opts.ObserveResultChan != nil {
 		cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
 	}
@@ -409,6 +445,19 @@ func waitForApproval(ch <-chan permission.ApprovalRequest) tea.Cmd {
 			return nil
 		}
 		return approvalRequestMsg{req: req}
+	}
+}
+
+// waitForAskUser is the ask_user counterpart of waitForApproval. Same
+// "one msg per Cmd" idiom; re-armed after every reply so the next
+// tool call gets picked up.
+func waitForAskUser(ch <-chan askuser.Request) tea.Cmd {
+	return func() tea.Msg {
+		req, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return askUserRequestMsg{req: req}
 	}
 }
 

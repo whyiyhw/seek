@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -36,6 +37,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/tools"
+	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
@@ -84,6 +86,7 @@ Available tools:
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
 - think(task, reflect?, context?): call deepseek-v4-flash in thinking mode for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
 - Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
+- ask_user(question, options, multi_select?): show the user an inline TUI picker (↑/↓ Enter — Space toggle for multi-select). Use this INSTEAD of asking plain text when you need a decision among 2-4 discrete, mutually-distinct choices and getting the wrong one costs a real round-trip. Examples: "user or project scope?", "overwrite, skip, or rename?". seek auto-appends an "Other / type your own" row, so the user can always escape into free text. Do NOT use for open-ended questions (naming, prose, style) — those work better as conversation.
 - skill_fetch(source, name?, subpath?, sha256?): when the user asks to INSTALL a skill, fetch + validate it into a /tmp staging dir. Returns name, description, files, body preview, and a staging_path. Inspect the staged files (read SKILL.md, scripts/ if any) BEFORE committing — judge whether the source matches user intent.
 - skill_commit(staging_path, name, source, scope, force?): finalise the install. BEFORE calling this, you MUST: (1) ask the user whether to install at "user" scope (~/.seek/skills/, available in every seek session on this machine, private) or "project" scope (<cwd>/.seek/skills/, shared via git with anyone who clones the repo) — DO NOT guess or default. (2) Wait for the user's answer. The user then sees a y/N approval prompt for the actual filesystem move. On success the new skill is on disk but NOT loaded into this session — tell the user to run /new (TUI) or restart so the manifest picks it up.
 
@@ -435,6 +438,12 @@ func run() error {
 		return env
 	}
 
+	// askPolicy holds the callback for ask_user. Constructed here
+	// (before tool registration) so askusertool.New can capture it;
+	// the actual channel + SetAskFn wiring happens later once ctx
+	// and the TUI options are ready.
+	askPolicy := askuser.New(askuser.ModeAsk)
+
 	reg := tools.New().
 		Add(read.New(policy)).
 		Add(grep.New()).
@@ -444,7 +453,8 @@ func run() error {
 		Add(bash.New(policy)).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
-		Add(skillinstall.NewCommit(policy))
+		Add(skillinstall.NewCommit(policy)).
+		Add(askusertool.New(askPolicy))
 
 	// DeepSeek-exclusive tools: FIM and Reasoner are only available
 	// when using the DeepSeek client directly.
@@ -691,6 +701,30 @@ func run() error {
 		}
 	})
 
+	// ask_user channel: same pattern as approval, but the reply
+	// type is the structured askuser.Answer (chosen ids OR free
+	// text OR cancelled) rather than a bool. Buffer 4 mirrors the
+	// approval channel — never has more than one in flight today,
+	// the buffer is a defence against future parallelism. askPolicy
+	// itself was constructed earlier (before tool registration) so
+	// the askuser tool could capture it; SetAskFn registers the
+	// real callback here, now that ctx + askUserCh are in scope.
+	askUserCh := make(chan askuser.Request, 4)
+	askPolicy.SetAskFn(func(q askuser.Question) askuser.Answer {
+		resp := make(chan askuser.Answer, 1)
+		select {
+		case askUserCh <- askuser.Request{Question: q, Reply: resp}:
+		case <-ctx.Done():
+			return askuser.Answer{Cancelled: true}
+		}
+		select {
+		case ans := <-resp:
+			return ans
+		case <-ctx.Done():
+			return askuser.Answer{Cancelled: true}
+		}
+	})
+
 	sessionModel = *model
 
 	// Resolve the effective theme for the TUI.
@@ -724,6 +758,7 @@ func run() error {
 		Theme:             effectiveTheme,
 		GlamourStyle:      glamourStyle,
 		ApprovalCh:        approvalCh,
+		AskUserCh:         askUserCh,
 		Session:           activeSession,
 		Store:             store,
 		Skills:            skills,

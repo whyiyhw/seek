@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/skill"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -1517,4 +1518,261 @@ func pickerIDs(choices []modelChoice) []string {
 		out = append(out, c.id)
 	}
 	return out
+}
+
+// --- ask_user picker ---------------------------------------------------
+//
+// The picker is the user-facing surface of the ask_user tool. These
+// tests exercise the key-handler state machine directly — without
+// firing up bubbletea — by setting m.pendingQuestion + selection
+// state and driving handleQuestionKey with synthetic KeyMsgs.
+
+// armQuestion attaches a pending Question to a fresh Model and
+// returns a reply channel so the test can read the Answer that the
+// handler eventually sends back.
+func armQuestion(t *testing.T, q askuser.Question) (*Model, <-chan askuser.Answer) {
+	t.Helper()
+	m := emptyModel()
+	reply := make(chan askuser.Answer, 1)
+	m.pendingQuestion = &askuser.Request{Question: q, Reply: reply}
+	m.pendingQuestionSelected = map[int]bool{}
+	m.pendingQuestionCursor = 0
+	return m, reply
+}
+
+func keyDown() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyDown} }
+func keyUp() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyUp} }
+func keyEnter() tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyEnter}
+}
+func keySpace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeySpace} }
+func keyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
+
+func TestHandleQuestionKey_SingleSelectEnter(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick one",
+		Options: []askuser.Option{
+			{ID: "a", Label: "A"},
+			{ID: "b", Label: "B"},
+		},
+	}
+	m, reply := armQuestion(t, q)
+
+	// Cursor down once to land on "b".
+	updated, _ := m.handleQuestionKey(keyDown())
+	m2 := updated.(Model)
+
+	// Enter on cursor row should commit ChosenIDs=[b] and clear state.
+	updated, _ = m2.handleQuestionKey(keyEnter())
+	m3 := updated.(Model)
+
+	if m3.pendingQuestion != nil {
+		t.Errorf("pendingQuestion should be cleared after Enter")
+	}
+	select {
+	case ans := <-reply:
+		if len(ans.ChosenIDs) != 1 || ans.ChosenIDs[0] != "b" {
+			t.Errorf("ChosenIDs=%v, want [b]", ans.ChosenIDs)
+		}
+	default:
+		t.Fatal("Answer never sent on reply channel")
+	}
+}
+
+func TestHandleQuestionKey_EscCancels(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick",
+		Options:  []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	m, reply := armQuestion(t, q)
+
+	updated, _ := m.handleQuestionKey(keyEsc())
+	m2 := updated.(Model)
+
+	if m2.pendingQuestion != nil {
+		t.Errorf("pendingQuestion should clear on Esc")
+	}
+	select {
+	case ans := <-reply:
+		if !ans.Cancelled {
+			t.Errorf("expected Cancelled=true on Esc, got %+v", ans)
+		}
+		if len(ans.ChosenIDs) != 0 || ans.FreeText != "" {
+			t.Errorf("cancelled answer must be empty otherwise, got %+v", ans)
+		}
+	default:
+		t.Fatal("Esc must still emit an answer so the agent unblocks")
+	}
+}
+
+func TestHandleQuestionKey_MultiSelectSpaceThenEnter(t *testing.T) {
+	q := askuser.Question{
+		Question:    "Which features",
+		MultiSelect: true,
+		Options: []askuser.Option{
+			{ID: "x", Label: "X"},
+			{ID: "y", Label: "Y"},
+			{ID: "z", Label: "Z"},
+		},
+	}
+	m, reply := armQuestion(t, q)
+
+	// Space toggles row 0 (X) on.
+	updated, _ := m.handleQuestionKey(keySpace())
+	m2 := updated.(Model)
+	if !m2.pendingQuestionSelected[0] {
+		t.Errorf("Space should toggle current row; selected=%v", m2.pendingQuestionSelected)
+	}
+
+	// Down twice → row 2 (Z), Space toggle.
+	updated, _ = m2.handleQuestionKey(keyDown())
+	m3 := updated.(Model)
+	updated, _ = m3.handleQuestionKey(keyDown())
+	m4 := updated.(Model)
+	updated, _ = m4.handleQuestionKey(keySpace())
+	m5 := updated.(Model)
+	if !m5.pendingQuestionSelected[2] {
+		t.Errorf("Space at row 2 should toggle Z on; selected=%v", m5.pendingQuestionSelected)
+	}
+
+	// Enter confirms — should return [x, z] in option order, not toggle order.
+	updated, _ = m5.handleQuestionKey(keyEnter())
+	m6 := updated.(Model)
+	if m6.pendingQuestion != nil {
+		t.Errorf("question should clear after Enter")
+	}
+	select {
+	case ans := <-reply:
+		if len(ans.ChosenIDs) != 2 || ans.ChosenIDs[0] != "x" || ans.ChosenIDs[1] != "z" {
+			t.Errorf("ChosenIDs=%v, want [x z]", ans.ChosenIDs)
+		}
+	default:
+		t.Fatal("no answer received")
+	}
+}
+
+func TestHandleQuestionKey_OtherTransitionsToFreeText(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick or type",
+		Options:  []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	m, reply := armQuestion(t, q)
+	// Cursor at index 2 = the auto-appended Other row.
+	m.pendingQuestionCursor = 2
+
+	updated, _ := m.handleQuestionKey(keyEnter())
+	m2 := updated.(Model)
+	if !m2.pendingQuestionFreeText {
+		t.Fatal("Enter on Other row should flip pendingQuestionFreeText=true")
+	}
+	// Picker should still be open — we're collecting free text now.
+	if m2.pendingQuestion == nil {
+		t.Error("question must remain pending; we haven't replied yet")
+	}
+
+	// Simulate the user typing.
+	m2.input.SetValue("actually I want a different thing")
+	updated, _ = m2.handleQuestionKey(keyEnter())
+	m3 := updated.(Model)
+
+	if m3.pendingQuestion != nil {
+		t.Error("question should clear after Enter on typed answer")
+	}
+	select {
+	case ans := <-reply:
+		if ans.FreeText == "" {
+			t.Errorf("FreeText must be populated, got %+v", ans)
+		}
+		if len(ans.ChosenIDs) != 0 {
+			t.Errorf("ChosenIDs must be empty when FreeText answer used, got %v", ans.ChosenIDs)
+		}
+	default:
+		t.Fatal("free-text submission did not produce an answer")
+	}
+}
+
+func TestHandleQuestionKey_FreeTextEscReturnsToChoices(t *testing.T) {
+	// Esc inside free-text mode goes BACK to the picker, doesn't
+	// cancel the whole thing. Differentiates "I want to retype"
+	// from "I want to give up".
+	q := askuser.Question{
+		Question: "Pick",
+		Options:  []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	m, _ := armQuestion(t, q)
+	m.pendingQuestionFreeText = true
+	m.input.SetValue("partial type")
+
+	updated, _ := m.handleQuestionKey(keyEsc())
+	m2 := updated.(Model)
+
+	if m2.pendingQuestionFreeText {
+		t.Error("Esc in free-text should revert to choice mode")
+	}
+	if m2.pendingQuestion == nil {
+		t.Error("Esc in free-text must NOT cancel the question (it's a sub-Esc, not the cancel Esc)")
+	}
+}
+
+func TestHandleQuestionKey_MultiSelectOtherIsExclusive(t *testing.T) {
+	// Toggling Other while other rows are on must clear them, and
+	// vice versa: toggling a non-Other row while Other is on must
+	// clear Other. Otherwise we'd produce nonsensical answers like
+	// "ids=[a] AND free_text='...'" which the schema forbids.
+	q := askuser.Question{
+		Question:    "Pick",
+		MultiSelect: true,
+		Options:     []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	otherIdx := 2
+	m, _ := armQuestion(t, q)
+
+	// Pre-select a + b.
+	m.pendingQuestionSelected = map[int]bool{0: true, 1: true}
+	// Cursor to Other; toggle it on.
+	m.pendingQuestionCursor = otherIdx
+	updated, _ := m.handleQuestionKey(keySpace())
+	m2 := updated.(Model)
+	if !m2.pendingQuestionSelected[otherIdx] {
+		t.Errorf("Other should be toggled on; selected=%v", m2.pendingQuestionSelected)
+	}
+	if m2.pendingQuestionSelected[0] || m2.pendingQuestionSelected[1] {
+		t.Errorf("Toggling Other must clear non-Other rows; selected=%v", m2.pendingQuestionSelected)
+	}
+
+	// Now cursor back to row 0 and toggle it on; Other should clear.
+	m2.pendingQuestionCursor = 0
+	updated, _ = m2.handleQuestionKey(keySpace())
+	m3 := updated.(Model)
+	if m3.pendingQuestionSelected[otherIdx] {
+		t.Errorf("Toggling a non-Other row must clear Other; selected=%v", m3.pendingQuestionSelected)
+	}
+	if !m3.pendingQuestionSelected[0] {
+		t.Errorf("Row 0 should be on after Space; selected=%v", m3.pendingQuestionSelected)
+	}
+}
+
+func TestHandleQuestionKey_CursorBoundsClamped(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick",
+		Options:  []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	otherIdx := 2
+	m, _ := armQuestion(t, q)
+
+	// Up at top: no-op (cursor stays at 0).
+	updated, _ := m.handleQuestionKey(keyUp())
+	m2 := updated.(Model)
+	if m2.pendingQuestionCursor != 0 {
+		t.Errorf("Up at top should clamp at 0, got %d", m2.pendingQuestionCursor)
+	}
+
+	// Down past last: stops at Other (index = len(options)).
+	for i := 0; i < 10; i++ {
+		updated, _ = m2.handleQuestionKey(keyDown())
+		m2 = updated.(Model)
+	}
+	if m2.pendingQuestionCursor != otherIdx {
+		t.Errorf("Down should clamp at Other index %d, got %d", otherIdx, m2.pendingQuestionCursor)
+	}
 }
