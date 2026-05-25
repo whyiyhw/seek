@@ -1873,34 +1873,6 @@
     });
   });
 
-  // ============ COPY TO CLIPBOARD ============
-  function visibleText(el) {
-    let result = '';
-    el.childNodes.forEach(node => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        result += node.textContent;
-      } else if (node.nodeType === Node.ELEMENT_NODE && !node.hidden) {
-        result += visibleText(node);
-      }
-    });
-    return result;
-  }
-
-  // Install section code blocks
-  document.querySelectorAll('.install-option code').forEach(el => {
-    el.addEventListener('click', function (e) {
-      createRipple(e, this);
-      let text = visibleText(this).trim();
-      text = text.replace(/^\$\s*/, '');
-      text = text.replace(/\s+#.*$/, '').trim();
-      const origBorder = this.style.borderColor;
-      this.style.borderColor = 'var(--green)';
-      this.style.transition = 'border-color .2s';
-      setTimeout(() => { this.style.borderColor = origBorder || ''; }, 1200);
-      navigator.clipboard.writeText(text);
-    });
-  });
-
   // ============ COUNTER ANIMATION ============
   (function animateCounters() {
     const els = document.querySelectorAll('[data-target]');
