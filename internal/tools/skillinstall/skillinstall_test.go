@@ -198,9 +198,9 @@ func TestCommit_ProjectScope(t *testing.T) {
 	// Project scope lands the skill under <cwd>/.seek/skills/<name>/
 	// instead of ~/.seek/skills/. Run the commit from a tempdir so
 	// we don't actually write into the seek repo we're testing in.
+	projectDir := t.TempDir()
 	cwd, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	projectDir := t.TempDir()
 	if err := os.Chdir(projectDir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
