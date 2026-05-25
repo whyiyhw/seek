@@ -577,6 +577,20 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: any Go code that truncates, clips, or paginates user-visible text by length must use `[]rune` for the count and the slice operation. `string` indexing is byte-level; multi-byte characters (Chinese, emoji, CJK punctuation) will be silently corrupted. The function signature says "n chars" — make sure the implementation actually counts chars, not bytes
 - **Refs**: `internal/tui/update.go:truncateOneLine`, `docs/pitfalls.md:300` (same root cause, different surface)
 
+### Custom color tokens (`--dim`) must be verified against WCAG AA in both themes
+- **Saw**: after a UI/UX Pro Max review, the `--dim` color token in both light mode (`#7a7570`) and dark mode (`#6a6a7a`) failed WCAG AA minimum contrast (4.5:1) for `.72rem` labels, despite looking "fine" to the developer
+- **Why**: designing by eye is unreliable for low-contrast semantic colors. `--dim` is used for secondary/muted labels at small sizes (`.72rem` ≈ 11.5px), which requires the strictest contrast ratio. Light mode achieved ~4.2:1 (needs 4.5:1), dark mode ~3.8:1 (needs 4.5:1)
+- **Fix**: light mode `--dim` → `#635e58` (~5.7:1), dark mode → `#8a8a98` (~5.8:1). Verified with Chrome DevTools contrast checker
+- **Lesson**: any custom color token used for text (even "dim" or "muted" text) must be verified against WCAG AA (4.5:1) before shipping. The eye is not a colorimeter — especially for subtle differences around the 4.0–4.5:1 boundary. Always test both light and dark themes independently
+- **Refs**: `examples/index.html:105,126`, WCAG 1.4.3
+
+### SVG data-URI in CSS `content:` needs explicit width/height on pseudo-element
+- **Saw**: replaced `content: "📋"` emoji with an SVG data URI in `::after`, but the icon rendered at 0×0 or default size
+- **Why**: `content: url(...)` does not inherit the `font-size` of the element; SVGs render at their intrinsic size (if declared) or 0 if the URI is opaque to the browser. The old emoji sized itself via `font-size: .8rem`, which is meaningless for a `background-image` approach
+- **Fix**: switched from `content: url(...)` to `content: ""` + `background-image` + explicit `width`/`height: 16px` + `background-size: contain`. This gives reliable sizing across all browsers
+- **Lesson**: when replacing text/emoji in CSS pseudo-elements with SVGs, use the `background-image` pattern (empty content + dimensions + background-size) rather than `content: url(...)`. The former gives you explicit size control; the latter depends on the SVG's intrinsic dimensions and browser implementation
+- **Refs**: `examples/index.html:834`, `docs/pitfalls.md:this-commit`
+
 ### Alt+Enter steer doesn't work on macOS terminals
 - **Saw**: pressing Option+Enter during a stream queued the text instead of steering it — same behaviour as plain Enter. The `Alt` modifier was lost before it reached bubbletea
 - **Why**: `msg.Alt` depends on the terminal sending `\x1b\r` (ESC prefix + Enter) as the raw byte sequence. macOS terminal emulators (Terminal.app, iTerm2, Warp) typically send Option+Enter as a bare `\r` unless "Use Option as Meta key" is enabled. Without the ESC prefix, `msg.Alt` is false and the code falls into the queue branch (update.go:502)
