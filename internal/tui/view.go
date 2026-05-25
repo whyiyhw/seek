@@ -125,12 +125,10 @@ func (m Model) View() string {
 
 	// When the live region is idle (no streaming, no tools, no menus,
 	// no approval prompt), push the input toward the bottom of the
-	// terminal so the welcome screen fills the height. m.height is
-	// the FULL terminal height (from tea.WindowSizeMsg), but bubbletea
-	// only owns the bottom slice — the welcome banner above us takes
-	// welcomeFixedLines rows we can't reclaim. welcomePadding handles
-	// the bookkeeping (and caps at welcomePadMax so a 60-row window
-	// doesn't end up with 40 lines of empty space).
+	// terminal. m.height is the FULL terminal height (from
+	// tea.WindowSizeMsg); welcomePadding fills whatever's left after
+	// the banner rows + the live region's own height — uncapped, so
+	// the input always pins to the bottom.
 	//
 	// Gated on scrollbackLines == 0 — i.e. "nothing has been Println'd
 	// above us". This covers BOTH first-launch (no turns yet) AND

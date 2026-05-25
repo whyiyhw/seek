@@ -276,13 +276,10 @@ func TestWelcomePadding_BelowMinimumReturnsZero(t *testing.T) {
 func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
 	t.Parallel()
 	// 30-row terminal is the modal case (default iTerm/Terminal.app
-	// window). Want a clear, non-zero pad that's well under the cap.
+	// window). Want a clear, non-zero pad.
 	pad := welcomePadding(30)
 	if pad <= 0 {
 		t.Errorf("30-row pad = %d, want > 0", pad)
-	}
-	if pad > welcomePadMax {
-		t.Errorf("30-row pad = %d, want ≤ welcomePadMax (%d)", pad, welcomePadMax)
 	}
 	// Sanity: 30 = 14 fixed + 4 live + 12 pad. Should be 12.
 	if pad != 12 {
@@ -291,13 +288,22 @@ func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
 	}
 }
 
-func TestWelcomePadding_HugeTerminalCapsAtMax(t *testing.T) {
+// TestWelcomePadding_TallTerminalFillsToBottom locks in the
+// "input always pins to the bottom" invariant on large viewports.
+// An earlier design capped this at welcomePadMax = 20 so a 60-row
+// terminal would leave 35 blank rows below the input — the cap is
+// gone now and tall terminals fill the gap.
+func TestWelcomePadding_TallTerminalFillsToBottom(t *testing.T) {
 	t.Parallel()
-	// A 100-row terminal would otherwise get 82 lines of padding —
-	// the input would float in mid-screen with the banner pinned to
-	// the top. The cap exists to keep things proportional.
-	if got := welcomePadding(1000); got != welcomePadMax {
-		t.Errorf("welcomePadding(1000) = %d, want %d (capped)", got, welcomePadMax)
+	// 60-row fullscreen — the case where the old cap broke layout.
+	// Expect pad = 60 - 14 - 4 = 42, no clipping.
+	if got, want := welcomePadding(60), 42; got != want {
+		t.Errorf("60-row pad = %d, want %d (uncapped)", got, want)
+	}
+	// 1000-row pathological case — still uncapped, math is just
+	// height - used.
+	if got, want := welcomePadding(1000), 1000-welcomeFixedLines-welcomeBelowLines; got != want {
+		t.Errorf("1000-row pad = %d, want %d (uncapped)", got, want)
 	}
 }
 

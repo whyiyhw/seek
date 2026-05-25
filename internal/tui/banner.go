@@ -192,17 +192,19 @@ const (
 	// height — 3-row textarea + 1-row status bar. Approximate;
 	// ±1 line of pad isn't a visible problem.
 	welcomeBelowLines = 4
-
-	// welcomePadMax caps the pad so a 60-row terminal doesn't shove
-	// the input 40 lines down. ~20 lines of breathing room is
-	// already plenty; beyond that the screen feels wasteful.
-	welcomePadMax = 20
 )
 
 // welcomePadding returns the number of blank lines to insert between
-// the meta line and the live region so the welcome screen feels like
-// it sits on the bottom edge of the terminal instead of clustered at
-// the top.
+// the meta line and the live region so the input box always pins to
+// the bottom of the terminal regardless of viewport size.
+//
+// Historical note: this function used to cap at welcomePadMax = 20
+// (rationale: "feels wasteful beyond that"). The cap broke the
+// "input always at the bottom" invariant on tall terminals — on a
+// 60-row window the input floated at row 25 with 35 blank rows
+// below it. The cap is gone: bottom-pinning is the invariant, and
+// the welcome banner sitting in scrollback above the empty space is
+// a worthwhile trade for consistent layout. Scroll up to see it.
 //
 // Pulled out of PrintPixelWelcomeBanner as a pure function so tests
 // can hit it for known heights without mocking the actual terminal.
@@ -214,9 +216,6 @@ func welcomePadding(termHeight int) int {
 	pad := termHeight - used
 	if pad <= 0 {
 		return 0
-	}
-	if pad > welcomePadMax {
-		pad = welcomePadMax
 	}
 	return pad
 }
