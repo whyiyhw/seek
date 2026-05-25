@@ -114,6 +114,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: every per-session setting that claims to change behaviour on-the-fly must update the live Agent instance, not just the host variable and display. Per-message injection (like `workflowReminder`) is a viable alternative to system-prompt mutation when the system prompt template is complex and the setting's scope is "from the next user message onward"
 - **Refs**: `pkg/agent/agent.go:SetLang`, `pkg/agent/agent.go:langReminder`, `internal/tui/commands.go:applyLangChoice`, `cmd/seek/main.go:SetLang`
 
+### `initialSizeCmd` clobbers `teatest.WithInitialTermSize` in test environments
+- **Saw**: writing a teatest case with `WithInitialTermSize(80, 40)`; the model still rendered as 80x24, clipping the help overlay panel so the title scrolled off-screen and assertions on top-of-panel strings ("Help — seek") timed out even though the overlay was clearly rendering
+- **Why**: `Init()` returns `initialSizeCmd()` which calls `term.GetSize(os.Stdout.Fd())`. In `go test` stdout isn't a TTY, so it fails and the function falls back to the hard-coded `(80, 24)`, sending a `WindowSizeMsg` that overrides whatever size teatest provided. Even sending an explicit `WindowSizeMsg` after `NewTestModel` racing against `initialSizeCmd`'s goroutine is non-deterministic
+- **Fix**: assert on strings that ARE in the bottom-of-panel visible viewport ("Shift+Tab", "Scrollback:") instead of the title. Document the constraint inline in the test so the next writer doesn't fight it. Commit (this one)
+- **Lesson**: when adding teatest cases, design assertions for a 24-row viewport — bubbletea writes only what fits, not the full rendered buffer, regardless of what your code generates. If you genuinely need a taller viewport, patch `initialSizeCmd` to honour a test-only env var rather than racing it
+- **Refs**: `internal/tui/model.go:initialSizeCmd`, `internal/tui/render_test.go`
+
+### `tm.Output()` is a single-use reader — sequential `WaitFor` calls drain it
+- **Saw**: a test with two consecutive `teatest.WaitFor(t, tm.Output(), ...)` calls: first asserted on string A (passed), second on string B (timed out with empty buffer), even though both A and B were clearly in the program's output dump from the first failure
+- **Why**: `tm.Output()` returns the same underlying pipe/reader on every call. `teatest.WaitFor` reads bytes from it incrementally; once the predicate matches it stops, and the bytes it consumed are gone. The second `WaitFor` reads from the same position — anything not since written by the program is unavailable. When the program is idle (e.g. help overlay rendered once, no spinner re-renders) there are no new bytes
+- **Fix**: one `WaitFor` per test; if multiple signals must be checked, compose them into a single predicate (`bytes.Contains(b, a) && bytes.Contains(b, c)`). Commit (this one)
+- **Lesson**: treat `tm.Output()` as a stream, not a buffer. Multiple sequential reads work only when the model produces new output between them — never assume earlier bytes are still readable
+- **Refs**: `internal/tui/render_test.go` (the `waitFor` helper takes a single needle for this reason)
+
 ### Ctrl+J newline inserts via `InsertString("\n")` broke cursor/viewport scrolling
 - **Saw**: typing Ctrl+J (multi-line newline) when the textarea had 3+ lines of content caused the cursor to disappear or appear at the wrong position — the first line didn't scroll up as new content was added below
 - **Why**: `handleKey` intercepted `tea.KeyCtrlJ` and called `m.input.InsertString("\n")` to insert a newline. `InsertString` writes the character but bypasses the textarea's `Update()` method entirely, so it never updated the internal cursor position, line tracking, or viewport scroll offset. The cursor ended up off-screen
