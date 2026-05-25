@@ -67,6 +67,15 @@ const execTimeout = 30 * time.Second
 // tool will dispatch. Read-only by construction. New additions
 // require evidence the subcommand cannot mutate the working tree,
 // the index, the object database, or the remote.
+//
+// Local-only reads: the bulk of the list. No network, no disk
+// writes, no ref updates.
+//
+// Network reads: `ls-remote` is the one exception. It hits a remote
+// to enumerate refs but doesn't fetch their objects, doesn't write
+// to .git/, and doesn't update local refs. We allow it for "what
+// branches/tags exist on origin?" style questions; the 30s timeout
+// keeps a slow or stalled remote from parking the agent.
 var allowedSubcommands = map[string]bool{
 	"log":       true, // commit history
 	"diff":      true, // file/commit/branch diffs
@@ -82,6 +91,7 @@ var allowedSubcommands = map[string]bool{
 	"shortlog":  true, // grouped commit log by author
 	"describe":  true, // ref → human-readable name
 	"reflog":    true, // ref history (default `reflog show`, read-only)
+	"ls-remote": true, // list refs on a remote — NETWORK READ, no fetch
 }
 
 // blockedArgPrefixes refuses arguments that could subvert the
@@ -135,7 +145,7 @@ var schemaBytes = []byte(`{
   "properties": {
     "subcommand": {
       "type": "string",
-      "description": "Which git subcommand to run. Read-only ops only. Allowed: log, diff, show, status, blame, branch, tag, rev-parse, ls-files, ls-tree, cat-file, shortlog, describe, reflog. Mutating ops (commit, push, reset, checkout, rebase, merge, clean, fetch, pull, clone) are refused — use bash for those and accept the permission prompt."
+      "description": "Which git subcommand to run. Read-only ops only. Local-only reads: log, diff, show, status, blame, branch, tag, rev-parse, ls-files, ls-tree, cat-file, shortlog, describe, reflog. Network read (one exception, no fetch / no ref update): ls-remote. Mutating ops (commit, push, reset, checkout, rebase, merge, clean, fetch, pull, clone) are refused — use bash for those and accept the permission prompt."
     },
     "args": {
       "type": "array",

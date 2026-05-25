@@ -332,6 +332,22 @@ func TestValidateArgs_AllowsNormalFlags(t *testing.T) {
 	}
 }
 
+func TestWhitelist_NetworkReadException(t *testing.T) {
+	// ls-remote is the one network-touching subcommand we accept.
+	// This test pins the exception so a future cleanup pass doesn't
+	// remove it without thinking — if you want it gone, delete this
+	// test AND the entry in allowedSubcommands together, on purpose.
+	if !allowedSubcommands["ls-remote"] {
+		t.Error("ls-remote must remain in the whitelist as the documented network-read exception")
+	}
+	// The other genuinely-network ops must stay OUT.
+	for _, sub := range []string{"fetch", "pull", "clone", "push"} {
+		if allowedSubcommands[sub] {
+			t.Errorf("%s must NOT be in the whitelist — it writes to .git/ or mutates remote state", sub)
+		}
+	}
+}
+
 func TestReadOnly_True(t *testing.T) {
 	// ReadOnly() marker enables concurrent dispatch in the agent.
 	// Regression guard so the marker is never accidentally dropped.
