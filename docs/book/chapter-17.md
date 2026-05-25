@@ -351,7 +351,60 @@ allowed-tools:
 
 ---
 
-## 17.9 一个观察:可观测性是 v0 到 v1 的换挡
+## 17.9 模型驱动的 skill 安装: `skill_fetch` / `skill_commit` 工具
+
+M8 的核心是用 CLI 安装 skill: `seek skill install github.com/foo/bar`。但 seek 是一个 agent——用户更自然的姿势是告诉模型"装一个前端设计 skill", 让模型自己完成安装流程, 而不是退出对话去敲命令。
+
+这就需要两个新工具:
+- **`skill_fetch(source)`** — 下载技能包到临时目录并校验, 返回元数据预览
+- **`skill_commit(staging_path, name, source, scope)`** — 把已验证的包从临时目录搬进正式位置
+
+### 为什么拆成两步, 而不是一步"install"
+
+理由跟 `read` 和 `grep` 分开一样:**在确认之前先预览**。如果 `skill_fetch` 直接安装, 模型连"这个 skill 是干什么的"都没看到就把文件写进了用户磁盘——一个名字叫 `clean-code` 但包含 `scripts/rm-rf.sh` 的恶意包就绕过了所有审查。
+
+两步流程:
+1. 模型调用 `skill_fetch(source)` → 拿到 `name`, `description`, 文件清单, 正文预览 (≈500字)
+2. 模型 **读完预览后再决定**:值得装 → 调用 `skill_commit`;不值得 → 直接丢弃临时目录
+
+这跟 `staged installation` 模式一致——先暂存, 再提交。
+
+### scope 参数:用户级的隐私 vs 项目级的共享
+
+`skill_commit` 的 `scope` 参数是最核心的设计决策, 也是**必须由用户选择, 模型不能默认**的字段:
+
+- **`user` 级** (`~/.seek/skills/<name>/`): 只有当前机器、当前用户可用。私有的个人效率 skill、公司内部 skill 放这里
+- **`project` 级** (`<cwd>/.seek/skills/<name>/`): 会 git 提交到仓库, 所有克隆这个项目的人都能用。团队的代码规范、项目特定的 review checklist 放这里
+
+选择错误的后果严重:
+- 把私密 skill 装到 project 级 = 不小心 git push 了内部工具
+- 把团队共享 skill 装到 user 级 = 同事不知道有这条规则, 每个人都要手动装一次
+
+所以 `skill_commit` 的 API 明确要求:**在调用前, 模型必须用 `ask_user` 工具让用户选择 scope**。这不是 UX 建议, 是 API 契约:
+
+> "I'll use X — say so if you want Y"（当用户取消选择器时的 fallback 策略）
+
+### 校验层: staging path 安全检查
+
+`skill_commit` 收到路径后, 做三层校验:
+1. 路径必须在 `os.TempDir()` 下, 且前缀匹配 `seek-skill-staging-`——防止模型传入任意路径
+2. `name` 必须与 `skill_fetch` 返回的一致——防止模型"狸猫换太子"
+3. `source` 原样传给审批提示——让用户在确认时看到"这个 skill 是从哪来的"
+
+这些校验写在 `internal/tools/skillinstall/skillinstall.go` 里, 测试覆盖了正常路径和每层校验的绕过尝试。
+
+### 与 CLI 的关系
+
+`skill_fetch` / `skill_commit` 不是替代 `seek skill install`。它们走同一个底层 (`internal/skillmgr.InstallPackage`), 只是入口不同:
+
+- **CLI**: 用户手动操作, 适合批量安装、脚本化
+- **工具**: 模型自动操作, 适合自然语言工作流——"帮我装一个检查 Go 错误处理的 skill"
+
+两条路径共享相同的安装逻辑、校验规则、scope 处理。CLI 不需要 `ask_user`(用户直接在命令行给了 scope), 工具必须走 `ask_user`(模型不知道用户的意图)。
+
+---
+
+## 17.10 一个观察:可观测性是 v0 到 v1 的换挡
 
 回头看 v0 → v2 这条 skill 子系统的演进:
 
@@ -377,14 +430,15 @@ v2 没有把 v0 推翻——单文件 .md 永远兼容, 没有 "manifest" 或者
 - `update` 区分 managed(有 sidecar)和 unmanaged, 后者拒绝处理——避免 seek 自作主张去某处覆盖文件
 - `.stats.jsonl` 用 JSONL + 一次 `write(2)` + payload < `PIPE_BUF`(3 KiB 守门)实现**无锁、跨进程的 append 原子性**——比 mutex 或 SQLite 简单, grep/jq 友好
 - `seek skill status` 是诊断核心:source + shadowed + frontmatter + install + stats + token 估算一条命令出齐
+- `skill_fetch` / `skill_commit` 提供模型驱动的安装流程, 两步分离实现"预览再确认", scope 参数**必须由用户通过 `ask_user` 选择**, 模型不能默认
 - 整个 v2 不推翻 v0, 只是把"事实"从隐式变成 *外显的* 文件;**复杂度长在功能上, 不长在机制上**
 
 ---
 
-至此, 这本书覆盖了 seek 从 v0.1 的第一行 Go 代码, 到 v1.0 的"agent 能用", 到 v0.2.x 的"agent 有记忆", 到 v0.3.x 的"skill 有生命周期"。下一步 PRD v3 计划包括 eval harness、跨模型测评、工具裁剪机制——但那些还没落地, 这本书也不再写。
+至此, v0.3.x 的 Skill 生命周期闭环已经讲完。下一章我们进入 M9, 看 Plan Mode 如何将目前已累积的所有工具能力组合成交互式规划工作流, 彻底打开 v1.0 的大门。
 
 代码会继续演进; PRD 目录 `docs/prd/` 是未来章节的种子。读完这本书的读者应该已经具备能力:**任意 commit 处暂停, 读 PRD + 代码, 自己写一章续作**。
 
 ---
 
-*对应 commit:`b7d7996`(M8.0 目录包 + 4 形态 frontmatter)、`f56cd69`(M8.1a local install)、`9aa8f53`(M8.1b https tarball)、`6865a64`(M8.1c git clone)、`a362374`(M8.2 update + sidecar)、`be05864`(M8.3 stats writer + skilltool 集成)、`4b0c939`(M8.4a CLI install/uninstall/update)、`266d6f2`(M8.4b CLI list/status/stats)、`87bd195`(M8.5 抽出 internal/skillcli + TUI `/skill`)、`fc34bb2`(M8.6 端到端测试 + 文档)、`0e6189f`(M8.7 `seek skill create`)。运行 `go test -race ./internal/skill/... ./internal/skillmgr/... ./internal/skillstats/... ./internal/skillcli/...` 验证。详 PRD 见 `docs/prd/v2.md`。*
+*对应 commit:`b7d7996`(M8.0 目录包 + 4 形态 frontmatter)、`f56cd69`(M8.1a local install)、`9aa8f53`(M8.1b https tarball)、`6865a64`(M8.1c git clone)、`a362374`(M8.2 update + sidecar)、`be05864`(M8.3 stats writer + skilltool 集成)、`4b0c939`(M8.4a CLI install/uninstall/update)、`266d6f2`(M8.4b CLI list/status/stats)、`87bd195`(M8.5 抽出 internal/skillcli + TUI `/skill`)、`fc34bb2`(M8.6 端到端测试 + 文档)、`0e6189f`(M8.7 `seek skill create`)、`90731db`(M8.8 `skill_fetch`/`skill_commit` 模型安装工具)、`d86d509`(M8.8 fix scope 必须用户选择)。运行 `go test -race ./internal/skill/... ./internal/skillmgr/... ./internal/skillstats/... ./internal/skillcli/... ./internal/tools/skillinstall/...` 验证。详 PRD 见 `docs/prd/v2.md`。*

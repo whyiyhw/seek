@@ -98,6 +98,35 @@
 - "`glamour@v1.0.0` required a specific `lipgloss` pre-release commit"
 - "`go run ./cmd/seek` is slow enough to feel broken"
 
+### 来自 Plan Mode / 交互工具（Ch 18）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch18 §18.3 propose | "Propose tool's `expected_replacements` requires exact match count"（示例：propose 工具的参数校验模式类似） |
+| ch18 §18.4 git 工具 | "`git` tool refused flags that could mutate refs (--delete, -D, --force)" |
+| ch18 §18.5 ask_user | "ask_user: cancelled=true 时模型必须做最佳猜测而非重问" |
+
+### 来自 M8 Skill 安装扩展（Ch 17 §17.9）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch17 §17.9 | "`skill_fetch` → `skill_commit` scope 参数必需用户选择, 不能默认" |
+| ch17 §17.9 | "`t.Cleanup(chdir)` after `t.TempDir()` breaks Windows TempDir removal" |
+
+### 来自 Hook / Memory 维护（Ch 16 补充）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch16 §16.3.2 | "OnSessionStart must reset snapshot state for --resume correctness" |
+| ch16 §16.4.3 | "M 不是 bug tracker: `memory_remember` 工具描述误导模型用 M 记 bug" |
+
+### 来自 DeepSeek API 更新
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch13 §13.5（延伸） | "DeepSeek HTTP 5xx and empty SSE bodies are transient — retry once before failing" |
+| ch18（隐含，无缝继续） | "`/lang` only updated the display and session variable, not the live Agent → no effect until `/new`"（per-message injection 模式） |
+
 ---
 
 ## A.3 怎么读 pitfalls.md

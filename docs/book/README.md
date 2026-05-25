@@ -178,7 +178,7 @@
 
 ---
 
-### 第六部分：v1.0 之后
+### 第六部分：v1.0 之后（第 16–18 章）
 
 **[第 16 章：M5 — 三层认知记忆 (L/M/S)](chapter-16.md)** *(v0.2.x, PRD v1)*
 - 16.1 为什么需要"记忆", 不只是"会话历史"
@@ -220,7 +220,24 @@
 - 17.6 `seek skill update`:三种来源各自的"刷新"语义
 - 17.7 调用统计: `.stats.jsonl` 与 PIPE_BUF 单写原子性
 - 17.8 CLI / TUI 子命令族
-- 17.9 一个观察:可观测性是 v0 到 v1 的换挡
+- 17.9 模型驱动的 skill 安装: `skill_fetch` / `skill_commit` 工具
+- 17.10 一个观察:可观测性是 v0 到 v1 的换挡
+
+**[第 18 章：M9 — Plan Mode 与交互工具](chapter-18.md)** *(v0.3.x–v0.4.x)*
+- 18.1 从"单向 toggle"到"分析→提案→执行→报告"闭环
+- 18.2 分岔点: 为什么 plan-mode 需要自解析, 而不是靠工具返回值
+- 18.3 `propose` 工具:problem + steps + TUI 选择器
+  - 18.3.1 在 plan-execute 子态下禁止 filesystem 和 shell 写入
+  - 18.3.2 adjust: 用户说"改"时不丢掉已完成的工作
+- 18.4 `git` 工具: 只读 git wrapper + plan-mode 豁免
+  - 18.4.1 为什么不用 bash git: 安全 + plan-mode 可执行
+  - 18.4.2 覆盖本地子命令与网络只读 (`ls-remote`)
+- 18.5 `ask_user` 工具: 内联 TUI 选择器
+  - 18.5.1 三个适用条件 vs 与 permission 提示的职责边界
+  - 18.5.2 当用户取消: 模型的最佳猜测 + 明确声明
+- 18.6 plan-mode 内置 skill: 提示自动注入
+- 18.7 `/review` 与 per-message 模式提醒
+- 18.8 一个观察: 确认门改变了 agent 和用户之间的权力结构
 
 ---
 
