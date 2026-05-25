@@ -816,6 +816,7 @@
     border-radius: 6px;
     padding: 24px;
     transition: border-color .25s;
+    min-width: 0; /* let the grid track shrink instead of blowing out from long URLs in <code> */
   }
   .install-option:hover { border-color: var(--amber); }
   .install-option h4 { font-size: .9rem; margin-bottom: 4px; }
@@ -832,7 +833,9 @@
     padding: 12px 14px;
     font-size: .78rem;
     color: var(--teal);
-    overflow-x: auto;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
     cursor: pointer;
     transition: border-color .2s;
     min-height: 44px;
@@ -844,8 +847,8 @@
     content: "";
     position: absolute;
     right: 8px;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 8px;
+    transform: none;
     width: 16px;
     height: 16px;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236a6a7a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E");
@@ -861,7 +864,6 @@
   @media (max-width: 640px) {
     .install-grid { grid-template-columns: 1fr; }
     .install-option code::after { display: none; }
-    .install-option code { white-space: pre-wrap; overflow-wrap: break-word; word-break: break-all; }
   }
 
   /* ============ FOOTER ============ */
@@ -1498,7 +1500,7 @@
         <span data-lang="en">Pulls the latest release — no Go toolchain needed.</span>
         <span data-lang="zh" hidden>拉取最新版本——无需 Go 工具链。</span>
       </p>
-      <code id="code-curl" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> curl -fsSL https://github.com/whyiyhw/seek/releases/latest/download/seek_$(uname -s)_$(uname -m).tar.gz | tar -xz -C /usr/local/bin seek</code>
+      <code id="code-curl" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> OS=$(uname -s | tr '[:upper:]' '[:lower:]')<br><span class="prompt-inline">$</span> ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')<br><span class="prompt-inline">$</span> VER=$(curl -fsSL https://api.github.com/repos/whyiyhw/seek/releases/latest | sed -nE 's/.*"tag_name":[[:space:]]*"v([^"]+)".*/\1/p')<br><span class="prompt-inline">$</span> curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER}_${OS}_${ARCH}.tar.gz" | sudo tar -xz -C /usr/local/bin seek</code>
     </div>
     <div class="install-option reveal" style="transition-delay:.1s">
       <h4>
@@ -1517,7 +1519,7 @@
         <span data-lang="en">Download the zip from the releases page and unpack it.</span>
         <span data-lang="zh" hidden>从发布页下载 zip 并解压。</span>
       </p>
-      <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> <span data-lang="en"># Grab seek_*_windows_amd64.zip from github.com/whyiyhw/seek/releases</span><span data-lang="zh" hidden># 从 github.com/whyiyhw/seek/releases 下载 seek_*_windows_amd64.zip</span></code>
+      <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">PS&gt;</span> $v=(irm https://api.github.com/repos/whyiyhw/seek/releases/latest | ConvertFrom-Json).tag_name; irm "https://github.com/whyiyhw/seek/releases/download/$v/seek_$($v.Substring(1))_windows_amd64.zip" -OutFile seek.zip; Expand-Archive seek.zip -Dest .; Remove-Item seek.zip; echo "Done — run .\seek.exe"</code>
     </div>
     <div class="install-option reveal" style="transition-delay:.3s">
       <h4>
@@ -1525,10 +1527,10 @@
         <span data-lang="zh" hidden>升级</span>
       </h4>
       <p class="detail">
-        <span data-lang="en">Built-in atomic in-place update — no re-download needed.</span>
-        <span data-lang="zh" hidden>内置原子级原地更新——无需重新下载。</span>
+        <span data-lang="en">Atomic in-place update. Pulls the latest release, verifies sha256, replaces the binary — no re-download needed.</span>
+        <span data-lang="zh" hidden>原子级原地更新。拉取最新版本、校验 sha256、替换二进制——无需重新下载。</span>
       </p>
-      <code id="code-upgrade" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> sudo seek -upgrade <span data-lang="en"># replaces the running binary atomically</span><span data-lang="zh" hidden># 原子替换正在运行的二进制</span></code>
+      <code id="code-upgrade" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> seek -upgrade</code>
     </div>
   </div>
 
@@ -1536,6 +1538,18 @@
     <span class="dot"></span>
     <span data-lang="en">First run walks you through provider setup — no manual <code style="font-size:.78rem">export</code> needed.</span>
     <span data-lang="zh" hidden>首次运行会引导你配置 provider——无需手动 <code style="font-size:.78rem">export</code>。</span>
+  </div>
+
+  <div class="price-note reveal" style="margin-top:10px;">
+    <span class="dot"></span>
+    <span data-lang="en"><strong>macOS Gatekeeper:</strong> <code style="font-size:.78rem">curl | tar</code> doesn't trigger quarantine. If your browser download is blocked: <code style="font-size:.78rem">xattr -d com.apple.quarantine seek</code>.</span>
+    <span data-lang="zh" hidden><strong>macOS Gatekeeper：</strong><code style="font-size:.78rem">curl | tar</code> 管道不会触发隔离。若浏览器下载被拦：<code style="font-size:.78rem">xattr -d com.apple.quarantine seek</code>。</span>
+  </div>
+
+  <div class="price-note reveal" style="margin-top:10px;">
+    <span class="dot"></span>
+    <span data-lang="en"><strong>No sudo?</strong> Install to <code style="font-size:.78rem">~/.local/bin</code> instead — just change <code style="font-size:.78rem">-C /usr/local/bin</code> to <code style="font-size:.78rem">-C ~/.local/bin</code>, then add it to your <code style="font-size:.78rem">PATH</code>.</span>
+    <span data-lang="zh" hidden><strong>不想用 sudo？</strong>装到 <code style="font-size:.78rem">~/.local/bin</code>——把上面命令的 <code style="font-size:.78rem">-C /usr/local/bin</code> 换成 <code style="font-size:.78rem">-C ~/.local/bin</code>，再把这个目录加入 <code style="font-size:.78rem">PATH</code> 即可。</span>
   </div>
 </section>
 
@@ -1557,6 +1571,37 @@
 </footer>
 
 <script>
+  // ============ COPY TO CLIPBOARD ============
+  document.querySelectorAll('.install-option code[role="button"]').forEach(code => {
+    code.addEventListener('click', async () => {
+      // Get text content, strip prompt markers ($ or PS>) for clean copy
+      const raw = code.textContent || '';
+      const cleaned = raw.replace(/^(\$|PS>)\s*/gm, '').trim();
+      try {
+        await navigator.clipboard.writeText(cleaned);
+      } catch {
+        // Fallback for older browsers / non-HTTPS
+        const ta = document.createElement('textarea');
+        ta.value = cleaned;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      // Visual feedback: brief background flash
+      code.style.transition = 'background 0.12s, color 0.12s';
+      code.style.background = 'var(--teal)';
+      code.style.color = 'var(--bg)';
+      setTimeout(() => {
+        code.style.removeProperty('background');
+        code.style.removeProperty('color');
+        code.style.removeProperty('transition');
+      }, 700);
+    });
+  });
+
   // ============ SCROLL REVEAL ============
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
