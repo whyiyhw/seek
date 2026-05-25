@@ -15,8 +15,10 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/memorycli"
+	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skillcli"
+	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
@@ -57,7 +59,7 @@ func allCommands() []command {
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
-		{names: []string{"/skills"}, usage: "/skills", description: "List loaded skills with source paths.", handler: cmdSkills},
+		{names: []string{"/skills"}, usage: "/skills [--used]", description: "List loaded skills, or --used to see which were called in this session.", handler: cmdSkills},
 		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Manage skill packages (mirrors the `seek skill` CLI: install, uninstall, update, list, status, stats, help).", handler: cmdSkillCLI},
 		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", handler: cmdMemoryCLI},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
@@ -157,6 +159,11 @@ func cmdNew(m *Model, _ string) cmdResult {
 	m.curContent = ""
 	m.curReasoning = ""
 	m.activeTools = nil
+	// A skill arm is conceptually tied to the conversation it was
+	// staged in. Carrying it into a fresh /new would surprise the user
+	// — they typed "/skill use X" for the thing they were working on,
+	// not for the next 200 turns.
+	m.pendingSkill = ""
 	return cmdResult{clear: true, text: styleMuted.Render("new conversation — previous session saved")}
 }
 
@@ -1043,8 +1050,15 @@ func cmdQuit(_ *Model, _ string) cmdResult {
 // typed /skill install — for any v3 polish round we can promote to
 // a tea.Cmd with a spinner, but keeping it synchronous in v2 keeps
 // the implementation honest about what the dispatcher does.
-func cmdSkillCLI(_ *Model, args string) cmdResult {
+func cmdSkillCLI(m *Model, args string) cmdResult {
 	tokens := strings.Fields(args)
+	// `use` is TUI-only — the CLI dispatcher has no concept of an
+	// in-session conversation to apply a skill to. Intercept before
+	// delegating to skillcli.Run so the user gets the arm/fire
+	// behaviour from /skill use instead of an unknown-verb error.
+	if len(tokens) >= 1 && tokens[0] == "use" {
+		return cmdSkillUse(m, tokens[1:])
+	}
 	var stdout, stderr bytes.Buffer
 	err := skillcli.Run(tokens, &stdout, &stderr)
 	var b strings.Builder
@@ -1064,6 +1078,69 @@ func cmdSkillCLI(_ *Model, args string) cmdResult {
 		b.WriteString(styleMuted.Render(err.Error()))
 	}
 	return cmdResult{text: b.String()}
+}
+
+// cmdSkillUse is the TUI-only `use` verb. Two modes, distinguished by
+// whether the user typed extra text after the name:
+//
+//   - `/skill use <name>`          → arm. Sets m.pendingSkill so the
+//     next user-typed message gets wrapped with a
+//     "Please use the X skill" preamble (see Model.consumeArm).
+//     Slash commands and programmatic prompts do NOT consume the
+//     arm — only a real user message.
+//   - `/skill use <name> <task>`   → fire immediately. Wraps the inline
+//     task and submits as if the user had typed it. No arm state
+//     is touched.
+//   - `/skill use clear`           → disarm. No-op if nothing armed.
+//
+// Validation:
+//   - No skills loaded → error.
+//   - Unknown name      → error with the list of loaded names so the
+//     user can fix a typo without another round-trip.
+//
+// Re-arming with a different name replaces the previous arm silently
+// (the new feedback line already names the active skill; a separate
+// "replaced X" notice would be noise).
+func cmdSkillUse(m *Model, tokens []string) cmdResult {
+	if len(tokens) == 0 {
+		return cmdResult{text: styleErr.Render("/skill use: missing skill name (try /skill list)")}
+	}
+	if tokens[0] == "clear" {
+		if m.pendingSkill == "" {
+			return cmdResult{text: styleMuted.Render("/skill use: nothing armed")}
+		}
+		prev := m.pendingSkill
+		m.pendingSkill = ""
+		return cmdResult{text: styleMuted.Render(fmt.Sprintf("✦ disarmed %s", prev))}
+	}
+
+	if m.opts.Skills == nil || m.opts.Skills.Len() == 0 {
+		return cmdResult{text: styleErr.Render("/skill use: no skills loaded")}
+	}
+	name := tokens[0]
+	if m.opts.Skills.Get(name) == nil {
+		var names []string
+		for _, sk := range m.opts.Skills.List() {
+			names = append(names, sk.Name)
+		}
+		return cmdResult{text: styleErr.Render(fmt.Sprintf("/skill use: %q not found. Available: %s", name, strings.Join(names, ", ")))}
+	}
+
+	// Inline task present → immediate fire. Build the same wrapper that
+	// consumeArm would produce, then run it through submitOrSteer so
+	// streaming vs idle is handled uniformly.
+	if len(tokens) > 1 {
+		task := strings.Join(tokens[1:], " ")
+		wrapped := fmt.Sprintf("Please use the %q skill for the following task:\n\n%s", name, task)
+		// Touch nothing in pendingSkill — immediate-fire does not
+		// arm; the user got what they asked for on this line.
+		return submitOrSteer(m, wrapped)
+	}
+
+	// Bare name → arm.
+	m.pendingSkill = name
+	return cmdResult{text: styleAssistantLabel.Render(fmt.Sprintf("✦ armed %s", name)) +
+		styleMuted.Render(" — next message will use this skill (/skill use clear to cancel)")}
 }
 
 // cmdMemoryCLI mirrors the `seek memory ...` CLI inside the TUI. Same
@@ -1102,9 +1179,17 @@ func cmdMemoryCLI(_ *Model, args string) cmdResult {
 // model already sees the manifest in its system prompt, so this command
 // exists for humans who want to verify what got loaded.
 //
+// With --used, switches to "which skills were actually called in this
+// session", aggregated from ~/.seek/skills/.stats.jsonl filtered by the
+// current Session.ID. This is the in-session counterpart to `seek skill
+// stats` (which aggregates across all sessions).
+//
 // Kept alongside /skill (mirror of CLI list) because /skills is the
 // pre-v2 muscle memory; deleting it would break existing user habits.
-func cmdSkills(m *Model, _ string) cmdResult {
+func cmdSkills(m *Model, args string) cmdResult {
+	if strings.TrimSpace(args) == "--used" {
+		return cmdSkillsUsed(m)
+	}
 	if m.opts.Skills == nil || m.opts.Skills.Len() == 0 {
 		return cmdResult{text: styleMuted.Render("no skills loaded")}
 	}
@@ -1113,6 +1198,66 @@ func cmdSkills(m *Model, _ string) cmdResult {
 	for _, sk := range m.opts.Skills.List() {
 		fmt.Fprintf(&b, "  %-24s  %s\n", sk.Name, sk.Source)
 		fmt.Fprintf(&b, "    %s\n", sk.Description)
+	}
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
+}
+
+// cmdSkillsUsed renders the per-skill call count for the current session.
+// Data comes from .stats.jsonl filtered by Session.ID. Returns a muted
+// "no skills called yet" line when this session hasn't invoked any skill,
+// so the user can tell "session id mismatch" apart from "stats file
+// missing" by reading the message.
+func cmdSkillsUsed(m *Model) cmdResult {
+	if m.opts.Session == nil {
+		return cmdResult{text: styleMuted.Render("/skills --used: needs a session (running with --no-save?)")}
+	}
+	path, err := paths.UserSkillStats()
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/skills --used: " + err.Error())}
+	}
+	entries, err := skillstats.Read(path)
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/skills --used: " + err.Error())}
+	}
+
+	sid := m.opts.Session.ID
+	counts := map[string]int{}
+	lastTS := map[string]string{}
+	for _, e := range entries {
+		if e.SessionID != sid {
+			continue
+		}
+		counts[e.Name]++
+		if e.TS > lastTS[e.Name] {
+			lastTS[e.Name] = e.TS
+		}
+	}
+	if len(counts) == 0 {
+		return cmdResult{text: styleMuted.Render("no skills called in this session yet")}
+	}
+
+	// Sort by count desc, then name asc for ties — same ordering rule
+	// as `seek skill stats` so habits transfer.
+	type row struct {
+		name  string
+		count int
+		last  string
+	}
+	rows := make([]row, 0, len(counts))
+	for n, c := range counts {
+		rows = append(rows, row{name: n, count: c, last: lastTS[n]})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return rows[i].name < rows[j].name
+	})
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("skills called this session (%d):\n", len(rows)))
+	for _, r := range rows {
+		fmt.Fprintf(&b, "  %-24s  %d call(s)   last %s\n", r.name, r.count, r.last)
 	}
 	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
 }

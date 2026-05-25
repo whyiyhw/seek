@@ -499,6 +499,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if handled, cmd := dispatchCommand(&m, text); handled {
 				return m, cmd
 			}
+			// Consume any armed skill: wraps text with a "Please use the X
+			// skill" preamble and clears m.pendingSkill. Done AFTER the
+			// slash-dispatch check so slash commands (including the arm
+			// command itself) do not eat the arm.
+			text = m.consumeArm(text)
 			if msg.Alt {
 				// Steer: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
@@ -530,6 +535,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if handled, cmd := dispatchCommand(&m, text); handled {
 			return m, cmd
 		}
+		// Consume any armed skill before submit. Mirrors the streaming
+		// branch above; slash commands have already short-circuited so
+		// they never reach this line and never consume the arm.
+		text = m.consumeArm(text)
 		return m.submit(text)
 
 	case tea.KeyCtrlL:

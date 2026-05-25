@@ -595,3 +595,119 @@ func TestRenderCommittedToolOk_NonDiffResultStaysOneLine(t *testing.T) {
 		t.Errorf("byte count should be len(result)=%d: %q", len(result), got)
 	}
 }
+
+// sgrToolSkill is what styleToolSkill (accent magenta + bold) emits
+// under ANSI256. Bold + colour 177 → "\x1b[1;38;5;177m". Used by the
+// Skill rendering tests below to assert the dedicated style was applied
+// instead of the default styleToolLine (amber 180).
+const sgrToolSkill = "\x1b[1;38;5;177m"
+
+func TestRenderCommittedToolOk_SkillUsesDedicatedFormat(t *testing.T) {
+	forceColor(t)
+	// Args is the JSON the Skill tool's schema requires (PRD v0 §4.6.3:
+	// one required field, "name").
+	got := renderCommittedToolOk("Skill", `{"name":"dual-model"}`, "(body)", 300*time.Millisecond, "")
+
+	// The skill-specific header replaces the generic "↳ Name(args)"
+	// form so the user reads "which skill" directly. The dual-model
+	// name must appear inline.
+	if !strings.Contains(got, "✦ skill: dual-model") {
+		t.Errorf("expected dedicated skill header, got: %q", got)
+	}
+	// Negative: the generic "↳ Skill(...)" form must NOT leak through
+	// — that would mean the branch didn't trigger and we'd be back to
+	// the indistinguishable amber line.
+	if strings.Contains(got, "↳ Skill(") {
+		t.Errorf("skill call should NOT render with the generic tool form: %q", got)
+	}
+	// Colour: accent magenta + bold, not amber.
+	if !strings.Contains(got, sgrToolSkill) {
+		t.Errorf("skill line should use styleToolSkill (sgr=%q), got: %q", sgrToolSkill, got)
+	}
+}
+
+func TestRenderCommittedToolOk_NonSkillUnchanged(t *testing.T) {
+	forceColor(t)
+	// Regression guard: every non-Skill tool must keep its existing
+	// "↳ name(args) → N bytes" shape. The accent-magenta sgr must NOT
+	// appear on a plain read call.
+	got := renderCommittedToolOk("read", "foo.go", "(body)", 100*time.Millisecond, "")
+	if !strings.Contains(got, "↳ read(foo.go)") {
+		t.Errorf("non-Skill tools must keep the generic form, got: %q", got)
+	}
+	if strings.Contains(got, sgrToolSkill) {
+		t.Errorf("non-Skill tools must NOT use styleToolSkill, got: %q", got)
+	}
+}
+
+func TestRenderCommittedToolErr_SkillKeepsHeaderAndStaysRed(t *testing.T) {
+	forceColor(t)
+	got := renderCommittedToolErr("Skill", `{"name":"missing"}`, `"missing" not found`, 250*time.Millisecond)
+
+	// Skill errors still get the dedicated "✦ skill: <name>" header
+	// so the failed call is attributable; the red colour itself is
+	// what marks it as "failed".
+	if !strings.Contains(got, "✦ skill: missing") {
+		t.Errorf("skill error should keep the dedicated header, got: %q", got)
+	}
+	if !strings.Contains(got, "ERROR:") {
+		t.Errorf("ERROR: tag missing, got: %q", got)
+	}
+	// Red, not accent magenta: failure colour takes precedence over
+	// the per-tool accent.
+	if !strings.Contains(got, sgrToolErr) {
+		t.Errorf("skill error should render in styleToolError (red), got: %q", got)
+	}
+	if strings.Contains(got, sgrToolSkill) {
+		t.Errorf("skill error should NOT also carry the accent style: %q", got)
+	}
+}
+
+func TestParseSkillName(t *testing.T) {
+	cases := []struct {
+		args string
+		want string
+	}{
+		// Canonical args produced by the Skill tool's schema.
+		{`{"name":"dual-model"}`, "dual-model"},
+		{`{"name":"go-test-runner"}`, "go-test-runner"},
+		// Truncated mid-value (truncateOneLine clips at 80 chars on the
+		// active-tool line) — must not panic; falls back to "?".
+		{`{"name":"some-really-long-name-tha`, "?"},
+		// Empty / missing name — also "?", never a blank rendered line.
+		{`{}`, "?"},
+		{``, "?"},
+		// Wrong shape entirely (shouldn't happen in practice, but the
+		// fallback is what keeps render-side panics off the table).
+		{`not json`, "?"},
+	}
+	for _, tc := range cases {
+		if got := parseSkillName(tc.args); got != tc.want {
+			t.Errorf("parseSkillName(%q) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestFormatActiveToolLabel_SkillBranch(t *testing.T) {
+	label, style := formatActiveToolLabel("Skill", `{"name":"dual-model"}`)
+	if !strings.Contains(label, "✦ skill: dual-model") {
+		t.Errorf("active skill label missing dedicated form: %q", label)
+	}
+	// Style must be the dedicated one. Compare by rendering a probe
+	// string — lipgloss styles are not comparable by ==.
+	forceColor(t)
+	if style.Render("x") != styleToolSkill.Render("x") {
+		t.Errorf("expected styleToolSkill for Skill name, got a different style")
+	}
+}
+
+func TestFormatActiveToolLabel_NonSkillUnchanged(t *testing.T) {
+	label, style := formatActiveToolLabel("read", "foo.go")
+	if !strings.Contains(label, "read(foo.go) …") {
+		t.Errorf("non-Skill active label changed shape: %q", label)
+	}
+	forceColor(t)
+	if style.Render("x") != styleToolLine.Render("x") {
+		t.Errorf("non-Skill active label should use styleToolLine, got different style")
+	}
+}

@@ -25,6 +25,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -187,6 +188,15 @@ type Model struct {
 	// the current turn is dropped (Repair() cleans any orphan tool_calls
 	// in the agent's history) and the steer message replaces it.
 	pendingSteerText string
+
+	// pendingSkill, when non-empty, names a skill that the user has
+	// "armed" via `/skill use <name>` (no extra args). The next
+	// user-typed message (and ONLY the next one — slash commands and
+	// programmatic prompts like /review do not consume the arm) gets
+	// wrapped with a "Please use the X skill" preamble before going to
+	// the agent. Consumed via consumeArm; cleared on /skill use clear,
+	// on send, and on /reset.
+	pendingSkill string
 
 	// pastedContent stores the full content of a multi-line paste when
 	// the textarea display is folded to a placeholder. The marker text
@@ -438,4 +448,26 @@ func scrollbackLineCount(s string) int {
 		return 0
 	}
 	return strings.Count(s, "\n") + 1
+}
+
+// consumeArm wraps text with a "Please use the <name> skill" preamble
+// when m.pendingSkill is set, then clears the arm. Returns text
+// unchanged when no skill is armed. Called at the two user-typed
+// submission sites (non-streaming submit and streaming queue/steer);
+// programmatic submissions like /review go through submit() directly
+// without this wrapper, so the arm survives until a real user message
+// arrives.
+//
+// The wrapper text is deliberately explicit ("Please use the X skill")
+// rather than something terser like a sigil — the model needs an
+// unambiguous instruction to call the Skill tool first, and the
+// natural-language form is what reliably triggers that across both
+// DeepSeek and the second-tier providers.
+func (m *Model) consumeArm(text string) string {
+	if m.pendingSkill == "" {
+		return text
+	}
+	name := m.pendingSkill
+	m.pendingSkill = ""
+	return fmt.Sprintf("Please use the %q skill for the following task:\n\n%s", name, text)
 }

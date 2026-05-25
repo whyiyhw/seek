@@ -83,6 +83,12 @@ var (
 	styleToolLine  = lipgloss.NewStyle().Foreground(colourTool)
 	styleToolError = lipgloss.NewStyle().Foreground(colourToolErr)
 
+	// styleToolSkill is the dedicated colour for `Skill` tool invocations
+	// — accent magenta + bold — so a human scrolling back can spot
+	// "the model used a skill here" without parsing the tool name. Other
+	// tool calls stay on styleToolLine (amber).
+	styleToolSkill = lipgloss.NewStyle().Foreground(colourAccent).Bold(true)
+
 	// Diff-block accents used by colorizeDiffBlocks (view.go). Applied to
 	// `+`/`-` lines inside ```diff fences embedded in tool error messages.
 	// `-` lines reuse styleToolError; only `+` (add) needs a separate style.
@@ -170,6 +176,7 @@ func SetTheme(theme string) {
 
 	styleToolLine = lipgloss.NewStyle().Foreground(colourTool)
 	styleToolError = lipgloss.NewStyle().Foreground(colourToolErr)
+	styleToolSkill = lipgloss.NewStyle().Foreground(colourAccent).Bold(true)
 	styleDiffAdd = lipgloss.NewStyle().Foreground(colourOk)
 
 	styleReasoning = lipgloss.NewStyle().Foreground(colourReasoning).Italic(true)

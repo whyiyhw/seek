@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1082,5 +1083,293 @@ func TestCurrentGitBranch_Timeout(t *testing.T) {
 	got := currentGitBranch(ctx, "/nonexistent")
 	if got != "" {
 		t.Errorf("expected empty for cancelled context, got %q", got)
+	}
+}
+
+// --- /skills --used ------------------------------------------------------
+//
+// Coverage targets PRD v2 §4.3 (the .stats.jsonl session-id filter) and
+// the small UX rules: pre-existing /skills (no args) must keep working,
+// --used with a session that has no calls says so explicitly, and
+// counts are sorted by count desc.
+
+// writeStatsJSONL puts a synthetic .stats.jsonl under $SEEK_HOME for
+// cmdSkillsUsed to read. Each line is one skillstats.Entry shape; the
+// caller controls which session_id values appear so the filter rule
+// can be exercised.
+func writeStatsJSONL(t *testing.T, lines []string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("SEEK_HOME", dir)
+	skillsDir := filepath.Join(dir, "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(skillsDir, ".stats.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write stats: %v", err)
+	}
+}
+
+func TestCmdSkills_NoArgsListsLoaded(t *testing.T) {
+	m := emptyModel()
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "go-test-runner", Description: "runs go tests", Source: "builtin"})
+	m.opts.Skills = set
+
+	res := runHandler(t, m, "/skills")
+	for _, want := range []string{"loaded 1 skill", "go-test-runner", "runs go tests"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("expected %q in:\n%s", want, res.text)
+		}
+	}
+}
+
+func TestCmdSkillsUsed_FiltersBySession(t *testing.T) {
+	sess := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	other := "20260101-000000-aaaaaa" // a different session id
+
+	writeStatsJSONL(t, []string{
+		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-reasoner","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:05:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-reasoner","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:10:00Z","name":"go-test-runner","session_id":"` + sess.ID + `","model":"deepseek-chat","provider":"deepseek"}`,
+		// Different session — must NOT be counted.
+		`{"ts":"2026-05-24T11:00:00Z","name":"dual-model","session_id":"` + other + `","model":"deepseek-chat","provider":"deepseek"}`,
+	})
+
+	m := emptyModel()
+	m.opts.Session = sess
+	res := runHandler(t, m, "/skills --used")
+
+	if !strings.Contains(res.text, "skills called this session (2)") {
+		t.Errorf("expected 2 distinct skills called, got:\n%s", res.text)
+	}
+	// dual-model (2 calls) should rank above go-test-runner (1 call).
+	dual := strings.Index(res.text, "dual-model")
+	gtr := strings.Index(res.text, "go-test-runner")
+	if dual < 0 || gtr < 0 {
+		t.Fatalf("expected both skills in output:\n%s", res.text)
+	}
+	if dual > gtr {
+		t.Errorf("dual-model (2 calls) should rank before go-test-runner (1 call):\n%s", res.text)
+	}
+	// The other-session entry must NOT bump dual-model's count.
+	if !strings.Contains(res.text, "2 call(s)") {
+		t.Errorf("dual-model count should be exactly 2 (other-session row must not leak):\n%s", res.text)
+	}
+}
+
+func TestCmdSkillsUsed_NoCallsInThisSession(t *testing.T) {
+	sess := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	// Stats file exists but contains only entries from a different session.
+	writeStatsJSONL(t, []string{
+		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"some-other-session","model":"deepseek-chat","provider":"deepseek"}`,
+	})
+
+	m := emptyModel()
+	m.opts.Session = sess
+	res := runHandler(t, m, "/skills --used")
+
+	if !strings.Contains(res.text, "no skills called in this session yet") {
+		t.Errorf("expected 'no skills called' message, got:\n%s", res.text)
+	}
+}
+
+func TestCmdSkillsUsed_NoSessionSaysSo(t *testing.T) {
+	// --no-save / inline mode: opts.Session is nil. /skills --used must
+	// give a clear reason rather than panic or pretend to query.
+	m := emptyModel()
+	m.opts.Session = nil
+	res := runHandler(t, m, "/skills --used")
+
+	if !strings.Contains(res.text, "needs a session") {
+		t.Errorf("expected helpful 'needs a session' message, got:\n%s", res.text)
+	}
+}
+
+// --- /skill use --------------------------------------------------------
+//
+// Arm-vs-fire semantics: bare name arms (sets pendingSkill); name +
+// extra fires immediately; "clear" disarms. Slash dispatch is gated
+// before consumeArm runs in the live KeyEnter path, so we assert the
+// state changes directly on Model and check that consumeArm wraps
+// then clears.
+
+// withSkills attaches a Set containing the named skills (with minimal
+// metadata) so cmdSkillUse can validate them.
+func withSkills(m *Model, names ...string) {
+	set := skill.NewSet()
+	for _, n := range names {
+		set.Add(&skill.Skill{Name: n, Description: "desc for " + n, Source: "builtin"})
+	}
+	m.opts.Skills = set
+}
+
+func TestCmdSkillUse_BareNameArms(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model")
+
+	res := runHandler(t, m, "/skill use dual-model")
+
+	if m.pendingSkill != "dual-model" {
+		t.Errorf("expected pendingSkill=dual-model, got %q", m.pendingSkill)
+	}
+	if !strings.Contains(res.text, "armed") || !strings.Contains(res.text, "dual-model") {
+		t.Errorf("expected confirmation mentioning armed + skill name, got: %q", res.text)
+	}
+}
+
+func TestCmdSkillUse_NameWithExtraFiresImmediately(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model")
+
+	// submitOrSteer in non-streaming mode tries to call m.submit which
+	// needs m.opts.Agent / opts.Ctx. We don't have those in emptyModel,
+	// so we'd panic — fix by stubbing m.streaming = true: that path
+	// re-routes through steerStream which DOES require Agent for the
+	// cancel side... so instead we verify state preconditions and
+	// re-enter the dispatch with a minimal mock. Simpler: drop down to
+	// cmdSkillUse directly and only assert on the non-submit branches.
+	//
+	// Approach: assert that handing extra args takes us out of the arm
+	// branch (pendingSkill stays empty) and produces a cmdResult whose
+	// payload is the submit pipeline (extra cmd, not text).
+	m.streaming = false
+	// We can't easily run m.submit without an agent. Inspect cmdSkillUse
+	// directly by routing through cmdSkillCLI on the "use" verb so
+	// we exercise the production parser. To avoid Agent panic, replace
+	// the model's submit path by using a streaming sentinel and
+	// catching the steerStream call's lack of agent.
+	m.streaming = true         // route through steerStream branch
+	m.cancelStream = func() {} // steerStream calls cancel()
+	res := runHandler(t, m, "/skill use dual-model 帮我重构 foo.go")
+
+	if m.pendingSkill != "" {
+		t.Errorf("immediate fire should NOT arm; got pendingSkill=%q", m.pendingSkill)
+	}
+	// steerStream stashes the wrapped text in pendingSteerText. Verify
+	// the wrapper is exactly what consumeArm would produce — single
+	// source of truth check.
+	if !strings.Contains(m.pendingSteerText, "dual-model") {
+		t.Errorf("steer text should reference the skill name, got: %q", m.pendingSteerText)
+	}
+	if !strings.Contains(m.pendingSteerText, "帮我重构 foo.go") {
+		t.Errorf("steer text should preserve the user's task, got: %q", m.pendingSteerText)
+	}
+	_ = res
+}
+
+func TestCmdSkillUse_Clear(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model")
+	m.pendingSkill = "dual-model"
+
+	res := runHandler(t, m, "/skill use clear")
+
+	if m.pendingSkill != "" {
+		t.Errorf("clear should disarm; got pendingSkill=%q", m.pendingSkill)
+	}
+	if !strings.Contains(res.text, "disarmed") {
+		t.Errorf("expected 'disarmed' confirmation, got: %q", res.text)
+	}
+}
+
+func TestCmdSkillUse_ClearWhenNothingArmed(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model")
+
+	res := runHandler(t, m, "/skill use clear")
+	// Idempotent — clearing nothing is fine. The message just tells the
+	// user nothing was armed so they can tell apart "I cleared it" from
+	// "there was nothing to clear" without checking state themselves.
+	if !strings.Contains(res.text, "nothing armed") {
+		t.Errorf("expected 'nothing armed' notice, got: %q", res.text)
+	}
+}
+
+func TestCmdSkillUse_UnknownNameErrorsAndListsAvailable(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model", "go-test-runner")
+
+	res := runHandler(t, m, "/skill use typo")
+
+	if m.pendingSkill != "" {
+		t.Errorf("unknown skill must not arm; got %q", m.pendingSkill)
+	}
+	// Error must surface the available names so the user can fix the
+	// typo without another round-trip to /skills.
+	for _, want := range []string{"typo", "not found", "dual-model", "go-test-runner"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("error should contain %q, got: %q", want, res.text)
+		}
+	}
+}
+
+func TestCmdSkillUse_NoSkillsLoaded(t *testing.T) {
+	m := emptyModel() // m.opts.Skills nil
+	res := runHandler(t, m, "/skill use dual-model")
+
+	if m.pendingSkill != "" {
+		t.Errorf("must not arm when no skills loaded; got %q", m.pendingSkill)
+	}
+	if !strings.Contains(res.text, "no skills loaded") {
+		t.Errorf("expected explicit 'no skills loaded', got: %q", res.text)
+	}
+}
+
+func TestCmdSkillUse_ReplacesExistingArm(t *testing.T) {
+	m := emptyModel()
+	withSkills(m, "dual-model", "go-test-runner")
+	m.pendingSkill = "dual-model"
+
+	res := runHandler(t, m, "/skill use go-test-runner")
+
+	if m.pendingSkill != "go-test-runner" {
+		t.Errorf("re-arm should replace existing arm; got %q", m.pendingSkill)
+	}
+	if !strings.Contains(res.text, "go-test-runner") {
+		t.Errorf("confirmation should name the new skill, got: %q", res.text)
+	}
+}
+
+func TestConsumeArm_WrapsAndClears(t *testing.T) {
+	m := emptyModel()
+	m.pendingSkill = "dual-model"
+
+	wrapped := m.consumeArm("帮我重构这段代码")
+
+	if m.pendingSkill != "" {
+		t.Errorf("consumeArm must clear pendingSkill after use; got %q", m.pendingSkill)
+	}
+	for _, want := range []string{"dual-model", "帮我重构这段代码", "Please use"} {
+		if !strings.Contains(wrapped, want) {
+			t.Errorf("wrapped text missing %q: %q", want, wrapped)
+		}
+	}
+}
+
+func TestConsumeArm_NoArmIsNoOp(t *testing.T) {
+	m := emptyModel()
+	// pendingSkill empty by default
+
+	got := m.consumeArm("hello")
+	if got != "hello" {
+		t.Errorf("consumeArm with no arm should be identity, got %q", got)
+	}
+}
+
+func TestCmdNew_ClearsArm(t *testing.T) {
+	// /new starts a fresh conversation — any armed skill from the prior
+	// session is conceptually obsolete and should not silently apply to
+	// the next message in the new session.
+	m := emptyModel()
+	m.pendingSkill = "dual-model"
+	// /new needs RebuildAgent to do its real work; stub it.
+	m.opts.RebuildAgent = func() (*agent.Agent, error) { return nil, nil }
+
+	runHandler(t, m, "/new")
+
+	if m.pendingSkill != "" {
+		t.Errorf("/new should clear pendingSkill; got %q", m.pendingSkill)
 	}
 }

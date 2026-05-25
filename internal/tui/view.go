@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -76,7 +77,7 @@ func (m Model) View() string {
 	// cleanup), the final token count is shown for one frame.
 	for _, t := range m.activeTools {
 		elapsed := formatToolElapsed(time.Since(t.started))
-		label := fmt.Sprintf("%s(%s) …", t.name, t.args)
+		label, style := formatActiveToolLabel(t.name, t.args)
 		if elapsed != "" {
 			label += " · " + elapsed
 		}
@@ -84,7 +85,7 @@ func (m Model) View() string {
 		if tok != "" {
 			label += " · " + tok
 		}
-		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), style.Render(label))
 	}
 
 	// Distill spinner — shown while /distill's reasoner call is
@@ -157,6 +158,17 @@ func (m Model) View() string {
 		sb.WriteString(styleMuted.Render(fmt.Sprintf(
 			"✎ paste API key for %s — Enter to save, Esc to cancel",
 			m.setupProvider)))
+		sb.WriteString("\n")
+	}
+
+	// Skill-armed badge — sits directly above the input so the user
+	// sees, at the moment they hit Enter, that their message will be
+	// wrapped with a skill instruction. Co-exists with the queue hint
+	// above (mid-stream + armed is legitimate — the armed wrapping
+	// applies to whatever message gets queued).
+	if m.pendingSkill != "" {
+		sb.WriteString(styleToolSkill.Render(fmt.Sprintf("✦ skill armed: %s", m.pendingSkill)))
+		sb.WriteString(styleMuted.Render(" — next message uses this skill (/skill use clear to cancel)"))
 		sb.WriteString("\n")
 	}
 
@@ -592,8 +604,14 @@ func renderCommittedAssistant(content, reasoning string, showReasoning bool, wid
 }
 
 func renderCommittedToolOk(name, args, result string, d time.Duration, tokenTail string) string {
-	head := styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s%s",
-		name, args, len(result), durationTail(d), tokenTail))
+	var head string
+	if name == skillToolName {
+		head = styleToolSkill.Render(fmt.Sprintf("  ✦ skill: %s → %d bytes%s%s",
+			parseSkillName(args), len(result), durationTail(d), tokenTail))
+	} else {
+		head = styleToolLine.Render(fmt.Sprintf("  ↳ %s(%s) → %d bytes%s%s",
+			name, args, len(result), durationTail(d), tokenTail))
+	}
 	// If the result carries a ```diff fenced section (today: only emitted
 	// by the edit tool), surface the diff coloured under the summary line
 	// so the human can verify the change without leaving the TUI. Other
@@ -603,6 +621,37 @@ func renderCommittedToolOk(name, args, result string, d time.Duration, tokenTail
 		return head
 	}
 	return head + "\n" + colorizeDiffBody(body)
+}
+
+// skillToolName matches internal/tools/skilltool.toolName; duplicated as a
+// constant here to avoid pulling the whole tool package into the TUI's
+// import graph for one string comparison.
+const skillToolName = "Skill"
+
+// formatActiveToolLabel builds the in-flight label + colour for an active
+// tool call. Skill calls get the dedicated "✦ skill: <name>" form so the
+// user sees the *which-skill* signal directly; everything else stays on
+// the canonical "name(args) …" amber line.
+func formatActiveToolLabel(name, args string) (string, lipgloss.Style) {
+	if name == skillToolName {
+		return fmt.Sprintf("✦ skill: %s …", parseSkillName(args)), styleToolSkill
+	}
+	return fmt.Sprintf("%s(%s) …", name, args), styleToolLine
+}
+
+// parseSkillName extracts the "name" field from the Skill tool's args
+// JSON. The schema only has one required field (PRD v0 §4.6.3), so the
+// parse is intentionally minimal — and tolerant: if args was truncated
+// past the closing brace by truncateOneLine, falls back to "?" rather
+// than failing the render.
+func parseSkillName(args string) string {
+	var v struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(args), &v); err == nil && v.Name != "" {
+		return v.Name
+	}
+	return "?"
 }
 
 // extractDiffSection returns the body of the first ```diff ... ``` fence
@@ -660,7 +709,16 @@ func renderCommittedToolErr(name, args, err string, d time.Duration) string {
 	// colour. The body recogniser is in colorizeDiffBlocks — outside any
 	// ```diff fence it falls back to styleToolError, so a plain-text
 	// error renders byte-for-byte the way it always did.
-	head := fmt.Sprintf("  ↳ %s(%s) → ERROR: ", name, args)
+	//
+	// Skill errors reuse the "✦ skill: <name>" header so the failed call
+	// is still visually attributable to the skill mechanism — the colour
+	// itself (red) is what marks it as failed.
+	var head string
+	if name == skillToolName {
+		head = fmt.Sprintf("  ✦ skill: %s → ERROR: ", parseSkillName(args))
+	} else {
+		head = fmt.Sprintf("  ↳ %s(%s) → ERROR: ", name, args)
+	}
 	body := colorizeDiffBlocks(err, styleToolError)
 	tail := durationTail(d)
 	return styleToolError.Render(head) + body + styleToolError.Render(tail)
