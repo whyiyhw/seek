@@ -41,6 +41,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
+	gittool "github.com/whyiyhw/seek/internal/tools/git"
 	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
@@ -82,7 +83,8 @@ Available tools:
 - list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Use this instead of 'bash ls' when you need depth or dotfiles.
 - write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
 - edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
-- bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly).
+- bash(command, timeout_ms?): run a shell command. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly). DO NOT use for git read operations (log/diff/status/blame/show) — the git tool below handles those without an approval prompt and works in plan mode.
+- git(subcommand, args?, max_lines?): read-only git wrapper. Allowed subcommands: log, diff, show, status, blame, branch, tag, rev-parse, ls-files, ls-tree, cat-file, shortlog, describe, reflog. Output capped at 500 lines hard. Works in plan mode (bash does not). Use this instead of bash whenever you need to inspect git state. Mutating ops (commit/push/reset/checkout/rebase/merge/clean/fetch/pull/clone) MUST go through bash and accept the user prompt.
 - fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
 - think(task, reflect?, context?): call deepseek-v4-flash in thinking mode for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
 - Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
@@ -459,6 +461,7 @@ func run() error {
 		Add(write.New(policy)).
 		Add(edit.New(policy)).
 		Add(bash.New(policy)).
+		Add(gittool.New()).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).

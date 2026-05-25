@@ -31,6 +31,13 @@ const (
 	// because that's the irreversible filesystem mutation that puts
 	// model-influenced content on the user's machine.
 	KindSkillInstall Kind = "skill_install"
+	// KindGit is the read-only git tool. Plan mode allows it
+	// unconditionally (the tool's subcommand whitelist enforces
+	// the read-only guarantee — push/commit/reset cannot reach
+	// the policy). ModeAsk also permits without prompting: gating
+	// read-only operations behind y/N would be noise, and the
+	// tool layer already refuses anything mutating.
+	KindGit Kind = "git"
 )
 
 // Action describes one attempt to perform a guarded operation.
@@ -211,8 +218,15 @@ func (p *Policy) Check(a Action) error {
 			}
 			return nil
 		case KindBash:
-			return fmt.Errorf("%w: plan mode: bash is not allowed — explore with read/grep/list_dir instead",
+			return fmt.Errorf("%w: plan mode: bash is not allowed — explore with read/grep/list_dir/git instead",
 				ErrDenied)
+		case KindGit:
+			// The git tool is read-only by construction (subcommand
+			// whitelist). Plan mode allows it so the model can
+			// inspect history, diffs, and blame while producing the
+			// plan — without this, plan-mode reviews were forced to
+			// guess at git state.
+			return nil
 		case KindWrite, KindEdit:
 			return fmt.Errorf("%w: plan mode: %s is not allowed — produce a plan in your response instead",
 				ErrDenied, a.Kind)
@@ -272,6 +286,12 @@ func (p *Policy) Check(a Action) error {
 			return fmt.Errorf("%w: skill_install requires a skill name", ErrDenied)
 		}
 		dangerous = true
+	case KindGit:
+		// Read-only by construction (tool layer enforces a
+		// subcommand whitelist). Treated as safe — no prompt, no
+		// outside-cwd check (git's pwd is the project root and
+		// it only emits historical data, not filesystem reads).
+		return nil
 	default:
 		return fmt.Errorf("%w: unknown action kind %q", ErrDenied, a.Kind)
 	}
