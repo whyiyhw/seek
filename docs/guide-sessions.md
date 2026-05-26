@@ -26,9 +26,8 @@ seek --no-save -p "scratch work"
 
 | Command | What it does |
 |---|---|
-| `/help`, `/?` | Show this help |
-| `/clear` | Clear visible screen (scrollback preserved by terminal) |
-| `/new` | Start a fresh conversation (saves the current one first) |
+| `/help`, `/?` or `?` hotkey | Show help — no arg opens a topic picker (all, commands, keys, about); pass a topic to skip the picker |
+| `/clear`, `/new` | Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state |
 | `/model` | Switch model — no arg opens a picker; pass an id to skip it |
 | `/effort` | Set DeepSeek reasoning effort: `off`, `high`, or `max` |
 | `/lang` | Set response language: `en`, `zh`, or `auto` |

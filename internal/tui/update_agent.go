@@ -52,8 +52,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	// simplicity we drop it — the next prompt can re-ask).
 	wasCanceled := m.userCanceled
 	if m.userCanceled {
-		cmds = append(cmds, tea.Println(styleMuted.Render("  ↰ interrupted")))
-		m.scrollbackLines++
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↰ interrupted")))
 		m.userCanceled = false
 	}
 	// At this point all completed messages are already in
@@ -66,7 +65,10 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	// after an Esc-cancelled stream, so they can edit and re-send.
 	// Only when the textarea is still empty — the Esc handler may
 	// have already restored queuedText into it.
-	if wasCanceled && m.input.Value() == "" && len(m.promptHistory) > 0 {
+	// Also skip when the user is in setup/review entry mode — restoring
+	// a prior chat prompt into the API-key or branch-name field would
+	// leak conversation text into config or git state.
+	if wasCanceled && !m.setupKeyEntry && !m.reviewBranchEntry && m.input.Value() == "" && len(m.promptHistory) > 0 {
 		m.input.SetValue(m.promptHistory[len(m.promptHistory)-1])
 	}
 
@@ -92,21 +94,15 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		text := m.pendingSteerText
 		m.pendingSteerText = ""
 		m.queuedText = "" // a steer supersedes any queue
-		cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ steered")))
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ steered")))
 		newM, cmd := m.submit(text)
-		m2 := newM.(Model)
-		m2.scrollbackLines++
-		newM = m2
 		cmds = append(cmds, cmd)
 		return newM, tea.Batch(cmds...)
 	case m.queuedText != "":
 		text := m.queuedText
 		m.queuedText = ""
-		cmds = append(cmds, tea.Println(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
 		newM, cmd := m.submit(text)
-		m2 := newM.(Model)
-		m2.scrollbackLines++
-		newM = m2
 		cmds = append(cmds, cmd)
 		return newM, tea.Batch(cmds...)
 	}
@@ -143,9 +139,9 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	ch := m.opts.Agent.Prompt(ctx, text)
 	m.stream = ch
 
-	printUser := renderCommittedUser(text, m.width)
-	m.scrollbackLines += scrollbackLineCount(printUser)
-	return m, tea.Batch(tea.Println(printUser), waitForAgentEvent(ch))
+	printUser := renderUserBlock(text, m.width)
+	pcmd := (&m).appendHistory(printUser)
+	return m, tea.Batch(pcmd, waitForAgentEvent(ch))
 }
 
 // applyAgentEvent updates Model state for an agent event and returns
@@ -174,22 +170,16 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 
 	case agent.MessageEnd:
 		if e.Message.Role == deepseek.RoleAssistant {
-			// Only commit a `▸ seek` scrollback block when the model
-			// actually produced narrative text. Pure tool-call turns
-			// (reasoning + tool_calls, no content) used to render as
-			// "(no content)" — that's noise: the `↳ tool(...)` lines
-			// directly below already convey what happened on that
-			// turn, and the reasoning was visible mid-stream via
-			// Ctrl+R. Skipping the commit collapses N consecutive
-			// silent reasoning rounds into just their tool lines.
+			// renderAssistantBlock also returns "" for empty content
+			// (defense in depth), but we skip the append at the caller
+			// so cmds doesn't grow with a nil entry — the
+			// "pure tool-call turn → no scrollback commit" contract
+			// asserted by TestApplyAgentEvent_PureToolCallTurnSkipsCommit.
+			// The `↳ tool(...)` lines committed via ToolExecEnd already
+			// convey what happened on a silent reasoning round.
 			if m.curContent != "" {
-				rendered := renderMarkdown(m.md, m.curContent)
-				if rendered == "" {
-					rendered = m.curContent
-				}
-				line := renderCommittedAssistant(rendered, m.curReasoning, m.showReasoning, m.width)
-				cmds = append(cmds, tea.Println(line))
-				m.scrollbackLines += scrollbackLineCount(line)
+				line := renderAssistantBlock(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md)
+				cmds = append(cmds, m.appendHistory(line))
 			}
 			// Always reset the live-region buffers — leaving them
 			// populated would leak this turn's reasoning/content into
@@ -244,19 +234,22 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.curContent = ""
 		m.curReasoning = ""
 		// ToolExecEnd carries Name/Result/Err but not Args/started —
-		// look both back up from the active list.
+		// look both back up from the active list. We do NOT remove the
+		// slot here; it stays visible (rendered with ✓ + locked
+		// duration) until handleStreamEnd clears m.activeTools at the
+		// end of the turn. See activeTool's doc for why.
 		var (
 			args             string
 			duration         time.Duration
 			completionTokens int
 		)
+		now := time.Now()
 		for i, t := range m.activeTools {
 			if t.callID == e.CallID {
 				args = t.args
-				duration = time.Since(t.started)
-				// Parse completion tokens from result and set on the
-				// active tool so View() can show them for one frame
-				// before cleanupToolMsg removes it.
+				duration = now.Sub(t.started)
+				m.activeTools[i].completed = now
+				m.activeTools[i].finished = true
 				if e.Result != "" {
 					matches := completionRe.FindStringSubmatch(e.Result)
 					if len(matches) >= 2 {
@@ -266,23 +259,11 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 						}
 					}
 				}
-				// Defer removal — queue cleanup for next frame so
-				// View() renders the final token count once.
-				cmds = append(cmds, func() tea.Msg {
-					return cleanupToolMsg{callID: e.CallID}
-				})
 				break
 			}
 		}
-		var line string
-		tokenTail := formatTokenTail(completionTokens)
-		if e.Err != nil {
-			line = renderCommittedToolErr(e.Name, args, e.Err.Error(), duration)
-		} else {
-			line = renderCommittedToolOk(e.Name, args, e.Result, duration, tokenTail)
-		}
-		cmds = append(cmds, tea.Println(line))
-		m.scrollbackLines += scrollbackLineCount(line)
+		line := renderToolResultLine(e.Name, args, e.Result, e.Err, duration, completionTokens)
+		cmds = append(cmds, m.appendHistory(line))
 
 	case agent.TurnEnd:
 		m.turns++
@@ -298,17 +279,13 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.toolCalls += e.ToolCalls
 
 	case agent.AgentEnd:
-		// Stats footer at turn boundary — print a thin separator with
-		// running totals so a long session has visible "checkpoints"
-		// in the scrollback.
-		cmds = append(cmds, tea.Println(m.renderTurnFooter()))
-		m.scrollbackLines++
+		// Stats footer at turn boundary — gives the user visible
+		// "checkpoints" in history for long sessions.
+		cmds = append(cmds, m.appendHistory(m.renderTurnFooter()))
 
 	case agent.ErrorEvent:
 		m.lastErr = e.Err
-		errLine := styleErr.Render("  ! error: " + e.Err.Error())
-		cmds = append(cmds, tea.Println(errLine))
-		m.scrollbackLines += scrollbackLineCount(errLine)
+		cmds = append(cmds, m.appendHistory(styleErr.Render("  ! error: "+e.Err.Error())))
 
 	case agent.PlanProposalApproved:
 		// User approved the proposed plan via the propose tool's
@@ -322,9 +299,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		if m.opts.SetPlanSubstate != nil {
 			m.opts.SetPlanSubstate("execute")
 		}
-		line := styleMuted.Render("  ▸ plan approved — write/edit/bash now ask per call")
-		cmds = append(cmds, tea.Println(line))
-		m.scrollbackLines += scrollbackLineCount(line)
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ▸ plan approved — write/edit/bash now ask per call")))
 
 	case agent.PlanProposalAdjustRequested:
 		// User declined the proposed plan with optional free-text
@@ -339,9 +314,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		if e.Feedback != "" {
 			msg += " (feedback: " + truncateOneLine(e.Feedback, 60) + ")"
 		}
-		line := styleMuted.Render(msg)
-		cmds = append(cmds, tea.Println(line))
-		m.scrollbackLines += scrollbackLineCount(line)
+		cmds = append(cmds, m.appendHistory(styleMuted.Render(msg)))
 
 	case agent.PlanProposalCancelled:
 		// User aborted /plan entirely from the propose picker. Same
@@ -354,9 +327,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.opts.SetPlan(false)
 		}
 		m.refreshPlaceholder()
-		line := styleMuted.Render("  ▸ plan cancelled — exited /plan mode")
-		cmds = append(cmds, tea.Println(line))
-		m.scrollbackLines += scrollbackLineCount(line)
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ▸ plan cancelled — exited /plan mode")))
 	}
 
 	return cmds
@@ -376,9 +347,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 // history is ever permanently lost.
 func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	if msg.err != nil {
-		line := styleErr.Render("  ! compact failed: " + msg.err.Error())
-		m.scrollbackLines += scrollbackLineCount(line)
-		return []tea.Cmd{tea.Println(line)}
+		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! compact failed: " + msg.err.Error()))}
 	}
 	if m.opts.Agent == nil {
 		return nil
@@ -405,8 +374,7 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 		//    so the child's stats reflect only post-compact activity.
 		child := m.opts.Session.Fork()
 		m.opts.Session = child
-		m.turns = 0
-		m.toolCalls = 0
+		m.resetSessionCounters()
 	}
 
 	// The user→assistant bootstrap pair is what upstream pi / Claude
@@ -438,8 +406,7 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
 			msg.usage.PromptTokens, msg.usage.CompletionTokens)
 	}
-	m.scrollbackLines += scrollbackLineCount(styleMuted.Render(notice))
-	return []tea.Cmd{tea.Println(styleMuted.Render(notice))}
+	return []tea.Cmd{m.appendHistory(styleMuted.Render(notice))}
 }
 
 // persistSession snapshots the agent's current message history,
@@ -452,7 +419,9 @@ func (m *Model) persistSession() {
 	m.opts.Session.Messages = m.opts.Agent.Messages()
 	m.opts.Session.Turns = m.turns
 	m.opts.Session.ToolCalls = m.toolCalls
-	m.opts.Session.Usage = m.opts.Tracker.Cumulative()
+	if m.opts.Tracker != nil {
+		m.opts.Session.Usage = m.opts.Tracker.Cumulative()
+	}
 	m.opts.Session.Model = m.opts.Model
 	m.opts.Session.Yolo = m.opts.Yolo
 	m.opts.Session.Effort = m.opts.Effort

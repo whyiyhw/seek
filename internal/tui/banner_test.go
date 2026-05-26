@@ -240,126 +240,19 @@ func TestFormatVersion_ShortRevisionDroppedNotPartial(t *testing.T) {
 	}
 }
 
-// --- Welcome padding ------------------------------------------------
+// --- Welcome wordmark line count -----------------------------------
 
-// TestWelcomePadding_ZeroOrNegativeHeightReturnsZero pins the safety
-// path: when term.GetSize fails (very rare) or returns an absurd
-// value, we must NOT print padding. Negative or zero `pad := h-used`
-// would have us either print 0 lines (fine) or, if the math drifted,
-// negative — which would panic the loop. Defensive.
-func TestWelcomePadding_ZeroOrNegativeHeightReturnsZero(t *testing.T) {
+// TestRenderPixelBanner_WordmarkLineCount pins the wordmark height to
+// 7 rows. Other code paths joined the wordmark with cwd/meta lines to
+// build the welcome header, and changes to the row count would visibly
+// shift the rest. Keeping this checked even after the alt-screen detour
+// dropped the layout-row-count math — the wordmark is still load-bearing
+// visual identity.
+func TestRenderPixelBanner_WordmarkLineCount(t *testing.T) {
 	t.Parallel()
-	for _, h := range []int{0, -1, -100} {
-		if got := welcomePadding(h); got != 0 {
-			t.Errorf("welcomePadding(%d) = %d, want 0", h, got)
-		}
-	}
-}
-
-// TestWelcomePadding_BelowMinimumReturnsZero locks "no padding on
-// small terminals". On a 15-row window the banner ALREADY fills the
-// screen; pushing the input further down would just make it scroll
-// off the bottom.
-func TestWelcomePadding_BelowMinimumReturnsZero(t *testing.T) {
-	t.Parallel()
-	// Exactly the minimum (banner + live region fills the screen) →
-	// no pad needed.
-	if got := welcomePadding(welcomeFixedLines + welcomeBelowLines); got != 0 {
-		t.Errorf("at minimum height: got %d, want 0", got)
-	}
-	// Smaller than minimum → still 0, never negative.
-	if got := welcomePadding(welcomeFixedLines + welcomeBelowLines - 5); got != 0 {
-		t.Errorf("below minimum: got %d, want 0", got)
-	}
-}
-
-func TestWelcomePadding_TypicalTerminalSensiblePad(t *testing.T) {
-	t.Parallel()
-	// 30-row terminal is the modal case (default iTerm/Terminal.app
-	// window). Want a clear, non-zero pad.
-	pad := welcomePadding(30)
-	if pad <= 0 {
-		t.Errorf("30-row pad = %d, want > 0", pad)
-	}
-	// Sanity: 30 = 14 fixed + 4 live + 12 pad. Should be 12.
-	if pad != 12 {
-		t.Errorf("30-row pad = %d, want 12 (30 - %d - %d)",
-			pad, welcomeFixedLines, welcomeBelowLines)
-	}
-}
-
-// TestWelcomePadding_TallTerminalFillsToBottom locks in the
-// "input always pins to the bottom" invariant on large viewports.
-// An earlier design capped this at welcomePadMax = 20 so a 60-row
-// terminal would leave 35 blank rows below the input — the cap is
-// gone now and tall terminals fill the gap.
-func TestWelcomePadding_TallTerminalFillsToBottom(t *testing.T) {
-	t.Parallel()
-	// 60-row fullscreen — the case where the old cap broke layout.
-	// Expect pad = 60 - 14 - 4 = 42, no clipping.
-	if got, want := welcomePadding(60), 42; got != want {
-		t.Errorf("60-row pad = %d, want %d (uncapped)", got, want)
-	}
-	// 1000-row pathological case — still uncapped, math is just
-	// height - used.
-	if got, want := welcomePadding(1000), 1000-welcomeFixedLines-welcomeBelowLines; got != want {
-		t.Errorf("1000-row pad = %d, want %d (uncapped)", got, want)
-	}
-}
-
-// TestWelcomeBannerLineCount pins the physical line count of the
-// welcome banner AND the pre-banner system output lines in
-// welcomeFixedLines. If the banner layout changes (more/fewer
-// wordmark rows, extra meta lines, dropped blank lines) this test
-// fails — the constant must be updated to keep status-bar pinning
-// correct.
-//
-// Layout from PrintPixelWelcomeBanner:
-//
-//	1 leading blank
-//	7 wordmark rows (RenderPixelBanner)
-//	1 blank after banner
-//	cwd line
-//	meta line (model · tier · YOLO · version)
-//	1 trailing blank
-//	= 12 banner lines
-//
-// Plus 2 pre-banner lines printed by cmd/seek (skills loader +
-// projectmd loader) = welcomeFixedLines (14).
-func TestWelcomeBannerLineCount(t *testing.T) {
-	t.Parallel()
-	// Count wordmark rows from RenderPixelBanner.
-	bannerWordmarkLines := strings.Count(RenderPixelBanner(), "\n") + 1
-	if bannerWordmarkLines != 7 {
-		t.Errorf("RenderPixelBanner() = %d line(s), want 7 — wordmark height changed", bannerWordmarkLines)
-	}
-
-	// Surrounding blank + meta lines in PrintPixelWelcomeBanner.
-	const surrounding = 5 // leading blank, post-banner blank, cwd, meta, trailing blank
-	bannerTotal := bannerWordmarkLines + surrounding
-	if bannerTotal != 12 {
-		t.Errorf("PrintPixelWelcomeBanner prints %d line(s), want 12 — banner layout changed", bannerTotal)
-	}
-
-	// Pre-banner lines from cmd/seek/main.go (skills loader + projectmd loader).
-	const preBanner = 2
-	want := bannerTotal + preBanner
-	if welcomeFixedLines != want {
-		t.Errorf("welcomeFixedLines = %d, want %d (banner %d + pre-banner %d) — update the constant",
-			welcomeFixedLines, want, bannerTotal, preBanner)
-	}
-}
-
-// --- Animation gate ------------------------------------------------
-
-// TestShouldAnimate_SkippedWhenEnvSet pins the SEEK_NO_ANIM kill-
-// switch. CI and scripted invocations rely on it; if the precedence
-// ever flips to "TTY check wins", every script-driven seek run gets
-// a 320ms penalty.
-func TestShouldAnimate_SkippedWhenEnvSet(t *testing.T) {
-	t.Setenv("SEEK_NO_ANIM", "1")
-	if shouldAnimate() {
-		t.Errorf("SEEK_NO_ANIM=1 should suppress animation")
+	got := strings.Count(RenderPixelBanner(), "\n") + 1
+	if got != 7 {
+		t.Errorf("RenderPixelBanner() = %d line(s), want 7 — wordmark height changed", got)
 	}
 }
 

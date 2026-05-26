@@ -8,20 +8,19 @@ import (
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Help overlay grabs keys when open — user can dismiss it.
+	// Help overlay: dismiss on any key. The overlay is purely
+	// informational and blocks the view until dismissed. Esc and q
+	// are the advertised dismiss keys; any other key also dismisses
+	// so the user doesn't feel stuck.
 	if m.helpOverlayOpen {
-		switch msg.Type {
-		case tea.KeyCtrlC:
+		m.helpOverlayOpen = false
+		m.helpContent = ""
+		// Ctrl+C must quit even with the overlay open — the help
+		// text itself advertises "Ctrl+C → Quit seek", and swallowing
+		// it would make the user press Ctrl+C twice.
+		if msg.Type == tea.KeyCtrlC {
+			(&m).persistSession()
 			return m, tea.Quit
-		case tea.KeyEsc, tea.KeyEnter:
-			m.helpOverlayOpen = false
-			return m, nil
-		case tea.KeyRunes:
-			// Use case-insensitive check for "q" close.
-			if len(msg.Runes) == 1 && (msg.Runes[0] == 'q' || msg.Runes[0] == 'Q') {
-				m.helpOverlayOpen = false
-				return m, nil
-			}
 		}
 		return m, nil
 	}
@@ -107,20 +106,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyEnter:
-			// Menu open with candidates: Enter accepts the highlighted
-			// command, same as Tab — avoids the surprise where typing
-			// "/h" + Enter submits the literal string "/h" instead of
-			// the /help command the menu was clearly suggesting. With
-			// zero candidates (user typed "/xxxxx"), fall through so
-			// they can still queue / submit the literal text.
+			// Menu open with candidates: Enter dispatches the highlighted
+			// command immediately — typing "/h" + Enter fires /help. This
+			// matches user expectation: pressing Enter while a candidate
+			// is visibly selected is "submit this thing", not "stage it
+			// for editing". Tab still does accept-and-add-space when the
+			// user actually wants to edit args (e.g. "/model gpt-4").
+			// Zero candidates (user typed "/xxxxx") → fall through so the
+			// literal text can be queued/submitted.
 			if len(m.commandMenuFiltered) > 0 {
 				name := m.commandMenuFiltered[m.commandMenuSelected].names[0]
-				m.input.SetValue(name + " ")
 				m.commandMenuOpen = false
 				m.commandMenuFiltered = nil
 				m.commandMenuSelected = 0
-				// Same handoff as the Tab branch above — see comment there.
-				m.updateCommandMenu()
+				m.input.Reset()
+				if handled, cmd := dispatchCommand(&m, name); handled {
+					return m, cmd
+				}
 				return m, nil
 			}
 		case tea.KeyUp:
@@ -134,11 +136,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyEsc:
-			// Menu open & not streaming: Esc closes the menu without
-			// affecting input contents.
+			// Menu open & not streaming: Esc = "cancel this slash
+			// command entirely" — clears the partial `/foo` text along
+			// with the menu. Previous behaviour kept the input contents
+			// (the assumption being "user might want to keep typing a
+			// literal /path/..."), but in practice users hit Esc to
+			// abort the command intent, not to repurpose the leading `/`
+			// as plain text; the leftover `/` then looked like residue
+			// after submission.
 			m.commandMenuOpen = false
 			m.commandMenuFiltered = nil
 			m.commandMenuSelected = 0
+			m.input.Reset()
 			return m, nil
 		}
 		// Other keys fall through to the normal switch (Enter still
@@ -211,8 +220,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Inline mode: PgUp/PgDn/Home/End and the mouse wheel all go to
+	// the terminal's native scrollback. We no longer intercept them.
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
+		(&m).persistSession()
 		return m, tea.Quit
 
 	case tea.KeyEsc:
@@ -222,7 +235,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.reviewBranchEntry {
 			m.reviewBranchEntry = false
 			m.input.Reset()
-			return m, tea.Println(styleMuted.Render("  review: cancelled"))
+			return m, (&m).appendHistory(styleMuted.Render("  review: cancelled"))
 		}
 		// Esc only does something when there's an active stream — at
 		// rest we leave it alone so the textarea / future overlays can
@@ -258,17 +271,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Comes BEFORE setupKeyEntry — both set a flag and use the
 		// textarea, and review is stateless so there's no ambiguity.
 		if m.reviewBranchEntry {
+			// Resolve folded paste before reading the textarea value.
+			if m.pastedContent != "" {
+				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
+				val := m.input.Value()
+				if strings.Contains(val, marker) {
+					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
+				}
+				m.pastedContent = ""
+				m.pastedLineCount = 0
+			}
 			branch := strings.TrimSpace(m.input.Value())
 			m.reviewBranchEntry = false
 			m.input.Reset()
 			if branch == "" {
-				return m, tea.Println(styleErr.Render("review: no branch name entered"))
+				return m, (&m).appendHistory(styleErr.Render("review: no branch name entered"))
 			}
 			// Re-dispatch through dispatchCommand so the existing
 			// arg-handling path (/review <branch>) is reused.
 			handled, cmd := dispatchCommand(&m, "/review "+branch)
 			if !handled {
-				return m, tea.Println(styleErr.Render("review: invalid branch name"))
+				return m, (&m).appendHistory(styleErr.Render("review: invalid branch name"))
 			}
 			return m, cmd
 		}
@@ -277,6 +300,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// /setup can't be opened while streaming (slash menu is
 		// closed during streams), so there's no ambiguity.
 		if m.setupKeyEntry {
+			// Resolve folded paste before reading the textarea value.
+			if m.pastedContent != "" {
+				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
+				val := m.input.Value()
+				if strings.Contains(val, marker) {
+					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
+				}
+				m.pastedContent = ""
+				m.pastedLineCount = 0
+			}
 			key := strings.TrimSpace(m.input.Value())
 			m.input.Reset()
 			cmd := m.finishSetup(key)
@@ -314,8 +347,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					if wasSteer {
 						label = "↰ withdrew pending steer"
 					}
-					m.scrollbackLines++
-					return m, tea.Println(styleMuted.Render("  " + label))
+					return m, (&m).appendHistory(styleMuted.Render("  " + label))
 				}
 				return m, nil
 			}
@@ -373,11 +405,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.submit(text)
 
 	case tea.KeyCtrlL:
-		// "clear" no longer maps to a viewport reset — in inline mode
-		// the terminal owns the scrollback. We print a clear-screen
-		// escape via tea.ClearScreen, then redraw. Same scrollbackLines
-		// reset as cmdClear — keep both paths in sync.
-		m.scrollbackLines = 0
+		// Ctrl+L mirrors /clear: blank the visible terminal; scrollback
+		// above is the terminal's, untouched. No banner re-print, no
+		// state reset — same semantics as the shell's `clear`.
 		return m, tea.ClearScreen
 
 	case tea.KeyCtrlR:
@@ -386,8 +416,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyShiftTab:
 		m.cycleMode()
-		m.scrollbackLines++
-		return m, tea.Println(styleMuted.Render("  " + m.modeLabel()))
+		return m, (&m).appendHistory(styleMuted.Render("  " + m.modeLabel()))
 
 	case tea.KeyUp:
 		// History recall — only when the textarea is empty (so it
@@ -402,6 +431,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+	}
+
+	// ? hotkey: open the help overlay when the textarea is empty.
+	// Matches the documented "/help, /? or ?" key binding in the
+	// help overlay. Intercepted before the textarea sees it so a
+	// bare '?' opens help rather than typing a literal '?' into the
+	// input. When the textarea already has content (e.g. typing a
+	// prompt or the slash menu is open) the key passes through to
+	// let the textarea handle it normally.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
+		if m.input.Value() == "" {
+			cmdHelp(&m, "")
+			return m, nil
+		}
 	}
 
 	// Everything else: feed the textarea. The completion affordances (/
@@ -437,28 +480,42 @@ func (m *Model) cycleMode() {
 		// Yolo → Ask: turn off yolo, stay in Ask
 		m.opts.Yolo = false
 		m.opts.Plan = false
+		m.opts.PlanSubstate = ""
 		if m.opts.SetYolo != nil {
 			m.opts.SetYolo(false)
 		}
 		if m.opts.SetPlan != nil {
 			m.opts.SetPlan(false)
 		}
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("")
+		}
 	case m.opts.Plan:
-		// Plan → Yolo: turn off plan, turn on yolo
+		// Plan → Yolo: turn off plan, turn on yolo. Clear the substate
+		// so it doesn't leak into Yolo or the next Ask→Plan entry.
 		m.opts.Plan = false
 		m.opts.Yolo = true
+		m.opts.PlanSubstate = ""
 		if m.opts.SetPlan != nil {
 			m.opts.SetPlan(false)
 		}
 		if m.opts.SetYolo != nil {
 			m.opts.SetYolo(true)
 		}
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("")
+		}
 	default:
-		// Ask → Plan: turn on plan
+		// Ask → Plan: turn on plan and start in the analyze substate,
+		// matching cmdPlan's contract (PRD §2.1).
 		m.opts.Plan = true
 		m.opts.Yolo = false
+		m.opts.PlanSubstate = "analyze"
 		if m.opts.SetPlan != nil {
 			m.opts.SetPlan(true)
+		}
+		if m.opts.SetPlanSubstate != nil {
+			m.opts.SetPlanSubstate("analyze")
 		}
 	}
 	m.refreshPlaceholder()

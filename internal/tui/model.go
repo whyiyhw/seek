@@ -42,13 +42,36 @@ import (
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
+
 	"golang.org/x/term"
 )
+
+// AgentClient is the subset of *agent.Agent that the TUI actually
+// calls. Defined here (consumer-side interface, Go convention) so
+// tests can substitute a fakeAgent without spinning up the real HTTP
+// client + event loop. *agent.Agent implements this structurally —
+// production callers in cmd/seek pass `*agent.Agent` as before with
+// zero changes.
+//
+// Keep this interface minimal — every method added here is one more
+// hop the fake has to implement. Only add a method when production
+// code in this package calls it; methods like SetModeLabel that are
+// called from cmd/seek belong on the concrete *agent.Agent, not here.
+type AgentClient interface {
+	Prompt(ctx context.Context, text string) <-chan agent.Event
+	Messages() []deepseek.Message
+	Reset(history []deepseek.Message)
+	Summarise(ctx context.Context) (string, deepseek.Usage, error)
+	SetModel(string)
+	SetEffort(string)
+	SetLang(string)
+}
 
 // Options bundles everything cmd/seek hands the TUI. Hooks let in-app
 // slash commands (/reset, /model, /yolo) update host-owned state.
 type Options struct {
-	Agent   *agent.Agent
+	Agent   AgentClient
 	Tracker *cache.Tracker
 	Model   string
 	Yolo    bool
@@ -153,21 +176,27 @@ type Options struct {
 // calls don't look like the program froze.
 //
 // When ToolExecEnd fires, the tool is NOT removed immediately — instead
-// completionTokens is set and a cleanupToolMsg is queued, giving View()
-// one frame to show the final token count on the live line.
+// completionTokens, completed, and finished are populated at
+// ToolExecEnd; before then they're zero. The slot is NOT removed
+// from activeTools at that point — it stays visible (rendered with
+// a ✓ marker and locked-in duration) until handleStreamEnd clears
+// the whole list at turn end.
+//
+// Why keep finished slots around: removing them per-tool causes the
+// live region to lose 1 row each time a tool ends, then gain it back
+// when the next tool starts — the input visibly twitches up and down
+// throughout a multi-tool turn. Holding the slot until stream end
+// makes the active-tool area monotonically non-decreasing within a
+// turn (and collapses once, at the end), which is what users actually
+// want to see.
 type activeTool struct {
 	callID           string
 	name             string
 	args             string
 	started          time.Time
-	completionTokens int // set at ToolExecEnd; 0 before that
-}
-
-// cleanupToolMsg is sent after ToolExecEnd to remove a finished tool
-// from activeTools on the next frame, so View() renders one frame with
-// the final token count visible.
-type cleanupToolMsg struct {
-	callID string
+	completed        time.Time // zero = still running; set at ToolExecEnd
+	completionTokens int       // set at ToolExecEnd; 0 before that
+	finished         bool      // ToolExecEnd has fired for this slot
 }
 
 type Model struct {
@@ -240,11 +269,6 @@ type Model struct {
 
 	turns     int
 	toolCalls int
-	// scrollbackLines tracks the total number of lines printed above the
-	// live region via tea.Println (including the welcome banner). Used by
-	// View() to calculate remaining terminal height for pinning the
-	// status bar to the bottom of the window.
-	scrollbackLines int
 
 	width, height int
 	ready         bool
@@ -252,9 +276,11 @@ type Model struct {
 
 	showReasoning bool
 
-	// helpOverlayOpen is set by /help or the ? key. When true, View
-	// renders a floating overlay panel with all commands and keybindings.
-	helpOverlayOpen bool
+	// bannerFrame drives the welcome-banner letter-reveal animation.
+	// 0 = blank, 1 = S, 2 = SE, 3 = SEE, 4 = SEEK (full). Advanced
+	// by bannerTickMsg; stops at 4. View() renders the animated
+	// wordmark when turns == 0, regardless of frame.
+	bannerFrame int
 
 	// Slash-command menu state. Open when the input starts with "/" and
 	// contains no space yet; refreshed in handleKey's default branch
@@ -363,36 +389,19 @@ type Model struct {
 	// probe was skipped. Surfaced in the status bar as a "↑ <tag>"
 	// segment so the user can see they're behind without a popup.
 	upgradeAvailable string
-}
 
-// isWelcomeScreen returns true when the live region is "idle" —
-// no streaming content, no active tools, no pending approval, no
-// command menu or path picker showing. In this state we add vertical
-// padding to push the input area to the bottom of the terminal.
-func (m Model) isWelcomeScreen() bool {
-	if m.streaming {
-		return false
-	}
-	if len(m.activeTools) > 0 {
-		return false
-	}
-	if m.pendingApproval != nil {
-		return false
-	}
-	if m.pendingQuestion != nil {
-		return false
-	}
-	if m.distillReviewOpen {
-		return false
-	}
-	if m.commandMenuOpen || m.pathPicker.open {
-		return false
-	}
-	return true
+	// helpOverlayOpen means the user has invoked /help and we are showing
+	// a dismissable help overlay in the live region (instead of committing
+	// the help text to scrollback where it would mix with conversation).
+	// helpContent holds the formatted content to display. Dismissed on
+	// Esc or q; cleared on the next keypress when the overlay is open.
+	helpOverlayOpen bool
+	helpContent     string
 }
 
 // New constructs the initial Model. The caller should pass it to
-// tea.NewProgram WITHOUT tea.WithAltScreen() (see PRD §4.9).
+// tea.NewProgram without tea.WithAltScreen() — inline mode is the
+// load-bearing architectural decision; see Run() for the rationale.
 func New(opts Options) Model {
 	ta := textarea.New()
 	// Initial placeholder is filled in by refreshPlaceholder() below
@@ -417,6 +426,35 @@ func New(opts Options) Model {
 		spinner:    sp,
 		now:        time.Now(),
 		historyIdx: -1,
+	}
+	// In the resume case (--resume / --continue), the loaded session
+	// carries turn and tool-call counts from the prior run. Propagate
+	// them to the Model so the post-/clear welcome header knows there's
+	// history (m.turns > 0) and re-renders the pixel banner. Without
+	// this, m.turns stays 0 even for a session with dozens of prior
+	// turns, and the post-/clear branch skips the header.
+	//
+	// NOTE: we reconstruct turns/toolCalls from the message list rather
+	// than trusting the saved Session.Turns/ToolCalls. A pre-existing
+	// bug (fixed concurrently) could save corrupted counts after a
+	// resume-then-one-turn cycle — the messages are always the ground
+	// truth, the counters are a derived cache.
+	if opts.Session != nil {
+		t := 0
+		tc := 0
+		for _, msg := range opts.Session.Messages {
+			if msg.Role == deepseek.RoleAssistant {
+				t++
+				// Only assistant turns can legitimately carry tool_calls
+				// (DeepSeek API contract). Counting other roles' synthetic
+				// ToolCalls slices would inflate the status bar's tool
+				// counter for any malformed session — defensive filter
+				// against corrupt input on --resume.
+				tc += len(msg.ToolCalls)
+			}
+		}
+		m.turns = t
+		m.toolCalls = tc
 	}
 	// Warm-up: scan workspace once for @-completer paths. Cost is
 	// O(files), capped by pathScanLimit, runs synchronously here so
@@ -450,6 +488,18 @@ func (m Model) Init() tea.Cmd {
 	if c := versionCheckCmd("whyiyhw", "seek", VersionString()); c != nil {
 		cmds = append(cmds, c)
 	}
+	// Start the welcome-banner letter-reveal animation on a fresh
+	// session. The first tick fires synchronously (delay=0) so
+	// frame 0 renders immediately; subsequent ticks advance one
+	// letter at a time until all four letters are revealed.
+	if m.turns == 0 {
+		cmds = append(cmds, tickBannerEvery(0))
+	}
+	// Resume replay happens BEFORE tea.NewProgram in Run() — see
+	// renderReplayHistory + the Run() call site. Doing it from inside
+	// Update via tea.Println triggers one redraw per message and floods
+	// the screen at startup for long sessions; the pre-tea stdout
+	// write lands the whole history in scrollback as one batch.
 	return tea.Batch(cmds...)
 }
 
@@ -496,6 +546,10 @@ func tickStatusEvery(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(time.Time) tea.Msg { return statusTickMsg{} })
 }
 
+func tickBannerEvery(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg { return bannerTickMsg{} })
+}
+
 // waitForAgentEvent reads one event from the agent's channel and emits
 // an agentEventMsg. When the channel closes it emits streamEndMsg.
 func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
@@ -508,13 +562,61 @@ func waitForAgentEvent(ch <-chan agent.Event) tea.Cmd {
 	}
 }
 
-// scrollbackLineCount returns the number of terminal lines s occupies
-// (used to track scrollback position for status-bar pinning).
-func scrollbackLineCount(s string) int {
-	if s == "" {
-		return 0
+// appendHistory commits an already-styled string to the terminal's
+// native scrollback via tea.Println. Under inline mode, this is the
+// entire mechanism: there is no in-app buffer; bubbletea flushes the
+// Println immediately above the live region, and the line stays in
+// the terminal's scrollback for the rest of the session (and after
+// exit). Wheel scroll, PgUp/PgDn, and click-drag selection over the
+// committed line are all the terminal's, not the app's.
+//
+// Trailing newlines are stripped because tea.Println adds its own
+// terminating newline; leaving them in would produce a stray blank
+// row above the live region after each commit.
+//
+// DO NOT reintroduce an in-app buffer (the old historyBuf + viewport
+// shape). The previous attempt to mirror committed content inside the
+// app was load-bearing under alt-screen, but under inline mode it's
+// redundant with terminal scrollback AND it dragged in the manual
+// scrollbackLines / floor-pin padding that caused the M3-era drift
+// bugs documented in docs/pitfalls.md.
+//
+// Callers should `cmds = append(cmds, m.appendHistory(line))` to
+// wire the returned cmd into their tea.Cmd batch. A nil result (empty
+// input) is safe to append.
+func (m *Model) appendHistory(line string) tea.Cmd {
+	line = strings.TrimRight(line, "\n")
+	if line == "" {
+		return nil
 	}
-	return strings.Count(s, "\n") + 1
+	return tea.Println(line)
+}
+
+// resetSessionCounters wipes the per-session counter state and streaming
+// live buffers shared by every "new session bucket" entry point:
+// cmdNew (/clear), handleCompactDone (/compact), and cmdBranch (/branch).
+// All three reset the same fields verbatim before this helper existed —
+// adding a new field that needs resetting required touching three call
+// sites and forgetting one was the bug pattern (#8 in the v0.3.x review).
+//
+// bannerFrame is set to "fully revealed" rather than 0 so the wordmark
+// doesn't replay its letter-by-letter animation on every /clear; the
+// reveal is reserved for first-startup. View()'s banner gate
+// (`turns == 0 && len(promptHistory) == 0`) decides whether the banner
+// is rendered at all — for compact/branch it is not, because
+// promptHistory survives those operations.
+//
+// NOT included here: pendingSkill, promptHistory/historyIdx/savedDraft,
+// opts.PlanSubstate. Those are conversation-scoped — only cmdNew (a
+// genuinely fresh conversation) should reset them. Compact/branch are
+// continuations of the same conversation and must keep them.
+func (m *Model) resetSessionCounters() {
+	m.turns = 0
+	m.toolCalls = 0
+	m.bannerFrame = len(letterEndCols)
+	m.curContent = ""
+	m.curReasoning = ""
+	m.activeTools = nil
 }
 
 // consumeArm wraps text with a "Please use the <name> skill" preamble

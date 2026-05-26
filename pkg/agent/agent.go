@@ -88,6 +88,7 @@ type Config struct {
 // Agent holds the persistent state for one conversation. It is NOT safe for
 // concurrent calls to Prompt; one Prompt at a time per Agent.
 type Agent struct {
+	mu       sync.RWMutex
 	cfg      Config
 	messages []deepseek.Message
 
@@ -242,8 +243,19 @@ func New(cfg Config) (*Agent, error) {
 	return a, nil
 }
 
+// appendMessage appends one or more messages to the agent's history under a
+// write lock. Safe to call from the Prompt goroutine while Messages() is being
+// read by the TUI goroutine.
+func (a *Agent) appendMessage(msgs ...deepseek.Message) {
+	a.mu.Lock()
+	a.messages = append(a.messages, msgs...)
+	a.mu.Unlock()
+}
+
 // Messages returns a copy of the current conversation history.
 func (a *Agent) Messages() []deepseek.Message {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	out := make([]deepseek.Message, len(a.messages))
 	copy(out, a.messages)
 	return out
@@ -257,6 +269,8 @@ func (a *Agent) Messages() []deepseek.Message {
 // Used by /compact to swap a long history for a short summary, and
 // any future "rewind" UI. NOT safe to call while a Prompt is in flight.
 func (a *Agent) Reset(history []deepseek.Message) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.messages = a.messages[:0]
 	if a.cfg.SystemPrompt != "" {
 		a.messages = append(a.messages, deepseek.Message{
@@ -393,10 +407,10 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			return
 		}
 		for _, m := range prePrompt.Prepend {
-			a.messages = append(a.messages, m)
+			a.appendMessage(m)
 		}
 		userContent := prePrompt.UserText + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel) + workflowReminder
-		a.messages = append(a.messages, deepseek.Message{
+		a.appendMessage(deepseek.Message{
 			Role:    deepseek.RoleUser,
 			Content: userContent,
 		})
@@ -504,7 +518,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 				return
 			}
 
-			a.messages = append(a.messages, assistant)
+			a.appendMessage(assistant)
 			out <- MessageEnd{Message: assistant}
 
 			// Surface a visible notice when the completion was cut by
@@ -526,7 +540,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 					Finish:    finish,
 				})
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
-					a.messages = append(a.messages, deepseek.Message{
+					a.appendMessage(deepseek.Message{
 						Role:    deepseek.RoleUser,
 						Content: "continue" + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel),
 					})
@@ -556,7 +570,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 				wg.Wait()
 				for _, msg := range toolMsgs {
 					out <- MessageStart{Message: msg}
-					a.messages = append(a.messages, msg)
+					a.appendMessage(msg)
 					out <- MessageEnd{Message: msg}
 				}
 			} else {
@@ -564,7 +578,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 					result, terr := a.dispatchTool(ctx, tc, out)
 					toolMsg := buildToolResultMsg(tc.ID, result, terr)
 					out <- MessageStart{Message: toolMsg}
-					a.messages = append(a.messages, toolMsg)
+					a.appendMessage(toolMsg)
 					out <- MessageEnd{Message: toolMsg}
 				}
 			}

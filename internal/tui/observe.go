@@ -25,18 +25,13 @@ func waitForObserveResult(ch <-chan memory.ObserveResult) tea.Cmd {
 }
 
 // handleObserveDone processes one async observe filter result.
-// On success (OK=true): prints a scrollback notification.
-// On failure (OK=false): prints an error notification.
+// On success (OK=true): commits a notification to history.
+// On failure (OK=false): commits an error notification.
 // Rejects and timeouts are silent (no message sent to channel).
 func (m *Model) handleObserveDone(msg observeDoneMsg) []tea.Cmd {
 	if msg.OK {
-		line := styleMuted.Render(fmt.Sprintf("  \u00b7 saved to M: %s (auto-sourced)", msg.Tagline))
-		m.scrollbackLines += scrollbackLineCount(line)
-		return []tea.Cmd{tea.Println(line)}
+		return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf("  · saved to M: %s (auto-sourced)", msg.Tagline)))}
 	}
-
 	// Failure or rejected confirmed-entry.
-	line := styleErr.Render(fmt.Sprintf("  \u0021 observe: %s", msg.Err))
-	m.scrollbackLines += scrollbackLineCount(line)
-	return []tea.Cmd{tea.Println(line)}
+	return []tea.Cmd{m.appendHistory(styleErr.Render(fmt.Sprintf("  ! observe: %s", msg.Err)))}
 }

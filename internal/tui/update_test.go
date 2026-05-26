@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/skill"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,7 +37,6 @@ func streamingModel(t *testing.T, input string) Model {
 func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
 	t.Parallel()
 	m := emptyModel()
-	beforeLines := m.scrollbackLines
 
 	// Simulate the stream: reasoning deltas arrive, content stays empty,
 	// then MessageEnd fires for the assistant turn (with tool_calls on
@@ -51,9 +51,6 @@ func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
 	if len(cmds) != 0 {
 		t.Errorf("expected no tea.Cmds (no scrollback commit), got %d", len(cmds))
 	}
-	if m.scrollbackLines != beforeLines {
-		t.Errorf("scrollbackLines changed: was %d, now %d", beforeLines, m.scrollbackLines)
-	}
 	if m.curContent != "" || m.curReasoning != "" {
 		t.Errorf("live buffers not reset: content=%q reasoning=%q",
 			m.curContent, m.curReasoning)
@@ -67,7 +64,6 @@ func TestApplyAgentEvent_PureToolCallTurnSkipsCommit(t *testing.T) {
 func TestApplyAgentEvent_TextTurnCommits(t *testing.T) {
 	t.Parallel()
 	m := emptyModel()
-	beforeLines := m.scrollbackLines
 
 	m.applyAgentEvent(agent.MessageDelta{Delta: "here is the answer", Reasoning: false})
 	cmds := m.applyAgentEvent(agent.MessageEnd{
@@ -75,11 +71,7 @@ func TestApplyAgentEvent_TextTurnCommits(t *testing.T) {
 	})
 
 	if len(cmds) != 1 {
-		t.Fatalf("expected exactly 1 tea.Cmd (the scrollback Println), got %d", len(cmds))
-	}
-	if m.scrollbackLines <= beforeLines {
-		t.Errorf("scrollbackLines should advance after commit: was %d, now %d",
-			beforeLines, m.scrollbackLines)
+		t.Fatalf("expected exactly 1 tea.Cmd (the appendHistory Println), got %d", len(cmds))
 	}
 	if m.curContent != "" || m.curReasoning != "" {
 		t.Errorf("live buffers not reset: content=%q reasoning=%q",
@@ -97,7 +89,6 @@ func TestApplyAgentEvent_ToolMessageEndIgnored(t *testing.T) {
 	m := emptyModel()
 	m.curContent = "stale"
 	m.curReasoning = "stale"
-	beforeLines := m.scrollbackLines
 
 	cmds := m.applyAgentEvent(agent.MessageEnd{
 		Message: deepseek.Message{Role: deepseek.RoleTool, ToolCallID: "x"},
@@ -105,9 +96,6 @@ func TestApplyAgentEvent_ToolMessageEndIgnored(t *testing.T) {
 
 	if len(cmds) != 0 {
 		t.Errorf("tool MessageEnd should not emit cmds, got %d", len(cmds))
-	}
-	if m.scrollbackLines != beforeLines {
-		t.Errorf("scrollbackLines moved on tool MessageEnd")
 	}
 	if m.curContent != "stale" || m.curReasoning != "stale" {
 		t.Errorf("tool MessageEnd must not touch the assistant live buffers; got content=%q reasoning=%q",
@@ -277,31 +265,35 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 	}
 }
 
-// TestHandleKey_CtrlL_ResetsScrollbackLines is the keyboard-path mirror
-// of TestClear_ResetsScrollbackLines. Ctrl+L bypasses cmdClear and goes
-// directly to tea.ClearScreen in update_key.go, so this is a separate
-// path that must independently keep the layout counter truthful.
-func TestHandleKey_CtrlL_ResetsScrollbackLines(t *testing.T) {
+// TestHandleKey_CtrlL_RequestsClearScreen pins the only "visible blank
+// without state reset" escape hatch left after /clear and /new were
+// unified into a full-reset handler. Ctrl+L returns tea.ClearScreen
+// directly — no session save, no agent rebuild, no counter reset —
+// which preserves the rare "I just want to wipe my screen" use case
+// (matching shell `clear` semantics) without bloating /clear's contract.
+func TestHandleKey_CtrlL_RequestsClearScreen(t *testing.T) {
 	t.Parallel()
 	m := *emptyModel()
-	m.scrollbackLines = 47
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
-	m2 := out.(Model)
-
-	if m2.scrollbackLines != 0 {
-		t.Errorf("scrollbackLines after Ctrl+L: got %d, want 0", m2.scrollbackLines)
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	if cmd == nil {
+		t.Fatal("Ctrl+L must return a tea.Cmd (tea.ClearScreen)")
+	}
+	if got := cmd(); got != tea.ClearScreen() {
+		t.Errorf("Ctrl+L must return tea.ClearScreen, got %T(%v)", got, got)
 	}
 }
 
-func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
+func TestHandleKey_CommandMenuOpen_EnterDispatchesCandidate(t *testing.T) {
 	t.Parallel()
-	// When the slash-command menu is open and has candidates, Enter
-	// should fill in the highlighted command (same as Tab) — NOT
-	// submit the partial literal text and queue/dispatch on that.
+	// When the slash-command menu is open with candidates, Enter
+	// dispatches the highlighted candidate directly (no intermediate
+	// "accept and add trailing space" step). This is the user-expected
+	// behaviour: a visibly-selected /help entry should run on Enter,
+	// not stage "/help " for a second Enter. Tab keeps the accept-only
+	// flow for when the user wants to type args.
 	m := Model{input: textarea.New()}
 	m.input.SetValue("/h")
-	// Force the menu state directly rather than driving it via key events.
 	cmds := filterCommands(allCommands(), "/h")
 	if len(cmds) == 0 {
 		t.Fatalf("setup: filterCommands returned 0 candidates for '/h'")
@@ -316,9 +308,62 @@ func TestHandleKey_CommandMenuOpen_EnterAcceptsCandidate(t *testing.T) {
 	if m2.commandMenuOpen {
 		t.Error("Enter on candidate should close the menu")
 	}
+	if got := m2.input.Value(); got != "" {
+		t.Errorf("textarea should be reset after dispatch, got %q", got)
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabKeepsAcceptBehavior(t *testing.T) {
+	t.Parallel()
+	// Tab still does the "accept + trailing space" flow so the user
+	// can edit args on commands like /model. Locks in that the Enter
+	// behaviour change didn't accidentally touch Tab.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/h")
+	cmds := filterCommands(allCommands(), "/h")
+	if len(cmds) == 0 {
+		t.Fatalf("setup: filterCommands returned 0 candidates for '/h'")
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if m2.commandMenuOpen {
+		t.Error("Tab on candidate should close the menu")
+	}
 	want := cmds[0].names[0] + " "
 	if got := m2.input.Value(); got != want {
-		t.Errorf("textarea should be filled with the candidate, got %q want %q", got, want)
+		t.Errorf("Tab should stage the candidate for editing, got %q want %q", got, want)
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_EscClearsInput(t *testing.T) {
+	t.Parallel()
+	// Esc on an open slash menu = "cancel this command entirely" —
+	// must clear the partial `/foo` text along with the menu. Earlier
+	// behaviour kept the input, which looked like submission residue
+	// from the user's point of view.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/he")
+	cmds := filterCommands(allCommands(), "/he")
+	if len(cmds) == 0 {
+		t.Fatalf("setup: filterCommands returned 0 candidates for '/he'")
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := out.(Model)
+
+	if m2.commandMenuOpen {
+		t.Error("Esc should close the menu")
+	}
+	if got := m2.input.Value(); got != "" {
+		t.Errorf("Esc should clear the input, got %q", got)
 	}
 }
 
@@ -326,10 +371,9 @@ func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
 	t.Parallel()
 	// User flow: type "/model" → slash menu opens with /model highlighted →
 	// press Enter. The expected result is that the model picker opens
-	// immediately (not on the NEXT keystroke). Before the handoff fix,
-	// accepting a slash-menu candidate set the textarea to "/model "
-	// but didn't trigger updateCommandMenu, leaving the screen empty
-	// until something else moved the input.
+	// immediately (not on the NEXT keystroke). With Enter-dispatches
+	// behaviour, /model is dispatched directly: cmdModel opens its
+	// picker, the textarea resets, and pickerPurpose is set.
 	m := emptyModel()
 	m.opts.Model = "deepseek-chat"
 	m.input.SetValue("/model")
@@ -342,16 +386,16 @@ func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
-		t.Error("slash menu should be closed after accept")
+		t.Error("slash menu should be closed after dispatch")
 	}
 	if !m2.modelPickerOpen {
-		t.Error("model picker should auto-open right after /model is accepted")
+		t.Error("model picker should auto-open right after /model is dispatched")
 	}
 	if m2.pickerPurpose != "model" {
 		t.Errorf("pickerPurpose = %q, want 'model'", m2.pickerPurpose)
 	}
-	if got := m2.input.Value(); got != "/model " {
-		t.Errorf("textarea after accept = %q, want '/model '", got)
+	if got := m2.input.Value(); got != "" {
+		t.Errorf("textarea should be reset after dispatch, got %q", got)
 	}
 }
 
@@ -1049,21 +1093,28 @@ func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
 
 func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
 	t.Parallel()
-	// Regression: while streaming, typing "/help" and pressing Enter
-	// must open the help overlay immediately — NOT stash "/help" into
-	// queuedText and dispatch it as a user message to the model when
-	// the turn ends. Slash commands are TUI-side, not LLM-bound.
-	m := streamingModel(t, "/help")
+	// Regression: while streaming, typing "/help all" and pressing Enter
+	// must fire the slash command immediately — NOT stash "/help all"
+	// into queuedText and dispatch it as a user message when the turn
+	// ends. Slash commands are TUI-side, not LLM-bound. We use "all"
+	// to get the overlay directly (bare /help now opens a topic picker).
+	m := streamingModel(t, "/help all")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.queuedText != "" {
 		t.Errorf("/help during stream must not queue, got queuedText=%q", m2.queuedText)
 	}
 	if !m2.helpOverlayOpen {
-		t.Error("/help during stream should open the help overlay immediately")
+		t.Error("/help during stream should set helpOverlayOpen, got false")
 	}
+	if m2.helpContent == "" {
+		t.Error("/help during stream should set non-empty helpContent")
+	}
+	// cmd is nil because /help no longer commits text to scrollback
+	// (it shows a dismissable overlay instead). Nil cmd is correct.
+	_ = cmd
 }
 
 func TestRenderQueueHint_States(t *testing.T) {
@@ -1928,5 +1979,64 @@ func TestApplyAgentEvent_PlanProposalApproved_NilHostCallbackSafe(t *testing.T) 
 	}
 	if len(cmds) == 0 {
 		t.Error("expected scrollback feedback regardless of callback wiring")
+	}
+}
+
+// TestBannerTick_AdvancesFrame verifies that bannerTickMsg correctly
+// advances bannerFrame from 0 to len(letterEndCols) and stops.
+func TestBannerTick_AdvancesFrame(t *testing.T) {
+	t.Parallel()
+	m := Model{bannerFrame: 0}
+
+	prev := -1
+	for i := 0; i < len(letterEndCols)+3; i++ {
+		out, cmds := m.Update(bannerTickMsg{})
+		m2 := out.(Model)
+
+		if m2.bannerFrame < prev {
+			t.Fatalf("bannerFrame decreased: %d → %d", prev, m2.bannerFrame)
+		}
+		if m2.bannerFrame > len(letterEndCols) {
+			t.Fatalf("bannerFrame exceeded max: %d > %d", m2.bannerFrame, len(letterEndCols))
+		}
+		prev = m2.bannerFrame
+
+		if m2.bannerFrame >= len(letterEndCols) {
+			if cmds != nil {
+				t.Errorf("frame %d produced non-nil cmd, want nil (animation done)", m2.bannerFrame)
+			}
+		}
+
+		m = m2
+	}
+
+	if m.bannerFrame != len(letterEndCols) {
+		t.Errorf("final bannerFrame = %d, want %d", m.bannerFrame, len(letterEndCols))
+	}
+}
+
+// TestBannerTick_InitNotTriggeredOnResume verifies that Init() does NOT
+// start the banner animation when turns > 0 (resumed session).
+func TestBannerTick_InitNotTriggeredOnResume(t *testing.T) {
+	t.Parallel()
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.turns = 5
+
+	if m.bannerFrame != 0 {
+		t.Errorf("resumed session bannerFrame = %d, want 0", m.bannerFrame)
+	}
+	_ = m.Init()
+}
+
+// TestBannerTick_InitStartsOnFreshSession verifies that Init() returns
+// cmds on a fresh session (turns == 0), including the animation tick.
+func TestBannerTick_InitStartsOnFreshSession(t *testing.T) {
+	t.Parallel()
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.turns = 0
+
+	cmds := m.Init()
+	if cmds == nil {
+		t.Fatal("Init() returned nil cmds on fresh session")
 	}
 }

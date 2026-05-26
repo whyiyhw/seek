@@ -41,6 +41,11 @@ type promptSubmittedMsg struct{ Text string }
 // off-peak boundary is a minute granularity.
 type statusTickMsg struct{}
 
+// bannerTickMsg advances the welcome-banner letter-reveal animation by
+// one frame (0→1→2→3→4). Each tick fires ~150ms after the previous one;
+// frame 4 triggers one final render and stops.
+type bannerTickMsg struct{}
+
 // compactDoneMsg fires when /compact's async Summarise call returns.
 // Update() handles it by swapping the agent's history via Reset and
 // persisting the now-compacted session.

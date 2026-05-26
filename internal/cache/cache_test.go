@@ -76,6 +76,53 @@ func TestTracker_Last(t *testing.T) {
 	}
 }
 
+// TestTracker_SetBase_LastIgnoresBase locks in the load-bearing invariant
+// for the resume ctx% fix: SetBase must contribute to Cumulative() but NOT
+// to Last(). Without this, a resumed session's aggregate usage makes the
+// status bar show "ctx 211%" on start.
+func TestTracker_SetBase_LastIgnoresBase(t *testing.T) {
+	tr := New()
+
+	// Set a base representing a prior session with heavy usage.
+	base := deepseek.Usage{PromptTokens: 500_000, CompletionTokens: 20_000, TotalTokens: 520_000}
+	tr.SetBase(base, "deepseek-chat", pricing.TierStandard)
+
+	// Last() must return zero — no turns recorded yet.
+	if got := tr.Last(); got.PromptTokens != 0 {
+		t.Errorf("Last() after SetBase = %+v, want zero (no turns yet)", got)
+	}
+	if got := tr.LastCost(); got != 0 {
+		t.Errorf("LastCost() after SetBase = %v, want 0", got)
+	}
+
+	// Cumulative() must include the base.
+	if got := tr.Cumulative().PromptTokens; got != 500_000 {
+		t.Errorf("Cumulative().PromptTokens after SetBase = %d, want 500_000", got)
+	}
+
+	// Record one genuine turn — Last() must return the turn, not the base.
+	recordFlash(tr, deepseek.Usage{PromptTokens: 10_000, CompletionTokens: 1_000, TotalTokens: 11_000})
+	if got := tr.Last().PromptTokens; got != 10_000 {
+		t.Errorf("Last().PromptTokens after record = %d, want 10_000 (the turn, not the base)", got)
+	}
+	if got := tr.Cumulative().PromptTokens; got != 510_000 {
+		t.Errorf("Cumulative().PromptTokens after record = %d, want 510_000 = base(500k) + turn(10k)", got)
+	}
+}
+
+// TestTracker_SetBase_EmptyUsageIsNoOp verifies that SetBase with a zero
+// Usage does not pollute Cumulative or Last.
+func TestTracker_SetBase_EmptyUsageIsNoOp(t *testing.T) {
+	tr := New()
+	tr.SetBase(deepseek.Usage{}, "deepseek-chat", pricing.TierStandard)
+	if got := tr.Cumulative().TotalTokens; got != 0 {
+		t.Errorf("Cumulative() with empty SetBase = %+v, want zero", got)
+	}
+	if got := tr.Last().TotalTokens; got != 0 {
+		t.Errorf("Last() with empty SetBase = %+v, want zero", got)
+	}
+}
+
 func TestTracker_TurnsReturnsCopy(t *testing.T) {
 	tr := New()
 	recordFlash(tr, deepseek.Usage{PromptTokens: 1})

@@ -34,6 +34,7 @@ func (m Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Reply deny, then quit. Without this the agent goroutine
 		// would block forever on the reply channel.
 		m.replyApproval(false)
+		(&m).persistSession()
 		return m, tea.Quit
 	default:
 		// Character keys.

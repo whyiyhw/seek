@@ -90,6 +90,21 @@ func (m *Model) updateCommandMenu() {
 		}
 		return
 
+	case strings.HasPrefix(v, "/help ") || v == "/help ":
+		// Auto-open the help topic picker when the user types "/help "
+		// (trailing space). Mirrors the /model /effort /lang pattern.
+		m.commandMenuOpen = false
+		m.commandMenuFiltered = nil
+		m.commandMenuSelected = 0
+		if !m.modelPickerOpen || m.pickerPurpose != "help-topic" {
+			choices := helpTopicChoices()
+			m.modelPickerFiltered = choices
+			m.modelPickerSelected = 0
+			m.modelPickerOpen = true
+			m.pickerPurpose = "help-topic"
+		}
+		return
+
 	case strings.HasPrefix(v, "/review "):
 		// Auto-open the review picker when the user types "/review "
 		// (trailing space). Mirrors the /model /effort /lang pattern.

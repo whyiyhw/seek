@@ -2,14 +2,10 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/whyiyhw/seek/internal/pricing"
-	"golang.org/x/term"
 )
 
 // seekRow is one line of the wordmark plus its colour tier.
@@ -138,88 +134,6 @@ func bannerWithLettersRevealed(n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// animateBanner reveals the wordmark letter-by-letter using raw ANSI
-// cursor-up + reprint. ~80ms per letter, ~320ms total — long enough
-// to feel intentional, short enough that repeat invocations don't drag.
-//
-// MUST only be called when stdout is a TTY (no animation when piped).
-// Caller is responsible for that check.
-func animateBanner() {
-	const frameDelay = 80 * time.Millisecond
-	const bannerLines = 7 // matches len(seekRows)
-
-	// Hide the cursor during animation so it doesn't bounce around;
-	// defer restore covers panic paths too.
-	fmt.Print("\x1b[?25l")
-	defer fmt.Print("\x1b[?25h")
-
-	for n := 0; n <= len(letterEndCols); n++ {
-		if n > 0 {
-			// Move back up to the top of the previously-drawn banner
-			// so this frame overwrites it cleanly. \r returns to col 0;
-			// \x1b[<k>A goes up k lines.
-			fmt.Printf("\r\x1b[%dA", bannerLines)
-		}
-		fmt.Println(renderBanner(n))
-		if n < len(letterEndCols) {
-			time.Sleep(frameDelay)
-		}
-	}
-}
-
-// shouldAnimate gates the welcome animation. Returns false when
-// stdout isn't a TTY (piped, print mode, dumb terminal) or when
-// SEEK_NO_ANIM is set (CI, scripts, slow remote sessions).
-func shouldAnimate() bool {
-	if os.Getenv("SEEK_NO_ANIM") != "" {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}
-
-// Padding constants for welcomePadding. Tracked centrally so a future
-// banner layout change (e.g. dropping the cwd line) updates the
-// padding math in one place instead of drifting.
-const (
-	// welcomeFixedLines is how many lines PrintPixelWelcomeBanner
-	// actually prints: 1 leading blank + 7 banner rows + 1 blank +
-	// cwd + meta + 1 trailing blank = 12. Plus 2 system-output lines
-	// printed by cmd/seek BEFORE the banner (skills loader,
-	// projectmd loader) = 14 total above the live region.
-	welcomeFixedLines = 14
-
-	// welcomeBelowLines is the bubbletea live region's typical
-	// height — 3-row textarea + 1-row status bar. Approximate;
-	// ±1 line of pad isn't a visible problem.
-	welcomeBelowLines = 4
-)
-
-// welcomePadding returns the number of blank lines to insert between
-// the meta line and the live region so the input box always pins to
-// the bottom of the terminal regardless of viewport size.
-//
-// Historical note: this function used to cap at welcomePadMax = 20
-// (rationale: "feels wasteful beyond that"). The cap broke the
-// "input always at the bottom" invariant on tall terminals — on a
-// 60-row window the input floated at row 25 with 35 blank rows
-// below it. The cap is gone: bottom-pinning is the invariant, and
-// the welcome banner sitting in scrollback above the empty space is
-// a worthwhile trade for consistent layout. Scroll up to see it.
-//
-// Pulled out of PrintPixelWelcomeBanner as a pure function so tests
-// can hit it for known heights without mocking the actual terminal.
-func welcomePadding(termHeight int) int {
-	if termHeight <= 0 {
-		return 0
-	}
-	used := welcomeFixedLines + welcomeBelowLines
-	pad := termHeight - used
-	if pad <= 0 {
-		return 0
-	}
-	return pad
-}
-
 // VersionString returns the build identity for the running binary as
 // a single human-readable string. Pulled from runtime/debug.BuildInfo
 // so it picks up the module version, short git hash, and `+` dirty
@@ -280,58 +194,9 @@ func formatVersion(info *debug.BuildInfo) string {
 	return fmt.Sprintf("%s · %s%s", version, rev, suffix)
 }
 
-// PrintPixelWelcomeBanner prints the welcome screen. Called by
-// tui.Run BEFORE bubbletea takes over so the lines land in scrollback
-// above the live region.
-//
-// Layout (option-B "pixel art done seriously"):
-//
-//	<blank>
-//	<5×7 wordmark with cyan gradient>     ← animated when stdout is a TTY
-//	<blank>
-//	  <cwd>
-//	  <model · tier [· YOLO] · version>
-//	<blank>
-//
-// No tagline, no help line, no off-peak countdown — the status bar
-// at the bottom already carries the live info. Welcome should set
-// the brand, not be a dashboard.
-func PrintPixelWelcomeBanner(opts Options) {
-	tier := pricing.CurrentTier(time.Now())
-	muted := lipgloss.NewStyle().Foreground(colourMuted)
-
-	fmt.Println()
-	if shouldAnimate() {
-		animateBanner()
-	} else {
-		fmt.Println(RenderPixelBanner())
-	}
-	fmt.Println()
-
-	// Two compact meta lines. cwd alone on its own line because it's
-	// the thing the user actually needs to verify ("am I in the right
-	// project?"); model/tier/version share a status line.
-	fmt.Println(muted.Render("  " + opts.CWD))
-
-	tierLabel := pricing.TierLabel(tier)
-	if tier != pricing.TierOffPeak {
-		tierLabel = "☀️ " + tierLabel
-	} else {
-		tierLabel = "🌙 " + tierLabel
-	}
-	status := fmt.Sprintf("%s  ·  %s", opts.Model, tierLabel)
-	if opts.Yolo {
-		status += "  ·  YOLO"
-	} else if opts.Plan {
-		status += "  ·  PLAN"
-	}
-	status += "  ·  " + VersionString()
-	fmt.Println(muted.Render("  " + status))
-	fmt.Println()
-
-	// Vertical padding to push the input toward the bottom of the
-	// terminal is applied INSIDE View() via welcomePadding, not
-	// here. Doing it pre-bubbletea would lock the layout to the
-	// initial terminal size and not re-apply after /reset; doing it
-	// at View() level lets isWelcomeScreen drive it dynamically.
-}
+// pixelBannerMinWidth is the minimum terminal width (in cells) at
+// which the 5×7 pixel wordmark renders cleanly. The full banner is
+// ~30 cells of glyph + 2 of indent; below this width View() falls
+// back to a one-line text banner. Empirically derived — the pixel
+// banner row is 26 chars, leaving 4 cells of breathing room.
+const pixelBannerMinWidth = 30

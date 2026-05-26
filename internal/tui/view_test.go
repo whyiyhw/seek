@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -289,9 +291,79 @@ func TestColorizeDiffBlocks_MultipleFences(t *testing.T) {
 	}
 }
 
-func TestRenderCommittedToolErr_PlainErrorUnchangedShape(t *testing.T) {
+// --- Shared committed-block renderers ---------------------------------
+//
+// These pin the contracts of renderUserBlock / renderAssistantBlock /
+// renderToolResultLine — the SHARED functions called by both the live
+// commit path (update_agent.go) and the replay path (replay.go).
+// Divergences between live and replay (Markdown skipped, duplicate
+// tool rows, untruncated args, spurious "▸ seek" on tool-only turns)
+// were the bug cluster Option A of the v0.3.x review was meant to
+// retire.
+
+func TestRenderUserBlock_StartsWithNewline(t *testing.T) {
+	t.Parallel()
+	out := renderUserBlock("foo", 0)
+	if !strings.HasPrefix(out, "\n") {
+		t.Errorf("user block must start with newline; got %q", out)
+	}
+}
+
+func TestRenderUserBlock_WidthZeroSkipsWrapping(t *testing.T) {
+	t.Parallel()
+	// width==0 path is only hit by replay (terminal size unknown before
+	// tea.NewProgram). Body should pass through highlightRefs but skip
+	// lipgloss.Width.
+	out := renderUserBlock("hello", 0)
+	if !strings.Contains(out, "hello") {
+		t.Errorf("missing body in %q", out)
+	}
+}
+
+func TestRenderAssistantBlock_EmptyContentReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	// Pure tool-call turn (no narrative content) MUST return "" — the
+	// `↳ tool(...)` lines emitted by ToolExecEnd / RoleTool render
+	// already convey what happened. Live's applyAgentEvent gates on
+	// curContent != "" at the caller; this is the defense-in-depth
+	// check at the helper.
+	if got := renderAssistantBlock("", "reasoning text", false, 80, nil); got != "" {
+		t.Errorf("empty content must return empty, got %q", got)
+	}
+}
+
+func TestRenderAssistantBlock_NoLeadingNewline(t *testing.T) {
+	t.Parallel()
+	// Matches the appendHistory contract: the previous tea.Println's
+	// trailing \n already positioned the cursor at column 0, so the
+	// block starts directly with its label.
+	out := renderAssistantBlock("hi", "", false, 80, nil)
+	if strings.HasPrefix(out, "\n") {
+		t.Errorf("must NOT start with newline, got %q", out)
+	}
+	if !strings.Contains(stripANSI(out), "▸ seek") {
+		t.Errorf("must start with seek label, got %q", out)
+	}
+}
+
+func TestRenderAssistantBlock_ReasoningShownWhenToggled(t *testing.T) {
+	t.Parallel()
+	withShown := renderAssistantBlock("answer", "step 1", true, 80, nil)
+	withHidden := renderAssistantBlock("answer", "step 1", false, 80, nil)
+	if !strings.Contains(stripANSI(withShown), "step 1") {
+		t.Errorf("showReasoning=true must surface body; got %q", withShown)
+	}
+	if strings.Contains(stripANSI(withHidden), "step 1") {
+		t.Errorf("showReasoning=false must NOT show body; got %q", withHidden)
+	}
+	if !strings.Contains(stripANSI(withHidden), "reasoning hidden") {
+		t.Errorf("showReasoning=false must show hidden placeholder; got %q", withHidden)
+	}
+}
+
+func TestRenderToolResultLine_ErrorShape(t *testing.T) {
 	forceColor(t)
-	got := renderCommittedToolErr("edit", "args", "0 matches found", 250*time.Millisecond)
+	got := renderToolResultLine("edit", "args", "", errors.New("0 matches found"), 250*time.Millisecond, 0)
 	// Structural invariants from the old single-Render version: the chrome
 	// is present, the body is present, the duration tail is present.
 	for _, want := range []string{"↳ edit(args)", "ERROR:", "0 matches found", " · 0.2s"} {
@@ -301,10 +373,10 @@ func TestRenderCommittedToolErr_PlainErrorUnchangedShape(t *testing.T) {
 	}
 }
 
-func TestRenderCommittedToolErr_DiffBlockGetsColored(t *testing.T) {
+func TestRenderToolResultLine_ErrorDiffColored(t *testing.T) {
 	forceColor(t)
-	err := "0 matches\n\n```diff\n-old\n+new\n```\nTip: copy +."
-	got := renderCommittedToolErr("edit", "args", err, time.Second)
+	errBody := "0 matches\n\n```diff\n-old\n+new\n```\nTip: copy +."
+	got := renderToolResultLine("edit", "args", "", errors.New(errBody), time.Second, 0)
 	if !strings.Contains(got, sgrOk+"+new") {
 		t.Errorf("`+` line inside embedded diff should be green. Output:\n%q", got)
 	}
@@ -354,7 +426,7 @@ func TestRenderCommittedToolOk_DiffResultShowsColoredDiff(t *testing.T) {
 	forceColor(t)
 	result := "edited /tmp/x: 1 replacement(s), 10 → 12 bytes\n" +
 		"```diff\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n```"
-	got := renderCommittedToolOk("edit", "/tmp/x", result, 200*time.Millisecond, "")
+	got := renderToolResultLine("edit", "/tmp/x", result, nil, 200*time.Millisecond, 0)
 	// Summary line stays on top.
 	if !strings.Contains(got, "↳ edit(/tmp/x)") {
 		t.Errorf("summary line missing: %q", got)
@@ -581,7 +653,7 @@ func TestRenderCommittedToolOk_NonDiffResultStaysOneLine(t *testing.T) {
 	// Simulate a non-edit tool's result (e.g. `read`, `grep`). Should
 	// render exactly as before — a single summary line with no extra rows.
 	result := "found 3 matches in /tmp/x\n  /tmp/x:10:hit one\n  /tmp/x:14:hit two\n  /tmp/x:22:hit three"
-	got := renderCommittedToolOk("grep", "pattern", result, 50*time.Millisecond, "")
+	got := renderToolResultLine("grep", "pattern", result, nil, 50*time.Millisecond, 0)
 	if strings.Count(got, "\n") != 0 {
 		t.Errorf("non-diff result should render as single line, got %d newlines:\n%q",
 			strings.Count(got, "\n"), got)
@@ -602,11 +674,11 @@ func TestRenderCommittedToolOk_NonDiffResultStaysOneLine(t *testing.T) {
 // instead of the default styleToolLine (amber 180).
 const sgrToolSkill = "\x1b[1;38;5;177m"
 
-func TestRenderCommittedToolOk_SkillUsesDedicatedFormat(t *testing.T) {
+func TestRenderToolResultLine_SkillUsesDedicatedFormat(t *testing.T) {
 	forceColor(t)
 	// Args is the JSON the Skill tool's schema requires (PRD v0 §4.6.3:
 	// one required field, "name").
-	got := renderCommittedToolOk("Skill", `{"name":"dual-model"}`, "(body)", 300*time.Millisecond, "")
+	got := renderToolResultLine("Skill", `{"name":"dual-model"}`, "(body)", nil, 300*time.Millisecond, 0)
 
 	// The skill-specific header replaces the generic "↳ Name(args)"
 	// form so the user reads "which skill" directly. The dual-model
@@ -626,12 +698,12 @@ func TestRenderCommittedToolOk_SkillUsesDedicatedFormat(t *testing.T) {
 	}
 }
 
-func TestRenderCommittedToolOk_NonSkillUnchanged(t *testing.T) {
+func TestRenderToolResultLine_NonSkillUnchanged(t *testing.T) {
 	forceColor(t)
 	// Regression guard: every non-Skill tool must keep its existing
 	// "↳ name(args) → N bytes" shape. The accent-magenta sgr must NOT
 	// appear on a plain read call.
-	got := renderCommittedToolOk("read", "foo.go", "(body)", 100*time.Millisecond, "")
+	got := renderToolResultLine("read", "foo.go", "(body)", nil, 100*time.Millisecond, 0)
 	if !strings.Contains(got, "↳ read(foo.go)") {
 		t.Errorf("non-Skill tools must keep the generic form, got: %q", got)
 	}
@@ -640,9 +712,9 @@ func TestRenderCommittedToolOk_NonSkillUnchanged(t *testing.T) {
 	}
 }
 
-func TestRenderCommittedToolErr_SkillKeepsHeaderAndStaysRed(t *testing.T) {
+func TestRenderToolResultLine_SkillErrorKeepsHeaderAndStaysRed(t *testing.T) {
 	forceColor(t)
-	got := renderCommittedToolErr("Skill", `{"name":"missing"}`, `"missing" not found`, 250*time.Millisecond)
+	got := renderToolResultLine("Skill", `{"name":"missing"}`, "", errors.New(`"missing" not found`), 250*time.Millisecond, 0)
 
 	// Skill errors still get the dedicated "✦ skill: <name>" header
 	// so the failed call is attributable; the red colour itself is
@@ -709,5 +781,511 @@ func TestFormatActiveToolLabel_NonSkillUnchanged(t *testing.T) {
 	forceColor(t)
 	if style.Render("x") != styleToolLine.Render("x") {
 		t.Errorf("non-Skill active label should use styleToolLine, got different style")
+	}
+}
+
+// TestView_IdleStateIsStableAcrossRedraws locks the load-bearing
+// "no jumping" invariant for inline mode: View() called twice on
+// identical model state must return byte-identical output. If a
+// future change introduces time-dependent rendering inside View()
+// (live timestamps, frame counters, etc.) or accidentally non-
+// deterministic ordering, this test catches it. The whole reason
+// we left alt-screen is to fix scroll/copy — that win is undone if
+// each redraw subtly shuffles the live region.
+func TestView_IdleStateIsStableAcrossRedraws(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = 120
+	m.height = 40
+	m.ready = true
+	m.input.SetWidth(118)
+	// Pin a fixed `now` so the status bar's tier label / off-peak
+	// computation doesn't fluctuate between calls.
+	m.now = time.Date(2026, time.January, 15, 12, 0, 0, 0, pricing.Shanghai)
+
+	first := m.View()
+	second := m.View()
+	if first != second {
+		t.Errorf("View() is non-deterministic across redraws on identical state;\nfirst:  %q\nsecond: %q", first, second)
+	}
+}
+
+// TestView_WelcomeBannerOnFreshSession verifies that a model with
+// turns==0 renders the pixel wordmark ("█") and the working directory.
+// Regression: the welcome banner must appear in the live region on
+// startup now that it's no longer printed to stdout pre-tea.
+func TestView_WelcomeBannerOnFreshSession(t *testing.T) {
+	SetTheme("dark")
+	m := testModel().WithBannerFrame(len(letterEndCols)).Build()
+
+	out := m.View()
+
+	if !strings.Contains(out, "█") {
+		t.Error("welcome banner should contain pixel-art blocks (█) when turns==0")
+	}
+	if !strings.Contains(out, m.opts.CWD) {
+		t.Errorf("welcome banner should contain cwd %q", m.opts.CWD)
+	}
+}
+
+// TestView_WelcomeBannerHiddenAfterFirstTurn verifies that once a
+// conversation starts (turns>0), the pixel wordmark is absent from
+// the live region. It should NOT reappear mid-conversation.
+func TestView_WelcomeBannerHiddenAfterFirstTurn(t *testing.T) {
+	SetTheme("dark")
+	m := testModel().WithTurns(1).Build()
+
+	out := m.View()
+
+	if strings.Contains(out, "█") {
+		t.Error("pixel-art blocks (█) must NOT appear in View() when turns>0")
+	}
+}
+
+// TestView_WelcomeBannerHiddenAfterFirstSubmit pins the fix for the
+// "user input above banner / screen wipes on TurnEnd" bug. m.turns
+// stays 0 from submit() until TurnEnd, so a turns-only gate left the
+// banner pinned in the live region for the entire first turn — every
+// tea.Println'd user/assistant line landed in scrollback ABOVE the
+// stuck banner, and when TurnEnd finally fired the 11-row banner
+// vanished in one frame and bubbletea over-erased real scrollback
+// content. Fix: also gate on promptHistory==[], which gets its first
+// entry inside submit() before any streaming activity.
+func TestView_WelcomeBannerHiddenAfterFirstSubmit(t *testing.T) {
+	SetTheme("dark")
+	// turns still 0 — TurnEnd has not fired yet — but the user has
+	// submitted once, so promptHistory is non-empty.
+	m := testModel().
+		WithBannerFrame(len(letterEndCols)).
+		WithPromptHistory("hello").
+		Build()
+
+	out := m.View()
+
+	if strings.Contains(out, "█") {
+		t.Error("pixel-art blocks (█) must NOT appear after the first submit, even while turns==0")
+	}
+}
+
+// TestView_WelcomeBannerNarrowFallback checks that on a terminal
+// narrower than pixelBannerMinWidth, the welcome banner drops the
+// pixel wordmark and shows a one-line text marker instead.
+func TestView_WelcomeBannerNarrowFallback(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = pixelBannerMinWidth - 1 // just below the threshold
+	m.height = 24
+	m.ready = true
+	m.bannerFrame = len(letterEndCols)
+
+	out := m.View()
+
+	if strings.Contains(out, "█") {
+		t.Error("pixel-art blocks must NOT render below pixelBannerMinWidth")
+	}
+	if !strings.Contains(out, "seek") {
+		t.Error("narrow banner should still mention 'seek'")
+	}
+}
+
+// TestView_WelcomeBannerAnimationFrame produces consistent output at
+// every frame. Frame 0 is blank (no blocks), frame 2 shows partial
+// letters, frame 4 shows the full wordmark.
+func TestView_WelcomeBannerAnimationFrame(t *testing.T) {
+	SetTheme("dark")
+	build := func(frame int) string {
+		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+		m.width = 80
+		m.height = 40
+		m.ready = true
+		m.bannerFrame = frame
+		return m.View()
+	}
+
+	// Frame 0: no blocks visible.
+	blank := build(0)
+	if strings.Contains(blank, "█") {
+		t.Error("frame 0 must not contain any blocks")
+	}
+
+	// Frame 4 (full): must contain blocks.
+	full := build(len(letterEndCols))
+	if !strings.Contains(full, "█") {
+		t.Error("frame 4 (full) must contain blocks")
+	}
+
+	// Frame 2: fewer blocks than full.
+	partial := build(2)
+	fullBlocks := strings.Count(full, "█")
+	partialBlocks := strings.Count(partial, "█")
+	if partialBlocks >= fullBlocks {
+		t.Errorf("frame 2 (%d blocks) must have fewer blocks than frame 4 (%d)",
+			partialBlocks, fullBlocks)
+	}
+	if partialBlocks == 0 {
+		t.Error("frame 2 must have at least some blocks (S + first E)")
+	}
+}
+
+// TestView_NoBottomFloorPadding hard-guards the load-bearing "no
+// floor-pin" decision for inline mode. The previous inline attempt
+// padded sb with `strings.Repeat("\n", pad)` to push the input to
+// the absolute terminal floor, which caused the M3-era drift class.
+// Any reintroduction of that pattern will leave a long trailing run
+// of \n in View() output — this test fails on the first such regression.
+func TestView_NoBottomFloorPadding(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = 120
+	m.height = 40 // tall terminal — old code padded ~30 lines here
+	m.ready = true
+	m.input.SetWidth(118)
+
+	out := m.View()
+	// Allow a small handful of trailing newlines (one per logical row
+	// like input's `\n` + status's absence of `\n`), but never the kind
+	// of long run that floor-pinning produces.
+	const maxTrailingNewlines = 3
+	trailing := 0
+	for i := len(out) - 1; i >= 0 && out[i] == '\n'; i-- {
+		trailing++
+	}
+	if trailing > maxTrailingNewlines {
+		t.Errorf("View() ends with %d consecutive '\\n' — floor-pin padding has been reintroduced (max allowed: %d)", trailing, maxTrailingNewlines)
+	}
+}
+
+// TestView_SeparatorAlwaysPresent locks the "separator is always
+// present above the input" invariant. Under the reserved-popup-zone
+// design (see view.go), the bottom block always has content above
+// the input (filter popup if open, blank zone otherwise), so the
+// separator is a stable demarcation rather than an on/off element.
+// Holding the separator constant is what eliminates the per-popup-
+// open shift the user complained about.
+func TestView_SeparatorAlwaysPresent(t *testing.T) {
+	SetTheme("dark")
+	const hbar = "─"
+
+	t.Run("idle has separator", func(t *testing.T) {
+		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+		m.width = 80
+		m.height = 30
+		m.ready = true
+		m.input.SetWidth(78)
+
+		out := stripANSI(m.View())
+		if !strings.Contains(out, strings.Repeat(hbar, 10)) {
+			t.Errorf("idle View() must render the separator (reserved-zone invariant); got:\n%s", out)
+		}
+	})
+
+	t.Run("popup forces separator", func(t *testing.T) {
+		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+		m.width = 80
+		m.height = 30
+		m.ready = true
+		m.input.SetWidth(78)
+		m.commandMenuOpen = true
+		m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
+
+		out := stripANSI(m.View())
+		if !strings.Contains(out, strings.Repeat(hbar, 10)) {
+			t.Errorf("View() with popup open must render the separator; got:\n%s", out)
+		}
+	})
+}
+
+// TestRenderCommandMenu_FixedHeight locks the load-bearing "input does
+// not move as user filters" invariant. Before this fix, typing a
+// filter into the slash menu would shrink the visible list, which
+// under inline mode visibly shifted the input upward; backspacing
+// would grow the list back, shifting the input downward. Now the
+// menu always emits menuMaxRows item rows + one footer row, padded
+// with blank lines when there are fewer matches.
+func TestRenderCommandMenu_FixedHeight(t *testing.T) {
+	SetTheme("dark")
+
+	// stripped row count = newlines in the rendered string. The menu
+	// emits one row per item (or blank), plus one footer row; total
+	// must be menuMaxRows + 1 regardless of how many items match.
+	rowsIn := func(s string) int { return strings.Count(s, "\n") }
+	const wantRows = menuMaxRows + 1
+
+	cases := []struct {
+		name  string
+		items []command
+	}{
+		{"one item", []command{{usage: "/help", description: "show help"}}},
+		{"three items", []command{
+			{usage: "/help", description: "show help"},
+			{usage: "/clear", description: "clear screen"},
+			{usage: "/quit", description: "exit"},
+		}},
+		{"full window", func() []command {
+			out := make([]command, menuMaxRows)
+			for i := range out {
+				out[i] = command{usage: "/cmd", description: "desc"}
+			}
+			return out
+		}()},
+		{"overflow", func() []command {
+			out := make([]command, menuMaxRows+5)
+			for i := range out {
+				out[i] = command{usage: "/cmd", description: "desc"}
+			}
+			return out
+		}()},
+		{"no match", nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+			m.commandMenuFiltered = tc.items
+			out := m.renderCommandMenu()
+			if got := rowsIn(out); got != wantRows {
+				t.Errorf("rendered %d rows, want %d (menuMaxRows + footer); output:\n%s", got, wantRows, out)
+			}
+		})
+	}
+}
+
+// TestRenderPathPicker_FixedHeight is the @-completer sibling of the
+// slash-menu test above. Same invariant: filtering must not change
+// total popup height.
+func TestRenderPathPicker_FixedHeight(t *testing.T) {
+	SetTheme("dark")
+	rowsIn := func(s string) int { return strings.Count(s, "\n") }
+	const wantRows = menuMaxRows + 1
+
+	cases := []struct {
+		name     string
+		filtered []string
+	}{
+		{"two paths", []string{"main.go", "go.mod"}},
+		{"overflow", func() []string {
+			out := make([]string, menuMaxRows+3)
+			for i := range out {
+				out[i] = "file.go"
+			}
+			return out
+		}()},
+		{"no match", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+			m.pathPicker.filtered = tc.filtered
+			out := m.renderPathPicker()
+			if got := rowsIn(out); got != wantRows {
+				t.Errorf("rendered %d rows, want %d; output:\n%s", got, wantRows, out)
+			}
+		})
+	}
+}
+
+// TestMenuWindow_FollowsSelection locks the cursor-stays-visible
+// behaviour: when the list overflows menuMaxRows and the user
+// navigates with ↑/↓, the window slides so the selected index is
+// always inside [start, end). Without this, paging breaks once
+// selected goes past the initial visible page.
+func TestMenuWindow_FollowsSelection(t *testing.T) {
+	const total = menuMaxRows + 10 // forces a windowed list
+
+	for selected := 0; selected < total; selected++ {
+		start, end := menuWindow(total, selected)
+		if end-start != menuMaxRows {
+			t.Errorf("selected=%d: window size = %d, want %d", selected, end-start, menuMaxRows)
+		}
+		if selected < start || selected >= end {
+			t.Errorf("selected=%d not in window [%d, %d)", selected, start, end)
+		}
+	}
+}
+
+// TestView_PopupZoneStablyHigh locks the load-bearing "popup open
+// does not shift the input" invariant. Without the reserved zone,
+// opening a filter popup grows the bottom block by ~9 rows and the
+// input visibly jumps. With the reserved zone, the View()'s total
+// row count is byte-stable between idle and any filter-popup-open
+// state — only the popup region's CONTENT changes, not its size.
+func TestView_PopupZoneStablyHigh(t *testing.T) {
+	SetTheme("dark")
+	build := func(setup func(*Model)) string {
+		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+		m.width = 80
+		m.height = 30
+		m.ready = true
+		m.input.SetWidth(78)
+		setup(&m)
+		return m.View()
+	}
+
+	idle := build(func(_ *Model) {})
+	withMenu := build(func(m *Model) {
+		m.commandMenuOpen = true
+		m.commandMenuFiltered = []command{
+			{usage: "/help", description: "show help"},
+		}
+	})
+	withModel := build(func(m *Model) {
+		m.modelPickerOpen = true
+		m.modelPickerFiltered = []modelChoice{{id: "deepseek-chat", description: "default"}}
+	})
+	withPath := build(func(m *Model) {
+		m.pathPicker.open = true
+		m.pathPicker.filtered = []string{"main.go"}
+	})
+
+	idleRows := strings.Count(idle, "\n")
+	for _, c := range []struct {
+		name string
+		out  string
+	}{
+		{"command menu", withMenu},
+		{"model picker", withModel},
+		{"path picker", withPath},
+	} {
+		got := strings.Count(c.out, "\n")
+		if got != idleRows {
+			t.Errorf("%s: %d rows, want %d (same as idle) — input position is shifting", c.name, got, idleRows)
+		}
+	}
+}
+
+// TestView_ToolSlotPersistsUntilStreamEnd checks that ToolExecEnd
+// keeps the slot visible (marked finished) instead of removing it,
+// and that handleStreamEnd clears the list at turn end. Without this,
+// the input twitches up and down on every per-tool completion.
+func TestView_ToolSlotPersistsUntilStreamEnd(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	// Simulate two tools running in sequence within one turn.
+	m.applyAgentEvent(agent.ToolExecStart{CallID: "c1", Name: "read", Args: `"a"`})
+	m.applyAgentEvent(agent.ToolExecStart{CallID: "c2", Name: "grep", Args: `"b"`})
+
+	if len(m.activeTools) != 2 {
+		t.Fatalf("after two ToolExecStart, activeTools = %d, want 2", len(m.activeTools))
+	}
+
+	// First tool ends — slot must REMAIN (just flipped to finished).
+	m.applyAgentEvent(agent.ToolExecEnd{CallID: "c1", Name: "read", Result: "ok"})
+
+	if len(m.activeTools) != 2 {
+		t.Errorf("after one ToolExecEnd, activeTools = %d, want 2 (finished slot must stay)", len(m.activeTools))
+	}
+	// Find the finished slot.
+	var foundFinished, foundRunning bool
+	for _, t := range m.activeTools {
+		if t.callID == "c1" && t.finished {
+			foundFinished = true
+		}
+		if t.callID == "c2" && !t.finished {
+			foundRunning = true
+		}
+	}
+	if !foundFinished {
+		t.Error("c1 must be marked finished after ToolExecEnd")
+	}
+	if !foundRunning {
+		t.Error("c2 must still be marked running")
+	}
+
+	// handleStreamEnd is the single point that should clear the list.
+	out, _ := m.handleStreamEnd(streamEndMsg{})
+	if got := len(out.(Model).activeTools); got != 0 {
+		t.Errorf("handleStreamEnd must clear activeTools, got %d remaining", got)
+	}
+}
+
+// TestView_PopupRendersAboveSeparator locks the popup-in-sb position:
+// a menu's footer string lands BEFORE the separator row in View()
+// output. If a future change accidentally re-puts the popup back into
+// bottomBuf below the separator, this test catches it.
+func TestView_PopupRendersAboveSeparator(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = 120
+	m.height = 40
+	m.ready = true
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
+	m.input.SetWidth(118)
+
+	out := stripANSI(m.View())
+	footerIdx := strings.Index(out, "Tab to complete")
+	if footerIdx < 0 {
+		t.Fatalf("menu footer not found in view output")
+	}
+	// Find the separator that precedes the input — it's a long run of
+	// the horizontal-bar rune. Take the LAST one in the output.
+	sepIdx := strings.LastIndex(out, strings.Repeat("─", 10))
+	if sepIdx < 0 {
+		t.Fatalf("separator row not found in view output")
+	}
+	if footerIdx > sepIdx {
+		t.Errorf("menu footer (idx %d) appears AFTER separator (idx %d) — popup is below separator instead of above",
+			footerIdx, sepIdx)
+	}
+}
+
+// TestAppendHistory_ReturnsPrintlnCmd locks the load-bearing
+// contract under inline mode: every appendHistory call must return a
+// non-nil tea.Cmd carrying tea.Println. That cmd is the entire
+// mechanism for getting committed content into terminal scrollback —
+// if a caller drops the returned cmd (or appendHistory returns nil
+// for a non-empty line), the line vanishes silently.
+func TestAppendHistory_ReturnsPrintlnCmd(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	cmd := m.appendHistory("hello")
+	if cmd == nil {
+		t.Errorf("appendHistory of non-empty line returned nil cmd — line will not reach scrollback")
+	}
+
+	// Empty / whitespace-only line is a no-op (and returns nil cmd) —
+	// nothing for tea.Println to commit.
+	cmd2 := m.appendHistory("")
+	if cmd2 != nil {
+		t.Errorf("appendHistory of empty line should return nil cmd, got non-nil")
+	}
+}
+
+// _ legacy_alt_screen_tests_removed:
+// The following tests existed only to assert alt-screen-era invariants
+// (banner inside live region, View() fills the viewport exactly, input
+// pinned to the absolute terminal floor, in-app history viewport with
+// PgUp scrolling, mouse-wheel routing). They were deleted alongside
+// the migration back to inline mode; see docs/pitfalls.md for context.
+// Stability of the inline live region is now covered by
+// TestView_IdleStateIsStableAcrossRedraws,
+// TestView_NoBottomFloorPadding, and TestView_SeparatorAlwaysPresent.
+
+// TestView_MenuCloseRemovesPopupRows confirms that once
+// commandMenuOpen flips back to false, the next View() output no
+// longer contains the menu's footer string — the popup is gone
+// from the live region. Catches a regression where popup rendering
+// could leak into the next frame if the state machine forgets to
+// reset it.
+func TestView_MenuCloseRemovesPopupRows(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = 120
+	m.height = 40
+	m.ready = true
+	m.input.SetWidth(118)
+
+	// Menu open → footer is present.
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
+	if !strings.Contains(stripANSI(m.View()), "Tab to complete") {
+		t.Fatalf("precondition: menu footer should appear while menu is open")
+	}
+
+	// Menu closed → footer is gone.
+	m.commandMenuOpen = false
+	m.commandMenuFiltered = nil
+	if strings.Contains(stripANSI(m.View()), "Tab to complete") {
+		t.Errorf("menu footer still rendered after commandMenuOpen=false")
 	}
 }

@@ -43,13 +43,38 @@ type turnRecord struct {
 
 // Tracker accumulates per-turn Usage + cost records and computes
 // session-level rollups. Safe for concurrent Record/Snapshot calls.
+//
+// baseUsage / baseCost hold the cumulative state from a resumed session
+// (loaded via SetBase). They contribute to Cumulative()/CumulativeCost()
+// but are EXCLUDED from Last()/LastCost() — those return only the most
+// recent genuine turn. Without this split, recording a resumed session's
+// aggregate Usage as a "turn" would make Last() return a cumulative sum
+// and cause the ctx% indicator in the status bar to exceed 100%
+// (docs/pitfalls.md "cumulative prompt tokens are meaningless").
 type Tracker struct {
-	mu    sync.Mutex
-	turns []turnRecord
+	mu        sync.Mutex
+	turns     []turnRecord
+	baseUsage deepseek.Usage // cumulative from prior session; included in Cumulative() only
+	baseCost  float64        // dollar cost of baseUsage
 }
 
 // New returns an empty Tracker.
 func New() *Tracker { return &Tracker{} }
+
+// SetBase loads cumulative usage from a prior session (--resume / --continue).
+// The usage and its estimated cost contribute to Cumulative()/CumulativeCost()
+// but are excluded from Last()/LastCost(). Must be called before any Record
+// call — in practice this happens at startup before the TUI begins.
+//
+// model and tier are the values active at resume time; the cost is an
+// approximation when the session spanned multiple models or tier transitions.
+func (t *Tracker) SetBase(u deepseek.Usage, model string, tier pricing.Tier) {
+	cost := pricing.Cost(model, tier, u)
+	t.mu.Lock()
+	t.baseUsage = u
+	t.baseCost = cost
+	t.mu.Unlock()
+}
 
 // Record appends a turn to the history. cost is locked in at this
 // moment using (model, tier); the same usage replayed later under a
@@ -66,12 +91,13 @@ func (t *Tracker) Record(u deepseek.Usage, model string, tier pricing.Tier) {
 	t.mu.Unlock()
 }
 
-// Cumulative returns the sum of token usage across all recorded turns.
-// Cost is NOT derivable from this aggregate — use CumulativeCost.
+// Cumulative returns the sum of token usage across all recorded turns PLUS
+// any base loaded via SetBase (prior session on --resume). Cost is NOT
+// derivable from this aggregate — use CumulativeCost.
 func (t *Tracker) Cumulative() deepseek.Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var sum deepseek.Usage
+	sum := t.baseUsage
 	for _, r := range t.turns {
 		sum.PromptTokens += r.Usage.PromptTokens
 		sum.CompletionTokens += r.Usage.CompletionTokens
@@ -82,14 +108,14 @@ func (t *Tracker) Cumulative() deepseek.Usage {
 	return sum
 }
 
-// CumulativeCost returns the sum of per-turn costs (USD). Because each
-// turn's cost was priced at the model+tier that were active when the
-// turn was recorded, switching model or crossing a tier boundary does
-// not retroactively re-price prior turns.
+// CumulativeCost returns the sum of per-turn costs (USD), including the
+// base cost from SetBase. Because each turn's cost was priced at the
+// model+tier that were active when the turn was recorded, switching model
+// or crossing a tier boundary does not retroactively re-price prior turns.
 func (t *Tracker) CumulativeCost() float64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	var sum float64
+	sum := t.baseCost
 	for _, r := range t.turns {
 		sum += r.Cost
 	}

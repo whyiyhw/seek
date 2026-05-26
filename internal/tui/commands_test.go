@@ -105,41 +105,119 @@ func TestDispatch_Unknown(t *testing.T) {
 	}
 }
 
-func TestHelp_SetsOverlayFlag(t *testing.T) {
+// TestHelp_NoArgs_OpensPicker verifies that /help without arguments
+// opens the help topic picker, mirroring /model's picker pattern.
+func TestHelp_NoArgs_OpensPicker(t *testing.T) {
 	t.Parallel()
 	m := emptyModel()
-	if m.helpOverlayOpen {
-		t.Fatal("should start with overlay closed")
+	_ = runHandler(t, m, "/help")
+	if !m.modelPickerOpen {
+		t.Fatal("/help should open the topic picker, got closed")
 	}
-	res := runHandler(t, m, "/help")
-	if !m.helpOverlayOpen {
-		t.Errorf("help should set helpOverlayOpen")
+	if m.pickerPurpose != "help-topic" {
+		t.Fatalf("/help picker purpose should be 'help-topic', got %q", m.pickerPurpose)
 	}
-	if res.text != "" {
-		t.Errorf("help should produce no text, got %q", res.text)
+	if len(m.modelPickerFiltered) == 0 {
+		t.Fatal("/help picker should have filtered candidates")
+	}
+	// Verify all expected help topics are present in the picker.
+	topics := map[string]bool{"all": false, "commands": false, "keys": false, "about": false}
+	for _, c := range m.modelPickerFiltered {
+		topics[c.id] = true
+	}
+	for name, found := range topics {
+		if !found {
+			t.Errorf("/help picker missing topic %q", name)
+		}
 	}
 }
 
-// TestClear_ResetsScrollbackLines locks in the "input stays at the
-// bottom after /clear" invariant. tea.ClearScreen wipes the viewport
-// and parks the cursor at (1,1); view.go's layout math uses
-// m.scrollbackLines to locate the live region. Before this fix the
-// counter stayed at its pre-clear value (say 47), so welcome-padding
-// didn't fire and the bottom-pin branch computed a negative `pad` —
-// the input ended up at the TOP of the terminal until the next turn
-// scrolled it back down.
-func TestClear_ResetsScrollbackLines(t *testing.T) {
+// TestHelp_WithArg_ShowsTopic verifies that /help <topic> shows the
+// help overlay with topic-specific content, mirroring /model <id>.
+func TestHelp_WithArg_ShowsTopic(t *testing.T) {
 	t.Parallel()
-	m := emptyModel()
-	m.scrollbackLines = 47
 
-	res := runHandler(t, m, "/clear")
-
-	if !res.clear {
-		t.Errorf("/clear must request tea.ClearScreen via cmdResult.clear")
+	tests := []struct {
+		name    string
+		args    string
+		present []string
+		absent  []string
+	}{
+		{"all", "all", []string{" Commands ", " Keys ", "/help"}, nil},
+		{"commands", "commands", []string{" Commands ", "/help", "/model"}, []string{"↑ / ↓"}},
+		{"keys", "keys", []string{" Keys ", "↑ / ↓", "Ctrl+J"}, []string{" Commands "}},
+		{"about", "about", []string{"Version", "MIT"}, []string{" Commands "}},
 	}
-	if m.scrollbackLines != 0 {
-		t.Errorf("scrollbackLines after /clear: got %d, want 0", m.scrollbackLines)
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := emptyModel()
+			_ = runHandler(t, m, "/help "+tc.args)
+			if !m.helpOverlayOpen {
+				t.Fatalf("/help %s should set helpOverlayOpen", tc.args)
+			}
+			if m.helpContent == "" {
+				t.Fatalf("/help %s should set non-empty helpContent", tc.args)
+			}
+			for _, want := range tc.present {
+				if !strings.Contains(m.helpContent, want) {
+					t.Errorf("/help %s content missing %q", tc.args, want)
+				}
+			}
+			for _, notWant := range tc.absent {
+				if strings.Contains(m.helpContent, notWant) {
+					t.Errorf("/help %s content should not contain %q (different topic)", tc.args, notWant)
+				}
+			}
+		})
+	}
+}
+
+// TestClearAliasesNew locks the unified-semantics decision: /clear
+// and /new dispatch to the same handler, so their cmdResults are
+// indistinguishable. Hooks fire identically; both request a screen
+// clear; both emit the "previous session saved" notice. The
+// "blank-screen only" use case lives on Ctrl+L (see
+// TestHandleKey_CtrlL_RequestsClearScreen in update_test.go).
+func TestClearAliasesNew(t *testing.T) {
+	t.Parallel()
+
+	build := func() *Model {
+		m := emptyModel()
+		m.opts.RebuildAgent = func() (*agent.Agent, error) { return nil, nil }
+		return m
+	}
+
+	resClear := runHandler(t, build(), "/clear")
+	resNew := runHandler(t, build(), "/new")
+
+	if resClear.clear != resNew.clear {
+		t.Errorf("clear=%v new=%v — both should request ClearScreen", resClear.clear, resNew.clear)
+	}
+	if !resClear.clear {
+		t.Errorf("/clear must request ClearScreen (unified with /new)")
+	}
+	if resClear.text != resNew.text {
+		t.Errorf("/clear and /new must produce identical notice text;\nclear: %q\nnew:   %q", resClear.text, resNew.text)
+	}
+	if !strings.Contains(resClear.text, "previous session saved") {
+		t.Errorf("/clear should now emit the same notice as /new; got %q", resClear.text)
+	}
+}
+
+// TestClearWithoutRebuildHook_SurfacesError mirrors TestNew_NoHook's
+// behaviour now that /clear shares the /new handler. emptyModel()
+// doesn't wire RebuildAgent, so the handler must surface the
+// unsupported-state notice rather than silently no-op.
+func TestClearWithoutRebuildHook_SurfacesError(t *testing.T) {
+	t.Parallel()
+	m := emptyModel() // no RebuildAgent
+	res := runHandler(t, m, "/clear")
+	if !strings.Contains(res.text, "unsupported") {
+		t.Errorf("/clear without RebuildAgent should surface error; got %q", res.text)
+	}
+	if res.clear {
+		t.Errorf("/clear without RebuildAgent should NOT request ClearScreen; got clear=true")
 	}
 }
 
@@ -148,14 +226,6 @@ func TestExit_SetsQuit(t *testing.T) {
 	res := runHandler(t, emptyModel(), "/exit")
 	if !res.quit {
 		t.Errorf("expected quit=true")
-	}
-}
-
-func TestClear_SetsClear(t *testing.T) {
-	t.Parallel()
-	res := runHandler(t, emptyModel(), "/clear")
-	if !res.clear {
-		t.Errorf("expected clear=true")
 	}
 }
 

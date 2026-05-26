@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,44 +68,55 @@ func TestRender_ShiftTabCommitsModeLabel(t *testing.T) {
 
 // TestRender_SlashOpensCommandMenu: typing "/" opens the slash-command
 // menu in the live region (renderCommandMenu in view.go). We assert on
-// a stable menu entry (/help is always present) so the test doesn't
-// break when commands get reordered.
+// the footer hint string ("Tab to complete") which is always the last
+// line of the menu regardless of command ordering, and sits at a stable
+// position in the View() output.
 func TestRender_SlashOpensCommandMenu(t *testing.T) {
 	m := renderTestModel(t)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 
 	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
-	waitFor(t, tm, "/help")
+	waitFor(t, tm, "Tab to complete")
 
 	shutdown(t, tm)
 }
 
-// TestRender_HelpOverlayDispatch: dispatching /help via the slash
-// pipeline flips m.helpOverlayOpen and View() switches to
-// renderHelpOverlay. Catches regressions in BOTH the command-dispatch
-// path AND the overlay renderer (handler-level tests only cover one
-// or the other in isolation).
-func TestRender_HelpOverlayDispatch(t *testing.T) {
+// TestRender_HelpDispatch: dispatching /help all via the slash pipeline
+// opens the help overlay in the live region (instead of committing
+// to scrollback). We verify the overlay content appears in the
+// program's accumulated output after shutdown.
+func TestRender_HelpDispatch(t *testing.T) {
 	m := renderTestModel(t)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 
-	for _, r := range "/help" {
+	// Dispatch "/help all" through the slash menu: type "/help all"
+	// and press Enter. Bare /help now opens a topic picker (mirroring
+	// /model's picker pattern), so we pass an explicit topic to
+	// directly show the overlay.
+	for _, r := range "/help all" {
 		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 	}
-	// First Enter: slash-menu accepts "/help" as the highlighted
-	// candidate and sets the textarea to "/help " (with space) —
-	// matches what a real user sees. Second Enter dispatches the
-	// command for real.
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Can't assert on the panel's "Help — seek" title — initialSizeCmd
-	// forces 80x24 (os.Stdout fallback in test env) and the help panel
-	// is ~30 rows tall, so the title scrolls past stdout before
-	// bubbletea writes it. Assert on a bottom-of-panel string that IS
-	// in the visible viewport AND is a distinctive overlay signature
-	// (key-binding text doesn't appear anywhere outside the overlay).
-	waitFor(t, tm, "Shift+Tab")
+	// Give the program a moment to render the help overlay, dismiss it,
+	// then quit and verify the overlay content in accumulated output.
+	time.Sleep(50 * time.Millisecond)
+	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	time.Sleep(50 * time.Millisecond)
+	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
-	shutdown(t, tm)
+	out := tm.FinalOutput(t)
+	var buf bytes.Buffer
+	buf.ReadFrom(out)
+	output := buf.String()
+
+	// The dismiss hint is only rendered by the help overlay.
+	if !strings.Contains(output, "Esc or q to close help") {
+		t.Error("help overlay dismiss hint not found in program output")
+	}
+	// Keybinding text from the help content should also be present.
+	if !strings.Contains(output, "Shift+Tab") {
+		t.Error("help keybinding 'Shift+Tab' not found in program output")
+	}
 }

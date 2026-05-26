@@ -49,9 +49,9 @@ type command struct {
 func allCommands() []command {
 	return []command{
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
-		{names: []string{"/clear"}, usage: "/clear", description: "Clear the visible screen (scrollback preserved by your terminal).", handler: cmdClear},
-		{names: []string{"/new"}, usage: "/new", description: "Start a fresh conversation (saves the current session first).", handler: cmdNew},
+		{names: []string{"/clear", "/new"}, usage: "/clear", description: "Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state.", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
+		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Save the current session and quit seek.", handler: cmdQuit},
 		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. No args opens a picker. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
 		{names: []string{"/lang"}, usage: "/lang [en|zh|auto]", description: "Set response language preference. No args opens a picker. Switching invalidates the prefix cache; effective after /new.", handler: cmdLang},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
@@ -63,10 +63,9 @@ func allCommands() []command {
 		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Use or manage skills. `use <name>` arms next message (or fire with inline task); install/list/status/stats/uninstall/update/help mirror the CLI.", handler: cmdSkillCLI},
 		{names: []string{"/skills"}, usage: "/skills [--used]", description: "List loaded skills, or --used to see which were called in this session.", handler: cmdSkills},
 		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", handler: cmdMemoryCLI},
+		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
-		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Quit seek.", handler: cmdQuit},
-		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 	}
 }
 
@@ -89,22 +88,33 @@ func dispatchCommand(m *Model, input string) (handled bool, cmd tea.Cmd) {
 		for _, n := range c.names {
 			if n == name {
 				res := c.handler(m, args)
-				m.scrollbackLines += scrollbackLineCount(res.text)
-				return true, resultToCmd(res)
+				var printCmd tea.Cmd
+				if res.text != "" {
+					printCmd = m.appendHistory(res.text)
+				}
+				baseCmd := resultToCmd(res)
+				if printCmd == nil {
+					return true, baseCmd
+				}
+				if baseCmd == nil {
+					return true, printCmd
+				}
+				return true, tea.Sequence(printCmd, baseCmd)
 			}
 		}
 	}
 
 	text := styleMuted.Render(fmt.Sprintf("unknown command %s — try /help", name))
-	m.scrollbackLines += scrollbackLineCount(text)
-	return true, resultToCmd(cmdResult{text: text})
+	return true, m.appendHistory(text)
 }
 
 func resultToCmd(r cmdResult) tea.Cmd {
+	// r.text is committed to history by dispatchCommand BEFORE this is
+	// called — bubbletea tea.Println is no longer used for committed
+	// content under alt-screen mode (where it would land in the unseen
+	// main screen and only flush on exit). Only clear/quit/extra remain
+	// as actual bubbletea commands.
 	var cmds []tea.Cmd
-	if r.text != "" {
-		cmds = append(cmds, tea.Println(r.text))
-	}
 	if r.clear {
 		cmds = append(cmds, tea.ClearScreen)
 	}
@@ -120,28 +130,132 @@ func resultToCmd(r cmdResult) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func cmdHelp(m *Model, _ string) cmdResult {
-	m.helpOverlayOpen = true
+// helpTopicChoices is the curated picker shown when /help is invoked
+// without arguments. Mirrors the /model /effort /lang picker pattern.
+func helpTopicChoices() []modelChoice {
+	return []modelChoice{
+		{"all", "Show all help (commands + keys + about)"},
+		{"commands", "List all slash commands"},
+		{"keys", "Show key bindings"},
+		{"about", "About seek — version, license, links"},
+	}
+}
+
+func cmdHelp(m *Model, args string) cmdResult {
+	if args != "" {
+		// Args path: show the specified help topic directly.
+		m.helpOverlayOpen = true
+		m.helpContent = buildHelpTopic(args)
+		return cmdResult{}
+	}
+
+	// No args: open the topic picker — mirrors /model (no arg → picker).
+	m.modelPickerFiltered = helpTopicChoices()
+	m.modelPickerSelected = 0
+	m.modelPickerOpen = true
+	m.pickerPurpose = "help-topic"
 	return cmdResult{}
 }
 
-func cmdClear(m *Model, _ string) cmdResult {
-	// tea.ClearScreen wipes the visible viewport and parks the cursor at
-	// (1,1). Layout math in view.go locates the live region using
-	// m.scrollbackLines (rows of tea.Println output above us). After a
-	// clear the truthful value is 0 — without this reset, the padding
-	// math thinks ~47 phantom rows still sit above the cursor and never
-	// pushes the input back to the bottom of the terminal.
-	m.scrollbackLines = 0
-	return cmdResult{clear: true}
+// buildHelpTopic returns the help overlay content for the given topic.
+// Falls back to the combined view for unknown topics.
+func buildHelpTopic(topic string) string {
+	var sb strings.Builder
+	switch topic {
+	case "all":
+		sb.WriteString(styleHeader.Render("seek — help"))
+		sb.WriteString("\n\n")
+		sb.WriteString(buildHelpCommandsSection())
+		sb.WriteString("\n")
+		sb.WriteString(buildHelpKeysSection())
+	case "commands":
+		sb.WriteString(buildHelpCommandsSection())
+	case "keys":
+		sb.WriteString(buildHelpKeysSection())
+	case "about":
+		sb.WriteString(buildHelpAboutSection())
+	default:
+		sb.WriteString(styleHeader.Render("seek — help"))
+		sb.WriteString("\n\n")
+		sb.WriteString(buildHelpCommandsSection())
+		sb.WriteString("\n")
+		sb.WriteString(buildHelpKeysSection())
+	}
+	return sb.String()
 }
 
+func buildHelpCommandsSection() string {
+	var sb strings.Builder
+	sb.WriteString(styleStatusOffPeak.Render(" Commands "))
+	sb.WriteString("\n")
+	cmds := allCommands()
+	sort.Slice(cmds, func(i, j int) bool { return cmds[i].usage < cmds[j].usage })
+	for _, c := range cmds {
+		names := strings.Join(c.names, ", ")
+		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", names, c.description))
+	}
+	return sb.String()
+}
+
+func buildHelpKeysSection() string {
+	var sb strings.Builder
+	sb.WriteString(styleStatusOffPeak.Render(" Keys "))
+	sb.WriteString("\n")
+	keys := []struct{ key, desc string }{
+		{"/help, /? or ?", "Show this help"},
+		{"Enter", "Send prompt"},
+		{"↑ / ↓", "Recall prompt history (when input is empty)"},
+		{"Esc", "Cancel ongoing assistant response"},
+		{"Shift+Tab", "Cycle mode: ask → plan → yolo → ask"},
+		{"Ctrl+J", "Insert newline in input"},
+		{"Ctrl+L", "Clear visible screen (same as /clear)"},
+		{"Ctrl+R", "Toggle reasoning visibility"},
+		{"Ctrl+C", "Quit seek"},
+		{"/steer or Alt+Enter", "Interrupt current response with new instructions"},
+	}
+	for _, b := range keys {
+		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", b.key, b.desc))
+	}
+	return sb.String()
+}
+
+func buildHelpAboutSection() string {
+	var sb strings.Builder
+	sb.WriteString(styleHeader.Render("seek"))
+	sb.WriteString("\n\n")
+	sb.WriteString(styleMuted.Render("  Terminal AI coding agent"))
+	sb.WriteString("\n\n")
+	sb.WriteString(fmt.Sprintf("  Version: %s\n", VersionString()))
+	sb.WriteString("  License: MIT\n")
+	sb.WriteString("  \n")
+	sb.WriteString("  https://github.com/whyiyhw/seek\n")
+	return sb.String()
+}
+
+// cmdNew is also bound to /clear — both names invoke the same
+// reset-then-blank behavior. This matches the dominant AI-CLI
+// convention (Claude Code, etc.) where /clear means "start over",
+// not the shell's "wipe visible terminal". The pure-blank use case
+// is still available via Ctrl+L (see update_key.go), which calls
+// tea.ClearScreen without touching session / agent / counters.
 func cmdNew(m *Model, _ string) cmdResult {
+	if m.streaming {
+		return cmdResult{text: styleMuted.Render("/new: wait for the current turn to finish")}
+	}
 	if m.opts.RebuildAgent == nil {
 		return cmdResult{text: styleMuted.Render("/new unsupported (rebuild hook not wired)")}
 	}
 	// Save the current session before starting fresh.
 	m.persistSession()
+
+	// Try to build the new agent FIRST — if RebuildAgent fails
+	// (transient config / network error), abort without touching
+	// the in-memory session or tracker state so the user can
+	// retry from a clean state.
+	newAgent, err := m.opts.RebuildAgent()
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/new failed: " + err.Error())}
+	}
 
 	// Create a brand-new session (clean slate, no parent link).
 	// Guard against --no-save mode where session persistence is off:
@@ -156,22 +270,36 @@ func cmdNew(m *Model, _ string) cmdResult {
 
 	// Reset the usage tracker so the new session starts clean.
 	m.opts.Tracker = cache.New()
-
-	newAgent, err := m.opts.RebuildAgent()
-	if err != nil {
-		return cmdResult{text: styleErr.Render("/new failed: " + err.Error())}
-	}
 	m.opts.Agent = newAgent
-	m.turns = 0
-	m.toolCalls = 0
-	m.curContent = ""
-	m.curReasoning = ""
-	m.activeTools = nil
+
+	// Reload skills so /skills shows any newly installed skills.
+	// RebuildAgent already reloads skills for the system prompt, but
+	// opts.Skills is a separate reference that cmdSkills reads from.
+	if m.opts.CWD != "" {
+		if reloaded, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: m.opts.CWD}); lerr == nil && reloaded != nil {
+			m.opts.Skills = reloaded
+		}
+	}
+
+	m.resetSessionCounters()
+	// Conversation-scoped resets — UNIQUE to /clear because /clear is
+	// "fresh conversation", not "same conversation, different storage"
+	// (which is what /compact and /branch are). See resetSessionCounters'
+	// doc for the split.
+	m.opts.PlanSubstate = ""
 	// A skill arm is conceptually tied to the conversation it was
 	// staged in. Carrying it into a fresh /new would surprise the user
 	// — they typed "/skill use X" for the thing they were working on,
 	// not for the next 200 turns.
 	m.pendingSkill = ""
+	// Clear prompt-recall state. Two reasons: (1) the welcome banner's
+	// gate in View() is `turns==0 && len(promptHistory)==0`, so leaving
+	// prior prompts here would hide the fresh-conversation banner; (2)
+	// up-arrow recall belongs to the conversation that produced it —
+	// "fresh conversation" is the documented contract of /clear.
+	m.promptHistory = nil
+	m.historyIdx = -1
+	m.savedDraft = ""
 	return cmdResult{clear: true, text: styleMuted.Render("new conversation — previous session saved")}
 }
 
@@ -264,6 +392,7 @@ func cmdModel(m *Model, args string) cmdResult {
 		}
 	}
 	m.modelPickerOpen = true
+	m.pickerPurpose = "model"
 	return cmdResult{}
 }
 
@@ -357,6 +486,15 @@ func (m *Model) applyModelChoice(idx int) {
 		// just accepted. Accept is "I'm done with this picker"; the next
 		// genuine keystroke will re-evaluate.
 		m.input.SetValue("/skill use " + choice.id)
+
+	case "help-topic":
+		// Selected a help topic from /help picker. Build the overlay
+		// content for the chosen topic and open the dismissable help
+		// overlay. Mirrors how /model picker accepts into a direct
+		// action (model switch).
+		m.helpOverlayOpen = true
+		m.helpContent = buildHelpTopic(choice.id)
+		m.input.Reset()
 	}
 }
 
@@ -624,6 +762,16 @@ func setupProviderChoices() []modelChoice {
 }
 
 func cmdSetup(m *Model, _ string) cmdResult {
+	// Refuse mid-stream — same gate as every other modal-opening
+	// command (/clear, /branch, /compact, /upgrade, /distill). Without
+	// this guard the picker opens during a live turn and the user
+	// lands in setupKeyEntry while agent events keep firing in the
+	// background; combined with the handleStreamEnd hijack class
+	// (see streamend_test.go) this is how a chat prompt ends up
+	// saved as an API key in config.json.
+	if m.streaming {
+		return cmdResult{text: styleMuted.Render("/setup: wait for the current turn to finish")}
+	}
 	// Open the picker pre-loaded with provider choices and tagged
 	// with the setup purpose so applyModelChoice routes correctly.
 	m.modelPickerFiltered = setupProviderChoices()
@@ -661,32 +809,24 @@ func (m *Model) finishSetup(key string) tea.Cmd {
 	m.setupProvider = ""
 
 	if key == "" {
-		line := styleMuted.Render("  setup: empty key — cancelled.")
-		m.scrollbackLines += scrollbackLineCount(line)
-		return tea.Println(line)
+		return m.appendHistory(styleMuted.Render("  setup: empty key — cancelled."))
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		line := styleErr.Render("  setup: load config: " + err.Error())
-		m.scrollbackLines += scrollbackLineCount(line)
-		return tea.Println(line)
+		return m.appendHistory(styleErr.Render("  setup: load config: " + err.Error()))
 	}
 	config.SetKey(&cfg, provider, key)
 	if cfg.DefaultProvider == "" {
 		cfg.DefaultProvider = provider
 	}
 	if err := config.Save(cfg); err != nil {
-		line := styleErr.Render("  setup: save: " + err.Error())
-		m.scrollbackLines += scrollbackLineCount(line)
-		return tea.Println(line)
+		return m.appendHistory(styleErr.Render("  setup: save: " + err.Error()))
 	}
 	path, _ := config.Path()
-	line := styleMuted.Render(fmt.Sprintf(
+	return m.appendHistory(styleMuted.Render(fmt.Sprintf(
 		"  setup: saved %s key to %s — restart seek or /new to apply",
-		provider, path))
-	m.scrollbackLines += scrollbackLineCount(line)
-	return tea.Println(line)
+		provider, path)))
 }
 
 // cancelSetup clears in-flight setup state without saving. Called
@@ -695,9 +835,7 @@ func (m *Model) cancelSetup() tea.Cmd {
 	m.setupKeyEntry = false
 	m.setupProvider = ""
 	m.input.Reset()
-	line := styleMuted.Render("  setup: cancelled (no changes)")
-	m.scrollbackLines += scrollbackLineCount(line)
-	return tea.Println(line)
+	return m.appendHistory(styleMuted.Render("  setup: cancelled (no changes)"))
 }
 
 func cmdYolo(m *Model, _ string) cmdResult {
@@ -1121,7 +1259,7 @@ func (m Model) handleReviewPick() (Model, tea.Cmd) {
 	case choice == "working-tree":
 		changes, ok := gatherChangedFiles(m.opts.CWD)
 		if !ok {
-			return m, tea.Println(styleErr.Render("review: no changes to review"))
+			return m, m.appendHistory(styleErr.Render("review: no changes to review"))
 		}
 		res := submitOrSteer(&m, workingTreeReviewPrompt(changes))
 		return m, res.extra
@@ -1130,7 +1268,7 @@ func (m Model) handleReviewPick() (Model, tea.Cmd) {
 		branch := strings.TrimPrefix(choice, "branch:")
 		diffContent, ok := gatherBranchDiff(m.opts.CWD, branch)
 		if !ok {
-			return m, tea.Println(styleErr.Render("review: no diff found between current branch and " + branch))
+			return m, m.appendHistory(styleErr.Render("review: no diff found between current branch and " + branch))
 		}
 		res := submitOrSteer(&m, branchDiffReviewPrompt(branch, diffContent))
 		return m, res.extra
@@ -1145,7 +1283,8 @@ func (m Model) handleReviewPick() (Model, tea.Cmd) {
 	return m, nil
 }
 
-func cmdQuit(_ *Model, _ string) cmdResult {
+func cmdQuit(m *Model, _ string) cmdResult {
+	m.persistSession()
 	return cmdResult{quit: true}
 }
 
@@ -1410,8 +1549,7 @@ func cmdBranch(m *Model, _ string) cmdResult {
 	m.opts.Session = child
 	// The fork has done zero turns of its own work yet — the inherited
 	// messages are history, not credit toward the child's counters.
-	m.turns = 0
-	m.toolCalls = 0
+	m.resetSessionCounters()
 
 	return cmdResult{text: styleMuted.Render(fmt.Sprintf(
 		"branched: %s → %s (continuing on new branch; parent intact at %s)",
@@ -1535,8 +1673,7 @@ func (m *Model) handleUpgradeDone(msg upgradeDoneMsg) []tea.Cmd {
 		// doesn't keep advertising the upgrade after it's done.
 		m.upgradeAvailable = ""
 	}
-	m.scrollbackLines += scrollbackLineCount(line)
-	return []tea.Cmd{tea.Println(line)}
+	return []tea.Cmd{m.appendHistory(line)}
 }
 
 // startCompactCmd returns the tea.Cmd that actually runs Summarise. We

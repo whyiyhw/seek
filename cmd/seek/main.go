@@ -578,7 +578,7 @@ func run() error {
 			// spans multiple models or tier transitions. Subsequent
 			// turns are priced accurately at their own (model, tier).
 			if loaded.Usage.TotalTokens > 0 {
-				tracker.Record(loaded.Usage, *model, pricing.CurrentTier(time.Now()))
+				tracker.SetBase(loaded.Usage, *model, pricing.CurrentTier(time.Now()))
 			}
 		} else {
 			activeSession = session.New(*model, abs, systemPrompt, *yolo, *plan)
@@ -814,6 +814,13 @@ func run() error {
 			// the file's behaviour to be "loaded at launch", not "hot-
 			// reloaded"; documented behaviour is easier to reason
 			// about than clever).
+			//
+			// Skills, however, ARE hot-reloaded here so that newly
+			// installed skills (via skill_commit) appear in the system
+			// prompt manifest after /new without requiring a full restart.
+			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
+				skills = freshSkills
+			}
 			sp := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(policy.Mode()))
 			if section := projMD.Section(); section != "" {
 				sp = sp + "\n" + section

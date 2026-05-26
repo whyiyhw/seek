@@ -16,14 +16,10 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	m.distilling = false
 
 	if msg.err != nil {
-		line := styleErr.Render("  ! distill failed: " + msg.err.Error())
-		m.scrollbackLines += scrollbackLineCount(line)
-		return []tea.Cmd{tea.Println(line)}
+		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! distill failed: " + msg.err.Error()))}
 	}
 	if len(msg.candidates) == 0 {
-		line := styleMuted.Render("  · distill: the reasoner found nothing project-specific worth saving")
-		m.scrollbackLines += scrollbackLineCount(line)
-		return []tea.Cmd{tea.Println(line)}
+		return []tea.Cmd{m.appendHistory(styleMuted.Render("  · distill: the reasoner found nothing project-specific worth saving"))}
 	}
 	m.distillCandidates = msg.candidates
 	m.distillIdx = 0
@@ -32,9 +28,7 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	m.distillEditing = false
 	m.distillReviewOpen = true
 	m.input.Blur()
-	line := styleMuted.Render(fmt.Sprintf("  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [q] quit", len(msg.candidates)))
-	m.scrollbackLines += scrollbackLineCount(line)
-	return []tea.Cmd{tea.Println(line)}
+	return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf("  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [q] quit", len(msg.candidates))))}
 }
 
 // handleDistillKey is the review-modal key handler. Two sub-modes:
@@ -96,10 +90,8 @@ func (m Model) distillAcceptCurrent() (tea.Model, tea.Cmd) {
 	cand := m.distillCandidates[m.distillIdx]
 	var cmds []tea.Cmd
 	if err := saveDistillCandidate(m.opts.MemoryProject, cand); err != nil {
-		// Print and continue. The candidate is NOT counted as saved.
-		line := styleErr.Render(fmt.Sprintf("  ! save %q failed: %v", cand.Name, err))
-		m.scrollbackLines += scrollbackLineCount(line)
-		cmds = append(cmds, tea.Println(line))
+		// Commit and continue. The candidate is NOT counted as saved.
+		cmds = append(cmds, m.appendHistory(styleErr.Render(fmt.Sprintf("  ! save %q failed: %v", cand.Name, err))))
 		m.distillDropped++
 	} else {
 		m.distillSaved++
@@ -202,11 +194,9 @@ func (m Model) exitDistillReview(aborted bool) (tea.Model, tea.Cmd) {
 	if aborted && remaining > 0 {
 		suffix = fmt.Sprintf(", %d skipped", remaining)
 	}
-	line := styleMuted.Render(fmt.Sprintf(
+	return m, (&m).appendHistory(styleMuted.Render(fmt.Sprintf(
 		"  · distill review done: %d saved, %d dropped%s",
-		m.distillSaved, m.distillDropped, suffix))
-	m.scrollbackLines += scrollbackLineCount(line)
-	return m, tea.Println(line)
+		m.distillSaved, m.distillDropped, suffix)))
 }
 
 // saveDistillCandidate copies an approved candidate into M. The

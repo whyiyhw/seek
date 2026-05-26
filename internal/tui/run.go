@@ -1,29 +1,90 @@
 package tui
 
 import (
+	"fmt"
+	"os"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 )
 
-// Run starts the seek TUI program in inline mode (PRD §4.9). It blocks
-// until the user quits or the underlying context is cancelled.
+// Run starts the seek TUI program in inline mode. It blocks until the
+// user quits or the underlying context is cancelled.
 //
-// Architectural note: NO tea.WithAltScreen() — we want the terminal's
-// native scrollback to own committed conversation history (so Cmd+C
-// works across the entire session and the conversation survives exit).
-// NO tea.WithMouseCellMotion() either — that captures mouse events
-// and breaks native click-and-drag selection. Both choices are
-// deliberate; flipping them re-introduces fixed bugs.
+// Architectural note: inline mode (no `tea.WithAltScreen()`) lets the
+// terminal own scrollback, click-and-drag text selection, and the
+// mouse wheel. Committed conversation lines (user prompts, tool
+// results, assistant messages) are emitted via `tea.Println` from
+// `appendHistory`, which under inline mode flushes them immediately
+// into the terminal's native scrollback. The bubbletea live region
+// holds only volatile state — streaming text, active tool spinners,
+// popups, the input textarea, and the status bar — and sits naturally
+// at the end of the output stream.
+//
+// CRITICAL invariant: do NOT pad the live region with trailing
+// newlines to "pin" the input to the absolute terminal floor. That
+// pattern (counter-tracked `scrollbackLines` + `strings.Repeat("\n",
+// pad)`) is what caused the M3-era drift bugs documented in
+// `docs/pitfalls.md` and led to the alt-screen detour. The renderer's
+// cursor-up + EraseScreenBelow handles frame-to-frame height changes
+// natively; trying to outsmart it reintroduces the drift class.
+//
+// No mouse capture. Wheel scroll, click-drag selection, PgUp/PgDn —
+// the terminal handles them all. No `tea.WithMouseCellMotion()`.
+//
+// The welcome banner is printed once to stdout BEFORE `tea.NewProgram`
+// so it lives in terminal scrollback like any other shell-startup
+// output, never re-entering the live region.
 func Run(opts Options) error {
-	// Apply the colour theme before anything renders (banner, styles,
-	// etc.) so every package-level style var picks up the right palette.
+	// Apply the colour theme before anything renders so every
+	// package-level style var picks up the right palette.
 	SetTheme(opts.Theme)
 
-	// The welcome banner goes directly to stdout before bubbletea
-	// takes over so it ends up in scrollback above the live region.
-	PrintPixelWelcomeBanner(opts)
+	// Minimal scrollback marker. The animated pixel banner now lives in
+	// View() during the welcome state (turns==0), driven by a tickMsg.
+	// This one-line marker is all that goes to terminal scrollback so
+	// the user can identify the session in history.
+	muted := lipgloss.NewStyle().Foreground(colourMuted)
+	fmt.Fprintln(os.Stdout, muted.Render("  seek · "+opts.CWD))
+
+	// Resume replay. When the session was loaded with prior messages
+	// (--resume / --continue), dump them to scrollback BEFORE the
+	// program starts so they land as native terminal output rather
+	// than as N per-message tea.Println cycles. A 100-message resume
+	// without this fix triggers 100 redraw passes inside Update() and
+	// visibly floods the screen at startup.
+	//
+	// Query the terminal width for markdown rendering. Under inline
+	// mode we own stdout before bubbletea starts, so term.GetSize
+	// returns the real terminal dimensions even when stdout is a TTY.
+	// Fall back to 80 when piped / redirecting (same as initialSizeCmd).
+	replayWidth := 0
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		replayWidth = w
+	} else {
+		replayWidth = 80
+	}
+	if hist := renderReplayHistory(opts.Session, false, replayWidth, opts.GlamourStyle); hist != "" {
+		fmt.Fprintln(os.Stdout, hist)
+	}
 
 	m := New(opts)
 	p := tea.NewProgram(m)
-	_, err := p.Run()
-	return err
+	finalModel, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	// Session/resume hint after the live region tears down. The
+	// conversation itself is already in scrollback — `tea.Println`
+	// under inline mode flushed each commit live, no exit dump needed.
+	if m, ok := finalModel.(Model); ok {
+		if sess := m.opts.Session; sess != nil {
+			fmt.Fprintf(os.Stderr, "session: %s  (seek --resume %s)\n",
+				sess.ID, sess.ID)
+		}
+	}
+
+	return nil
 }

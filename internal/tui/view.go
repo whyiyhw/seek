@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -15,21 +14,32 @@ import (
 	"github.com/whyiyhw/seek/internal/pricing"
 )
 
-// View renders the LIVE region only (no scrollback — that belongs to
-// the terminal). Layout (idle welcome):
+// View renders the LIVE region only. Under inline mode, the terminal
+// owns scrollback — committed conversation lines (user prompts, tool
+// output, completed assistant messages) live there via tea.Println.
+// The live region holds only volatile state and floats naturally at
+// the end of the output stream.
 //
-//	[padding lines — fill terminal height]
+// Layout (idle):
+//
 //	> input
 //	status: …
 //
-// Layout (active):
+// Layout (active stream / popup):
 //
-//	[active tools]    ← one line each, with a spinner
+//	[active tools, one line each with a spinner]
 //	[streaming assistant text]
-//	[streaming reasoning, when showReasoning]
+//	[streaming reasoning, when Ctrl+R]
+//	[popup: approval / menu / picker, if any]
 //	── separator ─────────────────
 //	> input
 //	status: …
+//
+// CRITICAL: do NOT pad sb with trailing newlines to push the input to
+// the absolute terminal floor. That was the M3-era drift class
+// (`scrollbackLines` counter + `strings.Repeat("\n", pad)`). The
+// renderer's cursor-up + EraseScreenBelow handles frame-to-frame
+// height changes natively; let the live region sit where it sits.
 func (m Model) View() string {
 	if !m.ready {
 		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
@@ -37,11 +47,34 @@ func (m Model) View() string {
 		return styleMuted.Render("starting…") + "\n"
 	}
 
-	if m.helpOverlayOpen {
-		return m.renderHelpOverlay()
-	}
-
 	var sb strings.Builder
+
+	// Welcome banner (wordmark + cwd) — shown only on a session that
+	// hasn't received a user submission yet. Gated on promptHistory
+	// rather than m.turns because m.turns increments at TurnEnd, NOT
+	// at submit time — so a turns-only gate left the banner pinned in
+	// the live region from submit → TurnEnd. During that window
+	// tea.Println'd user/assistant lines landed in scrollback ABOVE
+	// the stuck banner, splitting the conversation across a 11-row
+	// banner divider. Worse, when TurnEnd finally fired the banner
+	// vanished in a single 11-row layout shrink — bubbletea's
+	// cursor-up + EraseScreenBelow over-erased and wiped real
+	// scrollback content. Gating on promptHistory makes the banner
+	// disappear on the FIRST Enter, before any streaming redraws.
+	if m.turns == 0 && len(m.promptHistory) == 0 {
+		// Narrow-terminal fallback: skip the pixel banner if the
+		// terminal is too small to render it without wrapping.
+		if m.width >= pixelBannerMinWidth {
+			sb.WriteByte('\n')
+			sb.WriteString(renderBanner(m.bannerFrame))
+			sb.WriteByte('\n')
+			sb.WriteString(styleMuted.Render("  " + m.opts.CWD))
+		} else {
+			sb.WriteString(styleMuted.Render("  seek · " + m.opts.CWD))
+		}
+		sb.WriteByte('\n')
+		sb.WriteByte('\n')
+	}
 
 	// Second-tier provider banner: warn that DeepSeek-exclusive features
 	// (cache stats, FIM, Reasoner) are disabled.
@@ -69,23 +102,28 @@ func (m Model) View() string {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render(m.streamingLabel()))
 	}
 
-	// Active tool lines — each shows a spinner and an elapsed-time
-	// tail. The spinner ticks ~80 ms which is also what drives the
-	// elapsed-time refresh; without that the user can't tell whether
-	// a long `think` call is alive or hung.
-	// When completionTokens > 0 (set at ToolExecEnd, before deferred
-	// cleanup), the final token count is shown for one frame.
+	// Active tool slots — finished ones stay visible until streamEnd
+	// clears the list, so the live region's tool zone grows but never
+	// shrinks within a turn. Running tools render with a spinner +
+	// live elapsed; finished tools render with ✓ + locked duration
+	// (computed at ToolExecEnd, not re-measured each frame).
 	for _, t := range m.activeTools {
-		elapsed := formatToolElapsed(time.Since(t.started))
 		label, style := formatActiveToolLabel(t.name, t.args)
-		if elapsed != "" {
-			label += " · " + elapsed
+		if t.finished {
+			duration := t.completed.Sub(t.started)
+			if d := formatCommittedDuration(duration); d != "" {
+				label += " · " + d
+			}
+			if tok := formatTokenTail(t.completionTokens); tok != "" {
+				label += " · " + tok
+			}
+			fmt.Fprintf(&sb, "%s %s\n", styleMuted.Render("✓"), style.Render(label))
+		} else {
+			if elapsed := formatToolElapsed(time.Since(t.started)); elapsed != "" {
+				label += " · " + elapsed
+			}
+			fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), style.Render(label))
 		}
-		tok := formatTokenTail(t.completionTokens)
-		if tok != "" {
-			label += " · " + tok
-		}
-		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), style.Render(label))
 	}
 
 	// Distill spinner — shown while /distill's reasoner call is
@@ -111,56 +149,18 @@ func (m Model) View() string {
 			sb.WriteString(styleReasoning.Render("▸ reasoning:\n" + indent(m.curReasoning, "    ")))
 			sb.WriteString("\n")
 		} else {
-			sb.WriteString(styleReasoning.Render("▸ reasoning… (Ctrl+R to expand)"))
+			sb.WriteString(styleReasoning.Render("▸ reasoning… (Ctrl+R to toggle)"))
 			sb.WriteString("\n")
 		}
 	}
 
-	// Separator only when there's live content above it — keeps idle
-	// state clean.
-	if sb.Len() > 0 {
-		sb.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
-		sb.WriteString("\n")
-	}
-
-	// When the live region is idle (no streaming, no tools, no menus,
-	// no approval prompt), push the input toward the bottom of the
-	// terminal. m.height is the FULL terminal height (from
-	// tea.WindowSizeMsg); welcomePadding fills whatever's left after
-	// the banner rows + the live region's own height — uncapped, so
-	// the input always pins to the bottom.
-	//
-	// Gated on scrollbackLines == 0 — i.e. "nothing has been Println'd
-	// above us". This covers BOTH first-launch (no turns yet) AND
-	// post-/clear (turns > 0 but the visible viewport is empty because
-	// tea.ClearScreen wiped it and cmdClear reset the counter). Using
-	// m.turns as the gate was a proxy that broke after /clear: input
-	// rendered at the TOP of the terminal until the next streamed turn
-	// scrolled it back down.
-	if m.isWelcomeScreen() && m.scrollbackLines == 0 {
-		if pad := welcomePadding(m.height); pad > 0 {
-			sb.WriteString(strings.Repeat("\n", pad))
-		}
-	}
-
-	// "Bottom block" — everything pinned to the bottom of the viewport:
-	// queue hint, setup banner, skill armed badge, INPUT, autocomplete
-	// dropdowns. Rendered into a separate buffer so its height is
-	// known BEFORE we decide where to place the bottom-pin pad — that
-	// way the input + status pin to the terminal bottom regardless of
-	// how tall the live region above grows during streaming.
-	//
-	// Historical note: this used to be written directly into sb and
-	// padded AFTER input/dropdowns (pad sat between input and status).
-	// Result: as agent output streamed in, the input slid DOWN with
-	// the live content while status stayed pinned — input "followed
-	// the output" instead of staying with the status bar. Putting
-	// the pad BEFORE this block fixes that.
+	// Bottom block — transient UI + (conditional) separator + input.
+	// Popup-style UI (queue hint / setup banner / skill-armed badge /
+	// approval / menu / picker) is rendered INSIDE bottomBuf above the
+	// separator so it visually anchors to the input region.
 	var bottomBuf strings.Builder
 
-	// Queue / steer hint — only meaningful mid-stream. Sits ABOVE the
-	// textarea so the user can see "what's already queued" and "what
-	// I'm currently typing" without the two visually merging.
+	// Queue / steer hint — only meaningful mid-stream.
 	if m.streaming {
 		if hint := m.renderQueueHint(); hint != "" {
 			bottomBuf.WriteString(hint)
@@ -168,9 +168,7 @@ func (m Model) View() string {
 		}
 	}
 
-	// Setup key-entry banner — same slot as the queue hint (mutually
-	// exclusive: /setup can't be opened mid-stream so we never need
-	// both at once).
+	// Setup key-entry banner.
 	if m.setupKeyEntry {
 		bottomBuf.WriteString(styleMuted.Render(fmt.Sprintf(
 			"✎ paste API key for %s — Enter to save, Esc to cancel",
@@ -178,34 +176,25 @@ func (m Model) View() string {
 		bottomBuf.WriteString("\n")
 	}
 
-	// Skill-armed badge — sits directly above the input so the user
-	// sees, at the moment they hit Enter, that their message will be
-	// wrapped with a skill instruction. Co-exists with the queue hint
-	// above (mid-stream + armed is legitimate — the armed wrapping
-	// applies to whatever message gets queued).
+	// Skill-armed badge.
 	if m.pendingSkill != "" {
 		bottomBuf.WriteString(styleToolSkill.Render(fmt.Sprintf("✦ skill armed: %s", m.pendingSkill)))
 		bottomBuf.WriteString(styleMuted.Render(" — next message uses this skill (/skill use clear to cancel)"))
 		bottomBuf.WriteString("\n")
 	}
 
-	// Input area FIRST (above any dropdown) — autocomplete popups
-	// attach BELOW the input, matching IDE / shell completer
-	// convention. With dropdowns above the input we were visually
-	// pushing the in-flight conversation upward when the user typed
-	// "/" or "@", obscuring whatever they were reading. Below-the-
-	// input keeps the upper conversation steady; the menu grows
-	// downward into the space just above the status bar.
-	bottomBuf.WriteString(m.renderInput())
-	bottomBuf.WriteString("\n")
-
-	// Approval prompt takes precedence — blurs the input, blocks
-	// everything else. After that, command menu and path picker are
-	// mutually exclusive in practice (different trigger chars).
-	// pendingQuestion sits one rank below pendingApproval: approvals
-	// gate filesystem mutations, so they outrank a model's "which
-	// option?" — though in practice only one of the two is ever
-	// active because they both block the agent goroutine.
+	// Decision UIs (approval / ask_user / distill review): variable
+	// height, user-blocking. They render in their own space; the
+	// input may shift to accommodate them, which is acceptable
+	// because the user has to attend to them before continuing.
+	//
+	// Filter popups (slash menu, model picker, path picker): render
+	// in a FIXED reserved zone of menuMaxRows + 1 rows above the
+	// separator. When no filter popup is open, the zone is blank —
+	// keeping the input position byte-stable across "user pressed /
+	// vs not". Without the reserved zone, opening any filter popup
+	// shifts the input by 9 rows, which is the residual jumping that
+	// users complained about even after fixed-height popups.
 	switch {
 	case m.pendingApproval != nil:
 		bottomBuf.WriteString(m.renderApprovalPrompt())
@@ -213,49 +202,50 @@ func (m Model) View() string {
 		bottomBuf.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
 		bottomBuf.WriteString(m.renderDistillReview())
-	case m.commandMenuOpen:
-		bottomBuf.WriteString(m.renderCommandMenu())
-	case m.modelPickerOpen:
-		bottomBuf.WriteString(m.renderModelPicker())
-	case m.pathPicker.open:
-		bottomBuf.WriteString(m.renderPathPicker())
-	}
-
-	// Bottom-pin pad — fills space BETWEEN live content and the bottom
-	// block so the whole input+status assembly sits on the terminal's
-	// last rows. Gated on scrollbackLines > 0 so we don't double-pad
-	// over welcomePadding (which fires in the idle scrollback==0 case).
-	if m.scrollbackLines > 0 && m.height > 0 {
-		liveHeight := strings.Count(sb.String(), "\n") + 1
-		bottomHeight := strings.Count(bottomBuf.String(), "\n") + 1
-		cursorRow := welcomeFixedLines + m.scrollbackLines
-		remaining := m.height - cursorRow
-		pad := remaining - liveHeight - bottomHeight - 2 // -2 for status bar + bottom rule
-		if pad > 0 {
-			sb.WriteString(strings.Repeat("\n", pad))
+	case m.helpOverlayOpen:
+		bottomBuf.WriteString(m.renderHelpOverlay())
+	default:
+		// Reserved-zone branch. Exactly one of the filter popups OR
+		// the blank-zone fallback fires; all paths emit menuMaxRows+1
+		// rows so the input position is the same in every branch.
+		switch {
+		case m.commandMenuOpen:
+			bottomBuf.WriteString(m.renderCommandMenu())
+		case m.modelPickerOpen:
+			bottomBuf.WriteString(m.renderModelPicker())
+		case m.pathPicker.open:
+			bottomBuf.WriteString(m.renderPathPicker())
+		default:
+			// Blank reserved zone. NOTE: this is fixed-height padding,
+			// NOT terminal-floor-pin padding. The drift class that led
+			// to the alt-screen detour was variable-height padding
+			// computed against m.height; this is a constant N regardless
+			// of terminal size.
+			bottomBuf.WriteString(strings.Repeat("\n", menuMaxRows+1))
 		}
 	}
 
+	// Separator above the input. Always drawn — there's now always
+	// content above (reserved zone or decision UI), so the separator
+	// is a stable demarcation rather than a conditional one.
+	bottomBuf.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
+	bottomBuf.WriteString("\n")
+
+	bottomBuf.WriteString(m.renderInput())
+	bottomBuf.WriteString("\n")
+
 	sb.WriteString(bottomBuf.String())
 
-	// Status line.
+	// Status line. No bottom rule — under inline mode the line below
+	// the status is either the next streamed update (still ours) or
+	// the post-exit shell prompt (cleanly separated by the program's
+	// natural teardown). The rule was a leftover from alt-screen
+	// where the live region needed a visual "seal".
 	sb.WriteString(m.renderStatusBar())
-
-	// Bottom rule — closes seek's live region visually so the next line
-	// in the terminal (shell prompt, neighbouring tmux pane bleed-through,
-	// etc.) doesn't appear to belong to seek. Muted so it recedes; full
-	// width so it acts as a clean horizontal seal.
-	if m.width > 0 {
-		sb.WriteString("\n")
-		sb.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
-	}
 
 	return sb.String()
 }
 
-// relayout adapts to a new terminal width. No viewport in inline mode,
-// so this is just resizing the textarea and (re)building the Markdown
-// renderer.
 func (m Model) relayout() Model {
 	if m.width == 0 || m.height == 0 {
 		return m
@@ -354,28 +344,74 @@ func formatTokensK(n int) string {
 	return fmt.Sprintf("%.1fk", float64(n)/1000)
 }
 
+// menuMaxRows is the fixed-height popup contract: every filter-driven
+// menu/picker renders exactly this many item rows regardless of how
+// many candidates match. Without this, filtering would shrink the
+// popup as the user types and grow it as they backspace — which under
+// inline mode visibly shifts the input up and down on every keystroke.
+// Holding row count constant pins the input position while the user
+// narrows their selection.
+const menuMaxRows = 8
+
+// menuWindow returns the visible [start, end) slice of items for a
+// fixed-height popup with `total` candidates and the cursor at
+// `selected`. When total <= menuMaxRows, the entire list is in view.
+// Otherwise the window of size menuMaxRows follows selected so the
+// cursor stays centred-ish (and never scrolls past either end).
+func menuWindow(total, selected int) (start, end int) {
+	if total <= menuMaxRows {
+		return 0, total
+	}
+	start = selected - menuMaxRows/2
+	if start < 0 {
+		start = 0
+	}
+	end = start + menuMaxRows
+	if end > total {
+		end = total
+		start = end - menuMaxRows
+	}
+	return start, end
+}
+
+// padMenuRows appends blank lines to sb so the menu's item section
+// reaches exactly menuMaxRows rows. emitted is how many item rows the
+// caller already wrote. No-op when the menu was already full.
+func padMenuRows(sb *strings.Builder, emitted int) {
+	for i := emitted; i < menuMaxRows; i++ {
+		sb.WriteByte('\n')
+	}
+}
+
 // renderCommittedUser renders the user's prompt for scrollback. Called
 // before tea.Println.
-// renderPathPicker draws the @-completion dropdown. Same vertical
-// shape as the slash menu so the input doesn't jump when the user
-// switches between "@" and "/".
+// renderPathPicker draws the @-completion dropdown. Fixed-height
+// rendering (menuMaxRows + footer) keeps the input from shifting as
+// the user narrows the filter.
 func (m Model) renderPathPicker() string {
-	if len(m.pathPicker.filtered) == 0 {
-		return styleMuted.Render("  (no files match — Esc to dismiss)") + "\n"
-	}
 	var sb strings.Builder
-	for i, p := range m.pathPicker.filtered {
-		if m.pathPicker.token != "" {
-			sb.WriteString(m.renderHighlightedPath(p, i == m.pathPicker.selected))
-		} else {
-			// No token — plain list (empty @ prompt).
-			if i == m.pathPicker.selected {
-				sb.WriteString(styleMenuSelected.Render("▸ " + p))
+	if len(m.pathPicker.filtered) == 0 {
+		sb.WriteString(styleMuted.Render("  (no files match — Esc to dismiss)"))
+		sb.WriteByte('\n')
+		// One row already emitted ("no files match"); pad the rest.
+		padMenuRows(&sb, 1)
+	} else {
+		start, end := menuWindow(len(m.pathPicker.filtered), m.pathPicker.selected)
+		for i := start; i < end; i++ {
+			p := m.pathPicker.filtered[i]
+			if m.pathPicker.token != "" {
+				sb.WriteString(m.renderHighlightedPath(p, i == m.pathPicker.selected))
 			} else {
-				sb.WriteString(styleMenuItem.Render("  " + p))
+				// No token — plain list (empty @ prompt).
+				if i == m.pathPicker.selected {
+					sb.WriteString(styleMenuSelected.Render("▸ " + p))
+				} else {
+					sb.WriteString(styleMenuItem.Render("  " + p))
+				}
 			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
+		padMenuRows(&sb, end-start)
 	}
 	sb.WriteString(styleMuted.Render("  Tab to insert · ↑/↓ to navigate · Esc to dismiss"))
 	sb.WriteString("\n")
@@ -522,6 +558,44 @@ func formatQuestionRow(_ int, label, description string, cursor, multi, selected
 	return styleMenuItem.Render(row)
 }
 
+// renderHelpOverlay draws the /help content as a dismissable overlay
+// in the live region. The overlay replaces the old scrollback-based
+// help output so it doesn't mix with the conversation history.
+func (m Model) renderHelpOverlay() string {
+	if !m.helpOverlayOpen || m.helpContent == "" {
+		return ""
+	}
+	// Wrap the help block in a NormalBorder + padding so it reads as
+	// a panel rather than blending into scrollback. We deliberately do
+	// NOT compute a centered floating panel against m.height (the M7
+	// design did, and it required scrollbackLines accounting that
+	// caused the M3-era drift bugs — see docs/pitfalls.md). The lighter
+	// "just a border" treatment gives the visual cue without re-
+	// introducing layout-by-magic-number.
+	var sb strings.Builder
+	sb.WriteString(m.helpContent)
+	sb.WriteString("\n")
+	sb.WriteString(styleMuted.Render("Press Esc or q to close help"))
+
+	// Constrain the panel width so it doesn't span the whole terminal
+	// on wide screens — readability tops out around 100 cols. Border
+	// adds 2 cols, padding adds 2 more, so cap the inner content at
+	// min(m.width-6, 100).
+	maxW := m.width - 6
+	if maxW > 100 {
+		maxW = 100
+	}
+	if maxW < 20 {
+		maxW = 20
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(colourMuted).
+		Padding(0, 1).
+		Width(maxW).
+		Render(sb.String()) + "\n"
+}
+
 // renderApprovalPrompt draws the inline y/N/a chooser shown while a
 // dangerous tool waits for a decision. For edit actions it also renders
 // the unified diff so the user can see exactly what will change.
@@ -606,19 +680,30 @@ func renderDiff(udiff string, _ int) string {
 // renderCommandMenu renders the slash-command dropdown. Selected row
 // is highlighted with a ▸ marker and an accent colour; others get a
 // neutral two-space indent so the visual rhythm matches.
+//
+// Fixed-height rendering (menuMaxRows item rows + 1 footer) keeps the
+// input position pinned as the user types and the filtered list
+// shrinks; without this, every keystroke would resize the popup and
+// shift the input up or down.
 func (m Model) renderCommandMenu() string {
-	if len(m.commandMenuFiltered) == 0 {
-		return styleMuted.Render("  (no commands match — Esc to dismiss)") + "\n"
-	}
 	var sb strings.Builder
-	for i, c := range m.commandMenuFiltered {
-		row := fmt.Sprintf("%-22s  %s", c.usage, c.description)
-		if i == m.commandMenuSelected {
-			sb.WriteString(styleMenuSelected.Render("▸ " + row))
-		} else {
-			sb.WriteString(styleMenuItem.Render("  " + row))
+	if len(m.commandMenuFiltered) == 0 {
+		sb.WriteString(styleMuted.Render("  (no commands match — Esc to dismiss)"))
+		sb.WriteByte('\n')
+		padMenuRows(&sb, 1)
+	} else {
+		start, end := menuWindow(len(m.commandMenuFiltered), m.commandMenuSelected)
+		for i := start; i < end; i++ {
+			c := m.commandMenuFiltered[i]
+			row := fmt.Sprintf("%-22s  %s", c.usage, c.description)
+			if i == m.commandMenuSelected {
+				sb.WriteString(styleMenuSelected.Render("▸ " + row))
+			} else {
+				sb.WriteString(styleMenuItem.Render("  " + row))
+			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
+		padMenuRows(&sb, end-start)
 	}
 	sb.WriteString(styleMuted.Render("  Tab to complete · ↑/↓ to navigate · Esc to dismiss"))
 	sb.WriteString("\n")
@@ -651,23 +736,29 @@ func (m Model) isCurrentPickerItem(id string) bool {
 }
 
 func (m Model) renderModelPicker() string {
-	if len(m.modelPickerFiltered) == 0 {
-		return styleMuted.Render("  (no models — Esc to dismiss)") + "\n"
-	}
 	var sb strings.Builder
-	for i, mc := range m.modelPickerFiltered {
-		marker := "  "
-		idLabel := mc.id
-		if m.isCurrentPickerItem(mc.id) {
-			idLabel = idLabel + " (current)"
+	if len(m.modelPickerFiltered) == 0 {
+		sb.WriteString(styleMuted.Render("  (no models — Esc to dismiss)"))
+		sb.WriteByte('\n')
+		padMenuRows(&sb, 1)
+	} else {
+		start, end := menuWindow(len(m.modelPickerFiltered), m.modelPickerSelected)
+		for i := start; i < end; i++ {
+			mc := m.modelPickerFiltered[i]
+			marker := "  "
+			idLabel := mc.id
+			if m.isCurrentPickerItem(mc.id) {
+				idLabel = idLabel + " (current)"
+			}
+			row := fmt.Sprintf("%-32s  %s", idLabel, mc.description)
+			if i == m.modelPickerSelected {
+				sb.WriteString(styleMenuSelected.Render("▸ " + row))
+			} else {
+				sb.WriteString(styleMenuItem.Render(marker + row))
+			}
+			sb.WriteString("\n")
 		}
-		row := fmt.Sprintf("%-32s  %s", idLabel, mc.description)
-		if i == m.modelPickerSelected {
-			sb.WriteString(styleMenuSelected.Render("▸ " + row))
-		} else {
-			sb.WriteString(styleMenuItem.Render(marker + row))
-		}
-		sb.WriteString("\n")
+		padMenuRows(&sb, end-start)
 	}
 	sb.WriteString(styleMuted.Render("  Tab/Enter to switch · ↑/↓ to navigate · Esc to dismiss"))
 	sb.WriteString("\n")
@@ -705,33 +796,78 @@ func (m Model) renderInput() string {
 	})
 }
 
-func renderCommittedUser(text string, width int) string {
+// renderUserBlock renders a completed user prompt for scrollback. Shared
+// by the live submit() path (update_agent.go) and renderReplayHistory
+// (replay.go) — the previous fork (renderCommittedUser + formatReplayUser)
+// drifted in width handling and was the kind of divergence Option A of
+// the v0.3.x review was meant to retire. width == 0 (replay pre-tea,
+// terminal size unknown) skips lipgloss wrapping and lets the terminal
+// wrap natively; live always passes m.width > 0.
+func renderUserBlock(text string, width int) string {
 	label := styleUserLabel.Render("▌ you")
-	body := lipgloss.NewStyle().Width(width - 2).Render(highlightRefs(text))
+	body := highlightRefs(text)
+	if width > 0 {
+		body = lipgloss.NewStyle().Width(width - 2).Render(body)
+	}
 	return "\n" + label + "\n" + body
 }
 
-// renderCommittedAssistant renders a completed assistant message for
-// scrollback. content is already Markdown-rendered when md was
-// available. The caller (applyAgentEvent on MessageEnd) only invokes
-// this when content is non-empty — pure tool-call turns no longer get
-// a `▸ seek` block — so we do not bother with an empty-content
-// placeholder here.
-func renderCommittedAssistant(content, reasoning string, showReasoning bool, width int) string {
-	label := styleAssistantLabel.Render("▸ seek")
-	out := label + "\n" + content
+// renderAssistantBlock renders a completed assistant message for
+// scrollback. Returns "" when content is empty so callers can drop
+// the no-op tea.Println — pure tool-call turns (reasoning + tool_calls,
+// no narrative) MUST NOT emit a `▸ seek` block (the `↳ tool(...)` lines
+// already convey what happened).
+//
+// Markdown rendering happens INSIDE the function (via md) so live and
+// replay get byte-identical output for the same (content, reasoning,
+// width, md, showReasoning) inputs. Previous design had callers pre-
+// render Markdown, which is exactly where the replay path forgot to
+// — the kind of divergence Option A was meant to retire. Pass md == nil
+// to skip rendering and emit raw content (used by tests; production
+// callers always have a renderer ready).
+func renderAssistantBlock(content, reasoning string, showReasoning bool, width int, md *glamour.TermRenderer) string {
+	if content == "" {
+		return ""
+	}
+	rendered := renderMarkdown(md, content)
+	if rendered == "" {
+		rendered = content
+	}
+	out := styleAssistantLabel.Render("▸ seek") + "\n" + rendered
 	if reasoning != "" {
 		if showReasoning {
 			out += "\n" + styleReasoning.Render("▸ reasoning:\n"+indent(reasoning, "    "))
 		} else {
-			out += "\n" + styleReasoning.Render("▸ reasoning hidden — Ctrl+R during streaming to expand")
+			out += "\n" + styleReasoning.Render("▸ reasoning hidden — Ctrl+R to toggle during streaming")
 		}
 	}
 	_ = width // wrap is already applied via the Markdown renderer
 	return out
 }
 
-func renderCommittedToolOk(name, args, result string, d time.Duration, tokenTail string) string {
+// renderToolResultLine renders one committed tool invocation for
+// scrollback. Replaces the old renderCommittedToolOk / Err pair so live
+// and replay share a single code path. err != nil → error rendering
+// (red header, error body inline, no diff section); err == nil → ok
+// rendering (muted header, optional ```diff body coloured per-line).
+//
+// d == 0 suppresses the duration tail (replay has no recorded
+// duration; formatCommittedDuration already drops sub-100ms operations
+// anyway). completionTokens == 0 suppresses the token tail.
+func renderToolResultLine(name, args, result string, err error, d time.Duration, completionTokens int) string {
+	if err != nil {
+		var head string
+		if name == skillToolName {
+			head = fmt.Sprintf("  ✦ skill: %s → ERROR: ", parseSkillName(args))
+		} else {
+			head = fmt.Sprintf("  ↳ %s(%s) → ERROR: ", name, args)
+		}
+		body := colorizeDiffBlocks(err.Error(), styleToolError)
+		tail := durationTail(d)
+		return styleToolError.Render(head) + body + styleToolError.Render(tail)
+	}
+
+	tokenTail := formatTokenTail(completionTokens)
 	var head string
 	if name == skillToolName {
 		head = styleToolSkill.Render(fmt.Sprintf("  ✦ skill: %s → %d bytes%s%s",
@@ -829,27 +965,6 @@ func colorizeDiffBody(s string) string {
 		}
 	}
 	return out.String()
-}
-
-func renderCommittedToolErr(name, args, err string, d time.Duration) string {
-	// Split the message into [chrome] + [body] + [tail] so the body can
-	// receive per-line styling while the framing keeps the uniform error
-	// colour. The body recogniser is in colorizeDiffBlocks — outside any
-	// ```diff fence it falls back to styleToolError, so a plain-text
-	// error renders byte-for-byte the way it always did.
-	//
-	// Skill errors reuse the "✦ skill: <name>" header so the failed call
-	// is still visually attributable to the skill mechanism — the colour
-	// itself (red) is what marks it as failed.
-	var head string
-	if name == skillToolName {
-		head = fmt.Sprintf("  ✦ skill: %s → ERROR: ", parseSkillName(args))
-	} else {
-		head = fmt.Sprintf("  ↳ %s(%s) → ERROR: ", name, args)
-	}
-	body := colorizeDiffBlocks(err, styleToolError)
-	tail := durationTail(d)
-	return styleToolError.Render(head) + body + styleToolError.Render(tail)
 }
 
 // colorizeDiffBlocks scans s for ```diff ... ``` fenced code blocks and
@@ -1006,111 +1121,4 @@ func renderMarkdown(r *glamour.TermRenderer, text string) string {
 		return text
 	}
 	return strings.TrimRight(out, "\n")
-}
-
-// ---- Help overlay ---------------------------------------------------------
-
-// renderHelpOverlay builds a floating centered panel showing all slash
-// commands and keybindings. Called from View when helpOverlayOpen is true.
-func (m Model) renderHelpOverlay() string {
-	// Collect content: commands + keys.
-	var content strings.Builder
-	content.WriteString(styleHeader.Render("Help — seek"))
-	content.WriteString("\n\n")
-
-	// Slash commands.
-	content.WriteString(styleStatusOffPeak.Render(" Commands "))
-	content.WriteString("\n")
-	sorted := allCommands()
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].usage < sorted[j].usage })
-	for _, c := range sorted {
-		names := strings.Join(c.names, ", ")
-		content.WriteString(fmt.Sprintf("  %-22s  %s\n", names, c.description))
-	}
-	content.WriteString("\n")
-
-	// Key bindings.
-	content.WriteString(styleStatusOffPeak.Render(" Keys "))
-	content.WriteString("\n")
-	type binding struct{ key, desc string }
-	bindings := []binding{
-		{"/help, /? or ?", "Show this help overlay"},
-		{"Enter", "Send prompt"},
-		{"↑ / ↓", "Recall prompt history (when input is empty)"},
-		{"Esc", "Cancel ongoing assistant response"},
-		{"Shift+Tab", "Cycle mode: ask → plan → yolo → ask"},
-		{"Ctrl+J", "Insert newline in input"},
-		{"Ctrl+L", "Clear visible screen (same as /clear)"},
-		{"Ctrl+R", "Toggle reasoning visibility"},
-		{"Ctrl+C", "Quit seek"},
-		{"/steer or Alt+Enter", "Interrupt current response with new instructions"},
-	}
-	for _, b := range bindings {
-		content.WriteString(fmt.Sprintf("  %-22s  %s\n", b.key, b.desc))
-	}
-	content.WriteString("\n")
-	content.WriteString(styleMuted.Render("Scrollback: use your terminal's native scrollback (not captured by seek)."))
-	content.WriteString("\n\n")
-	content.WriteString(styleMuted.Render("Esc / Enter / q  to close"))
-
-	// Panel width: 60% of terminal width, with sensible bounds.
-	panelW := int(float64(m.width) * 0.6)
-	if panelW < 50 {
-		if m.width > 54 {
-			panelW = 50
-		} else {
-			panelW = m.width - 4 // leave 2-char margin on each side
-		}
-	}
-	if panelW > 80 {
-		panelW = 80
-	}
-	if panelW < 30 {
-		panelW = 30 // absolute minimum — still readable
-	}
-
-	// Panel height: content-driven; let lipgloss handle wrapping and
-	// we measure the actual rendered line count for centering.
-	contentStr := content.String()
-	panel := lipgloss.NewStyle().
-		Width(panelW).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colourAccent).
-		Padding(1, 2).
-		Render(contentStr)
-
-	// Center the panel vertically. Use the actual rendered line count.
-	panelLines := strings.Count(strings.TrimRight(panel, "\n"), "\n") + 1
-	available := m.height - 3 // reserve for input line + status bar + margin
-	padTop := (available - panelLines) / 2
-	if padTop < 0 {
-		padTop = 0
-	}
-	padBottom := available - panelLines - padTop
-	if padBottom < 0 {
-		padBottom = 0
-	}
-
-	// Pad the panel horizontally — lipgloss already centers via Width,
-	// but we add left padding to shift it toward center.
-	leftPad := (m.width - panelW) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-
-	var sb strings.Builder
-	sb.WriteString(strings.Repeat("\n", padTop))
-	for _, line := range strings.Split(strings.TrimRight(panel, "\n"), "\n") {
-		sb.WriteString(strings.Repeat(" ", leftPad))
-		sb.WriteString(line)
-		sb.WriteString("\n")
-	}
-	sb.WriteString(strings.Repeat("\n", padBottom))
-
-	// Input area and status bar still visible at the bottom.
-	sb.WriteString(m.renderInput())
-	sb.WriteString("\n")
-	sb.WriteString(m.renderStatusBar())
-
-	return sb.String()
 }

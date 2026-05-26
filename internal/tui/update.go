@@ -18,10 +18,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.relayout()
 
 	case tea.KeyMsg:
-		// Inline mode has no in-process scrollable region — the
-		// terminal does that natively. So we don't intercept PgUp/PgDn
-		// for an internal viewport; they go to the terminal's
-		// scrollback like in any normal shell.
+		// Inline mode: PgUp/PgDn/Home/End and the mouse wheel all go
+		// to the terminal's native scrollback — we don't capture mouse
+		// events, and the viewport widget is gone. handleKey only
+		// owns key bindings the textarea / overlays care about.
 		return m.handleKey(msg)
 
 	case agentEventMsg:
@@ -44,6 +44,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// up the moment the discount kicks in.
 		m.refreshPlaceholder()
 		cmds = append(cmds, tickStatusEvery(time.Minute))
+
+	case bannerTickMsg:
+		// Advance the wordmark reveal animation by one frame.
+		if m.bannerFrame < len(letterEndCols) {
+			m.bannerFrame++
+			// Schedule next tick. 150ms gives a crisp letter-by-letter
+			// reveal without feeling sluggish.
+			if m.bannerFrame < len(letterEndCols) {
+				cmds = append(cmds, tickBannerEvery(150*time.Millisecond))
+			}
+		}
 
 	case spinner.TickMsg:
 		var spCmd tea.Cmd
@@ -87,14 +98,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case upgradeDoneMsg:
 		cmds = append(cmds, m.handleUpgradeDone(msg)...)
-
-	case cleanupToolMsg:
-		for i, t := range m.activeTools {
-			if t.callID == msg.callID {
-				m.activeTools = append(m.activeTools[:i], m.activeTools[i+1:]...)
-				break
-			}
-		}
 	}
 
 	return m, tea.Batch(cmds...)
