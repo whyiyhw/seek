@@ -40,8 +40,15 @@ import (
 )
 
 // CurrentSchemaVersion is incremented whenever the on-disk layout
-// changes in a backward-incompatible way. JSONL format = version 2.
-const CurrentSchemaVersion = 2
+// changes in a backward-incompatible way.
+//
+//	v1 — single JSON file (pre-M5)
+//	v2 — JSONL: header line + one deepseek.Message per line
+//	v3 — v2 + assistant messages may carry an optional
+//	     `predicted_next` field for v4 柱 D suggested-reply
+//	     (additive; v2 readers ignore the field via Go's default
+//	     unknown-field handling, so cross-version compat is preserved)
+const CurrentSchemaVersion = 3
 
 // Session is the in-memory (and on-disk) representation of one
 // conversation. All time fields are UTC; ID is sortable by creation

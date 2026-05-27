@@ -91,3 +91,18 @@ type observeDoneMsg struct {
 	OK      bool
 	Err     string
 }
+
+// suggestionReadyMsg fires when the v4 柱 D suggester's side-channel
+// prediction returns. Text="" is the explicit "no useful prediction"
+// sentinel (timed out, errored, model refused) — Update should clear
+// any pending placeholder rather than show empty hint.
+//
+// See PRD docs/prd/feature-suggested-reply.md §4.1.
+type suggestionReadyMsg struct {
+	Text string
+	// Turn is the assistant turn index this prediction was generated
+	// for. Used by Update to drop stale predictions: if the user has
+	// already submitted another turn between stream-end and this
+	// callback firing, Turn won't match the current head and we skip.
+	Turn int
+}

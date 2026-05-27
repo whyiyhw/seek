@@ -37,6 +37,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// All cmds for this case are returned from handleStreamEnd.
 		return m.handleStreamEnd(msg)
 
+	case suggestionReadyMsg:
+		// v4 柱 D side-channel prediction landed. Drop stale results
+		// (user submitted another turn while the goroutine was in
+		// flight) and "no prediction" sentinels. Otherwise stash for
+		// rendering + persist to agent so calibration sees it next
+		// turn.
+		if m.opts.Agent == nil {
+			return m, nil
+		}
+		if len(m.opts.Agent.Messages()) != msg.Turn {
+			return m, nil
+		}
+		if msg.Text == "" {
+			return m, nil
+		}
+		// User started typing while we were waiting — don't shove
+		// a placeholder under their cursor.
+		if m.input.Value() != "" {
+			return m, nil
+		}
+		m.suggestedReply = msg.Text
+		m.suggestedReplyValid = true
+		m.suggestedReplyTurn = msg.Turn
+		if pa, ok := m.opts.Agent.(predictionAttacher); ok {
+			pa.AttachPredictedNext(msg.Text)
+			(&m).persistSession()
+		}
+		return m, nil
+
 	case statusTickMsg:
 		m.now = time.Now()
 		// A minute passed — off-peak window may have just opened or

@@ -32,6 +32,7 @@ import (
 	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/keyscli"
+	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -565,6 +566,7 @@ func run() error {
 		resume        = flag.String("resume", "", "load a saved session by ID (see seek -list)")
 		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
+		noSuggest     = flag.Bool("no-suggest", false, "disable v4 柱 D suggested-reply (predictor + UI placeholder + calibration injection); equivalent to suggest_reply=false in ~/.seek/config.json")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
 		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
@@ -1105,6 +1107,22 @@ func run() error {
 		}
 	}
 
+	// v4 柱 D suggested-reply: a single switch (`--no-suggest` CLI flag
+	// trumps `suggest_reply: true|false` in ~/.seek/config.json; absent
+	// config field defaults to enabled). When disabled, both the
+	// Predictor and the InjectCalibration message-preparer are nil —
+	// `agent.runTurn*` no-ops the PrepareMessages hook on nil, and the
+	// TUI suggester goroutine is gated on Options.Suggester != nil.
+	// PRD docs/prd/feature-suggested-reply.md §4.7.
+	appCfg, _ := config.Load()
+	suggestEnabled := !*noSuggest && appCfg.SuggestReplyEnabled() && dsClient != nil
+	var predictor *suggester.Predictor
+	var prepareMessages func([]deepseek.Message) []deepseek.Message
+	if suggestEnabled {
+		predictor = suggester.New(dsClient)
+		prepareMessages = suggester.InjectCalibration
+	}
+
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
 		Provider:        provider,
@@ -1117,6 +1135,7 @@ func run() error {
 		AutoContinue:    *autoContinue,
 		InitialMessages: initialMsgs,
 		Hooks:           hooksReg,
+		PrepareMessages: prepareMessages,
 	})
 	if err != nil {
 		return err
@@ -1355,6 +1374,7 @@ func run() error {
 		Store:                 store,
 		Checkpoint:            ckMgr,
 		Keymap:                userKeymap,
+		Suggester:             predictor,
 		Skills:                skills,
 		ProviderName:          provLabel,
 		MemoryProject:         memProject,

@@ -39,6 +39,16 @@ type Message struct {
 	// subsequent request — DeepSeek rejects requests that include prior
 	// reasoning_content fields.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
+
+	// PredictedNext is the v4 柱 D "suggested reply" prediction generated
+	// by a side-channel call after this assistant turn ended. It is
+	// PURELY a session-persistence field — `PrepareForSend` strips it
+	// before every API call so DeepSeek never sees the field. Stored
+	// here (rather than as a sidecar) for proximity: each assistant
+	// message carries the prediction it spawned, and the next user
+	// message's match check can read it via a single-step lookback.
+	// See PRD docs/prd/feature-suggested-reply.md §4.5.
+	PredictedNext string `json:"predicted_next,omitempty"`
 }
 
 type ToolCall struct {

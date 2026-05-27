@@ -275,6 +275,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Inline mode: PgUp/PgDn/Home/End and the mouse wheel all go to
 	// the terminal's native scrollback. We no longer intercept them.
 
+	// v4 柱 D suggested-reply: Tab accepts the pending prediction when
+	// no picker / menu wants Tab for its own purpose AND the input box
+	// is empty (Tab on non-empty input is the textarea-native "insert
+	// tab char" / focus-jump). PRD docs/prd/feature-suggested-reply.md §4.4.
+	if msg.Type == tea.KeyTab &&
+		m.suggestedReply != "" &&
+		m.suggestedReplyValid &&
+		m.input.Value() == "" {
+		m.input.SetValue(m.suggestedReply)
+		m.suggestedReplyValid = false
+		// Don't clear m.suggestedReply itself — it stays on the
+		// assistant message for session persistence; only the
+		// "show placeholder" gate flips off.
+		return m, nil
+	}
+
 	// Action-based dispatch. The keymap layer (internal/keymap) translates
 	// raw bubbletea KeyMsgs into named, user-rebindable Actions. The
 	// switch below dispatches by Action; only the very-special cases
@@ -287,6 +303,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case keymap.ActionCancel:
+		// v4 柱 D: Esc hides any active suggestion placeholder. Text
+		// itself stays on the assistant message — the user dismissed
+		// the suggestion UI but session persistence + calibration
+		// signal continue to function. PRD §4.4.
+		m.suggestedReplyValid = false
 		// Cancel in review branch-entry mode cancels without action.
 		// Checked BEFORE the streaming branch so a streaming user
 		// in branch-entry mode can cancel the entry, not the stream.

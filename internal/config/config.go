@@ -54,6 +54,25 @@ type Config struct {
 	// prompt has been shown (or dismissed) on Windows. Prevents
 	// nagging on every startup.
 	PathPromptDone bool `json:"path_prompt_done,omitempty"`
+
+	// SuggestReply gates the v4 柱 D suggested-reply subsystem (single
+	// switch covers prediction + UI + calibration injection — PRD
+	// docs/prd/feature-suggested-reply.md §4.7). Pointer so we can
+	// distinguish "field absent → default on" from "field present and
+	// false → user explicitly turned it off"; a bool would silently
+	// default to false for any config file written before v4.
+	SuggestReply *bool `json:"suggest_reply,omitempty"`
+}
+
+// SuggestReplyEnabled returns whether the suggested-reply feature
+// should run, with a default of true when SuggestReply is unset.
+// Use this rather than reading the pointer directly so the
+// default-on policy lives in one place.
+func (c *Config) SuggestReplyEnabled() bool {
+	if c == nil || c.SuggestReply == nil {
+		return true
+	}
+	return *c.SuggestReply
 }
 
 // ProviderConfig holds the per-provider state. APIKey is the only

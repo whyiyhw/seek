@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -107,8 +108,55 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		return newM, tea.Batch(cmds...)
 	}
 
+	// v4 柱 D suggested-reply: spawn side-channel prediction off the
+	// bubbletea thread. Fires only at "at rest, ready for next user
+	// input" (no queue / steer auto-fired above). PRD §3 triggers
+	// gate further inside scheduleSuggestion.
+	if cmd := m.scheduleSuggestion(wasCanceled); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
 	_ = msg
 	return m, tea.Batch(cmds...)
+}
+
+// scheduleSuggestion returns a tea.Cmd that runs the suggester's
+// side-channel prediction off the bubbletea thread and surfaces the
+// result via suggestionReadyMsg. Returns nil when prediction
+// shouldn't fire (PRD docs/prd/feature-suggested-reply.md §3):
+//
+//   - no suggester configured (—no-suggest)
+//   - no agent / no history
+//   - stream was user-canceled (Esc)
+//   - input box already has text (user beat the prediction)
+//   - last assistant turn was a tool dispatch (no text to predict from)
+func (m Model) scheduleSuggestion(wasCanceled bool) tea.Cmd {
+	if m.opts.Suggester == nil || m.opts.Agent == nil {
+		return nil
+	}
+	if wasCanceled {
+		return nil
+	}
+	if m.input.Value() != "" {
+		return nil
+	}
+	history := m.opts.Agent.Messages()
+	if len(history) == 0 {
+		return nil
+	}
+	last := history[len(history)-1]
+	if last.Role != deepseek.RoleAssistant || len(last.ToolCalls) > 0 {
+		return nil
+	}
+	turn := len(history)
+	sug := m.opts.Suggester
+	ctxRoot := m.opts.Ctx
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(ctxRoot, suggester.PredictionTimeout)
+		defer cancel()
+		text := sug.Suggest(ctx, history)
+		return suggestionReadyMsg{Text: text, Turn: turn}
+	}
 }
 
 // submit kicks off an agent.Prompt for the given user text. Before
@@ -121,6 +169,14 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.promptHistory = append(m.promptHistory, text)
 	m.historyIdx = -1
 	m.savedDraft = ""
+
+	// v4 柱 D: clear the suggested-reply state on submit. The
+	// PredictedNext field on the prior assistant message is already
+	// persisted (via attachPredictedNext fired on suggestionReadyMsg
+	// arrival); the TUI placeholder is per-turn UX and resets to
+	// empty for the next turn.
+	m.suggestedReply = ""
+	m.suggestedReplyValid = false
 
 	m.curContent = ""
 	m.curReasoning = ""

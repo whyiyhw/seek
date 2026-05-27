@@ -42,6 +42,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -68,6 +69,15 @@ type AgentClient interface {
 	SetModel(string)
 	SetEffort(string)
 	SetLang(string)
+}
+
+// predictionAttacher is an OPTIONAL sibling interface (CLAUDE.md
+// "Sink interfaces: don't break the main contract"). The TUI's
+// suggestionReadyMsg handler type-asserts and only attaches when the
+// agent supports it; fake agents in tests don't need to implement it.
+// *agent.Agent satisfies this structurally.
+type predictionAttacher interface {
+	AttachPredictedNext(text string)
 }
 
 // Options bundles everything cmd/seek hands the TUI. Hooks let in-app
@@ -117,6 +127,13 @@ type Options struct {
 	// resolves through m.keymap() which always returns non-nil so
 	// existing tests don't need to construct one.
 	Keymap *keymap.KeyMap
+
+	// Suggester is the v4 柱 D side-channel predictor (PRD docs/prd/
+	// feature-suggested-reply.md). nil = disabled (—no-suggest or
+	// `suggest_reply: false`); the TUI silently skips spawning the
+	// prediction goroutine on stream-end. Tests can leave nil; the
+	// prediction integration is opt-in by Options not by default.
+	Suggester *suggester.Predictor
 
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
@@ -252,6 +269,21 @@ type Model struct {
 	promptHistory []string
 	historyIdx    int
 	savedDraft    string
+
+	// suggestedReply is the v4 柱 D side-channel prediction of the
+	// user's next message. Set by suggestionReadyMsg; cleared on
+	// Tab accept, on Enter submit, or invalidated (kept in field
+	// but suggestedReplyValid=false) when the user starts typing.
+	// Empty string = no active suggestion.
+	suggestedReply string
+	// suggestedReplyValid gates rendering: true → show the muted
+	// "↳ tab: ..." hint; false → suppress even if suggestedReply is
+	// non-empty (we still keep the text for stats / debugging).
+	suggestedReplyValid bool
+	// suggestedReplyTurn is the assistant turn index this prediction
+	// targets — used by Update to drop late-arriving predictions
+	// when the user has already moved past that turn.
+	suggestedReplyTurn int
 
 	stream    <-chan agent.Event
 	streaming bool

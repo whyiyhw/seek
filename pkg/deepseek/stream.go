@@ -318,6 +318,10 @@ func truncate(s string, n int) string {
 // model, which rejected any request that retained prior
 // reasoning_content. The pitfall is documented in docs/pitfalls.md.
 //
+// As of v4 柱 D, this function also clears PredictedNext on every
+// message — that field is a session-persistence-only artifact (see
+// pkg/deepseek/types.go), and DeepSeek doesn't accept it.
+//
 // Callers should always run history through this function before
 // resending — the conditional logic lives here so individual call
 // sites don't need to track which assistant turns had tool_calls.
@@ -325,6 +329,10 @@ func StripReasoningContent(msgs []Message) []Message {
 	out := make([]Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = m
+		// PredictedNext is always stripped — it's a side-channel UX
+		// hint that lives in the session JSONL but never crosses the
+		// API boundary.
+		out[i].PredictedNext = ""
 		if m.Role == RoleAssistant && len(m.ToolCalls) > 0 {
 			// Required by the API — keep reasoning_content intact.
 			continue

@@ -83,6 +83,23 @@ type Config struct {
 	// by the caller (typically cmd/seek/main.go), not by the agent —
 	// the agent doesn't know when its host program is "done".
 	Hooks *hooks.Registry
+
+	// PrepareMessages, when non-nil, runs as the final transform on
+	// the message slice immediately before every ChatRequest is sent
+	// — AFTER deepseek.StripReasoningContent has cleaned up
+	// reasoning_content / predicted_next, but BEFORE the bytes leave
+	// the process.
+	//
+	// Used by v4 柱 D (internal/suggester.InjectCalibration) to insert
+	// a synthetic system note before the latest user message when the
+	// prior turn's prediction missed. Kept generic — any future
+	// "tweak messages just before send" feature can use the same
+	// hook without modifying agent internals.
+	//
+	// Contract: must be PURE (no side effects); returning the input
+	// unchanged is a valid no-op; must not mutate the input slice
+	// (caller may reuse it later).
+	PrepareMessages func([]deepseek.Message) []deepseek.Message
 }
 
 // Agent holds the persistent state for one conversation. It is NOT safe for
@@ -259,6 +276,25 @@ func (a *Agent) Messages() []deepseek.Message {
 	out := make([]deepseek.Message, len(a.messages))
 	copy(out, a.messages)
 	return out
+}
+
+// AttachPredictedNext writes text onto the PredictedNext field of the
+// most recent text-content assistant message (i.e. the one that ended
+// the last turn — len(ToolCalls)==0). No-op when no such message
+// exists. Used by v4 柱 D's TUI suggester integration to persist a
+// side-channel prediction so it round-trips through session save +
+// resume and so the next turn's calibration check can read it back.
+//
+// PRD docs/prd/feature-suggested-reply.md §4.5.
+func (a *Agent) AttachPredictedNext(text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == deepseek.RoleAssistant && len(a.messages[i].ToolCalls) == 0 {
+			a.messages[i].PredictedNext = text
+			return
+		}
+	}
 }
 
 // Reset replaces the agent's non-system message history with the
@@ -609,9 +645,13 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 
 // runTurnDeepSeek is the original DeepSeek-specific streaming path.
 func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
+	msgs := deepseek.StripReasoningContent(a.messages)
+	if a.cfg.PrepareMessages != nil {
+		msgs = a.cfg.PrepareMessages(msgs)
+	}
 	req := &deepseek.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  deepseek.StripReasoningContent(a.messages),
+		Messages:  msgs,
 		MaxTokens: a.cfg.MaxTokens,
 	}
 	// V4 shipped Thinking as a request parameter rather than a separate
@@ -754,9 +794,17 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 // assistant turn as a deepseek.Message so the rest of the agent loop
 // (history, session save, TUI rendering) is unchanged.
 func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
+	// Apply PrepareMessages on the deepseek.Message form (where
+	// calibration injection makes sense) then convert to llm.Message.
+	// msgsToLLM is the byte-shape conversion; it shouldn't know about
+	// calibration semantics.
+	prepared := a.messages
+	if a.cfg.PrepareMessages != nil {
+		prepared = a.cfg.PrepareMessages(prepared)
+	}
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  msgsToLLM(a.messages),
+		Messages:  msgsToLLM(prepared),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
 	}

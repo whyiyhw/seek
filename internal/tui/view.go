@@ -251,6 +251,10 @@ func (m Model) View() string {
 
 	bottomBuf.WriteString(m.renderInput())
 	bottomBuf.WriteString("\n")
+	if hint := m.renderSuggestedReplyHint(); hint != "" {
+		bottomBuf.WriteString(hint)
+		bottomBuf.WriteString("\n")
+	}
 
 	sb.WriteString(bottomBuf.String())
 
@@ -848,6 +852,32 @@ func highlightRefs(text string) string {
 		}
 	}
 	return styled.String()
+}
+
+// renderSuggestedReplyHint returns the muted "↳ tab: ..." line shown
+// below the input box when a v4 柱 D side-channel prediction is
+// available AND the input box is empty. Returns "" otherwise — the
+// caller suppresses the surrounding newline. PRD docs/prd/
+// feature-suggested-reply.md §4.4.
+//
+// Gate (in order):
+//  1. suggestedReply non-empty
+//  2. suggestedReplyValid true (not invalidated by Esc / typing)
+//  3. input box empty (don't render OVER a user-typed prompt)
+//  4. not streaming + not in modal entry mode — the placeholder is a
+//     suggestion for "what to send next", which is meaningless during
+//     review-branch / setup-key wizards.
+func (m Model) renderSuggestedReplyHint() string {
+	if m.suggestedReply == "" || !m.suggestedReplyValid {
+		return ""
+	}
+	if m.input.Value() != "" {
+		return ""
+	}
+	if m.streaming || m.setupKeyEntry || m.reviewBranchEntry {
+		return ""
+	}
+	return styleMuted.Render("  ↳ tab: " + truncateOneLine(m.suggestedReply, max(20, m.width-12)))
 }
 
 // renderInput returns the textarea's view with @-prefixed file references
