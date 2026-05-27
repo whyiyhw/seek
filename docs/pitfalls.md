@@ -33,6 +33,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## TUI / terminal
 
+### Explicit `Accept-Encoding: gzip` header disables Go's auto-decompression
+- **Saw**: webfetch tool returned the raw gzip-compressed bytes of an HTTPS HTML response instead of decoded text. The model saw garbage where the doc body should be and reported "gzip 压缩的 HTML，无法正常解码显示内容"
+- **Why**: in webfetch.go we set `req.Header.Set("Accept-Encoding", "gzip")` manually. Go's `http.Transport` normally requests gzip on the caller's behalf AND transparently decodes the response body — but when the user explicitly sets `Accept-Encoding`, the transport interprets it as "the caller wants to decode this themselves" and skips decompression. Documented at `net/http.Transport.DisableCompression`: *"If the Transport requests gzip on its own and gets a gzipped response, it's transparently decoded in the Response.Body. However, if the user explicitly requested gzip it is not automatically uncompressed."*
+- **Fix**: remove the manual `Set("Accept-Encoding", ...)` line. Go's transport adds it for us AND decodes — both ends transparent. Commit `4efcdd4`
+- **Lesson**: never set `Accept-Encoding` manually unless you're actually going to decode by hand. The header acts as an opt-in into "DIY decompression" mode that you almost certainly don't want. Same gotcha applies to brotli (`Accept-Encoding: br`) if you ever add it — but Go's stdlib doesn't auto-handle br at all, so adding br means committing to manual decode anyway. For v1 we don't need br; the no-set default gets gzip transparently
+- **Refs**: `internal/tools/webfetch/webfetch.go` (header set site), `internal/tools/webfetch/webfetch_test.go:TestExecute_AutoDecodesGzip` (regression test serving gzipped content)
+
 ### "starting seek …" placeholder stuck for seconds (or forever)
 - **Saw**: launching the TUI showed only the welcome banner / placeholder, no input box, no status bar; could last from a second to "never resolves"
 - **Why**: bubbletea is supposed to send a `WindowSizeMsg` on startup so the layout can size itself, but on some terminal / tmux / `go run` combinations that first message is delayed or dropped. Without dimensions, `relayout()` returned early and `m.ready` stayed false
