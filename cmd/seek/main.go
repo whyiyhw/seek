@@ -25,6 +25,8 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hooks"
+	"github.com/whyiyhw/seek/internal/hooksconfig"
+	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -476,6 +478,13 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	// `seek hooks ...` — list / check / trust / audit. Dispatched
+	// before global flag parse for the same reason as `skill`:
+	// hooks queries don't need API keys, sessions, or a project
+	// directory. See PRD docs/prd/feature-shell-hooks.md §4.1.
+	if len(os.Args) >= 2 && os.Args[1] == "hooks" {
+		return hookscli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
 
 	var (
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
@@ -893,6 +902,52 @@ func run() error {
 	// program is "done".
 	hooksReg := hooks.NewRegistry()
 
+	// v3 pillar B — user-configurable shell hooks. Gate() reads
+	// ~/.seek/hooks.toml (no trust prompt) and <project>/.seek/hooks.toml
+	// (trust-on-first-visit + sha256-change re-prompt), then merges +
+	// static-checks. The CLI/print paths run without a TrustPrompt so
+	// project hooks stay dormant until the user trusts them from a
+	// TUI session; this matches the PRD §3.5 "no bash before trust"
+	// guarantee — the only way `bash -c` runs is via the StaticCheck
+	// inside Gate (`bash -n`, safe) and via ShellRunner at dispatch
+	// time AFTER Register, which only happens when HasHooks is true.
+	userHooksPath, _ := paths.UserHooksToml()
+	projectHooksPath := paths.ProjectHooksToml(abs)
+	trustPath, _ := paths.TrustedProjectsJSON()
+	auditPath, _ := paths.HooksAuditLog()
+	trustStore, err := hooksconfig.NewTrustStore(trustPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "hooks:", err)
+	}
+	hookCfg, hookWarnings := hooksconfig.Gate(
+		userHooksPath, projectHooksPath, abs, trustStore,
+		// TUI launches install a real TrustPrompt later (see
+		// startupHooksTrust); for now we pass nil — Gate will exclude
+		// untrusted project hooks rather than block. In TUI mode the
+		// user can re-launch after `seek hooks trust --reset` once
+		// they've reviewed hooks.toml.
+		nil,
+		hooksconfig.DefaultSyntaxChecker,
+	)
+	for _, w := range hookWarnings {
+		fmt.Fprintln(os.Stderr, w)
+	}
+	var shellRunner *hooks.ShellRunner
+	if !hookCfg.IsEmpty() {
+		auditLog, alerr := hooksconfig.NewAuditLog(auditPath)
+		if alerr != nil {
+			fmt.Fprintln(os.Stderr, "hooks: audit log:", alerr)
+		}
+		shellRunner = hooks.NewShellRunner(hookCfg,
+			hooks.WithAuditLog(auditLog),
+			hooks.WithVersion(tui.VersionString()),
+			hooks.WithProjectContext(paths.ProjectID(abs), abs),
+		)
+		if shellRunner.HasHooks() {
+			hooksReg.Register(shellRunner)
+		}
+	}
+
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
 		Provider:        provider,
@@ -1013,6 +1068,12 @@ func run() error {
 			ID:    sessionID,
 			Usage: tracker.Cumulative(),
 		})
+		// Flush the shell-hook audit log on the way out. SessionEnd
+		// observers in ShellRunner write one final audit row; Close
+		// makes sure the file's fsync isn't lost to a fast exit.
+		if shellRunner != nil {
+			_ = shellRunner.Close()
+		}
 	}()
 
 	// Benchmark mode: short-circuit before normal routing. Forces --yolo

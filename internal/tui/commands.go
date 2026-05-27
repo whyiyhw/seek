@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/session"
@@ -63,6 +64,7 @@ func allCommands() []command {
 		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Use or manage skills. `use <name>` arms next message (or fire with inline task); install/list/status/stats/uninstall/update/help mirror the CLI.", handler: cmdSkillCLI},
 		{names: []string{"/skills"}, usage: "/skills [--used]", description: "List loaded skills, or --used to see which were called in this session.", handler: cmdSkills},
 		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", handler: cmdMemoryCLI},
+		{names: []string{"/hooks"}, usage: "/hooks [verb]", description: "Inspect shell hooks (mirrors `seek hooks` CLI: list, check, trust, audit). Default verb = list.", handler: cmdHooksCLI},
 		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
@@ -1415,6 +1417,36 @@ func cmdSkillUse(m *Model, tokens []string) cmdResult {
 // separate tokens. The underlying CLI's FlagSet only sees the first token,
 // causing unexpected parse errors. This matches the identical limitation
 // in cmdSkillCLI — both use the same dispatcher pattern.
+// cmdHooksCLI mirrors `seek hooks ...` inside the TUI. Default verb
+// (no args) is `list` for consistency with the PRD §4.2 UX
+// requirement that /hooks be equivalent to `seek hooks list` for the
+// bare command. All other verbs are forwarded verbatim.
+func cmdHooksCLI(_ *Model, args string) cmdResult {
+	tokens := strings.Fields(args)
+	if len(tokens) == 0 {
+		tokens = []string{"list"}
+	}
+	var stdout, stderr bytes.Buffer
+	err := hookscli.Run(tokens, &stdout, &stderr)
+	var b strings.Builder
+	if s := strings.TrimRight(stdout.String(), "\n"); s != "" {
+		b.WriteString(s)
+	}
+	if s := strings.TrimRight(stderr.String(), "\n"); s != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(s))
+	}
+	if err != nil {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(styleMuted.Render(err.Error()))
+	}
+	return cmdResult{text: b.String()}
+}
+
 func cmdMemoryCLI(_ *Model, args string) cmdResult {
 	tokens := strings.Fields(args)
 	var stdout, stderr bytes.Buffer

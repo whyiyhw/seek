@@ -62,6 +62,9 @@ func TestSubdirs_ComposeUnderHome(t *testing.T) {
 		{"Sessions", Sessions, filepath.Join(override, "sessions")},
 		{"MCPConfig", MCPConfig, filepath.Join(override, "mcp.json")},
 		{"UserSkills", UserSkills, filepath.Join(override, "skills")},
+		{"UserHooksToml", UserHooksToml, filepath.Join(override, "hooks.toml")},
+		{"TrustedProjectsJSON", TrustedProjectsJSON, filepath.Join(override, "trusted-projects.json")},
+		{"HooksAuditLog", HooksAuditLog, filepath.Join(override, "hooks-audit.jsonl")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -123,6 +126,14 @@ func TestProjectPlans_ComposesUnderProjectDir(t *testing.T) {
 	expected := filepath.Join(override, "projects", ProjectID("/abs/path/to/project"), "plans")
 	if got != expected {
 		t.Errorf("ProjectPlans = %q, want %q", got, expected)
+	}
+}
+
+func TestProjectHooksToml_ComposesUnderSeekDir(t *testing.T) {
+	got := ProjectHooksToml("/abs/path/to/project")
+	want := filepath.Join("/abs/path/to/project", ".seek", "hooks.toml")
+	if got != want {
+		t.Errorf("ProjectHooksToml = %q, want %q", got, want)
 	}
 }
 
