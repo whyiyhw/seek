@@ -65,6 +65,18 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		Command:  a.Command,
 		ReadOnly: isReadOnlySafe(a.Command),
 	}); err != nil {
+		// Plan-analyze denial — append a command-specific hint so the
+		// model gets pointed at the right alternative (use the git
+		// tool, drop the cd prefix, use go vet instead of go test,
+		// etc.) at the exact moment it's about to retry. Other workflow
+		// / pref deny paths get the vanilla message — their hints
+		// ("--yolo", "user declined") already point the model the
+		// right way.
+		if errors.Is(err, permission.ErrDenied) && t.policy.Workflow() == permission.WorkflowPlanAnalyze {
+			if hint := planAnalyzeBashHint(a.Command); hint != "" {
+				return "", fmt.Errorf("%w. Hint: %s", err, hint)
+			}
+		}
 		return "", err
 	}
 

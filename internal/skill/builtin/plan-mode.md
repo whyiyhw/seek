@@ -120,6 +120,19 @@ If the user picks **cancel** in the propose picker, `/plan` is toggled off entir
 - **Drifting in execute**: doing one thing in step 3 that "felt natural" but wasn't approved. Re-propose; don't go around the gate.
 - **Restarting silently after adjust**: the user adjusts, you immediately re-propose with no chat summary of what's done. The new plan duplicates work. Fix: **always summarize first**.
 
+## Common bash pitfalls in plan-analyze
+
+The bash whitelist in plan-analyze is narrow on purpose. These are the four ways models routinely trip it; for each, do the thing on the right instead:
+
+| ❌ Don't | ✅ Do | Why |
+|---------|------|-----|
+| `bash("cd /path && go vet ./...")` | `bash("go vet ./...")` | seek's bash tool already runs from the project root — `cd` is redundant AND introduces `&&` which is a denied metacharacter |
+| `bash("git log --oneline -10")` | use the dedicated `git` tool with subcommand `log` | the `git` tool is plan-mode allowed (subcommand whitelist enforced in the tool); going through bash means a separate whitelist check that doesn't include git |
+| `bash("go test ./...")` | `bash("go vet ./...")` or `bash("go build -n ./...")` | `go test` runs code and writes the build cache — has side effects. `go vet` and `go build -n` are pure static analysis / dry-run |
+| `bash("ls | grep foo")` or `bash("cmd > /tmp/x")` | call the `grep` tool directly; for "compute X then look at it" sequence two tool calls instead of one piped command | shell metacharacters (`;`, `&&`, `||`, `|`, `>`, `` ` ``, `$(`, `${`, newline) are denied in plan-analyze regardless of the rest of the command, even if the individual subcommands would be whitelisted |
+
+When you see `permission denied: plan mode: bash is not allowed for this command`, the error message now includes a `Hint:` clause pointing at the specific fix — read it and adjust, don't retry the same shape with cosmetic changes.
+
 ## Cost discipline
 
 `propose` and `ask_user` both block waiting for user input. Each one is a real interruption — use them sparingly. Two `ask_user` calls during ANALYZE and one `propose` to gate is typical. Five `ask_user` calls + three `propose` cycles in one task means you're being either too cautious or insufficiently prepared in ANALYZE.
