@@ -19,7 +19,7 @@ import "strings"
 func (m *Model) updateCommandMenu() {
 	v := strings.TrimRight(m.input.Value(), "\n")
 
-	// Branch 1: "<cmd><space>..." — auto-open pickers for model / effort / lang.
+	// Branch 1: "<cmd><space>..." — auto-open pickers for model / effort.
 	// Close any open command menu first; they're mutually exclusive.
 	// Stale cleanup (Branch 2 below) handles closing when the user backspaces.
 	switch {
@@ -67,32 +67,9 @@ func (m *Model) updateCommandMenu() {
 		}
 		return
 
-	case strings.HasPrefix(v, "/lang ") || v == "/lang ":
-		m.commandMenuOpen = false
-		m.commandMenuFiltered = nil
-		m.commandMenuSelected = 0
-		if !m.modelPickerOpen || m.pickerPurpose != "lang" {
-			choices := langChoices()
-			m.modelPickerFiltered = choices
-			m.modelPickerSelected = 0
-			current := m.opts.Lang
-			if current == "" {
-				current = "auto"
-			}
-			for i, c := range choices {
-				if c.id == current {
-					m.modelPickerSelected = i
-					break
-				}
-			}
-			m.modelPickerOpen = true
-			m.pickerPurpose = "lang"
-		}
-		return
-
 	case strings.HasPrefix(v, "/help ") || v == "/help ":
 		// Auto-open the help topic picker when the user types "/help "
-		// (trailing space). Mirrors the /model /effort /lang pattern.
+		// (trailing space). Mirrors the /model /effort pattern.
 		m.commandMenuOpen = false
 		m.commandMenuFiltered = nil
 		m.commandMenuSelected = 0
@@ -107,7 +84,7 @@ func (m *Model) updateCommandMenu() {
 
 	case strings.HasPrefix(v, "/review "):
 		// Auto-open the review picker when the user types "/review "
-		// (trailing space). Mirrors the /model /effort /lang pattern.
+		// (trailing space). Mirrors the /model /effort pattern.
 		m.commandMenuOpen = false
 		m.commandMenuFiltered = nil
 		m.commandMenuSelected = 0
@@ -216,7 +193,7 @@ func (m *Model) updateCommandMenu() {
 
 	// Branch 2: not in a known auto-open state but a stale auto-opened picker
 	// is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name" || m.pickerPurpose == "help-topic") {
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name" || m.pickerPurpose == "help-topic") {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0

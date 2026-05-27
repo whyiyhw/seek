@@ -68,7 +68,6 @@ type AgentClient interface {
 	Summarise(ctx context.Context) (string, deepseek.Usage, error)
 	SetModel(string)
 	SetEffort(string)
-	SetLang(string)
 }
 
 // predictionAttacher is an OPTIONAL sibling interface (CLAUDE.md
@@ -196,16 +195,6 @@ type Options struct {
 	// "high" | "max"). Read by the status bar and the /effort command;
 	// written by /effort through SetEffort.
 	Effort string
-
-	// SetLang updates the host-owned sessionLang. The TUI mirrors the
-	// new value into m.opts.Lang + Session.Lang so the next save
-	// captures the choice. nil disables /lang; the command surfaces
-	// an unsupported message.
-	SetLang func(string)
-
-	// Lang mirrors the session's response language preference ("" |
-	// "en" | "zh"). Read by /lang; written through SetLang.
-	Lang string
 
 	// MemoryProject is the M-layer handle for this session. nil = memory
 	// is unavailable (e.g. --no-save, load failure); /distill surfaces a

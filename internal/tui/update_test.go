@@ -1058,7 +1058,7 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 // applies the picker's highlighted row — NOT the typed "high". The
 // textarea shows "/effort high" but Enter selects whatever row is
 // highlighted (e.g. "off" or "max"). This is the current behaviour for
-// all auto-open pickers (/model, /effort, /lang); the test documents it
+// all auto-open pickers (/model, /effort); the test documents it
 // so any future change to "Enter takes the typed value" is deliberate.
 func TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped(t *testing.T) {
 	t.Parallel()
@@ -1403,7 +1403,7 @@ func TestTruncateOneLine(t *testing.T) {
 
 // --- /skill verb + name pickers -----------------------------------------
 //
-// The "auto-open on trailing space" pattern matches /model /effort /lang
+// The "auto-open on trailing space" pattern matches /model /effort
 // /review; these tests verify the new /skill branches follow the same
 // state-machine rules: open on `/skill `, narrow as you type, hand off
 // to the name picker on `use`, close once you compose past the name.

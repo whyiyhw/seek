@@ -214,7 +214,6 @@
           <tr><td class="cmd">/new</td><td>/new</td><td data-lang="en">Start a fresh conversation (same as /clear)</td><td data-lang="zh" hidden>开始新对话（同 /clear）</td></tr>
           <tr><td class="cmd">/model</td><td>/model [id]</td><td data-lang="en">Switch model — no arg opens a picker</td><td data-lang="zh" hidden>切换模型——无参数打开选择器</td></tr>
           <tr><td class="cmd">/effort</td><td>/effort [off|high|max]</td><td data-lang="en">Set DeepSeek reasoning effort</td><td data-lang="zh" hidden>设置推理深度</td></tr>
-          <tr><td class="cmd">/lang</td><td>/lang [en|zh|auto]</td><td data-lang="en">Set response language</td><td data-lang="zh" hidden>设置回复语言</td></tr>
           <tr><td class="cmd">/yolo</td><td>/yolo</td><td data-lang="en">Toggle --yolo (bypass permission prompts)</td><td data-lang="zh" hidden>切换 yolo 模式（跳过权限提示）</td></tr>
           <tr><td class="cmd">/plan</td><td>/plan</td><td data-lang="en">Toggle plan mode (read-only exploration)</td><td data-lang="zh" hidden>切换规划模式（只读探索）</td></tr>
           <tr><td class="cmd">/review</td><td>/review [branch]</td><td data-lang="en">Code review working-tree changes</td><td data-lang="zh" hidden>审查工作树变更</td></tr>
@@ -341,14 +340,13 @@
           <tr><td class="flag-key">-upgrade-check</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Check for newer release, never modify</td><td data-lang="zh" hidden">检查新版本，不改动</td></tr>
           <tr><td class="flag-key">-dream</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">M→L distillation scan (read-only)</td><td data-lang="zh" hidden">M→L 蒸馏扫描（只读）</td></tr>
           <tr><td class="flag-key">-dream-write</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Write dream candidates to soul.md</td><td data-lang="zh" hidden">写入 dream 候选到 soul.md</td></tr>
-          <tr><td class="flag-key">-lang</td><td>string</td><td class="flag-default">"auto"</td><td data-lang="en">Response language (en | zh | auto)</td><td data-lang="zh" hidden>回复语言</td></tr>
         </tbody>
       </table>
     </div>
 
     <div class="note">
-      <span data-lang="en">💡 Use <code>seek --help</code> for the most up-to-date flag list. The table above reflects the source at <code>cmd/seek/main.go</code>.</span>
-      <span data-lang="zh" hidden>💡 使用 <code>seek --help</code> 获取最新参数列表。上表反映 <code>cmd/seek/main.go</code> 中的定义。</span>
+      <span data-lang="en">💡 Use <code>seek --help</code> for the most up-to-date flag list. The table above reflects the source at <code>cmd/seek/main.go</code>. Reply language follows your input — there is no <code>/lang</code> or <code>--lang</code>.</span>
+      <span data-lang="zh" hidden>💡 使用 <code>seek --help</code> 获取最新参数列表。上表反映 <code>cmd/seek/main.go</code> 中的定义。回复语言跟随你的输入，无 <code>/lang</code> 或 <code>--lang</code>。</span>
     </div>
   </div>
 

@@ -80,12 +80,6 @@ type Session struct {
 	// doesn't silently leak to future sessions; omitempty keeps the
 	// JSONL header tidy for the common no-override case.
 	Effort string `json:"effort,omitempty"`
-	// Lang records the response language preference for this session.
-	// "" or "auto" = detect from system locale; "en" = English;
-	// "zh" = Chinese. Stored per-session so a one-off switch doesn't
-	// leak to future sessions; omitempty keeps the JSONL header tidy
-	// for the common auto-detect case.
-	Lang string `json:"lang,omitempty"`
 }
 
 // New constructs a fresh Session with a timestamp-based ID.
@@ -222,7 +216,6 @@ func (s *Session) Fork() *Session {
 		SystemPrompt:  s.SystemPrompt,
 		Messages:      msgs,
 		ParentID:      s.ID,
-		Lang:          s.Lang,
 	}
 }
 

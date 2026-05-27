@@ -783,15 +783,9 @@ func (m Model) renderCommandMenu() string {
 // hint — so users don't need to learn a second affordance.
 // isCurrentPickerItem returns true when id matches the currently-active
 // value for the open picker. This lets the picker annotate the preselected
-// row with "(current)" — works for model / lang / effort pickers.
+// row with "(current)" — works for model / effort pickers.
 func (m Model) isCurrentPickerItem(id string) bool {
 	switch m.pickerPurpose {
-	case "lang":
-		current := m.opts.Lang
-		if current == "" {
-			current = "auto"
-		}
-		return id == current
 	case "effort":
 		current := m.opts.Effort
 		if current == "" {

@@ -30,7 +30,6 @@ seek --no-save -p "scratch work"
 | `/clear`, `/new` | Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state |
 | `/model` | Switch model — no arg opens a picker; pass an id to skip it |
 | `/effort` | Set DeepSeek reasoning effort: `off`, `high`, or `max` |
-| `/lang` | Set response language: `en`, `zh`, or `auto` |
 | `/yolo` | Toggle `--yolo` (bypass permission prompts) for this session |
 | `/plan` | Toggle plan mode (read-only exploration) for this session |
 | `/steer`, `/s` | Mid-stream steer: `/steer <text>` lines up text to send right after current response; bare `/steer` promotes a queued message to steer (Mac-friendly Alt+Enter alternative) |
@@ -44,6 +43,12 @@ seek --no-save -p "scratch work"
 | `/setup` | Re-run the API-key configuration wizard |
 | `/upgrade` | Download the latest release and replace the binary in place |
 | `/exit`, `/quit`, `/q` | Quit seek |
+
+## Response language
+
+seek replies in the **same language you write in** — there is no `/lang` command and no `--lang` flag. The system prompt instructs the model to match your input language (Chinese prompt → Chinese reply; English prompt → English reply).
+
+If you need Chinese answers, write your prompts in Chinese. Scripts or habits that relied on `--lang zh` while sending English prompts must switch to Chinese input instead.
 
 ## Forking with /branch
 

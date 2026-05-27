@@ -251,7 +251,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickerPurpose = ""
 			return m, nil
 		}
-		// Auto-opened pickers (/model, /effort, /lang, /review, /skill, /skill use, /help with trailing space):
+		// Auto-opened pickers (/model, /effort, /review, /skill, /skill use, /help with trailing space):
 		// Backspace + printable chars fall through so the user can keep
 		// editing the textarea (backspace the space to dismiss, or type
 		// a full id to bypass the picker). Modal pickers (e.g. /setup,
@@ -259,7 +259,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Backspace on an already-empty input is a harmless no-op, so
 		// it's safe to allow unconditionally.
 		switch m.pickerPurpose {
-		case "model", "effort", "lang", "review", "skill-verb", "skill-name", "help-topic":
+		case "model", "effort", "review", "skill-verb", "skill-name", "help-topic":
 			switch msg.Type {
 			case tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
 				// fall through to textarea Update at the end of handleKey

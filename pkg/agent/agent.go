@@ -51,12 +51,6 @@ type Config struct {
 	// expose their own thinking knobs out of band.
 	Effort string
 
-	// Lang is the response language preference for per-message injection.
-	// "" or "en" → no injection (the system prompt directive suffices).
-	// "zh" → append a Chinese-language reminder to every user turn so the
-	// model honours a /lang switch immediately without requiring /new.
-	Lang string
-
 	// ModeLabel is the current permission mode label for per-message
 	// injection. Empty string → no reminder (the system-prompt tool
 	// descriptions already cover Ask/Deny behaviour). Non-empty values
@@ -143,13 +137,6 @@ func (a *Agent) Effort() string {
 	return a.cfg.Effort
 }
 
-// SetLang sets the response language for per-message injection. Safe
-// between turns; takes effect on the next Prompt call. Call with ""
-// or "en" to clear a prior override (revert to system-prompt directive).
-func (a *Agent) SetLang(lang string) {
-	a.cfg.Lang = lang
-}
-
 // SetModeLabel sets the per-message mode reminder label. Safe between
 // turns; takes effect on the next Prompt call. Call with "" to clear
 // (no reminder — the system-prompt tool descriptions suffice for
@@ -207,17 +194,6 @@ func modeReminder(label string) string {
 	default:
 		return ""
 	}
-}
-
-// langReminder returns a per-message language reminder suffix.
-// Empty string = no reminder needed (the system prompt directive is
-// sufficient). The reminder is placed at the end of the user turn
-// so recency bias makes it effective immediately after a /lang switch.
-func langReminder(lang string) string {
-	if lang == "zh" {
-		return "\n\nLanguage: 中文。请始终用中文回复。"
-	}
-	return ""
 }
 
 // New constructs an Agent and seeds the system prompt (if any).
@@ -445,7 +421,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 		for _, m := range prePrompt.Prepend {
 			a.appendMessage(m)
 		}
-		userContent := prePrompt.UserText + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel) + workflowReminder
+		userContent := prePrompt.UserText + modeReminder(a.cfg.ModeLabel) + workflowReminder
 		a.appendMessage(deepseek.Message{
 			Role:    deepseek.RoleUser,
 			Content: userContent,
@@ -578,7 +554,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
 					a.appendMessage(deepseek.Message{
 						Role:    deepseek.RoleUser,
-						Content: "continue" + langReminder(a.cfg.Lang) + modeReminder(a.cfg.ModeLabel),
+						Content: "continue" + modeReminder(a.cfg.ModeLabel),
 					})
 					continue
 				}

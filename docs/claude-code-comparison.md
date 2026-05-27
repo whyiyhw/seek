@@ -135,7 +135,7 @@
 |---|---|---|---|---|
 | Inline TUI 模式 | ✅ | ✅ | **对等** | 双方都用 tea.Println 写 scrollback + 实时渲染 |
 | 状态栏 | ✅ | ✅ | **对等** | 模型、费用、缓存命中率、错峰倒计时 |
-| `/` 斜杠命令 | ✅ | ✅ | **对等** | Seek 已覆盖 `/help` `/clear` `/model` `/effort` `/lang` `/yolo` `/plan` `/review` `/branch` `/compact` `/distill` `/skill` `/skills` `/memory` `/steer` `/setup` `/upgrade` 等 17 个 |
+| `/` 斜杠命令 | ✅ | ✅ | **对等** | Seek 已覆盖 `/help` `/clear` `/model` `/effort` `/yolo` `/plan` `/review` `/branch` `/compact` `/distill` `/skill` `/skills` `/memory` `/steer` `/setup` `/upgrade` 等 16 个 |
 | 用户提问选择器 | ✅ | 🔶 **等效替代** | Claude Code 用结构化 `AskUserQuestion`（多问题/多选项/preview）；Seek 用单选 `ask_user` picker，能力略弱 |
 | `help` 浮层 | ✅ | ✅ | **对等** | 双方都有可关闭的浮层 |
 | 快捷键绑定（可自定义） | ✅ | ❌ **缺失** | — | Claude Code 通过 `~/.claude/keybindings.json` 自定义；Seek 无此机制 |

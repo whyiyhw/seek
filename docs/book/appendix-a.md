@@ -125,7 +125,7 @@
 | 书中位置 | pitfalls.md 条目 |
 |---|---|
 | ch13 §13.5（延伸） | "DeepSeek HTTP 5xx and empty SSE bodies are transient — retry once before failing" |
-| ch18（隐含，无缝继续） | "`/lang` only updated the display and session variable, not the live Agent → no effect until `/new`"（per-message injection 模式） |
+| ch18（隐含，无缝继续） | 回复语言跟随用户输入（已移除 `/lang` / `--lang`；见 pitfalls「Explicit `/lang` removed」） |
 
 ---
 
