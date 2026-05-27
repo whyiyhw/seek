@@ -46,6 +46,47 @@ seek
 
 > **English**: Open Windows Terminal, create a PowerShell or CMD tab, and run `seek`. The first launch will walk you through API key setup.
 
+### 多行粘贴 / Multi-line paste
+
+在 TUI 输入框粘贴多行文本时，请用 **Ctrl+V** 或 Windows Terminal 的 **Ctrl+Shift+V**。粘贴完成后按 **Enter** 发送（超过 3 行会显示 `📋 pasted N lines` 占位符，再按 Enter 即可）。
+
+> **English**: Paste multi-line prompts with **Ctrl+V** or WT's **Ctrl+Shift+V**, then press **Enter** to send. Long pastes fold into a `📋 pasted N lines` marker — press **Enter** again to submit.
+
+### 输入框换行 / Newline in the input box
+
+| 按键 | 行为 |
+|------|------|
+| **Enter** | 发送消息 |
+| **Ctrl+J** | 插入换行（跨平台官方方式） |
+| **Shift+Enter** | 与 Enter 相同，**会发送**（不会换行） |
+
+在 macOS 上 **Shift+Enter** 往往能换行，是因为部分终端把 Shift+Enter 发送为 `\n`，seek 会当作 Ctrl+J 处理。Windows 控制台不区分 Shift，Enter 与 Shift+Enter 都会提交。
+
+> **English**: **Enter** sends; **Ctrl+J** inserts a newline (the official cross-platform shortcut). **Shift+Enter** also sends on Windows — it does not insert a newline. On macOS, Shift+Enter often works because some terminals send `\n`, which seek treats like Ctrl+J.
+
+若习惯 macOS 的 Shift+Enter 换行，可在 Windows Terminal 的 **settings.json** 里把 Shift+Enter 映射为发送 `\n`（`0x0A`）。在 WT **设置 → 打开 JSON 文件** 编辑，向 `actions` 数组追加：
+
+> **English**: To mirror macOS Shift+Enter, add this to the `actions` array in WT's **settings.json** (**Settings → Open JSON file**). It sends LF (`\n`, hex `0x0A`):
+
+```jsonc
+{
+  "command": { "action": "sendInput", "input": "\n" },
+  "keys": "shift+enter"
+}
+```
+
+等价写法：`"input": "\u000a"`。保存后 seek 会把收到的 LF 当作 **Ctrl+J** 处理，从而在输入框内换行而非提交。
+
+> **English**: `"input": "\u000a"` is equivalent. After saving, seek treats the LF like **Ctrl+J** — newline in the input box, not submit.
+
+也可在 **设置 → 操作 → 添加新操作** 里用 UI 完成同样配置（**发送输入** → `\n`，绑定 **Shift+Enter**）。
+
+> **English**: The same can be done in the UI under Settings → Actions (**Send input** → `\n`, bind **Shift+Enter**).
+
+不想自己改 JSON？在 seek 里说一句「帮我把 Windows Terminal 的 Shift+Enter 设成换行」——让 seek 帮你处理就好。
+
+> **English**: Don't want to edit JSON yourself? Tell seek something like *"set up Shift+Enter as newline in Windows Terminal"* and let seek handle it.
+
 ## 设为默认终端（可选）/ Set as default (optional)
 
 **设置 → 隐私和安全性 → 开发者选项 → 终端 → 将 Windows Terminal 设为默认终端应用**

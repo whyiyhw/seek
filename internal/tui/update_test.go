@@ -585,10 +585,10 @@ func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
 	// The placeholder should include the line count.
 	m := Model{input: textarea.New()}
 	m.input.SetHeight(3)
-	lines := "one\ntwo\nthree\nfour\nfive\nsix\nseven\n" // 8 lines
+	lines := "one\ntwo\nthree\nfour\nfive\nsix\nseven\n" // 7 lines (+ trailing \n)
 	m.input.SetValue(lines)
 	out := m.handlePasteFolding()
-	want := "8 lines"
+	want := "7 lines"
 	if !strings.Contains(out.input.Value(), want) {
 		t.Errorf("placeholder %q should contain %q", out.input.Value(), want)
 	}

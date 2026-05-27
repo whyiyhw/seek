@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -276,20 +276,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// Windows/conhost paste without bracketed mode: each CRLF line
+		// ends with \r which bubbletea maps to Enter. Insert newline
+		// instead of submitting when Enter arrives right after runes.
+		// This check fires BEFORE review/setup/streaming mode checks
+		// because it is a raw input-level concern: on conhost, every
+		// CRLF line would otherwise submit prematurely regardless of
+		// which mode the textarea is in.
+		if m.enterInsertsNewlineDuringPaste() {
+			m.input.InsertString("\n")
+			m = m.handlePasteFolding()
+			m.updateCommandMenu()
+			m.updatePathCompleter()
+			return m, nil
+		}
 		// Review branch-entry mode: Enter submits /review <typed>.
 		// Comes BEFORE setupKeyEntry — both set a flag and use the
 		// textarea, and review is stateless so there's no ambiguity.
 		if m.reviewBranchEntry {
-			// Resolve folded paste before reading the textarea value.
-			if m.pastedContent != "" {
-				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
-				val := m.input.Value()
-				if strings.Contains(val, marker) {
-					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
-				}
-				m.pastedContent = ""
-				m.pastedLineCount = 0
-			}
+			(&m).resolvePasteInInput()
 			branch := strings.TrimSpace(m.input.Value())
 			m.reviewBranchEntry = false
 			m.input.Reset()
@@ -309,16 +314,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// /setup can't be opened while streaming (slash menu is
 		// closed during streams), so there's no ambiguity.
 		if m.setupKeyEntry {
-			// Resolve folded paste before reading the textarea value.
-			if m.pastedContent != "" {
-				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
-				val := m.input.Value()
-				if strings.Contains(val, marker) {
-					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
-				}
-				m.pastedContent = ""
-				m.pastedLineCount = 0
-			}
+			(&m).resolvePasteInInput()
 			key := strings.TrimSpace(m.input.Value())
 			m.input.Reset()
 			cmd := m.finishSetup(key)
@@ -330,16 +326,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// falls through to m.input.Update(msg) at the end of handleKey
 		// and the textarea handles it natively.
 		if m.streaming {
-			// Resolve folded paste: replace marker with actual content before sending.
-			if m.pastedContent != "" {
-				marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
-				val := m.input.Value()
-				if strings.Contains(val, marker) {
-					m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
-				}
-				m.pastedContent = ""
-				m.pastedLineCount = 0
-			}
+			(&m).resolvePasteInInput()
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				// Empty Enter on an empty textarea has no submission
@@ -389,16 +376,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		// Resolve folded paste: replace marker with actual content before sending.
-		if m.pastedContent != "" {
-			marker := fmt.Sprintf("📋 pasted %d lines — press Enter to send", m.pastedLineCount)
-			val := m.input.Value()
-			if strings.Contains(val, marker) {
-				m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
-			}
-			m.pastedContent = ""
-			m.pastedLineCount = 0
-		}
+		(&m).resolvePasteInInput()
 		text := strings.TrimSpace(m.input.Value())
 		if text == "" {
 			return m, nil
@@ -456,6 +434,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Bracketed terminal paste: inject wholesale so embedded \r bytes
+	// never arrive as separate Enter keys between lines.
+	if msg.Paste && len(msg.Runes) > 0 {
+		m = m.insertPasteText(string(msg.Runes))
+		m.updateCommandMenu()
+		m.updatePathCompleter()
+		return m, nil
+	}
+
+	// Ctrl+V reads the OS clipboard directly. The bubbles textarea Paste
+	// cmd returns an unexported pasteMsg that our Update switch never
+	// forwarded — intercept here so Windows Ctrl+V gets the full body.
+	if msg.Type == tea.KeyCtrlV {
+		if pasted, ok := m.tryClipboardPaste(); ok {
+			m = pasted
+			m.updateCommandMenu()
+			m.updatePathCompleter()
+			return m, nil
+		}
+	}
+
 	// Everything else: feed the textarea. The completion affordances (/
 	// menu and @ path picker) are pure display — keep them live during
 	// streaming too, since a queued/steered message routinely references
@@ -464,18 +463,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// agent). Commands that genuinely don't apply mid-stream (/branch,
 	// /compact, /new, …) self-reject at dispatch time with their own
 	// "wait for the current turn to finish" notice.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+		m.lastInputRunesAt = time.Now()
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	m.updateCommandMenu()
 	m.updatePathCompleter()
-
-	// Paste folding: when pasted content exceeds textarea height, fold
-	// it into a compact placeholder to keep the small textarea manageable.
-	// Only fires on paste events (msg.Paste) so normal typing never
-	// triggers it.
-	if msg.Paste {
-		m = m.handlePasteFolding()
-	}
 
 	return m, cmd
 }
@@ -596,15 +590,13 @@ func (m *Model) tryHistoryDown() bool {
 // Only called on paste events (msg.Paste == true) so normal typing or
 // Ctrl+J newlines never trigger folding.
 func (m Model) handlePasteFolding() Model {
-	val := m.input.Value()
-	lines := strings.Count(val, "\n") + 1
+	val := normalizePasteText(m.input.Value())
+	lines := pasteLineCount(val)
 	if lines > m.input.Height() {
 		m.pastedContent = val
 		m.pastedLineCount = lines
 		m.input.Reset()
-		m.input.SetValue(fmt.Sprintf(
-			"📋 pasted %d lines — press Enter to send", lines,
-		))
+		m.input.SetValue(pasteFoldMarker(lines))
 	}
 	return m
 }

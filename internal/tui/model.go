@@ -278,6 +278,11 @@ type Model struct {
 	pastedContent   string
 	pastedLineCount int
 
+	// lastInputRunesAt records when the main textarea last received typed
+	// or pasted runes. Enter within pasteEnterGap of this timestamp is
+	// treated as an intra-paste newline, not submit (Windows CRLF paste).
+	lastInputRunesAt time.Time
+
 	// streamStartTime is set in submit() and used to compute elapsed
 	// time for the live streaming indicator. Zero when not streaming.
 	streamStartTime time.Time

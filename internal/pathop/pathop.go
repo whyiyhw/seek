@@ -2,11 +2,7 @@
 
 package pathop
 
-import (
-	"os"
-	"path/filepath"
-	"strings"
-)
+import "os"
 
 // IsInPATH reports whether dir appears in the current process PATH.
 func IsInPATH(dir string) bool {
