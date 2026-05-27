@@ -312,16 +312,16 @@ func TestHandleKey_CommandMenuOpen_EnterDispatchesCandidate(t *testing.T) {
 	}
 }
 
-func TestHandleKey_CommandMenuOpen_TabKeepsAcceptBehavior(t *testing.T) {
+func TestHandleKey_CommandMenuOpen_TabUniqueAutocompletes(t *testing.T) {
 	t.Parallel()
-	// Tab still does the "accept + trailing space" flow so the user
-	// can edit args on commands like /model. Locks in that the Enter
-	// behaviour change didn't accidentally touch Tab.
+	// M9.5 PRD §3.3: Tab on a UNIQUE prefix autocompletes the input
+	// to the full command + trailing space. `/un` matches /undo only
+	// (other /u-prefix commands are /upgrade which doesn't share /un).
 	m := Model{input: textarea.New()}
-	m.input.SetValue("/h")
-	cmds := filterCommands(allCommands(), "/h")
-	if len(cmds) == 0 {
-		t.Fatalf("setup: filterCommands returned 0 candidates for '/h'")
+	m.input.SetValue("/un")
+	cmds := filterCommands(allCommands(), "/un")
+	if len(cmds) != 1 {
+		t.Fatalf("setup: filterCommands('/un') expected 1 candidate (got %d) — registry may have changed; pick a different unique prefix", len(cmds))
 	}
 	m.commandMenuOpen = true
 	m.commandMenuFiltered = cmds
@@ -331,11 +331,64 @@ func TestHandleKey_CommandMenuOpen_TabKeepsAcceptBehavior(t *testing.T) {
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
-		t.Error("Tab on candidate should close the menu")
+		t.Error("Tab on a unique candidate should close the menu")
 	}
 	want := cmds[0].names[0] + " "
 	if got := m2.input.Value(); got != want {
-		t.Errorf("Tab should stage the candidate for editing, got %q want %q", got, want)
+		t.Errorf("Tab on unique should autocomplete to %q, got %q", want, got)
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabMultiKeepsPickerOpen(t *testing.T) {
+	t.Parallel()
+	// M9.5 PRD §3.3: Tab on AMBIGUOUS prefix keeps the picker open and
+	// does NOT auto-accept the highlighted candidate. The user navigates
+	// with ↑/↓ and confirms with Enter (which dispatches the highlighted
+	// command immediately).
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/s")
+	cmds := filterCommands(allCommands(), "/s")
+	if len(cmds) < 2 {
+		t.Fatalf("setup: filterCommands('/s') expected 2+ candidates, got %d", len(cmds))
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if !m2.commandMenuOpen {
+		t.Error("Tab on ambiguous prefix should KEEP the picker open")
+	}
+	if got := m2.input.Value(); got != "/s" {
+		t.Errorf("Tab on ambiguous should NOT change input, want %q got %q", "/s", got)
+	}
+	if len(m2.commandMenuFiltered) != len(cmds) {
+		t.Errorf("filtered list should be unchanged: was %d, now %d", len(cmds), len(m2.commandMenuFiltered))
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabNoMatchEmitsBell(t *testing.T) {
+	t.Parallel()
+	// M9.5 PRD §3.3: Tab when the typed prefix has NO matches emits a
+	// terminal bell and leaves the input untouched. The menu is still
+	// "open" (set by updateCommandMenu because input starts with `/`)
+	// but with an empty filtered slice.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/zzz")
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = nil // no matches
+	m.commandMenuSelected = 0
+
+	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if got := m2.input.Value(); got != "/zzz" {
+		t.Errorf("Tab on no-match should NOT change input, want %q got %q", "/zzz", got)
+	}
+	if cmd == nil {
+		t.Error("Tab on no-match should return a bell cmd (got nil)")
 	}
 }
 

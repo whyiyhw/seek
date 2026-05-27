@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -8,6 +10,19 @@ import (
 
 	"github.com/whyiyhw/seek/internal/keymap"
 )
+
+// beepCmd emits a terminal bell (BEL, \a). Written to os.Stderr so it
+// bypasses bubbletea's render buffer — most terminals beep on the byte
+// regardless of alt-screen / cursor state. Used by Tab completion
+// when there's no match (PRD docs/prd/feature-tui-ergonomics.md §3.3).
+//
+// Best-effort: terminals with bell muted or VT-bell-disabled will see
+// nothing, which is fine; the rest of the UI doesn't depend on this
+// signal landing.
+var beepCmd tea.Cmd = func() tea.Msg {
+	fmt.Fprint(os.Stderr, "\a")
+	return nil
+}
 
 // defaultKeymapFallback is used when Options.Keymap is nil — e.g.
 // in unit tests that construct a Model directly. cmd/seek/main.go
@@ -107,8 +122,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.commandMenuOpen {
 		switch msg.Type {
 		case tea.KeyTab:
-			if len(m.commandMenuFiltered) > 0 {
-				name := m.commandMenuFiltered[m.commandMenuSelected].names[0]
+			// M9.5 Tab completion semantics (PRD §3.3):
+			//   0 candidates  → terminal bell, no input change
+			//   1 candidate   → autocomplete: replace input with the
+			//                   command name + trailing space
+			//   2+ candidates → picker stays open, NO auto-accept
+			//                   (Enter still dispatches the highlighted
+			//                   command for fast single-keystroke flows
+			//                   like `/h` + Enter → /help)
+			// Tab is the trigger; Enter is the commit. Different from
+			// pre-M9.5 where Tab accepted the highlighted regardless
+			// of ambiguity — that pattern silently picked the wrong
+			// command when the prefix wasn't unique.
+			switch len(m.commandMenuFiltered) {
+			case 0:
+				return m, beepCmd
+			case 1:
+				name := m.commandMenuFiltered[0].names[0]
 				m.input.SetValue(name + " ")
 				m.commandMenuOpen = false
 				m.commandMenuFiltered = nil
@@ -121,8 +151,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				// gets a stuck "/model " with no candidates until
 				// the next keystroke.
 				m.updateCommandMenu()
+				return m, nil
+			default:
+				// Multi-candidate: picker stays open. ↑/↓ to navigate,
+				// Enter to dispatch the highlighted one.
+				return m, nil
 			}
-			return m, nil
 		case tea.KeyEnter:
 			// Menu open with candidates: Enter dispatches the highlighted
 			// command immediately — typing "/h" + Enter fires /help. This
