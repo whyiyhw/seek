@@ -36,7 +36,9 @@ func TestEnterInsertsNewlineDuringPaste(t *testing.T) {
 
 func TestPasteBurstEnterInsertsNewline(t *testing.T) {
 	m := Model{input: textarea.New()}
-	m.lastInputRunesAt = time.Now()
+	// Set in the future so the time check is always within pasteEnterGap,
+	// regardless of goroutine scheduling delays under -race or heavy load.
+	m.lastInputRunesAt = time.Now().Add(pasteEnterGap)
 	m.input.SetValue("line1")
 
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
