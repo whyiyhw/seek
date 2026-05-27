@@ -407,13 +407,9 @@ Alpine / distroless / 某些精简 docker image 不带 tzdata。`time.LoadLocati
 
 ### TUI 与终端能力
 
-第 7 章讲过的 OSC 11 探针、WindowSizeMsg 合成、KeyMsg 路由——这些都在 macOS Terminal / iTerm2 / GNOME Terminal / Alacritty 上完全一致工作。**Windows 上的 TUI 体验是最弱的**：
+第 7 章讲过的 OSC 11 探针、WindowSizeMsg 合成、KeyMsg 路由——这些都在 macOS Terminal / iTerm2 / GNOME Terminal / Alacritty 上完全一致工作。**Windows 上推荐 [Windows Terminal](https://github.com/microsoft/terminal)**：在 WT 里运行 PowerShell 或 CMD，TUI 流式输出、中文、键盘输入均正常。老式 conhost（蓝色 PowerShell 5.x 窗口）ANSI 支持弱，可能出现阶梯刷屏——换 WT 即可，详见 [`docs/guide-windows.md`](../guide-windows.md)。
 
-- 老的 cmd.exe / PowerShell 不全支持 ANSI 转义
-- Windows Terminal 是好的，但用户不一定装了
-- 颜色支持 / 鼠标行为 / scrollback 的细节都有偏差
-
-seek 在 Windows 上能跑（CI 验证），但建议用户用 Windows Terminal 或 WSL。这条写在 README 里，比试图把所有 Windows 终端都 polish 到 macOS 体验更现实。
+其余 Windows 终端：Windows Terminal + PowerShell/CMD 为官方支持路径；Git Bash / 老式 conhost 不推荐用于 TUI。临时可用 `seek -p` print 模式。
 
 ### CRLF 不是 LF（一个没踩但要警惕的）
 

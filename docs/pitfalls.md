@@ -751,3 +751,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: added `"review", "skill-verb", "skill-name", "help-topic"` to the allow-list in `update_key.go:210`, and added `"help-topic"` to the stale-cleanup condition in `update_menu.go:219` (which was also missing it). Closes #4.
 - **Lesson**: adding a new auto-opened picker requires touching THREE places: (1) the Branch 1 trigger in `update_menu.go`, (2) the Branch 2 stale-cleanup condition in `update_menu.go`, and (3) the key-passthrough allow-list in `update_key.go`. There's no compile-time coupling between these — missing (2) or (3) silently produces a frozen picker. Consider a shared `map[string]bool` or a registration pattern that makes it impossible to add a picker without wiring all three. Until then: when you add a new auto-opened picker, grep for the last one you added and make sure all three sites match.
 - **Refs**: `internal/tui/update_key.go:210`, `internal/tui/update_menu.go:133,182,219`
+
+### Legacy conhost (blue PowerShell 5.x window) TUI streaming cascades (use Windows Terminal)
+- **Saw**: in blue-background Windows PowerShell 5.x (conhost), assistant streaming text printed a new full-length line on every token — a "staircase" of growing sentences; stray escape bytes appeared in the left margin
+- **Why**: seek inline mode relies on ANSI cursor-up + erase to overwrite the live region each frame. Legacy conhost does not handle these sequences reliably; each frame appends instead of overwriting
+- **Fix**: document Windows Terminal as the supported Windows TUI host — no seek-side terminal shims. Users install WT via winget / Store / GitHub release and run seek there. Fallback: `seek -p` print mode. See [`docs/guide-windows.md`](guide-windows.md)
+- **Lesson**: on Windows, the terminal emulator choice *is* the compatibility layer. Prefer documenting and recommending a modern host over per-emulator code paths in seek
+- **Refs**: [`docs/guide-windows.md`](guide-windows.md), [Windows Terminal](https://github.com/microsoft/terminal)
