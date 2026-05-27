@@ -919,14 +919,16 @@ func run() error {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "hooks:", err)
 	}
+	// stdinTrustPrompt asks the user y/N before any project-level
+	// `bash -c` can fire. Detects TTY internally — piped/non-TTY
+	// stdin auto-refuses with a friendly warning rather than hang.
+	// Per PRD §3.5: this is the ONLY thing standing between a freshly
+	// cloned repo's hooks.toml and arbitrary shell execution; we run
+	// it BEFORE constructing ShellRunner so the contract "no `bash -c`
+	// before trust" holds even when the file is malicious.
 	hookCfg, hookWarnings := hooksconfig.Gate(
 		userHooksPath, projectHooksPath, abs, trustStore,
-		// TUI launches install a real TrustPrompt later (see
-		// startupHooksTrust); for now we pass nil — Gate will exclude
-		// untrusted project hooks rather than block. In TUI mode the
-		// user can re-launch after `seek hooks trust --reset` once
-		// they've reviewed hooks.toml.
-		nil,
+		newStdinTrustPrompt(),
 		hooksconfig.DefaultSyntaxChecker,
 	)
 	for _, w := range hookWarnings {

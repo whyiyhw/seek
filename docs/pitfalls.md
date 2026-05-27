@@ -31,6 +31,27 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any Hook struct field that tracks per-session state MUST be reset in `OnSessionStart`. The Hook is reusable across agent lifetimes (--resume), not 1:1 with sessions. Don't assume zero-init at construction covers all paths
 - **Refs**: `internal/memory/hook.go:OnSessionStart`, `internal/memory/hook.go:Hook.snapshotInjected`
 
+### Shell-hook SkipReason needs per-event handling, not a single funnel
+- **Saw**: a hook marked `SkipReason="syntax: bad"` (failed `bash -n` at startup) was producing `Deny: 'hook "broken" exited with code -1'` and blocking the tool, even though the PRD says skipped hooks must be silently bypassed
+- **Why**: the natural place to short-circuit was inside `runHook` — return `code=-1` with `Reason="skipped: …"`. But `OnPreToolUse` treats `code != 0` as deny by design (that's the whole pre_tool contract), so a "neutral" sentinel exit code for "skipped" doesn't exist. Trying to centralise the skip-handling at the exec level papers over a real semantic split: pre_tool needs to skip-and-continue, observers need to skip-and-noop, and there's no single exit code that means both
+- **Fix**: each event entry point checks `h.SkipReason` itself BEFORE calling `runHook` and decides what skip means for THAT event. `OnPreToolUse` `continue`s the loop; observers no-op. `runHook` still defends-in-depth by returning `code=0` if reached with SkipReason set, so the observer paths don't accidentally trip on a stale -1
+- **Lesson**: when a flag has different semantics per call site, push the handling to the call site rather than synthesising a "magic value" in the shared helper. Shared helpers are great for shared invariants; per-caller decisions belong with the caller
+- **Refs**: `internal/hooks/shell_runner.go:OnPreToolUse` (skip branch), `internal/hooks/shell_runner.go:runHook` (defensive)
+
+### Trust prompt must run pre-bubbletea — askuser channel isn't drained yet
+- **Saw**: initial plan was to plumb the shell-hooks trust dialog through the existing `internal/askuser.Policy` (same pattern as the propose tool). But Gate runs at main.go ~line 920, while `askPolicy.SetAskFn` doesn't get a real callback until line ~1145, and even then the callback pushes onto a channel the TUI bubbletea loop is supposed to drain — and the TUI hasn't started yet. Any pre-TUI askuser call would block forever
+- **Why**: the askuser policy is a TUI-coupled async primitive by design — the SetAskFn callback expects a goroutine on the other end. There's no version of it that works at startup before bubbletea's `tea.NewProgram(...).Run()` has spun up
+- **Fix**: built a separate `stdinTrustPrompt` in `cmd/seek/hooks_trust.go` that reads from stdin directly when isatty=true and refuses with a warning when not. Pre-TUI stdin still belongs to the process; piped / non-TTY launches auto-refuse rather than hang
+- **Lesson**: not every "ask the user" UI needs to route through askuser.Policy. Pre-bubbletea questions belong on stdin; post-bubbletea questions belong in the policy. The cost of two paths is one ~80-line file; the cost of unifying them is reworking the TUI start order to allow async-prompts-before-render
+- **Refs**: `cmd/seek/hooks_trust.go`, `internal/askuser/askuser.go` (the policy we deliberately do NOT use here)
+
+### limitedWriter needs a pointer receiver — value receiver loses byte count
+- **Saw**: cap-output write helper looked OK in isolation but in tests the captured stdout would exceed the documented 64KiB cap because `l.n` never seemed to grow
+- **Why**: `func (l limitedWriter) Write` (value receiver) gets a fresh copy of the struct on every call. `l.n += n` modifies the copy, which is discarded when Write returns. The caller (exec.Cmd) sees `Write` return successfully and keeps streaming, blowing past the cap silently
+- **Fix**: switch to pointer receiver `func (l *limitedWriter) Write` and pass `&limitedWriter{…}` when assigning to `cmd.Stdout` / `cmd.Stderr`. The `io.Writer` interface is satisfied by both value and pointer receivers, but ONLY the pointer receiver mutates state across calls
+- **Lesson**: any "tracking" struct (counter, accumulator, ring buffer) that satisfies an interface MUST use pointer receivers. The compiler doesn't warn — it'll happily build and silently drop your mutations
+- **Refs**: `internal/hooks/shell_runner.go:limitedWriter`
+
 ## TUI / terminal
 
 ### Explicit `Accept-Encoding: gzip` header disables Go's auto-decompression
