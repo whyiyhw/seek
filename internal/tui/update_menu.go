@@ -216,7 +216,7 @@ func (m *Model) updateCommandMenu() {
 
 	// Branch 2: not in a known auto-open state but a stale auto-opened picker
 	// is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name") {
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "lang" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name" || m.pickerPurpose == "help-topic") {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0
