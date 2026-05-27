@@ -52,6 +52,26 @@ const (
 	defaultMaxMatches   = 20
 	maxAllowedMatches   = 200
 	maxFileSizeBytes    = 2 * 1024 * 1024 // 2 MiB — skip binary/generated blobs
+
+	// maxOutputBytes is the hard upper bound on the formatted grep
+	// result string returned to the model. Picked so two back-to-back
+	// greps cost ≤ ~8K tokens — well inside the 128K context window
+	// even on top of a verbose transcript. PRD: see CLAUDE.md "Token
+	// & prefix-cache constraints" §2 — tool output limits MUST be
+	// enforced inside the tool itself.
+	//
+	// Why this matters: a broad pattern like `grep -r "llm"` against a
+	// large codebase can return 20 matches × ~7 lines × variable line
+	// length and easily exceed 50 KiB. Two such calls fill the model's
+	// context, leaving zero room for /compact to recover. Hard cap
+	// here is the safety belt for that failure mode.
+	maxOutputBytes = 16 * 1024
+
+	// maxLineChars truncates single matched lines that are absurdly
+	// long (minified JS, generated TypeScript, multi-MB JSON declared
+	// on one line). Without this a single match can blow the per-
+	// output cap on its own.
+	maxLineChars = 240
 )
 
 // Tool is the grep tool implementation.
@@ -139,7 +159,38 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		return fmt.Sprintf("grep: %q — no matches in %s\n", a.Pattern, a.Path), nil
 	}
 
-	return formatResults(a.Pattern, results, totalHits, capped), nil
+	out := formatResults(a.Pattern, results, totalHits, capped)
+	// Final safety belt: even with match capping + per-line truncation,
+	// the formatted output can still exceed budget when every match
+	// has the maximum context window AND many files contribute. Trim
+	// to maxOutputBytes here so two greps never fill the context.
+	if len(out) > maxOutputBytes {
+		out = truncateOutput(out)
+	}
+	return out, nil
+}
+
+// truncateOutput trims out to fit maxOutputBytes and replaces the tail
+// with a human-readable notice telling the model exactly how to refine
+// the call. Cuts on a line boundary so the last visible match isn't a
+// half-line that confuses the LLM.
+func truncateOutput(out string) string {
+	if len(out) <= maxOutputBytes {
+		return out
+	}
+	const noticeTemplate = "\n... (grep output truncated at %d KiB to protect context budget; %d KiB of additional matches were dropped — refine the `pattern` (more specific regex) or `path` (narrower scope) to see the rest)\n"
+	// Reserve headroom for the notice so the final length stays ≤ budget.
+	headroom := len(fmt.Sprintf(noticeTemplate, maxOutputBytes/1024, 9999)) + 8
+	cut := maxOutputBytes - headroom
+	if cut < 0 {
+		cut = 0
+	}
+	// Back up to the previous newline so we don't slice a line in half.
+	if nl := strings.LastIndex(out[:cut], "\n"); nl >= 0 {
+		cut = nl + 1
+	}
+	dropped := (len(out) - cut + 1023) / 1024
+	return out[:cut] + fmt.Sprintf(noticeTemplate, maxOutputBytes/1024, dropped)
 }
 
 // fileResult holds all matched blocks for a single file.
@@ -256,10 +307,11 @@ func formatResults(pattern string, results []fileResult, total int, capped bool)
 			}
 			for i, line := range b.lines {
 				absLine := b.start + i
+				display := truncateLine(line)
 				if b.matchLines[absLine] {
-					fmt.Fprintf(&sb, "> %5d  %s\n", absLine, line)
+					fmt.Fprintf(&sb, "> %5d  %s\n", absLine, display)
 				} else {
-					fmt.Fprintf(&sb, "  %5d  %s\n", absLine, line)
+					fmt.Fprintf(&sb, "  %5d  %s\n", absLine, display)
 				}
 			}
 			prevEnd = b.start + len(b.lines) - 1
@@ -378,6 +430,24 @@ func isBinary(data []byte) bool {
 		check = check[:512]
 	}
 	return bytes.IndexByte(check, 0) >= 0
+}
+
+// truncateLine clips a single source line to maxLineChars when it
+// would otherwise blow the output budget on its own (minified JS,
+// generated declarations, multi-MB JSON-on-one-line). Rune-aware so
+// CJK / UTF-8 source doesn't get cut mid-codepoint. Returns the line
+// unchanged when it fits.
+func truncateLine(s string) string {
+	// Fast path: ASCII check. Most source lines are ASCII; counting
+	// bytes is enough.
+	if len(s) <= maxLineChars {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxLineChars {
+		return s
+	}
+	return string(runes[:maxLineChars]) + " …(truncated)"
 }
 
 func max1(a, b int) int {

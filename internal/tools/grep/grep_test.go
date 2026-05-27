@@ -262,3 +262,77 @@ func TestGrep_MatchLineMarkedWithArrow(t *testing.T) {
 		}
 	}
 }
+
+// TestGrep_TruncatesLongLines pins per-line truncation. Source lines
+// over maxLineChars (e.g. minified JS / generated declarations) get
+// clipped with a "…(truncated)" sentinel so a single match can't blow
+// the output budget on its own.
+func TestGrep_TruncatesLongLines(t *testing.T) {
+	root := t.TempDir()
+	// Build a single-line file > maxLineChars where the pattern appears
+	// once near the front. The full source line has length
+	// maxLineChars*3, so the formatted match line would be huge
+	// without truncation.
+	longLine := "ALPHA " + strings.Repeat("x", maxLineChars*3) + " ZETA"
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(longLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, Args{Pattern: "ALPHA", Path: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "…(truncated)") {
+		t.Errorf("long line should be truncated with …(truncated) sentinel; got %q", out)
+	}
+	// Sanity: the displayed line should be much shorter than the source.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "ALPHA") && len(line) > maxLineChars*2 {
+			t.Errorf("line containing match still too long (%d bytes): %q", len(line), line)
+		}
+	}
+}
+
+// TestGrep_HardBytesCap pins the safety belt at the output level.
+// A pathological pattern that would otherwise return tens of KiB of
+// matches gets clipped at maxOutputBytes with a notice telling the
+// model how to refine.
+func TestGrep_HardBytesCap(t *testing.T) {
+	root := t.TempDir()
+	// Build many files each containing the pattern + verbose context
+	// so the formatted output blows past maxOutputBytes.
+	for i := range 50 {
+		var b strings.Builder
+		for j := 0; j < 20; j++ {
+			// Each match has 7 lines of context (3 before + 3 after by default).
+			// Pad each line to ensure the file is meaty.
+			b.WriteString(strings.Repeat("// padding line ", 8) + "\n")
+		}
+		b.WriteString("TARGET_PATTERN appears here\n")
+		for j := 0; j < 20; j++ {
+			b.WriteString(strings.Repeat("// padding line ", 8) + "\n")
+		}
+		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("f%02d.txt", i)), []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	maxCap := 50
+	out, err := run(t, Args{Pattern: "TARGET_PATTERN", Path: root, MaxMatches: maxCap})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > maxOutputBytes+200 {
+		t.Errorf("output exceeded maxOutputBytes+200 budget: got %d bytes (cap=%d)", len(out), maxOutputBytes)
+	}
+	if !strings.Contains(out, "truncated at") {
+		t.Errorf("truncated output should carry the refine-pattern notice; got tail %q", tail(out, 400))
+	}
+}
+
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "…" + s[len(s)-n:]
+}
