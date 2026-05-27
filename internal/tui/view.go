@@ -668,12 +668,12 @@ func (m Model) renderApprovalPrompt() string {
 		// Tagline is the one-line summary — show it next to the name so
 		// the user knows what they're committing to project memory
 		// without having to read the (possibly long) content body.
-		if req.Action.MemoryTagline != "" {
+		if req.Action.Display.MemoryTagline != "" {
 			subject = fmt.Sprintf("save memory %q — %s",
-				req.Action.MemoryName,
-				truncateOneLine(req.Action.MemoryTagline, 100))
+				req.Action.Display.MemoryName,
+				truncateOneLine(req.Action.Display.MemoryTagline, 100))
 		} else {
-			subject = fmt.Sprintf("save memory %q", req.Action.MemoryName)
+			subject = fmt.Sprintf("save memory %q", req.Action.Display.MemoryName)
 		}
 	case permission.KindSkillInstall:
 		// Three load-bearing pieces of info: which skill, from where,
@@ -682,9 +682,9 @@ func (m Model) renderApprovalPrompt() string {
 		// catch hallucinated URLs ("I asked for X, why is it pulling
 		// from Y?") before files land on disk.
 		subject = fmt.Sprintf("install skill %q from %s to %s",
-			req.Action.SkillName,
-			truncateOneLine(req.Action.SkillSource, 80),
-			req.Action.SkillTarget)
+			req.Action.Display.SkillName,
+			truncateOneLine(req.Action.Display.SkillSource, 80),
+			req.Action.Display.SkillTarget)
 	default:
 		subject = fmt.Sprintf("%s %q (outside CWD)", req.Action.Kind, req.Action.Path)
 	}
@@ -693,8 +693,8 @@ func (m Model) renderApprovalPrompt() string {
 	sb.WriteString(styleApprovalHeader.Render("⚠ approve " + subject + "?"))
 	sb.WriteString("\n")
 
-	if req.Action.Diff != "" {
-		sb.WriteString(renderDiff(req.Action.Diff, m.width))
+	if req.Action.Display.Diff != "" {
+		sb.WriteString(renderDiff(req.Action.Display.Diff, m.width))
 	}
 
 	sb.WriteString(styleMuted.Render("  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny"))

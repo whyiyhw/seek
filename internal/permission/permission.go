@@ -55,7 +55,10 @@ const (
 	KindGit Kind = "git"
 )
 
-// Action describes one attempt to perform a guarded operation.
+// Action describes one attempt to perform a guarded operation. The
+// fields here drive Check's gating decision. Anything that exists
+// purely so the TUI can render a richer y/N prompt lives in the
+// nested Display struct — Check never reads it.
 type Action struct {
 	Kind    Kind
 	Path    string // for write/edit
@@ -74,25 +77,44 @@ type Action struct {
 	// lockout.
 	ReadOnly bool
 
-	// Diff is an optional unified diff string populated by the edit tool
-	// before it calls Check. When non-empty the TUI renders it alongside
-	// the y/N approval prompt so the user can see exactly what will change.
+	// Display carries optional rendering hints used by the TUI's y/N
+	// approval prompt. Check NEVER consults these fields — they're
+	// pass-through data for the askFn callback. Tools that surface
+	// richer-than-path/command context (edit diff, memory tagline,
+	// skill source) populate the relevant sub-fields; tools that
+	// don't leave Display zero-valued.
+	Display Display
+}
+
+// Display is the bag of "what does the user see in the y/N prompt?"
+// fields. Lives separate from Action's gating data so a reader of
+// permission.go can tell at a glance which fields drive decisions
+// (Action) vs. which only drive rendering (Display).
+//
+// Adding a new tool that needs richer y/N text: append a field here
+// rather than to Action. Removing one: ripple through TUI's
+// renderApprovalPrompt only.
+type Display struct {
+	// Diff is an optional unified diff string populated by the edit
+	// tool. When non-empty the TUI renders it alongside the y/N
+	// prompt so the user can see exactly what will change.
 	Diff string
 
-	// MemoryName / MemoryTagline are populated by memory_remember so the
-	// TUI can render "save memory: NAME — TAGLINE" alongside the y/N
-	// prompt. The full content body is intentionally NOT here — name +
-	// tagline is enough decision context, and content can be paragraphs.
+	// MemoryName / MemoryTagline are populated by memory_remember so
+	// the TUI can render "save memory: NAME — TAGLINE" alongside the
+	// y/N prompt. The full content body is intentionally NOT here —
+	// name + tagline is enough decision context, and content can be
+	// paragraphs.
 	MemoryName    string
 	MemoryTagline string
 
 	// SkillName / SkillSource / SkillTarget are populated by
-	// skill_commit so the TUI can render "install <name> from <source>
-	// to <target>?" — the three things the user actually needs to
-	// decide on. Body / scripts content stays out: the model has
-	// already inspected them via read/grep before getting here, and
-	// dumping the full body into the approval prompt would push it
-	// off-screen.
+	// skill_commit so the TUI can render "install <name> from
+	// <source> to <target>?" — the three things the user actually
+	// needs to decide on. Body / scripts content stays out: the
+	// model has already inspected them via read/grep before getting
+	// here, and dumping the full body into the approval prompt would
+	// push it off-screen.
 	SkillName   string
 	SkillSource string
 	SkillTarget string
@@ -170,11 +192,31 @@ const (
 // SetWorkflow ALSO resets preApproved — moving between workflows
 // always invalidates step state.
 type Policy struct {
-	mu          sync.RWMutex
-	pref        Preference
-	workflow    Workflow
-	cwd         string // absolute path; used to decide "inside vs outside"
-	askFn       func(Action) bool
+	mu       sync.RWMutex
+	pref     Preference
+	workflow Workflow
+	cwd      string // absolute path; used to decide "inside vs outside"
+	askFn    func(Action) bool
+
+	// exec holds WorkflowPlanExecute-specific transient state. Its
+	// fields have no meaning under any other workflow; SetWorkflow
+	// zeros it on every transition (defense in depth). Grouped as
+	// a sub-struct so a reader can tell at a glance that these
+	// fields are workflow-scoped, not top-level Policy state.
+	exec workflowExecState
+}
+
+// workflowExecState collects all fields that only make sense while
+// Policy.workflow == WorkflowPlanExecute. Today it's just preApproved
+// (the per-step batch-approval gate); future PlanExecute extensions
+// (e.g. step-count limits, time budgets) belong here too.
+type workflowExecState struct {
+	// preApproved is the per-step batch-approval flag. True between
+	// plan(start=N) and plan(complete=N) when the user approved a
+	// plan with "auto-approve writes per step". Check honours it as
+	// a fast-path for bash/write/edit WHILE workflow is PlanExecute;
+	// other workflows ignore it. Cleared by plan(complete) /
+	// plan(skip), Esc cancellation, /plan-off, and SetWorkflow.
 	preApproved bool
 }
 
@@ -248,7 +290,11 @@ func (p *Policy) SetWorkflow(w Workflow) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.workflow = w
-	p.preApproved = false
+	// Zero ALL workflow-execute state on transition, not just the
+	// preApproved field. Future fields added to workflowExecState
+	// inherit the safe-by-default reset behaviour without anyone
+	// having to remember to extend this line.
+	p.exec = workflowExecState{}
 }
 
 // SetPreApproved toggles the per-step batch-approval flag. Called
@@ -267,7 +313,7 @@ func (p *Policy) SetPreApproved(b bool) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.preApproved = b
+	p.exec.preApproved = b
 }
 
 // PreApproved reports the current per-step pre-approval flag — read
@@ -278,7 +324,7 @@ func (p *Policy) PreApproved() bool {
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.preApproved
+	return p.exec.preApproved
 }
 
 // ErrDenied is returned when an action is blocked by policy. Callers should
@@ -310,7 +356,7 @@ func (p *Policy) Check(a Action) error {
 	workflow := p.workflow
 	cwd := p.cwd
 	askFn := p.askFn
-	preApproved := p.preApproved
+	preApproved := p.exec.preApproved
 	p.mu.RUnlock()
 
 	// 1. Workflow dispatch. PlanAnalyze is TERMINAL — its rule set is
@@ -431,12 +477,12 @@ func prefGate(pref Preference, a Action, cwd string, askFn func(Action) bool) er
 			dangerous = true
 		}
 	case KindMemoryRemember:
-		if a.MemoryName == "" {
+		if a.Display.MemoryName == "" {
 			return fmt.Errorf("%w: memory_remember requires a name", ErrDenied)
 		}
 		dangerous = true
 	case KindSkillInstall:
-		if a.SkillName == "" {
+		if a.Display.SkillName == "" {
 			return fmt.Errorf("%w: skill_install requires a skill name", ErrDenied)
 		}
 		dangerous = true
@@ -466,10 +512,10 @@ func prefGate(pref Preference, a Action, cwd string, askFn func(Action) bool) er
 			ErrDenied, shorten(a.Command, 80))
 	case KindMemoryRemember:
 		return fmt.Errorf("%w: memory_remember %q is gated; re-run seek with --yolo, or save the entry yourself",
-			ErrDenied, a.MemoryName)
+			ErrDenied, a.Display.MemoryName)
 	case KindSkillInstall:
 		return fmt.Errorf("%w: skill_install %q from %q is gated; re-run seek with --yolo, or install the skill yourself with `seek skill install %s`",
-			ErrDenied, a.SkillName, a.SkillSource, a.SkillSource)
+			ErrDenied, a.Display.SkillName, a.Display.SkillSource, a.Display.SkillSource)
 	default:
 		return fmt.Errorf("%w: %s on %q is outside the working directory %q — re-run with --yolo to allow",
 			ErrDenied, a.Kind, a.Path, cwd)

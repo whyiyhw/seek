@@ -197,9 +197,11 @@ func (t Remember) Execute(_ context.Context, raw json.RawMessage) (string, error
 	}
 
 	if err := t.policy.Check(permission.Action{
-		Kind:          permission.KindMemoryRemember,
-		MemoryName:    a.Name,
-		MemoryTagline: a.Tagline,
+		Kind: permission.KindMemoryRemember,
+		Display: permission.Display{
+			MemoryName:    a.Name,
+			MemoryTagline: a.Tagline,
+		},
 	}); err != nil {
 		return "", err
 	}

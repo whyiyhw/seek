@@ -169,15 +169,15 @@ func TestCommit_UserScope(t *testing.T) {
 	if !ask.called {
 		t.Errorf("permission ask was not invoked")
 	}
-	if ask.last.SkillName != "happy-skill" {
-		t.Errorf("approval action SkillName = %q, want happy-skill", ask.last.SkillName)
+	if ask.last.Display.SkillName != "happy-skill" {
+		t.Errorf("approval action SkillName = %q, want happy-skill", ask.last.Display.SkillName)
 	}
-	if ask.last.SkillSource != src {
-		t.Errorf("approval action SkillSource = %q, want %q", ask.last.SkillSource, src)
+	if ask.last.Display.SkillSource != src {
+		t.Errorf("approval action SkillSource = %q, want %q", ask.last.Display.SkillSource, src)
 	}
 	// User scope: approval target shown with the ~/ tilde form.
-	if !strings.HasPrefix(ask.last.SkillTarget, "~/.seek/skills/") {
-		t.Errorf("user-scope approval target should start with ~/.seek/skills/, got %q", ask.last.SkillTarget)
+	if !strings.HasPrefix(ask.last.Display.SkillTarget, "~/.seek/skills/") {
+		t.Errorf("user-scope approval target should start with ~/.seek/skills/, got %q", ask.last.Display.SkillTarget)
 	}
 	// Result text MUST include the /new hint — that's the user's
 	// only signal that they need to restart for the skill to load.
@@ -224,8 +224,8 @@ func TestCommit_ProjectScope(t *testing.T) {
 	}
 
 	// Approval shows the project dir, not the home dir.
-	if !strings.Contains(ask.last.SkillTarget, projectDir) {
-		t.Errorf("project-scope approval target should point at <cwd>, got %q (cwd=%q)", ask.last.SkillTarget, projectDir)
+	if !strings.Contains(ask.last.Display.SkillTarget, projectDir) {
+		t.Errorf("project-scope approval target should point at <cwd>, got %q (cwd=%q)", ask.last.Display.SkillTarget, projectDir)
 	}
 	// File landed in the project dir.
 	installed := filepath.Join(projectDir, ".seek", "skills", "project-skill", "SKILL.md")

@@ -325,7 +325,7 @@ func TestWorkflowAnalyze_DeniesEdit(t *testing.T) {
 
 func TestWorkflowAnalyze_DeniesMemoryRemember(t *testing.T) {
 	p := newPlanAnalyze(t, t.TempDir())
-	err := p.Check(Action{Kind: KindMemoryRemember, MemoryName: "test"})
+	err := p.Check(Action{Kind: KindMemoryRemember, Display: Display{MemoryName: "test"}})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("plan-analyze should deny memory_remember, got %v", err)
 	}

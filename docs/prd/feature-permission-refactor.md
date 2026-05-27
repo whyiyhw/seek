@@ -2,7 +2,7 @@
 
 **主题**：当前 `permission.Mode` 同时编码两个正交的概念——**用户偏好**（我想多严，Deny / Ask / Yolo）和**工作流状态**（我现在在做什么，Plan-analyze / Plan-execute / Normal）。这种合并是 plan mode 落地后所有补丁的复杂度根源。R1 把它拆成两个独立的字段：`Preference` + `Workflow`，让后续的工作流扩展（plan / review / future）不再挤压 mode enum。
 
-**状态**：📐 设计稿，未实施。重构 PRD，不引入用户可见的新能力 —— 但解锁后续 R2（capability declarations）/ R3（mode-aware registry）的清晰基底。
+**状态**：🚀 R1 + R1.1 已上线。R1（两轴拆分）见 §六；R1.1（TUI 元数据剥离 + preApproved 封装）见 §十。R2 / R3 仍待 webfetch 之后的痛点真触发再开。
 
 **触发起因**：2026-05 一次设计 review。在 v2 plan-mode + 6 个 v2.x 扩展（含 `preApproved` flag、`Action.ReadOnly` flag、bash 只读白名单等）落地后，盘账发现：
 - `permission.Mode` 4 个值中，`ModePlan` 是**工作流状态**，其它 3 个是**用户偏好**
@@ -431,13 +431,14 @@ R1 是单 PR 重构。失败回滚 = revert PR。session 持久化没动 schema�
 
 ## 八、与后续 R 系列的关系
 
-| 重构 | 范围 | 依赖 |
-|------|------|------|
-| **R1（本 PRD）** | Mode → Pref + Workflow | 独立可 ship |
-| R2 | Action.ReadOnly / KindGit / 各种 read-only 表达统一成 Capability 声明 | 依赖 R1（清晰的 workflow gate 后 capability 才好对接） |
-| R3 | Tool registry 按 workflow 过滤可见工具 | 依赖 R1（registry 要看 workflow） |
+| 重构 | 范围 | 依赖 | 状态 |
+|------|------|------|------|
+| **R1（本 PRD）** | Mode → Pref + Workflow | 独立可 ship | ✅ 已上线 |
+| **R1.1（§十）** | TUI 元数据从 Action 剥离 + preApproved 封装进 workflowExecState | R1 之后的小手术，无破坏性 | ✅ 已上线 |
+| R2 | Action.ReadOnly / KindGit / 各种 read-only 表达统一成 Capability 声明 | 依赖 R1（清晰的 workflow gate 后 capability 才好对接） | 待 webfetch 后的真痛点触发 |
+| R3 | Tool registry 按 workflow 过滤可见工具 | 依赖 R1（registry 要看 workflow） | 同上 |
 
-R2 和 R3 是独立 PRD，待 R1 落地、代码 stable 后单独写。
+R2 / R3 是独立 PRD，目前判定**不值得做**——webfetch 实施已经验证了"工具自己 gate"是可工作的模式，sample size 还不足以驱动通用化。
 
 ---
 
@@ -458,3 +459,145 @@ R2 和 R3 是独立 PRD，待 R1 落地、代码 stable 后单独写。
 - `CLAUDE.md` / `AGENTS.md` — "Permission model" 节描述改成 "Preference + Workflow"
 - `docs/prd/feature-plan-mode.md` — §2.5 permission 联动段落改写为新 API；§实施状态速览补 R1 条
 - `docs/pitfalls.md` — 如果迁移过程踩到非显然坑，登记
+
+---
+
+## 十、R1.1：两个小手术（✅ 已完成）
+
+R1 落地、webfetch 上线后做的一次结构 review 发现三个真实摩擦点：
+
+1. **`Action.Kind` 同时干两件事**：分类（给 TUI 看）+ 路由（Check 里 switch）—— 不对齐
+2. **TUI 渲染元数据漏进 `Action`**：`Diff` / `MemoryName` / `MemoryTagline` / `SkillName` / `SkillSource` / `SkillTarget` 6 个字段 `Check` 永远不读
+3. **`preApproved` 浮在 Policy 顶层**：只在 `WorkflowPlanExecute` 有意义但所有 workflow 都看得见
+
+R1.1 处理 #2 和 #3。#1 是 R2 的 scope，本次不动。
+
+### 10.1 Surgery 1：TUI 元数据剥离
+
+把 6 个渲染字段从 `Action` 移到新 `Display` 子结构：
+
+```go
+// 改前
+type Action struct {
+    Kind     Kind
+    Path     string
+    Command  string
+    ReadOnly bool
+    Diff     string                  // ← 给 TUI 看
+    MemoryName, MemoryTagline string  // ← 给 TUI 看
+    SkillName, SkillSource, SkillTarget string  // ← 给 TUI 看
+}
+
+// 改后
+type Action struct {
+    Kind     Kind
+    Path     string
+    Command  string
+    ReadOnly bool
+    Display  Display  // ← 渲染数据，Check 不读
+}
+
+type Display struct {
+    Diff string
+    MemoryName, MemoryTagline string
+    SkillName, SkillSource, SkillTarget string
+}
+```
+
+**收益**：
+
+- `Action` 顶层只剩 5 字段，全部 Check 会读
+- 添加新工具的 TUI 渲染数据：append 到 `Display`，不动 `Action`
+- 阅读 `permission.go` 时一眼看出"决策数据 vs 渲染数据"
+
+**callsite 改动**（3 处工具 + 3 处 TUI/permission 内部）：
+
+- `internal/tools/edit/edit.go`：`Diff: udiff` → `Display: Display{Diff: udiff}`
+- `internal/tools/memorytool/memorytool.go`：同款 wrap
+- `internal/tools/skillinstall/skillinstall.go`：同款 wrap
+- `internal/tui/view.go:renderApprovalPrompt`：`req.Action.MemoryName` → `req.Action.Display.MemoryName`（等 6 处 sed-rename）
+- `internal/permission/permission.go`：Check 里对 `MemoryName` / `SkillName` 等的 sanity check 跟着改 `a.Display.X`
+- 测试侧 4 处构造点同步
+
+**API 兼容性**：`Check(Action) error` 签名不变；`ApprovalRequest` 字段不变（`Action` 内部嵌套 `Display`，外面引用方式 `req.Action.Display.X`）。
+
+### 10.2 Surgery 2：preApproved 封装
+
+把 `preApproved` 从 Policy 顶层移到 workflow-specific 子结构：
+
+```go
+// 改前
+type Policy struct {
+    mu          sync.RWMutex
+    pref        Preference
+    workflow    Workflow
+    cwd         string
+    askFn       func(Action) bool
+    preApproved bool  // ← 浮在顶层，所有 workflow 都看见
+}
+
+// 改后
+type Policy struct {
+    mu       sync.RWMutex
+    pref     Preference
+    workflow Workflow
+    cwd      string
+    askFn    func(Action) bool
+    exec     workflowExecState  // ← PlanExecute 专属状态
+}
+
+type workflowExecState struct {
+    preApproved bool
+}
+```
+
+**收益**：
+
+- 阅读 Policy 结构时一眼看出"哪些是顶层不变量，哪些是 workflow-scoped"
+- 未来 PlanExecute 加新字段（step-count limit、time budget 等）顺手挂这里，不污染 Policy 顶层
+- `SetWorkflow` 重置改成 `p.exec = workflowExecState{}` —— 整块清零，未来加字段自动继承"safe by default reset"行为
+
+**API 完全不变**：`SetPreApproved(bool)` / `PreApproved() bool` 签名不动，外部调用零修改。改动纯粹是 Policy 内部 field shuffling + 一个 sub-struct 类型定义。
+
+### 10.3 实施成本
+
+| 阶段 | 内容 | 实际工作量 |
+|------|------|----------|
+| S1 | Display 子结构 + 6 callsite (sed for reads, Edit for struct literals) + 4 test files | ~40 行净变更 |
+| S2 | workflowExecState 子结构 + 4 处 `p.preApproved` → `p.exec.preApproved` (sed) | ~10 行净变更 |
+
+**总计：~半小时**，全部 45 包绿 `-race`、`go vet` clean。
+
+### 10.4 这次**不**做的
+
+- ❌ `Action.Kind` 的 enum vs routing 不对齐 —— R2 的事
+- ❌ 工具内 gate 的不一致（git subcommand whitelist / bash readonly / webfetch URL gate 各写各的）—— R2 的事
+- ❌ 把 `Display` 字段进一步压缩成单 `Subject string`（让工具自己 format）—— 失去 per-tool TUI 个性，不值
+- ❌ Effect + Workflow interface 那种完全重写方案 —— 90% 收益 vs 200% 成本，不值
+
+### 10.5 长期方向（参考）
+
+session 设计 review 期间讨论过更激进的 **Effect 设计**：
+
+```go
+type Effect interface {
+    Mutates() bool
+    Describe() string
+    Within(cwd string) (bool, error)
+}
+
+type Workflow interface {
+    Name() string
+    Decide(e Effect, cwd string) (Decision, error)
+}
+```
+
+工具 declare effect（`WriteFile{Path,Diff}` / `RunBash{Command,ReadOnly}` 等），Policy 在 declarative data 上 dispatch，不在 Kind enum 上 dispatch。Workflow 变成 interface，preApproved 等状态在具体 workflow 类型里。`Action.Kind` enum、`Action.ReadOnly` 半内半外的尴尬全消。
+
+**为什么不做**：
+
+- Go 没有 sum type，Effect 接口实现要 type-switch（比 enum 多一层 indirection）
+- 70+ 调用点要改，比 R1 的 60 处更广
+- 真实痛点不到那个程度——R1.1 已经处理掉 #2 #3 两个最碍眼的，剩下的 #1 是 R2 范畴
+
+如果将来 `Kind` 超过 10 个 / `Display` 字段超过 12 个 / 出现"我不知道这个工具该归哪个 Kind"的真痛点，再开 Effect。

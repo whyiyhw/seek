@@ -131,7 +131,7 @@ func TestRemember_AskApprovedWrites(t *testing.T) {
 	if saw.Kind != permission.KindMemoryRemember {
 		t.Errorf("Kind = %q, want KindMemoryRemember", saw.Kind)
 	}
-	if saw.MemoryName != "test-entry" || saw.MemoryTagline != "one-liner" {
+	if saw.Display.MemoryName != "test-entry" || saw.Display.MemoryTagline != "one-liner" {
 		t.Errorf("Action missing memory metadata: %+v", saw)
 	}
 

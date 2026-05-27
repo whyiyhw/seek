@@ -122,9 +122,9 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	udiff := diff.Unified(content, updated, filepath.Base(clean))
 
 	if err := t.policy.Check(permission.Action{
-		Kind: permission.KindEdit,
-		Path: a.Path,
-		Diff: udiff,
+		Kind:    permission.KindEdit,
+		Path:    a.Path,
+		Display: permission.Display{Diff: udiff},
 	}); err != nil {
 		return "", err
 	}

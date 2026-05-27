@@ -53,11 +53,11 @@ func TestPreApproved_DoesNotBypassMemoryOrSkillInstall(t *testing.T) {
 	p.SetPreApproved(true)
 	p.SetAskFn(func(Action) bool { return false })
 
-	err := p.Check(Action{Kind: KindMemoryRemember, MemoryName: "x"})
+	err := p.Check(Action{Kind: KindMemoryRemember, Display: Display{MemoryName: "x"}})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("memory_remember should still ask, got: %v", err)
 	}
-	err = p.Check(Action{Kind: KindSkillInstall, SkillName: "y"})
+	err = p.Check(Action{Kind: KindSkillInstall, Display: Display{SkillName: "y"}})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("skill_install should still ask, got: %v", err)
 	}

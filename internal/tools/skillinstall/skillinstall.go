@@ -231,10 +231,12 @@ func (t CommitTool) Execute(_ context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("%s: %w", commitName, err)
 	}
 	if err := t.policy.Check(permission.Action{
-		Kind:        permission.KindSkillInstall,
-		SkillName:   stage.Name,
-		SkillSource: stage.Source,
-		SkillTarget: target,
+		Kind: permission.KindSkillInstall,
+		Display: permission.Display{
+			SkillName:   stage.Name,
+			SkillSource: stage.Source,
+			SkillTarget: target,
+		},
 	}); err != nil {
 		return "", err
 	}
