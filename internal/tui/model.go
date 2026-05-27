@@ -39,6 +39,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -102,6 +103,12 @@ type Options struct {
 	// persisted via Store.Save. nil for ephemeral runs (--no-save).
 	Session *session.Session
 	Store   *session.Store
+
+	// Checkpoint is the v3 safety-net Manager (PRD docs/prd/
+	// feature-checkpoint.md). nil for ephemeral runs / disabled.
+	// The TUI uses it to back /checkpoints, /restore, /undo, /redo
+	// without re-resolving the session each call.
+	Checkpoint *checkpoint.Manager
 
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
