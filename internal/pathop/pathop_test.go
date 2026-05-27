@@ -23,7 +23,8 @@ func TestIsInPATH(t *testing.T) {
 
 func TestIsInPATH_ignoresEmptySegments(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("PATH", ";;"+dir+";;")
+	sep := string(os.PathListSeparator)
+	t.Setenv("PATH", sep+sep+dir+sep+sep)
 
 	if !IsInPATH(dir) {
 		t.Fatal("expected dir to match through empty segments")
@@ -79,7 +80,19 @@ func TestPathContainsDir_caseSensitive(t *testing.T) {
 }
 
 func TestPathContainsDir_caseInsensitive(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("case-insensitive PATH uses Windows paths and ; separators")
+	}
 	if !pathContainsDir(`C:\Tools\Seek`, `C:\tools\seek`, true) {
+		t.Fatal("expected case-insensitive match")
+	}
+}
+
+func TestPathContainsDir_caseInsensitive_nonWindows(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("covered by TestPathContainsDir_caseInsensitive")
+	}
+	if !pathContainsDir("/FOO/BAR", "/foo/bar", true) {
 		t.Fatal("expected case-insensitive match")
 	}
 }
