@@ -111,3 +111,88 @@ func hintGoTest(lower string) bool {
 	}
 	return false
 }
+
+// bashAdvisory is the **success-path** counterpart to
+// planAnalyzeBashHint. The hint above fires only when a command is
+// DENIED in plan-analyze — but in Ask mode the user often approves
+// `bash("ls foo")` / `bash("cd /x && git log")` / etc., the command
+// runs, and the model never learns that a dedicated tool would have
+// been more efficient (no quoting, no shell escaping, structured
+// output).
+//
+// bashAdvisory inspects the command at success-time and returns a
+// short suggestion when a clear "should have used <tool>" pattern
+// matches. bash.Execute appends it to the result as a [hint: …]
+// trailer; the model reads it on the next turn and (gradually)
+// internalises the right tool. Empty string = no advisory.
+//
+// Detected patterns:
+//   - `ls`  → use list_dir tool
+//   - `cat` / `head` / `tail` → use read tool
+//   - `grep` → use grep tool
+//   - `find` → use grep / list_dir
+//   - `git`  → use git tool
+//   - `cd ` prefix → drop it (orthogonal; combined with above)
+//
+// The advisory fires regardless of workflow/pref since the model's
+// habit is workflow-independent. Yolo-mode bash users see it too;
+// the noise is bounded (single line at result tail).
+func bashAdvisory(command string) string {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return ""
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	var advisories []string
+
+	// Pick the "effective" first token — if the command starts with
+	// `cd <path> &&`, the meaningful command comes after.
+	target := firstTokenAfterCD(fields)
+	switch target {
+	case "ls":
+		advisories = append(advisories, "for listing files use the `list_dir` tool — it handles globs natively and avoids shell quoting / metachar issues")
+	case "cat", "head", "tail":
+		advisories = append(advisories, "for reading file contents use the `read` tool — paginated output with line numbers, no shell quoting needed")
+	case "grep", "rg", "ag":
+		advisories = append(advisories, "for searching use the `grep` tool — preserves match metadata in the transcript, supports max_matches cap")
+	case "find":
+		advisories = append(advisories, "for finding files use the `grep` or `list_dir` tool — `find` via bash is fragile to escape correctly")
+	case "git":
+		advisories = append(advisories, "for git operations use the `git` tool — subcommand-whitelisted and plan-mode allowed (works inside `/plan` too)")
+	}
+
+	// Orthogonal: cd-prefix waste.
+	if hintCDPrefix(strings.ToLower(trimmed)) {
+		advisories = append(advisories, "drop the `cd` prefix — seek's bash tool already runs from the project root")
+	}
+
+	if len(advisories) == 0 {
+		return ""
+	}
+	return strings.Join(advisories, "; ")
+}
+
+// firstTokenAfterCD returns the meaningful first command token,
+// skipping past `cd <path> &&` / `cd <path> ;`. Empty when nothing
+// usable.
+func firstTokenAfterCD(fields []string) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	if fields[0] != "cd" {
+		return fields[0]
+	}
+	for i := 1; i < len(fields); i++ {
+		switch fields[i] {
+		case "&&", "||", ";", "|":
+			if i+1 < len(fields) {
+				return fields[i+1]
+			}
+		}
+	}
+	return ""
+}

@@ -139,5 +139,14 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		header += fmt.Sprintf(", output truncated to %d bytes", maxOutputBytes)
 	}
 	header += ")\n"
-	return header + string(output), nil
+	result := header + string(output)
+	// Success-path advisory: if the command had a clearly-better
+	// dedicated-tool alternative (ls → list_dir, git → git tool,
+	// cd-prefix waste, etc.), append a [hint: …] line so the model
+	// learns the preferred shape on the next turn. Doesn't block
+	// execution and doesn't affect non-matching commands.
+	if advisory := bashAdvisory(a.Command); advisory != "" {
+		result += "\n[hint: " + advisory + "]\n"
+	}
+	return result, nil
 }

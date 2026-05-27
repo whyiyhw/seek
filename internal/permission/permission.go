@@ -359,6 +359,20 @@ func (p *Policy) Check(a Action) error {
 	preApproved := p.exec.preApproved
 	p.mu.RUnlock()
 
+	// 0. ReadOnly bash short-circuit. The bash tool sets a.ReadOnly
+	//    only when the command matches its strict whitelist (`go vet`,
+	//    `npm ls`, `which`, etc.) AND has zero shell metacharacters
+	//    (`;`, `|`, `&&`, `>`, …). By construction such a command has
+	//    no side effects, so honour the flag regardless of workflow
+	//    or pref — saves the user from y/N prompts on `go vet ./...`
+	//    in Ask mode, and lets PrefDeny (print mode) still run safe
+	//    inspectors. The flag is advisory-from-the-tool: only the
+	//    bash tool's readonly.go is the authorised setter; no other
+	//    Kind should ever set it.
+	if a.Kind == KindBash && a.ReadOnly {
+		return nil
+	}
+
 	// 1. Workflow dispatch. PlanAnalyze is TERMINAL — its rule set is
 	//    a complete decision (every Kind either allowed or denied,
 	//    no fall-through). PlanExecute is non-terminal: it just adds
@@ -411,14 +425,10 @@ func planAnalyzeGate(a Action, cwd string) error {
 		}
 		return nil
 	case KindBash:
-		// Read-only inspector commands (go vet, go list, npm ls, …)
-		// are allowed in plan-analyze so the model can answer "does
-		// this still compile?" / "what's in the module graph?"
-		// without leaving the substate. The bash tool sets ReadOnly
-		// via the whitelist + metachar check; we trust that flag here.
-		if a.ReadOnly {
-			return nil
-		}
+		// ReadOnly bash already short-circuited at the top of Check
+		// (step 0). If we reach here, the command isn't whitelisted
+		// or contained shell metachars — deny with the standard
+		// guidance pointing at alternatives.
 		return fmt.Errorf("%w: plan mode: bash is not allowed for this command — explore with read/grep/list_dir/git, or run a read-only inspector (go vet, go list, npm ls, …) which is whitelisted",
 			ErrDenied)
 	case KindGit:

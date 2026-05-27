@@ -47,6 +47,44 @@ func TestBash_EchoUnderYolo(t *testing.T) {
 	}
 }
 
+// TestBash_AppendsAdvisoryOnDedicatedToolPattern is the end-to-end
+// regression test for the success-path advisory mechanism. When the
+// model uses bash for something a dedicated tool does better
+// (`ls`/`cat`/`git`/etc.), the result must carry a `[hint: …]`
+// trailer so the model learns the preferred shape on the next turn.
+func TestBash_AppendsAdvisoryOnDedicatedToolPattern(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	out, err := run(t, yolo(t), Args{Command: "ls /tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[hint:") {
+		t.Errorf("advisory missing — ls(1) should suggest list_dir: %s", out)
+	}
+	if !strings.Contains(out, "list_dir") {
+		t.Errorf("advisory should mention list_dir, got: %s", out)
+	}
+}
+
+// TestBash_NoAdvisoryForOpaqueCommands verifies the inverse — commands
+// that don't match a dedicated-tool pattern must not pollute the
+// result with a [hint] line. echo / go vet / arbitrary scripts run
+// silently.
+func TestBash_NoAdvisoryForOpaqueCommands(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	out, err := run(t, yolo(t), Args{Command: "echo only-output"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "[hint:") {
+		t.Errorf("echo should not trigger advisory, got: %s", out)
+	}
+}
+
 func TestBash_NonZeroExit(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only smoke")

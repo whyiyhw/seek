@@ -142,6 +142,46 @@ func TestPreApproved_PlanAnalyzeStillReadOnly(t *testing.T) {
 	}
 }
 
+// TestReadOnlyBash_GloballyAllowed: a bash command with Action.ReadOnly
+// set is whitelisted by the tool (strict pattern + no shell metachars)
+// — by construction it has no side effects. The Policy honours that
+// regardless of workflow OR pref, so `go vet ./...` doesn't nag y/N
+// in Ask mode and isn't deny'd under PrefDeny print-mode.
+func TestReadOnlyBash_GloballyAllowed(t *testing.T) {
+	t.Parallel()
+	matrix := []struct {
+		name     string
+		pref     Preference
+		workflow Workflow
+	}{
+		{"ask + none", PrefAsk, WorkflowNone},
+		{"ask + plan-analyze", PrefAsk, WorkflowPlanAnalyze},
+		{"ask + plan-execute", PrefAsk, WorkflowPlanExecute},
+		{"deny + none", PrefDeny, WorkflowNone},
+		// PrefYolo already trivially allows; covered by other tests.
+	}
+	for _, tc := range matrix {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := New(t.TempDir(), tc.pref)
+			p.SetWorkflow(tc.workflow)
+			// askFn explicitly returns FALSE: if Check decides to ask,
+			// the action gets denied. ReadOnly should short-circuit
+			// before askFn is even consulted.
+			var askCalls int
+			p.SetAskFn(func(Action) bool {
+				askCalls++
+				return false
+			})
+			if err := p.Check(Action{Kind: KindBash, Command: "go vet ./...", ReadOnly: true}); err != nil {
+				t.Errorf("ReadOnly bash should auto-pass in %s, got: %v", tc.name, err)
+			}
+			if askCalls != 0 {
+				t.Errorf("askFn must NOT be consulted for ReadOnly bash (%s), got %d calls", tc.name, askCalls)
+			}
+		})
+	}
+}
+
 // TestPlanAnalyze_AllowsReadOnlyBash: the ReadOnly flag (set by the
 // bash tool when the command matches the inspector whitelist) lets
 // `go vet ./...` and friends through plan-analyze. Without the flag,

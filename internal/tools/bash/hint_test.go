@@ -166,6 +166,134 @@ func TestHintGitViaBash_StandaloneVsSubword(t *testing.T) {
 	}
 }
 
+// --- bashAdvisory (success-path teaching) -----------------------------
+
+func TestBashAdvisory_LsSuggestsListDir(t *testing.T) {
+	t.Parallel()
+	got := bashAdvisory("ls docs/prd/")
+	if !strings.Contains(got, "list_dir") {
+		t.Errorf("expected list_dir suggestion, got: %s", got)
+	}
+}
+
+func TestBashAdvisory_CatSuggestsRead(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		"cat README.md",
+		"head -20 main.go",
+		"tail -100 logs/app.log",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			got := bashAdvisory(cmd)
+			if !strings.Contains(got, "`read` tool") {
+				t.Errorf("expected read suggestion for %q, got: %s", cmd, got)
+			}
+		})
+	}
+}
+
+func TestBashAdvisory_GrepSuggestsGrepTool(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		"grep -r foo .",
+		"rg foo",
+		"ag foo",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			got := bashAdvisory(cmd)
+			if !strings.Contains(got, "`grep` tool") {
+				t.Errorf("expected grep tool suggestion for %q, got: %s", cmd, got)
+			}
+		})
+	}
+}
+
+func TestBashAdvisory_GitSuggestsGitTool(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		"git log --oneline",
+		"git status",
+		"cd /repo && git diff HEAD",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			got := bashAdvisory(cmd)
+			if !strings.Contains(got, "`git` tool") {
+				t.Errorf("expected git tool suggestion for %q, got: %s", cmd, got)
+			}
+		})
+	}
+}
+
+func TestBashAdvisory_FindSuggestsGrepOrListDir(t *testing.T) {
+	t.Parallel()
+	got := bashAdvisory("find . -name '*.go'")
+	if !strings.Contains(got, "`grep`") || !strings.Contains(got, "`list_dir`") {
+		t.Errorf("expected grep/list_dir suggestion, got: %s", got)
+	}
+}
+
+func TestBashAdvisory_CDPrefixAlwaysFlagged(t *testing.T) {
+	t.Parallel()
+	got := bashAdvisory("cd /repo && ls foo/")
+	// Both the ls suggestion AND the cd suggestion should fire.
+	if !strings.Contains(got, "list_dir") {
+		t.Errorf("missing list_dir for cd && ls: %s", got)
+	}
+	if !strings.Contains(got, "drop the `cd` prefix") {
+		t.Errorf("missing cd suggestion for cd && ls: %s", got)
+	}
+}
+
+func TestBashAdvisory_NoSuggestionForOpaqueCommands(t *testing.T) {
+	t.Parallel()
+	// Commands that don't match any pattern should produce empty
+	// advisory — no "[hint: ...]" trailer appended on the result.
+	for _, cmd := range []string{
+		"go vet ./...",
+		"npm ls",
+		"docker run alpine",
+		"./my-script.sh",
+		"echo hello",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if got := bashAdvisory(cmd); got != "" {
+				t.Errorf("opaque command %q should produce empty advisory, got: %s", cmd, got)
+			}
+		})
+	}
+}
+
+func TestBashAdvisory_EmptyCommand(t *testing.T) {
+	t.Parallel()
+	if got := bashAdvisory(""); got != "" {
+		t.Errorf("empty command → empty advisory, got: %q", got)
+	}
+	if got := bashAdvisory("   "); got != "" {
+		t.Errorf("whitespace-only → empty advisory, got: %q", got)
+	}
+}
+
+func TestFirstTokenAfterCD_HandlesCdChaining(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		fields []string
+		want   string
+	}{
+		{[]string{"ls", "/tmp"}, "ls"}, // no cd
+		{[]string{"cd", "/x", "&&", "ls"}, "ls"},
+		{[]string{"cd", "/x", ";", "git", "log"}, "git"},
+		{[]string{"cd", "/x"}, ""}, // cd with no follow-up
+		{[]string{}, ""},           // empty
+	}
+	for _, c := range cases {
+		t.Run(strings.Join(c.fields, " "), func(t *testing.T) {
+			if got := firstTokenAfterCD(c.fields); got != c.want {
+				t.Errorf("firstTokenAfterCD(%v) = %q, want %q", c.fields, got, c.want)
+			}
+		})
+	}
+}
+
 func TestHintGoTest_RequiresAdjacentTokens(t *testing.T) {
 	t.Parallel()
 	if !hintGoTest("go test ./...") {
