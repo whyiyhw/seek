@@ -36,6 +36,11 @@ func TestRecall_HitReturnsEntryAndBumpsRecall(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
+	// Ensure the monotonic clock advances at least one tick before the
+	// Recall call below; on fast machines (esp. CI containers with
+	// coarse time resolution) Add's time.Now() and Recall's time.Now()
+	// can land in the same nanosecond, making LastRecalledAt == CreatedAt.
+	time.Sleep(time.Millisecond)
 
 	tool := NewRecall(p)
 	out, err := tool.Execute(context.Background(), json.RawMessage(`{"name":"session-format"}`))

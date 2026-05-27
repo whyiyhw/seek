@@ -585,6 +585,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when combining `t.TempDir()` + `os.Chdir()` in a test, always call `t.TempDir()` *first*, then register the chdir-back `t.Cleanup`. The reverse ordering is a latent Windows-only failure. `defer os.Chdir(prev)` is safe (runs before `t.Cleanup` callbacks); `t.Cleanup` is not.
 - **Refs**: `internal/tools/skillinstall/skillinstall_test.go:TestCommit_ProjectScope`
 
+### Two `time.Now()` calls in the same nanosecond make Equal-based timestamp assertions flaky
+- **Saw**: `TestRecall_HitReturnsEntryAndBumpsRecall` intermittently failed with `LastRecalledAt should advance past CreatedAt after Recall`. Reproduces more often on fast CI runners with coarse clock resolution.
+- **Why**: `Project.Add` and `memorytool.Execute → TouchRecall` each call `time.Now().UTC()` independently. When the two calls land in the same nanosecond, `LastRecalledAt.Equal(CreatedAt)` is true, even though Recall *did* update the timestamp. The bug is in the test's assumption that `time.Now()` strictly advances between two adjacent calls, not in the production code.
+- **Fix**: insert `time.Sleep(time.Millisecond)` between `p.Add` and `tool.Execute` in the test so the clock provably ticks. 50/50 race-mode runs pass after the fix.
+- **Lesson**: `t1, t2 := time.Now(), time.Now(); t1 == t2` is allowed by the Go spec — successive `Now()` calls in the same monotonic tick return equal values. Tests that assert "later timestamp is strictly greater" need either a sleep or a fake clock. Don't depend on real-clock progress for correctness assertions inside fast-running tests.
+- **Refs**: `internal/tools/memorytool/memorytool_test.go:TestRecall_HitReturnsEntryAndBumpsRecall`, `internal/memory/project.go:Add` (line 266 `time.Now`), `internal/tools/memorytool/memorytool.go:92` (line 92 `time.Now`)
+
 ## Release / upgrade
 
 ### `tui.VersionString()` is a formatted banner, not a raw module version
