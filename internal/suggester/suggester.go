@@ -94,6 +94,37 @@ func New(client *deepseek.Client, opts ...Option) *Predictor {
 	return p
 }
 
+// maxHistoryTurns caps the number of past user→assistant turns included in
+// the prediction prompt. 2 turns (≈ last user Q + assistant A + tool results
+// + current assistant's final text) gives enough context for a good guess
+// without burning prefix-cache or token budget on early conversation history.
+const maxHistoryTurns = 2
+
+// predictionSuffix extracts the last `maxTurns` complete user→assistant
+// turn(s) from the full history. This is the only context the prediction
+// model needs — it already gets a dedicated system prompt explaining the
+// task, and ancient turns don't help it guess the next reply. Sending the
+// full conversation (which can be 100K+ tokens on Pro) to the cheap Flash
+// model would waste prefix cache and add pointless latency.
+func predictionSuffix(msgs []deepseek.Message, maxTurns int) []deepseek.Message {
+	// Scan backwards from the tail. Find the start of the Nth
+	// user message (counting from the end). Drop everything before it.
+	seen := 0
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == deepseek.RoleUser {
+			seen++
+			if seen >= maxTurns {
+				start = i
+				break
+			}
+		}
+	}
+	out := make([]deepseek.Message, len(msgs)-start)
+	copy(out, msgs[start:])
+	return out
+}
+
 // Suggest predicts the user's next message given the conversation
 // transcript. Returns "" on:
 //   - nil predictor (caller can short-circuit safely)
@@ -108,12 +139,12 @@ func (p *Predictor) Suggest(ctx context.Context, history []deepseek.Message) str
 		return ""
 	}
 
-	// Build the prediction-call message list: side-channel system prompt,
-	// then full transcript (with PredictedNext + ReasoningContent stripped
-	// by the shared helper so it round-trips cleanly), then the sentinel
-	// user message that triggers the prediction.
+	// Strip side-channel fields, then keep only the last 2 turns so the
+	// cheap Flash model doesn't have to ingest a 100K-token Pro transcript.
 	prepared := deepseek.StripReasoningContent(history)
-	msgs := make([]deepseek.Message, 0, len(prepared)+2)
+	prepared = predictionSuffix(prepared, maxHistoryTurns)
+
+	msgs := make([]deepseek.Message, 0, len(prepared)+3)
 	msgs = append(msgs, deepseek.Message{
 		Role:    deepseek.RoleSystem,
 		Content: systemPrompt,
@@ -128,6 +159,12 @@ func (p *Predictor) Suggest(ctx context.Context, history []deepseek.Message) str
 		Model:     p.model,
 		Messages:  msgs,
 		MaxTokens: maxPredictionTokens,
+		// Thinking must be explicitly DISABLED for the prediction call
+		// — V4-Flash currently defaults to thinking-mode-on at the API
+		// level, which drains the max_tokens budget on reasoning_content
+		// and leaves content empty. The prediction task (short single-
+		// sentence guess) needs zero reasoning.
+		Thinking: &deepseek.ThinkingMode{Type: "disabled"},
 	})
 	if err != nil {
 		// Silent failure — UX hint, not load-bearing.

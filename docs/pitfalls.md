@@ -831,3 +831,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: call `setsid()` via `cmd.SysProcAttr.Setsid = true` before starting the child. This creates a new session, detaching from the controlling terminal — `/dev/tty` open returns ENXIO instead of blocking the UI. Added `detachStdin()` (Unix build tag) with a no-op for Windows
 - **Lesson**: child processes inherit the parent's TTY by default. Process-spawning tools must explicitly opt out of TTY inheritance (setsid, setctty=false, or equivalent), otherwise interactive prompts steal input in a way that context cancellation can't reach
 - **Refs**: `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash.go` (line 113)
+
+### V4-Flash prediction returns empty content when Thinking isn't explicitly disabled
+- **Saw**: side-channel suggested-reply (`Suggest`) always returned `""` even though the API call succeeded (200 OK) and tokens were consumed. `finish_reason="length"`, `content=""`, but `reasoning_content` was populated with the model's internal monologue — all `max_tokens` were spent on reasoning, leaving nothing for the actual prediction.
+- **Why**: the DeepSeek API currently defaults V4-Flash to thinking-mode-*on* at the endpoint level, even though `ShouldEnableThinking("deepseek-v4-flash")` returns false in the code. Without an explicit `Thinking: {Type: "disabled"}` in the request, the model burns the entire `max_tokens` budget on `reasoning_content` and emits an empty `content` field.
+- **Fix**: set `Thinking: &deepseek.ThinkingMode{Type: "disabled"}` in the `Suggest` function's `ChatRequest`. The prediction task (short single-sentence guess) needs zero chain-of-thought reasoning.
+- **Lesson**: never assume the API default matches the code's `ShouldEnableThinking` switch. V4 models may have default thinking enabled server-side regardless of what the client expects. When the task is fast/cheap (side-channel prediction, classification), always pin `Thinking: disabled` explicitly.
+- **Refs**: `internal/suggester/suggester.go`, `pkg/deepseek/types.go:ShouldEnableThinking`, `pkg/deepseek/types.go:ThinkingMode`
