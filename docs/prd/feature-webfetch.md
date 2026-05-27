@@ -2,7 +2,7 @@
 
 **主题**：给 agent 一条**狭窄、有界、读-only** 的 HTTP GET 路径，让 plan-analyze 模式（以及任何模式）能在不开 bash 的前提下访问外部文档。本质上是 `read` 的远程版本：路径换成 URL，inside-CWD 验证换成 SSRF 防御。
 
-**状态**：📐 设计稿，未实施。
+**状态**：🚀 v1 已上线。W1-W6 全部实施完成；详见 §六 阶段交付（每阶段标 ✅ + 实际落地处）。
 
 **触发起因**：2026-05 一次 plan 模式会话中，模型尝试 `curl -sL https://docs.anthropic.com/...` 被 Phase D 的 bash 只读白名单 deny（详见 [`docs/prd/feature-plan-mode.md`](feature-plan-mode.md) §八）。`curl` 不该进白名单（flag 组合太多、`file://` / localhost / 上传文件等都能搞事），但模型在 plan-analyze 里**完全没有合法的外部读取路径**也是事实。本 PRD 是这条缺口的正解。
 
@@ -300,18 +300,23 @@ Hostname-level reject 远远不够。攻击向量：
 
 ---
 
-## 六、阶段交付
+## 六、阶段交付（✅ 已完成）
 
-| 阶段 | 内容 | 工作量 |
+| 阶段 | 内容 | 落地处 |
 |------|------|-------|
-| W1 | `internal/tools/webfetch/validate.go`：URL 解析 + scheme/host/port allow/deny + 私网 IP 判定 + 表驱动单测 | ~150 行 + 测 ~200 行 |
-| W2 | `webfetch.go`：Tool 实现，包括自定义 `http.Client`（Dialer / CheckRedirect / Transport）、size cap、Content-Type 过滤 | ~200 行 + 测 ~150 行（用 `httptest` server 覆盖 happy / 30x / 4xx / 5xx / timeout / binary CT） |
-| W3 | `render.go`：HTML → text 简化（`golang.org/x/net/html` tokenize + script/style 剥离） | ~80 行 + 测 ~80 行 |
-| W4 | `cmd/seek/main.go` 注册工具 + `SEEK_NO_WEBFETCH` / `SEEK_WEBFETCH_ALLOW_HTTP` 环境变量识别 | ~30 行 |
-| W5 | 端到端：plan-analyze 下调 webfetch 成功 / 拒绝 file:// / 拒绝 localhost / redirect-to-private 拒绝 / 大文件截断 | 半天 |
-| W6 | Skill 文档（`plan-mode.md` 补一行说明 plan-analyze 可以调 webfetch） | ~10 行 |
+| W1 ✅ | URL/IP validator + 5 层 SSRF 防御 + 表驱动测试 | `validate.go` + `validate_test.go`（~280 行 + ~300 行测试，覆盖 scheme / host / port / 私网 IP / DNS rebinding 模式） |
+| W2 ✅ | Tool 实现：自定义 `http.Client` (DialContext + CheckRedirect + Transport)、size cap、Content-Type 过滤、错误分类 | `webfetch.go` (~380 行) + `webfetch_test.go` (~330 行 httptest 覆盖 happy/30x/4xx/5xx/timeout/binary CT/truncation/SSRF) |
+| W3 ✅ | HTML→text 简化：`golang.org/x/net/html` tokenize + script/style/noscript 剥离 + 段落保留 + 空白规范化 | `render.go` (~160 行) + `render_test.go` (~150 行测试) |
+| W4 ✅ | `cmd/seek/main.go` 注册 + `SEEK_NO_WEBFETCH` / `SEEK_WEBFETCH_ALLOW_HTTP` 环境变量；通用 `envBoolTrue` helper | `cmd/seek/main.go` (~25 行新增 + `envBoolTrue` 提取) + `envgate_test.go` |
+| W5 ✅ | 端到端验证集成在 W2 httptest 套件中（redirect-to-blocked / 拒 file:// / 拒 localhost / 拒 bad port / 大文件截断 / ctx 取消） | 见 `webfetch_test.go` |
+| W6 ✅ | Skill 文档更新 | `internal/skill/builtin/plan-mode.md` mode reminder 段补 webfetch + curl 反例 |
 
-**总计：~1.5 天**。三个 commit：W1（validate 纯函数 + 测试）独立、W2+W3 一起、W4+W5+W6 一起。
+**实际工作量**：约 1 天（比 PRD 估计的 1.5 天略快，因为 W5 集成进了 W2 httptest 套件，没单开 e2e）。`go vet` clean、`go test -race ./...` 45 包全绿、0 failure。
+
+**关键实施补充 vs PRD**：
+- `Tool.skipIPValidation` 字段：package-private 字段，**仅供单测**使用让 httptest server (127.0.0.1) 能 dial。生产代码绝不可设。
+- `ssrfDialContext` 实现："resolve all IPs → validate each → dial validated IP 字面量"，防 DNS rebinding 攻击。
+- `formatErrorResult` / `formatHTTPError` / `formatSuccess` 三个文案 helper：所有错误都走 `[webfetch: <category>]` 前缀（per PRD §2.8），让模型在 tool result 里识别错误类别后自决断。
 
 ### 6.1 测试覆盖（按 CLAUDE.md 失败路径强制）
 

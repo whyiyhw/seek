@@ -53,6 +53,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
+	"github.com/whyiyhw/seek/internal/tools/webfetch"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -761,6 +762,18 @@ func run() error {
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).
 		Add(askusertool.New(askPolicy))
+
+	// webfetch: opt-out via SEEK_NO_WEBFETCH for air-gapped /
+	// privacy-sensitive sessions. SEEK_WEBFETCH_ALLOW_HTTP opens
+	// the http:// scheme for internal docs sites. See PRD
+	// docs/prd/feature-webfetch.md.
+	if !envBoolTrue("SEEK_NO_WEBFETCH") {
+		wfOpts := webfetch.DefaultOptions()
+		if envBoolTrue("SEEK_WEBFETCH_ALLOW_HTTP") {
+			wfOpts.AllowHTTP = true
+		}
+		reg.Add(webfetch.New(wfOpts))
+	}
 
 	// DeepSeek-exclusive tools: FIM and Reasoner are only available
 	// when using the DeepSeek client directly.
@@ -1760,5 +1773,13 @@ func autoDistillEnabled() bool {
 	if v == "" {
 		return true // default: enabled
 	}
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+// envBoolTrue returns true when the named env var is set to a truthy
+// value (1/true/yes/on). Empty/unset is false. Use for kill-switch /
+// opt-in flags where "absent = disabled" is the safer default.
+func envBoolTrue(name string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }

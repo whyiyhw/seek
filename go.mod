@@ -7,7 +7,9 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
+	github.com/charmbracelet/x/exp/teatest v0.0.0-20260525135217-abeec2b8bf0b
 	github.com/muesli/termenv v0.16.0
+	golang.org/x/net v0.38.0
 	golang.org/x/term v0.36.0
 	golang.org/x/text v0.30.0
 )
@@ -23,7 +25,6 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/golden v0.0.0-20241011142426-46044092ad91 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20250327172914-2fdc97757edf // indirect
-	github.com/charmbracelet/x/exp/teatest v0.0.0-20260525135217-abeec2b8bf0b // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.9.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
@@ -43,6 +44,5 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
-	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 )

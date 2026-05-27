@@ -526,7 +526,7 @@ artifact **不替代** transcript。adjust / re-propose / cancel / duplicate 都
 
 ### 相邻 PRD
 
-- [`feature-webfetch.md`](feature-webfetch.md) — 解决 plan-analyze 下"想读外部文档但 bash 被 deny"的缺口。专用 HTTP GET 工具，强约束 + SSRF 防御，跟 plan-mode 的安全姿态完全对齐。设计稿，待建。
+- [`feature-webfetch.md`](feature-webfetch.md) — 解决 plan-analyze 下"想读外部文档但 bash 被 deny"的缺口。专用 HTTP GET 工具，强约束 + SSRF 防御，跟 plan-mode 的安全姿态完全对齐。✅ v1 已上线。
 
 ### 历史
 
