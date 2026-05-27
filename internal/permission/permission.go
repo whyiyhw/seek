@@ -204,6 +204,19 @@ type Policy struct {
 	// a sub-struct so a reader can tell at a glance that these
 	// fields are workflow-scoped, not top-level Policy state.
 	exec workflowExecState
+
+	// onDestructive is the v3 checkpoint hook (PRD docs/prd/
+	// feature-checkpoint.md §5). When Check decides a destructive
+	// action (write / edit / mutating bash) will go through, it
+	// fires this callback BEFORE returning nil. The callback is
+	// the safety net's only entry point into the permission gate.
+	// Wired by cmd/seek/main.go after the Manager is constructed.
+	//
+	// Why a callback rather than an interface coupling permission
+	// to internal/checkpoint: keeps permission's import surface
+	// minimal and lets tests use a no-op without dragging in the
+	// real checkpoint machinery.
+	onDestructive func(a Action)
 }
 
 // workflowExecState collects all fields that only make sense while
@@ -244,6 +257,23 @@ func (p *Policy) SetAskFn(fn func(Action) bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.askFn = fn
+}
+
+// SetOnDestructive registers the v3 checkpoint hook. Called from
+// Check IMMEDIATELY before returning nil for destructive actions
+// (write / edit / mutating bash). Idempotent / cheap: the callback
+// itself handles "have I already checkpointed this turn?".
+//
+// Concurrency: writer side under p.mu (mirrors SetAskFn); reader
+// side snapshots under RLock in Check, so a hot-swap mid-turn is
+// safe.
+func (p *Policy) SetOnDestructive(fn func(a Action)) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onDestructive = fn
 }
 
 // Pref returns the current preference.
@@ -357,6 +387,7 @@ func (p *Policy) Check(a Action) error {
 	cwd := p.cwd
 	askFn := p.askFn
 	preApproved := p.exec.preApproved
+	onDestructive := p.onDestructive
 	p.mu.RUnlock()
 
 	// 0. ReadOnly bash short-circuit. The bash tool sets a.ReadOnly
@@ -373,6 +404,7 @@ func (p *Policy) Check(a Action) error {
 		return nil
 	}
 
+	var decision error
 	// 1. Workflow dispatch. PlanAnalyze is TERMINAL — its rule set is
 	//    a complete decision (every Kind either allowed or denied,
 	//    no fall-through). PlanExecute is non-terminal: it just adds
@@ -383,9 +415,11 @@ func (p *Policy) Check(a Action) error {
 	//    chosen safety boundaries that trump pref. PrefYolo +
 	//    PlanAnalyze MUST still be read-only — that's plan mode's
 	//    raison d'être.
+	terminal := false
 	switch workflow {
 	case WorkflowPlanAnalyze:
-		return planAnalyzeGate(a, cwd)
+		decision = planAnalyzeGate(a, cwd)
+		terminal = true
 	case WorkflowPlanExecute:
 		// preApproved fast-path: per-step batch approval granted at
 		// propose() time. Bash / write / edit auto-pass while the
@@ -395,15 +429,53 @@ func (p *Policy) Check(a Action) error {
 		if preApproved {
 			switch a.Kind {
 			case KindBash, KindWrite, KindEdit:
-				return nil
+				decision = nil
+				terminal = true
 			}
 		}
-		// fall through to pref gate
+		// fall through to pref gate when not pre-approved
 	}
 
-	// 2. Preference gate. Reached for WorkflowNone, or PlanExecute
-	//    where preApproved didn't short-circuit.
-	return prefGate(pref, a, cwd, askFn)
+	if !terminal {
+		// 2. Preference gate. Reached for WorkflowNone, or PlanExecute
+		//    where preApproved didn't short-circuit.
+		decision = prefGate(pref, a, cwd, askFn)
+	}
+
+	// 3. Checkpoint hook. Fire ONLY on success and ONLY for
+	//    destructive actions. Read / git / read-only bash are out of
+	//    scope (read-only bash already short-circuited at step 0).
+	//    The Manager owns the "one per turn" gate — we just fire
+	//    every time and let it decide. Wrapped in a recover'd helper
+	//    so a buggy hook can't take down the permission gate.
+	if decision == nil && onDestructive != nil && isDestructiveAction(a) {
+		safeFireDestructive(onDestructive, a)
+	}
+	return decision
+}
+
+// isDestructiveAction is the in-package mirror of the
+// `checkpoint.isDestructive` decision, kept here so permission
+// doesn't import checkpoint (the dependency would invert).
+func isDestructiveAction(a Action) bool {
+	switch a.Kind {
+	case KindWrite, KindEdit:
+		return true
+	case KindBash:
+		return !a.ReadOnly
+	}
+	return false
+}
+
+// safeFireDestructive runs the registered hook with a panic guard.
+// The hook is best-effort: the safety net should never become a
+// reliability hazard. recover()'d panics are silently swallowed
+// here; the surfacing happens via the hook's own Sink.Warn.
+func safeFireDestructive(fn func(Action), a Action) {
+	defer func() {
+		_ = recover()
+	}()
+	fn(a)
 }
 
 // planAnalyzeGate is the read-only constraint set for plan-analyze:

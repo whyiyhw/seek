@@ -22,6 +22,15 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+## Filesystem / concurrency
+
+### Two parallel writers of the SAME content-addressed blob race on a shared `.tmp` filename
+- **Saw**: checkpoint package's concurrent-snapshot test failed with ~half the expected events; the warnings logged "rename ... .tmp ... : no such file or directory" for many goroutines
+- **Why**: `storeBlobLocked(sha, content)` used a fixed `<bp>.tmp` filename, then `os.Rename(tmp, bp)`. Two goroutines hashing the same content (e.g. concurrent edits to small files with identical pre-state) both: (a) Stat — miss; (b) WriteFile(tmp); (c) Rename(tmp, bp). Whichever rename wins erases the .tmp file. The losing goroutine's later WriteFile-to-the-same-tmp succeeds, but its rename of that file fails because the .tmp path is already renamed-away — same name, but stale fd handle wasn't the issue, the file path was simply gone
+- **Fix**: swap fixed-name `<bp>.tmp` for `os.CreateTemp(dir, base+".tmp.*")` so every writer gets a unique scratch path, then absorb the "target already exists" race after `Rename` returns an error by checking `Stat(bp)` and dropping our tmp copy silently. Commit (M9.1)
+- **Lesson**: content-addressed storage is forgiving about losing the race (the winner's bytes equal yours) but UNforgiving about sharing a `.tmp` filename. Either use a unique tmp name per writer OR hold a per-blob mutex. The unique-tmp approach is simpler and lock-free
+- **Refs**: `internal/checkpoint/file.go:storeBlobLocked`, `internal/checkpoint/checkpoint_test.go:TestFile_ConcurrentSnapshots`
+
 ## Hook / memory
 
 ### OnSessionStart must reset snapshot state for --resume correctness

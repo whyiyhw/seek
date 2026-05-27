@@ -150,3 +150,38 @@ func Soul() (string, error) {
 	}
 	return filepath.Join(root, "soul.md"), nil
 }
+
+// ProjectSessionDir returns ~/.seek/projects/<id>/sessions/<sid>/ for the
+// given absolute project path and session id. Used by the v3 checkpoint
+// subsystem as the per-session scratch space — feature PRD docs/prd/
+// feature-checkpoint.md §3.2. Does NOT create the directory.
+//
+// Note: this is NOT where session JSONL files live (those stay flat
+// under ~/.seek/sessions/<id>.jsonl for backward-compat). This is the
+// per-project, per-session sidecar dir that holds checkpoint blobs +
+// indexes, scoped so cleanup on SessionEnd is a simple RemoveAll.
+func ProjectSessionDir(absPath, sid string) (string, error) {
+	if sid == "" {
+		return "", fmt.Errorf("paths: ProjectSessionDir: empty session id")
+	}
+	dir, err := ProjectDir(absPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "sessions", sid), nil
+}
+
+// SessionCheckpointDir returns the per-session checkpoint root:
+// ~/.seek/projects/<id>/sessions/<sid>/. The checkpoint subsystem
+// (internal/checkpoint) hangs its `checkpoints.jsonl` (git index) and
+// `checkpoints/` subdir (file CAS blob store + index) under this root.
+// Does NOT create the directory — callers MkdirAll on first use.
+//
+// Why per-project + per-session rather than per-session-only: the
+// project ID is stable across machines for the same path, so a future
+// "list all checkpoints for this project" UI has a natural namespace,
+// and cleanup is a single RemoveAll without grepping for the session
+// across multiple roots.
+func SessionCheckpointDir(absPath, sid string) (string, error) {
+	return ProjectSessionDir(absPath, sid)
+}

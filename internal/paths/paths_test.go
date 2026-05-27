@@ -126,6 +126,27 @@ func TestProjectPlans_ComposesUnderProjectDir(t *testing.T) {
 	}
 }
 
+func TestSessionCheckpointDir_ComposesUnderProjectSessions(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+	got, err := SessionCheckpointDir("/abs/path/to/project", "sid123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(override, "projects",
+		ProjectID("/abs/path/to/project"), "sessions", "sid123")
+	if got != want {
+		t.Errorf("SessionCheckpointDir = %q, want %q", got, want)
+	}
+}
+
+func TestSessionCheckpointDir_RequiresSessionID(t *testing.T) {
+	_, err := SessionCheckpointDir("/abs/path", "")
+	if err == nil {
+		t.Fatal("expected error for empty session id, got nil")
+	}
+}
+
 func TestHome_IgnoresXDG(t *testing.T) {
 	// Pre-v1.0 versions read $XDG_CONFIG_HOME. Pin the new behaviour
 	// so a future "let's support XDG again" change has to consciously
