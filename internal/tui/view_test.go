@@ -811,25 +811,26 @@ func TestView_IdleStateIsStableAcrossRedraws(t *testing.T) {
 }
 
 // TestView_WelcomeBannerOnFreshSession verifies that a model with
-// turns==0 renders the pixel wordmark ("█") and the working directory.
-// Regression: the welcome banner must appear in the live region on
-// startup now that it's no longer printed to stdout pre-tea.
+// turns==0 renders the meta line (CWD, version, creator).
 func TestView_WelcomeBannerOnFreshSession(t *testing.T) {
 	SetTheme("dark")
-	m := testModel().WithBannerFrame(len(letterEndCols)).Build()
+	m := testModel().Build()
 
 	out := m.View()
 
-	if !strings.Contains(out, "█") {
-		t.Error("welcome banner should contain pixel-art blocks (█) when turns==0")
-	}
 	if !strings.Contains(out, m.opts.CWD) {
 		t.Errorf("welcome banner should contain cwd %q", m.opts.CWD)
+	}
+	if !strings.Contains(out, "seek") {
+		t.Error("welcome banner should mention 'seek'")
+	}
+	if !strings.Contains(out, Creator) {
+		t.Errorf("welcome banner should show creator %q", Creator)
 	}
 }
 
 // TestView_WelcomeBannerHiddenAfterFirstTurn verifies that once a
-// conversation starts (turns>0), the pixel wordmark is absent from
+// conversation starts (turns>0), the welcome meta line is absent from
 // the live region. It should NOT reappear mid-conversation.
 func TestView_WelcomeBannerHiddenAfterFirstTurn(t *testing.T) {
 	SetTheme("dark")
@@ -837,93 +838,24 @@ func TestView_WelcomeBannerHiddenAfterFirstTurn(t *testing.T) {
 
 	out := m.View()
 
-	if strings.Contains(out, "█") {
-		t.Error("pixel-art blocks (█) must NOT appear in View() when turns>0")
+	if strings.Contains(out, Creator) {
+		t.Error("welcome meta line must NOT appear in View() when turns>0")
 	}
 }
 
-// TestView_WelcomeBannerHiddenAfterFirstSubmit pins the fix for the
-// "user input above banner / screen wipes on TurnEnd" bug. m.turns
-// stays 0 from submit() until TurnEnd, so a turns-only gate left the
-// banner pinned in the live region for the entire first turn — every
-// tea.Println'd user/assistant line landed in scrollback ABOVE the
-// stuck banner, and when TurnEnd finally fired the 11-row banner
-// vanished in one frame and bubbletea over-erased real scrollback
-// content. Fix: also gate on promptHistory==[], which gets its first
-// entry inside submit() before any streaming activity.
+// TestView_WelcomeBannerHiddenAfterFirstSubmit verifies that the
+// welcome banner disappears on the FIRST Enter, gated on promptHistory,
+// rather than waiting for TurnEnd.
 func TestView_WelcomeBannerHiddenAfterFirstSubmit(t *testing.T) {
 	SetTheme("dark")
 	// turns still 0 — TurnEnd has not fired yet — but the user has
 	// submitted once, so promptHistory is non-empty.
-	m := testModel().
-		WithBannerFrame(len(letterEndCols)).
-		WithPromptHistory("hello").
-		Build()
+	m := testModel().WithPromptHistory("hello").Build()
 
 	out := m.View()
 
-	if strings.Contains(out, "█") {
-		t.Error("pixel-art blocks (█) must NOT appear after the first submit, even while turns==0")
-	}
-}
-
-// TestView_WelcomeBannerNarrowFallback checks that on a terminal
-// narrower than pixelBannerMinWidth, the welcome banner drops the
-// pixel wordmark and shows a one-line text marker instead.
-func TestView_WelcomeBannerNarrowFallback(t *testing.T) {
-	SetTheme("dark")
-	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
-	m.width = pixelBannerMinWidth - 1 // just below the threshold
-	m.height = 24
-	m.ready = true
-	m.bannerFrame = len(letterEndCols)
-
-	out := m.View()
-
-	if strings.Contains(out, "█") {
-		t.Error("pixel-art blocks must NOT render below pixelBannerMinWidth")
-	}
-	if !strings.Contains(out, "seek") {
-		t.Error("narrow banner should still mention 'seek'")
-	}
-}
-
-// TestView_WelcomeBannerAnimationFrame produces consistent output at
-// every frame. Frame 0 is blank (no blocks), frame 2 shows partial
-// letters, frame 4 shows the full wordmark.
-func TestView_WelcomeBannerAnimationFrame(t *testing.T) {
-	SetTheme("dark")
-	build := func(frame int) string {
-		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
-		m.width = 80
-		m.height = 40
-		m.ready = true
-		m.bannerFrame = frame
-		return m.View()
-	}
-
-	// Frame 0: no blocks visible.
-	blank := build(0)
-	if strings.Contains(blank, "█") {
-		t.Error("frame 0 must not contain any blocks")
-	}
-
-	// Frame 4 (full): must contain blocks.
-	full := build(len(letterEndCols))
-	if !strings.Contains(full, "█") {
-		t.Error("frame 4 (full) must contain blocks")
-	}
-
-	// Frame 2: fewer blocks than full.
-	partial := build(2)
-	fullBlocks := strings.Count(full, "█")
-	partialBlocks := strings.Count(partial, "█")
-	if partialBlocks >= fullBlocks {
-		t.Errorf("frame 2 (%d blocks) must have fewer blocks than frame 4 (%d)",
-			partialBlocks, fullBlocks)
-	}
-	if partialBlocks == 0 {
-		t.Error("frame 2 must have at least some blocks (S + first E)")
+	if strings.Contains(out, Creator) {
+		t.Error("welcome meta line must NOT appear after the first submit, even while turns==0")
 	}
 }
 

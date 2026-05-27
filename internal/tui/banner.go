@@ -134,6 +134,9 @@ func bannerWithLettersRevealed(n int) string {
 	return strings.Join(lines, "\n")
 }
 
+// Creator is the human-readable author credit shown in the welcome banner.
+const Creator = "whyiyhw"
+
 // VersionString returns the build identity for the running binary as
 // a single human-readable string. Pulled from runtime/debug.BuildInfo
 // so it picks up the module version, short git hash, and `+` dirty

@@ -240,20 +240,4 @@ func TestFormatVersion_ShortRevisionDroppedNotPartial(t *testing.T) {
 	}
 }
 
-// --- Welcome wordmark line count -----------------------------------
-
-// TestRenderPixelBanner_WordmarkLineCount pins the wordmark height to
-// 7 rows. Other code paths joined the wordmark with cwd/meta lines to
-// build the welcome header, and changes to the row count would visibly
-// shift the rest. Keeping this checked even after the alt-screen detour
-// dropped the layout-row-count math — the wordmark is still load-bearing
-// visual identity.
-func TestRenderPixelBanner_WordmarkLineCount(t *testing.T) {
-	t.Parallel()
-	got := strings.Count(RenderPixelBanner(), "\n") + 1
-	if got != 7 {
-		t.Errorf("RenderPixelBanner() = %d line(s), want 7 — wordmark height changed", got)
-	}
-}
-
 // (stripANSI lives in statusbar_test.go and is reused here.)

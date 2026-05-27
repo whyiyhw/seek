@@ -5,7 +5,6 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
@@ -40,13 +39,6 @@ func Run(opts Options) error {
 	// Apply the colour theme before anything renders so every
 	// package-level style var picks up the right palette.
 	SetTheme(opts.Theme)
-
-	// Minimal scrollback marker. The animated pixel banner now lives in
-	// View() during the welcome state (turns==0), driven by a tickMsg.
-	// This one-line marker is all that goes to terminal scrollback so
-	// the user can identify the session in history.
-	muted := lipgloss.NewStyle().Foreground(colourMuted)
-	fmt.Fprintln(os.Stdout, muted.Render("  seek · "+opts.CWD))
 
 	// Resume replay. When the session was loaded with prior messages
 	// (--resume / --continue), dump them to scrollback BEFORE the

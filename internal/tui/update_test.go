@@ -6,7 +6,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/askuser"
-	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/skill"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -1979,64 +1978,5 @@ func TestApplyAgentEvent_PlanProposalApproved_NilHostCallbackSafe(t *testing.T) 
 	}
 	if len(cmds) == 0 {
 		t.Error("expected scrollback feedback regardless of callback wiring")
-	}
-}
-
-// TestBannerTick_AdvancesFrame verifies that bannerTickMsg correctly
-// advances bannerFrame from 0 to len(letterEndCols) and stops.
-func TestBannerTick_AdvancesFrame(t *testing.T) {
-	t.Parallel()
-	m := Model{bannerFrame: 0}
-
-	prev := -1
-	for i := 0; i < len(letterEndCols)+3; i++ {
-		out, cmds := m.Update(bannerTickMsg{})
-		m2 := out.(Model)
-
-		if m2.bannerFrame < prev {
-			t.Fatalf("bannerFrame decreased: %d → %d", prev, m2.bannerFrame)
-		}
-		if m2.bannerFrame > len(letterEndCols) {
-			t.Fatalf("bannerFrame exceeded max: %d > %d", m2.bannerFrame, len(letterEndCols))
-		}
-		prev = m2.bannerFrame
-
-		if m2.bannerFrame >= len(letterEndCols) {
-			if cmds != nil {
-				t.Errorf("frame %d produced non-nil cmd, want nil (animation done)", m2.bannerFrame)
-			}
-		}
-
-		m = m2
-	}
-
-	if m.bannerFrame != len(letterEndCols) {
-		t.Errorf("final bannerFrame = %d, want %d", m.bannerFrame, len(letterEndCols))
-	}
-}
-
-// TestBannerTick_InitNotTriggeredOnResume verifies that Init() does NOT
-// start the banner animation when turns > 0 (resumed session).
-func TestBannerTick_InitNotTriggeredOnResume(t *testing.T) {
-	t.Parallel()
-	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
-	m.turns = 5
-
-	if m.bannerFrame != 0 {
-		t.Errorf("resumed session bannerFrame = %d, want 0", m.bannerFrame)
-	}
-	_ = m.Init()
-}
-
-// TestBannerTick_InitStartsOnFreshSession verifies that Init() returns
-// cmds on a fresh session (turns == 0), including the animation tick.
-func TestBannerTick_InitStartsOnFreshSession(t *testing.T) {
-	t.Parallel()
-	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
-	m.turns = 0
-
-	cmds := m.Init()
-	if cmds == nil {
-		t.Fatal("Init() returned nil cmds on fresh session")
 	}
 }

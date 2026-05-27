@@ -698,10 +698,6 @@ func run() error {
 			fmt.Fprintln(os.Stderr, "project-md:", perr)
 		}
 		projMD = pm
-		if projMD.Path != "" {
-			fmt.Fprintf(os.Stderr, "Loaded project instructions from %s (%d bytes%s)\n",
-				projMD.Path, projMD.Bytes, truncMarker(projMD.Truncate))
-		}
 	}
 
 	// Load skills before the system prompt is rendered — the manifest
@@ -1589,13 +1585,6 @@ func truncate(s string, n int) string {
 		b = b[:len(b)-1]
 	}
 	return string(b) + "…"
-}
-
-func truncMarker(t bool) string {
-	if t {
-		return ", truncated"
-	}
-	return ""
 }
 
 // detectGlamourStyle picks "dark" or "light" for the TUI's Markdown

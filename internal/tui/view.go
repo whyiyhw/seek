@@ -69,9 +69,17 @@ func (m Model) View() string {
 			sb.WriteByte('\n')
 			sb.WriteString(renderBanner(m.bannerFrame))
 			sb.WriteByte('\n')
-			sb.WriteString(styleMuted.Render("  " + m.opts.CWD))
+			// Meta line: CWD (muted) · seek+version (User cyan) · creator (Accent magenta)
+			sb.WriteString(styleMuted.Render("  " + m.opts.CWD + "  ·  "))
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourUser).Render("seek " + VersionString()))
+			sb.WriteString(styleMuted.Render("  ·  "))
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourAccent).Render(Creator))
 		} else {
-			sb.WriteString(styleMuted.Render("  seek · " + m.opts.CWD))
+			// Narrow fallback: same three segments on one line, no wordmark
+			sb.WriteString(styleMuted.Render("  seek · " + m.opts.CWD + "  ·  "))
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourUser).Render(VersionString()))
+			sb.WriteString(styleMuted.Render("  ·  "))
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourAccent).Render(Creator))
 		}
 		sb.WriteByte('\n')
 		sb.WriteByte('\n')

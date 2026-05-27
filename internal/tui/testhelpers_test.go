@@ -155,7 +155,7 @@ func (a *fakeAgent) SetMessages(msgs []deepseek.Message) {
 //
 // Every test that touches more than counters used to set 5-10 fields
 // by hand: width, height, ready, opts.Tracker, opts.Model,
-// opts.Agent, sometimes m.streaming, m.bannerFrame, m.promptHistory,
+// opts.Agent, sometimes m.streaming, m.promptHistory,
 // etc. The builder gives sensible defaults (80×40, ready=true,
 // tracker wired, no agent) and a knob for each common axis.
 //
@@ -265,12 +265,6 @@ func (b *testModelBuilder) WithPromptHistory(prompts ...string) *testModelBuilde
 // WithTurns sets m.turns. Hides the welcome banner. Most tests want 1.
 func (b *testModelBuilder) WithTurns(n int) *testModelBuilder {
 	b.mutators = append(b.mutators, func(m *Model) { m.turns = n })
-	return b
-}
-
-// WithBannerFrame sets the animation frame (0=blank … len(letterEndCols)=fully revealed).
-func (b *testModelBuilder) WithBannerFrame(frame int) *testModelBuilder {
-	b.mutators = append(b.mutators, func(m *Model) { m.bannerFrame = frame })
 	return b
 }
 
