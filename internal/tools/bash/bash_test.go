@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
 )
@@ -160,5 +161,58 @@ func TestBash_TruncatesHugeOutput(t *testing.T) {
 	}
 	if !strings.Contains(out, "output truncated") {
 		t.Errorf("expected truncation: %s", out[:200])
+	}
+}
+
+// TestBash_DevTTY_IsInaccessible verifies that child processes launched by
+// the bash tool cannot open /dev/tty. Without detachStdin (Setsid), commands
+// like sudo, ssh, and git credential helpers can open the controlling
+// terminal and steal keystrokes from the TUI, making the session appear frozen
+// and resistant to Esc cancellation.
+func TestBash_DevTTY_IsInaccessible(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only test")
+	}
+	// Try to read from /dev/tty — must fail because Setsid detaches
+	// the child from the controlling terminal.
+	out, err := run(t, yolo(t), Args{Command: "test -r /dev/tty && echo ACCESSIBLE || echo INACCESSIBLE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "INACCESSIBLE") {
+		t.Errorf("expected /dev/tty to be INACCESSIBLE after Setsid, got: %s", out)
+	}
+}
+
+// TestBash_ContextCancel_KillsProcess verifies that cancelling the parent
+// context kills a long-running bash command. Even with Setsid, Esc must be
+// able to interrupt a slow process that doesn't touch /dev/tty.
+func TestBash_ContextCancel_KillsProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only test")
+	}
+	tool := yolo(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	start := time.Now()
+	errCh := make(chan error, 1)
+	go func() {
+		raw, _ := json.Marshal(Args{Command: "sleep 600", TimeoutMS: 600000})
+		_, execErr := tool.Execute(ctx, raw)
+		errCh <- execErr
+	}()
+
+	// Cancel within 100ms — well before the 10-minute timeout.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-errCh:
+		elapsed := time.Since(start)
+		if elapsed > 5*time.Second {
+			t.Errorf("context cancel took %v to kill sleep — should be near-instant", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("context cancellation did NOT kill the bash process within 10s")
 	}
 }

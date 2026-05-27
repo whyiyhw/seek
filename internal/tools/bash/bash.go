@@ -110,6 +110,8 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		cmd.Dir = cwd
 	}
 
+	detachStdin(cmd)
+
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
