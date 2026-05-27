@@ -20,6 +20,7 @@
 | [`feature-permission-refactor.md`](feature-permission-refactor.md) | seek v0.3.x+ | 🚀 R1+R1.1 已交付 | Permission 两轴重构：Preference/Workflow 拆分、TUI 元数据剥离、preApproved 封装。 |
 | [`feature-edit-read-before.md`](feature-edit-read-before.md) | 持续 | 📝 方案笔记 | Edit 前强制 read 的软性提示已通过 workflowReminder 实施；结构性方案（如 schema 层约束）待评估。 |
 | [`feature-plan-tasklist.md`](feature-plan-tasklist.md) | 已废弃 | ❌ 被取代 | 旧 PRD，scope 误判（只覆盖执行追踪可视化），被 `feature-plan-mode.md` 取代。保留作设计推演审计。 |
+| [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
 
 ## 阅读指引
 
@@ -33,3 +34,9 @@
 1. 每个大版本一个独立 `.md` 文件，不追加已有文件。
 2. 版本之间是**叠加关系**——v1 依赖 v0 的架构基础，除非显式说明"此决策在 v1 中已变更"。
 3. 一个版本交付后，其 PRD 标记为已归档，不再修改（勘误除外）。
+
+## 未来愿景
+
+[`vision.md`](vision.md) 描述了 seek 的长期北向星——从编程助手演化为**本地计算机智能终端**。它不是某个版本的路线图，而是指导远期决策的方向框架，包括三层架构（CLI 核心 → MCP 桥接 → 系统原生应用）、视觉闭环（看见→理解→规划→执行→验证）、以及当前架构与这一愿景之间的差距分析。
+
+愿景文档不随版本迭代更新，只随认知跃迁而修订。

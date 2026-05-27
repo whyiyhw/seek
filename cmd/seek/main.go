@@ -75,7 +75,7 @@ import (
 	"github.com/muesli/termenv"
 )
 
-const systemPromptTpl = `%s
+const systemPromptTpl = `Language: Match the user's input language. Always respond in the same language the user writes in.
 
 You are seek, an open-source terminal coding agent.
 
@@ -122,46 +122,7 @@ Workflow:
 Working directory: %s — every tool (bash, read, write, edit, grep, list_dir) resolves relative paths from here. You do NOT need to prepend the absolute path or run "cd" in bash commands; it's already the CWD. Mode: %s.
 `
 
-// buildLangDirective returns the language directive text to inject at
-// the top of the system prompt. lang is "en", "zh", or "" (auto).
-func buildLangDirective(lang string) string {
-	switch lang {
-	case "en":
-		return "Language: English. Always respond in English."
-	case "zh":
-		return "Language: 中文。请始终用中文回复。"
-	default:
-		// Auto-detect from OS locale.
-		if detected := detectLangFromEnv(); detected == "zh" {
-			return "Language: 中文。请始终用中文回复。"
-		}
-		return "Language: English. Always respond in English."
-	}
-}
 
-// detectLangFromEnv checks locale environment variables for a zh prefix.
-// Order: LC_ALL > LC_MESSAGES > LANG. Returns "en" if no match.
-func detectLangFromEnv() string {
-	for _, env := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if v := os.Getenv(env); strings.HasPrefix(strings.ToLower(v), "zh") {
-			return "zh"
-		}
-	}
-	return "en"
-}
-
-// resolveLang converts a --lang flag value ("en", "zh", "auto")
-// to the resolved language ("en" or "zh"). "auto" detects from env.
-func resolveLang(raw string) string {
-	switch strings.ToLower(raw) {
-	case "en":
-		return "en"
-	case "zh":
-		return "zh"
-	default: // "auto" or anything else
-		return detectLangFromEnv()
-	}
-}
 
 // modeLabel returns the human-readable label for the (pref, workflow)
 // pair, used in the system prompt status line. Workflow wins when
@@ -582,7 +543,6 @@ func run() error {
 		installFlag   = flag.Bool("install", false, "add seek to the user PATH (Windows)")
 		dreamFlag     = flag.Bool("dream", false, "M→L distillation: scan project memory, print L-pending candidates without writing")
 		dreamWrite    = flag.Bool("dream-write", false, "with -dream: actually append the candidates to ~/.seek/soul.md's Pending section")
-		langFlag      = flag.String("lang", "auto", "response language: en|zh|auto (auto = detect from system locale)")
 		// v3 柱 A: keep the per-session file checkpoint directory
 		// past SessionEnd. Default off — file checkpoints are
 		// "this-session-only" by design (see feature-checkpoint
@@ -778,10 +738,6 @@ func run() error {
 	// session-level choice at call time.
 	// Default is "max" — the deepest reasoning level.
 	var sessionEffort = "max"
-	// sessionLang mirrors session.Lang: "" (auto-detect) | "en" | "zh".
-	// The /lang TUI command updates it through SetLang below; the system
-	// prompt builder reads it to inject the language directive.
-	sessionLang := resolveLang(*langFlag)
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -972,7 +928,7 @@ func run() error {
 			Add(memorytool.NewAmend(memProject))
 	}
 
-	systemPrompt := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(initialPref, initialWorkflow))
+	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, modeLabel(initialPref, initialWorkflow))
 	// Project instructions go BEFORE the skill manifest: they describe
 	// "how this repo expects you to work" while skills are workflow
 	// templates. Ordering matches the model's likely reading priority.
@@ -1024,12 +980,7 @@ func run() error {
 		if loaded != nil {
 			sessionEffort = activeSession.Effort
 		}
-		// Language override: if the user explicitly set --lang=en|zh,
-		// that wins (already resolved in resolveLang above). If the
-		// flag is "auto" and the session has a saved preference, use it.
-		if loaded != nil && *langFlag == "auto" && activeSession.Lang != "" {
-			sessionLang = activeSession.Lang
-		}
+
 	}
 
 	// Lifecycle hooks. v1 memory plugs in PrePromptHook (inject L+M
@@ -1339,7 +1290,6 @@ func run() error {
 		Tracker:               tracker,
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
-		Lang:                  sessionLang,
 		Yolo:                  policy.Yolo(),
 		Plan:                  policy.Plan(),
 		PlanSteps:             restoredPlanSteps,
@@ -1377,7 +1327,7 @@ func run() error {
 			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
 				skills = freshSkills
 			}
-			sp := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(policy.Pref(), policy.Workflow()))
+			sp := fmt.Sprintf(systemPromptTpl, abs, modeLabel(policy.Pref(), policy.Workflow()))
 			if section := projMD.Section(); section != "" {
 				sp = sp + "\n" + section
 			}
@@ -1414,12 +1364,6 @@ func run() error {
 			// on the live agent so the change is visible on the very
 			// next prompt without a /reset / RebuildAgent.
 			sessionEffort = e
-		},
-		SetLang: func(l string) {
-			// Mirror into sessionLang so RebuildAgent picks up the
-			// change on the next /new. The TUI separately updates
-			// Session.Lang so the next save captures the choice.
-			sessionLang = l
 		},
 		SetYolo: func(y bool) {
 			// policy.SetPref takes effect immediately for every

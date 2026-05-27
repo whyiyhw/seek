@@ -57,7 +57,6 @@ type fakeAgent struct {
 	ResetCalls     [][]deepseek.Message
 	SetModelCalls  []string
 	SetEffortCalls []string
-	SetLangCalls   []string
 }
 
 func newFakeAgent() *fakeAgent {
@@ -108,12 +107,6 @@ func (a *fakeAgent) SetEffort(s string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.SetEffortCalls = append(a.SetEffortCalls, s)
-}
-
-func (a *fakeAgent) SetLang(s string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.SetLangCalls = append(a.SetLangCalls, s)
 }
 
 // PushEvent enqueues an agent event for the next waitForAgentEvent to

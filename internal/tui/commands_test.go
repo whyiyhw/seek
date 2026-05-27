@@ -379,7 +379,7 @@ func TestEffort_NoArg_OpensPicker(t *testing.T) {
 }
 
 // TestEffort_DescriptionHasPickerHint ensures the /effort description
-// mentions the picker — same as /model and /lang. Without this the
+// mentions the picker — same as /model. Without this the
 // usage text reads as if only manual typing is supported (see
 // picker-over-typed-input memory entry).
 func TestEffort_DescriptionHasPickerHint(t *testing.T) {
