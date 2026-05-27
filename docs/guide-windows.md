@@ -78,12 +78,45 @@ seek -p "你的问题 / your question"
 
 ## 安装 seek 本身 / Installing seek
 
-从 [Releases](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压，或：
+从 [Releases](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压到**一个固定的目录**（如 `C:\tools\seek\`），或：
 
-> Download from [Releases](https://github.com/whyiyhw/seek/releases/latest) or run:
+> Download from [Releases](https://github.com/whyiyhw/seek/releases/latest) and extract to a **permanent folder** (e.g. `C:\tools\seek\`), or run:
 
 ```powershell
 go install github.com/whyiyhw/seek/cmd/seek@latest
 ```
+
+> `go install` automatically places the binary in `%USERPROFILE%\go\bin\`, which is typically already in PATH.
+
+### 添加 PATH / Add to PATH
+
+ZIP 解压后，需要把 exe 所在目录加入 PATH 才能直接在终端输入 `seek`。最简单的方式：
+
+> After extracting the ZIP, add the directory to your PATH so `seek` works from any terminal. The easiest way:
+
+```powershell
+seek -install
+```
+
+首次启动 TUI 时，seek 也会询问是否自动添加。
+
+> On first TUI launch, seek also offers to add itself to PATH interactively.
+
+也可以手动添加（将 `C:\tools\seek` 改成你的解压路径）：
+
+> Or add it manually (replace `C:\tools\seek` with your extract path):
+
+```powershell
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+$dir = "C:\tools\seek"
+$segments = $path -split ';' | Where-Object { $_ -ne '' }
+if ($segments -notcontains $dir) {
+    [Environment]::SetEnvironmentVariable("Path", ($segments + $dir) -join ';', "User")
+}
+```
+
+修改后**重启终端**生效。
+
+> Restart your terminal after changing PATH. The `go install` path doesn't need this step.
 
 升级 / Upgrade：`seek -upgrade`

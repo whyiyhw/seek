@@ -30,7 +30,7 @@ seek
 
 首次运行引导设置 API key，之后即可开始对话。详细步骤：[安装指南](./docs/)
 
-**Windows**：从 [Releases](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压即用。TUI 请在 **[Windows Terminal](https://github.com/microsoft/terminal)** 中运行（[安装说明](./docs/guide-windows.md)）；不要用蓝色老式 PowerShell 窗口。
+**Windows**：从 [Releases](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压到固定目录并[加入 PATH](./docs/guide-windows.md) 后即可在终端输入 `seek`。TUI 请在 **[Windows Terminal](https://github.com/microsoft/terminal)** 中运行（[安装说明](./docs/guide-windows.md)）；不要用蓝色老式 PowerShell 窗口。
 
 > macOS Gatekeeper 问题：`curl | tar` 管道不会触发；若浏览器下载被打上 quarantine，执行 `xattr -d com.apple.quarantine seek` 即可。
 

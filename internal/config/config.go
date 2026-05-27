@@ -49,6 +49,11 @@ type Config struct {
 	// values: "deepseek", "anthropic", "openai", "gemini") to its
 	// stored credentials. Nil map = no providers configured yet.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
+
+	// PathPromptDone is set to true after the first-run "add to PATH?"
+	// prompt has been shown (or dismissed) on Windows. Prevents
+	// nagging on every startup.
+	PathPromptDone bool `json:"path_prompt_done,omitempty"`
 }
 
 // ProviderConfig holds the per-provider state. APIKey is the only

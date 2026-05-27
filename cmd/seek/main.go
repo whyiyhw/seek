@@ -503,6 +503,7 @@ func run() error {
 		upgradeForce  = flag.Bool("upgrade-force", false, "with -upgrade: proceed even when the current build is a dev build (overwrites local builds)")
 		upgradeDryRun = flag.Bool("upgrade-dry-run", false, "with -upgrade: download + verify checksum but do not replace the binary")
 		upgradeCheck  = flag.Bool("upgrade-check", false, "check for a newer release on GitHub and print the result; never modifies the binary")
+		installFlag   = flag.Bool("install", false, "add seek to the user PATH (Windows)")
 		dreamFlag     = flag.Bool("dream", false, "M→L distillation: scan project memory, print L-pending candidates without writing")
 		dreamWrite    = flag.Bool("dream-write", false, "with -dream: actually append the candidates to ~/.seek/soul.md's Pending section")
 		langFlag      = flag.String("lang", "auto", "response language: en|zh|auto (auto = detect from system locale)")
@@ -525,6 +526,11 @@ func run() error {
 	}
 	if *upgradeCheck {
 		return runUpgradeCheck()
+	}
+
+	// -install short-circuit before any provider machinery.
+	if *installFlag {
+		return runInstall()
 	}
 
 	// Best-effort cleanup of a stale ".old" file left by a previous
@@ -566,6 +572,15 @@ func run() error {
 		// bufio.Scanner, and pingDeepSeek derives its own 10s timeout.
 		if _, werr := runSetupWizard(context.Background(), os.Stdin, os.Stderr); werr != nil {
 			return werr
+		}
+	}
+
+	// First-run PATH nudge on Windows TUI launches — runs after the setup
+	// wizard but before agent/session machinery so the user isn't kept
+	// waiting through a full init only to hit an stdin prompt.
+	if willUseTUI(*jsonOut, *prompt, *benchmarkTask, *rpcMode, *dreamFlag) {
+		if err := maybeWindowsPATHPrompt(); err != nil {
+			return err
 		}
 	}
 

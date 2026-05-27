@@ -758,3 +758,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: document Windows Terminal as the supported Windows TUI host — no seek-side terminal shims. Users install WT via winget / Store / GitHub release and run seek there. Fallback: `seek -p` print mode. See [`docs/guide-windows.md`](guide-windows.md)
 - **Lesson**: on Windows, the terminal emulator choice *is* the compatibility layer. Prefer documenting and recommending a modern host over per-emulator code paths in seek
 - **Refs**: [`docs/guide-windows.md`](guide-windows.md), [Windows Terminal](https://github.com/microsoft/terminal)
+
+### WM_SETTINGCHANGE broadcast blocks startup on busy Windows desktops
+- **Saw**: first-run seek -install / PATH nudge took 1-5 seconds on a machine with many open windows; the delay was caused by SendMessageTimeoutW returning only after every top-level window processed (or timed out on) the WM_SETTINGCHANGE message
+- **Why**: HWND_BROADCAST sends sequentially to every top-level window. Browsers with hundreds of tabs, Electron apps, and Office processes each take a small slice of time; summed across dozens of windows the latency hits seconds. SMTO_ABORTIFHUNG only skips hung windows - responsive ones still get the full sequential send
+- **Fix**: split the PATH operation into EnsureInPATH (registry write only, no broadcast - for startup nudge) and EnsureInPATHWithBroadcast (registry + broadcast - for explicit seek -install). Startup nudge writes the registry in microseconds and tells the user to restart their terminal; the broadcast is only done when the user explicitly runs seek -install
+- **Lesson**: SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE) is not free - avoid it in startup or fast paths. Registry writes take effect on next login even without a broadcast; the broadcast is a UX nicety, not a correctness requirement
+- **Refs**: internal/pathop/pathop_windows.go, MSDN WM_SETTINGCHANGE (https://learn.microsoft.com/en-us/windows/win32/sysinfo/wm-settingchange)

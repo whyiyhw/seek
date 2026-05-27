@@ -30,7 +30,7 @@ seek
 
 First launch walks you through picking a provider and saving the API key — that's it. Detailed walkthrough: [`docs/`](./).
 
-**Windows**: grab `seek_*_windows_amd64.zip` from [Releases](https://github.com/whyiyhw/seek/releases/latest) and unpack. Run the TUI inside **[Windows Terminal](https://github.com/microsoft/terminal)** — see [`docs/guide-windows.md`](./guide-windows.md) for install steps. Avoid the legacy blue PowerShell 5.x window.
+**Windows**: grab `seek_*_windows_amd64.zip` from [Releases](https://github.com/whyiyhw/seek/releases/latest), extract to a permanent folder, and [add it to your PATH](./guide-windows.md). Run the TUI inside **[Windows Terminal](https://github.com/microsoft/terminal)** — see [`docs/guide-windows.md`](./guide-windows.md) for install steps. Avoid the legacy blue PowerShell 5.x window.
 
 > **macOS Gatekeeper**: `curl | tar` doesn't trigger the quarantine xattr. If your browser download is blocked, run `xattr -d com.apple.quarantine seek`.
 
