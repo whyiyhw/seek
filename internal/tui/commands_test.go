@@ -144,8 +144,11 @@ func TestHelp_WithArg_ShowsTopic(t *testing.T) {
 		absent  []string
 	}{
 		{"all", "all", []string{" Commands ", " Keys ", "/help"}, nil},
-		{"commands", "commands", []string{" Commands ", "/help", "/model"}, []string{"↑ / ↓"}},
-		{"keys", "keys", []string{" Keys ", "↑ / ↓", "Ctrl+J"}, []string{" Commands "}},
+		{"commands", "commands", []string{" Commands ", "/help", "/model"}, []string{"history-prev", "Previous prompt"}},
+		// After M9.4 the keys section renders bubbletea canonical key strings
+		// ("up", "down", "enter") from keymap.Snapshot() so user overrides
+		// from ~/.seek/keybindings.toml surface immediately.
+		{"keys", "keys", []string{" Keys ", "up", "down", "Ctrl+J", "enter", "Previous prompt"}, []string{" Commands "}},
 		{"about", "about", []string{"Version", "MIT"}, []string{" Commands "}},
 	}
 

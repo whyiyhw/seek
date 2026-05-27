@@ -40,6 +40,7 @@ import (
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/checkpoint"
+	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -109,6 +110,13 @@ type Options struct {
 	// The TUI uses it to back /checkpoints, /restore, /undo, /redo
 	// without re-resolving the session each call.
 	Checkpoint *checkpoint.Manager
+
+	// Keymap is the v3 柱 C user-customisable keybindings table
+	// (PRD docs/prd/feature-tui-ergonomics.md §4). nil = use the
+	// hard-coded defaults from internal/keymap.NewDefault(); the TUI
+	// resolves through m.keymap() which always returns non-nil so
+	// existing tests don't need to construct one.
+	Keymap *keymap.KeyMap
 
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.

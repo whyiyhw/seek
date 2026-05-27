@@ -5,7 +5,24 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/whyiyhw/seek/internal/keymap"
 )
+
+// defaultKeymapFallback is used when Options.Keymap is nil — e.g.
+// in unit tests that construct a Model directly. cmd/seek/main.go
+// always passes a fully-resolved keymap, so production never hits
+// this path. Cheap: package init builds the table once.
+var defaultKeymapFallback = keymap.NewDefault()
+
+// keymap returns the active KeyMap for this Model. Always non-nil so
+// callers don't need defensive nil checks at every dispatch site.
+func (m Model) keymap() *keymap.KeyMap {
+	if m.opts.Keymap != nil {
+		return m.opts.Keymap
+	}
+	return defaultKeymapFallback
+}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Help overlay: dismiss on any key. The overlay is purely
@@ -15,10 +32,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.helpOverlayOpen {
 		m.helpOverlayOpen = false
 		m.helpContent = ""
-		// Ctrl+C must quit even with the overlay open — the help
-		// text itself advertises "Ctrl+C → Quit seek", and swallowing
-		// it would make the user press Ctrl+C twice.
-		if msg.Type == tea.KeyCtrlC {
+		// The interrupt action (default ctrl+c) must quit even with the
+		// overlay open — the help text itself advertises "ctrl+c → quit
+		// seek", and swallowing it would make the user press it twice.
+		// Resolved through keymap so user rebinds (e.g. ctrl+q) still work.
+		if m.keymap().Resolve(msg) == keymap.ActionInterrupt {
 			(&m).persistSession()
 			return m, tea.Quit
 		}
@@ -223,13 +241,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Inline mode: PgUp/PgDn/Home/End and the mouse wheel all go to
 	// the terminal's native scrollback. We no longer intercept them.
 
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	// Action-based dispatch. The keymap layer (internal/keymap) translates
+	// raw bubbletea KeyMsgs into named, user-rebindable Actions. The
+	// switch below dispatches by Action; only the very-special cases
+	// (CRLF-paste insertion, picker key vocabulary) still inspect
+	// msg.Type directly. PRD docs/prd/feature-tui-ergonomics.md §4.
+	action := m.keymap().Resolve(msg)
+	switch action {
+	case keymap.ActionInterrupt:
 		(&m).persistSession()
 		return m, tea.Quit
 
-	case tea.KeyEsc:
-		// Esc in review branch-entry mode cancels without action.
+	case keymap.ActionCancel:
+		// Cancel in review branch-entry mode cancels without action.
 		// Checked BEFORE the streaming branch so a streaming user
 		// in branch-entry mode can cancel the entry, not the stream.
 		if m.reviewBranchEntry {
@@ -237,14 +261,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			return m, (&m).appendHistory(styleMuted.Render("  review: cancelled"))
 		}
-		// Esc only does something when there's an active stream — at
+		// Cancel only does something when there's an active stream — at
 		// rest we leave it alone so the textarea / future overlays can
 		// claim it for their own purposes.
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
 			m.cancelStream()
 			// Revoke any plan-execute batch pre-approval. The user
-			// pressing Esc means "stop, give me back per-call
+			// pressing cancel means "stop, give me back per-call
 			// control" — leaving the gate open across the next
 			// prompt would surprise them. The plan task list stays
 			// (no auto-revert) so the model can re-arm via
@@ -252,10 +276,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.opts.RevokePlanPreApproval != nil {
 				m.opts.RevokePlanPreApproval()
 			}
-			// "Esc stops everything" — clear steer, but restore
+			// "Cancel stops everything" — clear steer, but restore
 			// queued text into the textarea so the user can edit
 			// and re-submit (the textarea was already cleared on
-			// Enter, so this doesn't overwrite anything).
+			// submit, so this doesn't overwrite anything).
 			if m.queuedText != "" {
 				m.input.SetValue(m.queuedText)
 				m.queuedText = ""
@@ -263,10 +287,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingSteerText = ""
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
-			// the next Esc within the same race window double-cancels.
+			// the next cancel within the same race window double-cancels.
 			return m, nil
 		}
-		// Esc in setup key-entry mode cancels the wizard without saving.
+		// Cancel in setup key-entry mode cancels the wizard without saving.
 		// Checked AFTER the streaming branch above so an in-flight
 		// stream isn't accidentally bypassed.
 		if m.setupKeyEntry {
@@ -275,22 +299,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyEnter:
+	case keymap.ActionSubmit, keymap.ActionSteer:
 		// Windows/conhost paste without bracketed mode: each CRLF line
 		// ends with \r which bubbletea maps to Enter. Insert newline
 		// instead of submitting when Enter arrives right after runes.
-		// This check fires BEFORE review/setup/streaming mode checks
-		// because it is a raw input-level concern: on conhost, every
-		// CRLF line would otherwise submit prematurely regardless of
-		// which mode the textarea is in.
-		if m.enterInsertsNewlineDuringPaste() {
+		// Tied to raw msg.Type — this is a raw-input concern that
+		// outlives user rebindings of the submit action.
+		if msg.Type == tea.KeyEnter && m.enterInsertsNewlineDuringPaste() {
 			m.input.InsertString("\n")
 			m = m.handlePasteFolding()
 			m.updateCommandMenu()
 			m.updatePathCompleter()
 			return m, nil
 		}
-		// Review branch-entry mode: Enter submits /review <typed>.
+		// Review branch-entry mode: submit dispatches /review <typed>.
 		// Comes BEFORE setupKeyEntry — both set a flag and use the
 		// textarea, and review is stateless so there's no ambiguity.
 		if m.reviewBranchEntry {
@@ -309,7 +331,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, cmd
 		}
-		// Setup key-entry mode: Enter saves the typed key to config
+		// Setup key-entry mode: submit saves the typed key to config
 		// and exits setup. Comes BEFORE the streaming branch because
 		// /setup can't be opened while streaming (slash menu is
 		// closed during streams), so there's no ambiguity.
@@ -320,7 +342,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			cmd := m.finishSetup(key)
 			return m, cmd
 		}
-		// Streaming branch: Enter = queue, Alt+Enter = steer.
+		// Streaming branch: submit = queue, steer = interrupt+steer.
 		// Ctrl+J / Ctrl+Enter inserts a newline — the textarea has
 		// InsertNewline bound to "ctrl+j" (model.go:311), so the key
 		// falls through to m.input.Update(msg) at the end of handleKey
@@ -329,10 +351,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			(&m).resolvePasteInInput()
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
-				// Empty Enter on an empty textarea has no submission
+				// Empty submit on an empty textarea has no submission
 				// meaning, so we reuse it as the "withdraw the pending
 				// queue / steer" gesture. Without this, the only way
-				// to clear a queued message was Esc, which ALSO
+				// to clear a queued message was cancel, which ALSO
 				// cancels the in-flight stream — too coarse when the
 				// agent is already 30 seconds into a useful turn.
 				if m.queuedText != "" || m.pendingSteerText != "" {
@@ -363,14 +385,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// slash-dispatch check so slash commands (including the arm
 			// command itself) do not eat the arm.
 			text = m.consumeArm(text)
-			if msg.Alt {
+			if action == keymap.ActionSteer {
 				// Steer: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
 				steerStream(&m, text)
 			} else {
 				// Queue: stash text; streamEndMsg auto-submits when the
 				// agent loop reaches its natural end (not userCanceled).
-				// Second Enter during the same stream replaces — last
+				// Second submit during the same stream replaces — last
 				// thing you said is what you meant.
 				m.queuedText = text
 			}
@@ -391,43 +413,40 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		text = m.consumeArm(text)
 		return m.submit(text)
 
-	case tea.KeyCtrlL:
-		// Ctrl+L mirrors /clear: blank the visible terminal; scrollback
+	case keymap.ActionClearScreen:
+		// clear-screen mirrors /clear: blank the visible terminal; scrollback
 		// above is the terminal's, untouched. No banner re-print, no
 		// state reset — same semantics as the shell's `clear`.
 		return m, tea.ClearScreen
 
-	case tea.KeyCtrlR:
+	case keymap.ActionToggleReasoning:
 		m.showReasoning = !m.showReasoning
 		return m, nil
 
-	case tea.KeyShiftTab:
+	case keymap.ActionCycleMode:
 		m.cycleMode()
 		return m, (&m).appendHistory(styleMuted.Render("  " + m.modeLabel()))
 
-	case tea.KeyUp:
+	case keymap.ActionHistoryPrev:
 		// History recall — only when the textarea is empty (so it
 		// doesn't fight cursor-up in a multi-line draft) OR when
-		// we're already navigating history.
+		// we're already navigating history. If the gate is closed
+		// (non-empty textarea), fall through so the key reaches
+		// the textarea for cursor movement.
 		if m.tryHistoryUp() {
 			return m, nil
 		}
 
-	case tea.KeyDown:
+	case keymap.ActionHistoryNext:
 		if m.tryHistoryDown() {
 			return m, nil
 		}
 
-	}
-
-	// ? hotkey: open the help overlay when the textarea is empty.
-	// Matches the documented "/help, /? or ?" key binding in the
-	// help overlay. Intercepted before the textarea sees it so a
-	// bare '?' opens help rather than typing a literal '?' into the
-	// input. When the textarea already has content (e.g. typing a
-	// prompt or the slash menu is open) the key passes through to
-	// let the textarea handle it normally.
-	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == '?' {
+	case keymap.ActionToggleHelp:
+		// Open the help overlay only when the textarea is empty —
+		// otherwise the key (default '?') is a literal character
+		// the user is typing into a prompt. Fall through on
+		// non-empty so the textarea receives it.
 		if m.input.Value() == "" {
 			cmdHelp(&m, "")
 			return m, nil

@@ -17,6 +17,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hookscli"
+	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/session"
@@ -52,6 +53,7 @@ type command struct {
 func allCommands() []command {
 	return []command{
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
+		{names: []string{"/keys"}, usage: "/keys", description: "Show the active keymap (including any ~/.seek/keybindings.toml overrides).", handler: cmdKeys},
 		{names: []string{"/clear", "/new"}, usage: "/clear", description: "Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state.", handler: cmdNew},
 		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Save the current session and quit seek.", handler: cmdQuit},
@@ -154,7 +156,7 @@ func cmdHelp(m *Model, args string) cmdResult {
 	if args != "" {
 		// Args path: show the specified help topic directly.
 		m.helpOverlayOpen = true
-		m.helpContent = buildHelpTopic(args)
+		m.helpContent = buildHelpTopic(m.keymap(), args)
 		return cmdResult{}
 	}
 
@@ -166,9 +168,21 @@ func cmdHelp(m *Model, args string) cmdResult {
 	return cmdResult{}
 }
 
+// cmdKeys opens the help overlay scoped to the keys section. Mirrors
+// `/help keys` but is a first-class command so users with custom
+// keybindings have a shortcut that bypasses the topic picker.
+// PRD docs/prd/feature-tui-ergonomics.md §5.2.
+func cmdKeys(m *Model, _ string) cmdResult {
+	m.helpOverlayOpen = true
+	m.helpContent = buildHelpTopic(m.keymap(), "keys")
+	return cmdResult{}
+}
+
 // buildHelpTopic returns the help overlay content for the given topic.
-// Falls back to the combined view for unknown topics.
-func buildHelpTopic(topic string) string {
+// Falls back to the combined view for unknown topics. km is the active
+// keymap — passed in (rather than read from a global) so /help reflects
+// the user's live customisations from ~/.seek/keybindings.toml.
+func buildHelpTopic(km *keymap.KeyMap, topic string) string {
 	var sb strings.Builder
 	switch topic {
 	case "all":
@@ -176,11 +190,11 @@ func buildHelpTopic(topic string) string {
 		sb.WriteString("\n\n")
 		sb.WriteString(buildHelpCommandsSection())
 		sb.WriteString("\n")
-		sb.WriteString(buildHelpKeysSection())
+		sb.WriteString(buildHelpKeysSection(km))
 	case "commands":
 		sb.WriteString(buildHelpCommandsSection())
 	case "keys":
-		sb.WriteString(buildHelpKeysSection())
+		sb.WriteString(buildHelpKeysSection(km))
 	case "about":
 		sb.WriteString(buildHelpAboutSection())
 	default:
@@ -188,7 +202,7 @@ func buildHelpTopic(topic string) string {
 		sb.WriteString("\n\n")
 		sb.WriteString(buildHelpCommandsSection())
 		sb.WriteString("\n")
-		sb.WriteString(buildHelpKeysSection())
+		sb.WriteString(buildHelpKeysSection(km))
 	}
 	return sb.String()
 }
@@ -206,25 +220,31 @@ func buildHelpCommandsSection() string {
 	return sb.String()
 }
 
-func buildHelpKeysSection() string {
+// buildHelpKeysSection renders the live keymap (action → key) into the
+// help overlay. The table is sourced from km.Snapshot() so users see
+// their actual bindings (including any ~/.seek/keybindings.toml
+// overrides), not a stale hard-coded list. PRD §4.5.
+func buildHelpKeysSection(km *keymap.KeyMap) string {
 	var sb strings.Builder
 	sb.WriteString(styleStatusOffPeak.Render(" Keys "))
 	sb.WriteString("\n")
-	keys := []struct{ key, desc string }{
-		{"/help, /? or ?", "Show this help"},
-		{"Enter", "Send prompt"},
-		{"↑ / ↓", "Recall prompt history (when input is empty)"},
-		{"Esc", "Cancel ongoing assistant response"},
-		{"Shift+Tab", "Cycle mode: ask → plan → yolo → ask"},
-		{"Ctrl+J", "Insert newline in input"},
-		{"Ctrl+L", "Clear visible screen (same as /clear)"},
-		{"Ctrl+R", "Toggle reasoning visibility"},
-		{"Ctrl+C", "Quit seek"},
-		{"/steer or Alt+Enter", "Interrupt current response with new instructions"},
+	// Non-rebindable keys (textarea native + bracketed paste) — list
+	// first so users know what NOT to try rebinding via keybindings.toml.
+	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Ctrl+J", "Insert newline in input (textarea native)"))
+	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Tab", "Picker accept / completion (reserved)"))
+	// Rebindable actions: render from snapshot so user overrides surface.
+	for _, b := range km.Snapshot() {
+		label := b.Key
+		if b.Source == "user" {
+			label += " *"
+		}
+		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", label, b.Description))
 	}
-	for _, b := range keys {
-		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", b.key, b.desc))
-	}
+	sb.WriteString("\n")
+	sb.WriteString(styleMuted.Render("  * = customised in ~/.seek/keybindings.toml"))
+	sb.WriteString("\n")
+	sb.WriteString(styleMuted.Render("  See `seek keys actions` for the full rebindable list."))
+	sb.WriteString("\n")
 	return sb.String()
 }
 
@@ -502,7 +522,7 @@ func (m *Model) applyModelChoice(idx int) {
 		// overlay. Mirrors how /model picker accepts into a direct
 		// action (model switch).
 		m.helpOverlayOpen = true
-		m.helpContent = buildHelpTopic(choice.id)
+		m.helpContent = buildHelpTopic(m.keymap(), choice.id)
 		m.input.Reset()
 	}
 }

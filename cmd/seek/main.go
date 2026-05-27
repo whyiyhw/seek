@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,8 @@ import (
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hooksconfig"
 	"github.com/whyiyhw/seek/internal/hookscli"
+	"github.com/whyiyhw/seek/internal/keymap"
+	"github.com/whyiyhw/seek/internal/keyscli"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -533,6 +536,21 @@ func run() error {
 	// directory. See PRD docs/prd/feature-shell-hooks.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "hooks" {
 		return hookscli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek keys ...` — list / check / actions. Same rationale: keymap
+	// queries don't need API keys, sessions, or a project directory.
+	// PRD §5.1 wants exit code 2 for validation errors (so CI can
+	// distinguish "bad config" from "system failure"); keyscli signals
+	// this via ErrUsage which we unwrap and route to os.Exit(2) here.
+	// See PRD docs/prd/feature-tui-ergonomics.md §5.1.
+	if len(os.Args) >= 2 && os.Args[1] == "keys" {
+		if err := keyscli.Run(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			if errors.Is(err, keyscli.ErrUsage) {
+				os.Exit(2)
+			}
+			return err
+		}
+		return nil
 	}
 
 	var (
@@ -1040,6 +1058,14 @@ func run() error {
 	// guarantee — the only way `bash -c` runs is via the StaticCheck
 	// inside Gate (`bash -n`, safe) and via ShellRunner at dispatch
 	// time AFTER Register, which only happens when HasHooks is true.
+	// v3 柱 C — user-customisable keybindings. Load BEFORE constructing
+	// the TUI Options so the loaded KeyMap (or default fallback) is
+	// available at Options.Keymap. Warnings from a malformed
+	// keybindings.toml go to stderr; the file is silently ignored if
+	// absent (common case). PRD docs/prd/feature-tui-ergonomics.md §4.4.
+	userKeymapPath, _ := paths.UserKeybindings()
+	userKeymap, _ := keymap.Load(userKeymapPath, os.Stderr)
+
 	userHooksPath, _ := paths.UserHooksToml()
 	projectHooksPath := paths.ProjectHooksToml(abs)
 	trustPath, _ := paths.TrustedProjectsJSON()
@@ -1328,6 +1354,7 @@ func run() error {
 		Session:               activeSession,
 		Store:                 store,
 		Checkpoint:            ckMgr,
+		Keymap:                userKeymap,
 		Skills:                skills,
 		ProviderName:          provLabel,
 		MemoryProject:         memProject,

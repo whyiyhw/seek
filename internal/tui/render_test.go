@@ -116,7 +116,9 @@ func TestRender_HelpDispatch(t *testing.T) {
 		t.Error("help overlay dismiss hint not found in program output")
 	}
 	// Keybinding text from the help content should also be present.
-	if !strings.Contains(output, "Shift+Tab") {
-		t.Error("help keybinding 'Shift+Tab' not found in program output")
+	// M9.4: help renders bubbletea canonical key strings from keymap.Snapshot();
+	// `shift+tab` is the default binding for cycle-mode.
+	if !strings.Contains(output, "shift+tab") {
+		t.Error("help keybinding 'shift+tab' not found in program output")
 	}
 }

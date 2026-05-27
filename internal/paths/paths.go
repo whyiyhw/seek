@@ -186,6 +186,22 @@ func SessionCheckpointDir(absPath, sid string) (string, error) {
 	return ProjectSessionDir(absPath, sid)
 }
 
+// UserKeybindings returns the user-level keybindings file
+// (~/.seek/keybindings.toml). May not exist — that's the common case
+// for users who never customise; callers (internal/keymap.Load)
+// silently fall back to defaults. See PRD docs/prd/feature-tui-ergonomics.md §4.1.
+//
+// Keybindings are user-level only by design: rebinding is personal
+// muscle memory that shouldn't be forced on teammates via a checked-in
+// project file.
+func UserKeybindings() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "keybindings.toml"), nil
+}
+
 // UserHooksToml returns the user-level shell hooks file
 // (~/.seek/hooks.toml). May not exist — having no user hooks
 // configured is a normal state; callers treat ENOENT as "no
