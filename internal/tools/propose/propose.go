@@ -29,9 +29,12 @@ const toolName = "propose"
 
 const (
 	// Steps cap. The intent is "a focused, executable plan", not
-	// "every TODO in the project". Tighter than the JSON schema's
-	// maxItems so the tool can produce a guiding error message.
-	maxSteps = 12
+	// "every TODO in the project". 20 is loose enough to fit a real
+	// migration (e.g. an auth refactor with 12-15 verifiable steps)
+	// while still tight enough that the user can scan the whole plan
+	// in the picker. Tighter than the JSON schema's maxItems so the
+	// tool can produce a guiding error message.
+	maxSteps = 20
 	// Per-step character cap. Steps are verifiable actions, not
 	// paragraphs — the cap prevents "rephrase the entire design
 	// doc into a single step" patterns.
@@ -48,8 +51,8 @@ var schemaBytes = []byte(`{
     "steps": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 12,
-      "description": "Ordered concrete actions you will take. 3–8 items typical. Each step must be verifiable by the user (e.g. \"Add X handler in handlers.go\"), not internal phases (\"think about Y\"). Each step ≤ 200 chars. Don't include sub-bullets — if a step is too big, split it before proposing.",
+      "maxItems": 20,
+      "description": "Ordered concrete actions you will take. 3–8 items typical, up to 20 for larger migrations. Each step must be verifiable by the user (e.g. \"Add X handler in handlers.go\"), not internal phases (\"think about Y\"). Each step ≤ 200 chars. Don't include sub-bullets — if a step is too big, split it before proposing.",
       "items": {"type": "string"}
     },
     "why_now": {
@@ -70,10 +73,14 @@ const description = "Propose a concrete plan (problem + ordered steps) to the us
 // substate). P1 callers and unit tests pass nil; the tool degrades
 // to "return result string, no side effects".
 type Sink interface {
-	// Approved is called when the user picked "approve". Steps is
-	// the plan verbatim (same slice the model proposed), useful for
-	// later panel rendering or for stuffing into the mode reminder.
-	Approved(steps []string)
+	// Approved is called when the user picked an approve option.
+	// Steps is the plan verbatim (same slice the model proposed).
+	// batch is true when the user picked "auto-approve writes per
+	// step" — the host should arm the plan tool's pre-approval gate
+	// so that write/edit/bash inside a plan(start)…plan(complete)
+	// window bypass the per-call y/N prompt. false = legacy
+	// per-call gating (Phase C of plan-mode optimisation).
+	Approved(steps []string, batch bool)
 	// AdjustRequested is called when the user picked "adjust" OR
 	// typed free-text feedback via the auto-appended Other row.
 	// feedback may be empty when the user picked Adjust without
@@ -82,6 +89,61 @@ type Sink interface {
 	// Cancelled is called when the user picked "cancel" or pressed
 	// Esc (Answer.Cancelled).
 	Cancelled()
+}
+
+// DuplicateChecker is an OPTIONAL interface a Sink may implement.
+// When present, propose calls IsDuplicateOfLastApproved with the
+// incoming steps before showing the picker. A true return short-
+// circuits the call: no picker, no user interruption, result text
+// asks the model to re-think instead of re-proposing the same plan.
+//
+// Implementations should compare order-sensitively against the most
+// recently approved step list (whitespace-trimmed). Returning false
+// when no plan has been approved yet is correct — there's nothing
+// to dedupe against.
+type DuplicateChecker interface {
+	IsDuplicateOfLastApproved(steps []string) bool
+}
+
+// ProgressReporter is an OPTIONAL interface a Sink may implement.
+// When present, propose calls ProgressSummary on adjust paths and
+// folds the returned summary into the result text, so the model's
+// next proposal preserves work already completed. Empty string =
+// no progress to report (return as such; propose elides the section
+// entirely).
+//
+// The summary should be terse and self-contained — propose drops it
+// verbatim into the result without further formatting. Recommended
+// shape: "Completed: 1, 2. In progress: 3. Pending: 4, 5."
+type ProgressReporter interface {
+	ProgressSummary() string
+}
+
+// ContextReceiver is an OPTIONAL interface a Sink may implement.
+// When present, propose calls OnProposeStart with the full propose
+// args (problem + steps + why_now) BEFORE the picker pops. The host
+// uses this to capture context that Approved alone doesn't carry —
+// e.g. the plan artifact writer needs the problem statement, but
+// Approved's signature is (steps, batch). The call fires for every
+// Execute invocation regardless of the user's eventual choice; the
+// host should hold the data only as long as it might be needed
+// (typically: until the next OnProposeStart or until the workflow
+// resets).
+type ContextReceiver interface {
+	OnProposeStart(problem string, steps []string, whyNow string)
+}
+
+// ArtifactReporter is an OPTIONAL interface a Sink may implement.
+// After Approved returns, propose calls LastArtifactStatus and folds
+// the result into the approve-path tool text:
+//
+//   - path != "" && err == nil → success: "Plan artifact: <path>"
+//   - err != nil               → failure: "(note: plan artifact …)"
+//   - path == "" && err == nil → host doesn't write artifacts; quiet
+//
+// See PRD §八 (plan-mode-v2.x artifact).
+type ArtifactReporter interface {
+	LastArtifactStatus() (path string, err error)
 }
 
 // Tool is the propose tool implementation.
@@ -135,6 +197,27 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		}
 	}
 
+	// Duplicate-of-last-approved short-circuit. The model sometimes
+	// re-proposes verbatim after an adjust loop went in circles, or
+	// after a tangent interrupted the flow. Without this guard, the
+	// user gets the same picker again and learns to ignore it. The
+	// short-circuit returns a result that steers the model to either
+	// (a) re-think with the user's pending feedback, or (b) execute
+	// the existing plan rather than re-propose. No sink callback —
+	// nothing happened from the user's perspective.
+	if dc, ok := t.sink.(DuplicateChecker); ok && dc.IsDuplicateOfLastApproved(a.Steps) {
+		return duplicateResult(a.Steps), nil
+	}
+
+	// Hand the full propose args to the host BEFORE the picker pops.
+	// Approved's signature only carries steps + batch, but downstream
+	// consumers (e.g. the plan artifact writer) need the problem
+	// statement and why_now. The host stores these and consumes them
+	// later if/when the user approves.
+	if cr, ok := t.sink.(ContextReceiver); ok {
+		cr.OnProposeStart(a.Problem, a.Steps, a.WhyNow)
+	}
+
 	q := buildQuestion(a)
 	if err := auser.Validate(q); err != nil {
 		return "", fmt.Errorf("%s: %w", toolName, err)
@@ -167,7 +250,8 @@ func buildQuestion(a args) auser.Question {
 	return auser.Question{
 		Question: sb.String(),
 		Options: []auser.Option{
-			{ID: "approve", Label: "Go ahead", Description: "Approve the plan; unlock writes and start executing."},
+			{ID: "approve", Label: "Go ahead — ask per call", Description: "Approve the plan; each write/edit/bash still prompts for y/N (default, safest)."},
+			{ID: "approve_batch", Label: "Go ahead — auto-approve per step", Description: "Approve the plan; while plan(start=N) is active, writes/edits/bash auto-pass without prompting. Esc revokes for the rest of the step."},
 			{ID: "adjust", Label: "Adjust", Description: "Reject this proposal; you can type feedback so the assistant re-plans."},
 			{ID: "cancel", Label: "Cancel /plan", Description: "Stop the plan flow entirely. Exit plan mode."},
 		},
@@ -190,25 +274,34 @@ func (t Tool) handleAnswer(a args, ans auser.Answer) string {
 		if t.sink != nil {
 			t.sink.AdjustRequested(ans.FreeText)
 		}
-		return adjustResult(ans.FreeText)
+		return adjustResult(ans.FreeText, t.progressSummary())
 	}
 
 	if pickedID(ans, "adjust") {
 		if t.sink != nil {
 			t.sink.AdjustRequested("")
 		}
-		return adjustResult("")
+		return adjustResult("", t.progressSummary())
 	}
 
 	if pickedID(ans, "approve") {
 		if t.sink != nil {
-			t.sink.Approved(a.Steps)
+			t.sink.Approved(a.Steps, false)
 		}
-		return approveResult(a.Steps)
+		path, werr := t.artifactStatus()
+		return approveResult(a.Steps, false, path, werr)
+	}
+
+	if pickedID(ans, "approve_batch") {
+		if t.sink != nil {
+			t.sink.Approved(a.Steps, true)
+		}
+		path, werr := t.artifactStatus()
+		return approveResult(a.Steps, true, path, werr)
 	}
 
 	// Defensive: shouldn't be reachable given single-select picker
-	// over 3 deterministic option IDs. If askuser ever evolves and
+	// over 4 deterministic option IDs. If askuser ever evolves and
 	// returns something unexpected, treat as cancellation rather
 	// than silently proceeding.
 	return "[plan: cancelled]\nUnexpected answer shape from picker — treating as cancellation. Please re-issue your last request."
@@ -218,16 +311,55 @@ func pickedID(ans auser.Answer, id string) bool {
 	return slices.Contains(ans.ChosenIDs, id)
 }
 
-func approveResult(steps []string) string {
+// progressSummary returns the host's progress summary if the sink
+// implements ProgressReporter; otherwise the empty string. Captured
+// at the moment the adjust path fires so the snapshot reflects
+// "what was done by the time the user pressed Adjust", not "what's
+// done now".
+func (t Tool) progressSummary() string {
+	if r, ok := t.sink.(ProgressReporter); ok {
+		return r.ProgressSummary()
+	}
+	return ""
+}
+
+// artifactStatus returns the host's most recent artifact write
+// outcome (path, err) if the sink implements ArtifactReporter;
+// otherwise (zero, nil). Called AFTER sink.Approved so the host has
+// had a chance to do the write.
+func (t Tool) artifactStatus() (string, error) {
+	if r, ok := t.sink.(ArtifactReporter); ok {
+		return r.LastArtifactStatus()
+	}
+	return "", nil
+}
+
+func approveResult(steps []string, batch bool, artifactPath string, artifactErr error) string {
+	// The "[plan: approved]" prefix is load-bearing — the resume
+	// path (internal/tools/plan/reconstruct.go) scans for it
+	// verbatim to find the seeding point. Variants go AFTER the
+	// closing bracket.
 	var sb strings.Builder
-	sb.WriteString("[plan: approved]\nProposal accepted by user. You are now in plan-execute substate — write/edit/bash will prompt for per-call confirmation. Execute the plan step by step and narrate progress in chat.\n\nApproved plan:")
+	if batch {
+		sb.WriteString("[plan: approved] (auto-approve-per-step)\nProposal accepted by user with auto-approve-per-step. You are now in plan-execute substate. Call plan(action=\"start\", index=N) before each step's writes/edits/bash — that arms the per-step pre-approval gate so those calls auto-pass without a y/N prompt. Call plan(action=\"complete\", index=N) when the step is done to disarm the gate. If the user Esc's mid-step, the gate is revoked and subsequent writes go back to per-call y/N until you re-arm via plan(start). Narrate progress in chat.\n\nApproved plan:")
+	} else {
+		sb.WriteString("[plan: approved]\nProposal accepted by user. You are now in plan-execute substate — write/edit/bash will prompt for per-call confirmation. Execute the plan step by step and narrate progress in chat. Use plan(action=\"start\", index=N) and plan(action=\"complete\", index=N) to track progress.\n\nApproved plan:")
+	}
 	for i, s := range steps {
 		fmt.Fprintf(&sb, "\n  %d. %s", i+1, s)
+	}
+	if artifactErr != nil {
+		// Failure surfaces in the model-visible tool result AND on
+		// stderr (host responsibility). PRD §8.7: failure is
+		// observational — the workflow continues regardless.
+		fmt.Fprintf(&sb, "\n\n(note: plan artifact write failed: %v — workflow continues)", artifactErr)
+	} else if artifactPath != "" {
+		fmt.Fprintf(&sb, "\n\nPlan artifact: %s", artifactPath)
 	}
 	return sb.String()
 }
 
-func adjustResult(feedback string) string {
+func adjustResult(feedback, progress string) string {
 	var sb strings.Builder
 	sb.WriteString("[plan: adjust requested]\nUser did NOT approve. Before re-proposing: (1) summarize in chat what's already done (if anything), so the next plan can build on it; (2) revise the plan based on the feedback below; (3) call propose() again with the revised plan.\n")
 	if feedback != "" {
@@ -235,6 +367,33 @@ func adjustResult(feedback string) string {
 		sb.WriteString(feedback)
 	} else {
 		sb.WriteString("\nNo specific feedback provided — the user clicked Adjust without typing. Ask them what to change before re-proposing.")
+	}
+	if progress != "" {
+		// Inject the structured progress summary so the next
+		// propose() can build ON the work the user already
+		// approved. Without this, the model has to re-derive
+		// "what's done" from chat narrative — which routinely
+		// causes the new plan to redo steps 1-2 that already
+		// landed. The summary lives in the tool result, NOT
+		// in the system prompt, so each adjust loop's snapshot
+		// is captured at that loop's actual progress state.
+		sb.WriteString("\n\nProgress on the previous (now-superseded) plan — preserve this when proposing the next one:\n  ")
+		sb.WriteString(progress)
+	}
+	return sb.String()
+}
+
+// duplicateResult is the canned response when the model re-proposes
+// the exact same step list. We don't fire the Sink (no Approved /
+// AdjustRequested / Cancelled — nothing happened from the user's
+// view) and we don't pop the picker. The text steers the model:
+// either execute the already-approved plan, or call ask_user to
+// resolve whatever ambiguity tripped the duplicate.
+func duplicateResult(steps []string) string {
+	var sb strings.Builder
+	sb.WriteString("[plan: duplicate]\nThis proposal is byte-identical to the last plan the user already approved. Do not show the user the same picker again. Either: (a) execute the existing plan step by step (use plan(action=\"start\", index=N) to track progress); or (b) if you're unsure what to do next, call ask_user with a specific question — duplicating propose is not a question.\n\nApproved (and active) plan:")
+	for i, s := range steps {
+		fmt.Fprintf(&sb, "\n  %d. %s", i+1, s)
 	}
 	return sb.String()
 }

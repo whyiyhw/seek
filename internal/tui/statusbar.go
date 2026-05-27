@@ -27,15 +27,22 @@ type StatusSnapshot struct {
 	// badge (back-compat with sessions / callers that pre-date the
 	// substate split). See PRD docs/prd/feature-plan-mode.md §2.6.
 	PlanSubstate string
-	Tier         pricing.Tier
-	NextTier     pricing.Tier
-	NextAt       time.Time
-	Turns        int
-	ToolCalls    int
-	Usage        deepseek.Usage // cumulative
-	Streaming    bool           // "thinking" indicator state
-	Now          time.Time      // for "until next tier" countdown
-	Width        int            // for right-padding
+	// PlanStepsTotal and PlanStepsDone drive the "N/M" counter on
+	// the PLAN:EXEC badge. Zero values suppress the counter — the
+	// badge falls back to the bare label until the `plan` tool has
+	// produced any state. PlanStepsDone counts both completed and
+	// skipped steps (both flavours of "no more work here").
+	PlanStepsTotal int
+	PlanStepsDone  int
+	Tier           pricing.Tier
+	NextTier       pricing.Tier
+	NextAt         time.Time
+	Turns          int
+	ToolCalls      int
+	Usage          deepseek.Usage // cumulative
+	Streaming      bool           // "thinking" indicator state
+	Now            time.Time      // for "until next tier" countdown
+	Width          int            // for right-padding
 
 	// StreamElapsed and StreamDeltaBytes drive the live "Ns · ↓~Xtok"
 	// counter. Both are zero when Streaming is false or the stream just
@@ -109,6 +116,9 @@ func leftSegments(s StatusSnapshot) []string {
 		case "execute":
 			label = "PLAN:EXEC"
 			bg = colourTool
+		}
+		if s.PlanStepsTotal > 0 {
+			label = fmt.Sprintf("%s %d/%d", label, s.PlanStepsDone, s.PlanStepsTotal)
 		}
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label))
 	}

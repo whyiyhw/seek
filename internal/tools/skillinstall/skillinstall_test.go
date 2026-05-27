@@ -128,7 +128,7 @@ func (s *stubAskFn) fn(a permission.Action) bool {
 
 func newAskPolicy(t *testing.T, ask *stubAskFn) *permission.Policy {
 	t.Helper()
-	p, err := permission.New("/", permission.ModeAsk)
+	p, err := permission.New("/", permission.PrefAsk)
 	if err != nil {
 		t.Fatalf("permission.New: %v", err)
 	}

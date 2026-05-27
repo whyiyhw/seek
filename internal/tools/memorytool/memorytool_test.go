@@ -102,7 +102,7 @@ func TestRecall_RejectsExtraFields(t *testing.T) {
 
 func TestRemember_AskApprovedWrites(t *testing.T) {
 	p := setupProject(t)
-	policy, err := permission.New(t.TempDir(), permission.ModeAsk)
+	policy, err := permission.New(t.TempDir(), permission.PrefAsk)
 	if err != nil {
 		t.Fatalf("permission.New: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRemember_AskApprovedWrites(t *testing.T) {
 
 func TestRemember_AskDeniedSkipsWrite(t *testing.T) {
 	p := setupProject(t)
-	policy, _ := permission.New(t.TempDir(), permission.ModeAsk)
+	policy, _ := permission.New(t.TempDir(), permission.PrefAsk)
 	policy.SetAskFn(func(permission.Action) bool { return false })
 
 	tool := NewRemember(p, policy)
@@ -172,7 +172,7 @@ func TestRemember_AskDeniedSkipsWrite(t *testing.T) {
 
 func TestRemember_YoloModeSkipsAsk(t *testing.T) {
 	p := setupProject(t)
-	policy, _ := permission.New(t.TempDir(), permission.ModeYolo)
+	policy, _ := permission.New(t.TempDir(), permission.PrefYolo)
 	askCalled := false
 	policy.SetAskFn(func(permission.Action) bool {
 		askCalled = true
@@ -198,7 +198,7 @@ func TestRemember_YoloModeSkipsAsk(t *testing.T) {
 
 func TestRemember_DenyModeRejectsBeforeAsk(t *testing.T) {
 	p := setupProject(t)
-	policy, _ := permission.New(t.TempDir(), permission.ModeDeny)
+	policy, _ := permission.New(t.TempDir(), permission.PrefDeny)
 	askCalled := false
 	policy.SetAskFn(func(permission.Action) bool {
 		askCalled = true
@@ -235,7 +235,7 @@ func TestRemember_MissingRequiredFields(t *testing.T) {
 }
 
 func TestRemember_NilProjectReturnsClearError(t *testing.T) {
-	policy, _ := permission.New(t.TempDir(), permission.ModeYolo)
+	policy, _ := permission.New(t.TempDir(), permission.PrefYolo)
 	tool := NewRemember(nil, policy)
 	_, err := tool.Execute(context.Background(), json.RawMessage(`{
 		"name":"x","tagline":"t","content":"c"
@@ -250,7 +250,7 @@ func TestRemember_NilProjectReturnsClearError(t *testing.T) {
 func TestRemember_RoundTrip_PersistsAcrossReload(t *testing.T) {
 	p := setupProject(t)
 	cwd := p.AbsPath
-	policy, _ := permission.New(t.TempDir(), permission.ModeYolo)
+	policy, _ := permission.New(t.TempDir(), permission.PrefYolo)
 	tool := NewRemember(p, policy)
 
 	now := time.Now().UTC()
@@ -279,7 +279,7 @@ func TestRemember_RoundTrip_PersistsAcrossReload(t *testing.T) {
 
 func mustPolicy(t *testing.T) *permission.Policy {
 	t.Helper()
-	p, err := permission.New(t.TempDir(), permission.ModeYolo)
+	p, err := permission.New(t.TempDir(), permission.PrefYolo)
 	if err != nil {
 		t.Fatalf("permission.New: %v", err)
 	}

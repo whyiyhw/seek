@@ -10,7 +10,7 @@ import (
 )
 
 func TestYoloAllowsEverything(t *testing.T) {
-	p, err := New(t.TempDir(), ModeYolo)
+	p, err := New(t.TempDir(), PrefYolo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestYoloAllowsEverything(t *testing.T) {
 }
 
 func TestBashRequiresYolo(t *testing.T) {
-	p, _ := New(t.TempDir(), ModeDeny)
+	p, _ := New(t.TempDir(), PrefDeny)
 	err := p.Check(Action{Kind: KindBash, Command: "ls"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -35,7 +35,7 @@ func TestBashRequiresYolo(t *testing.T) {
 
 func TestWriteInsideCWD(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, ModeDeny)
+	p, _ := New(root, PrefDeny)
 	for _, path := range []string{
 		filepath.Join(root, "a.txt"),
 		filepath.Join(root, "deep", "nested", "b.txt"),
@@ -50,7 +50,7 @@ func TestWriteInsideCWD(t *testing.T) {
 func TestWriteOutsideCWD(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir() // different dir
-	p, _ := New(root, ModeDeny)
+	p, _ := New(root, PrefDeny)
 	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(other, "x")})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -59,7 +59,7 @@ func TestWriteOutsideCWD(t *testing.T) {
 
 func TestEditAlsoCWDGated(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, ModeDeny)
+	p, _ := New(root, PrefDeny)
 	err := p.Check(Action{Kind: KindEdit, Path: "/etc/hosts"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -67,7 +67,7 @@ func TestEditAlsoCWDGated(t *testing.T) {
 }
 
 func TestUnknownKind(t *testing.T) {
-	p, _ := New(t.TempDir(), ModeDeny)
+	p, _ := New(t.TempDir(), PrefDeny)
 	err := p.Check(Action{Kind: "voodoo"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)
@@ -82,7 +82,7 @@ func TestUnknownKind(t *testing.T) {
 // behaviour / safe-action skipping were all untested guesses.
 
 func TestModeAsk_AllowsWhenAskFnReturnsTrue(t *testing.T) {
-	p, _ := New(t.TempDir(), ModeAsk)
+	p, _ := New(t.TempDir(), PrefAsk)
 	var (
 		calls int
 		seen  Action
@@ -104,7 +104,7 @@ func TestModeAsk_AllowsWhenAskFnReturnsTrue(t *testing.T) {
 }
 
 func TestModeAsk_DeniesWhenAskFnReturnsFalse(t *testing.T) {
-	p, _ := New(t.TempDir(), ModeAsk)
+	p, _ := New(t.TempDir(), PrefAsk)
 	p.SetAskFn(func(_ Action) bool { return false })
 	err := p.Check(Action{Kind: KindBash, Command: "rm -rf /"})
 	if !errors.Is(err, ErrDenied) {
@@ -120,7 +120,7 @@ func TestModeAsk_DeniesWhenAskFnReturnsFalse(t *testing.T) {
 func TestModeAsk_NoAskFnFallsBackToDeny(t *testing.T) {
 	// If the host forgot SetAskFn — the policy must NEVER silently
 	// allow. Failing closed is non-negotiable for a permission gate.
-	p, _ := New(t.TempDir(), ModeAsk)
+	p, _ := New(t.TempDir(), PrefAsk)
 	err := p.Check(Action{Kind: KindBash, Command: "ls"})
 	if !errors.Is(err, ErrDenied) {
 		t.Errorf("ask-without-askFn should deny, got %v", err)
@@ -135,7 +135,7 @@ func TestModeAsk_SafeActionsBypassAskFn(t *testing.T) {
 	// Writes inside CWD are safe; the askFn must NOT be consulted —
 	// every safe action that nags the user is a UX regression.
 	root := t.TempDir()
-	p, _ := New(root, ModeAsk)
+	p, _ := New(root, PrefAsk)
 	var calls int
 	p.SetAskFn(func(_ Action) bool { calls++; return true })
 
@@ -154,22 +154,22 @@ func TestSetMode_TransitionFromAskToYoloTakesEffectImmediately(t *testing.T) {
 	// /yolo in the TUI uses SetMode for live policy updates. The
 	// next Check after the flip must see the new mode without any
 	// agent / registry rebuild.
-	p, _ := New(t.TempDir(), ModeAsk)
+	p, _ := New(t.TempDir(), PrefAsk)
 	p.SetAskFn(func(_ Action) bool { return false }) // would deny
 
 	if err := p.Check(Action{Kind: KindBash, Command: "ls"}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("pre-flip should deny, got %v", err)
 	}
 
-	p.SetMode(ModeYolo)
+	p.SetPref(PrefYolo)
 
 	if err := p.Check(Action{Kind: KindBash, Command: "ls"}); err != nil {
 		t.Errorf("post-flip should allow, got %v", err)
 	}
 	// Getter sanity — also bumps coverage on Mode / Yolo / CWD,
 	// which are trivial but part of the public API.
-	if p.Mode() != ModeYolo {
-		t.Errorf("Mode() = %v, want ModeYolo", p.Mode())
+	if p.Pref() != PrefYolo {
+		t.Errorf("Mode() = %v, want PrefYolo", p.Pref())
 	}
 	if !p.Yolo() {
 		t.Errorf("Yolo() = false, want true after flip")
@@ -185,10 +185,10 @@ func TestSetMode_NilPolicySafe(t *testing.T) {
 	// that accidentally remove the guard (or worse, introduce a
 	// dependency on Policy being non-nil).
 	var p *Policy
-	p.SetMode(ModeYolo)
+	p.SetPref(PrefYolo)
 	p.SetAskFn(func(_ Action) bool { return true })
-	if p.Mode() != ModeDeny {
-		t.Errorf("nil policy Mode() = %v, want ModeDeny", p.Mode())
+	if p.Pref() != PrefDeny {
+		t.Errorf("nil policy Mode() = %v, want PrefDeny", p.Pref())
 	}
 	if p.Yolo() {
 		t.Errorf("nil policy Yolo() = true, want false")
@@ -210,7 +210,7 @@ func TestCheck_ConcurrentCallsRaceFree(t *testing.T) {
 	//
 	// Mixes reads (Check/Mode/Yolo) and writes (SetMode) to stress
 	// the mode field specifically.
-	p, _ := New(t.TempDir(), ModeYolo)
+	p, _ := New(t.TempDir(), PrefYolo)
 	p.SetAskFn(func(_ Action) bool { return true })
 
 	const N = 64
@@ -220,15 +220,15 @@ func TestCheck_ConcurrentCallsRaceFree(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = p.Check(Action{Kind: KindBash, Command: "ls"})
-			_ = p.Mode()
+			_ = p.Pref()
 			_ = p.Yolo()
 		}()
 		go func(flip int) {
 			defer wg.Done()
 			if flip%2 == 0 {
-				p.SetMode(ModeYolo)
+				p.SetPref(PrefYolo)
 			} else {
-				p.SetMode(ModeAsk)
+				p.SetPref(PrefAsk)
 			}
 		}(i)
 	}
@@ -247,81 +247,149 @@ func TestIsWithin_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	p, _ := New(root, ModeDeny)
+	p, _ := New(root, PrefDeny)
 	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(link, "x")})
 	if err == nil {
 		t.Error("symlink-in-cwd write allowed — symlink resolution not working")
 	}
 }
 
-// --- ModePlan tests ---------------------------------------------------
+// --- WorkflowPlanAnalyze tests --------------------------------------
+// These exercise the workflow gate's read-only constraints. The pref
+// axis is held at PrefAsk to isolate workflow behaviour from pref
+// (see TestWorkflowAnalyze_TrumpsYoloPref for the cross-axis case).
 
-func TestModePlan_AllowsReadInsideCWD(t *testing.T) {
+func newPlanAnalyze(t *testing.T, root string) *Policy {
+	t.Helper()
+	p, err := New(root, PrefAsk)
+	if err != nil {
+		t.Fatalf("permission.New: %v", err)
+	}
+	p.SetWorkflow(WorkflowPlanAnalyze)
+	return p
+}
+
+func TestWorkflowAnalyze_AllowsReadInsideCWD(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, ModePlan)
+	p := newPlanAnalyze(t, root)
 	err := p.Check(Action{Kind: KindRead, Path: filepath.Join(root, "foo.go")})
 	if err != nil {
-		t.Errorf("plan mode should allow read inside CWD, got %v", err)
+		t.Errorf("plan-analyze should allow read inside CWD, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesReadOutsideCWD(t *testing.T) {
+func TestWorkflowAnalyze_DeniesReadOutsideCWD(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()
-	p, _ := New(root, ModePlan)
+	p := newPlanAnalyze(t, root)
 	err := p.Check(Action{Kind: KindRead, Path: filepath.Join(other, "secret")})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny read outside CWD, got %v", err)
+		t.Errorf("plan-analyze should deny read outside CWD, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesBash(t *testing.T) {
-	p, _ := New(t.TempDir(), ModePlan)
+func TestWorkflowAnalyze_DeniesBash(t *testing.T) {
+	p := newPlanAnalyze(t, t.TempDir())
 	err := p.Check(Action{Kind: KindBash, Command: "ls"})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny bash, got %v", err)
+		t.Errorf("plan-analyze should deny bash, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesWriteInsideCWD(t *testing.T) {
+func TestWorkflowAnalyze_AllowsReadOnlyBash(t *testing.T) {
+	// ReadOnly flag (set by bash tool's whitelist + metachar check)
+	// punches through the plan-analyze blanket deny.
+	p := newPlanAnalyze(t, t.TempDir())
+	err := p.Check(Action{Kind: KindBash, Command: "go vet ./...", ReadOnly: true})
+	if err != nil {
+		t.Errorf("ReadOnly bash should be allowed in plan-analyze, got %v", err)
+	}
+}
+
+func TestWorkflowAnalyze_DeniesWriteInsideCWD(t *testing.T) {
 	root := t.TempDir()
-	p, _ := New(root, ModePlan)
+	p := newPlanAnalyze(t, root)
 	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(root, "x.go")})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny write even inside CWD, got %v", err)
+		t.Errorf("plan-analyze should deny write even inside CWD, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesEdit(t *testing.T) {
-	p, _ := New(t.TempDir(), ModePlan)
+func TestWorkflowAnalyze_DeniesEdit(t *testing.T) {
+	p := newPlanAnalyze(t, t.TempDir())
 	err := p.Check(Action{Kind: KindEdit, Path: "/some/file"})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny edit, got %v", err)
+		t.Errorf("plan-analyze should deny edit, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesMemoryRemember(t *testing.T) {
-	p, _ := New(t.TempDir(), ModePlan)
+func TestWorkflowAnalyze_DeniesMemoryRemember(t *testing.T) {
+	p := newPlanAnalyze(t, t.TempDir())
 	err := p.Check(Action{Kind: KindMemoryRemember, MemoryName: "test"})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny memory_remember, got %v", err)
+		t.Errorf("plan-analyze should deny memory_remember, got %v", err)
 	}
 }
 
-func TestModePlan_DeniesUnknownKind(t *testing.T) {
-	p, _ := New(t.TempDir(), ModePlan)
+func TestWorkflowAnalyze_DeniesUnknownKind(t *testing.T) {
+	p := newPlanAnalyze(t, t.TempDir())
 	err := p.Check(Action{Kind: "voodoo"})
 	if !errors.Is(err, ErrDenied) {
-		t.Errorf("plan mode should deny unknown kind, got %v", err)
+		t.Errorf("plan-analyze should deny unknown kind, got %v", err)
 	}
 }
 
 func TestPlan_Method(t *testing.T) {
-	p, _ := New(t.TempDir(), ModePlan)
+	p := newPlanAnalyze(t, t.TempDir())
 	if !p.Plan() {
-		t.Error("Plan() should return true in ModePlan")
+		t.Error("Plan() should return true under any plan workflow")
 	}
 	if p.Yolo() {
-		t.Error("Yolo() should return false in ModePlan")
+		t.Error("Yolo() should return false under PrefAsk")
+	}
+	if p.Workflow() != WorkflowPlanAnalyze {
+		t.Errorf("Workflow() = %v, want WorkflowPlanAnalyze", p.Workflow())
+	}
+}
+
+// --- Cross-axis matrix (PRD §6.1) -----------------------------------
+// Workflow trumps pref where workflow imposes a hard constraint.
+// PrefYolo + WorkflowPlanAnalyze MUST still be read-only — that's the
+// load-bearing invariant of plan mode existing at all.
+
+func TestWorkflowAnalyze_TrumpsYoloPref(t *testing.T) {
+	root := t.TempDir()
+	p, _ := New(root, PrefYolo)
+	p.SetWorkflow(WorkflowPlanAnalyze)
+	err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(root, "x.go")})
+	if !errors.Is(err, ErrDenied) {
+		t.Fatalf("write under Yolo+PlanAnalyze should be denied — workflow trumps pref. Got: %v", err)
+	}
+}
+
+func TestWorkflowExecute_FallsBackToPref(t *testing.T) {
+	// PlanExecute is just plan-analyze unlocked; pref takes over.
+	// Yolo + PlanExecute = allow writes; Ask + PlanExecute (no
+	// preApproved) = askFn consulted.
+	root := t.TempDir()
+	p, _ := New(root, PrefYolo)
+	p.SetWorkflow(WorkflowPlanExecute)
+	if err := p.Check(Action{Kind: KindWrite, Path: filepath.Join(root, "x.go")}); err != nil {
+		t.Errorf("Yolo + PlanExecute should allow writes (pref takes over), got %v", err)
+	}
+}
+
+func TestSetWorkflow_ResetsPreApproved(t *testing.T) {
+	// Any workflow transition wipes preApproved — the plan-execute
+	// step state must not survive workflow boundaries.
+	p, _ := New(t.TempDir(), PrefAsk)
+	p.SetWorkflow(WorkflowPlanExecute)
+	p.SetPreApproved(true)
+	if !p.PreApproved() {
+		t.Fatal("setup: PreApproved should be true")
+	}
+	p.SetWorkflow(WorkflowNone)
+	if p.PreApproved() {
+		t.Fatal("SetWorkflow should clear PreApproved")
 	}
 }

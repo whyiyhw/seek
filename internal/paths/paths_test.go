@@ -76,6 +76,56 @@ func TestSubdirs_ComposeUnderHome(t *testing.T) {
 	}
 }
 
+func TestProjectID_Deterministic(t *testing.T) {
+	a := ProjectID("/Users/whyiyhw/code/github/seek")
+	b := ProjectID("/Users/whyiyhw/code/github/seek")
+	if a != b {
+		t.Errorf("ProjectID should be deterministic, got %q vs %q", a, b)
+	}
+	if len(a) != 16 {
+		t.Errorf("ProjectID should be 16 hex chars, got %d (%q)", len(a), a)
+	}
+	for _, c := range a {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("ProjectID contains non-hex char %q in %q", c, a)
+		}
+	}
+}
+
+func TestProjectID_DifferentPathsDiffer(t *testing.T) {
+	a := ProjectID("/Users/x/projectA")
+	b := ProjectID("/Users/x/projectB")
+	if a == b {
+		t.Errorf("ProjectID collided on different paths: both = %q", a)
+	}
+}
+
+func TestProjectDir_ComposesUnderProjects(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+	got, err := ProjectDir("/abs/path/to/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := filepath.Join(override, "projects", ProjectID("/abs/path/to/project"))
+	if got != expected {
+		t.Errorf("ProjectDir = %q, want %q", got, expected)
+	}
+}
+
+func TestProjectPlans_ComposesUnderProjectDir(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+	got, err := ProjectPlans("/abs/path/to/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := filepath.Join(override, "projects", ProjectID("/abs/path/to/project"), "plans")
+	if got != expected {
+		t.Errorf("ProjectPlans = %q, want %q", got, expected)
+	}
+}
+
 func TestHome_IgnoresXDG(t *testing.T) {
 	// Pre-v1.0 versions read $XDG_CONFIG_HOME. Pin the new behaviour
 	// so a future "let's support XDG again" change has to consciously

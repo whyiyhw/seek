@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -46,6 +47,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/internal/tools/memorytool"
+	plantool "github.com/whyiyhw/seek/internal/tools/plan"
 	"github.com/whyiyhw/seek/internal/tools/propose"
 	"github.com/whyiyhw/seek/internal/tools/read"
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
@@ -153,38 +155,304 @@ func resolveLang(raw string) string {
 	}
 }
 
-// modeLabel returns the human-readable label for a permission mode,
-// used in the system prompt status line.
-func modeLabel(m permission.Mode) string {
-	switch m {
-	case permission.ModeYolo:
+// modeLabel returns the human-readable label for the (pref, workflow)
+// pair, used in the system prompt status line. Workflow wins when
+// non-None (it's more specific than pref) — "yolo + plan-analyze" is
+// expressed as "plan-analyze" so the model knows to honour the
+// read-only workflow contract.
+func modeLabel(pref permission.Preference, workflow permission.Workflow) string {
+	switch workflow {
+	case permission.WorkflowPlanAnalyze:
+		return "plan-analyze"
+	case permission.WorkflowPlanExecute:
+		return "plan-execute"
+	}
+	switch pref {
+	case permission.PrefYolo:
 		return "yolo"
-	case permission.ModePlan:
-		return "plan"
-	case permission.ModeAsk:
+	case permission.PrefAsk:
 		return "ask"
 	default:
 		return "deny"
 	}
 }
 
-// proposeAgentSink bridges the propose tool's Sink interface to the
-// agent's event channel. Holds a getAgent closure (not a *Agent
-// directly) so the sink follows the live agent across /reset rebuilds
-// — see run()'s RebuildAgent callback where `ag = newAg`. v1 just
-// emits the typed events; the TUI consumes them in P4 to flip
-// permission policy / mode label / status bar substate. See
-// docs/prd/feature-plan-mode.md §2.3.
-type proposeAgentSink struct{ getAgent func() *agent.Agent }
+// planBridge implements BOTH the propose tool's Sink and the plan
+// tool's Sink. Centralising the wiring here avoids the
+// chicken-and-egg of plan-and-propose sharing batch-mode state across
+// two structs: propose decides whether batch is on (via the user's
+// pick), plan acts on it (flipping the permission gate per step), and
+// the policy is the single source of truth that Check consults.
+//
+// Lifecycle.
+//
+//	user picks "approve" / "approve_batch" → Approved(steps, batch)
+//	    bridge.batch = batch
+//	    plan.Seed(steps)                 // emits PlanStepUpdated
+//	    policy.SetPreApproved(false)     // clean slate
+//	    agent.EmitEvent(PlanProposalApproved{Steps})
+//
+//	model calls plan(action="start",  index=N) → StepChanged(snap, N-1)
+//	    if bridge.batch && currentIdx >= 0 {
+//	        policy.SetPreApproved(true)
+//	    } else {
+//	        policy.SetPreApproved(false)
+//	    }
+//	    agent.EmitEvent(PlanStepUpdated{snap, currentIdx})
+//
+//	model calls plan(action="complete", index=N) → StepChanged(snap, -1)
+//	    policy.SetPreApproved(false)
+//	    agent.EmitEvent(PlanStepUpdated{snap, -1})
+//
+//	user picks "cancel"                      → Cancelled()
+//	    bridge.batch = false
+//	    plan.Clear()                      // emits PlanStepUpdated(nil, -1)
+//	    policy.SetPreApproved(false)
+//	    agent.EmitEvent(PlanProposalCancelled{})
+//
+//	user Esc on the stream / /plan-off       → policy.SetPreApproved(false)
+//	    (called from the TUI cancellation path, not via this bridge)
+//
+// The mutex on `batch` serialises the rare cross-goroutine update:
+// proposeAnswer (Ask goroutine) writes batch; StepChanged (tool
+// dispatch goroutine) reads it.
+type planBridge struct {
+	mu    sync.Mutex
+	batch bool
+	// lastApproved is the step list the user most recently approved
+	// (any flavour). Used by IsDuplicateOfLastApproved to suppress
+	// byte-identical re-proposals — the model occasionally loops and
+	// asks the user the same picker question after an adjust round
+	// resolved nothing.
+	lastApproved []string
+	// lastArtifactPath / lastArtifactErr capture the outcome of the
+	// most recent WriteArtifact call. Read by LastArtifactStatus
+	// (propose.ArtifactReporter) so the tool result can surface the
+	// path on success or a "(note: …)" line on failure. PRD §8.7.
+	lastArtifactPath string
+	lastArtifactErr  error
+	// pendingProblem / pendingWhyNow carry the propose args from the
+	// in-flight Execute call into Approved, which only receives steps
+	// and batch. RecordProposalContext sets them before sink.Approved
+	// fires; Approved clears them after consuming.
+	pendingProblem string
+	pendingWhyNow  string
+	getAgent       func() *agent.Agent
+	planTool       *plantool.Tool
+	policy         *permission.Policy
+	// sessionID returns the live session ID (closure so /compact / /reset
+	// rebuilds don't strand a stale value). Returns "" in --no-save
+	// mode; we use that signal to skip artifact writes entirely.
+	sessionID func() string
+	// projectAbs is the resolved CWD at startup. Fixed for the
+	// program's lifetime — /reset doesn't move the project root.
+	projectAbs string
+	// artifactEnabled gates the write. False in --no-save (user
+	// explicitly wants ephemeral; honour that for artifacts too,
+	// even though they live outside the session dir).
+	artifactEnabled bool
+	// now is the clock injected for testability. nil → time.Now.
+	now func() time.Time
+}
 
-func (s proposeAgentSink) Approved(steps []string) {
-	s.getAgent().EmitEvent(agent.PlanProposalApproved{Steps: steps})
+func (b *planBridge) Approved(steps []string, batch bool) {
+	b.mu.Lock()
+	b.batch = batch
+	// Snapshot the approved steps for duplicate detection on
+	// subsequent propose calls. We copy so a later mutation by
+	// callers can't shift our reference.
+	b.lastApproved = append(b.lastApproved[:0], steps...)
+	// Consume the in-flight propose context (set by OnProposeStart).
+	// We hold these only until the next propose, so consuming here
+	// avoids stale data leaking into the next adjust loop.
+	problem := b.pendingProblem
+	whyNow := b.pendingWhyNow
+	b.pendingProblem = ""
+	b.pendingWhyNow = ""
+	enabled := b.artifactEnabled
+	projectAbs := b.projectAbs
+	now := b.now
+	sessionFn := b.sessionID
+	b.mu.Unlock()
+
+	// Write artifact (best-effort). Failure path: stash on the
+	// bridge, print to stderr; propose.LastArtifactStatus surfaces
+	// it to the model in the next breath. Success: stash path.
+	if enabled && problem != "" && len(steps) > 0 {
+		if now == nil {
+			now = time.Now
+		}
+		sid := ""
+		if sessionFn != nil {
+			sid = sessionFn()
+		}
+		path, werr := plantool.WriteArtifact(plantool.ArtifactMetadata{
+			Problem:        problem,
+			Steps:          steps,
+			WhyNow:         whyNow,
+			SessionID:      sid,
+			ProjectAbsPath: projectAbs,
+			Batch:          batch,
+			ApprovedAt:     now(),
+		})
+		b.mu.Lock()
+		b.lastArtifactPath = path
+		b.lastArtifactErr = werr
+		b.mu.Unlock()
+		if werr != nil {
+			fmt.Fprintln(os.Stderr, "plan artifact:", werr)
+		}
+	} else {
+		// Either disabled or insufficient context — clear any prior
+		// status so a stale path doesn't get echoed into this turn's
+		// result.
+		b.mu.Lock()
+		b.lastArtifactPath = ""
+		b.lastArtifactErr = nil
+		b.mu.Unlock()
+	}
+
+	if b.policy != nil {
+		b.policy.SetPreApproved(false)
+	}
+	if b.planTool != nil {
+		b.planTool.Seed(steps)
+	}
+	b.getAgent().EmitEvent(agent.PlanProposalApproved{Steps: steps})
 }
-func (s proposeAgentSink) AdjustRequested(feedback string) {
-	s.getAgent().EmitEvent(agent.PlanProposalAdjustRequested{Feedback: feedback})
+
+// OnProposeStart implements propose.ContextReceiver. Snapshots the
+// in-flight propose args so Approved can stuff them into the artifact
+// write. AdjustRequested / Cancelled / duplicate-short-circuit don't
+// consume them — they get overwritten by the next OnProposeStart or
+// cleared on Cancelled.
+func (b *planBridge) OnProposeStart(problem string, _ []string, whyNow string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pendingProblem = problem
+	b.pendingWhyNow = whyNow
 }
-func (s proposeAgentSink) Cancelled() {
-	s.getAgent().EmitEvent(agent.PlanProposalCancelled{})
+
+// LastArtifactStatus implements propose.ArtifactReporter. Reset
+// during Approved (either to a real path/err pair or to zeros),
+// returned verbatim here for propose to fold into the tool result.
+func (b *planBridge) LastArtifactStatus() (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastArtifactPath, b.lastArtifactErr
+}
+
+func (b *planBridge) AdjustRequested(feedback string) {
+	b.getAgent().EmitEvent(agent.PlanProposalAdjustRequested{Feedback: feedback})
+}
+
+func (b *planBridge) Cancelled() {
+	b.mu.Lock()
+	b.batch = false
+	b.lastApproved = nil
+	b.pendingProblem = ""
+	b.pendingWhyNow = ""
+	// Clear artifact status too — a previous turn's success path
+	// should not leak into the cancel's tool result (currently
+	// cancel doesn't call LastArtifactStatus, but defensive).
+	b.lastArtifactPath = ""
+	b.lastArtifactErr = nil
+	b.mu.Unlock()
+	if b.policy != nil {
+		b.policy.SetPreApproved(false)
+	}
+	if b.planTool != nil {
+		b.planTool.Clear()
+	}
+	b.getAgent().EmitEvent(agent.PlanProposalCancelled{})
+}
+
+// IsDuplicateOfLastApproved implements propose.DuplicateChecker. The
+// comparison is order-sensitive (re-ordering steps IS a real change)
+// and whitespace-trimmed (extra trailing spaces are not). Returns
+// false when no plan has been approved yet — there's nothing to
+// dedupe against, so the first propose always shows the picker.
+func (b *planBridge) IsDuplicateOfLastApproved(steps []string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.lastApproved) == 0 || len(b.lastApproved) != len(steps) {
+		return false
+	}
+	for i, s := range steps {
+		if strings.TrimSpace(s) != strings.TrimSpace(b.lastApproved[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// ProgressSummary implements propose.ProgressReporter. Returns a
+// one-line summary of step statuses suitable for embedding in the
+// adjust-path tool result — the model carries this into the next
+// proposal so completed work isn't redone. Empty string when no
+// plan is loaded (nothing to summarise).
+func (b *planBridge) ProgressSummary() string {
+	if b.planTool == nil {
+		return ""
+	}
+	steps, _ := b.planTool.Snapshot()
+	if len(steps) == 0 {
+		return ""
+	}
+	var done, inProgress, pending, skipped []string
+	for i, s := range steps {
+		idx := fmt.Sprintf("%d", i+1)
+		switch s.Status {
+		case plantool.StatusCompleted:
+			done = append(done, idx)
+		case plantool.StatusInProgress:
+			inProgress = append(inProgress, idx)
+		case plantool.StatusSkipped:
+			skipped = append(skipped, idx)
+		default:
+			pending = append(pending, idx)
+		}
+	}
+	parts := []string{}
+	if len(done) > 0 {
+		parts = append(parts, "completed: "+strings.Join(done, ","))
+	}
+	if len(inProgress) > 0 {
+		parts = append(parts, "in_progress: "+strings.Join(inProgress, ","))
+	}
+	if len(skipped) > 0 {
+		parts = append(parts, "skipped: "+strings.Join(skipped, ","))
+	}
+	if len(pending) > 0 {
+		parts = append(parts, "pending: "+strings.Join(pending, ","))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ") + "."
+}
+
+func (b *planBridge) StepChanged(snapshot []plantool.Step, currentIdx int) {
+	b.mu.Lock()
+	batch := b.batch
+	b.mu.Unlock()
+
+	if b.policy != nil {
+		// Gate flips only when batch mode is on. currentIdx >= 0
+		// means a step is in progress; -1 means none. In non-batch
+		// approval the gate stays closed regardless.
+		if batch && currentIdx >= 0 {
+			b.policy.SetPreApproved(true)
+		} else {
+			b.policy.SetPreApproved(false)
+		}
+	}
+
+	out := make([]agent.PlanStep, len(snapshot))
+	for i, st := range snapshot {
+		out[i] = agent.PlanStep{Text: st.Text, Status: string(st.Status)}
+	}
+	b.getAgent().EmitEvent(agent.PlanStepUpdated{Steps: out, CurrentIdx: currentIdx})
 }
 
 func main() {
@@ -367,18 +635,25 @@ func run() error {
 		}
 	}
 	// Print mode (-p / piped stdin) can't realistically interrupt to
-	// ask, so it stays in deny mode unless --yolo is explicit. The TUI
-	// path overrides to Ask further down so per-call approval kicks
-	// in. --yolo and --plan always win.
-	initialMode := permission.ModeDeny
+	// ask, so it stays in Deny preference unless --yolo is explicit.
+	// The TUI path overrides to Ask further down so per-call approval
+	// kicks in. --yolo wins on pref; --plan enters the plan workflow
+	// (they're orthogonal so could in principle co-exist; cmdYolo/
+	// cmdPlan enforce mutual exclusion at the UI layer).
+	initialPref := permission.PrefDeny
 	if *yolo {
-		initialMode = permission.ModeYolo
-	} else if *plan {
-		initialMode = permission.ModePlan
+		initialPref = permission.PrefYolo
 	}
-	policy, err := permission.New(cwd, initialMode)
+	initialWorkflow := permission.WorkflowNone
+	if *plan {
+		initialWorkflow = permission.WorkflowPlanAnalyze
+	}
+	policy, err := permission.New(cwd, initialPref)
 	if err != nil {
 		return err
+	}
+	if initialWorkflow != permission.WorkflowNone {
+		policy.SetWorkflow(initialWorkflow)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -550,7 +825,7 @@ func run() error {
 			Add(memorytool.NewAmend(memProject))
 	}
 
-	systemPrompt := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(initialMode))
+	systemPrompt := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(initialPref, initialWorkflow))
 	// Project instructions go BEFORE the skill manifest: they describe
 	// "how this repo expects you to work" while skills are workflow
 	// templates. Ordering matches the model's likely reading priority.
@@ -626,12 +901,59 @@ func run() error {
 		return err
 	}
 
-	// Register the propose tool AFTER agent.New so its Sink can route
-	// approve/adjust/cancel into ag.EmitEvent. Same deferred-registration
-	// pattern as memorytool.NewObserve below (the Registry's tool list
-	// isn't frozen until Wire() runs on the first Prompt). See PRD
-	// docs/prd/feature-plan-mode.md for the full plan-mode flow.
-	reg.Add(propose.New(askPolicy, proposeAgentSink{getAgent: func() *agent.Agent { return ag }}))
+	// Register the plan + propose tools AFTER agent.New so both Sinks
+	// can route into ag.EmitEvent. Same deferred-registration pattern
+	// as memorytool.NewObserve below (the Registry's tool list isn't
+	// frozen until Wire() runs on the first Prompt). The plan tool is
+	// constructed first because the propose sink Seeds it on approval
+	// — both tools share that *plan.Tool pointer for the program's
+	// lifetime. See PRD docs/prd/feature-plan-mode.md for the full
+	// plan-mode flow.
+	bridge := &planBridge{
+		getAgent:        func() *agent.Agent { return ag },
+		policy:          policy,
+		projectAbs:      abs,
+		artifactEnabled: !*noSave,
+		sessionID: func() string {
+			// activeSession may flip on /compact (forked session
+			// with new ID) — close over the variable, not the
+			// current value, so the next Approved picks up the
+			// live ID. Empty string in --no-save mode signals "do
+			// not write artifacts" to Approved's gate (defensive;
+			// artifactEnabled above is the primary gate).
+			if activeSession == nil {
+				return ""
+			}
+			return activeSession.ID
+		},
+	}
+	planTool := plantool.New(bridge)
+	bridge.planTool = planTool
+	reg.Add(planTool)
+	reg.Add(propose.New(askPolicy, bridge))
+
+	// On resume, rebuild the plan task list from the transcript so the
+	// TUI shows the user where they left off. Reconstruction here only
+	// populates `restoredPlanSteps` for the initial tui.Options seed;
+	// the planTool itself is also Restored so subsequent plan() calls
+	// from the model see the correct in-memory state. Reconstruction
+	// is a pure-read scan — no events emitted (no agent Prompt active
+	// yet, EmitEvent would no-op anyway).
+	var (
+		restoredPlanSteps  []agent.PlanStep
+		restoredPlanCurIdx = -1
+	)
+	if loaded != nil && len(initialMsgs) > 0 {
+		steps, cur := plantool.ReconstructFromTranscript(initialMsgs)
+		if len(steps) > 0 {
+			planTool.Restore(steps, cur)
+			restoredPlanSteps = make([]agent.PlanStep, len(steps))
+			for i, st := range steps {
+				restoredPlanSteps[i] = agent.PlanStep{Text: st.Text, Status: string(st.Status)}
+			}
+			restoredPlanCurIdx = cur
+		}
+	}
 
 	// Register the memory hook AFTER agent.New so the M5.7 auto-distill
 	// HistoryProvider can close over ag.Messages. The Registry stores a
@@ -688,7 +1010,7 @@ func run() error {
 	// so the agent can run bash/go-test without interactive approval.
 	if *benchmarkTask != "" {
 		*yolo = true
-		policy.SetMode(permission.ModeYolo)
+		policy.SetPref(permission.PrefYolo)
 		return runBenchmark(ctx, *benchmarkTask, *benchmarkOut,
 			ag, tracker, *model, activeSession, store)
 	}
@@ -713,11 +1035,13 @@ func run() error {
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
-	// from Deny → Ask unless --yolo or --plan was passed. This is
-	// what gives us inline y/N prompts on bash and out-of-CWD writes.
-	// Plan mode stays Plan — read-only, no prompts needed.
-	if !*yolo && !*plan {
-		policy.SetMode(permission.ModeAsk)
+	// from Deny → Ask unless --yolo was passed. This is what gives
+	// us inline y/N prompts on bash and out-of-CWD writes. --plan
+	// doesn't change pref (it sets the workflow); upgrading pref to
+	// Ask here is correct for --plan too — plan-execute uses Ask for
+	// per-call gating after approval.
+	if !*yolo {
+		policy.SetPref(permission.PrefAsk)
 	}
 
 	// Approval channel: askFn pushes a request, blocks on its reply.
@@ -784,26 +1108,29 @@ func run() error {
 	}
 
 	return tui.Run(tui.Options{
-		Agent:             ag,
-		Tracker:           tracker,
-		Model:             sessionModel,
-		Effort:            sessionEffort,
-		Lang:              sessionLang,
-		Yolo:              policy.Yolo(),
-		Plan:              policy.Plan(),
-		CWD:               abs,
-		Ctx:               ctx,
-		Theme:             effectiveTheme,
-		GlamourStyle:      glamourStyle,
-		ApprovalCh:        approvalCh,
-		AskUserCh:         askUserCh,
-		Session:           activeSession,
-		Store:             store,
-		Skills:            skills,
-		ProviderName:      provLabel,
-		MemoryProject:     memProject,
-		Distiller:         distiller,
-		ObserveResultChan: observeResultChan,
+		Agent:                 ag,
+		Tracker:               tracker,
+		Model:                 sessionModel,
+		Effort:                sessionEffort,
+		Lang:                  sessionLang,
+		Yolo:                  policy.Yolo(),
+		Plan:                  policy.Plan(),
+		PlanSteps:             restoredPlanSteps,
+		PlanCurrentIdx:        restoredPlanCurIdx,
+		RevokePlanPreApproval: func() { policy.SetPreApproved(false) },
+		CWD:                   abs,
+		Ctx:                   ctx,
+		Theme:                 effectiveTheme,
+		GlamourStyle:          glamourStyle,
+		ApprovalCh:            approvalCh,
+		AskUserCh:             askUserCh,
+		Session:               activeSession,
+		Store:                 store,
+		Skills:                skills,
+		ProviderName:          provLabel,
+		MemoryProject:         memProject,
+		Distiller:             distiller,
+		ObserveResultChan:     observeResultChan,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project
@@ -821,7 +1148,7 @@ func run() error {
 			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
 				skills = freshSkills
 			}
-			sp := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(policy.Mode()))
+			sp := fmt.Sprintf(systemPromptTpl, buildLangDirective(sessionLang), abs, modeLabel(policy.Pref(), policy.Workflow()))
 			if section := projMD.Section(); section != "" {
 				sp = sp + "\n" + section
 			}
@@ -866,48 +1193,47 @@ func run() error {
 			sessionLang = l
 		},
 		SetYolo: func(y bool) {
-			// policy.SetMode takes effect immediately for every
+			// policy.SetPref takes effect immediately for every
 			// tool's permission.Check call. The agent's per-message
 			// modeReminder keeps the model in sync without touching
 			// the system prompt (prefix-cache safe).
 			if y {
-				policy.SetMode(permission.ModeYolo)
+				policy.SetPref(permission.PrefYolo)
 				ag.SetModeLabel("yolo")
 			} else {
-				policy.SetMode(permission.ModeAsk)
+				policy.SetPref(permission.PrefAsk)
 				ag.SetModeLabel("")
 			}
 		},
 		SetPlan: func(p bool) {
-			// Same as SetYolo — permission gate flips immediately;
-			// modeReminder tells the model on the next user turn.
-			// Entering /plan starts in the analyze substate (plan
-			// mode v2; PRD §2.4). The legacy "plan" label still
-			// works in modeReminder for back-compat.
+			// /plan toggles the Workflow axis (not Pref). Entering
+			// /plan starts in the analyze substate (plan mode v2;
+			// PRD §2.4). The legacy "plan" label still works in
+			// modeReminder for back-compat.
 			if p {
-				policy.SetMode(permission.ModePlan)
+				policy.SetWorkflow(permission.WorkflowPlanAnalyze)
 				ag.SetModeLabel("plan-analyze")
 			} else {
-				policy.SetMode(permission.ModeAsk)
+				policy.SetWorkflow(permission.WorkflowNone)
 				ag.SetModeLabel("")
 			}
 		},
 		SetPlanSubstate: func(s string) {
 			// Driven by propose tool events flowing through
-			// applyAgentEvent. "execute" unlocks writes (ModeAsk)
-			// but keeps the plan-execute reminder so the model
-			// stays within the approved scope. "" is symmetric
-			// with SetPlan(false) — not used by current callers
-			// but kept defensive.
+			// applyAgentEvent. "execute" moves the workflow to
+			// PlanExecute (pref is untouched — typically Ask, so
+			// per-call gating applies unless preApproved is set by
+			// plan-tool start/complete). "" is symmetric with
+			// SetPlan(false).
 			switch s {
 			case "execute":
-				policy.SetMode(permission.ModeAsk)
+				policy.SetWorkflow(permission.WorkflowPlanExecute)
 				ag.SetModeLabel("plan-execute")
 			case "analyze":
-				policy.SetMode(permission.ModePlan)
+				policy.SetWorkflow(permission.WorkflowPlanAnalyze)
 				ag.SetModeLabel("plan-analyze")
 			case "":
-				policy.SetMode(permission.ModeAsk)
+				policy.SetWorkflow(permission.WorkflowNone)
 				ag.SetModeLabel("")
 			}
 		},

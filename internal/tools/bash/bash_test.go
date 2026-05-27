@@ -13,7 +13,7 @@ import (
 
 func yolo(t *testing.T) Tool {
 	t.Helper()
-	p, _ := permission.New(t.TempDir(), permission.ModeYolo)
+	p, _ := permission.New(t.TempDir(), permission.PrefYolo)
 	return New(p)
 }
 
@@ -24,7 +24,7 @@ func run(t *testing.T, tool Tool, a Args) (string, error) {
 }
 
 func TestBash_DeniedWithoutYolo(t *testing.T) {
-	p, _ := permission.New(t.TempDir(), permission.ModeDeny)
+	p, _ := permission.New(t.TempDir(), permission.PrefDeny)
 	_, err := run(t, New(p), Args{Command: "echo hi"})
 	if !errors.Is(err, permission.ErrDenied) {
 		t.Errorf("err = %v, want ErrDenied", err)

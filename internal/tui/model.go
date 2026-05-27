@@ -135,6 +135,25 @@ type Options struct {
 	// applyAgentEvent. Read by the status bar; only meaningful when
 	// Plan=true.
 	PlanSubstate string
+
+	// PlanSteps is the live task list owned by the `plan` tool. Seeded
+	// when the user approves a propose() call and mutated by every
+	// plan(start|complete|skip) call. Rendered as a fixed block at
+	// the top of the live region whenever non-empty; the status bar
+	// shows "done/total" alongside the PLAN:EXEC badge.
+	PlanSteps []agent.PlanStep
+	// PlanCurrentIdx is the 0-based index of the in_progress step, or
+	// -1 when no step is active.
+	PlanCurrentIdx int
+
+	// RevokePlanPreApproval is called when the user Esc's a stream
+	// (or /plan-off's mid-execute) so the host can clear the
+	// permission policy's per-step pre-approval flag. Without this
+	// hook, an Esc'd batch step would leave the gate open across the
+	// next user prompt — the user would expect that prompt to gate
+	// writes again. nil = no host wiring (e.g. tests); the TUI just
+	// won't call it.
+	RevokePlanPreApproval func()
 	// SetEffort updates the host-owned sessionEffort. The TUI mirrors the
 	// new value into m.opts.Effort + Session.Effort (via persistSession)
 	// so the status bar refreshes and the next save captures the choice.

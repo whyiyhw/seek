@@ -17,7 +17,7 @@ import (
 func testReadTool(t *testing.T) (Tool, string) {
 	t.Helper()
 	dir := t.TempDir()
-	p, err := permission.New(dir, permission.ModeDeny)
+	p, err := permission.New(dir, permission.PrefDeny)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestRead_NotExist(t *testing.T) {
 
 func TestRead_DirectoryDegradesToListing(t *testing.T) {
 	dir := t.TempDir()
-	p, err := permission.New(dir, permission.ModeDeny)
+	p, err := permission.New(dir, permission.PrefDeny)
 	if err != nil {
 		t.Fatal(err)
 	}

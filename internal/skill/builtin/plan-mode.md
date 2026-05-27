@@ -9,10 +9,28 @@ Plan mode is a **gated workflow**, not a verbosity setting. The user enters it w
 
 You will see one of two **substate reminders** appended to user turns while plan mode is on:
 
-- `[Mode: plan-analyze — ...]` — read-only. You can use `read`, `grep`, `list_dir`, `git`, `think`, `ask_user`. **You cannot** call `write`, `edit`, or `bash`.
-- `[Mode: plan-execute — ...]` — the user has approved your plan. Writes are unlocked but each one still prompts for per-call approval; you're expected to execute the approved steps, narrate progress in chat, and stay within scope.
+- `[Mode: plan-analyze — ...]` — read-only. You can use `read`, `grep`, `list_dir`, `git`, `think`, `ask_user`. **You cannot** call `write` or `edit`. `bash` is *narrowly* allowed for whitelisted read-only inspectors (`go vet`, `go list`, `go env`, `go mod download|graph|verify|why`, `go build -n`, `go doc`, `go version`, `npm ls`, `pnpm ls`, `yarn list`, `make -n`, `which`, `type`, `command -v`). Any other bash, or any command with shell metacharacters (`;`, `&&`, `|`, `>`, `` ` ``, `$(`, `${`, newline, `(`, `)`), is denied — including `go vet; rm test.go`. Use these to quickly verify "does this still build?" before proposing.
+- `[Mode: plan-execute — ...]` — the user has approved your plan. Writes are unlocked. The two approval flavours differ:
+  - **`[plan: approved]`** (default) — every write / edit / bash call still prompts for per-call y/N.
+  - **`[plan: approved] (auto-approve-per-step)`** — between `plan(action="start", index=N)` and `plan(action="complete", index=N)`, writes / edits / bash inside that step **auto-pass** with no y/N prompt. Esc revokes the gate; the next write goes back to per-call until you re-arm via `plan(start=N)`.
 
 Substate transitions are driven by the `propose` tool, not by `/plan` (which only toggles the mode on/off entirely).
+
+## Tracking progress with the `plan` tool
+
+After approval, use `plan(action="start"|"complete"|"skip", index=N)` (1-based) to drive the TUI's live task list and the status bar's `N/M` counter. The pattern:
+
+```
+plan(start=1)      // before any write/edit/bash in step 1
+…do step 1 work…
+plan(complete=1)   // when step 1 is done
+plan(start=2)      // before step 2
+…
+```
+
+This is **load-bearing for resume**: when the user runs `seek -resume <id>`, plan state is reconstructed from these tool calls. Skipping them means the resumed session sees an empty task list and the model has to re-derive "where am I" from chat. In `[plan: approved] (auto-approve-per-step)` mode, `plan(start=N)` is also what unlocks the per-step pre-approval gate — without calling it, every write still prompts y/N.
+
+Use `skip` sparingly — for a single step the user explicitly waved off. For bigger scope changes, summarise progress and call `propose` again (see Step 4 below).
 
 ## The loop
 
@@ -34,7 +52,7 @@ Call `propose(problem, steps, why_now?)`. This pops a picker for the user with t
 What makes a good proposal:
 
 - **Problem statement**: one paragraph, self-contained. The user reads this in the picker — assume they've forgotten the prior turn.
-- **Steps**: 3–8 verifiable actions. Each step is something a human could check ("Add X handler in handlers.go", "Update integration tests for Y"), **not** an internal phase ("think about Z", "consider edge cases"). Don't nest sub-bullets — if a step is too big, refine it.
+- **Steps**: 3–8 verifiable actions typical, up to 20 for larger migrations. Each step is something a human could check ("Add X handler in handlers.go", "Update integration tests for Y"), **not** an internal phase ("think about Z", "consider edge cases"). Don't nest sub-bullets — if a step is too big, refine it.
 - **Why now** (optional): use to surface hidden assumptions ("this assumes #234 is merged", "skipping mobile because it's frozen until March 5").
 
 Example translation from a `think` reasoner output to a `propose` call:

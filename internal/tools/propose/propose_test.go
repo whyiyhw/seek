@@ -27,15 +27,17 @@ func newPolicyReturning(ans auser.Answer) *auser.Policy {
 type recordingSink struct {
 	approved       bool
 	approvedSteps  []string
+	approvedBatch  bool
 	adjusted       bool
 	adjustFeedback string
 	cancelled      bool
 	callCount      int
 }
 
-func (s *recordingSink) Approved(steps []string) {
+func (s *recordingSink) Approved(steps []string, batch bool) {
 	s.approved = true
 	s.approvedSteps = steps
+	s.approvedBatch = batch
 	s.callCount++
 }
 func (s *recordingSink) AdjustRequested(feedback string) {
@@ -220,7 +222,7 @@ func TestExecute_RejectsEmptySteps(t *testing.T) {
 func TestExecute_RejectsTooManySteps(t *testing.T) {
 	policy := newPolicyReturning(auser.Answer{ChosenIDs: []string{"approve"}})
 
-	steps := make([]string, 13)
+	steps := make([]string, maxSteps+1)
 	for i := range steps {
 		steps[i] = "step"
 	}
@@ -337,7 +339,7 @@ func TestQuestion_OmitsWhyNowWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestOptions_AreApproveAdjustCancel(t *testing.T) {
+func TestOptions_AreApproveBatchAdjustCancel(t *testing.T) {
 	var captured auser.Question
 	p := auser.New(auser.ModeAsk)
 	p.SetAskFn(func(q auser.Question) auser.Answer {
@@ -348,16 +350,46 @@ func TestOptions_AreApproveAdjustCancel(t *testing.T) {
 	if _, err := New(p, nil).Execute(context.Background(), json.RawMessage(validArgs)); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if len(captured.Options) != 3 {
-		t.Fatalf("expected 3 options, got %d", len(captured.Options))
+	if len(captured.Options) != 4 {
+		t.Fatalf("expected 4 options, got %d", len(captured.Options))
 	}
-	for i, want := range []string{"approve", "adjust", "cancel"} {
+	for i, want := range []string{"approve", "approve_batch", "adjust", "cancel"} {
 		if captured.Options[i].ID != want {
 			t.Errorf("option %d: id=%q, want %q", i, captured.Options[i].ID, want)
 		}
 	}
 	if captured.MultiSelect {
-		t.Error("propose picker must be single-select; approve/adjust/cancel are mutually exclusive")
+		t.Error("propose picker must be single-select; the four choices are mutually exclusive")
+	}
+}
+
+func TestExecute_ApproveBatch(t *testing.T) {
+	policy := newPolicyReturning(auser.Answer{ChosenIDs: []string{"approve_batch"}})
+	sink := &recordingSink{}
+
+	out, err := New(policy, sink).Execute(context.Background(), json.RawMessage(validArgs))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.HasPrefix(out, "[plan: approved]") {
+		t.Errorf("batch-approve must keep '[plan: approved]' prefix so resume reconstruct still finds the seed; got: %s", out)
+	}
+	if !strings.Contains(out, "auto-approve-per-step") {
+		t.Errorf("batch-approve result should mention auto-approve-per-step, got: %s", out)
+	}
+	if !sink.approved || !sink.approvedBatch {
+		t.Errorf("sink: approved=%v batch=%v, want both true", sink.approved, sink.approvedBatch)
+	}
+}
+
+func TestExecute_ApproveLegacyHasBatchFalse(t *testing.T) {
+	policy := newPolicyReturning(auser.Answer{ChosenIDs: []string{"approve"}})
+	sink := &recordingSink{}
+	if _, err := New(policy, sink).Execute(context.Background(), json.RawMessage(validArgs)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if sink.approvedBatch {
+		t.Error("plain approve must set batch=false")
 	}
 }
 

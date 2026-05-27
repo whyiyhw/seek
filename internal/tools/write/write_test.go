@@ -14,7 +14,7 @@ import (
 
 func TestWrite_CreatesFile(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	w := New(p)
 
 	target := filepath.Join(dir, "hello.txt")
@@ -37,7 +37,7 @@ func TestWrite_CreatesFile(t *testing.T) {
 
 func TestWrite_CreatesParents(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	target := filepath.Join(dir, "a", "b", "c", "deep.txt")
 	args, _ := json.Marshal(Args{Path: target, Content: "x"})
 	if _, err := New(p).Execute(context.Background(), args); err != nil {
@@ -50,7 +50,7 @@ func TestWrite_CreatesParents(t *testing.T) {
 
 func TestWrite_Overwrites(t *testing.T) {
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	target := filepath.Join(dir, "f.txt")
 	os.WriteFile(target, []byte("original"), 0o644)
 
@@ -67,7 +67,7 @@ func TestWrite_Overwrites(t *testing.T) {
 func TestWrite_RefusesOutsideCWD(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	args, _ := json.Marshal(Args{Path: filepath.Join(other, "evil"), Content: "x"})
 	_, err := New(p).Execute(context.Background(), args)
 	if !errors.Is(err, permission.ErrDenied) {
@@ -78,7 +78,7 @@ func TestWrite_RefusesOutsideCWD(t *testing.T) {
 func TestWrite_YoloAllowsOutsideCWD(t *testing.T) {
 	dir := t.TempDir()
 	other := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeYolo)
+	p, _ := permission.New(dir, permission.PrefYolo)
 	target := filepath.Join(other, "ok")
 	args, _ := json.Marshal(Args{Path: target, Content: "x"})
 	if _, err := New(p).Execute(context.Background(), args); err != nil {
@@ -87,7 +87,7 @@ func TestWrite_YoloAllowsOutsideCWD(t *testing.T) {
 }
 
 func TestWrite_MissingPath(t *testing.T) {
-	p, _ := permission.New(t.TempDir(), permission.ModeDeny)
+	p, _ := permission.New(t.TempDir(), permission.PrefDeny)
 	_, err := New(p).Execute(context.Background(), json.RawMessage(`{"content":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "path is required") {
 		t.Errorf("err = %v", err)
@@ -100,7 +100,7 @@ func TestWrite_BadJSONArguments(t *testing.T) {
 	// LLM-produced JSON occasionally lands malformed (truncated mid-
 	// stream, escape-character drift, etc.). The tool must surface
 	// it as a tool-level error, not panic or run a write with garbage.
-	p, _ := permission.New(t.TempDir(), permission.ModeYolo)
+	p, _ := permission.New(t.TempDir(), permission.PrefYolo)
 	_, err := New(p).Execute(context.Background(), json.RawMessage("not json at all"))
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
@@ -116,7 +116,7 @@ func TestWrite_MkdirFailsWhenParentIsAFile(t *testing.T) {
 	// "not a directory"; the tool must surface that cleanly without
 	// panicking or partially-applying.
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	blocker := filepath.Join(dir, "blocker")
 	if err := os.WriteFile(blocker, []byte{}, 0o644); err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestWrite_EmptyContent(t *testing.T) {
 	// .gitkeep, truncate a log, etc.). Make sure we don't accidentally
 	// short-circuit on len(content)==0.
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	target := filepath.Join(dir, "empty.txt")
 	args, _ := json.Marshal(Args{Path: target, Content: ""})
 	out, err := New(p).Execute(context.Background(), args)
@@ -160,7 +160,7 @@ func TestWrite_LargeContent(t *testing.T) {
 	// boundary. Catches silent truncation or buffer-reuse bugs that
 	// only manifest above a threshold.
 	dir := t.TempDir()
-	p, _ := permission.New(dir, permission.ModeDeny)
+	p, _ := permission.New(dir, permission.PrefDeny)
 	target := filepath.Join(dir, "big.bin")
 	content := strings.Repeat("a", 1<<20)
 	args, _ := json.Marshal(Args{Path: target, Content: content})
@@ -208,7 +208,7 @@ func TestWrite_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	p, _ := permission.New(root, permission.ModeDeny)
+	p, _ := permission.New(root, permission.PrefDeny)
 	target := filepath.Join(link, "leaked.txt")
 	args, _ := json.Marshal(Args{Path: target, Content: "leaked content"})
 	_, err := New(p).Execute(context.Background(), args)

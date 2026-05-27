@@ -14,12 +14,12 @@
 package memory
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/whyiyhw/seek/internal/paths"
 )
 
 // SchemaVersion is the wire version of Entry / Manifest. Bumped only on
@@ -93,13 +93,11 @@ type IndexEntry struct {
 	Tagline string
 }
 
-// projectID returns the 16-char hex prefix of sha256(absPath), the
-// on-disk directory name under ~/.seek/projects/. 16 hex chars = 64
-// bits of namespace; collision probability is negligible for personal
-// scale (≤thousands of projects).
+// projectID is a thin wrapper around paths.ProjectID kept for
+// backward compatibility with this package's test helpers. New
+// code should prefer paths.ProjectID directly.
 func projectID(absPath string) string {
-	sum := sha256.Sum256([]byte(absPath))
-	return hex.EncodeToString(sum[:])[:16]
+	return paths.ProjectID(absPath)
 }
 
 // isValidProjectID enforces the 16-lowercase-hex shape so a malformed

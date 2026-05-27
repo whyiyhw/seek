@@ -883,8 +883,18 @@ func cmdPlan(m *Model, _ string) cmdResult {
 	} else {
 		// Leaving /plan clears the substate so the status bar stops
 		// rendering "PLAN:..." and any stale substate doesn't leak
-		// into the next /plan entry.
+		// into the next /plan entry. Also drop the task list — it's
+		// scoped to the active plan workflow.
 		m.opts.PlanSubstate = ""
+		m.opts.PlanSteps = nil
+		m.opts.PlanCurrentIdx = -1
+		// Revoke any in-flight batch pre-approval so the gate closes
+		// cleanly on /plan-off. policy.SetMode in cmd/seek's SetPlan
+		// callback also clears the flag, but doing it here too keeps
+		// the TUI honest if the host wiring ever changes.
+		if m.opts.RevokePlanPreApproval != nil {
+			m.opts.RevokePlanPreApproval()
+		}
 	}
 	if m.opts.SetPlan != nil {
 		m.opts.SetPlan(m.opts.Plan)

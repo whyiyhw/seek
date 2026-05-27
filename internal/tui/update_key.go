@@ -243,6 +243,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
 			m.cancelStream()
+			// Revoke any plan-execute batch pre-approval. The user
+			// pressing Esc means "stop, give me back per-call
+			// control" — leaving the gate open across the next
+			// prompt would surprise them. The plan task list stays
+			// (no auto-revert) so the model can re-arm via
+			// plan(start=N) when it resumes work.
+			if m.opts.RevokePlanPreApproval != nil {
+				m.opts.RevokePlanPreApproval()
+			}
 			// "Esc stops everything" — clear steer, but restore
 			// queued text into the textarea so the user can edit
 			// and re-submit (the textarea was already cleared on

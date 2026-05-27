@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/pkg/agent"
 )
 
 // View renders the LIVE region only. Under inline mode, the terminal
@@ -84,6 +85,15 @@ func (m Model) View() string {
 			Render("⚠ Provider: " + m.opts.ProviderName + " — FIM / cache stats / Reasoner disabled")
 		sb.WriteString(banner)
 		sb.WriteString("\n")
+	}
+
+	// Plan task list: rendered as a fixed block at the top of the live
+	// region whenever a plan has been approved (PlanSteps non-empty).
+	// Survives across turns, so the user always sees their plan and
+	// which step is in progress. Cleared on PlanProposalCancelled or
+	// /plan off (see applyAgentEvent).
+	if len(m.opts.PlanSteps) > 0 {
+		sb.WriteString(renderPlanTaskList(m.opts.PlanSteps, m.opts.PlanCurrentIdx))
 	}
 
 	// "thinking…" placeholder for the gap between submit and the
@@ -273,12 +283,21 @@ func (m Model) renderStatusBar() string {
 		streamElapsed = time.Since(m.streamStartTime)
 	}
 
+	doneCount := 0
+	for _, st := range m.opts.PlanSteps {
+		if st.Status == "completed" || st.Status == "skipped" {
+			doneCount++
+		}
+	}
+
 	return RenderStatusBar(StatusSnapshot{
 		Model:            m.opts.Model,
 		Effort:           m.opts.Effort,
 		Yolo:             m.opts.Yolo,
 		Plan:             m.opts.Plan,
 		PlanSubstate:     m.opts.PlanSubstate,
+		PlanStepsTotal:   len(m.opts.PlanSteps),
+		PlanStepsDone:    doneCount,
 		Tier:             tier,
 		NextTier:         nextTier,
 		NextAt:           nextAt,
@@ -333,6 +352,43 @@ func (m Model) streamingLabel() string {
 		return fmt.Sprintf("thinking… %ds", s)
 	}
 	return fmt.Sprintf("thinking… %dm%ds", s/60, s%60)
+}
+
+// renderPlanTaskList renders the fixed-position task list shown above
+// the active-tools / streaming region whenever a plan is active. Each
+// step gets a marker reflecting its status:
+//
+//	✓  completed (muted)
+//	▸  in_progress (accent)
+//	·  pending (muted)
+//	—  skipped (muted with "(skipped)" tail)
+//
+// The list trails a single blank line so it visually separates from
+// the streaming content underneath. Wrapping is left to the terminal;
+// step text is capped at 200 chars upstream by the propose tool.
+func renderPlanTaskList(steps []agent.PlanStep, currentIdx int) string {
+	if len(steps) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(styleMuted.Render("▾ plan"))
+	sb.WriteByte('\n')
+	for i, st := range steps {
+		switch st.Status {
+		case "completed":
+			sb.WriteString(styleMuted.Render(fmt.Sprintf("  ✓ %d. %s", i+1, st.Text)))
+		case "in_progress":
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourTool).Bold(true).Render(fmt.Sprintf("  ▸ %d. %s", i+1, st.Text)))
+		case "skipped":
+			sb.WriteString(styleMuted.Render(fmt.Sprintf("  — %d. %s (skipped)", i+1, st.Text)))
+		default: // pending
+			sb.WriteString(styleMuted.Render(fmt.Sprintf("  · %d. %s", i+1, st.Text)))
+		}
+		sb.WriteByte('\n')
+	}
+	_ = currentIdx // status mark on the step itself is the source of truth
+	sb.WriteByte('\n')
+	return sb.String()
 }
 
 // formatTokensK renders a token count as a compact string: raw below

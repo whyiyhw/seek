@@ -60,7 +60,11 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return "", tools.MissingField("bash", "command", raw, "command", "timeout_ms")
 	}
 
-	if err := t.policy.Check(permission.Action{Kind: permission.KindBash, Command: a.Command}); err != nil {
+	if err := t.policy.Check(permission.Action{
+		Kind:     permission.KindBash,
+		Command:  a.Command,
+		ReadOnly: isReadOnlySafe(a.Command),
+	}); err != nil {
 		return "", err
 	}
 

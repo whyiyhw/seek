@@ -274,10 +274,11 @@ func TestExecute_PlanModeAllowsGit(t *testing.T) {
 	// subcommand whitelist is the safety boundary), but plan mode
 	// is the case the whole tool exists for — verify the policy
 	// would say yes if asked.
-	p, err := permission.New("/", permission.ModePlan)
+	p, err := permission.New("/", permission.PrefAsk)
 	if err != nil {
 		t.Fatalf("permission.New: %v", err)
 	}
+	p.SetWorkflow(permission.WorkflowPlanAnalyze)
 	if err := p.Check(permission.Action{Kind: permission.KindGit}); err != nil {
 		t.Errorf("plan mode must allow KindGit, got: %v", err)
 	}

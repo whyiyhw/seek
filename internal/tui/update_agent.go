@@ -323,11 +323,22 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		// badge.
 		m.opts.Plan = false
 		m.opts.PlanSubstate = ""
+		m.opts.PlanSteps = nil
+		m.opts.PlanCurrentIdx = -1
 		if m.opts.SetPlan != nil {
 			m.opts.SetPlan(false)
 		}
 		m.refreshPlaceholder()
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ▸ plan cancelled — exited /plan mode")))
+
+	case agent.PlanStepUpdated:
+		// Live task-list mutation from the `plan` tool. Mirror into
+		// Options so View() can re-render the fixed task-list block
+		// and the status bar can show the done/total counter. No
+		// scrollback line — the rendered block IS the update; spamming
+		// scrollback on every step change would drown the conversation.
+		m.opts.PlanSteps = e.Steps
+		m.opts.PlanCurrentIdx = e.CurrentIdx
 	}
 
 	return cmds

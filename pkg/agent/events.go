@@ -100,6 +100,25 @@ type PlanProposalAdjustRequested struct {
 // (permission → ModeAsk, mode label → "").
 type PlanProposalCancelled struct{}
 
+// PlanStep is one row of the live plan task list. Status values match
+// the `plan` tool's Status constants verbatim ("pending" / "in_progress"
+// / "completed" / "skipped"); the string form keeps the agent event
+// layer free of an import on internal/tools/plan.
+type PlanStep struct {
+	Text   string
+	Status string
+}
+
+// PlanStepUpdated fires whenever the `plan` tool mutates the live task
+// list (on Seed after propose-approval, or on each start/complete/skip
+// call). TUI consumers should mirror Steps + CurrentIdx into their
+// model and re-render. CurrentIdx is the 0-based index of the step
+// currently in_progress, or -1 when no step is active.
+type PlanStepUpdated struct {
+	Steps      []PlanStep
+	CurrentIdx int
+}
+
 func (AgentStart) isEvent()                  {}
 func (AgentEnd) isEvent()                    {}
 func (TurnStart) isEvent()                   {}
@@ -114,3 +133,4 @@ func (ErrorEvent) isEvent()                  {}
 func (PlanProposalApproved) isEvent()        {}
 func (PlanProposalAdjustRequested) isEvent() {}
 func (PlanProposalCancelled) isEvent()       {}
+func (PlanStepUpdated) isEvent()             {}

@@ -1,11 +1,29 @@
-// Package permission gates dangerous tool actions. M2 is intentionally
-// minimal: a global Policy that either allows everything (--yolo) or
-// applies safe defaults (no bash, no writes outside CWD). Interactive
-// per-call prompts arrive with the TUI in M3.
+// Package permission gates dangerous tool actions.
 //
-// Denials are returned as plain errors so the agent can feed them back to
-// the LLM as a tool result. The model then knows to ask the user instead
-// of retrying blindly.
+// The policy is two orthogonal axes:
+//
+//   - Preference — what the user has signed up for: Deny (no dangerous
+//     actions), Ask (consult askFn per call), Yolo (allow everything).
+//     This is the "user intent" axis, driven by --yolo / --deny flags
+//     and the /yolo TUI toggle.
+//
+//   - Workflow — what ceremony the user has entered: None (normal
+//     usage), PlanAnalyze (read-only investigation), PlanExecute (plan
+//     approved, executing). This is the "workflow state" axis, driven
+//     by /plan and the propose tool's approval event.
+//
+// Why two axes. Earlier versions packed both into a single `Mode` enum,
+// which forced contradictions ("plan + yolo" was inexpressible) and
+// invented orphan flags (preApproved hung off Policy with no clear
+// owner). Splitting them lets Yolo + PlanAnalyze coexist (the
+// workflow's read-only contract still holds — workflow trumps pref
+// when in conflict) and gives preApproved a clear owner (it only
+// makes sense inside WorkflowPlanExecute). See
+// docs/prd/feature-permission-refactor.md for the full design.
+//
+// Denials are returned as plain errors so the agent can feed them back
+// to the LLM as a tool result. The model then knows to ask the user
+// instead of retrying blindly.
 package permission
 
 import (
@@ -31,12 +49,9 @@ const (
 	// because that's the irreversible filesystem mutation that puts
 	// model-influenced content on the user's machine.
 	KindSkillInstall Kind = "skill_install"
-	// KindGit is the read-only git tool. Plan mode allows it
-	// unconditionally (the tool's subcommand whitelist enforces
-	// the read-only guarantee — push/commit/reset cannot reach
-	// the policy). ModeAsk also permits without prompting: gating
-	// read-only operations behind y/N would be noise, and the
-	// tool layer already refuses anything mutating.
+	// KindGit is the read-only git tool. Both PlanAnalyze workflow
+	// and ModeAsk allow it unconditionally — the tool's subcommand
+	// whitelist enforces the read-only guarantee at construction.
 	KindGit Kind = "git"
 )
 
@@ -45,6 +60,19 @@ type Action struct {
 	Kind    Kind
 	Path    string // for write/edit
 	Command string // for bash; only first ~80 chars are shown in errors
+
+	// ReadOnly is set by the bash tool when the command matches the
+	// read-only inspector whitelist (go vet / go list / npm ls / …)
+	// and contains no shell metacharacters. The plan-analyze workflow
+	// gate honours this flag: a ReadOnly bash call is allowed even in
+	// the otherwise-read-only workflow so the model can answer "does
+	// this still compile?" / "what's in the module graph?" without
+	// leaving the substate. Other workflows / prefs ignore the flag
+	// — PlanExecute and Ask route bash through the askFn callback;
+	// Yolo allows everything; Deny denies everything. See
+	// internal/tools/bash/readonly.go for the whitelist and metachar
+	// lockout.
+	ReadOnly bool
 
 	// Diff is an optional unified diff string populated by the edit tool
 	// before it calls Check. When non-empty the TUI renders it alongside
@@ -70,9 +98,9 @@ type Action struct {
 	SkillTarget string
 }
 
-// ApprovalRequest is what the TUI consumes when ModeAsk needs a user
-// answer. The host (cmd/seek) glues the policy's askFn to a channel of
-// these and the TUI reads from that channel.
+// ApprovalRequest is what the TUI consumes when Preference == PrefAsk
+// needs a user answer. The host (cmd/seek) glues the policy's askFn to
+// a channel of these and the TUI reads from that channel.
 //
 // Reply MUST receive exactly one value — true to allow, false to deny.
 // askFn blocks on Reply, so a missing reply hangs the agent.
@@ -81,56 +109,89 @@ type ApprovalRequest struct {
 	Reply  chan<- bool
 }
 
-// Mode controls how Check resolves a dangerous Action.
-type Mode int
+// Preference is the user's standing posture toward dangerous actions.
+// It's the "how strict am I" axis — chosen once at startup, toggled
+// via /yolo, persisted in session JSONL.
+type Preference int
 
 const (
-	// ModeDeny refuses dangerous actions outright. The default for
+	// PrefDeny refuses dangerous actions outright. The default for
 	// non-interactive launches (print mode), since there's no user to
 	// ask. Returns a denial message instructing the model to surface
 	// the request to a human.
-	ModeDeny Mode = iota
-	// ModeAsk consults the askFn callback for each dangerous action.
+	PrefDeny Preference = iota
+	// PrefAsk consults the askFn callback for each dangerous action.
 	// The default for the interactive TUI.
-	ModeAsk
-	// ModeYolo permits every action. Set by --yolo or by an "always
+	PrefAsk
+	// PrefYolo permits every action. Set by --yolo or by an "always
 	// approve" answer at an inline prompt.
-	ModeYolo
-	// ModePlan is read-only exploration. All mutations (bash, write,
-	// edit, memory_remember) are denied unconditionally — even writes
-	// inside CWD that ModeDeny would allow. Reads inside CWD are
-	// permitted. Set by --plan or /plan toggle.
-	ModePlan
+	PrefYolo
+)
+
+// Workflow is the ceremony the user has currently entered. It's
+// orthogonal to Preference: a workflow imposes its own constraints
+// (e.g. PlanAnalyze is read-only regardless of PrefYolo).
+type Workflow int
+
+const (
+	// WorkflowNone is normal usage — no workflow ceremony, the
+	// preference fully drives gating.
+	WorkflowNone Workflow = iota
+	// WorkflowPlanAnalyze is the read-only investigation substate of
+	// /plan, set when the user enters /plan mode. Writes / bash
+	// (other than read-only inspectors) / memory writes / skill
+	// installs are denied. Reads / git / read-only bash are allowed.
+	WorkflowPlanAnalyze
+	// WorkflowPlanExecute is the post-approval substate of /plan,
+	// set by the TUI on PlanProposalApproved. Workflow constraints
+	// drop (pref takes over), but per-step batch pre-approval may
+	// short-circuit individual writes via preApproved.
+	WorkflowPlanExecute
 )
 
 // Policy is the per-process permission policy. Construct via New.
 //
-// Concurrency: `mode` and `askFn` can be updated at runtime (via
-// SetMode / SetAskFn) — most commonly when /yolo flips Ask→Yolo
-// mid-session from the TUI goroutine while a tool dispatch is calling
-// Check on the agent goroutine. The mutex serialises those transitions
-// so concurrent Check + SetMode is race-free. `cwd` is set at
-// construction and never changes; the mutex covers it anyway because
-// it's cheap and avoids a footgun if that assumption ever changes.
+// Concurrency: the pref / workflow / askFn / preApproved fields can be
+// updated at runtime from the TUI goroutine while tool dispatch may
+// concurrently be in Check on the agent goroutine. The mutex serialises
+// those transitions so concurrent Check + Set* is race-free. `cwd` is
+// set at construction and never changes; the mutex covers it anyway
+// because it's cheap and avoids a footgun if that assumption changes.
+//
+// preApproved is the per-step batch-approval flag used by the
+// WorkflowPlanExecute substate. When the user approves a propose()
+// call with "auto-approve writes per step", the `plan` tool sink
+// toggles this flag true on plan(action="start", …) and false on
+// plan(action="complete"|"skip", …). Check, while in WorkflowPlanExecute,
+// treats preApproved as a fast-path "yes" for KindWrite/KindEdit/KindBash,
+// skipping the askFn callback. Esc / Ctrl+C cancellation paths AND
+// /plan-off explicitly reset preApproved so a half-finished step
+// never leaves the gate unlocked across the next user prompt.
+// SetWorkflow ALSO resets preApproved — moving between workflows
+// always invalidates step state.
 type Policy struct {
-	mu    sync.RWMutex
-	mode  Mode
-	cwd   string // absolute path; used to decide "inside vs outside"
-	askFn func(Action) bool
+	mu          sync.RWMutex
+	pref        Preference
+	workflow    Workflow
+	cwd         string // absolute path; used to decide "inside vs outside"
+	askFn       func(Action) bool
+	preApproved bool
 }
 
 // New returns a Policy. cwd should be the project root (typically
-// os.Getwd() at start-up).
-func New(cwd string, mode Mode) (*Policy, error) {
+// os.Getwd() at start-up). Initial workflow is WorkflowNone; callers
+// who start in plan mode (--plan flag) should follow with
+// SetWorkflow(WorkflowPlanAnalyze).
+func New(cwd string, pref Preference) (*Policy, error) {
 	abs, err := filepath.Abs(cwd)
 	if err != nil {
 		return nil, fmt.Errorf("permission: resolve cwd: %w", err)
 	}
-	return &Policy{mode: mode, cwd: abs}, nil
+	return &Policy{pref: pref, cwd: abs}, nil
 }
 
 // SetAskFn registers a callback consulted for each dangerous action
-// when the policy is in ModeAsk. The callback is expected to BLOCK
+// when the policy is in PrefAsk. The callback is expected to BLOCK
 // until the user answers (or the surrounding context cancels). It is
 // called from the tool's goroutine, NOT the TUI's — so the callback
 // can safely use blocking channel ops to coordinate with the UI.
@@ -143,26 +204,81 @@ func (p *Policy) SetAskFn(fn func(Action) bool) {
 	p.askFn = fn
 }
 
-// Mode returns the current mode.
-func (p *Policy) Mode() Mode {
+// Pref returns the current preference.
+func (p *Policy) Pref() Preference {
 	if p == nil {
-		return ModeDeny
+		return PrefDeny
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.mode
+	return p.pref
 }
 
-// SetMode updates the active mode. Used by /yolo to upgrade Ask→Yolo
-// mid-session — called from the TUI goroutine while tool dispatch may
-// concurrently be in Check on the agent goroutine, hence the mutex.
-func (p *Policy) SetMode(m Mode) {
+// SetPref updates the preference. Does NOT touch workflow — the two
+// axes are independent. TUI's cmdYolo enforces mutual exclusion at
+// the UI layer if desired.
+func (p *Policy) SetPref(pref Preference) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.mode = m
+	p.pref = pref
+}
+
+// Workflow returns the current workflow.
+func (p *Policy) Workflow() Workflow {
+	if p == nil {
+		return WorkflowNone
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.workflow
+}
+
+// SetWorkflow updates the workflow. Any workflow transition resets
+// preApproved — the per-step batch-approval flag only makes sense
+// within a single PlanExecute episode, so moving away from (or even
+// re-entering) plan-execute always invalidates the previous step
+// state. This is the "default safe" invariant.
+func (p *Policy) SetWorkflow(w Workflow) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.workflow = w
+	p.preApproved = false
+}
+
+// SetPreApproved toggles the per-step batch-approval flag. Called
+// from the plan tool's sink in cmd/seek when (a) a propose-approved
+// batch plan enters a step (plan(start=…)) → true, and (b) the step
+// completes or skips → false. Also reset on Esc / Ctrl+C from the
+// TUI and on /plan-off, so a half-finished step does not silently
+// pre-approve the next user prompt's writes.
+//
+// The flag is only consulted when Workflow == WorkflowPlanExecute;
+// setting it under any other workflow is a no-op effectively (Check
+// only honours it inside that workflow).
+func (p *Policy) SetPreApproved(b bool) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.preApproved = b
+}
+
+// PreApproved reports the current per-step pre-approval flag — read
+// by tests; production code goes through Check.
+func (p *Policy) PreApproved() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.preApproved
 }
 
 // ErrDenied is returned when an action is blocked by policy. Callers should
@@ -173,14 +289,14 @@ var ErrDenied = errors.New("permission denied")
 // Check evaluates an Action against the Policy. Nil = allowed.
 //
 // Resolution order:
-//  1. ModeYolo  → always allow.
-//  2. ModePlan  → read-only: deny bash/write/edit/memory_remember
-//     unconditionally; allow reads within CWD only.
-//  3. Action is "safe" (write/edit inside CWD; nothing else reaches
-//     Check today) → allow.
-//  4. ModeAsk + askFn set → consult the callback; allow if true.
-//  5. Otherwise → return ErrDenied with a clear message the model
-//     can pass back to the user.
+//  1. Workflow gate — if the current workflow imposes a hard
+//     constraint on this Action, it wins regardless of pref. This is
+//     how PlanAnalyze stays read-only even when pref is Yolo.
+//  2. PlanExecute fast-path — if workflow is PlanExecute and
+//     preApproved is true, writes/edits/bash auto-pass (per-step
+//     batch approval granted at propose() time).
+//  3. Preference gate — Yolo allows all; Deny rejects dangerous;
+//     Ask consults askFn for dangerous and allows safe.
 func (p *Policy) Check(a Action) error {
 	if p == nil {
 		return fmt.Errorf("%w: no policy configured", ErrDenied)
@@ -190,59 +306,104 @@ func (p *Policy) Check(a Action) error {
 	// askFn blocks on the user). Holding the lock across either would
 	// turn a brief read-side lock into a session-long write barrier.
 	p.mu.RLock()
-	mode := p.mode
+	pref := p.pref
+	workflow := p.workflow
 	cwd := p.cwd
 	askFn := p.askFn
+	preApproved := p.preApproved
 	p.mu.RUnlock()
 
-	if mode == ModeYolo {
+	// 1. Workflow dispatch. PlanAnalyze is TERMINAL — its rule set is
+	//    a complete decision (every Kind either allowed or denied,
+	//    no fall-through). PlanExecute is non-terminal: it just adds
+	//    the preApproved fast-path before falling through to the
+	//    pref gate. WorkflowNone falls straight to the pref gate.
+	//
+	//    Workflow runs first because workflow ceremonies are user-
+	//    chosen safety boundaries that trump pref. PrefYolo +
+	//    PlanAnalyze MUST still be read-only — that's plan mode's
+	//    raison d'être.
+	switch workflow {
+	case WorkflowPlanAnalyze:
+		return planAnalyzeGate(a, cwd)
+	case WorkflowPlanExecute:
+		// preApproved fast-path: per-step batch approval granted at
+		// propose() time. Bash / write / edit auto-pass while the
+		// flag is set. The user retained scope-level veto at the
+		// propose() picker and per-step boundary control via plan
+		// (start) / plan(complete).
+		if preApproved {
+			switch a.Kind {
+			case KindBash, KindWrite, KindEdit:
+				return nil
+			}
+		}
+		// fall through to pref gate
+	}
+
+	// 2. Preference gate. Reached for WorkflowNone, or PlanExecute
+	//    where preApproved didn't short-circuit.
+	return prefGate(pref, a, cwd, askFn)
+}
+
+// planAnalyzeGate is the read-only constraint set for plan-analyze:
+// reads / git / read-only bash allowed; everything else hard-rejected
+// with a model-readable hint.
+func planAnalyzeGate(a Action, cwd string) error {
+	switch a.Kind {
+	case KindRead:
+		if a.Path == "" {
+			return fmt.Errorf("%w: %s requires a path", ErrDenied, a.Kind)
+		}
+		inside, err := isWithin(cwd, a.Path)
+		if err != nil {
+			return fmt.Errorf("%w: resolve path %q: %v", ErrDenied, a.Path, err)
+		}
+		if !inside {
+			return fmt.Errorf("%w: plan mode: %s outside working directory %q",
+				ErrDenied, a.Kind, cwd)
+		}
+		return nil
+	case KindBash:
+		// Read-only inspector commands (go vet, go list, npm ls, …)
+		// are allowed in plan-analyze so the model can answer "does
+		// this still compile?" / "what's in the module graph?"
+		// without leaving the substate. The bash tool sets ReadOnly
+		// via the whitelist + metachar check; we trust that flag here.
+		if a.ReadOnly {
+			return nil
+		}
+		return fmt.Errorf("%w: plan mode: bash is not allowed for this command — explore with read/grep/list_dir/git, or run a read-only inspector (go vet, go list, npm ls, …) which is whitelisted",
+			ErrDenied)
+	case KindGit:
+		// Git tool is read-only by construction (subcommand whitelist
+		// enforced at tool layer). Plan-analyze allows it so the
+		// model can inspect history / diffs / blame while producing
+		// the plan.
+		return nil
+	case KindWrite, KindEdit:
+		return fmt.Errorf("%w: plan mode: %s is not allowed — produce a plan in your response instead",
+			ErrDenied, a.Kind)
+	case KindMemoryRemember:
+		return fmt.Errorf("%w: plan mode: memory_remember is not allowed",
+			ErrDenied)
+	case KindSkillInstall:
+		return fmt.Errorf("%w: plan mode: skill_install is not allowed — plan mode is read-only",
+			ErrDenied)
+	default:
+		return fmt.Errorf("%w: plan mode: unknown action kind %q", ErrDenied, a.Kind)
+	}
+}
+
+// prefGate is the preference-driven gate, run AFTER the workflow gate
+// has had its say. It handles the classic Yolo / Ask / Deny semantics.
+func prefGate(pref Preference, a Action, cwd string, askFn func(Action) bool) error {
+	if pref == PrefYolo {
 		return nil
 	}
 
-	// ModePlan: strict read-only. All writes, edits, bash, and
-	// memory writes are denied unconditionally — even inside CWD.
-	// Reads are allowed only within CWD.
-	if mode == ModePlan {
-		switch a.Kind {
-		case KindRead:
-			if a.Path == "" {
-				return fmt.Errorf("%w: %s requires a path", ErrDenied, a.Kind)
-			}
-			inside, err := isWithin(cwd, a.Path)
-			if err != nil {
-				return fmt.Errorf("%w: resolve path %q: %v", ErrDenied, a.Path, err)
-			}
-			if !inside {
-				return fmt.Errorf("%w: plan mode: %s outside working directory %q",
-					ErrDenied, a.Kind, cwd)
-			}
-			return nil
-		case KindBash:
-			return fmt.Errorf("%w: plan mode: bash is not allowed — explore with read/grep/list_dir/git instead",
-				ErrDenied)
-		case KindGit:
-			// The git tool is read-only by construction (subcommand
-			// whitelist). Plan mode allows it so the model can
-			// inspect history, diffs, and blame while producing the
-			// plan — without this, plan-mode reviews were forced to
-			// guess at git state.
-			return nil
-		case KindWrite, KindEdit:
-			return fmt.Errorf("%w: plan mode: %s is not allowed — produce a plan in your response instead",
-				ErrDenied, a.Kind)
-		case KindMemoryRemember:
-			return fmt.Errorf("%w: plan mode: memory_remember is not allowed",
-				ErrDenied)
-		case KindSkillInstall:
-			return fmt.Errorf("%w: plan mode: skill_install is not allowed — plan mode is read-only",
-				ErrDenied)
-		default:
-			return fmt.Errorf("%w: plan mode: unknown action kind %q", ErrDenied, a.Kind)
-		}
-	}
-
-	// First: is this action even dangerous? Safe actions return nil
-	// without ever consulting askFn.
+	// Is this action even dangerous? Safe actions return nil without
+	// consulting askFn.
 	dangerous := false
 	switch a.Kind {
 	case KindBash:
@@ -270,27 +431,18 @@ func (p *Policy) Check(a Action) error {
 			dangerous = true
 		}
 	case KindMemoryRemember:
-		// Memory writes are always dangerous — there is no "safe"
-		// path equivalent. The TUI shows name+tagline so the user
-		// can decide; yolo skips the ask, ModeDeny refuses.
 		if a.MemoryName == "" {
 			return fmt.Errorf("%w: memory_remember requires a name", ErrDenied)
 		}
 		dangerous = true
 	case KindSkillInstall:
-		// Skill installs are always dangerous: the source is model-
-		// influenced (a URL the model parsed from chat) and the
-		// destination is the user's persistent home dir. Yolo skips
-		// the ask, ModeDeny refuses.
 		if a.SkillName == "" {
 			return fmt.Errorf("%w: skill_install requires a skill name", ErrDenied)
 		}
 		dangerous = true
 	case KindGit:
-		// Read-only by construction (tool layer enforces a
-		// subcommand whitelist). Treated as safe — no prompt, no
-		// outside-cwd check (git's pwd is the project root and
-		// it only emits historical data, not filesystem reads).
+		// Read-only by construction (tool layer enforces a subcommand
+		// whitelist). Treated as safe.
 		return nil
 	default:
 		return fmt.Errorf("%w: unknown action kind %q", ErrDenied, a.Kind)
@@ -301,7 +453,7 @@ func (p *Policy) Check(a Action) error {
 	}
 
 	// Dangerous: ask if we can, otherwise deny.
-	if mode == ModeAsk && askFn != nil {
+	if pref == PrefAsk && askFn != nil {
 		if askFn(a) {
 			return nil
 		}
@@ -334,24 +486,29 @@ func (p *Policy) CWD() string {
 	return p.cwd
 }
 
-// Yolo reports whether the policy is in unrestricted mode.
+// Yolo reports whether the policy's preference is Yolo. Kept as a
+// compat helper for callers that just want the "are writes
+// unrestricted?" boolean; new code can use Pref() directly.
 func (p *Policy) Yolo() bool {
 	if p == nil {
 		return false
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.mode == ModeYolo
+	return p.pref == PrefYolo
 }
 
-// Plan reports whether the policy is in read-only plan mode.
+// Plan reports whether the policy is in any plan workflow (analyze or
+// execute). Kept as a compat helper for callers that just want the
+// "is /plan on?" boolean — distinguishes analyze vs execute via
+// Workflow().
 func (p *Policy) Plan() bool {
 	if p == nil {
 		return false
 	}
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.mode == ModePlan
+	return p.workflow != WorkflowNone
 }
 
 // isWithin reports whether target resolves to a path inside root (inclusive

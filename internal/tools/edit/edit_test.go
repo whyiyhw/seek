@@ -21,7 +21,7 @@ func setup(t *testing.T, body string) (string, Tool) {
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	pol, _ := permission.New(dir, permission.ModeDeny)
+	pol, _ := permission.New(dir, permission.PrefDeny)
 	return p, New(pol)
 }
 
@@ -130,7 +130,7 @@ func TestEdit_NoOpRejected(t *testing.T) {
 
 func TestEdit_OutsideCWDDenied(t *testing.T) {
 	dir := t.TempDir()
-	pol, _ := permission.New(dir, permission.ModeDeny)
+	pol, _ := permission.New(dir, permission.PrefDeny)
 	tool := New(pol)
 	other := t.TempDir()
 	p := filepath.Join(other, "x.txt")
