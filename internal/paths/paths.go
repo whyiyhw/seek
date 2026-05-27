@@ -185,3 +185,49 @@ func ProjectSessionDir(absPath, sid string) (string, error) {
 func SessionCheckpointDir(absPath, sid string) (string, error) {
 	return ProjectSessionDir(absPath, sid)
 }
+
+// UserHooksToml returns the user-level shell hooks file
+// (~/.seek/hooks.toml). May not exist — having no user hooks
+// configured is a normal state; callers treat ENOENT as "no
+// user hooks". See PRD docs/prd/feature-shell-hooks.md §3.1.
+func UserHooksToml() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "hooks.toml"), nil
+}
+
+// ProjectHooksToml returns the project-level shell hooks file
+// (<project>/.seek/hooks.toml) for the given absolute project path.
+// Unlike Project*-under-Home helpers above, project hooks live INSIDE
+// the project directory so they can be committed to git and shared by
+// the team. May not exist; callers treat ENOENT as "no project
+// hooks". The trust-on-first-visit flow in internal/hooksconfig is
+// what protects users against malicious project hooks.
+func ProjectHooksToml(absProjectPath string) string {
+	return filepath.Join(absProjectPath, ".seek", "hooks.toml")
+}
+
+// TrustedProjectsJSON returns the path to the trust registry
+// (~/.seek/trusted-projects.json) that records which project-level
+// hooks.toml files the user has approved (keyed by abs path, value
+// = sha256 of the file at approval time). See PRD §3.5.
+func TrustedProjectsJSON() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "trusted-projects.json"), nil
+}
+
+// HooksAuditLog returns the path to the append-only hooks audit
+// JSONL (~/.seek/hooks-audit.jsonl). One line per hook execution.
+// See PRD §3.6 for the entry shape.
+func HooksAuditLog() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "hooks-audit.jsonl"), nil
+}
