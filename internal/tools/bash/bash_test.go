@@ -47,6 +47,37 @@ func TestBash_EchoUnderYolo(t *testing.T) {
 	}
 }
 
+// TestBash_PinsWorkingDirectoryToPolicy verifies the contractual
+// pinning: bash.Execute must set cmd.Dir to policy.CWD(), NOT
+// inherit os.Getwd() at exec time. The system prompt promises the
+// model that "bash already runs from the working directory" — this
+// test is the load-bearing check that the promise holds even if
+// some other code inside the process calls os.Chdir.
+func TestBash_PinsWorkingDirectoryToPolicy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	// Build a Policy whose CWD is a fresh temp dir, then run `pwd`.
+	// Output must show the temp dir's REAL path (after symlink
+	// resolution on macOS where /var → /private/var) — not whatever
+	// the test runner's process CWD happens to be.
+	dir := t.TempDir()
+	p, err := permission.New(dir, permission.PrefYolo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, New(p), Args{Command: "pwd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// macOS resolves /var/folders/... → /private/var/folders/... in pwd
+	// output, so trimRight on the expected and check suffix to be
+	// platform-agnostic.
+	if !strings.Contains(out, strings.TrimPrefix(dir, "/private")) {
+		t.Errorf("bash should execute from policy.CWD() = %q; got output:\n%s", dir, out)
+	}
+}
+
 // TestBash_AppendsAdvisoryOnDedicatedToolPattern is the end-to-end
 // regression test for the success-path advisory mechanism. When the
 // model uses bash for something a dedicated tool does better

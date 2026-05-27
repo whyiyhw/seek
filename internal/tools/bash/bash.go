@@ -97,6 +97,18 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	} else {
 		cmd = exec.CommandContext(cctx, "/bin/sh", "-c", a.Command)
 	}
+	// Pin the working directory to the project root the policy was
+	// configured with, NOT whatever the process happens to be in.
+	// Without this we'd inherit os.Getwd() at exec time — fragile if
+	// anything inside the program (a tool, a test, a future feature)
+	// ever calls os.Chdir. Pinning here also means relative paths in
+	// model-issued commands resolve to the right project root, so the
+	// model doesn't need `cd /abs/path && …` prefixes (the system
+	// prompt promises this; here is where the promise becomes load-
+	// bearing).
+	if cwd := t.policy.CWD(); cwd != "" {
+		cmd.Dir = cwd
+	}
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
