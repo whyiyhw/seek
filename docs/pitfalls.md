@@ -421,7 +421,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Why**: macOS/Linux developers writing tests against `filepath.Join` outputs and then asserting via Unix-style literals (`/foo`) or embedding paths directly into JSON without escaping. Both work locally; both blow up the moment a Windows runner sees them. The `\U` case is sneakier — JSON requires backslashes to be escaped (`\\`), but raw concatenation skips that step
 - **Fix**: (1)+(2) use `filepath.Base(p)` for last-segment checks or `filepath.ToSlash(p)` when substring matching; (3) build JSON via `json.Marshal(map[string]string{"path": p})` instead of string concat — the marshaller escapes backslashes correctly
 - **Lesson**: any test that touches paths needs to be reviewed with "what does this do on Windows?" in mind. Three antipatterns to grep for periodically: `HasSuffix(.*"/`, `Contains(.*"/`, `json.RawMessage(.*+.*+`. Especially the JSON one — it looks like obviously-correct test setup until a backslash lands inside
-- **Refs**: `internal/skillmgr/skillmgr_test.go` `update_test.go`, `internal/skill/loader_test.go`, `internal/tools/read/read_test.go`, `internal/tui/filepicker_test.go`
+- **Refs**: `internal/skillmgr/skillmgr_test.go` `update_test.go`, `internal/skill/loader_test.go`, `internal/tools/read/read_test.go`, `internal/tui/filepicker_test.go`, `internal/tools/plan/artifact_test.go`
 
 ### Go's `time.ParseDuration` rejects "30d" / "1w" — only ns…h
 - **Saw**: a `flag.Duration` with default `30*24*time.Hour` accepted `--since=720h` but choked on `--since=30d` with "parse error" — the natural unit a CLI user would write
