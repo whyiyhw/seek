@@ -2,8 +2,9 @@
 
 **所属版本**：v3（柱 B · 可扩展性）
 **前置阅读**：[PRD v3 umbrella](v3.md) §3（跨柱约束）、[`internal/hooks/hooks.go`](../../internal/hooks/hooks.go)（已有的 typed hook Registry）
-**状态**：📐 设计稿
-**预估工作量**：~4.5 天（M9.2 + M9.3）
+**状态**：🚀 已交付（v0.4.1）
+**实现提交**：`66a4312`（M9.2 hooks 核心 + 12 验收测试） → `50a7f01`（M9.3 stdin trust 提示 + audit log）
+**验收**：12/12 验收标准全部通过，`go test -race` 全绿
 
 ---
 

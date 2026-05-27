@@ -102,11 +102,11 @@
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
 | 生命周期 hooks（会话开始/结束） | ✅ | ✅ | **对等** | Seek：`hooks.Registry` 含 `SessionStart`、`SessionEnd`、`PrePromptHook` |
-| Pre/post 命令 hooks | ✅ | ❌ **缺失** | — | Claude Code：`claude-hooks.toml` 用于工具执行前后 hook |
+| Pre/post 命令 hooks | ✅ | ✅ **v0.4.1** | **对等** | Seek：`.seek/hooks.toml` 可配置 `pre_tool` deny + 五个 observer |
 | 插件系统 | ✅ | ❌ **缺失** | — | Claude Code 有插件市场和依赖管理 |
 | 插件 hints / 依赖 | ✅ | ❌ **缺失** | — | 包管理器式插件元数据 |
 
-**小结**：Hooks 仅生命周期对等。缺少 pre/post 命令 hooks。插件系统完全缺失。
+**小结**：生命周期 hooks 和 pre/post 命令 hooks 均已对等。插件系统完全缺失。
 
 ---
 
@@ -116,15 +116,16 @@
 |---|---|---|---|---|
 | Git 读操作 | ✅ | ✅ | **对等** | Seek：`git` 工具（只读，plan 模式白名单） |
 | Git commit / push | ✅ | ✅ | **对等** | Seek：通过 `bash`（需审批） |
-| 自动 git checkpoint | ✅ | ❌ **缺失** | — | Claude Code 在破坏性操作前自动 commit |
-| 文件 checkpointing（undo/redo） | ✅ | ❌ **缺失** | — | Claude Code 追踪文件级变更用于撤销 |
+| 自动 git checkpoint | ✅ | ✅ **v0.4.0** | **对等** | Seek：`internal/checkpoint` git ref 命名空间，每 turn 首次破坏操作前自动快照 |
+| 文件 checkpointing（undo/redo） | ✅ | ✅ **v0.4.0** | **对等** | Seek：content-addressed CAS blob undo/redo，`/undo` `/redo` / `seek undo` |
 | Code review（`/review`） | ✅ | ✅ | **对等** | Seek：`/review` 激活 plan + review prompt |
 | Ultra review（云端多 agent 深度复审） | ✅ | ❌ **缺失** | — | Claude Code：`/code-review ultra`（旧名 `/ultrareview`），调用云端多 agent 协作复审 |
 | GitHub PR 工作流 | ✅ | 🔶 **等效替代** | Claude Code 通过 `gh` CLI + Bash 创建/审查/合并 PR（无独立的 `/pr-create` 斜杠命令）；Seek 同样可通过 `gh` 经 `bash` 工具达成，但缺少为 PR 流程专门优化的 prompt/skill |
 | Worktree 管理 | ✅ | ❌ **缺失** | — | Claude Code 提供 `EnterWorktree`/`ExitWorktree` 工具用于并行任务隔离 |
 | Tab 补全（TUI 命令） | ✅ | ❌ **缺失** | — | 锦上添花；Seek 已有路径自动补全，但缺斜杠命令的 Tab 补全 |
+| Shell 命令 hooks | ✅ | ✅ **v0.4.1** | **对等** | Seek：`.seek/hooks.toml` 可配置 `pre_tool` deny + 五个 observer |
 
-**小结**：开发工作流有明显差距：自动 git checkpoint、文件级 undo/redo、worktrees、PR 流程优化 prompt 均缺失。
+**小结**：开发工作流有明显差距：worktrees、PR 流程优化 prompt 均缺失。自动 git checkpoint 和文件级 undo/redo 已在 v0.4.0 补齐。
 
 ---
 
@@ -228,9 +229,9 @@
 
 | 优先级 | 领域 | 缺失功能 | 备注 |
 |---|---|---|---|
-| **🟡 P1** | 工作流 | **自动 git checkpoint** | 低投入、高信任提升；破坏性操作前自动 commit |
-| **🟡 P1** | 工作流 | **文件级 checkpoint（undo/redo）** | 低投入、高 UX 提升 |
-| **🟡 P1** | Hooks | **Pre/post 命令 hooks** | `claude-hooks.toml` 等价物 |
+| **🟢 已交付** | 工作流 | **自动 git checkpoint** | v0.4.0：每 turn 首次破坏前自动 git ref 快照 |
+| **🟢 已交付** | 工作流 | **文件级 checkpoint（undo/redo）** | v0.4.0：content-addressed CAS undo/redo，`/undo` `/redo` |
+| **🟢 已交付** | Hooks | **Pre/post 命令 hooks** | v0.4.1：`.seek/hooks.toml` 可配置，`pre_tool` deny + 五个 observer |
 | **🟡 P1** | UI | **Tab 补全（斜杠命令）** | 低投入、锦上添花 |
 | **🟡 P1** | UI | **快捷键绑定** | 低投入、锦上添花 |
 | **🟠 P2** | Agent | **子代理 / Agent 工具** | 中-高投入，是 Claude Code 公开宣传的高级能力；Seek 侧需要先看用户呼声再投入 |
@@ -264,7 +265,7 @@
 
 1. **核心对等**：Seek 在 Agent 基础循环、Plan/权限、MCP、Skills 上与 Claude Code 对等；记忆方向一致但模型不同（Seek L/M/S vs. Claude Code 类型化条目）。这些是日常编码最常用的能力。
 
-2. **最大差距**：多 agent 架构（子代理 / Agent 工具）、调度与远程触发（Routines / Cron / RemoteTrigger）、自动 git checkpoint 与文件级 undo/redo。其中自动 checkpoint 和 undo/redo 投入产出比最高，多 agent 是架构性投入。
+2. **最大差距**：多 agent 架构（子代理 / Agent 工具）、调度与远程触发（Routines / Cron / RemoteTrigger）。checkpoint 安全网和 shell hooks 已在 v0.4.x 交付，缩小了 workflow 层面的差距。
 
 3. **独特优势**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰组合，叠加单二进制与零遥测，这些是 Claude Code 体系内难以复制的差异化能力。
 

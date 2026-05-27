@@ -171,6 +171,19 @@
     <p data-lang="en"><code>/distill</code> scans the current session's conversation history and uses the DeepSeek reasoning model to propose ≤3 project-level decisions worth remembering. Each candidate is presented for y/n/e review before being written to project memory (M layer). This is the primary feed mechanism for the M index — run it at the end of a session when you've made non-obvious decisions.</p>
     <p data-lang="zh" hidden"><code>/distill</code> 扫描当前会话历史，使用 DeepSeek 推理模型提出 ≤3 条值得记忆的项目级决策。每条候选需要 y/n/e 审查后写入项目记忆（M 层）。这是 M 索引的主要输入机制——在做出非显而易见决策的会话结束时运行。</p>
 
+    <h2 data-lang="en">Checkpoint Safety Net</h2>
+    <h2 data-lang="zh" hidden>检查点安全网</h2>
+    <p data-lang="en">seek provides a two-layer safety net that makes destructive operations reversible within a session.</p>
+    <p data-lang="zh" hidden">seek 提供双层安全网，让会话内的破坏性操作可逆。</p>
+    <ul>
+      <li data-lang="en"><strong>Git checkpoint</strong> — before the first destructive action in each turn, seek automatically snapshots the entire working tree (<code>git stash create</code>) into a custom ref namespace (<code>refs/seek/checkpoints/</code>). Use <code>/restore &lt;turn&gt;</code> or <code>seek checkpoint restore &lt;turn&gt;</code> to roll back. HEAD is never altered.</li>
+      <li data-lang="zh" hidden><strong>Git 检查点</strong> — 每个 turn 首次破坏性操作前自动快照整个工作树到自定义 ref 命名空间。用 <code>/restore &lt;turn&gt;</code> 或 <code>seek checkpoint restore &lt;turn&gt;</code> 回滚，HEAD 不变。</li>
+      <li data-lang="en"><strong>File checkpoint (undo/redo)</strong> — every write or edit snapshots the original file as a content-addressed SHA-256 blob. Use <code>/undo</code> / <code>/redo</code> to step through file changes. Cleans up when the session ends.</li>
+      <li data-lang="zh" hidden><strong>文件检查点（撤销/重做）</strong> — 每次写入/编辑前快照源文件为内容寻址 blob。用 <code>/undo</code> / <code>/redo</code> 前后步进，会话结束时自动清理。</li>
+    </ul>
+    <p data-lang="en">The two layers complement each other: git checkpoints cover all file changes (including from bash), while file checkpoints work per-file and outside git repos. See <code>seek checkpoint list</code> and <code>seek checkpoint prune</code>.</p>
+    <p data-lang="zh" hidden">两层互补：git 检查点覆盖所有文件（含 bash 造成的变更），文件检查点覆盖单文件且在非 git 仓库中也能用。</p>
+
     <h2 data-lang="en">Token Accounting</h2>
     <h2 data-lang="zh" hidden">Token 统计</h2>
     <p data-lang="en">The status bar shows cumulative token counts across the session:</p>

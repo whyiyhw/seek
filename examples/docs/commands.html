@@ -209,6 +209,7 @@
         </thead>
         <tbody>
           <tr><td class="cmd">/help</td><td class="alias">/help, /?</td><td>Show help topic picker, or pass a topic (all, commands, keys, about)</td></tr>
+          <tr><td class="cmd">/hooks</td><td>/hooks</td><td data-lang="en">List active shell hooks (user + project)</td><td data-lang="zh" hidden>列出活跃的 shell 钩子</td></tr>
           <tr><td class="cmd">/clear</td><td>/clear</td><td data-lang="en">Start a fresh conversation (saves current session, opens new one, clears screen). Ctrl+L to only clear the display.</td><td data-lang="zh" hidden>开始新对话（保存当前会话、打开新会话、清屏）。Ctrl+L 仅清屏。</td></tr>
           <tr><td class="cmd">/new</td><td>/new</td><td data-lang="en">Start a fresh conversation (same as /clear)</td><td data-lang="zh" hidden>开始新对话（同 /clear）</td></tr>
           <tr><td class="cmd">/model</td><td>/model [id]</td><td data-lang="en">Switch model — no arg opens a picker</td><td data-lang="zh" hidden>切换模型——无参数打开选择器</td></tr>
@@ -219,6 +220,7 @@
           <tr><td class="cmd">/review</td><td>/review [branch]</td><td data-lang="en">Code review working-tree changes</td><td data-lang="zh" hidden>审查工作树变更</td></tr>
           <tr><td class="cmd">/branch</td><td>/branch</td><td data-lang="en">Fork this session (new ID, parent link)</td><td data-lang="zh" hidden">分叉当前会话</td></tr>
           <tr><td class="cmd">/compact</td><td>/compact</td><td data-lang="en">Summarise prior history to free up context</td><td data-lang="zh" hidden>压缩历史以释放上下文</td></tr>
+          <tr><td class="cmd">/checkpoints</td><td>/checkpoints</td><td data-lang="en">List git checkpoints for current session</td><td data-lang="zh" hidden>列出当前会话的 git 检查点</td></tr>
           <tr><td class="cmd">/distill</td><td>/distill</td><td data-lang="en">Extract project decisions → M memory</td><td data-lang="zh" hidden>提炼会话决策到 M 记忆</td></tr>
           <tr><td class="cmd">/skills</td><td>/skills</td><td data-lang="en">List loaded skills with source paths</td><td data-lang="zh" hidden>列出已加载的技能</td></tr>
           <tr><td class="cmd">/skill</td><td>/skill &lt;verb&gt; [args]</td><td data-lang="en">Manage skill packages (install, uninstall, list, …)</td><td data-lang="zh" hidden>管理 Skill 包</td></tr>
@@ -227,6 +229,9 @@
           <tr><td class="cmd">/upgrade</td><td>/upgrade [--force] [--dry-run]</td><td data-lang="en">Download latest release and replace binary</td><td data-lang="zh" hidden>下载最新版本并替换二进制</td></tr>
           <tr><td class="cmd">/exit</td><td class="alias">/exit, /quit, /q</td><td data-lang="en">Quit seek</td><td data-lang="zh" hidden>退出 seek</td></tr>
           <tr><td class="cmd">/steer</td><td class="alias">/steer, /s</td><td data-lang="en">Interrupt and send new instructions</td><td data-lang="zh" hidden>中断当前回复并发送新指令</td></tr>
+          <tr><td class="cmd">/undo</td><td>/undo [path]</td><td data-lang="en">Undo the last write or edit</td><td data-lang="zh" hidden>撤销上一次写入或编辑</td></tr>
+          <tr><td class="cmd">/redo</td><td>/redo [path]</td><td data-lang="en">Redo a previously undone write or edit</td><td data-lang="zh" hidden>重做上一次撤销</td></tr>
+          <tr><td class="cmd">/restore</td><td>/restore [turn]</td><td data-lang="en">Restore entire working tree from a git checkpoint</td><td data-lang="zh" hidden>从 git 检查点恢复整个工作树</td></tr>
         </tbody>
       </table>
     </div>
@@ -259,6 +264,39 @@
           <tr><td>?</td><td data-lang="en">Open this help overlay (/help)</td><td data-lang="zh" hidden">打开帮助面板</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ============ CLI SUBCOMMANDS ============ -->
+  <div class="reveal">
+    <h3 data-lang="en">CLI Subcommands</h3>
+    <h3 data-lang="zh" hidden>CLI 子命令</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Command</th>
+            <th data-lang="zh" hidden>命令</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">seek checkpoint list</td><td data-lang="en">List git checkpoints for the current session</td><td data-lang="zh" hidden>列出当前会话的 git 检查点</td></tr>
+          <tr><td class="cmd">seek checkpoint restore &lt;turn&gt;</td><td data-lang="en">Restore working tree from a checkpoint turn</td><td data-lang="zh" hidden>从检查点恢复工作树</td></tr>
+          <tr><td class="cmd">seek checkpoint prune</td><td data-lang="en">Remove old checkpoints (default 90 days)</td><td data-lang="zh" hidden>清理旧检查点（默认 90 天前）</td></tr>
+          <tr><td class="cmd">seek undo [path]</td><td data-lang="en">Undo the last file write/edit</td><td data-lang="zh" hidden>撤销上一次文件写入/编辑</td></tr>
+          <tr><td class="cmd">seek redo [path]</td><td data-lang="en">Redo a previously undone write/edit</td><td data-lang="zh" hidden>重做上一次撤销</td></tr>
+          <tr><td class="cmd">seek hooks list</td><td data-lang="en">List active hooks with average duration</td><td data-lang="zh" hidden>列出活跃的 hook 及平均耗时</td></tr>
+          <tr><td class="cmd">seek hooks check</td><td data-lang="en">Dry-run: show which hooks would fire for an event</td><td data-lang="zh" hidden>干跑：模拟某事件会触发的 hook</td></tr>
+          <tr><td class="cmd">seek hooks trust</td><td data-lang="en">Reset trust record for project hooks</td><td data-lang="zh" hidden>重置项目级 hook 信任记录</td></tr>
+          <tr><td class="cmd">seek hooks audit</td><td data-lang="en">Query hook execution audit log</td><td data-lang="zh" hidden>查询 hook 执行审计日志</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <span data-lang="en">💡 These subcommands also have TUI slash-command equivalents: <code>/checkpoints</code>, <code>/restore</code>, <code>/undo</code>, <code>/redo</code>, <code>/hooks</code>.</span>
+      <span data-lang="zh" hidden>💡 这些子命令也有 TUI 斜杠命令等价：<code>/checkpoints</code>、<code>/restore</code>、<code>/undo</code>、<code>/redo</code>、<code>/hooks</code>。</span>
     </div>
   </div>
 

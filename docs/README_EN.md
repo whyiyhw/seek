@@ -111,7 +111,7 @@ All commands available inside the TUI: `/skill <verb>`. Single-file `.md` skills
 
 ## 📖 Roadmap
 
-Milestones **M0–M8 all delivered**. Recently shipped (v0.3.x+):
+Milestones **M0–M9 all delivered**. Recently shipped (v0.4.x+):
 
 | Feature | What it does |
 |---|---|
@@ -119,6 +119,9 @@ Milestones **M0–M8 all delivered**. Recently shipped (v0.3.x+):
 | `skill_fetch` / `skill_commit` | Model can fetch and install skills directly (with your approval) |
 | `/plan` · `/steer` · `/review` | TUI interaction upgrades |
 | Skill v2 package install | Git URL, HTTPS tarball, local path |
+| **Checkpoint safety net** | Git snapshot per turn + file CAS undo/redo, `/undo` `/redo` `/restore` |
+| **Shell Hooks** | Pre/post tool lifecycle hooks, configured via `.seek/hooks.toml` |
+| Windows install | `seek -install` adds to PATH automatically, first-run nudge |
 
 Full design docs: [`docs/prd/`](./prd/) | Contributor guide: [`AGENTS.md`](../AGENTS.md)
 

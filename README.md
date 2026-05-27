@@ -111,7 +111,7 @@ seek skill stats --top 5              # 调用排行
 
 ## 📖 路线图
 
-里程碑 **M0–M8 全部交付**。最近新增（v0.3.x+）：
+里程碑 **M0–M9 全部交付**。最近新增（v0.4.x+）：
 
 | 功能 | 说明 |
 |---|---|
@@ -119,6 +119,9 @@ seek skill stats --top 5              # 调用排行
 | `skill_fetch` / `skill_commit` | 模型可直接获取并安装 skill（需审批） |
 | `/plan` · `/steer` · `/review` | TUI 交互升级 |
 | Skill v2 目录包 | Git URL / HTTPS 压缩包 / 本地路径安装 |
+| **Checkpoint 撤销安全网** | git 每 turn 快照 + 文件级 undo/redo，`/undo` `/redo` `/restore` |
+| **Shell Hooks** | 工具调用前后 shell 钩子，`.seek/hooks.toml` 可配置 |
+| Windows 安装 | `seek -install` 自动加入 PATH，首次运行提示 |
 
 完整设计文档：[`docs/prd/`](./docs/prd/) | 贡献指南：[`AGENTS.md`](./AGENTS.md)
 

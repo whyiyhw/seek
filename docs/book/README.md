@@ -223,7 +223,7 @@
 - 17.9 模型驱动的 skill 安装: `skill_fetch` / `skill_commit` 工具
 - 17.10 一个观察:可观测性是 v0 到 v1 的换挡
 
-**[第 18 章：M9 — Plan Mode 与交互工具](chapter-18.md)** *(v0.3.x–v0.4.x)*
+**[第 18 章：Plan Mode 与交互工具](chapter-18.md)** *(v0.3.x–v0.4.x)*
 - 18.1 从"单向 toggle"到"分析→提案→执行→报告"闭环
 - 18.2 分岔点: 为什么 plan-mode 需要自解析, 而不是靠工具返回值
 - 18.3 `propose` 工具:problem + steps + TUI 选择器
@@ -238,6 +238,24 @@
 - 18.6 plan-mode 内置 skill: 提示自动注入
 - 18.7 `/review` 与 per-message 模式提醒
 - 18.8 一个观察: 确认门改变了 agent 和用户之间的权力结构
+
+**[第 19 章：M9.0–M9.1 — 双层 Checkpoint 安全网](chapter-19.md)** *(v0.4.0)*
+- 19.1 问题: 不可逆的破坏性操作让 `--yolo` 心理成本很高
+- 19.2 两层互补设计: git ref 快照 (粗粒度) + 文件 CAS undo/redo (细粒度)
+- 19.3 Git checkpoint: `git stash create` + `refs/seek/checkpoints/` 命名空间
+- 19.4 文件 checkpoint: content-addressed blob + index.jsonl + 外部修改检测
+- 19.5 CLI / TUI 命令: `seek checkpoint {list,restore,prune}` · `seek undo/redo`
+- 19.6 TUI 斜杠命令: `/checkpoints` · `/restore` · `/undo` · `/redo`
+- 19.7 验收标准 12/12 全绿
+
+**[第 20 章：M9.2–M9.3 — Shell Hooks 可扩展性](chapter-20.md)** *(v0.4.1)*
+- 20.1 动机: 把 `internal/hooks` Registry 开放给用户
+- 20.2 设计约束: stdout 不进 prompt · 只 deny/observe · 信任前置
+- 20.3 hooks.toml: 用户级 + 项目级叠加，VS Code 风格 trust 询问
+- 20.4 ShellRunner: pre_tool deny + 五个 observer
+- 20.5 安全机制: `bash -n` 静态检查 · timeout · 并发 audit log
+- 20.6 CLI / TUI 命令: `seek hooks {list,check,trust,audit}`
+- 20.7 验收标准 12/12 全绿
 
 ---
 
