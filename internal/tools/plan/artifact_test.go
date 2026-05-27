@@ -36,7 +36,7 @@ func TestWriteArtifact_WritesFileWithExpectedShape(t *testing.T) {
 	if !strings.HasSuffix(path, ".md") {
 		t.Errorf("path lacks .md extension: %s", path)
 	}
-	if !strings.Contains(path, "/plans/") {
+	if !strings.Contains(path, "/plans/") && !strings.Contains(path, "\\plans\\") {
 		t.Errorf("path missing /plans/ segment: %s", path)
 	}
 	if !strings.Contains(filepath.Base(path), "20260526-1430-") {

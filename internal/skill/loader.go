@@ -173,7 +173,11 @@ func loadPackage(dir string) (*Skill, []error) {
 	var warnings []error
 	var entry string
 	switch {
-	case hasUpper && hasLower, hasUpper:
+	case hasUpper && hasLower:
+		entry = upper
+		warnings = append(warnings, fmt.Errorf(
+			"skills: %s: both SKILL.md and lowercase skill.md exist; using SKILL.md", dir))
+	case hasUpper:
 		entry = upper
 	case hasLower:
 		entry = lower
