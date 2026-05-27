@@ -1,6 +1,7 @@
 package webfetch
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -116,6 +117,42 @@ func TestExecute_HappyApplicationJSON(t *testing.T) {
 	// JSON is returned verbatim (no HTML simplification).
 	if !strings.Contains(out, `{"hello":"world","n":42}`) {
 		t.Errorf("JSON body not returned verbatim:\n%s", out)
+	}
+}
+
+// TestExecute_AutoDecodesGzip exercises the case the model hit during
+// smoke: server gzips the response, webfetch must transparently
+// decode it. Regression test for the explicit Accept-Encoding header
+// bug — if the bug returns, this test sees raw gzip bytes instead of
+// the expected text.
+func TestExecute_AutoDecodesGzip(t *testing.T) {
+	const plaintext = "<html><body><p>Decoded content from gzip</p></body></html>"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Server advertises gzip and serves gzipped bytes IF the
+		// client signalled acceptance. We check the negotiated
+		// header rather than guessing — that way the test also
+		// asserts "Go's transport requested gzip on our behalf".
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("test server expected gzip negotiation; got Accept-Encoding=%q", r.Header.Get("Accept-Encoding"))
+			http.Error(w, "no gzip", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		_, _ = gz.Write([]byte(plaintext))
+		_ = gz.Close()
+	}))
+	defer srv.Close()
+
+	tool := toolForServer(t, srv)
+	out, err := tool.Execute(context.Background(), makeRequestRaw(t, srv.URL, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Decoded content from gzip") {
+		t.Errorf("gzipped response not auto-decoded — webfetch returned raw bytes:\n%s", out[:min(400, len(out))])
 	}
 }
 

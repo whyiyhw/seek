@@ -87,8 +87,8 @@ func TestPlanAnalyzeBashHint_CombinesMultipleHints(t *testing.T) {
 func TestPlanAnalyzeBashHint_FallbackForUnknownCommand(t *testing.T) {
 	t.Parallel()
 	got := planAnalyzeBashHint("docker run alpine")
-	if !strings.Contains(got, "whitelisted read-only inspector") {
-		t.Errorf("expected fallback message, got: %s", got)
+	if !strings.Contains(got, "whitelisted inspector") {
+		t.Errorf("expected fallback to mention inspector option, got: %s", got)
 	}
 	// Should NOT include the specific-hint phrases (the fallback's
 	// "go vet, go list, npm ls" mention is the allowlist enumeration,
@@ -102,6 +102,28 @@ func TestPlanAnalyzeBashHint_FallbackForUnknownCommand(t *testing.T) {
 	} {
 		if strings.Contains(got, banned) {
 			t.Errorf("fallback should not include %q, got: %s", banned, got)
+		}
+	}
+}
+
+// TestPlanAnalyzeBashHint_FallbackOffersEscapePaths is the regression
+// test for the smoke-test issue where the model, faced with
+// bash("curl ...") being denied, suggested `--yolo` restart instead
+// of in-session options. The fallback hint must steer the model
+// toward propose(), Shift+Tab, or /yolo — and explicitly NOT toward
+// restarting.
+func TestPlanAnalyzeBashHint_FallbackOffersEscapePaths(t *testing.T) {
+	t.Parallel()
+	got := planAnalyzeBashHint("curl https://example.com")
+	for _, want := range []string{
+		"propose",     // path 1: plan-execute via propose
+		"Shift+Tab",   // path 2: in-session mode cycle
+		"/yolo",       // path 2 alt: slash command toggle
+		"NEVER",       // path 3 anti-pattern: no --yolo restart suggestion
+		"--yolo flag", // explicitly disclaimed
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fallback should mention %q, got: %s", want, got)
 		}
 	}
 }

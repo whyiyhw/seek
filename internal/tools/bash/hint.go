@@ -46,10 +46,25 @@ func planAnalyzeBashHint(command string) string {
 	}
 
 	if len(hints) == 0 {
-		// No pattern matched — fall back to the generic suggestion. This
-		// duplicates the message from permission.planAnalyzeGate but
-		// reads more naturally as "alternatives" prose.
-		return "explore with read/grep/list_dir/git tool, or run a whitelisted read-only inspector (go vet, go list, npm ls, …)"
+		// No pattern matched — the command is genuinely outside the
+		// whitelist (curl, docker, kubectl, …) and the model can't
+		// rewrite it as a whitelisted equivalent. Point at the THREE
+		// escape paths in order of seek-nativeness:
+		//
+		// (1) propose: stay in plan-mode, add the work as a plan
+		//     step, then execute it in plan-execute where bash is
+		//     allowed (per-call y/N).
+		// (2) mode switch: ask user to press Shift+Tab (cycles
+		//     mode) or type /yolo (in-session toggle). Both keep
+		//     the session, neither requires a restart.
+		// (3) read alternative: maybe this question can be answered
+		//     by reading files directly (the whitelisted inspector
+		//     hint).
+		//
+		// Crucially, do NOT suggest --yolo flag restart. That loses
+		// session state. Models that learned curl habits often
+		// suggest it; the hint here exists to retrain that.
+		return "no whitelist match. If you genuinely need this command: (1) call propose() with this work as a step — it will run in plan-execute where bash is allowed (per-call y/N); or (2) ask the user to press Shift+Tab to switch modes (cycles Ask → Yolo → Plan) or type /yolo to allow writes in-session — both keep your session intact, no restart needed; or (3) if the question can be answered by reading source, use read/grep/list_dir/git tool or a whitelisted inspector (go vet, go list, npm ls, …). NEVER suggest restarting with --yolo flag — that destroys session state and the user can switch modes without it."
 	}
 	return strings.Join(hints, "; ")
 }

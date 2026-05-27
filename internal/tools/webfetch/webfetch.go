@@ -178,7 +178,13 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 	// that webfetch was created to close.
 	req.Header.Set("User-Agent", "seek-webfetch/0.1")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,text/plain,text/markdown,*/*;q=0.5")
-	req.Header.Set("Accept-Encoding", "gzip")
+	// NOTE: do NOT set Accept-Encoding manually. Go's http.Transport
+	// adds gzip on its own AND transparently decodes the response body
+	// — but ONLY when the caller leaves the header unset. Setting it
+	// here ourselves tells the transport "I'll decode it" and leaves
+	// us with raw gzip bytes in resp.Body, which then look like
+	// garbage to the model. Real bug seen during smoke testing
+	// 2026-05-26. See net/http.Transport.DisableCompression docs.
 
 	resp, err := t.client.Do(req)
 	if err != nil {

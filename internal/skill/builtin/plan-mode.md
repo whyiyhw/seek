@@ -133,6 +133,27 @@ The bash whitelist in plan-analyze is narrow on purpose. These are the four ways
 
 When you see `permission denied: plan mode: bash is not allowed for this command`, the error message now includes a `Hint:` clause pointing at the specific fix — read it and adjust, don't retry the same shape with cosmetic changes.
 
+### When you genuinely need bash that's not whitelistable
+
+Sometimes the right answer really is `curl` / `docker` / `kubectl` / `go test` / etc. — commands that can't be turned into whitelisted inspectors. In that case, here are the three legitimate options, **in order of preference**:
+
+1. **Propose the work as a plan step.** Call `propose(problem, steps)` including the action in `steps`. Once the user approves, you'll be in `plan-execute` substate where `bash` is allowed (subject to per-call y/N or batch-approval if they picked auto-approve-per-step). This is the most plan-mode-aligned path — the work is gated by the user's explicit approval of scope, not by a backdoor escape.
+
+2. **Tell the user to switch modes in-session.** Two zero-restart paths:
+   - `Shift+Tab` cycles modes: Ask → Yolo → Plan → Ask. One keystroke.
+   - `/yolo` slash command toggles Yolo on/off in-session (mutually exclusive with `/plan`, so /yolo also exits plan mode).
+   Both keep the current session, preserve all message history, and don't require closing the program.
+
+3. **Re-frame as a read.** Often "I need to run `curl docs.example.com`" is really "I need to read the docs". Use `webfetch` for HTTPS URLs (plan-allowed, no curl needed). Use `read`/`grep`/`list_dir`/`git` tool for local repo. Often the question dissolves before you reach for bash.
+
+### What NOT to suggest
+
+❌ **Never tell the user to "restart with `--yolo`"**. That destroys session state (memory, plan progress, message history). The `--yolo` CLI flag is for starting fresh sessions, not for escaping plan-analyze mid-session. Use `Shift+Tab` or `/yolo` in-session toggle instead.
+
+❌ **Don't suggest header workarounds** for `webfetch` issues. webfetch's request headers are fixed (`User-Agent` / `Accept` / `Accept-Encoding` all hardcoded) precisely so the model can't shape requests in ways that bypass the SSRF gate. If `webfetch` returns weird content (encoding issues, content-type rejected, etc.), that's a seek-side bug to report, not something to work around with curl flags.
+
+❌ **Don't retry the same denied command with cosmetic changes** (rename a variable, add a comment, etc.). The deny is structural; superficial edits don't change the verdict. Read the `Hint:` clause in the error message — it tells you what to actually change.
+
 ## Cost discipline
 
 `propose` and `ask_user` both block waiting for user input. Each one is a real interruption — use them sparingly. Two `ask_user` calls during ANALYZE and one `propose` to gate is typical. Five `ask_user` calls + three `propose` cycles in one task means you're being either too cautious or insufficiently prepared in ANALYZE.
