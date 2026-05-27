@@ -23,6 +23,8 @@ import (
 
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/checkpoint"
+	"github.com/whyiyhw/seek/internal/checkpointcli"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
@@ -217,6 +219,41 @@ func modeLabel(pref permission.Preference, workflow permission.Workflow) string 
 // The mutex on `batch` serialises the rare cross-goroutine update:
 // proposeAnswer (Ask goroutine) writes batch; StepChanged (tool
 // dispatch goroutine) reads it.
+
+// ----- v3 checkpoint glue -----
+
+// checkpointStderrSink routes Manager warnings to os.Stderr — the
+// default for non-TUI launches. TUI swaps to its own buffered sink
+// via Options when ready.
+type checkpointStderrSink struct{}
+
+func (checkpointStderrSink) Warn(m string) { fmt.Fprintln(os.Stderr, m) }
+
+// checkpointSnapshotter is the adapter the write/edit tools see.
+// Lives here so internal/tools/{write,edit} don't have to import
+// internal/checkpoint (the dependency would also fight tests that
+// pass nil snapshotters).
+type checkpointSnapshotter struct{ m *checkpoint.Manager }
+
+func (c checkpointSnapshotter) SnapshotFile(path, tool, callID string) error {
+	return c.m.SnapshotFile(path, tool, callID)
+}
+func (c checkpointSnapshotter) FinaliseSnapshot(path string, after []byte) error {
+	return c.m.FinaliseSnapshot(path, after)
+}
+
+// checkpointHook adapts *checkpoint.Manager to the hooks observer
+// interfaces. Register once on the hooks.Registry; the dispatcher
+// detects PreTurn / SessionEnd by interface satisfaction.
+type checkpointHook struct{ m *checkpoint.Manager }
+
+func (h *checkpointHook) OnPreTurn(ctx context.Context, ev hooks.PreTurnEvent) {
+	h.m.OnPreTurn(ctx, nil)
+}
+func (h *checkpointHook) OnSessionEnd(ctx context.Context, ev hooks.SessionEndEvent) {
+	h.m.OnSessionEnd(ctx, nil)
+}
+
 type planBridge struct {
 	mu    sync.Mutex
 	batch bool
@@ -476,6 +513,18 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	// v3 checkpoint subcommand (PRD docs/prd/feature-checkpoint.md §4.1).
+	// Dispatched ahead of flag.Parse so the user can pass --session etc.
+	// without colliding with the top-level binary flags.
+	if len(os.Args) >= 2 && os.Args[1] == "checkpoint" {
+		return checkpointcli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "undo" {
+		return checkpointcli.RunUndo(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	if len(os.Args) >= 2 && os.Args[1] == "redo" {
+		return checkpointcli.RunRedo(os.Args[2:], os.Stdout, os.Stderr)
+	}
 
 	var (
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
@@ -507,6 +556,11 @@ func run() error {
 		dreamFlag     = flag.Bool("dream", false, "M→L distillation: scan project memory, print L-pending candidates without writing")
 		dreamWrite    = flag.Bool("dream-write", false, "with -dream: actually append the candidates to ~/.seek/soul.md's Pending section")
 		langFlag      = flag.String("lang", "auto", "response language: en|zh|auto (auto = detect from system locale)")
+		// v3 柱 A: keep the per-session file checkpoint directory
+		// past SessionEnd. Default off — file checkpoints are
+		// "this-session-only" by design (see feature-checkpoint
+		// PRD §3.2). Power users debugging across resumes set this.
+		keepCheckpoints = flag.Bool("keep-checkpoints", false, "preserve <session>/checkpoints/ across session end (default: cleaned)")
 	)
 	flag.Parse()
 
@@ -761,12 +815,56 @@ func run() error {
 	// and the TUI options are ready.
 	askPolicy := askuser.New(askuser.ModeAsk)
 
+	// Resolve the absolute project root early — the checkpoint
+	// Manager (constructed next) needs it, and downstream code
+	// (memory init, system prompt rendering) re-uses the same
+	// value via the variable.
+	abs, _ := filepath.Abs(cwd)
+
+	// v3 checkpoint Manager (feature-checkpoint.md). Constructed
+	// BEFORE tool registration so write.WithSnapshotter / edit
+	// .WithSnapshotter can bind. Built with the session id we
+	// either inherit (resume) or pre-generate (fresh). The pre-
+	// generation only commits a string — the actual session
+	// header is written later by store.Save.
+	//
+	// --no-save disables checkpoint entirely (ephemeral run; no
+	// session id means no scoped storage path). Same intent as
+	// --no-save's memory / session opt-outs.
+	var ckMgr *checkpoint.Manager
+	if !*noSave {
+		sid := ""
+		if loaded != nil {
+			sid = loaded.ID
+		} else {
+			// Construct the session early so we get a stable ID
+			// for the checkpoint scope. activeSession is reused
+			// below — the fresh-session branch at line ~870 only
+			// runs when loaded == nil AND activeSession is nil,
+			// so this pre-emptive construction is safe.
+			activeSession = session.New(*model, abs, "", *yolo, *plan)
+			sid = activeSession.ID
+		}
+		ckMgr = checkpoint.New(checkpoint.Config{
+			SessionID:  sid,
+			ProjectAbs: abs,
+			CWD:        abs,
+			Sink:       checkpointStderrSink{},
+			KeepOnExit: *keepCheckpoints,
+		})
+		// Hook into the permission gate so destructive actions
+		// fire MaybeCreateGit before they hit the filesystem.
+		policy.SetOnDestructive(func(a permission.Action) {
+			ckMgr.MaybeCreateGit(ctx, a)
+		})
+	}
+
 	reg := tools.New().
 		Add(read.New(policy)).
 		Add(grep.New()).
 		Add(listdir.New()).
-		Add(write.New(policy)).
-		Add(edit.New(policy)).
+		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
+		Add(edit.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
 		Add(bash.New(policy)).
 		Add(gittool.New()).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
@@ -822,8 +920,6 @@ func run() error {
 		}
 	}
 
-	abs, _ := filepath.Abs(cwd)
-
 	// M layer + L layer. Without session persistence (--no-save) we
 	// also skip memory persistence — they share the "this is a
 	// throwaway run" intent. Load failures are non-fatal: a broken
@@ -864,6 +960,11 @@ func run() error {
 	// activeSession nil so the TUI auto-save no-ops. activeSession
 	// is forward-declared above (Skill stats env fn captures it);
 	// only the assignment lives here.
+	//
+	// v3 checkpoint: a fresh activeSession may already exist —
+	// pre-constructed earlier so the checkpoint Manager could
+	// bind a stable session id. In that case we just back-fill
+	// the SystemPrompt that wasn't known at construction time.
 	var initialMsgs []deepseek.Message
 	if !*noSave {
 		if loaded != nil {
@@ -879,8 +980,12 @@ func run() error {
 			if loaded.Usage.TotalTokens > 0 {
 				tracker.SetBase(loaded.Usage, *model, pricing.CurrentTier(time.Now()))
 			}
-		} else {
+		} else if activeSession == nil {
 			activeSession = session.New(*model, abs, systemPrompt, *yolo, *plan)
+		} else {
+			// Pre-constructed by the checkpoint Manager bootstrap;
+			// back-fill the SystemPrompt now that it's known.
+			activeSession.SystemPrompt = systemPrompt
 		}
 		// A resumed session may carry an /effort selection from the prior
 		// run — restore it before the agent is built so the very first
@@ -907,6 +1012,15 @@ func run() error {
 	// from main.go because the agent doesn't know when its host
 	// program is "done".
 	hooksReg := hooks.NewRegistry()
+
+	// v3 柱 A: register the checkpoint Manager as a SessionEnd /
+	// PreTurn observer so file-checkpoint state is cleaned up on
+	// shutdown and per-turn git-checkpoint arming refreshes each
+	// turn. Wrapped in a small adapter so the Manager's specific
+	// signatures match the hooks Observer interfaces.
+	if ckMgr != nil {
+		hooksReg.Register(&checkpointHook{m: ckMgr})
+	}
 
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
@@ -1150,6 +1264,7 @@ func run() error {
 		AskUserCh:             askUserCh,
 		Session:               activeSession,
 		Store:                 store,
+		Checkpoint:            ckMgr,
 		Skills:                skills,
 		ProviderName:          provLabel,
 		MemoryProject:         memProject,

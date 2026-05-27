@@ -7,12 +7,14 @@ import (
 	"io"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
@@ -66,6 +68,11 @@ func allCommands() []command {
 		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
+		// v3 柱 A checkpoint surface (PRD docs/prd/feature-checkpoint.md §4.2).
+		{names: []string{"/checkpoints"}, usage: "/checkpoints", description: "List git checkpoints for this session (the per-turn working-tree snapshots seek wrote before destructive actions).", handler: cmdCheckpoints},
+		{names: []string{"/restore"}, usage: "/restore [last|<turn>]", description: "Restore the working tree to a git checkpoint. No args = last; pass a turn number for a specific one. HEAD is NOT moved; --force needed if working tree is dirty.", handler: cmdRestore},
+		{names: []string{"/undo"}, usage: "/undo [<path>]", description: "Undo the most recent write/edit (file checkpoint). With a path: undo the most recent change to that file. Refuses if the file was modified externally; pass --force to override.", handler: cmdUndo},
+		{names: []string{"/redo"}, usage: "/redo [<path>]", description: "Redo the most recently undone write/edit. Truncated by a fresh write/edit (classic editor semantics).", handler: cmdRedo},
 	}
 }
 
@@ -1755,4 +1762,152 @@ func startDistillCmd(m *Model) tea.Cmd {
 		candidates, err := distiller.Distill(ctx, history)
 		return distillDoneMsg{candidates: candidates, err: err}
 	}
+}
+
+// ----- v3 checkpoint slash commands (feature-checkpoint.md §4.2) -----
+//
+// Each command is a thin wrapper around the Manager — the same code
+// the CLI calls. We deliberately bypass internal/checkpointcli here:
+// it sits behind a flag.FlagSet that would intercept "--session" and
+// fight TUI conventions. The mapped semantics are identical.
+
+func cmdCheckpoints(m *Model, _ string) cmdResult {
+	if m.opts.Checkpoint == nil {
+		return cmdResult{text: styleMuted.Render("/checkpoints: unavailable (--no-save or session not initialised)")}
+	}
+	list, err := m.opts.Checkpoint.ListGitCheckpoints()
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/checkpoints: " + err.Error())}
+	}
+	if len(list) == 0 {
+		return cmdResult{text: styleMuted.Render("no git checkpoints yet — they're written before the first destructive action of each turn")}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("session %s", m.opts.Checkpoint.SessionID())))
+	fmt.Fprintf(&b, "%-5s %-19s %-10s %s\n", "TURN", "TIMESTAMP", "BRANCH", "LABEL")
+	for _, c := range list {
+		branch := c.Branch
+		if branch == "" {
+			branch = "-"
+		}
+		fmt.Fprintf(&b, "%-5d %-19s %-10s %s\n",
+			c.Turn,
+			c.TS.Local().Format("2006-01-02 15:04:05"),
+			truncateForCheckpoint(branch, 10),
+			truncateForCheckpoint(c.Label, 64))
+	}
+	return cmdResult{text: b.String()}
+}
+
+func cmdRestore(m *Model, args string) cmdResult {
+	if m.opts.Checkpoint == nil {
+		return cmdResult{text: styleMuted.Render("/restore: unavailable (--no-save or session not initialised)")}
+	}
+	tokens := strings.Fields(args)
+	turn := 0 // 0 → last
+	force := false
+	for _, tk := range tokens {
+		switch tk {
+		case "--force", "-f":
+			force = true
+		case "last", "latest":
+			turn = 0
+		default:
+			n, err := strconv.Atoi(tk)
+			if err != nil || n <= 0 {
+				return cmdResult{text: styleErr.Render(fmt.Sprintf("/restore: invalid turn %q (try a positive integer or `last`)", tk))}
+			}
+			turn = n
+		}
+	}
+	ctx, cancel := context.WithTimeout(m.opts.Ctx, 30*time.Second)
+	defer cancel()
+	res, err := m.opts.Checkpoint.RestoreGit(ctx, checkpoint.RestoreOptions{Turn: turn, Force: force})
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/restore: " + err.Error())}
+	}
+	return cmdResult{text: fmt.Sprintf("restored turn %d (%d file(s) reset); HEAD unchanged at %s",
+		res.Checkpoint.Turn, len(res.AffectedFiles), res.Checkpoint.HeadBefore)}
+}
+
+func cmdUndo(m *Model, args string) cmdResult {
+	if m.opts.Checkpoint == nil {
+		return cmdResult{text: styleMuted.Render("/undo: unavailable (--no-save or session not initialised)")}
+	}
+	tokens := strings.Fields(args)
+	path := ""
+	force := false
+	for _, tk := range tokens {
+		switch tk {
+		case "--force", "-f":
+			force = true
+		default:
+			if !strings.HasPrefix(tk, "-") {
+				path = tk
+			}
+		}
+	}
+	results, err := m.opts.Checkpoint.Undo(checkpoint.UndoOptions{Path: path, Force: force})
+	if err != nil {
+		if len(results) == 0 {
+			return cmdResult{text: styleErr.Render("/undo: " + err.Error())}
+		}
+		// Partial success.
+		return cmdResult{text: fmt.Sprintf("/undo: %d step(s) ok; stopped at: %s", len(results), err.Error())}
+	}
+	if len(results) == 0 {
+		return cmdResult{text: styleMuted.Render("/undo: nothing to undo")}
+	}
+	var b strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&b, "undone: %s\n", r.Restored)
+	}
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
+}
+
+func cmdRedo(m *Model, args string) cmdResult {
+	if m.opts.Checkpoint == nil {
+		return cmdResult{text: styleMuted.Render("/redo: unavailable (--no-save or session not initialised)")}
+	}
+	tokens := strings.Fields(args)
+	path := ""
+	force := false
+	for _, tk := range tokens {
+		switch tk {
+		case "--force", "-f":
+			force = true
+		default:
+			if !strings.HasPrefix(tk, "-") {
+				path = tk
+			}
+		}
+	}
+	results, err := m.opts.Checkpoint.Redo(checkpoint.RedoOptions{Path: path, Force: force})
+	if err != nil {
+		if len(results) == 0 {
+			return cmdResult{text: styleErr.Render("/redo: " + err.Error())}
+		}
+		return cmdResult{text: fmt.Sprintf("/redo: %d step(s) ok; stopped at: %s", len(results), err.Error())}
+	}
+	if len(results) == 0 {
+		return cmdResult{text: styleMuted.Render("/redo: nothing to redo")}
+	}
+	var b strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&b, "redone: %s\n", r.Restored)
+	}
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
+}
+
+// truncateForCheckpoint trims a string to n runes with a horizontal-
+// ellipsis suffix. Local helper so the checkpoint commands don't pull
+// in a heavyweight unicode helper.
+func truncateForCheckpoint(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n <= 1 {
+		return s[:n]
+	}
+	return s[:n-1] + "…"
 }

@@ -53,11 +53,28 @@ type Args struct {
 	ExpectedReplacements int    `json:"expected_replacements,omitempty"`
 }
 
+// Snapshotter is the optional dependency for file checkpoint (v3
+// feature-checkpoint). Mirrors write.Snapshotter; we duplicate the
+// interface name rather than importing internal/tools/write so the
+// two tools stay independent.
+type Snapshotter interface {
+	SnapshotFile(path, toolName, callID string) error
+	FinaliseSnapshot(path string, after []byte) error
+}
+
 type Tool struct {
 	policy *permission.Policy
+	snap   Snapshotter
 }
 
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
+
+// WithSnapshotter returns a copy of t bound to s. Optional — leaving
+// the snapshotter unset (nil) disables file checkpoint integration.
+func (t Tool) WithSnapshotter(s Snapshotter) Tool {
+	t.snap = s
+	return t
+}
 
 func (Tool) Name() string            { return "edit" }
 func (Tool) Description() string     { return description }
@@ -135,8 +152,19 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	if fi, err := os.Stat(clean); err == nil {
 		mode = fi.Mode().Perm()
 	}
+	// File checkpoint: snapshot prior content (the byte sequence we
+	// already have in `orig`) before mutating. Snapshotter handles
+	// re-reading internally to keep the API uniform with write; the
+	// duplicate read is one-shot and bounded by the tool's existing
+	// file-size limits.
+	if t.snap != nil {
+		_ = t.snap.SnapshotFile(clean, "edit", "")
+	}
 	if err := os.WriteFile(clean, []byte(updated), mode); err != nil {
 		return "", fmt.Errorf("edit: %w", err)
+	}
+	if t.snap != nil {
+		_ = t.snap.FinaliseSnapshot(clean, []byte(updated))
 	}
 
 	abs, err := filepath.Abs(clean)
