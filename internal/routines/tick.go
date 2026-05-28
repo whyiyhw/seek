@@ -211,6 +211,10 @@ type TickResult struct {
 	// files actually run this tick (M11.3 file bridge).
 	// Excludes skipped-as-too-fresh, TTL-expired, malformed.
 	TriggersDispatched int
+	// GCRemoved aggregates how many old run + malformed-trigger
+	// files this tick swept (G4 + G5 — v0.6.x housekeeping).
+	// Always >= 0; zero is the steady-state on a quiet host.
+	GCRemoved int
 }
 
 // Tick runs one scan-and-fire cycle. Acquires tick.lock LOCK_NB
@@ -262,11 +266,12 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 		}
 	}
 
-	// 4. Per-job goroutine fan-out.
+	// 4. Per-job goroutine fan-out. NOTE: do NOT early-return on
+	// len(due) == 0 — triggers/ inbox and the housekeeping GC
+	// (steps 5-6) must run every tick regardless of cron-job
+	// state. An empty WaitGroup.Wait() is a sub-microsecond no-op,
+	// so falling through costs nothing on idle ticks.
 	res := TickResult{Considered: len(jobs), Fired: len(due)}
-	if len(due) == 0 {
-		return res, nil
-	}
 
 	subFn := opts.subprocess()
 	runTimeout := opts.runTimeout()
@@ -292,6 +297,22 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 		fmt.Fprintf(os.Stderr, "routines: triggers: %v\n", terr)
 	} else {
 		res.TriggersDispatched = dispatched
+	}
+
+	// 6. Housekeeping (G4 + G5): sweep old runs/ + .malformed
+	// files under the still-held tick.lock so no concurrent tick
+	// can race file deletion against file creation. Best-effort —
+	// per-file errors are logged but never fail the tick.
+	if removed, gerr := GCRuns(GCRunsOptions{Dir: tp.runsDir, Now: now}); gerr != nil {
+		fmt.Fprintf(os.Stderr, "routines: gc runs: %v\n", gerr)
+	} else {
+		res.GCRemoved += removed
+	}
+	malformedDir := filepath.Join(triggersDir, ".malformed")
+	if removed, gerr := GCMalformedTriggers(GCMalformedOptions{Dir: malformedDir, Now: now}); gerr != nil {
+		fmt.Fprintf(os.Stderr, "routines: gc malformed: %v\n", gerr)
+	} else {
+		res.GCRemoved += removed
 	}
 
 	if err := ctx.Err(); err != nil {

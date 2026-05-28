@@ -343,6 +343,83 @@ func TestTick_PerJobLockSerialisesRetries(t *testing.T) {
 	}
 }
 
+// TestTick_GCSweepsOldRunsAndMalformed verifies the G4 + G5
+// housekeeping integration: Tick, after running due jobs +
+// processing triggers, sweeps old runs/<id>.jsonl and old
+// triggers/.malformed/<id>.json. We don't drive any due job —
+// just seed pre-existing fake history and observe what
+// survives.
+func TestTick_GCSweepsOldRunsAndMalformed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/bin/sh tick stub not available on Windows")
+	}
+	f := newTickFixture(t)
+	runsDir := filepath.Join(f.dir, "runs")
+	malformedDir := filepath.Join(f.dir, "triggers", ".malformed")
+
+	// Seed: one stale run, one fresh run, one stale malformed,
+	// one fresh malformed.
+	staleMtime := f.now.Add(-31 * 24 * time.Hour)
+	freshMtime := f.now.Add(-1 * time.Hour)
+	for _, kv := range []struct {
+		path  string
+		mtime time.Time
+	}{
+		{filepath.Join(runsDir, "stale.jsonl"), staleMtime},
+		{filepath.Join(runsDir, "fresh.jsonl"), freshMtime},
+		{filepath.Join(malformedDir, "stale.json"), staleMtime.Add(-30 * 24 * time.Hour)}, // very old
+		{filepath.Join(malformedDir, "fresh.json"), freshMtime},
+		// Lock file in runsDir — must survive even if ancient.
+		{filepath.Join(runsDir, "j0.lock"), staleMtime},
+	} {
+		if err := os.MkdirAll(filepath.Dir(kv.path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(kv.path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(kv.path, kv.mtime, kv.mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// No due jobs — Tick just runs the GC step.
+	res, err := Tick(context.Background(), f.store, f.opts(shellStub(t, "exit 0")))
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Fired != 0 {
+		t.Errorf("Fired = %d, want 0 (no due jobs)", res.Fired)
+	}
+	if res.GCRemoved != 2 {
+		t.Errorf("GCRemoved = %d, want 2 (stale.jsonl + stale.json)", res.GCRemoved)
+	}
+
+	// Survivors verified directly.
+	survivors := map[string]bool{}
+	for _, dir := range []string{runsDir, malformedDir} {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			survivors[filepath.Join(dir, e.Name())] = true
+		}
+	}
+	if !survivors[filepath.Join(runsDir, "fresh.jsonl")] {
+		t.Error("fresh.jsonl was deleted")
+	}
+	if survivors[filepath.Join(runsDir, "stale.jsonl")] {
+		t.Error("stale.jsonl survived GC")
+	}
+	if !survivors[filepath.Join(runsDir, "j0.lock")] {
+		t.Error("LOCK FILE was deleted by GC — G4 safety guarantee broken")
+	}
+	if !survivors[filepath.Join(malformedDir, "fresh.json")] {
+		t.Error("fresh malformed.json was deleted")
+	}
+	if survivors[filepath.Join(malformedDir, "stale.json")] {
+		t.Error("stale malformed.json survived GC")
+	}
+}
+
 // TestTick_ConcurrentMarkRunRaceFree: drive Tick in a goroutine
 // while reading Store from the main one. -race catches any
 // missing sync.

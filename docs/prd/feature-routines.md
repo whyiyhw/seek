@@ -306,6 +306,33 @@ Without intervention, every cron-fired job runs under that minimal env and hits 
 
 Implementation: `internal/routines.LoadEnvFile(path)` + `routines.MergeEnv(base, overlay)`; `DefaultSubprocess` calls both; `paths.CronEnv()` returns the canonical path. Tests pin happy-path parse, comment/blank skipping, quote stripping, last-duplicate-wins, parse-error fail-loud, missing-file no-error, end-to-end overlay flowing into `cmd.Env`, and overlay-overrides-inherited.
 
+### 3.10 Housekeeping GC (G4 + G5, v0.6.1)
+
+`~/.seek/cron/runs/` accumulates one JSONL per fire forever; on a `@every 5m` job that's ~288 files/day × 30 days = ~8.6k files even at minimum cadence, easily 100MB+ of plaintext on a busy host. `~/.seek/cron/triggers/.malformed/` accumulates indefinitely too — every malformed external payload sits in the quarantine forever despite forensic value dropping off rapidly.
+
+Both directories get a two-axis sweep at the end of every Tick (after job dispatch + trigger processing, BEFORE releasing tick.lock so no concurrent tick races file deletion against creation):
+
+| Surface | Suffix filter | KeepRecent | MaxAge |
+|---------|---------------|-----------:|-------:|
+| `runs/<id>.jsonl` | `.jsonl` ONLY (preserves `<job>.lock`) | 100 | 30d |
+| `triggers/.malformed/<id>.json` | `.json` | 20 | 14d |
+
+**Two-axis rationale**: either trigger is sufficient. A power user firing `@every 5m` keeps 8 hours of recent runs via KeepRecent; a quiet user with one weekly job still has ancient runs cleaned via MaxAge. Neither defaults trips on the steady-state install (median user runs 1-2 jobs/day; both bounds remain comfortably under-utilised).
+
+**Safety invariants**:
+
+1. **Suffix filter is load-bearing**. `runs/` holds both `<run-id>.jsonl` (logs — GC fodder) and `<job-name>.lock` (live advisory locks via flock). Deleting a held lock file doesn't unlock it (flock attaches to the inode, not the path) but creates a phantom lock under whoever opens that path next. The GC matches `.jsonl` suffix only — `<job>.lock` files are invisible to the sweep.
+2. **Subdirs skipped**. `IsRegular()` filter — a future per-job runs subdirectory feature (or any operator's manual mkdir) won't be traversed or removed.
+3. **mtime tiebreak deterministic**. 1Hz-resolution filesystems can give two files the same mtime on a fast tick; sort tiebreaks by name descending so the lex-greater (later-id) survives.
+4. **Missing dir is not an error**. Fresh install: `runs/` and `triggers/.malformed/` don't exist yet. GC returns `(0, nil)` rather than propagating ENOENT.
+5. **Best-effort sweep**. Per-file `os.Remove` failures (permissions, racing manual rm) are joined into the returned error but don't abort the sweep — partial cleanup beats no cleanup. Tick logs the error and continues.
+
+**No configuration in v0.6.1**. Defaults are baked into `routines.Default{Runs,Malformed}{KeepRecent,MaxAge}` constants. A `seek cron config set runs.keep_recent N` is a v0.6.x dot follow-up if users complain — the data point so far is "any GC at all > silent unbounded growth".
+
+**Anti-goal**: NO compress-old-runs-to-.tar.zst, NO archive-to-cold-storage, NO "interesting fire" detection (longest run / failed run / different exit code). All of those expand scope into log-pipeline territory. seek's job is to run prompts on schedule; archiving runs that survived a month is the user's problem if they care.
+
+Implementation: `internal/routines.GCRuns(opts)` + `GCMalformedTriggers(opts)`; both go through a shared `gcByAgeAndCount(dir, suffix, keepRecent, maxAge, now)` helper. Tick step 6 invokes both. `TickResult.GCRemoved` aggregates the count for telemetry / verbose logging. Tests cover the safety axes (lock-file preservation, subdir skipping, missing-dir-non-error, mtime tiebreak) plus the per-axis pins (count-only, age-only, combined) plus the Tick-level integration.
+
 ## 4. CLI / TUI
 
 ### 4.1 CLI
