@@ -106,6 +106,61 @@ func TestTemplate_FilterIntersectsWhitelistForExplore(t *testing.T) {
 	}
 }
 
+// TestTemplate_FilterPlanIsReadOnly: lock in the C.2 redesign —
+// plan must NOT include write/edit/bash even when the parent has
+// them. If anyone "fixes" plan back to inheriting parent全集 (per
+// the original PRD v1 wording) this test fails, prompting them to
+// re-read the templates.go rationale before merging.
+//
+// Without this gate, the PRD §2.3 monotonic-收紧 promise quietly
+// degrades to soft-enforcement-via-system-prompt for plan
+// subagents.
+func TestTemplate_FilterPlanIsReadOnly(t *testing.T) {
+	tmpl, _ := TemplateFor(TypePlan)
+	parent := []string{
+		"read", "grep", "list_dir", "git", "webfetch", "think",
+		"write", "edit", "bash", // mutating — MUST be filtered out
+		"propose", "plan", // parent-session-bound — MUST be filtered out
+		"agent", "ask_user", // universally excluded
+	}
+	got := tmpl.Filter(parent)
+	mutating := []string{"write", "edit", "bash"}
+	for _, name := range mutating {
+		if slices.Contains(got, name) {
+			t.Errorf("plan template leaked mutating tool %q — C.2 hard-safety violated", name)
+		}
+	}
+	for _, name := range []string{"propose", "plan"} {
+		if slices.Contains(got, name) {
+			t.Errorf("plan template includes parent-bound tool %q — would pollute parent's plan panel", name)
+		}
+	}
+	// Positive: the standard read-only six must be present.
+	want := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Filter plan = %v, want %v", got, want)
+	}
+}
+
+// TestTemplate_PlanAndExploreHaveSameToolSubset: plan and explore
+// share the same tool set by design (C.2). The framing difference
+// lives in the Extra clause, not the registry. If a future change
+// adds a tool to one but not the other (intentional divergence),
+// this test fails and the author must justify in the PRD.
+func TestTemplate_PlanAndExploreHaveSameToolSubset(t *testing.T) {
+	plan, _ := TemplateFor(TypePlan)
+	explore, _ := TemplateFor(TypeExplore)
+	if !slices.Equal(plan.ToolNames, explore.ToolNames) {
+		t.Errorf("plan tools %v != explore tools %v — divergence requires PRD §3.6 update",
+			plan.ToolNames, explore.ToolNames)
+	}
+	// Extras MUST differ — that's the whole point of keeping
+	// both templates after C.2. If they collapse, drop one.
+	if plan.Extra == explore.Extra {
+		t.Error("plan.Extra == explore.Extra — templates collapsed; drop one or differentiate")
+	}
+}
+
 // TestTemplate_RoleBuildsSubagentRole: the Role() method packages
 // the description + Extra clause into a sysprompt.SubagentRole
 // ready for ComposeSubagent. Verify the round-trip carries content.

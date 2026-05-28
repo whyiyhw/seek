@@ -79,13 +79,37 @@ var templates = map[Type]Template{
 		Extra:       "You are in research-only mode. You cannot write, edit, or run mutating commands. Return findings as bulleted summary.",
 	},
 	TypePlan: {
-		Type:      TypePlan,
-		ToolNames: nil, // inherit (minus agent/ask_user)
-		// Same PlanAnalyze force as explore, but with full tool
-		// access — `plan` subagents propose changes via the
-		// propose tool without executing.
+		Type: TypePlan,
+		// Plan shares explore's read-only subset by design. The
+		// PRD originally had plan inheriting parent全集 to use
+		// the propose tool, but two issues forced a redesign:
+		//
+		//   1. The `propose` tool's sink is bound to the parent's
+		//      session (plan_bridge captures parent activeSession
+		//      / plan panel). A subagent calling propose would
+		//      write artifacts into parent's plan dir and emit
+		//      events into parent's plan panel — cross-context
+		//      pollution.
+		//
+		//   2. With shared parent Tool instances (M11.0
+		//      production wiring) the child's tightened Policy
+		//      (Workflow=PlanAnalyze) isn't consulted by
+		//      individual tool Check() calls — write/edit/bash
+		//      would slip through soft-enforcement. PRD §2.3
+		//      monotonic-收紧 promise would be only as strong as
+		//      the system prompt instruction.
+		//
+		// Resolution (commit <this>): plan = same tools as
+		// explore (read-only); the role prompt below reframes
+		// the output as a structured numbered-step plan rather
+		// than bulleted findings. The parent reads the plan and
+		// may invoke propose itself in the main context.
+		// docs/prd/feature-subagent.md §3.6 reflects this.
+		ToolNames: []string{
+			"read", "grep", "list_dir", "git", "webfetch", "think",
+		},
 		Restriction: permission.Restriction{Workflow: &planAnalyzeWorkflow},
-		Extra:       "You are in plan-analyze mode. Propose changes via the `propose` tool; do not execute.",
+		Extra:       "You are in plan-analyze mode. Investigate the task and return a numbered, structured plan in your final summary — explicit steps the parent (or a human reviewer) can execute. You cannot run mutating tools yourself.",
 	},
 }
 

@@ -423,26 +423,29 @@ type subagentRunnerOpts struct {
 // instances by NAME (filtered via the template's ToolNames). Those
 // instances hold the PARENT's permission.Policy at construction,
 // so the child's tightened Policy (per PRD §2.3) is NOT consulted
-// by individual tool Check() calls. Net safety comes from two
-// places:
+// by individual tool Check() calls. Net safety comes from one
+// place: the per-template ToolNames whitelist.
 //
-//   - The per-template ToolNames whitelist (Filter excludes
-//     write/edit/bash from the explore subagent's child Registry,
-//     so those tools literally aren't reachable).
-//   - The system prompt instructing the model to honour the
-//     subagent's intended workflow ("plan-analyze mode") even
-//     when its tool surface technically allows mutation.
+// Practical consequences (after C.2 narrowing of the plan template
+// in commit <this branch>):
 //
-// Practical consequences:
-//
-//   - `explore` subagents are hard-safe (no mutating tools at all).
+//   - `explore` subagents are hard-safe (whitelist: read / grep /
+//     list_dir / git / webfetch / think — no mutating tools at
+//     all).
+//   - `plan` subagents are hard-safe via the same whitelist
+//     (after C.2: plan and explore share an identical tool
+//     subset; only the Extra clause framing differs).
 //   - `general-purpose` subagents see the parent's permission
-//     level — which is INTENDED, since they inherit. No leak.
-//   - `plan` subagents trust the system prompt to keep them out of
-//     write/edit/bash. A future commit will reconstruct per-spawn
-//     Registries with the child Policy threaded through so the
-//     Workflow=PlanAnalyze restriction is hard-enforced at the
-//     tool gate too. Tracked as M11.x in the v5 roadmap.
+//     level — which is INTENDED, since they inherit pref+workflow.
+//     No leak.
+//
+// A future commit (v0.6.x dot release) will reconstruct per-spawn
+// Registries with the child Policy threaded through so PRD §2.3
+// monotonic-收紧 promise is hard-enforced at every tool gate —
+// at which point `plan` can re-acquire access to the `propose`
+// tool (currently dropped because propose's sink binds to the
+// parent's session). See feature-subagent.md §9 "v0.6.x dot:
+// per-spawn Registry 重建".
 func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
 		// Filter parent registry by ToolNames. The Filter the

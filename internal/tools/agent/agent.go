@@ -50,7 +50,7 @@ var schemaBytes = []byte(`{
     "subagent_type": {
       "type": "string",
       "enum": ["general-purpose", "explore", "plan"],
-      "description": "general-purpose: full tools (minus agent/ask_user), parent's model, inherits parent permissions. explore: read-only subset (read/grep/list_dir/git/webfetch/think) forced into plan-analyze workflow regardless of parent — use for parallel research. plan: full tools but forced plan-analyze — use for proposing changes without executing."
+      "description": "general-purpose: full tools (minus agent/ask_user), parent's model, inherits parent permissions. explore: read-only subset (read/grep/list_dir/git/webfetch/think) forced into plan-analyze workflow regardless of parent — output is bulleted findings; use for parallel research. plan: same read-only subset as explore, forced into plan-analyze workflow — output is a numbered, structured action plan the parent (or a human reviewer) can execute step by step."
     },
     "isolation": {
       "type": "string",

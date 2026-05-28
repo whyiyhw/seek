@@ -199,7 +199,14 @@ func (p *Policy) Cwd() string
 |---|---|---|---|
 | `general-purpose` | 父 Registry 全集 **减** `agent` / `ask_user` | role 提示 + 摘要长度提示（见下） | inherit |
 | `explore` | read / grep / list_dir / git / webfetch / think | role 提示 + "You are in research-only mode. You cannot write, edit, or run mutating commands. Return findings as bulleted summary." + 摘要长度提示 | Workflow=`PlanAnalyze`（强制只读，即使父 Yolo） |
-| `plan` | 父 Registry 全集 **减** `agent` / `ask_user` | role 提示 + "You are in plan-analyze mode. Propose changes via the `propose` tool; do not execute." + 摘要长度提示 | Workflow=`PlanAnalyze` |
+| `plan` | read / grep / list_dir / git / webfetch / think（与 explore 同） | role 提示 + "You are in plan-analyze mode. Investigate the task and return a numbered, structured plan in your final summary — explicit steps the parent (or a human reviewer) can execute. You cannot run mutating tools yourself." + 摘要长度提示 | Workflow=`PlanAnalyze` |
+
+**为什么 `plan` 与 `explore` 共用同一只读子集（C.2 决策，M11.0）**：原 v1 设计把 plan 定为"父全集 + 用 `propose` 工具"，但实现时发现两个硬约束让该路径走不通——
+
+1. `propose` 工具的 sink 绑定父 session（`plan_bridge` 捕获父 `activeSession` + plan panel）。子调用 `propose` 会把 artifact 写到父 plan 目录、事件灌到父 plan panel，形成跨上下文污染。
+2. M11.0 production wiring 复用父 reg 的 Tool 实例（共享父 Policy）。子的 `Workflow=PlanAnalyze` 限制**不被** tools 自己的 `Check()` 强制（PRD §2.3 monotonic-收紧 promise 在这一路径上只能软兜底于 system prompt 指令）。
+
+**净效果**：`plan` 与 `explore` 在工具能力上**完全相同**——区别只在 Extra clause 的 framing。`explore` 输出 bulleted findings；`plan` 输出 numbered structured steps。父读到子 summary 后，如有执行需要，由父在主上下文里调 `propose`。这是 M11.0 的 ship-with 决策；未来若 per-spawn Registry 重建（PRD §8 风险表 "Policy passthrough"）落地，可重新评估让 `plan` 拥有 `propose` 工具的可行性。
 
 **统一的 role 提示**（首行，三模板共用）：
 
@@ -480,11 +487,13 @@ audit log 在 worktree 场景下记录**两个**path 字段：`path_worktree`（
 | Worktree 隔离下子用 `bash` 跑 `echo poison > ../../parent/foo` 或 `rm -rf /abs/path/outside` 越界 | **v5 不做路径沙箱**——`bash.cmd.Dir` 的 pin 防的是 cwd 漂移，不是绝对路径越权。文档 + 工具 description 明确"`isolation: worktree` 防的是文件冲突与并行实施，**不是**沙箱安全；不要让不可信子代理代跑 untrusted 代码"。真正沙箱留到 v6（评估容器化或路径白名单） |
 | `-resume` 父 session 时父 baseUsage 已含子的累计 → 再 `AdoptChild` 子 Tracker → 重复计数 | `AdoptChild` 不调用于已完成的子；resume 只读子的 `subagents.jsonl` 最终事件做 `/agents` 渲染。**Tracker 加 "adoption flag"** 字段，标记已被父 baseUsage 吸纳的子，再次 AdoptChild 时短路 |
 | `-resume` 时遇到 `started` 无终态的子 → `/agents` 面板显示"3 个活跃"但实际进程都死了 | resume 启动钩子扫 `subagents.jsonl`，对所有 `started` 无终态的 sub_sid 立即追写一行 `event: "orphaned"`（§3.4 状态折叠规则自动处理）；同步 fire `SessionStartObserver` 让相关清理（如 orphan worktree 检测）一并触发 |
+| **Policy passthrough**（M11.0 已知限制）：子 agent 调 write/edit/bash 时工具用的是**父 Policy** 做 `Check`，子的 `Workflow=PlanAnalyze` 限制**不被工具 Check 强制**。原因：M11.0 production wiring 复用父 reg 的 Tool 实例，这些工具在父 reg 构造时已绑死父 Policy 引用 | **M11.0 ship-with 三层保护**：(a) `explore` 子模板直接不包含 write/edit/bash —— hard safety via tool whitelist；(b) `plan` 子模板 §3.6 已窄化为只读子集（C.2 决策）—— 与 explore 同；(c) `general-purpose` 子继承父 Policy 是设计意图，passthrough 等价。**未决项**：未来若需让 plan 用 `propose` / 真正 hard-enforce 子 Workflow，需做 **per-spawn Registry 重建**（重构 6 个 Policy-持有 tool 的构造路径 + 子构造闭包），追踪到 v0.6.x dot release |
 
 ## 9. 后续版本
 
 - **v0.6.x dot**：子 agent 实时流式回显到父 TUI（可折叠区域）—— v5 只做 "agent in progress" 占位
 - **v0.6.x dot**：`MaxConcurrentSubagents` 暴露为配置项 + `/agents` 面板内提升/降低
+- **v0.6.x dot**：**per-spawn Registry 重建**——让 6 个吃 Policy 的工具（read/write/edit/bash/memorytool.Remember/skillinstall.Commit）在 Manager.Spawn 时用 childPolicy 重构造，PRD §2.3 monotonic-收紧 promise 在工具 Check 级别也 hard-enforce。这一项落地后即可放开 plan 模板的工具子集，让它真正持有 `propose`（须先解决 propose sink 跨上下文污染——可能要给 propose 一个 sub-aware bridge）
 - **v6**：嵌套 spawn 深度 > 1（评估后决定）
 - **v6**：`subagent_type` 注册表开放给 skill（社区分发 code-reviewer / security-reviewer 等专精 agent）
 - **v6**：跨 worktree 合并辅助工具（`merge_worktree`）+ 三方合并冲突提示
