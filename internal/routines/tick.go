@@ -91,6 +91,13 @@ type TickOptions struct {
 	// paths.CronDir(). When set, RunsDir + TickLockPath are
 	// derived from this root rather than the host-global path.
 	CronDir string
+
+	// Notifier dispatches the OS notification on terminal-event
+	// (per Job.Notify policy). nil → DefaultNotifier (per-build-
+	// tag platform shim: osascript on darwin, notify-send on
+	// linux, no-op on windows + other). Tests inject a stub
+	// recorder to assert without popping real banners.
+	Notifier Notifier
 }
 
 func (o *TickOptions) now() time.Time {
@@ -112,6 +119,13 @@ func (o *TickOptions) runTimeout() time.Duration {
 		return o.RunTimeout
 	}
 	return DefaultRunTimeout
+}
+
+func (o *TickOptions) notifier() Notifier {
+	if o.Notifier != nil {
+		return o.Notifier
+	}
+	return DefaultNotifier
 }
 
 // tickPaths bundles the four paths Tick writes under. Either
@@ -214,13 +228,14 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 
 	subFn := opts.subprocess()
 	runTimeout := opts.runTimeout()
+	notifier := opts.notifier()
 
 	var wg sync.WaitGroup
 	for _, j := range due {
 		wg.Add(1)
 		go func(j Job) {
 			defer wg.Done()
-			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn)
+			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn, notifier)
 		}(j)
 	}
 	wg.Wait()
@@ -265,7 +280,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 	if err != nil {
 		return err
 	}
-	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess())
+	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess(), opts.notifier())
 	return nil
 }
 
@@ -278,7 +293,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 //     prior fire; skip silently.
 //   - lock acquire I/O error → log to stderr, skip; don't crash
 //     the whole tick.
-func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn) {
+func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn, notify Notifier) {
 	jobLockPath := filepath.Join(runsDir, job.Name+".lock")
 	jobLock, ok, err := TryLock(jobLockPath)
 	if err != nil {
@@ -373,7 +388,16 @@ func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, jo
 	streamersWG.Wait()
 	dur := time.Since(startedAt)
 
-	// Classify outcome.
+	// Classify outcome + dispatch OS notification per
+	// job.Notify policy. Notifications fire AFTER MarkRun so
+	// the store reflects the run before the user clicks/sees
+	// the popup (no race where the popup arrives but `seek
+	// cron list` still shows old status).
+	var (
+		terminalStatus string
+		terminalErrMsg string
+		terminalNote   string // body text fed to OS notification
+	)
 	switch {
 	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 		// Wait for grace period after the kernel SIGKILL'd via
@@ -383,17 +407,25 @@ func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, jo
 		// implicit here — cmd.Wait already returned, so we
 		// just record.
 		_ = rr.WriteKilled("timeout", dur)
-		_ = store.MarkRun(job.Name, runID, StatusKilled, "timeout", ranAt)
+		terminalStatus = StatusKilled
+		terminalErrMsg = "timeout"
+		terminalNote = fmt.Sprintf("killed after %s (timeout)", dur.Round(time.Second))
 	case errors.Is(parentCtx.Err(), context.Canceled) && runCtx.Err() != nil:
 		_ = rr.WriteKilled("canceled", dur)
-		_ = store.MarkRun(job.Name, runID, StatusKilled, "canceled", ranAt)
+		terminalStatus = StatusKilled
+		terminalErrMsg = "canceled"
+		terminalNote = "canceled mid-run"
 	case waitErr == nil:
 		exit := cmd.ProcessState.ExitCode()
 		summaryMu.Lock()
 		summary := strings.TrimRight(summaryBuf.String(), "\n")
 		summaryMu.Unlock()
 		_ = rr.WriteCompleted(exit, dur, summary)
-		_ = store.MarkRun(job.Name, runID, StatusCompleted, "", ranAt)
+		terminalStatus = StatusCompleted
+		terminalNote = summary
+		if terminalNote == "" {
+			terminalNote = fmt.Sprintf("completed in %s", dur.Round(time.Second))
+		}
 	default:
 		exit := -1
 		if ps := cmd.ProcessState; ps != nil {
@@ -401,10 +433,26 @@ func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, jo
 		}
 		errMsg := waitErr.Error()
 		_ = rr.WriteFailed(exit, dur, errMsg)
-		_ = store.MarkRun(job.Name, runID, StatusFailed, errMsg, ranAt)
+		terminalStatus = StatusFailed
+		terminalErrMsg = errMsg
+		terminalNote = errMsg
 	}
 
-	_ = cronDir // reserved for future hooks (triggers/ dir in M11.3)
+	_ = store.MarkRun(job.Name, runID, terminalStatus, terminalErrMsg, ranAt)
+
+	// Notification dispatch — best-effort. A notify failure
+	// writes WARN to stderr but never undoes MarkRun. Per PRD
+	// §3.8 "fallback (binary missing): write WARN to the run
+	// record, don't fail the cron run itself" — we stick that
+	// WARN on stderr too so launchd / systemd logs surface it.
+	if notify != nil && shouldNotify(job, terminalStatus) {
+		title := fmt.Sprintf("seek cron: %s (%s)", job.Name, terminalStatus)
+		if err := notify(title, terminalNote); err != nil {
+			fmt.Fprintf(os.Stderr, "routines: notify failed for %s: %v\n", job.Name, err)
+		}
+	}
+
+	_ = cronDir // reserved for triggers/ dispatcher (M11.3 follow-up)
 }
 
 // drainStream reads chunks from r until EOF, calling onChunk
