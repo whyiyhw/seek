@@ -1,0 +1,390 @@
+package routines
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/whyiyhw/seek/internal/paths"
+)
+
+// DefaultRunTimeout is the per-run wall-clock cap (PRD §3.6
+// "Subprocess timeout: hard 30 min default"). After timeout
+// the engine sends SIGTERM, waits gracePeriod for clean exit,
+// then SIGKILL.
+const (
+	DefaultRunTimeout = 30 * time.Minute
+	summaryHeadBytes  = 1024
+)
+
+// Future work (M11.3 / dot release): explicit SIGTERM →
+// terminateGrace → SIGKILL escalation. Today exec.CommandContext's
+// cancel sends SIGKILL directly when ctx Deadline expires — which
+// works but doesn't give the child a chance to flush state. A
+// kinder escalation lives in feature-routines.md §9 follow-ups.
+
+// SubprocessFn builds the *exec.Cmd used to actually run a job.
+// Injectable so tests use /bin/sh stubs instead of needing a
+// real `seek` binary on PATH. Production callers should use
+// DefaultSubprocess (defined in cmd/seek when the binary path
+// is known); the package-level default below uses os.Executable.
+//
+// ctx is per-run (already wrapped with the timeout); the
+// function MUST use exec.CommandContext(ctx, ...) so cancellation
+// propagates to the child via SIGKILL on context Done.
+type SubprocessFn func(ctx context.Context, job Job, runID string) (*exec.Cmd, error)
+
+// DefaultSubprocess builds the cron child process: `seek -p
+// '<prompt>' [--yolo] [--no-save]` running with cmd.Dir set to
+// the job's ProjectRoot (or the current working dir if
+// unspecified). Adds --no-save by default (PRD §5.3); a future
+// SaveSession field on Job will let users opt back in.
+//
+// Returns an error if os.Executable lookup fails — better to
+// surface that loudly than silently fall back to PATH and
+// inherit ambiguity about which seek binary is running.
+func DefaultSubprocess(ctx context.Context, job Job, runID string) (*exec.Cmd, error) {
+	bin, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("routines: locate seek binary: %w", err)
+	}
+	args := []string{"-p", job.Prompt, "--no-save"}
+	if job.Yolo {
+		args = append(args, "--yolo")
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	if job.ProjectRoot != "" {
+		cmd.Dir = job.ProjectRoot
+	}
+	return cmd, nil
+}
+
+// TickOptions configures one Tick invocation. All fields are
+// optional with sensible defaults; tests inject the bits they
+// need to drive specific paths (deterministic Now, scripted
+// Subprocess, custom RunTimeout).
+type TickOptions struct {
+	// Now is the moment Tick treats as "current time" for
+	// due-job filtering + run record timestamps. Defaults to
+	// time.Now().UTC. Tests inject to get reproducible IDs.
+	Now func() time.Time
+
+	// Subprocess builds the *exec.Cmd for each due job.
+	// Defaults to DefaultSubprocess. Tests pass a fake that
+	// uses /bin/sh.
+	Subprocess SubprocessFn
+
+	// RunTimeout caps each job's wall-clock duration. Defaults
+	// to DefaultRunTimeout (30 min). Per-job override is a
+	// Step 3+ CLI feature.
+	RunTimeout time.Duration
+
+	// CronDir overrides ~/.seek/cron/ for tests. Empty →
+	// paths.CronDir(). When set, RunsDir + TickLockPath are
+	// derived from this root rather than the host-global path.
+	CronDir string
+}
+
+func (o *TickOptions) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now().UTC()
+}
+
+func (o *TickOptions) subprocess() SubprocessFn {
+	if o.Subprocess != nil {
+		return o.Subprocess
+	}
+	return DefaultSubprocess
+}
+
+func (o *TickOptions) runTimeout() time.Duration {
+	if o.RunTimeout > 0 {
+		return o.RunTimeout
+	}
+	return DefaultRunTimeout
+}
+
+// tickPaths bundles the four paths Tick writes under. Either
+// derived from paths.CronDir() (production) or from opts.CronDir
+// (tests).
+type tickPaths struct {
+	cronDir      string
+	runsDir      string
+	tickLockPath string
+}
+
+func resolveTickPaths(opts TickOptions) (tickPaths, error) {
+	if opts.CronDir != "" {
+		return tickPaths{
+			cronDir:      opts.CronDir,
+			runsDir:      filepath.Join(opts.CronDir, "runs"),
+			tickLockPath: filepath.Join(opts.CronDir, "tick.lock"),
+		}, nil
+	}
+	dir, err := paths.CronDir()
+	if err != nil {
+		return tickPaths{}, err
+	}
+	return tickPaths{
+		cronDir:      dir,
+		runsDir:      filepath.Join(dir, "runs"),
+		tickLockPath: filepath.Join(dir, "tick.lock"),
+	}, nil
+}
+
+// TickResult summarises one Tick invocation.
+type TickResult struct {
+	// Skipped is true when tick.lock was held by another
+	// process; this Tick was a silent no-op.
+	Skipped bool
+	// Considered is the count of jobs Tick looked at.
+	Considered int
+	// Fired is the count of jobs that crossed NextRun and got
+	// a goroutine. Note: Fired counts ATTEMPTS — a job whose
+	// per-job lock was held still increments this so the
+	// caller can tell "tick wasn't idle" apart from "tick
+	// idle".
+	Fired int
+}
+
+// Tick runs one scan-and-fire cycle. Acquires tick.lock LOCK_NB
+// (skip silently if held); reads jobs from store; for each due
+// job, spawns a goroutine that acquires the per-job lock,
+// records the run, and updates the store on completion. Waits
+// for all goroutines before returning.
+//
+// Cancellable: ctx Done before all jobs finish → outstanding
+// subprocesses get SIGKILL via their per-run ctx; recorders
+// flush "killed" terminal events; Tick returns ctx.Err() after
+// goroutine drain.
+//
+// Returns ctx.Err() on cancellation; flock / I/O errors on
+// path setup; nil on a clean tick (whether jobs ran or not).
+func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, error) {
+	if store == nil {
+		return TickResult{}, errors.New("routines: Tick: nil Store")
+	}
+	tp, err := resolveTickPaths(opts)
+	if err != nil {
+		return TickResult{}, err
+	}
+
+	// 1. Host-wide tick.lock LOCK_NB. Another tick (or a
+	//    long-running Store mutation that uses the same lock,
+	//    if we ever add that path) → skip silently. OS scheduler
+	//    fires again in ~1 minute; the skip cost is one open()
+	//    + flock syscall.
+	tickLock, ok, err := TryLock(tp.tickLockPath)
+	if err != nil {
+		return TickResult{}, fmt.Errorf("routines: tick.lock: %w", err)
+	}
+	if !ok {
+		return TickResult{Skipped: true}, nil
+	}
+	defer tickLock.Close()
+
+	// 2-3. Load + filter due jobs under `now`.
+	now := opts.now()
+	jobs, err := store.List()
+	if err != nil {
+		return TickResult{}, err
+	}
+	due := make([]Job, 0, len(jobs))
+	for _, j := range jobs {
+		if j.NextRun.IsZero() || !j.NextRun.After(now) {
+			due = append(due, j)
+		}
+	}
+
+	// 4. Per-job goroutine fan-out.
+	res := TickResult{Considered: len(jobs), Fired: len(due)}
+	if len(due) == 0 {
+		return res, nil
+	}
+
+	subFn := opts.subprocess()
+	runTimeout := opts.runTimeout()
+
+	var wg sync.WaitGroup
+	for _, j := range due {
+		wg.Add(1)
+		go func(j Job) {
+			defer wg.Done()
+			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn)
+		}(j)
+	}
+	wg.Wait()
+
+	if err := ctx.Err(); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// runOne is the body of the per-job goroutine. Three locking
+// outcomes:
+//
+//   - lock free → ran the subprocess, wrote a run record, called
+//     Store.MarkRun.
+//   - lock held → another tick is still running this job from a
+//     prior fire; skip silently.
+//   - lock acquire I/O error → log to stderr, skip; don't crash
+//     the whole tick.
+func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn) {
+	jobLockPath := filepath.Join(runsDir, job.Name+".lock")
+	jobLock, ok, err := TryLock(jobLockPath)
+	if err != nil {
+		// Lock infrastructure broken; don't kill the whole
+		// tick — log via stderr and move on. The job stays at
+		// its current NextRun; next tick will retry.
+		fmt.Fprintf(os.Stderr, "routines: per-job lock %s: %v\n", job.Name, err)
+		return
+	}
+	if !ok {
+		// Prior fire still in flight; skip silently. The next
+		// tick will retry if it's due again by then.
+		return
+	}
+	defer jobLock.Close()
+
+	// Per-run context: timeout + cancellable on parent.
+	runCtx, cancel := context.WithTimeout(parentCtx, timeout)
+	defer cancel()
+
+	runID := NewRunID(ranAt)
+	startedAt := ranAt
+
+	// Build the subprocess BEFORE writing the run record header
+	// — we want the header.command field to reflect the actual
+	// argv that gets exec'd. If Subprocess returns an error
+	// (e.g. os.Executable failed), no run file is written; we
+	// still call MarkRun so the failure surfaces in
+	// `seek cron list` as last_status=failed.
+	cmd, subErr := subFn(runCtx, job, runID)
+	if subErr != nil {
+		errMsg := fmt.Sprintf("subprocess build failed: %v", subErr)
+		_ = store.MarkRun(job.Name, runID, StatusFailed, errMsg, ranAt)
+		return
+	}
+
+	rr, err := NewRecorder(runsDir, runID, job.Name, job.ProjectRoot,
+		append([]string{cmd.Path}, cmd.Args[1:]...), job.Yolo, startedAt)
+	if err != nil {
+		// Failed to create the run record — log + mark failed.
+		errMsg := fmt.Sprintf("create run record: %v", err)
+		_ = store.MarkRun(job.Name, runID, StatusFailed, errMsg, ranAt)
+		return
+	}
+	defer rr.Close()
+
+	// Pipe stdout / stderr through goroutines that write events
+	// to the run record. Buffered reader so each Read returns a
+	// reasonable chunk; the recorder's mu serialises writes.
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = rr.WriteFailed(-1, 0, "stdout pipe: "+err.Error())
+		_ = store.MarkRun(job.Name, runID, StatusFailed, err.Error(), ranAt)
+		return
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		_ = rr.WriteFailed(-1, 0, "stderr pipe: "+err.Error())
+		_ = store.MarkRun(job.Name, runID, StatusFailed, err.Error(), ranAt)
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		_ = rr.WriteFailed(-1, 0, "start: "+err.Error())
+		_ = store.MarkRun(job.Name, runID, StatusFailed, err.Error(), ranAt)
+		return
+	}
+
+	var (
+		streamersWG sync.WaitGroup
+		summaryBuf  strings.Builder
+		summaryMu   sync.Mutex
+	)
+	streamersWG.Add(2)
+	go drainStream(&streamersWG, stdoutPipe, func(chunk string) {
+		_ = rr.WriteStdout(chunk)
+		summaryMu.Lock()
+		if summaryBuf.Len() < summaryHeadBytes {
+			remaining := summaryHeadBytes - summaryBuf.Len()
+			if len(chunk) > remaining {
+				chunk = chunk[:remaining]
+			}
+			summaryBuf.WriteString(chunk)
+		}
+		summaryMu.Unlock()
+	})
+	go drainStream(&streamersWG, stderrPipe, func(chunk string) {
+		_ = rr.WriteStderr(chunk)
+	})
+
+	waitErr := cmd.Wait()
+	streamersWG.Wait()
+	dur := time.Since(startedAt)
+
+	// Classify outcome.
+	switch {
+	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		// Wait for grace period after the kernel SIGKILL'd via
+		// CommandContext, then write killed. (DeadlineExceeded
+		// triggers cancel() which sends SIGKILL; cmd.Wait
+		// returns once the process exits.) The grace is
+		// implicit here — cmd.Wait already returned, so we
+		// just record.
+		_ = rr.WriteKilled("timeout", dur)
+		_ = store.MarkRun(job.Name, runID, StatusKilled, "timeout", ranAt)
+	case errors.Is(parentCtx.Err(), context.Canceled) && runCtx.Err() != nil:
+		_ = rr.WriteKilled("canceled", dur)
+		_ = store.MarkRun(job.Name, runID, StatusKilled, "canceled", ranAt)
+	case waitErr == nil:
+		exit := cmd.ProcessState.ExitCode()
+		summaryMu.Lock()
+		summary := strings.TrimRight(summaryBuf.String(), "\n")
+		summaryMu.Unlock()
+		_ = rr.WriteCompleted(exit, dur, summary)
+		_ = store.MarkRun(job.Name, runID, StatusCompleted, "", ranAt)
+	default:
+		exit := -1
+		if ps := cmd.ProcessState; ps != nil {
+			exit = ps.ExitCode()
+		}
+		errMsg := waitErr.Error()
+		_ = rr.WriteFailed(exit, dur, errMsg)
+		_ = store.MarkRun(job.Name, runID, StatusFailed, errMsg, ranAt)
+	}
+
+	_ = cronDir // reserved for future hooks (triggers/ dir in M11.3)
+}
+
+// drainStream reads chunks from r until EOF, calling onChunk
+// for each non-empty chunk. Uses bufio so reads are buffered
+// (default 4 KB) — small enough that "live" tailing of the
+// run file shows progress, large enough to avoid syscall
+// overhead per byte.
+func drainStream(wg *sync.WaitGroup, r io.Reader, onChunk func(string)) {
+	defer wg.Done()
+	buf := bufio.NewReader(r)
+	tmp := make([]byte, 4096)
+	for {
+		n, err := buf.Read(tmp)
+		if n > 0 {
+			onChunk(string(tmp[:n]))
+		}
+		if err != nil {
+			return
+		}
+	}
+}
