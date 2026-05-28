@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/pkg/agent"
 )
 
@@ -324,7 +325,20 @@ func (m Model) renderStatusBar() string {
 		StreamElapsed:    streamElapsed,
 		StreamDeltaBytes: m.streamDeltaBytes,
 		UpgradeAvailable: m.upgradeAvailable,
+		SubagentsActive:  subagentsActiveCount(m.opts.Subagents),
 	})
+}
+
+// subagentsActiveCount nil-safe wraps Manager.ActiveCount so the
+// view-side caller (a hot render path) doesn't have to guard each
+// time. nil Manager → 0, suppressing the badge. Lives next to the
+// status-bar producer rather than as a Manager method because
+// nil-safety is a TUI concern, not a Manager API concern.
+func subagentsActiveCount(m *subagent.Manager) int {
+	if m == nil {
+		return 0
+	}
+	return m.ActiveCount()
 }
 
 // renderQueueHint returns a one-line indicator for queued / steering

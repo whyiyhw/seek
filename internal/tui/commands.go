@@ -24,6 +24,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
@@ -73,6 +74,10 @@ func allCommands() []command {
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		// v3 柱 A checkpoint surface (PRD docs/prd/feature-checkpoint.md §4.2).
 		{names: []string{"/checkpoints"}, usage: "/checkpoints", description: "List git checkpoints for this session (the per-turn working-tree snapshots seek wrote before destructive actions).", handler: cmdCheckpoints},
+		// v5 柱 G subagent surface (PRD docs/prd/feature-subagent.md §4.2).
+		// M11.0 ships a read-only text table; interactive picker
+		// (Enter for detail / `k` to kill) lands in a v0.6.x dot.
+		{names: []string{"/agents"}, usage: "/agents", description: "List subagents in this project: spawn time, type, status, turns, tokens, description. Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
 		{names: []string{"/restore"}, usage: "/restore [last|<turn>]", description: "Restore the working tree to a git checkpoint. No args = last; pass a turn number for a specific one. HEAD is NOT moved; --force needed if working tree is dirty.", handler: cmdRestore},
 		{names: []string{"/undo"}, usage: "/undo [<path>]", description: "Undo the most recent write/edit (file checkpoint). With a path: undo the most recent change to that file. Refuses if the file was modified externally; pass --force to override.", handler: cmdUndo},
 		{names: []string{"/redo"}, usage: "/redo [<path>]", description: "Redo the most recently undone write/edit. Truncated by a fresh write/edit (classic editor semantics).", handler: cmdRedo},
@@ -1872,4 +1877,65 @@ func truncateForCheckpoint(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-1] + "…"
+}
+
+// ----- v5 柱 G subagent slash command (feature-subagent.md §4.2) -----
+//
+// M11.0 ships a read-only text-table view, same pattern as
+// /checkpoints. The fuller picker (Enter for detail / `k` to kill
+// active subagents / live refresh as events arrive) is in
+// feature-subagent.md §9 "v0.6.x dot" and lands after the M11.1
+// worktree work — by then there'll be more state worth navigating.
+
+func cmdAgents(m *Model, _ string) cmdResult {
+	if m.opts.Subagents == nil {
+		return cmdResult{text: styleMuted.Render("/agents: unavailable (--no-save or session not initialised)")}
+	}
+	subs, err := m.opts.Subagents.List(subagent.ListFilter{})
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/agents: " + err.Error())}
+	}
+	if len(subs) == 0 {
+		return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
+	}
+
+	// Columns chosen to fit a typical 100-col TUI without wrap:
+	//   STARTED  TIME  TYPE(15)  STATUS(10)  TURNS  TOKENS  DESCRIPTION(remaining)
+	// SHORT (random sub-sid suffix) is more readable than the full
+	// 22-char timestamped ID and matches the wire-format footer
+	// shown in tool results.
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-8s %-15s %-10s %5s %8s  %s\n",
+		"SUB-SID", "TYPE", "STATUS", "TURNS", "TOKENS", "DESCRIPTION")
+	for _, s := range subs {
+		tokens := s.Tokens.Prompt + s.Tokens.Completion
+		turns := "-"
+		// Turns isn't a Subagent field (the index events carry
+		// tokens but not a turn count — that lives in the wire
+		// format footer the tool result already shows). We
+		// surface "-" rather than fake a value; if the user
+		// wants the per-spawn turn count they go look at the
+		// transcript or the tool result in scrollback. Future:
+		// add Turns to the completed event payload.
+		fmt.Fprintf(&b, "%-8s %-15s %-10s %5s %8d  %s\n",
+			truncateForCheckpoint(shortSubSid(s.SubSid), 8),
+			truncateForCheckpoint(string(s.Type), 15),
+			truncateForCheckpoint(string(s.Status), 10),
+			turns,
+			tokens,
+			truncateForCheckpoint(s.Description, 56))
+	}
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
+}
+
+// shortSubSid mirrors internal/subagent.shortSid — the random
+// suffix after the last hyphen — but is duplicated here so the TUI
+// doesn't import a private helper. If the wire-format owner
+// promotes shortSid to a package-level export, replace this with
+// the direct call.
+func shortSubSid(subSid string) string {
+	if i := strings.LastIndex(subSid, "-"); i >= 0 && i < len(subSid)-1 {
+		return subSid[i+1:]
+	}
+	return subSid
 }

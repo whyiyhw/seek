@@ -1163,8 +1163,13 @@ func run() error {
 	// the next subagent's system prompt; ParentToolNamesFn reads
 	// reg.Names() live so plan/propose tools added below are
 	// available to subagents that want them (e.g. plan template).
+	// Declared outside the !*noSave block so the TUI Options
+	// below can pass the same pointer (or nil) without scoping
+	// gymnastics. /agents handler nil-checks it.
+	var subagentMgr *subagent.Manager
 	if !*noSave && activeSession != nil {
-		subagentMgr, smerr := subagent.NewManager(subagent.ManagerOpts{
+		var smerr error
+		subagentMgr, smerr = subagent.NewManager(subagent.ManagerOpts{
 			ProjectAbsPath: abs,
 			ParentTracker:  tracker,
 			ParentPolicy:   policy,
@@ -1455,6 +1460,7 @@ func run() error {
 		Session:               activeSession,
 		Store:                 store,
 		Checkpoint:            ckMgr,
+		Subagents:             subagentMgr,
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,

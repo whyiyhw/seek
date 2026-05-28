@@ -28,6 +28,48 @@ func stripANSI(s string) string {
 	return sb.String()
 }
 
+// TestStatusBar_SubagentBadge pins the v5 柱 G status-bar
+// indicator (PRD §4.3). Non-zero count shows "⤴ N agents";
+// zero count suppresses entirely. Singular/plural matter
+// because users WILL nitpick "⤴ 1 agents" reading.
+func TestStatusBar_SubagentBadge(t *testing.T) {
+	// Zero — no badge.
+	zero := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model: "deepseek-chat",
+		Width: 120,
+		// SubagentsActive: 0 by default
+	}))
+	if strings.Contains(zero, "⤴") {
+		t.Errorf("agent badge leaked with zero active: %q", zero)
+	}
+	if strings.Contains(zero, "agent") {
+		t.Errorf("agent label leaked with zero active: %q", zero)
+	}
+
+	// One — singular.
+	one := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:           "deepseek-chat",
+		Width:           120,
+		SubagentsActive: 1,
+	}))
+	if !strings.Contains(one, "⤴ 1 agent") {
+		t.Errorf("expected '⤴ 1 agent' badge, got: %q", one)
+	}
+	if strings.Contains(one, "1 agents") {
+		t.Errorf("singular pluralisation wrong: %q", one)
+	}
+
+	// Three — plural.
+	three := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:           "deepseek-chat",
+		Width:           120,
+		SubagentsActive: 3,
+	}))
+	if !strings.Contains(three, "⤴ 3 agents") {
+		t.Errorf("expected '⤴ 3 agents' badge, got: %q", three)
+	}
+}
+
 // TestStatusBar_UpgradeAvailable verifies the "↑ <tag>" segment lands
 // in the bar when a newer release was detected at startup. Empty
 // UpgradeAvailable must produce no upgrade segment — otherwise we'd

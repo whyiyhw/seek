@@ -70,6 +70,14 @@ type StatusSnapshot struct {
 	// by the startup probe. Empty when up-to-date or the probe was
 	// skipped — in which case no segment is rendered.
 	UpgradeAvailable string
+
+	// SubagentsActive is the count of in-flight subagents at render
+	// time (v5 柱 G; PRD docs/prd/feature-subagent.md §4.3).
+	// Zero suppresses the badge so idle sessions show nothing —
+	// the indicator's job is to remind the user "something is
+	// happening in the background", and zero count means nothing
+	// is happening.
+	SubagentsActive int
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -191,6 +199,20 @@ func rightSegments(s StatusSnapshot) []string {
 
 	out = append(out, formatBudget(s))
 	out = append(out, formatTier(s))
+
+	// Subagent badge: only shown while at least one subagent is
+	// active. Tinted ok-colour to signal "background work is
+	// progressing" rather than alarm — the badge is informational,
+	// not a warning. ⤴ glyph chosen for "delegated upward to a
+	// sibling context"; falls back to a plain "agents:N" when the
+	// terminal can't render the rune (most modern terminals can).
+	if s.SubagentsActive > 0 {
+		badge := fmt.Sprintf("⤴ %d agent", s.SubagentsActive)
+		if s.SubagentsActive != 1 {
+			badge += "s"
+		}
+		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render(badge))
+	}
 	return out
 }
 

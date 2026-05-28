@@ -15,8 +15,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -82,6 +84,103 @@ func runHandler(t *testing.T, m *Model, input string) cmdResult {
 	}
 	t.Fatalf("no handler for %q", input)
 	return cmdResult{}
+}
+
+// TestCmdAgents_NilManager covers the --no-save / session-less path
+// — /agents must produce a clear "unavailable" hint rather than
+// crash. emptyModel leaves opts.Subagents nil by default.
+func TestCmdAgents_NilManager(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	res := runHandler(t, m, "/agents")
+	if !strings.Contains(res.text, "unavailable") {
+		t.Errorf("expected 'unavailable' for nil Subagents Manager, got: %q", res.text)
+	}
+}
+
+// TestCmdAgents_EmptyList covers the steady-state happy path before
+// any subagent has been spawned in this project. NOT t.Parallel —
+// newCmdTestSubagentMgr uses t.Setenv to redirect ~/.seek, which is
+// mutually exclusive with parallel.
+func TestCmdAgents_EmptyList(t *testing.T) {
+	mgr := newCmdTestSubagentMgr(t, nil)
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	res := runHandler(t, m, "/agents")
+	if !strings.Contains(res.text, "no subagents") {
+		t.Errorf("expected 'no subagents' hint for empty list, got: %q", res.text)
+	}
+}
+
+// TestCmdAgents_RendersTable covers the populated case. Spawns
+// one subagent via a stub Runner that returns immediately, then
+// verifies all six column headers + the subagent's row content
+// land in the output. NOT t.Parallel for the same reason as
+// TestCmdAgents_EmptyList.
+func TestCmdAgents_RendersTable(t *testing.T) {
+	mgr := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{
+			Summary: "Found Esc handlers in three packages.",
+			Tokens:  subagent.Tokens{Prompt: 8000, Completion: 100, CacheHit: 7500},
+			Turns:   2,
+		}, nil
+	})
+	_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{
+		Description: "audit esc handlers",
+		Prompt:      "find them",
+		Type:        subagent.TypeExplore,
+	})
+
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	res := runHandler(t, m, "/agents")
+
+	for _, frag := range []string{
+		"SUB-SID", "TYPE", "STATUS", "TURNS", "TOKENS", "DESCRIPTION", // headers
+		"explore", "completed", // template + folded status
+		"audit esc handlers", // description survives column truncation
+		"8100",               // 8000 prompt + 100 completion in TOKENS col
+	} {
+		if !strings.Contains(res.text, frag) {
+			t.Errorf("/agents output missing %q in:\n%s", frag, res.text)
+		}
+	}
+}
+
+// newCmdTestSubagentMgr builds a Manager wired to the supplied
+// stub Runner. Sets SEEK_HOME to a tempdir so the index file
+// lands isolated. runner == nil → a Runner that should never
+// be invoked (callers using this path don't Spawn).
+func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) *subagent.Manager {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+	cwd := t.TempDir()
+	policy, err := permission.New(cwd, permission.PrefYolo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner == nil {
+		runner = func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+			t.Error("Runner unexpectedly invoked from test path")
+			return subagent.RunnerResult{}, nil
+		}
+	}
+	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	mgr, err := subagent.NewManager(subagent.ManagerOpts{
+		ProjectAbsPath:    cwd,
+		ParentTracker:     cache.New(),
+		ParentPolicy:      policy,
+		ParentSidFn:       func() string { return "20260601-100000-test" },
+		ProjectSectionFn:  func() string { return "" },
+		SkillManifestFn:   func() string { return "" },
+		ParentToolNamesFn: func() []string { return parentTools },
+		Runner:            runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr
 }
 
 func TestDispatch_RejectsNonCommands(t *testing.T) {

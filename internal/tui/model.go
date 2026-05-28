@@ -43,6 +43,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -119,6 +120,16 @@ type Options struct {
 	// The TUI uses it to back /checkpoints, /restore, /undo, /redo
 	// without re-resolving the session each call.
 	Checkpoint *checkpoint.Manager
+
+	// Subagents is the v5 柱 G orchestrator (PRD docs/prd/
+	// feature-subagent.md). nil in --no-save mode or when
+	// session-persistence is otherwise unavailable; the /agents
+	// slash command and the status-bar agent badge both gate on
+	// nil-check and report "unavailable" rather than crash. Reads
+	// only — the TUI does NOT call Spawn or Kill from this
+	// reference in M11.0 (interactive kill lands with the picker
+	// upgrade in v0.6.x dot release).
+	Subagents *subagent.Manager
 
 	// Keymap is the v3 柱 C user-customisable keybindings table
 	// (PRD docs/prd/feature-tui-ergonomics.md §4). nil = use the
