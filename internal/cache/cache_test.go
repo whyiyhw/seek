@@ -407,3 +407,100 @@ func TestTracker_TierTransitionDoesNotRePrice(t *testing.T) {
 		t.Errorf("CumulativeCost across tier boundary = %v, want ≈0.42 (each turn priced at its own tier)", got)
 	}
 }
+
+// TestTracker_AdoptChild_DoubleCountAfterResumePanics is the load-bearing
+// G2 pin: when the parent has been resumed (SetBase'd), its baseUsage
+// already aggregates every prior-session child's cumulative usage.
+// Adopting a child that itself carries prior turns at this point would
+// silently double-count via the children-walk in Cumulative — a v5 柱 G
+// risk explicitly called out in feature-subagent.md §8.
+//
+// The guard panics rather than returns an error because, like the
+// "nested children" panic on the same function, it represents an
+// orchestrator bug that should fail loudly at the boundary rather than
+// quietly produce mis-priced status-bar numbers.
+func TestTracker_AdoptChild_DoubleCountAfterResumePanics(t *testing.T) {
+	parent := New()
+	// Simulate a resumed session: prior cumulative already includes
+	// whatever children ran in session N-1.
+	parent.SetBase(deepseek.Usage{
+		PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100,
+		PromptCacheHitTokens: 800, PromptCacheMissTokens: 200,
+	}, deepseek.ModelV4Flash, pricing.TierStandard)
+
+	// Simulate a child Tracker that has been restored from disk
+	// (or, more likely in practice, a buggy call site that recycles
+	// a child that's already been Recorded into).
+	child := New()
+	recordFlash(child, deepseek.Usage{PromptTokens: 200, TotalTokens: 200})
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AdoptChild on a non-fresh child after parent SetBase must panic — double-count risk not guarded")
+		}
+	}()
+	parent.AdoptChild(child) // expected to panic
+}
+
+// TestTracker_AdoptChild_DoubleCountGuardCoversChildBase covers the
+// "child also has baseUsage" branch of the G2 guard: even if the child
+// has zero Recorded turns, a non-zero baseUsage represents prior
+// accounting that the parent's baseUsage already encompasses.
+func TestTracker_AdoptChild_DoubleCountGuardCoversChildBase(t *testing.T) {
+	parent := New()
+	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV4Flash, pricing.TierStandard)
+
+	// Child has SetBase but no Record — still a "non-fresh" child
+	// per the G2 contract.
+	child := New()
+	child.SetBase(deepseek.Usage{TotalTokens: 50}, deepseek.ModelV4Flash, pricing.TierStandard)
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AdoptChild on a child with baseUsage after parent SetBase must panic")
+		}
+	}()
+	parent.AdoptChild(child)
+}
+
+// TestTracker_AdoptChild_FreshChildAfterResumeOK is the inverse pin:
+// the G2 guard MUST NOT fire on the production happy path. After a
+// parent resumes via SetBase, every new Spawn creates a fresh child
+// Tracker (cache.New() — zero turns, zero baseUsage); adopting it is
+// the documented, correct flow and must succeed.
+func TestTracker_AdoptChild_FreshChildAfterResumeOK(t *testing.T) {
+	parent := New()
+	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV4Flash, pricing.TierStandard)
+
+	child := New() // fresh — what subagent.Manager.Spawn always passes
+	parent.AdoptChild(child)
+	// Subagent then records into its own Tracker. This is the normal
+	// post-resume spawn flow.
+	recordFlash(child, deepseek.Usage{PromptTokens: 50, TotalTokens: 50})
+
+	// Parent's Cumulative correctly stacks: base (1000) + child (50)
+	// = 1050. No double-count, no panic.
+	if got := parent.Cumulative().TotalTokens; got != 1050 {
+		t.Errorf("Cumulative after fresh-adopt-after-resume = %d, want 1050 (base 1000 + child 50)", got)
+	}
+}
+
+// TestTracker_AdoptChild_NonFreshChildWithoutResumeOK confirms the
+// guard is correctly gated on hasBase: in a fresh (non-resumed) parent,
+// adopting a child that already has its own turns is permitted because
+// there's no overlap with parent's baseUsage (there is none). This is
+// what TestTracker_AdoptChild_IsIdempotent has always relied on; we're
+// pinning it explicitly so the gating intent is documented.
+func TestTracker_AdoptChild_NonFreshChildWithoutResumeOK(t *testing.T) {
+	parent := New() // NO SetBase
+	child := New()
+	recordFlash(child, deepseek.Usage{PromptTokens: 200, TotalTokens: 200})
+
+	// Must not panic — there's no double-count risk without a parent
+	// baseUsage to overlap with.
+	parent.AdoptChild(child)
+
+	if got := parent.Cumulative().TotalTokens; got != 200 {
+		t.Errorf("Cumulative = %d, want 200 (only the child's turn)", got)
+	}
+}

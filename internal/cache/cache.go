@@ -66,6 +66,7 @@ type Tracker struct {
 	baseUsage deepseek.Usage // cumulative from prior session; included in Cumulative() only
 	baseCost  float64        // dollar cost of baseUsage
 	children  []*Tracker     // adopted subagent Trackers (see AdoptChild)
+	hasBase   bool           // SetBase has been called — gates AdoptChild's double-count guard
 }
 
 // New returns an empty Tracker.
@@ -83,6 +84,7 @@ func (t *Tracker) SetBase(u deepseek.Usage, model string, tier pricing.Tier) {
 	t.mu.Lock()
 	t.baseUsage = u
 	t.baseCost = cost
+	t.hasBase = true
 	t.mu.Unlock()
 }
 
@@ -114,9 +116,14 @@ func (t *Tracker) Record(u deepseek.Usage, model string, tier pricing.Tier) {
 // folded into this Tracker's baseUsage (i.e. a child resumed from disk
 // whose prior turns are already accounted for in the parent's saved
 // cumulative). The intended caller is internal/subagent at spawn time,
-// where a freshly-spawned child has zero usage by construction. The
-// orchestrator is responsible for honouring this contract — Tracker
-// has no way to verify it. See docs/prd/feature-subagent.md §8 risk
+// where a freshly-spawned child has zero usage by construction. After
+// SetBase has been called on the parent (resumed session), AdoptChild
+// PANICS if the child has any recorded turns or its own baseUsage —
+// that's the v0.6.0 G2 fix: the bug detection escalates from "informal
+// orchestrator contract" to a runtime check at the exact double-count
+// site. The check is gated on hasBase because in a fresh (non-resumed)
+// parent there's no overlap risk — adopt-recorded-child is benign even
+// if structurally unusual. See docs/prd/feature-subagent.md §8 risk
 // "resume cost 双重计数" for the rationale.
 //
 // SAFETY — nested adoption is forbidden. v5 limits spawn depth = 1
@@ -136,6 +143,10 @@ func (t *Tracker) AdoptChild(child *Tracker) {
 	}
 	child.mu.Lock()
 	nested := len(child.children) > 0
+	// Capture under child.mu so a concurrent Record / SetBase on the
+	// child can't race the double-count guard below. Cheap — same
+	// critical section we already entered for the nested check.
+	childHasUsage := len(child.turns) > 0 || child.baseUsage.TotalTokens > 0
 	child.mu.Unlock()
 	if nested {
 		panic("cache: AdoptChild on a Tracker that already has children — v5 forbids spawn depth > 1")
@@ -144,6 +155,15 @@ func (t *Tracker) AdoptChild(child *Tracker) {
 	defer t.mu.Unlock()
 	if slices.Contains(t.children, child) {
 		return
+	}
+	// G2 guard: a resumed parent's baseUsage already folded in every
+	// prior-session child's cumulative usage. Adopting a child that
+	// itself carries prior usage at this point would double-count
+	// those tokens via the children-walk in Cumulative. Pointer-dedup
+	// runs first so idempotent re-adopt-after-record (the
+	// spawn-retry path) is still a no-op.
+	if t.hasBase && childHasUsage {
+		panic("cache: AdoptChild on a non-fresh child after parent SetBase — double-count risk (parent's baseUsage already includes prior-session children)")
 	}
 	t.children = append(t.children, child)
 }
