@@ -187,6 +187,36 @@ func TestSubagentSessionDir_RequiresBothIDs(t *testing.T) {
 	}
 }
 
+// TestCronPaths_ComposeUnderSeekHome covers the v5 柱 H paths.
+// All five helpers must land under the SEEK_HOME override so
+// test runs don't pollute the user's real ~/.seek/cron/.
+func TestCronPaths_ComposeUnderSeekHome(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+
+	cases := []struct {
+		name string
+		fn   func() (string, error)
+		want string
+	}{
+		{"CronDir", CronDir, filepath.Join(override, "cron")},
+		{"CronJobs", CronJobs, filepath.Join(override, "cron", "jobs.jsonl")},
+		{"CronTickLock", CronTickLock, filepath.Join(override, "cron", "tick.lock")},
+		{"CronRuns", CronRuns, filepath.Join(override, "cron", "runs")},
+		{"CronTriggers", CronTriggers, filepath.Join(override, "cron", "triggers")},
+	}
+	for _, c := range cases {
+		got, err := c.fn()
+		if err != nil {
+			t.Errorf("%s() err = %v", c.name, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestProjectHooksToml_ComposesUnderSeekDir(t *testing.T) {
 	got := ProjectHooksToml("/abs/path/to/project")
 	want := filepath.Join("/abs/path/to/project", ".seek", "hooks.toml")

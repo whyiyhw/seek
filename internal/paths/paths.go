@@ -229,6 +229,68 @@ func SubagentSessionDir(absPath, sid, subSid string) (string, error) {
 	return filepath.Join(dir, "subagents", subSid), nil
 }
 
+// CronDir returns ~/.seek/cron/ — the v5 柱 H routines root
+// (feature-routines.md §3.1). Houses jobs.jsonl, tick.lock,
+// runs/ and triggers/ subdirs. Does NOT create the directory;
+// callers MkdirAll at write time. Single-user single-machine —
+// no per-project subdivision (a cron job IS project-scoped via
+// its project_root field but the registry is host-global).
+func CronDir() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "cron"), nil
+}
+
+// CronJobs returns ~/.seek/cron/jobs.jsonl. The registered cron
+// job list, rewritten atomically by internal/routines.Store on
+// every mutation (write-tmp-rename dance).
+func CronJobs() (string, error) {
+	dir, err := CronDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "jobs.jsonl"), nil
+}
+
+// CronTickLock returns ~/.seek/cron/tick.lock — the host-wide
+// advisory flock file. tick acquires LOCK_NB (skip-on-conflict
+// because OS scheduler will fire again in ~1 min); Store
+// mutations acquire LOCK_EX (block, usually < 1ms). See
+// feature-routines.md §3.6 for the locking matrix.
+func CronTickLock() (string, error) {
+	dir, err := CronDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "tick.lock"), nil
+}
+
+// CronRuns returns ~/.seek/cron/runs/ — per-run JSONL records
+// (one file per fire) plus per-job advisory locks
+// (<name>.lock). Does NOT create the directory.
+func CronRuns() (string, error) {
+	dir, err := CronDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "runs"), nil
+}
+
+// CronTriggers returns ~/.seek/cron/triggers/ — the file-bridge
+// inbox for external systems (CI webhooks, IDE plugins). Each
+// .json file in here gets consumed + deleted by tick. M11.3
+// dependency; the helper lives here in M11.2 alongside the
+// other cron paths for cohesion.
+func CronTriggers() (string, error) {
+	dir, err := CronDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "triggers"), nil
+}
+
 // UserKeybindings returns the user-level keybindings file
 // (~/.seek/keybindings.toml). May not exist — that's the common case
 // for users who never customise; callers (internal/keymap.Load)
