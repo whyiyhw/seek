@@ -1730,3 +1730,36 @@ func TestCmdNew_ClearsArm(t *testing.T) {
 		t.Errorf("/new should clear pendingSkill; got %q", m.pendingSkill)
 	}
 }
+
+func TestCmdDiagnose_OutputsAllSections(t *testing.T) {
+	m := emptyModel()
+	m.opts.Model = "deepseek-chat"
+	m.opts.CWD = "/home/test"
+	m.opts.Session = session.New("deepseek-chat", "/home/test", "sys", false, false)
+	m.opts.Theme = "dark"
+
+	res := runHandler(t, m, "/diagnose")
+	if res.text == "" {
+		t.Fatal("/diagnose should produce output text")
+	}
+	for _, want := range []string{"seek:", "os:", "provider:", "model:", "mode:", "theme:", "session:", "cwd:"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("/diagnose output missing %q", want)
+		}
+	}
+	if !strings.Contains(res.text, "redact any sensitive paths") {
+		t.Errorf("/diagnose should include the redact notice")
+	}
+}
+
+func TestCmdDiagnose_EphemeralSession(t *testing.T) {
+	m := emptyModel()
+	m.opts.Model = "test-model"
+	m.opts.CWD = "/tmp"
+	// opts.Session nil by default
+
+	res := runHandler(t, m, "/diagnose")
+	if !strings.Contains(res.text, "(none — ephemeral)") {
+		t.Errorf("/diagnose without session should say ephemeral, got %q", res.text)
+	}
+}
