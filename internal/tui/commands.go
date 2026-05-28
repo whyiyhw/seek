@@ -80,6 +80,10 @@ func allCommands() []command {
 		// M11.0 ships a read-only text table; interactive picker
 		// (Enter for detail / `k` to kill) lands in a v0.6.x dot.
 		{names: []string{"/agents"}, usage: "/agents", description: "List subagents in this project: spawn time, type, status, turns, tokens, description. Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
+		// v5 柱 G M11.1 worktree surface (feature-subagent.md §3.8 + §4.2).
+		// Read-only listing; create/cleanup go through the
+		// enter/exit_worktree tools or `seek worktree gc` CLI.
+		{names: []string{"/worktrees"}, usage: "/worktrees", description: "List seek-managed git worktrees: ID, branch, path. Includes worktrees from prior sessions (reads `git worktree list --porcelain` and filters to ~/.seek/projects/<pid>/worktrees/).", handler: cmdWorktrees},
 		{names: []string{"/restore"}, usage: "/restore [last|<turn>]", description: "Restore the working tree to a git checkpoint. No args = last; pass a turn number for a specific one. HEAD is NOT moved; --force needed if working tree is dirty.", handler: cmdRestore},
 		{names: []string{"/undo"}, usage: "/undo [<path>]", description: "Undo the most recent write/edit (file checkpoint). With a path: undo the most recent change to that file. Refuses if the file was modified externally; pass --force to override.", handler: cmdUndo},
 		{names: []string{"/redo"}, usage: "/redo [<path>]", description: "Redo the most recently undone write/edit. Truncated by a fresh write/edit (classic editor semantics).", handler: cmdRedo},
@@ -2063,4 +2067,47 @@ func shortSubSid(subSid string) string {
 		return subSid[i+1:]
 	}
 	return subSid
+}
+
+// ----- v5 柱 G M11.1 worktree slash command -----
+//
+// Reads from disk (Manager.ListFromDisk) so worktrees from prior
+// seek sessions show up too. The `git worktree list --porcelain`
+// roundtrip is bounded (one shell-out per /worktrees invocation,
+// no per-row Status to keep the latency low) — change-count is
+// LEFT OUT here for the same reason: running git status N times
+// would block the TUI on large projects. The user can drill into
+// a specific worktree via `cd <path>; git status`.
+
+func cmdWorktrees(m *Model, _ string) cmdResult {
+	if m.opts.Worktrees == nil {
+		return cmdResult{text: styleMuted.Render("/worktrees: unavailable (not a git repository, or Manager not wired)")}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wts, err := m.opts.Worktrees.ListFromDisk(ctx)
+	if err != nil {
+		return cmdResult{text: styleErr.Render("/worktrees: " + err.Error())}
+	}
+	if len(wts) == 0 {
+		return cmdResult{text: styleMuted.Render("no seek-managed worktrees — created by `agent` tool with isolation=\"worktree\" or direct `enter_worktree` calls")}
+	}
+	// Sort newest-first by ID (which embeds a timestamp) — same
+	// convention as /agents.
+	sort.Slice(wts, func(i, j int) bool { return wts[i].ID > wts[j].ID })
+
+	var b strings.Builder
+	// Column widths:
+	//   WT-ID (22)  BRANCH (30, truncate)  PATH (rest, truncate)
+	// PATH last so it can absorb arbitrary terminal width without
+	// the layout cracking.
+	fmt.Fprintf(&b, "%-22s %-30s %s\n", "WT-ID", "BRANCH", "PATH")
+	for _, w := range wts {
+		fmt.Fprintf(&b, "%-22s %-30s %s\n",
+			truncateForCheckpoint(w.ID, 22),
+			truncateForCheckpoint(w.Branch, 30),
+			w.Path)
+	}
+	b.WriteString(styleMuted.Render("tip: `git -C <path> status` for per-tree change counts; `seek worktree gc` to prune rescue stashes"))
+	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
 }

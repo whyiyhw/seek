@@ -45,6 +45,7 @@ import (
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 
@@ -130,6 +131,15 @@ type Options struct {
 	// reference in M11.0 (interactive kill lands with the picker
 	// upgrade in v0.6.x dot release).
 	Subagents *subagent.Manager
+
+	// Worktrees is the v5 柱 G M11.1 worktree Manager (feature-
+	// subagent.md §3.8). nil when seek runs outside a git repo
+	// (cmd/seek skips Manager construction in that case) — the
+	// /worktrees panel renders an "unavailable" hint rather
+	// than crash. Like Subagents, this is read-only from the
+	// TUI: cleanup/creation goes through enter/exit_worktree
+	// tools.
+	Worktrees *worktree.Manager
 
 	// Keymap is the v3 柱 C user-customisable keybindings table
 	// (PRD docs/prd/feature-tui-ergonomics.md §4). nil = use the

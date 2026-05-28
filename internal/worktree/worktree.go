@@ -409,6 +409,10 @@ func (m *Manager) unregister(id string) {
 // List returns a snapshot of currently-active worktrees. Order
 // is insertion order is NOT guaranteed — callers that care sort
 // by Path / ID themselves.
+//
+// "Active" means "created by THIS seek process and not yet
+// cleaned up". For cross-session visibility (worktrees a prior
+// seek run created and the user didn't remove) use ListFromDisk.
 func (m *Manager) List() []Worktree {
 	if m == nil {
 		return nil
@@ -420,6 +424,82 @@ func (m *Manager) List() []Worktree {
 		out = append(out, w)
 	}
 	return out
+}
+
+// ListFromDisk enumerates every seek-managed worktree currently
+// registered with git, regardless of which seek process created
+// it. Used by `seek worktree list` CLI and the /worktrees TUI
+// panel so prior-session worktrees show up in the user's view.
+//
+// Implementation:
+//
+//  1. `git worktree list --porcelain` enumerates ALL worktrees
+//     git knows about (main repo + every `worktree add`-created
+//     dir, regardless of who created it).
+//  2. Filter to entries whose worktree path is under
+//     ~/.seek/projects/<pid>/worktrees/ — those are seek's.
+//  3. For each, parse the porcelain block's branch + HEAD into
+//     a Worktree{ID, Path, Branch, Base}.
+//
+// The ID is recovered from the path basename
+// (worktrees/<id>/) — since seek creates path + ID together,
+// the round-trip is lossless.
+//
+// Returns an empty slice (not nil) on no matches, so callers can
+// `for range` without a nil check. Errors propagate verbatim
+// from git stderr.
+func (m *Manager) ListFromDisk(ctx context.Context) ([]Worktree, error) {
+	if m == nil {
+		return nil, errors.New("worktree: nil Manager")
+	}
+	out, errOut, err := m.runGit(ctx, m.root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("worktree: git worktree list: %v: %s", err, strings.TrimSpace(errOut))
+	}
+	seekRoot := filepath.Join(m.homeProjectDir, "worktrees") + string(filepath.Separator)
+	var found []Worktree
+	// Porcelain format: blocks separated by blank lines; each
+	// block has "worktree <path>" / "HEAD <sha>" / "branch <ref>"
+	// (or "detached") lines.
+	var cur Worktree
+	flush := func() {
+		if cur.Path == "" {
+			return
+		}
+		if strings.HasPrefix(cur.Path, seekRoot) {
+			// Recover ID from the path's first segment under
+			// worktrees/. Tail segments (e.g. nested files)
+			// shouldn't occur — git's worktree list only emits
+			// the root.
+			rel := strings.TrimPrefix(cur.Path, seekRoot)
+			cur.ID = strings.SplitN(rel, string(filepath.Separator), 2)[0]
+			found = append(found, cur)
+		}
+		cur = Worktree{}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" {
+			flush()
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			cur.Path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "HEAD "):
+			cur.Base = strings.TrimPrefix(line, "HEAD ")
+		case strings.HasPrefix(line, "branch "):
+			// "branch refs/heads/<name>" → strip the refs/heads/
+			// prefix so output matches what Create returned.
+			b := strings.TrimPrefix(line, "branch ")
+			cur.Branch = strings.TrimPrefix(b, "refs/heads/")
+		}
+	}
+	flush() // last block (porcelain may or may not end with blank line)
+	if found == nil {
+		return []Worktree{}, nil
+	}
+	return found, nil
 }
 
 // MapToProject rewrites an absolute path under a registered

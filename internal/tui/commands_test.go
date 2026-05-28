@@ -15,10 +15,12 @@ import (
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -84,6 +86,126 @@ func runHandler(t *testing.T, m *Model, input string) cmdResult {
 	}
 	t.Fatalf("no handler for %q", input)
 	return cmdResult{}
+}
+
+// ----- v5 柱 G M11.1 /worktrees command -----
+
+// TestCmdWorktrees_NilManager: outside-a-git-repo path —
+// cmd/seek won't construct the Manager, so opts.Worktrees is
+// nil. The handler must hint rather than crash.
+func TestCmdWorktrees_NilManager(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	res := runHandler(t, m, "/worktrees")
+	if !strings.Contains(res.text, "unavailable") {
+		t.Errorf("expected 'unavailable' for nil Worktrees Manager, got: %q", res.text)
+	}
+	if !strings.Contains(res.text, "not a git repository") {
+		t.Errorf("hint should mention git-repo requirement: %q", res.text)
+	}
+}
+
+// TestCmdWorktrees_EmptyList: in a git repo with no seek-managed
+// worktrees, the empty-state hint points at the two ways to
+// create one (agent tool isolation, enter_worktree).
+func TestCmdWorktrees_EmptyList(t *testing.T) {
+	mgr := newCmdTestWorktreeMgr(t,
+		(&fakeWorktreeGit{}).push("", "", nil),
+	)
+	m := emptyModel()
+	m.opts.Worktrees = mgr
+	res := runHandler(t, m, "/worktrees")
+	if !strings.Contains(res.text, "no seek-managed worktrees") {
+		t.Errorf("empty-state hint missing in: %q", res.text)
+	}
+	for _, frag := range []string{"agent", "enter_worktree"} {
+		if !strings.Contains(res.text, frag) {
+			t.Errorf("empty hint should mention %q: %q", frag, res.text)
+		}
+	}
+}
+
+// TestCmdWorktrees_RendersTable: populated case — column
+// headers + one seek-managed row from scripted porcelain. Main
+// repo row MUST be filtered out (it's not seek-managed).
+func TestCmdWorktrees_RendersTable(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	root := t.TempDir()
+	pd, err := paths.ProjectDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtPath := pd + "/worktrees/20260601-100000-abcdef"
+	porcelain := "worktree " + root + "\nHEAD aaa\nbranch refs/heads/main\n\n" +
+		"worktree " + wtPath + "\nHEAD bbb\nbranch refs/heads/seek/wt/20260601-100000-abcdef\n\n"
+
+	mgr := newCmdTestWorktreeMgrWithRoot(t,
+		(&fakeWorktreeGit{}).push(porcelain, "", nil),
+		root,
+	)
+	m := emptyModel()
+	m.opts.Worktrees = mgr
+	res := runHandler(t, m, "/worktrees")
+
+	for _, frag := range []string{
+		"WT-ID", "BRANCH", "PATH",
+		"20260601-100000-abcdef",
+		"seek/wt/20260601-100000-abcdef",
+		"tip:",
+	} {
+		if !strings.Contains(res.text, frag) {
+			t.Errorf("missing %q in:\n%s", frag, res.text)
+		}
+	}
+	// Main repo's branch (refs/heads/main) must NOT leak —
+	// ListFromDisk filters to seek-managed paths only.
+	if strings.Contains(res.text, " main ") {
+		t.Errorf("main repo branch leaked into /worktrees output:\n%s", res.text)
+	}
+}
+
+// fakeWorktreeGit is the scriptable git stub for /worktrees
+// tests. Mirrors the worktree package's own test fakeGit but
+// lives here so the TUI test file doesn't reach into another
+// package's private helpers.
+type fakeWorktreeGit struct {
+	queue []fakeWtGitResp
+}
+type fakeWtGitResp struct {
+	stdout, stderr string
+	err            error
+}
+
+func (f *fakeWorktreeGit) push(stdout, stderr string, err error) *fakeWorktreeGit {
+	f.queue = append(f.queue, fakeWtGitResp{stdout, stderr, err})
+	return f
+}
+
+func (f *fakeWorktreeGit) fn(t *testing.T) worktree.GitRunner {
+	t.Helper()
+	return func(ctx context.Context, cwd string, args ...string) (string, string, error) {
+		if len(f.queue) == 0 {
+			t.Fatalf("fakeWorktreeGit: no queued response for: git %v", args)
+		}
+		r := f.queue[0]
+		f.queue = f.queue[1:]
+		return r.stdout, r.stderr, r.err
+	}
+}
+
+func newCmdTestWorktreeMgr(t *testing.T, fg *fakeWorktreeGit) *worktree.Manager {
+	t.Helper()
+	t.Setenv("SEEK_HOME", t.TempDir())
+	return newCmdTestWorktreeMgrWithRoot(t, fg, t.TempDir())
+}
+
+func newCmdTestWorktreeMgrWithRoot(t *testing.T, fg *fakeWorktreeGit, root string) *worktree.Manager {
+	t.Helper()
+	mgr, err := worktree.NewManagerWithRunner(root, fg.fn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr
 }
 
 // TestCmdAgents_NilManager covers the --no-save / session-less path

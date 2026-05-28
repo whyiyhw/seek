@@ -49,6 +49,7 @@ import (
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/worktree"
+	"github.com/whyiyhw/seek/internal/worktreecli"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
 	"github.com/whyiyhw/seek/internal/tools/bash"
@@ -579,6 +580,14 @@ func run() error {
 	// directory. See PRD docs/prd/feature-shell-hooks.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "hooks" {
 		return hookscli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek worktree ...` — list / gc. Same rationale as hooks:
+	// worktree queries don't need API keys, sessions, or full
+	// seek runtime, so they short-circuit ahead of flag.Parse to
+	// stay invokable from CI cleanup scripts. PRD docs/prd/
+	// feature-subagent.md §3.8 + §9 v0.6.x dot.
+	if len(os.Args) >= 2 && os.Args[1] == "worktree" {
+		return worktreecli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// `seek keys ...` — list / check / actions. Same rationale: keymap
 	// queries don't need API keys, sessions, or a project directory.
@@ -1498,6 +1507,7 @@ func run() error {
 		Store:                 store,
 		Checkpoint:            ckMgr,
 		Subagents:             subagentMgr,
+		Worktrees:             wtMgr,
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,

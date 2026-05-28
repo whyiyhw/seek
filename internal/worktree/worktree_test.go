@@ -3,11 +3,14 @@ package worktree
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/whyiyhw/seek/internal/paths"
 )
 
 // fakeGit is a recording stub that lets tests script git command
@@ -435,6 +438,159 @@ func TestPruneDiscarded_ZeroDurationPrunesEverything(t *testing.T) {
 	if n != 2 {
 		t.Errorf("olderThan=0 should prune all parseable; got %d", n)
 	}
+}
+
+// TestListFromDisk_FiltersSeekManaged: `git worktree list
+// --porcelain` returns the main repo + every worktree git knows
+// about. ListFromDisk must filter to only those rooted under
+// ~/.seek/projects/<pid>/worktrees/ — leaving the user's main
+// repo + their own manually-created worktrees out of the
+// /worktrees panel.
+func TestListFromDisk_FiltersSeekManaged(t *testing.T) {
+	_ = withTestHome(t)
+	root := t.TempDir()
+	// Resolve the same seek project dir the Manager will compute,
+	// so the porcelain paths match what ListFromDisk filters for.
+	pd, err := paths.ProjectDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	porcelain := buildPorcelainOutput(t, root, []string{
+		root,                                                            // main repo — must be filtered out
+		filepath.Join(pd, "worktrees", "20260601-100000-abcdef"), // seek-managed
+		filepath.Join(pd, "worktrees", "20260601-101000-fedcba"), // seek-managed
+		"/Users/whyiyhw/other-project",                                  // user-manual worktree elsewhere
+	})
+	fg := (&fakeGit{}).push(porcelain, "", nil)
+	mgr := newTestManagerWithRoot(t, fg, root)
+
+	got, err := mgr.ListFromDisk(context.Background())
+	if err != nil {
+		t.Fatalf("ListFromDisk: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d worktrees, want 2 (seek-managed)", len(got))
+	}
+	// Verify ID round-trip from path.
+	ids := []string{got[0].ID, got[1].ID}
+	wantIDs := []string{"20260601-100000-abcdef", "20260601-101000-fedcba"}
+	if !slicesEqualAnyOrder(ids, wantIDs) {
+		t.Errorf("ID round-trip lost; got %v want %v", ids, wantIDs)
+	}
+}
+
+// TestListFromDisk_EmptyReturnsEmptySlice: nil-safe iteration —
+// callers can `for range` without guarding nil.
+func TestListFromDisk_EmptyReturnsEmptySlice(t *testing.T) {
+	fg := (&fakeGit{}).push("", "", nil)
+	mgr := newTestManager(t, fg)
+	got, err := mgr.ListFromDisk(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("ListFromDisk should return empty []Worktree, not nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("empty git output should yield 0 entries; got %d", len(got))
+	}
+}
+
+// TestListFromDisk_ParsesBranchAndBase: porcelain "branch
+// refs/heads/<name>" + "HEAD <sha>" populate Worktree fields.
+func TestListFromDisk_ParsesBranchAndBase(t *testing.T) {
+	_ = withTestHome(t)
+	root := t.TempDir()
+	pd, err := paths.ProjectDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wtPath := filepath.Join(pd, "worktrees", "20260601-100000-aaa")
+	porcelain := fmt.Sprintf("worktree %s\nHEAD abc123def\nbranch refs/heads/seek/wt/20260601-100000-aaa\n\n", wtPath)
+	fg := (&fakeGit{}).push(porcelain, "", nil)
+	mgr := newTestManagerWithRoot(t, fg, root)
+
+	got, err := mgr.ListFromDisk(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1", len(got))
+	}
+	if got[0].Branch != "seek/wt/20260601-100000-aaa" {
+		t.Errorf("Branch = %q, want seek/wt/...; refs/heads/ prefix should be stripped", got[0].Branch)
+	}
+	if got[0].Base != "abc123def" {
+		t.Errorf("Base = %q, want abc123def", got[0].Base)
+	}
+}
+
+// TestListFromDisk_GitFailureSurfaced: a non-zero git exit
+// propagates stderr verbatim.
+func TestListFromDisk_GitFailureSurfaced(t *testing.T) {
+	fg := (&fakeGit{}).push("", "fatal: not a git repository", errors.New("exit 128"))
+	mgr := newTestManager(t, fg)
+	_, err := mgr.ListFromDisk(context.Background())
+	if err == nil {
+		t.Fatal("expected error from git failure")
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("error should include git stderr: %v", err)
+	}
+}
+
+// buildPorcelainOutput constructs git worktree list --porcelain
+// output for the given paths. Each entry gets a stable
+// HEAD sha + a synthetic branch name; the exact values don't
+// matter for filter testing. `mainPath` (when matching a path
+// in the list) gets the "refs/heads/main" branch so test
+// readers can immediately spot which entry is the project root
+// versus a worktree.
+func buildPorcelainOutput(t *testing.T, mainPath string, wtPaths []string) string {
+	t.Helper()
+	var sb strings.Builder
+	for i, p := range wtPaths {
+		fmt.Fprintf(&sb, "worktree %s\n", p)
+		fmt.Fprintf(&sb, "HEAD sha%02d\n", i)
+		if p == mainPath {
+			fmt.Fprintf(&sb, "branch refs/heads/main\n")
+		} else {
+			fmt.Fprintf(&sb, "branch refs/heads/feat/x-%d\n", i)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// newTestManagerWithRoot is like newTestManager but pins the
+// project root to a caller-supplied path. Used by ListFromDisk
+// tests so the porcelain `worktree <root>` filter line matches
+// the same root the Manager filters against.
+func newTestManagerWithRoot(t *testing.T, fg *fakeGit, root string) *Manager {
+	t.Helper()
+	mgr, err := NewManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.runGit = fg.run(t)
+	return mgr
+}
+
+func slicesEqualAnyOrder(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	got := make(map[string]int, len(a))
+	for _, v := range a {
+		got[v]++
+	}
+	for _, v := range b {
+		got[v]--
+		if got[v] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // TestNewManager_NilSafe: methods on nil Manager return clear
