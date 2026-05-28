@@ -33,6 +33,15 @@ func descendantPIDs(rootPID int) []int {
 }
 
 func procChildren(pid int) []int {
+	if out := procChildrenFile(pid); len(out) > 0 {
+		return out
+	}
+	// /proc/PID/children is missing on some containers/kernels, or not
+	// yet populated right after fork — scan /proc/*/stat for PPID match.
+	return procChildrenScan(pid)
+}
+
+func procChildrenFile(pid int) []int {
 	path := fmt.Sprintf("/proc/%d/children", pid)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -48,4 +57,48 @@ func procChildren(pid int) []int {
 		out = append(out, n)
 	}
 	return out
+}
+
+func procChildrenScan(parentPID int) []int {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		ppid, ok := procPPID(pid)
+		if ok && ppid == parentPID {
+			out = append(out, pid)
+		}
+	}
+	return out
+}
+
+func procPPID(pid int) (int, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return 0, false
+	}
+	// stat: pid (comm) state ppid ... — comm may contain ')'.
+	s := string(data)
+	i := strings.LastIndex(s, ")")
+	if i < 0 || i+2 >= len(s) {
+		return 0, false
+	}
+	fields := strings.Fields(strings.TrimSpace(s[i+1:]))
+	if len(fields) < 2 {
+		return 0, false
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, false
+	}
+	return ppid, true
 }

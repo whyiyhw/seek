@@ -873,3 +873,17 @@ If you're new to the project, skim entries in this order:
 - **Fix**: on Linux, walk `/proc/[pid]/children` recursively and SIGKILL every descendant **before** the PGID kill (killing sh first reparents escapees and empties `/proc/<sh>/children`); cap `cmd.Wait()` with a 5s post-kill grace so the tool returns even when kill fails; snapshot stdout via a mutex-protected buffer because pipe-copy goroutines may still run after the grace deadline
 - **Lesson**: Setsid + PGID kill is necessary but not sufficient when children deliberately escape the group (sudo, setsid). Snapshot the descendant tree before reaping the root, pair group kill with descendant cleanup AND a Wait() deadline — never assume SIGKILL reaps the whole tree
 - **Refs**: `internal/tools/bash/proc_linux.go`, `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash.go`, issue #9
+
+### ObserveEnqueue goroutine captures entry parameter by reference
+- **Saw**: `go test -race ./internal/memory` failed in `TestObserveEnqueue_RespectsSessionCap` at `hook.go:713` (read/write on the same address from two filter goroutines) even after `observeAcceptCt` was converted to `atomic.Int32`
+- **Why**: the async goroutine closed over the outer `entry` parameter without copying it. The closure returns immediately after a non-blocking `ResultChan` send; the test (and production TUI) enqueues the next entry while the prior goroutine may still be running. Go reuses the parameter stack slot, so the second call overwrites `entry` while the first goroutine still reads it
+- **Fix**: launch with `go func(ctx context.Context, entry Entry) { … }(ctx, entry)` so each goroutine owns a value copy
+- **Lesson**: any `go func()` inside a callback that returns before the goroutine finishes must copy loop/parameter variables into the closure literal — atomics on unrelated counters do not fix captured-variable races
+- **Refs**: `internal/memory/hook.go:ObserveEnqueue`, `internal/memory/auto_distill_test.go:TestObserveEnqueue_RespectsSessionCap`
+
+### /proc/PID/children empty on CI — descendant walk returns nothing
+- **Saw**: Linux CI failed `TestDescendantPIDs_FindsNestedChildren` (got `[]`) and `TestBash_Timeout_KillsEscapedProcessGroup` (elapsed ≈ `killWaitGrace` 5s — setsid sleep survived)
+- **Why**: `descendantPIDs` relied solely on `/proc/[pid]/children`, which is missing or empty on some GitHub Actions kernels/containers even when `/proc/[pid]/stat` PPID links are present
+- **Fix**: fall back to scanning `/proc/*/stat` for `PPID == parent` when the `children` file is absent or empty; keep snapshot-before-kill ordering in `killProcessGroup`
+- **Lesson**: treat `/proc/PID/children` as an optimisation, not the only source of truth — PPID scan is slower but works wherever `/proc` is mounted
+- **Refs**: `internal/tools/bash/proc_linux.go`, `internal/tools/bash/proc_linux_test.go`

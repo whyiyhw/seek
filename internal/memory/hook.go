@@ -642,8 +642,11 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 			return
 		}
 
-		// Launch filter goroutine.
-		go func() {
+		// Launch filter goroutine. Copy entry (and ctx) into the closure
+		// — the outer parameter stack slot is reused on the next enqueue
+		// call while this goroutine may still be running after the
+		// non-blocking ResultChan send (race found by go test -race).
+		go func(ctx context.Context, entry Entry) {
 			defer h.observeLocks.unlock(entry.Name)
 
 			// Non-blocking send: if the TUI has exited and nobody is
@@ -711,7 +714,7 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 				OK:      true,
 			})
 			h.observeAcceptCt.Add(1) // M5.13: successful save → stats counter
-		}()
+		}(ctx, entry)
 	}
 }
 
