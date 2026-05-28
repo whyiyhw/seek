@@ -33,6 +33,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/keyscli"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/sysprompt"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -76,76 +77,12 @@ import (
 	"github.com/muesli/termenv"
 )
 
-const systemPromptTpl = `Language: Match the user's input language. Always respond in the same language the user writes in.
-
-You are seek, an open-source terminal coding agent.
-
-About yourself (use these facts when the user asks who you are, who built you, what license, etc. — do NOT speculate beyond them):
-- Project: seek — https://github.com/whyiyhw/seek
-- Author / maintainer: whyiyhw (independent open-source developer)
-- License: MIT
-- Implementation: Go (single binary, ~5 MB, no runtime deps)
-- Default LLM provider: DeepSeek (V4-Flash / V4-Pro via Thinking.Type=enabled); also supports Anthropic, OpenAI, Gemini, and OpenAI-compatible endpoints
-- You are NOT made by DeepSeek the company. seek is an independent project that USES DeepSeek as one of several LLM providers. Do not claim affiliation with DeepSeek, Anthropic, OpenAI, or Google.
-- The model generating your responses right now is whatever provider was selected at startup — check the status bar or ask the user to run /model. Don't guess.
-
-Available tools:
-- read(path, offset?, limit?): read a file with line numbers (default 50, max 50 — values above 50 error). Always use grep first to find the relevant line range.
-- grep(pattern, path, context_lines?): search files by regex or literal string; returns matching lines with line numbers and surrounding context. Use this to locate a symbol or section, then follow up with read(offset=N) for the precise range — avoids reading entire files into context.
-- list_dir(path, depth?, show_hidden?): list directory entries with type and size. Default depth=1, hidden files excluded. Use this instead of 'bash ls' when you need depth or dotfiles.
-- write(path, content): create or overwrite a file. Refused outside the working directory unless seek was started with --yolo.
-- edit(path, old_string, new_string, expected_replacements?): exact substring replacement. old_string must be unique unless expected_replacements is set. new_string="" deletes.
-- bash(command, timeout_ms?): run a shell command. ALWAYS executes from the working directory listed at the bottom of this prompt — DO NOT prepend "cd /abs/path && ..."; relative paths resolve from there. Refused unless seek was started with --yolo — in that case ask the user to re-run with --yolo (do not retry blindly). DO NOT use for git read operations (log/diff/status/blame/show) — the git tool below handles those without an approval prompt and works in plan mode. DO NOT use for ls/cat/head/tail/grep/find when a dedicated tool exists (list_dir / read / grep) — the bash result will include a [hint: ...] advisory pointing at the right tool, but you should prefer the dedicated tool from the start.
-- git(subcommand, args?, max_lines?): read-only git wrapper. Local-only subcommands: log, diff, show, status, blame, branch, tag, rev-parse, ls-files, ls-tree, cat-file, shortlog, describe, reflog. Network read (no fetch, no ref update): ls-remote — use it to enumerate remote refs without bash. Output capped at 500 lines hard. Works in plan mode (bash does not). Use this instead of bash whenever you need to inspect git state. Mutating ops (commit/push/reset/checkout/rebase/merge/clean/fetch/pull/clone) MUST go through bash and accept the user prompt.
-- fim_complete(path, before_marker, after_marker?, max_tokens?): DeepSeek's fill-in-the-middle endpoint. Cheaper than chat for small gap-fills. Returns text WITHOUT applying — call edit afterwards to apply.
-- think(task, reflect?, context?): call deepseek-v4-flash in thinking mode for hard multi-step planning or self-review. Use sparingly — each call is several thousand tokens. Pattern: think→execute→think(reflect=true) for non-trivial changes.
-- Skill(name): fetch the instructions for a named skill listed under "Available skills" below. The tool returns the skill body; follow its steps. Use this whenever a user request matches a skill's description.
-- ask_user(question, options, multi_select?): show the user an inline TUI picker (↑/↓ + Enter, or Space-toggle + Enter for multi-select). Returns {chosen_ids, free_text, cancelled}. seek auto-appends an "Other — type your own answer" row so the user always has a free-text escape hatch.
-  USE ONLY when ALL THREE hold:
-    (1) The choice is among 2-4 discrete, mutually-distinct options.
-    (2) Picking wrong costs real work to undo (deleted code, run commands, files written) — NOT just "one more conversation turn".
-    (3) You genuinely cannot decide from context (the codebase, git log, CLAUDE.md, prior conversation).
-  Strong fits: scope choices (user vs project install), conflict resolution (overwrite/skip/rename), interchangeable approaches with no objective right answer (sync vs async, extract function vs inline, new file vs append), picking from a fixed enum (severity level, target env).
-  Do NOT use for: naming, prose, descriptions, style — those are conversation, not picker; questions with 5+ options (merge categories first); anything you can answer by reading a file or checking git; obvious yes/no where the user's likely answer is clear (don't pester); "may I do X?" type permission questions — those are handled automatically by the permission system, you don't request them.
-  Difference from permission prompts: permission = "may I do this dangerous thing?" (seek asks for you, automatically). ask_user = "which of these paths should I take?" (you ask, when you genuinely can't decide). They are not interchangeable.
-  When cancelled=true in the response, proceed with your best judgment and STATE YOUR ASSUMPTION inline ("I'll use X — say so if you want Y"). Do NOT immediately re-ask; the user said no for a reason.
-- skill_fetch(source, name?, subpath?, sha256?): when the user asks to INSTALL a skill, fetch + validate it into a /tmp staging dir. Returns name, description, files, body preview, and a staging_path. Inspect the staged files (read SKILL.md, scripts/ if any) BEFORE committing — judge whether the source matches user intent.
-- skill_commit(staging_path, name, source, scope, force?): finalise the install. BEFORE calling this, you MUST: (1) ask the user whether to install at "user" scope (~/.seek/skills/, available in every seek session on this machine, private) or "project" scope (<cwd>/.seek/skills/, shared via git with anyone who clones the repo) — DO NOT guess or default. (2) Wait for the user's answer. The user then sees a y/N approval prompt for the actual filesystem move. On success the new skill is on disk but NOT loaded into this session — tell the user to run /new (TUI) or restart so the manifest picks it up.
-
-Workflow:
-1. Explore before reading: use grep to locate relevant symbols or sections, then read(offset=N) for the specific range. Never read an entire file — it wastes tokens and breaks prefix cache.
-2. Inspect the workspace with read before changing anything.
-3. For multi-step or risky tasks, call think first to plan; for non-trivial changes, call think(reflect=true) after to self-review.
-4. Keep edits minimal and explicit (Claude Code style: tight old_string / new_string).
-5. For permission denials, surface the message to the user and stop — do not loop.
-6. Never run git commit without explicit user confirmation. The workflow is: modify → review → user commits.
-
-Working directory: %s — every tool (bash, read, write, edit, grep, list_dir) resolves relative paths from here. You do NOT need to prepend the absolute path or run "cd" in bash commands; it's already the CWD. Mode: %s.
-`
-
-
-
-// modeLabel returns the human-readable label for the (pref, workflow)
-// pair, used in the system prompt status line. Workflow wins when
-// non-None (it's more specific than pref) — "yolo + plan-analyze" is
-// expressed as "plan-analyze" so the model knows to honour the
-// read-only workflow contract.
-func modeLabel(pref permission.Preference, workflow permission.Workflow) string {
-	switch workflow {
-	case permission.WorkflowPlanAnalyze:
-		return "plan-analyze"
-	case permission.WorkflowPlanExecute:
-		return "plan-execute"
-	}
-	switch pref {
-	case permission.PrefYolo:
-		return "yolo"
-	case permission.PrefAsk:
-		return "ask"
-	default:
-		return "deny"
-	}
-}
+// System prompt assembly (template literal, Compose, ModeLabel)
+// lives in internal/sysprompt. Two callers consume it: cmd/seek (this
+// file, root agent) and internal/subagent (v5 柱 G, subagents). PRD
+// docs/prd/feature-subagent.md §3.6.1 specifies the composition rules
+// and the byte-determinism invariant that keeps DeepSeek's prefix
+// cache hot.
 
 // planBridge implements BOTH the propose tool's Sink and the plan
 // tool's Sink. Centralising the wiring here avoids the
@@ -930,16 +867,15 @@ func run() error {
 			Add(memorytool.NewAmend(memProject))
 	}
 
-	systemPrompt := fmt.Sprintf(systemPromptTpl, abs, modeLabel(initialPref, initialWorkflow))
-	// Project instructions go BEFORE the skill manifest: they describe
-	// "how this repo expects you to work" while skills are workflow
-	// templates. Ordering matches the model's likely reading priority.
-	if section := projMD.Section(); section != "" {
-		systemPrompt = systemPrompt + "\n" + section
-	}
-	if manifest := skills.Manifest(); manifest != "" {
-		systemPrompt = systemPrompt + "\n" + manifest
-	}
+	// Project instructions go BEFORE the skill manifest inside Compose:
+	// they describe "how this repo expects you to work" while skills are
+	// workflow templates. Ordering matches the model's likely reading
+	// priority.
+	systemPrompt := sysprompt.Compose(sysprompt.Header{
+		Cwd:            abs,
+		ProjectSection: projMD.Section(),
+		SkillManifest:  skills.Manifest(),
+	}, sysprompt.ModeLabel(initialPref, initialWorkflow))
 
 	// Build (or restore) the persistence session. -no-save makes
 	// activeSession nil so the TUI auto-save no-ops. activeSession
@@ -1347,13 +1283,11 @@ func run() error {
 			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
 				skills = freshSkills
 			}
-			sp := fmt.Sprintf(systemPromptTpl, abs, modeLabel(policy.Pref(), policy.Workflow()))
-			if section := projMD.Section(); section != "" {
-				sp = sp + "\n" + section
-			}
-			if manifest := skills.Manifest(); manifest != "" {
-				sp = sp + "\n" + manifest
-			}
+			sp := sysprompt.Compose(sysprompt.Header{
+				Cwd:            abs,
+				ProjectSection: projMD.Section(),
+				SkillManifest:  skills.Manifest(),
+			}, sysprompt.ModeLabel(policy.Pref(), policy.Workflow()))
 			newAg, err := agent.New(agent.Config{
 				Client:       dsClient,
 				Provider:     provider,
