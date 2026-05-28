@@ -341,15 +341,18 @@ func TestHandleKey_CommandMenuOpen_TabUniqueAutocompletes(t *testing.T) {
 
 func TestHandleKey_CommandMenuOpen_TabMultiKeepsPickerOpen(t *testing.T) {
 	t.Parallel()
-	// M9.5 PRD §3.3: Tab on AMBIGUOUS prefix keeps the picker open and
-	// does NOT auto-accept the highlighted candidate. The user navigates
-	// with ↑/↓ and confirms with Enter (which dispatches the highlighted
-	// command immediately).
+	// Tab on a prefix with multiple candidates and NO further LCP
+	// progress (and no exact-name match) keeps the picker open and
+	// leaves the input alone — the user must type to disambiguate or
+	// ↑/↓ + Enter to pick.
+	//
+	// `/` matches every command and LCP is "/" (== input). No alias
+	// equals "/" exactly, so exact-name doesn't fire either.
 	m := Model{input: textarea.New()}
-	m.input.SetValue("/s")
-	cmds := filterCommands(allCommands(), "/s")
+	m.input.SetValue("/")
+	cmds := filterCommands(allCommands(), "/")
 	if len(cmds) < 2 {
-		t.Fatalf("setup: filterCommands('/s') expected 2+ candidates, got %d", len(cmds))
+		t.Fatalf("setup: filterCommands('/') expected all candidates, got %d", len(cmds))
 	}
 	m.commandMenuOpen = true
 	m.commandMenuFiltered = cmds
@@ -359,10 +362,10 @@ func TestHandleKey_CommandMenuOpen_TabMultiKeepsPickerOpen(t *testing.T) {
 	m2 := out.(Model)
 
 	if !m2.commandMenuOpen {
-		t.Error("Tab on ambiguous prefix should KEEP the picker open")
+		t.Error("Tab on no-progress ambiguous prefix should KEEP the picker open")
 	}
-	if got := m2.input.Value(); got != "/s" {
-		t.Errorf("Tab on ambiguous should NOT change input, want %q got %q", "/s", got)
+	if got := m2.input.Value(); got != "/" {
+		t.Errorf("Tab on no-progress ambiguous should NOT change input, want %q got %q", "/", got)
 	}
 	if len(m2.commandMenuFiltered) != len(cmds) {
 		t.Errorf("filtered list should be unchanged: was %d, now %d", len(cmds), len(m2.commandMenuFiltered))
@@ -423,15 +426,40 @@ func TestHandleKey_CommandMenuOpen_TabFillsLongestCommonPrefix(t *testing.T) {
 	}
 }
 
-func TestHandleKey_CommandMenuOpen_TabAtLcpEmitsBell(t *testing.T) {
+func TestHandleKey_CommandMenuOpen_TabExactNameAcceptsShorter(t *testing.T) {
 	t.Parallel()
-	// When the user's input is already AT the longest common prefix and
-	// multiple candidates remain, Tab can't make further progress — emit
-	// a bell to signal "you've reached the unambiguous prefix; pick from
-	// the menu or type to narrow".
-	//
-	// `/s` filters to multiple commands across /skill, /skills, /steer,
-	// /setup, etc. — LCP is `/s` (= user's input). Tab should bell.
+	// `/skill` matches both /skill and /skills (HasPrefix). Without the
+	// exact-name rule, LCP equals input → bell. With the rule, the
+	// user's explicit typing of "/skill" is honoured: accept it as the
+	// canonical and add trailing space — the shorter, more-commonly-used
+	// command wins over the longer-prefix sibling.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/skill")
+	cmds := filterCommands(allCommands(), "/skill")
+	if len(cmds) < 2 {
+		t.Fatalf("setup: filterCommands('/skill') expected 2+ (skill + skills), got %d", len(cmds))
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if got := m2.input.Value(); got != "/skill " {
+		t.Errorf("Tab on exact /skill should accept it (+ space), got %q", got)
+	}
+	if m2.commandMenuOpen {
+		t.Error("exact-match accept should close the menu")
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabAliasAcceptsCanonical(t *testing.T) {
+	t.Parallel()
+	// `/s` is an alias for /steer (per the {"/steer","/s"} names tuple).
+	// User typing `/s` + Tab should accept the command and PROMOTE to
+	// canonical: input becomes "/steer " (not "/s "). Mirrors bash where
+	// aliases expand on completion.
 	m := Model{input: textarea.New()}
 	m.input.SetValue("/s")
 	cmds := filterCommands(allCommands(), "/s")
@@ -442,11 +470,42 @@ func TestHandleKey_CommandMenuOpen_TabAtLcpEmitsBell(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if got := m2.input.Value(); got != "/steer " {
+		t.Errorf("Tab on alias `/s` should promote to canonical `/steer `, got %q", got)
+	}
+	if m2.commandMenuOpen {
+		t.Error("alias-accept should close the menu")
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabAtLcpEmitsBell(t *testing.T) {
+	t.Parallel()
+	// When the user's input is already AT the longest common prefix,
+	// multiple candidates remain, AND no candidate's name equals the
+	// input exactly, Tab can't make further progress — emit a bell to
+	// signal "you've reached the unambiguous prefix; pick from the
+	// menu or type to narrow".
+	//
+	// `/` matches everything; LCP across all canonicals = "/" = input;
+	// no command's canonical or alias equals "/". → bell.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/")
+	cmds := filterCommands(allCommands(), "/")
+	if len(cmds) < 2 {
+		t.Fatalf("setup: filterCommands('/') expected 2+ candidates, got %d", len(cmds))
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
 	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
 	m2 := out.(Model)
 
-	if got := m2.input.Value(); got != "/s" {
-		t.Errorf("Tab at LCP should NOT change input, want %q got %q", "/s", got)
+	if got := m2.input.Value(); got != "/" {
+		t.Errorf("Tab at LCP should NOT change input, want %q got %q", "/", got)
 	}
 	if !m2.commandMenuOpen {
 		t.Error("Tab at LCP should KEEP the picker open")

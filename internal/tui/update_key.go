@@ -127,19 +127,51 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// feedback that "Tab does nothing visible on ambiguous
 			// prefix" felt broken):
 			//
-			//   0 candidates              → terminal bell, no input change
-			//   1 candidate               → autocomplete + trailing space
-			//   2+ candidates with LCP    → fill to longest common prefix
-			//                               (visible progress), picker stays
-			//                               open so user can either keep
-			//                               typing to disambiguate or use
-			//                               ↑/↓ + Enter to pick
-			//   2+ candidates, no LCP gain → terminal bell (prefix already
-			//                                exhausted; user must type to
-			//                                disambiguate or arrow + Enter)
+			//   exact-name match (any alias) → accept that command
+			//                                  (+ trailing space). Handles
+			//                                  /skill when /skills also
+			//                                  matches — the user typed the
+			//                                  shorter name explicitly, so
+			//                                  honour it instead of bell-ing
+			//                                  on a no-progress LCP. Also
+			//                                  promotes aliases to canonical
+			//                                  (`/s` → `/steer `).
+			//   0 candidates                 → terminal bell, no input change
+			//   1 candidate                  → autocomplete + trailing space
+			//   2+ candidates with LCP gain  → fill to longest common prefix
+			//                                  (visible progress), picker stays
+			//                                  open so user can either keep
+			//                                  typing to disambiguate or use
+			//                                  ↑/↓ + Enter to pick
+			//   2+ candidates, no LCP gain   → terminal bell (prefix already
+			//                                  exhausted; user must type to
+			//                                  disambiguate or arrow + Enter)
 			//
 			// Enter on the menu still dispatches the highlighted command
 			// directly (fast `/h` + Enter → /help flow).
+			input := m.input.Value()
+			// Exact-name match wins over LCP — user typed the full
+			// canonical name (or an alias), accept this command.
+			var exactMatch *command
+			for i, c := range m.commandMenuFiltered {
+				for _, name := range c.names {
+					if name == input {
+						exactMatch = &m.commandMenuFiltered[i]
+						break
+					}
+				}
+				if exactMatch != nil {
+					break
+				}
+			}
+			if exactMatch != nil {
+				m.input.SetValue(exactMatch.names[0] + " ")
+				m.commandMenuOpen = false
+				m.commandMenuFiltered = nil
+				m.commandMenuSelected = 0
+				m.updateCommandMenu()
+				return m, nil
+			}
 			switch len(m.commandMenuFiltered) {
 			case 0:
 				return m, beepCmd
@@ -160,7 +192,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			default:
 				lcp := longestCommonCandidatePrefix(m.commandMenuFiltered)
-				if lcp == "" || lcp == m.input.Value() {
+				if lcp == "" || lcp == input {
 					// No further LCP progress possible — bell to signal
 					// "you've reached the unambiguous prefix; disambiguate
 					// by typing or pick from the menu".
