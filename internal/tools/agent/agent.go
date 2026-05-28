@@ -1,0 +1,214 @@
+// Package agent implements the `agent` tool — the LLM-facing surface
+// over internal/subagent. It is intentionally thin: the heavy lifting
+// (Policy.Spawn / Tracker.AdoptChild / system-prompt assembly / event
+// indexing / Runner orchestration) lives in internal/subagent. This
+// package is just argument parse + dispatch + wire-format pass-through.
+//
+// Split rationale (mirrors bash / memory / propose): tool schema +
+// Execute lives next to the LLM contract; state machine + persistence
+// lives where it can be unit-tested without the LLM in the loop. The
+// schema bytes are package-level so the Wire() output stays byte-
+// identical across turns and process restarts — load-bearing for
+// DeepSeek's prefix cache.
+//
+// See docs/prd/feature-subagent.md for the full design; this file
+// is the thinnest possible Go reflection of §3.1 (LLM schema) +
+// §3.2 (wire-format result).
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+
+	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/tools"
+)
+
+// schemaBytes is the package-level JSON schema for the `agent` tool.
+// Byte-stable across processes (load-bearing for prefix cache —
+// PRD v0 §4.8.1). Do NOT regenerate at call time, do NOT inject
+// runtime data.
+//
+// Mirrors docs/prd/feature-subagent.md §3.1 verbatim with one
+// deviation: `maxLength` is omitted from the `description` field
+// because tools.UnmarshalStrict doesn't enforce JSON Schema length
+// constraints (only DisallowUnknownFields). Length is enforced in
+// Execute via the explicit guards documented in the PRD as
+// "Execute-side strict, schema-side advisory".
+var schemaBytes = []byte(`{
+  "type": "object",
+  "properties": {
+    "description": {
+      "type": "string",
+      "description": "Short (3-5 word) description of the task. Shown in /agents UI."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The full task for the subagent. The subagent sees NOTHING else from the parent — write a self-contained briefing including any context the subagent needs."
+    },
+    "subagent_type": {
+      "type": "string",
+      "enum": ["general-purpose", "explore", "plan"],
+      "description": "general-purpose: full tools (minus agent/ask_user), parent's model, inherits parent permissions. explore: read-only subset (read/grep/list_dir/git/webfetch/think) forced into plan-analyze workflow regardless of parent — use for parallel research. plan: full tools but forced plan-analyze — use for proposing changes without executing."
+    },
+    "isolation": {
+      "type": "string",
+      "enum": ["none", "worktree"],
+      "description": "none (default): subagent works in the parent's cwd. worktree: creates a temporary git worktree so the subagent works on an isolated copy; useful for parallel implementation attempts. Auto-cleaned if no changes. (worktree not yet implemented — use \"none\" until v0.6.0 ships M11.1.)"
+    }
+  },
+  "required": ["description", "prompt"],
+  "additionalProperties": false
+}`)
+
+const description = `Launch a subagent with isolated context to perform a focused task. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide. Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review). Costs roll up into your session's total automatically. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
+
+// Args is the strict-decode target. JSON tags must match schemaBytes
+// field names exactly (DisallowUnknownFields rejects mismatches).
+type Args struct {
+	Description  string `json:"description"`
+	Prompt       string `json:"prompt"`
+	SubagentType string `json:"subagent_type,omitempty"`
+	Isolation    string `json:"isolation,omitempty"`
+}
+
+// Length caps enforced in Execute. Schema's `description` field
+// includes a "3-5 word" hint but JSON Schema's maxLength isn't
+// enforced by our UnmarshalStrict path; these constants cover the
+// pathology where the model produces a runaway description.
+//
+// Numbers come from docs/prd/feature-subagent.md §3.1 ("description
+// > 120 chars → 截断 + hint; prompt > 32 KB → 失败 prompt_too_long").
+const (
+	maxDescriptionLen = 120
+	maxPromptBytes    = 32 * 1024
+)
+
+// Tool is the LLM-facing wrapper around subagent.Manager. Constructed
+// with New(manager); the manager carries all the heavy state (parent
+// Policy/Tracker, the injected Runner, the active map).
+type Tool struct {
+	mgr *subagent.Manager
+}
+
+// New constructs the tool. manager must be non-nil; a nil manager
+// means "the host program didn't wire subagents" — in that case the
+// tool isn't registered in the parent Registry at all, so reaching
+// New(nil) is a programmer error.
+func New(manager *subagent.Manager) *Tool {
+	if manager == nil {
+		panic("agent: New called with nil Manager — host program did not wire internal/subagent")
+	}
+	return &Tool{mgr: manager}
+}
+
+func (*Tool) Name() string            { return "agent" }
+func (*Tool) Description() string     { return description }
+func (*Tool) Schema() json.RawMessage { return schemaBytes }
+
+// Execute parses args and dispatches to Manager.Spawn. The Result's
+// Summary field is ALWAYS a well-formed wire-format string (success
+// path = "[agent: completed] ..." / any failure = "[agent: failed
+// reason=...] ...") so the LLM can read the prefix to decide next
+// action. Execute returns (Summary, nil) for every Manager outcome
+// — including subagent failure — so the agent loop feeds the
+// structured result back without wrapping it in an error frame
+// that would lose the wire-format signal.
+//
+// The error return is reserved for argument-parsing failures
+// (strict unmarshal, missing required field, runtime length
+// violations) — those need to surface via the agent loop's
+// ErrUnknownTool / strict-unmarshal handling path so the model sees
+// a clear "fix your arguments" hint rather than a wire-format
+// failure that looks like a subagent crash.
+func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	var a Args
+	if err := tools.UnmarshalStrict("agent", raw, &a,
+		"description", "prompt", "subagent_type", "isolation"); err != nil {
+		return "", err
+	}
+	if a.Description == "" {
+		return "", tools.MissingField("agent", "description", raw,
+			"description", "prompt", "subagent_type", "isolation")
+	}
+	if a.Prompt == "" {
+		return "", tools.MissingField("agent", "prompt", raw,
+			"description", "prompt", "subagent_type", "isolation")
+	}
+
+	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
+	// Truncate description with an inline hint so the /agents panel
+	// stays readable; reject oversize prompts outright because a
+	// silent truncation could lose load-bearing context.
+	if len(a.Description) > maxDescriptionLen {
+		a.Description = a.Description[:maxDescriptionLen] + "…(truncated)"
+	}
+	if len(a.Prompt) > maxPromptBytes {
+		// Wire-format failure rather than tool error — same outcome
+		// as if Manager rejected: the LLM gets a structured signal
+		// it can react to.
+		return failNoSpawn("prompt_too_long",
+			"prompt exceeds 32 KB; split the task into smaller subagent calls"), nil
+	}
+
+	// subagent_type defaults to general-purpose when omitted, matching
+	// the PRD schema description. Manager.Spawn will reject any other
+	// invalid value at its own validation step; we let it speak.
+	st := subagent.Type(a.SubagentType)
+	if st == "" {
+		st = subagent.TypeGeneralPurpose
+	}
+
+	// isolation:"worktree" isn't wired until M11.1. Surface a wire-
+	// format failure that names the milestone so the LLM (and any
+	// downstream human reading the transcript) knows this is a
+	// not-yet-implemented path, not a generic bug.
+	switch a.Isolation {
+	case "", "none":
+		// happy path
+	case "worktree":
+		return failNoSpawn("spawn_error",
+			"isolation=\"worktree\" is not implemented yet (v0.6.0 / M11.1); use \"none\" or omit the field"), nil
+	default:
+		return failNoSpawn("spawn_error",
+			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
+	}
+
+	// Dispatch. Manager.Spawn returns a Result whose Summary is the
+	// wire-format string we hand back unchanged.
+	res := t.mgr.Spawn(ctx, subagent.SpawnArgs{
+		Description: a.Description,
+		Prompt:      a.Prompt,
+		Type:        st,
+		// ParentTurn is 0 in M11.0 — the parent turn counter isn't
+		// threaded through the tool interface yet. The index event
+		// still records the spawn timing via the timestamp, and the
+		// /agents panel doesn't depend on parent_turn for MVP. Will
+		// thread through Sink in a follow-up if the UI needs it.
+		ParentTurn: 0,
+	})
+	return res.Summary, nil
+}
+
+// failNoSpawn formats a wire-format failure for paths that reject
+// before reaching Manager.Spawn (length caps, unknown isolation
+// value). Reuses subagent.FormatFailed so the prefix bytes stay
+// identical to Manager-emitted failures — parsers shouldn't care
+// where the failure originated.
+//
+// SubSid is empty for these paths: nothing was allocated, no event
+// was emitted, no on-disk state exists. Wire format handles empty
+// sub-sid gracefully (footer reads "sub-sid: " with empty value).
+func failNoSpawn(reason, hint string) string {
+	return subagent.FormatFailed("", reason, hint)
+}
+
+// Sentinel error returned when New is called with nil manager but
+// the caller wants to recover rather than panic. Not currently
+// used; kept as a hook for future test seams.
+var errNilManager = errors.New("agent: nil Manager")
+
+// Compile-time assertions: Tool satisfies the tools.Tool contract.
+// These are free — they catch interface drift at build time.
+var _ tools.Tool = (*Tool)(nil)
