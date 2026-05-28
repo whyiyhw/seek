@@ -17,6 +17,12 @@ import (
 // the child gets ENXIO on /dev/tty. Stdin is already /dev/null by
 // default (Go's exec.Cmd leaves it nil), so normal stdin reads also
 // fail with EOF.
+//
+// NOTE: Setsid creates a new session where the child can fork
+// grandchildren that inherit the stdout/stderr pipe fds. The parent
+// (bash.go) must kill the process group (negative PID) on context
+// cancellation, NOT just the direct child PID — otherwise grandchildren
+// keep the pipes open and cmd.Wait() deadlocks.
 func detachStdin(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}

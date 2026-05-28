@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
@@ -95,7 +96,15 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(cctx, "cmd.exe", "/C", a.Command)
 	} else {
-		cmd = exec.CommandContext(cctx, "/bin/sh", "-c", a.Command)
+		// We use exec.Command (NOT CommandContext) on Unix because
+		// exec.CommandContext only kills the direct child PID when the
+		// context is cancelled. With detachStdin creating a new session
+		// (Setsid), the child (sh) forks grandchildren (e.g. `sleep`)
+		// that inherit the stdout/stderr pipe fds. Killing sh alone
+		// orphans them but the pipes stay open → cmd.Wait() deadlocks.
+		// Instead we kill the whole process group (negative PID) via a
+		// dedicated goroutine.
+		cmd = exec.Command("/bin/sh", "-c", a.Command)
 	}
 	// Pin the working directory to the project root the policy was
 	// configured with, NOT whatever the process happens to be in.
@@ -117,7 +126,30 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	cmd.Stderr = &buf
 
 	start := time.Now()
-	err := cmd.Run()
+	err := func() error {
+		if runtime.GOOS == "windows" {
+			return cmd.Run()
+		}
+		// Unix: start manually so we can kill the process group on cancel.
+		// With Setsid, the child (sh) forks grandchildren that inherit pipe
+		// fds; killing only sh orphans them and the pipes stay open, causing
+		// cmd.Wait() to deadlock (test: TestBash_ContextCancel_KillsProcess).
+		if e := cmd.Start(); e != nil {
+			return e
+		}
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-cctx.Done():
+				if cmd.Process != nil {
+					syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
+			case <-done:
+			}
+		}()
+		return cmd.Wait()
+	}()
 	dur := time.Since(start)
 
 	output := buf.Bytes()
