@@ -1899,31 +1899,37 @@ func cmdAgents(m *Model, _ string) cmdResult {
 		return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
 	}
 
-	// Columns chosen to fit a typical 100-col TUI without wrap:
-	//   STARTED  TIME  TYPE(15)  STATUS(10)  TURNS  TOKENS  DESCRIPTION(remaining)
-	// SHORT (random sub-sid suffix) is more readable than the full
-	// 22-char timestamped ID and matches the wire-format footer
-	// shown in tool results.
+	// Column order matches PRD §4.2 — description goes right after
+	// status so the user reads "what did this subagent do" without
+	// having to scan past numeric noise. Tokens lives at the right
+	// edge where number columns conventionally sit. SHORT (random
+	// sub-sid suffix) is more readable than the full 22-char
+	// timestamped ID and matches the wire-format footer shown in
+	// tool results.
+	//
+	// TURNS column intentionally dropped: the event index
+	// (subagents.jsonl) carries Tokens on the completed event but
+	// not a turn count — the turn number lives in the wire-format
+	// footer the tool result already echoes. Faking "-" for every
+	// row burns a 5-char column for zero signal. If we later want
+	// turns surfaced here, add a Turns int field to the completed
+	// event payload + Subagent struct (see feature-subagent.md
+	// §3.4 schema) rather than re-introducing a placeholder.
+	//
+	// Widths: SUB-SID(8) TYPE(11) STATUS(10) DESCRIPTION(50)
+	// TOKENS(right). Total fits a typical 100-col TUI comfortably
+	// even with longer descriptions.
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-8s %-15s %-10s %5s %8s  %s\n",
-		"SUB-SID", "TYPE", "STATUS", "TURNS", "TOKENS", "DESCRIPTION")
+	fmt.Fprintf(&b, "%-8s %-11s %-10s %-50s %8s\n",
+		"SUB-SID", "TYPE", "STATUS", "DESCRIPTION", "TOKENS")
 	for _, s := range subs {
 		tokens := s.Tokens.Prompt + s.Tokens.Completion
-		turns := "-"
-		// Turns isn't a Subagent field (the index events carry
-		// tokens but not a turn count — that lives in the wire
-		// format footer the tool result already shows). We
-		// surface "-" rather than fake a value; if the user
-		// wants the per-spawn turn count they go look at the
-		// transcript or the tool result in scrollback. Future:
-		// add Turns to the completed event payload.
-		fmt.Fprintf(&b, "%-8s %-15s %-10s %5s %8d  %s\n",
+		fmt.Fprintf(&b, "%-8s %-11s %-10s %-50s %8d\n",
 			truncateForCheckpoint(shortSubSid(s.SubSid), 8),
-			truncateForCheckpoint(string(s.Type), 15),
+			truncateForCheckpoint(string(s.Type), 11),
 			truncateForCheckpoint(string(s.Status), 10),
-			turns,
-			tokens,
-			truncateForCheckpoint(s.Description, 56))
+			truncateForCheckpoint(s.Description, 50),
+			tokens)
 	}
 	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
 }

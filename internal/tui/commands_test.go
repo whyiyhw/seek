@@ -136,7 +136,7 @@ func TestCmdAgents_RendersTable(t *testing.T) {
 	res := runHandler(t, m, "/agents")
 
 	for _, frag := range []string{
-		"SUB-SID", "TYPE", "STATUS", "TURNS", "TOKENS", "DESCRIPTION", // headers
+		"SUB-SID", "TYPE", "STATUS", "DESCRIPTION", "TOKENS", // headers (PRD §4.2 order)
 		"explore", "completed", // template + folded status
 		"audit esc handlers", // description survives column truncation
 		"8100",               // 8000 prompt + 100 completion in TOKENS col
@@ -144,6 +144,22 @@ func TestCmdAgents_RendersTable(t *testing.T) {
 		if !strings.Contains(res.text, frag) {
 			t.Errorf("/agents output missing %q in:\n%s", frag, res.text)
 		}
+	}
+	// TURNS column was dropped (no data in event index — see
+	// commands.go cmdAgents doc). If anyone re-adds it without
+	// also threading Turns through the completed event payload,
+	// this assertion fires.
+	if strings.Contains(res.text, "TURNS") {
+		t.Errorf("/agents output contains stale TURNS column header — drop it or thread real data:\n%s", res.text)
+	}
+	// Column ordering: DESCRIPTION must come BEFORE TOKENS in the
+	// header (PRD §4.2). Catches an accidental column reorder that
+	// shoves description back to the right edge where it gets
+	// truncated.
+	hi := strings.Index(res.text, "DESCRIPTION")
+	ti := strings.Index(res.text, "TOKENS")
+	if hi < 0 || ti < 0 || hi > ti {
+		t.Errorf("DESCRIPTION must appear before TOKENS (PRD §4.2 order); header line: %q", strings.SplitN(res.text, "\n", 2)[0])
 	}
 }
 
