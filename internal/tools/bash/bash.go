@@ -34,7 +34,13 @@ const (
 	defaultTimeoutMS = 120_000
 	maxTimeoutMS     = 600_000
 	maxOutputBytes   = 32 * 1024
+	// Grace period after killProcessGroup before abandoning cmd.Wait().
+	// Covers slow reaping; prevents indefinite hang when kill fails
+	// (e.g. WSL sudo waiting on a Windows credential dialog).
+	killWaitGrace = 5 * time.Second
 )
+
+var errKillWaitGrace = errors.New("bash: process did not exit after kill")
 
 type Args struct {
 	Command   string `json:"command"`
@@ -136,16 +142,22 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		if e := cmd.Start(); e != nil {
 			return e
 		}
-		done := make(chan struct{})
-		defer close(done)
+		waitDone := make(chan error, 1)
 		go func() {
-			select {
-			case <-cctx.Done():
-				killProcessGroup(cmd)
-			case <-done:
-			}
+			waitDone <- cmd.Wait()
 		}()
-		return cmd.Wait()
+		select {
+		case err := <-waitDone:
+			return err
+		case <-cctx.Done():
+			killProcessGroup(cmd)
+			select {
+			case err := <-waitDone:
+				return err
+			case <-time.After(killWaitGrace):
+				return errKillWaitGrace
+			}
+		}
 	}()
 	dur := time.Since(start)
 
@@ -159,15 +171,18 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	exitCode := 0
 	timedOut := false
 	if err != nil {
-		// context.DeadlineExceeded surfaces as ctx.Err() rather than the
-		// cmd.Run() error on some platforms; check both.
+		forcedExit := errors.Is(err, errKillWaitGrace)
 		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 			timedOut = true
+			forcedExit = true
+		}
+		if errors.Is(cctx.Err(), context.Canceled) {
+			forcedExit = true
 		}
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			exitCode = ee.ExitCode()
-		} else if !timedOut {
+		} else if !forcedExit {
 			// Non-exit error (e.g. shell not found). Surface verbatim so
 			// the model can adjust.
 			return "", fmt.Errorf("bash: %w (output: %s)", err, string(output))

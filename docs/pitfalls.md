@@ -859,3 +859,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: extracted `killProcessGroup(cmd)` into `bash_unix.go` (`//go:build !windows`) and `bash_windows.go` (`//go:build windows`), matching the pattern already used by `detachStdin`. Every Unix-only syscall must live behind a build tag.
 - **Lesson**: `go build ./...` on a native Windows runner is NOT a sufficient guard for cross-compilation. Always add an explicit cross-compile step (`GOOS=windows GOARCH=amd64 go build ./cmd/seek`) on the Linux CI runner, mirroring the goreleaser build matrix. This catches "compiles on platform X but fails when cross-compiled" before the release tag is cut.
 - **Refs**: `.github/workflows/ci.yml` (cross-build job), `internal/tools/bash/bash.go`, `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash_windows.go`
+
+### WSL sudo escapes process-group kill, bash Wait() hangs past timeout
+- **Saw**: `bash -c 'sudo cp …'` in WSL2 hung 55+ minutes despite `timeout_ms` max (10m); Esc/context cancel fired but the TUI stayed blocked until manual kill
+- **Why**: `sudo` (and `setsid`) create a new session/PGID — `SIGKILL` to `-sh.PGID` only kills the shell wrapper. WSL `sudo` with no TTY blocks on a Windows credential dialog (not killable via Linux signals). Orphaned descendants keep stdout/stderr pipe fds open → `cmd.Wait()` never returns even after the context timer fires
+- **Fix**: on Linux, walk `/proc/[pid]/task/[tid]/children` recursively and SIGKILL every descendant before the PGID kill; cap `cmd.Wait()` with a 5s post-kill grace so the tool returns even when kill fails
+- **Lesson**: Setsid + PGID kill is necessary but not sufficient when children deliberately escape the group (sudo, setsid). Always pair group kill with descendant cleanup AND a Wait() deadline — never assume SIGKILL reaps the whole tree
+- **Refs**: `internal/tools/bash/proc_linux.go`, `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash.go`, issue #9
