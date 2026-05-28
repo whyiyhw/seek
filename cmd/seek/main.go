@@ -47,6 +47,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/routinescli"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/internal/worktreecli"
@@ -588,6 +589,15 @@ func run() error {
 	// feature-subagent.md §3.8 + §9 v0.6.x dot.
 	if len(os.Args) >= 2 && os.Args[1] == "worktree" {
 		return worktreecli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek cron ...` — create / list / delete / run / tick. Same
+	// rationale: cron registry mutations + the OS-scheduler-fired
+	// tick don't need the full seek runtime. tick especially is
+	// invoked every minute by launchd / systemd / cron / Task
+	// Scheduler; short-circuit keeps that cheap. PRD docs/prd/
+	// feature-routines.md §4.1.
+	if len(os.Args) >= 2 && os.Args[1] == "cron" {
+		return routinescli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// `seek keys ...` — list / check / actions. Same rationale: keymap
 	// queries don't need API keys, sessions, or a project directory.

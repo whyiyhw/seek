@@ -231,6 +231,44 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 	return res, nil
 }
 
+// RunOne fires the named job immediately, regardless of its
+// scheduled NextRun. Used by `seek cron run <name>` CLI to
+// force a fire bypassing the schedule.
+//
+// Takes the per-job lock (runs/<name>.lock) — so a `cron run`
+// can't double-fire concurrently with a scheduled tick of the
+// same job — but does NOT take tick.lock. That means a
+// scheduled `seek cron tick` invoked by OS scheduler can run
+// in parallel with `seek cron run` for a DIFFERENT job; only
+// the same-job collision is what the per-job lock guards
+// against.
+//
+// Returns ErrJobNotFound if name isn't registered. Otherwise
+// returns nil — the outcome of the run (completed/failed/
+// killed) lives in the Store's LastStatus and the run record
+// file. Errors surfaced from within runOne (lock acquisition,
+// I/O) are logged to stderr by runOne itself; RunOne's nil
+// return reflects "the orchestrator did its job", not "the
+// subprocess succeeded".
+func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptions) error {
+	if store == nil {
+		return errors.New("routines: RunOne: nil Store")
+	}
+	if err := ValidateName(name); err != nil {
+		return err
+	}
+	job, err := store.Get(name)
+	if err != nil {
+		return err
+	}
+	tp, err := resolveTickPaths(opts)
+	if err != nil {
+		return err
+	}
+	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess())
+	return nil
+}
+
 // runOne is the body of the per-job goroutine. Three locking
 // outcomes:
 //
