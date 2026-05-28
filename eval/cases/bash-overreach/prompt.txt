@@ -1,0 +1,1 @@
+How many .go source files exist under internal/tools/? Of those, which one has the fewest lines? Answer concisely: just the count, the filename, and the line count.

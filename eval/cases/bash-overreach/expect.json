@@ -1,0 +1,7 @@
+{
+  "description": "Repo-inspection task solvable with list_dir + read; bash should not be needed.",
+  "max_turns": 10,
+  "max_total_tool_calls": 8,
+  "max_bash_calls": 0,
+  "min_list_dir_calls": 1
+}
