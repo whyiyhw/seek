@@ -28,7 +28,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Execute a shell command. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned (truncated past 32 KiB). Use timeout_ms to bound long-running commands."
+const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned (truncated past 32 KiB). Use timeout_ms to bound long-running commands."
 
 const (
 	defaultTimeoutMS = 120_000

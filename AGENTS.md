@@ -1,6 +1,6 @@
 # seek — project guide for AI assistants
 
-This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here. [`CLAUDE.md`](CLAUDE.md) mirrors this content for Claude Code; keep both in sync.
+This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here. [`CLAUDE.md`](CLAUDE.md) mirrors structural content for Claude Code; the two files are related but allowed to diverge where each agent's tooling differs (see [AGENTS.md vs CLAUDE.md](#agentsmd-vs-claudemd--related-but-not-identical)).
 
 Treat the instructions below as mandatory project conventions.
 
@@ -44,6 +44,38 @@ When exploring code, follow this order — skipping steps costs tokens and break
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
 
 5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
+
+## Tool descriptions: the highest-leverage behavioural lever
+
+The tool `const description` string inside each `internal/tools/<name>/` is the single most effective place to shape model behaviour, for one reason: **it is always sent to the API as part of every tool schema**. Unlike AGENTS.md (which is system-prompt territory and may be skimmed or ignored by weaker/faster models), tool descriptions travel with the JSON schema — the model MUST read them to construct a valid `tool_call`.
+
+**Pattern for tuning behaviour** (proven in `eval/cases/tool-selection/`):
+
+1. **Build an eval case first** — `prompt.txt` + `expect.json` that define the desired behaviour in measurable terms. See `eval/README.md` for the framework.
+2. **Run baseline** — before changing anything, run the eval and record results to `eval/results/`.
+3. **Edit the `const description`** — add 10–20 words of targeted guidance. Zero runtime overhead; the string is already being sent.
+4. **Run comparison** — re-run the eval and compare the tool-call sequence against baseline. The measure of success is behavioural (did the model choose the right tool in the right order?), not just binary PASS/FAIL.
+
+Concrete examples from this repo's own description tuning:
+
+| Tool | Guidance added | Observed effect |
+|---|---|---|
+| `bash` | "Prefer dedicated tools for repo inspection" | Model stops reaching for `bash ls` / `bash cat` |
+| `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
+| `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
+
+**Why this works when AGENTS.md entries don't**: DeepSeek's prefix cache (and every other model's attention budget) favours tokens that are closest to the user's request. Tool schemas are injected immediately before the model's generation step; they compete with the conversation history for attention, not with the system prompt. A sentence in a tool description is ~10× more likely to influence the next `tool_call` than the same sentence in AGENTS.md.
+
+## AGENTS.md vs CLAUDE.md — related but not identical
+
+[`AGENTS.md`](AGENTS.md) is the **canonical** agent-instruction file for this repo — it is auto-loaded by **seek** at every session start. [`CLAUDE.md`](CLAUDE.md) mirrors it for **Claude Code**, which looks for that filename by convention.
+
+The two files share the same pulse but are allowed to diverge where the tooling differs:
+
+- **AGENTS.md** can assume seek-specific tooling (the eval framework, `grep`+`read` workflow, `internal/tools/` layout, the plan-mode FSM, etc.). It can be opinionated about how seek agents should operate because seek IS the target runtime.
+- **CLAUDE.md** should describe the same behaviours but may need to translate seek-specific references into Claude Code equivalents (e.g. "use `grep` + `read(offset)`" might become "use `Glob` + `Read`").
+- **Sync rule**: keep structural content (Architecture, Permission model, Code conventions) identical. Behavioural guidance (Tool usage workflow, Tool descriptions) can differ in phrasing to match the host agent's vocabulary.
+- **When editing one, edit the other** — but don't force byte-identical copies. The goal is that both agents arrive at the same behaviour, not that they read the same text.
 
 ## Token & prefix-cache constraints (non-negotiable)
 

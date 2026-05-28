@@ -53,6 +53,7 @@ per case it executed, e.g.:
 | `read_calls` | `tool_start` events with `name=read` |
 | `grep_calls` | `tool_start` events with `name=grep` |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
+| `git_calls` | `tool_start` events with `name=git` |
 | `turns` | `turn_end` events |
 
 Bounds in `expect.json` use the prefix to declare direction:

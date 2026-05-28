@@ -1,0 +1,8 @@
+{
+  "description": "Three-file read task solvable with grep+read; git show and bash should not be needed.",
+  "max_turns": 12,
+  "max_git_calls": 0,
+  "max_bash_calls": 0,
+  "min_grep_calls": 1,
+  "min_read_calls": 3
+}

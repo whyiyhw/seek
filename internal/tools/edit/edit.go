@@ -50,7 +50,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Replace exact substring(s) in a file. old_string must appear in the file the exact number of times given by expected_replacements (default 1). new_string=\"\" deletes the match. Edits outside the working directory are refused unless seek was started with --yolo."
+const description = "Replace exact substring(s) in a file. Before calling, read the target lines first to capture exact whitespace for old_string — guessing from memory causes failures. old_string must appear in the file the exact number of times given by expected_replacements (default 1). new_string=\"\" deletes the match. Edits outside the working directory are refused unless seek was started with --yolo."
 
 type Args struct {
 	Path                 string `json:"path"`

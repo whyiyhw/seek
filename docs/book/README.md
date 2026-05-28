@@ -262,6 +262,7 @@
 ### 附录
 
 - **[附录 A：踩坑录索引](appendix-a.md)** — 书中 #1–#16 编号坑 ↔ [`docs/pitfalls.md`](../pitfalls.md) 条目对照表；附"书中提过但未编号"的延伸阅读列表
+- **[附录 B：为什么 seek 是 DeepSeek 原生的](appendix-b.md)** — 评估驱动的行为调优方法论；为什么 tool description 是最有效的干预点；和抄 Claude Code 提示词的本质区别
 
 > 原计划中的"DeepSeek API 速查"、"bubbletea 常用模式"、"参考资料"三份附录暂未撰写。第 2、6、13 章已覆盖 DeepSeek API 的关键细节；第 7、8 章覆盖 bubbletea 的实用模式。如未来有读者需求再单独成册。
 

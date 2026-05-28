@@ -161,7 +161,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Run a read-only git subcommand (log, diff, status, blame, etc.) and return its output, capped at 500 lines. ALLOWED in plan mode — this is how the model inspects history without falling back to bash (which is blocked under plan). Use this for any git query; do NOT use bash for 'git log' or 'git diff' when this tool can do it."
+const description = "Run a read-only git subcommand (log, diff, status, blame, etc.) and return its output, capped at 500 lines. For reading file content, prefer grep+read over git show/cat-file — cheaper and won't truncate. ALLOWED in plan mode — this is how the model inspects history without falling back to bash (which is blocked under plan). Use this for any git query; do NOT use bash for 'git log' or 'git diff' when this tool can do it."
 
 // Tool is the git wrapper. Stateless: no fields. cwd resolves at
 // each call so tests can chdir without re-constructing the tool.

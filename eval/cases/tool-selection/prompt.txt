@@ -1,0 +1,7 @@
+Read the `const description` string from these three files and quote each one verbatim:
+
+1. internal/tools/bash/bash.go
+2. internal/tools/edit/edit.go
+3. internal/tools/git/git.go
+
+Then tell me: which of the three descriptions has the most words? Answer concisely — just the tool name, the word count, and the quoted string.

@@ -1,0 +1,1 @@
+{"case":"tool-selection","pass":true,"metrics":{"unknown_field_errors":0,"think_calls":0,"total_tool_calls":6,"read_calls":3,"grep_calls":3,"list_dir_calls":0,"bash_calls":0,"edit_calls":0,"git_calls":0,"turns":3},"prompt_tokens":36568,"completion_tokens":3467,"elapsed_s":29,"note":"after description changes — grep-before-read workflow observed"}

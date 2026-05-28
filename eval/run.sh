@@ -29,9 +29,15 @@ if [[ ! -x "$binary" ]]; then
   echo "      (build it first: go build -o seek ./cmd/seek)" >&2
   exit 2
 fi
-if ! command -v jq >/dev/null 2>&1; then
+if ! command -v jq >/dev/null 2>&1 && ! command -v jq.exe >/dev/null 2>&1; then
   echo "eval: jq is required but not installed" >&2
   exit 2
+fi
+# Resolve jq binary name (WSL needs jq.exe, Linux/macOS uses jq).
+if command -v jq >/dev/null 2>&1; then
+  JQ=jq
+else
+  JQ=jq.exe
 fi
 
 mkdir -p "$results_dir"
@@ -55,25 +61,34 @@ extract_metric() {
   local name=$1 path=$2
   case "$name" in
     unknown_field_errors)
-      jq -s '[.[] | select(.type=="tool_end" and (.error // "" | contains("unknown field")))] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_end" and (.error // "" | contains("unknown field")))] | length' "$path"
       ;;
     think_calls)
-      jq -s '[.[] | select(.type=="tool_start" and .name=="think")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="think")] | length' "$path"
       ;;
     total_tool_calls)
-      jq -s '[.[] | select(.type=="tool_start")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_start")] | length' "$path"
       ;;
     read_calls)
-      jq -s '[.[] | select(.type=="tool_start" and .name=="read")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="read")] | length' "$path"
       ;;
     grep_calls)
-      jq -s '[.[] | select(.type=="tool_start" and .name=="grep")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="grep")] | length' "$path"
       ;;
     list_dir_calls)
-      jq -s '[.[] | select(.type=="tool_start" and .name=="list_dir")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="list_dir")] | length' "$path"
+      ;;
+    bash_calls)
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash")] | length' "$path"
+      ;;
+    edit_calls)
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="edit")] | length' "$path"
+      ;;
+    git_calls)
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="git")] | length' "$path"
       ;;
     turns)
-      jq -s '[.[] | select(.type=="turn_end")] | length' "$path"
+      $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
       ;;
     *)
       echo "0"
@@ -95,7 +110,7 @@ run_one() {
   fi
 
   local max_turns
-  max_turns=$(jq -r '.max_turns // 10' "$expect_file")
+  max_turns=$($JQ -r '.max_turns // 10' "$expect_file")
   local prompt
   prompt=$(cat "$prompt_file")
 
@@ -117,27 +132,30 @@ run_one() {
   # vocabulary. We compute the same fixed set every case so historical
   # diffs are comparable across cases.
   local metrics
-  metrics=$(jq -n \
+  metrics=$($JQ -n \
     --argjson unknown_field_errors "$(extract_metric unknown_field_errors "$out_file")" \
     --argjson think_calls          "$(extract_metric think_calls          "$out_file")" \
     --argjson total_tool_calls     "$(extract_metric total_tool_calls     "$out_file")" \
     --argjson read_calls           "$(extract_metric read_calls           "$out_file")" \
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
+    --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
+    --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
+    --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, turns:$turns}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, turns:$turns}')
 
   # agent_end carries cumulative token counts; pull them straight out
   # so we can plot cost-vs-quality trends.
   local prompt_tokens completion_tokens
-  prompt_tokens=$(jq -s 'map(select(.type=="agent_end")) | .[0].prompt_tokens // 0' "$out_file")
-  completion_tokens=$(jq -s 'map(select(.type=="agent_end")) | .[0].completion_tokens // 0' "$out_file")
+  prompt_tokens=$($JQ -s 'map(select(.type=="agent_end")) | .[0].prompt_tokens // 0' "$out_file")
+  completion_tokens=$($JQ -s 'map(select(.type=="agent_end")) | .[0].completion_tokens // 0' "$out_file")
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got
   # actual" lines, empty when everything passed.
   local failures
-  failures=$(jq -r --argjson m "$metrics" '
+  failures=$($JQ -r --argjson m "$metrics" '
     [ to_entries[]
       | select(.key | startswith("max_") or startswith("min_") or startswith("exact_"))
       | . as $entry
@@ -159,7 +177,7 @@ run_one() {
   fi
 
   local row
-  row=$(jq -n \
+  row=$($JQ -n \
     --arg case "$case_name" \
     --argjson pass "$pass" \
     --argjson metrics "$metrics" \
@@ -175,12 +193,12 @@ run_one() {
 
   if [[ "$pass" == "true" ]]; then
     pass_total=$((pass_total + 1))
-    echo "PASS  $case_name  (${elapsed}s, $(echo "$metrics" | jq -c .))"
+    echo "PASS  $case_name  (${elapsed}s, $(echo "$metrics" | $JQ -c .))"
   else
     fail_total=$((fail_total + 1))
     echo "FAIL  $case_name  (${elapsed}s)"
-    echo "$failures" | jq -r '.[]' | sed 's/^/      /'
-    echo "      metrics: $(echo "$metrics" | jq -c .)"
+    echo "$failures" | $JQ -r '.[]' | sed 's/^/      /'
+    echo "      metrics: $(echo "$metrics" | $JQ -c .)"
   fi
 
   rm -f "$out_file"
