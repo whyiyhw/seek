@@ -373,3 +373,26 @@ func TestErrSentinelExists(t *testing.T) {
 		t.Error("errNilManager must be errors.Is-comparable to itself")
 	}
 }
+
+// TestTool_ImplementsReadOnlyTool pins the parallel-dispatch
+// property: pkg/agent.allReadOnly() permits concurrent dispatch
+// of a tool-call batch only when EVERY call is backed by a
+// tools.ReadOnlyTool. Without this marker, two parallel `agent`
+// calls in the same turn would serialise at the agent loop —
+// defeating the entire reason subagents exist. The compile-time
+// assertion var _ tools.ReadOnlyTool = (*Tool)(nil) catches
+// drops of the method; this test catches a future regression
+// where the method returns false (could happen if someone
+// "fixes" the semantic stretch noted in the method docs).
+func TestTool_ImplementsReadOnlyTool(t *testing.T) {
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	ro, ok := any(tl).(interface{ ReadOnly() bool })
+	if !ok {
+		t.Fatal("Tool does not implement ReadOnly() — parallel dispatch broken")
+	}
+	if !ro.ReadOnly() {
+		t.Error("Tool.ReadOnly() returned false — pkg/agent.allReadOnly() will refuse to dispatch concurrent agent calls")
+	}
+}

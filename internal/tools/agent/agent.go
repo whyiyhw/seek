@@ -107,6 +107,39 @@ func (*Tool) Name() string            { return "agent" }
 func (*Tool) Description() string     { return description }
 func (*Tool) Schema() json.RawMessage { return schemaBytes }
 
+// ReadOnly implements tools.ReadOnlyTool. Marking `agent` as
+// read-only is a deliberate semantic stretch — a subagent CAN
+// mutate the filesystem if its template includes write/edit/bash
+// (general-purpose does). But the `tools.ReadOnlyTool` marker is
+// consumed by pkg/agent.allReadOnly() to decide whether a turn's
+// tool-call batch can be dispatched concurrently, NOT by the
+// permission gate (which uses the separate Action.ReadOnly flag
+// set inside individual tools like bash).
+//
+// Dispatch-level concurrency is safe for `agent` because:
+//
+//   - Manager.Spawn is concurrent-safe (tested: parallel spawn N
+//     with -race in subagent/manager_test.go).
+//   - The subagents.jsonl index serialises appends under
+//     indexLock + O_APPEND atomicity.
+//   - Each spawn allocates fresh child Tracker / Policy / pkg/
+//     agent.Agent; no shared mutable state between siblings.
+//   - The MaxConcurrent gate caps simultaneous in-flights so a
+//     runaway model can't fork-bomb the orchestrator.
+//
+// Without this marker, two parallel `agent` tool calls in the same
+// turn (e.g. "spawn 3 explore subagents to research X / Y / Z")
+// would serialise at the agent loop, defeating the entire point of
+// subagents. With it, the user sees max(t1, t2, t3) wall time
+// instead of sum.
+//
+// Side note: if the LLM mixes agent + a non-read-only tool in the
+// same batch (e.g. [agent, bash]), the batch goes serial (pkg/
+// agent.allReadOnly requires EVERY call to be marked). That's the
+// correct conservative choice — we don't want bash and agent
+// interleaving in indeterminate order.
+func (*Tool) ReadOnly() bool { return true }
+
 // Execute parses args and dispatches to Manager.Spawn. The Result's
 // Summary field is ALWAYS a well-formed wire-format string (success
 // path = "[agent: completed] ..." / any failure = "[agent: failed
@@ -209,6 +242,13 @@ func failNoSpawn(reason, hint string) string {
 // used; kept as a hook for future test seams.
 var errNilManager = errors.New("agent: nil Manager")
 
-// Compile-time assertions: Tool satisfies the tools.Tool contract.
-// These are free — they catch interface drift at build time.
-var _ tools.Tool = (*Tool)(nil)
+// Compile-time assertions: Tool satisfies the tools.Tool contract
+// AND the tools.ReadOnlyTool extension. These are free — they
+// catch interface drift at build time. If a refactor accidentally
+// drops the ReadOnly method, the second assertion fails and the
+// parallel-dispatch property is recovered at compile rather than
+// silently degrading at runtime.
+var (
+	_ tools.Tool         = (*Tool)(nil)
+	_ tools.ReadOnlyTool = (*Tool)(nil)
+)
