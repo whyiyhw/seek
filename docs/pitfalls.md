@@ -832,6 +832,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: child processes inherit the parent's TTY by default. Process-spawning tools must explicitly opt out of TTY inheritance (setsid, setctty=false, or equivalent), otherwise interactive prompts steal input in a way that context cancellation can't reach
 - **Refs**: `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash.go` (line 113)
 
+### Setsid + pipe stdout = orphan grandchildren deadlock Wait()
+- **Saw**: `TestBash_ContextCancel_KillsProcess` timed out at 10s. Context cancellation (Esc) didn't kill `sleep 600` even though `exec.CommandContext` sent SIGKILL to the child PID.
+- **Why**: `detachStdin` sets `Setsid = true` to detach the child from the controlling terminal. But Setsid creates a new session where `sh` can fork `sleep` as a grandchild. When SIGKILL kills `sh` alone, `sleep` survives as an orphan **inheriting the stdout/stderr pipe fds** → the write-ends stay open → `cmd.Wait()` blocks forever waiting for EOF on the pipes.
+- **Fix**: switch from `exec.CommandContext` to `exec.Command` + manual `Start()`/`Wait()` on Unix. A dedicated goroutine waits for `cctx.Done()` and kills the **entire process group** via `syscall.Kill(-pid, SIGKILL)`. This closes all pipe fds and lets `Wait()` return.
+- **Lesson**: Setsid orphans can keep pipe fds alive. When using Setsid + pipe I/O, always cancel by process group (`-pid`), not by PID.
+- **Refs**: `internal/tools/bash/bash.go`, `internal/tools/bash/bash_unix.go`
+
 ### V4-Flash prediction returns empty content when Thinking isn't explicitly disabled
 - **Saw**: side-channel suggested-reply (`Suggest`) always returned `""` even though the API call succeeded (200 OK) and tokens were consumed. `finish_reason="length"`, `content=""`, but `reasoning_content` was populated with the model's internal monologue — all `max_tokens` were spent on reasoning, leaving nothing for the actual prediction.
 - **Why**: the DeepSeek API currently defaults V4-Flash to thinking-mode-*on* at the endpoint level, even though `ShouldEnableThinking("deepseek-v4-flash")` returns false in the code. Without an explicit `Thinking: {Type: "disabled"}` in the request, the model burns the entire `max_tokens` budget on `reasoning_content` and emits an empty `content` field.
