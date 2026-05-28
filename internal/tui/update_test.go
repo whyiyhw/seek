@@ -1606,12 +1606,17 @@ func TestApplyModelChoice_SkillVerbNonUseClosesPicker(t *testing.T) {
 	}
 }
 
-func TestApplyModelChoice_SkillNameInsertsWithoutTrailingSpace(t *testing.T) {
+func TestApplyModelChoice_SkillNameInsertsWithTrailingSpace(t *testing.T) {
 	t.Parallel()
-	// Skill-name accept lands at "/skill use <name>" with no trailing
-	// space — the picker closes, but the user can hit Enter to arm or
-	// keep typing " <task>" to fire with extras. The missing space is
-	// the affordance that picker-handoff rules read.
+	// Skill-name accept lands at "/skill use <name> " WITH a trailing
+	// space — cursor sits in the inline-task position so the user can
+	// immediately type a task. submit()'s TrimSpace still allows
+	// Enter-to-arm without the user manually removing the space.
+	//
+	// The trailing space ALSO prevents the prior bug where the next
+	// updateCommandMenu invocation re-opened the name picker on the
+	// just-accepted row (since `tail` now contains a space and routes
+	// to the "user past name" branch).
 	m := emptyModel()
 	attachSkills(m, "dual-model", "go-test-runner")
 	m.modelPickerFiltered = skillNameChoices(m.opts.Skills)
@@ -1621,8 +1626,8 @@ func TestApplyModelChoice_SkillNameInsertsWithoutTrailingSpace(t *testing.T) {
 
 	m.applyModelChoice(0)
 
-	if got := m.input.Value(); got != "/skill use dual-model" {
-		t.Errorf("input after name accept = %q, want '/skill use dual-model'", got)
+	if got := m.input.Value(); got != "/skill use dual-model " {
+		t.Errorf("input after name accept = %q, want '/skill use dual-model '", got)
 	}
 	if m.modelPickerOpen {
 		t.Errorf("no further picker after name; expected closed, got open=%v purpose=%q",

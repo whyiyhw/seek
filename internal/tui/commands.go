@@ -492,20 +492,21 @@ func (m *Model) applyModelChoice(idx int) {
 		m.updateCommandMenu()
 
 	case "skill-name":
-		// Completion-style insert: `/skill use <name>` with NO trailing
-		// space. The missing space is load-bearing — updateCommandMenu
-		// reads the trailing-space-or-not as "user is composing the
-		// name" vs "user is composing the inline task". Without the
-		// space the picker closes; the user can hit Enter immediately
-		// to arm, or type ` <task>` to fire with extras.
+		// Completion-style insert: `/skill use <name> ` with trailing
+		// space. The space puts the cursor in the inline-task position
+		// so the user can type a task immediately — the common follow-
+		// up gesture. submit() runs TrimSpace before dispatch, so
+		// Enter-to-arm still works without the user manually removing
+		// the trailing whitespace.
 		//
-		// Critically, we do NOT call updateCommandMenu here. The inserted
-		// value `/skill use dual-model` would still partial-match the
-		// picker filter against itself ("dual-model" is a prefix of
-		// "dual-model"), re-opening the picker on the same row the user
-		// just accepted. Accept is "I'm done with this picker"; the next
-		// genuine keystroke will re-evaluate.
-		m.input.SetValue("/skill use " + choice.id)
+		// We do NOT need to call updateCommandMenu here: applyModelChoice
+		// already cleared modelPickerOpen above (line ~439), and the
+		// trailing space means the NEXT updateCommandMenu invocation
+		// (on the next keystroke) will see `tail` containing a space and
+		// route to the "user past name → close picker" branch —
+		// preventing the "picker re-opens on the same row" loop that
+		// the no-space version was working around.
+		m.input.SetValue("/skill use " + choice.id + " ")
 
 	case "help-topic":
 		// Selected a help topic from /help picker. Build the overlay
