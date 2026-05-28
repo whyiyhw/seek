@@ -150,6 +150,43 @@ func TestSessionCheckpointDir_RequiresSessionID(t *testing.T) {
 	}
 }
 
+func TestSubagentsIndex_ComposesUnderProjectDir(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+	got, err := SubagentsIndex("/abs/path/to/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(override, "projects",
+		ProjectID("/abs/path/to/project"), "subagents.jsonl")
+	if got != want {
+		t.Errorf("SubagentsIndex = %q, want %q", got, want)
+	}
+}
+
+func TestSubagentSessionDir_ComposesUnderProjectSessions(t *testing.T) {
+	override := t.TempDir()
+	withEnv(t, envHome, override)
+	got, err := SubagentSessionDir("/abs/path/to/project", "sid123", "sub456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(override, "projects",
+		ProjectID("/abs/path/to/project"), "sessions", "sid123", "subagents", "sub456")
+	if got != want {
+		t.Errorf("SubagentSessionDir = %q, want %q", got, want)
+	}
+}
+
+func TestSubagentSessionDir_RequiresBothIDs(t *testing.T) {
+	if _, err := SubagentSessionDir("/abs", "", "sub"); err == nil {
+		t.Error("expected error for empty parent sid")
+	}
+	if _, err := SubagentSessionDir("/abs", "sid", ""); err == nil {
+		t.Error("expected error for empty subagent sid")
+	}
+}
+
 func TestProjectHooksToml_ComposesUnderSeekDir(t *testing.T) {
 	got := ProjectHooksToml("/abs/path/to/project")
 	want := filepath.Join("/abs/path/to/project", ".seek", "hooks.toml")

@@ -186,6 +186,49 @@ func SessionCheckpointDir(absPath, sid string) (string, error) {
 	return ProjectSessionDir(absPath, sid)
 }
 
+// SubagentsIndex returns ~/.seek/projects/<id>/subagents.jsonl — the
+// project-wide event-source index of parent → subagent relations
+// (one event per spawn / completion / failure / kill / orphan). See
+// docs/prd/feature-subagent.md §3.4 for the event schema and folding
+// rules. Does NOT create the file or parent directory; callers
+// MkdirAll the project dir and append to the file lazily.
+//
+// Why project-scoped (not session-scoped): a "list all subagents I
+// ever spawned in this project" view spans sessions, and the
+// orphan-recovery scan on seek startup needs one file per project,
+// not N files keyed by historical session IDs.
+func SubagentsIndex(absPath string) (string, error) {
+	dir, err := ProjectDir(absPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "subagents.jsonl"), nil
+}
+
+// SubagentSessionDir returns the per-subagent directory rooted at
+// ~/.seek/projects/<id>/sessions/<sid>/subagents/<sub-sid>/. The
+// directory holds transcript.jsonl (the subagent's own session
+// JSONL, schema_version=2), plus optional plans/ and checkpoints/
+// subdirectories that are created lazily when the subagent calls
+// propose or triggers a destructive operation. See feature PRD
+// docs/prd/feature-subagent.md §3.3 for the full layout.
+//
+// Does NOT create the directory. Both `sid` (parent session id) and
+// `subSid` (subagent's own short id) are required.
+func SubagentSessionDir(absPath, sid, subSid string) (string, error) {
+	if sid == "" {
+		return "", fmt.Errorf("paths: SubagentSessionDir: empty parent session id")
+	}
+	if subSid == "" {
+		return "", fmt.Errorf("paths: SubagentSessionDir: empty subagent id")
+	}
+	dir, err := ProjectSessionDir(absPath, sid)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "subagents", subSid), nil
+}
+
 // UserKeybindings returns the user-level keybindings file
 // (~/.seek/keybindings.toml). May not exist — that's the common case
 // for users who never customise; callers (internal/keymap.Load)
