@@ -1887,15 +1887,54 @@ func truncateForCheckpoint(s string, n int) string {
 // feature-subagent.md §9 "v0.6.x dot" and lands after the M11.1
 // worktree work — by then there'll be more state worth navigating.
 
-func cmdAgents(m *Model, _ string) cmdResult {
+func cmdAgents(m *Model, args string) cmdResult {
 	if m.opts.Subagents == nil {
 		return cmdResult{text: styleMuted.Render("/agents: unavailable (--no-save or session not initialised)")}
 	}
-	subs, err := m.opts.Subagents.List(subagent.ListFilter{})
+
+	// Arg parsing. --all (or -a) widens the filter to the whole
+	// project; default scope is the current session only (PRD §4.2
+	// "当前 session 已 spawn 的子"). subagents.jsonl is project-
+	// scoped on disk and accumulates across sessions, so an
+	// unfiltered dump grows unbounded over a project's lifetime.
+	showAll := false
+	for _, tok := range strings.Fields(args) {
+		switch tok {
+		case "--all", "-a":
+			showAll = true
+		default:
+			return cmdResult{text: styleErr.Render("/agents: unknown arg " + tok + " (only --all / -a)")}
+		}
+	}
+
+	// Resolve the current session ID for the default filter. If
+	// Session is nil (defensive — Subagents wiring in cmd/seek
+	// already requires activeSession), fall back to --all behaviour
+	// so the user still sees something rather than a confusing
+	// "no subagents" message.
+	currentSid := ""
+	if m.opts.Session != nil {
+		currentSid = m.opts.Session.ID
+	}
+	filter := subagent.ListFilter{}
+	if !showAll && currentSid != "" {
+		filter.ParentSid = currentSid
+	}
+	subs, err := m.opts.Subagents.List(filter)
 	if err != nil {
 		return cmdResult{text: styleErr.Render("/agents: " + err.Error())}
 	}
 	if len(subs) == 0 {
+		if showAll || currentSid == "" {
+			return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
+		}
+		// Empty in current session — check if there's project-wide
+		// history so the hint can point at --all rather than just
+		// saying "spawn one".
+		all, _ := m.opts.Subagents.List(subagent.ListFilter{})
+		if len(all) > 0 {
+			return cmdResult{text: styleMuted.Render(fmt.Sprintf("no subagents in this session yet — pass `--all` to see %d from prior sessions in this project", len(all)))}
+		}
 		return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
 	}
 
@@ -1920,6 +1959,15 @@ func cmdAgents(m *Model, _ string) cmdResult {
 	// TOKENS(right). Total fits a typical 100-col TUI comfortably
 	// even with longer descriptions.
 	var b strings.Builder
+
+	// Scope banner — tells the user whether they're looking at
+	// just this session or the whole project, and how to switch.
+	// Muted so it doesn't compete with the data rows.
+	if showAll || currentSid == "" {
+		fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("scope: all project sessions (%d subagents)", len(subs))))
+	} else {
+		fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("scope: current session %s (%d subagents) — pass `--all` for project-wide", shortSubSid(currentSid), len(subs))))
+	}
 	fmt.Fprintf(&b, "%-8s %-11s %-10s %-50s %8s\n",
 		"SUB-SID", "TYPE", "STATUS", "DESCRIPTION", "TOKENS")
 	for _, s := range subs {

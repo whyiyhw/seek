@@ -103,7 +103,7 @@ func TestCmdAgents_NilManager(t *testing.T) {
 // newCmdTestSubagentMgr uses t.Setenv to redirect ~/.seek, which is
 // mutually exclusive with parallel.
 func TestCmdAgents_EmptyList(t *testing.T) {
-	mgr := newCmdTestSubagentMgr(t, nil)
+	mgr, _ := newCmdTestSubagentMgr(t, nil)
 	m := emptyModel()
 	m.opts.Subagents = mgr
 	res := runHandler(t, m, "/agents")
@@ -118,7 +118,7 @@ func TestCmdAgents_EmptyList(t *testing.T) {
 // land in the output. NOT t.Parallel for the same reason as
 // TestCmdAgents_EmptyList.
 func TestCmdAgents_RendersTable(t *testing.T) {
-	mgr := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+	mgr, _ := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
 		return subagent.RunnerResult{
 			Summary: "Found Esc handlers in three packages.",
 			Tokens:  subagent.Tokens{Prompt: 8000, Completion: 100, CacheHit: 7500},
@@ -163,11 +163,129 @@ func TestCmdAgents_RendersTable(t *testing.T) {
 	}
 }
 
+// TestCmdAgents_DefaultFiltersByCurrentSession pins the PRD §4.2
+// scope rule: /agents (no args) shows ONLY current-session
+// subagents, not the whole project's accumulated history. This is
+// the load-bearing fix for the "scroll-screen overflow when
+// project has 100+ historical subagents" UX bug.
+func TestCmdAgents_DefaultFiltersByCurrentSession(t *testing.T) {
+	mgr, parentSid := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+
+	// Spawn two from the "current" session...
+	*parentSid = "session-current"
+	for _, desc := range []string{"task A", "task B"} {
+		_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{
+			Description: desc, Prompt: "go", Type: subagent.TypeExplore,
+		})
+	}
+	// ...and three from an older "other" session — these should
+	// NOT appear in the default /agents output.
+	*parentSid = "session-other"
+	for _, desc := range []string{"old X", "old Y", "old Z"} {
+		_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{
+			Description: desc, Prompt: "go", Type: subagent.TypeExplore,
+		})
+	}
+
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	m.opts.Session = &session.Session{ID: "session-current"}
+
+	res := runHandler(t, m, "/agents")
+	for _, want := range []string{"task A", "task B"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("current-session row %q missing:\n%s", want, res.text)
+		}
+	}
+	for _, leak := range []string{"old X", "old Y", "old Z"} {
+		if strings.Contains(res.text, leak) {
+			t.Errorf("other-session row %q leaked into default scope:\n%s", leak, res.text)
+		}
+	}
+	// Scope banner must mention current session + how to widen.
+	if !strings.Contains(res.text, "current session") {
+		t.Errorf("missing 'current session' scope hint:\n%s", res.text)
+	}
+	if !strings.Contains(res.text, "--all") {
+		t.Errorf("missing --all hint pointing at project-wide view:\n%s", res.text)
+	}
+}
+
+// TestCmdAgents_AllFlagWidens: --all surfaces every subagent in
+// the project regardless of session.
+func TestCmdAgents_AllFlagWidens(t *testing.T) {
+	mgr, parentSid := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	*parentSid = "session-current"
+	_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{Description: "fresh", Prompt: "p", Type: subagent.TypeExplore})
+	*parentSid = "session-other"
+	_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{Description: "stale", Prompt: "p", Type: subagent.TypeExplore})
+
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	m.opts.Session = &session.Session{ID: "session-current"}
+
+	res := runHandler(t, m, "/agents --all")
+	for _, want := range []string{"fresh", "stale"} {
+		if !strings.Contains(res.text, want) {
+			t.Errorf("--all should surface %q across all sessions:\n%s", want, res.text)
+		}
+	}
+	if !strings.Contains(res.text, "all project sessions") {
+		t.Errorf("missing 'all project sessions' scope banner:\n%s", res.text)
+	}
+}
+
+// TestCmdAgents_UnknownArgErrors: anything that isn't --all / -a
+// errors rather than silently being ignored. Catches typos like
+// /agents --tail 10 (which we don't support yet) early.
+func TestCmdAgents_UnknownArgErrors(t *testing.T) {
+	mgr, _ := newCmdTestSubagentMgr(t, nil)
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	res := runHandler(t, m, "/agents --tail 10")
+	if !strings.Contains(res.text, "unknown arg") {
+		t.Errorf("expected 'unknown arg' for /agents --tail 10, got: %q", res.text)
+	}
+}
+
+// TestCmdAgents_EmptyCurrentPointsToAll: current session is empty
+// but project has historical subagents — the empty-state hint
+// must point at --all so the user discovers their history.
+func TestCmdAgents_EmptyCurrentPointsToAll(t *testing.T) {
+	mgr, parentSid := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	// Only spawn under an "old" session.
+	*parentSid = "session-old"
+	_ = mgr.Spawn(context.Background(), subagent.SpawnArgs{Description: "old", Prompt: "p", Type: subagent.TypeExplore})
+
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	m.opts.Session = &session.Session{ID: "session-current-empty"}
+
+	res := runHandler(t, m, "/agents")
+	if !strings.Contains(res.text, "no subagents in this session") {
+		t.Errorf("expected empty-current hint, got: %q", res.text)
+	}
+	if !strings.Contains(res.text, "--all") {
+		t.Errorf("empty-current hint should point at --all to discover history:\n%s", res.text)
+	}
+}
+
 // newCmdTestSubagentMgr builds a Manager wired to the supplied
 // stub Runner. Sets SEEK_HOME to a tempdir so the index file
 // lands isolated. runner == nil → a Runner that should never
 // be invoked (callers using this path don't Spawn).
-func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) *subagent.Manager {
+//
+// Returns the Manager plus a pointer to the parent-SID variable
+// the closure reads — tests that need to spawn under multiple
+// parent SIDs (e.g. session-filter coverage) write to *parentSid
+// between Spawn calls.
+func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) (*subagent.Manager, *string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SEEK_HOME", home)
@@ -183,11 +301,12 @@ func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) *subagent.Manag
 		}
 	}
 	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	parentSid := "20260601-100000-test"
 	mgr, err := subagent.NewManager(subagent.ManagerOpts{
 		ProjectAbsPath:    cwd,
 		ParentTracker:     cache.New(),
 		ParentPolicy:      policy,
-		ParentSidFn:       func() string { return "20260601-100000-test" },
+		ParentSidFn:       func() string { return parentSid },
 		ProjectSectionFn:  func() string { return "" },
 		SkillManifestFn:   func() string { return "" },
 		ParentToolNamesFn: func() []string { return parentTools },
@@ -196,7 +315,7 @@ func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) *subagent.Manag
 	if err != nil {
 		t.Fatal(err)
 	}
-	return mgr
+	return mgr, &parentSid
 }
 
 func TestDispatch_RejectsNonCommands(t *testing.T) {
