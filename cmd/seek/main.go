@@ -57,6 +57,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/enterworktree"
 	"github.com/whyiyhw/seek/internal/tools/exitworktree"
+	"github.com/whyiyhw/seek/internal/tools/wakeup"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	gittool "github.com/whyiyhw/seek/internal/tools/git"
@@ -991,6 +992,20 @@ func run() error {
 	if wtMgr != nil {
 		reg.Add(enterworktree.New(wtMgr)).
 			Add(exitworktree.New(wtMgr))
+	}
+
+	// v5 柱 H schedule_wakeup tool — the model's surface over
+	// internal/routines for one-shot future-time wake-ups
+	// (feature-routines.md §3.7). Registration gated on Store
+	// availability: a read-only ~/.seek/ (rare but possible
+	// e.g. on locked-down CI runners) means we can't persist
+	// jobs, and the tool would just fail every call — cleaner
+	// to omit it from the registry entirely so the model
+	// doesn't even see it as an option.
+	if cronStore, err := routines.OpenStore(); err == nil {
+		reg.Add(wakeup.New(cronStore))
+	} else {
+		fmt.Fprintln(os.Stderr, "wakeup: cron store unavailable, schedule_wakeup tool not registered:", err)
 	}
 
 	// webfetch: opt-out via SEEK_NO_WEBFETCH for air-gapped /

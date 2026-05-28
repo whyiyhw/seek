@@ -231,13 +231,20 @@ Schema:
 {
   "type": "object",
   "properties": {
-    "delay_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "delay_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
     "prompt": {"type": "string"}
   },
   "required": ["delay_seconds", "prompt"],
   "additionalProperties": false
 }
 ```
+
+**Minimum 60s — not 1s** (revised from original spec): the
+underlying `Schedule.@every <duration>` enforces `MinSchedule
+= 1 minute` (§3.2 "CPU pathology"). Sub-minute wakeup would
+require a separate "@once <ts>" schedule form, deferred to
+v0.6.x dot. For now wakeup floors at 60s; tool returns
+`[schedule: failed reason=delay_too_short]` on smaller values.
 
 Behavior: registers a `max_runs=1` job with `schedule="@every <delay>s"` and `next_run_at = now() + delay`. The job auto-deletes after the single run.
 
