@@ -263,11 +263,43 @@ func (s *Store) Save(sess *Session) error {
 	if sess.ID == "" {
 		return errors.New("session: Save with empty ID")
 	}
+	final := filepath.Join(s.dir, sess.ID+".jsonl")
+	return SaveTo(final, sess)
+}
+
+// SaveTo writes sess to an arbitrary path using the JSONL header
+// + N messages layout. Used by v5 柱 G subagent transcripts
+// which land OUTSIDE the flat ~/.seek/sessions/<id>.jsonl
+// hierarchy (under sessions/<sid>/subagents/<sub-sid>/
+// transcript.jsonl — see feature-subagent.md §3.3). Atomic
+// rewrite via the same tmp+rename dance Save uses; Touch()
+// fires so UpdatedAt reflects the write moment.
+//
+// Lazy MkdirAll on the parent dir — subagent paths under
+// projects/<pid>/sessions/<sid>/subagents/<sub-sid>/ may not
+// exist before the first transcript write.
+//
+// Caller-supplied path means SaveTo doesn't know whether the
+// existing file (if any) belongs to the same logical session.
+// Caller is responsible for path uniqueness; using a sub-sid-
+// derived path (as the subagent runner does) keeps that safe.
+func SaveTo(path string, sess *Session) error {
+	if sess == nil {
+		return errors.New("session: SaveTo nil")
+	}
+	if sess.ID == "" {
+		return errors.New("session: SaveTo with empty ID")
+	}
+	if path == "" {
+		return errors.New("session: SaveTo with empty path")
+	}
 	sess.Touch()
 
-	final := filepath.Join(s.dir, sess.ID+".jsonl")
-	tmp := final + ".tmp"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("session: mkdir %s: %w", filepath.Dir(path), err)
+	}
 
+	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("session: open tmp %s: %w", sess.ID, err)
@@ -301,7 +333,7 @@ func (s *Store) Save(sess *Session) error {
 		os.Remove(tmp)
 		return fmt.Errorf("session: close tmp %s: %w", sess.ID, err)
 	}
-	if err := os.Rename(tmp, final); err != nil {
+	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
 		return fmt.Errorf("session: rename %s: %w", sess.ID, err)
 	}

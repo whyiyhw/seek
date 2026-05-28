@@ -453,6 +453,35 @@ type subagentRunnerOpts struct {
 // tool (currently dropped because propose's sink binds to the
 // parent's session). See feature-subagent.md §9 "v0.6.x dot:
 // per-spawn Registry 重建".
+// writeSubagentTranscript persists the subagent's session
+// JSONL to job.SessionDir/transcript.jsonl per PRD
+// feature-subagent.md §3.3. PRD promised it; M11.0 production
+// wiring missed it (audit G1). Without this `seek -resume
+// <sub-sid>`, the /agents detail view (v0.6.x dot), and
+// feature-inspect-rpc all have nothing to read.
+//
+// Best-effort: a write failure logs to stderr but does NOT
+// fail the spawn. The subagent ran successfully by the time
+// we reach here (Manager.MarkRun has already classified it as
+// completed); losing the transcript shouldn't poison the
+// parent's tool result.
+//
+// Extracted from buildSubagentRunner's closure so unit tests
+// can exercise the file landing without spinning up the full
+// pkg/agent.Agent + DeepSeek client + per-platform
+// subprocess machinery.
+func writeSubagentTranscript(job subagent.RunnerJob, msgs []deepseek.Message, model string, usage deepseek.Usage, turns int) {
+	subSess := session.New(model, job.Policy.Cwd(), job.SystemPrompt, true, false)
+	subSess.ID = job.SubSid
+	subSess.Messages = msgs
+	subSess.Turns = turns
+	subSess.Usage = usage
+	transcriptPath := filepath.Join(job.SessionDir, "transcript.jsonl")
+	if err := session.SaveTo(transcriptPath, subSess); err != nil {
+		fmt.Fprintf(os.Stderr, "subagent transcript save (%s): %v\n", job.SubSid, err)
+	}
+}
+
 func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
 		// Filter parent registry by ToolNames. The Filter the
@@ -532,6 +561,12 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		if summary == "" {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent produced no terminal assistant message")
 		}
+
+		// G1 fix: persist the subagent's transcript per PRD
+		// feature-subagent.md §3.3. Extracted to a helper so
+		// the persistence logic is unit-testable without
+		// spinning up the full Runner closure.
+		writeSubagentTranscript(job, msgs, opts.getModel(), totalUsage, turnCount)
 
 		return subagent.RunnerResult{
 			Summary: summary,

@@ -55,6 +55,87 @@ func TestSaveLoad_Roundtrip(t *testing.T) {
 	}
 }
 
+// TestSaveTo_ArbitraryPathRoundtrip covers v5 柱 G subagent
+// transcripts (PRD feature-subagent.md §3.3) — they land at
+// ~/.seek/projects/<pid>/sessions/<sid>/subagents/<sub-sid>/
+// transcript.jsonl, OUTSIDE the flat Store dir. SaveTo must
+// produce the same JSONL shape Save does (so a later Load can
+// read it back) and lazily MkdirAll the parent dir.
+func TestSaveTo_ArbitraryPathRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+	// Path includes a nested dir that doesn't exist yet —
+	// mirrors the subagent path's lazy mkdir need.
+	path := filepath.Join(tmp, "projects", "p", "sessions", "s", "subagents", "ss", "transcript.jsonl")
+
+	sess := New("deepseek-v4-flash", "/tmp/proj", "system", true, false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "delegate this"},
+		{Role: deepseek.RoleAssistant, Content: "done"},
+	}
+	sess.Turns = 1
+	sess.Usage = deepseek.Usage{PromptTokens: 8000, CompletionTokens: 100}
+
+	if err := SaveTo(path, sess); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected transcript file at %s: %v", path, err)
+	}
+
+	// Read it back via the same JSONL parser Load uses.
+	// Easiest: construct a Store rooted at the file's dir +
+	// rename the file so it matches Store.Load's lookup
+	// pattern. Even simpler: parse the file manually since
+	// Load's path resolution assumes the flat layout.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) != 3 {
+		// 1 header + 2 messages
+		t.Fatalf("expected 3 JSONL lines, got %d: %q", len(lines), data)
+	}
+	var header Session
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("header parse: %v", err)
+	}
+	if header.ID != sess.ID || header.Model != sess.Model || header.CWD != "/tmp/proj" {
+		t.Errorf("header metadata mismatch: %+v", header)
+	}
+	if header.Messages != nil {
+		t.Error("header should NOT carry Messages (omitempty drops them)")
+	}
+	var msg deepseek.Message
+	if err := json.Unmarshal([]byte(lines[2]), &msg); err != nil {
+		t.Fatalf("message parse: %v", err)
+	}
+	if msg.Content != "done" {
+		t.Errorf("message round-trip lost content: %+v", msg)
+	}
+}
+
+// TestSaveTo_RejectsEmpty covers the defensive validation —
+// callers (the production Runner) might pass a partially-
+// constructed Session if path resolution failed upstream;
+// SaveTo should surface the bug rather than write garbage.
+func TestSaveTo_RejectsEmpty(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.jsonl")
+	// Nil sess.
+	if err := SaveTo(tmp, nil); err == nil {
+		t.Error("SaveTo with nil sess should error")
+	}
+	// Empty ID.
+	if err := SaveTo(tmp, &Session{}); err == nil {
+		t.Error("SaveTo with empty ID should error")
+	}
+	// Empty path.
+	sess := New("m", "/c", "", false, false)
+	if err := SaveTo("", sess); err == nil {
+		t.Error("SaveTo with empty path should error")
+	}
+}
+
 // TestSaveLoad_PreservesEffort covers /effort persistence:
 //   - non-empty values ("high" / "max") round-trip exactly
 //   - empty Effort is omitted from the JSONL header (omitempty), so a
