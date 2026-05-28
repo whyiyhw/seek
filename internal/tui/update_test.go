@@ -392,6 +392,109 @@ func TestHandleKey_CommandMenuOpen_TabNoMatchEmitsBell(t *testing.T) {
 	}
 }
 
+func TestHandleKey_CommandMenuOpen_TabFillsLongestCommonPrefix(t *testing.T) {
+	t.Parallel()
+	// Readline/bash-style Tab completion: when multiple candidates share
+	// a longer common prefix than the user has typed, Tab fills to that
+	// longer prefix (visible progress). The picker stays open so the
+	// user can either keep typing to disambiguate or arrow + Enter.
+	//
+	// `/ski` filters to [/skill, /skills] — LCP is `/skill` (one char
+	// longer than `/ski`). Tab should fill to `/skill` and keep the
+	// picker open showing both.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/ski")
+	cmds := filterCommands(allCommands(), "/ski")
+	if len(cmds) < 2 {
+		t.Fatalf("setup: filterCommands('/ski') expected 2+ candidates (/skill + /skills), got %d", len(cmds))
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if got := m2.input.Value(); got != "/skill" {
+		t.Errorf("Tab with LCP progress should fill to '/skill', got %q", got)
+	}
+	if !m2.commandMenuOpen {
+		t.Error("Tab with LCP progress should KEEP the picker open for further disambiguation")
+	}
+}
+
+func TestHandleKey_CommandMenuOpen_TabAtLcpEmitsBell(t *testing.T) {
+	t.Parallel()
+	// When the user's input is already AT the longest common prefix and
+	// multiple candidates remain, Tab can't make further progress — emit
+	// a bell to signal "you've reached the unambiguous prefix; pick from
+	// the menu or type to narrow".
+	//
+	// `/s` filters to multiple commands across /skill, /skills, /steer,
+	// /setup, etc. — LCP is `/s` (= user's input). Tab should bell.
+	m := Model{input: textarea.New()}
+	m.input.SetValue("/s")
+	cmds := filterCommands(allCommands(), "/s")
+	if len(cmds) < 2 {
+		t.Fatalf("setup: filterCommands('/s') expected 2+ candidates, got %d", len(cmds))
+	}
+	m.commandMenuOpen = true
+	m.commandMenuFiltered = cmds
+	m.commandMenuSelected = 0
+
+	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	m2 := out.(Model)
+
+	if got := m2.input.Value(); got != "/s" {
+		t.Errorf("Tab at LCP should NOT change input, want %q got %q", "/s", got)
+	}
+	if !m2.commandMenuOpen {
+		t.Error("Tab at LCP should KEEP the picker open")
+	}
+	if cmd == nil {
+		t.Error("Tab at LCP should return a bell cmd (got nil)")
+	}
+}
+
+func TestLongestCommonCandidatePrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   []command
+		want string
+	}{
+		{"empty", nil, ""},
+		{"single", []command{{names: []string{"/foo"}}}, "/foo"},
+		{
+			"two share /skill",
+			[]command{{names: []string{"/skill"}}, {names: []string{"/skills"}}},
+			"/skill",
+		},
+		{
+			"all share /s",
+			[]command{{names: []string{"/skill"}}, {names: []string{"/steer"}}, {names: []string{"/setup"}}},
+			"/s",
+		},
+		{
+			"only / shared",
+			[]command{{names: []string{"/foo"}}, {names: []string{"/bar"}}},
+			"/",
+		},
+		{
+			"nothing shared",
+			[]command{{names: []string{"alpha"}}, {names: []string{"beta"}}},
+			"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := longestCommonCandidatePrefix(tc.in); got != tc.want {
+				t.Errorf("longestCommonCandidatePrefix(%v) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHandleKey_CommandMenuOpen_EscClearsInput(t *testing.T) {
 	t.Parallel()
 	// Esc on an open slash menu = "cancel this command entirely" —

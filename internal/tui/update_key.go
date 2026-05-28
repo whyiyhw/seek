@@ -122,18 +122,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.commandMenuOpen {
 		switch msg.Type {
 		case tea.KeyTab:
-			// M9.5 Tab completion semantics (PRD §3.3):
-			//   0 candidates  → terminal bell, no input change
-			//   1 candidate   → autocomplete: replace input with the
-			//                   command name + trailing space
-			//   2+ candidates → picker stays open, NO auto-accept
-			//                   (Enter still dispatches the highlighted
-			//                   command for fast single-keystroke flows
-			//                   like `/h` + Enter → /help)
-			// Tab is the trigger; Enter is the commit. Different from
-			// pre-M9.5 where Tab accepted the highlighted regardless
-			// of ambiguity — that pattern silently picked the wrong
-			// command when the prefix wasn't unique.
+			// Tab completion semantics — readline / bash / fish style
+			// (refined from the M9.5 PRD §3.3 design after dogfood
+			// feedback that "Tab does nothing visible on ambiguous
+			// prefix" felt broken):
+			//
+			//   0 candidates              → terminal bell, no input change
+			//   1 candidate               → autocomplete + trailing space
+			//   2+ candidates with LCP    → fill to longest common prefix
+			//                               (visible progress), picker stays
+			//                               open so user can either keep
+			//                               typing to disambiguate or use
+			//                               ↑/↓ + Enter to pick
+			//   2+ candidates, no LCP gain → terminal bell (prefix already
+			//                                exhausted; user must type to
+			//                                disambiguate or arrow + Enter)
+			//
+			// Enter on the menu still dispatches the highlighted command
+			// directly (fast `/h` + Enter → /help flow).
 			switch len(m.commandMenuFiltered) {
 			case 0:
 				return m, beepCmd
@@ -153,8 +159,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.updateCommandMenu()
 				return m, nil
 			default:
-				// Multi-candidate: picker stays open. ↑/↓ to navigate,
-				// Enter to dispatch the highlighted one.
+				lcp := longestCommonCandidatePrefix(m.commandMenuFiltered)
+				if lcp == "" || lcp == m.input.Value() {
+					// No further LCP progress possible — bell to signal
+					// "you've reached the unambiguous prefix; disambiguate
+					// by typing or pick from the menu".
+					return m, beepCmd
+				}
+				m.input.SetValue(lcp)
+				// Re-filter on the new (longer) prefix so the picker
+				// shrinks to the still-matching candidates.
+				m.updateCommandMenu()
 				return m, nil
 			}
 		case tea.KeyEnter:

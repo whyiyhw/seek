@@ -232,3 +232,43 @@ func filterCommands(cmds []command, prefix string) []command {
 	}
 	return out
 }
+
+// longestCommonCandidatePrefix returns the longest string that is a
+// prefix of every CANONICAL name (`c.names[0]`) in cmds. Used by Tab
+// completion to fill multi-candidate input to the unambiguous prefix
+// (readline/bash semantics): `/ski` with candidates [/skill, /skills]
+// returns `/skill`; the user sees visible progress and the picker
+// stays open for further disambiguation.
+//
+// Returns "" if cmds is empty or no shared prefix exists (different
+// first character). Compares bytes — all slash commands are ASCII,
+// so codepoint boundaries aren't a concern.
+func longestCommonCandidatePrefix(cmds []command) string {
+	if len(cmds) == 0 {
+		return ""
+	}
+	lcp := cmds[0].names[0]
+	for _, c := range cmds[1:] {
+		lcp = commonPrefixBytes(lcp, c.names[0])
+		if lcp == "" {
+			return ""
+		}
+	}
+	return lcp
+}
+
+// commonPrefixBytes returns the longest byte-level common prefix of a
+// and b. Safe for ASCII (slash command names); for arbitrary UTF-8 use
+// a rune-aware variant.
+func commonPrefixBytes(a, b string) string {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return a[:i]
+		}
+	}
+	return a[:n]
+}
