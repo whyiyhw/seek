@@ -176,16 +176,57 @@ func (p *Predictor) Suggest(ctx context.Context, history []deepseek.Message) str
 	return cleanPrediction(resp.Choices[0].Message.Content)
 }
 
-// cleanPrediction trims, single-lines, and length-caps the raw model
-// output. Defends against the cheap Flash model occasionally
-// over-explaining ("Sure! I think the user would say: 'A'") or
-// returning multi-line junk.
+// minPredictionRunes is the minimum length below which predictions
+// are dropped as low-signal noise (paired with genericPredictions
+// for content-based filtering). Set conservatively to 2 — anything
+// shorter is mathematically content-free; e.g. "用 A" / "选 B" are
+// 3 runes and remain valid multi-choice predictions.
+const minPredictionRunes = 2
+
+// genericPredictions are normalised (lowercase, ASCII-punct stripped,
+// whitespace-collapsed) predictions that, even if cleanPrediction
+// would otherwise accept them, carry essentially no actionable user
+// intent — the Flash model padding-out a low-confidence guess rather
+// than producing real signal. Drop so the UI doesn't show placeholders
+// the model basically invented.
+//
+// Curated from dogfood observations + obvious low-info responses. Both
+// English and Chinese covered; extend rather than fork when a new
+// pattern repeatedly clutters predictions.
+var genericPredictions = map[string]struct{}{
+	// English affirmations
+	"ok": {}, "okay": {}, "k": {}, "yes": {}, "yep": {}, "yeah": {},
+	"sure": {}, "thanks": {}, "thank you": {}, "thx": {},
+	"great": {}, "cool": {}, "nice": {}, "got it": {}, "alright": {},
+	// English negations
+	"no": {}, "nope": {}, "nah": {},
+	// English fillers / context-poor continuations
+	"continue": {}, "next": {}, "go ahead": {}, "do it": {}, "go for it": {},
+	"keep going": {},
+	// Chinese affirmations
+	"好": {}, "好的": {}, "好啊": {}, "可以": {}, "可以的": {},
+	"嗯": {}, "嗯嗯": {}, "对": {}, "对的": {}, "是": {}, "是的": {},
+	"没问题": {}, "知道了": {}, "了解": {}, "明白": {}, "明白了": {},
+	"收到": {}, "谢谢": {}, "谢了": {}, "感谢": {},
+	// Chinese negations
+	"不": {}, "不用": {}, "不要": {}, "不行": {},
+	// Chinese fillers / context-poor continuations
+	"继续": {}, "继续吧": {}, "下一步": {}, "去吧": {},
+}
+
+// cleanPrediction trims, single-lines, length-caps, and noise-filters
+// the raw model output. Defends against the cheap Flash model
+// occasionally over-explaining ("Sure! I think the user would say:
+// 'A'") or returning multi-line junk, AND against the model padding
+// out a low-confidence guess with generic short replies.
 //
 // Rules:
 //   - Strip whitespace, take first non-empty line
 //   - Drop wrapping quotes (single, double, smart quotes)
 //   - Reject anything longer than 200 runes (model went off the rails)
 //   - Reject the literal sentinel echoed back
+//   - Reject < minPredictionRunes (content-free noise)
+//   - Reject normalized match in genericPredictions denylist
 //   - Return "" if nothing useful remains
 func cleanPrediction(raw string) string {
 	if raw == "" {
@@ -220,7 +261,17 @@ func cleanPrediction(raw string) string {
 	if line == "" || line == predictNextSentinel {
 		return ""
 	}
-	if len([]rune(line)) > 200 {
+	runeCount := len([]rune(line))
+	if runeCount > 200 {
+		return ""
+	}
+	if runeCount < minPredictionRunes {
+		return ""
+	}
+	// Denylist match — `normalize` from match.go strips ASCII punct
+	// and lowercases, so "OK!" / "好的。" / " thanks " all funnel into
+	// the same canonical key.
+	if _, ok := genericPredictions[normalize(line)]; ok {
 		return ""
 	}
 	return line

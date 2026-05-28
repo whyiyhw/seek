@@ -72,10 +72,16 @@ func runePrefix(s string, n int) string {
 	return string(runes[:n])
 }
 
-// normalize lowercases, strips ASCII punctuation, and collapses
-// whitespace runs to a single space. Leaves non-ASCII characters
-// (Chinese, etc.) intact since they often carry the actual content
-// signal in seek's user base.
+// normalize lowercases, strips ALL unicode punctuation (ASCII and
+// CJK alike — "，。、；" etc. all dropped), and collapses whitespace
+// runs to a single space. Non-punctuation characters (letters, CJK
+// glyphs, digits) are preserved.
+//
+// Why drop CJK punct too: denylist matching needs "好的" / "好的。" /
+// "好的，" to funnel to the same canonical key, and contains-based
+// match cares about content not punctuation. The earlier "keep CJK
+// punct" design was overly conservative — empirically it caused
+// denylist misses (commit log: "noise placeholder bug").
 func normalize(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -87,10 +93,8 @@ func normalize(s string) string {
 				b.WriteRune(' ')
 				prevSpace = true
 			}
-		case r < 128 && unicode.IsPunct(r):
-			// Drop ASCII punctuation entirely (cheaper than mapping
-			// to space + collapsing). Non-ASCII punctuation is kept
-			// because it carries meaning in CJK contexts.
+		case unicode.IsPunct(r):
+			// Drop punctuation in both ASCII and CJK ranges.
 			continue
 		default:
 			b.WriteRune(r)

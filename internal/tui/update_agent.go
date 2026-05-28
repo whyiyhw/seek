@@ -148,6 +148,16 @@ func (m Model) scheduleSuggestion(wasCanceled bool) tea.Cmd {
 	if last.Role != deepseek.RoleAssistant || len(last.ToolCalls) > 0 {
 		return nil
 	}
+	// Pre-flight heuristic gate: skip the prediction call entirely
+	// when the assistant turn doesn't look like it invites a user
+	// response (no question mark, no multi-choice markers, no
+	// intent-eliciting phrases). Saves an API call AND saves the
+	// user from a placeholder the model would have padded out
+	// from nothing on an obviously-finished turn.
+	// PRD docs/prd/feature-suggested-reply.md §3 + dogfood follow-up.
+	if !suggester.ShouldPredict(last.Content) {
+		return nil
+	}
 	turn := len(history)
 	sug := m.opts.Suggester
 	ctxRoot := m.opts.Ctx
