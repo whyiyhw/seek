@@ -6,18 +6,72 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/worktree"
 )
 
-// newToolWithStubRunner builds a Tool wired to a real Manager whose
-// Runner is a caller-supplied stub. Most tests just need
-// "succeed with this summary" or "fail with this error" — the stub
-// makes both trivial without spinning up pkg/agent.
+// errBoom is a generic test-side sentinel for "git command failed
+// somehow" — the agent tool just propagates git stderr; the
+// specific error type doesn't matter for wire-format assertions.
+var errBoom = errors.New("exit 128")
+
+// fakeGit scripts git command responses. Mirrors the helper in
+// internal/worktree's own tests but lives here too so worktree
+// integration tests at the agent layer don't have to import
+// internal/worktree's package-local helpers.
+type fakeGit struct {
+	mu    sync.Mutex
+	queue []fakeGitResp
+}
+
+type fakeGitResp struct {
+	stdout, stderr string
+	err            error
+}
+
+func (f *fakeGit) push(stdout, stderr string, err error) *fakeGit {
+	f.queue = append(f.queue, fakeGitResp{stdout, stderr, err})
+	return f
+}
+
+func (f *fakeGit) fn(t *testing.T) worktree.GitRunner {
+	t.Helper()
+	return func(ctx context.Context, cwd string, args ...string) (string, string, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if len(f.queue) == 0 {
+			t.Fatalf("fakeGit: no queued response for: git %v", args)
+		}
+		r := f.queue[0]
+		f.queue = f.queue[1:]
+		return r.stdout, r.stderr, r.err
+	}
+}
+
+// newToolWithStubRunner builds a Tool wired to a real Manager
+// whose Runner is a caller-supplied stub. Most tests just need
+// "succeed with this summary" or "fail with this error" — the
+// stub makes both trivial without spinning up pkg/agent.
+//
+// The wtMgr argument is OPTIONAL: pass nil for tests that don't
+// exercise isolation=worktree paths (the bulk of existing
+// tests). Tests that DO exercise worktree paths use
+// newToolWithStubsAndWorktree below.
 func newToolWithStubRunner(t *testing.T, runner subagent.Runner) *Tool {
+	t.Helper()
+	return newToolWithStubsAndWorktree(t, runner, nil)
+}
+
+// newToolWithStubsAndWorktree is the worktree-aware variant —
+// callers pass a wtMgr they prepared with a scripted GitRunner.
+// The standard Manager wiring is identical; only the agent
+// Tool's wtMgr field differs.
+func newToolWithStubsAndWorktree(t *testing.T, runner subagent.Runner, wtMgr *worktree.Manager) *Tool {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SEEK_HOME", home)
@@ -41,7 +95,8 @@ func newToolWithStubRunner(t *testing.T, runner subagent.Runner) *Tool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(mgr)
+	_ = home // silence unused-var when only the side effect (Setenv) matters
+	return New(mgr, wtMgr)
 }
 
 func TestTool_Name(t *testing.T) {
@@ -218,12 +273,13 @@ func TestTool_Execute_InvalidType(t *testing.T) {
 	}
 }
 
-// TestTool_Execute_IsolationWorktreeReturnsNotImplemented: until
-// M11.1 lands, isolation=worktree must surface a clear failure
-// pointing at the milestone.
-func TestTool_Execute_IsolationWorktreeReturnsNotImplemented(t *testing.T) {
+// TestTool_Execute_IsolationWorktreeNoManager: when wtMgr is nil
+// (host program didn't wire — typically non-git project), the
+// tool must surface a clear failure rather than crash. Mirrors
+// PRD §3.8 failure-degraded behaviour.
+func TestTool_Execute_IsolationWorktreeNoManager(t *testing.T) {
 	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
-		t.Error("Runner invoked despite isolation=worktree")
+		t.Error("Runner invoked despite missing wtMgr")
 		return subagent.RunnerResult{}, nil
 	})
 	out, err := tl.Execute(context.Background(), json.RawMessage(`{
@@ -235,8 +291,130 @@ func TestTool_Execute_IsolationWorktreeReturnsNotImplemented(t *testing.T) {
 	if !strings.Contains(out, "reason=spawn_error") {
 		t.Errorf("expected spawn_error reason, got:\n%s", out)
 	}
-	if !strings.Contains(out, "M11.1") {
-		t.Errorf("expected M11.1 milestone reference, got:\n%s", out)
+	if !strings.Contains(out, "requires a git working tree") {
+		t.Errorf("expected git-repo hint, got:\n%s", out)
+	}
+}
+
+// TestTool_Execute_IsolationWorktreeHappy: with wtMgr wired and
+// the spawn completing on a clean tree, the worktree is created,
+// the subagent runs at the worktree's cwd, and the worktree is
+// auto-cleaned (no append to summary per PRD §3.8 "无改动时不追
+// 加（自动 cleaned）").
+func TestTool_Execute_IsolationWorktreeHappy(t *testing.T) {
+	wtFG := (&fakeGit{}).
+		push("abc\n", "", nil). // Create: rev-parse HEAD
+		push("", "", nil).      // Create: worktree add
+		push("", "", nil).      // Create: update-ref
+		push("", "", nil).      // Cleanup: status (clean — empty output)
+		push("", "", nil).      // Cleanup: worktree remove
+		push("", "", nil)       // Cleanup: update-ref -d
+	t.Setenv("SEEK_HOME", t.TempDir())
+	wtMgr, err := worktree.NewManagerWithRunner(t.TempDir(), wtFG.fn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var capturedCwd string
+	tl := newToolWithStubsAndWorktree(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		// The child Policy's cwd should be the worktree path.
+		capturedCwd = j.Policy.Cwd()
+		return subagent.RunnerResult{Summary: "Done in worktree.", Turns: 1}, nil
+	}, wtMgr)
+
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{
+		"description": "try refactor", "prompt": "do it", "isolation": "worktree"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "[agent: completed]") {
+		t.Errorf("expected success prefix, got:\n%s", out)
+	}
+	if !strings.Contains(capturedCwd, "worktrees") {
+		t.Errorf("child cwd should be inside worktrees dir, got %q", capturedCwd)
+	}
+	// Clean-tree cleanup → no worktree info appended.
+	if strings.Contains(out, "— worktree:") {
+		t.Errorf("clean worktree should auto-clean silently, but summary appended worktree info:\n%s", out)
+	}
+}
+
+// TestTool_Execute_IsolationWorktreeDirtyAppendsInfo: when the
+// subagent leaves dirty changes, Cleanup's if_dirty=keep path
+// keeps the worktree on disk and the parent's Summary gets a
+// "— worktree: path (branch X, N changes)" line so the LLM /
+// reader knows where to find the work.
+func TestTool_Execute_IsolationWorktreeDirtyAppendsInfo(t *testing.T) {
+	wtFG := (&fakeGit{}).
+		push("abc\n", "", nil).             // Create: rev-parse
+		push("", "", nil).                  // Create: worktree add
+		push("", "", nil).                  // Create: update-ref
+		push(" M file.go\n?? new.go\n", "", nil) // Cleanup: status reports 2 dirty
+		// status > 0 + if_dirty=keep → no further git calls
+	t.Setenv("SEEK_HOME", t.TempDir())
+	wtMgr, err := worktree.NewManagerWithRunner(t.TempDir(), wtFG.fn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tl := newToolWithStubsAndWorktree(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "Refactor sketched.", Turns: 1}, nil
+	}, wtMgr)
+
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{
+		"description": "refactor", "prompt": "do it", "isolation": "worktree"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Summary must STILL be wire-format completed.
+	if !strings.HasPrefix(out, "[agent: completed]") {
+		t.Errorf("expected success prefix, got:\n%s", out)
+	}
+	// Worktree info appended.
+	if !strings.Contains(out, "— worktree:") {
+		t.Errorf("dirty worktree should append info line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "2 changes") {
+		t.Errorf("expected change count in append, got:\n%s", out)
+	}
+	if !strings.Contains(out, "branch seek/wt/") {
+		t.Errorf("expected auto-generated branch name, got:\n%s", out)
+	}
+}
+
+// TestTool_Execute_IsolationWorktreeCreateFailureReturnsFailure:
+// rev-parse / worktree add failure → wire-format spawn_error;
+// the Runner never gets invoked.
+func TestTool_Execute_IsolationWorktreeCreateFailureReturnsFailure(t *testing.T) {
+	wtFG := (&fakeGit{}).push("", "fatal: not a git repository", errBoom)
+	t.Setenv("SEEK_HOME", t.TempDir())
+	wtMgr, err := worktree.NewManagerWithRunner(t.TempDir(), wtFG.fn(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runnerInvoked := false
+	tl := newToolWithStubsAndWorktree(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		runnerInvoked = true
+		return subagent.RunnerResult{}, nil
+	}, wtMgr)
+
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{
+		"description": "x", "prompt": "y", "isolation": "worktree"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerInvoked {
+		t.Error("Runner invoked despite worktree create failure")
+	}
+	if !strings.Contains(out, "spawn_error") {
+		t.Errorf("expected spawn_error wire format, got:\n%s", out)
+	}
+	if !strings.Contains(out, "not a git repository") {
+		t.Errorf("git stderr should propagate, got:\n%s", out)
 	}
 }
 
@@ -361,7 +539,7 @@ func TestNew_PanicsOnNilManager(t *testing.T) {
 			t.Error("New(nil) must panic")
 		}
 	}()
-	_ = New(nil)
+	_ = New(nil, nil)
 }
 
 // TestErrSentinelExists pins the sentinel error name; future tests

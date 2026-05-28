@@ -1233,7 +1233,7 @@ func run() error {
 		if smerr != nil {
 			return fmt.Errorf("subagent manager: %w", smerr)
 		}
-		reg.Add(agenttool.New(subagentMgr))
+		reg.Add(agenttool.New(subagentMgr, wtMgr))
 
 		// On startup, scan the index for `started`-without-terminal
 		// sub_sids (subagents whose owning seek process crashed

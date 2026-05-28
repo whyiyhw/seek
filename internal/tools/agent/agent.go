@@ -20,9 +20,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools"
+	"github.com/whyiyhw/seek/internal/worktree"
 )
 
 // schemaBytes is the package-level JSON schema for the `agent` tool.
@@ -85,22 +87,35 @@ const (
 	maxPromptBytes    = 32 * 1024
 )
 
-// Tool is the LLM-facing wrapper around subagent.Manager. Constructed
-// with New(manager); the manager carries all the heavy state (parent
-// Policy/Tracker, the injected Runner, the active map).
+// Tool is the LLM-facing wrapper around subagent.Manager.
+//
+// wtMgr is the v5 柱 G M11.1 worktree integration — optional
+// (nullable for non-git environments). When set + the model
+// passes isolation="worktree", Execute calls wtMgr.Create
+// BEFORE Spawn and wtMgr.Cleanup(if_dirty=keep) AFTER, threading
+// the worktree's Path through subagent.SpawnArgs.WorktreePath so
+// the child Policy + tool execution lands in the worktree dir.
+// When wtMgr is nil, isolation="worktree" returns a clean wire-
+// format failure pointing the user at "this needs a git repo".
 type Tool struct {
-	mgr *subagent.Manager
+	mgr   *subagent.Manager
+	wtMgr *worktree.Manager
 }
 
-// New constructs the tool. manager must be non-nil; a nil manager
-// means "the host program didn't wire subagents" — in that case the
-// tool isn't registered in the parent Registry at all, so reaching
-// New(nil) is a programmer error.
-func New(manager *subagent.Manager) *Tool {
+// New constructs the tool. manager must be non-nil; a nil
+// manager means "the host program didn't wire subagents" — in
+// that case the tool isn't registered in the parent Registry at
+// all, so reaching New(nil, _) is a programmer error.
+//
+// wtMgr is OPTIONAL — pass nil when seek runs outside a git
+// working tree. Execute then refuses isolation="worktree"
+// requests with a structured failure but still serves the
+// general-purpose / explore / plan paths.
+func New(manager *subagent.Manager, wtMgr *worktree.Manager) *Tool {
 	if manager == nil {
 		panic("agent: New called with nil Manager — host program did not wire internal/subagent")
 	}
-	return &Tool{mgr: manager}
+	return &Tool{mgr: manager, wtMgr: wtMgr}
 }
 
 func (*Tool) Name() string            { return "agent" }
@@ -193,27 +208,45 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 		st = subagent.TypeGeneralPurpose
 	}
 
-	// isolation:"worktree" isn't wired until M11.1. Surface a wire-
-	// format failure that names the milestone so the LLM (and any
-	// downstream human reading the transcript) knows this is a
-	// not-yet-implemented path, not a generic bug.
+	// Resolve isolation. "none" / "" is the standard path
+	// (spawn under parent cwd); "worktree" creates a seek-managed
+	// worktree BEFORE spawn so the child runs in an isolated git
+	// checkout. M11.1 Phase 2 implementation per PRD §3.8.
+	var (
+		worktreePath   string
+		worktreeBranch string
+	)
 	switch a.Isolation {
 	case "", "none":
-		// happy path
+		// happy path; worktreePath stays empty, child uses
+		// parent's cwd.
 	case "worktree":
-		return failNoSpawn("spawn_error",
-			"isolation=\"worktree\" is not implemented yet (v0.6.0 / M11.1); use \"none\" or omit the field"), nil
+		if t.wtMgr == nil {
+			return failNoSpawn("spawn_error",
+				"isolation=\"worktree\" requires a git working tree (Manager not wired — non-git project?); use isolation=\"none\" or omit"), nil
+		}
+		wt, err := t.wtMgr.Create(ctx, "", "")
+		if err != nil {
+			return failNoSpawn("spawn_error",
+				"worktree create: "+err.Error()), nil
+		}
+		worktreePath = wt.Path
+		worktreeBranch = wt.Branch
 	default:
 		return failNoSpawn("spawn_error",
 			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
 	}
 
 	// Dispatch. Manager.Spawn returns a Result whose Summary is the
-	// wire-format string we hand back unchanged.
+	// wire-format string we hand back unchanged. WorktreePath
+	// (when non-empty) becomes the child Policy's cwd inside
+	// Manager.Spawn — tools the subagent invokes execute against
+	// the worktree.
 	res := t.mgr.Spawn(ctx, subagent.SpawnArgs{
-		Description: a.Description,
-		Prompt:      a.Prompt,
-		Type:        st,
+		Description:  a.Description,
+		Prompt:       a.Prompt,
+		Type:         st,
+		WorktreePath: worktreePath,
 		// ParentTurn is 0 in M11.0 — the parent turn counter isn't
 		// threaded through the tool interface yet. The index event
 		// still records the spawn timing via the timestamp, and the
@@ -221,6 +254,38 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 		// thread through Sink in a follow-up if the UI needs it.
 		ParentTurn: 0,
 	})
+
+	// Worktree post-spawn cleanup (PRD §3.8 "子结束后自动
+	// exit_worktree (if_dirty: keep)"). Three outcomes:
+	//
+	//   - Cleanup succeeds + status="cleaned" (no dirty files)
+	//     → worktree auto-removed; nothing appended to summary
+	//     (PRD: "无改动时不追加（自动 cleaned）").
+	//   - Cleanup succeeds + status="kept" + changes > 0 →
+	//     worktree stays on disk; append the path/branch/changes
+	//     line so the LLM (and the user reading the transcript)
+	//     knows where to find the work.
+	//   - Cleanup fails → don't lose the subagent's success;
+	//     append a "(worktree cleanup error: ...)" line for
+	//     diagnostics but keep the original Summary intact.
+	//
+	// We deliberately use context.Background() (not the caller's
+	// ctx) so a cancelled parent turn doesn't strand the
+	// worktree mid-cleanup. The cleanup is short — git status +
+	// maybe git worktree remove — bounded latency.
+	if worktreePath != "" {
+		cleanupRes, cleanupErr := t.wtMgr.Cleanup(context.Background(), worktreePath, "keep")
+		switch {
+		case cleanupErr != nil:
+			res.Summary += fmt.Sprintf("\n— worktree cleanup error: %v (path=%s branch=%s)",
+				cleanupErr, worktreePath, worktreeBranch)
+		case cleanupRes.Status == "kept" && cleanupRes.Changes > 0:
+			res.Summary += fmt.Sprintf("\n— worktree: %s (branch %s, %d changes)",
+				cleanupRes.Path, cleanupRes.Branch, cleanupRes.Changes)
+		}
+		// status="cleaned" → no append (the silent happy path).
+	}
+
 	return res.Summary, nil
 }
 
