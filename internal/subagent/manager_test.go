@@ -50,14 +50,17 @@ func newManager(t *testing.T, runner Runner) *Manager {
 	if err != nil {
 		t.Fatal(err)
 	}
+	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think", "agent", "ask_user", "bash", "write", "edit"}
 	mgr, err := NewManager(ManagerOpts{
-		ProjectAbsPath:  parentCwd,
-		ParentSid:       "20260601-100000-parent",
-		ParentTracker:   cache.New(),
-		ParentPolicy:    policy,
-		ParentToolNames: []string{"read", "grep", "list_dir", "git", "webfetch", "think", "agent", "ask_user", "bash", "write", "edit"},
-		MaxConcurrent:   3,
-		Runner:          runner,
+		ProjectAbsPath:    parentCwd,
+		ParentSidFn:       func() string { return "20260601-100000-parent" },
+		ParentTracker:     cache.New(),
+		ParentPolicy:      policy,
+		ProjectSectionFn:  func() string { return "" },
+		SkillManifestFn:   func() string { return "" },
+		ParentToolNamesFn: func() []string { return parentTools },
+		MaxConcurrent:     3,
+		Runner:            runner,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -81,26 +81,51 @@ type RunnerResult struct {
 	Turns   int
 }
 
-// ManagerOpts configures a new Manager. Most fields are required;
-// MaxConcurrent defaults if zero. Header inputs (ProjectSection,
-// SkillManifest, ParentToolNames) are captured at construction; if
-// they change mid-session (e.g. user installs a new skill) callers
-// can rebuild the Manager — same pattern as cmd/seek's
-// RebuildAgent.
+// ManagerOpts configures a new Manager.
+//
+// ProjectAbsPath / ParentTracker / ParentPolicy are bound at
+// construction — the path is immutable, and the pointers themselves
+// don't change (Tracker / Policy own their own state mutation under
+// their own locks).
+//
+// ParentSid / ProjectSection / SkillManifest / ParentToolNames are
+// supplied as func() closures, not values, because:
+//
+//   - ParentSid: /compact forks a new session with a new ID; the
+//     closure pattern (typed by main.go's planBridge.sessionID) ensures
+//     subagents spawned after /compact use the live ID.
+//   - ProjectSection: stable today, but the closure form keeps the
+//     contract uniform with the rest.
+//   - SkillManifest: skill_commit + /new hot-reloads the manifest;
+//     subagents spawned after the reload must see the new manifest.
+//   - ParentToolNames: the parent's Registry is built in stages
+//     (initial set → agent.New → plan/propose added) so capturing a
+//     snapshot at Manager construction would miss tools added later.
+//     reg.Names() is also where the agent tool itself appears — the
+//     template Filter strips it universally so the recursion guard
+//     stays intact.
+//
+// MaxConcurrent defaults to 3 when zero. Runner is required.
 type ManagerOpts struct {
-	ProjectAbsPath  string
-	ParentSid       string
-	ParentTracker   *cache.Tracker
-	ParentPolicy    *permission.Policy
-	ProjectSection  string
-	SkillManifest   string
-	ParentToolNames []string
-	MaxConcurrent   int
-	Runner          Runner
+	ProjectAbsPath string
+	ParentTracker  *cache.Tracker
+	ParentPolicy   *permission.Policy
+	MaxConcurrent  int
+	Runner         Runner
+
 	// Now is the time source used for sub_sid generation and event
 	// timestamps. Optional — falls back to time.Now if nil.
 	// Tests inject a stub so sub-sids are reproducible.
 	Now func() time.Time
+
+	// Dynamic accessors — called at each Spawn so RebuildAgent,
+	// skill hot-reload, and session compaction (fork-new-SID) pick
+	// up fresh values. See struct doc above for the rationale per
+	// field. All are required.
+	ParentSidFn       func() string
+	ProjectSectionFn  func() string
+	SkillManifestFn   func() string
+	ParentToolNamesFn func() []string
 }
 
 // Manager owns the subagents.jsonl index + the in-flight map for
@@ -131,9 +156,6 @@ func NewManager(opts ManagerOpts) (*Manager, error) {
 	if opts.ProjectAbsPath == "" {
 		return nil, errors.New("subagent: NewManager: ProjectAbsPath required")
 	}
-	if opts.ParentSid == "" {
-		return nil, errors.New("subagent: NewManager: ParentSid required")
-	}
 	if opts.ParentTracker == nil {
 		return nil, errors.New("subagent: NewManager: ParentTracker required")
 	}
@@ -142,6 +164,18 @@ func NewManager(opts ManagerOpts) (*Manager, error) {
 	}
 	if opts.Runner == nil {
 		return nil, errors.New("subagent: NewManager: Runner required")
+	}
+	if opts.ParentSidFn == nil {
+		return nil, errors.New("subagent: NewManager: ParentSidFn required")
+	}
+	if opts.ProjectSectionFn == nil {
+		return nil, errors.New("subagent: NewManager: ProjectSectionFn required")
+	}
+	if opts.SkillManifestFn == nil {
+		return nil, errors.New("subagent: NewManager: SkillManifestFn required")
+	}
+	if opts.ParentToolNamesFn == nil {
+		return nil, errors.New("subagent: NewManager: ParentToolNamesFn required")
 	}
 	if opts.MaxConcurrent == 0 {
 		opts.MaxConcurrent = defaultMaxConcurrent
@@ -236,10 +270,17 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	childTracker := cache.New()
 	m.opts.ParentTracker.AdoptChild(childTracker)
 
-	// Step 5: allocate sub_sid + session directory.
+	// Step 5: allocate sub_sid + session directory. Resolve the
+	// parent sid via the supplied closure so /compact-forked sessions
+	// pick up the new ID. Empty result is a programmer error (the
+	// host program should not allow Spawn with no active session).
+	parentSid := m.opts.ParentSidFn()
+	if parentSid == "" {
+		return failResult("", "spawn_error", "no active parent session (host did not seed ParentSidFn)")
+	}
 	now := m.opts.Now()
 	subSid := newSubSid(now)
-	sessionDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, m.opts.ParentSid, subSid)
+	sessionDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, parentSid, subSid)
 	if err != nil {
 		return failResult(subSid, "spawn_error", err.Error())
 	}
@@ -250,11 +291,13 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	// Step 6: compose system prompt. Header is byte-identical to
 	// the parent's segments 1-3 (sysprompt.Compose guarantees
 	// determinism for the same inputs); the trailing role + summary
-	// hint differs per template.
+	// hint differs per template. Project section + skill manifest
+	// are resolved fresh each spawn so skill_commit + /new is
+	// reflected in the next subagent's prompt.
 	systemPrompt := sysprompt.ComposeSubagent(sysprompt.Header{
 		Cwd:            cwd,
-		ProjectSection: m.opts.ProjectSection,
-		SkillManifest:  m.opts.SkillManifest,
+		ProjectSection: m.opts.ProjectSectionFn(),
+		SkillManifest:  m.opts.SkillManifestFn(),
 	}, tmpl.Role(args.Description))
 
 	// Step 7: emit `started` event BEFORE registering in active.
@@ -267,7 +310,7 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	if err := appendEvent(indexPath, event{
 		Kind:         "started",
 		SubSid:       subSid,
-		ParentSid:    m.opts.ParentSid,
+		ParentSid:    parentSid,
 		ParentTurn:   args.ParentTurn,
 		TS:           now,
 		Type:         args.Type,
@@ -304,7 +347,7 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 			SessionDir:   sessionDir,
 			Tracker:      childTracker,
 			Policy:       childPolicy,
-			ToolNames:    tmpl.Filter(m.opts.ParentToolNames),
+			ToolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
 		})
 	}()
 	cancel() // release any goroutines depending on runCtx

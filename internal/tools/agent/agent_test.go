@@ -26,14 +26,17 @@ func newToolWithStubRunner(t *testing.T, runner subagent.Runner) *Tool {
 	if err != nil {
 		t.Fatal(err)
 	}
+	parentTools := []string{"read", "grep", "bash", "agent", "ask_user"}
 	mgr, err := subagent.NewManager(subagent.ManagerOpts{
-		ProjectAbsPath:  projCwd,
-		ParentSid:       "20260601-100000-parent",
-		ParentTracker:   cache.New(),
-		ParentPolicy:    policy,
-		ParentToolNames: []string{"read", "grep", "bash", "agent", "ask_user"},
-		MaxConcurrent:   3,
-		Runner:          runner,
+		ProjectAbsPath:    projCwd,
+		ParentSidFn:       func() string { return "20260601-100000-parent" },
+		ParentTracker:     cache.New(),
+		ParentPolicy:      policy,
+		ProjectSectionFn:  func() string { return "" },
+		SkillManifestFn:   func() string { return "" },
+		ParentToolNamesFn: func() []string { return parentTools },
+		MaxConcurrent:     3,
+		Runner:            runner,
 	})
 	if err != nil {
 		t.Fatal(err)

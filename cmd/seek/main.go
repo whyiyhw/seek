@@ -46,7 +46,9 @@ import (
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools"
+	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
 	"github.com/whyiyhw/seek/internal/tools/bash"
 	"github.com/whyiyhw/seek/internal/tools/edit"
@@ -395,6 +397,142 @@ func (b *planBridge) StepChanged(snapshot []plantool.Step, currentIdx int) {
 		out[i] = agent.PlanStep{Text: st.Text, Status: string(st.Status)}
 	}
 	b.getAgent().EmitEvent(agent.PlanStepUpdated{Steps: out, CurrentIdx: currentIdx})
+}
+
+// ----- v5 柱 G subagent glue -----
+
+// subagentRunnerOpts captures everything buildSubagentRunner needs
+// to close over. Kept as a named struct (rather than a long
+// parameter list) so future additions don't churn the call site.
+type subagentRunnerOpts struct {
+	client    *deepseek.Client
+	provider  llm.Provider
+	parentReg *tools.Registry
+	hooksReg  *hooks.Registry
+	maxTokens int
+	maxTurns  int
+	getModel  func() string
+	getEffort func() string
+}
+
+// buildSubagentRunner returns the production subagent.Runner that
+// wires a child pkg/agent.Agent and drains its events into the
+// child cache.Tracker.
+//
+// LIMITATION (M11.0): the child agent reuses the parent's Tool
+// instances by NAME (filtered via the template's ToolNames). Those
+// instances hold the PARENT's permission.Policy at construction,
+// so the child's tightened Policy (per PRD §2.3) is NOT consulted
+// by individual tool Check() calls. Net safety comes from two
+// places:
+//
+//   - The per-template ToolNames whitelist (Filter excludes
+//     write/edit/bash from the explore subagent's child Registry,
+//     so those tools literally aren't reachable).
+//   - The system prompt instructing the model to honour the
+//     subagent's intended workflow ("plan-analyze mode") even
+//     when its tool surface technically allows mutation.
+//
+// Practical consequences:
+//
+//   - `explore` subagents are hard-safe (no mutating tools at all).
+//   - `general-purpose` subagents see the parent's permission
+//     level — which is INTENDED, since they inherit. No leak.
+//   - `plan` subagents trust the system prompt to keep them out of
+//     write/edit/bash. A future commit will reconstruct per-spawn
+//     Registries with the child Policy threaded through so the
+//     Workflow=PlanAnalyze restriction is hard-enforced at the
+//     tool gate too. Tracked as M11.x in the v5 roadmap.
+func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
+	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		// Filter parent registry by ToolNames. The Filter the
+		// Manager performs already strips `agent` and `ask_user`
+		// universally; here we just project parent's registered
+		// instances onto the survivor name list.
+		childReg := tools.New()
+		for _, name := range job.ToolNames {
+			if t := opts.parentReg.Lookup(name); t != nil {
+				childReg.Add(t)
+			}
+		}
+
+		// Build child agent. No InitialMessages (subagent gets a
+		// fresh context per PRD §2.1); no PrepareMessages (suggester
+		// disabled for subagents per PRD §3.5). Hooks ARE shared
+		// with the parent — pre_tool deny / post_tool observer /
+		// audit log all apply to subagent tool calls (PRD §5.3).
+		sub, err := agent.New(agent.Config{
+			Client:       opts.client,
+			Provider:     opts.provider,
+			Model:        opts.getModel(),
+			Effort:       opts.getEffort(),
+			SystemPrompt: job.SystemPrompt,
+			Tools:        childReg,
+			MaxTokens:    opts.maxTokens,
+			MaxTurns:     opts.maxTurns,
+			Hooks:        opts.hooksReg,
+		})
+		if err != nil {
+			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
+		}
+
+		// Drain events. Per-turn Usage rolls into the child
+		// Tracker, which has already been AdoptChild'd by the
+		// parent — so the cost shows up in the status bar
+		// automatically without further plumbing here.
+		var (
+			totalUsage deepseek.Usage
+			turnCount  int
+			lastErr    error
+		)
+		events := sub.Prompt(ctx, job.UserPrompt)
+		for ev := range events {
+			switch e := ev.(type) {
+			case agent.TurnEnd:
+				job.Tracker.Record(e.Usage, opts.getModel(), pricing.CurrentTier(time.Now()))
+			case agent.AgentEnd:
+				totalUsage = e.Usage
+				turnCount = e.Turns
+			case agent.ErrorEvent:
+				lastErr = e.Err
+			}
+		}
+		if lastErr != nil {
+			return subagent.RunnerResult{}, lastErr
+		}
+		if ctx.Err() != nil {
+			return subagent.RunnerResult{}, ctx.Err()
+		}
+
+		// Extract summary: the most recent assistant message
+		// without tool calls (i.e. the terminal assistant turn).
+		// pkg/agent.Prompt only ends when this exists (or on
+		// MaxTurns / ctx cancel / error — which we handled
+		// above), so finding nothing here is a contract violation
+		// — surface it as an error so Manager classifies it as
+		// spawn_error rather than wrapping an empty Summary.
+		msgs := sub.Messages()
+		var summary string
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == deepseek.RoleAssistant && len(msgs[i].ToolCalls) == 0 {
+				summary = msgs[i].Content
+				break
+			}
+		}
+		if summary == "" {
+			return subagent.RunnerResult{}, fmt.Errorf("subagent produced no terminal assistant message")
+		}
+
+		return subagent.RunnerResult{
+			Summary: summary,
+			Tokens: subagent.Tokens{
+				Prompt:     totalUsage.PromptTokens,
+				Completion: totalUsage.CompletionTokens,
+				CacheHit:   totalUsage.PromptCacheHitTokens,
+			},
+			Turns: turnCount,
+		}, nil
+	}
 }
 
 func main() {
@@ -1008,6 +1146,61 @@ func run() error {
 	if suggestEnabled {
 		predictor = suggester.New(dsClient)
 		prepareMessages = suggester.InjectCalibration
+	}
+
+	// v5 柱 G subagent orchestrator (feature-subagent PRD §3.7).
+	// Subagent persistence (index + transcript dir) needs an
+	// activeSession; in --no-save we skip subagent wiring entirely
+	// so the LLM can't spawn what we can't track. The `agent` tool
+	// is simply absent from the registry in that mode.
+	//
+	// Closures: ParentSidFn reads activeSession.ID live so /compact
+	// (forks a new session) is reflected; SkillManifestFn reads
+	// skills.Manifest() live so skill_commit + /new shows up in
+	// the next subagent's system prompt; ParentToolNamesFn reads
+	// reg.Names() live so plan/propose tools added below are
+	// available to subagents that want them (e.g. plan template).
+	if !*noSave && activeSession != nil {
+		subagentMgr, smerr := subagent.NewManager(subagent.ManagerOpts{
+			ProjectAbsPath: abs,
+			ParentTracker:  tracker,
+			ParentPolicy:   policy,
+			ParentSidFn: func() string {
+				if activeSession == nil {
+					return ""
+				}
+				return activeSession.ID
+			},
+			ProjectSectionFn:  func() string { return projMD.Section() },
+			SkillManifestFn:   func() string { return skills.Manifest() },
+			ParentToolNamesFn: func() []string { return reg.Names() },
+			Runner: buildSubagentRunner(subagentRunnerOpts{
+				client:    dsClient,
+				provider:  provider,
+				parentReg: reg,
+				hooksReg:  hooksReg,
+				maxTokens: *maxTokens,
+				maxTurns:  *maxTurns,
+				getModel:  func() string { return sessionModel },
+				getEffort: func() string { return sessionEffort },
+			}),
+		})
+		if smerr != nil {
+			return fmt.Errorf("subagent manager: %w", smerr)
+		}
+		reg.Add(agenttool.New(subagentMgr))
+
+		// On startup, scan the index for `started`-without-terminal
+		// sub_sids (subagents whose owning seek process crashed
+		// mid-run). Marks them `orphaned` so /agents doesn't show
+		// stale "active" rows after a crash recover. Best-effort —
+		// failure here doesn't block startup; the panel just shows
+		// the stale row until next clean shutdown.
+		if indexPath, perr := paths.SubagentsIndex(abs); perr == nil {
+			if _, oerr := subagent.OrphanRecover(indexPath); oerr != nil {
+				fmt.Fprintln(os.Stderr, "subagent: orphan recover:", oerr)
+			}
+		}
 	}
 
 	ag, err := agent.New(agent.Config{
