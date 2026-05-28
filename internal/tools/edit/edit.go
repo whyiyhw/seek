@@ -3,14 +3,20 @@
 // uniquely (or expected_replacements times exactly), new_string=""
 // deletes. FIM lives in the separate fim_complete tool, not here.
 //
-// Matching has two tiers, both transparent to the caller:
+// Matching has three tiers, all transparent to the caller:
 //  1. Exact byte match (preserves file bytes 1:1).
-//  2. Unicode NFC fallback — when (1) misses, retry after running both
-//     sides through NFC normalisation. Smaller LLMs frequently produce
-//     visually-identical but byte-different sequences for combining
-//     characters / pre-composed forms; this lets them succeed without
-//     a re-read loop. When the fallback fires the file is rewritten in
-//     NFC form and the result message says so.
+//  2. Line-ending fallback — when (1) misses, retry after normalising
+//     CRLF / lone CR to LF on both sides. Windows Go files are often
+//     CRLF while model-produced old_string is LF; without this tier every
+//     edit misses with "occurs 0 times". When the file used CRLF the
+//     replacement is written back in CRLF form.
+//  3. Unicode NFC fallback — when (2) misses, retry after running both
+//     sides through NFC normalisation (on the line-ending-normalised
+//     text). Smaller LLMs frequently produce visually-identical but
+//     byte-different sequences for combining characters / pre-composed
+//     forms; this lets them succeed without a re-read loop. When the
+//     fallback fires the file is rewritten in NFC form and the result
+//     message says so.
 //
 // When both tiers miss, the error embeds the closest line-window in
 // the file as a hint, so the model can re-align without another grep+read.
@@ -117,19 +123,32 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		updated = strings.ReplaceAll(content, a.OldString, a.NewString)
 		gotCount = exactCount
 	default:
-		// Tier 2: NFC normalisation. NFC-normalise the file, the needle,
-		// and the replacement, then match in NFC space. If the count is
-		// right we proceed with NFC content as the new file body.
-		nfcContent := norm.NFC.String(content)
-		nfcOld := norm.NFC.String(a.OldString)
-		nfcCount := strings.Count(nfcContent, nfcOld)
-		if nfcCount == a.ExpectedReplacements {
-			nfcNew := norm.NFC.String(a.NewString)
-			updated = strings.ReplaceAll(nfcContent, nfcOld, nfcNew)
-			gotCount = nfcCount
-			fallback = "nfc"
-		} else {
-			return "", noMatchError(content, a.OldString, a.ExpectedReplacements, exactCount, nfcCount)
+		// Tier 2: line-ending normalisation (CRLF / lone CR → LF).
+		leContent := normalizeEOL(content)
+		leOld := normalizeEOL(a.OldString)
+		leNew := normalizeEOL(a.NewString)
+		useCRLF := fileUsesCRLF(content)
+		leCount := strings.Count(leContent, leOld)
+		switch {
+		case leCount == a.ExpectedReplacements:
+			leUpdated := strings.ReplaceAll(leContent, leOld, leNew)
+			updated = denormalizeEOL(leUpdated, useCRLF)
+			gotCount = leCount
+			fallback = "crlf"
+		default:
+			// Tier 3: NFC on line-ending-normalised text.
+			nfcContent := norm.NFC.String(leContent)
+			nfcOld := norm.NFC.String(leOld)
+			nfcCount := strings.Count(nfcContent, nfcOld)
+			if nfcCount == a.ExpectedReplacements {
+				nfcNew := norm.NFC.String(leNew)
+				leUpdated := strings.ReplaceAll(nfcContent, nfcOld, nfcNew)
+				updated = denormalizeEOL(leUpdated, useCRLF)
+				gotCount = nfcCount
+				fallback = "nfc"
+			} else {
+				return "", noMatchError(content, a.OldString, a.ExpectedReplacements, exactCount, leCount, nfcCount)
+			}
 		}
 	}
 
@@ -173,6 +192,9 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	}
 	result := fmt.Sprintf("edited %s: %d replacement(s), %d → %d bytes",
 		abs, gotCount, len(orig), len(updated))
+	if fallback == "crlf" {
+		result += " (matched after line-ending normalisation — CRLF/LF differences ignored)"
+	}
 	if fallback == "nfc" {
 		result += " (matched after Unicode NFC normalisation — file rewritten in NFC form)"
 	}
@@ -191,20 +213,20 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	return result, nil
 }
 
-// noMatchError builds the error returned when neither exact nor NFC matching
-// produced the expected count. It includes the closest line-window in the file
-// so the model can re-align without another round-trip.
-func noMatchError(content, needle string, expected, exact, nfc int) error {
+// noMatchError builds the error returned when no matching tier produced the
+// expected count. It includes the closest line-window in the file so the
+// model can re-align without another round-trip.
+func noMatchError(content, needle string, expected, exact, le, nfc int) error {
 	var b strings.Builder
-	if exact != expected && nfc != expected && nfc != exact {
-		fmt.Fprintf(&b, "edit: expected %d replacements but old_string occurs %d times (exact) / %d times (after Unicode NFC normalisation)",
-			expected, exact, nfc)
+	if exact != expected && le != expected && nfc != expected {
+		fmt.Fprintf(&b, "edit: expected %d replacements but old_string occurs %d times (exact) / %d times (after line-ending normalisation) / %d times (after Unicode NFC normalisation)",
+			expected, exact, le, nfc)
 	} else {
 		fmt.Fprintf(&b, "edit: expected %d replacements but old_string occurs %d times", expected, exact)
 	}
 
 	// Closest-candidate hint: only useful when we found 0 anywhere.
-	if exact == 0 && nfc == 0 {
+	if exact == 0 && le == 0 && nfc == 0 {
 		if hint := closestCandidate(content, needle); hint != "" {
 			b.WriteString("\n\n")
 			b.WriteString(hint)
@@ -227,6 +249,10 @@ func noMatchError(content, needle string, expected, exact, nfc int) error {
 // coordinates, then the candidate's actual bytes verbatim, fenced. The model
 // can copy from inside the fence and retry.
 func closestCandidate(content, needle string) string {
+	// Normalise line endings so CRLF file content and LF needles score
+	// the same windows the tier-2 matcher would consider.
+	content = normalizeEOL(content)
+	needle = normalizeEOL(needle)
 	needleLines := splitLines(needle)
 	contentLines := splitLines(content)
 	n := len(needleLines)
@@ -316,6 +342,28 @@ func closestCandidate(content, needle string) string {
 // so window scoring is symmetric for needles that don't end in newline.
 func splitLines(s string) []string {
 	return strings.Split(s, "\n")
+}
+
+// normalizeEOL folds CRLF and lone CR to LF. Used only for matching and
+// hint scoring — never applied to tier-1 exact matches.
+func normalizeEOL(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	return s
+}
+
+// fileUsesCRLF reports whether the on-disk content uses Windows line endings.
+// Mixed files are treated as CRLF when any CRLF pair is present.
+func fileUsesCRLF(content string) bool {
+	return strings.Contains(content, "\r\n")
+}
+
+// denormalizeEOL converts LF back to CRLF when the original file used CRLF.
+func denormalizeEOL(s string, useCRLF bool) string {
+	if !useCRLF {
+		return s
+	}
+	return strings.ReplaceAll(s, "\n", "\r\n")
 }
 
 // canonForCompare normalises a string so that the closest-candidate scorer

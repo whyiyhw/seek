@@ -38,6 +38,18 @@ func coreVersion(v string) string {
 	return v
 }
 
+// UpToDate reports whether current is at or past tag. Accepts both raw
+// tags and tui.formatVersion banner strings ("v0.9.0 · abc1234").
+func UpToDate(current, tag string) bool {
+	if tag == "" {
+		return true
+	}
+	if IsDev(current) {
+		return false
+	}
+	return compareSemver(current, tag) >= 0
+}
+
 // compareSemver returns -1, 0, or +1 for a < b, a == b, a > b.
 // Accepts both "v0.9.0" and "0.9.0". Pre-release suffix (e.g. "-rc.1")
 // makes a version strictly LESS than the same version without it. This
@@ -98,13 +110,15 @@ func splitSemver(v string) ([]int, string) {
 	var pre string
 	if dash := strings.IndexByte(v, '-'); dash >= 0 {
 		pre = v[dash+1:]
-		v = v[:dash]
 	}
-	parts := strings.SplitN(v, ".", 3)
-	out := make([]int, 0, 3)
+	parts := strings.Split(v, ".")
+	nums := make([]int, 0, len(parts))
 	for _, p := range parts {
-		n, _ := strconv.Atoi(strings.TrimSpace(p))
-		out = append(out, n)
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			break
+		}
+		nums = append(nums, n)
 	}
-	return out, pre
+	return nums, pre
 }

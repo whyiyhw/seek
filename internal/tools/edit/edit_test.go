@@ -196,7 +196,7 @@ func TestEdit_NFCFallback_CountMismatchStillFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected count-mismatch error, got nil")
 	}
-	if !strings.Contains(err.Error(), "2 times (after Unicode NFC") {
+	if !strings.Contains(err.Error(), "2 times (after Unicode NFC normalisation)") {
 		t.Errorf("error should report NFC count, got: %v", err)
 	}
 	// File must be unchanged on failure (no NFC rewrite on the failure path).
@@ -297,5 +297,72 @@ func TestEdit_NoCandidateWhenNoNearMatch(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "closest candidate") {
 		t.Errorf("should not embed a candidate for unrelated needle, got: %v", err)
+	}
+}
+
+func TestEdit_CRLFFallback_LFNeedleOnCRLFFile(t *testing.T) {
+	// Windows Go files are typically CRLF; models produce LF needles.
+	body := "func foo() {\r\n\treturn 1\r\n}\r\n"
+	path, tool := setup(t, body)
+	needle := "func foo() {\n\treturn 1\n}"
+	out, err := run(t, tool, Args{Path: path, OldString: needle, NewString: "func bar() {\n\treturn 2\n}"})
+	if err != nil {
+		t.Fatalf("expected CRLF fallback to succeed, got: %v", err)
+	}
+	if !strings.Contains(out, "line-ending normalisation") {
+		t.Errorf("expected result to mention line-ending normalisation, got: %s", out)
+	}
+	got, _ := os.ReadFile(path)
+	want := "func bar() {\r\n\treturn 2\r\n}\r\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEdit_CRLFFallback_MultiLineNeedle(t *testing.T) {
+	body := "alpha\r\nbeta\r\ngamma\r\n"
+	path, tool := setup(t, body)
+	needle := "beta\ngamma" // LF needle against CRLF file
+	_, err := run(t, tool, Args{Path: path, OldString: needle, NewString: "replaced"})
+	if err != nil {
+		t.Fatalf("expected CRLF fallback for multi-line needle, got: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	want := "alpha\r\nreplaced\r\n"
+	if string(got) != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEdit_CRLFFallback_CountMismatchStillFails(t *testing.T) {
+	body := "x\r\nx\r\nx\r\n"
+	path, tool := setup(t, body)
+	_, err := run(t, tool, Args{Path: path, OldString: "x", NewString: "y", ExpectedReplacements: 2})
+	if err == nil {
+		t.Fatal("expected count-mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "3 times (after line-ending normalisation)") {
+		t.Errorf("error should report line-ending count, got: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != body {
+		t.Errorf("file mutated on failure: %q", got)
+	}
+}
+
+func TestEdit_LFFileUnchangedByCRLFTier(t *testing.T) {
+	// LF files should still match on the exact tier; no CRLF rewrite.
+	body := "hello\nworld\n"
+	path, tool := setup(t, body)
+	out, err := run(t, tool, Args{Path: path, OldString: "world", NewString: "there"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "line-ending normalisation") {
+		t.Errorf("LF exact match should not mention line-ending fallback, got: %s", out)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "hello\nthere\n" {
+		t.Errorf("file = %q", got)
 	}
 }

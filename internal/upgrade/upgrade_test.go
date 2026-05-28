@@ -77,6 +77,27 @@ func TestCompareSemver(t *testing.T) {
 	}
 }
 
+func TestUpToDate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		current, tag string
+		want         bool
+	}{
+		{"v0.3.0", "v0.3.1", false},
+		{"v0.3.1", "v0.3.1", true},
+		{"v0.3.1 · abc1234", "v0.3.1", true},
+		{"v0.3.2", "v0.3.1", true},
+		{"dev · abc1234", "v0.3.1", false},
+		{"", "v0.3.1", false},
+		{"v0.3.1", "", true},
+	}
+	for _, c := range cases {
+		if got := UpToDate(c.current, c.tag); got != c.want {
+			t.Errorf("UpToDate(%q, %q) = %v, want %v", c.current, c.tag, got, c.want)
+		}
+	}
+}
+
 func TestPickAsset(t *testing.T) {
 	t.Parallel()
 	assets := []ghAsset{

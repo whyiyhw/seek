@@ -15,7 +15,8 @@ import (
 //   - the running binary is a dev build — local builds are usually
 //     ahead of the latest release, so a nudge would be noise
 //   - the cache says we checked within the last 24h AND the last
-//     check did not see a newer version
+//     check did not see a newer version (or the user has since
+//     upgraded to that version)
 //
 // When the cache holds a still-newer tag the message fires
 // immediately with no network call — the user sees the nudge even
@@ -35,8 +36,8 @@ func versionCheckCmd(repoOwner, repoName, current string) tea.Cmd {
 	cached := upgrade.LoadCheckCache()
 	if cached.Fresh() {
 		// Within TTL: replay the cached answer without network.
-		if cached.LatestTag == "" {
-			return nil // we were up-to-date last time
+		if cached.LatestTag == "" || upgrade.UpToDate(current, cached.LatestTag) {
+			return nil // up-to-date (now or when we last checked)
 		}
 		// We saw a newer tag and the user hasn't upgraded yet —
 		// re-nudge so the status bar shows it after a restart.

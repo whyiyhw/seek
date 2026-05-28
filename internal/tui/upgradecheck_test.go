@@ -58,6 +58,23 @@ func TestVersionCheckCmd_FreshCacheReplay(t *testing.T) {
 // TestVersionCheckCmd_FreshCacheNoNewer: cache says "we checked
 // recently and the user was up to date" → no message. We don't keep
 // polling GitHub on every launch.
+
+// TestVersionCheckCmd_FreshCacheAlreadyUpgraded: cache still holds the
+// tag the user was nudged toward, but they've since installed it.
+// Replaying that tag without comparing to current would leave a stale
+// "↑ v0.3.1" hint on the status bar forever (within the 24h TTL).
+func TestVersionCheckCmd_FreshCacheAlreadyUpgraded(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("SEEK_NO_UPGRADE_CHECK", "")
+	_ = upgrade.SaveCheckCache(upgrade.CheckCache{
+		CheckedAt: time.Now(),
+		LatestTag: "v0.3.1",
+	})
+	if cmd := versionCheckCmd("whyiyhw", "seek", "v0.3.1 · abc1234"); cmd != nil {
+		t.Error("fresh cache must not replay when current already matches latest tag")
+	}
+}
+
 func TestVersionCheckCmd_FreshCacheNoNewer(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
 	t.Setenv("SEEK_NO_UPGRADE_CHECK", "")
