@@ -23,6 +23,28 @@ jobs:
       - run: go test -race ./...
       - run: go build ./...
 
+  cross-build:
+    name: cross-build (release targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: linux amd64
+        run: GOOS=linux GOARCH=amd64 go build ./cmd/seek
+      - name: linux arm64
+        run: GOOS=linux GOARCH=arm64 go build ./cmd/seek
+      - name: darwin amd64
+        run: GOOS=darwin GOARCH=amd64 go build ./cmd/seek
+      - name: darwin arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./cmd/seek
+      - name: windows amd64
+        run: GOOS=windows GOARCH=amd64 go build ./cmd/seek
+      - name: windows arm64
+        run: GOOS=windows GOARCH=arm64 go build ./cmd/seek
+
   layer-lint:
     name: layer-lint (pkg/deepseek must not import pkg/llm)
     runs-on: ubuntu-latest
