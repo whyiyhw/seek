@@ -357,6 +357,156 @@ func (p *Policy) PreApproved() bool {
 	return p.exec.preApproved
 }
 
+// Cwd returns the policy's working directory (set at construction;
+// immutable post-construction). Added in v5 to support Spawn —
+// subagents under isolation:"worktree" run at the worktree path
+// rather than the parent's cwd, so the spawn API must thread cwd
+// through explicitly rather than inheriting implicitly.
+func (p *Policy) Cwd() string {
+	if p == nil {
+		return ""
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.cwd
+}
+
+// String returns a human-readable name for the Preference value. Used
+// in Spawn error messages and tests; production code paths compare
+// against the named constants directly.
+func (p Preference) String() string {
+	switch p {
+	case PrefDeny:
+		return "deny"
+	case PrefAsk:
+		return "ask"
+	case PrefYolo:
+		return "yolo"
+	}
+	return fmt.Sprintf("Preference(%d)", int(p))
+}
+
+// String returns a human-readable name for the Workflow value.
+func (w Workflow) String() string {
+	switch w {
+	case WorkflowNone:
+		return "none"
+	case WorkflowPlanAnalyze:
+		return "plan-analyze"
+	case WorkflowPlanExecute:
+		return "plan-execute"
+	}
+	return fmt.Sprintf("Workflow(%d)", int(w))
+}
+
+// Restriction tightens a Policy when spawning a subagent. Each field
+// is a nil-pointer "inherit from parent" by default; setting the
+// pointer pins that axis. Spawn enforces monotonic-only restriction
+// (values may move toward MORE restrictive but never less), so even
+// caller mistakes can't accidentally elevate a child's permissions.
+//
+// See docs/prd/feature-subagent.md §3.5 for the full rule set.
+type Restriction struct {
+	// Pref pins the child's Preference. nil = inherit parent's pref.
+	// Permitted transitions:
+	//   parent PrefDeny  → only PrefDeny
+	//   parent PrefAsk   → PrefDeny | PrefAsk (never PrefYolo)
+	//   parent PrefYolo  → any pref
+	Pref *Preference
+
+	// Workflow pins the child's Workflow. nil = inherit parent's
+	// workflow. Permitted transitions:
+	//   parent PlanAnalyze  → MUST be PlanAnalyze (terminal read-only)
+	//   parent PlanExecute  → PlanExecute | PlanAnalyze
+	//   parent None         → any workflow
+	Workflow *Workflow
+}
+
+// Spawn returns a new Policy for a subagent rooted at the given cwd.
+//
+// cwd is REQUIRED — subagents under isolation:"worktree" run at the
+// worktree path, not the parent's cwd, so it cannot be inherited
+// implicitly. For isolation:"none" the caller passes parent.Cwd()
+// explicitly. (Policy.cwd is set at construction and never changes
+// post-hoc; that invariant is preserved by always taking cwd on
+// Spawn.)
+//
+// Returns an error if Restriction would loosen any axis; never
+// returns a Policy looser than the receiver. The error message names
+// both parent and intended child values so the orchestrator can
+// surface a clear hint to the caller.
+//
+// IMPORTANT — preApproved is NEVER inherited. Even when the child
+// stays in WorkflowPlanExecute, the per-step batch-approval gate
+// must be re-established inside the child's own plan flow. This
+// prevents a parent step's auto-approve window from silently
+// extending into a fresh subagent (docs/prd/feature-subagent.md
+// §3.5).
+//
+// askFn / onDestructive are NOT carried over — the orchestrator wires
+// them on the child after construction (typically wrapping the parent
+// askFn with a "[subagent: <description>]" prefix decorator;
+// onDestructive points to the child's own checkpoint manager). The
+// child gets its own *sync.RWMutex so concurrent operations on parent
+// and child never block each other.
+func (p *Policy) Spawn(cwd string, r Restriction) (*Policy, error) {
+	if p == nil {
+		return nil, fmt.Errorf("permission: Spawn on nil parent")
+	}
+	p.mu.RLock()
+	parentPref := p.pref
+	parentWorkflow := p.workflow
+	p.mu.RUnlock()
+
+	childPref := parentPref
+	if r.Pref != nil {
+		childPref = *r.Pref
+	}
+	childWorkflow := parentWorkflow
+	if r.Workflow != nil {
+		childWorkflow = *r.Workflow
+	}
+
+	// Monotonic-only on Preference. Since the enum is ordered
+	// Deny=0 < Ask=1 < Yolo=2 with strictness decreasing, "loosening"
+	// is simply childPref > parentPref.
+	if childPref > parentPref {
+		return nil, fmt.Errorf("permission: Spawn would loosen Preference (parent=%s, child=%s)", parentPref, childPref)
+	}
+
+	// Monotonic-only on Workflow. Unlike Preference, this axis is
+	// not totally ordered — PlanAnalyze and PlanExecute are siblings
+	// under None, and PlanAnalyze is the strictly-tighter substate
+	// of PlanExecute. Enumerate explicitly rather than using integer
+	// comparison.
+	switch parentWorkflow {
+	case WorkflowPlanAnalyze:
+		if childWorkflow != WorkflowPlanAnalyze {
+			return nil, fmt.Errorf("permission: Spawn under %s must stay %s (got %s)", parentWorkflow, parentWorkflow, childWorkflow)
+		}
+	case WorkflowPlanExecute:
+		if childWorkflow != WorkflowPlanExecute && childWorkflow != WorkflowPlanAnalyze {
+			return nil, fmt.Errorf("permission: Spawn under %s cannot escape to %s", parentWorkflow, childWorkflow)
+		}
+	case WorkflowNone:
+		// Any child workflow allowed.
+	}
+
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("permission: Spawn resolve cwd: %w", err)
+	}
+
+	// Construct a fresh Policy. Independent mu so parent and child
+	// can be operated on concurrently. exec is zero — preApproved is
+	// not inherited (see method doc).
+	return &Policy{
+		pref:     childPref,
+		workflow: childWorkflow,
+		cwd:      abs,
+	}, nil
+}
+
 // ErrDenied is returned when an action is blocked by policy. Callers should
 // surface its message verbatim to the LLM — it includes the specific reason
 // and the override instructions ("run with --yolo …").

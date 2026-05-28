@@ -202,6 +202,190 @@ func TestTracker_CumulativeCostLockedInAtRecord(t *testing.T) {
 	}
 }
 
+// TestTracker_AdoptChild_AggregatesUsageAndCost pins the v5 柱 G cost
+// rollup contract: a parent's Cumulative()/CumulativeCost() includes
+// every adopted child's totals so the status bar shows
+// parent + Σ children.
+func TestTracker_AdoptChild_AggregatesUsageAndCost(t *testing.T) {
+	parent := New()
+	recordFlash(parent, deepseek.Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120, PromptCacheHitTokens: 80, PromptCacheMissTokens: 20})
+
+	childA := New()
+	recordFlash(childA, deepseek.Usage{PromptTokens: 200, CompletionTokens: 30, TotalTokens: 230, PromptCacheHitTokens: 150, PromptCacheMissTokens: 50})
+	childB := New()
+	recordFlash(childB, deepseek.Usage{PromptTokens: 50, CompletionTokens: 10, TotalTokens: 60, PromptCacheHitTokens: 0, PromptCacheMissTokens: 50})
+
+	parent.AdoptChild(childA)
+	parent.AdoptChild(childB)
+
+	c := parent.Cumulative()
+	if c.PromptTokens != 350 { // 100 + 200 + 50
+		t.Errorf("PromptTokens = %d, want 350 (parent 100 + childA 200 + childB 50)", c.PromptTokens)
+	}
+	if c.CompletionTokens != 60 { // 20 + 30 + 10
+		t.Errorf("CompletionTokens = %d, want 60", c.CompletionTokens)
+	}
+	if c.PromptCacheHitTokens != 230 || c.PromptCacheMissTokens != 120 {
+		t.Errorf("cache split = (%d, %d), want (230, 120)", c.PromptCacheHitTokens, c.PromptCacheMissTokens)
+	}
+
+	// Cost rollup must walk children too. Each turn is 1 prompt + 1 completion
+	// at V4-Flash standard rates; exact dollar values don't matter for this
+	// assertion as long as parent ≥ each child's cost.
+	pCost := parent.CumulativeCost()
+	aCost := childA.CumulativeCost()
+	bCost := childB.CumulativeCost()
+	wantCost := childOnlyCost(parent) + aCost + bCost
+	if pCost < wantCost-1e-9 || pCost > wantCost+1e-9 {
+		t.Errorf("CumulativeCost = %v, want %v (parent-own %v + childA %v + childB %v)", pCost, wantCost, childOnlyCost(parent), aCost, bCost)
+	}
+
+	// Last() / LastCost() are parent-only by contract — children's most-recent
+	// turn must NOT bleed in.
+	if got := parent.Last().PromptTokens; got != 100 {
+		t.Errorf("Last() leaked from child: PromptTokens = %d, want 100 (parent's own turn)", got)
+	}
+}
+
+// childOnlyCost returns the parent's own-turns cost, excluding adopted
+// children. Used by tests to construct expectations without rebuilding
+// the pricing maths.
+func childOnlyCost(t *Tracker) float64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	sum := t.baseCost
+	for _, r := range t.turns {
+		sum += r.Cost
+	}
+	return sum
+}
+
+// TestTracker_AdoptChild_IsIdempotent: spawn-retry paths re-call
+// AdoptChild with the same *Tracker; the second call must be a no-op
+// rather than double-count.
+func TestTracker_AdoptChild_IsIdempotent(t *testing.T) {
+	parent := New()
+	child := New()
+	recordFlash(child, deepseek.Usage{PromptTokens: 100, TotalTokens: 100})
+
+	parent.AdoptChild(child)
+	parent.AdoptChild(child)
+	parent.AdoptChild(child)
+
+	if got := parent.Cumulative().PromptTokens; got != 100 {
+		t.Errorf("repeated AdoptChild double-counted: PromptTokens = %d, want 100", got)
+	}
+}
+
+// TestTracker_AdoptChild_NilAndSelfAreNoOp: defensive guards against
+// nil receivers / self-adoption.
+func TestTracker_AdoptChild_NilAndSelfAreNoOp(t *testing.T) {
+	parent := New()
+	parent.AdoptChild(nil)  // must not panic
+	parent.AdoptChild(parent) // must not panic, must not adopt self
+	// Adopting self would cause infinite recursion in Cumulative — verify
+	// we can still walk without stack-overflow.
+	_ = parent.Cumulative()
+
+	var nilT *Tracker
+	nilT.AdoptChild(New()) // nil receiver: must not panic
+}
+
+// TestTracker_AdoptChild_NestedPanics defends spawn-depth = 1 (v5 §2):
+// AdoptChild on a Tracker that already has children panics so the bug
+// surfaces at the orchestrator boundary rather than silently
+// double-counting via transitive walk.
+func TestTracker_AdoptChild_NestedPanics(t *testing.T) {
+	grand := New()
+	child := New()
+	parent := New()
+
+	child.AdoptChild(grand) // child now has children of its own
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("AdoptChild on a Tracker with existing children must panic")
+		}
+	}()
+	parent.AdoptChild(child) // should panic
+}
+
+// TestTracker_AdoptChild_ConcurrentSpawn: spawning N parallel
+// subagents (each adopting + recording in its own goroutine) must
+// aggregate every child's tokens without losing writes.
+func TestTracker_AdoptChild_ConcurrentSpawn(t *testing.T) {
+	parent := New()
+	var wg sync.WaitGroup
+	const N = 50
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			child := New()
+			recordFlash(child, deepseek.Usage{PromptTokens: 10, PromptCacheHitTokens: 5, PromptCacheMissTokens: 5})
+			parent.AdoptChild(child)
+		}()
+	}
+	wg.Wait()
+
+	c := parent.Cumulative()
+	if c.PromptTokens != N*10 {
+		t.Errorf("PromptTokens after %d parallel adoptions = %d, want %d", N, c.PromptTokens, N*10)
+	}
+	if c.PromptCacheHitTokens != N*5 {
+		t.Errorf("PromptCacheHitTokens = %d, want %d", c.PromptCacheHitTokens, N*5)
+	}
+}
+
+// TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock: parent
+// Cumulative running while another goroutine calls AdoptChild + child
+// Record must not deadlock. Cumulative's snapshot-then-release pattern
+// is the load-bearing invariant; without it, holding parent.mu across
+// child.Cumulative() (which takes child.mu) could compose into a lock
+// ordering hazard if any future code path takes the locks in reverse.
+func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
+	parent := New()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Reader: hammer Cumulative on parent.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = parent.Cumulative()
+				_ = parent.CumulativeCost()
+			}
+		}
+	}()
+
+	// Writer: spawn children, record into them, adopt.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			child := New()
+			recordFlash(child, deepseek.Usage{PromptTokens: 1})
+			parent.AdoptChild(child)
+		}
+	}()
+
+	// Let it run briefly then stop.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			recordFlash(parent, deepseek.Usage{PromptTokens: 1})
+		}
+		close(stop)
+	}()
+
+	wg.Wait()
+}
+
 // TestTracker_TierTransitionDoesNotRePrice covers the off-peak
 // boundary case — same root cause as the cross-model bug, different
 // trigger.
