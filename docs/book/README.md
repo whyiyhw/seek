@@ -257,6 +257,21 @@
 - 20.6 CLI / TUI 命令: `seek hooks {list,check,trust,audit}`
 - 20.7 验收标准 12/12 全绿
 
+**[第 21 章：M11.0 + M11.1 — v5 柱 G 子代理 + Worktree 隔离](chapter-21.md)** *(v0.6.0)*
+- 21.1 单 agent 单进程的两个空白（并行研究 / 长上下文保护）
+- 21.2 静态结构（架构总览图）
+- 21.3 Spawn 动态流程（时序图：worktree create → Manager.Spawn 11 步 → Runner 闭包 → Cleanup）
+- 21.4 四个 primitives 的"加法操作"
+  - 21.4.1 `Policy.Spawn`: 双轴 monotonic 收紧 + preApproved 永不继承
+  - 21.4.2 `Tracker.AdoptChild`: 父子引用 + snapshot-then-release 避免父锁放大
+  - 21.4.3 `sysprompt.ComposeSubagent`: 前 3 段字节复用 + 第 4 段替换
+  - 21.4.4 `worktree.Manager`: refs/seek/ 复用 v3 checkpoint + discard 救命栈
+- 21.5 Manager.Spawn 的 11 步固定顺序
+- 21.6 三个 subagent_type 模板（C.2 之后 plan ≡ explore 工具子集）
+- 21.7 工具表达层 (`agent` ReadOnly 语义伸展 / `enter/exit_worktree`)
+- 21.8 已知限制: Policy passthrough 软安全 + 三层兜底
+- 21.9 一个观察: 从"单上下文流"到"可分裂上下文"的换挡
+
 ---
 
 ### 附录
