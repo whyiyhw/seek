@@ -41,7 +41,7 @@ type ghRelease struct {
 // fetchLatestRelease pulls the newest non-draft, non-prerelease release
 // for owner/repo. Returns a helpful error when the repo has no releases
 // yet — GitHub returns 404, which would otherwise be opaque.
-func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, owner, repo string) (*ghRelease, error) {
+func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, owner, repo, token string) (*ghRelease, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest",
 		strings.TrimRight(apiBase, "/"), owner, repo)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -49,7 +49,7 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, owner
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", userAgent)
+	setGitHubRequestHeaders(req, token)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 
 	resp, err := client.Do(req)
@@ -76,4 +76,14 @@ func fetchLatestRelease(ctx context.Context, client *http.Client, apiBase, owner
 		return nil, fmt.Errorf("github: decode release: %w", err)
 	}
 	return &rel, nil
+}
+
+// setGitHubRequestHeaders adds the standard headers for GitHub API and
+// release-asset downloads. token is optional; when set, Bearer auth
+// raises the rate limit from 60/h per IP to 5000/h per token.
+func setGitHubRequestHeaders(req *http.Request, token string) {
+	req.Header.Set("User-Agent", userAgent)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 }

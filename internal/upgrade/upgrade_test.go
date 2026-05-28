@@ -480,6 +480,84 @@ func TestCheck_NewerAvailable(t *testing.T) {
 	}
 }
 
+func TestGitHubTokenFromEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	if got := githubTokenFromEnv(); got != "" {
+		t.Errorf("githubTokenFromEnv() = %q, want empty", got)
+	}
+	t.Setenv("GH_TOKEN", "gh-token")
+	if got := githubTokenFromEnv(); got != "gh-token" {
+		t.Errorf("githubTokenFromEnv() = %q, want gh-token", got)
+	}
+	t.Setenv("GITHUB_TOKEN", "github-token")
+	if got := githubTokenFromEnv(); got != "github-token" {
+		t.Errorf("githubTokenFromEnv() = %q, want github-token", got)
+	}
+}
+
+func TestWithDefaults_ReadsTokenFromEnv(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "from-env")
+	opt := withDefaults(Options{})
+	if opt.Token != "from-env" {
+		t.Errorf("Token = %q, want from-env", opt.Token)
+	}
+}
+
+func TestCheck_SendsBearerToken(t *testing.T) {
+	t.Parallel()
+	const wantToken = "ghp_test_token"
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/repos/whyiyhw/seek/releases/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(ghRelease{TagName: "v0.9.0"})
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := Check(context.Background(), Options{
+		Owner: "whyiyhw", Repo: "seek",
+		Current: "v0.9.0",
+		Token:   wantToken,
+		APIBase: srv.URL, HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if gotAuth != "Bearer "+wantToken {
+		t.Errorf("Authorization = %q, want Bearer %q", gotAuth, wantToken)
+	}
+}
+
+func TestRun_SendsBearerTokenOnDownload(t *testing.T) {
+	t.Parallel()
+	const wantToken = "ghp_test_token"
+	srv := newFakeReleaseServer(t, "v0.9.1", []byte("new-seek-binary"))
+
+	exePath := filepath.Join(t.TempDir(), "seek")
+	if err := os.WriteFile(exePath, []byte("old-seek-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Run(context.Background(), Options{
+		Owner: "whyiyhw", Repo: "seek",
+		Current: "v0.9.0",
+		Token:   wantToken,
+		APIBase: srv.URL, HTTPClient: srv.Client(),
+		GOOS: "linux", GOARCH: "amd64",
+		ExePath: exePath, Stderr: io.Discard, Stdout: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := srv.lastDownloadAuth.Load(); got != "Bearer "+wantToken {
+		t.Errorf("download Authorization = %v, want Bearer %q", got, wantToken)
+	}
+}
+
 // --- fake GitHub server ---
 
 // fakeReleaseServer simulates the subset of github.com endpoints the
@@ -494,6 +572,7 @@ type fakeReleaseServer struct {
 	overrideChecksumBody string
 	checksumOverride atomic.Pointer[byte] // if non-nil, serve overrideChecksumBody
 	reqCount         atomic.Int64
+	lastDownloadAuth atomic.Value // string — Authorization on last /dl/ request
 }
 
 func newFakeReleaseServer(t *testing.T, tag string, binaryBytes []byte) *fakeReleaseServer {
@@ -522,6 +601,7 @@ func newFakeReleaseServer(t *testing.T, tag string, binaryBytes []byte) *fakeRel
 	})
 
 	mux.HandleFunc("/dl/", func(w http.ResponseWriter, r *http.Request) {
+		srv.lastDownloadAuth.Store(r.Header.Get("Authorization"))
 		switch {
 		case strings.HasSuffix(r.URL.Path, "checksums.txt"):
 			if srv.checksumOverride.Load() != nil {

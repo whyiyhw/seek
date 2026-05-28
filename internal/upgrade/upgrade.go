@@ -71,6 +71,11 @@ type Options struct {
 	// DryRun stops after downloading + verifying — no replace. Useful
 	// for `seek -upgrade -dry-run` to vet a release before committing.
 	DryRun bool
+
+	// Token is a GitHub personal access token (or Actions GITHUB_TOKEN)
+	// used to raise the API rate limit from 60/h per IP to 5000/h.
+	// When empty, withDefaults reads GITHUB_TOKEN then GH_TOKEN.
+	Token string
 }
 
 // Result captures the outcome of an upgrade run so callers (CLI,
@@ -103,7 +108,7 @@ func Run(ctx context.Context, opt Options) (*Result, error) {
 	}
 
 	fmt.Fprintf(opt.Stderr, "upgrade: checking %s/%s for releases…\n", opt.Owner, opt.Repo)
-	rel, err := fetchLatestRelease(ctx, opt.HTTPClient, opt.APIBase, opt.Owner, opt.Repo)
+	rel, err := fetchLatestRelease(ctx, opt.HTTPClient, opt.APIBase, opt.Owner, opt.Repo, opt.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -125,14 +130,14 @@ func Run(ctx context.Context, opt Options) (*Result, error) {
 	fmt.Fprintf(opt.Stderr, "upgrade: %s → %s (%s, %s)\n",
 		displayVersion(opt.Current), rel.TagName, asset.Name, humanBytes(asset.Size))
 
-	wantSum, err := downloadChecksum(ctx, opt.HTTPClient, checksumAsset, asset.Name)
+	wantSum, err := downloadChecksum(ctx, opt.HTTPClient, opt.Token, checksumAsset, asset.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	dir := filepath.Dir(exePath)
 	binName := filepath.Base(exePath)
-	tmpArchive, err := downloadAsset(ctx, opt.HTTPClient, asset, dir, wantSum)
+	tmpArchive, err := downloadAsset(ctx, opt.HTTPClient, opt.Token, asset, dir, wantSum)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +182,7 @@ func Run(ctx context.Context, opt Options) (*Result, error) {
 // foreground at startup.
 func Check(ctx context.Context, opt Options) (*ghRelease, error) {
 	opt = withDefaults(opt)
-	rel, err := fetchLatestRelease(ctx, opt.HTTPClient, opt.APIBase, opt.Owner, opt.Repo)
+	rel, err := fetchLatestRelease(ctx, opt.HTTPClient, opt.APIBase, opt.Owner, opt.Repo, opt.Token)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +216,20 @@ func withDefaults(opt Options) Options {
 	if opt.Stderr == nil {
 		opt.Stderr = os.Stderr
 	}
+	if opt.Token == "" {
+		opt.Token = githubTokenFromEnv()
+	}
 	return opt
+}
+
+// githubTokenFromEnv returns a GitHub API token from the environment.
+// GITHUB_TOKEN wins over GH_TOKEN — matching gh CLI and Actions convention.
+// Whitespace is trimmed to guard against quoting accidents in env files.
+func githubTokenFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv("GH_TOKEN"))
 }
 
 // resolveExePath returns the absolute path of the running binary
@@ -236,8 +254,8 @@ func resolveExePath(override string) (string, error) {
 
 // downloadChecksum fetches the checksums.txt asset, parses it, and
 // returns the expected sha256 for binAssetName.
-func downloadChecksum(ctx context.Context, client *http.Client, a *ghAsset, binAssetName string) (string, error) {
-	body, err := httpGet(ctx, client, a.BrowserDownloadURL)
+func downloadChecksum(ctx context.Context, client *http.Client, token string, a *ghAsset, binAssetName string) (string, error) {
+	body, err := httpGet(ctx, client, a.BrowserDownloadURL, token)
 	if err != nil {
 		return "", fmt.Errorf("upgrade: fetch checksums: %w", err)
 	}
@@ -258,8 +276,8 @@ func downloadChecksum(ctx context.Context, client *http.Client, a *ghAsset, binA
 // removed and an error is returned. dir MUST be the same directory
 // the binary will eventually be renamed into — same-filesystem rename
 // is what makes the replace atomic.
-func downloadAsset(ctx context.Context, client *http.Client, a *ghAsset, dir, wantSum string) (string, error) {
-	body, err := httpGet(ctx, client, a.BrowserDownloadURL)
+func downloadAsset(ctx context.Context, client *http.Client, token string, a *ghAsset, dir, wantSum string) (string, error) {
+	body, err := httpGet(ctx, client, a.BrowserDownloadURL, token)
 	if err != nil {
 		return "", fmt.Errorf("upgrade: fetch asset: %w", err)
 	}
@@ -321,15 +339,16 @@ func extractToTemp(archivePath, assetName, binName, dir string) (string, error) 
 	return tmpName, nil
 }
 
-// httpGet does a GET with the same UA we use for API calls and
-// returns the body. Caller closes it. Non-2xx maps to an error
-// containing the status text — most useful for "404 asset moved".
-func httpGet(ctx context.Context, client *http.Client, url string) (io.ReadCloser, error) {
+// httpGet does a GET (with User-Agent and optional Bearer auth headers
+// set via setGitHubRequestHeaders) and returns the body. Caller closes
+// it. Non-2xx maps to an error containing the status text — most useful
+// for "404 asset moved".
+func httpGet(ctx context.Context, client *http.Client, url, token string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
+	setGitHubRequestHeaders(req, token)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
