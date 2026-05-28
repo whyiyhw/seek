@@ -276,6 +276,36 @@ notify-send "seek: <job>" "<body>"
 
 **Fallback** (binary missing on the host): write `WARN: notify failed: ...` to the run record, don't fail the cron run itself. The user lost the popup but not the data.
 
+### 3.9 Subprocess env (G3, v0.6.0)
+
+OS schedulers hand `seek cron tick` a minimal environment — `launchd` typically gives a process `PATH=/usr/bin:/bin` and not much else; `systemd` user units inherit only what `EnvironmentFile=` / `Environment=` named; classic `cron(1)` is even stingier (often no `HOME`, no `PATH` beyond `/usr/bin:/bin`). The user's interactive-shell `DEEPSEEK_API_KEY` (sourced from `.zshrc` / `.bashrc` / a project `.env`) is invisible to all three.
+
+Without intervention, every cron-fired job runs under that minimal env and hits the DeepSeek client's "no API key" path, producing identical authentication-failure runs at the configured cadence. The fix:
+
+1. **`cmd.Env` is set explicitly in `DefaultSubprocess`**, never left implicit. The default `cmd.Env = nil` (which Go documents as "inherit from parent") makes the env-shape opaque to readers and to tests; an explicit `cmd.Env = MergeEnv(os.Environ(), overlay)` makes it auditable and makes a future "filter env" change impossible to introduce by accident.
+
+2. **`~/.seek/cron/env` is an opt-in overlay file** parsed at every spawn. Format is intentionally simpler than POSIX shell — one `KEY=VALUE` per line, `#` comments, blank lines skipped, balanced `"…"` / `'…'` stripped, no escape interpretation:
+
+   ```
+   # ~/.seek/cron/env
+   DEEPSEEK_API_KEY=sk-…
+   PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+   GOROOT=/usr/local/go
+   ```
+
+   Parse errors (missing `=`, empty key) are FATAL to the spawn — the alternative (silently dropping a misformatted line) gives the user a tick that runs without the API key they thought they'd set, with no signal.
+
+3. **Last-wins semantics**: overlay entries are APPENDED to `os.Environ()` and resolved by Go's documented "last duplicate wins for `cmd.Env`" rule. So overlay overrides scheduler-provided env, while still letting the scheduler set vars the overlay doesn't mention (e.g. `XPC_SERVICE_NAME` on macOS).
+
+4. **Documented install patterns** (recommended `seek cron install --help` text):
+   - **macOS launchd**: either populate `<key>EnvironmentVariables</key>` in the plist OR write `~/.seek/cron/env` (recommended — avoids embedding secrets in a Time-Machine-backed plist).
+   - **systemd user unit**: `EnvironmentFile=%h/.seek/cron/env` in the `[Service]` section is the natural one-line config; the overlay file then drives both seek's own env loading AND systemd's.
+   - **classic cron(1)**: a shell wrapper that sources the user's `.zshrc` / `.bashrc` before `exec seek cron tick`, OR rely entirely on `~/.seek/cron/env` (recommended — avoids sourcing an interactive-shell rcfile in a non-interactive context).
+
+5. **Anti-goal**: seek does NOT implement env-file capture at install time (no `seek cron install --capture-env` snapshotting the current shell). The opt-in overlay file gives users explicit control over which secrets cross the boundary into the spawned process; auto-capture would silently smuggle `AWS_SECRET_*`, ssh-agent sockets, and similar into every cron child, with no audit trail.
+
+Implementation: `internal/routines.LoadEnvFile(path)` + `routines.MergeEnv(base, overlay)`; `DefaultSubprocess` calls both; `paths.CronEnv()` returns the canonical path. Tests pin happy-path parse, comment/blank skipping, quote stripping, last-duplicate-wins, parse-error fail-loud, missing-file no-error, end-to-end overlay flowing into `cmd.Env`, and overlay-overrides-inherited.
+
 ## 4. CLI / TUI
 
 ### 4.1 CLI
@@ -425,7 +455,7 @@ cron 子进程默认 `--yolo`（无人值守）。Per-job 覆盖：`seek cron cr
 |---|---|
 | 用户挂的 OS 调度器频率太高（每秒 tick） → tick 之间互锁导致空转 | `tick.lock` LOCK_NB 立即返回，CPU 浪费 < 1ms 每次；文档建议最小间隔 1 分钟 |
 | 长任务跨多个 tick → 同一 job 被并发触发两次 | per-job `<name>.lock` LOCK_NB；后到的 tick 看到锁就 skip + 写 `WARN: prior run still active` 到 runs record |
-| 用户 API key 不可达（cron 跑在 user shell 之外的 env）→ 每次 cron 静默失败 | 每个 run 的 stderr 落入 `runs/<id>.jsonl`；`seek cron list` 显示 `last_status: failed`；`seek cron logs <name>` 给出最近三次 run 的 head |
+| 用户 API key 不可达（cron 跑在 user shell 之外的 env）→ 每次 cron 静默失败 | §3.9 G3 fix (v0.6.0): `DefaultSubprocess` sets `cmd.Env` explicitly as `os.Environ() + ~/.seek/cron/env overlay`. Overlay is opt-in dotenv; parse errors fail spawn loudly (not silent). Plus the diagnostic loop: each run's stderr → `runs/<id>.jsonl`; `seek cron list` 显示 `last_status: failed`; `seek cron logs <name>` 给出最近三次 run head |
 | OS notification 在 headless server 上根本没意义 → 用户启动 cron 但收不到通知 | `--notify never` 默认在 `$DISPLAY` 未设置 + 非 macOS 的环境下自动适用；文档明确"无 GUI = 不通知" |
 | `jobs.jsonl` rewrite 期间进程被杀（断电）→ 文件损坏 | rewrite 用 write-tmp-rename atomic dance（与 session.Save 同模式）；rename 失败保留 .tmp |
 | 用户 `seek cron tick` 跑在错误的 cwd → cron job 的 `project_root` 指向不存在的目录 | `Create` 期 stat `--cwd` 必须存在；run 期 stat 失败 → `failed reason=cwd_missing`，next tick 不重试，直到用户 `delete` 或 `edit`（edit 在 v0.6.x dot） |

@@ -16,6 +16,12 @@ import (
 	"github.com/whyiyhw/seek/internal/paths"
 )
 
+// envOverlayPath is overridable for tests so DefaultSubprocess can
+// be exercised without writing into the real ~/.seek/cron/env. The
+// production default goes through paths.CronEnv. Tests assign a
+// temp-file path before calling DefaultSubprocess and restore after.
+var envOverlayPath = func() (string, error) { return paths.CronEnv() }
+
 // DefaultRunTimeout is the per-run wall-clock cap (PRD §3.6
 // "Subprocess timeout: hard 30 min default"). After timeout
 // the engine sends SIGTERM, waits gracePeriod for clean exit,
@@ -48,6 +54,25 @@ type SubprocessFn func(ctx context.Context, job Job, runID string) (*exec.Cmd, e
 // unspecified). Adds --no-save by default (PRD §5.3); a future
 // SaveSession field on Job will let users opt back in.
 //
+// Environment (feature-routines.md §3.9 "G3: subprocess env"):
+// the child's env is built EXPLICITLY rather than left to Go's
+// implicit "inherit parent env when cmd.Env is nil" — the parent
+// here is `seek cron tick`, which itself was invoked by launchd /
+// systemd / cron / Task Scheduler with whatever (often minimal)
+// env that scheduler chose. Making it explicit makes the path
+// auditable: `cmd.Env = os.Environ() + ~/.seek/cron/env overlay`.
+//
+// The overlay file is opt-in: when ~/.seek/cron/env exists, its
+// KEY=VALUE entries override entries inherited from the parent
+// (last-wins via cmd.Env semantics). This is the documented
+// escape hatch for launchd/systemd users who can't easily inject
+// DEEPSEEK_API_KEY into their unit file — the alternative would
+// be embedding the secret in a plist that Time Machine backs up.
+// A read-failure on the overlay file (parse error, permissions)
+// is fatal to the spawn so the user notices the mis-configuration
+// immediately rather than after every job silently runs without
+// API auth.
+//
 // Returns an error if os.Executable lookup fails — better to
 // surface that loudly than silently fall back to PATH and
 // inherit ambiguity about which seek binary is running.
@@ -64,6 +89,19 @@ func DefaultSubprocess(ctx context.Context, job Job, runID string) (*exec.Cmd, e
 	if job.ProjectRoot != "" {
 		cmd.Dir = job.ProjectRoot
 	}
+
+	// G3: explicit env composition. os.Environ() captures whatever
+	// the OS scheduler handed us (often very little); overlay file
+	// fills the gaps the scheduler couldn't see (user shell secrets).
+	envPath, err := envOverlayPath()
+	if err != nil {
+		return nil, fmt.Errorf("routines: resolve env overlay path: %w", err)
+	}
+	overlay, err := LoadEnvFile(envPath)
+	if err != nil {
+		return nil, fmt.Errorf("routines: load env overlay: %w", err)
+	}
+	cmd.Env = MergeEnv(os.Environ(), overlay)
 	return cmd, nil
 }
 

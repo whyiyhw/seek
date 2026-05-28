@@ -100,7 +100,19 @@ OS scheduler setup (every minute):
   Linux systemd:    user-level seek-cron.{service,timer} unit
                     OnUnitActiveSec=1min → `+"`systemctl --user enable --now`"+`
   Windows Task:     schtasks /create /tn "seek cron" /tr "seek cron tick"
-                    /sc minute`)
+                    /sc minute
+
+Subprocess env (~/.seek/cron/env):
+  OS schedulers hand seek a minimal environment — DEEPSEEK_API_KEY
+  and PATH from your interactive shell are NOT inherited. Create
+  ~/.seek/cron/env to inject what the scheduler can't see:
+    DEEPSEEK_API_KEY=sk-…
+    PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+  Format: one KEY=VALUE per line; # comments; balanced quotes
+  stripped; no shell expansion. Overlay entries override the
+  scheduler-provided env (last-wins). Parse errors fail spawn
+  loudly — better than silently running without your API key.
+  systemd users can point `+"`EnvironmentFile=`"+` at this same file.`)
 }
 
 // cmdCreate parses --name / --at / --cwd / etc, joins the

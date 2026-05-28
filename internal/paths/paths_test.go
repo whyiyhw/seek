@@ -204,6 +204,7 @@ func TestCronPaths_ComposeUnderSeekHome(t *testing.T) {
 		{"CronTickLock", CronTickLock, filepath.Join(override, "cron", "tick.lock")},
 		{"CronRuns", CronRuns, filepath.Join(override, "cron", "runs")},
 		{"CronTriggers", CronTriggers, filepath.Join(override, "cron", "triggers")},
+		{"CronEnv", CronEnv, filepath.Join(override, "cron", "env")},
 	}
 	for _, c := range cases {
 		got, err := c.fn()

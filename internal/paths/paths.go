@@ -278,6 +278,26 @@ func CronRuns() (string, error) {
 	return filepath.Join(dir, "runs"), nil
 }
 
+// CronEnv returns ~/.seek/cron/env — optional dotenv-style overlay
+// applied on top of the OS scheduler's inherited environment when
+// `seek cron tick` spawns each due job's subprocess
+// (feature-routines.md §3.9 "G3: subprocess env"). Solves the
+// launchd/systemd/cron problem where the scheduler hands seek a
+// minimal env (no DEEPSEEK_API_KEY, no PATH beyond /usr/bin:/bin)
+// without forcing users to embed secrets in their plist/unit file.
+//
+// Format: one KEY=VALUE per line; lines starting with `#` and blank
+// lines are ignored; no shell expansion. Returned path may not exist
+// (the common case — opt-in feature); callers MUST tolerate
+// os.IsNotExist on read.
+func CronEnv() (string, error) {
+	dir, err := CronDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "env"), nil
+}
+
 // CronTriggers returns ~/.seek/cron/triggers/ — the file-bridge
 // inbox for external systems (CI webhooks, IDE plugins). Each
 // .json file in here gets consumed + deleted by tick. M11.3
