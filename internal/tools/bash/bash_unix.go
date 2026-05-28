@@ -29,3 +29,13 @@ func detachStdin(cmd *exec.Cmd) {
 	}
 	cmd.SysProcAttr.Setsid = true
 }
+
+// killProcessGroup kills the entire process group of cmd.
+// Negative PID = process group on Unix (PGID == PID of session leader).
+// Without this, grandchildren orphaned by Setsid keep pipe fds open
+// and cmd.Wait() deadlocks.
+func killProcessGroup(cmd *exec.Cmd) {
+	if cmd.Process != nil {
+		syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+}

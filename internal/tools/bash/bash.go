@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
-	"syscall"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
@@ -142,9 +141,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		go func() {
 			select {
 			case <-cctx.Done():
-				if cmd.Process != nil {
-					syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-				}
+				killProcessGroup(cmd)
 			case <-done:
 			}
 		}()
