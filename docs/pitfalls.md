@@ -40,6 +40,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any Hook struct field that tracks per-session state MUST be reset in `OnSessionStart`. The Hook is reusable across agent lifetimes (--resume), not 1:1 with sessions. Don't assume zero-init at construction covers all paths
 - **Refs**: `internal/memory/hook.go:OnSessionStart`, `internal/memory/hook.go:Hook.snapshotInjected`
 
+### ObserveEnqueue accept counter races with non-blocking ResultChan send
+- **Saw**: `go test -race ./internal/memory` failed in `TestObserveEnqueue_RespectsSessionCap` on `h.observeAcceptCt++` — two filter goroutines could increment concurrently
+- **Why**: `ObserveEnqueue` is non-blocking; the TUI/test receives from `ResultChan` as soon as the goroutine sends, which can overlap with the goroutine still bumping stats. `observeAcceptCt++` ran after the channel send, so a second enqueue could start before the first increment finished
+- **Fix**: store `observeCount` / `observeAcceptCt` as `atomic.Int32` (Add/Load)
+- **Lesson**: non-blocking handoff to a consumer doesn't mean the producer goroutine is done — any post-send bookkeeping in that goroutine needs the same synchronization as the shared counter itself
+- **Refs**: `internal/memory/hook.go:ObserveEnqueue`, `internal/memory/auto_distill_test.go:TestObserveEnqueue_RespectsSessionCap`
+
 ### Shell-hook SkipReason needs per-event handling, not a single funnel
 - **Saw**: a hook marked `SkipReason="syntax: bad"` (failed `bash -n` at startup) was producing `Deny: 'hook "broken" exited with code -1'` and blocking the tool, even though the PRD says skipped hooks must be silently bypassed
 - **Why**: the natural place to short-circuit was inside `runHook` — return `code=-1` with `Reason="skipped: …"`. But `OnPreToolUse` treats `code != 0` as deny by design (that's the whole pre_tool contract), so a "neutral" sentinel exit code for "skipped" doesn't exist. Trying to centralise the skip-handling at the exec level papers over a real semantic split: pre_tool needs to skip-and-continue, observers need to skip-and-noop, and there's no single exit code that means both
@@ -863,6 +870,6 @@ If you're new to the project, skim entries in this order:
 ### WSL sudo escapes process-group kill, bash Wait() hangs past timeout
 - **Saw**: `bash -c 'sudo cp …'` in WSL2 hung 55+ minutes despite `timeout_ms` max (10m); Esc/context cancel fired but the TUI stayed blocked until manual kill
 - **Why**: `sudo` (and `setsid`) create a new session/PGID — `SIGKILL` to `-sh.PGID` only kills the shell wrapper. WSL `sudo` with no TTY blocks on a Windows credential dialog (not killable via Linux signals). Orphaned descendants keep stdout/stderr pipe fds open → `cmd.Wait()` never returns even after the context timer fires
-- **Fix**: on Linux, walk `/proc/[pid]/task/[tid]/children` recursively and SIGKILL every descendant before the PGID kill; cap `cmd.Wait()` with a 5s post-kill grace so the tool returns even when kill fails
-- **Lesson**: Setsid + PGID kill is necessary but not sufficient when children deliberately escape the group (sudo, setsid). Always pair group kill with descendant cleanup AND a Wait() deadline — never assume SIGKILL reaps the whole tree
+- **Fix**: on Linux, walk `/proc/[pid]/children` recursively and SIGKILL every descendant **before** the PGID kill (killing sh first reparents escapees and empties `/proc/<sh>/children`); cap `cmd.Wait()` with a 5s post-kill grace so the tool returns even when kill fails; snapshot stdout via a mutex-protected buffer because pipe-copy goroutines may still run after the grace deadline
+- **Lesson**: Setsid + PGID kill is necessary but not sufficient when children deliberately escape the group (sudo, setsid). Snapshot the descendant tree before reaping the root, pair group kill with descendant cleanup AND a Wait() deadline — never assume SIGKILL reaps the whole tree
 - **Refs**: `internal/tools/bash/proc_linux.go`, `internal/tools/bash/bash_unix.go`, `internal/tools/bash/bash.go`, issue #9

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
@@ -41,6 +42,27 @@ const (
 )
 
 var errKillWaitGrace = errors.New("bash: process did not exit after kill")
+
+// lockedBuffer wraps bytes.Buffer for concurrent writes from os/exec pipe
+// goroutines and a post-Wait read on the main goroutine. When killWaitGrace
+// expires before cmd.Wait() returns (e.g. WSL sudo), we still need a safe
+// partial snapshot of captured output.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) snapshot() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return bytes.Clone(b.buf.Bytes())
+}
 
 type Args struct {
 	Command   string `json:"command"`
@@ -126,7 +148,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 
 	detachStdin(cmd)
 
-	var buf bytes.Buffer
+	var buf lockedBuffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
@@ -161,7 +183,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}()
 	dur := time.Since(start)
 
-	output := buf.Bytes()
+	output := buf.snapshot()
 	truncated := false
 	if len(output) > maxOutputBytes {
 		output = output[:maxOutputBytes]

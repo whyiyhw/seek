@@ -530,8 +530,8 @@ func TestOnSessionEnd_WritesObserveStats(t *testing.T) {
 	_ = p.Add(Entry{Name: "existing", Tagline: "t"})
 
 	h := &Hook{Project: p}
-	h.observeCount = 5
-	h.observeAcceptCt = 3
+	h.observeCount.Store(5)
+	h.observeAcceptCt.Store(3)
 	h.OnSessionEnd(context.Background(), hooks.SessionEndEvent{})
 
 	// Verify the file was written.

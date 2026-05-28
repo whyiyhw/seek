@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -115,13 +116,13 @@ type Hook struct {
 	// observeCount tracks how many filter goroutines have been launched
 	// this session. Capped at observeMax (default 10). Exceeding the
 	// cap causes silent discard (no goroutine, no error).
-	observeCount int
+	observeCount atomic.Int32
 	observeMax   int // configured via $SEEK_OBSERVE_MAX, default 10
 
 	// observeAcceptCt tracks how many memory_observe calls resulted in
 	// a successful write to M this session. Used with observeCount to
 	// compute aggregate stats for the M5.13 feedback loop.
-	observeAcceptCt int
+	observeAcceptCt atomic.Int32
 
 	// snapshotInjected is set after the first OnPrePrompt call delivers
 	// the session-start L+M snapshot. Subsequent calls skip snapshot
@@ -583,12 +584,12 @@ func (h *Hook) OnSessionEnd(_ context.Context, _ hooks.SessionEndEvent) {
 // if there were any observe calls this session. Best-effort: errors are
 // silently swallowed (stats are a nice-to-have, not correctness-critical).
 func (h *Hook) writeObserveStats() {
-	if h.Project == nil || h.observeCount == 0 {
+	if h.Project == nil || h.observeCount.Load() == 0 {
 		return
 	}
 	data, err := json.Marshal(observeStats{
-		Launched: h.observeCount,
-		Saved:    h.observeAcceptCt,
+		Launched: int(h.observeCount.Load()),
+		Saved:    int(h.observeAcceptCt.Load()),
 	})
 	if err != nil {
 		return
@@ -636,8 +637,7 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 				}
 			}
 		}
-		h.observeCount++
-		if h.observeCount > h.observeMax {
+		if int(h.observeCount.Add(1)) > h.observeMax {
 			h.observeLocks.unlock(entry.Name)
 			return
 		}
@@ -710,7 +710,7 @@ func (h *Hook) ObserveEnqueue() func(context.Context, Entry) {
 				Tagline: entry.Tagline,
 				OK:      true,
 			})
-			h.observeAcceptCt++ // M5.13: successful save → stats counter
+			h.observeAcceptCt.Add(1) // M5.13: successful save → stats counter
 		}()
 	}
 }

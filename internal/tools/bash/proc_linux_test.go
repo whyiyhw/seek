@@ -11,8 +11,9 @@ import (
 )
 
 func TestDescendantPIDs_FindsNestedChildren(t *testing.T) {
-	// sh -c 'sleep 600 & sleep 600' → two direct children of sh.
-	cmd := exec.Command("/bin/sh", "-c", "sleep 600 & sleep 600")
+	// Keep sh alive while both background sleeps run; without wait sh exits
+	// immediately and reparents the sleeps, so /proc/<sh>/children is empty.
+	cmd := exec.Command("/bin/sh", "-c", "sleep 600 & sleep 600 & wait")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

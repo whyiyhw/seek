@@ -39,9 +39,13 @@ func killProcessGroup(cmd *exec.Cmd) {
 		return
 	}
 	pid := cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
-	for _, dpid := range descendantPIDs(pid) {
+	// Snapshot descendants before killing the root — SIGKILL to -PGID
+	// reaps sh immediately and reparents setsid/sleep to init, so a
+	// post-kill /proc walk returns empty (issue #9, TestBash_Timeout_*).
+	descendants := descendantPIDs(pid)
+	for _, dpid := range descendants {
 		_ = syscall.Kill(dpid, syscall.SIGKILL)
 	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
