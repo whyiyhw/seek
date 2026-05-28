@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
+	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/pkg/agent"
 )
@@ -326,6 +327,7 @@ func (m Model) renderStatusBar() string {
 		StreamDeltaBytes: m.streamDeltaBytes,
 		UpgradeAvailable: m.upgradeAvailable,
 		SubagentsActive:  subagentsActiveCount(m.opts.Subagents),
+		CronsRegistered:  cronsRegisteredCount(),
 	})
 }
 
@@ -339,6 +341,29 @@ func subagentsActiveCount(m *subagent.Manager) int {
 		return 0
 	}
 	return m.ActiveCount()
+}
+
+// cronsRegisteredCount opens the routines Store and counts
+// registered jobs. Per-render filesystem I/O — but the
+// render path fires on Bubble Tea events (input, ticks,
+// agent stream), NOT at 60fps, so the cost is bounded. Any
+// I/O error (read-only ~/.seek, jobs.jsonl corrupt) silently
+// returns 0 so the badge disappears rather than the TUI
+// rendering a confused error in the status bar.
+//
+// Lives at the TUI layer (not as a routines.Manager method)
+// for the same reason as subagentsActiveCount: error tolerance
+// is a TUI concern, not a Store API concern.
+func cronsRegisteredCount() int {
+	store, err := routines.OpenStore()
+	if err != nil {
+		return 0
+	}
+	jobs, err := store.List()
+	if err != nil {
+		return 0
+	}
+	return len(jobs)
 }
 
 // renderQueueHint returns a one-line indicator for queued / steering

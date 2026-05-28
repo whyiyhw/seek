@@ -169,6 +169,10 @@ type TickResult struct {
 	// caller can tell "tick wasn't idle" apart from "tick
 	// idle".
 	Fired int
+	// TriggersDispatched is the count of triggers/<id>.json
+	// files actually run this tick (M11.3 file bridge).
+	// Excludes skipped-as-too-fresh, TTL-expired, malformed.
+	TriggersDispatched int
 }
 
 // Tick runs one scan-and-fire cycle. Acquires tick.lock LOCK_NB
@@ -239,6 +243,18 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 		}(j)
 	}
 	wg.Wait()
+
+	// 5. Drain the triggers/ inbox (PRD §3.6 step 5). Runs
+	// AFTER cron jobs so jobs always get priority on a busy
+	// tick. Errors logged inline; one bad trigger doesn't stop
+	// the rest, and the directory-listing error is the only
+	// thing that bubbles up (rare — ENOENT degrades silently).
+	triggersDir := filepath.Join(tp.cronDir, "triggers")
+	if dispatched, terr := processTriggers(ctx, triggersDir, tp.runsDir, now, subFn, notifier); terr != nil {
+		fmt.Fprintf(os.Stderr, "routines: triggers: %v\n", terr)
+	} else {
+		res.TriggersDispatched = dispatched
+	}
 
 	if err := ctx.Err(); err != nil {
 		return res, err

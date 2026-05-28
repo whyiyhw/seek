@@ -78,6 +78,17 @@ type StatusSnapshot struct {
 	// happening in the background", and zero count means nothing
 	// is happening.
 	SubagentsActive int
+
+	// CronsRegistered is the count of registered cron jobs at
+	// render time (v5 柱 H; PRD docs/prd/feature-routines.md
+	// §4.3). Zero suppresses the badge — registering a job is
+	// a one-time action; the indicator's job is to remind the
+	// user "I have N background routines configured" when the
+	// list is non-trivial. Mirrors the SubagentsActive pattern
+	// but counts REGISTERED (durable state) rather than ACTIVE
+	// (transient state) — cron jobs aren't "running right now"
+	// from the TUI's vantage point; they fire async via tick.
+	CronsRegistered int
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -211,6 +222,16 @@ func rightSegments(s StatusSnapshot) []string {
 		if s.SubagentsActive != 1 {
 			badge += "s"
 		}
+		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render(badge))
+	}
+	// Cron badge: shown while at least one cron job is
+	// registered. Counts REGISTERED jobs not active runs — the
+	// signal is "I have N routines configured" so the user
+	// remembers what's running unattended. ⏰ glyph reads as
+	// "scheduled" without ambiguity. Same muted ok-colour as
+	// the agent badge.
+	if s.CronsRegistered > 0 {
+		badge := fmt.Sprintf("⏰ %d cron", s.CronsRegistered)
 		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render(badge))
 	}
 	return out

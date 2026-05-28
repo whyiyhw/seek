@@ -70,6 +70,51 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 	}
 }
 
+// TestStatusBar_CronBadge pins the v5 柱 H status-bar
+// indicator: "⏰ N cron" when N > 0; suppressed at zero.
+// Unlike the agent badge, the unit ("cron") doesn't take a
+// plural -s — "5 cron" reads more naturally than "5 crons"
+// when "cron" refers to scheduled jobs rather than the
+// scheduler itself. Test verifies both forms.
+func TestStatusBar_CronBadge(t *testing.T) {
+	// Zero → no badge.
+	zero := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model: "deepseek-chat",
+		Width: 120,
+	}))
+	if strings.Contains(zero, "⏰") {
+		t.Errorf("cron badge leaked at count=0: %q", zero)
+	}
+	if strings.Contains(zero, " cron") {
+		t.Errorf("cron label leaked at count=0: %q", zero)
+	}
+
+	// One.
+	one := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:           "deepseek-chat",
+		Width:           120,
+		CronsRegistered: 1,
+	}))
+	if !strings.Contains(one, "⏰ 1 cron") {
+		t.Errorf("expected '⏰ 1 cron' badge, got: %q", one)
+	}
+
+	// Many — same unit, no -s. The agent badge takes -s for
+	// the noun "agent"; cron is treated as already-plural
+	// (like "sheep").
+	many := stripANSI(RenderStatusBar(StatusSnapshot{
+		Model:           "deepseek-chat",
+		Width:           120,
+		CronsRegistered: 7,
+	}))
+	if !strings.Contains(many, "⏰ 7 cron") {
+		t.Errorf("expected '⏰ 7 cron' badge, got: %q", many)
+	}
+	if strings.Contains(many, "crons") {
+		t.Errorf("cron should not take plural -s: %q", many)
+	}
+}
+
 // TestStatusBar_UpgradeAvailable verifies the "↑ <tag>" segment lands
 // in the bar when a newer release was detected at startup. Empty
 // UpgradeAvailable must produce no upgrade segment — otherwise we'd
