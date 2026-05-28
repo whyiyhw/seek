@@ -47,6 +47,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/routinescli"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/internal/worktree"
@@ -628,6 +629,7 @@ func run() error {
 		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
 		noSuggest     = flag.Bool("no-suggest", false, "disable v4 柱 D suggested-reply (predictor + UI placeholder + calibration injection); equivalent to suggest_reply=false in ~/.seek/config.json")
+		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
 		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
@@ -1265,6 +1267,39 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "subagent: orphan recover:", oerr)
 			}
 		}
+	}
+
+	// v5 柱 H auto-tick: fire any due cron jobs as a side effect
+	// of starting seek interactively. Detached goroutine so the
+	// agent loop doesn't wait for cron subprocesses. Errors
+	// stderr-only; cron tick is best-effort and never blocks the
+	// foreground path.
+	//
+	// Why side-effect-on-startup at all: most users won't bother
+	// to install a launchd / systemd / cron job to call
+	// `seek cron tick` every minute. Hooking it to every
+	// interactive launch makes routines work out of the box —
+	// "I open seek, my morning report runs". OS scheduler is
+	// still the right answer for "fire while seek isn't open";
+	// auto-tick is the right answer for "fire when seek IS open".
+	//
+	// --no-cron-tick opts out for CI / scripted invocations
+	// where the side effect would surprise. The early-dispatch
+	// CLI subcommands (skill / memory / checkpoint / hooks /
+	// worktree / cron itself) return before reaching this point,
+	// so `seek cron tick` doesn't trigger an inner auto-tick
+	// (no infinite recursion risk).
+	if !*noCronTick {
+		go func() {
+			cronStore, err := routines.OpenStore()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "cron auto-tick: open store:", err)
+				return
+			}
+			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{}); err != nil {
+				fmt.Fprintln(os.Stderr, "cron auto-tick:", err)
+			}
+		}()
 	}
 
 	ag, err := agent.New(agent.Config{
