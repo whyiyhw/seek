@@ -48,9 +48,12 @@ import (
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools"
+	"github.com/whyiyhw/seek/internal/worktree"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
 	"github.com/whyiyhw/seek/internal/tools/bash"
+	"github.com/whyiyhw/seek/internal/tools/enterworktree"
+	"github.com/whyiyhw/seek/internal/tools/exitworktree"
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	gittool "github.com/whyiyhw/seek/internal/tools/git"
@@ -922,6 +925,29 @@ func run() error {
 		})
 	}
 
+	// v5 柱 G worktree Manager (feature-subagent.md §3.8).
+	// Constructed unconditionally — Manager itself doesn't probe
+	// for git availability (mirrors checkpoint.New's lazy
+	// failure model). If the user's cwd isn't a git working
+	// tree, enter_worktree's first git invocation surfaces a
+	// clean "fatal: not a git repository" via the wire-format
+	// failure path. Always-construct keeps the tool list byte-
+	// stable across project types (non-git users still see the
+	// tool in the schema list, which the prefix cache wants).
+	//
+	// PruneDiscarded fires at startup as a best-effort GC of
+	// 48h-old rescue stashes (PRD §3.8). Failure here doesn't
+	// block startup — the worst case is leftover refs the next
+	// `seek worktree gc` reaps.
+	wtMgr, wtErr := worktree.NewManager(abs)
+	if wtErr != nil {
+		fmt.Fprintln(os.Stderr, "worktree:", wtErr)
+	} else {
+		if _, perr := wtMgr.PruneDiscarded(ctx, 48*time.Hour); perr != nil {
+			fmt.Fprintln(os.Stderr, "worktree: prune discarded:", perr)
+		}
+	}
+
 	reg := tools.New().
 		Add(read.New(policy)).
 		Add(grep.New()).
@@ -934,6 +960,17 @@ func run() error {
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).
 		Add(askusertool.New(askPolicy))
+
+	// v5 柱 G worktree tools — only register when Manager
+	// constructed successfully. nil Manager would force the
+	// tools to panic at New(); skipping registration gives
+	// non-git environments a cleaner schema (no enter_worktree
+	// in the LLM's tool list at all, no model confusion about
+	// "why does this fail every time I try it").
+	if wtMgr != nil {
+		reg.Add(enterworktree.New(wtMgr)).
+			Add(exitworktree.New(wtMgr))
+	}
 
 	// webfetch: opt-out via SEEK_NO_WEBFETCH for air-gapped /
 	// privacy-sensitive sessions. SEEK_WEBFETCH_ALLOW_HTTP opens
