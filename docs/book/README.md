@@ -272,6 +272,20 @@
 - 21.8 已知限制: Policy passthrough 软安全 + 三层兜底
 - 21.9 一个观察: 从"单上下文流"到"可分裂上下文"的换挡
 
+**[第 22 章：M11.2 + M11.3 — v5 柱 H 时序触发 Routines](chapter-22.md)** *(v0.6.1)*
+- 22.1 三个具体痛点（定时维护 / 延迟检查 / 被动通知）
+- 22.2 为什么三件绑在一起做（共享触发→运行→通知三段式）
+- 22.3 关键设计决策（零常驻 daemon / 文件桥 / OS 原生通知 / @every 优先）
+- 22.4 数据模型与目录布局（jobs.jsonl / runs/ / .malformed/ / triggers/）
+- 22.5 Tick 引擎：六步走（Lock→Load→Scan→Run→Update→GC）
+- 22.6 schedule_wakeup：模型自己排自己
+- 22.7 启动 auto-tick：best-effort 保障
+- 22.8 G3 与环境变量叠加（~/.seek/cron/env）
+- 22.9 G4+G5：Run 记录 GC（双轴 age-and-count 回收）
+- 22.10 CLI 命令族（create / list / delete / run / tick）
+- 22.11 与柱 G 的对比（触发方式 / 父子关系 / 进程模型）
+- 22.12 一个观察：从同步到异步的换挡
+
 ---
 
 ### 附录

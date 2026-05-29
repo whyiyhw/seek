@@ -2,7 +2,7 @@
 
 **所属版本**：v5（柱 G · 空间维度编排）
 **前置阅读**：[PRD v5 umbrella](v5.md) §2（v5 特有约束六条）、[PRD v0](v0.md) §4.7（Permission）、§4.8（Tool）、[feature-permission-refactor.md](feature-permission-refactor.md)（R1+R1.1 双轴模型）
-**状态**：📐 设计稿
+**状态**：🚀 已交付（M11.0 + M11.1 全部落地，v0.6.0）
 **目标里程碑**：M11.0（子代理核心）+ M11.1（worktree 集成）
 **目标发版**：v0.6.0
 
@@ -488,6 +488,24 @@ audit log 在 worktree 场景下记录**两个**path 字段：`path_worktree`（
 | `-resume` 父 session 时父 baseUsage 已含子的累计 → 再 `AdoptChild` 子 Tracker → 重复计数 | `AdoptChild` 不调用于已完成的子；resume 只读子的 `subagents.jsonl` 最终事件做 `/agents` 渲染。**Tracker 加 "adoption flag"** 字段，标记已被父 baseUsage 吸纳的子，再次 AdoptChild 时短路 |
 | `-resume` 时遇到 `started` 无终态的子 → `/agents` 面板显示"3 个活跃"但实际进程都死了 | resume 启动钩子扫 `subagents.jsonl`，对所有 `started` 无终态的 sub_sid 立即追写一行 `event: "orphaned"`（§3.4 状态折叠规则自动处理）；同步 fire `SessionStartObserver` 让相关清理（如 orphan worktree 检测）一并触发 |
 | **Policy passthrough**（M11.0 已知限制）：子 agent 调 write/edit/bash 时工具用的是**父 Policy** 做 `Check`，子的 `Workflow=PlanAnalyze` 限制**不被工具 Check 强制**。原因：M11.0 production wiring 复用父 reg 的 Tool 实例，这些工具在父 reg 构造时已绑死父 Policy 引用 | **M11.0 ship-with 三层保护**：(a) `explore` 子模板直接不包含 write/edit/bash —— hard safety via tool whitelist；(b) `plan` 子模板 §3.6 已窄化为只读子集（C.2 决策）—— 与 explore 同；(c) `general-purpose` 子继承父 Policy 是设计意图，passthrough 等价。**未决项**：未来若需让 plan 用 `propose` / 真正 hard-enforce 子 Workflow，需做 **per-spawn Registry 重建**（重构 6 个 Policy-持有 tool 的构造路径 + 子构造闭包），追踪到 v0.6.x dot release |
+
+## 实现偏差 & 交付后修复
+
+### G1 — 生产 Runner 写入子转录 JSONL（commit `d2fa0a9`）
+
+**问题**：M11.0 production wiring 中 `Runner.run()` 没有把子 agent 的完整对话写入其独立 session JSONL，导致子 session 在 seek 异常退出后无法 `-resume`。
+
+**修复**：在 `Runner` 闭包中注入 `session.Saver`，每次 LLM 交互后写入子转录。同时修复了一个关联问题：`session.Save()` 在子路径下未正确创建父目录。
+
+**教训**：设计稿假设 production wiring 会自动包含 session 持久化——但 M11.0 的 MVP wiring 更关注可用性而非持久化，G1 才补上。
+
+### G2 — Tracker.AdoptChild resumed parent 双重计数守卫（commit `8e30b1d`）
+
+**问题**：resume 一个父 session 时，`Tracker.AdoptChild` 会因为 replay 所有子 adoption 事件而重复追加 child 引用，导致 `CumulativeCost()` 数字膨胀约 2×。
+
+**修复**：在 `Tracker` 上增加 `adopted` 标记位——resume 路径反序列化后设置标记；`AdoptChild` 在标记为 true 时跳过追加。同时完善 `Tracker.Reset()` 以正确清除该标记。
+
+**lesson**：事件溯源 resume 路径上，任何"追加"而非"设置"的操作都需要幂等守卫。设计稿的 resume 分析（§3.7）提到了 orphan 风险但漏掉了双重计数，G2 才补全。
 
 ## 9. 后续版本
 

@@ -1,6 +1,6 @@
 # 第 21 章：M11.0 + M11.1 — v5 柱 G 子代理 + Worktree 隔离
 
-> **对应版本**：v0.6.0（开发中）
+> **对应版本**：v0.6.0
 > **对应代码**：`internal/subagent/`、`internal/worktree/`、`internal/tools/{agent,enterworktree,exitworktree}/`、`internal/sysprompt/`、`internal/permission.Policy.Spawn`、`internal/cache.Tracker.AdoptChild`
 > **PRD**：[`docs/prd/v5.md`](../prd/v5.md) · [`docs/prd/feature-subagent.md`](../prd/feature-subagent.md)
 > **验收**：M11.0 + M11.1 Phase 1+2 已落地；Phase 3（`/worktrees` 面板 + `seek worktree gc` CLI）在路上
@@ -317,7 +317,7 @@ v5 柱 G 第一次把这条主流**显式可分裂**——`agent` 工具一旦�
 
 这不只是"加并发"或"加性能"。它是 agent 模型从"个人助理"演化到"小团队 lead"的换挡——主 agent 学会分派 / 收集 / 综合，而不是亲自下手做所有事。
 
-第 22 章会接住**时序维度**那一半（v5 柱 H：cron / wakeup / push），让 agent 摆脱"用户敲完回车才跑"的同步约束。
+[第 22 章](chapter-22.md)接住了**时序维度**那一半（v5 柱 H：cron / wakeup / push），让 agent 摆脱"用户敲完回车才跑"的同步约束。
 
 ---
 

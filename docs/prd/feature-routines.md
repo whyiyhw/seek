@@ -2,7 +2,7 @@
 
 **所属版本**：v5（柱 H · 时序维度编排）
 **前置阅读**：[PRD v5 umbrella](v5.md) §2.5（时序触发零常驻进程约束）、§3.2（共享配置目录）、[`docs/prd/feature-subagent.md`](feature-subagent.md)（柱 G 已交付参考）
-**状态**：📐 设计稿
+**状态**：🚀 已交付（M11.2 + M11.3 全部落地，v0.6.1）
 **目标里程碑**：M11.2（cron 骨架）+ M11.3（wakeup + push + 远程触发）
 **目标发版**：v0.6.1（v0.6.0 ship 完柱 G 后接续）
 
@@ -492,6 +492,28 @@ cron 子进程默认 `--yolo`（无人值守）。Per-job 覆盖：`seek cron cr
 | 同名 job 重复 create → 静默覆盖原配置（用户丢失原 prompt） | `Create` 默认 idempotent 覆盖；新增 `--force` flag。**不带 --force 时如果 jobs.jsonl 已有同名 job → 报错并 hint "use --force to overwrite or delete first"** |
 | 用户在 cron list 输出里看到几十个 schedule_wakeup 残留（job 跑完没自动删） | `MarkRun` 内的 `max_runs` 检查必跑：达到上限即 `Store.Delete(name)`。集成测试 #7 守门 |
 | Windows 路径下 flock 实现差异 | 用 `golang.org/x/sys` 包装；测试 race + path-with-spaces |
+
+## 实现偏差 & 交付后修复
+
+### G3 — 显式子进程环境变量与 `~/.seek/cron/env` 叠加（commit `2d787f0`）
+
+**问题**：M11.2 的 `cron run` 子进程默认继承了 seek 父进程的环境变量，但用户需要的 cron-specific 变量（如 `PATH` 在 launchd/launchctl 下被清空）无法独立配置。设计稿只写了"以子进程形式运行"，没有处理子进程环境差异。
+
+**修复**：新增 `~/.seek/cron/env` 文件（key=value 格式，支持 `#` 注释），在 `cron run` 和 `cron tick` 时叠加到子进程环境；同时保留父进程环境作为 base。新增 `internal/paths.CronEnvFile()` + `internal/routines.LoadEnv()` 实现，单元测试覆盖 328 行。
+
+**lesson**：OS scheduler 拉起的进程环境与交互式 shell 差异极大——launchd 的 PATH 是 `/usr/bin:/bin`，systemd 的 PATH 默认空。任何需要运行子进程的子系统都应该考虑显式环境配置。
+
+### G4+G5 — `runs/` + `.malformed/` 双轴 GC（commit `a7205cb`）
+
+**问题**：M11.2 交付的 tick engine 把每次 cron run 的 stdout/stderr/status 写入 `~/.seek/cron/runs/<run-id>.jsonl`，但**没有回收机制**——频繁调度的 job（比如 `@every 30s`）会在几小时内产生数千个 run 文件，耗尽磁盘 inode。同样，格式错误或写入中断产生的 `.malformed` 文件也没有清理。
+
+**修复**：新增 `internal/routines/gc.go`，在每次 tick 末尾（step 6）执行双轴 GC：
+- **`runs/`**：按 age-and-count 保留策略——每个 job 保 100 条最近 + 7 天（默认），超出的删除
+- **`.malformed/`**：纯按 age——超过 24h 的 `.malformed` 文件删除
+
+设计稿 §3.3（Store）和 §3.5（Tick）都没有提到 GC。这是一个"设计时忽视、使用中发现"的类。
+
+**lesson**：任何持久化 append 型存储（jsonl 日志 / 运行记录 / 审计事件）都必须在一开始就设计回收策略——GC 在功能上线时不触发，要到 1000x 后才触发，但那时 fix 的成本远高于设计时加入。建议未来的持久化设计模板包含"回收策略"字段。
 
 ## 9. 后续版本
 
