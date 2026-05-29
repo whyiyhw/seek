@@ -334,18 +334,34 @@
   .section-head p { font-size: 1.05rem; line-height: 1.55; }
 
   /* ============ ASCII LOGO ============ */
-  .ascii-logo {
-    font-size: clamp(1.1rem, 3.2vw, 2.6rem);
-    font-weight: 700;
-    line-height: 1.15;
-    color: var(--amber);
-    text-shadow: 0 0 20px rgba(245,166,35,.3), 0 0 60px rgba(245,166,35,.15);
-    white-space: pre;
-    letter-spacing: 0;
-    font-kerning: none;
-    font-variant-ligatures: none;
-    font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Courier New", monospace;
-    margin-bottom: 24px;
+  /* Pixel-grid "SEEK" wordmark — drawn as real DOM cells on a 23×7 CSS
+     grid, NOT a <pre> of `█` glyphs. The old block-text banner sheared
+     into "98%" on mobile webviews with no monospace font: `█` (U+2588)
+     fell back to a CJK full-block glyph and line-height gaps split the
+     strokes into misaligned dot-soup (S→9, E E→8 8, K→%). Real grid cells
+     are uniform and perfectly aligned on every device, font-independent.
+     Source-of-truth pattern is the comment beside the markup. */
+  .pixel-logo {
+    display: grid;
+    grid-template-columns: repeat(23, 1fr);
+    grid-template-rows: repeat(7, 1fr);
+    /* Pixel-art (not LED): flat hard-edged squares + a uniform thin gutter
+       keep the retro pixel grid visible. The amber bloom below is an OUTER
+       glow on the whole word only — the pixels themselves stay flat and
+       square. What tips block-art into "LED display" is rounding, per-pixel
+       gradients/halos, or fused segment bars — NOT an outer bloom. */
+    gap: clamp(1.5px, .28vw, 3px);
+    width: min(560px, 88vw);
+    aspect-ratio: 23 / 7;
+    margin: 0 auto 24px;
+    filter: drop-shadow(0 0 9px rgba(245,166,35,.42))
+            drop-shadow(0 0 26px rgba(245,166,35,.20));
+  }
+  .pixel-logo > i {
+    background: var(--amber);
+  }
+  [data-theme="light"] .pixel-logo {
+    filter: drop-shadow(0 0 6px rgba(186,61,10,.16));
   }
   @keyframes logoIn {
     0%   { opacity: 0; transform: scale(.9); filter: blur(5px); }
@@ -1198,7 +1214,8 @@
     body { background: #fff; color: #111; }
     body::after { display: none; }
     .lang-toggle, .theme-toggle, .back-top, .skip-link { display: none !important; }
-    .ascii-logo { color: #333; text-shadow: none; }
+    .pixel-logo { filter: none; }
+    .pixel-logo > i { background: #333; }
     .btn-primary { background: #333; color: #fff; box-shadow: none; }
     .price-wrap, .cost-bars, .diff-card, .feat-line, .install-option, .term-window {
       background: #f5f5f5;
@@ -1255,7 +1272,7 @@
     font-size: .9rem;
   }
   .term-hero-window .term-body::-webkit-scrollbar { display: none; }
-  .terminal-hero .ascii-logo {
+  .terminal-hero .pixel-logo {
     margin-bottom: 20px;
   }
 
@@ -1314,11 +1331,8 @@
       padding: 16px 16px;
       font-size: .78rem;
     }
-    .terminal-hero .ascii-logo {
-      font-size: clamp(.75rem, 4vw, 1.1rem);
-      font-weight: 500;
-      line-height: 1.15;
-      text-shadow: 0 0 10px rgba(245,166,35,.25);
+    .terminal-hero .pixel-logo {
+      width: min(560px, 90vw);
       margin-bottom: 12px;
     }
     .terminal-hero-tagline {
@@ -1387,15 +1401,27 @@
       <span data-lang="en">seek — DeepSeek native AI coding agent</span>
       <span data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</span>
     </h1>
-    <!-- trailing spaces intentional, do not strip — matches internal/tui/banner.go wordmark width -->
-    <pre class="ascii-logo reveal" aria-label="seek"><!--
--->█████ █████ █████ █   █
-█     █     █     █  █
-█     █     █     █ █
-████  ████  ████  ██
-    █ █     █     █ █
-    █ █     █     █  █
-█████ █████ █████ █   █</pre>
+    <!-- Pixel-grid "SEEK" wordmark. The lit-pixel <i> cells below are
+         generated from this 23×7 pattern (1 cell per `█`); if you change a
+         letter, regenerate the cells to match. Rendered as real CSS-grid
+         cells, NOT `█` glyphs, so it never depends on a mobile monospace
+         font — see .pixel-logo in <style>.
+           █████ █████ █████ █   █
+           █     █     █     █  █
+           █     █     █     █ █
+           ████  ████  ████  ██
+               █ █     █     █ █
+               █ █     █     █  █
+           █████ █████ █████ █   █  -->
+    <div class="pixel-logo reveal" role="img" aria-label="seek">
+      <i style="grid-area:1/1"></i><i style="grid-area:1/2"></i><i style="grid-area:1/3"></i><i style="grid-area:1/4"></i><i style="grid-area:1/5"></i><i style="grid-area:1/7"></i><i style="grid-area:1/8"></i><i style="grid-area:1/9"></i><i style="grid-area:1/10"></i><i style="grid-area:1/11"></i><i style="grid-area:1/13"></i><i style="grid-area:1/14"></i><i style="grid-area:1/15"></i><i style="grid-area:1/16"></i><i style="grid-area:1/17"></i><i style="grid-area:1/19"></i><i style="grid-area:1/23"></i>
+      <i style="grid-area:2/1"></i><i style="grid-area:2/7"></i><i style="grid-area:2/13"></i><i style="grid-area:2/19"></i><i style="grid-area:2/22"></i>
+      <i style="grid-area:3/1"></i><i style="grid-area:3/7"></i><i style="grid-area:3/13"></i><i style="grid-area:3/19"></i><i style="grid-area:3/21"></i>
+      <i style="grid-area:4/1"></i><i style="grid-area:4/2"></i><i style="grid-area:4/3"></i><i style="grid-area:4/4"></i><i style="grid-area:4/7"></i><i style="grid-area:4/8"></i><i style="grid-area:4/9"></i><i style="grid-area:4/10"></i><i style="grid-area:4/13"></i><i style="grid-area:4/14"></i><i style="grid-area:4/15"></i><i style="grid-area:4/16"></i><i style="grid-area:4/19"></i><i style="grid-area:4/20"></i>
+      <i style="grid-area:5/5"></i><i style="grid-area:5/7"></i><i style="grid-area:5/13"></i><i style="grid-area:5/19"></i><i style="grid-area:5/21"></i>
+      <i style="grid-area:6/5"></i><i style="grid-area:6/7"></i><i style="grid-area:6/13"></i><i style="grid-area:6/19"></i><i style="grid-area:6/22"></i>
+      <i style="grid-area:7/1"></i><i style="grid-area:7/2"></i><i style="grid-area:7/3"></i><i style="grid-area:7/4"></i><i style="grid-area:7/5"></i><i style="grid-area:7/7"></i><i style="grid-area:7/8"></i><i style="grid-area:7/9"></i><i style="grid-area:7/10"></i><i style="grid-area:7/11"></i><i style="grid-area:7/13"></i><i style="grid-area:7/14"></i><i style="grid-area:7/15"></i><i style="grid-area:7/16"></i><i style="grid-area:7/17"></i><i style="grid-area:7/19"></i><i style="grid-area:7/23"></i>
+    </div>
     <div class="term-window term-hero-window" id="term-demo">
       <div class="term-titlebar">
         <div class="term-dots">

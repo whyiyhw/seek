@@ -679,6 +679,17 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+## Site / landing page
+
+### Pixel "SEEK" banner read as "98%" on mobile — font-glyph block-art is not portable
+- **Saw**: hero wordmark built from a `<pre>` of `█` (U+2588) block characters rendered crisply as "SEEK" on desktop but sheared into "98%" on a mobile in-app (CJK) webview — S→9, E E→8 8, K→%
+- **Why**: the banner's monospace grid only holds when `█` fills exactly one cell. On mobile none of the stack's fonts (JetBrains Mono / SF Mono / Fira Code / Courier New) exist, so `█` falls back to a CJK/proportional glyph at a different advance width and `line-height: 1.15` adds vertical gutters — the strokes split into misaligned dots the eye re-reads as digits. Two earlier commits chased the wrong layer (redrew the glyph shapes, added then deleted a text wordmark); neither helped because the medium, not the letterforms, was the problem
+- **Fix**: render the wordmark as real DOM cells on a 23×7 CSS grid (`<i style="grid-area:r/c">` per lit pixel), not font glyphs. Uniform cells are perfectly aligned and font-independent on every device. Source-of-truth pattern kept as an HTML comment beside the markup; lit-cell divs generated from it. `examples/index.html` `.pixel-logo`
+- **Lesson**: never render a brand/wordmark as ASCII block-art that depends on a font glyph (`█`, box-drawing, braille) — mobile/CJK webviews will fall back to a glyph of the wrong width and shear it. Use real DOM/SVG rects. Also: when a visual bug survives a "fix", check you're fixing the right layer (medium vs content) before redrawing. For the look — flat hard-edged squares + uniform gutter = pixel-art (an outer amber bloom is fine and wanted); per-pixel rounding/gradients/halos or fused segment bars are what tip it into "LED display", a different aesthetic
+- **Refs**: `examples/index.html` `.pixel-logo` + pixel-grid markup; commits c346c20, 85efd29 (the two mis-aimed attempts)
+
+---
+
 ## Reading order for newcomers
 
 If you're new to the project, skim entries in this order:
