@@ -1256,32 +1256,7 @@
   }
   .term-hero-window .term-body::-webkit-scrollbar { display: none; }
   .terminal-hero .ascii-logo {
-    margin-bottom: 8px;
-  }
-
-  /* Plain wordmark sitting under the pixel art. Belt-and-suspenders
-     for brand recognition — the pixel "SEEK" can read as "98%" at
-     small mobile widths (S blurs into 9, E E into 8 8, K's diagonal
-     into %). The wordmark guarantees the brand always lands even
-     when the pixels are ambiguous. Mobile bumps the size so it's
-     the primary brand element on narrow screens. */
-  .ascii-logo-wordmark {
-    text-align: center;
-    font-family: var(--font-display, "JetBrains Mono", monospace);
-    font-weight: 700;
-    font-size: clamp(.9rem, 2vw, 1.15rem);
-    letter-spacing: .35em;
-    color: var(--amber);
-    text-transform: lowercase;
-    margin: 0 0 20px;
-    opacity: .85;
-  }
-  @media (max-width: 640px) {
-    .ascii-logo-wordmark {
-      font-size: 1.2rem;
-      letter-spacing: .5em;
-      margin-bottom: 16px;
-    }
+    margin-bottom: 20px;
   }
 
   /* Status bar at the bottom of the terminal window */
@@ -1421,7 +1396,6 @@
     █ █     █     █ █
     █ █     █     █  █
 █████ █████ █████ █   █</pre>
-    <p class="ascii-logo-wordmark" aria-hidden="true">seek</p>
     <div class="term-window term-hero-window" id="term-demo">
       <div class="term-titlebar">
         <div class="term-dots">
