@@ -54,6 +54,14 @@ type Option struct {
 	// the label. Use for "what does this option mean?" — leave
 	// empty when the label is self-explanatory.
 	Description string `json:"description,omitempty"`
+	// Preview (v2) is optional plain-text content shown in a
+	// side-panel when the user hovers this option in a wide
+	// terminal (>=100 cols). Use for ASCII mockups, code snippets,
+	// or visual comparisons. Plain monospace only — no markdown.
+	// TUI truncates at ~12 lines × 80 cols with an explicit
+	// "[truncated]" marker. Narrow terminals collapse the preview
+	// to an indented block under the option row.
+	Preview string `json:"preview,omitempty"`
 }
 
 // Question is what the askuser tool builds and hands to Ask. The
@@ -65,6 +73,13 @@ type Question struct {
 	// terse — long context belongs in the conversation, not the
 	// picker.
 	Question string
+	// Header (v2) is an optional short chip-style label shown
+	// alongside the question — useful in multi-question batches
+	// where each question needs a 1-2 word topic marker (e.g.
+	// "Framework", "Storage", "Auth"). Single-question pickers
+	// typically leave it empty (the Question line itself is the
+	// label).
+	Header string
 	// Options is the model-provided list. Constrained to 2–4 rows
 	// (tool layer enforces). The "Other" row is added by the TUI.
 	Options []Option
@@ -73,6 +88,21 @@ type Question struct {
 	// (false) is the default and matches every other picker in
 	// seek (Enter on a highlighted row accepts immediately).
 	MultiSelect bool
+}
+
+// Batch (v2) is a multi-question payload — the tool can ask 1–4
+// independent questions in one call. The TUI renders them as a
+// stack: answered questions dim out, the current one shows the
+// active picker, pending questions show as placeholders. Esc on
+// the current picker preserves prior answers and marks the
+// remainder cancelled.
+//
+// Single-question pickers go through this same path internally
+// (wrapped to a 1-element Batch by the tool layer), so the TUI
+// only deals with one shape. v1 result-shape backward-compatibility
+// lives in the tool layer, not here.
+type Batch struct {
+	Questions []Question
 }
 
 // Answer is what the TUI sends back through the reply channel. The
@@ -96,14 +126,32 @@ type Request struct {
 	Reply    chan<- Answer
 }
 
+// BatchRequest (v2) is what Policy.AskBatch emits. Reply receives
+// a single []Answer aligned by index with the batch's Questions.
+// Length always equals len(batch.Questions); cancelled / unasked
+// questions get zero-value Answer{Cancelled: true} entries.
+type BatchRequest struct {
+	Batch Batch
+	Reply chan<- []Answer
+}
+
 // Policy holds the callback the tool dispatches to. Construct via
 // New; concurrency mirrors permission.Policy — mode/askFn can flip
 // at runtime from the TUI goroutine while the tool goroutine is
 // inside Ask(), so a mutex serialises the transitions.
+//
+// Two callback slots live here (v1 + v2). v2 is the canonical
+// path now (the ask_user tool always calls AskBatch); v1 askFn
+// stays for direct internal callers (e.g. propose tool) that
+// only ever ask one question at a time. When askBatchFn is nil
+// but askFn is set, AskBatch falls back to looping single Ask
+// calls — preserves backward behaviour for any caller that
+// wires only the v1 callback.
 type Policy struct {
-	mu    sync.RWMutex
-	mode  Mode
-	askFn func(Question) Answer
+	mu         sync.RWMutex
+	mode       Mode
+	askFn      func(Question) Answer
+	askBatchFn func(Batch) []Answer
 }
 
 // New returns a Policy starting in ModeAsk. SetAskFn must be called
@@ -124,6 +172,20 @@ func (p *Policy) SetAskFn(fn func(Question) Answer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.askFn = fn
+}
+
+// SetAskBatchFn (v2) registers the batch callback. Like SetAskFn
+// but takes a Batch and returns []Answer aligned by question
+// index. Called from the same TUI wire-up code; both callbacks
+// can coexist (and typically share state, e.g. the same TUI
+// request channel demuxed by type).
+func (p *Policy) SetAskBatchFn(fn func(Batch) []Answer) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.askBatchFn = fn
 }
 
 // Mode returns the current mode.
@@ -178,6 +240,90 @@ func (p *Policy) Ask(q Question) (Answer, error) {
 		return Answer{}, ErrNoCallback
 	}
 	return fn(q), nil
+}
+
+// AskBatch (v2) is the multi-question entry point. Returns
+// []Answer with length == len(b.Questions); cancelled / unasked
+// questions have Answer{Cancelled: true}.
+//
+// Falls back to the v1 single-Ask loop when no batch callback is
+// registered — this keeps any caller that only wired SetAskFn
+// working (the answers come back sequentially via the v1
+// picker UX, just without the stack render).
+//
+// Lock semantics mirror Ask: snapshot under RLock, release
+// before invoking the callback (which blocks on user input).
+func (p *Policy) AskBatch(b Batch) ([]Answer, error) {
+	if p == nil {
+		return nil, ErrDisabled
+	}
+	if len(b.Questions) == 0 {
+		return nil, fmt.Errorf("askuser: AskBatch with empty Questions")
+	}
+	p.mu.RLock()
+	mode := p.mode
+	batchFn := p.askBatchFn
+	singleFn := p.askFn
+	p.mu.RUnlock()
+
+	if mode == ModeDisabled {
+		return nil, ErrDisabled
+	}
+	if batchFn != nil {
+		ans := batchFn(b)
+		// Defensive: if the callback returns the wrong length,
+		// pad / truncate to len(Questions) with cancelled
+		// placeholders rather than crash. Programming bug in TUI,
+		// but the tool result should still be usable by the LLM.
+		switch {
+		case len(ans) == len(b.Questions):
+			return ans, nil
+		case len(ans) < len(b.Questions):
+			pad := make([]Answer, len(b.Questions))
+			copy(pad, ans)
+			for i := len(ans); i < len(pad); i++ {
+				pad[i] = Answer{Cancelled: true}
+			}
+			return pad, nil
+		default:
+			return ans[:len(b.Questions)], nil
+		}
+	}
+	if singleFn == nil {
+		return nil, ErrNoCallback
+	}
+	// v1 fallback: loop. No stack-render UX, but functionally
+	// correct. Mid-batch cancel semantics: if Q_i is cancelled,
+	// Q_(i+1..N) are NOT asked and get cancelled placeholders.
+	answers := make([]Answer, len(b.Questions))
+	for i, q := range b.Questions {
+		a := singleFn(q)
+		answers[i] = a
+		if a.Cancelled {
+			for j := i + 1; j < len(answers); j++ {
+				answers[j] = Answer{Cancelled: true}
+			}
+			break
+		}
+	}
+	return answers, nil
+}
+
+// ValidateBatch (v2) checks structural rules for a Batch — 1–4
+// questions, each individually valid. Errors point at the
+// specific failing question index + the per-question error
+// (e.g. "question 2: option 0: id is required").
+func ValidateBatch(b Batch) error {
+	n := len(b.Questions)
+	if n < 1 || n > 4 {
+		return fmt.Errorf("batch must have 1-4 questions, got %d", n)
+	}
+	for i, q := range b.Questions {
+		if err := Validate(q); err != nil {
+			return fmt.Errorf("question %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 // Validate checks the structural rules for a Question. Returns nil
