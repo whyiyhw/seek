@@ -486,7 +486,7 @@ cron 子进程默认 `--yolo`（无人值守）。Per-job 覆盖：`seek cron cr
 | OS notification 在 headless server 上根本没意义 → 用户启动 cron 但收不到通知 | `--notify never` 默认在 `$DISPLAY` 未设置 + 非 macOS 的环境下自动适用；文档明确"无 GUI = 不通知" |
 | `jobs.jsonl` rewrite 期间进程被杀（断电）→ 文件损坏 | rewrite 用 write-tmp-rename atomic dance（与 session.Save 同模式）；rename 失败保留 .tmp |
 | 用户 `seek cron tick` 跑在错误的 cwd → cron job 的 `project_root` 指向不存在的目录 | `Create` 期 stat `--cwd` 必须存在；run 期 stat 失败 → `failed reason=cwd_missing`，next tick 不重试，直到用户 `delete` 或 `edit`（edit 在 v0.6.x dot） |
-| `triggers/<id>.json` 文件被部分写入时被 tick 读 → 解析失败 | tick 读 trigger 前先 stat mtime；mtime < now - 1s 才处理（producer 完成写入 1s 后才认为"已 ready"）。malformed JSON → 文件 rename 到 `triggers/.malformed/<id>.json` + WARN 写 stderr，不阻塞 |
+| `triggers/<id>.json` 文件被部分写入时被 tick 读 → 解析失败 | tick 读 trigger 前先 stat mtime；mtime < now - 1s 才处理（producer 完成写入 1s 后才认为"已 ready"）。malformed JSON → 文件 rename 到 `triggers/.malformed/<id>.json` + WARN 写 stderr，不阻塞。**✅ G5 已交付（commit `a7205cb`）**——`.malformed/` 超过 14d 自动 GC，避免无限增长；详见 §3.10 + §"实现偏差 & 交付后修复" G4+G5 |
 | cron 子进程意外死循环 → 耗光 token quota | per-job `--timeout` 默认 30min；子进程 SIGTERM → grace → SIGKILL；cost 累计 v0.6.x dot 加 `--max-cost` 选项 |
 | `@every 1ns` 这种极小 duration → tick 把 CPU 拉满 | `ParseSchedule` 拒绝 duration < 1 分钟；hint "schedule must be at least 1m" |
 | 同名 job 重复 create → 静默覆盖原配置（用户丢失原 prompt） | `Create` 默认 idempotent 覆盖；新增 `--force` flag。**不带 --force 时如果 jobs.jsonl 已有同名 job → 报错并 hint "use --force to overwrite or delete first"** |

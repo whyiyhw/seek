@@ -2,7 +2,7 @@
 
 **所属版本**：v3（柱 C · 可定制性）
 **前置阅读**：[PRD v3 umbrella](v3.md) §3（跨柱约束）、[`internal/tui/commands.go`](../../internal/tui/commands.go)（cmdMeta 注册表）、[`internal/tui/update_key.go`](../../internal/tui/update_key.go)（按键分发）
-**状态**：📐 设计稿
+**状态**：🚀 已交付（M9.4 + M9.5 / v0.4.2+）。`internal/keymap/`（自定义键位 + `~/.seek/keybindings.toml`）+ `internal/keyscli/`（`seek keys list/check/actions` CLI）+ Tab 补全（commands.go + 最近三次 polish fix `88e058b` `c26cc16` `3d0f254`）全部 ship。
 **预估工作量**：~3 天（M9.4 + M9.5）
 
 ---
