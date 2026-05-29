@@ -135,7 +135,7 @@ func TestCmdWorktrees_RendersTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wtPath := pd + "/worktrees/20260601-100000-abcdef"
+	wtPath := filepath.Join(pd, "worktrees", "20260601-100000-abcdef")
 	porcelain := "worktree " + root + "\nHEAD aaa\nbranch refs/heads/main\n\n" +
 		"worktree " + wtPath + "\nHEAD bbb\nbranch refs/heads/seek/wt/20260601-100000-abcdef\n\n"
 

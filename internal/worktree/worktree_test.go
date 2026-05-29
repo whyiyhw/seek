@@ -525,6 +525,36 @@ func TestListFromDisk_ParsesBranchAndBase(t *testing.T) {
 	}
 }
 
+// TestListFromDisk_NormalizesForwardSlashes: Git for Windows often
+// emits forward slashes in `git worktree list --porcelain` while
+// seekRoot uses filepath.Separator. Without normalization the
+// prefix filter misses every seek-managed worktree on Windows.
+func TestListFromDisk_NormalizesForwardSlashes(t *testing.T) {
+	_ = withTestHome(t)
+	root := t.TempDir()
+	pd, err := paths.ProjectDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seekWT := filepath.Join(pd, "worktrees", "20260601-100000-abcdef")
+	// Simulate Git for Windows porcelain: forward slashes even on Windows.
+	porcelainPath := strings.ReplaceAll(seekWT, string(filepath.Separator), "/")
+	porcelain := fmt.Sprintf("worktree %s\nHEAD abc123\nbranch refs/heads/seek/wt/x\n\n", porcelainPath)
+	fg := (&fakeGit{}).push(porcelain, "", nil)
+	mgr := newTestManagerWithRoot(t, fg, root)
+
+	got, err := mgr.ListFromDisk(context.Background())
+	if err != nil {
+		t.Fatalf("ListFromDisk: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d worktrees, want 1", len(got))
+	}
+	if got[0].ID != "20260601-100000-abcdef" {
+		t.Errorf("ID = %q, want 20260601-100000-abcdef", got[0].ID)
+	}
+}
+
 // TestListFromDisk_GitFailureSurfaced: a non-zero git exit
 // propagates stderr verbatim.
 func TestListFromDisk_GitFailureSurfaced(t *testing.T) {

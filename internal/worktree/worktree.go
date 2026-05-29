@@ -485,7 +485,11 @@ func (m *Manager) ListFromDisk(ctx context.Context) ([]Worktree, error) {
 		}
 		switch {
 		case strings.HasPrefix(line, "worktree "):
-			cur.Path = strings.TrimPrefix(line, "worktree ")
+			// Git for Windows porcelain may emit forward slashes while
+			// seekRoot uses filepath.Separator — normalize before prefix
+			// match so /worktrees panel isn't empty on Windows.
+			p := strings.TrimPrefix(line, "worktree ")
+			cur.Path = filepath.Clean(strings.ReplaceAll(p, "/", string(filepath.Separator)))
 		case strings.HasPrefix(line, "HEAD "):
 			cur.Base = strings.TrimPrefix(line, "HEAD ")
 		case strings.HasPrefix(line, "branch "):
