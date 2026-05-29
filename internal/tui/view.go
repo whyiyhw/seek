@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/routines"
@@ -218,6 +219,11 @@ func (m Model) View() string {
 	switch {
 	case m.pendingApproval != nil:
 		bottomBuf.WriteString(m.renderApprovalPrompt())
+	case m.pendingBatch != nil:
+		// v2 multi-question stack — takes precedence over v1
+		// pendingQuestion since handleBatchKey installs a faux
+		// pendingQuestion for the active question internally.
+		bottomBuf.WriteString(m.renderBatchStack())
 	case m.pendingQuestion != nil:
 		bottomBuf.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
@@ -663,6 +669,136 @@ func formatQuestionRow(_ int, label, description string, cursor, multi, selected
 		return styleAssistantLabel.Render(row)
 	}
 	return styleMenuItem.Render(row)
+}
+
+// renderBatchStack (v2) draws the multi-question stack: answered
+// questions show dim with their chosen label / free-text, the
+// currently-active question shows the full picker (delegating to
+// renderUserQuestion via the borrowed pendingQuestion pointer),
+// and pending questions show as dim placeholders.
+//
+// Layout in narrow / wide terminals:
+//   - Narrow (< 100 cols): everything stacks vertically; preview
+//     for the active option renders inline as an indented block
+//     under the picker.
+//   - Wide  (>= 100 cols): planned for phase 2b — same vertical
+//     stack, but preview moves to a right-hand side panel. The
+//     side-panel branch is not yet wired (PRD §3.3 follow-up).
+//
+// Single-question batches degenerate to the v1 single-picker UX
+// since the "answered" and "pending" lists are both empty and the
+// active branch renders renderUserQuestion. Useful: callers
+// always get the same code path whether they sent 1 or 4
+// questions.
+func (m Model) renderBatchStack() string {
+	if m.pendingBatch == nil {
+		return ""
+	}
+	var sb strings.Builder
+	questions := m.pendingBatch.Batch.Questions
+	total := len(questions)
+
+	// Top header — shows progress when there's more than one
+	// question. Single-question batches skip this to match the v1
+	// look exactly.
+	if total > 1 {
+		hdr := fmt.Sprintf("? %d question%s · %d of %d",
+			total, plural(total), m.pendingBatchIdx+1, total)
+		sb.WriteString(styleApprovalHeader.Render(hdr))
+		sb.WriteString("\n")
+	}
+
+	// Already-answered questions: dim, with chosen labels.
+	for i := 0; i < m.pendingBatchIdx; i++ {
+		q := questions[i]
+		ans := m.pendingBatchAnswers[i]
+		topic := batchTopicLabel(q, i+1)
+		sb.WriteString(styleMuted.Render("  ✓ " + topic + ": " + summariseAnswer(q, ans)))
+		sb.WriteString("\n")
+	}
+
+	// Currently-active question: borrow the v1 single-picker
+	// renderer. handleBatchKey already installed pendingQuestion
+	// to point at this question's data; renderUserQuestion reads
+	// pendingQuestion + the shared per-question state and draws
+	// the picker exactly like the v1 path.
+	if m.pendingBatchIdx < total {
+		q := questions[m.pendingBatchIdx]
+		if total > 1 {
+			topic := batchTopicLabel(q, m.pendingBatchIdx+1)
+			sb.WriteString(styleAssistantLabel.Render("▸ " + topic))
+			sb.WriteString("\n")
+		}
+		// renderUserQuestion needs pendingQuestion to be set; the
+		// handleBatchKey path sets it but the view runs out of
+		// band, so set a transient one here for rendering only.
+		// (Direct field write — Model is a value type so this
+		// doesn't mutate the actual Model state used by Update.)
+		mview := m
+		mview.pendingQuestion = &askuser.Request{Question: q}
+		sb.WriteString(mview.renderUserQuestion())
+	}
+
+	// Pending (not-yet-asked) questions: just the topic label.
+	for i := m.pendingBatchIdx + 1; i < total; i++ {
+		q := questions[i]
+		topic := batchTopicLabel(q, i+1)
+		sb.WriteString(styleMuted.Render("  · " + topic))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// batchTopicLabel returns the chip-style label for a question in
+// a batch stack — prefers q.Header (the v2 field) and falls back
+// to a numbered "Question N" when no header was set.
+func batchTopicLabel(q askuser.Question, n int) string {
+	if q.Header != "" {
+		return q.Header
+	}
+	return fmt.Sprintf("Question %d", n)
+}
+
+// summariseAnswer renders a one-line summary of an Answer for the
+// "already answered" section of the batch stack. Multi-select
+// answers concatenate option labels with commas; free-text shows
+// truncated with quotes; cancelled answers show as "(cancelled)".
+func summariseAnswer(q askuser.Question, ans askuser.Answer) string {
+	if ans.Cancelled {
+		return "(cancelled)"
+	}
+	if ans.FreeText != "" {
+		txt := ans.FreeText
+		if len(txt) > 40 {
+			txt = txt[:37] + "..."
+		}
+		return `"` + txt + `"`
+	}
+	if len(ans.ChosenIDs) == 0 {
+		return "(empty)"
+	}
+	// Map ChosenIDs back to labels for display.
+	labels := make([]string, 0, len(ans.ChosenIDs))
+	for _, id := range ans.ChosenIDs {
+		for _, opt := range q.Options {
+			if opt.ID == id {
+				labels = append(labels, opt.Label)
+				break
+			}
+		}
+	}
+	if len(labels) == 0 {
+		return strings.Join(ans.ChosenIDs, ", ")
+	}
+	return strings.Join(labels, ", ")
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // renderHelpOverlay draws the /help content as a dismissable overlay

@@ -110,6 +110,16 @@ type Options struct {
 	// tool returns ErrDisabled when called.
 	AskUserCh <-chan askuser.Request
 
+	// AskUserBatchCh (v2) delivers multi-question batch requests
+	// from askuser.Policy.AskBatch. Carries the full Batch and a
+	// Reply channel that receives []Answer aligned by question
+	// index. The TUI renders this as a stack: answered questions
+	// dim out, the current one shows the active picker, pending
+	// ones show as placeholders. nil = the v2 batch path is
+	// unavailable (the ask_user tool's executeBatch falls back
+	// to ErrDisabled).
+	AskUserBatchCh <-chan askuser.BatchRequest
+
 	// Session + Store, when both non-nil, enable auto-save: after
 	// every agent stream ends the current Session snapshot is
 	// persisted via Store.Save. nil for ephemeral runs (--no-save).
@@ -428,6 +438,27 @@ type Model struct {
 	// Answer.FreeText.
 	pendingQuestionFreeText bool
 
+	// pendingBatch (v2), when non-nil, means the agent goroutine is
+	// blocked on an ask_user batch request and the TUI is showing
+	// the multi-question stack. Mutually exclusive with
+	// pendingQuestion and pendingApproval. The per-question picker
+	// state (cursor / selected / freeText) is shared with the v1
+	// pendingQuestion path — Q_i's picker uses the same fields,
+	// which get reset each time we advance pendingBatchIdx.
+	pendingBatch *askuser.BatchRequest
+
+	// pendingBatchIdx is the 0-indexed position of the active
+	// question within pendingBatch.Batch.Questions. Range: [0, N-1]
+	// where N = len(Questions). Bumped each time a question is
+	// answered or cancelled; the batch completes (Reply fires)
+	// when this reaches N.
+	pendingBatchIdx int
+
+	// pendingBatchAnswers accumulates answers as the user works
+	// through the stack. Length always equals pendingBatchIdx
+	// (entries appended after each question completes).
+	pendingBatchAnswers []askuser.Answer
+
 	// Distill review state. When distillReviewOpen is true, all keys
 	// are intercepted by handleDistillKey: y saves the current
 	// candidate, n drops it, e enters edit mode (distillEditing
@@ -563,6 +594,9 @@ func (m Model) Init() tea.Cmd {
 	if m.opts.AskUserCh != nil {
 		cmds = append(cmds, waitForAskUser(m.opts.AskUserCh))
 	}
+	if m.opts.AskUserBatchCh != nil {
+		cmds = append(cmds, waitForAskBatch(m.opts.AskUserBatchCh))
+	}
 	if m.opts.ObserveResultChan != nil {
 		cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
 	}
@@ -607,6 +641,20 @@ func waitForAskUser(ch <-chan askuser.Request) tea.Cmd {
 			return nil
 		}
 		return askUserRequestMsg{req: req}
+	}
+}
+
+// waitForAskBatch is the v2 multi-question counterpart of
+// waitForAskUser. Pumps the BatchRequest channel and emits
+// askUserBatchRequestMsg; the Update handler installs it as
+// m.pendingBatch and starts rendering the question stack.
+func waitForAskBatch(ch <-chan askuser.BatchRequest) tea.Cmd {
+	return func() tea.Msg {
+		req, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return askUserBatchRequestMsg{req: req}
 	}
 }
 

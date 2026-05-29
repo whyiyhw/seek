@@ -5,6 +5,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/whyiyhw/seek/internal/askuser"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -98,6 +100,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case askUserRequestMsg:
 		// New ask_user request — grab focus and reset picker state.
+		// (Re-arming happens at completion in completeQuestion, not
+		// here, to match the approval-channel pattern.)
 		req := msg.req
 		m.pendingQuestion = &req
 		m.pendingQuestionSelected = map[int]bool{}
@@ -105,6 +109,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingQuestionFreeText = false
 		// Single-select picker uses keyboard nav, not textarea; blur.
 		// We re-focus when the user picks "Other" so they can type.
+		m.input.Blur()
+
+	case askUserBatchRequestMsg:
+		// New v2 batch request — initialise stack state at Q1.
+		// Per-question picker state (cursor / selected / freeText)
+		// is shared with the single-question path; we reset it
+		// here for Q1 and again each time we advance to Q_(i+1).
+		// Re-arming happens at completion via completeBatch, same
+		// pattern as askUserRequestMsg.
+		req := msg.req
+		m.pendingBatch = &req
+		m.pendingBatchIdx = 0
+		m.pendingBatchAnswers = make([]askuser.Answer, 0, len(req.Batch.Questions))
+		m.pendingQuestionSelected = map[int]bool{}
+		m.pendingQuestionCursor = 0
+		m.pendingQuestionFreeText = false
 		m.input.Blur()
 
 	case compactDoneMsg:

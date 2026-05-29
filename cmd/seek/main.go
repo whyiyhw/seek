@@ -1562,6 +1562,35 @@ func run() error {
 		}
 	})
 
+	// v2 batch channel: parallel to askUserCh but carries a Batch +
+	// receives a []Answer. ask_user v2 (柱 I) tool uses AskBatch
+	// which goes through this path; the TUI renders a multi-question
+	// stack instead of a single picker. Buffer 4 matches the single-
+	// question channel.
+	askBatchCh := make(chan askuser.BatchRequest, 4)
+	askPolicy.SetAskBatchFn(func(b askuser.Batch) []askuser.Answer {
+		resp := make(chan []askuser.Answer, 1)
+		// Defensive cancelled payload sized to the batch — every
+		// ctx.Done() / channel-close path returns this so the
+		// caller never sees a nil slice (which would index-panic
+		// in the tool layer's result builder).
+		cancelled := make([]askuser.Answer, len(b.Questions))
+		for i := range cancelled {
+			cancelled[i] = askuser.Answer{Cancelled: true}
+		}
+		select {
+		case askBatchCh <- askuser.BatchRequest{Batch: b, Reply: resp}:
+		case <-ctx.Done():
+			return cancelled
+		}
+		select {
+		case ans := <-resp:
+			return ans
+		case <-ctx.Done():
+			return cancelled
+		}
+	})
+
 	sessionModel = *model
 
 	// Resolve the effective theme for the TUI.
@@ -1598,6 +1627,7 @@ func run() error {
 		GlamourStyle:          glamourStyle,
 		ApprovalCh:            approvalCh,
 		AskUserCh:             askUserCh,
+		AskUserBatchCh:        askBatchCh,
 		Session:               activeSession,
 		Store:                 store,
 		Checkpoint:            ckMgr,

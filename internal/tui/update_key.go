@@ -71,6 +71,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleQuestionKey(msg)
 	}
 
+	// v2 multi-question batch picker. Takes precedence over the
+	// single-question path so a misrouted v1 request can't sneak
+	// keys past an active batch. The batch handler delegates to
+	// the same per-question key logic as v1 — the cursor /
+	// selected / freeText state is shared — and advances
+	// pendingBatchIdx when each question completes.
+	if m.pendingBatch != nil {
+		return m.handleBatchKey(msg)
+	}
+
 	// Distill review modal grabs all keys until the user finishes the
 	// pass. Edit-mode (one of the y/n/e/q states) reuses the main
 	// input area for textarea-style content editing.

@@ -23,6 +23,17 @@ type askUserRequestMsg struct {
 	req askuser.Request
 }
 
+// askUserBatchRequestMsg (v2) carries a multi-question batch ask_user
+// request. The TUI renders the batch as a vertical stack: already-
+// answered questions dim out with their chosen label, the current
+// question shows the active picker, pending questions show as
+// placeholders. Reply (chan []Answer) fires once the user has
+// worked through all questions OR cancelled mid-batch (in which
+// case the remaining questions get Cancelled placeholders).
+type askUserBatchRequestMsg struct {
+	req askuser.BatchRequest
+}
+
 // agentEventMsg wraps a single event from agent.Prompt's channel. The
 // TUI polls one event per tea.Cmd to stay friendly with Bubble Tea's
 // single-msg-per-Cmd model.

@@ -251,3 +251,104 @@ func (m Model) completeQuestion(ans askuser.Answer) (tea.Model, tea.Cmd) {
 	m.input.Focus()
 	return m, waitForAskUser(m.opts.AskUserCh)
 }
+
+// handleBatchKey is the v2 multi-question dispatcher. It works by
+// temporarily setting m.pendingQuestion to the current question
+// in the batch, delegating to handleQuestionKey (which uses the
+// shared cursor / selected / freeText state), intercepting the
+// resulting Answer, and either advancing pendingBatchIdx or
+// completing the batch.
+//
+// The delegation trick keeps single-question and multi-question
+// pickers byte-identical at the input layer — the only difference
+// is what completion does: single completes the request; batch
+// either advances or completes the BATCH request.
+func (m Model) handleBatchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingBatch == nil {
+		return m, nil
+	}
+	if m.pendingBatchIdx >= len(m.pendingBatch.Batch.Questions) {
+		// Defensive: shouldn't happen — completeBatch fires the
+		// reply and clears state when Idx hits len. If we get here,
+		// something raced. Reply with whatever we have + clean up.
+		return m.completeBatch(askuser.Answer{})
+	}
+
+	// Sentinel: borrow a faux *Request that points at the active
+	// question so handleQuestionKey can read it via m.pendingQuestion.
+	// We DON'T install a real channel — the caller (this function)
+	// intercepts the Answer via the per-question pipeline below,
+	// bypassing the v1 reply path entirely.
+	q := m.pendingBatch.Batch.Questions[m.pendingBatchIdx]
+	answerCh := make(chan askuser.Answer, 1)
+	m.pendingQuestion = &askuser.Request{Question: q, Reply: answerCh}
+
+	// Delegate. handleQuestionKey may call completeQuestion which
+	// sends to answerCh + clears m.pendingQuestion + re-arms the
+	// v1 channel (the last is harmless — re-arming a never-firing
+	// channel just queues a Cmd that blocks forever in Go's
+	// scheduler, GC'd when the program exits).
+	updated, _ := m.handleQuestionKey(msg)
+	m = updated.(Model)
+
+	// Did the per-question handler complete an answer?
+	select {
+	case ans := <-answerCh:
+		return m.batchAdvance(ans)
+	default:
+		// In-progress (navigating, toggling, typing free-text).
+		// Keep pendingQuestion pointer alive for the next key.
+		return m, nil
+	}
+}
+
+// batchAdvance records an answer for the current question and
+// either moves to the next question or completes the batch.
+// Cancel semantics: a Cancelled answer at index i appends
+// Cancelled for the rest (mirrors AskBatch's v1-fallback loop)
+// and fires the reply immediately — user gave up, stop asking.
+func (m Model) batchAdvance(ans askuser.Answer) (tea.Model, tea.Cmd) {
+	if m.pendingBatch == nil {
+		return m, nil
+	}
+	m.pendingBatchAnswers = append(m.pendingBatchAnswers, ans)
+	if ans.Cancelled {
+		// Pad the rest as cancelled and fire the reply.
+		for i := len(m.pendingBatchAnswers); i < len(m.pendingBatch.Batch.Questions); i++ {
+			m.pendingBatchAnswers = append(m.pendingBatchAnswers, askuser.Answer{Cancelled: true})
+		}
+		return m.completeBatch(ans) // ans content unused — completeBatch reads pendingBatchAnswers
+	}
+	m.pendingBatchIdx++
+	if m.pendingBatchIdx >= len(m.pendingBatch.Batch.Questions) {
+		return m.completeBatch(ans)
+	}
+	// Reset per-question state for the next question.
+	m.pendingQuestion = nil
+	m.pendingQuestionSelected = map[int]bool{}
+	m.pendingQuestionCursor = 0
+	m.pendingQuestionFreeText = false
+	return m, nil
+}
+
+// completeBatch fires the batch Reply channel with the accumulated
+// answers, clears state, and re-arms the batch listener.
+func (m Model) completeBatch(_ askuser.Answer) (tea.Model, tea.Cmd) {
+	if m.pendingBatch == nil {
+		return m, nil
+	}
+	select {
+	case m.pendingBatch.Reply <- m.pendingBatchAnswers:
+	default:
+		// Buffered to 1 — should always succeed.
+	}
+	m.pendingBatch = nil
+	m.pendingBatchIdx = 0
+	m.pendingBatchAnswers = nil
+	m.pendingQuestion = nil
+	m.pendingQuestionSelected = nil
+	m.pendingQuestionCursor = 0
+	m.pendingQuestionFreeText = false
+	m.input.Focus()
+	return m, waitForAskBatch(m.opts.AskUserBatchCh)
+}
