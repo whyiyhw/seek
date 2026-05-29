@@ -2,7 +2,7 @@
 
 **目标**：把 seek 的 `/plan` 从"单向只读 toggle"演化为一个**带显式用户确认门**的工作流：模型分析上下文 → 反思充分性 → 提案问题与解决方案 → 用户审批 → 解锁执行 → 完成报告。异议触发从中断点 re-plan，已完成工作不丢。
 
-**状态**：🚀 v2 P1-P6 全部实施 + v2.x 扩展持续中。本 PRD 取代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)（仅追踪 TUI task list 可视化，scope 过窄、误判了 plan 模式的核心价值在确认门而非可视化）。
+**状态**：🚀 v2 P1-P6 + v2.x 全部 13 项扩展已上线（明细见下表）。明确推到未来的项（多 plan 并行 / artifact CLI / 跨设备同步）见 §"实施状态速览"下方。本 PRD 取代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)（仅追踪 TUI task list 可视化，scope 过窄、误判了 plan 模式的核心价值在确认门而非可视化）。
 
 ### 实施状态速览（2026-05）
 
