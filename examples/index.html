@@ -1707,10 +1707,10 @@
     <div class="install-option reveal" style="transition-delay:.2s">
       <h4>Windows</h4>
       <p class="detail">
-        <span data-lang="en">Download from Releases or use <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">winget install seek</code>. Run in Windows Terminal.</span>
-        <span data-lang="zh" hidden>从 Releases 下载或使用 <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">winget install seek</code>。在 Windows Terminal 中运行。</span>
+        <span data-lang="en">Download from <a href="https://github.com/whyiyhw/seek/releases/latest" style="color:var(--teal);">Releases</a> or run the PowerShell one-liner below. <strong>Use <a href="https://github.com/microsoft/terminal" style="color:var(--teal);">Windows Terminal</a></strong> — the legacy blue PowerShell window mis-renders the TUI.</span>
+        <span data-lang="zh" hidden>从 <a href="https://github.com/whyiyhw/seek/releases/latest" style="color:var(--teal);">Releases</a> 下载，或运行下方 PowerShell 一行命令。<strong>请在 <a href="https://github.com/microsoft/terminal" style="color:var(--teal);">Windows Terminal</a> 中运行</strong>——老式蓝底 PowerShell 窗口会错乱渲染 TUI。</span>
       </p>
-      <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">PS&gt;</span> $v=(irm https://api.github.com/repos/whyiyhw/seek/releases/latest | ConvertFrom-Json).tag_name; irm "https://github.com/whyiyhw/seek/releases/download/$v/seek_$($v.Substring(1))_windows_amd64.zip" -OutFile seek.zip; Expand-Archive seek.zip -Dest .; Remove-Item seek.zip; echo "Done — run .\seek.exe"</code>
+      <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">PS&gt;</span> $v=(irm https://api.github.com/repos/whyiyhw/seek/releases/latest).tag_name; irm "https://github.com/whyiyhw/seek/releases/download/$v/seek_$($v.Substring(1))_windows_amd64.zip" -OutFile seek.zip; Expand-Archive -Force seek.zip -Dest .; Remove-Item seek.zip; .\seek.exe -install; echo "Done -- restart shell, then run: seek"</code>
     </div>
     <div class="install-option reveal" style="transition-delay:.3s">
       <h4>
