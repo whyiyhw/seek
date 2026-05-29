@@ -198,28 +198,29 @@
     <ul>
       <li><strong>Soul (L)</strong> — <code>~/.seek/soul.md</code>. Cross-project user preferences and thinking habits. ~500 token hard cap, resident in system prompt. Written by <code>seek -dream</code> → user review.</li>
       <li><strong>Project (M)</strong> — <code>~/.seek/projects/&lt;hash&gt;/memory.jsonl</code>. Key decisions and rationale per project. Index injected into every prompt; full content fetched on demand via <code>memory_recall</code>.</li>
-      <li><strong>Session (S)</strong> — <code>~/.local/share/seek/sessions/&lt;id&gt;.jsonl</code>. Full message history with auto-save. <code>/distill</code> at session end extracts reusable decisions into M.</li>
+      <li><strong>Session (S)</strong> — <code>~/.seek/sessions/&lt;id&gt;.jsonl</code> (or <code>$SEEK_HOME/sessions/</code>). Full message history with auto-save. <code>/distill</code> at session end extracts reusable decisions into M.</li>
     </ul>
     <div class="dir">📁 <code>pkg/agent/memory/</code> · <code>internal/memory/</code> · <code>docs/guide-memory.md</code></div>
   </div>
 
-  <!-- 2. Permission System -->
+  <!-- 2. Permission System (Pref × Workflow two-axis) -->
   <div class="arch-card reveal">
     <div class="arch-title">
       <span class="num">2</span>
-      <h3 data-lang="en">Permission System</h3>
-      <h3 data-lang="zh" hidden>权限系统</h3>
+      <h3 data-lang="en">Permission System (Pref × Workflow, two axes)</h3>
+      <h3 data-lang="zh" hidden>权限系统（Pref × Workflow 双轴）</h3>
     </div>
-    <p data-lang="en">Three modes control what the agent can do. Set at startup or toggled mid-session with <code>/yolo</code> or <code>/plan</code>:</p>
-    <p data-lang="zh" hidden">三种模式控制 agent 的权限范围。可在启动时设置，也可在会话中通过 <code>/yolo</code> 或 <code>/plan</code> 切换：</p>
+    <p data-lang="en">After R1 refactor, permission lives on two orthogonal axes — never crammed into a single enum:</p>
+    <p data-lang="zh" hidden">R1 重构后，权限走两条正交轴——不再合并成一个 enum：</p>
     <ul>
-      <li><strong>ask</strong> (default) — Every filesystem write and shell command prompts for confirmation. Granular path whitelists available.</li>
-      <li><strong>yolo</strong> (<code>--yolo</code>) — Bypass all permission prompts. Use in trusted environments or CI.</li>
-      <li><strong>plan</strong> (<code>--plan</code>) — Read-only. Writes and shell commands are denied. Use for exploration.</li>
+      <li><strong>Preference</strong> (<code>Deny</code> / <code>Ask</code> / <code>Yolo</code>) — your standing posture. "How strict am I." Chosen at startup (<code>--yolo</code>, <code>--no-perm</code>) or toggled via <code>/yolo</code>.</li>
+      <li><strong>Workflow</strong> (<code>None</code> / <code>PlanAnalyze</code> / <code>PlanExecute</code>) — the ceremony you've entered. "What am I doing." Toggled via <code>/plan</code> and the propose-tool flow.</li>
     </ul>
-    <p data-lang="en">Permission denials are <strong>tool results, not errors</strong> — the agent sees the denial message and asks the user, rather than crashing the loop.</p>
-    <p data-lang="zh" hidden">权限拒绝是<strong>工具结果，而非错误</strong>——agent 看到拒绝消息后会询问用户，而非中断循环。</p>
-    <div class="dir">📁 <code>internal/permission/</code></div>
+    <p data-lang="en"><strong>Workflow trumps Preference where they conflict.</strong> <code>PrefYolo + WorkflowPlanAnalyze</code> is still read-only — that's plan mode's raison d'être. The workflow is a user-chosen safety boundary; pref can't override it.</p>
+    <p data-lang="zh" hidden"><strong>Workflow 永远 trump Preference</strong>。<code>PrefYolo + WorkflowPlanAnalyze</code> 仍然是只读——这正是 plan mode 存在的意义。Workflow 是用户选定的安全边界，pref 不能反过来覆盖。</p>
+    <p data-lang="en">Permission denials are <strong>tool results, not errors</strong> — the agent sees the denial message and asks the user (or reconsiders), rather than crashing the loop.</p>
+    <p data-lang="zh" hidden">权限拒绝是<strong>工具结果，而非错误</strong>——agent 看到拒绝消息后会询问用户（或重新考虑），而不是中断循环。</p>
+    <div class="dir">📁 <code>internal/permission/</code> · see <code>docs/prd/feature-permission-refactor.md</code></div>
   </div>
 
   <!-- 3. Tool System -->
@@ -234,11 +235,17 @@
     <ul>
       <li><code>read</code> / <code>grep</code> / <code>list_dir</code> — filesystem exploration (grep first, read offset-limited segments)</li>
       <li><code>write</code> / <code>edit</code> — file mutation (edit requires exact <code>old_string</code>, unique match)</li>
-      <li><code>bash</code> — shell execution (denied without <code>--yolo</code>)</li>
+      <li><code>bash</code> / <code>git</code> — shell + git porcelain (denied without <code>--yolo</code> or in plan-analyze workflow)</li>
       <li><code>fim_complete</code> — DeepSeek-specific fill-in-the-middle (cheaper than chat for small gaps)</li>
       <li><code>think</code> — DeepSeek reasoning mode for planning and self-review</li>
-      <li><code>Skill</code> — fetch a named skill's instructions and follow them</li>
-      <li><code>memory_observe</code> / <code>memory_recall</code> / <code>memory_amend</code> / <code>memory_archive</code> / <code>memory_remember</code> — M-layer read/write</li>
+      <li><code>webfetch</code> — HTTPS GET with SSRF guard (works in plan-analyze; private-IP + redirect-target validation)</li>
+      <li><code>mcp</code> — bridge to external MCP servers (stdio / SSE / WebSocket transports)</li>
+      <li><code>ask_user</code> — open a TUI picker to gather user choice mid-loop</li>
+      <li><code>Skill</code> / <code>skill_fetch</code> / <code>skill_commit</code> — discover, install, and invoke skills</li>
+      <li><code>memory_observe</code> / <code>memory_recall</code> / <code>memory_amend</code> / <code>memory_archive</code> — M-layer read/write</li>
+      <li><code>propose</code> / <code>plan</code> — plan-mode v2 confirmation-gated workflow (analyze → propose → execute → adjust → report)</li>
+      <li><code>agent</code> / <code>enter_worktree</code> / <code>exit_worktree</code> — spawn subagents (v5 柱 G); marked ReadOnly so multiple <code>agent</code> calls dispatch in parallel</li>
+      <li><code>schedule_wakeup</code> — model self-schedules a future check-in (v5 柱 H one-shot cron)</li>
     </ul>
     <p data-lang="en"><strong>Key constraint</strong>: Tool schemas are <code>[]byte</code> constants at package level (built once at init, not at call time). This ensures identical bytes across turns → DeepSeek's prefix cache hits.</p>
     <p data-lang="zh" hidden"><strong>关键约束</strong>：工具 schema 是包级别的 <code>[]byte</code> 常量（在 init 时构建一次，而非每次调用）。这确保跨轮次的字节一致性，从而命中 DeepSeek 的前缀缓存。</p>
@@ -298,6 +305,70 @@
       <li><strong>Durability</strong>: write-tmp-rename pattern with <code>f.Sync()</code> before <code>f.Close()</code>.</li>
     </ul>
     <div class="dir">📁 <code>internal/session/</code> · <code>docs/guide-sessions.md</code></div>
+  </div>
+
+  <!-- 7. Plan Mode v2 (confirmation-gated workflow) -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">7</span>
+      <h3 data-lang="en">Plan Mode v2 — confirmation-gated workflow</h3>
+      <h3 data-lang="zh" hidden>Plan Mode v2——确认门工作流</h3>
+    </div>
+    <p data-lang="en"><code>/plan</code> is more than read-only exploration. The model analyzes context, proposes a problem definition + step list via the <code>propose</code> tool, waits for user <strong>approve / adjust / cancel</strong>, then enters EXECUTE substate with per-step gating via the <code>plan</code> tool.</p>
+    <p data-lang="zh" hidden><code>/plan</code> 不只是只读探索。模型分析上下文 → 通过 <code>propose</code> 工具提议问题定义 + step list → 等待用户 <strong>approve / adjust / cancel</strong> → 进入 EXECUTE 子态，通过 <code>plan</code> 工具按步审批。</p>
+    <ul>
+      <li data-lang="en"><strong>State machine via transcript</strong> — substate is reconstructed on <code>seek -resume</code> by replaying <code>propose</code> args + <code>plan(start|complete|skip)</code> events. No parallel state file.</li>
+      <li data-lang="zh" hidden><strong>状态机由 transcript 重建</strong>——<code>seek -resume</code> 通过 replay <code>propose</code> 参数 + <code>plan(start|complete|skip)</code> 事件重建子态，无并行状态文件。</li>
+      <li data-lang="en"><strong>Plan artifact</strong> — every approve writes a read-only markdown snapshot to <code>~/.seek/projects/&lt;id&gt;/plans/</code>. Audit trail of "at moment X, approved these steps for problem Y."</li>
+      <li data-lang="zh" hidden><strong>Plan artifact</strong>——每次 approve 写入只读 markdown 快照到 <code>~/.seek/projects/&lt;id&gt;/plans/</code>。"在 X 时刻、对 Y 问题、批准了哪几步"的审计记录。</li>
+      <li data-lang="en"><strong>approve_batch (auto-approve-per-step)</strong> — opt-in fast-path: bash/edit/write inside an active step auto-pass without re-prompting. Status bar shows substate + <code>N/M</code> progress.</li>
+      <li data-lang="zh" hidden><strong>approve_batch（按步预批准）</strong>——可选 fast-path：活跃步骤内的 bash/edit/write 自动通过，不再询问。状态栏显示子态 + <code>N/M</code> 进度。</li>
+    </ul>
+    <div class="dir">📁 <code>internal/tools/propose/</code> · <code>internal/tools/plan/</code> · <code>docs/prd/feature-plan-mode.md</code></div>
+  </div>
+
+  <!-- 8. Subagent + Worktree -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">8</span>
+      <h3 data-lang="en">Subagent &amp; Worktree (v5 柱 G)</h3>
+      <h3 data-lang="zh" hidden>子代理 &amp; Worktree（v5 柱 G）</h3>
+    </div>
+    <p data-lang="en">The parent agent can spawn subagents — each with its own session, token budget, and optionally an isolated git worktree — to run parallel research, drafting, or experimentation. Only the summary crosses back, so the parent's prefix cache stays warm.</p>
+    <p data-lang="zh" hidden>父 agent 可派生子代理——各自独立 session、token 账户，可选 git worktree 隔离——并行调研、起方案或试验。只有 summary 回到父，父的 prefix cache 不被击穿。</p>
+    <ul>
+      <li data-lang="en"><strong>Permission monotonic-tighten</strong> — a child's <code>Pref × Workflow</code> can only be tighter than the parent's. <code>Policy.Spawn(restriction)</code> enforces it at the type level.</li>
+      <li data-lang="zh" hidden><strong>权限单调收紧</strong>——子的 <code>Pref × Workflow</code> 只能比父更严。<code>Policy.Spawn(restriction)</code> 在类型层强制。</li>
+      <li data-lang="en"><strong>Cost rolled up</strong> — <code>cache.Tracker.AdoptChild</code> wires the child's per-turn usage into the parent's cumulative cost. Status bar shows the full picture.</li>
+      <li data-lang="zh" hidden><strong>成本归集</strong>——<code>cache.Tracker.AdoptChild</code> 把子的每轮 token 累加到父的 cumulative cost。状态栏展示完整画面。</li>
+      <li data-lang="en"><strong>Spawn depth = 1</strong> — subagents cannot themselves spawn. Prevents fan-out runaway.</li>
+      <li data-lang="zh" hidden><strong>派生深度 = 1</strong>——子不能再派生。防止 fan-out 失控。</li>
+      <li data-lang="en"><strong>ReadOnly dispatch marker</strong> — the <code>agent</code> tool is marked <code>ReadOnly</code> so multiple <code>agent</code> calls in one assistant turn run <strong>concurrently</strong>, not sequentially.</li>
+      <li data-lang="zh" hidden><strong>ReadOnly 派发标记</strong>——<code>agent</code> 工具标 <code>ReadOnly</code>，让一轮多个 <code>agent</code> 调用<strong>并行</strong>跑，不串行。</li>
+    </ul>
+    <div class="dir">📁 <code>internal/subagent/</code> · <code>internal/worktree/</code> · <code>internal/tools/agent/</code> · <a href="subagent.html" style="color:var(--teal);">📖 Subagent docs</a></div>
+  </div>
+
+  <!-- 9. Cron / Wakeup / Triggers (zero-daemon scheduling) -->
+  <div class="arch-card reveal">
+    <div class="arch-title">
+      <span class="num">9</span>
+      <h3 data-lang="en">Cron / Wakeup / Triggers (v5 柱 H)</h3>
+      <h3 data-lang="zh" hidden>定时 / 唤醒 / 触发（v5 柱 H）</h3>
+    </div>
+    <p data-lang="en">seek runs <strong>no resident daemon</strong>. Scheduling delegates to the OS (launchd / systemd / cron / Task Scheduler), which invokes <code>seek cron tick</code> once a minute. tick reads <code>jobs.jsonl</code> + <code>triggers/</code>, fires what's due, exits.</p>
+    <p data-lang="zh" hidden>seek <strong>零常驻 daemon</strong>。调度委派给 OS（launchd / systemd / cron / Task Scheduler），每分钟调用 <code>seek cron tick</code>。tick 读 <code>jobs.jsonl</code> + <code>triggers/</code>，触发所有到期，退出。</p>
+    <ul>
+      <li data-lang="en"><strong>Three input sources</strong> — scheduled jobs (<code>seek cron create</code>), model self-scheduled wakeups (<code>schedule_wakeup</code> tool, max_runs=1), and external triggers (CI / IDE writes JSON to <code>~/.seek/cron/triggers/</code>).</li>
+      <li data-lang="zh" hidden><strong>三类输入</strong>——定时任务（<code>seek cron create</code>）、模型自调用唤醒（<code>schedule_wakeup</code> 工具，max_runs=1）、外部触发（CI / IDE 写 JSON 到 <code>~/.seek/cron/triggers/</code>）。</li>
+      <li data-lang="en"><strong>Explicit env injection</strong> — OS schedulers hand seek a near-empty env. Opt-in <code>~/.seek/cron/env</code> overlay (dotenv format) supplies <code>DEEPSEEK_API_KEY</code> and friends. Parse errors fail spawn loudly.</li>
+      <li data-lang="zh" hidden><strong>显式 env 注入</strong>——OS 调度器 env 极简。可选 <code>~/.seek/cron/env</code> 覆盖文件（dotenv 格式）注入 <code>DEEPSEEK_API_KEY</code> 等。解析错误明确报错。</li>
+      <li data-lang="en"><strong>OS notifications</strong> — macOS <code>osascript</code> ✅ / Linux <code>notify-send</code> ✅ (auto no-op when headless) / Windows ⚠️ no-op pending BurntToast adapter (v0.6.x dot).</li>
+      <li data-lang="zh" hidden><strong>OS 通知</strong>——macOS <code>osascript</code> ✅ / Linux <code>notify-send</code> ✅（headless 自动 no-op）/ Windows ⚠️ no-op，BurntToast 适配在 v0.6.x dot。</li>
+      <li data-lang="en"><strong>Two-axis GC</strong> — <code>runs/&lt;id&gt;.jsonl</code> keeps 100 recent + 30 days max-age; <code>.malformed/</code> keeps 20 recent + 14 days. Suffix filter ensures live <code>&lt;job&gt;.lock</code> files in <code>runs/</code> are NEVER deleted.</li>
+      <li data-lang="zh" hidden><strong>双轴 GC</strong>——<code>runs/&lt;id&gt;.jsonl</code> 保留 100 个最近 + 30 天最老；<code>.malformed/</code> 保留 20 个最近 + 14 天。后缀过滤确保 <code>runs/</code> 中活跃的 <code>&lt;job&gt;.lock</code> 文件永远不被删。</li>
+    </ul>
+    <div class="dir">📁 <code>internal/routines/</code> · <code>internal/routinescli/</code> · <a href="cron.html" style="color:var(--teal);">📖 Cron docs</a> · <a href="https://github.com/whyiyhw/seek/blob/main/docs/guide-cron.md" style="color:var(--teal);">guide-cron.md</a></div>
   </div>
 
   <div class="note">

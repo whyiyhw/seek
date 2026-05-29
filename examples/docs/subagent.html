@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek subagent + worktree — parallel research, planning, and isolated experimentation via the agent / enter_worktree / exit_worktree tools." />
+<title>Subagent &amp; Worktree — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  pre .dim { color: var(--dim); }
+  pre .ok { color: var(--green); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+  .warn {
+    background: var(--surface); border-left: 3px solid var(--amber);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Subagent &amp; Worktree</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Subagent &amp; Worktree</h1>
+    <h1 data-lang="zh" hidden>子代理 &amp; Worktree</h1>
+    <p class="subtitle" data-lang="en">Parallel research, planning, and isolated experimentation — v5 柱 G (shipped v0.6.0).</p>
+    <p class="subtitle" data-lang="zh" hidden>并行调研、起方案、隔离试方案——v5 柱 G（v0.6.0 已 ship）。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">seek's main agent runs your conversation in one thread. When a task needs <strong>parallel work</strong> (read 50 files at once, propose three approaches simultaneously, try a refactor in isolation), the model spawns <strong>subagents</strong> — each with its own session, its own token budget, optionally its own git worktree. Results condense into a single summary fed back to the parent.</p>
+    <p data-lang="zh" hidden>seek 的主 agent 在一个线程里跑你的对话。需要<strong>并行工作</strong>时（一次读 50 个文件、同时起 3 个方案、隔离试一次 refactor），模型派生<strong>子代理</strong>——各自独立 session、独立 token 账户，可选独立 git worktree。结果浓缩成单个 summary 回到父。</p>
+
+    <h2 data-lang="en">Why it exists</h2>
+    <h2 data-lang="zh" hidden>为什么</h2>
+    <p data-lang="en">Three concrete problems the parent agent can't solve on its own:</p>
+    <p data-lang="zh" hidden>父 agent 单线程解决不了三件事：</p>
+    <ul>
+      <li data-lang="en"><strong>Context window protection</strong> — "read 50 files and summarize" would bloat the parent transcript past the prefix-cache reuse threshold. A subagent absorbs the 50 files; only the summary crosses back.</li>
+      <li data-lang="zh" hidden><strong>上下文保护</strong>——「读 50 个文件归纳风格」会让父 transcript 膨胀到失去 prefix-cache 复用价值。子代理吞掉这 50 个文件，只把 summary 塞回父。</li>
+      <li data-lang="en"><strong>Real parallelism</strong> — three independent research questions take min(t1,t2,t3) wall-clock, not t1+t2+t3.</li>
+      <li data-lang="zh" hidden><strong>真正的并行</strong>——三个独立调研花 min(t1,t2,t3) 墙钟时间，而不是 t1+t2+t3。</li>
+      <li data-lang="en"><strong>Safe experimentation</strong> — worktree-isolated subagents can try a refactor without touching your working tree. Discard or keep on completion.</li>
+      <li data-lang="zh" hidden><strong>安全试验</strong>——worktree 隔离的子代理可以试 refactor 而不动你的工作树，结束时丢弃或保留。</li>
+    </ul>
+
+    <h2 data-lang="en">The shape</h2>
+    <h2 data-lang="zh" hidden>形状</h2>
+    <pre><span class="prompt">parent agent</span>
+   ├─→ <span class="ok">subagent · explore</span>  → read 3 directories → summary
+   ├─→ <span class="ok">subagent · plan</span>     → draft an approach → summary
+   └─→ <span class="ok">subagent · worktree</span> → try refactor in isolation → summary
+        │
+        ▼
+   father reads summaries → continues conversation</pre>
+
+    <h2 data-lang="en">LLM-facing tools</h2>
+    <h2 data-lang="zh" hidden>LLM 调用的工具</h2>
+    <p data-lang="en">The model spawns subagents through the <code>agent</code> tool; worktree isolation is opt-in via <code>enter_worktree</code> / <code>exit_worktree</code>:</p>
+    <p data-lang="zh" hidden>模型通过 <code>agent</code> 工具派生子代理；worktree 隔离通过 <code>enter_worktree</code> / <code>exit_worktree</code> 选用：</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Tool</th><th data-lang="zh" hidden>工具</th>
+            <th data-lang="en">Purpose</th><th data-lang="zh" hidden>用途</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="cmd">agent</td><td data-lang="en">Spawn a subagent (explore / plan / general-purpose). Returns a single summary. ReadOnly-marked → multiple <code>agent</code> calls in one assistant turn dispatch <strong>in parallel</strong>.</td><td data-lang="zh" hidden>派生子代理（explore / plan / general-purpose）。返回单个 summary。标 ReadOnly → 一轮多个 <code>agent</code> 调用<strong>并行</strong>分派。</td></tr>
+          <tr><td class="cmd">enter_worktree</td><td data-lang="en">Create an isolated git worktree under <code>~/.seek/projects/&lt;pid&gt;/worktrees/&lt;id&gt;</code>. Subsequent edits go there, not your working tree.</td><td data-lang="zh" hidden>在 <code>~/.seek/projects/&lt;pid&gt;/worktrees/&lt;id&gt;</code> 创建隔离 worktree。后续编辑在那里发生，不动你的工作树。</td></tr>
+          <tr><td class="cmd">exit_worktree</td><td data-lang="en">Leave the worktree. Disposition: <code>discard</code> (default; stashed to <code>refs/seek/discarded/&lt;ts&gt;</code> for accidental-recovery), <code>keep</code> (file stays for later inspection), <code>merge</code> (manual — model prints suggested commands).</td><td data-lang="zh" hidden>离开 worktree。处置：<code>discard</code>（默认；stash 到 <code>refs/seek/discarded/&lt;ts&gt;</code> 防误删）、<code>keep</code>（保留待后续检查）、<code>merge</code>（手动——模型打印推荐命令）。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">User-facing surfaces</h2>
+    <h2 data-lang="zh" hidden>用户面</h2>
+    <pre><span class="prompt">$</span> seek
+<span class="prompt">&gt;</span> /agents                    <span class="dim"># TUI panel: live + completed subagents</span>
+<span class="prompt">&gt;</span> /worktrees                 <span class="dim"># TUI panel: seek-managed git worktrees</span>
+
+<span class="prompt">$</span> seek worktree list         <span class="dim"># CLI: same data as /worktrees</span>
+<span class="prompt">$</span> seek worktree gc           <span class="dim"># reap orphans from crashed sessions</span></pre>
+
+    <h2 data-lang="en">Safety contracts</h2>
+    <h2 data-lang="zh" hidden>安全约定</h2>
+    <ul>
+      <li data-lang="en"><strong>Permission单调收紧</strong> — a subagent's permissions can only be <strong>tighter</strong> than the parent's, never looser. <code>PrefYolo</code> parent can spawn <code>PrefAsk</code> child; the reverse never happens. <code>PlanAnalyze</code> parent <em>forces</em> all children to <code>PlanAnalyze</code> (no escape via spawn).</li>
+      <li data-lang="zh" hidden><strong>权限单调收紧</strong>——子代理权限只能<strong>更严</strong>，永远不能更松。<code>PrefYolo</code> 父可以派生 <code>PrefAsk</code> 子；反向永不发生。<code>PlanAnalyze</code> 父<em>强制</em>所有子也是 <code>PlanAnalyze</code>（spawn 不能绕过）。</li>
+      <li data-lang="en"><strong>Cost rolled up to parent</strong> — subagent token usage adds to the parent's status-bar cost via <code>cache.Tracker.AdoptChild</code>. No hidden bill.</li>
+      <li data-lang="zh" hidden><strong>成本累加到父</strong>——子代理的 token 通过 <code>cache.Tracker.AdoptChild</code> 累加到父状态栏。无隐藏账单。</li>
+      <li data-lang="en"><strong>Spawn depth = 1</strong> — subagents cannot themselves spawn subagents. Prevents runaway fan-out. <code>AdoptChild</code> panics if called on a child with children.</li>
+      <li data-lang="zh" hidden><strong>派生深度 = 1</strong>——子代理不能再派生子代理。防止失控 fan-out。<code>AdoptChild</code> 在子已有 children 时 panic。</li>
+      <li data-lang="en"><strong>Worktree ≠ sandbox</strong> — worktree isolates <em>file conflicts</em> for parallel work; it does NOT sandbox bash (<code>../outside</code> paths and absolute paths still resolve normally). Don't run untrusted code in a worktree expecting containment.</li>
+      <li data-lang="zh" hidden><strong>Worktree ≠ 沙箱</strong>——worktree 隔离的是<em>文件冲突</em>，不是 bash 沙箱（<code>../outside</code> 和绝对路径仍正常解析）。别在 worktree 里跑不可信代码当沙箱。</li>
+    </ul>
+
+    <h2 data-lang="en">What lives where</h2>
+    <h2 data-lang="zh" hidden>文件位置</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Path</th><th data-lang="zh" hidden>路径</th>
+            <th data-lang="en">Contents</th><th data-lang="zh" hidden>内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>~/.seek/projects/&lt;pid&gt;/sessions/&lt;sid&gt;/subagents/&lt;sub-sid&gt;/transcript.jsonl</code></td><td data-lang="en">Subagent full message history — resumable via <code>seek -resume &lt;sub-sid&gt;</code>.</td><td data-lang="zh" hidden>子代理完整消息历史——可通过 <code>seek -resume &lt;sub-sid&gt;</code> 续传。</td></tr>
+          <tr><td><code>~/.seek/projects/&lt;pid&gt;/sessions/&lt;sid&gt;/subagents.jsonl</code></td><td data-lang="en">Per-parent-session subagent index (started/completed/failed/orphaned events) — drives <code>/agents</code> rendering.</td><td data-lang="zh" hidden>每个父 session 的子代理索引（started/completed/failed/orphaned 事件）——驱动 <code>/agents</code> 渲染。</td></tr>
+          <tr><td><code>~/.seek/projects/&lt;pid&gt;/worktrees/&lt;wt-id&gt;/</code></td><td data-lang="en">Active worktree filesystem (per <code>git worktree add</code>).</td><td data-lang="zh" hidden>活跃 worktree 文件系统（由 <code>git worktree add</code> 创建）。</td></tr>
+          <tr><td><code>refs/seek/discarded/&lt;timestamp&gt;</code></td><td data-lang="en">Git ref where <code>exit_worktree if_dirty=discard</code> stashes work for accidental-recovery (not in default refspec; GC'd by <code>seek worktree gc</code>).</td><td data-lang="zh" hidden><code>exit_worktree if_dirty=discard</code> 时 stash 到这里防误删（不在默认 refspec 中；由 <code>seek worktree gc</code> 清理）。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Limits</h2>
+    <h2 data-lang="zh" hidden>限制</h2>
+    <ul>
+      <li data-lang="en"><strong>MaxConcurrent</strong> — at most N (default 3) active subagents at once. Excess spawn returns <code>[agent: failed reason=too_many_subagents]</code>; the parent model decides whether to retry or switch strategy.</li>
+      <li data-lang="zh" hidden><strong>MaxConcurrent</strong>——最多同时 N 个（默认 3）活跃子代理。超出的 spawn 返回 <code>[agent: failed reason=too_many_subagents]</code>；父模型自行决定 retry 或换策略。</li>
+      <li data-lang="en"><strong>MaxTurns inherited</strong> — child inherits parent's <code>MaxTurns</code> (default 200). Exhaustion → <code>[agent: failed reason=max_turns_exceeded]</code>.</li>
+      <li data-lang="zh" hidden><strong>MaxTurns 继承</strong>——子继承父的 <code>MaxTurns</code>（默认 200）。耗尽 → <code>[agent: failed reason=max_turns_exceeded]</code>。</li>
+      <li data-lang="en"><strong>No streaming surface yet</strong> — subagent output is opaque until the summary fires. Live streaming into a collapsible region is a v0.6.x dot follow-up.</li>
+      <li data-lang="zh" hidden><strong>暂无流式回显</strong>——子代理输出对父不可见，直到 summary 落地。流式回显到可折叠区域是 v0.6.x dot 跟进项。</li>
+    </ul>
+
+    <div class="note">
+      <span data-lang="en">📖 Full design rationale: <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-subagent.md" style="color:var(--teal);text-decoration:underline;">feature-subagent.md</a> + <a href="https://github.com/whyiyhw/seek/blob/main/docs/book/chapter-21.md" style="color:var(--teal);text-decoration:underline;">book chapter 21</a>. Worktree GC + orphan recovery details in <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-subagent.md#38" style="color:var(--teal);text-decoration:underline;">§3.8</a>.</span>
+      <span data-lang="zh" hidden>📖 完整设计原理：<a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-subagent.md" style="color:var(--teal);text-decoration:underline;">feature-subagent.md</a> + <a href="https://github.com/whyiyhw/seek/blob/main/docs/book/chapter-21.md" style="color:var(--teal);text-decoration:underline;">book 第 21 章</a>。Worktree GC + 孤儿恢复详见 <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-subagent.md#38" style="color:var(--teal);text-decoration:underline;">§3.8</a>。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => { el.hidden = el.getAttribute('data-lang') !== lang; });
+    document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === lang); });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => { const lang = s.getAttribute('data-lang-val'); if (lang !== currentLang) setLang(lang); });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

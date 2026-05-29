@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek cron — scheduled prompts, model self-wakeups, external triggers. Cross-platform setup for launchd / systemd / Task Scheduler." />
+<title>Cron &amp; Wakeup — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  pre .dim { color: var(--dim); }
+  pre .ok { color: var(--green); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+
+  /* Platform tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    padding: 10px 18px; cursor: pointer; font-size: .82rem; color: var(--dim);
+    border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0;
+    user-select: none; transition: all .15s ease;
+  }
+  .tab:hover { color: var(--teal); }
+  .tab.active { color: var(--amber); border-color: var(--border); background: var(--surface); }
+  .tab-panel { display: none; background: var(--surface); border: 1px solid var(--border); border-top: none; border-radius: 0 4px 4px 4px; padding: 18px; margin-bottom: 24px; }
+  .tab-panel.active { display: block; }
+  .tab-panel pre { margin-bottom: 0; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+  .warn {
+    background: var(--surface); border-left: 3px solid var(--amber);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Cron &amp; Wakeup</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Cron &amp; Wakeup</h1>
+    <h1 data-lang="zh" hidden>定时任务 &amp; 唤醒</h1>
+    <p class="subtitle" data-lang="en">Scheduled prompts, model self-wakeups, external triggers — v5 柱 H (shipped v0.6.1). Zero resident daemon.</p>
+    <p class="subtitle" data-lang="zh" hidden>定时 prompt、模型自我唤醒、外部触发——v5 柱 H（v0.6.1 已 ship）。零常驻 daemon。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">seek doesn't run a background process. Instead, it teaches your OS scheduler (launchd / systemd / Task Scheduler) to invoke <code>seek cron tick</code> once a minute. seek's tick reads <code>~/.seek/cron/jobs.jsonl</code> + <code>triggers/</code>, fires whatever's due, exits.</p>
+    <p data-lang="zh" hidden>seek 自身不跑后台进程。改成教你的 OS 调度器（launchd / systemd / Task Scheduler）每分钟调用一次 <code>seek cron tick</code>。tick 读 <code>~/.seek/cron/jobs.jsonl</code> + <code>triggers/</code>，触发所有到期任务，退出。</p>
+
+    <h2 data-lang="en">1. Register a job</h2>
+    <h2 data-lang="zh" hidden>1. 注册任务</h2>
+    <pre><span class="prompt">$</span> seek cron create --name ci-watch --at @daily \
+    --cwd ~/code/myproj \
+    <span class="ok">'check main branch CI status; summarise failures'</span>
+
+<span class="prompt">$</span> seek cron list             <span class="dim"># see what's registered</span>
+<span class="prompt">$</span> seek cron run ci-watch     <span class="dim"># fire NOW, bypass schedule</span></pre>
+    <p data-lang="en">Saved to <code>~/.seek/cron/jobs.jsonl</code>. But <strong>nothing fires yet</strong> — the OS scheduler hasn't been wired up. Continue below.</p>
+    <p data-lang="zh" hidden>保存到 <code>~/.seek/cron/jobs.jsonl</code>。但<strong>还不会自动跑</strong>——OS 调度器还没启动 tick，继续下面。</p>
+
+    <h2 data-lang="en">2. Wire up the OS scheduler</h2>
+    <h2 data-lang="zh" hidden>2. 接 OS 调度器</h2>
+
+    <div class="tabs" role="tablist">
+      <div class="tab active" data-tab="macos">macOS · launchd</div>
+      <div class="tab" data-tab="linux">Linux · systemd</div>
+      <div class="tab" data-tab="windows">Windows · Task Scheduler</div>
+    </div>
+
+    <div class="tab-panel active" data-panel="macos">
+<pre><span class="prompt">$</span> mkdir -p ~/Library/LaunchAgents
+<span class="prompt">$</span> cat &gt; ~/Library/LaunchAgents/com.seek.cron.plist &lt;&lt;'EOF'
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.seek.cron&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+    &lt;array&gt;
+      &lt;string&gt;/usr/local/bin/seek&lt;/string&gt;
+      &lt;string&gt;cron&lt;/string&gt;
+      &lt;string&gt;tick&lt;/string&gt;
+    &lt;/array&gt;
+  &lt;key&gt;StartInterval&lt;/key&gt;&lt;integer&gt;60&lt;/integer&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+EOF
+<span class="prompt">$</span> launchctl load ~/Library/LaunchAgents/com.seek.cron.plist</pre>
+      <p data-lang="en" style="margin-top:8px;font-size:.78rem;">Replace <code>/usr/local/bin/seek</code> with your actual <code>which seek</code>. Uninstall: <code>launchctl unload</code> + <code>rm</code>.</p>
+      <p data-lang="zh" hidden style="margin-top:8px;font-size:.78rem;">把 <code>/usr/local/bin/seek</code> 改成你的 <code>which seek</code> 路径。卸载：<code>launchctl unload</code> + <code>rm</code>。</p>
+    </div>
+
+    <div class="tab-panel" data-panel="linux">
+<pre><span class="prompt">$</span> mkdir -p ~/.config/systemd/user
+
+<span class="prompt">$</span> cat &gt; ~/.config/systemd/user/seek-cron.service &lt;&lt;'EOF'
+[Unit]
+Description=seek cron tick
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/seek cron tick
+EnvironmentFile=-%h/.seek/cron/env
+EOF
+
+<span class="prompt">$</span> cat &gt; ~/.config/systemd/user/seek-cron.timer &lt;&lt;'EOF'
+[Unit]
+Description=Fire seek cron tick every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+<span class="prompt">$</span> systemctl --user daemon-reload
+<span class="prompt">$</span> systemctl --user enable --now seek-cron.timer</pre>
+      <p data-lang="en" style="margin-top:8px;font-size:.78rem;">The <code>EnvironmentFile=-</code> prefix means "no error if missing" — pairs with the env overlay in §3 below. Check: <code>systemctl --user list-timers</code>, <code>journalctl --user -u seek-cron.service</code>.</p>
+      <p data-lang="zh" hidden style="margin-top:8px;font-size:.78rem;"><code>EnvironmentFile=-</code> 前缀的 <code>-</code> 意味"文件不存在也不报错"——配合下面 §3 的 env overlay 一鱼两吃。检查：<code>systemctl --user list-timers</code>、<code>journalctl --user -u seek-cron.service</code>。</p>
+    </div>
+
+    <div class="tab-panel" data-panel="windows">
+<pre><span class="prompt">PS&gt;</span> schtasks /create /tn <span class="ok">"seek cron tick"</span> /tr <span class="ok">"seek cron tick"</span> /sc minute /mo 1 /ru <span class="ok">"$env:USERNAME"</span></pre>
+      <p data-lang="en" style="margin-top:8px;font-size:.78rem;">Or GUI: <strong>Task Scheduler → Create Basic Task</strong>; trigger Daily + Repeat every 1 minute; action Start a program (<code>seek</code>) with args <code>cron tick</code>. Uninstall: <code>schtasks /delete /tn "seek cron tick" /f</code>.</p>
+      <p data-lang="zh" hidden style="margin-top:8px;font-size:.78rem;">或 GUI：<strong>任务计划程序 → 创建基本任务</strong>；触发器选每天 + 重复任务每 1 分钟；操作启动程序 <code>seek</code> 参数 <code>cron tick</code>。卸载：<code>schtasks /delete /tn "seek cron tick" /f</code>。</p>
+    </div>
+
+    <h2 data-lang="en">3. Inject the API key — <code>~/.seek/cron/env</code></h2>
+    <h2 data-lang="zh" hidden>3. 注入 API key——<code>~/.seek/cron/env</code></h2>
+    <p data-lang="en"><strong>Core problem</strong>: the OS scheduler hands your <code>seek cron tick</code> process a near-empty environment. <code>launchd</code> typically gives <code>PATH=/usr/bin:/bin</code> and nothing else; <code>systemd</code> user units inherit only what <code>EnvironmentFile=</code> names; Windows Task Scheduler is similar. Your <code>.zshrc</code>'s <code>DEEPSEEK_API_KEY</code> will <strong>not</strong> cross that boundary automatically.</p>
+    <p data-lang="zh" hidden><strong>核心问题</strong>：OS 调度器拉起 <code>seek cron tick</code> 时 env 极简。<code>launchd</code> 通常只给 <code>PATH=/usr/bin:/bin</code>；<code>systemd</code> 用户单元只继承 <code>EnvironmentFile=</code> 列出的；Windows Task Scheduler 也类似。你 <code>.zshrc</code> 里的 <code>DEEPSEEK_API_KEY</code> <strong>完全不会</strong>自动跨过这条边界。</p>
+    <p data-lang="en">Fix: write a dotenv-style file at <code>~/.seek/cron/env</code> — seek auto-overlays it onto every spawned cron child:</p>
+    <p data-lang="zh" hidden>解法：写一个 dotenv-style 文件 <code>~/.seek/cron/env</code>——seek 自动叠加到每个 cron 子进程：</p>
+<pre><span class="dim"># ~/.seek/cron/env (macOS / Linux / WSL)</span>
+<span class="dim"># %USERPROFILE%\.seek\cron\env (Windows)</span>
+
+DEEPSEEK_API_KEY=sk-...
+PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+<span class="dim"># Linux desktop notifications additionally need:</span>
+<span class="dim"># DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus</span></pre>
+    <p data-lang="en">Format: one <code>KEY=VALUE</code> per line; <code>#</code> comments; balanced quotes stripped; <strong>no shell expansion</strong> (<code>$HOME</code> is three literal characters). Duplicate keys: last wins. Parse errors (missing <code>=</code>, empty key) <strong>fail spawn loudly</strong> — far safer than silently running without the API key you thought you set.</p>
+    <p data-lang="zh" hidden>格式：一行一个 <code>KEY=VALUE</code>；<code>#</code> 注释；平衡引号被剥离；<strong>不</strong>做 shell 展开（<code>$HOME</code> 是字面三个字符）。重复 KEY 后写赢。解析错误（缺 <code>=</code>、空 KEY）→ <strong>明确报错，spawn 失败</strong>——比"静默掉 API key"安全多了。</p>
+    <div class="note">
+      <span data-lang="en">💡 systemd users: pointing <code>EnvironmentFile=%h/.seek/cron/env</code> at this same file makes it drive both systemd's env AND seek's overlay — one file, two layers.</span>
+      <span data-lang="zh" hidden>💡 systemd 用户：<code>EnvironmentFile=%h/.seek/cron/env</code> 让同一个文件同时驱动 systemd 的 env 和 seek 的覆盖——一文件双用。</span>
+    </div>
+
+    <h2 data-lang="en">4. OS notifications</h2>
+    <h2 data-lang="zh" hidden>4. OS 通知</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Platform</th><th data-lang="zh" hidden>平台</th>
+            <th data-lang="en">Implementation</th><th data-lang="zh" hidden>实现</th>
+            <th data-lang="en">Status</th><th data-lang="zh" hidden>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>macOS</td><td><code>osascript -e 'display notification ...'</code></td><td style="color:var(--green);">✅ Notification Center banner</td></tr>
+          <tr><td>Linux</td><td><code>notify-send</code> (libnotify)</td><td style="color:var(--green);" data-lang="en">✅ Desktop (auto no-op when <code>$DISPLAY</code> + <code>$WAYLAND_DISPLAY</code> empty)</td><td style="color:var(--green);" data-lang="zh" hidden>✅ 桌面（<code>$DISPLAY</code>+<code>$WAYLAND_DISPLAY</code> 都空时自动 no-op）</td></tr>
+          <tr><td>Windows</td><td data-lang="en">(none)</td><td data-lang="zh" hidden>（无）</td><td style="color:var(--amber);" data-lang="en">⚠️ <strong>v0.6.1 no-op</strong> — BurntToast adapter planned for v0.6.x dot</td><td style="color:var(--amber);" data-lang="zh" hidden>⚠️ <strong>v0.6.1 暂为 no-op</strong>——BurntToast 适配规划在 v0.6.x dot</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="warn">
+      <span data-lang="en">⚠️ <strong>Windows fallback</strong>: until a toast adapter ships, rely on <code>seek cron list</code> for <code>last_status</code> and <code>tail -F %USERPROFILE%\.seek\cron\runs\*.jsonl</code> for run output.</span>
+      <span data-lang="zh" hidden>⚠️ <strong>Windows 临时方案</strong>：toast 适配落地前，依赖 <code>seek cron list</code> 看 <code>last_status</code> + <code>tail -F %USERPROFILE%\.seek\cron\runs\*.jsonl</code> 查最近运行。</span>
+    </div>
+
+    <h2 data-lang="en">5. External triggers (file bridge)</h2>
+    <h2 data-lang="zh" hidden>5. 外部触发（文件桥）</h2>
+    <p data-lang="en">CI, IDE plugins, shell scripts can write JSON to <code>~/.seek/cron/triggers/</code> — the next tick consumes + deletes:</p>
+    <p data-lang="zh" hidden>CI、IDE 插件、shell 脚本可写 JSON 到 <code>~/.seek/cron/triggers/</code>——下一次 tick 消费 + 删除：</p>
+<pre><span class="prompt">$</span> cat &gt; ~/.seek/cron/triggers/ci-$(date +%s).json &lt;&lt;EOF
+{
+  "trigger_id": "ci-build-1234",
+  "prompt": "CI build 1234 finished on branch foo-feature; summarise test failures",
+  "cwd": "/Users/me/code/myproj",
+  "ttl_seconds": 3600
+}
+EOF</pre>
+    <p data-lang="en">Rules: file mtime must be older than "now − 1s" (prevents tick reading partial writes); parse failure → file renamed to <code>triggers/.malformed/&lt;id&gt;.json</code> + WARN, doesn't block; <code>ttl_seconds</code> expired → silently dropped; consumed → deleted (the directory is an inbox, not history). Run history lives in <code>~/.seek/cron/runs/&lt;id&gt;.jsonl</code> with two-axis GC (keep 100 recent + 30d max-age).</p>
+    <p data-lang="zh" hidden>规则：文件 mtime 必须早于"现在 − 1s"（防 tick 读半截）；解析失败 → 文件 rename 到 <code>triggers/.malformed/&lt;id&gt;.json</code> + WARN，不阻塞；<code>ttl_seconds</code> 过期 → silently 丢弃；跑完即删（目录是 inbox，不是历史）。历史在 <code>~/.seek/cron/runs/&lt;id&gt;.jsonl</code>，双轴 GC（保留 100 个最近 + 30 天最老）。</p>
+
+    <h2 data-lang="en">6. <code>schedule_wakeup</code> LLM tool</h2>
+    <h2 data-lang="zh" hidden>6. <code>schedule_wakeup</code> LLM 工具</h2>
+    <p data-lang="en">The model can schedule a future check-in on itself — e.g., "30 minutes from now, look at CI again." Internally this is just a one-shot cron job (<code>max_runs=1</code>) registered through the same <code>jobs.jsonl</code> pipeline.</p>
+    <p data-lang="zh" hidden>模型可以给自己安排未来回访——比如"30 分钟后再来检查 CI"。本质是通过同一 <code>jobs.jsonl</code> 管道注册一次性 cron 任务（<code>max_runs=1</code>）。</p>
+<pre><span class="dim"># Model calls (not user):</span>
+schedule_wakeup({
+  "seconds": 1800,
+  "prompt": "Check CI for branch foo-feature; report any new failures"
+})
+<span class="dim"># → registered as cron job; fires once; auto-deletes</span></pre>
+
+    <h2 data-lang="en">7. Troubleshooting</h2>
+    <h2 data-lang="zh" hidden>7. 故障排查</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Symptom</th><th data-lang="zh" hidden>症状</th>
+            <th data-lang="en">Likely cause / check</th><th data-lang="zh" hidden>大概率原因 / 检查</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td data-lang="en">Registered a job, never fires</td><td data-lang="zh" hidden>注册了 job，从来不跑</td><td data-lang="en">OS scheduler not running. macOS: <code>launchctl list | grep seek</code> · Linux: <code>systemctl --user list-timers</code> · Windows: <code>schtasks /query /tn "seek cron tick"</code></td><td data-lang="zh" hidden>OS 调度器没启。macOS: <code>launchctl list | grep seek</code> · Linux: <code>systemctl --user list-timers</code> · Win: <code>schtasks /query /tn "seek cron tick"</code></td></tr>
+          <tr><td data-lang="en">Fires but every run auth-fails</td><td data-lang="zh" hidden>跑了但每次 auth fail</td><td data-lang="en">Subprocess env missing API key. Check <code>~/.seek/cron/env</code> exists; <code>seek cron run &lt;name&gt;</code> to reproduce</td><td data-lang="zh" hidden>子进程 env 没 API key。检查 <code>~/.seek/cron/env</code> 是否存在；<code>seek cron run &lt;name&gt;</code> 重现</td></tr>
+          <tr><td data-lang="en">Linux: "notify-send: command not found"</td><td data-lang="zh" hidden>Linux 报 "notify-send: command not found"</td><td data-lang="en"><code>libnotify</code> not installed. <code>apt install libnotify-bin</code> / <code>dnf install libnotify</code></td><td data-lang="zh" hidden>libnotify 没装。<code>apt install libnotify-bin</code> / <code>dnf install libnotify</code></td></tr>
+          <tr><td data-lang="en">Windows: notifications enabled but no popup</td><td data-lang="zh" hidden>Windows 启用通知但没弹窗</td><td data-lang="en">Known v0.6.1 limitation (see §4). Fallback to <code>seek cron list</code>.</td><td data-lang="zh" hidden>v0.6.1 已知限制（见 §4）。暂时 fallback 到 <code>seek cron list</code></td></tr>
+          <tr><td data-lang="en">Same job triggered twice</td><td data-lang="zh" hidden>同名 job 重复触发</td><td data-lang="en">Prior run still active — per-job lock skips new trigger (design behavior; check <code>runs/&lt;id&gt;.jsonl</code> for <code>WARN: prior run still active</code>)</td><td data-lang="zh" hidden>上次 run 还没结束，per-job 锁跳过新触发（设计行为，看 <code>runs/&lt;id&gt;.jsonl</code> 的 <code>WARN: prior run still active</code>）</td></tr>
+          <tr><td data-lang="en">Env file parse error fails spawn</td><td data-lang="zh" hidden>env 文件解析错就 spawn fail</td><td data-lang="en"><strong>By design</strong> — far safer than silent. Fix the syntax; re-run.</td><td data-lang="zh" hidden><strong>设计如此</strong>——比静默更安全。修文件语法；再跑</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span data-lang="en">📖 Full design + risk discussion: <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-routines.md" style="color:var(--teal);text-decoration:underline;">feature-routines.md</a> · markdown guide for direct command paste: <a href="https://github.com/whyiyhw/seek/blob/main/docs/guide-cron.md" style="color:var(--teal);text-decoration:underline;">guide-cron.md</a> · book chapter on routines architecture: <a href="https://github.com/whyiyhw/seek/blob/main/docs/book/chapter-22.md" style="color:var(--teal);text-decoration:underline;">chapter 22</a>.</span>
+      <span data-lang="zh" hidden>📖 完整设计 + 风险讨论：<a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-routines.md" style="color:var(--teal);text-decoration:underline;">feature-routines.md</a> · 直接粘贴命令的 markdown 指南：<a href="https://github.com/whyiyhw/seek/blob/main/docs/guide-cron.md" style="color:var(--teal);text-decoration:underline;">guide-cron.md</a> · routines 架构 book 章：<a href="https://github.com/whyiyhw/seek/blob/main/docs/book/chapter-22.md" style="color:var(--teal);text-decoration:underline;">chapter 22</a>。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to docs</a>
+    <span class="sep">·</span>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<script>
+  // Theme
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  // Language
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => { el.hidden = el.getAttribute('data-lang') !== lang; });
+    document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === lang); });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => { const lang = s.getAttribute('data-lang-val'); if (lang !== currentLang) setLang(lang); });
+  });
+
+  // Platform tabs
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      const target = t.dataset.tab;
+      document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.panel === target));
+    });
+  });
+
+  // Reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

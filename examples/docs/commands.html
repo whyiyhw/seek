@@ -231,6 +231,10 @@
           <tr><td class="cmd">/undo</td><td>/undo [path]</td><td data-lang="en">Undo the last write or edit</td><td data-lang="zh" hidden>撤销上一次写入或编辑</td></tr>
           <tr><td class="cmd">/redo</td><td>/redo [path]</td><td data-lang="en">Redo a previously undone write or edit</td><td data-lang="zh" hidden>重做上一次撤销</td></tr>
           <tr><td class="cmd">/restore</td><td>/restore [turn]</td><td data-lang="en">Restore entire working tree from a git checkpoint</td><td data-lang="zh" hidden>从 git 检查点恢复整个工作树</td></tr>
+          <tr><td class="cmd">/agents</td><td>/agents</td><td data-lang="en">List subagents for this project: spawn time, type, status, turns, tokens, description</td><td data-lang="zh" hidden>列出当前项目的子代理：派生时间、类型、状态、turn 数、token、描述</td></tr>
+          <tr><td class="cmd">/worktrees</td><td>/worktrees</td><td data-lang="en">List seek-managed git worktrees: id, branch, path (includes prior sessions)</td><td data-lang="zh" hidden>列出 seek 管理的 git worktree：id、分支、路径（含历史会话）</td></tr>
+          <tr><td class="cmd">/diagnose</td><td>/diagnose</td><td data-lang="en">Print a diagnostic report (version, OS, provider, config, session metadata) — paste into bug reports</td><td data-lang="zh" hidden>打印诊断报告（版本、OS、provider、配置、session 元数据）——粘到 bug 报告里</td></tr>
+          <tr><td class="cmd">/keys</td><td>/keys</td><td data-lang="en">Show the active keymap (incl. any ~/.seek/keybindings.toml overrides)</td><td data-lang="zh" hidden>显示当前键位映射（含 ~/.seek/keybindings.toml 覆盖）</td></tr>
         </tbody>
       </table>
     </div>
@@ -290,12 +294,31 @@
           <tr><td class="cmd">seek hooks check</td><td data-lang="en">Dry-run: show which hooks would fire for an event</td><td data-lang="zh" hidden>干跑：模拟某事件会触发的 hook</td></tr>
           <tr><td class="cmd">seek hooks trust</td><td data-lang="en">Reset trust record for project hooks</td><td data-lang="zh" hidden>重置项目级 hook 信任记录</td></tr>
           <tr><td class="cmd">seek hooks audit</td><td data-lang="en">Query hook execution audit log</td><td data-lang="zh" hidden>查询 hook 执行审计日志</td></tr>
+          <tr><td class="cmd">seek skill install &lt;path|url&gt;</td><td data-lang="en">Install a skill from local path, git URL, or HTTPS tarball</td><td data-lang="zh" hidden>从本地路径、git URL 或 https 压缩包安装 skill</td></tr>
+          <tr><td class="cmd">seek skill list</td><td data-lang="en">List installed skills (user + project)</td><td data-lang="zh" hidden>列出已安装 skill（用户级 + 项目级）</td></tr>
+          <tr><td class="cmd">seek skill uninstall &lt;name&gt;</td><td data-lang="en">Remove a skill from user-level installs</td><td data-lang="zh" hidden>从用户安装中卸载 skill</td></tr>
+          <tr><td class="cmd">seek skill update &lt;name&gt;</td><td data-lang="en">Re-fetch a git-installed skill</td><td data-lang="zh" hidden>重新拉取 git 安装的 skill</td></tr>
+          <tr><td class="cmd">seek skill stats [--top N]</td><td data-lang="en">Show skill call counts ranked by frequency</td><td data-lang="zh" hidden>按调用频率显示 skill 排行</td></tr>
+          <tr><td class="cmd">seek memory list</td><td data-lang="en">List M-memory entries for current project</td><td data-lang="zh" hidden>列出当前项目的 M 记忆条目</td></tr>
+          <tr><td class="cmd">seek memory show &lt;name&gt;</td><td data-lang="en">Print full content of an M-memory entry</td><td data-lang="zh" hidden>打印某条 M 记忆全文</td></tr>
+          <tr><td class="cmd">seek memory search &lt;query&gt;</td><td data-lang="en">Search M-memory by keyword (tagline + body)</td><td data-lang="zh" hidden>按关键词搜索 M 记忆</td></tr>
+          <tr><td class="cmd">seek memory archive &lt;name&gt;</td><td data-lang="en">Archive a stale entry (preserved on disk, removed from index)</td><td data-lang="zh" hidden>归档某条记忆（保留磁盘，移出索引）</td></tr>
+          <tr><td class="cmd">seek cron create [flags] &lt;prompt&gt;</td><td data-lang="en">Register a scheduled prompt (--at @daily / @every 1h)</td><td data-lang="zh" hidden>注册定时任务（--at @daily / @every 1h）</td></tr>
+          <tr><td class="cmd">seek cron list [--json]</td><td data-lang="en">List registered cron jobs with next-run time</td><td data-lang="zh" hidden>列出已注册 cron 任务及下次触发时间</td></tr>
+          <tr><td class="cmd">seek cron run &lt;name&gt;</td><td data-lang="en">Fire a cron job immediately (bypass schedule)</td><td data-lang="zh" hidden>立即触发某 cron 任务（绕过调度）</td></tr>
+          <tr><td class="cmd">seek cron delete &lt;name&gt;</td><td data-lang="en">Remove a cron job</td><td data-lang="zh" hidden>删除 cron 任务</td></tr>
+          <tr><td class="cmd">seek cron tick</td><td data-lang="en">OS-scheduler entry point — scan + fire all due jobs (called every 1 min by launchd/systemd/Task Scheduler)</td><td data-lang="zh" hidden>OS 调度器入口——扫描并触发所有到期任务（launchd/systemd/Task Scheduler 每分钟调用）</td></tr>
+          <tr><td class="cmd">seek worktree list</td><td data-lang="en">List seek-managed worktrees (includes externally-created ones flagged "external")</td><td data-lang="zh" hidden>列出 seek 管理的 worktree（标 "external" 表示用户手动创建）</td></tr>
+          <tr><td class="cmd">seek worktree gc</td><td data-lang="en">Reap orphan worktrees + dangling refs from prior crashes</td><td data-lang="zh" hidden>回收孤立 worktree + dangling refs</td></tr>
+          <tr><td class="cmd">seek keys list</td><td data-lang="en">List active key bindings (defaults + user overrides)</td><td data-lang="zh" hidden>列出当前键位绑定（默认 + 用户覆盖）</td></tr>
+          <tr><td class="cmd">seek keys check</td><td data-lang="en">Lint ~/.seek/keybindings.toml for conflicts and unknown actions</td><td data-lang="zh" hidden>检查 ~/.seek/keybindings.toml 是否有冲突或未知动作</td></tr>
+          <tr><td class="cmd">seek keys actions</td><td data-lang="en">List all bindable actions (the actions a user override can target)</td><td data-lang="zh" hidden>列出所有可绑定的动作</td></tr>
         </tbody>
       </table>
     </div>
     <div class="note">
-      <span data-lang="en">💡 These subcommands also have TUI slash-command equivalents: <code>/checkpoints</code>, <code>/restore</code>, <code>/undo</code>, <code>/redo</code>, <code>/hooks</code>.</span>
-      <span data-lang="zh" hidden>💡 这些子命令也有 TUI 斜杠命令等价：<code>/checkpoints</code>、<code>/restore</code>、<code>/undo</code>、<code>/redo</code>、<code>/hooks</code>。</span>
+      <span data-lang="en">💡 Many subcommands have TUI slash-command equivalents: <code>/checkpoints</code>, <code>/restore</code>, <code>/undo</code>, <code>/redo</code>, <code>/hooks</code>, <code>/skill</code>, <code>/memory</code>, <code>/agents</code>, <code>/worktrees</code>, <code>/keys</code>. Use either path interchangeably.</span>
+      <span data-lang="zh" hidden>💡 多数子命令有 TUI 斜杠命令等价：<code>/checkpoints</code>、<code>/restore</code>、<code>/undo</code>、<code>/redo</code>、<code>/hooks</code>、<code>/skill</code>、<code>/memory</code>、<code>/agents</code>、<code>/worktrees</code>、<code>/keys</code>。两条路径可互换使用。</span>
     </div>
   </div>
 
@@ -340,6 +363,13 @@
           <tr><td class="flag-key">-upgrade-check</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Check for newer release, never modify</td><td data-lang="zh" hidden">检查新版本，不改动</td></tr>
           <tr><td class="flag-key">-dream</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">M→L distillation scan (read-only)</td><td data-lang="zh" hidden">M→L 蒸馏扫描（只读）</td></tr>
           <tr><td class="flag-key">-dream-write</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Write dream candidates to soul.md</td><td data-lang="zh" hidden">写入 dream 候选到 soul.md</td></tr>
+          <tr><td class="flag-key">-no-suggest</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Disable suggested-reply predictor + UI placeholder (v4 柱 D)</td><td data-lang="zh" hidden>禁用建议回复预测 + UI 占位（v4 柱 D）</td></tr>
+          <tr><td class="flag-key">-no-cron-tick</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Skip startup cron auto-tick (jobs still fire via OS scheduler)</td><td data-lang="zh" hidden>跳过启动时 cron 自动 tick（不影响 OS 调度器触发）</td></tr>
+          <tr><td class="flag-key">-keep-checkpoints</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Preserve session checkpoints/ across session end (default: cleaned)</td><td data-lang="zh" hidden>会话结束时保留 checkpoints/（默认清理）</td></tr>
+          <tr><td class="flag-key">-install</td><td>bool</td><td class="flag-default">false</td><td data-lang="en">Add seek to user PATH (Windows)</td><td data-lang="zh" hidden>把 seek 添加到用户 PATH（Windows）</td></tr>
+          <tr><td class="flag-key">-benchmark</td><td>string</td><td class="flag-default">""</td><td data-lang="en">Run benchmark task (self-hosting | fim-patch) and report metrics</td><td data-lang="zh" hidden>跑基准测试任务并报告指标</td></tr>
+          <tr><td class="flag-key">-benchmark-out</td><td>string</td><td class="flag-default">""</td><td data-lang="en">With -benchmark: write JSON report to this file (default: stdout)</td><td data-lang="zh" hidden>与 -benchmark 配合：报告写入文件（默认 stdout）</td></tr>
+          <tr><td class="flag-key">-provider-name</td><td>string</td><td class="flag-default">"Compatible"</td><td data-lang="en">Display name for --provider=compatible</td><td data-lang="zh" hidden>--provider=compatible 的显示名</td></tr>
         </tbody>
       </table>
     </div>

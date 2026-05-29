@@ -8,3 +8,5 @@
 /docs/sessions       /docs/sessions.html            200
 /docs/memory         /docs/memory.html              200
 /docs/skills         /docs/skills.html              200
+/docs/subagent       /docs/subagent.html            200
+/docs/cron           /docs/cron.html                200
