@@ -636,7 +636,83 @@ func (m Model) renderUserQuestion() string {
 	}
 	sb.WriteString(styleMuted.Render(hint))
 	sb.WriteString("\n")
+
+	// v2 preview rendering: when the cursor is on an option that
+	// has a Preview string, append the preview block. Layout
+	// depends on terminal width:
+	//   - >= 100 cols: render side-by-side via lipgloss
+	//     JoinHorizontal (picker on the left, preview on the right)
+	//   - < 100 cols: append inline as an indented block under
+	//     the picker.
+	// Cursor over the auto-appended "Other" row has no preview
+	// (free-text mode), so we only render when the cursor is on a
+	// real option.
+	if m.pendingQuestionCursor < len(q.Options) {
+		opt := q.Options[m.pendingQuestionCursor]
+		if opt.Preview != "" {
+			preview := truncatePreview(opt.Preview, previewMaxLines, previewMaxCols)
+			if m.width >= previewSidePanelMinCols {
+				// Wide terminal — assemble picker + preview side
+				// by side. Replace the picker output we just built
+				// with the joined version.
+				panel := stylePreviewBox.Render(preview)
+				joined := lipgloss.JoinHorizontal(lipgloss.Top, sb.String(), "  ", panel)
+				return joined + "\n"
+			}
+			// Narrow terminal — inline below the picker.
+			sb.WriteString("\n")
+			sb.WriteString(stylePreviewBox.Render(preview))
+			sb.WriteString("\n")
+		}
+	}
 	return sb.String()
+}
+
+// Preview rendering knobs. See feature-askuser-v2.md §5.3.
+const (
+	previewMaxLines         = 12  // truncate vertically
+	previewMaxCols          = 80  // truncate horizontally
+	previewSidePanelMinCols = 100 // wide-terminal threshold
+)
+
+// stylePreviewBox draws the preview content with a thin border so
+// it reads as a distinct panel from the picker. Colours come from
+// the muted palette already used elsewhere in the TUI so it
+// doesn't compete visually with the active cursor.
+var stylePreviewBox = lipgloss.NewStyle().
+	Border(lipgloss.NormalBorder()).
+	BorderForeground(colourMuted).
+	Padding(0, 1)
+
+// truncatePreview caps a preview string to at most maxLines lines
+// and maxCols runes per line. If either bound trips, appends an
+// explicit "[truncated]" marker so the user knows there's more
+// content the option author wrote. Trailing whitespace on
+// truncated lines is preserved (might be part of ASCII art).
+func truncatePreview(s string, maxLines, maxCols int) string {
+	if s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	truncated := false
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+	for i, line := range lines {
+		// Rune-aware truncation — multi-byte chars (CJK / box-
+		// drawing glyphs) shouldn't get sliced mid-byte.
+		runes := []rune(line)
+		if len(runes) > maxCols {
+			lines[i] = string(runes[:maxCols])
+			truncated = true
+		}
+	}
+	out := strings.Join(lines, "\n")
+	if truncated {
+		out += "\n" + styleMuted.Render("[truncated]")
+	}
+	return out
 }
 
 // formatQuestionRow renders one picker row. selected applies only in

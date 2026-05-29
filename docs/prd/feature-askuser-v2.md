@@ -2,7 +2,7 @@
 
 **所属版本**：seek v0.7.0 · v6 柱 I 第一项
 **前置阅读**：[`v6.md`](v6.md) §3.1 草稿、[`internal/askuser/askuser.go`](../../internal/askuser/askuser.go) v1 实现、[`internal/tools/askuser/askuser.go`](../../internal/tools/askuser/askuser.go) v1 schema
-**状态**：📐 设计稿
+**状态**：🚀 已交付（v0.7.0 · phase 1+2a+2b）。Schema + Batch/AskBatch（cb8ed16）→ TUI 多题 stack 状态机（5b775fe）→ Preview 双栏 + 截断（本提交）。27 个新测试全过，全 repo `-race` 绿。
 **预估工作量**：~2 天
 
 ---

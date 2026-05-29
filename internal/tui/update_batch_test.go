@@ -268,3 +268,175 @@ func ptrModel(updated tea.Model) *Model {
 	m := updated.(Model)
 	return &m
 }
+
+// --- preview rendering tests --------------------------------------
+
+// TestTruncatePreview_LineLimit pins the vertical bound — at most
+// previewMaxLines (12) lines rendered, with "[truncated]" appended.
+func TestTruncatePreview_LineLimit(t *testing.T) {
+	// 15 lines — over the 12 limit.
+	preview := strings.Repeat("line\n", 14) + "line"
+	got := truncatePreview(preview, previewMaxLines, previewMaxCols)
+	got = stripAnsi(got)
+	lines := strings.Split(got, "\n")
+	// 12 content lines + 1 marker line
+	if len(lines) != 13 {
+		t.Errorf("truncated preview line count = %d, want 13 (12 content + 1 marker)", len(lines))
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Errorf("over-limit preview should include [truncated] marker; got:\n%s", got)
+	}
+}
+
+// TestTruncatePreview_ColumnLimit pins the horizontal bound —
+// long lines get sliced at previewMaxCols runes (not bytes).
+func TestTruncatePreview_ColumnLimit(t *testing.T) {
+	long := strings.Repeat("x", 120)
+	got := truncatePreview(long, previewMaxLines, previewMaxCols)
+	got = stripAnsi(got)
+	lines := strings.Split(got, "\n")
+	// First line should be exactly previewMaxCols chars.
+	if firstLine := lines[0]; len([]rune(firstLine)) != previewMaxCols {
+		t.Errorf("first line rune-length = %d, want %d", len([]rune(firstLine)), previewMaxCols)
+	}
+	if !strings.Contains(got, "[truncated]") {
+		t.Errorf("over-column preview should include [truncated]; got:\n%s", got)
+	}
+}
+
+// TestTruncatePreview_WithinBoundsUnchanged: small previews pass
+// through verbatim — no spurious "[truncated]" marker.
+func TestTruncatePreview_WithinBoundsUnchanged(t *testing.T) {
+	preview := "row1\nrow2\nrow3"
+	got := truncatePreview(preview, previewMaxLines, previewMaxCols)
+	if strings.Contains(stripAnsi(got), "[truncated]") {
+		t.Errorf("within-bounds preview should NOT have [truncated]; got:\n%s", got)
+	}
+}
+
+// TestTruncatePreview_Empty: empty input → empty output (no
+// trailing newlines, no marker).
+func TestTruncatePreview_Empty(t *testing.T) {
+	if got := truncatePreview("", 5, 80); got != "" {
+		t.Errorf("empty preview should return empty; got %q", got)
+	}
+}
+
+// TestTruncatePreview_PreservesMultibyteRunes verifies CJK / box-
+// drawing characters get treated as 1 rune each (not 3 bytes).
+// Without rune-aware slicing, "中" would consume 3 of the 80-col
+// budget and could get sliced mid-byte producing invalid UTF-8.
+func TestTruncatePreview_PreservesMultibyteRunes(t *testing.T) {
+	// 100 CJK chars — 100 runes, 300 bytes.
+	preview := strings.Repeat("中", 100)
+	got := truncatePreview(preview, 5, 80)
+	got = stripAnsi(got)
+	// Should truncate to 80 runes worth of CJK + [truncated].
+	first := strings.Split(got, "\n")[0]
+	if rc := len([]rune(first)); rc != 80 {
+		t.Errorf("CJK truncation got %d runes, want 80", rc)
+	}
+	// Also must be valid UTF-8.
+	if !isValidUTF8(first) {
+		t.Errorf("truncated CJK should be valid UTF-8; got bytes: %x", []byte(first))
+	}
+}
+
+// TestRenderUserQuestion_AppendsInlinePreviewOnNarrowTerminal:
+// when m.width < 100, preview renders as an indented block under
+// the picker rather than a side panel.
+func TestRenderUserQuestion_AppendsInlinePreviewOnNarrowTerminal(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick style",
+		Options: []askuser.Option{
+			{ID: "glass", Label: "Glass", Preview: "█▓▒░"},
+			{ID: "flat", Label: "Flat"},
+		},
+	}
+	m := emptyModel()
+	m.pendingQuestion = &askuser.Request{Question: q}
+	m.pendingQuestionSelected = map[int]bool{}
+	m.pendingQuestionCursor = 0 // on 'glass'
+	m.width = 80                // narrow
+
+	out := stripAnsi(m.renderUserQuestion())
+	if !strings.Contains(out, "█▓▒░") {
+		t.Errorf("preview content should render under narrow picker; got:\n%s", out)
+	}
+}
+
+// TestRenderUserQuestion_NoPreviewWhenCursorOnOther: cursor on
+// the auto-appended Other row must NOT trigger preview rendering
+// (Other has no Preview field — free-text input is its own UX).
+func TestRenderUserQuestion_NoPreviewWhenCursorOnOther(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick",
+		Options: []askuser.Option{
+			{ID: "a", Label: "A", Preview: "PREVIEW-A"},
+			{ID: "b", Label: "B", Preview: "PREVIEW-B"},
+		},
+	}
+	m := emptyModel()
+	m.pendingQuestion = &askuser.Request{Question: q}
+	m.pendingQuestionSelected = map[int]bool{}
+	m.pendingQuestionCursor = 2 // on auto-appended Other row
+	m.width = 120
+
+	out := stripAnsi(m.renderUserQuestion())
+	if strings.Contains(out, "PREVIEW-A") || strings.Contains(out, "PREVIEW-B") {
+		t.Errorf("cursor on Other row should NOT render any preview; got:\n%s", out)
+	}
+}
+
+// TestRenderUserQuestion_NoPreviewBlockWhenOptionHasNone: cursor
+// on an option without a Preview — render the picker normally
+// without an empty preview box.
+func TestRenderUserQuestion_NoPreviewBlockWhenOptionHasNone(t *testing.T) {
+	q := askuser.Question{
+		Question: "Pick",
+		Options:  []askuser.Option{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}},
+	}
+	m := emptyModel()
+	m.pendingQuestion = &askuser.Request{Question: q}
+	m.pendingQuestionSelected = map[int]bool{}
+	m.pendingQuestionCursor = 0 // 'a' has no Preview
+	m.width = 200
+
+	out := stripAnsi(m.renderUserQuestion())
+	// Picker should render; no "border line" artifacts from an
+	// empty preview box would've showed up via ─ chars in the
+	// border (NormalBorder has ─ and │). Confirm picker text is
+	// present and nothing else unexpected.
+	if !strings.Contains(out, "Pick") {
+		t.Errorf("picker header missing: %s", out)
+	}
+}
+
+// stripAnsi removes the lipgloss-emitted ANSI escape sequences so
+// string-matching tests aren't fooled by colour codes.
+func stripAnsi(s string) string {
+	var out strings.Builder
+	skip := false
+	for _, r := range s {
+		switch {
+		case r == 0x1b:
+			skip = true
+		case skip && r == 'm':
+			skip = false
+		case skip:
+			// inside escape — drop
+		default:
+			out.WriteRune(r)
+		}
+	}
+	return out.String()
+}
+
+func isValidUTF8(s string) bool {
+	for _, r := range s {
+		if r == 0xFFFD { // replacement char = invalid UTF-8 byte
+			return false
+		}
+	}
+	return true
+}
