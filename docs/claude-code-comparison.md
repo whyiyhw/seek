@@ -1,10 +1,12 @@
 # 功能对比：Seek vs. Claude Code
 
-> **最后更新**：2026-05-27
+> **最后更新**：2026-05-29（v5 柱 G + 柱 H ship 后）
 > **数据来源**：[Claude Code 官方文档](https://code.claude.com/docs/en/overview)（sitemap: 130+ 页面，周 changelog 覆盖 2026 W13–W20）+ 在 Claude Code 内可直接观察到的工具/skill 清单；Seek 代码库主干。
 > **核查范围**：Seek 一侧所有功能均回到代码核对；Claude Code 一侧仅保留有官方文档或直接观察证据的条目，存疑项已标注 "(待确认)"。
 
 系统对比 **Seek**（开源、DeepSeek 优先、多 LLM 智能体）与 **Claude Code**（Anthropic 的自主编程智能体参考实现）。
+
+> **v0.6.x 重要变化**：v5 柱 G（v0.6.0 — 子代理 + worktree 隔离）和柱 H（v0.6.1 — cron / wakeup / triggers / OS notification）已 ship，关闭了过去版本里"架构级缺口"的全部 3 个 🔴 P0 项目。本次更新把 §7 / §10 / 差距汇总 / 核心结论同步到最新代码现实。
 
 ## 图例
 
@@ -125,11 +127,11 @@
 | Code review（`/review`） | ✅ | ✅ | **对等** | Seek：`/review` 激活 plan + review prompt |
 | Ultra review（云端多 agent 深度复审） | ✅ | ❌ **缺失** | — | Claude Code：`/code-review ultra`（旧名 `/ultrareview`），调用云端多 agent 协作复审 |
 | GitHub PR 工作流 | ✅ | 🔶 **等效替代** | Claude Code 通过 `gh` CLI + Bash 创建/审查/合并 PR（无独立的 `/pr-create` 斜杠命令）；Seek 同样可通过 `gh` 经 `bash` 工具达成，但缺少为 PR 流程专门优化的 prompt/skill |
-| Worktree 管理 | ✅ | ❌ **缺失** | — | Claude Code 提供 `EnterWorktree`/`ExitWorktree` 工具用于并行任务隔离 |
+| Worktree 管理 | ✅ | ✅ **v0.6.0** | **对等** | Seek：`enter_worktree` / `exit_worktree` 工具 + `seek worktree list/gc` CLI + `/worktrees` TUI 面板；`exit if_dirty=discard` 把 work 暂存到 `refs/seek/discarded/<ts>` 防误删 |
 | Tab 补全（TUI 命令） | ✅ | ✅ **v0.4.x (M9.5)** | **对等** | Seek：斜杠命令 Tab 补全；唯一匹配直接 accept，多匹配填到最长公共前缀 |
 | Shell 命令 hooks | ✅ | ✅ **v0.4.1** | **对等** | Seek：`.seek/hooks.toml` 可配置 `pre_tool` deny + 五个 observer |
 
-**小结**：开发工作流主要差距收敛到 **worktrees** 与 **PR 流程优化 prompt**。自动 git checkpoint、文件级 undo/redo 已在 v0.4.0 补齐，斜杠命令 Tab 补全在 v0.4.x（M9.5）补齐。
+**小结**：开发工作流剩余差距收敛到 **PR 流程优化 prompt** 和 **云端 ultra review**。自动 git checkpoint、文件级 undo/redo 已在 v0.4.0 补齐，斜杠命令 Tab 补全在 v0.4.x（M9.5）补齐，worktree 管理在 v0.6.0 补齐（与下方 §10 子代理强耦合）。
 
 ---
 
@@ -174,12 +176,13 @@
 
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
-| 子代理（`Agent` 工具，可指定 `subagent_type`） | ✅ | ❌ **缺失** | — | Claude Code 可 spawn 子 agent 并行/隔离执行任务，支持 `worktree` 隔离 |
-| 子代理类型库（Explore / Plan / general-purpose 等） | ✅ | ❌ **缺失** | — | 内置专用子 agent 类型 |
-| 定时任务 / Routines（`CronCreate` + `/schedule`）| ✅ | ❌ **缺失** | — | Claude Code 把 cron 调度的远程 agent 称为 "routines"；与下方"定时任务"是同一物，对外接口是 `/schedule` skill |
-| 远程触发 / PushNotification | ✅ | ❌ **缺失** | — | `RemoteTrigger` / `PushNotification` 工具，连接远程开发环境与消息通道 |
+| 子代理（`Agent` 工具，可指定 `subagent_type`） | ✅ | ✅ **v0.6.0** | **对等** | Seek：`agent` 工具，标 `ReadOnly` 让一轮多次 `agent` 调用**并行分派**；`permission.Policy.Spawn` 强制权限单调收紧；`cache.Tracker.AdoptChild` 把子 token 累加到父状态栏 |
+| 子代理类型库（Explore / Plan / general-purpose 等） | ✅ | ✅ **v0.6.0** | **对等** | Seek：三个内置模板 `explore`（只读调研）/ `plan`（起方案 · 已窄化为只读）/ `general-purpose`（继承父 Policy），通过 `agent({type: ...})` 选择 |
+| 定时任务 / Routines（`CronCreate` + `/schedule`）| ✅ | ✅ **v0.6.1** | 🔶 **架构差异** | Seek：`seek cron create/list/run/delete/tick`，**零常驻 daemon**——委派 OS 调度器（launchd / systemd / cron / Task Scheduler）每分钟调用 `seek cron tick`。Claude Code routines 是**云托管**远程 agent；seek 是**本地** agent，机器关机就不跑（trade-off：无 vendor lock-in + 无数据上传 ↔ 无"睡觉时跑"可靠性） |
+| 模型自调用唤醒 | ✅ | ✅ **v0.6.1** | **对等** | Seek：`schedule_wakeup` LLM 工具——模型说"30 分钟后再来检查"自动注册 `max_runs=1` 一次性 cron 任务 |
+| 远程触发 / PushNotification | ✅ | 🔶 **等效替代** | — | Seek：文件桥触发 `~/.seek/cron/triggers/<id>.json`（CI / IDE 插件写文件、下次 tick 消费）+ OS 通知（macOS osascript / Linux notify-send / Windows toast pending）。Claude Code 走云 push 到手机；seek 走 OS 本地通知，无移动端推送 |
 
-**小结**：最大差距区，全是多 agent / 调度 / 远程方向。Seek 目前是单进程单 agent 设计，没有 spawn / 调度 / 远程触发机制。
+**小结**：v5 柱 G（v0.6.0）+ 柱 H（v0.6.1）关闭了过去版本里全部 3 个 🔴 P0 架构级缺口。剩下的是**架构选择**而非缺口——Claude Code 的 routines 走云托管（vendor lock-in + 移动 push + 24/7 可靠 vs seek 的零 daemon + 本地隐私 + 机器关机就不跑）。两套模型针对的是不同用户画像，不再适合用"对等/缺失"二元判断。
 
 ---
 
@@ -238,13 +241,14 @@
 | **🟢 已交付** | Hooks | **Pre/post 命令 hooks** | v0.4.1：`.seek/hooks.toml` 可配置，`pre_tool` deny + 五个 observer |
 | **🟢 已交付** | UI | **Tab 补全（斜杠命令）** | v0.4.x（M9.5）：唯一匹配 accept、多匹配填最长公共前缀 |
 | **🟢 已交付** | UI | **快捷键绑定** | v0.4.x（M9.4）：`~/.seek/keybindings.toml` + `keys check` 校验 |
-| **🔴 P0** | Agent | **子代理 / `Agent` 工具** | 架构级缺口；Claude Code 支持 `subagent_type` + 子上下文隔离 + 可选 worktree。并行探索 / 长上下文保护 / 角色专精都依赖这一层 |
-| **🔴 P0** | 调度 | **Routines / 远程触发（`CronCreate` / `ScheduleWakeup` / `RemoteTrigger` / `PushNotification`）** | 架构级缺口；与子代理共享调度面，做应一起设计 |
-| **🔴 P0** | 工作流 | **Worktrees（`EnterWorktree`/`ExitWorktree`）** | 与子代理强耦合：子 agent 默认在隔离副本工作 |
+| **🟢 已交付** | Agent | **子代理 / `agent` 工具 + 3 个内置 type** | v0.6.0（v5 柱 G）：`agent` 工具 + `explore/plan/general-purpose` 模板 + 父子权限单调收紧 + cost 累加 + `/agents` TUI 面板 |
+| **🟢 已交付** | 工作流 | **Worktrees（`enter_worktree`/`exit_worktree`）** | v0.6.0：与子代理强耦合 + `seek worktree list/gc` CLI + `refs/seek/discarded/<ts>` 防误删 |
+| **🟢 已交付** | 调度 | **Cron / Wakeup / Triggers / OS 通知** | v0.6.1（v5 柱 H）：`seek cron` CLI + `schedule_wakeup` LLM 工具 + 文件桥 trigger + macOS/Linux 通知。**零常驻 daemon**，架构上与 Claude Code 云托管 routines 不同（trade-off 见 §10 小结） |
 | **🟡 P1** | UI | **`AskUserQuestion` 结构化选择器** | 多题/多选项/preview 双栏渲染，对"让模型自己拿决定"路径影响大 |
 | **🟡 P1** | 工具 | **LSP 工具** | 结构化符号/引用查询，大型代码库 grep 替代不掉 |
-| **🟡 P1** | Bash | **后台执行 + `Monitor` 流式跟踪** | 长任务跟踪能力，与调度面 P0 有部分耦合 |
+| **🟡 P1** | Bash | **后台执行 + `Monitor` 流式跟踪** | 长任务跟踪能力 |
 | **🟡 P1** | 工作流 | **复合 review skill（`/code-review` 的 low/medium/high + `--fix`）** | 不含云端 `ultra` 模式；本地 plan-mode + propose 应能实现 |
+| **🟡 P1** | 推送 | **移动端 push 通知** | Claude Code 走云 push 到手机；seek 当前限 OS 桌面通知（macOS Notification Center / Linux libnotify）。Windows toast 适配延后 v0.6.x dot |
 | **🟠 P2** | MCP | **TUI 内重启 server** | 中等投入 |
 | **🟠 P2** | 工具 | **`NotebookEdit`（Jupyter）** | 数据科学场景；用户群可能小 |
 | **🟠 P2** | 工具 | **`WebSearch`** | 不只是 fetch 单 URL；Seek 已有 webfetch 框架可扩展 |
@@ -269,6 +273,9 @@
 | **零遥测** | 隐私优先，无数据收集 |
 | **无地区限制** | 全球可用 |
 | **MIT 协议** | 宽松许可，无使用限制 |
+| **零常驻 daemon 的本地调度** | seek 不跑后台进程；定时任务委派 OS（launchd / systemd / Task Scheduler）拉起 `seek cron tick`。无 resident memory 占用、无"是否启动"歧义、无 auto-start config 维护、跨重启自动恢复 |
+| **文件桥触发**（无需 webhook server） | CI / IDE 插件写 `~/.seek/cron/triggers/<id>.json`，下次 tick 消费。不需要 HTTP server / 端口管理 / 反向代理 / TLS / 认证 |
+| **`~/.seek/cron/env` 显式注入** | 解决 OS 调度器 env 极简问题（launchd/systemd/cron 都不会继承 shell 的 `DEEPSEEK_API_KEY`）。dotenv 格式 + 解析错误明确报错（不会"静默掉 API key"） |
 
 ---
 
@@ -276,12 +283,14 @@
 
 1. **核心对等**：Seek 在 Agent 基础循环、Plan/权限、MCP、Skills 上与 Claude Code 对等；记忆方向一致但模型不同（Seek L/M/S vs. Claude Code 类型化条目）。这些是日常编码最常用的能力。
 
-2. **最大差距集中在一处**：**多 agent + 调度 + worktree 隔离**这套组合（`Agent` / `CronCreate` / `ScheduleWakeup` / `EnterWorktree` / `RemoteTrigger` / `PushNotification`）在 Claude Code 里互相耦合，要做就得一起设计。Seek 目前是单进程单 agent。
+2. **过去的"最大架构缺口"已关闭（v0.6.x）**：子代理（v0.6.0）、worktree 隔离（v0.6.0）、cron / 唤醒 / 触发 / OS 通知（v0.6.1）三个 🔴 P0 项全部 ship。Seek 不再是"单进程单 agent"——模型可以 spawn 并行子代理（standalone session + token 账户 + 可选 worktree 隔离），可以让自己定时唤醒，可以由外部 CI/IDE 触发跑活。**剩下的"差距"全部是架构选择**而非缺口（云托管 routines vs 本地零 daemon），针对的是不同用户画像。
 
 3. **第二档单点工具缺口**：`LSP`、`Monitor` + 后台 bash、`NotebookEdit`、`WebSearch`、结构化 `AskUserQuestion` —— 都是独立可补的点，每个一两天工程，挑两个做能很快缩差距。
 
-4. **v0.4.x 已补齐的差距**：自动 git checkpoint、文件级 undo/redo、shell hooks、斜杠命令 Tab 补全、可自定义快捷键。Workflow 层面已基本对齐 Claude Code。
+4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 
-5. **独特优势**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰组合，叠加单二进制与零遥测，这些是 Claude Code 体系内难以复制的差异化能力。
+5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。
 
-6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
+6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入、**移动端 push 通知**——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
+
+7. **本次更新触发**：v5 柱 G + 柱 H ship 后（2026-05-28 / 2026-05-29），原有的"🔴 P0 架构缺口"段落已与代码现实严重脱节。本次完整重写 §7 / §10 / 差距汇总 / 独特优势 / 核心结论，把"架构级缺口"那条主线收尾。
