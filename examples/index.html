@@ -1317,8 +1317,7 @@
     .terminal-hero .ascii-logo {
       font-size: clamp(.75rem, 4vw, 1.1rem);
       font-weight: 500;
-      letter-spacing: 0.04em;
-      line-height: 1.35;
+      line-height: 1.15;
       text-shadow: 0 0 10px rgba(245,166,35,.25);
       margin-bottom: 12px;
     }
@@ -1388,15 +1387,15 @@
       <span data-lang="en">seek — DeepSeek native AI coding agent</span>
       <span data-lang="zh" hidden>seek — DeepSeek 原生 AI 编程助手</span>
     </h1>
-    <pre class="ascii-logo reveal">
-   ████ █████ █████ █   █
-  █     █     █     █  █
-  █     █     █     █ █
-   ███  ████  ████  ██
-      █ █     █     █ █
-      █ █     █     █  █
-  ████  █████ █████ █   █
-    </pre>
+    <!-- trailing spaces intentional, do not strip — matches internal/tui/banner.go wordmark width -->
+    <pre class="ascii-logo reveal"><!--
+-->   ████ █████ █████ █   █
+  █     █     █     █  █ 
+  █     █     █     █ █  
+   ███  ████  ████  ██   
+      █ █     █     █ █  
+      █ █     █     █  █ 
+  ████  █████ █████ █   █</pre>
     <div class="term-window term-hero-window" id="term-demo">
       <div class="term-titlebar">
         <div class="term-dots">
