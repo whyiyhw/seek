@@ -161,3 +161,11 @@ if ($segments -notcontains $dir) {
 > Restart your terminal after changing PATH. The `go install` path doesn't need this step.
 
 升级 / Upgrade：`seek -upgrade`
+
+---
+
+## 进阶：定时任务、外部触发、通知 / Cron, triggers, notifications
+
+`seek cron` 在 Windows 上跑通需要走 **Task Scheduler**，且 OS 通知在 v0.6.1 是 no-op。完整跨平台设置（含 `~/.seek/cron/env` API key 注入、Task Scheduler 命令、Windows 通知限制说明）见 **[`guide-cron.md`](./guide-cron.md)**。
+
+> **English**: To run `seek cron` on Windows you need Task Scheduler, and OS notifications are a no-op on v0.6.1. Full cross-platform setup (env injection, Task Scheduler commands, the Windows notification limitation) lives in **[`guide-cron.md`](./guide-cron.md)**.

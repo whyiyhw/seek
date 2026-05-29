@@ -2,22 +2,24 @@
   <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go Version">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
   <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI">
-  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome">
+  <img src="https://img.shields.io/badge/lines-85k-orange" alt="LOC">
 </p>
 
 **Languages**: 中文 · [English](./docs/README_EN.md)
 
 # seek
 
-**终端里的编程助手**——基于 DeepSeek / Anthropic / OpenAI，读写文件、执行命令、帮你写代码。不用离开键盘。
+**Claude Code 的工作流，DeepSeek 的价格。** 开源、单二进制、跨平台。
 
-> 开源 (MIT) · 无地区限制 · 无 telemetry · 欢迎全球用户
+```
+┌─ seek · deepseek-v4-flash ────────────────── cache 96% · saved $0.42 ─┐
+│ /agents (2 active)  · /worktrees (1)  · cron: next @14:30 (12m)       │
+└────────────────────────────────────────────────────────────────────── ─┘
+```
 
 ---
 
-## ⚡ 快速开始
-
-**macOS / Linux**（无需 Go 环境，~5 MB 单二进制）：
+## ⚡ 安装
 
 ```bash
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -28,111 +30,130 @@ curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER
 seek
 ```
 
-首次运行引导设置 API key，之后即可开始对话。详细步骤：[安装指南](./docs/)
-
-**Windows**：从 [Releases](https://github.com/whyiyhw/seek/releases/latest) 下载 `seek_*_windows_amd64.zip` 解压到固定目录并[加入 PATH](./docs/guide-windows.md) 后即可在终端输入 `seek`。TUI 请在 **[Windows Terminal](https://github.com/microsoft/terminal)** 中运行（[安装说明](./docs/guide-windows.md)）；不要用蓝色老式 PowerShell 窗口。
-
-> macOS Gatekeeper 问题：`curl | tar` 管道不会触发；若浏览器下载被打上 quarantine，执行 `xattr -d com.apple.quarantine seek` 即可。
-
-**升级**：`seek -upgrade` 自动拉取最新 release，校验 sha256，原子替换。TUI 内也可 `/upgrade`。
+首次运行引导设置 API key。Windows 用户走 [`docs/guide-windows.md`](./docs/guide-windows.md)；macOS Gatekeeper / 升级 / 离线安装看 [`docs/`](./docs/)。
 
 ---
 
-## 🎯 为什么选 seek
+## 它能做什么
 
-### 💰 便宜一个数量级
+### 子代理 + Worktree 并行（v0.6.0）
 
-DeepSeek 输入价格（来源：`internal/pricing/pricing.go`）：
+模型可以派生子代理并行做调研、起方案、试方案。每个子代理有独立 token 账户、独立 transcript、可选隔离 git worktree。
 
-| 对比项 | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
-|---|---|---|---|
-| 输入（无缓存） | **$0.14** / 1M tok | **$0.435** / 1M tok¹ | $3 / 1M tok |
-| 输入（前缀缓存命中） | **$0.0028** / 1M tok | **$0.003625** / 1M tok | $0.30 / 1M tok |
-| 输出 | **$0.28** / 1M tok | **$0.87** / 1M tok | $15 / 1M tok |
-| 错峰折扣² | **再 5 折** | **再 5 折** | — |
-
-> ¹ V4-Pro 目前 promo 价（75% 折扣）；全价 $1.74 / $0.0145 / $3.48。  
-> ² 北京时间 00:30–08:30。
-
-实测 prefix-cache hit 率 **95.7%**（前 5 轮除外 97%）——工程纪律写入工具，成本节约在状态栏实时可见。
-
-### 📦 单二进制零依赖
-
-`~5 MB`，无 Python / Node runtime，无 `npm install` / `pip install`。`go install github.com/whyiyhw/seek/cmd/seek@latest` 或 release tarball，macOS / Linux / Windows 三平台。
-
-### 🧠 三层记忆（L/M/S）
-
-| 层级 | 名称 | 作用 |
-|---|---|---|
-| **S** (短期) | 会话记忆 | 自动保存完整消息历史，支持 `/branch` 分叉和 `/compact` 压缩 |
-| **M** (中期) | 项目记忆 | `memory_observe` 写入关键决策，`memory_recall` 检索，decay-score GC 自动遗忘 |
-| **L** (长期) | 用户本源 | `seek -dream` 跨项目归纳用户偏好，常驻 system prompt |
-
-Claude Code / Cursor 仅有会话持久化——缺少跨会话的项目记忆和用户偏好归纳。
-
-### 🎯 DeepSeek 专属能力
-
-- **V4 推理模式**（`Thinking.Type=enabled`）：通过 `think` 工具按需调用；内置 `dual-model` skill 做 reasoner → 执行 → 反思
-- **FIM 端点**（`fim_complete`）：小范围修改走填空补全，比 chat 便宜 5–10×
-- **缓存命中率实时可见**：状态栏显示 hit ratio + 节省 token 数
-- **错峰倒计时**：状态栏显示当前是否在 5 折时段，以及距下次切换时间
-
-### 🖥️ TUI 原生交互流
-
-- **`/plan`** — 只读探索模式，审计 agent 计划而不动文件
-- **`/steer`** — 流中插入指令（macOS 友好的 Alt+Enter 替代方案）
-- **`/review`** — 一键代码审查：激活 plan + 审查 prompt
-- **`ask_user`** — 模型可以打开 TUI 选择器征求你的决定
-- **空 Enter 撤回** — 有排队消息时，空输入框按 Enter 撤回
-
-### 🌏 中英双语
-
-工具描述、system prompt、错误信息中英双语。中文 prompt 在 DeepSeek 上响应优于多数欧美模型，是 seek 的核心使用场景之一。英文工作流无限制——其他 provider 默认英文路径，自然衔接。
-
----
-
-## 📚 Skills & 生态
-
-兼容 [Anthropic Agent Skills 格式](https://docs.anthropic.com/en/docs/claude-code/skills)（`<dir>/SKILL.md` + frontmatter），任何 Claude Code skill 仓库可零修改安装。
-
-```bash
-seek skill create <name>              # 创建 skill
-seek skill install ./my-skill         # 本地路径安装
-seek skill install https://github.com/foo/bar#v1.0.0  # Git URL
-seek skill list                       # 查看已加载
-seek skill stats --top 5              # 调用排行
+```mermaid
+graph LR
+  P["父 agent"]
+  E["subagent · explore<br/>调研三个目录"]
+  L["subagent · plan<br/>起方案"]
+  W["subagent · worktree<br/>隔离试方案"]
+  P --> E
+  P --> L
+  P --> W
+  E --> S1[summary]
+  L --> S2[summary]
+  W --> S3[summary]
 ```
 
-所有命令 TUI 内可用：`/skill <verb>`。单文件 `.md` skill 永久兼容。
+权限单调收紧（子永远不能松于父），成本自动累加到父状态栏。TUI `/agents` `/worktrees` 实时查看。
 
-**其他生态能力**：MCP 服务端接入 · 文件系统权限系统（默认询问 / `--yolo` / 路径白名单）· JSON-RPC 2.0 服务模式（IDE 接入）· 多 LLM provider（Anthropic / OpenAI / Gemini / OpenAI 兼容端点）。
+### 定时唤醒 + 外部触发（v0.6.1）
+
+借力 OS 调度器，**零常驻 daemon**。可以让 cron 跑定时 prompt、让模型自己说"30 分钟后再来检查"、让 CI / IDE 插件写文件触发。
+
+```mermaid
+graph LR
+  OS["launchd / systemd / cron"]
+  T["seek cron tick"]
+  J["jobs.jsonl"]
+  X["triggers/*.json"]
+  R["子进程: seek -p '<prompt>'"]
+  N["OS notification"]
+  OS --> T
+  T --> J
+  T --> X
+  J --> R
+  X --> R
+  R --> N
+```
+
+`seek cron create/list/run` 管定时；`schedule_wakeup` 工具让模型主动安排回访；macOS `osascript` / Linux `notify-send` 自动选择（Windows 通知 v0.6.1 暂为 no-op）。完整启用步骤见 [`docs/guide-cron.md`](./docs/guide-cron.md)。
+
+### 便宜一个数量级
+
+DeepSeek 输入价格（源 `internal/pricing/pricing.go`）：
+
+| 项 | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
+|---|---|---|---|
+| 输入（无缓存） | **$0.14** / 1M | **$0.435** / 1M¹ | $3 / 1M |
+| 输入（缓存命中） | **$0.0028** / 1M | **$0.003625** / 1M | $0.30 / 1M |
+| 输出 | **$0.28** / 1M | **$0.87** / 1M | $15 / 1M |
+| 错峰² 折扣 | **再 5 折** | **再 5 折** | — |
+
+> ¹ promo 价 25% 全价。  ² 北京时间 00:30–08:30。
+
+工程纪律保证缓存命中：tool schema 是 `[]byte` 常量、tool 输出大小写入端就限定、历史消息从不在发送前重写。**实测稳态 prefix-cache 命中率 95–97%**。
+
+### 其他能力
+
+- **三层记忆**——S 会话 JSONL、M 项目 `memory_observe` + `/distill`、L 用户 `seek -dream` → `~/.seek/soul.md`
+- **双轴权限**——Pref（Deny/Ask/Yolo）× Workflow（None/PlanAnalyze/PlanExecute），workflow 永远 trump pref
+- **DeepSeek 专属**——V4 thinking 通过 `think` 工具按需调用、FIM 端点小补全便宜 5–10×、状态栏实时显示 cache 命中 + 错峰倒计时
+- **撤销安全网**——每 turn 自动 git checkpoint，`/undo` / `/redo` / `/restore` 文件级回滚
+- **Shell hooks + MCP client + Skills v2**——`.seek/hooks.toml` 钩子、MCP server 透传、兼容 [Anthropic Skills 格式](https://docs.anthropic.com/en/docs/claude-code/skills)零修改安装
 
 ---
 
-## 📖 路线图
+## 工具与命令
 
-里程碑 **M0–M9 全部交付**。最近新增（v0.4.x+）：
+### 主入口
 
-| 功能 | 说明 |
-|---|---|
-| `ask_user` 工具 | 模型可打开 TUI 选择器征求你的决定 |
-| `skill_fetch` / `skill_commit` | 模型可直接获取并安装 skill（需审批） |
-| `/plan` · `/steer` · `/review` | TUI 交互升级 |
-| Skill v2 目录包 | Git URL / HTTPS 压缩包 / 本地路径安装 |
-| **Checkpoint 撤销安全网** | git 每 turn 快照 + 文件级 undo/redo，`/undo` `/redo` `/restore` |
-| **Shell Hooks** | 工具调用前后 shell 钩子，`.seek/hooks.toml` 可配置 |
-| Windows 安装 | `seek -install` 自动加入 PATH，首次运行提示 |
+```bash
+seek                       # TUI
+seek -p '<prompt>'         # 一次性打印模式（pipeline 友好）
+seek -rpc                  # JSON-RPC 2.0 server（IDE 接入）
+seek -resume <sid>         # 续传指定 session（`-continue` 续最近）
+```
 
-完整设计文档：[`docs/prd/`](./docs/prd/) | 贡献指南：[`AGENTS.md`](./AGENTS.md)
+### 子系统（独立子命令）
+
+```bash
+seek skill      install/list/stats/uninstall/update
+seek memory     list/show/search/archive
+seek cron       create/list/run/delete/tick
+seek worktree   list/gc
+seek checkpoint list/clean       # 配合 seek undo / seek redo
+seek hooks      list/check/trust/audit
+seek keys       list/check/actions
+```
+
+每个子命令在 TUI 内也以 `/<name>` 形式可用（`/skill use <name>`、`/memory show`、…）。
+
+### TUI 独有
+
+`/plan` 切只读探索；`/steer` 流中插入指令；`/agents` `/worktrees` 编排面板；`/distill` 抽取项目记忆候选；`/review` 一键代码审查。完整 26 个 slash：`/help`。
 
 ---
 
-## 🔓 开源 & 贡献
+## 路线图
 
-[MIT 协议](./LICENSE)。欢迎所有地区开发者使用、提 issue、提 PR——无地区限制，无身份审核，无强制 telemetry。
+| 里程碑 | 主题 | 状态 |
+|---|---|---|
+| M0–M9 | DeepSeek 客户端、agent loop、多 provider、session、skill、hooks、checkpoint | 已 ship |
+| M10 | plan-mode v2、permission 重构、active memory、webfetch、MCP client | 已 ship |
+| M11.0 | v5 柱 G——subagent + worktree | 已 ship (v0.6.0) |
+| M11.1–11.3 | v5 柱 H——cron + wakeup + push + triggers | 已 ship (v0.6.1) |
+| v0.6.x dot | `/routines` 面板、`seek cron logs/edit`、5-field cron 表达式 | 计划中 |
+| v0.7+ | `--max-cost` 熔断、跨机同步、HTTP webhook、依赖图 | brainstorm |
 
-灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）；归属说明见 [`NOTICE`](./NOTICE)。踩坑记录见 [`docs/pitfalls.md`](./docs/pitfalls.md)；Windows TUI 见 [`docs/guide-windows.md`](./docs/guide-windows.md)。
+完整 PRD：[`docs/prd/`](./docs/prd/)（v0–v5 umbrella + 11 个 feature PRD）  
+贡献：[`AGENTS.md`](./AGENTS.md) · 踩坑：[`docs/pitfalls.md`](./docs/pitfalls.md)
 
 ---
 
-*seek — ~49k 行 Go（25k 非测试），44 个包，macOS / Linux / Windows 全平台 -race 测试通过。*
+## 开源
+
+[MIT](./LICENSE)。无地区限制、无身份审核、无强制 telemetry。灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）；归属见 [`NOTICE`](./NOTICE)。
+
+---
+
+*~85k 行 Go（~44k 非测试）· 66 个包 · macOS / Linux / Windows 全平台 -race 通过*
