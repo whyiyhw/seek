@@ -3,6 +3,7 @@ package wakeup
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -201,9 +202,15 @@ func TestNew_PanicsOnNilStore(t *testing.T) {
 // store_error wire format rather than a Go error. The LLM
 // gets a structured signal it can react to (retry, escalate).
 func TestExecute_StoreErrorReturnsWireFailure(t *testing.T) {
-	// Construct a Store pointing at an unwritable path so
-	// Create fails on MkdirAll.
-	store := routines.OpenStoreAt("/dev/null/cannot/write/here")
+	// Parent of jobs.jsonl must be a directory; if a regular file
+	// occupies that path, MkdirAll fails on every OS (unlike
+	// /dev/null/... which only blocks writes on Unix).
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := routines.OpenStoreAt(filepath.Join(blocker, "jobs.jsonl"))
 	tool := New(store).WithNow(func() time.Time { return time.Now() })
 
 	args := json.RawMessage(`{"delay_seconds": 60, "prompt": "p"}`)
