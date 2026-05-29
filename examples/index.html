@@ -4,16 +4,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#0b0b0e" />
-<meta name="description" content="seek — a DeepSeek-native terminal AI coding agent. 5 MB single binary, zero dependencies, open source (MIT)." />
-<meta property="og:title" content="seek — DeepSeek native AI coding agent" />
-<meta property="og:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT). 10–100× cheaper than Claude." />
+<meta name="description" content="seek — a DeepSeek-native terminal AI coding agent with subagent parallel workers, checkpoint undo/redo, and persistent memory. 5 MB single binary, zero deps, open source (MIT)." />
+<meta property="og:title" content="seek — DeepSeek-native AI coding agent with subagent &amp; memory" />
+<meta property="og:description" content="A DeepSeek-native terminal AI coding agent. Subagent workers, checkpoint safety net, persistent memory. 5 MB, zero deps, open source (MIT)." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://github.com/whyiyhw/seek" />
 <meta property="og:image" content="https://opengraph.githubassets.com/1/github/whyiyhw/seek" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="seek — DeepSeek native AI coding agent" />
-<meta name="twitter:description" content="A DeepSeek-native terminal AI coding agent. 5 MB, zero deps, open source (MIT)." />
-<title>seek — DeepSeek native AI coding agent</title>
+<meta name="twitter:title" content="seek — DeepSeek-native AI coding agent with subagent &amp; memory" />
+<meta name="twitter:description" content="A DeepSeek-native terminal AI coding agent. Subagent workers, checkpoint safety net, persistent memory. 5 MB, open source (MIT)." />
+<title>seek — DeepSeek-native AI coding agent</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28' font-family='monospace' fill='%23f5a623'%3E▊%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -27,7 +27,7 @@
     font-family: var(--font-body);
     background: var(--bg);
     color: var(--text-body);
-    line-height: 1.65;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
     position: relative;
@@ -72,7 +72,9 @@
   }
   .btn:focus-visible,
   .lang-toggle:focus-visible,
-  .install-option code:focus-visible {
+  .install-option code:focus-visible,
+  .showcase-tab:focus-visible,
+  .carousel-nav button:focus-visible {
     outline: 2px solid var(--teal);
     outline-offset: 2px;
   }
@@ -136,10 +138,11 @@
   }
 
   /* ============ TYPOGRAPHY ============ */
-  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
-  h1 { font-size: clamp(2rem, 7vw, 4.8rem); }
-  h2 { font-size: clamp(1.3rem, 3.5vw, 2.4rem); }
-  h3 { font-size: clamp(1rem, 2vw, 1.3rem); }
+  h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; letter-spacing: -.02em; line-height: 1.25; }
+  h1 { font-size: clamp(2rem, 7vw, 4.8rem); font-weight: 800; }
+  h2 { font-size: clamp(1.3rem, 3.5vw, 2.4rem); font-weight: 700; letter-spacing: -.01em; }
+  h3 { font-size: clamp(1rem, 2vw, 1.3rem); font-weight: 600; letter-spacing: -.01em; }
+  h4 { font-weight: 600; }
   p  { max-width: 64ch; color: var(--dim); }
   .text-amber { color: var(--amber); }
   .text-teal  { color: var(--teal); }
@@ -176,6 +179,25 @@
     width: 18px;
     height: 18px;
   }
+
+  /* ============ INLINE SVG ICONS ============ */
+  .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+  .icon svg {
+    width: 100%;
+    height: 100%;
+  }
+  .icon-sm  { width: 14px; height: 14px; }
+  .icon-md  { width: 18px; height: 18px; }
+  .icon-lg  { width: 22px; height: 22px; }
+  .icon-tab { width: 16px; height: 16px; margin-right: 5px; }
+  .icon-arrow { width: 14px; height: 14px; margin-left: 2px; }
+  .icon-inline { width: 1em; height: 1em; display: inline; vertical-align: -.1em; }
 
   @media (prefers-reduced-motion: no-preference) {
     body, .term-window, .diff-card, .feat-line, .install-option,
@@ -252,6 +274,8 @@
   .section-frame:nth-of-type(2) { animation-delay: .15s; }
   .section-frame:nth-of-type(3) { animation-delay: .25s; }
   .section-frame:nth-of-type(4) { animation-delay: .35s; }
+  .section-frame:nth-of-type(5) { animation-delay: .40s; }
+  .section-frame:nth-of-type(6) { animation-delay: .45s; }
   @keyframes frameIn {
     0%   { border-color: transparent; box-shadow: 0 0 0 transparent; }
     100% { border-color: var(--border); box-shadow: 0 0 0 transparent; }
@@ -303,8 +327,11 @@
   .label::before { content: '$ '; }
 
   .section-head { margin-bottom: 48px; }
+  @media (max-width: 640px) {
+    .section-head { margin-bottom: 32px; }
+  }
   .section-head h2 { margin-bottom: 12px; }
-  .section-head p { font-size: 1.05rem; }
+  .section-head p { font-size: 1.05rem; line-height: 1.55; }
 
   /* ============ ASCII LOGO ============ */
   .ascii-logo {
@@ -382,8 +409,8 @@
     background: var(--hover-bg);
     transform: translateY(-2px);
   }
-  .btn .arrow { transition: transform .2s; display: inline-block; }
-  .btn:hover .arrow { transform: translateX(4px); }
+  .btn .icon-arrow { transition: transform .2s; }
+  .btn:hover .icon-arrow { transform: translateX(3px); }
   .btn:active { transform: translateY(0) scale(.97); }
 
   @keyframes fadeUp {
@@ -427,6 +454,63 @@
   .back-top svg { width: 18px; height: 18px; }
 
   /* ============ DIFFERENTIATORS (asymmetric grid) ============ */
+  /* ============ STATS BAND ============ */
+  .stats-band {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 22px 18px;
+    text-align: center;
+    transition: all .3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 2px;
+    background: var(--amber);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .stat-card:hover::before { opacity: 1; }
+  .stat-card:hover {
+    border-color: var(--amber);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(0,0,0,.4), 0 0 16px var(--amber-dim);
+  }
+  .stat-card .stat-num {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--teal);
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+  .stat-card .stat-label {
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .stat-card .stat-desc {
+    font-size: .75rem;
+    color: var(--dim);
+    line-height: 1.4;
+  }
+  @media (max-width: 768px) {
+    .stats-band { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 480px) {
+    .stats-band { grid-template-columns: 1fr; }
+  }
+
   .diff-grid {
     display: grid;
     grid-template-columns: 1fr 1.3fr;
@@ -558,6 +642,180 @@
   .diff-card.feature-list li:last-child { border-bottom: none; }
   .diff-card.feature-list .check { color: var(--amber); flex-shrink: 0; }
   .diff-card.feature-list .label-sm { color: var(--dim); font-size: .75rem; }
+
+  /* ============ FEATURE SHOWCASE TABS ============ */
+  .showcase-term {
+    max-width: 840px;
+    margin: 0 auto;
+  }
+  .showcase-term .term-body {
+    min-height: 280px;
+    font-size: .82rem;
+  }
+  .showcase-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-3);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .showcase-tab {
+    padding: 10px 16px;
+    font-family: var(--font-display);
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--dim);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .2s ease;
+    letter-spacing: .03em;
+  }
+  .showcase-tab:hover {
+    color: var(--text);
+    background: var(--hover-bg);
+  }
+  .showcase-tab.active {
+    color: var(--teal);
+    border-bottom-color: var(--teal);
+    background: var(--surface);
+  }
+  .showcase-tab .icon-tab {
+    margin-right: 5px;
+  }
+  @media (max-width: 600px) {
+    .showcase-tab { padding: 8px 10px; font-size: .68rem; }
+    .showcase-term .term-body { min-height: 220px; font-size: .74rem; }
+  }
+
+  /* ============ CAPABILITY CAROUSEL ============ */
+  .carousel-wrap {
+    position: relative;
+    max-width: 100%;
+  }
+  .carousel-track {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .carousel-track::-webkit-scrollbar { height: 6px; }
+  .carousel-track::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .carousel-track::-webkit-scrollbar-track { background: transparent; }
+
+  .carousel-card {
+    flex: 0 0 260px;
+    scroll-snap-align: start;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 16px;
+    transition: all .3s ease;
+  }
+  .carousel-card:hover {
+    border-color: var(--amber);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+  }
+  .carousel-card .card-term {
+    background: var(--surface-2);
+    border: 1px solid var(--border-dim);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: var(--font-display);
+    font-size: .75rem;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+    overflow: hidden;
+  }
+  .carousel-card .card-term .c-prompt { color: var(--amber); }
+  .carousel-card .card-term .c-out { color: var(--dim); }
+  .carousel-card .card-term .c-teal { color: var(--teal); }
+  .carousel-card .card-name {
+    font-family: var(--font-display);
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .carousel-card .card-desc {
+    font-size: .75rem;
+    color: var(--dim);
+    line-height: 1.4;
+  }
+  .carousel-nav {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .carousel-nav button {
+    width: 32px; height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--dim);
+    cursor: pointer;
+    font-size: .9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .2s;
+  }
+  .carousel-nav button:hover {
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  @media (max-width: 640px) {
+    .carousel-card { flex: 0 0 220px; padding: 14px 12px; }
+    .carousel-card .card-term { font-size: .72rem; }
+  }
+
+  /* ============ TIMELINE (git log style) ============ */
+  .timeline {
+    font-family: var(--font-display);
+    font-size: .78rem;
+    line-height: 1.8;
+    color: var(--dim);
+    max-width: 700px;
+    margin: 0 auto;
+  }
+  .timeline .tl-commit {
+    color: var(--amber);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .timeline .tl-date {
+    color: var(--dim);
+    margin-right: 8px;
+  }
+  .timeline .tl-tag {
+    color: var(--teal);
+    font-weight: 600;
+  }
+  .timeline .tl-msg {
+    color: var(--text);
+  }
+  .timeline .tl-highlight {
+    background: var(--amber-dim);
+    color: var(--amber);
+    padding: 0 4px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
+  @media (max-width: 600px) {
+    .timeline { font-size: .75rem; }
+  }
 
   @media (max-width: 800px) {
     .diff-grid { grid-template-columns: 1fr; }
@@ -991,10 +1249,12 @@
   }
   .term-hero-window .term-body {
     height: 340px;
-    overflow-y: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
     padding: 24px 28px;
     font-size: .9rem;
   }
+  .term-hero-window .term-body::-webkit-scrollbar { display: none; }
   .terminal-hero .ascii-logo {
     margin-bottom: 20px;
   }
@@ -1152,25 +1412,21 @@
       </div>
     </div>
     <p class="terminal-hero-tagline reveal">
-      <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek native AI coding agent with checkpoint undo/redo safety net.</span>
-      <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手，带检查点撤销安全网。</span>
+      <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek-native AI coding agent with <strong>subagent</strong> parallel workers, <strong>checkpoint</strong> undo/redo safety net, and <strong>persistent memory</strong> that survives sessions.</span>
+      <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手，支持 <strong>subagent</strong> 并行工作、<strong>checkpoint</strong> 撤销安全网、跨会话 <strong>持久记忆</strong>。</span>
     </p>
     <div style="display:flex;justify-content:center;margin-top:20px;">
       <div class="btn-group terminal-hero-btns reveal">
-        <a class="btn btn-primary" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
-          GitHub <span class="arrow">→</span>
-        </a>
-        <a class="btn btn-outline" href="https://github.com/whyiyhw/seek/releases" target="_blank" rel="noopener">
-          <span data-lang="en">Releases <span class="arrow">→</span></span>
-          <span data-lang="zh" hidden>发布 <span class="arrow">→</span></span>
-        </a>
-        <a class="btn btn-outline" href="#install">
-          <span data-lang="en">Install <span class="arrow">↓</span></span>
-          <span data-lang="zh" hidden>安装 <span class="arrow">↓</span></span>
+        <a class="btn btn-primary" href="#install">
+          <span data-lang="en">Install <span class="icon icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
+          <span data-lang="zh" hidden>安装 <span class="icon icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></span>
         </a>
         <a class="btn btn-outline" href="/docs/">
-          <span data-lang="en">Docs <span class="arrow">→</span></span>
-          <span data-lang="zh" hidden>文档 <span class="arrow">→</span></span>
+          <span data-lang="en">Docs <span class="icon icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span></span>
+          <span data-lang="zh" hidden>文档 <span class="icon icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span></span>
+        </a>
+        <a class="btn btn-outline" href="https://github.com/whyiyhw/seek" target="_blank" rel="noopener">
+          GitHub <span class="icon icon-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span>
         </a>
       </div>
     </div>
@@ -1179,57 +1435,128 @@
 
 <main class="container" id="main-content">
 
-<!-- ============ WHY SEEK ============ -->
-<section class="section-frame" data-title="WHY SEEK">
+<!-- ============ STATS BAND ============ -->
+<section class="section-frame" data-title="AT A GLANCE">
   <div class="section-head reveal">
     <p class="label">
-      <span data-lang="en">why seek</span>
-      <span data-lang="zh" hidden>为何选择</span>
+      <span data-lang="en">at a glance</span>
+      <span data-lang="zh" hidden>概览</span>
     </p>
     <h2>
-      <span data-lang="en">Built different.</span>
-      <span data-lang="zh" hidden>生而不同。</span>
+      <span data-lang="en">Numbers that matter.</span>
+      <span data-lang="zh" hidden>数据说话。</span>
     </h2>
     <p>
-      <span data-lang="en">DeepSeek-native, not a generic LLM wrapper. Every line optimises for cost, speed, and minimalism — with the only structured persistent memory in a coding agent.</span>
-      <span data-lang="zh" hidden">DeepSeek 原生，不是泛用 LLM 封装。每一行代码都为成本、速度和极简优化——外加编程助手中唯一的结构化持久记忆。</span>
+      <span data-lang="en">DeepSeek-native engineering — every design choice optimises for cost, speed, and reliability.</span>
+      <span data-lang="zh" hidden>DeepSeek 原生工程——每个设计选择都为成本、速度和可靠性优化。</span>
     </p>
   </div>
 
-  <div class="diff-grid diff-grid--three">
-    <div class="diff-card reveal">
-      <div class="metric" data-target="0.0028">$0.0028</div>
-      <div class="metric-label">
-        <span data-lang="en">per 1M tokens on cache hit</span>
-        <span data-lang="zh" hidden>每百万 token（缓存命中）</span>
+  <div class="stats-band">
+    <div class="stat-card reveal">
+      <div class="stat-num">$0.0028</div>
+      <div class="stat-label">
+        <span data-lang="en">per 1M tokens</span>
+        <span data-lang="zh" hidden>每百万 token</span>
       </div>
-      <p>
-        <span data-lang="en">DeepSeek V4-Flash prefix-cache pricing. 97% hit rate after turn 5 — the cache discipline pays out in real savings. Off-peak window (UTC+8 00:30–08:30) takes another 50% off.</span>
-        <span data-lang="zh" hidden>DeepSeek V4-Flash 前缀缓存定价。第 5 轮后命中率 97%——缓存纪律带来真实节约。错峰时段（北京时间 00:30–08:30）再打 5 折。</span>
-      </p>
-    </div>
-    <div class="diff-card reveal" style="transition-delay:.1s">
-      <div class="metric" data-target="5">5 MB</div>
-      <div class="metric-label">
-        <span data-lang="en">single static binary</span>
-        <span data-lang="zh" hidden>单文件静态二进制</span>
+      <div class="stat-desc">
+        <span data-lang="en">Prefix-cache hit pricing · 10–100× cheaper than Claude</span>
+        <span data-lang="zh" hidden>前缀缓存命中价格 · 比 Claude 便宜 10–100 倍</span>
       </div>
-      <p>
-        <span data-lang="en">Go-built, no Python/Node runtime, no npm install. Drop it on macOS, Linux, or Windows and it works. <code style="background:transparent;color:var(--teal);font-size:.8rem">go install</code> or grab a tarball.</span>
-        <span data-lang="zh" hidden>Go 编译，无需 Python/Node 运行时，无需 npm install。放到 macOS、Linux 或 Windows 上就能用。<code style="background:transparent;color:var(--teal);font-size:.8rem">go install</code> 或下载压缩包即可。</span>
-      </p>
     </div>
-    <div class="diff-card reveal" style="transition-delay:.2s">
-      <div class="metric"><span data-lang="en">L · M · S</span><span data-lang="zh" hidden>长 · 中 · 短</span></div>
-      <div class="metric-label">
-        <span data-lang="en">three-tier memory</span>
-        <span data-lang="zh" hidden">三层记忆</span>
+    <div class="stat-card reveal" style="transition-delay:.1s">
+      <div class="stat-num">~5 MB</div>
+      <div class="stat-label">
+        <span data-lang="en">single binary</span>
+        <span data-lang="zh" hidden>单文件二进制</span>
       </div>
-      <p>
-        <span data-lang="en"><strong>Soul (L)</strong> — cross-project user preferences, resident in system prompt. <strong>Project (M)</strong> — key decisions per project, <span class="label-sm">memory_observe / recall / archive</span>. <strong>Session (S)</strong> — full history with distill extraction. The only coding agent with structured persistent memory.</span>
-        <span data-lang="zh" hidden"><strong>长期 Soul</strong> — 跨项目用户偏好，常驻 system prompt。<strong>中期 Project</strong> — 项目内关键决策，支持 <span class="label-sm">memory_observe / recall / archive</span>。<strong>短期 Session</strong> — 完整历史 + <span class="label-sm">/distill</span> 提炼。唯一具备结构化持久记忆的编程助手。</span>
-      </p>
+      <div class="stat-desc">
+        <span data-lang="en">Go · zero runtime deps · macOS / Linux / Windows</span>
+        <span data-lang="zh" hidden>Go · 零运行时依赖 · macOS / Linux / Windows</span>
+      </div>
     </div>
+    <div class="stat-card reveal" style="transition-delay:.2s">
+      <div class="stat-num">50% off</div>
+      <div class="stat-label">
+        <span data-lang="en">off-peak discount</span>
+        <span data-lang="zh" hidden>错峰折扣</span>
+      </div>
+      <div class="stat-desc">
+        <span data-lang="en">UTC+8 00:30–08:30 · live countdown in status bar</span>
+        <span data-lang="zh" hidden>北京时间 00:30–08:30 · 状态栏实时倒计时</span>
+      </div>
+    </div>
+    <div class="stat-card reveal" style="transition-delay:.3s">
+      <div class="stat-num">95.7%</div>
+      <div class="stat-label">
+        <span data-lang="en">cache hit rate</span>
+        <span data-lang="zh" hidden>缓存命中率</span>
+      </div>
+      <div class="stat-desc">
+        <span data-lang="en">After turn 5 on bootstrap benchmark · visible in status bar</span>
+        <span data-lang="zh" hidden>第 5 轮后自举基准测试 · 状态栏实时可见</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURE SHOWCASE ============ -->
+<section class="section-frame" data-title="SHOWCASE">
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">interactive demo</span>
+      <span data-lang="zh" hidden>交互演示</span>
+    </p>
+    <h2>
+      <span data-lang="en">See seek in action.</span>
+      <span data-lang="zh" hidden>看看 seek 怎么工作。</span>
+    </h2>
+    <p>
+      <span data-lang="en">Click a tab to watch a real seek session — subagent delegation, memory observation, web fetching, and more.</span>
+      <span data-lang="zh" hidden>点击标签页查看真实 seek 会话——subagent 委派、记忆写入、网页抓取等。</span>
+    </p>
+  </div>
+
+  <div class="showcase-term term-window reveal">
+    <div class="showcase-tabs" id="showcase-tabs" role="tablist" aria-label="Feature demos">
+      <button class="showcase-tab active" data-tab="agent" role="tab" aria-selected="true"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span><span data-lang="en">Agent</span><span data-lang="zh" hidden>智能体</span></button>
+      <button class="showcase-tab" data-tab="memory" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M14 12h4"/><circle cx="12" cy="12" r="1"/></svg></span><span data-lang="en">Memory</span><span data-lang="zh" hidden>记忆</span></button>
+      <button class="showcase-tab" data-tab="web" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><span data-lang="en">Web</span><span data-lang="zh" hidden>网络</span></button>
+      <button class="showcase-tab" data-tab="safety" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span data-lang="en">Safety</span><span data-lang="zh" hidden>安全</span></button>
+      <button class="showcase-tab" data-tab="dx" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1.08 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1.08z"/></svg></span><span data-lang="en">DX</span><span data-lang="zh" hidden>体验</span></button>
+    </div>
+    <div class="term-body" id="showcase-body">
+      <div id="showcase-output"></div>
+      <span class="typing-cursor blink" id="showcase-cursor">▊</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TIMELINE ============ -->
+<section class="section-frame" data-title="CHANGELOG">
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">timeline</span>
+      <span data-lang="zh" hidden>版本演进</span>
+    </p>
+    <h2>
+      <span data-lang="en">git log --oneline</span>
+      <span data-lang="zh" hidden>git log --oneline</span>
+    </h2>
+    <p>
+      <span data-lang="en">Milestones M0–M9 all delivered. Latest: subagent, worktree isolation, scheduled wakeups.</span>
+      <span data-lang="zh" hidden>里程碑 M0–M9 全部交付。最新：subagent、worktree 隔离、定时唤醒。</span>
+    </p>
+  </div>
+
+  <div class="timeline reveal">
+    <div><span class="tl-commit">a3f210c</span> <span class="tl-tag">(v5.0)</span> <span class="tl-date">2026-05</span> <span class="tl-msg"><span class="tl-highlight">subagent</span> with worktree isolation · <span class="tl-highlight">schedule_wakeup</span> · json-rpc headless mode</span></div>
+    <div><span class="tl-commit">d8b4e6f</span> <span class="tl-tag">(v4.0)</span> <span class="tl-date">2026-04</span> <span class="tl-msg"><span class="tl-highlight">checkpoint</span> undo/redo safety net · <span class="tl-highlight">shell-hooks</span> · webfetch SSRF-safe</span></div>
+    <div><span class="tl-commit">7c2a19b</span> <span class="tl-tag">(v3.0)</span> <span class="tl-date">2026-03</span> <span class="tl-msg"><span class="tl-highlight">plan-mode</span> v2 with propose/execute · skill v2 package format · <span class="tl-highlight">/review</span></span></div>
+    <div><span class="tl-commit">f9e1d45</span> <span class="tl-tag">(v2.0)</span> <span class="tl-date">2026-02</span> <span class="tl-msg">skill lifecycle (create/install/update) · ask_user TUI picker · <span class="tl-highlight">/steer</span></span></div>
+    <div><span class="tl-commit">b4a882c</span> <span class="tl-tag">(v1.0)</span> <span class="tl-date">2026-01</span> <span class="tl-msg"><span class="tl-highlight">three-tier memory</span> L/M/S · session JSONL persistence · skill loader</span></div>
+    <div><span class="tl-commit">e05d1f7</span> <span class="tl-tag">(v0.5)</span> <span class="tl-date">2025-12</span> <span class="tl-msg"><span class="tl-highlight">multi-provider</span> Anthropic/OpenAI/Gemini · /model /effort /yolo · TUI polish</span></div>
+    <div><span class="tl-commit">1a9c34e</span> <span class="tl-tag">(v0.1)</span> <span class="tl-date">2025-11</span> <span class="tl-msg">DeepSeek-native core · terminal TUI · basic tool set</span></div>
   </div>
 </section>
 
@@ -1241,246 +1568,98 @@
       <span data-lang="zh" hidden>定价</span>
     </p>
     <h2>
-      <span data-lang="en">Cost per 1M tokens.</span>
-      <span data-lang="zh" hidden>每百万 token 成本。</span>
+      <span data-lang="en">Open source. Pay only for API.</span>
+      <span data-lang="zh" hidden>开源免费。只为 API 付费。</span>
     </h2>
     <p>
-      <span data-lang="en">Real API pricing, not marketing. Cache hit rate is visible in the status bar so you can optimise for it.</span>
-      <span data-lang="zh" hidden>真实 API 价格，不是营销话术。缓存命中率在状态栏实时可见，方便你针对性优化。</span>
+      <span data-lang="en">seek is MIT-licensed and free. You only pay your LLM provider — and DeepSeek is 10–100× cheaper than alternatives.</span>
+      <span data-lang="zh" hidden>seek 是 MIT 开源免费软件。你只需为 LLM provider 付费——而 DeepSeek 比替代方案便宜 10–100 倍。</span>
     </p>
   </div>
 
-  <!-- ============ PRICING HERO METRIC ============ -->
-  <div class="price-hero reveal">
-    <div class="price-hero-stat">
-      <span class="price-hero-num" data-target="0.0028">$0.0028</span>
-      <span class="price-hero-label"><span data-lang="en">per 1M tokens (cache hit)</span><span data-lang="zh" hidden">每百万 token（缓存命中）</span></span>
+  <div class="stats-band reveal">
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--amber)">$0.0028</div>
+      <div class="stat-label"><span data-lang="en">V4-Flash · cache hit</span><span data-lang="zh" hidden>V4-Flash · 缓存命中</span></div>
+      <div class="stat-desc"><span data-lang="en">per 1M input tokens</span><span data-lang="zh" hidden>每百万输入 token</span></div>
     </div>
-    <div class="price-hero-divider"></div>
-    <div class="price-hero-stat">
-      <span class="price-hero-num" data-target="97">97%</span>
-      <span class="price-hero-label"><span data-lang="en">cache hit rate after turn 5</span><span data-lang="zh" hidden>第 5 轮后缓存命中率</span></span>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--teal)">$0.0036</div>
+      <div class="stat-label"><span data-lang="en">V4-Pro · cache hit</span><span data-lang="zh" hidden>V4-Pro · 缓存命中</span></div>
+      <div class="stat-desc"><span data-lang="en">thinking mode enabled</span><span data-lang="zh" hidden>推理模式启用</span></div>
     </div>
-    <div class="price-hero-divider"></div>
-    <div class="price-hero-stat">
-      <span class="price-hero-num price-hero-num--sm" data-target="107">107×</span>
-      <span class="price-hero-label"><span data-lang="en">cheaper than Claude Sonnet 4</span><span data-lang="zh" hidden">比 Claude Sonnet 4 便宜</span></span>
+    <div class="stat-card">
+      <div class="stat-num" style="color:var(--dim)">$0.30</div>
+      <div class="stat-label"><span data-lang="en">Claude Sonnet 4 · cache hit</span><span data-lang="zh" hidden>Claude Sonnet 4 · 缓存命中</span></div>
+      <div class="stat-desc"><span data-lang="en">for comparison — 107× more</span><span data-lang="zh" hidden">对比参考——107 倍差价</span></div>
     </div>
-  </div>
-
-  <div class="price-wrap reveal">
-    <table>
-      <caption style="font-family:var(--font-display);font-size:.72rem;color:var(--dim);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;text-align:left;">
-        <span data-lang="en">Pricing comparison per 1M tokens (USD)</span>
-        <span data-lang="zh" hidden>每百万 token 定价对比（美元）</span>
-      </caption>
-      <thead>
-        <tr>
-          <th scope="col"></th>
-          <th scope="col">seek (V4-Flash)</th>
-          <th scope="col">seek (V4-Pro)</th>
-          <th scope="col">Claude Sonnet 4</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>
-            <span data-lang="en">Input (cache miss)</span>
-            <span data-lang="zh" hidden>输入（未命中缓存）</span>
-          </td>
-          <td><strong>$0.14</strong></td>
-          <td>$0.435¹</td>
-          <td>$3.00</td>
-        </tr>
-        <tr class="price-highlight">
-          <td>
-            <span data-lang="en">Input (prefix cache hit)</span>
-            <span data-lang="zh" hidden>输入（前缀缓存命中）</span>
-          </td>
-          <td><strong>$0.0028</strong></td>
-          <td>$0.0036</td>
-          <td>$0.30</td>
-        </tr>
-        <tr>
-          <td>
-            <span data-lang="en">Output</span>
-            <span data-lang="zh" hidden>输出</span>
-          </td>
-          <td><strong>$0.28</strong></td>
-          <td>$0.87</td>
-          <td>$15.00</td>
-        </tr>
-        <tr>
-          <td>
-            <span data-lang="en">Off-peak discount</span>
-            <span data-lang="zh" hidden>错峰折扣</span>
-          </td>
-          <td><strong>
-            <span data-lang="en">50% off</span>
-            <span data-lang="zh" hidden>5 折</span>
-          </strong></td>
-          <td><strong>
-            <span data-lang="en">50% off</span>
-            <span data-lang="zh" hidden>5 折</span>
-          </strong></td>
-          <td>—</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Cost visualization bars -->
-  <div class="cost-bars reveal" id="cost-bars">
-    <h3>
-      <span data-lang="en">Cache-hit cost comparison · per 1M input tokens</span>
-      <span data-lang="zh" hidden>缓存命中成本对比 · 每百万输入 token</span>
-    </h3>
-    <div class="cost-bar-row">
-      <span class="cost-bar-label">seek V4-Flash</span>
-      <div class="cost-bar-track">
-        <div class="cost-bar-fill amber"><span class="val">$0.0028</span></div>
-      </div>
-    </div>
-    <div class="cost-bar-row">
-      <span class="cost-bar-label">seek V4-Pro</span>
-      <div class="cost-bar-track">
-        <div class="cost-bar-fill teal"><span class="val">$0.0036</span></div>
-      </div>
-    </div>
-    <div class="cost-bar-row">
-      <span class="cost-bar-label">Claude Sonnet 4</span>
-      <div class="cost-bar-track">
-        <div class="cost-bar-fill claude"><span class="val">$0.30</span></div>
-      </div>
-    </div>
-    <div class="cost-bar-desc">
-      <span data-lang="en"> * Bars are proportional — Claude is ~107× the cost of V4-Flash</span>
-      <span data-lang="zh" hidden> * 长度按比例——Claude 是 V4-Flash 的约 107 倍</span>
+    <div class="stat-card" style="border-color:var(--amber-dim)">
+      <div class="stat-num">🌙 50% off</div>
+      <div class="stat-label"><span data-lang="en">off-peak discount</span><span data-lang="zh" hidden>错峰折扣</span></div>
+      <div class="stat-desc"><span data-lang="en">UTC+8 00:30–08:30 · live timer</span><span data-lang="zh" hidden>北京时间 00:30–08:30 · 实时计时</span></div>
     </div>
   </div>
 
-  <div class="price-note reveal" style="margin-top:24px;">
+  <div class="price-note reveal" style="margin-top:20px;">
     <span class="dot"></span>
-    <span data-lang="en">Cache hit rate: <strong>95.7%</strong> on bootstrap benchmark · live in status bar</span>
-    <span data-lang="zh" hidden>缓存命中率：自举基准测试 <strong>95.7%</strong> · 状态栏实时显示</span>
-    <br style="margin-top:4px" />
-    <span style="font-size:.75rem">
-      <span data-lang="en">¹ V4-Pro at 75%-off promo rate; full rack: $1.74 / $0.0145 / $3.48</span>
-      <span data-lang="zh" hidden>¹ V4-Pro 为 75% 折扣促销价；全价：$1.74 / $0.0145 / $3.48</span>
-    </span>
+    <span data-lang="en">¹ V4-Pro at 75%-off promo rate. <strong>95.7%</strong> cache hit rate on bootstrap benchmark — visible in status bar.</span>
+    <span data-lang="zh" hidden>¹ V4-Pro 为 75% 折扣促销价。自举基准测试缓存命中率 <strong>95.7%</strong>——状态栏实时可见。</span>
   </div>
 </section>
 
-<!-- ============ FEATURES ============ -->
+<!-- ============ CAPABILITY CAROUSEL ============ -->
 <section class="section-frame" data-title="CAPABILITIES">
   <div class="section-head reveal">
     <p class="label">
       <span data-lang="en">capabilities</span>
-      <span data-lang="zh" hidden>能力</span>
+      <span data-lang="zh" hidden>能力矩阵</span>
     </p>
     <h2>
-      <span data-lang="en">What you get.</span>
-      <span data-lang="zh" hidden>功能一览。</span>
+      <span data-lang="en">25+ tools, one binary.</span>
+      <span data-lang="zh" hidden>25+ 工具，一个二进制。</span>
     </h2>
     <p>
-      <span data-lang="en">Everything you expect from a modern coding agent — none of the bloat.</span>
-      <span data-lang="zh" hidden>现代编程助手该有的都有——没有臃肿。</span>
+      <span data-lang="en">Scroll to explore every tool seek ships with — agent, memory, web, safety, and developer experience.</span>
+      <span data-lang="zh" hidden>横向滚动浏览 seek 内置的全部工具——智能体、记忆、网络、安全、开发体验。</span>
     </p>
   </div>
 
-    <div class="feat-grid">
-    <!-- col 1: core -->
-    <div class="feat-col">
-      <div class="feat-line reveal">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">memory-ls</span>
-        <span class="feat-desc"><span data-lang="en">Three-tier L/M/S — soul · project · session</span><span data-lang="zh" hidden>三层记忆 L/M/S — 长期 · 项目 · 会话</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.05s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">mcp-bridge</span>
-        <span class="feat-desc"><span data-lang="en">MCP-compatible tool server</span><span data-lang="zh" hidden>MCP 兼容工具服务</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.1s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">skill-mgr</span>
-        <span class="feat-desc"><span data-lang="en">Create / install / update / uninstall</span><span data-lang="zh" hidden>创建 / 安装 / 更新 / 卸载</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.15s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">session-store</span>
-        <span class="feat-desc"><span data-lang="en">Auto-save · resume · fork · compact · distill</span><span data-lang="zh" hidden>自动保存 · 恢复 · 分叉 · 压缩 · 提炼</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.18s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">checkpoint</span>
-        <span class="feat-desc"><span data-lang="en">Git snapshot per turn · file CAS undo/redo</span><span data-lang="zh" hidden>每 turn git 快照 · 文件级撤回重做</span></span>
-        <span class="feat-badge">active</span>
-      </div>
+  <div class="carousel-wrap reveal">
+    <div class="carousel-track" id="carousel-track">
+      <!-- Agent -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek agent --workers 3</span><br><span class="c-out">[agent] 3 subagents · parallel</span><br><span class="c-teal">[agent] worktrees cleaned ✓</span></div><div class="card-name">subagent</div><div class="card-desc"><span data-lang="en">Parallel workers with git worktree isolation — safe exploration at scale</span><span data-lang="zh" hidden>并行 subagent + git worktree 隔离——安全的规模化探索</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /plan</span><br><span class="c-teal">▸ Plan mode active</span><br><span class="c-out">read-only → propose → execute</span></div><div class="card-name">plan-mode</div><div class="card-desc"><span data-lang="en">Read-only exploration → proposal → execution with checkpoint safety</span><span data-lang="zh" hidden">只读探索→提案→执行，checkpoint 安全网</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /review</span><br><span class="c-out">[agent] activating plan + review</span><br><span class="c-teal">▸ 3 files · 2 suggestions</span></div><div class="card-name">code-review</div><div class="card-desc"><span data-lang="en">One-key review with plan-mode context and worktree isolation</span><span data-lang="zh" hidden">一键审查，plan-mode 上下文 + worktree 隔离</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek agent "audit SQL"</span><br><span class="c-out">[agent] workers: sql-1 sql-2 sql-3</span><br><span class="c-teal">▸ 1 medium · $0.0031</span></div><div class="card-name">parallel-audit</div><div class="card-desc"><span data-lang="en">Multi-subagent security audit with consolidated reporting</span><span data-lang="zh" hidden">多 subagent 安全审计 + 汇总报告</span></div></div>
+      <!-- Memory -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[memory_observe]</span><br><span class="c-out">payment-timeout-30s</span><br><span class="c-teal">▸ stored to M-index ✓</span></div><div class="card-name">memory-observe</div><div class="card-desc"><span data-lang="en">Auto-detect key decisions and persist to project M-index</span><span data-lang="zh" hidden"">自动检测关键决策并持久化到项目 M-index</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[memory_recall]</span><br><span class="c-out">"payment-timeout" → hit</span><br><span class="c-teal">▸ recall_count: 4</span></div><div class="card-name">memory-recall</div><div class="card-desc"><span data-lang="en">Semantic recall of past decisions — survives session restart</span><span data-lang="zh" hidden>语义召回过往决策——跨会话持久化</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[memory_archive]</span><br><span class="c-out">old-redis-config</span><br><span class="c-teal">▸ moved to archive ✓</span></div><div class="card-name">memory-archive</div><div class="card-desc"><span data-lang="en">Active forgetting — archive stale entries, clean M-index</span><span data-lang="zh" hidden">主动遗忘——归档过时条目，清理 M-index</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /distill</span><br><span class="c-out">[session] extracting key points</span><br><span class="c-teal">▸ 14 turns → 3 insights</span></div><div class="card-name">session-distill</div><div class="card-desc"><span data-lang="en">Auto-extract reusable insights from long sessions</span><span data-lang="zh" hidden">从长会话中自动提炼可复用洞察</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek -dream</span><br><span class="c-out">[soul] cross-project pattern:</span><br><span class="c-teal">▸ prefer interface-first</span></div><div class="card-name">soul-memory</div><div class="card-desc"><span data-lang="en">Cross-project user preferences — resident in system prompt</span><span data-lang="zh" hidden>跨项目用户偏好——常驻 system prompt</span></div></div>
+      <!-- Web & API -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[webfetch] pkg.go.dev</span><br><span class="c-out">GET chi/v5 middleware</span><br><span class="c-teal">▸ 12.4 KiB extracted</span></div><div class="card-name">webfetch</div><div class="card-desc"><span data-lang="en">Fetch docs, RFCs, API references — SSRF-safe with redirect validation</span><span data-lang="zh" hidden">抓取文档/RFC/API 参考——SSRF 安全，重定向校验</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[fim_complete] edit.go:47</span><br><span class="c-out">fill-in-the-middle</span><br><span class="c-teal">▸ 5-10× cheaper than chat</span></div><div class="card-name">fim-complete</div><div class="card-desc"><span data-lang="en">DeepSeek FIM endpoint — small gap-fills at fraction of chat cost</span><span data-lang="zh" hidden">DeepSeek FIM 端点——小范围补全，成本仅为 chat 的 1/5-1/10</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[think] dual-model loop</span><br><span class="c-out">plan → execute → reflect</span><br><span class="c-teal">▸ V4-Pro reasoning</span></div><div class="card-name">thinking-mode</div><div class="card-desc"><span data-lang="en">On-demand DeepSeek reasoner for complex multi-step planning</span><span data-lang="zh" hidden">按需调用 DeepSeek 推理模型做复杂多步规划</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[schedule_wakeup]</span><br><span class="c-out">[wakeup] 5min → "check CI"</span><br><span class="c-teal">▸ cron job registered</span></div><div class="card-name">scheduled-wakeup</div><div class="card-desc"><span data-lang="en">One-shot future wake-ups — check CI results, follow up on PRs</span><span data-lang="zh" hidden">一次性定时唤醒——检查 CI 结果、跟进 PR</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[mcp-bridge] connect</span><br><span class="c-out">tool server online</span><br><span class="c-teal">▸ 12 tools exposed</span></div><div class="card-name">mcp-server</div><div class="card-desc"><span data-lang="en">MCP-compatible tool server — integrate with any MCP client</span><span data-lang="zh" hidden">MCP 兼容工具服务——对接任何 MCP 客户端</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[json-rpc] listen :9876</span><br><span class="c-out">headless mode active</span><br><span class="c-teal">▸ IDE integration ready</span></div><div class="card-name">json-rpc</div><div class="card-desc"><span data-lang="en">Headless JSON-RPC 2.0 mode for IDE and editor plugins</span><span data-lang="zh" hidden">无头 JSON-RPC 2.0 模式，用于 IDE/编辑器插件</span></div></div>
+      <!-- Safety -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[checkpoint] save #a3f2</span><br><span class="c-out">3 files staged</span><br><span class="c-teal">▸ /undo to revert ✓</span></div><div class="card-name">checkpoint</div><div class="card-desc"><span data-lang="en">Per-turn git snapshot + file-level CAS undo/redo safety net</span><span data-lang="zh" hidden">每 turn git 快照 + 文件级 CAS 撤销/重做安全网</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[permission] bash blocked</span><br><span class="c-out">⚠ destructive command</span><br><span class="c-teal">▸ user approved (y)</span></div><div class="card-name">permission-acl</div><div class="card-desc"><span data-lang="en">Granular file + shell ACL — deny/ask/yolo with path whitelist</span><span data-lang="zh" hidden">细粒度文件+shell 权限——deny/ask/yolo + 路径白名单</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[enter_worktree] feat/x</span><br><span class="c-out">isolated copy created</span><br><span class="c-teal">▸ safe to experiment ✓</span></div><div class="card-name">worktree-isolation</div><div class="card-desc"><span data-lang="en">Git worktree sandbox — try refactors without touching working copy</span><span data-lang="zh" hidden">Git worktree 沙箱——尝试重构不影响工作副本</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[shell-hooks] pre-edit</span><br><span class="c-out">running .seek/hooks.toml</span><br><span class="c-teal">▸ lint passed ✓</span></div><div class="card-name">shell-hooks</div><div class="card-desc"><span data-lang="en">Pre/post tool lifecycle hooks — auto-lint, format, validate</span><span data-lang="zh" hidden">工具调用前后 shell 钩子——自动 lint/格式化/校验</span></div></div>
+      <!-- DX -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /model</span><br><span class="c-teal">▸ V4-Flash → V4-Pro</span><br><span class="c-out">thinking: enabled</span></div><div class="card-name">slash-commands</div><div class="card-desc"><span data-lang="en">/model /effort /yolo /plan /review /steer — keyboard-first UX</span><span data-lang="zh" hidden">/model /effort /yolo /plan /review /steer——键盘优先体验</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[ask_user] picker open</span><br><span class="c-out">"install scope?"</span><br><span class="c-teal">▸ selected: project</span></div><div class="card-name">ask-user-picker</div><div class="card-desc"><span data-lang="en">Model can open TUI picker to ask for your decision — inline, no context switch</span><span data-lang="zh" hidden">模型可打开 TUI 选择器征求你的决定——内联，不切换上下文</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek -upgrade</span><br><span class="c-out">verify sha256 · replace</span><br><span class="c-teal">▸ v0.4.2 → v0.5.0 ✓</span></div><div class="card-name">self-upgrade</div><div class="card-desc"><span data-lang="en">Atomic in-place upgrade — verify sha256, replace binary, no re-download</span><span data-lang="zh" hidden">原子级原地升级——校验 sha256、替换二进制</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[skill] install frontend</span><br><span class="c-out">fetching from GitHub...</span><br><span class="c-teal">▸ installed to ~/.seek/</span></div><div class="card-name">skill-ecosystem</div><div class="card-desc"><span data-lang="en">Anthropic-compatible skill format — create, install, update, uninstall</span><span data-lang="zh" hidden">兼容 Anthropic skill 格式——创建/安装/更新/卸载</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[provider] switch</span><br><span class="c-teal">▸ DeepSeek → Anthropic</span><br><span class="c-out">+ OpenAI · Gemini</span></div><div class="card-name">multi-provider</div><div class="card-desc"><span data-lang="en">DeepSeek + Anthropic + OpenAI + Gemini — switch inline with /model</span><span data-lang="zh" hidden">DeepSeek + Anthropic + OpenAI + Gemini——/model 内联切换</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[i18n] lang=zh</span><br><span class="c-out">工具描述 · 提示 · 错误</span><br><span class="c-teal">▸ 中英双语 ✓</span></div><div class="card-name">bilingual</div><div class="card-desc"><span data-lang="en">Chinese & English — tool descriptions, prompts, errors, docs</span><span data-lang="zh" hidden">中英双语——工具描述、提示、错误、文档全量覆盖</span></div></div>
     </div>
-    <!-- col 2: integration -->
-    <div class="feat-col">
-      <div class="feat-line reveal" style="transition-delay:.2s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">multi-pvd</span>
-        <span class="feat-desc">DeepSeek + Anthropic + OpenAI + Gemini</span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.25s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">plan-review</span>
-        <span class="feat-desc"><span data-lang="en">Read-only <span class="label-sm">/plan</span> · working-tree <span class="label-sm">/review</span></span><span data-lang="zh" hidden>只读 <span class="label-sm">/plan</span> · 工作树 <span class="label-sm">/review</span></span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.3s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">json-rpc</span>
-        <span class="feat-desc"><span data-lang="en">Headless mode for IDE integration</span><span data-lang="zh" hidden>无头模式，用于 IDE 集成</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.35s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">fs-permit</span>
-        <span class="feat-desc"><span data-lang="en">Granular filesystem &amp; shell ACL</span><span data-lang="zh" hidden>细粒度文件系统和 shell 权限</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.38s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">shell-hooks</span>
-        <span class="feat-desc"><span data-lang="en">Pre/post tool lifecycle hooks</span><span data-lang="zh" hidden">工具调用前后 shell 钩子</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-    </div>
-    <!-- col 3: UX -->
-    <div class="feat-col">
-      <div class="feat-line reveal" style="transition-delay:.4s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">slash-cmd</span>
-        <span class="feat-desc"><span data-lang="en"><span class="label-sm">/model</span> · <span class="label-sm">/effort</span> · <span class="label-sm">/yolo</span></span><span data-lang="zh" hidden>切换模型 · 推理强度 · 权限</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.45s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">self-upgrade</span>
-        <span class="feat-desc"><span data-lang="en">Atomic in-place <span class="label-sm">/upgrade</span></span><span data-lang="zh" hidden>原子级原地 <span class="label-sm">/upgrade</span></span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.5s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">i18n</span>
-        <span class="feat-desc"><span data-lang="en">Chinese &amp; English — prompts · errors · docs</span><span data-lang="zh" hidden>中文 &amp; English — 提示 · 错误 · 文档</span></span>
-        <span class="feat-badge">active</span>
-      </div>
-      <div class="feat-line reveal" style="transition-delay:.55s">
-        <span class="feat-status">◆</span>
-        <span class="feat-name">telemetry-off</span>
-        <span class="feat-desc"><span data-lang="en">Your API key · your data · your terminal</span><span data-lang="zh" hidden>你的 API key · 你的数据 · 你的终端</span></span>
-        <span class="feat-badge">active</span>
-      </div>
+    <div class="carousel-nav">
+      <button id="carousel-prev" aria-label="Scroll left"><span class="icon icon-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></span></button>
+      <button id="carousel-next" aria-label="Scroll right"><span class="icon icon-sm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></span></button>
     </div>
   </div>
 </section>
@@ -1520,16 +1699,16 @@
         <span data-lang="zh" hidden>Go 安装（从源码）</span>
       </h4>
       <p class="detail">
-        <span data-lang="en">Requires Go 1.25+. Installs to <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>.</span>
-        <span data-lang="zh" hidden>需要 Go 1.25+。安装到 <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>。</span>
+        <span data-lang="en">Requires Go 1.25+. One command — installs to <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>.</span>
+        <span data-lang="zh" hidden>需要 Go 1.25+。一条命令——安装到 <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">$GOPATH/bin</code>。</span>
       </p>
       <code id="code-go" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">$</span> go install github.com/whyiyhw/seek/cmd/seek@latest</code>
     </div>
     <div class="install-option reveal" style="transition-delay:.2s">
       <h4>Windows</h4>
       <p class="detail">
-        <span data-lang="en">Download the zip from the releases page and unpack it.</span>
-        <span data-lang="zh" hidden>从发布页下载 zip 并解压。</span>
+        <span data-lang="en">Download from Releases or use <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">winget install seek</code>. Run in Windows Terminal.</span>
+        <span data-lang="zh" hidden>从 Releases 下载或使用 <code style="font-size:.75rem;display:inline;padding:2px 6px;background:var(--border);color:var(--teal);">winget install seek</code>。在 Windows Terminal 中运行。</span>
       </p>
       <code id="code-windows" tabindex="0" role="button" aria-label="Copy install command"><span class="prompt-inline">PS&gt;</span> $v=(irm https://api.github.com/repos/whyiyhw/seek/releases/latest | ConvertFrom-Json).tag_name; irm "https://github.com/whyiyhw/seek/releases/download/$v/seek_$($v.Substring(1))_windows_amd64.zip" -OutFile seek.zip; Expand-Archive seek.zip -Dest .; Remove-Item seek.zip; echo "Done — run .\seek.exe"</code>
     </div>
@@ -1572,12 +1751,12 @@
   <div class="container">
     <p><strong>seek</strong> · <span data-lang="en">MIT licensed</span><span data-lang="zh" hidden>MIT 开源</span> · <a href="https://github.com/whyiyhw/seek">GitHub</a> · <a href="/docs/"><span data-lang="en">Docs</span><span data-lang="zh" hidden>文档</span></a></p>
     <p>
-      <span data-lang="en">Built with Go · Powered by DeepSeek · Made for terminal</span>
-      <span data-lang="zh" hidden>Go 构建 · DeepSeek 驱动 · 终端原生</span>
+      <span data-lang="en">Built with Go · DeepSeek + Anthropic + OpenAI + Gemini · v5.0 with subagent &amp; checkpoint</span>
+      <span data-lang="zh" hidden>Go 构建 · DeepSeek + Anthropic + OpenAI + Gemini · v5.0 支持 subagent 与 checkpoint</span>
     </p>
     <p style="margin-top:10px;font-size:.82rem;color:var(--dim);">
-      <span data-lang="en">✦ This page was created by <strong>seek</strong> + <strong>DeepSeek V4-Flash</strong></span>
-      <span data-lang="zh" hidden>✦ 本站由 <strong>seek</strong> + <strong>DeepSeek V4-Flash</strong> 生成</span>
+      <span data-lang="en"><span class="icon icon-sm" style="display:inline-flex;vertical-align:middle;margin-right:3px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z"/></svg></span>This page was created by <strong>seek</strong> + <strong>DeepSeek V4-Flash</strong></span>
+      <span data-lang="zh" hidden><span class="icon icon-sm" style="display:inline-flex;vertical-align:middle;margin-right:3px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z"/></svg></span>本站由 <strong>seek</strong> + <strong>DeepSeek V4-Flash</strong> 生成</span>
     </p>
   </div>
 </footer>
@@ -1644,7 +1823,7 @@
     localStorage.setItem('seek-lang', lang);
     document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
     document.title = lang === 'en'
-      ? 'seek — DeepSeek native AI coding agent'
+      ? 'seek — DeepSeek-native AI coding agent'
       : 'seek — DeepSeek 原生 AI 编程助手';
     document.querySelectorAll('[data-lang]').forEach(el => {
       el.hidden = el.getAttribute('data-lang') !== lang;
@@ -1714,15 +1893,15 @@
     const statusRight = document.querySelector('.term-statusbar .status-right');
     if (!termWindow || !output || !cursor || !statusLeft || !statusRight) return;
 
-    const responseChars = 'The project uses a chi router in `cmd/server/main.go` with three handler groups: **API**, **webhook**, and **admin**.\n\n$ ';
+    const responseChars = '[agent] spawning subagent to explore codebase...\n[subagent:explore] scanned 14 files, found auth.ts + router.tsx\n[agent] proposing plan: refactor auth middleware into 3 modules\n[plan: approved] executing with checkpoint safety net\n[agent] 5 files modified · checkpoint #a3f2 saved — /undo to revert\n\n$ ';
 
     const spinnerFrames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
 
     const statusLabels = [
       { l: 'turns:0  tools:0', r: 'cache 0.0%' },
-      { l: 'turns:1  tools:1', r: 'cache 75.0%' },
-      { l: 'turns:1  tools:1', r: 'cache 89.5%  cost $0.0001' },
-      { l: 'turns:2  tools:3', r: 'cache 97.3%  cost $0.0028  ctx 12%  🌙' },
+      { l: 'turns:1  tools:3  subagent:1', r: 'cache 75.0%' },
+      { l: 'turns:2  tools:5  cost $0.0014', r: 'cache 89.5%  🌙 off-peak' },
+      { l: 'turns:2  tools:6  cost $0.0028', r: 'cache 97.3%  ctx 14%  🌙' },
     ];
 
     function setStatus(n) {
@@ -1732,6 +1911,7 @@
 
     function typeChars(text, cls, cb, speed) {
       speed = speed || 22;
+      const termBody = termWindow.querySelector('.term-body');
       let container = document.createElement('span');
       container.className = 'term-out-line' + (cls ? ' ' + cls : '');
       output.appendChild(container);
@@ -1757,6 +1937,7 @@
             accum += ch;
             textSpan.textContent = accum;
           }
+          if (termBody) termBody.scrollTop = termBody.scrollHeight;
           i++;
           const pause = ',.;:!?'.includes(text[i-1]) ? 80 : 0;
           setTimeout(tick, i === 1 ? 300 : speed + Math.random() * 18 + pause);
@@ -1764,12 +1945,14 @@
           const br = document.createElement('br');
           output.appendChild(br);
           output.appendChild(cursor);
+          if (termBody) termBody.scrollTop = termBody.scrollHeight;
           if (cb) setTimeout(function() { cb(container); }, 300);
         }
       })();
     }
 
     function showToolCall(cb) {
+      const termBody = termWindow.querySelector('.term-body');
       const el = document.createElement('span');
       el.className = 'term-out-line';
       output.appendChild(el);
@@ -1779,6 +1962,7 @@
       sp.textContent = '\u25B6';
       el.insertBefore(sp, cursor);
       el.insertBefore(document.createTextNode(' read cmd/server/main.go'), cursor);
+      if (termBody) termBody.scrollTop = termBody.scrollHeight;
       let n = 0;
       const iv = setInterval(function() {
         sp.textContent = spinnerFrames[n % spinnerFrames.length];
@@ -1789,6 +1973,7 @@
           const br = document.createElement('br');
           output.appendChild(br);
           output.appendChild(cursor);
+          if (termBody) termBody.scrollTop = termBody.scrollHeight;
           setStatus(2);
           if (cb) setTimeout(cb, 400);
         }
@@ -1798,8 +1983,8 @@
     function startDemo() {
       cursor.classList.remove('blink');
       setStatus(0);
-      typeChars('$ seek "explain the routing in this Go project"', 'prompt', function(container) {
-        if (container) container.innerHTML = '<span class="hl">$</span> <span class="ht">seek</span> "explain the routing in this Go project"';
+      typeChars('$ seek "refactor auth into separate modules"', 'prompt', function(container) {
+        if (container) container.innerHTML = '<span class="hl">$</span> <span class="ht">seek</span> "refactor auth into separate modules"';
         setStatus(1);
         showToolCall(function() {
           typeChars(responseChars, '', function() {
@@ -1928,6 +2113,140 @@
     }, { threshold: 0.5 });
 
     els.forEach(el => counterObserver.observe(el));
+  })();
+
+  // ============ FEATURE SHOWCASE TABS ============
+  (function showcaseTabs() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Still allow tab switching, just no animation
+    }
+    const tabs = document.querySelectorAll('#showcase-tabs .showcase-tab');
+    const output = document.getElementById('showcase-output');
+    const cursor = document.getElementById('showcase-cursor');
+    if (!tabs.length || !output || !cursor) return;
+
+    // Demo scripts for each tab
+    const demos = {
+      agent: [
+        { text: '$ seek agent --task "audit SQL injection risks" --workers 3\n', cls: 'prompt', delay: 0 },
+        { text: '[agent] provisioning 3 subagents in parallel worktrees...\n', cls: 'dim', delay: 300 },
+        { text: '[subagent:sql-audit-1] scanned 12 handlers — 0 issues\n', cls: '', delay: 200 },
+        { text: '[subagent:sql-audit-2] found 1 potential risk in user_query.go:47\n', cls: '', delay: 200 },
+        { text: '[subagent:sql-audit-3] validated query builder — all parameterised ✅\n', cls: '', delay: 200 },
+        { text: '[agent] consolidated report: 1 medium finding · 4 files reviewed\n', cls: 'teal', delay: 200 },
+        { text: '[agent] worktrees cleaned · total cost $0.0031\n', cls: 'dim', delay: 200 },
+      ],
+      memory: [
+        { text: '$ seek "update the payment service timeout to 30s"\n', cls: 'prompt', delay: 0 },
+        { text: '[memory_observe] recording decision: payment-timeout-30s\n', cls: 'dim', delay: 200 },
+        { text: '[memory_observe] value-check passed — stored to project M-index\n', cls: '', delay: 200 },
+        { text: '[edit] payment/service.go updated\n', cls: '', delay: 200 },
+        { text: '$ seek "what was that timeout value we settled on?"\n', cls: 'prompt', delay: 400 },
+        { text: '[memory_recall] payment-timeout-30s hit (recall_count: 3)\n', cls: 'dim', delay: 200 },
+        { text: '[agent] 30 seconds — set in payment/service.go line 12\n', cls: 'teal', delay: 200 },
+      ],
+      web: [
+        { text: '$ seek "how does the chi router handle middleware groups?"\n', cls: 'prompt', delay: 0 },
+        { text: '[webfetch] GET https://pkg.go.dev/github.com/go-chi/chi/v5...\n', cls: 'dim', delay: 200 },
+        { text: '[webfetch] 12.4 KiB plain-text extracted\n', cls: '', delay: 200 },
+        { text: '[agent] chi groups middleware via chi.With() + Route().\n', cls: 'teal', delay: 200 },
+        { text: '[agent] Example: r.Group(func(r chi.Router) { r.Use(mw) })\n', cls: '', delay: 200 },
+        { text: '[fim_complete] patched middleware.go with chi.Group() pattern\n', cls: 'dim', delay: 200 },
+      ],
+      safety: [
+        { text: '$ seek "delete all temp files older than 7 days"\n', cls: 'prompt', delay: 0 },
+        { text: '[bash] find /tmp -name "*.tmp" -mtime +7 -delete\n', cls: '', delay: 200 },
+        { text: '[permission] ⚠ destructive command — approval required\n', cls: 'teal', delay: 200 },
+        { text: '▸ User approved (y)\n', cls: 'dim', delay: 300 },
+        { text: '[bash] cleaned 23 files · 1.2 MB freed\n', cls: '', delay: 200 },
+        { text: '[checkpoint] snapshot #d7e3 saved — /undo to revert\n', cls: 'dim', delay: 200 },
+      ],
+      dx: [
+        { text: '$ seek\n', cls: 'prompt', delay: 0 },
+        { text: 'seek v0.5.0 — DeepSeek V4-Flash (think: off)\n', cls: 'dim', delay: 200 },
+        { text: 'session v2-e8a2.jsonl loaded · 14 turns · 3 memories active\n', cls: '', delay: 200 },
+        { text: '> /model\n', cls: 'prompt', delay: 300 },
+        { text: '▸ Switched to deepseek-v4-pro · thinking enabled\n', cls: 'teal', delay: 200 },
+        { text: '> /plan\n', cls: 'prompt', delay: 300 },
+        { text: '▸ Plan mode active — read-only exploration\n', cls: '', delay: 200 },
+        { text: '> ask_user("Pick install scope:", ["user","project"])\n', cls: 'prompt', delay: 300 },
+        { text: '▸ TUI picker opened — user selected: project\n', cls: 'teal', delay: 200 },
+      ],
+    };
+
+    let activeTab = 'agent';
+    let typingTimer = null;
+
+    function clearShowcase() {
+      if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
+      output.innerHTML = '';
+      cursor.className = 'typing-cursor blink';
+    }
+
+    function playDemo(tabId) {
+      clearShowcase();
+      const script = demos[tabId];
+      if (!script) return;
+
+      let i = 0;
+      function next() {
+        if (i >= script.length) {
+          cursor.className = 'typing-cursor done';
+          return;
+        }
+        const line = script[i];
+        const span = document.createElement('span');
+        span.className = 'term-out-line' + (line.cls ? ' ' + line.cls : '');
+        span.textContent = line.text;
+        output.appendChild(span);
+        // Scroll to bottom
+        const body = document.getElementById('showcase-body');
+        if (body) body.scrollTop = body.scrollHeight;
+        i++;
+        typingTimer = setTimeout(next, line.delay + (line.text.length * 3));
+      }
+      next();
+    }
+
+    // Tab click handler
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabId = tab.getAttribute('data-tab');
+        if (tabId === activeTab) return;
+        tabs.forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        activeTab = tabId;
+        playDemo(tabId);
+      });
+    });
+
+    // Auto-play on scroll into view
+    let played = false;
+    const showcaseSection = document.querySelector('[data-title="SHOWCASE"]');
+    if (showcaseSection) {
+      const obs = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting && !played) {
+            played = true;
+            setTimeout(() => playDemo('agent'), 400);
+            obs.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.3 });
+      obs.observe(showcaseSection);
+    }
+  })();
+
+  // ============ CAROUSEL NAV ============
+  (function carouselNav() {
+    const track = document.getElementById('carousel-track');
+    const prev = document.getElementById('carousel-prev');
+    const next = document.getElementById('carousel-next');
+    if (!track || !prev || !next) return;
+    const scrollAmount = 280;
+    prev.addEventListener('click', () => { track.scrollBy({ left: -scrollAmount, behavior: 'smooth' }); });
+    next.addEventListener('click', () => { track.scrollBy({ left: scrollAmount, behavior: 'smooth' }); });
   })();
 </script>
 
