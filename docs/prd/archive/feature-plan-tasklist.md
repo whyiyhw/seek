@@ -1,8 +1,8 @@
 # Plan Task List —— TUI 上的结构化任务追踪
 
-> ⚠️ **已废弃 / SUPERSEDED**：scope 误判（只覆盖了 plan 模式工作流的"执行追踪可视化"这一个窄面，忽略了 ANALYZE → PROPOSE → CONFIRM 的核心门）。继任者：[`feature-plan-mode.md`](feature-plan-mode.md)，把 plan 模式作为完整闭环重新设计，task list 可视化推到 v2。
+> ⚠️ **已归档 / ARCHIVED**：scope 误判（只覆盖了 plan 模式工作流的"执行追踪可视化"这一个窄面，忽略了 ANALYZE → PROPOSE → CONFIRM 的核心门）。继任者：[`../feature-plan-mode.md`](../feature-plan-mode.md)，把 plan 模式作为完整闭环重新设计，task list 面板已论证 v1 不必要（详见继任 PRD §3.2）。
 >
-> 本文保留作设计推演审计——为什么 .md checkpoint 文件方案被否决（§1.2）、为什么"派生自 transcript"的事件驱动 cache 是正确架构（§2.3）—— 这些推演 v2 加面板时仍然适用。
+> 本文归档在 `docs/prd/archive/` 作设计推演审计——为什么 .md checkpoint 文件方案被否决（§1.2）、为什么"派生自 transcript"的事件驱动 cache 是正确架构（§2.3）—— 这些推演若未来重新评估 task list 面板仍然适用。
 
 **目标**：让 plan-exe-reflect 工作流的"我执行到哪一步了"在 TUI 上**可见且权威**。把当前依赖模型口头叙述（"step 1 done, moving to step 2"）的隐式状态，升级为由专门工具维护、TUI 专区渲染、随 session JSONL 天然持久化的一等结构。
 

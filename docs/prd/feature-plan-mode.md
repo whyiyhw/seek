@@ -2,7 +2,7 @@
 
 **目标**：把 seek 的 `/plan` 从"单向只读 toggle"演化为一个**带显式用户确认门**的工作流：模型分析上下文 → 反思充分性 → 提案问题与解决方案 → 用户审批 → 解锁执行 → 完成报告。异议触发从中断点 re-plan，已完成工作不丢。
 
-**状态**：🚀 v2 P1-P6 全部实施 + v2.x 扩展持续中。本 PRD 取代旧的 `feature-plan-tasklist.md`（仅追踪 TUI task list 可视化，scope 过窄、误判了 plan 模式的核心价值在确认门而非可视化）。
+**状态**：🚀 v2 P1-P6 全部实施 + v2.x 扩展持续中。本 PRD 取代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)（仅追踪 TUI task list 可视化，scope 过窄、误判了 plan 模式的核心价值在确认门而非可视化）。
 
 ### 实施状态速览（2026-05）
 
@@ -80,7 +80,7 @@
 
 为避免 scope 漂移，以下统一推到 v2：
 
-- ❌ **TUI task list 面板**（步骤列表可视化、`[x]/[>]/[ ]` 状态机、strike-through）—— 旧 PRD `feature-plan-tasklist.md` 的核心，已论证 v1 不必要
+- ❌ **TUI task list 面板**（步骤列表可视化、`[x]/[>]/[ ]` 状态机、strike-through）—— 旧 PRD [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) 的核心，已论证 v1 不必要
 - ❌ **per-step 进度追踪工具**（start / complete / skip 系列）—— EXECUTE 子态中模型靠 chat narration 报告进度
 - ❌ **Re-plan 时已完成步骤的结构化注入**—— v1 靠 mode reminder 提醒模型"在 re-propose 前先 summarize 已做工作"，模型自己在 chat 里写
 - ❌ **plan 历史 / plan 版本对比**—— transcript 本身已记录每次 propose 的 schema 参数
@@ -247,7 +247,7 @@ v1 用 mode reminder 引导模型，不做结构化注入：
 
 ### 3.2 为什么 v1 不做 TUI task list 面板
 
-旧 PRD `feature-plan-tasklist.md` 设计了完整的面板渲染、状态机、in_progress 中断恢复。审查后发现：
+旧 PRD [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) 设计了完整的面板渲染、状态机、in_progress 中断恢复。审查后发现：
 
 - 它解决的是"用户视觉感知进度"问题——但 chat 本身就在做这件事（每次工具调用有 active tool 行，模型自然 narrate）
 - 真正 load-bearing 的是确认门（propose）和异议循环，不是面板
@@ -530,4 +530,4 @@ artifact **不替代** transcript。adjust / re-propose / cancel / duplicate 都
 
 ### 历史
 
-- `docs/prd/feature-plan-tasklist.md` — 旧 PRD，被本文取代，保留作设计推演审计
+- [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) — 旧 PRD，被本文取代，归档在 `docs/prd/archive/` 作设计推演审计

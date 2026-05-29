@@ -21,12 +21,13 @@
 | [`feature-routines.md`](feature-routines.md) | seek v0.6.1（柱 H）| 🚀 已交付 | 时序触发 routines：`seek cron {create,list,delete,run,tick}` CLI + `jobs.jsonl` 事件存储 + 零 daemon（OS scheduler 拉起 tick）+ `schedule_wakeup` LLM 工具 + OS 原生通知（osascript / notify-send / Windows toast）+ `triggers/` 文件桥 + GC + env overlay。M11.2 + M11.3。 |
 | [`feature-inspect-rpc.md`](feature-inspect-rpc.md) | seek v0.6.x dot → v0.7.0 | 📐 设计稿 | Inspect RPC + Web 面板：扩展 `--rpc` JSON-RPC 2.0 read-only method 集（session/memory/project/hooks/stats）+ HTTP+SSE transport + 静态 Web 面板（与主 binary 解耦发布）。作为未来应用的数据平面前置验证。M12.0（独立于 v5）+ M12.1/M12.2（依赖 v5）。 |
 | [`feature-mcp-client.md`](feature-mcp-client.md) | M5.4（已交付）+ 规划中 | ✅ MCP infra 已交付 / 📐 深度集成设计中 | MCP 客户端（pkg/mcp/）已于 M5.4 交付。本文是后续深度集成设计：以 Semble 为第一验证目标，定义 prompt 引导、工具路由、效果评估方案。参见 `docs/book/chapter-12.md`。 |
-| [`feature-plan-mode.md`](feature-plan-mode.md) | seek v0.3.x+ | 🚀 已交付 | Plan 模式 v2：ANALYZE → propose → approve → EXECUTE → re-plan 闭环。propose/plan 工具、mode reminder 多态（plan-analyze/plan-execute）、permission 子态联动、TUI task list 面板、event-sourcing resume。替代旧的 `feature-plan-tasklist.md`。 |
+| [`feature-plan-mode.md`](feature-plan-mode.md) | seek v0.3.x+ | 🚀 已交付 | Plan 模式 v2：ANALYZE → propose → approve → EXECUTE → re-plan 闭环。propose/plan 工具、mode reminder 多态（plan-analyze/plan-execute）、permission 子态联动、TUI task list 面板、event-sourcing resume。替代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)。 |
 | [`feature-webfetch.md`](feature-webfetch.md) | seek v0.3.x+ | 🚀 已交付 | WebFetch HTTPS GET 工具，专为 plan-analyze 设计的 SSRF 防御外部文档读取路径。gzip 解码 + HTML 渲染 + 私网 IP 拦截。 |
 | [`feature-permission-refactor.md`](feature-permission-refactor.md) | seek v0.3.x+ | 🚀 R1+R1.1 已交付 | Permission 两轴重构：Preference/Workflow 拆分、TUI 元数据剥离、preApproved 封装。 |
 | [`feature-edit-read-before.md`](feature-edit-read-before.md) | 持续 | 📝 方案笔记 | Edit 前强制 read 的软性提示已通过 workflowReminder 实施；结构性方案（如 schema 层约束）待评估。 |
-| [`feature-plan-tasklist.md`](feature-plan-tasklist.md) | 已废弃 | ❌ 被取代 | 旧 PRD，scope 误判（只覆盖执行追踪可视化），被 `feature-plan-mode.md` 取代。保留作设计推演审计。 |
 | [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
+
+> **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 1 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）。
 
 ## 阅读指引
 
