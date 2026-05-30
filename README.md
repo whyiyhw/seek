@@ -144,7 +144,7 @@ Every subcommand is also a `/<name>` inside the TUI. TUI-only: `/plan`, `/steer`
 
 ## Roadmap
 
-Everything below ships in the current **v0.7.0** release:
+Everything below ships in the current **v0.7.1** release:
 
 | Phase | What landed |
 |---|---|

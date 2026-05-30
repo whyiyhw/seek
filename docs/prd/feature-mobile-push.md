@@ -125,7 +125,7 @@ stdlib `net/http`，5s timeout，best-effort。
   "push_webhooks": [
     {
       "url": "https://ntfy.sh/my-seek-topic",
-      "format": "ntfy",                     // ntfy | slack | discord | feishu | raw（默认 raw）
+      "format": "ntfy",                     // ntfy | slack | discord | feishu | feishu-flow | template | raw（默认 raw）
       "events": ["cron.failed", "cron.killed", "trigger.failed"]  // 省略 = 全部
     }
   ]
@@ -136,7 +136,7 @@ stdlib `net/http`，5s timeout，best-effort。
 ```go
 PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 ```
-向后兼容（旧 binary 忽略未知 key，`config.go:38-40`）。`PushWebhook{URL, Format, Events []string}`。
+向后兼容（旧 binary 忽略未知 key，`config.go:38-40`）。`PushWebhook{URL, Format, Template, Events}`。
 
 ## 5. 实施拆解与估时
 

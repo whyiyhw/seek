@@ -63,11 +63,14 @@ seek 不引入自己的后台进程。OS 级调度器（launchd / systemd / cron
 
 零新依赖——全部走系统自带的 CLI 工具。如果通知发送失败（比如 `notify-send` 没装），静默降级不影响任务本身。
 
-### 22.3.4 `@every <duration>` 优先
+### 22.3.4 调度表达式：`@every <duration>` + 5-field cron
 
-MVP 不实现 5-field cron 表达式。不是因为难（写一个正确的 cron parser 大约 200 LOC），而是因为 seek 的 cron 主要场景是"每 N 秒/分钟/小时"而非"每个月第二个星期二 3:15 AM"。`@every 30s`、`@every 1h`、`@daily` 覆盖 95% 的用例。
+seek 支持两种调度语法，在同一个 `--at` / `ParseSchedule` 入口并存：
 
-5-field cron 放在 v0.6.x dot release 作为补充，不推迟 MVP。
+1. **`@every <Go duration>`** — 固定间隔，适合"每 N 秒/分钟/小时"。如 `@every 30m`、`@every 6h`。配套别名 `@hourly`(≡1h)、`@daily`/`@midnight`(≡24h)、`@weekly`(≡168h)。
+2. **5-field POSIX cron** — 标准 `minute hour day-of-month month day-of-week`，适合"每周一早上 9 点"这类带日历边界的时间。如 `0 9 * * 1-5`（工作日上午 9 点）、`*/15 * * * *`（每 15 分钟）。支持 `*`、`*/N`、`N-M`、`N-M/S`、逗号列表，以及月份/星期英文缩写（jan、mon-fri 等）。
+
+两者在 `Schedule.Next()` 层透明分发：`@every` 走 `after.Add(Every)`，cron 走位扫描（~4 年安全上界）。存储格式一致，`schedule` 字段在 `jobs.jsonl` 中始终是用户输入的原文。
 
 ## 22.4 数据模型与目录布局
 

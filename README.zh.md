@@ -136,7 +136,7 @@ seek keys       list/check/actions
 
 ## 路线图
 
-以下全部包含在当前 **v0.7.0** release：
+以下全部包含在当前 **v0.7.1** release：
 
 | 阶段 | 已落地 |
 |---|---|
