@@ -672,6 +672,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: `t1, t2 := time.Now(), time.Now(); t1 == t2` is allowed by the Go spec — successive `Now()` calls in the same monotonic tick return equal values. Tests that assert "later timestamp is strictly greater" need either a sleep or a fake clock. Don't depend on real-clock progress for correctness assertions inside fast-running tests.
 - **Refs**: `internal/tools/memorytool/memorytool_test.go:TestRecall_HitReturnsEntryAndBumpsRecall`, `internal/memory/project.go:Add` (line 266 `time.Now`), `internal/tools/memorytool/memorytool.go:92` (line 92 `time.Now`)
 
+### Asserting zero collisions over N random IDs is a birthday-paradox flake trap
+- **Saw**: `TestNewSubSid_FormatAndUniqueness` failed intermittently with `duplicate sub-sid: 20260601-103412-7790c1` — generating 1000 sub-sids at a fixed timestamp and asserting all unique.
+- **Why**: sub-sids use a 24-bit (6 hex) random suffix (matching `session.generateID`'s format contract). Over 1000 draws the birthday probability of *some* collision is `1000²/(2·2²⁴) ≈ 3%`, not the "~6e-4" the test comment claimed — so the zero-collision assertion flaked ~1 run in 34. The bug was the test's probability assumption, not production: real subagent fan-out is far below 1000 IDs/second and the second-resolution timestamp disambiguates across seconds.
+- **Fix**: assert RNG *health* instead of perfection — require ≥990/1000 distinct (tripping it needs ≥11 collisions, P≈1e-15; a degenerate/constant suffix fails immediately). Added the missing different-timestamp uniqueness check the comment had claimed. Commit (this one).
+- **Lesson**: with a b-bit random ID you cannot robustly assert "all unique" for any meaningful N — the birthday bound is `N²/2^(b+1)`. Either widen the entropy (if the format allows) or assert a relaxed "distinct ≥ N−k" / "not degenerate" property. Don't paper a too-small ID space with a flaky zero-collision test; and don't widen entropy just to satisfy a test when production fan-out is safe and the format is a shared contract.
+- **Refs**: `internal/subagent/types_test.go:TestNewSubSid_FormatAndUniqueness`, `internal/subagent/types.go:newSubSid` (3-byte suffix), `internal/session/session.go:generateID` (the mirrored format)
+
 ## Release / upgrade
 
 ### `tui.VersionString()` is a formatted banner, not a raw module version

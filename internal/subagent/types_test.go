@@ -46,15 +46,30 @@ func TestNewSubSid_FormatAndUniqueness(t *testing.T) {
 		t.Errorf("sub-sid missing timestamp prefix: %q", id)
 	}
 
-	// 1000 IDs at the same timestamp must all be unique (collision
-	// probability for 24 random bits is ~6e-4 over 1000 draws,
-	// well below flake threshold).
-	seen := make(map[string]bool, 1000)
-	for range 1000 {
-		s := newSubSid(now)
-		if seen[s] {
-			t.Errorf("duplicate sub-sid: %s", s)
-		}
-		seen[s] = true
+	// Different timestamps disambiguate deterministically — the format is
+	// sortable at second resolution, so lexical order == creation order.
+	if a, b := newSubSid(now), newSubSid(now.Add(time.Second)); a == b {
+		t.Errorf("different timestamps produced identical IDs: %q", a)
+	}
+
+	// Same-timestamp uniqueness rests entirely on the 24-bit (6 hex)
+	// random suffix. That is NOT collision-free at scale: over 1000 draws
+	// the birthday probability of *some* collision is ~3%
+	// (1000²/(2·2²⁴) ≈ 0.03) — so asserting zero collisions made this
+	// test flake ~1 run in 34 (the original "~6e-4" comment miscalculated
+	// it). What we CAN assert robustly is that the RNG is healthy: a
+	// working suffix yields ~1000 distinct IDs; a degenerate one
+	// (constant / all-zero) yields a handful. Require ≥990 distinct —
+	// tripping that needs ≥11 collisions (P ≈ 1e-15), while a broken RNG
+	// fails immediately. Production is unaffected: real subagent fan-out
+	// is far below 1000 sub-sids/second, and the timestamp disambiguates
+	// across seconds.
+	const draws = 1000
+	seen := make(map[string]bool, draws)
+	for range draws {
+		seen[newSubSid(now)] = true
+	}
+	if distinct := len(seen); distinct < 990 {
+		t.Errorf("only %d/%d distinct sub-sids at a fixed timestamp — random suffix looks degenerate", distinct, draws)
 	}
 }
