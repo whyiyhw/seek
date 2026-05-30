@@ -41,6 +41,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/subagent"
@@ -168,6 +169,19 @@ type Options struct {
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
+
+	// Webhook is the v6 柱 M push dispatcher (feature-mobile-push.md),
+	// reused here for the interactive extension: when an interactive turn
+	// runs at least SessionNotifySeconds, seek fires a "session.completed"
+	// event so a configured webhook can ping the user's phone. nil = no
+	// push webhooks configured. Best-effort, same contract as cron.
+	Webhook routines.WebhookDispatcher
+
+	// SessionNotifySeconds is the duration gate for the interactive push:
+	// only turns lasting at least this long notify (so quick back-and-
+	// forth doesn't spam). 0 = interactive notify disabled. Resolved from
+	// config.SessionNotifySecondsOrDefault() (default 60) by cmd/seek.
+	SessionNotifySeconds int
 
 	// ProviderName, when non-empty, means a second-tier provider is active
 	// (Anthropic, OpenAI, Gemini, or a compatible endpoint). The TUI

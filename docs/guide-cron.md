@@ -176,7 +176,7 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
 }
 ```
 
-事件名：`cron.completed` / `cron.failed` / `cron.killed`、`trigger.completed` / `trigger.failed`。
+事件名：`cron.completed` / `cron.failed` / `cron.killed`、`trigger.completed` / `trigger.failed`，以及 `session.completed`（**交互式**:在普通 TUI 里跑的长任务 turn 结束时推——时长闸门默认 60s,可用 config 顶层 `session_notify_seconds` 调,`0` 关。events 含 `session.completed` 或留空即生效）。
 
 **最快上手（ntfy.sh，开源 + 免费 + 有 iOS/Android app）**：
 1. 手机装 [ntfy](https://ntfy.sh) app，订阅一个只有你知道的 topic，例如 `my-seek-7f3a`。

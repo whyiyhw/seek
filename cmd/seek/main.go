@@ -28,12 +28,10 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpointcli"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hooks"
-	"github.com/whyiyhw/seek/internal/hooksconfig"
 	"github.com/whyiyhw/seek/internal/hookscli"
+	"github.com/whyiyhw/seek/internal/hooksconfig"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/keyscli"
-	"github.com/whyiyhw/seek/internal/suggester"
-	"github.com/whyiyhw/seek/internal/sysprompt"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -41,24 +39,23 @@ import (
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/projectmd"
+	"github.com/whyiyhw/seek/internal/routines"
+	"github.com/whyiyhw/seek/internal/routinescli"
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
-	"github.com/whyiyhw/seek/internal/routines"
-	"github.com/whyiyhw/seek/internal/routinescli"
+	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/sysprompt"
 	"github.com/whyiyhw/seek/internal/tools"
-	"github.com/whyiyhw/seek/internal/worktree"
-	"github.com/whyiyhw/seek/internal/worktreecli"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
 	"github.com/whyiyhw/seek/internal/tools/bash"
+	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/enterworktree"
 	"github.com/whyiyhw/seek/internal/tools/exitworktree"
-	"github.com/whyiyhw/seek/internal/tools/wakeup"
-	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	gittool "github.com/whyiyhw/seek/internal/tools/git"
 	"github.com/whyiyhw/seek/internal/tools/grep"
@@ -71,10 +68,13 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
+	"github.com/whyiyhw/seek/internal/tools/wakeup"
 	"github.com/whyiyhw/seek/internal/tools/webfetch"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
+	"github.com/whyiyhw/seek/internal/worktree"
+	"github.com/whyiyhw/seek/internal/worktreecli"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -1611,6 +1611,15 @@ func run() error {
 		distiller = &memory.Distiller{Client: dsClient}
 	}
 
+	// 柱 M interactive push: notify a configured webhook when a long
+	// interactive turn finishes. Reuses the cron push dispatcher; the
+	// duration gate (default 60s) comes from config. nil dispatcher when
+	// no push_webhooks are set, so this is a no-op for most users.
+	sessionNotifySeconds := 60
+	if cfg, cerr := config.Load(); cerr == nil {
+		sessionNotifySeconds = cfg.SessionNotifySecondsOrDefault()
+	}
+
 	return tui.Run(tui.Options{
 		Agent:                 ag,
 		Tracker:               tracker,
@@ -1636,6 +1645,8 @@ func run() error {
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,
+		Webhook:               routinescli.WebhookDispatcherFromConfig(),
+		SessionNotifySeconds:  sessionNotifySeconds,
 		ProviderName:          provLabel,
 		MemoryProject:         memProject,
 		Distiller:             distiller,

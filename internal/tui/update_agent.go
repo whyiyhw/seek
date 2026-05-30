@@ -29,6 +29,58 @@ var completionRe = regexp.MustCompile(`completion (\d+)`)
 // steered message if one is waiting. Returns batched cmds for Println
 // output (interrupt notice, queue/steer marker) plus any submit-driven
 // cmds when a queued message auto-fires.
+// sessionNotifyCmd returns a best-effort command that pings the configured
+// push webhook with a "session.completed" event when an interactive turn
+// finished naturally after running at least Options.SessionNotifySeconds.
+// Returns nil when interactive notify is off (no webhook / seconds<=0), the
+// turn was Esc-cancelled, the start time is unset, or the turn was shorter
+// than the gate. The POST runs off the UI thread inside a tea.Cmd and has
+// its own timeout; the webhook dispatcher filters by each webhook's events
+// list, so only webhooks subscribed to session.completed receive it.
+func (m Model) sessionNotifyCmd(wasCanceled bool) tea.Cmd {
+	if m.opts.Webhook == nil || m.opts.SessionNotifySeconds <= 0 || wasCanceled {
+		return nil
+	}
+	if m.streamStartTime.IsZero() {
+		return nil
+	}
+	elapsed := time.Since(m.streamStartTime)
+	if elapsed < time.Duration(m.opts.SessionNotifySeconds)*time.Second {
+		return nil
+	}
+	wh := m.opts.Webhook
+	ctx := m.opts.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	title := fmt.Sprintf("seek: task finished in %s", elapsed.Round(time.Second))
+	body := sessionNotifyBody(m.promptHistory)
+	return func() tea.Msg {
+		wh(ctx, "session.completed", title, body)
+		return nil
+	}
+}
+
+// sessionNotifyBody summarises which task finished, from the last submitted
+// prompt (first line, trimmed, capped). Generic fallback when none recorded.
+func sessionNotifyBody(history []string) string {
+	if len(history) == 0 {
+		return "Your seek task finished."
+	}
+	last := history[len(history)-1]
+	if i := strings.IndexByte(last, '\n'); i >= 0 {
+		last = last[:i]
+	}
+	last = strings.TrimSpace(last)
+	// Truncate by RUNE, not byte — prompts are often Chinese, and a
+	// byte-slice would split a multi-byte rune into mojibake.
+	const max = 160
+	if r := []rune(last); len(r) > max {
+		last = string(r[:max-1]) + "…"
+	}
+	return "Task: " + last
+}
+
 func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	m.streaming = false
@@ -55,6 +107,12 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	if m.userCanceled {
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↰ interrupted")))
 		m.userCanceled = false
+	}
+	// 柱 M interactive extension: ping the configured push webhook when a
+	// long interactive turn finishes (you walked away → phone buzzes).
+	// Best-effort, off the UI thread; skipped on Esc-cancel and short turns.
+	if cmd := m.sessionNotifyCmd(wasCanceled); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	// At this point all completed messages are already in
 	// scrollback (committed during MessageEnd/ToolExecEnd). Clear

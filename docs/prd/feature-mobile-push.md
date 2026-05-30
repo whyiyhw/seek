@@ -177,3 +177,22 @@ PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 **开放决策（reviewer 拍板）**：
 1. **D3 私网放行**：本 PRD 主张放行（自托管用例）。若安全姿态要求保守，可加 config 顶层开关 `push_allow_private: false`（默认放行）让谨慎用户自锁——但默认放行，否则 LAN push 开箱即坏。
 2. **`config check` 是否发真探测 POST**：发一条 test 消息能真验可达，但会给用户频道推一条「测试」噪声。建议 `check` 默认只做 scheme/parse 校验，`--probe` flag 才发真 POST。
+
+---
+
+## 9. 交互式扩展（`session.completed`，已交付）
+
+**动机**：cron/trigger 是无人值守路径，但用户常在**交互式 TUI** 里丢一个长任务然后走开——"跑完叫我"同样有用(对日常用户比 cron 更高频)。
+
+**设计**(复用同一 `WebhookDispatcher`,不碰核心):
+- TUI turn 结束(`handleStreamEnd`)时,若这一轮**自然完成**(非 Esc 取消)且**时长 ≥ 闸门**,fire 一个 `session.completed` 事件 → dispatcher 按各 webhook 的 `events` 过滤后推送。
+- **时长闸门默认开**:`config.session_notify_seconds`,**默认 60s**(nil→60);`0`=关。避免"每问一句都响"。
+- title = `seek: task finished in <时长>`;body = 该轮最后提交的 prompt(首行,**按 rune 截断**——中文 prompt 不能按字节切,否则乱码)。
+- best-effort:POST 走 `tea.Cmd`(不阻塞 UI 线程),失败 WARN 不影响会话。Esc 取消的 turn **不推**(人就在键盘前)。
+- 接线:`Options.Webhook`(= `routinescli.WebhookDispatcherFromConfig()`)+ `Options.SessionNotifySeconds`,由 cmd/seek 注入。
+
+**用法**:`push_webhooks` 的 `events` 含 `session.completed`(或留空=全部)即生效。
+
+**已知限制**:交互式没有 cron 的 completed/failed 区分——任何 >闸门 的非取消 turn 都算 `session.completed`(即便那轮内部报错)。区分成本高,best-effort 接受。
+
+**测试**:`sessionNotifyCmd` 闸门各分支(无 webhook / 关 / 取消 / 未起时 / 太短 / 命中)+ `sessionNotifyBody`(空/单行/多行/超长/中文 rune-safe)。

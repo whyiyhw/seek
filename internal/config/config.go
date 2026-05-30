@@ -68,6 +68,24 @@ type Config struct {
 	// notification) so the user is reachable away from the machine.
 	// Empty / absent = no webhooks. See docs/prd/feature-mobile-push.md.
 	PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
+
+	// SessionNotifySeconds gates the interactive "task finished" push
+	// (柱 M extension): when an interactive TUI turn runs at least this
+	// many seconds AND a push webhook subscribes to the session.completed
+	// event, seek pings that webhook when the turn ends. Pointer so we
+	// distinguish "unset → default 60s (on)" from "0 → disabled".
+	SessionNotifySeconds *int `json:"session_notify_seconds,omitempty"`
+}
+
+// SessionNotifySecondsOrDefault returns the interactive-notify duration
+// gate in seconds — 60 when unset (the default-on threshold), or the
+// explicit value (0 disables interactive notify). Use this so the
+// default lives in one place.
+func (c Config) SessionNotifySecondsOrDefault() int {
+	if c.SessionNotifySeconds == nil {
+		return 60
+	}
+	return *c.SessionNotifySeconds
 }
 
 // PushWebhook is one mobile-push destination (v6 柱 M). cmd/seek maps
