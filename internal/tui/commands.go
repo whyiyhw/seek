@@ -62,7 +62,8 @@ func allCommands() []command {
 		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. No args opens a picker. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
 		{names: []string{"/plan"}, usage: "/plan", description: "Toggle plan mode (read-only exploration) for the rest of this session.", handler: cmdPlan},
-		{names: []string{"/review"}, usage: "/review [branch]", description: "Code review working-tree changes. No args opens a picker; pass a branch name to diff against it instead.", handler: cmdReview},
+		{names: []string{"/review"}, usage: "/review [branch]", description: "Code review working-tree changes (shorthand for /code-review quick). No args opens a picker; pass a branch name to diff against it instead.", handler: cmdReview},
+		{names: []string{"/code-review"}, usage: "/code-review [quick|thorough] [--fix] [--comment] [branch]", description: "Code-review the diff at a chosen effort level (quick: terse, high-confidence blocking bugs; thorough: exhaustive incl. long-tail design findings). --fix applies findings via plan-mode propose; --comment posts inline PR comments (needs gh).", handler: cmdCodeReview},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
@@ -926,25 +927,99 @@ func cmdPlan(m *Model, _ string) cmdResult {
 	return cmdResult{text: styleMuted.Render("plan " + state)}
 }
 
+// cmdReview is the shorthand for /code-review at the default (quick)
+// effort with no flags. Its entire arg is treated as a branch name so a
+// branch literally called "quick"/"thorough"/etc. still diffs correctly
+// (only /code-review parses the leading token as an effort level).
 func cmdReview(m *Model, args string) cmdResult {
-	// Submit a review prompt. We do NOT force plan mode — the prompt
-	// itself instructs the model to stay read-only ("Do NOT write or
-	// edit files"). Keeping the current permission mode lets the model
-	// use bash for git diff/git log in ModeAsk (with user approval) or
-	// ModeYolo, which makes review far more efficient than grep/read
-	// over every changed file. If the user is already in plan mode
-	// (explicit /plan toggle), that is respected and bash stays denied.
+	return m.startCodeReview("quick", false, false, strings.TrimSpace(args))
+}
 
-	args = strings.TrimSpace(args)
+// cmdCodeReview parses [low|medium|high|max] [--fix] [--comment] [branch]
+// and starts a review. Parse errors are surfaced as tool-result text so
+// the user can correct the invocation — we never silently default a
+// misspelled effort or swallow an unknown flag.
+func cmdCodeReview(m *Model, args string) cmdResult {
+	effort, fix, comment, branch, err := parseCodeReviewArgs(args)
+	if err != nil {
+		return cmdResult{text: styleErr.Render("code-review: " + err.Error())}
+	}
+	return m.startCodeReview(effort, fix, comment, branch)
+}
 
-	if args == "" {
-		// No args: open a picker so the user can choose between
+// normalizeEffort folds an effort token into one of the two canonical
+// levels (quick | thorough), or returns "" if the token isn't an effort
+// word. The legacy 4-level vocabulary (low/medium/high/max) is accepted
+// as an alias: a 2026-05 eval (eval/cases/code-review-effort-*) found
+// DeepSeek doesn't reliably separate four prompt-framing levels — within-
+// run variance swamped the signal — so the feature collapsed to two. Old
+// invocations and the model's Claude-Code-trained low/medium/high
+// vocabulary still map cleanly, so we don't error on them.
+func normalizeEffort(tok string) string {
+	switch tok {
+	case "quick", "low", "medium":
+		return "quick"
+	case "thorough", "high", "max":
+		return "thorough"
+	}
+	return ""
+}
+
+// parseCodeReviewArgs splits /code-review arguments into effort + flags +
+// branch. effort defaults to "quick". The first standalone effort token
+// (quick|thorough, or a legacy low|medium|high|max alias) sets the level;
+// --fix / --comment are the flags; the first remaining token is the
+// branch. A second effort token, a second branch token, or an unknown
+// --flag is an error.
+func parseCodeReviewArgs(args string) (effort string, fix, comment bool, branch string, err error) {
+	effort = "quick"
+	effortSet := false
+	for _, tok := range strings.Fields(args) {
+		switch {
+		case tok == "--fix":
+			fix = true
+		case tok == "--comment":
+			comment = true
+		case strings.HasPrefix(tok, "--"):
+			return "", false, false, "", fmt.Errorf("unknown flag %q (valid flags: --fix, --comment)", tok)
+		case normalizeEffort(tok) != "":
+			if effortSet {
+				return "", false, false, "", fmt.Errorf("effort already set to %q; unexpected %q", effort, tok)
+			}
+			effort, effortSet = normalizeEffort(tok), true
+		default:
+			if branch != "" {
+				return "", false, false, "", fmt.Errorf("unexpected argument %q (already diffing against %q)", tok, branch)
+			}
+			branch = tok
+		}
+	}
+	return effort, fix, comment, branch, nil
+}
+
+// startCodeReview is the shared core behind /review and /code-review. It
+// stashes effort+flags on the model (so the picker / branch-entry paths
+// can rebuild the prompt) and either opens the branch picker, runs a
+// working-tree review, or diffs against the named branch.
+//
+// We do NOT force plan mode — the prompt instructs read-only review
+// unless --fix is set, in which case the model proposes fixes through
+// the existing plan-mode gate (still per-call y/N). Keeping the current
+// permission mode lets the model use bash for git diff/log in ModeAsk
+// (with approval) or ModeYolo, which is far more efficient than grep/read
+// over every changed file. An explicit /plan toggle is respected.
+func (m *Model) startCodeReview(effort string, fix, comment bool, branch string) cmdResult {
+	m.reviewEffort, m.reviewFix, m.reviewComment = effort, fix, comment
+
+	if branch == "" {
+		// No branch: open a picker so the user can choose between
 		// working-tree review or diffing against a specific branch.
 		choices := reviewChoices(m.opts.CWD)
 		if len(choices) == 0 {
-			// Not a git repo or no branches at all — fall back to
-			// a generic code-review prompt.
-			return submitOrSteer(m, fallbackReviewPrompt())
+			// Not a git repo or no branches at all — fall back to a
+			// generic working-directory review.
+			return submitOrSteer(m, codeReviewPrompt(effort, fix, comment,
+				"Review the code in the current working directory.", ""))
 		}
 		m.modelPickerFiltered = choices
 		m.modelPickerSelected = 0
@@ -953,23 +1028,25 @@ func cmdReview(m *Model, args string) cmdResult {
 		return cmdResult{}
 	}
 
-	// args is a branch name: diff against it.
-	// If we can determine the current branch and the target matches,
-	// fall back to working-tree review (no diff needed).
+	// branch named: diff against it. If it matches the current branch,
+	// fall back to working-tree review (diff against yourself is a no-op).
 	// Use a 5-second timeout so a hung git doesn't freeze the TUI.
 	gitCtx, gitCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer gitCancel()
 	current := currentGitBranch(gitCtx, m.opts.CWD)
-	if current != "" && args == current {
+	if current != "" && branch == current {
 		if changes, ok := gatherChangedFiles(m.opts.CWD); ok {
-			return submitOrSteer(m, workingTreeReviewPrompt(changes))
+			return submitOrSteer(m, codeReviewPrompt(effort, fix, comment,
+				"Review the current git working-tree changes.", "Changed files:\n"+changes))
 		}
-		return submitOrSteer(m, fallbackReviewPrompt())
+		return submitOrSteer(m, codeReviewPrompt(effort, fix, comment,
+			"Review the code in the current working directory.", ""))
 	}
-	if diffContent, ok := gatherBranchDiff(m.opts.CWD, args); ok {
-		return submitOrSteer(m, branchDiffReviewPrompt(args, diffContent))
+	if diffContent, ok := gatherBranchDiff(m.opts.CWD, branch); ok {
+		return submitOrSteer(m, codeReviewPrompt(effort, fix, comment,
+			"Review the git diff between the current branch and "+branch+".", diffContent))
 	}
-	return cmdResult{text: styleErr.Render("no diff found between current branch and " + args)}
+	return cmdResult{text: styleErr.Render("no diff found between current branch and " + branch)}
 }
 
 // reviewChoices builds the picker options for /review.
@@ -1041,42 +1118,52 @@ func reviewChoices(cwd string) []modelChoice {
 	return choices
 }
 
-// workingTreeReviewPrompt builds the working-tree code-review prompt
-// with the changed-files summary appended.
-func workingTreeReviewPrompt(changes string) string {
-	return "Review the current git working-tree changes. " +
-		"Examine the changed files for bugs, security vulnerabilities, " +
-		"style violations, and design problems. " +
-		"Categorise findings by severity. " +
-		"Use bash for git diff to inspect line-level changes, " +
-		"then explore specific files with read/grep as needed. " +
-		"Do NOT write or edit files.\n\n" +
-		"Changed files:\n" + changes
-}
+// codeReviewPrompt builds the prompt that /code-review (and its /review
+// alias) submits. scope is a one-line description of what to review
+// ("Review the current git working-tree changes." etc.); context is the
+// changed-files summary or full diff to append, or "" when none.
+//
+// The "use the code-review skill" instruction lives inline here on
+// purpose: programmatic submissions like this one bypass consumeArm (only
+// user-typed messages get the skill-arm wrapper), so the trigger to fetch
+// the skill body via the Skill tool must be baked into the prompt text.
+// The skill body carries the methodology; this prompt carries the chosen
+// effort framing + flags so the model applies the right precision/recall.
+func codeReviewPrompt(effort string, fix, comment bool, scope, context string) string {
+	var b strings.Builder
+	b.WriteString(`Please use the "code-review" skill for this task.` + "\n\n")
+	b.WriteString(scope + " ")
+	b.WriteString("Examine the changes for bugs, security vulnerabilities, " +
+		"style violations, and design problems. Categorise findings by severity. ")
 
-// fallbackReviewPrompt returns a generic code-review prompt for when
-// git info isn't available (not a repo, no changes, etc.).
-func fallbackReviewPrompt() string {
-	return "Review the code in the current working directory. " +
-		"Examine the files for bugs, security vulnerabilities, " +
-		"style violations, and design problems. " +
-		"Categorise findings by severity. " +
-		"Use bash for git exploration (diff, log, show), " +
-		"then read/grep specific files as needed. " +
-		"Do NOT write or edit files."
-}
+	b.WriteString("Effort level: " + effort + " — ")
+	switch effort {
+	case "thorough":
+		b.WriteString("exhaustive recall: cast a wide net across correctness, security, performance, " +
+			"design, edge cases, concurrency, error paths, and test gaps. You may include uncertain " +
+			"findings — label each with a confidence — and surface long-tail design/maintainability " +
+			"issues, not just the blocking bugs.")
+	default: // quick
+		b.WriteString("precision-first: report only the blocking bugs you are highly confident are real. " +
+			"Stay terse; skip speculative or style-level nits. An empty result is a valid answer.")
+	}
 
-// branchDiffReviewPrompt builds the branch-diff code-review prompt
-// with the full diff output appended.
-func branchDiffReviewPrompt(target, diff string) string {
-	return "Review the git diff between the current branch and " +
-		target + ". Examine the changes for bugs, security vulnerabilities, " +
-		"style violations, and design problems. " +
-		"Categorise findings by severity. " +
-		"The full diff is included below. Use read/grep " +
-		"to explore surrounding context in changed files. " +
-		"Do NOT write or edit files.\n\n" +
-		diff
+	if fix {
+		b.WriteString(" --fix is set: after the read-only review, propose the mechanically-fixable " +
+			"findings via the propose tool and apply them on approval (per-call y/N still applies).")
+	} else {
+		b.WriteString(" Do NOT write or edit files — this is a read-only review.")
+	}
+	if comment {
+		b.WriteString(" --comment is set: post findings as inline PR comments via the gh CLI; " +
+			"pre-check that gh is installed and authenticated first, and if it is not, print the " +
+			"findings in chat instead.")
+	}
+
+	if context != "" {
+		b.WriteString("\n\n" + context)
+	}
+	return b.String()
 }
 
 // gatherChangedFiles runs git status --porcelain and collects a diff-stat
@@ -1290,7 +1377,8 @@ func (m Model) handleReviewPick() (Model, tea.Cmd) {
 		if !ok {
 			return m, m.appendHistory(styleErr.Render("review: no changes to review"))
 		}
-		res := submitOrSteer(&m, workingTreeReviewPrompt(changes))
+		res := submitOrSteer(&m, codeReviewPrompt(m.reviewEffort, m.reviewFix, m.reviewComment,
+			"Review the current git working-tree changes.", "Changed files:\n"+changes))
 		return m, res.extra
 
 	case strings.HasPrefix(choice, "branch:"):
@@ -1299,7 +1387,8 @@ func (m Model) handleReviewPick() (Model, tea.Cmd) {
 		if !ok {
 			return m, m.appendHistory(styleErr.Render("review: no diff found between current branch and " + branch))
 		}
-		res := submitOrSteer(&m, branchDiffReviewPrompt(branch, diffContent))
+		res := submitOrSteer(&m, codeReviewPrompt(m.reviewEffort, m.reviewFix, m.reviewComment,
+			"Review the git diff between the current branch and "+branch+".", diffContent))
 		return m, res.extra
 
 	case choice == "type-branch":

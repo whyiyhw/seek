@@ -1,0 +1,40 @@
+Please use the "code-review" skill for this task.
+
+Review the following Go code. Examine the changes for bugs, security vulnerabilities, style violations, and design problems. Categorise findings by severity. Effort level: low — precision-first: report only findings you are highly confident are real. Do NOT write or edit files — this is a read-only review.
+
+```go
+package sizecache
+
+import (
+	"os"
+	"sync"
+)
+
+// Cache memoises file sizes by path.
+type Cache struct {
+	mu    sync.Mutex
+	sizes map[string]int
+}
+
+// New returns an empty Cache.
+func New() *Cache {
+	return &Cache{}
+}
+
+// Record stores the byte size of the file at path.
+func (c *Cache) Record(path string) {
+	f, _ := os.Open(path)
+	defer f.Close()
+	fi, _ := f.Stat()
+	c.sizes[path] = int(fi.Size())
+}
+
+// Total returns the sum of all recorded sizes.
+func (c *Cache) Total() int {
+	sum := 0
+	for _, s := range c.sizes {
+		sum += s
+	}
+	return sum
+}
+```

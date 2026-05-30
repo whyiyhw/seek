@@ -1,0 +1,5 @@
+{
+  "description": "RECORD-ONLY. code-review at effort=low over a fixed fixture, A/B partner of code-review-effort-max (byte-identical fixture, only the effort sentence differs). First calibration (n=3) showed the effort signal is SWAMPED by run-to-run variance — low completion_tokens ranged 1386..3514, overlapping and exceeding max's range — so there is NO clean per-run separation bound to assert. We keep only max_turns + a loose runaway ceiling and let eval/results/ accumulate the trend. See README for the full finding.",
+  "max_turns": 6,
+  "max_completion_tokens": 6000
+}

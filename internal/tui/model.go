@@ -37,14 +37,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
-	"github.com/whyiyhw/seek/internal/memory"
-	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/keymap"
+	"github.com/whyiyhw/seek/internal/memory"
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
-	"github.com/whyiyhw/seek/internal/suggester"
-	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -404,9 +404,19 @@ type Model struct {
 
 	// reviewBranchEntry is set when the user selects "Type a branch name…"
 	// from the /review picker. The textarea is focused; the next Enter
-	// submits /review <typed-text> (dispatched through dispatchCommand
+	// submits /code-review <typed-text> (dispatched through dispatchCommand
 	// so no dedicated handler is needed). Esc cancels back to idle.
 	reviewBranchEntry bool
+
+	// reviewEffort / reviewFix / reviewComment stash the /code-review
+	// effort level and flags when the picker opens (or branch-entry mode
+	// is entered), so handleReviewPick and the branch-entry submit path
+	// can rebuild the prompt without re-parsing. /review aliases to
+	// /code-review quick, so these are always set before the picker
+	// shows. reviewEffort is one of quick|thorough.
+	reviewEffort  string
+	reviewFix     bool
+	reviewComment bool
 
 	// pendingApproval, when non-nil, means the agent goroutine is
 	// blocked on a permission decision and the TUI is showing an

@@ -1,0 +1,5 @@
+{
+  "description": "RECORD-ONLY. code-review at effort=max over the SAME fixture as code-review-effort-low. First calibration (n=3): max trended higher (completion_tokens {2389,3174,2705}, review_line_refs {4,13,6}; qualitatively 12 findings vs low's 5) but the distributions OVERLAP low's, so no robust per-run min bound holds. Keep only max_turns + a runaway ceiling; the value is the recorded trend, not a pass/fail gate. See ../code-review-effort-low/README.md.",
+  "max_turns": 6,
+  "max_completion_tokens": 6000
+}

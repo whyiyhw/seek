@@ -85,4 +85,15 @@ func TestSkill_SchemaIsStable(t *testing.T) {
 	if !strings.Contains(string(a), `"name"`) {
 		t.Errorf("schema missing name field: %s", a)
 	}
+	// D1 guard (docs/prd/feature-code-review.md): the Skill tool stays
+	// {name}-only. Per-skill parameters like /code-review's effort/flags
+	// must live in the invoking slash command, NOT be lowered into this
+	// schema — that would make the cached schema bytes polymorphic per
+	// skill and break the prefix-cache invariant asserted above. If this
+	// trips, you're adding a parameter that belongs in the caller.
+	for _, banned := range []string{`"effort"`, `"fix"`, `"comment"`, `"args"`} {
+		if strings.Contains(string(a), banned) {
+			t.Errorf("Skill schema must stay name-only; found per-skill param %s: %s", banned, a)
+		}
+	}
 }

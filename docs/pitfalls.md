@@ -249,6 +249,22 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ---
 
+### Programmatic submissions bypass `consumeArm` — skill-arm must be inline in the injected prompt
+- **Saw**: building `/code-review`, the natural move was to set `m.pendingSkill = "code-review"` so the model would call the Skill tool next turn (mirroring `/skill use`). It would have silently mis-fired.
+- **Why**: `m.pendingSkill` is only consumed by `consumeArm`, which runs at the two **user-typed** submission sites (non-streaming submit, streaming queue/steer). Programmatic submissions (`/review`, `/code-review`) call `submit()` directly and **bypass** `consumeArm` — so the arm survives the programmatic message and wrongly prepends "Please use the X skill" to the user's **next hand-typed** message.
+- **Fix**: bake the `Please use the "code-review" skill` instruction directly into the injected prompt text (`codeReviewPrompt`'s first line); never touch `m.pendingSkill` from a slash command. Commit (this one).
+- **Lesson**: `m.pendingSkill` is for *user-initiated* arming only. A slash command that wants the model to use a skill must put the instruction in the prompt it submits, because the arm-wrapper does not run on the programmatic path.
+- **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/feature-code-review.md` §5.3
+
+### Adding a builtin skill is prefix-cache-safe ONLY because the manifest is deterministically ordered
+- **Saw**: dropping a 4th file into `internal/skill/builtin/` (`code-review.md`) adds a line to the system-prompt `# Available skills` manifest, which is sent every turn as part of the cached prefix.
+- **Why**: this is safe — but only by construction. The manifest renders via `Set.Manifest()` → `Set.List()` → `s.order` (an insertion-order **slice**, not map iteration), and the loader sorts every directory's entries (`sort.Slice(... Name())` for both on-disk and `embed.FS` tiers) before `Add`. So the manifest bytes are identical across process restarts. `Manifest()` also flattens `\n` out of descriptions so a multi-line description can't introduce per-skill byte variability.
+- **Fix**: nothing to fix; verified the invariant holds and added a `code-review` presence + description-keyword assertion to `loader_test.go`.
+- **Lesson**: if you ever render skills into a prompt by ranging a `map` (instead of `List()`/`order`), or stop sorting a skill source directory, you silently break prefix-cache for **every** session (random manifest order per process → full cache miss each turn). Keep all skill→prompt paths going through `List()`. Adding a skill still costs a one-time cache miss on the first turn of any session **resumed across the upgrade** (the system prompt changed) — unavoidable, not a regression.
+- **Refs**: `internal/skill/skill.go:Manifest`/`List`/`order`, `internal/skill/loader.go:107,247` (sort.Slice), `cmd/seek/main.go:1126,1291,1663` (the only manifest call sites)
+
+---
+
 ## Agent loop
 
 ### Esc mid-stream poisoned the session: orphan `tool_calls` rejected on every subsequent turn

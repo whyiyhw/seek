@@ -436,8 +436,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, (&m).appendHistory(styleErr.Render("review: no branch name entered"))
 			}
 			// Re-dispatch through dispatchCommand so the existing
-			// arg-handling path (/review <branch>) is reused.
-			handled, cmd := dispatchCommand(&m, "/review "+branch)
+			// arg-handling path is reused. Rebuild the /code-review
+			// invocation from the effort+flags stashed when the picker
+			// opened, so a "type a branch name" pick keeps the original
+			// /code-review high --fix (etc.) rather than resetting to
+			// the medium /review default.
+			effort := m.reviewEffort
+			if effort == "" {
+				effort = "quick"
+			}
+			reviewArgs := effort
+			if m.reviewFix {
+				reviewArgs += " --fix"
+			}
+			if m.reviewComment {
+				reviewArgs += " --comment"
+			}
+			handled, cmd := dispatchCommand(&m, "/code-review "+reviewArgs+" "+branch)
 			if !handled {
 				return m, (&m).appendHistory(styleErr.Render("review: invalid branch name"))
 			}

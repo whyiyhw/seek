@@ -55,6 +55,8 @@ per case it executed, e.g.:
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
 | `git_calls` | `tool_start` events with `name=git` |
 | `turns` | `turn_end` events |
+| `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
+| `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
 
 Bounds in `expect.json` use the prefix to declare direction:
 

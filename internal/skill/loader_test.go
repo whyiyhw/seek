@@ -95,6 +95,17 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 		!strings.Contains(pm.Description, "/plan") {
 		t.Errorf("plan-mode description should mention the mode-reminder substates or the /plan command so the model loads it at the right time; got %q", pm.Description)
 	}
+
+	// code-review (v6 柱 J) carries the /code-review methodology. The
+	// description is what the model matches against, so it must signal
+	// the trigger (the command name) and the effort/flag vocabulary.
+	cr := set.Get("code-review")
+	if cr == nil {
+		t.Fatalf("builtin code-review not present; loaded: %v", listNames(set))
+	}
+	if !strings.Contains(cr.Description, "/code-review") && !strings.Contains(cr.Description, "--fix") {
+		t.Errorf("code-review description should mention the command or its flags so it loads at the right time; got %q", cr.Description)
+	}
 }
 
 func TestLoad_PriorityCascade(t *testing.T) {

@@ -1519,20 +1519,25 @@ func TestReviewChoices_NonGitDir(t *testing.T) {
 
 // --- review prompt tests ------------------------------------------------
 
-func TestWorkingTreeReviewPrompt_IncludesChanges(t *testing.T) {
+func TestCodeReviewPrompt_WorkingTreeIncludesChanges(t *testing.T) {
 	t.Parallel()
-	prompt := workingTreeReviewPrompt("M  foo.go\n?? bar.go")
+	prompt := codeReviewPrompt("quick", false, false,
+		"Review the current git working-tree changes.", "Changed files:\nM  foo.go\n?? bar.go")
 	if !strings.Contains(prompt, "foo.go") {
 		t.Error("prompt should contain file from changes")
 	}
 	if !strings.Contains(prompt, "Do NOT write or edit files") {
-		t.Error("prompt should contain read-only instruction")
+		t.Error("read-only review (no --fix) should contain read-only instruction")
+	}
+	if !strings.Contains(prompt, `"code-review" skill`) {
+		t.Error("prompt should arm the code-review skill inline")
 	}
 }
 
-func TestFallbackReviewPrompt(t *testing.T) {
+func TestCodeReviewPrompt_FallbackMentionsReview(t *testing.T) {
 	t.Parallel()
-	prompt := fallbackReviewPrompt()
+	prompt := codeReviewPrompt("quick", false, false,
+		"Review the code in the current working directory.", "")
 	if !strings.Contains(prompt, "Review the code") {
 		t.Errorf("unexpected prompt: %q", prompt)
 	}
@@ -1541,14 +1546,115 @@ func TestFallbackReviewPrompt(t *testing.T) {
 	}
 }
 
-func TestBranchDiffReviewPrompt_IncludesDiff(t *testing.T) {
+func TestCodeReviewPrompt_BranchIncludesDiff(t *testing.T) {
 	t.Parallel()
-	prompt := branchDiffReviewPrompt("main", "diff --git a/x.go b/x.go")
+	prompt := codeReviewPrompt("quick", false, false,
+		"Review the git diff between the current branch and main.", "diff --git a/x.go b/x.go")
 	if !strings.Contains(prompt, "main") {
 		t.Error("prompt should mention target branch")
 	}
 	if !strings.Contains(prompt, "diff --git") {
 		t.Error("prompt should include diff content")
+	}
+}
+
+func TestCodeReviewPrompt_EffortFraming(t *testing.T) {
+	t.Parallel()
+	for _, eff := range []string{"quick", "thorough"} {
+		prompt := codeReviewPrompt(eff, false, false, "Review.", "")
+		if !strings.Contains(prompt, "Effort level: "+eff) {
+			t.Errorf("effort %q: prompt missing effort framing: %q", eff, prompt)
+		}
+	}
+	if !strings.Contains(codeReviewPrompt("quick", false, false, "Review.", ""), "precision-first") {
+		t.Error("quick effort should be precision-first")
+	}
+	if !strings.Contains(codeReviewPrompt("thorough", false, false, "Review.", ""), "exhaustive recall") {
+		t.Error("thorough effort should be exhaustive recall")
+	}
+}
+
+func TestCodeReviewPrompt_FixFlipsWritePolicy(t *testing.T) {
+	t.Parallel()
+	ro := codeReviewPrompt("quick", false, false, "Review.", "")
+	if !strings.Contains(ro, "Do NOT write or edit files") {
+		t.Error("no --fix should stay read-only")
+	}
+	fix := codeReviewPrompt("quick", true, false, "Review.", "")
+	if strings.Contains(fix, "Do NOT write or edit files") {
+		t.Error("--fix should not carry the read-only instruction")
+	}
+	if !strings.Contains(fix, "propose") {
+		t.Error("--fix should route through the propose tool")
+	}
+}
+
+func TestCodeReviewPrompt_CommentMentionsGh(t *testing.T) {
+	t.Parallel()
+	c := codeReviewPrompt("quick", false, true, "Review.", "")
+	if !strings.Contains(c, "gh") || !strings.Contains(c, "inline") {
+		t.Errorf("--comment should mention posting inline comments via gh: %q", c)
+	}
+	noc := codeReviewPrompt("quick", false, false, "Review.", "")
+	if strings.Contains(noc, "inline PR comments") {
+		t.Error("no --comment should not mention inline PR comments")
+	}
+}
+
+func TestParseCodeReviewArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		args        string
+		wantEffort  string
+		wantFix     bool
+		wantComment bool
+		wantBranch  string
+		wantErr     bool
+	}{
+		{"empty defaults to quick", "", "quick", false, false, "", false},
+		{"canonical thorough", "thorough", "thorough", false, false, "", false},
+		{"canonical quick", "quick", "quick", false, false, "", false},
+		{"legacy low maps to quick", "low", "quick", false, false, "", false},
+		{"legacy medium maps to quick", "medium", "quick", false, false, "", false},
+		{"legacy high maps to thorough", "high", "thorough", false, false, "", false},
+		{"legacy max maps to thorough", "max", "thorough", false, false, "", false},
+		{"effort + fix", "thorough --fix", "thorough", true, false, "", false},
+		{"all flags + effort", "thorough --fix --comment", "thorough", true, true, "", false},
+		{"branch only", "feature-x", "quick", false, false, "feature-x", false},
+		{"effort + branch", "quick main", "quick", false, false, "main", false},
+		{"flags any order", "--comment thorough --fix", "thorough", true, true, "", false},
+		{"effort + flag + branch", "thorough --fix release/1.2", "thorough", true, false, "release/1.2", false},
+		{"unknown flag errors", "thorough --frobnicate", "", false, false, "", true},
+		{"double effort errors (incl. alias) ", "high low", "", false, false, "", true},
+		{"double branch errors", "main other", "", false, false, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			eff, fix, comment, branch, err := parseCodeReviewArgs(tc.args)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if eff != tc.wantEffort || fix != tc.wantFix || comment != tc.wantComment || branch != tc.wantBranch {
+				t.Errorf("got (effort=%q fix=%v comment=%v branch=%q), want (effort=%q fix=%v comment=%v branch=%q)",
+					eff, fix, comment, branch, tc.wantEffort, tc.wantFix, tc.wantComment, tc.wantBranch)
+			}
+		})
+	}
+}
+
+// TestCodeReview_UnknownFlagError verifies the handler surfaces a parse
+// error as tool-result text rather than silently proceeding.
+func TestCodeReview_UnknownFlagError(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	res := runHandler(t, m, "/code-review --bogus")
+	if !strings.Contains(res.text, "unknown flag") {
+		t.Errorf("expected unknown-flag error, got %q", res.text)
 	}
 }
 

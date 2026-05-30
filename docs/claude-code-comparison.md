@@ -247,7 +247,7 @@
 | **🟡 P1** | UI | **`AskUserQuestion` 结构化选择器** | 多题/多选项/preview 双栏渲染，对"让模型自己拿决定"路径影响大 |
 | **🟡 P1** | 工具 | **LSP 工具** | 结构化符号/引用查询，大型代码库 grep 替代不掉 |
 | **🟡 P1** | Bash | **后台执行 + `Monitor` 流式跟踪** | 长任务跟踪能力 |
-| **🟡 P1** | 工作流 | **复合 review skill（`/code-review` 的 low/medium/high + `--fix`）** | 不含云端 `ultra` 模式；本地 plan-mode + propose 应能实现 |
+| **🟢 已交付** | 工作流 | **复合 review skill（`/code-review` 的 `quick`/`thorough` + `--fix` + `--comment`）** | v0.7.0（v6 柱 J）：内置 `code-review` skill（方法论 + effort framing）+ `/code-review` slash 命令（参数解析，复用 `/review` diff 采集 + picker）+ `/review` = `/code-review quick` 别名。**eval 实测 DeepSeek 分不开 4 档 → 收敛为 2 档**（旧 low/medium/high/max 软别名映射）。`--fix` 走 plan-mode propose；不含云端 `ultra`（架构选择） |
 | **🟡 P1** | 推送 | **移动端 push 通知** | Claude Code 走云 push 到手机；seek 当前限 OS 桌面通知（macOS Notification Center / Linux libnotify）。Windows toast 适配延后 v0.6.x dot |
 | **🟠 P2** | MCP | **TUI 内重启 server** | 中等投入 |
 | **🟠 P2** | 工具 | **`NotebookEdit`（Jupyter）** | 数据科学场景；用户群可能小 |
