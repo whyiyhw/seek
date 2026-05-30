@@ -79,7 +79,8 @@ type PushWebhook struct {
 	// relays are a use case, unlike webfetch's model-driven SSRF gate).
 	URL string `json:"url"`
 	// Format selects the payload shape: ntfy | slack | discord | feishu |
-	// raw. Empty defaults to raw.
+	// feishu-flow | raw. Empty defaults to raw. (feishu = custom bot;
+	// feishu-flow = Feishu Flow trigger webhook.)
 	Format string `json:"format,omitempty"`
 	// Events filters which terminal events fire this webhook
 	// (e.g. "cron.failed", "trigger.completed"). Empty = every event.

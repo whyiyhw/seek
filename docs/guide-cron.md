@@ -183,7 +183,9 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
 2. config 里 `"url": "https://ntfy.sh/my-seek-7f3a"`，`"format": "ntfy"`。
 3. 验证：`seek cron config check --probe`（往每个 webhook 发一条真实测试消息）。
 
-**飞书 / Lark（国内推荐）**：群里加「自定义机器人」拿到 webhook URL（形如 `https://open.feishu.cn/open-apis/bot/v2/hook/<id>`），config 里 `"format": "feishu"`。注意两点:① 机器人若开了**自定义关键词**,推送文本必须含该关键词才不被拒;② 飞书对关键词/签名错误**返回 HTTP 200 + body 里 `code≠0`**,seek 只看 HTTP 状态,这类逻辑错不会被标记——建议用**无签名**的机器人,先 `--probe` 确认真能收到。
+**飞书 / Lark（国内推荐）** 两种接法:
+- **自定义机器人**:群里加「自定义机器人」拿到 URL(形如 `https://open.feishu.cn/open-apis/bot/v2/hook/<id>`),`"format": "feishu"`。坑:① 开了**自定义关键词**时推送文本须含该关键词;② 飞书对关键词/签名错误**返回 HTTP 200 + body `code≠0`**,seek 只看 HTTP 状态,这类逻辑错抓不到——建议用**无签名**机器人,先 `--probe` 确认。
+- **飞书流程(Flow)trigger**:URL 形如 `https://www.feishu.cn/flow/api/trigger-webhook/<id>`,`"format": "feishu-flow"`(payload `{"msg_type":"text","content":{"text":{"title":…,"msg":…}}}`,title→标题、msg→正文)。这套 payload 由你的 Flow 自定义;若你的 Flow 期望别的形状,改用 `"format": "raw"`(发 `{event,title,body}`)在 Flow 里映射字段。
 
 ```bash
 seek cron config check          # 离线校验 scheme + format

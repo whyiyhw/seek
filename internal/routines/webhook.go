@@ -41,11 +41,12 @@ type WebhookTarget struct {
 
 // Webhook payload formats.
 const (
-	FormatNtfy    = "ntfy"
-	FormatSlack   = "slack"
-	FormatDiscord = "discord"
-	FormatFeishu  = "feishu"
-	FormatRaw     = "raw"
+	FormatNtfy       = "ntfy"
+	FormatSlack      = "slack"
+	FormatDiscord    = "discord"
+	FormatFeishu     = "feishu"      // custom bot: content.text is a string
+	FormatFeishuFlow = "feishu-flow" // Flow trigger: content.text is {title, msg}
+	FormatRaw        = "raw"
 )
 
 // webhookTimeout caps each individual POST. Short: a notification that
@@ -79,10 +80,10 @@ func ValidateWebhookURL(raw string) error {
 // config before the user relies on it.
 func ValidateWebhookFormat(format string) error {
 	switch format {
-	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu:
+	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu, FormatFeishuFlow:
 		return nil
 	default:
-		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, raw)", format)
+		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, feishu-flow, raw)", format)
 	}
 }
 
@@ -242,6 +243,19 @@ func buildWebhookRequest(t WebhookTarget, event, title, body string) (*http.Requ
 		return jsonRequest(t.URL, map[string]any{
 			"msg_type": "text",
 			"content":  map[string]string{"text": title + "\n" + body},
+		})
+	case FormatFeishuFlow:
+		// Feishu Flow (飞书流程) trigger webhook (feishu.cn/flow/api/
+		// trigger-webhook/<id>) — a low-code automation, NOT a custom bot.
+		// The payload shape is defined by the Flow's own sample; this
+		// matches the common {msg_type, content.text:{title, msg}} schema
+		// and maps title→title, body→msg. If a given Flow expects a
+		// different shape, use the `raw` format and map fields in the Flow.
+		return jsonRequest(t.URL, map[string]any{
+			"msg_type": "text",
+			"content": map[string]any{
+				"text": map[string]string{"title": title, "msg": body},
+			},
 		})
 	case FormatRaw, "":
 		return jsonRequest(t.URL, map[string]string{"event": event, "title": title, "body": body})
