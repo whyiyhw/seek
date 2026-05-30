@@ -169,7 +169,7 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
   "push_webhooks": [
     {
       "url": "https://ntfy.sh/my-seek-topic",   // 你自己的 topic
-      "format": "ntfy",                          // ntfy | slack | discord | feishu | raw（默认 raw）
+      "format": "ntfy",                          // ntfy | slack | discord | feishu | feishu-flow | template | raw（默认 raw）
       "events": ["cron.failed", "cron.killed"]   // 省略 = 全部事件
     }
   ]
@@ -185,7 +185,18 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
 
 **飞书 / Lark（国内推荐）** 两种接法:
 - **自定义机器人**:群里加「自定义机器人」拿到 URL(形如 `https://open.feishu.cn/open-apis/bot/v2/hook/<id>`),`"format": "feishu"`。坑:① 开了**自定义关键词**时推送文本须含该关键词;② 飞书对关键词/签名错误**返回 HTTP 200 + body `code≠0`**,seek 只看 HTTP 状态,这类逻辑错抓不到——建议用**无签名**机器人,先 `--probe` 确认。
-- **飞书流程(Flow)trigger**:URL 形如 `https://www.feishu.cn/flow/api/trigger-webhook/<id>`,`"format": "feishu-flow"`(payload `{"msg_type":"text","content":{"text":{"title":…,"msg":…}}}`,title→标题、msg→正文)。这套 payload 由你的 Flow 自定义;若你的 Flow 期望别的形状,改用 `"format": "raw"`(发 `{event,title,body}`)在 Flow 里映射字段。
+- **飞书流程(Flow)trigger**:URL 形如 `https://www.feishu.cn/flow/api/trigger-webhook/<id>`,`"format": "feishu-flow"`(固定发 `{"msg_type":"text","content":{"text":{"title":…,"msg":…}}}`)。若你的 Flow 期望别的 JSON 形状 → 用下面的 **`template`** 自定义。
+
+**`template`(自定义任意 JSON,最通用)**:你的 webhook/Flow 要什么形状,你就在 config 里写什么,用占位符 `{{title}}` / `{{body}}` / `{{event}}`,seek 在发送时**JSON 转义后**填进去(标题/正文含引号、换行都不会破坏 JSON):
+```jsonc
+{
+  "url": "https://www.feishu.cn/flow/api/trigger-webhook/<id>",
+  "format": "template",
+  "template": "{\"msg_type\":\"text\",\"content\":{\"text\":{\"title\":\"{{title}}\",\"msg\":\"{{body}}\"}}}",
+  "events": ["cron.completed", "session.completed"]
+}
+```
+占位符必须落在 **JSON 字符串值**里(`"...":"{{title}}"`),否则渲染出的不是合法 JSON——`seek cron config check --probe` 会直接报错帮你发现。
 
 ```bash
 seek cron config check          # 离线校验 scheme + format

@@ -35,8 +35,15 @@ type WebhookDispatcher func(ctx context.Context, event, title, body string)
 // the config package (no import cycle, clean layering).
 type WebhookTarget struct {
 	URL    string
-	Format string   // ntfy | slack | discord | raw (default raw)
+	Format string   // ntfy | slack | discord | feishu | feishu-flow | template | raw
 	Events []string // empty = every event
+	// Template is the raw JSON body for format "template": the user
+	// writes their own payload with {{title}} / {{body}} / {{event}}
+	// placeholders, which are substituted (JSON-escaped) at send time.
+	// This is the general escape hatch for any webhook target with a
+	// custom schema (e.g. a Feishu Flow whose sample differs from the
+	// built-in feishu-flow shape).
+	Template string
 }
 
 // Webhook payload formats.
@@ -46,6 +53,7 @@ const (
 	FormatDiscord    = "discord"
 	FormatFeishu     = "feishu"      // custom bot: content.text is a string
 	FormatFeishuFlow = "feishu-flow" // Flow trigger: content.text is {title, msg}
+	FormatTemplate   = "template"    // user-defined JSON with {{title}}/{{body}}/{{event}}
 	FormatRaw        = "raw"
 )
 
@@ -80,10 +88,10 @@ func ValidateWebhookURL(raw string) error {
 // config before the user relies on it.
 func ValidateWebhookFormat(format string) error {
 	switch format {
-	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu, FormatFeishuFlow:
+	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu, FormatFeishuFlow, FormatTemplate:
 		return nil
 	default:
-		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, feishu-flow, raw)", format)
+		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, feishu-flow, template, raw)", format)
 	}
 }
 
@@ -105,6 +113,10 @@ func NewWebhookDispatcher(targets []WebhookTarget, client *http.Client) WebhookD
 		}
 		if err := ValidateWebhookFormat(t.Format); err != nil {
 			fmt.Fprintf(os.Stderr, "routines: webhook %s dropped: %v\n", t.URL, err)
+			continue
+		}
+		if t.Format == FormatTemplate && strings.TrimSpace(t.Template) == "" {
+			fmt.Fprintf(os.Stderr, "routines: webhook %s dropped: format \"template\" requires a non-empty template\n", t.URL)
 			continue
 		}
 		if t.Format == "" {
@@ -257,11 +269,40 @@ func buildWebhookRequest(t WebhookTarget, event, title, body string) (*http.Requ
 				"text": map[string]string{"title": title, "msg": body},
 			},
 		})
+	case FormatTemplate:
+		// User-defined JSON body. Substitute placeholders with JSON-ESCAPED
+		// values so a title/body containing quotes or newlines can't break
+		// the payload. The rendered result must be valid JSON.
+		rendered := t.Template
+		rendered = strings.ReplaceAll(rendered, "{{title}}", jsonEscape(title))
+		rendered = strings.ReplaceAll(rendered, "{{body}}", jsonEscape(body))
+		rendered = strings.ReplaceAll(rendered, "{{event}}", jsonEscape(event))
+		if !json.Valid([]byte(rendered)) {
+			return nil, fmt.Errorf("template did not render to valid JSON (check {{...}} placeholders sit inside JSON string values)")
+		}
+		req, err := http.NewRequest(http.MethodPost, t.URL, strings.NewReader(rendered))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		return req, nil
 	case FormatRaw, "":
 		return jsonRequest(t.URL, map[string]string{"event": event, "title": title, "body": body})
 	default:
 		return nil, fmt.Errorf("unknown webhook format %q", t.Format)
 	}
+}
+
+// jsonEscape returns s escaped for insertion inside a JSON string literal
+// (quotes, backslashes, newlines, control chars) WITHOUT the surrounding
+// quotes — so it can be dropped into a template's "...{{title}}..." slot
+// and still yield valid JSON.
+func jsonEscape(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil || len(b) < 2 {
+		return ""
+	}
+	return string(b[1 : len(b)-1]) // strip the surrounding quotes
 }
 
 func jsonRequest(rawURL string, payload any) (*http.Request, error) {

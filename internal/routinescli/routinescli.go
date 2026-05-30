@@ -51,7 +51,7 @@ func WebhookDispatcherFromConfig() routines.WebhookDispatcher {
 	}
 	targets := make([]routines.WebhookTarget, 0, len(cfg.PushWebhooks))
 	for _, w := range cfg.PushWebhooks {
-		targets = append(targets, routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events})
+		targets = append(targets, routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events, Template: w.Template})
 	}
 	return routines.NewWebhookDispatcher(targets, nil)
 }
@@ -459,7 +459,7 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) error {
 			continue
 		}
 		if *probe {
-			target := routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events}
+			target := routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events, Template: w.Template}
 			if err := routines.SendTestWebhook(ctx, target, nil); err != nil {
 				fmt.Fprintf(stdout, "  ✗ %s — probe failed: %v\n", label, err)
 				failures++

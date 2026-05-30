@@ -40,7 +40,7 @@ func TestValidateWebhookURL(t *testing.T) {
 
 func TestValidateWebhookFormat(t *testing.T) {
 	t.Parallel()
-	for _, f := range []string{"", "raw", "ntfy", "slack", "discord", "feishu", "feishu-flow"} {
+	for _, f := range []string{"", "raw", "ntfy", "slack", "discord", "feishu", "feishu-flow", "template"} {
 		if err := ValidateWebhookFormat(f); err != nil {
 			t.Errorf("ValidateWebhookFormat(%q) = %v, want nil", f, err)
 		}
@@ -259,6 +259,40 @@ func TestWebhookDispatcher_ConcurrentTargets(t *testing.T) {
 	d(context.Background(), "cron.failed", "T", "B")
 	if rec.count != 3 {
 		t.Errorf("all 3 targets should fire, got %d", rec.count)
+	}
+}
+
+func TestWebhookDispatcher_TemplateRendersValidJSON(t *testing.T) {
+	t.Parallel()
+	srv, rec := newRecorderServer(t, 200)
+	tmpl := `{"msg_type":"text","content":{"text":{"title":"{{title}}","msg":"{{body}}","ev":"{{event}}"}}}`
+	d := NewWebhookDispatcher([]WebhookTarget{{URL: srv.URL, Format: "template", Template: tmpl}}, srv.Client())
+	// title/body with chars that naive string interpolation would use to
+	// break out of the JSON string — the load-bearing escaping test.
+	d(context.Background(), "cron.failed", `He said "hi"`, "line1\nline2\tend")
+	if rec.count != 1 {
+		t.Fatalf("got %d requests, want 1", rec.count)
+	}
+	var p map[string]any
+	if err := json.Unmarshal([]byte(rec.body), &p); err != nil {
+		t.Fatalf("template body is not valid JSON (escaping broken): %v\nbody=%s", err, rec.body)
+	}
+	text := p["content"].(map[string]any)["text"].(map[string]any)
+	if text["title"] != `He said "hi"` {
+		t.Errorf("title = %v, want literal quotes preserved", text["title"])
+	}
+	if text["msg"] != "line1\nline2\tend" {
+		t.Errorf("msg = %q, want newline/tab preserved", text["msg"])
+	}
+	if text["ev"] != "cron.failed" {
+		t.Errorf("ev = %v", text["ev"])
+	}
+}
+
+func TestNewWebhookDispatcher_EmptyTemplateDropped(t *testing.T) {
+	t.Parallel()
+	if NewWebhookDispatcher([]WebhookTarget{{URL: "https://ok", Format: "template"}}, nil) != nil {
+		t.Error("format=template with empty Template should be dropped → nil dispatcher")
 	}
 }
 

@@ -29,7 +29,7 @@ v6 §3.5 草稿方向正确（webhook 桥、ntfy/slack/discord/raw、不做 nati
 ### 2.1 目标
 
 1. 通知派发时（cron 终态 / trigger 终态）**额外**把 `(title, body)` 经 HTTPS POST 推到用户配置的 webhook URL；**不替代** OS 桌面通知。
-2. 支持 6 种 format：`ntfy`（推荐）/ `slack` / `discord` / `feishu`（自定义机器人）/ `feishu-flow`（飞书流程 trigger）/ `raw`，各自正确的 payload 形态。
+2. 支持 7 种 format：`ntfy` / `slack` / `discord` / `feishu`（自定义机器人）/ `feishu-flow`（飞书流程 trigger）/ **`template`（用户自定义 JSON,最通用）** / `raw`，各自正确的 payload 形态。
 3. 每个 webhook 可配 `events` 过滤（默认全部）；webhook 触发**独立于** `job.Notify`（见 D4 理由）。
 4. best-effort：webhook 失败 → WARN 到 stderr，**绝不**阻塞或回滚 cron run（继承 `Notifier` 契约）。
 5. `seek cron config check`：配置时验证 webhook（scheme + URL parse + 可选可达探测），把错误挡在用户依赖它之前。
@@ -112,7 +112,8 @@ v6 的「同 URL 连续失败 5 次降 DEBUG」假设有跨调用的进程内存
 | `slack` | POST，JSON body `{"text": "<title>\n<body>"}`（incoming webhook） |
 | `discord` | POST，JSON body `{"content": "**<title>**\n<body>"}` |
 | `feishu` | POST，JSON body `{"msg_type":"text","content":{"text":"<title>\n<body>"}}`（飞书/Lark 自定义机器人；关键词/签名机器人会被拒，且飞书逻辑错返回 200+`code≠0`，status-only 检查抓不到——best-effort） |
-| `feishu-flow` | POST，JSON body `{"msg_type":"text","content":{"text":{"title":"<title>","msg":"<body>"}}}`（飞书流程 trigger webhook `feishu.cn/flow/...`；payload 由 Flow 自定义,匹配常见 sample,否则用 `raw` 映射） |
+| `feishu-flow` | POST，JSON body `{"msg_type":"text","content":{"text":{"title":"<title>","msg":"<body>"}}}`（飞书流程 trigger 的常见 sample；自定义 schema 用 `template`） |
+| `template` | POST，**用户自定义 JSON**(`PushWebhook.template`)含 `{{title}}`/`{{body}}`/`{{event}}` 占位符,发送时 **JSON-escape 后**替换。通用逃生口:任何自定义 schema 的 webhook/Flow 都能对上。占位符须在 JSON 字符串值内;渲染后用 `json.Valid` 校验,坏模板在 `config check` 报错 |
 | `raw` | POST，JSON body `{"title": ..., "body": ..., "event": ...}` |
 
 stdlib `net/http`，5s timeout，best-effort。
