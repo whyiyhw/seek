@@ -169,7 +169,7 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
   "push_webhooks": [
     {
       "url": "https://ntfy.sh/my-seek-topic",   // 你自己的 topic
-      "format": "ntfy",                          // ntfy | slack | discord | raw（默认 raw）
+      "format": "ntfy",                          // ntfy | slack | discord | feishu | raw（默认 raw）
       "events": ["cron.failed", "cron.killed"]   // 省略 = 全部事件
     }
   ]
@@ -183,6 +183,8 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
 2. config 里 `"url": "https://ntfy.sh/my-seek-7f3a"`，`"format": "ntfy"`。
 3. 验证：`seek cron config check --probe`（往每个 webhook 发一条真实测试消息）。
 
+**飞书 / Lark（国内推荐）**：群里加「自定义机器人」拿到 webhook URL（形如 `https://open.feishu.cn/open-apis/bot/v2/hook/<id>`），config 里 `"format": "feishu"`。注意两点:① 机器人若开了**自定义关键词**,推送文本必须含该关键词才不被拒;② 飞书对关键词/签名错误**返回 HTTP 200 + body 里 `code≠0`**,seek 只看 HTTP 状态,这类逻辑错不会被标记——建议用**无签名**的机器人,先 `--probe` 确认真能收到。
+
 ```bash
 seek cron config check          # 离线校验 scheme + format
 seek cron config check --probe  # 额外发真实测试通知，确认渠道可达
@@ -194,7 +196,7 @@ seek cron config check --probe  # 额外发真实测试通知，确认渠道可�
 - **events 独立于 `--notify`**：`--notify never` 的任务（不要桌面弹窗）仍可通过 webhook `events` 推送失败到手机——桌面和远端是两个正交开关。
 - **隐私**：body 即桌面通知的 body，会发给你**自选**的第三方；敏感场景推荐 ntfy 自有 topic 或自托管。
 
-> Desktop popups only help when you're at the machine. `push_webhooks` additionally POSTs cron/trigger outcomes to a channel you pick (ntfy/Slack/Discord/raw). Best-effort, never blocks the run, private/LAN URLs allowed. Verify with `seek cron config check --probe`.
+> Desktop popups only help when you're at the machine. `push_webhooks` additionally POSTs cron/trigger outcomes to a channel you pick (ntfy/Slack/Discord/Feishu/raw). Best-effort, never blocks the run, private/LAN URLs allowed. Verify with `seek cron config check --probe`.
 
 ---
 

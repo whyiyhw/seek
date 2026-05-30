@@ -78,8 +78,8 @@ type PushWebhook struct {
 	// are allowed (the user configured it — self-hosted ntfy / intranet
 	// relays are a use case, unlike webfetch's model-driven SSRF gate).
 	URL string `json:"url"`
-	// Format selects the payload shape: ntfy | slack | discord | raw.
-	// Empty defaults to raw.
+	// Format selects the payload shape: ntfy | slack | discord | feishu |
+	// raw. Empty defaults to raw.
 	Format string `json:"format,omitempty"`
 	// Events filters which terminal events fire this webhook
 	// (e.g. "cron.failed", "trigger.completed"). Empty = every event.

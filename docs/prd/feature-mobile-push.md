@@ -29,7 +29,7 @@ v6 §3.5 草稿方向正确（webhook 桥、ntfy/slack/discord/raw、不做 nati
 ### 2.1 目标
 
 1. 通知派发时（cron 终态 / trigger 终态）**额外**把 `(title, body)` 经 HTTPS POST 推到用户配置的 webhook URL；**不替代** OS 桌面通知。
-2. 支持 4 种 format：`ntfy`（推荐）/ `slack` / `discord` / `raw`，各自正确的 payload + header 形态。
+2. 支持 5 种 format：`ntfy`（推荐）/ `slack` / `discord` / `feishu`（国内推荐）/ `raw`，各自正确的 payload + header 形态。
 3. 每个 webhook 可配 `events` 过滤（默认全部）；webhook 触发**独立于** `job.Notify`（见 D4 理由）。
 4. best-effort：webhook 失败 → WARN 到 stderr，**绝不**阻塞或回滚 cron run（继承 `Notifier` 契约）。
 5. `seek cron config check`：配置时验证 webhook（scheme + URL parse + 可选可达探测），把错误挡在用户依赖它之前。
@@ -111,6 +111,7 @@ v6 的「同 URL 连续失败 5 次降 DEBUG」假设有跨调用的进程内存
 | `ntfy` | POST，body = `body` 纯文本；header `Title: <title>`、`Priority`、可选 `Tags`（ntfy.sh API 形式，**非** JSON body） |
 | `slack` | POST，JSON body `{"text": "<title>\n<body>"}`（incoming webhook） |
 | `discord` | POST，JSON body `{"content": "**<title>**\n<body>"}` |
+| `feishu` | POST，JSON body `{"msg_type":"text","content":{"text":"<title>\n<body>"}}`（飞书/Lark 自定义机器人；关键词/签名机器人会被拒，且飞书逻辑错返回 200+`code≠0`，status-only 检查抓不到——best-effort） |
 | `raw` | POST，JSON body `{"title": ..., "body": ..., "event": ...}` |
 
 stdlib `net/http`，5s timeout，best-effort。
@@ -122,7 +123,7 @@ stdlib `net/http`，5s timeout，best-effort。
   "push_webhooks": [
     {
       "url": "https://ntfy.sh/my-seek-topic",
-      "format": "ntfy",                     // ntfy | slack | discord | raw（默认 raw）
+      "format": "ntfy",                     // ntfy | slack | discord | feishu | raw（默认 raw）
       "events": ["cron.failed", "cron.killed", "trigger.failed"]  // 省略 = 全部
     }
   ]
@@ -139,7 +140,7 @@ PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 
 | 任务 | 估时 |
 |---|---|
-| `internal/routines/webhook.go`：`WebhookDispatcher` 类型 + 构造器 + 4 个 format 适配器 + HTTPS POST（5s timeout、best-effort）+ URL 校验（scheme-only，D3） | ~1d |
+| `internal/routines/webhook.go`：`WebhookDispatcher` 类型 + 构造器 + 5 个 format 适配器（含 feishu）+ HTTPS POST（5s timeout、best-effort）+ URL 校验（scheme-only，D3） | ~1d |
 | 接线：`TickOptions.Webhook` 字段 + 两个派发点追加调用（D1）+ `main.go` 从 config 构造注入（D2）+ `config.PushWebhook` 结构 | ~0.5d |
 | `seek cron config check`（routinescli 新 verb，D5）+ 测试 + 文档（README + `guide-cron.md` 加 ntfy 安装指南） | ~0.5d |
 | **合计** | **~2d**（对齐 v6 §3.5） |
@@ -152,7 +153,7 @@ PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 | **malformed 输入** | 坏 config：URL 非 http(s)、`url.Parse` 失败、未知 format → `config check` 报错；运行时遇坏 URL → skip + WARN，不 panic |
 | **cancellation** | dispatcher 的 http 请求挂 ctx（5s timeout）；tick ctx 取消时 in-flight POST 被取消，不泄漏 goroutine |
 | **events 过滤** | table-test：`events=["cron.failed"]` 时 `cron.completed` 不发、`cron.failed` 发；空 events = 全发；过滤独立于 job.Notify（D4） |
-| **format 正确性** | 4 个 format 各断言 method/header/payload（ntfy 的 `Title` header 在 header 不在 body；slack/discord JSON 形态；raw 带 event 字段） |
+| **format 正确性** | 5 个 format 各断言 method/header/payload（ntfy 的 `Title` header 在 header 不在 body；slack/discord/feishu JSON 形态——feishu 断言 `msg_type:text` + 嵌套 `content.text`；raw 带 event 字段） |
 | **并发 -race** | 多 webhook 并发 POST（一个 tick 多 job）无共享可变态竞争；http.Client 并发安全 |
 | **持久化 round-trip** | config 带 `push_webhooks` 写→读→dispatcher 构造一致；旧 config（无该字段）→ nil dispatcher，零行为变化 |
 | **零破坏回归** | 现有 `notify` / tick / trigger 测试全绿（`Notifier` 签名未动） |

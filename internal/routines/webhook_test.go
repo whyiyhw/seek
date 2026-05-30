@@ -40,7 +40,7 @@ func TestValidateWebhookURL(t *testing.T) {
 
 func TestValidateWebhookFormat(t *testing.T) {
 	t.Parallel()
-	for _, f := range []string{"", "raw", "ntfy", "slack", "discord"} {
+	for _, f := range []string{"", "raw", "ntfy", "slack", "discord", "feishu"} {
 		if err := ValidateWebhookFormat(f); err != nil {
 			t.Errorf("ValidateWebhookFormat(%q) = %v, want nil", f, err)
 		}
@@ -109,6 +109,19 @@ func TestWebhookDispatcher_FormatPayloads(t *testing.T) {
 			}
 			if p["content"] != "**T**\nB" {
 				t.Errorf("discord content = %q", p["content"])
+			}
+		}},
+		{"feishu", func(t *testing.T, rec *recorder) {
+			var p map[string]any
+			if err := json.Unmarshal([]byte(rec.body), &p); err != nil {
+				t.Fatalf("feishu body not JSON: %v", err)
+			}
+			if p["msg_type"] != "text" {
+				t.Errorf("feishu msg_type = %v, want text", p["msg_type"])
+			}
+			content, ok := p["content"].(map[string]any)
+			if !ok || content["text"] != "T\nB" {
+				t.Errorf("feishu content = %v, want {text: T\\nB}", p["content"])
 			}
 		}},
 		{"raw", func(t *testing.T, rec *recorder) {

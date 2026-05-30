@@ -44,6 +44,7 @@ const (
 	FormatNtfy    = "ntfy"
 	FormatSlack   = "slack"
 	FormatDiscord = "discord"
+	FormatFeishu  = "feishu"
 	FormatRaw     = "raw"
 )
 
@@ -78,10 +79,10 @@ func ValidateWebhookURL(raw string) error {
 // config before the user relies on it.
 func ValidateWebhookFormat(format string) error {
 	switch format {
-	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord:
+	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu:
 		return nil
 	default:
-		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, raw)", format)
+		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, raw)", format)
 	}
 }
 
@@ -229,6 +230,19 @@ func buildWebhookRequest(t WebhookTarget, event, title, body string) (*http.Requ
 		return jsonRequest(t.URL, map[string]string{"text": title + "\n" + body})
 	case FormatDiscord:
 		return jsonRequest(t.URL, map[string]string{"content": "**" + title + "**\n" + body})
+	case FormatFeishu:
+		// Feishu / Lark custom-bot incoming webhook: msg_type "text" with a
+		// nested content.text. CAVEAT: a keyword- or signature-protected bot
+		// rejects this (keyword bots need the keyword in the text; signed
+		// bots need timestamp+sign) AND Feishu signals such errors with
+		// HTTP 200 + a non-zero `code` in the body — which postWebhook's
+		// status-only check can't see. Best-effort by design; use an
+		// unsigned custom bot (or one whose keyword you include) for
+		// reliable delivery.
+		return jsonRequest(t.URL, map[string]any{
+			"msg_type": "text",
+			"content":  map[string]string{"text": title + "\n" + body},
+		})
 	case FormatRaw, "":
 		return jsonRequest(t.URL, map[string]string{"event": event, "title": title, "body": body})
 	default:
