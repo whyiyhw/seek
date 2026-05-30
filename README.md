@@ -1,25 +1,30 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white" alt="Go Version">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
-  <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI">
-  <img src="https://img.shields.io/badge/lines-85k-orange" alt="LOC">
+  <img src="https://img.shields.io/badge/CI-race--tested-brightgreen?logo=github" alt="CI">
+  <img src="https://img.shields.io/badge/code-~85k%20LOC%20%C2%B7%2066%20pkgs-orange" alt="LOC">
+  <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey" alt="Platforms">
 </p>
 
-**Languages**: 中文 · [English](./docs/README_EN.md)
+**Languages**: English · [中文](README.zh.md)
 
 # seek
 
-**Claude Code 的工作流，DeepSeek 的价格。** 开源、单二进制、跨平台。
+> **Not an agent demo — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep.**
+
+A coding agent that runs as a single **~5 MB Go binary** in your terminal — **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend.** You bring your own model key: **DeepSeek-first**, and it also speaks to OpenAI / Anthropic / Gemini and other OpenAI-compatible endpoints (such as KIMI).
 
 ```
-┌─ seek · deepseek-v4-flash ────────────────── cache 96% · saved $0.42 ─┐
-│ /agents (2 active)  · /worktrees (1)  · cron: next @14:30 (12m)       │
-└────────────────────────────────────────────────────────────────────── ─┘
+┌─ seek · deepseek-v4-flash ─────────────── cache 96% · saved $0.42 ─┐
+│ /agents (2 active)  ·  /worktrees (1)  ·  cron: next @14:30 (12m)  │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## ⚡ 安装
+## ⚡ Install (single binary, no toolchain)
+
+**macOS / Linux:**
 
 ```bash
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -30,130 +35,133 @@ curl -fsSL "https://github.com/whyiyhw/seek/releases/download/v${VER}/seek_${VER
 seek
 ```
 
-首次运行引导设置 API key。Windows 用户走 [`docs/guide-windows.md`](./docs/guide-windows.md)；macOS Gatekeeper / 升级 / 离线安装看 [`docs/`](./docs/)。
+First launch walks you through picking a provider and saving an API key — that's it. **Windows**: see [`docs/guide-windows.md`](docs/guide-windows.md). **Upgrade**: `seek -upgrade` (sha256-verified, atomic) or `/upgrade` in the TUI.
 
 ---
 
-## 它能做什么
+## What it does — the three claims in the tagline, each backed by shipping code
 
-### 子代理 + Worktree 并行（v0.6.0）
+### 🧭 1. Plans before it acts
 
-模型可以派生子代理并行做调研、起方案、试方案。每个子代理有独立 token 账户、独立 transcript、可选隔离 git worktree。
+`/plan` puts seek in a **gated workflow**: `analyze → propose → you approve → execute`. It stays **read-only** until you approve a concrete, step-by-step plan rendered as a live TUI task list — no runaway edits. Push back mid-execution and it re-plans *without redoing finished work*. State is reconstructed from the transcript, so `seek -resume` picks the plan back up exactly where it left off.
+
+### 👥 2. Spawns a team of sub-agents
+
+seek fans a task out to sub-agents that work **in parallel, each isolated in its own git worktree** so they never collide — one explores, one drafts a plan, one implements in isolation. Permissions narrow **monotonically** (a child can never be less restricted than its parent), and token cost aggregates to the parent's status bar. Watch it live with `/agents` and `/worktrees`.
 
 ```mermaid
 graph LR
-  P["父 agent"]
-  E["subagent · explore<br/>调研三个目录"]
-  L["subagent · plan<br/>起方案"]
-  W["subagent · worktree<br/>隔离试方案"]
+  P["parent agent"]
+  E["subagent · explore"]
+  L["subagent · plan"]
+  W["subagent · worktree (isolated)"]
   P --> E
   P --> L
   P --> W
-  E --> S1[summary]
-  L --> S2[summary]
-  W --> S3[summary]
+  E --> S["merged result"]
+  L --> S
+  W --> S
 ```
 
-权限单调收紧（子永远不能松于父），成本自动累加到父状态栏。TUI `/agents` `/worktrees` 实时查看。
+### 🌙 3. Ships while you sleep
 
-### 定时唤醒 + 外部触发（v0.6.1）
-
-借力 OS 调度器，**零常驻 daemon**。可以让 cron 跑定时 prompt、让模型自己说"30 分钟后再来检查"、让 CI / IDE 插件写文件触发。
+**Zero-daemon scheduling** — seek leans on your OS scheduler (launchd / systemd / Task Scheduler); nothing resident. Schedule prompts with `seek cron`, let the model schedule its own follow-up with the `schedule_wakeup` tool, or fire a run from CI/IDE by dropping a trigger file. An unattended run does the work, commits it, and **pushes the result to your phone** via webhook (ntfy / Slack / Discord / any URL) — so you wake up to a finished commit, not a TODO.
 
 ```mermaid
 graph LR
-  OS["launchd / systemd / cron"]
-  T["seek cron tick"]
-  J["jobs.jsonl"]
-  X["triggers/*.json"]
-  R["子进程: seek -p '<prompt>'"]
-  N["OS notification"]
-  OS --> T
-  T --> J
-  T --> X
-  J --> R
-  X --> R
-  R --> N
+  OS["launchd / systemd / cron"] --> T["seek cron tick"]
+  T --> R["seek -p '<prompt>' (unattended)"]
+  R --> C["commit / PR"]
+  R --> N["OS notification + webhook → your phone"]
 ```
 
-`seek cron create/list/run` 管定时；`schedule_wakeup` 工具让模型主动安排回访；macOS `osascript` / Linux `notify-send` 自动选择（Windows 通知 v0.6.1 暂为 no-op）。完整启用步骤见 [`docs/guide-cron.md`](./docs/guide-cron.md)。
+---
 
-### 便宜一个数量级
+## Why it's real, not a concept
 
-DeepSeek 输入价格（源 `internal/pricing/pricing.go`）：
+seek is a mature, daily-driver codebase, not a weekend build:
 
-| 项 | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
+- **~85k lines of Go** (~44k non-test) across **66 packages**, tested with **`-race` on macOS / Linux / Windows** in CI.
+- **PRD-driven** — [`docs/prd/`](docs/prd/) holds the v0–v6 umbrellas plus 14 feature PRDs; a documented [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest.
+- Zero external dependencies in the DeepSeek client; **stdlib-first** throughout.
+
+### 💰 An order of magnitude cheaper
+
+DeepSeek input pricing (from [`internal/pricing/pricing.go`](internal/pricing/pricing.go)):
+
+| Metric | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
 |---|---|---|---|
-| 输入（无缓存） | **$0.14** / 1M | **$0.435** / 1M¹ | $3 / 1M |
-| 输入（缓存命中） | **$0.0028** / 1M | **$0.003625** / 1M | $0.30 / 1M |
-| 输出 | **$0.28** / 1M | **$0.87** / 1M | $15 / 1M |
-| 错峰² 折扣 | **再 5 折** | **再 5 折** | — |
+| Input (cache miss) | **$0.14** / 1M tok | **$0.435** / 1M tok¹ | $3 / 1M tok |
+| Input (prefix-cache hit) | **$0.0028** / 1M tok | **$0.003625** / 1M tok | $0.30 / 1M tok |
+| Output | **$0.28** / 1M tok | **$0.87** / 1M tok | $15 / 1M tok |
+| Off-peak window² | **50% off all of the above** | **50% off all of the above** | — |
 
-> ¹ promo 价 25% 全价。  ² 北京时间 00:30–08:30。
+> ¹ V4-Pro is at a 75%-off promo; full rack rate is $1.74 / $0.0145 / $3.48.  ² 00:30–08:30 Beijing time.
 
-工程纪律保证缓存命中：tool schema 是 `[]byte` 常量、tool 输出大小写入端就限定、历史消息从不在发送前重写。**实测稳态 prefix-cache 命中率 95–97%**。
+Measured **prefix-cache hit rate 95–97%**. That's engineering discipline, not luck: tool schemas are byte-stable `[]byte` constants, tool output is capped at write-time, and history is never rewritten before send. The status bar shows the live hit ratio and dollars saved.
 
-### 其他能力
+### 📚 Portable Agent Skills
 
-- **三层记忆**——S 会话 JSONL、M 项目 `memory_observe` + `/distill`、L 用户 `seek -dream` → `~/.seek/soul.md`
-- **双轴权限**——Pref（Deny/Ask/Yolo）× Workflow（None/PlanAnalyze/PlanExecute），workflow 永远 trump pref
-- **DeepSeek 专属**——V4 thinking 通过 `think` 工具按需调用、FIM 端点小补全便宜 5–10×、状态栏实时显示 cache 命中 + 错峰倒计时
-- **撤销安全网**——每 turn 自动 git checkpoint，`/undo` / `/redo` / `/restore` 文件级回滚
-- **Shell hooks + MCP client + Skills v2**——`.seek/hooks.toml` 钩子、MCP server 透传、兼容 [Anthropic Skills 格式](https://docs.anthropic.com/en/docs/claude-code/skills)零修改安装
-
----
-
-## 工具与命令
-
-### 主入口
+Compatible with the [Anthropic Agent Skills format](https://docs.anthropic.com/en/docs/claude-code/skills) (`<dir>/SKILL.md` + frontmatter) — any Claude Code skill installs **unmodified**. Author, install, and run modular, reusable skills:
 
 ```bash
-seek                       # TUI
-seek -p '<prompt>'         # 一次性打印模式（pipeline 友好）
-seek -rpc                  # JSON-RPC 2.0 server（IDE 接入）
-seek -resume <sid>         # 续传指定 session（`-continue` 续最近）
+seek skill create my-skill                              # scaffold one
+seek skill install https://github.com/foo/bar#v1.0.0    # git URL / tarball / local path
+seek skill list                                         # what's loaded
 ```
 
-### 子系统（独立子命令）
+Built-ins include **`code-review`** (effort-graded review that spawns sub-agents and can `--fix` through plan-mode, or `--comment` to a PR), `plan-mode`, `dual-model`, `go-test-runner`.
+
+### And more
+
+- **Three-tier memory** — S (session) / M (project, with decay-score GC) / L (cross-project "soul", distilled by `seek -dream`).
+- **MCP client** — pass through any MCP server's tools.
+- **Checkpoint safety net** — per-turn git snapshot + file-level `/undo` `/redo` `/restore`.
+- **Dual-axis permissions** — Preference (Deny / Ask / Yolo) × Workflow (None / PlanAnalyze / PlanExecute); workflow always trumps preference.
+- **Shell hooks**, **JSON-RPC 2.0 server mode** (IDE integration), and DeepSeek extras (V4 reasoning via the `think` tool; FIM endpoint for 5–10× cheaper small edits; off-peak pricing countdown).
+
+---
+
+## Tools & commands
 
 ```bash
-seek skill      install/list/stats/uninstall/update
-seek memory     list/show/search/archive
-seek cron       create/list/run/delete/tick
-seek worktree   list/gc
-seek checkpoint list/clean       # 配合 seek undo / seek redo
-seek hooks      list/check/trust/audit
-seek keys       list/check/actions
+seek                       # interactive TUI
+seek -p '<prompt>'         # one-shot print mode (pipeline-friendly)
+seek -rpc                  # JSON-RPC 2.0 server (IDE integration)
+seek -resume <sid>         # resume a session (-continue for the most recent)
+
+seek skill      install / list / stats / uninstall / update
+seek memory     list / show / search / archive
+seek cron       create / list / run / delete / tick / config check
+seek worktree   list / gc
+seek checkpoint list / clean        # with seek undo / seek redo
+seek hooks      list / check / trust / audit
 ```
 
-每个子命令在 TUI 内也以 `/<name>` 形式可用（`/skill use <name>`、`/memory show`、…）。
-
-### TUI 独有
-
-`/plan` 切只读探索；`/steer` 流中插入指令；`/agents` `/worktrees` 编排面板；`/distill` 抽取项目记忆候选；`/review` 一键代码审查。完整 26 个 slash：`/help`。
+Every subcommand is also a `/<name>` inside the TUI. TUI-only: `/plan`, `/steer`, `/agents`, `/worktrees`, `/distill`, `/code-review`. Full list: `/help`.
 
 ---
 
-## 路线图
+## Roadmap
 
-| 里程碑 | 主题 | 状态 |
-|---|---|---|
-| M0–M9 | DeepSeek 客户端、agent loop、多 provider、session、skill、hooks、checkpoint | 已 ship |
-| M10 | plan-mode v2、permission 重构、active memory、webfetch、MCP client | 已 ship |
-| M11.0 | v5 柱 G——subagent + worktree | 已 ship (v0.6.0) |
-| M11.1–11.3 | v5 柱 H——cron + wakeup + push + triggers | 已 ship (v0.6.1) |
-| v0.6.x dot | `/routines` 面板、`seek cron logs/edit`、5-field cron 表达式 | 计划中 |
-| v0.7+ | `--max-cost` 熔断、跨机同步、HTTP webhook、依赖图 | brainstorm |
+Everything below ships in the current **v0.7.0** release:
 
-完整 PRD：[`docs/prd/`](./docs/prd/)（v0–v5 umbrella + 11 个 feature PRD）  
-贡献：[`AGENTS.md`](./AGENTS.md) · 踩坑：[`docs/pitfalls.md`](./docs/pitfalls.md)
+| Phase | What landed |
+|---|---|
+| Foundations (M0–M10) | DeepSeek client · agent loop · multi-provider · sessions · skills · hooks · checkpoints · plan-mode v2 · permission refactor · MCP client · webfetch |
+| Orchestration (柱 G/H) | sub-agents + worktrees · cron + self-scheduled wakeups + file triggers + OS notifications |
+| Single-point tools (柱 I/J/M) | AskUserQuestion v2 · composite `code-review` skill · **mobile-push webhook bridge** |
 
----
+Next up (柱 K / L): Monitor + background bash · LSP tool.
 
-## 开源
-
-[MIT](./LICENSE)。无地区限制、无身份审核、无强制 telemetry。灵感来自 [`earendil-works/pi`](https://github.com/earendil-works/pi)（MIT）；归属见 [`NOTICE`](./NOTICE)。
+Full design docs: [`docs/prd/`](docs/prd/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md) · pitfalls: [`docs/pitfalls.md`](docs/pitfalls.md)
 
 ---
 
-*~85k 行 Go（~44k 非测试）· 66 个包 · macOS / Linux / Windows 全平台 -race 通过*
+## Open source
+
+[MIT](LICENSE). No region lock, no signup, no mandatory telemetry — builders anywhere in the world are welcome. Inspired by [`earendil-works/pi`](https://github.com/earendil-works/pi) (MIT); attribution in [`NOTICE`](NOTICE).
+
+---
+
+*~85k lines of Go (~44k non-test) · 66 packages · `-race` on macOS / Linux / Windows*
