@@ -29,8 +29,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/routines"
 )
+
+// WebhookDispatcherFromConfig builds the push-webhook dispatcher from
+// ~/.seek/config.json's push_webhooks (v6 柱 M). Returns nil when no
+// webhooks are configured (the common case) or when config can't be
+// read — push is best-effort and must never block a cron tick, so a
+// config-read failure degrades to "no webhooks" with a stderr WARN
+// rather than an error. Shared by `cron tick`, `cron run`, and the
+// interactive auto-tick in cmd/seek so the wiring can't drift.
+func WebhookDispatcherFromConfig() routines.WebhookDispatcher {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cron: read config for push webhooks: %v\n", err)
+		return nil
+	}
+	if len(cfg.PushWebhooks) == 0 {
+		return nil
+	}
+	targets := make([]routines.WebhookTarget, 0, len(cfg.PushWebhooks))
+	for _, w := range cfg.PushWebhooks {
+		targets = append(targets, routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events})
+	}
+	return routines.NewWebhookDispatcher(targets, nil)
+}
 
 // Run is the public entry. args is everything after `seek cron`
 // (e.g. `seek cron create --at @daily foo` → args = `["create",
@@ -52,6 +76,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return cmdRun(rest, stdout, stderr)
 	case "tick":
 		return cmdTick(rest, stdout, stderr)
+	case "config":
+		return cmdConfig(rest, stdout, stderr)
 	case "help", "--help", "-h":
 		printHelp(stdout)
 		return nil
@@ -90,6 +116,12 @@ Usage:
       Designed for launchd / systemd-timer / cron / Task Scheduler
       at ~1-minute cadence. Skips silently if another tick holds
       the host-wide tick.lock.
+
+  seek cron config check [--probe]
+      Validate the push_webhooks in ~/.seek/config.json (mobile-push
+      bridge). Checks each URL's scheme + format offline; --probe sends
+      a real test notification to each so you can confirm a channel
+      works before relying on it.
 
   seek cron help
       Show this help.
@@ -282,7 +314,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 
 	fmt.Fprintf(stdout, "running cron job %q...\n", name)
-	if err := routines.RunOne(ctx, store, name, routines.TickOptions{RunTimeout: *timeout}); err != nil {
+	if err := routines.RunOne(ctx, store, name, routines.TickOptions{RunTimeout: *timeout, Webhook: WebhookDispatcherFromConfig()}); err != nil {
 		return err
 	}
 	// RunOne returns nil on completed/failed/killed runs; the
@@ -323,7 +355,7 @@ func cmdTick(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	res, err := routines.Tick(ctx, store, routines.TickOptions{})
+	res, err := routines.Tick(ctx, store, routines.TickOptions{Webhook: WebhookDispatcherFromConfig()})
 	if err != nil {
 		return err
 	}
@@ -367,4 +399,80 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-1] + "…"
+}
+
+// cmdConfig dispatches `seek cron config <sub>`. Currently only `check`
+// (validate push webhooks). Kept as a sub-namespace so future cron-level
+// config inspection can land here without new top-level verbs.
+func cmdConfig(args []string, stdout, stderr io.Writer) error {
+	sub := "check"
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	switch sub {
+	case "check":
+		return cmdConfigCheck(args, stdout, stderr)
+	default:
+		return fmt.Errorf("unknown `cron config` subcommand %q (try `check`)", sub)
+	}
+}
+
+// cmdConfigCheck validates ~/.seek/config.json's push_webhooks. By
+// default it only checks each URL's scheme + format (offline). With
+// --probe it sends a real test notification to each and reports the
+// outcome — the recommended way to confirm a channel works BEFORE a
+// 3am cron run silently fails to reach it (feature-mobile-push.md §D5).
+func cmdConfigCheck(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("cron config check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	probe := fs.Bool("probe", false, "send a real test notification to each webhook")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if len(cfg.PushWebhooks) == 0 {
+		fmt.Fprintln(stdout, "no push webhooks configured (push_webhooks in ~/.seek/config.json)")
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	failures := 0
+	for i, w := range cfg.PushWebhooks {
+		label := fmt.Sprintf("[%d] %s (%s)", i, w.URL, w.Format)
+		if w.Format == "" {
+			label = fmt.Sprintf("[%d] %s (raw)", i, w.URL)
+		}
+		if err := routines.ValidateWebhookURL(w.URL); err != nil {
+			fmt.Fprintf(stdout, "  ✗ %s — %v\n", label, err)
+			failures++
+			continue
+		}
+		if err := routines.ValidateWebhookFormat(w.Format); err != nil {
+			fmt.Fprintf(stdout, "  ✗ %s — %v\n", label, err)
+			failures++
+			continue
+		}
+		if *probe {
+			target := routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events}
+			if err := routines.SendTestWebhook(ctx, target, nil); err != nil {
+				fmt.Fprintf(stdout, "  ✗ %s — probe failed: %v\n", label, err)
+				failures++
+				continue
+			}
+			fmt.Fprintf(stdout, "  ✓ %s — probe delivered\n", label)
+			continue
+		}
+		fmt.Fprintf(stdout, "  ✓ %s\n", label)
+	}
+	if failures > 0 {
+		return fmt.Errorf("%d of %d webhook(s) failed validation", failures, len(cfg.PushWebhooks))
+	}
+	fmt.Fprintf(stdout, "%d webhook(s) OK\n", len(cfg.PushWebhooks))
+	return nil
 }

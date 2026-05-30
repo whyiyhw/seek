@@ -158,6 +158,44 @@ Windows 用户启用 `--notify always` 不会收到任何弹窗——这是 v0.6
 
 Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，不会刷 stderr。macOS headless（虽然罕见）`osascript` 也会失败，目前会写 `WARN: notify failed: ...` 到 run record，不阻塞 cron 跑——任务跑了，只是没弹窗。
 
+### 移动端推送 webhook / Mobile push (v0.7.0 柱 M)
+
+桌面通知只在你坐在电脑前才有用。**push webhook** 让 cron / trigger 的终态**额外**通过 HTTPS POST 推到你自选的渠道——离开电脑也能收。桌面通知**不受影响**，webhook 是叠加的旁路。
+
+在 `~/.seek/config.json` 配置：
+
+```jsonc
+{
+  "push_webhooks": [
+    {
+      "url": "https://ntfy.sh/my-seek-topic",   // 你自己的 topic
+      "format": "ntfy",                          // ntfy | slack | discord | raw（默认 raw）
+      "events": ["cron.failed", "cron.killed"]   // 省略 = 全部事件
+    }
+  ]
+}
+```
+
+事件名：`cron.completed` / `cron.failed` / `cron.killed`、`trigger.completed` / `trigger.failed`。
+
+**最快上手（ntfy.sh，开源 + 免费 + 有 iOS/Android app）**：
+1. 手机装 [ntfy](https://ntfy.sh) app，订阅一个只有你知道的 topic，例如 `my-seek-7f3a`。
+2. config 里 `"url": "https://ntfy.sh/my-seek-7f3a"`，`"format": "ntfy"`。
+3. 验证：`seek cron config check --probe`（往每个 webhook 发一条真实测试消息）。
+
+```bash
+seek cron config check          # 离线校验 scheme + format
+seek cron config check --probe  # 额外发真实测试通知，确认渠道可达
+```
+
+要点 / Notes：
+- **私网/LAN 地址放行**：`http://192.168.x.x/...`、自托管 ntfy、内网 Slack relay 都行——这是你在自己 config 里写的 outbound，不是模型驱动的 SSRF（与 `webfetch` 的私网拦截**不同**）。
+- **best-effort**：webhook 失败只写 WARN 到 stderr，**绝不**影响 cron 任务本身（任务照跑、run record 照写）。5xx 自动重试一次。
+- **events 独立于 `--notify`**：`--notify never` 的任务（不要桌面弹窗）仍可通过 webhook `events` 推送失败到手机——桌面和远端是两个正交开关。
+- **隐私**：body 即桌面通知的 body，会发给你**自选**的第三方；敏感场景推荐 ntfy 自有 topic 或自托管。
+
+> Desktop popups only help when you're at the machine. `push_webhooks` additionally POSTs cron/trigger outcomes to a channel you pick (ntfy/Slack/Discord/raw). Best-effort, never blocks the run, private/LAN URLs allowed. Verify with `seek cron config check --probe`.
+
 ---
 
 ## 5. 外部触发 / External triggers (file bridge)

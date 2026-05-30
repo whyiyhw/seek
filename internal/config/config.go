@@ -62,6 +62,28 @@ type Config struct {
 	// false → user explicitly turned it off"; a bool would silently
 	// default to false for any config file written before v4.
 	SuggestReply *bool `json:"suggest_reply,omitempty"`
+
+	// PushWebhooks are the v6 柱 M mobile-push targets: cron / trigger
+	// terminal events are POSTed to each (in ADDITION to the OS desktop
+	// notification) so the user is reachable away from the machine.
+	// Empty / absent = no webhooks. See docs/prd/feature-mobile-push.md.
+	PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
+}
+
+// PushWebhook is one mobile-push destination (v6 柱 M). cmd/seek maps
+// this onto routines.WebhookTarget when wiring the dispatcher, keeping
+// the routines package independent of this config package.
+type PushWebhook struct {
+	// URL is the POST target. http/https only; private/LAN addresses
+	// are allowed (the user configured it — self-hosted ntfy / intranet
+	// relays are a use case, unlike webfetch's model-driven SSRF gate).
+	URL string `json:"url"`
+	// Format selects the payload shape: ntfy | slack | discord | raw.
+	// Empty defaults to raw.
+	Format string `json:"format,omitempty"`
+	// Events filters which terminal events fire this webhook
+	// (e.g. "cron.failed", "trigger.completed"). Empty = every event.
+	Events []string `json:"events,omitempty"`
 }
 
 // SuggestReplyEnabled returns whether the suggested-reply feature

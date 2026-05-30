@@ -1346,7 +1346,7 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "cron auto-tick: open store:", err)
 				return
 			}
-			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{}); err != nil {
+			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{Webhook: routinescli.WebhookDispatcherFromConfig()}); err != nil {
 				fmt.Fprintln(os.Stderr, "cron auto-tick:", err)
 			}
 		}()

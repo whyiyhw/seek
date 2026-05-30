@@ -136,6 +136,15 @@ type TickOptions struct {
 	// linux, no-op on windows + other). Tests inject a stub
 	// recorder to assert without popping real banners.
 	Notifier Notifier
+
+	// Webhook is the optional push-webhook sibling of Notifier
+	// (feature-mobile-push.md §D1). nil → no webhooks (the common
+	// case; only set when the user configured push_webhooks).
+	// Unlike Notifier it carries the event ("cron.failed" etc.)
+	// so a webhook can filter, and it fires INDEPENDENT of
+	// Job.Notify — the desktop popup and the remote channel are
+	// orthogonal knobs (§D4).
+	Webhook WebhookDispatcher
 }
 
 func (o *TickOptions) now() time.Time {
@@ -276,13 +285,14 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 	subFn := opts.subprocess()
 	runTimeout := opts.runTimeout()
 	notifier := opts.notifier()
+	webhook := opts.Webhook
 
 	var wg sync.WaitGroup
 	for _, j := range due {
 		wg.Add(1)
 		go func(j Job) {
 			defer wg.Done()
-			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn, notifier)
+			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn, notifier, webhook)
 		}(j)
 	}
 	wg.Wait()
@@ -293,7 +303,7 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 	// the rest, and the directory-listing error is the only
 	// thing that bubbles up (rare — ENOENT degrades silently).
 	triggersDir := filepath.Join(tp.cronDir, "triggers")
-	if dispatched, terr := processTriggers(ctx, triggersDir, tp.runsDir, now, subFn, notifier); terr != nil {
+	if dispatched, terr := processTriggers(ctx, triggersDir, tp.runsDir, now, subFn, notifier, webhook); terr != nil {
 		fmt.Fprintf(os.Stderr, "routines: triggers: %v\n", terr)
 	} else {
 		res.TriggersDispatched = dispatched
@@ -355,7 +365,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 	if err != nil {
 		return err
 	}
-	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess(), opts.notifier())
+	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess(), opts.notifier(), opts.Webhook)
 	return nil
 }
 
@@ -368,7 +378,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 //     prior fire; skip silently.
 //   - lock acquire I/O error → log to stderr, skip; don't crash
 //     the whole tick.
-func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn, notify Notifier) {
+func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) {
 	jobLockPath := filepath.Join(runsDir, job.Name+".lock")
 	jobLock, ok, err := TryLock(jobLockPath)
 	if err != nil {
@@ -520,11 +530,18 @@ func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, jo
 	// §3.8 "fallback (binary missing): write WARN to the run
 	// record, don't fail the cron run itself" — we stick that
 	// WARN on stderr too so launchd / systemd logs surface it.
+	title := fmt.Sprintf("seek cron: %s (%s)", job.Name, terminalStatus)
 	if notify != nil && shouldNotify(job, terminalStatus) {
-		title := fmt.Sprintf("seek cron: %s (%s)", job.Name, terminalStatus)
 		if err := notify(title, terminalNote); err != nil {
 			fmt.Fprintf(os.Stderr, "routines: notify failed for %s: %v\n", job.Name, err)
 		}
+	}
+	// Webhook push fires INDEPENDENT of Job.Notify (§D4): the desktop
+	// popup and the remote channel are orthogonal. The dispatcher
+	// filters by its own per-webhook events list. Best-effort — never
+	// touches the already-written run record.
+	if webhook != nil {
+		webhook(parentCtx, "cron."+terminalStatus, title, terminalNote)
 	}
 
 	_ = cronDir // reserved for triggers/ dispatcher (M11.3 follow-up)

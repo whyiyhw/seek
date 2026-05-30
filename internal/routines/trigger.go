@@ -62,7 +62,7 @@ type Trigger struct {
 // directory listing surface; per-file errors are stderr WARN
 // and processing continues (one broken trigger doesn't block
 // the rest).
-func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier) (int, error) {
+func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) (int, error) {
 	entries, err := os.ReadDir(triggersDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -85,7 +85,7 @@ func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.
 			continue // ignore non-JSON files in the inbox
 		}
 		path := filepath.Join(triggersDir, name)
-		if processed := processOneTrigger(ctx, path, runsDir, now, subFn, notify); processed {
+		if processed := processOneTrigger(ctx, path, runsDir, now, subFn, notify, webhook); processed {
 			dispatched++
 		}
 	}
@@ -97,7 +97,7 @@ func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.
 // false on skip/expire/malformed paths. Each non-dispatch
 // reason gets a stderr WARN naming the file so launchd /
 // systemd logs surface actionable hints.
-func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier) bool {
+func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "routines: trigger %s: stat: %v\n", path, err)
@@ -241,11 +241,15 @@ func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time,
 		terminalNote = errMsg
 	}
 
+	title := fmt.Sprintf("seek trigger: %s (%s)", trig.TriggerID, terminalStatus)
 	if notify != nil {
-		title := fmt.Sprintf("seek trigger: %s (%s)", trig.TriggerID, terminalStatus)
 		if err := notify(title, terminalNote); err != nil {
 			fmt.Fprintf(os.Stderr, "routines: notify failed for trigger %s: %v\n", trig.TriggerID, err)
 		}
+	}
+	// Webhook push — best-effort, independent of OS notification (§D4).
+	if webhook != nil {
+		webhook(ctx, "trigger."+terminalStatus, title, terminalNote)
 	}
 	return true
 }

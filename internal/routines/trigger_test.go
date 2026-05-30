@@ -75,7 +75,7 @@ func TestProcessTriggers_HappyPath(t *testing.T) {
 		return sub(ctx, j, runID)
 	})
 
-	n, err := processTriggers(context.Background(), triggersDir, runsDir, now, wrapped, noopNotifier)
+	n, err := processTriggers(context.Background(), triggersDir, runsDir, now, wrapped, noopNotifier, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestProcessTriggers_TTLExpired(t *testing.T) {
 		return nil, nil // shouldn't be reached
 	})
 
-	n, err := processTriggers(context.Background(), triggersDir, runsDir, now, sub, noopNotifier)
+	n, err := processTriggers(context.Background(), triggersDir, runsDir, now, sub, noopNotifier, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestProcessTriggers_MalformedQuarantined(t *testing.T) {
 	now := time.Now().UTC()
 	path := writeRawTrigger(t, triggersDir, now, "bad-syntax", []byte(`{this is not json}`))
 
-	n, _ := processTriggers(context.Background(), triggersDir, runsDir, now, nil, noopNotifier)
+	n, _ := processTriggers(context.Background(), triggersDir, runsDir, now, nil, noopNotifier, nil)
 	if n != 0 {
 		t.Errorf("dispatched = %d, want 0 (malformed)", n)
 	}
@@ -169,7 +169,7 @@ func TestProcessTriggers_MissingRequiredFields(t *testing.T) {
 	data, _ := json.Marshal(Trigger{TriggerID: "no-prompt", Prompt: ""})
 	path := writeRawTrigger(t, triggersDir, now, "no-prompt", data)
 
-	n, _ := processTriggers(context.Background(), triggersDir, runsDir, now, nil, noopNotifier)
+	n, _ := processTriggers(context.Background(), triggersDir, runsDir, now, nil, noopNotifier, nil)
 	if n != 0 {
 		t.Errorf("dispatched = %d, want 0 (missing prompt)", n)
 	}
@@ -203,7 +203,7 @@ func TestProcessTriggers_FreshFileSkipped(t *testing.T) {
 		return nil, nil
 	})
 
-	n, _ := processTriggers(context.Background(), triggersDir, runsDir, time.Now().UTC(), sub, noopNotifier)
+	n, _ := processTriggers(context.Background(), triggersDir, runsDir, time.Now().UTC(), sub, noopNotifier, nil)
 	if n != 0 {
 		t.Errorf("dispatched = %d, want 0 (file too fresh)", n)
 	}
@@ -222,7 +222,7 @@ func TestProcessTriggers_FreshFileSkipped(t *testing.T) {
 func TestProcessTriggers_MissingDirIsNotError(t *testing.T) {
 	root := t.TempDir()
 	nonexistent := filepath.Join(root, "no-such-triggers")
-	n, err := processTriggers(context.Background(), nonexistent, filepath.Join(root, "runs"), time.Now().UTC(), nil, noopNotifier)
+	n, err := processTriggers(context.Background(), nonexistent, filepath.Join(root, "runs"), time.Now().UTC(), nil, noopNotifier, nil)
 	if err != nil {
 		t.Fatalf("missing triggers dir should not error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestProcessTriggers_IgnoresNonJSON(t *testing.T) {
 	for _, name := range []string{"README.txt", "notes", "config.yaml"} {
 		_ = os.WriteFile(filepath.Join(triggersDir, name), []byte("hi"), 0o644)
 	}
-	n, err := processTriggers(context.Background(), triggersDir, filepath.Join(root, "runs"), time.Now().UTC(), nil, noopNotifier)
+	n, err := processTriggers(context.Background(), triggersDir, filepath.Join(root, "runs"), time.Now().UTC(), nil, noopNotifier, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
