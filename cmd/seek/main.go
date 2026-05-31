@@ -2321,7 +2321,40 @@ func acpUpdate(sessionID string, ev agent.Event) (acp.SessionUpdate, bool) {
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
 // logging goes to stderr.
 func runACP(ctx context.Context, ag *agent.Agent) error {
-	return acp.NewServer(os.Stdin, os.Stdout, &acpBackend{ag: ag}).Serve(ctx)
+	var r io.Reader = os.Stdin
+	var w io.Writer = os.Stdout
+	// Opt-in protocol trace for debugging the Zed (or any ACP client)
+	// handshake: SEEK_ACP_LOG=/path records raw incoming ("<<") and
+	// outgoing (">>") JSON-RPC. Off by default — no overhead/noise. The
+	// real stdio stream is untouched; only a tee copy is tagged + logged.
+	if lp := strings.TrimSpace(os.Getenv("SEEK_ACP_LOG")); lp != "" {
+		if f, err := os.OpenFile(lp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			defer f.Close()
+			wd, _ := os.Getwd()
+			fmt.Fprintf(f, "\n=== seek acp start cwd=%s pid=%d ===\n", wd, os.Getpid())
+			r = io.TeeReader(os.Stdin, &taggedWriter{w: f, tag: "<< "})
+			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
+		}
+	}
+	return acp.NewServer(r, w, &acpBackend{ag: ag}).Serve(ctx)
+}
+
+// taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace
+// only. Best-effort: inner write errors are swallowed so tracing can never
+// disturb the live protocol stream, and it always reports a full write so
+// io.TeeReader / io.MultiWriter stay happy.
+type taggedWriter struct {
+	w   io.Writer
+	tag string
+}
+
+func (t *taggedWriter) Write(p []byte) (int, error) {
+	_, _ = t.w.Write([]byte(t.tag))
+	_, _ = t.w.Write(p)
+	if n := len(p); n == 0 || p[n-1] != '\n' {
+		_, _ = t.w.Write([]byte("\n"))
+	}
+	return len(p), nil
 }
 
 func resolvePrompt(flagPrompt string) (string, error) {

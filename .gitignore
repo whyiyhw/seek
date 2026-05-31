@@ -15,6 +15,7 @@ coverage.txt
 .DS_Store
 .idea/
 .vscode/
+.zed/
 *.swp
 
 # Benchmark output reports

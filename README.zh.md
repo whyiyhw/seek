@@ -104,6 +104,9 @@ DeepSeek 输入价格（源 `internal/pricing/pricing.go`）：
 - **DeepSeek 专属**——V4 thinking 通过 `think` 工具按需调用、FIM 端点小补全便宜 5–10×、状态栏实时显示 cache 命中 + 错峰倒计时
 - **撤销安全网**——每 turn 自动 git checkpoint，`/undo` / `/redo` / `/restore` 文件级回滚
 - **Shell hooks + MCP client + Skills v2**——`.seek/hooks.toml` 钩子、MCP server 透传、兼容 [Anthropic Skills 格式](https://docs.anthropic.com/en/docs/claude-code/skills)零修改安装
+- **离线图片 OCR**——prompt 中引用图片文件（`.png` `.jpg` `.heic` …），seek 离线本地 OCR 后传给模型。macOS 默认开启；其他平台需 `ocr.command`。见 [`docs/guide-ocr.md`](docs/guide-ocr.md)
+- **代码审查**——四档深度（`quick` → `max`）结构化 diff 审查，支持 `--fix` 自动修复和 `--comment` 输出。见 [`docs/guide-code-review.md`](docs/guide-code-review.md)
+- **推送通知**——cron/autopilot/长交互回合完成后，通过 webhook 推送到手机（ntfy / Slack / Discord / 飞书 / 自定义）。见 [`docs/guide-webhooks.md`](docs/guide-webhooks.md)
 
 ---
 
@@ -140,15 +143,16 @@ seek keys       list/check/actions
 
 ## 路线图
 
-以下全部包含在当前 **v0.7.1** release：
+以下全部包含在当前 **v0.8.0** release：
 
 | 阶段 | 已落地 |
 |---|---|
 | 基础（M0–M10） | DeepSeek 客户端、agent loop、多 provider、session、skill、hooks、checkpoint、plan-mode v2、permission 重构、MCP client、webfetch |
 | 编排（柱 G/H） | 子代理 + worktree、cron + 自调度 wakeup + 文件触发 + OS 通知 |
-| 单点工具（柱 I–M） | AskUserQuestion v2、复合 `code-review` skill、**移动端 webhook 推送桥**、后台 bash + `monitor`（poll/wait/kill）、语义 `references`（LSP 找引用） |
+| 单点工具（柱 I–M） | AskUserQuestion v2、复合 `code-review` skill、移动端 webhook 推送桥、后台 bash + `monitor`（poll/wait/kill）、语义 `references`（LSP 找引用） |
 
-v6 单点工具全交付。**v7**（规划中）：深化护城河——Autopilot（无人值守过夜编排）+ OS 沙箱——外加 ACP 编辑器集成、图片 OCR。见 [`docs/prd/v7.md`](docs/prd/v7.md)。
+v6 单点工具全交付。**v7 已交付，v0.8.x**：四柱全部落地。  
+[📘 Autopilot](docs/guide-autopilot.md)（无人值守编排）· [📘 OS 沙箱](docs/guide-sandbox.md)（seatbelt/landlock）· [📘 ACP / Zed 集成](docs/guide-zed.md) · [📘 OCR](docs/guide-ocr.md)（本地图片文字识别）
 
 完整 PRD：[`docs/prd/`](./docs/prd/)（v0–v6 umbrella + 14 个 feature PRD）  
 贡献：[`AGENTS.md`](./AGENTS.md) · 踩坑：[`docs/pitfalls.md`](./docs/pitfalls.md)

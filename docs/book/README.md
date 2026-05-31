@@ -286,6 +286,23 @@
 - 22.11 与柱 G 的对比（触发方式 / 父子关系 / 进程模型）
 - 22.12 一个观察：从同步到异步的换挡
 
+**[第 23 章：v6 五柱 — 单点工具补齐 I·J·K·L·M](chapter-23.md)** *(v0.7.x)*
+- 23.1 从架构缺口到单点补齐（P0 清零后的战略换挡）
+- 23.2 柱 I：AskUserQuestion v2 — 多题 stack + preview 侧栏
+- 23.3 柱 J：Code-Review Skill — 四档 effort + --fix/--comment
+- 23.4 柱 K：Background Bash + Monitor — 长任务不卡 turn
+- 23.5 柱 L：LSP References — 语义找引用，瘦身版
+- 23.6 柱 M：Mobile Push Webhook — 离开电脑也能收通知
+- 23.7 一个观察：从"推土机"到"扳手"的换挡
+
+**[第 24 章：v7 四柱 — 打擂台 Reasonix N·O·P·Q](chapter-24.md)** *(v0.8.x)*
+- 24.1 战略转折：从追赶到防守
+- 24.2 柱 N：Autopilot 无人值守编排（分解→fleet→聚合→commit）
+- 24.3 柱 O：OS 沙箱（macOS seatbelt / Linux landlock trampoline）
+- 24.4 柱 P：ACP 编辑器集成（适配层，非新 agent）
+- 24.5 柱 Q：离线图片 OCR（go:embed Swift → 首次编译缓存）
+- 24.6 一个观察：如何在"已追上"的市场保持领先
+
 ---
 
 ### 附录

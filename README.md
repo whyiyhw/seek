@@ -114,11 +114,14 @@ Built-ins include **`code-review`** (effort-graded review that spawns sub-agents
 
 ### And more
 
-- **Three-tier memory** — S (session) / M (project, with decay-score GC) / L (cross-project "soul", distilled by `seek -dream`).
-- **MCP client** — pass through any MCP server's tools.
+- **Three-tier memory** — S (session) / M (project, with decay-score GC) / L (cross-project "soul", distilled by `seek -dream`). See [`docs/guide-memory.md`](docs/guide-memory.md).
+- **MCP client** — pass through any MCP server's tools. See [`docs/guide-mcp.md`](docs/guide-mcp.md).
 - **Checkpoint safety net** — per-turn git snapshot + file-level `/undo` `/redo` `/restore`.
 - **Background jobs** — `bash run_in_background` detaches long builds / test suites / dev servers and returns a `bg-N` handle; the `monitor` tool polls, waits (`until_regex` for readiness), or kills. Session-scoped, never orphaned. See [`docs/guide-background.md`](docs/guide-background.md).
 - **Semantic find-references** — the `references` tool asks the language server (gopls / pyright / typescript-language-server) "who calls this?" — resolving the real symbol, following aliased imports, ignoring comments/strings, where a name-grep can't. Lazy-started, session-scoped, falls back to grep if unavailable. See [`docs/guide-references.md`](docs/guide-references.md).
+- **Offline image OCR** — reference images in your prompt (`.png` `.jpg` `.heic` …); seek OCRs them locally and offline before sending to the model. No VLM, no network, no cloud API. macOS default-on; Linux/Windows need `ocr.command`. See [`docs/guide-ocr.md`](docs/guide-ocr.md).
+- **Code review** — four effort levels (`quick` → `max`) for structured diff review, with `--fix` (auto-repair via plan-mode) and `--comment` (inline output). See [`docs/guide-code-review.md`](docs/guide-code-review.md).
+- **Push notifications** — cron/autopilot/long-turn completions push to your phone via webhook (ntfy / Slack / Discord / Feishu / custom). See [`docs/guide-webhooks.md`](docs/guide-webhooks.md).
 - **Dual-axis permissions** — Preference (Deny / Ask / Yolo) × Workflow (None / PlanAnalyze / PlanExecute); workflow always trumps preference.
 - **Shell hooks**, **JSON-RPC 2.0 server mode** (IDE integration), and DeepSeek extras (V4 reasoning via the `think` tool; FIM endpoint for 5–10× cheaper small edits; off-peak pricing countdown).
 
@@ -146,15 +149,16 @@ Every subcommand is also a `/<name>` inside the TUI. TUI-only: `/plan`, `/steer`
 
 ## Roadmap
 
-Everything below ships in the current **v0.7.1** release:
+Everything below ships in the current **v0.8.0** release:
 
 | Phase | What landed |
 |---|---|
 | Foundations (M0–M10) | DeepSeek client · agent loop · multi-provider · sessions · skills · hooks · checkpoints · plan-mode v2 · permission refactor · MCP client · webfetch |
 | Orchestration (柱 G/H) | sub-agents + worktrees · cron + self-scheduled wakeups + file triggers + OS notifications |
-| Single-point tools (柱 I–M) | AskUserQuestion v2 · composite `code-review` skill · **mobile-push webhook bridge** · background bash + `monitor` (poll/wait/kill) · semantic `references` (LSP find-references) |
+| Single-point tools (柱 I–M) | AskUserQuestion v2 · composite `code-review` skill · mobile-push webhook bridge · background bash + `monitor` (poll/wait/kill) · semantic `references` (LSP find-references) |
 
-v6 single-point tools complete. **v7 delivered, v0.8.x**: Autopilot (unattended orchestration) + OS sandbox (seatbelt/landlock) + ACP editor integration + local image OCR — all shipped. See [`docs/prd/v7.md`](docs/prd/v7.md).
+v6 single-point tools complete. **v7 delivered, v0.8.x**: all four pillars shipped.  
+[📘 Autopilot](docs/guide-autopilot.md) (unattended orchestration) · [📘 OS Sandbox](docs/guide-sandbox.md) (seatbelt/landlock) · [📘 ACP / Zed](docs/guide-zed.md) (editor integration) · [📘 OCR](docs/guide-ocr.md) (local image scanning)
 
 Full design docs: [`docs/prd/`](docs/prd/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md) · pitfalls: [`docs/pitfalls.md`](docs/pitfalls.md)
 
