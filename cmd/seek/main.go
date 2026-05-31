@@ -31,6 +31,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/checkpointcli"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/hooksconfig"
@@ -1080,6 +1081,17 @@ func run() error {
 	lspMgr := lspclient.New(lspRoot, ctx)
 	defer lspMgr.Shutdown()
 
+	// `seek goal run` drives the MAIN agent unattended (loops until a
+	// condition is met), so — like autopilot's subagents — its bash must
+	// deny remote-mutating ops (no `git push` / `gh pr` while you're away).
+	// Detected here (before the registry) because the main bash tool is
+	// built inline below; autopilot guards SUBagent bash instead.
+	goalMode := len(os.Args) >= 2 && os.Args[1] == "goal"
+	goalBash := bash.New(policy).WithBackground(bgMgr)
+	if goalMode {
+		goalBash = goalBash.WithDeny(autopilot.IsRemoteMutating)
+	}
+
 	reg := tools.New().
 		Add(read.New(policy)).
 		Add(references.New(lspMgr)).
@@ -1087,7 +1099,7 @@ func run() error {
 		Add(listdir.New()).
 		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
 		Add(edit.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
-		Add(bash.New(policy).WithBackground(bgMgr)).
+		Add(goalBash).
 		Add(monitor.New(bgMgr)).
 		Add(gittool.New()).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
@@ -1605,6 +1617,23 @@ func run() error {
 		return runACP(ctx, ag)
 	}
 
+	// `seek goal run "<condition>"` → headless single-agent loop-until-met
+	// (M-goal.3). Uses the same Driver as the TUI's /goal, with a real
+	// agent Worker. Cron-composable (M-goal.4).
+	if goalMode {
+		cond := ""
+		if len(os.Args) >= 3 && os.Args[2] == "run" {
+			cond = strings.TrimSpace(strings.Join(os.Args[3:], " "))
+		}
+		// Unattended loop → elevate to yolo so the agent can actually edit/
+		// run bash without per-action approval (there's no human to ask).
+		// LOCAL only: the bash no-remote guard wired above still blocks
+		// push/PR, so an overnight goal can't leave the machine. Same
+		// safety posture as autopilot.
+		policy.SetPref(permission.PrefYolo)
+		return runGoal(ctx, ag, dsClient, sessionModel, cond)
+	}
+
 	// Route: --rpc → JSON-RPC 2.0 server; -json / -p / piped stdin → print; otherwise TUI.
 	if *jsonOut || *prompt != "" || stdinIsPiped() {
 		text, err := resolvePrompt(*prompt)
@@ -1737,12 +1766,28 @@ func run() error {
 		sessionNotifySeconds = cfg.SessionNotifySecondsOrDefault()
 	}
 
+	// /goal judge (M-goal.2): a cheap per-turn "is the condition met?" call.
+	// Uses the session model for now (guaranteed valid); a dedicated cheap
+	// goal.judge_model lands with the headless path. nil on non-DeepSeek
+	// providers → /goal reports "unavailable" rather than crashing.
+	var goalJudge goal.Judge
+	if dsClient != nil {
+		goalJudge = goal.NewDeepSeekJudge(dsClient, sessionModel)
+	}
+	// A resumed session may carry an unfinished /goal (M-goal.3); re-arm it.
+	resumeGoal := ""
+	if activeSession != nil {
+		resumeGoal = activeSession.Goal
+	}
+
 	return tui.Run(tui.Options{
 		Agent:                 ag,
 		Tracker:               tracker,
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
 		ExpandInput:           tuiOCRExpander(appCfg),
+		GoalJudge:             goalJudge,
+		ResumeGoal:            resumeGoal,
 		Yolo:                  policy.Yolo(),
 		Plan:                  policy.Plan(),
 		PlanSteps:             restoredPlanSteps,
@@ -2315,6 +2360,50 @@ func acpUpdate(sessionID string, ev agent.Event) (acp.SessionUpdate, bool) {
 		}}, true
 	}
 	return acp.SessionUpdate{}, false
+}
+
+// runGoal drives the headless `/goal` loop (M-goal.3): a single agent works
+// across turns toward a completion condition, judged each turn by a cheap
+// DeepSeek call, until met / capped / stalled. Progress goes to stderr; the
+// final report to stdout (cron/webhook-friendly).
+func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, model, condition string) error {
+	if condition == "" {
+		return fmt.Errorf("usage: seek goal run \"<condition>\"")
+	}
+	if client == nil {
+		return fmt.Errorf("goal requires a DeepSeek provider — set an API key (seek setup)")
+	}
+	drv := goal.New(goal.NewAgentWorker(ag), goal.NewDeepSeekJudge(client, model), goal.Caps{Timeout: 30 * time.Minute})
+	drv.OnTurn = func(tl goal.TurnLog) {
+		mark := "…"
+		if tl.Met {
+			mark = "✓"
+		}
+		fmt.Fprintf(os.Stderr, "goal: turn %d (tools %d) %s %s\n", tl.Turn, tl.ToolCalls, mark, tl.Reason)
+	}
+	fmt.Fprintf(os.Stderr, "goal: working toward %q …\n", condition)
+	rep, err := drv.Run(ctx, condition)
+	if err != nil {
+		return fmt.Errorf("goal: %w", err)
+	}
+	status := "stopped"
+	event := "goal.stopped"
+	if rep.Met {
+		status, event = "met", "goal.completed"
+	}
+	fmt.Printf("goal %s (%s) — %d turn(s), %d tok\n", status, rep.Stop, rep.Turns, rep.Tokens)
+	if rep.Reason != "" {
+		fmt.Printf("  %s\n", rep.Reason)
+	}
+	// Best-effort mobile push (柱 M reuse) so an unattended cron goal reaches
+	// you — wake up to "goal met", not a silent exit. nil dispatcher when no
+	// push_webhooks configured, so this is a no-op for most users.
+	if dispatch := routinescli.WebhookDispatcherFromConfig(); dispatch != nil {
+		title := fmt.Sprintf("seek goal %s — %s", status, condition)
+		body := fmt.Sprintf("%s (%s) after %d turn(s), %d tok\n%s", status, rep.Stop, rep.Turns, rep.Tokens, rep.Reason)
+		dispatch(ctx, event, title, body)
+	}
+	return nil
 }
 
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP

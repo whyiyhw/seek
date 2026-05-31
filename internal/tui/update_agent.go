@@ -166,6 +166,24 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		return newM, tea.Batch(cmds...)
 	}
 
+	// /goal loop (M-goal.2): a turn just finished while a goal is active.
+	// Esc clears the goal (Esc stops everything); otherwise judge this
+	// turn off the UI thread — the verdict (goalVerdictMsg) continues or
+	// stops the loop. Fires only when no queue/steer auto-submitted above.
+	if m.goalActive {
+		if wasCanceled {
+			m.clearGoal()
+			m.persistSession() // clear Goal on disk so -resume won't re-arm
+			cmds = append(cmds, m.appendHistory(styleMuted.Render("  ■ goal canceled")))
+		} else {
+			m.goalTurns++
+			m.goalLastTurnTools = m.toolCalls - m.goalToolsBase
+			cmds = append(cmds, m.appendHistory(styleMuted.Render(fmt.Sprintf("  🎯 goal turn %d done — judging…", m.goalTurns))))
+			cmds = append(cmds, m.goalJudgeCmd())
+			return m, tea.Batch(cmds...) // verdict drives the next turn; skip suggestion
+		}
+	}
+
 	// v4 柱 D suggested-reply: spawn side-channel prediction off the
 	// bubbletea thread. Fires only at "at rest, ready for next user
 	// input" (no queue / steer auto-fired above). PRD §3 triggers
@@ -249,6 +267,7 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	m.curContent = ""
 	m.curReasoning = ""
 	m.activeTools = nil
+	m.lastAssistantText = "" // reset per turn for the /goal judge
 	m.userCanceled = false
 	m.streaming = true
 	m.streamStartTime = time.Now()
@@ -310,6 +329,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			if m.curContent != "" {
 				line := renderAssistantBlock(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md)
 				cmds = append(cmds, m.appendHistory(line))
+				// Capture for the /goal judge: the latest assistant text is
+				// fed in as "the latest work" at this turn's stream-end.
+				m.lastAssistantText = m.curContent
 			}
 			// Always reset the live-region buffers — leaving them
 			// populated would leak this turn's reasoning/content into
@@ -566,6 +588,9 @@ func (m *Model) persistSession() {
 	m.opts.Session.Model = m.opts.Model
 	m.opts.Session.Yolo = m.opts.Yolo
 	m.opts.Session.Effort = m.opts.Effort
+	// Persist the active /goal so -resume continues it; empty when no goal
+	// is running (clearGoal zeroes goalCond), which clears it on disk.
+	m.opts.Session.Goal = m.goalCond
 	if err := m.opts.Store.Save(m.opts.Session); err != nil {
 		// Surface to scrollback so the user knows persistence broke;
 		// they can keep working but should investigate before losing

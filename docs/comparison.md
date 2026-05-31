@@ -1,6 +1,6 @@
 # seek 竞品对比：Claude Code（能力天花板）+ Reasonix（同论题竞品）
 
-> **最后更新**：2026-05-31（柱 K/L ship 后 + 新增 Reasonix 对比节）
+> **最后更新**：2026-06（v6 五柱全交付 + v7 四柱全交付 + 新增用户指南 + book 第 23–24 章）
 > **本文覆盖两个对比点，二者关系不同**：
 > - **§1–核心结论：seek vs Claude Code** —— CC 是**能力天花板/参考标杆**，本节是**逐项 gap 追踪器**（✅/❌/🔶 + P1/P2 优先级），驱动 seek 的 roadmap。
 > - **末节：seek vs Reasonix** —— Reasonix 是**同论题孪生竞品**（DeepSeek 原生 Go agent），本节是**差异化定位分析**（趋同/分歧 + 站位），驱动 pitch/messaging，不是 gap 追踪。
@@ -38,8 +38,9 @@
 | 交互式 / 流式 | ✅ | ✅ | **对等** | inline TUI（bubbletea），流式输出，`ask_user` TUI 选择器 |
 | 自动继续 / steer | ✅ | ✅ | **对等** | Seek：`/steer` 中途插入指令，`AutoContinue` 模式 |
 | 多行输入 | ✅ | ✅ | **对等** | Textarea 输入，路径自动补全 |
+| 自治达标循环（`/goal`） | ✅ **v2.1.139** | ✅ | **对等，且 seek 更广** | CC `/goal` 单 agent 死磕到达标（Haiku 每轮判），仅 session 级。Seek `/goal`（feature-goal.md）：便宜模型每轮判 + **TUI + headless `seek goal run` + `cron create --goal`**——可定时无人值守跑、push 手机，CC 的 session 级 `/goal` 做不到 |
 
-**小结**：核心 chat/edit 循环对等。原"四件套"差距已收敛：**`Monitor` + 后台 Bash**（柱 K）、**`LSP`**（柱 L `references`，语义引用部分）已补；剩 **`NotebookEdit`**（notebook 编辑）、**`WebSearch`**（不止 fetch 单页）。Fast 模式属于 UX 便利功能而非架构级特性。
+**小结**：核心 chat/edit 循环对等。原"四件套"差距已收敛：**`Monitor` + 后台 Bash**（柱 K）、**`LSP`**（柱 L `references`，语义引用部分）已补；CC 新增的 **`/goal`** 也已对齐（且 seek 可 headless/cron 组合，更广）；剩 **`NotebookEdit`**（notebook 编辑）、**`WebSearch`**（不止 fetch 单页）。Fast 模式属于 UX 便利功能而非架构级特性。
 
 ---
 
@@ -144,7 +145,7 @@
 | Inline TUI 模式 | ✅ | ✅ | **对等** | 双方都用 tea.Println 写 scrollback + 实时渲染 |
 | 状态栏 | ✅ | ✅ | **对等** | 模型、费用、缓存命中率、错峰倒计时 |
 | `/` 斜杠命令 | ✅ | ✅ | **对等** | Seek 已覆盖 `/help` `/clear` `/model` `/effort` `/yolo` `/plan` `/review` `/branch` `/compact` `/distill` `/skill` `/skills` `/memory` `/steer` `/setup` `/upgrade` 等 16 个 |
-| 用户提问选择器 | ✅ | 🔶 **等效替代** | Claude Code 用结构化 `AskUserQuestion`（一次 1–4 题、每题 2–4 选项、可 multiSelect、可带 preview 双栏渲染、自动 Other 自由输入）；Seek 用单选 `ask_user` picker，能力差一档 |
+| 用户提问选择器 | ✅ | ✅ **v6 柱 I v2** | **对等** | Seek v2：一次最多 4 题、每题 2–4 选项、multiSelect、preview 双栏渲染（mockup / 代码片段 / diagram）、自动 "Other" 自由文本。与 Claude Code `AskUserQuestion` 完全对等 |
 | `help` 浮层 | ✅ | ✅ | **对等** | 双方都有可关闭的浮层 |
 | 快捷键绑定（可自定义） | ✅ | ✅ **v0.4.x (M9.4)** | **对等** | Seek：`~/.seek/keybindings.toml` + `internal/keymap` / `internal/keyscli`（`seek keys check` 可校验） |
 | 输出样式 | ✅ | ❌ **缺失** | — | Claude Code 有多种输出样式预设 |
@@ -155,7 +156,7 @@
 | 桌面应用 | ✅ | ❌ **缺失** | — | Claude Code Desktop（Electron） |
 | Web 界面 | ✅ | ❌ **缺失** | — | Claude Code on the Web |
 
-**小结**：核心 TUI 对等，快捷键自定义已在 v0.4.x（M9.4）补齐；用户选择器仍是 Claude Code 表达力领先（结构化多题/多选项/preview）。语音、computer use、IDE 扩展、桌面/Web 等属于多端平台战略而非 Agent 核心。
+**小结**：核心 TUI 对等，快捷键自定义已在 v0.4.x（M9.4）补齐；用户选择器 v6 柱 I v2 后已与 Claude Code 对等（多题/多选项/preview）。语音、computer use、IDE 扩展、桌面/Web 等属于多端平台战略而非 Agent 核心。
 
 ---
 
@@ -182,7 +183,7 @@
 | 子代理类型库（Explore / Plan / general-purpose 等） | ✅ | ✅ **v0.6.0** | **对等** | Seek：三个内置模板 `explore`（只读调研）/ `plan`（起方案 · 已窄化为只读）/ `general-purpose`（继承父 Policy），通过 `agent({type: ...})` 选择 |
 | 定时任务 / Routines（`CronCreate` + `/schedule`）| ✅ | ✅ **v0.6.1** | 🔶 **架构差异** | Seek：`seek cron create/list/run/delete/tick`，**零常驻 daemon**——委派 OS 调度器（launchd / systemd / cron / Task Scheduler）每分钟调用 `seek cron tick`。Claude Code routines 是**云托管**远程 agent；seek 是**本地** agent，机器关机就不跑（trade-off：无 vendor lock-in + 无数据上传 ↔ 无"睡觉时跑"可靠性） |
 | 模型自调用唤醒 | ✅ | ✅ **v0.6.1** | **对等** | Seek：`schedule_wakeup` LLM 工具——模型说"30 分钟后再来检查"自动注册 `max_runs=1` 一次性 cron 任务 |
-| 远程触发 / PushNotification | ✅ | 🔶 **等效替代** | — | Seek：文件桥触发 `~/.seek/cron/triggers/<id>.json`（CI / IDE 插件写文件、下次 tick 消费）+ OS 通知（macOS osascript / Linux notify-send / Windows toast pending）。Claude Code 走云 push 到手机；seek 走 OS 本地通知，无移动端推送 |
+| 远程触发 / PushNotification | ✅ | ✅ **v6 柱 M + v7 柱 N** | **对等** | Seek：文件桥触发 `~/.seek/cron/triggers/<id>.json`（CI / IDE 插件写文件、下次 tick 消费）+ OS 通知（macOS osascript / Linux notify-send / Windows toast）+ **webhook push 到手机**（ntfy/Slack/Discord/飞书/自定义，v6 柱 M）+ **Autopilot 完成推送**（v7 柱 N）。Claude Code 走云 push；seek 走 webhook 桥——用户自选渠道，等价覆盖"离开电脑也能收"的需求 |
 
 **小结**：v5 柱 G（v0.6.0）+ 柱 H（v0.6.1）关闭了过去版本里全部 3 个 🔴 P0 架构级缺口。剩下的是**架构选择**而非缺口——Claude Code 的 routines 走云托管（vendor lock-in + 移动 push + 24/7 可靠 vs seek 的零 daemon + 本地隐私 + 机器关机就不跑）。两套模型针对的是不同用户画像，不再适合用"对等/缺失"二元判断。
 
@@ -246,8 +247,8 @@
 | **🟢 已交付** | Agent | **子代理 / `agent` 工具 + 3 个内置 type** | v0.6.0（v5 柱 G）：`agent` 工具 + `explore/plan/general-purpose` 模板 + 父子权限单调收紧 + cost 累加 + `/agents` TUI 面板 |
 | **🟢 已交付** | 工作流 | **Worktrees（`enter_worktree`/`exit_worktree`）** | v0.6.0：与子代理强耦合 + `seek worktree list/gc` CLI + `refs/seek/discarded/<ts>` 防误删 |
 | **🟢 已交付** | 调度 | **Cron / Wakeup / Triggers / OS 通知** | v0.6.1（v5 柱 H）：`seek cron` CLI + `schedule_wakeup` LLM 工具 + 文件桥 trigger + macOS/Linux 通知。**零常驻 daemon**，架构上与 Claude Code 云托管 routines 不同（trade-off 见 §10 小结） |
-| **🟡 P1** | UI | **`AskUserQuestion` 结构化选择器** | 多题/多选项/preview 双栏渲染，对"让模型自己拿决定"路径影响大 |
-| **🟡 P1** | 工具 | **LSP 工具** | 结构化符号/引用查询，大型代码库 grep 替代不掉 |
+| **🟢 已交付** | UI | **`AskUserQuestion` 结构化选择器 v2** | v0.7.0（v6 柱 I）：多题 stack（1–4 题/调用）+ `preview` 双栏渲染（mockup / diagram）+ `header` chip。polymorphic schema——v1 零破坏。完美对等 |
+| **🟢 已交付** | 工具 | **LSP 语义引用（`references`）** | v0.7.0（v6 柱 L 瘦身版）：gopls/pyright/tsserver 语义引用（grep 替代不了的硬赢）。懒启动 + 会话级缓存 + crash 重启 + 缺 binary 降级 grep。definition/hover/symbols 故意不做（ROI 评估） |
 | **🟢 已交付** | Bash | **后台执行 + `monitor` 跟踪（poll/wait/kill）** | v0.7.x（v6 柱 K）：`bash run_in_background` 返回 `bg-N` 句柄 + `monitor` 工具轮询/等待/杀；会话级生命周期、`until_regex` 条件等待、`Manager.Shutdown` 退出全杀。Windows 为降级路径 |
 | **🟢 已交付** | 工作流 | **复合 review skill（`/code-review` 的 `quick`/`thorough` + `--fix` + `--comment`）** | v0.7.0（v6 柱 J）：内置 `code-review` skill（方法论 + effort framing）+ `/code-review` slash 命令（参数解析，复用 `/review` diff 采集 + picker）+ `/review` = `/code-review quick` 别名。**eval 实测 DeepSeek 分不开 4 档 → 收敛为 2 档**（旧 low/medium/high/max 软别名映射）。`--fix` 走 plan-mode propose；不含云端 `ultra`（架构选择） |
 | **🟢 已交付** | 推送 | **移动端可达（webhook 桥）** | v0.7.0（v6 柱 M）：`push_webhooks` 把 cron/trigger 终态额外 POST 到用户自选渠道（ntfy/slack/discord/raw），离开电脑也能收。**故意不做** native 云 push（反零 daemon/隐私立场，见 §6 边界）——webhook 桥让用户自接渠道，等价覆盖「手机收得到」的需求。`seek cron config check --probe` 验证可达 |
@@ -293,9 +294,9 @@
 
 5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。
 
-6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入、**移动端 push 通知**——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
+6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
 
-7. **本次更新触发**：v5 柱 G + 柱 H ship 后（2026-05-28 / 2026-05-29），原有的"🔴 P0 架构缺口"段落已与代码现实严重脱节。本次完整重写 §7 / §10 / 差距汇总 / 独特优势 / 核心结论，把"架构级缺口"那条主线收尾。
+7. **v7 四柱全交付**：Autopilot（无人值守编排）+ OS 沙箱（seatbelt/landlock）+ ACP（Zed 编辑器集成）+ 离线 OCR（图片→文字）——四柱已落地，详见 [`docs/prd/v7.md`](prd/v7.md)。新增 [`docs/guide-autopilot.md`](guide-autopilot.md)、[`docs/guide-sandbox.md`](guide-sandbox.md)、[`docs/guide-ocr.md`](guide-ocr.md)、[`docs/guide-webhooks.md`](guide-webhooks.md) 用户指南。本书新增第 23 章（v6 五柱）和第 24 章（v7 四柱）。
 
 ---
 
@@ -346,7 +347,7 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 
 ## R.4 对 seek 的站位结论（读源码后更尖锐）
 
-1. **结论已修复**：上一版低估了 seek——seek 的 Autopilot（柱 N）是 Reasonix 没有的编排层；柱 P ACP 补齐了 IDE 集成缺口；柱 O 沙箱追平了 macOS 且多了一个 Linux landlock。seek 真正的领先轴已是三轴：**并行+worktree 子代理、时序自治+Autopilot 无人值守、零依赖双平台沙箱**。
+1. **结论已修复**：上一版低估了 seek——seek 的 Autopilot（柱 N）是 Reasonix 没有的编排层；柱 P ACP 补齐了 IDE 集成缺口；柱 O 沙箱追平了 macOS 且多了一个 Linux landlock。seek 真正的领先轴已是三轴：**并行+worktree 子代理、时序自治+Autopilot 无人值守、零依赖双平台沙箱**。详见 [`docs/guide-autopilot.md`](guide-autopilot.md)、[`docs/guide-sandbox.md`](guide-sandbox.md)。
 2. **pitch 应压这三轴**，且认可 Reasonix 在规模/语义索引/web 前端上的优势。ACP 和沙箱不再是差异点。
 3. **别在重叠区硬碰**——DeepSeek/cache/Go-binary 又大又先发，主打它 = 给对手做嫁衣。
 4. **"无语义索引"是主动下的注**（柱 L 选 grep+references 轻路线 vs Reasonix 押 `codegraph` embeddings）——pitch 要能**主动解释为什么不做**（零索引常驻 / 本地轻量），否则被当短板。

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek autopilot — unattended orchestration: decompose, parallel worktree agents, aggregate, commit." />
+<title>Autopilot — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body); line-height: 1.65;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); } pre .ok { color: var(--green); } pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); } .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; margin-bottom: 24px; }
+  .table-wrap table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th { background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px; border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .note { background: var(--surface); border-left: 3px solid var(--teal); padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px; }
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; } .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer; font-size: .9rem; transition: all .2s ease; flex-shrink: 0; color: var(--dim); }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; font-family: "JetBrains Mono", monospace; font-size: .78rem; line-height: 1; flex-shrink: 0; }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Autopilot</span></div>
+  <div class="page-header">
+    <h1 data-lang="en">Autopilot — Unattended Orchestration</h1>
+    <h1 data-lang="zh" hidden>Autopilot — 无人值守编排</h1>
+    <p class="subtitle" data-lang="en">Decompose goals → parallel worktree agents → aggregate → local commit. Works while you sleep.</p>
+    <p class="subtitle" data-lang="zh" hidden">接收一个目标，分解为子任务，并行 spawn 隔离 worktree 子代理，聚合结果。</p>
+  </div>
+  <div class="reveal">
+    <h2 data-lang="en">Quick Start</h2>
+    <h2 data-lang="zh" hidden">快速开始</h2>
+    <pre><span class="prompt">$</span> <span class="ok">seek autopilot run "重构 User 模型，添加邮箱验证字段"</span>
+→ [autopilot] 4/4 tasks succeeded
+  User model: 添加 email_verified 字段 (abc1234)
+  Service: 添加 verifyEmail 方法 (def5678)
+  Tests: User + Service 单元测试 (ghi9012)
+  Docs: 更新字段文档 (jkl3456)</pre>
+
+    <h3 data-lang="en">How It Works</h3>
+    <h3 data-lang="zh" hidden">工作原理</h3>
+    <pre>目标
+  └─→ Decomposer (DeepSeek) ──→ 任务列表
+       ├─ 1. User model 字段
+       ├─ 2. Service 方法
+       ├─ 3. Test 用例
+       └─ 4. 文档更新
+       └─→ Fleet (并行 worktree 子代理)
+            ├─ worktree-1 → edit → 本地 commit
+            ├─ worktree-2 → edit → 本地 commit
+            └─ ... → 报告: 摘要 + commit SHA</pre>
+
+    <h2 data-lang="en">Safety Boundaries</h2>
+    <h2 data-lang="zh" hidden">安全边界</h2>
+    <ul>
+      <li data-lang="en"><strong>Read-only decompose</strong> — the decomposer step only reads files. No edits before user approval.</li>
+      <li data-lang="zh" hidden"><strong>只读分解</strong>——分解步骤只读文件，不写。</li>
+      <li data-lang="en"><strong>Worktree isolation</strong> — each sub-agent works in its own ephemeral git worktree. No cross-contamination.</li>
+      <li data-lang="zh" hidden"><strong>Worktree 隔离</strong>——每个子代理在独立的 ephemeral git worktree 中工作。</li>
+      <li data-lang="en"><strong>No remote push</strong> — sub-agents cannot push / create PRs.</li>
+      <li data-lang="zh" hidden"><strong>禁止远程推送</strong>——子代理不能 push 或创建 PR。</li>
+      <li data-lang="en"><strong>OS level sandbox</strong> — when available, sub-agent bash is confined by the kernel sandbox (macOS Seatbelt / Linux Landlock).</li>
+      <li data-lang="zh" hidden"><strong>OS 级沙箱</strong>——子代理 bash 受内核沙箱约束（macOS Seatbelt / Linux Landlock）。</li>
+    </ul>
+
+    <h2 data-lang="en">CLI Reference</h2>
+    <h2 data-lang="zh" hidden">CLI 参考</h2>
+    <pre><span class="prompt">$</span> <span class="ok">seek autopilot run "&lt;goal&gt;"</span>    <span class="dim"># Full pipeline</span>
+<span class="prompt">$</span> <span class="ok">seek autopilot run --dry-run "&lt;goal&gt;"</span>  <span class="dim"># Decompose only, review before execution</span></pre>
+
+    <h2 data-lang="en">vs Goal</h2>
+    <h2 data-lang="zh" hidden">与 Goal 的区别</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th></th><th data-lang="en">Autopilot</th><th data-lang="zh" hidden">Autopilot</th><th data-lang="en">Goal</th><th data-lang="zh" hidden">Goal</th></tr></thead>
+        <tbody>
+          <tr><td><strong data-lang="en">Architecture</strong><strong data-lang="zh" hidden">架构</strong></td><td data-lang="en">Multi-agent, parallel, isolated worktrees</td><td data-lang="zh" hidden">多 agent 并行独立 worktree</td><td data-lang="en">Single agent, same conversation</td><td data-lang="zh" hidden">单 agent 同一对话</td></tr>
+          <tr><td><strong data-lang="en">Use case</strong><strong data-lang="zh" hidden">适用场景</strong></td><td data-lang="en">Exploratory / independent sub-tasks</td><td data-lang="zh" hidden">探索性、多方案并行</td><td data-lang="en">Linear sequential tasks</td><td data-lang="zh" hidden">线性顺序任务</td></tr>
+          <tr><td><strong data-lang="en">Result</strong><strong data-lang="zh" hidden">产出</strong></td><td data-lang="en">Per-task commits + summary report</td><td data-lang="zh" hidden">每任务 commit + 摘要</td><td data-lang="en">Working tree modified in-place</td><td data-lang="zh" hidden">工作区原地修改</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p data-lang="en">See <a href="guide-goal.html">Goal</a> for single-agent multi-turn tasks.</p>
+    <p data-lang="zh" hidden">见 <a href="guide-goal.html">Goal 文档</a>了解单 agent 多轮任务。</p>
+  </div>
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a> <span class="sep">·</span> <span class="dim">design: <a href="/prd/feature-autopilot.md">PRD</a></span>
+  </div>
+</div>
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(t) { currentTheme = t; localStorage.setItem('seek-theme', t); document.documentElement.setAttribute('data-theme', t); themeBtn.textContent = t === 'dark' ? '☀️' : '🌙'; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === 'dark' ? '#0b0b0e' : '#f4f3ef'; }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(l) { currentLang = l; localStorage.setItem('seek-lang', l); document.documentElement.lang = l === 'en' ? 'en' : 'zh'; document.querySelectorAll('[data-lang]').forEach(el => { el.hidden = el.getAttribute('data-lang') !== l; }); updateSegments(l); }
+  function updateSegments(l) { document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === l); }); }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== currentLang) setLang(l); }); });
+  new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); observer.unobserve(i.target); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
+</script>
+</body>
+</html>

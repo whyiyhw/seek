@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek checkpoint — two-layer safety net: git per-turn snapshots and per-file undo/redo." />
+<title>Checkpoint — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Checkpoint</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Checkpoint — Two-Layer Safety Net</h1>
+    <h1 data-lang="zh" hidden>Checkpoint — 双层安全网</h1>
+    <p class="subtitle" data-lang="en">Per-turn git snapshots and per-file undo/redo for model-driven changes.</p>
+    <p class="subtitle" data-lang="zh" hidden">自动整轮回滚和单步撤销，让模型动过代码后随时撤回。</p>
+  </div>
+
+  <div class="reveal">
+    <p data-lang="en">seek's built-in safety net automatically snapshots the working tree before every destructive action. Two complementary layers cover different granularities:</p>
+    <p data-lang="zh" hidden>seek 内置的双层 checkpoint 安全网，让你在模型动过代码后随时撤回——不管是整个工作区回滚到上一轮，还是单文件撤销上一步 write/edit。</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Layer</th>
+            <th data-lang="zh" hidden>层</th>
+            <th data-lang="en">Granularity</th>
+            <th data-lang="zh" hidden>粒度</th>
+            <th data-lang="en">Command</th>
+            <th data-lang="zh" hidden>命令</th>
+            <th data-lang="en">Dependency</th>
+            <th data-lang="zh" hidden>依赖</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Git checkpoint</strong></td>
+            <td data-lang="en">Per-turn (cross-tool)</td>
+            <td data-lang="zh" hidden>整轮（跨工具）</td>
+            <td><code>/checkpoints</code> / <code>/restore</code> / <code>seek checkpoint</code></td>
+            <td>git repo + git binary</td>
+          </tr>
+          <tr>
+            <td><strong>File checkpoint</strong></td>
+            <td data-lang="en">Per write/edit</td>
+            <td data-lang="zh" hidden>单次 write/edit</td>
+            <td><code>/undo</code> / <code>/redo</code> / <code>seek undo</code></td>
+            <td>None (git-independent)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Git Checkpoint — Per-Turn Rollback</h2>
+    <h2 data-lang="zh" hidden>Git checkpoint — 整轮回滚</h2>
+    <p data-lang="en">Before every first destructive action (write / edit / mutating bash) per turn, seek snapshots the working tree via <code>git stash create</code> + <code>git update-ref</code> to <code>refs/seek/checkpoints/&lt;sid&gt;/&lt;turn&gt;</code>.</p>
+    <p data-lang="zh" hidden">每当模型发起第一个破坏性操作，seek 自动快照工作区——通过 git stash create + git update-ref 将当前工作树的状态固定到 refs/seek/checkpoints/&lt;session-id&gt;/&lt;turn&gt;。</p>
+
+    <h3 data-lang="en">List checkpoints</h3>
+    <h3 data-lang="zh" hidden>查看检查点</h3>
+    <pre><span class="prompt">$</span> <span class="ok">seek checkpoint list</span>
+<span class="prompt">$</span> <span class="ok">seek checkpoint list --session &lt;id&gt;</span>   <span class="dim"># specific session</span>
+<span class="prompt">$</span> <span class="ok">seek checkpoint list --json</span>           <span class="dim"># JSONL output</span></pre>
+
+    <h3 data-lang="en">Restore</h3>
+    <h3 data-lang="zh" hidden">回滚</h3>
+    <pre><span class="prompt">$</span> <span class="ok">seek checkpoint restore 3</span>
+<span class="prompt">$</span> <span class="ok">seek checkpoint restore 3 --session &lt;id&gt;</span></pre>
+    <p data-lang="en">Uses <code>git read-tree --reset -u &lt;ref&gt;</code> — an in-place overwrite. No branching.</p>
+    <p data-lang="zh" hidden">覆盖式回滚，不衍生分支。</p>
+
+    <h3 data-lang="en">Prune</h3>
+    <h3 data-lang="zh" hidden">清理</h3>
+    <pre><span class="prompt">$</span> <span class="ok">seek checkpoint prune --before 2025-01-01</span></pre>
+    <p data-lang="en">Checkpoints also enter git's natural GC cycle (90-day default expiry).</p>
+    <p data-lang="zh" hidden">检查点也受 git 自身 GC 管理（默认 90 天过期）。</p>
+
+    <h2 data-lang="en">File Checkpoint — Per-Step Undo/Redo</h2>
+    <h2 data-lang="zh" hidden>文件 checkpoint — 单步撤销/重做</h2>
+    <p data-lang="en">Every write/edit snapshots the prior file content to a content-addressed SHA-256 blob with an append-only event log. Supports undo and redo.</p>
+    <p data-lang="zh" hidden">每次 write/edit 自动备份旧文件内容到内容寻址 blob，记录事件日志。支持撤销和重做。</p>
+
+    <h3 data-lang="en">Undo</h3>
+    <h3 data-lang="zh" hidden">撤销</h3>
+    <pre><span class="prompt">$</span> <span class="ok">/undo</span>          <span class="dim"># TUI: undo last write/edit (global)</span>
+<span class="prompt">$</span> <span class="ok">/undo &lt;path&gt;</span>   <span class="dim"># TUI: undo last write/edit on specific file</span>
+<span class="prompt">$</span> <span class="ok">seek undo</span>      <span class="dim"># CLI</span>
+<span class="prompt">$</span> <span class="ok">seek undo -n 3</span>      <span class="dim"># CLI: undo last 3 steps</span>
+<span class="prompt">$</span> <span class="ok">seek undo &lt;path&gt;</span>    <span class="dim"># CLI: undo specific file only</span></pre>
+
+    <h3 data-lang="en">Redo</h3>
+    <h3 data-lang="zh" hidden">重做</h3>
+    <pre><span class="prompt">$</span> <span class="ok">/redo</span>          <span class="dim"># TUI: redo last undone change</span>
+<span class="prompt">$</span> <span class="ok">/redo &lt;path&gt;</span>   <span class="dim"># TUI: redo last undo on specific file</span>
+<span class="prompt">$</span> <span class="ok">seek redo</span>      <span class="dim"># CLI</span>
+<span class="prompt">$</span> <span class="ok">seek redo -n 3</span>      <span class="dim"># CLI: redo last 3 steps</span></pre>
+
+    <div class="note">
+      <strong data-lang="en">Note:</strong>
+      <strong data-lang="zh" hidden">注意：</strong>
+      <span data-lang="en">New write/edit operations truncate the redo history (classic editor semantics).</span>
+      <span data-lang="zh" hidden">新的 write/edit 操作会截断重做历史（经典编辑器语义）。</span>
+    </div>
+
+    <h2 data-lang="en">CLI Reference</h2>
+    <h2 data-lang="zh" hidden">CLI 参考</h2>
+    <pre><span class="prompt">$</span> <span class="ok">seek checkpoint</span> — inspect / restore / prune the safety-net layer
+
+Usage:
+  seek checkpoint &lt;command&gt; [flags] [args]
+
+Commands:
+  list                   List git checkpoints (default: most recent session)
+  restore &lt;turn&gt;         Restore working tree to named checkpoint
+  prune --before &lt;date&gt;  Delete checkpoint refs older than a date
+
+Shared flags:
+  --session &lt;id&gt;         Target a specific session (default: most recent)
+  --json                 (list) emit JSONL on stdout
+
+See also:
+  seek undo / seek redo  File-level undo/redo</pre>
+
+    <h2 data-lang="en">TUI Slash Commands</h2>
+    <h2 data-lang="zh" hidden">TUI 斜杠命令</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Command</th>
+            <th data-lang="zh" hidden>命令</th>
+            <th data-lang="en">Action</th>
+            <th data-lang="zh" hidden>作用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/undo</code></td><td data-lang="en">Undo last write/edit</td><td data-lang="zh" hidden>撤销最近一次 write/edit</td></tr>
+          <tr><td><code>/undo &lt;path&gt;</code></td><td data-lang="en">Undo last write/edit on specific file</td><td data-lang="zh" hidden>撤销对指定文件的最近一次 write/edit</td></tr>
+          <tr><td><code>/redo</code></td><td data-lang="en">Redo last undone change</td><td data-lang="zh" hidden>重做最近一次撤销</td></tr>
+          <tr><td><code>/redo &lt;path&gt;</code></td><td data-lang="en">Redo last undo on specific file</td><td data-lang="zh" hidden>重做对指定文件的最近一次撤销</td></tr>
+          <tr><td><code>/restore</code></td><td data-lang="en">Roll back to latest git checkpoint (or <code>/restore &lt;turn&gt;</code> to specify turn)</td><td data-lang="zh" hidden>回滚到最新 git checkpoint（或 /restore &lt;turn&gt; 指定轮次）</td></tr>
+          <tr><td><code>/checkpoints</code></td><td data-lang="en">List current session git checkpoints</td><td data-lang="zh" hidden>列出当前会话的 git 检查点</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Design Notes</h2>
+    <h2 data-lang="zh" hidden">设计要点</h2>
+    <ul>
+      <li data-lang="en"><strong>Zero disturbance</strong> — No permission prompts for checkpoint writes. TUI status bar shows "✓ checkpoint #N".</li>
+      <li data-lang="zh" hidden><strong>零打扰</strong>——checkpoint 写入不弹 picker，TUI 状态栏显示 "✓ checkpoint #N"。</li>
+      <li data-lang="en"><strong>No git pollution</strong> — Uses <code>refs/seek/checkpoints/</code> namespace, never touches HEAD or stash.</li>
+      <li data-lang="zh" hidden><strong>不污染 git 历史</strong>——使用 refs/seek/checkpoints/ 自定义 ref 命名空间。</li>
+      <li data-lang="en"><strong>Graceful degradation</strong> — No git repo? Git checkpoint silently skips, file checkpoint still works.</li>
+      <li data-lang="zh" hidden><strong>优雅降级</strong>——非 git 目录时 git checkpoint 静默跳过，文件 checkpoint 仍工作。</li>
+      <li data-lang="en"><strong>Content-addressed dedup</strong> — Identical content shares one blob.</li>
+      <li data-lang="zh" hidden><strong>内容寻址去重</strong>——相同内容的文件只存储一次 blob。</li>
+      <li data-lang="en"><strong>External modification detection</strong> — Before restoring, re-hashes current content to detect external edits; refuses unless --force.</li>
+      <li data-lang="zh" hidden><strong>外部修改检测</strong>——恢复前重新计算当前文件哈希，若与预期不符则拒绝（除非 --force）。</li>
+    </ul>
+
+    <div class="note">
+      <span data-lang="en">See <a href="guide-references.html" style="color:var(--teal)">guide-references.md</a> — LSP-based semantic find-references via the <code>references</code> tool, protected by checkpoint undo/redo.</span>
+      <span data-lang="zh" hidden">另见 <a href="guide-references.html" style="color:var(--teal)">guide-references.md</a>——references 工具用 LSP 做语义符号引用查找，checkpoint 的 undo/redo 保护这些查找后的编辑。</span>
+    </div>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/whyiyhw/seek">GitHub</a>
+    <span class="sep">·</span>
+    <span class="dim">design docs: <a href="/prd/feature-checkpoint.md" style="color:var(--teal)">PRD</a></span>
+  </div>
+</div>
+
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek OCR — offline local image text recognition for macOS, Linux, and Windows." />
+<title>OCR — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body { font-family: "JetBrains Mono", monospace; background: var(--bg); color: var(--text-body); line-height: 1.65; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  a { color: inherit; text-decoration: none; }
+  :root { --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24; --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a; --amber: #f5a623; --amber-dim: rgba(245,166,35,.15); --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12); --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04); }
+  [data-theme="light"] { --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6; --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82; --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10); --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04); }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); } pre .ok { color: var(--green); } pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); } .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; margin-bottom: 24px; }
+  .table-wrap table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th { background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px; border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .note { background: var(--surface); border-left: 3px solid var(--teal); padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px; }
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; } .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer; font-size: .9rem; transition: all .2s ease; flex-shrink: 0; color: var(--dim); }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; font-family: "JetBrains Mono", monospace; font-size: .78rem; line-height: 1; flex-shrink: 0; }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar"><button class="theme-toggle" id="themeToggle">☀️</button>
+    <div class="lang-toggle" id="langToggle"><span data-lang-val="en">EN</span><span data-lang-val="zh">中文</span></div>
+  </div>
+</div>
+<div class="container">
+  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>OCR</span></div>
+  <div class="page-header">
+    <h1 data-lang="en">OCR — Offline Image Text Recognition</h1>
+    <h1 data-lang="zh" hidden>OCR — 离线本地图片文字识别</h1>
+    <p class="subtitle" data-lang="en">Read text from screenshots, error dialogs, and design mockups — locally and offline.</p>
+    <p class="subtitle" data-lang="zh" hidden">离线本地读取图片中的文字，无需 VLM、无需网络、不依赖云 API。</p>
+  </div>
+  <div class="reveal">
+    <h2 data-lang="en">Quick Start</h2>
+    <h2 data-lang="zh" hidden">快速开始</h2>
+    <p data-lang="en">Reference an image file path in your prompt — seek auto-detects and OCRs it before sending to the model:</p>
+    <p data-lang="zh" hidden">在 prompt 中引用图片文件路径：</p>
+    <pre><span class="prompt">你：</span>修复这个 <span class="ok">@error.png</span> 中的错误
+
+    ↓ seek 自动检测图片引用 → OCR → 追加文字块
+
+<span class="prompt">模型看到的：</span>修复这个 @error.png 中的错误
+
+[image: error.png — OCR]
+TypeError: Cannot read properties of undefined (reading 'map')
+    at renderList (components/List.tsx:42)
+[/image: error.png]</pre>
+    <p data-lang="en">Supported formats: <code>.png</code> <code>.jpg</code> <code>.jpeg</code> <code>.webp</code> <code>.tiff</code> <code>.bmp</code> <code>.heic</code> <code>.gif</code></p>
+    <p data-lang="zh" hidden">支持的图片格式：.png .jpg .jpeg .webp .tiff .bmp .heic .gif</p>
+
+    <h2 data-lang="en">Platform Support</h2>
+    <h2 data-lang="zh" hidden">平台支持</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Platform</th><th data-lang="zh" hidden>平台</th><th data-lang="en">Default</th><th data-lang="zh" hidden">默认状态</th><th data-lang="en">Engine</th><th data-lang="zh" hidden">引擎</th></tr></thead>
+        <tbody>
+          <tr><td>macOS</td><td>✅ On</td><td data-lang="en">Built-in <code>vision_ocr</code> (Swift + Apple Vision API), auto-compiled on first use</td><td data-lang="zh" hidden">内置 vision_ocr，首次自动编译</td></tr>
+          <tr><td>Linux</td><td>❌ Off</td><td data-lang="en">Requires <code>ocr.command</code> config (e.g. tesseract)</td><td data-lang="zh" hidden">需配置 ocr.command（如 tesseract）</td></tr>
+          <tr><td>Windows</td><td>❌ Off</td><td data-lang="en">Requires <code>ocr.command</code> config</td><td data-lang="zh" hidden">需配置 ocr.command</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Configuration</h2>
+    <h2 data-lang="zh" hidden">配置</h2>
+    <p data-lang="en">In <code>~/.seek/config.json</code>:</p>
+    <p data-lang="zh" hidden">在 ~/.seek/config.json 中：</p>
+    <pre>{
+  <span class="dim">"ocr"</span>: {
+    <span class="dim">"enabled"</span>: <span class="ok">true</span>,               <span class="dim">// Override platform default</span>
+    <span class="dim">"command"</span>: <span class="ok">"tesseract"</span>,         <span class="dim">// Custom OCR engine</span>
+    <span class="dim">"languages"</span>: <span class="ok">"zh-Hans,en-US"</span>, <span class="dim">// Language hint</span>
+    <span class="dim">"timeout_seconds"</span>: <span class="ok">15</span>        <span class="dim">// Per-call timeout</span>
+  }
+}</pre>
+
+    <p data-lang="en">Design: <a href="/prd/feature-image-ocr.md">PRD feature-image-ocr.md</a></p>
+    <p data-lang="zh" hidden">设计文档：<a href="/prd/feature-image-ocr.md">PRD feature-image-ocr.md</a></p>
+  </div>
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</div>
+<script>
+  let ct = localStorage.getItem('seek-theme') || 'dark', tb = document.getElementById('themeToggle');
+  function st(t) { ct = t; localStorage.setItem('seek-theme', t); document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === 'dark' ? '#0b0b0e' : '#f4f3ef'; }
+  st(ct); tb.addEventListener('click', () => { st(ct === 'dark' ? 'light' : 'dark'); });
+  let cl = localStorage.getItem('seek-lang') || 'zh';
+  function sl(l) { cl = l; localStorage.setItem('seek-lang', l); document.documentElement.lang = l === 'en' ? 'en' : 'zh'; document.querySelectorAll('[data-lang]').forEach(e => { e.hidden = e.getAttribute('data-lang') !== l; }); document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === l); }); }
+  sl(cl);
+  document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
+  new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
+</script>
+</body>
+</html>

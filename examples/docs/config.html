@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek configuration — API keys, provider setup, and global settings in ~/.seek/config.json." />
+<title>Configuration — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Configuration</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Configuration — API Keys & Provider Setup</h1>
+    <h1 data-lang="zh" hidden>配置 — API 密钥与 Provider 设置</h1>
+    <p class="subtitle" data-lang="en">Manage API keys, default providers, and global settings via environment variables or ~/.seek/config.json.</p>
+    <p class="subtitle" data-lang="zh" hidden">通过环境变量或 ~/.seek/config.json 管理 API 密钥、默认 provider 和其他全局设置。</p>
+  </div>
+
+  <div class="reveal">
+
+    <h2 data-lang="en">API Key Resolution Order</h2>
+    <h2 data-lang="zh" hidden">API 密钥查找顺序</h2>
+    <p data-lang="en">From highest to lowest priority:</p>
+    <p data-lang="zh" hidden">从高到低优先级：</p>
+    <ol>
+      <li data-lang="en"><strong>Environment variables</strong> — <code>DEEPSEEK_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>. Best for CI, secret managers, one-off invocations.</li>
+      <li data-lang="zh" hidden"><strong>环境变量</strong>——<code>DEEPSEEK_API_KEY</code>、<code>ANTHROPIC_API_KEY</code>、<code>OPENAI_API_KEY</code>、<code>GEMINI_API_KEY</code>。适合 CI、secret manager、单次调用。</li>
+      <li data-lang="en"><strong><code>~/.seek/config.json</code></strong> — written by the first-run wizard or hand-edited.</li>
+      <li data-lang="zh" hidden"><strong><code>~/.seek/config.json</code></strong>——由首次运行向导写入或手动编辑。</li>
+      <li data-lang="en"><strong>Unconfigured</strong> — seek launches the setup wizard automatically.</li>
+      <li data-lang="zh" hidden"><strong>空</strong>——seek 自动启动配置向导。</li>
+    </ol>
+    <div class="note">
+      <span data-lang="en">Environment variables always win over the config file, so CI / secret-manager invocations never accidentally pick up a stale on-disk key.</span>
+      <span data-lang="zh" hidden">环境变量始终优先于配置文件，确保 CI 等场景不会意外读到过期的本地密钥。</span>
+    </div>
+
+    <h2 data-lang="en">Config File Format</h2>
+    <h2 data-lang="zh" hidden">配置文件格式</h2>
+    <pre>{
+  <span class="dim">"default_provider"</span>: <span class="ok">"deepseek"</span>,
+  <span class="dim">"providers"</span>: {
+    <span class="dim">"deepseek"</span>: {
+      <span class="dim">"api_key"</span>: <span class="ok">"sk-..."</span>
+    },
+    <span class="dim">"anthropic"</span>: {
+      <span class="dim">"api_key"</span>: <span class="ok">"sk-ant-..."</span>
+    }
+  }
+}</pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Field</th>
+            <th data-lang="zh" hidden>字段</th>
+            <th data-lang="en">Type</th>
+            <th data-lang="zh" hidden>类型</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>default_provider</code></td><td>string</td><td data-lang="en">Default provider (<code>deepseek</code> / <code>anthropic</code> / <code>openai</code> / <code>gemini</code>). Empty = auto-detect.</td><td data-lang="zh" hidden">默认 provider，空字符串走自动检测。</td></tr>
+          <tr><td><code>providers</code></td><td>object</td><td data-lang="en">Per-provider credential config, keyed by provider name.</td><td data-lang="zh" hidden">各 provider 的凭证配置。</td></tr>
+          <tr><td><code>path_prompt_done</code></td><td>bool</td><td data-lang="en">Whether the "add to PATH" prompt has been shown (Windows).</td><td data-lang="zh" hidden">Windows 上"添加到 PATH"提示是否已显示。</td></tr>
+          <tr><td><code>suggest_reply</code></td><td>*bool</td><td data-lang="en">Enable/disable suggested replies. Absent = enabled.</td><td data-lang="zh" hidden">启用/禁用建议回复。缺省 = 启用。</td></tr>
+          <tr><td><code>push_webhooks</code></td><td>array</td><td data-lang="en">Push notification webhook targets.</td><td data-lang="zh" hidden">推送通知 webhook 配置。</td></tr>
+          <tr><td><code>session_notify_seconds</code></td><td>*int</td><td data-lang="en">Interactive turn threshold for push notification. Default 60s, 0 = disabled.</td><td data-lang="zh" hidden">交互回合推送通知阈值秒数。缺省 60s，0 禁用。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Supported Providers</h2>
+    <h2 data-lang="zh" hidden">支持的 Provider</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Provider</th>
+            <th data-lang="zh" hidden>Provider</th>
+            <th data-lang="en">Env Variable</th>
+            <th data-lang="zh" hidden>环境变量</th>
+            <th data-lang="en">Config Name</th>
+            <th data-lang="zh" hidden>配置名</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>DeepSeek</strong> (default)</td><td><code>DEEPSEEK_API_KEY</code></td><td><code>deepseek</code></td></tr>
+          <tr><td>Anthropic</td><td><code>ANTHROPIC_API_KEY</code></td><td><code>anthropic</code></td></tr>
+          <tr><td>OpenAI</td><td><code>OPENAI_API_KEY</code></td><td><code>openai</code></td></tr>
+          <tr><td>Gemini</td><td><code>GEMINI_API_KEY</code></td><td><code>gemini</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 data-lang="en">Switching Provider</h3>
+    <h3 data-lang="zh" hidden">切换 Provider</h3>
+    <pre><span class="prompt">$</span> <span class="ok">DEEPSEEK_API_KEY=sk-xxx seek</span>       <span class="dim"># via env var</span>
+<span class="prompt">$</span> <span class="ok">seek --provider anthropic</span>            <span class="dim"># via CLI flag</span></pre>
+
+    <h2 data-lang="en">First-Run Wizard</h2>
+    <h2 data-lang="zh" hidden">首次运行向导</h2>
+    <p data-lang="en">On first launch with no API key configured, seek starts an interactive wizard:</p>
+    <p data-lang="zh" hidden">首次运行且未配置 API 密钥时，自动启动交互式向导：</p>
+    <ol>
+      <li data-lang="en">Detects already-set environment variables.</li>
+      <li data-lang="zh" hidden">检测已设置的环境变量。</li>
+      <li data-lang="en">Prompts for provider selection.</li>
+      <li data-lang="zh" hidden">提示选择 provider。</li>
+      <li data-lang="en">Prompts for API key (or confirms detected env var).</li>
+      <li data-lang="zh" hidden">输入 API 密钥（或确认使用已检测到的环境变量）。</li>
+      <li data-lang="en">Writes <code>~/.seek/config.json</code>.</li>
+      <li data-lang="zh" hidden">写入 ~/.seek/config.json。</li>
+    </ol>
+
+    <h2 data-lang="en">Storage Paths</h2>
+    <h2 data-lang="zh" hidden">存储路径</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Platform</th>
+            <th data-lang="zh" hidden">平台</th>
+            <th data-lang="en">Config Path</th>
+            <th data-lang="zh" hidden">配置文件路径</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Linux / macOS</td><td><code>~/.seek/config.json</code></td></tr>
+          <tr><td>Windows</td><td><code>%USERPROFILE%\.seek\config.json</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p data-lang="en">Override <code>~/.seek/</code> location with the <code>$SEEK_HOME</code> environment variable.</p>
+    <p data-lang="zh" hidden">可通过 <code>$SEEK_HOME</code> 环境变量覆盖 <code>~/.seek/</code> 的位置。</p>
+
+    <h2 data-lang="en">Related Guides</h2>
+    <h2 data-lang="zh" hidden">相关指南</h2>
+    <ul>
+      <li data-lang="en"><a href="guide-webhooks.html">Webhook push notifications</a> — configure push webhooks for job completion and session end.</li>
+      <li data-lang="zh" hidden"><a href="guide-webhooks.html">推送通知</a>——配置 webhook 推送。</li>
+      <li data-lang="en"><a href="guide-ocr.html">OCR</a> — local image OCR configuration.</li>
+      <li data-lang="zh" hidden"><a href="guide-ocr.html">OCR</a>——本地图片 OCR 配置。</li>
+    </ul>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</div>
+
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

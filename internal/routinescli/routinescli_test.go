@@ -289,3 +289,27 @@ func TestTick_VerboseEmitsIdleHint(t *testing.T) {
 	}
 }
 
+// TestCreate_GoalFlag: --goal persists Job.Goal=true (M-goal.4).
+func TestCreate_GoalFlag(t *testing.T) {
+	withTestHome(t)
+	if err := Run([]string{"create", "--name", "ng", "--at", "@daily", "--goal", "all tests pass"}, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	jobsPath, _ := paths.CronJobs()
+	raw, err := os.ReadFile(jobsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"goal":true`) {
+		t.Fatalf("--goal not persisted into jobs.jsonl: %s", raw)
+	}
+}
+
+// TestCreate_GoalAutopilotMutuallyExclusive: can't be both.
+func TestCreate_GoalAutopilotMutuallyExclusive(t *testing.T) {
+	withTestHome(t)
+	err := Run([]string{"create", "--at", "@daily", "--autopilot", "--goal", "x"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutual-exclusion error, got %v", err)
+	}
+}

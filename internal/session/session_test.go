@@ -573,3 +573,38 @@ func saveDirect(t *testing.T, s *Store, sess *Session) {
 		}
 	}
 }
+
+func TestSaveLoad_PreservesGoal(t *testing.T) {
+	// Mirrors PreservesEffort: the active /goal condition must survive a
+	// save/load round-trip (so `seek -resume` re-arms it), and an empty
+	// Goal must not leak into the header (omitempty).
+	for _, want := range []string{"", "make all tests pass"} {
+		t.Run("goal="+want, func(t *testing.T) {
+			store := newStoreIn(t)
+			sess := New("deepseek-v4-flash", "/tmp", "", false, false)
+			sess.Goal = want
+			if err := store.Save(sess); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.Load(sess.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Goal != want {
+				t.Errorf("Goal round-trip: got %q, want %q", got.Goal, want)
+			}
+			raw, err := os.ReadFile(filepath.Join(store.Dir(), sess.ID+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			header := strings.SplitN(string(raw), "\n", 2)[0]
+			hasKey := strings.Contains(header, `"goal"`)
+			if want == "" && hasKey {
+				t.Errorf("empty Goal leaked into header JSON: %s", header)
+			}
+			if want != "" && !hasKey {
+				t.Errorf("non-empty Goal missing from header JSON: %s", header)
+			}
+		})
+	}
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
+	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
@@ -95,6 +96,16 @@ type Options struct {
 	// ExpandInput, if set, preprocesses submitted user text before it
 	// reaches the agent (v7 柱 Q: image refs → OCR'd text). nil = identity.
 	ExpandInput func(string) string
+
+	// GoalJudge backs the `/goal` loop (M-goal.2): after each turn it
+	// assesses whether the goal condition is met. nil = `/goal` is
+	// unavailable (the command reports so rather than crashing).
+	GoalJudge goal.Judge
+
+	// ResumeGoal, when non-empty, re-arms a /goal loop on startup (read
+	// from the resumed session's Goal field, M-goal.3) and auto-continues
+	// it. Empty for fresh sessions / no active goal.
+	ResumeGoal string
 
 	// GlamourStyle is pre-detected by cmd/seek so we don't trigger an
 	// OSC 11 query under bubbletea (see PRD §4.9 / pitfalls #5).
@@ -344,6 +355,27 @@ type Model struct {
 	// the current turn is dropped (Repair() cleans any orphan tool_calls
 	// in the agent's history) and the steer message replaces it.
 	pendingSteerText string
+
+	// --- /goal loop state (M-goal.2) -------------------------------------
+	// When goalActive, after each turn ends naturally the judge assesses
+	// whether goalCond is met; if not, the next turn auto-submits a
+	// Continuation. Single-agent dual of autopilot. Cleared on met / cap /
+	// stall / Esc-cancel / `/goal clear`.
+	goalActive bool
+	goalCond   string
+	goalTurns  int       // submits completed in this goal so far
+	goalStalls int       // consecutive no-tool-call turns
+	goalStart  time.Time // for the status-bar elapsed readout
+	goalCaps   goal.Caps
+	// goalToolsBase snapshots m.toolCalls at the start of the current goal
+	// turn, so turnTools = m.toolCalls-base gives this turn's progress.
+	goalToolsBase int
+	// goalLastTurnTools is this turn's tool count, captured at stream-end
+	// for the verdict handler's stall check.
+	goalLastTurnTools int
+	// lastAssistantText is the most recent assistant message's text,
+	// captured at MessageEnd — fed to the judge as "the latest work".
+	lastAssistantText string
 
 	// pendingSkill, when non-empty, names a skill that the user has
 	// "armed" via `/skill use <name>` (no extra args). The next
@@ -602,6 +634,14 @@ func New(opts Options) Model {
 	if opts.CWD != "" {
 		m.pathPicker.all = scanWorkspace(opts.CWD)
 	}
+	// Resume an unfinished /goal loop (M-goal.3): re-arm the state here so
+	// Init can auto-continue it. Gated on a judge being available.
+	if opts.ResumeGoal != "" && opts.GoalJudge != nil {
+		m.goalActive = true
+		m.goalCond = opts.ResumeGoal
+		m.goalStart = time.Now()
+		m.goalCaps = goal.Caps{}.WithDefaults()
+	}
 	// Seed the placeholder with a state-aware hint (first-turn welcome,
 	// or yolo warning if --yolo was passed).
 	m.refreshPlaceholder()
@@ -636,6 +676,15 @@ func (m Model) Init() tea.Cmd {
 	// letter at a time until all four letters are revealed.
 	if m.turns == 0 {
 		cmds = append(cmds, tickBannerEvery(0))
+	}
+	// Resumed /goal loop (M-goal.3): announce it and auto-continue. The
+	// notice is prominent so the user can Esc / `/goal clear` immediately
+	// rather than be surprised by an autonomous turn firing on startup.
+	if m.goalActive {
+		cmds = append(cmds,
+			tea.Println(styleMuted.Render("  🎯 resuming goal: "+truncateOneLine(m.goalCond, 60)+"   (Esc or /goal clear to stop)")),
+			func() tea.Msg { return goalStartMsg{} },
+		)
 	}
 	// Resume replay happens BEFORE tea.NewProgram in Run() — see
 	// renderReplayHistory + the Run() call site. Doing it from inside

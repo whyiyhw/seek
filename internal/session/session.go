@@ -61,8 +61,12 @@ type Session struct {
 	Model         string    `json:"model"`
 	Yolo          bool      `json:"yolo"`
 	Plan          bool      `json:"plan,omitempty"`
-	CWD           string    `json:"cwd"`
-	SystemPrompt  string    `json:"system_prompt,omitempty"`
+	// Goal is the active /goal condition, persisted so `seek -resume`
+	// picks an unfinished autonomous loop back up (M-goal.3). Empty when
+	// no goal is running; cleared on met/cap/stall/Esc.
+	Goal         string `json:"goal,omitempty"`
+	CWD          string `json:"cwd"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 	// Messages is omitted from the JSONL header line and written as
 	// individual lines 2..N instead. omitempty ensures the key is
 	// absent from the header even when the slice is non-nil.

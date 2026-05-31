@@ -39,6 +39,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// All cmds for this case are returned from handleStreamEnd.
 		return m.handleStreamEnd(msg)
 
+	case goalStartMsg:
+		// /goal set the loop state; fire the first turn here so submit()'s
+		// streaming Model is the one we return (M-goal.2).
+		m.goalToolsBase = m.toolCalls
+		return m.submit(m.goalCond)
+
+	case goalVerdictMsg:
+		// The judge assessed the just-finished goal turn — continue or stop.
+		return m.handleGoalVerdict(msg)
+
 	case suggestionReadyMsg:
 		// v4 柱 D side-channel prediction landed. Drop stale results
 		// (user submitted another turn while the goroutine was in

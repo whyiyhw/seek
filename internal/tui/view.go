@@ -334,6 +334,9 @@ func (m Model) renderStatusBar() string {
 		UpgradeAvailable: m.upgradeAvailable,
 		SubagentsActive:  subagentsActiveCount(m.opts.Subagents),
 		CronsRegistered:  cronsRegisteredCount(),
+		GoalActive:       m.goalActive,
+		GoalTurns:        m.goalTurns,
+		GoalMaxTurns:     m.goalCaps.MaxTurns,
 	})
 }
 
