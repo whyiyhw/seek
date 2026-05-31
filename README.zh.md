@@ -142,9 +142,9 @@ seek keys       list/check/actions
 |---|---|
 | 基础（M0–M10） | DeepSeek 客户端、agent loop、多 provider、session、skill、hooks、checkpoint、plan-mode v2、permission 重构、MCP client、webfetch |
 | 编排（柱 G/H） | 子代理 + worktree、cron + 自调度 wakeup + 文件触发 + OS 通知 |
-| 单点工具（柱 I/J/M） | AskUserQuestion v2、复合 `code-review` skill、**移动端 webhook 推送桥** |
+| 单点工具（柱 I/J/K/M） | AskUserQuestion v2、复合 `code-review` skill、**移动端 webhook 推送桥**、后台 bash + `monitor`（poll/wait/kill） |
 
-下一步（柱 K / L）：Monitor + 后台 bash、LSP 工具。
+下一步（柱 L）：LSP 工具。
 
 完整 PRD：[`docs/prd/`](./docs/prd/)（v0–v6 umbrella + 14 个 feature PRD）  
 贡献：[`AGENTS.md`](./AGENTS.md) · 踩坑：[`docs/pitfalls.md`](./docs/pitfalls.md)

@@ -27,7 +27,7 @@
 | Think / 反思 | ✅ | ✅ | **对等** | Seek：`think` 工具调用 DeepSeek reasoner；内置 `dual-model` skill 实现 reasoner→执行→反思闭环 |
 | LSP 工具（结构化符号/引用） | ✅ | ❌ **缺失** | — | Claude Code 暴露 `LSP` 工具直连语言服务器拿 hover / def / refs；Seek 所有"找符号"路径都走 grep+read |
 | Notebook 编辑 | ✅ | ❌ **缺失** | — | Claude Code 有 `NotebookEdit` 原生编辑 Jupyter `.ipynb`；Seek 无 |
-| 后台 bash + 流式监听 | ✅ | ❌ **缺失** | — | Claude Code Bash 支持 `run_in_background`，配 `Monitor` 流式跟 stdout；Seek bash 仅一次性 exec |
+| 后台 bash + 流式监听 | ✅ | ✅ | — | 双方均支持 `run_in_background` + `monitor`（poll/wait/kill）跟踪后台 job。seek 为会话级（随会话生死、零 daemon），v6 柱 K |
 | Web 搜索 | ✅ | ❌ **缺失** | — | Claude Code `WebSearch`；Seek 只有 `webfetch`（HTTPS GET 单页） |
 | Fast 模式 | ✅ | ❌ **缺失** | — | Claude Code 有 `/fast` 模式，对简单任务快速低消耗响应 |
 | Headless / 非交互模式 | ✅ | 🔶 **等效替代** | Seek 有 JSON-RPC 2.0 service 模式（`--rpc`）用于 IDE 接入和 `-json` / `-p` 一次性输出，但不是通用 `--headless` 标志 |
@@ -246,7 +246,7 @@
 | **🟢 已交付** | 调度 | **Cron / Wakeup / Triggers / OS 通知** | v0.6.1（v5 柱 H）：`seek cron` CLI + `schedule_wakeup` LLM 工具 + 文件桥 trigger + macOS/Linux 通知。**零常驻 daemon**，架构上与 Claude Code 云托管 routines 不同（trade-off 见 §10 小结） |
 | **🟡 P1** | UI | **`AskUserQuestion` 结构化选择器** | 多题/多选项/preview 双栏渲染，对"让模型自己拿决定"路径影响大 |
 | **🟡 P1** | 工具 | **LSP 工具** | 结构化符号/引用查询，大型代码库 grep 替代不掉 |
-| **🟡 P1** | Bash | **后台执行 + `Monitor` 流式跟踪** | 长任务跟踪能力 |
+| **🟢 已交付** | Bash | **后台执行 + `monitor` 跟踪（poll/wait/kill）** | v0.7.x（v6 柱 K）：`bash run_in_background` 返回 `bg-N` 句柄 + `monitor` 工具轮询/等待/杀；会话级生命周期、`until_regex` 条件等待、`Manager.Shutdown` 退出全杀。Windows 为降级路径 |
 | **🟢 已交付** | 工作流 | **复合 review skill（`/code-review` 的 `quick`/`thorough` + `--fix` + `--comment`）** | v0.7.0（v6 柱 J）：内置 `code-review` skill（方法论 + effort framing）+ `/code-review` slash 命令（参数解析，复用 `/review` diff 采集 + picker）+ `/review` = `/code-review quick` 别名。**eval 实测 DeepSeek 分不开 4 档 → 收敛为 2 档**（旧 low/medium/high/max 软别名映射）。`--fix` 走 plan-mode propose；不含云端 `ultra`（架构选择） |
 | **🟢 已交付** | 推送 | **移动端可达（webhook 桥）** | v0.7.0（v6 柱 M）：`push_webhooks` 把 cron/trigger 终态额外 POST 到用户自选渠道（ntfy/slack/discord/raw），离开电脑也能收。**故意不做** native 云 push（反零 daemon/隐私立场，见 §6 边界）——webhook 桥让用户自接渠道，等价覆盖「手机收得到」的需求。`seek cron config check --probe` 验证可达 |
 | **🟠 P2** | MCP | **TUI 内重启 server** | 中等投入 |
@@ -285,7 +285,7 @@
 
 2. **过去的"最大架构缺口"已关闭（v0.6.x）**：子代理（v0.6.0）、worktree 隔离（v0.6.0）、cron / 唤醒 / 触发 / OS 通知（v0.6.1）三个 🔴 P0 项全部 ship。Seek 不再是"单进程单 agent"——模型可以 spawn 并行子代理（standalone session + token 账户 + 可选 worktree 隔离），可以让自己定时唤醒，可以由外部 CI/IDE 触发跑活。**剩下的"差距"全部是架构选择**而非缺口（云托管 routines vs 本地零 daemon），针对的是不同用户画像。
 
-3. **第二档单点工具缺口**：`LSP`、`Monitor` + 后台 bash、`NotebookEdit`、`WebSearch`、结构化 `AskUserQuestion` —— 都是独立可补的点，每个一两天工程，挑两个做能很快缩差距。
+3. **第二档单点工具缺口（收敛中）**：结构化 `AskUserQuestion`（柱 I）、复合 review（柱 J）、移动 push（柱 M）、`Monitor` + 后台 bash（柱 K）均已 ship；**剩 `LSP`（柱 L）、`NotebookEdit`、`WebSearch`** 仍是独立可补的点，每个一两天工程。
 
 4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 

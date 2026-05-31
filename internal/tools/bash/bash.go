@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/bgjob"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
 )
@@ -23,13 +24,14 @@ var schemaBytes = []byte(`{
   "type": "object",
   "properties": {
     "command":    {"type": "string", "description": "Shell command. Runs under /bin/sh -c (POSIX) or cmd.exe /C (Windows)."},
-    "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds. Default 120000 (2m), max 600000 (10m).", "minimum": 100, "maximum": 600000}
+    "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds. Default 120000 (2m), max 600000 (10m).", "minimum": 100, "maximum": 600000},
+    "run_in_background": {"type": "boolean", "description": "Run the command detached and return a handle (bg-N) immediately instead of blocking. Track it with the monitor tool (poll/wait/kill). Use for long builds, test suites, and dev servers. timeout_ms is ignored in background mode; the job lives until it exits, you kill it, or the session ends."}
   },
   "required": ["command"],
   "additionalProperties": false
 }`)
 
-const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned (truncated past 32 KiB). Use timeout_ms to bound long-running commands."
+const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned (truncated past 32 KiB). Use timeout_ms to bound long-running commands. Set run_in_background to start a long task (build / test suite / dev server) detached and track it with the monitor tool instead of blocking the turn."
 
 const (
 	defaultTimeoutMS = 120_000
@@ -65,15 +67,26 @@ func (b *lockedBuffer) snapshot() []byte {
 }
 
 type Args struct {
-	Command   string `json:"command"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	Command         string `json:"command"`
+	TimeoutMS       int    `json:"timeout_ms,omitempty"`
+	RunInBackground bool   `json:"run_in_background,omitempty"`
 }
 
 type Tool struct {
 	policy *permission.Policy
+	bgMgr  *bgjob.Manager
 }
 
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
+
+// WithBackground wires the session's background-job manager, enabling
+// run_in_background. Optional: without it, background launches are
+// refused while foreground bash keeps working — keeps 柱 K independently
+// rollback-able (v6 §2.2). Mirrors write/edit's WithSnapshotter builder.
+func (t Tool) WithBackground(mgr *bgjob.Manager) Tool {
+	t.bgMgr = mgr
+	return t
+}
 
 func (Tool) Name() string            { return "bash" }
 func (Tool) Description() string     { return description }
@@ -81,11 +94,11 @@ func (Tool) Schema() json.RawMessage { return schemaBytes }
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := tools.UnmarshalStrict("bash", raw, &a, "command", "timeout_ms"); err != nil {
+	if err := tools.UnmarshalStrict("bash", raw, &a, "command", "timeout_ms", "run_in_background"); err != nil {
 		return "", err
 	}
 	if a.Command == "" {
-		return "", tools.MissingField("bash", "command", raw, "command", "timeout_ms")
+		return "", tools.MissingField("bash", "command", raw, "command", "timeout_ms", "run_in_background")
 	}
 
 	if err := t.policy.Check(permission.Action{
@@ -106,6 +119,13 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 			}
 		}
 		return "", err
+	}
+
+	// Background launch: permission already cleared above (same KindBash
+	// gate). Detach and return a handle immediately — never block the turn,
+	// never bind the process to the turn ctx (PRD §4 D5).
+	if a.RunInBackground {
+		return t.runBackground(a.Command)
 	}
 
 	timeout := a.TimeoutMS
@@ -229,4 +249,63 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		result += "\n[hint: " + advisory + "]\n"
 	}
 	return result, nil
+}
+
+// runBackground launches the command detached and returns immediately
+// with a handle. Crucially it binds the process to NOTHING ctx-wise (no
+// turn ctx, no timeout ctx): a background job must outlive the turn that
+// started it (PRD §4 D5). Cleanup is via the monitor tool's kill or the
+// manager's Shutdown at session end — never via turn cancellation.
+func (t Tool) runBackground(command string) (string, error) {
+	if t.bgMgr == nil {
+		return "", errors.New("bash: background execution is unavailable in this session (run_in_background not supported here)")
+	}
+	job, err := t.bgMgr.Launch(command)
+	if err != nil {
+		return "", err // concurrency cap reached — message is already actionable
+	}
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe", "/C", command)
+	} else {
+		cmd = exec.Command("/bin/sh", "-c", command)
+	}
+	if cwd := t.policy.CWD(); cwd != "" {
+		cmd.Dir = cwd
+	}
+	detachStdin(cmd)
+	// Stdout == Stderr (same *Job): os/exec shares a single pipe + copy
+	// goroutine, so combined output streams into the ring buffer with no
+	// interleave race.
+	cmd.Stdout = job
+	cmd.Stderr = job
+
+	if err := cmd.Start(); err != nil {
+		job.Finish(-1)
+		return "", fmt.Errorf("bash: failed to start background job: %w", err)
+	}
+	job.SetKiller(func() error {
+		killProcessGroup(cmd)
+		return nil
+	})
+	go func() {
+		job.Finish(exitCodeOf(cmd.Wait()))
+	}()
+
+	return fmt.Sprintf("[bg: started %s] $ %s\nTrack with the monitor tool: monitor(job=%q, action=poll|wait|kill).", job.ID, command, job.ID), nil
+}
+
+// exitCodeOf extracts a process exit code from cmd.Wait's error: 0 on
+// success, the real code on ExitError, -1 for anything else (killed,
+// shell-not-found, …).
+func exitCodeOf(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
 }

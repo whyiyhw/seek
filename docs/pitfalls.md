@@ -508,6 +508,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: no single string-similarity metric works equally well for multi-word English and CJK. Use word-level for space-delimited languages (the common case for LLM output) and character-level for scripts without word boundaries. Test border cases on both
 - **Refs**: `internal/memory/merge.go:traitSimilarity`
 
+### A background process must NOT inherit the turn ctx, or it dies when the turn ends
+- **Saw**: designing `bash run_in_background` (v6 柱 K), the obvious move was to mirror the foreground path — `exec.CommandContext(turnCtx, …)`. That would silently kill every background job the instant its launching turn returned (or the user pressed Esc), making "background" a lie
+- **Why**: seek's tool `ctx` is the **turn** ctx — cancelled when the agent turn completes or is interrupted. Foreground bash WANTS that (a hung command dies with the turn). A background job's whole point is to outlive the turn that started it; binding it to the turn ctx is a category error
+- **Fix**: `runBackground` uses plain `exec.Command` (no ctx) and registers a kill closure with the session-scoped `bgjob.Manager`. Cleanup is via `monitor(action=kill)` or `Manager.Shutdown()` at session end — never turn cancellation. The *observer* (`monitor wait`) IS bound to the turn ctx, so Esc stops watching without killing the job
+- **Lesson**: separate the two lifetimes explicitly — turn-scoped (foreground exec, wait/observe) vs session-scoped (the background process itself). When a value should outlive the turn, the turn ctx is the wrong leash. Tested with an already-cancelled ctx in `TestBash_Background_IgnoresTurnCtx`
+- **Refs**: `internal/tools/bash/bash.go:runBackground`, `internal/bgjob/bgjob.go` (Shutdown), `internal/tools/monitor/monitor.go` (wait propagates ctx.Err), `docs/prd/feature-bash-monitor.md` §4 D5
+
 ---
 
 ## Tooling / environment

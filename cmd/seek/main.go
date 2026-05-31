@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/bgjob"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/checkpointcli"
@@ -62,6 +63,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/listdir"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/internal/tools/memorytool"
+	"github.com/whyiyhw/seek/internal/tools/monitor"
 	plantool "github.com/whyiyhw/seek/internal/tools/plan"
 	"github.com/whyiyhw/seek/internal/tools/propose"
 	"github.com/whyiyhw/seek/internal/tools/read"
@@ -1005,13 +1007,20 @@ func run() error {
 		}
 	}
 
+	// Background-job manager for `bash run_in_background` + the monitor
+	// tool (v6 柱 K). Session-scoped: Shutdown kills every survivor when
+	// run() returns so no background process is ever orphaned (PRD §3, D5).
+	bgMgr := bgjob.New()
+	defer bgMgr.Shutdown()
+
 	reg := tools.New().
 		Add(read.New(policy)).
 		Add(grep.New()).
 		Add(listdir.New()).
 		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
 		Add(edit.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
-		Add(bash.New(policy)).
+		Add(bash.New(policy).WithBackground(bgMgr)).
+		Add(monitor.New(bgMgr)).
 		Add(gittool.New()).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
