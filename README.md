@@ -154,7 +154,7 @@ Everything below ships in the current **v0.7.1** release:
 | Orchestration (柱 G/H) | sub-agents + worktrees · cron + self-scheduled wakeups + file triggers + OS notifications |
 | Single-point tools (柱 I–M) | AskUserQuestion v2 · composite `code-review` skill · **mobile-push webhook bridge** · background bash + `monitor` (poll/wait/kill) · semantic `references` (LSP find-references) |
 
-v6 single-point tools complete. **v7** (planned): deepen the moat — Autopilot (unattended overnight orchestration) + OS sandbox — plus ACP editor integration and image OCR. See [`docs/prd/v7.md`](docs/prd/v7.md).
+v6 single-point tools complete. **v7 delivered, v0.8.x**: Autopilot (unattended orchestration) + OS sandbox (seatbelt/landlock) + ACP editor integration + local image OCR — all shipped. See [`docs/prd/v7.md`](docs/prd/v7.md).
 
 Full design docs: [`docs/prd/`](docs/prd/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md) · pitfalls: [`docs/pitfalls.md`](docs/pitfalls.md)
 

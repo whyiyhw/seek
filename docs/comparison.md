@@ -327,8 +327,8 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 | **时序自治** | cron + wakeup + 文件触发 + OS 通知 + **手机 webhook push**（零 daemon） | **源码零调度**：无 cron/wakeup/trigger/schedule 任何文件 | **seek（干净领先）** |
 | ⚠️ **后台任务** | `bash run_in_background` + `monitor`（poll/wait/kill, until_regex） | **有**：`bash/task run_in_background` + `bash_output`/`wait`/`kill_shell`（session 级，无 list） | **≈ 对等**（原以为 seek 独有，错） |
 | ⚠️ **编辑安全网** | 每 turn **git** snapshot + 文件级 undo/redo/restore（git stash 连 bash 副作用一起盖） | **有** checkpoint：**git-free** turn-rewind（"like Claude Code rewind"，仅 edit-tool、不含 bash） | **≈ 对等**（实现取舍不同；原以为 seek 独有，错） |
-| ⚠️ **IDE 集成** | JSON-RPC `-rpc` server（自定义） | **ACP**（Agent Client Protocol）：session/load/prompt + 事件流 + 审批路由，e2e 测过——**Zed 等用的标准协议** | **Reasonix**（标准协议 > 自定义 RPC；原以为 seek 赢，错） |
-| **OS 沙箱** | ❌（靠权限门 + worktree） | **有** macOS Seatbelt 沙箱（`sandbox/seatbelt_darwin`） | **Reasonix** |
+| ⚠️ **IDE 集成** | JSON-RPC `-rpc` + **ACP**（`seek acp`，柱 P 已交付）：initialize/session.new/prompt/cancel/update，真 server stdio e2e | **ACP**（Agent Client Protocol）：session/load/prompt + 事件流 + 审批路由，e2e 测过——**Zed 等用的标准协议** | **≈ 对等**（seek v0.8 已补齐 ACP；原以为 seek 只有自定义 RPC，已更新） |
+| **OS 沙箱** | ✅ **macOS seatbelt + Linux landlock**（柱 O 已交付）：零 runtime 依赖、单二进制。seatbelt SBPL confine 写+网络；landlock trampoline re-exec 实现，fail-closed。子代理 per-worktree 集成 autopilot | **有** macOS Seatbelt 沙箱（`sandbox/seatbelt_darwin`） | **≈ 对等**（seek 双平台、零依赖；Reasonix 仅 macOS；原以为 seek 无沙箱，错） |
 | **Web 前端** | ❌ 仅 TUI + 状态栏 | **生产级** web 前端（SSE 事件流 + REST submit/cancel/approve/plan/compact + context/token 指标；源码非 stub） | **Reasonix** |
 | **语义索引** | ❌ 故意不做（grep+read+`references`） | **有** `codegraph`（含 install + e2e） | Reasonix（路线分歧） |
 | **桌面 / 远程** | webhook push（单向通知） | Tauri 桌面（预发布）+ QQ 双向远程 | Reasonix |
@@ -339,16 +339,17 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 
 ## R.3 各自赢的（源码校正后）
 
-- **seek 干净领先的只剩两轴**：(1) 子代理**并行 + git worktree 隔离**（Reasonix 子代理故意串行、无隔离）；(2) **时序自治**（cron/wakeup/触发/手机 push；Reasonix 源码零调度）。外加 DeepSeek FIM/错峰的边角深度。
-- **Reasonix 赢**：规模碾压（14.9k、435M token 战测）· `codegraph` 语义索引 · 生产级 web 前端 · **ACP 标准编辑器集成** · macOS Seatbelt 沙箱 · 多 provider 搜索 · QQ 双向远程。
+- **seek 干净领先的仍有两轴**：(1) 子代理**并行 + git worktree 隔离**（Reasonix 子代理故意串行、无隔离）；(2) **时序自治**（cron/wakeup/触发/手机 push；Reasonix 源码零调度）。外加 **Autopilot 无人值守编排**（柱 N，seek 独有）+ DeepSeek FIM/错峰的边角深度。
+- **已追平**：ACP 编辑器集成（柱 P，seek 现已支持）· OS 沙箱（柱 O，seek 双平台 macOS seatbelt + Linux landlock，零依赖）。
+- **Reasonix 仍赢**：规模碾压（14.9k、435M token 战测）· `codegraph` 语义索引 · 生产级 web 前端 · 多 provider 搜索 · QQ 双向远程。
 - **大面积对等（读源码后比 README 印象更趋同）**：后台任务、编辑安全网/rewind、plan、skills、memory、MCP、hooks、权限、session、headless——这些都不是差异点。
 
 ## R.4 对 seek 的站位结论（读源码后更尖锐）
 
-1. **结论比上一版更不利**：原以为 seek 在**后台任务 / 编辑安全网 / IDE 集成**也领先——**三项全被源码推翻**（Reasonix 都有，IDE 还用标准 ACP）。seek 真正干净领先的**只剩两轴**：并行+worktree 子代理、时序自治。
-2. **pitch 必须全力压这两轴**，且**别声称"我有 X 而它没有"**除非已确认——后台/checkpoint/IDE 都会被现场打脸。
+1. **结论已修复**：上一版低估了 seek——seek 的 Autopilot（柱 N）是 Reasonix 没有的编排层；柱 P ACP 补齐了 IDE 集成缺口；柱 O 沙箱追平了 macOS 且多了一个 Linux landlock。seek 真正的领先轴已是三轴：**并行+worktree 子代理、时序自治+Autopilot 无人值守、零依赖双平台沙箱**。
+2. **pitch 应压这三轴**，且认可 Reasonix 在规模/语义索引/web 前端上的优势。ACP 和沙箱不再是差异点。
 3. **别在重叠区硬碰**——DeepSeek/cache/Go-binary 又大又先发，主打它 = 给对手做嫁衣。
 4. **"无语义索引"是主动下的注**（柱 L 选 grep+references 轻路线 vs Reasonix 押 `codegraph` embeddings）——pitch 要能**主动解释为什么不做**（零索引常驻 / 本地轻量），否则被当短板。
-5. **一句话区隔（更新）**：*"两者都是 DeepSeek-native Go agent；Reasonix 更全面（索引 / web / ACP / 沙箱）且大得多。seek 唯一清晰的差异是**把单 agent 变成并行隔离的团队，并在你睡觉时定时/触发交付、push 到手机**——其余基本对等。"*
+5. **一句话区隔（v0.8 更新）**：*"两者都是 DeepSeek-native Go agent。Reasonix 更全面（语义索引 / web 前端 / 多搜索 / 远程桌面）且大得多。seek 独有的差异是**把单 agent 变成并行隔离的团队、无人值守自动编排（Autopilot），并在你睡觉时定时/触发交付、push 到手机**——ACP 和沙箱已追平，其余基本对等。"*
 
 > **已坐实（读 `main-v2` 源码）**：coordinator / task / bgjobs / checkpoint / acp/service / serve 均已读。Reasonix **确有**：子代理（`TaskTool`，串行无隔离）、后台任务、checkpoint+rewind、ACP 编辑器集成、生产级 web 前端、`codegraph` 语义索引、macOS 沙箱。**源码确无**：调度/cron/wakeup/trigger、worktree 隔离、并行子代理 fleet。未深读：`codegraph` 内部算法、billing——但存在性已确认。
