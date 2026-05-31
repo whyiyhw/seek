@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -46,6 +47,18 @@ type streamEndMsg struct{}
 // promptSubmittedMsg fires when the user pressed Enter in the input
 // area, carrying the trimmed text.
 type promptSubmittedMsg struct{ Text string }
+
+// goalStartMsg is emitted by the /goal command to kick off the first goal
+// turn from Update (the command handler sets state; submit happens here so
+// the new streaming Model isn't lost). M-goal.2.
+type goalStartMsg struct{}
+
+// goalVerdictMsg carries the judge's assessment of a finished goal turn
+// back into Update, off the UI thread. M-goal.2.
+type goalVerdictMsg struct {
+	v   goal.Verdict
+	err error
+}
 
 // statusTickMsg keeps the status bar live so the off-peak window shifts
 // in real time. We tick once a minute — enough resolution given the

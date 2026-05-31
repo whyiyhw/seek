@@ -89,6 +89,12 @@ type StatusSnapshot struct {
 	// (transient state) — cron jobs aren't "running right now"
 	// from the TUI's vantage point; they fire async via tick.
 	CronsRegistered int
+
+	// GoalActive + GoalTurns/GoalMaxTurns drive the "🎯 N/M" badge while a
+	// /goal loop is running (M-goal.2). Suppressed when no goal is active.
+	GoalActive   bool
+	GoalTurns    int
+	GoalMaxTurns int
 }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
@@ -140,6 +146,14 @@ func leftSegments(s StatusSnapshot) []string {
 			label = fmt.Sprintf("%s %d/%d", label, s.PlanStepsDone, s.PlanStepsTotal)
 		}
 		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label))
+	}
+	// /goal badge: "🎯 N/M" while a goal loop is running (M-goal.2).
+	if s.GoalActive {
+		label := "🎯 goal"
+		if s.GoalMaxTurns > 0 {
+			label = fmt.Sprintf("🎯 goal %d/%d", s.GoalTurns, s.GoalMaxTurns)
+		}
+		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourTool).Bold(true).Padding(0, 1).Render(label))
 	}
 	// Effort badge: "high" is muted (the user opted in but it's the
 	// cheaper of the two escalations); "max" is tinted to make the
