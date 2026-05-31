@@ -16,13 +16,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
 
+	"github.com/whyiyhw/seek/internal/acp"
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/autopilot"
 	"github.com/whyiyhw/seek/internal/bgjob"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
@@ -37,6 +40,7 @@ import (
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
+	"github.com/whyiyhw/seek/internal/ocr"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -44,6 +48,7 @@ import (
 	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/routinescli"
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
+	"github.com/whyiyhw/seek/internal/sandbox"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
@@ -424,6 +429,14 @@ type subagentRunnerOpts struct {
 	maxTurns  int
 	getModel  func() string
 	getEffort func() string
+	// bashGuard, when set, wraps the child's bash tool with a deny check
+	// (v7 柱 N: autopilot subagents deny remote ops). nil = no guard.
+	bashGuard func(command string) (bool, string)
+	// bashSandbox, when true, confines the child's bash to its own
+	// worktree via the OS sandbox (v7 柱 O integration; macOS only for
+	// now). Each autopilot subagent thus can't write outside the worktree
+	// it was given.
+	bashSandbox bool
 }
 
 // buildSubagentRunner returns the production subagent.Runner that
@@ -494,9 +507,26 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// instances onto the survivor name list.
 		childReg := tools.New()
 		for _, name := range job.ToolNames {
-			if t := opts.parentReg.Lookup(name); t != nil {
-				childReg.Add(t)
+			t := opts.parentReg.Lookup(name)
+			if t == nil {
+				continue
 			}
+			// autopilot: swap in a bash that denies remote ops (柱 N) and
+			// is OS-sandbox-confined to this subagent's own worktree (柱 O).
+			if name == "bash" {
+				if bt, ok := t.(bash.Tool); ok {
+					if opts.bashGuard != nil {
+						bt = bt.WithDeny(opts.bashGuard)
+					}
+					if opts.bashSandbox {
+						if wt := job.Policy.CWD(); wt != "" && sandbox.Available() {
+							bt = bt.WithSandbox(sandbox.Options{WritableDirs: []string{wt}})
+						}
+					}
+					t = bt
+				}
+			}
+			childReg.Add(t)
 		}
 
 		// Build child agent. No InitialMessages (subagent gets a
@@ -1297,6 +1327,20 @@ func run() error {
 	// Declared outside the !*noSave block so the TUI Options
 	// below can pass the same pointer (or nil) without scoping
 	// gymnastics. /agents handler nil-checks it.
+	// v7 柱 N: `seek autopilot run "<goal>"` — unattended orchestration.
+	// Detected here (after the full agent/subagent/worktree wiring is
+	// available) rather than as a cheap early subcommand. In this mode
+	// every subagent gets the no-remote bash guard for the whole run.
+	autopilotMode := len(os.Args) >= 2 && os.Args[1] == "autopilot"
+	autopilotGoal := ""
+	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
+		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
+	}
+	var autopilotGuard func(string) (bool, string)
+	if autopilotMode {
+		autopilotGuard = autopilot.IsRemoteMutating
+	}
+
 	var subagentMgr *subagent.Manager
 	if !*noSave && activeSession != nil {
 		var smerr error
@@ -1314,14 +1358,16 @@ func run() error {
 			SkillManifestFn:   func() string { return skills.Manifest() },
 			ParentToolNamesFn: func() []string { return reg.Names() },
 			Runner: buildSubagentRunner(subagentRunnerOpts{
-				client:    dsClient,
-				provider:  provider,
-				parentReg: reg,
-				hooksReg:  hooksReg,
-				maxTokens: *maxTokens,
-				maxTurns:  *maxTurns,
-				getModel:  func() string { return sessionModel },
-				getEffort: func() string { return sessionEffort },
+				client:      dsClient,
+				provider:    provider,
+				parentReg:   reg,
+				hooksReg:    hooksReg,
+				maxTokens:   *maxTokens,
+				maxTurns:    *maxTurns,
+				getModel:    func() string { return sessionModel },
+				getEffort:   func() string { return sessionEffort },
+				bashGuard:   autopilotGuard,
+				bashSandbox: autopilotMode,
 			}),
 		})
 		if smerr != nil {
@@ -1340,6 +1386,18 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "subagent: orphan recover:", oerr)
 			}
 		}
+	}
+
+	// v7 柱 N: autopilot takes over before the TUI/print dispatch.
+	// runAutopilot nil-checks the manager/client and returns a usage error
+	// for an empty goal, so this is safe even with --no-save / missing key
+	// (and never silently falls through to the TUI).
+	if autopilotMode {
+		mdl := *model
+		if mdl == "" {
+			mdl = modelDefault
+		}
+		return runAutopilot(ctx, dsClient, mdl, subagentMgr, wtMgr, autopilotGoal)
 	}
 
 	// v5 柱 H auto-tick: fire any due cron jobs as a side effect
@@ -1517,6 +1575,11 @@ func run() error {
 		return runRPC(ctx, ag, tracker, *model, *yolo, *plan, activeSession, store)
 	}
 
+	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
+	if len(os.Args) >= 2 && os.Args[1] == "acp" {
+		return runACP(ctx, ag)
+	}
+
 	// Route: --rpc → JSON-RPC 2.0 server; -json / -p / piped stdin → print; otherwise TUI.
 	if *jsonOut || *prompt != "" || stdinIsPiped() {
 		text, err := resolvePrompt(*prompt)
@@ -1525,6 +1588,12 @@ func run() error {
 		}
 		if text == "" {
 			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
+		}
+		// v7 柱 Q: expand referenced image files to OCR'd text (local,
+		// offline) before the prompt reaches the model. No-op when there
+		// are no image refs; on macOS default-on, elsewhere needs ocr.command.
+		if appCfg.OCREnabledOr(runtime.GOOS == "darwin") {
+			text = ocr.Expand(ctx, text, ocrOptions(appCfg))
 		}
 		if *jsonOut {
 			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, activeSession, store)
@@ -1648,6 +1717,7 @@ func run() error {
 		Tracker:               tracker,
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
+		ExpandInput:           tuiOCRExpander(appCfg),
 		Yolo:                  policy.Yolo(),
 		Plan:                  policy.Plan(),
 		PlanSteps:             restoredPlanSteps,
@@ -2080,6 +2150,141 @@ func printSessionList(store *session.Store) error {
 			parent)
 	}
 	return nil
+}
+
+// tuiOCRExpander returns the TUI input preprocessor for v7 柱 Q image
+// OCR, or nil when OCR is disabled (the TUI treats nil as identity). Uses
+// a background ctx — OCR's own per-image timeout bounds each call, and it
+// only does real work when the input references an existing image file.
+func tuiOCRExpander(cfg config.Config) func(string) string {
+	if !cfg.OCREnabledOr(runtime.GOOS == "darwin") {
+		return nil
+	}
+	opt := ocrOptions(cfg)
+	return func(s string) string { return ocr.Expand(context.Background(), s, opt) }
+}
+
+// ocrOptions builds the OCR engine config (v7 柱 Q) from user config:
+// an explicit ocr.command wins; otherwise on macOS we look for the
+// bundled vision_ocr helper next to the seek binary. An empty result
+// (no engine) makes ocr.Expand surface a "build the helper" hint per
+// image rather than failing.
+func ocrOptions(cfg config.Config) ocr.Options {
+	opt := ocr.Options{
+		Command:   cfg.OCRCommand(),
+		Languages: cfg.OCRLanguages(),
+		Timeout:   cfg.OCRTimeout(),
+	}
+	if len(opt.Command) == 0 && runtime.GOOS == "darwin" {
+		if exe, err := os.Executable(); err == nil {
+			h := filepath.Join(filepath.Dir(exe), "vision_ocr")
+			if st, serr := os.Stat(h); serr == nil && !st.IsDir() {
+				opt.Helper = h
+			}
+		}
+	}
+	return opt
+}
+
+// runAutopilot drives the v7 柱 N unattended loop: decompose the goal,
+// fan out to no-remote-guarded worktree subagents, aggregate, push the
+// summary. The subagents are already guarded (bashGuard set on their
+// manager for the whole autopilot process), so they produce LOCAL commits
+// only — the user reviews + pushes in the morning.
+func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {
+	if goal == "" {
+		return fmt.Errorf("usage: seek autopilot run \"<goal>\"")
+	}
+	if client == nil {
+		return fmt.Errorf("autopilot requires a model provider — set an API key (seek setup)")
+	}
+	if mgr == nil {
+		return fmt.Errorf("autopilot requires a saved session in a git repo (unavailable with --no-save or outside a git project)")
+	}
+	dec := autopilot.NewDeepSeekDecomposer(client, model)
+	fleet := autopilot.NewFleet(mgr, wtMgr)
+	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
+
+	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
+	rep, err := drv.Run(ctx, goal)
+	if err != nil {
+		return fmt.Errorf("autopilot: %w", err)
+	}
+	fmt.Println(rep.Body())
+	// Best-effort mobile push (柱 M reuse) so an unattended run reaches you.
+	if dispatch := routinescli.WebhookDispatcherFromConfig(); dispatch != nil {
+		dispatch(ctx, rep.Event(), rep.Title(), rep.Body())
+	}
+	return nil
+}
+
+// acpBackend adapts seek's agent to the Agent Client Protocol (v7 柱 P).
+// One seek process = one ACP session (MVP); Prompt streams the agent's
+// event channel out as ACP session/update notifications.
+type acpBackend struct{ ag *agent.Agent }
+
+func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
+	return acp.InitializeResult{ProtocolVersion: p.ProtocolVersion}
+}
+
+func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
+	return acp.NewSessionResult{SessionID: "seek"}, nil
+}
+
+func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
+	text := p.PromptText()
+	if text == "" {
+		return acp.PromptResult{StopReason: "end_turn"}, nil
+	}
+	for ev := range b.ag.Prompt(ctx, text) {
+		if e, ok := ev.(agent.ErrorEvent); ok {
+			return acp.PromptResult{}, e.Err
+		}
+		if u, ok := acpUpdate(p.SessionID, ev); ok {
+			sendU(u)
+		}
+	}
+	if ctx.Err() != nil {
+		return acp.PromptResult{StopReason: "cancelled"}, nil
+	}
+	return acp.PromptResult{StopReason: "end_turn"}, nil
+}
+
+// acpUpdate maps one agent event to an ACP session/update payload. ok is
+// false for events that don't surface to the client (reasoning chunks,
+// turn bookkeeping). Pure + table-testable (acp_test.go) so the mapping
+// is verified without a live Zed client.
+func acpUpdate(sessionID string, ev agent.Event) (acp.SessionUpdate, bool) {
+	switch e := ev.(type) {
+	case agent.MessageDelta:
+		if e.Reasoning {
+			return acp.SessionUpdate{}, false // CoT not surfaced as message content
+		}
+		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
+			"sessionUpdate": "agent_message_chunk",
+			"content":       map[string]any{"type": "text", "text": e.Delta},
+		}}, true
+	case agent.ToolExecStart:
+		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
+			"sessionUpdate": "tool_call", "toolCallId": e.CallID, "title": e.Name, "status": "in_progress",
+		}}, true
+	case agent.ToolExecEnd:
+		status := "completed"
+		if e.Err != nil {
+			status = "failed"
+		}
+		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
+			"sessionUpdate": "tool_call_update", "toolCallId": e.CallID, "status": status,
+		}}, true
+	}
+	return acp.SessionUpdate{}, false
+}
+
+// runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
+// editor (Zed, …) can drive seek. stdout is the protocol channel — all
+// logging goes to stderr.
+func runACP(ctx context.Context, ag *agent.Agent) error {
+	return acp.NewServer(os.Stdin, os.Stdout, &acpBackend{ag: ag}).Serve(ctx)
 }
 
 func resolvePrompt(flagPrompt string) (string, error) {

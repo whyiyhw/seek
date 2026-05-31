@@ -29,6 +29,9 @@ type Job struct {
 	RunCount    int       `json:"run_count,omitempty"`
 	Yolo        bool      `json:"yolo,omitempty"`
 	Notify      string    `json:"notify,omitempty"`
+	// Autopilot makes the tick fire `seek autopilot run <prompt>` instead
+	// of `seek -p <prompt>` (v7 柱 N: scheduled unattended orchestration).
+	Autopilot bool `json:"autopilot,omitempty"`
 }
 
 // MarshalJSON encodes the Schedule field by its Raw form rather
@@ -50,6 +53,9 @@ type jobWire struct {
 	RunCount    int       `json:"run_count,omitempty"`
 	Yolo        bool      `json:"yolo,omitempty"`
 	Notify      string    `json:"notify,omitempty"`
+	// Autopilot makes the tick fire `seek autopilot run <prompt>` instead
+	// of `seek -p <prompt>` (v7 柱 N: scheduled unattended orchestration).
+	Autopilot bool `json:"autopilot,omitempty"`
 }
 
 // MarshalJSON serialises Job with Schedule flattened to its
@@ -70,6 +76,7 @@ func (j Job) MarshalJSON() ([]byte, error) {
 		RunCount:    j.RunCount,
 		Yolo:        j.Yolo,
 		Notify:      j.Notify,
+		Autopilot:   j.Autopilot,
 	}
 	return json.Marshal(w)
 }
@@ -103,6 +110,7 @@ func (j *Job) UnmarshalJSON(data []byte) error {
 		RunCount:    w.RunCount,
 		Yolo:        w.Yolo,
 		Notify:      w.Notify,
+		Autopilot:   w.Autopilot,
 	}
 	return nil
 }

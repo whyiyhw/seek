@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
 )
@@ -75,6 +77,63 @@ type Config struct {
 	// event, seek pings that webhook when the turn ends. Pointer so we
 	// distinguish "unset → default 60s (on)" from "0 → disabled".
 	SessionNotifySeconds *int `json:"session_notify_seconds,omitempty"`
+
+	// OCR gates the v7 柱 Q image→OCR→text input expansion. On macOS the
+	// bundled Vision helper makes it default-on; other platforms need
+	// Command set. See docs/prd/feature-image-ocr.md.
+	OCR *OCRConfig `json:"ocr,omitempty"`
+}
+
+// OCRConfig configures local image OCR (v7 柱 Q). All fields optional.
+type OCRConfig struct {
+	// Enabled overrides the platform default (macOS on, others off
+	// unless Command set). Pointer to distinguish unset from explicit
+	// false.
+	Enabled *bool `json:"enabled,omitempty"`
+	// Command is an explicit OCR engine, space-separated; the image path
+	// is appended as the last arg. Overrides the bundled macOS helper.
+	Command string `json:"command,omitempty"`
+	// Languages is a hint like "zh-Hans,en-US" passed to the engine.
+	Languages string `json:"languages,omitempty"`
+	// TimeoutSeconds bounds one OCR call (default 15).
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
+}
+
+// OCRCommand returns the configured engine split on spaces (nil if none).
+func (c Config) OCRCommand() []string {
+	if c.OCR == nil || strings.TrimSpace(c.OCR.Command) == "" {
+		return nil
+	}
+	return strings.Fields(c.OCR.Command)
+}
+
+// OCRLanguages returns the language hint, defaulting to zh-Hans,en-US.
+func (c Config) OCRLanguages() string {
+	if c.OCR == nil || c.OCR.Languages == "" {
+		return "zh-Hans,en-US"
+	}
+	return c.OCR.Languages
+}
+
+// OCRTimeout returns the per-image timeout, defaulting to 15s.
+func (c Config) OCRTimeout() time.Duration {
+	if c.OCR == nil || c.OCR.TimeoutSeconds <= 0 {
+		return 15 * time.Second
+	}
+	return time.Duration(c.OCR.TimeoutSeconds) * time.Second
+}
+
+// OCREnabledOr returns whether OCR is on: explicit Enabled wins; else
+// platformDefault (caller passes runtime.GOOS=="darwin"), but always on
+// when an explicit Command is configured.
+func (c Config) OCREnabledOr(platformDefault bool) bool {
+	if c.OCR != nil && c.OCR.Enabled != nil {
+		return *c.OCR.Enabled
+	}
+	if len(c.OCRCommand()) > 0 {
+		return true
+	}
+	return platformDefault
 }
 
 // SessionNotifySecondsOrDefault returns the interactive-notify duration

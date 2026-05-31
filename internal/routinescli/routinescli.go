@@ -162,6 +162,7 @@ func cmdCreate(args []string, stdout, stderr io.Writer) error {
 	noYolo := fs.Bool("no-yolo", false, "run subprocess WITHOUT --yolo (default: yolo on)")
 	notify := fs.String("notify", "always", "always | on_failure | never")
 	force := fs.Bool("force", false, "overwrite existing job with same name")
+	autopilotFlag := fs.Bool("autopilot", false, "unattended autopilot job: fires `seek autopilot run <goal>` (parallel worktree fleet, no-remote-guarded) instead of `seek -p`")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -206,6 +207,7 @@ func cmdCreate(args []string, stdout, stderr io.Writer) error {
 		MaxRuns:     *maxRuns,
 		Yolo:        !*noYolo,
 		Notify:      *notify,
+		Autopilot:   *autopilotFlag,
 	}
 	if err := store.Create(j, routines.CreateOptions{Force: *force}); err != nil {
 		return err

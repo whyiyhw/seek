@@ -17,6 +17,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/bgjob"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/sandbox"
 	"github.com/whyiyhw/seek/internal/tools"
 )
 
@@ -73,11 +74,47 @@ type Args struct {
 }
 
 type Tool struct {
-	policy *permission.Policy
-	bgMgr  *bgjob.Manager
+	policy  *permission.Policy
+	bgMgr   *bgjob.Manager
+	deny    func(command string) (bool, string)
+	sandbox *sandbox.Options
+}
+
+// WithSandbox runs commands inside an OS sandbox (v7 柱 O) — on macOS,
+// seatbelt confining writes to opt.WritableDirs. Used by autopilot to jail
+// unattended subagents to the project tree. No-op off macOS until landlock
+// lands. Composes with WithDeny / WithBackground; nil = no sandbox.
+func (t Tool) WithSandbox(opt sandbox.Options) Tool {
+	t.sandbox = &opt
+	return t
+}
+
+// shellArgv builds the argv for command, wrapped in the OS sandbox when
+// one is configured. Off-sandbox it's the plain `/bin/sh -c` (or cmd.exe)
+// argv, so the existing exec machinery (Setsid + process-group kill) is
+// unchanged.
+func (t Tool) shellArgv(command string) (string, []string) {
+	name, args := "/bin/sh", []string{"-c", command}
+	if runtime.GOOS == "windows" {
+		name, args = "cmd.exe", []string{"/C", command}
+	}
+	if t.sandbox != nil {
+		name, args = sandbox.Argv(*t.sandbox, name, args...)
+	}
+	return name, args
 }
 
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
+
+// WithDeny installs a command guard checked before permission/exec. When
+// the guard returns true, the command is refused with a model-visible
+// result (not a fatal error) carrying the reason. Used by autopilot to
+// deny remote ops (push / PR) in unattended subagents (v7 柱 N D2);
+// composes with WithBackground. nil guard = no restriction.
+func (t Tool) WithDeny(fn func(command string) (deny bool, reason string)) Tool {
+	t.deny = fn
+	return t
+}
 
 // WithBackground wires the session's background-job manager, enabling
 // run_in_background. Optional: without it, background launches are
@@ -99,6 +136,14 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}
 	if a.Command == "" {
 		return "", tools.MissingField("bash", "command", raw, "command", "timeout_ms", "run_in_background")
+	}
+
+	// Command guard (autopilot no-remote, etc.) — refused as a
+	// model-visible result, not a fatal error, so the model adapts.
+	if t.deny != nil {
+		if blocked, reason := t.deny(a.Command); blocked {
+			return fmt.Sprintf("[bash: blocked — %s]\n$ %s", reason, a.Command), nil
+		}
 	}
 
 	if err := t.policy.Check(permission.Action{
@@ -139,9 +184,10 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
+	shell, shArgs := t.shellArgv(a.Command)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(cctx, "cmd.exe", "/C", a.Command)
+		cmd = exec.CommandContext(cctx, shell, shArgs...)
 	} else {
 		// We use exec.Command (NOT CommandContext) on Unix because
 		// exec.CommandContext only kills the direct child PID when the
@@ -151,7 +197,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		// orphans them but the pipes stay open → cmd.Wait() deadlocks.
 		// Instead we kill the whole process group (negative PID) via a
 		// dedicated goroutine.
-		cmd = exec.Command("/bin/sh", "-c", a.Command)
+		cmd = exec.Command(shell, shArgs...)
 	}
 	// Pin the working directory to the project root the policy was
 	// configured with, NOT whatever the process happens to be in.
@@ -265,12 +311,8 @@ func (t Tool) runBackground(command string) (string, error) {
 		return "", err // concurrency cap reached — message is already actionable
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd.exe", "/C", command)
-	} else {
-		cmd = exec.Command("/bin/sh", "-c", command)
-	}
+	shell, shArgs := t.shellArgv(command)
+	cmd := exec.Command(shell, shArgs...)
 	if cwd := t.policy.CWD(); cwd != "" {
 		cmd.Dir = cwd
 	}

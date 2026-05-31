@@ -2,8 +2,8 @@
 
 **所属版本**：v0.8.x 候选（自治维度；柱 G/H/M 之上的编排层，非新单点工具）
 **前置阅读**：[`comparison.md`](../comparison.md) §R.4（**本 PRD 的战略依据**：seek vs Reasonix 唯一结构性领先的两轴）、[`feature-subagent.md`](feature-subagent.md)（柱 G — 并行子代理 + worktree 隔离）、[`feature-routines.md`](feature-routines.md)（柱 H — cron/wakeup/trigger）、[`feature-mobile-push.md`](feature-mobile-push.md)（柱 M — webhook push）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K — 会话级子进程生命周期 + Shutdown 范式）
-**状态**：📐 设计稿，未实施。本 PRD 记录设计推演、决策表、预埋坑路径。
-**目标里程碑**：M-A.1 ~ M-A.4
+**状态**：🚧 已实装 + 接线（未做真环境 e2e）。`internal/autopilot`：driver（fan-out/caps/kill/panic 隔离）+ Decomposer（deepseek + 健壮解析）+ report 聚合 + fleet adapter（worktree + subagent.Spawn）+ **no-remote 守卫**（`bash.WithDeny` 机制 + `IsRemoteMutating` 策略）。`cmd/seek`：`seek autopilot run "<goal>"` 子命令——复用现有 subagent.Manager（autopilot 子进程整体加 no-remote 守卫）+ worktree + 柱 M webhook push。~22 测试 `-race` 绿,全仓 3-OS build 绿,CLI 派发已冒烟（no-goal→usage）。**剩**：① 真环境 e2e（需 API key + 真 repo,会 spawn 编辑子代理——故未由我执行）;② cron `--autopilot` 接线;③ token 上限（需 tracker）。
+**目标里程碑**：M-A.1 ✅ · M-A.2（守卫）✅ · M-A.3（聚合/push）✅ · M-A.4（CLI）✅ / cron 待 / e2e 待
 **估时**：~6 天（大量复用柱 G/H/M；真正新写的是编排 driver + 安全边界 + 聚合 + CLI）
 
 **为什么做这个（一句话）**：读完 Reasonix `main-v2` 源码后确认，seek 唯一 Reasonix **结构上做不出**的能力是"**并行 worktree 子代理 + 时序自治**"（它子代理串行无隔离、源码零调度）。Autopilot 把这两轴焊成一个**可演示、可信赖的无人值守交付闭环**——tagline 第二三句的兑现，也是打擂台唯一的护城河。详见 `comparison.md` §R.4。

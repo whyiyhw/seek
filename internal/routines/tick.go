@@ -81,9 +81,17 @@ func DefaultSubprocess(ctx context.Context, job Job, runID string) (*exec.Cmd, e
 	if err != nil {
 		return nil, fmt.Errorf("routines: locate seek binary: %w", err)
 	}
-	args := []string{"-p", job.Prompt, "--no-save"}
-	if job.Yolo {
-		args = append(args, "--yolo")
+	// v7 柱 N: autopilot jobs fire `seek autopilot run <goal>` (its
+	// subagents are no-remote-guarded for the whole run); plain jobs fire
+	// `seek -p <prompt>`.
+	var args []string
+	if job.Autopilot {
+		args = []string{"autopilot", "run", job.Prompt}
+	} else {
+		args = []string{"-p", job.Prompt, "--no-save"}
+		if job.Yolo {
+			args = append(args, "--yolo")
+		}
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	if job.ProjectRoot != "" {

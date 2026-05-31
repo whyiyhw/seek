@@ -92,6 +92,9 @@ type Options struct {
 	Plan    bool
 	CWD     string
 	Ctx     context.Context // cancelled on SIGINT
+	// ExpandInput, if set, preprocesses submitted user text before it
+	// reaches the agent (v7 柱 Q: image refs → OCR'd text). nil = identity.
+	ExpandInput func(string) string
 
 	// GlamourStyle is pre-detected by cmd/seek so we don't trigger an
 	// OSC 11 query under bubbletea (see PRD §4.9 / pitfalls #5).

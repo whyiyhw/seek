@@ -260,6 +260,12 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.opts.Ctx)
 	m.cancelStream = cancel
 
+	// v7 柱 Q: expand image refs → OCR'd text before the agent sees it.
+	// No-op unless the input references an existing image file.
+	if m.opts.ExpandInput != nil {
+		text = m.opts.ExpandInput(text)
+	}
+
 	ch := m.opts.Agent.Prompt(ctx, text)
 	m.stream = ch
 
