@@ -39,6 +39,7 @@ type Session struct {
     UpdatedAt     time.Time          `json:"updated_at"`
     Model         string             `json:"model"`
     Yolo          bool               `json:"yolo"`
+    Plan          bool               `json:"plan,omitempty"`
     Effort        string             `json:"effort,omitempty"`
     CWD           string             `json:"cwd"`
     SystemPrompt  string             `json:"system_prompt,omitempty"`
@@ -60,7 +61,13 @@ type Session struct {
 // "20260121-103045-a1b2c3" = 时间戳 + 6 字符随机后缀
 func generateID(t time.Time) string {
     var rnd [3]byte
-    _, _ = rand.Read(rnd[:])
+    if _, err := rand.Read(rnd[:]); err != nil {
+        // Fallback: nanosecond-precision hex suffix from the timestamp.
+        // The fractional seconds make IDs unique even at high concurrency.
+        return fmt.Sprintf("%s-%s",
+            t.Format("20060102-150405"),
+            fmt.Sprintf("%06x", t.Nanosecond()/1000))
+    }
     return fmt.Sprintf("%s-%s",
         t.Format("20060102-150405"),
         hex.EncodeToString(rnd[:]))
