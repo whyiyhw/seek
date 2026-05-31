@@ -32,6 +32,10 @@ type Job struct {
 	// Autopilot makes the tick fire `seek autopilot run <prompt>` instead
 	// of `seek -p <prompt>` (v7 柱 N: scheduled unattended orchestration).
 	Autopilot bool `json:"autopilot,omitempty"`
+	// Goal makes the tick fire `seek goal run <prompt>` — a scheduled
+	// single-agent loop-until-condition-met (M-goal.4). Mutually exclusive
+	// with Autopilot in practice; if both set, Autopilot wins in the tick.
+	Goal bool `json:"goal,omitempty"`
 }
 
 // MarshalJSON encodes the Schedule field by its Raw form rather
@@ -56,6 +60,8 @@ type jobWire struct {
 	// Autopilot makes the tick fire `seek autopilot run <prompt>` instead
 	// of `seek -p <prompt>` (v7 柱 N: scheduled unattended orchestration).
 	Autopilot bool `json:"autopilot,omitempty"`
+	// Goal makes the tick fire `seek goal run <prompt>` (M-goal.4).
+	Goal bool `json:"goal,omitempty"`
 }
 
 // MarshalJSON serialises Job with Schedule flattened to its
@@ -77,6 +83,7 @@ func (j Job) MarshalJSON() ([]byte, error) {
 		Yolo:        j.Yolo,
 		Notify:      j.Notify,
 		Autopilot:   j.Autopilot,
+		Goal:        j.Goal,
 	}
 	return json.Marshal(w)
 }
@@ -111,6 +118,7 @@ func (j *Job) UnmarshalJSON(data []byte) error {
 		Yolo:        w.Yolo,
 		Notify:      w.Notify,
 		Autopilot:   w.Autopilot,
+		Goal:        w.Goal,
 	}
 	return nil
 }

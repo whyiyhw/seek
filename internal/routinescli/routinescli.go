@@ -163,8 +163,12 @@ func cmdCreate(args []string, stdout, stderr io.Writer) error {
 	notify := fs.String("notify", "always", "always | on_failure | never")
 	force := fs.Bool("force", false, "overwrite existing job with same name")
 	autopilotFlag := fs.Bool("autopilot", false, "unattended autopilot job: fires `seek autopilot run <goal>` (parallel worktree fleet, no-remote-guarded) instead of `seek -p`")
+	goalFlag := fs.Bool("goal", false, "unattended goal job: fires `seek goal run <condition>` (single agent loops until a cheap model judges <condition> met; yolo-local + no-remote-guarded) instead of `seek -p`")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *autopilotFlag && *goalFlag {
+		return fmt.Errorf("cron create: --autopilot and --goal are mutually exclusive")
 	}
 
 	// Prompt is the joined positional args. Allow piped stdin
@@ -208,6 +212,7 @@ func cmdCreate(args []string, stdout, stderr io.Writer) error {
 		Yolo:        !*noYolo,
 		Notify:      *notify,
 		Autopilot:   *autopilotFlag,
+		Goal:        *goalFlag,
 	}
 	if err := store.Create(j, routines.CreateOptions{Force: *force}); err != nil {
 		return err
