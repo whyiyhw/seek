@@ -1,10 +1,12 @@
-# 功能对比：Seek vs. Claude Code
+# seek 竞品对比：Claude Code（能力天花板）+ Reasonix（同论题竞品）
 
-> **最后更新**：2026-05-29（v5 柱 G + 柱 H ship 后）
-> **数据来源**：[Claude Code 官方文档](https://code.claude.com/docs/en/overview)（sitemap: 130+ 页面，周 changelog 覆盖 2026 W13–W20）+ 在 Claude Code 内可直接观察到的工具/skill 清单；Seek 代码库主干。
-> **核查范围**：Seek 一侧所有功能均回到代码核对；Claude Code 一侧仅保留有官方文档或直接观察证据的条目，存疑项已标注 "(待确认)"。
+> **最后更新**：2026-05-31（柱 K/L ship 后 + 新增 Reasonix 对比节）
+> **本文覆盖两个对比点，二者关系不同**：
+> - **§1–核心结论：seek vs Claude Code** —— CC 是**能力天花板/参考标杆**，本节是**逐项 gap 追踪器**（✅/❌/🔶 + P1/P2 优先级），驱动 seek 的 roadmap。
+> - **末节：seek vs Reasonix** —— Reasonix 是**同论题孪生竞品**（DeepSeek 原生 Go agent），本节是**差异化定位分析**（趋同/分歧 + 站位），驱动 pitch/messaging，不是 gap 追踪。
+> **数据来源**：CC 侧 = 官方文档 + 直接观察；seek 侧 = 代码库主干（逐项回核）；Reasonix 侧 = README/仓库页 **+ `main-v2` 关键源码**（已读 coordinator/task/bgjobs/checkpoint/acp/serve）。
 
-系统对比 **Seek**（开源、DeepSeek 优先、多 LLM 智能体）与 **Claude Code**（Anthropic 的自主编程智能体参考实现）。
+系统对比 **Seek**（开源、DeepSeek 优先、多 LLM 智能体）与 **Claude Code**（Anthropic 的自主编程智能体参考实现）。Reasonix 的对比见文末专节。
 
 > **v0.6.x 重要变化**：v5 柱 G（v0.6.0 — 子代理 + worktree 隔离）和柱 H（v0.6.1 — cron / wakeup / triggers / OS notification）已 ship，关闭了过去版本里"架构级缺口"的全部 3 个 🔴 P0 项目。本次更新把 §7 / §10 / 差距汇总 / 核心结论同步到最新代码现实。
 
@@ -25,19 +27,19 @@
 | 基础工具循环（读/写/bash/edit 等） | ✅ | ✅ | **对等** | Seek：`read`、`write`、`edit`、`bash`、`grep`、`list_dir`、`git`、`think`、`fim_complete`，另有 `ask_user` 选择器 |
 | FIM / 自动补全 | ✅ | ✅ | **对等** | Seek：通过 DeepSeek FIM 端点提供 `fim_complete` 工具（小范围编辑比 chat 便宜） |
 | Think / 反思 | ✅ | ✅ | **对等** | Seek：`think` 工具调用 DeepSeek reasoner；内置 `dual-model` skill 实现 reasoner→执行→反思闭环 |
-| LSP 工具（结构化符号/引用） | ✅ | ❌ **缺失** | — | Claude Code 暴露 `LSP` 工具直连语言服务器拿 hover / def / refs；Seek 所有"找符号"路径都走 grep+read |
+| LSP 工具（结构化符号/引用） | ✅ | 🔶 **等效替代** | — | v6 柱 L（瘦身版）：`references` 工具走 gopls/pyright/tsserver 拿**语义引用**（grep 替代不了的硬赢）。definition/hover/symbols **故意不做**——Go 里被 grep+`go build` 覆盖，ROI 低（见 `feature-lsp.md` §动机）。会话级 server、零 daemon |
 | Notebook 编辑 | ✅ | ❌ **缺失** | — | Claude Code 有 `NotebookEdit` 原生编辑 Jupyter `.ipynb`；Seek 无 |
 | 后台 bash + 流式监听 | ✅ | ✅ | — | 双方均支持 `run_in_background` + `monitor`（poll/wait/kill）跟踪后台 job。seek 为会话级（随会话生死、零 daemon），v6 柱 K |
 | Web 搜索 | ✅ | ❌ **缺失** | — | Claude Code `WebSearch`；Seek 只有 `webfetch`（HTTPS GET 单页） |
 | Fast 模式 | ✅ | ❌ **缺失** | — | Claude Code 有 `/fast` 模式，对简单任务快速低消耗响应 |
 | Headless / 非交互模式 | ✅ | 🔶 **等效替代** | Seek 有 JSON-RPC 2.0 service 模式（`--rpc`）用于 IDE 接入和 `-json` / `-p` 一次性输出，但不是通用 `--headless` 标志 |
-| 会话持久化 | ✅ | ✅ | **对等** | JSONL 格式（`schema_version=2`），自动保存，`/branch` 分支，`/compact` 压缩，断点续传 |
+| 会话持久化 | ✅ | ✅ | **对等** | JSONL 格式（`schema_version=3`），自动保存，`/branch` 分支，`/compact` 压缩，断点续传 |
 | 上下文窗口管理 | ✅ | ✅ | **对等** | `/compact` 压缩，DeepSeek 前缀缓存（实测 95.7% 命中率） |
 | 交互式 / 流式 | ✅ | ✅ | **对等** | inline TUI（bubbletea），流式输出，`ask_user` TUI 选择器 |
 | 自动继续 / steer | ✅ | ✅ | **对等** | Seek：`/steer` 中途插入指令，`AutoContinue` 模式 |
 | 多行输入 | ✅ | ✅ | **对等** | Textarea 输入，路径自动补全 |
 
-**小结**：核心 chat/edit 循环对等。真正的工具集差距集中在四件套：**`LSP`**（结构化代码查询）、**`NotebookEdit`**（notebook 编辑）、**`Monitor` + 后台 Bash**（长任务跟踪）、**`WebSearch`**（不止 fetch 单页）。Fast 模式属于 UX 便利功能而非架构级特性。
+**小结**：核心 chat/edit 循环对等。原"四件套"差距已收敛：**`Monitor` + 后台 Bash**（柱 K）、**`LSP`**（柱 L `references`，语义引用部分）已补；剩 **`NotebookEdit`**（notebook 编辑）、**`WebSearch`**（不止 fetch 单页）。Fast 模式属于 UX 便利功能而非架构级特性。
 
 ---
 
@@ -285,7 +287,7 @@
 
 2. **过去的"最大架构缺口"已关闭（v0.6.x）**：子代理（v0.6.0）、worktree 隔离（v0.6.0）、cron / 唤醒 / 触发 / OS 通知（v0.6.1）三个 🔴 P0 项全部 ship。Seek 不再是"单进程单 agent"——模型可以 spawn 并行子代理（standalone session + token 账户 + 可选 worktree 隔离），可以让自己定时唤醒，可以由外部 CI/IDE 触发跑活。**剩下的"差距"全部是架构选择**而非缺口（云托管 routines vs 本地零 daemon），针对的是不同用户画像。
 
-3. **第二档单点工具缺口（收敛中）**：结构化 `AskUserQuestion`（柱 I）、复合 review（柱 J）、移动 push（柱 M）、`Monitor` + 后台 bash（柱 K）均已 ship；**剩 `LSP`（柱 L）、`NotebookEdit`、`WebSearch`** 仍是独立可补的点，每个一两天工程。
+3. **第二档单点工具缺口（基本收敛）**：结构化 `AskUserQuestion`（柱 I）、复合 review（柱 J）、移动 push（柱 M）、`Monitor` + 后台 bash（柱 K）、`LSP` 语义引用（柱 L `references`）均已 ship；**剩 `NotebookEdit`、`WebSearch`**（+ LSP 的 definition/hover/symbols，经评估 ROI 低、故意不做）。v6 五柱全交付。
 
 4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 
@@ -294,3 +296,59 @@
 6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入、**移动端 push 通知**——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
 
 7. **本次更新触发**：v5 柱 G + 柱 H ship 后（2026-05-28 / 2026-05-29），原有的"🔴 P0 架构缺口"段落已与代码现实严重脱节。本次完整重写 §7 / §10 / 差距汇总 / 独特优势 / 核心结论，把"架构级缺口"那条主线收尾。
+
+---
+
+# 同论题竞品：seek vs Reasonix（定位对比）
+
+> **这是一种不同类型的对比**。上面 §1–核心结论是"追赶 Claude Code 天花板"的 gap 追踪器。本节是"和同论题孪生竞品的差异化定位"——重点**不是** gap（重叠是常态），而是站位。
+>
+> **数据可信度**：Reasonix 侧 = [github.com/esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) README/仓库页 **+ `main-v2` 关键源码**（coordinator / task / bgjobs / checkpoint / acp / serve 已读）。下表已据源码**校正**——README 印象里以为 Reasonix 没有的几项（后台任务 / checkpoint / IDE 集成）其实都有。
+>
+> **版本二重性**：Reasonix 正在重写中——`main`（TS 0.x，维护模式，DeepSeek-only）vs `main-v2`（Go 重写，活跃，多 OpenAI-compatible）。下面以 **Go v2（活跃线）** 为准。
+
+## R.0 一句话
+
+Reasonix ≈ **seek 的孪生**：DeepSeek 原生、Go 单二进制、prefix-cache 字节稳定、plan/skills/MCP/hooks/session 全有，**MIT、14.9k stars / 870 forks**（远大于 seek）。差异不在"是什么"，在"往哪长"。
+
+## R.1 趋同（红海重叠——任何一项都不构成差异化）
+
+DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 案例）· Go 单二进制 · 多 provider（v2）· Plan 模式 · Skills（都兼容 Markdown/Agent-Skills）· MCP client · Hooks · 权限白名单 · 按目录持久化 session · headless 一次性执行 · 终端优先 · 本地 · BYO key · 开源。
+
+→ **"DeepSeek 省钱 + 前缀缓存 + 终端 Go agent"在二者之间是 0 分差异。**
+
+## R.2 分歧矩阵
+
+> 下表为**读源码后的校正版**。⚠️ 标记 = README 印象被源码推翻处。
+
+| 维度 | seek | Reasonix（main-v2 源码） | 谁强 |
+|---|---|---|---|
+| **子代理：并行+隔离** | spawn 子代理 **并行** + **git worktree 隔离** + 权限单调收紧 + 成本归集 | `TaskTool` 子代理（独立 session、sync/async 跨 turn），但**源码注释明确故意串行、无 worktree**（"keeps the parallel-dispatch path from running two sub-agents at once…writes race"） | **seek**（仅"并行+隔离"这一点；"有没有子代理"是对等） |
+| **时序自治** | cron + wakeup + 文件触发 + OS 通知 + **手机 webhook push**（零 daemon） | **源码零调度**：无 cron/wakeup/trigger/schedule 任何文件 | **seek（干净领先）** |
+| ⚠️ **后台任务** | `bash run_in_background` + `monitor`（poll/wait/kill, until_regex） | **有**：`bash/task run_in_background` + `bash_output`/`wait`/`kill_shell`（session 级，无 list） | **≈ 对等**（原以为 seek 独有，错） |
+| ⚠️ **编辑安全网** | 每 turn **git** snapshot + 文件级 undo/redo/restore（git stash 连 bash 副作用一起盖） | **有** checkpoint：**git-free** turn-rewind（"like Claude Code rewind"，仅 edit-tool、不含 bash） | **≈ 对等**（实现取舍不同；原以为 seek 独有，错） |
+| ⚠️ **IDE 集成** | JSON-RPC `-rpc` server（自定义） | **ACP**（Agent Client Protocol）：session/load/prompt + 事件流 + 审批路由，e2e 测过——**Zed 等用的标准协议** | **Reasonix**（标准协议 > 自定义 RPC；原以为 seek 赢，错） |
+| **OS 沙箱** | ❌（靠权限门 + worktree） | **有** macOS Seatbelt 沙箱（`sandbox/seatbelt_darwin`） | **Reasonix** |
+| **Web 前端** | ❌ 仅 TUI + 状态栏 | **生产级** web 前端（SSE 事件流 + REST submit/cancel/approve/plan/compact + context/token 指标；源码非 stub） | **Reasonix** |
+| **语义索引** | ❌ 故意不做（grep+read+`references`） | **有** `codegraph`（含 install + e2e） | Reasonix（路线分歧） |
+| **桌面 / 远程** | webhook push（单向通知） | Tauri 桌面（预发布）+ QQ 双向远程 | Reasonix |
+| **Web search** | webfetch 单页（WebSearch 在 P2） | 多 provider（Bing/Baidu/SearXNG/Tavily/Perplexity） | Reasonix |
+| **Memory 模型** | L/M/S 三层 + `seek -dream` 跨项目蒸馏 + decay GC | 四分类（user/feedback/project/reference） | 路线不同 |
+| **DeepSeek 深度** | FIM 端点 + 错峰 5 折倒计时 + V4 `think` | billing/balance（**未见** FIM/错峰） | seek 略深 |
+| **规模/心智份额** | 新/小 | **14.9k stars / 870 forks** | **Reasonix（碾压）** |
+
+## R.3 各自赢的（源码校正后）
+
+- **seek 干净领先的只剩两轴**：(1) 子代理**并行 + git worktree 隔离**（Reasonix 子代理故意串行、无隔离）；(2) **时序自治**（cron/wakeup/触发/手机 push；Reasonix 源码零调度）。外加 DeepSeek FIM/错峰的边角深度。
+- **Reasonix 赢**：规模碾压（14.9k、435M token 战测）· `codegraph` 语义索引 · 生产级 web 前端 · **ACP 标准编辑器集成** · macOS Seatbelt 沙箱 · 多 provider 搜索 · QQ 双向远程。
+- **大面积对等（读源码后比 README 印象更趋同）**：后台任务、编辑安全网/rewind、plan、skills、memory、MCP、hooks、权限、session、headless——这些都不是差异点。
+
+## R.4 对 seek 的站位结论（读源码后更尖锐）
+
+1. **结论比上一版更不利**：原以为 seek 在**后台任务 / 编辑安全网 / IDE 集成**也领先——**三项全被源码推翻**（Reasonix 都有，IDE 还用标准 ACP）。seek 真正干净领先的**只剩两轴**：并行+worktree 子代理、时序自治。
+2. **pitch 必须全力压这两轴**，且**别声称"我有 X 而它没有"**除非已确认——后台/checkpoint/IDE 都会被现场打脸。
+3. **别在重叠区硬碰**——DeepSeek/cache/Go-binary 又大又先发，主打它 = 给对手做嫁衣。
+4. **"无语义索引"是主动下的注**（柱 L 选 grep+references 轻路线 vs Reasonix 押 `codegraph` embeddings）——pitch 要能**主动解释为什么不做**（零索引常驻 / 本地轻量），否则被当短板。
+5. **一句话区隔（更新）**：*"两者都是 DeepSeek-native Go agent；Reasonix 更全面（索引 / web / ACP / 沙箱）且大得多。seek 唯一清晰的差异是**把单 agent 变成并行隔离的团队，并在你睡觉时定时/触发交付、push 到手机**——其余基本对等。"*
+
+> **已坐实（读 `main-v2` 源码）**：coordinator / task / bgjobs / checkpoint / acp/service / serve 均已读。Reasonix **确有**：子代理（`TaskTool`，串行无隔离）、后台任务、checkpoint+rewind、ACP 编辑器集成、生产级 web 前端、`codegraph` 语义索引、macOS 沙箱。**源码确无**：调度/cron/wakeup/trigger、worktree 隔离、并行子代理 fleet。未深读：`codegraph` 内部算法、billing——但存在性已确认。

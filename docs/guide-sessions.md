@@ -4,7 +4,7 @@ seek automatically saves every conversation to disk. Sessions store the full mes
 
 ## Storage location
 
-Sessions are stored as JSONL files in `~/.local/share/seek/sessions/` (Linux/macOS) or `%LOCALAPPDATA%\seek\sessions\` (Windows). Each session is one file named by its ID.
+Sessions are stored as JSONL files in `~/.seek/sessions/` (Linux, macOS) or `C:\Users\<user>\.seek\sessions\` (Windows). Each session is one file named by its ID.
 
 ## Basic operations
 

@@ -78,6 +78,10 @@ graph LR
 
 `seek cron create/list/run` 管定时；`schedule_wakeup` 工具让模型主动安排回访；macOS `osascript` / Linux `notify-send` 自动选择（Windows 通知 v0.6.1 暂为 no-op）。完整启用步骤见 [`docs/guide-cron.md`](./docs/guide-cron.md)。
 
+**会话内后台任务**（不同于 cron 的跨进程调度）：`bash run_in_background` 把长 build / 测试套件 / dev server 丢后台，立即返回 `bg-N` 句柄；`monitor` 工具 poll / wait（`until_regex` 等就绪）/ kill 跟踪。会话级生命周期，退出全杀不留 orphan。见 [`docs/guide-background.md`](./docs/guide-background.md)。
+
+**语义找引用**：`references` 工具问语言服务器（gopls / pyright / typescript-language-server）"谁调用了它"——解析真实符号、跟踪别名导入、跳过注释/字符串，name-grep 做不到。懒启动、会话级、不可用时回退 grep。见 [`docs/guide-references.md`](./docs/guide-references.md)。
+
 ### 便宜一个数量级
 
 DeepSeek 输入价格（源 `internal/pricing/pricing.go`）：
@@ -142,9 +146,9 @@ seek keys       list/check/actions
 |---|---|
 | 基础（M0–M10） | DeepSeek 客户端、agent loop、多 provider、session、skill、hooks、checkpoint、plan-mode v2、permission 重构、MCP client、webfetch |
 | 编排（柱 G/H） | 子代理 + worktree、cron + 自调度 wakeup + 文件触发 + OS 通知 |
-| 单点工具（柱 I/J/K/M） | AskUserQuestion v2、复合 `code-review` skill、**移动端 webhook 推送桥**、后台 bash + `monitor`（poll/wait/kill） |
+| 单点工具（柱 I–M） | AskUserQuestion v2、复合 `code-review` skill、**移动端 webhook 推送桥**、后台 bash + `monitor`（poll/wait/kill）、语义 `references`（LSP 找引用） |
 
-下一步（柱 L）：LSP 工具。
+v6 单点工具全交付。**v7**（规划中）：深化护城河——Autopilot（无人值守过夜编排）+ OS 沙箱——外加 ACP 编辑器集成、图片 OCR。见 [`docs/prd/v7.md`](docs/prd/v7.md)。
 
 完整 PRD：[`docs/prd/`](./docs/prd/)（v0–v6 umbrella + 14 个 feature PRD）  
 贡献：[`AGENTS.md`](./AGENTS.md) · 踩坑：[`docs/pitfalls.md`](./docs/pitfalls.md)

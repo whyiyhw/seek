@@ -1,7 +1,7 @@
 # Feature: 复合 code-review skill（v6 柱 J）
 
 **所属版本**：seek v0.7.0 · v6 柱 J 第二项（柱 I AskUserQuestion v2 已 ship）
-**前置阅读**：[`v6.md`](v6.md) §3.2 草稿、[`internal/tui/commands.go`](../../internal/tui/commands.go) `cmdReview` + 三个 `*ReviewPrompt` builder（L929–L1080）、[`internal/skill/builtin/plan-mode.md`](../../internal/skill/builtin/plan-mode.md) 内置 skill 范式、[`internal/tools/skilltool/skilltool.go`](../../internal/tools/skilltool/skilltool.go) Skill 工具 schema、[`docs/claude-code-comparison.md`](../claude-code-comparison.md) §"开发工作流" 第 250 行 P1 项
+**前置阅读**：[`v6.md`](v6.md) §3.2 草稿、[`internal/tui/commands.go`](../../internal/tui/commands.go) `cmdReview` + 三个 `*ReviewPrompt` builder（L929–L1080）、[`internal/skill/builtin/plan-mode.md`](../../internal/skill/builtin/plan-mode.md) 内置 skill 范式、[`internal/tools/skilltool/skilltool.go`](../../internal/tools/skilltool/skilltool.go) Skill 工具 schema、[`docs/comparison.md`](../comparison.md) §"开发工作流" 第 250 行 P1 项
 **状态**：🚀 已交付（v0.7.0 · v6 柱 J）。内置 `code-review` skill + `/code-review` slash 命令（effort 解析 + `--fix`/`--comment`）+ `/review` = `/code-review quick` 别名。走 D3 推荐路（别名）。新增/迁移测试全过，`internal/{tui,skill,tools/skilltool}` 全 `-race` 绿，全 repo `go test ./...` 绿。
 **effort 档位（实测后定稿）**：原设计 4 档（low/medium/high/max），但 D4 的 eval（`eval/cases/code-review-effort-*`）实测 DeepSeek **分不开 4 档**（组内方差吞没组间信号）。**已收敛为 2 档**：`quick`（精确优先，默认）/ `thorough`（穷尽召回）；旧 4 名作软别名映射（low/medium→quick，high/max→thorough），不报错。详见 D4。
 **预估工作量**：~2 天（与 v6 §3.2 估时一致）
@@ -247,7 +247,7 @@ propose tool and apply them on approval (per-call y/N still applies).
 |---|---|
 | 写 `internal/skill/builtin/code-review.md`（§4 草稿 + 按 D4 校准 framing） | ~1d |
 | `cmdCodeReview`：解析（effort/flag/branch）+ 复用 diff 采集/picker + 注入引子 + arm skill；`/review` 收敛为别名 | ~0.5d |
-| 测试 + 文档（`guide-skills.md` 提一句、`claude-code-comparison.md` §250 P1 项标 ✅、`eval/cases/` effort 案例、AGENTS/CLAUDE 若需提及） | ~0.5d |
+| 测试 + 文档（`guide-skills.md` 提一句、`comparison.md` §250 P1 项标 ✅、`eval/cases/` effort 案例、AGENTS/CLAUDE 若需提及） | ~0.5d |
 | **合计** | **~2d**（对齐 v6 §3.2） |
 
 ## 7. 测试要求（继承 CLAUDE.md "Testing (load-bearing)" 5 条 + v6 §6 柱 J）

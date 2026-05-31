@@ -20,8 +20,10 @@ A project skill shadows a user skill of the same name. Built-ins are always lowe
 
 | Name | When to use |
 |---|---|
+| `code-review` | Structured diff review — checks current working-tree changes for correctness bugs and cleanup opportunities. Quick (precision-first, blocking only) or thorough (exhaustive). `/code-review` (alias `/review`) |
 | `dual-model` | Non-trivial multi-step tasks — plans first with V4 reasoning mode (`Thinking.Type=enabled, ReasoningEffort=high`), executes with regular chat, then reviews |
 | `go-test-runner` | Running, debugging, or analyzing Go test failures |
+| `plan-mode` | Explains the analyze → propose → execute → report loop. Auto-read when the mode reminder says `plan-analyze` or `plan-execute`, or user types `/plan` |
 
 ## Writing a skill
 

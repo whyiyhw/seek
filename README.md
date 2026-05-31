@@ -117,6 +117,8 @@ Built-ins include **`code-review`** (effort-graded review that spawns sub-agents
 - **Three-tier memory** — S (session) / M (project, with decay-score GC) / L (cross-project "soul", distilled by `seek -dream`).
 - **MCP client** — pass through any MCP server's tools.
 - **Checkpoint safety net** — per-turn git snapshot + file-level `/undo` `/redo` `/restore`.
+- **Background jobs** — `bash run_in_background` detaches long builds / test suites / dev servers and returns a `bg-N` handle; the `monitor` tool polls, waits (`until_regex` for readiness), or kills. Session-scoped, never orphaned. See [`docs/guide-background.md`](docs/guide-background.md).
+- **Semantic find-references** — the `references` tool asks the language server (gopls / pyright / typescript-language-server) "who calls this?" — resolving the real symbol, following aliased imports, ignoring comments/strings, where a name-grep can't. Lazy-started, session-scoped, falls back to grep if unavailable. See [`docs/guide-references.md`](docs/guide-references.md).
 - **Dual-axis permissions** — Preference (Deny / Ask / Yolo) × Workflow (None / PlanAnalyze / PlanExecute); workflow always trumps preference.
 - **Shell hooks**, **JSON-RPC 2.0 server mode** (IDE integration), and DeepSeek extras (V4 reasoning via the `think` tool; FIM endpoint for 5–10× cheaper small edits; off-peak pricing countdown).
 
@@ -150,9 +152,9 @@ Everything below ships in the current **v0.7.1** release:
 |---|---|
 | Foundations (M0–M10) | DeepSeek client · agent loop · multi-provider · sessions · skills · hooks · checkpoints · plan-mode v2 · permission refactor · MCP client · webfetch |
 | Orchestration (柱 G/H) | sub-agents + worktrees · cron + self-scheduled wakeups + file triggers + OS notifications |
-| Single-point tools (柱 I/J/K/M) | AskUserQuestion v2 · composite `code-review` skill · **mobile-push webhook bridge** · background bash + `monitor` (poll/wait/kill) |
+| Single-point tools (柱 I–M) | AskUserQuestion v2 · composite `code-review` skill · **mobile-push webhook bridge** · background bash + `monitor` (poll/wait/kill) · semantic `references` (LSP find-references) |
 
-Next up (柱 L): LSP tool.
+v6 single-point tools complete. **v7** (planned): deepen the moat — Autopilot (unattended overnight orchestration) + OS sandbox — plus ACP editor integration and image OCR. See [`docs/prd/v7.md`](docs/prd/v7.md).
 
 Full design docs: [`docs/prd/`](docs/prd/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md) · pitfalls: [`docs/pitfalls.md`](docs/pitfalls.md)
 

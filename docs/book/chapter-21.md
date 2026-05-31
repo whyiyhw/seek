@@ -3,8 +3,8 @@
 > **对应版本**：v0.6.0
 > **对应代码**：`internal/subagent/`、`internal/worktree/`、`internal/tools/{agent,enterworktree,exitworktree}/`、`internal/sysprompt/`、`internal/permission.Policy.Spawn`、`internal/cache.Tracker.AdoptChild`
 > **PRD**：[`docs/prd/v5.md`](../prd/v5.md) · [`docs/prd/feature-subagent.md`](../prd/feature-subagent.md)
-> **验收**：M11.0 + M11.1 Phase 1+2 已落地；Phase 3（`/worktrees` 面板 + `seek worktree gc` CLI）在路上
-> **起点**：第 20 章（Shell Hooks 可扩展性）。v3 把"可逆性 / 可扩展性 / 可定制性"三柱补齐后，seek 在单 agent 单进程的能力曲线上已对齐 Claude Code 主流形态。但与 Claude Code 对比时浮现一个**架构维度**的空白——多 agent + 调度 + 隔离这一团 P0 缺口（[`docs/claude-code-comparison.md`](../claude-code-comparison.md) §10）。v5 接住这一团；本章覆盖**空间维度**的一半，柱 G。
+> **验收**：M11.0 + M11.1 Phase 1+2+3 已全部落地（Phase 3：`/worktrees` TUI 面板 + `seek worktree gc` CLI）
+> **起点**：第 20 章（Shell Hooks 可扩展性）。v3 把"可逆性 / 可扩展性 / 可定制性"三柱补齐后，seek 在单 agent 单进程的能力曲线上已对齐 Claude Code 主流形态。但与 Claude Code 对比时浮现一个**架构维度**的空白——多 agent + 调度 + 隔离这一团 P0 缺口（[`docs/comparison.md`](../comparison.md) §10）。v5 接住这一团；本章覆盖**空间维度**的一半，柱 G。
 
 ---
 

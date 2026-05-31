@@ -340,9 +340,9 @@ if m.opts.Tracker != nil {
 `--list` 输出会显示 `ParentID`，让用户能看到关系：
 
 ```
-20260121-103045-a1b2c3      60 turns, deepseek-chat                  (root)
-20260121-103045-a1b2c3      60 turns, deepseek-chat            ← parent of:
-20260122-091203-f7e8d9      8 turns,  deepseek-chat
+20260121-103045-a1b2c3      60 turns, deepseek-v4-flash                  (root)
+20260121-103045-a1b2c3      60 turns, deepseek-v4-flash            ← parent of:
+20260122-091203-f7e8d9      8 turns,  deepseek-v4-flash
 ```
 
 目前的展示停在"列出关系"层面，没有 ASCII 树渲染。原因是绝大多数用户的会话图是浅的——主线 + 偶尔分一两个支——线性列表加 parent 标注已经够用。

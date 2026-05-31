@@ -1,8 +1,8 @@
 # Feature: Monitor + 后台 bash（v6 柱 K）
 
 **所属版本**：v6（单点工具补齐 umbrella）
-**前置阅读**：[`v6.md`](v6.md) §柱 K + §2 跨柱约束、[`docs/claude-code-comparison.md`](../claude-code-comparison.md) §"第二档单点工具缺口"、现有 bash 工具（`internal/tools/bash/{bash.go,proc_linux.go,bash_unix.go}`）
-**状态**：🚀 已交付（v6 柱 K）。`internal/bgjob`（Manager + ring buffer + 生命周期）→ `bash` 接 `run_in_background`（session-ctx 分离）→ `monitor` 工具（poll/wait/kill）→ `cmd/seek` 注入 + Shutdown + sysprompt。新增测试全过，`internal/{bgjob,tools/bash,tools/monitor,sysprompt}` 全 `-race` 绿，全仓 `go test ./...` 绿。Windows 后台为降级路径（`killProcessGroup` 在 Windows 是 no-op，见 §8）。
+**前置阅读**：[`v6.md`](v6.md) §柱 K + §2 跨柱约束、[`docs/comparison.md`](../comparison.md) §"第二档单点工具缺口"、现有 bash 工具（`internal/tools/bash/{bash.go,proc_linux.go,bash_unix.go}`）
+**状态**：🚀 已交付（v6 柱 K）。`internal/bgjob`（Manager + ring buffer + 生命周期）→ `bash` 接 `run_in_background`（session-ctx 分离）→ `monitor` 工具（poll/wait/kill）→ `cmd/seek` 注入 + Shutdown + sysprompt。新增测试全过，`internal/{bgjob,tools/bash,tools/monitor,sysprompt}` 全 `-race` 绿，全仓 `go test ./...` 绿。Windows 后台为降级路径（kill 走 `taskkill /T /F /PID`，见 §8）。文档见 [`docs/guide-background.md`](../guide-background.md)。
 **目标里程碑**：M-K.1 ~ M-K.4（全部落地）
 **目标发版**：v0.7.x
 **估时**：~5 天（v6 umbrella 表）
@@ -202,15 +202,15 @@ Claude Code 的对应答卷是 `Bash(run_in_background)` + `BashOutput` + `KillB
 | **Esc 中断 wait 误杀 job** | D6：wait 是观察者，绑 turn ctx；job 绑 session ctx；测试 `TestMonitor_Wait_CtxCancel` |
 | **bg job 输出 race** | ring buffer mutex；`-race` CI |
 | **进程泄漏 / orphan** | Shutdown 全杀 + 并发上限 8；复用 `killProcessGroup` 的 `/proc` 后代遍历 |
-| **Windows 无 Setsid/进程组** | `bash_windows.go` 已走 `cmd.exe` 路径；bg kill 用 Job Object 或 `taskkill /T /F /PID`。MVP 可先 Unix-full / Windows 降级（前台回退 + 文档注明），随后补齐 |
+| **Windows 无 Setsid/进程组** | **已实现（M-K.4 补）**：`killProcessGroup` 在 Windows 走 `taskkill /T /F /PID`（按 PID 杀进程树）+ `HideWindow` 防控制台闪窗。选 taskkill 而非 Job Object：后者要在启动时建句柄并跨 `killProcessGroup(cmd)` 签名传递，taskkill 只需 PID（kill 时点 PID 仍稳定，wait goroutine 未 reap）。**残留**：前台 Windows 仍走 `CommandContext`（只杀直接子进程，树清理待补）——非柱 K 范围 |
 | **模型把 dev-server 当前台跑** | `bash` 描述 + `sysprompt` 引导：长任务/server 用 `run_in_background`；前台超时 result 附 `[hint: long-running? use run_in_background]` |
 
 ---
 
-## 9. 落地后文档同步清单
+## 9. 落地后文档同步清单（全部完成 ✅）
 
-- `docs/claude-code-comparison.md`：`后台 bash + 流式监听` 行 ❌→✅；P1 段勾掉柱 K。
-- `README.md` / `README.zh.md`：Roadmap "Next up (柱 K/L)" → 柱 K 移入已交付，工具表加 `monitor`。
-- `docs/guide-*.md`：新增或并入"后台任务"小节（启动 / poll / wait / kill / 生命周期约束）。
-- `AGENTS.md` + `CLAUDE.md`：若 `internal/bgjob` 引入新"只此包可变更 X"约束，补一行（类比 skill 状态那条）。
-- `v6.md` 柱 K 行状态 → 🚀 已交付。
+- ✅ `docs/comparison.md`：`后台 bash + 流式监听` 行 ❌→✅；P1 段勾掉柱 K；§核心结论收敛。
+- ✅ `README.md` / `README.zh.md`：Roadmap "Next up (柱 K/L)" → 柱 K 移入已交付（柱 I/J/**K**/M）；工具表/"And more"加 `monitor` + guide 链接。
+- ✅ `docs/guide-background.md`：新建"后台任务"指南（启动 / poll / wait / kill / 生命周期 / 限制 / vs cron）。
+- ⊘ `AGENTS.md` + `CLAUDE.md`：**评估后不加**。`internal/bgjob` 无"只此包可变更 X"那类硬不变量（它就是个普通会话级状态包）；D2 的"bash 拥有进程、bgjob 保持进程无关、monitor 只 import bgjob"已写进包注释 + 本 PRD，再塞进 CLAUDE.md 反而稀释那批真正的架构红线。
+- ✅ `v6.md` 柱 K 行状态 → 🚀 已交付。

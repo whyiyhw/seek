@@ -320,7 +320,7 @@ func (m *Model) tryHistoryUp() bool {
 状态栏是 M4.5 里最容易被忽略的一项工作，但用户长期凝视它。它的内容（精简版）：
 
 ```
-  ● 4.2s · ↓~312tok    ctx 28%    model: deepseek-chat    /yolo off
+  ● 4.2s · ↓~312tok    ctx 28%    model: deepseek-v4-flash    /yolo off
 ```
 
 `● 4.2s` 是 streaming 已运行的实时秒数。`↓~312tok` 是输出 token 估算（streaming 期间真实数还没回来，按 ~4 chars/token 估）。`ctx 28%` 是上下文占用百分比。后面是当前 model、yolo 开关、provider banner（M6 才出现）。

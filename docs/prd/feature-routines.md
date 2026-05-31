@@ -28,14 +28,14 @@
 1. **零常驻 daemon**（继承 v5 §2.5）—— seek 不引入自己的后台进程。OS 级调度器（launchd / systemd / cron / Task Scheduler）已经免费提供进程拉起；seek 只负责"被拉起后做什么"。
 2. **文件桥而非 socket**——远程触发走 `~/.seek/cron/triggers/<id>.json`，跨平台、可审计、与 Windows 兼容。
 3. **OS notification 走系统原生**——`osascript` / `notify-send` / PowerShell toast。零新依赖。
-4. **`@every <duration>` 优先**——MVP 不实现 5-field cron 解析（写一个正确的 cron parser 至少 200 LOC）。`@hourly` / `@daily` 作为 sugar。
+4. **`@every <duration>` 优先**——后续新增 5-field cron 解析（`internal/routines/schedule.go:parseCronExpr`），两种语法并存。
 5. **每次运行 fresh subprocess**——`seek cron tick` 触发 `seek -p '<prompt>'` 作为独立子进程。简单可靠，session/state 完全隔离。
 6. **并发安全 + 去重**——`tick.lock` + 每 job 一把 `<name>.lock`，重叠 tick / 长任务跨 tick 都不重跑。
 7. **失败降级**——cron 跑失败把 stderr stash 到 `last_status`；下次 tick 继续；不会让一个失败任务拖死调度链。
 
-### 不做什么（v5 明确延后）
+### 已交付（原"不做什么"项已落地）
 
-- ❌ **5-field cron 表达式**——v0.6.x dot 候选；MVP 用 `@every <duration>`。
+- ✅ **5-field cron 表达式**——已交付（v0.7.x）。支持完整 cron 语法，每字段支持 `*`、`*/N`、`N-M`、`N-M/S`、逗号列表，月份/星期支持英文缩写。
 - ❌ **seek 自己的后台 daemon**——零常驻进程是 v5 §2.5 硬约束。
 - ❌ **持久化运行进程**——每个 tick 是独立 seek 子进程，进程生命周期 = 单次任务。
 - ❌ **HTTP webhook 端口**——`feature-inspect-rpc.md` §9 v0.7.0+ 候选；MVP 用文件桥。
@@ -90,7 +90,7 @@ Each line is one cron job, last-write-wins on same `name`. Schema (Go names; JSO
   - `@hourly` (≡ `@every 1h`)
   - `@daily` / `@midnight` (≡ `@every 24h`)
   - `@weekly` (≡ `@every 168h`)
-  - Reserved syntax for future: 5-field cron (`* * * * *`)
+  - 5-field cron (`* * * * *`)：`minute hour day-of-month month day-of-week`，例如 `*/15 * * * *`（每 15 分钟）、`0 9 * * 1-5`（工作日早 9 点）。每字段支持 `*`、`*/N`、`N-M`、`N-M/S`、逗号列表，月份/星期支持英文缩写。
 - `prompt` — fed as the user prompt to `seek -p '<prompt>'` at run time.
 - `project_root` — `cwd` for the subprocess. Optional; empty → user's `$HOME`.
 - `max_runs` — 0 = unlimited; ≥1 = run that many times then auto-delete. Used by `schedule_wakeup` tool with `max_runs=1`.
@@ -164,8 +164,8 @@ type Job struct {
     Notify      string
 }
 
-// Schedule is a parsed schedule expression. Today only Every is
-// populated; Cron field reserved for future 5-field support.
+// Schedule is a parsed schedule expression. Both Every and Cron are
+// populated depending on the user's input format.
 type Schedule struct {
     Raw   string         // original "@every 5m" / "@daily" / ...
     Every time.Duration  // > 0 when @every / @hourly / @daily / @weekly
@@ -517,7 +517,7 @@ cron 子进程默认 `--yolo`（无人值守）。Per-job 覆盖：`seek cron cr
 
 ## 9. 后续版本
 
-- **v0.6.x dot**：5-field cron 表达式（`* * * * *` / `0 9 * * *` 风格），写一个 ~200 LOC parser
+- ~~**v0.6.x dot**：5-field cron 表达式（已交付，见 `internal/routines/schedule.go:parseCronExpr`）~~
 - **v0.6.x dot**：`/routines` TUI 面板（仿 `/agents` 表格 + Enter 查看最近一次 run output）
 - **v0.6.x dot**：`seek cron logs <name>`（流式 tail 最近 N 次 run 的 jsonl）
 - **v0.6.x dot**：`seek cron edit <name>` 改 prompt / schedule 不需要 delete + recreate

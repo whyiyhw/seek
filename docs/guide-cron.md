@@ -25,7 +25,7 @@ seek cron run ci-watch   # 立刻跑一次，绕过调度
 ```
 
 `--at` 支持两种调度语法：
-- **`@every <Go duration>`** + 别名：`@every 5m`、`@hourly`（≡1h）、`@daily`（≡24h）、`@weekly`（≡168h）
+- **`@every <Go duration>`** + 别名：`@every 5m`、`@hourly`（≡1h）、`@daily` / `@midnight`（≡24h）、`@weekly`（≡168h）
 - **5-field POSIX cron**：`minute hour day-of-month month day-of-week`，例如 `0 9 * * 1-5`（工作日早 9 点）、`*/15 * * * *`（每 15 分钟）。每字段支持 `*`、`*/N`、`N-M`、`N-M/S`、逗号列表，月份/星期支持英文缩写（jan、mon-fri 等）
 
 注册到 `~/.seek/cron/jobs.jsonl`。但**还不会自动跑**——OS 调度器还没启动 tick。

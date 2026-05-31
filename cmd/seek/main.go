@@ -33,6 +33,7 @@ import (
 	"github.com/whyiyhw/seek/internal/hooksconfig"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/keyscli"
+	"github.com/whyiyhw/seek/internal/lspclient"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
@@ -67,6 +68,7 @@ import (
 	plantool "github.com/whyiyhw/seek/internal/tools/plan"
 	"github.com/whyiyhw/seek/internal/tools/propose"
 	"github.com/whyiyhw/seek/internal/tools/read"
+	"github.com/whyiyhw/seek/internal/tools/references"
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
 	"github.com/whyiyhw/seek/internal/tools/think"
@@ -1013,8 +1015,20 @@ func run() error {
 	bgMgr := bgjob.New()
 	defer bgMgr.Shutdown()
 
+	// Language-server manager for the references tool (v6 柱 L). Like
+	// bgMgr it's session-scoped: servers are bound to ctx (the session,
+	// NOT a turn) and Shutdown kills them when run() returns, so no gopls
+	// is orphaned (PRD feature-lsp.md §4 D4).
+	lspRoot := policy.CWD()
+	if lspRoot == "" {
+		lspRoot, _ = os.Getwd()
+	}
+	lspMgr := lspclient.New(lspRoot, ctx)
+	defer lspMgr.Shutdown()
+
 	reg := tools.New().
 		Add(read.New(policy)).
+		Add(references.New(lspMgr)).
 		Add(grep.New()).
 		Add(listdir.New()).
 		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).

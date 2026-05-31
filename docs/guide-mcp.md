@@ -6,8 +6,8 @@ seek can connect to external tools via the [Model Context Protocol](https://mode
 
 | Platform | Path |
 |---|---|
-| Linux / macOS | `~/.config/seek/mcp.json` (or `$XDG_CONFIG_HOME/seek/mcp.json`) |
-| Windows | `%APPDATA%\seek\mcp.json` |
+| Linux / macOS | `~/.seek/mcp.json` |
+| Windows | `~/.seek/mcp.json`（即 `C:\Users\<user>\.seek\mcp.json`）|
 
 The format is compatible with Claude Code and Cursor, so you can reuse an existing `mcp.json` unchanged.
 
