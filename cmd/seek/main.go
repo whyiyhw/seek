@@ -437,6 +437,11 @@ type subagentRunnerOpts struct {
 	// now). Each autopilot subagent thus can't write outside the worktree
 	// it was given.
 	bashSandbox bool
+	// bgMgr backs the child bash tool's run_in_background. The child's
+	// bash is rebuilt with the child (worktree) policy, so it needs the
+	// background manager re-attached; nil disables background jobs in the
+	// subagent (graceful — run_in_background just errors).
+	bgMgr *bgjob.Manager
 }
 
 // buildSubagentRunner returns the production subagent.Runner that
@@ -505,28 +510,43 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// Manager performs already strips `agent` and `ask_user`
 		// universally; here we just project parent's registered
 		// instances onto the survivor name list.
+		// The policy-bearing tools (read/write/edit/bash) MUST be rebuilt
+		// with the CHILD policy — for isolation:"worktree" that policy's
+		// CWD is the worktree, so the subagent's file/shell ops stay inside
+		// it. Reusing the parent's instances (which embed the parent policy
+		// = main tree) silently breaks worktree isolation — found by
+		// autopilot e2e (a subagent's edit hit the MAIN README). Other
+		// tools (grep/think/git/…) are read-only or policy-free, so reusing
+		// the parent instance is fine.
 		childReg := tools.New()
 		for _, name := range job.ToolNames {
-			t := opts.parentReg.Lookup(name)
-			if t == nil {
-				continue
-			}
-			// autopilot: swap in a bash that denies remote ops (柱 N) and
-			// is OS-sandbox-confined to this subagent's own worktree (柱 O).
-			if name == "bash" {
-				if bt, ok := t.(bash.Tool); ok {
-					if opts.bashGuard != nil {
-						bt = bt.WithDeny(opts.bashGuard)
+			switch name {
+			case "read":
+				childReg.Add(read.New(job.Policy))
+			case "write":
+				childReg.Add(write.New(job.Policy))
+			case "edit":
+				childReg.Add(edit.New(job.Policy))
+			case "bash":
+				// 柱 N: deny remote ops; 柱 O: OS-sandbox to this worktree.
+				bt := bash.New(job.Policy)
+				if opts.bgMgr != nil {
+					bt = bt.WithBackground(opts.bgMgr)
+				}
+				if opts.bashGuard != nil {
+					bt = bt.WithDeny(opts.bashGuard)
+				}
+				if opts.bashSandbox {
+					if wt := job.Policy.CWD(); wt != "" && sandbox.Available() {
+						bt = bt.WithSandbox(sandbox.Options{WritableDirs: []string{wt}})
 					}
-					if opts.bashSandbox {
-						if wt := job.Policy.CWD(); wt != "" && sandbox.Available() {
-							bt = bt.WithSandbox(sandbox.Options{WritableDirs: []string{wt}})
-						}
-					}
-					t = bt
+				}
+				childReg.Add(bt)
+			default:
+				if t := opts.parentReg.Lookup(name); t != nil {
+					childReg.Add(t)
 				}
 			}
-			childReg.Add(t)
 		}
 
 		// Build child agent. No InitialMessages (subagent gets a
@@ -615,6 +635,10 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 }
 
 func main() {
+	// v7 柱 O: if this is a Landlock trampoline re-exec (Linux only), lock
+	// the process down and exec the wrapped command before anything else —
+	// no config load, no flag parse. No-op on every other invocation/OS.
+	sandbox.RunTrampolineIfRequested()
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "seek:", err)
 		os.Exit(1)
@@ -1368,6 +1392,7 @@ func run() error {
 				getEffort:   func() string { return sessionEffort },
 				bashGuard:   autopilotGuard,
 				bashSandbox: autopilotMode,
+				bgMgr:       bgMgr,
 			}),
 		})
 		if smerr != nil {
@@ -2176,10 +2201,22 @@ func ocrOptions(cfg config.Config) ocr.Options {
 		Timeout:   cfg.OCRTimeout(),
 	}
 	if len(opt.Command) == 0 && runtime.GOOS == "darwin" {
+		// A prebuilt helper next to the binary wins (zero compile cost)…
 		if exe, err := os.Executable(); err == nil {
 			h := filepath.Join(filepath.Dir(exe), "vision_ocr")
 			if st, serr := os.Stat(h); serr == nil && !st.IsDir() {
 				opt.Helper = h
+			}
+		}
+		// …otherwise compile the embedded Vision helper on first image
+		// into ~/.seek/cache and reuse it (true single-binary, 柱 Q).
+		if opt.Helper == "" {
+			opt.Provision = func(ctx context.Context) (string, error) {
+				cache, err := paths.Cache()
+				if err != nil {
+					return "", err
+				}
+				return ocr.EnsureVisionHelper(ctx, cache)
 			}
 		}
 	}

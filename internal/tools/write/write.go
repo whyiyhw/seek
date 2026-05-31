@@ -80,7 +80,7 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		return "", err
 	}
 
-	clean := filepath.Clean(a.Path)
+	clean := t.policy.Resolve(a.Path)
 	if err := os.MkdirAll(filepath.Dir(clean), 0o755); err != nil {
 		return "", fmt.Errorf("write: mkdir: %w", err)
 	}

@@ -104,7 +104,7 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		a.ExpectedReplacements = 1
 	}
 
-	clean := filepath.Clean(a.Path)
+	clean := t.policy.Resolve(a.Path)
 	orig, err := os.ReadFile(clean)
 	if err != nil {
 		return "", fmt.Errorf("edit: %w", err)

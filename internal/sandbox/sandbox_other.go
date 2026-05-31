@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package sandbox
 
@@ -7,10 +7,10 @@ import (
 	"os/exec"
 )
 
-// Available reports false on non-macOS platforms. Linux landlock
-// (filesystem-only) is a TODO (柱 O M-O.2); Windows has no equivalent.
-// Callers requiring confinement must check this and degrade (autopilot
-// falls back to worktree logical isolation).
+// Available reports false on platforms with no supported jail (Windows,
+// *BSD, …). macOS uses seatbelt (sandbox_darwin.go); Linux uses Landlock
+// (sandbox_linux.go). Callers requiring confinement must check this and
+// degrade (autopilot falls back to worktree logical isolation).
 func Available() bool { return false }
 
 // Wrap returns the command UN-sandboxed on unsupported platforms. Gate on

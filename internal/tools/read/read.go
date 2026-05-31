@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -77,7 +76,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return "", fmt.Errorf("read: limit=%d exceeds maximum (%d). Valid: 1-%d, or omit the parameter for the default.", a.Limit, defaultLimit, defaultLimit)
 	}
 
-	clean := filepath.Clean(a.Path)
+	clean := t.policy.Resolve(a.Path)
 
 	if err := t.policy.Check(permission.Action{
 		Kind: permission.KindRead,

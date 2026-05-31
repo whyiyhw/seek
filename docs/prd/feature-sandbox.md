@@ -2,7 +2,7 @@
 
 **所属版本**：v7（v0.8.x）· 柱 O
 **前置阅读**：[`v7.md`](v7.md) §7.1/§7.2、[`feature-autopilot.md`](feature-autopilot.md)（柱 N —— 本柱主要服务的无人值守路径）、[`feature-permission-refactor.md`](feature-permission-refactor.md)（permission 是逻辑闸，沙箱是其下的内核闸）、memory `project_containerization_decision`（容器化已否决，本柱不是它）
-**状态**：📐 seed —— 够定 scope/决策/估时，实施前细化为完整 PRD。
+**状态**：✅ **已实现（双平台）**。macOS seatbelt（`sandbox-exec` SBPL，confine 文件写 + 网络，本机内核级验证）+ Linux landlock（`internal/sandbox/sandbox_linux.go`：re-exec **trampoline**——`main()` 首行 `RunTrampolineIfRequested()`，重入的 seek 给自己上 landlock 再 `unix.Exec` 真命令；ABI 版本掩码避免老内核 EINVAL；`no_new_privs`+`restrict_self`；**fail-closed**——加不上牢笼就退出 127 而非裸跑；内核无 landlock → `Available()=false` 优雅降级到 worktree 逻辑隔离）。bash `WithSandbox` 两平台统一；**已集成进 autopilot 子代理**（per-worktree confine，柱 N×柱 O）。landlock `GOOS=linux` 交叉编译过 + `internal/sandbox/sandbox_linux_test.go` 子进程内核验证（写 allowed ✅ / 写 outside ❌，内核无 landlock 时 skip），运行时正确性由 CI ubuntu matrix 跑 `go test -race` 确认。**剩**：网络 confine 仅 macOS（landlock 管不了网络，文档已写清不对称）。下方 seed 设计与最终实现一致。
 **估时**：~4-6 天（跨平台沙箱本身 fiddly）
 
 **一句话**：给 seek 的危险操作（bash/write/edit、autopilot 子代理）套一层**内核级沙箱**，把"`--yolo` / 睡觉时自动改代码"从"靠权限逻辑 + worktree 逻辑隔离"升级到"OS 真的拦得住"。

@@ -43,6 +43,7 @@ type Outcome struct {
 	Status   string // "done" | "failed"
 	Summary  string // wire-format subagent summary, or the failure reason
 	Worktree string // worktree path (kept for morning review); empty on early failure
+	Commit   string // short SHA the Fleet committed in the worktree; empty if nothing changed
 }
 
 // Report aggregates the whole run.

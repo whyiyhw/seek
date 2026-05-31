@@ -966,12 +966,28 @@ If you're new to the project, skim entries in this order:
 
 ## Worktree / Windows
 
+### Worktree-isolated subagent edited the MAIN tree (isolation silently bypassed)
+- **Saw**: autopilot e2e — a subagent spawned with `isolation:"worktree"` was asked to append a line to `README.md`; the report said "→ <worktree>", but the line landed in the **main repo's** `README.md` and the worktree stayed untouched
+- **Why**: TWO layers. (1) `read`/`edit`/`write` resolved relative paths with `filepath.Clean(a.Path)` — i.e. against the PROCESS cwd (main repo), never `policy.CWD()`. (2) Deeper: even after fixing that, `buildSubagentRunner` built the child registry by **reusing the parent's tool instances** (`parentReg.Lookup`), and those instances embed the PARENT policy (main-repo CWD). So the child policy's worktree CWD was set by `Manager.Spawn` but no tool ever consulted it. `bash`/`git` looked isolated only because they pin `cmd.Dir`; the in-process file tools had no such pin.
+- **Fix**: (a) add `permission.Policy.Resolve(path)` — abs paths cleaned, RELATIVE paths joined to `policy.CWD()` — and use it in read/edit/write; (b) in `buildSubagentRunner`, REBUILD the policy-bearing tools (read/write/edit/bash) with `job.Policy` instead of reusing the parent instance. (left uncommitted for review)
+- **Lesson**: a child policy with the right CWD is inert unless the child's TOOLS are constructed with that policy. "Isolation" that's only wired into `cmd.Dir` (bash/git) is a half-measure — in-process file tools must resolve paths against `policy.CWD()`, and subagent registries must not silently reuse parent tool instances that close over the parent policy. Worktree creation ≠ worktree isolation.
+- **Refs**: `internal/permission/permission.go:Resolve`, `internal/tools/{read,edit,write}`, `cmd/seek/main.go:buildSubagentRunner`, `internal/tools/write/write_test.go:TestWrite_RelativePath_AnchoredToPolicyCWD`
+
 ### /worktrees panel empty on Windows despite seek-managed worktrees existing
 - **Saw**: TUI `/worktrees` panel always empty on Windows even when `ListFromDisk` should find entries under `~/.seek/projects/<pid>/worktrees/`
 - **Why**: `git worktree list --porcelain` from Git for Windows emits forward slashes in `worktree <path>` lines, but `ListFromDisk` compared against `seekRoot` built with `filepath.Join` (backslashes). `strings.HasPrefix` is byte-exact — mixed separators never match
 - **Fix**: normalize porcelain paths at parse time via `filepath.Clean(strings.ReplaceAll(p, "/", string(filepath.Separator)))` before the seekRoot prefix filter
 - **Lesson**: never compare git-emitted paths with `strings.HasPrefix` against `filepath.Join` roots on Windows — normalize separators first or use `filepath.Rel`/`isPrefix`
 - **Refs**: `internal/worktree/worktree.go:ListFromDisk`, `internal/worktree/worktree_test.go:TestListFromDisk_NormalizesForwardSlashes`
+
+## Sandbox / OS jail
+
+### Landlock create_ruleset returns EINVAL if you "handle" an access right the kernel's ABI doesn't know
+- **Saw**: (design-time, caught while implementing 柱 O) a fixed `handled_access_fs` mask including `LANDLOCK_ACCESS_FS_TRUNCATE` (ABI 3) / `REFER` (ABI 2) / `IOCTL_DEV` (ABI 5) would make `landlock_create_ruleset` fail with EINVAL on any older kernel — i.e. the whole jail silently fails to build on exactly the machines most in need of a fallback
+- **Why**: Landlock is versioned. `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` returns the kernel's ABI (1..N); the set of rights you may *handle* grows per ABI. Handling a newer right on an older kernel is rejected, not ignored
+- **Fix**: probe the ABI first, then mask the handled write-rights set to that ABI (base FS-write rights for ABI≥1, add REFER at ≥2, TRUNCATE at ≥3, IOCTL_DEV at ≥5). Plus: `no_new_privs` MUST be set before `restrict_self`; the trampoline FAILS CLOSED (exit 127) if the jail can't be applied, never running the command unconfined. `internal/sandbox/sandbox_linux.go`
+- **Lesson**: for any versioned kernel LSM API, query the supported version and mask your request down to it — never hardcode the union of all features. And confine the IN-PROCESS file tools too: kernel jails like landlock apply to the process, but only bash/git pin `cmd.Dir`; see the worktree-isolation pitfall above for the parallel hole on the permission side
+- **Refs**: `internal/sandbox/sandbox_linux.go:applyLandlock`, `internal/sandbox/sandbox_linux_test.go`
 
 ## Cron parser
 

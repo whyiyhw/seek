@@ -2,7 +2,7 @@
 
 **所属版本**：v7（v0.8.x）· 柱 Q
 **前置阅读**：[`v7.md`](v7.md) §7.4、原始任务书（图片→OCR→注入）
-**状态**：🚀 核心已交付。`internal/ocr`（检测+exec+注入）+ `config.OCRConfig` + print-mode 接线 + macOS Vision 助手（`tools/ocr/vision_ocr.swift`，**已端到端验证**离线读中英混排）+ `scripts/build-vision-ocr.sh`。新增 12+ 测试 `-race` 绿，全仓 build 绿。**剩**：goreleaser 把 `vision_ocr` 打进 darwin archive（需 macOS release runner）+ TUI 接线（验收路径是 `-p`，TUI 是 bonus）。
+**状态**：✅ **完成**。`internal/ocr`（检测+exec+注入）+ `config.OCRConfig` + print-mode/TUI 接线 + macOS Vision 助手（`internal/ocr/vision_ocr.swift`，**已端到端验证**离线读中英混排）。**打包问题被嵌入方案彻底解决**：`go:embed` 把 Swift 源编进二进制，首次用 OCR 时 `swiftc` 编译并缓存到 `~/.seek/cache/vision_ocr`（`ocr.EnsureVisionHelper` + `Options.Provision` 惰性钩子）——真·单二进制，文档安装路径 `tar -xz seek` 也直接有 OCR，**无需 goreleaser bundle、无需 macOS release runner**。`scripts/build-vision-ocr.sh` 保留（想预编译"挨着二进制"助手者可用，优先级高于 Provision）。真二进制 e2e：删掉预编译助手后 `seek -p "… @img.png"` 触发 Provision→编译→缓存→注入 `[image: … — OCR]`，模型确认读到 "HELLO OCR 123 你好"。新增 12+ 测试 + 嵌入编译 e2e（`SEEK_OCR_E2E` 门控）`-race` 绿。
 **估时**：~2-3 天（已基本落地）
 
 **一句话**：seek 模型是纯文本的；本柱让 `seek -p "这个报错怎么修 @err.png"` 在**不联网**下,用本地 OCR 把图转成文字注入 prompt——无 VLM、无网络、保持单二进制（+ 一个可选 70KB 助手）。
@@ -40,7 +40,7 @@ DeepSeek 文本模型不吃图片。用户引用图片（报错截图、文档�
 - `internal/ocr/ocr.go`：`Expand` / `DetectImageRefs` / `Run`（os/exec + 15s 超时 + `SEEK_OCR_LANGUAGES` 透传）。
 - `internal/config`：`OCRConfig{Enabled,Command,Languages,TimeoutSeconds}` + `OCRCommand/OCRLanguages/OCRTimeout/OCREnabledOr`（macOS 默认 on,其他默认 off 除非设 command）。
 - `cmd/seek/main.go`：`ocrOptions(cfg)` + print 派发处 `text = ocr.Expand(...)`。
-- `tools/ocr/vision_ocr.swift`：Vision 助手（`.accurate` + zh-Hans/en-US,env 可覆盖语言）;仅系统框架,~70KB。
+- `internal/ocr/vision_ocr.swift`：Vision 助手（`.accurate` + zh-Hans/en-US,env 可覆盖语言）;仅系统框架,~70KB。**由 `go:embed` 编进二进制**，`ocr.EnsureVisionHelper` 首次用时 `swiftc` 编译并缓存（`scripts/build-vision-ocr.sh` 仍可手动预编译）。
 - `scripts/build-vision-ocr.sh`：`swiftc -O` 构建,非 macOS no-op,bash 3.2 兼容。
 
 ## 4. 测试

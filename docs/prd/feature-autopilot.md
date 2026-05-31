@@ -2,7 +2,13 @@
 
 **所属版本**：v0.8.x 候选（自治维度；柱 G/H/M 之上的编排层，非新单点工具）
 **前置阅读**：[`comparison.md`](../comparison.md) §R.4（**本 PRD 的战略依据**：seek vs Reasonix 唯一结构性领先的两轴）、[`feature-subagent.md`](feature-subagent.md)（柱 G — 并行子代理 + worktree 隔离）、[`feature-routines.md`](feature-routines.md)（柱 H — cron/wakeup/trigger）、[`feature-mobile-push.md`](feature-mobile-push.md)（柱 M — webhook push）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K — 会话级子进程生命周期 + Shutdown 范式）
-**状态**：🚧 已实装 + 接线（未做真环境 e2e）。`internal/autopilot`：driver（fan-out/caps/kill/panic 隔离）+ Decomposer（deepseek + 健壮解析）+ report 聚合 + fleet adapter（worktree + subagent.Spawn）+ **no-remote 守卫**（`bash.WithDeny` 机制 + `IsRemoteMutating` 策略）。`cmd/seek`：`seek autopilot run "<goal>"` 子命令——复用现有 subagent.Manager（autopilot 子进程整体加 no-remote 守卫）+ worktree + 柱 M webhook push。~22 测试 `-race` 绿,全仓 3-OS build 绿,CLI 派发已冒烟（no-goal→usage）。**剩**：① 真环境 e2e（需 API key + 真 repo,会 spawn 编辑子代理——故未由我执行）;② cron `--autopilot` 接线;③ token 上限（需 tracker）。
+**状态**：✅ **真环境 e2e 跑通**。`internal/autopilot`：driver（fan-out/caps/kill/panic 隔离）+ Decomposer（deepseek + 健壮解析）+ report 聚合（带 per-task commit SHA）+ fleet adapter（worktree + subagent.Spawn + **per-task 本地 commit**）+ **no-remote 守卫**（`bash.WithDeny` + `IsRemoteMutating`）。`cmd/seek`：`seek autopilot run "<goal>"` + `cron create --autopilot`，复用 subagent.Manager（整体 no-remote 守卫）+ worktree + 柱 M webhook push。
+
+**e2e 结果**（真 DeepSeek + 真 repo，跑"append 一行到 README"）：分解→并行 worktree fleet→聚合→报告 全链路通；**暴露并修复两个真 bug**：
+1. **worktree 隔离洞**——子代理的 `edit/write` 误写了**主树** README（报告却称落在 worktree）。根因双层：(a) `read/edit/write` 用 `filepath.Clean` 按**进程 cwd**解析相对路径，不读 `policy.CWD()`；(b) 更深——`buildSubagentRunner` 复用了**父 tool 实例**（内含父 policy=主树），子 policy 的 worktree CWD 根本没 tool 去用。修：加 `permission.Policy.Resolve`（相对路径锚到 `policy.CWD()`）+ read/edit/write 改用它 + `buildSubagentRunner` 用 `job.Policy` **重建** read/write/edit/bash。修后主树字节不变、edit 落在 worktree。
+2. **dirty worktree**——子代理改完不一定 commit。修：Fleet 成功后**确定性 per-task 本地 commit**（msg=`autopilot: <title>`），报告显示短 SHA；no-remote guard 仍挡 push。
+
+~28 测试 `-race` 绿（含 `fleet_test.go:commitWorktree` + `write_test.go:TestWrite_RelativePath_AnchoredToPolicyCWD`），全仓 3-OS build 绿。**剩**：token 上限（需 tracker，可选）。
 **目标里程碑**：M-A.1 ✅ · M-A.2（守卫）✅ · M-A.3（聚合/push）✅ · M-A.4（CLI）✅ / cron 待 / e2e 待
 **估时**：~6 天（大量复用柱 G/H/M；真正新写的是编排 driver + 安全边界 + 聚合 + CLI）
 

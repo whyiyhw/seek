@@ -63,6 +63,18 @@ func MCPConfig() (string, error) {
 	return filepath.Join(root, "mcp.json"), nil
 }
 
+// Cache returns the user-level cache directory (~/.seek/cache/) for
+// regenerable artifacts — e.g. the compiled macOS Vision OCR helper
+// (柱 Q), built on demand from embedded source. Safe to delete; rebuilt
+// lazily. The caller creates the directory if needed.
+func Cache() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "cache"), nil
+}
+
 // UserSkills returns the user-level skills directory (~/.seek/skills/).
 // Project-level skills live at <project>/.seek/skills/ which is NOT
 // computed here — it's relative to whatever working directory the

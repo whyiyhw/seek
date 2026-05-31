@@ -2,7 +2,7 @@
 
 **所属版本**：v7（v0.8.x）· 柱 P
 **前置阅读**：[`v7.md`](v7.md) §7.3、[`comparison.md`](../comparison.md) §R.2（IDE 集成行：源码确认 Reasonix 用 ACP、领先于 seek 的自定义 `-rpc`）、`internal/rpc/server.go`（seek 现有 JSON-RPC server 模式）、`internal/lspclient`（柱 L 刚做的 stdio JSON-RPC client，帧/关联范式可借鉴）、`pkg/mcp/client.go`（JSON-RPC over stdio 先例）
-**状态**：📐 seed —— 够定 scope/决策/估时，实施前细化。
+**状态**：✅ **实现 + 真 server stdio e2e 跑通**。`internal/acp`：手写 stdlib JSON-RPC 2.0（newline-delimited，无 Content-Length，复用 pkg/mcp 风格）—— `initialize` / `session/new` / `session/prompt`（异步、可 `session/cancel`）+ `session/update` 通知；`cmd/seek`：`seek acp` 子命令 + `acpBackend`（适配现有 agent）+ `acpUpdate`（Event→session/update 映射，含 reasoning/turn-bookkeeping **不外泄** 的单测）。**e2e**：脚本化 newline-JSON-RPC 客户端驱动真 `seek acp` + 真 agent —— initialize→`{protocolVersion:1, agentCapabilities}`，session/new→`sessionId`，session/prompt→流式 `agent_message_chunk`（"P"/"ONG"）→`{stopReason:"end_turn"}`，session/cancel 已完成会话不崩，stdin EOF 干净退出 rc=0。**剩**：真 Zed GUI live 验 + `load_session`（capability 现报 false）。下方 seed 设计与实现一致。
 **估时**：~4-5 天
 
 **一句话**：实现 **ACP（Agent Client Protocol）** server 模式，让 **Zed / 任意 ACP 编辑器**直接驱动 seek。这是读源码后确认的**唯一 Reasonix 明确领先、seek 该追平的项**——而且用的是**标准协议**（生态网络效应），不是再造一个自定义 RPC。

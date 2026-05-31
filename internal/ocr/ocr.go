@@ -30,14 +30,19 @@ var errNoEngine = errors.New("no OCR engine configured")
 // Options configures OCR. Command (if set) wins; otherwise Helper (the
 // bundled macOS Vision binary) is used; if neither, OCR is unavailable.
 type Options struct {
-	Command   []string      // explicit engine; image path appended as the last arg
-	Helper    string        // path to the bundled vision_ocr helper (fallback)
-	Languages string        // hint passed via SEEK_OCR_LANGUAGES (helper may honor)
-	Timeout   time.Duration // per-image; 0 → 15s
+	Command   []string                              // explicit engine; image path appended as the last arg
+	Helper    string                                // path to a prebuilt vision_ocr helper (fallback)
+	Provision func(context.Context) (string, error) // lazy: produce a helper path on first image (compile-on-demand); fallback after Helper
+	Languages string                                // hint passed via SEEK_OCR_LANGUAGES (helper may honor)
+	Timeout   time.Duration                         // per-image; 0 → 15s
 }
 
-// Available reports whether any OCR engine is configured.
-func (o Options) Available() bool { return len(o.Command) > 0 || o.Helper != "" }
+// Available reports whether any OCR engine is configured. A Provision
+// closure counts as available — it may still fail at first use (e.g. no
+// swiftc), which surfaces as an in-band hint rather than a missing engine.
+func (o Options) Available() bool {
+	return len(o.Command) > 0 || o.Helper != "" || o.Provision != nil
+}
 
 var imageExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
@@ -129,6 +134,15 @@ func Run(ctx context.Context, path string, opt Options) (string, error) {
 		argv = opt.Command
 	case opt.Helper != "":
 		argv = []string{opt.Helper}
+	case opt.Provision != nil:
+		// Lazy compile-on-demand (e.g. embedded macOS Vision helper).
+		// Uses the parent ctx, not the per-image timeout — a one-time
+		// build can legitimately outlast a single OCR call.
+		h, err := opt.Provision(ctx)
+		if err != nil {
+			return "", err
+		}
+		argv = []string{h}
 	default:
 		return "", errNoEngine
 	}

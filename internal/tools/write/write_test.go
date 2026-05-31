@@ -216,3 +216,25 @@ func TestWrite_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 		t.Error("symlink-escape write was allowed — symlink resolution not working")
 	}
 }
+
+// TestWrite_RelativePath_AnchoredToPolicyCWD locks the worktree-isolation
+// fix found by autopilot e2e: a RELATIVE path must resolve against the
+// policy's CWD (the worktree for an isolation:"worktree" subagent), NOT
+// the process working directory. Before the fix, a subagent writing
+// "README.md" hit the MAIN tree.
+func TestWrite_RelativePath_AnchoredToPolicyCWD(t *testing.T) {
+	dir := t.TempDir()
+	p, _ := permission.New(dir, permission.PrefYolo)
+
+	args, _ := json.Marshal(Args{Path: "rel-iso.txt", Content: "x"})
+	if _, err := New(p).Execute(context.Background(), args); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rel-iso.txt")); err != nil {
+		t.Fatalf("relative write must land in policy CWD %s: %v", dir, err)
+	}
+	if _, err := os.Stat("rel-iso.txt"); err == nil {
+		_ = os.Remove("rel-iso.txt")
+		t.Fatal("relative write leaked into process cwd — worktree isolation broken")
+	}
+}

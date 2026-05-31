@@ -35,6 +35,9 @@ func (r Report) Body() string {
 			mark = "✗"
 		}
 		fmt.Fprintf(&b, "  %s %s", mark, o.Task.Title)
+		if o.Commit != "" {
+			fmt.Fprintf(&b, "  [%s]", o.Commit)
+		}
 		if o.Worktree != "" {
 			fmt.Fprintf(&b, "  → %s", o.Worktree)
 		}

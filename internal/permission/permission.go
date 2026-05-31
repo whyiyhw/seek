@@ -764,6 +764,24 @@ func (p *Policy) CWD() string {
 	return p.cwd
 }
 
+// Resolve turns a tool's path argument into the path to actually touch:
+// absolute paths are cleaned and returned; RELATIVE paths are anchored to
+// this policy's CWD — the project root for the main agent, the WORKTREE
+// for an isolation:"worktree" subagent — NOT the process working
+// directory. read/edit/write MUST use this; otherwise a worktree subagent
+// resolving a relative path (e.g. "README.md") against os.Getwd() edits
+// the MAIN tree, silently breaking worktree isolation. (bash/git already
+// pin cmd.Dir to CWD, so only the in-process file tools had this hole.)
+func (p *Policy) Resolve(path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	if cwd := p.CWD(); cwd != "" {
+		return filepath.Join(cwd, path)
+	}
+	return filepath.Clean(path)
+}
+
 // Yolo reports whether the policy's preference is Yolo. Kept as a
 // compat helper for callers that just want the "are writes
 // unrestricted?" boolean; new code can use Pref() directly.
