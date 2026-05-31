@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek comparison vs Claude Code and Reasonix — feature parity, gaps, and positioning." />
+<title>Comparison — seek docs</title>
+<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth;font-size:16px}body{font-family:"JetBrains Mono",monospace;background:var(--bg);color:var(--text-body);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}a{color:inherit;text-decoration:none}:root{--bg:#0b0b0e;--surface:#12121a;--surface-2:#0e0e14;--surface-3:#1a1a24;--border:#1e1e2a;--text:#d0d0d8;--text-body:#d0d0d8;--dim:#6a6a7a;--amber:#f5a623;--amber-dim:rgba(245,166,35,.15);--teal:#00d4ff;--teal-dim:rgba(0,212,255,.12);--green:#22c55e;--hover-bg:rgba(255,255,255,.04);--border-dim:rgba(255,255,255,.04)}[data-theme="light"]{--bg:#f4f3ef;--surface:#ffffff;--surface-2:#e8e7e2;--surface-3:#dddcd6;--border:#dddcd6;--text:#1a1a1e;--text-body:#1a1a1e;--dim:#7a7a82;--amber:#c9861a;--amber-dim:rgba(201,134,26,.12);--teal:#009e9e;--teal-dim:rgba(0,158,158,.10);--green:#15803d;--hover-bg:rgba(0,0,0,.04);--border-dim:rgba(0,0,0,.04)}h1,h2,h3{font-weight:600;letter-spacing:-.02em;line-height:1.15}h1{font-size:clamp(1.5rem,4vw,2.8rem);margin-bottom:8px}h2{font-size:clamp(1.2rem,2.5vw,1.6rem);margin:32px 0 16px;color:var(--amber)}h3{font-size:clamp(1rem,2vw,1.2rem);margin:24px 0 8px;color:var(--teal)}p{max-width:64ch;color:var(--dim);font-size:.88rem;margin-bottom:12px}code{font-family:"JetBrains Mono",monospace;font-size:.82rem;background:var(--surface-2);padding:2px 6px;border-radius:3px;color:var(--teal)}pre{background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:16px 18px;overflow-x:auto;font-size:.8rem;color:var(--teal);margin-bottom:16px}pre .prompt{color:var(--amber)}pre .ok{color:var(--green)}pre .dim{color:var(--dim)}ul,ol{color:var(--text-body);font-size:.85rem;padding-left:20px;margin-bottom:12px}li{margin-bottom:6px}.container{max-width:860px;margin:0 auto;padding:0 24px}.breadcrumb{padding:20px 0 0;font-size:.8rem;color:var(--dim)}.breadcrumb a{color:var(--teal)}.breadcrumb a:hover{color:var(--amber)}.page-header{padding:40px 0 32px;border-bottom:1px solid var(--border);margin-bottom:36px}.page-header .subtitle{font-size:.9rem;color:var(--dim);margin-top:6px}.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow-x:auto;margin-bottom:24px}.table-wrap table{width:100%;min-width:500px;border-collapse:collapse;font-size:.82rem}.table-wrap th{background:var(--surface-3);color:var(--amber);text-align:left;padding:12px 14px;border-bottom:2px solid var(--border);text-transform:uppercase;letter-spacing:.06em;font-size:.7rem}.table-wrap td{padding:12px 14px;border-bottom:1px solid var(--border)}.table-wrap tr:last-child td{border-bottom:none}.table-wrap tr:hover td{background:rgba(0,212,255,.03)}.table-wrap .tag-on{color:var(--green)}.table-wrap .tag-off{color:var(--dim)}.table-wrap .tag-partial{color:var(--amber)}.page-footer{border-top:1px solid var(--border);padding:28px 0;text-align:center}.page-footer a{color:var(--teal);font-size:.82rem}.page-footer a:hover{color:var(--amber)}.page-footer .sep{color:var(--dim);margin:0 10px}.reveal{opacity:0;transform:translateY(20px);transition:opacity .6s ease,transform .6s ease}.reveal.visible{opacity:1;transform:translateY(0)}.util-bar{display:flex;align-items:center;gap:6px;flex-shrink:0}.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:4px;background:transparent;cursor:pointer;font-size:.9rem;transition:all .2s ease;flex-shrink:0;color:var(--dim)}.theme-toggle:hover{border-color:var(--amber);color:var(--amber)}.lang-toggle{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;font-family:"JetBrains Mono",monospace;font-size:.78rem;line-height:1;flex-shrink:0}.lang-toggle span{padding:10px 14px;cursor:pointer;transition:all .2s ease;color:var(--dim);user-select:none}.lang-toggle span.active{background:var(--teal);color:#0b0b0e;font-weight:700}.lang-toggle span:not(.active):hover{color:var(--teal)}@media(max-width:640px){.container{padding:0 16px}pre{padding:12px 14px;font-size:.75rem}}</style>
+</head>
+<body>
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar"><button class="theme-toggle" id="themeToggle">☀️</button>
+    <div class="lang-toggle" id="langToggle"><span data-lang-val="en">EN</span><span data-lang-val="zh">中文</span></div>
+  </div>
+</div>
+<div class="container">
+  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Comparison</span></div>
+  <div class="page-header">
+    <h1 data-lang="en">Seek vs Claude Code vs Reasonix</h1>
+    <h1 data-lang="zh" hidden">Seek 竞品对比</h1>
+    <p class="subtitle" data-lang="en">Feature parity, gaps, and positioning against Claude Code (ceiling) and Reasonix (peer).</p>
+    <p class="subtitle" data-lang="zh" hidden">与 Claude Code（能力上限）和 Reasonix（同论题竞品）的全面对比。</p>
+  </div>
+  <div class="reveal">
+    <p data-lang="en">See the full comparison at <a href="/comparison.md"><code>docs/comparison.md</code></a>. Key highlights:</p>
+    <p data-lang="zh" hidden">完整对比见 <a href="/comparison.md">docs/comparison.md</a>。核心要点：</p>
+
+    <h2 data-lang="en">Agent Loop & Execution</h2>
+    <h2 data-lang="zh" hidden">核心 Agent 循环与执行</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Feature</th><th data-lang="zh" hidden>功能</th><th>Claude Code</th><th>Seek</th></tr></thead>
+        <tbody>
+          <tr><td>Tool loop (read/write/bash/edit)</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>FIM completions</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>Think / reflection</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>LSP references</td><td class="tag-on">✅</td><td class="tag-partial">🔶 Slim (refs only)</td></tr>
+          <tr><td>Background bash + monitor</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>Session persistence</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>/goal autoloop</td><td class="tag-on">✅</td><td class="tag-on">✅ (also headless+cron)</td></tr>
+          <tr><td>Web search</td><td class="tag-on">✅</td><td class="tag-off">❌ (fetch only)</td></tr>
+          <tr><td>Notebook edit</td><td class="tag-on">✅</td><td class="tag-off">❌</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Planning & Permissions</h2>
+    <h2 data-lang="zh" hidden">计划与权限系统</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Feature</th><th data-lang="zh" hidden>功能</th><th>Claude Code</th><th>Seek</th></tr></thead>
+        <tbody>
+          <tr><td>Plan mode (analyze→propose→execute)</td><td class="tag-on">✅</td><td class="tag-on">✅ v2</td></tr>
+          <tr><td>Two-axis permission (pref × workflow)</td><td>🔶</td><td class="tag-on">✅</td></tr>
+          <tr><td>YOLO / ask-all modes</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Subagent & Automation</h2>
+    <h2 data-lang="zh" hidden">子代理与自动化</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Feature</th><th data-lang="zh" hidden>功能</th><th>Claude Code</th><th>Seek</th></tr></thead>
+        <tbody>
+          <tr><td>Subagent (parallel worktree)</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>Cron / scheduled wakeup</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>OS sandbox (Seatbelt/Landlock)</td><td class="tag-off">❌</td><td class="tag-on">✅</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Memory & Skills</h2>
+    <h2 data-lang="zh" hidden">记忆与技能系统</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Feature</th><th data-lang="zh" hidden>功能</th><th>Claude Code</th><th>Seek</th></tr></thead>
+        <tbody>
+          <tr><td>Three-tier memory (L/M/S)</td><td>🔶</td><td class="tag-on">✅</td></tr>
+          <tr><td>Skill system (v2)</td><td class="tag-on">✅</td><td class="tag-on">✅</td></tr>
+          <tr><td>Soul / cross-project induction</td><td class="tag-off">❌</td><td class="tag-on">✅</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p data-lang="en">For the full detailed comparison including gap tracking, roadmap priorities, and Reasonix analysis: <a href="/comparison.md">docs/comparison.md</a> (35KB).</p>
+    <p data-lang="zh" hidden">包括差距追踪、roadmap 优先级和 Reasonix 分析的完整对比：<a href="/comparison.md">docs/comparison.md</a>。</p>
+  </div>
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</div>
+<script>
+  let ct = localStorage.getItem('seek-theme') || 'dark', tb = document.getElementById('themeToggle');
+  function st(t) { ct = t; localStorage.setItem('seek-theme', t); document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === 'dark' ? '#0b0b0e' : '#f4f3ef'; }
+  st(ct); tb.addEventListener('click', () => { st(ct === 'dark' ? 'light' : 'dark'); });
+  let cl = localStorage.getItem('seek-lang') || 'zh';
+  function sl(l) { cl = l; localStorage.setItem('seek-lang', l); document.documentElement.lang = l === 'en' ? 'en' : 'zh'; document.querySelectorAll('[data-lang]').forEach(e => { e.hidden = e.getAttribute('data-lang') !== l; }); document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === l); }); }
+  sl(cl);
+  document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
+  new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
+</script>
+</body>
+</html>

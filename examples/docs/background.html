@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek background jobs — long-running command tracking with bash run_in_background and monitor." />
+<title>Background Jobs — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg); color: var(--text-body); line-height: 1.65;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] { --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6; --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82; --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10); --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04); }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); } pre .ok { color: var(--green); } pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); } .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; margin-bottom: 24px; }
+  .table-wrap table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th { background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px; border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; }
+  .note { background: var(--surface); border-left: 3px solid var(--teal); padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px; }
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; } .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer; font-size: .9rem; transition: all .2s ease; flex-shrink: 0; color: var(--dim); }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; font-family: "JetBrains Mono", monospace; font-size: .78rem; line-height: 1; flex-shrink: 0; }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Background Jobs</span></div>
+  <div class="page-header">
+    <h1 data-lang="en">Background Jobs — Long-Running Tasks</h1>
+    <h1 data-lang="zh" hidden>后台任务 — 长任务跟踪</h1>
+    <p class="subtitle" data-lang="en">Push long builds, test suites, and dev servers to the background and check progress with the monitor tool.</p>
+    <p class="subtitle" data-lang="zh" hidden">把 build / 测试套件 / dev server 丢到后台，再随时查看进度——不再被一条命令卡死整轮。</p>
+  </div>
+  <div class="reveal">
+    <div class="note">
+      <span data-lang="en">Background jobs are <strong>session-scoped</strong> — they live and die with the current seek session. No persistence across restarts. For persistent scheduled jobs, see <a href="cron.html">Cron</a>.</span>
+      <span data-lang="zh" hidden">后台任务随当前 seek 会话生死，不写盘、不跨重启。持久化定时任务见 <a href="cron.html">Cron</a>。</span>
+    </div>
+
+    <h2 data-lang="en">Launch a Background Job</h2>
+    <h2 data-lang="zh" hidden">启动一个后台任务</h2>
+    <p data-lang="en">Pass <code>run_in_background: true</code> to the bash tool. It returns a handle <code>bg-N</code> immediately instead of blocking:</p>
+    <p data-lang="zh" hidden">给 bash 传 run_in_background: true，它立即返回句柄 bg-N：</p>
+    <pre><span class="dim">bash(command="go build ./...", run_in_background=true)</span>
+→ [bg: started bg-1] $ go build ./...
+  Track with: monitor(job="bg-1", action=poll|wait|kill).</pre>
+    <ul>
+      <li data-lang="en"><strong>No timeout</strong> — background mode ignores <code>timeout_ms</code>. The job runs until it exits, is killed, or the session ends.</li>
+      <li data-lang="zh" hidden">后台模式下 timeout_ms 被忽略——任务一直跑到退出、被杀、或会话结束。</li>
+      <li data-lang="en">Best for: long builds, full test suites, dev servers, file watchers.</li>
+      <li data-lang="zh" hidden">适用场景：长 build、完整测试套件、dev server、文件 watcher。</li>
+    </ul>
+
+    <h2 data-lang="en">Track with <code>monitor</code></h2>
+    <h2 data-lang="zh" hidden">用 monitor 跟踪</h2>
+    <h3 data-lang="en"><code>poll</code> (default) — incremental output since last check</h3>
+    <h3 data-lang="zh" hidden">poll（默认）——看自上次以来的新输出 + 状态</h3>
+    <pre><span class="dim">monitor(job="bg-1")</span>
+→ [bg-1: running, elapsed=12s]
+  &lt;new output since last poll&gt;</pre>
+    <p data-lang="en">Cursor is server-side — each poll returns only incremental output. No new output = <code>(no new output)</code>.</p>
+    <p data-lang="zh" hidden">游标是服务端记的——每次 poll 只给你增量输出。</p>
+
+    <h3 data-lang="en"><code>wait</code> — block until exit / match / timeout</h3>
+    <h3 data-lang="zh" hidden">wait——阻塞直到完成 / 命中 / 超时</h3>
+    <pre><span class="dim">monitor(job="bg-1", action=wait, timeout_ms=60000)</span>
+→ [bg-1: exited code=0, elapsed=43s]
+  &lt;final output&gt;</pre>
+    <p data-lang="en">Three exit paths: task exits, <code>until_regex</code> matches ("Listening on" for a dev server), or timeout.</p>
+    <p data-lang="zh" hidden">三条退出路径：任务退出、until_regex 命中（如 dev server 的 "Listening on"）、超时。</p>
+    <p data-lang="en">Cancelling a wait (Esc) stops observing but leaves the job running.</p>
+    <p data-lang="zh" hidden">取消 wait（Esc）停止观察但让任务继续跑。</p>
+
+    <h3 data-lang="en"><code>kill</code> — terminate</h3>
+    <h3 data-lang="zh" hidden">kill——终止</h3>
+    <pre><span class="dim">monitor(job="bg-1", action=kill)</span>
+→ [bg-1: killed, elapsed=67s]</pre>
+
+    <h2 data-lang="en">Lifecycle</h2>
+    <h2 data-lang="zh" hidden">生命周期</h2>
+    <ul>
+      <li data-lang="en">Jobs live until: they exit, you kill them, or the session ends.</li>
+      <li data-lang="zh" hidden">任务一直存活到：自己退出、被 kill、或会话结束。</li>
+      <li data-lang="en"><strong>Not persisted across restarts</strong> — bg jobs never survive a session restart.</li>
+      <li data-lang="zh" hidden"><strong>不跨重启</strong>——后台任务不会在会话重启后存活。</li>
+      <li data-lang="en">Up to N concurrent jobs (ring buffer). Oldest job is evicted on overflow.</li>
+      <li data-lang="zh" hidden">最多 N 个并发任务（环形缓冲），溢出时淘汰最老的。</li>
+    </ul>
+
+    <p data-lang="en">Design: <a href="/prd/feature-bash-monitor.md">PRD feature-bash-monitor.md</a></p>
+    <p data-lang="zh" hidden">设计文档：<a href="/prd/feature-bash-monitor.md">PRD feature-bash-monitor.md</a></p>
+  </div>
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</div>
+<script>
+  let ct = localStorage.getItem('seek-theme') || 'dark', tb = document.getElementById('themeToggle');
+  function st(t) { ct = t; localStorage.setItem('seek-theme', t); document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === 'dark' ? '#0b0b0e' : '#f4f3ef'; }
+  st(ct); tb.addEventListener('click', () => { st(ct === 'dark' ? 'light' : 'dark'); });
+  let cl = localStorage.getItem('seek-lang') || 'zh';
+  function sl(l) { cl = l; localStorage.setItem('seek-lang', l); document.documentElement.lang = l === 'en' ? 'en' : 'zh'; document.querySelectorAll('[data-lang]').forEach(e => { e.hidden = e.getAttribute('data-lang') !== l; }); document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === l); }); }
+  sl(cl);
+  document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
+  new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
+</script>
+</body>
+</html>

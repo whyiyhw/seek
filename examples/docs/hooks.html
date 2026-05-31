@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek hooks — lifecycle interception points for the agent: PrePrompt, PostTurn, and shell hooks." />
+<title>Hooks — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  pre .ok { color: var(--green); }
+  pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Hooks</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Hooks — Lifecycle Interception</h1>
+    <h1 data-lang="zh" hidden>Hooks — 生命周期拦截</h1>
+    <p class="subtitle" data-lang="en">Decorate or observe agent lifecycle events: prompts, tool use, session boundaries.</p>
+    <p class="subtitle" data-lang="zh" hidden">在 agent 关键事件插入自定义逻辑——memory 子系统就是通过 hooks 实现的。</p>
+  </div>
+
+  <div class="reveal">
+
+    <h2 data-lang="en">Hook Kinds</h2>
+    <h2 data-lang="zh" hidden">Hook 类型</h2>
+    <p data-lang="en">Two categories, separated at the type level — prefix-cache safety is a compile-time property:</p>
+    <p data-lang="zh" hidden">两类 hooks，在类型层面区分，前缀缓存安全性在编译时保证：</p>
+
+    <h3 data-lang="en">Decorators (can mutate the request)</h3>
+    <h3 data-lang="zh" hidden">装饰器（可修改请求）</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Hook</th>
+            <th data-lang="zh" hidden>Hook</th>
+            <th data-lang="en">When</th>
+            <th data-lang="zh" hidden">触发时机</th>
+            <th data-lang="en">Purpose</th>
+            <th data-lang="zh" hidden">作用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>PrePromptHook</code></td>
+            <td data-lang="en">Before user message is appended to history</td>
+            <td data-lang="zh" hidden">用户消息追加到历史之前</td>
+            <td data-lang="en">Inject memory, expand slash commands, rewrite user text</td>
+            <td data-lang="zh" hidden">注入记忆、展开斜杠命令、改写用户文本</td>
+          </tr>
+          <tr>
+            <td><code>PreToolUseHook</code></td>
+            <td data-lang="en">Before tool call execution</td>
+            <td data-lang="zh" hidden">工具调用执行前</td>
+            <td data-lang="en">Modify tool arguments, inject context</td>
+            <td data-lang="zh" hidden">修改工具参数、注入上下文</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">
+      <strong>⚠️</strong> <span data-lang="en">Output MUST be deterministic — DeepSeek's prefix cache keys on the exact byte sequence of the prompt history.</span>
+      <span data-lang="zh" hidden">输出必须确定——DeepSeek 前缀缓存 key 是 prompt 历史的精确字节序列。</span>
+    </div>
+
+    <h3 data-lang="en">Observers (read-only)</h3>
+    <h3 data-lang="zh" hidden">观察器（只读）</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Hook</th>
+            <th data-lang="zh" hidden>Hook</th>
+            <th data-lang="en">When</th>
+            <th data-lang="zh" hidden">触发时机</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>PreTurn</code></td><td data-lang="en">Before each turn</td><td data-lang="zh" hidden">每轮开始前</td></tr>
+          <tr><td><code>PostTurn</code></td><td data-lang="en">After each turn</td><td data-lang="zh" hidden">每轮结束后</td></tr>
+          <tr><td><code>PostToolUse</code></td><td data-lang="en">After each tool call</td><td data-lang="zh" hidden">每个工具执行后</td></tr>
+          <tr><td><code>SessionStart</code></td><td data-lang="en">Session begins</td><td data-lang="zh" hidden">会话开始时</td></tr>
+          <tr><td><code>SessionEnd</code></td><td data-lang="en">Session ends</td><td data-lang="zh" hidden">会话结束时</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Built-in Hooks</h2>
+    <h2 data-lang="zh" hidden">内置 Hook</h2>
+    <ul>
+      <li data-lang="en"><strong>Checkpoint</strong> (<code>checkpointHook</code>) — PreTurn + SessionEnd to manage checkpoint state</li>
+      <li data-lang="zh" hidden"><strong>Checkpoint 安全网</strong>——通过 PreTurn + SessionEnd 管理 checkpoint 状态</li>
+      <li data-lang="en"><strong>Memory system</strong> (<code>internal/memory</code>) — PrePrompt + PostToolUse + SessionStart + SessionEnd for L/M/S three-tier memory</li>
+      <li data-lang="zh" hidden"><strong>记忆系统</strong>（<code>internal/memory</code>）——通过 PrePrompt + PostToolUse + SessionStart + SessionEnd 实现 L/M/S 三层记忆</li>
+    </ul>
+
+    <h2 data-lang="en">CLI: <code>seek hooks</code></h2>
+    <h2 data-lang="zh" hidden">CLI：seek hooks</h2>
+    <pre><span class="prompt">$</span> <span class="ok">seek hooks list</span>     <span class="dim"># List trusted hook scripts</span>
+<span class="prompt">$</span> <span class="ok">seek hooks check --event &lt;event&gt; [--tool &lt;tool&gt;]</span>    <span class="dim"># Dry-run: which hooks fire for this event/tool?</span>
+<span class="prompt">$</span> <span class="ok">seek hooks trust [--reset[=&lt;path&gt;]]</span>    <span class="dim"># List trusted projects; --reset removes trust</span>
+<span class="prompt">$</span> <span class="ok">seek hooks audit</span>    <span class="dim"># Audit hook call records</span></pre>
+
+    <h2 data-lang="en">Writing Custom Hooks (Go)</h2>
+    <h2 data-lang="zh" hidden">编写自定义 Hook</h2>
+    <p data-lang="en">A single struct may implement multiple hook interfaces. <code>Registry.Register</code> dispatches it into every slot it satisfies.</p>
+    <p data-lang="zh" hidden">一个结构体可以实现多个 hook 接口。Registry.Register 自动分发：</p>
+    <pre><span class="dim">// A struct implementing both PrePrompt + PostTurn</span>
+type myHook struct{}
+
+func (h *myHook) OnPrePrompt(ctx context.Context, in hooks.PrePromptIn) (hooks.PrePromptOut, error) {
+    <span class="ok">return hooks.PrePromptOut{UserText: in.UserText + "\n[injected context]"}, nil</span>
+}
+
+func (h *myHook) OnPostTurn(ctx context.Context, ev hooks.PostTurnEvent) {
+    <span class="dim">// analyse, distil, persist...</span>
+}
+
+<span class="dim">// Register</span>
+registry := hooks.NewRegistry()
+registry.Register(&myHook{})</pre>
+
+    <h2 data-lang="en">Design Notes</h2>
+    <h2 data-lang="zh" hidden">设计要点</h2>
+    <ul>
+      <li data-lang="en"><strong>Determinism first</strong> — Decorators must be deterministic to preserve prefix cache</li>
+      <li data-lang="zh" hidden"><strong>确定性优先</strong>——装饰器的输出必须确定，否则破坏前缀缓存</li>
+      <li data-lang="en"><strong>Zero-intrusion observers</strong> — Observer signatures enforce they cannot modify conversation, request, or control flow</li>
+      <li data-lang="zh" hidden"><strong>零侵入观察器</strong>——Observer 接口强制不能修改对话、请求或控制流</li>
+      <li data-lang="en"><strong>Single struct, multiple interfaces</strong> — Registry auto-detects and dispatches</li>
+      <li data-lang="zh" hidden"><strong>单一结构多接口</strong>——一个结构体实现多个 hook 接口，Registry 自动分发</li>
+    </ul>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/whyiyhw/seek">GitHub</a>
+    <span class="sep">·</span>
+    <span class="dim">design docs: <a href="/prd/feature-shell-hooks.md">PRD</a></span>
+  </div>
+</div>
+
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

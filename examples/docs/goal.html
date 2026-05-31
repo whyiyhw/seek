@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek goal — unattended multi-turn task execution with automatic completion detection." />
+<title>Goal — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg);
+    color: var(--text-body);
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p  { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); }
+  pre .ok { color: var(--green); }
+  pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); }
+  .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    overflow-x: auto; margin-bottom: 24px; -webkit-overflow-scrolling: touch;
+  }
+  .table-wrap table { width: 100%; min-width: 500px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th {
+    background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px;
+    border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem;
+  }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .table-wrap .cmd { color: var(--green); font-weight: 600; white-space: nowrap; }
+
+  .note {
+    background: var(--surface); border-left: 3px solid var(--teal);
+    padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px;
+  }
+
+  .page-footer {
+    border-top: 1px solid var(--border); padding: 28px 0; text-align: center;
+  }
+  .page-footer a { color: var(--teal); font-size: .82rem; }
+  .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+
+  .util-bar {
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .theme-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px;
+    border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; cursor: pointer; font-size: .9rem;
+    transition: all .2s ease; flex-shrink: 0; color: var(--dim);
+  }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle {
+    display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+    overflow: hidden; font-family: "JetBrains Mono", monospace;
+    font-size: .78rem; line-height: 1; flex-shrink: 0;
+  }
+  .lang-toggle span {
+    padding: 10px 14px; cursor: pointer; transition: all .2s ease;
+    color: var(--dim); user-select: none;
+  }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+
+  @media (max-width: 640px) {
+    .container { padding: 0 16px; }
+    pre { padding: 12px 14px; font-size: .75rem; }
+  }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="breadcrumb">
+    <a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>Goal</span>
+  </div>
+
+  <div class="page-header">
+    <h1 data-lang="en">Goal — Unattended Multi-Turn Tasks</h1>
+    <h1 data-lang="zh" hidden>Goal — 无人值守多轮任务</h1>
+    <p class="subtitle" data-lang="en">Run seek across multiple turns toward a completion condition, unattended.</p>
+    <p class="subtitle" data-lang="zh" hidden">自动多轮工作直到某个条件满足，无需逐轮确认。</p>
+  </div>
+
+  <div class="reveal">
+
+    <p data-lang="en">Goal runs seek unattended across multiple turns toward a completion CONDITION. A cheap DeepSeek model judges after each turn whether the condition is satisfied. Use it for tasks like "fix all TODOs", "run test suite green", or "migrate all API calls".</p>
+    <p data-lang="zh" hidden">Goal 让 seek 自动多轮工作直到某个条件满足。适合"改完所有 TODO"、"跑通所有测试"、"迁移完这个目录的 API 调用"这类长时间任务。</p>
+
+    <h2 data-lang="en">Quick Start</h2>
+    <h2 data-lang="zh" hidden">快速开始</h2>
+    <pre><span class="prompt">$</span> <span class="ok">/goal 修复 internal/bgjob/ 下所有测试</span>           <span class="dim"># TUI</span>
+<span class="prompt">$</span> <span class="ok">seek goal run "把 docs/ 下所有 .md 中的 V3 改为 V4"</span>  <span class="dim"># CLI</span></pre>
+
+    <h2 data-lang="en">How It Works</h2>
+    <h2 data-lang="zh" hidden">工作方式</h2>
+    <ol>
+      <li data-lang="en">You set a <strong>condition</strong> — e.g. "fix all lint errors"</li>
+      <li data-lang="zh" hidden">你给一个"完成条件"（condition）</li>
+      <li data-lang="en">The agent works autonomously — reading, editing, running commands</li>
+      <li data-lang="zh" hidden">agent 每轮自主调用工具</li>
+      <li data-lang="en">A <strong>cheap judge model</strong> (DeepSeek) checks if the condition is met after each turn</li>
+      <li data-lang="zh" hidden">一个廉价模型（DeepSeek）每轮判断条件是否满足</li>
+      <li data-lang="en">The run stops when: met / max_turns / timeout / stalled / token_budget / canceled / error</li>
+      <li data-lang="zh" hidden">满足停止条件时终止</li>
+    </ol>
+
+    <h3 data-lang="en">Stop Reasons</h3>
+    <h3 data-lang="zh" hidden">终止原因</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Reason</th>
+            <th data-lang="zh" hidden">原因</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>met</code></td><td data-lang="en">Judge confirmed condition satisfied</td><td data-lang="zh" hidden">判定条件已满足</td></tr>
+          <tr><td><code>max_turns</code></td><td data-lang="en">Reached turn cap (default 25)</td><td data-lang="zh" hidden">达到轮数上限</td></tr>
+          <tr><td><code>timeout</code></td><td data-lang="en">Wall-clock timeout</td><td data-lang="zh" hidden">超时</td></tr>
+          <tr><td><code>stalled</code></td><td data-lang="en">No progress for N turns (default 3)</td><td data-lang="zh" hidden">连续多轮无进展</td></tr>
+          <tr><td><code>token_budget</code></td><td data-lang="en">Token budget exhausted</td><td data-lang="zh" hidden">Tokens 预算耗尽</td></tr>
+          <tr><td><code>canceled</code></td><td data-lang="en">User canceled (Esc / SIGINT)</td><td data-lang="zh" hidden">用户取消</td></tr>
+          <tr><td><code>error</code></td><td data-lang="en">A turn execution failed</td><td data-lang="zh" hidden">某轮执行出错</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Safety Boundaries</h2>
+    <h2 data-lang="zh" hidden">安全边界</h2>
+    <p data-lang="en"><strong>Note:</strong> these protections apply only to the unattended paths (<code>seek goal run</code> and <code>cron --goal</code>). The TUI <code>/goal</code> uses your current permission posture — Ask prompts fire normally and remote push is not auto-blocked (you are present to supervise).</p>
+    <p data-lang="zh" hidden"><strong>注意：</strong>以下保护只在无人值守路径（<code>seek goal run</code> 和 <code>cron --goal</code>）启用。TUI 里的 <code>/goal</code> 走你当前的权限姿态——Ask 模式会逐次弹确认，push 也不会被自动拦（你在旁边，由你把关）。</p>
+    <p data-lang="en">In unattended mode (<code>goal run</code> / cron), seek automatically enables these protections:</p>
+    <p data-lang="zh" hidden">无人值守时（goal run / cron），自动启用以下保护：</p>
+    <ul>
+      <li data-lang="en"><strong>Remote commits blocked</strong> — <code>git push</code>, <code>gh pr</code>, <code>gh api</code> are refused</li>
+      <li data-lang="zh" hidden"><strong>禁止远程提交</strong>——<code>git push</code>、<code>gh pr</code>、<code>gh api</code> 等远程改动操作被拒绝</li>
+      <li data-lang="en"><strong>Auto-yolo</strong> — elevated to unattended mode (no one is there to click "allow")</li>
+      <li data-lang="zh" hidden"><strong>权限提升</strong>——自动进入 yolo 模式</li>
+      <li data-lang="en"><strong>Same workspace, not sandboxed</strong> — unlike autopilot, goal does <em>not</em> open a separate worktree and does not apply an OS sandbox. Remote push is blocked, but local writes (even outside cwd under yolo) are not kernel-confined. Verify the blast radius before running long unattended tasks.</li>
+      <li data-lang="zh" hidden"><strong>在工作目录里干活，但不是沙箱隔离</strong>——与 autopilot 不同，goal 不开独立 worktree、也不上 OS 沙箱。远程 push 被挡，但本地写入（yolo 下甚至可能在工作区之外）不受内核级限制。无人值守跑长任务前，请确认作用范围。</li>
+    </ul>
+    <div class="note">
+      <span data-lang="en">Remote-mutating commands (<code>git push</code>, <code>gh pr</code>, <code>gh api</code>, etc.) are blocked even in yolo mode during an unattended goal run.</span>
+      <span data-lang="zh" hidden>远程提交操作（<code>git push</code>、<code>gh pr</code>、<code>gh api</code> 等）即使在 yolo 模式下也被禁止。</span>
+    </div>
+
+    <h2 data-lang="en">TUI Usage</h2>
+    <h2 data-lang="zh" hidden">TUI 使用</h2>
+    <pre><span class="prompt">$</span> <span class="ok">/goal &lt;condition&gt;</span></pre>
+    <ul>
+      <li data-lang="en">Status bar shows current/limit turns and progress (<code>🎯 goal N/M</code> badge)</li>
+      <li data-lang="zh" hidden">状态栏显示当前轮/上限和进度（<code>🎯 goal N/M</code> 徽章）</li>
+      <li data-lang="en">Press <kbd>Esc</kbd> at any time to cancel</li>
+      <li data-lang="zh" hidden">随时按 Esc 取消</li>
+      <li data-lang="en">Auto-resumes unfinished goals on session restart</li>
+      <li data-lang="zh" hidden">会话重启后自动恢复未完成的 goal</li>
+    </ul>
+
+    <h2 data-lang="en">CLI Reference</h2>
+    <h2 data-lang="zh" hidden">CLI 参考</h2>
+    <pre><span class="prompt">$</span> <span class="ok">seek goal run "&lt;condition&gt;"</span>  <span class="dim"># Unattended run until condition met</span></pre>
+
+    <h3 data-lang="en">Caps (code defaults — no CLI / env switches yet)</h3>
+    <h3 data-lang="zh" hidden">上限参数（当前为内置默认，暂无 CLI / 环境变量开关）</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th data-lang="en">Param</th>
+            <th data-lang="zh" hidden">参数</th>
+            <th data-lang="en">Default</th>
+            <th data-lang="zh" hidden">默认</th>
+            <th data-lang="en">Description</th>
+            <th data-lang="zh" hidden">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Max turns</td><td>25</td><td data-lang="en">Stops with max_turns reason</td><td data-lang="zh" hidden">达到后以 max_turns 停止</td></tr>
+          <tr><td>Stall limit</td><td>3</td><td data-lang="en">N turns with no tool calls → stalled</td><td data-lang="zh" hidden">连续 N 轮无工具调用时停止</td></tr>
+          <tr><td>Timeout</td><td data-lang="en">30 min (headless <code>goal run</code>); none (TUI <code>/goal</code>)</td><td data-lang="zh" hidden">headless goal run 30 分钟；TUI /goal 无</td><td data-lang="en">Stops with timeout reason</td><td data-lang="zh" hidden">到点以 timeout 停止</td></tr>
+          <tr><td>Token budget</td><td>None</td><td data-lang="en">Reserved — no tracker wired yet</td><td data-lang="zh" hidden">预留（接入需 tracker，见 PRD 后续项）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">Goal vs Autopilot</h2>
+    <h2 data-lang="zh" hidden">Goal 与 Autopilot 的区别</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th></th>
+            <th data-lang="en">Goal</th>
+            <th data-lang="zh" hidden">Goal</th>
+            <th data-lang="en">Autopilot</th>
+            <th data-lang="zh" hidden">Autopilot</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong data-lang="en">Architecture</strong><strong data-lang="zh" hidden">架构</strong></td>
+            <td data-lang="en">Single agent, same conversation, multiple turns</td>
+            <td data-lang="zh" hidden">单 agent，同一对话多轮</td>
+            <td data-lang="en">Multiple agents, isolated worktrees, parallel</td>
+            <td data-lang="zh" hidden">多 agent，独立 worktree 并行</td>
+          </tr>
+          <tr>
+            <td><strong data-lang="en">Use case</strong><strong data-lang="zh" hidden">适用场景</strong></td>
+            <td data-lang="en">Linear tasks (edit → compile → test)</td>
+            <td data-lang="zh" hidden">线性任务（改代码 → 编译 → 测试）</td>
+            <td data-lang="en">Exploratory (parallel experiments)</td>
+            <td data-lang="zh" hidden">探索性任务（多方案并行实验）</td>
+          </tr>
+          <tr>
+            <td><strong data-lang="en">Isolation</strong><strong data-lang="zh" hidden">隔离</strong></td>
+            <td data-lang="en">Same workspace</td>
+            <td data-lang="zh" hidden">同一工作区</td>
+            <td data-lang="en">Per-agent worktree</td>
+            <td data-lang="zh" hidden">每个 subagent 独立 worktree</td>
+          </tr>
+          <tr>
+            <td><strong data-lang="en">Judge</strong><strong data-lang="zh" hidden">判決器</strong></td>
+            <td data-lang="en">Cheap DeepSeek call per turn</td>
+            <td data-lang="zh" hidden">DeepSeek 廉价模型每轮判断</td>
+            <td data-lang="en">Orchestrator aggregates results</td>
+            <td data-lang="zh" hidden">由 orchestrator 汇总结果</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2 data-lang="en">See Also</h2>
+    <h2 data-lang="zh" hidden">相关功能</h2>
+    <ul>
+      <li data-lang="en"><a href="guide-autopilot.html">Autopilot</a> — multi-agent parallel exploration</li>
+      <li data-lang="zh" hidden"><a href="guide-autopilot.html">Autopilot</a>——多 agent 并行探索</li>
+      <li data-lang="en"><a href="guide-cron.html">Cron / Background Jobs</a> — scheduled execution</li>
+      <li data-lang="zh" hidden"><a href="guide-cron.html">定时任务</a>——定时执行</li>
+    </ul>
+  </div>
+
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/whyiyhw/seek">GitHub</a>
+    <span class="sep">·</span>
+    <span class="dim">design docs: <a href="/prd/feature-goal.md">PRD</a></span>
+  </div>
+</div>
+
+<script>
+  let currentTheme = localStorage.getItem('seek-theme') || 'dark';
+  const themeBtn = document.getElementById('themeToggle');
+  function setTheme(theme) {
+    currentTheme = theme;
+    localStorage.setItem('seek-theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+    themeBtn.textContent = theme === 'dark' ? '☀️' : '🌙';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = theme === 'dark' ? '#0b0b0e' : '#f4f3ef';
+  }
+  setTheme(currentTheme);
+  themeBtn.addEventListener('click', () => { setTheme(currentTheme === 'dark' ? 'light' : 'dark'); });
+
+  let currentLang = localStorage.getItem('seek-lang') || 'zh';
+  function setLang(lang) {
+    currentLang = lang;
+    localStorage.setItem('seek-lang', lang);
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh';
+    document.querySelectorAll('[data-lang]').forEach(el => {
+      el.hidden = el.getAttribute('data-lang') !== lang;
+    });
+    updateSegments(lang);
+  }
+  function updateSegments(lang) {
+    document.querySelectorAll('#langToggle span').forEach(s => {
+      s.classList.toggle('active', s.getAttribute('data-lang-val') === lang);
+    });
+  }
+  setLang(currentLang);
+  document.querySelectorAll('#langToggle span').forEach(s => {
+    s.addEventListener('click', () => {
+      const lang = s.getAttribute('data-lang-val');
+      if (lang !== currentLang) setLang(lang);
+    });
+  });
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
+  }, { threshold: 0.15 });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>

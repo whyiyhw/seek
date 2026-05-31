@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0b0b0e" />
+<meta name="description" content="seek references — semantic find-references via language server (gopls, pyright, typescript-language-server)." />
+<title>References — seek docs</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; font-size: 16px; }
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: var(--bg); color: var(--text-body); line-height: 1.65;
+    -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  :root {
+    --bg: #0b0b0e; --surface: #12121a; --surface-2: #0e0e14; --surface-3: #1a1a24;
+    --border: #1e1e2a; --text: #d0d0d8; --text-body: #d0d0d8; --dim: #6a6a7a;
+    --amber: #f5a623; --amber-dim: rgba(245,166,35,.15);
+    --teal: #00d4ff; --teal-dim: rgba(0,212,255,.12);
+    --green: #22c55e; --hover-bg: rgba(255,255,255,.04); --border-dim: rgba(255,255,255,.04);
+  }
+  [data-theme="light"] {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #e8e7e2; --surface-3: #dddcd6;
+    --border: #dddcd6; --text: #1a1a1e; --text-body: #1a1a1e; --dim: #7a7a82;
+    --amber: #c9861a; --amber-dim: rgba(201,134,26,.12); --teal: #009e9e; --teal-dim: rgba(0,158,158,.10);
+    --green: #15803d; --hover-bg: rgba(0,0,0,.04); --border-dim: rgba(0,0,0,.04);
+  }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -.02em; line-height: 1.15; }
+  h1 { font-size: clamp(1.5rem, 4vw, 2.8rem); margin-bottom: 8px; }
+  h2 { font-size: clamp(1.2rem, 2.5vw, 1.6rem); margin: 32px 0 16px; color: var(--amber); }
+  h3 { font-size: clamp(1rem, 2vw, 1.2rem); margin: 24px 0 8px; color: var(--teal); }
+  p { max-width: 64ch; color: var(--dim); font-size: .88rem; margin-bottom: 12px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: .82rem; background: var(--surface-2); padding: 2px 6px; border-radius: 3px; color: var(--teal); }
+  pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 16px 18px; overflow-x: auto; font-size: .8rem; color: var(--teal); margin-bottom: 16px; }
+  pre .prompt { color: var(--amber); } pre .ok { color: var(--green); } pre .dim { color: var(--dim); }
+  ul, ol { color: var(--text-body); font-size: .85rem; padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+  .breadcrumb { padding: 20px 0 0; font-size: .8rem; color: var(--dim); }
+  .breadcrumb a { color: var(--teal); } .breadcrumb a:hover { color: var(--amber); }
+  .page-header { padding: 40px 0 32px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+  .page-header .subtitle { font-size: .9rem; color: var(--dim); margin-top: 6px; }
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; margin-bottom: 24px; }
+  .table-wrap table { width: 100%; min-width: 400px; border-collapse: collapse; font-size: .82rem; }
+  .table-wrap th { background: var(--surface-3); color: var(--amber); text-align: left; padding: 12px 14px; border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing: .06em; font-size: .7rem; }
+  .table-wrap td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .table-wrap tr:last-child td { border-bottom: none; }
+  .table-wrap tr:hover td { background: rgba(0,212,255,.03); }
+  .note { background: var(--surface); border-left: 3px solid var(--teal); padding: 16px 20px; border-radius: 0 4px 4px 0; font-size: .82rem; color: var(--dim); margin: 20px 0 28px; }
+  .page-footer { border-top: 1px solid var(--border); padding: 28px 0; text-align: center; }
+  .page-footer a { color: var(--teal); font-size: .82rem; } .page-footer a:hover { color: var(--amber); }
+  .page-footer .sep { color: var(--dim); margin: 0 10px; }
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+  .util-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer; font-size: .9rem; transition: all .2s ease; flex-shrink: 0; color: var(--dim); }
+  .theme-toggle:hover { border-color: var(--amber); color: var(--amber); }
+  .lang-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; font-family: "JetBrains Mono", monospace; font-size: .78rem; line-height: 1; flex-shrink: 0; }
+  .lang-toggle span { padding: 10px 14px; cursor: pointer; transition: all .2s ease; color: var(--dim); user-select: none; }
+  .lang-toggle span.active { background: var(--teal); color: #0b0b0e; font-weight: 700; }
+  .lang-toggle span:not(.active):hover { color: var(--teal); }
+  @media (max-width: 640px) { .container { padding: 0 16px; } pre { padding: 12px 14px; font-size: .75rem; } }
+</style>
+</head>
+<body>
+<div style="display:flex;justify-content:flex-end;padding:12px 24px 0;max-width:860px;margin:0 auto;">
+  <div class="util-bar">
+    <button class="theme-toggle" id="themeToggle">☀️</button>
+    <div class="lang-toggle" id="langToggle">
+      <span data-lang-val="en">EN</span>
+      <span data-lang-val="zh">中文</span>
+    </div>
+  </div>
+</div>
+<div class="container">
+  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>References</span></div>
+  <div class="page-header">
+    <h1 data-lang="en">References — Semantic Find-References</h1>
+    <h1 data-lang="zh" hidden>References — 语义找引用</h1>
+    <p class="subtitle" data-lang="en">Ask the language server who calls/uses a symbol. Resolves real symbols, follows aliased imports, ignores comments.</p>
+    <p class="subtitle" data-lang="zh" hidden">通过语言服务器查找符号的所有引用——解析真实符号、跟踪别名导入、跳过注释和字符串。</p>
+  </div>
+  <div class="reveal">
+    <div class="note">
+      <span data-lang="en">seek's LSP integration is <strong>slim</strong> — <code>references</code> only. <code>definition</code>/<code>hover</code>/symbol listing are intentionally omitted (Go: covered by grep + <code>go build</code>; dynamic langs: <code>references</code> is the high-value win).</span>
+      <span data-lang="zh" hidden">seek 的 LSP 集成是瘦身版——只做 references。definition/hover/符号列表故意不做。</span>
+    </div>
+
+    <h2 data-lang="en">Install the Server</h2>
+    <h2 data-lang="zh" hidden">装语言服务器</h2>
+    <p data-lang="en">You must have the language server on PATH:</p>
+    <p data-lang="zh" hidden">需将对应 server 放进 PATH：</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th data-lang="en">Language</th><th data-lang="zh" hidden">语言</th><th data-lang="en">Server</th><th data-lang="zh" hidden">Server</th><th data-lang="en">Install</th><th data-lang="zh" hidden">安装</th></tr></thead>
+        <tbody>
+          <tr><td>Go</td><td><code>gopls</code></td><td><code>go install golang.org/x/tools/gopls@latest</code></td></tr>
+          <tr><td>Python</td><td><code>pyright-langserver</code></td><td><code>npm i -g pyright</code></td></tr>
+          <tr><td>TS/JS</td><td><code>typescript-language-server</code></td><td><code>npm i -g typescript-language-server typescript</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p data-lang="en">Missing server = graceful error message, not a crash.</p>
+    <p data-lang="zh" hidden">没装 server 时返回错误信息，不崩溃。</p>
+
+    <h2 data-lang="en">Usage: grep → references</h2>
+    <h2 data-lang="zh" hidden">用法：先 grep 找声明，再 references 找引用</h2>
+    <pre><span class="prompt"># 1. grep 找到声明在哪</span>
+grep "func Kill" internal/bgjob/bgjob.go → bgjob.go:230
+
+<span class="prompt"># 2. references 拿到所有语义引用</span>
+references(file="internal/bgjob/bgjob.go", line=230, symbol="Kill")
+→ 4 reference(s) to Kill:
+  internal/tools/monitor/monitor.go:112:9 | if err := t.mgr.Kill(a.Job); err != nil {</pre>
+
+    <ul>
+      <li data-lang="en"><strong>symbol</strong> finds the exact column on that line; can also pass <strong>character</strong> (1-based) directly.</li>
+      <li data-lang="zh" hidden"><strong>symbol</strong> 用于在那一行定位精确列；也可以直接传 <strong>character</strong>（1-based）。</li>
+      <li data-lang="en">Line numbers are <strong>1-based</strong> (matching grep / editor).</li>
+      <li data-lang="zh" hidden">行号是 1-based（和 grep / 编辑器一致）。</li>
+      <li data-lang="en">Result cap: <strong>50</strong> references; more = "… N more …".</li>
+      <li data-lang="zh" hidden">结果上限 50 条，超出标 … N more …。</li>
+    </ul>
+
+    <h2 data-lang="en">When to Use grep Instead</h2>
+    <h2 data-lang="zh" hidden">什么时候用 grep</h2>
+    <p data-lang="en">grep is fine for: "where is X defined?", listing symbols, fuzzy search. <code>references</code> is for <strong>"who uses it?"</strong> — the safety net before changing an exported API.</p>
+    <p data-lang="zh" hidden">找"X 定义在哪"、列符号、模糊搜索——grep 就够。references 专门回答"谁用了它"。</p>
+
+    <h2 data-lang="en">Lifecycle</h2>
+    <h2 data-lang="zh" hidden">生命周期</h2>
+    <ul>
+      <li data-lang="en">Language server starts once per session (session-scoped ctx, not turn-scoped).</li>
+      <li data-lang="zh" hidden">语言服务器每个会话启动一次（使用会话级 ctx，非回合级）。</li>
+      <li data-lang="en">Turn-level ctx cancels the query, not the server — gopls cold-start is not re-done on Esc.</li>
+      <li data-lang="zh" hidden">回合级 ctx 取消的是查询，不是 server——gopls 冷启动不会因 Esc 而重新开始。</li>
+      <li data-lang="en">Dead server (crash / EOF) fails all inflight and future calls.</li>
+      <li data-lang="zh" hidden">server 崩溃时所有进行中和未来的调用都失败。</li>
+    </ul>
+
+    <p data-lang="en">Design: <a href="/prd/feature-lsp.md">PRD feature-lsp.md</a></p>
+    <p data-lang="zh" hidden">设计文档：<a href="/prd/feature-lsp.md">PRD feature-lsp.md</a></p>
+  </div>
+  <div class="page-footer">
+    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
+  </div>
+</div>
+<script>
+  let ct = localStorage.getItem('seek-theme') || 'dark', tb = document.getElementById('themeToggle');
+  function st(t) { ct = t; localStorage.setItem('seek-theme', t); document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? '☀️' : '🌙'; const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = t === 'dark' ? '#0b0b0e' : '#f4f3ef'; }
+  st(ct); tb.addEventListener('click', () => { st(ct === 'dark' ? 'light' : 'dark'); });
+  let cl = localStorage.getItem('seek-lang') || 'zh';
+  function sl(l) { cl = l; localStorage.setItem('seek-lang', l); document.documentElement.lang = l === 'en' ? 'en' : 'zh'; document.querySelectorAll('[data-lang]').forEach(e => { e.hidden = e.getAttribute('data-lang') !== l; }); document.querySelectorAll('#langToggle span').forEach(s => { s.classList.toggle('active', s.getAttribute('data-lang-val') === l); }); }
+  sl(cl);
+  document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
+  new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
+</script>
+</body>
+</html>
