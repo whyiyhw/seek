@@ -145,5 +145,7 @@
   document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
   new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
 </script>
+  <script defer src="search-index.js"></script>
+  <script defer src="search.js"></script>
 </body>
 </html>
