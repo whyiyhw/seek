@@ -63,7 +63,7 @@
   </div>
 </div>
 <div class="container">
-  <div class="breadcrumb"><a href="/">Home</a> / <a href="/docs/">Docs</a> / <span>MCP</span></div>
+  <div class="breadcrumb"><a href="../index.html">Home</a> / <a href="index.html">Docs</a> / <span>MCP</span></div>
   <div class="page-header">
     <h1 data-lang="en">MCP — Tool Integration Protocol</h1>
     <h1 data-lang="zh" hidden>MCP — 工具集成协议</h1>
@@ -110,11 +110,11 @@
     <p data-lang="en">MCP tools are merged at startup and listed alongside built-in tools when the agent decides which to call. Unlike built-in tools, MCP tools have <strong>no system-prompt-level guidance</strong> — the agent discovers them by name + description alone. Give your MCP server tools descriptive names and descriptions.</p>
     <p data-lang="zh" hidden">MCP 工具在启动时合并，但无系统提示层面的引导——agent 仅通过名称和描述发现它们。请给你的 MCP server 工具起描述性的名称和说明。</p>
 
-    <p data-lang="en">Design: <a href="/prd/feature-mcp-client.md">PRD feature-mcp-client.md</a></p>
-    <p data-lang="zh" hidden">设计文档：<a href="/prd/feature-mcp-client.md">PRD feature-mcp-client.md</a></p>
+    <p data-lang="en">Design: <a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-mcp-client.md">PRD feature-mcp-client.md</a></p>
+    <p data-lang="zh" hidden">设计文档：<a href="https://github.com/whyiyhw/seek/blob/main/docs/prd/feature-mcp-client.md">PRD feature-mcp-client.md</a></p>
   </div>
   <div class="page-footer">
-    <a href="/docs/">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
+    <a href="index.html">← Back to Docs</a> <span class="sep">·</span> <a href="https://github.com/whyiyhw/seek">GitHub</a>
   </div>
 </div>
 <script>
@@ -127,5 +127,7 @@
   document.querySelectorAll('#langToggle span').forEach(s => { s.addEventListener('click', () => { const l = s.getAttribute('data-lang-val'); if (l !== cl) sl(l); }); });
   new IntersectionObserver((e) => { e.forEach(i => { if (i.isIntersecting) { i.target.classList.add('visible'); } }) }, { threshold: 0.15 }).observe(document.querySelector('.reveal'));
 </script>
+  <script defer src="search-index.js"></script>
+  <script defer src="search.js"></script>
 </body>
 </html>
