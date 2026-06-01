@@ -9,12 +9,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-f5a623?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/CI-race--tested-2ea043?style=flat-square&logo=github&logoColor=white" alt="CI">
-  <img src="https://img.shields.io/badge/release-v0.8.0-f5a623?style=flat-square" alt="release">
+  <img src="https://img.shields.io/badge/release-v0.8.1-f5a623?style=flat-square" alt="release">
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-2b2b32?style=flat-square" alt="Platforms">
   &nbsp;·&nbsp; <a href="README.md">English</a>
 </p>
 
-一个编码 agent，以单个 **~5 MB Go 二进制** 跑在你的终端里——**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，同时也讲 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）。
+一个编码 agent，以单个 **静态 Go 二进制** 跑在你的终端里——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，同时也讲 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）。
 
 ---
 
@@ -113,7 +113,7 @@ seek hooks      list / check / trust / audit
 
 ## 为真实场景打造，不是周末玩具
 
-**~85k 行 Go**（~44k 非测试），跨 **66 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.8.0**。
+**~85k 行 Go**（~44k 非测试），跨 **66 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.8.1**。
 
 文档：[`docs/`](docs/) · 贡献：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 
