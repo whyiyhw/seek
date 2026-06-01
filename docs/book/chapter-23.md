@@ -260,4 +260,36 @@ v6 的 5 根柱子的共同特征是**小而专注**：
 
 ---
 
+### 相关踩坑
+
+v6 单点工具实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. webfetch 手动 Accept-Encoding 关闭透明解压**
+
+- **Saw**：webfetch 返回 gzip 原始字节而非解压后的 HTML。
+- **Why**：手动设置 `Accept-Encoding: gzip` 触发 Go 的 DIY 解压模式。
+- **Fix**：移除手动 header，依赖 Go transport 自动编解码。
+
+**2. grep 宽泛模式死锁 agent**
+
+- **Saw**：`grep "llm"` 匹配上千行，撑爆 context，`/compact` 无法恢复。
+- **Fix**：在工具层加 max_matches 上限（默认 20，最大 200）。
+
+**3. Windows CRLF 上 edit 匹配失败**
+
+- **Saw**：`old_string` 使用 LF 换行，在 CRLF 的 Go 文件上匹配失败。
+- **Fix**：匹配前规范化换行符。
+
+**4. AskUser v2 选择器按键白名单与键盘路由不同步**
+
+- **Saw**：自动打开的选择器需要白名单放行某些按键，该白名单与键盘路由注册表不同步。
+- **Fix**：统一两套注册表的按键映射定义。
+
+**5. `--fix` 模式的 consumeArm 绕过**
+
+- **Saw**：代码评审的 `--fix` 模式绕过 `consumeArm` 保护，直接执行修复。
+- **Fix**：skill arm 内联在注入 prompt 中而非依赖 TUI 交互。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
 > **下一章**：v7 四柱——从追赶 Reasonix 到深化护城河。

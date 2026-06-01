@@ -438,6 +438,31 @@ RebuildAgent: func() (*agent.Agent, error) {
 
 ---
 
+### 相关踩坑
+
+Skill 系统实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Go 字符串字面量中的 UTF-8 BOM 是编译错误**
+
+- **Saw**：在 Go 源码中嵌入带 BOM（`\uFEFF`）的字符串字面量时，Go 编译器报错。
+- **Fix**：从外部文件读取含 BOM 的内容，或使用 `\uFEFF` 转义序列。
+
+**2. macOS APFS 大小写不敏感导致 SKILL.md 和 skill.md 冲突**
+
+- **Saw**：GitHub CI（Linux ext4）上测试通过，但本地 macOS 开发者 `SKILL.md` 和 `skill.md` 被当作同一文件，测试静默失败。
+- **Why**：macOS APFS 默认大小写不敏感，`SKILL.md` 和 `skill.md` 指向同一 inode。
+- **Fix**：测试用例使用不同的文件名前缀而非仅大小写区别。
+
+**3. 内建 skill 的注入顺序必须确定**
+
+- **Saw**：每次启动时 manifest 字节序列不同，前缀缓存每次 miss。
+- **Why**：`go:embed` 的文件顺序取决于文件系统遍历顺序，不保证确定性。
+- **Fix**：在 Wire() 时按文件名排序，确保 manifest 字节稳定。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - Skill = "任务说明书"，AGENTS.md = "项目宪法"。看起来重叠，但服务的"指令覆盖面"不同

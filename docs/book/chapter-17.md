@@ -419,6 +419,26 @@ v2 没有把 v0 推翻——单文件 .md 永远兼容, 没有 "manifest" 或者
 
 ---
 
+### 相关踩坑
+
+Skill 生命周期管理实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `skill_commit` 不能静默选择 scope——模型没有用户意图信号**
+
+- **Saw**：LLM 驱动的 skill 安装流程中，模型自动选择了 `scope="user"`，用户期望的是项目级安装。
+- **Why**：模型没有任何用户意图信号来判断 user 还是 project 范围——两种范围有完全不同的隐私和共享语义。
+- **Fix**：`scope` 参数必须由 `ask_user` 工具让用户选择，模型不能默认。
+
+**2. `t.Cleanup(chdir)` 在 `t.TempDir()` 之后破坏 Windows 清理**
+
+- **Saw**：Windows CI 上 TempDir 清理失败："The process cannot access the file because it is being used by another process"。
+- **Why**：`t.Cleanup(chdir)` 将工作目录切换到 TempDir，测试完成后 chdir 尚未恢复 TempDir 就被删除。Windows 不允许删除进程当前工作目录。
+- **Fix**：确保 `t.Cleanup(chdir)` 在 `t.TempDir()` 之前注册，或使用绝对路径。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - v0 的"丢文件就生效"模型在 skill 增长后有三个缺口:**没有 install / 没有调用痕迹 / 没有生效保障**, v2 补这三块

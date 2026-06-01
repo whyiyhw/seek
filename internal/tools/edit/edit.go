@@ -68,11 +68,14 @@ type Snapshotter interface {
 	FinaliseSnapshot(path string, after []byte) error
 }
 
+// Tool is the edit tool implementation. Construct via New, with optional
+// WithSnapshotter for file checkpoint integration.
 type Tool struct {
 	policy *permission.Policy
 	snap   Snapshotter
 }
 
+// New returns an edit tool gated by the given permission policy.
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
 
 // WithSnapshotter returns a copy of t bound to s. Optional — leaving

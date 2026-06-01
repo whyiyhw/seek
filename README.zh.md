@@ -28,6 +28,23 @@
 
 ---
 
+## 亲眼看它跑 —— 这些文档是 seek 自己审计的
+
+我们只给了 seek 一个目标——*"审计代码库文档的准确性、修正它们、并把我们的踩坑日志织进 book"*——然后走开。它自己规划、**派出一队子代理**、改了 **33 个文件、覆盖全部 24 个 book 章节**,直到一个便宜模型判定目标达成才停:**120 轮 · 212 次工具调用 · 干净构建 · 97.7% 缓存命中 · $0.17。** 真实跑批,未剪辑(仅加速):
+
+**1 · 先规划,再派出一队子代理**
+<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek plans the task, then fans out explore sub-agents" width="820"></p>
+
+**2 · 跨整个代码库自治干活**
+<p align="center"><img src="examples/demo-edit.gif" alt="seek edits doc comments and weaves pitfalls into book chapters" width="820"></p>
+
+**3 · 直到便宜模型判定目标达成**
+<p align="center"><img src="examples/demo-goalmet.gif" alt="goal met after 3 turns, clean build, $0.17" width="820"></p>
+
+本 PR 里的每一处文档改动,都出自那一次 **$0.17** 的跑批。录制脚本:[`examples/demo-fullrun.tape`](examples/demo-fullrun.tape)。
+
+---
+
 ## 安装
 
 ```bash

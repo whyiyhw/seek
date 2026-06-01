@@ -38,6 +38,7 @@ type Args struct {
 
 type Tool struct{}
 
+// New returns a list_dir tool.
 func New() Tool { return Tool{} }
 
 func (Tool) Name() string            { return "list_dir" }

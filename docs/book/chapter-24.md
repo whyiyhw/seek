@@ -364,4 +364,36 @@ v7 把这两轴做成了产品：
 
 ---
 
+### 相关踩坑
+
+v7 Autopilot / Sandbox / ACP 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Landlock ABI 版本不匹配导致 create_ruleset 返回 EINVAL**
+
+- **Saw**：在旧内核上启动 sandbox 失败。
+- **Why**：Landlock LSM 的 ABI 版本不同支持不同的 access right。固定 mask 包含了当前内核不支持的 right。
+- **Fix**：运行时查询内核支持的 Landlock ABI 版本，按版本降级 access right mask。
+
+**2. 子进程夺取 /dev/tty——Esc 无法中断**
+
+- **Saw**：sandbox 内的子进程夺取终端控制权，主进程按 Esc 无反应。
+- **Fix**：子进程 I/O 通过 pipe 而非共享终端。
+
+**3. Setsid 后孙进程孤儿导致 Wait() 死锁**
+
+- **Saw**：创建新 session 后孙进程成为孤儿，管道写入端不关闭，Wait() 永远阻塞。
+- **Fix**：取消时强制 kill 整个进程组。
+
+**4. /proc/PID/children 在 CI 上为空**
+
+- **Saw**：CI 环境无法通过 `/proc/PID/children` 枚举子进程。
+- **Fix**：回退到 PPID 扫描。
+
+**5. WSL sudo 逃逸进程组 kill**
+
+- **Saw**：WSL 中 `sudo` 启动的进程不在同一进程组，kill 失败，Wait() 超时。
+- **Fix**：使用 `sudo` 配合 `--kill-child` 或直接以非 root 用户运行 sandbox。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
 > **下一章**：暂无。v7 四柱交付后，seek 的下一阶段将走向何方——见 [`docs/prd/vision.md`](../prd/vision.md)。

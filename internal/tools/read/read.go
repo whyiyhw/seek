@@ -44,6 +44,7 @@ type Tool struct {
 	policy *permission.Policy
 }
 
+// New returns a read tool gated by the given permission policy.
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
 
 func (Tool) Name() string            { return "read" }

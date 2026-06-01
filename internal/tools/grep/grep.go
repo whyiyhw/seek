@@ -77,6 +77,7 @@ const (
 // Tool is the grep tool implementation.
 type Tool struct{}
 
+// New returns a grep tool.
 func New() Tool { return Tool{} }
 
 func (Tool) Name() string            { return "grep" }

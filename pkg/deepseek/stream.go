@@ -342,8 +342,9 @@ func StripReasoningContent(msgs []Message) []Message {
 	return out
 }
 
-// formatPercent is a tiny helper used by cmd/seek; lives here so external
-// callers don't reinvent it.
+// FormatHitRatio formats a Usage as a human-readable percentage string
+// (e.g. "73.2%"). Returns "n/a" when there are no cache-accounted tokens.
+// Lives in deepseek so external callers don't reinvent it.
 func FormatHitRatio(u Usage) string {
 	if u.PromptCacheHitTokens+u.PromptCacheMissTokens == 0 {
 		return "n/a"

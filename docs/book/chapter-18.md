@@ -292,6 +292,34 @@ Plan Mode 之后变成：
 
 ---
 
+### 相关踩坑
+
+Plan Mode 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `[plan: approved]` 是承重线格式前缀**
+
+- **Why**：`[plan: approved]` 这个字符串看起来像日志文本，但它是 `propose` 工具和 `plan` 重构器（`reconstruct.go`）共享的线格式契约。`seek -resume` 时系统扫描会话历史中的这个前缀来重建 plan 状态。
+- **Lesson**：一旦某个结果前缀有了解析器，它就是线格式。修改它（如改为 `[plan: approved batch]`）会无声破坏 `--resume` 的 plan 状态重建。**新变体必须加在关闭标记之后**（`[plan: approved] (auto-approve-per-step)`），永远不能改标记本身。
+
+**2. Plan artifact write 需要 Sink.Approved 前的上下文**
+
+- **Saw**：`propose` Sink 的 `Approved()` 触发时需要当前执行上下文（如 projectID、sessionID）来写 plan artifact，但 Sink 接口没有传递这些信息。
+- **Fix**：新增可选的 `ContextReceiver` sibling 接口——`Approved` 之前先调 `SetContext(ctx)` 注入上下文。不破坏现有的 Sink 接口签名（sibling interface 模式）。
+
+**3. 审批 callback 两端都需要 ctx-aware select**
+
+- **Saw**：审批回调在 channel 上阻塞等待用户回复时，用户按 Esc 取消，发送端和接收端都可能卡住。
+- **Fix**：发送端 `select { case ch <- v: ... case <-ctx.Done(): ... }`，接收端同理。两端同步处理取消。
+
+**4. `/help` 文档声明的 `?` 热键未实现**
+
+- **Saw**：`/help` overlay 的文档里写着"按 ? 快速打开帮助"，但 `?` 键没有对应的 handler。
+- **Fix**：在 key handler 中添加对 `?` 的识别，与 Ctrl+H 行为一致。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - plan mode 从"单向 toggle"重构为 analyze → propose → execute → report 闭环，每个子态有明确的读写限制

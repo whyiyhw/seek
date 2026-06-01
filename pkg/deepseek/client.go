@@ -28,20 +28,32 @@ const (
 	endpointFIM = "/beta/completions"
 )
 
+// Client is a DeepSeek API client. Construct via New, then call Chat, ChatStream, or FIM.
 type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
 }
 
+// Option configures a Client. See WithAPIKey, WithBaseURL, WithHTTPClient.
 type Option func(*Client)
 
-func WithAPIKey(k string) Option       { return func(c *Client) { c.apiKey = k } }
-func WithBaseURL(u string) Option      { return func(c *Client) { c.baseURL = u } }
+// WithAPIKey returns an Option that sets the API key used for authentication.
+// If DEEPSEEK_API_KEY is set in the environment, that value is used as default.
+func WithAPIKey(k string) Option { return func(c *Client) { c.apiKey = k } }
+
+// WithBaseURL returns an Option that overrides the default API base URL.
+func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
+
+// WithHTTPClient returns an Option that replaces the default HTTP client.
+// Useful for custom timeouts, testing with httptest, or injecting transport layers.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
 }
 
+// New returns a Client with the given functional options.
+// Defaults: baseURL = DefaultBaseURL (DeepSeek production), HTTP timeout = 5 minutes.
+// At minimum, WithAPIKey or DEEPSEEK_API_KEY must be set before making requests.
 func New(opts ...Option) *Client {
 	c := &Client{
 		baseURL: DefaultBaseURL,

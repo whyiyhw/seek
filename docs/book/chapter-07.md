@@ -286,6 +286,51 @@ func bannerWithLettersRevealed(n int) string {
 
 ---
 
+### 相关踩坑
+
+TUI 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Alt-screen 模式破坏 scrollback、复制和内容持久性**
+
+- **Saw**：M4 版本使用 `tea.WithAltScreen()`。问题累积：终端 scrollback 消失（只有一个应用内 viewport），复制只能在可见区域内工作，退出 seek 后整个对话消失，OSC 查询响应无处可去。
+- **Why**：alt-screen 切换到终端的备屏缓冲区。该缓冲区**设计上就没有 scrollback**——它是为全屏应用（vim、less）准备的，使用者接受"屏幕上有什么就是什么"。对于聊天式编码 agent，这个权衡是错的：用户希望任意回滚、复制任意历史消息、退出后对话仍然留在 shell 中。
+- **Fix**：M4.5.1 切换到 inline 模式。移除 `tea.WithAltScreen()`，已提交的历史（用户 prompt、tool result、已完成的 assistant 消息）通过 `tea.Println` 发布到终端的原生 scrollback。bubbletea 的 live 区域只持有易失状态（活动工具、流式输出、输入框、状态栏）。
+- **Lesson**：alt-screen 对任何"有历史记录的对话"都是错误默认。仅用于真正的全屏模态 UI（文件选择器、日志查看器）。Inline 模式 + `tea.Println` 提交内容是 Claude Code、gh CLI、gemini CLI 的选择——这不是巧合。
+- **后续**：后来一次修复布局漂移的尝试把 seek 切回了 alt-screen，鼠标滚轮和复制再次损坏——同一个教训被学习了两次。参见 "Inline-mode drift"。
+
+**2. `WindowSizeMsg` 不可靠——Init 中主动合成**
+
+- **Saw**：bubbletea 的 `WindowSizeMsg` 在某些终端/tmux/`go run` 组合下会延迟或丢失。没有窗口尺寸时 `relayout()` 无法进行。
+- **Fix**：在 `Init()` 中通过 `term.GetSize(os.Stdout.Fd())` 主动合成 `WindowSizeMsg`。如果真实事件后来到达，幂等的 relayout 只是重新执行一次。
+
+**3. KeyMsg 不能发给两个消费者**
+
+- **Saw**：Update 把每个 `KeyMsg` 同时发给 textarea 和 viewport。viewport 的默认键映射包含空格、b、f、j、k 用于滚动——这些也是普通文本输入。结果：打字时页面也跟着滚动。
+- **Fix**：显式 per-key 路由——全局键由 handleKey 处理；PgUp/PgDn/Ctrl+U/Ctrl+D → viewport；其他所有 → textarea。
+
+**4. 自动滚动应尊重用户意图**
+
+- **Saw**：streaming 时每收到一个 token 都调用 `viewport.GotoBottom()`。用户滚动到上面阅读历史时会被拉回底部。
+- **Fix**：在应用事件前捕获 `wasAtBottom := m.viewport.AtBottom()`，仅当为 true 时才 `GotoBottom()`。
+
+**5. OSC 11 探针时序——bubbletea 启动前完成**
+
+- **Saw**：`glamour.WithAutoStyle()` 通过 OSC 11 查询终端背景色。终端响应在 bubbletea 已进入 alt-screen 后才到达，被当成键盘输入，显示为 `]11;rgb:...` 乱码。
+- **Fix**：在 `cmd/seek` 中，进入 bubbletea 的 alt-screen **之前**同步调用 `termenv.NewOutput(os.Stdout).HasDarkBackground()`，结果作为 `Options` 传入。
+
+**6. `for range string` 的 byte 索引陷阱**
+
+- **Saw**：`for j, r := range s` 中 j 是 rune 的**字节**起始位置，不是字符索引。涉及中文、特殊符号时切片错误破坏 UTF-8 序列。
+- **Fix**：需要按字符位置做计算时先转 `[]rune(s)`。
+
+**7. 鼠标捕获权衡：drag-to-select vs 滚轮**
+
+- 两次反转：最初移除 `tea.WithMouseCellMotion()` 恢复原生选择→用户失去滚轮→重新启用→drag 失效。最终方案：alt-screen 模式下启用滚轮，并提供修饰键（Option）作为原生选择的逃逸口。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - inline 模式保留 scrollback，是聊天类工具的正确选择

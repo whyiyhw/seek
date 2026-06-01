@@ -437,6 +437,31 @@ pkg/llm/provider/gemini/client_test.go      6 tests
 
 ---
 
+### 相关踩坑
+
+多 Provider 支持实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Anthropic 要求 tool_result 合并到同一条 user 消息**
+
+- **Saw**：将每个 `tool_result` 分别作为独立 `role="user"` 消息发送给 Anthropic API，返回 400。
+- **Why**：Anthropic 要求同一轮中所有 `tool_result` 块合并到**一条** `role="user"` 消息中。
+- **Fix**：在 `translate.go` 中累积同一批 tool result，合并为一条 user 消息发送。
+
+**2. Gemini 没有 tool call ID——system message 是顶层字段**
+
+- **Saw**：Gemini 的 functionCall 没有 ID 字段；system message 不是消息数组的一部分，而是顶层 `systemInstruction` 字段。
+- **Fix**：Provider 层自生成 `gemini_N` 形式的 ID；system message 在构建请求时放到顶层。
+
+**3. OpenAI streaming token 计数默认关闭**
+
+- **Saw**：OpenAI 的流式响应中 token 用量不在 SSE 事件中返回。
+- **Why**：需要显式设置 `stream_options: {include_usage: true}`。
+- **Fix**：在 buildRequest 中对 OpenAI 路径设置此选项。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - 多 Provider 的核心架构：**第一公民（DeepSeek）+ 第二公民（pkg/llm）两层并排，pkg/agent 用 type switch 衔接**——CI lint 用一行 grep 把这条规则物化

@@ -490,6 +490,54 @@ streamEndMsg 派发时另外打印一行 `↪ <preview>`（queue）或 `↪ stee
 
 ---
 
+### 相关踩坑
+
+TUI 稳定化中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Esc 取消后用户 prompt 被静默丢弃**
+
+- **Saw**：按 Esc 取消流式响应后，用户已输入但未提交的 prompt 消失。用户必须重新打字。
+- **Why**：Esc 处理逻辑在取消 stream 后没有保留输入框的当前内容。
+- **Fix**：引入 `queuedText` 机制——取消时保存输入框内容，stream 完全终止后恢复。
+
+**2. `tea.Println` 返回的 Cmd 被静默丢弃——scrollback 行计数漂移**
+
+- **Saw**：`_ = tea.Println(line)` 模式丢弃了 `tea.Println` 返回的 `tea.Cmd`。bubbletea 框架没有执行这个 cmd，scrollback 行计数逐渐漂移，最终布局错乱。
+- **Why**：`tea.Println` 和 `tea.ClearScreen` 都返回 `tea.Cmd`，必须由 `Update` 返回给框架执行。丢弃后框架不知道有新的输出需要渲染。
+- **Fix**：所有 `tea.Println` 调用都改为返回组合 cmd（`m.cmds = append(m.cmds, tea.Println(...))`）。
+
+**3. `/model` 更新了显示但没更新 Agent 的实际模型**
+
+- **Saw**：用户敲 `/model deepseek-chat`，状态栏显示了新模型名，但下一次 API 调用还是用的旧模型。
+- **Why**：`/model` 处理器只更新了 `m.modelName` 等显示字段，没有调用 `Agent.SetModel()`。
+- **Fix**：在 `/model` 和 `/effort` 处理器中调用 `Agent.SetModel()` / `Agent.SetEffort()`。
+
+**4. top-level var slice 和 func 互相引用 → init cycle**
+
+- **Saw**：斜杠命令菜单用 top-level `var commandHandlers = []Command{...}` 注册处理器，而处理器函数又引用了 `commandHandlers`——Go 的 init cycle 编译错误。
+- **Fix**：把 var 降级为 `initCommands()` 函数，延迟构建。调用处改为 `commands = initCommands()`。
+
+**5. 帮助浮层拦截 Ctrl+C——用户无法退出**
+
+- **Saw**：打开 `/help` overlay 后按 Ctrl+C 无反应，用户觉得"卡死了"。
+- **Why**：overlay 模式下的键盘路由没有监听退出快捷键。
+- **Fix**：overlay 的 key handler 中也添加 quit/back 的监听。
+
+**6. 新 overlay panel 拦截 Ctrl+C**
+
+- **Saw**：/help overlay 打开后 Ctrl+C 不退出，用户以为程序卡死。
+- **Fix**：overlay 也监听退出键。
+
+**7. Inline 模式布局漂移源于地板填充**
+
+- **Saw**：inline 模式下输入行经过几次对话后漂离终端底部（三个 commit `16b13ef`、`59bd9a9`、`f218c57` 分别追了不同侧面症状；最终"修复"是迁移回 alt-screen——又导致鼠标滚轮和复制损坏）。
+- **Why**：`View()` 用 `strings.Repeat("\n", pad)` 每帧填充以将输入固定在终端绝对底部。填充长度来自手动的 `scrollbackLines` 计数器，它与 `tea.ClearScreen`、多行 `tea.Println`、异步窗口调整以及丢弃的 `tea.Println` cmd 失步。
+- **Fix**：第二次迁移回 inline 模式——移除 `tea.WithAltScreen()` 且**不**用地板填充。live 区域高度每帧变化；bubbletea 的标准渲染器通过 cursor-up + EraseScreenBelow 原生处理。欢迎横幅在 `tea.NewProgram` **之前**打印一次到 stdout，因此留在终端 scrollback 中，不再进入重绘循环。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - Esc 中断的闭环有三层：TUI 持有子 ctx 的 cancel，Agent 在 ctx.Err 上 bail，加载时 Repair 兜底。`userCanceled` 标志让 TUI 能正确处理"取消后到流真正结束"之间的尾巴 event

@@ -480,6 +480,39 @@ func TestLoadMeta_DoesNotReadMessages(t *testing.T) {
 
 ---
 
+### 相关踩坑
+
+会话持久化实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `json.Encoder.Encode()` 自动追加换行——JSONL 原语**
+
+- **Saw**：`json.Encoder.Encode()` 调用后序列化数据后总有一个尾随换行。这不是 bug —— 它恰好是 JSONL 格式所需的记录分隔符。
+- **Lesson**：JSONL 的一行 = 一个 `json.Marshal` + `\n`。`json.Encoder.Encode()` 已经做了这两件事，不需要手写 `\n`。
+
+**2. `omitempty` 在 slice 字段上同时省略 nil 和空切片**
+
+- **Saw**：`Messages []Message `json:"messages,omitempty"`` 使得 `messages: []` 和 `messages: null` 都被省略。在某些场景下需要区分"从未设置"和"设置为空数组"。
+- **Lesson**：如果 nil 和空有语义区别，去掉 `omitempty` 或改用指针包装。
+
+**3. `--no-save` 路径上 `/compact` panicked**
+
+- **Saw**：`--no-save` 模式下 Session 为 nil，`/compact` 和 `/branch` 直接访问 Session 字段导致 nil pointer dereference panic。
+- **Fix**：在所有访问 Session 的入口添加 nil 检查，`--no-save` 模式下提前拒绝这些操作。
+
+**4. 原子自替换需要同文件系统临时文件**
+
+- **Saw**：`os.Rename(old, new)` 在 old 和 new 跨越文件系统挂载点时返回 `cross-device link` 错误。
+- **Lesson**：原子写模式（write-tmp-rename）必须确保 tmp 文件与目标文件在同一挂载点。用 `os.CreateTemp(dir, ...)` 而非 `os.CreateTemp("", ...)`。
+
+**5. `--resume` 回放与实况滚动不一致**
+
+- **Saw**：M4.5 TUI 改造后，`--resume` 使用 `replay.go` 回放历史时跳过了 `RoleTool` 消息且原始渲染 Markdown，导致回放滚动与实况的滚动历史不一致。
+- **Fix**：统一消息格式和渲染路径，回放时使用与实况相同的渲染代码。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - `Session` 保存"对话本身"，不保存 UI 状态/policy mode 这些程序态——这条边界让格式演进可控

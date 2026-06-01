@@ -295,6 +295,37 @@ func TestAgent_SingleTurn(t *testing.T) {
 
 ---
 
+### 相关踩坑
+
+Agent 循环实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Esc 中断导致孤儿 tool_calls 损坏会话**
+
+- **Saw**：按 Esc 中断 stream 后，下一轮 prompt 立即失败：`An assistant message with 'tool_calls' must be followed by tool messages responding to each 'tool_call_id'`。之后每轮重试都报同一错误，会话彻底损坏。
+- **Why**：`runTurn` 在 SSE 流被 ctx 取消时返回 nil error，留下 `finish=""` 和一个半组装的 assistant message。外层循环把这条消息追加到历史后跳出（因为 `finish != "tool_calls"`），**没有执行工具**。结果：assistant message 携带着 tool_call ID，但没有对应的 tool result 消息。
+- **Fix**：`runTurn` 在流排空后检查 `ctx.Err()` 并作为 error 返回；`Prompt` 检测到 `context.Canceled` 后在追加部分 assistant message 之前立即退出。已有会话在 Load 后通过 `session.Repair()` 修复。
+- **Lesson**：当 LLM 消息携带 `tool_calls` 时，它是一个配对结构——必须有匹配的 `tool` 消息。永远不能保留头部而不保留尾部。任何可能中断在"assistant message 已发出 tool_calls"和"所有工具已分发"之间的代码路径，要么完成配对（合成 stub tool result），要么丢弃头部。**测试要针对状态形状（tool_calls ↔ finish_reason 耦合），而不是针对触发原因（ctx 取消）。**
+
+**2. ctx-cancel 只是通向同一孤儿状态的四条路径之一**
+
+- **Saw**：原修复只覆盖了用户取消。边界压力测试证明另外三条路径导致相同损坏：服务器挂起但不发 `[DONE]`、SSE chunk JSON 解码失败、服务器同时发出 `finish_reason="stop"` 和 `tool_calls`（违反协议但可能通过代理）。
+- **Why**：不变量存在于 `tool_calls ↔ finish_reason` 耦合处，而非"ctx 被取消了"。任何 `runTurn` 返回 `len(ToolCalls)>0 && finish != "tool_calls"` 的路径都是损坏的。
+- **Fix**：在 `Prompt` 中增加显式不变量检查：拒绝提交 tool_calls 不匹配 finish_reason 的 turn，改为发出 `ErrorEvent`。
+
+**3. `Agent.Messages()` 与 Prompt goroutine 的竞态**
+
+- **Saw**：TUI 中断（Ctrl+C）时，`Messages()` 与 `Prompt` goroutine 并发访问消息历史。
+- **Fix**：在 Messages() 访问历史时使用同步保护（mutex 或原子操作）。
+
+**4. DeepSeek 拒绝 `content` 和 `tool_calls` 同时为空的 assistant message**
+
+- **Saw**：V4 思考模式可能产生只有 `reasoning_content` 而没有 `content` 和 `tool_calls` 的消息。
+- **Fix**：发回 API 前过滤或补全此类消息。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - Agent 循环的核心是"发请求 → 组装 tool_calls → 执行工具 → 追加结果 → 继续"

@@ -46,10 +46,12 @@ type Args struct {
 	IfDirty string `json:"if_dirty,omitempty"`
 }
 
+// Tool is the exit_worktree tool implementation. Construct via New.
 type Tool struct {
 	mgr *worktree.Manager
 }
 
+// New returns an exit_worktree tool bound to the given worktree manager.
 func New(mgr *worktree.Manager) *Tool {
 	if mgr == nil {
 		panic("exitworktree: New called with nil Manager — host did not wire internal/worktree")
