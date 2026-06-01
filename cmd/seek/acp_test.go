@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
+	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/ocr"
 	"github.com/whyiyhw/seek/pkg/agent"
 )
 
@@ -58,5 +63,68 @@ func TestACPUpdate_Dropped(t *testing.T) {
 		if _, ok := acpUpdate("s", ev); ok {
 			t.Errorf("%T should not surface as a session/update", ev)
 		}
+	}
+}
+
+// M-P.5: image input.
+
+func TestACPBackend_AdvertisesImage(t *testing.T) {
+	b := &acpBackend{}
+	res := b.Initialize(acp.InitializeParams{ProtocolVersion: 1})
+	if res.ProtocolVersion != 1 {
+		t.Fatalf("protocolVersion echo: %d", res.ProtocolVersion)
+	}
+	if !res.AgentCapabilities.PromptCapabilities.Image {
+		t.Fatal("initialize must advertise promptCapabilities.image=true so Zed offers image attach")
+	}
+}
+
+func TestImageExtForMime(t *testing.T) {
+	for mime, want := range map[string]string{
+		"image/png":    ".png",
+		"image/jpeg":   ".jpg",
+		"IMAGE/PNG":    ".png", // case-insensitive
+		" image/webp ": ".webp",
+		"image/gif":    ".gif",
+		"text/plain":   "", // non-image → skip
+		"":             "",
+	} {
+		if got := imageExtForMime(mime); got != want {
+			t.Errorf("imageExtForMime(%q) = %q, want %q", mime, got, want)
+		}
+	}
+}
+
+func TestBuildACPPromptText(t *testing.T) {
+	ctx := context.Background()
+	// Fake OCR engine: prints fixed text regardless of the image.
+	ocrOpt := ocr.Options{Command: []string{"sh", "-c", "printf '%s' OCRTEXT"}}
+	png := base64.StdEncoding.EncodeToString([]byte("fake png bytes"))
+
+	img := func(data, mime string) acp.ContentBlock {
+		return acp.ContentBlock{Type: "image", Data: data, MimeType: mime}
+	}
+	txt := func(s string) acp.ContentBlock { return acp.ContentBlock{Type: "text", Text: s} }
+	build := func(blocks ...acp.ContentBlock) string {
+		return buildACPPromptText(ctx, acp.PromptParams{Prompt: blocks}, ocrOpt)
+	}
+
+	if got := build(txt("hi")); got != "hi" {
+		t.Fatalf("text-only = %q", got)
+	}
+	if got := build(txt("what is this"), img(png, "image/png")); !strings.Contains(got, "what is this") ||
+		!strings.Contains(got, "OCRTEXT") || !strings.Contains(got, "[image: pasted-image — OCR]") {
+		t.Fatalf("text+image = %q", got)
+	}
+	if got := build(img(png, "image/png")); !strings.Contains(got, "OCRTEXT") {
+		t.Fatalf("image-only should still OCR: %q", got)
+	}
+	// Corrupt base64 → that block is skipped, text preserved.
+	if got := build(txt("keep"), img("!!!not-base64!!!", "image/png")); got != "keep" {
+		t.Fatalf("corrupt base64 must be skipped: %q", got)
+	}
+	// Non-image mimeType → skipped.
+	if got := build(txt("keep"), img(png, "application/pdf")); got != "keep" {
+		t.Fatalf("non-image mime must be skipped: %q", got)
 	}
 }

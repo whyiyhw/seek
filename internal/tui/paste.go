@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -55,21 +56,56 @@ func (m Model) insertPasteText(text string) Model {
 	return m.handlePasteFolding()
 }
 
-// resolvePasteInInput replaces a fold marker with the stored paste body.
+// imagePasteMarker is the fold placeholder shown in the input after a
+// clipboard image is grabbed (M-imgpaste.2); resolved to `@<path>` on
+// submit so the OCR pipeline picks it up.
+const imagePasteMarker = "📋 image — press Enter to OCR & send"
+
+// resolvePasteInInput replaces pending fold markers with their bodies just
+// before submit: the text-paste marker → the full pasted text; the image
+// marker → `@<temp PNG path>` (M-imgpaste.2) so ExpandInput / ocr.Expand
+// OCRs it. No-op when nothing is pending.
 func (m *Model) resolvePasteInInput() {
-	if m.pastedContent == "" {
+	if m.pastedContent == "" && m.pastedImagePath == "" {
 		return
 	}
-	marker := pasteFoldMarker(m.pastedLineCount)
 	val := m.input.Value()
-	if strings.Contains(val, marker) {
-		m.input.SetValue(strings.Replace(val, marker, m.pastedContent, 1))
+	if m.pastedContent != "" {
+		if marker := pasteFoldMarker(m.pastedLineCount); strings.Contains(val, marker) {
+			val = strings.Replace(val, marker, m.pastedContent, 1)
+		}
+		m.pastedContent = ""
+		m.pastedLineCount = 0
 	}
-	m.pastedContent = ""
-	m.pastedLineCount = 0
+	if m.pastedImagePath != "" {
+		if strings.Contains(val, imagePasteMarker) {
+			val = strings.Replace(val, imagePasteMarker, "@"+m.pastedImagePath, 1)
+		}
+		m.pastedImagePath = ""
+	}
+	m.input.SetValue(val)
 }
 
+// tryClipboardPaste handles Ctrl+V. M-imgpaste.2: if the clipboard holds an
+// image (and a grabber is wired), grab it to a temp PNG and insert a fold
+// marker that resolves to `@<path>` on submit — reusing the 柱 Q OCR
+// pipeline. Otherwise fall back to text paste. A slow/hanging grabber is
+// bounded by a short timeout so the UI never wedges.
 func (m Model) tryClipboardPaste() (Model, bool) {
+	if m.opts.GrabImage != nil {
+		base := m.opts.Ctx
+		if base == nil {
+			base = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(base, 3*time.Second)
+		path, err := m.opts.GrabImage(ctx)
+		cancel()
+		if err == nil && path != "" {
+			m.pastedImagePath = path
+			m.input.InsertString(imagePasteMarker)
+			return m, true
+		}
+	}
 	text, err := clipboard.ReadAll()
 	if err != nil || text == "" {
 		return m, false
