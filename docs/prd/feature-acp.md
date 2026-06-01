@@ -6,7 +6,7 @@
 
 **真 Zed GUI 验证通过**（Zed 1.4.4）：seek 出现在 Agent 面板 External Agents 下拉里，`initialize`（带 `clientCapabilities`）→`session/new`（cwd=项目）→多轮 `session/prompt`，工具调用（read/grep/list_dir/git/**edit**）映射成 Zed 步骤卡片、实测成功改了工作区文件（`.gitignore` 加行），多轮均 `end_turn`。新增 opt-in 协议 trace（`SEEK_ACP_LOG=/path` → tee 收发原始 JSON-RPC，零默认开销）便于调试握手。**用法见 [`docs/guide-zed.md`](../guide-zed.md)。**
 
-**剩（MVP 优化 backlog，见 guide §5）**：① ACP `session/request_permission` 把工具审批弹到 Zed 原生 UI（当前 ACP 路径无 per-action 审批门，直接操作工作区）;② `session/load`（`loadSession` 现报 false）;③ 多 session/进程;④ slash 命令子集;⑤ `promptCapabilities`（图片）+ 版本协商;⑥ per-session cwd;⑦ Zed `mcpServers` 透传。下方 seed 设计与实现一致。
+**剩（MVP 优化 backlog，见 guide §5）**：① ACP `session/request_permission` 把工具审批弹到 Zed 原生 UI（当前 ACP 路径无 per-action 审批门，直接操作工作区）;② `session/load`（`loadSession` 现报 false）;③ 多 session/进程;④ slash 命令子集;⑤ `promptCapabilities`（图片）+ 版本协商（**已细化为 M-P.5 / §8 图片输入**）;⑥ per-session cwd;⑦ Zed `mcpServers` 透传。下方 seed 设计与实现一致。
 **估时**：~4-5 天
 
 **一句话**：实现 **ACP（Agent Client Protocol）** server 模式，让 **Zed / 任意 ACP 编辑器**直接驱动 seek。这是读源码后确认的**唯一 Reasonix 明确领先、seek 该追平的项**——而且用的是**标准协议**（生态网络效应），不是再造一个自定义 RPC。
@@ -73,6 +73,7 @@ ACP 仍在演进。实施前**锁定一个目标 spec 版本**（Zed 当前 ACP�
 | M-P.2 | session/prompt：`Agent.Prompt` Event 流 → ACP 流式事件（核心转换）+ cancel |
 | M-P.3 | 审批过线（askuser → ACP approval）+ MCP passthrough |
 | M-P.4 | `seek acp` CLI 接线 + 与 `-rpc` 并存 + Zed 真机冒烟 + 文档 |
+| M-P.5 ✅ | **图片输入（已实现）**：`initialize` 声明 `promptCapabilities.image`（`AgentCapabilities.PromptCapabilities`）+ `ContentBlock` 加 `Data`/`MimeType` + `ImageBlocks()` 取图块 + `buildACPPromptText`（从 `acpBackend.Prompt` 提取的纯函数）解码 base64 → `ocr.RunBytes`/`ExpandImageData`（新增：写临时文件→复用柱 Q）→ 注入 `[image: … — OCR]`。继承柱 Q 不变量（只注入文字、不送字节）；坏 base64 / 非图 mimeType 静默跳过。新增测试 `-race` 绿（`ImageBlocks`、`RunBytes`/`ExpandImageData` 假引擎、`imageExtForMime`、`AdvertisesImage`、`buildACPPromptText`：text/text+image/image-only/坏base64/非图mime）。**剩：真 Zed 附图 e2e（你跑）**。详见 §8 |
 
 ## 6. 风险 / 预埋 pitfall
 - **ACP spec 演进/版本**——锁定目标版本，未实现方法回标准 error（柱 L 范式）。
@@ -85,3 +86,28 @@ ACP 仍在演进。实施前**锁定一个目标 spec 版本**（Zed 当前 ACP�
 - **现有 `-rpc`（已交付）**：ACP 与它并列；可能共享传输层，待 D1 评估。
 - **柱 N/O（护城河）**：本柱是触达、正交；排在护城河之后（除非触达成首要目标）。
 - **MCP client（已交付）**：ACP session 里编辑器要的 MCP server 复用现有 client 接入。
+
+---
+
+## 8. 图片输入：ACP image content block → 本地 OCR（M-P.5）
+
+**现状（核到代码）**：seek 的 ACP **直接丢弃图片**。`ContentBlock{Type, Text}`（`internal/acp/server.go:59`）**没有图片数据字段**；`PromptText()` 只收 `type=="text"` 的块（`server.go:243`）；纯图 prompt → `text==""` → `acpBackend.Prompt` 直接返回 `end_turn`、什么都不做。且 `initialize` 没声明 `promptCapabilities`，Zed 多半**根本不让你**给 seek 线程附图（按 agent 声明的能力 gate 附件 UI）。
+
+**为什么这是三条图片输入里最干净的一条**：`@路径`（柱 Q）从磁盘读、TUI 粘贴要去抓剪贴板，而 **ACP 的图片数据就在协议消息里**（image 块带 base64 `data` + `mimeType`）——无需抓取，解码即得。三条入口都汇入柱 Q 的**同一个** OCR 注入。
+
+**设计（复用柱 Q OCR，三步）**：
+1. **`initialize` 声明 `promptCapabilities: { image: true }`**（顺带兑现 backlog ⑤ 的版本协商）——让 Zed 肯发图。
+2. **扩 `ContentBlock`**：加 `Data string \`json:"data"\`` + `MimeType string \`json:"mimeType"\``（ACP/MCP image 块形状）；`type=="image"` 时收下。
+3. **`acpBackend.Prompt`**：每个 image 块 base64 解码 → 写临时 PNG（`paths.Cache()/clipboard/` 或 temp）→ **复用 `ocr.Run`（柱 Q Vision 助手）** → 把 `[image: … — OCR]` 文本拼进 `PromptText()` 的结果，再喂 `Agent.Prompt`。文本块 + 图片块按原顺序拼接。
+
+**不变量（继承柱 Q）**：只注入 OCR **文字**，**绝不把图片字节送给模型**（DeepSeek 文本模型不吃图）；无 OCR 引擎 / 非图 `mimeType` / 损坏 base64 / 超大图 → 优雅降级（忽略该块 + 一次性说明），不崩。
+
+**与 `feature-image-paste.md` 同族**：共用柱 Q 的 OCR 注入轨道；那份做 **TUI 剪贴板**入口，本节做 **ACP** 入口。
+
+**测试**：
+- image 块 base64 → 临时文件 → OCR 注入（复用柱 Q 假 OCR 引擎测法，不依赖真模型/真 Zed）。
+- `initialize` 回包含 `promptCapabilities.image`。
+- 曾经的"纯图 prompt → end_turn 空转"现在能产出 OCR 块。
+- text + image 混合块：顺序正确、文本不丢。
+- 非图 `mimeType` / 损坏 base64 / 超大图 → 忽略该块、不崩。
+- 真 Zed 附图 e2e（手动，像柱 P 的 Zed 冒烟）。

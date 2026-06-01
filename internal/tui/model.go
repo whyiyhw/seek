@@ -107,6 +107,12 @@ type Options struct {
 	// it. Empty for fresh sessions / no active goal.
 	ResumeGoal string
 
+	// GrabImage, if set, tries to grab an image off the OS clipboard on
+	// Ctrl+V (M-imgpaste.2): returns a temp PNG path on success, or an
+	// error (clipimage.ErrNoImage / ErrNoGrabber) so the TUI falls back to
+	// text paste. nil = image paste disabled (text-only Ctrl+V).
+	GrabImage func(context.Context) (string, error)
+
 	// GlamourStyle is pre-detected by cmd/seek so we don't trigger an
 	// OSC 11 query under bubbletea (see PRD §4.9 / pitfalls #5).
 	GlamourStyle string
@@ -393,6 +399,13 @@ type Model struct {
 	// Empty = not folded.
 	pastedContent   string
 	pastedLineCount int
+
+	// pastedImagePath holds the temp PNG grabbed from the clipboard on
+	// Ctrl+V (M-imgpaste.2). The input shows an image fold marker; on submit
+	// resolvePasteInInput swaps the marker for `@<pastedImagePath>` so the
+	// existing OCR pipeline (ocr.Expand via ExpandInput) reads it. Empty =
+	// no pending pasted image.
+	pastedImagePath string
 
 	// lastInputRunesAt records when the main textarea last received typed
 	// or pasted runes. Enter within pasteEnterGap of this timestamp is

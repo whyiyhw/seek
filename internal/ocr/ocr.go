@@ -110,8 +110,15 @@ func cleanToken(tok string) string {
 }
 
 func block(ctx context.Context, path string, opt Options) string {
-	name := filepath.Base(path)
 	out, err := Run(ctx, path, opt)
+	return formatBlock(filepath.Base(path), out, err)
+}
+
+// formatBlock renders an OCR result (or failure) as the in-band injection
+// block. Shared by the file-path path (block) and the in-memory path
+// (ExpandImageData, M-P.5) so both produce byte-identical markup. Never
+// errors — failures become an in-band note so the conversation continues.
+func formatBlock(name, out string, err error) string {
 	if err != nil {
 		if errors.Is(err, errNoEngine) {
 			return fmt.Sprintf("[image: %s — OCR 未启用：macOS 需先构建 vision 助手；其他平台请设置 ocr.command]", name)

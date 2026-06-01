@@ -190,3 +190,23 @@ func TestServer_CleanShutdownOnEOF(t *testing.T) {
 	}
 	s2cR.Close()
 }
+
+func TestPromptParams_ImageBlocks(t *testing.T) {
+	p := PromptParams{Prompt: []ContentBlock{
+		{Type: "text", Text: "look at this"},
+		{Type: "image", Data: "Zm9v", MimeType: "image/png"},
+		{Type: "image", Data: "", MimeType: "image/png"}, // no data → skipped
+		{Type: "image", Data: "YmFy", MimeType: "image/jpeg"},
+	}}
+	imgs := p.ImageBlocks()
+	if len(imgs) != 2 {
+		t.Fatalf("expected 2 image blocks (non-empty data), got %d", len(imgs))
+	}
+	if imgs[0].MimeType != "image/png" || imgs[1].MimeType != "image/jpeg" {
+		t.Fatalf("image blocks out of order/wrong: %+v", imgs)
+	}
+	// PromptText must still ignore image blocks (text-only).
+	if got := p.PromptText(); got != "look at this" {
+		t.Fatalf("PromptText should only return text blocks, got %q", got)
+	}
+}

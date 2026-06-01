@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -30,6 +31,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/checkpointcli"
+	"github.com/whyiyhw/seek/internal/clipimage"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -1613,8 +1615,9 @@ func run() error {
 	}
 
 	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
+	// ocrOptions wired in so image content blocks get OCR'd (M-P.5).
 	if len(os.Args) >= 2 && os.Args[1] == "acp" {
-		return runACP(ctx, ag)
+		return runACP(ctx, ag, ocrOptions(appCfg))
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -1779,6 +1782,21 @@ func run() error {
 	if activeSession != nil {
 		resumeGoal = activeSession.Goal
 	}
+	// Clipboard image paste (M-imgpaste.2): Ctrl+V grabs an image off the OS
+	// clipboard to a temp PNG, which the OCR pipeline then reads. The grabber
+	// command comes from SEEK_CLIPBOARD_IMAGE_CMD (else the platform default);
+	// clipimage.Grab degrades to ErrNoImage/ErrNoGrabber → text paste.
+	grabImage := func(gctx context.Context) (string, error) {
+		var cmd []string
+		if v := strings.TrimSpace(os.Getenv("SEEK_CLIPBOARD_IMAGE_CMD")); v != "" {
+			cmd = strings.Fields(v)
+		}
+		dir := os.TempDir()
+		if c, err := paths.Cache(); err == nil {
+			dir = filepath.Join(c, "clipboard")
+		}
+		return clipimage.Grab(gctx, clipimage.Options{Command: cmd, CacheDir: dir})
+	}
 
 	return tui.Run(tui.Options{
 		Agent:                 ag,
@@ -1788,6 +1806,7 @@ func run() error {
 		ExpandInput:           tuiOCRExpander(appCfg),
 		GoalJudge:             goalJudge,
 		ResumeGoal:            resumeGoal,
+		GrabImage:             grabImage,
 		Yolo:                  policy.Yolo(),
 		Plan:                  policy.Plan(),
 		PlanSteps:             restoredPlanSteps,
@@ -2303,18 +2322,78 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 // acpBackend adapts seek's agent to the Agent Client Protocol (v7 柱 P).
 // One seek process = one ACP session (MVP); Prompt streams the agent's
 // event channel out as ACP session/update notifications.
-type acpBackend struct{ ag *agent.Agent }
+type acpBackend struct {
+	ag     *agent.Agent
+	ocrOpt ocr.Options // M-P.5: OCR engine for image content blocks
+}
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
-	return acp.InitializeResult{ProtocolVersion: p.ProtocolVersion}
+	return acp.InitializeResult{
+		ProtocolVersion: p.ProtocolVersion,
+		AgentCapabilities: acp.AgentCapabilities{
+			// Advertise image so editors (Zed) offer image attachment; seek
+			// OCRs the bytes to text (M-P.5), never forwards them to the model.
+			PromptCapabilities: acp.PromptCapabilities{Image: true},
+		},
+	}
 }
 
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
 	return acp.NewSessionResult{SessionID: "seek"}, nil
 }
 
-func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
+// buildACPPromptText assembles the prompt seek's agent actually sees from
+// an ACP session/prompt: the text blocks, plus an OCR injection block per
+// image content block (M-P.5). The image BYTES never reach the model —
+// only OCR text (柱 Q invariant). Corrupt base64 / unhandled mimeType
+// degrade silently (the block is skipped). Pure (no agent) so it's
+// unit-testable with a fake OCR command.
+func buildACPPromptText(ctx context.Context, p acp.PromptParams, ocrOpt ocr.Options) string {
 	text := p.PromptText()
+	for _, blk := range p.ImageBlocks() {
+		data, err := base64.StdEncoding.DecodeString(blk.Data)
+		if err != nil {
+			continue
+		}
+		ext := imageExtForMime(blk.MimeType)
+		if ext == "" {
+			continue
+		}
+		block := ocr.ExpandImageData(ctx, "pasted-image", data, ext, ocrOpt)
+		if text != "" {
+			text += "\n\n"
+		}
+		text += block
+	}
+	return text
+}
+
+// imageExtForMime maps an ACP image block's mimeType to a file extension
+// the OCR engine recognizes; "" means "not an image type we handle" → the
+// caller skips that block. M-P.5.
+func imageExtForMime(m string) string {
+	switch strings.ToLower(strings.TrimSpace(m)) {
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	case "image/gif":
+		return ".gif"
+	case "image/bmp":
+		return ".bmp"
+	case "image/tiff":
+		return ".tiff"
+	case "image/heic":
+		return ".heic"
+	default:
+		return ""
+	}
+}
+
+func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
+	text := buildACPPromptText(ctx, p, b.ocrOpt)
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
@@ -2409,7 +2488,7 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
 // logging goes to stderr.
-func runACP(ctx context.Context, ag *agent.Agent) error {
+func runACP(ctx context.Context, ag *agent.Agent, ocrOpt ocr.Options) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -2425,7 +2504,7 @@ func runACP(ctx context.Context, ag *agent.Agent) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{ag: ag, ocrOpt: ocrOpt}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

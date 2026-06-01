@@ -46,6 +46,18 @@ type InitializeResult struct {
 
 type AgentCapabilities struct {
 	LoadSession bool `json:"loadSession"`
+	// PromptCapabilities tells the client what content types it may put in
+	// a session/prompt. Advertising image lets editors (Zed) offer image
+	// attachment; seek OCRs those to text (M-P.5). Omitted when zero so a
+	// text-only agent stays silent.
+	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
+}
+
+// PromptCapabilities is the subset of ACP prompt content types seek
+// accepts. Audio / embedded-context are not handled (seek is text-only;
+// image is OCR'd, not sent as bytes).
+type PromptCapabilities struct {
+	Image bool `json:"image,omitempty"`
 }
 
 type NewSessionParams struct {
@@ -59,11 +71,29 @@ type NewSessionResult struct {
 type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
+	// Data + MimeType carry an image block's bytes (type=="image"): Data is
+	// base64, MimeType e.g. "image/png" (M-P.5). The caller OCRs these to
+	// text — seek never forwards image bytes to the model.
+	Data     string `json:"data,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
 }
 
 type PromptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
+}
+
+// ImageBlocks returns the prompt's image content blocks (type=="image"
+// with non-empty Data), in order. Used by the backend to OCR them into the
+// prompt text. M-P.5.
+func (p PromptParams) ImageBlocks() []ContentBlock {
+	var out []ContentBlock
+	for _, c := range p.Prompt {
+		if c.Type == "image" && c.Data != "" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type PromptResult struct {
