@@ -275,6 +275,41 @@ FIM 工具本身是只读的——它返回补全文本，不直接应用到文�
 
 ---
 
+### 相关踩坑
+
+推理增强实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. FIM 端点在 `/beta/completions` 而非 `/chat/completions`**
+
+- **Saw**：把 FIM 请求发送到 chat 端点，收到 400 错误，错误信息不够清晰。
+- **Why**：DeepSeek 的 FIM 端点是 `/beta/completions`，使用 legacy OpenAI 补全格式而非 Chat API 格式。两者的请求/响应结构完全不同（`prompt` vs `messages`）。
+- **Lesson**：FIM 和 Chat 是两套独立的端点/格式，不能混用。
+
+**2. Reasoner 不支持 `tools`、`temperature`、`top_p` 等**
+
+- **Saw**：向 reasoner 模型发送带 `tools` 的请求返回错误。
+- **Why**：DeepSeek 的纯推理模型（`deepseek-reasoner`）不支持工具调用、temperature、top_p 等参数。
+- **Fix**：在请求构建时剥离 reasoner 不支持的字段。`think` 工具通过独立 Chat 调用绕过此限制。
+
+**3. `reasoning_effort` 枚举值不同**
+
+- **Saw**：`reasoning_effort` 字段在 DeepSeek V4 上的有效值是 `"high"|"max"`，而非 OpenAI 的 `"low"|"medium"|"high"`。
+- **Fix**：直接使用字符串字面量而非试图定义兼容枚举。
+
+**4. 思维链 token 泄漏到源代码中**
+
+- **Saw**：推理模型的思考过程（CoT）被混入生成的代码输出中，用户看到"让我想想…"出现在源代码里。
+- **Fix**：在后处理中过滤 `reasoning_content`，确保只返回最终答案。
+
+**5. 不带 Thinking 参数的 reasoner 静默退化为 fast-chat**
+
+- **Saw**：使用 `deepseek-reasoner` 模型但未设置 `Thinking` 参数时，模型以快速聊天模式运行而非推理模式，静默退化而非报错。
+- **Fix**：自动添加 `Thinking.Type=enabled`，由 `pkg/deepseek` 统一处理。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - reasoner 被包装成工具而不是直接集成，因为 `thinking` 和 `tools` 参数不能同时使用

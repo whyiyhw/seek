@@ -339,4 +339,32 @@ feat(M11.1): worktree primitive + enter/exit_worktree tools         [679f7c7]
 feat(M11.1): agent.isolation=worktree end-to-end (Phase 2)          [ddaab85]
 ```
 
+
+
+---
+
+### 相关踩坑
+
+子代理与工作树隔离实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. Worktree 隔离的子代理写入了主仓库**
+
+- **Saw**：隔离模式 spawn 的子代理应该在工作树内操作，但 `README.md` 的修改落在了主仓库的工作目录中。
+- **Why**：工作树内的 `git` 命令仍然可以访问主仓库的 refs 和 objects，且文件路径解析如果不限制为工作树前缀，就会触及主仓库。
+- **Fix**：在 `enter_worktree` 工具和 Manager 中增强路径隔离——子进程的 `cwd` 设置为工作树根，工作树根的父目录不可写。
+
+**2. Windows 上工作树面板为空**
+
+- **Saw**：`/worktrees` 面板在 Windows 上不显示存在的 seek 管理工作树。
+- **Why**：git 输出的路径使用正斜杠（`dir/file`），而 `filepath` 在 Windows 上使用反斜杠（`dir\file`）。`strings.HasPrefix(path, worktreeRoot)` 匹配失败。
+- **Fix**：比较路径前规范化分隔符（统一为正斜杠），或使用 `filepath.Rel` 替代前缀比较。
+
+**3. `ReadOnlyTool` 是并行调度的开关**
+
+- **Saw**：一轮中 spawn 多个子 agent 时，它们串行执行而非并行。
+- **Why**：`agent` 工具没有实现 `ReadOnlyTool` 接口，调度器不知道它可以安全并行。
+- **Fix**：给 agent tool 加上 `ReadOnly() bool { return true }` 方法。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
 阅读本章前建议先读 PRD `v5.md` + `feature-subagent.md`，再 `go test -race ./internal/subagent/... ./internal/worktree/... ./internal/tools/{agent,enterworktree,exitworktree}/...` 跑一遍验收测试理解边界行为。

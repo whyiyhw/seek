@@ -571,6 +571,39 @@ v1.0 不是终点, 是节奏的换挡。第 15.7 节那份验收清单全绿之�
 
 ---
 
+### 相关踩坑
+
+发布与跨平台中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `VersionString()` 是格式化横幅，不是原始版本号**
+
+- **Saw**：`seek -upgrade` 用 `VersionString()` 做版本比较，横幅包含 logo 装饰，比较逻辑错误。
+- **Fix**：添加 `RawVersion()` 返回纯净语义版本号，两者职责分离。
+
+**2. `seek -upgrade` 报 "permission denied" 而非 sudo 提示**
+
+- **Saw**：用户执行 `seek -upgrade` 时看到原始的"permission denied"错误，不知道需要 sudo。
+- **Fix**：检测到写 `/usr/local/bin/` 等系统路径失败时，给出明确的"需要 sudo 或指定自定义路径"提示。
+
+**3. 原子自替换需要同文件系统临时文件**
+
+- **Saw**：自升级的 `os.Rename(tmp, target)` 在不同挂载点间失败。
+- **Fix**：在目标文件相同目录创建临时文件。
+
+**4. `go run ./cmd/seek` 慢到感觉像坏了**
+
+- **Saw**：`go run` 每次重新编译整个二进制，初次启动 >10 秒。
+- **Lesson**：`go install` 后直接执行是正确用法，`go run` 仅用于开发调试。
+
+**5. macOS bash 3.2 缺少 `mapfile`**
+
+- **Saw**：构建脚本在 macOS 上失败，因为 bash 3.2 没有 `mapfile`/`readarray` 命令。
+- **Fix**：使用兼容 POSIX 的循环替代。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - `-json` 模式让 seek 能跑在脚本里；事件类型字符串是 stable contract

@@ -2,7 +2,7 @@
 
 这本书正文里编号到 **#1–#16** 的"坑"是 callout 形式的方框，标出最值得记的一类细节——一个 LLM 协议层面或 Go 语言层面的、做对要靠经验、做错要靠运气的事情。第 23–24 章（v6–v7）的坑位分布在仓库 [`docs/pitfalls.md`](../pitfalls.md) 的对应段落中，正文中不再重复编号。
 
-仓库根的 [`docs/pitfalls.md`](../pitfalls.md) 是更全的版本——所有在开发中浮现过的非显然问题都记一条，截至本书写作时大约 35 条。两份内容**重叠但不相等**：
+仓库根的 [`docs/pitfalls.md`](../pitfalls.md) 是更全的版本——所有在开发中浮现过的非显然问题都记一条，截至本书写作时超过 130 条（仍在持续增长）。两份内容**重叠但不相等**：
 
 - **书中编号的 16 条**：每条都有教学价值（能从中提炼出一条普适规则），且通常出现在前后两个章节里互相引用
 - **pitfalls.md 的其余条目**：包括很多"修了一次就不再讨论"的具体 bug、tooling 怪癖、依赖问题——重要但不教学性
@@ -126,6 +126,76 @@
 |---|---|
 | ch13 §13.5（延伸） | "DeepSeek HTTP 5xx and empty SSE bodies are transient — retry once before failing" |
 | ch18（隐含，无缝继续） | 回复语言跟随用户输入（已移除 `/lang` / `--lang`；见 pitfalls「Explicit `/lang` removed」） |
+
+### 来自 Filesystem / concurrency（Ch 19 Checkpoint · Ch 9 会话持久化）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch19（隐含） | "Two parallel writers of the same content-addressed blob race on a shared `.tmp` filename" |
+| ch9 §9.3 | "Atomic self-replace requires same-filesystem temp file" |
+| ch16（隐含） | "ObserveEnqueue goroutine captures entry parameter by reference" |
+
+### 来自 Testing / CI
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch17 §17.9 | "`t.Cleanup(chdir)` after `t.TempDir()` breaks Windows TempDir removal" |
+| ch21（隐含） | "Two `time.Now()` calls in the same nanosecond make Equal-based timestamp assertions flaky" |
+| ch10 §10.8（隐含） | "Asserting zero collisions over N random IDs is a birthday-paradox flake trap" |
+| 通用 | "Path-string assertions / raw paths in JSON literals broke on windows-latest CI" |
+| 通用 | "Cross-compile failure: platform-specific syscall in non-tagged file" |
+
+### 来自 Release / upgrade（Ch 15 M7 发布）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch15 §15.4 | "`tui.VersionString()` is a formatted banner, not a raw module version" |
+| ch15 §15.3 | "`seek -upgrade` returned raw 'permission denied' — users couldn't see they needed sudo" |
+
+### 来自 Worktree / Windows（Ch 21 Subagent + Worktree）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch21 §21.5 | "Worktree-isolated subagent edited the MAIN tree (isolation silently bypassed)" |
+| ch21（隐含） | "/worktrees panel empty on Windows despite seek-managed worktrees existing" |
+| 通用 | "WSL sudo escapes process-group kill, bash Wait() hangs past timeout" |
+
+### 来自 Sandbox / OS jail（Ch 24 v7 柱 O）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch24 §24.3 | "Landlock create_ruleset returns EINVAL if you 'handle' an access right the kernel's ABI doesn't know" |
+| ch24 §24.3 | "Child process steals /dev/tty, Esc can't interrupt bash" |
+| ch24 §24.3 | "Setsid + pipe stdout = orphan grandchildren deadlock Wait()" |
+
+### 来自 Cron / Routines（Ch 22 Routines）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch22 §22.3.4 | "`*` wildcard is not a number — must be handled before `strconv.Atoi` in field-item parser" |
+| ch22 §22.5 | "Tick's 'len(due) == 0 → early return' silently skipped triggers + GC for the entire tick" |
+| ch22 §22.8 | "OS scheduler invokes `seek cron tick` with a near-empty env — interactive-shell secrets invisible" |
+| ch22 §22.6 | "A background process must NOT inherit the turn ctx, or it dies when the turn ends" |
+
+### 来自 Agent loop 补充
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch4 §4.4 / ch8 §8.2 / ch9 §9.6 | "Esc mid-stream poisoned the session: orphan `tool_calls` rejected on every subsequent turn" |
+| ch5 §5.4 | "Approval callback that blocks on a channel needs ctx-aware select on BOTH ends" |
+| ch5 §5.6 | "Symlinks inside CWD let `write`/`edit` escape the CWD gate" |
+| ch8 §8.2 | "Followup: ctx-cancel was one of FOUR paths to the same orphan state" |
+| ch18（隐含） | "`[plan: approved]` is a load-bearing wire-format prefix shared between propose and the plan reconstructor" |
+| ch18（隐含） | "Plan artifact write needs context BEFORE Sink.Approved fires — added a separate ContextReceiver interface" |
+
+### 来自 Tooling / environment
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch5 §5.7（隐含） | "Grep tool with broad pattern can deadlock the agent — no recovery via /compact" |
+| ch11 §11.2（隐含） | "macOS APFS made `SKILL.md` + `skill.md` tests collide silently" |
+| ch8 §8.4（隐含） | "Auto-opened picker key-passthrough allow-list is a second, out-of-sync registry" |
+| ch12 §12.3（隐含） | "`edit` tool byte-matches fail on Windows CRLF Go files when old_string uses LF" |
 
 ---
 

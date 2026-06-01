@@ -28,6 +28,23 @@ The three claims in the tagline, each backed by shipping code:
 
 ---
 
+## See it run — these docs were audited by seek itself
+
+We handed seek one goal — *"audit the codebase docs for accuracy, fix them, and weave our pitfalls log into the book"* — and walked away. It planned the work, **spawned a team of sub-agents**, edited **33 files across all 24 book chapters**, and stopped only when a cheap judge confirmed the goal was met: **120 turns · 212 tool calls · clean build · 97.7% cache hit · $0.17.** Real run, unedited (just sped up):
+
+**1 · Plans, then spawns a team of sub-agents**
+<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek plans the task, then fans out explore sub-agents" width="820"></p>
+
+**2 · Works autonomously across the codebase**
+<p align="center"><img src="examples/demo-edit.gif" alt="seek edits doc comments and weaves pitfalls into book chapters" width="820"></p>
+
+**3 · …until a cheap judge says the goal is met**
+<p align="center"><img src="examples/demo-goalmet.gif" alt="goal met after 3 turns, clean build, $0.17" width="820"></p>
+
+Every doc change in this PR came from that single **$0.17** run. The recording recipe is [`examples/demo-fullrun.tape`](examples/demo-fullrun.tape).
+
+---
+
 ## Install
 
 ```bash

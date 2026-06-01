@@ -330,6 +330,31 @@ for ev := range stream {
 
 ---
 
+### 相关踩坑
+
+M0 客户端实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. 手动 Accept-Encoding 关闭 Go 的透明 gzip 解压**
+
+- **Saw**：webfetch 工具返回了原始 gzip 压缩字节而非解压后的文本。模型看到乱码并报告"gzip 压缩的 HTML，无法正常解码显示内容"。
+- **Why**：Go 的 `http.Transport` 默认自动请求 gzip 并透明解码。但代码中设置了 `req.Header.Set("Accept-Encoding", "gzip")`——**手动设置此 header 会触发 Go 的"DIY 解压模式"**，返回原始压缩字节。
+- **Fix**：移除手动 `Set("Accept-Encoding", ...)` 行。Go 的 transport 既会添加它也会解码——两端都是自动的。
+- **Lesson**：永远不要手动设置 `Accept-Encoding`，除非你真的要自己解码。
+
+**2. Go 的常量 float→int 转换不是自动的**
+
+- **Saw**：`int(float64(65536) * frac)` 在常量上下文中编译失败："constant X.X of type float64" cannot convert。
+- **Fix**：转为运行时表达式 `int(float64(65536) * frac)` 或将输入转为非常量值。
+
+**3. 反引号原始字符串中的反引号**
+
+- **Saw**：在 Go 的反引号原始字符串中嵌入反引号字符导致编译错误。
+- **Fix**：使用拼接 `"` + "`" + "`" 或 `\u0060` 转义。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - `pkg/deepseek` 是零外部依赖的纯 stdlib 实现，让通信层行为可预测

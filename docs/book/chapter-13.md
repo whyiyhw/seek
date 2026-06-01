@@ -441,6 +441,40 @@ if m.opts.Tracker != nil {
 
 ---
 
+### 相关踩坑
+
+成本与上下文预算实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. 累计 prompt tokens 不是上下文预算信号**
+
+- **Saw**：状态栏用 `Cumulative()` 显示 context 利用率（ctx%），50 轮后显示 300%，用户困惑。
+- **Why**：累计 prompt tokens 在多轮对话中持续增长（因为消息历史不断追加），不是"当前上下文窗口还剩多少"的信号。
+- **Lesson**：context 利用率必须用 `Last()`（当轮消耗），而非 `Cumulative()`（累计消耗）。
+
+**2. `finish_reason="length"` 看起来像正常结束**
+
+- **Saw**：模型输出在 token 上限被截断时返回 `finish_reason="length"` 而非 `"stop"`。未检查此字段的用户以为回答已完整，重问后浪费一轮成本。
+- **Fix**：在 TUI 状态栏和消息渲染中显式标记被截断的输出，提示用户需要 `/compact` 或增加 `MaxTokens`。
+
+**3. 成本在模型或 tier 切换后被回溯重算**
+
+- **Saw**：用户中途 `/model` 后，历史对话成本按照新模型价格重算，状态栏金额跳动。
+- **Fix**：成本在 Record 时锁定（快照当前 model/tier/价格），不再 render 时重算。
+
+**4. PrePromptHook 输出必须字节稳定**
+
+- **Saw**：memory snapshot、AGENTS.md 注入等 PrePromptHook 每次输出不同，导致系统提示词前缀每次变化，前缀缓存永不命中。
+- **Lesson**：任何注入系统提示词的内容必须字节序列稳定，否则每次缓存失效 → 10 倍成本。
+
+**5. 前缀缓存是尽力而为的优化**
+
+- **Saw**：短 prompt 几乎不触发缓存；首次请求缓存命中率 0%。
+- **Lesson**：前缀缓存要求提示词前缀 ≥ ~64 token 且字节完全一致。短 prompt 不值得优化。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - `cache.Tracker` 每轮一条 `turnRecord`(Usage + Model + Tier + Cost)——token 是事实, 钱是 Record 时锁定的快照, 切 `/model` 或跨离峰边界不会回溯改写历史(commit `064a37a`)

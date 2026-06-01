@@ -345,6 +345,40 @@ type Args struct {
 
 ---
 
+### 相关踩坑
+
+工具系统实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `json.Unmarshal` 静默丢弃未知字段——LLM 拼错字段名产生无用的错误信息**
+
+- **Saw**：模型调用 `list_dir({"directory": "/path", "depth": 1})`（字段名错误）。错误信息是 `list_dir: path is required`——完全没有提到 `directory` 是未知字段，也没有提示有效字段。模型用一模一样参数重试，陷入自我怀疑循环。
+- **Why**：Go 的 `json.Unmarshal` 默认静默丢弃未知字段。`directory` 被忽略，`path` 保持零值，后续的空值检查产生了一条没有任何诊断信息的通用错误。
+- **Fix**：`internal/tools/tool.go` 引入 `UnmarshalStrict`（使用 `json.Decoder.DisallowUnknownFields`）和 `MissingField` 辅助函数。错误信息现在变成：`list_dir: bad arguments: json: unknown field "directory". Got: {"directory":...}. Valid: path, depth, ...`——模型当轮就能纠正。
+- **Lesson**：任何 LLM 工具边界的 `json.Unmarshal` 目标都必须使用 `DisallowUnknownFields`。静默丢弃让自我纠正循环不可能——模型没有可操作的错误信息。
+
+**2. `Policy.mode` 被 `/yolo` 切换与并发 `Check` 竞态**
+
+- **Saw**：`/yolo` 切换 permission mode 时，并发的 `Check` 调用读到不一致的中间状态，导致权限判断错误。
+- **Fix**：用 `sync.RWMutex` 保护 `mode` 字段的读写。`Check` 拿读锁，`SetMode` 拿写锁。
+
+**3. 符号链接绕过 CWD 安全检查**
+
+- **Saw**：工作目录内的符号链接可以指向目录外，`write`/`edit` 工具的路径检查只做了字符串前缀比较，没解析符号链接的目标。
+- **Fix**：路径解析时调用 `filepath.EvalSymlinks` 解析所有符号链接后再做安全检查。
+
+**4. 空工具结果 + `omitempty` → DeepSeek 拒绝消息**
+
+- **Saw**：工具返回空字符串结果，序列化时 `omitempty` 导致 `content` 字段被省略。DeepSeek 拒绝此类缺少 `content` 的消息。
+- **Fix**：确保工具结果为空时仍保留 `content` 字段（或返回占位符 "ok"）。
+
+**5. 新增 permission mode 需要触及 7+ 包**
+
+- **Lesson**：权限模式是横切关注点，新增 `Mode` 值的 checklis 包括：`permission.go` 的常量定义、`Check` 的 switch/case、TUI 状态栏渲染、plan-mode 子态判断等 7 个以上位置。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - 工具接口的四个方法：Name / Description / Schema / Execute

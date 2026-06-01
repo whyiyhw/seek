@@ -268,6 +268,25 @@ FIM 的端点是 `/beta/completions`，使用的是 OpenAI 的旧版 completions
 
 ---
 
+### 相关踩坑
+
+本章涉及的协议细节，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. 流式工具调用按 index 分片到达**
+
+- **Saw**：DeepSeek 的流式工具调用不是一次性发出完整 JSON，而是以 delta 形式按 `index` 分片到达。每个分片的 `arguments` 是部分字符串，需要按 index 累积拼接后再整体解析。
+- **Why**：SSE 流中工具调用 `tool_calls` 数组的每个元素独立 delta，`index` 标识是哪个工具调用槽位。`arguments` 是字符串片段而非 JSON 片段——需要字符串拼接而非逐层 JSON 合并。
+- **Lesson**：工具调用 arguments 的 delta 是字符串拼接，不是 JSON 合并。
+
+**2. SSE 流可能因上游瞬时故障失败**
+
+- **Saw**：DeepSeek 有时返回 HTTP 5xx 或空的 SSE body，没有有效数据。
+- **Fix**：实现一次重试（500ms backoff），仅在没有收到任何事件时触发。已收到部分事件时不重试——重发已消费的 token 会破坏前缀一致性。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - 消息列表是对话的载体。`tool_calls` 消息和 `tool` 结果消息必须配对，这个不变量贯穿整本书

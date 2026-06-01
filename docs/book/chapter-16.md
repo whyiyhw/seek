@@ -412,6 +412,37 @@ agent 不知道 memory 存在;memory 不修改 agent。中间只有 `internal/ho
 
 ---
 
+### 相关踩坑
+
+三层记忆实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. `OnSessionStart` 未重置 snapshot 状态导致 `--resume` 使用过期快照**
+
+- **Saw**：`--resume` 后，memory hook 注入了上一会话的快照而非重建当前快照。
+- **Why**：`snapshotInjected` 标志在 agent 生命周期间持久化（`--resume` 复用 registry），未被 `OnSessionStart` 重置。
+- **Fix**：`OnSessionStart` 中显式重置 `snapshotInjected = false` 和 `snapshotEntryNames = nil`。
+
+**2. ObserveEnqueue 计数器与非阻塞 channel 发送的竞态**
+
+- **Saw**：`go test -race` 在 `observeAcceptCt++` 上报告竞态。
+- **Why**：`ObserveEnqueue` 是非阻塞的，TUI goroutine 从 `ResultChan` 接收后，filter goroutine 仍在递增计数器。
+- **Fix**：用 `atomic.Int32` 存储计数器。
+
+**3. ObserveEnqueue goroutine 捕获循环变量引用**
+
+- **Saw**：多个 goroutine 处理一批观察条目时，所有 goroutine 看到同一份最后更新的 entry。
+- **Why**：goroutine 闭包捕获的是 `entry` 变量的指针而非每次迭代的值。
+- **Fix**：在 goroutine 内部创建本地副本或通过参数传递值。
+
+**4. 自动过滤分类器阻止合法内容**
+
+- **Saw**：`memory_observe` 的自动过滤错误地将含 API key 的命令行参数判定为敏感信息。
+- **Fix**：调整分类器规则，区分"泄露秘密"和"合法使用含 key 的命令"。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - 三层架构 L/M/S 不是"为了对称", 而是**用户偏好 / 项目决策 / 当前会话**三件事在写入频率、生命周期、可信度上根本不同

@@ -426,6 +426,30 @@ mcp: loaded 5 tool(s)
 
 ---
 
+### 相关踩坑
+
+MCP 客户端实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. 子进程夺取 /dev/tty——Esc 无法中断 bash**
+
+- **Saw**：MCP 子进程（如 filesystem server）继承终端控制权，主进程的 Esc 中断失效。
+- **Why**：子进程的标准 I/O 如果连接到终端（而非 pipe），会夺取终端的控制权。
+- **Fix**：确保子进程的 stdin/stdout/stderr 使用 pipe，不与主进程共享终端。
+
+**2. Setsid + pipe stdout = 孤儿孙进程导致 Wait() 死锁**
+
+- **Saw**：MCP 子进程通过 `setsid` 创建新 session 后，其孙进程成为孤儿。管道的写入端不能关闭，导致父进程 `Wait()` 永远阻塞。
+- **Fix**：在上下文取消时强制 kill 进程组，确保所有子进程终止、管道关闭。
+
+**3. Windows CRLF 编辑匹配问题**
+
+- **Saw**：`edit` 工具的 `old_string` 在 Windows CRLF 文件上匹配失败。
+- **Fix**：在匹配前规范化换行符。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - MCP = stdio + JSON-RPC 2.0 + `initialize` / `tools/list` / `tools/call` 三步握手。子进程模型让生命周期、权限、隔离都很清晰

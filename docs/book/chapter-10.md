@@ -351,6 +351,36 @@ if m.opts.Tracker != nil {
 
 ---
 
+### 相关踩坑
+
+分支与压缩实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. 累计 prompt tokens 不是上下文预算信号**
+
+- **Saw**：状态栏用 `Cumulative()` 显示 context 利用率，多轮后显示超过 100%，用户困惑。
+- **Why**：`/compact` 压缩后的会话仍有累计 token 计数，但那不是当前上下文占用的信号。
+- **Lesson**：上下文利用率必须用 `Last()`（当轮消耗），`/compact` 的 token 记录也要走 tracker。
+
+**2. `--no-save` 路径上 `/branch` 和 `/compact` panicked**
+
+- **Saw**：`--no-save` 模式下 Session 为 nil，`/branch` 和 `/compact` 直接 panic。
+- **Fix**：在命令入口添加 nil Session 检查，提前拒绝并给出清晰提示。
+
+**3. 随机 ID 碰撞测试的生日悖论陷阱**
+
+- **Saw**：Session ID 的随机性测试断言"零碰撞"，随着测试循环次数增加，偶尔失败。
+- **Why**：N 个随机 ID 的碰撞概率 ≈ N²/2^(b+1)，断言零碰撞随 N 增大必然变脆弱。
+- **Fix**：使用更宽松的断言（"distinct ≥ N−k"）或增大熵值。
+
+**4. 多字节 UTF-8 字符串切片产生乱码**
+
+- **Saw**：对包含中文的摘要做 `s[:n]` 切片，破坏了 UTF-8 序列，显示乱码。
+- **Fix**：先转 `[]rune(s)` 再按字符位置切片。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
+---
+
 ## 本章小结
 
 - 一个 `ParentID` 字段就能承载整棵会话树，反向指针让"fork 一次 = 写一个新文件，旧文件零修改"

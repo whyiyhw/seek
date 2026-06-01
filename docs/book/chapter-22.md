@@ -225,4 +225,41 @@ seek cron tick              # 扫一遍所有 job 并执行到期的
 
 **关键提交**：`f755324`（Schedule+Store） → `8f3265c`（Tick 引擎） → `67ff685`（cron CLI） → `0cc8beb`（auto-tick） → `68c1241`（OS 通知） → `610a26a`（schedule_wakeup 工具） → `5550759`（triggers/ + 状态栏） → `2d787f0`（G3 env 叠加） → `a7205cb`（G4+G5 GC）
 
+
+
+---
+
+### 相关踩坑
+
+定时任务与 Routines 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
+
+**1. cron 表达式中 `*` 通配符必须在 `strconv.Atoi` 之前处理**
+
+- **Saw**：所有含 `*` 字段的 cron 表达式（如 `* * * * *`）解析失败。
+- **Why**：`parseCronItem` 没有在 switch 中先处理 `*`，直接落到 `strconv.Atoi("*")` 报错。
+- **Fix**：在 `strconv.Atoi` 之前处理 `*` 通配符。
+
+**2. Tick 引擎的提前返回跳过 trigger 和 GC**
+
+- **Saw**：某些 job 永远不触发，尽管 schedule 已到期。
+- **Why**：`len(due) == 0` 的提前返回路径跳过了 trigger 检查和 GC 清理。
+- **Fix**：将 trigger 和 GC 移到提前返回之前执行。
+
+**3. OS 调度器启动的 cron 环境变量为空**
+
+- **Saw**：`seek cron tick` 被 systemd/launchd 启动时，用户 shell 中的环境变量（PATH、GOPATH 等）不可见。
+- **Fix**：在 Routines 中显式加载 `.env` 文件或在 job 定义中保留环境变量。
+
+**4. 后台进程不能继承 turn 的 context**
+
+- **Saw**：后台进程在 turn 结束时被取消（context done），任务未完成。
+- **Fix**：后台任务使用独立的 `context.Background()`，连接可取消的 context 仅用于传播关闭信号。
+
+**5. Go 的 `time.ParseDuration` 不支持 "30d" 或 "1w"**
+
+- **Saw**：`@every 30d` 解析失败。
+- **Fix**：在 `@every` 解析器中包装 `time.ParseDuration`，添加天/周的支持。
+
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+
 阅读本章前建议先读 PRD，再 `go test -race ./internal/routines/... ./internal/routinescli/...` 跑一遍验收测试理解边界行为。

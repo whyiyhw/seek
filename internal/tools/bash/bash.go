@@ -104,6 +104,7 @@ func (t Tool) shellArgv(command string) (string, []string) {
 	return name, args
 }
 
+// New returns a bash tool gated by the given permission policy.
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
 
 // WithDeny installs a command guard checked before permission/exec. When
