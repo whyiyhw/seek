@@ -252,8 +252,8 @@ func rightSegments(s StatusSnapshot) []string {
 }
 
 // formatBudget renders the context-window utilisation. Stays muted in
-// the safe zone; tints yellow above 80%; tints red above 95% with a
-// `/compact` nudge.
+// the safe zone; tints amber above budget.WarnFraction (60%); tints red
+// above budget.CriticalFraction (75%) with a `/compact` nudge.
 func formatBudget(s StatusSnapshot) string {
 	// Use the last turn's prompt tokens, not the cumulative sum.
 	// Cumulative grows quadratically (each turn re-sends the full history)
