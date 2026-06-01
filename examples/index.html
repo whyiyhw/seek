@@ -17,8 +17,8 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28' font-family='monospace' fill='%23f5a623'%3E▊%3C/text%3E%3C/svg%3E" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap" rel="stylesheet" />
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet" />
 <style>
   /* ============ RESET & BASE ============ */
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -530,6 +530,60 @@
     .stats-band { grid-template-columns: 1fr; }
   }
 
+  /* Why-different 3-pillar grid — same card aesthetic as .stat-card,
+     left-aligned for prose, larger icon. */
+  .pillar-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .pillar-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px 22px;
+    transition: all .3s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .pillar-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 2px;
+    background: var(--amber);
+    opacity: 0;
+    transition: opacity .3s;
+  }
+  .pillar-card:hover::before { opacity: 1; }
+  .pillar-card:hover {
+    border-color: var(--amber);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 24px rgba(0,0,0,.4), 0 0 16px var(--amber-dim);
+  }
+  .pillar-card .pillar-icon { color: var(--amber); line-height: 0; }
+  .pillar-card .pillar-icon svg { width: 30px; height: 30px; }
+  .pillar-card .pillar-title {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 12px 0 8px;
+  }
+  .pillar-card .pillar-desc {
+    font-size: .82rem;
+    color: var(--dim);
+    line-height: 1.6;
+  }
+  .pillar-card .pillar-desc code {
+    font-size: .76rem;
+    color: var(--amber);
+    background: none;
+  }
+  @media (max-width: 768px) {
+    .pillar-grid { grid-template-columns: 1fr; }
+  }
+
   .diff-grid {
     display: grid;
     grid-template-columns: 1fr 1.3fr;
@@ -680,7 +734,7 @@
     -webkit-overflow-scrolling: touch;
   }
   .showcase-tab {
-    padding: 10px 16px;
+    padding: 15px 18px;
     font-family: var(--font-display);
     font-size: .72rem;
     font-weight: 600;
@@ -706,7 +760,7 @@
     margin-right: 5px;
   }
   @media (max-width: 600px) {
-    .showcase-tab { padding: 8px 10px; font-size: .68rem; }
+    .showcase-tab { padding: 13px 12px; font-size: .68rem; }
     .showcase-term .term-body { min-height: 220px; font-size: .74rem; }
   }
 
@@ -779,7 +833,7 @@
     margin-top: 12px;
   }
   .carousel-nav button {
-    width: 32px; height: 32px;
+    width: 40px; height: 40px;
     border: 1px solid var(--border);
     border-radius: 4px;
     background: var(--surface);
@@ -1202,7 +1256,7 @@
     .container { padding: 0 16px; }
     .diff-card { padding: 20px 16px; }
     .diff-card .metric { font-size: 1.6rem; }
-    .back-top { bottom: 16px; right: 12px; width: 40px; height: 40px; }
+    .back-top { bottom: 16px; right: 12px; width: 44px; height: 44px; }
     .cost-bar-label { width: 80px; font-size: .65rem; }
     .price-wrap table { font-size: .72rem; }
     .price-wrap th, .price-wrap td { padding: 10px 10px; }
@@ -1444,8 +1498,8 @@
       </div>
     </div>
     <p class="terminal-hero-tagline reveal">
-      <span data-lang="en">Open source <strong>seek</strong> —&nbsp;DeepSeek-native AI coding agent with <strong>subagent</strong> parallel workers, <strong>checkpoint</strong> undo/redo safety net, and <strong>persistent memory</strong> that survives sessions.</span>
-      <span data-lang="zh" hidden>开源 <strong>seek</strong> —&nbsp;DeepSeek 原生 AI 编程助手，支持 <strong>subagent</strong> 并行工作、<strong>checkpoint</strong> 撤销安全网、跨会话 <strong>持久记忆</strong>。</span>
+      <span data-lang="en">Not an agent demo — a local agent platform that <strong>plans</strong>, <strong>spawns a team of sub-agents</strong>, and <strong>ships while you sleep</strong>. Open source, single <strong>~5 MB</strong> Go binary, DeepSeek-native.</span>
+      <span data-lang="zh" hidden>不是又一个 agent demo——而是一个本地 agent 平台：会<strong>规划</strong>、能<strong>派出一队子代理</strong>、在你<strong>睡觉时把活干完</strong>。开源、单个 <strong>~5 MB</strong> Go 二进制、DeepSeek 原生。</span>
     </p>
     <div style="display:flex;justify-content:center;margin-top:20px;">
       <div class="btn-group terminal-hero-btns reveal">
@@ -1466,6 +1520,60 @@
 </section>
 
 <main class="container" id="main-content">
+
+<!-- ============ WHY DIFFERENT (3 pillars) ============ -->
+<section class="section-frame" data-title="WHY SEEK">
+  <div class="section-head reveal">
+    <p class="label">
+      <span data-lang="en">why seek is different</span>
+      <span data-lang="zh" hidden>seek 与众不同之处</span>
+    </p>
+    <h2>
+      <span data-lang="en">Not an agent demo — a platform.</span>
+      <span data-lang="zh" hidden>不是 agent demo——是平台。</span>
+    </h2>
+    <p>
+      <span data-lang="en">Three claims in the tagline, each backed by shipping code.</span>
+      <span data-lang="zh" hidden>标语里的三句话，每句都有已落地的代码兜底。</span>
+    </p>
+  </div>
+
+  <div class="pillar-grid">
+    <div class="pillar-card reveal">
+      <div class="pillar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></div>
+      <h3 class="pillar-title">
+        <span data-lang="en">Plans before it acts</span>
+        <span data-lang="zh" hidden>先规划，再动手</span>
+      </h3>
+      <div class="pillar-desc">
+        <span data-lang="en"><code>/plan</code> gates work behind <em>analyze → propose → you approve → execute</em>. Read-only until you approve a step-by-step list; push back mid-run and it re-plans <em>without redoing finished work</em>. State rebuilds from the transcript, so <code>seek -resume</code> picks up exactly where it left off.</span>
+        <span data-lang="zh" hidden><code>/plan</code> 把工作卡在 <em>分析 → 提方案 → 你批准 → 执行</em> 之后。批准前全程只读；执行中你可以中途插话，它会<em>在不重做已完成步骤的前提下</em>重新规划。状态从 transcript 重建，<code>seek -resume</code> 能精确续上原计划。</span>
+      </div>
+    </div>
+    <div class="pillar-card reveal" style="transition-delay:.1s">
+      <div class="pillar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></div>
+      <h3 class="pillar-title">
+        <span data-lang="en">Spawns a team of sub-agents</span>
+        <span data-lang="zh" hidden>派出一队子代理</span>
+      </h3>
+      <div class="pillar-desc">
+        <span data-lang="en">Fans a task out to sub-agents that run <em>in parallel, each isolated in its own git worktree</em> so they never collide. Permissions narrow monotonically; cost aggregates to the parent's status bar. Watch live with <code>/agents</code> · <code>/worktrees</code>.</span>
+        <span data-lang="zh" hidden>把任务扇出给子代理，<em>并行执行、各自隔离在独立 git worktree</em> 里，互不踩踏。权限单调收紧（子永远不松于父），成本自动累加到父 agent 状态栏。用 <code>/agents</code> · <code>/worktrees</code> 实时观察。</span>
+      </div>
+    </div>
+    <div class="pillar-card reveal" style="transition-delay:.2s">
+      <div class="pillar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
+      <h3 class="pillar-title">
+        <span data-lang="en">Ships while you sleep</span>
+        <span data-lang="zh" hidden>你睡觉时把活干完</span>
+      </h3>
+      <div class="pillar-desc">
+        <span data-lang="en"><em>Zero-daemon</em> scheduling on your OS (launchd / systemd / Task Scheduler). <code>seek cron</code>, a model-scheduled <code>schedule_wakeup</code>, or a CI trigger file runs unattended, commits, and <em>pushes the result to your phone</em> (ntfy / Slack / Discord / any URL).</span>
+        <span data-lang="zh" hidden>借力操作系统的<em>零 daemon</em> 调度（launchd / systemd / 任务计划程序）。<code>seek cron</code>、模型自排的 <code>schedule_wakeup</code>、或一个 CI 触发文件，都能无人值守地跑完、提交，并把结果<em>推送到你手机</em>（ntfy / Slack / Discord / 任意 URL）。</span>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- ============ STATS BAND ============ -->
 <section class="section-frame" data-title="AT A GLANCE">
@@ -1544,14 +1652,15 @@
       <span data-lang="zh" hidden>看看 seek 怎么工作。</span>
     </h2>
     <p>
-      <span data-lang="en">Click a tab to watch a real seek session — subagent delegation, memory observation, web fetching, and more.</span>
-      <span data-lang="zh" hidden>点击标签页查看真实 seek 会话——subagent 委派、记忆写入、网页抓取等。</span>
+      <span data-lang="en">Click a tab to watch a real seek session — unattended autopilot, subagent delegation, memory recall, web fetching, and more.</span>
+      <span data-lang="zh" hidden>点击标签页查看真实 seek 会话——无人值守 autopilot、subagent 委派、记忆召回、网页抓取等。</span>
     </p>
   </div>
 
   <div class="showcase-term term-window reveal">
     <div class="showcase-tabs" id="showcase-tabs" role="tablist" aria-label="Feature demos">
       <button class="showcase-tab active" data-tab="agent" role="tab" aria-selected="true"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span><span data-lang="en">Agent</span><span data-lang="zh" hidden>智能体</span></button>
+      <button class="showcase-tab" data-tab="autopilot" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span><span data-lang="en">Autopilot</span><span data-lang="zh" hidden>无人值守</span></button>
       <button class="showcase-tab" data-tab="memory" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h4M14 12h4"/><circle cx="12" cy="12" r="1"/></svg></span><span data-lang="en">Memory</span><span data-lang="zh" hidden>记忆</span></button>
       <button class="showcase-tab" data-tab="web" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span><span data-lang="en">Web</span><span data-lang="zh" hidden>网络</span></button>
       <button class="showcase-tab" data-tab="safety" role="tab" aria-selected="false"><span class="icon icon-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span data-lang="en">Safety</span><span data-lang="zh" hidden>安全</span></button>
@@ -1576,19 +1685,20 @@
       <span data-lang="zh" hidden>git log --oneline</span>
     </h2>
     <p>
-      <span data-lang="en">Milestones M0–M9 all delivered. Latest: subagent, worktree isolation, scheduled wakeups.</span>
-      <span data-lang="zh" hidden>里程碑 M0–M9 全部交付。最新：subagent、worktree 隔离、定时唤醒。</span>
+      <span data-lang="en">v0–v7 PRD series all delivered, shipping as v0.8.0. Latest: autopilot, OS sandbox, ACP/Zed, offline OCR, <code>/goal</code>.</span>
+      <span data-lang="zh" hidden>v0–v7 PRD 系列全部交付，以 v0.8.0 发布。最新：autopilot、OS 沙箱、ACP/Zed、离线 OCR、<code>/goal</code>。</span>
     </p>
   </div>
 
   <div class="timeline reveal">
-    <div><span class="tl-commit">a3f210c</span> <span class="tl-tag">(v5.0)</span> <span class="tl-date">2026-05</span> <span class="tl-msg"><span class="tl-highlight">subagent</span> with worktree isolation · <span class="tl-highlight">schedule_wakeup</span> · json-rpc headless mode</span></div>
-    <div><span class="tl-commit">d8b4e6f</span> <span class="tl-tag">(v4.0)</span> <span class="tl-date">2026-04</span> <span class="tl-msg"><span class="tl-highlight">checkpoint</span> undo/redo safety net · <span class="tl-highlight">shell-hooks</span> · webfetch SSRF-safe</span></div>
-    <div><span class="tl-commit">7c2a19b</span> <span class="tl-tag">(v3.0)</span> <span class="tl-date">2026-03</span> <span class="tl-msg"><span class="tl-highlight">plan-mode</span> v2 with propose/execute · skill v2 package format · <span class="tl-highlight">/review</span></span></div>
-    <div><span class="tl-commit">f9e1d45</span> <span class="tl-tag">(v2.0)</span> <span class="tl-date">2026-02</span> <span class="tl-msg">skill lifecycle (create/install/update) · ask_user TUI picker · <span class="tl-highlight">/steer</span></span></div>
-    <div><span class="tl-commit">b4a882c</span> <span class="tl-tag">(v1.0)</span> <span class="tl-date">2026-01</span> <span class="tl-msg"><span class="tl-highlight">three-tier memory</span> L/M/S · session JSONL persistence · skill loader</span></div>
-    <div><span class="tl-commit">e05d1f7</span> <span class="tl-tag">(v0.5)</span> <span class="tl-date">2025-12</span> <span class="tl-msg"><span class="tl-highlight">multi-provider</span> Anthropic/OpenAI/Gemini · /model /effort /yolo · TUI polish</span></div>
-    <div><span class="tl-commit">1a9c34e</span> <span class="tl-tag">(v0.1)</span> <span class="tl-date">2025-11</span> <span class="tl-msg">DeepSeek-native core · terminal TUI · basic tool set</span></div>
+    <div><span class="tl-commit">3992a9f</span> <span class="tl-tag">(v0.8)</span> <span class="tl-date">2026-05</span> <span class="tl-msg"><span class="tl-highlight">autopilot</span> fleet · OS <span class="tl-highlight">sandbox</span> (seatbelt/landlock) · <span class="tl-highlight">ACP</span>/Zed · offline <span class="tl-highlight">OCR</span> · <span class="tl-highlight">/goal</span> autonomous loop</span></div>
+    <div><span class="tl-commit">a3f210c</span> <span class="tl-tag">(v0.7)</span> <span class="tl-date">2026-05</span> <span class="tl-msg"><span class="tl-highlight">cron</span> + schedule_wakeup + file triggers + OS notifications · <span class="tl-highlight">push-to-phone</span> webhooks</span></div>
+    <div><span class="tl-commit">d8b4e6f</span> <span class="tl-tag">(v0.6)</span> <span class="tl-date">2026-04</span> <span class="tl-msg"><span class="tl-highlight">subagent</span> + worktree isolation · <span class="tl-highlight">code-review</span> · background jobs + <span class="tl-highlight">monitor</span> · semantic <span class="tl-highlight">references</span></span></div>
+    <div><span class="tl-commit">7c2a19b</span> <span class="tl-tag">(v0.5)</span> <span class="tl-date">2026-03</span> <span class="tl-msg"><span class="tl-highlight">checkpoint</span> undo/redo · <span class="tl-highlight">shell-hooks</span> · webfetch SSRF-safe · <span class="tl-highlight">MCP</span> client</span></div>
+    <div><span class="tl-commit">f9e1d45</span> <span class="tl-tag">(v0.4)</span> <span class="tl-date">2026-02</span> <span class="tl-msg"><span class="tl-highlight">plan-mode</span> v2 (propose/execute) · skill v2 package format · permission refactor</span></div>
+    <div><span class="tl-commit">b4a882c</span> <span class="tl-tag">(v0.3)</span> <span class="tl-date">2026-01</span> <span class="tl-msg">skill lifecycle (create/install/update) · ask_user TUI picker · <span class="tl-highlight">/steer</span></span></div>
+    <div><span class="tl-commit">e05d1f7</span> <span class="tl-tag">(v0.2)</span> <span class="tl-date">2025-12</span> <span class="tl-msg"><span class="tl-highlight">three-tier memory</span> L/M/S · session JSONL persistence · skill loader</span></div>
+    <div><span class="tl-commit">1a9c34e</span> <span class="tl-tag">(v0.1)</span> <span class="tl-date">2025-11</span> <span class="tl-msg">DeepSeek-native core · <span class="tl-highlight">multi-provider</span> · terminal TUI · basic tool set</span></div>
   </div>
 </section>
 
@@ -1626,7 +1736,7 @@
       <div class="stat-desc"><span data-lang="en">for comparison — 107× more</span><span data-lang="zh" hidden">对比参考——107 倍差价</span></div>
     </div>
     <div class="stat-card" style="border-color:var(--amber-dim)">
-      <div class="stat-num">🌙 50% off</div>
+      <div class="stat-num"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:.85em;height:.85em;vertical-align:-.06em"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> 50% off</div>
       <div class="stat-label"><span data-lang="en">off-peak discount</span><span data-lang="zh" hidden>错峰折扣</span></div>
       <div class="stat-desc"><span data-lang="en">UTC+8 00:30–08:30 · live timer</span><span data-lang="zh" hidden>北京时间 00:30–08:30 · 实时计时</span></div>
     </div>
@@ -1647,12 +1757,12 @@
       <span data-lang="zh" hidden>能力矩阵</span>
     </p>
     <h2>
-      <span data-lang="en">25+ tools, one binary.</span>
-      <span data-lang="zh" hidden>25+ 工具，一个二进制。</span>
+      <span data-lang="en">30+ tools, one binary.</span>
+      <span data-lang="zh" hidden>30+ 工具，一个二进制。</span>
     </h2>
     <p>
-      <span data-lang="en">Scroll to explore every tool seek ships with — agent, memory, web, safety, and developer experience.</span>
-      <span data-lang="zh" hidden>横向滚动浏览 seek 内置的全部工具——智能体、记忆、网络、安全、开发体验。</span>
+      <span data-lang="en">Scroll to explore every tool seek ships with — autonomy, agent, memory, web, safety, and developer experience.</span>
+      <span data-lang="zh" hidden>横向滚动浏览 seek 内置的全部工具——自治、智能体、记忆、网络、安全、开发体验。</span>
     </p>
   </div>
 
@@ -1662,7 +1772,16 @@
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek agent --workers 3</span><br><span class="c-out">[agent] 3 subagents · parallel</span><br><span class="c-teal">[agent] worktrees cleaned ✓</span></div><div class="card-name">subagent</div><div class="card-desc"><span data-lang="en">Parallel workers with git worktree isolation — safe exploration at scale</span><span data-lang="zh" hidden>并行 subagent + git worktree 隔离——安全的规模化探索</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /plan</span><br><span class="c-teal">▸ Plan mode active</span><br><span class="c-out">read-only → propose → execute</span></div><div class="card-name">plan-mode</div><div class="card-desc"><span data-lang="en">Read-only exploration → proposal → execution with checkpoint safety</span><span data-lang="zh" hidden">只读探索→提案→执行，checkpoint 安全网</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /review</span><br><span class="c-out">[agent] activating plan + review</span><br><span class="c-teal">▸ 3 files · 2 suggestions</span></div><div class="card-name">code-review</div><div class="card-desc"><span data-lang="en">One-key review with plan-mode context and worktree isolation</span><span data-lang="zh" hidden">一键审查，plan-mode 上下文 + worktree 隔离</span></div></div>
-      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek agent "audit SQL"</span><br><span class="c-out">[agent] workers: sql-1 sql-2 sql-3</span><br><span class="c-teal">▸ 1 medium · $0.0031</span></div><div class="card-name">parallel-audit</div><div class="card-desc"><span data-lang="en">Multi-subagent security audit with consolidated reporting</span><span data-lang="zh" hidden">多 subagent 安全审计 + 汇总报告</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek agent "audit SQL"</span><br><span class="c-out">[agent] workers: sql-1 sql-2 sql-3</span><br><span class="c-teal">▸ 1 medium · $0.0031</span></div><div class="card-name">parallel-audit</div><div class="card-desc"><span data-lang="en">Multi-subagent security audit with consolidated reporting</span><span data-lang="zh" hidden>多 subagent 安全审计 + 汇总报告</span></div></div>
+      <!-- Autonomy & v7 -->
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek cron create --autopilot</span><br><span class="c-out">decompose → fleet → commit</span><br><span class="c-teal">▸ pushed · 📱 notified</span></div><div class="card-name">autopilot</div><div class="card-desc"><span data-lang="en">Unattended end-to-end: decompose → parallel worktree fleet → commit → push → webhook</span><span data-lang="zh" hidden>无人值守端到端：拆解 → 并行 worktree 舰队 → 提交 → 推送 → webhook</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ seek goal run "tests pass"</span><br><span class="c-out">turn 3 · judge: not yet</span><br><span class="c-teal">▸ turn 5 · goal met ✓</span></div><div class="card-name">goal-loop</div><div class="card-desc"><span data-lang="en">Loops across turns until a cheap model judges your condition met — TUI / headless / cron</span><span data-lang="zh" hidden>跨多轮循环，直到便宜模型判定条件满足——TUI / headless / cron</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[sandbox] seatbelt active</span><br><span class="c-out">writes confined to CWD</span><br><span class="c-teal">▸ kernel-level · 0 deps</span></div><div class="card-name">os-sandbox</div><div class="card-desc"><span data-lang="en">seatbelt (macOS) / landlock (Linux) — kernel-level confinement, zero runtime deps</span><span data-lang="zh" hidden>seatbelt（macOS）/ landlock（Linux）——内核级隔离，零运行时依赖</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[acp] zed connected</span><br><span class="c-out">editor agent online</span><br><span class="c-teal">▸ image attach ready</span></div><div class="card-name">acp-zed</div><div class="card-desc"><span data-lang="en">Run seek as an editor agent over the Agent Client Protocol — works in Zed</span><span data-lang="zh" hidden>通过 Agent Client Protocol 把 seek 当编辑器 agent 跑——支持 Zed</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">&gt; fix this @err.png</span><br><span class="c-out">[ocr] local · offline</span><br><span class="c-teal">▸ text → model, no VLM</span></div><div class="card-name">offline-ocr</div><div class="card-desc"><span data-lang="en">Reference or paste an image — seek OCRs it locally, no VLM and no network</span><span data-lang="zh" hidden>引用或粘贴图片——seek 本地 OCR，无 VLM、无网络</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[webhook] turn done</span><br><span class="c-out">POST ntfy / Slack / 飞书</span><br><span class="c-teal">▸ 📱 pushed to phone</span></div><div class="card-name">push-to-phone</div><div class="card-desc"><span data-lang="en">cron / autopilot / long-turn completions → webhook (ntfy / Slack / Discord / any URL)</span><span data-lang="zh" hidden>cron / autopilot / 长回合完成 → webhook（ntfy / Slack / Discord / 任意 URL）</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">[references] who calls this?</span><br><span class="c-out">gopls · 7 call sites</span><br><span class="c-teal">▸ grep fallback if no LSP</span></div><div class="card-name">references</div><div class="card-desc"><span data-lang="en">Semantic "who calls this?" via LSP (gopls / pyright / tsserver), grep fallback</span><span data-lang="zh" hidden>语义「谁调用了它」走 LSP（gopls / pyright / tsserver），grep 兜底</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ npm run build &amp;</span><br><span class="c-out">[bg-1] detached</span><br><span class="c-teal">▸ monitor: wait/poll/kill</span></div><div class="card-name">background-jobs</div><div class="card-desc"><span data-lang="en">Detach long builds/servers → bg-N; the monitor tool polls / waits / kills</span><span data-lang="zh" hidden>长 build/server 丢后台 → bg-N；monitor 工具 poll / wait / kill</span></div></div>
       <!-- Memory -->
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">[memory_observe]</span><br><span class="c-out">payment-timeout-30s</span><br><span class="c-teal">▸ stored to M-index ✓</span></div><div class="card-name">memory-observe</div><div class="card-desc"><span data-lang="en">Auto-detect key decisions and persist to project M-index</span><span data-lang="zh" hidden"">自动检测关键决策并持久化到项目 M-index</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">[memory_recall]</span><br><span class="c-out">"payment-timeout" → hit</span><br><span class="c-teal">▸ recall_count: 4</span></div><div class="card-name">memory-recall</div><div class="card-desc"><span data-lang="en">Semantic recall of past decisions — survives session restart</span><span data-lang="zh" hidden>语义召回过往决策——跨会话持久化</span></div></div>
@@ -1684,7 +1803,7 @@
       <!-- DX -->
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">> /model</span><br><span class="c-teal">▸ V4-Flash → V4-Pro</span><br><span class="c-out">thinking: enabled</span></div><div class="card-name">slash-commands</div><div class="card-desc"><span data-lang="en">/model /effort /yolo /plan /review /steer — keyboard-first UX</span><span data-lang="zh" hidden">/model /effort /yolo /plan /review /steer——键盘优先体验</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">[ask_user] picker open</span><br><span class="c-out">"install scope?"</span><br><span class="c-teal">▸ selected: project</span></div><div class="card-name">ask-user-picker</div><div class="card-desc"><span data-lang="en">Model can open TUI picker to ask for your decision — inline, no context switch</span><span data-lang="zh" hidden">模型可打开 TUI 选择器征求你的决定——内联，不切换上下文</span></div></div>
-      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ sudo seek -upgrade</span><br><span class="c-out">verify sha256 · replace</span><br><span class="c-teal">▸ v0.4.2 → v0.5.0 ✓</span></div><div class="card-name">self-upgrade</div><div class="card-desc"><span data-lang="en">Atomic in-place upgrade — verify sha256, replace binary, no re-download (sudo on macOS / Linux; Windows runs as-is)</span><span data-lang="zh" hidden">原子级原地升级——校验 sha256、替换二进制（macOS / Linux 需 sudo；Windows 无需）</span></div></div>
+      <div class="carousel-card"><div class="card-term"><span class="c-prompt">$ sudo seek -upgrade</span><br><span class="c-out">verify sha256 · replace</span><br><span class="c-teal">▸ v0.7.0 → v0.8.0 ✓</span></div><div class="card-name">self-upgrade</div><div class="card-desc"><span data-lang="en">Atomic in-place upgrade — verify sha256, replace binary, no re-download (sudo on macOS / Linux; Windows runs as-is)</span><span data-lang="zh" hidden">原子级原地升级——校验 sha256、替换二进制（macOS / Linux 需 sudo；Windows 无需）</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">[skill] install frontend</span><br><span class="c-out">fetching from GitHub...</span><br><span class="c-teal">▸ installed to ~/.seek/</span></div><div class="card-name">skill-ecosystem</div><div class="card-desc"><span data-lang="en">Anthropic-compatible skill format — create, install, update, uninstall</span><span data-lang="zh" hidden">兼容 Anthropic skill 格式——创建/安装/更新/卸载</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">[provider] switch</span><br><span class="c-teal">▸ DeepSeek → Anthropic</span><br><span class="c-out">+ OpenAI · Gemini</span></div><div class="card-name">multi-provider</div><div class="card-desc"><span data-lang="en">DeepSeek + Anthropic + OpenAI + Gemini — switch inline with /model</span><span data-lang="zh" hidden">DeepSeek + Anthropic + OpenAI + Gemini——/model 内联切换</span></div></div>
       <div class="carousel-card"><div class="card-term"><span class="c-prompt">&gt; 帮我重构这个函数</span><br><span class="c-out">[reply lang: zh · auto]</span><br><span class="c-teal">▸ 跟随用户输入</span></div><div class="card-name">auto-language</div><div class="card-desc"><span data-lang="en">Reply language auto-matches your input — no flag, no toggle. Chinese in → Chinese out; English in → English out</span><span data-lang="zh" hidden">回复语言自适应跟随你的输入——无 flag、无 toggle。中文进 → 中文出；英文进 → 英文出</span></div></div>
@@ -1783,8 +1902,8 @@
   <div class="container">
     <p><strong>seek</strong> · <span data-lang="en">MIT licensed</span><span data-lang="zh" hidden>MIT 开源</span> · <a href="https://github.com/whyiyhw/seek">GitHub</a> · <a href="/docs/"><span data-lang="en">Docs</span><span data-lang="zh" hidden>文档</span></a></p>
     <p>
-      <span data-lang="en">Built with Go · DeepSeek + Anthropic + OpenAI + Gemini · v5.0 with subagent &amp; checkpoint</span>
-      <span data-lang="zh" hidden>Go 构建 · DeepSeek + Anthropic + OpenAI + Gemini · v5.0 支持 subagent 与 checkpoint</span>
+      <span data-lang="en">Built with Go · DeepSeek + Anthropic + OpenAI + Gemini · v0.8.0 — autopilot · sandbox · ACP/Zed · /goal</span>
+      <span data-lang="zh" hidden>Go 构建 · DeepSeek + Anthropic + OpenAI + Gemini · v0.8.0——autopilot · 沙箱 · ACP/Zed · /goal</span>
     </p>
     <p style="margin-top:10px;font-size:.82rem;color:var(--dim);">
       <span data-lang="en"><span class="icon icon-sm" style="display:inline-flex;vertical-align:middle;margin-right:3px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z"/></svg></span>This page was created by <strong>seek</strong> + <strong>DeepSeek V4-Flash</strong></span>
@@ -2168,6 +2287,16 @@
         { text: '[agent] consolidated report: 1 medium finding · 4 files reviewed\n', cls: 'teal', delay: 200 },
         { text: '[agent] worktrees cleaned · total cost $0.0031\n', cls: 'dim', delay: 200 },
       ],
+      autopilot: [
+        { text: '$ seek cron create --autopilot "clear the bug backlog" --at 02:00\n', cls: 'prompt', delay: 0 },
+        { text: '[cron] registered via launchd — no daemon, fires at 02:00 🌙\n', cls: 'dim', delay: 300 },
+        { text: '[autopilot] decomposed backlog → 4 independent tasks\n', cls: '', delay: 250 },
+        { text: '[fleet] 4 sub-agents, each in its own git worktree, in parallel\n', cls: '', delay: 220 },
+        { text: '[worktree:fix-1] race in cache.go patched · tests green ✅\n', cls: '', delay: 200 },
+        { text: '[worktree:fix-3] nil-deref in router.go patched · tests green ✅\n', cls: '', delay: 200 },
+        { text: '[autopilot] 4/4 done · committed · pushed branch fix/backlog\n', cls: 'teal', delay: 220 },
+        { text: '[webhook] 📱 pushed to your phone — “backlog cleared · $0.04”\n', cls: 'teal', delay: 220 },
+      ],
       memory: [
         { text: '$ seek "update the payment service timeout to 30s"\n', cls: 'prompt', delay: 0 },
         { text: '[memory_observe] recording decision: payment-timeout-30s\n', cls: 'dim', delay: 200 },
@@ -2195,7 +2324,7 @@
       ],
       dx: [
         { text: '$ seek\n', cls: 'prompt', delay: 0 },
-        { text: 'seek v0.5.0 — DeepSeek V4-Flash (think: off)\n', cls: 'dim', delay: 200 },
+        { text: 'seek v0.8.0 — DeepSeek V4-Flash (think: off)\n', cls: 'dim', delay: 200 },
         { text: 'session v2-e8a2.jsonl loaded · 14 turns · 3 memories active\n', cls: '', delay: 200 },
         { text: '> /model\n', cls: 'prompt', delay: 300 },
         { text: '▸ Switched to deepseek-v4-pro · thinking enabled\n', cls: 'teal', delay: 200 },

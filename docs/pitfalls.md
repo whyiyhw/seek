@@ -718,6 +718,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: never render a brand/wordmark as ASCII block-art that depends on a font glyph (`█`, box-drawing, braille) — mobile/CJK webviews will fall back to a glyph of the wrong width and shear it. Use real DOM/SVG rects. Also: when a visual bug survives a "fix", check you're fixing the right layer (medium vs content) before redrawing. For the look — flat hard-edged squares + uniform gutter = pixel-art (an outer amber bloom is fine and wanted); per-pixel rounding/gradients/halos or fused segment bars are what tip it into "LED display", a different aesthetic
 - **Refs**: `examples/index.html` `.pixel-logo` + pixel-grid markup; commits c346c20, 85efd29 (the two mis-aimed attempts)
 
+### README hero SVG clipped on the right on GitHub — its monospace is wider than local Menlo
+- **Saw**: a hand-authored terminal-style banner (`examples/hero.svg`) fit perfectly when rasterised locally (qlmanage / Menlo), but GitHub's README render clipped the right edge — the tagline lost its last word and the status strip was cut off
+- **Why**: GitHub renders `<text>` in an inline-referenced SVG with ITS OWN (wider) monospace, not the macOS Menlo that `qlmanage` uses, so lines sized to "just fit" the 1200 viewBox locally overflow it on GitHub. Compounding it: adding `width`/`height` attrs to a viewBox-only SVG made `qlmanage` mis-scale (zoom + clip), which masked the real cause
+- **Fix**: keep the SVG **viewBox-only** (no `width`/`height`) and shorten every text line well under the viewBox width so any reasonable monospace fits with margin to spare. `examples/hero.svg`
+- **Lesson**: never size SVG `<text>` to "just fit" against a local rasteriser — the consumer (GitHub, another OS) picks a different font with a different advance width and overflows. Leave generous horizontal margin, or convert text to paths if exact width matters. `qlmanage` is NOT a faithful preview of GitHub's SVG font; verify the actual GitHub render
+- **Refs**: `examples/hero.svg`; sibling entry above (pixel block-art portability)
+
 ---
 
 ## Reading order for newcomers
