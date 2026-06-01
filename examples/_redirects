@@ -2,11 +2,10 @@
 # /docs without trailing slash → /docs/  (serves docs/index.html)
 /docs                /docs/                         301
 
-# Ensure .html files are served at clean URLs
-/docs/commands       /docs/commands.html            200
-/docs/architecture   /docs/architecture.html        200
-/docs/sessions       /docs/sessions.html            200
-/docs/memory         /docs/memory.html              200
-/docs/skills         /docs/skills.html              200
-/docs/subagent       /docs/subagent.html            200
-/docs/cron           /docs/cron.html                200
+# DO NOT add "/docs/<page>  /docs/<page>.html  200" rewrite rules here.
+# Cloudflare Pages already serves clean URLs (/docs/commands from
+# commands.html) automatically. An explicit 200-rewrite collides with that
+# built-in handling and puts the path into an infinite 307 redirect loop
+# (ERR_TOO_MANY_REDIRECTS) — which is exactly why commands/architecture/…
+# were "unclickable". Pages with NO rule (config, goal, …) work natively.
+# See docs/pitfalls.md → "Site / landing page".
