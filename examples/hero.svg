@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-label="seek — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep">
+  <!-- terminal window -->
+  <rect x="0" y="0" width="1200" height="340" rx="18" fill="#0b0b0e"/>
+  <rect x="0.75" y="0.75" width="1198.5" height="338.5" rx="17.25" fill="none" stroke="#26262e" stroke-width="1.5"/>
+
+  <!-- title bar -->
+  <circle cx="34" cy="32" r="6.5" fill="#ff5f56"/>
+  <circle cx="58" cy="32" r="6.5" fill="#ffbd2e"/>
+  <circle cx="82" cy="32" r="6.5" fill="#27c93f"/>
+  <text x="600" y="37" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6b6b78">seek · terminal agent</text>
+
+  <!-- wordmark -->
+  <text x="64" y="158" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="100" font-weight="700" letter-spacing="2" fill="#f5a623">seek</text>
+  <rect x="320" y="94" width="36" height="56" rx="2" fill="#f5a623" opacity="0.4"/>
+
+  <!-- tagline (short; full version is the text line below the banner) -->
+  <text x="66" y="206" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#c3c3cf">plans · spawns a sub-agent team · ships while you sleep</text>
+
+  <!-- prompt line -->
+  <text x="66" y="260" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#e6e6ec"><tspan fill="#f5a623">$</tspan> seek goal run <tspan fill="#9ad14b">"ship it"</tspan>  <tspan fill="#6b6b78"># then go to sleep</tspan></text>
+
+  <!-- status strip -->
+  <rect x="64" y="288" width="1072" height="34" rx="9" fill="#16161c"/>
+  <text x="80" y="310" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#9a9aa6">deepseek-v4-flash  ·  cache 96%  ·  /agents 2  ·  cron @14:30</text>
+  <text x="1120" y="310" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#f5a623">saved $0.42</text>
+</svg>
