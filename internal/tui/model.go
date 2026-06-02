@@ -25,7 +25,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -382,15 +381,6 @@ type Model struct {
 	// lastAssistantText is the most recent assistant message's text,
 	// captured at MessageEnd — fed to the judge as "the latest work".
 	lastAssistantText string
-
-	// pendingSkill, when non-empty, names a skill that the user has
-	// "armed" via `/skill use <name>` (no extra args). The next
-	// user-typed message (and ONLY the next one — slash commands and
-	// programmatic prompts like /review do not consume the arm) gets
-	// wrapped with a "Please use the X skill" preamble before going to
-	// the agent. Consumed via consumeArm; cleared on /skill use clear,
-	// on send, and on /reset.
-	pendingSkill string
 
 	// pastedContent stores the full content of a multi-line paste when
 	// the textarea display is folded to a placeholder. The marker text
@@ -824,10 +814,10 @@ func (m *Model) appendHistory(line string) tea.Cmd {
 // is rendered at all — for compact/branch it is not, because
 // promptHistory survives those operations.
 //
-// NOT included here: pendingSkill, promptHistory/historyIdx/savedDraft,
-// opts.PlanSubstate. Those are conversation-scoped — only cmdNew (a
-// genuinely fresh conversation) should reset them. Compact/branch are
-// continuations of the same conversation and must keep them.
+// NOT included here: promptHistory/historyIdx/savedDraft, opts.PlanSubstate.
+// Those are conversation-scoped — only cmdNew (a genuinely fresh conversation)
+// should reset them. Compact/branch are continuations of the same conversation
+// and must keep them.
 func (m *Model) resetSessionCounters() {
 	m.turns = 0
 	m.toolCalls = 0
@@ -837,24 +827,4 @@ func (m *Model) resetSessionCounters() {
 	m.activeTools = nil
 }
 
-// consumeArm wraps text with a "Please use the <name> skill" preamble
-// when m.pendingSkill is set, then clears the arm. Returns text
-// unchanged when no skill is armed. Called at the two user-typed
-// submission sites (non-streaming submit and streaming queue/steer);
-// programmatic submissions like /review go through submit() directly
-// without this wrapper, so the arm survives until a real user message
-// arrives.
-//
-// The wrapper text is deliberately explicit ("Please use the X skill")
-// rather than something terser like a sigil — the model needs an
-// unambiguous instruction to call the Skill tool first, and the
-// natural-language form is what reliably triggers that across both
-// DeepSeek and the second-tier providers.
-func (m *Model) consumeArm(text string) string {
-	if m.pendingSkill == "" {
-		return text
-	}
-	name := m.pendingSkill
-	m.pendingSkill = ""
-	return fmt.Sprintf("Please use the %q skill for the following task:\n\n%s", name, text)
-}
+

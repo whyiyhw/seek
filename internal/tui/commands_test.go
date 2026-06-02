@@ -1774,11 +1774,8 @@ func TestCmdSkillsUsed_NoSessionSaysSo(t *testing.T) {
 
 // --- /skill use --------------------------------------------------------
 //
-// Arm-vs-fire semantics: bare name arms (sets pendingSkill); name +
-// extra fires immediately; "clear" disarms. Slash dispatch is gated
-// before consumeArm runs in the live KeyEnter path, so we assert the
-// state changes directly on Model and check that consumeArm wraps
-// then clears.
+// Semantics: bare name fires immediately (no arm); name + extra fires
+// immediately with a task. Error cases are tested below.
 
 // withSkills attaches a Set containing the named skills (with minimal
 // metadata) so cmdSkillUse can validate them.
@@ -1790,51 +1787,36 @@ func withSkills(m *Model, names ...string) {
 	m.opts.Skills = set
 }
 
-func TestCmdSkillUse_BareNameArms(t *testing.T) {
+func TestCmdSkillUse_BareNameFiresImmediately(t *testing.T) {
 	m := emptyModel()
 	withSkills(m, "dual-model")
 
+	// submitOrSteer in non-streaming mode tries m.submit which needs
+	// Agent/Ctx. Route through steerStream by marking streaming=true.
+	m.streaming = true
+	m.cancelStream = func() {}
+
 	res := runHandler(t, m, "/skill use dual-model")
 
-	if m.pendingSkill != "dual-model" {
-		t.Errorf("expected pendingSkill=dual-model, got %q", m.pendingSkill)
+	// Should have fired via steerStream — check the wrapped text.
+	if !strings.Contains(m.pendingSteerText, "dual-model") {
+		t.Errorf("steer text should reference the skill name, got: %q", m.pendingSteerText)
 	}
-	if !strings.Contains(res.text, "armed") || !strings.Contains(res.text, "dual-model") {
-		t.Errorf("expected confirmation mentioning armed + skill name, got: %q", res.text)
+	if !strings.Contains(m.pendingSteerText, "Please use") {
+		t.Errorf("steer text should say 'Please use', got: %q", m.pendingSteerText)
 	}
+	_ = res
 }
 
 func TestCmdSkillUse_NameWithExtraFiresImmediately(t *testing.T) {
 	m := emptyModel()
 	withSkills(m, "dual-model")
 
-	// submitOrSteer in non-streaming mode tries to call m.submit which
-	// needs m.opts.Agent / opts.Ctx. We don't have those in emptyModel,
-	// so we'd panic — fix by stubbing m.streaming = true: that path
-	// re-routes through steerStream which DOES require Agent for the
-	// cancel side... so instead we verify state preconditions and
-	// re-enter the dispatch with a minimal mock. Simpler: drop down to
-	// cmdSkillUse directly and only assert on the non-submit branches.
-	//
-	// Approach: assert that handing extra args takes us out of the arm
-	// branch (pendingSkill stays empty) and produces a cmdResult whose
-	// payload is the submit pipeline (extra cmd, not text).
-	m.streaming = false
-	// We can't easily run m.submit without an agent. Inspect cmdSkillUse
-	// directly by routing through cmdSkillCLI on the "use" verb so
-	// we exercise the production parser. To avoid Agent panic, replace
-	// the model's submit path by using a streaming sentinel and
-	// catching the steerStream call's lack of agent.
-	m.streaming = true         // route through steerStream branch
-	m.cancelStream = func() {} // steerStream calls cancel()
+	// Route through steerStream to avoid full Agent setup.
+	m.streaming = true
+	m.cancelStream = func() {}
 	res := runHandler(t, m, "/skill use dual-model 帮我重构 foo.go")
 
-	if m.pendingSkill != "" {
-		t.Errorf("immediate fire should NOT arm; got pendingSkill=%q", m.pendingSkill)
-	}
-	// steerStream stashes the wrapped text in pendingSteerText. Verify
-	// the wrapper is exactly what consumeArm would produce — single
-	// source of truth check.
 	if !strings.Contains(m.pendingSteerText, "dual-model") {
 		t.Errorf("steer text should reference the skill name, got: %q", m.pendingSteerText)
 	}
@@ -1844,43 +1826,12 @@ func TestCmdSkillUse_NameWithExtraFiresImmediately(t *testing.T) {
 	_ = res
 }
 
-func TestCmdSkillUse_Clear(t *testing.T) {
-	m := emptyModel()
-	withSkills(m, "dual-model")
-	m.pendingSkill = "dual-model"
-
-	res := runHandler(t, m, "/skill use clear")
-
-	if m.pendingSkill != "" {
-		t.Errorf("clear should disarm; got pendingSkill=%q", m.pendingSkill)
-	}
-	if !strings.Contains(res.text, "disarmed") {
-		t.Errorf("expected 'disarmed' confirmation, got: %q", res.text)
-	}
-}
-
-func TestCmdSkillUse_ClearWhenNothingArmed(t *testing.T) {
-	m := emptyModel()
-	withSkills(m, "dual-model")
-
-	res := runHandler(t, m, "/skill use clear")
-	// Idempotent — clearing nothing is fine. The message just tells the
-	// user nothing was armed so they can tell apart "I cleared it" from
-	// "there was nothing to clear" without checking state themselves.
-	if !strings.Contains(res.text, "nothing armed") {
-		t.Errorf("expected 'nothing armed' notice, got: %q", res.text)
-	}
-}
-
 func TestCmdSkillUse_UnknownNameErrorsAndListsAvailable(t *testing.T) {
 	m := emptyModel()
 	withSkills(m, "dual-model", "go-test-runner")
 
 	res := runHandler(t, m, "/skill use typo")
 
-	if m.pendingSkill != "" {
-		t.Errorf("unknown skill must not arm; got %q", m.pendingSkill)
-	}
 	// Error must surface the available names so the user can fix the
 	// typo without another round-trip to /skills.
 	for _, want := range []string{"typo", "not found", "dual-model", "go-test-runner"} {
@@ -1894,68 +1845,8 @@ func TestCmdSkillUse_NoSkillsLoaded(t *testing.T) {
 	m := emptyModel() // m.opts.Skills nil
 	res := runHandler(t, m, "/skill use dual-model")
 
-	if m.pendingSkill != "" {
-		t.Errorf("must not arm when no skills loaded; got %q", m.pendingSkill)
-	}
 	if !strings.Contains(res.text, "no skills loaded") {
 		t.Errorf("expected explicit 'no skills loaded', got: %q", res.text)
-	}
-}
-
-func TestCmdSkillUse_ReplacesExistingArm(t *testing.T) {
-	m := emptyModel()
-	withSkills(m, "dual-model", "go-test-runner")
-	m.pendingSkill = "dual-model"
-
-	res := runHandler(t, m, "/skill use go-test-runner")
-
-	if m.pendingSkill != "go-test-runner" {
-		t.Errorf("re-arm should replace existing arm; got %q", m.pendingSkill)
-	}
-	if !strings.Contains(res.text, "go-test-runner") {
-		t.Errorf("confirmation should name the new skill, got: %q", res.text)
-	}
-}
-
-func TestConsumeArm_WrapsAndClears(t *testing.T) {
-	m := emptyModel()
-	m.pendingSkill = "dual-model"
-
-	wrapped := m.consumeArm("帮我重构这段代码")
-
-	if m.pendingSkill != "" {
-		t.Errorf("consumeArm must clear pendingSkill after use; got %q", m.pendingSkill)
-	}
-	for _, want := range []string{"dual-model", "帮我重构这段代码", "Please use"} {
-		if !strings.Contains(wrapped, want) {
-			t.Errorf("wrapped text missing %q: %q", want, wrapped)
-		}
-	}
-}
-
-func TestConsumeArm_NoArmIsNoOp(t *testing.T) {
-	m := emptyModel()
-	// pendingSkill empty by default
-
-	got := m.consumeArm("hello")
-	if got != "hello" {
-		t.Errorf("consumeArm with no arm should be identity, got %q", got)
-	}
-}
-
-func TestCmdNew_ClearsArm(t *testing.T) {
-	// /new starts a fresh conversation — any armed skill from the prior
-	// session is conceptually obsolete and should not silently apply to
-	// the next message in the new session.
-	m := emptyModel()
-	m.pendingSkill = "dual-model"
-	// /new needs RebuildAgent to do its real work; stub it.
-	m.opts.RebuildAgent = func() (*agent.Agent, error) { return nil, nil }
-
-	runHandler(t, m, "/new")
-
-	if m.pendingSkill != "" {
-		t.Errorf("/new should clear pendingSkill; got %q", m.pendingSkill)
 	}
 }
 

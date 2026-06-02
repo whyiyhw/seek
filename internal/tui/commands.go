@@ -328,11 +328,6 @@ func cmdNew(m *Model, _ string) cmdResult {
 	// (which is what /compact and /branch are). See resetSessionCounters'
 	// doc for the split.
 	m.opts.PlanSubstate = ""
-	// A skill arm is conceptually tied to the conversation it was
-	// staged in. Carrying it into a fresh /new would surprise the user
-	// — they typed "/skill use X" for the thing they were working on,
-	// not for the next 200 turns.
-	m.pendingSkill = ""
 	// Clear prompt-recall state. Two reasons: (1) the welcome banner's
 	// gate in View() is `turns==0 && len(promptHistory)==0`, so leaving
 	// prior prompts here would hide the fresh-conversation banner; (2)
@@ -1124,12 +1119,11 @@ func reviewChoices(cwd string) []modelChoice {
 // ("Review the current git working-tree changes." etc.); context is the
 // changed-files summary or full diff to append, or "" when none.
 //
-// The "use the code-review skill" instruction lives inline here on
-// purpose: programmatic submissions like this one bypass consumeArm (only
-// user-typed messages get the skill-arm wrapper), so the trigger to fetch
-// the skill body via the Skill tool must be baked into the prompt text.
-// The skill body carries the methodology; this prompt carries the chosen
-// effort framing + flags so the model applies the right precision/recall.
+// The "use the code-review skill" instruction lives inline here:
+// programmatic submissions must bake the trigger into the prompt text
+// because they bypass the user-typed submit path. The skill body carries
+// the methodology; this prompt carries the chosen effort framing + flags
+// so the model applies the right precision/recall.
 func codeReviewPrompt(effort string, fix, comment bool, scope, context string) string {
 	var b strings.Builder
 	b.WriteString(`Please use the "code-review" skill for this task.` + "\n\n")
@@ -1455,37 +1449,20 @@ func cmdSkillCLI(m *Model, args string) cmdResult {
 // cmdSkillUse is the TUI-only `use` verb. Two modes, distinguished by
 // whether the user typed extra text after the name:
 //
-//   - `/skill use <name>`          → arm. Sets m.pendingSkill so the
-//     next user-typed message gets wrapped with a
-//     "Please use the X skill" preamble (see Model.consumeArm).
-//     Slash commands and programmatic prompts do NOT consume the
-//     arm — only a real user message.
-//   - `/skill use <name> <task>`   → fire immediately. Wraps the inline
-//     task and submits as if the user had typed it. No arm state
-//     is touched.
-//   - `/skill use clear`           → disarm. No-op if nothing armed.
+//   - `/skill use <name>`          → fire immediately with no extra task.
+//     Submits "Please use the X skill" so the model calls the Skill tool,
+//     fetches the body, and follows its instructions.
+//   - `/skill use <name> <task>`   → fire immediately with inline task.
+//     Wraps the task and submits as if the user had typed it.
 //
 // Validation:
 //   - No skills loaded → error.
 //   - Unknown name      → error with the list of loaded names so the
 //     user can fix a typo without another round-trip.
-//
-// Re-arming with a different name replaces the previous arm silently
-// (the new feedback line already names the active skill; a separate
-// "replaced X" notice would be noise).
 func cmdSkillUse(m *Model, tokens []string) cmdResult {
 	if len(tokens) == 0 {
 		return cmdResult{text: styleErr.Render("/skill use: missing skill name (try /skill list)")}
 	}
-	if tokens[0] == "clear" {
-		if m.pendingSkill == "" {
-			return cmdResult{text: styleMuted.Render("/skill use: nothing armed")}
-		}
-		prev := m.pendingSkill
-		m.pendingSkill = ""
-		return cmdResult{text: styleMuted.Render(fmt.Sprintf("✦ disarmed %s", prev))}
-	}
-
 	if m.opts.Skills == nil || m.opts.Skills.Len() == 0 {
 		return cmdResult{text: styleErr.Render("/skill use: no skills loaded")}
 	}
@@ -1498,21 +1475,18 @@ func cmdSkillUse(m *Model, tokens []string) cmdResult {
 		return cmdResult{text: styleErr.Render(fmt.Sprintf("/skill use: %q not found. Available: %s", name, strings.Join(names, ", ")))}
 	}
 
-	// Inline task present → immediate fire. Build the same wrapper that
-	// consumeArm would produce, then run it through submitOrSteer so
-	// streaming vs idle is handled uniformly.
+	// Inline task present → immediate fire with user-supplied task.
 	if len(tokens) > 1 {
 		task := strings.Join(tokens[1:], " ")
 		wrapped := fmt.Sprintf("Please use the %q skill for the following task:\n\n%s", name, task)
-		// Touch nothing in pendingSkill — immediate-fire does not
-		// arm; the user got what they asked for on this line.
 		return submitOrSteer(m, wrapped)
 	}
 
-	// Bare name → arm.
-	m.pendingSkill = name
-	return cmdResult{text: styleAssistantLabel.Render(fmt.Sprintf("✦ armed %s", name)) +
-		styleMuted.Render(" — next message will use this skill (/skill use clear to cancel)")}
+	// Bare name → immediate fire with no extra task.
+	// The model sees "Please use the X skill", calls the Skill tool to fetch
+	// the body, and follows its instructions — no user task needed.
+	wrapped := fmt.Sprintf("Please use the %q skill.", name)
+	return submitOrSteer(m, wrapped)
 }
 
 // cmdMemoryCLI mirrors the `seek memory ...` CLI inside the TUI. Same

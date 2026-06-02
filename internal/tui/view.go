@@ -197,13 +197,6 @@ func (m Model) View() string {
 		bottomBuf.WriteString("\n")
 	}
 
-	// Skill-armed badge.
-	if m.pendingSkill != "" {
-		bottomBuf.WriteString(styleToolSkill.Render(fmt.Sprintf("✦ skill armed: %s", m.pendingSkill)))
-		bottomBuf.WriteString(styleMuted.Render(" — next message uses this skill (/skill use clear to cancel)"))
-		bottomBuf.WriteString("\n")
-	}
-
 	// Decision UIs (approval / ask_user / distill review): variable
 	// height, user-blocking. They render in their own space; the
 	// input may shift to accommodate them, which is acceptable
