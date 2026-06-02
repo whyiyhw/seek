@@ -16,6 +16,8 @@
 
 A coding agent that runs as a single **static Go binary** in your terminal — a **~6 MB download**, **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend.** Bring your own model key: **DeepSeek-first**, and it also speaks OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …).
 
+> **30-second version** — It's Claude Code / aider territory, but **DeepSeek-first**: the autonomous run that audited and fixed *these very docs* (33 files, 212 tool calls) cost **$0.17** at a **97.7% prefix-cache hit**. One binary, your own key, nothing phones home. Scroll down to watch that exact run ↓
+
 ---
 
 ## Why seek is different
