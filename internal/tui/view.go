@@ -167,7 +167,7 @@ func (m Model) View() string {
 	// Streaming reasoning.
 	if m.curReasoning != "" {
 		if m.showReasoning {
-			sb.WriteString(styleReasoning.Render("▸ reasoning:\n" + indent(m.curReasoning, "    ")))
+			sb.WriteString(styleReasoning.Render(reasoningBlock(m.curReasoning)))
 			sb.WriteString("\n")
 		} else {
 			sb.WriteString(styleReasoning.Render("▸ reasoning… (Ctrl+R to toggle)"))
@@ -1147,6 +1147,19 @@ func renderUserBlock(text string, width int) string {
 	return "\n" + label + "\n" + body
 }
 
+// reasoningBlock formats the model's reasoning as a visually distinct
+// aside: a "▸ reasoning" header above a left-gutter (│) block. The
+// gutter — not colour — is what sets the model's private reasoning
+// apart from the assistant prose around it, matching styles.go's
+// "differentiation comes from layout, not chroma". Callers wrap the
+// whole string in styleReasoning (italic + dim), so this stays a pure,
+// deterministic formatter — safe for renderAssistantBlock's byte-
+// identical live/replay contract. Shared by the streaming live region
+// and the committed scrollback block so both render identically.
+func reasoningBlock(reasoning string) string {
+	return "▸ reasoning\n" + indent(reasoning, "│ ")
+}
+
 // renderAssistantBlock renders a completed assistant message for
 // scrollback. Returns "" when content is empty so callers can drop
 // the no-op tea.Println — pure tool-call turns (reasoning + tool_calls,
@@ -1171,7 +1184,7 @@ func renderAssistantBlock(content, reasoning string, showReasoning bool, width i
 	out := styleAssistantLabel.Render("▸ seek") + "\n" + rendered
 	if reasoning != "" {
 		if showReasoning {
-			out += "\n" + styleReasoning.Render("▸ reasoning:\n"+indent(reasoning, "    "))
+			out += "\n" + styleReasoning.Render(reasoningBlock(reasoning))
 		} else {
 			out += "\n" + styleReasoning.Render("▸ reasoning hidden — Ctrl+R to toggle during streaming")
 		}
