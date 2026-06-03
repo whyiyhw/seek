@@ -163,9 +163,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			//                                  open so user can either keep
 			//                                  typing to disambiguate or use
 			//                                  ↑/↓ + Enter to pick
-			//   2+ candidates, no LCP gain   → terminal bell (prefix already
-			//                                  exhausted; user must type to
-			//                                  disambiguate or arrow + Enter)
+			//   2+ candidates, no LCP gain   → complete the HIGHLIGHTED row
+			//                                  (name + trailing space), same
+			//                                  as a single-candidate Tab.
+			//                                  ↑/↓ chooses which row. (Earlier
+			//                                  this rang a bell, but the bell
+			//                                  is silent on most terminals so
+			//                                  Tab felt dead — `/re` being the
+			//                                  canonical complaint. Tab now
+			//                                  always makes visible progress;
+			//                                  it still differs from Enter,
+			//                                  which RUNS the command now vs
+			//                                  Tab staging it for args.)
 			//
 			// Enter on the menu still dispatches the highlighted command
 			// directly (fast `/h` + Enter → /help flow).
@@ -213,10 +222,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			default:
 				lcp := longestCommonCandidatePrefix(m.commandMenuFiltered)
 				if lcp == "" || lcp == input {
-					// No further LCP progress possible — bell to signal
-					// "you've reached the unambiguous prefix; disambiguate
-					// by typing or pick from the menu".
-					return m, beepCmd
+					// Prefix is already at the unambiguous max — Tab can't
+					// extend it. Rather than ring an (often silent) bell,
+					// complete the highlighted row, exactly like a single-
+					// candidate Tab; ↑/↓ chooses which one. Keeps Tab
+					// meaning "complete" (Enter still means "run now") while
+					// guaranteeing Tab always does something visible.
+					name := m.commandMenuFiltered[m.commandMenuSelected].names[0]
+					m.input.SetValue(name + " ")
+					m.commandMenuOpen = false
+					m.commandMenuFiltered = nil
+					m.commandMenuSelected = 0
+					m.updateCommandMenu()
+					return m, nil
 				}
 				m.input.SetValue(lcp)
 				// Re-filter on the new (longer) prefix so the picker
@@ -325,15 +343,19 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// or Enter-opened with empty input) swallow all other keys.
 		// Backspace on an already-empty input is a harmless no-op, so
 		// it's safe to allow unconditionally.
+		autoOpened := strings.HasPrefix(m.pickerPurpose, subcmdPurposePrefix)
 		switch m.pickerPurpose {
 		case "model", "effort", "review", "skill-verb", "skill-name", "help-topic":
+			autoOpened = true
+		}
+		if autoOpened {
 			switch msg.Type {
 			case tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
 				// fall through to textarea Update at the end of handleKey
 			default:
 				return m, nil
 			}
-		default:
+		} else {
 			// Modal picker (e.g. /setup): swallow all other keys.
 			return m, nil
 		}

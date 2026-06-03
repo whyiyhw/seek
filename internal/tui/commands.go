@@ -49,6 +49,12 @@ type command struct {
 	names       []string // first entry is canonical, rest are aliases
 	usage       string
 	description string
+	// subcommands, when non-empty, drives generic "/<cmd> <verb>" Tab
+	// completion (a second-level verb picker) — see updateCommandMenu's
+	// generic branch. Leave nil for commands that take freeform args or
+	// own a bespoke picker (/model, /effort, /skill). Mirrors the verbs
+	// the handler's CLI accepts.
+	subcommands []modelChoice
 	handler     func(m *Model, args string) cmdResult
 }
 
@@ -70,8 +76,18 @@ func allCommands() []command {
 		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
 		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Use or manage skills. `use <name>` arms next message (or fire with inline task); install/list/status/stats/uninstall/update/help mirror the CLI.", handler: cmdSkillCLI},
 		{names: []string{"/skills"}, usage: "/skills [--used]", description: "List loaded skills, or --used to see which were called in this session.", handler: cmdSkills},
-		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", handler: cmdMemoryCLI},
-		{names: []string{"/hooks"}, usage: "/hooks [verb]", description: "Inspect shell hooks (mirrors `seek hooks` CLI: list, check, trust, audit). Default verb = list.", handler: cmdHooksCLI},
+		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", subcommands: []modelChoice{
+			{"list", "list — every memory entry with scope and age"},
+			{"show", "show <name> — full text of one entry"},
+			{"search", "search <query> — substring search across entries"},
+			{"archive", "archive <name> — retire an entry (kept on disk)"},
+		}, handler: cmdMemoryCLI},
+		{names: []string{"/hooks"}, usage: "/hooks [verb]", description: "Inspect shell hooks (mirrors `seek hooks` CLI: list, check, trust, audit). Default verb = list.", subcommands: []modelChoice{
+			{"list", "list — configured shell hooks and their events"},
+			{"check", "check — dry-run validate hook scripts (bash -n)"},
+			{"trust", "trust <id> — mark a hook trusted to run"},
+			{"audit", "audit — recent hook trust/exec decisions"},
+		}, handler: cmdHooksCLI},
 		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
 		{names: []string{"/diagnose"}, usage: "/diagnose", description: "Print a diagnostic report with version, OS, provider, config and session metadata — paste into bug reports.", handler: cmdDiagnose},
@@ -448,6 +464,17 @@ func (m *Model) applyModelChoice(idx int) {
 	m.modelPickerFiltered = nil
 	m.modelPickerSelected = 0
 	m.pickerPurpose = ""
+
+	// Generic verb completion ("/memory list ", "/hooks trust "): the
+	// command name rides in the purpose suffix. Completion-style insert
+	// (no dispatch) with a trailing space so the user keeps composing
+	// args, mirroring the skill-verb flow below. Re-run the menu so the
+	// new value's trailing-space state is recomputed (picker closes).
+	if name, ok := strings.CutPrefix(purpose, subcmdPurposePrefix); ok {
+		m.input.SetValue(name + " " + choice.id + " ")
+		m.updateCommandMenu()
+		return
+	}
 
 	switch purpose {
 	case "setup-provider":
