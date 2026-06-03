@@ -296,8 +296,17 @@ func (m Model) handleBatchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ans := <-answerCh:
 		return m.batchAdvance(ans)
 	default:
-		// In-progress (navigating, toggling, typing free-text).
-		// Keep pendingQuestion pointer alive for the next key.
+		// In-progress (navigating, toggling, typing free-text). Clear
+		// the transient faux pendingQuestion we installed above: it must
+		// NOT survive into the next key, or the router's single-question
+		// branch would capture that key and send its answer to this now-
+		// orphaned channel (the "only the first option works" bug).
+		// handleBatchKey rebuilds the faux request fresh on every key, so
+		// nothing is lost; the shared cursor / selected / freeText state
+		// lives on the Model and persists independently. The router also
+		// prefers pendingBatch over pendingQuestion as a second line of
+		// defense — see handleKey.
+		m.pendingQuestion = nil
 		return m, nil
 	}
 }

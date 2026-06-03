@@ -56,14 +56,19 @@ func TestCompose_ByteEquivalentToLegacy(t *testing.T) {
 			manifest:  "## Available skills\n- x: y\n",
 		},
 	}
+	// Date is orthogonal to the section/manifest matrix (it's an
+	// unconditional %s slot like Cwd/Mode), so a single representative
+	// value threaded through both sides fully exercises the new slot.
+	const date = "Wednesday, 2026-06-03"
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got := Compose(Header{
 				Cwd:            c.cwd,
 				ProjectSection: c.section,
 				SkillManifest:  c.manifest,
+				Date:           date,
 			}, c.modeLabel)
-			want := legacyAssemble(c.cwd, c.modeLabel, c.section, c.manifest)
+			want := legacyAssemble(c.cwd, c.modeLabel, c.section, c.manifest, date)
 			if got != want {
 				t.Errorf("Compose output diverged from legacy assembly.\n--- got (%d bytes) ---\n%s\n--- want (%d bytes) ---\n%s",
 					len(got), got, len(want), want)
@@ -75,8 +80,8 @@ func TestCompose_ByteEquivalentToLegacy(t *testing.T) {
 // legacyAssemble reproduces the inline assembly that lived in
 // cmd/seek/main.go before this package was extracted. Kept here as
 // the byte-equivalence oracle for the test above.
-func legacyAssemble(cwd, modeLabel, section, manifest string) string {
-	sp := fmt.Sprintf(rootTpl, cwd, modeLabel)
+func legacyAssemble(cwd, modeLabel, section, manifest, date string) string {
+	sp := fmt.Sprintf(rootTpl, cwd, modeLabel, date)
 	if section != "" {
 		sp = sp + "\n" + section
 	}
@@ -91,11 +96,23 @@ func legacyAssemble(cwd, modeLabel, section, manifest string) string {
 // today; lives as a regression guard against any future "add the
 // current time to the prompt" temptation that would break the cache.
 func TestCompose_IsDeterministic(t *testing.T) {
-	h := Header{Cwd: "/x", ProjectSection: "A", SkillManifest: "B"}
+	h := Header{Cwd: "/x", ProjectSection: "A", SkillManifest: "B", Date: "Wednesday, 2026-06-03"}
 	a := Compose(h, "yolo")
 	b := Compose(h, "yolo")
 	if a != b {
 		t.Errorf("Compose not deterministic across calls (len %d vs %d)", len(a), len(b))
+	}
+}
+
+// TestCompose_RendersDate confirms the Date field lands in the prompt
+// verbatim (so the model actually sees today's date) and is sourced
+// from the field, not a hidden time.Now() — the determinism test above
+// guards the no-time.Now() half; this guards the it-shows-up half.
+func TestCompose_RendersDate(t *testing.T) {
+	const date = "Wednesday, 2026-06-03"
+	got := Compose(Header{Cwd: "/x", Date: date}, "ask")
+	if !strings.Contains(got, "Today's date: "+date) {
+		t.Errorf("Compose output missing date line %q.\n--- got ---\n%s", date, got)
 	}
 }
 

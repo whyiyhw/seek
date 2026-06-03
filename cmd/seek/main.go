@@ -1207,6 +1207,17 @@ func run() error {
 			Add(memorytool.NewAmend(memProject))
 	}
 
+	// sessionDate is computed ONCE here and threaded through every
+	// system-prompt assembly for the life of the process (the Compose
+	// below, the /new rebuild closure, and the subagent Manager). It is
+	// deliberately NOT recomputed per turn: the date sits in the prompt
+	// prefix, so a value that ticked over at midnight (or per request)
+	// would invalidate DeepSeek's prefix cache on every turn. Held fixed,
+	// the prefix stays byte-identical and the cache holds. A new process
+	// (-resume on a later day) picks up the new date — an accepted
+	// invalidation point, same as Cwd/skill-manifest changes.
+	sessionDate := time.Now().Format("Monday, 2006-01-02")
+
 	// Project instructions go BEFORE the skill manifest inside Compose:
 	// they describe "how this repo expects you to work" while skills are
 	// workflow templates. Ordering matches the model's likely reading
@@ -1215,6 +1226,7 @@ func run() error {
 		Cwd:            abs,
 		ProjectSection: projMD.Section(),
 		SkillManifest:  skills.Manifest(),
+		Date:           sessionDate,
 	}, sysprompt.ModeLabel(initialPref, initialWorkflow))
 
 	// Build (or restore) the persistence session. -no-save makes
@@ -1395,6 +1407,11 @@ func run() error {
 			ProjectSectionFn:  func() string { return projMD.Section() },
 			SkillManifestFn:   func() string { return skills.Manifest() },
 			ParentToolNamesFn: func() []string { return reg.Names() },
+			// Static, not a closure: the date is fixed at session start
+			// (unlike project/skill which hot-reload), and must be byte-
+			// identical to the parent's prompt so the subagent header
+			// matches. See sessionDate above.
+			SessionDate: sessionDate,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
 				client:      dsClient,
 				provider:    provider,
@@ -1854,6 +1871,7 @@ func run() error {
 				Cwd:            abs,
 				ProjectSection: projMD.Section(),
 				SkillManifest:  skills.Manifest(),
+				Date:           sessionDate,
 			}, sysprompt.ModeLabel(policy.Pref(), policy.Workflow()))
 			newAg, err := agent.New(agent.Config{
 				Client:       dsClient,

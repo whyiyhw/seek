@@ -65,20 +65,30 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleApprovalKey(msg)
 	}
 
-	// An open ask_user picker also grabs everything for the same
-	// reason: the tool's goroutine is parked on the Reply channel.
-	if m.pendingQuestion != nil {
-		return m.handleQuestionKey(msg)
-	}
-
-	// v2 multi-question batch picker. Takes precedence over the
-	// single-question path so a misrouted v1 request can't sneak
-	// keys past an active batch. The batch handler delegates to
-	// the same per-question key logic as v1 — the cursor /
+	// v2 multi-question batch picker is checked BEFORE the single-
+	// question path — and that order is load-bearing. handleBatchKey
+	// installs a TRANSIENT faux m.pendingQuestion for the active
+	// question on every keypress and can leave it set between keys
+	// (e.g. after an arrow-key nav that didn't complete an answer). If
+	// the single-question branch ran first, that leaked faux request
+	// would capture the next key and route it to handleQuestionKey,
+	// whose completion sends to an orphaned channel — silently dropping
+	// the answer. That was the "only the first option works" bug: the
+	// first option completes inside one handleBatchKey call, but any
+	// option reached via ↓ first leaked pendingQuestion and lost the
+	// follow-up Enter. Batch-first makes an active batch authoritative
+	// regardless of any leaked pendingQuestion. The batch handler
+	// delegates to the same per-question key logic as v1 — the cursor /
 	// selected / freeText state is shared — and advances
 	// pendingBatchIdx when each question completes.
 	if m.pendingBatch != nil {
 		return m.handleBatchKey(msg)
+	}
+
+	// An open single-question ask_user picker grabs everything for the
+	// same reason: the tool's goroutine is parked on the Reply channel.
+	if m.pendingQuestion != nil {
+		return m.handleQuestionKey(msg)
 	}
 
 	// Distill review modal grabs all keys until the user finishes the

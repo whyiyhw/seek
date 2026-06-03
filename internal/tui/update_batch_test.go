@@ -99,6 +99,53 @@ func TestHandleBatchKey_AdvancesThroughQuestions(t *testing.T) {
 	}
 }
 
+// TestHandleKey_BatchSingleSelect_NonFirstOption is the regression pin
+// for the "only the first option works" bug. In a batch picker,
+// choosing any option that requires navigating off row 0 must register.
+//
+// Crucially it drives keys through the REAL router (handleKey), NOT
+// handleBatchKey directly — the bug lived in the router's
+// pendingBatch-vs-pendingQuestion precedence plus a transient
+// pendingQuestion that leaked between keys. The older tests call
+// handleBatchKey directly, which rebuilds the faux request every call
+// and never exercises the route, so they stayed green while the real
+// app dropped the answer. Pressing ↓ then Enter must land on 'vue', not
+// vanish into an orphaned channel.
+func TestHandleKey_BatchSingleSelect_NonFirstOption(t *testing.T) {
+	m, reply := armBatch(t, twoQuestionBatch())
+
+	// Q1: navigate down to 'vue' (index 1), then Enter.
+	updated, _ := m.handleKey(keyDown())
+	m = ptrModel(updated)
+	updated, _ = m.handleKey(keyEnter())
+	m = ptrModel(updated)
+
+	if m.pendingBatchIdx != 1 {
+		t.Fatalf("after ↓+Enter on Q1: idx = %d, want 1 (answer was dropped — the bug)", m.pendingBatchIdx)
+	}
+	if len(m.pendingBatchAnswers) != 1 || m.pendingBatchAnswers[0].ChosenIDs[0] != "vue" {
+		t.Fatalf("Q1 answer = %+v, want [vue]", m.pendingBatchAnswers)
+	}
+
+	// Q2: navigate down to 'css' (index 1), then Enter → batch completes.
+	updated, _ = m.handleKey(keyDown())
+	m = ptrModel(updated)
+	updated, _ = m.handleKey(keyEnter())
+	m = ptrModel(updated)
+
+	if m.pendingBatch != nil {
+		t.Error("batch should complete after both questions answered")
+	}
+	select {
+	case ans := <-reply:
+		if len(ans) != 2 || ans[0].ChosenIDs[0] != "vue" || ans[1].ChosenIDs[0] != "css" {
+			t.Fatalf("reply = %+v, want [vue css]", ans)
+		}
+	default:
+		t.Fatal("batch reply never fired")
+	}
+}
+
 // TestHandleBatchKey_EscMidBatch_PreservesPriorAnswers covers the
 // load-bearing PRD §3.3 cancel contract: Esc on Q2 keeps Q1's
 // real answer and pads Q2..N as Cancelled, then fires the

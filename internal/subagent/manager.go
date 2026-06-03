@@ -118,6 +118,16 @@ type ManagerOpts struct {
 	// Tests inject a stub so sub-sids are reproducible.
 	Now func() time.Time
 
+	// SessionDate is the parent's fixed session date string (e.g.
+	// "Wednesday, 2026-06-03"), captured once at session start and
+	// passed verbatim into every subagent's system prompt. It is a
+	// static value, NOT derived from Now(): it must stay byte-identical
+	// to the parent's prompt (the §3.6.1 header-inheritance invariant),
+	// and recomputing it from Now() at Spawn time would drift if the
+	// session spans midnight. Empty in tests that don't exercise the
+	// prompt body.
+	SessionDate string
+
 	// Dynamic accessors — called at each Spawn so RebuildAgent,
 	// skill hot-reload, and session compaction (fork-new-SID) pick
 	// up fresh values. See struct doc above for the rationale per
@@ -298,6 +308,7 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 		Cwd:            cwd,
 		ProjectSection: m.opts.ProjectSectionFn(),
 		SkillManifest:  m.opts.SkillManifestFn(),
+		Date:           m.opts.SessionDate,
 	}, tmpl.Role(args.Description))
 
 	// Step 7: emit `started` event BEFORE registering in active.
