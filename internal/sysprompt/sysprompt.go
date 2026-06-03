@@ -30,9 +30,16 @@ import (
 )
 
 // rootTpl is the constant header shared by every system prompt. The
-// two %s slots are the working directory (segment 1) and the mode
-// label (segment 4 in the PRD §3.6.1 numbering); ProjectSection
-// (segment 2) and SkillManifest (segment 3) are appended by Compose.
+// three %s slots are the working directory (segment 1), the mode
+// label (segment 4 in the PRD §3.6.1 numbering), and the session date
+// (appended after the mode line); ProjectSection (segment 2) and
+// SkillManifest (segment 3) are appended by Compose.
+//
+// The date is a Header FIELD, not a time.Now() call inside this
+// package — Compose must stay a pure function of its inputs. The
+// caller (cmd/seek) computes the date ONCE at session start and threads
+// the same string through every Compose call for the session's life;
+// recomputing per turn would mutate the prefix and tank the cache.
 //
 // DO NOT edit casually — any byte change invalidates every existing
 // cached prefix across all users on next run.
@@ -83,6 +90,7 @@ Workflow:
 6. Never run git commit without explicit user confirmation. The workflow is: modify → review → user commits.
 
 Working directory: %s — every tool (bash, read, write, edit, grep, list_dir) resolves relative paths from here. You do NOT need to prepend the absolute path or run "cd" in bash commands; it's already the CWD. Mode: %s.
+Today's date: %s — captured once when this session started and held FIXED for the whole conversation (so the prompt prefix stays byte-identical and the cache holds). Do not assume the date has advanced mid-session; if the user needs the live wall-clock date, ask them or run a shell command.
 `
 
 // summaryHint is the standard trailing instruction for subagents:
@@ -102,14 +110,20 @@ const summaryHint = "Your final assistant message will be returned to the parent
 // directory: %s" slot. ProjectSection is the AGENTS.md / CLAUDE.md
 // content from internal/projectmd (empty = skip). SkillManifest is
 // the per-session skill listing from internal/skill (empty = skip).
+// Date is the human-readable session date (e.g. "Wednesday,
+// 2026-06-03"); goes into the "Today's date: %s" slot. It MUST be
+// captured once at session start and reused unchanged for every turn
+// — see the rootTpl comment for why a per-turn time.Now() would break
+// the prefix cache.
 //
-// All three fields are byte-stable across turns for a given session,
+// All four fields are byte-stable across turns for a given session,
 // which is what keeps the prefix cache hot. They change only on /new
 // (RebuildAgent) or session resume.
 type Header struct {
 	Cwd            string
 	ProjectSection string
 	SkillManifest  string
+	Date           string
 }
 
 // Compose assembles the system prompt for the ROOT agent. modeLabel
@@ -123,8 +137,8 @@ type Header struct {
 // existing session in the wild).
 func Compose(h Header, modeLabel string) string {
 	var sb strings.Builder
-	sb.Grow(len(rootTpl) + len(h.ProjectSection) + len(h.SkillManifest) + 16)
-	fmt.Fprintf(&sb, rootTpl, h.Cwd, modeLabel)
+	sb.Grow(len(rootTpl) + len(h.ProjectSection) + len(h.SkillManifest) + len(h.Date) + 16)
+	fmt.Fprintf(&sb, rootTpl, h.Cwd, modeLabel, h.Date)
 	if h.ProjectSection != "" {
 		sb.WriteByte('\n')
 		sb.WriteString(h.ProjectSection)

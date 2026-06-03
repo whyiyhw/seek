@@ -76,6 +76,7 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 - **Never modify old messages before sending to the API** — even "compression" or "summarisation" of old tool results invalidates the cache and can cost more than sending the full history.
 - **Token optimisation happens at write-time** (tool output size limits), not at send-time (in-transit mutation).
 - Tool output limits are enforced inside the tool itself. Do not add a post-hoc filter layer in `pkg/agent` or the API path.
+- **Anything that must appear in the prompt prefix for correctness but would otherwise vary is captured ONCE per session — never recomputed per turn.** The canonical example is the session date: it's injected as `sysprompt.Header.Date` (computed once at startup in `cmd/seek` and threaded through every `Compose` call plus the subagent Manager's *static* `SessionDate`), NOT via a `time.Now()` inside the assembler — `Compose` must stay a pure function of its `Header` (the `TestCompose_IsDeterministic` guard enforces this). A per-turn date would mutate the prefix on every request and crater the hit ratio. Refresh only at session boundaries (`-resume` = new process = one accepted bust). See `docs/pitfalls.md` "Today's date belongs in the system prompt".
 
 ## Permission model
 

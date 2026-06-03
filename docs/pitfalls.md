@@ -446,6 +446,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: convert one operand to a runtime value first (`int(float64(65536) * frac)`), or use a tiny helper that does the conversion at runtime. Commit `d038455`
 - **Lesson**: when you see "constant X.X of type float64" cannot convert, the answer isn't to add more parentheses — it's to make the expression non-constant
 
+### Today's date belongs in the system prompt, but only if captured ONCE per session
+- **Saw**: the LLM kept guessing the wrong date (no date anywhere in the prompt). The obvious fix — inject `time.Now()` into the system prompt — is a cache trap: the date lives in the prompt prefix, so a value that recomputes per turn (or ticks over at midnight) mutates the prefix on every request and drops the DeepSeek prefix-cache hit ratio from ~96% to near zero
+- **Why**: `sysprompt.Compose` is deliberately a pure function of its `Header` (the package doc + `TestCompose_IsDeterministic` exist to stop anyone calling `time.Now()` inside it). The date has to be present for correctness but byte-stable for cache
+- **Fix**: added `Header.Date string`. `cmd/seek/main.go` computes `sessionDate := time.Now().Format("Monday, 2006-01-02")` ONCE at startup and threads the same string through every Compose call for the process's life (root prompt, `/new` rebuild closure, and the subagent Manager via a static `ManagerOpts.SessionDate` — static, NOT a closure or `Now()`, so it can't drift across midnight or diverge from the parent header). The prompt line tells the model the date is fixed-at-start so it won't assume it advanced. A later `-resume` is a new process → new date → one accepted prefix bust, same class as a Cwd/skill-manifest change
+- **Lesson**: anything that must appear in the prompt for correctness but would otherwise vary is injected as a *field captured once*, never computed inside the assembler. "Per-turn freshness" and "prefix cache" are mutually exclusive for prefix content — pick stability and refresh only at session boundaries
+- **Refs**: `internal/sysprompt/sysprompt.go` (`Header.Date`, `rootTpl`), `cmd/seek/main.go` (`sessionDate`), `internal/subagent/manager.go` (`ManagerOpts.SessionDate`), `internal/sysprompt/sysprompt_test.go:TestCompose_RendersDate`
+
 ## Go language
 
 ### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`
