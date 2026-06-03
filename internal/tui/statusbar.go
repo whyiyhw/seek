@@ -97,34 +97,97 @@ type StatusSnapshot struct {
 	GoalMaxTurns int
 }
 
+// statusSegment is one rendered status-bar chunk plus its drop priority.
+// Lower prio = more important; prioPin (0) is never dropped. Under width
+// pressure RenderStatusBar sheds the highest-prio (least important)
+// segments first, so the bar stays single-line in a narrow pane (tmux
+// split, side-by-side editor terminal) instead of wrapping or clipping
+// mid-badge.
+type statusSegment struct {
+	text string
+	prio int
+}
+
+const (
+	prioPin  = 0 // identity, mode/safety badge, active stream, critical ctx
+	prioHigh = 1 // model, active goal, ctx warning
+	prioMed  = 2 // cost, cache, active subagents
+	prioLow  = 3 // turns/tools, tier, effort, upgrade, crons, idle, normal ctx
+)
+
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
-// returns the raw text (useful for tests).
+// returns the raw text with every segment (useful for tests).
 func RenderStatusBar(s StatusSnapshot) string {
 	left := leftSegments(s)
 	right := rightSegments(s)
 
-	leftText := strings.Join(left, "  ")
-	rightText := strings.Join(right, "  ")
-
 	if s.Width <= 0 {
-		return leftText + "  •  " + rightText
+		return joinSegments(left) + "  •  " + joinSegments(right)
 	}
 
-	leftWidth := lipgloss.Width(leftText)
-	rightWidth := lipgloss.Width(rightText)
-	gap := s.Width - leftWidth - rightWidth
+	left, right = foldStatusBar(left, right, s.Width)
+
+	leftText := joinSegments(left)
+	rightText := joinSegments(right)
+	gap := s.Width - lipgloss.Width(leftText) - lipgloss.Width(rightText)
 	gap = max(gap, 1)
 	full := leftText + strings.Repeat(" ", gap) + rightText
 	return styleStatusBar.Width(s.Width).Render(full)
 }
 
-func leftSegments(s StatusSnapshot) []string {
-	out := []string{
-		styleStatusBar.Bold(true).Render(" seek "),
-		s.Model,
+// joinSegments renders segments into the "  "-separated text the bar
+// lays out at one end.
+func joinSegments(segs []statusSegment) string {
+	parts := make([]string, len(segs))
+	for i, seg := range segs {
+		parts[i] = seg.text
+	}
+	return strings.Join(parts, "  ")
+}
+
+// foldStatusBar drops least-important segments until both sides plus a
+// minimum gap fit within width. prioPin segments are never dropped, so a
+// pathologically narrow pane still shows identity + mode + stream state
+// (overflowing if it must) rather than silently hiding a YOLO/PLAN
+// badge. Ties drop the right side (metrics) before the left, and later
+// segments before earlier ones, keeping the most important context
+// anchored at each end.
+func foldStatusBar(left, right []statusSegment, width int) ([]statusSegment, []statusSegment) {
+	const minGap = 2
+	fits := func() bool {
+		return lipgloss.Width(joinSegments(left))+minGap+lipgloss.Width(joinSegments(right)) <= width
+	}
+	for !fits() {
+		side, idx, prio := -1, -1, prioPin
+		for i := len(right) - 1; i >= 0; i-- {
+			if right[i].prio > prio {
+				side, idx, prio = 1, i, right[i].prio
+			}
+		}
+		for i := len(left) - 1; i >= 0; i-- {
+			if left[i].prio > prio {
+				side, idx, prio = 0, i, left[i].prio
+			}
+		}
+		if idx < 0 {
+			break // only pinned segments remain — nothing left to shed
+		}
+		if side == 1 {
+			right = append(right[:idx], right[idx+1:]...)
+		} else {
+			left = append(left[:idx], left[idx+1:]...)
+		}
+	}
+	return left, right
+}
+
+func leftSegments(s StatusSnapshot) []statusSegment {
+	out := []statusSegment{
+		{styleStatusBar.Bold(true).Render(" seek "), prioPin},
+		{s.Model, prioHigh},
 	}
 	if s.Yolo {
-		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"), prioPin})
 	} else if s.Plan {
 		// Substate decides the badge text + background:
 		//   ""        → "PLAN" (legacy / no-substate callers)
@@ -145,7 +208,7 @@ func leftSegments(s StatusSnapshot) []string {
 		if s.PlanStepsTotal > 0 {
 			label = fmt.Sprintf("%s %d/%d", label, s.PlanStepsDone, s.PlanStepsTotal)
 		}
-		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label), prioPin})
 	}
 	// /goal badge: "🎯 N/M" while a goal loop is running (M-goal.2).
 	if s.GoalActive {
@@ -153,7 +216,7 @@ func leftSegments(s StatusSnapshot) []string {
 		if s.GoalMaxTurns > 0 {
 			label = fmt.Sprintf("🎯 goal %d/%d", s.GoalTurns, s.GoalMaxTurns)
 		}
-		out = append(out, lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourTool).Bold(true).Padding(0, 1).Render(label))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourTool).Bold(true).Padding(0, 1).Render(label), prioHigh})
 	}
 	// Effort badge: "high" is muted (the user opted in but it's the
 	// cheaper of the two escalations); "max" is tinted to make the
@@ -161,17 +224,17 @@ func leftSegments(s StatusSnapshot) []string {
 	// warning escalates on the right side.
 	switch s.Effort {
 	case "high":
-		out = append(out, styleMuted.Render("effort:high"))
+		out = append(out, statusSegment{styleMuted.Render("effort:high"), prioLow})
 	case "max":
-		out = append(out, lipgloss.NewStyle().Foreground(colourTool).Bold(true).Render("effort:max"))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourTool).Bold(true).Render("effort:max"), prioLow})
 	}
 	if s.Streaming {
-		out = append(out, styleMuted.Render(streamingStatusLabel(s)))
+		out = append(out, statusSegment{styleMuted.Render(streamingStatusLabel(s)), prioPin})
 	} else {
-		out = append(out, styleMuted.Render("○ idle"))
+		out = append(out, statusSegment{styleMuted.Render("○ idle"), prioLow})
 	}
 	if s.UpgradeAvailable != "" {
-		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render("↑ "+s.UpgradeAvailable))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render("↑ "+s.UpgradeAvailable), prioLow})
 	}
 	return out
 }
@@ -208,22 +271,21 @@ func formatTokenEst(bytes int) string {
 	return fmt.Sprintf("%.1fktok", float64(tok)/1000)
 }
 
-func rightSegments(s StatusSnapshot) []string {
-	out := []string{}
-
-	out = append(out, fmt.Sprintf("turns:%d  tools:%d", s.Turns, s.ToolCalls))
+func rightSegments(s StatusSnapshot) []statusSegment {
+	out := []statusSegment{
+		{fmt.Sprintf("turns:%d  tools:%d", s.Turns, s.ToolCalls), prioLow},
+	}
 
 	cache := fmt.Sprintf("cache %s", deepseek.FormatHitRatio(s.Usage))
 	if s.Usage.PromptCacheHitTokens > 0 {
 		cache = lipgloss.NewStyle().Foreground(colourOk).Render(cache)
 	}
-	out = append(out, cache)
+	out = append(out, statusSegment{cache, prioMed})
 
-	cost := pricing.FormatCost(s.CumulativeCost)
-	out = append(out, "cost "+cost)
+	out = append(out, statusSegment{"cost " + pricing.FormatCost(s.CumulativeCost), prioMed})
 
-	out = append(out, formatBudget(s))
-	out = append(out, formatTier(s))
+	out = append(out, statusSegment{formatBudget(s), ctxPrio(s)})
+	out = append(out, statusSegment{formatTier(s), prioLow})
 
 	// Subagent badge: only shown while at least one subagent is
 	// active. Tinted ok-colour to signal "background work is
@@ -236,7 +298,7 @@ func rightSegments(s StatusSnapshot) []string {
 		if s.SubagentsActive != 1 {
 			badge += "s"
 		}
-		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render(badge))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render(badge), prioMed})
 	}
 	// Cron badge: shown while at least one cron job is
 	// registered. Counts REGISTERED jobs not active runs — the
@@ -246,9 +308,26 @@ func rightSegments(s StatusSnapshot) []string {
 	// the agent badge.
 	if s.CronsRegistered > 0 {
 		badge := fmt.Sprintf("⏰ %d cron", s.CronsRegistered)
-		out = append(out, lipgloss.NewStyle().Foreground(colourOk).Render(badge))
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render(badge), prioLow})
 	}
 	return out
+}
+
+// ctxPrio escalates the context-window segment's keep-priority with
+// severity: a critical "/compact soon" warning is pinned (never folded
+// away), a warn-level nudge stays high, and steady-state ctx% is low —
+// the first metric to go when space is tight, since the colour tint
+// already carries any urgency.
+func ctxPrio(s StatusSnapshot) int {
+	used := s.LastUsage.PromptTokens + s.LastUsage.CompletionTokens
+	switch budget.Classify(s.Model, used) {
+	case budget.SeverityCritical:
+		return prioPin
+	case budget.SeverityWarn:
+		return prioHigh
+	default:
+		return prioLow
+	}
 }
 
 // formatBudget renders the context-window utilisation. Stays muted in
