@@ -28,7 +28,7 @@ TUI 操作面板对所有人一样。重度用户（一天 3 小时以上 inline
 
 ### 不做什么（v3 明确延后）
 
-- ❌ **子命令补全**——`/skill <verb>` 的 verb 候选（install/list/...）不在 v3 范围内；它们的候选集合是数据驱动的（skill 名字、文件路径），需要每个命令注册自己的补全函数，工作量翻倍且收益边际。留给 v4。
+- ~~❌ **子命令补全**——`/skill <verb>` 的 verb 候选（install/list/...）不在 v3 范围内~~ **（已交付）**：`/skill` 走 bespoke verb→name 二级 picker；`/memory`、`/hooks` 等 CLI 镜像命令走 `command.subcommands` 数据驱动的通用 verb picker（`updateCommandMenu` 的 generic 分支，purpose 前缀 `subcmd:`）。新增一个有 verb 的命令只需在 `allCommands()` 填 `subcommands`，无需新分支。
 - ❌ **参数补全**——只补到斜杠命令名 + 自动加空格；后面参数靠 v0 已有的路径补全或手敲。
 - ❌ **Chord（多键序列）keybindings**——bubbletea 不原生支持 stateful chord handler；用户调研也只是"想换两个组合键"而不是"想要 vim 模式"。v3 不投入。
 - ❌ **"key → 任意 shell 命令"**——keybindings 只能重绑封闭 action 集合，避免变成可执行配置（安全 + 学习成本 + 跨平台差异）。

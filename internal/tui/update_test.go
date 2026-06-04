@@ -339,15 +339,11 @@ func TestHandleKey_CommandMenuOpen_TabUniqueAutocompletes(t *testing.T) {
 	}
 }
 
-func TestHandleKey_CommandMenuOpen_TabMultiKeepsPickerOpen(t *testing.T) {
+func TestHandleKey_CommandMenuOpen_TabBareSlashCompletesHighlighted(t *testing.T) {
 	t.Parallel()
-	// Tab on a prefix with multiple candidates and NO further LCP
-	// progress (and no exact-name match) keeps the picker open and
-	// leaves the input alone — the user must type to disambiguate or
-	// ↑/↓ + Enter to pick.
-	//
-	// `/` matches every command and LCP is "/" (== input). No alias
-	// equals "/" exactly, so exact-name doesn't fire either.
+	// Bare "/" + Tab: LCP is "/" == input (no progress to make), so Tab
+	// completes the highlighted row — the first command — rather than
+	// the old silent bell. ↑/↓ would choose a different row first.
 	m := Model{input: textarea.New()}
 	m.input.SetValue("/")
 	cmds := filterCommands(allCommands(), "/")
@@ -358,17 +354,15 @@ func TestHandleKey_CommandMenuOpen_TabMultiKeepsPickerOpen(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
+	want := cmds[0].names[0] + " "
 	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
 	m2 := out.(Model)
 
-	if !m2.commandMenuOpen {
-		t.Error("Tab on no-progress ambiguous prefix should KEEP the picker open")
+	if got := m2.input.Value(); got != want {
+		t.Errorf("bare '/' + Tab should complete the highlighted (first) command; want %q got %q", want, got)
 	}
-	if got := m2.input.Value(); got != "/" {
-		t.Errorf("Tab on no-progress ambiguous should NOT change input, want %q got %q", "/", got)
-	}
-	if len(m2.commandMenuFiltered) != len(cmds) {
-		t.Errorf("filtered list should be unchanged: was %d, now %d", len(cmds), len(m2.commandMenuFiltered))
+	if m2.commandMenuOpen {
+		t.Error("command menu should close after Tab completes the highlighted candidate")
 	}
 }
 
@@ -481,37 +475,32 @@ func TestHandleKey_CommandMenuOpen_TabAliasAcceptsCanonical(t *testing.T) {
 	}
 }
 
-func TestHandleKey_CommandMenuOpen_TabAtLcpEmitsBell(t *testing.T) {
+func TestHandleKey_CommandMenuOpen_TabAtLcpAcceptsHighlighted(t *testing.T) {
 	t.Parallel()
-	// When the user's input is already AT the longest common prefix,
-	// multiple candidates remain, AND no candidate's name equals the
-	// input exactly, Tab can't make further progress — emit a bell to
-	// signal "you've reached the unambiguous prefix; pick from the
-	// menu or type to narrow".
-	//
-	// `/` matches everything; LCP across all canonicals = "/" = input;
-	// no command's canonical or alias equals "/". → bell.
+	// "/re" matches /review, /restore, /redo; their longest common prefix
+	// is "/re" == input, so Tab can't extend the prefix. Instead of a
+	// (silent) bell it now completes the HIGHLIGHTED candidate — same as a
+	// single-candidate Tab — with ↑/↓ choosing which row. This was the
+	// canonical "Tab does nothing" complaint.
 	m := Model{input: textarea.New()}
-	m.input.SetValue("/")
-	cmds := filterCommands(allCommands(), "/")
+	m.input.SetValue("/re")
+	cmds := filterCommands(allCommands(), "/re")
 	if len(cmds) < 2 {
-		t.Fatalf("setup: filterCommands('/') expected 2+ candidates, got %d", len(cmds))
+		t.Fatalf("setup: '/re' expected 2+ candidates, got %d", len(cmds))
 	}
 	m.commandMenuOpen = true
 	m.commandMenuFiltered = cmds
-	m.commandMenuSelected = 0
+	m.commandMenuSelected = 1 // second candidate — proves the highlight drives the pick
 
-	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	want := cmds[1].names[0] + " "
+	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
 	m2 := out.(Model)
 
-	if got := m2.input.Value(); got != "/" {
-		t.Errorf("Tab at LCP should NOT change input, want %q got %q", "/", got)
+	if got := m2.input.Value(); got != want {
+		t.Errorf("Tab at LCP should complete the highlighted candidate; want %q got %q", want, got)
 	}
-	if !m2.commandMenuOpen {
-		t.Error("Tab at LCP should KEEP the picker open")
-	}
-	if cmd == nil {
-		t.Error("Tab at LCP should return a bell cmd (got nil)")
+	if m2.commandMenuOpen {
+		t.Error("command menu should close once Tab accepts the highlighted candidate")
 	}
 }
 
@@ -660,6 +649,95 @@ func TestUpdateCommandMenu_ClosesAutoPickerOnBackspace(t *testing.T) {
 	}
 	if !m.commandMenuOpen {
 		t.Error("slash menu should re-open on '/model' (no space)")
+	}
+}
+
+// TestUpdateCommandMenu_SubcommandVerbPicker covers the generic
+// "/<cmd> <verb>" completion added for CLI-mirror commands. Typing
+// "/memory " must open a verb picker (purpose "subcmd:/memory") listing
+// the command's declared subcommands, with the slash menu closed.
+func TestUpdateCommandMenu_SubcommandVerbPicker(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/memory ")
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen {
+		t.Fatal("'/memory ' should auto-open the verb picker")
+	}
+	if m.pickerPurpose != subcmdPurposePrefix+"/memory" {
+		t.Errorf("pickerPurpose = %q, want %q", m.pickerPurpose, subcmdPurposePrefix+"/memory")
+	}
+	if m.commandMenuOpen {
+		t.Error("slash menu must be closed while the verb picker is open")
+	}
+	if len(m.modelPickerFiltered) != 4 || m.modelPickerFiltered[0].id != "list" {
+		t.Errorf("want 4 memory verbs starting with 'list'; got %+v", m.modelPickerFiltered)
+	}
+}
+
+// TestUpdateCommandMenu_SubcommandFiltersByPrefix: a partial verb
+// narrows the picker (readline-style), here "/hooks t" → only "trust".
+func TestUpdateCommandMenu_SubcommandFiltersByPrefix(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/hooks t")
+	m.updateCommandMenu()
+
+	if !m.modelPickerOpen || m.pickerPurpose != subcmdPurposePrefix+"/hooks" {
+		t.Fatalf("'/hooks t' should open the hooks verb picker; open=%v purpose=%q", m.modelPickerOpen, m.pickerPurpose)
+	}
+	if len(m.modelPickerFiltered) != 1 || m.modelPickerFiltered[0].id != "trust" {
+		t.Errorf("'/hooks t' should narrow to [trust]; got %+v", m.modelPickerFiltered)
+	}
+}
+
+// TestUpdateCommandMenu_NoSubcommandsNoPicker: a verb-less command
+// ("/yolo ") must NOT open a verb picker — the generic branch is gated
+// on command.subcommands being declared.
+func TestUpdateCommandMenu_NoSubcommandsNoPicker(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/yolo ")
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Errorf("'/yolo ' has no subcommands and must not open a picker; purpose=%q", m.pickerPurpose)
+	}
+}
+
+// TestApplyModelChoice_SubcommandInsertsVerb: picking a verb is a
+// completion insert ("/memory list "), not a dispatch — the user keeps
+// composing args. The picker closes afterward.
+func TestApplyModelChoice_SubcommandInsertsVerb(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.input.SetValue("/memory ")
+	m.updateCommandMenu() // opens picker, filtered[0] == "list"
+
+	m.applyModelChoice(0)
+
+	if got := m.input.Value(); got != "/memory list " {
+		t.Errorf("input = %q, want %q", got, "/memory list ")
+	}
+	if m.modelPickerOpen {
+		t.Error("picker should close after the verb is inserted")
+	}
+}
+
+// TestUpdateCommandMenu_SubcommandClosesPastVerb: once the user types a
+// space after the verb ("/memory list "), they've moved on to args, so
+// the verb picker closes.
+func TestUpdateCommandMenu_SubcommandClosesPastVerb(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.modelPickerOpen = true
+	m.pickerPurpose = subcmdPurposePrefix + "/memory"
+	m.input.SetValue("/memory list ")
+	m.updateCommandMenu()
+
+	if m.modelPickerOpen {
+		t.Error("verb picker should close once input moves past the verb")
 	}
 }
 

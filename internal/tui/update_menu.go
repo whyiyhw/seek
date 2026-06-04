@@ -2,6 +2,13 @@ package tui
 
 import "strings"
 
+// subcmdPurposePrefix tags a pickerPurpose for the generic "/<cmd>
+// <verb>" verb picker; the canonical command name follows (e.g.
+// "subcmd:/memory"). applyModelChoice reads the suffix to rebuild the
+// completed input. Kept distinct from the bespoke "skill-verb" purpose
+// so the two flows don't collide.
+const subcmdPurposePrefix = "subcmd:"
+
 // updateCommandMenu recomputes the slash-command dropdown state from
 // the current input value. Called after every textarea-bound key.
 //
@@ -191,9 +198,37 @@ func (m *Model) updateCommandMenu() {
 		return
 	}
 
+	// Branch 1b: generic "/<cmd> <verb-partial>" verb picker for any
+	// command that declares subcommands (e.g. /memory, /hooks). Comes
+	// AFTER the bespoke branches above so /skill etc. keep their custom
+	// flow; data-driven off command.subcommands so a new CLI-mirror verb
+	// command needs no new branch here. Closes once the user types past
+	// the verb (a second space) — same lifecycle as skill-verb.
+	if name, tail, hasSpace := splitCommandArg(v); hasSpace {
+		if c, ok := commandWithSubcommands(name); ok {
+			m.commandMenuOpen = false
+			m.commandMenuFiltered = nil
+			m.commandMenuSelected = 0
+			if strings.Contains(tail, " ") {
+				m.closeSubcommandPicker()
+				return
+			}
+			filtered := filterChoicesByPrefix(c.subcommands, tail)
+			if len(filtered) == 0 {
+				m.closeSubcommandPicker()
+				return
+			}
+			m.modelPickerFiltered = filtered
+			m.modelPickerSelected = 0
+			m.modelPickerOpen = true
+			m.pickerPurpose = subcmdPurposePrefix + name
+			return
+		}
+	}
+
 	// Branch 2: not in a known auto-open state but a stale auto-opened picker
 	// is still showing (e.g. user backspaced the space). Close it.
-	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name" || m.pickerPurpose == "help-topic") {
+	if m.modelPickerOpen && (m.pickerPurpose == "model" || m.pickerPurpose == "effort" || m.pickerPurpose == "review" || m.pickerPurpose == "skill-verb" || m.pickerPurpose == "skill-name" || m.pickerPurpose == "help-topic" || strings.HasPrefix(m.pickerPurpose, subcmdPurposePrefix)) {
 		m.modelPickerOpen = false
 		m.modelPickerFiltered = nil
 		m.modelPickerSelected = 0
@@ -231,6 +266,47 @@ func filterCommands(cmds []command, prefix string) []command {
 		}
 	}
 	return out
+}
+
+// splitCommandArg splits "/cmd rest..." at the first space into
+// ("/cmd", "rest...", true). hasSpace=false means no space yet (still
+// typing the command name → Branch 3's slash menu owns it).
+func splitCommandArg(v string) (name, tail string, hasSpace bool) {
+	i := strings.IndexByte(v, ' ')
+	if i < 0 {
+		return v, "", false
+	}
+	return v[:i], v[i+1:], true
+}
+
+// commandWithSubcommands returns the command whose canonical name or
+// alias equals name AND that declares subcommands. The subcommands
+// guard is what keeps verb-less commands — and the bespoke /skill,
+// /model, /effort, … — out of the generic verb picker.
+func commandWithSubcommands(name string) (command, bool) {
+	for _, c := range allCommands() {
+		if len(c.subcommands) == 0 {
+			continue
+		}
+		for _, n := range c.names {
+			if n == name {
+				return c, true
+			}
+		}
+	}
+	return command{}, false
+}
+
+// closeSubcommandPicker dismisses a generic verb picker if one is open.
+// No-op for any other picker purpose, so it's safe to call whenever the
+// generic branch decides there's nothing to show.
+func (m *Model) closeSubcommandPicker() {
+	if m.modelPickerOpen && strings.HasPrefix(m.pickerPurpose, subcmdPurposePrefix) {
+		m.modelPickerOpen = false
+		m.modelPickerFiltered = nil
+		m.modelPickerSelected = 0
+		m.pickerPurpose = ""
+	}
 }
 
 // longestCommonCandidatePrefix returns the longest string that is a

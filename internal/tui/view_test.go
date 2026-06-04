@@ -361,6 +361,22 @@ func TestRenderAssistantBlock_ReasoningShownWhenToggled(t *testing.T) {
 	}
 }
 
+// TestRenderAssistantBlock_ReasoningUsesGutter pins the visual-separation
+// contract: shown reasoning renders as a "▸ reasoning" header over a
+// left-gutter (│) block so it reads as a distinct aside from the
+// assistant prose. A refactor that drops the gutter (back to a bare
+// indent) silently undoes the separation, so guard it here.
+func TestRenderAssistantBlock_ReasoningUsesGutter(t *testing.T) {
+	t.Parallel()
+	out := stripANSI(renderAssistantBlock("answer", "first\nsecond", true, 80, nil))
+	if !strings.Contains(out, "▸ reasoning") {
+		t.Errorf("reasoning block must carry the ▸ reasoning header; got %q", out)
+	}
+	if !strings.Contains(out, "│ first") || !strings.Contains(out, "│ second") {
+		t.Errorf("every reasoning line must be gutter-prefixed (│ ); got %q", out)
+	}
+}
+
 func TestRenderToolResultLine_ErrorShape(t *testing.T) {
 	forceColor(t)
 	got := renderToolResultLine("edit", "args", "", errors.New("0 matches found"), 250*time.Millisecond, 0)

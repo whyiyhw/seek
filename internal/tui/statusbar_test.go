@@ -387,3 +387,45 @@ func TestFormatDuration(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderStatusBar_FoldsLowPriorityWhenNarrow pins the adaptive-fold
+// contract: at a wide width every segment is present; at a narrow width
+// the bar sheds low/medium-priority metrics, keeps the pinned identity +
+// mode badge, and never wraps to a second line.
+func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
+	t.Parallel()
+	rich := StatusSnapshot{
+		Model:            "deepseek-v4-pro",
+		Yolo:             true,
+		Turns:            5,
+		ToolCalls:        3,
+		CumulativeCost:   0.42,
+		CronsRegistered:  2,
+		UpgradeAvailable: "v0.9.0",
+	}
+
+	wide := rich
+	wide.Width = 200
+	w := stripANSI(RenderStatusBar(wide))
+	for _, frag := range []string{"seek", "YOLO", "turns:5", "⏰ 2 cron", "↑ v0.9.0", "cost"} {
+		if !strings.Contains(w, frag) {
+			t.Fatalf("wide bar should contain %q; got %q", frag, w)
+		}
+	}
+
+	narrow := rich
+	narrow.Width = 28
+	n := RenderStatusBar(narrow)
+	plain := stripANSI(n)
+	if !strings.Contains(plain, "seek") || !strings.Contains(plain, "YOLO") {
+		t.Errorf("narrow bar must keep pinned identity + mode badge; got %q", plain)
+	}
+	for _, frag := range []string{"turns:", "⏰", "↑ v0.9.0", "cost"} {
+		if strings.Contains(plain, frag) {
+			t.Errorf("narrow bar should have folded away %q; got %q", frag, plain)
+		}
+	}
+	if strings.Contains(n, "\n") {
+		t.Errorf("status bar must stay single-line; got %q", n)
+	}
+}
