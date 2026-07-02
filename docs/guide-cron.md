@@ -177,7 +177,7 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
   "push_webhooks": [
     {
       "url": "https://ntfy.sh/my-seek-topic",   // 你自己的 topic
-      "format": "ntfy",                          // ntfy | slack | discord | feishu | feishu-flow | template | raw（默认 raw）
+      "format": "ntfy",                          // ntfy | slack | discord | feishu | template | raw（默认 raw）
       "events": ["cron.failed", "cron.killed"]   // 省略 = 全部事件
     }
   ]
@@ -191,9 +191,25 @@ Linux notify 在 `$DISPLAY` 和 `$WAYLAND_DISPLAY` 都为空时自动 no-op，�
 2. config 里 `"url": "https://ntfy.sh/my-seek-7f3a"`，`"format": "ntfy"`。
 3. 验证：`seek cron config check --probe`（往每个 webhook 发一条真实测试消息）。
 
-**飞书 / Lark（国内推荐）** 两种接法:
-- **自定义机器人**:群里加「自定义机器人」拿到 URL(形如 `https://open.feishu.cn/open-apis/bot/v2/hook/<id>`),`"format": "feishu"`。坑:① 开了**自定义关键词**时推送文本须含该关键词;② 飞书对关键词/签名错误**返回 HTTP 200 + body `code≠0`**,seek 只看 HTTP 状态,这类逻辑错抓不到——建议用**无签名**机器人,先 `--probe` 确认。
-- **飞书流程(Flow)trigger**:URL 形如 `https://www.feishu.cn/flow/api/trigger-webhook/<id>`,`"format": "feishu-flow"`(固定发 `{"msg_type":"text","content":{"text":{"title":…,"msg":…}}}`)。若你的 Flow 期望别的 JSON 形状 → 用下面的 **`template`** 自定义。
+**飞书 / Lark（国内推荐）—— 自建应用 bot**:
+走企业自建应用 IM API,可发到任意群/私聊(`chat_id`/`open_id`),且 seek 会**正确解析飞书的 body 错误码**(飞书业务错误仍返回 HTTP 200,真正的成败在响应体 `code` 字段——老的自定义机器人方式抓不到,新方式已抓到)。
+
+```jsonc
+{
+  "push_webhooks": [
+    {
+      "format": "feishu",
+      "app_id": "cli_xxxxxxxxxxxxx",          // 飞书开放平台 → 自建应用 → 凭证与基础信息
+      "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxx",
+      "receive_id": "oc_xxxxxxxxxxxxx",        // 群 chat_id;私聊用 open_id
+      "receive_id_type": "chat_id",            // chat_id | open_id | user_id | union_id | email
+      "events": ["cron.failed"]
+    }
+  ]
+}
+```
+
+一次性配置:① [飞书开放平台](https://open.feishu.cn)创建企业自建应用,拿 App ID / Secret;② 开启**机器人**能力;③ 申请权限 `im:message:send_as_bot`(必填);④ 把机器人加进群(发群消息)或私聊(发私聊);⑤ 建议把 `~/.seek/config.json` 设为 `0600`(内含 secret)。详见 [`guide-webhooks.md`](guide-webhooks.md) §飞书。
 
 **`template`(自定义任意 JSON,最通用)**:你的 webhook/Flow 要什么形状,你就在 config 里写什么,用占位符 `{{title}}` / `{{body}}` / `{{event}}`,seek 在发送时**JSON 转义后**填进去(标题/正文含引号、换行都不会破坏 JSON):
 ```jsonc

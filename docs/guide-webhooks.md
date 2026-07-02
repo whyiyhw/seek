@@ -17,10 +17,11 @@ seek 可以把 cron 任务完成、autopilot 结果、长时间交互回合的�
 | `"ntfy"` | ntfy.sh 或自托管 ntfy | [ntfy.sh](https://ntfy.sh) |
 | `"slack"` | Slack Webhook | Slack Incoming Webhook |
 | `"discord"` | Discord Webhook | Discord Channel Webhook |
-| `"feishu"` | 飞书自定义机器人 | Feishu / Lark Bot |
-| `"feishu-flow"` | 飞书 Flow 触发器 | Feishu Flow |
+| `"feishu"` | 飞书企业自建应用 bot（IM API） | Feishu / Lark 自建应用 |
 | `"template"` | 自定义 JSON 模板 | 任何支持 JSON POST 的 webhook |
 | `"raw"`（默认） | 纯 JSON 负载 | 通用 |
+
+> **`feishu` 已升级为「自建应用 bot」**。早期版本的 `feishu`（自定义机器人 incoming webhook）和 `feishu-flow`（飞书流程触发器）已移除——自定义机器人只能单向群播、寻址不到具体会话,且关键词/签名错误会被静默拒绝(飞书返回 HTTP 200 + body `code≠0`)。新机制走自建应用 IM API,可发到任意 `chat_id`/`open_id`,并已正确解析 body 错误码。如仍需旧的群播 webhook,用 `"template"` 格式自定义 payload。
 
 ---
 
@@ -51,9 +52,46 @@ seek 可以把 cron 任务完成、autopilot 结果、长时间交互回合的�
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `url` | string | ✅ | POST 目标 URL。http/https 均可，**允许内网地址**（自托管 ntfy 等场景） |
+| `url` | string | ✅* | POST 目标 URL。http/https 均可，**允许内网地址**（自托管 ntfy 等场景）。**`format: "feishu"` 时忽略**,改用 IM API |
 | `format` | string | ❌ | 负载格式。默认 `"raw"` |
 | `template` | string | ❌ | 仅 `format: "template"` 时使用。自定义 JSON 负载，支持 `{{title}}`、`{{body}}`、`{{event}}` 占位符 |
+| `app_id` | string | ❌† | 仅 `format: "feishu"`。飞书企业自建应用 App ID |
+| `app_secret` | string | ❌† | 仅 `format: "feishu"`。飞书企业自建应用 App Secret |
+| `receive_id` | string | ❌† | 仅 `format: "feishu"`。目标会话 ID(群 `oc_...`、私聊 `ou_...`/邮箱) |
+| `receive_id_type` | string | ❌ | 仅 `format: "feishu"`。`receive_id` 的类型:`chat_id`(默认) / `open_id` / `user_id` / `union_id` / `email` |
+
+\* `format: "feishu"` 时 `url` 可省略。 † `format: "feishu"` 时 `app_id`/`app_secret`/`receive_id` 必填。
+
+### 飞书(自建应用 bot)配置 / Feishu via app bot
+
+```json
+{
+  "push_webhooks": [
+    {
+      "format": "feishu",
+      "app_id": "cli_xxxxxxxxxxxxx",
+      "app_secret": "xxxxxxxxxxxxxxxxxxxxxxxx",
+      "receive_id": "oc_xxxxxxxxxxxxx",
+      "receive_id_type": "chat_id",
+      "events": ["cron.failed"]
+    }
+  ]
+}
+```
+
+**飞书开放平台一次性配置**(详见 [飞书开放平台文档](https://open.feishu.cn/document)):
+
+1. 在[飞书开放平台](https://open.feishu.cn)创建**企业自建应用**,拿 `App ID` / `App Secret`(应用详情 → "凭证与基础信息")。
+2. 开启**机器人**能力(应用详情 → 添加应用能力 → 机器人)。
+3. 申请**权限**:`im:message`(收消息,可选)+ `im:message:send_as_bot`(以机器人身份发消息,**必填**)。
+4. 拿 `receive_id`:
+   - 发**群消息**:把机器人加进群,`receive_id_type=chat_id`,`receive_id` 是群 chat_id(可从群设置 / 调 API 获取)。
+   - 发**私聊**:`receive_id_type=open_id`,`receive_id` 是用户的 open_id。
+5. 写进 `~/.seek/config.json`(建议文件权限 0600,内含 secret)。`seek cron config check --probe` 发一条测试消息验证。
+
+> **密钥安全**:`app_secret` 落在 `config.json` 里——请把 `~/.seek/config.json` 设为 `0600`,且不要提交进版本库。未来可选迁移到 `~/.seek/serve/env`。
+>
+> **token 缓存**:seek 会缓存 `tenant_access_token`(默认有效期 2 小时,到期前 5 分钟自动刷新);同一 `app_id` 的多个 webhook 条目共享一个 token。
 
 ### 占位符
 

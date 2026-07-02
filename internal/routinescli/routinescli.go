@@ -51,7 +51,16 @@ func WebhookDispatcherFromConfig() routines.WebhookDispatcher {
 	}
 	targets := make([]routines.WebhookTarget, 0, len(cfg.PushWebhooks))
 	for _, w := range cfg.PushWebhooks {
-		targets = append(targets, routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events, Template: w.Template})
+		targets = append(targets, routines.WebhookTarget{
+			URL:           w.URL,
+			Format:        w.Format,
+			Events:        w.Events,
+			Template:      w.Template,
+			AppID:         w.AppID,
+			AppSecret:     w.AppSecret,
+			ReceiveID:     w.ReceiveID,
+			ReceiveIDType: w.ReceiveIDType,
+		})
 	}
 	return routines.NewWebhookDispatcher(targets, nil)
 }
@@ -451,22 +460,43 @@ func cmdConfigCheck(args []string, stdout, stderr io.Writer) error {
 
 	failures := 0
 	for i, w := range cfg.PushWebhooks {
-		label := fmt.Sprintf("[%d] %s (%s)", i, w.URL, w.Format)
-		if w.Format == "" {
-			label = fmt.Sprintf("[%d] %s (raw)", i, w.URL)
+		format := w.Format
+		if format == "" {
+			format = "raw"
 		}
-		if err := routines.ValidateWebhookURL(w.URL); err != nil {
-			fmt.Fprintf(stdout, "  ✗ %s — %v\n", label, err)
-			failures++
-			continue
+		// Feishu (IM API) doesn't use a URL — label it by receive_id so
+		// the user can tell multiple feishu targets apart; URL-based
+		// formats keep the old URL label.
+		var label string
+		if format == routines.FormatFeishu {
+			label = fmt.Sprintf("[%d] feishu app=%s receive=%s", i, w.AppID, w.ReceiveID)
+		} else {
+			label = fmt.Sprintf("[%d] %s (%s)", i, w.URL, format)
 		}
 		if err := routines.ValidateWebhookFormat(w.Format); err != nil {
 			fmt.Fprintf(stdout, "  ✗ %s — %v\n", label, err)
 			failures++
 			continue
 		}
+		// URL gate is skipped for feishu (it goes through the IM API).
+		if format != routines.FormatFeishu {
+			if err := routines.ValidateWebhookURL(w.URL); err != nil {
+				fmt.Fprintf(stdout, "  ✗ %s — %v\n", label, err)
+				failures++
+				continue
+			}
+		}
 		if *probe {
-			target := routines.WebhookTarget{URL: w.URL, Format: w.Format, Events: w.Events, Template: w.Template}
+			target := routines.WebhookTarget{
+				URL:           w.URL,
+				Format:        w.Format,
+				Events:        w.Events,
+				Template:      w.Template,
+				AppID:         w.AppID,
+				AppSecret:     w.AppSecret,
+				ReceiveID:     w.ReceiveID,
+				ReceiveIDType: w.ReceiveIDType,
+			}
 			if err := routines.SendTestWebhook(ctx, target, nil); err != nil {
 				fmt.Fprintf(stdout, "  ✗ %s — probe failed: %v\n", label, err)
 				failures++

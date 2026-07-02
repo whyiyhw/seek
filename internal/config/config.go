@@ -154,22 +154,40 @@ type PushWebhook struct {
 	// URL is the POST target. http/https only; private/LAN addresses
 	// are allowed (the user configured it — self-hosted ntfy / intranet
 	// relays are a use case, unlike webfetch's model-driven SSRF gate).
+	// For format "feishu" the URL is ignored — delivery goes through
+	// the Feishu open-platform IM API (im/v1/messages), addressed by
+	// ReceiveID below.
 	URL string `json:"url"`
 	// Format selects the payload shape: ntfy | slack | discord | feishu |
-	// feishu-flow | template | raw. Empty defaults to raw. (feishu =
-	// custom bot; feishu-flow = a common Feishu Flow shape; template =
-	// bring your own JSON.)
+	// template | raw. Empty defaults to raw. (feishu = 企业自建应用 bot
+	// via IM API; needs AppID/AppSecret/ReceiveID/ReceiveIDType. template
+	// = bring your own JSON.)
 	Format string `json:"format,omitempty"`
 	// Template is the raw JSON body for format "template": your own
 	// payload with {{title}} / {{body}} / {{event}} placeholders
 	// (JSON-escaped on substitution). The general escape hatch for any
-	// webhook whose schema the built-in formats don't match — e.g. a
-	// Feishu Flow with a custom sample.
+	// webhook whose schema the built-in formats don't match.
 	Template string `json:"template,omitempty"`
 	// Events filters which terminal events fire this webhook
 	// (e.g. "cron.failed", "trigger.completed", "session.completed").
 	// Empty = every event.
 	Events []string `json:"events,omitempty"`
+
+	// Feishu 企业自建应用 bot credentials (only used when Format ==
+	// "feishu"). Stored in config.json per project decision; treat the
+	// file as sensitive (0600 recommended on ~/.seek/config.json).
+	// Obtain from the Feishu developer console → your 企业自建应用 →
+	// "凭证与基础信息". See docs/guide-webhooks.md §飞书.
+	AppID     string `json:"app_id,omitempty"`
+	AppSecret string `json:"app_secret,omitempty"`
+	// ReceiveID is the target conversation: a chat_id (group), an
+	// open_id / user_id / union_id (private message), or an email.
+	// Which one it is, is declared by ReceiveIDType.
+	ReceiveID string `json:"receive_id,omitempty"`
+	// ReceiveIDType declares the kind of ReceiveID: chat_id | open_id |
+	// user_id | union_id | email. Empty defaults to chat_id (the common
+	// "send to a group" case).
+	ReceiveIDType string `json:"receive_id_type,omitempty"`
 }
 
 // SuggestReplyEnabled returns whether the suggested-reply feature

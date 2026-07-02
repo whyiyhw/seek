@@ -35,26 +35,33 @@ type WebhookDispatcher func(ctx context.Context, event, title, body string)
 // the config package (no import cycle, clean layering).
 type WebhookTarget struct {
 	URL    string
-	Format string   // ntfy | slack | discord | feishu | feishu-flow | template | raw
+	Format string   // ntfy | slack | discord | feishu | template | raw
 	Events []string // empty = every event
 	// Template is the raw JSON body for format "template": the user
 	// writes their own payload with {{title}} / {{body}} / {{event}}
 	// placeholders, which are substituted (JSON-escaped) at send time.
 	// This is the general escape hatch for any webhook target with a
-	// custom schema (e.g. a Feishu Flow whose sample differs from the
-	// built-in feishu-flow shape).
+	// custom schema.
 	Template string
+
+	// Feishu 企业自建应用 bot fields (only used when Format == "feishu").
+	// URL is ignored in this mode — delivery goes through the IM API at
+	// https://open.feishu.cn/open-apis/im/v1/messages, addressed by
+	// ReceiveID. See docs/guide-webhooks.md §飞书.
+	AppID         string
+	AppSecret     string
+	ReceiveID     string
+	ReceiveIDType string // empty defaults to "chat_id"
 }
 
 // Webhook payload formats.
 const (
-	FormatNtfy       = "ntfy"
-	FormatSlack      = "slack"
-	FormatDiscord    = "discord"
-	FormatFeishu     = "feishu"      // custom bot: content.text is a string
-	FormatFeishuFlow = "feishu-flow" // Flow trigger: content.text is {title, msg}
-	FormatTemplate   = "template"    // user-defined JSON with {{title}}/{{body}}/{{event}}
-	FormatRaw        = "raw"
+	FormatNtfy     = "ntfy"
+	FormatSlack    = "slack"
+	FormatDiscord  = "discord"
+	FormatFeishu   = "feishu" // 企业自建应用 bot via IM API (im/v1/messages)
+	FormatTemplate = "template" // user-defined JSON with {{title}}/{{body}}/{{event}}
+	FormatRaw      = "raw"
 )
 
 // webhookTimeout caps each individual POST. Short: a notification that
@@ -88,10 +95,10 @@ func ValidateWebhookURL(raw string) error {
 // config before the user relies on it.
 func ValidateWebhookFormat(format string) error {
 	switch format {
-	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu, FormatFeishuFlow, FormatTemplate:
+	case "", FormatRaw, FormatNtfy, FormatSlack, FormatDiscord, FormatFeishu, FormatTemplate:
 		return nil
 	default:
-		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, feishu-flow, template, raw)", format)
+		return fmt.Errorf("unknown webhook format %q (valid: ntfy, slack, discord, feishu, template, raw)", format)
 	}
 }
 
@@ -101,26 +108,48 @@ func ValidateWebhookFormat(format string) error {
 // notification. Returns nil when no valid target remains, so callers can
 // leave TickOptions.Webhook nil and skip dispatch entirely. A nil client
 // gets a default 5s-timeout client.
+//
+// Feishu targets share a tenant_access_token holder keyed by AppID, so two
+// targets pointed at the same app (e.g. a private chat and a group) reuse
+// one token instead of each minting its own (avoids needless auth calls
+// and Feishu's rate limit on the token endpoint).
 func NewWebhookDispatcher(targets []WebhookTarget, client *http.Client) WebhookDispatcher {
 	if client == nil {
 		client = &http.Client{Timeout: webhookTimeout}
 	}
 	valid := make([]WebhookTarget, 0, len(targets))
+	// tokenHolders keyed by AppID, shared across feishu targets of the
+	// same app. Lazily grown; read by the dispatcher goroutine.
+	tokenHolders := map[string]*feishuTokenHolder{}
 	for _, t := range targets {
-		if err := ValidateWebhookURL(t.URL); err != nil {
-			fmt.Fprintf(os.Stderr, "routines: webhook dropped: %v\n", err)
-			continue
-		}
 		if err := ValidateWebhookFormat(t.Format); err != nil {
 			fmt.Fprintf(os.Stderr, "routines: webhook %s dropped: %v\n", t.URL, err)
 			continue
+		}
+		if t.Format == "" {
+			t.Format = FormatRaw
 		}
 		if t.Format == FormatTemplate && strings.TrimSpace(t.Template) == "" {
 			fmt.Fprintf(os.Stderr, "routines: webhook %s dropped: format \"template\" requires a non-empty template\n", t.URL)
 			continue
 		}
-		if t.Format == "" {
-			t.Format = FormatRaw
+		// feishu (IM API) doesn't POST to t.URL at all — it ignores the
+		// URL field entirely. Validate the app credentials instead, and
+		// skip the URL gate.
+		if t.Format == FormatFeishu {
+			if err := validateFeishuBot(t); err != nil {
+				fmt.Fprintf(os.Stderr, "routines: webhook feishu (app_id=%s) dropped: %v\n", t.AppID, err)
+				continue
+			}
+			if _, ok := tokenHolders[t.AppID]; !ok {
+				tokenHolders[t.AppID] = &feishuTokenHolder{appID: t.AppID, appSecret: t.AppSecret}
+			}
+			valid = append(valid, t)
+			continue
+		}
+		if err := ValidateWebhookURL(t.URL); err != nil {
+			fmt.Fprintf(os.Stderr, "routines: webhook dropped: %v\n", err)
+			continue
 		}
 		valid = append(valid, t)
 	}
@@ -136,6 +165,10 @@ func NewWebhookDispatcher(targets []WebhookTarget, client *http.Client) WebhookD
 			wg.Add(1)
 			go func(t WebhookTarget) {
 				defer wg.Done()
+				if t.Format == FormatFeishu {
+					postFeishuBot(ctx, client, tokenHolders[t.AppID], t, event, title, body)
+					return
+				}
 				postWebhook(ctx, client, t, event, title, body)
 			}(t)
 		}
@@ -198,9 +231,6 @@ func postWebhook(ctx context.Context, client *http.Client, t WebhookTarget, even
 // Bypasses the events filter on purpose — a probe should reach every
 // configured target regardless of which events it subscribes to.
 func SendTestWebhook(ctx context.Context, target WebhookTarget, client *http.Client) error {
-	if err := ValidateWebhookURL(target.URL); err != nil {
-		return err
-	}
 	if err := ValidateWebhookFormat(target.Format); err != nil {
 		return err
 	}
@@ -209,6 +239,20 @@ func SendTestWebhook(ctx context.Context, target WebhookTarget, client *http.Cli
 	}
 	if client == nil {
 		client = &http.Client{Timeout: webhookTimeout}
+	}
+	// Feishu bot takes a totally different path (IM API + token + body
+	// code parse) and ignores the URL — route it there directly.
+	if target.Format == FormatFeishu {
+		if err := validateFeishuBot(target); err != nil {
+			return err
+		}
+		holder := &feishuTokenHolder{appID: target.AppID, appSecret: target.AppSecret}
+		return sendFeishuBot(ctx, client, holder, target,
+			"seek webhook test",
+			"If you can read this, your seek feishu bot push is configured correctly.")
+	}
+	if err := ValidateWebhookURL(target.URL); err != nil {
+		return err
 	}
 	req, err := buildWebhookRequest(target, "test", "seek webhook test",
 		"If you can read this, your seek push webhook is configured correctly.")
@@ -243,32 +287,6 @@ func buildWebhookRequest(t WebhookTarget, event, title, body string) (*http.Requ
 		return jsonRequest(t.URL, map[string]string{"text": title + "\n" + body})
 	case FormatDiscord:
 		return jsonRequest(t.URL, map[string]string{"content": "**" + title + "**\n" + body})
-	case FormatFeishu:
-		// Feishu / Lark custom-bot incoming webhook: msg_type "text" with a
-		// nested content.text. CAVEAT: a keyword- or signature-protected bot
-		// rejects this (keyword bots need the keyword in the text; signed
-		// bots need timestamp+sign) AND Feishu signals such errors with
-		// HTTP 200 + a non-zero `code` in the body — which postWebhook's
-		// status-only check can't see. Best-effort by design; use an
-		// unsigned custom bot (or one whose keyword you include) for
-		// reliable delivery.
-		return jsonRequest(t.URL, map[string]any{
-			"msg_type": "text",
-			"content":  map[string]string{"text": title + "\n" + body},
-		})
-	case FormatFeishuFlow:
-		// Feishu Flow (飞书流程) trigger webhook (feishu.cn/flow/api/
-		// trigger-webhook/<id>) — a low-code automation, NOT a custom bot.
-		// The payload shape is defined by the Flow's own sample; this
-		// matches the common {msg_type, content.text:{title, msg}} schema
-		// and maps title→title, body→msg. If a given Flow expects a
-		// different shape, use the `raw` format and map fields in the Flow.
-		return jsonRequest(t.URL, map[string]any{
-			"msg_type": "text",
-			"content": map[string]any{
-				"text": map[string]string{"title": title, "msg": body},
-			},
-		})
 	case FormatTemplate:
 		// User-defined JSON body. Substitute placeholders with JSON-ESCAPED
 		// values so a title/body containing quotes or newlines can't break
