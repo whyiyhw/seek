@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-f5a623?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/CI-race--tested-2ea043?style=flat-square&logo=github&logoColor=white" alt="CI">
-  <img src="https://img.shields.io/badge/release-v0.8.1-f5a623?style=flat-square" alt="release">
+  <img src="https://img.shields.io/badge/release-v0.9.0-f5a623?style=flat-square" alt="release">
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-2b2b32?style=flat-square" alt="Platforms">
   &nbsp;·&nbsp; <a href="README.zh.md">中文</a>
 </p>
@@ -132,7 +132,7 @@ Every subcommand is also `/<name>` in the TUI. TUI-only: `/plan` `/goal` `/steer
 
 ## Built for real, not a weekend build
 
-**~85k lines of Go** (~44k non-test) across **66 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.8.1**.
+**~85k lines of Go** (~44k non-test) across **66 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.9.0**.
 
 Docs: [`docs/`](docs/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 
