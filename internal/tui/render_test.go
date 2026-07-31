@@ -26,7 +26,7 @@ func renderTestModel(t *testing.T) Model {
 	SetTheme("dark")
 	return New(Options{
 		Tracker: cache.New(),
-		Model:   "deepseek-chat",
+		Model:   "deepseek-v4-flash",
 	})
 }
 

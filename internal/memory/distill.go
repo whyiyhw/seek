@@ -191,8 +191,8 @@ type chatClient interface {
 // distillation explicitly asks for chain-of-thought because picking
 // which decisions are worth preserving is exactly the reasoning
 // work thinking mode is good at. (Pre-2026-05 this used the
-// deepseek-reasoner alias, which routes to the same backend; the
-// switch is so callers survive the 2026-07-24 alias sunset.)
+// deepseek-reasoner alias, which routed to the same backend; the
+// switch predates the 2026-07-24 alias removal.)
 type Distiller struct {
 	Client chatClient
 	Model  string // default deepseek.ModelV4Flash (+ Thinking)
@@ -222,8 +222,9 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 		}),
 	}
 	// Distillation is a single-shot reasoning call — opt the model into
-	// thinking mode explicitly. The legacy deepseek-reasoner alias used
-	// to provide this implicitly; the explicit V4 names do not.
+	// thinking mode explicitly. V4 models only think when asked via the
+	// Thinking parameter; the retired deepseek-reasoner alias used to
+	// provide this implicitly.
 	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
 		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}

@@ -106,7 +106,7 @@ func TestRenderTurnFooter_Format(t *testing.T) {
 	}, deepseek.ModelV4Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
-			Model:   deepseek.ModelChat,
+			Model:   deepseek.ModelV4Flash,
 			Tracker: tracker,
 		},
 		turns:     3,
@@ -137,7 +137,7 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 	}, deepseek.ModelV4Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
-			Model:   deepseek.ModelChat,
+			Model:   deepseek.ModelV4Flash,
 			Tracker: tracker,
 		},
 		turns:     1,

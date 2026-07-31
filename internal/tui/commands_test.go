@@ -59,7 +59,7 @@ func emptyModel() *Model {
 	m := Model{
 		opts: Options{
 			Tracker: cache.New(),
-			Model:   "deepseek-chat",
+			Model:   "deepseek-v4-flash",
 		},
 		input: textarea.New(),
 	}
@@ -610,14 +610,14 @@ func TestModel_WithArg_SwitchesAndFiresHook(t *testing.T) {
 	m := emptyModel()
 	var captured string
 	m.opts.SetModel = func(s string) { captured = s }
-	res := runHandler(t, m, "/model deepseek-reasoner")
-	if captured != "deepseek-reasoner" {
+	res := runHandler(t, m, "/model deepseek-v4-pro")
+	if captured != "deepseek-v4-pro" {
 		t.Errorf("SetModel got %q", captured)
 	}
-	if m.opts.Model != "deepseek-reasoner" {
+	if m.opts.Model != "deepseek-v4-pro" {
 		t.Errorf("Options.Model = %q", m.opts.Model)
 	}
-	if !strings.Contains(res.text, "deepseek-reasoner") {
+	if !strings.Contains(res.text, "deepseek-v4-pro") {
 		t.Errorf("feedback text = %q", res.text)
 	}
 }
@@ -931,7 +931,7 @@ func TestNew_SessionCreatedAndSaved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	old := session.New("deepseek-v4-flash", "/tmp", "sys", false, false)
 	// /new needs a real agent so persistSession can read Messages().
 	ag, err := agent.New(agent.Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL("http://unused")),
@@ -1199,7 +1199,7 @@ func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{
-			"id":"x","model":"deepseek-chat",
+			"id":"x","model":"deepseek-v4-flash",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"BRIEFING"},"finish_reason":"stop"}],
 			"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}
 		}`)
@@ -1257,7 +1257,7 @@ func TestCompact_ForkPreservesFullHistory(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{
-			"id":"x","model":"deepseek-chat",
+			"id":"x","model":"deepseek-v4-flash",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"SUMMARY"},"finish_reason":"stop"}],
 			"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13}
 		}`)
@@ -1280,7 +1280,7 @@ func TestCompact_ForkPreservesFullHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	snap := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	snap := session.New("deepseek-v4-flash", "/tmp", "sys", false, false)
 	snap.Messages = ag.Messages()
 	if err := store.Save(snap); err != nil {
 		t.Fatalf("save initial session: %v", err)
@@ -1711,15 +1711,15 @@ func TestCmdSkills_NoArgsListsLoaded(t *testing.T) {
 }
 
 func TestCmdSkillsUsed_FiltersBySession(t *testing.T) {
-	sess := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	sess := session.New("deepseek-v4-flash", "/tmp", "sys", false, false)
 	other := "20260101-000000-aaaaaa" // a different session id
 
 	writeStatsJSONL(t, []string{
-		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-reasoner","provider":"deepseek"}`,
-		`{"ts":"2026-05-24T10:05:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-reasoner","provider":"deepseek"}`,
-		`{"ts":"2026-05-24T10:10:00Z","name":"go-test-runner","session_id":"` + sess.ID + `","model":"deepseek-chat","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-v4-pro","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:05:00Z","name":"dual-model","session_id":"` + sess.ID + `","model":"deepseek-v4-pro","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:10:00Z","name":"go-test-runner","session_id":"` + sess.ID + `","model":"deepseek-v4-flash","provider":"deepseek"}`,
 		// Different session — must NOT be counted.
-		`{"ts":"2026-05-24T11:00:00Z","name":"dual-model","session_id":"` + other + `","model":"deepseek-chat","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T11:00:00Z","name":"dual-model","session_id":"` + other + `","model":"deepseek-v4-flash","provider":"deepseek"}`,
 	})
 
 	m := emptyModel()
@@ -1745,10 +1745,10 @@ func TestCmdSkillsUsed_FiltersBySession(t *testing.T) {
 }
 
 func TestCmdSkillsUsed_NoCallsInThisSession(t *testing.T) {
-	sess := session.New("deepseek-chat", "/tmp", "sys", false, false)
+	sess := session.New("deepseek-v4-flash", "/tmp", "sys", false, false)
 	// Stats file exists but contains only entries from a different session.
 	writeStatsJSONL(t, []string{
-		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"some-other-session","model":"deepseek-chat","provider":"deepseek"}`,
+		`{"ts":"2026-05-24T10:00:00Z","name":"dual-model","session_id":"some-other-session","model":"deepseek-v4-flash","provider":"deepseek"}`,
 	})
 
 	m := emptyModel()
@@ -1852,9 +1852,9 @@ func TestCmdSkillUse_NoSkillsLoaded(t *testing.T) {
 
 func TestCmdDiagnose_OutputsAllSections(t *testing.T) {
 	m := emptyModel()
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.opts.CWD = "/home/test"
-	m.opts.Session = session.New("deepseek-chat", "/home/test", "sys", false, false)
+	m.opts.Session = session.New("deepseek-v4-flash", "/home/test", "sys", false, false)
 	m.opts.Theme = "dark"
 
 	res := runHandler(t, m, "/diagnose")

@@ -39,7 +39,7 @@ func TestPersistSession_NilTrackerDoesNotPanic(t *testing.T) {
 	fa := newFakeAgent()
 
 	m := testModel().WithAgent(fa).WithStore(store).WithCustomState(func(m *Model) {
-		m.opts.Session = session.New("deepseek-chat", t.TempDir(), "", false, false)
+		m.opts.Session = session.New("deepseek-v4-flash", t.TempDir(), "", false, false)
 		m.opts.Tracker = nil // the bug: previously panicked here
 	}).BuildPtr()
 
@@ -91,7 +91,7 @@ func TestPersistSession_GuardsNilDependencies(t *testing.T) {
 				WithAgent(newFakeAgent()).
 				WithStore(store).
 				WithCustomState(func(m *Model) {
-					m.opts.Session = session.New("deepseek-chat", t.TempDir(), "", false, false)
+					m.opts.Session = session.New("deepseek-v4-flash", t.TempDir(), "", false, false)
 					m.opts.Tracker = cache.New()
 					tc.patch(m)
 				}).BuildPtr()
@@ -115,7 +115,7 @@ func TestPersistSession_HappyPathRoundtrip(t *testing.T) {
 	}
 
 	fa := newFakeAgent()
-	sess := session.New("deepseek-chat", t.TempDir(), "", false, false)
+	sess := session.New("deepseek-v4-flash", t.TempDir(), "", false, false)
 
 	m := testModel().WithAgent(fa).WithStore(store).WithCustomState(func(m *Model) {
 		m.opts.Session = sess

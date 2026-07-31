@@ -378,15 +378,14 @@ type modelChoice struct {
 func knownModelsForProvider(providerName string) []modelChoice {
 	switch strings.ToLower(providerName) {
 	case "", "deepseek":
-		// The legacy "deepseek-reasoner" alias still works via
-		// /model deepseek-reasoner and --model deepseek-reasoner
-		// (see pkg/deepseek.ShouldEnableThinking), but the picker
-		// surfaces the explicit V4 name so users see what they're
-		// actually buying instead of relying on DeepSeek's server-side
-		// alias routing (which has silently demoted reasoner→V4-Flash
+		// The retired deepseek-chat / deepseek-reasoner aliases were
+		// removed server-side on 2026-07-24; the picker surfaces only
+		// the explicit V4 IDs so users see what they're actually
+		// buying instead of relying on DeepSeek's server-side alias
+		// routing (which has silently demoted reasoner→V4-Flash
 		// in the past).
 		return []modelChoice{
-			{"deepseek-chat", "DeepSeek V4-Flash — fast chat + tools (default)"},
+			{"deepseek-v4-flash", "DeepSeek V4-Flash — fast chat + tools (default)"},
 			{"deepseek-v4-pro", "DeepSeek V4-Pro — Thinking-enabled reasoning (explicit)"},
 		}
 	case "anthropic":

@@ -16,14 +16,12 @@ package budget
 //
 // DeepSeek V4 (Jan 2026 launch) ships with a 1M context for both
 // flash and pro. The legacy `deepseek-chat` / `deepseek-reasoner`
-// names route to V4 server-side, so they inherit the new ceiling too.
+// aliases were removed server-side on 2026-07-24; old session files
+// carrying those names now hit the Default fallback below.
 var contextLimits = map[string]int{
 	// DeepSeek V4 — current lineup.
 	"deepseek-v4-flash": 1_000_000,
 	"deepseek-v4-pro":   1_000_000,
-	// Legacy aliases (still served by DeepSeek, mapped to V4-class).
-	"deepseek-chat":     1_000_000,
-	"deepseek-reasoner": 1_000_000,
 	// M6 additions (already declared so the surface doesn't shift
 	// when the second-tier providers light up).
 	"claude-3-5-sonnet-20241022": 200_000,

@@ -85,7 +85,7 @@ func TestTracker_SetBase_LastIgnoresBase(t *testing.T) {
 
 	// Set a base representing a prior session with heavy usage.
 	base := deepseek.Usage{PromptTokens: 500_000, CompletionTokens: 20_000, TotalTokens: 520_000}
-	tr.SetBase(base, "deepseek-chat", pricing.TierStandard)
+	tr.SetBase(base, "deepseek-v4-flash", pricing.TierStandard)
 
 	// Last() must return zero — no turns recorded yet.
 	if got := tr.Last(); got.PromptTokens != 0 {
@@ -114,7 +114,7 @@ func TestTracker_SetBase_LastIgnoresBase(t *testing.T) {
 // Usage does not pollute Cumulative or Last.
 func TestTracker_SetBase_EmptyUsageIsNoOp(t *testing.T) {
 	tr := New()
-	tr.SetBase(deepseek.Usage{}, "deepseek-chat", pricing.TierStandard)
+	tr.SetBase(deepseek.Usage{}, "deepseek-v4-flash", pricing.TierStandard)
 	if got := tr.Cumulative().TotalTokens; got != 0 {
 		t.Errorf("Cumulative() with empty SetBase = %+v, want zero", got)
 	}

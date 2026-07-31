@@ -109,7 +109,7 @@ func TestAgent_ToolCallFlow(t *testing.T) {
 
 	ag, err := New(Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:        deepseek.ModelChat,
+		Model:        deepseek.ModelV4Flash,
 		SystemPrompt: "sys",
 		Tools:        reg,
 	})
@@ -373,10 +373,10 @@ func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
 		model       string
 		wantEnabled bool
 	}{
-		{deepseek.ModelReasoner, true},
 		{deepseek.ModelV4Pro, true},
 		{deepseek.ModelV4Flash, false},
-		{deepseek.ModelChat, false},
+		{"", false},
+		{"some-future-custom-model", false},
 	}
 	for _, c := range cases {
 		t.Run(c.model, func(t *testing.T) {
@@ -498,7 +498,7 @@ func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
 
 	ag, _ := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 		Tools:  reg,
 	})
 	for ev := range ag.Prompt(context.Background(), "go") {
@@ -724,7 +724,7 @@ func TestAgent_Summarise_ReturnsContentDoesNotMutateHistory(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{
-			"id":"x","model":"deepseek-chat",
+			"id":"x","model":"deepseek-v4-flash",
 			"choices":[{"index":0,"message":{"role":"assistant","content":"## briefing\n- goal: X"},"finish_reason":"stop"}],
 			"usage":{"prompt_tokens":50,"completion_tokens":12,"total_tokens":62}
 		}`)

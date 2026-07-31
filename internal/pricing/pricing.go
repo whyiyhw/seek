@@ -1,5 +1,6 @@
 // Package pricing models DeepSeek's tiered pricing and off-peak window.
-// Embedded rates are accurate as of 2025-05; bump them with each release
+// Embedded rates are accurate as of 2026-07 (verified against
+// api-docs.deepseek.com/quick_start/pricing); bump them with each release
 // rather than fetching at runtime — a price-list HTTP call adds a failure
 // mode for an exclusively defensive feature (PRD §4.8.4).
 //
@@ -33,20 +34,17 @@ type ModelPricing struct {
 // standardRates is the price card per model during the standard
 // (non-off-peak) window. Off-peak is derived via offPeakDiscount.
 //
-// Numbers track DeepSeek's V4 launch (api-docs.deepseek.com 2026-01):
+// Numbers track DeepSeek's V4 launch (api-docs.deepseek.com 2026-01,
+// unchanged through the V4-Flash-0731 GA on 2026-07-31):
 //
 //	V4-Flash: $0.14 miss · $0.0028 hit · $0.28 output (per 1M tokens)
 //	V4-Pro:   $0.435 miss · $0.003625 hit · $0.87 output
 //	          (these are V4-Pro's CURRENT 75%-off promo rates; full
 //	           rack rate is 4× higher — $1.74 / $0.0145 / $3.48)
 //
-// Legacy aliases (deepseek-chat, deepseek-reasoner) are scheduled for
-// removal on 2026-07-24 per api-docs.deepseek.com. Until then, both
-// alias names route to the V4-Flash backend — deepseek-chat with
-// thinking disabled, deepseek-reasoner with thinking enabled — so they
-// share V4-Flash's rate card (NOT V4-Pro's). An earlier version of
-// this file mistakenly priced ModelReasoner at V4-Pro rates, which
-// overstated session cost by ~3.1×.
+// The legacy deepseek-chat / deepseek-reasoner aliases were removed
+// server-side on 2026-07-24; unknown model names fall back to
+// V4-Flash rates via the fallback path below.
 var standardRates = map[string]ModelPricing{
 	deepseek.ModelV4Flash: {
 		InputMissPerMTok: 0.14,
@@ -57,21 +55,6 @@ var standardRates = map[string]ModelPricing{
 		InputMissPerMTok: 0.435,
 		InputHitPerMTok:  0.003625,
 		OutputPerMTok:    0.87,
-	},
-	// Legacy alias → V4-Flash (no thinking). Sunset 2026-07-24.
-	deepseek.ModelChat: {
-		InputMissPerMTok: 0.14,
-		InputHitPerMTok:  0.0028,
-		OutputPerMTok:    0.28,
-	},
-	// Legacy alias → V4-Flash with thinking enabled. Sunset 2026-07-24.
-	// Same per-token rate as V4-Flash; the "reasoner" name historically
-	// implied higher cost, but DeepSeek prices V4-Flash thinking output
-	// identically to non-thinking.
-	deepseek.ModelReasoner: {
-		InputMissPerMTok: 0.14,
-		InputHitPerMTok:  0.0028,
-		OutputPerMTok:    0.28,
 	},
 }
 
@@ -99,11 +82,12 @@ func CurrentTier(now time.Time) Tier {
 }
 
 // PricingFor returns the per-token rate card for a model+tier. Unknown
-// models fall back to deepseek-chat rates.
+// models fall back to V4-Flash rates (the same card the retired
+// deepseek-chat alias used to map to).
 func PricingFor(model string, tier Tier) ModelPricing {
 	p, ok := standardRates[model]
 	if !ok {
-		p = standardRates[deepseek.ModelChat]
+		p = standardRates[deepseek.ModelV4Flash]
 	}
 	if tier == TierOffPeak {
 		p.InputMissPerMTok *= offPeakDiscount

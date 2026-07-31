@@ -97,7 +97,7 @@ func TestNew_TurnCountIgnoresNonAssistantToolCalls(t *testing.T) {
 
 	m := New(Options{
 		Tracker: cache.New(),
-		Model:   "deepseek-chat",
+		Model:   "deepseek-v4-flash",
 		Session: sess,
 	})
 
@@ -135,7 +135,7 @@ func TestNew_TurnCountCountsRealAssistantToolCalls(t *testing.T) {
 
 	m := New(Options{
 		Tracker: cache.New(),
-		Model:   "deepseek-chat",
+		Model:   "deepseek-v4-flash",
 		Session: sess,
 	})
 

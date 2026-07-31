@@ -35,7 +35,7 @@ func stripANSI(s string) string {
 func TestStatusBar_SubagentBadge(t *testing.T) {
 	// Zero — no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-chat",
+		Model: "deepseek-v4-flash",
 		Width: 120,
 		// SubagentsActive: 0 by default
 	}))
@@ -48,7 +48,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 
 	// One — singular.
 	one := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-chat",
+		Model:           "deepseek-v4-flash",
 		Width:           120,
 		SubagentsActive: 1,
 	}))
@@ -61,7 +61,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 
 	// Three — plural.
 	three := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-chat",
+		Model:           "deepseek-v4-flash",
 		Width:           120,
 		SubagentsActive: 3,
 	}))
@@ -79,7 +79,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 func TestStatusBar_CronBadge(t *testing.T) {
 	// Zero → no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-chat",
+		Model: "deepseek-v4-flash",
 		Width: 120,
 	}))
 	if strings.Contains(zero, "⏰") {
@@ -91,7 +91,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 
 	// One.
 	one := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-chat",
+		Model:           "deepseek-v4-flash",
 		Width:           120,
 		CronsRegistered: 1,
 	}))
@@ -103,7 +103,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 	// the noun "agent"; cron is treated as already-plural
 	// (like "sheep").
 	many := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-chat",
+		Model:           "deepseek-v4-flash",
 		Width:           120,
 		CronsRegistered: 7,
 	}))
@@ -121,7 +121,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 // leave a stray "↑" with no version.
 func TestStatusBar_UpgradeAvailable(t *testing.T) {
 	with := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:            "deepseek-chat",
+		Model:            "deepseek-v4-flash",
 		UpgradeAvailable: "v0.2.0",
 		Width:            120,
 	}))
@@ -130,7 +130,7 @@ func TestStatusBar_UpgradeAvailable(t *testing.T) {
 	}
 
 	without := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-chat",
+		Model: "deepseek-v4-flash",
 		Width: 120,
 	}))
 	if strings.Contains(without, "↑") {
@@ -142,14 +142,14 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai) // standard
 	nt, na := pricing.NextTransition(at)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:    deepseek.ModelChat,
+		Model:    deepseek.ModelV4Flash,
 		Tier:     pricing.CurrentTier(at),
 		NextTier: nt,
 		NextAt:   na,
 		// Zero Usage — no turns yet → cache shows "n/a".
 		Now: at,
 	}))
-	for _, frag := range []string{"seek", "deepseek-chat", "idle", "cache n/a", "cost $0.0000", "standard", "next 🌙 in"} {
+	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "standard", "next 🌙 in"} {
 		if !strings.Contains(bar, frag) {
 			t.Errorf("missing %q in: %q", frag, bar)
 		}
@@ -159,7 +159,7 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 func TestStatusBar_Streaming_Yolo(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:     deepseek.ModelChat,
+		Model:     deepseek.ModelV4Flash,
 		Yolo:      true,
 		Streaming: true,
 		Tier:      pricing.CurrentTier(at),
@@ -175,7 +175,7 @@ func TestStatusBar_Streaming_Yolo(t *testing.T) {
 func TestStatusBar_Idle_Plan(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: deepseek.ModelChat,
+		Model: deepseek.ModelV4Flash,
 		Plan:  true,
 		Tier:  pricing.CurrentTier(at),
 		Now:   at,
@@ -199,7 +199,7 @@ func TestStatusBar_Idle_Plan(t *testing.T) {
 func TestStatusBar_Idle_PlanAnalyze(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelChat,
+		Model:        deepseek.ModelV4Flash,
 		Plan:         true,
 		PlanSubstate: "analyze",
 		Tier:         pricing.CurrentTier(at),
@@ -216,7 +216,7 @@ func TestStatusBar_Idle_PlanAnalyze(t *testing.T) {
 func TestStatusBar_Idle_PlanExecute(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelChat,
+		Model:        deepseek.ModelV4Flash,
 		Plan:         true,
 		PlanSubstate: "execute",
 		Tier:         pricing.CurrentTier(at),
@@ -235,7 +235,7 @@ func TestStatusBar_PlanSubstateIgnoredWhenPlanOff(t *testing.T) {
 	// Plan=false should suppress any substate badge — defensive against
 	// a stale substate value lingering after /plan off.
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelChat,
+		Model:        deepseek.ModelV4Flash,
 		Plan:         false,
 		PlanSubstate: "execute",
 		Tier:         pricing.CurrentTier(at),
@@ -249,7 +249,7 @@ func TestStatusBar_PlanSubstateIgnoredWhenPlanOff(t *testing.T) {
 func TestStatusBar_OffPeak(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 3, 0, 0, 0, pricing.Shanghai) // off-peak
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: deepseek.ModelChat,
+		Model: deepseek.ModelV4Flash,
 		Tier:  pricing.CurrentTier(at),
 		Now:   at,
 	}))
@@ -270,7 +270,7 @@ func TestStatusBar_CountsAndCost(t *testing.T) {
 	// the locked-in math live in internal/cache/cache_test.go
 	// (TestTracker_CumulativeCostLockedInAtRecord).
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:     deepseek.ModelChat,
+		Model:     deepseek.ModelV4Flash,
 		Turns:     5,
 		ToolCalls: 3,
 		Tier:      pricing.TierStandard,
@@ -293,7 +293,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	// Under 1s: should show plain "● streaming"
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:         deepseek.ModelChat,
+		Model:         deepseek.ModelV4Flash,
 		Streaming:     true,
 		StreamElapsed: 500 * time.Millisecond,
 		Tier:          pricing.TierStandard,
@@ -308,7 +308,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 
 	// Over 1s, no bytes yet: show elapsed only
 	bar = stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:         deepseek.ModelChat,
+		Model:         deepseek.ModelV4Flash,
 		Streaming:     true,
 		StreamElapsed: 7 * time.Second,
 		Tier:          pricing.TierStandard,
@@ -320,7 +320,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 
 	// Over 1s with bytes: show elapsed + token estimate
 	bar = stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:            deepseek.ModelChat,
+		Model:            deepseek.ModelV4Flash,
 		Streaming:        true,
 		StreamElapsed:    54 * time.Second,
 		StreamDeltaBytes: 12000, // 12000/4 = 3000 → "3.0ktok"

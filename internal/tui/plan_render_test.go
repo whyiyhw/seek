@@ -97,7 +97,7 @@ func TestApplyAgentEvent_PlanProposalCancelled_ClearsTaskList(t *testing.T) {
 func TestStatusBar_PlanExecWithCounter(t *testing.T) {
 	SetTheme("dark")
 	out := RenderStatusBar(StatusSnapshot{
-		Model:          "deepseek-chat",
+		Model:          "deepseek-v4-flash",
 		Plan:           true,
 		PlanSubstate:   "execute",
 		PlanStepsTotal: 5,
@@ -111,7 +111,7 @@ func TestStatusBar_PlanExecWithCounter(t *testing.T) {
 func TestStatusBar_PlanExecWithoutStepsOmitsCounter(t *testing.T) {
 	SetTheme("dark")
 	out := RenderStatusBar(StatusSnapshot{
-		Model:        "deepseek-chat",
+		Model:        "deepseek-v4-flash",
 		Plan:         true,
 		PlanSubstate: "execute",
 	})

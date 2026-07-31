@@ -18,7 +18,7 @@
 // # Example session
 //
 //	→ {"jsonrpc":"2.0","id":1,"method":"agent/info"}
-//	← {"jsonrpc":"2.0","id":1,"result":{"version":"0.9.0","model":"deepseek-chat","yolo":false}}
+//	← {"jsonrpc":"2.0","id":1,"result":{"version":"0.9.0","model":"deepseek-v4-flash","yolo":false}}
 //
 //	→ {"jsonrpc":"2.0","id":2,"method":"agent/prompt","params":{"text":"hello"}}
 //	← {"jsonrpc":"2.0","method":"agent/event","params":{"type":"turn_start","index":0}}

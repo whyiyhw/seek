@@ -48,8 +48,8 @@ func TestCurrentTier_TimezoneAware(t *testing.T) {
 }
 
 func TestPricingFor_OffPeakDiscounts(t *testing.T) {
-	std := PricingFor(deepseek.ModelChat, TierStandard)
-	off := PricingFor(deepseek.ModelChat, TierOffPeak)
+	std := PricingFor(deepseek.ModelV4Flash, TierStandard)
+	off := PricingFor(deepseek.ModelV4Flash, TierOffPeak)
 	if math.Abs(off.InputMissPerMTok-std.InputMissPerMTok*0.5) > 1e-9 {
 		t.Errorf("off-peak miss not 50%% of standard: std=%v off=%v", std.InputMissPerMTok, off.InputMissPerMTok)
 	}
@@ -60,7 +60,7 @@ func TestPricingFor_OffPeakDiscounts(t *testing.T) {
 
 func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 	p := PricingFor("deepseek-unknown", TierStandard)
-	std := PricingFor(deepseek.ModelChat, TierStandard)
+	std := PricingFor(deepseek.ModelV4Flash, TierStandard)
 	if p != std {
 		t.Errorf("fallback didn't equal chat pricing: %+v vs %+v", p, std)
 	}
@@ -68,7 +68,7 @@ func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 
 func TestCost_TypicalChatCall(t *testing.T) {
 	// Mixed-cache turn: 800 miss + 200 hit + 100 completion under
-	// the V4-Flash rate card (which deepseek-chat aliases to).
+	// the V4-Flash rate card (the fallback for unknown models).
 	u := deepseek.Usage{
 		PromptTokens:          1000,
 		PromptCacheMissTokens: 800,
@@ -76,7 +76,7 @@ func TestCost_TypicalChatCall(t *testing.T) {
 		CompletionTokens:      100,
 	}
 	want := 800*0.14/1e6 + 200*0.0028/1e6 + 100*0.28/1e6
-	got := Cost(deepseek.ModelChat, TierStandard, u)
+	got := Cost(deepseek.ModelV4Flash, TierStandard, u)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("Cost = %v, want %v", got, want)
 	}
@@ -84,8 +84,8 @@ func TestCost_TypicalChatCall(t *testing.T) {
 
 func TestCost_OffPeakIsHalf(t *testing.T) {
 	u := deepseek.Usage{PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000}
-	std := Cost(deepseek.ModelChat, TierStandard, u)
-	off := Cost(deepseek.ModelChat, TierOffPeak, u)
+	std := Cost(deepseek.ModelV4Flash, TierStandard, u)
+	off := Cost(deepseek.ModelV4Flash, TierOffPeak, u)
 	if math.Abs(off-std*0.5) > 1e-6 {
 		t.Errorf("off-peak cost != half: std=%v off=%v", std, off)
 	}

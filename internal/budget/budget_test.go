@@ -10,10 +10,9 @@ func pct(limit int, frac float64) int {
 }
 
 func TestLimit_KnownModelAndFallback(t *testing.T) {
-	// V4 launched with a 1M window for both flash and pro; the legacy
-	// chat/reasoner names route to V4 server-side.
-	if got := Limit("deepseek-chat"); got != 1_000_000 {
-		t.Errorf("deepseek-chat = %d, want 1M", got)
+	// V4 launched with a 1M window for both flash and pro.
+	if got := Limit("deepseek-v4-flash"); got != 1_000_000 {
+		t.Errorf("deepseek-v4-flash = %d, want 1M", got)
 	}
 	if got := Limit("deepseek-v4-flash"); got != 1_000_000 {
 		t.Errorf("deepseek-v4-flash = %d, want 1M", got)
@@ -24,7 +23,7 @@ func TestLimit_KnownModelAndFallback(t *testing.T) {
 }
 
 func TestClassify_Boundaries(t *testing.T) {
-	m := "deepseek-chat"
+	m := "deepseek-v4-flash"
 	limit := Limit(m) // 1M after V4
 	cases := []struct {
 		used int
@@ -47,8 +46,8 @@ func TestClassify_Boundaries(t *testing.T) {
 }
 
 func TestFraction(t *testing.T) {
-	limit := Limit("deepseek-chat")
-	if got := Fraction("deepseek-chat", limit); got != 1.0 {
+	limit := Limit("deepseek-v4-flash")
+	if got := Fraction("deepseek-v4-flash", limit); got != 1.0 {
 		t.Errorf("at limit = %v, want 1.0", got)
 	}
 	if got := Fraction("unknown", 0); got != 0 {

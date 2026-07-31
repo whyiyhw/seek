@@ -173,8 +173,8 @@ func TestSkillCmd_Status_WithStatsHistogram(t *testing.T) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	writeStats(t, []skillstats.Entry{
-		{TS: now, Name: "tracked", Model: "deepseek-chat", Provider: "deepseek"},
-		{TS: now, Name: "tracked", Model: "deepseek-chat", Provider: "deepseek"},
+		{TS: now, Name: "tracked", Model: "deepseek-v4-flash", Provider: "deepseek"},
+		{TS: now, Name: "tracked", Model: "deepseek-v4-flash", Provider: "deepseek"},
 		{TS: now, Name: "tracked", Model: "gpt-4", Provider: "openai"},
 	})
 
@@ -186,7 +186,7 @@ func TestSkillCmd_Status_WithStatsHistogram(t *testing.T) {
 		t.Errorf("status didn't aggregate calls; got:\n%s", stdout)
 	}
 	// Models / providers must appear with counts.
-	for _, want := range []string{"deepseek-chat", "gpt-4", "deepseek", "openai"} {
+	for _, want := range []string{"deepseek-v4-flash", "gpt-4", "deepseek", "openai"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status missing %q:\n%s", want, stdout)
 		}

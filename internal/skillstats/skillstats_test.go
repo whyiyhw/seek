@@ -51,7 +51,7 @@ func TestAppend_CreatesFileOnFirstWrite(t *testing.T) {
 		Name:      "go-test-runner",
 		SessionID: "sess-1",
 		ProjectID: "a3b9f1c2e8d4a7b6",
-		Model:     "deepseek-chat",
+		Model:     "deepseek-v4-flash",
 		Provider:  "deepseek",
 	}); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestAppend_CreatesFileOnFirstWrite(t *testing.T) {
 		"name":       "go-test-runner",
 		"session_id": "sess-1",
 		"project_id": "a3b9f1c2e8d4a7b6",
-		"model":      "deepseek-chat",
+		"model":      "deepseek-v4-flash",
 		"provider":   "deepseek",
 	} {
 		if row[k] != want {

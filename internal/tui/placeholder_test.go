@@ -16,13 +16,13 @@ import (
 func modelAt(now time.Time, turns int, yolo bool, usage deepseek.Usage) *Model {
 	tr := cache.New()
 	if usage != (deepseek.Usage{}) {
-		tr.Record(usage, deepseek.ModelChat, pricing.TierStandard)
+		tr.Record(usage, deepseek.ModelV4Flash, pricing.TierStandard)
 	}
 	return &Model{
 		opts: Options{
 			Tracker: tr,
 			Yolo:    yolo,
-			Model:   deepseek.ModelChat,
+			Model:   deepseek.ModelV4Flash,
 		},
 		turns: turns,
 		now:   now,

@@ -166,7 +166,7 @@ type testModelBuilder struct {
 
 // testModel starts a builder with sensible defaults:
 //   - Tracker = cache.New()
-//   - Model   = "deepseek-chat"
+//   - Model   = "deepseek-v4-flash"
 //   - width=80, height=40, ready=true (post-WindowSizeMsg state)
 //   - no Agent, no Session, no Store (caller adds when needed)
 //
@@ -175,7 +175,7 @@ func testModel() *testModelBuilder {
 	return &testModelBuilder{
 		opts: Options{
 			Tracker: cache.New(),
-			Model:   "deepseek-chat",
+			Model:   "deepseek-v4-flash",
 		},
 	}
 }

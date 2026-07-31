@@ -4,21 +4,17 @@ import "encoding/json"
 
 const (
 	// V4 lineup (current — as of api-docs.deepseek.com/quick_start/pricing).
-	// Both support thinking mode as a request-level parameter rather
-	// than as a separate model ID; both have a 1M context window.
+	// deepseek-v4-flash serves the latest GA build (DeepSeek-V4-Flash-0731
+	// as of 2026-07-31); the ID is stable — DeepSeek rotates the version
+	// behind it. Both support thinking mode as a request-level parameter
+	// rather than as a separate model ID; both have a 1M context window.
+	//
+	// The legacy deepseek-chat / deepseek-reasoner aliases were removed
+	// server-side on 2026-07-24 — old session files that still record
+	// those names fall back to "unknown model" handling (no thinking,
+	// budget/pricing defaults) rather than failing to load.
 	ModelV4Flash = "deepseek-v4-flash"
 	ModelV4Pro   = "deepseek-v4-pro"
-
-	// Legacy aliases — DEPRECATED, scheduled for removal on 2026-07-24
-	// per api-docs.deepseek.com. Per the same docs they correspond to:
-	//   deepseek-chat     → V4-Flash, thinking DISABLED
-	//   deepseek-reasoner → V4-Flash, thinking ENABLED
-	// Neither alias reaches V4-Pro. New code MUST use ModelV4Flash /
-	// ModelV4Pro directly. These constants remain only so existing
-	// session files and user configs that reference the old names
-	// continue to load until the sunset date.
-	ModelChat     = "deepseek-chat"
-	ModelReasoner = "deepseek-reasoner"
 
 	RoleSystem    = "system"
 	RoleUser      = "user"
@@ -33,9 +29,8 @@ type Message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 
-	// ReasoningContent is populated by V4 thinking-mode responses
-	// (and by the deprecated deepseek-reasoner alias). It MUST be
-	// stripped before sending the message back to the API in a
+	// ReasoningContent is populated by V4 thinking-mode responses.
+	// It MUST be stripped before sending the message back to the API in a
 	// subsequent request — DeepSeek rejects requests that include prior
 	// reasoning_content fields.
 	ReasoningContent string `json:"reasoning_content,omitempty"`
@@ -97,7 +92,7 @@ type ChatRequest struct {
 
 	// Thinking opts a V4-class model into reasoning mode. Replaces the
 	// pre-V4 pattern of calling a separate "deepseek-reasoner" model
-	// (now a deprecated alias, sunset 2026-07-24): just set
+	// (a deprecated alias, removed 2026-07-24): just set
 	// {"type":"enabled"} on a V4 chat request and you get
 	// reasoning_content alongside content in the response.
 	//
@@ -128,24 +123,16 @@ type ThinkingMode struct {
 // thinking-mode semantics and should therefore receive
 // Thinking.Type="enabled" when the agent constructs a ChatRequest.
 //
-// Returns true for:
-//   - ModelV4Pro — V4-Pro is the high-end reasoning model; using it
-//     without thinking would waste the price premium.
-//   - ModelReasoner — DEPRECATED legacy alias that DeepSeek defines as
-//     "V4-Flash with thinking enabled". Sending the alias name without
-//     also setting the Thinking parameter routes to V4-Flash with
-//     thinking implicitly off (a pre-V4 behaviour DeepSeek kept for
-//     wire-compat). Setting Thinking explicitly recovers the documented
-//     behaviour. Sunset 2026-07-24 — once removed, this case becomes
-//     dead code but is harmless until then.
+// Returns true for ModelV4Pro — V4-Pro is the high-end reasoning
+// model; using it without thinking would waste the price premium.
 //
-// Returns false for ModelV4Flash and ModelChat (both intentionally
-// non-thinking) and for any unknown / custom model name — callers
-// who want thinking on those must opt in explicitly via
+// Returns false for ModelV4Flash (intentionally non-thinking by
+// default) and for any unknown / custom model name — callers who
+// want thinking on those must opt in explicitly via
 // ChatRequest.Thinking.
 func ShouldEnableThinking(model string) bool {
 	switch model {
-	case ModelV4Pro, ModelReasoner:
+	case ModelV4Pro:
 		return true
 	}
 	return false

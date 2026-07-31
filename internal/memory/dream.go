@@ -247,8 +247,9 @@ func (d *Dreamer) Dream(ctx context.Context, in DreamInput) ([]LCandidate, error
 		}),
 	}
 	// Dream is a one-shot reasoning extraction — opt into thinking
-	// explicitly. The legacy deepseek-reasoner alias used to provide
-	// this implicitly; the explicit V4 names do not.
+	// explicitly. V4 models only think when asked via the Thinking
+	// parameter; the retired deepseek-reasoner alias used to provide
+	// this implicitly.
 	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
 		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}

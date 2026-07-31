@@ -75,7 +75,7 @@ func TestDeepSeekDecomposer_RoundTrip(t *testing.T) {
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
-	d := NewDeepSeekDecomposer(c, "deepseek-chat")
+	d := NewDeepSeekDecomposer(c, "deepseek-v4-flash")
 	tasks, err := d.Decompose(context.Background(), "fix and test x.go", 8)
 	if err != nil {
 		t.Fatal(err)

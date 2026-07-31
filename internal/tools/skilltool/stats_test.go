@@ -48,7 +48,7 @@ func TestStats_SuccessfulCallAppendsRow(t *testing.T) {
 		return Env{
 			SessionID: "sess-1",
 			ProjectID: "proj-abc",
-			Model:     "deepseek-chat",
+			Model:     "deepseek-v4-flash",
 			Provider:  "deepseek",
 		}
 	})
@@ -67,7 +67,7 @@ func TestStats_SuccessfulCallAppendsRow(t *testing.T) {
 	if e.SessionID != "sess-1" || e.ProjectID != "proj-abc" {
 		t.Errorf("session/project ids not propagated: %+v", e)
 	}
-	if e.Model != "deepseek-chat" || e.Provider != "deepseek" {
+	if e.Model != "deepseek-v4-flash" || e.Provider != "deepseek" {
 		t.Errorf("model/provider not propagated: %+v", e)
 	}
 	if e.TS == "" {

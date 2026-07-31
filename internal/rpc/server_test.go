@@ -39,7 +39,7 @@ func makeAgent(t *testing.T, backendURL string) *agent.Agent {
 	t.Helper()
 	ag, err := agent.New(agent.Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(backendURL)),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 	})
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
@@ -76,7 +76,7 @@ func TestServerInfo(t *testing.T) {
 	fakeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer fakeSrv.Close()
 
-	srv := New(makeAgent(t, fakeSrv.URL), cache.New(), nil, nil, "deepseek-chat", false)
+	srv := New(makeAgent(t, fakeSrv.URL), cache.New(), nil, nil, "deepseek-v4-flash", false)
 	lines := serve(t, srv, `{"jsonrpc":"2.0","id":1,"method":"agent/info"}`+"\n")
 
 	if len(lines) != 1 {
@@ -90,8 +90,8 @@ func TestServerInfo(t *testing.T) {
 	if !ok {
 		t.Fatalf("result not a map: %v", got["result"])
 	}
-	if result["model"] != "deepseek-chat" {
-		t.Errorf("model = %v, want deepseek-chat", result["model"])
+	if result["model"] != "deepseek-v4-flash" {
+		t.Errorf("model = %v, want deepseek-v4-flash", result["model"])
 	}
 	if result["yolo"] != false {
 		t.Errorf("yolo = %v, want false", result["yolo"])
@@ -172,7 +172,7 @@ func TestServerPromptStreaming(t *testing.T) {
 	backend := singleTurnBackend(t, "hello world")
 	defer backend.Close()
 
-	srv := New(makeAgent(t, backend.URL), cache.New(), nil, nil, "deepseek-chat", false)
+	srv := New(makeAgent(t, backend.URL), cache.New(), nil, nil, "deepseek-v4-flash", false)
 	lines := serve(t, srv,
 		`{"jsonrpc":"2.0","id":5,"method":"agent/prompt","params":{"text":"say hello"}}`+"\n",
 	)

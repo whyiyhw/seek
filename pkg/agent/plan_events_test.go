@@ -44,7 +44,7 @@ func TestEmitEvent_ForwardsDuringPrompt(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 		Tools:  reg,
 	})
 	if err != nil {
@@ -99,7 +99,7 @@ func TestEmitEvent_NoActivePromptIsNoOp(t *testing.T) {
 	// panic; must not block. The agent's contract says this is a no-op.
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL("http://127.0.0.1:1")),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 		Tools:  tools.New(),
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func TestEmitEvent_AfterPromptEndedIsNoOp(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 		Tools:  tools.New(),
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestEmitEvent_RaceFreeUnderConcurrentNoOps(t *testing.T) {
 	t.Parallel()
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL("http://127.0.0.1:1")),
-		Model:  deepseek.ModelChat,
+		Model:  deepseek.ModelV4Flash,
 		Tools:  tools.New(),
 	})
 	if err != nil {

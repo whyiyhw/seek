@@ -460,6 +460,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: anything that must appear in the prompt for correctness but would otherwise vary is injected as a *field captured once*, never computed inside the assembler. "Per-turn freshness" and "prefix cache" are mutually exclusive for prefix content — pick stability and refresh only at session boundaries
 - **Refs**: `internal/sysprompt/sysprompt.go` (`Header.Date`, `rootTpl`), `cmd/seek/main.go` (`sessionDate`), `internal/subagent/manager.go` (`ManagerOpts.SessionDate`), `internal/sysprompt/sysprompt_test.go:TestCompose_RendersDate`
 
+### Provider model-alias sunset dates silently orphan string-literal references
+- **Saw**: a week after DeepSeek removed the `deepseek-chat` / `deepseek-reasoner` aliases (2026-07-24), the TUI model picker still offered "DeepSeek V4-Flash" under the dead id `deepseek-chat` — picking the curated default would have hit a 404 model error. The legacy constants, rate-card entries, and budget entries were all still live too
+- **Why**: alias removal is announced in provider docs, not in code. Deleting a constant catches *constant* references at compile time, but string-literal references (picker entries, httptest fixtures, `session.New` args) compile fine forever. Even the constant sweep missed one fallback (`pricing.go:89` still read `standardRates[deepseek.ModelChat]`) — it only surfaced via `go vet` after the constant was gone
+- **Fix**: full repo sweep removing `ModelChat`/`ModelReasoner` constants, pricing rate-card entries, budget context-limit entries, the picker entry (`deepseek-chat` → `deepseek-v4-flash`), and every test fixture. Pricing fallback now points at `ModelV4Flash` directly. Old session files carrying alias names degrade to "unknown model" handling (no thinking, default budget/pricing) instead of failing to load
+- **Lesson**: when a provider announces an alias/model sunset, schedule a same-day repo-wide grep for BOTH the constant names and the raw wire strings — the picker/status-bar/CLI help are user-facing and the last places you expect a dead model id. Re-verify pricing and context-limit fallbacks, which often reference the retired name by habit
+- **Refs**: `pkg/deepseek/types.go`, `internal/tui/commands.go:knownModelsForProvider`, `internal/pricing/pricing.go:PricingFor`, `internal/budget/budget.go:contextLimits`
+
 ## Go language
 
 ### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`

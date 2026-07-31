@@ -94,7 +94,7 @@ func (t *Tracker) SetBase(u deepseek.Usage, model string, tier pricing.Tier) {
 //
 // model is the model id that was active when this turn ran; tier is
 // the pricing tier (typically pricing.CurrentTier(time.Now())) at
-// that moment. Unknown model names fall back to deepseek-chat rates
+// that moment. Unknown model names fall back to V4-Flash rates
 // per pricing.PricingFor — same fallback the renderer used pre-fix.
 func (t *Tracker) Record(u deepseek.Usage, model string, tier pricing.Tier) {
 	cost := pricing.Cost(model, tier, u)

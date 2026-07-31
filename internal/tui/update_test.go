@@ -578,7 +578,7 @@ func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
 	// behaviour, /model is dispatched directly: cmdModel opens its
 	// picker, the textarea resets, and pickerPurpose is set.
 	m := emptyModel()
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.input.SetValue("/model")
 	m.updateCommandMenu() // simulate the state after typing "/model"
 	if !m.commandMenuOpen {
@@ -609,7 +609,7 @@ func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 	// it forbids spaces in args mode) and nothing replaced it — the
 	// user saw nothing until they hit Enter.
 	m := emptyModel()
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.input.SetValue("/model ")
 
 	m.updateCommandMenu()
@@ -624,7 +624,7 @@ func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 		t.Error("slash menu should be closed when picker is open (mutually exclusive)")
 	}
 	// Current model preselected.
-	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek-chat" {
+	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek-v4-flash" {
 		t.Errorf("expected current model preselected, got %q",
 			m.modelPickerFiltered[m.modelPickerSelected].id)
 	}
@@ -636,7 +636,7 @@ func TestUpdateCommandMenu_ClosesAutoPickerOnBackspace(t *testing.T) {
 	// backspaced the space back to "/model"), the auto-opened picker
 	// must close so the regular slash menu can re-appear.
 	m := emptyModel()
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.modelPickerOpen = true
 	m.pickerPurpose = "model"
 	m.modelPickerFiltered = knownModelsForProvider("")
@@ -759,7 +759,7 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	}
 	// Preselect "deepseek-v4-pro" since it matches the current model
 	// AND it is the explicit reasoning entry in the curated list (the
-	// legacy "deepseek-reasoner" alias is intentionally not surfaced).
+	// retired "deepseek-reasoner" alias is not in the list).
 	got := m.modelPickerFiltered[m.modelPickerSelected].id
 	if got != "deepseek-v4-pro" {
 		t.Errorf("expected current model preselected, got %q", got)
@@ -771,15 +771,15 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 }
 
 // TestCmdModel_LegacyReasonerNotInPicker pins the policy decision: the
-// picker no longer lists "deepseek-reasoner" — the explicit V4 name
-// replaced it (see knownModelsForProvider). If someone re-adds reasoner
-// to the curated list this test fails on purpose. Direct-id use via
-// /model deepseek-reasoner is still valid (covered elsewhere) — the
-// alias is hidden, not removed.
+// picker lists only explicit V4 IDs — the retired "deepseek-reasoner"
+// alias must never reappear in the curated list (see
+// knownModelsForProvider). If someone re-adds it this test fails on
+// purpose. Direct-id use via /model <any-id> remains available
+// (covered elsewhere) — the picker curates, it does not gate.
 func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 	t.Parallel()
 	m := &Model{}
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.opts.ProviderName = ""
 
 	cmdModel(m, "")
@@ -1087,17 +1087,17 @@ func TestCmdModel_ArgsPathStillWorks(t *testing.T) {
 	// /model <id> should bypass the picker — used by power users and
 	// for compatible-provider freeform ids.
 	m := &Model{}
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 
-	res := cmdModel(m, "deepseek-reasoner")
+	res := cmdModel(m, "deepseek-v4-pro")
 
 	if m.modelPickerOpen {
 		t.Error("/model <id> must not open the picker")
 	}
-	if m.opts.Model != "deepseek-reasoner" {
+	if m.opts.Model != "deepseek-v4-pro" {
 		t.Errorf("model not switched: got %q", m.opts.Model)
 	}
-	if !strings.Contains(res.text, "deepseek-reasoner") {
+	if !strings.Contains(res.text, "deepseek-v4-pro") {
 		t.Errorf("transition message should mention new model: %q", res.text)
 	}
 }
@@ -1125,11 +1125,11 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	t.Parallel()
 	// Picker open + Enter on a different row → model switches, picker closes.
 	m := Model{input: textarea.New()}
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.modelPickerOpen = true
 	m.pickerPurpose = "model"
 	m.modelPickerFiltered = []modelChoice{
-		{"deepseek-chat", "current"},
+		{"deepseek-v4-flash", "current"},
 		{"deepseek-v4-pro", "Thinking mode"},
 	}
 	m.modelPickerSelected = 1 // user arrowed down to the second row
@@ -1197,7 +1197,7 @@ func TestApplyModelChoice_RoutesByPurpose(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			m := emptyModel()
-			m.opts.Model = "deepseek-chat"
+			m.opts.Model = "deepseek-v4-flash"
 			m.modelPickerOpen = true
 			m.pickerPurpose = tc.purpose
 			m.modelPickerFiltered = []modelChoice{
@@ -1213,7 +1213,7 @@ func TestApplyModelChoice_RoutesByPurpose(t *testing.T) {
 			if m.pickerPurpose != "" {
 				t.Errorf("purpose should clear, got %q", m.pickerPurpose)
 			}
-			modelChanged := m.opts.Model != "deepseek-chat"
+			modelChanged := m.opts.Model != "deepseek-v4-flash"
 			if modelChanged != tc.wantModelChanged {
 				t.Errorf("modelChanged = %v, want %v (now %q)", modelChanged, tc.wantModelChanged, m.opts.Model)
 			}
@@ -1273,10 +1273,10 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	t.Parallel()
 	// Esc closes the picker WITHOUT switching the model.
 	m := Model{input: textarea.New()}
-	m.opts.Model = "deepseek-chat"
+	m.opts.Model = "deepseek-v4-flash"
 	m.modelPickerOpen = true
 	m.modelPickerFiltered = []modelChoice{
-		{"deepseek-chat", "current"},
+		{"deepseek-v4-flash", "current"},
 		{"deepseek-v4-pro", "Thinking mode"},
 	}
 	m.modelPickerSelected = 1
@@ -1287,7 +1287,7 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	if m2.modelPickerOpen {
 		t.Error("Esc should close the picker")
 	}
-	if m2.opts.Model != "deepseek-chat" {
+	if m2.opts.Model != "deepseek-v4-flash" {
 		t.Errorf("Esc must not switch the model; got %q", m2.opts.Model)
 	}
 }
