@@ -48,9 +48,13 @@ seek
 
 ### 多行粘贴 / Multi-line paste
 
-在 TUI 输入框粘贴多行文本时，请用 **Ctrl+V** 或 Windows Terminal 的 **Ctrl+Shift+V**。粘贴完成后按 **Enter** 发送（超过 3 行会显示 `📋 pasted N lines` 占位符，再按 Enter 即可）。
+在 TUI 输入框粘贴多行文本时，请用 **Ctrl+V**（或 Windows Terminal 的 **Ctrl+Shift+V**）——seek 直接从剪贴板读取，绕过终端。粘贴完成后按 **Enter** 发送（超过 3 行会显示 `📋 pasted N lines` 占位符，再按 Enter 即可）。
 
-> **English**: Paste multi-line prompts with **Ctrl+V** or WT's **Ctrl+Shift+V**, then press **Enter** to send. Long pastes fold into a `📋 pasted N lines` marker — press **Enter** again to submit.
+> **English**: Paste multi-line prompts with **Ctrl+V** (or WT's **Ctrl+Shift+V**) — seek reads the clipboard directly, bypassing the terminal. Then press **Enter** to send. Long pastes fold into a `📋 pasted N lines` marker — press **Enter** again to submit.
+
+> **Windows Terminal 中文输入法（IME）用户注意**：在 WT 中按 Enter 提交输入法候选词时，WT 会把提交的文字和 Enter 键一并转发给 seek，因此**提交候选词的 Enter 会直接发送消息**（这是设计行为，不会变成换行）。「按 Enter 变成换行」是旧版本的 bug（已修复）：现在的行为是仅当运行在旧版 Windows 控制台 conhost 中时，粘贴产生的回车才会被当作换行；如需强制切换，可设置 `SEEK_LEGACY_CONHOST_INPUT=1`。
+>
+> **English (IME users)**: When Windows Terminal forwards the Enter that commits an IME composition, that Enter sends the message directly — it is NOT turned into a newline. The "Enter inserts a newline" bug (Windows Terminal + Chinese IME) is fixed: the 50ms paste-guard now only applies inside the legacy console host (conhost), where pasted CRLF lines still need it. Set `SEEK_LEGACY_CONHOST_INPUT=1` to force the legacy behavior.
 
 ### 输入框换行 / Newline in the input box
 

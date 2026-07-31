@@ -270,6 +270,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: a "borrow a field, delegate, restore" trick is only safe if the borrowed field is cleared on EVERY exit path, including the in-progress/no-op one — and don't lean on router ordering you didn't enforce. The deeper lesson is the test gap: the existing batch tests called `handleBatchKey` directly, which rebuilds the faux request each call and masks the leak entirely. The bug only manifests through the REAL router across two keypresses, so the regression test (`TestHandleKey_BatchSingleSelect_NonFirstOption`) drives `handleKey`, not `handleBatchKey`. When a bug lives in routing/state-between-events, the test MUST enter through the same door the user's keystrokes do.
 - **Refs**: `internal/tui/update_key.go:handleKey` (route order), `internal/tui/update_modal.go:handleBatchKey` (leak clear), `internal/tui/update_batch_test.go:TestHandleKey_BatchSingleSelect_NonFirstOption`
 
+### Windows Terminal forwards the IME-commit Enter — the 50ms paste guard turned Chinese messages into newlines
+- **Saw**: on Windows Terminal, after a conversation, pressing Enter to send a Chinese message inserted a newline instead of submitting; sending needed two Enters (or the message never sent and kept growing lines)
+- **Why**: `enterInsertsNewlineDuringPaste()` treats ANY Enter arriving within 50ms of the last KeyRunes as an intra-paste newline (added for legacy conhost CRLF paste, where each pasted line arrives as runes + `\r`). Windows Terminal delivers an IME-commit as the committed text AND the Enter key that ended the composition, in the same dispatch (microsoft/terminal#20039 / #20471 — TSF IMEs "re-inject" the commit key). Same signature as a paste line → guard misfires. A second misfire path: `lastInputRunesAt` is stamped at event-PROCESSING time, so when the event loop is busy (right after a stream/render), typed runes + Enter queue up and process within microseconds → same false positive
+- **Fix**: the guard now fires ONLY on legacy conhost — `m.legacyConhostInput`, detected once in `tui.New()` (`paste.go:detectLegacyConhostInput`): `GOOS==windows` AND no terminal-emulator env var (`WT_SESSION`, `TERM_PROGRAM`, `ConEmuPID`). Conhost is the only environment that BOTH lacks bracketed paste (guard needed) AND suppresses keys during active IME composition (guard safe). `SEEK_LEGACY_CONHOST_INPUT=1/0` overrides detection
+- **Lesson**: a time-window heuristic keyed on "recent runes" cannot distinguish paste from IME-commit or from a busy-loop input batch — the events are identical at processing time. Scope such heuristics to the environment that actually needs them (env-var detection is the honest signal: conhost sets no identifying vars). Also: bubbletea on Windows reads raw console key events (coninput), so there is NO `msg.Paste`-style marker for non-bracketed paste — the guard is the only defense there, which is why it can't simply be deleted
+- **Refs**: `internal/tui/paste.go`, `internal/tui/update_key.go:452`, commit 84aa379 (the original guard), microsoft/terminal#20039 + #20471 (IME commit key delivery), docs/guide-windows.md (multi-line paste section)
+
 ---
 
 ## Agent loop
@@ -649,6 +656,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Why**: `finish_reason="length"` means the model hit `max_tokens` and stopped generating — not that the answer was complete. The original code treated `"length"` identically to `"stop"`
 - **Fix**: `runTurnDeepSeek` now emits an `ErrorEvent` on `finish_reason="length"`: "response truncated (finish_reason=length, max_tokens=N) — use /compact to free context or ask me to continue". Also raised `MaxTokens` default from server default (~4096) to 8192. Commit `e240ea5`
 - **Lesson**: check every possible `finish_reason` value against the API docs; "stop" is the only one that means "normal completion". All others need surfacing
+
+### Windows System32 `sort.exe`/`find.exe` shadow POSIX tools in cygwin/msys shells — "Input file specified two times."
+- **Saw**: `scripts/pkg-inventory.sh` (new) exited 1 with `Input file specified two times.` and no table output after a full 2m44s test run; a minimal repro of `sort -t'|' -k1,1n file` failed identically, and `sort --version` printed `--versionThe system cannot find the file specified.`
+- **Why**: non-login cygwin/msys shells spawned from cmd inherit the Windows PATH verbatim, where `C:\Windows\System32` precedes the POSIX bin dir. `sort`/`find` then resolve to the Windows binaries: System32 `sort.exe` has no `-t`/`-k` flags and treats them as input files ("Input file specified two times."); System32 `find.exe` is a text filter, not a file lister. (WSL bash adds a second trap: with interop disabled it cannot execute any `.exe` — "Exec format error".)
+- **Fix**: `scripts/pkg-inventory.sh` resolves `SORT` to `/usr/bin/sort` (fallback `/bin/sort`, then bare `sort`) and replaced the `find … | wc -l` test-file count with a bash `nullglob` glob (`set -- "$rel"/*_test.go; tests=$#`). Both are immune to PATH order.
+- **Lesson**: in repo scripts that may run under a cmd-spawned cygwin/msys shell, never call `sort`/`find`/`ls`/`rm` by bare name — either use the absolute coreutils path or drop the external tool (bash globs). Bare `grep`/`sed`/`awk`/`wc`/`tr` are safe: Windows ships no such binaries, so only the POSIX ones exist on PATH.
+- **Refs**: `scripts/pkg-inventory.sh` (uncommitted at time of writing)
 
 ---
 

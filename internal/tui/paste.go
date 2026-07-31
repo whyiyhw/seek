@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -38,11 +40,73 @@ func pasteFoldMarker(lineCount int) string {
 // a newline instead of submitting. Terminals that lack bracketed paste
 // (notably legacy Windows conhost) deliver each pasted line as KeyRunes
 // immediately followed by Enter (\r).
+//
+// The guard is deliberately scoped to legacy conhost (see
+// legacyConhostInput): everywhere else the same "Enter within pasteEnterGap
+// of runes" signature is produced by Windows Terminal forwarding the
+// IME-commit Enter key (text + Enter in one dispatch), so firing there turns
+// every Chinese/Japanese/Korean message into a stray newline instead of a
+// send. Conhost is safe because it suppresses keys during active IME
+// composition instead of forwarding them.
 func (m Model) enterInsertsNewlineDuringPaste() bool {
+	if !m.legacyConhostInput {
+		return false
+	}
 	if m.lastInputRunesAt.IsZero() {
 		return false
 	}
 	return time.Since(m.lastInputRunesAt) < pasteEnterGap
+}
+
+// legacyConhostInputEnvOverride lets users force the paste-guard on or off
+// when auto-detection is wrong for their terminal:
+//
+//	SEEK_LEGACY_CONHOST_INPUT=1   force the CRLF-paste guard on
+//	SEEK_LEGACY_CONHOST_INPUT=0   force it off
+const legacyConhostInputEnvOverride = "SEEK_LEGACY_CONHOST_INPUT"
+
+// detectLegacyConhostInput decides once (at Model construction) whether the
+// Enter→newline paste guard may fire. True only on a legacy Windows console
+// host — the only environment that BOTH lacks bracketed paste (guard needed)
+// AND suppresses IME-commit keys (guard safe).
+//
+// SEEK_LEGACY_CONHOST_INPUT overrides detection: "1"/"true"/"on" force the
+// guard on, "0"/"false"/"off" force it off, anything else falls back to
+// auto-detection.
+func detectLegacyConhostInput() bool {
+	if v := os.Getenv(legacyConhostInputEnvOverride); v != "" {
+		if v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "on") {
+			return true
+		}
+		if v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off") {
+			return false
+		}
+		// Unknown value: fall through to auto-detection.
+	}
+	return legacyConhostInputFor(runtime.GOOS)
+}
+
+// legacyConhostInputFor is the GOOS + env-var detection, split out so tests
+// can exercise the windows branch on any host. Terminal emulators on Windows
+// identify themselves via env vars; legacy conhost sets none of them:
+//
+//   - Windows Terminal sets WT_SESSION
+//   - VS Code, WezTerm, mintty, Hyper, Alacritty set TERM_PROGRAM
+//   - ConEmu / Cmder set ConEmuPID
+func legacyConhostInputFor(goos string) bool {
+	if goos != "windows" {
+		return false
+	}
+	if os.Getenv("WT_SESSION") != "" {
+		return false
+	}
+	if os.Getenv("TERM_PROGRAM") != "" {
+		return false
+	}
+	if os.Getenv("ConEmuPID") != "" {
+		return false
+	}
+	return true
 }
 
 // insertPasteText normalizes and inserts clipboard/terminal paste content,

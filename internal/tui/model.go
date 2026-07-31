@@ -402,6 +402,16 @@ type Model struct {
 	// treated as an intra-paste newline, not submit (Windows CRLF paste).
 	lastInputRunesAt time.Time
 
+	// legacyConhostInput is true only on a legacy Windows console host
+	// (conhost) — the ONE environment where the CRLF-paste Enter→newline
+	// guard can fire correctly. Every terminal emulator (Windows Terminal
+	// included) delivers paste via bracketed paste (msg.Paste) and forwards
+	// IME-commit keys to the app, so there the guard can only misfire
+	// (Enter becomes a newline instead of sending — see docs/pitfalls.md
+	// "Windows Terminal forwards the IME-commit Enter"). Detected once in
+	// New() from GOOS + terminal env vars; zero-value (false) = guard off.
+	legacyConhostInput bool
+
 	// streamStartTime is set in submit() and used to compute elapsed
 	// time for the live streaming indicator. Zero when not streaming.
 	streamStartTime time.Time
@@ -595,11 +605,12 @@ func New(opts Options) Model {
 	sp.Style = lipgloss.NewStyle().Foreground(colourTool)
 
 	m := Model{
-		opts:       opts,
-		input:      ta,
-		spinner:    sp,
-		now:        time.Now(),
-		historyIdx: -1,
+		opts:               opts,
+		input:              ta,
+		spinner:            sp,
+		now:                time.Now(),
+		historyIdx:         -1,
+		legacyConhostInput: detectLegacyConhostInput(),
 	}
 	// In the resume case (--resume / --continue), the loaded session
 	// carries turn and tool-call counts from the prior run. Propagate
@@ -826,5 +837,3 @@ func (m *Model) resetSessionCounters() {
 	m.curReasoning = ""
 	m.activeTools = nil
 }
-
-
