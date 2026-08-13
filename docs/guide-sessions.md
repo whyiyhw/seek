@@ -109,7 +109,7 @@ All messages are JSON objects, one per line. Requests follow JSON-RPC 2.0.
 
 ```json
 → {"jsonrpc":"2.0","id":2,"method":"agent/info"}
-← {"jsonrpc":"2.0","id":2,"result":{"version":"0.9.0","model":"deepseek-chat","yolo":false}}
+← {"jsonrpc":"2.0","id":2,"result":{"version":"0.10.0","model":"deepseek-chat","yolo":false}}
 ```
 
 `session/list` — list saved sessions.
