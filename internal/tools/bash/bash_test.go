@@ -1,9 +1,11 @@
 package bash
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -150,17 +152,191 @@ func TestBash_MissingCommand(t *testing.T) {
 	}
 }
 
-func TestBash_TruncatesHugeOutput(t *testing.T) {
+func TestBash_ElidesMiddleOfHugeOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only smoke")
 	}
-	// 64 KiB of output; should be truncated to 32 KiB.
+	// 64 KiB of output; the middle should be elided, not the tail.
 	out, err := run(t, yolo(t), Args{Command: "yes a | head -c 65536"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "output truncated") {
-		t.Errorf("expected truncation: %s", out[:200])
+	if !strings.Contains(out, "elided") {
+		t.Errorf("expected mid-output elision, got: %s", out[:200])
+	}
+	if len(out) > maxOutputBytes+1024 {
+		t.Errorf("clamped output = %d bytes, want ≤ ~%d", len(out), maxOutputBytes)
+	}
+}
+
+// TestBash_PreservesVerdictAtTail is the regression guard for the defect
+// that motivated head+tail clamping: `go test`, `make`, `npm run build`
+// all print their verdict LAST. Head-only truncation dropped it and the
+// model reported success for a failing run.
+func TestBash_PreservesVerdictAtTail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	const verdict = "FAIL___build_broke___FAIL"
+	out, err := run(t, yolo(t), Args{
+		Command: "yes 'compiling some package' | head -c 65536; echo '" + verdict + "'",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, verdict) {
+		t.Fatalf("verdict line was dropped from over-budget output; tail must survive.\ntail seen: %q", out[max(0, len(out)-200):])
+	}
+	// And the head must still identify what ran.
+	if !strings.Contains(out, "compiling some package") {
+		t.Error("head of the output was dropped; head must survive too")
+	}
+}
+
+// TestBash_ScrubsCredentialsFromChildEnv is the end-to-end guard: the
+// model runs `env`, and seek's own API key must not be in the output.
+// Before childenv, cmd.Env was nil — Go handed the child the complete
+// parent environment, so every credential was one `env` (or one npm
+// postinstall) away from the model and from third-party build scripts.
+func TestBash_ScrubsCredentialsFromChildEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only: uses `env`")
+	}
+	t.Setenv("DEEPSEEK_API_KEY", "sk-must-not-leak-to-child")
+	t.Setenv("GH_TOKEN", "ghp-must-not-leak-to-child")
+	t.Setenv("BASH_TEST_BENIGN", "visible-to-child")
+
+	out, err := run(t, yolo(t), Args{Command: "env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"sk-must-not-leak-to-child", "ghp-must-not-leak-to-child"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("credential leaked into the child environment: %s", secret)
+		}
+	}
+	// Scrubbing must not gut the environment: ordinary variables and PATH
+	// have to survive or the shell becomes useless.
+	if !strings.Contains(out, "BASH_TEST_BENIGN=visible-to-child") {
+		t.Error("benign variable was dropped from the child environment")
+	}
+	if !strings.Contains(out, "PATH=") {
+		t.Error("PATH was dropped from the child environment")
+	}
+}
+
+func TestBash_EnvPassthroughRestoresNamedVar(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only: uses `env`")
+	}
+	t.Setenv("GH_TOKEN", "ghp-explicitly-allowed")
+	t.Setenv("DEEPSEEK_API_KEY", "sk-still-withheld")
+
+	tool := yolo(t).WithEnvPassthrough([]string{"GH_TOKEN"})
+	out, err := run(t, tool, Args{Command: "env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "GH_TOKEN=ghp-explicitly-allowed") {
+		t.Error("WithEnvPassthrough did not restore the named variable")
+	}
+	if strings.Contains(out, "sk-still-withheld") {
+		t.Error("passthrough of one variable leaked an unrelated credential")
+	}
+}
+
+func TestClampOutput_UnderBudgetIsUntouched(t *testing.T) {
+	in := []byte("short output\nsecond line\n")
+	got, elided := clampOutput(in)
+	if elided != 0 {
+		t.Errorf("elided = %d, want 0", elided)
+	}
+	if string(got) != string(in) {
+		t.Errorf("clampOutput mutated an under-budget output")
+	}
+}
+
+func TestClampOutput_KeepsBothEnds(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("HEAD_SENTINEL\n")
+	for b.Len() < maxOutputBytes*3 {
+		b.WriteString("filler line that is not interesting\n")
+	}
+	b.WriteString("TAIL_SENTINEL\n")
+	in := []byte(b.String())
+
+	got, elided := clampOutput(in)
+	if elided <= 0 {
+		t.Fatalf("elided = %d, want > 0", elided)
+	}
+	s := string(got)
+	if !strings.HasPrefix(s, "HEAD_SENTINEL\n") {
+		t.Error("head sentinel missing — head must be kept verbatim from byte 0")
+	}
+	if !strings.HasSuffix(s, "TAIL_SENTINEL\n") {
+		t.Error("tail sentinel missing — tail must be kept verbatim through the last byte")
+	}
+	if !strings.Contains(s, "elided") {
+		t.Error("elision marker missing")
+	}
+	if len(got) > maxOutputBytes {
+		t.Errorf("clamped to %d bytes, want ≤ %d", len(got), maxOutputBytes)
+	}
+}
+
+func TestClampOutput_CutsOnLineBoundaries(t *testing.T) {
+	var b strings.Builder
+	for i := 0; b.Len() < maxOutputBytes*2; i++ {
+		fmt.Fprintf(&b, "line-%06d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", i)
+	}
+	got, _ := clampOutput([]byte(b.String()))
+
+	head, _, ok := strings.Cut(string(got), "\n\n... [")
+	if !ok {
+		t.Fatal("elision marker not found")
+	}
+	if !strings.HasSuffix(head, "\n") {
+		t.Errorf("head does not end on a line boundary: %q", head[max(0, len(head)-60):])
+	}
+	_, tail, ok := strings.Cut(string(got), "] ...\n\n")
+	if !ok {
+		t.Fatal("elision marker tail delimiter not found")
+	}
+	if !strings.HasPrefix(tail, "line-") {
+		t.Errorf("tail does not start on a line boundary: %q", tail[:min(60, len(tail))])
+	}
+}
+
+// TestClampOutput_NoNewlinesAtAll covers a single enormous line (minified
+// JS, a base64 blob): there is no boundary to cut on, and the function
+// must still stay within budget rather than falling back to the whole
+// input.
+func TestClampOutput_NoNewlinesAtAll(t *testing.T) {
+	in := bytes.Repeat([]byte("x"), maxOutputBytes*2)
+	got, elided := clampOutput(in)
+	if elided <= 0 {
+		t.Fatalf("elided = %d, want > 0", elided)
+	}
+	if len(got) > maxOutputBytes {
+		t.Errorf("clamped to %d bytes, want ≤ %d", len(got), maxOutputBytes)
+	}
+}
+
+func TestClampOutput_ExactlyAtBudget(t *testing.T) {
+	in := bytes.Repeat([]byte("y"), maxOutputBytes)
+	got, elided := clampOutput(in)
+	if elided != 0 {
+		t.Errorf("elided = %d, want 0 at exactly the budget", elided)
+	}
+	if len(got) != maxOutputBytes {
+		t.Errorf("len = %d, want %d", len(got), maxOutputBytes)
+	}
+}
+
+func TestClampOutput_EmptyInput(t *testing.T) {
+	got, elided := clampOutput(nil)
+	if len(got) != 0 || elided != 0 {
+		t.Errorf("clampOutput(nil) = (%q, %d), want (empty, 0)", got, elided)
 	}
 }
 

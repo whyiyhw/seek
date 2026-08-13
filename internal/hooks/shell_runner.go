@@ -181,6 +181,21 @@ func (r *ShellRunner) Config() hooksconfig.Config { return r.cfg }
 
 // ---- env var building ----
 
+// baseEnv builds the hook process environment.
+//
+// Deliberately NOT scrubbed through internal/childenv, unlike the bash
+// tool / MCP / LSP spawn paths. Those run code seek does not control —
+// model-chosen commands and third-party binaries. A hook command is the
+// USER's own shell snippet from their own settings file: same trust
+// level as their .bashrc, and the whole point of a hook is often to
+// reach a credentialed service (post to a webhook, call gh, hit an
+// internal API). Scrubbing here would break that with no attacker
+// removed from the picture — the person who wrote the hook already has
+// the environment.
+//
+// If this ever changes, it needs a passthrough channel first (the bash
+// tool has config.BashEnvPassthrough); silently withholding variables
+// from user-authored hooks is a worse failure than the leak it prevents.
 func (r *ShellRunner) baseEnv(event string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

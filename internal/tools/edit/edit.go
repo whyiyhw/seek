@@ -34,6 +34,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/whyiyhw/seek/internal/diff"
+	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
 )
@@ -71,12 +72,25 @@ type Snapshotter interface {
 // Tool is the edit tool implementation. Construct via New, with optional
 // WithSnapshotter for file checkpoint integration.
 type Tool struct {
-	policy *permission.Policy
-	snap   Snapshotter
+	policy   *permission.Policy
+	snap     Snapshotter
+	observer *fsobserve.Store
 }
 
 // New returns an edit tool gated by the given permission policy.
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
+
+// WithObserver lets a successful edit refresh the file's observed state.
+//
+// edit is NOT guarded by the observer — its exact old_string match is
+// already a stronger check than any freshness token, and requiring a
+// prior `read` would reject a correct edit for no safety gain. It only
+// RECORDS, so the guard on `write` does not misfire on a file this tool
+// just changed.
+func (t Tool) WithObserver(s *fsobserve.Store) Tool {
+	t.observer = s
+	return t
+}
 
 // WithSnapshotter returns a copy of t bound to s. Optional — leaving
 // the snapshotter unset (nil) disables file checkpoint integration.
@@ -188,6 +202,12 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	if t.snap != nil {
 		_ = t.snap.FinaliseSnapshot(clean, []byte(updated))
 	}
+	// Re-observe: edit only applied because old_string matched, so the
+	// model's view was current, and it authored the replacement. Without
+	// this the model's OWN edit would make a subsequent `write` look
+	// stale — a false positive on the most ordinary sequence there is
+	// (read → edit → write).
+	t.observer.Observe(clean)
 
 	abs, err := filepath.Abs(clean)
 	if err != nil {

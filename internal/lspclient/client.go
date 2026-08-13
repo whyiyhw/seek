@@ -23,15 +23,20 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+
+	"github.com/whyiyhw/seek/internal/childenv"
 )
 
 // ServerConfig specifies how to launch a language server subprocess.
 type ServerConfig struct {
 	Command string
 	Args    []string
-	// Env holds extra "KEY=VALUE" pairs merged onto the parent env. nil =
-	// inherit unchanged. gopls needs GOPATH/GOFLAGS, pyright needs node on
-	// PATH — those come from the inherited parent env.
+	// Env holds extra "KEY=VALUE" pairs layered on top of the SCRUBBED
+	// parent env (see childenv): a language server is a third-party
+	// binary, so credential-shaped variables are not passed implicitly.
+	// gopls still gets GOPATH/GOFLAGS and pyright still finds node on
+	// PATH — none of those match the scrub predicate. Entries here win
+	// over the parent's (cmd.Env is last-wins).
 	Env []string
 }
 
@@ -73,9 +78,9 @@ func newClient(r io.Reader, w io.Writer) *Client {
 func StartServer(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	srvCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(srvCtx, cfg.Command, cfg.Args...)
-	if len(cfg.Env) > 0 {
-		cmd.Env = append(os.Environ(), cfg.Env...)
-	}
+	// Always explicit — a nil Env would hand this third-party binary the
+	// full parent environment, seek's API key included.
+	cmd.Env = append(childenv.Sanitized(), cfg.Env...)
 	cmd.Stderr = io.Discard // servers log to stderr; not our concern
 
 	stdin, err := cmd.StdinPipe()

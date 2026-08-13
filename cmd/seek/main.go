@@ -33,6 +33,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpointcli"
 	"github.com/whyiyhw/seek/internal/clipimage"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hookscli"
@@ -440,6 +441,11 @@ type subagentRunnerOpts struct {
 	// now). Each autopilot subagent thus can't write outside the worktree
 	// it was given.
 	bashSandbox bool
+	// bashEnvKeep carries config.BashEnvPassthrough down to the child's
+	// bash tool. Subagents run the SAME scrub as the parent — an
+	// unattended child is exactly where a leaked credential is least
+	// likely to be noticed, so the default is not relaxed here.
+	bashEnvKeep []string
 	// bgMgr backs the child bash tool's run_in_background. The child's
 	// bash is rebuilt with the child (worktree) policy, so it needs the
 	// background manager re-attached; nil disables background jobs in the
@@ -522,17 +528,23 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// tools (grep/think/git/…) are read-only or policy-free, so reusing
 		// the parent instance is fine.
 		childReg := tools.New()
+		// Per-subagent observation set, NOT the parent's. A subagent
+		// works in its own worktree; inheriting the parent's "already
+		// read" set would let it blind-overwrite a same-named file in a
+		// tree it never looked at — the exact isolation bug the child
+		// policy exists to prevent.
+		childObserved := fsobserve.New()
 		for _, name := range job.ToolNames {
 			switch name {
 			case "read":
-				childReg.Add(read.New(job.Policy))
+				childReg.Add(read.New(job.Policy).WithObserver(childObserved))
 			case "write":
-				childReg.Add(write.New(job.Policy))
+				childReg.Add(write.New(job.Policy).WithObserver(childObserved))
 			case "edit":
-				childReg.Add(edit.New(job.Policy))
+				childReg.Add(edit.New(job.Policy).WithObserver(childObserved))
 			case "bash":
 				// 柱 N: deny remote ops; 柱 O: OS-sandbox to this worktree.
-				bt := bash.New(job.Policy)
+				bt := bash.New(job.Policy).WithEnvPassthrough(opts.bashEnvKeep)
 				if opts.bgMgr != nil {
 					bt = bt.WithBackground(opts.bgMgr)
 				}
@@ -1089,21 +1101,43 @@ func run() error {
 	// Detected here (before the registry) because the main bash tool is
 	// built inline below; autopilot guards SUBagent bash instead.
 	goalMode := len(os.Args) >= 2 && os.Args[1] == "goal"
-	goalBash := bash.New(policy).WithBackground(bgMgr)
+	// bashEnvKeep opts specific variables back through the credential
+	// scrub every model-issued command runs under (internal/childenv).
+	// Read here rather than at the later config.Load() because the bash
+	// tool is a value type — options must be set before reg.Add copies it.
+	bashCfg, _ := config.Load()
+	bashEnvKeep := bashCfg.BashEnvPassthrough
+	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
 	if goalMode {
 		goalBash = goalBash.WithDeny(autopilot.IsRemoteMutating)
 	}
 
+	// Repeat-call guard (one counter per session). Wrapped around the
+	// tools whose repetition is both common and expensive: a failing
+	// command re-run unchanged, or the same file re-read after it fell
+	// out of attention. Deliberately NOT applied to ask_user (asking the
+	// same question twice is legitimate), write/edit (a second identical
+	// write is idempotent, not a loop), or the plan/skill tools (their
+	// own state machines already reject nonsense repeats).
+	repeats := tools.NewRepeatGuard()
+	guarded := func(t tools.Tool) tools.Tool { return tools.WithRepeatGuard(t, repeats) }
+
+	// Blind-overwrite guard (one observation set per session). `read`
+	// records what the model has seen, `edit` refreshes it after a
+	// successful match-and-replace, and `write` refuses to replace a file
+	// that is unseen or changed on disk since it was read.
+	observed := fsobserve.New()
+
 	reg := tools.New().
-		Add(read.New(policy)).
+		Add(guarded(read.New(policy).WithObserver(observed))).
 		Add(references.New(lspMgr)).
-		Add(grep.New()).
-		Add(listdir.New()).
-		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
-		Add(edit.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr})).
-		Add(goalBash).
+		Add(guarded(grep.New())).
+		Add(guarded(listdir.New())).
+		Add(write.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr}).WithObserver(observed)).
+		Add(edit.New(policy).WithSnapshotter(checkpointSnapshotter{m: ckMgr}).WithObserver(observed)).
+		Add(guarded(goalBash)).
 		Add(monitor.New(bgMgr)).
-		Add(gittool.New()).
+		Add(guarded(gittool.New())).
 		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).
@@ -1143,7 +1177,7 @@ func run() error {
 		if envBoolTrue("SEEK_WEBFETCH_ALLOW_HTTP") {
 			wfOpts.AllowHTTP = true
 		}
-		reg.Add(webfetch.New(wfOpts))
+		reg.Add(guarded(webfetch.New(wfOpts)))
 	}
 
 	// DeepSeek-exclusive tools: FIM and Reasoner are only available
@@ -1423,6 +1457,7 @@ func run() error {
 				getEffort:   func() string { return sessionEffort },
 				bashGuard:   autopilotGuard,
 				bashSandbox: autopilotMode,
+				bashEnvKeep: bashEnvKeep,
 				bgMgr:       bgMgr,
 			}),
 		})

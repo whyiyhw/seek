@@ -82,6 +82,23 @@ type Config struct {
 	// bundled Vision helper makes it default-on; other platforms need
 	// Command set. See docs/prd/feature-image-ocr.md.
 	OCR *OCRConfig `json:"ocr,omitempty"`
+
+	// BashEnvPassthrough names environment variables that survive the
+	// credential scrub applied to commands the MODEL runs (internal/
+	// childenv). By default anything whose name looks credential-bearing
+	// — API_KEY, GH_TOKEN, AWS_SECRET_ACCESS_KEY, *PASSWORD* — plus the
+	// SEEK_* namespace is withheld from the shell, so a model-issued
+	// command (and every build script it triggers) cannot read seek's own
+	// API key.
+	//
+	// List a name here when a workflow genuinely needs it: `gh pr create`
+	// wanting GH_TOKEN is the common case. Matching is exact and
+	// case-insensitive — listing "TOKEN" allows only a variable literally
+	// named TOKEN, never GH_TOKEN, so one allowance cannot widen into
+	// another.
+	//
+	// Empty / absent = scrub everything that matches (the safe default).
+	BashEnvPassthrough []string `json:"bash_env_passthrough,omitempty"`
 }
 
 // OCRConfig configures local image OCR (v7 柱 Q). All fields optional.

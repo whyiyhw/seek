@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/bgjob"
+	"github.com/whyiyhw/seek/internal/childenv"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/sandbox"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -32,17 +33,91 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned (truncated past 32 KiB). Use timeout_ms to bound long-running commands. Set run_in_background to start a long task (build / test suite / dev server) detached and track it with the monitor tool instead of blocking the turn."
+const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned; output over 32 KiB keeps the head AND the tail, eliding the middle, so a test/build verdict at the end is never lost. Use timeout_ms to bound long-running commands. Set run_in_background to start a long task (build / test suite / dev server) detached and track it with the monitor tool instead of blocking the turn."
 
 const (
 	defaultTimeoutMS = 120_000
 	maxTimeoutMS     = 600_000
 	maxOutputBytes   = 32 * 1024
+	// headOutputBytes is how much of the START of an over-budget output
+	// is kept. The rest of the budget goes to the TAIL — see clampOutput
+	// for why the split is lopsided in the tail's favour.
+	headOutputBytes = 8 * 1024
 	// Grace period after killProcessGroup before abandoning cmd.Wait().
 	// Covers slow reaping; prevents indefinite hang when kill fails
 	// (e.g. WSL sudo waiting on a Windows credential dialog).
 	killWaitGrace = 5 * time.Second
 )
+
+// elisionMarker is the notice spliced between the kept head and tail of
+// an over-budget output. It is wire-visible to the model, so it says
+// explicitly that the tail survived — otherwise the model reasonably
+// assumes a truncated result ends where the evidence ends.
+const elisionMarker = "\n\n... [%d KiB elided from the middle of the output — the head and the TAIL below are intact; re-run with a narrower command, or redirect to a file and `read` it, to see the elided span] ...\n\n"
+
+// clampOutput bounds captured output to maxOutputBytes while keeping
+// BOTH ends, and reports how many bytes were dropped.
+//
+// The naive fix — output[:maxOutputBytes] — keeps the head and drops the
+// tail, which is exactly backwards for the commands models actually run.
+// `go test ./...`, `npm run build`, `make`, `pytest` all put the verdict
+// LAST: a wall of passing lines, then the failure summary. Head-only
+// truncation feeds the model the wall, drops the verdict, and the model
+// concludes the run passed. That is a silent wrong answer, not a
+// degraded one — the worst failure shape available.
+//
+// The split favours the tail (8 KiB head / ~24 KiB tail) because the
+// head's job is only to identify WHAT ran and how it started, while the
+// tail carries the outcome. Both cuts land on line boundaries so neither
+// end starts or stops mid-line.
+func clampOutput(out []byte) (clamped []byte, elidedBytes int) {
+	if len(out) <= maxOutputBytes {
+		return out, 0
+	}
+
+	// Reserve room for the marker itself so the result stays within
+	// budget even after splicing (worst-case KiB count is 6 digits for
+	// any output a shell can realistically produce; pad generously).
+	markerBudget := len(fmt.Sprintf(elisionMarker, 999999))
+
+	head := headOutputBytes
+	tail := maxOutputBytes - head - markerBudget
+	if tail < 0 {
+		// Degenerate config (marker larger than the budget). Fall back to
+		// tail-only: the verdict matters more than the preamble.
+		head, tail = 0, maxOutputBytes
+	}
+
+	// Extend the head back to the last newline inside its window so the
+	// kept prefix ends on a complete line.
+	if head > 0 {
+		if nl := bytes.LastIndexByte(out[:head], '\n'); nl >= 0 {
+			head = nl + 1
+		}
+	}
+	// Pull the tail start forward to just after the first newline in its
+	// window so the kept suffix begins on a complete line.
+	tailStart := len(out) - tail
+	if tailStart < head {
+		tailStart = head
+	}
+	if nl := bytes.IndexByte(out[tailStart:], '\n'); nl >= 0 && tailStart+nl+1 < len(out) {
+		tailStart += nl + 1
+	}
+
+	elided := tailStart - head
+	if elided <= 0 {
+		// Line-boundary adjustment consumed the gap; nothing to elide.
+		return out, 0
+	}
+
+	var b bytes.Buffer
+	b.Grow(head + markerBudget + (len(out) - tailStart))
+	b.Write(out[:head])
+	fmt.Fprintf(&b, elisionMarker, (elided+1023)/1024)
+	b.Write(out[tailStart:])
+	return b.Bytes(), elided
+}
 
 var errKillWaitGrace = errors.New("bash: process did not exit after kill")
 
@@ -78,6 +153,37 @@ type Tool struct {
 	bgMgr   *bgjob.Manager
 	deny    func(command string) (bool, string)
 	sandbox *sandbox.Options
+	envKeep []string
+}
+
+// WithEnvPassthrough names variables that survive the credential scrub
+// applied to every command this tool runs (see childEnv). Use it for the
+// case where a user's workflow genuinely needs a credential visible to
+// the shell — `gh pr create` wanting GH_TOKEN is the canonical one.
+//
+// Names are matched exactly and case-insensitively; there is no
+// globbing, so allowing one token cannot silently allow its neighbours.
+// Wired from config (`bash_env_passthrough`) in cmd/seek.
+func (t Tool) WithEnvPassthrough(names []string) Tool {
+	t.envKeep = names
+	return t
+}
+
+// childEnv is the environment handed to every command the model runs.
+//
+// It is set EXPLICITLY rather than left nil: Go inherits the full parent
+// environment when cmd.Env is nil, which would hand DEEPSEEK_API_KEY,
+// GH_TOKEN and every other credential in seek's environment to a
+// model-chosen command — and to everything that command transitively
+// spawns (npm postinstall, Makefile recipes, build scripts).
+//
+// The OS sandbox does not cover this: seatbelt/landlock confine file
+// effects, not environment inheritance. So the gate has to be here.
+//
+// This also propagates correctly through the Linux sandbox trampoline,
+// which re-execs with os.Environ() of the already-scrubbed child.
+func (t Tool) childEnv() []string {
+	return childenv.Sanitized(t.envKeep...)
 }
 
 // WithSandbox runs commands inside an OS sandbox (v7 柱 O) — on macOS,
@@ -212,6 +318,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if cwd := t.policy.CWD(); cwd != "" {
 		cmd.Dir = cwd
 	}
+	cmd.Env = t.childEnv()
 
 	detachStdin(cmd)
 
@@ -250,12 +357,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}()
 	dur := time.Since(start)
 
-	output := buf.snapshot()
-	truncated := false
-	if len(output) > maxOutputBytes {
-		output = output[:maxOutputBytes]
-		truncated = true
-	}
+	output, elidedBytes := clampOutput(buf.snapshot())
 
 	exitCode := 0
 	timedOut := false
@@ -282,8 +384,8 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if timedOut {
 		header += ", TIMED OUT"
 	}
-	if truncated {
-		header += fmt.Sprintf(", output truncated to %d bytes", maxOutputBytes)
+	if elidedBytes > 0 {
+		header += fmt.Sprintf(", %d bytes elided mid-output (head+tail kept)", elidedBytes)
 	}
 	header += ")\n"
 	result := header + string(output)
@@ -294,6 +396,14 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	// execution and doesn't affect non-matching commands.
 	if advisory := bashAdvisory(a.Command); advisory != "" {
 		result += "\n[hint: " + advisory + "]\n"
+	}
+	// Sandbox attribution: a jail denial is indistinguishable from an
+	// ordinary failure in the raw output, and the confusion is most
+	// expensive under autopilot where nobody is watching the model retry
+	// a path it will never be allowed to write. Appended (not
+	// substituted) so the command's own output stays intact.
+	if diag, hint := diagnoseSandbox(t.sandbox, exitCode, result); diag != sandboxDiagNone {
+		result += "\n[sandbox: " + hint + "]\n"
 	}
 	return result, nil
 }
@@ -317,6 +427,7 @@ func (t Tool) runBackground(command string) (string, error) {
 	if cwd := t.policy.CWD(); cwd != "" {
 		cmd.Dir = cwd
 	}
+	cmd.Env = t.childEnv()
 	detachStdin(cmd)
 	// Stdout == Stderr (same *Job): os/exec shares a single pipe + copy
 	// goroutine, so combined output streams into the ring buffer with no

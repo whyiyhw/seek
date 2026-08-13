@@ -6,18 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/whyiyhw/seek/internal/childenv"
 )
 
 // ServerConfig specifies how to launch an MCP server subprocess.
 type ServerConfig struct {
 	Command string
 	Args    []string
-	// Env holds extra "KEY=VALUE" pairs merged on top of the parent's
-	// environment. nil means inherit the parent environment unchanged.
+	// Env holds extra "KEY=VALUE" pairs layered on top of the SCRUBBED
+	// parent environment (see childenv): credential-shaped variables and
+	// seek's own SEEK_* namespace are never passed implicitly, because an
+	// MCP server is a third-party binary named in user config.
+	//
+	// A server that genuinely needs a credential declares it here — that
+	// is the explicit channel, and entries here win over anything the
+	// parent had (cmd.Env is last-wins).
 	Env []string
 }
 
@@ -51,9 +58,9 @@ func NewClient(r io.Reader, w io.Writer) *Client {
 func StartServer(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	srvCtx, cancel := context.WithCancel(ctx)
 	cmd := exec.CommandContext(srvCtx, cfg.Command, cfg.Args...)
-	if len(cfg.Env) > 0 {
-		cmd.Env = append(os.Environ(), cfg.Env...)
-	}
+	// Always explicit — a nil Env would hand this third-party binary the
+	// full parent environment, seek's API key included.
+	cmd.Env = append(childenv.Sanitized(), cfg.Env...)
 	cmd.Stderr = io.Discard // servers write diagnostics to stderr; not our concern
 
 	stdin, err := cmd.StdinPipe()

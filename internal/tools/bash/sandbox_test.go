@@ -69,3 +69,53 @@ func TestBash_NoSandbox_Unchanged(t *testing.T) {
 		t.Fatalf("no-sandbox bash must be unchanged: %q err=%v", out, err)
 	}
 }
+
+// TestBash_SandboxDenial_IsAttributed closes the loop that the unit
+// tests in sandboxhint_test.go cannot: it drives a REAL seatbelt denial
+// and asserts the resulting output carries the attribution hint.
+//
+// The signatures in denialSignatures() are a claim about what the kernel
+// and shell actually print. Only a real denial can validate that claim —
+// if macOS ever changes the errno text, this test fails and the hint
+// stops silently working instead of silently lying.
+func TestBash_SandboxDenial_IsAttributed(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("sandbox-exec unavailable")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir")
+	}
+	root, err := os.MkdirTemp(home, ".seek-bashsb-hint-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	allowed := filepath.Join(root, "allowed")
+	denied := filepath.Join(root, "denied")
+	if err := os.Mkdir(allowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(denied, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	p, _ := permission.New(t.TempDir(), permission.PrefYolo)
+	tool := New(p).WithSandbox(sandbox.Options{WritableDirs: []string{allowed}})
+
+	out, _ := run(t, tool, Args{Command: "echo no > " + filepath.Join(denied, "f")})
+	if !strings.Contains(out, "[sandbox:") {
+		t.Fatalf("a real seatbelt denial produced no attribution hint — the errno signature no longer matches "+
+			"what the shell prints. Raw output:\n%s", out)
+	}
+	if !strings.Contains(out, allowed) {
+		t.Errorf("hint does not name the writable directory:\n%s", out)
+	}
+
+	// And the converse: an ordinary failure inside the sandbox must NOT
+	// be attributed to it.
+	out2, _ := run(t, tool, Args{Command: "exit 3"})
+	if strings.Contains(out2, "[sandbox:") {
+		t.Errorf("an ordinary non-zero exit was blamed on the sandbox:\n%s", out2)
+	}
+}

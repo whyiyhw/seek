@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/tools"
 )
@@ -41,11 +42,20 @@ type Args struct {
 
 // Tool is the read tool implementation. Construct via New.
 type Tool struct {
-	policy *permission.Policy
+	policy   *permission.Policy
+	observer *fsobserve.Store
 }
 
 // New returns a read tool gated by the given permission policy.
 func New(p *permission.Policy) Tool { return Tool{policy: p} }
+
+// WithObserver records every successful read in s, which is what lets
+// the `write` tool refuse a blind whole-file overwrite later. Optional:
+// a nil observer leaves read's behaviour unchanged.
+func (t Tool) WithObserver(s *fsobserve.Store) Tool {
+	t.observer = s
+	return t
+}
 
 func (Tool) Name() string            { return "read" }
 func (Tool) Description() string     { return description }
@@ -133,6 +143,12 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if err := sc.Err(); err != nil {
 		return "", fmt.Errorf("read: scan: %w", err)
 	}
+
+	// Record the file's current state: the model has now seen it, which
+	// is what permits a later whole-file `write`. Deliberately AFTER the
+	// scan succeeded — a read that errored out mid-file did not give the
+	// model a usable view of the contents.
+	t.observer.Observe(clean)
 
 	header := fmt.Sprintf("%s (%d bytes", clean, info.Size())
 	if a.Offset > 1 {
