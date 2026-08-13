@@ -76,7 +76,7 @@ This is the primary feed mechanism for the M index — run it at the end of a se
 
 The status bar shows cumulative token counts across the session:
 - **prompt** — tokens sent to the model (cached + uncached)
-- **hit** — tokens served from DeepSeek's prefix cache (~50× cheaper: $0.0028/M vs $0.14/M miss on V4-Flash)
+- **hit** — tokens served from DeepSeek's prefix cache (~31× cheaper: $0.014/M vs $0.44/M miss on V4-Flash, peak rates)
 - **gen** — generated completion tokens
 
 ## RPC mode (for IDE integrations)

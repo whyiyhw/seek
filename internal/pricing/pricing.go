@@ -1,6 +1,7 @@
-// Package pricing models DeepSeek's tiered pricing and off-peak window.
-// Embedded rates are accurate as of 2026-07 (verified against
-// api-docs.deepseek.com/quick_start/pricing); bump them with each release
+// Package pricing models DeepSeek's peak/off-peak pricing windows.
+// Embedded rates are the full (peak) rate card effective 2026-08-16
+// 16:00 UTC (verified against api-docs.deepseek.com/quick_start/pricing);
+// off-peak is exactly half the peak rate. Bump them with each release
 // rather than fetching at runtime — a price-list HTTP call adds a failure
 // mode for an exclusively defensive feature (PRD §4.8.4).
 //
@@ -31,30 +32,32 @@ type ModelPricing struct {
 	OutputPerMTok    float64
 }
 
-// standardRates is the price card per model during the standard
-// (non-off-peak) window. Off-peak is derived via offPeakDiscount.
+// standardRates is the full-rate card per model during DeepSeek's peak
+// windows (a.k.a. the "standard" tier). Off-peak is derived via
+// offPeakDiscount.
 //
-// Numbers track DeepSeek's V4 launch (api-docs.deepseek.com 2026-01,
-// unchanged through the V4-Flash-0731 GA on 2026-07-31):
+// Numbers track DeepSeek's V4 peak/off-peak pricing, effective
+// 2026-08-16 16:00 UTC (api-docs.deepseek.com/quick_start/pricing,
+// checked 2026-08-13 against V4-Flash-0731 / V4-Pro-0813):
 //
-//	V4-Flash: $0.14 miss · $0.0028 hit · $0.28 output (per 1M tokens)
-//	V4-Pro:   $0.435 miss · $0.003625 hit · $0.87 output
-//	          (these are V4-Pro's CURRENT 75%-off promo rates; full
-//	           rack rate is 4× higher — $1.74 / $0.0145 / $3.48)
+//	V4-Flash: $0.44 miss · $0.014 hit · $1.32 output (peak, per 1M tokens)
+//	V4-Pro:   $1.32 miss · $0.044 hit · $3.96 output
 //
-// The legacy deepseek-chat / deepseek-reasoner aliases were removed
-// server-side on 2026-07-24; unknown model names fall back to
-// V4-Flash rates via the fallback path below.
+// Off-peak is exactly half of these. The pre-2026-08-16 promotional
+// rates ($0.14/$0.0028/$0.28 flash, $0.435/$0.003625/$0.87 pro) are
+// retired; the legacy deepseek-chat / deepseek-reasoner aliases were
+// removed server-side on 2026-07-24, and unknown model names fall back
+// to V4-Flash rates via the fallback path below.
 var standardRates = map[string]ModelPricing{
 	deepseek.ModelV4Flash: {
-		InputMissPerMTok: 0.14,
-		InputHitPerMTok:  0.0028,
-		OutputPerMTok:    0.28,
+		InputMissPerMTok: 0.44,
+		InputHitPerMTok:  0.014,
+		OutputPerMTok:    1.32,
 	},
 	deepseek.ModelV4Pro: {
-		InputMissPerMTok: 0.435,
-		InputHitPerMTok:  0.003625,
-		OutputPerMTok:    0.87,
+		InputMissPerMTok: 1.32,
+		InputHitPerMTok:  0.044,
+		OutputPerMTok:    3.96,
 	},
 }
 
@@ -64,10 +67,14 @@ const offPeakDiscount = 0.5
 // tests can construct local times consistently.
 var Shanghai = time.FixedZone("CST", 8*60*60)
 
-// Off-peak window: [00:30, 08:30) Beijing time.
+// Peak windows (Beijing time): 09:00–12:00 and 14:00–18:00, matching
+// DeepSeek's published peak hours of 01:00–04:00 and 06:00–10:00 UTC.
+// Everything else is off-peak (half price).
 const (
-	offPeakStartMins = 0*60 + 30
-	offPeakEndMins   = 8*60 + 30
+	peak1StartMins = 9 * 60
+	peak1EndMins   = 12 * 60
+	peak2StartMins = 14 * 60
+	peak2EndMins   = 18 * 60
 )
 
 // CurrentTier reports the pricing tier in effect at the given instant.
@@ -75,10 +82,11 @@ const (
 func CurrentTier(now time.Time) Tier {
 	b := now.In(Shanghai)
 	mins := b.Hour()*60 + b.Minute()
-	if mins >= offPeakStartMins && mins < offPeakEndMins {
-		return TierOffPeak
+	if (mins >= peak1StartMins && mins < peak1EndMins) ||
+		(mins >= peak2StartMins && mins < peak2EndMins) {
+		return TierStandard
 	}
-	return TierStandard
+	return TierOffPeak
 }
 
 // PricingFor returns the per-token rate card for a model+tier. Unknown
@@ -114,7 +122,7 @@ func TierLabel(t Tier) string {
 	case TierOffPeak:
 		return "off-peak -50%"
 	default:
-		return "standard"
+		return "peak"
 	}
 }
 
@@ -123,23 +131,28 @@ func TierLabel(t Tier) string {
 //
 // Examples (all Beijing time):
 //
-//	at 09:00 standard → (off-peak, tomorrow 00:30)
-//	at 00:15 standard → (off-peak, today 00:30)
-//	at 03:00 off-peak → (standard, today 08:30)
+//	at 09:00 peak     → (off-peak, today 12:00)
+//	at 13:00 off-peak → (peak, today 14:00)
+//	at 03:00 off-peak → (peak, today 09:00)
+//	at 23:59 off-peak → (peak, tomorrow 09:00)
 func NextTransition(now time.Time) (Tier, time.Time) {
 	b := now.In(Shanghai)
-	today0030 := time.Date(b.Year(), b.Month(), b.Day(), 0, 30, 0, 0, Shanghai)
-	today0830 := time.Date(b.Year(), b.Month(), b.Day(), 8, 30, 0, 0, Shanghai)
+	at := func(hour, min int) time.Time {
+		return time.Date(b.Year(), b.Month(), b.Day(), hour, min, 0, 0, Shanghai)
+	}
+	mins := b.Hour()*60 + b.Minute()
 
-	switch CurrentTier(now) {
-	case TierOffPeak:
-		return TierStandard, today0830
-	default: // TierStandard
-		// We're either in [00:00, 00:30) or [08:30, 24:00).
-		if b.Hour() == 0 && b.Minute() < 30 {
-			return TierOffPeak, today0030
-		}
-		return TierOffPeak, today0030.AddDate(0, 0, 1)
+	switch {
+	case mins < peak1StartMins: // [00:00, 09:00) off-peak → peak 1
+		return TierStandard, at(9, 0)
+	case mins < peak1EndMins: // [09:00, 12:00) peak 1 → off-peak
+		return TierOffPeak, at(12, 0)
+	case mins < peak2StartMins: // [12:00, 14:00) off-peak → peak 2
+		return TierStandard, at(14, 0)
+	case mins < peak2EndMins: // [14:00, 18:00) peak 2 → off-peak
+		return TierOffPeak, at(18, 0)
+	default: // [18:00, 24:00) off-peak → peak 1 tomorrow
+		return TierStandard, at(9, 0).AddDate(0, 0, 1)
 	}
 }
 

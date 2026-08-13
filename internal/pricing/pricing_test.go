@@ -13,20 +13,22 @@ func at(hour, min int) time.Time {
 	return time.Date(2026, time.January, 15, hour, min, 0, 0, Shanghai)
 }
 
-func TestCurrentTier_StandardBoundaries(t *testing.T) {
+func TestCurrentTier_PeakBoundaries(t *testing.T) {
 	cases := []struct {
 		hour, min int
 		want      Tier
 		label     string
 	}{
-		{0, 0, TierStandard, "00:00 (just before off-peak)"},
-		{0, 29, TierStandard, "00:29 (last standard minute)"},
-		{0, 30, TierOffPeak, "00:30 (off-peak starts)"},
-		{4, 0, TierOffPeak, "04:00 (mid off-peak)"},
-		{8, 29, TierOffPeak, "08:29 (last off-peak minute)"},
-		{8, 30, TierStandard, "08:30 (standard resumes)"},
-		{12, 0, TierStandard, "noon"},
-		{23, 59, TierStandard, "end of day"},
+		{0, 0, TierOffPeak, "00:00 (off-peak)"},
+		{8, 59, TierOffPeak, "08:59 (last minute before peak 1)"},
+		{9, 0, TierStandard, "09:00 (peak 1 starts)"},
+		{11, 59, TierStandard, "11:59 (last peak-1 minute)"},
+		{12, 0, TierOffPeak, "12:00 (peak 1 ends)"},
+		{13, 59, TierOffPeak, "13:59 (last minute before peak 2)"},
+		{14, 0, TierStandard, "14:00 (peak 2 starts)"},
+		{17, 59, TierStandard, "17:59 (last peak-2 minute)"},
+		{18, 0, TierOffPeak, "18:00 (peak 2 ends)"},
+		{23, 59, TierOffPeak, "23:59 (end of day)"},
 	}
 	for _, c := range cases {
 		if got := CurrentTier(at(c.hour, c.min)); got != c.want {
@@ -36,11 +38,17 @@ func TestCurrentTier_StandardBoundaries(t *testing.T) {
 }
 
 func TestCurrentTier_TimezoneAware(t *testing.T) {
-	// 16:30 UTC == 00:30 Beijing → off-peak should kick in.
+	// 15:30 UTC == 23:30 Beijing → off-peak (outside both peak windows).
 	t1530UTC := time.Date(2026, time.January, 14, 15, 30, 0, 0, time.UTC)
-	if got := CurrentTier(t1530UTC); got != TierStandard {
-		t.Errorf("23:30 Beijing = standard, got %v", got)
+	if got := CurrentTier(t1530UTC); got != TierOffPeak {
+		t.Errorf("23:30 Beijing = off-peak, got %v", got)
 	}
+	// 01:00 UTC == 09:00 Beijing → peak 1 starts.
+	t0100UTC := time.Date(2026, time.January, 14, 1, 0, 0, 0, time.UTC)
+	if got := CurrentTier(t0100UTC); got != TierStandard {
+		t.Errorf("09:00 Beijing = peak, got %v", got)
+	}
+	// 16:30 UTC == 00:30 Beijing → off-peak.
 	t1630UTC := time.Date(2026, time.January, 14, 16, 30, 0, 0, time.UTC)
 	if got := CurrentTier(t1630UTC); got != TierOffPeak {
 		t.Errorf("00:30 Beijing next day = off-peak, got %v", got)
@@ -68,14 +76,14 @@ func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 
 func TestCost_TypicalChatCall(t *testing.T) {
 	// Mixed-cache turn: 800 miss + 200 hit + 100 completion under
-	// the V4-Flash rate card (the fallback for unknown models).
+	// the V4-Flash peak rate card (the fallback for unknown models).
 	u := deepseek.Usage{
 		PromptTokens:          1000,
 		PromptCacheMissTokens: 800,
 		PromptCacheHitTokens:  200,
 		CompletionTokens:      100,
 	}
-	want := 800*0.14/1e6 + 200*0.0028/1e6 + 100*0.28/1e6
+	want := 800*0.44/1e6 + 200*0.014/1e6 + 100*1.32/1e6
 	got := Cost(deepseek.ModelV4Flash, TierStandard, u)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("Cost = %v, want %v", got, want)
@@ -91,38 +99,66 @@ func TestCost_OffPeakIsHalf(t *testing.T) {
 	}
 }
 
-func TestNextTransition_StandardEvening(t *testing.T) {
+func TestNextTransition_OffPeakMorning(t *testing.T) {
+	// 03:00 — off-peak, peak 1 comes at 09:00.
+	now := at(3, 0)
+	tier, when := NextTransition(now)
+	if tier != TierStandard {
+		t.Errorf("tier = %v, want peak", tier)
+	}
+	wantWhen := time.Date(2026, time.January, 15, 9, 0, 0, 0, Shanghai)
+	if !when.Equal(wantWhen) {
+		t.Errorf("when = %v, want %v", when, wantWhen)
+	}
+}
+
+func TestNextTransition_Peak1(t *testing.T) {
+	// 09:00 — peak 1 starts, off-peak comes at 12:00.
 	now := at(9, 0)
 	tier, when := NextTransition(now)
 	if tier != TierOffPeak {
 		t.Errorf("tier = %v, want off-peak", tier)
 	}
-	wantWhen := time.Date(2026, time.January, 16, 0, 30, 0, 0, Shanghai)
+	wantWhen := time.Date(2026, time.January, 15, 12, 0, 0, 0, Shanghai)
 	if !when.Equal(wantWhen) {
 		t.Errorf("when = %v, want %v", when, wantWhen)
 	}
 }
 
-func TestNextTransition_StandardLateNight(t *testing.T) {
-	// 00:15 — still standard, off-peak comes in 15 minutes.
-	now := at(0, 15)
+func TestNextTransition_OffPeakMidday(t *testing.T) {
+	// 13:00 — off-peak between peaks, peak 2 comes at 14:00.
+	now := at(13, 0)
+	tier, when := NextTransition(now)
+	if tier != TierStandard {
+		t.Errorf("tier = %v, want peak", tier)
+	}
+	wantWhen := time.Date(2026, time.January, 15, 14, 0, 0, 0, Shanghai)
+	if !when.Equal(wantWhen) {
+		t.Errorf("when = %v, want %v", when, wantWhen)
+	}
+}
+
+func TestNextTransition_Peak2(t *testing.T) {
+	// 14:00 — peak 2 starts, off-peak comes at 18:00.
+	now := at(14, 0)
 	tier, when := NextTransition(now)
 	if tier != TierOffPeak {
 		t.Errorf("tier = %v, want off-peak", tier)
 	}
-	wantWhen := time.Date(2026, time.January, 15, 0, 30, 0, 0, Shanghai)
+	wantWhen := time.Date(2026, time.January, 15, 18, 0, 0, 0, Shanghai)
 	if !when.Equal(wantWhen) {
 		t.Errorf("when = %v, want %v", when, wantWhen)
 	}
 }
 
-func TestNextTransition_OffPeak(t *testing.T) {
-	now := at(3, 0)
+func TestNextTransition_OffPeakEvening(t *testing.T) {
+	// 23:59 — off-peak, peak 1 comes tomorrow 09:00.
+	now := at(23, 59)
 	tier, when := NextTransition(now)
 	if tier != TierStandard {
-		t.Errorf("tier = %v, want standard", tier)
+		t.Errorf("tier = %v, want peak", tier)
 	}
-	wantWhen := time.Date(2026, time.January, 15, 8, 30, 0, 0, Shanghai)
+	wantWhen := time.Date(2026, time.January, 16, 9, 0, 0, 0, Shanghai)
 	if !when.Equal(wantWhen) {
 		t.Errorf("when = %v, want %v", when, wantWhen)
 	}

@@ -74,12 +74,12 @@ DeepSeek pricing (from [`internal/pricing/pricing.go`](internal/pricing/pricing.
 
 | Metric | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
 |---|---|---|---|
-| Input (cache miss) | **$0.14** / 1M | **$0.435** / 1M¹ | $3 / 1M |
-| Input (cache hit) | **$0.0028** / 1M | **$0.003625** / 1M | $0.30 / 1M |
-| Output | **$0.28** / 1M | **$0.87** / 1M | $15 / 1M |
+| Input (cache miss) | **$0.44** / $0.22¹ | **$1.32** / $0.66¹ | $3 / 1M |
+| Input (cache hit) | **$0.014** / $0.007¹ | **$0.044** / $0.022¹ | $0.30 / 1M |
+| Output | **$1.32** / $0.66¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | Off-peak² | **−50%** | **−50%** | — |
 
-<sub>¹ V4-Pro at a 75%-off promo (rack rate $1.74 / $0.0145 / $3.48). ² 00:30–08:30 Beijing time.</sub>
+<sub>¹ Peak / off-peak rates (off-peak = half price), effective 2026-08-16 16:00 UTC — see [`internal/pricing/pricing.go`](internal/pricing/pricing.go). ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
 
 Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas are byte-stable `[]byte` constants, tool output is capped at write-time, and history is never rewritten before send. The status bar shows the live ratio + dollars saved.
 

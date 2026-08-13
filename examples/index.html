@@ -1594,14 +1594,14 @@
 
   <div class="stats-band">
     <div class="stat-card reveal">
-      <div class="stat-num">$0.0028</div>
+      <div class="stat-num">$0.007</div>
       <div class="stat-label">
         <span data-lang="en">per 1M tokens</span>
         <span data-lang="zh" hidden>每百万 token</span>
       </div>
       <div class="stat-desc">
-        <span data-lang="en">Prefix-cache hit pricing · 10–100× cheaper than Claude</span>
-        <span data-lang="zh" hidden>前缀缓存命中价格 · 比 Claude 便宜 10–100 倍</span>
+        <span data-lang="en">V4-Flash prefix-cache hit, off-peak · 10–100× cheaper than Claude</span>
+        <span data-lang="zh" hidden>V4-Flash 前缀缓存命中价（错峰）· 比 Claude 便宜 10–100 倍</span>
       </div>
     </div>
     <div class="stat-card reveal" style="transition-delay:.1s">
@@ -1622,8 +1622,8 @@
         <span data-lang="zh" hidden>错峰折扣</span>
       </div>
       <div class="stat-desc">
-        <span data-lang="en">UTC+8 00:30–08:30 · live countdown in status bar</span>
-        <span data-lang="zh" hidden>北京时间 00:30–08:30 · 状态栏实时倒计时</span>
+        <span data-lang="en">peak 09:00–12:00 / 14:00–18:00 (UTC+8) · everything else off-peak · live countdown in status bar</span>
+        <span data-lang="zh" hidden">高峰 09:00–12:00 / 14:00–18:00（北京）· 其余全部错峰 · 状态栏实时倒计时</span>
       </div>
     </div>
     <div class="stat-card reveal" style="transition-delay:.3s">
@@ -1721,31 +1721,31 @@
 
   <div class="stats-band reveal">
     <div class="stat-card">
-      <div class="stat-num" style="color:var(--amber)">$0.0028</div>
+      <div class="stat-num" style="color:var(--amber)">$0.007</div>
       <div class="stat-label"><span data-lang="en">V4-Flash · cache hit</span><span data-lang="zh" hidden>V4-Flash · 缓存命中</span></div>
-      <div class="stat-desc"><span data-lang="en">per 1M input tokens</span><span data-lang="zh" hidden>每百万输入 token</span></div>
+      <div class="stat-desc"><span data-lang="en">per 1M input tokens, off-peak</span><span data-lang="zh" hidden>每百万输入 token（错峰）</span></div>
     </div>
     <div class="stat-card">
-      <div class="stat-num" style="color:var(--teal)">$0.0036</div>
+      <div class="stat-num" style="color:var(--teal)">$0.022</div>
       <div class="stat-label"><span data-lang="en">V4-Pro · cache hit</span><span data-lang="zh" hidden>V4-Pro · 缓存命中</span></div>
       <div class="stat-desc"><span data-lang="en">thinking mode enabled</span><span data-lang="zh" hidden>推理模式启用</span></div>
     </div>
     <div class="stat-card">
       <div class="stat-num" style="color:var(--dim)">$0.30</div>
       <div class="stat-label"><span data-lang="en">Claude Sonnet 4 · cache hit</span><span data-lang="zh" hidden>Claude Sonnet 4 · 缓存命中</span></div>
-      <div class="stat-desc"><span data-lang="en">for comparison — 107× more</span><span data-lang="zh" hidden">对比参考——107 倍差价</span></div>
+      <div class="stat-desc"><span data-lang="en">for comparison — 43× more</span><span data-lang="zh" hidden">对比参考——43 倍差价</span></div>
     </div>
     <div class="stat-card" style="border-color:var(--amber-dim)">
       <div class="stat-num"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:.85em;height:.85em;vertical-align:-.06em"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> 50% off</div>
       <div class="stat-label"><span data-lang="en">off-peak discount</span><span data-lang="zh" hidden>错峰折扣</span></div>
-      <div class="stat-desc"><span data-lang="en">UTC+8 00:30–08:30 · live timer</span><span data-lang="zh" hidden>北京时间 00:30–08:30 · 实时计时</span></div>
+      <div class="stat-desc"><span data-lang="en">peak 09:00–12:00 / 14:00–18:00 (UTC+8) · live timer</span><span data-lang="zh" hidden>高峰 09:00–12:00 / 14:00–18:00（北京）· 实时计时</span></div>
     </div>
   </div>
 
   <div class="price-note reveal" style="margin-top:20px;">
     <span class="dot"></span>
-    <span data-lang="en">¹ V4-Pro at 75%-off promo rate. <strong>95.7%</strong> cache hit rate on bootstrap benchmark — visible in status bar.</span>
-    <span data-lang="zh" hidden>¹ V4-Pro 为 75% 折扣促销价。自举基准测试缓存命中率 <strong>95.7%</strong>——状态栏实时可见。</span>
+    <span data-lang="en">¹ Off-peak cache-hit rates (peak = 2×), effective 2026-08-16. <strong>95.7%</strong> cache hit rate on bootstrap benchmark — visible in status bar.</span>
+    <span data-lang="zh" hidden>¹ 错峰缓存命中价（高峰 = 2 倍），2026-08-16 起生效。自举基准测试缓存命中率 <strong>95.7%</strong>——状态栏实时可见。</span>
   </div>
 </section>
 

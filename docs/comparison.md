@@ -168,7 +168,7 @@
 | DeepSeek 专属能力 | ❌ | ✅ | **Seek 优势** | V4 推理模式、FIM 端点、错峰 5 折、前缀缓存追踪 |
 | 费用追踪（每会话） | ✅ | ✅ | **对等** | Seek：累计 + 每轮费用，状态栏实时显示 |
 | 缓存命中率显示 | ✅ | ✅ | **对等** | Seek：实时命中率 + 节省 token 数 |
-| 错峰折扣倒计时 | ❌ | ✅ | **Seek 优势** | 状态栏显示 5 折时段（北京时间 00:30–08:30） |
+| 错峰折扣倒计时 | ❌ | ✅ | **Seek 优势** | 状态栏显示 5 折时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰，2026-08-16 起） |
 | 定价对比 | ❌ | ✅ | **Seek 优势** | README 中的多提供商定价矩阵 |
 
 **小结**：LLM/成本方面 Seek 完胜——提供商自由 + DeepSeek 专属优化。Claude Code 绑定 Anthropic。
@@ -269,7 +269,7 @@
 | **多 LLM 提供商** | DeepSeek、Anthropic、OpenAI、Gemini、OpenAI 兼容端点——不绑定单一厂商 |
 | **DeepSeek 单价 + 前缀缓存** | DeepSeek 基础单价已显著低于 Anthropic；叠加 95.7% 实测缓存命中后，同等任务量级下 token 成本远低于 Claude Code 默认链路 |
 | **FIM 端点** | 通过 DeepSeek FIM 提供小范围原地编辑工具，比 chat 模式更便宜 |
-| **错峰 5 折** | DeepSeek 错峰时段（北京 00:30–08:30）半价；Seek 状态栏内置计时器和自动费用计算 |
+| **错峰 5 折** | DeepSeek 错峰时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰）半价；Seek 状态栏内置计时器和自动费用计算 |
 | **单二进制 ~5 MB** | 零运行时依赖，`go install` 或 `curl \| tar` 即用 |
 | **`think` + `dual-model` skill** | reasoner→chat→reflect 推理闭环 |
 | **三层记忆 + `-dream`** | `seek -dream` 做跨项目用户偏好归纳，decay-score GC 自动遗忘 |

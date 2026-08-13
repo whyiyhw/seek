@@ -148,20 +148,20 @@ type ModelPricing struct {
 
 var standardRates = map[string]ModelPricing{
     deepseek.ModelV4Flash: {
-        InputMissPerMTok: 0.14,
-        InputHitPerMTok:  0.0028,
-        OutputPerMTok:    0.28,
+        InputMissPerMTok: 0.44,
+        InputHitPerMTok:  0.014,
+        OutputPerMTok:    1.32,
     },
     deepseek.ModelV4Pro: {
-        InputMissPerMTok: 0.435,
-        InputHitPerMTok:  0.003625,
-        OutputPerMTok:    0.87,
+        InputMissPerMTok: 1.32,
+        InputHitPerMTok:  0.044,
+        OutputPerMTok:    3.96,
     },
     // ...
 }
 ```
 
-整个定价表是一个 `map`——**写死在代码里**，每次 DeepSeek 涨价/降价时改一次。
+整个定价表是一个 `map`——**写死在代码里**，每次 DeepSeek 涨价/降价时改一次。上面是 2026-08-16 起生效的**高峰价**；错峰时段按 `offPeakDiscount` 打 5 折（DeepSeek 官方定义为"错峰 = 高峰半价"）。
 
 为什么不在启动时从 DeepSeek 拿一份"current pricing"？两个理由：
 
@@ -174,7 +174,7 @@ PRD §4.8.4 把这件事写明白了：**embedded rates, bump them with each rel
 >
 > DeepSeek 在 2026-01 发 V4 时, 同时保留了两个 legacy 别名:`deepseek-chat`(对应 V4-Flash, thinking 关)和 `deepseek-reasoner`(对应 V4-Flash, thinking 开)。官方公告:**2026-07-24 这两个别名下线**, 之后必须直接写 `deepseek-v4-flash` / `deepseek-v4-pro`。
 >
-> seek 的 pricing 表对这两个别名做了显式映射, 共享 V4-Flash 的费率(`$0.14` miss / `$0.0028` hit / `$0.28` output, 全部按每百万 token):
+> seek 的 pricing 表对这两个别名做了显式映射, 共享 V4-Flash 的费率(当时的费率 `$0.14` miss / `$0.0028` hit / `$0.28` output, 全部按每百万 token; 2026-08-16 起已换成峰谷价):
 >
 > ```go
 > deepseek.ModelChat:     { 0.14, 0.0028, 0.28 },  // → V4-Flash, sunset 2026-07-24
@@ -199,7 +199,7 @@ func Cost(model string, tier Tier, u deepseek.Usage) float64 {
 
 这是 seek 整个成本故事里**最有意义的一行代码**。
 
-DeepSeek V4-Flash 的 input cache miss 是 $0.14/MTok，cache hit 是 $0.0028/MTok——**50 倍**差距。一份典型 seek 会话里，system prompt + 工具 schema 加起来 ~2 KB，每一轮都重发；如果第二轮命中了前缀缓存，这 ~500 个 token 的成本从 $0.00007 降到 $0.0000014——单次几乎免费。
+DeepSeek V4-Flash 的 input cache miss 是 $0.44/MTok，cache hit 是 $0.014/MTok——**约 31 倍**差距（2026-08-16 起的峰谷价表，此前促销价是 $0.14 / $0.0028，差距 50 倍）。一份典型 seek 会话里，system prompt + 工具 schema 加起来 ~2 KB，每一轮都重发；如果第二轮命中了前缀缓存，这 ~500 个 token 的成本从 $0.00022 降到 $0.000007——单次几乎免费。
 
 第 2、5 章反复强调的"Schema 必须是 package-level `[]byte` 常量"、"system prompt 字节稳定"——这条 `Cost` 函数是这些约束的最终兑现点。两个会话跑同样的逻辑，命中率 70% 的那个比 0% 的便宜 5-7 倍。
 
@@ -214,10 +214,14 @@ func (t *Tracker) SavedTokens() int { return t.Cumulative().PromptCacheHitTokens
 ### 离峰折扣
 
 ```go
-// 北京时间 [00:30, 08:30) 半价
+// 高峰窗口（北京时间）：09:00–12:00 和 14:00–18:00，
+// 对应 DeepSeek 官方高峰 01:00–04:00 / 06:00–10:00 UTC。
+// 其余时间全部错峰（半价）。
 const (
-    offPeakStartMins = 0*60 + 30
-    offPeakEndMins   = 8*60 + 30
+    peak1StartMins = 9 * 60
+    peak1EndMins   = 12 * 60
+    peak2StartMins = 14 * 60
+    peak2EndMins   = 18 * 60
 )
 
 const offPeakDiscount = 0.5
@@ -225,14 +229,15 @@ const offPeakDiscount = 0.5
 func CurrentTier(now time.Time) Tier {
     b := now.In(Shanghai)
     mins := b.Hour()*60 + b.Minute()
-    if mins >= offPeakStartMins && mins < offPeakEndMins {
-        return TierOffPeak
+    if (mins >= peak1StartMins && mins < peak1EndMins) ||
+        (mins >= peak2StartMins && mins < peak2EndMins) {
+        return TierStandard
     }
-    return TierStandard
+    return TierOffPeak
 }
 ```
 
-DeepSeek 在 2024 年下半年加了一个"夜间半价"窗口：北京时间 00:30-08:30，所有 token 价格直接打 5 折。对常加班的程序员来说这是一笔可观的省钱——状态栏显示当前是 off-peak / standard，让用户知道"现在跑大任务划算还是不划算"。
+DeepSeek 从 2026-08-16 起实行正式的**峰谷计价**：每天两个高峰时段（北京 09:00-12:00、14:00-18:00，即 UTC 01:00-04:00、06:00-10:00），其余时间全部错峰半价。注意语义反转：**错峰是默认，高峰是例外**——所以 `CurrentTier` 的默认返回值是 `TierOffPeak`。对常加班的程序员来说，晚上和中午跑大任务都能吃半价——状态栏显示当前是 off-peak / peak，让用户知道"现在跑大任务划算还是不划算"。
 
 时区写死成 `Shanghai = time.FixedZone("CST", 8*60*60)`，**不调用 `time.LoadLocation("Asia/Shanghai")`**。理由：`LoadLocation` 依赖系统 tzdata，最小 Linux 容器（Alpine、distroless）经常不带——`time.LoadLocation` 在那些环境上会返回错误。`FixedZone` 是纯计算，零文件系统依赖，永远工作。
 
@@ -241,14 +246,14 @@ DeepSeek 在 2024 年下半年加了一个"夜间半价"窗口：北京时间 00
 ### `NextTransition`：让用户知道还剩多久
 
 ```go
-// 现在是 standard，下次切换到 off-peak 是什么时候？
-// 现在是 off-peak，下次切换到 standard 是什么时候？
+// 现在是 peak，下次切换到 off-peak 是什么时候？
+// 现在是 off-peak，下次切换到 peak 是什么时候？
 func NextTransition(now time.Time) (Tier, time.Time) {
     // ...
 }
 ```
 
-这个函数当前没在状态栏里用，但写好放着——如果未来想加"距 off-peak 还有 2h 14m"这种 UI 元素，所有逻辑已经在了。
+这个函数驱动状态栏的"next 🌙 in 2h14m"倒计时——四个边界（两个高峰的起止）里，`NextTransition` 返回下一个。
 
 预设 hook 但不接入的代价基本为零（几十行代码 + 一组测试），收益是"未来想加 UI 时不需要回头补底层逻辑"。这是值得做的小事。
 
@@ -290,7 +295,7 @@ func Classify(model string, usedTokens int) Severity {
 
 为什么降？DeepSeek V4 是 1M context。95% × 1M = 950k token。"95% 才提示 compact" 意味着用户在 950k token 之后才看到提示——这时候：
 
-- **compact 调用本身代价不小**：summary 请求要处理 ~900k token 的 prompt，按当前定价就是真金白银（$0.14 × 900k / 1M = $0.126 美元单次）
+- **compact 调用本身代价不小**：summary 请求要处理 ~900k token 的 prompt，按当前定价就是真金白银（$0.44 × 900k / 1M = $0.396 美元单次，高峰价）
 - **模型质量在那个规模已经在下滑**：长 context 上模型注意力衰减是公认的，95% 不是"还能用"的点，是"快用不动了"的点
 
 降到 60/75 后：

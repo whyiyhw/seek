@@ -139,7 +139,7 @@ func TestStatusBar_UpgradeAvailable(t *testing.T) {
 }
 
 func TestStatusBar_Idle_Standard(t *testing.T) {
-	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai) // standard
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai) // peak window
 	nt, na := pricing.NextTransition(at)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:    deepseek.ModelV4Flash,
@@ -149,7 +149,7 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 		// Zero Usage — no turns yet → cache shows "n/a".
 		Now: at,
 	}))
-	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "standard", "next 🌙 in"} {
+	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "peak", "next 🌙 in"} {
 		if !strings.Contains(bar, frag) {
 			t.Errorf("missing %q in: %q", frag, bar)
 		}

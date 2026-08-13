@@ -474,6 +474,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when a provider announces an alias/model sunset, schedule a same-day repo-wide grep for BOTH the constant names and the raw wire strings — the picker/status-bar/CLI help are user-facing and the last places you expect a dead model id. Re-verify pricing and context-limit fallbacks, which often reference the retired name by habit
 - **Refs**: `pkg/deepseek/types.go`, `internal/tui/commands.go:knownModelsForProvider`, `internal/pricing/pricing.go:PricingFor`, `internal/budget/budget.go:contextLimits`
 
+### DeepSeek's peak/off-peak window semantics flipped on 2026-08-16 — "off-peak is the default" inverts tier logic
+- **Saw**: checking api-docs.deepseek.com on 2026-08-13 revealed V4 pricing moved to formal peak/off-peak billing (effective 08-16 16:00 UTC): peak = 01:00–04:00 & 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing), everything else off-peak at half price. seek's rate card was still the promo prices ($0.14/$0.28 flash) and its window [00:30, 08:30) Beijing covered only a slice of the new off-peak span. After updating, every placeholder test failed silently — the `noon()` helper used 12:00 as its "standard window" representative, which under the new rules is exactly the peak→off-peak boundary, so all tests ran the off-peak branch
+- **Why**: the window model inverted: previously "one contiguous off-peak window, standard by default"; now "two small peak windows, off-peak by default". A "representative time" that sat comfortably mid-window under the old rules can sit exactly on a boundary under new ones — and boundary answers flip between the two rule sets
+- **Fix**: `internal/pricing` re-based to the 08-16 rate card, storing **peak** prices with the existing 0.5 off-peak discount (matches the official "off-peak = half of peak" definition); `CurrentTier`/`NextTransition` rewritten as a four-segment switch; test representatives moved to mid-peak (10:00) with boundaries asserted only in dedicated boundary cases; README / docs / landing page synced
+- **Lesson**: (1) annotate rate cards with "verified-on" AND "effective-on" dates — prices change and promo/rack/peak rates can coexist confusingly; (2) "representative time" helpers in tests/docs must sit far from window boundaries — boundaries belong in dedicated boundary tests only; (3) when a provider flips which window is the default, re-check every default branch, label, and comment, not just the constants
+- **Refs**: api-docs.deepseek.com/quick_start/pricing, `internal/pricing/pricing.go`, `internal/tui/placeholder_test.go:noon`
+
 ## Go language
 
 ### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`

@@ -29,9 +29,9 @@ func modelAt(now time.Time, turns int, yolo bool, usage deepseek.Usage) *Model {
 	}
 }
 
-// noon = clearly inside the standard (non off-peak) window.
+// peakHour = clearly inside the first peak window (09:00–12:00 Beijing).
 func noon(t *testing.T) time.Time {
-	return time.Date(2026, time.January, 15, 12, 0, 0, 0, pricing.Shanghai)
+	return time.Date(2026, time.January, 15, 10, 0, 0, 0, pricing.Shanghai)
 }
 
 func TestPlaceholder_YoloWinsOverEverything(t *testing.T) {
