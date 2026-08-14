@@ -1,0 +1,7 @@
+{
+  "description": "Every git tool call must carry the subcommand ONLY in the `subcommand` field — args[0] repeating it (git diff --stat → {\"subcommand\":\"diff\",\"args\":[\"diff\",\"--stat\"]}) is the construction tic this case measures. The tool auto-fixes the shape and notes it in the result; git_subcommand_dupes counts those notes, so 0 = the model built every call correctly.",
+  "max_turns": 8,
+  "min_git_calls": 3,
+  "max_git_subcommand_dupes": 0,
+  "max_bash_calls": 0
+}

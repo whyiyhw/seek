@@ -1,0 +1,7 @@
+{
+  "description": "Mid-task variant of git-subcommand-shape: the model EDITS a file first, then verifies with git — the context of the motivating transcript, where the duplicated-subcommand tic appeared while transcribing shell-style git commands into tool calls mid-task. git_subcommand_dupes must stay 0.",
+  "max_turns": 10,
+  "min_git_calls": 2,
+  "max_git_subcommand_dupes": 0,
+  "max_bash_calls": 2
+}

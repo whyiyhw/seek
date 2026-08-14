@@ -1,0 +1,4 @@
+用 git 工具（subcommand+args 的那个专用工具，不要用 bash 跑 git 命令）快速盘点仓库当前状态：
+1. 未提交改动概览：diff --stat 和 status --short 各一次
+2. 最近 5 条提交：log --oneline -n 5
+最后用两三句话汇总现状。不要修改任何文件。

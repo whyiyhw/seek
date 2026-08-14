@@ -1,0 +1,1 @@
+把 git-shape-scratch/notes.txt 里的 version: v1 改成 version: v2（用 read 和 edit 工具，不要用 bash 改文件）。改完立刻用 git 工具自查改动效果：diff --stat 一次、status --short 一次，两句话汇报改动是否生效。不要 git add，不要 commit。

@@ -54,6 +54,7 @@ per case it executed, e.g.:
 | `grep_calls` | `tool_start` events with `name=grep` |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
 | `git_calls` | `tool_start` events with `name=git` |
+| `git_subcommand_dupes` | `tool_end` events for `git` whose result contains `repeated from args` — the model repeated the subcommand as `args[0]` and the tool auto-fixed it; counts the construction mistake at zero behavioral cost (see `eval/cases/git-subcommand-shape/README.md`) |
 | `probe_reads` | `tool_end` events for `read` whose result contains `0 lines emitted` **and** `from line` — a read past EOF that returned nothing, i.e. the model was probing because it couldn't tell whether more pages existed (see `docs/test-plan-read-tool.md` §3.2) |
 | `write_refusals` | `tool_end` events for `write` whose error contains `write refused` — the fsobserve blind-overwrite guard refusing (see `internal/fsobserve/fsobserve.go` `Explain`) |
 | `turns` | `turn_end` events |

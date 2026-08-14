@@ -21,6 +21,25 @@ eval_root="$repo_root/eval"
 cases_dir="$eval_root/cases"
 results_dir="$eval_root/results"
 
+# --- Windows/git-bash path compatibility --------------------------------
+# A Windows-native jq.exe (WinGet's, resolved below when it is the only
+# jq on PATH) cannot open MSYS paths: /tmp/... and /d/... are not
+# Windows paths, so EVERY jq invocation on such a path fails — expect
+# bounds read as garbage (max_turns becomes an error string), and the
+# mktemp'd stream file is unreadable, so every metric extracts as 0 and
+# seek itself exits instantly on the garbage -max-turns. Under MSYS,
+# rewrite the path vocabulary into mixed drive-letter form (D:/...),
+# which both Windows binaries and MSYS binaries open. WSL/Linux have no
+# cygpath and are untouched. (Sibling of the b041d62 WSL+jq.exe pitfall:
+# the same class of break, on the git-bash side the old comment assumed
+# worked.)
+if command -v cygpath >/dev/null 2>&1; then
+  repo_root=$(cygpath -m "$repo_root")
+  eval_root=$(cygpath -m "$eval_root")
+  cases_dir=$(cygpath -m "$cases_dir")
+  results_dir=$(cygpath -m "$results_dir")
+fi
+
 case_filter=${1-}
 binary=${2-$repo_root/seek}
 
@@ -91,6 +110,14 @@ extract_metric() {
     git_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="git")] | length' "$path"
       ;;
+    git_subcommand_dupes)
+      # The git tool auto-fixes a duplicated subcommand (args[0] ==
+      # subcommand) and prepends a note containing "repeated from args"
+      # to the result — counting the notes counts the model's mistakes,
+      # zero round trips sacrificed (see internal/tools/git/git.go and
+      # pitfalls "a refusal the model does not learn from").
+      $JQ -s '[.[] | select(.type=="tool_end" and .name=="git" and (.result // "" | contains("repeated from args")))] | length' "$path"
+      ;;
     probe_reads)
       # A read that returned zero lines from a non-starting offset is a
       # probe past EOF — the model could not tell "exactly N lines" from
@@ -159,6 +186,11 @@ run_one() {
 
   local out_file
   out_file=$(mktemp -t "seek-eval-${case_name}.XXXXXX")
+  # Same jq.exe/MSYS compatibility as the path block up top: mktemp
+  # yields /tmp/..., which a Windows-native jq cannot reopen later.
+  if command -v cygpath >/dev/null 2>&1; then
+    out_file=$(cygpath -m "$out_file")
+  fi
   local started_at
   started_at=$(date +%s)
 
@@ -208,12 +240,13 @@ run_one() {
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
     --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
+    --argjson git_subcommand_dupes "$(extract_metric git_subcommand_dupes "$out_file")" \
     --argjson probe_reads          "$(extract_metric probe_reads          "$out_file")" \
     --argjson write_refusals       "$(extract_metric write_refusals       "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got
