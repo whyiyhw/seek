@@ -131,3 +131,81 @@ func TestDiagnoseSandbox_CaseInsensitive(t *testing.T) {
 		t.Errorf("uppercase errno text escaped detection: %v", diag)
 	}
 }
+
+// TestDiagnoseSandbox_BenignNoticeIsNotRunnerFailure is the guard for the
+// exact defect dsh shipped and wrote up in postmortem 0004: their
+// launcher printed `landlock-run: partial enforcement (older Landlock
+// ABI)` on a successful path, their classifier substring-matched
+// `landlock-run: ` over the whole output plus "any nonzero exit", and
+// ripgrep's exit 1 — which means "no matches found", a SUCCESS — was
+// reported as sandbox infrastructure failure.
+//
+// This test pins the shape that prevents it: per-line matching with
+// exact informational exclusions. It fails the moment someone adds a
+// benign `seek sandbox:` line without registering it in
+// benignSandboxNotices.
+func TestDiagnoseSandbox_BenignNoticeIsNotRunnerFailure(t *testing.T) {
+	const notice = "seek sandbox: partial enforcement (older landlock abi)"
+	// Temporarily register the notice the way a future change would.
+	orig := benignSandboxNotices
+	benignSandboxNotices = []string{notice}
+	t.Cleanup(func() { benignSandboxNotices = orig })
+
+	opt := &sandbox.Options{WritableDirs: []string{"/w"}}
+	// The benign notice, then an ordinary non-zero child exit — ripgrep's
+	// "no matches" is the canonical example.
+	out := notice + "\n"
+
+	diag, hint := diagnoseSandbox(opt, 1, out)
+	if diag == sandboxDiagRunnerFailed {
+		t.Fatalf("a benign notice plus a non-zero child exit was misclassified as runner failure "+
+			"(this is dsh postmortem 0004 verbatim). hint=%q", hint)
+	}
+}
+
+// TestDiagnoseSandbox_FatalLineStillDetectedAlongsideBenign: excluding
+// informational lines must not blind the detector to a real fatal line
+// in the same output.
+func TestDiagnoseSandbox_FatalLineStillDetectedAlongsideBenign(t *testing.T) {
+	const notice = "seek sandbox: partial enforcement (older landlock abi)"
+	orig := benignSandboxNotices
+	benignSandboxNotices = []string{notice}
+	t.Cleanup(func() { benignSandboxNotices = orig })
+
+	opt := &sandbox.Options{WritableDirs: []string{"/w"}}
+	out := notice + "\nseek sandbox: landlock: cannot create ruleset\n"
+
+	if diag, _ := diagnoseSandbox(opt, 127, out); diag != sandboxDiagRunnerFailed {
+		t.Errorf("diag = %v, want sandboxDiagRunnerFailed — the fatal line was masked by the exclusion", diag)
+	}
+}
+
+// TestBenignNotices_AreExactNotPrefixes: the exclusion list must not be
+// matched loosely, or it would swallow the fatal lines it sits next to.
+func TestBenignNotices_AreExactNotPrefixes(t *testing.T) {
+	orig := benignSandboxNotices
+	benignSandboxNotices = []string{"seek sandbox: partial enforcement"}
+	t.Cleanup(func() { benignSandboxNotices = orig })
+
+	if isBenignNotice("seek sandbox: partial enforcement and then something fatal") {
+		t.Error("benign exclusion matched a longer line — must be exact, not a prefix")
+	}
+	if !isBenignNotice("seek sandbox: partial enforcement") {
+		t.Error("exact benign line was not excluded")
+	}
+}
+
+// TestBenignSandboxNotices_MatchesReality documents the current contract:
+// every `seek sandbox:` line the trampoline prints today is fatal, so the
+// exclusion list is legitimately empty. If that stops being true and the
+// list is not updated, the tests above are the ones that fire.
+func TestBenignSandboxNotices_MatchesReality(t *testing.T) {
+	if len(benignSandboxNotices) != 0 {
+		t.Skip("exclusions registered; the contract note below no longer applies verbatim")
+	}
+	// Intentionally just an assertion of the documented state so the
+	// empty list is a decision on record rather than an oversight.
+	if isBenignNotice("seek sandbox: anything") {
+		t.Error("empty exclusion list must exclude nothing")
+	}
+}

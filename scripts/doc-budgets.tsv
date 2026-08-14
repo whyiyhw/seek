@@ -1,0 +1,27 @@
+# doc-budgets.tsv — word ceilings for accretion-prone standing docs.
+#
+# Format: <path><TAB><ceiling><TAB><target>
+#   ceiling — hard limit; CI fails above it (wc -w semantics, whole file)
+#   target  — the size we actually want; ceiling ratchets toward it
+#
+# THE RATCHET (borrowed from dsh's doc-budgets note):
+#   - a doc at or below target keeps ~5% headroom as its ceiling, and the
+#     ceiling ratchets DOWN as the doc shrinks
+#   - a doc ABOVE target keeps a FROZEN ceiling at its current size: it
+#     cannot grow at all until it comes back to target
+#
+# Both agent-instruction files are currently frozen. They are ~2x the
+# size of the comparable file in dsh (root AGENTS.md ≤ 1600 words) and
+# they grew again in the change that added this gate. Freezing is the
+# point: from here, adding a paragraph requires displacing one.
+#
+# SCOPE IS DELIBERATELY NARROW. Only the standing instruction files that
+# every session pays for in prompt tokens are budgeted. Reference docs,
+# PRDs, pitfalls.md and the analysis docs are NOT listed and must not be:
+# length is legitimate there when every line is a fact, and a blanket
+# ceiling would punish exactly the right kind of long document.
+#
+# Raising a ceiling requires explicit justification in the PR. Lowering
+# one needs nothing.
+AGENTS.md	3200	1800
+CLAUDE.md	3100	1800

@@ -1,0 +1,111 @@
+# Real-API e2e — deliberately SEPARATE from ci.yml.
+#
+# ci.yml's value is that it is keyless, forkable, and always-green: any
+# contributor (including an outside fork) gets a complete signal with no
+# secret in the blast radius. Adding a secret-consuming job there would
+# couple that gate to credential availability and a different trigger
+# policy. Different lifecycles → different files.
+#
+# The load-bearing part of this file is the PREFLIGHT. The e2e tests
+# self-skip without a key (see pkg/agent/cache_e2e_test.go), which is
+# correct for `go test ./...` but catastrophic for a CI gate: a deleted,
+# renamed, or misconfigured secret would make every real-API test skip
+# and report all-green — silently removing the entire safety net while
+# looking healthier than ever. The preflight turns "secret missing" from
+# an invisible false pass into a visible failure.
+#
+# Shape borrowed from deepseek-harness's e2e workflow; see its Agent Note
+# .agents/notes/implemented/testing/2026-06-19-real-api-e2e-ci.md and
+# docs/dsh-analysis.md §11.
+name: e2e (real API)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    # 00:17 UTC = 08:17 Asia/Shanghai. Catches external-API drift (model
+    # deprecation, response-shape changes, cache behaviour) on a schedule
+    # rather than at the worst possible moment.
+    - cron: '17 0 * * *'
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: real-API e2e
+    runs-on: ubuntu-latest
+    # Skip for PRs that cannot receive repo secrets. GitHub withholds them
+    # from forks AND from Dependabot PRs (same-repo branch, so
+    # head.repo.fork is false, but secrets are still withheld).
+    #
+    # The Dependabot clause keys on the PR AUTHOR, not github.actor: a
+    # maintainer who reopens or re-runs a Dependabot PR makes github.actor
+    # a human while the PR is still keyless, and an author-based test
+    # stays correct across that.
+    #
+    # A job skipped by a job-level `if:` reports as a SUCCESSFUL check
+    # (unlike a workflow-level skip, which stays pending), so this
+    # workflow is safe to mark as a required status check — a fork PR's
+    # skipped-but-green check does not block the merge.
+    #
+    # This gate is a clean-skip nicety, not the security boundary: the
+    # boundary is GitHub's own fork-secret withholding. Without it forks
+    # still could not read the key, they would just hit the preflight
+    # hard-fail and waste compute.
+    if: >-
+      github.event_name != 'pull_request'
+      || !(github.event.pull_request.head.repo.fork
+           || github.event.pull_request.user.login == 'dependabot[bot]')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # Unconditional presence check. This job only runs on events where
+      # the secret is expected, so an empty key is a misconfiguration, not
+      # a legitimate state. Fail loud and name the secret.
+      - name: Preflight — the key must exist
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          if [ -z "${DEEPSEEK_API_KEY}" ]; then
+            echo "::error::DEEPSEEK_API_KEY is empty. The real-API suite self-skips without it, so this job would report a FALSE GREEN. Configure the DEEPSEEK_API_KEY repository secret (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          echo "key present (${#DEEPSEEK_API_KEY} chars)"
+
+      # One run, two assertions.
+      #
+      # -count=1 defeats the test cache: a cached PASS from a previous run
+      # would defeat the point of a nightly drift check.
+      #
+      # The grep is the second half of the false-green defence. A suite in
+      # which every test SKIPPED exits 0, exactly like a suite that
+      # passed. Requiring a literal PASS line proves the real test ran,
+      # not merely that nothing failed. Deliberately one invocation —
+      # re-running to check would double the API spend.
+      - name: Real-API e2e
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          # `if !` is deliberate: GitHub runs this with `bash -e`, so a
+          # bare failing pipeline would abort the step before the
+          # skip-detection grep below could report anything useful.
+          # pipefail makes the pipeline inherit go test's status rather
+          # than tee's.
+          set -o pipefail
+          if ! go test ./... -run 'RealAPI' -count=1 -v 2>&1 | tee e2e.log; then
+            echo "::error::real-API e2e failed. See the log above."
+            exit 1
+          fi
+          if ! grep -q -- '--- PASS: TestPrefixCache_RealAPI' e2e.log; then
+            echo "::error::No real-API test reported PASS. The suite skipped despite a present key — check the skip conditions in pkg/agent/cache_e2e_test.go."
+            exit 1
+          fi
+          echo "real-API coverage confirmed"

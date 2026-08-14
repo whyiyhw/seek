@@ -56,3 +56,11 @@ jobs:
             echo "::error::pkg/deepseek must not import pkg/llm (see PRD §4.1)"
             exit 1
           fi
+
+  doc-budgets:
+    name: doc-budgets (AGENTS.md / CLAUDE.md must not accrete)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify standing docs stay within budget
+        run: scripts/verify-doc-budgets.sh
