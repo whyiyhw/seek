@@ -1,0 +1,4 @@
+# Shell scripts must stay LF even on Windows checkouts (core.autocrlf
+# would otherwise turn them CRLF, which breaks strict bash on WSL/Linux
+# — see docs/test-plan-read-tool.md §执行环境).
+*.sh text eol=lf

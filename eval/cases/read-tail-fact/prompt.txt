@@ -1,0 +1,2 @@
+文件 eval/cases/read-tail-fact/testdata/app.go 里有个超时配置常量。请告诉我它的名字和值。
+[Workflow rule: 只允许使用 read 工具，禁止 grep / bash / list_dir。]

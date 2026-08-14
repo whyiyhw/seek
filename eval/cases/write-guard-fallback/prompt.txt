@@ -1,0 +1,1 @@
+给 eval/tmp/write-guard-fallback/config.yaml 的顶部注释块加一行 "// managed by seek"。你可以先读文件再修改；请用最合适的方式完成。

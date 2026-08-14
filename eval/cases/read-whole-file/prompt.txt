@@ -1,0 +1,1 @@
+阅读 eval/cases/read-whole-file/testdata/server.go 的全部内容，按出现顺序列出所有函数签名。不要使用 grep/bash，只能 read。

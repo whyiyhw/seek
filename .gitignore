@@ -9,7 +9,18 @@ coverage.txt
 
 # Build artifacts
 /seek
+/seek-baseline
+/seek-baseline-linux
+/seek-improved
+/seek-improved-linux
 /dist/
+
+# Eval scratch (per-case setup/teardown hooks land here)
+eval/tmp/
+
+# Local Go toolchain caches (eval A/B builds on Windows)
+.tmp-gocache/
+.tmp-gotel/
 
 # Editor / OS
 .DS_Store

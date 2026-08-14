@@ -87,6 +87,18 @@ extract_metric() {
     git_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="git")] | length' "$path"
       ;;
+    probe_reads)
+      # A read that returned zero lines from a non-starting offset is a
+      # probe past EOF — the model could not tell "exactly N lines" from
+      # "more pages exist". (An empty-file read at offset=1 also emits
+      # "0 lines" but lacks the "from line" fragment, so it is excluded.)
+      $JQ -s '[.[] | select(.type=="tool_end" and .name=="read" and (.result // "" | contains("0 lines emitted")) and (.result // "" | contains("from line")))] | length' "$path"
+      ;;
+    write_refusals)
+      # fsobserve guard refusals start with "write refused:" (see
+      # internal/fsobserve/fsobserve.go Explain).
+      $JQ -s '[.[] | select(.type=="tool_end" and .name=="write" and (.error // "" | contains("write refused")))] | length' "$path"
+      ;;
     turns)
       $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
       ;;
@@ -131,6 +143,16 @@ run_one() {
   local prompt
   prompt=$(cat "$prompt_file")
 
+  # Optional per-case hooks, run from repo root in the same cwd as the
+  # seek invocation: setup.sh prepares fixtures (e.g. copies them into
+  # eval/tmp/<case>/ so the model can mutate them), teardown.sh cleans
+  # up afterwards. Teardown runs even when the seek invocation failed.
+  local setup_file="$case_dir/setup.sh"
+  local teardown_file="$case_dir/teardown.sh"
+  if [[ -f "$setup_file" ]]; then
+    ( cd "$repo_root" && bash "$setup_file" )
+  fi
+
   local out_file
   out_file=$(mktemp -t "seek-eval-${case_name}.XXXXXX")
   local started_at
@@ -145,13 +167,27 @@ run_one() {
     > "$out_file" 2>/dev/null
   local elapsed=$(( $(date +%s) - started_at ))
 
+  if [[ -f "$teardown_file" ]]; then
+    ( cd "$repo_root" && bash "$teardown_file" )
+  fi
+
   # agent_end carries cumulative token counts; pull them straight out
   # so we can plot cost-vs-quality trends AND bound them as metrics
   # (completion_tokens is a robust verbosity proxy — load-bearing for
   # the code-review-effort cases).
-  local prompt_tokens completion_tokens
+  local prompt_tokens completion_tokens cache_hit_tokens
   prompt_tokens=$($JQ -s 'map(select(.type=="agent_end")) | .[0].prompt_tokens // 0' "$out_file")
   completion_tokens=$($JQ -s 'map(select(.type=="agent_end")) | .[0].completion_tokens // 0' "$out_file")
+  cache_hit_tokens=$($JQ -s 'map(select(.type=="agent_end")) | .[0].cache_hit_tokens // 0' "$out_file")
+
+  # Final assistant text (all turns' text_delta joined, reasoning
+  # excluded, capped) so offline gold-answer scoring works without
+  # keeping the raw stream — e.g. "does the answer contain 45s".
+  local final_text
+  final_text=$($JQ -rs '
+    ( [ .[] | select(.type=="text_delta" and ((.reasoning // false) | not)) | (.delta // "") ] | join("") )
+    | .[0:2000]
+  ' "$out_file")
 
   # Build a metrics object: extract one entry per metric in the
   # vocabulary. We compute the same fixed set every case so historical
@@ -168,10 +204,12 @@ run_one() {
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
     --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
+    --argjson probe_reads          "$(extract_metric probe_reads          "$out_file")" \
+    --argjson write_refusals       "$(extract_metric write_refusals       "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got
@@ -199,17 +237,21 @@ run_one() {
   fi
 
   local row
-  row=$($JQ -n \
+  # -c: jq 1.7+ pretty-prints -n object output by default; results must
+  # stay strict single-line JSONL.
+  row=$($JQ -cn \
     --arg case "$case_name" \
     --argjson pass "$pass" \
     --argjson metrics "$metrics" \
     --argjson prompt_tokens "$prompt_tokens" \
     --argjson completion_tokens "$completion_tokens" \
+    --argjson cache_hit_tokens "$cache_hit_tokens" \
     --argjson elapsed_s "$elapsed" \
     --argjson failures "$failures" \
     --arg version "$version_full" \
+    --arg final_text "$final_text" \
     --arg ran_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{case:$case, pass:$pass, metrics:$metrics, prompt_tokens:$prompt_tokens, completion_tokens:$completion_tokens, elapsed_s:$elapsed_s, failures:$failures, binary_version:$version, ran_at:$ran_at}')
+    '{case:$case, pass:$pass, metrics:$metrics, prompt_tokens:$prompt_tokens, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens, elapsed_s:$elapsed_s, failures:$failures, binary_version:$version, final_text:$final_text, ran_at:$ran_at}')
 
   echo "$row" >> "$results_file"
 

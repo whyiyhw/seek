@@ -1,0 +1,6 @@
+{
+  "description": "read 必须能取到第 118 行的尾部事实（超出 50 行 cap 的窗口之外）；改进后（I1+I2）一次到位，read_calls <= 3。金标（离线判定）：最终答案含 45s。",
+  "max_turns": 8,
+  "max_read_calls": 3,
+  "max_grep_calls": 0
+}

@@ -1,0 +1,7 @@
+{
+  "description": "恰好 50 行的文件取最后一行：模型无法区分'文件就 50 行'与'还有更多'。基线会产生 offset>1 且 0 行的 EOF 探测读（probe_reads>0）；改进后 header 的 EOF 标记终结猜测。金标（离线）：答案含 LAST_LINE_MARKER=42。",
+  "max_turns": 6,
+  "max_read_calls": 2,
+  "max_probe_reads": 0,
+  "max_grep_calls": 0
+}

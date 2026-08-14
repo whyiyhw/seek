@@ -1,0 +1,5 @@
+{
+  "description": "200 行配置只读了一部分就整文件 write：基线（部分读取即标记 observed）静默放行——缺陷现场，write_refusals 预期 0；改进（I3 仅完整读取标记）拒绝并回退 edit，write_refusals > 0。最终文件是否含目标行由 teardown.sh 记录，离线判定。",
+  "max_turns": 10,
+  "max_grep_calls": 3
+}

@@ -1,0 +1,1 @@
+文件 eval/cases/read-eof-blind/testdata/eof.txt 的最后一行内容是什么？只使用 read 工具，不要用 grep/bash。
