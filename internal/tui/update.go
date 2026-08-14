@@ -20,6 +20,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.relayout()
 
 	case tea.KeyMsg:
+		// Debug aid: record the raw event before routing decides
+		// anything (SEEK_KEYLOG=<file> to enable; no-op otherwise).
+		logKeyMsg(msg)
+		// IME/terminal bridges can deliver Enter/Backspace as character
+		// events; rewrite them to their key equivalents before routing.
+		msg = normalizeControlRunes(msg)
 		// Inline mode: PgUp/PgDn/Home/End and the mouse wheel all go
 		// to the terminal's native scrollback — we don't capture mouse
 		// events, and the viewport widget is gone. handleKey only
