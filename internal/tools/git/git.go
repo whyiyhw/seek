@@ -201,17 +201,23 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 		)
 	}
 	// A duplicated subcommand as the first arg — `git log log --oneline`
-	// — makes git treat the first positional as a revision and fail with
-	// the cryptic "ambiguous argument 'log'" error. Git's own recovery
-	// hint ("use '--' to separate paths from revisions") is misleading
-	// here: there is no path/revision ambiguity, and following it yields
-	// a different confusing error. Refuse before exec with a message
-	// that names the actual fix.
+	// — is a shape DeepSeek emits regularly (observed in the wild: two
+	// of four git calls in one turn), and a refusal it does not learn
+	// from is a pure tax: every occurrence burns a full round trip and
+	// the next call repeats the same shape. The intent is unambiguous,
+	// the tool is read-only, and the worst case of auto-fixing (a
+	// missing path/ref filter the model genuinely wanted) is recoverable
+	// from the output — so drop the duplicate and proceed, with an
+	// in-result note that names the effective command AND how to express
+	// a genuine same-named path/ref. Same philosophy as read's
+	// directory→listing fallback: do the obvious thing, teach in-band.
+	dropNote := ""
 	if len(a.Args) > 0 && a.Args[0] == a.Subcommand {
-		return "", fmt.Errorf(
-			"git: arg %q repeats the subcommand — the subcommand goes in the `subcommand` field, `args` holds flags and positionals only (e.g. [\"HEAD\", \"--stat\"]). "+
-				"If you genuinely mean a path or ref named %q: for a path, pass [\"--\", %q] explicitly; for a ref (branch/tag), use its fully-qualified form (e.g. refs/heads/%s), which does not collide with the subcommand.",
-			a.Args[0], a.Subcommand, a.Subcommand, a.Subcommand,
+		a.Args = a.Args[1:]
+		dropNote = fmt.Sprintf(
+			"note: dropped %q repeated from args — the subcommand goes in the `subcommand` field; ran `git %s`. (A genuine path/ref named %q needs [\"--\", %q] or the fully-qualified refs/heads/%s form.)\n",
+			a.Subcommand, strings.Join(append([]string{a.Subcommand}, a.Args...), " "),
+			a.Subcommand, a.Subcommand, a.Subcommand,
 		)
 	}
 	if err := validateArgs(a.Args); err != nil {
@@ -278,7 +284,7 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if truncated {
 		out += fmt.Sprintf("\n... (truncated; output exceeded %d lines — use --oneline, -n N, or path filters to narrow the query)", limit)
 	}
-	return out, nil
+	return dropNote + out, nil
 }
 
 // validateArgs scans the user-supplied args and rejects anything on

@@ -172,22 +172,30 @@ func TestExecute_RejectsBlockedArgs(t *testing.T) {
 	}
 }
 
-func TestExecute_RejectsDuplicatedSubcommandArg(t *testing.T) {
+func TestExecute_DuplicateSubcommandArgAutoFixed(t *testing.T) {
 	// subcommand "log" + args ["log", ...] would execute as
 	// `git log log ...` — git misreads the first positional as a
-	// revision and answers with the cryptic "ambiguous argument 'log'"
-	// error. The guard must refuse BEFORE exec with a message naming
-	// the real fix (git's own "use '--'" hint is misleading here).
+	// revision ("ambiguous argument"). Observed in the wild, the model
+	// emits this shape repeatedly and does NOT learn from refusals, so
+	// the guard auto-fixes: drop the duplicate, run the intended
+	// command, and teach in-band via a note naming the effective git
+	// invocation.
 	initRepo(t)
-	_, err := Tool{}.Execute(context.Background(), json.RawMessage(`{
+	out, err := Tool{}.Execute(context.Background(), json.RawMessage(`{
 		"subcommand": "log",
 		"args": ["log", "--oneline", "-n", "5"]
 	}`))
-	if err == nil {
-		t.Fatal("first arg repeating the subcommand must be rejected")
+	if err != nil {
+		t.Fatalf("duplicated subcommand must be auto-fixed, not refused: %v", err)
 	}
-	if !strings.Contains(err.Error(), "`subcommand` field") {
-		t.Errorf("error should point at the subcommand field, got: %v", err)
+	if !strings.Contains(out, "dropped \"log\"") {
+		t.Errorf("result must note the dropped duplicate, got: %q", out)
+	}
+	if !strings.Contains(out, "ran `git log --oneline -n 5`") {
+		t.Errorf("note must name the effective command, got: %q", out)
+	}
+	if !strings.Contains(out, "second commit") {
+		t.Errorf("the intended `git log --oneline -n 5` must have actually run, got: %q", out)
 	}
 }
 
