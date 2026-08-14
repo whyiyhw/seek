@@ -1106,6 +1106,9 @@ func run() error {
 	// Read here rather than at the later config.Load() because the bash
 	// tool is a value type — options must be set before reg.Add copies it.
 	bashCfg, _ := config.Load()
+	// Same load serves the read tool's limits (max_limit /
+	// whole_read_bytes).
+	readCfg := bashCfg
 	bashEnvKeep := bashCfg.BashEnvPassthrough
 	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
 	if goalMode {
@@ -1129,7 +1132,9 @@ func run() error {
 	observed := fsobserve.New()
 
 	reg := tools.New().
-		Add(guarded(read.New(policy).WithObserver(observed))).
+		Add(guarded(read.New(policy).
+			WithLimits(readCfg.ReadMaxLimit(), readCfg.ReadWholeReadBytes()).
+			WithObserver(observed))).
 		Add(references.New(lspMgr)).
 		Add(guarded(grep.New())).
 		Add(guarded(listdir.New())).

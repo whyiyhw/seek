@@ -51,10 +51,12 @@ func TestRead_Basic(t *testing.T) {
 
 func TestRead_LimitParamValidation(t *testing.T) {
 	tool, dir := testReadTool(t)
-	// Build a file with 60 lines (beyond default limit).
+	// Build a file with 400 LONG lines (well above the whole-read size
+	// threshold and the default limit) so limit windowing applies.
 	var sb strings.Builder
-	for i := range 60 {
-		fmt.Fprintf(&sb, "line%d\n", i+1)
+	for i := range 400 {
+		fmt.Fprintf(&sb, "key_%03d = \"value-%d-%s\" // padding padding padding padding\n",
+			i+1, i+1, strings.Repeat("x", 60))
 	}
 	p := writeFileIn(t, dir, sb.String())
 
@@ -65,11 +67,11 @@ func TestRead_LimitParamValidation(t *testing.T) {
 			limit     int // -1 = omit from JSON
 			wantLines int
 		}{
-			{"limit=50 (at cap)", 50, 50},
+			{"limit=200 (at cap)", 200, 200},
 			{"limit=10 explicit", 10, 10},
 			{"limit=1 explicit", 1, 1},
-			{"limit=0 defaults to 50", 0, 50},
-			{"no limit param defaults to 50", -1, 50},
+			{"limit=0 defaults to 200", 0, 200},
+			{"no limit param defaults to 200", -1, 200},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -85,9 +87,9 @@ func TestRead_LimitParamValidation(t *testing.T) {
 				if !strings.Contains(out, fmt.Sprintf("%d lines emitted", tc.wantLines)) {
 					t.Errorf("expected %d lines emitted, got:\n%s", tc.wantLines, out)
 				}
-				// File has 60 lines; any limit < 60 should show TRUNCATED.
-				if tc.wantLines < 60 && !strings.Contains(out, "TRUNCATED") {
-					t.Errorf("expected TRUNCATED for limit=%d on 60-line file:\n%s", tc.limit, out)
+				// File has 400 lines; any limit < 400 should show TRUNCATED.
+				if tc.wantLines < 400 && !strings.Contains(out, "TRUNCATED") {
+					t.Errorf("expected TRUNCATED for limit=%d on 400-line file:\n%s", tc.limit, out)
 				}
 			})
 		}
@@ -99,8 +101,8 @@ func TestRead_LimitParamValidation(t *testing.T) {
 			name  string
 			limit int
 		}{
-			{"limit=100", 100},
-			{"limit=51", 51},
+			{"limit=201", 201},
+			{"limit=250", 250},
 			{"limit=999", 999},
 		}
 		for _, tc := range cases {
@@ -108,9 +110,9 @@ func TestRead_LimitParamValidation(t *testing.T) {
 				raw, _ := json.Marshal(map[string]any{"path": p, "limit": tc.limit})
 				_, err := tool.Execute(context.Background(), raw)
 				if err == nil {
-					t.Fatal("expected error for limit > 50")
+					t.Fatal("expected error for limit > 200")
 				}
-				if !strings.Contains(err.Error(), "exceeds maximum (50)") {
+				if !strings.Contains(err.Error(), "exceeds maximum (200)") {
 					t.Errorf("wrong error message: %v", err)
 				}
 			})
@@ -190,12 +192,14 @@ func TestRead_DirectoryDegradesToListing(t *testing.T) {
 }
 
 func TestRead_DefaultLimitTruncatesLargeFile(t *testing.T) {
-	// Build a file with defaultLimit+10 lines — reading without an explicit
-	// limit must stop at defaultLimit and emit a TRUNCATED notice.
+	// Build a file with 400 LONG lines (> 32 KiB whole-read threshold) —
+	// reading without an explicit limit must stop at defaultMaxLimit and
+	// emit a TRUNCATED notice.
 	var sb strings.Builder
-	total := defaultLimit + 10
+	total := 400
 	for i := range total {
-		fmt.Fprintf(&sb, "line%d\n", i+1)
+		fmt.Fprintf(&sb, "key_%03d = \"value-%d-%s\" // padding padding padding padding\n",
+			i+1, i+1, strings.Repeat("x", 60))
 	}
 	tool, dir := testReadTool(t)
 	p := writeFileIn(t, dir, sb.String())
@@ -206,14 +210,14 @@ func TestRead_DefaultLimitTruncatesLargeFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "TRUNCATED") {
-		t.Errorf("expected TRUNCATED notice for %d-line file with default limit %d:\n%s", total, defaultLimit, out)
+		t.Errorf("expected TRUNCATED notice for %d-line file with default limit %d:\n%s", total, defaultMaxLimit, out)
 	}
-	// The last emitted line should be defaultLimit, not total.
-	wantLast := fmt.Sprintf("%6d\tline%d", defaultLimit, defaultLimit)
+	// The last emitted line should be defaultMaxLimit, not total.
+	wantLast := fmt.Sprintf("%6d\tkey_%03d", defaultMaxLimit, defaultMaxLimit)
 	if !strings.Contains(out, wantLast) {
 		t.Errorf("expected last emitted line %q:\n%s", wantLast, out)
 	}
-	unwanted := fmt.Sprintf("line%d", defaultLimit+1)
+	unwanted := fmt.Sprintf("key_%03d", defaultMaxLimit+1)
 	if strings.Contains(out, unwanted) {
 		t.Errorf("output should not contain line beyond default limit: %s", out)
 	}

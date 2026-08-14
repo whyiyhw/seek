@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -19,19 +20,21 @@ import (
 
 // schemaBytes is the JSON Schema for the `read` tool's arguments. Frozen
 // as a package-level []byte so the wire bytes are byte-identical every
-// turn (PRD §4.8.1 — any mutation kills DeepSeek's prefix cache).
+// turn (PRD §4.8.1 — any mutation kills DeepSeek's prefix cache). The
+// limit maximum mirrors defaultMaxLimit; a configured limit lower than
+// the schema maximum is enforced at runtime with a clear error.
 var schemaBytes = []byte(`{
   "type": "object",
   "properties": {
     "path":   {"type": "string", "description": "Absolute or repo-relative path to the file."},
     "offset": {"type": "integer", "description": "1-based line number to start from. Defaults to 1. Use with successive calls to page through a file.", "minimum": 1},
-    "limit":  {"type": "integer", "minimum": 1, "maximum": 50, "default": 50, "description": "Maximum lines to return (capped at 50). Defaults to 50."}
+    "limit":  {"type": "integer", "minimum": 1, "maximum": 200, "default": 200, "description": "Maximum lines to return (capped at 200). Defaults to 200. Small files (<= 32 KiB) are always returned whole regardless of limit."}
   },
   "required": ["path"],
   "additionalProperties": false
 }`)
 
-const description = "Read up to 50 lines from a file (with 1-based line numbers). Accepts an optional limit parameter (default 50, max 50 — values above 50 error). Use grep to locate the exact range first, then read(offset=N, limit=N) to retrieve it. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
+const description = "Read lines from a file (with 1-based line numbers). Small files (<= 32 KiB) are returned WHOLE in one call. Larger files: accepts optional limit (default 200, max 200) and offset (default 1); the header reports the total ('EOF at line N') when the read reached the end, so you never need a probing read. Over-long single lines are elided in-band. Use grep to locate the exact range first, then read(offset=N, limit=N) to retrieve it. OR list a directory's immediate entries when the path is a directory. For deeper recursion or to show hidden entries, use list_dir explicitly."
 
 // Args is the decoded argument struct for `read`.
 type Args struct {
@@ -40,18 +43,58 @@ type Args struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
+// Defaults (configurable per-tool via WithLimits).
+const (
+	// defaultMaxLimit caps one read call's emitted lines.
+	defaultMaxLimit = 200
+	// defaultWholeReadBytes: regular files at or below this size are
+	// emitted whole in one call regardless of limit/offset semantics
+	// (offset still applies). 32 KiB is the measured sweet spot from the
+	// read-tool A/B eval (docs/test-plan-read-tool.md §7.0/§7.2 — 16 KiB
+	// left case C cost 0.3% short of the H1 gate; 64 KiB cost more than
+	// 32 KiB because the model wrote longer answers).
+	defaultWholeReadBytes = 32 * 1024
+	// maxLineBytes caps an individual emitted line; longer lines are
+	// elided in-band with a marker instead of failing the read.
+	maxLineBytes = 1024
+	// maxResultBytes caps the whole result; the middle is elided.
+	maxResultBytes = 64 * 1024
+	// headKeep/tailKeep bound the elided middle (clampOutput pattern).
+	headKeep = 8 * 1024
+	tailKeep = 24 * 1024
+)
+
 // Tool is the read tool implementation. Construct via New.
 type Tool struct {
-	policy   *permission.Policy
-	observer *fsobserve.Store
+	policy         *permission.Policy
+	observer       *fsobserve.Store
+	maxLimit       int
+	wholeReadBytes int
 }
 
 // New returns a read tool gated by the given permission policy.
-func New(p *permission.Policy) Tool { return Tool{policy: p} }
+func New(p *permission.Policy) Tool {
+	return Tool{policy: p, maxLimit: defaultMaxLimit, wholeReadBytes: defaultWholeReadBytes}
+}
 
-// WithObserver records every successful read in s, which is what lets
-// the `write` tool refuse a blind whole-file overwrite later. Optional:
-// a nil observer leaves read's behaviour unchanged.
+// WithLimits overrides the per-call line cap and the whole-read size
+// threshold (config.Read.max_limit / whole_read_bytes). Zero values
+// keep the defaults.
+func (t Tool) WithLimits(maxLimit, wholeReadBytes int) Tool {
+	if maxLimit > 0 {
+		t.maxLimit = maxLimit
+	}
+	if wholeReadBytes > 0 {
+		t.wholeReadBytes = wholeReadBytes
+	}
+	return t
+}
+
+// WithObserver records a successful FULL read in s, which is what lets
+// the `write` tool refuse a blind whole-file overwrite later. A partial
+// read (offset > 1, or a limit that truncated the file) does NOT vouch
+// for the whole file. Optional: a nil observer leaves read's behaviour
+// unchanged.
 func (t Tool) WithObserver(s *fsobserve.Store) Tool {
 	t.observer = s
 	return t
@@ -61,8 +104,6 @@ func (Tool) Name() string            { return "read" }
 func (Tool) Description() string     { return description }
 func (Tool) Schema() json.RawMessage { return schemaBytes }
 func (Tool) ReadOnly() bool          { return true }
-
-const defaultLimit = 50
 
 func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
@@ -78,13 +119,14 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if a.Offset == 0 {
 		a.Offset = 1
 	}
-	// Default limit to 50 if omitted (omitempty drops 0 from JSON, so Go
-	// zero-value is 0). Reject values above 50 — the schema's maximum:50
-	// should catch this, but if the model ignores it, error clearly.
+	// Default limit to maxLimit if omitted (omitempty drops 0 from JSON,
+	// so Go zero-value is 0). Reject values above the configured maximum
+	// — the schema's maximum should catch this, but if the model ignores
+	// it, error clearly.
 	if a.Limit == 0 {
-		a.Limit = defaultLimit
-	} else if a.Limit > defaultLimit {
-		return "", fmt.Errorf("read: limit=%d exceeds maximum (%d). Valid: 1-%d, or omit the parameter for the default.", a.Limit, defaultLimit, defaultLimit)
+		a.Limit = t.maxLimit
+	} else if a.Limit > t.maxLimit {
+		return "", fmt.Errorf("read: limit=%d exceeds maximum (%d). Valid: 1-%d, or omit the parameter for the default.", a.Limit, t.maxLimit, t.maxLimit)
 	}
 
 	clean := t.policy.Resolve(a.Path)
@@ -117,49 +159,132 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		return listDirShallow(clean)
 	}
 
+	// I2: small regular files are emitted whole in one call — the model
+	// should never need to page a file that fits in a single response,
+	// and a whole read is what qualifies as "seen" for the write guard.
+	whole := info.Mode().IsRegular() && info.Size() <= int64(t.wholeReadBytes)
+	limit := a.Limit
+	if whole {
+		limit = 1 << 30
+	}
+
 	var (
-		out       strings.Builder
-		lineNo    = 0
-		emitted   = 0
-		truncated bool
+		out        strings.Builder
+		lineNo     = 0
+		emitted    = 0
+		truncated  bool
+		reachedEOF bool
 	)
-
-	sc := bufio.NewScanner(f)
-	// Allow individual lines up to 1 MiB.
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for sc.Scan() {
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, elided, lerr := readLine(r, maxLineBytes)
+		if lerr == io.EOF {
+			reachedEOF = true
+			break
+		}
+		if lerr != nil {
+			return "", fmt.Errorf("read: %w", lerr)
+		}
 		lineNo++
 		if lineNo < a.Offset {
 			continue
 		}
-		if emitted >= a.Limit {
+		if emitted >= limit {
 			truncated = true
 			break
 		}
-		fmt.Fprintf(&out, "%6d\t%s\n", lineNo, sc.Text())
 		emitted++
-	}
-	if err := sc.Err(); err != nil {
-		return "", fmt.Errorf("read: scan: %w", err)
+		fmt.Fprintf(&out, "%6d\t%s", lineNo, line)
+		if elided > 0 {
+			fmt.Fprintf(&out, " … [%d bytes of this line elided]", elided)
+		}
+		out.WriteByte('\n')
 	}
 
-	// Record the file's current state: the model has now seen it, which
-	// is what permits a later whole-file `write`. Deliberately AFTER the
-	// scan succeeded — a read that errored out mid-file did not give the
-	// model a usable view of the contents.
-	t.observer.Observe(clean)
+	// I3: only a read that covered the WHOLE file vouches for it. A
+	// windowed/truncated read or an offset read shows a fragment, and a
+	// fragment must not permit a blind whole-file overwrite.
+	if reachedEOF && a.Offset <= 1 && !truncated {
+		t.observer.Observe(clean)
+	}
 
 	header := fmt.Sprintf("%s (%d bytes", clean, info.Size())
 	if a.Offset > 1 {
 		header += fmt.Sprintf(", from line %d", a.Offset)
 	}
 	header += fmt.Sprintf(", %d lines emitted", emitted)
+	// I1: the model must be able to tell "file ends here" from "more
+	// pages exist" without a probing read.
+	if reachedEOF {
+		header += fmt.Sprintf(", EOF at line %d", lineNo)
+	}
 	if truncated {
 		header += fmt.Sprintf(", TRUNCATED — continue with offset=%d", lineNo)
 	}
 	header += ")\n"
-	return header + out.String(), nil
+
+	outStr := header + out.String()
+	// I4: bound the whole result (middle elision, tail intact).
+	if len(outStr) > maxResultBytes {
+		outStr = outStr[:headKeep] +
+			fmt.Sprintf("\n… [read output elided: %d bytes removed — the tail below is intact]\n", len(outStr)-headKeep-tailKeep) +
+			outStr[len(outStr)-tailKeep:]
+	}
+	return outStr, nil
+}
+
+// readLine reads the next line from r, newline stripped. Returns the
+// kept bytes, the number of bytes elided (0 when the line fits), and
+// io.EOF when no line remains. Over-long lines are truncated in-band
+// (head kept, remainder drained and counted) instead of failing the
+// whole read — bufio.Scanner's token-too-long would otherwise turn a
+// minified bundle into a hard error.
+func readLine(r *bufio.Reader, maxKeep int) (line []byte, elided int, err error) {
+	kept := make([]byte, 0, 256)
+	consumed := 0
+	for {
+		frag, e := r.ReadSlice('\n')
+		consumed += len(frag)
+		if len(kept)+len(frag) > maxKeep+1 { // +1 lets the \n fit exactly
+			// Line exceeds the keep cap: keep what fits, drain the rest
+			// so the next readLine starts at the next line.
+			if take := maxKeep - len(kept); take > 0 {
+				kept = append(kept, frag[:take]...)
+			}
+			for e == bufio.ErrBufferFull {
+				frag, e = r.ReadSlice('\n')
+				consumed += len(frag)
+			}
+			if e == io.EOF && len(kept) == 0 {
+				return nil, 0, io.EOF
+			}
+			return trimNL(kept), consumed - len(kept), normEOF(e)
+		}
+		kept = append(kept, frag...)
+		if e != bufio.ErrBufferFull {
+			if e == io.EOF && len(kept) == 0 {
+				return nil, 0, io.EOF
+			}
+			return trimNL(kept), 0, normEOF(e)
+		}
+	}
+}
+
+// trimNL strips one trailing newline (Scanner.Text semantics).
+func trimNL(b []byte) []byte {
+	if n := len(b); n > 0 && b[n-1] == '\n' {
+		return b[:n-1]
+	}
+	return b
+}
+
+// normEOF turns a clean end-of-file into nil so callers only see io.EOF
+// for "no line at all".
+func normEOF(err error) error {
+	if err == io.EOF {
+		return nil
+	}
+	return err
 }
 
 // listDirShallow is the directory fallback for Read. Same shape as

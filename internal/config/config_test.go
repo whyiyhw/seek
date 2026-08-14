@@ -151,6 +151,30 @@ func TestPath_UnderSeekHome(t *testing.T) {
 	}
 }
 
+func TestReadLimits_DefaultsAndOverrides(t *testing.T) {
+	var c Config
+	if got := c.ReadMaxLimit(); got != 200 {
+		t.Errorf("default ReadMaxLimit = %d, want 200", got)
+	}
+	if got := c.ReadWholeReadBytes(); got != 32*1024 {
+		t.Errorf("default ReadWholeReadBytes = %d, want %d", got, 32*1024)
+	}
+
+	c.Read = &ReadConfig{MaxLimit: 500, WholeReadBytes: 4096}
+	if got := c.ReadMaxLimit(); got != 500 {
+		t.Errorf("ReadMaxLimit = %d, want 500", got)
+	}
+	if got := c.ReadWholeReadBytes(); got != 4096 {
+		t.Errorf("ReadWholeReadBytes = %d, want 4096", got)
+	}
+
+	// Zero values must fall back to defaults, not clamp to zero.
+	c.Read = &ReadConfig{}
+	if got := c.ReadMaxLimit(); got != 200 {
+		t.Errorf("zero ReadMaxLimit = %d, want 200", got)
+	}
+}
+
 // isWindows is split out so the perm-check test reads cleanly. We
 // avoid runtime.GOOS at the call site to keep the test body
 // platform-agnostic in shape.

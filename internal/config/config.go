@@ -83,6 +83,11 @@ type Config struct {
 	// Command set. See docs/prd/feature-image-ocr.md.
 	OCR *OCRConfig `json:"ocr,omitempty"`
 
+	// Read tunes the `read` tool's output limits (read-tool v0.10.x
+	// improvements — docs/test-plan-read-tool.md §1). All fields
+	// optional.
+	Read *ReadConfig `json:"read,omitempty"`
+
 	// BashEnvPassthrough names environment variables that survive the
 	// credential scrub applied to commands the MODEL runs (internal/
 	// childenv). By default anything whose name looks credential-bearing
@@ -99,6 +104,33 @@ type Config struct {
 	//
 	// Empty / absent = scrub everything that matches (the safe default).
 	BashEnvPassthrough []string `json:"bash_env_passthrough,omitempty"`
+}
+
+// ReadConfig configures the read tool (internal/tools/read). All fields
+// optional; zero values keep the package defaults.
+type ReadConfig struct {
+	// MaxLimit caps one read call's emitted lines (default 200).
+	MaxLimit int `json:"max_limit,omitempty"`
+	// WholeReadBytes: regular files at or below this size are emitted
+	// whole in one call regardless of limit (default 16 KiB).
+	WholeReadBytes int `json:"whole_read_bytes,omitempty"`
+}
+
+// ReadMaxLimit returns the per-call line cap (default 200).
+func (c Config) ReadMaxLimit() int {
+	if c.Read == nil || c.Read.MaxLimit <= 0 {
+		return 200
+	}
+	return c.Read.MaxLimit
+}
+
+// ReadWholeReadBytes returns the whole-read size threshold (default
+// 32 KiB — measured sweet spot, see docs/test-plan-read-tool.md §7.0).
+func (c Config) ReadWholeReadBytes() int {
+	if c.Read == nil || c.Read.WholeReadBytes <= 0 {
+		return 32 * 1024
+	}
+	return c.Read.WholeReadBytes
 }
 
 // OCRConfig configures local image OCR (v7 柱 Q). All fields optional.
