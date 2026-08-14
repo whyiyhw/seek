@@ -21,11 +21,11 @@
 //
 // # Why stat, not a content hash
 //
-// The freshness token is (size, mtime), not a digest. `read` streams
-// files line-by-line through a bufio.Scanner and caps its window at 50
-// lines; hashing would force a full read of every file the model peeks
-// at, so a 50-line window into a 100 MB log would cost 100 MB of I/O to
-// produce a token. Stat is O(1) regardless of file size.
+// The freshness token is (size, mtime), not a digest. `read` serves
+// windowed views of large files; hashing would force a full read of
+// every file the model peeks at, so a windowed peek into a 100 MB log
+// would cost 100 MB of I/O to produce a token. Stat is O(1) regardless
+// of file size.
 //
 // The tradeoff is deliberate and biased toward safety: `touch` with no
 // content change reads as stale (a false "re-read please", costing one

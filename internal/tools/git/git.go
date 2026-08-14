@@ -47,7 +47,7 @@ const toolName = "git"
 // hardLineCap is the absolute maximum number of lines returned from
 // any git invocation. The model's max_lines arg is clamped to this
 // before the command runs — there is no way to bypass it. Same
-// philosophy as the read tool's 50-line cap: the safety is in the
+// philosophy as the read tool's output limits: the safety is in the
 // tool, not in the schema (which the LLM can lie about).
 const hardLineCap = 500
 

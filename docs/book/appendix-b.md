@@ -46,6 +46,8 @@ Claude Code 的 system prompt 可以在网上找到。Anthropic 的 tool descrip
 
 **结果**：
 
+> 注：下表记录 2026-05 的行为快照——当时 `read` 默认输出 50 行。现在的 `read` 已改为：≤32 KiB 的小文件整体返回、`limit` 默认 200、header 报告 EOF 行号（见 `docs/test-plan-read-tool.md`）。
+
 | | Baseline | After |
 |---|---|---|
 | 工具顺序 | `read(50行) → grep → read(offset)` | **`grep → read(offset)`** |

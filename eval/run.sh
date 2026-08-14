@@ -33,7 +33,11 @@ if ! command -v jq >/dev/null 2>&1 && ! command -v jq.exe >/dev/null 2>&1; then
   echo "eval: jq is required but not installed" >&2
   exit 2
 fi
-# Resolve jq binary name (WSL needs jq.exe, Linux/macOS uses jq).
+# Resolve jq. Prefer a native jq; the jq.exe fallback only works when
+# the script runs under MSYS (git-bash) with Windows-visible paths —
+# under WSL a Windows jq.exe cannot open /mnt/... or /tmp/... paths
+# (install the Linux jq instead: sudo apt install jq). See
+# docs/test-plan-read-tool.md §8.3.
 if command -v jq >/dev/null 2>&1; then
   JQ=jq
 else

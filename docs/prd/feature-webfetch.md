@@ -28,7 +28,7 @@
 | 安全边界 | path-inside-CWD | URL 不指向私网 / loopback / file:// |
 | 操作 | 读字节 | HTTP GET |
 | 写? | 否 | 否（永远） |
-| 输出 cap | 50 行 | 64 KiB（默认）/ 256 KiB（max） |
+| 输出 cap | ≤32 KiB 整体返回 / 64 KiB 结果上限 | 64 KiB（默认）/ 256 KiB（max） |
 | 在 plan-analyze? | 允许 | 允许 |
 
 模型用 `webfetch` 应该像用 `read` 一样自然：拿走内容，不会有副作用。
