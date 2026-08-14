@@ -100,6 +100,65 @@ func TestCheck_ForgetMakesFileUnseenAgain(t *testing.T) {
 	}
 }
 
+func TestCheck_ForgetClearsElidedNoteToo(t *testing.T) {
+	s := New()
+	path := filepath.Join(t.TempDir(), "gone-elided.go")
+	writeFile(t, path, "x")
+	s.NoteElided(path)
+	s.Forget(path)
+
+	if got := s.Check(path); got != StatusUnseen {
+		t.Errorf("Check after Forget = %v, want StatusUnseen", got)
+	}
+}
+
+// An elided read must refuse the write with StatusElided (whose message
+// names the real recovery), not StatusUnseen (whose "read it again"
+// advice can never succeed for this file shape).
+func TestCheck_ElidedReadIsStatusElided(t *testing.T) {
+	s := New()
+	path := filepath.Join(t.TempDir(), "huge.go")
+	writeFile(t, path, "x")
+	s.NoteElided(path)
+
+	if got := s.Check(path); got != StatusElided {
+		t.Errorf("Check after NoteElided = %v, want StatusElided", got)
+	}
+	if msg := Explain(s.Check(path), path); !strings.Contains(msg, "elided") || !strings.Contains(msg, "edit") {
+		t.Errorf("StatusElided message must name the elision and the `edit` recovery: %q", msg)
+	}
+}
+
+// A complete observation supersedes an elided note: the edit/write
+// re-observe after mutating the file must keep read → edit → write
+// legal even when an earlier read of the same file elided.
+func TestCheck_ObserveSupersedesElidedNote(t *testing.T) {
+	s := New()
+	path := filepath.Join(t.TempDir(), "then-edited.go")
+	writeFile(t, path, "x")
+	s.NoteElided(path)
+
+	s.Observe(path) // what edit/write do after mutating
+	if got := s.Check(path); got != StatusOK {
+		t.Errorf("Check after Observe = %v, want StatusOK", got)
+	}
+}
+
+// Staleness outranks elision: if the file changed on disk after the
+// elided read, the refusal must say so (StatusStale) — the model's
+// partial view is not merely incomplete, it is outdated.
+func TestCheck_ElidedThenChangedOnDiskIsStale(t *testing.T) {
+	s := New()
+	path := filepath.Join(t.TempDir(), "raced-elided.go")
+	writeFile(t, path, "v1")
+	s.NoteElided(path)
+
+	bump(t, path, "v2 from a colleague — longer")
+	if got := s.Check(path); got != StatusStale {
+		t.Errorf("Check after external change = %v, want StatusStale (stale outranks elided)", got)
+	}
+}
+
 func TestCheck_DirectoryIsNotOurProblem(t *testing.T) {
 	s := New()
 	dir := t.TempDir()

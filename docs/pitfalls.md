@@ -1081,6 +1081,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: before bounding any output, ask where the INFORMATION is, not where the bytes are. Truncation that silently removes the answer is worse than truncation that removes context — the first produces a confident wrong conclusion, the second produces a request for more detail. When both ends matter, elide the middle and say so in-band.
 - **Refs**: `internal/tools/bash/bash.go:clampOutput`, `internal/tools/bash/bash_test.go:TestBash_PreservesVerdictAtTail`
 
+### git tool: a duplicated subcommand arg surfaces git's cryptic "ambiguous argument" error
+- **Saw**: `git` tool called with `subcommand: "diff"` + `args: ["diff", "HEAD", "--stat"]` (the model repeated the subcommand as the first arg) returned `fatal: ambiguous argument 'diff': unknown revision or path not in the working tree. Use '--' to separate paths from revisions, like this: git diff -- <path>...`. The hint is misleading — there is no path/revision ambiguity, and following it yields a different confusing error (`pathspec 'HEAD' did not match`).
+- **Why**: `internal/tools/git/git.go` builds `git -c color.ui=false <subcommand> <args...>`; a repeated subcommand becomes a second positional, which `git diff` parses as a tree-ish. The error wrapper passes git's stderr through untouched, so the model receives git's generic hint instead of the actual fix — a burned turn.
+- **Fix**: pre-exec guard in `Execute` — `args[0] == subcommand` is refused with a message naming the `subcommand` field and the `["--", <path>]` escape hatch; the schema `args` description now says the subcommand is never repeated as an arg (descriptions travel with every request, so this also prevents the mistake at the source). Two tests: rejection message + `git log -- log` (a file literally named `log`) still works. (uncommitted)
+- **Lesson**: when a tool wraps another CLI, error passthrough is a UI decision — a cryptic underlying error is a tool bug, not "git's fault". Refuse before exec with the real fix; and note that in a backtick-delimited raw-string schema, the schema text must not contain backticks (the first `subcommand` in an early draft of this message broke the build).
+- **Refs**: `internal/tools/git/git.go:Execute`, `internal/tools/git/git_test.go:TestExecute_RejectsDuplicatedSubcommandArg`
+
 ## Testing
 
 ### Cache-hit tests against a fake backend prove the parser, not the behaviour
@@ -1136,6 +1143,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: before turning an observed string into a diagnosis, ask what ELSE produces that string. If the answer is "lots of ordinary things", the signature is not the detector — the signature plus the context gates is. And validate the signature against a REAL denial: a unit test with hand-written errno text proves the matcher, not the claim that the OS prints that text (`sandbox_test.go:TestBash_SandboxDenial_IsAttributed` drives real seatbelt so the hint fails loudly if macOS ever changes the wording).
 - **Refs**: `internal/tools/bash/sandboxhint.go`, `internal/tools/bash/sandboxhint_test.go`, `internal/tools/bash/sandbox_test.go:TestBash_SandboxDenial_IsAttributed`, dsh `packages/sandbox/sandbox/src/index.ts:95-116`
 
+### A read that reached EOF but got elided still vouched for the whole file
+- **Saw**: (review-time) I3 ("only a full read vouches") and I4 ("cap the result, elide the middle") landed in one commit, and the Observe condition checked only `reachedEOF && offset<=1 && !truncated` — every term describes the SCAN, none describes what the model RECEIVED. A 70 KiB file of 100 sub-1-KiB lines: the default read reaches EOF with nothing truncated, the output exceeds the 64 KiB cap, the middle is elided — and Observe fired anyway, letting the write guard authorise overwriting ~38 KiB the model never saw. The in-band line elision opens the same hole (a ≤32 KiB whole-read whose single over-long line comes back as 1 KiB + marker).
+- **Why**: two invariants phrased about different subjects. "Covered the file" is a property of the scan; "seen every byte" is a property of the result. Elision is exactly where they diverge — and neither I3's tests nor I4's tests could catch it, because each fixture exercised only one improvement.
+- **Fix**: `read` tracks both elision kinds; a full-but-elided read records `NoteElided` instead of `Observe`. fsobserve gains `StatusElided`, whose refusal message names the real recovery (`edit`, or ask the user) — NOT "read it again", which can never clear an elided note (the same parts elide every time) and would just burn turns. Stale outranks elided: an external change is the more urgent fact.
+- **Lesson**: when two features land together, test their INTERSECTION, not just each side — the bug lived only where both applied. And when a guard refuses, ask whether its recovery advice is achievable for the class of input that triggered it; advice that cannot succeed is worse than no advice, because the model retries it.
+- **Refs**: `internal/tools/read/read.go` (Observe/NoteElided gate), `internal/fsobserve/fsobserve.go:StatusElided`, `internal/tools/read/read_improved_test.go:TestRead_ResultElidedFullReadDoesNotVouch`
+
 ## Tooling / line endings
 
 ### A/B eval binaries built from the same commit share the -version string, so run.sh writes both sides into ONE results file
@@ -1158,3 +1172,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: convert `eval/run.sh`'s working copy to LF; add `.gitattributes` with `*.sh text eol=lf` so shell scripts check out LF everywhere. Phase 2+ eval runs must execute in WSL with a Linux jq (`sudo apt install jq`), not git-bash with jq.exe.
 - **Lesson**: "it runs in git-bash" is not evidence a script is portable — MSYS bash is lenient about CRLF and Windows binaries can't see MSYS/WSL paths. After editing any `.sh` on Windows, verify no whole-file line-ending noise in `git diff`, and test strict environments (WSL) before trusting the script. Shell scripts are LF-forever: enforce it in `.gitattributes`, don't rely on contributors remembering.
 - **Refs**: `eval/run.sh`, `.gitattributes`, `docs/test-plan-read-tool.md` §8.3
+
+### Hand-rolled readLine dropped bufio.Scanner's dropCR — CRLF lines gained an invisible \r
+- **Saw**: after replacing `bufio.Scanner` with a hand-written `ReadSlice` loop (to elide over-long lines instead of hard-failing on them), every line of a CRLF working-tree file gained a trailing `\r` in read output. Invisible in the TUI, invisible to the model, present in the context bytes.
+- **Why**: Scanner's `ScanLines` silently drops the `\r` of a `\r\n` pair (`dropCR`). That behaviour is undocumented at the call site — it lives inside the stdlib split function — so reimplementing "read a line" without it regressed invisibly. edit's line-ending fallback tier masked the practical damage (an old_string with or without the `\r` normalises to a match), which is why nothing failed loudly.
+- **Fix**: `trimNL` strips one `\n` and then one `\r` (Scanner.Text semantics, including the final no-newline token). Test pins CRLF input → CR-free output.
+- **Lesson**: when replacing a stdlib convenience with a hand-rolled loop, diff the BEHAVIOURS, not the happy path — Scanner's contract includes token-mangling (dropCR) you don't notice until it's gone. On a core.autocrlf Windows checkout (seek's home platform) the regression ships to every session that reads a checked-out text file.
+- **Refs**: `internal/tools/read/read.go:trimNL`, `internal/tools/read/read_test.go:TestRead_CRLFStripped`, this file's "core.autocrlf + editing .sh on Windows" entry above

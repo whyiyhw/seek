@@ -90,11 +90,13 @@ func (t Tool) WithLimits(maxLimit, wholeReadBytes int) Tool {
 	return t
 }
 
-// WithObserver records a successful FULL read in s, which is what lets
-// the `write` tool refuse a blind whole-file overwrite later. A partial
-// read (offset > 1, or a limit that truncated the file) does NOT vouch
-// for the whole file. Optional: a nil observer leaves read's behaviour
-// unchanged.
+// WithObserver records a successful FULL, UN-ELIDED read in s, which is
+// what lets the `write` tool refuse a blind whole-file overwrite later.
+// A partial read (offset > 1, or a limit that truncated the file) does
+// NOT vouch for the whole file, and neither does a whole-file read whose
+// output was elided (an over-long line, or the result-level middle cut)
+// — that records an elided note so the refusal names the real recovery.
+// Optional: a nil observer leaves read's behaviour unchanged.
 func (t Tool) WithObserver(s *fsobserve.Store) Tool {
 	t.observer = s
 	return t
@@ -169,11 +171,12 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	}
 
 	var (
-		out        strings.Builder
-		lineNo     = 0
-		emitted    = 0
-		truncated  bool
-		reachedEOF bool
+		out           strings.Builder
+		lineNo        = 0
+		emitted       = 0
+		truncated     bool
+		reachedEOF    bool
+		anyLineElided bool
 	)
 	r := bufio.NewReaderSize(f, 64*1024)
 	for {
@@ -196,16 +199,10 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 		emitted++
 		fmt.Fprintf(&out, "%6d\t%s", lineNo, line)
 		if elided > 0 {
+			anyLineElided = true
 			fmt.Fprintf(&out, " … [%d bytes of this line elided]", elided)
 		}
 		out.WriteByte('\n')
-	}
-
-	// I3: only a read that covered the WHOLE file vouches for it. A
-	// windowed/truncated read or an offset read shows a fragment, and a
-	// fragment must not permit a blind whole-file overwrite.
-	if reachedEOF && a.Offset <= 1 && !truncated {
-		t.observer.Observe(clean)
 	}
 
 	header := fmt.Sprintf("%s (%d bytes", clean, info.Size())
@@ -225,10 +222,27 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 
 	outStr := header + out.String()
 	// I4: bound the whole result (middle elision, tail intact).
-	if len(outStr) > maxResultBytes {
+	resultElided := len(outStr) > maxResultBytes
+	if resultElided {
 		outStr = outStr[:headKeep] +
 			fmt.Sprintf("\n… [read output elided: %d bytes removed — the tail below is intact]\n", len(outStr)-headKeep-tailKeep) +
 			outStr[len(outStr)-tailKeep:]
+	}
+
+	// I3: only a read that showed the model every byte vouches for the
+	// file. A windowed or truncated read shows a fragment — and so does
+	// one whose output was elided, in-band (an over-long line) or at the
+	// result level (the 64 KiB middle cut): reachedEOF says the scan
+	// covered the file, elision says the model did not see it. Such a
+	// read records an elided note instead, so the write guard refuses
+	// with recovery advice that names the real way out rather than the
+	// "read it again" step that can never succeed for this file shape.
+	if reachedEOF && a.Offset <= 1 && !truncated {
+		if anyLineElided || resultElided {
+			t.observer.NoteElided(clean)
+		} else {
+			t.observer.Observe(clean)
+		}
 	}
 	return outStr, nil
 }
@@ -270,10 +284,18 @@ func readLine(r *bufio.Reader, maxKeep int) (line []byte, elided int, err error)
 	}
 }
 
-// trimNL strips one trailing newline (Scanner.Text semantics).
+// trimNL strips one trailing newline plus the CR that preceded it
+// (Scanner.Text semantics — bufio's ScanLines drops the \r of a CRLF
+// pair). Without the CR half, every line of a CRLF working tree would
+// carry an invisible \r into the model's context — tokeniser noise the
+// model cannot see to reproduce, and a behaviour change from the
+// Scanner era this file used to keep.
 func trimNL(b []byte) []byte {
 	if n := len(b); n > 0 && b[n-1] == '\n' {
-		return b[:n-1]
+		b = b[:n-1]
+	}
+	if n := len(b); n > 0 && b[n-1] == '\r' {
+		b = b[:n-1]
 	}
 	return b
 }

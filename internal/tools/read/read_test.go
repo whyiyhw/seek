@@ -49,6 +49,46 @@ func TestRead_Basic(t *testing.T) {
 	}
 }
 
+// CRLF input must come back CR-free per line (Scanner.Text semantics —
+// bufio's ScanLines drops the \r of a CRLF pair). A trailing \r is
+// invisible to the model but is tokenizer noise it cannot see to
+// reproduce, and it silently regressed when the hand-rolled readLine
+// replaced bufio.Scanner.
+func TestRead_CRLFStripped(t *testing.T) {
+	tool, dir := testReadTool(t)
+
+	// CRLF throughout, plus a final line with no newline at all.
+	p := writeFileIn(t, dir, "alpha\r\nbeta\r\nlast")
+	args, _ := json.Marshal(map[string]string{"path": p})
+	out, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "\r") {
+		t.Errorf("CRLF file must not leak \\r into the output:\n%q", out)
+	}
+	if !strings.Contains(out, "     1\talpha\n") || !strings.Contains(out, "     2\tbeta\n") || !strings.Contains(out, "     3\tlast\n") {
+		t.Errorf("missing numbered lines:\n%s", out)
+	}
+	if !strings.Contains(out, ", EOF at line 3") {
+		t.Errorf("expected EOF at the final line:\n%s", out)
+	}
+
+	// A trailing lone \r (no \n behind it) is dropped too — Scanner's
+	// dropCR applies to the final token as well.
+	p = writeFileIn(t, dir, "alpha\r\nlast\r")
+	out, err = tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "\r") {
+		t.Errorf("lone trailing \\r must be stripped:\n%q", out)
+	}
+	if !strings.Contains(out, "     2\tlast\n") {
+		t.Errorf("missing numbered lines:\n%s", out)
+	}
+}
+
 func TestRead_LimitParamValidation(t *testing.T) {
 	tool, dir := testReadTool(t)
 	// Build a file with 400 LONG lines (well above the whole-read size

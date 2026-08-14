@@ -255,3 +255,108 @@ func TestWrite_PartialReadDenied_Integration(t *testing.T) {
 		t.Fatalf("whole-file write after a FULL read must be allowed (I3): %v", werr)
 	}
 }
+
+// ---- I3×I4 interaction (landed after the A/B battery) ----
+//
+// The tests below pin the invariant the original I3 wording already
+// claimed but the first implementation missed: "only a read that covered
+// the WHOLE file vouches for it". A read can cover the whole file (scan
+// reached EOF, nothing truncated) while the MODEL still has not seen
+// every byte, because I4 elided parts of the result — in-band (an
+// over-long line) or at the result level (the 64 KiB middle cut). Such
+// a read must record an elided note, not an observation.
+
+// writeHugeLines writes n lines of ~len bytes each, so the file is above
+// the whole-read threshold and every line is under the 1 KiB in-band
+// cap — the only elision that can fire is the result-level one.
+func writeHugeLines(t *testing.T, dir string, n, lineLen int) string {
+	t.Helper()
+	var sb strings.Builder
+	for i := range n {
+		fmt.Fprintf(&sb, "line %04d %s\n", i, strings.Repeat("y", lineLen-10))
+	}
+	p := filepath.Join(dir, "huge.txt")
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// I3×I4 — a read that reaches EOF with nothing truncated, but whose
+// result exceeds the 64 KiB cap and gets middle-elided, must NOT vouch
+// for the file: the model never saw the elided middle.
+func TestRead_ResultElidedFullReadDoesNotVouch(t *testing.T) {
+	tool, obs, dir := testObservedTool(t)
+	// 100 × 800 B ≈ 78 KiB: above the 32 KiB whole-read threshold, under
+	// the 200-line default limit (so the default read reaches EOF), each
+	// line under the 1 KiB line cap (no in-band elision) — the result
+	// alone exceeds 64 KiB and triggers the middle cut.
+	p := writeHugeLines(t, dir, 100, 800)
+
+	out, err := tool.Execute(context.Background(), mustArgs(t, map[string]any{"path": p}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "read output elided") {
+		t.Fatalf("precondition: expected the result-level elision marker:\n%s", headerOf(out))
+	}
+	if got := obs.Check(p); got != fsobserve.StatusElided {
+		t.Fatalf("a full read whose result was elided must not vouch for the file (I3×I4): Check = %v, want StatusElided", got)
+	}
+}
+
+// I3×I4 — the in-band variant: a small file (whole-read path) whose
+// single line exceeds the 1 KiB line cap. The scan reaches EOF and
+// nothing is "truncated", but the model saw 1 KiB of a 20 KiB file.
+func TestRead_LineElidedFullReadDoesNotVouch(t *testing.T) {
+	tool, obs, dir := testObservedTool(t)
+	p := filepath.Join(dir, "min.txt")
+	if err := os.WriteFile(p, []byte(strings.Repeat("z", 20*1024)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := tool.Execute(context.Background(), mustArgs(t, map[string]any{"path": p}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "of this line elided") {
+		t.Fatalf("precondition: expected the in-band elision marker:\n%s", headerOf(out))
+	}
+	if got := obs.Check(p); got != fsobserve.StatusElided {
+		t.Fatalf("a whole-file read with an elided line must not vouch for the file (I3×I4): Check = %v, want StatusElided", got)
+	}
+}
+
+// I3×I4 — integration: after an elided full read the whole-file write is
+// refused, and the refusal must NOT tell the model to read again (that
+// can never clear an elided note — the same parts get elided); it must
+// point at `edit` instead.
+func TestWrite_ElidedReadDenied_Integration(t *testing.T) {
+	dir := t.TempDir()
+	p, err := permission.New(dir, permission.PrefYolo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := fsobserve.New()
+	r := New(p).WithObserver(obs)
+	w := write.New(p).WithObserver(obs)
+	target := writeHugeLines(t, dir, 100, 800)
+
+	if _, err := r.Execute(context.Background(), mustArgs(t, map[string]any{"path": target})); err != nil {
+		t.Fatal(err)
+	}
+	_, werr := w.Execute(context.Background(), mustArgs(t, map[string]any{"path": target, "content": "clobbered"}))
+	if werr == nil {
+		t.Fatal("whole-file write after an ELIDED read must be refused (I3×I4)")
+	}
+	if !strings.Contains(werr.Error(), "elided") {
+		t.Errorf("refusal must name the elision, not a generic unread-file message: %v", werr)
+	}
+	if !strings.Contains(werr.Error(), "edit") {
+		t.Errorf("refusal must point at `edit` as the recovery, not at re-reading: %v", werr)
+	}
+	got, _ := os.ReadFile(target)
+	if strings.HasPrefix(string(got), "clobbered") {
+		t.Error("file was modified despite the refusal")
+	}
+}

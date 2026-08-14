@@ -57,6 +57,13 @@ const (
 	// afterwards — a concurrent editor, a build step, a git operation.
 	// The model's content is based on a view that no longer holds.
 	StatusStale
+	// StatusElided means the model read the file to its end but parts of
+	// the read were elided (a single line over the in-band cap, or the
+	// result-level middle cut), so it has NOT seen every byte. Unlike
+	// StatusUnseen, re-reading cannot clear it — the same parts get
+	// elided again — so the recovery is `edit` or windowed reads, not
+	// another read followed by a whole-file write.
+	StatusElided
 )
 
 // Token is the cheap freshness fingerprint for a path: file identity
@@ -137,15 +144,18 @@ func (d Decision) Matches(fi os.FileInfo) bool {
 // not usable; call New. Safe for concurrent use — read-only tools
 // dispatch as a parallel batch, so several reads can land at once.
 type Store struct {
-	mu   sync.Mutex
-	seen map[string]Token
+	mu     sync.Mutex
+	seen   map[string]Token
+	elided map[string]Token
 }
 
 // New returns an empty Store. One per session: carrying observations
 // across sessions would claim the model has seen a file that was only
 // read in a previous conversation, which is precisely the blind-write
 // case this package exists to catch.
-func New() *Store { return &Store{seen: map[string]Token{}} }
+func New() *Store {
+	return &Store{seen: map[string]Token{}, elided: map[string]Token{}}
+}
 
 // Observe records that the current on-disk state of path has been seen.
 //
@@ -168,6 +178,34 @@ func (s *Store) Observe(path string) {
 	}
 	s.mu.Lock()
 	s.seen[path] = tokenOf(fi)
+	// A complete view supersedes an elided one — read → edit → write must
+	// stay legal even when an earlier read of the same file elided.
+	delete(s.elided, path)
+	s.mu.Unlock()
+}
+
+// NoteElided records that path was read to its end but parts of the
+// read were elided, so the model has not seen every byte. Plan then
+// refuses a whole-file write with StatusElided — whose message names
+// the real recovery — instead of StatusUnseen, whose "read it first"
+// advice can never succeed for this file shape (the same elision
+// applies to every full read) and would just burn turns.
+//
+// A prior complete observation (Observe) is never downgraded by this:
+// once the model has genuinely seen the file, an elided re-read (only
+// possible after a mid-session config change) does not un-see it.
+func (s *Store) NoteElided(path string) {
+	if s == nil {
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	if _, seen := s.seen[path]; !seen {
+		s.elided[path] = tokenOf(fi)
+	}
 	s.mu.Unlock()
 }
 
@@ -179,6 +217,7 @@ func (s *Store) Forget(path string) {
 	}
 	s.mu.Lock()
 	delete(s.seen, path)
+	delete(s.elided, path)
 	s.mu.Unlock()
 }
 
@@ -222,16 +261,24 @@ func (s *Store) Plan(path string) Decision {
 
 	s.mu.Lock()
 	prev, ok := s.seen[path]
+	eprev, eok := s.elided[path]
 	s.mu.Unlock()
 
 	cur := tokenOf(fi)
 	switch {
-	case !ok:
-		return Decision{Status: StatusUnseen, Guarded: true, Exists: true}
-	case !prev.equal(cur):
-		return Decision{Status: StatusStale, Guarded: true, Exists: true}
-	default:
+	case ok && prev.equal(cur):
 		return Decision{Status: StatusOK, Guarded: true, Exists: true, Token: prev}
+	case ok:
+		return Decision{Status: StatusStale, Guarded: true, Exists: true}
+	case eok && !eprev.equal(cur):
+		// The elided view is not merely incomplete — it is outdated.
+		// Stale outranks elided: the world moved, and that is the more
+		// urgent fact for the model.
+		return Decision{Status: StatusStale, Guarded: true, Exists: true}
+	case eok:
+		return Decision{Status: StatusElided, Guarded: true, Exists: true}
+	default:
+		return Decision{Status: StatusUnseen, Guarded: true, Exists: true}
 	}
 }
 
@@ -254,6 +301,11 @@ func Explain(st Status, path string) string {
 		return fmt.Sprintf("write refused: %s changed on disk after you read it — another process, "+
 			"a build step, or a git operation touched it. Overwriting now would silently discard "+
 			"those changes. Call `read` on it again to see the current contents, then decide.", path)
+	case StatusElided:
+		return fmt.Sprintf("write refused: %s is too large to show in one read — parts of it were elided, "+
+			"so you have not seen every byte and `write` would replace them blind. Re-reading will not help "+
+			"(the same parts get elided again). Use `edit` for changes you can state precisely; for a full "+
+			"rewrite of a file this size, ask the user first.", path)
 	default:
 		return ""
 	}
