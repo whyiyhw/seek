@@ -56,8 +56,10 @@ import (
 // single-request conversation would prove nothing about prefix reuse.
 type cacheProbeTool struct{}
 
-func (cacheProbeTool) Name() string        { return "lookup_build_id" }
-func (cacheProbeTool) Description() string { return "Look up the current build id. Takes no arguments." }
+func (cacheProbeTool) Name() string { return "lookup_build_id" }
+func (cacheProbeTool) Description() string {
+	return "Look up the current build id. Takes no arguments."
+}
 func (cacheProbeTool) Schema() json.RawMessage {
 	return json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 }

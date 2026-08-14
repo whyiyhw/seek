@@ -73,9 +73,56 @@ const (
 // than running the command unconfined (internal/sandbox/sandbox_linux.go
 // RunTrampolineIfRequested — fail-closed by design). macOS surfaces the
 // wrapper's own name when `sandbox-exec` cannot apply the profile.
+//
+// ⚠️ These are matched PER LINE, after subtracting benignSandboxNotices —
+// never as a substring of the whole output. See that variable for the
+// incident this shape exists to prevent.
 var runnerFailureMarkers = []string{
 	"seek sandbox:",
 	"sandbox-exec:",
+}
+
+// benignSandboxNotices are lines seek's confinement machinery may print
+// on a SUCCESSFUL path even though they share a prefix with the fatal
+// ones. They must be excluded before any fatal-marker match.
+//
+// # Why this exists while the list is empty
+//
+// dsh shipped exactly this bug and wrote it up
+// (docs/postmortem/0004-landlock-partial-notice-misclassified-child-failures.md):
+// their launcher prints `landlock-run: partial enforcement (older
+// Landlock ABI)` on a kernel with an older ABI and then executes the
+// child normally. Their classifier reduced the contract to the substring
+// `landlock-run: ` plus "any nonzero exit", so ripgrep's exit 1 — which
+// means "no matches", a SUCCESS — was reported as sandbox infrastructure
+// failure. Their fix: "runner classification now requires status-gated
+// fatal evidence after exact informational exclusions."
+//
+// seek is currently safe by accident, not by design: every `seek
+// sandbox:` line in internal/sandbox/sandbox_linux.go is immediately
+// followed by os.Exit(127), so the prefix is fatal-only today. That is
+// one commit away from being false.
+//
+// **If you add any informational output prefixed `seek sandbox:` (a
+// partial-enforcement notice, a degraded-rung warning, a debug line),
+// you MUST add its exact text here in the same change.** Otherwise every
+// ordinary non-zero exit under a sandbox starts reporting as a jail
+// failure, and `TestDiagnoseSandbox_BenignNoticeIsNotRunnerFailure`
+// is the test that will tell you.
+var benignSandboxNotices = []string{}
+
+// isBenignNotice reports whether a single output line is a known
+// informational message rather than fatal evidence. Comparison is on the
+// trimmed, lowercased line and must be EXACT: a prefix or substring test
+// here would re-create the very ambiguity the exclusion exists to
+// remove.
+func isBenignNotice(line string) bool {
+	for _, n := range benignSandboxNotices {
+		if line == strings.ToLower(strings.TrimSpace(n)) {
+			return true
+		}
+	}
+	return false
 }
 
 // denialSignatures are the errno texts a confined command produces when
@@ -113,13 +160,24 @@ func diagnoseSandbox(opt *sandbox.Options, exitCode int, output string) (sandbox
 	}
 	lower := strings.ToLower(output)
 
-	// Runner failure first: it is the more serious reading, and its
-	// marker is unambiguous where the denial signatures are not.
-	for _, m := range runnerFailureMarkers {
-		if strings.Contains(lower, strings.ToLower(m)) {
-			return sandboxDiagRunnerFailed, "seek's OS sandbox could not be applied, so this command did NOT run " +
-				"(it fails closed rather than running unconfined). This is an environment problem on seek's side, " +
-				"not something the command can be rewritten to avoid — report it rather than retrying variations."
+	// Runner failure first: it is the more serious reading, and getting
+	// it wrong in the other direction ("you were denied" for a command
+	// that never ran) is the worse lie.
+	//
+	// Matched per line with benign notices subtracted, NOT as a substring
+	// of the whole output — see benignSandboxNotices for the incident
+	// that shape prevents.
+	for _, line := range strings.Split(lower, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || isBenignNotice(line) {
+			continue
+		}
+		for _, m := range runnerFailureMarkers {
+			if strings.Contains(line, strings.ToLower(m)) {
+				return sandboxDiagRunnerFailed, "seek's OS sandbox could not be applied, so this command did NOT run " +
+					"(it fails closed rather than running unconfined). This is an environment problem on seek's side, " +
+					"not something the command can be rewritten to avoid — report it rather than retrying variations."
+			}
 		}
 	}
 
