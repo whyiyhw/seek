@@ -150,7 +150,7 @@ var schemaBytes = []byte(`{
     "args": {
       "type": "array",
       "items": {"type": "string"},
-      "description": "Additional flags and positional args, one per element. Examples: [\"--oneline\",\"-n\",\"20\"], [\"HEAD~5..HEAD\"], [\"--stat\",\"main...feature\"]. NEVER include -c, -C, --git-dir, --work-tree, --exec, --upload-pack, --output, --delete, -d, -D, --force, -f, --prune (refused). For destructive operations, use bash."
+      "description": "Additional flags and positional args, one per element — the subcommand itself goes in the subcommand field, never repeated as an arg. Examples: [\"--oneline\",\"-n\",\"20\"], [\"HEAD~5..HEAD\"], [\"--stat\",\"main...feature\"]. NEVER include -c, -C, --git-dir, --work-tree, --exec, --upload-pack, --output, --delete, -d, -D, --force, -f, --prune (refused). For destructive operations, use bash."
     },
     "max_lines": {
       "type": "integer",
@@ -198,6 +198,20 @@ func (Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf(
 			"git: subcommand %q is not in the read-only whitelist. Allowed: %s. For destructive operations use bash (which requires user approval).",
 			a.Subcommand, allowedList(),
+		)
+	}
+	// A duplicated subcommand as the first arg — `git log log --oneline`
+	// — makes git treat the first positional as a revision and fail with
+	// the cryptic "ambiguous argument 'log'" error. Git's own recovery
+	// hint ("use '--' to separate paths from revisions") is misleading
+	// here: there is no path/revision ambiguity, and following it yields
+	// a different confusing error. Refuse before exec with a message
+	// that names the actual fix.
+	if len(a.Args) > 0 && a.Args[0] == a.Subcommand {
+		return "", fmt.Errorf(
+			"git: arg %q repeats the subcommand — the subcommand goes in the `subcommand` field, `args` holds flags and positionals only (e.g. [\"HEAD\", \"--stat\"]). "+
+				"If you genuinely mean a path or ref named %q: for a path, pass [\"--\", %q] explicitly; for a ref (branch/tag), use its fully-qualified form (e.g. refs/heads/%s), which does not collide with the subcommand.",
+			a.Args[0], a.Subcommand, a.Subcommand, a.Subcommand,
 		)
 	}
 	if err := validateArgs(a.Args); err != nil {

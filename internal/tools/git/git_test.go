@@ -172,6 +172,71 @@ func TestExecute_RejectsBlockedArgs(t *testing.T) {
 	}
 }
 
+func TestExecute_RejectsDuplicatedSubcommandArg(t *testing.T) {
+	// subcommand "log" + args ["log", ...] would execute as
+	// `git log log ...` — git misreads the first positional as a
+	// revision and answers with the cryptic "ambiguous argument 'log'"
+	// error. The guard must refuse BEFORE exec with a message naming
+	// the real fix (git's own "use '--'" hint is misleading here).
+	initRepo(t)
+	_, err := Tool{}.Execute(context.Background(), json.RawMessage(`{
+		"subcommand": "log",
+		"args": ["log", "--oneline", "-n", "5"]
+	}`))
+	if err == nil {
+		t.Fatal("first arg repeating the subcommand must be rejected")
+	}
+	if !strings.Contains(err.Error(), "`subcommand` field") {
+		t.Errorf("error should point at the subcommand field, got: %v", err)
+	}
+}
+
+func TestExecute_DuplicatedSubcommandEscapeHatch(t *testing.T) {
+	// A path that happens to share the subcommand's name stays
+	// reachable via the explicit `--` form — the guard must not break
+	// `git log -- log`.
+	dir := initRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "log"), []byte("the log file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, args, err, out)
+		}
+	}
+	run("git", "add", "log")
+	run("git", "commit", "-m", "add file named log")
+
+	out, err := Tool{}.Execute(context.Background(), json.RawMessage(`{
+		"subcommand": "log",
+		"args": ["--", "log"]
+	}`))
+	if err != nil {
+		t.Fatalf("`git log -- log` must still work: %v", err)
+	}
+	if !strings.Contains(out, "add file named log") {
+		t.Errorf("expected the path-limited commit to appear, got: %q", out)
+	}
+
+	// A REF that shares the subcommand's name stays reachable via the
+	// fully-qualified form — the guard must not break `git log
+	// refs/heads/log`, and the refusal message's ref advice must be
+	// true, not aspirational.
+	run("git", "branch", "log")
+	out, err = Tool{}.Execute(context.Background(), json.RawMessage(`{
+		"subcommand": "log",
+		"args": ["refs/heads/log"]
+	}`))
+	if err != nil {
+		t.Fatalf("`git log refs/heads/log` must still work: %v", err)
+	}
+	if !strings.Contains(out, "first commit") {
+		t.Errorf("expected the branch's history, got: %q", out)
+	}
+}
+
 func TestExecute_OutputCapped(t *testing.T) {
 	initRepo(t)
 	// Make a 700-line file so `git show HEAD:<file>` produces enough
