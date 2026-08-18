@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/tui/teatest"
 )
 
 // renderTestModel builds a Model wired with the minimum for end-to-end
@@ -48,7 +48,7 @@ func waitFor(t *testing.T, tm *teatest.TestModel, needle string) {
 // live until the program returns).
 func shutdown(t *testing.T, tm *teatest.TestModel) {
 	t.Helper()
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 }
 
@@ -60,7 +60,7 @@ func TestRender_ShiftTabCommitsModeLabel(t *testing.T) {
 	m := renderTestModel(t)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyShiftTab})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	waitFor(t, tm, "mode: plan")
 
 	shutdown(t, tm)
@@ -75,7 +75,7 @@ func TestRender_SlashOpensCommandMenu(t *testing.T) {
 	m := renderTestModel(t)
 	tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	tm.Send(tea.KeyPressMsg{Text: "/"})
 	waitFor(t, tm, "Tab to complete")
 
 	shutdown(t, tm)
@@ -94,16 +94,16 @@ func TestRender_HelpDispatch(t *testing.T) {
 	// /model's picker pattern), so we pass an explicit topic to
 	// directly show the overlay.
 	for _, r := range "/help all" {
-		tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm.Send(tea.KeyPressMsg{Text: string(r)})
 	}
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// Give the program a moment to render the help overlay, dismiss it,
 	// then quit and verify the overlay content in accumulated output.
 	time.Sleep(50 * time.Millisecond)
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEsc})
 	time.Sleep(50 * time.Millisecond)
-	tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+	tm.Send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	tm.WaitFinished(t, teatest.WithFinalTimeout(2*time.Second))
 
 	out := tm.FinalOutput(t)

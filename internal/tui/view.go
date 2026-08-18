@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -44,11 +45,11 @@ import (
 // (`scrollbackLines` counter + `strings.Repeat("\n", pad)`). The
 // renderer's cursor-up + EraseScreenBelow handles frame-to-frame
 // height changes natively; let the live region sit where it sits.
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if !m.ready {
 		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
 		// blank screen if bubbletea takes a moment to size up.
-		return styleMuted.Render("starting…") + "\n"
+		return tea.NewView(styleMuted.Render("starting…") + "\n")
 	}
 
 	var sb strings.Builder
@@ -266,7 +267,7 @@ func (m Model) View() string {
 	// where the live region needed a visual "seal".
 	sb.WriteString(m.renderStatusBar())
 
-	return sb.String()
+	return tea.NewView(sb.String())
 }
 
 func (m Model) relayout() Model {
@@ -1434,12 +1435,20 @@ func wrap(s string, width int) string {
 }
 
 // ---- Markdown rendering ----------------------------------------------
+//
+// glamour is the LAST v1-era dependency in the module graph (it directly
+// depends on lipgloss v1 + termenv). Decision (2026-08): keep glamour
+// v1.0.0 until charm ships glamour v2, then upgrade in one step —
+// `go get charm.land/glamour/v2@latest` + import-path swap + go mod tidy.
+// This renderer's API surface (NewTermRenderer + Render) is stable, so no
+// call-site logic changes are expected. The seek-side prep is done:
+// cmd/seek's style detection already uses lipgloss v2 instead of termenv.
 
 // newMarkdownRenderer builds a glamour renderer at the given width.
 // style is "dark" / "light" / "" (auto fallback). The host pre-detects
-// the style via termenv BEFORE the program starts (cmd/seek does this)
-// to avoid the OSC 11 query leaking into the textarea — see PRD §4.9
-// and docs/pitfalls.md.
+// the style BEFORE the program starts (cmd/seek does this) to avoid the
+// OSC 11 query leaking into the textarea — see PRD §4.9 and
+// docs/pitfalls.md.
 func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	if width < 20 {
 		width = 20

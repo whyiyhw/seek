@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Palette is the colour set shared across the TUI. Kept small and
 // boring on purpose — most differentiation comes from layout, not
@@ -10,19 +14,19 @@ import "github.com/charmbracelet/lipgloss"
 // light backgrounds. SetTheme() picks the right one and rebuilds
 // the package-level style vars.
 type palette struct {
-	User      lipgloss.Color
-	Assistant lipgloss.Color
-	Tool      lipgloss.Color
-	ToolErr   lipgloss.Color
-	Reasoning lipgloss.Color
-	Muted     lipgloss.Color
-	Accent    lipgloss.Color
-	Ok        lipgloss.Color
-	StatusBg  lipgloss.Color
-	StatusFg  lipgloss.Color
-	BannerFg  lipgloss.Color
-	BannerBg  lipgloss.Color
-	MenuSel   lipgloss.Color
+	User      color.Color
+	Assistant color.Color
+	Tool      color.Color
+	ToolErr   color.Color
+	Reasoning color.Color
+	Muted     color.Color
+	Accent    color.Color
+	Ok        color.Color
+	StatusBg  color.Color
+	StatusFg  color.Color
+	BannerFg  color.Color
+	BannerBg  color.Color
+	MenuSel   color.Color
 }
 
 var darkPalette = palette{

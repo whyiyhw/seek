@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/whyiyhw/seek/internal/keymap"
 )
@@ -39,7 +39,7 @@ func (m Model) keymap() *keymap.KeyMap {
 	return defaultKeymapFallback
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Help overlay: dismiss on any key. The overlay is purely
 	// informational and blocks the view until dismissed. Esc and q
 	// are the advertised dismiss keys; any other key also dismisses
@@ -102,11 +102,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// trigger character ("@" vs "/") makes them mutually exclusive
 	// in practice.
 	if m.pathPicker.open {
-		switch msg.Type {
-		case tea.KeyTab:
+		switch msg.String() {
+		case "tab":
 			m.applyPathCompletion()
 			return m, nil
-		case tea.KeyEnter:
+		case "enter":
 			// Picker open with results: Enter accepts the highlighted
 			// path, same as Tab. Two Enters total reach a "submit with
 			// path inserted" outcome (accept → submit), matching IDE
@@ -116,17 +116,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.applyPathCompletion()
 				return m, nil
 			}
-		case tea.KeyUp:
+		case "up":
 			if m.pathPicker.selected > 0 {
 				m.pathPicker.selected--
 			}
 			return m, nil
-		case tea.KeyDown:
+		case "down":
 			if m.pathPicker.selected < len(m.pathPicker.filtered)-1 {
 				m.pathPicker.selected++
 			}
 			return m, nil
-		case tea.KeyEsc:
+		case "esc":
 			m.pathPicker.open = false
 			m.pathPicker.filtered = nil
 			m.pathPicker.selected = 0
@@ -140,8 +140,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// when input is focused (i.e. not streaming), so menu navigation
 	// and stream cancellation never compete for the same key.
 	if m.commandMenuOpen {
-		switch msg.Type {
-		case tea.KeyTab:
+		switch msg.String() {
+		case "tab":
 			// Tab completion semantics — readline / bash / fish style
 			// (refined from the M9.5 PRD §3.3 design after dogfood
 			// feedback that "Tab does nothing visible on ambiguous
@@ -242,7 +242,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.updateCommandMenu()
 				return m, nil
 			}
-		case tea.KeyEnter:
+		case "enter":
 			// Menu open with candidates: Enter dispatches the highlighted
 			// command immediately — typing "/h" + Enter fires /help. This
 			// matches user expectation: pressing Enter while a candidate
@@ -262,17 +262,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-		case tea.KeyUp:
+		case "up":
 			if m.commandMenuSelected > 0 {
 				m.commandMenuSelected--
 			}
 			return m, nil
-		case tea.KeyDown:
+		case "down":
 			if m.commandMenuSelected < len(m.commandMenuFiltered)-1 {
 				m.commandMenuSelected++
 			}
 			return m, nil
-		case tea.KeyEsc:
+		case "esc":
 			// Menu open & not streaming: Esc = "cancel this slash
 			// command entirely" — clears the partial `/foo` text along
 			// with the menu. Previous behaviour kept the input contents
@@ -312,24 +312,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// textarea when purpose=="model"; for purpose=="setup-provider"
 	// (and any future modal picker) we swallow them to stay modal.
 	if m.modelPickerOpen {
-		switch msg.Type {
-		case tea.KeyTab, tea.KeyEnter:
+		switch msg.String() {
+		case "tab", "enter":
 			if m.pickerPurpose == "review" {
 				return m.handleReviewPick()
 			}
 			m.applyModelChoice(m.modelPickerSelected)
 			return m, nil
-		case tea.KeyUp:
+		case "up":
 			if m.modelPickerSelected > 0 {
 				m.modelPickerSelected--
 			}
 			return m, nil
-		case tea.KeyDown:
+		case "down":
 			if m.modelPickerSelected < len(m.modelPickerFiltered)-1 {
 				m.modelPickerSelected++
 			}
 			return m, nil
-		case tea.KeyEsc:
+		case "esc":
 			m.modelPickerOpen = false
 			m.modelPickerFiltered = nil
 			m.modelPickerSelected = 0
@@ -349,10 +349,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			autoOpened = true
 		}
 		if autoOpened {
-			switch msg.Type {
-			case tea.KeyBackspace, tea.KeyRunes, tea.KeySpace:
-				// fall through to textarea Update at the end of handleKey
-			default:
+			// Backspace, space, and printable characters fall through to
+			// the textarea (backspace the space to dismiss, or type a
+			// full id to bypass the picker); everything else is swallowed.
+			if msg.String() != "backspace" && msg.String() != "space" && len(msg.Text) == 0 {
 				return m, nil
 			}
 		} else {
@@ -368,7 +368,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// no picker / menu wants Tab for its own purpose AND the input box
 	// is empty (Tab on non-empty input is the textarea-native "insert
 	// tab char" / focus-jump). PRD docs/prd/feature-suggested-reply.md §4.4.
-	if msg.Type == tea.KeyTab &&
+	if msg.Code == tea.KeyTab &&
 		m.suggestedReply != "" &&
 		m.suggestedReplyValid &&
 		m.input.Value() == "" {
@@ -381,10 +381,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Action-based dispatch. The keymap layer (internal/keymap) translates
-	// raw bubbletea KeyMsgs into named, user-rebindable Actions. The
+	// raw bubbletea key events into named, user-rebindable Actions. The
 	// switch below dispatches by Action; only the very-special cases
 	// (CRLF-paste insertion, picker key vocabulary) still inspect
-	// msg.Type directly. PRD docs/prd/feature-tui-ergonomics.md §4.
+	// msg.Code directly. PRD docs/prd/feature-tui-ergonomics.md §4.
 	action := m.keymap().Resolve(msg)
 	switch action {
 	case keymap.ActionInterrupt:
@@ -446,10 +446,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keymap.ActionSubmit, keymap.ActionSteer:
 		// Windows/conhost paste without bracketed mode: each CRLF line
 		// ends with \r which bubbletea maps to Enter. Insert newline
-		// instead of submitting when Enter arrives right after runes.
-		// Tied to raw msg.Type — this is a raw-input concern that
+		// instead of submitting when Enter arrives right after characters.
+		// Tied to raw msg.Code — this is a raw-input concern that
 		// outlives user rebindings of the submit action.
-		if msg.Type == tea.KeyEnter && m.enterInsertsNewlineDuringPaste() {
+		if msg.Code == tea.KeyEnter && m.enterInsertsNewlineDuringPaste() {
 			m.input.InsertString("\n")
 			m = m.handlePasteFolding()
 			m.updateCommandMenu()
@@ -502,10 +502,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		// Streaming branch: submit = queue, steer = interrupt+steer.
-		// Ctrl+J / Ctrl+Enter inserts a newline — the textarea has
-		// InsertNewline bound to "ctrl+j" (model.go:311), so the key
-		// falls through to m.input.Update(msg) at the end of handleKey
-		// and the textarea handles it natively.
+		// Ctrl+J inserts a newline — the textarea has InsertNewline
+		// bound to "ctrl+j" (model.go:626), so the key falls through
+		// to m.input.Update(msg) at the end of handleKey and the
+		// textarea handles it natively. (Ctrl+Enter only newlines on
+		// Unix, where it arrives as \n = KeyCtrlJ; on Windows it is
+		// collapsed to plain Enter and submits.)
 		if m.streaming {
 			(&m).resolvePasteInInput()
 			text := strings.TrimSpace(m.input.Value())
@@ -603,19 +605,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Bracketed terminal paste: inject wholesale so embedded \r bytes
-	// never arrive as separate Enter keys between lines.
-	if msg.Paste && len(msg.Runes) > 0 {
-		m = m.insertPasteText(string(msg.Runes))
-		m.updateCommandMenu()
-		m.updatePathCompleter()
-		return m, nil
-	}
+	// Bracketed terminal paste is handled as a dedicated tea.PasteMsg in
+	// Update (update.go) — v2 no longer folds paste into key events.
 
 	// Ctrl+V reads the OS clipboard directly. The bubbles textarea Paste
 	// cmd returns an unexported pasteMsg that our Update switch never
 	// forwarded — intercept here so Windows Ctrl+V gets the full body.
-	if msg.Type == tea.KeyCtrlV {
+	if msg.String() == "ctrl+v" {
 		if pasted, ok := m.tryClipboardPaste(); ok {
 			m = pasted
 			m.updateCommandMenu()
@@ -632,7 +628,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// agent). Commands that genuinely don't apply mid-stream (/branch,
 	// /compact, /new, …) self-reject at dispatch time with their own
 	// "wait for the current turn to finish" notice.
-	if msg.Type == tea.KeyRunes && len(msg.Runes) > 0 {
+	if len(msg.Text) > 0 {
 		m.lastInputRunesAt = time.Now()
 	}
 	var cmd tea.Cmd
@@ -756,8 +752,8 @@ func (m *Model) tryHistoryDown() bool {
 // submit time (Enter) when the marker is replaced with the actual pasted
 // content.
 //
-// Only called on paste events (msg.Paste == true) so normal typing or
-// Ctrl+J newlines never trigger folding.
+// Only called on paste events (tea.PasteMsg or the conhost CRLF-Enter
+// guard path) so normal typing or Ctrl+J newlines never trigger folding.
 func (m Model) handlePasteFolding() Model {
 	val := normalizePasteText(m.input.Value())
 	lines := pasteLineCount(val)

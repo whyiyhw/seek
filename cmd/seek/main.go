@@ -96,7 +96,7 @@ import (
 	geminiprov "github.com/whyiyhw/seek/pkg/llm/provider/gemini"
 	openaiprov "github.com/whyiyhw/seek/pkg/llm/provider/openai"
 
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 )
 
 // System prompt assembly (template literal, Compose, ModeLabel)
@@ -2616,7 +2616,7 @@ func truncate(s string, n int) string {
 
 // detectGlamourStyle picks "dark" or "light" for the TUI's Markdown
 // renderer. We do this BEFORE entering bubbletea's alt-screen so that
-// termenv's OSC 11 background-colour query/response handshake
+// lipgloss v2's OSC 11 background-colour query/response handshake
 // completes synchronously while we still own stdin. If we let glamour
 // do the equivalent under bubbletea, the terminal's response (e.g.
 // "]11;rgb:fae0/fae0/fae0\[1;1R") leaks straight into the textarea as
@@ -2631,7 +2631,7 @@ func detectGlamourStyle(theme string) string {
 	if v := os.Getenv("SEEK_STYLE"); v != "" {
 		return v
 	}
-	if termenv.NewOutput(os.Stdout).HasDarkBackground() {
+	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
 		return "dark"
 	}
 	return "light"

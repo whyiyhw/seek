@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 )
 
@@ -71,10 +71,15 @@ func Run(opts Options) error {
 	// Session/resume hint after the live region tears down. The
 	// conversation itself is already in scrollback — `tea.Println`
 	// under inline mode flushed each commit live, no exit dump needed.
+	// The stats summary prints regardless of session persistence
+	// (--no-save still gets its numbers).
 	if m, ok := finalModel.(Model); ok {
 		if sess := m.opts.Session; sess != nil {
 			fmt.Fprintf(os.Stderr, "session: %s  (seek --resume %s)\n",
 				sess.ID, sess.ID)
+		}
+		if s := renderExitSummary(m); s != "" {
+			fmt.Fprintln(os.Stderr, s)
 		}
 	}
 

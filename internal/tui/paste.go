@@ -11,9 +11,10 @@ import (
 	"github.com/atotto/clipboard"
 )
 
-// pasteEnterGap is how long after the last KeyRunes we treat Enter as a
-// newline rather than submit. Windows terminals without bracketed paste
-// inject CRLF as "text" + Enter per line; the gap is always sub-millisecond.
+// pasteEnterGap is how long after the last typed character we treat Enter
+// as a newline rather than submit. Windows terminals without bracketed
+// paste inject CRLF as "text" + Enter per line; the gap is always
+// sub-millisecond.
 const pasteEnterGap = 50 * time.Millisecond
 
 // normalizePasteText converts Windows CRLF (and lone CR) to LF so pasted
@@ -38,14 +39,15 @@ func pasteFoldMarker(lineCount int) string {
 
 // enterInsertsNewlineDuringPaste reports whether an Enter key should insert
 // a newline instead of submitting. Terminals that lack bracketed paste
-// (notably legacy Windows conhost) deliver each pasted line as KeyRunes
-// immediately followed by Enter (\r).
+// (notably legacy Windows conhost) deliver each pasted line as character
+// payloads immediately followed by Enter (\r).
 //
 // The guard is deliberately scoped to legacy conhost (see
 // legacyConhostInput): everywhere else the same "Enter within pasteEnterGap
-// of runes" signature is produced by Windows Terminal forwarding the
-// IME-commit Enter key (text + Enter in one dispatch), so firing there turns
-// every Chinese/Japanese/Korean message into a stray newline instead of a
+// of typed characters" signature is produced by Windows Terminal forwarding
+// the IME-commit Enter key (text + Enter in one dispatch), so firing there
+// turns every Chinese/Japanese/Korean message into a stray newline instead
+// of a
 // send. Conhost is safe because it suppresses keys during active IME
 // composition instead of forwarding them.
 func (m Model) enterInsertsNewlineDuringPaste() bool {

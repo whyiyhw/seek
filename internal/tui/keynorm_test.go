@@ -12,32 +12,49 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNormalizeControlRunes_Table(t *testing.T) {
 	cases := []struct {
 		name string
-		in   tea.KeyMsg
-		want tea.KeyType
+		in   tea.KeyPressMsg
+		want tea.KeyPressMsg
 	}{
-		{"\\n becomes Enter", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}}, tea.KeyEnter},
-		{"\\r becomes Enter", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\r'}}, tea.KeyEnter},
-		{"\\b becomes Backspace", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\b'}}, tea.KeyBackspace},
-		{"plain rune untouched", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}, tea.KeyRunes},
-		{"real Enter untouched", tea.KeyMsg{Type: tea.KeyEnter}, tea.KeyEnter},
+		{"\\n becomes Enter", tea.KeyPressMsg{Text: "\n"}, tea.KeyPressMsg{Code: tea.KeyEnter}},
+		{"\\r becomes Enter", tea.KeyPressMsg{Text: "\r"}, tea.KeyPressMsg{Code: tea.KeyEnter}},
+		{"\\b becomes Backspace", tea.KeyPressMsg{Text: "\b"}, tea.KeyPressMsg{Code: tea.KeyBackspace}},
+		{"plain rune untouched", tea.KeyPressMsg{Text: "a"}, tea.KeyPressMsg{Text: "a"}},
+		{"real Enter untouched", tea.KeyPressMsg{Code: tea.KeyEnter}, tea.KeyPressMsg{Code: tea.KeyEnter}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := normalizeControlRunes(tc.in); got.Type != tc.want {
-				t.Fatalf("normalizeControlRunes(%v).Type = %v, want %v", tc.in, got.Type, tc.want)
+			if got := normalizeControlRunes(tc.in); got != tc.want {
+				t.Fatalf("normalizeControlRunes(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}
-	// Paste content and multi-rune payloads are real content, not keys.
-	paste := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a\nb"), Paste: true}
-	if got := normalizeControlRunes(paste); got.Type != tea.KeyRunes || len(got.Runes) != 3 {
-		t.Fatalf("paste payload must pass through untouched: %+v", got)
+	// The rewrite must produce keys whose String() matches what the
+	// keymap and key-dispatch switches match on — a rewritten \n with a
+	// stale Text field would String() as "\n" and never hit "enter".
+	for _, tc := range []struct {
+		in   tea.KeyPressMsg
+		want string
+	}{
+		{tea.KeyPressMsg{Text: "\n"}, "enter"},
+		{tea.KeyPressMsg{Text: "\r"}, "enter"},
+		{tea.KeyPressMsg{Text: "\b"}, "backspace"},
+	} {
+		if got := normalizeControlRunes(tc.in).String(); got != tc.want {
+			t.Errorf("normalizeControlRunes(%v).String() = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// Multi-rune payloads are real content, not keys: they pass through
+	// untouched (in v2, bracketed paste is its own PasteMsg, but a
+	// multi-rune key event must still never be rewritten).
+	paste := tea.KeyPressMsg{Text: "a\nb"}
+	if got := normalizeControlRunes(paste); got != paste {
+		t.Fatalf("multi-rune payload must pass through untouched: %+v", got)
 	}
 }
 
@@ -59,7 +76,7 @@ func TestUpdate_EnterAsRuneSubmits(t *testing.T) {
 	// on this model), same. Only the rewrite submits.
 	m.lastInputRunesAt = m.now
 
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\n'}})
+	out, _ := m.Update(tea.KeyPressMsg{Text: "\n"})
 	mm := out.(Model)
 	if !mm.streaming {
 		t.Fatal("a '\\n' character event must be treated as Enter and submit the message")
@@ -77,7 +94,7 @@ func TestUpdate_BackspaceAsRuneDeletes(t *testing.T) {
 	m.input.SetValue("ab")
 	m.input.CursorEnd()
 
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\b'}})
+	out, _ := m.Update(tea.KeyPressMsg{Text: "\b"})
 	mm := out.(Model)
 	if got := mm.input.Value(); got != "a" {
 		t.Fatalf("'\\b' character event must delete like Backspace, input = %q", got)
@@ -85,7 +102,9 @@ func TestUpdate_BackspaceAsRuneDeletes(t *testing.T) {
 }
 
 // TestUpdate_PastedNewlineIsNotEnter: a newline inside a paste payload is
-// CONTENT — the rewrite must not turn a 4-line paste into 4 Enters.
+// CONTENT — the rewrite must not turn a 4-line paste into 4 Enters. In v2
+// paste arrives as a dedicated tea.PasteMsg, which must go straight into
+// the input (folded), never into key routing.
 func TestUpdate_PastedNewlineIsNotEnter(t *testing.T) {
 	m := testModel().
 		WithAgent(newFakeAgent()).
@@ -94,7 +113,7 @@ func TestUpdate_PastedNewlineIsNotEnter(t *testing.T) {
 		}).
 		Build()
 
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("line1\nline2\nline3\nline4"), Paste: true})
+	out, _ := m.Update(tea.PasteMsg{Content: "line1\nline2\nline3\nline4"})
 	mm := out.(Model)
 	if mm.streaming {
 		t.Fatal("pasted newlines are content, not Enter — must not submit")

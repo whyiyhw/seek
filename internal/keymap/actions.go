@@ -9,7 +9,7 @@
 //     learnability and cross-platform consistency.
 //   - Bindings load from ~/.seek/keybindings.toml (user-level only —
 //     keybindings are personal muscle memory, NOT project state).
-//   - Resolve(tea.KeyMsg) Action is the dispatch primitive used by the
+//   - Resolve(tea.KeyPressMsg) Action is the dispatch primitive used by the
 //     TUI's update_key.go. Returns ActionNone for keys with no binding;
 //     callers fall through to default textarea handling.
 //   - Parse errors emit stderr warnings + fallback to defaults. A
@@ -87,6 +87,8 @@ func defaultBindings() map[Action]string {
 //   - tab: M9.5 Tab completion + all picker accept handlers
 //   - backspace: textarea native edit
 //   - space: textarea native edit
+//   - shift+enter: textarea native edit (InsertNewline; v2 delivers the
+//     modifier on capable terminals, plain Enter otherwise)
 //   - pgup / pgdn / home / end: terminal-native scrollback
 //
 // Note: enter, esc, up, down are NOT here — they ARE rebindable as
@@ -95,13 +97,14 @@ func defaultBindings() map[Action]string {
 // input is non-empty" behaviour is handled by the dispatch code in
 // update_key.go, not by the keymap layer.
 var reservedKeys = map[string]struct{}{
-	"tab":       {},
-	"backspace": {},
-	"space":     {},
-	"pgup":      {},
-	"pgdn":      {},
-	"home":      {},
-	"end":       {},
+	"tab":         {},
+	"backspace":   {},
+	"space":       {},
+	"shift+enter": {},
+	"pgup":        {},
+	"pgdn":        {},
+	"home":        {},
+	"end":         {},
 }
 
 // IsReservedKey reports whether key cannot be rebound. Used by the

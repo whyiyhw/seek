@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -8,9 +9,9 @@ import (
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/skill"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
-	"github.com/charmbracelet/bubbles/textarea"
+	"charm.land/bubbles/v2/textarea"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -107,7 +108,7 @@ func TestHandleKey_StreamingEnter_QueuesText(t *testing.T) {
 	m := streamingModel(t, "  follow-up: also check main.go  ")
 
 	// Enter (no modifier) during a stream → queue, do NOT submit.
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2, ok := out.(Model)
 	if !ok {
 		t.Fatalf("handleKey did not return a Model, got %T", out)
@@ -132,7 +133,7 @@ func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
 	canceled := false
 	m.cancelStream = func() { canceled = true }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	m2 := out.(Model)
 
 	if !canceled {
@@ -151,6 +152,48 @@ func TestHandleKey_StreamingAltEnter_TriggersSteer(t *testing.T) {
 	}
 }
 
+// TestHandleKey_ShiftEnterInsertsNewline: on terminals that report
+// modifiers (v2 CSI-u / kitty protocol / Windows coninput), Shift+Enter
+// must insert a newline instead of submitting — the v1-era "Shift+Enter
+// is indistinguishable from Enter" limitation (docs/pitfalls.md, resolved
+// by the v2 migration). Terminals without modifier reporting collapse
+// Shift+Enter to plain Enter, which submits as before (safe degradation).
+func TestHandleKey_ShiftEnterInsertsNewline(t *testing.T) {
+	t.Parallel()
+	// v2 String() contract: the modifier must survive into the string the
+	// keymap and textarea bindings match on. If this ever changes, the
+	// "shift+enter" binding in model.go silently stops matching.
+	if got := (tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}).String(); got != "shift+enter" {
+		t.Fatalf("v2 String() for Shift+Enter = %q, want %q", got, "shift+enter")
+	}
+
+	m := testModel().WithAgent(newFakeAgent()).Build()
+	m.opts.Ctx = context.Background() // submit() derives its cancel ctx from this
+	m.input.SetValue("hello")
+
+	// Shift+Enter → newline inserted, NOT submitted. (cmd may be the
+	// textarea's cursor-blink cmd — the proof of "not submitted" is
+	// streaming staying false, not cmd being nil.)
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	mm := out.(Model)
+	if mm.streaming {
+		t.Fatal("Shift+Enter must not submit the input")
+	}
+	if got := mm.input.Value(); got != "hello\n" {
+		t.Fatalf("Shift+Enter should insert a newline after the text, input = %q", got)
+	}
+
+	// Plain Enter on the same model still submits.
+	out2, cmd2 := mm.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	mm2 := out2.(Model)
+	if !mm2.streaming {
+		t.Fatal("plain Enter must still submit")
+	}
+	if cmd2 == nil {
+		t.Fatal("plain Enter must return a submit cmd")
+	}
+}
+
 func TestHandleKey_StreamingEnter_EmptyInputNothingToWithdrawIsNoOp(t *testing.T) {
 	t.Parallel()
 	// Empty textarea + empty queue + empty pending steer + Enter → no-op.
@@ -158,7 +201,7 @@ func TestHandleKey_StreamingEnter_EmptyInputNothingToWithdrawIsNoOp(t *testing.T
 	// next two tests.)
 	m := streamingModel(t, "   ") // whitespace-only
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.queuedText != "" {
@@ -178,7 +221,7 @@ func TestHandleKey_StreamingEnter_EmptyInputWithdrawsQueue(t *testing.T) {
 	cancelCalled := false
 	m.cancelStream = func() { cancelCalled = true }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.queuedText != "" {
@@ -201,7 +244,7 @@ func TestHandleKey_StreamingEnter_EmptyInputWithdrawsSteer(t *testing.T) {
 	m := streamingModel(t, "")
 	m.pendingSteerText = "wait, undo that"
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.pendingSteerText != "" {
@@ -217,14 +260,14 @@ func TestHandleKey_StreamingEnter_SecondPressReplacesQueue(t *testing.T) {
 	// First Enter queues "first"; second Enter (with new textarea
 	// content) replaces — "last thing you said is what you meant".
 	m := streamingModel(t, "first message")
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = out.(Model)
 	if m.queuedText != "first message" {
 		t.Fatalf("setup: queuedText=%q, want %q", m.queuedText, "first message")
 	}
 
 	m.input.SetValue("second message — disregard the first")
-	out, _ = m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ = m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = out.(Model)
 
 	if m.queuedText != "second message — disregard the first" {
@@ -242,7 +285,7 @@ func TestHandleKey_StreamingEsc_ClearsQueueAndSteer(t *testing.T) {
 	canceled := false
 	m.cancelStream = func() { canceled = true }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if !canceled {
@@ -274,7 +317,7 @@ func TestHandleKey_CtrlL_RequestsClearScreen(t *testing.T) {
 	t.Parallel()
 	m := *emptyModel()
 
-	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+	_, cmd := m.handleKey(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatal("Ctrl+L must return a tea.Cmd (tea.ClearScreen)")
 	}
@@ -301,7 +344,7 @@ func TestHandleKey_CommandMenuOpen_EnterDispatchesCandidate(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
@@ -327,7 +370,7 @@ func TestHandleKey_CommandMenuOpen_TabUniqueAutocompletes(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
@@ -355,7 +398,7 @@ func TestHandleKey_CommandMenuOpen_TabBareSlashCompletesHighlighted(t *testing.T
 	m.commandMenuSelected = 0
 
 	want := cmds[0].names[0] + " "
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != want {
@@ -378,7 +421,7 @@ func TestHandleKey_CommandMenuOpen_TabNoMatchEmitsBell(t *testing.T) {
 	m.commandMenuFiltered = nil // no matches
 	m.commandMenuSelected = 0
 
-	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != "/zzz" {
@@ -409,7 +452,7 @@ func TestHandleKey_CommandMenuOpen_TabFillsLongestCommonPrefix(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != "/skill" {
@@ -437,7 +480,7 @@ func TestHandleKey_CommandMenuOpen_TabExactNameAcceptsShorter(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != "/skill " {
@@ -464,7 +507,7 @@ func TestHandleKey_CommandMenuOpen_TabAliasAcceptsCanonical(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != "/steer " {
@@ -493,7 +536,7 @@ func TestHandleKey_CommandMenuOpen_TabAtLcpAcceptsHighlighted(t *testing.T) {
 	m.commandMenuSelected = 1 // second candidate — proves the highlight drives the pick
 
 	want := cmds[1].names[0] + " "
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyTab})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyTab})
 	m2 := out.(Model)
 
 	if got := m2.input.Value(); got != want {
@@ -559,7 +602,7 @@ func TestHandleKey_CommandMenuOpen_EscClearsInput(t *testing.T) {
 	m.commandMenuFiltered = cmds
 	m.commandMenuSelected = 0
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
@@ -585,7 +628,7 @@ func TestHandleKey_SlashMenuEnter_HandsOffToModelPicker(t *testing.T) {
 		t.Fatalf("setup: slash menu should be open for '/model'")
 	}
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.commandMenuOpen {
@@ -859,7 +902,7 @@ func TestPasteFolding_MarkerPersistsOnNonEnterKey(t *testing.T) {
 
 	// Simulate a character key press — without the old restore block,
 	// pastedContent should remain set and the marker should still be visible.
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	out, _ := m.handleKey(tea.KeyPressMsg{Text: "x"})
 	m2 := out.(Model)
 
 	if m2.pastedContent != lines {
@@ -889,20 +932,20 @@ func TestPasteFolding_PlaceholderShowsLineCount(t *testing.T) {
 
 func TestPasteFolding_NoFoldOnNonPasteTyping(t *testing.T) {
 	t.Parallel()
-	// handlePasteFolding is ONLY called when msg.Paste is true. Verify
-	// the guard in handleKey: a non-paste KeyRunes event should NOT fold
-	// even if the textarea has >3 lines.
+	// handlePasteFolding is ONLY called on paste events (tea.PasteMsg or
+	// the conhost CRLF-Enter guard). Verify a plain character key does NOT
+	// fold even if the textarea has >3 lines.
 	//
-	// We simulate this by calling handleKey with a Paste=false event after
-	// setting up multi-line content.
+	// We simulate this by calling handleKey with a plain character event
+	// after setting up multi-line content.
 	lines := "line1\nline2\nline3\nline4\nline5\nline6"
 	m := Model{input: textarea.New(), opts: Options{}}
 	m.input.SetValue(lines)
 
-	// handleKey only calls handlePasteFolding when msg.Paste is true.
-	// With a non-paste event, folding is skipped and pastedContent stays
+	// handleKey only calls handlePasteFolding on paste events. With a
+	// plain character event, folding is skipped and pastedContent stays
 	// empty — content should remain as-is.
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}, Paste: false})
+	out, _ := m.handleKey(tea.KeyPressMsg{Text: "x"})
 	m2 := out.(Model)
 
 	if m2.pastedContent != "" {
@@ -950,7 +993,7 @@ func TestPasteFolding_StreamingEnterResolvesPaste(t *testing.T) {
 	m.pastedLineCount = 7
 	m.input.SetValue("📋 pasted 7 lines — press Enter to send")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.pastedContent != "" {
@@ -975,7 +1018,7 @@ func TestPasteFolding_StreamingEnterResolvesPasteWithTyping(t *testing.T) {
 	m.pastedLineCount = 6
 	m.input.SetValue("📋 pasted 6 lines — press Enter to send and also fix this")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	want := content + " and also fix this"
@@ -996,7 +1039,7 @@ func TestPasteFolding_StreamingAltEnterResolvesPaste(t *testing.T) {
 	m.input.SetValue("📋 pasted 3 lines — press Enter to send")
 	m.cancelStream = func() {} // no-op, just needs to be non-nil
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
 	m2 := out.(Model)
 
 	if m2.pastedContent != "" {
@@ -1020,7 +1063,7 @@ func TestPasteFolding_StreamingEnterPasteNotEmptyOnEmptyTyping(t *testing.T) {
 	m.pastedLineCount = 8
 	m.input.SetValue("📋 pasted 8 lines — press Enter to send")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.queuedText == "" {
@@ -1046,7 +1089,7 @@ func TestPasteFolding_NonStreamingEnterConsumesPasteState(t *testing.T) {
 	var m2 Model
 	func() {
 		defer func() { recover() }()
-		out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m2 = out.(Model)
 	}()
 
@@ -1070,7 +1113,7 @@ func TestPasteFolding_NonStreamingEnterWithExtraTextConsumesPaste(t *testing.T) 
 	var m2 Model
 	func() {
 		defer func() { recover() }()
-		out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		m2 = out.(Model)
 	}()
 
@@ -1137,7 +1180,7 @@ func TestHandleKey_ModelPickerOpen_EnterApplies(t *testing.T) {
 	// holds that. Verify the accept cleans it up.
 	m.input.SetValue("/model ")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.modelPickerOpen {
@@ -1236,7 +1279,7 @@ func TestHandleKey_SetupKeyEntry_EscCancels(t *testing.T) {
 	m.setupProvider = "anthropic"
 	m.input.SetValue("sk-ant-partial")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if m2.setupKeyEntry {
@@ -1261,7 +1304,7 @@ func TestHandleKey_SetupKeyEntry_EnterEmptyDoesNotSave(t *testing.T) {
 	m.setupProvider = "deepseek"
 	m.input.SetValue("   ") // whitespace-only — trimmed to empty
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.setupKeyEntry {
@@ -1281,7 +1324,7 @@ func TestHandleKey_ModelPickerOpen_EscDismisses(t *testing.T) {
 	}
 	m.modelPickerSelected = 1
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if m2.modelPickerOpen {
@@ -1314,7 +1357,7 @@ func TestHandleKey_EffortPicker_AutoOpened_EnterUsesPickerNotTyped(t *testing.T)
 	var captured string
 	m.opts.SetEffort = func(e string) { captured = e }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.modelPickerOpen {
@@ -1345,7 +1388,7 @@ func TestHandleKey_EffortPicker_AutoOpened_EnterAppliesMaxWhenHighlighted(t *tes
 	var captured string
 	m.opts.SetEffort = func(e string) { captured = e }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.modelPickerOpen {
@@ -1372,7 +1415,7 @@ func TestHandleKey_PathPickerOpen_EnterAcceptsHighlighted(t *testing.T) {
 	m.pathPicker.tokenStart = 0
 	m.pathPicker.token = "RE"
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.pathPicker.open {
@@ -1392,7 +1435,7 @@ func TestHandleKey_StreamingEnter_SlashCommandRunsImmediately(t *testing.T) {
 	// to get the overlay directly (bare /help now opens a topic picker).
 	m := streamingModel(t, "/help all")
 
-	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.queuedText != "" {
@@ -1497,7 +1540,7 @@ func TestReviewBranchEntry_EscCancels_BeforeStreaming(t *testing.T) {
 	m.input.SetValue("my-feature")
 
 	// Esc should clear reviewBranchEntry even without a stream.
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if m2.reviewBranchEntry {
@@ -1517,7 +1560,7 @@ func TestReviewBranchEntry_EscCancels_WithStream(t *testing.T) {
 	canceled := false
 	m.cancelStream = func() { canceled = true }
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	m2 := out.(Model)
 
 	if m2.reviewBranchEntry {
@@ -1539,7 +1582,7 @@ func TestReviewBranchEntry_EnterEmptyShowsError(t *testing.T) {
 	m.reviewBranchEntry = true
 	// Textarea is empty (default).
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.reviewBranchEntry {
@@ -1553,7 +1596,7 @@ func TestReviewBranchEntry_EnterSubmitsCommand(t *testing.T) {
 	m.reviewBranchEntry = true
 	m.input.SetValue("some-branch")
 
-	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, cmd := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m2 := out.(Model)
 
 	if m2.reviewBranchEntry {
@@ -1905,13 +1948,13 @@ func armQuestion(t *testing.T, q askuser.Question) (*Model, <-chan askuser.Answe
 	return m, reply
 }
 
-func keyDown() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyDown} }
-func keyUp() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyUp} }
-func keyEnter() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyEnter}
+func keyDown() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyDown} }
+func keyUp() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyUp} }
+func keyEnter() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter}
 }
-func keySpace() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeySpace} }
-func keyEsc() tea.KeyMsg   { return tea.KeyMsg{Type: tea.KeyEsc} }
+func keySpace() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeySpace} }
+func keyEsc() tea.KeyPressMsg   { return tea.KeyPressMsg{Code: tea.KeyEsc} }
 
 func TestHandleQuestionKey_SingleSelectEnter(t *testing.T) {
 	q := askuser.Question{

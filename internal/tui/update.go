@@ -3,8 +3,8 @@ package tui
 import (
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/whyiyhw/seek/internal/askuser"
 )
@@ -19,7 +19,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m = m.relayout()
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Debug aid: record the raw event before routing decides
 		// anything (SEEK_KEYLOG=<file> to enable; no-op otherwise).
 		logKeyMsg(msg)
@@ -31,6 +31,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// events, and the viewport widget is gone. handleKey only
 		// owns key bindings the textarea / overlays care about.
 		return m.handleKey(msg)
+
+	case tea.PasteMsg:
+		// Bracketed-paste content is real payload — inject wholesale so
+		// embedded \r bytes never arrive as separate Enter keys between
+		// lines. v2 delivers paste as a dedicated message type instead
+		// of a key with a Paste flag.
+		m = m.insertPasteText(msg.Content)
+		m.updateCommandMenu()
+		m.updatePathCompleter()
+		return m, nil
 
 	case agentEventMsg:
 		// applyAgentEvent may emit Println commands for committed

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -300,8 +300,14 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	switch e := ev.(type) {
-	case agent.AgentStart, agent.TurnStart:
-		// no UI change
+	case agent.AgentStart:
+		// no UI change; per-turn timing bookkeeping belongs to TurnStart
+	case agent.TurnStart:
+		// Open the LLM-time span for this turn. Closed at the assistant
+		// MessageEnd (the stream is done); defensively at TurnEnd /
+		// AgentEnd / ErrorEvent for paths that never emit one.
+		m.turnStart = time.Now()
+		m.turnFirstTok = false
 	case agent.MessageStart:
 		// A new message is starting — discard any residual live state
 		// from a prior failed attempt (e.g. stream_error that triggered
@@ -310,6 +316,15 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.curReasoning = ""
 
 	case agent.MessageDelta:
+		// First token of the turn — the time-to-first-byte signal.
+		// Counts reasoning and content deltas alike (the first byte the
+		// model produced, whatever it is) and once per turn: a retried
+		// stream re-emits deltas under the same TurnStart.
+		if !m.turnFirstTok && !m.turnStart.IsZero() {
+			m.turnFirstTok = true
+			m.firstTokSum += time.Since(m.turnStart)
+			m.firstTokN++
+		}
 		if e.Reasoning {
 			m.curReasoning += e.Delta
 		} else {
@@ -319,6 +334,13 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 
 	case agent.MessageEnd:
 		if e.Message.Role == deepseek.RoleAssistant {
+			// Close the LLM-time span: the assistant stream is done and
+			// what follows (tool dispatch) is agent-side work, not model
+			// time. Tool-result MessageEnds skip this branch entirely.
+			if !m.turnStart.IsZero() {
+				m.llmTime += time.Since(m.turnStart)
+				m.turnStart = time.Time{}
+			}
 			// renderAssistantBlock also returns "" for empty content
 			// (defense in depth), but we skip the append at the caller
 			// so cmds doesn't grow with a nil entry — the
@@ -416,8 +438,19 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		}
 		line := renderToolResultLine(e.Name, args, e.Result, e.Err, duration, completionTokens)
 		cmds = append(cmds, m.appendHistory(line))
+		// Session-total tool execution time (parallel read-only batches
+		// sum overlapping durations — "time inside tools", not wall time).
+		m.toolTime += duration
 
 	case agent.TurnEnd:
+		// Defensive: the normal flow closes the LLM span at the
+		// assistant MessageEnd; close here too in case a future path
+		// reorders the events.
+		if !m.turnStart.IsZero() {
+			m.llmTime += time.Since(m.turnStart)
+			m.turnStart = time.Time{}
+		}
+		m.completionTok += e.Usage.CompletionTokens
 		m.turns++
 		// Lock in cost at the (model, tier) active when the turn settled
 		// — see internal/cache doc. Using m.opts.Model rather than a
@@ -431,12 +464,26 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.toolCalls += e.ToolCalls
 
 	case agent.AgentEnd:
+		// A canceled mid-stream turn (Esc) never reaches TurnEnd or an
+		// assistant MessageEnd — close its LLM span so partial stream
+		// time still counts. No-op when the last turn settled normally.
+		if !m.turnStart.IsZero() {
+			m.llmTime += time.Since(m.turnStart)
+			m.turnStart = time.Time{}
+		}
 		// Stats footer at turn boundary — gives the user visible
 		// "checkpoints" in history for long sessions.
 		cmds = append(cmds, m.appendHistory(m.renderTurnFooter()))
 
 	case agent.ErrorEvent:
 		m.lastErr = e.Err
+		// Stream death without MessageEnd (non-retryable error): close
+		// the LLM span the same way AgentEnd does. No-op when the error
+		// arrived after the span already closed (e.g. finish="length").
+		if !m.turnStart.IsZero() {
+			m.llmTime += time.Since(m.turnStart)
+			m.turnStart = time.Time{}
+		}
 		cmds = append(cmds, m.appendHistory(styleErr.Render("  ! error: "+e.Err.Error())))
 
 	case agent.PlanProposalApproved:

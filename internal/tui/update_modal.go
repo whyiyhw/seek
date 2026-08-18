@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/askuser"
 )
 
@@ -17,7 +17,7 @@ import (
 //
 // Replies on req.Reply are non-blocking because the channel is
 // buffered to 1; we still wrap in a select to be defensive.
-func (m Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.pendingApproval == nil {
 		return m, nil
 	}
@@ -25,12 +25,12 @@ func (m Model) handleApprovalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	always := false
 	answered := true
 
-	switch msg.Type {
-	case tea.KeyEnter:
+	switch msg.String() {
+	case "enter":
 		allow = true
-	case tea.KeyEsc:
+	case "esc":
 		allow = false
-	case tea.KeyCtrlC:
+	case "ctrl+c":
 		// Reply deny, then quit. Without this the agent goroutine
 		// would block forever on the reply channel.
 		m.replyApproval(false)
@@ -99,7 +99,7 @@ func (m *Model) replyApproval(allow bool) {
 // tool returns {cancelled: true} to the model. The model is
 // expected to gracefully step down to plain-text questioning when
 // it sees that.
-func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleQuestionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.pendingQuestion == nil {
 		return m, nil
 	}
@@ -107,21 +107,21 @@ func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	otherIdx := len(q.Options)
 
 	if m.pendingQuestionFreeText {
-		switch msg.Type {
-		case tea.KeyEsc:
+		switch msg.String() {
+		case "esc":
 			// Back to choices.
 			m.pendingQuestionFreeText = false
 			m.input.Blur()
 			m.input.Reset()
 			return m, nil
-		case tea.KeyEnter:
+		case "enter":
 			text := strings.TrimSpace(m.input.Value())
 			if text == "" {
 				return m, nil // Empty Enter is a no-op — don't submit blank.
 			}
 			m.input.Reset()
 			return m.completeQuestion(askuser.Answer{FreeText: text})
-		case tea.KeyCtrlC:
+		case "ctrl+c":
 			// Reply cancelled before quitting so the agent unblocks.
 			return m.completeQuestion(askuser.Answer{Cancelled: true})
 		}
@@ -132,18 +132,18 @@ func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Choice mode.
-	switch msg.Type {
-	case tea.KeyUp:
+	switch msg.String() {
+	case "up":
 		if m.pendingQuestionCursor > 0 {
 			m.pendingQuestionCursor--
 		}
 		return m, nil
-	case tea.KeyDown:
+	case "down":
 		if m.pendingQuestionCursor < otherIdx {
 			m.pendingQuestionCursor++
 		}
 		return m, nil
-	case tea.KeySpace:
+	case "space":
 		if !q.MultiSelect {
 			return m, nil
 		}
@@ -168,7 +168,7 @@ func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		// Single-select: accept the cursor row.
 		// Multi-select:  if nothing toggled, treat current row as
 		//                the single pick (a one-line shortcut for
@@ -199,9 +199,9 @@ func (m Model) handleQuestionKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.enterFreeText()
 		}
 		return m.completeQuestion(askuser.Answer{ChosenIDs: selected})
-	case tea.KeyEsc:
+	case "esc":
 		return m.completeQuestion(askuser.Answer{Cancelled: true})
-	case tea.KeyCtrlC:
+	case "ctrl+c":
 		// Reply cancelled before quitting so the agent unblocks.
 		return m.completeQuestion(askuser.Answer{Cancelled: true})
 	}
@@ -263,7 +263,7 @@ func (m Model) completeQuestion(ans askuser.Answer) (tea.Model, tea.Cmd) {
 // pickers byte-identical at the input layer — the only difference
 // is what completion does: single completes the request; batch
 // either advances or completes the BATCH request.
-func (m Model) handleBatchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleBatchKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.pendingBatch == nil {
 		return m, nil
 	}

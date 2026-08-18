@@ -29,11 +29,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
@@ -405,11 +405,12 @@ type Model struct {
 	// legacyConhostInput is true only on a legacy Windows console host
 	// (conhost) — the ONE environment where the CRLF-paste Enter→newline
 	// guard can fire correctly. Every terminal emulator (Windows Terminal
-	// included) delivers paste via bracketed paste (msg.Paste) and forwards
-	// IME-commit keys to the app, so there the guard can only misfire
-	// (Enter becomes a newline instead of sending — see docs/pitfalls.md
-	// "Windows Terminal forwards the IME-commit Enter"). Detected once in
-	// New() from GOOS + terminal env vars; zero-value (false) = guard off.
+	// included) delivers paste via bracketed paste (a dedicated tea.PasteMsg
+	// in v2) and forwards IME-commit keys to the app, so there the guard
+	// can only misfire (Enter becomes a newline instead of sending — see
+	// docs/pitfalls.md "Windows Terminal forwards the IME-commit Enter").
+	// Detected once in New() from GOOS + terminal env vars; zero-value
+	// (false) = guard off.
 	legacyConhostInput bool
 
 	// streamStartTime is set in submit() and used to compute elapsed
@@ -422,6 +423,31 @@ type Model struct {
 
 	turns     int
 	toolCalls int
+
+	// Session timing stats, measured at event-arrival in applyAgentEvent
+	// (pkg/agent events carry no timestamps). Timing is process-local by
+	// construction: on --resume, turns/toolCalls are reconstructed from
+	// the transcript, but wall-clock durations cannot be, so these fields
+	// cover only the current run. renderExitSummary marks resumed
+	// sessions so the mixed scope isn't silently presented as whole-
+	// session stats.
+	llmTime       time.Duration // LLM streaming time: TurnStart → assistant MessageEnd
+	toolTime      time.Duration // cumulative tool execution time
+	firstTokSum   time.Duration // sum of per-turn first-token latencies; avg = sum / firstTokN
+	firstTokN     int           // turns with a measured first-token latency
+	completionTok int           // completion tokens across turns (drives tok/s)
+
+	// Per-turn timing bookkeeping, set by TurnStart, consumed by
+	// MessageDelta / MessageEnd, zeroed when the LLM span closes.
+	turnStart    time.Time // TurnStart arrival — the LLM call's start
+	turnFirstTok bool      // first delta of the current turn already counted
+
+	// resumed marks a session loaded via --resume/--continue: its turn
+	// and tool counts include prior runs. Set in New() when the loaded
+	// session has assistant messages. Cleared by /clear (fresh session +
+	// fresh tracker); survives /compact and /branch, whose children are
+	// continuations of the resumed conversation.
+	resumed bool
 
 	width, height int
 	ready         bool
@@ -598,7 +624,17 @@ func New(opts Options) Model {
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	ta.Focus()
-	ta.KeyMap.InsertNewline.SetKeys("ctrl+j")
+	// Ctrl+J inserts a newline on every platform (its own control key).
+	// Shift+Enter ALSO inserts a newline, but only on terminals that can
+	// deliver the modifier: v2's input layer keeps Mod on VK_RETURN
+	// (Windows coninput, ultraviolet decoder.go) and parses CSI-u / kitty
+	// keyboard protocol on Unix, so Shift+Enter arrives as
+	// String()=="shift+enter". On terminals without modifier reporting it
+	// collapses to plain Enter (String()=="enter") and submits — safe
+	// degradation, identical to v1 behaviour. Ctrl+J remains the
+	// guaranteed-everywhere newline. See docs/pitfalls.md "Shift+Enter is
+	// indistinguishable from Enter" (resolved by the v2 migration).
+	ta.KeyMap.InsertNewline.SetKeys("ctrl+j", "shift+enter")
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -640,6 +676,10 @@ func New(opts Options) Model {
 		}
 		m.turns = t
 		m.toolCalls = tc
+		// A non-empty assistant history means the counts include prior
+		// runs — the exit summary must label totals as resumed since
+		// timing cannot be reconstructed for those runs.
+		m.resumed = t > 0
 	}
 	// Warm-up: scan workspace once for @-completer paths. Cost is
 	// O(files), capped by pathScanLimit, runs synchronously here so
@@ -832,6 +872,16 @@ func (m *Model) appendHistory(line string) tea.Cmd {
 func (m *Model) resetSessionCounters() {
 	m.turns = 0
 	m.toolCalls = 0
+	// Timing stats share the counters' lifecycle: /clear starts a fresh
+	// conversation, /compact and /branch start fresh buckets — the exit
+	// summary must not mix pre/post-reset timing.
+	m.llmTime = 0
+	m.toolTime = 0
+	m.firstTokSum = 0
+	m.firstTokN = 0
+	m.completionTok = 0
+	m.turnStart = time.Time{}
+	m.turnFirstTok = false
 	m.bannerFrame = len(letterEndCols)
 	m.curContent = ""
 	m.curReasoning = ""

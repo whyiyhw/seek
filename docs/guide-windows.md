@@ -62,11 +62,11 @@ seek
 |------|------|
 | **Enter** | 发送消息 |
 | **Ctrl+J** | 插入换行（跨平台官方方式） |
-| **Shift+Enter** | 与 Enter 相同，**会发送**（不会换行） |
+| **Shift+Enter** | 插入换行（在支持修饰键的终端：Windows Terminal / conhost、kitty、wezterm、foot、ghostty 等） |
 
-在 macOS 上 **Shift+Enter** 往往能换行，是因为部分终端把 Shift+Enter 发送为 `\n`，seek 会当作 Ctrl+J 处理。Windows 控制台不区分 Shift，Enter 与 Shift+Enter 都会提交。
+**Shift+Enter 换行是渐进增强**：seek 基于 Bubble Tea v2，能收到带修饰键的按键事件。在支持 CSI-u / kitty 键盘协议（Unix）或保留控制台修饰键（Windows）的终端上，Shift+Enter 在输入框内插入换行；在**不支持**修饰键的少数终端上，Shift+Enter 会退化为普通 Enter（直接发送消息）——与旧版本行为一致，不会误伤。**Ctrl+J 在任何终端都可用**，是跨平台保底方式。
 
-> **English**: **Enter** sends; **Ctrl+J** inserts a newline (the official cross-platform shortcut). **Shift+Enter** also sends on Windows — it does not insert a newline. On macOS, Shift+Enter often works because some terminals send `\n`, which seek treats like Ctrl+J.
+> **English**: **Enter** sends; **Ctrl+J** inserts a newline everywhere; **Shift+Enter** also inserts a newline on terminals that report modifiers (Windows Terminal, conhost, kitty, wezterm, foot, ghostty, …). On terminals without modifier reporting, Shift+Enter degrades to plain Enter (sends) — same as before. Ctrl+J remains the guaranteed-everywhere newline.
 
 若习惯 macOS 的 Shift+Enter 换行，可在 Windows Terminal 的 **settings.json** 里把 Shift+Enter 映射为发送 `\n`（`0x0A`）。在 WT **设置 → 打开 JSON 文件** 编辑，向 `actions` 数组追加：
 

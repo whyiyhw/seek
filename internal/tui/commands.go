@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/config"
@@ -258,7 +258,8 @@ func buildHelpKeysSection(km *keymap.KeyMap) string {
 	sb.WriteString("\n")
 	// Non-rebindable keys (textarea native + bracketed paste) — list
 	// first so users know what NOT to try rebinding via keybindings.toml.
-	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Ctrl+J", "Insert newline in input (textarea native)"))
+	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Ctrl+J", "Insert newline in input (every terminal)"))
+	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Shift+Enter", "Insert newline (terminals reporting modifiers; else sends)"))
 	sb.WriteString(fmt.Sprintf("  %-22s  %s\n", "Tab", "Picker accept / completion (reserved)"))
 	// Rebindable actions: render from snapshot so user overrides surface.
 	for _, b := range km.Snapshot() {
@@ -344,6 +345,9 @@ func cmdNew(m *Model, _ string) cmdResult {
 	// (which is what /compact and /branch are). See resetSessionCounters'
 	// doc for the split.
 	m.opts.PlanSubstate = ""
+	// A brand-new session + a fresh tracker mean the exit summary's
+	// totals no longer include prior runs — drop the resume marker.
+	m.resumed = false
 	// Clear prompt-recall state. Two reasons: (1) the welcome banner's
 	// gate in View() is `turns==0 && len(promptHistory)==0`, so leaving
 	// prior prompts here would hide the fresh-conversation banner; (2)

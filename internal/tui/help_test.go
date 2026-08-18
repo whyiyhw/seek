@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // cmdName reflects out the symbolic name of a tea.Cmd's function. We
@@ -50,7 +50,7 @@ func TestHelpOverlay_CtrlCQuits(t *testing.T) {
 		m.helpContent = "(rendered help)"
 	}).Build()
 
-	out, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	out, cmd := m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	final := out.(Model)
 
 	if !isQuit(cmd) {
@@ -74,12 +74,12 @@ func TestHelpOverlay_OtherKeysDismiss(t *testing.T) {
 
 	cases := []struct {
 		name string
-		key  tea.KeyMsg
+		key  tea.KeyPressMsg
 	}{
-		{"Esc", tea.KeyMsg{Type: tea.KeyEsc}},
-		{"Enter", tea.KeyMsg{Type: tea.KeyEnter}},
-		{"q", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}},
-		{"random rune", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}},
+		{"Esc", tea.KeyPressMsg{Code: tea.KeyEsc}},
+		{"Enter", tea.KeyPressMsg{Code: tea.KeyEnter}},
+		{"q", tea.KeyPressMsg{Text: "q"}},
+		{"random rune", tea.KeyPressMsg{Text: "x"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

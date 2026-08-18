@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNormalizePasteText_CRLF(t *testing.T) {
@@ -70,7 +70,7 @@ func TestEnterSubmitsOutsideLegacyConhost(t *testing.T) {
 	// Fresh runes — the old time-based guard would have fired here.
 	m.lastInputRunesAt = time.Now().Add(pasteEnterGap)
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := out.(Model)
 	if mm.input.Value() != "" {
 		t.Fatalf("Enter should submit and clear the input, got %q", mm.input.Value())
@@ -147,7 +147,7 @@ func TestPasteBurstEnterInsertsNewline(t *testing.T) {
 	m.lastInputRunesAt = time.Now().Add(pasteEnterGap)
 	m.input.SetValue("line1")
 
-	out, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ := m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := out.(Model)
 	if mm.input.Value() != "line1\n" {
 		t.Fatalf("burst Enter should insert newline, got %q", mm.input.Value())

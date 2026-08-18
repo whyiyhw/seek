@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/memory"
 )
 
@@ -41,7 +41,7 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 // Ctrl+C in either sub-mode aborts the review entirely (same exit as
 // 'q'). The review state persists across keys until exhausted; nothing
 // re-enters this handler once distillReviewOpen flips back to false.
-func (m Model) handleDistillKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleDistillKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.distillReviewOpen {
 		return m, nil
 	}
@@ -50,23 +50,23 @@ func (m Model) handleDistillKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleDistillEditKey(msg)
 	}
 
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	switch msg.String() {
+	case "ctrl+c":
 		return m.exitDistillReview(true)
-	case tea.KeyEsc:
+	case "esc":
 		// Esc behaves the same as 'q' — abort. Less surprising than
 		// "Esc does nothing here" in a modal context.
 		return m.exitDistillReview(true)
-	case tea.KeyEnter:
+	case "enter":
 		// Enter on the review prompt with no key first is ambiguous —
 		// reject it so the user must explicitly say y/n/e/q.
 		return m, nil
 	}
 
-	if len(msg.Runes) != 1 {
+	if len(msg.Text) != 1 {
 		return m, nil
 	}
-	switch strings.ToLower(string(msg.Runes)) {
+	switch strings.ToLower(msg.Text) {
 	case "y":
 		return m.distillAcceptCurrent()
 	case "n":
@@ -138,18 +138,18 @@ func (m Model) enterDistillEdit() (tea.Model, tea.Cmd) {
 // edited content into the candidate and treats it as accepted (saves
 // to M, advances). Esc cancels the edit and returns to y/n/e/q without
 // changing anything.
-func (m Model) handleDistillEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyCtrlC:
+func (m Model) handleDistillEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
 		// Abort the whole review including the in-flight edit.
 		return m.exitDistillReview(true)
-	case tea.KeyEsc:
+	case "esc":
 		m.distillEditing = false
 		m.input.Reset()
 		m.input.SetHeight(3)
 		m.input.Blur()
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		// Commit: replace the candidate's Content with the edit and
 		// route through the same accept path so Project.Add fires and
 		// counters update consistently.

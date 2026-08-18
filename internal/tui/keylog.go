@@ -2,7 +2,7 @@ package tui
 
 // Opt-in raw-key diagnostic logger (debug aid, not a feature).
 //
-// Set SEEK_KEYLOG=<file> before starting seek and every tea.KeyMsg is
+// Set SEEK_KEYLOG=<file> before starting seek and every tea.KeyPressMsg is
 // appended with a timestamp, BEFORE any routing decides what to do with
 // it. Used to diagnose "keys arrive as the wrong thing" bugs — e.g. a
 // terminal/IME bridge delivering Enter as a \n character event instead
@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 var (
@@ -37,16 +37,16 @@ func keylogInit() {
 }
 
 // logKeyMsg records one raw key event. String() is the canonical key
-// name seek's keymap resolves against; Type+Runes are the raw fields, so
-// a "\n delivered as runes" shows up as Type=KeyRunes Runes=[a] with
-// String()= "\n" — distinguishable from Type=KeyEnter "enter".
-func logKeyMsg(msg tea.KeyMsg) {
+// name seek's keymap resolves against; Code+Text are the raw fields, so
+// a "\n delivered as text" shows up as Code=0x0a Text="\n" with
+// String()="\n" — distinguishable from Code=KeyEnter "enter".
+func logKeyMsg(msg tea.KeyPressMsg) {
 	if keylogFile == nil {
 		keylogOnce.Do(keylogInit)
 		if keylogFile == nil {
 			return
 		}
 	}
-	fmt.Fprintf(keylogFile, "%s type=%d runes=%q str=%q paste=%v\n",
-		time.Now().Format("15:04:05.000"), msg.Type, string(msg.Runes), msg.String(), msg.Paste)
+	fmt.Fprintf(keylogFile, "%s code=%#x text=%q str=%q mod=%d\n",
+		time.Now().Format("15:04:05.000"), msg.Code, msg.Text, msg.String(), msg.Mod)
 }

@@ -2,10 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"runtime/debug"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // seekRow is one line of the wordmark plus its colour tier.
@@ -40,7 +41,7 @@ var seekRows = []seekRow{
 // transition; rows above use the brand cyan (117 = colourUser), rows
 // below use the deeper cyan to give the wordmark visual weight at the
 // bottom.
-var gradientCyan = [3]lipgloss.Color{
+var gradientCyan = [3]color.Color{
 	lipgloss.Color("117"), // top
 	lipgloss.Color("80"),  // middle
 	lipgloss.Color("38"),  // bottom

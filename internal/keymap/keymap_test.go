@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestNewDefault_HasAllActions(t *testing.T) {
@@ -27,20 +27,20 @@ func TestResolve_DefaultBindings(t *testing.T) {
 	km := NewDefault()
 	cases := []struct {
 		name string
-		msg  tea.KeyMsg
+		msg  tea.KeyPressMsg
 		want Action
 	}{
-		{"ctrl+c → interrupt", tea.KeyMsg{Type: tea.KeyCtrlC}, ActionInterrupt},
-		{"enter → submit", tea.KeyMsg{Type: tea.KeyEnter}, ActionSubmit},
-		{"alt+enter → steer", tea.KeyMsg{Type: tea.KeyEnter, Alt: true}, ActionSteer},
-		{"esc → cancel", tea.KeyMsg{Type: tea.KeyEsc}, ActionCancel},
-		{"ctrl+l → clear-screen", tea.KeyMsg{Type: tea.KeyCtrlL}, ActionClearScreen},
-		{"ctrl+r → toggle-reasoning", tea.KeyMsg{Type: tea.KeyCtrlR}, ActionToggleReasoning},
-		{"shift+tab → cycle-mode", tea.KeyMsg{Type: tea.KeyShiftTab}, ActionCycleMode},
-		{"up → history-prev", tea.KeyMsg{Type: tea.KeyUp}, ActionHistoryPrev},
-		{"down → history-next", tea.KeyMsg{Type: tea.KeyDown}, ActionHistoryNext},
-		{"? → toggle-help", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}}, ActionToggleHelp},
-		{"a → none", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}, ActionNone},
+		{"ctrl+c → interrupt", tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, ActionInterrupt},
+		{"enter → submit", tea.KeyPressMsg{Code: tea.KeyEnter}, ActionSubmit},
+		{"alt+enter → steer", tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}, ActionSteer},
+		{"esc → cancel", tea.KeyPressMsg{Code: tea.KeyEsc}, ActionCancel},
+		{"ctrl+l → clear-screen", tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}, ActionClearScreen},
+		{"ctrl+r → toggle-reasoning", tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}, ActionToggleReasoning},
+		{"shift+tab → cycle-mode", tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, ActionCycleMode},
+		{"up → history-prev", tea.KeyPressMsg{Code: tea.KeyUp}, ActionHistoryPrev},
+		{"down → history-next", tea.KeyPressMsg{Code: tea.KeyDown}, ActionHistoryNext},
+		{"? → toggle-help", tea.KeyPressMsg{Text: "?"}, ActionToggleHelp},
+		{"a → none", tea.KeyPressMsg{Text: "a"}, ActionNone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestResolve_DefaultBindings(t *testing.T) {
 
 func TestResolve_NilKeyMap_ReturnsNone(t *testing.T) {
 	var km *KeyMap
-	if got := km.Resolve(tea.KeyMsg{Type: tea.KeyEnter}); got != ActionNone {
+	if got := km.Resolve(tea.KeyPressMsg{Code: tea.KeyEnter}); got != ActionNone {
 		t.Errorf("nil KeyMap Resolve should be ActionNone, got %q", got)
 	}
 }
@@ -155,11 +155,11 @@ clear-screen = "ctrl+x"
 		t.Errorf("KeyFor(ActionClearScreen) = %q, want ctrl+x", got)
 	}
 	// Reverse lookup via Resolve — new key triggers
-	if act := km.Resolve(tea.KeyMsg{Type: tea.KeyCtrlX}); act != ActionClearScreen {
+	if act := km.Resolve(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl}); act != ActionClearScreen {
 		t.Errorf("ctrl+x should resolve to clear-screen, got %q", act)
 	}
 	// Old default no longer triggers clear-screen (cleared from byKey)
-	if act := km.Resolve(tea.KeyMsg{Type: tea.KeyCtrlL}); act == ActionClearScreen {
+	if act := km.Resolve(tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}); act == ActionClearScreen {
 		t.Errorf("old default ctrl+l should no longer trigger clear-screen after rebind")
 	}
 }
@@ -255,7 +255,7 @@ clear-screen = "tab"
 }
 
 func TestIsReservedKey(t *testing.T) {
-	for _, k := range []string{"tab", "backspace", "space"} {
+	for _, k := range []string{"tab", "backspace", "space", "shift+enter"} {
 		if !IsReservedKey(k) {
 			t.Errorf("%q should be reserved", k)
 		}

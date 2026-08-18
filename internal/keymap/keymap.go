@@ -1,7 +1,7 @@
 package keymap
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // KeyMap is the resolved (action → key) and (key → action) tables.
@@ -39,7 +39,7 @@ func NewDefault() *KeyMap {
 // ActionNone if no action is bound. The canonical form is bubbletea's
 // own KeyMsg.String() (e.g. "ctrl+c", "alt+enter", "shift+tab", "?")
 // — same string the user writes in keybindings.toml.
-func (km *KeyMap) Resolve(msg tea.KeyMsg) Action {
+func (km *KeyMap) Resolve(msg tea.KeyPressMsg) Action {
 	if km == nil {
 		return ActionNone
 	}

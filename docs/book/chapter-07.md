@@ -15,6 +15,8 @@ TUI 有一种特殊的复杂性：它同时处理用户输入、流式输出、�
 
 Go 有几个 TUI 框架，seek 选了 [bubbletea](https://github.com/charmbracelet/bubbletea)（charm 团队的），原因如下：
 
+> 版本现状：seek 运行在 Bubble Tea **v2**（`charm.land/bubbletea/v2`，v2.0.x 起）上，配套 `charm.land/bubbles/v2`（textarea/spinner）与 `charm.land/lipgloss/v2`。v2 的声明式 `View() tea.View`、独立的 `PasteMsg`、键盘增强协议让 v1 时代需要 workaround 的输入怪癖（见 `docs/pitfalls.md`）大部分原生消解；渲染器（Cursed Renderer）也更高效。
+
 **Elm 架构**：bubbletea 的编程模型是 Model-Update-View。所有状态在 Model 里，Update 函数处理消息（键盘事件、定时器、goroutine 发来的数据），View 函数渲染当前状态。这是一个纯函数式的架构——没有全局状态，没有回调地狱，状态变化可追踪。
 
 **inline 模式天然支持**：bubbletea 既支持 alt-screen（全屏接管终端），也支持 inline 模式（在当前光标位置下方渲染，不清屏）。这个区别比看起来重要得多——我们在 M4 做了一个关键决策。

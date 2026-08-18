@@ -7,24 +7,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// forceColor pins lipgloss to a colour-emitting profile for the duration of
-// a test. Without this, lipgloss detects "not a TTY" in `go test` and
-// silently strips all SGR codes — which makes any assertion about colour
-// output trivially fail.
+// forceColor is kept as a no-op hook for tests that assert on colour
+// output. In lipgloss v2, Style.Render() always emits the configured
+// ANSI sequences — colour downsampling moved to the output layer
+// (colorprofile.Writer / the bubbletea renderer), so there is no
+// "not a TTY strips SGR" behaviour to pin in unit tests anymore.
 func forceColor(t *testing.T) {
 	t.Helper()
-	prev := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.ANSI256)
-	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
 }
 
 func TestFormatCommittedDuration(t *testing.T) {
@@ -819,8 +814,8 @@ func TestView_IdleStateIsStableAcrossRedraws(t *testing.T) {
 	// computation doesn't fluctuate between calls.
 	m.now = time.Date(2026, time.January, 15, 12, 0, 0, 0, pricing.Shanghai)
 
-	first := m.View()
-	second := m.View()
+	first := m.View().Content
+	second := m.View().Content
 	if first != second {
 		t.Errorf("View() is non-deterministic across redraws on identical state;\nfirst:  %q\nsecond: %q", first, second)
 	}
@@ -832,7 +827,7 @@ func TestView_WelcomeBannerOnFreshSession(t *testing.T) {
 	SetTheme("dark")
 	m := testModel().Build()
 
-	out := m.View()
+	out := m.View().Content
 
 	if !strings.Contains(out, m.opts.CWD) {
 		t.Errorf("welcome banner should contain cwd %q", m.opts.CWD)
@@ -852,7 +847,7 @@ func TestView_WelcomeBannerHiddenAfterFirstTurn(t *testing.T) {
 	SetTheme("dark")
 	m := testModel().WithTurns(1).Build()
 
-	out := m.View()
+	out := m.View().Content
 
 	if strings.Contains(out, Creator) {
 		t.Error("welcome meta line must NOT appear in View() when turns>0")
@@ -868,7 +863,7 @@ func TestView_WelcomeBannerHiddenAfterFirstSubmit(t *testing.T) {
 	// submitted once, so promptHistory is non-empty.
 	m := testModel().WithPromptHistory("hello").Build()
 
-	out := m.View()
+	out := m.View().Content
 
 	if strings.Contains(out, Creator) {
 		t.Error("welcome meta line must NOT appear after the first submit, even while turns==0")
@@ -889,7 +884,7 @@ func TestView_NoBottomFloorPadding(t *testing.T) {
 	m.ready = true
 	m.input.SetWidth(118)
 
-	out := m.View()
+	out := m.View().Content
 	// Allow a small handful of trailing newlines (one per logical row
 	// like input's `\n` + status's absence of `\n`), but never the kind
 	// of long run that floor-pinning produces.
@@ -921,7 +916,7 @@ func TestView_SeparatorAlwaysPresent(t *testing.T) {
 		m.ready = true
 		m.input.SetWidth(78)
 
-		out := stripANSI(m.View())
+		out := stripANSI(m.View().Content)
 		if !strings.Contains(out, strings.Repeat(hbar, 10)) {
 			t.Errorf("idle View() must render the separator (reserved-zone invariant); got:\n%s", out)
 		}
@@ -936,7 +931,7 @@ func TestView_SeparatorAlwaysPresent(t *testing.T) {
 		m.commandMenuOpen = true
 		m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
 
-		out := stripANSI(m.View())
+		out := stripANSI(m.View().Content)
 		if !strings.Contains(out, strings.Repeat(hbar, 10)) {
 			t.Errorf("View() with popup open must render the separator; got:\n%s", out)
 		}
@@ -1066,7 +1061,7 @@ func TestView_PopupZoneStablyHigh(t *testing.T) {
 		m.ready = true
 		m.input.SetWidth(78)
 		setup(&m)
-		return m.View()
+		return m.View().Content
 	}
 
 	idle := build(func(_ *Model) {})
@@ -1160,7 +1155,7 @@ func TestView_PopupRendersAboveSeparator(t *testing.T) {
 	m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
 	m.input.SetWidth(118)
 
-	out := stripANSI(m.View())
+	out := stripANSI(m.View().Content)
 	footerIdx := strings.Index(out, "Tab to complete")
 	if footerIdx < 0 {
 		t.Fatalf("menu footer not found in view output")
@@ -1226,14 +1221,14 @@ func TestView_MenuCloseRemovesPopupRows(t *testing.T) {
 	// Menu open → footer is present.
 	m.commandMenuOpen = true
 	m.commandMenuFiltered = []command{{usage: "/help", description: "Show this help."}}
-	if !strings.Contains(stripANSI(m.View()), "Tab to complete") {
+	if !strings.Contains(stripANSI(m.View().Content), "Tab to complete") {
 		t.Fatalf("precondition: menu footer should appear while menu is open")
 	}
 
 	// Menu closed → footer is gone.
 	m.commandMenuOpen = false
 	m.commandMenuFiltered = nil
-	if strings.Contains(stripANSI(m.View()), "Tab to complete") {
+	if strings.Contains(stripANSI(m.View().Content), "Tab to complete") {
 		t.Errorf("menu footer still rendered after commandMenuOpen=false")
 	}
 }

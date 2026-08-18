@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/memory"
 )
 
@@ -36,8 +36,8 @@ func openReview(m Model, candidates []memory.Candidate) Model {
 	return m
 }
 
-func keyRune(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Text: string(r)}
 }
 
 func TestHandleDistillDone_EmptyClosesQuietly(t *testing.T) {
@@ -133,7 +133,7 @@ func TestDistill_EscBehavesLikeQ(t *testing.T) {
 	m, _ := setupDistillModel(t)
 	m = openReview(m, []memory.Candidate{{Name: "x", Tagline: "x", Content: "x"}})
 
-	out, _ := m.handleDistillKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ := m.handleDistillKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mm := out.(Model)
 	if mm.distillReviewOpen {
 		t.Errorf("Esc should close the modal (treated as abort)")
@@ -179,7 +179,7 @@ func TestDistill_EditEnterSavesEditedContent(t *testing.T) {
 	// brevity since that's textarea library code, not our state machine.
 	m.input.SetValue("edited rationale")
 
-	out, _ = m.handleDistillKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ = m.handleDistillKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := out.(Model)
 	if mm.distillEditing {
 		t.Errorf("Enter in edit mode should exit edit mode")
@@ -204,7 +204,7 @@ func TestDistill_EditEscCancelsWithoutSaving(t *testing.T) {
 	m = out.(Model)
 	m.input.SetValue("trash that should not be saved")
 
-	out, _ = m.handleDistillKey(tea.KeyMsg{Type: tea.KeyEsc})
+	out, _ = m.handleDistillKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	mm := out.(Model)
 	if mm.distillEditing {
 		t.Errorf("Esc should exit edit mode")
@@ -230,7 +230,7 @@ func TestDistill_EditCommitWithEmptyContentDrops(t *testing.T) {
 	m = out.(Model)
 	m.input.SetValue("   \n\n  ")
 
-	out, _ = m.handleDistillKey(tea.KeyMsg{Type: tea.KeyEnter})
+	out, _ = m.handleDistillKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	mm := out.(Model)
 	if mm.distillSaved != 0 || mm.distillDropped != 1 {
 		t.Errorf("empty edit should drop, got saved=%d dropped=%d", mm.distillSaved, mm.distillDropped)
