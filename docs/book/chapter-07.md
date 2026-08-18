@@ -57,7 +57,7 @@ inline 模式的工作方式：bubbletea 在终端光标当前位置下方渲染
 4. **退出时 dump**。离开全屏后把整份会话重新渲染打印到终端，留在 scrollback 里——这是应用打印的副本，不是运行期间的原生历史。
 5. **渲染层**：React + Ink（公开报道；后续版本因虚拟滚动性能部分替换为自研渲染）。
 
-Claude Code 能"完美贴底"，正是因为它选了 seek 明确放弃的那条路：全屏接管。seek 选择真 inline（终端原生滚动 / 原生选择 / 低内存，历史由 JSONL 会话文件持久化），代价是放弃"贴绝对底部"的执念——live region 随内容增长，状态栏锚定 live region 末尾（也就是终端底部），输入框紧贴状态栏上方，高度变化交给渲染器原生处理（见上文 7.2 的 CRITICAL 注释与坑 #8 的后续）。两种架构的取舍不同，不是实现水平差异。
+Claude Code 能"完美贴底"，正是因为它选了 seek 明确放弃的那条路：全屏接管。seek 选择真 inline（终端原生滚动 / 原生选择 / 低内存，历史由 JSONL 会话文件持久化），代价是放弃"贴绝对底部"的执念——live region 随内容增长，状态栏锚定 live region 末尾（也就是终端底部），输入框紧贴状态栏上方，高度变化交给渲染器原生处理（见上文 7.2 的 CRITICAL 注释与坑 #8 的后续）。长回复不会无限撑高 live region：正文超过半屏高度（`chunkThreshold`）时，已流出的内容会分段提交进 scrollback（续段带 "▸ seek (续)" 标签），live region 始终保持在一屏以内——因为 inline 渲染器的 cursor-up 定位在 live region 超高时会失效，屏幕会冻结在旧帧（见 `docs/pitfalls.md` "Long streaming replies freeze the screen"）。
 
 > 修正记录：初版此书断言"Claude Code 也用 inline 模式"，不准确。gh CLI、gemini CLI 才是真 inline；Claude Code 是伪全屏 + 退出时 dump。与之对应的 `docs/pitfalls.md` "Alt-screen mode breaks scrollback, copy, and content persistence" 条目已同步修正。另注：早期版本曾用"常驻 9 行 reserved zone"稳定输入框位置（菜单开关时不跳动），代价是输入框上方永远悬着空白、看起来像悬浮；该设计后来被废弃——输入框回到紧贴状态栏的位置，菜单打开时输入框随内容自然下移（与 streaming 内容增长是同一行为）。期间还尝试过把状态栏移到输入框上方让输入框当最后一行，结果状态栏在 inline 模式下悬在屏幕中间（inline 没有固定顶部）——状态栏必须保持屏幕最底部。详见 `docs/pitfalls.md` "Reserved popup zone was the same mistake as floor-pin padding, wearing a different hat"。
 
