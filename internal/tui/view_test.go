@@ -899,12 +899,10 @@ func TestView_NoBottomFloorPadding(t *testing.T) {
 }
 
 // TestView_SeparatorAlwaysPresent locks the "separator is always
-// present above the input" invariant. Under the reserved-popup-zone
-// design (see view.go), the bottom block always has content above
-// the input (filter popup if open, blank zone otherwise), so the
-// separator is a stable demarcation rather than an on/off element.
-// Holding the separator constant is what eliminates the per-popup-
-// open shift the user complained about.
+// present" invariant. The bottom block (status bar + input) is always
+// rendered, so the separator above it is a stable demarcation between
+// the content / popup zone and the bottom block — present at idle and
+// with a popup open alike.
 func TestView_SeparatorAlwaysPresent(t *testing.T) {
 	SetTheme("dark")
 	const hbar = "─"
@@ -918,7 +916,7 @@ func TestView_SeparatorAlwaysPresent(t *testing.T) {
 
 		out := stripANSI(m.View().Content)
 		if !strings.Contains(out, strings.Repeat(hbar, 10)) {
-			t.Errorf("idle View() must render the separator (reserved-zone invariant); got:\n%s", out)
+			t.Errorf("idle View() must render the separator (bottom-block invariant); got:\n%s", out)
 		}
 	})
 
@@ -1046,13 +1044,18 @@ func TestMenuWindow_FollowsSelection(t *testing.T) {
 	}
 }
 
-// TestView_PopupZoneStablyHigh locks the load-bearing "popup open
-// does not shift the input" invariant. Without the reserved zone,
-// opening a filter popup grows the bottom block by ~9 rows and the
-// input visibly jumps. With the reserved zone, the View()'s total
-// row count is byte-stable between idle and any filter-popup-open
-// state — only the popup region's CONTENT changes, not its size.
-func TestView_PopupZoneStablyHigh(t *testing.T) {
+// TestView_PopupZoneGrowsOnOpen locks the post-reserved-zone layout
+// contract: at idle the bottom block is separator + status + input
+// (no blank rows above the input); opening a filter popup adds
+// exactly menuMaxRows+1 rows (item rows + footer). The input row
+// therefore moves down when a popup opens and back up when it closes
+// — the same "live region grew" behaviour as streaming content, which
+// replaced the old byte-stable reserved zone (see view.go's bottom
+// block). The old TestView_PopupZoneStablyHigh pinned the opposite
+// contract (idle == popup-open row count) at the cost of 9 blank rows
+// above the input; that design was retired because the blank rows
+// made the input look like it was floating mid-screen.
+func TestView_PopupZoneGrowsOnOpen(t *testing.T) {
 	SetTheme("dark")
 	build := func(setup func(*Model)) string {
 		m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
@@ -1081,6 +1084,7 @@ func TestView_PopupZoneStablyHigh(t *testing.T) {
 	})
 
 	idleRows := strings.Count(idle, "\n")
+	wantRows := idleRows + menuMaxRows + 1
 	for _, c := range []struct {
 		name string
 		out  string
@@ -1090,9 +1094,47 @@ func TestView_PopupZoneStablyHigh(t *testing.T) {
 		{"path picker", withPath},
 	} {
 		got := strings.Count(c.out, "\n")
-		if got != idleRows {
-			t.Errorf("%s: %d rows, want %d (same as idle) — input position is shifting", c.name, got, idleRows)
+		if got != wantRows {
+			t.Errorf("%s: %d rows, want %d (idle %d + popup zone %d) — popup height contract broken", c.name, got, wantRows, idleRows, menuMaxRows+1)
 		}
+	}
+}
+
+// TestView_StatusBarIsLastRow locks the bottom-block layout contract:
+// the status bar is the LAST row of View() output (the terminal-bottom
+// anchor) and the input renders directly above it. The original
+// reserved-zone refactor briefly moved the status bar ABOVE the input
+// to make the input the last row — that left the status floating
+// mid-screen (inline mode has no fixed top), so the order was restored.
+func TestView_StatusBarIsLastRow(t *testing.T) {
+	SetTheme("dark")
+	m := New(Options{Tracker: cache.New(), Model: "deepseek-chat"})
+	m.width = 80
+	m.height = 30
+	m.ready = true
+	m.input.SetWidth(78)
+
+	out := stripANSI(m.View().Content)
+	statusIdx := strings.Index(out, "turns:")
+	inputIdx := strings.Index(out, "▌")
+	if statusIdx < 0 || inputIdx < 0 {
+		t.Fatalf("missing status bar (%d) or input prompt (%d) in View() output", statusIdx, inputIdx)
+	}
+	if inputIdx > statusIdx {
+		t.Errorf("input prompt (at %d) must render ABOVE the status bar (at %d)", inputIdx, statusIdx)
+	}
+
+	// The last non-empty row must be the status bar (contains
+	// "turns:"), not the input.
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	lastNonEmpty := ""
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			lastNonEmpty = l
+		}
+	}
+	if !strings.Contains(lastNonEmpty, "turns:") {
+		t.Errorf("status bar must be the last non-empty row of View(); last = %q", lastNonEmpty)
 	}
 }
 

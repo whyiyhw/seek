@@ -39,13 +39,27 @@ alt-screen 是很多 TUI 工具的默认选择（vim、less、htop 都用）。�
 
 inline 模式的工作方式：bubbletea 在终端光标当前位置下方渲染 TUI，"已完成"的内容（用户消息、AI 的回复、工具执行结果）通过 `tea.Println` 写入标准输出，永久保留在 scrollback 里；"活跃"的内容（正在流式输出的 AI 消息、当前工具的执行状态、输入框）在 bubbletea 的 live region 里实时更新。
 
-这个模式完全符合用户对聊天工具的期望：对话历史在 scrollback 里，可以无限往上翻；输入框始终在底部。这和 Claude Code、gh Copilot CLI 的行为完全一致——它们也用 inline 模式。
+这个模式完全符合用户对聊天工具的期望：对话历史在 scrollback 里，可以无限往上翻；输入框始终在底部。gh CLI、gemini CLI 与 seek 行为一致——它们也是真 inline（历史进终端原生 scrollback）。**Claude Code 是例外**：它走的是"伪全屏"的第三条路——全屏接管终端、历史留在应用内存、滚动由应用内虚拟列表负责、退出时再把整份会话 dump 到 scrollback。见下文"Claude Code 的第三条路"。
 
 > **坑 #8：`tea.WithAltScreen()` 对聊天类工具是一个路径依赖的陷阱**
 >
 > alt-screen 很容易加（一行代码），但一旦加上，很多特性就建立在它之上了：viewport 的大小假设、Println 的路由、scrollback 的不存在。切换到 inline 模式需要重写大量渲染逻辑，不是"改一行"能解决的。
 >
 > 开始做 TUI 时就要想清楚这个问题。聊天/REPL 类工具用 inline；全屏编辑器用 alt-screen。
+
+### Claude Code 的第三条路：伪全屏
+
+上文说"inline 模式与 Claude Code 行为一致"——这个说法不准确，需要修正。Claude Code 既不是 alt-screen，也不是 bubbletea 意义上的 inline，它是第三种模型：
+
+1. **全屏接管**。启动时清屏，整个可视区域归应用所有。运行期间终端 scrollback 里看不到会话——历史全部在应用内存里。
+2. **滚动是应用内虚拟列表**。滚轮 / PgUp / PgDn 走应用（需要鼠标捕获），原生文本选择被压制（要 Shift / Option 修饰键绕过）。
+3. **输入框贴底是布局坐标**。屏幕 = flex column：内容区（flex: 1）+ 底部输入框。窗口尺寸已知，resize 时整树重排——"底部"是画布坐标，不存在"终端 scrollback 累积了多少行"这个变量，所以从结构上就不会有 seek M3 时代的漂移问题。
+4. **退出时 dump**。离开全屏后把整份会话重新渲染打印到终端，留在 scrollback 里——这是应用打印的副本，不是运行期间的原生历史。
+5. **渲染层**：React + Ink（公开报道；后续版本因虚拟滚动性能部分替换为自研渲染）。
+
+Claude Code 能"完美贴底"，正是因为它选了 seek 明确放弃的那条路：全屏接管。seek 选择真 inline（终端原生滚动 / 原生选择 / 低内存，历史由 JSONL 会话文件持久化），代价是放弃"贴绝对底部"的执念——live region 随内容增长，状态栏锚定 live region 末尾（也就是终端底部），输入框紧贴状态栏上方，高度变化交给渲染器原生处理（见上文 7.2 的 CRITICAL 注释与坑 #8 的后续）。两种架构的取舍不同，不是实现水平差异。
+
+> 修正记录：初版此书断言"Claude Code 也用 inline 模式"，不准确。gh CLI、gemini CLI 才是真 inline；Claude Code 是伪全屏 + 退出时 dump。与之对应的 `docs/pitfalls.md` "Alt-screen mode breaks scrollback, copy, and content persistence" 条目已同步修正。另注：早期版本曾用"常驻 9 行 reserved zone"稳定输入框位置（菜单开关时不跳动），代价是输入框上方永远悬着空白、看起来像悬浮；该设计后来被废弃——输入框回到紧贴状态栏的位置，菜单打开时输入框随内容自然下移（与 streaming 内容增长是同一行为）。期间还尝试过把状态栏移到输入框上方让输入框当最后一行，结果状态栏在 inline 模式下悬在屏幕中间（inline 没有固定顶部）——状态栏必须保持屏幕最底部。详见 `docs/pitfalls.md` "Reserved popup zone was the same mistake as floor-pin padding, wearing a different hat"。
 
 ---
 
@@ -297,7 +311,7 @@ TUI 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pit
 - **Saw**：M4 版本使用 `tea.WithAltScreen()`。问题累积：终端 scrollback 消失（只有一个应用内 viewport），复制只能在可见区域内工作，退出 seek 后整个对话消失，OSC 查询响应无处可去。
 - **Why**：alt-screen 切换到终端的备屏缓冲区。该缓冲区**设计上就没有 scrollback**——它是为全屏应用（vim、less）准备的，使用者接受"屏幕上有什么就是什么"。对于聊天式编码 agent，这个权衡是错的：用户希望任意回滚、复制任意历史消息、退出后对话仍然留在 shell 中。
 - **Fix**：M4.5.1 切换到 inline 模式。移除 `tea.WithAltScreen()`，已提交的历史（用户 prompt、tool result、已完成的 assistant 消息）通过 `tea.Println` 发布到终端的原生 scrollback。bubbletea 的 live 区域只持有易失状态（活动工具、流式输出、输入框、状态栏）。
-- **Lesson**：alt-screen 对任何"有历史记录的对话"都是错误默认。仅用于真正的全屏模态 UI（文件选择器、日志查看器）。Inline 模式 + `tea.Println` 提交内容是 Claude Code、gh CLI、gemini CLI 的选择——这不是巧合。
+- **Lesson**：alt-screen 对任何"有历史记录的对话"都是错误默认。仅用于真正的全屏模态 UI（文件选择器、日志查看器）。Inline 模式 + `tea.Println` 提交内容是 gh CLI、gemini CLI 的选择——这不是巧合。Claude Code 是例外（伪全屏 + 退出时 dump），见上文 7.2 节"Claude Code 的第三条路"。
 - **后续**：后来一次修复布局漂移的尝试把 seek 切回了 alt-screen，鼠标滚轮和复制再次损坏——同一个教训被学习了两次。参见 "Inline-mode drift"。
 
 **2. `WindowSizeMsg` 不可靠——Init 中主动合成**

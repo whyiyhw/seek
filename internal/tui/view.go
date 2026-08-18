@@ -40,6 +40,11 @@ import (
 //	> input
 //	status: …
 //
+// The status bar is the LAST row of the live region — the terminal-
+// bottom anchor. The input sits directly above it; at idle there are
+// NO blank rows between content and input (the popup zone occupies
+// rows only while a popup is open).
+//
 // CRITICAL: do NOT pad sb with trailing newlines to push the input to
 // the absolute terminal floor. That was the M3-era drift class
 // (`scrollbackLines` counter + `strings.Repeat("\n", pad)`). The
@@ -176,10 +181,12 @@ func (m Model) View() tea.View {
 		}
 	}
 
-	// Bottom block — transient UI + (conditional) separator + input.
-	// Popup-style UI (queue hint / setup banner / skill-armed badge /
-	// approval / menu / picker) is rendered INSIDE bottomBuf above the
-	// separator so it visually anchors to the input region.
+	// Bottom block — transient UI + separator + input + status bar.
+	// Popup-style UI (queue hint / setup banner / approval / menu /
+	// picker) renders INSIDE bottomBuf above the separator so it
+	// visually anchors to the input region. The status bar is the
+	// LAST row — the terminal-bottom anchor — with the input sitting
+	// directly above it and no blank rows in between.
 	var bottomBuf strings.Builder
 
 	// Queue / steer hint — only meaningful mid-stream.
@@ -198,18 +205,22 @@ func (m Model) View() tea.View {
 		bottomBuf.WriteString("\n")
 	}
 
-	// Decision UIs (approval / ask_user / distill review): variable
-	// height, user-blocking. They render in their own space; the
-	// input may shift to accommodate them, which is acceptable
-	// because the user has to attend to them before continuing.
+	// Decision UIs (approval / ask_user / distill review / help
+	// overlay): variable height, user-blocking. They render in their
+	// own space; the input shifts to accommodate them, which is
+	// acceptable because the user has to attend to them before
+	// continuing.
 	//
 	// Filter popups (slash menu, model picker, path picker): render
-	// in a FIXED reserved zone of menuMaxRows + 1 rows above the
-	// separator. When no filter popup is open, the zone is blank —
-	// keeping the input position byte-stable across "user pressed /
-	// vs not". Without the reserved zone, opening any filter popup
-	// shifts the input by 9 rows, which is the residual jumping that
-	// users complained about even after fixed-height popups.
+	// ONLY while open, directly above the separator. At idle nothing
+	// is emitted — the input sits at the end of the live region, i.e.
+	// the terminal bottom. Opening a popup grows the live region and
+	// pushes the input down by menuMaxRows+1 rows; that shift is the
+	// same "content grew" behaviour as streaming output and is fine —
+	// the user is interacting with the popup. (The previous design
+	// reserved the rows even when idle to keep the input byte-stable;
+	// that is what produced the blank rows above the input that made
+	// it look like it was floating mid-screen.)
 	switch {
 	case m.pendingApproval != nil:
 		bottomBuf.WriteString(m.renderApprovalPrompt())
@@ -224,48 +235,39 @@ func (m Model) View() tea.View {
 		bottomBuf.WriteString(m.renderDistillReview())
 	case m.helpOverlayOpen:
 		bottomBuf.WriteString(m.renderHelpOverlay())
-	default:
-		// Reserved-zone branch. Exactly one of the filter popups OR
-		// the blank-zone fallback fires; all paths emit menuMaxRows+1
-		// rows so the input position is the same in every branch.
-		switch {
-		case m.commandMenuOpen:
-			bottomBuf.WriteString(m.renderCommandMenu())
-		case m.modelPickerOpen:
-			bottomBuf.WriteString(m.renderModelPicker())
-		case m.pathPicker.open:
-			bottomBuf.WriteString(m.renderPathPicker())
-		default:
-			// Blank reserved zone. NOTE: this is fixed-height padding,
-			// NOT terminal-floor-pin padding. The drift class that led
-			// to the alt-screen detour was variable-height padding
-			// computed against m.height; this is a constant N regardless
-			// of terminal size.
-			bottomBuf.WriteString(strings.Repeat("\n", menuMaxRows+1))
-		}
+	case m.commandMenuOpen:
+		bottomBuf.WriteString(m.renderCommandMenu())
+	case m.modelPickerOpen:
+		bottomBuf.WriteString(m.renderModelPicker())
+	case m.pathPicker.open:
+		bottomBuf.WriteString(m.renderPathPicker())
 	}
 
-	// Separator above the input. Always drawn — there's now always
-	// content above (reserved zone or decision UI), so the separator
-	// is a stable demarcation rather than a conditional one.
+	// Separator between the content / popup zone and the bottom block
+	// (input + status bar). Always drawn — the input and status bar
+	// are always present — so it is a stable demarcation.
 	bottomBuf.WriteString(styleMuted.Render(strings.Repeat("─", m.width)))
 	bottomBuf.WriteString("\n")
 
-	bottomBuf.WriteString(m.renderInput())
-	bottomBuf.WriteString("\n")
 	if hint := m.renderSuggestedReplyHint(); hint != "" {
 		bottomBuf.WriteString(hint)
 		bottomBuf.WriteString("\n")
 	}
 
-	sb.WriteString(bottomBuf.String())
+	bottomBuf.WriteString(m.renderInput())
+	bottomBuf.WriteString("\n")
 
-	// Status line. No bottom rule — under inline mode the line below
-	// the status is either the next streamed update (still ours) or
-	// the post-exit shell prompt (cleanly separated by the program's
-	// natural teardown). The rule was a leftover from alt-screen
-	// where the live region needed a visual "seal".
-	sb.WriteString(m.renderStatusBar())
+	// Status bar as the LAST row — the terminal-bottom anchor. The
+	// input sits directly above it (with any suggestion hint between),
+	// so the bottom block reads as input + status with no dead space.
+	// (An earlier attempt moved the status ABOVE the input so the
+	// input would be the last row; that left the status floating
+	// mid-screen — inline mode has no fixed top, so "above the input"
+	// is not "at the top". The input does not need to be the last
+	// row; it needs no blank rows around it.)
+	bottomBuf.WriteString(m.renderStatusBar())
+
+	sb.WriteString(bottomBuf.String())
 
 	return tea.NewView(sb.String())
 }
@@ -460,7 +462,9 @@ func formatTokensK(n int) string {
 // popup as the user types and grow it as they backspace — which under
 // inline mode visibly shifts the input up and down on every keystroke.
 // Holding row count constant pins the input position while the user
-// narrows their selection.
+// narrows their selection. The rows exist only while the popup is
+// open — idle View() emits nothing for them (see the bottom block in
+// View).
 const menuMaxRows = 8
 
 // menuWindow returns the visible [start, end) slice of items for a
