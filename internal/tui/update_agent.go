@@ -308,12 +308,14 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		// AgentEnd / ErrorEvent for paths that never emit one.
 		m.turnStart = time.Now()
 		m.turnFirstTok = false
+		m.turnClock = time.Now()
 	case agent.MessageStart:
 		// A new message is starting — discard any residual live state
 		// from a prior failed attempt (e.g. stream_error that triggered
 		// an agent-level retry of the same turn).
 		m.curContent = ""
 		m.curReasoning = ""
+		m.chunked = false
 
 	case agent.MessageDelta:
 		// First token of the turn — the time-to-first-byte signal.
@@ -330,6 +332,13 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		} else {
 			m.curContent += e.Delta
 			m.streamDeltaBytes += len(e.Delta)
+			// Long-reply chunking: once the live block would exceed the
+			// terminal height, commit what has streamed so far and keep
+			// the live region short. Prevents the inline-renderer freeze
+			// on replies taller than the screen (see shouldChunkCommit).
+			if m.shouldChunkCommit() {
+				cmds = append(cmds, m.commitChunk())
+			}
 		}
 
 	case agent.MessageEnd:
@@ -349,11 +358,18 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			// The `↳ tool(...)` lines committed via ToolExecEnd already
 			// convey what happened on a silent reasoning round.
 			if m.curContent != "" {
-				line := renderAssistantBlock(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md)
+				label := "▸ seek"
+				if m.chunked {
+					label = "▸ seek (续)"
+				}
+				line := renderAssistantBlockLabel(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md, label)
 				cmds = append(cmds, m.appendHistory(line))
 				// Capture for the /goal judge: the latest assistant text is
 				// fed in as "the latest work" at this turn's stream-end.
-				m.lastAssistantText = m.curContent
+				// e.Message.Content is the FULL assembled message — after
+				// long-reply chunking, m.curContent holds only the final
+				// segment.
+				m.lastAssistantText = e.Message.Content
 			}
 			// Always reset the live-region buffers — leaving them
 			// populated would leak this turn's reasoning/content into
@@ -450,6 +466,12 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.llmTime += time.Since(m.turnStart)
 			m.turnStart = time.Time{}
 		}
+		// Wall-clock turn duration for the footer (spans tool dispatch,
+		// unlike the LLM span above).
+		if !m.turnClock.IsZero() {
+			m.lastTurnDur = time.Since(m.turnClock)
+			m.turnClock = time.Time{}
+		}
 		m.completionTok += e.Usage.CompletionTokens
 		m.turns++
 		// Lock in cost at the (model, tier) active when the turn settled
@@ -471,6 +493,10 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.llmTime += time.Since(m.turnStart)
 			m.turnStart = time.Time{}
 		}
+		if !m.turnClock.IsZero() {
+			m.lastTurnDur = time.Since(m.turnClock)
+			m.turnClock = time.Time{}
+		}
 		// Stats footer at turn boundary — gives the user visible
 		// "checkpoints" in history for long sessions.
 		cmds = append(cmds, m.appendHistory(m.renderTurnFooter()))
@@ -483,6 +509,10 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		if !m.turnStart.IsZero() {
 			m.llmTime += time.Since(m.turnStart)
 			m.turnStart = time.Time{}
+		}
+		if !m.turnClock.IsZero() {
+			m.lastTurnDur = time.Since(m.turnClock)
+			m.turnClock = time.Time{}
 		}
 		cmds = append(cmds, m.appendHistory(styleErr.Render("  ! error: "+e.Err.Error())))
 
@@ -541,6 +571,58 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	}
 
 	return cmds
+}
+
+// shouldChunkCommit reports whether the assistant live block (label +
+// reasoning + content) has grown past chunkThreshold rendered rows —
+// i.e. continuing would exceed the terminal height and break the
+// inline renderer's cursor-up positioning (the long-reply freeze: the
+// screen stops showing new deltas even though the stream continues).
+//
+// Fence guard: while inside an unclosed ``` code block we defer the
+// split so the segment boundary doesn't land mid-code-block (glamour
+// would render an unterminated fence). The deferral is bounded —
+// at 2x the threshold an unclosed fence can no longer stall chunking.
+func (m Model) shouldChunkCommit() bool {
+	if m.chunkThreshold <= 0 {
+		return false
+	}
+	rows := 1 // label row
+	if m.curReasoning != "" {
+		rows += strings.Count(wrap(m.curReasoning, m.width-2), "\n") + 1
+	}
+	if m.curContent != "" {
+		rows += strings.Count(wrap(m.curContent, m.width-2), "\n") + 1
+	}
+	if rows < m.chunkThreshold {
+		return false
+	}
+	if unclosedFence(m.curContent) && rows < m.chunkThreshold*2 {
+		return false // wait for the code block to close
+	}
+	return true
+}
+
+// commitChunk commits the current assistant live block to scrollback
+// and resets the live buffers so streaming continues with a short live
+// region. The first segment renders with "▸ seek"; later ones carry
+// "▸ seek (续)" so the scrollback reads as one reply in pieces.
+func (m *Model) commitChunk() tea.Cmd {
+	label := "▸ seek"
+	if m.chunked {
+		label = "▸ seek (续)"
+	}
+	line := renderAssistantBlockLabel(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md, label)
+	m.curContent = ""
+	m.curReasoning = ""
+	m.chunked = true
+	return m.appendHistory(line)
+}
+
+// unclosedFence reports whether s contains an odd number of ``` fences
+// — i.e. a code block is open at the end of s.
+func unclosedFence(s string) bool {
+	return strings.Count(s, "```")%2 == 1
 }
 
 // handleCompactDone reacts to the summariser's response: on success,
@@ -679,10 +761,15 @@ func (m Model) renderTurnFooter() string {
 	// (appendHistory strips trailing newlines, so the blank line lands
 	// between them); the ┈ prefix + · separators distinguish it from the
 	// status bar's data-line language — the footer is a turn-boundary
-	// checkpoint in history, not a live status row.
+	// checkpoint in history, not a live status row. lastTurnDur is the
+	// wall-clock length of the just-finished turn (LLM + tool dispatch).
+	dur := ""
+	if m.lastTurnDur > 0 {
+		dur = " · " + formatStreamElapsed(m.lastTurnDur)
+	}
 	return styleMuted.Render(fmt.Sprintf(
-		"\n  ┈ turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s",
+		"\n  ┈ turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s%s",
 		m.turns, m.toolCalls,
 		formatTokensK(c.PromptTokens), cacheNote,
-		formatTokensK(c.CompletionTokens), cost))
+		formatTokensK(c.CompletionTokens), cost, dur))
 }

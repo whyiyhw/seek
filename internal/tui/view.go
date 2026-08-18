@@ -293,6 +293,18 @@ func (m Model) relayout() Model {
 		m.md = newMarkdownRenderer(m.width, m.opts.GlamourStyle)
 		m.mdWidth = m.width
 	}
+	// Long-reply chunk threshold: keep the assistant live block under
+	// half the terminal height (floor 12) so the inline renderer never
+	// has to cursor-up more than a screen. The other half covers the
+	// bottom block (separator + input + status), popups, and tool
+	// slots. Below this the live region exceeds the terminal and the
+	// renderer's cursor-up positioning breaks — see
+	// shouldChunkCommit / docs/pitfalls.md.
+	base := m.height / 2
+	if base < 12 {
+		base = 12
+	}
+	m.chunkThreshold = base
 	m.ready = true
 	return m
 }
@@ -1190,6 +1202,14 @@ func reasoningBlock(reasoning string) string {
 // to skip rendering and emit raw content (used by tests; production
 // callers always have a renderer ready).
 func renderAssistantBlock(content, reasoning string, showReasoning bool, width int, md *glamour.TermRenderer) string {
+	return renderAssistantBlockLabel(content, reasoning, showReasoning, width, md, "▸ seek")
+}
+
+// renderAssistantBlockLabel is the label-parameterised form of
+// renderAssistantBlock. Long replies are chunk-committed with a
+// "▸ seek (续)" continuation label (see commitChunk); the plain
+// renderer keeps "▸ seek" for single-block messages and replay.
+func renderAssistantBlockLabel(content, reasoning string, showReasoning bool, width int, md *glamour.TermRenderer, label string) string {
 	if content == "" {
 		return ""
 	}
@@ -1197,7 +1217,7 @@ func renderAssistantBlock(content, reasoning string, showReasoning bool, width i
 	if rendered == "" {
 		rendered = content
 	}
-	out := styleAssistantLabel.Render("▸ seek") + "\n" + rendered
+	out := styleAssistantLabel.Render(label) + "\n" + rendered
 	if reasoning != "" {
 		if showReasoning {
 			out += "\n" + styleReasoning.Render(reasoningBlock(reasoning))

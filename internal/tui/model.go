@@ -421,6 +421,19 @@ type Model struct {
 	// completion token count before the final Usage arrives.
 	streamDeltaBytes int
 
+	// chunked marks that the current assistant message has already been
+	// committed to scrollback in segments (long-reply chunking). Drives
+	// the "▸ seek (续)" label on subsequent segments. Reset on
+	// MessageStart.
+	chunked bool
+	// chunkThreshold is the max rendered rows the assistant live block
+	// (label + reasoning + content) may occupy before it is chunk-
+	// committed to scrollback. Long replies would otherwise exceed the
+	// terminal height, which breaks the inline renderer's cursor-up
+	// positioning (screen freezes on an old frame — see
+	// docs/pitfalls.md). Set in relayout().
+	chunkThreshold int
+
 	turns     int
 	toolCalls int
 
@@ -441,6 +454,15 @@ type Model struct {
 	// MessageDelta / MessageEnd, zeroed when the LLM span closes.
 	turnStart    time.Time // TurnStart arrival — the LLM call's start
 	turnFirstTok bool      // first delta of the current turn already counted
+
+	// turnClock is the wall-clock start of the current turn (TurnStart).
+	// Unlike turnStart it is NOT cleared at the assistant MessageEnd —
+	// the turn footer's per-turn duration spans the whole turn including
+	// tool dispatch. Cleared at TurnEnd / AgentEnd / ErrorEvent.
+	turnClock time.Time
+	// lastTurnDur is the previous turn's wall-clock duration, shown in
+	// the turn footer ("· 12s"). Zero before the first TurnEnd.
+	lastTurnDur time.Duration
 
 	// resumed marks a session loaded via --resume/--continue: its turn
 	// and tool counts include prior runs. Set in New() when the loaded
@@ -881,6 +903,8 @@ func (m *Model) resetSessionCounters() {
 	m.firstTokN = 0
 	m.completionTok = 0
 	m.turnStart = time.Time{}
+	m.turnClock = time.Time{}
+	m.lastTurnDur = 0
 	m.turnFirstTok = false
 	m.bannerFrame = len(letterEndCols)
 	m.curContent = ""

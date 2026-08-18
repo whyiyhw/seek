@@ -148,6 +148,25 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 	}
 }
 
+// TestRenderTurnFooter_ShowsDuration pins the per-turn wall-clock
+// segment: after a TurnEnd, the footer carries "· 1m5s" (or similar)
+// so each checkpoint in history says how long that turn took.
+func TestRenderTurnFooter_ShowsDuration(t *testing.T) {
+	m := Model{
+		opts: Options{Tracker: cache.New(), Model: deepseek.ModelV4Flash},
+		turns: 1,
+	}
+	// Zero duration → no time segment; the footer ends at the cost.
+	if got := stripANSI(m.renderTurnFooter()); !strings.HasSuffix(got, "$0.0000") {
+		t.Errorf("zero duration must not render a time segment: %q", got)
+	}
+	m.lastTurnDur = 65 * time.Second
+	footer := stripANSI(m.renderTurnFooter())
+	if !strings.Contains(footer, "· 1m5s") {
+		t.Errorf("missing duration segment in footer: %q", footer)
+	}
+}
+
 func TestStreamingLabel_SubSecond(t *testing.T) {
 	m := Model{streamStartTime: time.Now()}
 	if got := m.streamingLabel(); got != "thinking…" {
