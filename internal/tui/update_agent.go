@@ -675,8 +675,13 @@ func (m Model) renderTurnFooter() string {
 		cacheNote = fmt.Sprintf(" (%d%% cache)", pct)
 	}
 
+	// Leading \n separates the footer from the assistant block above it
+	// (appendHistory strips trailing newlines, so the blank line lands
+	// between them); the ┈ prefix + · separators distinguish it from the
+	// status bar's data-line language — the footer is a turn-boundary
+	// checkpoint in history, not a live status row.
 	return styleMuted.Render(fmt.Sprintf(
-		"  · turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s",
+		"\n  ┈ turn %d · %d tools · ↑%s prompt%s · ↓%s tok · %s",
 		m.turns, m.toolCalls,
 		formatTokensK(c.PromptTokens), cacheNote,
 		formatTokensK(c.CompletionTokens), cost))

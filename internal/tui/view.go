@@ -176,8 +176,19 @@ func (m Model) View() tea.View {
 			sb.WriteString(styleReasoning.Render(reasoningBlock(m.curReasoning)))
 			sb.WriteString("\n")
 		} else {
-			sb.WriteString(styleReasoning.Render("▸ reasoning… (Ctrl+R to toggle)"))
-			sb.WriteString("\n")
+			// Hidden-reasoning placeholder. Spinner + elapsed makes the
+			// "still working" state visible — a static line reads as
+			// frozen, and reasoning can be the longest silent gap in a
+			// turn (10-90s on /distill, seconds on normal think tool
+			// calls). Same pattern as the thinking… line above and the
+			// active-tool slots.
+			label := "reasoning…"
+			if !m.streamStartTime.IsZero() {
+				if el := formatToolElapsed(time.Since(m.streamStartTime)); el != "" {
+					label = fmt.Sprintf("reasoning… %s", el)
+				}
+			}
+			fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleReasoning.Render("▸ "+label+" (Ctrl+R to toggle)"))
 		}
 	}
 
