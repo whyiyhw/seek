@@ -33,7 +33,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned; output over 32 KiB keeps the head AND the tail, eliding the middle, so a test/build verdict at the end is never lost. Use timeout_ms to bound long-running commands. Set run_in_background to start a long task (build / test suite / dev server) detached and track it with the monitor tool instead of blocking the turn."
+const description = "Execute a shell command. Prefer dedicated tools (git, grep, read, list_dir, webfetch) for repo inspection — use bash only when no dedicated tool covers the need. By default seek refuses bash; the user must opt in by re-running with --yolo. When allowed, combined stdout/stderr is returned; output over 32 KiB keeps the head AND the tail, eliding the middle, so a test/build verdict at the end is never lost. Use timeout_ms to bound long-running commands. Set run_in_background to start a long task (build / test suite / dev server) detached and track it with the monitor tool instead of blocking the turn. NEVER chain commands (';' is not even a separator in the Windows cmd.exe shell, and chains defeat per-command output and permission granularity) — one command per call, several independent tasks = parallel dedicated-tool calls. Do not run read-only git (log/diff/status/show) here — the git tool covers those; bash is for mutating git (commit/push) and non-git work."
 
 const (
 	defaultTimeoutMS = 120_000

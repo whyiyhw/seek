@@ -1,0 +1,1 @@
+用 git 工具盘点仓库：分别查 scroll、drift、inline 三个关键词的提交历史（git log --all --grep 各一次，大小写不敏感），再查一次 status --short。最后用两三句话汇总现状。不要修改任何文件。

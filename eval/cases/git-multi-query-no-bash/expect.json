@@ -1,0 +1,9 @@
+{
+  "description": "Three independent git history queries + one status --short — the exact shape that failed as a bash ';'-chain (POSIX syntax on cmd.exe → 'ambiguous argument echo') and as bash-run git in the motivating session. Deliberately does NOT ban bash in the prompt: the tool descriptions must do the work, otherwise the eval measures instruction-following, not description effectiveness. Targets: all four queries via the git tool (min_git_calls 4, strict — merging greps into one call still violates one-query-per-call), zero bash (bash_calls 0), zero POSIX chains (bash_chains 0), zero git-via-bash (bash_git_calls 0), zero duplicated-subcommand tic (git_subcommand_dupes 0).",
+  "max_turns": 10,
+  "min_git_calls": 4,
+  "max_bash_calls": 0,
+  "max_bash_chains": 0,
+  "max_bash_git_calls": 0,
+  "max_git_subcommand_dupes": 0
+}

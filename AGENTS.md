@@ -44,6 +44,7 @@ When exploring code, follow this order — skipping steps costs tokens and break
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
 
 5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
+6. **Git queries: one per git-tool call** — never chain, never bash read-only git; several queries = parallel calls. Rationale: `docs/test-plan-git-tool-shape.md`.
 
 ## Tool descriptions: the highest-leverage behavioural lever
 
@@ -64,7 +65,7 @@ Concrete examples from this repo's own description tuning:
 | `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
 | `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
 
-**Why this works when AGENTS.md entries don't**: DeepSeek's prefix cache (and every other model's attention budget) favours tokens that are closest to the user's request. Tool schemas are injected immediately before the model's generation step; they compete with the conversation history for attention, not with the system prompt. A sentence in a tool description is ~10× more likely to influence the next `tool_call` than the same sentence in AGENTS.md.
+**Why this beats AGENTS.md**: tool schemas sit closest to the generation step, competing with the conversation for attention rather than with the system prompt — a description sentence is ~10× more likely to shape the next `tool_call` than the same sentence in AGENTS.md.
 
 ## AGENTS.md vs CLAUDE.md — related but not identical
 

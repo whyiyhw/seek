@@ -118,6 +118,29 @@ extract_metric() {
       # pitfalls "a refusal the model does not learn from").
       $JQ -s '[.[] | select(.type=="tool_end" and .name=="git" and (.result // "" | contains("repeated from args")))] | length' "$path"
       ;;
+    bash_chains)
+      # A bash call whose command chains multiple commands (';' or '&&').
+      # ';' is not even a separator on cmd.exe (the Windows shell), so a
+      # POSIX-style chain fails wholesale ("ambiguous argument 'echo'");
+      # '&&' is legal on cmd but still the chaining anti-pattern — the
+      # target shape is one command per call, or parallel dedicated-tool
+      # calls. '|' is deliberately NOT counted: pipelines and grep
+      # alternations (--grep="a|b") are legitimate. Matches the raw args
+      # JSON of the tool call (pre-exec), so a failed chain still counts.
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash" and ((.args // "") | test("[;]|&&")))] | length' "$path"
+      ;;
+    bash_git_calls)
+      # A bash call that invokes git — the dedicated git tool covers
+      # every read-only query (log/diff/status/show/...), so reaching for
+      # bash skips the subcommand whitelist and the auto-fix. Matches git
+      # as a COMMAND TOKEN: preceded by start/whitespace/quote/;/&/| and
+      # followed by whitespace or end — deliberately NOT \bgit\b, which
+      # would false-positive on ".git" in paths (cd .git, ls .git) and
+      # "github.com" style strings. Catches "cd x && git log" chains too.
+      # Mutating git (commit/push) legitimately belongs in bash, but this
+      # eval's prompts are read-only, so 0 is the correct target there.
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash" and ((.args // "") | test("(^|[;&|[:space:]\"])git([[:space:]]|$)")))] | length' "$path"
+      ;;
     probe_reads)
       # A read that returned zero lines from a non-starting offset is a
       # probe past EOF — the model could not tell "exactly N lines" from
@@ -238,6 +261,8 @@ run_one() {
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
+    --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
+    --argjson bash_git_calls       "$(extract_metric bash_git_calls       "$out_file")" \
     --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
     --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
     --argjson git_subcommand_dupes "$(extract_metric git_subcommand_dupes "$out_file")" \
@@ -246,7 +271,7 @@ run_one() {
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

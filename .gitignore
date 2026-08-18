@@ -13,6 +13,7 @@ coverage.txt
 /seek-baseline-linux
 /seek-improved
 /seek-improved-linux
+/seek-linux
 /dist/
 
 # Eval scratch (per-case setup/teardown hooks land here)

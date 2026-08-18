@@ -44,6 +44,7 @@ When exploring code, follow this order — skipping steps costs tokens and break
 Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
 
 5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
+6. **Git queries: one per git-tool call** — never chain, never bash read-only git; several queries = parallel calls. Rationale: `docs/test-plan-git-tool-shape.md`.
 
 ## Tool descriptions: the highest-leverage behavioural lever
 
