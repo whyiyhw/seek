@@ -40,7 +40,8 @@ type FIMChoice struct {
 // FIM issues a non-streaming fill-in-the-middle completion. The streaming
 // variant is intentionally deferred — FIM's natural use is small, fast
 // completions where bulk-buffering is fine and the saved round-trips
-// don't matter.
+// don't matter. Transient failures (transport errors, 5xx, 429) are
+// retried once via retryCall — same policy as Chat/ChatStream.
 func (c *Client) FIM(ctx context.Context, req *FIMRequest) (*FIMResponse, error) {
 	if req == nil {
 		return nil, errors.New("deepseek: nil FIM request")
@@ -52,23 +53,25 @@ func (c *Client) FIM(ctx context.Context, req *FIMRequest) (*FIMResponse, error)
 		req.Model = ModelV4Flash
 	}
 
-	resp, err := c.do(ctx, endpointFIM, req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return retryCall(ctx, func() (*FIMResponse, error) {
+		resp, err := c.do(ctx, endpointFIM, req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("deepseek FIM: read response: %w", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, parseAPIError(resp.StatusCode, body)
-	}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("deepseek FIM: read response: %w", err)
+		}
+		if resp.StatusCode/100 != 2 {
+			return nil, parseAPIError(resp.StatusCode, body)
+		}
 
-	out := &FIMResponse{}
-	if err := json.Unmarshal(body, out); err != nil {
-		return nil, fmt.Errorf("deepseek FIM: decode response: %w", err)
-	}
-	return out, nil
+		out := &FIMResponse{}
+		if err := json.Unmarshal(body, out); err != nil {
+			return nil, fmt.Errorf("deepseek FIM: decode response: %w", err)
+		}
+		return out, nil
+	})
 }

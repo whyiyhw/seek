@@ -236,6 +236,99 @@ func TestChat_MissingKey(t *testing.T) {
 	}
 }
 
+// TestChat_RetryOn500 verifies the non-streaming Chat path retries a
+// transient 5xx once and recovers — the same policy ChatStream has, now
+// shared via retryCall. Without retry the first 500 would surface as a
+// hard failure (this is the path Summarise uses).
+func TestChat_RetryOn500(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&hits, 1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"Internal Server Error"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+			"id":"1","object":"chat.completion","created":1,"model":"deepseek-v4-flash",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6,"prompt_cache_hit_tokens":3,"prompt_cache_miss_tokens":2}
+		}`)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("test"), WithBaseURL(srv.URL))
+	resp, err := c.Chat(context.Background(), &ChatRequest{
+		Model:    ModelV4Flash,
+		Messages: []Message{{Role: RoleUser, Content: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if got := resp.Choices[0].Message.Content; got != "pong" {
+		t.Errorf("content = %q, want pong", got)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want 2 (first=500, second=200)", got)
+	}
+}
+
+// TestChat_RetryExhaustedAnnotated pins the non-streaming exhaustion
+// path: when every attempt fails, the error keeps the API cause and is
+// annotated with the attempt count.
+func TestChat_RetryExhaustedAnnotated(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"boom"}}`)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.Chat(context.Background(), &ChatRequest{
+		Model:    ModelV4Flash,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected error after retry exhausted")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error should preserve original message, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "(after 2 attempts)") {
+		t.Errorf("error should be annotated with the attempt count, got %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
+	}
+}
+
+// TestChat_4xxNoRetry: 4xx codes are configuration / auth / quota
+// errors, not transients — the non-streaming path must not retry them.
+func TestChat_4xxNoRetry(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"type":"authentication_error","message":"bad key"}}`)
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelV4Flash})
+	if err == nil {
+		t.Fatalf("expected auth error")
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("server hits = %d, want 1 (no retry on 4xx)", got)
+	}
+}
+
 // validStream is a canned SSE body that produces exactly one delta
 // "ok" and finishes with reason="stop". Used as the "happy" payload by
 // the retry tests below.
@@ -362,6 +455,53 @@ func TestChatStream_RetryBudgetCapped(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Errorf("error should preserve original message, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "(after 2 attempts)") {
+		t.Errorf("error should be annotated with the attempt count, got %v", err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 2 {
+		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
+	}
+}
+
+// TestChatStream_TransportEOFAnnotated pins the real-world case that
+// motivated the annotation: the connection is closed before any response
+// (upstream EOF, proxy kill, network blip). The transport error is
+// retried once; when the retry also dies the surfaced error must say how
+// many attempts were made, so "this retried and still failed" is visible
+// instead of looking like a naive single-shot failure.
+func TestChatStream_TransportEOFAnnotated(t *testing.T) {
+	t.Parallel()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		// Hijack and close the raw connection without writing any
+		// response — the client observes a bare "EOF" from http.Do.
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack: %v", err)
+		}
+		conn.Close()
+	}))
+	defer srv.Close()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	_, err := c.ChatStream(context.Background(), &ChatRequest{
+		Model:    ModelV4Flash,
+		Messages: []Message{{Role: RoleUser, Content: "hi"}},
+	})
+	if err == nil {
+		t.Fatalf("expected EOF error after retry exhausted")
+	}
+	if !strings.Contains(err.Error(), "EOF") {
+		t.Errorf("error should preserve the transport cause, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "(after 2 attempts)") {
+		t.Errorf("error should be annotated with the attempt count, got %v", err)
 	}
 	if got := atomic.LoadInt32(&hits); got != 2 {
 		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)

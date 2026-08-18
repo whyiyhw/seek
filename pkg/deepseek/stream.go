@@ -13,16 +13,9 @@ import (
 	"time"
 )
 
-// Retry policy for transient DeepSeek stream failures (HTTP 5xx,
-// transport errors, or an SSE body that completes without emitting any
-// data). One retry catches the common upstream-blip case; more would
-// just amplify cost when the model genuinely produced nothing. Safe
-// because retry only fires before any event has reached the caller,
-// and the re-sent body is byte-identical so prefix-cache stays hot.
-const (
-	maxStreamRetries   = 1
-	streamRetryBackoff = 500 * time.Millisecond
-)
+// Retry policy for transient DeepSeek stream failures lives in retry.go
+// (maxRetries / retryBackoff / retryCall) — shared with the non-streaming
+// Chat and FIM paths.
 
 // StreamEventType discriminates the events emitted by ChatStream.
 type StreamEventType string
@@ -102,38 +95,25 @@ func (c *Client) ChatStream(ctx context.Context, req *ChatRequest) (<-chan Strea
 }
 
 // openChatStream issues the streaming request, returning the response
-// once a 2xx is observed. Transport errors, 5xx, and 429 (Too Many
-// Requests) are retried once with a fixed backoff; other 4xx is fatal
-// (those are configuration problems, not transients).
+// once a 2xx is observed. Transient failures (transport errors, 5xx,
+// 429) are retried once with a fixed backoff via retryCall; other 4xx is
+// fatal (those are configuration problems, not transients). When the
+// budget is exhausted the error carries an "(after N attempts)"
+// annotation so callers can tell a one-shot upstream blip (retried,
+// recovered) from an endpoint that stayed down across every attempt.
 func (c *Client) openChatStream(ctx context.Context, req *ChatRequest) (*http.Response, error) {
-	var lastErr error
-	for attempt := 0; attempt <= maxStreamRetries; attempt++ {
-		if attempt > 0 {
-			if err := sleepCtx(ctx, streamRetryBackoff); err != nil {
-				return nil, err
-			}
-		}
+	return retryCall(ctx, func() (*http.Response, error) {
 		resp, err := c.do(ctx, endpointChat, req)
 		if err != nil {
-			lastErr = err
-			if ctx.Err() != nil {
-				return nil, err
-			}
-			continue
+			return nil, err
 		}
 		if resp.StatusCode/100 == 2 {
 			return resp, nil
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		apiErr := parseAPIError(resp.StatusCode, body)
-		if resp.StatusCode/100 == 5 || resp.StatusCode == 429 {
-			lastErr = apiErr
-			continue
-		}
-		return nil, apiErr
-	}
-	return nil, lastErr
+		return nil, parseAPIError(resp.StatusCode, body)
+	})
 }
 
 // pumpChatStream owns the response body and drives one or more
@@ -147,11 +127,11 @@ func (c *Client) pumpChatStream(ctx context.Context, req *ChatRequest, initial *
 	defer close(out)
 
 	resp := initial
-	for attempt := 0; attempt <= maxStreamRetries; attempt++ {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		result := c.readChatStream(resp.Body, out)
 
 		canRetry := !result.emittedAny &&
-			attempt < maxStreamRetries &&
+			attempt < maxRetries &&
 			ctx.Err() == nil &&
 			(result.streamErr != nil || result.isEmpty())
 
@@ -160,7 +140,7 @@ func (c *Client) pumpChatStream(ctx context.Context, req *ChatRequest, initial *
 			return
 		}
 
-		if err := sleepCtx(ctx, streamRetryBackoff); err != nil {
+		if err := sleepCtx(ctx, retryBackoff); err != nil {
 			emitTerminalDone(out, result, nil)
 			return
 		}
@@ -266,13 +246,13 @@ func emitTerminalDone(out chan<- StreamEvent, result streamReadResult, openErr e
 	finish := result.finishReason
 	switch {
 	case openErr != nil:
-		finish = "stream_error:" + truncate(openErr.Error(), 80)
+		finish = "stream_error:" + truncate(openErr.Error(), 128)
 	case result.streamErr != nil:
 		msg := result.streamErr.Error()
 		if rest, ok := strings.CutPrefix(msg, "decode: "); ok {
-			finish = "decode_error:" + truncate(rest, 80)
+			finish = "decode_error:" + truncate(rest, 128)
 		} else {
-			finish = "stream_error:" + truncate(msg, 80)
+			finish = "stream_error:" + truncate(msg, 128)
 		}
 	}
 	out <- StreamEvent{

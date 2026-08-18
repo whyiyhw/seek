@@ -65,7 +65,10 @@ func New(opts ...Option) *Client {
 	return c
 }
 
-// Chat performs a non-streaming chat completion.
+// Chat performs a non-streaming chat completion. Transient failures
+// (transport errors, 5xx, 429) are retried once via retryCall — same
+// policy as ChatStream — so a connection blip doesn't surface as a hard
+// error on the first attempt.
 func (c *Client) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	if req == nil {
 		return nil, errors.New("deepseek: nil request")
@@ -73,25 +76,27 @@ func (c *Client) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, err
 	r := *req
 	r.Stream = false
 
-	resp, err := c.do(ctx, endpointChat, &r)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return retryCall(ctx, func() (*ChatResponse, error) {
+		resp, err := c.do(ctx, endpointChat, &r)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("deepseek: read response: %w", err)
-	}
-	if resp.StatusCode/100 != 2 {
-		return nil, parseAPIError(resp.StatusCode, body)
-	}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("deepseek: read response: %w", err)
+		}
+		if resp.StatusCode/100 != 2 {
+			return nil, parseAPIError(resp.StatusCode, body)
+		}
 
-	out := &ChatResponse{}
-	if err := json.Unmarshal(body, out); err != nil {
-		return nil, fmt.Errorf("deepseek: decode response: %w", err)
-	}
-	return out, nil
+		out := &ChatResponse{}
+		if err := json.Unmarshal(body, out); err != nil {
+			return nil, fmt.Errorf("deepseek: decode response: %w", err)
+		}
+		return out, nil
+	})
 }
 
 func (c *Client) do(ctx context.Context, path string, payload any) (*http.Response, error) {
