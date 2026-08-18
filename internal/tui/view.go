@@ -310,14 +310,17 @@ func (m Model) relayout() Model {
 		m.md = newMarkdownRenderer(m.width, m.opts.GlamourStyle)
 		m.mdWidth = m.width
 	}
-	// Long-reply chunk threshold: keep the assistant live block under
-	// half the terminal height (floor 12) so the inline renderer never
-	// has to cursor-up more than a screen. The other half covers the
-	// bottom block (separator + input + status), popups, and tool
-	// slots. Below this the live region exceeds the terminal and the
-	// renderer's cursor-up positioning breaks — see
-	// shouldChunkCommit / docs/pitfalls.md.
-	base := m.height / 2
+	// Long-reply chunk threshold: the assistant live block must stay
+	// under the terminal height MINUS the rest of the live region —
+	// tool status (1), reasoning placeholder (1), bottom block
+	// (separator + input + status, ~6) and a 2-row safety margin. If
+	// the TOTAL live region exceeds the terminal, the inline renderer's
+	// cursor-up breaks AND the overflow rows (tool status, reasoning
+	// placeholder, segment label) get pushed into the terminal
+	// scrollback, where they interleave with committed segments and
+	// read as format corruption. See shouldChunkCommit /
+	// docs/pitfalls.md "Long streaming replies freeze the screen".
+	base := m.height - 10
 	if base < 12 {
 		base = 12
 	}
