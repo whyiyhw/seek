@@ -331,7 +331,6 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.curReasoning += e.Delta
 		} else {
 			m.curContent += e.Delta
-			m.streamDeltaBytes += len(e.Delta)
 			// Long-reply chunking: once the live block would exceed the
 			// terminal height, commit what has streamed so far and keep
 			// the live region short. Prevents the inline-renderer freeze
@@ -340,6 +339,11 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 				cmds = append(cmds, m.commitChunk())
 			}
 		}
+		// Count reasoning AND content bytes: the estimate must track the
+		// final Usage.CompletionTokens, which includes reasoning tokens.
+		// Counting only content froze the ↓~Xtok indicator for the whole
+		// thinking phase of effort:max turns.
+		m.streamDeltaBytes += len(e.Delta)
 
 	case agent.MessageEnd:
 		if e.Message.Role == deepseek.RoleAssistant {

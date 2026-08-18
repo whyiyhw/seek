@@ -416,9 +416,12 @@ type Model struct {
 	// streamStartTime is set in submit() and used to compute elapsed
 	// time for the live streaming indicator. Zero when not streaming.
 	streamStartTime time.Time
-	// streamDeltaBytes accumulates the byte length of non-reasoning
-	// MessageDelta chunks in the current stream. Used to estimate
-	// completion token count before the final Usage arrives.
+	// streamDeltaBytes accumulates the byte length of MessageDelta
+	// chunks in the current stream (reasoning AND content). Feeds the
+	// "↓~Xtok" live estimate; counting only content froze the indicator
+	// during the thinking phase and diverged from the final
+	// Usage.CompletionTokens (which includes reasoning tokens). Reset
+	// in submit().
 	streamDeltaBytes int
 
 	// chunked marks that the current assistant message has already been

@@ -134,3 +134,22 @@ func TestUnclosedFence(t *testing.T) {
 		}
 	}
 }
+
+// TestStreamDeltaBytes_CountsReasoning pins the estimate's accounting
+// contract: reasoning deltas count towards streamDeltaBytes so the
+// ↓~Xtok indicator keeps moving during the thinking phase (effort:max)
+// and tracks Usage.CompletionTokens, which includes reasoning tokens.
+func TestStreamDeltaBytes_CountsReasoning(t *testing.T) {
+	m := testModel().BuildPtr()
+
+	m.applyAgentEvent(agent.MessageDelta{Delta: "think…", Reasoning: true})
+	if m.streamDeltaBytes != len("think…") {
+		t.Errorf("reasoning delta not counted: got %d, want %d", m.streamDeltaBytes, len("think…"))
+	}
+
+	before := m.streamDeltaBytes
+	m.applyAgentEvent(agent.MessageDelta{Delta: "answer"})
+	if m.streamDeltaBytes != before+len("answer") {
+		t.Errorf("content delta must add on top of reasoning bytes: got %d, want %d", m.streamDeltaBytes, before+len("answer"))
+	}
+}
