@@ -47,3 +47,4 @@ bench-*.json
 # directory name under each clone's ~/.seek/projects/. Each user's
 # clone should re-derive its own ID from its own abs_path.
 .seek/project-id
+.tmp/  
