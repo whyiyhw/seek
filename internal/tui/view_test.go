@@ -1158,9 +1158,9 @@ func TestView_StatusBarIsLastRow(t *testing.T) {
 }
 
 // TestView_ToolSlotPersistsUntilStreamEnd checks that ToolExecEnd
-// keeps the slot visible (marked finished) instead of removing it,
-// and that handleStreamEnd clears the list at turn end. Without this,
-// the input twitches up and down on every per-tool completion.
+// keeps the slot in the LIST (marked finished) instead of removing it
+// — the list feeds the collapsed one-line tool status — and that
+// handleStreamEnd clears the list at turn end.
 func TestView_ToolSlotPersistsUntilStreamEnd(t *testing.T) {
 	t.Parallel()
 	m := emptyModel()
@@ -1199,6 +1199,65 @@ func TestView_ToolSlotPersistsUntilStreamEnd(t *testing.T) {
 	out, _ := m.handleStreamEnd(streamEndMsg{})
 	if got := len(out.(Model).activeTools); got != 0 {
 		t.Errorf("handleStreamEnd must clear activeTools, got %d remaining", got)
+	}
+}
+
+// TestView_ToolStatusCollapsedOneLine pins the collapsed tool-status
+// rendering: however many tools run or finish in a turn, the live
+// region shows exactly ONE tool row (running tool + done/failed
+// counters) — the per-tool record lives in the scrollback ↳ lines.
+func TestView_ToolStatusCollapsedOneLine(t *testing.T) {
+	SetTheme("dark")
+	m := emptyModel()
+	m.width = 100
+	m.height = 30
+	m.ready = true
+	m.input.SetWidth(98)
+
+	countToolRows := func() int {
+		rows := 0
+		for _, l := range strings.Split(stripANSI(m.View().Content), "\n") {
+			if strings.Contains(l, "done") || strings.Contains(l, "failed") ||
+				strings.Contains(l, "read(") || strings.Contains(l, "grep(") ||
+				strings.Contains(l, "skill:") {
+				rows++
+			}
+		}
+		return rows
+	}
+
+	// Two tools running → exactly one row, showing the running tool.
+	m.applyAgentEvent(agent.ToolExecStart{CallID: "c1", Name: "read", Args: `"a"`})
+	m.applyAgentEvent(agent.ToolExecStart{CallID: "c2", Name: "grep", Args: `"b"`})
+	if rows := countToolRows(); rows != 1 {
+		t.Fatalf("two running tools must render ONE status row, got %d", rows)
+	}
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "read(") {
+		t.Errorf("running tool must be shown in the collapsed row: %q", out)
+	}
+	if strings.Contains(out, "done") {
+		t.Errorf("no 'done' counter while nothing has finished: %q", out)
+	}
+
+	// One finishes → same single row, now with the ✓ counter.
+	m.applyAgentEvent(agent.ToolExecEnd{CallID: "c1", Name: "read", Result: "ok"})
+	if rows := countToolRows(); rows != 1 {
+		t.Fatalf("mixed running+finished must still render ONE row, got %d", rows)
+	}
+	out = stripANSI(m.View().Content)
+	if !strings.Contains(out, "✓ 1 done") {
+		t.Errorf("finished counter missing: %q", out)
+	}
+
+	// A failure → ! counter alongside.
+	m.applyAgentEvent(agent.ToolExecEnd{CallID: "c2", Name: "grep", Result: "", Err: fmt.Errorf("boom")})
+	if rows := countToolRows(); rows != 1 {
+		t.Fatalf("all finished must still render ONE row, got %d", rows)
+	}
+	out = stripANSI(m.View().Content)
+	if !strings.Contains(out, "✓ 1 done") || !strings.Contains(out, "! 1 failed") {
+		t.Errorf("done/failed counters missing: %q", out)
 	}
 }
 

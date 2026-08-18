@@ -366,7 +366,11 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 				if m.chunked {
 					label = "▸ seek (续)"
 				}
-				line := renderAssistantBlockLabel(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md, label)
+				// Reasoning from the assembled message, not m.curReasoning:
+				// chunk commits discard it (see commitChunk), so the final
+				// segment is where the single "reasoning hidden" line
+				// lands — once per message, at the end.
+				line := renderAssistantBlockLabel(m.curContent, e.Message.ReasoningContent, m.showReasoning, m.width, m.md, label)
 				cmds = append(cmds, m.appendHistory(line))
 				// Capture for the /goal judge: the latest assistant text is
 				// fed in as "the latest work" at this turn's stream-end.
@@ -444,6 +448,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 				duration = now.Sub(t.started)
 				m.activeTools[i].completed = now
 				m.activeTools[i].finished = true
+				m.activeTools[i].failed = e.Err != nil
 				if e.Result != "" {
 					matches := completionRe.FindStringSubmatch(e.Result)
 					if len(matches) >= 2 {
@@ -593,7 +598,17 @@ func (m Model) shouldChunkCommit() bool {
 	}
 	rows := 1 // label row
 	if m.curReasoning != "" {
-		rows += strings.Count(wrap(m.curReasoning, m.width-2), "\n") + 1
+		if m.showReasoning {
+			rows += strings.Count(wrap(m.curReasoning, m.width-2), "\n") + 1
+		} else {
+			// Hidden reasoning renders as a single placeholder line
+			// ("▸ reasoning… (Ctrl+R to toggle)") — counting the full
+			// reasoning body here would over-estimate the live block
+			// and chunk-commit after the FIRST content delta of an
+			// effort:max turn (reasoning streams first, often longer
+			// than the threshold).
+			rows++
+		}
 	}
 	if m.curContent != "" {
 		rows += strings.Count(wrap(m.curContent, m.width-2), "\n") + 1
@@ -611,12 +626,18 @@ func (m Model) shouldChunkCommit() bool {
 // and resets the live buffers so streaming continues with a short live
 // region. The first segment renders with "▸ seek"; later ones carry
 // "▸ seek (续)" so the scrollback reads as one reply in pieces.
+//
+// Reasoning is deliberately NOT rendered in segments: the "▸ reasoning
+// hidden — Ctrl+R to toggle" line is a streaming-only interaction hint
+// (there is nothing to toggle after commit), and shown reasoning would
+// blow up each segment. It lands exactly once, at the end of the final
+// segment, via MessageEnd's e.Message.ReasoningContent.
 func (m *Model) commitChunk() tea.Cmd {
 	label := "▸ seek"
 	if m.chunked {
 		label = "▸ seek (续)"
 	}
-	line := renderAssistantBlockLabel(m.curContent, m.curReasoning, m.showReasoning, m.width, m.md, label)
+	line := renderAssistantBlockLabel(m.curContent, "", m.showReasoning, m.width, m.md, label)
 	m.curContent = ""
 	m.curReasoning = ""
 	m.chunked = true

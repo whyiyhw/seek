@@ -153,3 +153,80 @@ func TestStreamDeltaBytes_CountsReasoning(t *testing.T) {
 		t.Errorf("content delta must add on top of reasoning bytes: got %d, want %d", m.streamDeltaBytes, before+len("answer"))
 	}
 }
+
+// TestChunkCommit_HiddenReasoningDoesNotTrigger: with showReasoning
+// off, a long reasoning body must NOT chunk-commit the moment the
+// first content delta arrives — hidden reasoning renders as one
+// placeholder line, so the threshold is driven by content only.
+func TestChunkCommit_HiddenReasoningDoesNotTrigger(t *testing.T) {
+	m := testModel().BuildPtr()
+	m.width = 80
+	m.chunkThreshold = 12
+	m.showReasoning = false
+
+	// Long reasoning (30 lines) + a small first content delta: rows =
+	// 1 (label) + 1 (hidden reasoning) + 1 (content) = 3 < 12 → no commit.
+	lines := strings.Repeat("thinking…\n", 30)
+	m.applyAgentEvent(agent.MessageDelta{Delta: lines, Reasoning: true})
+	cmds := m.applyAgentEvent(agent.MessageDelta{Delta: "旧"})
+	if len(cmds) != 0 {
+		t.Fatalf("hidden reasoning must not trigger a chunk on first content delta, got %d cmds", len(cmds))
+	}
+	if m.chunked {
+		t.Fatal("chunked must stay false while content is small")
+	}
+
+	// Content alone drives the threshold: 12 more lines → commit.
+	// rows = content + 1 (label) + 1 (hidden reasoning); threshold 12
+	// → content hits 10 lines at delta index 8.
+	triggered := false
+	for i := 0; i < 12; i++ {
+		cmds := m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
+		if i < 8 && len(cmds) != 0 {
+			t.Fatalf("delta %d: unexpected commit", i)
+		}
+		if i >= 8 && len(cmds) == 1 {
+			triggered = true
+		}
+	}
+	if !triggered || !m.chunked {
+		t.Error("content past the threshold must chunk-commit")
+	}
+}
+
+// TestChunkCommit_SegmentHasNoReasoningLine: chunk commits must not
+// embed the reasoning placeholder — it lands once, on the final
+// segment, via MessageEnd's assembled reasoning.
+func TestChunkCommit_SegmentHasNoReasoningLine(t *testing.T) {
+	SetTheme("dark")
+	m := testModel().BuildPtr()
+	m.width = 80
+	m.chunkThreshold = 12
+	m.showReasoning = false
+
+	// Reasoning + enough content to trigger a chunk (rows = content +
+	// 2; threshold 12 → content hits 10 lines at the 10th delta).
+	m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("thinking…\n", 30), Reasoning: true})
+	chunked := false
+	cmds := m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
+	for i := 0; i < 10; i++ {
+		cmds = m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
+		if len(cmds) == 1 {
+			chunked = true
+		}
+	}
+	if !chunked {
+		t.Fatal("expected a chunk commit during the content deltas")
+	}
+	// Final segment: MessageEnd brings the reasoning in once.
+	final := m.applyAgentEvent(agent.MessageEnd{
+		Message: deepseek.Message{
+			Role:             deepseek.RoleAssistant,
+			Content:          "tail",
+			ReasoningContent: "secret reasoning",
+		},
+	})
+	if len(final) != 1 {
+		t.Fatalf("expected 1 final commit cmd, got %d", len(final))
+	}
+}

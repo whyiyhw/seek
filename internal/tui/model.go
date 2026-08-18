@@ -274,25 +274,20 @@ type Options struct {
 	ObserveResultChan <-chan memory.ObserveResult
 }
 
-// activeTool is a tool whose ToolExecStart has fired but ToolExecEnd
-// hasn't yet. Rendered inline in the live region with a spinner and an
-// elapsed-time tail (e.g. "think(...) · 12s") so long-running reasoner
-// calls don't look like the program froze.
+// activeTool is one in-flight or finished tool call of the current
+// turn. Finished slots are kept in the list until stream end so the
+// collapsed live-status line can count them ("✓ N done") and
+// ToolExecEnd can look up the slot to stamp completion fields.
 //
-// When ToolExecEnd fires, the tool is NOT removed immediately — instead
-// completionTokens, completed, and finished are populated at
-// ToolExecEnd; before then they're zero. The slot is NOT removed
-// from activeTools at that point — it stays visible (rendered with
-// a ✓ marker and locked-in duration) until handleStreamEnd clears
-// the whole list at turn end.
-//
-// Why keep finished slots around: removing them per-tool causes the
-// live region to lose 1 row each time a tool ends, then gain it back
-// when the next tool starts — the input visibly twitches up and down
-// throughout a multi-tool turn. Holding the slot until stream end
-// makes the active-tool area monotonically non-decreasing within a
-// turn (and collapses once, at the end), which is what users actually
-// want to see.
+// Rendering is a SINGLE live-status line (see View): the first
+// still-running tool with a spinner + elapsed, plus done/failed
+// counters — NOT one line per tool. The authoritative per-tool record
+// is the `↳ name(args) → N bytes` line committed to scrollback at
+// ToolExecEnd; the live line only answers "what's running now + how
+// many finished". A constant one-line height is what keeps the input
+// from twitching as tools complete (the old per-tool slot rendering
+// achieved the same by keeping finished rows visible, at the cost of
+// a growing tool zone).
 type activeTool struct {
 	callID           string
 	name             string
@@ -301,6 +296,7 @@ type activeTool struct {
 	completed        time.Time // zero = still running; set at ToolExecEnd
 	completionTokens int       // set at ToolExecEnd; 0 before that
 	finished         bool      // ToolExecEnd has fired for this slot
+	failed           bool      // ToolExecEnd carried Err; set alongside finished
 }
 
 type Model struct {

@@ -129,27 +129,44 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render(m.streamingLabel()))
 	}
 
-	// Active tool slots — finished ones stay visible until streamEnd
-	// clears the list, so the live region's tool zone grows but never
-	// shrinks within a turn. Running tools render with a spinner +
-	// live elapsed; finished tools render with ✓ + locked duration
-	// (computed at ToolExecEnd, not re-measured each frame).
-	for _, t := range m.activeTools {
-		label, style := formatActiveToolLabel(t.name, t.args)
-		if t.finished {
-			duration := t.completed.Sub(t.started)
-			if d := formatCommittedDuration(duration); d != "" {
-				label += " · " + d
+	// Active tool status — collapsed to a SINGLE live line so the tool
+	// zone never grows beyond one row: the first still-running tool
+	// (spinner + live elapsed) plus done/failed counters. Finished
+	// tools are NOT listed here — their authoritative record is the
+	// `↳ name(args) → N bytes` line committed to scrollback at
+	// ToolExecEnd; the live line only answers "what's running now +
+	// how many finished". Constant height keeps the input from
+	// twitching as tools complete within a turn.
+	if len(m.activeTools) > 0 {
+		var parts []string
+		for _, t := range m.activeTools {
+			if t.finished {
+				continue
 			}
-			if tok := formatTokenTail(t.completionTokens); tok != "" {
-				label += " · " + tok
-			}
-			fmt.Fprintf(&sb, "%s %s\n", styleMuted.Render("✓"), style.Render(label))
-		} else {
+			label, style := formatActiveToolLabel(t.name, t.args)
 			if elapsed := formatToolElapsed(time.Since(t.started)); elapsed != "" {
 				label += " · " + elapsed
 			}
-			fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), style.Render(label))
+			parts = append(parts, m.spinner.View()+" "+style.Render(label))
+		}
+		var done, failed int
+		for _, t := range m.activeTools {
+			if t.finished {
+				if t.failed {
+					failed++
+				} else {
+					done++
+				}
+			}
+		}
+		if done > 0 {
+			parts = append(parts, styleMuted.Render(fmt.Sprintf("✓ %d done", done)))
+		}
+		if failed > 0 {
+			parts = append(parts, styleToolError.Render(fmt.Sprintf("! %d failed", failed)))
+		}
+		if len(parts) > 0 {
+			fmt.Fprintf(&sb, "%s\n", strings.Join(parts, " · "))
 		}
 	}
 
