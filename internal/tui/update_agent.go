@@ -361,6 +361,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			// asserted by TestApplyAgentEvent_PureToolCallTurnSkipsCommit.
 			// The `↳ tool(...)` lines committed via ToolExecEnd already
 			// convey what happened on a silent reasoning round.
+			// Capture for the /goal judge: the latest assistant text is
+			// fed in as "the latest work" at this turn's stream-end.
+			// e.Message.Content is the FULL assembled message — m.curContent
+			// holds only the final segment after chunking, and can be
+			// EMPTY when the last delta itself triggered commitChunk, so
+			// the capture must not sit inside the curContent branch.
+			// Pure tool-call turns (empty content) keep the previous
+			// value — blanking it would starve the judge.
+			if e.Message.Content != "" {
+				m.lastAssistantText = e.Message.Content
+			}
 			if m.curContent != "" {
 				label := "▸ seek"
 				if m.chunked {
@@ -372,12 +383,6 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 				// lands — once per message, at the end.
 				line := renderAssistantBlockLabel(m.curContent, e.Message.ReasoningContent, m.showReasoning, m.width, m.md, label)
 				cmds = append(cmds, m.appendHistory(line))
-				// Capture for the /goal judge: the latest assistant text is
-				// fed in as "the latest work" at this turn's stream-end.
-				// e.Message.Content is the FULL assembled message — after
-				// long-reply chunking, m.curContent holds only the final
-				// segment.
-				m.lastAssistantText = e.Message.Content
 			}
 			// Always reset the live-region buffers — leaving them
 			// populated would leak this turn's reasoning/content into
@@ -416,6 +421,13 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 			m.curReasoning += e.Delta
 		} else {
 			m.curContent += e.Delta
+			// Same long-output guard as chat content: tool-streamed
+			// output (think's final answer) grows the live block
+			// row-for-row like a chat reply, and the inline-renderer
+			// freeze doesn't care whose delta filled the buffer.
+			if m.shouldChunkCommit() {
+				cmds = append(cmds, m.commitChunk())
+			}
 		}
 
 	case agent.ToolExecEnd:
@@ -599,7 +611,13 @@ func (m Model) shouldChunkCommit() bool {
 	rows := 1 // label row
 	if m.curReasoning != "" {
 		if m.showReasoning {
-			rows += strings.Count(wrap(m.curReasoning, m.width-2), "\n") + 1
+			// Estimate follows the folded render shape (view.go
+			// foldReasoningTail): header row + tail rows, NOT the full
+			// wrapped body — the live view folds, and counting unfolded
+			// rows would chunk-commit right after the first content
+			// delta of a long-reasoning turn ("one-character first
+			// segment" bug, the same shape-rule as hidden reasoning).
+			rows += strings.Count(foldReasoningTail(m.curReasoning, m.width, m.reasoningTailRows()), "\n") + 2
 		} else {
 			// Hidden reasoning renders as a single placeholder line
 			// ("▸ reasoning… (Ctrl+R to toggle)") — counting the full

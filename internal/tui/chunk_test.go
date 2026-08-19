@@ -135,6 +135,87 @@ func TestUnclosedFence(t *testing.T) {
 	}
 }
 
+// TestChunkCommit_ToolDeltaContentChunks: the long-output guard must
+// cover tool-streamed content too (think's final answer) — it fills
+// the same live buffers as chat content, and the inline-renderer
+// freeze doesn't care whose delta filled them.
+func TestChunkCommit_ToolDeltaContentChunks(t *testing.T) {
+	m := testModel().BuildPtr()
+	m.width = 80
+	m.chunkThreshold = 12
+
+	for i := 0; i < 9; i++ {
+		cmds := m.applyAgentEvent(agent.ToolDelta{Delta: strings.Repeat("x", 70) + "\n"})
+		if len(cmds) != 0 {
+			t.Fatalf("tool delta %d: got %d cmds, want 0 (below threshold)", i, len(cmds))
+		}
+	}
+	cmds := m.applyAgentEvent(agent.ToolDelta{Delta: strings.Repeat("y", 70) + "\n"})
+	if len(cmds) != 1 {
+		t.Fatalf("tool-streamed content past the threshold must chunk-commit, got %d cmds", len(cmds))
+	}
+	if m.curContent != "" || !m.chunked {
+		t.Errorf("buffers must reset after a tool-stream chunk: curContent=%q chunked=%v", m.curContent, m.chunked)
+	}
+}
+
+// TestChunkCommit_ShownReasoningFoldedEstimate: with showReasoning on,
+// the row estimate must follow the FOLDED render shape (tail rows), not
+// the full wrapped body — otherwise a long thinking phase chunk-commits
+// right after the first content delta, splitting off a one-character
+// first segment (the shown-reasoning twin of the hidden-reasoning bug
+// fixed earlier).
+func TestChunkCommit_ShownReasoningFoldedEstimate(t *testing.T) {
+	m := testModel().BuildPtr()
+	m.width = 80
+	m.chunkThreshold = 12
+	m.showReasoning = true
+
+	// 30 wrapped reasoning rows; tail budget = threshold-4 = 8 →
+	// rendered reasoning rows = 8, estimate = 1 label + 8 + 2 = 11 < 12.
+	m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("thinking…\n", 30), Reasoning: true})
+	cmds := m.applyAgentEvent(agent.MessageDelta{Delta: "旧"})
+	if len(cmds) != 0 {
+		t.Fatalf("folded reasoning must not trigger a chunk on the first content delta, got %d cmds", len(cmds))
+	}
+	if m.chunked {
+		t.Fatal("chunked must stay false while content is small")
+	}
+}
+
+// TestChunkCommit_LastDeltaCommitKeepsGoalJudgeText: when the LAST
+// content delta itself crosses the threshold, commitChunk fires and
+// clears curContent BEFORE MessageEnd arrives — the goal-judge capture
+// must still record the full assembled message, not stay stale.
+func TestChunkCommit_LastDeltaCommitKeepsGoalJudgeText(t *testing.T) {
+	m := testModel().BuildPtr()
+	m.width = 80
+	m.chunkThreshold = 12
+
+	// 10 one-row deltas: 1 label + 10 content rows = 12 ≥ 12 → the
+	// 10th (last) delta triggers the crossing commit and empties the
+	// live buffers.
+	full := ""
+	for i := 0; i < 10; i++ {
+		line := strings.Repeat("x", 70) + "\n"
+		full += line
+		cmds := m.applyAgentEvent(agent.MessageDelta{Delta: line})
+		if len(cmds) > 1 {
+			t.Fatalf("delta %d: at most one commit expected, got %d", i, len(cmds))
+		}
+	}
+	if !m.chunked || m.curContent != "" {
+		t.Fatalf("setup: the last delta must trigger the crossing commit (chunked=%v curContent=%q)", m.chunked, m.curContent)
+	}
+
+	m.applyAgentEvent(agent.MessageEnd{
+		Message: deepseek.Message{Role: deepseek.RoleAssistant, Content: full},
+	})
+	if m.lastAssistantText != full {
+		t.Errorf("lastAssistantText = %q, want the full assembled content", m.lastAssistantText)
+	}
+}
+
 // TestStreamDeltaBytes_CountsReasoning pins the estimate's accounting
 // contract: reasoning deltas count towards streamDeltaBytes so the
 // ↓~Xtok indicator keeps moving during the thinking phase (effort:max)

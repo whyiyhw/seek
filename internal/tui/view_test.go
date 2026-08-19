@@ -1352,3 +1352,65 @@ func TestView_MenuCloseRemovesPopupRows(t *testing.T) {
 		t.Errorf("menu footer still rendered after commandMenuOpen=false")
 	}
 }
+
+// TestView_ShownReasoningFoldsToTail: with showReasoning on, a long
+// streaming reasoning body must render as a bounded TAIL (fold marker
+// + last rows), never the full body — the full block would push the
+// live region past the terminal height and trip the inline-renderer
+// freeze during the thinking phase, before any chunk commit can fire.
+func TestView_ShownReasoningFoldsToTail(t *testing.T) {
+	SetTheme("dark")
+	m := emptyModel()
+	m.width = 80
+	m.height = 30
+	m.ready = true
+	m.input.SetWidth(78)
+	m.chunkThreshold = 12
+	m.showReasoning = true
+	m.curReasoning = strings.Repeat("thinking…\n", 30)
+
+	out := stripANSI(m.View().Content)
+	if !strings.Contains(out, "earlier reasoning folded") {
+		t.Errorf("long shown reasoning must render the fold marker:\n%s", out)
+	}
+	if !strings.Contains(out, "thinking…") {
+		t.Errorf("the folded tail must still show reasoning text:\n%s", out)
+	}
+	// Gutter rows = marker + tail rows only. Budget = threshold-4 = 8.
+	gutter := 0
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "│") {
+			gutter++
+		}
+	}
+	if gutter > 8 {
+		t.Errorf("folded reasoning must stay within the tail budget: %d gutter rows, want ≤ 8", gutter)
+	}
+}
+
+// TestRelayout_ChunkThresholdFloor pins the threshold contract across
+// terminal heights: height-10 wherever that is livable, floored at 4 —
+// NOT at a "sane minimum" like 12, which on short terminals (height
+// ≤ 22, e.g. vertical splits) would exceed height-10 and re-enable the
+// overflow/freeze the threshold exists to prevent.
+func TestRelayout_ChunkThresholdFloor(t *testing.T) {
+	m := emptyModel()
+	m.width = 100
+
+	m.height = 40
+	if got := m.relayout().chunkThreshold; got != 30 {
+		t.Errorf("height 40: chunkThreshold = %d, want 30 (height-10)", got)
+	}
+	m.height = 30
+	if got := m.relayout().chunkThreshold; got != 20 {
+		t.Errorf("height 30: chunkThreshold = %d, want 20 (height-10)", got)
+	}
+	m.height = 15
+	if got := m.relayout().chunkThreshold; got != 5 {
+		t.Errorf("height 15: chunkThreshold = %d, want 5 (height-10, above floor)", got)
+	}
+	m.height = 8
+	if got := m.relayout().chunkThreshold; got != 4 {
+		t.Errorf("height 8: chunkThreshold = %d, want 4 (floor)", got)
+	}
+}

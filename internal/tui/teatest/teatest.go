@@ -142,6 +142,11 @@ func NewTestModel(tb testing.TB, m tea.Model, options ...TestOption) *TestModel 
 	go func() {
 		model, err := tm.program.Run()
 		if err != nil {
+			// tb.Errorf panics if the test already completed by the
+			// time Run returns ("Log in goroutine after test has
+			// completed"); the recover keeps a late program failure
+			// from masking the original test result with a panic.
+			defer func() { _ = recover() }()
 			tb.Errorf("app failed: %s", err)
 		}
 		tm.modelCh <- model

@@ -129,11 +129,12 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleMuted.Render(m.streamingLabel()))
 	}
 
-	// Active tool status — collapsed to a SINGLE live line so the tool
-	// zone never grows beyond one row: the first still-running tool
-	// (spinner + live elapsed) plus done/failed counters. Finished
-	// tools are NOT listed here — their authoritative record is the
-	// `↳ name(args) → N bytes` line committed to scrollback at
+	// Active tool status — collapsed to a SINGLE live line listing every
+	// still-running tool (spinner + label + live elapsed each, " · "
+	// separated) plus "✓ N done" / "! N failed" counters, so the tool
+	// zone stays one row no matter how many tools the turn dispatches.
+	// Finished tools are NOT listed here — their authoritative record is
+	// the `↳ name(args) → N bytes` line committed to scrollback at
 	// ToolExecEnd; the live line only answers "what's running now +
 	// how many finished". Constant height keeps the input from
 	// twitching as tools complete within a turn.
@@ -190,7 +191,14 @@ func (m Model) View() tea.View {
 	// Streaming reasoning.
 	if m.curReasoning != "" {
 		if m.showReasoning {
-			sb.WriteString(styleReasoning.Render(reasoningBlock(m.curReasoning)))
+			// Shown reasoning streams BEFORE content, so no chunk
+			// commit can bound it yet (the guard runs on content
+			// deltas). Render only the TAIL — a thinking stream taller
+			// than the terminal is unreadable anyway and would trip the
+			// inline-renderer freeze. The full reasoning still lands
+			// once, in the MessageEnd scrollback commit.
+			sb.WriteString(styleReasoning.Render(reasoningBlock(
+				foldReasoningTail(m.curReasoning, m.width, m.reasoningTailRows()))))
 			sb.WriteString("\n")
 		} else {
 			// Hidden-reasoning placeholder. Spinner + elapsed makes the
@@ -320,9 +328,14 @@ func (m Model) relayout() Model {
 	// scrollback, where they interleave with committed segments and
 	// read as format corruption. See shouldChunkCommit /
 	// docs/pitfalls.md "Long streaming replies freeze the screen".
+	//
+	// The floor is 4, not a "sane minimum" like 12: a floor above
+	// height-10 on short terminals (height ≤ 22 — vertical splits)
+	// re-enables the overflow the threshold exists to prevent.
+	// Chunking every few rows on a tiny terminal beats a frozen screen.
 	base := m.height - 10
-	if base < 12 {
-		base = 12
+	if base < 4 {
+		base = 4
 	}
 	m.chunkThreshold = base
 	m.ready = true
@@ -1206,6 +1219,40 @@ func renderUserBlock(text string, width int) string {
 // and the committed scrollback block so both render identically.
 func reasoningBlock(reasoning string) string {
 	return "▸ reasoning\n" + indent(reasoning, "│ ")
+}
+
+// reasoningTailRows is the rendered-row budget for shown streaming
+// reasoning: chunkThreshold minus the rows the rest of the live block
+// needs (label, a couple of content rows, the fold marker). Keeps the
+// live region inside one terminal height during a long thinking phase,
+// where no chunk commit can fire yet (the guard runs on content
+// deltas; reasoning streams first).
+func (m Model) reasoningTailRows() int {
+	if m.chunkThreshold <= 0 {
+		return 1 << 30 // no layout yet — never fold
+	}
+	n := m.chunkThreshold - 4
+	if n < 3 {
+		return 3
+	}
+	return n
+}
+
+// foldReasoningTail bounds shown streaming reasoning to its last
+// maxRows wrapped rows, prefixing a fold marker when it truncates.
+// Wrapping matches shouldChunkCommit's row estimate (wrap at width-2)
+// so the estimate follows the actual render shape.
+func foldReasoningTail(reasoning string, width, maxRows int) string {
+	wrapped := wrap(reasoning, width-2)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) <= maxRows {
+		return wrapped
+	}
+	keep := maxRows - 1 // one row goes to the fold marker
+	if keep < 1 {
+		keep = 1
+	}
+	return "… (earlier reasoning folded)\n" + strings.Join(lines[len(lines)-keep:], "\n")
 }
 
 // renderAssistantBlock renders a completed assistant message for
