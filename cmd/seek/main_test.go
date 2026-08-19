@@ -88,3 +88,35 @@ func TestDetectGlamourStyle_Fallback(t *testing.T) {
 		t.Errorf("detectGlamourStyle(\"auto\") with no env = %q, want \"dark\" or \"light\"", got)
 	}
 }
+
+// TestDetectGlamourStyle_NonTTYStdinSkipsQuery pins the CONIN$ hang
+// fix: with a piped stdin (no tty), detection must short-circuit to
+// "dark" WITHOUT issuing the OSC 11 query. Pre-fix, lipgloss v2's
+// Windows path opened CONIN$, switched it to raw mode, and blocked in
+// ReadConsole forever waiting for a reply no non-interactive console
+// sends (the 2s CancelReader timeout did not fire on every console
+// host) — a full `go test ./...` hung 10m at TestDetectGlamourStyle_
+// Fallback exactly here. The pipe swap makes the non-tty condition
+// true on every platform, so the test is a portable regression trap.
+func TestDetectGlamourStyle_NonTTYStdinSkipsQuery(t *testing.T) {
+	const envKey = "SEEK_STYLE"
+	prevEnv := os.Getenv(envKey)
+	t.Cleanup(func() { os.Setenv(envKey, prevEnv) })
+	os.Unsetenv(envKey)
+
+	prevStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = prevStdin
+		r.Close()
+		w.Close()
+	})
+
+	if got := detectGlamourStyle("auto"); got != "dark" {
+		t.Errorf("detectGlamourStyle(\"auto\") with piped stdin = %q, want \"dark\" (query skipped)", got)
+	}
+}

@@ -83,14 +83,21 @@ tui.Run(tui.Options{GlamourStyle: style, ...})
 
 ```go
 func detectGlamourStyle() string {
-    // termenv.HasDarkBackground() 在内部发送 OSC 11 并同步等待响应
-    // 在 bubbletea 启动之前调用，stdin 还归我们管
-    if termenv.NewOutput(os.Stdout).HasDarkBackground() {
+    // stdin 不是 tty（被管道/包裹）就跳过探测，直接回退深色——
+    // lipgloss v2 在 Windows 上会打开 CONIN$ 去问真控制台，
+    // 非交互控制台永不回复，而其内部超时打断不了 ReadConsole，
+    // 进程会永久挂死（go test 全量在本机挂 10 分钟就是它）
+    if !isatty.IsTerminal(os.Stdin.Fd()) {
+        return "dark"
+    }
+    if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
         return "dark"
     }
     return "light"
 }
 ```
+
+> 迁移注记：v2 迁移前这里用的是 `termenv.NewOutput(os.Stdout).HasDarkBackground()`——它在非 tty 时优雅降级（NoColor）。换成 lipgloss v2 后，Windows 路径会在 stdin 非 tty 时强开 `CONIN$` 并阻塞在 `ReadConsole` 上，是 v2 迁移夹带的回归；tty gate 是补上的护栏。详见 `docs/pitfalls.md` "lipgloss v2 background probe hangs forever when stdin is piped"。
 
 ---
 

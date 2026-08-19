@@ -97,6 +97,7 @@ import (
 	openaiprov "github.com/whyiyhw/seek/pkg/llm/provider/openai"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-isatty"
 )
 
 // System prompt assembly (template literal, Compose, ModeLabel)
@@ -2622,6 +2623,15 @@ func truncate(s string, n int) string {
 // "]11;rgb:fae0/fae0/fae0\[1;1R") leaks straight into the textarea as
 // garbage text.
 //
+// stdin must be a real terminal for the query — lipgloss v2's Windows
+// path opens CONIN$ when it isn't, switches the console to raw mode,
+// and waits for an OSC reply that a non-interactive console never
+// sends; its 2s CancelReader timeout does not interrupt ReadConsole on
+// every console host, so the process hangs forever (go test under a
+// piped-stdin shell died exactly here). The TUI needs a tty stdin
+// anyway; without one, skip the query and assume dark — the same
+// fallback HasDarkBackground itself uses on query failure.
+//
 // --theme overrides the detection. SEEK_STYLE=dark|light is a fallback
 // when --theme=auto (the default).
 func detectGlamourStyle(theme string) string {
@@ -2630,6 +2640,9 @@ func detectGlamourStyle(theme string) string {
 	}
 	if v := os.Getenv("SEEK_STYLE"); v != "" {
 		return v
+	}
+	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		return "dark"
 	}
 	if lipgloss.HasDarkBackground(os.Stdin, os.Stdout) {
 		return "dark"
