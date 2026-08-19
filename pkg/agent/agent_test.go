@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1665,5 +1667,328 @@ func TestAgent_SetModeLabelVisibleNextPrompt(t *testing.T) {
 	}
 	if strings.Contains(lastUserContent, "[Mode:") {
 		t.Errorf("turn 4: unexpected mode reminder after clear: %q", lastUserContent)
+	}
+}
+
+// slowMutTool is a NON-read-only tool that sleeps for latency before
+// returning, recording each execution's wall-clock window. Tests use
+// the windows to assert ordering within the sequential stream (and,
+// via total wall-clock, overlap with the concurrent read-only side).
+// Executions never run concurrently with each other — every non-RO
+// call shares one sequential goroutine — but the mutex keeps -race
+// honest about that claim rather than assuming it.
+type slowMutTool struct {
+	latency time.Duration
+	called  atomic.Int32
+	mu      sync.Mutex
+	starts  []time.Time
+	ends    []time.Time
+}
+
+func (t *slowMutTool) Name() string            { return "slow_mut" }
+func (t *slowMutTool) Description() string     { return "slow mutating tool" }
+func (t *slowMutTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t *slowMutTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	t.called.Add(1)
+	start := time.Now()
+	t.mu.Lock()
+	t.starts = append(t.starts, start)
+	t.mu.Unlock()
+	defer func() {
+		t.mu.Lock()
+		t.ends = append(t.ends, time.Now())
+		t.mu.Unlock()
+	}()
+	select {
+	case <-time.After(t.latency):
+		return "mutated", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// failTool is a read-only tool that always errors — for failure-
+// isolation tests inside a mixed batch.
+type failTool struct{ called atomic.Int32 }
+
+func (t *failTool) Name() string            { return "fail_read" }
+func (t *failTool) Description() string     { return "always fails" }
+func (t *failTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t *failTool) ReadOnly() bool          { return true }
+func (t *failTool) Execute(_ context.Context, _ json.RawMessage) (string, error) {
+	t.called.Add(1)
+	return "", errors.New("boom")
+}
+
+// mixedBatchBackend serves turn 1 with the named tool_calls (in order)
+// and every later request with a final text answer.
+func mixedBatchBackend(t *testing.T, calls []struct{ name, id string }) *httptest.Server {
+	t.Helper()
+	var backendCalls atomic.Int32
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if n := backendCalls.Add(1); n == 1 {
+			for i, c := range calls {
+				fmt.Fprintf(w, "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":%d,\"id\":\"%s\",\"type\":\"function\",\"function\":{\"name\":\"%s\",\"arguments\":\"{}\"}}]}}]}\n\n", i, c.id, c.name)
+			}
+			io.WriteString(w, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+			io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n")
+			io.WriteString(w, "data: [DONE]\n\n")
+			return
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":20,"completion_tokens":1,"total_tokens":21}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+}
+
+// toolResultIDs extracts the RoleTool message call IDs, in order.
+func toolResultIDs(hist []deepseek.Message) []string {
+	var ids []string
+	for _, m := range hist {
+		if m.Role == deepseek.RoleTool {
+			ids = append(ids, m.ToolCallID)
+		}
+	}
+	return ids
+}
+
+// TestAgent_MixedBatchParallel: a mixed [mut, read, mut, read] batch
+// must NOT serialize wholesale. Partitioned dispatch runs the two
+// reads concurrently alongside the sequential mutating stream, so
+// wall-clock approaches max(seq stream, reads) ≈ 2×latency, far below
+// the sequential bound of 4×latency.
+func TestAgent_MixedBatchParallel(t *testing.T) {
+	t.Parallel()
+	const latency = 80 * time.Millisecond
+	calls := []struct{ name, id string }{
+		{"slow_mut", "call_m1"}, {"slow_read", "call_r1"},
+		{"slow_mut", "call_m2"}, {"slow_read", "call_r2"},
+	}
+	srv := mixedBatchBackend(t, calls)
+	defer srv.Close()
+
+	mut := &slowMutTool{latency: latency}
+	read := &slowReadTool{latency: latency}
+	reg := tools.New().Add(mut).Add(read)
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:  reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	start := time.Now()
+	res := drainAgent(ag.Prompt(context.Background(), "mixed batch"))
+	elapsed := time.Since(start)
+
+	if len(res.errors) > 0 {
+		t.Fatalf("unexpected errors: %v", res.errors)
+	}
+	if got := mut.called.Load(); got != 2 {
+		t.Errorf("mut tool called %d times, want 2", got)
+	}
+	if got := read.called.Load(); got != 2 {
+		t.Errorf("read tool called %d times, want 2", got)
+	}
+
+	// Partitioned: reads (latency, concurrent) overlap the sequential
+	// mut stream (2×latency) → ~2×latency total. Full-serial would be
+	// ≥ 4×latency. The 15% slack absorbs CI scheduling noise while
+	// still failing on wholesale serialization.
+	sequential := 4 * latency
+	if elapsed >= sequential-time.Duration(float64(sequential)*0.15) {
+		t.Errorf("mixed batch appears serialized: elapsed=%v, serial bound=%v", elapsed, sequential)
+	}
+
+	// Results append in ORIGINAL call order regardless of completion
+	// order (prefix-cache determinism).
+	want := []string{"call_m1", "call_r1", "call_m2", "call_r2"}
+	got := toolResultIDs(ag.Messages())
+	if len(got) != len(want) {
+		t.Fatalf("tool result count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("tool result[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	assertNoOrphanToolCalls(t, ag.Messages())
+}
+
+// TestAgent_MixedBatchCancel: cancelling mid-flight must not hang on
+// the WaitGroup — both streams' ctx-aware tools return, results are
+// appended (as tool errors), and the loop terminates via AgentEnd.
+func TestAgent_MixedBatchCancel(t *testing.T) {
+	t.Parallel()
+	const latency = 300 * time.Millisecond
+	calls := []struct{ name, id string }{
+		{"slow_read", "call_r1"}, {"slow_mut", "call_m1"},
+	}
+	srv := mixedBatchBackend(t, calls)
+	defer srv.Close()
+
+	mut := &slowMutTool{latency: latency}
+	read := &slowReadTool{latency: latency}
+	reg := tools.New().Add(mut).Add(read)
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:  reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := ag.Prompt(ctx, "cancel me")
+
+	// Let both streams start, then cancel while both tools are in
+	// flight. Guard the whole drain with a deadline so a WaitGroup
+	// leak fails the test instead of hanging it.
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		cancel()
+	}()
+
+	done := make(chan agentTurnResult, 1)
+	go func() { done <- drainAgent(stream) }()
+
+	select {
+	case res := <-done:
+		if got := read.called.Load(); got != 1 {
+			t.Errorf("read tool called %d times, want 1", got)
+		}
+		if got := mut.called.Load(); got != 1 {
+			t.Errorf("mut tool called %d times, want 1", got)
+		}
+		sawEnd := false
+		for _, e := range res.events {
+			if e == "AgentEnd" {
+				sawEnd = true
+			}
+		}
+		if !sawEnd {
+			t.Error("AgentEnd not received after mid-batch cancel")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("drain did not finish after cancel — dispatch leaked a goroutine?")
+	}
+}
+
+// TestAgent_MixedBatchFailureIsolation: one read-only tool failing must
+// not take down its batch siblings — every call still gets a result
+// appended and the loop reaches the final answer.
+func TestAgent_MixedBatchFailureIsolation(t *testing.T) {
+	t.Parallel()
+	calls := []struct{ name, id string }{
+		{"fail_read", "call_f1"}, {"slow_mut", "call_m1"}, {"slow_read", "call_r1"},
+	}
+	srv := mixedBatchBackend(t, calls)
+	defer srv.Close()
+
+	fail := &failTool{}
+	mut := &slowMutTool{latency: 20 * time.Millisecond}
+	read := &slowReadTool{latency: 20 * time.Millisecond}
+	reg := tools.New().Add(fail).Add(mut).Add(read)
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:  reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := drainAgent(ag.Prompt(context.Background(), "isolate failures"))
+	if len(res.errors) > 0 {
+		t.Fatalf("unexpected loop errors: %v", res.errors)
+	}
+	if res.assistant.Content != "done" {
+		t.Errorf("final answer = %q, want \"done\"", res.assistant.Content)
+	}
+	if got := fail.called.Load(); got != 1 {
+		t.Errorf("fail tool called %d times, want 1", got)
+	}
+	if got := mut.called.Load(); got != 1 {
+		t.Errorf("mut tool called %d times, want 1", got)
+	}
+	if got := read.called.Load(); got != 1 {
+		t.Errorf("read tool called %d times, want 1", got)
+	}
+
+	// Every call got a result, in original order; the failing one is a
+	// "tool error" message.
+	hist := ag.Messages()
+	want := []string{"call_f1", "call_m1", "call_r1"}
+	got := toolResultIDs(hist)
+	if len(got) != len(want) {
+		t.Fatalf("tool result count = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("tool result[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	for _, m := range hist {
+		if m.Role == deepseek.RoleTool && m.ToolCallID == "call_f1" && !strings.Contains(m.Content, "tool error") {
+			t.Errorf("failing call result = %q, want a \"tool error\" message", m.Content)
+		}
+	}
+	assertNoOrphanToolCalls(t, hist)
+}
+
+// TestAgent_SequentialToolsKeepRelativeOrder: non-read-only calls share
+// ONE sequential goroutine in original order — mutating tool 2 must not
+// start before mutating tool 1 finished, even while the read-only side
+// runs alongside them.
+func TestAgent_SequentialToolsKeepRelativeOrder(t *testing.T) {
+	t.Parallel()
+	const latency = 60 * time.Millisecond
+	calls := []struct{ name, id string }{
+		{"slow_mut", "call_m1"}, {"slow_read", "call_r1"}, {"slow_mut", "call_m2"},
+	}
+	srv := mixedBatchBackend(t, calls)
+	defer srv.Close()
+
+	mut := &slowMutTool{latency: latency}
+	reg := tools.New().Add(mut).Add(&slowReadTool{latency: latency})
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Tools:  reg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := drainAgent(ag.Prompt(context.Background(), "order check"))
+	if len(res.errors) > 0 {
+		t.Fatalf("unexpected errors: %v", res.errors)
+	}
+	if got := mut.called.Load(); got != 2 {
+		t.Fatalf("mut tool called %d times, want 2", got)
+	}
+	mut.mu.Lock()
+	defer mut.mu.Unlock()
+	if len(mut.starts) != 2 || len(mut.ends) != 2 {
+		t.Fatalf("recorded %d/%d windows, want 2/2", len(mut.starts), len(mut.ends))
+	}
+	// mut1 must finish before mut2 starts (the sequential stream
+	// preserves original order among non-read-only calls, with the
+	// read interleaved at index 1 running concurrently).
+	if mut.ends[0].After(mut.starts[1]) {
+		t.Errorf("sequential stream reordered: mut1 ended %v, mut2 started %v", mut.ends[0], mut.starts[1])
 	}
 }

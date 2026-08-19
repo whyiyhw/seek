@@ -51,7 +51,7 @@ func (s *fakeStreamingTool) ExecuteStream(ctx context.Context, raw json.RawMessa
 }
 
 // fakeReadOnlyTool also implements ReadOnlyTool, the marker pkg/agent's
-// allReadOnly type-asserts for before parallel dispatch (agent.go:996).
+// readOnlyCall type-asserts for before concurrent dispatch.
 type fakeReadOnlyTool struct {
 	fakeTool
 }
@@ -328,7 +328,7 @@ func TestInterfaceContractsSurviveRegistry(t *testing.T) {
 	}
 	gotRo := reg.Lookup("read")
 	if _, ok := gotRo.(ReadOnlyTool); !ok {
-		t.Error("Lookup(read) lost the ReadOnlyTool interface — agent allReadOnly would refuse parallel dispatch")
+		t.Error("Lookup(read) lost the ReadOnlyTool interface — agent readOnlyCall would refuse concurrent dispatch")
 	}
 }
 

@@ -391,8 +391,10 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 // The loop:
 //  1. Append the user message.
 //  2. Call ChatStream; assemble assistant message + any tool_call deltas.
-//  3. If finish_reason="tool_calls": dispatch tools sequentially, append
-//     tool result messages, loop.
+//  3. If finish_reason="tool_calls": dispatch the batch PARTITIONED —
+//     read-only calls concurrently, the rest sequentially in original
+//     order, the two streams overlapping — then append tool result
+//     messages in original call order, loop.
 //  4. Otherwise: terminate.
 func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 	out := make(chan Event, 32)
@@ -563,36 +565,51 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 
 			totalToolCalls += toolCount
 
-			if allReadOnly(assistant.ToolCalls, a.cfg.Tools) {
-				// All calls are read-only: dispatch concurrently and
-				// collect results into a pre-sized slice (safe — each
-				// goroutine writes to its own index). MessageStart/End
-				// are emitted in original order after Wait so the
-				// conversation prefix stays deterministic.
-				toolMsgs := make([]deepseek.Message, len(assistant.ToolCalls))
-				var wg sync.WaitGroup
-				for i, tc := range assistant.ToolCalls {
+			// Partitioned dispatch: read-only calls run concurrently
+			// (one goroutine each, writing its own index) while every
+			// other call runs on ONE sequential goroutine in original
+			// order — mutating tools keep their relative order among
+			// themselves and permission prompts stay naturally serial.
+			// The two streams overlap: the model issuing calls in one
+			// batch declares them independent. Results append in
+			// ORIGINAL call order after Wait so the conversation
+			// prefix stays deterministic. StreamingTool safety: the
+			// streaming tools are not ReadOnlyTool-marked (pinned by
+			// TestNoToolStreamsAndIsReadOnly), so ToolDelta never fires
+			// from the concurrent set and the TUI's shared live
+			// buffers always have at most one writer.
+			toolMsgs := make([]deepseek.Message, len(assistant.ToolCalls))
+			partitioned := len(assistant.ToolCalls) >= 2
+			var seqIdx []int
+			var wg sync.WaitGroup
+			for i, tc := range assistant.ToolCalls {
+				if partitioned && readOnlyCall(tc, a.cfg.Tools) {
 					wg.Add(1)
 					go func(i int, tc deepseek.ToolCall) {
 						defer wg.Done()
 						result, terr := a.dispatchTool(ctx, tc, out)
 						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
 					}(i, tc)
+				} else {
+					seqIdx = append(seqIdx, i)
 				}
-				wg.Wait()
-				for _, msg := range toolMsgs {
-					out <- MessageStart{Message: msg}
-					a.appendMessage(msg)
-					out <- MessageEnd{Message: msg}
-				}
-			} else {
-				for _, tc := range assistant.ToolCalls {
-					result, terr := a.dispatchTool(ctx, tc, out)
-					toolMsg := buildToolResultMsg(tc.ID, result, terr)
-					out <- MessageStart{Message: toolMsg}
-					a.appendMessage(toolMsg)
-					out <- MessageEnd{Message: toolMsg}
-				}
+			}
+			if len(seqIdx) > 0 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for _, i := range seqIdx {
+						tc := assistant.ToolCalls[i]
+						result, terr := a.dispatchTool(ctx, tc, out)
+						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
+					}
+				}()
+			}
+			wg.Wait()
+			for _, msg := range toolMsgs {
+				out <- MessageStart{Message: msg}
+				a.appendMessage(msg)
+				out <- MessageEnd{Message: msg}
 			}
 
 			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}
@@ -983,21 +1000,16 @@ func buildToolResultMsg(callID, result string, terr error) deepseek.Message {
 	return msg
 }
 
-// allReadOnly returns true when every tool call in tcs is backed by a
-// tools.ReadOnlyTool — meaning the batch can be dispatched concurrently
-// without ordering constraints. Returns false for batches of size < 2
-// (no parallelism benefit) and when reg is nil.
-func allReadOnly(tcs []deepseek.ToolCall, reg *tools.Registry) bool {
-	if reg == nil || len(tcs) < 2 {
+// readOnlyCall reports whether tc is backed by a tools.ReadOnlyTool —
+// eligible for concurrent dispatch in a partitioned batch. Calls that
+// don't resolve (nil registry, unknown name) are NOT read-only: they
+// take the sequential stream, where dispatchTool surfaces the error.
+func readOnlyCall(tc deepseek.ToolCall, reg *tools.Registry) bool {
+	if reg == nil {
 		return false
 	}
-	for _, tc := range tcs {
-		t := reg.Lookup(tc.Function.Name)
-		if _, ok := t.(tools.ReadOnlyTool); !ok {
-			return false
-		}
-	}
-	return true
+	_, ok := reg.Lookup(tc.Function.Name).(tools.ReadOnlyTool)
+	return ok
 }
 
 func sumUsage(a, b deepseek.Usage) deepseek.Usage {

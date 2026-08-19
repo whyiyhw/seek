@@ -126,8 +126,8 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 // read-only is a deliberate semantic stretch — a subagent CAN
 // mutate the filesystem if its template includes write/edit/bash
 // (general-purpose does). But the `tools.ReadOnlyTool` marker is
-// consumed by pkg/agent.allReadOnly() to decide whether a turn's
-// tool-call batch can be dispatched concurrently, NOT by the
+// consumed by pkg/agent.readOnlyCall() to route a tool call onto
+// the concurrent side of the partitioned dispatch, NOT by the
 // permission gate (which uses the separate Action.ReadOnly flag
 // set inside individual tools like bash).
 //
@@ -142,17 +142,17 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 //   - The MaxConcurrent gate caps simultaneous in-flights so a
 //     runaway model can't fork-bomb the orchestrator.
 //
-// Without this marker, two parallel `agent` tool calls in the same
+// Without this marker, parallel `agent` tool calls in the same
 // turn (e.g. "spawn 3 explore subagents to research X / Y / Z")
 // would serialise at the agent loop, defeating the entire point of
 // subagents. With it, the user sees max(t1, t2, t3) wall time
 // instead of sum.
 //
-// Side note: if the LLM mixes agent + a non-read-only tool in the
-// same batch (e.g. [agent, bash]), the batch goes serial (pkg/
-// agent.allReadOnly requires EVERY call to be marked). That's the
-// correct conservative choice — we don't want bash and agent
-// interleaving in indeterminate order.
+// Side note: mixing agent + a non-read-only tool in the same batch
+// (e.g. [agent, bash]) overlaps the two — agent runs concurrently
+// while bash takes the sequential stream. The model issuing one
+// batch declares the calls independent, and non-read-only tools
+// still keep their relative order among themselves.
 func (*Tool) ReadOnly() bool { return true }
 
 // Execute parses args and dispatches to Manager.Spawn. The Result's

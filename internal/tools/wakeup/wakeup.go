@@ -112,7 +112,7 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 // as read-only is the SAME semantic stretch as agent tool's
 // ReadOnly: the underlying operation MUTATES disk state
 // (jobs.jsonl gets a new entry), but the marker is consumed by
-// pkg/agent.allReadOnly() for concurrent dispatch — not by
+// pkg/agent.readOnlyCall() for concurrent dispatch — not by
 // permission gate. Store.Create is concurrent-safe (sync.Mutex
 // + atomic rewrite), so two parallel schedule_wakeup calls in
 // the same turn are safe.

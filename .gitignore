@@ -49,3 +49,4 @@ bench-*.json
 # clone should re-derive its own ID from its own abs_path.
 .seek/project-id
 .tmp/  
+.zcode/

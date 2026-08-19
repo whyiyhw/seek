@@ -403,20 +403,22 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 	case agent.ToolDelta:
 		// Streaming output from a long-running tool (currently only
 		// `think`). Routed into the same live-region buffers the
-		// chat model uses — sequential agent dispatch makes the
+		// chat model uses — the PARTITIONED agent dispatch keeps the
 		// aliasing safe:
 		//   1. chat model streams content → MessageEnd commits +
 		//      clears the buffers
-		//   2. then tool dispatch loop runs → ToolDelta refills the
-		//      buffers with tool output
+		//   2. then dispatch runs: read-only calls go concurrent but
+		//      never stream, and every StreamingTool lands on the
+		//      SEQUENTIAL stream (pinned by
+		//      TestNoToolStreamsAndIsReadOnly) → at most one ToolDelta
+		//      writer at a time
 		//   3. ToolExecEnd clears the buffers again before the next
 		//      chat turn streams in
-		// NOTE: this aliasing breaks the moment parallel tool dispatch
-		// lands (see PRD §3.1 — currently flagged as a post-v1.0 item:
-		// "M1: sequential tool dispatch. Parallel via errgroup lands
-		// with the parallel-execution work in a later milestone"). At
-		// that point ToolDelta routing must move to a per-CallID live
-		// region keyed off m.activeTools.
+		// NOTE: if a StreamingTool is ever marked ReadOnlyTool it
+		// would enter the concurrent set, interleave its deltas with
+		// siblings', and get its buffers wiped by a sibling's
+		// ToolExecEnd — at that point ToolDelta routing must move to
+		// a per-CallID live region keyed off m.activeTools.
 		if e.Reasoning {
 			m.curReasoning += e.Delta
 		} else {

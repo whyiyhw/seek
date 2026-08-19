@@ -202,11 +202,13 @@ func TestSetMode_NilPolicySafe(t *testing.T) {
 // --- Concurrent Check -----------------------------------------------
 
 func TestCheck_ConcurrentCallsRaceFree(t *testing.T) {
-	// Tool dispatch is sequential today (PRD §3.1); parallel via
-	// errgroup is a post-v1.0 item. Pinning the race-freedom contract
-	// NOW means the future parallel-dispatch milestone discovers
-	// "policy is already safe" instead of "policy needs a mutex" at
-	// the same time as it lands the rest of the parallelism work.
+	// Dispatch runs tool goroutines concurrently (partitioned batches),
+	// so N tools in flight means N concurrent Check calls — each
+	// possibly blocking in askFn, which the TUI serialises through its
+	// single armed listener. This contract was pinned back when
+	// dispatch was still sequential, which is exactly why landing
+	// parallelism found "policy is already safe" instead of a mutex
+	// retrofit.
 	//
 	// Mixes reads (Check/Mode/Yolo) and writes (SetMode) to stress
 	// the mode field specifically.
