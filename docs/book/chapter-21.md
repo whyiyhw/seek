@@ -289,7 +289,7 @@ Manager 拷贝了 v3 checkpoint 的 `gitRunner` 注入模式（导出为 `GitRun
 
 三个 LLM-facing 工具，schema 字节全部是 package-level 常量：
 
-- **`agent`**：MarkedReadOnly（语义伸展，dispatch 概念而非 permission 概念）。让批量 `[agent, agent]` 走 `pkg/agent.allReadOnly()` 并发分支。
+- **`agent`**：MarkedReadOnly（语义伸展，dispatch 概念而非 permission 概念）。让批量 `[agent, agent]` 走 `pkg/agent` 的并发派发——当年是 all-or-nothing 的 `allReadOnly()` 全并发分支，现在是分区派发里 `readOnlyCall()` 逐调用判定的并发侧。
 - **`enter_worktree`**：返回 `[worktree: created path=... branch=... base=...]`
 - **`exit_worktree`**：根据 status 返回 cleaned / kept / discarded 三种 wire format
 

@@ -552,10 +552,10 @@ func TestErrSentinelExists(t *testing.T) {
 	}
 }
 
-// TestTool_ImplementsReadOnlyTool pins the parallel-dispatch
-// property: pkg/agent.allReadOnly() permits concurrent dispatch
-// of a tool-call batch only when EVERY call is backed by a
-// tools.ReadOnlyTool. Without this marker, two parallel `agent`
+// TestTool_ImplementsReadOnlyTool pins the concurrent-dispatch
+// property: pkg/agent.readOnlyCall() routes a tool call onto the
+// concurrent side of the partitioned dispatch only when it is backed
+// by a tools.ReadOnlyTool. Without this marker, parallel `agent`
 // calls in the same turn would serialise at the agent loop —
 // defeating the entire reason subagents exist. The compile-time
 // assertion var _ tools.ReadOnlyTool = (*Tool)(nil) catches
@@ -571,6 +571,6 @@ func TestTool_ImplementsReadOnlyTool(t *testing.T) {
 		t.Fatal("Tool does not implement ReadOnly() — parallel dispatch broken")
 	}
 	if !ro.ReadOnly() {
-		t.Error("Tool.ReadOnly() returned false — pkg/agent.allReadOnly() will refuse to dispatch concurrent agent calls")
+		t.Error("Tool.ReadOnly() returned false — pkg/agent.readOnlyCall() will refuse to dispatch concurrent agent calls")
 	}
 }
