@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/glamour"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -1538,16 +1538,14 @@ func wrap(s string, width int) string {
 
 // ---- Markdown rendering ----------------------------------------------
 //
-// glamour is the LAST v1-era dependency in the module graph (it directly
-// depends on lipgloss v1 + termenv). Decision (2026-08): keep glamour
-// v1.0.0 until charm ships glamour v2, then upgrade in one step —
-// `go get charm.land/glamour/v2@latest` + import-path swap + go mod tidy.
-// This renderer's API surface (NewTermRenderer + Render) is stable, so no
-// call-site logic changes are expected. The seek-side prep is done:
-// cmd/seek's style detection already uses lipgloss v2 instead of termenv.
+// glamour v2 (charm.land module path) since 2026-08 — the last v1-era
+// dependency retired; the module graph no longer carries termenv /
+// reflow / lipgloss v1. v2 removed WithAutoStyle: the empty-style
+// fallback below pins "dark" explicitly, which is both v2's default
+// and detectGlamourStyle's non-tty fallback, so the two stay aligned.
 
 // newMarkdownRenderer builds a glamour renderer at the given width.
-// style is "dark" / "light" / "" (auto fallback). The host pre-detects
+// style is "dark" / "light" / "" (dark fallback). The host pre-detects
 // the style BEFORE the program starts (cmd/seek does this) to avoid the
 // OSC 11 query leaking into the textarea — see PRD §4.9 and
 // docs/pitfalls.md.
@@ -1562,7 +1560,10 @@ func newMarkdownRenderer(width int, style string) *glamour.TermRenderer {
 	if style != "" {
 		opts = append(opts, glamour.WithStandardStyle(style))
 	} else {
-		opts = append(opts, glamour.WithAutoStyle())
+		// v2 removed WithAutoStyle (its runtime OSC query was the
+		// leak-into-textarea pitfall anyway). Explicit dark matches v2's
+		// own default AND detectGlamourStyle's non-tty fallback.
+		opts = append(opts, glamour.WithStylePath("dark"))
 	}
 	r, err := glamour.NewTermRenderer(opts...)
 	if err != nil {
