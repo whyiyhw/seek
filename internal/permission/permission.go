@@ -205,6 +205,21 @@ type Policy struct {
 	// fields are workflow-scoped, not top-level Policy state.
 	exec workflowExecState
 
+	// alwaysAllow is the per-Kind session allowlist behind the
+	// approval prompt's "[a] always: <kind>" answer. A granted Kind
+	// skips the askFn consult in the PREFERENCE gate only — workflow
+	// gates still run first, so PlanAnalyze stays read-only even for
+	// a granted Kind (workflow trumps pref, as everywhere else).
+	//
+	// Scope: runtime-only session state — never persisted, never
+	// inherited by Spawn (same rationale as preApproved: a grant
+	// must not silently outlive the context it was given in). It is
+	// deliberately NARROWER than the pre-v6 "[a] = session yolo"
+	// behaviour: approving one edit no longer unlocks bash. Cleared
+	// by every SetWorkflow transition AND every SetPref call — any
+	// explicit posture change invalidates fine-grained grants.
+	alwaysAllow map[Kind]bool
+
 	// onDestructive is the v3 checkpoint hook (PRD docs/prd/
 	// feature-checkpoint.md §5). When Check decides a destructive
 	// action (write / edit / mutating bash) will go through, it
@@ -289,6 +304,13 @@ func (p *Policy) Pref() Preference {
 // SetPref updates the preference. Does NOT touch workflow — the two
 // axes are independent. TUI's cmdYolo enforces mutual exclusion at
 // the UI layer if desired.
+//
+// Clears the per-Kind alwaysAllow grants: an explicit posture change
+// ("/yolo on", "/yolo off") means the user is re-deciding how strict
+// to be, and stale fine-grained grants surviving that decision would
+// contradict it (turning yolo OFF while "always edit" silently stands
+// would keep edits unprompted — exactly what the user just asked to
+// stop).
 func (p *Policy) SetPref(pref Preference) {
 	if p == nil {
 		return
@@ -296,6 +318,7 @@ func (p *Policy) SetPref(pref Preference) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.pref = pref
+	p.alwaysAllow = nil
 }
 
 // Workflow returns the current workflow.
@@ -325,6 +348,11 @@ func (p *Policy) SetWorkflow(w Workflow) {
 	// inherit the safe-by-default reset behaviour without anyone
 	// having to remember to extend this line.
 	p.exec = workflowExecState{}
+	// Per-Kind grants die on every workflow transition too — same
+	// defense-in-depth posture as preApproved. A grant given during
+	// normal usage must not silently carry into (or out of) a plan
+	// ceremony.
+	p.alwaysAllow = nil
 }
 
 // SetPreApproved toggles the per-step batch-approval flag. Called
@@ -355,6 +383,34 @@ func (p *Policy) PreApproved() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.exec.preApproved
+}
+
+// SetAlwaysAllow grants the per-Kind session allowlist for k. Called
+// by the TUI when the user answers an approval prompt with
+// "[a] always: <kind>". The grant lives until the next SetPref or
+// SetWorkflow call (see the field doc) and is never persisted — a
+// resumed session starts with a clean slate and asks again.
+func (p *Policy) SetAlwaysAllow(k Kind) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.alwaysAllow == nil {
+		p.alwaysAllow = make(map[Kind]bool)
+	}
+	p.alwaysAllow[k] = true
+}
+
+// AlwaysAllowed reports whether k currently holds a session grant —
+// read by tests; production code goes through Check.
+func (p *Policy) AlwaysAllowed(k Kind) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.alwaysAllow[k]
 }
 
 // Cwd returns the policy's working directory (set at construction;
@@ -441,7 +497,9 @@ type Restriction struct {
 // must be re-established inside the child's own plan flow. This
 // prevents a parent step's auto-approve window from silently
 // extending into a fresh subagent (docs/prd/feature-subagent.md
-// §3.5).
+// §3.5). The per-Kind alwaysAllow grants are not inherited either,
+// for the same reason: the user granted them to the PARENT's prompt
+// stream, not to whatever a subagent decides to do.
 //
 // askFn / onDestructive are NOT carried over — the orchestrator wires
 // them on the child after construction (typically wrapping the parent
@@ -521,7 +579,10 @@ var ErrDenied = errors.New("permission denied")
 //  2. PlanExecute fast-path — if workflow is PlanExecute and
 //     preApproved is true, writes/edits/bash auto-pass (per-step
 //     batch approval granted at propose() time).
-//  3. Preference gate — Yolo allows all; Deny rejects dangerous;
+//  3. Per-Kind session grant — "[a] always: <kind>" at an approval
+//     prompt allows that Kind without consulting askFn until the
+//     next SetPref / SetWorkflow.
+//  4. Preference gate — Yolo allows all; Deny rejects dangerous;
 //     Ask consults askFn for dangerous and allows safe.
 func (p *Policy) Check(a Action) error {
 	if p == nil {
@@ -537,6 +598,7 @@ func (p *Policy) Check(a Action) error {
 	cwd := p.cwd
 	askFn := p.askFn
 	preApproved := p.exec.preApproved
+	kindGranted := p.alwaysAllow[a.Kind]
 	onDestructive := p.onDestructive
 	p.mu.RUnlock()
 
@@ -587,9 +649,19 @@ func (p *Policy) Check(a Action) error {
 	}
 
 	if !terminal {
-		// 2. Preference gate. Reached for WorkflowNone, or PlanExecute
-		//    where preApproved didn't short-circuit.
-		decision = prefGate(pref, a, cwd, askFn)
+		// 2. Per-Kind session grant — the "[a] always: <kind>" answer.
+		//    Sits at PREFERENCE level: workflow gates above already had
+		//    their say (PlanAnalyze stays read-only for a granted Kind),
+		//    and the grant is exactly "stop asking me about this Kind",
+		//    i.e. a scoped replacement for what used to be a full
+		//    session-yolo escalation.
+		if kindGranted {
+			decision = nil
+		} else {
+			// 3. Preference gate. Reached for WorkflowNone, or PlanExecute
+			//    where preApproved didn't short-circuit.
+			decision = prefGate(pref, a, cwd, askFn)
+		}
 	}
 
 	// 3. Checkpoint hook. Fire ONLY on success and ONLY for

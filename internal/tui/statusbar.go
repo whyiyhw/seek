@@ -90,7 +90,7 @@ type StatusSnapshot struct {
 	// from the TUI's vantage point; they fire async via tick.
 	CronsRegistered int
 
-	// GoalActive + GoalTurns/GoalMaxTurns drive the "🎯 N/M" badge while a
+	// GoalActive + GoalTurns/GoalMaxTurns drive the "goal N/M" badge while a
 	// /goal loop is running (M-goal.2). Suppressed when no goal is active.
 	GoalActive   bool
 	GoalTurns    int
@@ -129,7 +129,7 @@ func RenderStatusBar(s StatusSnapshot) string {
 
 	// The bar renders to width-widthSafety, not width: lipgloss and the
 	// terminal disagree by up to ~2 cols on ambiguous-width glyphs the
-	// bar contains (☀️, ○ — see foldStatusBar's note), and a bar whose
+	// bar contains (○, ●, · — see foldStatusBar's note), and a bar whose
 	// TERMINAL-measured width exceeds the frame width soft-wraps,
 	// desyncing bubbletea's line accounting and ghost-duplicating the
 	// frame top. A 2-col unpainted sliver at the right edge is the
@@ -165,8 +165,11 @@ func joinSegments(segs []statusSegment) string {
 //
 // The fits() check reserves a 2-col SAFETY MARGIN on top of minGap:
 // lipgloss and the terminal can disagree by 1–2 cols on ambiguous-width
-// glyphs (☀️ U+2600+VS16, ○ U+25CB — both appear in the bar; CJK-locale
-// Windows Terminal renders them wider than lipgloss measures). A bar
+// glyphs. The worst offenders (☀️ U+2600+VS16, ⤴ U+2934, ⏰/🎯/🌙) have
+// been removed from the bar entirely — segments are ASCII-labelled now —
+// but ○ U+25CB / ● U+25CF / · U+00B7 remain (spinner, separators) and
+// are ambiguous-width on CJK-locale terminals, so the margin stays as
+// defense in depth for those and for any glyph a future segment adds. A bar
 // that "just fits" by lipgloss's count soft-wraps on the real terminal,
 // desyncing bubbletea's frame line-count: the next repaint's cursor-up
 // comes up short and the previous frame's top block ghosts into
@@ -233,11 +236,15 @@ func leftSegments(s StatusSnapshot) []statusSegment {
 		}
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(bg).Bold(true).Padding(0, 1).Render(label), prioPin})
 	}
-	// /goal badge: "🎯 N/M" while a goal loop is running (M-goal.2).
+	// /goal badge: "goal N/M" while a goal loop is running (M-goal.2).
+	// Text-only (no 🎯): the badge's tinted background already carries
+	// the signal, and emoji in the bar are width-oracle hazards (see
+	// foldStatusBar's note) — the bar must contain only glyphs lipgloss
+	// and the terminal measure identically.
 	if s.GoalActive {
-		label := "🎯 goal"
+		label := "goal"
 		if s.GoalMaxTurns > 0 {
-			label = fmt.Sprintf("🎯 goal %d/%d", s.GoalTurns, s.GoalMaxTurns)
+			label = fmt.Sprintf("goal %d/%d", s.GoalTurns, s.GoalMaxTurns)
 		}
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourTool).Bold(true).Padding(0, 1).Render(label), prioHigh})
 	}
@@ -257,7 +264,7 @@ func leftSegments(s StatusSnapshot) []statusSegment {
 		out = append(out, statusSegment{styleMuted.Render("○ idle"), prioLow})
 	}
 	if s.UpgradeAvailable != "" {
-		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render("↑ "+s.UpgradeAvailable), prioLow})
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render("↑ " + s.UpgradeAvailable), prioLow})
 	}
 	return out
 }
@@ -313,24 +320,23 @@ func rightSegments(s StatusSnapshot) []statusSegment {
 	// Subagent badge: only shown while at least one subagent is
 	// active. Tinted ok-colour to signal "background work is
 	// progressing" rather than alarm — the badge is informational,
-	// not a warning. ⤴ glyph chosen for "delegated upward to a
-	// sibling context"; falls back to a plain "agents:N" when the
-	// terminal can't render the rune (most modern terminals can).
+	// not a warning. Label-first "agents N" (no ⤴ glyph): U+2934 is
+	// East-Asian-ambiguous and gets emoji presentation in many fonts,
+	// so lipgloss and the terminal disagree on its width — exactly the
+	// soft-wrap class foldStatusBar's safety margin exists to absorb.
+	// Plain ASCII removes the hazard instead of budgeting for it.
 	if s.SubagentsActive > 0 {
-		badge := fmt.Sprintf("⤴ %d agent", s.SubagentsActive)
-		if s.SubagentsActive != 1 {
-			badge += "s"
-		}
+		badge := fmt.Sprintf("agents %d", s.SubagentsActive)
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render(badge), prioMed})
 	}
 	// Cron badge: shown while at least one cron job is
 	// registered. Counts REGISTERED jobs not active runs — the
 	// signal is "I have N routines configured" so the user
-	// remembers what's running unattended. ⏰ glyph reads as
-	// "scheduled" without ambiguity. Same muted ok-colour as
-	// the agent badge.
+	// remembers what's running unattended. Label-first "cron N",
+	// same ASCII-only rule as the agent badge. Same muted
+	// ok-colour as the agent badge.
 	if s.CronsRegistered > 0 {
-		badge := fmt.Sprintf("⏰ %d cron", s.CronsRegistered)
+		badge := fmt.Sprintf("cron %d", s.CronsRegistered)
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render(badge), prioLow})
 	}
 	return out
@@ -371,26 +377,37 @@ func formatBudget(s StatusSnapshot) string {
 	label := fmt.Sprintf("ctx %d%%", pct)
 
 	switch budget.Classify(s.Model, used) {
+	// "!" not "⚠": U+26A0 is East-Asian-ambiguous and often gets emoji
+	// presentation — a width-oracle hazard in the bar (foldStatusBar's
+	// note). The colour tint + bold carry the urgency; the glyph only
+	// needs to mark "attention", which ASCII does at a deterministic
+	// one cell.
 	case budget.SeverityCritical:
-		return lipgloss.NewStyle().Foreground(colourToolErr).Bold(true).Render("⚠ " + label + " — /compact soon")
+		return lipgloss.NewStyle().Foreground(colourToolErr).Bold(true).Render("! " + label + " — /compact soon")
 	case budget.SeverityWarn:
-		return lipgloss.NewStyle().Foreground(colourTool).Render("⚠ " + label)
+		return lipgloss.NewStyle().Foreground(colourTool).Render("! " + label)
 	default:
 		return styleMuted.Render(label)
 	}
 }
 
+// formatTier renders the pricing-tier segment. Text-only: the old
+// ☀️/🌙 glyphs were the bar's worst width-oracle offenders (☀️ =
+// U+2600+VS16 measures 1, renders 2 on most terminals — the direct
+// cause of the soft-wrap/banner-ghost pitfall). The off-peak badge's
+// tinted background and the plain countdown text carry the same
+// information at a deterministic width.
 func formatTier(s StatusSnapshot) string {
 	label := pricing.TierLabel(s.Tier)
 	if s.Tier == pricing.TierOffPeak {
-		return styleStatusOffPeak.Render("🌙 " + label)
+		return styleStatusOffPeak.Render(label)
 	}
 	// Standard tier: show countdown to off-peak.
 	dur := untilTransition(s.NextAt, s.Now)
 	if dur <= 0 {
-		return "☀️ " + label
+		return label
 	}
-	return fmt.Sprintf("☀️ %s (next 🌙 in %s)", label, formatDuration(dur))
+	return fmt.Sprintf("%s · off-peak in %s", label, formatDuration(dur))
 }
 
 func untilTransition(when, now time.Time) time.Duration {

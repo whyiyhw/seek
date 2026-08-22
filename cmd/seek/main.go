@@ -25,6 +25,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/acp"
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/autopilot"
 	"github.com/whyiyhw/seek/internal/bgjob"
 	"github.com/whyiyhw/seek/internal/cache"
@@ -43,7 +44,6 @@ import (
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
-	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -1971,6 +1971,10 @@ func run() error {
 				ag.SetModeLabel("")
 			}
 		},
+		// The approval prompt's "[a] always: <kind>" answer — a per-Kind
+		// session grant, NOT a yolo escalation. SetPref/SetWorkflow clear
+		// it (see permission.Policy.alwaysAllow).
+		AlwaysAllowKind: policy.SetAlwaysAllow,
 		SetPlan: func(p bool) {
 			// /plan toggles the Workflow axis (not Pref). Entering
 			// /plan starts in the analyze substate (plan mode v2;

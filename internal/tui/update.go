@@ -119,9 +119,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, spCmd)
 
 	case approvalRequestMsg:
-		// New approval prompt — grab focus.
+		// New approval prompt — grab focus, diff window back to top.
 		req := msg.req
 		m.pendingApproval = &req
+		m.approvalDiffOffset = 0
 		m.input.Blur()
 
 	case askUserRequestMsg:

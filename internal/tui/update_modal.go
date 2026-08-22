@@ -12,7 +12,10 @@ import (
 //
 //	y / Y / Enter  → reply true (allow once)
 //	n / N / Esc    → reply false (deny once)
-//	a / A          → reply true AND upgrade session to ModeYolo
+//	a / A          → reply true AND grant this Action's Kind for the
+//	                 session (per-Kind allowlist — NOT session yolo;
+//	                 the full escalation lives only behind /yolo)
+//	j / k          → scroll the diff window (when the diff overflows)
 //	Ctrl+C         → reply false then quit (so the agent unblocks)
 //
 // Replies on req.Reply are non-blocking because the channel is
@@ -47,6 +50,16 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "a", "always":
 			allow = true
 			always = true
+		case "j", "k":
+			// Scroll the diff window without answering. Clamping
+			// against the diff's real length happens here so the
+			// renderer stays a pure formatter.
+			if delta := map[string]int{"j": 1, "k": -1}[s]; delta != 0 {
+				m.approvalDiffOffset = clampDiffOffset(
+					m.approvalDiffOffset+delta,
+					m.pendingApproval.Action.Display.Diff)
+			}
+			return m, nil
 		default:
 			answered = false
 		}
@@ -57,14 +70,17 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.replyApproval(allow)
-	if always && m.opts.SetYolo != nil {
-		m.opts.SetYolo(true)
-		m.opts.Yolo = true
-		// Yolo just turned on via "always" — refresh so the next
-		// idle moment shows the YOLO warning placeholder.
-		m.refreshPlaceholder()
+	if always {
+		// Per-Kind session grant — the narrow replacement for the old
+		// "[a] = yolo for session" escalation. The permission layer
+		// stops asking about THIS Kind; everything else keeps its
+		// prompt. Session-wide yolo remains an explicit /yolo act.
+		if m.opts.AlwaysAllowKind != nil {
+			m.opts.AlwaysAllowKind(m.pendingApproval.Action.Kind)
+		}
 	}
 	m.pendingApproval = nil
+	m.approvalDiffOffset = 0
 	m.input.Focus()
 	// Re-arm the approval listener so the next dangerous tool call
 	// triggers a fresh prompt.

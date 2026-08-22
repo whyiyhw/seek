@@ -32,9 +32,10 @@ func stripANSI(s string) string {
 }
 
 // TestStatusBar_SubagentBadge pins the v5 柱 G status-bar
-// indicator (PRD §4.3). Non-zero count shows "⤴ N agents";
-// zero count suppresses entirely. Singular/plural matter
-// because users WILL nitpick "⤴ 1 agents" reading.
+// indicator (PRD §4.3). Non-zero count shows "agents N";
+// zero count suppresses entirely. Label-first ASCII form —
+// no ⤴ glyph — so the bar stays free of ambiguous-width
+// characters (the soft-wrap/banner-ghost pitfall class).
 func TestStatusBar_SubagentBadge(t *testing.T) {
 	// Zero — no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
@@ -42,53 +43,45 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 		Width: 120,
 		// SubagentsActive: 0 by default
 	}))
-	if strings.Contains(zero, "⤴") {
-		t.Errorf("agent badge leaked with zero active: %q", zero)
-	}
 	if strings.Contains(zero, "agent") {
 		t.Errorf("agent label leaked with zero active: %q", zero)
 	}
 
-	// One — singular.
+	// One.
 	one := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:           "deepseek-v4-flash",
 		Width:           120,
 		SubagentsActive: 1,
 	}))
-	if !strings.Contains(one, "⤴ 1 agent") {
-		t.Errorf("expected '⤴ 1 agent' badge, got: %q", one)
+	if !strings.Contains(one, "agents 1") {
+		t.Errorf("expected 'agents 1' badge, got: %q", one)
 	}
-	if strings.Contains(one, "1 agents") {
-		t.Errorf("singular pluralisation wrong: %q", one)
+	if strings.Contains(one, "⤴") {
+		t.Errorf("ambiguous-width glyph leaked into the bar: %q", one)
 	}
 
-	// Three — plural.
+	// Three.
 	three := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:           "deepseek-v4-flash",
 		Width:           120,
 		SubagentsActive: 3,
 	}))
-	if !strings.Contains(three, "⤴ 3 agents") {
-		t.Errorf("expected '⤴ 3 agents' badge, got: %q", three)
+	if !strings.Contains(three, "agents 3") {
+		t.Errorf("expected 'agents 3' badge, got: %q", three)
 	}
 }
 
 // TestStatusBar_CronBadge pins the v5 柱 H status-bar
-// indicator: "⏰ N cron" when N > 0; suppressed at zero.
-// Unlike the agent badge, the unit ("cron") doesn't take a
-// plural -s — "5 cron" reads more naturally than "5 crons"
-// when "cron" refers to scheduled jobs rather than the
-// scheduler itself. Test verifies both forms.
+// indicator: "cron N" when N > 0; suppressed at zero.
+// Label-first ASCII form — no ⏰ glyph — same rationale as
+// the agent badge.
 func TestStatusBar_CronBadge(t *testing.T) {
 	// Zero → no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model: "deepseek-v4-flash",
 		Width: 120,
 	}))
-	if strings.Contains(zero, "⏰") {
-		t.Errorf("cron badge leaked at count=0: %q", zero)
-	}
-	if strings.Contains(zero, " cron") {
+	if strings.Contains(zero, "cron") {
 		t.Errorf("cron label leaked at count=0: %q", zero)
 	}
 
@@ -98,20 +91,21 @@ func TestStatusBar_CronBadge(t *testing.T) {
 		Width:           120,
 		CronsRegistered: 1,
 	}))
-	if !strings.Contains(one, "⏰ 1 cron") {
-		t.Errorf("expected '⏰ 1 cron' badge, got: %q", one)
+	if !strings.Contains(one, "cron 1") {
+		t.Errorf("expected 'cron 1' badge, got: %q", one)
+	}
+	if strings.Contains(one, "⏰") {
+		t.Errorf("ambiguous-width glyph leaked into the bar: %q", one)
 	}
 
-	// Many — same unit, no -s. The agent badge takes -s for
-	// the noun "agent"; cron is treated as already-plural
-	// (like "sheep").
+	// Many.
 	many := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:           "deepseek-v4-flash",
 		Width:           120,
 		CronsRegistered: 7,
 	}))
-	if !strings.Contains(many, "⏰ 7 cron") {
-		t.Errorf("expected '⏰ 7 cron' badge, got: %q", many)
+	if !strings.Contains(many, "cron 7") {
+		t.Errorf("expected 'cron 7' badge, got: %q", many)
 	}
 	if strings.Contains(many, "crons") {
 		t.Errorf("cron should not take plural -s: %q", many)
@@ -152,7 +146,7 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 		// Zero Usage — no turns yet → cache shows "n/a".
 		Now: at,
 	}))
-	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "peak", "next 🌙 in"} {
+	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "peak", "off-peak in"} {
 		if !strings.Contains(bar, frag) {
 			t.Errorf("missing %q in: %q", frag, bar)
 		}
@@ -259,8 +253,8 @@ func TestStatusBar_OffPeak(t *testing.T) {
 	if !strings.Contains(bar, "off-peak") {
 		t.Errorf("missing off-peak label: %q", bar)
 	}
-	// No "next 🌙 in" countdown during off-peak.
-	if strings.Contains(bar, "next 🌙") {
+	// No "off-peak in" countdown during off-peak — the badge alone.
+	if strings.Contains(bar, "off-peak in ") {
 		t.Errorf("countdown should not show during off-peak: %q", bar)
 	}
 }
@@ -410,7 +404,7 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	wide := rich
 	wide.Width = 200
 	w := stripANSI(RenderStatusBar(wide))
-	for _, frag := range []string{"seek", "YOLO", "turns:5", "⏰ 2 cron", "↑ v0.9.0", "cost"} {
+	for _, frag := range []string{"seek", "YOLO", "turns:5", "cron 2", "↑ v0.9.0", "cost"} {
 		if !strings.Contains(w, frag) {
 			t.Fatalf("wide bar should contain %q; got %q", frag, w)
 		}
@@ -423,7 +417,7 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	if !strings.Contains(plain, "seek") || !strings.Contains(plain, "YOLO") {
 		t.Errorf("narrow bar must keep pinned identity + mode badge; got %q", plain)
 	}
-	for _, frag := range []string{"turns:", "⏰", "↑ v0.9.0", "cost"} {
+	for _, frag := range []string{"turns:", "cron", "↑ v0.9.0", "cost"} {
 		if strings.Contains(plain, frag) {
 			t.Errorf("narrow bar should have folded away %q; got %q", frag, plain)
 		}
@@ -456,6 +450,38 @@ func TestRenderStatusBar_NeverExceedsTerminalWidth(t *testing.T) {
 		// staying within it guarantees no wrap on any mainstream terminal.
 		if got := runewidth.StringWidth(lines[0]); got > w {
 			t.Errorf("width=%d: bar physically %d cols: %q", w, got, lines[0])
+		}
+	}
+}
+
+// TestStatusBar_NoRetiredEmojiGlyphs pins the ASCII-only bar contract:
+// the emoji retired for width-oracle reasons (☀️ VS16 measures 1
+// renders 2; ⤴/⚠ East-Asian-ambiguous; 🌙/⏰/🎯 font-dependent Wide)
+// must never reappear in ANY bar state. Renders a maximal snapshot —
+// every badge lit, ctx at critical, standard tier with countdown — so
+// a regression in any segment trips the test.
+func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
+	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
+	nt, na := pricing.NextTransition(at)
+	for _, tier := range []pricing.Tier{pricing.TierStandard, pricing.TierOffPeak} {
+		bar := stripANSI(RenderStatusBar(StatusSnapshot{
+			Model: deepseek.ModelV4Flash, Effort: "max",
+			Tier: tier, NextTier: nt, NextAt: na, Now: at,
+			Turns: 3, ToolCalls: 9, Streaming: true,
+			StreamElapsed: 5 * time.Second, StreamDeltaBytes: 4096,
+			LastUsage:        deepseek.Usage{PromptTokens: 10_000_000}, // force ctx critical
+			SubagentsActive:  2,
+			CronsRegistered:  3,
+			GoalActive:       true,
+			GoalTurns:        2,
+			GoalMaxTurns:     8,
+			UpgradeAvailable: "v9.9.9",
+			Width:            0, // width 0 = every segment rendered, none folded
+		}))
+		for _, glyph := range []string{"☀", "🌙", "⤴", "⏰", "🎯", "⚠"} {
+			if strings.Contains(bar, glyph) {
+				t.Errorf("tier=%v: retired glyph %q back in the bar: %q", tier, glyph, bar)
+			}
 		}
 	}
 }

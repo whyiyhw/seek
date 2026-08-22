@@ -1011,45 +1011,129 @@ func (m Model) renderApprovalPrompt() string {
 
 	var sb strings.Builder
 	sb.WriteString(styleApprovalHeader.Render("⚠ approve " + subject + "?"))
+	// Diff stats ride on the header line so the user knows the SIZE of
+	// what they're approving before reading a single hunk — and, when
+	// the window below truncates, knows it truncated. ASCII "-" (not
+	// U+2212) keeps the line free of ambiguous-width glyphs.
+	if d := req.Action.Display.Diff; d != "" {
+		st := diffStats(d)
+		stats := fmt.Sprintf("  %d hunks · +%d -%d", st.hunks, st.adds, st.dels)
+		if st.total > maxDiffLines {
+			stats += fmt.Sprintf(" · %d lines", st.total)
+		}
+		sb.WriteString(styleMuted.Render(stats))
+	}
 	sb.WriteString("\n")
 
 	if req.Action.Display.Diff != "" {
-		sb.WriteString(renderDiff(req.Action.Display.Diff, m.width))
+		sb.WriteString(renderDiff(req.Action.Display.Diff, m.approvalDiffOffset))
 	}
 
-	sb.WriteString(styleMuted.Render("  [y] allow once  [n] deny  [a] always (yolo for session)  [Esc] deny"))
+	sb.WriteString(styleMuted.Render(fmt.Sprintf(
+		"  [y] allow once   [a] always: %s (this session)   [n] deny   [Esc] deny",
+		req.Action.Kind)))
 	sb.WriteString("\n")
 	return sb.String()
 }
 
-// renderDiff colourises a unified diff for inline display in the TUI.
-// Lines starting with '+' are green, '-' are red, '@' are cyan, others muted.
-// Capped at maxDiffLines to avoid shoving the input box off screen.
-func renderDiff(udiff string, _ int) string {
-	const maxDiffLines = 24
-	lines := strings.Split(strings.TrimRight(udiff, "\n"), "\n")
-	if len(lines) > maxDiffLines {
-		lines = lines[:maxDiffLines]
-		lines = append(lines, styleMuted.Render(fmt.Sprintf("  … (%d more lines)", len(strings.Split(udiff, "\n"))-maxDiffLines)))
-	}
-	styleAdd := lipgloss.NewStyle().Foreground(colourOk)
-	styleDel := lipgloss.NewStyle().Foreground(colourToolErr)
-	styleAt := lipgloss.NewStyle().Foreground(colourUser)
+// maxDiffLines is the approval diff window's fixed height (marker rows
+// included). Fixed — not grow-on-demand — because the live region must
+// stay inside one terminal height (the inline-renderer freeze pitfall);
+// diffs taller than the window are read by SCROLLING it with j/k, never
+// by expanding it.
+const maxDiffLines = 24
 
-	var sb strings.Builder
+// diffStat summarises a unified diff for the approval header: hunk
+// count, added/deleted line counts, total raw lines.
+type diffStat struct {
+	hunks, adds, dels, total int
+}
+
+func diffStats(udiff string) diffStat {
+	lines := strings.Split(strings.TrimRight(udiff, "\n"), "\n")
+	st := diffStat{total: len(lines)}
 	for _, l := range lines {
 		switch {
+		case strings.HasPrefix(l, "@@"):
+			st.hunks++
+		case strings.HasPrefix(l, "+++"), strings.HasPrefix(l, "---"):
+			// file headers — neither adds nor dels
 		case strings.HasPrefix(l, "+"):
-			sb.WriteString(styleAdd.Render(l))
+			st.adds++
 		case strings.HasPrefix(l, "-"):
-			sb.WriteString(styleDel.Render(l))
+			st.dels++
+		}
+	}
+	return st
+}
+
+// clampDiffOffset bounds a scroll offset to the diff's valid range so
+// the window never runs past the last line. Lives beside renderDiff
+// (same window math) but is called from the key handler — the renderer
+// itself stays a pure formatter of pre-clamped state.
+func clampDiffOffset(offset int, udiff string) int {
+	if udiff == "" {
+		return 0
+	}
+	total := len(strings.Split(strings.TrimRight(udiff, "\n"), "\n"))
+	maxOff := max(total-(maxDiffLines-2), 0)
+	return min(max(offset, 0), maxOff)
+}
+
+// renderDiff colourises a unified diff for inline display in the TUI.
+// Lines starting with '+' are green, '-' are red, '@' are cyan, others
+// muted.
+//
+// Diffs taller than maxDiffLines render as a scrollable window: two
+// marker rows (position above / below + the j/k hint) bracket
+// maxDiffLines-2 content rows, so the block's height is CONSTANT at
+// every scroll position — the input box below must not twitch as the
+// user scrolls (same fixed-height discipline as menuMaxRows). offset
+// is the first visible diff line, pre-clamped by clampDiffOffset in
+// the key handler.
+func renderDiff(udiff string, offset int) string {
+	lines := strings.Split(strings.TrimRight(udiff, "\n"), "\n")
+	total := len(lines)
+
+	var sb strings.Builder
+	emit := func(l string) {
+		switch {
+		case strings.HasPrefix(l, "+"):
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourOk).Render(l))
+		case strings.HasPrefix(l, "-"):
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourToolErr).Render(l))
 		case strings.HasPrefix(l, "@"):
-			sb.WriteString(styleAt.Render(l))
+			sb.WriteString(lipgloss.NewStyle().Foreground(colourUser).Render(l))
 		default:
 			sb.WriteString(styleMuted.Render(l))
 		}
 		sb.WriteString("\n")
 	}
+
+	if total <= maxDiffLines {
+		for _, l := range lines {
+			emit(l)
+		}
+		return sb.String()
+	}
+
+	offset = clampDiffOffset(offset, udiff)
+	window := maxDiffLines - 2 // two rows reserved for the markers
+	if above := offset; above > 0 {
+		sb.WriteString(styleMuted.Render(fmt.Sprintf("  … %d lines above", above)))
+	} else {
+		sb.WriteString(styleMuted.Render("  (top of diff)"))
+	}
+	sb.WriteString("\n")
+	for _, l := range lines[offset : offset+window] {
+		emit(l)
+	}
+	if below := total - offset - window; below > 0 {
+		sb.WriteString(styleMuted.Render(fmt.Sprintf("  … %d lines below · [j/k] scroll", below)))
+	} else {
+		sb.WriteString(styleMuted.Render("  (end of diff)"))
+	}
+	sb.WriteString("\n")
 	return sb.String()
 }
 

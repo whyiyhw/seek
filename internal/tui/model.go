@@ -214,7 +214,13 @@ type Options struct {
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)
 	SetYolo      func(bool)
-	SetPlan      func(bool)
+	// AlwaysAllowKind grants the per-Kind session allowlist behind the
+	// approval prompt's "[a] always: <kind>" answer (wired to
+	// permission.Policy.SetAlwaysAllow by cmd/seek). Deliberately
+	// narrower than SetYolo: approving one edit must not unlock bash.
+	// nil = the [a] answer degrades to allow-once.
+	AlwaysAllowKind func(permission.Kind)
+	SetPlan         func(bool)
 	// SetPlanSubstate notifies the host about plan-mode substate
 	// transitions triggered by the propose tool (PRD §2.5):
 	//
@@ -535,6 +541,14 @@ type Model struct {
 	// inline y/N prompt. Reply is sent on the channel pointer (which
 	// is buffered so we never block).
 	pendingApproval *permission.ApprovalRequest
+
+	// approvalDiffOffset is the scroll position (first visible diff
+	// line) of the approval prompt's diff window. j/k adjust it while
+	// pendingApproval is set; reset to 0 on every new approval. The
+	// window itself stays maxDiffLines tall — scrolling instead of
+	// expanding keeps the live region inside one terminal height (the
+	// inline-renderer freeze pitfall).
+	approvalDiffOffset int
 
 	// pendingQuestion, when non-nil, means the agent goroutine is
 	// blocked on an ask_user request and the TUI is showing a
