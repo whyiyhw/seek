@@ -51,14 +51,25 @@ var lightPalette = palette{
 	Tool:      lipgloss.Color("136"), // darker amber
 	ToolErr:   lipgloss.Color("196"), // bright red
 	Reasoning: lipgloss.Color("243"), // medium grey
-	Muted:     lipgloss.Color("237"), // darker grey
-	Accent:    lipgloss.Color("134"), // deeper magenta
-	Ok:        lipgloss.Color("70"),  // darker green
-	StatusBg:  lipgloss.Color("254"), // light grey
-	StatusFg:  lipgloss.Color("235"), // near-black
-	BannerFg:  lipgloss.Color("16"),
-	BannerBg:  lipgloss.Color("156"), // lighter green
-	MenuSel:   lipgloss.Color("134"),
+	// Muted is the "recede behind the body text" role, so on a light
+	// ground it has to move UP toward white — but this palette was
+	// derived by darkening each dark-theme counterpart, which pushed it
+	// the other way. 237 (#3a3a3a) landed one grey step off Assistant's
+	// 235 (#262626): 11.4:1 against white where body text is 15.1:1, a
+	// 1.33x separation where the dark palette has 3.2x. Nothing receded
+	// — plan rows, separators, unselected menu items and footer hints
+	// all read as loud as prose. 245 (#8a8a8a) is 3.45:1 on white,
+	// matching the dark palette's Muted at 3.44:1 on black, so the two
+	// themes now step back by the same amount. Guarded by
+	// TestPalettes_MutedRecedesBehindBody.
+	Muted:    lipgloss.Color("245"),
+	Accent:   lipgloss.Color("134"), // deeper magenta
+	Ok:       lipgloss.Color("70"),  // darker green
+	StatusBg: lipgloss.Color("254"), // light grey
+	StatusFg: lipgloss.Color("235"), // near-black
+	BannerFg: lipgloss.Color("16"),
+	BannerBg: lipgloss.Color("156"), // lighter green
+	MenuSel:  lipgloss.Color("134"),
 }
 
 var (
