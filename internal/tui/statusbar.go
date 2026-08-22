@@ -127,12 +127,22 @@ func RenderStatusBar(s StatusSnapshot) string {
 
 	left, right = foldStatusBar(left, right, s.Width)
 
+	// The bar renders to width-widthSafety, not width: lipgloss and the
+	// terminal disagree by up to ~2 cols on ambiguous-width glyphs the
+	// bar contains (☀️, ○ — see foldStatusBar's note), and a bar whose
+	// TERMINAL-measured width exceeds the frame width soft-wraps,
+	// desyncing bubbletea's line accounting and ghost-duplicating the
+	// frame top. A 2-col unpainted sliver at the right edge is the
+	// price of never wrapping; MaxWidth is the truncation backstop for
+	// the pinned-only pathological case.
+	const widthSafety = 2
+	budget := max(s.Width-widthSafety, 1)
 	leftText := joinSegments(left)
 	rightText := joinSegments(right)
-	gap := s.Width - lipgloss.Width(leftText) - lipgloss.Width(rightText)
+	gap := budget - lipgloss.Width(leftText) - lipgloss.Width(rightText)
 	gap = max(gap, 1)
 	full := leftText + strings.Repeat(" ", gap) + rightText
-	return styleStatusBar.Width(s.Width).Render(full)
+	return styleStatusBar.MaxWidth(budget).Render(full)
 }
 
 // joinSegments renders segments into the "  "-separated text the bar
@@ -152,10 +162,23 @@ func joinSegments(segs []statusSegment) string {
 // badge. Ties drop the right side (metrics) before the left, and later
 // segments before earlier ones, keeping the most important context
 // anchored at each end.
+//
+// The fits() check reserves a 2-col SAFETY MARGIN on top of minGap:
+// lipgloss and the terminal can disagree by 1–2 cols on ambiguous-width
+// glyphs (☀️ U+2600+VS16, ○ U+25CB — both appear in the bar; CJK-locale
+// Windows Terminal renders them wider than lipgloss measures). A bar
+// that "just fits" by lipgloss's count soft-wraps on the real terminal,
+// desyncing bubbletea's frame line-count: the next repaint's cursor-up
+// comes up short and the previous frame's top block ghosts into
+// scrollback (observed as the welcome banner duplicating after a /model
+// switch — the longer vision-exp model id pushed the bar into exactly
+// this boundary band). Dropping one more low-prio segment near the
+// boundary is invisible; wrapping the bar is not.
 func foldStatusBar(left, right []statusSegment, width int) ([]statusSegment, []statusSegment) {
 	const minGap = 2
+	const widthSafety = 2
 	fits := func() bool {
-		return lipgloss.Width(joinSegments(left))+minGap+lipgloss.Width(joinSegments(right)) <= width
+		return lipgloss.Width(joinSegments(left))+minGap+lipgloss.Width(joinSegments(right)) <= width-widthSafety
 	}
 	for !fits() {
 		side, idx, prio := -1, -1, prioPin

@@ -5,6 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
+
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -427,5 +430,52 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	}
 	if strings.Contains(n, "\n") {
 		t.Errorf("status bar must stay single-line; got %q", n)
+	}
+}
+
+// TestRenderStatusBar_NeverExceedsTerminalWidth pins the ghost-banner
+// fix: whatever the width oracle disagreement on ambiguous glyphs (☀️/○
+// render wider on CJK-locale terminals than lipgloss measures), the
+// bar's physically-rendered width must stay within the frame width — a
+// soft-wrapped status line desyncs bubbletea's frame line-count and
+// ghosts the previous frame's top block (the duplicated welcome banner
+// after a /model switch to the longer vision-exp id).
+func TestRenderStatusBar_NeverExceedsTerminalWidth(t *testing.T) {
+	for _, w := range []int{40, 60, 80, 90, 100, 110, 120, 140, 180} {
+		s := StatusSnapshot{
+			Model: "deepseek-v4-flash-vision-exp", Effort: "max",
+			Tier: pricing.TierStandard, NextTier: pricing.TierOffPeak,
+			Turns: 12, ToolCalls: 34, Width: w,
+		}
+		out := stripANSI(RenderStatusBar(s))
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if len(lines) != 1 {
+			t.Errorf("width=%d: bar must stay single-line, got %d lines", w, len(lines))
+		}
+		// runewidth is the strictest oracle in play (counts ○ as 2);
+		// staying within it guarantees no wrap on any mainstream terminal.
+		if got := runewidth.StringWidth(lines[0]); got > w {
+			t.Errorf("width=%d: bar physically %d cols: %q", w, got, lines[0])
+		}
+	}
+}
+
+// TestRenderModelPicker_RowsFitNarrowTerminal: every picker row —
+// including the "(current)" suffix on the longest id — must fit a
+// 100-col terminal. An overlong row wraps in the popup and desyncs the
+// frame (same failure class as the status bar).
+func TestRenderModelPicker_RowsFitNarrowTerminal(t *testing.T) {
+	m := testModel().Build()
+	m.opts.Model = "deepseek-v4-flash-vision-exp"
+	m.modelPickerFiltered = knownModelsForProvider("")
+	m.pickerPurpose = "model"
+	for i := range m.modelPickerFiltered {
+		m.modelPickerSelected = i
+		out := m.renderModelPicker()
+		for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if w := lipgloss.Width(stripANSI(line)); w > 100 {
+				t.Errorf("picker row %d physically %d cols (>100): %q", i, w, stripANSI(line))
+			}
+		}
 	}
 }

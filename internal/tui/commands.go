@@ -391,7 +391,12 @@ func knownModelsForProvider(providerName string) []modelChoice {
 		return []modelChoice{
 			{"deepseek-v4-flash", "DeepSeek V4-Flash — fast chat + tools (default)"},
 			{"deepseek-v4-pro", "DeepSeek V4-Pro — Thinking-enabled reasoning (explicit)"},
-			{"deepseek-v4-flash-vision-exp", "DeepSeek V4-Flash-Vision (exp) — native vision, accepts images"},
+			// Description kept short deliberately: the picker row must
+			// fit a ~100-col terminal even with the " (current)" suffix
+			// — an overlong row soft-wraps and desyncs bubbletea's
+			// frame count (same failure class as the status-bar wrap;
+			// see foldStatusBar's safety margin note).
+			{"deepseek-v4-flash-vision-exp", "V4-Flash-Vision (exp) — images"},
 		}
 	case "anthropic":
 		return []modelChoice{

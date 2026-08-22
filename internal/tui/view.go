@@ -1116,11 +1116,16 @@ func (m Model) renderModelPicker() string {
 		for i := start; i < end; i++ {
 			mc := m.modelPickerFiltered[i]
 			marker := "  "
-			idLabel := mc.id
+			// The (current) suffix rides in the free-form description
+			// column, NOT on the id: %-32s pads but never truncates, so
+			// a 28-char id + " (current)" would break the id column's
+			// alignment (and, on a long id, push the row past terminal
+			// width — the wrap-ghost failure class again).
+			desc := mc.description
 			if m.isCurrentPickerItem(mc.id) {
-				idLabel = idLabel + " (current)"
+				desc = desc + " (current)"
 			}
-			row := fmt.Sprintf("%-32s  %s", idLabel, mc.description)
+			row := fmt.Sprintf("%-32s  %s", mc.id, desc)
 			if i == m.modelPickerSelected {
 				sb.WriteString(styleMenuSelected.Render("▸ " + row))
 			} else {
