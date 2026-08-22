@@ -59,6 +59,15 @@ var standardRates = map[string]ModelPricing{
 		InputHitPerMTok:  0.044,
 		OutputPerMTok:    3.96,
 	},
+	// Vision-exp bills at Flash rates; each image normalises to ≤384
+	// prompt tokens regardless of original size, so image cost flows
+	// through the existing prompt-token accounting untouched
+	// (feature-vision §四).
+	deepseek.ModelV4FlashVisionExp: {
+		InputMissPerMTok: 0.44,
+		InputHitPerMTok:  0.014,
+		OutputPerMTok:    1.32,
+	},
 }
 
 const offPeakDiscount = 0.5

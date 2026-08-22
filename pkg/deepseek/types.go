@@ -16,6 +16,15 @@ const (
 	ModelV4Flash = "deepseek-v4-flash"
 	ModelV4Pro   = "deepseek-v4-pro"
 
+	// ModelV4FlashVisionExp is the experimental multimodal (vision)
+	// build, released 2026-08-21. Text capability matches V4-Flash; it
+	// accepts image_url content parts in user messages (each image
+	// normalises to ≤384 prompt tokens, billed at Flash rates). The
+	// "-Exp" suffix rotates — GA may rename; when it does, update this
+	// const + IsVisionModel + the /model picker + pricing in one go.
+	// See docs/prd/feature-vision.md.
+	ModelV4FlashVisionExp = "deepseek-v4-flash-vision-exp"
+
 	RoleSystem    = "system"
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
@@ -28,6 +37,16 @@ type Message struct {
 	Name       string     `json:"name,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+
+	// Images carries natively-attached image parts (feature-vision).
+	// Session persistence stores Asset references (content-addressed
+	// names under the project assets dir); ResolveImages materialises
+	// them into data: URLs on the request copy before send. Empty for
+	// every legacy / text-only message — the default struct marshal
+	// then omits the field, so JSONL bytes stay identical. Images are
+	// legal on USER messages only (API constraint: system/assistant
+	// images are a 400).
+	Images []ImagePart `json:"images,omitempty"`
 
 	// ReasoningContent is populated by V4 thinking-mode responses.
 	// It MUST be stripped before sending the message back to the API in a
