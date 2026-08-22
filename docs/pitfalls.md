@@ -524,6 +524,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: (1) annotate rate cards with "verified-on" AND "effective-on" dates — prices change and promo/rack/peak rates can coexist confusingly; (2) "representative time" helpers in tests/docs must sit far from window boundaries — boundaries belong in dedicated boundary tests only; (3) when a provider flips which window is the default, re-check every default branch, label, and comment, not just the constants
 - **Refs**: api-docs.deepseek.com/quick_start/pricing, `internal/pricing/pricing.go`, `internal/tui/placeholder_test.go:noon`
 
+### Side-channel Chat calls fail at marshal time on image-bearing history
+- **Saw**: `/compact` (Summarise) is a one-shot Chat over the agent's history — once feature-vision landed, any history holding an Asset-only `ImagePart` made `ChatRequest.MarshalJSON` error out ("image part … has no URL — run ResolveImages") before a single HTTP byte went out. The loud failure is intentional (silently dropping a user-attached image is worse), but it turns every NEW side-channel caller into a landmine
+- **Why**: the main send path resolves Assets via `Config.ImageLoader` at the `StripReasoningContent` station; side-channel calls (Summarise, think, memory distill, goal judge) build their own `ChatRequest` from agent history and know nothing about images
+- **Fix**: Summarise runs `deepseek.WithoutImages(StripReasoningContent(history))` — a briefing needs prior TEXT only, and the in-band `[image: …]` markers stay in Content so the transcript remains self-describing. Pinned by `TestSummarise_StripsImages`
+- **Lesson**: any new path that marshals agent history into a `ChatRequest` must either `ResolveImages` (loader available) or `WithoutImages` (side-channel). Keep the loud marshal error — handle it at the call site, never by weakening `toWire`
+- **Refs**: `pkg/deepseek/vision.go` (`ResolveImages`/`WithoutImages`/`toWire`), `pkg/agent/agent.go` (`Summarise`), `pkg/agent/vision_test.go`
+
 ## Go language
 
 ### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`

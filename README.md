@@ -98,7 +98,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Checkpoints** | per-turn git snapshot + file-level `/undo` `/redo` `/restore`. [📘](docs/guide-checkpoint.md) |
 | **Background jobs** | detach long builds/servers → `bg-N`; `monitor` polls / waits / kills. [📘](docs/guide-background.md) |
 | **Semantic references** | LSP "who calls this?" (gopls / pyright / tsserver), grep fallback. [📘](docs/guide-references.md) |
-| **Offline image OCR** | `@img.png` or pasted images → local OCR, no VLM / no network. [📘](docs/guide-ocr.md) |
+| **Native vision input** | paste or `@img.png` → image bytes sent natively to the vision model (`/model deepseek-v4-flash-vision-exp`). [📘](docs/guide-vision.md) |
 | **Code review** | effort-graded diff review with `--fix` and `--comment`. [📘](docs/guide-code-review.md) |
 | **MCP client** | pass through any MCP server's tools. [📘](docs/guide-mcp.md) |
 | **Push to phone** | cron / autopilot / long-turn completions → webhook. [📘](docs/guide-webhooks.md) |

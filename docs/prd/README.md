@@ -29,7 +29,8 @@
 | [`feature-autopilot.md`](feature-autopilot.md) | seek v0.8.0（柱 N）| 🚀 已交付 | Autopilot 无人值守编排：`seek autopilot run "<goal>"` → 分解 → 并行 worktree fleet → 聚合 → commit + push 摘要。复用柱 G/H/M 子代理/cron/worktree。子代理默认拒远程操作。真环境 e2e。 |
 | [`feature-sandbox.md`](feature-sandbox.md) | seek v0.8.0（柱 O）| 🚀 已交付 | OS 沙箱（macOS seatbelt / Linux landlock）—— autopilot / --yolo 无人值守的内核级安全边界。零 runtime 依赖，单二进制。子代理 per-worktree confine。网络 confine 仅 macOS（landlock 管不了网络）。 |
 | [`feature-acp.md`](feature-acp.md) | seek v0.8.0（柱 P）| 🚀 已交付 | ACP 编辑器集成（Agent Client Protocol），Zed 等标准 IDE 驱动 seek。`seek acp` + initialize/session.new/prompt/cancel/update。真 server stdio e2e。 |
-| [`feature-image-ocr.md`](feature-image-ocr.md) | seek v0.8.0（柱 Q）| 🚀 已交付 | 图片输入 → 本地 OCR → 文本（Apple Vision / 可插拔 ocr.command）。离线、无 VLM 无网络。go:embed Swift 源→首次用 swiftc 编译→缓存，真·单二进制。 |
+| [`archive/feature-image-ocr.md`](archive/feature-image-ocr.md) | seek v0.8.0（柱 Q）| 🕯 已下线 | 图片输入 → 本地 OCR → 文本（Apple Vision / 可插拔 ocr.command）。**已被 [feature-vision.md](feature-vision.md) 取代**（2026-08-22 M-V.0 执行，代码移除与其视觉路径同船：`internal/ocr` 删除、检测逻辑迁 `internal/imgrefs`、`ocr.*` config 摘除）。历史推演见归档件。 |
+| [`feature-vision.md`](feature-vision.md) | seek v0.9.x | 🚀 已交付 | 原生视觉输入：DeepSeek V4-Flash-Vision（2026-08-21 发布）接入。柱 Q 采集管道出口**唯一化**——图片字节作 content 分块直发视觉模型，非视觉模型遇图提示切模型；**柱 Q（OCR）同步整体下线**（M-V.0 同船执行）。`Message.Images` 兄弟字段双形态序列化（text-only 字节不变保缓存）+ 资产库 copy-at-submit + 提交期路由钩子三入口（TUI/print/ACP）。真 API smoke 双向验证。 |
 | [`feature-inspect-rpc.md`](feature-inspect-rpc.md) | seek v0.6.x dot → v0.7.0 | 📐 设计稿 | Inspect RPC + Web 面板：扩展 `--rpc` JSON-RPC 2.0 read-only method 集（session/memory/project/hooks/stats）+ HTTP+SSE transport + 静态 Web 面板（与主 binary 解耦发布）。作为未来应用的数据平面前置验证。M12.0（独立于 v5）+ M12.1/M12.2（依赖 v5）。 |
 | [`feature-mcp-client.md`](feature-mcp-client.md) | M5.4（已交付）+ 规划中 | ✅ MCP infra 已交付 / 📐 深度集成设计中 | MCP 客户端（pkg/mcp/）已于 M5.4 交付。本文是后续深度集成设计：以 Semble 为第一验证目标，定义 prompt 引导、工具路由、效果评估方案。参见 `docs/book/chapter-12.md`。 |
 | [`feature-plan-mode.md`](feature-plan-mode.md) | seek v0.3.x+ | 🚀 已交付 | Plan 模式 v2：ANALYZE → propose → approve → EXECUTE → re-plan 闭环。propose/plan 工具、mode reminder 多态（plan-analyze/plan-execute）、permission 子态联动、TUI task list 面板、event-sourcing resume。替代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)。 |
@@ -38,7 +39,7 @@
 | [`feature-edit-read-before.md`](feature-edit-read-before.md) | 持续 | 📝 方案笔记 | Edit 前强制 read 的软性提示已通过 workflowReminder 实施；结构性方案（如 schema 层约束）待评估。 |
 | [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
 
-> **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 1 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）。
+> **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 2 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）、`feature-image-ocr.md`（柱 Q，被 `feature-vision.md` 的原生视觉取代，代码已于 M-V.0 移除）。
 
 ## 阅读指引
 

@@ -45,7 +45,6 @@ API 密钥的查找优先级从高到低：
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
 | `session_notify_seconds` | int | 交互回合持续超过此秒数时触发推送通知。缺省 = 60s，设为 0 禁用 |
-| `ocr` | object | OCR 配置（见 [guide-ocr.md](guide-ocr.md)）|
 
 ---
 
@@ -104,11 +103,7 @@ seek --provider anthropic
 
 将 cron 任务完成、autopilot 结果、长时间交互回合的结束通知推送到手机。配置方式见 [guide-webhooks.md](guide-webhooks.md)。
 
-### OCR
 
-macOS 上默认启用本地图片 OCR；其他平台需手动配置。配置方式见 [guide-ocr.md](guide-ocr.md)。
-
----
 
 ## 6. CLI 参考 / CLI reference
 

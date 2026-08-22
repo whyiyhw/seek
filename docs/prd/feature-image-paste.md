@@ -2,7 +2,7 @@
 
 **所属版本**：v0.8.x（构建在 v7 柱 Q OCR 之上）
 **前置阅读**：[`feature-image-ocr.md`](feature-image-ocr.md)（柱 Q —— 本特性复用它的整条 OCR 管道）、`internal/tui/paste.go`（现有 `Ctrl+V` 粘贴 + 折叠标记机制，本特性镜像它）
-**状态**：🚧 **M-imgpaste.1 + .2 已交付，.3 核心已验**。.1：`internal/clipimage` 可插拔抓图器（命令/平台默认 + no-image/no-grabber 检测 + 临时文件 GC），纯单测 82.5%。.2：TUI 接线 —— `Ctrl+V` 探到图 → `clipimage.Grab` → 折叠标记 `📋 image` → 提交时 `resolvePasteInInput` 换成 `@<临时PNG>` → 走现有 OCR 管道;无图降级文本粘贴。`Options.GrabImage` 注入,env `SEEK_CLIPBOARD_IMAGE_CMD` 可覆盖。.3：**macOS osascript 抓图器真机验证通过**（剪贴板放图→Grab 取回 21KB PNG）。全仓 vet+race 绿。剩 .3 尾巴：config `imagepaste.command` key（env 已通）、Linux/Windows 真机验证（非 macOS 上做）、真 TUI 手动 e2e。
+**状态**：🚧 **M-imgpaste.1 + .2 已交付，.3 核心已验**。**2026-08-22 增注**：采集管道（clipimage 抓图 + `@路径` 标记）**保留**，出口从 OCR 改喂原生视觉（[`feature-vision.md`](feature-vision.md) M-V.0/M-V.2 同船）——本文中"走现有 OCR 管道"的下游引用届时失效，仅 Linux/Windows 抓图器验证等采集侧尾巴仍有意义。.1：`internal/clipimage` 可插拔抓图器（命令/平台默认 + no-image/no-grabber 检测 + 临时文件 GC），纯单测 82.5%。.2：TUI 接线 —— `Ctrl+V` 探到图 → `clipimage.Grab` → 折叠标记 `📋 image` → 提交时 `resolvePasteInInput` 换成 `@<临时PNG>` → 走现有 OCR 管道;无图降级文本粘贴。`Options.GrabImage` 注入,env `SEEK_CLIPBOARD_IMAGE_CMD` 可覆盖。.3：**macOS osascript 抓图器真机验证通过**（剪贴板放图→Grab 取回 21KB PNG）。全仓 vet+race 绿。剩 .3 尾巴：config `imagepaste.command` key（env 已通）、Linux/Windows 真机验证（非 macOS 上做）、真 TUI 手动 e2e。
 **估时**：~2-3 天
 
 **一句话**：让用户在 TUI 里**直接 `Ctrl+V` 粘贴剪贴板里的图片**（截图 / Preview 里 Copy 的图）——seek 把它落成临时 PNG、插入一个 `@路径` 引用，提交时走**已有的柱 Q OCR 管道**转成文字注入 prompt。**新代码只有"从剪贴板抓图到临时文件"这一步**;其余全复用。

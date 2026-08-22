@@ -2,7 +2,7 @@
 
 **所属版本**：v7（v0.8.x）· 柱 Q
 **前置阅读**：[`v7.md`](v7.md) §7.4、原始任务书（图片→OCR→注入）
-**状态**：✅ **完成**。`internal/ocr`（检测+exec+注入）+ `config.OCRConfig` + print-mode/TUI 接线 + macOS Vision 助手（`internal/ocr/vision_ocr.swift`，**已端到端验证**离线读中英混排）。**打包问题被嵌入方案彻底解决**：`go:embed` 把 Swift 源编进二进制，首次用 OCR 时 `swiftc` 编译并缓存到 `~/.seek/cache/vision_ocr`（`ocr.EnsureVisionHelper` + `Options.Provision` 惰性钩子）——真·单二进制，文档安装路径 `tar -xz seek` 也直接有 OCR，**无需 goreleaser bundle、无需 macOS release runner**。`scripts/build-vision-ocr.sh` 保留（想预编译"挨着二进制"助手者可用，优先级高于 Provision）。真二进制 e2e：删掉预编译助手后 `seek -p "… @img.png"` 触发 Provision→编译→缓存→注入 `[image: … — OCR]`，模型确认读到 "HELLO OCR 123 你好"。新增 12+ 测试 + 嵌入编译 e2e（`SEEK_OCR_E2E` 门控）`-race` 绿。
+**状态**：🕯 **已下线（2026-08-22 执行）**——被 [`../feature-vision.md`](../feature-vision.md) 取代：DeepSeek 上线原生视觉模型（2026-08-21）后，OCR 的存在理由（文本模型吃不了图）清零。代码已于 feature-vision **M-V.0** 移除（与视觉附加路径同船发布）：`internal/ocr` 整包删除，`DetectImageRefs`/`cleanToken` 迁至 `internal/imgrefs`，`ocr.*` config 键摘除（残留 `ocr` 配置段被静默忽略）。本文归档，以下为交付时的历史记录。✅ **完成**。`internal/ocr`（检测+exec+注入）+ `config.OCRConfig` + print-mode/TUI 接线 + macOS Vision 助手（`internal/ocr/vision_ocr.swift`，**已端到端验证**离线读中英混排）。**打包问题被嵌入方案彻底解决**：`go:embed` 把 Swift 源编进二进制，首次用 OCR 时 `swiftc` 编译并缓存到 `~/.seek/cache/vision_ocr`（`ocr.EnsureVisionHelper` + `Options.Provision` 惰性钩子）——真·单二进制，文档安装路径 `tar -xz seek` 也直接有 OCR，**无需 goreleaser bundle、无需 macOS release runner**。`scripts/build-vision-ocr.sh` 保留（想预编译"挨着二进制"助手者可用，优先级高于 Provision）。真二进制 e2e：删掉预编译助手后 `seek -p "… @img.png"` 触发 Provision→编译→缓存→注入 `[image: … — OCR]`，模型确认读到 "HELLO OCR 123 你好"。新增 12+ 测试 + 嵌入编译 e2e（`SEEK_OCR_E2E` 门控）`-race` 绿。
 **估时**：~2-3 天（已基本落地）
 
 **一句话**：seek 模型是纯文本的；本柱让 `seek -p "这个报错怎么修 @err.png"` 在**不联网**下,用本地 OCR 把图转成文字注入 prompt——无 VLM、无网络、保持单二进制（+ 一个可选 70KB 助手）。

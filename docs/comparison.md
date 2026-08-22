@@ -296,7 +296,7 @@
 
 6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
 
-7. **v7 四柱全交付**：Autopilot（无人值守编排）+ OS 沙箱（seatbelt/landlock）+ ACP（Zed 编辑器集成）+ 离线 OCR（图片→文字）——四柱已落地，详见 [`docs/prd/v7.md`](prd/v7.md)。新增 [`docs/guide-autopilot.md`](guide-autopilot.md)、[`docs/guide-sandbox.md`](guide-sandbox.md)、[`docs/guide-ocr.md`](guide-ocr.md)、[`docs/guide-webhooks.md`](guide-webhooks.md) 用户指南。本书新增第 23 章（v6 五柱）和第 24 章（v7 四柱）。
+7. **v7 四柱全交付**：Autopilot（无人值守编排）+ OS 沙箱（seatbelt/landlock）+ ACP（Zed 编辑器集成）+ 离线 OCR（图片→文字）——四柱已落地，详见 [`docs/prd/v7.md`](prd/v7.md)。新增 [`docs/guide-autopilot.md`](guide-autopilot.md)、[`docs/guide-sandbox.md`](guide-sandbox.md)、guide-ocr.md（后随柱 Q 下线移除，接替者 [guide-vision.md](guide-vision.md)）、[`docs/guide-webhooks.md`](guide-webhooks.md) 用户指南。本书新增第 23 章（v6 五柱）和第 24 章（v7 四柱）。
 
 ---
 
