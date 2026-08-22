@@ -86,7 +86,13 @@ func StoreFile(dir, src string) (string, error) {
 // a flat base name — session files carry asset names and must never
 // become traversal vectors.
 func Path(dir, asset string) (string, error) {
-	if asset == "" || asset == "." || asset != filepath.Base(asset) || strings.Contains(asset, "..") {
+	// ContainsAny catches both separators EXPLICITLY: filepath.Base
+	// only splits on the HOST OS's separator, so on unix `a\b.png`
+	// sails through Base unchanged — but the same session JSONL
+	// opened on Windows would traverse. Asset names are portable
+	// wire data; the guard must reject both separators on every OS.
+	if asset == "" || asset == "." || asset != filepath.Base(asset) ||
+		strings.Contains(asset, "..") || strings.ContainsAny(asset, `/\`) {
 		return "", fmt.Errorf("assets: invalid asset name %q", asset)
 	}
 	return filepath.Join(dir, asset), nil

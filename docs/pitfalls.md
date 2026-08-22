@@ -540,6 +540,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Go language
 
+### `filepath.Base` only splits on the host OS's separator — a backslash traversal guard that passes on Windows fails on unix
+- **Saw**: `TestPath_TraversalGuard` failed on macOS: `assets.Path("/tmp", "a\b.png")` was accepted, while the same guard rejects it on Windows
+- **Why**: the guard was `asset != filepath.Base(asset)` — but `filepath.Base` treats `\` as a separator ONLY on Windows. On unix `a\b.png` IS its own Base, so the check passes. Asset names round-trip through session JSONL (portable wire data): a name written on macOS and opened on Windows would traverse
+- **Fix**: added `strings.ContainsAny(asset, "/\\")` to the guard so both separators are rejected on every OS. `internal/assets/assets.go:Path`
+- **Lesson**: for portable identifiers, never derive a path-safety check from the HOST's path semantics (`filepath.Base`, `filepath.IsAbs`, …) — reject both separator characters explicitly. The test suite only catches this if it runs the foreign-OS case on every OS, which is exactly what the literal `a\b.png` case does
+- **Refs**: `internal/assets/assets.go`, `internal/assets/assets_test.go:TestPath_TraversalGuard`
+
 ### DeepSeek rejects assistant messages with neither `content` nor `tool_calls`
 - **Saw**: after a model streaming turn produced only `reasoning_content` (thinking) but no actual content or tool_calls, every subsequent API call failed with `invalid_request_error: Invalid assistant message: content or tool_calls must be set`
 - **Why**: `runTurnDeepSeek` and `runTurnLLM` construct `assistant := Message{Role: RoleAssistant}` with empty fields, then stream content/tool_calls into it. If the model only emitted reasoning tokens (or nothing at all) before `[DONE]`, the returned assistant has `Content=""` and `ToolCalls=nil`. On the next turn, `StripReasoningContent` strips the (absent) reasoning_content, leaving role=assistant with no fields at all — DeepSeek's API requires every assistant message to carry either content or tool_calls
