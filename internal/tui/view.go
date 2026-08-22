@@ -1201,11 +1201,30 @@ func (m Model) renderInput() string {
 // wrap natively; live always passes m.width > 0.
 func renderUserBlock(text string, width int) string {
 	label := styleUserLabel.Render("▌ you")
-	body := highlightRefs(text)
+	body := dimImageMarkers(highlightRefs(text))
 	if width > 0 {
 		body = lipgloss.NewStyle().Width(width - 2).Render(body)
 	}
 	return "\n" + label + "\n" + body
+}
+
+// dimImageMarkers mutes every "[image: " marker line — the collapsed
+// display for natively-attached and OCR-era images (feature-vision
+// §7.3: folded marker, not thumbnail). One rule covers live submit,
+// scrollback and replay since they all go through renderUserBlock; the
+// prefix is the wire-format family shared with the 柱 Q blocks, so
+// both generations dim identically.
+func dimImageMarkers(s string) string {
+	if !strings.Contains(s, "[image: ") {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "[image: ") {
+			lines[i] = styleMuted.Render(l)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // reasoningBlock formats the model's reasoning as a visually distinct

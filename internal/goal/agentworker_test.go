@@ -16,7 +16,7 @@ type fakePromptAgent struct {
 	prompts []string
 }
 
-func (a *fakePromptAgent) Prompt(_ context.Context, text string) <-chan agent.Event {
+func (a *fakePromptAgent) Prompt(_ context.Context, text string, _ ...deepseek.ImagePart) <-chan agent.Event {
 	a.prompts = append(a.prompts, text)
 	ch := make(chan agent.Event, len(a.events)+1)
 	for _, e := range a.events {

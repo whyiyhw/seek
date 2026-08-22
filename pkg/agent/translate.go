@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -10,6 +11,9 @@ import (
 
 // msgsToLLM converts the agent's internal deepseek.Message history into
 // the provider-agnostic llm.Message format for second-tier providers.
+// Image parts are dropped (llm.Message is text-only for now; per-
+// provider image formats are M-V.4) with an in-band note so the model
+// knows content existed — same never-error posture as the vision router.
 func msgsToLLM(msgs []deepseek.Message) []llm.Message {
 	out := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -18,6 +22,9 @@ func msgsToLLM(msgs []deepseek.Message) []llm.Message {
 			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
 			ToolName:   m.Name,
+		}
+		if len(m.Images) > 0 {
+			lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前 provider 不支持图片输入]", len(m.Images))
 		}
 		for _, tc := range m.ToolCalls {
 			lm.ToolCalls = append(lm.ToolCalls, llm.ToolCall{

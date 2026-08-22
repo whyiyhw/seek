@@ -8,9 +8,11 @@ import (
 )
 
 // PromptAgent is the slice of *agent.Agent the headless goal Worker needs.
-// *agent.Agent satisfies it structurally; tests inject a fake.
+// *agent.Agent satisfies it structurally; tests inject a fake. The
+// variadic images parameter mirrors agent.Prompt (feature-vision) —
+// the goal loop itself never passes images.
 type PromptAgent interface {
-	Prompt(ctx context.Context, text string) <-chan agent.Event
+	Prompt(ctx context.Context, text string, images ...deepseek.ImagePart) <-chan agent.Event
 }
 
 // AgentWorker adapts a PromptAgent to goal.Worker for the headless path:

@@ -279,13 +279,15 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(m.opts.Ctx)
 	m.cancelStream = cancel
 
-	// v7 柱 Q: expand image refs → OCR'd text before the agent sees it.
-	// No-op unless the input references an existing image file.
+	// feature-vision: route image references at submit time. The hook
+	// gets the CURRENT model (a mid-session /model switch changes the
+	// answer), and never errors — failures arrive as in-band notes.
+	var images []deepseek.ImagePart
 	if m.opts.ExpandInput != nil {
-		text = m.opts.ExpandInput(text)
+		text, images = m.opts.ExpandInput(m.opts.Model, text)
 	}
 
-	ch := m.opts.Agent.Prompt(ctx, text)
+	ch := m.opts.Agent.Prompt(ctx, text, images...)
 	m.stream = ch
 
 	printUser := renderUserBlock(text, m.width)

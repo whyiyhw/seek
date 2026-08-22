@@ -152,6 +152,19 @@ func ProjectPlans(absPath string) (string, error) {
 	return filepath.Join(dir, "plans"), nil
 }
 
+// ProjectAssets returns ~/.seek/projects/<id>/assets/ for the given
+// absolute project path — the content-addressed image store for
+// natively-attached vision images (feature-vision D5,
+// internal/assets). Creation is deferred to first Store; this helper
+// only computes the path.
+func ProjectAssets(absPath string) (string, error) {
+	dir, err := ProjectDir(absPath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "assets"), nil
+}
+
 // Soul returns the path to the L-layer (long-term / cross-project user
 // traits) markdown file at ~/.seek/soul.md. The file may not exist —
 // that's the steady state until `seek -dream` produces L candidates.

@@ -65,7 +65,7 @@ import (
 // code in this package calls it; methods like SetModeLabel that are
 // called from cmd/seek belong on the concrete *agent.Agent, not here.
 type AgentClient interface {
-	Prompt(ctx context.Context, text string) <-chan agent.Event
+	Prompt(ctx context.Context, text string, images ...deepseek.ImagePart) <-chan agent.Event
 	Messages() []deepseek.Message
 	Reset(history []deepseek.Message)
 	Summarise(ctx context.Context) (string, deepseek.Usage, error)
@@ -92,9 +92,12 @@ type Options struct {
 	Plan    bool
 	CWD     string
 	Ctx     context.Context // cancelled on SIGINT
-	// ExpandInput, if set, preprocesses submitted user text before it
-	// reaches the agent (v7 柱 Q: image refs → OCR'd text). nil = identity.
-	ExpandInput func(string) string
+	// ExpandInput, if set, is the submit-time image router
+	// (feature-vision D4): receives the CURRENT model id (images are
+	// legal only on vision models) and the raw input text; returns
+	// the text with in-band marker blocks appended plus the image
+	// parts to attach to the outgoing user message. nil = identity.
+	ExpandInput func(model, text string) (string, []deepseek.ImagePart)
 
 	// GoalJudge backs the `/goal` loop (M-goal.2): after each turn it
 	// assesses whether the goal condition is met. nil = `/goal` is

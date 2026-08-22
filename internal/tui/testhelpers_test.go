@@ -70,7 +70,7 @@ func newFakeAgent() *fakeAgent {
 // Compile-time check: fakeAgent satisfies AgentClient.
 var _ AgentClient = (*fakeAgent)(nil)
 
-func (a *fakeAgent) Prompt(ctx context.Context, text string) <-chan agent.Event {
+func (a *fakeAgent) Prompt(ctx context.Context, text string, _ ...deepseek.ImagePart) <-chan agent.Event {
 	a.mu.Lock()
 	a.PromptCalls = append(a.PromptCalls, text)
 	a.mu.Unlock()

@@ -608,3 +608,35 @@ func TestSaveLoad_PreservesGoal(t *testing.T) {
 		})
 	}
 }
+
+// TestSaveLoad_Roundtrip_Images: feature-vision — image-bearing user
+// messages must survive the JSONL round-trip with their durable Asset
+// references (and no data URLs), so -resume can re-materialise them.
+func TestSaveLoad_Roundtrip_Images(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
+	store := newStoreIn(t)
+	sess := New(deepseek.ModelV4FlashVisionExp, "/tmp", "sys", false, false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "look\n\n[image: shot.png — attached natively · 3x2 · 1.2 KiB]",
+			Images: []deepseek.ImagePart{{Asset: "ab12cd34ef56.png"}}},
+		{Role: deepseek.RoleAssistant, Content: "a chart"},
+	}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages: %+v", got.Messages)
+	}
+	m := got.Messages[0]
+	if len(m.Images) != 1 || m.Images[0].Asset != "ab12cd34ef56.png" || m.Images[0].URL != "" {
+		t.Fatalf("image part drifted: %+v", m.Images)
+	}
+	// Text-only messages stay image-free.
+	if len(got.Messages[1].Images) != 0 {
+		t.Fatalf("assistant message gained images: %+v", got.Messages[1].Images)
+	}
+}

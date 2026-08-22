@@ -1,15 +1,16 @@
 package main
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/acp"
-	"github.com/whyiyhw/seek/internal/ocr"
 	"github.com/whyiyhw/seek/pkg/agent"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // acpUpdate maps agent events → ACP session/update payloads. This verifies
@@ -96,35 +97,47 @@ func TestImageExtForMime(t *testing.T) {
 }
 
 func TestBuildACPPromptText(t *testing.T) {
-	ctx := context.Background()
-	// Fake OCR engine: prints fixed text regardless of the image.
-	ocrOpt := ocr.Options{Command: []string{"sh", "-c", "printf '%s' OCRTEXT"}}
+	vroute := visionRouter{assetsDir: t.TempDir()}
 	png := base64.StdEncoding.EncodeToString([]byte("fake png bytes"))
 
 	img := func(data, mime string) acp.ContentBlock {
 		return acp.ContentBlock{Type: "image", Data: data, MimeType: mime}
 	}
 	txt := func(s string) acp.ContentBlock { return acp.ContentBlock{Type: "text", Text: s} }
-	build := func(blocks ...acp.ContentBlock) string {
-		return buildACPPromptText(ctx, acp.PromptParams{Prompt: blocks}, ocrOpt)
+	build := func(model string, blocks ...acp.ContentBlock) (string, []deepseek.ImagePart) {
+		return buildACPPromptText(model, acp.PromptParams{Prompt: blocks}, vroute)
 	}
 
-	if got := build(txt("hi")); got != "hi" {
-		t.Fatalf("text-only = %q", got)
+	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("hi")); got != "hi" || parts != nil {
+		t.Fatalf("text-only = %q %v", got, parts)
 	}
-	if got := build(txt("what is this"), img(png, "image/png")); !strings.Contains(got, "what is this") ||
-		!strings.Contains(got, "OCRTEXT") || !strings.Contains(got, "[image: pasted-image — OCR]") {
+
+	// Vision model: image attached natively, part carries the stored
+	// asset name, marker names the display name.
+	got, parts := build(deepseek.ModelV4FlashVisionExp, txt("what is this"), img(png, "image/png"))
+	if !strings.Contains(got, "what is this") ||
+		!strings.Contains(got, "[image: pasted-image.png — attached natively") {
 		t.Fatalf("text+image = %q", got)
 	}
-	if got := build(img(png, "image/png")); !strings.Contains(got, "OCRTEXT") {
-		t.Fatalf("image-only should still OCR: %q", got)
+	if len(parts) != 1 || !strings.HasSuffix(parts[0].Asset, ".png") {
+		t.Fatalf("parts = %+v", parts)
 	}
+	if _, err := os.Stat(filepath.Join(vroute.assetsDir, parts[0].Asset)); err != nil {
+		t.Fatalf("asset not stored: %v", err)
+	}
+
+	// Non-vision model: switch-model note, no parts, nothing stored.
+	got, parts = build(deepseek.ModelV4Flash, txt("look"), img(png, "image/png"))
+	if !strings.Contains(got, "[image: pasted-image.png — 当前模型不支持图片输入") || len(parts) != 0 {
+		t.Fatalf("non-vision = %q %v", got, parts)
+	}
+
 	// Corrupt base64 → that block is skipped, text preserved.
-	if got := build(txt("keep"), img("!!!not-base64!!!", "image/png")); got != "keep" {
-		t.Fatalf("corrupt base64 must be skipped: %q", got)
+	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("keep"), img("!!!not-base64!!!", "image/png")); got != "keep" || parts != nil {
+		t.Fatalf("corrupt base64 must be skipped: %q %v", got, parts)
 	}
 	// Non-image mimeType → skipped.
-	if got := build(txt("keep"), img(png, "application/pdf")); got != "keep" {
-		t.Fatalf("non-image mime must be skipped: %q", got)
+	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("keep"), img(png, "application/pdf")); got != "keep" || parts != nil {
+		t.Fatalf("non-image mime must be skipped: %q %v", got, parts)
 	}
 }

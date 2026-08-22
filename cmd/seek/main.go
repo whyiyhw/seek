@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -44,7 +43,7 @@ import (
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
-	"github.com/whyiyhw/seek/internal/ocr"
+	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -1543,10 +1542,19 @@ func run() error {
 		InitialMessages: initialMsgs,
 		Hooks:           hooksReg,
 		PrepareMessages: prepareMessages,
+		// feature-vision: resolve Asset-referenced images into data
+		// URLs at send time. Wired whenever the project assets dir is
+		// computable; nil only in pathological setups, where an
+		// unresolved image fails the request loudly at marshal time.
+		ImageLoader: imageAssetsLoader(abs),
 	})
 	if err != nil {
 		return err
 	}
+
+	// The submit-time image router, shared by all three input entries
+	// (print, TUI, ACP) so capability decisions are byte-identical.
+	vroute := newVisionRouter(abs)
 
 	// Register the plan + propose tools AFTER agent.New so both Sinks
 	// can route into ag.EmitEvent. Same deferred-registration pattern
@@ -1673,9 +1681,10 @@ func run() error {
 	}
 
 	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
-	// ocrOptions wired in so image content blocks get OCR'd (M-P.5).
+	// feature-vision: pasted image blocks route through the same
+	// submit-time vision router as the TUI (native attach / switch note).
 	if len(os.Args) >= 2 && os.Args[1] == "acp" {
-		return runACP(ctx, ag, ocrOptions(appCfg))
+		return runACP(ctx, ag, newVisionRouter(abs))
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -1704,16 +1713,14 @@ func run() error {
 		if text == "" {
 			return fmt.Errorf("empty prompt (pass -p or pipe text on stdin)")
 		}
-		// v7 柱 Q: expand referenced image files to OCR'd text (local,
-		// offline) before the prompt reaches the model. No-op when there
-		// are no image refs; on macOS default-on, elsewhere needs ocr.command.
-		if appCfg.OCREnabledOr(runtime.GOOS == "darwin") {
-			text = ocr.Expand(ctx, text, ocrOptions(appCfg))
-		}
+		// feature-vision: route image references at submit time —
+		// vision model attaches bytes natively, anything else gets an
+		// in-band switch-model note. Never errors (M-V.2).
+		text, imageParts := vroute.route(ag.Model(), text)
 		if *jsonOut {
-			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, activeSession, store)
+			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
 		}
-		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, activeSession, store)
+		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
@@ -1861,7 +1868,7 @@ func run() error {
 		Tracker:               tracker,
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
-		ExpandInput:           tuiOCRExpander(appCfg),
+		ExpandInput:           vroute.route,
 		GoalJudge:             goalJudge,
 		ResumeGoal:            resumeGoal,
 		GrabImage:             grabImage,
@@ -2007,7 +2014,7 @@ func stdinIsPiped() bool {
 // tool indicators + stats footer to stderr. Suitable for piping.
 // The session is saved after every TurnEnd so a crash or interrupt
 // mid-run preserves progress up to the last completed turn.
-func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, activeSession *session.Session, store *session.Store) error {
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
 	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
@@ -2047,7 +2054,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		}
 	}
 
-	for ev := range ag.Prompt(ctx, text) {
+	for ev := range ag.Prompt(ctx, text, images...) {
 		switch e := ev.(type) {
 		case agent.MessageDelta:
 			if !gotFirst {
@@ -2157,7 +2164,7 @@ type jsonLine struct {
 // runJSON is the machine-readable output mode: one JSON object per line
 // on stdout. Human-readable diagnostics (tier, stats footer) go to
 // stderr so stdout stays parse-clean.
-func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, activeSession *session.Session, store *session.Store) error {
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
 	enc := json.NewEncoder(os.Stdout)
 
 	emit := func(line jsonLine) {
@@ -2192,7 +2199,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 
 	emit(jsonLine{Type: "agent_start"})
 
-	for ev := range ag.Prompt(ctx, text) {
+	for ev := range ag.Prompt(ctx, text, images...) {
 		switch e := ev.(type) {
 
 		case agent.TurnStart:
@@ -2300,50 +2307,21 @@ func printSessionList(store *session.Store) error {
 	return nil
 }
 
-// tuiOCRExpander returns the TUI input preprocessor for v7 柱 Q image
-// OCR, or nil when OCR is disabled (the TUI treats nil as identity). Uses
-// a background ctx — OCR's own per-image timeout bounds each call, and it
-// only does real work when the input references an existing image file.
-func tuiOCRExpander(cfg config.Config) func(string) string {
-	if !cfg.OCREnabledOr(runtime.GOOS == "darwin") {
+// tuiOCRExpander / ocrOptions were removed with 柱 Q (feature-vision
+// M-V.0): the TUI's ExpandInput hook now routes through visionRouter.
+
+// imageAssetsLoader returns the send-time Asset→data-URL loader for
+// the project's image store (feature-vision D2/D5). It is handed to
+// the agent (Config.ImageLoader) and runs on every DeepSeek-path
+// request alongside StripReasoningContent.
+func imageAssetsLoader(projectAbs string) deepseek.ImageLoader {
+	dir, err := paths.ProjectAssets(projectAbs)
+	if err != nil {
 		return nil
 	}
-	opt := ocrOptions(cfg)
-	return func(s string) string { return ocr.Expand(context.Background(), s, opt) }
-}
-
-// ocrOptions builds the OCR engine config (v7 柱 Q) from user config:
-// an explicit ocr.command wins; otherwise on macOS we look for the
-// bundled vision_ocr helper next to the seek binary. An empty result
-// (no engine) makes ocr.Expand surface a "build the helper" hint per
-// image rather than failing.
-func ocrOptions(cfg config.Config) ocr.Options {
-	opt := ocr.Options{
-		Command:   cfg.OCRCommand(),
-		Languages: cfg.OCRLanguages(),
-		Timeout:   cfg.OCRTimeout(),
+	return func(asset string) (string, error) {
+		return assets.Load(dir, asset)
 	}
-	if len(opt.Command) == 0 && runtime.GOOS == "darwin" {
-		// A prebuilt helper next to the binary wins (zero compile cost)…
-		if exe, err := os.Executable(); err == nil {
-			h := filepath.Join(filepath.Dir(exe), "vision_ocr")
-			if st, serr := os.Stat(h); serr == nil && !st.IsDir() {
-				opt.Helper = h
-			}
-		}
-		// …otherwise compile the embedded Vision helper on first image
-		// into ~/.seek/cache and reuse it (true single-binary, 柱 Q).
-		if opt.Helper == "" {
-			opt.Provision = func(ctx context.Context) (string, error) {
-				cache, err := paths.Cache()
-				if err != nil {
-					return "", err
-				}
-				return ocr.EnsureVisionHelper(ctx, cache)
-			}
-		}
-	}
-	return opt
 }
 
 // runAutopilot drives the v7 柱 N unattended loop: decompose the goal,
@@ -2382,16 +2360,17 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 // One seek process = one ACP session (MVP); Prompt streams the agent's
 // event channel out as ACP session/update notifications.
 type acpBackend struct {
-	ag     *agent.Agent
-	ocrOpt ocr.Options // M-P.5: OCR engine for image content blocks
+	ag    *agent.Agent
+	route visionRouter // feature-vision: submit-time image router
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 	return acp.InitializeResult{
 		ProtocolVersion: p.ProtocolVersion,
 		AgentCapabilities: acp.AgentCapabilities{
-			// Advertise image so editors (Zed) offer image attachment; seek
-			// OCRs the bytes to text (M-P.5), never forwards them to the model.
+			// Advertise image so editors (Zed) offer image attachment;
+			// on a vision model the bytes attach natively, otherwise an
+			// in-band note tells the model to suggest switching.
 			PromptCapabilities: acp.PromptCapabilities{Image: true},
 		},
 	}
@@ -2402,13 +2381,14 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 }
 
 // buildACPPromptText assembles the prompt seek's agent actually sees from
-// an ACP session/prompt: the text blocks, plus an OCR injection block per
-// image content block (M-P.5). The image BYTES never reach the model —
-// only OCR text (柱 Q invariant). Corrupt base64 / unhandled mimeType
-// degrade silently (the block is skipped). Pure (no agent) so it's
-// unit-testable with a fake OCR command.
-func buildACPPromptText(ctx context.Context, p acp.PromptParams, ocrOpt ocr.Options) string {
+// an ACP session/prompt: the text blocks, plus one in-band marker block
+// per image content block — native attach on vision models, a
+// switch-model note otherwise (feature-vision M-V.2, replacing the
+// 柱 Q OCR path). Corrupt base64 / unhandled mimeType degrade silently
+// (the block is skipped). Pure (no agent) so it's unit-testable.
+func buildACPPromptText(model string, p acp.PromptParams, vroute visionRouter) (string, []deepseek.ImagePart) {
 	text := p.PromptText()
+	var parts []deepseek.ImagePart
 	for _, blk := range p.ImageBlocks() {
 		data, err := base64.StdEncoding.DecodeString(blk.Data)
 		if err != nil {
@@ -2418,13 +2398,16 @@ func buildACPPromptText(ctx context.Context, p acp.PromptParams, ocrOpt ocr.Opti
 		if ext == "" {
 			continue
 		}
-		block := ocr.ExpandImageData(ctx, "pasted-image", data, ext, ocrOpt)
+		block, part := vroute.routeBytes(model, "pasted-image"+ext, data, ext)
 		if text != "" {
 			text += "\n\n"
 		}
 		text += block
+		if part.Asset != "" {
+			parts = append(parts, part)
+		}
 	}
-	return text
+	return text, parts
 }
 
 // imageExtForMime maps an ACP image block's mimeType to a file extension
@@ -2452,11 +2435,11 @@ func imageExtForMime(m string) string {
 }
 
 func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
-	text := buildACPPromptText(ctx, p, b.ocrOpt)
+	text, images := buildACPPromptText(b.ag.Model(), p, b.route)
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
-	for ev := range b.ag.Prompt(ctx, text) {
+	for ev := range b.ag.Prompt(ctx, text, images...) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
 			return acp.PromptResult{}, e.Err
 		}
@@ -2547,7 +2530,7 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
 // logging goes to stderr.
-func runACP(ctx context.Context, ag *agent.Agent, ocrOpt ocr.Options) error {
+func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -2563,7 +2546,7 @@ func runACP(ctx context.Context, ag *agent.Agent, ocrOpt ocr.Options) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag, ocrOpt: ocrOpt}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

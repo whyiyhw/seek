@@ -67,6 +67,15 @@ type Config struct {
 	// appended after, in order.
 	InitialMessages []deepseek.Message
 
+	// ImageLoader, when set, materialises Asset-only image parts
+	// (feature-vision) into data: URLs on every DeepSeek-path request
+	// — the send-time sibling of StripReasoningContent's cleanup
+	// station. nil disables resolution: messages keep their Asset
+	// references and the request fails fast at marshal time if any
+	// unresolved images are present (defensive — main wires this
+	// whenever a session exists).
+	ImageLoader deepseek.ImageLoader
+
 	// Hooks, when non-nil, receive lifecycle callbacks: PrePrompt /
 	// PreToolUse decorators (synchronous, ordered, can mutate the
 	// request) and PreTurn / PostTurn / PostToolUse observers
@@ -121,6 +130,14 @@ type Agent struct {
 // The change takes effect on the next Prompt call.
 func (a *Agent) SetModel(model string) {
 	a.cfg.Model = model
+}
+
+// Model returns the active model id. Mirrors Effort()'s role: callers
+// that need the CURRENT model at a moment other than construction
+// (e.g. the ACP backend routing pasted images, runPrint picking the
+// vision gate) read it off the agent instead of holding a second copy.
+func (a *Agent) Model() string {
+	return a.cfg.Model
 }
 
 // SetEffort changes the reasoning_effort override. Empty string clears
@@ -332,8 +349,11 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 	})
 
 	req := &deepseek.ChatRequest{
-		Model:    a.cfg.Model,
-		Messages: deepseek.StripReasoningContent(history),
+		Model: a.cfg.Model,
+		// Images stripped: the briefing only needs prior TEXT (the
+		// attached-image markers live in Content), and this side-channel
+		// call must not pay for — or depend on resolving — image bytes.
+		Messages: deepseek.WithoutImages(deepseek.StripReasoningContent(history)),
 	}
 	resp, err := a.cfg.Client.Chat(ctx, req)
 	if err != nil {
@@ -396,7 +416,13 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 //     order, the two streams overlapping — then append tool result
 //     messages in original call order, loop.
 //  4. Otherwise: terminate.
-func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
+//
+// images (feature-vision) are attached to THIS user message only —
+// the API accepts images on user messages exclusively, and this is
+// the single user-message construction site. Callers that don't pass
+// images are unaffected (variadic keeps every existing call site
+// source-compatible).
+func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.ImagePart) <-chan Event {
 	out := make(chan Event, 32)
 
 	go func() {
@@ -424,10 +450,14 @@ func (a *Agent) Prompt(ctx context.Context, userText string) <-chan Event {
 			a.appendMessage(m)
 		}
 		userContent := prePrompt.UserText + modeReminder(a.cfg.ModeLabel) + workflowReminder
-		a.appendMessage(deepseek.Message{
+		userMsg := deepseek.Message{
 			Role:    deepseek.RoleUser,
 			Content: userContent,
-		})
+		}
+		if len(images) > 0 {
+			userMsg.Images = images
+		}
+		a.appendMessage(userMsg)
 		out <- AgentStart{}
 
 		var (
@@ -639,6 +669,12 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 // runTurnDeepSeek is the original DeepSeek-specific streaming path.
 func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	msgs := deepseek.StripReasoningContent(a.messages)
+	// feature-vision: materialise Asset references into data URLs at
+	// the same send-time station. Load failures degrade in-band inside
+	// ResolveImages — they never abort the turn.
+	if a.cfg.ImageLoader != nil {
+		msgs = deepseek.ResolveImages(msgs, a.cfg.ImageLoader)
+	}
 	if a.cfg.PrepareMessages != nil {
 		msgs = a.cfg.PrepareMessages(msgs)
 	}
