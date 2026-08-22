@@ -181,3 +181,22 @@ func TestReadLimits_DefaultsAndOverrides(t *testing.T) {
 func isWindows() bool {
 	return os.PathSeparator == '\\'
 }
+
+// TestLoad_LegacyOCRSectionIgnored: the ocr section was removed with
+// pillar Q's decommission (feature-vision M-V.0). Configs written by
+// older builds still carry it; the plain json.Unmarshal loader must
+// ignore it silently rather than erroring the startup path.
+func TestLoad_LegacyOCRSectionIgnored(t *testing.T) {
+	dir := withSeekHome(t)
+	legacy := `{"providers": {"deepseek": {"api_key": "sk-x"}}, "ocr": {"enabled": true, "command": "/usr/bin/tesseract", "timeout_seconds": 15}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("legacy ocr section must not break Load: %v", err)
+	}
+	if cfg.Providers["deepseek"].APIKey != "sk-x" {
+		t.Errorf("adjacent fields must still parse: %+v", cfg)
+	}
+}

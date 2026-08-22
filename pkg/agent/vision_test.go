@@ -189,3 +189,53 @@ func TestSummarise_StripsImages(t *testing.T) {
 	}
 	t.Fatal("Summarise must not mutate history")
 }
+
+// TestPrompt_NonVisionModel_StripsHistoryImages: /model can switch a
+// session to a non-vision model while image-bearing messages sit in
+// history. The send path must drop them (markers stay in Content)
+// rather than 400 the whole turn.
+func TestPrompt_NonVisionModel_StripsHistoryImages(t *testing.T) {
+	t.Parallel()
+	var reqBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV4Flash, // non-vision, as if /model switched
+		ImageLoader: func(asset string) (string, error) {
+			return "data:image/png;base64," + asset, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag.Reset([]deepseek.Message{{
+		Role:    deepseek.RoleUser,
+		Content: "look\n\n[image: a.png — attached natively · 3x2 · 1 KiB]",
+		Images:  []deepseek.ImagePart{{Asset: "a.png"}},
+	}})
+	for ev := range ag.Prompt(context.Background(), "and now?") {
+		if e, ok := ev.(ErrorEvent); ok {
+			t.Fatalf("non-vision replay must not error: %v", e.Err)
+		}
+	}
+	body := string(reqBody)
+	if strings.Contains(body, "image_url") || strings.Contains(body, `"images"`) {
+		t.Fatalf("images leaked to non-vision model: %s", body)
+	}
+	if !strings.Contains(body, "[image: a.png") {
+		t.Fatalf("marker must stay for self-description: %s", body)
+	}
+}

@@ -1232,6 +1232,13 @@ If you're new to the project, skim entries in this order:
 
 ## TUI / session stats
 
+### `-resume` silently downgraded every session to the provider-default model
+- **Saw**: `seek --resume <id>` on a vision-model session failed with "deepseek api error: This model does not support image" — the session header recorded `deepseek-v4-flash-vision-exp`, no `--model` was passed, and the identical request shape worked via curl against the recorded model. Any session saved on V4-Pro had likewise been silently running on V4-Flash after every resume, losing thinking mode
+- **Why**: the sticky-session inheritance checked `*model == modelDefault`, but the `--model` flag's default is `""` — the comparison could never be true (dead branch), and the later `if *model == ""` fallback then applied the provider default. "Sessions are sticky" existed only in the comment
+- **Fix**: compare against the sentinel `""` (only an explicit `--model` overrides the saved model). Verified end-to-end by the feature-vision resume smoke: the resumed vision session answers "42" from a mid-history image. Second layer added in the same fix: the agent send path now strips history images when the active model isn't a vision model, so a mid-session `/model` switch degrades in-band instead of 400-ing the turn
+- **Lesson**: when a flag's default is a sentinel (`""`), every "did the user override?" check must compare against the SENTINEL, not against the downstream resolved default — sentinel and resolved value can never be equal, and the override logic becomes dead code that no compiler can catch
+- **Refs**: `cmd/seek/main.go` (sticky-session block), `pkg/agent/agent.go` (`runTurnDeepSeek` capability gate), surfaced by the feature-vision M-V.3 resume smoke
+
 ### Measure the LLM-time span at the assistant MessageEnd, not the first ToolExecStart
 - **Saw**: (design-time) when adding the exit-summary timing (llm/tool split), the obvious first draft closed the per-turn LLM span at the first `ToolExecStart` of the turn (and at `TurnEnd` for tool-less turns). That overcounts: between the assistant `MessageEnd` and tool dispatch the agent is parsing args and looking up tools — agent-side work, not model time — and the two definitions (tool turn vs tool-less turn) were inconsistent.
 - **Why**: pkg/agent events carry no timestamps, so timing is measured at the consumer. The event sequence is `TurnStart → deltas → assistant MessageEnd → ToolExecStart…End → TurnEnd`, and only the assistant-role `MessageEnd` marks "the stream is done" for every turn shape.

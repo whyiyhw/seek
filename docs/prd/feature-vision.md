@@ -175,7 +175,11 @@ ExpandInput func(model, text string) (string, []deepseek.ImagePart)
 
 ### M-V.3 — 回放、resume 与生命周期（~半天）✅
 
-> **落地（2026-08-22）**：`dimImageMarkers` 挂在 `renderUserBlock`（live/scrollback/replay 一条规则，OCR 旧标记同染）；session JSONL round-trip 带 Images（`TestSaveLoad_Roundtrip_Images`）；资产缺失 in-band 降级（`TestPrompt_MissingAsset_DegradesInBand`）；`/compact` 侧信道 `WithoutImages`（pitfall 已记）。真会话 JSONL 验证：`"images":[{"asset":"9a6fed1112fc.png"}]`——引用持久化、零 base64 膨胀。
+> **落地（2026-08-22）**：`dimImageMarkers` 挂在 `renderUserBlock`（live/scrollback/replay 一条规则，OCR 旧标记同染）；session JSONL round-trip 带 Images（`TestSaveLoad_Roundtrip_Images`）；资产缺失 in-band 降级（`TestPrompt_MissingAsset_DegradesInBand`）；`/compact` 侧信道 `WithoutImages`（pitfall 已记）；**发送路径能力门**——非视觉模型时历史图整批 `WithoutImages`（中途 `/model` 切换不再 400 整回合，`TestPrompt_NonVisionModel_StripsHistoryImages`）。
+>
+> **resume 真 API 验收**：带图会话存档 → 新进程 `--resume` 追问图中数字 → 模型答 "42"，缓存命中 49.2%（**顺带证实 base64 图参与前缀缓存**，§7.2 实验的一半数据）。验收过程中挖出并修复 seek 存量 bug：`-resume` 的粘性模型继承是死代码（`*model == modelDefault` vs flag 默认 `""` 永不相等），所有会话 resume 后都被静默降级到默认模型——视觉会话因此报 "This model does not support image"，V4-Pro 会话则静默丢失 thinking。已修 + 记 pitfalls。
+>
+> **偏差记录（D5 资产回收）**：PRD 设想"session 删除时目录级回收"，但 seek **没有 session 删除命令**（用户手动删文件），无挂载点；且资产库是**项目级**、内容寻址、跨会话去重，本就应比单个会话活得久。回收策略改为：手动清理 `~/.seek/projects/<id>/assets/` 即目录级删除；若将来出现 session 删除命令，再挂"扫描剩余会话引用、清除未引用资产"的 GC。
 
 - `internal/tui/replay.go:50` 渲染折叠标记（§7.3 方案 A：`📋 image · <name> · <WxH> · <size>`，尺寸用 stdlib `image.DecodeConfig` 读头部）；`-resume` 后带 `Images` 消息重发 round-trip
 - 资产缺失降级（in-band，不 fatal）；session 删除时的资产回收

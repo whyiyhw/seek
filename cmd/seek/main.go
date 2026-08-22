@@ -889,8 +889,14 @@ func run() error {
 	// surprising). The flags can still override explicitly: set them
 	// AFTER -resume on the command line and they win.
 	if loaded != nil {
-		if *model == modelDefault {
-			// User didn't override the model flag; honour the saved one.
+		if *model == "" {
+			// User didn't pass --model; honour the saved one. The
+			// comparison is against "" (the flag's default), NOT
+			// modelDefault — comparing against modelDefault made this
+			// branch dead code and silently downgraded every -resume
+			// to the provider default (a vision session → flash →
+			// "This model does not support image"; a V4-Pro session →
+			// flash, losing thinking). See docs/pitfalls.md.
 			*model = loaded.Model
 		}
 		if !*yolo {

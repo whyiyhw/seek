@@ -669,6 +669,15 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 // runTurnDeepSeek is the original DeepSeek-specific streaming path.
 func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	msgs := deepseek.StripReasoningContent(a.messages)
+	// Capability gate on history replay: images are only ever legal on
+	// a vision model. The submit-time router guards NEW attachments,
+	// but /model can switch a session to a non-vision model while
+	// image-bearing messages sit in history — sending them would 400
+	// the whole turn. Drop them (in-band markers stay in Content, so
+	// the transcript remains self-describing).
+	if len(msgs) > 0 && !deepseek.IsVisionModel(a.cfg.Model) {
+		msgs = deepseek.WithoutImages(msgs)
+	}
 	// feature-vision: materialise Asset references into data URLs at
 	// the same send-time station. Load failures degrade in-band inside
 	// ResolveImages — they never abort the turn.
