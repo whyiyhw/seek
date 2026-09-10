@@ -33,7 +33,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "Search for a regex (or literal string) across a file, directory, or glob. Returns matching lines with surrounding context and line numbers. Use this to locate a symbol or pattern, then follow up with read(offset, limit) to extract the precise range — avoids reading entire files into context."
+const description = "Search for a regex (or literal string) across a file, directory, or glob. Returns matching lines with surrounding context and line numbers. Dot-prefixed (hidden) entries are skipped when walking a directory — name a hidden path explicitly to search inside it. Use this to locate a symbol or pattern, then follow up with read(offset, limit) to extract the precise range — avoids reading entire files into context."
 
 // Args is the decoded argument struct.
 // ContextLines is a pointer so we can distinguish "not provided" (nil → use
@@ -357,19 +357,33 @@ func expandPath(raw string) ([]string, error) {
 	return files, nil
 }
 
+// walkSkip reports whether a walked entry should be filtered out as hidden.
+// Dot-prefixed entries are skipped — EXCEPT the walk ROOT itself. WalkDir hands
+// the root back with its literal name, so for `grep .` the root's Name() IS
+// ".", and a naive hidden check SkipDir'd the whole walk: every search of the
+// working directory returned "no matches" with no error. The root is always an
+// explicit user choice (`grep .github` means "search .github"), while hidden
+// CHILDREN stay filtered so a `.` root still doesn't descend into .git.
+func walkSkip(path, root string, d os.DirEntry) bool {
+	if path == root {
+		return false
+	}
+	return strings.HasPrefix(d.Name(), ".")
+}
+
 func walkDir(dir string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+		if walkSkip(path, dir, d) {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if strings.HasPrefix(d.Name(), ".") {
+		if d.IsDir() {
 			return nil
 		}
 		files = append(files, path)
@@ -386,7 +400,10 @@ func expandDoubleStarGlob(pattern string) ([]string, error) {
 	idx := strings.Index(pattern, "**")
 	prefix := filepath.Clean(pattern[:idx])
 	suffix := pattern[idx+2:]
-	if suffix != "" && suffix[0] == '/' || suffix[0] == filepath.Separator {
+	// Strip a leading separator via HasPrefix, never suffix[0]: a pattern that
+	// ENDS in ** (e.g. "internal/**") leaves an empty suffix, and indexing it
+	// panicked — in-process, with no recover, so it crashed the whole host.
+	if strings.HasPrefix(suffix, "/") || strings.HasPrefix(suffix, string(filepath.Separator)) {
 		suffix = suffix[1:]
 	}
 
@@ -395,13 +412,13 @@ func expandDoubleStarGlob(pattern string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+		if walkSkip(path, prefix, d) {
+			if d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if strings.HasPrefix(d.Name(), ".") {
+		if d.IsDir() {
 			return nil
 		}
 		if suffix == "" {

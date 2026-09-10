@@ -770,6 +770,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: in repo scripts that may run under a cmd-spawned cygwin/msys shell, never call `sort`/`find`/`ls`/`rm` by bare name — either use the absolute coreutils path or drop the external tool (bash globs). Bare `grep`/`sed`/`awk`/`wc`/`tr` are safe: Windows ships no such binaries, so only the POSIX ones exist on PATH.
 - **Refs**: `scripts/pkg-inventory.sh` (uncommitted at time of writing)
 
+### grep's hidden-entry filter ate the walk ROOT when path was "." — every cwd-wide search returned "no matches"
+- **Saw**: `grep pattern=X path=.` returned `no matches` for patterns that provably exist in the cwd, while the same pattern with `path=internal` matched. Hit twice in one session (both times the model concluded "nothing matches" and changed course)
+- **Why**: `filepath.WalkDir` hands the callback the root entry with its LITERAL name — for `dir == "."` that's `d.Name() == "."`, which `strings.HasPrefix(d.Name(), ".")` read as "hidden directory" → `filepath.SkipDir` on the first callback → empty file list, no error. The same walker fed `**` globs, so `**/*.go` (empty prefix → `.`) was silently empty too. The trap is that the filter is right for CHILDREN and wrong for the ROOT: a bare `strings.HasPrefix(d.Name(), ".")` cannot tell them apart
+- **Fix**: `walkSkip(path, root, d)` — hidden check with the root exempt (`path == root`), used by both walkers (`walkDir`, `expandDoubleStarGlob`). Hidden children stay filtered, so a `.` root still doesn't descend into `.git`. Tests: `TestGrep_DotPath_WalksCwd`, `TestGrep_Glob_DoubleStarFromDot` (plus the pre-existing `TestGrep_Directory_SkipsHidden` pinning the child filter)
+- **Lesson**: when a walker applies an entry filter, decide explicitly whether the ROOT is subject to it — most filters are "don't descend into X", and the root is a user's explicit choice, not something to discover and skip. A filter that silently yields zero results is worse than an error: the caller can't tell "nothing there" from "I refused to look"
+- **Refs**: `internal/tools/grep/grep.go:walkSkip`, `internal/tools/grep/grep_test.go:TestGrep_DotPath_WalksCwd`
+
+### grep crashed the whole process on a pattern ending in `**` (empty-suffix index panic)
+- **Saw**: while writing the fix above — `grep path="internal/**"` panicked with `index out of range [0] with length 0` at `grep.go:389` (reproduced from a test, which re-panicked through `testing`)
+- **Why**: the separator-strip was written as `if suffix != "" && suffix[0] == '/' || suffix[0] == filepath.Separator` — precedence makes it `(a && b) || (c)`, and when the pattern ENDS in `**` the suffix is empty, so the right-hand `suffix[0]` indexed an empty string. Nothing recovers: the grep tool runs in-process inside the TUI, so this is a host crash, not a tool error the model can recover from
+- **Fix**: `strings.HasPrefix(suffix, "/") || strings.HasPrefix(suffix, string(filepath.Separator))` — no indexing. `TestGrep_Glob_DoubleStarTrailing` pins it (`<dir>/**` must match everything below the dir)
+- **Lesson**: in `a && b[i] || c[j]` shapes, short-circuit protects only the operand it guards — a mixed-precedence condition needs parentheses, or better, prefix checks (`HasPrefix`/`TrimPrefix`) that are total by construction. And exit-code hygiene matters here: an in-process tool with an unguarded panic converts a malformed ARGUMENT into a dead session
+- **Refs**: `internal/tools/grep/grep.go:expandDoubleStarGlob`, `internal/tools/grep/grep_test.go:TestGrep_Glob_DoubleStarTrailing`
+
 ---
 
 ## LLM provider quirks (M6)

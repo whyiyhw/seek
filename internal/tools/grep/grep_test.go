@@ -113,6 +113,64 @@ func TestGrep_Glob_DoubleStarGoFiles(t *testing.T) {
 	}
 }
 
+// TestGrep_DotPath_WalksCwd pins `"path": "."` — the most natural way to say
+// "search everything here". WalkDir reports the walk ROOT with its literal
+// name, so for "." the root's Name() IS "." and the hidden-entry filter
+// SkipDir'd the root itself: every such search silently returned "no matches".
+func TestGrep_DotPath_WalksCwd(t *testing.T) {
+	root := setup(t)
+	t.Chdir(root)
+
+	out, err := run(t, Args{Pattern: "func Foo", Path: "."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf(`grep with path "." must search the cwd, got: %s`, out)
+	}
+	// The root exemption must not resurrect hidden CHILDREN.
+	if strings.Contains(out, ".hidden") {
+		t.Errorf("hidden dir must still be skipped below a . root: %s", out)
+	}
+}
+
+// TestGrep_Glob_DoubleStarTrailing: a pattern ENDING in ** (e.g. "dir/**")
+// leaves an empty suffix, and the old `suffix[0]` separator-strip indexed it —
+// panic: index out of range. The grep tool runs in-process with no recover, so
+// that crash takes the whole host down.
+func TestGrep_Glob_DoubleStarTrailing(t *testing.T) {
+	root := setup(t)
+	out, err := run(t, Args{Pattern: "func Foo", Path: filepath.Join(root, "**")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf(`"<dir>/**" must match every file below it, got: %s`, out)
+	}
+	if strings.Contains(out, ".hidden") {
+		t.Errorf("hidden dir must still be skipped: %s", out)
+	}
+}
+
+// TestGrep_Glob_DoubleStarFromDot covers the ** walker's own root check:
+// "**/*.go" cleans its empty prefix to ".". Same silent-zero bug, different
+// walker.
+func TestGrep_Glob_DoubleStarFromDot(t *testing.T) {
+	root := setup(t)
+	t.Chdir(root)
+
+	out, err := run(t, Args{Pattern: "func Foo", Path: "**/*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf(`"**/*.go" from the cwd must match, got: %s`, out)
+	}
+	if strings.Contains(out, ".hidden") {
+		t.Errorf("hidden dir must still be skipped: %s", out)
+	}
+}
+
 func TestGrep_NoMatch(t *testing.T) {
 	root := setup(t)
 	out, err := run(t, Args{Pattern: "XYZNOTFOUND", Path: root})
