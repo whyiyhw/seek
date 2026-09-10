@@ -580,6 +580,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when a vendor announces id routing ("temporarily routed, billed at X"), update client cost/context tables the same day — routed ids keep working, so no runtime error will ever surface the drift. Prefer deleting retired ids outright over keeping deprecated entries: the fallback paths (pricing/budget/thinking) already encode "unknown model" behaviour, so a kept entry is a second source of truth somebody must remember to age out. And re-read the pricing page's window QUALIFIERS (weekdays), not just the numbers
 - **Refs**: `pkg/deepseek/types.go`, `internal/pricing/pricing.go`, `internal/tui/commands.go:knownModelsForProvider`, `internal/budget/budget.go`, api-docs.deepseek.com/quick_start/pricing
 
+### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
+- **Saw**: an effort:max session on a long (99k prompt, 99% cache) turn died with `response truncated (finish_reason=length, max_tokens=16384)` after a hidden-reasoning stretch — the whole 16k completion budget went to `reasoning_content`, content arrived empty or cut at the start. A sibling turn produced the clean-empty variant (`model returned an empty response`)
+- **Why**: seek sends `max_tokens` explicitly (default 16384, a lineage of 4096→8192→16384 raises that all predate thinking-mode semantics). DeepSeek's API, when `max_tokens` is OMITTED, defaults to 8K non-thinking / **64K thinking** (`reasoning_effort=max`) — so the explicit 16k actively undercuts the budget the endpoint itself would grant for the exact mode /effort max selects, and reasoning + content share one budget (the suggested-reply entry below already documented the burn)
+- **Fix**: `Agent.turnMaxTokens()` — with `--max-tokens` unset, `/effort max` now caps at 65536 (aligned with the official implicit thinking default), every other effort state keeps 16384; an explicit `--max-tokens` beats the linkage everywhere. Takes effect on the next Prompt after SetEffort (same between-turns contract)
+- **Lesson**: when a vendor's parameter has a MODE-DEPENDENT implicit default, a client-side "safe explicit default" can quietly fight the vendor's semantics — re-check your hardcoded defaults whenever the request grows a new mode knob (here: Thinking/reasoning_effort), not just when errors appear
+- **Refs**: api-docs.deepseek.com (Chat Completions: max_tokens 1–384K; omitted → 8K/64K by mode), `pkg/agent/agent.go:turnMaxTokens`, `TestTurnMaxTokens_EffortLinkage`, `TestSetEffort_CapTakesEffectNextPrompt`
+
 ## Go language
 
 ### `filepath.Base` only splits on the host OS's separator — a backslash traversal guard that passes on Windows fails on unix

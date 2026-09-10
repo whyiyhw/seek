@@ -2110,3 +2110,116 @@ func TestAgent_SequentialToolsKeepRelativeOrder(t *testing.T) {
 		t.Errorf("sequential stream reordered: mut1 ended %v, mut2 started %v", mut.ends[0], mut.starts[1])
 	}
 }
+
+// ----------------------------------------------------------------------
+// turnMaxTokens — effort-linked completion cap.
+//
+// Under the default (--max-tokens 0), /effort max must raise the
+// per-call cap to DeepSeek's own implicit thinking budget (64K) while
+// every other effort state keeps the historical 16K; an explicit
+// --max-tokens wins over the linkage in all cases. Verified at the
+// wire: the max_tokens actually sent on the ChatRequest.
+// ----------------------------------------------------------------------
+
+func TestTurnMaxTokens_EffortLinkage(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		effort      string
+		explicitCap int // 0 = leave MaxTokens unset
+		want        int
+	}{
+		{"no effort keeps 16k", "", 0, 16384},
+		{"high keeps 16k", "high", 0, 16384},
+		{"max raises to 64k", "max", 0, 65536},
+		{"explicit cap beats effort max", "max", 8192, 8192},
+		{"explicit cap without effort", "", 4096, 4096},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var captured struct {
+				MaxTokens int `json:"max_tokens"`
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&captured)
+				w.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(w, strings.Join([]string{
+					`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+					``,
+					`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+					``,
+					`data: [DONE]`,
+					``,
+				}, "\n"))
+			}))
+			defer srv.Close()
+
+			cfg := Config{
+				Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+				Model:  "deepseek-v4-flash",
+				Effort: c.effort,
+			}
+			if c.explicitCap > 0 {
+				cfg.MaxTokens = c.explicitCap
+			}
+			ag, _ := New(cfg)
+			for range ag.Prompt(context.Background(), "hi") {
+			}
+
+			if captured.MaxTokens != c.want {
+				t.Errorf("effort=%q explicit=%d: max_tokens sent = %d, want %d",
+					c.effort, c.explicitCap, captured.MaxTokens, c.want)
+			}
+		})
+	}
+}
+
+// TestSetEffort_CapTakesEffectNextPrompt pins the mid-session
+// semantics: switching to /effort max between turns raises the cap on
+// the NEXT request (SetEffort's documented between-turns contract).
+func TestSetEffort_CapTakesEffectNextPrompt(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var caps []int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		caps = append(caps, body.MaxTokens)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:  "deepseek-v4-flash",
+	})
+	for range ag.Prompt(context.Background(), "hi") {
+	}
+	ag.SetEffort("max")
+	for range ag.Prompt(context.Background(), "again") {
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(caps) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(caps))
+	}
+	if caps[0] != 16384 {
+		t.Errorf("first request (no effort) max_tokens = %d, want 16384", caps[0])
+	}
+	if caps[1] != 65536 {
+		t.Errorf("second request (after SetEffort max) max_tokens = %d, want 65536", caps[1])
+	}
+}

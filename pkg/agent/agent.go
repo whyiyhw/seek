@@ -105,12 +105,32 @@ type Config struct {
 	PrepareMessages func([]deepseek.Message) []deepseek.Message
 }
 
+// Completion-token budgets. defaultMaxTokens is the historical cap
+// (4096 → 8192 → 16384, each predating thinking-mode semantics).
+// effortMaxMaxTokens aligns /effort max with DeepSeek's own implicit
+// budget: when max_tokens is omitted the API defaults to 8K
+// non-thinking / 64K thinking (api-docs.deepseek.com, Chat
+// Completions). Reasoning tokens draw from the same budget as content
+// (pitfalls.md "side-channel suggested-reply"), so a max-effort turn
+// under the 16K cap routinely truncates with all budget spent on
+// hidden reasoning and an empty content field.
+const (
+	defaultMaxTokens   = 16384
+	effortMaxMaxTokens = 65536
+)
+
 // Agent holds the persistent state for one conversation. It is NOT safe for
 // concurrent calls to Prompt; one Prompt at a time per Agent.
 type Agent struct {
 	mu       sync.RWMutex
 	cfg      Config
 	messages []deepseek.Message
+
+	// explicitMaxTokens records whether Config.MaxTokens carried a
+	// real user value at New() time (vs the <=0 → default fill). It
+	// gates turnMaxTokens' effort linkage: an explicit --max-tokens
+	// must keep winning over any effort-derived budget.
+	explicitMaxTokens bool
 
 	// currentEvents is the event sink for the in-flight Prompt call.
 	// Set at the start of Prompt's goroutine, cleared (via defer) when
@@ -152,6 +172,22 @@ func (a *Agent) SetEffort(effort string) {
 // session-level setting without holding a second copy of the state.
 func (a *Agent) Effort() string {
 	return a.cfg.Effort
+}
+
+// turnMaxTokens returns the completion cap for a DeepSeek turn request.
+// An explicit --max-tokens wins unchanged; otherwise the cap tracks the
+// reasoning effort — /effort max gets the 64K thinking budget DeepSeek
+// itself would apply when max_tokens is omitted, every other effort
+// state keeps the historical 16K default. Read inside the request-
+// building block under the same between-turns contract as SetEffort.
+func (a *Agent) turnMaxTokens() int {
+	if a.explicitMaxTokens {
+		return a.cfg.MaxTokens
+	}
+	if a.cfg.Effort == "max" {
+		return effortMaxMaxTokens
+	}
+	return defaultMaxTokens
 }
 
 // SetModeLabel sets the per-message mode reminder label. Safe between
@@ -230,10 +266,14 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = 200
 	}
+	// Record explicitness BEFORE the default fill — an explicit
+	// --max-tokens must keep winning over the effort linkage in
+	// turnMaxTokens.
+	explicitMaxTokens := cfg.MaxTokens > 0
 	if cfg.MaxTokens <= 0 {
-		cfg.MaxTokens = 16384
+		cfg.MaxTokens = defaultMaxTokens
 	}
-	a := &Agent{cfg: cfg}
+	a := &Agent{cfg: cfg, explicitMaxTokens: explicitMaxTokens}
 	if cfg.SystemPrompt != "" {
 		a.messages = append(a.messages, deepseek.Message{
 			Role:    deepseek.RoleSystem,
@@ -581,7 +621,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 			if finish == "length" {
 				out <- ErrorEvent{Err: fmt.Errorf(
 					"agent: response truncated (finish_reason=length, max_tokens=%d) — use /compact to free context or ask me to continue",
-					a.cfg.MaxTokens)}
+					a.turnMaxTokens())}
 			}
 
 			toolCount := len(assistant.ToolCalls)
@@ -713,7 +753,7 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	req := &deepseek.ChatRequest{
 		Model:     a.cfg.Model,
 		Messages:  msgs,
-		MaxTokens: a.cfg.MaxTokens,
+		MaxTokens: a.turnMaxTokens(),
 	}
 	// V4 shipped Thinking as a request parameter rather than a separate
 	// model id. Pre-V4, DeepSeek routed the "deepseek-reasoner" alias

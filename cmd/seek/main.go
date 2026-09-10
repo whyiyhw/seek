@@ -730,7 +730,7 @@ func run() error {
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
 		model         = flag.String("model", "", "model id; default depends on provider (deepseek-flash for DeepSeek, etc.)")
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
-		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → default (16384)")
+		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → effort-linked default (16k; 64k under /effort max)")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		plan          = flag.Bool("plan", false, "read-only exploration: no bash/writes/edits; produce a plan to review before executing")
