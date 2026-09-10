@@ -39,7 +39,7 @@ func stripANSI(s string) string {
 func TestStatusBar_SubagentBadge(t *testing.T) {
 	// Zero — no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-v4-flash",
+		Model: "deepseek-flash",
 		Width: 120,
 		// SubagentsActive: 0 by default
 	}))
@@ -49,7 +49,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 
 	// One.
 	one := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-v4-flash",
+		Model:           "deepseek-flash",
 		Width:           120,
 		SubagentsActive: 1,
 	}))
@@ -62,7 +62,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 
 	// Three.
 	three := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-v4-flash",
+		Model:           "deepseek-flash",
 		Width:           120,
 		SubagentsActive: 3,
 	}))
@@ -78,7 +78,7 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 func TestStatusBar_CronBadge(t *testing.T) {
 	// Zero → no badge.
 	zero := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-v4-flash",
+		Model: "deepseek-flash",
 		Width: 120,
 	}))
 	if strings.Contains(zero, "cron") {
@@ -87,7 +87,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 
 	// One.
 	one := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-v4-flash",
+		Model:           "deepseek-flash",
 		Width:           120,
 		CronsRegistered: 1,
 	}))
@@ -100,7 +100,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 
 	// Many.
 	many := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:           "deepseek-v4-flash",
+		Model:           "deepseek-flash",
 		Width:           120,
 		CronsRegistered: 7,
 	}))
@@ -118,7 +118,7 @@ func TestStatusBar_CronBadge(t *testing.T) {
 // leave a stray "↑" with no version.
 func TestStatusBar_UpgradeAvailable(t *testing.T) {
 	with := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:            "deepseek-v4-flash",
+		Model:            "deepseek-flash",
 		UpgradeAvailable: "v0.2.0",
 		Width:            120,
 	}))
@@ -127,7 +127,7 @@ func TestStatusBar_UpgradeAvailable(t *testing.T) {
 	}
 
 	without := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: "deepseek-v4-flash",
+		Model: "deepseek-flash",
 		Width: 120,
 	}))
 	if strings.Contains(without, "↑") {
@@ -139,14 +139,14 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai) // peak window
 	nt, na := pricing.NextTransition(at)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:    deepseek.ModelV4Flash,
+		Model:    deepseek.ModelV41Flash,
 		Tier:     pricing.CurrentTier(at),
 		NextTier: nt,
 		NextAt:   na,
 		// Zero Usage — no turns yet → cache shows "n/a".
 		Now: at,
 	}))
-	for _, frag := range []string{"seek", "deepseek-v4-flash", "idle", "cache n/a", "cost $0.0000", "peak", "off-peak in"} {
+	for _, frag := range []string{"seek", "deepseek-flash", "idle", "cache n/a", "cost $0.0000", "peak", "off-peak in"} {
 		if !strings.Contains(bar, frag) {
 			t.Errorf("missing %q in: %q", frag, bar)
 		}
@@ -156,7 +156,7 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 func TestStatusBar_Streaming_Yolo(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:     deepseek.ModelV4Flash,
+		Model:     deepseek.ModelV41Flash,
 		Yolo:      true,
 		Streaming: true,
 		Tier:      pricing.CurrentTier(at),
@@ -172,7 +172,7 @@ func TestStatusBar_Streaming_Yolo(t *testing.T) {
 func TestStatusBar_Idle_Plan(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: deepseek.ModelV4Flash,
+		Model: deepseek.ModelV41Flash,
 		Plan:  true,
 		Tier:  pricing.CurrentTier(at),
 		Now:   at,
@@ -196,7 +196,7 @@ func TestStatusBar_Idle_Plan(t *testing.T) {
 func TestStatusBar_Idle_PlanAnalyze(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelV4Flash,
+		Model:        deepseek.ModelV41Flash,
 		Plan:         true,
 		PlanSubstate: "analyze",
 		Tier:         pricing.CurrentTier(at),
@@ -213,7 +213,7 @@ func TestStatusBar_Idle_PlanAnalyze(t *testing.T) {
 func TestStatusBar_Idle_PlanExecute(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelV4Flash,
+		Model:        deepseek.ModelV41Flash,
 		Plan:         true,
 		PlanSubstate: "execute",
 		Tier:         pricing.CurrentTier(at),
@@ -232,7 +232,7 @@ func TestStatusBar_PlanSubstateIgnoredWhenPlanOff(t *testing.T) {
 	// Plan=false should suppress any substate badge — defensive against
 	// a stale substate value lingering after /plan off.
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:        deepseek.ModelV4Flash,
+		Model:        deepseek.ModelV41Flash,
 		Plan:         false,
 		PlanSubstate: "execute",
 		Tier:         pricing.CurrentTier(at),
@@ -246,7 +246,7 @@ func TestStatusBar_PlanSubstateIgnoredWhenPlanOff(t *testing.T) {
 func TestStatusBar_OffPeak(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 3, 0, 0, 0, pricing.Shanghai) // off-peak
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model: deepseek.ModelV4Flash,
+		Model: deepseek.ModelV41Flash,
 		Tier:  pricing.CurrentTier(at),
 		Now:   at,
 	}))
@@ -267,7 +267,7 @@ func TestStatusBar_CountsAndCost(t *testing.T) {
 	// the locked-in math live in internal/cache/cache_test.go
 	// (TestTracker_CumulativeCostLockedInAtRecord).
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:     deepseek.ModelV4Flash,
+		Model:     deepseek.ModelV41Flash,
 		Turns:     5,
 		ToolCalls: 3,
 		Tier:      pricing.TierStandard,
@@ -290,7 +290,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
 	// Under 1s: should show plain "● streaming"
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:         deepseek.ModelV4Flash,
+		Model:         deepseek.ModelV41Flash,
 		Streaming:     true,
 		StreamElapsed: 500 * time.Millisecond,
 		Tier:          pricing.TierStandard,
@@ -305,7 +305,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 
 	// Over 1s, no bytes yet: show elapsed only
 	bar = stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:         deepseek.ModelV4Flash,
+		Model:         deepseek.ModelV41Flash,
 		Streaming:     true,
 		StreamElapsed: 7 * time.Second,
 		Tier:          pricing.TierStandard,
@@ -317,7 +317,7 @@ func TestStatusBar_StreamingElapsed(t *testing.T) {
 
 	// Over 1s with bytes: show elapsed + token estimate
 	bar = stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:            deepseek.ModelV4Flash,
+		Model:            deepseek.ModelV41Flash,
 		Streaming:        true,
 		StreamElapsed:    54 * time.Second,
 		StreamDeltaBytes: 12000, // 12000/4 = 3000 → "3.0ktok"
@@ -392,7 +392,7 @@ func TestFormatDuration(t *testing.T) {
 func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	t.Parallel()
 	rich := StatusSnapshot{
-		Model:            "deepseek-v4-pro",
+		Model:            "deepseek-flash",
 		Yolo:             true,
 		Turns:            5,
 		ToolCalls:        3,
@@ -437,7 +437,7 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 func TestRenderStatusBar_NeverExceedsTerminalWidth(t *testing.T) {
 	for _, w := range []int{40, 60, 80, 90, 100, 110, 120, 140, 180} {
 		s := StatusSnapshot{
-			Model: "deepseek-v4-flash-vision-exp", Effort: "max",
+			Model: "deepseek-flash", Effort: "max",
 			Tier: pricing.TierStandard, NextTier: pricing.TierOffPeak,
 			Turns: 12, ToolCalls: 34, Width: w,
 		}
@@ -465,7 +465,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 	nt, na := pricing.NextTransition(at)
 	for _, tier := range []pricing.Tier{pricing.TierStandard, pricing.TierOffPeak} {
 		bar := stripANSI(RenderStatusBar(StatusSnapshot{
-			Model: deepseek.ModelV4Flash, Effort: "max",
+			Model: deepseek.ModelV41Flash, Effort: "max",
 			Tier: tier, NextTier: nt, NextAt: na, Now: at,
 			Turns: 3, ToolCalls: 9, Streaming: true,
 			StreamElapsed: 5 * time.Second, StreamDeltaBytes: 4096,
@@ -492,7 +492,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 // frame (same failure class as the status bar).
 func TestRenderModelPicker_RowsFitNarrowTerminal(t *testing.T) {
 	m := testModel().Build()
-	m.opts.Model = "deepseek-v4-flash-vision-exp"
+	m.opts.Model = "deepseek-flash"
 	m.modelPickerFiltered = knownModelsForProvider("")
 	m.pickerPurpose = "model"
 	for i := range m.modelPickerFiltered {

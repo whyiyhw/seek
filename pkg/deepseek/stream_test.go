@@ -47,7 +47,7 @@ func TestChatStream_ParsesDeltasAndUsage(t *testing.T) {
 
 	c := New(WithAPIKey("test"), WithBaseURL(srv.URL))
 	ch, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestChatStream_ReasoningDelta(t *testing.T) {
 
 	c := New(WithAPIKey("test"), WithBaseURL(srv.URL))
 	ch, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Pro,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
@@ -168,17 +168,17 @@ func TestShouldEnableThinking(t *testing.T) {
 		model string
 		want  bool
 	}{
-		// V4.1 ships with thinking as the server default for both
-		// tiers; seek sends the flag explicitly rather than leaning
-		// on that undocumented default (pitfall: suggested-reply once
-		// burned its whole max_tokens budget on reasoning because of
-		// exactly that default).
+		// V4.1 ships with thinking as the server default; seek sends
+		// the flag explicitly rather than leaning on that undocumented
+		// default (pitfall: suggested-reply once burned its whole
+		// max_tokens budget on reasoning because of exactly that
+		// default).
 		{ModelV41Flash, true},
-		{ModelV4Pro, true},
-		// Retired V4-Flash omits the field and inherits whatever the
-		// routed backend applies.
-		{ModelV4Flash, false},
-		{ModelV4FlashVisionExp, false},
+		// Retired ids (server-routed to V4.1 Flash) and custom names
+		// are plain unknowns — the field is omitted.
+		{"deepseek-v4-pro", false},
+		{"deepseek-v4-flash", false},
+		{"deepseek-v4-flash-vision-exp", false},
 		{"", false},
 		{"some-future-custom-model", false},
 	}
@@ -222,7 +222,7 @@ func TestChat_NonStream(t *testing.T) {
 
 	c := New(WithAPIKey("test"), WithBaseURL(srv.URL))
 	resp, err := c.Chat(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "ping"}},
 	})
 	if err != nil {
@@ -239,7 +239,7 @@ func TestChat_NonStream(t *testing.T) {
 func TestChat_MissingKey(t *testing.T) {
 	t.Parallel()
 	c := New() // no key
-	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelV4Flash})
+	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelV41Flash})
 	if err == nil || !strings.Contains(err.Error(), "missing api key") {
 		t.Errorf("expected missing-key error, got %v", err)
 	}
@@ -270,7 +270,7 @@ func TestChat_RetryOn500(t *testing.T) {
 
 	c := New(WithAPIKey("test"), WithBaseURL(srv.URL))
 	resp, err := c.Chat(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "ping"}},
 	})
 	if err != nil {
@@ -299,7 +299,7 @@ func TestChat_RetryExhaustedAnnotated(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	_, err := c.Chat(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err == nil {
@@ -329,7 +329,7 @@ func TestChat_4xxNoRetry(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
-	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelV4Flash})
+	_, err := c.Chat(context.Background(), &ChatRequest{Model: ModelV41Flash})
 	if err == nil {
 		t.Fatalf("expected auth error")
 	}
@@ -381,7 +381,7 @@ func TestChatStream_RetryOn500(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	ch, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
@@ -423,7 +423,7 @@ func TestChatStream_RetryOnEmptyBody(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	ch, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
@@ -456,7 +456,7 @@ func TestChatStream_RetryBudgetCapped(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	_, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err == nil {
@@ -500,7 +500,7 @@ func TestChatStream_TransportEOFAnnotated(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	_, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err == nil {
@@ -548,7 +548,7 @@ func TestChatStream_NoRetryAfterEmit(t *testing.T) {
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
 	ch, err := c.ChatStream(context.Background(), &ChatRequest{
-		Model:    ModelV4Flash,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "hi"}},
 	})
 	if err != nil {
@@ -581,7 +581,7 @@ func TestChatStream_4xxNoRetry(t *testing.T) {
 	defer srv.Close()
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
-	_, err := c.ChatStream(context.Background(), &ChatRequest{Model: ModelV4Flash})
+	_, err := c.ChatStream(context.Background(), &ChatRequest{Model: ModelV41Flash})
 	if err == nil {
 		t.Fatalf("expected auth error")
 	}
@@ -610,7 +610,7 @@ func TestChatStream_CtxCancelDuringBackoff(t *testing.T) {
 	}()
 
 	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
-	_, err := c.ChatStream(ctx, &ChatRequest{Model: ModelV4Flash})
+	_, err := c.ChatStream(ctx, &ChatRequest{Model: ModelV41Flash})
 	if err == nil {
 		t.Fatalf("expected error from cancelled context")
 	}

@@ -51,9 +51,9 @@ func TestVisionMarker_Family(t *testing.T) {
 		switchModelNote("x.png"),
 		attachMarker("x.png", data),
 	}
-	block, _ := vr.routeBytes(deepseek.ModelV4FlashVisionExp, "x.png", data, "")
+	block, _ := vr.routeBytes(deepseek.ModelV41Flash, "x.png", data, "")
 	markers = append(markers, block)
-	block, _ = vr.routeBytes(deepseek.ModelV4Flash, "x.png", data, "")
+	block, _ = vr.routeBytes("deepseek-v4-pro", "x.png", data, "")
 	markers = append(markers, block)
 	block, _ = vr.routeBytes("", "x.png", data, "")
 	markers = append(markers, block)
@@ -70,19 +70,19 @@ func TestVisionRouter_Route(t *testing.T) {
 	img := writePNG(t, dir, "shot.png")
 
 	// No image refs → identity.
-	got, parts := vr.route(deepseek.ModelV4Flash, "plain text")
+	got, parts := vr.route(deepseek.ModelV41Flash, "plain text")
 	if got != "plain text" || parts != nil {
 		t.Fatalf("no-refs: %q %v", got, parts)
 	}
 
 	// Non-existent .png mention (stat gate) → no attachment, no marker.
-	got, parts = vr.route(deepseek.ModelV4FlashVisionExp, "see assets/logo.png in the code")
+	got, parts = vr.route(deepseek.ModelV41Flash, "see assets/logo.png in the code")
 	if got != "see assets/logo.png in the code" || parts != nil {
 		t.Fatalf("stat gate bypassed: %q %v", got, parts)
 	}
 
 	// Vision model → attach + marker with dimensions from the PNG.
-	got, parts = vr.route(deepseek.ModelV4FlashVisionExp, "look "+img)
+	got, parts = vr.route(deepseek.ModelV41Flash, "look "+img)
 	if !strings.HasPrefix(got, "look "+img) {
 		t.Fatalf("original text must be preserved: %q", got)
 	}
@@ -93,8 +93,8 @@ func TestVisionRouter_Route(t *testing.T) {
 		t.Fatalf("parts = %+v", parts)
 	}
 
-	// Non-vision model → switch note, no parts.
-	got, parts = vr.route(deepseek.ModelV4Flash, "look "+img)
+	// Non-vision model (retired id = plain unknown) → switch note, no parts.
+	got, parts = vr.route("deepseek-v4-pro", "look "+img)
 	if !strings.Contains(got, "[image: shot.png — 当前模型不支持图片输入，/model deepseek-flash 切换]") {
 		t.Fatalf("switch note = %q", got)
 	}
@@ -106,7 +106,7 @@ func TestVisionRouter_Route(t *testing.T) {
 func TestVisionRouter_Degradations(t *testing.T) {
 	// assetsDir empty → 资产库不可用 note, never an error.
 	vr := visionRouter{}
-	block, part := vr.routeBytes(deepseek.ModelV4FlashVisionExp, "x.png", []byte("data"), "")
+	block, part := vr.routeBytes(deepseek.ModelV41Flash, "x.png", []byte("data"), "")
 	if part.Asset != "" || !strings.Contains(block, "资产库不可用") {
 		t.Fatalf("no-store degrade: %q %+v", block, part)
 	}
@@ -117,7 +117,7 @@ func TestVisionRouter_Degradations(t *testing.T) {
 	assets.MaxAssetBytes = 32
 	defer func() { assets.MaxAssetBytes = old }()
 	huge := make([]byte, 64)
-	block, part = vr.routeBytes(deepseek.ModelV4FlashVisionExp, "x.png", huge, "")
+	block, part = vr.routeBytes(deepseek.ModelV41Flash, "x.png", huge, "")
 	if part.Asset != "" || !strings.Contains(block, "上限") {
 		t.Fatalf("oversize: %q %+v", block, part)
 	}
@@ -125,7 +125,7 @@ func TestVisionRouter_Degradations(t *testing.T) {
 	// Unreadable file → 读取失败 note.
 	dir := t.TempDir()
 	gone := filepath.Join(dir, "gone.png")
-	block, part = vr.routeOne(deepseek.ModelV4FlashVisionExp, "gone.png", gone)
+	block, part = vr.routeOne(deepseek.ModelV41Flash, "gone.png", gone)
 	if part.Asset != "" || !strings.Contains(block, "读取失败") {
 		t.Fatalf("unreadable: %q %+v", block, part)
 	}
@@ -135,7 +135,7 @@ func TestVisionRouter_Degradations(t *testing.T) {
 // panic or an error return — every failure lands in-band.
 func TestVisionRouter_NeverErrors(t *testing.T) {
 	vr := visionRouter{assetsDir: t.TempDir()}
-	for _, model := range []string{"", deepseek.ModelV4Flash, deepseek.ModelV4FlashVisionExp} {
+	for _, model := range []string{"", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
 		for _, text := range []string{"", "no refs", "@", "().png", "\x00 weird"} {
 			got, parts := vr.route(model, text) // must not panic
 			if got == "" && parts != nil {

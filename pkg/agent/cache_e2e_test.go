@@ -92,7 +92,7 @@ func TestPrefixCache_RealAPI(t *testing.T) {
 
 	ag, err := New(Config{
 		Client:       deepseek.New(deepseek.WithAPIKey(key)),
-		Model:        deepseek.ModelV4Flash,
+		Model:        deepseek.ModelV41Flash,
 		SystemPrompt: systemPromptForCache,
 		Tools:        tools.New().Add(cacheProbeTool{}),
 		MaxTurns:     6,

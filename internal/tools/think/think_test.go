@@ -41,7 +41,7 @@ func thinkingServer(t *testing.T, wantModel, wantSystem string, reasoning, answe
 			"id":      "x",
 			"object":  "chat.completion",
 			"created": 1,
-			"model":   deepseek.ModelV4Flash,
+			"model":   deepseek.ModelV41Flash,
 			"choices": []map[string]any{{
 				"index": 0,
 				"message": map[string]any{
@@ -66,17 +66,17 @@ func thinkingServer(t *testing.T, wantModel, wantSystem string, reasoning, answe
 }
 
 func TestThink_HappyPath(t *testing.T) {
-	srv := thinkingServer(t, deepseek.ModelV4Flash, "step-by-step reasoner", "step 1 ... step 2 ...", "do X then Y")
+	srv := thinkingServer(t, deepseek.ModelV41Flash, "step-by-step reasoner", "step 1 ... step 2 ...", "do X then Y")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
 
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
+	out, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, frag := range []string{"reasoning ---", "step 1", "answer ---", "do X then Y", "usage:", deepseek.ModelV4Flash} {
+	for _, frag := range []string{"reasoning ---", "step 1", "answer ---", "do X then Y", "usage:", deepseek.ModelV41Flash} {
 		if !strings.Contains(out, frag) {
 			t.Errorf("output missing %q: %s", frag, out)
 		}
@@ -84,13 +84,13 @@ func TestThink_HappyPath(t *testing.T) {
 }
 
 func TestThink_ReflectUsesReviewSystem(t *testing.T) {
-	srv := thinkingServer(t, deepseek.ModelV4Flash, "code-review reasoner", "looks fine", "no issues")
+	srv := thinkingServer(t, deepseek.ModelV41Flash, "code-review reasoner", "looks fine", "no issues")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "Review my diff", Reflect: true, Context: "some code"})
 
-	_, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
+	_, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestThink_ContextIsPasted(t *testing.T) {
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "evaluate", Context: "MAGIC_TOKEN_4242"})
-	if _, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args); err != nil {
+	if _, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).Execute(context.Background(), args); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -184,7 +184,7 @@ func collectingPusher() (push func(tools.StreamDelta) error, reasoning, content 
 }
 
 func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
-	srv := thinkingSSE(t, deepseek.ModelV4Flash,
+	srv := thinkingSSE(t, deepseek.ModelV41Flash,
 		[]string{"step 1...", " step 2..."},
 		[]string{"do X", " then Y"},
 	)
@@ -194,7 +194,7 @@ func TestThink_ExecuteStream_RoutesDeltasByKind(t *testing.T) {
 	args, _ := json.Marshal(Args{Task: "Plan a refactor"})
 
 	push, reasoning, content := collectingPusher()
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).ExecuteStream(context.Background(), args, push)
+	out, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).ExecuteStream(context.Background(), args, push)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestThink_ExecuteStream_PropagatesPushError(t *testing.T) {
 	wantErr := context.Canceled
 	push := func(_ tools.StreamDelta) error { return wantErr }
 
-	_, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).ExecuteStream(context.Background(), args, push)
+	_, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).ExecuteStream(context.Background(), args, push)
 	if err != wantErr {
 		t.Errorf("err = %v, want %v", err, wantErr)
 	}
@@ -256,12 +256,12 @@ func TestThink_ExecuteStream_PropagatesPushError(t *testing.T) {
 
 func TestThink_TruncatesLongReasoning(t *testing.T) {
 	long := strings.Repeat("a", reasoningCap+500)
-	srv := thinkingServer(t, deepseek.ModelV4Flash, "", long, "short")
+	srv := thinkingServer(t, deepseek.ModelV41Flash, "", long, "short")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "x"})
-	out, err := New(c, func() string { return deepseek.ModelV4Flash }, nil).Execute(context.Background(), args)
+	out, err := New(c, func() string { return deepseek.ModelV41Flash }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestThink_EffortFromSession(t *testing.T) {
 			client := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 			args, _ := json.Marshal(Args{Task: "x"})
 			sess := tc.sessionEffort
-			_, err := New(client, func() string { return deepseek.ModelV4Flash },
+			_, err := New(client, func() string { return deepseek.ModelV41Flash },
 				func() string { return sess }).Execute(context.Background(), args)
 			if err != nil {
 				t.Fatal(err)
@@ -330,20 +330,23 @@ func TestThink_EffortFromSession(t *testing.T) {
 }
 
 func TestThink_UsesCurrentModel(t *testing.T) {
-	// When the modelFunc returns V4-Pro, the think tool must send
-	// V4-Pro in the request body and reflect it in the output header.
-	srv := thinkingServer(t, deepseek.ModelV4Pro, "step-by-step reasoner", "deep reasoning", "pro answer")
+	// When the modelFunc returns a custom model id (here: the retired
+	// deepseek-v4-pro, i.e. any arbitrary string), the think tool must
+	// send exactly that id in the request body and reflect it in the
+	// output header.
+	const m = "deepseek-v4-pro"
+	srv := thinkingServer(t, m, "step-by-step reasoner", "deep reasoning", "pro answer")
 	defer srv.Close()
 
 	c := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
 	args, _ := json.Marshal(Args{Task: "complex analysis"})
 
-	out, err := New(c, func() string { return deepseek.ModelV4Pro }, nil).Execute(context.Background(), args)
+	out, err := New(c, func() string { return m }, nil).Execute(context.Background(), args)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, deepseek.ModelV4Pro) {
-		t.Errorf("output should mention %q: %s", deepseek.ModelV4Pro, out)
+	if !strings.Contains(out, m) {
+		t.Errorf("output should mention %q: %s", m, out)
 	}
 	if !strings.Contains(out, "pro answer") {
 		t.Errorf("output missing answer: %s", out)

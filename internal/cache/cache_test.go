@@ -13,7 +13,7 @@ import (
 // tests — V4-Flash, standard tier. Tests that care about cost lock-in
 // across model/tier transitions construct their own Record calls.
 func recordFlash(tr *Tracker, u deepseek.Usage) {
-	tr.Record(u, deepseek.ModelV4Flash, pricing.TierStandard)
+	tr.Record(u, deepseek.ModelV41Flash, pricing.TierStandard)
 }
 
 func TestTracker_Empty(t *testing.T) {
@@ -187,23 +187,22 @@ func TestTracker_CumulativeCostLockedInAtRecord(t *testing.T) {
 		t.Errorf("after V4.1-Flash turn: cost = %v, want ≈1.20", got)
 	}
 
-	// Turn 2 — 1M completion @ retired V4-Pro, routed to V4.1 Flash
-	// and billed at Flash prices = $1.20. Cumulative = 2.40. (If the
-	// retired id still carried its pre-retirement $3.96/M card this
-	// would be 1.20 + 3.96 = 5.16 — the routing-billing pin.)
+	// Turn 2 — 1M completion @ the retired V4-Pro id: unknown to the
+	// rate card, so the pricing fallback bills it at the V4.1-Flash
+	// card the server actually charges = $1.20. Cumulative = 2.40.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
-		deepseek.ModelV4Pro, pricing.TierStandard,
+		"deepseek-v4-pro", pricing.TierStandard,
 	)
 	if got := tr.CumulativeCost(); got < 2.399 || got > 2.401 {
-		t.Errorf("after routed V4-Pro turn: cost = %v, want ≈2.40 (billed at Flash price)", got)
+		t.Errorf("after retired V4-Pro turn: cost = %v, want ≈2.40 (billed at Flash price)", got)
 	}
 
-	// Turn 3 — 1M completion @ retired V4-Flash (also Flash-billed)
-	// = $1.20. Cumulative = 3.60.
+	// Turn 3 — 1M completion @ the retired V4-Flash id (also
+	// Flash-billed) = $1.20. Cumulative = 3.60.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
-		deepseek.ModelV4Flash, pricing.TierStandard,
+		"deepseek-v4-flash", pricing.TierStandard,
 	)
 	if got := tr.CumulativeCost(); got < 3.599 || got > 3.601 {
 		t.Errorf("after retired V4-Flash turn: cost = %v, want ≈3.60", got)
@@ -434,7 +433,7 @@ func TestTracker_AdoptChild_DoubleCountAfterResumePanics(t *testing.T) {
 	parent.SetBase(deepseek.Usage{
 		PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100,
 		PromptCacheHitTokens: 800, PromptCacheMissTokens: 200,
-	}, deepseek.ModelV4Flash, pricing.TierStandard)
+	}, deepseek.ModelV41Flash, pricing.TierStandard)
 
 	// Simulate a child Tracker that has been restored from disk
 	// (or, more likely in practice, a buggy call site that recycles
@@ -456,12 +455,12 @@ func TestTracker_AdoptChild_DoubleCountAfterResumePanics(t *testing.T) {
 // accounting that the parent's baseUsage already encompasses.
 func TestTracker_AdoptChild_DoubleCountGuardCoversChildBase(t *testing.T) {
 	parent := New()
-	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV4Flash, pricing.TierStandard)
+	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV41Flash, pricing.TierStandard)
 
 	// Child has SetBase but no Record — still a "non-fresh" child
 	// per the G2 contract.
 	child := New()
-	child.SetBase(deepseek.Usage{TotalTokens: 50}, deepseek.ModelV4Flash, pricing.TierStandard)
+	child.SetBase(deepseek.Usage{TotalTokens: 50}, deepseek.ModelV41Flash, pricing.TierStandard)
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -478,7 +477,7 @@ func TestTracker_AdoptChild_DoubleCountGuardCoversChildBase(t *testing.T) {
 // the documented, correct flow and must succeed.
 func TestTracker_AdoptChild_FreshChildAfterResumeOK(t *testing.T) {
 	parent := New()
-	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV4Flash, pricing.TierStandard)
+	parent.SetBase(deepseek.Usage{TotalTokens: 1000}, deepseek.ModelV41Flash, pricing.TierStandard)
 
 	child := New() // fresh — what subagent.Manager.Spawn always passes
 	parent.AdoptChild(child)

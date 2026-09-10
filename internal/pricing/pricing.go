@@ -42,40 +42,15 @@ type ModelPricing struct {
 //
 //	V4.1-Flash: $0.30 miss · $0.006 hit · $1.20 output (peak, per 1M tokens)
 //
-// Off-peak is exactly half of these. The retired V4 ids are ALL routed
-// to V4.1 Flash server-side and billed at Flash prices
-// (deepseek-v4-flash / deepseek-v4-flash-vision-exp since launch;
-// deepseek-v4-pro after 2026-09-14 12:00 CST), so their entries map to
-// the Flash card — between 2026-09-10 and the Pro cutover a live Pro
-// session's displayed cost under-reports for those few days rather
-// than over-reporting forever afterwards. The legacy deepseek-chat /
-// deepseek-reasoner aliases were removed server-side on 2026-07-24,
-// and unknown model names fall back to V4.1-Flash rates via the
-// fallback path below.
+// Off-peak is exactly half of these. deepseek-flash is the only live
+// id; the retired V4 ids (deepseek-v4-flash / -pro /
+// -flash-vision-exp) are server-routed to V4.1 Flash and billed at
+// Flash prices, which is exactly what the unknown-model fallback
+// below charges them — no per-id entries needed. The legacy
+// deepseek-chat / deepseek-reasoner aliases were removed server-side
+// on 2026-07-24.
 var standardRates = map[string]ModelPricing{
 	deepseek.ModelV41Flash: {
-		InputMissPerMTok: 0.30,
-		InputHitPerMTok:  0.006,
-		OutputPerMTok:    1.20,
-	},
-	// Routed to V4.1 Flash, billed at Flash prices.
-	deepseek.ModelV4Flash: {
-		InputMissPerMTok: 0.30,
-		InputHitPerMTok:  0.006,
-		OutputPerMTok:    1.20,
-	},
-	// Retired 2026-09-14 12:00 CST; routed to V4.1 Flash at Flash
-	// prices until a V4.1 Pro lands.
-	deepseek.ModelV4Pro: {
-		InputMissPerMTok: 0.30,
-		InputHitPerMTok:  0.006,
-		OutputPerMTok:    1.20,
-	},
-	// Superseded by V4.1 Flash's native vision; routed + billed as
-	// Flash. Each image normalises to ≤384 prompt tokens regardless of
-	// original size, so image cost flows through the existing
-	// prompt-token accounting untouched (feature-vision §四).
-	deepseek.ModelV4FlashVisionExp: {
 		InputMissPerMTok: 0.30,
 		InputHitPerMTok:  0.006,
 		OutputPerMTok:    1.20,
@@ -116,8 +91,9 @@ func CurrentTier(now time.Time) Tier {
 }
 
 // PricingFor returns the per-token rate card for a model+tier. Unknown
-// models fall back to V4.1-Flash rates (the card every routed legacy
-// id bills at anyway).
+// models fall back to V4.1-Flash rates — which is also the card the
+// server bills the retired V4 ids at, so legacy sessions price
+// correctly without their own entries.
 func PricingFor(model string, tier Tier) ModelPricing {
 	p, ok := standardRates[model]
 	if !ok {

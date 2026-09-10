@@ -104,7 +104,7 @@ func newHookedAgent(t *testing.T, rec *recordingHook, toolReply string) (*Agent,
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 		Hooks:  hreg,
 	})
@@ -224,7 +224,7 @@ func TestAgent_PreToolUse_DenyShortCircuitsExecution(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 		Hooks:  hreg,
 	})
@@ -286,7 +286,7 @@ func TestAgent_PreToolUse_ArgsRewriteReachesTool(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 		Hooks:  hreg,
 	})
@@ -322,7 +322,7 @@ func TestAgent_NilHooksRunsCleanly(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 		// Hooks: nil — must not panic
 	})

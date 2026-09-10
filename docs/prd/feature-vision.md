@@ -3,7 +3,7 @@
 **所属版本**：v0.9.x（暂定）· 柱 Q 输入管道的原生视觉延伸
 **前置阅读**：[`feature-image-ocr.md`](feature-image-ocr.md)（柱 Q —— 本特性迁移复用其采集/检测管道，并下线其 OCR 出口）、[`feature-image-paste.md`](feature-image-paste.md)（贴图 → 临时 PNG → `@引用`，已交付 .1/.2/.3 核心）、[`vision.md`](vision.md)（北向星 §视觉闭环）、AGENTS.md「Token & prefix-cache constraints」
 **状态**：🚀 **已交付（2026-08-22）**。M-V.0 ~ M-V.3 全部实施，`go vet` + `go test ./...` 全绿，真 API smoke 双向验证（vision 模型读出图中文字 "SEEK VISION 42"；非 vision 模型收到切模型提示并转告用户）。§五 各里程碑标 ✅ + 落地处；M-V.4（Files API / 二线透传 / 工具产图）为后续储备。
-**GA 更新（2026-09-10）**：DeepSeek 发布 V4.1 Flash（`deepseek-flash`），**视觉原生并入默认模型**；`deepseek-v4-flash-vision-exp` 随之退役（服务端路由到 V4.1 Flash，仍收图，仍按 Flash 价计费）。seek 侧 `IsVisionModel` 增列 `deepseek-flash`、切模型提示目标改为 `deepseek-flash`、费率/预算表全线切 V4.1 卡——本文的"切视觉模型"步骤自此仅对显式非视觉模型会话（二线 provider 等）仍有意义，默认会话开箱即视觉。
+**GA 更新（2026-09-10）**：DeepSeek 发布 V4.1 Flash（`deepseek-flash`），**视觉原生并入默认模型**；`deepseek-v4-flash-vision-exp` 随之退役。seek 侧已把模型注册表统一收敛到 `deepseek-flash` 单个 id（常量、`IsVisionModel`、`/model` 选择器、费率、预算），切模型提示目标同步改为 `deepseek-flash`——本文的"切视觉模型"步骤自此仅对显式非视觉模型会话（二线 provider 等）仍有意义，默认会话开箱即视觉。旧名一律按未知模型退化（计价走 Flash 卡、预算 128K、历史图片丢弃），`/model deepseek-flash` 可恢复。
 **触发起因**：DeepSeek 于 **2026-08-21** 发布 `deepseek-v4-flash-vision-exp`——DeepSeek API 平台首个 agent 级视觉模型（文本能力对齐 V4-Flash，Terminal Bench 2.1 **83.9**，多模态 agent 接近 Opus-4.8；每图封顶 384 token 按 Flash 价计）。官方公告 [news260821](https://api-docs.deepseek.com/news/news260821/)。
 **估时**：M-V.0 ~ M-V.3 ≈ **2.5–4 天**（含柱 Q 下线）；M-V.4 后续储备。
 

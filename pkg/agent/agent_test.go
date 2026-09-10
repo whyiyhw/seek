@@ -111,7 +111,7 @@ func TestAgent_ToolCallFlow(t *testing.T) {
 
 	ag, err := New(Config{
 		Client:       deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
-		Model:        deepseek.ModelV4Flash,
+		Model:        deepseek.ModelV41Flash,
 		SystemPrompt: "sys",
 		Tools:        reg,
 	})
@@ -312,7 +312,7 @@ func TestAgent_PreservesReasoningContentOnToolCallTurns(t *testing.T) {
 	reg := tools.New().Add(&stubTool{name: "stub", schema: `{"type":"object"}`, reply: "ok"})
 	ag, _ := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Pro,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 		InitialMessages: []deepseek.Message{
 			// Plain assistant turn (no tool_calls) with reasoning — should
@@ -375,14 +375,14 @@ func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
 		model       string
 		wantEnabled bool
 	}{
-		{deepseek.ModelV4Pro, true},
 		{deepseek.ModelV41Flash, true},
 		// "" resolves to the ModelV41Flash default at construction —
 		// thinking travels with the default.
 		{"", true},
-		// Retired V4-Flash omits the field and inherits the routed
-		// backend's default; custom ids stay untouched.
-		{deepseek.ModelV4Flash, false},
+		// Retired ids (server-routed to V4.1 Flash) and custom names
+		// omit the field and inherit the backend's default.
+		{"deepseek-v4-pro", false},
+		{"deepseek-v4-flash", false},
 		{"some-future-custom-model", false},
 	}
 	for _, c := range cases {
@@ -505,7 +505,7 @@ func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
 
 	ag, _ := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 		Tools:  reg,
 	})
 	for ev := range ag.Prompt(context.Background(), "go") {
@@ -564,9 +564,9 @@ func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
 //   - Effort="" sends no reasoning_effort and only enables Thinking when
 //     ShouldEnableThinking(Model) returns true (the old behaviour).
 //   - Effort="high"/"max" forces Thinking on AND sets reasoning_effort —
-//     even on V4-Flash, which is normally non-reasoning. The explicit
-//     user intent ("I want this turn to think harder") trumps the
-//     model's stock default.
+//     even on a model that wouldn't think on its own (here: a retired
+//     id, i.e. an unknown model). The explicit user intent ("I want
+//     this turn to think harder") trumps the model's stock default.
 //   - SetEffort changes the value visible on the very next prompt,
 //     without rebuilding the agent.
 func TestAgent_EffortOverridesThinking(t *testing.T) {
@@ -578,11 +578,11 @@ func TestAgent_EffortOverridesThinking(t *testing.T) {
 		wantThinking      bool
 		wantReasoningSent string // "" means field absent
 	}{
-		{"empty effort on flash → no thinking", deepseek.ModelV4Flash, "", false, ""},
-		{"empty effort on pro → thinking on, no effort", deepseek.ModelV4Pro, "", true, ""},
-		{"high on flash → thinking on, effort=high", deepseek.ModelV4Flash, "high", true, "high"},
-		{"max on flash → thinking on, effort=max", deepseek.ModelV4Flash, "max", true, "max"},
-		{"max on pro → thinking on, effort=max", deepseek.ModelV4Pro, "max", true, "max"},
+		{"empty effort on flash → thinking on, no effort", deepseek.ModelV41Flash, "", true, ""},
+		{"empty effort on retired id → no thinking (unknown model)", "deepseek-v4-pro", "", false, ""},
+		{"high on flash → thinking on, effort=high", deepseek.ModelV41Flash, "high", true, "high"},
+		{"max on flash → thinking on, effort=max", deepseek.ModelV41Flash, "max", true, "max"},
+		{"max on retired id → effort still forces thinking", "deepseek-v4-pro", "max", true, "max"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -652,7 +652,7 @@ func TestAgent_SetEffortVisibleNextPrompt(t *testing.T) {
 
 	ag, _ := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 	})
 	for range ag.Prompt(context.Background(), "hi") {
 	}
@@ -1638,7 +1638,7 @@ func TestAgent_SetModeLabelVisibleNextPrompt(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

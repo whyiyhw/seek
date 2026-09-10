@@ -10,15 +10,16 @@ import (
 func TestIsVisionModel(t *testing.T) {
 	cases := map[string]bool{
 		// V4.1 Flash (2026-09-10) made vision native on the default
-		// model; the retired -Exp id stays allow-listed because the
-		// routed backend takes images and old sessions carry it.
-		ModelV41Flash:         true,
-		ModelV4FlashVisionExp: true,
-		ModelV4Flash:          false,
-		ModelV4Pro:            false,
-		"deepseek-v4-flash-vision": false, // never-shipped GA name — NOT matched
-		"vision":                   false, // substring must never match
-		"":                         false,
+		// model. The retired ids — including the old -Exp vision
+		// build — are plain unknowns now: NOT matched, exactly like
+		// any custom model string.
+		ModelV41Flash:               true,
+		"deepseek-v4-flash-vision-exp": false,
+		"deepseek-v4-flash":            false,
+		"deepseek-v4-pro":              false,
+		"deepseek-v4-flash-vision":     false, // never-shipped GA name — NOT matched
+		"vision":                       false, // substring must never match
+		"":                             false,
 	}
 	for model, want := range cases {
 		if got := IsVisionModel(model); got != want {
@@ -98,7 +99,7 @@ func TestMessage_SessionForm_Bytes(t *testing.T) {
 
 func TestChatRequest_WireForm_Images(t *testing.T) {
 	req := &ChatRequest{
-		Model: ModelV4FlashVisionExp,
+		Model: ModelV41Flash,
 		Messages: []Message{
 			{Role: RoleSystem, Content: "sys"},
 			{
@@ -162,7 +163,7 @@ func TestChatRequest_WireForm_Images(t *testing.T) {
 // loudly instead of silently dropping a user-attached image.
 func TestChatRequest_UnresolvedImageErrors(t *testing.T) {
 	req := &ChatRequest{
-		Model:    ModelV4FlashVisionExp,
+		Model:    ModelV41Flash,
 		Messages: []Message{{Role: RoleUser, Content: "x", Images: []ImagePart{{Asset: "a.png"}}}},
 	}
 	_, err := json.Marshal(req)

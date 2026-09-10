@@ -11,7 +11,7 @@ seek 支持把图片**原样**发给多模态模型：剪贴板截图、本地�
 - **粘贴**：TUI 里 `Ctrl+V` 粘贴剪贴板图片（截图 / 复制的图），输入框出现 `📋 image` 标记，直接回车发送。
 - **引用**：在输入里写已存在的图片路径，`@err.png` 或裸路径均可（stat-gated：只有真实存在的文件会被识别）。
 
-旧会话注意：`-resume` 一个模型为 `deepseek-v4-flash-vision-exp` 的历史会话照常收图（该 id 已退役，服务端路由到 V4.1 Flash，仍接受图片）。
+旧会话注意：seek 的模型注册表只认 `deepseek-flash` 一个 id。`-resume` 一个模型为旧名(`deepseek-v4-flash-vision-exp` 等)的历史会话时，该名字按未知模型处理——历史里的图片会被丢弃(in-band 标记保留，transcript 仍自描述)，预算走 128K 保守默认，计价走 Flash 卡(与服务端实际计费一致)。想恢复图片输入，会话里执行 `/model deepseek-flash` 即可。
 
 ## 行为细节
 

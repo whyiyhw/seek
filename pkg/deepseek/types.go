@@ -10,27 +10,17 @@ const (
 	// (server default: enabled — see ShouldEnableThinking). 1M context
 	// / 384K max output. Pricing effective 2026-09-10 12:00 CST — see
 	// internal/pricing.
+	//
+	// The whole V4 lineup retired with this launch: the server still
+	// accepts deepseek-v4-flash / deepseek-v4-pro /
+	// deepseek-v4-flash-vision-exp, routing them to V4.1 Flash and
+	// billing at Flash prices — but seek keeps NO registry entries for
+	// them. Session files carrying a retired id degrade to "unknown
+	// model" handling: no Thinking flag, 128K budget default, and
+	// Flash-card pricing via the pricing fallback (the numbers the
+	// server actually bills anyway). Same precedent as the
+	// deepseek-chat / deepseek-reasoner removal on 2026-07-24.
 	ModelV41Flash = "deepseek-flash"
-
-	// V4 lineup (legacy — retired server-side, names accepted for
-	// compatibility). deepseek-v4-flash and deepseek-v4-flash-vision-exp
-	// are routed to V4.1 Flash and billed at Flash prices; V4 Pro goes
-	// the same way after 2026-09-14 12:00 CST (until a V4.1 Pro lands).
-	// Session files record these ids, so the constants — and their
-	// budget/pricing entries — stay: resuming an old session must keep
-	// working. The legacy deepseek-chat / deepseek-reasoner aliases
-	// were removed earlier, server-side on 2026-07-24 — those fall back
-	// to "unknown model" handling (no thinking, budget/pricing
-	// defaults) rather than failing to load.
-	ModelV4Flash = "deepseek-v4-flash"
-	ModelV4Pro   = "deepseek-v4-pro"
-
-	// ModelV4FlashVisionExp was the experimental multimodal (vision)
-	// build, released 2026-08-21; each image normalises to ≤384 prompt
-	// tokens. Superseded 2026-09-10 by V4.1 Flash's native vision.
-	// IsVisionModel still accepts it (the routed backend takes images,
-	// and old sessions carry the id). See docs/prd/feature-vision.md.
-	ModelV4FlashVisionExp = "deepseek-v4-flash-vision-exp"
 
 	RoleSystem    = "system"
 	RoleUser      = "user"
@@ -149,24 +139,20 @@ type ThinkingMode struct {
 // thinking-mode semantics and should therefore receive
 // Thinking.Type="enabled" when the agent constructs a ChatRequest.
 //
-// Returns true for ModelV41Flash and ModelV4Pro. V4.1 ships with
-// thinking as the SERVER DEFAULT for both tiers (stated on the
-// 2026-09-10 pricing page; the same endpoint-level default burned the
-// suggested-reply side channel before it pinned disabled — see
-// docs/pitfalls.md "V4-Flash prediction returns empty content…").
-// Sending the flag explicitly keeps the wire request honest about the
-// behaviour it will get instead of relying on an undocumented default.
+// Returns true for ModelV41Flash — V4.1 ships with thinking as the
+// SERVER DEFAULT (stated on the 2026-09-10 pricing page; the same
+// endpoint-level default burned the suggested-reply side channel
+// before it pinned disabled — see docs/pitfalls.md "V4-Flash
+// prediction returns empty content…"). Sending the flag explicitly
+// keeps the wire request honest about the behaviour it will get
+// instead of relying on an undocumented default.
 //
-// Returns false for the retired ModelV4Flash / ModelV4FlashVisionExp
-// and any unknown / custom model name — those omit the field and
-// inherit whatever default the routed backend applies; callers who
-// want a say must opt in explicitly via ChatRequest.Thinking.
+// Returns false for any retired / unknown / custom model name — those
+// omit the field and inherit whatever default the routed backend
+// applies; callers who want a say must opt in explicitly via
+// ChatRequest.Thinking.
 func ShouldEnableThinking(model string) bool {
-	switch model {
-	case ModelV41Flash, ModelV4Pro:
-		return true
-	}
-	return false
+	return model == ModelV41Flash
 }
 
 type StreamOptions struct {

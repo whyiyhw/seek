@@ -615,7 +615,7 @@ func TestSaveLoad_PreservesGoal(t *testing.T) {
 func TestSaveLoad_Roundtrip_Images(t *testing.T) {
 	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
 	store := newStoreIn(t)
-	sess := New(deepseek.ModelV4FlashVisionExp, "/tmp", "sys", false, false)
+	sess := New(deepseek.ModelV41Flash, "/tmp", "sys", false, false)
 	sess.Messages = []deepseek.Message{
 		{Role: deepseek.RoleUser, Content: "look\n\n[image: shot.png — attached natively · 3x2 · 1.2 KiB]",
 			Images: []deepseek.ImagePart{{Asset: "ab12cd34ef56.png"}}},

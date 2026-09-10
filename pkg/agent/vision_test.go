@@ -38,7 +38,7 @@ func TestPrompt_Images_ResolvedOnWire(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4FlashVisionExp,
+		Model:  deepseek.ModelV41Flash,
 		ImageLoader: func(asset string) (string, error) {
 			return "data:image/png;base64," + asset, nil
 		},
@@ -127,7 +127,7 @@ func TestPrompt_MissingAsset_DegradesInBand(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4FlashVisionExp,
+		Model:  deepseek.ModelV41Flash,
 		ImageLoader: func(asset string) (string, error) {
 			return "", errors.New("asset gone")
 		},
@@ -163,7 +163,7 @@ func TestSummarise_StripsImages(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4FlashVisionExp,
+		Model:  deepseek.ModelV41Flash,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func TestPrompt_NonVisionModel_StripsHistoryImages(t *testing.T) {
 
 	ag, err := New(Config{
 		Client: deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
-		Model:  deepseek.ModelV4Flash, // non-vision, as if /model switched
+		Model:  "deepseek-v4-flash", // retired id = non-vision unknown, as if /model switched
 		ImageLoader: func(asset string) (string, error) {
 			return "data:image/png;base64," + asset, nil
 		},

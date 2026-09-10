@@ -39,7 +39,7 @@ func makeAgent(t *testing.T, backendURL string) *agent.Agent {
 	t.Helper()
 	ag, err := agent.New(agent.Config{
 		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(backendURL)),
-		Model:  deepseek.ModelV4Flash,
+		Model:  deepseek.ModelV41Flash,
 	})
 	if err != nil {
 		t.Fatalf("agent.New: %v", err)
@@ -76,7 +76,7 @@ func TestServerInfo(t *testing.T) {
 	fakeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
 	defer fakeSrv.Close()
 
-	srv := New(makeAgent(t, fakeSrv.URL), cache.New(), nil, nil, "deepseek-v4-flash", false)
+	srv := New(makeAgent(t, fakeSrv.URL), cache.New(), nil, nil, "deepseek-flash", false)
 	lines := serve(t, srv, `{"jsonrpc":"2.0","id":1,"method":"agent/info"}`+"\n")
 
 	if len(lines) != 1 {
@@ -84,14 +84,14 @@ func TestServerInfo(t *testing.T) {
 	}
 	got := lines[0]
 	if got["id"] != float64(1) {
-		t.Errorf("id = %v, want 1", got["id"])
+		t.Errorf("id = %v, want 1", got)
 	}
 	result, ok := got["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("result not a map: %v", got["result"])
 	}
-	if result["model"] != "deepseek-v4-flash" {
-		t.Errorf("model = %v, want deepseek-v4-flash", result["model"])
+	if result["model"] != "deepseek-flash" {
+		t.Errorf("model = %v, want deepseek-flash", result["model"])
 	}
 	if result["yolo"] != false {
 		t.Errorf("yolo = %v, want false", result["yolo"])

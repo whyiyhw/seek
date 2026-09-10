@@ -75,11 +75,13 @@ func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 }
 
 // TestPricingFor_RetiredIdsBilledAtFlashCard pins the V4.1 routing
-// contract: the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp
-// ids (and deepseek-v4-pro after its 2026-09-14 retirement) are served
-// by V4.1 Flash and billed at Flash prices — at BOTH tiers.
+// contract: the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp /
+// deepseek-v4-pro ids are served by V4.1 Flash and billed at Flash
+// prices — at BOTH tiers. They carry no registry entries, so this is
+// literally the unknown-model fallback doing the vendor's billing for
+// it.
 func TestPricingFor_RetiredIdsBilledAtFlashCard(t *testing.T) {
-	for _, m := range []string{deepseek.ModelV4Flash, deepseek.ModelV4Pro, deepseek.ModelV4FlashVisionExp} {
+	for _, m := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
 		for _, tier := range []Tier{TierStandard, TierOffPeak} {
 			if p, want := PricingFor(m, tier), PricingFor(deepseek.ModelV41Flash, tier); p != want {
 				t.Errorf("PricingFor(%s, %v) = %+v, want the V4.1-Flash card %+v", m, tier, p, want)

@@ -19,16 +19,11 @@ package budget
 // aliases were removed server-side on 2026-07-24; old session files
 // carrying those names now hit the Default fallback below.
 var contextLimits = map[string]int{
-	// DeepSeek — V4.1 Flash is the current lineup (1M context since the
-	// V4 launch). The V4 ids are retired server-side but still routed
-	// to V4.1 Flash with the same 1M window; keep them listed so old
-	// sessions resume with an accurate budget. The legacy
-	// deepseek-chat / deepseek-reasoner aliases (removed 2026-07-24)
-	// hit the Default fallback below.
-	"deepseek-flash":                1_000_000,
-	"deepseek-v4-flash":             1_000_000,
-	"deepseek-v4-pro":               1_000_000,
-	"deepseek-v4-flash-vision-exp":  1_000_000,
+	// DeepSeek — V4.1 Flash is the one live id (1M context since the
+	// V4 launch). The retired V4 ids are unknown here and hit the
+	// Default fallback below; the legacy deepseek-chat /
+	// deepseek-reasoner aliases (removed 2026-07-24) do too.
+	"deepseek-flash": 1_000_000,
 	// M6 additions (already declared so the surface doesn't shift
 	// when the second-tier providers light up).
 	"claude-3-5-sonnet-20241022": 200_000,

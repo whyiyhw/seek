@@ -108,13 +108,13 @@ func TestBuildACPPromptText(t *testing.T) {
 		return buildACPPromptText(model, acp.PromptParams{Prompt: blocks}, vroute)
 	}
 
-	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("hi")); got != "hi" || parts != nil {
+	if got, parts := build(deepseek.ModelV41Flash, txt("hi")); got != "hi" || parts != nil {
 		t.Fatalf("text-only = %q %v", got, parts)
 	}
 
 	// Vision model: image attached natively, part carries the stored
 	// asset name, marker names the display name.
-	got, parts := build(deepseek.ModelV4FlashVisionExp, txt("what is this"), img(png, "image/png"))
+	got, parts := build(deepseek.ModelV41Flash, txt("what is this"), img(png, "image/png"))
 	if !strings.Contains(got, "what is this") ||
 		!strings.Contains(got, "[image: pasted-image.png — attached natively") {
 		t.Fatalf("text+image = %q", got)
@@ -126,18 +126,19 @@ func TestBuildACPPromptText(t *testing.T) {
 		t.Fatalf("asset not stored: %v", err)
 	}
 
-	// Non-vision model: switch-model note, no parts, nothing stored.
-	got, parts = build(deepseek.ModelV4Flash, txt("look"), img(png, "image/png"))
+	// Non-vision model (retired id = plain unknown): switch-model
+	// note, no parts, nothing stored.
+	got, parts = build("deepseek-v4-pro", txt("look"), img(png, "image/png"))
 	if !strings.Contains(got, "[image: pasted-image.png — 当前模型不支持图片输入") || len(parts) != 0 {
 		t.Fatalf("non-vision = %q %v", got, parts)
 	}
 
 	// Corrupt base64 → that block is skipped, text preserved.
-	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("keep"), img("!!!not-base64!!!", "image/png")); got != "keep" || parts != nil {
+	if got, parts := build(deepseek.ModelV41Flash, txt("keep"), img("!!!not-base64!!!", "image/png")); got != "keep" || parts != nil {
 		t.Fatalf("corrupt base64 must be skipped: %q %v", got, parts)
 	}
 	// Non-image mimeType → skipped.
-	if got, parts := build(deepseek.ModelV4FlashVisionExp, txt("keep"), img(png, "application/pdf")); got != "keep" || parts != nil {
+	if got, parts := build(deepseek.ModelV41Flash, txt("keep"), img(png, "application/pdf")); got != "keep" || parts != nil {
 		t.Fatalf("non-image mime must be skipped: %q %v", got, parts)
 	}
 }

@@ -13,9 +13,7 @@ seek 维护了一份各模型的上下文窗口大小硬编码表（来源：各
 | 模型 | 上下文窗口 |
 |------|-----------|
 | `deepseek-flash` | 1,000,000 |
-| `deepseek-v4-flash`（退役，路由到 V4.1 Flash） | 1,000,000 |
-| `deepseek-v4-pro`（退役，路由到 V4.1 Flash） | 1,000,000 |
-| `deepseek-v4-flash-vision-exp`（退役，路由到 V4.1 Flash） | 1,000,000 |
+| 旧名（`deepseek-v4-*`，已退役） | 128,000（按未知模型的保守默认值） |
 | `claude-3-5-sonnet-20241022` | 200,000 |
 | `claude-sonnet-4-20250514` | 200,000 |
 | `gpt-4o` | 128,000 |

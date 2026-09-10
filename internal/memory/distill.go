@@ -222,10 +222,9 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 		}),
 	}
 	// Distillation is a single-shot reasoning call — opt the model into
-	// thinking mode explicitly. V4 models only think when asked via the
-	// Thinking parameter; the retired deepseek-reasoner alias used to
-	// provide this implicitly.
-	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
+	// thinking mode explicitly rather than inheriting whatever the
+	// routed backend defaults to.
+	if deepseek.ShouldEnableThinking(model) {
 		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}
 
@@ -318,7 +317,10 @@ func (d *Distiller) Filter(ctx context.Context, existing []Entry, candidate Entr
 			{Role: deepseek.RoleUser, Content: sb.String()},
 		},
 	}
-	if deepseek.ShouldEnableThinking(model) || model == deepseek.ModelV4Flash {
+	// Filter is a single-shot reasoning call — opt into thinking
+	// explicitly rather than inheriting whatever the routed backend
+	// defaults to.
+	if deepseek.ShouldEnableThinking(model) {
 		req.Thinking = &deepseek.ThinkingMode{Type: "enabled"}
 	}
 

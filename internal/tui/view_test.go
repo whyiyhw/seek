@@ -98,10 +98,10 @@ func TestRenderTurnFooter_Format(t *testing.T) {
 		PromptCacheHitTokens:  82000,
 		PromptCacheMissTokens: 17600,
 		CompletionTokens:      1700,
-	}, deepseek.ModelV4Flash, pricing.TierStandard)
+	}, deepseek.ModelV41Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
-			Model:   deepseek.ModelV4Flash,
+			Model:   deepseek.ModelV41Flash,
 			Tracker: tracker,
 		},
 		turns:     3,
@@ -129,10 +129,10 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 		PromptCacheHitTokens:  0,
 		PromptCacheMissTokens: 5000,
 		CompletionTokens:      200,
-	}, deepseek.ModelV4Flash, pricing.TierStandard)
+	}, deepseek.ModelV41Flash, pricing.TierStandard)
 	m := Model{
 		opts: Options{
-			Model:   deepseek.ModelV4Flash,
+			Model:   deepseek.ModelV41Flash,
 			Tracker: tracker,
 		},
 		turns:     1,
@@ -153,7 +153,7 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 // so each checkpoint in history says how long that turn took.
 func TestRenderTurnFooter_ShowsDuration(t *testing.T) {
 	m := Model{
-		opts: Options{Tracker: cache.New(), Model: deepseek.ModelV4Flash},
+		opts: Options{Tracker: cache.New(), Model: deepseek.ModelV41Flash},
 		turns: 1,
 	}
 	// Zero duration → no time segment; the footer ends at the cost.
