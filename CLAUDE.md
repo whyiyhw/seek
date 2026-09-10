@@ -22,7 +22,7 @@ What does **not** count:
 - Routine typos, missing imports, version bumps, refactors.
 - Anything obvious from reading the code or running `go vet`.
 
-If you're not sure: log it. Cheap to add, expensive to recover from memory months later.
+If you're not sure: log it — but only for pitfalls produced by the change at hand; if you stumble on something unrelated mid-task, name it in your final message instead of expanding the diff, and let the user decide whether it deserves an entry. Cheap to add, expensive to recover from memory months later.
 
 ## Architecture (non-negotiable)
 
@@ -30,6 +30,7 @@ If you're not sure: log it. Cheap to add, expensive to recover from memory month
 - **`pkg/deepseek` must not import `pkg/llm`** (CI lint enforces this — see `.github/workflows/ci.yml`). The whole point of the split is that DeepSeek-specific optimisations don't get lowered into a generic interface.
 - **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state.
 - **Plan-mode subsystem (v2 + v2.x)**: confirmation-gated workflow `analyze → propose → execute → adjust → report`. Driven by the `propose` tool (`internal/tools/propose/`) and progress-tracked by the `plan` tool (`internal/tools/plan/`). Substate state machine lives in `permission.Policy` (Mode / preApproved flag) + agent mode reminder + TUI status bar; transcript event-sourcing reconstructs state on `seek -resume` (see `plan/reconstruct.go`). Plan-approval artifacts (write-once markdown snapshots) land in `~/.seek/projects/<id>/plans/` via `plan/artifact.go`. Full design + status table in [`docs/prd/feature-plan-mode.md`](docs/prd/feature-plan-mode.md).
+- **i18n (view layer only)**: message catalogue in `internal/i18n` (stdlib map-per-language, English terminal fallback). Localises human-facing prose ONLY — LLM-visible strings (tool results, agent errors) and the status bar stay English by design (prefix-cache byte stability + width-oracle discipline); see [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md). Language resolves ONCE per process at startup (`SEEK_LANG` > config `language` > `LC_ALL`/`LANG` > en); `/lang` is the only sanctioned runtime swap. When adding user-facing prose, route it through `i18n.T` and add the key to EVERY catalogue (the parity test enforces this).
 - See [`docs/prd/`](docs/prd/) for the full PRD series: v0 initial, v1 Memory, v2 Skill lifecycle, plus standalone feature PRDs (`feature-plan-mode.md`, `feature-webfetch.md`, `feature-permission-refactor.md`, `feature-active-memory.md`, `feature-mcp-client.md`, …).
 
 ## Tool usage workflow (load-bearing)
@@ -41,12 +42,14 @@ When exploring code, follow this order — skipping steps costs tokens and break
 3. `read` accepts an optional `limit` parameter (default 200, max 200 — values above error; small files ≤ 32 KiB are always returned whole). Use `offset=N` to page through larger files.
 4. `grep` caps at 20 matches by default (`max_matches` can be raised, but rarely should be).
 
-Never read a whole file to answer a question you could answer with grep. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
+Never page through a whole file to answer a question grep can answer — small files (≤ 32 KiB) come back whole regardless; the rule targets needless full reads of larger files. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
 
 5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
 6. **Git queries: one per git-tool call** — never chain, never bash read-only git; several queries = parallel calls. Rationale: `docs/test-plan-git-tool-shape.md`.
 
 ## Tool descriptions: the highest-leverage behavioural lever
+
+> **Audience: maintainers, not the running agent.** This section is development guidance for tuning the tool descriptions shipped in this repo — it is not a behavioural rule, and it does not relax any instruction elsewhere in this file.
 
 Tool descriptions are the single most effective place to shape model behaviour: **they are always sent to the API as part of every tool schema**. Unlike project instructions (which are system-prompt territory and may be skimmed or ignored by weaker/faster models), tool descriptions travel with the JSON schema — the model MUST read them to construct a valid tool call.
 
@@ -67,8 +70,8 @@ The two files share the same pulse but are allowed to diverge where the tooling 
 
 - **CLAUDE.md** can leverage Claude Code-specific capabilities (permission model, tool names, workflow patterns) without translating them into seek's vocabulary first.
 - **AGENTS.md** may express the same behaviours in seek-specific terms (the eval framework, `grep`+`read` workflow, `internal/tools/` layout, plan-mode FSM).
-- **Sync rule**: keep structural content (Architecture, Permission model, Code conventions) identical. Behavioural guidance (Tool usage workflow, Tool descriptions) can differ in phrasing to match the host agent's vocabulary.
-- **When editing one, edit the other** — but don't force byte-identical copies. The goal is that both agents arrive at the same behaviour, not that they read the same text.
+- **Sync rule**: structural content (Architecture / Permission model / Code conventions) must stay identical — change it in both files in the same edit. Behavioural sections (Tool usage workflow, Tool descriptions, …) are maintained per-host: update only the file whose host agent's behaviour you're changing, unless you intend the new behaviour for both.
+- **Not byte-identical by design**: the goal is that both agents arrive at the same behaviour, not that they read the same text — translate the host-specific vocabulary (seek tools vs Claude Code equivalents) rather than copying verbatim.
 
 ## Token & prefix-cache constraints (non-negotiable)
 
@@ -138,17 +141,19 @@ Tests are how seek stays trustworthy. Treat coverage of failure paths as part of
 - **Concurrent access** — `-race` is on by default in CI; if a function can be hit concurrently, verify it
 - **Persistence round-trip + recovery** — write, reload, AND verify corrupt-state repair (see `session.Repair`)
 
-If one of these doesn't apply, fine. If you skipped a test for one that does, say why in the PR description. "Real-API behaviour only" is valid; "didn't have time" is not.
+If one of these doesn't apply, fine. If you skipped a test for one that does, say why in your final message (and in the PR description, if one is opened). "Real-API behaviour only" is valid; "didn't have time" is not.
 
-Coverage is a weak signal but 0% on a function is a strong one. Before claiming a feature done: `go test -cover ./...` and look at anything you touched that's not exercised.
+Coverage is a weak signal but 0% on a function is a strong one. Before claiming a feature done: `go test -race -cover ./...` and look at anything you touched that's not exercised.
 
 Procedurally:
-- `go test ./...` before every commit. CI runs `-race` on three OSes.
+- `go test -race ./...` before every commit — CI runs the same on three OSes.
+- If host permissions block bash, don't silently skip verification: say which tests remain unrun and ask the user to run them or switch modes.
 - Tests use `httptest` fake DeepSeek backends — no real API key required for the suite.
 - For real-API smokes, write the key to `.env` (gitignored) and source it; never put it on the command line.
 
 ## Commit messages
 
+- **Never commit unless the user explicitly asks.** Default flow: modify → review → the user commits. When asked to commit, run the tests first and include the trailers below.
 - Subject in conventional-commit style: `feat(M3): ...`, `fix(tui): ...`, `chore: ...`.
 - Body explains **why**, not what. The diff already shows what.
 - `Co-Authored-By: <model name> <noreply@anthropic.com>` trailer on AI-written commits.

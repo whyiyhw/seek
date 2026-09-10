@@ -18,6 +18,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/hookscli"
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
@@ -90,6 +91,10 @@ func allCommands() []command {
 		}, handler: cmdHooksCLI},
 		{names: []string{"/steer", "/s"}, usage: "/steer [text]", description: "Interrupt the assistant and send new instructions. Text arg submits immediately; bare command promotes the queued message to an interrupt.", handler: cmdSteer},
 		{names: []string{"/setup"}, usage: "/setup", description: "Re-run the API-key wizard. Saves to ~/.seek/config.json.", handler: cmdSetup},
+		// View-layer language switch (docs/prd/feature-i18n.md). Only
+		// prose the human reads follows it; LLM-visible strings and the
+		// status bar stay English by design.
+		{names: []string{"/lang"}, usage: "/lang [en|zh]", description: "Show or switch the interface language (view text only — model-facing text and the status bar stay English). Persists to ~/.seek/config.json; SEEK_LANG overrides per-launch.", handler: cmdLang},
 		{names: []string{"/diagnose"}, usage: "/diagnose", description: "Print a diagnostic report with version, OS, provider, config and session metadata — paste into bug reports.", handler: cmdDiagnose},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
 		// v3 柱 A checkpoint surface (PRD docs/prd/feature-checkpoint.md §4.2).
@@ -143,7 +148,7 @@ func dispatchCommand(m *Model, input string) (handled bool, cmd tea.Cmd) {
 		}
 	}
 
-	text := styleMuted.Render(fmt.Sprintf("unknown command %s — try /help", name))
+	text := styleMuted.Render(i18n.T("cmd.unknown", name))
 	return true, m.appendHistory(text)
 }
 
@@ -777,6 +782,33 @@ func cmdSetup(m *Model, _ string) cmdResult {
 	m.modelPickerOpen = true
 	m.pickerPurpose = "setup-provider"
 	return cmdResult{text: styleMuted.Render("setup: choose a provider (Tab/Enter to accept · Esc to cancel)")}
+}
+
+// cmdLang shows or switches the view-layer language. No args reports
+// the active language; `/lang <en|zh>` swaps the process-wide i18n
+// bundle and persists the choice to ~/.seek/config.json so the next
+// launch starts in it. Persisting is best-effort — a read-only HOME
+// downgrades to an in-session-only switch with a warning rather than
+// failing the command. LLM-visible text and the status bar are
+// deliberately out of scope (docs/prd/feature-i18n.md §1.2).
+func cmdLang(m *Model, args string) cmdResult {
+	if args == "" {
+		return cmdResult{text: styleMuted.Render(i18n.T("lang.status", i18n.Lang()))}
+	}
+	lang := i18n.Normalize(args)
+	if lang == "" {
+		return cmdResult{text: styleMuted.Render(i18n.T("lang.unsupported", args))}
+	}
+	i18n.SetDefault(i18n.New(lang))
+	cfg, err := config.Load()
+	if err == nil {
+		cfg.Language = lang
+		err = config.Save(cfg)
+	}
+	if err != nil {
+		return cmdResult{text: styleMuted.Render(i18n.T("lang.persist_failed", err))}
+	}
+	return cmdResult{text: styleMuted.Render(i18n.T("lang.switched", lang))}
 }
 
 // finishSetup is called by handleKey when the user presses Enter on

@@ -128,6 +128,8 @@ seek hooks      list / check / trust / audit
 
 Every subcommand is also `/<name>` in the TUI. TUI-only: `/plan` `/goal` `/steer` `/agents` `/worktrees` `/distill` `/code-review`. Full list: `/help`.
 
+**Interface language**: `/lang <en|zh>` switches the human-facing text (hints, notices, command feedback) and persists to `~/.seek/config.json`; `SEEK_LANG=zh seek` overrides per-launch; an unset config auto-detects from `LC_ALL`/`LANG`. Model-facing text and the status bar stay English by design — see [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md).
+
 ---
 
 ## Built for real, not a weekend build

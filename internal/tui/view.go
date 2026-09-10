@@ -12,6 +12,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/whyiyhw/seek/internal/askuser"
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/routines"
@@ -54,7 +55,7 @@ func (m Model) View() tea.View {
 	if !m.ready {
 		// Pre-WindowSizeMsg: minimal hint so the user doesn't see a
 		// blank screen if bubbletea takes a moment to size up.
-		return tea.NewView(styleMuted.Render("starting…") + "\n")
+		return tea.NewView(styleMuted.Render(i18n.T("view.starting")) + "\n")
 	}
 
 	var sb strings.Builder
@@ -99,7 +100,7 @@ func (m Model) View() tea.View {
 	if m.opts.ProviderName != "" {
 		banner := lipgloss.NewStyle().
 			Foreground(colourTool).
-			Render("⚠ Provider: " + m.opts.ProviderName + " — FIM / cache stats / Reasoner disabled")
+			Render(i18n.T("view.provider_banner", m.opts.ProviderName))
 		sb.WriteString(banner)
 		sb.WriteString("\n")
 	}
@@ -438,10 +439,10 @@ func (m Model) renderQueueHint() string {
 	switch {
 	case m.pendingSteerText != "":
 		preview := truncateOneLine(m.pendingSteerText, 60)
-		return styleMuted.Render("↪ steering: ") + styleMuted.Render(preview)
+		return styleMuted.Render(i18n.T("view.queue.steering")) + styleMuted.Render(preview)
 	case m.queuedText != "":
 		preview := truncateOneLine(m.queuedText, 60)
-		return styleMuted.Render("↰ queued: ") + styleMuted.Render(preview)
+		return styleMuted.Render(i18n.T("view.queue.queued")) + styleMuted.Render(preview)
 	}
 	return ""
 }
@@ -451,17 +452,17 @@ func (m Model) renderQueueHint() string {
 // knows the agent is alive during slow first-token or tool-gap windows.
 func (m Model) streamingLabel() string {
 	if m.streamStartTime.IsZero() {
-		return "thinking…"
+		return i18n.T("view.thinking")
 	}
 	elapsed := time.Since(m.streamStartTime)
 	if elapsed < time.Second {
-		return "thinking…"
+		return i18n.T("view.thinking")
 	}
 	s := int(elapsed.Seconds())
 	if s < 60 {
-		return fmt.Sprintf("thinking… %ds", s)
+		return i18n.T("view.thinking_s", s)
 	}
-	return fmt.Sprintf("thinking… %dm%ds", s/60, s%60)
+	return i18n.T("view.thinking_ms", s/60, s%60)
 }
 
 // renderPlanTaskList renders the fixed-position task list shown above
@@ -685,9 +686,9 @@ func (m Model) renderUserQuestion() string {
 	))
 	sb.WriteString("\n")
 
-	hint := "  ↑/↓ navigate · Enter accept · Esc cancel"
+	hint := i18n.T("menu.hint.simple")
 	if q.MultiSelect {
-		hint = "  ↑/↓ navigate · Space toggle · Enter confirm · Esc cancel"
+		hint = i18n.T("menu.hint.toggle")
 	}
 	sb.WriteString(styleMuted.Render(hint))
 	sb.WriteString("\n")

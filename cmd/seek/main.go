@@ -38,6 +38,7 @@ import (
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/hooksconfig"
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/keyscli"
 	"github.com/whyiyhw/seek/internal/lspclient"
@@ -1112,6 +1113,12 @@ func run() error {
 	// Read here rather than at the later config.Load() because the bash
 	// tool is a value type — options must be set before reg.Add copies it.
 	bashCfg, _ := config.Load()
+	// View-layer language: resolved ONCE here and stored as the i18n
+	// package default — the same per-session discipline as
+	// sysprompt.Header.Date (never recomputed per turn; /lang is the
+	// only sanctioned runtime swap). Reads SEEK_LANG > config >
+	// LC_ALL/LANG > en.
+	i18n.SetDefault(i18n.New(i18n.Resolve(bashCfg.Language)))
 	// Same load serves the read tool's limits (max_limit /
 	// whole_read_bytes).
 	readCfg := bashCfg

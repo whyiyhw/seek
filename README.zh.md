@@ -126,6 +126,8 @@ seek hooks      list / check / trust / audit
 
 每个子命令在 TUI 内也以 `/<name>` 形式可用。TUI 独有：`/plan` `/goal` `/steer` `/agents` `/worktrees` `/distill` `/code-review`。完整列表：`/help`。
 
+**界面语言**：`/lang <en|zh>` 切换人类可见文案（提示、横幅、命令反馈）并持久化到 `~/.seek/config.json`；`SEEK_LANG=zh seek` 按次覆盖；未配置时按 `LC_ALL`/`LANG` 自动检测。模型可见文本与状态栏设计上保持英文——见 [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md)。
+
 ---
 
 ## 为真实场景打造，不是周末玩具

@@ -102,6 +102,14 @@ type Config struct {
 	//
 	// Empty / absent = scrub everything that matches (the safe default).
 	BashEnvPassthrough []string `json:"bash_env_passthrough,omitempty"`
+
+	// Language selects the interface language for view-layer text
+	// ("en" | "zh" — internal/i18n is the catalogue). Empty = resolve
+	// from the environment (SEEK_LANG, then LC_ALL/LANG, then English).
+	// /lang writes this field; SEEK_LANG beats it for one-off launches.
+	// Only human-facing prose follows it — LLM-visible strings and the
+	// status bar stay English by design (docs/prd/feature-i18n.md §1.2).
+	Language string `json:"language,omitempty"`
 }
 
 // ReadConfig configures the read tool (internal/tools/read). All fields

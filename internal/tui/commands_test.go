@@ -15,6 +15,8 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
@@ -1891,5 +1893,88 @@ func TestCmdDiagnose_EphemeralSession(t *testing.T) {
 	res := runHandler(t, m, "/diagnose")
 	if !strings.Contains(res.text, "(none — ephemeral)") {
 		t.Errorf("/diagnose without session should say ephemeral, got %q", res.text)
+	}
+}
+
+// ----------------------------------------------------------------------
+// /lang — view-layer language switch (docs/prd/feature-i18n.md).
+// These tests deliberately avoid t.Parallel: cmdLang swaps the
+// process-wide i18n default, and a parallel neighbour asserting
+// English render text would flake. Cleanup restores English so the
+// rest of the package stays hermetic.
+// ----------------------------------------------------------------------
+
+func TestCmdLang_NoArgsReportsStatus(t *testing.T) {
+	t.Cleanup(func() { i18n.SetDefault(nil) })
+
+	m := emptyModel()
+	res := runHandler(t, m, "/lang")
+	if !strings.Contains(res.text, "Language: en") {
+		t.Errorf("/lang with no args should report the active language, got %q", res.text)
+	}
+	if i18n.Lang() != "en" {
+		t.Errorf("/lang status must not switch anything, lang now %q", i18n.Lang())
+	}
+}
+
+func TestCmdLang_SwitchesAndPersists(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Cleanup(func() { i18n.SetDefault(nil) })
+
+	m := emptyModel()
+	res := runHandler(t, m, "/lang zh")
+	// The confirmation renders through the freshly-switched bundle, so
+	// it arrives in Chinese.
+	if !strings.Contains(res.text, "已切换到 zh") {
+		t.Errorf("/lang zh should confirm in zh, got %q", res.text)
+	}
+	if i18n.Lang() != "zh" {
+		t.Errorf("process default should now be zh, got %q", i18n.Lang())
+	}
+	// The view layer immediately follows the new bundle.
+	if got := i18n.T("view.thinking"); got != "思考中…" {
+		t.Errorf("view.thinking under zh = %q", got)
+	}
+	// And the choice persisted for the next launch.
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load after /lang: %v", err)
+	}
+	if cfg.Language != "zh" {
+		t.Errorf("config language should persist zh, got %q", cfg.Language)
+	}
+
+	// Switching back also round-trips.
+	res = runHandler(t, m, "/lang en")
+	if !strings.Contains(res.text, "Language switched to en") {
+		t.Errorf("/lang en should confirm in en, got %q", res.text)
+	}
+	cfg, _ = config.Load()
+	if cfg.Language != "en" {
+		t.Errorf("config language should persist en, got %q", cfg.Language)
+	}
+}
+
+func TestCmdLang_UnsupportedArgRejected(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Cleanup(func() { i18n.SetDefault(nil) })
+
+	m := emptyModel()
+	res := runHandler(t, m, "/lang fr")
+	if !strings.Contains(res.text, "fr") || !strings.Contains(res.text, "en, zh") {
+		t.Errorf("/lang fr should name the bad value and the supported set, got %q", res.text)
+	}
+	if i18n.Lang() != "en" {
+		t.Errorf("unsupported value must not switch, lang now %q", i18n.Lang())
+	}
+	if cfg, err := config.Load(); err == nil && cfg.Language != "" {
+		t.Errorf("unsupported value must not persist, config has %q", cfg.Language)
+	}
+}
+
+func TestCmdLang_ListedInHelp(t *testing.T) {
+	t.Parallel()
+	if out := buildHelpCommandsSection(); !strings.Contains(out, "/lang") {
+		t.Error("/lang missing from the /help command listing")
 	}
 }
