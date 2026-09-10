@@ -56,8 +56,8 @@ func TestCurrentTier_TimezoneAware(t *testing.T) {
 }
 
 func TestPricingFor_OffPeakDiscounts(t *testing.T) {
-	std := PricingFor(deepseek.ModelV4Flash, TierStandard)
-	off := PricingFor(deepseek.ModelV4Flash, TierOffPeak)
+	std := PricingFor(deepseek.ModelV41Flash, TierStandard)
+	off := PricingFor(deepseek.ModelV41Flash, TierOffPeak)
 	if math.Abs(off.InputMissPerMTok-std.InputMissPerMTok*0.5) > 1e-9 {
 		t.Errorf("off-peak miss not 50%% of standard: std=%v off=%v", std.InputMissPerMTok, off.InputMissPerMTok)
 	}
@@ -68,23 +68,37 @@ func TestPricingFor_OffPeakDiscounts(t *testing.T) {
 
 func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 	p := PricingFor("deepseek-unknown", TierStandard)
-	std := PricingFor(deepseek.ModelV4Flash, TierStandard)
+	std := PricingFor(deepseek.ModelV41Flash, TierStandard)
 	if p != std {
-		t.Errorf("fallback didn't equal chat pricing: %+v vs %+v", p, std)
+		t.Errorf("fallback didn't equal flash pricing: %+v vs %+v", p, std)
+	}
+}
+
+// TestPricingFor_RetiredIdsBilledAtFlashCard pins the V4.1 routing
+// contract: the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp
+// ids (and deepseek-v4-pro after its 2026-09-14 retirement) are served
+// by V4.1 Flash and billed at Flash prices — at BOTH tiers.
+func TestPricingFor_RetiredIdsBilledAtFlashCard(t *testing.T) {
+	for _, m := range []string{deepseek.ModelV4Flash, deepseek.ModelV4Pro, deepseek.ModelV4FlashVisionExp} {
+		for _, tier := range []Tier{TierStandard, TierOffPeak} {
+			if p, want := PricingFor(m, tier), PricingFor(deepseek.ModelV41Flash, tier); p != want {
+				t.Errorf("PricingFor(%s, %v) = %+v, want the V4.1-Flash card %+v", m, tier, p, want)
+			}
+		}
 	}
 }
 
 func TestCost_TypicalChatCall(t *testing.T) {
 	// Mixed-cache turn: 800 miss + 200 hit + 100 completion under
-	// the V4-Flash peak rate card (the fallback for unknown models).
+	// the V4.1-Flash peak rate card.
 	u := deepseek.Usage{
 		PromptTokens:          1000,
 		PromptCacheMissTokens: 800,
 		PromptCacheHitTokens:  200,
 		CompletionTokens:      100,
 	}
-	want := 800*0.44/1e6 + 200*0.014/1e6 + 100*1.32/1e6
-	got := Cost(deepseek.ModelV4Flash, TierStandard, u)
+	want := 800*0.30/1e6 + 200*0.006/1e6 + 100*1.20/1e6
+	got := Cost(deepseek.ModelV41Flash, TierStandard, u)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("Cost = %v, want %v", got, want)
 	}
@@ -92,10 +106,49 @@ func TestCost_TypicalChatCall(t *testing.T) {
 
 func TestCost_OffPeakIsHalf(t *testing.T) {
 	u := deepseek.Usage{PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000}
-	std := Cost(deepseek.ModelV4Flash, TierStandard, u)
-	off := Cost(deepseek.ModelV4Flash, TierOffPeak, u)
+	std := Cost(deepseek.ModelV41Flash, TierStandard, u)
+	off := Cost(deepseek.ModelV41Flash, TierOffPeak, u)
 	if math.Abs(off-std*0.5) > 1e-6 {
 		t.Errorf("off-peak cost != half: std=%v off=%v", std, off)
+	}
+}
+
+// TestCurrentTier_WeekendOffPeak pins the weekday qualifier on the
+// peak windows (Monday through Friday, per the 2026-09-10 pricing
+// page): the same wall-clock inside a peak window is peak on a Friday
+// and off-peak on the following Saturday/Sunday.
+func TestCurrentTier_WeekendOffPeak(t *testing.T) {
+	fri := time.Date(2026, time.September, 11, 10, 0, 0, 0, Shanghai)  // Friday, inside peak 1
+	sat := time.Date(2026, time.September, 12, 10, 0, 0, 0, Shanghai)  // Saturday
+	sun := time.Date(2026, time.September, 13, 15, 30, 0, 0, Shanghai) // Sunday, inside peak 2
+	if got := CurrentTier(fri); got != TierStandard {
+		t.Errorf("Friday 10:00 Beijing = peak, got %v", got)
+	}
+	if got := CurrentTier(sat); got != TierOffPeak {
+		t.Errorf("Saturday 10:00 Beijing = off-peak, got %v", got)
+	}
+	if got := CurrentTier(sun); got != TierOffPeak {
+		t.Errorf("Sunday 15:30 Beijing = off-peak, got %v", got)
+	}
+}
+
+// TestNextTransition_SkipsWeekend: weekends are off-peak all day, so
+// the next peak resumption from anywhere in a weekend — and from a
+// Friday evening — is Monday 09:00, not the nearest calendar 09:00.
+func TestNextTransition_SkipsWeekend(t *testing.T) {
+	mon := time.Date(2026, time.September, 14, 9, 0, 0, 0, Shanghai)
+	for _, now := range []time.Time{
+		time.Date(2026, time.September, 11, 23, 59, 0, 0, Shanghai), // Friday evening
+		time.Date(2026, time.September, 12, 10, 0, 0, 0, Shanghai),  // Saturday, inside would-be peak 1
+		time.Date(2026, time.September, 13, 20, 0, 0, 0, Shanghai),  // Sunday evening
+	} {
+		tier, when := NextTransition(now)
+		if tier != TierStandard {
+			t.Errorf("%s: tier = %v, want peak (resumes Monday)", now, tier)
+		}
+		if !when.Equal(mon) {
+			t.Errorf("%s: when = %v, want Monday 09:00 %v", now, when, mon)
+		}
 	}
 }
 

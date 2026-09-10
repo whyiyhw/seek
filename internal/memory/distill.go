@@ -187,7 +187,7 @@ type chatClient interface {
 // Distiller orchestrates one /distill pass: prompt construction →
 // thinking-mode call → response parse → return Candidate slice.
 //
-// Model defaults to ModelV4Flash with Thinking enabled per PRD §6 —
+// Model defaults to ModelV41Flash with Thinking enabled per PRD §6 —
 // distillation explicitly asks for chain-of-thought because picking
 // which decisions are worth preserving is exactly the reasoning
 // work thinking mode is good at. (Pre-2026-05 this used the
@@ -195,7 +195,7 @@ type chatClient interface {
 // switch predates the 2026-07-24 alias removal.)
 type Distiller struct {
 	Client chatClient
-	Model  string // default deepseek.ModelV4Flash (+ Thinking)
+	Model  string // default deepseek.ModelV41Flash (+ Thinking)
 	Max    int    // default DefaultMaxCandidates
 }
 
@@ -207,7 +207,7 @@ func (d *Distiller) Distill(ctx context.Context, history []deepseek.Message) ([]
 	}
 	model := d.Model
 	if model == "" {
-		model = deepseek.ModelV4Flash
+		model = deepseek.ModelV41Flash
 	}
 	maxN := d.Max
 	if maxN <= 0 {
@@ -282,14 +282,14 @@ Respond with valid JSON only. No prose, no markdown fences:
 
 // Filter evaluates a candidate entry against the existing project memory.
 // Returns ACCEPT if the entry is valuable and non-duplicate; REJECT otherwise.
-// This is a single-shot V4-Flash thinking call — no streaming, no retry.
+// This is a single-shot Flash thinking call — no streaming, no retry.
 func (d *Distiller) Filter(ctx context.Context, existing []Entry, candidate Entry) (FilterResult, FilterReason, error) {
 	if d.Client == nil {
 		return FilterReject, "", errors.New("filter: Client is required")
 	}
 	model := d.Model
 	if model == "" {
-		model = deepseek.ModelV4Flash
+		model = deepseek.ModelV41Flash
 	}
 
 	var sb strings.Builder

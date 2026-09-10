@@ -10,12 +10,19 @@ func pct(limit int, frac float64) int {
 }
 
 func TestLimit_KnownModelAndFallback(t *testing.T) {
-	// V4 launched with a 1M window for both flash and pro.
-	if got := Limit("deepseek-v4-flash"); got != 1_000_000 {
-		t.Errorf("deepseek-v4-flash = %d, want 1M", got)
+	// V4.1 Flash (2026-09-10) and the retired V4 ids — routed to it
+	// server-side — all expose the 1M window.
+	if got := Limit("deepseek-flash"); got != 1_000_000 {
+		t.Errorf("deepseek-flash = %d, want 1M", got)
 	}
 	if got := Limit("deepseek-v4-flash"); got != 1_000_000 {
 		t.Errorf("deepseek-v4-flash = %d, want 1M", got)
+	}
+	if got := Limit("deepseek-v4-pro"); got != 1_000_000 {
+		t.Errorf("deepseek-v4-pro = %d, want 1M", got)
+	}
+	if got := Limit("deepseek-v4-flash-vision-exp"); got != 1_000_000 {
+		t.Errorf("deepseek-v4-flash-vision-exp = %d, want 1M", got)
 	}
 	if got := Limit("unknown-model-x"); got != Default {
 		t.Errorf("fallback = %d, want %d", got, Default)

@@ -95,7 +95,7 @@ func TestVisionRouter_Route(t *testing.T) {
 
 	// Non-vision model → switch note, no parts.
 	got, parts = vr.route(deepseek.ModelV4Flash, "look "+img)
-	if !strings.Contains(got, "[image: shot.png — 当前模型不支持图片输入，/model deepseek-v4-flash-vision-exp 切换]") {
+	if !strings.Contains(got, "[image: shot.png — 当前模型不支持图片输入，/model deepseek-flash 切换]") {
 		t.Fatalf("switch note = %q", got)
 	}
 	if len(parts) != 0 {

@@ -376,8 +376,13 @@ func TestAgent_ThinkingParamForReasoningModels(t *testing.T) {
 		wantEnabled bool
 	}{
 		{deepseek.ModelV4Pro, true},
+		{deepseek.ModelV41Flash, true},
+		// "" resolves to the ModelV41Flash default at construction —
+		// thinking travels with the default.
+		{"", true},
+		// Retired V4-Flash omits the field and inherits the routed
+		// backend's default; custom ids stay untouched.
 		{deepseek.ModelV4Flash, false},
-		{"", false},
 		{"some-future-custom-model", false},
 	}
 	for _, c := range cases {

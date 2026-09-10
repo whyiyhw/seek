@@ -9,12 +9,16 @@ import (
 
 func TestIsVisionModel(t *testing.T) {
 	cases := map[string]bool{
+		// V4.1 Flash (2026-09-10) made vision native on the default
+		// model; the retired -Exp id stays allow-listed because the
+		// routed backend takes images and old sessions carry it.
+		ModelV41Flash:         true,
 		ModelV4FlashVisionExp: true,
 		ModelV4Flash:          false,
 		ModelV4Pro:            false,
-		"deepseek-v4-flash-vision":   false, // hypothetical GA rename — NOT matched until allow-listed
-		"vision":                     false, // substring must never match
-		"":                           false,
+		"deepseek-v4-flash-vision": false, // never-shipped GA name — NOT matched
+		"vision":                   false, // substring must never match
+		"":                         false,
 	}
 	for model, want := range cases {
 		if got := IsVisionModel(model); got != want {

@@ -101,7 +101,7 @@ func (r visionRouter) routeBytes(model, display string, data []byte, ext string)
 }
 
 func switchModelNote(name string) string {
-	return fmt.Sprintf("[image: %s — 当前模型不支持图片输入，/model %s 切换]", name, deepseek.ModelV4FlashVisionExp)
+	return fmt.Sprintf("[image: %s — 当前模型不支持图片输入，/model %s 切换]", name, deepseek.ModelV41Flash)
 }
 
 // attachMarker is the transcript self-description for a natively

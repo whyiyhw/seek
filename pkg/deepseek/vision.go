@@ -37,13 +37,15 @@ type ImagePart struct {
 }
 
 // IsVisionModel reports whether the model id natively accepts image
-// content parts. Explicit allow-list, NOT substring matching: -Exp ids
-// rotate (GA may rename) and a silently-drifting pattern would send
-// images to a model that answers 400. An unknown id is simply not a
-// vision model — the submit-time router degrades to an in-band note.
+// content parts. Explicit allow-list, NOT substring matching: a
+// silently-drifting pattern would send images to a model that answers
+// 400. V4.1 Flash made vision native on the default model; the retired
+// -Exp id stays listed because the routed backend takes images and old
+// sessions carry it. An unknown id is simply not a vision model — the
+// submit-time router degrades to an in-band note.
 func IsVisionModel(model string) bool {
 	switch model {
-	case ModelV4FlashVisionExp:
+	case ModelV41Flash, ModelV4FlashVisionExp:
 		return true
 	}
 	return false

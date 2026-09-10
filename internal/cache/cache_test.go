@@ -163,42 +163,50 @@ func TestTracker_ConcurrentSafe(t *testing.T) {
 }
 
 // TestTracker_CumulativeCostLockedInAtRecord is the load-bearing pin
-// for the cross-model cost bug. Switching from V4-Flash to V4-Pro
-// mid-session must NOT retroactively re-price the V4-Flash turn at
-// V4-Pro's 3× rate, and switching back must not re-price the
-// V4-Pro turn at the cheaper V4-Flash rate either.
+// for per-turn cost accounting: each turn's cost is computed from the
+// model+tier active WHEN IT RAN, never retroactively recomputed.
+//
+// Historically this guarded against re-pricing a V4-Flash turn at
+// V4-Pro's 3× card after a mid-session /model switch. Since the
+// 2026-09-10 V4.1 launch every DeepSeek lineage id — including the
+// retired ones — bills at the SAME V4.1-Flash card, so a cross-model
+// re-pricing bug is no longer cost-visible; the mechanism stays
+// cost-visible via the tier axis (TestTracker_TierTransitionDoesNotRePrice).
+// What this test still pins: retired ids bill at the Flash card (the
+// server's routing contract), and the per-model recording path stays
+// exercised across distinct model keys.
 func TestTracker_CumulativeCostLockedInAtRecord(t *testing.T) {
 	tr := New()
 
-	// Turn 1 — 1M completion @ V4-Flash peak ($1.32/M output) = $1.32.
+	// Turn 1 — 1M completion @ V4.1-Flash peak ($1.20/M output) = $1.20.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
-		deepseek.ModelV4Flash, pricing.TierStandard,
+		deepseek.ModelV41Flash, pricing.TierStandard,
 	)
-	if got := tr.CumulativeCost(); got < 1.319 || got > 1.321 {
-		t.Errorf("after V4-Flash turn: cost = %v, want ≈1.32", got)
+	if got := tr.CumulativeCost(); got < 1.199 || got > 1.201 {
+		t.Errorf("after V4.1-Flash turn: cost = %v, want ≈1.20", got)
 	}
 
-	// Turn 2 — 1M completion @ V4-Pro peak ($3.96/M output) = $3.96.
-	// Cumulative now = 1.32 + 3.96 = 5.28.
+	// Turn 2 — 1M completion @ retired V4-Pro, routed to V4.1 Flash
+	// and billed at Flash prices = $1.20. Cumulative = 2.40. (If the
+	// retired id still carried its pre-retirement $3.96/M card this
+	// would be 1.20 + 3.96 = 5.16 — the routing-billing pin.)
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
 		deepseek.ModelV4Pro, pricing.TierStandard,
 	)
-	if got := tr.CumulativeCost(); got < 5.279 || got > 5.281 {
-		t.Errorf("after V4-Pro turn: cost = %v, want ≈5.28", got)
+	if got := tr.CumulativeCost(); got < 2.399 || got > 2.401 {
+		t.Errorf("after routed V4-Pro turn: cost = %v, want ≈2.40 (billed at Flash price)", got)
 	}
 
-	// Turn 3 — 1M completion @ V4-Flash peak ($1.32/M) = $1.32.
-	// Cumulative now = 5.28 + 1.32 = 6.60. If we were re-pricing all
-	// turns at the CURRENT model (V4-Flash) this would come out to
-	// 3 × 1.32 = 3.96 instead — the exact bug this pins against.
+	// Turn 3 — 1M completion @ retired V4-Flash (also Flash-billed)
+	// = $1.20. Cumulative = 3.60.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
 		deepseek.ModelV4Flash, pricing.TierStandard,
 	)
-	if got := tr.CumulativeCost(); got < 6.599 || got > 6.601 {
-		t.Errorf("after switch-back to V4-Flash: cost = %v, want ≈6.60 (NOT 3.96 — that would mean we re-priced)", got)
+	if got := tr.CumulativeCost(); got < 3.599 || got > 3.601 {
+		t.Errorf("after retired V4-Flash turn: cost = %v, want ≈3.60", got)
 	}
 }
 
@@ -391,20 +399,20 @@ func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
 // trigger.
 func TestTracker_TierTransitionDoesNotRePrice(t *testing.T) {
 	tr := New()
-	// Peak tier: 1M completion @ V4-Flash = $1.32.
+	// Peak tier: 1M completion @ V4.1-Flash = $1.20.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
-		deepseek.ModelV4Flash, pricing.TierStandard,
+		deepseek.ModelV41Flash, pricing.TierStandard,
 	)
-	// Off-peak tier (50% discount): 1M completion = $0.66.
+	// Off-peak tier (50% discount): 1M completion = $0.60.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
-		deepseek.ModelV4Flash, pricing.TierOffPeak,
+		deepseek.ModelV41Flash, pricing.TierOffPeak,
 	)
-	// Expected = 1.32 + 0.66 = 1.98. NOT 0.66 (both at off-peak)
-	// and NOT 2.64 (both at peak).
-	if got := tr.CumulativeCost(); got < 1.979 || got > 1.981 {
-		t.Errorf("CumulativeCost across tier boundary = %v, want ≈1.98 (each turn priced at its own tier)", got)
+	// Expected = 1.20 + 0.60 = 1.80. NOT 0.60 (both at off-peak)
+	// and NOT 2.40 (both at peak).
+	if got := tr.CumulativeCost(); got < 1.799 || got > 1.801 {
+		t.Errorf("CumulativeCost across tier boundary = %v, want ≈1.80 (each turn priced at its own tier)", got)
 	}
 }
 

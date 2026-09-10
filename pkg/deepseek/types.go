@@ -3,26 +3,33 @@ package deepseek
 import "encoding/json"
 
 const (
-	// V4 lineup (current — as of api-docs.deepseek.com/quick_start/pricing).
-	// deepseek-v4-flash serves the latest GA build (DeepSeek-V4-Flash-0731
-	// as of 2026-07-31); the ID is stable — DeepSeek rotates the version
-	// behind it. Both support thinking mode as a request-level parameter
-	// rather than as a separate model ID; both have a 1M context window.
-	//
-	// The legacy deepseek-chat / deepseek-reasoner aliases were removed
-	// server-side on 2026-07-24 — old session files that still record
-	// those names fall back to "unknown model" handling (no thinking,
-	// budget/pricing defaults) rather than failing to load.
+	// ModelV41Flash is the V4.1-Flash GA build (DeepSeek-V4.1-Flash,
+	// released 2026-09-10): 552B MoE with NATIVE multimodal vision —
+	// image_url content parts work on the default model, no vision
+	// sibling id needed anymore. Thinking is a request-level parameter
+	// (server default: enabled — see ShouldEnableThinking). 1M context
+	// / 384K max output. Pricing effective 2026-09-10 12:00 CST — see
+	// internal/pricing.
+	ModelV41Flash = "deepseek-flash"
+
+	// V4 lineup (legacy — retired server-side, names accepted for
+	// compatibility). deepseek-v4-flash and deepseek-v4-flash-vision-exp
+	// are routed to V4.1 Flash and billed at Flash prices; V4 Pro goes
+	// the same way after 2026-09-14 12:00 CST (until a V4.1 Pro lands).
+	// Session files record these ids, so the constants — and their
+	// budget/pricing entries — stay: resuming an old session must keep
+	// working. The legacy deepseek-chat / deepseek-reasoner aliases
+	// were removed earlier, server-side on 2026-07-24 — those fall back
+	// to "unknown model" handling (no thinking, budget/pricing
+	// defaults) rather than failing to load.
 	ModelV4Flash = "deepseek-v4-flash"
 	ModelV4Pro   = "deepseek-v4-pro"
 
-	// ModelV4FlashVisionExp is the experimental multimodal (vision)
-	// build, released 2026-08-21. Text capability matches V4-Flash; it
-	// accepts image_url content parts in user messages (each image
-	// normalises to ≤384 prompt tokens, billed at Flash rates). The
-	// "-Exp" suffix rotates — GA may rename; when it does, update this
-	// const + IsVisionModel + the /model picker + pricing in one go.
-	// See docs/prd/feature-vision.md.
+	// ModelV4FlashVisionExp was the experimental multimodal (vision)
+	// build, released 2026-08-21; each image normalises to ≤384 prompt
+	// tokens. Superseded 2026-09-10 by V4.1 Flash's native vision.
+	// IsVisionModel still accepts it (the routed backend takes images,
+	// and old sessions carry the id). See docs/prd/feature-vision.md.
 	ModelV4FlashVisionExp = "deepseek-v4-flash-vision-exp"
 
 	RoleSystem    = "system"
@@ -142,16 +149,21 @@ type ThinkingMode struct {
 // thinking-mode semantics and should therefore receive
 // Thinking.Type="enabled" when the agent constructs a ChatRequest.
 //
-// Returns true for ModelV4Pro — V4-Pro is the high-end reasoning
-// model; using it without thinking would waste the price premium.
+// Returns true for ModelV41Flash and ModelV4Pro. V4.1 ships with
+// thinking as the SERVER DEFAULT for both tiers (stated on the
+// 2026-09-10 pricing page; the same endpoint-level default burned the
+// suggested-reply side channel before it pinned disabled — see
+// docs/pitfalls.md "V4-Flash prediction returns empty content…").
+// Sending the flag explicitly keeps the wire request honest about the
+// behaviour it will get instead of relying on an undocumented default.
 //
-// Returns false for ModelV4Flash (intentionally non-thinking by
-// default) and for any unknown / custom model name — callers who
-// want thinking on those must opt in explicitly via
-// ChatRequest.Thinking.
+// Returns false for the retired ModelV4Flash / ModelV4FlashVisionExp
+// and any unknown / custom model name — those omit the field and
+// inherit whatever default the routed backend applies; callers who
+// want a say must opt in explicitly via ChatRequest.Thinking.
 func ShouldEnableThinking(model string) bool {
 	switch model {
-	case ModelV4Pro:
+	case ModelV41Flash, ModelV4Pro:
 		return true
 	}
 	return false

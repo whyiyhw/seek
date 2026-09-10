@@ -168,8 +168,17 @@ func TestShouldEnableThinking(t *testing.T) {
 		model string
 		want  bool
 	}{
+		// V4.1 ships with thinking as the server default for both
+		// tiers; seek sends the flag explicitly rather than leaning
+		// on that undocumented default (pitfall: suggested-reply once
+		// burned its whole max_tokens budget on reasoning because of
+		// exactly that default).
+		{ModelV41Flash, true},
 		{ModelV4Pro, true},
+		// Retired V4-Flash omits the field and inherits whatever the
+		// routed backend applies.
 		{ModelV4Flash, false},
+		{ModelV4FlashVisionExp, false},
 		{"", false},
 		{"some-future-custom-model", false},
 	}

@@ -727,7 +727,7 @@ func run() error {
 
 	var (
 		prompt        = flag.String("p", "", "prompt text; if non-empty (or stdin is piped) seek runs in print mode and exits")
-		model         = flag.String("model", "", "model id; default depends on provider (deepseek-v4-flash for DeepSeek, etc.)")
+		model         = flag.String("model", "", "model id; default depends on provider (deepseek-flash for DeepSeek, etc.)")
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
 		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → default (16384)")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
@@ -2741,7 +2741,7 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no DeepSeek API key — set DEEPSEEK_API_KEY or run seek once to use the setup wizard")
 		}
-		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelV4Flash, nil
+		return nil, deepseek.New(deepseek.WithAPIKey(apiKey)), "", deepseek.ModelV41Flash, nil
 
 	case "anthropic":
 		apiKey := config.KeyFor(cfg, "anthropic")

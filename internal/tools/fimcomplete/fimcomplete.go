@@ -52,10 +52,10 @@ type Tool struct {
 }
 
 // New returns a fim_complete tool bound to the given DeepSeek client. Pass
-// "" for model to default to deepseek-v4-flash.
+// "" for model to default to deepseek-flash.
 func New(c *deepseek.Client, model string) Tool {
 	if model == "" {
-		model = deepseek.ModelV4Flash
+		model = deepseek.ModelV41Flash
 	}
 	return Tool{client: c, model: model}
 }

@@ -63,7 +63,7 @@ func allCommands() []command {
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
 		{names: []string{"/keys"}, usage: "/keys", description: "Show the active keymap (including any ~/.seek/keybindings.toml overrides).", handler: cmdKeys},
 		{names: []string{"/clear", "/new"}, usage: "/clear", description: "Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state.", handler: cmdNew},
-		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-v4-pro).", handler: cmdModel},
+		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-flash).", handler: cmdModel},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Save the current session and quit seek.", handler: cmdQuit},
 		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. No args opens a picker. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above.", handler: cmdEffort},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
@@ -383,20 +383,22 @@ func knownModelsForProvider(providerName string) []modelChoice {
 	switch strings.ToLower(providerName) {
 	case "", "deepseek":
 		// The retired deepseek-chat / deepseek-reasoner aliases were
-		// removed server-side on 2026-07-24; the picker surfaces only
-		// the explicit V4 IDs so users see what they're actually
-		// buying instead of relying on DeepSeek's server-side alias
-		// routing (which has silently demoted reasoner→V4-Flash
-		// in the past).
+		// removed server-side on 2026-07-24; V4.1 Flash (2026-09-10)
+		// then absorbed the whole V4 lineup — the server routes the old
+		// ids (deepseek-v4-flash, deepseek-v4-flash-vision-exp, and
+		// deepseek-v4-pro after 2026-09-14) to V4.1 Flash and bills
+		// them at Flash prices. Rows for routed ids would mislead
+		// ("you're buying Pro") exactly the way the old reasoner row
+		// did, so the picker surfaces only the real target; freeform
+		// `/model <id>` still accepts any string.
+		//
+		// Description kept short deliberately: the picker row must
+		// fit a ~100-col terminal even with the " (current)" suffix
+		// — an overlong row soft-wraps and desyncs bubbletea's
+		// frame count (same failure class as the status-bar wrap;
+		// see foldStatusBar's safety margin note).
 		return []modelChoice{
-			{"deepseek-v4-flash", "DeepSeek V4-Flash — fast chat + tools (default)"},
-			{"deepseek-v4-pro", "DeepSeek V4-Pro — Thinking-enabled reasoning (explicit)"},
-			// Description kept short deliberately: the picker row must
-			// fit a ~100-col terminal even with the " (current)" suffix
-			// — an overlong row soft-wraps and desyncs bubbletea's
-			// frame count (same failure class as the status-bar wrap;
-			// see foldStatusBar's safety margin note).
-			{"deepseek-v4-flash-vision-exp", "V4-Flash-Vision (exp) — images"},
+			{"deepseek-flash", "DeepSeek V4.1-Flash — chat+tools+vision (default)"},
 		}
 	case "anthropic":
 		return []modelChoice{

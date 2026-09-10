@@ -35,7 +35,7 @@ import (
 // defaultModel is the model used for prediction calls. Flash tier —
 // cheap + low latency — because predictions are speculative UX hints,
 // not load-bearing decisions.
-const defaultModel = "deepseek-v4-flash"
+const defaultModel = deepseek.ModelV41Flash
 
 // maxPredictionTokens caps the prediction length. 80 tokens ≈ one
 // sentence in English / one short clause in Chinese; anything longer

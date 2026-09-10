@@ -50,7 +50,7 @@ func (c *Client) FIM(ctx context.Context, req *FIMRequest) (*FIMResponse, error)
 		return nil, errors.New("deepseek: FIM requires a non-empty Prompt")
 	}
 	if req.Model == "" {
-		req.Model = ModelV4Flash
+		req.Model = ModelV41Flash
 	}
 
 	return retryCall(ctx, func() (*FIMResponse, error) {

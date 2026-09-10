@@ -36,37 +36,49 @@ type ModelPricing struct {
 // windows (a.k.a. the "standard" tier). Off-peak is derived via
 // offPeakDiscount.
 //
-// Numbers track DeepSeek's V4 peak/off-peak pricing, effective
-// 2026-08-16 16:00 UTC (api-docs.deepseek.com/quick_start/pricing,
-// checked 2026-08-13 against V4-Flash-0731 / V4-Pro-0813):
+// Numbers track DeepSeek's V4.1 peak/off-peak pricing, effective
+// 2026-09-10 12:00 CST (api-docs.deepseek.com/quick_start/pricing,
+// checked 2026-09-10 against DeepSeek-V4.1-Flash):
 //
-//	V4-Flash: $0.44 miss · $0.014 hit · $1.32 output (peak, per 1M tokens)
-//	V4-Pro:   $1.32 miss · $0.044 hit · $3.96 output
+//	V4.1-Flash: $0.30 miss · $0.006 hit · $1.20 output (peak, per 1M tokens)
 //
-// Off-peak is exactly half of these. The pre-2026-08-16 promotional
-// rates ($0.14/$0.0028/$0.28 flash, $0.435/$0.003625/$0.87 pro) are
-// retired; the legacy deepseek-chat / deepseek-reasoner aliases were
-// removed server-side on 2026-07-24, and unknown model names fall back
-// to V4-Flash rates via the fallback path below.
+// Off-peak is exactly half of these. The retired V4 ids are ALL routed
+// to V4.1 Flash server-side and billed at Flash prices
+// (deepseek-v4-flash / deepseek-v4-flash-vision-exp since launch;
+// deepseek-v4-pro after 2026-09-14 12:00 CST), so their entries map to
+// the Flash card — between 2026-09-10 and the Pro cutover a live Pro
+// session's displayed cost under-reports for those few days rather
+// than over-reporting forever afterwards. The legacy deepseek-chat /
+// deepseek-reasoner aliases were removed server-side on 2026-07-24,
+// and unknown model names fall back to V4.1-Flash rates via the
+// fallback path below.
 var standardRates = map[string]ModelPricing{
+	deepseek.ModelV41Flash: {
+		InputMissPerMTok: 0.30,
+		InputHitPerMTok:  0.006,
+		OutputPerMTok:    1.20,
+	},
+	// Routed to V4.1 Flash, billed at Flash prices.
 	deepseek.ModelV4Flash: {
-		InputMissPerMTok: 0.44,
-		InputHitPerMTok:  0.014,
-		OutputPerMTok:    1.32,
+		InputMissPerMTok: 0.30,
+		InputHitPerMTok:  0.006,
+		OutputPerMTok:    1.20,
 	},
+	// Retired 2026-09-14 12:00 CST; routed to V4.1 Flash at Flash
+	// prices until a V4.1 Pro lands.
 	deepseek.ModelV4Pro: {
-		InputMissPerMTok: 1.32,
-		InputHitPerMTok:  0.044,
-		OutputPerMTok:    3.96,
+		InputMissPerMTok: 0.30,
+		InputHitPerMTok:  0.006,
+		OutputPerMTok:    1.20,
 	},
-	// Vision-exp bills at Flash rates; each image normalises to ≤384
-	// prompt tokens regardless of original size, so image cost flows
-	// through the existing prompt-token accounting untouched
-	// (feature-vision §四).
+	// Superseded by V4.1 Flash's native vision; routed + billed as
+	// Flash. Each image normalises to ≤384 prompt tokens regardless of
+	// original size, so image cost flows through the existing
+	// prompt-token accounting untouched (feature-vision §四).
 	deepseek.ModelV4FlashVisionExp: {
-		InputMissPerMTok: 0.44,
-		InputHitPerMTok:  0.014,
-		OutputPerMTok:    1.32,
+		InputMissPerMTok: 0.30,
+		InputHitPerMTok:  0.006,
+		OutputPerMTok:    1.20,
 	},
 }
 
@@ -76,9 +88,11 @@ const offPeakDiscount = 0.5
 // tests can construct local times consistently.
 var Shanghai = time.FixedZone("CST", 8*60*60)
 
-// Peak windows (Beijing time): 09:00–12:00 and 14:00–18:00, matching
-// DeepSeek's published peak hours of 01:00–04:00 and 06:00–10:00 UTC.
-// Everything else is off-peak (half price).
+// Peak windows (Beijing time): 09:00–12:00 and 14:00–18:00, MONDAY
+// through FRIDAY, matching DeepSeek's published peak hours of
+// 01:00–04:00 and 06:00–10:00 UTC on weekdays (stated on the
+// 2026-09-10 pricing page). Everything else — evenings, mornings,
+// weekends — is off-peak (half price).
 const (
 	peak1StartMins = 9 * 60
 	peak1EndMins   = 12 * 60
@@ -90,6 +104,9 @@ const (
 // Pass time.Now() in production; tests pass a fixed instant.
 func CurrentTier(now time.Time) Tier {
 	b := now.In(Shanghai)
+	if wd := b.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		return TierOffPeak
+	}
 	mins := b.Hour()*60 + b.Minute()
 	if (mins >= peak1StartMins && mins < peak1EndMins) ||
 		(mins >= peak2StartMins && mins < peak2EndMins) {
@@ -99,12 +116,12 @@ func CurrentTier(now time.Time) Tier {
 }
 
 // PricingFor returns the per-token rate card for a model+tier. Unknown
-// models fall back to V4-Flash rates (the same card the retired
-// deepseek-chat alias used to map to).
+// models fall back to V4.1-Flash rates (the card every routed legacy
+// id bills at anyway).
 func PricingFor(model string, tier Tier) ModelPricing {
 	p, ok := standardRates[model]
 	if !ok {
-		p = standardRates[deepseek.ModelV4Flash]
+		p = standardRates[deepseek.ModelV41Flash]
 	}
 	if tier == TierOffPeak {
 		p.InputMissPerMTok *= offPeakDiscount
@@ -143,9 +160,21 @@ func TierLabel(t Tier) string {
 //	at 09:00 peak     → (off-peak, today 12:00)
 //	at 13:00 off-peak → (peak, today 14:00)
 //	at 03:00 off-peak → (peak, today 09:00)
-//	at 23:59 off-peak → (peak, tomorrow 09:00)
+//	at 23:59 off-peak → (peak, tomorrow 09:00 — or Monday 09:00 if
+//	                    tomorrow is a weekend day)
 func NextTransition(now time.Time) (Tier, time.Time) {
 	b := now.In(Shanghai)
+	// Weekends are off-peak all day: the next tier change from
+	// anywhere inside a weekend is peak resuming Monday 09:00 —
+	// NOT the nearest calendar boundary (Saturday 12:00 is no
+	// transition at all).
+	if wd := b.Weekday(); wd == time.Saturday || wd == time.Sunday {
+		next := time.Date(b.Year(), b.Month(), b.Day(), 9, 0, 0, 0, Shanghai).AddDate(0, 0, 1)
+		for next.Weekday() != time.Monday {
+			next = next.AddDate(0, 0, 1)
+		}
+		return TierStandard, next
+	}
 	at := func(hour, min int) time.Time {
 		return time.Date(b.Year(), b.Month(), b.Day(), hour, min, 0, 0, Shanghai)
 	}
@@ -161,7 +190,13 @@ func NextTransition(now time.Time) (Tier, time.Time) {
 	case mins < peak2EndMins: // [14:00, 18:00) peak 2 → off-peak
 		return TierOffPeak, at(18, 0)
 	default: // [18:00, 24:00) off-peak → peak 1 tomorrow
-		return TierStandard, at(9, 0).AddDate(0, 0, 1)
+		// Tomorrow may be Saturday (Friday evening) — skip the
+		// whole weekend to Monday 09:00.
+		next := at(9, 0).AddDate(0, 0, 1)
+		for next.Weekday() == time.Saturday || next.Weekday() == time.Sunday {
+			next = next.AddDate(0, 0, 1)
+		}
+		return TierStandard, next
 	}
 }
 

@@ -174,7 +174,7 @@ func promptAPIKey(out io.Writer, scanner *bufio.Scanner, provider string) (strin
 func pingDeepSeek(ctx context.Context, apiKey string) error {
 	c := deepseek.New(deepseek.WithAPIKey(apiKey))
 	_, err := c.Chat(ctx, &deepseek.ChatRequest{
-		Model: deepseek.ModelV4Flash,
+		Model: deepseek.ModelV41Flash,
 		Messages: []deepseek.Message{
 			{Role: deepseek.RoleUser, Content: "ping"},
 		},

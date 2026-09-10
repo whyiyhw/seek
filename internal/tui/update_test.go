@@ -652,7 +652,7 @@ func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 	// it forbids spaces in args mode) and nothing replaced it — the
 	// user saw nothing until they hit Enter.
 	m := emptyModel()
-	m.opts.Model = "deepseek-v4-flash"
+	m.opts.Model = "deepseek-flash"
 	m.input.SetValue("/model ")
 
 	m.updateCommandMenu()
@@ -667,7 +667,7 @@ func TestUpdateCommandMenu_AutoOpensModelPickerOnSpace(t *testing.T) {
 		t.Error("slash menu should be closed when picker is open (mutually exclusive)")
 	}
 	// Current model preselected.
-	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek-v4-flash" {
+	if m.modelPickerFiltered[m.modelPickerSelected].id != "deepseek-flash" {
 		t.Errorf("expected current model preselected, got %q",
 			m.modelPickerFiltered[m.modelPickerSelected].id)
 	}
@@ -787,9 +787,12 @@ func TestUpdateCommandMenu_SubcommandClosesPastVerb(t *testing.T) {
 func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	t.Parallel()
 	// /model with no args should open the picker for a curated provider
-	// (DeepSeek), with the current model preselected.
+	// (DeepSeek), with the current model preselected. Since the V4.1
+	// launch (2026-09-10) the curated DeepSeek list is a single row —
+	// every retired V4 id is server-routed to V4.1 Flash and billed at
+	// Flash prices, so rows for them would mislead.
 	m := &Model{}
-	m.opts.Model = "deepseek-v4-pro"
+	m.opts.Model = "deepseek-flash"
 	m.opts.ProviderName = "" // DeepSeek
 
 	res := cmdModel(m, "")
@@ -797,14 +800,11 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 	if !m.modelPickerOpen {
 		t.Fatal("expected /model to open the picker")
 	}
-	if len(m.modelPickerFiltered) < 2 {
-		t.Fatalf("expected at least 2 DeepSeek candidates, got %d", len(m.modelPickerFiltered))
+	if len(m.modelPickerFiltered) != 1 {
+		t.Fatalf("expected exactly 1 DeepSeek candidate, got %d", len(m.modelPickerFiltered))
 	}
-	// Preselect "deepseek-v4-pro" since it matches the current model
-	// AND it is the explicit reasoning entry in the curated list (the
-	// retired "deepseek-reasoner" alias is not in the list).
 	got := m.modelPickerFiltered[m.modelPickerSelected].id
-	if got != "deepseek-v4-pro" {
+	if got != "deepseek-flash" {
 		t.Errorf("expected current model preselected, got %q", got)
 	}
 	// No surface text when opening — the picker is the response.
@@ -814,23 +814,30 @@ func TestCmdModel_NoArgsOpensPicker(t *testing.T) {
 }
 
 // TestCmdModel_LegacyReasonerNotInPicker pins the policy decision: the
-// picker lists only explicit V4 IDs — the retired "deepseek-reasoner"
-// alias must never reappear in the curated list (see
-// knownModelsForProvider). If someone re-adds it this test fails on
-// purpose. Direct-id use via /model <any-id> remains available
-// (covered elsewhere) — the picker curates, it does not gate.
+// picker lists only the live V4.1 id — the retired "deepseek-reasoner"
+// alias and the server-routed V4 ids must never (re)appear in the
+// curated list (see knownModelsForProvider). If someone re-adds one
+// this test fails on purpose. Direct-id use via /model <any-id>
+// remains available (covered elsewhere) — the picker curates, it does
+// not gate.
 func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 	t.Parallel()
 	m := &Model{}
-	m.opts.Model = "deepseek-v4-flash"
+	m.opts.Model = "deepseek-flash"
 	m.opts.ProviderName = ""
 
 	cmdModel(m, "")
 
+	retired := map[string]bool{
+		"deepseek-reasoner":           true,
+		"deepseek-v4-flash":           true,
+		"deepseek-v4-pro":             true,
+		"deepseek-v4-flash-vision-exp": true,
+	}
 	for _, mc := range m.modelPickerFiltered {
-		if mc.id == "deepseek-reasoner" {
-			t.Errorf("deepseek-reasoner should not appear in the curated picker, found in: %+v",
-				m.modelPickerFiltered)
+		if retired[mc.id] {
+			t.Errorf("retired/routed id %q should not appear in the curated picker, found in: %+v",
+				mc.id, m.modelPickerFiltered)
 		}
 	}
 }

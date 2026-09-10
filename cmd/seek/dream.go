@@ -72,7 +72,7 @@ func runDream(ctx context.Context, client *deepseek.Client, write bool) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling V4-Flash thinking …\n",
+	fmt.Fprintf(os.Stderr, "dream: scanning %d project(s), %d recent session(s) → calling V4.1-Flash thinking …\n",
 		len(in.Projects), len(in.Sessions))
 
 	// 3. Run the thinking-mode round-trip.

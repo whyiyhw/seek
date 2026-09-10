@@ -219,7 +219,7 @@ func FilterByEvidence(in []LCandidate, minDistinctSources int) []LCandidate {
 // testing path is the same.
 type Dreamer struct {
 	Client     chatClient
-	Model      string // default deepseek.ModelV4Flash (+ Thinking)
+	Model      string // default deepseek.ModelV41Flash (+ Thinking)
 	MinSources int    // default 2 per PRD §6
 }
 
@@ -232,7 +232,7 @@ func (d *Dreamer) Dream(ctx context.Context, in DreamInput) ([]LCandidate, error
 	}
 	model := d.Model
 	if model == "" {
-		model = deepseek.ModelV4Flash
+		model = deepseek.ModelV41Flash
 	}
 	minSrc := d.MinSources
 	if minSrc <= 0 {

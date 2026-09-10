@@ -62,7 +62,7 @@ type Tool struct {
 // New creates a Think tool. modelFunc is called at execution time to
 // determine which DeepSeek model to use for the reasoning call — it's
 // a function so the model can change at runtime (e.g. via /model).
-// If modelFunc returns "" or nil, ModelV4Flash is used as fallback.
+// If modelFunc returns "" or nil, ModelV41Flash is used as fallback.
 //
 // effortFunc may be nil; when non-nil, it returns the session's current
 // /effort setting ("" | "high" | "max") and Think uses one level above
@@ -204,14 +204,14 @@ func parseArgs(raw json.RawMessage) (sys, userMsg string, err error) {
 }
 
 // modelName returns the current model to use for the think call. Falls
-// back to deepseek-v4-flash if modelFunc is nil or returns empty string.
+// back to deepseek-flash if modelFunc is nil or returns empty string.
 func (t Tool) modelName() string {
 	if t.modelFunc != nil {
 		if m := t.modelFunc(); m != "" {
 			return m
 		}
 	}
-	return deepseek.ModelV4Flash
+	return deepseek.ModelV41Flash
 }
 
 func (t Tool) buildRequest(sys, userMsg string) *deepseek.ChatRequest {

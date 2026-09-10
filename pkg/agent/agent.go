@@ -35,7 +35,7 @@ type Config struct {
 	// compatible). DeepSeek-exclusive features are unavailable on this path.
 	Provider llm.Provider
 
-	Model        string          // defaults to deepseek.ModelV4Flash / provider default
+	Model        string          // defaults to deepseek.ModelV41Flash / provider default
 	SystemPrompt string          // optional
 	Tools        *tools.Registry // optional — nil means no tools
 	MaxTurns     int             // safety bound; defaults to 200
@@ -223,7 +223,7 @@ func New(cfg Config) (*Agent, error) {
 	}
 	if cfg.Model == "" {
 		if cfg.Client != nil {
-			cfg.Model = deepseek.ModelV4Flash
+			cfg.Model = deepseek.ModelV41Flash
 		}
 		// Provider callers must set Model explicitly — no universal default.
 	}
