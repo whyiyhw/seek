@@ -56,9 +56,9 @@ func TestPrompt_Images_ResolvedOnWire(t *testing.T) {
 	// Wire body: array-form content on the user message.
 	var body struct {
 		Messages []struct {
-			Role    string            `json:"role"`
-			Content json.RawMessage   `json:"content"`
-			Images  *json.RawMessage  `json:"images"`
+			Role    string           `json:"role"`
+			Content json.RawMessage  `json:"content"`
+			Images  *json.RawMessage `json:"images"`
 		} `json:"messages"`
 	}
 	if err := json.Unmarshal(reqBody, &body); err != nil {

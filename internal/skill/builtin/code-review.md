@@ -66,7 +66,7 @@ Only when the prompt says `--comment` is set. Requires the `gh` CLI, authenticat
 
 1. Pre-check first: `bash command -v gh` (and `bash gh auth status`). If `gh` is missing or
    unauthenticated, do NOT fail the review — print the full findings in chat and tell the user
-   to install gh and run `gh auth login` to post inline comments, then stop.
+   to install gh and run `gh auth login` to post inline comments, then stop only the `--comment` posting — the findings already printed in chat are the deliverable.
 2. If `gh` is ready, post via `gh pr review --comment` (a single review whose body summarises
    the findings; use the review API for line-level comments). Confirm in chat what you posted.
 

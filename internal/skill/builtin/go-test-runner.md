@@ -12,7 +12,7 @@ This codebase is Go, with a CI policy of `go test -race ./...` on three OSes. Wh
    ```
    go test -race -v ./path/...
    ```
-3. **On failure**: read the failure message, identify the test name + assertion, then `read` the source file. Propose the smallest diff that satisfies the assertion. Do NOT relax the assertion to make the test pass — that's almost always wrong.
+3. **On failure**: read the failure message, identify the test name + assertion, then `read` the source file. Apply the smallest fix when the user asked you to fix/debug it, or when the failure was caused by your own in-flight change. If they only asked for a status run, present the failure + your proposed fix, then wait. Never weaken an assertion to make a test pass — but if the assertion itself encodes behaviour that intentionally changed, update the test as part of the change and say so explicitly; don't delete coverage. (The normal write gate still applies.)
 4. **Re-run before claiming success** — don't say "fixed" until you've seen a green run.
 
 Common traps:

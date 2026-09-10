@@ -8,10 +8,11 @@ system prompt、AGENTS.md 均有 "read before edit" 规则；`workflowReminder` 
 
 ## 当前缓解
 
-`pkg/agent/agent.go` 的 `workflowReminder` 已含：
+`pkg/agent/agent.go` 的 `workflowReminder`（当前值）：
 
-> Before calling edit, read the target lines first to capture exact whitespace
-> — never guess indent from memory.
+> `[Workflow: grep→read(offset,limit≤50). edit→read first.]`
+
+（早期版本曾含完整的一句 "Before calling edit, read the target lines first to capture exact whitespace — never guess indent from memory."；`3dddae3c` 起压缩为 `edit→read first`。）
 
 每条用户消息末尾追加，recency bias 使生效概率高于 system prompt，但不能杜绝。
 

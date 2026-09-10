@@ -64,7 +64,7 @@ func planAnalyzeBashHint(command string) string {
 		// Crucially, do NOT suggest --yolo flag restart. That loses
 		// session state. Models that learned curl habits often
 		// suggest it; the hint here exists to retrain that.
-		return "no whitelist match. If you genuinely need this command: (1) call propose() with this work as a step — it will run in plan-execute where bash is allowed (per-call y/N); or (2) ask the user to press Shift+Tab to switch modes (cycles Ask → Yolo → Plan) or type /yolo to allow writes in-session — both keep your session intact, no restart needed; or (3) if the question can be answered by reading source, use read/grep/list_dir/git tool or a whitelisted inspector (go vet, go list, npm ls, …). NEVER suggest restarting with --yolo flag — that destroys session state and the user can switch modes without it."
+		return "no whitelist match. If you genuinely need this command: (1) call propose() with this work as a step — it will run in plan-execute where bash is allowed (per-call y/N); or (2) ask the user to press Shift+Tab to switch modes (cycles Ask → Plan → Yolo) or type /yolo to allow writes in-session — both keep your session intact, no restart needed; or (3) if the question can be answered by reading source, use read/grep/list_dir/git tool or a whitelisted inspector (go vet, go list, npm ls, …). NEVER suggest restarting with --yolo flag — that destroys session state and the user can switch modes without it."
 	}
 	return strings.Join(hints, "; ")
 }

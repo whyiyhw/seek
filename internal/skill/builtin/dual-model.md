@@ -1,6 +1,6 @@
 ---
 name: dual-model
-description: Use BEFORE starting any non-trivial multi-step task — anything touching 3+ files, designing a new module, refactoring across packages, debugging from a vague symptom, or making an irreversible change. Pairs the chat model (you) with the DeepSeek reasoner via the `think` tool, so you get explicit planning up front and self-review at the end. Skip for one-line edits, typo fixes, doc tweaks, or anything the user has already specified to the keystroke.
+description: Use BEFORE starting any non-trivial multi-step task — anything changing 3+ files, designing a new module, refactoring across packages, debugging from a vague symptom, or making an irreversible change. Pairs the chat model (you) with the DeepSeek reasoner via the `think` tool, so you get explicit planning up front and self-review at the end. Skip for one-line edits, typo fixes, doc tweaks, or anything the user has already specified to the keystroke.
 ---
 
 # Dual-model collaboration (think → execute → think)
@@ -10,7 +10,7 @@ You are the **chat** model. The `think` tool calls the **reasoner** model — sl
 ## When this skill applies
 
 Invoke the loop when the user's request matches any of:
-- Multi-step task spanning **3+ files** or **3+ logical phases**.
+- Multi-step task that will **modify 3+ files** or span **3+ logical phases**.
 - Designing or refactoring a module — not just editing one.
 - Debugging from a vague symptom ("it's slow", "tests flake sometimes") where the cause isn't obvious from one file.
 - Irreversible operations (schema changes, destructive shell, anything in shared infra).

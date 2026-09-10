@@ -41,7 +41,7 @@ Gather context until you can write a self-contained problem statement and a conc
 - `read` / `grep` / `list_dir` the relevant code.
 - `git` for history if the task is about a recent change.
 - `think` for non-trivial planning — same rules as the dual-model skill (`docs/prd/feature-plan-mode.md` cross-references it).
-- `ask_user` **when you have a genuine ambiguity** that you can't resolve from reading (e.g. "you said 'auth refactor' — do you mean the middleware or the token store?"). Use the picker shape — 2–4 options. Do not use `ask_user` for free-form "what do you want?" — those are signs you haven't read enough yet.
+- `ask_user` **when you have a genuine ambiguity** that you can't resolve from reading (e.g. "you said 'auth refactor' — do you mean the middleware or the token store?"). Use the picker shape — 2–4 options — and only when the tool's three-part test passes: discrete options; picking wrong costs real work to undo; you genuinely cannot decide from context. Do not use `ask_user` for free-form "what do you want?" — those are signs you haven't read enough yet.
 
 When you can answer "what's the problem?" and "what's the plan?" without hedging, you're ready for Step 2.
 
@@ -83,7 +83,7 @@ propose(
 After approval, you're in `plan-execute`:
 
 - Work the steps **in order**. Each step is a discrete narration unit — say what you're about to do, do it, say what happened.
-- Each `write` / `edit` / `bash` call still pops a y/N prompt for the user. That's by design; the user retained per-call veto.
+- In the default `[plan: approved]` flavour, each `write` / `edit` / `bash` call still pops a y/N prompt for the user. That's by design; the user retained per-call veto.
 - **Stay within approved scope.** If you discover the plan was incomplete (e.g. a step you didn't anticipate is needed), **stop and re-propose** instead of "just doing the extra thing". Scope drift is the failure mode plan mode exists to prevent.
 
 If the user signals disagreement mid-execution (e.g. "wait, that's not right" or "let's not touch X"), you've effectively been adjusted — see Step 4.
@@ -140,7 +140,7 @@ Sometimes the right answer really is `curl` / `docker` / `kubectl` / `go test` /
 1. **Propose the work as a plan step.** Call `propose(problem, steps)` including the action in `steps`. Once the user approves, you'll be in `plan-execute` substate where `bash` is allowed (subject to per-call y/N or batch-approval if they picked auto-approve-per-step). This is the most plan-mode-aligned path — the work is gated by the user's explicit approval of scope, not by a backdoor escape.
 
 2. **Tell the user to switch modes in-session.** Two zero-restart paths:
-   - `Shift+Tab` cycles modes: Ask → Yolo → Plan → Ask. One keystroke.
+   - `Shift+Tab` cycles modes: Ask → Plan → Yolo → Ask. One keystroke.
    - `/yolo` slash command toggles Yolo on/off in-session (mutually exclusive with `/plan`, so /yolo also exits plan mode).
    Both keep the current session, preserve all message history, and don't require closing the program.
 
@@ -156,7 +156,7 @@ Sometimes the right answer really is `curl` / `docker` / `kubectl` / `go test` /
 
 ## Cost discipline
 
-`propose` and `ask_user` both block waiting for user input. Each one is a real interruption — use them sparingly. Two `ask_user` calls during ANALYZE and one `propose` to gate is typical. Five `ask_user` calls + three `propose` cycles in one task means you're being either too cautious or insufficiently prepared in ANALYZE.
+`propose` and `ask_user` both block waiting for user input. Each one is a real interruption — use them sparingly. Zero to two `ask_user` calls during ANALYZE and one `propose` to gate is the normal range, and every ask must pass the tool's three-part test first. Five `ask_user` calls + three `propose` cycles in one task means you're being either too cautious or insufficiently prepared in ANALYZE.
 
 ## What this skill does NOT do
 
