@@ -56,6 +56,22 @@ seek
 >
 > **English (IME users)**: When Windows Terminal forwards the Enter that commits an IME composition, that Enter sends the message directly — it is NOT turned into a newline. The "Enter inserts a newline" bug (Windows Terminal + Chinese IME) is fixed: the 50ms paste-guard now only applies inside the legacy console host (conhost), where pasted CRLF lines still need it. Set `SEEK_LEGACY_CONHOST_INPUT=1` to force the legacy behavior.
 
+### 粘贴图片 / Paste an image
+
+复制截图（或任意图片）后在输入框按 **Ctrl+V**：seek 用 Windows PowerShell 读剪贴板，把图抓成临时 PNG，输入框出现 `📋 image` 标记 —— 直接回车，图片就**原样发给模型**（默认模型 `deepseek-flash` 支持看图，无需切换）。剪贴板里没有图片时按键行为不变，仍是普通文本粘贴；抓图约 0.3 秒，不卡界面。
+
+> Windows Terminal 等终端会把粘贴和弦绑成自己的动作，按键本身到不了 seek——但这不影响使用：终端对**图片-only 剪贴板**执行粘贴时会发出一个**空粘贴事件**，seek 把它当作贴图意图直接抓剪贴板位图，所以默认终端里 **Ctrl+V 原样可用、零配置**。若你的终端把按键放行给了应用（如部分 conhost 配置），seek 也绑了 `Ctrl+V` / `Ctrl+Shift+V` 两个键，同样触发。
+
+> **English**: With an image on the clipboard, **Ctrl+V** grabs it via Windows PowerShell into a temp PNG and shows a `📋 image` marker — press Enter to send the picture as-is to the default `deepseek-flash` model (no `/model` switch needed). With no image, the key stays a plain text paste. The grab takes ~0.3s and never blocks the UI. Intercept-proof: stock terminals (Windows Terminal et al.) bind the paste chord to their own action so the keypress never reaches seek — but pasting an image-only clipboard makes them emit an EMPTY bracketed-paste event, which seek treats as image intent and grabs the bitmap. Where a terminal does pass the key through, seek also binds ctrl+v / ctrl+shift+v directly.
+
+想换抓图器（比如换成自己的脚本）就设 `SEEK_CLIPBOARD_IMAGE_CMD`，**重启终端**生效：
+
+```powershell
+setx SEEK_CLIPBOARD_IMAGE_CMD "powershell -NoProfile -STA -File C:\tools\seek-grab.ps1"
+```
+
+> **English**: To swap the grabber, set `SEEK_CLIPBOARD_IMAGE_CMD` and restart the terminal. The value is split on whitespace, so keep paths space-free; your script receives the output PNG path as its last argument.
+
 ### 输入框换行 / Newline in the input box
 
 | 按键 | 行为 |

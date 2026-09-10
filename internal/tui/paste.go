@@ -124,13 +124,13 @@ func (m Model) insertPasteText(text string) Model {
 
 // imagePasteMarker is the fold placeholder shown in the input after a
 // clipboard image is grabbed (M-imgpaste.2); resolved to `@<path>` on
-// submit so the OCR pipeline picks it up.
-const imagePasteMarker = "📋 image — press Enter to OCR & send"
+// submit so the vision router attaches the bytes natively.
+const imagePasteMarker = "📋 image — press Enter to send"
 
 // resolvePasteInInput replaces pending fold markers with their bodies just
 // before submit: the text-paste marker → the full pasted text; the image
-// marker → `@<temp PNG path>` (M-imgpaste.2) so ExpandInput / ocr.Expand
-// OCRs it. No-op when nothing is pending.
+// marker → `@<temp PNG path>` (M-imgpaste.2) so ExpandInput / the vision
+// router attaches it. No-op when nothing is pending.
 func (m *Model) resolvePasteInInput() {
 	if m.pastedContent == "" && m.pastedImagePath == "" {
 		return
@@ -152,11 +152,12 @@ func (m *Model) resolvePasteInInput() {
 	m.input.SetValue(val)
 }
 
-// tryClipboardPaste handles Ctrl+V. M-imgpaste.2: if the clipboard holds an
-// image (and a grabber is wired), grab it to a temp PNG and insert a fold
-// marker that resolves to `@<path>` on submit — reusing the 柱 Q OCR
-// pipeline. Otherwise fall back to text paste. A slow/hanging grabber is
-// bounded by a short timeout so the UI never wedges.
+// tryClipboardPaste handles Ctrl+V / Ctrl+Shift+V. M-imgpaste.2: if the
+// clipboard holds an image (and a grabber is wired), grab it to a temp PNG
+// and insert a fold marker that resolves to `@<path>` on submit — the
+// vision router attaches the bytes natively. Otherwise fall back to text
+// paste. A slow/hanging grabber is bounded by a short timeout so the UI
+// never wedges.
 func (m Model) tryClipboardPaste() (Model, bool) {
 	if m.opts.GrabImage != nil {
 		base := m.opts.Ctx

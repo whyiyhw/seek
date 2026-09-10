@@ -37,6 +37,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// embedded \r bytes never arrive as separate Enter keys between
 		// lines. v2 delivers paste as a dedicated message type instead
 		// of a key with a Paste flag.
+		//
+		// An EMPTY paste is the signature of a terminal-level paste on
+		// an image-only clipboard: the terminal (Windows Terminal et al.)
+		// intercepts the paste chord itself, finds no text format to
+		// inject, and emits just the empty bracketed-paste wrappers. That
+		// is the user's image-paste intent reaching us by the only
+		// channel it can — route it to the clipboard-image grab
+		// (tryClipboardPaste grabs the bitmap, or no-ops when the
+		// clipboard truly holds nothing). Verified against a real
+		// Windows Terminal: Ctrl+V with an image-only clipboard delivers
+		// PasteMsg{Content:""} and never a keypress.
+		if msg.Content == "" {
+			if pasted, ok := m.tryClipboardPaste(); ok {
+				m = pasted
+			}
+			m.updateCommandMenu()
+			m.updatePathCompleter()
+			return m, nil
+		}
 		m = m.insertPasteText(msg.Content)
 		m.updateCommandMenu()
 		m.updatePathCompleter()

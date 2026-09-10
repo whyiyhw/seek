@@ -111,7 +111,7 @@
 |---|---|
 | **M-imgpaste.1** ✅ | `internal/clipimage`:pluggable 抓图器(`Options.Command`/`defaultGrabCommand` 平台默认,把剪贴板图写到末参路径)+ `ErrNoImage`/`ErrNoGrabber` 检测 + `gcOldGrabs`(24h age GC)。纯单测(假命令:has-image/empty/non-zero/no-grabber/canceled/GC),82.5%。 |
 | **M-imgpaste.2** ✅ | TUI 接线:`tryClipboardPaste` 加图片分支(超时保护)+ `Options.GrabImage` 注入 + `Model.pastedImagePath` + `imagePasteMarker` 折叠 + `resolvePasteInInput` 换成 `@<路径>`(镜像文本粘贴)。`cmd/seek` 接线(env `SEEK_CLIPBOARD_IMAGE_CMD` 覆盖、cache dir `~/.seek/cache/clipboard`)。假抓图器单测:image→marker、resolve→@path、无图不回归、空 no-op。 |
-| **M-imgpaste.3** 🚧 | **macOS osascript 抓图器真机 e2e 通过**(剪贴板放图 → `Grab` 取回 21KB PNG,gated darwin test)+ 临时文件 GC ✅。**剩**:config `imagepaste.command` key（env 已通）、Linux/Windows 真机验证（需在对应平台）、完整 TUI 手动 e2e（`Ctrl+V` 活体粘贴需真终端）。 |
+| **M-imgpaste.3** 🚧 | **macOS osascript 抓图器真机 e2e 通过**(剪贴板放图 → `Grab` 取回 21KB PNG,gated darwin test)+ 临时文件 GC ✅ + **Windows PowerShell 默认抓图器已交付**(`defaultGrabCommandFor("windows")` → WinForms `Clipboard::GetImage()`;真机 e2e 通过:`SEEK_CLIPIMAGE_E2E=1` 取回 334B PNG / 309ms,`e2e_windows_test.go` 同时守 3s 预算)✅。**剩**:config `imagepaste.command` key（env 已通）、Linux 真机验证（需在对应平台）、完整 TUI 手动 e2e（`Ctrl+V` 活体粘贴需真终端）。 |
 
 ---
 

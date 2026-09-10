@@ -611,9 +611,48 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Ctrl+V reads the OS clipboard directly. The bubbles textarea Paste
 	// cmd returns an unexported pasteMsg that our Update switch never
 	// forwarded — intercept here so Windows Ctrl+V gets the full body.
-	if msg.String() == "ctrl+v" {
+	//
+	// Ctrl+Shift+V is bound too because Windows terminals EAT one of the
+	// two by default and pass the other through: Windows Terminal binds
+	// plain Ctrl+V to its own text paste (the keypress never reaches us),
+	// while conhost with "Use Ctrl+Shift+C/V as Copy/Paste" checked
+	// intercepts Ctrl+Shift+V instead. Binding both leaves the image grab
+	// reachable on a stock terminal with zero configuration — and the
+	// KEY, not the terminal's paste event, is the only path that can
+	// reach the bitmap: a terminal-level paste of an image-only clipboard
+	// injects nothing at all (paste carries UTF-8 text only).
+	//
+	// The ctrl+shift match is case-insensitive because Windows console
+	// input capitalises the rune under Shift: the same physical chord can
+	// arrive as Code 'v' or 'V' ("ctrl+shift+v" / "ctrl+shift+V").
+	if s := msg.String(); s == "ctrl+v" || strings.EqualFold(s, "ctrl+shift+v") {
 		if pasted, ok := m.tryClipboardPaste(); ok {
 			m = pasted
+			m.updateCommandMenu()
+			m.updatePathCompleter()
+			return m, nil
+		}
+	}
+
+	// The image fold marker deletes as ONE unit: a Backspace with the
+	// caret at the end of the input removes the whole marker AND cancels
+	// the pending image attachment. The alternative is 30+ rune presses
+	// that strand a half-marker — resolvePasteInInput only substitutes
+	// the EXACT marker text, so a partial delete silently drops the image
+	// and leaks marker fragments into the sent message. Guarded on the
+	// caret being at the very end so editing mid-input never
+	// atomically cancels an image the user is still typing around.
+	if msg.String() == "backspace" && m.pastedImagePath != "" {
+		val := m.input.Value()
+		lastLine := val[strings.LastIndexByte(val, '\n')+1:]
+		if strings.HasSuffix(val, imagePasteMarker) &&
+			m.input.Line() == m.input.LineCount()-1 &&
+			// Column() counts RUNES, not bytes (the emoji/em-dash in the
+			// marker make the two disagree — pinned by the atomic-delete
+			// tests).
+			m.input.Column() == len([]rune(lastLine)) {
+			m.input.SetValue(strings.TrimSuffix(val, imagePasteMarker))
+			m.pastedImagePath = ""
 			m.updateCommandMenu()
 			m.updatePathCompleter()
 			return m, nil

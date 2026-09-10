@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -75,11 +76,37 @@ func TestGrab_NoImage_NonZeroExit(t *testing.T) {
 func TestGrab_NoGrabber(t *testing.T) {
 	// No explicit command + no platform default → ErrNoGrabber.
 	orig := defaultGrabCommand
-	defaultGrabCommand = func() []string { return nil }
+	defaultGrabCommand = func() ([]string, string) { return nil, "" }
 	defer func() { defaultGrabCommand = orig }()
 
 	if _, err := Grab(context.Background(), Options{CacheDir: t.TempDir()}); !errors.Is(err, ErrNoGrabber) {
 		t.Fatalf("no grabber should be ErrNoGrabber, got %v", err)
+	}
+}
+
+// TestGrab_OutEnvDeliversPath: when the default names an outEnv, Grab must
+// pass the reserved path through that env var and NOT append it to argv — the
+// Windows default depends on this (argv would be re-parsed as PowerShell
+// command text, splitting any path with a space).
+func TestGrab_OutEnvDeliversPath(t *testing.T) {
+	orig := defaultGrabCommand
+	// Fake "windows-like" default: writes $FAKE_OUT to the file at that path.
+	defaultGrabCommand = func() ([]string, string) {
+		return []string{"sh", "-c", `printf '%s' "$FAKE_OUT" > "$FAKE_OUT"`, "sh"}, "FAKE_OUT"
+	}
+	defer func() { defaultGrabCommand = orig }()
+
+	path, err := Grab(context.Background(), Options{CacheDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("env-delivered path should grab: %v", err)
+	}
+	defer os.Remove(path)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != path {
+		t.Fatalf("grabber wrote to %q, want the reserved path %q", b, path)
 	}
 }
 
@@ -93,10 +120,71 @@ func TestGrab_CanceledCtx(t *testing.T) {
 }
 
 func TestDefaultGrabCommand_Platform(t *testing.T) {
-	// macOS/Linux have a default; elsewhere nil. A non-nil default must be
-	// a real argv (sanity that it isn't accidentally an empty slice).
-	if got := defaultGrabCommand(); got != nil && len(got) == 0 {
+	// macOS/Linux/Windows have a default; elsewhere nil. A non-nil default
+	// must be a real argv (sanity that it isn't accidentally an empty slice).
+	if got, _ := defaultGrabCommand(); got != nil && len(got) == 0 {
 		t.Fatal("non-nil default must be a real argv")
+	}
+}
+
+// TestDefaultGrabCommandFor_Platforms pins every branch on every host — the
+// switch is on a goos PARAMETER, not runtime.GOOS, so a Linux CI box still
+// exercises the Windows entry (the branch that was missing until the Windows
+// default landed: Ctrl+V silently pasted nothing there).
+func TestDefaultGrabCommandFor_Platforms(t *testing.T) {
+	tests := []struct {
+		goos   string
+		first  string // "" = expect no default at all
+		outEnv string
+	}{
+		{"darwin", "osascript", ""},
+		{"linux", "sh", ""},
+		{"windows", "powershell", windowsOutEnv},
+		{"plan9", "", ""},
+	}
+	for _, tc := range tests {
+		got, outEnv := defaultGrabCommandFor(tc.goos)
+		if tc.first == "" {
+			if got != nil {
+				t.Errorf("%s: want nil (no default grabber), got %q", tc.goos, got)
+			}
+			continue
+		}
+		if len(got) == 0 || got[0] != tc.first {
+			t.Errorf("%s: want argv starting with %q, got %q", tc.goos, tc.first, got)
+			continue
+		}
+		if outEnv != tc.outEnv {
+			t.Errorf("%s: outEnv = %q, want %q", tc.goos, outEnv, tc.outEnv)
+		}
+	}
+}
+
+// TestDefaultGrabCommandFor_WindowsShape guards the contract the Windows
+// default depends on: the output path CANNOT ride on argv, because
+// `powershell -Command` re-parses everything after -Command as command TEXT —
+// a path with a space (C:\Users\John Smith\…) splits, and an apostrophe
+// (C:\Users\O'Brien\…) is a parse error. So: the argv must NOT invite a
+// trailing path (outEnv is set) and the script must read the env var, or the
+// grab writes nowhere and Ctrl+V degrades to text paste. See docs/pitfalls.md
+// "PowerShell `-Command`: everything after it is command TEXT".
+func TestDefaultGrabCommandFor_WindowsShape(t *testing.T) {
+	got, outEnv := defaultGrabCommandFor("windows")
+	if len(got) < 2 {
+		t.Fatalf("windows default too short: %q", got)
+	}
+	if got[len(got)-2] != "-Command" {
+		t.Fatalf("windows default must end with `-Command <script>`; got %q", got)
+	}
+	if outEnv != windowsOutEnv {
+		t.Fatalf("windows default must deliver the path via %s (argv is command text), got outEnv %q", windowsOutEnv, outEnv)
+	}
+	script := got[len(got)-1]
+	if !strings.Contains(script, "$env:"+windowsOutEnv) {
+		t.Errorf("script must read the output path from $env:%s: %q", windowsOutEnv, script)
+	}
+	if !strings.Contains(script, "Clipboard]::GetImage()") {
+		t.Errorf("script must read the clipboard bitmap: %q", script)
 	}
 }
 
