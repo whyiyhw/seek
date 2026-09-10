@@ -693,9 +693,14 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	}
 	// Fold the summariser's own usage into the cumulative tracker so
 	// the cost line in the status bar stays honest — the compact call
-	// is a real billed request.
+	// is a real billed request. Then Seal: the summariser's prompt WAS
+	// the pre-compact context, and leaving it as the most recent turn
+	// pinned the status bar's ctx% at the old full-history reading
+	// until the next turn. Sealing keeps the totals but re-bases ctx%
+	// on the post-compact context (the first turn in the child session).
 	if m.opts.Tracker != nil {
 		m.opts.Tracker.Record(msg.usage, m.opts.Model, pricing.CurrentTier(time.Now()))
+		m.opts.Tracker.Seal()
 	}
 
 	var snapshotID string

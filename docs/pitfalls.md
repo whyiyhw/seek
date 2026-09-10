@@ -429,6 +429,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any `json.Unmarshal` target in an LLM tool boundary must use `DisallowUnknownFields`. Silent drops make self-correction loops impossible — the model has no information to act on
 - **Refs**: `internal/tools/tool.go:UnmarshalStrict`; `internal/tools/listdir/listdir_test.go`
 
+### A clean empty completion aborted the turn — but a retry needs "nothing was rendered" as its gate
+- **Saw**: a turn died with `agent: model returned an empty response (no content and no tool calls)` after a long tool-heavy run. The stream had completed normally (200, finish=stop) with no deltas at all — an upstream flake — yet the whole user turn was lost to a manual re-send
+- **Why**: the empty-response guard (correctly) refuses to commit an assistant message with no content and no tool_calls — DeepSeek rejects that shape on the next request. But it treated every empty as fatal, including the pure-flake shape where NOTHING had been streamed to the UI. A retry is only safe when no events were emitted; once reasoning deltas reached the screen, re-issuing would double-render the partial block
+- **Fix**: `errEmptyResponse` sentinel + retry-once inside the existing retry budget. `runTurnDeepSeek`/`runTurnLLM` return the sentinel ONLY when `started == false` (no MessageStart/MessageDelta ever emitted) and finish is ""/stop; reasoning-only empties and finish=length keep the hard error. Pinned by `TestAgent_EmptyResponse_RetriedOnceAndRecovers` (exactly 2 requests, 1 MessageStart, 1 TurnEnd), `TestAgent_ReasoningOnlyEmpty_NotRetried` (1 request), and the extended `TestAgent_EmptyChoicesUsageOnly` (budget exhausted → error)
+- **Lesson**: "retryable" is not a property of the error, it is a property of the error AND what the consumer already saw. Encode retryability where visibility is known (the streaming function), not at the retry site — the loop cannot tell whether events left the process
+- **Refs**: `pkg/agent/agent.go` (`errEmptyResponse`, retry loop in `Prompt`, both `runTurn*` guards), `pkg/agent/agent_test.go`
+
 ## DeepSeek API
 
 ### `reasoning_content` rule for V4 thinking is the OPPOSITE of the old reasoner — conditional on tool_calls
@@ -1315,6 +1322,13 @@ If you're new to the project, skim entries in this order:
 - **Fix**: each test that asserts a positive duration sleeps ≥2ms inside the measured span before the closing event (established empirically: 2ms was reliable; sub-ms was not).
 - **Lesson**: on Windows, never assert `duration > 0` on a span you created and measured within the same goroutine microseconds apart — either sleep across a tick or assert structure (zeroed state, accumulation) instead of magnitude.
 - **Refs**: `internal/tui/summary_test.go` (the `time.Sleep(2 * time.Millisecond)` comments), this file's "t.Cleanup(chdir) after t.TempDir() breaks Windows TempDir removal" entry (same platform, same class)
+
+### After /compact the status bar kept showing the summariser's full-history ctx% until the next turn
+- **Saw**: right after compacting a ~510K-token session (1M window), the status bar still read `ctx 51%` — the summariser call re-read the entire old history, and that reading stuck as "the most recent turn" until the next real turn landed. Easy to read as "compaction barely helped"
+- **Why**: `handleCompactDone` records the summariser's usage via `Tracker.Record` (cost honesty — it is a real billed request), and the bar's ctx% reads `Last()` = the most recently recorded turn. So the pre-compact context size was pinned as the current one even though the agent's history had already been swapped to the summary pair
+- **Fix**: new `Tracker.Seal()` folds every recorded turn into the cumulative-only base — `Cumulative()` / `CumulativeCost()` / cache% unchanged — while `Last()`/`LastCost()` go empty; `handleCompactDone` calls it right after the Record. ctx% now shows 0% (no reading in this window) until the first post-compact turn re-bases it. `hasBase` is deliberately NOT set by Seal (its AdoptChild guard is about resume-time bases, not in-process folds — arming it would turn legitimate adoption flows into false panics). Tests: `TestTracker_Seal_FoldsTurnsIntoBase`, `TestTracker_Seal_IsIdempotentAndEmptySafe`, `TestTracker_Seal_DoesNotArmDoubleCountGuard`, plus the extended compact handler test
+- **Lesson**: "most recent turn" is the wrong baseline for a window indicator when the window itself was replaced. When an operation rebases the live context, the tracker needs an explicit "start a new window" primitive — otherwise every `Last()` consumer silently keeps reading the old world until the next write
+- **Refs**: `internal/cache/cache.go:Seal`, `internal/tui/update_agent.go:handleCompactDone`, `internal/cache/cache_test.go`
 
 ## CI / gates
 

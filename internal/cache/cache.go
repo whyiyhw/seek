@@ -88,6 +88,36 @@ func (t *Tracker) SetBase(u deepseek.Usage, model string, tier pricing.Tier) {
 	t.mu.Unlock()
 }
 
+// Seal folds every recorded turn into the cumulative-only base:
+// Cumulative()/CumulativeCost() are unchanged (the tokens and dollars stay
+// counted), while Last()/LastCost() go empty until the next Record.
+//
+// Used by /compact. The pre-compact turns — including the summariser call
+// that just re-read the full history — belong in the session totals, but
+// must not feed the status bar's ctx% indicator, which should re-base on
+// the (small) post-compact context. Without the seal, ctx% sat at the
+// summariser's full-history reading until the next turn landed.
+//
+// hasBase is deliberately NOT set here. Its AdoptChild guard is about a
+// RESUME-time base that already aggregates prior-session children; an
+// in-process seal folds only this Tracker's own turns (adopted children
+// stay in `children` and keep being walked), so the guard's premise does
+// not hold and arming it would turn legitimate adoption flows into false
+// panics. A subsequent resume arms the guard the usual way via SetBase.
+func (t *Tracker) Seal() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, r := range t.turns {
+		t.baseUsage.PromptTokens += r.Usage.PromptTokens
+		t.baseUsage.CompletionTokens += r.Usage.CompletionTokens
+		t.baseUsage.TotalTokens += r.Usage.TotalTokens
+		t.baseUsage.PromptCacheHitTokens += r.Usage.PromptCacheHitTokens
+		t.baseUsage.PromptCacheMissTokens += r.Usage.PromptCacheMissTokens
+		t.baseCost += r.Cost
+	}
+	t.turns = nil
+}
+
 // Record appends a turn to the history. cost is locked in at this
 // moment using (model, tier); the same usage replayed later under a
 // different model/tier will NOT re-price.

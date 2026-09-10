@@ -123,6 +123,91 @@ func TestTracker_SetBase_EmptyUsageIsNoOp(t *testing.T) {
 	}
 }
 
+// TestTracker_Seal_FoldsTurnsIntoBase is the /compact rebase pin: Seal
+// must keep Cumulative()/CumulativeCost() intact (cost honesty) while
+// emptying Last()/LastCost() so the status bar's ctx% re-bases on the
+// post-compact context instead of sticking at the summariser call's
+// full-history reading.
+func TestTracker_Seal_FoldsTurnsIntoBase(t *testing.T) {
+	tr := New()
+	recordFlash(tr, deepseek.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, PromptCacheHitTokens: 60, PromptCacheMissTokens: 40})
+	tr.Record(
+		deepseek.Usage{PromptTokens: 500_000, CompletionTokens: 800, TotalTokens: 500_800, PromptCacheHitTokens: 499_000, PromptCacheMissTokens: 1_000},
+		deepseek.ModelV41Flash, pricing.TierOffPeak,
+	)
+
+	beforeUsage := tr.Cumulative()
+	beforeCost := tr.CumulativeCost()
+
+	tr.Seal()
+
+	if got := tr.Cumulative(); got != beforeUsage {
+		t.Errorf("Cumulative changed across Seal: %+v → %+v", beforeUsage, got)
+	}
+	if got := tr.CumulativeCost(); got != beforeCost {
+		t.Errorf("CumulativeCost changed across Seal: %v → %v", beforeCost, got)
+	}
+	if got := tr.Last(); got != (deepseek.Usage{}) {
+		t.Errorf("Last() after Seal = %+v, want zero", got)
+	}
+	if got := tr.LastCost(); got != 0 {
+		t.Errorf("LastCost() after Seal = %v, want 0", got)
+	}
+	if n := len(tr.Turns()); n != 0 {
+		t.Errorf("Turns() after Seal = %d turns, want 0", n)
+	}
+
+	// The next genuine turn re-bases Last() on the post-compact context
+	// and still accumulates on top of the sealed totals.
+	recordFlash(tr, deepseek.Usage{PromptTokens: 20_000, CompletionTokens: 100, TotalTokens: 20_100})
+	if got := tr.Last().PromptTokens; got != 20_000 {
+		t.Errorf("Last().PromptTokens after post-seal record = %d, want 20_000", got)
+	}
+	if got := tr.Cumulative().PromptTokens; got != beforeUsage.PromptTokens+20_000 {
+		t.Errorf("Cumulative().PromptTokens after post-seal record = %d, want %d", got, beforeUsage.PromptTokens+20_000)
+	}
+	if got := tr.CumulativeCost(); got <= beforeCost {
+		t.Errorf("CumulativeCost after post-seal record = %v, want > %v", got, beforeCost)
+	}
+}
+
+// TestTracker_Seal_IsIdempotentAndEmptySafe: Seal on a fresh tracker and
+// repeated Seal calls are no-ops — they must never panic or double-fold.
+func TestTracker_Seal_IsIdempotentAndEmptySafe(t *testing.T) {
+	tr := New()
+	tr.Seal() // empty tracker — must not panic
+	recordFlash(tr, deepseek.Usage{PromptTokens: 5, TotalTokens: 5})
+	tr.Seal()
+	tr.Seal() // second seal folds nothing
+	if got := tr.Cumulative().PromptTokens; got != 5 {
+		t.Errorf("Cumulative after repeated Seal = %d, want 5", got)
+	}
+	if got := tr.Last().PromptTokens; got != 0 {
+		t.Errorf("Last() after repeated Seal = %d, want 0", got)
+	}
+}
+
+// TestTracker_Seal_DoesNotArmDoubleCountGuard pins the deliberate
+// non-interaction with AdoptChild: Seal folds only this Tracker's OWN
+// turns, so the resume-time double-count premise (base already
+// aggregates prior-session children) does not hold and the guard must
+// stay disarmed. Adopting a non-fresh child after Seal is the same
+// benign case as adopting one on a never-resumed parent.
+func TestTracker_Seal_DoesNotArmDoubleCountGuard(t *testing.T) {
+	parent := New()
+	recordFlash(parent, deepseek.Usage{PromptTokens: 100, TotalTokens: 100})
+	parent.Seal()
+
+	child := New()
+	recordFlash(child, deepseek.Usage{PromptTokens: 50, TotalTokens: 50})
+
+	parent.AdoptChild(child) // must NOT panic
+
+	if got := parent.Cumulative().TotalTokens; got != 150 {
+		t.Errorf("Cumulative after seal+adopt = %d, want 150 (100 sealed + 50 child)", got)
+	}
+}
+
 func TestTracker_TurnsReturnsCopy(t *testing.T) {
 	tr := New()
 	recordFlash(tr, deepseek.Usage{PromptTokens: 1})
@@ -288,7 +373,7 @@ func TestTracker_AdoptChild_IsIdempotent(t *testing.T) {
 // nil receivers / self-adoption.
 func TestTracker_AdoptChild_NilAndSelfAreNoOp(t *testing.T) {
 	parent := New()
-	parent.AdoptChild(nil)  // must not panic
+	parent.AdoptChild(nil)    // must not panic
 	parent.AdoptChild(parent) // must not panic, must not adopt self
 	// Adopting self would cause infinite recursion in Cumulative — verify
 	// we can still walk without stack-overflow.

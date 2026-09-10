@@ -1225,7 +1225,9 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 // rejects with "content or tool_calls must be set".
 func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 	t.Parallel()
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
 			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
@@ -1249,7 +1251,118 @@ func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 	if !strings.Contains(res.errors[0].Error(), "empty response") {
 		t.Errorf("error should mention empty response, got: %v", res.errors[0])
 	}
+	// Retry budget: a clean empty is re-issued exactly once before the
+	// error surfaces — two attempts total.
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server hits = %d, want 2 (one retry)", got)
+	}
 	// No orphan tool_calls — the empty message is NOT committed.
+	assertNoOrphanToolCalls(t, ag.Messages())
+}
+
+// TestAgent_EmptyResponse_RetriedOnceAndRecovers: the first attempt is a
+// clean empty (200, finish=stop, no deltas at all); the second streams
+// real content. The retry must be invisible in the event stream — one
+// MessageStart, one TurnEnd, no ErrorEvent — because attempt 1 emitted
+// nothing for the UI to duplicate (see errEmptyResponse).
+func TestAgent_EmptyResponse_RetriedOnceAndRecovers(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		if hits.Add(1) == 1 {
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0,"total_tokens":3}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+			return
+		}
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) > 0 {
+		t.Fatalf("empty retry should recover without an error, got: %v", res.errors)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server hits = %d, want 2", got)
+	}
+	if res.assistant.Content != "recovered" {
+		t.Errorf("assistant content = %q, want %q", res.assistant.Content, "recovered")
+	}
+	if n := strings.Count(strings.Join(res.events, ","), "MessageStart"); n != 1 {
+		t.Errorf("MessageStart count = %d, want 1 — the retry must not re-open the block: %v", n, res.events)
+	}
+	if n := strings.Count(strings.Join(res.events, ","), "TurnEnd"); n != 1 {
+		t.Errorf("TurnEnd count = %d, want 1 (one logical turn): %v", n, res.events)
+	}
+	hist := ag.Messages()
+	if n := len(hist); n == 0 || hist[n-1].Content != "recovered" {
+		t.Errorf("history tail = %+v, want the recovered assistant message", hist)
+	}
+}
+
+// TestAgent_ReasoningOnlyEmpty_NotRetried: reasoning streamed, then the
+// response ended with no content. The partial block is already visible,
+// so the empty guard must surface the error WITHOUT a retry — a retry
+// would render the reasoning twice.
+func TestAgent_ReasoningOnlyEmpty_NotRetried(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking..."}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) == 0 {
+		t.Fatal("expected empty-response error for reasoning-only stream, got none")
+	}
+	if !strings.Contains(res.errors[0].Error(), "empty response") {
+		t.Errorf("error should mention empty response, got: %v", res.errors[0])
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("server hits = %d, want 1 — reasoning-only empty must NOT be retried", got)
+	}
 	assertNoOrphanToolCalls(t, ag.Messages())
 }
 

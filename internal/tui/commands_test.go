@@ -1248,6 +1248,17 @@ func TestCompact_KicksOffAsyncSummariseAndPostsDoneMsg(t *testing.T) {
 	if !strings.Contains(hist[1].Content, "BRIEFING") {
 		t.Errorf("summary not folded into history: %q", hist[1].Content)
 	}
+
+	// The summariser's usage is counted (cost honesty) and then sealed:
+	// after /compact the tracker must NOT keep reporting the
+	// summariser's full-history prompt as the current context — ctx%
+	// re-bases on the first post-compact turn.
+	if got := m.opts.Tracker.Last().PromptTokens; got != 0 {
+		t.Errorf("tracker.Last().PromptTokens after compact = %d, want 0 (sealed)", got)
+	}
+	if got := m.opts.Tracker.Cumulative().TotalTokens; got != 9 {
+		t.Errorf("tracker.Cumulative().TotalTokens after compact = %d, want 9 (summariser usage still counted)", got)
+	}
 }
 
 // TestCompact_ForkPreservesFullHistory verifies that handleCompactDone

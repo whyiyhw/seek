@@ -474,13 +474,20 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 				History: append([]deepseek.Message{}, a.messages...),
 			})
 
-			// Retry loop: transient stream interruptions (unexpected
-			// EOF, SSE decode failures) that cut off mid-tool-call are
-			// safe to retry — the model's tool_call_ids are unverified,
-			// so the partial turn is NOT committed to history. We match
-			// the stream-layer retry budget (1 retry = 2 attempts) and
-			// backoff. Plain text streams cut off are NOT retried here;
-			// the partial text is already visible and the user can say
+			// Retry loop. Two shapes are retryable within the same
+			// budget (1 retry = 2 attempts) and backoff:
+			//   1. stream cuts (unexpected EOF, SSE decode failures)
+			//      that died mid-tool-call — the tool_call_ids are
+			//      unverified, so the partial turn is NOT committed to
+			//      history;
+			//   2. a clean empty response (errEmptyResponse) — the
+			//      server completed the stream with nothing in it.
+			//      DeepSeek's guidance for empty completions is to
+			//      retry, and runTurn returns the sentinel only when
+			//      NOTHING reached the UI, so a retry cannot duplicate
+			//      visible output.
+			// Plain text streams cut off are NOT retried here; the
+			// partial text is already visible and the user can say
 			// "continue".
 			const agentStreamRetries = 1
 			const agentRetryBackoff = 500 * time.Millisecond
@@ -494,18 +501,21 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 
 			for attempt := 0; attempt <= agentStreamRetries; attempt++ {
 				assistant, usage, finish, err = a.runTurn(ctx, out)
-				if err != nil {
-					break
-				}
 
-				// Only retry when the stream died while the model was
-				// emitting tool calls.
-				canRetry := len(assistant.ToolCalls) > 0 &&
-					finish != "tool_calls" &&
-					(strings.HasPrefix(finish, "stream_error:") ||
-						strings.HasPrefix(finish, "decode_error:")) &&
-					attempt < agentStreamRetries &&
-					ctx.Err() == nil
+				canRetry := false
+				switch {
+				case err != nil:
+					// Clean empty response — safe to re-issue.
+					canRetry = errors.Is(err, errEmptyResponse)
+				default:
+					// Only retry when the stream died while the model
+					// was emitting tool calls.
+					canRetry = len(assistant.ToolCalls) > 0 &&
+						finish != "tool_calls" &&
+						(strings.HasPrefix(finish, "stream_error:") ||
+							strings.HasPrefix(finish, "decode_error:"))
+				}
+				canRetry = canRetry && attempt < agentStreamRetries && ctx.Err() == nil
 
 				if !canRetry {
 					break
@@ -517,7 +527,7 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 					err = ctx.Err()
 				case <-time.After(agentRetryBackoff):
 				}
-				if err != nil {
+				if ctx.Err() != nil {
 					break
 				}
 			}
@@ -657,6 +667,19 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 	return out
 }
 
+// errEmptyResponse marks a completed stream that carried no content and
+// no tool calls — and emitted no events either. runTurn returns it only
+// in that shape, which is what makes it safe for the retry loop in
+// Prompt to re-issue the request: nothing reached the screen, so a
+// retry cannot duplicate visible output.
+//
+// The reasoning-only variant (thinking streamed, then the response ended
+// with no content) is deliberately NOT this sentinel — the partial block
+// is already visible, and a retry would render it twice. finish=length
+// is excluded too: the budget was the problem, and an identical retry
+// would be deterministic waste.
+var errEmptyResponse = errors.New("agent: model returned an empty response (no content and no tool calls)")
+
 // runTurn routes to the DeepSeek or second-tier path depending on which
 // provider was configured.
 func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
@@ -784,11 +807,6 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		}
 	}
 
-	if !started {
-		// Edge case: server returned nothing before [DONE].
-		out <- MessageStart{Message: assistant}
-	}
-
 	if maxIdx >= 0 {
 		assistant.ToolCalls = make([]deepseek.ToolCall, 0, maxIdx+1)
 		for i := 0; i <= maxIdx; i++ {
@@ -813,15 +831,32 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		return assistant, usage, finish, err
 	}
 
-	// Empty-response guard: if the model streamed reasoning tokens but
-	// no content or tool_calls, the assistant message has nothing to say.
+	// Empty-response guard: the assistant message has nothing to say.
 	// Committing it would leave an orphan assistant turn with no content
 	// and no tool_calls, which DeepSeek rejects on the next request as
 	// "Invalid assistant message: content or tool_calls must be set"
 	// (PRD §4.5.1, pitfalls/message-contract.md).
+	//
+	// Split on `started` (did any event reach `out`?):
+	//   - nothing streamed + normal finish → retryable sentinel; the
+	//     retry loop re-issues the request, and since attempt 1 emitted
+	//     no events there is nothing to duplicate on screen;
+	//   - reasoning streamed, then silence → the partial block is
+	//     already visible; a retry would double-render it. Hard error.
 	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
+		if !started && (finish == "" || finish == "stop") {
+			return assistant, usage, finish, errEmptyResponse
+		}
 		return assistant, usage, finish,
 			errors.New("agent: model returned an empty response (no content and no tool calls)")
+	}
+
+	if !started {
+		// Defensive: unreachable today — every emission path sets
+		// `started`, so !started implies the guard above returned. Kept
+		// so a future emission channel that forgets to set it still
+		// opens the UI's assistant block instead of rendering nothing.
+		out <- MessageStart{Message: assistant}
 	}
 
 	return assistant, usage, finish, nil
@@ -891,20 +926,25 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		}
 	}
 
-	if !started {
-		out <- MessageStart{Message: assistant}
-	}
-
 	if ctx.Err() != nil {
 		return assistant, deepseek.Usage{}, finish, ctx.Err()
 	}
 
-	// Empty-response guard: same rationale as runTurnDeepSeek — an
-	// assistant message with no content and no tool_calls poisons the
-	// next API request.
+	// Empty-response guard: same rationale AND same two-shape split as
+	// runTurnDeepSeek — a clean empty returns the retryable sentinel
+	// (nothing was emitted), a reasoning-only empty does not (the
+	// partial block is already visible).
 	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
+		if !started && (finish == "" || finish == "stop") {
+			return assistant, deepseek.Usage{}, finish, errEmptyResponse
+		}
 		return assistant, deepseek.Usage{}, finish,
 			errors.New("agent: model returned an empty response (no content and no tool calls)")
+	}
+
+	if !started {
+		// Defensive: see runTurnDeepSeek — unreachable by construction.
+		out <- MessageStart{Message: assistant}
 	}
 
 	usage := deepseek.Usage{
