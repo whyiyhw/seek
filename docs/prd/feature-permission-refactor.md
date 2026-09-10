@@ -603,3 +603,12 @@ type Workflow interface {
 - 真实痛点不到那个程度——R1.1 已经处理掉 #2 #3 两个最碍眼的，剩下的 #1 是 R2 范畴
 
 如果将来 `Kind` 超过 10 个 / `Display` 字段超过 12 个 / 出现"我不知道这个工具该归哪个 Kind"的真痛点，再开 Effect。
+
+## 十一、R1.2 addendum（2026-09）：`alwaysAllow` — per-Kind 会话许可
+
+> 2026-09 随 per-Kind 审批选项落地（8cacb15）。操作语义最初全文写在 AGENTS.md / CLAUDE.md，因 doc-budgets ratchet（指令文件冻结上限）细则归档至此，指令文件只留一句话摘要。
+
+- **是什么**：`Policy` 上的 per-Kind 会话级允许表。TUI 审批提示带 `[a] always: <kind>` 选项，用户选中即把该 Kind 加入表。
+- **语义**：跳过 `askFn`，但只作用于 **PREFERENCE 层**——workflow 门照常先跑（PlanAnalyze 对已授权 Kind 仍保持只读）。刻意比旧「[a] = 本会话 yolo」升级路径窄：批一个 edit 不再连带解锁 bash；会话级 yolo 只能显式 `/yolo` 进入。
+- **生命周期**：每次 `SetPref` / `SetWorkflow` 调用都清空；从不持久化（resume 后重新询问）；`Spawn` 子代理不继承。
+- **定位**：与 `preApproved`（plan-execute 步内免问）、`Action.ReadOnly`（bash 只读白名单）并列为三个状态扩展之一；本 PRD §二/§三的设计动机同样适用。
