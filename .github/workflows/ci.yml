@@ -14,8 +14,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache: true
@@ -27,8 +27,8 @@ jobs:
     name: cross-build (release targets)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
           cache: true
@@ -49,7 +49,7 @@ jobs:
     name: layer-lint (pkg/deepseek must not import pkg/llm)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: forbid pkg/deepseek -> pkg/llm imports
         run: |
           if grep -rnE 'github\.com/whyiyhw/seek/pkg/llm' pkg/deepseek; then
@@ -61,6 +61,6 @@ jobs:
     name: doc-budgets (AGENTS.md / CLAUDE.md must not accrete)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: verify standing docs stay within budget
         run: scripts/verify-doc-budgets.sh
