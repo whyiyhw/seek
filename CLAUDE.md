@@ -30,7 +30,7 @@ If you're not sure: log it — but only for pitfalls produced by the change at h
 - **`pkg/deepseek` must not import `pkg/llm`** (CI lint enforces this — see `.github/workflows/ci.yml`). The whole point of the split is that DeepSeek-specific optimisations don't get lowered into a generic interface.
 - **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state.
 - **Plan-mode subsystem (v2 + v2.x)**: confirmation-gated workflow `analyze → propose → execute → adjust → report`. Driven by the `propose` tool (`internal/tools/propose/`) and progress-tracked by the `plan` tool (`internal/tools/plan/`). Substate state machine lives in `permission.Policy` (Mode / preApproved flag) + agent mode reminder + TUI status bar; transcript event-sourcing reconstructs state on `seek -resume` (see `plan/reconstruct.go`). Plan-approval artifacts (write-once markdown snapshots) land in `~/.seek/projects/<id>/plans/` via `plan/artifact.go`. Full design + status table in [`docs/prd/feature-plan-mode.md`](docs/prd/feature-plan-mode.md).
-- **i18n (view layer only)**: message catalogue in `internal/i18n` (stdlib map-per-language, English terminal fallback). Localises human-facing prose ONLY — LLM-visible strings (tool results, agent errors) and the status bar stay English by design (prefix-cache byte stability + width-oracle discipline); see [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md). Language resolves ONCE per process at startup (`SEEK_LANG` > config `language` > `LC_ALL`/`LANG` > en); `/lang` is the only sanctioned runtime swap. When adding user-facing prose, route it through `i18n.T` and add the key to EVERY catalogue (the parity test enforces this).
+- **i18n (view layer only)**: catalogue in `internal/i18n` (`i18n.T`; every key goes in ALL catalogues — parity-tested). Human-facing prose only; LLM-visible strings and the status bar stay English (prefix-cache bytes + width oracle). Language resolves once per session; `/lang` is the only runtime swap. Design + scope: [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md).
 - See [`docs/prd/`](docs/prd/) for the full PRD series: v0 initial, v1 Memory, v2 Skill lifecycle, plus standalone feature PRDs (`feature-plan-mode.md`, `feature-webfetch.md`, `feature-permission-refactor.md`, `feature-active-memory.md`, `feature-mcp-client.md`, …).
 
 ## Tool usage workflow (load-bearing)
@@ -49,29 +49,19 @@ Never page through a whole file to answer a question grep can answer — small f
 
 ## Tool descriptions: the highest-leverage behavioural lever
 
-> **Audience: maintainers, not the running agent.** This section is development guidance for tuning the tool descriptions shipped in this repo — it is not a behavioural rule, and it does not relax any instruction elsewhere in this file.
+> **Audience: maintainers, not the running agent.** Development guidance for tuning the shipped tool descriptions — not a behavioural rule.
 
-Tool descriptions are the single most effective place to shape model behaviour: **they are always sent to the API as part of every tool schema**. Unlike project instructions (which are system-prompt territory and may be skimmed or ignored by weaker/faster models), tool descriptions travel with the JSON schema — the model MUST read them to construct a valid tool call.
+Tool descriptions are the most effective behavioural lever: they ride every tool schema to the API, so the model MUST read them to build a valid tool call — unlike project instructions, which weaker/faster models may skim. Schemas inject immediately before generation; a description sentence is ~10× more likely to influence the next tool call than the same sentence in a project file.
 
-**Pattern for tuning behaviour** (proven in this repo via `eval/cases/tool-selection/`):
-
-1. **Build an eval case first** — a prompt + expected metric bounds that define the desired behaviour in measurable terms.
-2. **Run baseline** — before changing anything, run the eval and record results.
-3. **Edit the tool description** — add 10–20 words of targeted guidance. Zero runtime overhead; the string is already being sent.
-4. **Run comparison** — re-run the eval and compare the tool-call sequence against baseline. Success = behavioural change (did the model choose the right tool in the right order?), not just binary PASS/FAIL.
-
-**Why this works when project-file entries don't**: model attention favours tokens closest to the user's request. Tool schemas are injected immediately before the generation step; they compete with conversation history for attention, not with the system prompt. A sentence in a tool description is ~10× more likely to influence the next tool call than the same sentence in a project file.
+Pattern (proven via `eval/cases/tool-selection/`): **eval case first** (prompt + measurable bounds) → **record the baseline** → **edit the description** (10–20 targeted words, zero runtime cost) → **re-run and compare tool-call sequences**, not just binary PASS/FAIL.
 
 ## AGENTS.md vs CLAUDE.md — related but not identical
 
-[`CLAUDE.md`](CLAUDE.md) is read by **Claude Code** at the start of every session in this repo. [`AGENTS.md`](AGENTS.md) is the canonical agent-instruction file — it is auto-loaded by **seek**, and mirrors structural content from here.
+[`CLAUDE.md`](CLAUDE.md) is read by **Claude Code** each session; [`AGENTS.md`](AGENTS.md) is the canonical agent-instruction file that **seek** auto-loads. Same pulse, diverging only where the host tooling differs:
 
-The two files share the same pulse but are allowed to diverge where the tooling differs:
-
-- **CLAUDE.md** can leverage Claude Code-specific capabilities (permission model, tool names, workflow patterns) without translating them into seek's vocabulary first.
-- **AGENTS.md** may express the same behaviours in seek-specific terms (the eval framework, `grep`+`read` workflow, `internal/tools/` layout, plan-mode FSM).
-- **Sync rule**: structural content (Architecture / Permission model / Code conventions) must stay identical — change it in both files in the same edit. Behavioural sections (Tool usage workflow, Tool descriptions, …) are maintained per-host: update only the file whose host agent's behaviour you're changing, unless you intend the new behaviour for both.
-- **Not byte-identical by design**: the goal is that both agents arrive at the same behaviour, not that they read the same text — translate the host-specific vocabulary (seek tools vs Claude Code equivalents) rather than copying verbatim.
+- **CLAUDE.md** uses Claude Code's own vocabulary (permission model, tool names, workflow patterns); **AGENTS.md** expresses the same behaviours in seek terms (eval framework, `grep`+`read`, `internal/tools/`, plan-mode FSM).
+- **Sync rule**: structural sections (Architecture / Permission model / Code conventions) change in BOTH files in the same edit; behavioural sections are maintained per-host.
+- Not byte-identical by design — the goal is equal behaviour, not equal text.
 
 ## Token & prefix-cache constraints (non-negotiable)
 
@@ -101,13 +91,13 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 
 ## When a tool fails or returns unexpected content
 
-Self-recovery first. "Ask the user to do it" should be the LAST resort, not the first.
+Self-recovery first. "Ask the user to do it" is the LAST resort, not the first.
 
-- **Read the error message carefully.** Tool results include category-specific hints: webfetch error prefixes (`[webfetch: blocked target]` etc.), bash `Hint:` clauses pointing at specific fixes, permission denials suggesting alternatives. The answer is usually IN the error — re-read before retrying or escalating.
-- **Try alternative paths to the same answer.** webfetch returned garbage on an HTML page? Try a different URL form — raw GitHub (`https://raw.githubusercontent.com/...`), the API reference instead of the rendered doc, a mirror, the project's own `docs/` in the source repo. bash denied in plan-analyze? Use the equivalent purpose-built tool (the `git` tool instead of `bash("git log")`, `webfetch` instead of `curl`). One tool failing rarely means the question is unanswerable.
-- **Check local context before reaching for external resources.** Before asking the user to paste docs, run `list_dir docs/` and `grep` for keywords — seek's CWD often has README / PRD / comparison docs that already answer the question. The repo is closer than the internet.
-- **Re-frame to source code.** "I can't fetch the docs to answer Y" frequently becomes "I can answer Y from the code." For questions about a project's behaviour, the source is more authoritative than its docs anyway.
-- **Only when actually blocked, ask SPECIFIC questions** via `ask_user` with a 2–4 option picker, not free-form "what should I do?". The anti-pattern is shifting tool work to the user: "can you fetch this page and paste it for me?" inverts seek's value proposition — users installed seek because they wanted the *model* to do the lookup work, not to become a human glue layer between the model and the web.
+- **Read the error.** Results carry category-specific hints — webfetch prefixes (`[webfetch: blocked target]`), bash `Hint:` clauses, permission denials suggesting alternatives. The answer is usually IN the error.
+- **Try alternative paths.** webfetch returned garbage on an HTML page? Try raw GitHub, the API reference instead of the rendered doc, a mirror, the project's own `docs/`. bash denied in plan-analyze? Use the purpose-built tool (`git` instead of `bash("git log")`, `webfetch` instead of `curl`). One tool failing rarely makes the question unanswerable.
+- **Check local context first.** `list_dir docs/` + `grep` for keywords before asking the user to paste anything — seek's CWD often already answers the question; the repo is closer than the internet.
+- **Re-frame to source.** "I can't fetch the docs to answer Y" usually becomes "I can answer Y from the code" — for behaviour questions the source beats the docs anyway.
+- **Actually blocked? Ask SPECIFIC questions** via `ask_user` with a 2–4 option picker, not free-form. Shifting lookup work to the user ("fetch this page for me?") inverts seek's value proposition — the *model* does the lookup work.
 
 ## Code conventions
 
