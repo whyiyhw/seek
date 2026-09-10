@@ -62,7 +62,7 @@ func TestVersionCheckCmd_FreshCacheReplay(t *testing.T) {
 // TestVersionCheckCmd_FreshCacheAlreadyUpgraded: cache still holds the
 // tag the user was nudged toward, but they've since installed it.
 // Replaying that tag without comparing to current would leave a stale
-// "↑ v0.3.1" hint on the status bar forever (within the 24h TTL).
+// "new v0.3.1" hint on the status bar forever (within the 24h TTL).
 func TestVersionCheckCmd_FreshCacheAlreadyUpgraded(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
 	t.Setenv("SEEK_NO_UPGRADE_CHECK", "")

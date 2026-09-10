@@ -634,7 +634,7 @@ type Model struct {
 
 	// upgradeAvailable is the tag of a newer release found by the
 	// startup probe, e.g. "v0.2.0". Empty when up-to-date or the
-	// probe was skipped. Surfaced in the status bar as a "↑ <tag>"
+	// probe was skipped. Surfaced in the status bar as a "new <tag>"
 	// segment so the user can see they're behind without a popup.
 	upgradeAvailable string
 

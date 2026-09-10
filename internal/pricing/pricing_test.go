@@ -220,7 +220,25 @@ func TestNextTransition_OffPeakEvening(t *testing.T) {
 }
 
 func TestFormatCost(t *testing.T) {
-	if got := FormatCost(0.001234); got != "$0.0012" {
-		t.Errorf("FormatCost = %q", got)
+	// Precision scales with magnitude: sub-cent amounts keep 4 decimals
+	// (they are routinely the whole story for one call), the sub-dollar
+	// band reads in thousandths, dollars and up in cents. Zero is
+	// exactly "$0" — not "$0.0000".
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{0, "$0"},
+		{0.001234, "$0.0012"},
+		{0.0099, "$0.0099"},
+		{0.01, "$0.010"},
+		{0.42, "$0.420"},
+		{1.5, "$1.50"},
+		{9.99, "$9.99"},
+	}
+	for _, c := range cases {
+		if got := FormatCost(c.in); got != c.want {
+			t.Errorf("FormatCost(%v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

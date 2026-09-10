@@ -157,7 +157,7 @@ func TestRenderTurnFooter_ShowsDuration(t *testing.T) {
 		turns: 1,
 	}
 	// Zero duration → no time segment; the footer ends at the cost.
-	if got := stripANSI(m.renderTurnFooter()); !strings.HasSuffix(got, "$0.0000") {
+	if got := stripANSI(m.renderTurnFooter()); !strings.HasSuffix(got, "$0") {
 		t.Errorf("zero duration must not render a time segment: %q", got)
 	}
 	m.lastTurnDur = 65 * time.Second
@@ -1134,7 +1134,11 @@ func TestView_StatusBarIsLastRow(t *testing.T) {
 	m.input.SetWidth(78)
 
 	out := stripANSI(m.View().Content)
-	statusIdx := strings.Index(out, "turns:")
+	// The model id is the bar's pinned identity segment — the marker
+	// must be something the bar ALWAYS renders (the old "turns:"
+	// counter was retired). In a fresh session's View() the model name
+	// appears in the status bar only.
+	statusIdx := strings.Index(out, "deepseek-chat")
 	inputIdx := strings.Index(out, "▌")
 	if statusIdx < 0 || inputIdx < 0 {
 		t.Fatalf("missing status bar (%d) or input prompt (%d) in View() output", statusIdx, inputIdx)
@@ -1143,8 +1147,8 @@ func TestView_StatusBarIsLastRow(t *testing.T) {
 		t.Errorf("input prompt (at %d) must render ABOVE the status bar (at %d)", inputIdx, statusIdx)
 	}
 
-	// The last non-empty row must be the status bar (contains
-	// "turns:"), not the input.
+	// The last non-empty row must be the status bar (contains the
+	// model id), not the input.
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	lastNonEmpty := ""
 	for _, l := range lines {
@@ -1152,7 +1156,7 @@ func TestView_StatusBarIsLastRow(t *testing.T) {
 			lastNonEmpty = l
 		}
 	}
-	if !strings.Contains(lastNonEmpty, "turns:") {
+	if !strings.Contains(lastNonEmpty, "deepseek-chat") {
 		t.Errorf("status bar must be the last non-empty row of View(); last = %q", lastNonEmpty)
 	}
 }

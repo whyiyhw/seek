@@ -176,8 +176,20 @@ func NextTransition(now time.Time) (Tier, time.Time) {
 	}
 }
 
-// FormatCost renders a USD amount as a compact "$0.0123" string (4
-// decimal places — DeepSeek's per-call costs are routinely sub-cent).
+// FormatCost renders a USD amount with precision scaled to magnitude:
+// 4 decimals below a cent (DeepSeek's per-call costs are routinely
+// sub-cent), 3 decimals in the sub-dollar band, 2 from a dollar up.
+// Zero renders as "$0" — a fresh session has spent nothing, and
+// "$0.0000" was precision theater.
 func FormatCost(usd float64) string {
-	return fmt.Sprintf("$%.4f", usd)
+	switch {
+	case usd == 0:
+		return "$0"
+	case usd < 0.01:
+		return fmt.Sprintf("$%.4f", usd)
+	case usd < 1:
+		return fmt.Sprintf("$%.3f", usd)
+	default:
+		return fmt.Sprintf("$%.2f", usd)
+	}
 }

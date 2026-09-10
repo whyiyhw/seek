@@ -37,8 +37,6 @@ type StatusSnapshot struct {
 	Tier           pricing.Tier
 	NextTier       pricing.Tier
 	NextAt         time.Time
-	Turns          int
-	ToolCalls      int
 	Usage          deepseek.Usage // cumulative
 	Streaming      bool           // "thinking" indicator state
 	Now            time.Time      // for "until next tier" countdown
@@ -109,11 +107,23 @@ type statusSegment struct {
 }
 
 const (
-	prioPin  = 0 // identity, mode/safety badge, active stream, critical ctx
-	prioHigh = 1 // model, active goal, ctx warning
+	prioPin  = 0 // model identity, mode/safety badge, active stream, critical ctx
+	prioHigh = 1 // active goal, ctx warning
 	prioMed  = 2 // cost, cache, active subagents
-	prioLow  = 3 // turns/tools, tier, effort, upgrade, crons, idle, normal ctx
+	prioLow  = 3 // wordmark, tier, effort, upgrade, crons, normal ctx
 )
+
+// cacheOkRatio is the hit-ratio floor for the cache segment's green
+// tint. Green means "the prefix cache is healthy"; below the floor the
+// number stays uncoloured rather than alarming — early-session ratios
+// are legitimately low (a fresh session's first turn is ~0% and climbs
+// as the prefix warms), so a warning tint would fire on every start.
+const cacheOkRatio = 0.80
+
+// cacheTinted decides the cache segment's colour: green only at or
+// above the health floor. HitRatio is a 0..1 fraction and 0 when no
+// cache-accounted tokens exist, so a fresh session stays uncoloured.
+func cacheTinted(u deepseek.Usage) bool { return u.HitRatio() >= cacheOkRatio }
 
 // RenderStatusBar produces a single line styled with lipgloss. Width=0
 // returns the raw text with every segment (useful for tests).
@@ -209,8 +219,11 @@ func foldStatusBar(left, right []statusSegment, width int) ([]statusSegment, []s
 
 func leftSegments(s StatusSnapshot) []statusSegment {
 	out := []statusSegment{
-		{styleStatusBar.Bold(true).Render(" seek "), prioPin},
-		{s.Model, prioHigh},
+		// Wordmark: a quiet identity anchor — decorative, so it folds
+		// first. The model id below is the identity that matters (it
+		// decides cost and capability) and is pinned.
+		{styleMuted.Render("seek"), prioLow},
+		{s.Model, prioPin},
 	}
 	if s.Yolo {
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourBannerFg).Background(colourToolErr).Bold(true).Padding(0, 1).Render("YOLO"), prioPin})
@@ -258,13 +271,17 @@ func leftSegments(s StatusSnapshot) []statusSegment {
 	case "max":
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourTool).Bold(true).Render("effort:max"), prioLow})
 	}
+	// Activity: rendered only while it is true. Idle is the resting
+	// state — "nothing is happening" is communicated by the segment's
+	// absence; the ● appearing IS the signal. (The always-on "○ idle"
+	// spent 8 columns restating the default.)
 	if s.Streaming {
 		out = append(out, statusSegment{styleMuted.Render(streamingStatusLabel(s)), prioPin})
-	} else {
-		out = append(out, statusSegment{styleMuted.Render("○ idle"), prioLow})
 	}
 	if s.UpgradeAvailable != "" {
-		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render("↑ " + s.UpgradeAvailable), prioLow})
+		// "new", not "↑": U+2191 is East-Asian-ambiguous — the same
+		// width-oracle class as the ⤴ this bar already retired.
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render("new " + s.UpgradeAvailable), prioLow})
 	}
 	return out
 }
@@ -302,12 +319,14 @@ func formatTokenEst(bytes int) string {
 }
 
 func rightSegments(s StatusSnapshot) []statusSegment {
-	out := []statusSegment{
-		{fmt.Sprintf("turns:%d  tools:%d", s.Turns, s.ToolCalls), prioLow},
-	}
+	// No turn/tool counters here: they are retrospective session stats,
+	// not instrumentation ("what do I do about it now?"). They live in
+	// /diagnose and the exit summary; the bar keeps only metrics the
+	// user acts on.
+	var out []statusSegment
 
 	cache := fmt.Sprintf("cache %s", deepseek.FormatHitRatio(s.Usage))
-	if s.Usage.PromptCacheHitTokens > 0 {
+	if cacheTinted(s.Usage) {
 		cache = lipgloss.NewStyle().Foreground(colourOk).Render(cache)
 	}
 	out = append(out, statusSegment{cache, prioMed})
@@ -402,12 +421,15 @@ func formatTier(s StatusSnapshot) string {
 	if s.Tier == pricing.TierOffPeak {
 		return styleStatusOffPeak.Render(label)
 	}
-	// Standard tier: show countdown to off-peak.
+	// Standard tier: show countdown to off-peak. Parentheses, not a
+	// "·"-chain or "→" — the arrow is U+2192, East-Asian-ambiguous,
+	// and "peak (off-peak in 35m)" reads as one fact (when it flips)
+	// rather than two stapled together.
 	dur := untilTransition(s.NextAt, s.Now)
 	if dur <= 0 {
 		return label
 	}
-	return fmt.Sprintf("%s · off-peak in %s", label, formatDuration(dur))
+	return fmt.Sprintf("%s (off-peak in %s)", label, formatDuration(dur))
 }
 
 func untilTransition(when, now time.Time) time.Duration {

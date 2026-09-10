@@ -112,17 +112,19 @@ func TestStatusBar_CronBadge(t *testing.T) {
 	}
 }
 
-// TestStatusBar_UpgradeAvailable verifies the "↑ <tag>" segment lands
+// TestStatusBar_UpgradeAvailable verifies the "new <tag>" segment lands
 // in the bar when a newer release was detected at startup. Empty
 // UpgradeAvailable must produce no upgrade segment — otherwise we'd
-// leave a stray "↑" with no version.
+// leave a stray "new" with no version. (The old "↑ " prefix was
+// retired: U+2191 is East-Asian-ambiguous, the same width-oracle class
+// as the ⤴ glyph this bar already bans.)
 func TestStatusBar_UpgradeAvailable(t *testing.T) {
 	with := stripANSI(RenderStatusBar(StatusSnapshot{
 		Model:            "deepseek-flash",
 		UpgradeAvailable: "v0.2.0",
 		Width:            120,
 	}))
-	if !strings.Contains(with, "↑ v0.2.0") {
+	if !strings.Contains(with, "new v0.2.0") {
 		t.Errorf("expected upgrade hint, bar = %q", with)
 	}
 
@@ -130,7 +132,7 @@ func TestStatusBar_UpgradeAvailable(t *testing.T) {
 		Model: "deepseek-flash",
 		Width: 120,
 	}))
-	if strings.Contains(without, "↑") {
+	if strings.Contains(without, "new ") {
 		t.Errorf("upgrade segment leaked when UpgradeAvailable is empty: %q", without)
 	}
 }
@@ -146,10 +148,16 @@ func TestStatusBar_Idle_Standard(t *testing.T) {
 		// Zero Usage — no turns yet → cache shows "n/a".
 		Now: at,
 	}))
-	for _, frag := range []string{"seek", "deepseek-flash", "idle", "cache n/a", "cost $0.0000", "peak", "off-peak in"} {
+	for _, frag := range []string{"seek ", "deepseek-flash", "cache n/a", "cost $0", "peak", "off-peak in"} {
 		if !strings.Contains(bar, frag) {
 			t.Errorf("missing %q in: %q", frag, bar)
 		}
+	}
+	// "○ idle" is retired: idle is the resting state, and the segment's
+	// absence is the signal — the ● streaming label appearing IS the
+	// event.
+	if strings.Contains(bar, "idle") {
+		t.Errorf("idle segment retired — absence is the signal; got %q", bar)
 	}
 }
 
@@ -177,10 +185,8 @@ func TestStatusBar_Idle_Plan(t *testing.T) {
 		Tier:  pricing.CurrentTier(at),
 		Now:   at,
 	}))
-	for _, frag := range []string{"PLAN", "idle"} {
-		if !strings.Contains(bar, frag) {
-			t.Errorf("missing %q in: %q", frag, bar)
-		}
+	if !strings.Contains(bar, "PLAN") {
+		t.Errorf("missing PLAN badge in: %q", bar)
 	}
 	// PLAN and YOLO are mutually exclusive — PLAN badge means no YOLO badge.
 	if strings.Contains(bar, "YOLO") {
@@ -259,18 +265,16 @@ func TestStatusBar_OffPeak(t *testing.T) {
 	}
 }
 
-func TestStatusBar_CountsAndCost(t *testing.T) {
+func TestStatusBar_Cost(t *testing.T) {
 	at := time.Date(2026, time.January, 15, 9, 0, 0, 0, pricing.Shanghai)
-	// CumulativeCost is now a pre-computed input into the bar, not
+	// CumulativeCost is a pre-computed input into the bar, not
 	// re-derived from Usage × current rates at render time. The bar
 	// just formats whatever number the tracker locked in. Tests for
 	// the locked-in math live in internal/cache/cache_test.go
 	// (TestTracker_CumulativeCostLockedInAtRecord).
 	bar := stripANSI(RenderStatusBar(StatusSnapshot{
-		Model:     deepseek.ModelV41Flash,
-		Turns:     5,
-		ToolCalls: 3,
-		Tier:      pricing.TierStandard,
+		Model: deepseek.ModelV41Flash,
+		Tier:  pricing.TierStandard,
 		Usage: deepseek.Usage{
 			PromptCacheMissTokens: 1_000_000,
 			CompletionTokens:      1_000_000,
@@ -278,11 +282,41 @@ func TestStatusBar_CountsAndCost(t *testing.T) {
 		CumulativeCost: 0.42,
 		Now:            at,
 	}))
-	if !strings.Contains(bar, "turns:5") || !strings.Contains(bar, "tools:3") {
-		t.Errorf("counters missing: %q", bar)
-	}
-	if !strings.Contains(bar, "$0.4200") {
+	// Sub-dollar costs read in thousandths: $0.420.
+	if !strings.Contains(bar, "cost $0.420") {
 		t.Errorf("cost missing: %q", bar)
+	}
+	// Turn/tool counters are retired from the bar — they live in
+	// /diagnose and the exit summary.
+	if strings.Contains(bar, "turns") || strings.Contains(bar, "tools") {
+		t.Errorf("retired counters leaked back: %q", bar)
+	}
+}
+
+// TestCacheTinted pins the ≥80% green floor: a low-but-nonzero hit
+// ratio (12%) must not read as healthy, and a fresh session (no
+// cache-accounted tokens at all, HitRatio 0) must stay uncoloured
+// rather than triggering a warning tint on every session start.
+func TestCacheTinted(t *testing.T) {
+	cases := []struct {
+		name      string
+		hit, miss int
+		want      bool
+	}{
+		{"no data", 0, 0, false},
+		{"all miss", 0, 100, false},
+		{"12%", 12, 88, false},
+		{"79%", 79, 21, false},
+		{"80% floor", 80, 20, true},
+		{"warm", 99, 1, true},
+		{"all hit", 100, 0, true},
+	}
+	for _, c := range cases {
+		u := deepseek.Usage{PromptCacheHitTokens: c.hit, PromptCacheMissTokens: c.miss}
+		if got := cacheTinted(u); got != c.want {
+			t.Errorf("%s: cacheTinted(%d hit / %d accounted) = %v, want %v",
+				c.name, c.hit, c.hit+c.miss, got, c.want)
+		}
 	}
 }
 
@@ -387,15 +421,13 @@ func TestFormatDuration(t *testing.T) {
 
 // TestRenderStatusBar_FoldsLowPriorityWhenNarrow pins the adaptive-fold
 // contract: at a wide width every segment is present; at a narrow width
-// the bar sheds low/medium-priority metrics, keeps the pinned identity +
-// mode badge, and never wraps to a second line.
+// the bar sheds low/medium-priority metrics, keeps the pinned identity
+// (the model id) + mode badge, and never wraps to a second line.
 func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	t.Parallel()
 	rich := StatusSnapshot{
 		Model:            "deepseek-flash",
 		Yolo:             true,
-		Turns:            5,
-		ToolCalls:        3,
 		CumulativeCost:   0.42,
 		CronsRegistered:  2,
 		UpgradeAvailable: "v0.9.0",
@@ -404,23 +436,33 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 	wide := rich
 	wide.Width = 200
 	w := stripANSI(RenderStatusBar(wide))
-	for _, frag := range []string{"seek", "YOLO", "turns:5", "cron 2", "↑ v0.9.0", "cost"} {
+	for _, frag := range []string{"seek ", "YOLO", "cron 2", "new v0.9.0", "cost"} {
 		if !strings.Contains(w, frag) {
 			t.Fatalf("wide bar should contain %q; got %q", frag, w)
 		}
+	}
+	// Turn/tool counters are retired — the widest bar shows no trace.
+	if strings.Contains(w, "turns") || strings.Contains(w, "tools") {
+		t.Errorf("retired counters leaked into the wide bar: %q", w)
 	}
 
 	narrow := rich
 	narrow.Width = 28
 	n := RenderStatusBar(narrow)
 	plain := stripANSI(n)
-	if !strings.Contains(plain, "seek") || !strings.Contains(plain, "YOLO") {
-		t.Errorf("narrow bar must keep pinned identity + mode badge; got %q", plain)
+	if !strings.Contains(plain, "deepseek-flash") || !strings.Contains(plain, "YOLO") {
+		t.Errorf("narrow bar must keep the pinned model id + mode badge; got %q", plain)
 	}
-	for _, frag := range []string{"turns:", "cron", "↑ v0.9.0", "cost"} {
+	for _, frag := range []string{"seek ", "cache", "cost", "cron", "new v0.9.0"} {
 		if strings.Contains(plain, frag) {
 			t.Errorf("narrow bar should have folded away %q; got %q", frag, plain)
 		}
+	}
+	// Exactly the pinned pair survives — nothing else. (Field-join
+	// normalises badge padding; any extra surviving segment would add
+	// a token and fail the comparison.)
+	if got := strings.Join(strings.Fields(plain), " "); got != "deepseek-flash YOLO" {
+		t.Errorf("narrow bar = %q, want exactly \"deepseek-flash YOLO\"", got)
 	}
 	if strings.Contains(n, "\n") {
 		t.Errorf("status bar must stay single-line; got %q", n)
@@ -436,10 +478,15 @@ func TestRenderStatusBar_FoldsLowPriorityWhenNarrow(t *testing.T) {
 // after a /model switch to the longer vision-exp id).
 func TestRenderStatusBar_NeverExceedsTerminalWidth(t *testing.T) {
 	for _, w := range []int{40, 60, 80, 90, 100, 110, 120, 140, 180} {
+		// Critical ctx is pinned, so at the small widths the pin stack
+		// alone overflows the budget: the contract is that the bar
+		// TRUNCATES (MaxWidth backstop) and stays one line — a wrapped
+		// bar would desync bubbletea's frame accounting.
 		s := StatusSnapshot{
 			Model: "deepseek-flash", Effort: "max",
 			Tier: pricing.TierStandard, NextTier: pricing.TierOffPeak,
-			Turns: 12, ToolCalls: 34, Width: w,
+			LastUsage: deepseek.Usage{PromptTokens: 10_000_000}, // force ctx critical
+			Width:     w,
 		}
 		out := stripANSI(RenderStatusBar(s))
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -455,8 +502,8 @@ func TestRenderStatusBar_NeverExceedsTerminalWidth(t *testing.T) {
 }
 
 // TestStatusBar_NoRetiredEmojiGlyphs pins the ASCII-only bar contract:
-// the emoji retired for width-oracle reasons (☀️ VS16 measures 1
-// renders 2; ⤴/⚠ East-Asian-ambiguous; 🌙/⏰/🎯 font-dependent Wide)
+// the glyphs retired for width-oracle reasons (☀️ VS16 measures 1
+// renders 2; ⤴/⚠/↑ East-Asian-ambiguous; 🌙/⏰/🎯 font-dependent Wide)
 // must never reappear in ANY bar state. Renders a maximal snapshot —
 // every badge lit, ctx at critical, standard tier with countdown — so
 // a regression in any segment trips the test.
@@ -467,7 +514,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 		bar := stripANSI(RenderStatusBar(StatusSnapshot{
 			Model: deepseek.ModelV41Flash, Effort: "max",
 			Tier: tier, NextTier: nt, NextAt: na, Now: at,
-			Turns: 3, ToolCalls: 9, Streaming: true,
+			Streaming: true,
 			StreamElapsed: 5 * time.Second, StreamDeltaBytes: 4096,
 			LastUsage:        deepseek.Usage{PromptTokens: 10_000_000}, // force ctx critical
 			SubagentsActive:  2,
@@ -478,7 +525,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 			UpgradeAvailable: "v9.9.9",
 			Width:            0, // width 0 = every segment rendered, none folded
 		}))
-		for _, glyph := range []string{"☀", "🌙", "⤴", "⏰", "🎯", "⚠"} {
+		for _, glyph := range []string{"☀", "🌙", "⤴", "⏰", "🎯", "⚠", "↑"} {
 			if strings.Contains(bar, glyph) {
 				t.Errorf("tier=%v: retired glyph %q back in the bar: %q", tier, glyph, bar)
 			}

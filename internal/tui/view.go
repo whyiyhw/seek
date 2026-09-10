@@ -373,8 +373,6 @@ func (m Model) renderStatusBar() string {
 		Tier:             tier,
 		NextTier:         nextTier,
 		NextAt:           nextAt,
-		Turns:            m.turns,
-		ToolCalls:        m.toolCalls,
 		Usage:            m.opts.Tracker.Cumulative(),
 		LastUsage:        m.opts.Tracker.Last(),
 		CumulativeCost:   m.opts.Tracker.CumulativeCost(),

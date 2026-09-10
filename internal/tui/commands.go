@@ -1823,7 +1823,7 @@ func (m *Model) handleUpgradeDone(msg upgradeDoneMsg) []tea.Cmd {
 			fmt.Sprintf("/upgrade failed: %v", msg.Err))
 	case msg.AlreadyLatest:
 		line = styleMuted.Render(fmt.Sprintf("/upgrade: already on the latest release (%s)", msg.NewTag))
-		// We're on the latest — clear any stale "↑ tag" status hint.
+		// We're on the latest — clear any stale "new tag" status hint.
 		m.upgradeAvailable = ""
 	case msg.DryRun:
 		line = styleMuted.Render(fmt.Sprintf("/upgrade dry-run OK: checksum verified for %s (binary not replaced)", msg.NewTag))
