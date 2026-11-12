@@ -1,14 +1,26 @@
 # seek 竞品对比：Claude Code（能力天花板）+ Reasonix（同论题竞品）
 
-> **最后更新**：2026-06（v6 五柱全交付 + v7 四柱全交付 + 新增用户指南 + book 第 23–24 章）
+> **定位变更（2026-11-12，butler 事件 #2575）**
+>
+> **本文从 roadmap 驱动降级为参考：seek 不再逐项追平 Claude Code。**北极星变更为
+> **能自我进化的本地 agent 平台**——能力对标 CC、DeepSeek-first 成本断崖、多端可驱动
+> （Frontend 端口，飞书第一个）、自进化闭环（失败→eval→修复→发布）。叙事与决策记录见
+> [`docs/narrative/seek.md`](narrative/seek.md)。
+>
+> 实际影响：
+> - 下文各节的 ✅/❌/🔶 与 P1/P2 **不再是排期输入**，只回答「seek 能力现状如何、是否回退」。
+> - 某项 CC 能力缺失是否立项，改按**平台化三轴**判断（多端 / 自进化 / 成本），验收口径见文末「平台化验收口径」。
+> - eval 同步降位为内部回归工具，不做公开跑分竞赛。
+
+> **最后更新**：2026-11-12（头部「定位变更」+ 差距汇总降格「能力对照参考」+ 新增「平台化验收口径」；§1–13 与 §R 表格数据截至 2026-06 / v0.8 口径，未随本次定位变更重核）
 > **本文覆盖两个对比点，二者关系不同**：
-> - **§1–核心结论：seek vs Claude Code** —— CC 是**能力天花板/参考标杆**，本节是**逐项 gap 追踪器**（✅/❌/🔶 + P1/P2 优先级），驱动 seek 的 roadmap。
+> - **§1–核心结论：seek vs Claude Code** —— CC 是**能力天花板/参考标杆**，本节是**能力对照参考**（✅/❌/🔶，优先级仅作历史参考，见头部「定位变更」）。
 > - **末节：seek vs Reasonix** —— Reasonix 是**同论题孪生竞品**（DeepSeek 原生 Go agent），本节是**差异化定位分析**（趋同/分歧 + 站位），驱动 pitch/messaging，不是 gap 追踪。
 > **数据来源**：CC 侧 = 官方文档 + 直接观察；seek 侧 = 代码库主干（逐项回核）；Reasonix 侧 = README/仓库页 **+ `main-v2` 关键源码**（已读 coordinator/task/bgjobs/checkpoint/acp/serve）。
 
 系统对比 **Seek**（开源、DeepSeek 优先、多 LLM 智能体）与 **Claude Code**（Anthropic 的自主编程智能体参考实现）。Reasonix 的对比见文末专节。
 
-> **v0.6.x 重要变化**：v5 柱 G（v0.6.0 — 子代理 + worktree 隔离）和柱 H（v0.6.1 — cron / wakeup / triggers / OS notification）已 ship，关闭了过去版本里"架构级缺口"的全部 3 个 🔴 P0 项目。本次更新把 §7 / §10 / 差距汇总 / 核心结论同步到最新代码现实。
+> **v0.6.x 重要变化**：v5 柱 G（v0.6.0 — 子代理 + worktree 隔离）和柱 H（v0.6.1 — cron / wakeup / triggers / OS notification）已 ship，关闭了过去版本里"架构级缺口"的全部 3 个 🔴 P0 项目。本次更新把 §7 / §10 / 差距汇总（现「能力对照参考」）/ 核心结论同步到最新代码现实。
 
 ## 图例
 
@@ -231,11 +243,13 @@
 
 ---
 
-## 差距汇总
+## 能力对照参考（原「差距汇总」，2026-11-12 降格）
 
-### 按投入产出比的差距清单
+> **降格说明（#2575）**：本节原是按 P1/P2/P3 排优先级、驱动 roadmap 的差距清单；定位变更后降格为**纯参考**——回答「seek 现在有什么、没有什么」。优先级列保留只为记录历史评估，**不再是排期输入**；某项是否立项，回到平台化三轴（多端/自进化/成本）判断：拖累三轴的才做，否则不追。
 
-优先级仅供路线图参考，不代表 Claude Code 用户使用频率（缺乏 Seek 侧的真实需求数据来佐证排序）。
+### 能力清单（优先级标记为历史评估，仅供参考）
+
+优先级不代表 Claude Code 用户使用频率（缺乏 Seek 侧的真实需求数据来佐证排序），也不再代表 seek 的排期。
 
 | 优先级 | 领域 | 缺失功能 | 备注 |
 |---|---|---|---|
@@ -294,15 +308,32 @@
 
 5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。
 
-6. **明确边界**：企业管理（SSO、用量分析、Managed MCP）、SDK、桌面/Web/Chrome 扩展、Computer use、语音输入——都不是 Seek 的目标。Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品。除非定位变化，否则不应作为差距追赶。
+6. **明确边界（2026-11-12 #2575 起重划）**：原表述「Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品」**已失效**——定位变更为自我进化的本地 agent 平台后，**多端进入目标**（Frontend 端口 + sidecar 路线，飞书第一个，见「平台化验收口径」）。维持出界的是：企业管理（SSO、用量分析、Managed MCP）、SDK（seek 是 agent 不是框架）；另按 #2575，公开跑分竞赛明确不做。CC 的桌面/Web/Chrome 形态不逐项复刻——多端验收以 Frontend 端口可驱动为准。
 
 7. **v7 四柱全交付**：Autopilot（无人值守编排）+ OS 沙箱（seatbelt/landlock）+ ACP（Zed 编辑器集成）+ 离线 OCR（图片→文字）——四柱已落地，详见 [`docs/prd/v7.md`](prd/v7.md)。新增 [`docs/guide-autopilot.md`](guide-autopilot.md)、[`docs/guide-sandbox.md`](guide-sandbox.md)、guide-ocr.md（后随柱 Q 下线移除，接替者 [guide-vision.md](guide-vision.md)）、[`docs/guide-webhooks.md`](guide-webhooks.md) 用户指南。本书新增第 23 章（v6 五柱）和第 24 章（v7 四柱）。
 
 ---
 
+## 平台化验收口径（2026-11-12 起）
+
+> 北极星：**能自我进化的本地 agent 平台**（[`docs/narrative/seek.md`](narrative/seek.md)，butler 事件 #2575 用户拍板）。上文各节的 ✅/❌/🔶 对照从 roadmap 输入降级为参考，项目验收改按以下三轴度量。治理层是 butler（卡片/派发/验证/合并），seek 是执行与产品层。
+
+| 轴 | 含义 | 验收标准（与 butler projects 表 done_criteria 同源） |
+|---|---|---|
+| **多端** | 任何 Frontend 端口（飞书第一个）都能驱动本机 seek 干活 | remote control plane M1–M7 落地；**飞书真实会话可驱动本机 seek 跑完一个多轮任务** |
+| **自进化** | 失败 → eval → 修复 → 发布的闭环，dogfood 飞轮转起来 | pitfall→eval 管道产出用例进 **CI 口径回归集**；周度过夜 goal run 实战成功率**可追趋势**；seek 接入 paseo 成为 butler 执行车道，dogfood 飞轮（seek 干活→失败沉淀→seek 变强）**至少转满一轮** |
+| **成本** | DeepSeek-first：CC 同级能力、断崖级更低单位成本 | 常用编码路径能力对 CC 保持对等（**本文对照表即「能力不回退」的守成基线**）；DeepSeek 单价 + 前缀缓存（实测 95.7%）+ 错峰 5 折 + FIM 组合下，同等任务 token 成本显著低于 CC 默认链路 |
+
+**与本文其余部分的关系**：
+
+- 对照表（§1–13 + 能力对照参考）从「追平清单」变为「**守成基线**」——只要求不回退，不要求逐项追平。
+- 治理纪律（同 done_criteria ④）：[`docs/narrative/seek.md`](narrative/seek.md) 由负责人会话滚动更新，间隔不超 7 天。
+
+---
+
 # 同论题竞品：seek vs Reasonix（定位对比）
 
-> **这是一种不同类型的对比**。上面 §1–核心结论是"追赶 Claude Code 天花板"的 gap 追踪器。本节是"和同论题孪生竞品的差异化定位"——重点**不是** gap（重叠是常态），而是站位。
+> **这是一种不同类型的对比**。上面 §1–核心结论曾是"追赶 Claude Code 天花板"的 gap 追踪器（2026-11-12 起降级为能力对照参考，见头部「定位变更」）。本节是"和同论题孪生竞品的差异化定位"——重点**不是** gap（重叠是常态），而是站位；本节继续驱动 pitch/messaging。
 >
 > **数据可信度**：Reasonix 侧 = [github.com/esengine/DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix) README/仓库页 **+ `main-v2` 关键源码**（coordinator / task / bgjobs / checkpoint / acp / serve 已读）。下表已据源码**校正**——README 印象里以为 Reasonix 没有的几项（后台任务 / checkpoint / IDE 集成）其实都有。
 >
