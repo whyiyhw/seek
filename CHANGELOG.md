@@ -18,3 +18,4 @@
 - c_7krtrc：eval 扩容：把 c_7hudp6 验证过的三项契约锁成回归用例
 - c_w7kob6：pitfall→eval 半自动管道 seed：把 docs/pitfalls.md 条目转成 eval 用例草稿
 - c_3k3o6r：control-plane M1b：seek serve 命令骨架 + config 接线——空平面可启停
+- c_x7fgcv：control-plane M2：路由与指令层——/bind /projects /switch /new /cancel + DirectAt 过滤

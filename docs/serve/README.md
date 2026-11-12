@@ -6,9 +6,12 @@
 以及 launchd / systemd 示例单元。用户侧使用指南（绑定、指令、飞书配置）见
 M7 的 `docs/guide-serve.md`。
 
-**当前状态（M6b）**：生命周期机制（M6a）+ `seek serve` CLI 接线（M1b/M6b，
-`internal/servecli`）均已落地并有测试锁定。默认构建注册的 frontend 仅 `fake`
-（起停自检用）；真实飞书 frontend（M4/M5）落地前，单元文件里的
+**当前状态（M6b + M2）**：生命周期机制（M6a）+ `seek serve` CLI 接线（M1b/M6b，
+`internal/servecli`）均已落地并有测试锁定；入站 handler 已从 M1b 的丢弃桩换成
+M2 路由器（`internal/controlplane/router.go`：EventID 去重 → DirectAt 过滤 →
+`/bind` `/projects` `/switch` `/new` `/cancel` 指令与 ConvID→binding 路由 →
+M3 执行器 → session 回写 → 按 frontend 前缀回发）。默认构建注册的 frontend 仅
+`fake`（起停自检用）；真实飞书 frontend（M4/M5）落地前，单元文件里的
 `ExecStart=... --frontend=feishu` 仍是契约示例。config 的可选 `serve` 段
 （projects / max_concurrency / yolo，默认 yolo=false）见
 [`internal/config`](../../internal/config/config.go)；旧 config 无该段照常工作。
