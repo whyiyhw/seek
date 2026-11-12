@@ -1,0 +1,1 @@
+In eval/tmp/edit-unicode-read-first/panel.txt, the bare horizontal rule (a line made only of light dashes) directly under the STATUS block's data rows should be drawn with heavy dashes instead. Swap that one rule, keeping exactly the same rule width in characters. Every other line must stay byte-identical.

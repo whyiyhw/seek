@@ -1,0 +1,8 @@
+{
+  "description": "74KB dump: a full read elides the middle so whole-file write can never pass (fsobserve StatusElided names edit as the recovery). Healthy: grep+windowed read+single edit, zero or one tolerated write refusal, no re-read loop.",
+  "max_turns": 10,
+  "min_edit_calls": 1,
+  "max_write_refusals": 1,
+  "max_read_calls": 3,
+  "max_grep_calls": 2
+}

@@ -1,0 +1,1 @@
+eval/tmp/grep-refine-not-flood/app.log is a generated service log (a bit over 2100 lines, each line fairly long). Report two things: (1) the total number of lvl=ERROR lines, and (2) the top 3 error codes (the code=ERR-xx field) by occurrence count, each with its count.
