@@ -1,0 +1,7 @@
+{
+  "description": "--yolo 全放行（c_7hudp6 实测，PRD §6 已验证②末条）：--yolo 把初始 pref 升为 PrefYolo，bash 正常执行而非 ErrDenied。走 harness 默认调用（本就带 -yolo），无需 runner.sh——与 print-deny-semantics 互为对照。",
+  "max_turns": 5,
+  "min_bash_calls": 1,
+  "max_denied_tool_ends": 0,
+  "min_agent_ends": 1
+}

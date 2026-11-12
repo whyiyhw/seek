@@ -15,3 +15,4 @@
 - c_27i3zi：seek 接入 paseo 作为 provider：可行性设计稿 docs/prd/feature-paseo-provider.md
 - c_uh2x4q：internal/permission isWithin 符号链接 CWD 下误判相对路径 outside：write 被误挡
 - c_hw47pe：pricing 表支持 glm 车道计价：glm-5.3 三口价 + $ 统计不落 0
+- c_7krtrc：eval 扩容：把 c_7hudp6 验证过的三项契约锁成回归用例

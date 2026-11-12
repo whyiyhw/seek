@@ -1,0 +1,8 @@
+{
+  "description": "session-id 契约（c_7hudp6 实测，PRD §6 已验证①）：seek -p --json 的 stdout JSONL 末行 agent_end 带顶层 session_id；-resume <sid> 续跑返回同一 id。runner.sh 链式两次调用（fresh → resume），共 2 个 agent_end、session_id 无缺失、distinct=1、退出码全 0。",
+  "max_turns": 3,
+  "exact_agent_ends": 2,
+  "max_session_id_missing": 0,
+  "exact_session_id_distinct": 1,
+  "max_nonzero_exits": 0
+}

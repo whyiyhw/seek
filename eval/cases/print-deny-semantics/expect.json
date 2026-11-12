@@ -1,0 +1,8 @@
+{
+  "description": "print 模式默认权限语义（c_7hudp6 实测，PRD §6 已验证②）：无 --yolo 时初始 pref 即 PrefDeny——bash（touch，不在 ReadOnly 白名单）被挡且以 ErrDenied 工具结果返回、进程不挂起；in-CWD write 放行。runner.sh 去掉默认调用的 -yolo，其余保持（含 -no-save，本例不锁 session_id）。",
+  "max_turns": 8,
+  "min_denied_tool_ends": 1,
+  "min_write_ok": 1,
+  "max_write_refusals": 0,
+  "max_nonzero_exits": 0
+}
