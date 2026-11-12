@@ -16,3 +16,4 @@
 - c_uh2x4q：internal/permission isWithin 符号链接 CWD 下误判相对路径 outside：write 被误挡
 - c_hw47pe：pricing 表支持 glm 车道计价：glm-5.3 三口价 + $ 统计不落 0
 - c_7krtrc：eval 扩容：把 c_7hudp6 验证过的三项契约锁成回归用例
+- c_w7kob6：pitfall→eval 半自动管道 seed：把 docs/pitfalls.md 条目转成 eval 用例草稿
