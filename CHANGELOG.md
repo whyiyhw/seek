@@ -13,3 +13,4 @@
 - c_nap4wk：control-plane M7a：guide-serve 文档骨架 + Telegram frontend 纸面接缝验证
 - c_odyzbq：comparison.md 定位改造：从 roadmap 驱动降级为参考 + 平台化验收口径段
 - c_27i3zi：seek 接入 paseo 作为 provider：可行性设计稿 docs/prd/feature-paseo-provider.md
+- c_uh2x4q：internal/permission isWithin 符号链接 CWD 下误判相对路径 outside：write 被误挡

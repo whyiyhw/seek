@@ -888,23 +888,31 @@ func (p *Policy) Plan() bool {
 // the directory tree until finding an existing ancestor, resolve its
 // symlinks, then append the non-existent suffix — preserving the guard.
 func isWithin(root, target string) (bool, error) {
-	// Resolve the root first so symlinks in root-level paths (e.g.
-	// /var → /private/var on macOS) don't cause false denials.
-	absRoot, err := filepath.EvalSymlinks(root)
+	// Both sides must go through the SAME pipeline — Abs first, then
+	// symlink resolution — so they land on one base. The old order
+	// (resolveClosest → Abs) resolved the root to its physical form
+	// (e.g. /private/tmp/proj) while a RELATIVE target kept the logical
+	// PWD prefix (/tmp/proj/file): under a symlinked CWD every relative
+	// path compared "outside" and in-CWD writes were falsely denied.
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false, fmt.Errorf("resolve root %q: %w", root, err)
+	}
+	physRoot, err := filepath.EvalSymlinks(absRoot)
 	if err != nil {
 		return false, fmt.Errorf("resolve root %q: %w", root, err)
 	}
 
 	// Resolve symlinks in the target path, walking up if needed.
-	resolved, err := resolveClosest(target)
+	absTarget, err := filepath.Abs(target)
 	if err != nil {
 		return false, err
 	}
-	absTarget, err := filepath.Abs(resolved)
+	resolved, err := resolveClosest(absTarget)
 	if err != nil {
 		return false, err
 	}
-	rel, err := filepath.Rel(absRoot, absTarget)
+	rel, err := filepath.Rel(physRoot, resolved)
 	if err != nil {
 		return false, err
 	}
