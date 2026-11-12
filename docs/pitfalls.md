@@ -830,6 +830,20 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: OpenAI-compatible providers often require explicit opt-in for features that other providers include by default. Scan the request body options for anything labelled "include_*" or "with_*"
 - **Refs**: `pkg/llm/provider/openai/client.go:openAIRequest`
 
+### GLM (bigmodel.cn paas/v4) is streaming-tool_calls compatible; `reasoning_content` deltas are silently dropped
+- **Saw**: smoke-running `--provider glm` (glm-5.3, zcode coding-plan key): full grep→read→edit→read loop and a plan-mode run both worked first try; but stats showed `cache hit 0/0 ratio n/a` and TTFB 11.8–42.5s with long silent gaps before the first visible token
+- **Why**: the endpoint speaks OpenAI Chat Completions byte-for-byte where it matters — `delta.tool_calls[]` keyed by `index` with id/name/arguments, `finish_reason:"tool_calls"`, usage on the final chunk (the client's `stream_options.include_usage` opt-in is honored). GLM ALSO emits `reasoning_content` deltas (same field name as DeepSeek's reasoner); the openai client's wire types don't declare it, so `encoding/json` skips those chunks — thinking time renders as dead air. No DeepSeek cache metadata comes back either, so prefix-cache stats stay empty. Both are the documented expected degradation for the GLM lane, not bugs
+- **Fix**: none needed for the lane — `compatible.New` + pinned default base URL `https://open.bigmodel.cn/api/paas/v4/chat/completions` registered as `case "glm"` in `buildProvider` (this change). If silent thinking becomes a UX problem, add a `reasoning_content` passthrough like deepseek's Reasoning deltas — deliberate non-goal here
+- **Lesson**: "OpenAI-compatible" needs exactly three verifications before trusting a lane: streaming tool_calls delta shape, usage-in-stream opt-in, and what the model emits that your wire types DON'T parse — that last one is where silent degradation hides
+- **Refs**: `cmd/seek/main.go:buildProvider` (glm case + `glmBaseURL`), `pkg/llm/provider/openai/client.go:streamDelta` (undeclared fields are skipped by unmarshal)
+
+### propose in print mode always errors "askuser: no callback registered" — plan approval can't be picked headless
+- **Saw**: `--plan -p "..."` smoke: the model correctly called `propose` during plan-analyze, and the tool returned `ERROR: propose: askuser: no callback registered (programming error)`; the model recovered by presenting the plan inline (exit 0, zero edits — the read-only gate held)
+- **Why**: `askPolicy.SetAskFn` (and the permission approval channel) are wired AFTER the `-p`/`-json`/piped-stdin branch returns in `main.go` — only the TUI path registers them. Print mode never wires an askFn, so any tool that asks (propose's approval picker, ask_user) hits `ErrNoCallback`. Pre-existing harness gap, surfaced by the GLM plan-mode smoke; provider-independent
+- **Fix**: not fixed here (out of card scope). Headless plan approval needs either an auto-deny + "plan printed, rerun interactively" contract or an approval-via-stdin callback; the model's inline-plan fallback is acceptable for smokes
+- **Lesson**: `SetAskFn` wiring is TUI-only; any headless surface that registers asking tools inherits `ErrNoCallback`. When smoke-testing interactive subsystems in print mode, expect this error and read it as "wiring gap", not model misbehaviour
+- **Refs**: `cmd/seek/main.go` (print/json branch returns before the `SetAskFn` wiring in the TUI path), `internal/askuser/askuser.go:ErrNoCallback`, `internal/tools/propose/propose.go`
+
 ---
 
 ## Testing / CI

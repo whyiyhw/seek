@@ -46,8 +46,8 @@ type Config struct {
 	DefaultProvider string `json:"default_provider,omitempty"`
 
 	// Providers maps provider name (matching the --provider flag
-	// values: "deepseek", "anthropic", "openai", "gemini") to its
-	// stored credentials. Nil map = no providers configured yet.
+	// values: "deepseek", "anthropic", "openai", "gemini", "glm") to
+	// its stored credentials. Nil map = no providers configured yet.
 	Providers map[string]ProviderConfig `json:"providers,omitempty"`
 
 	// PathPromptDone is set to true after the first-run "add to PATH?"
@@ -224,6 +224,8 @@ func envVarFor(providerName string) string {
 		return "OPENAI_API_KEY"
 	case "gemini":
 		return "GEMINI_API_KEY"
+	case "glm":
+		return "GLM_API_KEY"
 	}
 	return ""
 }

@@ -10,7 +10,7 @@ seek 通过 `~/.seek/config.json`（或 `$SEEK_HOME/config.json`）管理 API �
 
 API 密钥的查找优先级从高到低：
 
-1. **环境变量**（最高优先级）——如 `DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`。适合 CI、secret manager 或单次调用。
+1. **环境变量**（最高优先级）——如 `DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`GLM_API_KEY`。适合 CI、secret manager 或单次调用。
 2. **`~/.seek/config.json`**——由首次运行向导写入或用户手动编辑。
 3. **空**——无密钥配置时，seek 会自动启动配置向导。
 
@@ -38,7 +38,7 @@ API 密钥的查找优先级从高到低：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini`）。空字符串 = 不指定，走自动检测 |
+| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm`）。空字符串 = 不指定，走自动检测 |
 | `providers` | object | 各 provider 的凭证配置，key 为 provider 名 |
 | `providers.<name>.api_key` | string | API 密钥 |
 | `path_prompt_done` | bool | Windows 上"添加到 PATH"提示是否已显示过 |
@@ -58,6 +58,7 @@ API 密钥的查找优先级从高到低：
 | Anthropic | `ANTHROPIC_API_KEY` | `anthropic` |
 | OpenAI | `OPENAI_API_KEY` | `openai` |
 | Gemini | `GEMINI_API_KEY` | `gemini` |
+| GLM（智谱 bigmodel.cn） | `GLM_API_KEY` | `glm` |
 
 ### 切换默认 Provider
 
