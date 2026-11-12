@@ -38,6 +38,7 @@
 | [`feature-permission-refactor.md`](feature-permission-refactor.md) | seek v0.3.x+ | 🚀 R1+R1.1 已交付 | Permission 两轴重构：Preference/Workflow 拆分、TUI 元数据剥离、preApproved 封装。 |
 | [`feature-edit-read-before.md`](feature-edit-read-before.md) | 持续 | 📝 方案笔记 | Edit 前强制 read 的软性提示已通过 workflowReminder 实施；结构性方案（如 schema 层约束）待评估。 |
 | [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 独立 feature（平台化 v0.11 线） | 📐 设计稿 | 远程控制平面：`Frontend` 端口（收/发分离）+ `seek serve` sidecar + 会话绑定路由 + 直连子进程执行。飞书为第一个 frontend，核心 agent loop 零 daemon 不动。多端通用线的落地起点。 |
+| [`feature-skill-distill.md`](feature-skill-distill.md) | 独立 feature（自进化内环） | 📐 设计稿 | Skill 自动蒸馏（S→K）：会话历史 → reasoner 提取 → 四层新颖性漏斗（机械门槛/提示词内判重/机械查重/语义过滤 + N≥2 复发累积）→ `.drafts/` 草稿区（loader 不可见）→ 人审 install（scope 选择）。`/distill` 扩展先行，自动路径 = SessionStart 后台批量（auto-dream 同构）；自动路径永不 install——与 RSI 同构的人审闸。 |
 | [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
 
 > **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 2 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）、`feature-image-ocr.md`（柱 Q，被 `feature-vision.md` 的原生视觉取代，代码已于 M-V.0 移除）。
