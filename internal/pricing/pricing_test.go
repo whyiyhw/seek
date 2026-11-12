@@ -242,3 +242,58 @@ func TestFormatCost(t *testing.T) {
 		}
 	}
 }
+
+// TestPricingFor_GLM53 pins the GLM-5.3 card against bigmodel.cn's
+// paas listing (checked 2026-11-12): ¥8 miss / ¥2 hit / ¥28 output per
+// 1M tokens, converted at 7.0 CNY/USD. GLM has no peak/off-peak
+// windows, so the card must be identical at both tiers — CurrentTier
+// describes DeepSeek's clock, and callers pass it unconditionally.
+func TestPricingFor_GLM53(t *testing.T) {
+	std := PricingFor(ModelGLM53, TierStandard)
+	if math.Abs(std.InputMissPerMTok-8/7.0) > 1e-9 {
+		t.Errorf("glm-5.3 miss = %v, want 8/7.0 (%v)", std.InputMissPerMTok, 8/7.0)
+	}
+	if math.Abs(std.InputHitPerMTok-2/7.0) > 1e-9 {
+		t.Errorf("glm-5.3 hit = %v, want 2/7.0 (%v)", std.InputHitPerMTok, 2/7.0)
+	}
+	if math.Abs(std.OutputPerMTok-28/7.0) > 1e-9 {
+		t.Errorf("glm-5.3 output = %v, want 28/7.0 (%v)", std.OutputPerMTok, 28/7.0)
+	}
+
+	off := PricingFor(ModelGLM53, TierOffPeak)
+	if off != std {
+		t.Errorf("glm-5.3 must be flat-rate: off-peak card %+v differs from standard %+v", off, std)
+	}
+
+	// Regression guard in the same breath: DeepSeek's off-peak halving
+	// must survive the NoOffPeakDiscount branch.
+	dsStd := PricingFor(deepseek.ModelV41Flash, TierStandard)
+	dsOff := PricingFor(deepseek.ModelV41Flash, TierOffPeak)
+	if math.Abs(dsOff.InputMissPerMTok-dsStd.InputMissPerMTok*0.5) > 1e-9 {
+		t.Errorf("deepseek off-peak discount regressed: std=%v off=%v", dsStd.InputMissPerMTok, dsOff.InputMissPerMTok)
+	}
+}
+
+// TestCost_GLM53 prices one usage block across all three buckets. This
+// is the shape runTurnLLM produces for the GLM lane: full prompt split
+// into hit/miss from prompt_tokens_details.cached_tokens.
+func TestCost_GLM53(t *testing.T) {
+	u := deepseek.Usage{
+		PromptTokens:          100_000,
+		PromptCacheHitTokens:  60_000,
+		PromptCacheMissTokens: 40_000,
+		CompletionTokens:      5_000,
+	}
+	got := Cost(ModelGLM53, TierStandard, u)
+	want := 60_000.0*(2/7.0)/1e6 + 40_000.0*(8/7.0)/1e6 + 5_000.0*(28/7.0)/1e6
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("Cost(glm-5.3) = %v, want %v", got, want)
+	}
+	if got <= 0 {
+		t.Errorf("Cost(glm-5.3) = %v, must be > 0 — this is the $0-statistics regression", got)
+	}
+	// Off-peak must price identically (flat-rate provider).
+	if off := Cost(ModelGLM53, TierOffPeak, u); math.Abs(off-got) > 1e-9 {
+		t.Errorf("Cost(glm-5.3, off-peak) = %v, want same %v (no peak windows)", off, got)
+	}
+}
