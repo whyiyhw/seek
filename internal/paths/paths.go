@@ -336,6 +336,20 @@ func CronTriggers() (string, error) {
 	return filepath.Join(dir, "triggers"), nil
 }
 
+// ServeDir returns ~/.seek/serve/ — the root for the remote control
+// plane's persistent state (feature-remote-control-plane.md M1):
+// bindings.json (ConvID ↔ project ↔ session) and env (frontend
+// credentials). Does NOT create the directory; callers MkdirAll at
+// write time. The serve process is the only writer — seek core
+// never touches this directory.
+func ServeDir() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "serve"), nil
+}
+
 // UserKeybindings returns the user-level keybindings file
 // (~/.seek/keybindings.toml). May not exist — that's the common case
 // for users who never customise; callers (internal/keymap.Load)
