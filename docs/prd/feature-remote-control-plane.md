@@ -74,7 +74,7 @@
 
 ### 2.2 飞书 frontend 目标（v1 唯一实现的适配器）
 
-1. **入站**：larkws 长连接收 `im.message.receive_v1` → 归一化成 `Inbound`；私聊全收、群里 @ 机器人才 `DirectAt=true`；`event_id` 去重；ACK；断线指数退避重连。
+1. **入站**：larkws 长连接收 `im.message.receive_v1` → 归一化成 `Inbound`；私聊全收、群里 @ 机器人才 `DirectAt=true`；`EventID` 去重；ACK 由 SDK 自动完成；断线用 SDK 内建自动重连（终态 error 时平面重建 Client）。
 2. **出站**：`Send` 经自建应用 IM API（`im/v1/messages`，`chat_id` 寻址）回到原会话；`tenant_access_token` 缓存+刷新；长文本分片；best-effort + 重试一次。
 
 ### 2.3 非目标（v1 明确不做）
@@ -143,9 +143,9 @@ type Reply struct {
 后续:  seek -p '<msg>' --json -resume <sid>
 ```
 
-- 用 `--json`（JSONL）拿**结构化**最终文本 + session id，不脆弱地 grep stderr。（实现前核对 JSONL schema 里 session id 字段——§6 待验证①。）
-- 首条成功 → 回写 binding 的 session_id；后续带 `-resume`。
-- `-resume` 失败 → 当首条重建并回写新 id（自愈，一次坏 id 不卡死会话）。
+- 用 `--json`（JSONL）拿**结构化**最终文本 + session id，不脆弱地 grep stderr。session id 在**末行 `agent_end` 事件的顶层 `session_id` 字段**（§6 已验证①：schema 稳定契约，无需 `--print-session` 补口）。
+- 首条成功 → 回写 binding 的 session_id；后续带 `-resume`。`-resume` 续跑返回**同一 id**，且实测 prefix cache 命中（resume 经济性成立）。
+- `-resume` 失败 → seek 直接 **exit 1、stdout 空**（不自愈）→ 平面检测非零退出后降级为首条重跑并回写新 id（自愈责任在平面，一次坏 id 不卡死会话）。mid-run error（stdout 有 `error` 行、无 `agent_end`）→ 拿不到 id，弃上下文按首条重开（已接受边界）。
 
 #### D-C4 — 并发：同会话串行、跨会话并行
 
@@ -155,7 +155,7 @@ type Reply struct {
 
 #### D-C5 — 权限：v1 单人自用，per-binding yolo（默认关），卡片审批留 v2
 
-`seek -p` 无 TUI 交互 y/N → 权限询问无法在远程渠道完成（v1）。默认**非 yolo**（安全优先，**待验证**②print 模式遇 ask 行为）；binding 可显式 `yolo:true`（仅信任自己机器时）。**飞书互动卡片审批**是杀手锏但依赖 print 模式可中断等外部审批输入，留 v2（§8）。
+`seek -p` 无 TUI 交互 y/N → 权限询问无法在远程渠道完成（v1）。print 模式初始 pref 即 `PrefDeny`（§6 已验证②）：危险动作返回 `ErrDenied` **工具结果**（agent 收到后自行调整、不挂起、run 正常结束），默认体验 = **无任何 shell、out-of-CWD 读写挡、in-CWD 写放行**；binding 可显式 `yolo:true`（exec 时加 `--yolo`，全放行——仅信任自己机器时）。**飞书互动卡片审批**是杀手锏但依赖 print 模式可中断等外部审批输入，留 v2（§8）。
 
 ### 飞书 frontend（D-F）
 
@@ -175,8 +175,8 @@ type Reply struct {
 
 #### D-F3 — 飞书投递语义：去重 + ACK + 触发条件（实现 `Run`）
 
-- 飞书 **at-least-once**：handler 按 `event_id` LRU 去重（内存即可）。
-- WS handler **快速返回**（重活丢进平面队列异步做），不阻塞心跳；按 SDK 要求 ACK。
+- 飞书 **at-least-once**：handler 按 `event.Header.EventID` LRU 去重（内存即可）。
+- WS handler **快速返回**（重活丢进平面队列异步做）即可——**SDK 自动 ACK**（handler 返回即回写 200/500；返回 error 或 panic 不回 ACK、触发服务端重推，§6 已验证③）。分片消息 SDK 自动合并。
 - 触发归一化成 `Inbound.DirectAt`：私聊 = true、群里 @bot = true、群里闲聊 = false。
 
 ---
@@ -218,7 +218,7 @@ type Reply struct {
 | **M1 平面骨架** | `internal/controlplane/`：`Frontend`/`Inbound`/`Reply`/`ConvID` 定义；config（候选项目/全局并发/默认 yolo）；`paths` 加 `~/.seek/serve/`；bindings store（原子写+重载+损坏修复） | 平面 | — | 1d |
 | **M2 路由 + 指令** | `ConvID→binding` 解析、`/bind` `/projects` `/switch` `/new` `/cancel`、未绑提示、`DirectAt` 过滤 | 平面 | M1 | 1d |
 | **M3 执行器** | `exec seek -p --json [-resume]`、`cmd.Dir`、JSONL 解析（文本+session id）、per-Conv 串行+跨 Conv 并行+全局上限、超时 kill、`-resume` 自愈 | 平面 | M2 | 1.5d |
-| **M4 飞书 frontend·入站** | `larkws` `Run`、`im.message.receive_v1`→`Inbound`、`event_id` 去重、`DirectAt`、ACK、退避重连 | frontend | M1 | 1.5d |
+| **M4 飞书 frontend·入站** | `larkws` `Run`（内建自动重连：默认无限次、首连抖动≤30s+固定间隔，`Start` 返回终态 error 时平面重建 Client）、`im.message.receive_v1`→`Inbound`、`EventID` 去重、`DirectAt`（ACK 由 SDK 自动完成） | frontend | M1 | 1.5d |
 | **M5 飞书 frontend·出站** | `Send` via `larkim`、`tenant_access_token` 缓存+刷新、分片、best-effort+重试一次 | frontend | M4 | 1d |
 | **M6 serve 生命周期** | `seek serve --frontend=feishu`、多 frontend 扇入、优雅退出（drain）、build-tag 依赖隔离、launchd/systemd 示例 | 两层 | M2–M5 | 0.5d |
 | **M7 测试 + 文档** | §6；`docs/guide-serve.md` + 飞书侧配置清单（§9）+ **纸面验证第二个 frontend 的接缝**（§6 末） | all | all | 1.5d |
@@ -244,7 +244,13 @@ type Reply struct {
 
 **纸面验证第二个 frontend（不写代码，只证接缝够用）**：在 §7 附一段"Telegram frontend 怎么落"——`Run` 用 long-poll、`Send` 用 sendMessage、`ConvID="telegram:<chat>"`、`DirectAt` = 私聊/群 @。**若这段写不顺，说明端口抽错了**——这是抽象的验收测试。
 
-**待验证项（实现前必须坐实，避免设计踩假设）**：① `seek -p --json` 的 JSONL 里 **session id 字段名/位置**（D-C3 依赖；无则加 `--print-session`）；② **print 模式遇权限 ask 的行为**（D-C5）；③ `larkws` 的 ACK / 重连 API 形状（D-F3）。
+**已验证项（2026-11-12 实测坐实，方法：worktree 构建二进制 + `SEEK_HOME` 隔离临时目录跑真 API + 读 larkws SDK v3.12.2 源码）**：
+
+**① session id 字段 —— 已存在，`--print-session` 不需要**。`seek -p --json` 的 stdout JSONL 末行 `agent_end` 事件带顶层字段 `session_id`（`cmd/seek/main.go` `jsonLine.SessionID`，schema 注释声明为稳定契约）；人类可读诊断全在 stderr，stdout 保持 parse-clean。实测四条路径：happy path 正常带出；`-resume <sid>` 返回**同一 id**（session 文件复用，且 prefix cache 命中——resume 跑 cache_hit_tokens 12160/12339）；**坏 id**：exit 1、stdout 完全为空、错误只在 stderr（→ 自愈必须由平面自己做：检测非零退出后降级为首条重跑）；**mid-run error**（如 API 认证失败）：stdout 有 `agent_start`/`turn_start`/`error` 三类行但**无 `agent_end`**——若此前已有完成 turn，session 文件已落盘但 id 不上 stdout，平面拿不到 id 只能弃上下文重开（可接受，记为 D-C3 已知边界）。
+
+**② print 模式权限行为 —— 默认 `deny`（非 ask、非被迫 yolo），不挂起**。`-p`/`--json` 模式初始 pref 就是 `PrefDeny`（`main.go` L920 起，注释明说"can't realistically interrupt to ask"），askFn 只在 TUI 路径注册，print 模式下为 nil → `prefGate` 对危险动作直接返回 `ErrDenied` **工具结果**（非致命）：实测 `pwd` 级 bash 也被挡，agent 收到带 hint 的拒绝后自行调整继续完成任务，exit 0、`agent_end` 照常带 session_id。精确挡面（`prefGate`）：**bash 全挡**（ReadOnly 白名单除外）、out-of-CWD 读写挡、memory/skill install 挡；**in-CWD write/edit 默认放行**（不属 dangerous）；`ask_user` → `ErrNoCallback` 工具错误。`--yolo` 实测全放行（bash 正常执行）。→ D-C5 的"默认非 yolo"成立，且远程默认体验 = "能读能写项目目录、不能跑任何 shell"；`/cancel`-级交互能力在 v1 默认模式下天然安全。**实测还撞出一个与平面无关的既有 bug**：相对路径 write 在符号链接 CWD（macOS `/tmp`→`/private/tmp`）下被 `isWithin` 误判 outside（`resolveClosest(".")` 原样返回 + `filepath.Abs` 不解析符号链接，而 root 侧走 `EvalSymlinks`）；模型改绝对路径一次重试即自愈，不阻塞平面，另报主会话处置。
+
+**③ larkws ACK/重连形状（SDK `github.com/larksuite/oapi-sdk-go/v3 v3.12.2`）—— ACK 全自动，重连内建**。ACK：**没有手动 ACK API**——SDK 在事件 handler **同步返回后**自动回写 Response 帧（handler 返回 nil → 200、返回 error → 500 触发服务端重推、panic 被 recover 但**不回 ACK**）→ D-F3 的"handler 快速返回"正确姿势就是 handler 内只做入队即刻 return；分片消息（headers `sum>1`）SDK 自动合并。重连：`autoReconnect` 默认开、次数默认无限（`reconnectCount=-1`）、首连失败随机抖动 ≤30s、此后**固定间隔**（默认 2min，服务端可在连接期下发 `ClientConfig` 覆盖全部四参数）——**不是指数退避**；仅非 `ClientError`（≈4xx）可重试，耗尽/不可重试 → `Start(ctx)` **阻塞返回 error** 且 Client 进入 terminal 状态**不可复用**（平面需重建 Client）。入口形状 `Start(ctx) error` 阻塞 + ctx 取消干净退出 + OnReady/OnReconnecting/OnReconnected/OnDisconnected/OnError 回调——与 `Frontend.Run` 端口一一对应。事件注册：`dispatcher.NewEventDispatcher("", "")`（长连接无需 verification token）+ `OnP2MessageReceiveV1(func(ctx, *larkim.P2MessageReceiveV1) error)`；去重键 `event.Header.EventID`。→ D-F3"按 SDK 要求 ACK"措辞修正为"SDK 自动 ACK"；M4"退避重连"修正为"内建抖动+固定间隔重连（默认即够用），平面仅在 `Start` 返回终态 error 时重建 Client"。
 
 ---
 
@@ -259,7 +265,7 @@ type Reply struct {
 | **print 模式无法交互审批** | 危险动作要么被挡要么被迫 yolo | D-C5：v1 默认非 yolo + per-binding 显式授权；卡片审批 v2 |
 | **多用户冒名驱动我机器上的 seek** | 任意群成员能在你机器跑命令 | v1 单人自用、私聊优先；未来：`Sender` allowlist + per-用户 session 隔离 + 危险动作强制卡片审批 |
 | **`ConvID` 跨 frontend 撞键** | 串话 | 前缀 `<frontend>:` 强制隔离 |
-| **session id 抓取依赖未定 schema** | D-C3 落空 | §6 待验证①先核对，必要时加 `--print-session` |
+| **session id 抓取依赖未定 schema** | D-C3 落空 | **已解除**（§6 已验证①）：`agent_end.session_id` 是稳定契约字段，无需 `--print-session`；剩余边界 = mid-run error 无 `agent_end`（弃上下文重开） |
 | **token/密钥落盘泄露** | 应用被盗用 | 存 `~/.seek/serve/env`（0600，沿用 cron env overlay 姿态），不进 config.json、不进日志 |
 
 > **与 `vision.md` 的对齐张力（值得记下，不改 v1）**：vision.md 主张"系统应用与 CLI 层**通过 MCP 通信**"。本平面 v1 走 `exec seek` + 共享 `~/.seek/`，**站在 MCP 栈旁边而非栈里**（图简单）。长期，远程控制平面或某个 frontend 可能本身是 MCP-fronted 的——届时 `Frontend` 端口的存在让这种替换是"加一个实现"，而非重写。另：vision.md 称 CLI 为"中枢神经"靠的是确定性+可审计+穿透 SSH/容器；本平面**让 CLI 继续当大脑**（只 exec 它），自己只做远程触手——不违背该底牌。
