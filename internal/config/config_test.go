@@ -218,3 +218,66 @@ func TestLoad_LegacyOCRSectionIgnored(t *testing.T) {
 		t.Errorf("adjacent fields must still parse: %+v", cfg)
 	}
 }
+
+// TestLoad_NoServeSection_Compat: every config written before the
+// remote control plane exists has no `serve` key. Loading one must not
+// error and must read as "all defaults" (nil section, yolo off) —
+// top-level backward compat is the M1b acceptance bar.
+func TestLoad_NoServeSection_Compat(t *testing.T) {
+	dir := withSeekHome(t)
+	old := `{"default_provider": "deepseek", "providers": {"deepseek": {"api_key": "sk-x"}}, "language": "zh"}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("old config without serve section must load clean: %v", err)
+	}
+	if cfg.Serve != nil {
+		t.Errorf("absent serve section must load as nil, got %+v", cfg.Serve)
+	}
+	if cfg.ServeYolo() {
+		t.Error("no serve section must mean yolo off (D-C5 safe default)")
+	}
+}
+
+// TestServeConfig_RoundTrip: a hand-edited serve section survives
+// Save/Load byte-faithfully — this file is user-writable, so the
+// section must round-trip without the wizard's help.
+func TestServeConfig_RoundTrip(t *testing.T) {
+	withSeekHome(t)
+	cfg := Config{
+		Serve: &ServeConfig{
+			Projects:       []string{"/Users/me/code/seek", "/Users/me/code/butler"},
+			MaxConcurrency: 8,
+			Yolo:           true,
+		},
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Serve == nil {
+		t.Fatal("serve section lost in round-trip")
+	}
+	if len(got.Serve.Projects) != 2 || got.Serve.Projects[0] != "/Users/me/code/seek" {
+		t.Errorf("projects round-trip: %+v", got.Serve.Projects)
+	}
+	if got.Serve.MaxConcurrency != 8 {
+		t.Errorf("max_concurrency round-trip: %d", got.Serve.MaxConcurrency)
+	}
+	if !got.ServeYolo() {
+		t.Error("yolo round-trip")
+	}
+}
+
+// TestServeYolo_DefaultOff: the exposure switch defaults OFF even when
+// the section exists but leaves yolo unset (D-C5).
+func TestServeYolo_DefaultOff(t *testing.T) {
+	if (Config{Serve: &ServeConfig{MaxConcurrency: 4}}).ServeYolo() {
+		t.Error("yolo must default off")
+	}
+}

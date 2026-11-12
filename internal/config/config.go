@@ -110,6 +110,44 @@ type Config struct {
 	// Only human-facing prose follows it — LLM-visible strings and the
 	// status bar stay English by design (docs/prd/feature-i18n.md §1.2).
 	Language string `json:"language,omitempty"`
+
+	// Serve configures the remote control plane (`seek serve` —
+	// docs/prd/feature-remote-control-plane.md, wired in M1b). Nil
+	// (section absent, i.e. every config written before the plane
+	// existed) means all defaults; loading an old config must not
+	// error — top-level backward compat is the file-format contract.
+	Serve *ServeConfig `json:"serve,omitempty"`
+}
+
+// ServeConfig is the `serve` section of the config file: the plane's
+// standing posture, read once at `seek serve` startup. Per-conversation
+// state (bindings, sessions) lives in ~/.seek/serve/, never here — this
+// section is only what the user configures by hand.
+type ServeConfig struct {
+	// Projects lists candidate project directories a conversation can
+	// bind to (the /projects command renders this list, M2). Directories
+	// are used as given; the router resolves to absolute paths at bind
+	// time. Empty = a plane with no pre-declared candidates.
+	Projects []string `json:"projects,omitempty"`
+
+	// MaxConcurrency caps globally concurrent seek subprocesses across
+	// ALL conversations (PRD D-C4). <= 0 / absent = the executor's own
+	// default (mirrored by controlplane.NewExecutor — the zero value is
+	// deliberately passed through so the default lives in ONE place).
+	MaxConcurrency int `json:"max_concurrency,omitempty"`
+
+	// Yolo opts the plane's child seek runs into --yolo (all permission
+	// gates open). Default false — deliberate (PRD D-C5): print mode is
+	// PrefDeny, so a remote run can read/write the bound project but
+	// cannot run shell commands unless the user explicitly accepts that
+	// exposure here. Per-binding overrides are future work.
+	Yolo bool `json:"yolo,omitempty"`
+}
+
+// ServeYolo reports whether serve-mode child runs start with --yolo.
+// Nil-safe: no serve section = the safe default (false).
+func (c Config) ServeYolo() bool {
+	return c.Serve != nil && c.Serve.Yolo
 }
 
 // ReadConfig configures the read tool (internal/tools/read). All fields

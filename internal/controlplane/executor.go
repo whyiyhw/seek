@@ -108,6 +108,12 @@ func NewExecutor(cfg ExecutorConfig) *Executor {
 	}
 }
 
+// MaxParallel reports the effective global concurrency cap (post
+// defaulting). Read accessor for the serve CLI's startup log, so the
+// "max_concurrency unset → default" fallback is observable without a
+// second copy of the default constant.
+func (e *Executor) MaxParallel() int { return e.cfg.MaxParallel }
+
 // convGate is the per-conversation serialisation lock: a
 // buffered-channel mutex that can be acquired ctx-aware (a /cancel
 // while queued for the conv aborts instead of waiting).

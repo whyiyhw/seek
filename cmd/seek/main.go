@@ -33,6 +33,7 @@ import (
 	"github.com/whyiyhw/seek/internal/checkpointcli"
 	"github.com/whyiyhw/seek/internal/clipimage"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/controlplane"
 	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -53,6 +54,7 @@ import (
 	"github.com/whyiyhw/seek/internal/routinescli"
 	seekrpc "github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/sandbox"
+	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
@@ -722,6 +724,20 @@ func run() error {
 				os.Exit(2)
 			}
 			return err
+		}
+		return nil
+	}
+	// `seek serve` — remote control plane (docs/prd/feature-remote-
+	// control-plane.md). Dispatched ahead of the agent runtime for the
+	// same reason as cron: the plane never loads a session or touches
+	// the TUI. The plane owns its exit-code contract (docs/serve/
+	// README.md): 0 clean drain / 1 work dropped / 2 frontend-layer or
+	// bad config. controlplane.ExitCode is the single mapping — servecli
+	// has already printed the error, so don't re-print (main() would
+	// prefix "seek:" and flatten the code to 1).
+	if len(os.Args) >= 2 && os.Args[1] == "serve" {
+		if err := servecli.Run(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			os.Exit(controlplane.ExitCode(err))
 		}
 		return nil
 	}
