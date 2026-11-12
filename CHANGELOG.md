@@ -11,3 +11,4 @@
 - c_evvow4：memory 与 skill 联动现状盘点：蒸馏漏斗里 L/M/S 与 SKILL.md 的断层
 - c_xelskv：control-plane M6a：serve 生命周期——多 frontend 扇入、优雅 drain、build-tag 依赖隔离
 - c_nap4wk：control-plane M7a：guide-serve 文档骨架 + Telegram frontend 纸面接缝验证
+- c_odyzbq：comparison.md 定位改造：从 roadmap 驱动降级为参考 + 平台化验收口径段
