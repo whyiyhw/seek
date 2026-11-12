@@ -10,10 +10,10 @@
 // mapping (0 clean / 1 work dropped / 2 frontend-layer or bad
 // config); cmd/seek routes serve errors through it verbatim.
 //
-// What it deliberately does NOT own: routing and reply delivery. The
-// inbound handler is a stub until the M2 router lands — every message
-// is logged and dropped, loudly, so an empty plane never pretends to
-// have processed work.
+// What it deliberately does NOT own: routing and reply delivery —
+// those are controlplane.Router's. servePlane wires the frontends,
+// binding store, executor and config into one Router and hands it to
+// Serve as the inbound handler (M2).
 package servecli
 
 import (
@@ -130,28 +130,34 @@ func registeredNames() string {
 	return strings.Join(names, ", ")
 }
 
-// servePlane runs the empty plane to completion: frontends fan into
-// the Serve supervisor, inbound messages hit the stub handler, ctx
-// cancellation (signal or test) triggers the drain. Split from Run so
-// tests drive it with their own ctx instead of real signals.
+// servePlane runs the plane to completion: frontends fan into the
+// Serve supervisor, the Router answers each inbound (commands, bound
+// prompts via the executor), ctx cancellation (signal or test)
+// triggers the drain. Split from Run so tests drive it with their own
+// ctx instead of real signals.
 func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Config, stderr io.Writer) error {
 	// Config → plane wiring. MaxConcurrency passes through as-is: the
 	// zero value means "unset" and controlplane.NewExecutor owns the
 	// default, so the number lives in exactly one place (executor.go).
 	maxParallel := 0
+	var projects []string
 	if cfg.Serve != nil {
 		maxParallel = cfg.Serve.MaxConcurrency
+		projects = cfg.Serve.Projects
 	}
 	exec := controlplane.NewExecutor(controlplane.ExecutorConfig{MaxParallel: maxParallel})
 
-	// The executor is wired from config now (the M1b mapping
-	// executor.go's comment promises) but has nothing to run yet: the
-	// M2 router takes it over once bindings exist. Until then the
-	// handler is a stub — dropped messages are logged loudly, never
-	// silently swallowed by an empty plane.
-	handle := func(ctx context.Context, m controlplane.Inbound) {
-		fmt.Fprintf(stderr, "serve: no router yet (M2): dropped message from %s (%d chars)\n", m.Conv, len(m.Text))
+	store, err := controlplane.OpenBindingStore()
+	if err != nil {
+		return fmt.Errorf("open bindings store: %w", err)
 	}
+
+	// The M2 router is the inbound handler: dedup → DirectAt →
+	// command/binding route → exec → session writeback → Send.
+	router := controlplane.NewRouter(fes, store, exec, controlplane.RouterConfig{
+		Projects: projects,
+		Yolo:     cfg.ServeYolo(),
+	})
 
 	names := make([]string, len(fes))
 	sources := make([]controlplane.ServeSource[controlplane.Inbound], len(fes))
@@ -159,16 +165,12 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 		names[i] = f.Name()
 		sources[i] = f
 	}
-	projects := 0
-	if cfg.Serve != nil {
-		projects = len(cfg.Serve.Projects)
-	}
 	fmt.Fprintf(stderr, "serve: plane up: frontends=[%s] max_parallel=%d yolo=%v candidate_projects=%d\n",
-		strings.Join(names, ","), exec.MaxParallel(), cfg.ServeYolo(), projects)
+		strings.Join(names, ","), exec.MaxParallel(), cfg.ServeYolo(), len(projects))
 
 	// ServeSource[Inbound] ← Frontend is the structural seam asserted
 	// in controlplane/serve.go; Serve handles the rest.
-	err := controlplane.Serve(ctx, sources, handle, controlplane.ServeConfig{})
+	err = controlplane.Serve(ctx, sources, router.Handle, controlplane.ServeConfig{})
 	if err == nil {
 		fmt.Fprintln(stderr, "serve: plane down: drained cleanly")
 	}

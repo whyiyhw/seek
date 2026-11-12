@@ -97,6 +97,12 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"agent_start"}`)
 		fmt.Println(`{"type":"text_delta","delta":"half an answer"}`)
 		return 0
+	case "bare_end":
+		// agent_end with no deltas and no session id: a completed run
+		// that reports neither text nor id (router edge: empty-reply
+		// placeholder + session-writeback keeps the stored id).
+		fmt.Println(`{"type":"agent_end","turns":0}`)
+		return 0
 	case "hang_tree":
 		// For the timeout/cancel tests: records both PIDs, spawns a
 		// grandchild that outlives everything, then hangs. The
