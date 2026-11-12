@@ -10,3 +10,4 @@
 - c_n2k6qi：dsh 事件溯源不变量在 seek 的适用性评估：approval/todo fold 化设计笔记
 - c_evvow4：memory 与 skill 联动现状盘点：蒸馏漏斗里 L/M/S 与 SKILL.md 的断层
 - c_xelskv：control-plane M6a：serve 生命周期——多 frontend 扇入、优雅 drain、build-tag 依赖隔离
+- c_nap4wk：control-plane M7a：guide-serve 文档骨架 + Telegram frontend 纸面接缝验证

@@ -242,7 +242,7 @@ type Reply struct {
 
 飞书 frontend 单测（`//go:build feishu`）：WS 重连退避；token 过期→刷新重发；长文本分片；4xx 不重试 / 5xx 重试一次。
 
-**纸面验证第二个 frontend（不写代码，只证接缝够用）**：在 §7 附一段"Telegram frontend 怎么落"——`Run` 用 long-poll、`Send` 用 sendMessage、`ConvID="telegram:<chat>"`、`DirectAt` = 私聊/群 @。**若这段写不顺，说明端口抽错了**——这是抽象的验收测试。
+**纸面验证第二个 frontend（不写代码，只证接缝够用）**：在 §7 附一段"Telegram frontend 怎么落"——`Run` 用 long-poll、`Send` 用 sendMessage、`ConvID="telegram:<chat>"`、`DirectAt` = 私聊/群 @。**若这段写不顺，说明端口抽错了**——这是抽象的验收测试。→ **已落（M7a）**：[`guide-serve.md`](../guide-serve.md) §5——写得顺，接缝成立；沉淀两条归一化约定（提及剥离归 frontend、去重统一在平面层），无需改端口。
 
 **已验证项（2026-11-12 实测坐实，方法：worktree 构建二进制 + `SEEK_HOME` 隔离临时目录跑真 API + 读 larkws SDK v3.12.2 源码）**：
 
