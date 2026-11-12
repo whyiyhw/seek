@@ -153,6 +153,49 @@ extract_metric() {
       # internal/fsobserve/fsobserve.go Explain).
       $JQ -s '[.[] | select(.type=="tool_end" and .name=="write" and (.error // "" | contains("write refused")))] | length' "$path"
       ;;
+    write_ok)
+      # write tool calls that completed without error — the in-CWD
+      # write default-allow path under print-mode PrefDeny (writes
+      # inside the working directory are not "dangerous", so the deny
+      # preference never sees them). Distinct from write_refusals,
+      # which counts the fsobserve blind-overwrite guard.
+      $JQ -s '[.[] | select(.type=="tool_end" and .name=="write" and ((.error // "") == ""))] | length' "$path"
+      ;;
+    denied_tool_ends)
+      # Tool calls refused by the permission gate. internal/permission
+      # surfaces refusals as tool RESULTS whose error is ErrDenied
+      # ("permission denied", permission.go) — never a fatal error, so
+      # the run keeps going and still exits 0.
+      $JQ -s '[.[] | select(.type=="tool_end" and (.error // "" | contains("permission denied")))] | length' "$path"
+      ;;
+    agent_ends)
+      # agent_end events in the stream — one per seek invocation. A
+      # run that dies mid-flight (API failure, crash) emits none, so
+      # runner-chained cases bind exact_agent_ends to catch that.
+      $JQ -s '[.[] | select(.type=="agent_end")] | length' "$path"
+      ;;
+    session_id_missing)
+      # agent_end events WITHOUT a session_id. cmd/seek/main.go sets
+      # jsonLine.SessionID whenever a session is active (stable
+      # contract, schema comment on the struct); --no-save runs
+      # legitimately omit it, so only bind this metric in cases that
+      # run WITHOUT -no-save.
+      $JQ -s '[.[] | select(.type=="agent_end" and ((.session_id // "") == ""))] | length' "$path"
+      ;;
+    session_id_distinct)
+      # Distinct session_id values across agent_end events. A fresh
+      # run plus a -resume of that session must report the SAME id
+      # (the session file is reused), so the contract holds at exactly 1.
+      $JQ -s '[.[] | select(.type=="agent_end") | .session_id // empty] | unique | length' "$path"
+      ;;
+    nonzero_exits)
+      # runner_fact lines reporting a non-zero seek exit code. Exit
+      # codes are process-level, not part of the JSONL stream, so a
+      # runner.sh appends {"type":"runner_fact","exit_code":N} after
+      # each invocation; this metric is how that reaches expect.json.
+      # Cases using the default invocation emit no facts → 0.
+      $JQ -s '[.[] | select(.type=="runner_fact" and ((.exit_code // 0) != 0))] | length' "$path"
+      ;;
     turns)
       $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
       ;;
@@ -217,6 +260,25 @@ run_one() {
   local started_at
   started_at=$(date +%s)
 
+  # Per-case runner hook: when runner.sh exists it REPLACES the default
+  # invocation below. Needed for cases whose contract is about the CLI
+  # shape itself rather than the model's tool-call stream — e.g. running
+  # WITHOUT -yolo (print-mode permission defaults) or chaining multiple
+  # seek invocations (fresh run + -resume must reuse the session id).
+  # Contract: executed from repo root with SEEK_EVAL_BINARY,
+  # SEEK_EVAL_REPO_ROOT, SEEK_EVAL_PROMPT_FILE and SEEK_EVAL_MAX_TURNS in
+  # the environment; writes the JSONL event stream to stdout, optionally
+  # followed by {"type":"runner_fact","exit_code":N} lines (see the
+  # nonzero_exits metric) to surface process-level results.
+  local runner_file="$case_dir/runner.sh"
+  if [[ -f "$runner_file" ]]; then
+    ( cd "$repo_root" && \
+      SEEK_EVAL_BINARY="$binary" \
+      SEEK_EVAL_REPO_ROOT="$repo_root" \
+      SEEK_EVAL_PROMPT_FILE="$prompt_file" \
+      SEEK_EVAL_MAX_TURNS="$max_turns" \
+      bash "$runner_file" ) > "$out_file" 2>/dev/null
+  else
   # -no-save: don't pollute ~/.seek/sessions/ with eval runs.
   # -yolo:    these prompts are read-only inspections; --yolo lets
   #           grep/read/list_dir run without inline approval prompts.
@@ -224,6 +286,7 @@ run_one() {
   #          inspect (most cases reference real files).
   ( cd "$repo_root" && "$binary" -yolo -no-save -max-turns "$max_turns" -json -p "$prompt" ) \
     > "$out_file" 2>/dev/null
+  fi
   local elapsed=$(( $(date +%s) - started_at ))
 
   if [[ -f "$teardown_file" ]]; then
@@ -268,10 +331,16 @@ run_one() {
     --argjson git_subcommand_dupes "$(extract_metric git_subcommand_dupes "$out_file")" \
     --argjson probe_reads          "$(extract_metric probe_reads          "$out_file")" \
     --argjson write_refusals       "$(extract_metric write_refusals       "$out_file")" \
+    --argjson write_ok             "$(extract_metric write_ok             "$out_file")" \
+    --argjson denied_tool_ends     "$(extract_metric denied_tool_ends     "$out_file")" \
+    --argjson agent_ends           "$(extract_metric agent_ends           "$out_file")" \
+    --argjson session_id_missing   "$(extract_metric session_id_missing   "$out_file")" \
+    --argjson session_id_distinct  "$(extract_metric session_id_distinct  "$out_file")" \
+    --argjson nonzero_exits        "$(extract_metric nonzero_exits        "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got
