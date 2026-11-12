@@ -256,6 +256,60 @@ func TestIsWithin_SymlinkInsideCWDPointingOutsideIsDenied(t *testing.T) {
 	}
 }
 
+// Relative paths under a symlinked CWD must not be denied as "outside".
+//
+// macOS /tmp → /private/tmp: a shell launched inside a symlinked dir
+// exports PWD in logical (symlinked) form, and os.Getwd prefers PWD —
+// so filepath.Abs lands relative targets on the logical prefix while
+// the root side resolves to the physical form. Rel() across the two
+// bases says "outside" and every in-CWD relative write/read is denied
+// (hit in the wild under /tmp; the model self-healed by switching to
+// an absolute path, costing one wasted round-trip).
+func TestIsWithin_RelativePathUnderSymlinkedCWD(t *testing.T) {
+	phys := t.TempDir()
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "link")
+	if err := os.Symlink(phys, link); err != nil {
+		t.Skipf("symlinks not supported on this platform: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(phys, "exists.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Emulate the launch environment: process CWD inside the symlinked
+	// path, PWD exported in logical form (what os.Getwd prefers over
+	// the syscall result). The policy sees the same logical path a real
+	// seek startup would capture via os.Getwd.
+	t.Setenv("PWD", link)
+	t.Chdir(link)
+
+	t.Run("write new file relative allowed", func(t *testing.T) {
+		p, _ := New(link, PrefAsk)
+		if err := p.Check(Action{Kind: KindWrite, Path: "notes.md"}); err != nil {
+			t.Errorf("in-CWD relative write denied under symlinked CWD: %v", err)
+		}
+	})
+	t.Run("write existing file relative allowed", func(t *testing.T) {
+		p, _ := New(link, PrefAsk)
+		if err := p.Check(Action{Kind: KindEdit, Path: "exists.txt"}); err != nil {
+			t.Errorf("in-CWD relative edit denied under symlinked CWD: %v", err)
+		}
+	})
+	t.Run("plan-analyze relative read allowed", func(t *testing.T) {
+		p := newPlanAnalyze(t, link)
+		if err := p.Check(Action{Kind: KindRead, Path: "notes.md"}); err != nil {
+			t.Errorf("plan-analyze in-CWD relative read denied under symlinked CWD: %v", err)
+		}
+	})
+	t.Run("parent traversal still denied", func(t *testing.T) {
+		p, _ := New(link, PrefAsk)
+		err := p.Check(Action{Kind: KindWrite, Path: "../escape.txt"})
+		if !errors.Is(err, ErrDenied) {
+			t.Errorf("relative ../ write must stay denied under symlinked CWD, got %v", err)
+		}
+	})
+}
+
 // --- WorkflowPlanAnalyze tests --------------------------------------
 // These exercise the workflow gate's read-only constraints. The pref
 // axis is held at PrefAsk to isolate workflow behaviour from pref
