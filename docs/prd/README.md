@@ -41,6 +41,7 @@
 | [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 独立 feature（平台化 v0.11 线） | 📐 设计稿 | 远程控制平面：`Frontend` 端口（收/发分离）+ `seek serve` sidecar + 会话绑定路由 + 直连子进程执行。飞书为第一个 frontend，核心 agent loop 零 daemon 不动。多端通用线的落地起点。 |
 | [`feature-skill-distill.md`](feature-skill-distill.md) | 独立 feature（自进化内环） | 📐 设计稿 | Skill 自动蒸馏（S→K）：会话历史 → reasoner 提取 → 四层新颖性漏斗（机械门槛/提示词内判重/机械查重/语义过滤 + N≥2 复发累积）→ `.drafts/` 草稿区（loader 不可见）→ 人审 install（scope 选择）。`/distill` 扩展先行，自动路径 = SessionStart 后台批量（auto-dream 同构）；自动路径永不 install——与 RSI 同构的人审闸。 |
 | [`notes-memory-skill-gap.md`](notes-memory-skill-gap.md) | 盘点笔记（自进化内环备料） | 📝 已盘点 | memory L/M/S 与 skill SKILL.md 的断层：三出口产出形态、decay 规则链、6 项重复点、7 项失联点、P0/P1/P2 打通优先级。坐实一处 PRD↔代码偏差——v1.md 硬豁免永不 stale vs score.go 实现 30 天宽限后正常 GC（实现是对的，PRD 该改）。 |
+| [`feature-paseo-provider.md`](feature-paseo-provider.md) | 独立 feature（平台化线） | 📐 设计稿 | seek 接入 paseo 作为 acp 型 provider（butler drive 最便宜车道）：`seek acp` 即 ACP server，无需桥进程。读 paseo asar 逆向证实能力协商门控；两个必做缺口——`session/new` cwd 必须生效（paseo 不给子进程设 cwd）、`SEEK_ACP_YOLO` 无头权限（ACP 模式 flag 全不解析、Deny 拒 bash）。验收 = drive 最小卡 `--provider seek` 全流程写回。 |
 | [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
 
 > **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 2 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）、`feature-image-ocr.md`（柱 Q，被 `feature-vision.md` 的原生视觉取代，代码已于 M-V.0 移除）。
