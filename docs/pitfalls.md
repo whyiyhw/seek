@@ -1396,3 +1396,12 @@ If you're new to the project, skim entries in this order:
 - **Fix**: rule 5 now splits by source — user-declined y/N → stop, never re-ask/re-try; policy denial with a `Hint:` → adjust once (different tool or corrected shape); still denied → surface and stop; never retry the same shape. No test change needed: the byte-equivalence oracle in `internal/sysprompt` reuses `rootTpl` itself. (this change; commit pending)
 - **Lesson**: when an error gains machine-actionable metadata (hints, alternatives), grep the instruction surfaces for blanket "on error: stop" rules — they silently discard it.
 - **Refs**: `internal/sysprompt/sysprompt.go` (Workflow rule 5), `internal/tools/bash/hint.go`, `internal/skill/builtin/plan-mode.md` "Common bash pitfalls in plan-analyze"
+
+## Build tags / dependency isolation
+
+### A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`
+- **Saw**: planned to gate the feishu frontend SDK behind `//go:build feishu` with a package containing ONLY tagged files; assumed `go build ./...` would break ("build constraints exclude all Go files"). Empirically (go1.27): `go build ./...`, `go vet ./...`, `go test ./...` all SKIP such packages silently — only directly naming the package (`go build ./internal/.../pkg`, or importing it from untagged code) errors.
+- **Why**: pattern-matched packages with zero matching files are dropped from the pattern expansion; an explicitly named package must produce a build result and has none to produce.
+- **Fix**: keep an untagged `doc.go` as the package anchor (also carries the tag contract in godoc) and, for the default-build guarantee, assert the package's default `GoFiles == [doc.go]` via `go/build.Default.ImportDir` in an ordinary CI test (`internal/controlplane/buildtags_test.go`) — go/build evaluates //go:build per tags without spawning builds, so the exclusion proof itself runs under default tags.
+- **Lesson**: `./...` staying green does NOT prove a tag-gated package is wired right; prove the gate both ways — default tags exclude the file (go/build assertion in CI) and `-tags feishu` compiles AND runs it (tagged test, run on demand until CI grows a tagged lane).
+- **Refs**: `internal/controlplane/feishu/doc.go` (anchor), `internal/controlplane/buildtags_test.go`, `docs/serve/README.md` "build-tag 依赖隔离"

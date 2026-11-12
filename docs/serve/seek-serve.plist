@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  seek serve — launchd 用户 agent 示例（M6a 契约示例，M6b CLI 接线后可用）
+
+  安装：cp 到 ~/Library/LaunchAgents/com.whyiyhw.seek-serve.plist（改掉下面
+  两处 EXAMPLE 路径：二进制位置、日志位置），然后
+    launchctl load ~/Library/LaunchAgents/com.whyiyhw.seek-serve.plist
+
+  契约要点（docs/serve/README.md）：
+  - KeepAlive=true       任意退出都拉起（exit 1/2 需要；exit 0 也拉——launchd
+                          用户 agent 没有 per-exit-status 的 KeepAlive 细分，
+                          语义上等同 Restart=always）
+  - ExitTimeOut=30       > DrainWait(10s) + 2×HandlerGrace(5s) = 20s；
+                          到点 launchd 发 SIGKILL，serve 应早已自己退完
+  - 停机信号            unload/reboot 时 launchd 先发 SIGTERM——serve 的 main
+                          （M6b）把 SIGTERM 映射成 ctx cancel 进入 drain
+  - 密钥不进本文件       按 PRD §9 放 ~/.seek/serve/env（0600），
+                          FEISHU_APP_ID / FEISHU_APP_SECRET
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.whyiyhw.seek-serve</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/seek</string>
+        <string>serve</string>
+        <string>--frontend=feishu</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- EXAMPLE: 换成你的绝对路径（launchd 不展开 ~） -->
+    <key>StandardOutPath</key>
+    <string>/Users/EXAMPLE/Library/Logs/seek-serve.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/EXAMPLE/Library/Logs/seek-serve.err.log</string>
+</dict>
+</plist>

@@ -1,0 +1,38 @@
+# seek serve — systemd 用户服务示例（M6a 契约示例，M6b CLI 接线后可用）
+# 契约说明：docs/serve/README.md
+#
+# 安装（用户级，无需 root；单机自用姿态，PRD D-C5）：
+#   cp seek-serve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now seek-serve
+#
+# 退出码语义（README 表格）：
+#   0 = 干净停机          → Restart=on-failure 不拉起（手动 stop 就该停着）
+#   1 = drain 丢工        → on-failure 拉起
+#   2 = frontend 全挂/配置错 → on-failure 拉起（持续 2 = 查凭证/配置）
+
+[Unit]
+Description=seek remote control plane (serve)
+Documentation=file:///usr/local/share/seek/docs/serve/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# EXAMPLE: 换成实际的 seek 路径；feishu tag 构建产物见 README「build-tag 依赖隔离」
+ExecStart=/usr/local/bin/seek serve --frontend=feishu
+
+# SIGTERM → serve 进入 drain；> DrainWait(10s)+2×HandlerGrace(5s) 后才允许 SIGKILL
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=5
+
+# 密钥不进单元：按 PRD §9 放 ~/.seek/serve/env（0600）
+# Environment=FEISHU_APP_ID=...   ← 不要这样
+
+# 日志走 journald：journalctl --user -u seek-serve -f
+
+[Install]
+WantedBy=default.target
