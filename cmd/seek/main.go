@@ -742,8 +742,8 @@ func run() error {
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
-		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | compatible")
-		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible (OpenAI-compatible endpoint)")
+		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | compatible")
+		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag     = flag.String("theme", "auto", "color theme: auto|dark|light")
 		rpcMode       = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
@@ -2735,6 +2735,8 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 			provFlag = "openai"
 		case config.KeyFor(cfg, "gemini") != "":
 			provFlag = "gemini"
+		case config.KeyFor(cfg, "glm") != "":
+			provFlag = "glm"
 		case cfg.DefaultProvider != "":
 			provFlag = cfg.DefaultProvider
 		default:
@@ -2771,6 +2773,24 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		}
 		return geminiprov.New(apiKey), nil, "Gemini", "gemini-2.0-flash", nil
 
+	case "glm":
+		// Zhipu GLM subscription lane (open.bigmodel.cn). The paas/v4
+		// endpoint speaks OpenAI Chat Completions — including streaming
+		// tool_calls deltas — so it rides the compatible adapter with a
+		// pinned default base URL (--base-url overrides, e.g. for
+		// proxies). Expected degradation vs DeepSeek: no FIM, no cache
+		// metadata, reasoning_content deltas are silently skipped by the
+		// openai client's wire types.
+		apiKey := config.KeyFor(cfg, "glm")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("no GLM API key — set GLM_API_KEY or add providers.glm.api_key to ~/.seek/config.json")
+		}
+		base := glmBaseURL
+		if baseURLFlag != "" {
+			base = baseURLFlag
+		}
+		return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
+
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
 		// accept OPENAI_API_KEY or DEEPSEEK_API_KEY (common shapes for
@@ -2789,9 +2809,15 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		return compatible.New(apiKey, baseURLFlag, provName), nil, provName, "", nil
 
 	default:
-		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | compatible", provFlag)
+		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | compatible", provFlag)
 	}
 }
+
+// glmBaseURL is the default endpoint for --provider=glm: Zhipu's
+// OpenAI-compatible Chat Completions path (subscription and pay-as-you-go
+// keys share it). Full chat-completions path, matching the openai client's
+// expectation that baseURL is the POST target.
+const glmBaseURL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 
 // autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
 // a truthy value (1/true/yes/on). Controls memory_observe tool registration;

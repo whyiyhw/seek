@@ -64,7 +64,7 @@ seek --rpc                  # JSON-RPC 2.0 server mode (IDE integration)
 seek --resume <id>          # Resume a saved session by ID (see seek -list)
 seek --continue             # Resume the most-recently-updated session
 seek --model <name>         # Override model selection
-seek --provider <name>      # Override provider (deepseek/anthropic/openai/gemini)
+seek --provider <name>      # Override provider (deepseek/anthropic/openai/gemini/glm)
 seek --yolo                 # Bypass permission prompts
 seek --plan                 # Start in plan mode
 seek --no-save              # Ephemeral session (no persistence)

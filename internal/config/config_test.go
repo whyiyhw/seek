@@ -130,6 +130,24 @@ func TestKeyFor_UnknownProviderOnlyChecksConfig(t *testing.T) {
 	}
 }
 
+func TestKeyFor_GLMEnvVar(t *testing.T) {
+	// glm has a canonical env var (GLM_API_KEY) that beats the config
+	// file, same precedence shape as the other named providers.
+	withSeekHome(t)
+	_ = os.Unsetenv("GLM_API_KEY")
+	cfg := Config{Providers: map[string]ProviderConfig{
+		"glm": {APIKey: "from-config"},
+	}}
+	if got := KeyFor(cfg, "glm"); got != "from-config" {
+		t.Errorf("glm config fallback failed, got %q", got)
+	}
+	_ = os.Setenv("GLM_API_KEY", "from-env")
+	t.Cleanup(func() { _ = os.Unsetenv("GLM_API_KEY") })
+	if got := KeyFor(cfg, "glm"); got != "from-env" {
+		t.Errorf("glm env should win, got %q", got)
+	}
+}
+
 func TestSetKey_CreatesMap(t *testing.T) {
 	// nil Providers map should not panic — SetKey allocates.
 	cfg := Config{}

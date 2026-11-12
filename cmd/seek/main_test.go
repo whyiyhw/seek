@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -119,4 +120,68 @@ func TestDetectGlamourStyle_NonTTYStdinSkipsQuery(t *testing.T) {
 	if got := detectGlamourStyle("auto"); got != "dark" {
 		t.Errorf("detectGlamourStyle(\"auto\") with piped stdin = %q, want \"dark\" (query skipped)", got)
 	}
+}
+
+// buildProvider("glm", ...) wiring: label, default model, key resolution,
+// and the --base-url override path. SEEK_HOME is pointed at a temp dir so
+// the test never reads the developer's real ~/.seek/config.json.
+func TestBuildProvider_GLM(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+
+	t.Run("env key, default base url", func(t *testing.T) {
+		t.Setenv("GLM_API_KEY", "k")
+		provider, dsClient, label, modelDefault, err := buildProvider("glm", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if dsClient != nil {
+			t.Errorf("glm must not build a deepseek client")
+		}
+		if provider == nil || provider.Name() != "GLM" {
+			t.Errorf("provider label = %v, want GLM", provider)
+		}
+		if label != "GLM" {
+			t.Errorf("provLabel = %q, want \"GLM\"", label)
+		}
+		if modelDefault != "glm-5.3" {
+			t.Errorf("modelDefault = %q, want glm-5.3", modelDefault)
+		}
+	})
+
+	t.Run("config-file key", func(t *testing.T) {
+		t.Setenv("GLM_API_KEY", "")
+		home := t.TempDir()
+		t.Setenv("SEEK_HOME", home)
+		cfgJSON := `{"providers": {"glm": {"api_key": "from-config"}}}`
+		if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		provider, _, label, modelDefault, err := buildProvider("glm", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if provider == nil || label != "GLM" || modelDefault != "glm-5.3" {
+			t.Errorf("glm from config-file key: provider=%v label=%q model=%q", provider, label, modelDefault)
+		}
+	})
+
+	t.Run("no key errors", func(t *testing.T) {
+		t.Setenv("GLM_API_KEY", "")
+		t.Setenv("SEEK_HOME", t.TempDir())
+		_, _, _, _, err := buildProvider("glm", "", "")
+		if err == nil || !strings.Contains(err.Error(), "no GLM API key") {
+			t.Errorf("expected no-key error, got %v", err)
+		}
+	})
+
+	t.Run("base-url override accepted", func(t *testing.T) {
+		t.Setenv("GLM_API_KEY", "k")
+		provider, _, _, _, err := buildProvider("glm", "http://localhost:9/v1/chat/completions", "")
+		if err != nil {
+			t.Fatalf("buildProvider with --base-url: %v", err)
+		}
+		if provider == nil {
+			t.Errorf("nil provider with --base-url override")
+		}
+	})
 }
