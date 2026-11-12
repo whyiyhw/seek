@@ -16,6 +16,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
+	"github.com/whyiyhw/seek/pkg/llm"
 )
 
 // slowReadTool is a read-only tool that sleeps for latency before
@@ -2221,5 +2222,77 @@ func TestSetEffort_CapTakesEffectNextPrompt(t *testing.T) {
 	}
 	if caps[1] != 65536 {
 		t.Errorf("second request (after SetEffort max) max_tokens = %d, want 65536", caps[1])
+	}
+}
+
+// fakeUsageProvider is a second-tier llm.Provider that replays one
+// fixed event script — the minimum surface to drive runTurnLLM and
+// inspect the Usage it synthesises.
+type fakeUsageProvider struct {
+	events []llm.Event
+}
+
+func (f *fakeUsageProvider) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Event, error) {
+	ch := make(chan llm.Event, len(f.events))
+	for _, e := range f.events {
+		ch <- e
+	}
+	close(ch)
+	return ch, nil
+}
+func (f *fakeUsageProvider) Name() string { return "fake" }
+
+// TestRunTurnLLM_UsageCacheMapping pins the GLM-lane accounting fix:
+// TurnDone.CachedInputTokens must land in deepseek.Usage's
+// PromptCacheHitTokens bucket with the remainder in
+// PromptCacheMissTokens. Before this mapping both buckets stayed 0 and
+// pricing.Cost — which bills input ONLY via those buckets — reported
+// input cost $0 on every second-tier turn.
+func TestRunTurnLLM_UsageCacheMapping(t *testing.T) {
+	prov := &fakeUsageProvider{events: []llm.Event{
+		llm.TextDelta{Delta: "hi"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 1000, OutputTokens: 40, CachedInputTokens: 600},
+	}}
+	a, err := New(Config{Provider: prov, Model: "glm-5.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got deepseek.Usage
+	for ev := range a.Prompt(context.Background(), "hello") {
+		if end, ok := ev.(AgentEnd); ok {
+			got = end.Usage
+		}
+	}
+	if got.PromptCacheHitTokens != 600 || got.PromptCacheMissTokens != 400 {
+		t.Errorf("cache split = hit %d / miss %d, want 600/400 (input 1000, cached 600)",
+			got.PromptCacheHitTokens, got.PromptCacheMissTokens)
+	}
+	if got.PromptTokens != 1000 || got.CompletionTokens != 40 || got.TotalTokens != 1040 {
+		t.Errorf("token totals = %+v", got)
+	}
+}
+
+// TestRunTurnLLM_UsageNoCacheDetail: providers that report no cache
+// detail (CachedInputTokens=0, e.g. anthropic/gemini today) price the
+// FULL input at the miss rate — miss=input, hit=0. Conservative, and
+// it is what makes their input billable at all now.
+func TestRunTurnLLM_UsageNoCacheDetail(t *testing.T) {
+	prov := &fakeUsageProvider{events: []llm.Event{
+		llm.TextDelta{Delta: "hi"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 500, OutputTokens: 10},
+	}}
+	a, err := New(Config{Provider: prov, Model: "glm-5.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got deepseek.Usage
+	for ev := range a.Prompt(context.Background(), "hello") {
+		if end, ok := ev.(AgentEnd); ok {
+			got = end.Usage
+		}
+	}
+	if got.PromptCacheMissTokens != 500 || got.PromptCacheHitTokens != 0 {
+		t.Errorf("no-detail split = hit %d / miss %d, want 0/500 (all input at miss rate)",
+			got.PromptCacheHitTokens, got.PromptCacheMissTokens)
 	}
 }

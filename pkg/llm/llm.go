@@ -90,10 +90,18 @@ func (ToolCallDone) llmEvent() {}
 
 // TurnDone signals the end of one assistant turn. FinishReason is a
 // normalised string: "stop", "tool_calls", "length", or "error".
+//
+// CachedInputTokens is the portion of InputTokens the provider served
+// from its server-side prompt cache, when the wire format reports it
+// (OpenAI-compatible prompt_tokens_details.cached_tokens; filled by the
+// GLM lane). Providers without cache reporting leave it 0, meaning
+// "no cache information" — the agent prices the full input at the miss
+// rate, which is the conservative (never under-billing) reading.
 type TurnDone struct {
-	FinishReason string
-	InputTokens  int
-	OutputTokens int
+	FinishReason      string
+	InputTokens       int
+	OutputTokens      int
+	CachedInputTokens int
 }
 
 func (TurnDone) llmEvent() {}

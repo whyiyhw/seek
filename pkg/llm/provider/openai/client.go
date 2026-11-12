@@ -108,9 +108,25 @@ type tcFnChunk struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
+// streamUsage mirrors the OpenAI usage block. prompt_tokens_details is
+// how OpenAI-compatible providers (GLM's paas/v4 among them) report
+// server-side prompt-cache hits; providers that don't cache simply omit
+// it and CachedTokens stays 0.
 type streamUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+}
+
+// cachedTokens returns the cache-hit portion of the prompt, 0 when the
+// provider reports no cache detail.
+func (u *streamUsage) cachedTokens() int {
+	if u == nil || u.PromptTokensDetails == nil {
+		return 0
+	}
+	return u.PromptTokensDetails.CachedTokens
 }
 
 // toolAccum accumulates one streaming tool call by index.
@@ -203,7 +219,7 @@ func streamBody(ctx context.Context, r io.Reader, out chan<- llm.Event) {
 
 	accum := map[int]*toolAccum{}
 	var lastFinish string
-	var inputTokens, outputTokens int
+	var inputTokens, outputTokens, cachedTokens int
 
 	for sc.Scan() {
 		select {
@@ -231,6 +247,7 @@ func streamBody(ctx context.Context, r io.Reader, out chan<- llm.Event) {
 		}
 		if chunk.Usage != nil {
 			inputTokens, outputTokens = chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens
+			cachedTokens = chunk.Usage.cachedTokens()
 		}
 		for _, ch := range chunk.Choices {
 			if ch.Delta.Content != nil && *ch.Delta.Content != "" {
@@ -265,5 +282,5 @@ func streamBody(ctx context.Context, r io.Reader, out chan<- llm.Event) {
 		}
 		out <- llm.ToolCallDone{ID: a.id, Name: a.name, Arguments: a.args.String()}
 	}
-	out <- llm.TurnDone{FinishReason: lastFinish, InputTokens: inputTokens, OutputTokens: outputTokens}
+	out <- llm.TurnDone{FinishReason: lastFinish, InputTokens: inputTokens, OutputTokens: outputTokens, CachedInputTokens: cachedTokens}
 }

@@ -160,7 +160,7 @@ func TestChatStream_ContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-ch   // consume the first event
+	<-ch // consume the first event
 	cancel()
 	for range ch { // must eventually close
 	}
@@ -203,5 +203,47 @@ func TestChatStream_UsageInFinalChunk(t *testing.T) {
 	done := findTurnDone(t, drain(ch))
 	if done.InputTokens != 42 || done.OutputTokens != 7 {
 		t.Errorf("tokens=%d/%d want 42/7", done.InputTokens, done.OutputTokens)
+	}
+}
+
+// TestChatStream_UsageCachedTokens pins the GLM-lane cache mapping:
+// prompt_tokens_details.cached_tokens rides the final usage chunk and
+// must surface on TurnDone.CachedInputTokens so runTurnLLM can split
+// the prompt into hit/miss buckets. A usage block without the detail
+// object yields 0 (no cache information).
+func TestChatStream_UsageCachedTokens(t *testing.T) {
+	srv := sseServer(t, []string{
+		`{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":60}}}`,
+		`[DONE]`,
+	})
+	defer srv.Close()
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := drain(ch)
+	d := findTurnDone(t, events)
+	if d.InputTokens != 100 || d.OutputTokens != 7 {
+		t.Fatalf("token counts = %d/%d, want 100/7", d.InputTokens, d.OutputTokens)
+	}
+	if d.CachedInputTokens != 60 {
+		t.Errorf("CachedInputTokens = %d, want 60", d.CachedInputTokens)
+	}
+
+	// No prompt_tokens_details → 0, never a guess.
+	srv2 := sseServer(t, []string{
+		`{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":50,"completion_tokens":3}}`,
+		`[DONE]`,
+	})
+	defer srv2.Close()
+	ch2, err := NewCompatible("k", srv2.URL).ChatStream(context.Background(), llm.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2 := findTurnDone(t, drain(ch2))
+	if d2.CachedInputTokens != 0 {
+		t.Errorf("CachedInputTokens without detail object = %d, want 0", d2.CachedInputTokens)
 	}
 }

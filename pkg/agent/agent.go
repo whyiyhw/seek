@@ -930,7 +930,7 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 	assistant := deepseek.Message{Role: deepseek.RoleAssistant}
 	started := false
 	var finish string
-	var inputTokens, outputTokens int
+	var inputTokens, outputTokens, cachedInput int
 
 	for ev := range stream {
 		switch e := ev.(type) {
@@ -960,6 +960,7 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 			finish = e.FinishReason
 			inputTokens = e.InputTokens
 			outputTokens = e.OutputTokens
+			cachedInput = e.CachedInputTokens
 
 		case llm.ErrorEvent:
 			return assistant, deepseek.Usage{}, "", e.Err
@@ -987,10 +988,20 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		out <- MessageStart{Message: assistant}
 	}
 
+	// Map the provider's usage onto deepseek.Usage's cache-hit/miss
+	// split so pricing.Cost prices all three buckets. Without this the
+	// hit/miss fields stay 0 and Cost — which bills input ONLY via those
+	// two buckets — reports input cost $0 on every second-tier turn
+	// (the GLM lane's "$0 statistics" bug). Providers that report no
+	// cache detail (CachedInputTokens=0) price the full input at the
+	// miss rate: conservative, never under-bills.
+	cached := min(cachedInput, inputTokens)
 	usage := deepseek.Usage{
-		PromptTokens:     inputTokens,
-		CompletionTokens: outputTokens,
-		TotalTokens:      inputTokens + outputTokens,
+		PromptTokens:          inputTokens,
+		CompletionTokens:      outputTokens,
+		TotalTokens:           inputTokens + outputTokens,
+		PromptCacheHitTokens:  cached,
+		PromptCacheMissTokens: inputTokens - cached,
 	}
 	return assistant, usage, finish, nil
 }

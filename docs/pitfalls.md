@@ -844,6 +844,15 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: `SetAskFn` wiring is TUI-only; any headless surface that registers asking tools inherits `ErrNoCallback`. When smoke-testing interactive subsystems in print mode, expect this error and read it as "wiring gap", not model misbehaviour
 - **Refs**: `cmd/seek/main.go` (print/json branch returns before the `SetAskFn` wiring in the TUI path), `internal/askuser/askuser.go:ErrNoCallback`, `internal/tools/propose/propose.go`
 
+### pricing.Cost bills input ONLY via cache-hit/miss buckets — every second-tier turn priced input at $0
+- **Saw**: the GLM lane's money stats only ever counted output tokens: input cost $0 on every turn, `cache hit 0/0 ratio n/a`. The earlier GLM smoke entry concluded "no cache metadata comes back" — that conclusion was unfalsifiable with the client as it stood (see Lesson)
+- **Why**: three links in one chain, each silently dropping the same data. (1) `openai/client.go`'s `streamUsage` didn't declare `prompt_tokens_details`, so `encoding/json` skipped it even when the provider sent `cached_tokens`; (2) `llm.TurnDone` carried no cache field, so the provider couldn't report what it had parsed; (3) `runTurnLLM` synthesised `deepseek.Usage` with hit/miss left at zero — and `pricing.Cost` prices input ONLY through those two buckets (`PromptTokens` is never read), so input cost was structurally $0 on every `llm.Provider` turn, GLM or not
+- **Fix**: `TurnDone.CachedInputTokens` + `streamUsage.prompt_tokens_details.cached_tokens` + `runTurnLLM` splitting `input-cached` / `cached` into miss/hit buckets (clamp to input), plus the `glm-5.3` rate card with `NoOffPeakDiscount` so CurrentTier's DeepSeek clock can't half-price a flat-rate provider. End-to-end (real seek binary, print mode, fake bigmodel wire server sending prompt_tokens 1000 / cached 600 / completion 12): `est. cost $0.0007`, session jsonl persists `prompt_cache_hit_tokens: 600 / miss: 400` (this change)
+- **Lesson**: for "cost shows $0" bugs, read what the billing function consumes, not whether the call happened — usage carried `prompt_tokens` all along and Cost never looked at it. And: a wire type that doesn't declare a field makes "server didn't send it" and "client dropped it" observationally identical; verifying a wire contract requires dumping the raw stream, not reading your own parsed structs
+- **Refs**: `internal/pricing/pricing.go:Cost`, `pkg/agent/agent.go:runTurnLLM`, `pkg/llm/provider/openai/client.go:streamUsage`, previous entry "GLM … reasoning_content deltas are silently dropped"
+
+---
+
 ---
 
 ## Testing / CI

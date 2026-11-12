@@ -1,4 +1,5 @@
-// Package pricing models DeepSeek's peak/off-peak pricing windows.
+// Package pricing models DeepSeek's peak/off-peak pricing windows plus
+// the flat-rate cards of providers without such windows (GLM).
 // Embedded rates are the full (peak) rate card effective 2026-08-16
 // 16:00 UTC (verified against api-docs.deepseek.com/quick_start/pricing);
 // off-peak is exactly half the peak rate. Bump them with each release
@@ -30,7 +31,18 @@ type ModelPricing struct {
 	InputMissPerMTok float64 // cache miss
 	InputHitPerMTok  float64 // cache hit (~5–10% of miss for DeepSeek)
 	OutputPerMTok    float64
+
+	// NoOffPeakDiscount marks providers without DeepSeek's peak/off-peak
+	// windows (GLM bills the same rate around the clock). Set on their
+	// rows so PricingFor never halves them, whichever tier the clock
+	// says — CurrentTier is a DeepSeek-only concept but callers pass it
+	// unconditionally.
+	NoOffPeakDiscount bool
 }
+
+// ModelGLM53 is Zhipu's GLM-5.3 as addressed on bigmodel.cn's paas/v4
+// endpoint — the default model of seek's --provider=glm lane.
+const ModelGLM53 = "glm-5.3"
 
 // standardRates is the full-rate card per model during DeepSeek's peak
 // windows (a.k.a. the "standard" tier). Off-peak is derived via
@@ -49,11 +61,28 @@ type ModelPricing struct {
 // below charges them — no per-id entries needed. The legacy
 // deepseek-chat / deepseek-reasoner aliases were removed server-side
 // on 2026-07-24.
+//
+// The GLM row prices Zhipu's GLM-5.3 on open.bigmodel.cn (paas/v4),
+// flat-rate — no peak/off-peak windows, hence NoOffPeakDiscount. Source:
+// docs.bigmodel.cn/cn/guide/start/pricing, checked 2026-11-12: ¥8 input
+// · ¥2 cache-hit · ¥28 output per 1M tokens (single 1M-context tier;
+// cache storage was 限时免费 at check time). Converted to USD at 7.0
+// CNY/USD — the table's unit is USD because Cost feeds the $ status
+// display; re-check the conversion when bumping rates. GLM's other ids
+// (glm-5.3-flash / -flashx) have no entries and fall back to the
+// DeepSeek-Flash card below — wrong provider, but they are not models
+// this lane addresses today.
 var standardRates = map[string]ModelPricing{
 	deepseek.ModelV41Flash: {
 		InputMissPerMTok: 0.30,
 		InputHitPerMTok:  0.006,
 		OutputPerMTok:    1.20,
+	},
+	ModelGLM53: {
+		InputMissPerMTok:  8 / 7.0,  // ¥8
+		InputHitPerMTok:   2 / 7.0,  // ¥2
+		OutputPerMTok:     28 / 7.0, // ¥28
+		NoOffPeakDiscount: true,
 	},
 }
 
@@ -99,7 +128,7 @@ func PricingFor(model string, tier Tier) ModelPricing {
 	if !ok {
 		p = standardRates[deepseek.ModelV41Flash]
 	}
-	if tier == TierOffPeak {
+	if tier == TierOffPeak && !p.NoOffPeakDiscount {
 		p.InputMissPerMTok *= offPeakDiscount
 		p.InputHitPerMTok *= offPeakDiscount
 		p.OutputPerMTok *= offPeakDiscount
