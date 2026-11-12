@@ -43,6 +43,15 @@ type ServeSource[M any] interface {
 	Run(ctx context.Context, in chan<- M) error
 }
 
+// The M1a Frontend port satisfies ServeSource[Inbound] STRUCTURALLY —
+// Name + Run(ctx, chan<- Inbound) error, no adapter. This assertion is
+// the load-bearing seam of the whole design: it lets Serve drive real
+// frontends while staying generic, so the lifecycle never learns about
+// Send and the router never learns about drain budgets. If a future
+// Frontend change breaks it, the compiler stops the build here rather
+// than at the serve CLI.
+var _ ServeSource[Inbound] = Frontend(nil)
+
 // ServeConfig tunes Serve. Zero fields fill from the defaults below;
 // the M6b CLI wiring maps plane config onto this struct.
 type ServeConfig struct {

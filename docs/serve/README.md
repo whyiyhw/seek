@@ -6,9 +6,12 @@
 以及 launchd / systemd 示例单元。用户侧使用指南（绑定、指令、飞书配置）见
 M7 的 `docs/guide-serve.md`。
 
-**当前状态（M6a）**：生命周期机制已就位并有测试锁定；`seek serve` CLI 接线、
-真实飞书 frontend（M4/M5）尚未落地——单元文件里的 `ExecStart` 是契约示例，
-M6b 接线后即可用。
+**当前状态（M6b）**：生命周期机制（M6a）+ `seek serve` CLI 接线（M1b/M6b，
+`internal/servecli`）均已落地并有测试锁定。默认构建注册的 frontend 仅 `fake`
+（起停自检用）；真实飞书 frontend（M4/M5）落地前，单元文件里的
+`ExecStart=... --frontend=feishu` 仍是契约示例。config 的可选 `serve` 段
+（projects / max_concurrency / yolo，默认 yolo=false）见
+[`internal/config`](../../internal/config/config.go)；旧 config 无该段照常工作。
 
 ## 生命周期
 
