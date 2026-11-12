@@ -1,0 +1,7 @@
+{
+  "description": "Unicode-dense one-line edit: must read exact bytes first (>=1 read) and land the edit in <=3 attempts; the source pitfall burned ~10 edit calls on byte-mismatched old_string. Whole-file write and bash-sed are counted as non-target shapes (min_edit_calls=1).",
+  "max_turns": 8,
+  "min_read_calls": 1,
+  "min_edit_calls": 1,
+  "max_edit_calls": 3
+}

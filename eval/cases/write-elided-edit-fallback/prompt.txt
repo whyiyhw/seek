@@ -1,0 +1,1 @@
+In eval/tmp/write-elided-edit-fallback/config-dump.txt, change the setting `retention_days: 30` to `retention_days: 14`. Everything else in the file must stay byte-identical.

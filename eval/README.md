@@ -85,6 +85,14 @@ Bounds in `expect.json` use the prefix to declare direction:
 3. `prompt.txt` — the exact `-p` input; multi-line is fine
 4. `expect.json` — start with `{"max_turns": 10}` and add bounds as you learn what good vs. bad looks like
 
+Seeding from the pitfalls log: `scripts/pitfall-to-eval.sh --list` ranks
+`docs/pitfalls.md` entries by model-behaviour likelihood (a triage
+heuristic, not a decision), and `--make <line> <slug>` scaffolds a draft —
+README.md + prompt.txt with the pitfall excerpt embedded, **no
+expect.json**. The runner skips a case without expect.json, so a
+scaffolded draft cannot run until a human writes the bounds; that skip is
+the review gate.
+
 Optional per-case hooks (run from the repo root, same cwd as the seek invocation):
 
 - `setup.sh` — prepare fixtures before the run, e.g. copy `fixtures/` into `eval/tmp/<case>/` so the model can mutate them without dirtying the repo.

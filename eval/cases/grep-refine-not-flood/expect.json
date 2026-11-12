@@ -1,0 +1,6 @@
+{
+  "description": "Aggregate question over a ~550KB log: enumeration via grep paging or read windows floods context (the pitfall). Healthy: 1-2 scoping greps then one instrumented bash pipeline. First-pass loose bounds — tighten with run data. Offline gold: total 614, top3 ERR-03:110 ERR-07:86 ERR-05:68.",
+  "max_turns": 10,
+  "max_total_tool_calls": 6,
+  "max_grep_calls": 3
+}
