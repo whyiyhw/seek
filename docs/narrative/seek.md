@@ -16,9 +16,10 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
 
 - **一夜平台化落地（11-12 夜至 11-13 晨，事件 #2618/#2660）**：control-plane 装配线
   M1a→M1b→M2→M3→M6a→M7a **全部交付进 main**（类型层/bindings、serve 骨架、路由指令、
-  执行器含自愈、生命周期与 build-tag 隔离、guide 文档 + Telegram 纸面验证）；M4/M5
-  （飞书 frontend 真联调）待用户提供自建应用凭证。与 CC 对照的 roadmap 驱动已降级
-  为参考（comparison.md 改造完成）。
+  执行器含自愈、生命周期与 build-tag 隔离、guide 文档 + Telegram 纸面验证）。
+  **M4/M5（飞书 adapter）2026-11-13 用户拍板撤销**：不绑定具体渠道，Frontend 端口
+  已是资产，首个 frontend 选型开放（web/HTTP 或任意聊天渠道按端口后续加）。
+  与 CC 对照的 roadmap 驱动已降级为参考（comparison.md 改造完成）。
 - **token 三车道落地**：GLM 订阅车道进 main（provider 注册 + pricing 三口价），
   真 key 烟测全链通且 **cache_hit_tokens=10944**——GLM 前缀缓存与 seek 缓存纪律咬合
   （#2897）；DeepSeek 关键点验证口径不变。
@@ -54,9 +55,11 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
 
 ## 下一步
 
-- **多端收口**：M4/M5 飞书 frontend（等用户给 App ID/Secret，晨间已提醒）。
+- **多端**：M4/M5 已撤销（不绑飞书）；首个 frontend 选型开放——候选自建 web/HTTP
+  最小 frontend（零外部依赖），未排期；新 adapter 按端口另开卡。
 - **paseo 车道**：两缺口卡已开——session/new cwd 生效（c_bnjrw5）、SEEK_ACP_YOLO
   无头权限（c_rewul5）；落地后 butler drive `--provider seek` 最小卡验收。
 - **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
   eval 用例随每次 dogfood 失败持续扩容。
-- **治理**：c_hi3lv5 验证口径改造等用户拍板（能力外项与真 doubt 分流）。
+- **治理**：c_hi3lv5 已拍板（改，#2977），实现卡 c_gk6cb2 在飞；两缺口卡
+  （c_bnjrw5/c_rewul5）在 todo 池等巡检派发。
