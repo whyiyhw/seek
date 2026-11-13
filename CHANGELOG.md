@@ -23,3 +23,4 @@
 - c_twt3el：减法机制 L2/L3 设计稿：删代码与缩文档流程（feature-slim-loop.md）
 - c_vt7fiw：减法机制 L1：weight.sh 体重秤 + docs/budget.json 预算清单（只读只报）
 - c_rtjjsl：减法机制 L1：首轮 deadcode/unused 扫描产出瘦身候选清单（只报不删）
+- c_rewul5：SEEK_ACP_YOLO 无头权限开关：ACP 模式 flag 全不解析、默认 Deny 拒 bash（paseo provider 前置缺口 ②）
