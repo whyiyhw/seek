@@ -86,6 +86,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/wakeup"
 	"github.com/whyiyhw/seek/internal/tools/webfetch"
+	"github.com/whyiyhw/seek/internal/tools/websearch"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -1318,6 +1319,14 @@ func run() error {
 	if dsClient != nil {
 		reg.Add(fimcomplete.New(dsClient, *model)).
 			Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
+		// web_search rides the standalone Search API — same DeepSeek
+		// key / base URL as chat (config.KeyFor deepseek), billed per
+		// successful call into the tracker so the status bar's $ total
+		// grows without a token turn. Opt-out mirrors SEEK_NO_WEBFETCH
+		// for air-gapped / privacy-sensitive sessions.
+		if !envBoolTrue("SEEK_NO_WEBSEARCH") {
+			reg.Add(guarded(websearch.New(dsClient, tracker)))
+		}
 	}
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
