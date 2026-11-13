@@ -29,8 +29,12 @@ type event struct {
 	Type         Type      `json:"type,omitempty"`
 	Description  string    `json:"description,omitempty"`
 	WorktreePath string    `json:"worktree_path,omitempty"`
-	Tokens       *Tokens   `json:"tokens,omitempty"`
-	Reason       string    `json:"reason,omitempty"`
+	// ResumedFrom is set on `started` events emitted by
+	// Manager.Continue: the sub-sid of the prior run whose transcript
+	// seeds this run's context. Empty on fresh spawns.
+	ResumedFrom string  `json:"resumed_from,omitempty"`
+	Tokens      *Tokens `json:"tokens,omitempty"`
+	Reason      string  `json:"reason,omitempty"`
 }
 
 // indexLock serialises concurrent append callers to a single index
@@ -157,6 +161,7 @@ func foldEvents(events []event) []Subagent {
 				Type:         e.Type,
 				Description:  e.Description,
 				WorktreePath: e.WorktreePath,
+				ResumedFrom:  e.ResumedFrom,
 				StartedAt:    e.TS,
 				Status:       StatusActive,
 			}

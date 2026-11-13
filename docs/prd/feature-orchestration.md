@@ -219,6 +219,16 @@ main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；d
 | **M-O1.4** | ProviderRegistry + config `agents` 段 + RunnerJob 传递 + D8 provider 过滤 | ~2 天 |
 | **M-O1.5** | budget 补条目 + 成本交叉测试 + 文档（guide-subagent / guide-config / comparison 勾选） | ~1 天 |
 
+#### P1-b 续话复活（卡 c_u4ugnu，先于 P1-a 的异步面落地）
+
+§2.1「续话复活」行的模型侧调度面已交付（同步形态）：`agent` 工具新增 `session_id`——传既有子的 sub-sid（全 id 或脚注短后缀，唯一解析）+ 新指令即续话。落地口径：
+
+- **续话 = 新 sub_sid + 血统字段**，不是同 id 复活：`subagents.jsonl` 的 fold 契约是「一个 sub_sid 恰好一个终态」，同 id 二次 `started` 会被 fold 静默忽略。血统走 `started` 事件的 `resumed_from` 字段（fold 透出为 `Subagent.ResumedFrom`），旧 transcript 不动，新 transcript 自包含（prior messages + 续话轮次）。
+- **上下文延续的实现**：`Manager.Continue` fold 索引定位前运行 → `session.LoadFrom` 读旧 transcript → 消息经 `RunnerJob.PriorMessages` 传给 Runner → 生产 Runner 映射到 `agent.Config.InitialMessages`（系统提示词按前次模板**重新**组合，不沿用旧头部）。全新 Manager（父进程 resume 后）凭盘上事件流即可续话——零内存携带，这就是本卡的「事件溯源重建」验收。
+- **完成事件合流**：`Spawn` 的执行/分类尾抽成共享的 `runAndFinish`，续话与首发走同一条终态分类 + 事件落盘路径；P1-a 的后台通知队列（D2）落地上游只需挂在同一处。
+- **可续话状态**：仅 `completed`（生产 Runner 只在成功时写 transcript）；`active` 报 `session_active`，promoted/failed/killed/orphaned/索引在而 transcript 丢失报 `unknown_session`（hint 点名状态与路径）。
+- 与 P1-a 的关系：本卡不含 `run_in_background` 异步 spawn 与完成通知注入（仍属 M-O1.1/O1.2）；续话在 P1-a 落地前为同步阻塞路径，落地后经同一 `runAndFinish` 合流进通知流。
+
 ## 5. P2 —— 类型化 agent（M-O2.x）
 
 #### D10 — 文件形态对齐 skills 布局，scope 先例照抄

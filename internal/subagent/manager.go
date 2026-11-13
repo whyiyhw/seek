@@ -5,13 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/sysprompt"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // defaultMaxConcurrent caps the number of active subagents the LLM
@@ -68,6 +72,18 @@ type RunnerJob struct {
 	// (typically by re-registering the parent's tool instances
 	// keyed by name).
 	ToolNames []string
+	// PriorMessages, when non-empty, seeds the child agent's history
+	// — the message payload loaded from a prior run's transcript at
+	// Manager.Continue time (context continuity). Fresh spawns leave
+	// it nil. Production Runner maps it onto agent.Config.
+	// InitialMessages; stub Runners in tests can assert on it.
+	//
+	// SystemPrompt is NOT part of this payload: it is recomposed
+	// fresh from the prior run's recorded template so the header
+	// reflects the CURRENT parent segments (cwd / project section /
+	// skills) rather than the stale ones baked into the old
+	// transcript header.
+	PriorMessages []deepseek.Message
 }
 
 // RunnerResult is what Runner returns on success. Summary is the
@@ -331,16 +347,258 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 		return failResult(subSid, "spawn_error", "write index: "+err.Error())
 	}
 
-	// Step 8: register in m.active under a child ctx we own.
+	return m.runAndFinish(ctx, indexPath, RunnerJob{
+		SubSid:       subSid,
+		SystemPrompt: systemPrompt,
+		UserPrompt:   args.Prompt,
+		SessionDir:   sessionDir,
+		Tracker:      childTracker,
+		Policy:       childPolicy,
+		ToolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
+	}, FormatCompleted)
+}
+
+// ContinueArgs is the per-call input for continuing a prior
+// subagent run (P1-b "续话复活"). FromSubSid addresses the prior
+// run; Prompt is the follow-up instruction appended after the
+// restored context.
+type ContinueArgs struct {
+	// FromSubSid is the sub-sid of the run being continued. Accepts
+	// the full id or its short random suffix (what the wire-format
+	// footer and /agents panel show — uniquely resolved within this
+	// project's index; ambiguity errors with the full candidates).
+	// Must exist and must NOT be currently active (still running)
+	// or promoted. The prior run's transcript.jsonl is loaded and
+	// becomes the child agent's seed history, so the follow-up
+	// instruction lands in-context.
+	FromSubSid string
+	// Description labels THIS run in /agents (a fresh label, not the
+	// prior one — the index lineage keeps the connection).
+	Description string
+	Prompt      string
+	ParentTurn  int
+	// WorktreePath has the same semantics as SpawnArgs.WorktreePath:
+	// when non-empty the child Policy's cwd is the worktree. Note the
+	// PRIOR run's worktree (if any) was cleaned up after it finished —
+	// continuations do not resurrect worktrees, they run wherever the
+	// caller isolates them (default: parent cwd).
+	WorktreePath string
+}
+
+// Continue launches a follow-up run of a prior subagent: the prior
+// run's transcript is restored as the child's initial context and
+// args.Prompt is delivered as the next instruction. The run gets a
+// FRESH sub_sid — one sub_sid = one lifecycle (the fold contract in
+// types.go) — with the lineage recorded via the started event's
+// resumed_from field.
+//
+// Everything the continuation needs is rebuilt from the on-disk
+// event stream + transcripts: a Manager constructed fresh over the
+// same project (e.g. the parent seek process was resumed) continues
+// a prior run with zero in-memory carry-over. That is the
+// event-sourcing property this entry point is required to preserve
+// — no parallel runtime state mirrors the index.
+//
+// Completion merges with the spawn path by construction: Continue
+// funnels into the same runAndFinish classify-and-emit tail, so the
+// terminal event kinds, /agents kill semantics, capacity gate, and
+// cost roll-up are identical to a fresh spawn.
+//
+// Failure taxonomy (all pre-run, wire-format results with no new
+// index event):
+//
+//   - unknown id, ended-without-transcript (failed/killed/orphaned),
+//     promoted, or transcript unreadable → reason=unknown_session,
+//     hint says exactly which and why.
+//   - id exists but still running → reason=session_active.
+func (m *Manager) Continue(ctx context.Context, args ContinueArgs) Result {
+	// Step 1: validate args.
+	if args.FromSubSid == "" {
+		return failResult("", "unknown_session", "session_id required to continue a prior subagent")
+	}
+	if args.Prompt == "" {
+		return failResult(args.FromSubSid, "spawn_error", "prompt required")
+	}
+	if args.Description == "" {
+		return failResult(args.FromSubSid, "spawn_error", "description required")
+	}
+
+	// Step 2: capacity gate — same budget as Spawn, both entry
+	// points draw from the same MaxConcurrent pool.
+	m.mu.Lock()
+	if len(m.active) >= m.opts.MaxConcurrent {
+		n := len(m.active)
+		m.mu.Unlock()
+		return failResult("", "too_many_subagents",
+			fmt.Sprintf("%d active, retry after one completes", n))
+	}
+	m.mu.Unlock()
+
+	// Step 3: fold the index and locate the prior record. This is
+	// the event-sourcing rebuild: the Manager needs nothing beyond
+	// subagents.jsonl + the prior transcript to continue.
+	recs, err := m.List(ListFilter{})
+	if err != nil {
+		return failResult(args.FromSubSid, "spawn_error", "read index: "+err.Error())
+	}
+	var rec *Subagent
+	for i := range recs {
+		if recs[i].SubSid == args.FromSubSid {
+			rec = &recs[i]
+			break
+		}
+	}
+	if rec == nil {
+		// Short-form resolution: the wire-format footer (and the
+		// /agents panel) shows only the random suffix of a sub-sid,
+		// so that is what the model naturally quotes back. Resolve
+		// a unique "-<suffix>" match within this project's index;
+		// ambiguity is an error naming the full candidates.
+		var matches []string
+		for i := range recs {
+			if strings.HasSuffix(recs[i].SubSid, "-"+args.FromSubSid) {
+				matches = append(matches, recs[i].SubSid)
+				rec = &recs[i]
+			}
+		}
+		if len(matches) > 1 {
+			return failResult("", "unknown_session",
+				fmt.Sprintf("sub-sid %q is ambiguous (%d matches: %s) — pass the full sub-sid",
+					args.FromSubSid, len(matches), strings.Join(matches, ", ")))
+		}
+	}
+	if rec == nil {
+		return failResult("", "unknown_session",
+			fmt.Sprintf("no subagent with sub-sid %q in this project — check the id via /agents or spawn a fresh one", args.FromSubSid))
+	}
+	switch rec.Status {
+	case StatusActive:
+		return failResult(args.FromSubSid, "session_active",
+			fmt.Sprintf("sub-sid %q is still running — wait for it to finish or kill it via /agents, then continue", args.FromSubSid))
+	case StatusPromoted:
+		return failResult(args.FromSubSid, "unknown_session",
+			fmt.Sprintf("sub-sid %q was promoted to a top-level session — resume that session instead of continuing the subagent", args.FromSubSid))
+	}
+
+	// Step 4: load the prior transcript. Failed / killed / orphaned
+	// runs never wrote one (the production Runner persists the
+	// transcript only on success), so the load error below IS their
+	// clear failure surface — the hint names the status so the model
+	// understands why the chain is broken.
+	oldDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, rec.ParentSid, rec.SubSid)
+	if err != nil {
+		return failResult(args.FromSubSid, "spawn_error", err.Error())
+	}
+	transcriptPath := filepath.Join(oldDir, "transcript.jsonl")
+	priorSess, err := session.LoadFrom(transcriptPath)
+	if err != nil {
+		return failResult(args.FromSubSid, "unknown_session",
+			fmt.Sprintf("cannot continue sub-sid %q (status=%s): no readable transcript at %s (%v) — only runs that completed leave a continuable context",
+				args.FromSubSid, rec.Status, transcriptPath, err))
+	}
+
+	// Step 5: child Policy / Tracker from the PRIOR run's template —
+	// context continuity includes the same role and tool subset.
+	if !rec.Type.IsValid() {
+		return failResult(args.FromSubSid, "spawn_error",
+			fmt.Sprintf("corrupt index record for %q: unknown type %q", args.FromSubSid, rec.Type))
+	}
+	tmpl, _ := TemplateFor(rec.Type)
+	cwd := m.opts.ParentPolicy.Cwd()
+	if args.WorktreePath != "" {
+		cwd = args.WorktreePath
+	}
+	childPolicy, err := m.opts.ParentPolicy.Spawn(cwd, tmpl.Restriction)
+	if err != nil {
+		return failResult("", "spawn_error", err.Error())
+	}
+	childTracker := cache.New()
+	m.opts.ParentTracker.AdoptChild(childTracker)
+
+	// Step 6: fresh sub_sid + session dir under the CURRENT parent
+	// sid (a /compact-forked parent keeps working; the old dir stays
+	// untouched — append-only discipline).
+	parentSid := m.opts.ParentSidFn()
+	if parentSid == "" {
+		return failResult("", "spawn_error", "no active parent session (host did not seed ParentSidFn)")
+	}
+	now := m.opts.Now()
+	subSid := newSubSid(now)
+	sessionDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, parentSid, subSid)
+	if err != nil {
+		return failResult(subSid, "spawn_error", err.Error())
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		return failResult(subSid, "spawn_error", "mkdir session dir: "+err.Error())
+	}
+
+	// Step 7: system prompt recomposed FRESH (current parent segments
+	// + the prior run's template role) — deliberately not reused from
+	// the old transcript header, which may carry stale cwd / skills.
+	systemPrompt := sysprompt.ComposeSubagent(sysprompt.Header{
+		Cwd:            cwd,
+		ProjectSection: m.opts.ProjectSectionFn(),
+		SkillManifest:  m.opts.SkillManifestFn(),
+		Date:           m.opts.SessionDate,
+	}, tmpl.Role(args.Description))
+
+	// Step 8: emit the lineage-carrying `started` event, then run.
+	indexPath, err := paths.SubagentsIndex(m.opts.ProjectAbsPath)
+	if err != nil {
+		return failResult(subSid, "spawn_error", err.Error())
+	}
+	if err := appendEvent(indexPath, event{
+		Kind:         "started",
+		SubSid:       subSid,
+		ParentSid:    parentSid,
+		ParentTurn:   args.ParentTurn,
+		TS:           now,
+		Type:         rec.Type,
+		Description:  args.Description,
+		WorktreePath: args.WorktreePath,
+		ResumedFrom:  rec.SubSid,
+	}); err != nil {
+		return failResult(subSid, "spawn_error", "write index: "+err.Error())
+	}
+
+	fromSid := rec.SubSid
+	return m.runAndFinish(ctx, indexPath, RunnerJob{
+		SubSid:        subSid,
+		SystemPrompt:  systemPrompt,
+		UserPrompt:    args.Prompt,
+		SessionDir:    sessionDir,
+		Tracker:       childTracker,
+		Policy:        childPolicy,
+		ToolNames:     tmpl.Filter(m.opts.ParentToolNamesFn()),
+		PriorMessages: priorSess.Messages,
+	}, func(subSid string, summary string, turns int, tokens Tokens) string {
+		return FormatContinued(subSid, fromSid, summary, turns, tokens)
+	})
+}
+
+// runAndFinish executes the Runner for one already-registered-by-
+// event subagent and classifies the outcome into a terminal index
+// event + wire-format Result. Steps 8–11 of the original monolithic
+// Spawn, extracted so Spawn (fresh run) and Continue (seeded run)
+// funnel through the SAME completion path: active-map registration,
+// Kill semantics, terminal-event kinds, and failure classification
+// stay identical by construction — the only caller-chosen bit is
+// the success-summary formatter (lineage footer differs for
+// continuations).
+func (m *Manager) runAndFinish(ctx context.Context, indexPath string, job RunnerJob,
+	formatSuccess func(subSid string, summary string, turns int, tokens Tokens) string) Result {
+	subSid := job.SubSid
+
+	// Register in m.active under a child ctx we own.
 	runCtx, cancel := context.WithCancel(ctx)
 	inf := &inFlight{cancel: cancel}
 	m.mu.Lock()
 	m.active[subSid] = inf
 	m.mu.Unlock()
 
-	// Step 9: run. This blocks. Recover from panics so a buggy
-	// Runner can't take down the seek process — convert panic to
-	// a failed event with reason=spawn_error.
+	// Run. This blocks. Recover from panics so a buggy Runner can't
+	// take down the seek process — convert panic to a failed event
+	// with reason=spawn_error.
 	var (
 		runResult RunnerResult
 		runErr    error
@@ -351,29 +609,20 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 				runErr = fmt.Errorf("runner panic: %v", r)
 			}
 		}()
-		runResult, runErr = m.opts.Runner(runCtx, RunnerJob{
-			SubSid:       subSid,
-			SystemPrompt: systemPrompt,
-			UserPrompt:   args.Prompt,
-			SessionDir:   sessionDir,
-			Tracker:      childTracker,
-			Policy:       childPolicy,
-			ToolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
-		})
+		runResult, runErr = m.opts.Runner(runCtx, job)
 	}()
 	cancel() // release any goroutines depending on runCtx
 
-	// Step 10: pop from active under mu, capturing the killed
-	// flag if set.
+	// Pop from active under mu, capturing the killed flag if set.
 	m.mu.Lock()
 	killed := inf.killedByUser
 	delete(m.active, subSid)
 	m.mu.Unlock()
 
-	// Step 11: classify outcome → terminal event + wire-format
-	// result. Order matters: explicit kill takes precedence over
-	// ctx.Canceled detection because Kill sets the flag THEN
-	// cancels, so a Kill is observable both ways.
+	// Classify outcome → terminal event + wire-format result. Order
+	// matters: explicit kill takes precedence over ctx.Canceled
+	// detection because Kill sets the flag THEN cancels, so a Kill
+	// is observable both ways.
 	endTS := m.opts.Now()
 
 	switch {
@@ -385,7 +634,7 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 		})
 		return Result{
 			SubSid:  subSid,
-			Summary: FormatCompleted(subSid, runResult.Summary, runResult.Turns, tokens),
+			Summary: formatSuccess(subSid, runResult.Summary, runResult.Turns, tokens),
 			Status:  StatusCompleted,
 			Tokens:  tokens,
 		}

@@ -58,13 +58,17 @@ var schemaBytes = []byte(`{
       "type": "string",
       "enum": ["none", "worktree"],
       "description": "none (default): subagent works in the parent's cwd. worktree: creates a temporary git worktree so the subagent works on an isolated copy; useful for parallel implementation attempts. Auto-cleaned if no changes. (worktree not yet implemented — use \"none\" until v0.6.0 ships M11.1.)"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "CONTINUE a prior subagent instead of spawning fresh: pass its sub-sid — the full id, or the short value from a previous result's \"— sub-sid:\" footer (uniquely resolved). The prior run's conversation is restored as context and your prompt is delivered as the next instruction — write only the follow-up, do not repeat the original briefing. The prior run must have finished; a still-running, promoted, transcript-less (failed/killed/orphaned) or unknown id returns a clear error. The continuation gets a NEW sub-sid (footer shows resumed-from); quote that new id for further continuations. When set, subagent_type is inherited from the original run and ignored here."
     }
   },
   "required": ["description", "prompt"],
   "additionalProperties": false
 }`)
 
-const description = `Launch a subagent with isolated context to perform a focused task. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide. Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review). Costs roll up into your session's total automatically. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
+const description = `Launch a subagent with isolated context to perform a focused task, or (pass session_id) continue a prior subagent with its context restored and a follow-up instruction. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide (or, for continuations, its own prior transcript). Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review), iterative follow-ups on a finished subagent's work (session_id — e.g. "now audit the edge cases in what you found"). Costs roll up into your session's total automatically. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
 
 // Args is the strict-decode target. JSON tags must match schemaBytes
 // field names exactly (DisallowUnknownFields rejects mismatches).
@@ -73,6 +77,10 @@ type Args struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
+	// SessionID, when non-empty, switches Execute from fresh-spawn to
+	// continuation: Manager.Continue restores the prior run's context
+	// and delivers Prompt as the follow-up. See schemaBytes.
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // Length caps enforced in Execute. Schema's `description` field
@@ -173,22 +181,30 @@ func (*Tool) ReadOnly() bool { return true }
 func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("agent", raw, &a,
-		"description", "prompt", "subagent_type", "isolation"); err != nil {
+		"description", "prompt", "subagent_type", "isolation", "session_id"); err != nil {
 		return "", err
 	}
-	if a.Description == "" {
+	// Fresh spawns require an explicit description (it names a NEW
+	// task in /agents). Continuations may omit it — the session_id
+	// already identifies the lineage, so a default label suffices.
+	if a.Description == "" && a.SessionID == "" {
 		return "", tools.MissingField("agent", "description", raw,
-			"description", "prompt", "subagent_type", "isolation")
+			"description", "prompt", "subagent_type", "isolation", "session_id")
 	}
 	if a.Prompt == "" {
 		return "", tools.MissingField("agent", "prompt", raw,
-			"description", "prompt", "subagent_type", "isolation")
+			"description", "prompt", "subagent_type", "isolation", "session_id")
 	}
 
 	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
 	// Truncate description with an inline hint so the /agents panel
 	// stays readable; reject oversize prompts outright because a
 	// silent truncation could lose load-bearing context.
+	if a.Description == "" && a.SessionID != "" {
+		// Continuation default label — short by construction, still
+		// run through the cap below for uniformity.
+		a.Description = "continue " + a.SessionID
+	}
 	if len(a.Description) > maxDescriptionLen {
 		a.Description = a.Description[:maxDescriptionLen] + "…(truncated)"
 	}
@@ -200,18 +216,13 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			"prompt exceeds 32 KB; split the task into smaller subagent calls"), nil
 	}
 
-	// subagent_type defaults to general-purpose when omitted, matching
-	// the PRD schema description. Manager.Spawn will reject any other
-	// invalid value at its own validation step; we let it speak.
-	st := subagent.Type(a.SubagentType)
-	if st == "" {
-		st = subagent.TypeGeneralPurpose
-	}
-
 	// Resolve isolation. "none" / "" is the standard path
 	// (spawn under parent cwd); "worktree" creates a seek-managed
 	// worktree BEFORE spawn so the child runs in an isolated git
 	// checkout. M11.1 Phase 2 implementation per PRD §3.8.
+	// Applies to continuations identically (a continuation runs
+	// wherever the caller isolates it — the prior run's worktree
+	// was cleaned up when that run finished).
 	var (
 		worktreePath   string
 		worktreeBranch string
@@ -237,56 +248,86 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
 	}
 
-	// Dispatch. Manager.Spawn returns a Result whose Summary is the
-	// wire-format string we hand back unchanged. WorktreePath
-	// (when non-empty) becomes the child Policy's cwd inside
-	// Manager.Spawn — tools the subagent invokes execute against
-	// the worktree.
-	res := t.mgr.Spawn(ctx, subagent.SpawnArgs{
-		Description:  a.Description,
-		Prompt:       a.Prompt,
-		Type:         st,
-		WorktreePath: worktreePath,
-		// ParentTurn is 0 in M11.0 — the parent turn counter isn't
-		// threaded through the tool interface yet. The index event
-		// still records the spawn timing via the timestamp, and the
-		// /agents panel doesn't depend on parent_turn for MVP. Will
-		// thread through Sink in a follow-up if the UI needs it.
-		ParentTurn: 0,
-	})
-
-	// Worktree post-spawn cleanup (PRD §3.8 "子结束后自动
-	// exit_worktree (if_dirty: keep)"). Three outcomes:
-	//
-	//   - Cleanup succeeds + status="cleaned" (no dirty files)
-	//     → worktree auto-removed; nothing appended to summary
-	//     (PRD: "无改动时不追加（自动 cleaned）").
-	//   - Cleanup succeeds + status="kept" + changes > 0 →
-	//     worktree stays on disk; append the path/branch/changes
-	//     line so the LLM (and the user reading the transcript)
-	//     knows where to find the work.
-	//   - Cleanup fails → don't lose the subagent's success;
-	//     append a "(worktree cleanup error: ...)" line for
-	//     diagnostics but keep the original Summary intact.
-	//
-	// We deliberately use context.Background() (not the caller's
-	// ctx) so a cancelled parent turn doesn't strand the
-	// worktree mid-cleanup. The cleanup is short — git status +
-	// maybe git worktree remove — bounded latency.
-	if worktreePath != "" {
-		cleanupRes, cleanupErr := t.wtMgr.Cleanup(context.Background(), worktreePath, "keep")
-		switch {
-		case cleanupErr != nil:
-			res.Summary += fmt.Sprintf("\n— worktree cleanup error: %v (path=%s branch=%s)",
-				cleanupErr, worktreePath, worktreeBranch)
-		case cleanupRes.Status == "kept" && cleanupRes.Changes > 0:
-			res.Summary += fmt.Sprintf("\n— worktree: %s (branch %s, %d changes)",
-				cleanupRes.Path, cleanupRes.Branch, cleanupRes.Changes)
+	// Dispatch. Fresh spawn vs continuation (P1-b): session_id
+	// switches the entry point. Both return a Result whose Summary
+	// is the wire-format string handed back unchanged; continuations
+	// additionally carry PriorMessages seeded from the prior run's
+	// transcript inside Manager.Continue.
+	var res subagent.Result
+	if a.SessionID != "" {
+		res = t.mgr.Continue(ctx, subagent.ContinueArgs{
+			FromSubSid:   a.SessionID,
+			Description:  a.Description,
+			Prompt:       a.Prompt,
+			WorktreePath: worktreePath,
+			// ParentTurn is 0 — same M11.0 limitation as the spawn
+			// path below.
+			ParentTurn: 0,
+		})
+	} else {
+		// subagent_type defaults to general-purpose when omitted,
+		// matching the PRD schema description. Manager.Spawn will
+		// reject any other invalid value at its own validation
+		// step; we let it speak. (On the continuation branch the
+		// type is inherited from the prior run — the field is
+		// ignored.)
+		st := subagent.Type(a.SubagentType)
+		if st == "" {
+			st = subagent.TypeGeneralPurpose
 		}
-		// status="cleaned" → no append (the silent happy path).
+		res = t.mgr.Spawn(ctx, subagent.SpawnArgs{
+			Description:  a.Description,
+			Prompt:       a.Prompt,
+			Type:         st,
+			WorktreePath: worktreePath,
+			// ParentTurn is 0 in M11.0 — the parent turn counter
+			// isn't threaded through the tool interface yet. The
+			// index event still records the spawn timing via the
+			// timestamp, and the /agents panel doesn't depend on
+			// parent_turn for MVP. Will thread through Sink in a
+			// follow-up if the UI needs it.
+			ParentTurn: 0,
+		})
 	}
 
+	res = t.settleWorktree(res, worktreePath, worktreeBranch)
 	return res.Summary, nil
+}
+
+// settleWorktree runs the post-run worktree cleanup (PRD §3.8 "子结束
+// 后自动 exit_worktree (if_dirty: keep)") and returns res with any
+// cleanup note appended to Summary. Three outcomes:
+//
+//   - Cleanup succeeds + status="cleaned" (no dirty files)
+//     → worktree auto-removed; nothing appended to summary
+//     (PRD: "无改动时不追加（自动 cleaned）").
+//   - Cleanup succeeds + status="kept" + changes > 0 →
+//     worktree stays on disk; append the path/branch/changes
+//     line so the LLM (and the user reading the transcript)
+//     knows where to find the work.
+//   - Cleanup fails → don't lose the subagent's success;
+//     append a "(worktree cleanup error: ...)" line for
+//     diagnostics but keep the original Summary intact.
+//
+// No-op when worktreePath is empty. We deliberately use
+// context.Background() (not the caller's ctx) so a cancelled parent
+// turn doesn't strand the worktree mid-cleanup. The cleanup is
+// short — git status + maybe git worktree remove — bounded latency.
+func (t *Tool) settleWorktree(res subagent.Result, worktreePath, worktreeBranch string) subagent.Result {
+	if worktreePath == "" {
+		return res
+	}
+	cleanupRes, cleanupErr := t.wtMgr.Cleanup(context.Background(), worktreePath, "keep")
+	switch {
+	case cleanupErr != nil:
+		res.Summary += fmt.Sprintf("\n— worktree cleanup error: %v (path=%s branch=%s)",
+			cleanupErr, worktreePath, worktreeBranch)
+	case cleanupRes.Status == "kept" && cleanupRes.Changes > 0:
+		res.Summary += fmt.Sprintf("\n— worktree: %s (branch %s, %d changes)",
+			cleanupRes.Path, cleanupRes.Branch, cleanupRes.Changes)
+	}
+	// status="cleaned" → no append (the silent happy path).
+	return res
 }
 
 // failNoSpawn formats a wire-format failure for paths that reject

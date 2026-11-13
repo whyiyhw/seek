@@ -122,3 +122,31 @@ func TestTruncateSummary_UTF8Boundary(t *testing.T) {
 		t.Error("missing truncation suffix on oversized input")
 	}
 }
+
+// TestFormatContinued locks the continuation wire format: the prefix
+// is the SAME [agent: completed] token as a fresh run (a completed
+// continuation IS a completed run), and the lineage footer carries
+// resumed-from between the sub-sid and turns/tokens tokens.
+func TestFormatContinued(t *testing.T) {
+	got := FormatContinued(
+		"20260613-111111-newsub1",
+		"20260613-100000-oldsub2",
+		"edge cases audited", 3, Tokens{Prompt: 700, Completion: 90})
+	if !strings.HasPrefix(got, "[agent: completed] edge cases audited") {
+		t.Errorf("prefix wrong:\n%s", got)
+	}
+	wantFooter := "— sub-sid: newsub1 · resumed-from: oldsub2 · turns: 3 · tokens: 790"
+	if !strings.Contains(got, wantFooter) {
+		t.Errorf("footer %q missing from:\n%s", wantFooter, got)
+	}
+}
+
+// TestFormatContinued_Truncation shares the fresh-run summary cap:
+// oversized bodies truncate identically (MaxSummaryBytes).
+func TestFormatContinued_Truncation(t *testing.T) {
+	got := FormatContinued("a-b-cccccc", "d-e-ffffff",
+		strings.Repeat("x", MaxSummaryBytes+100), 1, Tokens{})
+	if !strings.Contains(got, truncationSuffix) {
+		t.Error("oversized continuation summary not truncated")
+	}
+}

@@ -100,6 +100,36 @@ func FormatCompleted(subSid string, summary string, turns int, tokens Tokens) st
 	return sb.String()
 }
 
+// FormatContinued builds the parent tool-result string for a
+// SUCCESSFUL continuation run (Manager.Continue). Identical layout
+// to FormatCompleted plus one footer token — the resumed-from
+// lineage — inserted after the sub-sid:
+//
+//	[agent: completed] <headline>
+//	<blank>
+//	<truncated summary body>
+//	<blank>
+//	— sub-sid: <new> · resumed-from: <old> · turns: <n> · tokens: <p+c>
+//
+// The "[agent: completed]" prefix is deliberately the SAME token as
+// a fresh run's (a continuation that completed IS a completed run;
+// parsers matching on the prefix keep working). The lineage sits
+// after the closing footer tokens per the wire-format discipline
+// (additions go after closed tokens, never inside them).
+func FormatContinued(subSid, fromSid, summary string, turns int, tokens Tokens) string {
+	var sb strings.Builder
+	sb.WriteString("[agent: completed] ")
+	sb.WriteString(headline(summary))
+	sb.WriteString("\n\n")
+	sb.WriteString(truncateSummary(summary))
+	sb.WriteString("\n\n— sub-sid: ")
+	sb.WriteString(shortSid(subSid))
+	sb.WriteString(" · resumed-from: ")
+	sb.WriteString(shortSid(fromSid))
+	fmt.Fprintf(&sb, " · turns: %d · tokens: %d", turns, tokens.Prompt+tokens.Completion)
+	return sb.String()
+}
+
 // FormatFailed builds the parent tool-result string for a failed /
 // canceled / killed subagent run. The reason is part of the wire-
 // format prefix per PRD §3.2 (enclosed in the bracket, so parsers

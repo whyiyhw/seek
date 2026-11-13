@@ -1465,3 +1465,17 @@ If you're new to the project, skim entries in this order:
 - **Fix**: webfrontend's Run force-closes with `srv.Close()` once the plane ctx is done (in-flight POST bodies are tiny; the Serve drain owns the message queue, not HTTP responses). Client-side disconnects stay covered by `r.Context().Done()` in the stream loop.
 - **Lesson**: for any streaming endpoint, "graceful" Shutdown needs per-connection cancellation tracking (register each request's cancel and fire them before Shutdown). Plain Shutdown + timeout is a hang with extra steps — don't upgrade the Close() back without that.
 - **Refs**: `internal/controlplane/webfrontend.go` (Run), net/http Server.Shutdown docs
+
+### Subagent continuation must mint a NEW sub_sid — same-id resurrection corrupts the fold
+- **Saw**: 2026-11-13 P1-b 设计（卡 c_u4ugnu）：续话最自然的形态是照抄 CC 的 SendMessage——同 agent id 再入追加指令。但按同 id 二写 `started` 事件，fold 后该子永远停在旧终态，续话运行中 /agents 面板显示 completed。
+- **Why**: `foldEvents` 对同一 sub_sid 的重复 `started` 只保留首见（视为 sub_sid 空间碰撞），且 `types.go` 契约是「一个 sub_sid 恰好一个终态，终态后不再有事件」。同 id 复活要求改 fold / orphan 扫描 / TUI 三处语义，且 `writeSubagentTranscript` 同路径覆写会丢掉旧 transcript 历史。
+- **Fix**: `Manager.Continue` 每次续话铸新 sub_sid，血统记在 `started` 事件的 `resumed_from` 字段（fold 透出 `Subagent.ResumedFrom`）；新 transcript 自包含（prior messages + 续话轮次），旧文件零改动。
+- **Lesson**: 事件溯源索引里「id = 单生命周期」是不变式；复活/续话类需求一律用「新 id + lineage 字段」表达，别让一个 id 活第二段人生。
+- **Refs**: `internal/subagent/manager.go` (Continue), `internal/subagent/index.go` (foldEvents duplicate-started branch), `docs/prd/feature-orchestration.md` §4 P1-b
+
+### 面向模型的 id 参数必须接受模型实际看得到的形态——agent 脚注只露 sub-sid 短后缀
+- **Saw**: 续话让模型回传 sub-sid 时，它手里只有结果脚注「— sub-sid: a1b2c3」（随机短后缀）；按全 id 精确匹配，真实对话里必然 `unknown_session`，测试里用全 id 却全绿。
+- **Why**: `FormatCompleted/FormatContinued` 的脚注设计给人类读，展示的是 `shortSid`；工具 schema 描述若说「传 sub-sid」而模型只能引用短形态，功能在 eval/实战中差最后一步。
+- **Fix**: `Manager.Continue` 先全 id 精确匹配，再按 `"-<suffix>"` 在本项目索引内唯一后缀解析；多命中报 `unknown_session` 并列出全 id 候选。schema 描述明说两种形态都收。
+- **Lesson**: 给模型开的 id 入口，收它看得见的形态（脚注/面板展示什么就解析什么）；只用全 id 的契约要在测试里用「模型视角的 id」走一遍才算数。
+- **Refs**: `internal/subagent/manager.go` (Continue short-form resolution), `internal/tools/agent/agent.go` (session_id schema), `internal/subagent/manager_continue_test.go:TestContinue_ShortSidResolution`
