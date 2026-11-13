@@ -27,3 +27,4 @@
 - c_vv2mde：seek 车道首单验收：叙事稿 paseo 线状态同步 + ACP 无头 provider  pitfalls 条目
 - c_mvfi4i：SEEK_ACP_YOLO 车道接 IsRemoteMutating bash guard：yolo 只放本地、照堵远程变更（PRD §3.3 同船项）
 - c_rjg6hs：ACP 无头车道跳过 cron auto-tick（PRD M1 同船项）
+- c_ur7bup：编排层差距盘点与设计：后台子代理/类型化 agent/模型路由/hooks 面（feature-orchestration.md）
