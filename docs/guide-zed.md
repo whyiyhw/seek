@@ -64,7 +64,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 真 Zed（1.4.x）端到端验证过：
 
-- ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目）→ `session/prompt`。
+- ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。
 - ✅ **流式回复**：文本逐 chunk 推送（reasoning 不外泄给客户端）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 Zed 的 `tool_call` 卡片，含 in_progress → completed/failed 状态。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
@@ -83,7 +83,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **会话数** | 一个 `seek` 进程 = 一个会话（MVP）。 | 支持多 `session/new` 复用同进程。 |
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。 |
 | **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
-| **per-session cwd** | `session/new` 的 `cwd` 被忽略，用进程启动目录。 | 按 session 切工作目录。 |
+| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）；sessionId 变为项目目录名。 | 多 session 各持独立栈（见 backlog ③）。 |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
 
 ---

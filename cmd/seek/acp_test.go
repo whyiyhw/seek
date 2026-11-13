@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -77,6 +78,56 @@ func TestACPBackend_AdvertisesImage(t *testing.T) {
 	}
 	if !res.AgentCapabilities.PromptCapabilities.Image {
 		t.Fatal("initialize must advertise promptCapabilities.image=true so Zed offers image attach")
+	}
+}
+
+// D-1 (feature-paseo-provider.md §2.2): NewSession must anchor BOTH cwd
+// conventions to p.Cwd and return the project name as sessionId — the
+// deep dispatch-path behaviour is covered in internal/acp; this pins
+// the production backend's wiring (policy handoff + name).
+func TestACPBackend_NewSessionAnchorsCwd(t *testing.T) {
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pol, err := permission.New(old, permission.PrefDeny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &acpBackend{policy: pol}
+
+	// Default first (empty cwd → CURRENT directory, before anything
+	// moves): Zed-equivalent, a behavioural no-op.
+	res, err := b.NewSession(acp.NewSessionParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Base(old); res.SessionID != want {
+		t.Fatalf("default sessionId = %q, want %q", res.SessionID, want)
+	}
+	if got := pol.Cwd(); got != old {
+		t.Fatalf("default policy cwd = %q, want %q", got, old)
+	}
+
+	// Explicit cwd: both anchors move, sessionId = project name.
+	res, err = b.NewSession(acp.NewSessionParams{Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Base(dir); res.SessionID != want {
+		t.Fatalf("sessionId = %q, want project name %q", res.SessionID, want)
+	}
+	if got := pol.Cwd(); got != dir {
+		t.Fatalf("policy cwd = %q, want %q", got, dir)
+	}
+	if got, _ := os.Getwd(); got != dir {
+		t.Fatalf("process cwd = %q, want %q", got, dir)
 	}
 }
 

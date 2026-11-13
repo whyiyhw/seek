@@ -260,6 +260,34 @@ func New(cwd string, pref Preference) (*Policy, error) {
 	return &Policy{pref: pref, cwd: abs}, nil
 }
 
+// Reanchor re-points the policy's working directory. The ONE sanctioned
+// caller is the ACP `session/new` handshake (feature-paseo-provider.md
+// §2.2 D-1): headless ACP clients (paseo) spawn `seek acp` WITHOUT a
+// cwd — the child inherits the daemon's (often "/") — so the real
+// project root only arrives as the session/new cwd parameter, AFTER
+// every tool has already captured this *Policy at construction.
+// Re-anchoring the shared policy in place is what makes read/edit/write
+// (Policy.Resolve), bash (cmd.Dir = CWD()) and the cwd-inside write
+// whitelist follow the session cwd without rebuilding the registry.
+//
+// Prefer New/Spawn for everything else: those keep the "cwd fixed at
+// construction" invariant that the rest of the codebase assumes. Call
+// Reanchor BEFORE the first prompt — one seek process serves one ACP
+// session (MVP), so in practice this runs exactly once, handshake-time.
+func (p *Policy) Reanchor(cwd string) error {
+	if p == nil {
+		return fmt.Errorf("permission: Reanchor on nil policy")
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return fmt.Errorf("permission: reanchor: resolve cwd: %w", err)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cwd = abs
+	return nil
+}
+
 // SetAskFn registers a callback consulted for each dangerous action
 // when the policy is in PrefAsk. The callback is expected to BLOCK
 // until the user answers (or the surrounding context cancels). It is
@@ -414,10 +442,11 @@ func (p *Policy) AlwaysAllowed(k Kind) bool {
 }
 
 // Cwd returns the policy's working directory (set at construction;
-// immutable post-construction). Added in v5 to support Spawn —
-// subagents under isolation:"worktree" run at the worktree path
-// rather than the parent's cwd, so the spawn API must thread cwd
-// through explicitly rather than inheriting implicitly.
+// the only sanctioned post-construction change is Reanchor, the ACP
+// session/new handshake). Added in v5 to support Spawn — subagents
+// under isolation:"worktree" run at the worktree path rather than the
+// parent's cwd, so the spawn API must thread cwd through explicitly
+// rather than inheriting implicitly.
 func (p *Policy) Cwd() string {
 	if p == nil {
 		return ""
