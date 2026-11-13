@@ -78,13 +78,29 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 | 项 | 现状 | 后续优化方向 |
 |---|---|---|
-| **审批门 / approval** | ACP 路径**没有 per-action 审批 UI**——seek 直接操作工作区（实质接近无门）。 | 实现 ACP `session/request_permission`，把工具审批弹到 Zed 原生权限 UI（"允许 seek 编辑 X?"）。 |
+| **审批门 / approval** | ACP 路径**没有 per-action 审批 UI**，且权限姿态钉死 `Deny`（flag 够不到，见 §5.1）：cwd 内写/编辑直接放行、**bash 全拒**（`go vet` 类 read-only 白名单除外）。无头场景可用 `SEEK_ACP_YOLO=1` 放开（§5.1）。 | 实现 ACP `session/request_permission`，把工具审批弹到 Zed 原生权限 UI（"允许 seek 编辑 X?"）。 |
 | **session resume** | `agentCapabilities.loadSession=false`，不能恢复历史会话。 | 实现 `session/load`，对接 seek 的 JSONL session 持久化。 |
 | **会话数** | 一个 `seek` 进程 = 一个会话（MVP）。 | 支持多 `session/new` 复用同进程。 |
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。 |
 | **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）；sessionId 变为项目目录名。 | 多 session 各持独立栈（见 backlog ③）。 |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
+
+### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch
+
+`seek acp` 以 `os.Args[1]=="acp"` 短路启动，而 `flag.Parse` 在第一个位置参数处就停止——**一个命令行 flag 都不消费**，`--yolo` 根本表达不到这条路。权限姿态因此默认钉死 `Deny`：cwd 内写/编辑放行，**bash 全拒**（read-only 白名单如 `go vet` 除外）。交互场景（Zed）这是合理默认；**无头场景**（paseo / ACP driver 派单，没有人回答 y/N）会直接卡死——`git commit`、`go test` 都跑不了。
+
+开关：给 ACP 进程注入环境变量（真值：`1`/`true`/`yes`/`on`，大小写不敏感；其它值一律视为关）：
+
+```json
+"env": { "SEEK_ACP_YOLO": "1" }
+```
+
+seek 在 ACP 车道**初始化时**就以 `PrefYolo` 起栈（不是事后翻转——系统提示词里的 Mode 标签和权限门必须一致），bash / cwd 外写全部放行，与 `--yolo` 同姿态。先例：`seek goal run`、autopilot 的"无人值守 → yolo"。
+
+> ⚠️ **仅受信本机 headless 场景使用**（paseo provider 的 `env` 块就是典型用法）。`PrefYolo` 放开的是本机 bash 与写文件；env 会被原样继承给子进程，不要在不受信、共享或远程可达的环境里设置。默认关（unset = `Deny`）；只在 `seek acp` 车道生效——shell 里残留的 `SEEK_ACP_YOLO` 对 TUI / print 模式**无**影响。
+
+设计出处：[`docs/prd/feature-paseo-provider.md`](./prd/feature-paseo-provider.md) §3.3（缺口 D-2）。
 
 ---
 

@@ -84,6 +84,8 @@
 
 方案：**`SEEK_ACP_YOLO=1` env → `SetPref(PrefYolo)`**，照抄无人值守先例（`goal`：`main.go:1716`，autopilot：`main.go:1687`，注释原话"Unattended loop → elevate to yolo … no human to ask"）。并建议同船把 `autopilot.IsRemoteMutating` 接成 bash command guard（照抄 autopilot 的做法）——yolo 放开本地操作但照堵 push/PR 类远程动作，与 drive 卡自身的沙盒纪律（"绝不 push"）互为双保险。显式 env 开关而非默认 yolo：Zed 等交互场景仍可保持 Deny/后续接 `session/request_permission`（feature-acp.md backlog ①，留作后续增强，paseo 端有 permission 渲染能力等着对接）。
 
+> ✅ **D-2 已落地**（卡 c_rewul5，2026-11-12）：`internal/acp/headless.go`（`YoloEnvVar`/`YoloFromEnv`）+ `cmd/seek` 在 ACP 车道把它并进 `initialPref` 解析（在 `sysprompt.Compose` **之前**，非事后 SetPref——否则系统提示词 Mode 标签还写 deny，模型根本不会去试 bash）。实现细节与设计稿的一处偏差：env 只在 `os.Args[1]=="acp"` 车道生效（防 shell 残留 env 静默 yolo TUI）。用法/警告写进 `docs/guide-zed.md` §5.1。`IsRemoteMutating` guard 与 cron-tick 跳过**未**同船（卡片拆分后不在本卡范围，guard 留待后续卡）。
+
 ### 3.4 其它无头注意
 
 - **stdout 是协议通道**：acp 模式日志全走 stderr（现状已保证）；首验排查用 `SEEK_ACP_LOG` tee 原始收发（已有，`main.go:2557`）。
@@ -130,7 +132,7 @@
 
 | M | 内容 | 执行方 |
 |---|---|---|
-| M1 | seek 侧：D-1 `session/new` cwd（per-session 栈重建，兑现 backlog ⑥）+ D-2 `SEEK_ACP_YOLO`（+ `IsRemoteMutating` guard）+ acp 跳过 cron auto-tick + 测试（cwd 切换、yolo env 开关、无 key 启动失败的探测语义） | drive 卡（代码，seek 仓） |
+| M1 | seek 侧：D-1 `session/new` cwd（per-session 栈重建，兑现 backlog ⑥）+ D-2 `SEEK_ACP_YOLO`（+ `IsRemoteMutating` guard）+ acp 跳过 cron auto-tick + 测试（cwd 切换、yolo env 开关、无 key 启动失败的探测语义）。**实拆两卡**：D-2 先落地（c_rewul5，guard/tick 未同船）；D-1 = c_bnjrw5 | drive 卡（代码，seek 仓） |
 | M2 | paseo 侧：重装 seek 二进制 → 写 provider 块 → `paseo reload` → §4.1 冒烟 | 主会话人工（沙盒外配置文件） |
 | M3 | 验收：§4.2 最小卡走 `--only --provider seek` 全流程 → 纳入 `--providers` 清单 | drive 卡 + 主会话观察 |
 

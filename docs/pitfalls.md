@@ -1429,7 +1429,7 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: `./...` staying green does NOT prove a tag-gated package is wired right; prove the gate both ways — default tags exclude the file (go/build assertion in CI) and `-tags feishu` compiles AND runs it (tagged test, run on demand until CI grows a tagged lane).
 - **Refs**: `internal/controlplane/feishu/doc.go` (anchor), `internal/controlplane/buildtags_test.go`, `docs/serve/README.md` "build-tag 依赖隔离"
 
-## ACP / editor integration
+## ACP / editor & headless lanes
 
 ### Session cwd has TWO resolution conventions — anchoring only one leaves half the toolbox in the daemon's dir
 - **Saw**: `seek acp`'s `NewSession` ignored `session/new`'s `cwd` entirely (fixed sessionId "seek"). Invisible under Zed (which spawns seek IN the project dir and sends the same dir), but headless ACP clients (paseo) spawn the child WITHOUT a cwd — it inherits the daemon's (usually `/`) — so every relative path and every unpinned subprocess ran in the wrong place. The fix had a trap of its own: re-anchoring `permission.Policy` alone (the obvious move, since read/edit/write resolve via `Policy.Resolve` and bash pins `cmd.Dir = CWD()`) still left `git` (no cmd.Dir pin), `grep`/`list_dir` (WalkDir on the raw relative path) in `/`.
@@ -1437,3 +1437,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: `acp.AnchorSession` (`internal/acp/session.go`): `os.Chdir(abs)` + `Policy.Reanchor(abs)` as one atomic handshake step; cwd that can't be entered fails the session loud (-32000) instead of silently running in the daemon dir. `Policy.Reanchor` (`internal/permission`) is the one sanctioned post-construction cwd change — tools hold the `*Policy` by pointer, so the re-anchor reaches them without rebuilding the registry.
 - **Lesson**: "make cwd effective" in this codebase is TWO operations, not one. Any future per-session cwd consumer (multi-session backlog ③) must go through both anchors — or enumerate which convention each affected tool uses. Zed-compat falls out for free: it sends the spawn dir as cwd, so the anchor is a no-op there.
 - **Refs**: `internal/acp/session.go`, `internal/permission/permission.go` (Reanchor), `cmd/seek/main.go` (acpBackend.NewSession), `docs/prd/feature-paseo-provider.md` §2.2 D-1
+
+### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
+- **Saw**: implementing SEEK_ACP_YOLO, the obvious wiring was `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent at main.go:1732). It would have been silently half-broken: the gate would allow bash while the system prompt header still read `Mode: deny` (and the bash tool description says "Refused under the current permission mode"), so the model would likely never attempt a bash call at all.
+- **Why**: the permission gate is live state — SetPref takes effect on the next Check — but the sysprompt Mode label is baked ONCE at startup into the prefix (`sysprompt.Compose(..., ModeLabel(initialPref, ...))`). Only the interactive TUI keeps them in sync mid-session via `Agent.SetModeLabel` per-message reminders; headless lanes (acp/goal/rpc) never set that label.
+- **Fix**: resolve SEEK_ACP_YOLO into `initialPref` BEFORE `sysprompt.Compose` (cmd/seek/main.go, gated on the ACP lane so a stray env can't yolo the TUI); env parsing owned by `internal/acp/headless.go`. Commit: `feat(acp): SEEK_ACP_YOLO headless permission switch` (c_rewul5).
+- **Lesson**: on headless lanes a permission posture is not just `policy.SetPref` — it must win before `sysprompt.Compose`, or also call `Agent.SetModeLabel`. When changing posture outside the TUI, check BOTH the gate and the prompt label.
+- **Refs**: `cmd/seek/main.go` (initialPref block), `internal/acp/headless.go`, `internal/sysprompt/sysprompt.go:ModeLabel`, `docs/guide-zed.md` §5.1
