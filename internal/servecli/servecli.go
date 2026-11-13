@@ -207,8 +207,9 @@ Usage:
                        Registered in the default build: fake, web.
                        (feishu arrives with -tags feishu, D-F1.)
 
-      The web frontend listens on 127.0.0.1:8790 and prints its
-      token-bearing URL to stderr on startup; the token also lives
+      The web frontend listens on 127.0.0.1:8790 ($SEEK_WEB_ADDR
+      overrides, e.g. the smoke suite's random high port) and prints
+      its token-bearing URL to stderr on startup; the token also lives
       in ~/.seek/serve/web.token (regenerate by deleting the file).
 
       Config: the optional "serve" section of ~/.seek/config.json

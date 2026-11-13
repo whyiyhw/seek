@@ -42,6 +42,19 @@ func newTestWeb(t *testing.T) (*WebFrontend, chan Inbound, string) {
 	return fe, in, "test-token-0123456789abcdef"
 }
 
+// TestWeb_AddrEnvOverride pins the SEEK_WEB_ADDR resolution order the
+// smoke suite (scripts/serve-smoke-test.sh) depends on for its random
+// high port: env beats the default, an explicit Addr beats env.
+func TestWeb_AddrEnvOverride(t *testing.T) {
+	t.Setenv(envWebAddr, "127.0.0.1:1") // port 1: resolved, never dialled
+	if got := NewWeb(WebConfig{}).cfg.Addr; got != "127.0.0.1:1" {
+		t.Errorf("zero Addr: got %q, want env value", got)
+	}
+	if got := NewWeb(WebConfig{Addr: "127.0.0.1:2"}).cfg.Addr; got != "127.0.0.1:2" {
+		t.Errorf("explicit Addr: got %q, want explicit cfg to win over env", got)
+	}
+}
+
 func TestWeb_RootServesEmbeddedPage(t *testing.T) {
 	fe, _, _ := newTestWeb(t)
 	srv := httptest.NewServer(fe.handler())
