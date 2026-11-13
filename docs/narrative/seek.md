@@ -1,6 +1,6 @@
 # whyiyhw/seek 项目叙事稿
 
-> 数据截至 2026-11-12（北京）；负责人会话（agent，2026-11-12 用户全权移交）。
+> 数据截至 2026-11-13（北京）；负责人会话（agent，2026-11-12 用户全权移交）。
 > 模板与写作纪律见 butler 仓 `docs/narrative/README.md`；事件 `#N` 指 butler 事件 id（memory_search 可查）。
 
 ## 目标
@@ -14,16 +14,22 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
 
 ## 现状
 
-- v0.10.3，主干干净；与 Claude Code 的能力对照见 `docs/comparison.md`
-  （定位变更：从 roadmap 驱动**降级为参考**，不再逐项追平——#2575 口径）。
-- **自进化面已有底子**：skills v2 生命周期（skill/skillmgr/skillstats）、记忆 L/M/S
-  + decay GC、`-dream`/`/distill` 蒸馏、pitfalls 台账（commit trailer 双信号）、
-  eval harness（14 用例，黑盒行为对比）、goal 达标循环、checkpoint 双层、自升级。
-- **多端种子已入库**：`docs/prd/feature-remote-control-plane.md`（📐 Frontend 端口 +
-  `seek serve` sidecar，核心零改动）；ACP 已交付并经 Zed 实测（`docs/prd/feature-acp.md`）
-  ——paseo provider 接入有现成先例（zcode-acp 桥）。
-- **缺口**：失败→eval 用例无自动管道；skill 不会自动蒸馏；事件溯源不变量
-  （model-visible ⟺ durably logged）只覆盖 plan 子系统；多端只有纸面设计。
+- **一夜平台化落地（11-12 夜至 11-13 晨，事件 #2618/#2660）**：control-plane 装配线
+  M1a→M1b→M2→M3→M6a→M7a **全部交付进 main**（类型层/bindings、serve 骨架、路由指令、
+  执行器含自愈、生命周期与 build-tag 隔离、guide 文档 + Telegram 纸面验证）；M4/M5
+  （飞书 frontend 真联调）待用户提供自建应用凭证。与 CC 对照的 roadmap 驱动已降级
+  为参考（comparison.md 改造完成）。
+- **token 三车道落地**：GLM 订阅车道进 main（provider 注册 + pricing 三口价），
+  真 key 烟测全链通且 **cache_hit_tokens=10944**——GLM 前缀缓存与 seek 缓存纪律咬合
+  （#2897）；DeepSeek 关键点验证口径不变。
+- **自进化内环首轮收成**：eval 14→20 例（3 契约回归 + 3 pitfall 衍生，pitfall→eval
+  管道落地）；skill 自动蒸馏设计稿就绪（feature-skill-distill.md，四层新颖性漏斗 +
+  人审闸）；dsh 事件溯源评估结论=approval 全量 fold 不值得、resume 缝隙部分做
+  （notes-event-sourcing-adoption.md）。
+- **butler 侧**：验证车道坑 8 越界问题修复（c_jnyf3y，机械面收进调度器）、Stop hook
+  多仓误报修复（c_f3wwqq）、go vet 清零；剩余一张 c_hi3lv5（验证 verdict 口径改造）
+  拟人判 ask_human 等用户拍板。
+- 顺手修掉：permission symlink CWD 误判（c_uh2x4q）。
 
 ## 关键决策
 
@@ -48,7 +54,9 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
 
 ## 下一步
 
-- **内环（自进化）**：pitfall→eval 半自动管道（c_w7kob6）→ skill 自动蒸馏设计（待开卡）。
-- **多端**：control-plane 三项待验证坐实（c_7hudp6）→ M1 平面骨架（worktree 并行可期）。
-- **治理接入**：seek 作 paseo provider 可行性设计（c_27i3zi）→ 落地后成为 butler
-  最便宜执行车道，dogfood 飞轮（seek 干活 → 失败沉淀 eval → seek 变强）转起来。
+- **多端收口**：M4/M5 飞书 frontend（等用户给 App ID/Secret，晨间已提醒）。
+- **paseo 车道**：两缺口卡已开——session/new cwd 生效（c_bnjrw5）、SEEK_ACP_YOLO
+  无头权限（c_rewul5）；落地后 butler drive `--provider seek` 最小卡验收。
+- **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
+  eval 用例随每次 dogfood 失败持续扩容。
+- **治理**：c_hi3lv5 验证口径改造等用户拍板（能力外项与真 doubt 分流）。
