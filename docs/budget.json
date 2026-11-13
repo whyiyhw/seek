@@ -6,5 +6,5 @@
   "docs/prd/archive": {"budget_bytes": 28500, "why": "retired PRDs; grows when work is archived INTO it — raise in the same change that retires something big; actual 25552 +10%"},
   "docs/book": {"budget_bytes": 558500, "why": "reference prose, length legitimate when every line is a fact; actual 507547 +10%"},
   "docs/pitfalls.md": {"budget_bytes": 327000, "why": "append-mostly ledger; actual 297205 +10%"},
-  "CHANGELOG.md": {"budget_bytes": 2500, "why": "release notes grow by design; tripwire only; actual 1839 +10%"}
+  "CHANGELOG.md": {"budget_bytes": 2500, "why": "tripwire, never a target. 2026-11-13 首轮缩并（c_7afk5i）：改「一行一卡」索引口径（细节回 PRD / git log），3604→2450，未 raise。此后 frozen：追加一行须同船缩等量；部署清掉已部署条目后自然回落"}
 }
