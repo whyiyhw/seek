@@ -113,11 +113,6 @@ func WithAuditLog(a *hooksconfig.AuditLog) Option {
 	return func(r *ShellRunner) { r.audit = a }
 }
 
-// WithStatusCallback wires status events to the TUI. nil = no UI.
-func WithStatusCallback(fn func(StatusEvent)) Option {
-	return func(r *ShellRunner) { r.onStatus = fn }
-}
-
 // WithVersion stamps the SEEK_VERSION env var. Optional.
 func WithVersion(v string) Option {
 	return func(r *ShellRunner) { r.version = v }

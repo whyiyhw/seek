@@ -52,10 +52,3 @@ func LoadFrom(path string) (Config, error) {
 	}
 	return cfg, nil
 }
-
-// DefaultPath returns the path where mcp.json is read from. Kept as a
-// thin wrapper around paths.MCPConfig for callers (tests, --help text)
-// that already used this symbol.
-func DefaultPath() (string, error) {
-	return paths.MCPConfig()
-}

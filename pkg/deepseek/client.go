@@ -35,7 +35,7 @@ type Client struct {
 	http    *http.Client
 }
 
-// Option configures a Client. See WithAPIKey, WithBaseURL, WithHTTPClient.
+// Option configures a Client. See WithAPIKey, WithBaseURL.
 type Option func(*Client)
 
 // WithAPIKey returns an Option that sets the API key used for authentication.
@@ -44,12 +44,6 @@ func WithAPIKey(k string) Option { return func(c *Client) { c.apiKey = k } }
 
 // WithBaseURL returns an Option that overrides the default API base URL.
 func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
-
-// WithHTTPClient returns an Option that replaces the default HTTP client.
-// Useful for custom timeouts, testing with httptest, or injecting transport layers.
-func WithHTTPClient(h *http.Client) Option {
-	return func(c *Client) { c.http = h }
-}
 
 // New returns a Client with the given functional options.
 // Defaults: baseURL = DefaultBaseURL (DeepSeek production), HTTP timeout = 5 minutes.
