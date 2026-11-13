@@ -37,9 +37,9 @@ func shellStub(t *testing.T, script string) SubprocessFn {
 // for deterministic test runs. All paths land in tempdirs so
 // runs/<id>.jsonl don't pollute the user's real ~/.seek/cron/.
 type tickFixture struct {
-	dir    string
-	store  *Store
-	now    time.Time
+	dir   string
+	store *Store
+	now   time.Time
 }
 
 func newTickFixture(t *testing.T) *tickFixture {
@@ -71,10 +71,10 @@ func (f *tickFixture) createDueJob(t *testing.T, name, prompt string) {
 	}
 	sched, _ := ParseSchedule("@every 5m")
 	j := Job{
-		Name:    name,
+		Name:     name,
 		Schedule: sched,
-		Prompt:  prompt,
-		NextRun: f.now.Add(-1 * time.Minute), // already due
+		Prompt:   prompt,
+		NextRun:  f.now.Add(-1 * time.Minute), // already due
 	}
 	if err := f.store.Create(j, CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -85,10 +85,10 @@ func (f *tickFixture) createNotDueJob(t *testing.T, name string) {
 	t.Helper()
 	sched, _ := ParseSchedule("@every 5m")
 	j := Job{
-		Name:    name,
+		Name:     name,
 		Schedule: sched,
-		Prompt:  "shouldn't run",
-		NextRun: f.now.Add(10 * time.Minute), // future
+		Prompt:   "shouldn't run",
+		NextRun:  f.now.Add(10 * time.Minute), // future
 	}
 	if err := f.store.Create(j, CreateOptions{}); err != nil {
 		t.Fatal(err)

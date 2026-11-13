@@ -347,9 +347,9 @@ func TestTool_Execute_IsolationWorktreeHappy(t *testing.T) {
 // reader knows where to find the work.
 func TestTool_Execute_IsolationWorktreeDirtyAppendsInfo(t *testing.T) {
 	wtFG := (&fakeGit{}).
-		push("abc\n", "", nil).             // Create: rev-parse
-		push("", "", nil).                  // Create: worktree add
-		push("", "", nil).                  // Create: update-ref
+		push("abc\n", "", nil).                  // Create: rev-parse
+		push("", "", nil).                       // Create: worktree add
+		push("", "", nil).                       // Create: update-ref
 		push(" M file.go\n?? new.go\n", "", nil) // Cleanup: status reports 2 dirty
 		// status > 0 + if_dirty=keep → no further git calls
 	t.Setenv("SEEK_HOME", t.TempDir())

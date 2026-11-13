@@ -35,3 +35,4 @@
 - c_j5qzb7：skill-distill 实现一期：/distill 扩展——会话→SKILL.md 草稿落 .drafts/（人审闸，自动路径不做）
 - c_qucxtu：web MVP 两小时版：浏览器聊天驱动 seek——webfrontend 适配器 + embed 单页 + serve 接线
 - c_6pgin4：seek serve 常驻化：launchd plist 落 deploy + 安装说明（合并后主会话安装）
+- c_7qjnko：真删第二批：deadcode 清单剩余候选 + gofmt -s 简化点（每版一刀第 2 刀）

@@ -4,6 +4,19 @@
 > **本卡不删任何东西。** 下面所有条目都是候选 + 证据 + 风险分级，删除/收缩动作由后续卡片逐条审批执行。
 > 每条候选都附机械复核命令，任何人可在任意机器重跑得到同样结论。
 
+## 执行状态（后续减法卡回填）
+
+| 刀 | 卡 | 删了什么 | 备注 |
+|---|---|---|---|
+| 首刀 2026-11-13 | c_ajavza | A1/A2/A5/A12（describeAt、WithStatusCallback、DefaultPath、WithHTTPClient） | deadcode 51→47；连带 emitStatus 永_nil 链记为下轮候选 |
+| 第 2 刀 2026-11-13 | c_7qjnko | A 类剩余全部（A3/A4/A6–A11、A13、A14）+ C 类全部（C1–C9）+ 连锁（teatest `model` 字段、3 个孤儿 import、testing import）+ gofmt -s 33 文件 + §6.1 计数指针化（appendix-a 不再复述条目数） | 删除前逐条重跑 deadcode 双模式 + U1000 + 全仓 grep 复核零引用；deadcode 43→35、-test 模式清单条目清零。B 类（§2）不满足「零引用」标准未动 |
+
+**第 2 刀新增候选（后续刀的队列，本刀按范围纪律未删）**：
+- `skilldistill_test.go:163 skillSetWith`：skill-distill M-SD1 合入后新增的死测试助手（C 类同性质），扫描基线 5b76ed6 之后才出现，不在本清单原始条目内。
+- `internal/hooks` emitStatus 永_nil 链（首刀遗留）与 `internal/tui/teatest` `modelCh` write-only 通道（本刀删 FinalModel 后唯一读者消失，字段仍有写入方故 U1000 不报）：同属「删除注入器后留下的孤儿读写路径」，需语义判断，不满足机械零引用标准。
+- `testModelBuilder.skipDefSize/skipReady` 字段（本刀删 WithSize/SkipReady 后恒 false，Build 仍读取）：行为零变化，可连 Build 无条件化一起删。
+
+
 ---
 
 ## 0. 方法与工具（含取舍说明）

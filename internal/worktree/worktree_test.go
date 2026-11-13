@@ -90,8 +90,8 @@ func newTestManager(t *testing.T, fg *fakeGit) *Manager {
 func TestCreate_HappyPath(t *testing.T) {
 	fg := (&fakeGit{}).
 		push("abc123\n", "", nil). // rev-parse HEAD
-		push("", "", nil).          // worktree add
-		push("", "", nil)           // update-ref
+		push("", "", nil).         // worktree add
+		push("", "", nil)          // update-ref
 	mgr := newTestManager(t, fg)
 
 	wt, err := mgr.Create(context.Background(), "", "")
@@ -266,13 +266,13 @@ func TestCleanup_DirtyDiscard(t *testing.T) {
 		push("abc\n", "", nil).
 		push("", "", nil).
 		push("", "", nil).
-		push(" M x.go\n", "", nil).       // status: 1 dirty
-		push("stashsha\n", "", nil).      // stash create
-		push("", "", nil).                // update-ref discarded
-		push("", "", nil).                // reset --hard
-		push("", "", nil).                // clean -fd
-		push("", "", nil).                // worktree remove
-		push("", "", nil)                 // update-ref -d
+		push(" M x.go\n", "", nil).  // status: 1 dirty
+		push("stashsha\n", "", nil). // stash create
+		push("", "", nil).           // update-ref discarded
+		push("", "", nil).           // reset --hard
+		push("", "", nil).           // clean -fd
+		push("", "", nil).           // worktree remove
+		push("", "", nil)            // update-ref -d
 	mgr := newTestManager(t, fg)
 
 	wt, _ := mgr.Create(context.Background(), "", "")
@@ -377,7 +377,7 @@ func TestPruneDiscarded_OnlyRemovesOld(t *testing.T) {
 
 	fg := (&fakeGit{}).
 		push(refsOut, "", nil). // for-each-ref
-		push("", "", nil)        // update-ref -d (only for old)
+		push("", "", nil)       // update-ref -d (only for old)
 	mgr := newTestManager(t, fg)
 
 	n, err := mgr.PruneDiscarded(context.Background(), 48*time.Hour)
@@ -456,10 +456,10 @@ func TestListFromDisk_FiltersSeekManaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	porcelain := buildPorcelainOutput(t, root, []string{
-		root,                                                            // main repo — must be filtered out
+		root, // main repo — must be filtered out
 		filepath.Join(pd, "worktrees", "20260601-100000-abcdef"), // seek-managed
 		filepath.Join(pd, "worktrees", "20260601-101000-fedcba"), // seek-managed
-		"/Users/whyiyhw/other-project",                                  // user-manual worktree elsewhere
+		"/Users/whyiyhw/other-project",                           // user-manual worktree elsewhere
 	})
 	fg := (&fakeGit{}).push(porcelain, "", nil)
 	mgr := newTestManagerWithRoot(t, fg, root)

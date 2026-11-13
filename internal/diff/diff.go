@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	DefaultContext = 3  // lines of context around each change
-	MaxHunks       = 8  // cap: avoid flooding the TUI / tool result
+	DefaultContext = 3 // lines of context around each change
+	MaxHunks       = 8 // cap: avoid flooding the TUI / tool result
 )
 
 // Unified returns a unified-diff string comparing oldContent to newContent.
@@ -192,7 +192,7 @@ func makeHunks(ops []op, _, _ int, ctx int) []hunk {
 		hunks = append(hunks, hunk{
 			oldStart: oldStart, oldCount: oldCount,
 			newStart: newStart, newCount: newCount,
-			ops:      slice,
+			ops: slice,
 		})
 	}
 	return hunks

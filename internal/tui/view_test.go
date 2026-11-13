@@ -153,7 +153,7 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 // so each checkpoint in history says how long that turn took.
 func TestRenderTurnFooter_ShowsDuration(t *testing.T) {
 	m := Model{
-		opts: Options{Tracker: cache.New(), Model: deepseek.ModelV41Flash},
+		opts:  Options{Tracker: cache.New(), Model: deepseek.ModelV41Flash},
 		turns: 1,
 	}
 	// Zero duration → no time segment; the footer ends at the cost.

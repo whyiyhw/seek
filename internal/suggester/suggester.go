@@ -75,11 +75,6 @@ type Predictor struct {
 // Option configures a Predictor.
 type Option func(*Predictor)
 
-// WithModel overrides the default prediction model.
-func WithModel(model string) Option {
-	return func(p *Predictor) { p.model = model }
-}
-
 // New constructs a Predictor. client must be non-nil; the predictor
 // shares it with the main agent (the main client's transport, retries,
 // auth all transparently apply to side-channel calls too).

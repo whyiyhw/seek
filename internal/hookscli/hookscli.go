@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -354,15 +353,4 @@ func cmdAudit(args []string, stdout, stderr io.Writer) error {
 			e.TS, e.Event, e.Hook, e.Tool, e.ExitCode, e.DurationMs, flag)
 	}
 	return nil
-}
-
-// ResolveProjectHooksPath is a small helper for callers (TUI) that
-// want to point a "view file" prompt at the project hooks.toml without
-// having to duplicate the .seek/ subdir logic. Keeps the wire format
-// in one place.
-func ResolveProjectHooksPath(projectAbs string) string {
-	if projectAbs == "" {
-		return ""
-	}
-	return filepath.Join(projectAbs, ".seek", "hooks.toml")
 }

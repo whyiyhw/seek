@@ -65,9 +65,9 @@ func TestCompareSemver(t *testing.T) {
 		{"dev", "v1.0.0", -1}, // dev always < any release
 		{"v1.0.0", "dev", +1},
 		{"dev", "dev", 0},
-		{"0.9.0", "v0.9.0", 0},                       // tolerant of leading v
-		{"v0.9.0 · abc1234", "v0.9.1", -1},           // formatted banner string
-		{"v1.0.0 · abc1234+", "v1.0.0", 0},           // formatted banner string, equal core
+		{"0.9.0", "v0.9.0", 0},             // tolerant of leading v
+		{"v0.9.0 · abc1234", "v0.9.1", -1}, // formatted banner string
+		{"v1.0.0 · abc1234+", "v1.0.0", 0}, // formatted banner string, equal core
 	}
 	for _, c := range cases {
 		got := compareSemver(c.a, c.b)
@@ -151,9 +151,9 @@ func TestContainsToken(t *testing.T) {
 		{"seek_0.9.0_linux_amd64.tar.gz", "linux", true},
 		{"seek_0.9.0_linux_amd64.tar.gz", "amd64", true},
 		{"seek_0.9.0_darwin_arm64.tar.gz", "linux", false},
-		{"linuxlike_0.9.0_darwin.tar.gz", "linux", false},     // not bounded
-		{"linux_amd64.tar.gz", "linux", true},                 // start
-		{"seek_amd64", "amd64", true},                         // end
+		{"linuxlike_0.9.0_darwin.tar.gz", "linux", false}, // not bounded
+		{"linux_amd64.tar.gz", "linux", true},             // start
+		{"seek_amd64", "amd64", true},                     // end
 		{"", "linux", false},
 	}
 	for _, c := range cases {
@@ -566,13 +566,13 @@ func TestRun_SendsBearerTokenOnDownload(t *testing.T) {
 // are derived from srv.URL so the upgrader's host resolution lines up.
 type fakeReleaseServer struct {
 	*httptest.Server
-	tag              string
-	archive          []byte // tar.gz containing "seek"
-	checksumsBody    string
+	tag                  string
+	archive              []byte // tar.gz containing "seek"
+	checksumsBody        string
 	overrideChecksumBody string
-	checksumOverride atomic.Pointer[byte] // if non-nil, serve overrideChecksumBody
-	reqCount         atomic.Int64
-	lastDownloadAuth atomic.Value // string — Authorization on last /dl/ request
+	checksumOverride     atomic.Pointer[byte] // if non-nil, serve overrideChecksumBody
+	reqCount             atomic.Int64
+	lastDownloadAuth     atomic.Value // string — Authorization on last /dl/ request
 }
 
 func newFakeReleaseServer(t *testing.T, tag string, binaryBytes []byte) *fakeReleaseServer {

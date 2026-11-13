@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/cache"
@@ -185,16 +184,6 @@ func (b *testModelBuilder) WithAgent(a AgentClient) *testModelBuilder {
 	return b
 }
 
-func (b *testModelBuilder) WithModel(name string) *testModelBuilder {
-	b.opts.Model = name
-	return b
-}
-
-func (b *testModelBuilder) WithCWD(cwd string) *testModelBuilder {
-	b.opts.CWD = cwd
-	return b
-}
-
 func (b *testModelBuilder) WithSession(s *session.Session) *testModelBuilder {
 	b.opts.Session = s
 	return b
@@ -212,24 +201,6 @@ func (b *testModelBuilder) WithYolo() *testModelBuilder {
 
 func (b *testModelBuilder) WithPlan() *testModelBuilder {
 	b.opts.Plan = true
-	return b
-}
-
-// WithSize overrides the default 80×40 dimensions. Pass (0, 0) to
-// simulate the pre-WindowSizeMsg state (combined with SkipReady).
-func (b *testModelBuilder) WithSize(w, h int) *testModelBuilder {
-	b.skipDefSize = true
-	b.mutators = append(b.mutators, func(m *Model) {
-		m.width = w
-		m.height = h
-	})
-	return b
-}
-
-// SkipReady leaves m.ready=false (pre-WindowSizeMsg). Use when testing
-// the "starting…" placeholder path.
-func (b *testModelBuilder) SkipReady() *testModelBuilder {
-	b.skipReady = true
 	return b
 }
 
@@ -294,37 +265,4 @@ func (b *testModelBuilder) Build() Model {
 func (b *testModelBuilder) BuildPtr() *Model {
 	m := b.Build()
 	return &m
-}
-
-// ----------------------------------------------------------------------
-// Common assertion helpers (no logic — just labels for readability).
-// ----------------------------------------------------------------------
-
-func assertContains(t *testing.T, haystack, needle, why string) {
-	t.Helper()
-	if !contains(haystack, needle) {
-		t.Errorf("%s — output missing %q in %q", why, needle, haystack)
-	}
-}
-
-func assertNotContains(t *testing.T, haystack, needle, why string) {
-	t.Helper()
-	if contains(haystack, needle) {
-		t.Errorf("%s — output unexpectedly contained %q in %q", why, needle, haystack)
-	}
-}
-
-// contains wraps strings.Contains — kept private + named to match the
-// assertion helper convention.
-func contains(s, sub string) bool {
-	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

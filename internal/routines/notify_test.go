@@ -60,10 +60,10 @@ func TestTick_NotifierCalledAfterCompletion(t *testing.T) {
 	f.createDueJob(t, "morning-report", "summarise PRs")
 
 	var (
-		mu          sync.Mutex
-		gotTitle    string
-		gotBody     string
-		callCount   int
+		mu        sync.Mutex
+		gotTitle  string
+		gotBody   string
+		callCount int
 	)
 	stub := Notifier(func(title, body string) error {
 		mu.Lock()
@@ -106,11 +106,11 @@ func TestTick_NotifierRespectsNotifyNever(t *testing.T) {
 	// defaults (always); we need to override.
 	sched, _ := ParseSchedule("@every 5m")
 	j := Job{
-		Name:    "quiet",
+		Name:     "quiet",
 		Schedule: sched,
-		Prompt:  "p",
-		NextRun: f.now.Add(-1 * time.Minute),
-		Notify:  NotifyNever,
+		Prompt:   "p",
+		NextRun:  f.now.Add(-1 * time.Minute),
+		Notify:   NotifyNever,
 	}
 	if err := f.store.Create(j, CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -169,8 +169,8 @@ func TestTick_NotifierRespectsOnFailure(t *testing.T) {
 	})
 
 	var (
-		mu      sync.Mutex
-		titles  []string
+		mu     sync.Mutex
+		titles []string
 	)
 	stub := Notifier(func(title, body string) error {
 		mu.Lock()

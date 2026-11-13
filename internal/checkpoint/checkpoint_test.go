@@ -115,11 +115,11 @@ func TestGit_OnePerTurn(t *testing.T) {
 	g := &fakeGit{}
 	// Turn 1: rev-parse → true, then for every checkpoint write
 	// queue: rev-parse HEAD, symbolic-ref, stash create, update-ref.
-	g.queue("true\n", "", nil)            // rev-parse --is-inside-work-tree
-	g.queue("abc1234\n", "", nil)         // rev-parse HEAD
-	g.queue("main\n", "", nil)            // symbolic-ref
-	g.queue("deadbeef\n", "", nil)        // stash create
-	g.queue("", "", nil)                  // update-ref
+	g.queue("true\n", "", nil)     // rev-parse --is-inside-work-tree
+	g.queue("abc1234\n", "", nil)  // rev-parse HEAD
+	g.queue("main\n", "", nil)     // symbolic-ref
+	g.queue("deadbeef\n", "", nil) // stash create
+	g.queue("", "", nil)           // update-ref
 	m.runGit = g.run
 
 	ctx := context.Background()
