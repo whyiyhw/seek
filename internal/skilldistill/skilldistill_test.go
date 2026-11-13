@@ -490,3 +490,40 @@ func TestRenderSKILLMD_ParsesAsLegalPackage(t *testing.T) {
 		t.Errorf("body template section missing: %q", sk.Body)
 	}
 }
+
+// ---------- NearestSkill (drafts show's nearest-skill panel) ----------
+
+func TestNearestSkill(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "fix-tui-state-bug", Description: l2ExistingDesc})
+	set.Add(&skill.Skill{Name: "rebase-reflog", Description: l2OtherDesc})
+
+	name, sim := NearestSkill(l2SameDesc, "reproduce first", set)
+	if name != "fix-tui-state-bug" {
+		t.Fatalf("nearest = %q, want fix-tui-state-bug", name)
+	}
+	if sim < SimilarityGrey {
+		t.Errorf("sim = %.2f, want at least grey-zone against the near-twin description", sim)
+	}
+
+	// The other skill must lose to the near-twin.
+	_, otherSim := NearestSkill(l2OtherDesc, "check reflog", set)
+	if otherSim <= sim {
+		t.Errorf("disjoint text (%.2f) should not outrank the near-twin (%.2f)", otherSim, sim)
+	}
+}
+
+func TestNearestSkill_EmptyAndDegenerate(t *testing.T) {
+	if name, sim := NearestSkill("anything", "body", nil); name != "" || sim != 0 {
+		t.Errorf("nil set: got (%q, %.2f), want empty", name, sim)
+	}
+	if name, sim := NearestSkill("anything", "body", skill.NewSet()); name != "" || sim != 0 {
+		t.Errorf("empty set: got (%q, %.2f), want empty", name, sim)
+	}
+	// A draft shorter than three runes shares no trigrams with anyone.
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "some-skill", Description: "a real description"})
+	if name, sim := NearestSkill("ab", "", set); name != "" || sim != 0 {
+		t.Errorf("short draft: got (%q, %.2f), want empty", name, sim)
+	}
+}

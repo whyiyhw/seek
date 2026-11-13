@@ -105,6 +105,20 @@ type DraftInfo struct {
 	SuggestedScope string
 	CreatedAt      string
 	Dir            string
+	// Sources / FilterTrace surface the sidecar's provenance and funnel
+	// record to the inbox listing (card c_jvn3ky): which session
+	// produced the draft, and how the novelty funnel scored it.
+	Sources     []DraftSource
+	FilterTrace []FilterTraceEntry
+}
+
+// DraftDetail is the full body of one draft for review: the raw
+// SKILL.md bytes plus its sidecar. What `seek skill drafts show`
+// renders and `approve` hands to Install.
+type DraftDetail struct {
+	Info DraftInfo
+	MD   []byte       // raw SKILL.md bytes
+	Side DraftSidecar // zero value when the sidecar is missing/corrupt
 }
 
 // DraftStore owns the drafts directory under a user skills tree.
@@ -225,6 +239,8 @@ func (s *DraftStore) ListDrafts() ([]DraftInfo, error) {
 				info.Recurrence = side.Recurrence
 				info.SuggestedScope = side.SuggestedScope
 				info.CreatedAt = side.CreatedAt
+				info.Sources = side.Sources
+				info.FilterTrace = side.FilterTrace
 			}
 		}
 		out = append(out, info)
@@ -262,6 +278,52 @@ func (s *DraftStore) DeleteDraft(name string) (string, error) {
 		return "", fmt.Errorf("skillmgr: remove draft: %w", err)
 	}
 	return dir, nil
+}
+
+// ReadDraft loads one draft for review: the raw SKILL.md bytes plus
+// the parsed sidecar. The name is validated against the kebab regex
+// BEFORE touching the filesystem — show/approve take user-supplied
+// names, and the same path-escape guard DeleteDraft uses applies. A
+// missing or corrupt sidecar does NOT fail the read: the SKILL.md is
+// the review target, the sidecar is provenance (Side stays zero, and
+// the caller degrades — approve falls back to scope "project").
+func (s *DraftStore) ReadDraft(name string) (*DraftDetail, error) {
+	if !draftNameRE.MatchString(name) {
+		return nil, fmt.Errorf("skillmgr: invalid draft name %q", name)
+	}
+	draftsDir, err := s.DraftsDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(draftsDir, name)
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("skillmgr: draft %q not found in %s (try `seek skill drafts`)", name, draftsDir)
+		}
+		return nil, fmt.Errorf("skillmgr: stat draft: %w", err)
+	}
+	md, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		return nil, fmt.Errorf("skillmgr: read draft SKILL.md: %w", err)
+	}
+	detail := &DraftDetail{MD: md}
+	detail.Info = DraftInfo{
+		Name:           name,
+		Status:         "(no sidecar)",
+		SuggestedScope: "project",
+		Dir:            dir,
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, SidecarName)); err == nil {
+		if err := json.Unmarshal(data, &detail.Side); err == nil {
+			detail.Info.Status = detail.Side.Status
+			detail.Info.Recurrence = detail.Side.Recurrence
+			detail.Info.SuggestedScope = detail.Side.SuggestedScope
+			detail.Info.CreatedAt = detail.Side.CreatedAt
+			detail.Info.Sources = detail.Side.Sources
+			detail.Info.FilterTrace = detail.Side.FilterTrace
+		}
+	}
+	return detail, nil
 }
 
 func (s *DraftStore) now() time.Time {

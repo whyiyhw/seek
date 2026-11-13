@@ -207,3 +207,83 @@ func TestDraftsInvisibleToLoader(t *testing.T) {
 	}
 	_ = stats
 }
+
+func TestReadDraft(t *testing.T) {
+	userDir := t.TempDir()
+	store := &DraftStore{UserDir: userDir}
+
+	side := DraftSidecar{
+		Status:         DraftStatusReviewable,
+		SuggestedScope: "user",
+		Sources:        []DraftSource{{SessionID: "s-42", ProjectID: "p-1", At: "2026-11-13T09:00:00Z"}},
+		FilterTrace:    []FilterTraceEntry{{Stage: "L2", Verdict: "GREY", Reason: "borderline"}},
+	}
+	if _, err := store.WriteDraft(validDraftMD("readable-draft"), side); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	detail, err := store.ReadDraft("readable-draft")
+	if err != nil {
+		t.Fatalf("ReadDraft: %v", err)
+	}
+	if string(detail.MD) != string(validDraftMD("readable-draft")) {
+		t.Error("MD must be the raw SKILL.md bytes")
+	}
+	if detail.Side.SuggestedScope != "user" || len(detail.Side.Sources) != 1 {
+		t.Errorf("sidecar = %+v", detail.Side)
+	}
+	if detail.Info.Sources[0].SessionID != "s-42" || detail.Info.FilterTrace[0].Verdict != "GREY" {
+		t.Errorf("info provenance not surfaced: %+v", detail.Info)
+	}
+}
+
+func TestReadDraft_MissingAndEscapedNames(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir()}
+	if _, err := store.ReadDraft("no-such-draft"); err == nil {
+		t.Error("missing draft must error")
+	}
+	// Same path-escape guard DeleteDraft has — the name joins a path.
+	for _, name := range []string{"../evil", "/abs", "UPPER"} {
+		if _, err := store.ReadDraft(name); err == nil {
+			t.Errorf("ReadDraft(%q) must refuse", name)
+		}
+	}
+}
+
+// A sidecar-less draft (manual meddling / half-written dir) still
+// reads: SKILL.md is the review target, provenance degrades to defaults.
+func TestReadDraft_SidecarOptional(t *testing.T) {
+	userDir := t.TempDir()
+	store := &DraftStore{UserDir: userDir}
+	if _, err := store.WriteDraft(validDraftMD("bare-draft"), DraftSidecar{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Remove(filepath.Join(userDir, DraftsDirName, "bare-draft", SidecarName)); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := store.ReadDraft("bare-draft")
+	if err != nil {
+		t.Fatalf("ReadDraft without sidecar: %v", err)
+	}
+	if detail.Info.Status != "(no sidecar)" || detail.Info.SuggestedScope != "project" {
+		t.Errorf("degraded info = %+v", detail.Info)
+	}
+}
+
+func TestListDrafts_SurfacesProvenance(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir()}
+	side := DraftSidecar{
+		Sources:     []DraftSource{{SessionID: "s-1"}, {SessionID: "s-2"}},
+		FilterTrace: []FilterTraceEntry{{Stage: "L2", Verdict: "PASS"}},
+	}
+	if _, err := store.WriteDraft(validDraftMD("provenanced"), side); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	drafts, err := store.ListDrafts()
+	if err != nil || len(drafts) != 1 {
+		t.Fatalf("ListDrafts: %v %+v", err, drafts)
+	}
+	if len(drafts[0].Sources) != 2 || drafts[0].FilterTrace[0].Stage != "L2" {
+		t.Errorf("provenance missing from inbox row: %+v", drafts[0])
+	}
+}
