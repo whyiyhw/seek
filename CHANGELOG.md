@@ -26,3 +26,4 @@
 - c_rewul5：SEEK_ACP_YOLO 无头权限开关：ACP 模式 flag 全不解析、默认 Deny 拒 bash（paseo provider 前置缺口 ②）
 - c_vv2mde：seek 车道首单验收：叙事稿 paseo 线状态同步 + ACP 无头 provider  pitfalls 条目
 - c_mvfi4i：SEEK_ACP_YOLO 车道接 IsRemoteMutating bash guard：yolo 只放本地、照堵远程变更（PRD §3.3 同船项）
+- c_rjg6hs：ACP 无头车道跳过 cron auto-tick（PRD M1 同船项）
