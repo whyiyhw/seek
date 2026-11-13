@@ -1421,3 +1421,12 @@ If you're new to the project, skim entries in this order:
 - **Fix**: keep an untagged `doc.go` as the package anchor (also carries the tag contract in godoc) and, for the default-build guarantee, assert the package's default `GoFiles == [doc.go]` via `go/build.Default.ImportDir` in an ordinary CI test (`internal/controlplane/buildtags_test.go`) — go/build evaluates //go:build per tags without spawning builds, so the exclusion proof itself runs under default tags.
 - **Lesson**: `./...` staying green does NOT prove a tag-gated package is wired right; prove the gate both ways — default tags exclude the file (go/build assertion in CI) and `-tags feishu` compiles AND runs it (tagged test, run on demand until CI grows a tagged lane).
 - **Refs**: `internal/controlplane/feishu/doc.go` (anchor), `internal/controlplane/buildtags_test.go`, `docs/serve/README.md` "build-tag 依赖隔离"
+
+## ACP / headless lanes
+
+### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
+- **Saw**: implementing SEEK_ACP_YOLO, the obvious wiring was `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent at main.go:1732). It would have been silently half-broken: the gate would allow bash while the system prompt header still read `Mode: deny` (and the bash tool description says "Refused under the current permission mode"), so the model would likely never attempt a bash call at all.
+- **Why**: the permission gate is live state — SetPref takes effect on the next Check — but the sysprompt Mode label is baked ONCE at startup into the prefix (`sysprompt.Compose(..., ModeLabel(initialPref, ...))`). Only the interactive TUI keeps them in sync mid-session via `Agent.SetModeLabel` per-message reminders; headless lanes (acp/goal/rpc) never set that label.
+- **Fix**: resolve SEEK_ACP_YOLO into `initialPref` BEFORE `sysprompt.Compose` (cmd/seek/main.go, gated on the ACP lane so a stray env can't yolo the TUI); env parsing owned by `internal/acp/headless.go`. Commit: `feat(acp): SEEK_ACP_YOLO headless permission switch` (c_rewul5).
+- **Lesson**: on headless lanes a permission posture is not just `policy.SetPref` — it must win before `sysprompt.Compose`, or also call `Agent.SetModeLabel`. When changing posture outside the TUI, check BOTH the gate and the prompt label.
+- **Refs**: `cmd/seek/main.go` (initialPref block), `internal/acp/headless.go`, `internal/sysprompt/sysprompt.go:ModeLabel`, `docs/guide-zed.md` §5.1

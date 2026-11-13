@@ -927,14 +927,29 @@ func run() error {
 			*plan = loaded.Plan
 		}
 	}
+	// `seek acp` (v7 柱 P). Hoisted here because the ACP lane needs it
+	// before initialPref resolves (SEEK_ACP_YOLO below); the actual
+	// short-circuit sits further down, after the agent is up.
+	acpLane := len(os.Args) >= 2 && os.Args[1] == "acp"
 	// Print mode (-p / piped stdin) can't realistically interrupt to
 	// ask, so it stays in Deny preference unless --yolo is explicit.
 	// The TUI path overrides to Ask further down so per-call approval
 	// kicks in. --yolo wins on pref; --plan enters the plan workflow
 	// (they're orthogonal so could in principle co-exist; cmdYolo/
 	// cmdPlan enforce mutual exclusion at the UI layer).
+	//
+	// ACP lane (D-2, docs/prd/feature-paseo-provider.md §3.3): flags
+	// NEVER reach it — flag.Parse stops at the "acp" positional — so
+	// --yolo is inexpressible and pref would stay Deny (bash denied
+	// across the board → unattended lanes can't work). The escape
+	// hatch is the SEEK_ACP_YOLO env var, resolved HERE rather than at
+	// the acp short-circuit so sysprompt.Compose's Mode label matches
+	// the gate (a late SetPref would leave "Mode: deny" in the prompt
+	// and the model wouldn't even try bash). Env-scoped and gated on
+	// acpLane: a stray SEEK_ACP_YOLO in the shell must not silently
+	// yolo the TUI. Same "no human to ask" posture as goal/autopilot.
 	initialPref := permission.PrefDeny
-	if *yolo {
+	if *yolo || (acpLane && acp.YoloFromEnv(os.Getenv)) {
 		initialPref = permission.PrefYolo
 	}
 	initialWorkflow := permission.WorkflowNone
@@ -1712,7 +1727,9 @@ func run() error {
 	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
 	// feature-vision: pasted image blocks route through the same
 	// submit-time vision router as the TUI (native attach / switch note).
-	if len(os.Args) >= 2 && os.Args[1] == "acp" {
+	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
+	// initialPref above — nothing to flip here.
+	if acpLane {
 		return runACP(ctx, ag, newVisionRouter(abs))
 	}
 
