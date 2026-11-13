@@ -1444,3 +1444,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: resolve SEEK_ACP_YOLO into `initialPref` BEFORE `sysprompt.Compose` (cmd/seek/main.go, gated on the ACP lane so a stray env can't yolo the TUI); env parsing owned by `internal/acp/headless.go`. Commit: `feat(acp): SEEK_ACP_YOLO headless permission switch` (c_rewul5).
 - **Lesson**: on headless lanes a permission posture is not just `policy.SetPref` — it must win before `sysprompt.Compose`, or also call `Agent.SetModeLabel`. When changing posture outside the TUI, check BOTH the gate and the prompt label.
 - **Refs**: `cmd/seek/main.go` (initialPref block), `internal/acp/headless.go`, `internal/sysprompt/sysprompt.go:ModeLabel`, `docs/guide-zed.md` §5.1
+
+### Headless ACP can't choose its provider by flag — and a stray ANTHROPIC_API_KEY in the inherited shell wins the auto-detect
+- **Saw**: 2026-11-13 paseo provider 首次无头冒烟：想显式钉 DeepSeek，但 `seek acp --provider=deepseek` 里 flag 被整个无视；同时 daemon 继承的 shell 环境残留 `ANTHROPIC_API_KEY`（而 DeepSeek key 只在交互 shell 里 export、不在 daemon env / config），车道的自动探测静默选中 Anthropic，首轮就用 claude-sonnet-4 跑起来——进程健康、模型不对。
+- **Why**: 两层叠加。①`seek acp` 以 `os.Args[1]=="acp"` 判定车道，Go 的 `flag.Parse` 在第一个位置参数处就停止——ACP 车道一个命令行 flag 都不消费，`--provider` 是死字。② `buildProvider` 的解析顺序是 `--provider` flag → DeepSeek key → Anthropic key → OpenAI → Gemini → GLM → `cfg.DefaultProvider`；flag 恒空时，DeepSeek key 不在 env/config 就直接落到下一家，残留的 Anthropic key 顺位上位，无任何告警。
+- **Fix**: 无头车道的 provider 姿态只能走 env/config：paseo provider 块的 `env` 显式带 `DEEPSEEK_API_KEY`（或写进 `~/.seek/config.json` 的 providers 段，`config.KeyFor` 会读到）；冒烟判据补一条——首轮实际模型必须是 DeepSeek（看 `/model` 等价的启动日志或回复里的 model），"进程起来了"不算通。本卡 c_vv2mde 仅记录，未改代码。
+- **Lesson**: 无 flag 车道（acp）的启动姿态——provider / 权限 / 模型——只能经 env 或 config 表达；自动化环境继承的 env 不是干净的，冒烟必须验"实际选了谁"，不能验"进程活着"。provider 自动探测的优先级对残留 key 零抵抗，daemon 侧要显式钉死。
+- **Refs**: `cmd/seek/main.go`（`flag.Parse` ≈782、`acpLane` ≈933、`buildProvider` ≈2763）, `internal/config/config.go:KeyFor`, `internal/acp/headless.go`, `docs/prd/feature-paseo-provider.md` §3.3, `docs/guide-zed.md` §5.1
