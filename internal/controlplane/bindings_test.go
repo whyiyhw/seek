@@ -310,11 +310,11 @@ func TestBindingStore_ConcurrentPuts(t *testing.T) {
 	const workers, perWorker = 8, 25
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWorker; i++ {
+			for i := range perWorker {
 				conv := NewConvID("feishu", fmt.Sprintf("c-%d-%d", w, i))
 				if err := s.Put(Binding{ConvID: conv, ProjectPath: fmt.Sprintf("/p/%d/%d", w, i)}); err != nil {
 					t.Errorf("Put %s: %v", conv, err)

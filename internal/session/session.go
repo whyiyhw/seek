@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -170,8 +171,7 @@ func backfillEmptyToolContent(msgs []deepseek.Message) {
 }
 
 func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int) {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for i, m := range slices.Backward(msgs) {
 		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}

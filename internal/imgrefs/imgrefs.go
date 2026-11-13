@@ -26,7 +26,7 @@ var imageExts = map[string]bool{
 func Detect(text string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, tok := range strings.Fields(text) {
+	for tok := range strings.FieldsSeq(text) {
 		p := cleanToken(tok)
 		if p == "" || seen[p] {
 			continue

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -80,10 +81,8 @@ func runHandler(t *testing.T, m *Model, input string) cmdResult {
 		args = strings.TrimSpace(parts[1])
 	}
 	for _, c := range allCommands() {
-		for _, n := range c.names {
-			if n == name {
-				return c.handler(m, args)
-			}
+		if slices.Contains(c.names, name) {
+			return c.handler(m, args)
 		}
 	}
 	t.Fatalf("no handler for %q", input)
@@ -743,13 +742,11 @@ func TestEffort_NoArg_OpensPicker(t *testing.T) {
 func TestEffort_DescriptionHasPickerHint(t *testing.T) {
 	t.Parallel()
 	for _, c := range allCommands() {
-		for _, n := range c.names {
-			if n == "/effort" {
-				if !strings.Contains(c.description, "No args opens a picker") {
-					t.Errorf("/effort description should mention the picker, got:\n  %s", c.description)
-				}
-				return
+		if slices.Contains(c.names, "/effort") {
+			if !strings.Contains(c.description, "No args opens a picker") {
+				t.Errorf("/effort description should mention the picker, got:\n  %s", c.description)
 			}
+			return
 		}
 	}
 	t.Fatal("/effort not found in allCommands()")

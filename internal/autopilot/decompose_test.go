@@ -33,7 +33,7 @@ func TestParseTasks_ToleratesFencesAndProse(t *testing.T) {
 
 func TestParseTasks_ClampToMax(t *testing.T) {
 	var arr string
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if i > 0 {
 			arr += ","
 		}

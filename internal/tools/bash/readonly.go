@@ -30,6 +30,8 @@
 
 package bash
 
+import "slices"
+
 import "strings"
 
 // isReadOnlySafe reports whether cmd is one of the whitelisted
@@ -124,10 +126,5 @@ func hasShellMetachars(cmd string) bool {
 // Only exact matches count — a flag-style value like "-not-this" does
 // not match "-n".
 func hasFlag(tokens []string, flag string) bool {
-	for _, t := range tokens {
-		if t == flag {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(tokens, flag)
 }

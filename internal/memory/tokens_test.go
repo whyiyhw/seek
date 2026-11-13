@@ -62,7 +62,7 @@ func TestTruncateSoulStable_DropsTrailingBullets(t *testing.T) {
 	// Each bullet is ~60 CJK chars, estimateTokens ≈ 20 tokens.
 	// 60 bullets × 20 = ~1200 tokens — well over the 450 limit.
 	var bullets []string
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		bullets = append(bullets, "- **这是一个非常长的用户偏好条目用来测试截断逻辑是否正常工作**")
 	}
 	input := strings.Join(bullets, "\n")

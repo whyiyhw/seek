@@ -2183,7 +2183,7 @@ func TestHandleQuestionKey_CursorBoundsClamped(t *testing.T) {
 	}
 
 	// Down past last: stops at Other (index = len(options)).
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		updated, _ = m2.handleQuestionKey(keyDown())
 		m2 = updated.(Model)
 	}

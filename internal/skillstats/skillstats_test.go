@@ -106,11 +106,11 @@ func TestAppend_ConcurrentWritesDoNotInterleave(t *testing.T) {
 	const G = 16
 	const PerGoroutine = 50
 	var wg sync.WaitGroup
-	for g := 0; g < G; g++ {
+	for g := range G {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < PerGoroutine; i++ {
+			for range PerGoroutine {
 				_ = w.Append(Entry{
 					TS:   "t",
 					Name: "skill",

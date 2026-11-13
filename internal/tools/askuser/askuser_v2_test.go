@@ -282,13 +282,11 @@ func TestExecute_V2BatchConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, N)
 	for range N {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := New(policy).Execute(context.Background(), raw); err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

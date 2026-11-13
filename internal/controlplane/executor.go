@@ -351,7 +351,7 @@ type seekOutcome struct {
 func parseSeekJSONL(data []byte) seekOutcome {
 	var out seekOutcome
 	var reply strings.Builder
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue

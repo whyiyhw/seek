@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -322,8 +323,9 @@ func (a *Agent) Messages() []deepseek.Message {
 func (a *Agent) AttachPredictedNext(text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for i := len(a.messages) - 1; i >= 0; i-- {
-		if a.messages[i].Role == deepseek.RoleAssistant && len(a.messages[i].ToolCalls) == 0 {
+	for i, v := range slices.Backward(a.messages) {
+		if v.Role == deepseek.RoleAssistant && len(v.ToolCalls) == 0 {
+			// Write through the index: v is a copy of the slice element.
 			a.messages[i].PredictedNext = text
 			return
 		}
@@ -675,15 +677,13 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 				}
 			}
 			if len(seqIdx) > 0 {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					for _, i := range seqIdx {
 						tc := assistant.ToolCalls[i]
 						result, terr := a.dispatchTool(ctx, tc, out)
 						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
 					}
-				}()
+				})
 			}
 			wg.Wait()
 			for _, msg := range toolMsgs {

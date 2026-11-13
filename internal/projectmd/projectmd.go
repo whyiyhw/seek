@@ -68,7 +68,7 @@ func Load(startDir string) (Result, error) {
 		return Result{}, err
 	}
 
-	for i := 0; i < maxAscend; i++ {
+	for range maxAscend {
 		candidate := filepath.Join(dir, Filename)
 		data, err := os.ReadFile(candidate)
 		if err == nil {

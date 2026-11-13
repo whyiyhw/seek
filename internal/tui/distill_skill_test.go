@@ -295,7 +295,7 @@ func gateAgent(t *testing.T, nMessages, nCalls int) *agent.Agent {
 	}
 	var hist []deepseek.Message
 	calls := 0
-	for i := 0; i < nMessages; i++ {
+	for i := range nMessages {
 		m := deepseek.Message{Role: deepseek.RoleUser, Content: "please fix the flaky test"}
 		if calls < nCalls && i%2 == 1 {
 			m = deepseek.Message{

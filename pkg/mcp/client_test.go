@@ -323,7 +323,7 @@ func TestClient_Concurrent(t *testing.T) {
 
 	const workers = 5
 	errc := make(chan error, workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			result, err := client.CallTool(ctx, "echo", map[string]any{"msg": "hi"})
 			if err != nil {
@@ -337,7 +337,7 @@ func TestClient_Concurrent(t *testing.T) {
 			errc <- nil
 		}()
 	}
-	for i := 0; i < workers; i++ {
+	for range workers {
 		if err := <-errc; err != nil {
 			t.Errorf("worker error: %v", err)
 		}

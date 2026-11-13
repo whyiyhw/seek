@@ -34,7 +34,7 @@ func chatWith(content string) *fakeChatClient {
 func gateHistory(messages int, toolCalls int) []deepseek.Message {
 	var h []deepseek.Message
 	calls := 0
-	for i := 0; i < messages; i++ {
+	for i := range messages {
 		m := deepseek.Message{Role: deepseek.RoleUser, Content: "message body"}
 		if calls < toolCalls && i%3 == 0 {
 			m.Role = deepseek.RoleAssistant
@@ -71,7 +71,7 @@ func TestMechanicalGate(t *testing.T) {
 
 func TestMechanicalGate_SystemMessagesDontCount(t *testing.T) {
 	var h []deepseek.Message
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		h = append(h, deepseek.Message{Role: deepseek.RoleSystem, Content: "system"})
 	}
 	h = append(h, gateHistory(3, 0)...)
@@ -289,7 +289,7 @@ func TestTrigramJaccard(t *testing.T) {
 func extractionHistory() []deepseek.Message {
 	var h []deepseek.Message
 	h = append(h, deepseek.Message{Role: deepseek.RoleSystem, Content: "sysprompt"})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		h = append(h, deepseek.Message{Role: deepseek.RoleUser, Content: "fix the flaky TUI test"})
 		h = append(h, deepseek.Message{
 			Role:    deepseek.RoleAssistant,

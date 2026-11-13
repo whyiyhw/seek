@@ -114,7 +114,7 @@ func TestObserveEnqueue_RespectsSessionCap(t *testing.T) {
 
 	enqueue := h.ObserveEnqueue()
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		name := fmt.Sprintf("entry-%d", i)
 		enqueue(context.Background(), Entry{Name: name, Tagline: name, Content: name})
 		r := <-resultChan

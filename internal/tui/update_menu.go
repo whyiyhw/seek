@@ -1,5 +1,7 @@
 package tui
 
+import "slices"
+
 import "strings"
 
 // subcmdPurposePrefix tags a pickerPurpose for the generic "/<cmd>
@@ -272,11 +274,11 @@ func filterCommands(cmds []command, prefix string) []command {
 // ("/cmd", "rest...", true). hasSpace=false means no space yet (still
 // typing the command name → Branch 3's slash menu owns it).
 func splitCommandArg(v string) (name, tail string, hasSpace bool) {
-	i := strings.IndexByte(v, ' ')
-	if i < 0 {
+	before, after, ok := strings.Cut(v, " ")
+	if !ok {
 		return v, "", false
 	}
-	return v[:i], v[i+1:], true
+	return before, after, true
 }
 
 // commandWithSubcommands returns the command whose canonical name or
@@ -288,10 +290,8 @@ func commandWithSubcommands(name string) (command, bool) {
 		if len(c.subcommands) == 0 {
 			continue
 		}
-		for _, n := range c.names {
-			if n == name {
-				return c, true
-			}
+		if slices.Contains(c.names, name) {
+			return c, true
 		}
 	}
 	return command{}, false
@@ -337,11 +337,8 @@ func longestCommonCandidatePrefix(cmds []command) string {
 // and b. Safe for ASCII (slash command names); for arbitrary UTF-8 use
 // a rune-aware variant.
 func commonPrefixBytes(a, b string) string {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(b), len(a))
+	for i := range n {
 		if a[i] != b[i] {
 			return a[:i]
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,13 +63,7 @@ func TestFetch_ProducesValidMetadata(t *testing.T) {
 		t.Errorf("StagingPath should be under seek-skill-staging-*, got %q", res.StagingPath)
 	}
 	// Files list should contain at least SKILL.md.
-	found := false
-	for _, f := range res.Files {
-		if f == "SKILL.md" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(res.Files, "SKILL.md")
 	if !found {
 		t.Errorf("Files should contain SKILL.md, got %v", res.Files)
 	}

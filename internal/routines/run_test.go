@@ -130,7 +130,7 @@ func TestRecorder_ConcurrentStdoutStderrSerialised(t *testing.T) {
 
 	const N = 50
 	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(2)
 		go func(n int) {
 			defer wg.Done()

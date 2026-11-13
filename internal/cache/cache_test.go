@@ -234,12 +234,10 @@ func TestTracker_SummaryFormat(t *testing.T) {
 func TestTracker_ConcurrentSafe(t *testing.T) {
 	tr := New()
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			recordFlash(tr, deepseek.Usage{PromptTokens: 1, PromptCacheHitTokens: 1})
-		}()
+		})
 	}
 	wg.Wait()
 	if c := tr.Cumulative(); c.PromptTokens != 100 || c.PromptCacheHitTokens != 100 {
@@ -408,14 +406,12 @@ func TestTracker_AdoptChild_ConcurrentSpawn(t *testing.T) {
 	parent := New()
 	var wg sync.WaitGroup
 	const N = 50
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range N {
+		wg.Go(func() {
 			child := New()
 			recordFlash(child, deepseek.Usage{PromptTokens: 10, PromptCacheHitTokens: 5, PromptCacheMissTokens: 5})
 			parent.AdoptChild(child)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -440,9 +436,7 @@ func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Reader: hammer Cumulative on parent.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -452,28 +446,24 @@ func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
 				_ = parent.CumulativeCost()
 			}
 		}
-	}()
+	})
 
 	// Writer: spawn children, record into them, adopt.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			child := New()
 			recordFlash(child, deepseek.Usage{PromptTokens: 1})
 			parent.AdoptChild(child)
 		}
-	}()
+	})
 
 	// Let it run briefly then stop.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 500; i++ {
+	wg.Go(func() {
+		for range 500 {
 			recordFlash(parent, deepseek.Usage{PromptTokens: 1})
 		}
 		close(stop)
-	}()
+	})
 
 	wg.Wait()
 }

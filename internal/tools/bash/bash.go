@@ -97,10 +97,7 @@ func clampOutput(out []byte) (clamped []byte, elidedBytes int) {
 	}
 	// Pull the tail start forward to just after the first newline in its
 	// window so the kept suffix begins on a complete line.
-	tailStart := len(out) - tail
-	if tailStart < head {
-		tailStart = head
-	}
+	tailStart := max(len(out)-tail, head)
 	if nl := bytes.IndexByte(out[tailStart:], '\n'); nl >= 0 && tailStart+nl+1 < len(out) {
 		tailStart += nl + 1
 	}

@@ -272,7 +272,7 @@ func TestTick_MultipleDueJobsRunInParallel(t *testing.T) {
 	}
 	f := newTickFixture(t)
 	const N = 4
-	for i := 0; i < N; i++ {
+	for i := range N {
 		f.createDueJob(t, fmt.Sprintf("j%d", i), "")
 	}
 
@@ -428,19 +428,17 @@ func TestTick_ConcurrentMarkRunRaceFree(t *testing.T) {
 		t.Skip("/bin/sh tick stub not available on Windows")
 	}
 	f := newTickFixture(t)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		f.createDueJob(t, fmt.Sprintf("j%d", i), "")
 	}
 	sub := shellStub(t, "echo hi; exit 0")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = Tick(context.Background(), f.store, f.opts(sub))
-	}()
+	})
 	// Hammer List during the tick.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		_, _ = f.store.List()
 	}
 	wg.Wait()

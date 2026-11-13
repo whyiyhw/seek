@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -254,11 +255,8 @@ func TestAgent_PreToolUse_DenyShortCircuitsExecution(t *testing.T) {
 	// PostToolUse should still fire (audit observer needs to see it).
 	got := rec.Events()
 	var sawPostTool bool
-	for _, e := range got {
-		if e == "post_tool:read:denied" {
-			sawPostTool = true
-			break
-		}
+	if slices.Contains(got, "post_tool:read:denied") {
+		sawPostTool = true
 	}
 	if !sawPostTool {
 		t.Errorf("PostToolUse should fire on deny path, got events=%v", got)

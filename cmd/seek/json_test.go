@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -121,13 +122,7 @@ func TestRunJSON_ReasoningDelta(t *testing.T) {
 	lines := captureLinesJSON(t, events)
 
 	types := typeSeq(lines)
-	found := false
-	for _, ty := range types {
-		if ty == "reasoning_delta" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(types, "reasoning_delta")
 	if !found {
 		t.Errorf("expected reasoning_delta in output, got %v", types)
 	}

@@ -18,7 +18,7 @@ func TestChunkCommit_TriggersAtThreshold(t *testing.T) {
 	m.chunkThreshold = 12
 
 	// 9 lines of 70 chars each → 9 wrapped rows + 1 label = 11 < 12.
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		cmds := m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
 		if len(cmds) != 0 {
 			t.Fatalf("delta %d: got %d cmds, want 0 (below threshold)", i, len(cmds))
@@ -144,7 +144,7 @@ func TestChunkCommit_ToolDeltaContentChunks(t *testing.T) {
 	m.width = 80
 	m.chunkThreshold = 12
 
-	for i := 0; i < 9; i++ {
+	for i := range 9 {
 		cmds := m.applyAgentEvent(agent.ToolDelta{Delta: strings.Repeat("x", 70) + "\n"})
 		if len(cmds) != 0 {
 			t.Fatalf("tool delta %d: got %d cmds, want 0 (below threshold)", i, len(cmds))
@@ -196,7 +196,7 @@ func TestChunkCommit_LastDeltaCommitKeepsGoalJudgeText(t *testing.T) {
 	// 10th (last) delta triggers the crossing commit and empties the
 	// live buffers.
 	full := ""
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		line := strings.Repeat("x", 70) + "\n"
 		full += line
 		cmds := m.applyAgentEvent(agent.MessageDelta{Delta: line})
@@ -261,7 +261,7 @@ func TestChunkCommit_HiddenReasoningDoesNotTrigger(t *testing.T) {
 	// rows = content + 1 (label) + 1 (hidden reasoning); threshold 12
 	// → content hits 10 lines at delta index 8.
 	triggered := false
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		cmds := m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
 		if i < 8 && len(cmds) != 0 {
 			t.Fatalf("delta %d: unexpected commit", i)
@@ -290,7 +290,7 @@ func TestChunkCommit_SegmentHasNoReasoningLine(t *testing.T) {
 	m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("thinking…\n", 30), Reasoning: true})
 	chunked := false
 	cmds := m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		cmds = m.applyAgentEvent(agent.MessageDelta{Delta: strings.Repeat("x", 70) + "\n"})
 		if len(cmds) == 1 {
 			chunked = true
