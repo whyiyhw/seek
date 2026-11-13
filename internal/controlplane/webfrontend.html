@@ -1,0 +1,120 @@
+<!doctype html>
+<!-- seek web MVP (card c_qucxtu) — single page, ~150 lines, zero build
+     chain. Deliberately out of scope: multi-tab sync, history
+     persistence, markdown rendering, task panels, mobile, real auth
+     (design card c_7pptol owns the full UI). -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>seek</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-monospace, Menlo, monospace;
+         background: #14161a; color: #d7dae0; display: flex; flex-direction: column;
+         height: 100vh; }
+  #status { padding: 8px 14px; background: #1b1e24; border-bottom: 1px solid #2a2e36;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #status .ok { color: #7ec699; }
+  #status .warn { color: #d8a657; }
+  #list { flex: 1; overflow-y: auto; padding: 14px; }
+  .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
+         white-space: pre-wrap; word-break: break-word; }
+  .you { margin-left: auto; background: #2c3d5f; }
+  .seek { background: #242830; }
+  .hint { color: #7a8089; font-style: italic; }
+  form { display: flex; gap: 8px; padding: 10px 14px; background: #1b1e24;
+         border-top: 1px solid #2a2e36; }
+  #input { flex: 1; background: #14161a; color: inherit; border: 1px solid #2a2e36;
+           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
+  #input:focus { border-color: #4a5568; }
+  button { background: #2c3d5f; color: inherit; border: 0; border-radius: 6px;
+           padding: 8px 16px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+</style>
+</head>
+<body>
+<header id="status" class="warn">连接中…</header>
+<main id="list"></main>
+<form id="form">
+  <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
+  <button id="send">发送</button>
+</form>
+<script>
+'use strict';
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const q = s => s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+const status = document.getElementById('status');
+const list = document.getElementById('list');
+const form = document.getElementById('form');
+const input = document.getElementById('input');
+const send = document.getElementById('send');
+
+function setStatus(text, ok) {
+  status.textContent = text;
+  status.className = ok ? 'ok' : 'warn';
+}
+function addMsg(who, text) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + who;
+  el.textContent = text;               // textContent: no HTML injection, ever
+  list.appendChild(el);
+  list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// 绑定状态一行：GET /state（web 会话的 binding）。
+async function refreshState() {
+  try {
+    const r = await fetch(q('/state'));
+    if (r.status === 401) return setStatus('token 无效——用 /?token=<serve 启动时打印的值> 打开', false);
+    const s = await r.json();
+    setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
+                      : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
+  } catch (e) { setStatus('连不上 /state：' + e, false); }
+}
+
+// SSE 下行：seek 的回复逐条追加。
+function listen() {
+  if (!TOKEN) return;
+  const es = new EventSource(q('/events'));
+  es.onmessage = ev => {
+    try {
+      const m = JSON.parse(ev.data);
+      if (m.text) addMsg('seek', m.text);
+      refreshState();                   // 回复可能改了绑定（/bind 等）
+    } catch (e) { addMsg('hint', '（无法解析的回复）'); }
+  };
+  es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
+}
+
+// 上行：POST /msg，指令原样透传给路由（/bind /projects /switch /new /cancel）。
+form.addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const text = input.value.trim();
+  if (!text || send.disabled) return;
+  addMsg('you', text);
+  input.value = '';
+  send.disabled = true;
+  try {
+    const r = await fetch(q('/msg'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
+    else if (!r.ok) addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
+  } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
+  send.disabled = false;
+  input.focus();
+});
+
+if (!TOKEN) {
+  setStatus('缺少 token——用 /?token=<serve 启动时打印的值> 打开', false);
+} else {
+  refreshState();
+  listen();
+}
+</script>
+</body>
+</html>
