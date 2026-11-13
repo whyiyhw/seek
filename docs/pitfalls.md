@@ -805,6 +805,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: in `a && b[i] || c[j]` shapes, short-circuit protects only the operand it guards — a mixed-precedence condition needs parentheses, or better, prefix checks (`HasPrefix`/`TrimPrefix`) that are total by construction. And exit-code hygiene matters here: an in-process tool with an unguarded panic converts a malformed ARGUMENT into a dead session
 - **Refs**: `internal/tools/grep/grep.go:expandDoubleStarGlob`, `internal/tools/grep/grep_test.go:TestGrep_Glob_DoubleStarTrailing`
 
+### `go get -tool pkg@latest` quietly bumps the go directive and runtime deps; analysis CLIs are pinned by the toolchain's export-data version, not just semver
+- **Saw**: adding the deadcode scanner via `go get -tool golang.org/x/tools/cmd/deadcode@latest` rewrote `go 1.25.8` → `go 1.26.0` AND upgraded four runtime deps (x/net, x/sys, x/term, x/text) — for a scan-only change. Separately: globally-installed staticcheck (built with go1.25.0) failed on this module with "export data version 5 is greater than maximum supported version 2", gopls ≤v0.20's modernize cmd hit the same wall, and v0.24.0 removed the cmd package entirely
+- **Why**: tool directives live in go.mod, so `@latest` resolves MVS against the newest x/tools, whose go requirement propagates to the module's `go` line and drags shared deps up. Analysis drivers read compiled export data, which is forward-incompatible: a binary built by an older toolchain cannot read a newer one's builds — "latest" is bounded by your toolchain, not the registry
+- **Fix**: pin the tool to the x/tools version already in the module graph (`deadcode@v0.48.0` → go.mod diff of +1 tool line, +3 indirect); for one-off analysis runs use module-agnostic `go run pkg@version` (never touches go.mod) with the newest version your toolchain can feed: staticcheck@v0.8.2, modernize cmd @gopls v0.23.0 (the last version that ships it and reads go1.27 export data)
+- **Lesson**: two pinning rules for analysis tooling — (1) `go get -tool` at the version already in your module graph unless you INTEND the toolchain/dep bump; (2) an analysis CLI's usable range is [repo's go directive, toolchain that built it], so when one errors on export data, change the CLI version, not the repo
+- **Refs**: `go.mod` (`tool golang.org/x/tools/cmd/deadcode`), `docs/notes-slim-candidates-2026-11.md` §0.2 (full version matrix)
+
 ---
 
 ## LLM provider quirks (M6)
