@@ -812,6 +812,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: two pinning rules for analysis tooling — (1) `go get -tool` at the version already in your module graph unless you INTEND the toolchain/dep bump; (2) an analysis CLI's usable range is [repo's go directive, toolchain that built it], so when one errors on export data, change the CLI version, not the repo
 - **Refs**: `go.mod` (`tool golang.org/x/tools/cmd/deadcode`), `docs/notes-slim-candidates-2026-11.md` §0.2 (full version matrix)
 
+### macOS bash 3.2: fullwidth punctuation after `$var` joins the variable NAME, and a successful EXIT-trap command masks the real exit code
+- **Saw**: `install-serve.sh --dry-run` printed `rendered\ufffd: unbound variable` at a line that only did `echo "--- 渲染结果（$rendered）---"` — and exited 0 despite `set -euo pipefail`. Three stacked traps, all macOS-system-bash-specific: (1) the fullwidth `）` after `$rendered` was absorbed into the variable name (bash 3.2 treats high bytes as name characters outside POSIX mode); (2) the EXIT trap's successful `rm` overwrote the expansion-error exit code → the failure reported success; (3) after fixing those, the trap itself died on `"$rendered"` once the function returned — `local` variables are gone when the trap runs back at top level
+- **Why**: bash ≤3.2 (what `/bin/bash` still is on macOS) predates the modern variable-name and trap-exit-code rules; `bash -n` catches none of this, and the same text runs clean on bash 5
+- **Fix**: always brace `${var}` when any non-ASCII character can follow it in a double-quoted string; make EXIT traps exit-code-honest (`trap 'rc=$?; rm -f "${rendered:-}"; exit $rc' EXIT` — `:-` for the local-out-of-scope case); verified with dry-run + `shellcheck`
+- **Lesson**: repo shell scripts run under macOS system bash 3.2 — write for 3.2, not for the brew bash you test with. In Chinese prose embedded in shell strings, `$var` is ALWAYS one fullwidth character away from silently becoming a different variable. And a trap that can't fail must not be allowed to speak for the script's exit status
+- **Refs**: `scripts/install-serve.sh` (uncommitted at time of writing), verified via `bash -c 'set -eu; echo "（$rendered）"'` → exit 1, with trap → exit 0
+
 ---
 
 ## LLM provider quirks (M6)
