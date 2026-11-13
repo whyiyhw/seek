@@ -33,13 +33,16 @@ import (
 	"github.com/whyiyhw/seek/internal/controlplane/fake"
 )
 
-// frontends maps --frontend names to constructors. v1 registers only
-// the fake (M1b acceptance). Real adapters live behind their own build
-// tags (D-F1): the feishu frontend (M4/M5) will register itself from
-// a `//go:build feishu` file's init() in THIS package, so the default
-// binary stays SDK-free while `-tags feishu` gains "feishu" here.
+// frontends maps --frontend names to constructors. The default build
+// registers the fake (M1b acceptance) and the web frontend (net/http
+// is stdlib, so the D-F1 SDK gate does not apply — card c_qucxtu).
+// SDK-backed adapters live behind their own build tags (D-F1): the
+// feishu frontend (M4/M5) will register itself from a `//go:build
+// feishu` file's init() in THIS package, so the default binary stays
+// SDK-free while `-tags feishu` gains "feishu" here.
 var frontends = map[string]func() controlplane.Frontend{
 	"fake": func() controlplane.Frontend { return fake.New() },
+	"web":  func() controlplane.Frontend { return controlplane.NewWeb(controlplane.WebConfig{}) },
 }
 
 // frontendList is a repeatable string flag: --frontend=fake
@@ -69,7 +72,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	var fes frontendList
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Var(&fes, "frontend", "frontend to launch; repeat the flag for multiple (v1: fake)")
+	fs.Var(&fes, "frontend", "frontend to launch; repeat the flag for multiple (v1: fake, web)")
 	fs.Usage = func() { printHelp(stderr) }
 	if err := fs.Parse(args); err != nil {
 		// flag already printed the error + help to fs.Output().
@@ -108,7 +111,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 // sharing a ConvID prefix is crosstalk" rule); unknown names die here.
 func buildFrontends(names []string) ([]controlplane.Frontend, error) {
 	if len(names) == 0 {
-		return nil, errors.New("no frontends selected — pass --frontend=<name> (v1: fake)")
+		return nil, errors.New("no frontends selected — pass --frontend=<name> (v1: fake, web)")
 	}
 	out := make([]controlplane.Frontend, 0, len(names))
 	for _, n := range names {
@@ -201,8 +204,12 @@ Usage:
 
       Flags:
         --frontend N   frontend to launch; repeat for multiple.
-                       Registered in the default build: fake.
+                       Registered in the default build: fake, web.
                        (feishu arrives with -tags feishu, D-F1.)
+
+      The web frontend listens on 127.0.0.1:8790 and prints its
+      token-bearing URL to stderr on startup; the token also lives
+      in ~/.seek/serve/web.token (regenerate by deleting the file).
 
       Config: the optional "serve" section of ~/.seek/config.json
       (projects / max_concurrency / yolo — default yolo=false).

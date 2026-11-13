@@ -32,3 +32,4 @@
 - c_4c6dar：paths.ProjectID 符号链接敏感：定口径（规范路径约定 vs 内部归一）
 - c_ajavza：首批真删（每版一刀第 1 刀）：deadcode 首扫 4 个零引用导出符号删除
 - c_j5qzb7：skill-distill 实现一期：/distill 扩展——会话→SKILL.md 草稿落 .drafts/（人审闸，自动路径不做）
+- c_qucxtu：web MVP 两小时版：浏览器聊天驱动 seek——webfrontend 适配器 + embed 单页 + serve 接线
