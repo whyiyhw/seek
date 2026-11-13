@@ -1434,6 +1434,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when an error gains machine-actionable metadata (hints, alternatives), grep the instruction surfaces for blanket "on error: stop" rules — they silently discard it.
 - **Refs**: `internal/sysprompt/sysprompt.go` (Workflow rule 5), `internal/tools/bash/hint.go`, `internal/skill/builtin/plan-mode.md` "Common bash pitfalls in plan-analyze"
 
+### Eval prompts that demand verbatim quoting silently break when the target line crosses read's 1024-byte cap
+- **Saw**: `tool-selection` (quote `const description` strings verbatim) failed with `bash_calls 1–4` three months after its last pass — the model still did grep×3→read×3, then bash awk/wc. Same-era `bash-overreach` failed with `bash_calls=2, list_dir=0`.
+- **Why**: fixture drift, not model drift: `bash.go`'s `const description` line grew 384→1059 B, crossing `read`'s `maxLineBytes=1024` in-band elision (`grep` also truncates matches at 240 chars) — no dedicated tool can return that line verbatim any more, so shell recovery is CORRECT tool selection. `bash-overreach`'s "fewest lines" question additionally had no dedicated-tool answer at all (`list_dir` prints byte sizes, not line counts), so `find -exec wc|sort` was forced by the prompt itself.
+- **Fix**: bound what the mechanism forces, not the aspiration. `tool-selection`: `max_bash_calls 0→4` (elision-recovery envelope: 1 extraction + ≤3 word counts) + new `bash_before_dedicated` metric bound 0 (bash never FIRST resort — ordering is what a total-calls bound can't see). `bash-overreach`: second question switched to "smallest in bytes" (the same single `list_dir` call answers it) + `list_dir`/`bash` description clauses steering count-/size-questions away from `find/wc/stat` (measured: bash 2→1→0, `list_dir` 0→1, sequence flipped).
+- **Lesson**: an eval case that quotes repo content is coupled to that content's SIZE — when a `max_*_calls=0` assertion starts failing months later, first check whether any dedicated tool can still answer the prompt at all (line caps, truncation) before blaming model drift. And prefer order-sensitive bounds (`bash_before_dedicated`) over loosened totals when recovery is legitimate: they keep the anti-pattern failing while tolerating forced recovery.
+- **Refs**: `internal/tools/read/read.go` (`maxLineBytes`), `internal/tools/grep/grep.go` (`maxLineChars`), `eval/cases/tool-selection/README.md` (drift history), `eval/cases/bash-overreach/README.md`, `eval/run.sh` (`bash_before_dedicated`)
+
 ## Build tags / dependency isolation
 
 ### A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`

@@ -28,7 +28,7 @@ var schemaBytes = []byte(`{
   "additionalProperties": false
 }`)
 
-const description = "List the entries of a directory with type and size. Use this instead of `read` when the path is a directory, or instead of `bash ls` when you don't need to run a shell command."
+const description = "List the entries of a directory with type and size, recursively up to the requested depth. One call answers count- and size-questions about a tree (how many files, which is smallest/largest) — no `find`/`wc`/`stat` shell needed. Use this instead of `read` when the path is a directory, or instead of `bash ls` when you don't need to run a shell command."
 
 type Args struct {
 	Path       string `json:"path"`

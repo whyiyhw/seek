@@ -66,6 +66,7 @@ This repo's own tuning history:
 | `bash` | "Prefer dedicated tools for repo inspection" | Model stops reaching for `bash ls` / `bash cat` |
 | `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
 | `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
+| `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
 
 ## AGENTS.md vs CLAUDE.md — related but not identical
 
