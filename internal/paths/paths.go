@@ -123,6 +123,26 @@ func Projects() (string, error) {
 // content-based identity would couple to file contents and break on
 // every edit; path-based identity is stable for as long as the path
 // is.
+//
+// CONTRACT: absPath is hashed byte-for-byte — no symlink, case, or
+// Unicode normalisation happens here. Two spellings of the same
+// physical directory are two IDs: on macOS /tmp is a symlink to
+// /private/tmp AND os.Getwd honours the shell's logical $PWD, so the
+// same cwd can surface as either spelling. Callers must pass a
+// canonical physical path — resolve once with filepath.EvalSymlinks
+// at the point where cwd is first made absolute, then reuse that
+// string everywhere in the process. Why not normalise in here:
+// EvalSymlinks is a filesystem call that errors on not-yet-created
+// paths (worktrees anchor before their dirs exist), so the silent
+// fallback would make identity depend on filesystem state and break
+// the cross-machine promise above. The memory lane dedupes aliases
+// independently via the <project>/.seek/project-id pointer
+// (internal/memory resolveProjectID), which every spelling of the
+// path can read; pointer-less consumers (checkpoints, subagents
+// index, plans, assets) fork on alias spellings — accepted, since
+// real lanes (Zed, paseo --cwd) pass canonical paths. Decision
+// c_4c6dar; see docs/pitfalls.md "ProjectID hashes the path string,
+// not the directory".
 func ProjectID(absPath string) string {
 	sum := sha256.Sum256([]byte(absPath))
 	return hex.EncodeToString(sum[:])[:16]

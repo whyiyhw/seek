@@ -29,3 +29,4 @@
 - c_rjg6hs：ACP 无头车道跳过 cron auto-tick（PRD M1 同船项）
 - c_ur7bup：编排层差距盘点与设计：后台子代理/类型化 agent/模型路由/hooks 面（feature-orchestration.md）
 - c_23nhhr：验收：seek 车道冒烟——docs/ 下新建 tmp-paseo-acceptance.md 写一句话并 commit
+- c_4c6dar：paths.ProjectID 符号链接敏感：定口径（规范路径约定 vs 内部归一）

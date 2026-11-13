@@ -104,6 +104,23 @@ func TestProjectID_DifferentPathsDiffer(t *testing.T) {
 	}
 }
 
+// TestProjectID_AliasSpellingsDiffer pins the documented contract:
+// ProjectID hashes the path STRING byte-for-byte, so the two
+// spellings of one physical macOS directory (/tmp is a symlink to
+// /private/tmp, and os.Getwd honours the shell's logical $PWD) are
+// two different project identities. This is intentional — see the
+// ProjectID doc comment and docs/pitfalls.md "ProjectID hashes the
+// path string, not the directory" before changing it: normalising
+// inside ProjectID re-keys existing projects and makes the pure
+// hash filesystem-dependent. Pure string test; no filesystem.
+func TestProjectID_AliasSpellingsDiffer(t *testing.T) {
+	a := ProjectID("/tmp/seek-smoke")
+	b := ProjectID("/private/tmp/seek-smoke")
+	if a == b {
+		t.Fatalf("alias spellings of one physical dir must yield different IDs (contract: byte-for-byte hash), both = %q", a)
+	}
+}
+
 func TestProjectDir_ComposesUnderProjects(t *testing.T) {
 	override := t.TempDir()
 	withEnv(t, envHome, override)
