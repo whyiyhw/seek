@@ -183,6 +183,21 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
 	}
 
+	// Skill-distill spinner — the /distill skill pass runs in parallel
+	// with the M pass, so both spinners can be up at once; each names
+	// what it's waiting for.
+	if m.skillDistilling {
+		elapsed := formatToolElapsed(time.Since(m.distillSince))
+		label := "distilling skill drafts …"
+		if m.skillDistillGate != "" {
+			label += " · " + m.skillDistillGate
+		}
+		if elapsed != "" {
+			label += " · " + elapsed
+		}
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
+	}
+
 	// Streaming assistant text (volatile — committed at MessageEnd).
 	if m.curContent != "" {
 		body := styleAssistantText.Render(wrap(m.curContent, m.width-2))
@@ -270,6 +285,8 @@ func (m Model) View() tea.View {
 		bottomBuf.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
 		bottomBuf.WriteString(m.renderDistillReview())
+	case m.skillReviewOpen:
+		bottomBuf.WriteString(m.renderSkillReview())
 	case m.helpOverlayOpen:
 		bottomBuf.WriteString(m.renderHelpOverlay())
 	case m.commandMenuOpen:

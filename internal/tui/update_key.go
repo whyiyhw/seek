@@ -98,6 +98,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleDistillKey(msg)
 	}
 
+	// Skill review modal — same all-keys grab, one at a time after the
+	// M review (or instead of it, when M found nothing). Checked after
+	// the M review because the two modals are mutually exclusive by
+	// construction (whichever opens second queues behind pending*).
+	if m.skillReviewOpen {
+		return m.handleSkillDistillKey(msg)
+	}
+
 	// @-path picker has the same priority as the slash menu; the
 	// trigger character ("@" vs "/") makes them mutually exclusive
 	// in practice.

@@ -44,6 +44,7 @@ import (
 	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/worktree"
@@ -277,6 +278,18 @@ type Options struct {
 	// Distiller runs the reasoner pass that turns history → candidates.
 	// nil disables /distill (same effect as MemoryProject being nil).
 	Distiller *memory.Distiller
+
+	// SkillDistiller runs the /distill skill segment: history → skill
+	// DRAFT candidates (feature-skill-distill M-SD1). nil (or Skills
+	// nil) disables the skill segment — /distill then only distills M
+	// entries, exactly as before the feature existed.
+	SkillDistiller *skilldistill.Distiller
+
+	// DraftsUserDir overrides the user skills tree the drafts area
+	// lives under (<UserDir>/.drafts/). Empty = paths.UserSkills().
+	// Tests inject a tempdir so draft writes never touch the real
+	// ~/.seek; production leaves it empty.
+	DraftsUserDir string
 
 	// ObserveResultChan receives async memory_observe filter results
 	// from background goroutines. nil = observe unavailable.
@@ -621,6 +634,28 @@ type Model struct {
 	distilling      bool
 	distillSince    time.Time
 	distillMsgCount int
+
+	// Skill-distill review state (feature-skill-distill M-SD1). The
+	// skill segment of /distill runs in parallel with the M segment;
+	// its candidates are reviewed in the SAME modal flow but a
+	// separate state block, because the accept action is completely
+	// different (write a draft under .drafts/, never touch M) and the
+	// two reviews can interleave (M still open when skill results
+	// arrive → held in pendingSkillCandidates until the M review
+	// closes).
+	skillReviewOpen  bool
+	skillCandidates  []skilldistill.SkillCandidate
+	skillIdx         int
+	skillSaved       int
+	skillDropped     int
+	pendingSkill     []skilldistill.SkillCandidate
+	skillDistilling  bool
+	skillDistillGate string // L0 gate detail, shown on the spinner line
+
+	// pendingMCandidates holds M-review candidates that arrived while
+	// the skill review modal was open (reverse of pendingSkill; only
+	// hit when the skill round-trip beats the M one).
+	pendingMCandidates memoryCandidates
 
 	// pathPicker drives the "@" file-path autocomplete dropdown.
 	pathPicker pathCompleterState
