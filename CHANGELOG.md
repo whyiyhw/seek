@@ -21,3 +21,4 @@
 - c_3k3o6r：control-plane M1b：seek serve 命令骨架 + config 接线——空平面可启停
 - c_x7fgcv：control-plane M2：路由与指令层——/bind /projects /switch /new /cancel + DirectAt 过滤
 - c_twt3el：减法机制 L2/L3 设计稿：删代码与缩文档流程（feature-slim-loop.md）
+- c_vt7fiw：减法机制 L1：weight.sh 体重秤 + docs/budget.json 预算清单（只读只报）
