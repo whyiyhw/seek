@@ -1572,7 +1572,15 @@ func run() error {
 	// worktree / cron itself) return before reaching this point,
 	// so `seek cron tick` doesn't trigger an inner auto-tick
 	// (no infinite recursion risk).
-	if !*noCronTick {
+	//
+	// The ACP headless lane skips as well (PRD M1, §2.3): its
+	// processes are short-lived spawns (paseo probes / Zed
+	// sessions) that kill the detached tick goroutine mid-run —
+	// a half-fired cron job risk for zero benefit. And this
+	// can't ride the flag: flag.Parse stops at the "acp"
+	// positional, so --no-cron-tick is inexpressible in that
+	// lane; acpLane gates independently.
+	if cronAutoTickEnabled(*noCronTick, acpLane) {
 		go func() {
 			cronStore, err := routines.OpenStore()
 			if err != nil {
@@ -2899,4 +2907,16 @@ func autoDistillEnabled() bool {
 func envBoolTrue(name string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+// cronAutoTickEnabled is the single gate for the startup cron auto-tick
+// goroutine (v5 柱 H). False when --no-cron-tick opts out, or when the
+// ACP headless lane runs: those processes are short-lived spawns (paseo
+// probes / Zed sessions) that kill the detached tick goroutine mid-run —
+// half-fired cron job risk, zero benefit (docs/prd/feature-paseo-provider.md
+// §2.3). The two axes are independent because --no-cron-tick cannot
+// substitute for acpLane: flag.Parse stops at the "acp" positional, so
+// the flag never reaches that lane.
+func cronAutoTickEnabled(noCronTickFlag, acpLane bool) bool {
+	return !noCronTickFlag && !acpLane
 }

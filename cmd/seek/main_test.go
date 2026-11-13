@@ -185,3 +185,31 @@ func TestBuildProvider_GLM(t *testing.T) {
 		}
 	})
 }
+
+// cronAutoTickEnabled has two independent off-switches: --no-cron-tick
+// (explicit opt-out) and the ACP headless lane (always off — its processes
+// are short-lived spawns where a detached tick goroutine is a half-fired
+// cron job risk, PRD feature-paseo-provider.md §2.3). The default case
+// (interactive TUI, no flag) MUST stay on: startup auto-tick is what makes
+// routines fire "when seek IS open" without an OS scheduler.
+func TestCronAutoTickEnabled(t *testing.T) {
+	tests := []struct {
+		name       string
+		noCronTick bool
+		acpLane    bool
+		want       bool
+	}{
+		{"interactive default: tick fires", false, false, true},
+		{"--no-cron-tick opts out", true, false, false},
+		{"acp headless lane skips", false, true, false},
+		{"acp lane with flag (flag inexpressible there): still off", true, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := cronAutoTickEnabled(tt.noCronTick, tt.acpLane); got != tt.want {
+				t.Errorf("cronAutoTickEnabled(noCronTick=%v, acpLane=%v) = %v, want %v",
+					tt.noCronTick, tt.acpLane, got, tt.want)
+			}
+		})
+	}
+}

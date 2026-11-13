@@ -132,7 +132,7 @@
 
 | M | 内容 | 执行方 |
 |---|---|---|
-| M1 | seek 侧：D-1 `session/new` cwd（per-session 栈重建，兑现 backlog ⑥）+ D-2 `SEEK_ACP_YOLO`（+ `IsRemoteMutating` guard）+ acp 跳过 cron auto-tick + 测试（cwd 切换、yolo env 开关、无 key 启动失败的探测语义）。**实拆三卡**：D-2 先落地（c_rewul5，guard/tick 未同船）；guard 补齐 = c_mvfi4i；D-1 = c_bnjrw5。剩 cron-tick 跳过未做 | drive 卡（代码，seek 仓） |
+| M1 | seek 侧：D-1 `session/new` cwd（per-session 栈重建，兑现 backlog ⑥）+ D-2 `SEEK_ACP_YOLO`（+ `IsRemoteMutating` guard）+ acp 跳过 cron auto-tick + 测试（cwd 切换、yolo env 开关、无 key 启动失败的探测语义）。**实拆四卡**：D-2 先落地（c_rewul5，guard/tick 未同船）；guard 补齐 = c_mvfi4i；D-1 = c_bnjrw5；cron-tick 跳过 = c_rjg6hs（`cronAutoTickEnabled` 单门 + 单测）。**M1 全部完成** | drive 卡（代码，seek 仓） |
 | M2 | paseo 侧：重装 seek 二进制 → 写 provider 块 → `paseo reload` → §4.1 冒烟 | 主会话人工（沙盒外配置文件） |
 | M3 | 验收：§4.2 最小卡走 `--only --provider seek` 全流程 → 纳入 `--providers` 清单 | drive 卡 + 主会话观察 |
 
