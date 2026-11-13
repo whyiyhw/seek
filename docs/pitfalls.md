@@ -1465,3 +1465,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: webfrontend's Run force-closes with `srv.Close()` once the plane ctx is done (in-flight POST bodies are tiny; the Serve drain owns the message queue, not HTTP responses). Client-side disconnects stay covered by `r.Context().Done()` in the stream loop.
 - **Lesson**: for any streaming endpoint, "graceful" Shutdown needs per-connection cancellation tracking (register each request's cancel and fire them before Shutdown). Plain Shutdown + timeout is a hang with extra steps — don't upgrade the Close() back without that.
 - **Refs**: `internal/controlplane/webfrontend.go` (Run), net/http Server.Shutdown docs
+
+### PRD said "sessions are archived per-project" — they are not; bucket by header CWD
+- **Saw**: implementing skill auto-distillation's batch scan (M-SD2), the PRD's pointer (`~/.seek/projects/<pid>/sessions/<sid>/`, paths.go L179) turned out to hold checkpoint/subagent SIDECAR space, not session transcripts — the transcripts live flat at `~/.seek/sessions/<id>.jsonl` with only a `cwd` field in the JSONL header line.
+- **Why**: `ProjectSessionDir` was named/documented for the checkpoint subsystem; the PRD read the path shape as the archive location. "List a project's sessions" has no existing helper because nothing needed per-project bucketing before.
+- **Fix**: `session.Store.ListProject(projectID)` (M-SD2) reads headers only (`loadMeta` discipline) and filters by `paths.ProjectID(info.CWD)`, skipping forked sessions (`ParentID != ""`) so /branch & /compact children can't double-count one conversation as two "independent" recurrences. Commit c_dkgvnp.
+- **Lesson**: when a design doc cites a path as "where X lives", verify against the writer of X, not just the path helper's name. Per-project bucketing of sessions = hash of the header's `cwd`, nothing on disk groups them for you.
+- **Refs**: `internal/session/session.go` (ListProject), `internal/paths/paths.go` (ProjectSessionDir comment), `docs/prd/feature-skill-distill.md` §3.1 D

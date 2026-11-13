@@ -207,3 +207,156 @@ func TestDraftsInvisibleToLoader(t *testing.T) {
 	}
 	_ = stats
 }
+
+// ---------- M-SD2: weak-inbox filtering, StrengthenDraft, GC ----------
+
+// The inbox hides weak drafts (single-session evidence hasn't earned a
+// human's attention); ListAllDrafts still surfaces them for GC and L4
+// merge-matching. PRD §4 L4.
+func TestListDrafts_HidesWeak(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
+	if _, err := store.WriteDraft(validDraftMD("weak-one"), DraftSidecar{Status: DraftStatusWeak}); err != nil {
+		t.Fatalf("write weak: %v", err)
+	}
+	if _, err := store.WriteDraft(validDraftMD("ready-one"), DraftSidecar{Status: DraftStatusReviewable}); err != nil {
+		t.Fatalf("write reviewable: %v", err)
+	}
+
+	inbox, err := store.ListDrafts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inbox) != 1 || inbox[0].Name != "ready-one" {
+		t.Fatalf("inbox = %+v, want only ready-one", inbox)
+	}
+	all, err := store.ListAllDrafts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListAllDrafts = %d, want 2 (weak included)", len(all))
+	}
+	for _, d := range all {
+		if d.Description == "" {
+			t.Errorf("draft %s: Description not populated from SKILL.md", d.Name)
+		}
+	}
+}
+
+func TestStrengthenDraft(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
+	if _, err := store.WriteDraft(validDraftMD("grow-me"), DraftSidecar{
+		Status: DraftStatusWeak,
+		Sources: []DraftSource{
+			{SessionID: "s1", ProjectID: "p1", At: "2026-11-12T09:00:00Z"},
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// First strengthen: same project, second session → recurrence 2 →
+	// reviewable, scope stays project.
+	side, err := store.StrengthenDraft("grow-me",
+		DraftSource{SessionID: "s2", ProjectID: "p1", At: "2026-11-13T09:00:00Z"},
+		[]string{"more evidence"},
+		[]FilterTraceEntry{{Stage: "L3", Verdict: "ACCEPT"}},
+	)
+	if err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+	if side.Recurrence != 2 || side.Status != DraftStatusReviewable {
+		t.Errorf("after 2nd source: recurrence=%d status=%s, want 2/reviewable", side.Recurrence, side.Status)
+	}
+	if side.SuggestedScope != "project" {
+		t.Errorf("scope = %s, want project (single project so far)", side.SuggestedScope)
+	}
+	if len(side.Sources) != 2 || len(side.Evidence) != 1 || len(side.FilterTrace) != 1 {
+		t.Errorf("provenance not appended: %+v", side)
+	}
+
+	// Cross-project strengthen → scope upgrades to user (PRD §5.4).
+	side, err = store.StrengthenDraft("grow-me",
+		DraftSource{SessionID: "s3", ProjectID: "p2", At: "2026-11-13T10:00:00Z"}, nil, nil)
+	if err != nil {
+		t.Fatalf("strengthen 2: %v", err)
+	}
+	if side.Recurrence != 3 || side.SuggestedScope != "user" {
+		t.Errorf("after 3rd source: recurrence=%d scope=%s, want 3/user", side.Recurrence, side.SuggestedScope)
+	}
+
+	// SKILL.md untouched — first write wins for content.
+	draftsDir, err := store.DraftsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	md, err := os.ReadFile(filepath.Join(draftsDir, "grow-me", "SKILL.md"))
+	if err != nil || string(md) != string(validDraftMD("grow-me")) {
+		t.Errorf("SKILL.md must not change on strengthen")
+	}
+
+	// Strengthening a missing draft errors; a bad name is refused.
+	if _, err := store.StrengthenDraft("no-such-draft", DraftSource{}, nil, nil); err == nil {
+		t.Error("missing draft must error")
+	}
+	if _, err := store.StrengthenDraft("../escape", DraftSource{}, nil, nil); err == nil {
+		t.Error("path-escape name must be refused")
+	}
+}
+
+func TestGCDrafts_AgeAndCap(t *testing.T) {
+	now := time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC) // GC moment: 15d after pinnedClock base
+	clock := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)
+	store := &DraftStore{UserDir: t.TempDir(), Now: func() time.Time { return clock }}
+
+	// stale-draft: untouched since creation (15d old) → aged out.
+	if _, err := store.WriteDraft(validDraftMD("stale-draft"), DraftSidecar{}); err != nil {
+		t.Fatal(err)
+	}
+	// fresh-draft: created old but strengthened recently → survives
+	// age GC (age runs on UpdatedAt; activity keeps a draft alive).
+	if _, err := store.WriteDraft(validDraftMD("fresh-draft"), DraftSidecar{
+		CreatedAt: "2026-11-01T09:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	yesterday := now.Add(-24 * time.Hour) // strengthen happened yesterday
+	clock = yesterday
+	if _, err := store.StrengthenDraft("fresh-draft", DraftSource{SessionID: "s", ProjectID: "p"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.GCDrafts(now, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0] != "stale-draft" {
+		t.Fatalf("age GC removed %v, want [stale-draft]", removed)
+	}
+	all, _ := store.ListAllDrafts()
+	if len(all) != 1 || all[0].Name != "fresh-draft" {
+		t.Fatalf("survivors = %+v", all)
+	}
+
+	// Cap: write 12 drafts, cap at 10 → 2 oldest-by-CreatedAt evicted.
+	base := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < 12; i++ {
+		name := "cap-draft-" + string(rune('a'+i))
+		createdAt := base.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)
+		if _, err := store.WriteDraft(validDraftMD(name), DraftSidecar{CreatedAt: createdAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err = store.GCDrafts(now, time.Duration(100*24)*time.Hour, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, _ = store.ListAllDrafts()
+	if len(all) != 10 {
+		t.Fatalf("after cap GC: %d drafts, want 10 (removed %v)", len(all), removed)
+	}
+	for _, d := range all {
+		if d.Name == "cap-draft-a" || d.Name == "cap-draft-b" {
+			t.Errorf("oldest draft %s survived cap eviction", d.Name)
+		}
+	}
+}
