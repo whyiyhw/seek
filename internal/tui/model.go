@@ -166,6 +166,15 @@ type Options struct {
 	// upgrade in v0.6.x dot release).
 	Subagents *subagent.Manager
 
+	// SubagentWake is the background-completion wake signal
+	// (feature-orchestration PRD §4.1 D2), wired from
+	// subagent.Manager.WakeCh by cmd/seek. A receive fires
+	// subagentWakeMsg so the loop refreshes the agents badge and
+	// prints the "background agent finished" hint — the same
+	// channel-wake idiom as ObserveResultChan. nil when Subagents
+	// is nil; the wake handler also nil-checks.
+	SubagentWake <-chan struct{}
+
 	// Worktrees is the v5 柱 G M11.1 worktree Manager (feature-
 	// subagent.md §3.8). nil when seek runs outside a git repo
 	// (cmd/seek skips Manager construction in that case) — the
@@ -793,6 +802,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.opts.ObserveResultChan != nil {
 		cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
+	}
+	if m.opts.SubagentWake != nil {
+		cmds = append(cmds, waitForSubagentWake(m.opts.SubagentWake))
 	}
 	if c := versionCheckCmd("whyiyhw", "seek", VersionString()); c != nil {
 		cmds = append(cmds, c)

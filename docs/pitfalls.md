@@ -68,6 +68,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any "tracking" struct (counter, accumulator, ring buffer) that satisfies an interface MUST use pointer receivers. The compiler doesn't warn — it'll happily build and silently drop your mutations
 - **Refs**: `internal/hooks/shell_runner.go:limitedWriter`
 
+### A hook registered on the shared Registry fires in EVERY agent that shares it — including subagent children
+- **Saw**: (design-time, caught while wiring the background-completion Notifier) the obvious wiring — `hooksReg.Register(subagent.NewNotifier(mgr))` — silently corrupts delivery: `buildSubagentRunner` hands the SAME `*hooks.Registry` pointer to every child `agent.New`, so a child's `Prompt` runs `ApplyPrePrompt` too. A background sibling finishing just before a child spawns has its completion notice DRAINED into the child's transcript — wrong context, wrong session file, and the parent never sees the result.
+- **Why**: the registry is a live pointer shared parent+children by design (pre_tool deny / post_tool audit must cover subagent tool calls), so registration order can't scope a hook to the parent; any ordering still leaks because children read the registry at spawn time, after everything is registered. The memory hook registering AFTER Manager construction additionally means a snapshot taken at construction time would silently drop it from children.
+- **Fix**: `hooks.Registry.CloneWithout(exclude)` — children resolve their registry through a LAZY `hooksFn` closure (`hooksReg.CloneWithout(bgNotifier)` per spawn) so they get every hook registered so far minus the parent-only drain point. Delivery (Notifier) DRAINS the inbox; the TUI wake PEEKS (`PendingNotices`) — one consumer per semantics. Card c_bickfj (P1-a).
+- **Lesson**: on this codebase, "register a hook" is a broadcast to every agent sharing the registry — parent-session-scoped hooks need explicit exclusion at the child boundary, and the exclusion must be lazy (closure) when the parent registry keeps growing after the children's factory is built. Any future parent-only PrePrompt hook (resume revival, controlplane inbox) rides the same `CloneWithout` seam.
+- **Refs**: `internal/hooks/registry.go:CloneWithout`, `internal/subagent/notifier.go`, `cmd/seek/main.go` (`subagentRunnerOpts.hooksFn`), `docs/prd/feature-orchestration.md` §4.1 D2
+
 ## TUI / terminal
 
 ### A light palette derived by darkening a dark palette stops the "muted" role from receding

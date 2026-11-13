@@ -105,6 +105,14 @@ type RunnerResult struct {
 //     template Filter strips it universally so the recursion guard
 //     stays intact.
 //
+// SessionCtx is the process/session-level context that background
+// spawns (SpawnBackground) derive from — NEVER the calling turn's
+// ctx, otherwise the parent turn returning would cancel the child
+// and "background" would be a lie (feature-orchestration PRD §4.1
+// D1, the 柱 K bgjob D5 lesson lifted to agent level). Optional at
+// construction: sync-only Managers leave it nil, and SpawnBackground
+// refuses with a wire-format failure when it's missing.
+//
 // MaxConcurrent defaults to 3 when zero. Runner is required.
 type ManagerOpts struct {
 	ProjectAbsPath string
@@ -112,6 +120,10 @@ type ManagerOpts struct {
 	ParentPolicy   *permission.Policy
 	MaxConcurrent  int
 	Runner         Runner
+	// SessionCtx anchors background spawns to the seek process
+	// lifetime (session dies → jobs die; zero-daemon discipline).
+	// cmd/seek passes the signal.NotifyContext ctx here.
+	SessionCtx context.Context
 
 	// Now is the time source used for sub_sid generation and event
 	// timestamps. Optional — falls back to time.Now if nil.
@@ -142,11 +154,28 @@ type ManagerOpts struct {
 // one (project, parent-session) pair. Methods are concurrent-safe;
 // the LLM can issue parallel `agent` tool calls in one turn and
 // each Spawn runs in its own goroutine.
+//
+// Background spawns (SpawnBackground, feature-orchestration PRD
+// §4.1) add three pieces on top: a bgWg tracking the detached
+// goroutines (so Shutdown can wait for their terminal events to
+// land), and a notice inbox (FIFO queue + cap-1 wake channel) that
+// carries terminal results to the parent session's next Prompt via
+// the Notifier PrePrompt hook and wakes the TUI loop.
 type Manager struct {
 	opts ManagerOpts
 
 	mu     sync.Mutex
 	active map[string]*inFlight
+
+	// bgWg tracks SpawnBackground goroutines. Shutdown cancels all
+	// active inFlights then waits here so every background child
+	// writes its `failed reason=canceled` terminal event before the
+	// process exits (clean-exit contract, PRD §4.1 D3).
+	bgWg sync.WaitGroup
+
+	noticeMu sync.Mutex
+	pending  []BackgroundNotice
+	wakeCh   chan struct{}
 }
 
 // inFlight is the per-spawn mutable state that lives only between
@@ -196,6 +225,7 @@ func NewManager(opts ManagerOpts) (*Manager, error) {
 	return &Manager{
 		opts:   opts,
 		active: make(map[string]*inFlight),
+		wakeCh: make(chan struct{}, 1),
 	}, nil
 }
 
@@ -233,17 +263,103 @@ type SpawnArgs struct {
 // Spawn is sync, but the LLM can call the `agent` tool multiple
 // times in one turn → multiple Spawns running in parallel
 // goroutines. The MaxConcurrent gate caps simultaneous in-flights.
+//
+// Spawn and SpawnBackground share steps 1–8 via begin and steps
+// 9–11 via runAndFinish; the ONLY divergence is which ctx the
+// child runs under (caller turn ctx vs ManagerOpts.SessionCtx)
+// and where the Result goes (return value vs notice inbox).
 func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
+	sp, fail := m.begin(ctx, args)
+	if fail != nil {
+		return *fail
+	}
+	return m.runAndFinish(sp, false)
+}
+
+// SpawnBackground launches one subagent detached and returns
+// IMMEDIATELY with a "[agent: background started sub-sid=...]"
+// wire-format Result — the parent turn keeps going while the child
+// runs (feature-orchestration PRD §4.1 D1).
+//
+// The child goroutine is bound to ManagerOpts.SessionCtx, NOT the
+// caller's ctx: cancelling the parent turn (Esc) must never kill a
+// background child. Kill / the capacity gate / ActiveCount treat
+// sync and background spawns identically (same m.active map +
+// MaxConcurrent door).
+//
+// On terminal state the goroutine writes the same subagents.jsonl
+// event kinds as the sync path (no new event types) and enqueues a
+// BackgroundNotice. Delivery into the parent session is the
+// Notifier PrePrompt hook's job (next Prompt prepends the notice
+// as a <context> message); the TUI gets a WakeCh signal for
+// immediate UI feedback. See D2 for the notification protocol.
+func (m *Manager) SpawnBackground(args SpawnArgs) Result {
+	if m.opts.SessionCtx == nil {
+		return failResult("", "spawn_error",
+			"background spawn unavailable: ManagerOpts.SessionCtx not wired by host")
+	}
+	sp, fail := m.begin(m.opts.SessionCtx, args)
+	if fail != nil {
+		return *fail
+	}
+	m.bgWg.Add(1)
+	go func() {
+		defer m.bgWg.Done()
+		res := m.runAndFinish(sp, true)
+		m.enqueueNotice(BackgroundNotice{
+			SubSid:      res.SubSid,
+			Description: args.Description,
+			Status:      res.Status,
+			Summary:     res.Summary,
+		})
+	}()
+	return Result{
+		SubSid:  sp.subSid,
+		Summary: FormatBackgroundStarted(sp.subSid, args.Description),
+		Status:  StatusActive,
+	}
+}
+
+// spawnSetup is the per-spawn state produced by begin — everything
+// steps 1–8 allocated, with the child registered in m.active. The
+// name mirrors the step numbering of the original Spawn body so the
+// split stays auditable against feature-subagent.md §3.
+type spawnSetup struct {
+	args         SpawnArgs
+	subSid       string
+	sessionDir   string
+	indexPath    string
+	childPolicy  *permission.Policy
+	childTracker *cache.Tracker
+	systemPrompt string
+	toolNames    []string
+	runCtx       context.Context
+	cancel       context.CancelFunc
+	inf          *inFlight
+}
+
+// begin runs the shared steps 1–8: validate, capacity-gate, child
+// Policy/Tracker, sub_sid + session dir, system prompt, `started`
+// index event, active registration under a child ctx derived from
+// parentCtx (the CALLER's ctx for sync Spawn, SessionCtx for
+// SpawnBackground — the one line that makes background real).
+// A non-nil *Result return means the spawn was refused before the
+// runner started (wire-format failure, no active entry); on success
+// the caller owns the child lifecycle from step 9.
+func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup, *Result) {
 	// Step 1: validate args. Failures here produce a wire-format
 	// result with no index event — the spawn never happened.
 	if !args.Type.IsValid() {
-		return failResult("", "spawn_error", fmt.Sprintf("unknown subagent_type %q", args.Type))
+		r := failResult("", "spawn_error", fmt.Sprintf("unknown subagent_type %q", args.Type))
+		return nil, &r
 	}
 	if args.Description == "" {
-		return failResult("", "spawn_error", "description required")
+		r := failResult("", "spawn_error", "description required")
+		return nil, &r
 	}
 	if args.Prompt == "" {
-		return failResult("", "spawn_error", "prompt required")
+		r := failResult("", "spawn_error", "prompt required")
+		return nil, &r
 	}
 
 	// Step 2: capacity gate. Held BRIEFLY under m.mu — the Runner
@@ -253,8 +369,9 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	if len(m.active) >= m.opts.MaxConcurrent {
 		n := len(m.active)
 		m.mu.Unlock()
-		return failResult("", "too_many_subagents",
+		r := failResult("", "too_many_subagents",
 			fmt.Sprintf("%d active, retry after one completes", n))
+		return nil, &r
 	}
 	m.mu.Unlock()
 
@@ -270,7 +387,8 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	}
 	childPolicy, err := m.opts.ParentPolicy.Spawn(cwd, tmpl.Restriction)
 	if err != nil {
-		return failResult("", "spawn_error", err.Error())
+		r := failResult("", "spawn_error", err.Error())
+		return nil, &r
 	}
 
 	// Step 4: create + adopt child Tracker. The parent's
@@ -286,16 +404,19 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	// host program should not allow Spawn with no active session).
 	parentSid := m.opts.ParentSidFn()
 	if parentSid == "" {
-		return failResult("", "spawn_error", "no active parent session (host did not seed ParentSidFn)")
+		r := failResult("", "spawn_error", "no active parent session (host did not seed ParentSidFn)")
+		return nil, &r
 	}
 	now := m.opts.Now()
 	subSid := newSubSid(now)
 	sessionDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, parentSid, subSid)
 	if err != nil {
-		return failResult(subSid, "spawn_error", err.Error())
+		r := failResult(subSid, "spawn_error", err.Error())
+		return nil, &r
 	}
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		return failResult(subSid, "spawn_error", "mkdir session dir: "+err.Error())
+		r := failResult(subSid, "spawn_error", "mkdir session dir: "+err.Error())
+		return nil, &r
 	}
 
 	// Step 6: compose system prompt. Header is byte-identical to
@@ -316,7 +437,8 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	// the map.
 	indexPath, err := paths.SubagentsIndex(m.opts.ProjectAbsPath)
 	if err != nil {
-		return failResult(subSid, "spawn_error", err.Error())
+		r := failResult(subSid, "spawn_error", err.Error())
+		return nil, &r
 	}
 	if err := appendEvent(indexPath, event{
 		Kind:         "started",
@@ -328,16 +450,41 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 		Description:  args.Description,
 		WorktreePath: args.WorktreePath,
 	}); err != nil {
-		return failResult(subSid, "spawn_error", "write index: "+err.Error())
+		r := failResult(subSid, "spawn_error", "write index: "+err.Error())
+		return nil, &r
 	}
 
 	// Step 8: register in m.active under a child ctx we own.
-	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(parentCtx)
 	inf := &inFlight{cancel: cancel}
 	m.mu.Lock()
 	m.active[subSid] = inf
 	m.mu.Unlock()
 
+	return &spawnSetup{
+		args:         args,
+		subSid:       subSid,
+		sessionDir:   sessionDir,
+		indexPath:    indexPath,
+		childPolicy:  childPolicy,
+		childTracker: childTracker,
+		systemPrompt: systemPrompt,
+		toolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
+		runCtx:       runCtx,
+		cancel:       cancel,
+		inf:          inf,
+	}, nil
+}
+
+// runAndFinish runs the shared steps 9–11: invoke the Runner,
+// release the active slot, classify the outcome, write the terminal
+// index event, and format the Result. background selects the
+// wire-format family: the sync path returns
+// "[agent: completed/failed ...]" to the calling turn as its tool
+// result; the background path's Result flows into the notice inbox
+// as "[agent: background done/failed ...]" for the Notifier.
+// Terminal index events are IDENTICAL for both paths.
+func (m *Manager) runAndFinish(sp *spawnSetup, background bool) Result {
 	// Step 9: run. This blocks. Recover from panics so a buggy
 	// Runner can't take down the seek process — convert panic to
 	// a failed event with reason=spawn_error.
@@ -351,23 +498,23 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 				runErr = fmt.Errorf("runner panic: %v", r)
 			}
 		}()
-		runResult, runErr = m.opts.Runner(runCtx, RunnerJob{
-			SubSid:       subSid,
-			SystemPrompt: systemPrompt,
-			UserPrompt:   args.Prompt,
-			SessionDir:   sessionDir,
-			Tracker:      childTracker,
-			Policy:       childPolicy,
-			ToolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
+		runResult, runErr = m.opts.Runner(sp.runCtx, RunnerJob{
+			SubSid:       sp.subSid,
+			SystemPrompt: sp.systemPrompt,
+			UserPrompt:   sp.args.Prompt,
+			SessionDir:   sp.sessionDir,
+			Tracker:      sp.childTracker,
+			Policy:       sp.childPolicy,
+			ToolNames:    sp.toolNames,
 		})
 	}()
-	cancel() // release any goroutines depending on runCtx
+	sp.cancel() // release any goroutines depending on runCtx
 
 	// Step 10: pop from active under mu, capturing the killed
 	// flag if set.
 	m.mu.Lock()
-	killed := inf.killedByUser
-	delete(m.active, subSid)
+	killed := sp.inf.killedByUser
+	delete(m.active, sp.subSid)
 	m.mu.Unlock()
 
 	// Step 11: classify outcome → terminal event + wire-format
@@ -380,43 +527,72 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	case runErr == nil && runResult.Summary != "":
 		// Happy path.
 		tokens := runResult.Tokens
-		_ = appendEvent(indexPath, event{
-			Kind: "completed", SubSid: subSid, TS: endTS, Tokens: &tokens,
+		_ = appendEvent(sp.indexPath, event{
+			Kind: "completed", SubSid: sp.subSid, TS: endTS, Tokens: &tokens,
 		})
+		if background {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatBackgroundDone(sp.subSid, runResult.Summary, runResult.Turns, tokens),
+				Status:  StatusCompleted,
+				Tokens:  tokens,
+			}
+		}
 		return Result{
-			SubSid:  subSid,
-			Summary: FormatCompleted(subSid, runResult.Summary, runResult.Turns, tokens),
+			SubSid:  sp.subSid,
+			Summary: FormatCompleted(sp.subSid, runResult.Summary, runResult.Turns, tokens),
 			Status:  StatusCompleted,
 			Tokens:  tokens,
 		}
 
 	case killed:
-		_ = appendEvent(indexPath, event{
-			Kind: "killed", SubSid: subSid, TS: endTS,
+		_ = appendEvent(sp.indexPath, event{
+			Kind: "killed", SubSid: sp.subSid, TS: endTS,
 		})
+		if background {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatBackgroundFailed(sp.subSid, "killed", "terminated by user via /agents kill"),
+				Status:  StatusKilled,
+			}
+		}
 		return Result{
-			SubSid:  subSid,
-			Summary: FormatFailed(subSid, "killed", "terminated by user via /agents kill"),
+			SubSid:  sp.subSid,
+			Summary: FormatFailed(sp.subSid, "killed", "terminated by user via /agents kill"),
 			Status:  StatusKilled,
 		}
 
 	case errors.Is(runErr, context.Canceled):
-		_ = appendEvent(indexPath, event{
-			Kind: "failed", SubSid: subSid, TS: endTS, Reason: "canceled",
+		_ = appendEvent(sp.indexPath, event{
+			Kind: "failed", SubSid: sp.subSid, TS: endTS, Reason: "canceled",
 		})
+		if background {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatBackgroundFailed(sp.subSid, "canceled", "background ctx cancelled (session end or /agents kill)"),
+				Status:  StatusFailed,
+			}
+		}
 		return Result{
-			SubSid:  subSid,
-			Summary: FormatFailed(subSid, "canceled", "parent turn cancelled"),
+			SubSid:  sp.subSid,
+			Summary: FormatFailed(sp.subSid, "canceled", "parent turn cancelled"),
 			Status:  StatusFailed,
 		}
 
 	case errors.Is(runErr, context.DeadlineExceeded):
-		_ = appendEvent(indexPath, event{
-			Kind: "failed", SubSid: subSid, TS: endTS, Reason: "timeout",
+		_ = appendEvent(sp.indexPath, event{
+			Kind: "failed", SubSid: sp.subSid, TS: endTS, Reason: "timeout",
 		})
+		if background {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatBackgroundFailed(sp.subSid, "timeout", "deadline exceeded"),
+				Status:  StatusFailed,
+			}
+		}
 		return Result{
-			SubSid:  subSid,
-			Summary: FormatFailed(subSid, "timeout", "deadline exceeded"),
+			SubSid:  sp.subSid,
+			Summary: FormatFailed(sp.subSid, "timeout", "deadline exceeded"),
 			Status:  StatusFailed,
 		}
 
@@ -433,12 +609,19 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 			// hook.
 			hint = "runner returned empty summary with no error (contract violation)"
 		}
-		_ = appendEvent(indexPath, event{
-			Kind: "failed", SubSid: subSid, TS: endTS, Reason: reason,
+		_ = appendEvent(sp.indexPath, event{
+			Kind: "failed", SubSid: sp.subSid, TS: endTS, Reason: reason,
 		})
+		if background {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatBackgroundFailed(sp.subSid, reason, hint),
+				Status:  StatusFailed,
+			}
+		}
 		return Result{
-			SubSid:  subSid,
-			Summary: FormatFailed(subSid, reason, hint),
+			SubSid:  sp.subSid,
+			Summary: FormatFailed(sp.subSid, reason, hint),
 			Status:  StatusFailed,
 		}
 	}
@@ -469,6 +652,99 @@ func (m *Manager) Kill(subSid string) error {
 // the active map. Callers (TUI, CLI) surface this as "no such
 // active subagent" — the failure case is benign.
 var ErrUnknownSubagent = errors.New("subagent: unknown or no longer active")
+
+// BackgroundNotice is one terminal-state notification for a
+// background-spawned subagent. The Manager's background goroutine
+// enqueues it right after writing the terminal index event; the
+// Notifier PrePrompt hook drains the queue into the parent session
+// as <context> Prepend messages. Summary is the full wire-format
+// text ("[agent: background done/failed ...]") — system-written,
+// never model-authored (the CC "notification is never something you
+// write yourself" contract, PRD §2.1).
+type BackgroundNotice struct {
+	SubSid      string
+	Description string
+	Status      Status
+	Summary     string
+}
+
+// DrainNotices pops every pending notice in FIFO order. Called by
+// the Notifier at the start of each parent Prompt so completions
+// that stacked up between turns land together in the next one. An
+// empty (nil) return is the steady state.
+//
+// Deliberately destructive: only the delivery path (Notifier) may
+// drain. UI surfaces that just want to NAME what finished use
+// PendingNotices so they never steal from delivery.
+func (m *Manager) DrainNotices() []BackgroundNotice {
+	m.noticeMu.Lock()
+	defer m.noticeMu.Unlock()
+	out := m.pending
+	m.pending = nil
+	return out
+}
+
+// PendingNotices returns a COPY of the queue without draining —
+// for UI surfaces (TUI wake hint, status line) that want to name
+// what finished without consuming the Notifier's delivery payload.
+func (m *Manager) PendingNotices() []BackgroundNotice {
+	m.noticeMu.Lock()
+	defer m.noticeMu.Unlock()
+	out := make([]BackgroundNotice, len(m.pending))
+	copy(out, m.pending)
+	return out
+}
+
+// WakeCh returns the read-only wake signal that fires (capacity 1,
+// non-blocking) whenever a notice is enqueued. The TUI arms a
+// waitFor-style Cmd on it — the same channel-wake idiom as
+// ObserveResultChan — to refresh the agents badge and print the
+// "background agent finished" hint without pulling anything off
+// the delivery queue.
+func (m *Manager) WakeCh() <-chan struct{} { return m.wakeCh }
+
+// enqueueNotice appends to the FIFO and pokes the wake channel.
+// Never blocks: a full wake channel just means one wake is already
+// pending; the notice itself is safe in the queue (drained in full
+// by the Notifier regardless of wake count).
+func (m *Manager) enqueueNotice(n BackgroundNotice) {
+	m.noticeMu.Lock()
+	m.pending = append(m.pending, n)
+	m.noticeMu.Unlock()
+	select {
+	case m.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// Shutdown cancels every active subagent (sync + background) and
+// waits for background goroutines to finish writing their terminal
+// events — the agent-level counterpart of bgjob.Manager.Shutdown
+// (v6 柱 K). Wire into the session teardown path: on clean exit
+// every background child gets a `failed reason=canceled` terminal
+// event, leaving no started-without-terminal residue for the
+// orphan scanner to mop up (feature-orchestration PRD §4.1 D3).
+//
+// Cancel WITHOUT setting killedByUser — Kill is the user-action
+// path (`killed` event); Shutdown is lifecycle teardown
+// (`failed reason=canceled`).
+//
+// Blocking contract: waits as long as Runners take to honour ctx
+// cancellation (the Runner contract requires a prompt return; a
+// pathological Runner that ignores its ctx would hang Shutdown the
+// same way it would hang the sync Spawn it belonged to).
+func (m *Manager) Shutdown() {
+	m.mu.Lock()
+	infs := make([]*inFlight, 0, len(m.active))
+	for _, inf := range m.active {
+		infs = append(infs, inf)
+	}
+	m.mu.Unlock()
+	for _, inf := range infs {
+		inf.cancel()
+	}
+	m.bgWg.Wait()
+}
 
 // ListFilter selects which folded Subagent records List returns.
 // Empty Status / ParentSid mean "any". Zero value returns all.

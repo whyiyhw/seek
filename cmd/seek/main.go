@@ -432,7 +432,16 @@ type subagentRunnerOpts struct {
 	client    *deepseek.Client
 	provider  llm.Provider
 	parentReg *tools.Registry
-	hooksReg  *hooks.Registry
+	// hooksFn resolves the child's hooks Registry per spawn — a
+	// LAZY closure (not a pointer) because the parent's registry
+	// keeps growing after Manager construction (memory hook
+	// registers later), while the child must NEVER see the
+	// background-completion Notifier: a child Prompt runs
+	// ApplyPrePrompt too, and an unscoped Notifier would drain the
+	// parent's pending background notices into the child's
+	// transcript (feature-orchestration §4.1 D2). cmd/seek wires
+	// hooksReg.CloneWithout(notifier). nil = no hooks for children.
+	hooksFn   func() *hooks.Registry
 	maxTokens int
 	maxTurns  int
 	getModel  func() string
@@ -572,7 +581,13 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// fresh context per PRD §2.1); no PrepareMessages (suggester
 		// disabled for subagents per PRD §3.5). Hooks ARE shared
 		// with the parent — pre_tool deny / post_tool observer /
-		// audit log all apply to subagent tool calls (PRD §5.3).
+		// audit log all apply to subagent tool calls (PRD §5.3) —
+		// resolved through hooksFn so parent-only hooks (the
+		// background Notifier) stay excluded (see subagentRunnerOpts).
+		var childHooks *hooks.Registry
+		if opts.hooksFn != nil {
+			childHooks = opts.hooksFn()
+		}
 		sub, err := agent.New(agent.Config{
 			Client:       opts.client,
 			Provider:     opts.provider,
@@ -582,7 +597,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			Tools:        childReg,
 			MaxTokens:    opts.maxTokens,
 			MaxTurns:     opts.maxTurns,
-			Hooks:        opts.hooksReg,
+			Hooks:        childHooks,
 		})
 		if err != nil {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
@@ -1488,6 +1503,7 @@ func run() error {
 	}
 
 	var subagentMgr *subagent.Manager
+	var bgNotifier *subagent.Notifier
 	if !*noSave && activeSession != nil {
 		var smerr error
 		subagentMgr, smerr = subagent.NewManager(subagent.ManagerOpts{
@@ -1508,11 +1524,22 @@ func run() error {
 			// identical to the parent's prompt so the subagent header
 			// matches. See sessionDate above.
 			SessionDate: sessionDate,
+			// Background spawns bind to the process/session ctx so a
+			// parent turn returning (Esc) can never kill them — the
+			// 柱 K bgjob ctx-discipline lifted to agent level
+			// (feature-orchestration PRD §4.1 D1).
+			SessionCtx: ctx,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
-				client:      dsClient,
-				provider:    provider,
-				parentReg:   reg,
-				hooksReg:    hooksReg,
+				client:    dsClient,
+				provider:  provider,
+				parentReg: reg,
+				// Children share the parent's hook surface EXCEPT the
+				// background Notifier (parent-only drain point). Lazy
+				// per-spawn resolution so hooks registered after Manager
+				// construction (memory hook) still reach children.
+				hooksFn: func() *hooks.Registry {
+					return hooksReg.CloneWithout(bgNotifier)
+				},
 				maxTokens:   *maxTokens,
 				maxTurns:    *maxTurns,
 				getModel:    func() string { return sessionModel },
@@ -1527,6 +1554,21 @@ func run() error {
 			return fmt.Errorf("subagent manager: %w", smerr)
 		}
 		reg.Add(agenttool.New(subagentMgr, wtMgr))
+
+		// Background-completion delivery (feature-orchestration PRD
+		// §4.1 D2): the Notifier drains pending background notices
+		// into the PARENT Prompt as <context> Prepend messages. It
+		// lives on the parent registry only — children get it
+		// stripped via the CloneWithout closure above.
+		bgNotifier = subagent.NewNotifier(subagentMgr)
+		hooksReg.Register(bgNotifier)
+
+		// Clean-exit contract: cancel every still-active subagent
+		// (background children write `failed reason=canceled`
+		// terminal events) and wait for those events to land before
+		// the process tears down — no started-without-terminal
+		// residue for the orphan scanner.
+		defer subagentMgr.Shutdown()
 
 		// On startup, scan the index for `started`-without-terminal
 		// sub_sids (subagents whose owning seek process crashed
@@ -1707,6 +1749,13 @@ func run() error {
 	var observeResultChan <-chan memory.ObserveResult
 	if memHook != nil {
 		observeResultChan = memHook.ResultChan
+	}
+
+	// Background-subagent wake signal for the TUI loop (nil when the
+	// Manager isn't wired — --no-save — the wake handler gates on it).
+	var subagentWakeCh <-chan struct{}
+	if subagentMgr != nil {
+		subagentWakeCh = subagentMgr.WakeCh()
 	}
 
 	var sessionID string
@@ -1975,6 +2024,7 @@ func run() error {
 		Distiller:             distiller,
 		SkillDistiller:        skillDistiller,
 		ObserveResultChan:     observeResultChan,
+		SubagentWake:          subagentWakeCh,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project

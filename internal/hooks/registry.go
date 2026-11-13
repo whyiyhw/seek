@@ -77,6 +77,50 @@ func (r *Registry) Register(h any) {
 	}
 }
 
+// CloneWithout returns a snapshot of the registry: every slot's hook
+// list is copied, minus any entry identical to exclude (pointer
+// identity). Later Register calls on the receiver do not affect the
+// clone and vice versa. exclude may be nil — then this is a plain
+// snapshot (CloneWithout(nil)).
+//
+// Use case: scoped dispatch. internal/subagent children share the
+// parent's hook surface (pre_tool deny, post_tool audit, …) but must
+// NOT see hooks whose semantics are parent-session-bound — e.g. the
+// background-completion Notifier (feature-orchestration PRD §4.1 D2):
+// a child Prompt runs ApplyPrePrompt too, and an unscoped Notifier
+// would DRAIN the parent's pending background notices into the wrong
+// transcript. cmd/seek hands buildSubagentRunner a
+// hooksReg.CloneWithout(notifier) closure so children get everything
+// except the parent-only drain point.
+func (r *Registry) CloneWithout(exclude any) *Registry {
+	if r == nil {
+		return nil
+	}
+	clone := &Registry{onPanic: r.onPanic}
+	clone.prePrompt = filterHooks(r.prePrompt, exclude)
+	clone.preToolUse = filterHooks(r.preToolUse, exclude)
+	clone.preTurn = filterHooks(r.preTurn, exclude)
+	clone.postTurn = filterHooks(r.postTurn, exclude)
+	clone.postToolUse = filterHooks(r.postToolUse, exclude)
+	clone.sessionStart = filterHooks(r.sessionStart, exclude)
+	clone.sessionEnd = filterHooks(r.sessionEnd, exclude)
+	return clone
+}
+
+// filterHooks copies slots, dropping entries identical to exclude.
+// Always allocates a fresh backing array so the copy and the original
+// never alias (append on either stays invisible to the other).
+func filterHooks[T any](slots []T, exclude any) []T {
+	out := make([]T, 0, len(slots))
+	for _, h := range slots {
+		if any(h) == exclude {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
 // Stack returns the registered hooks per slot, in dispatch order. Useful
 // for debug logging right after wiring — call Stack and dump to confirm
 // composition before the first user message lands.
