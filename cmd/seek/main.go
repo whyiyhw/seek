@@ -1713,7 +1713,7 @@ func run() error {
 	// feature-vision: pasted image blocks route through the same
 	// submit-time vision router as the TUI (native attach / switch note).
 	if len(os.Args) >= 2 && os.Args[1] == "acp" {
-		return runACP(ctx, ag, newVisionRouter(abs))
+		return runACP(ctx, ag, newVisionRouter(abs), policy)
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2393,8 +2393,9 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 // One seek process = one ACP session (MVP); Prompt streams the agent's
 // event channel out as ACP session/update notifications.
 type acpBackend struct {
-	ag    *agent.Agent
-	route visionRouter // feature-vision: submit-time image router
+	ag     *agent.Agent
+	route  visionRouter // feature-vision: submit-time image router
+	policy *permission.Policy
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2409,8 +2410,22 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 	}
 }
 
+// NewSession anchors the session's working directory to p.Cwd
+// (feature-paseo-provider.md §2.2 D-1): headless ACP clients (paseo)
+// spawn seek without a cwd, so the project root only arrives here.
+// acp.AnchorSession chdirs the process AND re-anchors the shared
+// policy, so read/edit/write/bash (policy-anchored) and
+// git/grep/list_dir (process-anchored) all follow. The sessionId
+// becomes the project name (directory base) — the fixed "seek" id
+// pre-D-1 carried no information. Empty cwd keeps the current
+// directory (Zed-equivalent, a behavioural no-op under Zed).
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
-	return acp.NewSessionResult{SessionID: "seek"}, nil
+	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
+	if err != nil {
+		return acp.NewSessionResult{}, err
+	}
+	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s\n", anchor.Abs, anchor.ProjectID)
+	return acp.NewSessionResult{SessionID: anchor.Name}, nil
 }
 
 // buildACPPromptText assembles the prompt seek's agent actually sees from
@@ -2562,8 +2577,10 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
-// logging goes to stderr.
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter) error {
+// logging goes to stderr. pol is the shared permission policy the whole
+// tool registry was built on; session/new re-anchors it to the client's
+// cwd (D-1).
+func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, pol *permission.Policy) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -2579,7 +2596,7 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute, policy: pol}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

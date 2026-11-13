@@ -23,7 +23,7 @@
 |---|---|---|
 | provider 注册 | spawn 一个**探测进程**，发 `initialize`（`clientInfo: paseo`，10s 超时），读回 `agentCapabilities` 后关闭该进程 | ✅ `initialize` 回显 protocolVersion + `loadSession:false` + `promptCapabilities.image:true` |
 | 能力折算 | `loadSession:true` → session.persistence；`sessionCapabilities.list` → session.list；`promptCapabilities.image` → prompt.image | seek 报 `loadSession:false` → paseo **永不**调 `session/load`、不持久化 native session id；不报 list → **不**调 `session/list` |
-| 每个会话 | **再 spawn 一个独立进程**，`session/new {cwd, mcpServers, _meta._paseo{…}}` → `session.ready` | ✅ 处理（但见 D-1：cwd 被忽略） |
+| 每个会话 | **再 spawn 一个独立进程**，`session/new {cwd, mcpServers, _meta._paseo{…}}` → `session.ready` | ✅ 处理（D-1 已修：cwd 生效，见 §2.2） |
 | 对话轮 | `session/prompt {sessionId, prompt[]}`，串行排队（promptLane），收 `session/update` 流，等 `stopReason`；打断 = `session/cancel` | ✅ 全支持（Zed 已验证同一路径） |
 | 进程退出 | stdin 关闭 → seek rc=0 退出；会话中异常退出 → `session.runtime_failed` | ✅ EOF 干净退出（e2e 有测） |
 
@@ -36,6 +36,8 @@
 - **丢弃的字段**（知悉即可，非缺口）：`session/new` 的 `mcpServers`（paseo 侧 MCP 透传不达 seek，MVP 无需）；`_meta._paseo.systemPrompt/providerOptions/toolPolicy`（paseo 级系统提示词不生效——seek 用自己的 sysprompt；drive 场景卡面 prompt 走用户消息，**这正是想要的**语义）。paseo 会话建立后按返回的 `modes`/`configOptions` 决定是否发 `set_config_option` 类调用；seek 两者皆空 → paseo 把 session.configure 能力过滤掉、UI 不给这个 provider 出模型选择。注意：**不要**在 paseo 里给 seek provider 配 providerOptions，否则可能触发对 seek 的设置调用（回 -32601，理论无害但没必要试）。
 
 ### 2.2 D-1（必做缺口）：`session/new` 的 cwd 必须生效
+
+> **已落地（drive/c_bnjrw5）**：`acp.AnchorSession`（`internal/acp/session.go`）——`os.Chdir`（git/grep/list_dir 的进程锚）+ `Policy.Reanchor`（read/edit/write/bash 的策略锚 + cwd 内写白名单）一次完成，ProjectID 按 `paths.ProjectID(abs(cwd))`、sessionId 取目录名；缺省仍为当前目录，cwd 不可用则 fail-loud 拒建会话。方案取下文 2 的简化版（锚定共享栈而非整套重建：AGENTS.md/sysprompt、memory、hooks project 上下文、LSP root、plan artifacts 仍按启动 cwd——paseo 探测进程下无 AGENTS.md 加载需求，残余留给后续卡按需补）。
 
 **这是本设计最重要的发现。** paseo spawn ACP 进程时**不传 cwd**（`spawnProcess` 只给 env/stdio，子进程继承 paseo daemon 的 cwd——GUI 拉起，通常是 `/`）；工作目录**只**通过 `session/new` 的 `cwd` 参数到达。而 seek 的 `acpBackend.NewSession` 今天返回固定的 `"seek"` 会话 id、完全忽略 `p.Cwd`（`cmd/seek/main.go:2396`）——Zed 场景下恰好 spawn 时就带对了 cwd，所以从没暴露。
 
