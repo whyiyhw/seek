@@ -59,7 +59,7 @@ const (
 	FormatNtfy     = "ntfy"
 	FormatSlack    = "slack"
 	FormatDiscord  = "discord"
-	FormatFeishu   = "feishu" // 企业自建应用 bot via IM API (im/v1/messages)
+	FormatFeishu   = "feishu"   // 企业自建应用 bot via IM API (im/v1/messages)
 	FormatTemplate = "template" // user-defined JSON with {{title}}/{{body}}/{{event}}
 	FormatRaw      = "raw"
 )

@@ -13,7 +13,7 @@ func TestIsVisionModel(t *testing.T) {
 		// model. The retired ids — including the old -Exp vision
 		// build — are plain unknowns now: NOT matched, exactly like
 		// any custom model string.
-		ModelV41Flash:               true,
+		ModelV41Flash:                  true,
 		"deepseek-v4-flash-vision-exp": false,
 		"deepseek-v4-flash":            false,
 		"deepseek-v4-pro":              false,

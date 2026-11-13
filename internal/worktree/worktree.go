@@ -86,8 +86,8 @@ type CleanupResult struct {
 // collide on filesystem state.
 type Manager struct {
 	mu     sync.Mutex
-	root   string            // abs project working tree path
-	runGit GitRunner         // injectable for tests
+	root   string              // abs project working tree path
+	runGit GitRunner           // injectable for tests
 	active map[string]Worktree // ID → Worktree
 
 	// homeProjectDir caches the resolved ~/.seek/projects/<pid>/

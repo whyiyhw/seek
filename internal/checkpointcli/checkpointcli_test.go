@@ -273,4 +273,3 @@ func TestIntegration_RealGit(t *testing.T) {
 		t.Errorf("HEAD moved: before=%q after=%q", headBefore.String(), headAfter.String())
 	}
 }
-

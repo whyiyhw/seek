@@ -12,22 +12,6 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// fakeAgent replays a fixed slice of agent.Events on ag.Prompt calls.
-// It satisfies the same call signature as *agent.Agent but is not a
-// real agent — used only to drive runJSON tests without a network.
-type fakeStream struct {
-	events []agent.Event
-}
-
-func (f *fakeStream) prompt() <-chan agent.Event {
-	ch := make(chan agent.Event, len(f.events))
-	for _, ev := range f.events {
-		ch <- ev
-	}
-	close(ch)
-	return ch
-}
-
 // captureLinesJSON runs runJSON against a fake event stream and returns
 // the decoded JSONL lines emitted to stdout.
 func captureLinesJSON(t *testing.T, events []agent.Event) []jsonLine {

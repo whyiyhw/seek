@@ -41,13 +41,13 @@ func redirectClient(srv *httptest.Server) *http.Client {
 // with HTTP 200 — the trap shape, so tests exercise that the production
 // code actually parses the body code.
 type feishuFake struct {
-	mu           sync.Mutex
-	tokenHits    int
-	messageHits  int
-	lastAuth     string
-	lastQuery    string
-	lastBody     string
-	failMsgCode  int // non-zero → message endpoint returns this code
+	mu            sync.Mutex
+	tokenHits     int
+	messageHits   int
+	lastAuth      string
+	lastQuery     string
+	lastBody      string
+	failMsgCode   int // non-zero → message endpoint returns this code
 	failTokenCode int // non-zero → token endpoint returns this code
 	// clearMsgCodeAfterHit flips failMsgCode to 0 after the first message
 	// hit, so the refresh-retry path succeeds on attempt 2.

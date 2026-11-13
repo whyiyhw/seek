@@ -156,7 +156,7 @@ func TestMergeEnv_OverlayOverridesBase(t *testing.T) {
 		"USER=alice",
 	}
 	overlay := map[string]string{
-		"HOME": "/new",
+		"HOME":             "/new",
 		"DEEPSEEK_API_KEY": "sk-test",
 	}
 	got := MergeEnv(base, overlay)

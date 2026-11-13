@@ -133,11 +133,6 @@ func WithExecutor(fn func(ctx context.Context, command, cwd string, env []string
 	return func(r *ShellRunner) { r.execCmd = fn }
 }
 
-// WithClock swaps time.Now for tests.
-func WithClock(fn func() time.Time) Option {
-	return func(r *ShellRunner) { r.now = fn }
-}
-
 // NewShellRunner constructs a runner from a merged config. Call
 // Register(runner) once on the agent's Registry. nil-safe Config
 // (empty Config{}) → all dispatch paths no-op without erroring.

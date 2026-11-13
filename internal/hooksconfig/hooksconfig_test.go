@@ -309,8 +309,8 @@ func TestAverageDurationByHook(t *testing.T) {
 // ---- Gate ----
 
 type fakePrompt struct {
-	answer bool
-	called int32
+	answer  bool
+	called  int32
 	lastReq TrustRequest
 }
 

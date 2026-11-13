@@ -84,8 +84,8 @@ func TestTool_SchemaIdempotent(t *testing.T) {
 func TestExecute_HappyPath(t *testing.T) {
 	fg := (&fakeGit{}).
 		push("abc123\n", "", nil). // rev-parse
-		push("", "", nil).          // worktree add
-		push("", "", nil)           // update-ref
+		push("", "", nil).         // worktree add
+		push("", "", nil)          // update-ref
 	tl := newTool(t, fg)
 
 	out, err := tl.Execute(context.Background(), json.RawMessage(`{}`))

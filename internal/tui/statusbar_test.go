@@ -514,7 +514,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 		bar := stripANSI(RenderStatusBar(StatusSnapshot{
 			Model: deepseek.ModelV41Flash, Effort: "max",
 			Tier: tier, NextTier: nt, NextAt: na, Now: at,
-			Streaming: true,
+			Streaming:     true,
 			StreamElapsed: 5 * time.Second, StreamDeltaBytes: 4096,
 			LastUsage:        deepseek.Usage{PromptTokens: 10_000_000}, // force ctx critical
 			SubagentsActive:  2,
