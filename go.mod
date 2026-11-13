@@ -19,7 +19,10 @@ require (
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/telemetry v0.0.0-20260708182218-49f421fb7959 // indirect
+	golang.org/x/tools v0.48.0 // indirect
 )
 
 require (
@@ -43,3 +46,5 @@ require (
 	github.com/yuin/goldmark v1.8.5 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 )
+
+tool golang.org/x/tools/cmd/deadcode

@@ -22,3 +22,4 @@
 - c_x7fgcv：control-plane M2：路由与指令层——/bind /projects /switch /new /cancel + DirectAt 过滤
 - c_twt3el：减法机制 L2/L3 设计稿：删代码与缩文档流程（feature-slim-loop.md）
 - c_vt7fiw：减法机制 L1：weight.sh 体重秤 + docs/budget.json 预算清单（只读只报）
+- c_rtjjsl：减法机制 L1：首轮 deadcode/unused 扫描产出瘦身候选清单（只报不删）
