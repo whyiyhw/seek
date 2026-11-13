@@ -58,13 +58,22 @@ var schemaBytes = []byte(`{
       "type": "string",
       "enum": ["none", "worktree"],
       "description": "none (default): subagent works in the parent's cwd. worktree: creates a temporary git worktree so the subagent works on an isolated copy; useful for parallel implementation attempts. Auto-cleaned if no changes. (worktree not yet implemented — use \"none\" until v0.6.0 ships M11.1.)"
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["deepseek", "glm"],
+      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); deepseek = first-class DeepSeek. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
+    },
+    "model": {
+      "type": "string",
+      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
     }
   },
   "required": ["description", "prompt"],
   "additionalProperties": false
 }`)
 
-const description = `Launch a subagent with isolated context to perform a focused task. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide. Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review). Costs roll up into your session's total automatically. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
+const description = `Launch a subagent with isolated context to perform a focused task. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide. Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review). Costs roll up into your session's total automatically, priced per each subagent's own provider/model. Optional provider/model params route a subagent to a different lane (e.g. provider="glm" for cheap bulk research) — omit both to inherit the parent session's model. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
 
 // Args is the strict-decode target. JSON tags must match schemaBytes
 // field names exactly (DisallowUnknownFields rejects mismatches).
@@ -73,6 +82,13 @@ type Args struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
+	// Provider / Model are the optional routing params (P1-c,
+	// feature-orchestration.md §4.2). Both empty = inherit the
+	// parent session's lane unchanged. Passed through verbatim —
+	// Manager.Spawn is the single validation point (same split as
+	// subagent_type).
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Length caps enforced in Execute. Schema's `description` field
@@ -173,16 +189,16 @@ func (*Tool) ReadOnly() bool { return true }
 func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("agent", raw, &a,
-		"description", "prompt", "subagent_type", "isolation"); err != nil {
+		"description", "prompt", "subagent_type", "isolation", "provider", "model"); err != nil {
 		return "", err
 	}
 	if a.Description == "" {
 		return "", tools.MissingField("agent", "description", raw,
-			"description", "prompt", "subagent_type", "isolation")
+			"description", "prompt", "subagent_type", "isolation", "provider", "model")
 	}
 	if a.Prompt == "" {
 		return "", tools.MissingField("agent", "prompt", raw,
-			"description", "prompt", "subagent_type", "isolation")
+			"description", "prompt", "subagent_type", "isolation", "provider", "model")
 	}
 
 	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
@@ -247,6 +263,11 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 		Prompt:       a.Prompt,
 		Type:         st,
 		WorktreePath: worktreePath,
+		// Routing params pass through raw; Manager.Spawn validates
+		// them (ResolveRoute) and fills lane defaults into the
+		// RunnerJob. Empty strings = inherit parent lane.
+		Provider: a.Provider,
+		Model:    a.Model,
 		// ParentTurn is 0 in M11.0 — the parent turn counter isn't
 		// threaded through the tool interface yet. The index event
 		// still records the spawn timing via the timestamp, and the

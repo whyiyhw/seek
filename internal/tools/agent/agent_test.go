@@ -530,6 +530,101 @@ func TestTool_Execute_PromptTooLong(t *testing.T) {
 	}
 }
 
+// TestTool_Execute_RouteParamsPlumbedToSpawn: valid provider/model
+// args pass through the tool into the RunnerJob with lane defaults
+// filled by subagent.ResolveRoute (P1-c acceptance: 路由参数解析).
+func TestTool_Execute_RouteParamsPlumbedToSpawn(t *testing.T) {
+	var gotProvider, gotModel string
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		gotProvider, gotModel = j.Provider, j.Model
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{
+		"description": "glm sweep", "prompt": "read everything", "provider": "glm"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out, "[agent: completed]") {
+		t.Fatalf("expected completed wire format, got:\n%s", out)
+	}
+	if gotProvider != "glm" {
+		t.Errorf("job.Provider = %q, want glm", gotProvider)
+	}
+	if gotModel != "glm-5.3" {
+		t.Errorf("job.Model = %q, want lane default glm-5.3", gotModel)
+	}
+}
+
+// TestTool_Execute_RouteDefaultsInheritParent: omitting provider and
+// model leaves the RunnerJob's route fields empty — the Runner's
+// inherit path, byte-identical to pre-routing behaviour (P1-c
+// acceptance: 默认继承).
+func TestTool_Execute_RouteDefaultsInheritParent(t *testing.T) {
+	var gotProvider, gotModel string
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		gotProvider, gotModel = j.Provider, j.Model
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	if _, err := tl.Execute(context.Background(), json.RawMessage(`{
+		"description": "plain", "prompt": "p"
+	}`)); err != nil {
+		t.Fatal(err)
+	}
+	if gotProvider != "" || gotModel != "" {
+		t.Errorf("inherit path job.Provider/Model = %q/%q, want empty", gotProvider, gotModel)
+	}
+}
+
+// TestTool_Execute_InvalidRouteFailsWireFormat: unknown provider /
+// model ids reach Manager.Spawn (schema enums are advisory) and come
+// back as a structured [agent: failed reason=spawn_error] result the
+// LLM can react to — not a tool-argument error, not a silent fallback
+// (P1-c acceptance: 非法模型报错).
+func TestTool_Execute_InvalidRouteFailsWireFormat(t *testing.T) {
+	cases := []struct {
+		name string
+		args string
+		want string
+	}{
+		{
+			name: "unknown provider",
+			args: `"provider": "sonnet"`,
+			want: `unknown provider "sonnet"`,
+		},
+		{
+			name: "cross-lane model",
+			args: `"provider": "glm", "model": "deepseek-flash"`,
+			want: "does not belong",
+		},
+		{
+			name: "unknown bare model",
+			args: `"model": "gpt-4o"`,
+			want: `unknown model "gpt-4o"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+				t.Error("Runner invoked despite invalid route")
+				return subagent.RunnerResult{}, nil
+			})
+			out, err := tl.Execute(context.Background(), json.RawMessage(`{
+				"description": "x", "prompt": "y", `+tc.args+`
+			}`))
+			if err != nil {
+				t.Fatalf("expected wire-format failure, not tool err: %v", err)
+			}
+			if !strings.HasPrefix(out, "[agent: failed reason=spawn_error]") {
+				t.Errorf("expected spawn_error wire format, got:\n%s", out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("failure %q missing %q", out, tc.want)
+			}
+		})
+	}
+}
+
 // TestNew_PanicsOnNilManager: misuse fails loud. New(nil) is a
 // programmer error — the LLM never sees this path because nil
 // manager means the host didn't register the tool at all.

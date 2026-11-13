@@ -437,6 +437,16 @@ type subagentRunnerOpts struct {
 	maxTurns  int
 	getModel  func() string
 	getEffort func() string
+	// routes maps routing lane names (subagent.ProviderDeepSeek /
+	// ProviderGLM — validated in internal/subagent.ResolveRoute) to
+	// the backend a child spawned on that lane should use
+	// (feature-orchestration.md D7). Built once at startup from
+	// config keys: a lane appears here only when its API key exists,
+	// so "named provider without key" fails the spawn with a
+	// structured error at Runner time instead of silently running on
+	// the parent's lane. Nil/empty map = routing params always fail
+	// (tests that don't exercise routing).
+	routes map[string]subagentRoute
 	// bashGuard, when set, wraps the child's bash tool with a deny check
 	// (v7 柱 N: autopilot subagents deny remote ops). nil = no guard.
 	bashGuard func(command string) (bool, string)
@@ -455,6 +465,41 @@ type subagentRunnerOpts struct {
 	// background manager re-attached; nil disables background jobs in the
 	// subagent (graceful — run_in_background just errors).
 	bgMgr *bgjob.Manager
+}
+
+// subagentRoute is one lane entry in subagentRunnerOpts.routes.
+// Exactly one of client / provider is set, mirroring agent.Config's
+// two-path contract: client = first-class DeepSeek, provider = a
+// pkg/llm lane (GLM rides pkg/llm/compatible with the pinned
+// bigmodel.cn endpoint).
+type subagentRoute struct {
+	client   *deepseek.Client
+	provider llm.Provider
+}
+
+// buildSubagentRoutes constructs the routing table for per-agent
+// model routing (feature-orchestration.md D6/D7): deepseek always
+// (reusing the parent's client when the parent lane IS deepseek, else
+// building one from the config key), glm when GLM_API_KEY /
+// providers.glm is configured. Explicit names only — no key-probing
+// chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
+// table iff its key exists.
+func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute {
+	cfg, _ := config.Load()
+	routes := make(map[string]subagentRoute)
+	if parentClient != nil {
+		routes[subagent.ProviderDeepSeek] = subagentRoute{client: parentClient}
+	} else if k := config.KeyFor(cfg, "deepseek"); k != "" {
+		// Parent session runs a second-tier lane; deepseek routing is
+		// still available when its key is configured.
+		routes[subagent.ProviderDeepSeek] = subagentRoute{client: deepseek.New(deepseek.WithAPIKey(k))}
+	}
+	if k := config.KeyFor(cfg, "glm"); k != "" {
+		routes[subagent.ProviderGLM] = subagentRoute{
+			provider: compatible.New(k, glmBaseURL, "GLM"),
+		}
+	}
+	return routes
 }
 
 // buildSubagentRunner returns the production subagent.Runner that
@@ -519,6 +564,23 @@ func writeSubagentTranscript(job subagent.RunnerJob, msgs []deepseek.Message, mo
 
 func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		// Per-agent model routing (feature-orchestration.md D7):
+		// job.Provider non-empty → resolve the lane's backend from
+		// the route table; empty → inherit the parent instances and
+		// the live session model (the pre-routing path, unchanged).
+		// The effective model feeds agent.Config, Tracker.Record
+		// (per-lane pricing) and the transcript header alike.
+		client, provider, model := opts.client, opts.provider, opts.getModel()
+		if job.Provider != "" {
+			r, ok := opts.routes[job.Provider]
+			if !ok {
+				return subagent.RunnerResult{}, fmt.Errorf(
+					"provider %q has no configured API key — set its env var / config entry, or omit provider to inherit the parent lane", job.Provider)
+			}
+			client, provider = r.client, r.provider
+			model = job.Model // non-empty by ResolveRoute contract
+		}
+
 		// Filter parent registry by ToolNames. The Filter the
 		// Manager performs already strips `agent` and `ask_user`
 		// universally; here we just project parent's registered
@@ -539,6 +601,14 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// policy exists to prevent.
 		childObserved := fsobserve.New()
 		for _, name := range job.ToolNames {
+			// D8 provider-compatibility filter (after the template
+			// Filter): think / fim_complete only work against the
+			// first-class DeepSeek client — a child on any llm.Provider
+			// lane (explicitly routed OR inheriting a second-tier
+			// parent) must not see them.
+			if client == nil && subagent.IsDeepSeekOnlyTool(name) {
+				continue
+			}
 			switch name {
 			case "read":
 				childReg.Add(read.New(job.Policy).WithObserver(childObserved))
@@ -574,9 +644,9 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// with the parent — pre_tool deny / post_tool observer /
 		// audit log all apply to subagent tool calls (PRD §5.3).
 		sub, err := agent.New(agent.Config{
-			Client:       opts.client,
-			Provider:     opts.provider,
-			Model:        opts.getModel(),
+			Client:       client,
+			Provider:     provider,
+			Model:        model,
 			Effort:       opts.getEffort(),
 			SystemPrompt: job.SystemPrompt,
 			Tools:        childReg,
@@ -601,7 +671,10 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		for ev := range events {
 			switch e := ev.(type) {
 			case agent.TurnEnd:
-				job.Tracker.Record(e.Usage, opts.getModel(), pricing.CurrentTier(time.Now()))
+				// Effective model, not the parent's — a GLM-routed child
+				// prices at the GLM card (pricing.Cost keys off the model
+				// id; NoOffPeakDiscount keeps flat-rate lanes flat).
+				job.Tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
 			case agent.AgentEnd:
 				totalUsage = e.Usage
 				turnCount = e.Turns
@@ -639,7 +712,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// feature-subagent.md §3.3. Extracted to a helper so
 		// the persistence logic is unit-testable without
 		// spinning up the full Runner closure.
-		writeSubagentTranscript(job, msgs, opts.getModel(), totalUsage, turnCount)
+		writeSubagentTranscript(job, msgs, model, totalUsage, turnCount)
 
 		return subagent.RunnerResult{
 			Summary: summary,
@@ -1517,6 +1590,7 @@ func run() error {
 				maxTurns:    *maxTurns,
 				getModel:    func() string { return sessionModel },
 				getEffort:   func() string { return sessionEffort },
+				routes:      buildSubagentRoutes(dsClient),
 				bashGuard:   autopilotGuard,
 				bashSandbox: autopilotMode,
 				bashEnvKeep: bashEnvKeep,
