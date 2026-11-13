@@ -948,8 +948,13 @@ func run() error {
 	// and the model wouldn't even try bash). Env-scoped and gated on
 	// acpLane: a stray SEEK_ACP_YOLO in the shell must not silently
 	// yolo the TUI. Same "no human to ask" posture as goal/autopilot.
+	// Resolved once, consumed twice: initialPref here, and the
+	// no-remote bash guard further down (goalBash + subagent runner
+	// wiring). The guard is a property of the yolo lane specifically —
+	// a Deny ACP session (Zed) keeps the plain permission gate.
+	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
 	initialPref := permission.PrefDeny
-	if *yolo || (acpLane && acp.YoloFromEnv(os.Getenv)) {
+	if *yolo || acpYolo {
 		initialPref = permission.PrefYolo
 	}
 	initialWorkflow := permission.WorkflowNone
@@ -1155,7 +1160,12 @@ func run() error {
 	readCfg := bashCfg
 	bashEnvKeep := bashCfg.BashEnvPassthrough
 	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
-	if goalMode {
+	// No-remote guard for the unattended lanes: goal and SEEK_ACP_YOLO
+	// (docs/prd/feature-paseo-provider.md §3.3) both run yolo with no
+	// human to ask — yolo opens LOCAL edit/shell only; push/PR-class
+	// remote mutations stay blocked (double insurance with the drive
+	// cards' own "never push" sandbox discipline).
+	if goalMode || acpYolo {
 		goalBash = goalBash.WithDeny(autopilot.IsRemoteMutating)
 	}
 
@@ -1464,13 +1474,15 @@ func run() error {
 	// Detected here (after the full agent/subagent/worktree wiring is
 	// available) rather than as a cheap early subcommand. In this mode
 	// every subagent gets the no-remote bash guard for the whole run.
+	// The SEEK_ACP_YOLO lane shares the guard: subagents spawnable
+	// there must not push either (PRD paseo §3.3).
 	autopilotMode := len(os.Args) >= 2 && os.Args[1] == "autopilot"
 	autopilotGoal := ""
 	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
 		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
 	}
 	var autopilotGuard func(string) (bool, string)
-	if autopilotMode {
+	if autopilotMode || acpYolo {
 		autopilotGuard = autopilot.IsRemoteMutating
 	}
 
