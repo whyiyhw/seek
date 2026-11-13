@@ -97,9 +97,9 @@ func parseLMarkdown(s string) []LCandidate {
 
 	var out []LCandidate
 	var current *LCandidate
-	lines := strings.Split(s, "\n")
+	lines := strings.SplitSeq(s, "\n")
 
-	for _, raw := range lines {
+	for raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -130,7 +130,7 @@ func parseLMarkdown(s string) []LCandidate {
 		// Indented sub-bullet: "- sources: ..."
 		if strings.HasPrefix(line, "- ") && strings.HasPrefix(strings.TrimLeft(line, "- "), "sources:") {
 			if _, after, ok := strings.Cut(line, ":"); ok {
-				for _, s := range strings.Split(after, ",") {
+				for s := range strings.SplitSeq(after, ",") {
 					s = strings.TrimSpace(s)
 					if s != "" {
 						current.Sources = append(current.Sources, s)
@@ -306,7 +306,7 @@ func traitSimilarity(a, b string) float64 {
 // words splits a string into space-separated tokens, filtering empties.
 func words(s string) []string {
 	var out []string
-	for _, tok := range strings.Fields(s) {
+	for tok := range strings.FieldsSeq(s) {
 		if tok != "" {
 			out = append(out, tok)
 		}

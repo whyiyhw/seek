@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -106,29 +107,29 @@ func ResolveRoute(provider, model string) (Route, error) {
 // allKnownModels renders every known model id across lanes for error
 // messages ("glm-5.3, deepseek-flash").
 func allKnownModels() string {
-	var out string
+	var out strings.Builder
 	first := true
 	for _, models := range knownModels {
 		for _, m := range models {
 			if !first {
-				out += ", "
+				out.WriteString(", ")
 			}
-			out += m
+			out.WriteString(m)
 			first = false
 		}
 	}
-	return out
+	return out.String()
 }
 
 func joinModels(models []string) string {
-	out := ""
+	var out strings.Builder
 	for i, m := range models {
 		if i > 0 {
-			out += ", "
+			out.WriteString(", ")
 		}
-		out += m
+		out.WriteString(m)
 	}
-	return out
+	return out.String()
 }
 
 // deepSeekOnlyTools lists tool names that only work against the

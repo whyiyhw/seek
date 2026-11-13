@@ -224,7 +224,7 @@ func TestE2E_LplusMIndexFitsTokenBudget(t *testing.T) {
 	cwd, _ := withMemoryEnv(t)
 	p, _ := LoadOrCreate(cwd)
 
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		// Tagline length tracks PRD §4 "一条 ~60 字符" — name eats
 		// ~10-12 chars, the formatting prefix eats ~4, leaving ~44 chars
 		// for tagline at the documented cap.

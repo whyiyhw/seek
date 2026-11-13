@@ -819,6 +819,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: repo shell scripts run under macOS system bash 3.2 — write for 3.2, not for the brew bash you test with. In Chinese prose embedded in shell strings, `$var` is ALWAYS one fullwidth character away from silently becoming a different variable. And a trap that can't fail must not be allowed to speak for the script's exit status
 - **Refs**: `scripts/install-serve.sh` (uncommitted at time of writing), verified via `bash -c 'set -eu; echo "（$rendered）"'` → exit 1, with trap → exit 0
 
+### modernize -fix turns `s[i].Field = x` into `v.Field = x` under slices.Backward — a silent write-to-copy no-op
+- **Saw**: 第 3 刀 modernize（card c_l3cw6d）let gopls v0.23.0's slices.Backward fix rewrite `AttachPredictedNext`'s through-index write `a.messages[i].PredictedNext = text` into `v.PredictedNext = text`, where `v` is the range COPY — the prediction silently stopped persisting while `go build` / `go vet` / `go test -race ./...` all stayed green (the path had zero coverage)
+- **Why**: the Backward fixer replaces `s[i].X` with `v.X` uniformly and drops the now-unused index; it does not distinguish reads from writes, and v0.23.0 has no write-safety guard
+- **Fix**: audited all 12 Backward rewrites in the knife's diff (this was the only write-through-value); kept Backward but took the index too (`for i, v := range slices.Backward(...)`, write via `a.messages[i]`) and added `TestAttachPredictedNextWritesThroughIndex` to pin the contract
+- **Lesson**: never trust a bulk `-fix` pass blind — after applying, grep the diff for value-dropping rewrites (`range slices.Backward`, index elision) and check every loop body for writes through the loop variable; a green suite only means nothing was watching
+- **Refs**: `pkg/agent/agent.go` `AttachPredictedNext`, `pkg/agent/agent_test.go` `TestAttachPredictedNextWritesThroughIndex`, `docs/notes-slim-candidates-2026-11.md` 执行状态·第 3 刀
+
 ---
 
 ## LLM provider quirks (M6)

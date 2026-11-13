@@ -374,7 +374,7 @@ func readBlockList(lines []string, from int) ([]string, int, bool) {
 // identifiers ("Read", "Grep") and never contain commas.
 func splitInlineList(s string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		p := unquote(strings.TrimSpace(part))
 		if p != "" {
 			out = append(out, p)

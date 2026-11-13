@@ -36,7 +36,7 @@ func TestFilterPaths_CaseInsensitive(t *testing.T) {
 
 func TestFilterPaths_CapsAtTwenty(t *testing.T) {
 	var all []string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		all = append(all, "match_"+string(rune('a'+i%26))+".go")
 	}
 	got := filterPaths(all, "match")

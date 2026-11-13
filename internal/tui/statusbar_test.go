@@ -545,7 +545,7 @@ func TestRenderModelPicker_RowsFitNarrowTerminal(t *testing.T) {
 	for i := range m.modelPickerFiltered {
 		m.modelPickerSelected = i
 		out := m.renderModelPicker()
-		for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 			if w := lipgloss.Width(stripANSI(line)); w > 100 {
 				t.Errorf("picker row %d physically %d cols (>100): %q", i, w, stripANSI(line))
 			}

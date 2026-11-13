@@ -252,7 +252,7 @@ func TestExecute_OutputCapped(t *testing.T) {
 	bigDir := initRepo(t) // fresh repo for this case
 	bigPath := filepath.Join(bigDir, "big.txt")
 	var sb strings.Builder
-	for i := 0; i < 700; i++ {
+	for range 700 {
 		sb.WriteString("line\n")
 	}
 	if err := os.WriteFile(bigPath, []byte(sb.String()), 0o644); err != nil {
@@ -295,7 +295,7 @@ func TestExecute_DefaultLineCapIs100(t *testing.T) {
 	cwd, _ := os.Getwd()
 	bigPath := filepath.Join(cwd, "small.txt")
 	var sb strings.Builder
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		sb.WriteString("x\n")
 	}
 	if err := os.WriteFile(bigPath, []byte(sb.String()), 0o644); err != nil {

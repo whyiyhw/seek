@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -182,12 +183,7 @@ func eventMatches(events []string, event string) bool {
 	if len(events) == 0 {
 		return true
 	}
-	for _, e := range events {
-		if e == event {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(events, event)
 }
 
 // postWebhook delivers one notification to one target, best-effort. It
@@ -196,7 +192,7 @@ func eventMatches(events []string, event string) bool {
 // 4xx is not retried: that's a config problem (bad token / topic), and
 // hammering it won't help.
 func postWebhook(ctx context.Context, client *http.Client, t WebhookTarget, event, title, body string) {
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		req, err := buildWebhookRequest(t, event, title, body)
 		if err != nil {
 			// Build errors are deterministic — no point retrying.

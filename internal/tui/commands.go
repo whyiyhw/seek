@@ -1041,7 +1041,7 @@ func normalizeEffort(tok string) string {
 func parseCodeReviewArgs(args string) (effort string, fix, comment bool, branch string, err error) {
 	effort = "quick"
 	effortSet := false
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch {
 		case tok == "--fix":
 			fix = true
@@ -1158,7 +1158,7 @@ func reviewChoices(cwd string) []modelChoice {
 	branchCmd.Dir = cwd
 	if out, err := branchCmd.Output(); err == nil {
 		var branches []string
-		for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for b := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 			if b != "" {
 				branches = append(branches, b)
 			}
@@ -1783,7 +1783,7 @@ func cmdUpgrade(m *Model, args string) cmdResult {
 		return cmdResult{text: styleMuted.Render("/upgrade: wait for the current turn to finish")}
 	}
 	var force, dryRun bool
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch tok {
 		case "--force", "-force":
 			force = true
@@ -2135,7 +2135,7 @@ func cmdAgents(m *Model, args string) cmdResult {
 	// scoped on disk and accumulates across sessions, so an
 	// unfiltered dump grows unbounded over a project's lifetime.
 	showAll := false
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch tok {
 		case "--all", "-a":
 			showAll = true

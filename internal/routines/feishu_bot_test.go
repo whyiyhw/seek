@@ -206,7 +206,7 @@ func TestFeishuBot_TokenCachedAcrossSends(t *testing.T) {
 
 	holder := &feishuTokenHolder{appID: "app1", appSecret: "secret"}
 	target := WebhookTarget{AppID: "app1", AppSecret: "secret", ReceiveID: "oc_x"}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := sendFeishuBot(context.Background(), client, holder, target, "T", "B"); err != nil {
 			t.Fatalf("send %d: %v", i, err)
 		}
@@ -320,14 +320,12 @@ func TestFeishuBot_ConcurrentSendsShareOneTokenRefresh(t *testing.T) {
 	const n = 8
 	var wg sync.WaitGroup
 	var failCount atomic.Int64
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			if err := sendFeishuBot(context.Background(), client, holder, target, "T", "B"); err != nil {
 				failCount.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if failCount.Load() != 0 {

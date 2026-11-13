@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -699,9 +700,9 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// spawn_error rather than wrapping an empty Summary.
 		msgs := sub.Messages()
 		var summary string
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if msgs[i].Role == deepseek.RoleAssistant && len(msgs[i].ToolCalls) == 0 {
-				summary = msgs[i].Content
+		for _, msg := range slices.Backward(msgs) {
+			if msg.Role == deepseek.RoleAssistant && len(msg.ToolCalls) == 0 {
+				summary = msg.Content
 				break
 			}
 		}

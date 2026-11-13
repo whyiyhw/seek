@@ -466,18 +466,18 @@ func (m *Manager) ListFromDisk(ctx context.Context) ([]Worktree, error) {
 		if cur.Path == "" {
 			return
 		}
-		if strings.HasPrefix(cur.Path, seekRoot) {
+		if after, ok := strings.CutPrefix(cur.Path, seekRoot); ok {
 			// Recover ID from the path's first segment under
 			// worktrees/. Tail segments (e.g. nested files)
 			// shouldn't occur — git's worktree list only emits
 			// the root.
-			rel := strings.TrimPrefix(cur.Path, seekRoot)
+			rel := after
 			cur.ID = strings.SplitN(rel, string(filepath.Separator), 2)[0]
 			found = append(found, cur)
 		}
 		cur = Worktree{}
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			flush()
@@ -571,7 +571,7 @@ func (m *Manager) PruneDiscarded(ctx context.Context, olderThan time.Duration) (
 	}
 	cutoff := time.Now().UTC().Add(-olderThan)
 	pruned := 0
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

@@ -784,7 +784,7 @@ func RenderSKILLMD(cand SkillCandidate) ([]byte, error) {
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "name: %s\n", cand.Name)
 	sb.WriteString("description: |\n")
-	for _, line := range strings.Split(strings.TrimRight(cand.Description, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Description, "\n"), "\n") {
 		if line == "" {
 			sb.WriteString("\n")
 			continue

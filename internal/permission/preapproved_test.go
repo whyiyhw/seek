@@ -15,9 +15,9 @@ func TestPreApproved_BypassesAskFnForWrites(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	p, _ := New(root, PrefAsk)
-	var askCalls int32
+	var askCalls atomic.Int32
 	p.SetAskFn(func(Action) bool {
-		atomic.AddInt32(&askCalls, 1)
+		askCalls.Add(1)
 		return false // would deny, but we expect not to be called
 	})
 	// preApproved is only consulted inside WorkflowPlanExecute — the
@@ -37,7 +37,7 @@ func TestPreApproved_BypassesAskFnForWrites(t *testing.T) {
 			t.Errorf("preApproved should allow %v, got: %v", a.Kind, err)
 		}
 	}
-	if got := atomic.LoadInt32(&askCalls); got != 0 {
+	if got := askCalls.Load(); got != 0 {
 		t.Fatalf("askFn called %d times, want 0", got)
 	}
 }
@@ -101,9 +101,9 @@ func TestPreApproved_ToggleFalse(t *testing.T) {
 	t.Parallel()
 	p, _ := New(t.TempDir(), PrefAsk)
 	p.SetWorkflow(WorkflowPlanExecute)
-	var asked int32
+	var asked atomic.Int32
 	p.SetAskFn(func(Action) bool {
-		atomic.AddInt32(&asked, 1)
+		asked.Add(1)
 		return true
 	})
 	outside := filepath.Join(t.TempDir(), "x.txt")
@@ -112,7 +112,7 @@ func TestPreApproved_ToggleFalse(t *testing.T) {
 	if err := p.Check(Action{Kind: KindWrite, Path: outside}); err != nil {
 		t.Fatalf("during pre-approval: %v", err)
 	}
-	if got := atomic.LoadInt32(&asked); got != 0 {
+	if got := asked.Load(); got != 0 {
 		t.Fatalf("askFn called during pre-approval: %d", got)
 	}
 
@@ -120,7 +120,7 @@ func TestPreApproved_ToggleFalse(t *testing.T) {
 	if err := p.Check(Action{Kind: KindWrite, Path: outside}); err != nil {
 		t.Fatalf("post-revoke (askFn=true): %v", err)
 	}
-	if got := atomic.LoadInt32(&asked); got != 1 {
+	if got := asked.Load(); got != 1 {
 		t.Fatalf("askFn calls = %d, want 1 after revoke", got)
 	}
 }

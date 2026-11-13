@@ -260,7 +260,7 @@ func TestManager_UnknownJob(t *testing.T) {
 // (single close of done). Loop so -race / the panic-on-double-close has
 // many windows to fire.
 func TestManager_KillVsFinish_Race(t *testing.T) {
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		m := New()
 		j, _ := m.Launch("race")
 		j.SetKiller(func() error { return nil })
@@ -279,7 +279,7 @@ func TestManager_KillVsFinish_Race(t *testing.T) {
 func TestManager_Concurrent(t *testing.T) {
 	m := New(WithMaxJobs(64), WithRingCap(256))
 	var ids []string
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		j, err := m.Launch(fmt.Sprintf("job-%d", i))
 		if err != nil {
 			t.Fatal(err)
@@ -295,7 +295,7 @@ func TestManager_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(j *Job) {
 			defer wg.Done()
-			for k := 0; k < 100; k++ {
+			for range 100 {
 				j.Write(bytes.Repeat([]byte("x"), 10))
 			}
 		}(j)
@@ -303,17 +303,15 @@ func TestManager_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			for k := 0; k < 100; k++ {
+			for range 100 {
 				_, _ = m.Poll(id)
 			}
 		}(id)
 	}
 	// concurrent shutdown
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		time.Sleep(5 * time.Millisecond)
 		m.Shutdown()
-	}()
+	})
 	wg.Wait()
 }

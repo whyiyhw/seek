@@ -186,7 +186,7 @@ func TestGit_NotARepoLogsOnce(t *testing.T) {
 	g.queue("", "", fmt.Errorf("not a git repo")) // first rev-parse fails
 	m.runGit = g.run
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.MaybeCreateGit(context.Background(),
 			permission.Action{Kind: permission.KindWrite, Path: "foo"})
 		m.OnPreTurn(context.Background(), nil)
@@ -517,7 +517,7 @@ func TestFile_ConcurrentSnapshots(t *testing.T) {
 	sink := &recordingSink{}
 	m := newTestManager(t, sink)
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

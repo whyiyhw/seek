@@ -249,10 +249,10 @@ func TestSkillCmd_Stats_TopNDescByCount(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var entries []skillstats.Entry
 	// alpha: 5 calls; beta: 2; gamma: 1
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "alpha", Provider: "deepseek"})
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "beta", Provider: "deepseek"})
 	}
 	entries = append(entries, skillstats.Entry{TS: now, Name: "gamma", Provider: "deepseek"})

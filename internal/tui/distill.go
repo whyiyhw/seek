@@ -277,7 +277,7 @@ func (m Model) renderDistillReview() string {
 	// Standard review prompt: show the full content body indented so
 	// the user can decide informed.
 	sb.WriteString("\n")
-	for _, line := range strings.Split(strings.TrimRight(cand.Content, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Content, "\n"), "\n") {
 		sb.WriteString("    ")
 		sb.WriteString(line)
 		sb.WriteString("\n")

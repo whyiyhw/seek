@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -101,13 +102,7 @@ func canonicalArgs(raw json.RawMessage) string {
 // reminderFor returns the model-visible nudge for the count-th identical
 // call, or "" when this count is not a threshold.
 func reminderFor(name string, raw json.RawMessage, count int) string {
-	hit := false
-	for _, t := range repeatThresholds {
-		if count == t {
-			hit = true
-			break
-		}
-	}
+	hit := slices.Contains(repeatThresholds, count)
 	if !hit {
 		return ""
 	}

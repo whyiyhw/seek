@@ -272,7 +272,7 @@ func (m Model) renderSkillReview() string {
 	sb.WriteString(styleApprovalHeader.Render(header))
 	sb.WriteString("\n")
 
-	for _, line := range strings.Split(strings.TrimRight(cand.Description, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Description, "\n"), "\n") {
 		sb.WriteString(styleMuted.Render("  " + line))
 		sb.WriteString("\n")
 	}
@@ -285,7 +285,7 @@ func (m Model) renderSkillReview() string {
 		sb.WriteString(styleMuted.Render("  evidence (verbatim from this session):"))
 		sb.WriteString("\n")
 		for _, ev := range cand.Evidence {
-			for _, line := range strings.Split(strings.TrimRight(ev, "\n"), "\n") {
+			for line := range strings.SplitSeq(strings.TrimRight(ev, "\n"), "\n") {
 				sb.WriteString("    | ")
 				sb.WriteString(line)
 				sb.WriteString("\n")
@@ -293,7 +293,7 @@ func (m Model) renderSkillReview() string {
 		}
 	}
 	sb.WriteString("\n")
-	for _, line := range strings.Split(strings.TrimRight(cand.Body, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Body, "\n"), "\n") {
 		sb.WriteString("    ")
 		sb.WriteString(line)
 		sb.WriteString("\n")

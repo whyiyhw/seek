@@ -38,3 +38,4 @@
 - c_6pgin4：seek serve 常驻化：launchd plist 落 deploy + 安装说明（合并后主会话安装）
 - c_7qjnko：真删第二批：deadcode 清单剩余候选 + gofmt -s 简化点（每版一刀第 2 刀）
 - c_wsxoqk：编排 P1-c：per-agent 模型路由——子代理可指定 provider/model（三车道兑现点）
+- c_l3cw6d：seek L1 瘦身前十项已裁决（代拍批）：按 1/2/3/4/5 开减法执行卡
