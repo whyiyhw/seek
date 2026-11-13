@@ -2,6 +2,7 @@
 
 ## 已进 main、未部署
 
+- c_i2cyb7：验证基建跨仓统一：scripts/selftest.sh 注册入口（与 butler 同款协议：case 分发/--list/拒路径形态/透传退出码），登记 acp-smoke（真二进制 ndJson 冒烟——initialize/session/new 双锚/坏 cwd fail-loud/EOF 干净退出，SEEK_HOME 沙盒免 LLM）与 weight；验证车道凭既有 Bash(bash scripts/selftest.sh:*) 白名单即可跑 seek 仓验收
 - c_bnjrw5：acp D-1：session/new 的 cwd 生效——`acp.AnchorSession` 同时 chdir 进程 + `Policy.Reanchor`（git/grep/list_dir 与 read/edit/write/bash 两条解析约定一起锚定），sessionId 取项目目录名，ProjectID 按 `paths.ProjectID(abs(cwd))`；缺省仍当前目录，坏 cwd fail-loud
 - c_7hudp6：control-plane 动工前坐实三项待验证：session id 字段、print 模式权限行为、larkws ACK 形状
 - c_xcy7ff：control-plane M1a：类型层 + bindings store——Frontend/Inbound/Reply/ConvID 与原子写持久化
