@@ -215,8 +215,9 @@ func New(p *permission.Policy) Tool { return Tool{policy: p} }
 
 // WithDeny installs a command guard checked before permission/exec. When
 // the guard returns true, the command is refused with a model-visible
-// result (not a fatal error) carrying the reason. Used by autopilot to
-// deny remote ops (push / PR) in unattended subagents (v7 柱 N D2);
+// result (not a fatal error) carrying the reason. Used by the unattended
+// lanes (goal / autopilot / SEEK_ACP_YOLO ACP) to deny remote ops
+// (push / PR) while yolo keeps local work open (v7 柱 N D2);
 // composes with WithBackground. nil guard = no restriction.
 func (t Tool) WithDeny(fn func(command string) (deny bool, reason string)) Tool {
 	t.deny = fn

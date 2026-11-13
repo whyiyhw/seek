@@ -948,8 +948,13 @@ func run() error {
 	// and the model wouldn't even try bash). Env-scoped and gated on
 	// acpLane: a stray SEEK_ACP_YOLO in the shell must not silently
 	// yolo the TUI. Same "no human to ask" posture as goal/autopilot.
+	// Resolved once, consumed twice: initialPref here, and the
+	// no-remote bash guard further down (goalBash + subagent runner
+	// wiring). The guard is a property of the yolo lane specifically —
+	// a Deny ACP session (Zed) keeps the plain permission gate.
+	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
 	initialPref := permission.PrefDeny
-	if *yolo || (acpLane && acp.YoloFromEnv(os.Getenv)) {
+	if *yolo || acpYolo {
 		initialPref = permission.PrefYolo
 	}
 	initialWorkflow := permission.WorkflowNone
@@ -1155,7 +1160,12 @@ func run() error {
 	readCfg := bashCfg
 	bashEnvKeep := bashCfg.BashEnvPassthrough
 	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
-	if goalMode {
+	// No-remote guard for the unattended lanes: goal and SEEK_ACP_YOLO
+	// (docs/prd/feature-paseo-provider.md §3.3) both run yolo with no
+	// human to ask — yolo opens LOCAL edit/shell only; push/PR-class
+	// remote mutations stay blocked (double insurance with the drive
+	// cards' own "never push" sandbox discipline).
+	if goalMode || acpYolo {
 		goalBash = goalBash.WithDeny(autopilot.IsRemoteMutating)
 	}
 
@@ -1464,13 +1474,15 @@ func run() error {
 	// Detected here (after the full agent/subagent/worktree wiring is
 	// available) rather than as a cheap early subcommand. In this mode
 	// every subagent gets the no-remote bash guard for the whole run.
+	// The SEEK_ACP_YOLO lane shares the guard: subagents spawnable
+	// there must not push either (PRD paseo §3.3).
 	autopilotMode := len(os.Args) >= 2 && os.Args[1] == "autopilot"
 	autopilotGoal := ""
 	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
 		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
 	}
 	var autopilotGuard func(string) (bool, string)
-	if autopilotMode {
+	if autopilotMode || acpYolo {
 		autopilotGuard = autopilot.IsRemoteMutating
 	}
 
@@ -1560,7 +1572,15 @@ func run() error {
 	// worktree / cron itself) return before reaching this point,
 	// so `seek cron tick` doesn't trigger an inner auto-tick
 	// (no infinite recursion risk).
-	if !*noCronTick {
+	//
+	// The ACP headless lane skips as well (PRD M1, §2.3): its
+	// processes are short-lived spawns (paseo probes / Zed
+	// sessions) that kill the detached tick goroutine mid-run —
+	// a half-fired cron job risk for zero benefit. And this
+	// can't ride the flag: flag.Parse stops at the "acp"
+	// positional, so --no-cron-tick is inexpressible in that
+	// lane; acpLane gates independently.
+	if cronAutoTickEnabled(*noCronTick, acpLane) {
 		go func() {
 			cronStore, err := routines.OpenStore()
 			if err != nil {
@@ -2887,4 +2907,16 @@ func autoDistillEnabled() bool {
 func envBoolTrue(name string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+// cronAutoTickEnabled is the single gate for the startup cron auto-tick
+// goroutine (v5 柱 H). False when --no-cron-tick opts out, or when the
+// ACP headless lane runs: those processes are short-lived spawns (paseo
+// probes / Zed sessions) that kill the detached tick goroutine mid-run —
+// half-fired cron job risk, zero benefit (docs/prd/feature-paseo-provider.md
+// §2.3). The two axes are independent because --no-cron-tick cannot
+// substitute for acpLane: flag.Parse stops at the "acp" positional, so
+// the flag never reaches that lane.
+func cronAutoTickEnabled(noCronTickFlag, acpLane bool) bool {
+	return !noCronTickFlag && !acpLane
 }

@@ -31,6 +31,7 @@ func TestIsRemoteMutating_Allows(t *testing.T) {
 		"git pull",         // not a push; allowed (merges locally)
 		"gh pr view 12",    // read
 		"go test ./...",
+		"ls",
 		"echo git push is just text in a comment", // not an actual push invocation? it IS "git push" — see note
 	}
 	for _, c := range allowed[:len(allowed)-1] { // last case documents a known limitation

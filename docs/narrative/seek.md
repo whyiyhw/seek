@@ -57,9 +57,14 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
 
 - **多端**：M4/M5 已撤销（不绑飞书）；首个 frontend 选型开放——候选自建 web/HTTP
   最小 frontend（零外部依赖），未排期；新 adapter 按端口另开卡。
-- **paseo 车道**：两缺口卡已开——session/new cwd 生效（c_bnjrw5）、SEEK_ACP_YOLO
-  无头权限（c_rewul5）；落地后 butler drive `--provider seek` 最小卡验收。
+- **paseo 车道**：两缺口已落地进 main——`session/new` cwd 锚定（c_bnjrw5：`os.Chdir`
+  + `Policy.Reanchor` 双锚定，工具层两条 cwd 约定一起切）、`SEEK_ACP_YOLO` 无头权限
+  开关（c_rewul5：ACP 车道 flag 全不解析，env 在 sysprompt 之前并进 `initialPref`）；
+  paseo provider 块已接通并冒烟，butler drive `--provider seek` 可派单。**本卡
+  （c_vv2mde）即车道首单**——worktree→干活→commit→`.butler-commit.md` 写回全流程
+  跑通即验收，之后纳入常规调度池。剩余 backlog：session 多路复用、`session/load`
+  恢复、MCP 透传（docs/guide-zed.md §5 表）。
 - **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
   eval 用例随每次 dogfood 失败持续扩容。
-- **治理**：c_hi3lv5 已拍板（改，#2977），实现卡 c_gk6cb2 在飞；两缺口卡
-  （c_bnjrw5/c_rewul5）在 todo 池等巡检派发。
+- **治理**：c_hi3lv5 已拍板（改，#2977），实现卡 c_gk6cb2 在飞；paseo 两缺口卡
+  （c_bnjrw5/c_rewul5）已随 paseo 车道落地进 main。

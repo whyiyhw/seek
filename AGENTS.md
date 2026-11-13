@@ -160,3 +160,9 @@ Procedurally:
 - Body explains **why**, not what. The diff already shows what.
 - `Co-Authored-By: seek (DeepSeek) <service@deepseek.com>` trailer on AI-written commits.
 - `Pitfall: <summary>` trailer when fixing a non-obvious bug (see above).
+
+## Subtraction discipline (one cut per minor version)
+
+- Every minor version ships at least one **subtraction card** — delete code or condense docs. Acceptance is **behaviour unchanged**: `go test ./...` green and `eval/run.sh` all cases non-regressing (2026-11-13 user-approved, `docs/prd/feature-slim-loop.md`).
+- Evidence comes from the scales: `scripts/weight.sh` trends + `docs/budget.json` budgets (over budget ⇒ open a card); `go tool deadcode` candidates (`docs/notes-slim-candidates-*.md`) are the code-side queue.
+- The slim machinery itself stays under budget (≤500 LOC) — a mechanism that grows to fight growth is a bug.
