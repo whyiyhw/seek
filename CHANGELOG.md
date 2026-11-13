@@ -30,3 +30,4 @@
 - c_ur7bup：编排层差距盘点与设计：后台子代理/类型化 agent/模型路由/hooks 面（feature-orchestration.md）
 - c_23nhhr：验收：seek 车道冒烟——docs/ 下新建 tmp-paseo-acceptance.md 写一句话并 commit
 - c_4c6dar：paths.ProjectID 符号链接敏感：定口径（规范路径约定 vs 内部归一）
+- c_ajavza：首批真删（每版一刀第 1 刀）：deadcode 首扫 4 个零引用导出符号删除
