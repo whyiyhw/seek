@@ -57,6 +57,7 @@ import (
 	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
@@ -1891,6 +1892,15 @@ func run() error {
 		distiller = &memory.Distiller{Client: dsClient}
 	}
 
+	// The skill segment of /distill (feature-skill-distill M-SD1) is
+	// same-shaped: needs the DeepSeek client for extraction and the
+	// loaded skill registry for the L0/L2 dedup context. nil on
+	// second-tier providers → /distill silently stays M-only.
+	var skillDistiller *skilldistill.Distiller
+	if dsClient != nil && skills != nil {
+		skillDistiller = &skilldistill.Distiller{Client: dsClient}
+	}
+
 	// 柱 M interactive push: notify a configured webhook when a long
 	// interactive turn finishes. Reuses the cron push dispatcher; the
 	// duration gate (default 60s) comes from config. nil dispatcher when
@@ -1963,6 +1973,7 @@ func run() error {
 		ProviderName:          provLabel,
 		MemoryProject:         memProject,
 		Distiller:             distiller,
+		SkillDistiller:        skillDistiller,
 		ObserveResultChan:     observeResultChan,
 
 		RebuildAgent: func() (*agent.Agent, error) {

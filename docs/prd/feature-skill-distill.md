@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature PRD · 📐 设计稿 · 未排期（自进化内环第二块；第一块 pitfall→eval 见 butler 卡 `c_w7kob6`）
 **前置阅读**：[`v1.md`](v1.md) §6（`/distill`、`memory_observe`、auto-dream，及 M5.7「SessionEnd 调 reasoner」的弃用史）、[`v2.md`](v2.md)（skill 生命周期 + §6.1 AI 侧两段式安装）、[`docs/narrative/seek.md`](../narrative/seek.md)（自进化闭环定位）、本仓 `AGENTS.md`（「`~/.seek/skills/` 写盘只许 skillmgr/skillstats」约束）、[`internal/skill/loader.go`](../../internal/skill/loader.go)（dotfile 跳过是本设计的承重墙）、[`internal/memory/hook.go`](../../internal/memory/hook.go)（`OnSessionEnd` no-op 注释 = v1 弃用实录）
-**状态**：📐 设计稿。本文只定义设计与取舍，无代码。
+**状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）。M-SD2/SD3 未动。
 **预估工作量**：~6 天（M-SD1 ~3d / M-SD2 ~2d / M-SD3 ~1d）。
 
 > **一句话**：从会话历史里自动蒸馏「值得复用的程序性知识」，以 Anthropic skill 包**草稿**形态落进隔离草稿区；**自动路径永远不可能**把任何东西写进 loader 可见的位置——安装是且仅是人的动作。这给自进化内环补上「会话 → 能力」的出口（另一出口是 pitfall→eval 的「失败 → 回归用例」）。

@@ -25,6 +25,7 @@ import (
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -1890,7 +1891,10 @@ func startCompactCmd(m *Model) tea.Cmd {
 
 // cmdDistill runs the reasoner pass that extracts ≤3 project-level
 // decisions from the current session and surfaces them for y/n/e
-// review (PRD §6). Refuses to run mid-stream — the reasoner needs the
+// review (PRD §6), and — when the skill segment is available and the
+// session passes the L0 mechanical gate — a parallel skill-draft pass
+// whose candidates chain into the same review flow (feature-skill-
+// distill M-SD1). Refuses to run mid-stream — the reasoner needs the
 // full settled history, not a half-streamed turn. Refuses on
 // unavailable memory (--no-save, project load failure) so the user
 // gets a clear message instead of a silent no-op.
@@ -1910,14 +1914,38 @@ func cmdDistill(m *Model, _ string) cmdResult {
 			"/distill: session is too short to extract decisions yet — keep going and try again later")}
 	}
 
-	return cmdResult{
-		extra: func() tea.Msg {
+	// L0 mechanical gate for the skill segment (PRD §4): procedural
+	// knowledge needs a tool-heavy session to exist in. A session that
+	// fails the gate silently skips the skill pass — the M pass runs
+	// exactly as before; a muted note explains what was skipped and
+	// why, because "nothing happened" is indistinguishable from
+	// "broken" without it.
+	skillPass := tea.Cmd(nil)
+	if m.opts.SkillDistiller != nil && m.opts.Skills != nil {
+		gate := skilldistill.MechanicalGate(msgs)
+		if gate.Pass {
+			m.skillDistilling = true
+			m.skillDistillGate = gate.Detail
+			skillPass = startSkillDistillCmd(m)
+		} else {
 			m.distilling = true
 			m.distillSince = time.Now()
 			m.distillMsgCount = len(msgs) - 1
-			return startDistillCmd(m)()
-		},
+			return cmdResult{
+				text:  styleMuted.Render(fmt.Sprintf("/distill: skill drafts skipped — session has %s", gate.Detail)),
+				extra: startDistillCmd(m),
+			}
+		}
 	}
+
+	m.distilling = true
+	m.distillSince = time.Now()
+	m.distillMsgCount = len(msgs) - 1
+	mPass := startDistillCmd(m)
+	if skillPass == nil {
+		return cmdResult{extra: mPass}
+	}
+	return cmdResult{extra: tea.Batch(mPass, skillPass)}
 }
 
 // startDistillCmd runs the reasoner round-trip in a tea.Cmd. The 90s
