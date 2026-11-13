@@ -1,0 +1,1 @@
+Read the first 5 lines of README.md in the current directory, then reply with exactly: GLM LANE OK
