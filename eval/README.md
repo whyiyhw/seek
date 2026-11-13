@@ -109,6 +109,23 @@ Optional per-case hooks (run from the repo root, same cwd as the seek invocation
 
 Results are checked into git so you can `git log eval/results/` and watch how the agent's behaviour drifts as the codebase, prompts, or model versions change. A single PASS does not mean the bug is fixed; a sustained PASS rate across many runs does.
 
+## Trend reports
+
+`scripts/eval-trend.sh` aggregates every `results/*.jsonl` into
+`trend-report.md` + `trend-report.json` (both checked in, regenerated on
+demand): per-case last-5 pass rate, first-failure time, consecutive-failure
+streak, and drift-suspect flags — most notably `suspect:gap-uncovered`
+(failing run whose previous coverage was >30 days earlier: the failure date
+is only an **upper bound** on when behaviour drifted — the bash-overreach
+lesson) and `suspect:no-baseline` (case with ≤5 recorded runs, first run
+<30 days old, already failing). `--selftest` drives the whole flag matrix
+from a fake results dir. Env knobs (`TREND_WINDOW`, `TREND_GAP_DAYS`,
+`TREND_NOW`, …) are documented in the script header.
+
+Note for tooling: the early result files (pre v0.5) are pretty-printed
+concatenated JSON objects — one result spans many lines — so readers must
+parse with jq, never line-by-line (see `docs/pitfalls.md`).
+
 ## Cost
 
 Each pass is one full `seek` invocation against DeepSeek's API. Budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out. The full 3-case suite is well under $0.20.
