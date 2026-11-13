@@ -50,3 +50,6 @@ bench-*.json
 .seek/project-id
 .tmp/  
 .zcode/
+
+# weight.sh trend files (subtraction mechanism L1) — local only by design
+/out/
