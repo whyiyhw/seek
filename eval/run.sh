@@ -141,6 +141,21 @@ extract_metric() {
       # eval's prompts are read-only, so 0 is the correct target there.
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash" and ((.args // "") | test("(^|[;&|[:space:]\"])git([[:space:]]|$)")))] | length' "$path"
       ;;
+    bash_before_dedicated)
+      # Bash calls made BEFORE the first dedicated read/grep call —
+      # bash as FIRST resort. Ordering is the honest anti-pattern
+      # signal when a case's task legitimately forces shell recovery
+      # LATER (e.g. read elided an over-1024-byte line and verbatim
+      # text needs awk/sed): a total bash_calls bound cannot tell
+      # recovery from overreach, this can. No grep/read at all →
+      # every bash call counts (sentinel index past the array end).
+      $JQ -s '
+        [ .[] | select(.type=="tool_start") ] as $ts
+        | [ range(0; $ts|length) as $i | select($ts[$i].name=="grep" or $ts[$i].name=="read") | $i ] as $ded_idx
+        | ( if ($ded_idx|length) > 0 then $ded_idx[0] else 999999999 end ) as $first_ded
+        | [ range(0; $ts|length) as $i | select($ts[$i].name=="bash" and $i < $first_ded) ] | length
+      ' "$path"
+      ;;
     probe_reads)
       # A read that returned zero lines from a non-starting offset is a
       # probe past EOF — the model could not tell "exactly N lines" from
@@ -326,6 +341,7 @@ run_one() {
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
     --argjson bash_git_calls       "$(extract_metric bash_git_calls       "$out_file")" \
+    --argjson bash_before_dedicated "$(extract_metric bash_before_dedicated "$out_file")" \
     --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
     --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
     --argjson git_subcommand_dupes "$(extract_metric git_subcommand_dupes "$out_file")" \
@@ -340,7 +356,7 @@ run_one() {
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

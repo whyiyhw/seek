@@ -1,8 +1,9 @@
 {
-  "description": "Three-file read task solvable with grep+read; git show and bash should not be needed.",
+  "description": "Three-file read task solvable with grep+read up to read's 1024-byte line cap; git show should not be needed, and bash only AFTER the dedicated tools as elision recovery (bash.go:37 is 1059 B > cap — see README drift history).",
   "max_turns": 12,
   "max_git_calls": 0,
-  "max_bash_calls": 0,
+  "max_bash_calls": 4,
+  "max_bash_before_dedicated": 0,
   "min_grep_calls": 1,
   "min_read_calls": 3
 }
