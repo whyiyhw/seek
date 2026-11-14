@@ -398,6 +398,37 @@ func TestExtract_GreyCandidateCarriesNote(t *testing.T) {
 	}
 }
 
+// Every drop site must attribute its stage — the /distill --dry-run
+// report tallies layer hits off Rejection.Stage, so an unattributed
+// rejection would silently vanish from the tally.
+func TestExtract_RejectionStages(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "repro-flaky-tui-first", Description: "already installed"})
+	raw := `[
+  {"name":"Bad_Name","description":"d","body":"b","evidence":["--- FAIL: TestFlaky"]},
+  {"name":"ghost-proc","description":"d","body":"b","evidence":["quote that never appeared"]},
+  {"name":"repro-flaky-tui-first","description":"dup","body":"b","evidence":["--- FAIL: TestFlaky"]}
+]`
+	d := &Distiller{Client: chatWith(raw)}
+	kept, rejected, err := d.Extract(context.Background(), extractionHistory(), "", nil, set)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(kept) != 0 || len(rejected) != 3 {
+		t.Fatalf("kept=%d rejected=%d, want 0/3", len(kept), len(rejected))
+	}
+	want := map[string]string{
+		"Bad_Name":              StageShape,
+		"ghost-proc":            StageEvidence,
+		"repro-flaky-tui-first": StageL2,
+	}
+	for _, r := range rejected {
+		if r.Stage != want[r.Name] {
+			t.Errorf("rejection %q: Stage = %q, want %q", r.Name, r.Stage, want[r.Name])
+		}
+	}
+}
+
 func TestExtract_ClientErrors(t *testing.T) {
 	d := &Distiller{Client: &fakeChatClient{err: errors.New("boom")}}
 	if _, _, err := d.Extract(context.Background(), extractionHistory(), "", nil, nil); err == nil {

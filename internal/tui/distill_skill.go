@@ -17,6 +17,11 @@ package tui
 // reviews ⚡ entries, then 🛠 entries — the PRD's "skill candidates
 // are reviewed after the M candidates" sequencing without a serial
 // second round-trip.
+//
+// /distill --dry-run (card c_oh2dl3) is the preview twin of the skill
+// segment: same funnel, same rejection lines, but the result lands in
+// renderSkillDryRunReport instead of the modal — layer verdicts +
+// truncated draft previews, zero writes, no M pass.
 
 import (
 	"context"
@@ -33,41 +38,58 @@ import (
 // skillDistillDoneMsg fires when the skill-extraction reasoner pass
 // returns. rejected carries the funnel's drops (shape validation,
 // evidence verification, L2 mechanical dedup) with reasons — printed
-// as muted lines so the funnel stays observable.
+// as muted lines so the funnel stays observable. dryRun marks a
+// /distill --dry-run pass: the handler prints the funnel report and
+// draft previews instead of opening the review modal — nothing is
+// ever written.
 type skillDistillDoneMsg struct {
 	candidates []skilldistill.SkillCandidate
 	rejected   []skilldistill.Rejection
 	err        error
+	dryRun     bool
 }
 
 // handleSkillDistillDone is the entry point for the async skill pass.
-// Err → one error line; gate empty / funnel rejected everything →
-// one muted line (the funnel working is not a failure); survivors →
-// queue for review, chained after any still-open M review.
+// Err → one error line (same line in both modes); dry-run → the
+// report-only path (renderSkillDryRunReport); gate empty / funnel
+// rejected everything → one muted line (the funnel working is not a
+// failure); survivors → queue for review, chained after any
+// still-open M review.
 func (m *Model) handleSkillDistillDone(msg skillDistillDoneMsg) []tea.Cmd {
 	m.skillDistilling = false
 
 	if msg.err != nil {
 		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! skill distill failed: " + msg.err.Error()))}
 	}
+	if msg.dryRun {
+		return []tea.Cmd{m.appendHistory(renderSkillDryRunReport(
+			m.skillDistillGate, msg.candidates, msg.rejected))}
+	}
+
+	// NOTE: appendHistory RETURNS the tea.Cmd that actually prints —
+	// calling it as a bare statement silently drops the line (that is
+	// exactly the bug this loop carried until /distill --dry-run made
+	// the rejection lines a comparison surface; see docs/pitfalls.md).
+	var cmds []tea.Cmd
 	for _, r := range msg.rejected {
-		m.appendHistory(styleMuted.Render("  · skill candidate rejected — " + r.String()))
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  · skill candidate rejected — "+r.String())))
 	}
 	if len(msg.candidates) == 0 {
 		if len(msg.rejected) == 0 {
-			return []tea.Cmd{m.appendHistory(styleMuted.Render("  · skill distill: no reusable procedure found in this session"))}
+			cmds = append(cmds, m.appendHistory(styleMuted.Render("  · skill distill: no reusable procedure found in this session")))
 		}
-		return nil
+		return cmds
 	}
 
 	if m.distillReviewOpen {
 		// M review in progress — hold the skill candidates; the M
 		// review's exit chains into opening this one.
 		m.pendingSkill = append(m.pendingSkill, msg.candidates...)
-		return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf(
-			"  · skill distill: %d draft candidate(s) queued behind the memory review", len(msg.candidates))))}
+		cmds = append(cmds, m.appendHistory(styleMuted.Render(fmt.Sprintf(
+			"  · skill distill: %d draft candidate(s) queued behind the memory review", len(msg.candidates)))))
+		return cmds
 	}
-	return m.openSkillReview(msg.candidates)
+	return append(cmds, m.openSkillReview(msg.candidates)...)
 }
 
 // openSkillReview starts (or chains into) the skill review modal.
@@ -304,10 +326,125 @@ func (m Model) renderSkillReview() string {
 	return sb.String()
 }
 
+// skillDryRunBodyPreviewLines caps the per-candidate body preview in
+// the /distill --dry-run report — enough to judge a draft's shape
+// without flooding scrollback; the full body shows in the real run's
+// review modal.
+const skillDryRunBodyPreviewLines = 20
+
+// renderSkillDryRunReport renders the /distill --dry-run completion
+// report (butler card c_oh2dl3): the same rejection lines the real
+// run prints (byte-identical, so a dry run and a real run can be
+// diffed side by side), a one-line tally of every funnel layer's
+// verdict (L0 gate · L1 extraction yield · per-stage drops), and one
+// preview block per survivor shaped like the review modal but with
+// the body truncated. Pure function of its inputs — the handler
+// appends the result to scrollback verbatim, and the tests assert on
+// it directly.
+func renderSkillDryRunReport(gateDetail string, kept []skilldistill.SkillCandidate, rejected []skilldistill.Rejection) string {
+	var sb strings.Builder
+	for _, r := range rejected {
+		sb.WriteString(styleMuted.Render("  · skill candidate rejected — " + r.String()))
+		sb.WriteString("\n")
+	}
+
+	var shape, evidence, l2, grey int
+	for _, r := range rejected {
+		switch r.Stage {
+		case skilldistill.StageShape:
+			shape++
+		case skilldistill.StageEvidence:
+			evidence++
+		case skilldistill.StageL2:
+			l2++
+		}
+	}
+	for _, c := range kept {
+		if c.L2Note != "" {
+			grey++
+		}
+	}
+	// L0 is always PASS here — a failing gate never starts the pass
+	// (cmdDistillDryRun cuts early with the same skip line the real
+	// run prints). The report states it anyway so every layer has a
+	// verdict on the page.
+	l0 := "L0 PASS"
+	if gateDetail != "" {
+		l0 += " — " + gateDetail
+	}
+	fmt.Fprintf(&sb, "%s\n", styleMuted.Render(fmt.Sprintf(
+		"  · skill dry-run funnel: %s · L1 extraction returned %d candidate(s) · drops shape %d / evidence %d / L2 %d · would-draft %d (grey %d)",
+		l0, len(kept)+len(rejected), shape, evidence, l2, len(kept), grey)))
+
+	for i, cand := range kept {
+		header := fmt.Sprintf("🛠 skill candidate %d/%d: %s — dry-run, nothing written",
+			i+1, len(kept), cand.Name)
+		sb.WriteString(styleApprovalHeader.Render(header))
+		sb.WriteString("\n")
+
+		for line := range strings.SplitSeq(strings.TrimRight(cand.Description, "\n"), "\n") {
+			sb.WriteString(styleMuted.Render("  " + line))
+			sb.WriteString("\n")
+		}
+		if cand.L2Note != "" {
+			sb.WriteString(styleErr.Render("  ⚠ L2: GREY — " + cand.L2Note))
+		} else {
+			sb.WriteString(styleMuted.Render("  L2: PASS"))
+		}
+		sb.WriteString("\n")
+
+		if len(cand.Evidence) > 0 {
+			sb.WriteString("\n")
+			sb.WriteString(styleMuted.Render("  evidence (verbatim from this session):"))
+			sb.WriteString("\n")
+			for _, ev := range cand.Evidence {
+				for line := range strings.SplitSeq(strings.TrimRight(ev, "\n"), "\n") {
+					sb.WriteString("    | ")
+					sb.WriteString(line)
+					sb.WriteString("\n")
+				}
+			}
+		}
+		sb.WriteString("\n")
+
+		// The draft preview proper: the SKILL.md this candidate WOULD
+		// become, rendered in memory (never on disk). A render failure
+		// here is exactly the failure 'y' would hit in the real
+		// review — surface it now so the dry run can't preview a
+		// draft that can't be saved.
+		if _, err := skilldistill.RenderSKILLMD(cand); err != nil {
+			sb.WriteString(styleErr.Render(fmt.Sprintf("  ⚠ would fail to render: %v", err)))
+			sb.WriteString("\n")
+		} else {
+			lines := strings.Split(strings.TrimRight(cand.Body, "\n"), "\n")
+			for _, line := range lines[:min(len(lines), skillDryRunBodyPreviewLines)] {
+				sb.WriteString("    ")
+				sb.WriteString(line)
+				sb.WriteString("\n")
+			}
+			if rem := len(lines) - skillDryRunBodyPreviewLines; rem > 0 {
+				sb.WriteString(styleMuted.Render(fmt.Sprintf(
+					"    … (+%d more body lines — full body shows in the real review)", rem)))
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	if len(kept) == 0 && len(rejected) == 0 {
+		sb.WriteString(styleMuted.Render("  · skill distill: no reusable procedure found in this session (dry-run — nothing written)"))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+	fmt.Fprintf(&sb, "%s\n", styleMuted.Render(fmt.Sprintf(
+		"  · dry-run done: %d draft(s) would be produced — nothing written; rerun /distill to review and save", len(kept))))
+	return sb.String()
+}
+
 // startSkillDistillCmd runs the skill-extraction round-trip as a
 // tea.Cmd. Same 90s bound and parent-ctx propagation as the M pass —
-// one reasoner round-trip, no tool loop.
-func startSkillDistillCmd(m *Model) tea.Cmd {
+// one reasoner round-trip, no tool loop. dryRun rides along on the
+// done-msg so the handler routes to the report instead of the modal.
+func startSkillDistillCmd(m *Model, dryRun bool) tea.Cmd {
 	distiller := m.opts.SkillDistiller
 	history := m.opts.Agent.Messages()
 	parentCtx := m.opts.Ctx
@@ -329,6 +466,6 @@ func startSkillDistillCmd(m *Model) tea.Cmd {
 		ctx, cancel := context.WithTimeout(parentCtx, 90*time.Second)
 		defer cancel()
 		kept, rejected, err := distiller.Extract(ctx, history, manifest, mIndex, skills)
-		return skillDistillDoneMsg{candidates: kept, rejected: rejected, err: err}
+		return skillDistillDoneMsg{candidates: kept, rejected: rejected, err: err, dryRun: dryRun}
 	}
 }

@@ -348,6 +348,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: before shipping a key-triggered clipboard feature on Windows, probe that the KEY itself arrives in a stock terminal — "text paste works" proves nothing (the terminal did it, not the app). And when every chord gets intercepted, instrument what the terminal DOES emit: the empty paste event it couldn't help sending was the only faithful carrier of the user's intent — sometimes the interception leaks its own signal
 - **Refs**: `internal/tui/update_key.go` (dual binding), `internal/tui/imgpaste_test.go:TestHandleKey_PasteKeys_ReachImageGrab`, `docs/guide-windows.md` (paste-image section)
 
+### Bare `m.appendHistory(...)` as a statement drops the line — same disease as `_ = tea.Println`
+- **Saw**: /distill's skill-segment rejection lines ("· skill candidate rejected — …") never appeared in scrollback despite the handler visibly calling appendHistory for each. Surfaced while building `/distill --dry-run`, whose entire value is diffing those lines against a real run — the real run's half of the diff was empty
+- **Why**: sibling of the `_ = tea.Println(line)` entry above. `appendHistory` doesn't buffer anything — it RETURNS the `tea.Println` cmd that does the printing. The rejection loop called it as a bare statement inside a `[]tea.Cmd`-returning handler, so the cmds fell on the floor. Compiles clean, vet is silent (Go doesn't flag unused call results), no test asserted the lines printed
+- **Fix**: collect the cmds and return them (`cmds = append(cmds, m.appendHistory(...))`); pinned by `TestHandleSkillDistillDone_RejectionCmdsAreReturned`. Commit (this one)
+- **Lesson**: `appendHistory` is print-via-Cmd, not a buffer append. In a `[]tea.Cmd`-returning handler, every appendHistory call must be wired into the returned slice — a bare call is a silent no-op. When a handler's job is emitting lines, assert on the returned cmds' count, not just the model state
+- **Refs**: `internal/tui/distill_skill.go:handleSkillDistillDone`, `internal/tui/model.go:appendHistory` (doc comment spells out the contract), `internal/tui/distill_skill_dryrun_test.go`
+
 ---
 
 ## Agent loop
