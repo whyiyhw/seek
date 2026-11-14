@@ -20,9 +20,9 @@ All slash commands, key bindings, and CLI flags.
 | `/branch` | | Fork this session (new ID, parent link) |
 | `/compact` | | Summarise prior history to free up context |
 | `/checkpoints` | | List git checkpoints for current session |
-| `/distill` | | Extract project decisions → M memory |
+| `/distill` | | /distill [--dry-run] — extract project decisions into M memory (per-candidate y/n/e); --dry-run previews the skill-draft funnel, nothing written |
 | `/skills` | | List loaded skills with source paths |
-| `/skill` | `/skill <verb> [args]` | Manage skill packages (install, uninstall, list, …) |
+| `/skill` | `/skill <verb> [args]` | Manage skill packages (install, uninstall, list, drafts, …) |
 | `/memory` | `/memory <verb> [args]` | Inspect project memory (list, show, search, archive) |
 | `/setup` | | Re-run the API-key configuration wizard |
 | `/upgrade` | `/upgrade [--force] [--dry-run]` | Download latest release and replace binary |
@@ -79,11 +79,14 @@ seek --version              # Print version and exit
 ```bash
 seek goal run "<condition>"       # Unattended multi-turn task
 seek autopilot run "<goal>"        # Multi-agent parallel orchestration
+seek serve                         # Remote control plane (--frontend=web ships)
+seek acp                           # Agent Client Protocol server (Zed, …)
 seek cron create ...               # Schedule a recurring job
 seek cron list                     # List scheduled jobs
 seek cron tick                     # Manually trigger due jobs
 seek skill install <path|url>      # Install a skill
 seek skill list                    # List installed skills
+seek skill drafts                  # Review distilled skill drafts (list/preview/approve)
 seek checkpoint list               # List git checkpoints
 seek checkpoint restore <turn>     # Restore working tree
 seek undo                          # Undo last file write/edit (CLI)
@@ -106,5 +109,6 @@ seek worktree gc                   # Garbage-collect stale worktrees
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `GEMINI_API_KEY` | Gemini API key |
+| `GLM_API_KEY` | Zhipu bigmodel.cn API key (glm provider) |
 | `SEEK_HOME` | Override `~/.seek/` location |
 | `SEEK_WEBFETCH_ALLOW_HTTP=1` | Allow http:// URLs in webfetch (dev only) |

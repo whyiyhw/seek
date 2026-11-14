@@ -13,7 +13,7 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - **`/distill` — session → skill draft**. Distill the current session transcript into a SKILL.md draft under `~/.seek/skills/.drafts/` — drafts land in a dot directory no session ever loads, and installing one stays an explicit human `seek skill install`. Preview without writing anything via `/distill --dry-run`; review drafts on the CLI with `/skill drafts` (list · preview · approve-install). The opt-in auto path (batch-distill on session start) never installs on its own.
 - **ACP headless hardening**. The `cwd` your editor passes with `session/new` now anchors every tool to that workspace (git, grep, read/edit/write/bash alike). For unattended runs, `SEEK_ACP_YOLO=1` auto-approves local actions while still blocking remote-mutating bash commands, and skips the cron auto-tick.
 - **Fixed**: write/edit permission checks misjudged relative paths as "outside the workspace" whenever the shell sat behind a symlink (macOS `/tmp` → `/private/tmp` being the common case), wrongly denying edits. Both sides of the check now resolve symlinks through the same pipeline.
-- **Quality**: behavioral eval suite grew 14 → 20 cases (session-id contract, print-mode permission semantics, tool-selection and edit-fallback regressions); three dead-code / gofmt / modernize sweeps.
+- **Quality**: behavioral eval suite grew 14 → 21 cases (session-id contract, print-mode permission semantics, tool-selection and edit-fallback regressions, glm-lane contract); three dead-code / gofmt / modernize sweeps.
 
 ## 已进 main、未部署
 - c_r5dm2f：v0.11 发布准备：版本号 + CHANGELOG 汇总 + tag 草稿（发版动作留人）
