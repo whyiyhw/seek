@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
 </p>
 
 <p align="center">
-  <strong>不是又一个 agent demo——而是一个本地 agent 平台：会规划、能派出一队子代理、在你睡觉时把活干完。</strong>
+  <strong>不是又一个 agent demo——而是一个本地 agent 平台：终端、浏览器、IDE、无头车队皆可驱动；跑完的会话可蒸馏成 skill；任务在三条成本车道间路由。</strong>
 </p>
 
 <p align="center">
@@ -14,13 +14,17 @@
   &nbsp;·&nbsp; <a href="README.md">English</a>
 </p>
 
-一个编码 agent，以单个 **静态 Go 二进制** 跑在你的终端里——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，**GLM**（独立计价卡）与 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）也在列。
+整个平台就是单个 **静态 Go 二进制**——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端**——v0.11 起立在三根轴上：
+
+- **多端驱动。** 原生终端 TUI · 浏览器聊天页（`seek serve --frontend=web`——内嵌页面、SSE 流式、token 认证）· IDE（`seek acp` 接 Zed 等 ACP 客户端、`seek -rpc` JSON-RPC 2.0）· 无头车道：无人值守 ACP 下，派单方传来的 `cwd` 锚定所有工具，`SEEK_ACP_YOLO=1` 自动放行本地动作、照堵 push/PR——seek 自身已作为一个派单车道跑在 ACP 编排器（paseo）之下。
+- **自蒸馏 skill。** `/distill` 把跑完的会话蒸馏成可人审的 SKILL.md 草稿——`--dry-run` 先预览、草稿落在任何会话都不加载的目录、安装永远是一步显式的人工动作。下个月的 agent 带着这个月的教训上岗。
+- **三条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价 · OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
 
 ---
 
 ## seek 与众不同之处
 
-标语里的三句话，每句都有已落地的代码兜底：
+平台的三个承重行为，每个都有已落地的代码兜底：
 
 - **🧭 先规划，再动手** — `/plan` 把工作卡在 `分析 → 提方案 → 你批准 → 执行` 之后。批准前全程只读；执行中你可以中途插话，它会**在不重做已完成步骤的前提下**重新规划。状态从 transcript 重建，所以 `seek -resume` 能精确续上原计划。
 - **👥 派出一队子代理** — 把任务扇出给子代理，**并行执行、各自隔离在独立 git worktree** 里，互不踩踏。权限单调收紧（子永远不松于父），成本自动累加到父 agent 状态栏。用 `/agents` · `/worktrees` 实时观察。→ [文档](docs/guide-subagent.md)
@@ -30,18 +34,18 @@
 
 ## 亲眼看它跑 —— 这些文档是 seek 自己审计的
 
-我们只给了 seek 一个目标——*"审计代码库文档的准确性、修正它们、并把我们的踩坑日志织进 book"*——然后走开。它自己规划、**派出一队子代理**、改了 **33 个文件、覆盖全部 24 个 book 章节**,直到一个便宜模型判定目标达成才停:**120 轮 · 212 次工具调用 · 干净构建 · 97.7% 缓存命中 · $0.17。** 真实跑批,未剪辑(仅加速):
+我们只给了 seek 一个目标——*"审计代码库文档的准确性、修正它们、并把我们的踩坑日志织进 book"*——然后走开。它自己拆解任务、**把 explorer 子代理扇出到整个代码库**、改了 **33 个文件、覆盖全部 24 个 book 章节**，直到一个便宜模型判定目标达成才停：**120 轮 · 212 次工具调用 · 干净构建 · 97.7% 缓存命中 · $0.17。** 真实跑批，未剪辑（仅加速），录制于 v0.8 构建——`/goal` 循环、子代理扇出与判定收尾的机制与今天发布的版本一致：
 
-**1 · 先规划,再派出一队子代理**
-<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek plans the task, then fans out explore sub-agents" width="820"></p>
+**1 · 拆解目标，再派出 explorer 子代理**
+<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek maps the repo structure, then dispatches an explorer sub-agent" width="820"></p>
 
 **2 · 跨整个代码库自治干活**
 <p align="center"><img src="examples/demo-edit.gif" alt="seek edits doc comments and weaves pitfalls into book chapters" width="820"></p>
 
 **3 · 直到便宜模型判定目标达成**
-<p align="center"><img src="examples/demo-goalmet.gif" alt="goal met after 3 turns, clean build, $0.17" width="820"></p>
+<p align="center"><img src="examples/demo-goalmet.gif" alt="goal judge: met after 3 passes — 120 turns, 212 tools, clean build, $0.17" width="820"></p>
 
-本 PR 里的每一处文档改动,都出自那一次 **$0.17** 的跑批。录制脚本:[`examples/demo-fullrun.tape`](examples/demo-fullrun.tape)。
+33 个文件的改动全部出自那一次 **$0.17** 的跑批。录制脚本：[`examples/demo-fullrun.tape`](examples/demo-fullrun.tape)。
 
 ---
 
@@ -92,7 +96,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **操作系统沙箱** | seatbelt（macOS）/ landlock（Linux）——内核级隔离，零运行时依赖。[📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | 通过 Agent Client Protocol 把 seek 当编辑器 agent 跑。[📘](docs/guide-zed.md) |
 | **远程控制平面** | `seek serve` ——常驻单进程；浏览器即可驱动（内置 web 聊天页：SSE 流式 + token 认证），任何聊天渠道经 `Frontend` 端口接入。[📘](docs/guide-serve.md) |
-| **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装。[📘](docs/guide-skills.md) |
+| **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装；`/distill` 可从你自己的会话蒸馏新 skill 草稿。[📘](docs/guide-skills.md) |
 | **三层记忆** | 会话 · 项目（衰减分 GC）· 跨项目「soul」（`seek -dream`）。[📘](docs/guide-memory.md) |
 | **Checkpoint** | 每 turn git 快照 + 文件级 `/undo` `/redo` `/restore`。[📘](docs/guide-checkpoint.md) |
 | **后台任务** | 长 build/server 丢后台 → `bg-N`；`monitor` poll / wait / kill。[📘](docs/guide-background.md) |

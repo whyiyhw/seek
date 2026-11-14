@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-label="seek — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-label="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes">
   <!-- terminal window -->
   <rect x="0" y="0" width="1200" height="340" rx="18" fill="#0b0b0e"/>
   <rect x="0.75" y="0.75" width="1198.5" height="338.5" rx="17.25" fill="none" stroke="#26262e" stroke-width="1.5"/>
@@ -14,7 +14,7 @@
   <rect x="320" y="94" width="36" height="56" rx="2" fill="#f5a623" opacity="0.4"/>
 
   <!-- tagline (short; full version is the text line below the banner) -->
-  <text x="66" y="206" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#c3c3cf">plans · spawns a sub-agent team · ships while you sleep</text>
+  <text x="66" y="206" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#c3c3cf">one binary · every surface · self-distilling · three cost lanes</text>
 
   <!-- prompt line -->
   <text x="66" y="260" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#e6e6ec"><tspan fill="#f5a623">$</tspan> seek goal run <tspan fill="#9ad14b">"ship it"</tspan>  <tspan fill="#6b6b78"># then go to sleep</tspan></text>

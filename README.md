@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
 </p>
 
 <p align="center">
-  <strong>Not an agent demo — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep.</strong>
+  <strong>Not an agent demo — a local agent platform: drive it from a terminal, browser, IDE, or a headless fleet; it distills its own sessions into skills; it routes work across three cost lanes.</strong>
 </p>
 
 <p align="center">
@@ -14,7 +14,11 @@
   &nbsp;·&nbsp; <a href="README.zh.md">中文</a>
 </p>
 
-A coding agent that runs as a single **static Go binary** in your terminal — a **~6 MB download**, **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend.** Bring your own model key: **DeepSeek-first**, **GLM** (own pricing card) alongside OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …).
+The whole platform is one **static Go binary** — a **~6 MB download**, **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend** — and as of v0.11 it stands on three axes:
+
+- **Every surface.** Native terminal TUI · browser chat (`seek serve --frontend=web` — embedded page, SSE streaming, token auth) · IDE (`seek acp` for Zed and other ACP clients, `seek -rpc` JSON-RPC 2.0) · headless lanes: unattended ACP where the dispatcher's `cwd` anchors every tool and `SEEK_ACP_YOLO=1` auto-approves local actions while push/PR stay blocked — seek itself runs as a dispatch lane under an ACP fleet manager (paseo).
+- **Self-distilling skills.** `/distill` turns a finished session into a reviewable SKILL.md draft — `--dry-run` previews it, drafts sit in a directory no session loads, and installing one stays an explicit human action. Next month's agent carries this month's lessons.
+- **Three cost lanes.** Bring your own key: **DeepSeek-first** per-token (measured 95–97% prefix-cache hits) · **GLM** on its own pricing card · OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …) as the fallback lane — and sub-agents can ride a cheaper lane than their parent.
 
 > **30-second version** — It's Claude Code / aider territory, but **DeepSeek-first**: the autonomous run that audited and fixed *these very docs* (33 files, 212 tool calls) cost **$0.17** at a **97.7% prefix-cache hit**. One binary, your own key, nothing phones home. Scroll down to watch that exact run ↓
 
@@ -22,7 +26,7 @@ A coding agent that runs as a single **static Go binary** in your terminal — a
 
 ## Why seek is different
 
-The three claims in the tagline, each backed by shipping code:
+The three behaviors that carry the platform, each backed by shipping code:
 
 - **🧭 Plans before it acts** — `/plan` gates work behind `analyze → propose → you approve → execute`. Read-only until you approve a step-by-step task list; push back mid-run and it re-plans *without redoing finished work*. State rebuilds from the transcript, so `seek -resume` resumes the plan exactly where it left off.
 - **👥 Spawns a team of sub-agents** — fans a task out to sub-agents that run **in parallel, each isolated in its own git worktree** so they never collide. Permissions narrow monotonically; cost aggregates to the parent's status bar. Watch live with `/agents` · `/worktrees`. → [guide](docs/guide-subagent.md)
@@ -32,18 +36,18 @@ The three claims in the tagline, each backed by shipping code:
 
 ## See it run — these docs were audited by seek itself
 
-We handed seek one goal — *"audit the codebase docs for accuracy, fix them, and weave our pitfalls log into the book"* — and walked away. It planned the work, **spawned a team of sub-agents**, edited **33 files across all 24 book chapters**, and stopped only when a cheap judge confirmed the goal was met: **120 turns · 212 tool calls · clean build · 97.7% cache hit · $0.17.** Real run, unedited (just sped up):
+We handed seek one goal — *"audit the codebase docs for accuracy, fix them, and weave our pitfalls log into the book"* — and walked away. It decomposed the job itself, **fanned explorer sub-agents out over the codebase**, edited **33 files across all 24 book chapters**, and stopped only when a cheap judge confirmed the goal was met: **120 turns · 212 tool calls · clean build · 97.7% cache hit · $0.17.** Real run, unedited (just sped up), recorded on a v0.8 build — the `/goal` loop, sub-agent fan-out, and judge verdict are the same mechanics shipping today:
 
-**1 · Plans, then spawns a team of sub-agents**
-<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek plans the task, then fans out explore sub-agents" width="820"></p>
+**1 · Decomposes the goal, then dispatches explorer sub-agents**
+<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek maps the repo structure, then dispatches an explorer sub-agent" width="820"></p>
 
 **2 · Works autonomously across the codebase**
 <p align="center"><img src="examples/demo-edit.gif" alt="seek edits doc comments and weaves pitfalls into book chapters" width="820"></p>
 
 **3 · …until a cheap judge says the goal is met**
-<p align="center"><img src="examples/demo-goalmet.gif" alt="goal met after 3 turns, clean build, $0.17" width="820"></p>
+<p align="center"><img src="examples/demo-goalmet.gif" alt="goal judge: met after 3 passes — 120 turns, 212 tools, clean build, $0.17" width="820"></p>
 
-Every doc change in this PR came from that single **$0.17** run. The recording recipe is [`examples/demo-fullrun.tape`](examples/demo-fullrun.tape).
+All 33 file edits came from that single **$0.17** run. The recording recipe is [`examples/demo-fullrun.tape`](examples/demo-fullrun.tape).
 
 ---
 
@@ -94,7 +98,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **OS sandbox** | seatbelt (macOS) / landlock (Linux) — kernel-level confinement, zero runtime deps. [📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | run seek as an editor agent via the Agent Client Protocol. [📘](docs/guide-zed.md) |
 | **Remote control plane** | `seek serve` — one resident process; drive seek from a browser (bundled web chat: SSE streaming, token auth) or any chat channel via the `Frontend` port. [📘](docs/guide-serve.md) |
-| **Portable skills** | Anthropic Agent Skills format — any Claude Code skill installs unmodified. [📘](docs/guide-skills.md) |
+| **Portable skills** | Anthropic Agent Skills format — any Claude Code skill installs unmodified; `/distill` drafts new skills from your own sessions. [📘](docs/guide-skills.md) |
 | **Three-tier memory** | session · project (decay-score GC) · cross-project "soul" (`seek -dream`). [📘](docs/guide-memory.md) |
 | **Checkpoints** | per-turn git snapshot + file-level `/undo` `/redo` `/restore`. [📘](docs/guide-checkpoint.md) |
 | **Background jobs** | detach long builds/servers → `bg-N`; `monitor` polls / waits / kills. [📘](docs/guide-background.md) |
