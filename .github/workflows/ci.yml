@@ -1,8 +1,16 @@
 name: CI
 
+# Trigger policy (2026-11-14, user decision): merges to main are gated LOCALLY
+# (butler drive merge runs `go test` before landing), so a per-push matrix here
+# duplicated that gate dozens of times a day. CI now runs:
+#   - workflow_dispatch  — on-demand verification pass (the "验证阶段")
+#   - schedule nightly   — once-a-day cross-OS drift catch (cheap middle ground)
+#   - pull_request       — fork/contributor signal, unchanged (keyless, always-green)
+#   - release-time full pass — owned by release.yml on v* tags (unchanged)
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 19 * * *'  # 03:17 Beijing daily
   pull_request:
 
 jobs:

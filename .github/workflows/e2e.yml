@@ -21,8 +21,6 @@ name: e2e (real API)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
   schedule:
     # 00:17 UTC = 08:17 Asia/Shanghai. Catches external-API drift (model
     # deprecation, response-shape changes, cache behaviour) on a schedule
