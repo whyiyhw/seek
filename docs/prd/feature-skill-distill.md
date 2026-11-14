@@ -3,7 +3,7 @@
 **所属版本**：独立 feature PRD · 📐 设计稿 · 未排期（自进化内环第二块；第一块 pitfall→eval 见 butler 卡 `c_w7kob6`）
 **前置阅读**：[`v1.md`](v1.md) §6（`/distill`、`memory_observe`、auto-dream，及 M5.7「SessionEnd 调 reasoner」的弃用史）、[`v2.md`](v2.md)（skill 生命周期 + §6.1 AI 侧两段式安装）、[`docs/narrative/seek.md`](../narrative/seek.md)（自进化闭环定位）、本仓 `AGENTS.md`（「`~/.seek/skills/` 写盘只许 skillmgr/skillstats」约束）、[`internal/skill/loader.go`](../../internal/skill/loader.go)（dotfile 跳过是本设计的承重墙）、[`internal/memory/hook.go`](../../internal/memory/hook.go)（`OnSessionEnd` no-op 注释 = v1 弃用实录）
 **状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）；§6.2 的 `/skill drafts` 收件箱人审流（list/show/approve/reject，卡 `c_jvn3ky`）已实施——approve 走既有 skillmgr.Install（scope 默认取 sidecar 建议，`--project/--user` 覆盖），未做模态 scope picker。M-SD2/SD3 未动。
-**状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）。M-SD2/SD3（自动路径 + GC + 失败路径测试）已实施（butler 卡 `c_dkgvnp`，2026-11-13）：`internal/skilldistill/auto.go` 的 SessionStart 后台批量、L4 复发累积、per-project state、`$SEEK_AUTO_SKILL_DISTILL`（默认关）、草稿 GC。偏差两处：①§7 表中「internal/hooks」一行实际落位 `internal/skilldistill/auto.go`（hooks 包保持通用，AutoHook 经 Registry 注册，结构逐行对照 maybeAutoDream）；②打点复用 `.stats.jsonl`（provider=`distill-auto`，调用数聚合并跳过该标记）而非新文件。TUI scrollback 通知未做（不在 §9 的 M-SD2 交付清单里），留待后续。另：`/distill --dry-run` 预览已实施（butler 卡 `c_oh2dl3`，2026-11-13）——跑完整漏斗（L0→L1→证据→L2）、报告各层判定 + 每候选草稿正文前 20 行预览，零落盘不开模态，M 段跳过；拒绝行与真跑字节一致便于对照（顺手修复了真跑拒绝行因 appendHistory cmd 丢弃而从未打印的旧 bug，见 pitfalls.md）。
+**状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）。M-SD2/SD3（自动路径 + GC + 失败路径测试）已实施（butler 卡 `c_dkgvnp`，2026-11-13）：`internal/skilldistill/auto.go` 的 SessionStart 后台批量、L4 复发累积、per-project state、`$SEEK_AUTO_SKILL_DISTILL`（默认关）、草稿 GC。偏差两处：①§7 表中「internal/hooks」一行实际落位 `internal/skilldistill/auto.go`（hooks 包保持通用，AutoHook 经 Registry 注册，结构逐行对照 maybeAutoDream）；②打点复用 `.stats.jsonl`（provider=`distill-auto`，调用数聚合并跳过该标记）而非新文件。三期（butler 卡 `c_jqwd72`，2026-11-14）已实施：蒸馏漏斗打点——`skillstats.Entry` 加可选 `stage`/`verdict` 字段（旧行两缺皆空，读侧兼容），自动路径每个漏斗事件一行（L0 PASS/DROP、L1 ERROR、shape/evidence/L2 REJECT、L3 ACCEPT/REJECT/ERROR、L4 DRAFT/STRENGTHEN），报表读面为 `seek skill stats --distill`（stage×verdict 计数表，`--json` 给脚本；三期前的无 stage 旧行归入空 stage 桶不丢失）；`/skill drafts` 列表的 recurrence 计数（M-SD2 已有）补文本输出测试钉死。TUI scrollback 通知未做（不在 §9 的 M-SD2 交付清单里），留待后续。另：`/distill --dry-run` 预览已实施（butler 卡 `c_oh2dl3`，2026-11-13）——跑完整漏斗（L0→L1→证据→L2）、报告各层判定 + 每候选草稿正文前 20 行预览，零落盘不开模态，M 段跳过；拒绝行与真跑字节一致便于对照（顺手修复了真跑拒绝行因 appendHistory cmd 丢弃而从未打印的旧 bug，见 pitfalls.md）。
 **预估工作量**：~6 天（M-SD1 ~3d / M-SD2 ~2d / M-SD3 ~1d）。
 
 > **一句话**：从会话历史里自动蒸馏「值得复用的程序性知识」，以 Anthropic skill 包**草稿**形态落进隔离草稿区；**自动路径永远不可能**把任何东西写进 loader 可见的位置——安装是且仅是人的动作。这给自进化内环补上「会话 → 能力」的出口（另一出口是 pitfall→eval 的「失败 → 回归用例」）。
@@ -273,7 +273,7 @@ author: distilled
 | `internal/skill` | **零改动**。dot 目录跳过已承重；`Parse`/`Manifest` 原样复用（草稿校验器 + 判重输入） | 0 |
 | `internal/hooks` | M-SD2：memory.Hook 旁新增（或同体实现）SessionStart 的 cadence 检查 + 后台 goroutine——结构逐行对照 `maybeAutoDream`/`runAutoDream` | 小 |
 | `internal/session` | 只读：按项目列会话、读誊本（`loadMeta` 只读 header 的既有纪律） | 极小 |
-| `internal/skillstats` | 零改动（反哺留 §11） | 0 |
+| `internal/skillstats` | 三期（`c_jqwd72`）起为漏斗打点宿主：`Entry` 增可选 `stage`/`verdict`，自动路径每层事件一行；报表读面在 skillcli（`seek skill stats --distill`）。反哺留 §11 | 小 |
 | TUI | `/distill` 模态扩展（skill 候选段 + scope picker）；`/skill drafts` 命令 | 中 |
 | `cmd/seek` | `seek skill drafts [--json]` 子命令 | 小 |
 | permission | 零新增机制（§6.3） | 0 |

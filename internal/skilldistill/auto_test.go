@@ -9,6 +9,7 @@ package skilldistill
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,6 +244,36 @@ func skillsTreeEntries(t *testing.T, userDir string) []string {
 	return names
 }
 
+// funnelRowDiff compares the (stage, verdict) multiset of staged rows
+// against want; non-staged or call rows make the diff non-empty.
+func funnelRowDiff(entries []skillstats.Entry, want map[[2]string]int) string {
+	got := map[[2]string]int{}
+	for _, e := range entries {
+		got[[2]string{e.Stage, e.Verdict}]++
+	}
+	var sb strings.Builder
+	for k, n := range want {
+		if got[k] != n {
+			fmt.Fprintf(&sb, "  %s/%s: got %d, want %d\n", k[0], k[1], got[k], n)
+		}
+		delete(got, k)
+	}
+	for k, n := range got {
+		fmt.Fprintf(&sb, "  %s/%s: got %d, want 0\n", k[0], k[1], n)
+	}
+	return sb.String()
+}
+
+// findFunnelRow returns the first staged row matching stage+verdict.
+func findFunnelRow(entries []skillstats.Entry, stage, verdict string) *skillstats.Entry {
+	for i, e := range entries {
+		if e.Stage == stage && e.Verdict == verdict {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
 // ---------- cadence + env ----------
 
 func TestAutoEnabled_DefaultOff(t *testing.T) {
@@ -331,17 +362,26 @@ func TestAutoPath_EndToEnd(t *testing.T) {
 		t.Fatalf("weak draft must NOT surface in the inbox: %+v", inbox)
 	}
 
-	// Telemetry: one provenance row, provider-marked.
+	// Telemetry: the funnel row set for one clean session — L0 PASS,
+	// L3 ACCEPT, L4 DRAFT (三期 c_jqwd72), all provider-marked so call
+	// aggregation skips them.
 	entries, err := skillstats.Read(filepath.Join(f.statsDir, "stats.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("stats rows = %d, want 1", len(entries))
+	if diff := funnelRowDiff(entries, map[[2]string]int{
+		{"L0", "PASS"}: 1, {"L3", "ACCEPT"}: 1, {"L4", "DRAFT"}: 1,
+	}); diff != "" {
+		t.Fatalf("funnel rows mismatch:\n%s\nrows: %+v", diff, entries)
 	}
-	if e := entries[0]; e.Provider != skillstats.ProviderDistillAuto ||
-		e.Name != "fix-tui-state-bug" || e.SessionID != "sess-1" || e.ProjectID != "proj-test" {
-		t.Errorf("bad stats row: %+v", e)
+	for _, e := range entries {
+		if e.Provider != skillstats.ProviderDistillAuto || e.ProjectID != "proj-test" {
+			t.Errorf("bad stats row: %+v", e)
+		}
+	}
+	l4 := findFunnelRow(entries, "L4", "DRAFT")
+	if l4 == nil || l4.Name != "fix-tui-state-bug" || l4.SessionID != "sess-1" {
+		t.Errorf("L4 DRAFT row must carry draft name + source session: %+v", l4)
 	}
 
 	// IRON RULE (PRD §8 #10): the auto path never installs. The skills
@@ -476,8 +516,11 @@ func TestAutoPath_ConcurrentStartsSingleBatch(t *testing.T) {
 		t.Fatalf("duplicate production: recurrence=%d sources=%d, want 1/1", side.Recurrence, len(side.Sources))
 	}
 	entries, _ := skillstats.Read(filepath.Join(f.statsDir, "stats.jsonl"))
-	if len(entries) != 1 {
-		t.Errorf("stats rows = %d, want 1", len(entries))
+	// One session through the clean path: L0 PASS + L3 ACCEPT + L4 DRAFT.
+	if diff := funnelRowDiff(entries, map[[2]string]int{
+		{"L0", "PASS"}: 1, {"L3", "ACCEPT"}: 1, {"L4", "DRAFT"}: 1,
+	}); diff != "" {
+		t.Errorf("funnel rows mismatch:\n%s\nrows: %+v", diff, entries)
 	}
 }
 
@@ -574,6 +617,133 @@ func TestAutoPath_L0SkipsQASessions(t *testing.T) {
 	}
 	if all, _ := f.drafts.ListAllDrafts(); len(all) != 0 {
 		t.Errorf("Q&A session must yield no drafts: %+v", all)
+	}
+}
+
+// TestAutoPath_FunnelTelemetry (三期 c_jqwd72 acceptance): one batch
+// driving every observable funnel outcome — L0 drop+pass, shape /
+// evidence / L2 candidate rejects, L3 accept, L4 draft — lands as
+// staged rows in .stats.jsonl, and the raw JSONL carries the stage /
+// verdict keys so report scripts (seek skill stats --distill, jq)
+// can read them without a Go decoder.
+func TestAutoPath_FunnelTelemetry(t *testing.T) {
+	// One extraction payload, four candidates, four different fates:
+	// good-one passes everything; Bad_Name fails the kebab shape
+	// check; evidence-fail quotes text the transcript doesn't contain;
+	// collide-name collides with an installed skill at L2.
+	extract := `[` +
+		`{"name":"good-one","description":"When a TUI modal swallows keys after exit, follow this reproduction-first sequence to fix the state machine.","body":"## When to use\nA modal's key handler swallows keys after exit.\n\n## Steps\n1. reproduce\n2. fix deregistration\n\n## Verification\ngo test green","evidence":["` + autoEvidence + `"]},` +
+		`{"name":"Bad_Name","description":"When a name is not kebab the shape layer drops it.","body":"## Steps\n1. nope","evidence":["` + autoEvidence + `"]},` +
+		`{"name":"evidence-fail","description":"When evidence quotes are absent from the transcript the evidence layer drops the candidate.","body":"## Steps\n1. nope","evidence":["QUOTE THAT APPEARS NOWHERE IN THE TRANSCRIPT xyzzy"]},` +
+		`{"name":"collide-name","description":"When a candidate collides with an installed skill name L2 drops it.","body":"## Steps\n1. nope","evidence":["` + autoEvidence + `"]}` +
+		`]`
+	f := newAutoFixture(t, extract, autoFilterAccept)
+	installed := skill.NewSet()
+	installed.Add(&skill.Skill{Name: "collide-name", Description: "already installed"})
+	f.hook.Skills = installed
+
+	// A pure-Q&A session dies at L0; a procedural session feeds the
+	// extraction above.
+	var qa []deepseek.Message
+	for i := 0; i < 30; i++ {
+		qa = append(qa, deepseek.Message{Role: deepseek.RoleUser, Content: "q"})
+		qa = append(qa, deepseek.Message{Role: deepseek.RoleAssistant, Content: "a"})
+	}
+	f.sessions.add("sess-qa", qa, f.now.Add(-2*time.Hour))
+	f.sessions.add("sess-1", proceduralHistory(autoEvidence), f.now.Add(-1*time.Hour))
+
+	done := f.armDue(t)
+	f.hook.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
+	f.waitDone(t, done)
+
+	path := filepath.Join(f.statsDir, "stats.jsonl")
+	entries, err := skillstats.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[[2]string]int{
+		{"L0", "DROP"}:         1, // sess-qa
+		{"L0", "PASS"}:         1, // sess-1
+		{"shape", "REJECT"}:    1, // Bad_Name
+		{"evidence", "REJECT"}: 1,
+		{"L2", "REJECT"}:       1, // collide-name
+		{"L3", "ACCEPT"}:       1, // good-one
+		{"L4", "DRAFT"}:        1, // good-one
+	}
+	if diff := funnelRowDiff(entries, want); diff != "" {
+		t.Fatalf("funnel rows mismatch:\n%s\nrows: %+v", diff, entries)
+	}
+
+	// Row attribution: drops carry the candidate's name and source
+	// session; L0 rows carry the session (no candidate exists yet).
+	if e := findFunnelRow(entries, "L2", "REJECT"); e == nil || e.Name != "collide-name" || e.SessionID != "sess-1" {
+		t.Errorf("L2 REJECT row attribution: %+v", e)
+	}
+	if e := findFunnelRow(entries, "L0", "DROP"); e == nil || e.SessionID != "sess-qa" || e.Name != "" {
+		t.Errorf("L0 DROP row attribution: %+v", e)
+	}
+
+	// Script readability: the raw bytes carry stage/verdict keys (the
+	// acceptance is "rows readable by report scripts", not "rows
+	// decodable only through skillstats.Read).
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"stage":"L0"`, `"stage":"L2"`, `"stage":"L3"`, `"stage":"L4"`, `"verdict":"DROP"`, `"verdict":"DRAFT"`, `"provider":"distill-auto"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("raw JSONL missing %s — report scripts can't read the funnel:\n%s", key, raw)
+		}
+	}
+
+	// Only good-one became a draft; the funnel ate the other three.
+	if all, _ := f.drafts.ListAllDrafts(); len(all) != 1 || all[0].Name != "good-one" {
+		t.Fatalf("drafts = %+v, want only good-one", all)
+	}
+}
+
+// TestAutoPath_FunnelTelemetryErrors: the two ERROR verdicts — a
+// whole extraction call that fails (L1) and an L3 filter call that
+// fails — are rows too; an unattended path's failures must stay
+// countable, not just silent.
+func TestAutoPath_FunnelTelemetryErrors(t *testing.T) {
+	// L1 ERROR: unparseable extraction payload.
+	f := newAutoFixture(t, "not json at all", autoFilterAccept)
+	f.sessions.add("sess-1", proceduralHistory(autoEvidence), f.now.Add(-time.Hour))
+	done := f.armDue(t)
+	f.hook.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
+	f.waitDone(t, done)
+
+	entries, _ := skillstats.Read(filepath.Join(f.statsDir, "stats.jsonl"))
+	if diff := funnelRowDiff(entries, map[[2]string]int{
+		{"L0", "PASS"}: 1, {"L1", "ERROR"}: 1,
+	}); diff != "" {
+		t.Fatalf("L1 error rows mismatch:\n%s\nrows: %+v", diff, entries)
+	}
+
+	// L3 ERROR: the filter call itself breaks; L3 REJECT: the model
+	// votes no. Both leave the funnel countable.
+	for name, tc := range map[string]struct {
+		filter string
+		want   map[[2]string]int
+	}{
+		"filter broken": {filter: `not json`, want: map[[2]string]int{{"L0", "PASS"}: 1, {"L3", "ERROR"}: 1}},
+		"filter reject": {filter: `{"decision":"REJECT","reason":"generic"}`, want: map[[2]string]int{{"L0", "PASS"}: 1, {"L3", "ACCEPT"}: 0, {"L3", "REJECT"}: 1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newAutoFixture(t, autoExtractOK, tc.filter)
+			f.sessions.add("sess-1", proceduralHistory(autoEvidence), f.now.Add(-time.Hour))
+			done := f.armDue(t)
+			f.hook.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
+			f.waitDone(t, done)
+			entries, _ := skillstats.Read(filepath.Join(f.statsDir, "stats.jsonl"))
+			if diff := funnelRowDiff(entries, tc.want); diff != "" {
+				t.Fatalf("rows mismatch:\n%s\nrows: %+v", diff, entries)
+			}
+			if all, _ := f.drafts.ListAllDrafts(); len(all) != 0 {
+				t.Fatalf("no draft may land without an L3 accept: %+v", all)
+			}
+		})
 	}
 }
 
