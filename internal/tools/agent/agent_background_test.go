@@ -49,6 +49,7 @@ func newBgTool(t *testing.T, release <-chan struct{}) (*Tool, *subagent.Manager)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { <-release; mgr.Shutdown() }) // 等后台跑完落盘再放 TempDir 清理（判 c_bickfj 驳点修复）
 	return New(mgr, nil), mgr
 }
 

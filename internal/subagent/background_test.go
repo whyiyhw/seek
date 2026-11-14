@@ -60,6 +60,7 @@ func newBackgroundManager(t *testing.T, runner Runner) (*Manager, context.Cancel
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { sessionCancel(); mgr.Shutdown() }) // 等后台 goroutine 落盘后再放 TempDir 清理（c_bickfj 竞态族修复）
 	return mgr, sessionCancel
 }
 
