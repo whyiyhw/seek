@@ -246,37 +246,6 @@ func TestReadDraft_MissingAndEscapedNames(t *testing.T) {
 	for _, name := range []string{"../evil", "/abs", "UPPER"} {
 		if _, err := store.ReadDraft(name); err == nil {
 			t.Errorf("ReadDraft(%q) must refuse", name)
-// ---------- M-SD2: weak-inbox filtering, StrengthenDraft, GC ----------
-
-// The inbox hides weak drafts (single-session evidence hasn't earned a
-// human's attention); ListAllDrafts still surfaces them for GC and L4
-// merge-matching. PRD §4 L4.
-func TestListDrafts_HidesWeak(t *testing.T) {
-	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
-	if _, err := store.WriteDraft(validDraftMD("weak-one"), DraftSidecar{Status: DraftStatusWeak}); err != nil {
-		t.Fatalf("write weak: %v", err)
-	}
-	if _, err := store.WriteDraft(validDraftMD("ready-one"), DraftSidecar{Status: DraftStatusReviewable}); err != nil {
-		t.Fatalf("write reviewable: %v", err)
-	}
-
-	inbox, err := store.ListDrafts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(inbox) != 1 || inbox[0].Name != "ready-one" {
-		t.Fatalf("inbox = %+v, want only ready-one", inbox)
-	}
-	all, err := store.ListAllDrafts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("ListAllDrafts = %d, want 2 (weak included)", len(all))
-	}
-	for _, d := range all {
-		if d.Description == "" {
-			t.Errorf("draft %s: Description not populated from SKILL.md", d.Name)
 		}
 	}
 }
@@ -316,6 +285,44 @@ func TestListDrafts_SurfacesProvenance(t *testing.T) {
 	}
 	if len(drafts[0].Sources) != 2 || drafts[0].FilterTrace[0].Stage != "L2" {
 		t.Errorf("provenance missing from inbox row: %+v", drafts[0])
+	}
+}
+
+// ---------- M-SD2: weak-inbox filtering, StrengthenDraft, GC ----------
+
+// The inbox hides weak drafts (single-session evidence hasn't earned a
+// human's attention); ListAllDrafts still surfaces them for GC and L4
+// merge-matching. PRD §4 L4.
+func TestListDrafts_HidesWeak(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
+	if _, err := store.WriteDraft(validDraftMD("weak-one"), DraftSidecar{Status: DraftStatusWeak}); err != nil {
+		t.Fatalf("write weak: %v", err)
+	}
+	if _, err := store.WriteDraft(validDraftMD("ready-one"), DraftSidecar{Status: DraftStatusReviewable}); err != nil {
+		t.Fatalf("write reviewable: %v", err)
+	}
+
+	inbox, err := store.ListDrafts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inbox) != 1 || inbox[0].Name != "ready-one" {
+		t.Fatalf("inbox = %+v, want only ready-one", inbox)
+	}
+	all, err := store.ListAllDrafts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("ListAllDrafts = %d, want 2 (weak included)", len(all))
+	}
+	for _, d := range all {
+		if d.Description == "" {
+			t.Errorf("draft %s: Description not populated from SKILL.md", d.Name)
+		}
+	}
+}
+
 func TestStrengthenDraft(t *testing.T) {
 	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
 	if _, err := store.WriteDraft(validDraftMD("grow-me"), DraftSidecar{

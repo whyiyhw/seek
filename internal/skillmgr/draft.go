@@ -108,6 +108,14 @@ type DraftInfo struct {
 	// produced the draft, and how the novelty funnel scored it.
 	Sources     []DraftSource
 	FilterTrace []FilterTraceEntry
+
+	// Description is the draft SKILL.md's description frontmatter —
+	// populated by ListAllDrafts/ReadDraftDescription for L4's
+	// merge-matching (a recurring candidate can arrive under a
+	// different name than the draft it repeats). Empty when the
+	// SKILL.md is unreadable; the listing tolerates that (the row
+	// still shows, with "(no sidecar)"-style degradation).
+	Description string
 }
 
 // DraftDetail is the full body of one draft for review: the raw
@@ -117,13 +125,6 @@ type DraftDetail struct {
 	Info DraftInfo
 	MD   []byte       // raw SKILL.md bytes
 	Side DraftSidecar // zero value when the sidecar is missing/corrupt
-	// Description is the draft SKILL.md's description frontmatter —
-	// populated by ListAllDrafts/ReadDraftDescription for L4's
-	// merge-matching (a recurring candidate can arrive under a
-	// different name than the draft it repeats). Empty when the
-	// SKILL.md is unreadable; the listing tolerates that (the row
-	// still shows, with "(no sidecar)"-style degradation).
-	Description string
 }
 
 // DraftStore owns the drafts directory under a user skills tree.
@@ -321,23 +322,6 @@ func (s *DraftStore) DeleteDraft(name string) (string, error) {
 // the review target, the sidecar is provenance (Side stays zero, and
 // the caller degrades — approve falls back to scope "project").
 func (s *DraftStore) ReadDraft(name string) (*DraftDetail, error) {
-// StrengthenDraft is L4's merge write (PRD §4): an independent session
-// re-extracted a procedure that already has a draft. Recurrence++,
-// source appended, UpdatedAt refreshed. The SKILL.md is deliberately
-// NOT touched — first write wins for the body; recurrence is
-// provenance, not content.
-//
-// Promotions that ride along:
-//   - recurrence ≥ 2 → status "reviewable" (the draft surfaces in the
-//     ListDrafts inbox — two independent sessions are the evidence a
-//     pattern is not one session's special case).
-//   - sources spanning ≥ 2 distinct project_ids → suggested_scope
-//     upgrades project → user (cross-project recurrence is the "user
-//     work habit" signal, PRD §5.4).
-//
-// extraTrace appends to filter_trace so each strengthening round's
-// funnel verdict stays visible to the human reviewer.
-func (s *DraftStore) StrengthenDraft(name string, src DraftSource, extraEvidence []string, extraTrace []FilterTraceEntry) (*DraftSidecar, error) {
 	if !draftNameRE.MatchString(name) {
 		return nil, fmt.Errorf("skillmgr: invalid draft name %q", name)
 	}
@@ -374,6 +358,33 @@ func (s *DraftStore) StrengthenDraft(name string, src DraftSource, extraEvidence
 		}
 	}
 	return detail, nil
+}
+
+// StrengthenDraft is L4's merge write (PRD §4): an independent session
+// re-extracted a procedure that already has a draft. Recurrence++,
+// source appended, UpdatedAt refreshed. The SKILL.md is deliberately
+// NOT touched — first write wins for the body; recurrence is
+// provenance, not content.
+//
+// Promotions that ride along:
+//   - recurrence ≥ 2 → status "reviewable" (the draft surfaces in the
+//     ListDrafts inbox — two independent sessions are the evidence a
+//     pattern is not one session's special case).
+//   - sources spanning ≥ 2 distinct project_ids → suggested_scope
+//     upgrades project → user (cross-project recurrence is the "user
+//     work habit" signal, PRD §5.4).
+//
+// extraTrace appends to filter_trace so each strengthening round's
+// funnel verdict stays visible to the human reviewer.
+func (s *DraftStore) StrengthenDraft(name string, src DraftSource, extraEvidence []string, extraTrace []FilterTraceEntry) (*DraftSidecar, error) {
+	if !draftNameRE.MatchString(name) {
+		return nil, fmt.Errorf("skillmgr: invalid draft name %q", name)
+	}
+	draftsDir, err := s.DraftsDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(draftsDir, name)
 	sidecarPath := filepath.Join(dir, SidecarName)
 
 	data, err := os.ReadFile(sidecarPath)
