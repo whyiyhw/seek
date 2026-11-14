@@ -130,6 +130,7 @@ seek skill      install / list / stats / uninstall / update
 seek memory     list / show / search / archive
 seek cron       create / list / run / delete / tick   # --autopilot / --goal
 seek worktree   list / gc
+seek session    export <sid>               # transcript → markdown (-o <file> to save)
 seek checkpoint list / clean               # + seek undo / seek redo
 seek hooks      list / check / trust / audit
 ```

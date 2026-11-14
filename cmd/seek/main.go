@@ -57,6 +57,7 @@ import (
 	"github.com/whyiyhw/seek/internal/sandbox"
 	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/sessioncli"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skilldistill"
@@ -752,6 +753,15 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek session export` — transcript JSONL → human-readable
+	// markdown. Same rationale as skill/memory: export needs neither
+	// API keys nor the agent runtime, and must not collide with the
+	// top-level flags. The markdown renderer lives in
+	// internal/sessionexport (pure, reusable) so the serve web panel
+	// can call it directly when a transcript download button lands.
+	if len(os.Args) >= 2 && os.Args[1] == "session" {
+		return sessioncli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// v3 checkpoint subcommand (PRD docs/prd/feature-checkpoint.md §4.1).
 	// Dispatched ahead of flag.Parse so the user can pass --session etc.
