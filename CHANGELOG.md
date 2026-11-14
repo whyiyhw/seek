@@ -20,3 +20,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_mvv5td：book 与 PRD 重复事实清单（缩并备料，只盘点不改）
 - c_7afk5i：文档预算首轮缩并：budget.json 超限区开刀（每版一刀文档刀）
 - c_jvn3ky：skill-distill 人审 CLI：/skill drafts 列表·预览·审批安装一条流
+- c_oh2dl3：/distill dry-run 预览：显示将产出的草稿不落盘
