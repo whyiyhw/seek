@@ -75,4 +75,3 @@ func TestCheckCache_Fresh(t *testing.T) {
 		})
 	}
 }
-

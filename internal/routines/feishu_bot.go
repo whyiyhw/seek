@@ -181,7 +181,7 @@ func sendFeishuBot(ctx context.Context, client *http.Client, holder *feishuToken
 	t WebhookTarget, title, text string) error {
 	text = truncateFeishu(text)
 
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := range 2 {
 		token, err := holder.Token(ctx, client)
 		if err != nil {
 			return err

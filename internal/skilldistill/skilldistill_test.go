@@ -34,7 +34,7 @@ func chatWith(content string) *fakeChatClient {
 func gateHistory(messages int, toolCalls int) []deepseek.Message {
 	var h []deepseek.Message
 	calls := 0
-	for i := 0; i < messages; i++ {
+	for i := range messages {
 		m := deepseek.Message{Role: deepseek.RoleUser, Content: "message body"}
 		if calls < toolCalls && i%3 == 0 {
 			m.Role = deepseek.RoleAssistant
@@ -71,7 +71,7 @@ func TestMechanicalGate(t *testing.T) {
 
 func TestMechanicalGate_SystemMessagesDontCount(t *testing.T) {
 	var h []deepseek.Message
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		h = append(h, deepseek.Message{Role: deepseek.RoleSystem, Content: "system"})
 	}
 	h = append(h, gateHistory(3, 0)...)
@@ -289,7 +289,7 @@ func TestTrigramJaccard(t *testing.T) {
 func extractionHistory() []deepseek.Message {
 	var h []deepseek.Message
 	h = append(h, deepseek.Message{Role: deepseek.RoleSystem, Content: "sysprompt"})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		h = append(h, deepseek.Message{Role: deepseek.RoleUser, Content: "fix the flaky TUI test"})
 		h = append(h, deepseek.Message{
 			Role:    deepseek.RoleAssistant,
@@ -398,6 +398,37 @@ func TestExtract_GreyCandidateCarriesNote(t *testing.T) {
 	}
 }
 
+// Every drop site must attribute its stage — the /distill --dry-run
+// report tallies layer hits off Rejection.Stage, so an unattributed
+// rejection would silently vanish from the tally.
+func TestExtract_RejectionStages(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "repro-flaky-tui-first", Description: "already installed"})
+	raw := `[
+  {"name":"Bad_Name","description":"d","body":"b","evidence":["--- FAIL: TestFlaky"]},
+  {"name":"ghost-proc","description":"d","body":"b","evidence":["quote that never appeared"]},
+  {"name":"repro-flaky-tui-first","description":"dup","body":"b","evidence":["--- FAIL: TestFlaky"]}
+]`
+	d := &Distiller{Client: chatWith(raw)}
+	kept, rejected, err := d.Extract(context.Background(), extractionHistory(), "", nil, set)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(kept) != 0 || len(rejected) != 3 {
+		t.Fatalf("kept=%d rejected=%d, want 0/3", len(kept), len(rejected))
+	}
+	want := map[string]string{
+		"Bad_Name":              StageShape,
+		"ghost-proc":            StageEvidence,
+		"repro-flaky-tui-first": StageL2,
+	}
+	for _, r := range rejected {
+		if r.Stage != want[r.Name] {
+			t.Errorf("rejection %q: Stage = %q, want %q", r.Name, r.Stage, want[r.Name])
+		}
+	}
+}
+
 func TestExtract_ClientErrors(t *testing.T) {
 	d := &Distiller{Client: &fakeChatClient{err: errors.New("boom")}}
 	if _, _, err := d.Extract(context.Background(), extractionHistory(), "", nil, nil); err == nil {
@@ -488,5 +519,42 @@ func TestRenderSKILLMD_ParsesAsLegalPackage(t *testing.T) {
 	}
 	if !strings.Contains(sk.Body, "## Verification") {
 		t.Errorf("body template section missing: %q", sk.Body)
+	}
+}
+
+// ---------- NearestSkill (drafts show's nearest-skill panel) ----------
+
+func TestNearestSkill(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "fix-tui-state-bug", Description: l2ExistingDesc})
+	set.Add(&skill.Skill{Name: "rebase-reflog", Description: l2OtherDesc})
+
+	name, sim := NearestSkill(l2SameDesc, "reproduce first", set)
+	if name != "fix-tui-state-bug" {
+		t.Fatalf("nearest = %q, want fix-tui-state-bug", name)
+	}
+	if sim < SimilarityGrey {
+		t.Errorf("sim = %.2f, want at least grey-zone against the near-twin description", sim)
+	}
+
+	// The other skill must lose to the near-twin.
+	_, otherSim := NearestSkill(l2OtherDesc, "check reflog", set)
+	if otherSim <= sim {
+		t.Errorf("disjoint text (%.2f) should not outrank the near-twin (%.2f)", otherSim, sim)
+	}
+}
+
+func TestNearestSkill_EmptyAndDegenerate(t *testing.T) {
+	if name, sim := NearestSkill("anything", "body", nil); name != "" || sim != 0 {
+		t.Errorf("nil set: got (%q, %.2f), want empty", name, sim)
+	}
+	if name, sim := NearestSkill("anything", "body", skill.NewSet()); name != "" || sim != 0 {
+		t.Errorf("empty set: got (%q, %.2f), want empty", name, sim)
+	}
+	// A draft shorter than three runes shares no trigrams with anyone.
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "some-skill", Description: "a real description"})
+	if name, sim := NearestSkill("ab", "", set); name != "" || sim != 0 {
+		t.Errorf("short draft: got (%q, %.2f), want empty", name, sim)
 	}
 }

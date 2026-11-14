@@ -829,9 +829,9 @@ func TestCmdModel_LegacyReasonerNotInPicker(t *testing.T) {
 	cmdModel(m, "")
 
 	retired := map[string]bool{
-		"deepseek-reasoner":           true,
-		"deepseek-v4-flash":           true,
-		"deepseek-v4-pro":             true,
+		"deepseek-reasoner":            true,
+		"deepseek-v4-flash":            true,
+		"deepseek-v4-pro":              true,
 		"deepseek-v4-flash-vision-exp": true,
 	}
 	for _, mc := range m.modelPickerFiltered {
@@ -2183,7 +2183,7 @@ func TestHandleQuestionKey_CursorBoundsClamped(t *testing.T) {
 	}
 
 	// Down past last: stops at Other (index = len(options)).
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		updated, _ = m2.handleQuestionKey(keyDown())
 		m2 = updated.(Model)
 	}

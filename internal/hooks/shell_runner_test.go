@@ -57,8 +57,8 @@ func (f *fakeExec) Exec(ctx context.Context, command, cwd string, env []string) 
 	f.mu.Lock()
 	envMap := make(map[string]string)
 	for _, e := range env {
-		if i := strings.IndexByte(e, '='); i >= 0 {
-			envMap[e[:i]] = e[i+1:]
+		if before, after, ok := strings.Cut(e, "="); ok {
+			envMap[before] = after
 		}
 	}
 	f.calls = append(f.calls, fakeCall{Command: command, CWD: cwd, Env: envMap})
@@ -479,15 +479,13 @@ func TestConcurrentPreToolUse(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var deniedCount atomic.Int64
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			out, _ := r.OnPreToolUse(context.Background(), PreToolUseIn{Name: "bash"})
 			if out.Deny != "" {
 				deniedCount.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if deniedCount.Load() != 0 {
@@ -516,11 +514,4 @@ func TestPreToolUse_ExecFailureTreatedAsDeny(t *testing.T) {
 	if out.Deny == "" {
 		t.Errorf("exec failure should deny (defensive); got allow")
 	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

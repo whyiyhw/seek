@@ -86,6 +86,19 @@ var standardRates = map[string]ModelPricing{
 	},
 }
 
+// searchPerCallUSD is the standalone Search API's per-call rate:
+// ¥5 per 1,000 successful requests (listed alongside $0.75/1K USD ≈
+// ¥5.25 — we convert the CNY card at the same 7.0 CNY/USD the GLM row
+// uses, ≈ $0.000714/call). Opened 2026-10-17 with the tool-API family;
+// unlike the token table above, only HTTP-200 calls are billable.
+const searchPerCallUSD = 5.0 / 7.0 / 1000
+
+// SearchCost returns the USD cost of n successful Search API calls.
+// Failed requests cost nothing — pass only the count that returned 2xx.
+func SearchCost(calls int) float64 {
+	return float64(calls) * searchPerCallUSD
+}
+
 const offPeakDiscount = 0.5
 
 // Shanghai (CST = UTC+8) is DeepSeek's reference timezone. Exported so

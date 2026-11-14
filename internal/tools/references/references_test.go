@@ -120,7 +120,7 @@ func TestRefs_FormatsLocationsWithSnippet(t *testing.T) {
 func TestRefs_OutputCap(t *testing.T) {
 	file := writeFile(t, "x.go", "func Kill() {}\n")
 	var locs []lspclient.Location
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		locs = append(locs, loc(fmt.Sprintf("file:///nonexistent/f%d.go", i), i, 0))
 	}
 	out, err := run(t, &fakeResolver{locs: locs}, Args{File: file, Line: 1, Symbol: "Kill"})

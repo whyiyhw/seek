@@ -34,7 +34,7 @@ func TestSeekRows_GradientTiersCoverTopMiddleBottom(t *testing.T) {
 	for _, row := range seekRows {
 		seen[row.tier]++
 	}
-	for tier := 0; tier < 3; tier++ {
+	for tier := range 3 {
 		if seen[tier] == 0 {
 			t.Errorf("tier %d has no rows — gradient is broken", tier)
 		}

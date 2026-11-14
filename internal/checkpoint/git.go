@@ -376,7 +376,7 @@ func diffFiles(ctx context.Context, run gitRunner, cwd, commit string) []string 
 		return nil
 	}
 	var files []string
-	for _, ln := range strings.Split(strings.TrimSpace(out), "\n") {
+	for ln := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		ln = strings.TrimSpace(ln)
 		if ln != "" {
 			files = append(files, ln)

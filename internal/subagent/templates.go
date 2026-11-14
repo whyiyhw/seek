@@ -63,7 +63,7 @@ var templates = map[Type]Template{
 		// exclusion = "parent全集 减 agent / ask_user".
 		ToolNames:   nil,
 		Restriction: permission.Restriction{}, // inherit both axes
-		Extra:       "",                        // no extra clause; role intro alone
+		Extra:       "",                       // no extra clause; role intro alone
 	},
 	TypeExplore: {
 		Type: TypeExplore,

@@ -221,10 +221,8 @@ func TestConcurrentSwapAndRead(t *testing.T) {
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -235,9 +233,9 @@ func TestConcurrentSwapAndRead(t *testing.T) {
 					panic("T returned empty string under swap")
 				}
 			}
-		}()
+		})
 	}
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		SetDefault(New("zh"))
 		SetDefault(New("en"))
 	}

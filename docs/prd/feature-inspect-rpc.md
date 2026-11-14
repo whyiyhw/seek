@@ -2,7 +2,7 @@
 
 **所属版本**：v0.6.x dot release（M12.0 并行于 v5；M12.1/M12.2 依赖 v5 数据）
 **前置阅读**：[PRD v0](v0.md) §4.5（JSON-RPC 服务模式）、[PRD v5 umbrella](v5.md) §2.5（零常驻进程约束）、[`internal/rpc/server.go`](../../internal/rpc/server.go)（已有 method 集）
-**状态**：📐 设计稿
+**状态**：📐 设计稿 · **部分并入 [`feature-web-frontend.md`](feature-web-frontend.md)（2026-11-13）**——§3.1 method 集/§3.5 错误码/命名稳定性纪律原样并入其 P3 资产面；§3.3 HTTP+SSE transport 换宿主（TUI 进程 `--rpc-listen` → `seek serve` web frontend 进程）；§4 独立 tarball 面板**取消**（go:embed 进单二进制取代）。stdio transport 与 §3.2 Registry 重构仍归本设计（IDE 线）。数据面权威设计以 feature-web-frontend.md §3.3 为准。
 **目标里程碑**：M12.0 + M12.1 + M12.2
 **目标发版**：M12.0 → v0.6.x dot；M12.1/M12.2 → v0.7.0
 

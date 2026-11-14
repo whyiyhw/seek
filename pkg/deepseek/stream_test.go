@@ -251,9 +251,9 @@ func TestChat_MissingKey(t *testing.T) {
 // hard failure (this is the path Summarise uses).
 func TestChat_RetryOn500(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"Internal Server Error"}}`)
@@ -279,7 +279,7 @@ func TestChat_RetryOn500(t *testing.T) {
 	if got := resp.Choices[0].Message.Content; got != "pong" {
 		t.Errorf("content = %q, want pong", got)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2 (first=500, second=200)", got)
 	}
 }
@@ -289,9 +289,9 @@ func TestChat_RetryOn500(t *testing.T) {
 // annotated with the attempt count.
 func TestChat_RetryExhaustedAnnotated(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"boom"}}`)
 	}))
@@ -311,7 +311,7 @@ func TestChat_RetryExhaustedAnnotated(t *testing.T) {
 	if !strings.Contains(err.Error(), "(after 2 attempts)") {
 		t.Errorf("error should be annotated with the attempt count, got %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
 	}
 }
@@ -320,9 +320,9 @@ func TestChat_RetryExhaustedAnnotated(t *testing.T) {
 // errors, not transients — the non-streaming path must not retry them.
 func TestChat_4xxNoRetry(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"error":{"type":"authentication_error","message":"bad key"}}`)
 	}))
@@ -333,7 +333,7 @@ func TestChat_4xxNoRetry(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected auth error")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1 (no retry on 4xx)", got)
 	}
 }
@@ -365,9 +365,9 @@ func drainStream(t *testing.T, ch <-chan StreamEvent) (text, finish string) {
 // agent layer and force the user to manually re-send.
 func TestChatStream_RetryOn500(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		if n == 1 {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"Internal Server Error"}}`)
@@ -394,7 +394,7 @@ func TestChatStream_RetryOn500(t *testing.T) {
 	if finish != "stop" {
 		t.Errorf("finish = %q, want stop", finish)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2 (first=500, second=200)", got)
 	}
 }
@@ -407,9 +407,9 @@ func TestChatStream_RetryOn500(t *testing.T) {
 // the agent's empty-response guard).
 func TestChatStream_RetryOnEmptyBody(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		if n == 1 {
@@ -436,7 +436,7 @@ func TestChatStream_RetryOnEmptyBody(t *testing.T) {
 	if finish != "stop" {
 		t.Errorf("finish = %q, want stop", finish)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2", got)
 	}
 }
@@ -446,9 +446,9 @@ func TestChatStream_RetryOnEmptyBody(t *testing.T) {
 // rather than burning tokens (and the user's time) on an infinite loop.
 func TestChatStream_RetryBudgetCapped(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"boom"}}`)
 	}))
@@ -468,7 +468,7 @@ func TestChatStream_RetryBudgetCapped(t *testing.T) {
 	if !strings.Contains(err.Error(), "(after 2 attempts)") {
 		t.Errorf("error should be annotated with the attempt count, got %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
 	}
 }
@@ -481,9 +481,9 @@ func TestChatStream_RetryBudgetCapped(t *testing.T) {
 // instead of looking like a naive single-shot failure.
 func TestChatStream_TransportEOFAnnotated(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		// Hijack and close the raw connection without writing any
 		// response — the client observes a bare "EOF" from http.Do.
 		hj, ok := w.(http.Hijacker)
@@ -512,7 +512,7 @@ func TestChatStream_TransportEOFAnnotated(t *testing.T) {
 	if !strings.Contains(err.Error(), "(after 2 attempts)") {
 		t.Errorf("error should be annotated with the attempt count, got %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
 	}
 }
@@ -530,9 +530,9 @@ func TestChatStream_TransportEOFAnnotated(t *testing.T) {
 // MidStream_DropsTurn.
 func TestChatStream_NoRetryAfterEmit(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		flusher, _ := w.(http.Flusher)
@@ -561,7 +561,7 @@ func TestChatStream_NoRetryAfterEmit(t *testing.T) {
 	if !strings.HasPrefix(finish, "decode_error:") {
 		t.Errorf("finish = %q, want decode_error:... (sentinel relied on by agent layer)", finish)
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want exactly 1 (must not retry post-emit)", got)
 	}
 }
@@ -572,9 +572,9 @@ func TestChatStream_NoRetryAfterEmit(t *testing.T) {
 // widen the trigger.
 func TestChatStream_4xxNoRetry(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"error":{"type":"authentication_error","message":"bad key"}}`)
 	}))
@@ -585,7 +585,7 @@ func TestChatStream_4xxNoRetry(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected auth error")
 	}
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("server hits = %d, want 1 (no retry on 4xx)", got)
 	}
 }

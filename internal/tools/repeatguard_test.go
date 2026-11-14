@@ -120,7 +120,7 @@ func TestRepeatGuard_DifferentArgsCountSeparately(t *testing.T) {
 	tool := WithRepeatGuard(&rgTool{name: "read", result: "contents"}, g)
 
 	// Reading twelve different files is healthy work, not a loop.
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		out, err := rgExec(t, tool, `{"path":"file`+string(rune('a'+i))+`.go"}`)
 		if err != nil {
 			t.Fatal(err)
@@ -372,12 +372,10 @@ func TestRepeatGuard_ConcurrentUse(t *testing.T) {
 	tool := WithRepeatGuard(&rgTool{name: "read", result: "ok"}, g)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			_, _ = rgExec(t, tool, `{"path":"same.go"}`)
-		}()
+		})
 	}
 	wg.Wait()
 

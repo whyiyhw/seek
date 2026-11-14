@@ -103,4 +103,3 @@ func normalize(s string) string {
 	}
 	return strings.TrimRight(b.String(), " ")
 }
-

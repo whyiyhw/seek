@@ -291,7 +291,7 @@ func TestWire_ConcurrentReads(t *testing.T) {
 	var wg sync.WaitGroup
 	results := make([][]byte, workers)
 	errs := make([]error, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -302,7 +302,7 @@ func TestWire_ConcurrentReads(t *testing.T) {
 	}
 	wg.Wait()
 
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		if errs[i] != nil {
 			t.Fatalf("worker %d: %v", i, errs[i])
 		}

@@ -396,9 +396,9 @@ func TestExecute_BodyExactlyLimitIsNotTruncated(t *testing.T) {
 // --- Timeout / ctx --------------------------------------------------
 
 func TestExecute_ContextCancelStopsRequest(t *testing.T) {
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		<-r.Context().Done() // hang until client cancels
 	}))
 	defer srv.Close()
@@ -416,8 +416,8 @@ func TestExecute_ContextCancelStopsRequest(t *testing.T) {
 	if !strings.Contains(out, "[webfetch:") {
 		t.Errorf("cancelled fetch should return webfetch error, got:\n%s", out)
 	}
-	if atomic.LoadInt32(&hits) != 1 {
-		t.Errorf("server should have been hit once, got %d", atomic.LoadInt32(&hits))
+	if hits.Load() != 1 {
+		t.Errorf("server should have been hit once, got %d", hits.Load())
 	}
 }
 

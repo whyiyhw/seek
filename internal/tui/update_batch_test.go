@@ -379,7 +379,7 @@ func TestTruncatePreview_PreservesMultibyteRunes(t *testing.T) {
 	got := truncatePreview(preview, 5, 80)
 	got = stripAnsi(got)
 	// Should truncate to 80 runes worth of CJK + [truncated].
-	first := strings.Split(got, "\n")[0]
+	first, _, _ := strings.Cut(got, "\n")
 	if rc := len([]rune(first)); rc != 80 {
 		t.Errorf("CJK truncation got %d runes, want 80", rc)
 	}

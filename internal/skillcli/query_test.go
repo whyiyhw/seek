@@ -249,10 +249,10 @@ func TestSkillCmd_Stats_TopNDescByCount(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var entries []skillstats.Entry
 	// alpha: 5 calls; beta: 2; gamma: 1
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "alpha", Provider: "deepseek"})
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "beta", Provider: "deepseek"})
 	}
 	entries = append(entries, skillstats.Entry{TS: now, Name: "gamma", Provider: "deepseek"})
@@ -314,5 +314,26 @@ func TestSkillCmd_Stats_JSON(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("got %d rows, want 1", len(rows))
+	}
+}
+
+// Distillation provenance rows (provider=distill-auto, M-SD2) share
+// .stats.jsonl but must not count as skill calls — a much-distilled
+// draft would otherwise top `seek skill stats`.
+func TestAggregate_SkipsDistillAutoRows(t *testing.T) {
+	entries := []skillstats.Entry{
+		{TS: "2026-11-13T09:00:00Z", Name: "real-skill", Model: "m"},
+		{TS: "2026-11-13T09:01:00Z", Name: "draft-name", Provider: skillstats.ProviderDistillAuto},
+		{TS: "2026-11-13T09:02:00Z", Name: "draft-name", Provider: skillstats.ProviderDistillAuto},
+	}
+	agg := aggregate(entries, 0, time.Now())
+	if len(agg) != 1 {
+		t.Fatalf("aggregated %d names, want 1 (distill rows excluded): %+v", len(agg), agg)
+	}
+	if _, ok := agg["real-skill"]; !ok {
+		t.Errorf("real-skill missing from aggregation: %+v", agg)
+	}
+	if _, ok := agg["draft-name"]; ok {
+		t.Errorf("distill-auto row leaked into call counts")
 	}
 }

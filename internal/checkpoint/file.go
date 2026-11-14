@@ -44,6 +44,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -773,12 +774,7 @@ func (m *Manager) shouldSkipPath(abs string) bool {
 func containsSeekDir(abs string) bool {
 	abs = filepath.ToSlash(abs)
 	parts := strings.Split(abs, "/")
-	for _, p := range parts {
-		if p == ".seek" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(parts, ".seek")
 }
 
 // readPriorContent loads the file at `path` if it exists. Reports:

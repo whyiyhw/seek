@@ -36,13 +36,13 @@ func TestParseSchedule_HappyAliases(t *testing.T) {
 // >= MinSchedule.
 func TestParseSchedule_EveryWithGoDuration(t *testing.T) {
 	cases := map[string]time.Duration{
-		"@every 1m":      1 * time.Minute,
-		"@every 5m":      5 * time.Minute,
-		"@every 30m":     30 * time.Minute,
-		"@every 1h":      1 * time.Hour,
-		"@every 2h30m":   2*time.Hour + 30*time.Minute,
-		"@every 24h":     24 * time.Hour,
-		"@every 168h":    168 * time.Hour,
+		"@every 1m":    1 * time.Minute,
+		"@every 5m":    5 * time.Minute,
+		"@every 30m":   30 * time.Minute,
+		"@every 1h":    1 * time.Hour,
+		"@every 2h30m": 2*time.Hour + 30*time.Minute,
+		"@every 24h":   24 * time.Hour,
+		"@every 168h":  168 * time.Hour,
 	}
 	for in, want := range cases {
 		s, err := ParseSchedule(in)
@@ -252,16 +252,16 @@ func TestParseCron_WithNames(t *testing.T) {
 // expressions are rejected with a clear error.
 func TestParseCron_InvalidExpressions(t *testing.T) {
 	cases := []string{
-		"* * * *",           // 4 fields
-		"* * * * * *",       // 6 fields
-		"70 * * * *",        // minute out of range
-		"* 25 * * *",        // hour out of range
-		"* * 32 * *",        // day-of-month out of range
-		"* * * 13 *",        // month out of range
-		"* * * * 7",         // day-of-week out of range
-		"*/* * * * *",       // bad step
-		"*/ * * * *",        // empty step
-		"a * * * *",         // non-numeric, non-name
+		"* * * *",     // 4 fields
+		"* * * * * *", // 6 fields
+		"70 * * * *",  // minute out of range
+		"* 25 * * *",  // hour out of range
+		"* * 32 * *",  // day-of-month out of range
+		"* * * 13 *",  // month out of range
+		"* * * * 7",   // day-of-week out of range
+		"*/* * * * *", // bad step
+		"*/ * * * *",  // empty step
+		"a * * * *",   // non-numeric, non-name
 	}
 	for _, in := range cases {
 		_, err := ParseSchedule(in)

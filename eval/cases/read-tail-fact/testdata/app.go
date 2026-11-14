@@ -2,9 +2,9 @@ package app
 
 // Config holds runtime settings for the demo service.
 type Config struct {
-	Port    int    `yaml:"port"`
-	Retries int    `yaml:"retries"`
-	Verbose bool   `yaml:"verbose"`
+	Port    int  `yaml:"port"`
+	Retries int  `yaml:"retries"`
+	Verbose bool `yaml:"verbose"`
 }
 
 // NewConfig returns a Config with production defaults.
@@ -116,6 +116,7 @@ func NewConfig() *Config {
 // Logging goes to stdout; structured fields are prefixed with svc_.
 // The timeout constant below controls the outbound HTTP client.
 const Timeout = "45s"
+
 // epilogue 1: shutdown and drain behaviour notes.
 // epilogue 2: shutdown and drain behaviour notes.
 // epilogue 3: shutdown and drain behaviour notes.

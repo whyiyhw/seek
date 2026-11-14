@@ -355,6 +355,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: before shipping a key-triggered clipboard feature on Windows, probe that the KEY itself arrives in a stock terminal — "text paste works" proves nothing (the terminal did it, not the app). And when every chord gets intercepted, instrument what the terminal DOES emit: the empty paste event it couldn't help sending was the only faithful carrier of the user's intent — sometimes the interception leaks its own signal
 - **Refs**: `internal/tui/update_key.go` (dual binding), `internal/tui/imgpaste_test.go:TestHandleKey_PasteKeys_ReachImageGrab`, `docs/guide-windows.md` (paste-image section)
 
+### Bare `m.appendHistory(...)` as a statement drops the line — same disease as `_ = tea.Println`
+- **Saw**: /distill's skill-segment rejection lines ("· skill candidate rejected — …") never appeared in scrollback despite the handler visibly calling appendHistory for each. Surfaced while building `/distill --dry-run`, whose entire value is diffing those lines against a real run — the real run's half of the diff was empty
+- **Why**: sibling of the `_ = tea.Println(line)` entry above. `appendHistory` doesn't buffer anything — it RETURNS the `tea.Println` cmd that does the printing. The rejection loop called it as a bare statement inside a `[]tea.Cmd`-returning handler, so the cmds fell on the floor. Compiles clean, vet is silent (Go doesn't flag unused call results), no test asserted the lines printed
+- **Fix**: collect the cmds and return them (`cmds = append(cmds, m.appendHistory(...))`); pinned by `TestHandleSkillDistillDone_RejectionCmdsAreReturned`. Commit (this one)
+- **Lesson**: `appendHistory` is print-via-Cmd, not a buffer append. In a `[]tea.Cmd`-returning handler, every appendHistory call must be wired into the returned slice — a bare call is a silent no-op. When a handler's job is emitting lines, assert on the returned cmds' count, not just the model state
+- **Refs**: `internal/tui/distill_skill.go:handleSkillDistillDone`, `internal/tui/model.go:appendHistory` (doc comment spells out the contract), `internal/tui/distill_skill_dryrun_test.go`
+
 ---
 
 ## Agent loop
@@ -825,6 +832,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: always brace `${var}` when any non-ASCII character can follow it in a double-quoted string; make EXIT traps exit-code-honest (`trap 'rc=$?; rm -f "${rendered:-}"; exit $rc' EXIT` — `:-` for the local-out-of-scope case); verified with dry-run + `shellcheck`
 - **Lesson**: repo shell scripts run under macOS system bash 3.2 — write for 3.2, not for the brew bash you test with. In Chinese prose embedded in shell strings, `$var` is ALWAYS one fullwidth character away from silently becoming a different variable. And a trap that can't fail must not be allowed to speak for the script's exit status
 - **Refs**: `scripts/install-serve.sh` (uncommitted at time of writing), verified via `bash -c 'set -eu; echo "（$rendered）"'` → exit 1, with trap → exit 0
+
+### modernize -fix turns `s[i].Field = x` into `v.Field = x` under slices.Backward — a silent write-to-copy no-op
+- **Saw**: 第 3 刀 modernize（card c_l3cw6d）let gopls v0.23.0's slices.Backward fix rewrite `AttachPredictedNext`'s through-index write `a.messages[i].PredictedNext = text` into `v.PredictedNext = text`, where `v` is the range COPY — the prediction silently stopped persisting while `go build` / `go vet` / `go test -race ./...` all stayed green (the path had zero coverage)
+- **Why**: the Backward fixer replaces `s[i].X` with `v.X` uniformly and drops the now-unused index; it does not distinguish reads from writes, and v0.23.0 has no write-safety guard
+- **Fix**: audited all 12 Backward rewrites in the knife's diff (this was the only write-through-value); kept Backward but took the index too (`for i, v := range slices.Backward(...)`, write via `a.messages[i]`) and added `TestAttachPredictedNextWritesThroughIndex` to pin the contract
+- **Lesson**: never trust a bulk `-fix` pass blind — after applying, grep the diff for value-dropping rewrites (`range slices.Backward`, index elision) and check every loop body for writes through the loop variable; a green suite only means nothing was watching
+- **Refs**: `pkg/agent/agent.go` `AttachPredictedNext`, `pkg/agent/agent_test.go` `TestAttachPredictedNextWritesThroughIndex`, `docs/notes-slim-candidates-2026-11.md` 执行状态·第 3 刀
 
 ---
 
@@ -1388,6 +1402,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: "most recent turn" is the wrong baseline for a window indicator when the window itself was replaced. When an operation rebases the live context, the tracker needs an explicit "start a new window" primitive — otherwise every `Last()` consumer silently keeps reading the old world until the next write
 - **Refs**: `internal/cache/cache.go:Seal`, `internal/tui/update_agent.go:handleCompactDone`, `internal/cache/cache_test.go`
 
+### Flat search cost is not resumed — Tracker only re-prices TOKENS
+- **Saw**: (design-time, web_search landing) the Search API bills per successful call (≈$0.0007), which has no `deepseek.Usage` to `Record`. The obvious hack — fabricate a synthetic Usage turn whose pricing.Cost happens to equal the flat fee — would poison `Last()` and the ctx% indicator with fake tokens.
+- **Why**: resume reconstructs the session cost from `session.Usage` via `SetBase`, and Usage carries only token counts — there is nothing in the persisted session to re-derive a flat dollar amount from.
+- **Fix**: `Tracker.RecordFlatCost(usd)` grows a separate `extraCost` folded into `CumulativeCost()` only (status bar $ total); `Cumulative()`/`Last()`/`LastCost()` stay token-pure. Accepted trade-off: flat costs vanish across `-resume` rather than growing the session schema for a $0.0007/call line item.
+- **Lesson**: cost that isn't denominated in the persisted unit (tokens) can't survive resume for free — either widen the persisted schema deliberately or accept the loss, but never launder it through a fake token turn (it corrupts every token-derived indicator).
+- **Refs**: `internal/cache/cache.go:RecordFlatCost`, `internal/tools/websearch/websearch.go` (CostSink), `TestTracker_RecordFlatCost`
+
 ## CI / gates
 
 ### A self-skipping test suite makes a missing CI secret look like a pass
@@ -1434,6 +1455,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when an error gains machine-actionable metadata (hints, alternatives), grep the instruction surfaces for blanket "on error: stop" rules — they silently discard it.
 - **Refs**: `internal/sysprompt/sysprompt.go` (Workflow rule 5), `internal/tools/bash/hint.go`, `internal/skill/builtin/plan-mode.md` "Common bash pitfalls in plan-analyze"
 
+### Eval prompts that demand verbatim quoting silently break when the target line crosses read's 1024-byte cap
+- **Saw**: `tool-selection` (quote `const description` strings verbatim) failed with `bash_calls 1–4` three months after its last pass — the model still did grep×3→read×3, then bash awk/wc. Same-era `bash-overreach` failed with `bash_calls=2, list_dir=0`.
+- **Why**: fixture drift, not model drift: `bash.go`'s `const description` line grew 384→1059 B, crossing `read`'s `maxLineBytes=1024` in-band elision (`grep` also truncates matches at 240 chars) — no dedicated tool can return that line verbatim any more, so shell recovery is CORRECT tool selection. `bash-overreach`'s "fewest lines" question additionally had no dedicated-tool answer at all (`list_dir` prints byte sizes, not line counts), so `find -exec wc|sort` was forced by the prompt itself.
+- **Fix**: bound what the mechanism forces, not the aspiration. `tool-selection`: `max_bash_calls 0→4` (elision-recovery envelope: 1 extraction + ≤3 word counts) + new `bash_before_dedicated` metric bound 0 (bash never FIRST resort — ordering is what a total-calls bound can't see). `bash-overreach`: second question switched to "smallest in bytes" (the same single `list_dir` call answers it) + `list_dir`/`bash` description clauses steering count-/size-questions away from `find/wc/stat` (measured: bash 2→1→0, `list_dir` 0→1, sequence flipped).
+- **Lesson**: an eval case that quotes repo content is coupled to that content's SIZE — when a `max_*_calls=0` assertion starts failing months later, first check whether any dedicated tool can still answer the prompt at all (line caps, truncation) before blaming model drift. And prefer order-sensitive bounds (`bash_before_dedicated`) over loosened totals when recovery is legitimate: they keep the anti-pattern failing while tolerating forced recovery.
+- **Refs**: `internal/tools/read/read.go` (`maxLineBytes`), `internal/tools/grep/grep.go` (`maxLineChars`), `eval/cases/tool-selection/README.md` (drift history), `eval/cases/bash-overreach/README.md`, `eval/run.sh` (`bash_before_dedicated`)
+
 ## Build tags / dependency isolation
 
 ### A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`
@@ -1479,3 +1507,10 @@ If you're new to the project, skim entries in this order:
 - **Fix**: webfrontend's Run force-closes with `srv.Close()` once the plane ctx is done (in-flight POST bodies are tiny; the Serve drain owns the message queue, not HTTP responses). Client-side disconnects stay covered by `r.Context().Done()` in the stream loop.
 - **Lesson**: for any streaming endpoint, "graceful" Shutdown needs per-connection cancellation tracking (register each request's cancel and fire them before Shutdown). Plain Shutdown + timeout is a hang with extra steps — don't upgrade the Close() back without that.
 - **Refs**: `internal/controlplane/webfrontend.go` (Run), net/http Server.Shutdown docs
+
+### PRD said "sessions are archived per-project" — they are not; bucket by header CWD
+- **Saw**: implementing skill auto-distillation's batch scan (M-SD2), the PRD's pointer (`~/.seek/projects/<pid>/sessions/<sid>/`, paths.go L179) turned out to hold checkpoint/subagent SIDECAR space, not session transcripts — the transcripts live flat at `~/.seek/sessions/<id>.jsonl` with only a `cwd` field in the JSONL header line.
+- **Why**: `ProjectSessionDir` was named/documented for the checkpoint subsystem; the PRD read the path shape as the archive location. "List a project's sessions" has no existing helper because nothing needed per-project bucketing before.
+- **Fix**: `session.Store.ListProject(projectID)` (M-SD2) reads headers only (`loadMeta` discipline) and filters by `paths.ProjectID(info.CWD)`, skipping forked sessions (`ParentID != ""`) so /branch & /compact children can't double-count one conversation as two "independent" recurrences. Commit c_dkgvnp.
+- **Lesson**: when a design doc cites a path as "where X lives", verify against the writer of X, not just the path helper's name. Per-project bucketing of sessions = hash of the header's `cwd`, nothing on disk groups them for you.
+- **Refs**: `internal/session/session.go` (ListProject), `internal/paths/paths.go` (ProjectSessionDir comment), `docs/prd/feature-skill-distill.md` §3.1 D

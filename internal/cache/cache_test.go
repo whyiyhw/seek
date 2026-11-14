@@ -234,12 +234,10 @@ func TestTracker_SummaryFormat(t *testing.T) {
 func TestTracker_ConcurrentSafe(t *testing.T) {
 	tr := New()
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			recordFlash(tr, deepseek.Usage{PromptTokens: 1, PromptCacheHitTokens: 1})
-		}()
+		})
 	}
 	wg.Wait()
 	if c := tr.Cumulative(); c.PromptTokens != 100 || c.PromptCacheHitTokens != 100 {
@@ -408,14 +406,12 @@ func TestTracker_AdoptChild_ConcurrentSpawn(t *testing.T) {
 	parent := New()
 	var wg sync.WaitGroup
 	const N = 50
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range N {
+		wg.Go(func() {
 			child := New()
 			recordFlash(child, deepseek.Usage{PromptTokens: 10, PromptCacheHitTokens: 5, PromptCacheMissTokens: 5})
 			parent.AdoptChild(child)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -440,9 +436,7 @@ func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Reader: hammer Cumulative on parent.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -452,28 +446,24 @@ func TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock(t *testing.T) {
 				_ = parent.CumulativeCost()
 			}
 		}
-	}()
+	})
 
 	// Writer: spawn children, record into them, adopt.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			child := New()
 			recordFlash(child, deepseek.Usage{PromptTokens: 1})
 			parent.AdoptChild(child)
 		}
-	}()
+	})
 
 	// Let it run briefly then stop.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 500; i++ {
+	wg.Go(func() {
+		for range 500 {
 			recordFlash(parent, deepseek.Usage{PromptTokens: 1})
 		}
 		close(stop)
-	}()
+	})
 
 	wg.Wait()
 }
@@ -594,5 +584,45 @@ func TestTracker_AdoptChild_NonFreshChildWithoutResumeOK(t *testing.T) {
 
 	if got := parent.Cumulative().TotalTokens; got != 200 {
 		t.Errorf("Cumulative = %d, want 200 (only the child's turn)", got)
+	}
+}
+
+// TestTracker_RecordFlatCost verifies the Search-API cost path: flat
+// per-call dollars must grow CumulativeCost WITHOUT fabricating a token
+// turn — Cumulative()/Last()/LastCost() stay token- and turn-pure so
+// the ctx% indicator and per-turn footer are unaffected.
+func TestTracker_RecordFlatCost(t *testing.T) {
+	tr := New()
+	tr.Record(deepseek.Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120}, "deepseek-flash", pricing.TierStandard)
+
+	beforeCost := tr.CumulativeCost()
+	beforeLast := tr.Last()
+	beforeCum := tr.Cumulative()
+	beforeLastCost := tr.LastCost()
+
+	tr.RecordFlatCost(0.0007142857) // one successful search call
+	tr.RecordFlatCost(0)            // no-op, must not perturb anything
+
+	if got := tr.CumulativeCost(); got != beforeCost+0.0007142857 {
+		t.Errorf("CumulativeCost() = %v, want %v (flat cost folded in)", got, beforeCost+0.0007142857)
+	}
+	if tr.Last() != beforeLast {
+		t.Errorf("Last() changed after RecordFlatCost: %+v vs %+v", tr.Last(), beforeLast)
+	}
+	if tr.Cumulative() != beforeCum {
+		t.Errorf("Cumulative() changed after RecordFlatCost: %+v vs %+v", tr.Cumulative(), beforeCum)
+	}
+	if got := tr.LastCost(); got != beforeLastCost {
+		// LastCost is the token turn's locked-in cost; the flat cost
+		// must not have leaked into it.
+		t.Errorf("LastCost() = %v, want unchanged %v", got, beforeLastCost)
+	}
+
+	// Seal folds turns into base but must not double-count the flat
+	// cost (it is already cumulative-only).
+	cum := tr.CumulativeCost()
+	tr.Seal()
+	if got := tr.CumulativeCost(); got != cum {
+		t.Errorf("CumulativeCost() changed across Seal: %v vs %v — flat cost double-counted", got, cum)
 	}
 }

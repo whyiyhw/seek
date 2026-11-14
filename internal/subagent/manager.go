@@ -68,6 +68,14 @@ type RunnerJob struct {
 	// (typically by re-registering the parent's tool instances
 	// keyed by name).
 	ToolNames []string
+	// Provider is the resolved routing lane ("" = inherit the
+	// parent session's provider). Set from SpawnArgs via
+	// ResolveRoute — never the raw tool-call value, which
+	// validation has already rejected when unknown.
+	Provider string
+	// Model is the resolved model id. Empty exactly when Provider
+	// is empty (inherit the parent's live session model).
+	Model string
 }
 
 // RunnerResult is what Runner returns on success. Summary is the
@@ -243,6 +251,13 @@ type SpawnArgs struct {
 	// invoking Spawn). Empty for isolation:"none". Goes into the
 	// started event for the /worktrees panel's cross-reference.
 	WorktreePath string
+	// Provider / Model are the optional per-call routing params
+	// (feature-orchestration.md §4.2). Both empty = inherit the
+	// parent session's lane unchanged. Validated via ResolveRoute
+	// in Spawn step 1 — raw tool-call values arrive here verbatim
+	// so Manager stays the single validation point.
+	Provider string
+	Model    string
 }
 
 // Spawn launches one subagent and blocks until it terminates.
@@ -333,9 +348,15 @@ type spawnSetup struct {
 	childTracker *cache.Tracker
 	systemPrompt string
 	toolNames    []string
-	runCtx       context.Context
-	cancel       context.CancelFunc
-	inf          *inFlight
+	// Provider / Model carry the RESOLVED route from ResolveRoute
+	// (begin step 1) through to the RunnerJob — never the raw
+	// tool-call values, which validation has already rejected.
+	// Both empty = inherit the parent session's lane.
+	Provider string
+	Model    string
+	runCtx   context.Context
+	cancel   context.CancelFunc
+	inf      *inFlight
 }
 
 // begin runs the shared steps 1–8: validate, capacity-gate, child
@@ -359,6 +380,16 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 	}
 	if args.Prompt == "" {
 		r := failResult("", "spawn_error", "prompt required")
+		return nil, &r
+	}
+	// Routing params: unknown provider / model is a validation
+	// failure, same class as unknown subagent_type (feature-
+	// orchestration.md §4.2). Route keeps "" provider for the
+	// inherit path so the Runner's default lane is byte-identical
+	// to the pre-routing behaviour.
+	route, err := ResolveRoute(args.Provider, args.Model)
+	if err != nil {
+		r := failResult("", "spawn_error", err.Error())
 		return nil, &r
 	}
 
@@ -470,6 +501,8 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 		childTracker: childTracker,
 		systemPrompt: systemPrompt,
 		toolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
+		Provider:     route.Provider,
+		Model:        route.Model,
 		runCtx:       runCtx,
 		cancel:       cancel,
 		inf:          inf,
@@ -506,6 +539,8 @@ func (m *Manager) runAndFinish(sp *spawnSetup, background bool) Result {
 			Tracker:      sp.childTracker,
 			Policy:       sp.childPolicy,
 			ToolNames:    sp.toolNames,
+			Provider:     sp.Provider,
+			Model:        sp.Model,
 		})
 	}()
 	sp.cancel() // release any goroutines depending on runCtx
