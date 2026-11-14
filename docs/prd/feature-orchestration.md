@@ -283,6 +283,8 @@ P1 的 config `agents` 段是内置 type 的最小 override（不动文件系统
 
 ## 6. P3 —— hooks 面扩展（M-O3.x）
 
+> **P3-a 设计启动已细化**（2026-11-14，卡 c_o77s3m）：字节级缓存分析（四命题）、全量生命周期点清单（含 env/audit 契约）、注入通道决策（三区 + 唯一缝）与 CC hooks 逐项取舍见 [`feature-hooks-injection.md`](feature-hooks-injection.md)。该文对 D17 有两处精确化（非确定性代价面 = token 预算而非缓存；授权语义 = 内容信任），对 D16 三区补了字节范围定义——以该文为准。
+
 #### D15 — 新观察点（全部 observer，无返回值，deny 面不扩）
 
 | 新点 | 触发时机 | in-process | shell（hooks.toml） |
