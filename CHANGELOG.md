@@ -17,3 +17,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 
 ## 已进 main、未部署
 - c_r5dm2f：v0.11 发布准备：版本号 + CHANGELOG 汇总 + tag 草稿（发版动作留人）
+- c_mvv5td：book 与 PRD 重复事实清单（缩并备料，只盘点不改）
