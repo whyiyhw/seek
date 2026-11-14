@@ -23,3 +23,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_oh2dl3：/distill dry-run 预览：显示将产出的草稿不落盘
 - c_kql3ip：eval 扩容：GLM 车道契约用例——路由/计价/cache 字段锁回归
 - c_7pptol：web frontend 设计稿：control-plane 首个真实渠道 + inspect-rpc 数据面并入评估（feature-web-frontend.md）
+- c_c26lvq：DeepSeek 全家桶 API 接入评估设计稿：read_url/文件输入/ASR-TTS/安全参数（feature-deepseek-app-api.md）
