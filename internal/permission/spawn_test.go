@@ -72,11 +72,11 @@ func TestSpawn_PreferenceTransitions(t *testing.T) {
 // enumerate every (parent × child) pair explicitly.
 func TestSpawn_WorkflowTransitions(t *testing.T) {
 	cases := []struct {
-		name      string
-		parent    Workflow
-		childWf   *Workflow
-		wantWf    Workflow
-		wantOK    bool
+		name    string
+		parent  Workflow
+		childWf *Workflow
+		wantWf  Workflow
+		wantOK  bool
 	}{
 		// Parent None → any child workflow OK.
 		{"none→inherit (none)", WorkflowNone, nil, WorkflowNone, true},
@@ -195,7 +195,7 @@ func TestSpawn_ChildHasIndependentLock(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

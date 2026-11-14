@@ -8,10 +8,22 @@ import (
 	"github.com/whyiyhw/seek/internal/memory"
 )
 
+// memoryCandidates keeps the pending-hold plumbing readable — the M
+// review's candidate slice type, held while the skill review modal
+// owns the keyboard (see pendingMCandidates).
+type memoryCandidates = []memory.Candidate
+
 // handleDistillDone is the entry point for the async reasoner result.
 // On error or no candidates we print a single muted line to scrollback
 // and stay idle. On a non-empty candidate list we open the review modal
 // and the next keypress flows into handleDistillKey.
+//
+// Skill-segment interleave: /distill also runs a skill pass in
+// parallel (distill_skill.go). If that review modal is somehow still
+// open when the M result lands (M round-trip slower than skill — rare
+// but possible), the M candidates are held in pendingMCandidates and
+// opened when the skill review closes, mirroring how the skill pass
+// waits behind an open M review.
 func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	m.distilling = false
 
@@ -20,6 +32,11 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	}
 	if len(msg.candidates) == 0 {
 		return []tea.Cmd{m.appendHistory(styleMuted.Render("  · distill: the reasoner found nothing project-specific worth saving"))}
+	}
+	if m.skillReviewOpen {
+		m.pendingMCandidates = msg.candidates
+		return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf(
+			"  · distill: %d memory candidate(s) queued behind the skill review", len(msg.candidates))))}
 	}
 	m.distillCandidates = msg.candidates
 	m.distillIdx = 0
@@ -194,9 +211,19 @@ func (m Model) exitDistillReview(aborted bool) (tea.Model, tea.Cmd) {
 	if aborted && remaining > 0 {
 		suffix = fmt.Sprintf(", %d skipped", remaining)
 	}
-	return m, (&m).appendHistory(styleMuted.Render(fmt.Sprintf(
+	cmds := []tea.Cmd{(&m).appendHistory(styleMuted.Render(fmt.Sprintf(
 		"  · distill review done: %d saved, %d dropped%s",
-		m.distillSaved, m.distillDropped, suffix)))
+		m.distillSaved, m.distillDropped, suffix)))}
+
+	// Chain into the skill review if its candidates arrived while the
+	// M review was open (the normal /distill flow: M lands first, the
+	// skill pass lands mid-review and waits).
+	if len(m.pendingSkill) > 0 {
+		cands := m.pendingSkill
+		m.pendingSkill = nil
+		cmds = append(cmds, (&m).openSkillReview(cands)...)
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // saveDistillCandidate copies an approved candidate into M. The
@@ -250,7 +277,7 @@ func (m Model) renderDistillReview() string {
 	// Standard review prompt: show the full content body indented so
 	// the user can decide informed.
 	sb.WriteString("\n")
-	for _, line := range strings.Split(strings.TrimRight(cand.Content, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Content, "\n"), "\n") {
 		sb.WriteString("    ")
 		sb.WriteString(line)
 		sb.WriteString("\n")

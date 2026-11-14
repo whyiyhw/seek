@@ -170,7 +170,7 @@ func TestSaveLoad_PreservesEffort(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			header := strings.SplitN(string(raw), "\n", 2)[0]
+			header, _, _ := strings.Cut(string(raw), "\n")
 			hasKey := strings.Contains(header, `"effort"`)
 			if want == "" && hasKey {
 				t.Errorf("empty Effort leaked into header JSON: %s", header)
@@ -597,7 +597,7 @@ func TestSaveLoad_PreservesGoal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			header := strings.SplitN(string(raw), "\n", 2)[0]
+			header, _, _ := strings.Cut(string(raw), "\n")
 			hasKey := strings.Contains(header, `"goal"`)
 			if want == "" && hasKey {
 				t.Errorf("empty Goal leaked into header JSON: %s", header)

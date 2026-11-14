@@ -385,8 +385,7 @@ func TestServe_RejectsBadConfigs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			err := Serve(ctx, tc.sources, tc.handle, ServeConfig{})
 			if err == nil || !strings.Contains(err.Error(), tc.wantMsg) {
 				t.Fatalf("want error containing %q, got %v", tc.wantMsg, err)
@@ -401,8 +400,7 @@ func TestServe_RejectsBadConfigs(t *testing.T) {
 	}
 
 	t.Run("nil handler", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx := t.Context()
 		err := Serve(ctx, []ServeSource[testMsg]{good}, nil, ServeConfig{})
 		if err == nil || !strings.Contains(err.Error(), "nil handler") {
 			t.Fatalf("want nil-handler error, got %v", err)

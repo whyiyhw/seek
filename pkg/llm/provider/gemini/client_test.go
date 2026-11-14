@@ -57,7 +57,8 @@ func TestChatStream_TextOnly(t *testing.T) {
 		case llm.TextDelta:
 			text += e.Delta
 		case llm.TurnDone:
-			cp := e; done = &cp
+			cp := e
+			done = &cp
 		case llm.ErrorEvent:
 			t.Fatalf("unexpected error: %v", e.Err)
 		}
@@ -95,9 +96,11 @@ func TestChatStream_FunctionCall(t *testing.T) {
 	for _, ev := range drain(ch) {
 		switch e := ev.(type) {
 		case llm.ToolCallDone:
-			cp := e; tool = &cp
+			cp := e
+			tool = &cp
 		case llm.TurnDone:
-			cp := e; done = &cp
+			cp := e
+			done = &cp
 		case llm.ErrorEvent:
 			t.Fatalf("unexpected error: %v", e.Err)
 		}

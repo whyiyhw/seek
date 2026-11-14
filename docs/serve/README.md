@@ -77,9 +77,34 @@ go test -race -tags feishu ./internal/controlplane/...  # tag 打开后：占位
 默认：10s + 2×5s = 20s  →  单元取 30s
 ```
 
-改 `ServeConfig` 预算时同步改单元文件。
+改 `ServeConfig` 预算时同步改单元文件（`deploy/seek-serve.plist` 与两份示例同源，改预算时三处一起动）。
+
+## 常驻化安装（macOS）
+
+`deploy/seek-serve.plist` 是可安装模板（`{{SEEK_BIN}}`/`{{SEEK_LOG}}` 占位符，
+契约参数与上面的示例 plist 一致），`scripts/install-serve.sh` 负责校验、
+渲染与加载：
+
+```sh
+scripts/install-serve.sh install              # 校验二进制 → 渲染 → launchctl load
+scripts/install-serve.sh install --dry-run    # 只打印动作与渲染结果，不写不加载
+scripts/install-serve.sh uninstall            # launchctl unload + 删 plist（日志保留）
+scripts/install-serve.sh status               # 最近退出码 / PID
+```
+
+默认二进制 `~/.local/bin/seek`（`SEEK_BIN` 覆盖）、日志
+`~/Library/Logs/seek-serve.log`（`SEEK_LOG` 覆盖，stdout/stderr 合流写同一
+文件）。launchd 不展开 `~`，占位符必须由脚本渲染成绝对路径——不要手工
+cp 模板。安装后用 `launchctl list | grep seek-serve` 确认加载，从日志拿
+web frontend 的启动横幅（带 token 的 URL）：`tail -f ~/Library/Logs/seek-serve.log`。
+
+模板 ProgramArguments 固定 `--frontend=web`（当前默认构建可用的 frontend）；
+feishu（M4/M5）落地后在模板里重复一行 `<string>--frontend=feishu</string>`
+即可多开，重跑 install 覆盖。
 
 ## 文件
 
-- [`seek-serve.plist`](seek-serve.plist) — macOS launchd 用户 agent 示例
+- [`seek-serve.plist`](seek-serve.plist) — macOS launchd 用户 agent 示例（契约参考）
 - [`seek-serve.service`](seek-serve.service) — Linux systemd 用户服务示例
+- [`../../deploy/seek-serve.plist`](../../deploy/seek-serve.plist) — 可安装模板（占位符版，install-serve.sh 渲染）
+- [`../../scripts/install-serve.sh`](../../scripts/install-serve.sh) — macOS 常驻化安装/卸载脚本

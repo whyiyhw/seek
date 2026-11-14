@@ -108,8 +108,8 @@ func splitSemver(v string) ([]int, string) {
 		v = v[:plus]
 	}
 	var pre string
-	if dash := strings.IndexByte(v, '-'); dash >= 0 {
-		pre = v[dash+1:]
+	if _, after, ok := strings.Cut(v, "-"); ok {
+		pre = after
 	}
 	parts := strings.Split(v, ".")
 	nums := make([]int, 0, len(parts))

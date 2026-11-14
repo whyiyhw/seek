@@ -61,15 +61,15 @@ func LoadEnvFile(path string) (map[string]string, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
+		before, after, ok := strings.Cut(line, "=")
+		if !ok {
 			return nil, fmt.Errorf("routines: env file %s:%d missing '=' in %q", path, lineNum, raw)
 		}
-		key := strings.TrimSpace(line[:eq])
+		key := strings.TrimSpace(before)
 		if key == "" {
 			return nil, fmt.Errorf("routines: env file %s:%d empty key in %q", path, lineNum, raw)
 		}
-		val := line[eq+1:]
+		val := after
 		// Strip wrapping quotes if balanced. Unbalanced quotes are
 		// left as literal — a value containing a stray `"` should
 		// stay queryable in the child process.

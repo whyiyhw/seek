@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/checkpoint"
@@ -351,19 +350,4 @@ func cmdRedo(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "(nothing to redo)")
 	}
 	return nil
-}
-
-// describeAt allows future help renderers to peek at a single
-// checkpoint by turn — currently exported only for tests.
-func describeAt(list []checkpoint.GitCheckpoint, turn int) string {
-	for _, c := range list {
-		if c.Turn == turn {
-			return strings.Join([]string{
-				fmt.Sprintf("turn %d", c.Turn),
-				c.TS.Local().Format(time.RFC3339),
-				c.Label,
-			}, " · ")
-		}
-	}
-	return ""
 }

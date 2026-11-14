@@ -228,7 +228,7 @@ func TestThink_ExecuteStream_PropagatesPushError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_, _ = io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"reasoning_content":"thinking..."}}]}`+"\n\n")
 			if flusher != nil {
 				flusher.Flush()

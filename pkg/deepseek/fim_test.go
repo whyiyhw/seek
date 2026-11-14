@@ -85,9 +85,9 @@ func TestFIM_APIErrorPropagates(t *testing.T) {
 // failure on the first attempt.
 func TestFIM_RetryOnTransportEOF(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&hits, 1)
+		n := hits.Add(1)
 		if n == 1 {
 			// Hijack and close the raw connection without writing any
 			// response — the client observes a bare "EOF" from http.Do.
@@ -119,7 +119,7 @@ func TestFIM_RetryOnTransportEOF(t *testing.T) {
 	if got := resp.Choices[0].Text; got != "return a + b" {
 		t.Errorf("text = %q", got)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want 2 (first=EOF, second=200)", got)
 	}
 }
@@ -129,9 +129,9 @@ func TestFIM_RetryOnTransportEOF(t *testing.T) {
 // attempt count.
 func TestFIM_RetryExhaustedAnnotated(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, `{"error":{"type":"internal_error","message":"fim boom"}}`)
 	}))
@@ -148,7 +148,7 @@ func TestFIM_RetryExhaustedAnnotated(t *testing.T) {
 	if !strings.Contains(err.Error(), "(after 2 attempts)") {
 		t.Errorf("error should be annotated with the attempt count, got %v", err)
 	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("server hits = %d, want exactly 2 (initial + one retry)", got)
 	}
 }

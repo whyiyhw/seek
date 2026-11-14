@@ -32,6 +32,10 @@ var contextLimits = map[string]int{
 	"gpt-4o-mini":                128_000,
 	"gemini-2.0-flash":           1_000_000,
 	"gemini-1.5-pro":             2_000_000,
+	// GLM lane (per-agent routing, feature-orchestration.md D9):
+	// glm-5.3 on open.bigmodel.cn ships a single 1M-context tier —
+	// same source as the pricing table's GLM row.
+	"glm-5.3": 1_000_000,
 }
 
 // Default is returned when an unknown model is queried. Since most

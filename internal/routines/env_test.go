@@ -156,7 +156,7 @@ func TestMergeEnv_OverlayOverridesBase(t *testing.T) {
 		"USER=alice",
 	}
 	overlay := map[string]string{
-		"HOME": "/new",
+		"HOME":             "/new",
 		"DEEPSEEK_API_KEY": "sk-test",
 	}
 	got := MergeEnv(base, overlay)
@@ -272,8 +272,8 @@ func TestDefaultSubprocess_OverrideOverridesInherited(t *testing.T) {
 	// Last-wins: walk cmd.Env in REVERSE, the first match is the
 	// effective value (this mirrors how exec resolves duplicate keys).
 	var effective string
-	for i := len(cmd.Env) - 1; i >= 0; i-- {
-		if v, ok := strings.CutPrefix(cmd.Env[i], "SEEK_TEST_OVERRIDDEN="); ok {
+	for _, v := range slices.Backward(cmd.Env) {
+		if v, ok := strings.CutPrefix(v, "SEEK_TEST_OVERRIDDEN="); ok {
 			effective = v
 			break
 		}

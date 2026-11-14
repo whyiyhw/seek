@@ -92,7 +92,7 @@ func TestLoad_AscendBounded(t *testing.T) {
 	writeMD(t, filepath.Join(root, "AGENTS.md"), "out of reach\n")
 
 	deep := root
-	for i := 0; i < maxAscend+2; i++ {
+	for range maxAscend + 2 {
 		deep = filepath.Join(deep, "x")
 	}
 	if err := os.MkdirAll(deep, 0o755); err != nil {

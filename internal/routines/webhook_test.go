@@ -169,30 +169,30 @@ func TestWebhookDispatcher_EmptyEventsMatchAll(t *testing.T) {
 
 func TestWebhookDispatcher_5xxRetriesOnce(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
 	d := NewWebhookDispatcher([]WebhookTarget{{URL: srv.URL}}, srv.Client())
 	d(context.Background(), "cron.failed", "T", "B") // must not panic / block
-	if got := atomic.LoadInt32(&hits); got != 2 {
+	if got := hits.Load(); got != 2 {
 		t.Errorf("5xx should retry exactly once (2 total requests), got %d", got)
 	}
 }
 
 func TestWebhookDispatcher_4xxNoRetry(t *testing.T) {
 	t.Parallel()
-	var hits int32
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
+		hits.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	t.Cleanup(srv.Close)
 	d := NewWebhookDispatcher([]WebhookTarget{{URL: srv.URL}}, srv.Client())
 	d(context.Background(), "cron.failed", "T", "B")
-	if got := atomic.LoadInt32(&hits); got != 1 {
+	if got := hits.Load(); got != 1 {
 		t.Errorf("4xx is a config error, must NOT retry; got %d requests", got)
 	}
 }

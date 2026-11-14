@@ -25,6 +25,7 @@ import (
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -74,8 +75,8 @@ func allCommands() []command {
 		{names: []string{"/code-review"}, usage: "/code-review [quick|thorough] [--fix] [--comment] [branch]", description: "Code-review the diff at a chosen effort level (quick: terse, high-confidence blocking bugs; thorough: exhaustive incl. long-tail design findings). --fix applies findings via plan-mode propose; --comment posts inline PR comments (needs gh).", handler: cmdCodeReview},
 		{names: []string{"/branch"}, usage: "/branch", description: "Fork this session: new ID, parent link, copy of history. Parent left intact on disk.", handler: cmdBranch},
 		{names: []string{"/compact"}, usage: "/compact", description: "Summarise prior history into one message to free up context.", handler: cmdCompact},
-		{names: []string{"/distill"}, usage: "/distill", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review).", handler: cmdDistill},
-		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Use or manage skills. `use <name>` arms next message (or fire with inline task); install/list/status/stats/uninstall/update/help mirror the CLI.", handler: cmdSkillCLI},
+		{names: []string{"/distill"}, usage: "/distill [--dry-run]", description: "Thinking-mode-extract project-level decisions from this session into M memory (per-candidate y/n/e review). --dry-run previews the skill-draft funnel only: layer verdicts + draft previews, nothing written.", handler: cmdDistill},
+		{names: []string{"/skill"}, usage: "/skill <verb> [args]", description: "Use or manage skills. `use <name>` arms next message (or fire with inline task); install/list/status/stats/uninstall/update/help mirror the CLI; `drafts` is the review inbox (list/show/approve/reject).", handler: cmdSkillCLI},
 		{names: []string{"/skills"}, usage: "/skills [--used]", description: "List loaded skills, or --used to see which were called in this session.", handler: cmdSkills},
 		{names: []string{"/memory"}, usage: "/memory <verb> [args]", description: "Inspect project memory (mirrors the `seek memory` CLI: list, show, search, archive).", subcommands: []modelChoice{
 			{"list", "list — every memory entry with scope and age"},
@@ -1040,7 +1041,7 @@ func normalizeEffort(tok string) string {
 func parseCodeReviewArgs(args string) (effort string, fix, comment bool, branch string, err error) {
 	effort = "quick"
 	effortSet := false
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch {
 		case tok == "--fix":
 			fix = true
@@ -1157,7 +1158,7 @@ func reviewChoices(cwd string) []modelChoice {
 	branchCmd.Dir = cwd
 	if out, err := branchCmd.Output(); err == nil {
 		var branches []string
-		for _, b := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		for b := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 			if b != "" {
 				branches = append(branches, b)
 			}
@@ -1782,7 +1783,7 @@ func cmdUpgrade(m *Model, args string) cmdResult {
 		return cmdResult{text: styleMuted.Render("/upgrade: wait for the current turn to finish")}
 	}
 	var force, dryRun bool
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch tok {
 		case "--force", "-force":
 			force = true
@@ -1890,11 +1891,28 @@ func startCompactCmd(m *Model) tea.Cmd {
 
 // cmdDistill runs the reasoner pass that extracts ≤3 project-level
 // decisions from the current session and surfaces them for y/n/e
-// review (PRD §6). Refuses to run mid-stream — the reasoner needs the
+// review (PRD §6), and — when the skill segment is available and the
+// session passes the L0 mechanical gate — a parallel skill-draft pass
+// whose candidates chain into the same review flow (feature-skill-
+// distill M-SD1). Refuses to run mid-stream — the reasoner needs the
 // full settled history, not a half-streamed turn. Refuses on
 // unavailable memory (--no-save, project load failure) so the user
 // gets a clear message instead of a silent no-op.
-func cmdDistill(m *Model, _ string) cmdResult {
+//
+// --dry-run (card c_oh2dl3) previews only the skill segment: the full
+// funnel runs, the report shows every layer's verdict plus truncated
+// draft previews, and nothing is written anywhere.
+func cmdDistill(m *Model, args string) cmdResult {
+	dryRun := false
+	for _, a := range strings.Fields(args) {
+		switch a {
+		case "--dry-run":
+			dryRun = true
+		default:
+			return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+				"/distill: unknown argument %q (usage: /distill [--dry-run])", a))}
+		}
+	}
 	if m.streaming {
 		return cmdResult{text: styleMuted.Render("/distill: wait for the current turn to finish")}
 	}
@@ -1910,13 +1928,72 @@ func cmdDistill(m *Model, _ string) cmdResult {
 			"/distill: session is too short to extract decisions yet — keep going and try again later")}
 	}
 
-	return cmdResult{
-		extra: func() tea.Msg {
+	if dryRun {
+		return cmdDistillDryRun(m)
+	}
+
+	// L0 mechanical gate for the skill segment (PRD §4): procedural
+	// knowledge needs a tool-heavy session to exist in. A session that
+	// fails the gate silently skips the skill pass — the M pass runs
+	// exactly as before; a muted note explains what was skipped and
+	// why, because "nothing happened" is indistinguishable from
+	// "broken" without it.
+	skillPass := tea.Cmd(nil)
+	if m.opts.SkillDistiller != nil && m.opts.Skills != nil {
+		gate := skilldistill.MechanicalGate(msgs)
+		if gate.Pass {
+			m.skillDistilling = true
+			m.skillDistillGate = gate.Detail
+			skillPass = startSkillDistillCmd(m, false)
+		} else {
 			m.distilling = true
 			m.distillSince = time.Now()
 			m.distillMsgCount = len(msgs) - 1
-			return startDistillCmd(m)()
-		},
+			return cmdResult{
+				text:  styleMuted.Render(fmt.Sprintf("/distill: skill drafts skipped — session has %s", gate.Detail)),
+				extra: startDistillCmd(m),
+			}
+		}
+	}
+
+	m.distilling = true
+	m.distillSince = time.Now()
+	m.distillMsgCount = len(msgs) - 1
+	mPass := startDistillCmd(m)
+	if skillPass == nil {
+		return cmdResult{extra: mPass}
+	}
+	return cmdResult{extra: tea.Batch(mPass, skillPass)}
+}
+
+// cmdDistillDryRun is the /distill --dry-run path (card c_oh2dl3):
+// run the full skill funnel — L0 gate, L1 extraction (with its prompt
+// dedup), evidence verification, L2 — and report what it WOULD
+// produce, without opening any review modal and without touching
+// .drafts/ (or anything else). The M pass is deliberately skipped: it
+// has no draft artifact to preview (its output is the review modal
+// itself), and a dry run that could still save memory on 'y' wouldn't
+// be dry. Prechecks (streaming, memory availability, short session)
+// are shared with the real run so a dry run previews exactly the
+// state a real run would see.
+func cmdDistillDryRun(m *Model) cmdResult {
+	if m.opts.SkillDistiller == nil || m.opts.Skills == nil {
+		return cmdResult{text: styleMuted.Render(
+			"/distill --dry-run: skill segment unavailable in this session (no DeepSeek client or no skills loaded)")}
+	}
+	msgs := m.opts.Agent.Messages()
+	gate := skilldistill.MechanicalGate(msgs)
+	if !gate.Pass {
+		// Byte-identical to the real run's skip line — a failing gate
+		// should read the same whichever mode asked.
+		return cmdResult{text: styleMuted.Render(fmt.Sprintf(
+			"/distill: skill drafts skipped — session has %s", gate.Detail))}
+	}
+	m.skillDistilling = true
+	m.skillDistillGate = gate.Detail
+	return cmdResult{
+		text:  styleMuted.Render("/distill dry-run: running the skill funnel — nothing will be written"),
+		extra: startSkillDistillCmd(m, true),
 	}
 }
 
@@ -2107,7 +2184,7 @@ func cmdAgents(m *Model, args string) cmdResult {
 	// scoped on disk and accumulates across sessions, so an
 	// unfiltered dump grows unbounded over a project's lifetime.
 	showAll := false
-	for _, tok := range strings.Fields(args) {
+	for tok := range strings.FieldsSeq(args) {
 		switch tok {
 		case "--all", "-a":
 			showAll = true

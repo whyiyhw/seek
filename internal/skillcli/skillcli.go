@@ -53,6 +53,8 @@ func runSkillCmd(args []string, stdout, stderr io.Writer) error {
 		return cmdSkillStats(rest, stdout, stderr)
 	case "create", "new":
 		return cmdSkillCreate(rest, stdout, stderr)
+	case "drafts":
+		return cmdSkillDrafts(rest, stdout, stderr)
 	case "help", "--help", "-h":
 		printSkillHelp(stdout)
 		return nil
@@ -78,6 +80,10 @@ Commands:
   status <name>          Detailed view of one skill: source path, install record, shadowing, stats
   stats                  Top-N skills by call count (default --top 10 --since 30d)
   create <name>          Scaffold a new skill package (SKILL.md + references/ + README.md)
+  drafts                 List skill drafts distilled from sessions (.drafts/, invisible to sessions)
+  drafts show <name>     Full draft text + diff vs the nearest installed skill
+  drafts approve <name>  Install a reviewed draft (existing install chain, then delete it)
+  drafts reject <name>   Delete a draft you've decided against (rm is an alias)
 
 Run 'seek skill <command> --help' for command-specific flags.`)
 }

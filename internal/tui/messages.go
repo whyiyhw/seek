@@ -44,10 +44,6 @@ type agentEventMsg struct{ Event agent.Event }
 // complete, error, or context cancellation).
 type streamEndMsg struct{}
 
-// promptSubmittedMsg fires when the user pressed Enter in the input
-// area, carrying the trimmed text.
-type promptSubmittedMsg struct{ Text string }
-
 // goalStartMsg is emitted by the /goal command to kick off the first goal
 // turn from Update (the command handler sets state; submit happens here so
 // the new streaming Model isn't lost). M-goal.2.

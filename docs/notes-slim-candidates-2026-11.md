@@ -4,6 +4,20 @@
 > **本卡不删任何东西。** 下面所有条目都是候选 + 证据 + 风险分级，删除/收缩动作由后续卡片逐条审批执行。
 > 每条候选都附机械复核命令，任何人可在任意机器重跑得到同样结论。
 
+## 执行状态（后续减法卡回填）
+
+| 刀 | 卡 | 删了什么 | 备注 |
+|---|---|---|---|
+| 首刀 2026-11-13 | c_ajavza | A1/A2/A5/A12（describeAt、WithStatusCallback、DefaultPath、WithHTTPClient） | deadcode 51→47；连带 emitStatus 永_nil 链记为下轮候选 |
+| 第 2 刀 2026-11-13 | c_7qjnko | A 类剩余全部（A3/A4/A6–A11、A13、A14）+ C 类全部（C1–C9）+ 连锁（teatest `model` 字段、3 个孤儿 import、testing import）+ gofmt -s 33 文件 + §6.1 计数指针化（appendix-a 不再复述条目数） | 删除前逐条重跑 deadcode 双模式 + U1000 + 全仓 grep 复核零引用；deadcode 43→35、-test 模式清单条目清零。B 类（§2）不满足「零引用」标准未动 |
+| 第 3 刀 2026-11-13 | c_l3cw6d | 裁决 4：modernize@v0.23.0 -fix 全量落地（两轮共 285 fix、106 文件、净 -77 行；omitzero 2 条按裁决剔除——dream.go fix 后整文件还原）；连带删自定义 `max`（§5 唯一纯删项）。**修复 modernize 自身引入的回归 1 处**：slices.Backward 修正在 pkg/agent/agent.go `AttachPredictedNext` 把写穿索引改成写 range 副本（静默 no-op，绿灯漏网——该路径零覆盖），已改回带索引写并补回归测试 `TestAttachPredictedNextWritesThroughIndex`（pitfall 已入册 Tooling 分区） | 验收：`go test -race ./...` 82 包全绿；deadcode 双模式 35/-test 1 与第 2 刀基线一致（-test 的 1 条即下述队列里的 skillSetWith）；gofmt -s 零偏差；modernize 残留命中恰为剔除的 2 条 Omitempty。第 9 条复核结论已回填 §2 |
+
+**第 2 刀新增候选（后续刀的队列，本刀按范围纪律未删）**：
+- `skilldistill_test.go:163 skillSetWith`：skill-distill M-SD1 合入后新增的死测试助手（C 类同性质），扫描基线 5b76ed6 之后才出现，不在本清单原始条目内。
+- `internal/hooks` emitStatus 永_nil 链（首刀遗留）与 `internal/tui/teatest` `modelCh` write-only 通道（本刀删 FinalModel 后唯一读者消失，字段仍有写入方故 U1000 不报）：同属「删除注入器后留下的孤儿读写路径」，需语义判断，不满足机械零引用标准。
+- `testModelBuilder.skipDefSize/skipReady` 字段（本刀删 WithSize/SkipReady 后恒 false，Build 仍读取）：行为零变化，可连 Build 无条件化一起删。
+
+
 ---
 
 ## 0. 方法与工具（含取舍说明）
@@ -84,6 +98,9 @@ GOOS=windows go build ./...   # other 变体进 windows 构建
 grep -rn "sandbox.Wrap\|\.Wrap(" --include="*.go" --exclude="*_test.go" .   # 生产引用=0（本次已验）
 ```
 
+**第 9 条复核结论（2026-11-13，卡 c_l3cw6d 回填）——判：保留（三变体整组），linux/other 两变体登记为下一刀候选。**
+证据：① GOOS=linux / GOOS=windows `go build ./...` + `go vet ./internal/sandbox/` 全过（含第 3 刀 modernize 改动后）；② deadcode 跨 GOOS 复扫（host 构建 + GOOS env；注意 `GOOS=x go tool deadcode` 会把工具本体也按目标平台编译导致 exec format error，须先 host 构建二进制再传 env）：linux 变体（sandbox_linux.go:54）与 other 变体（sandbox_other.go:18）在生产与 -test 双模式**均死**——`sandbox_linux_test.go` 零 `Wrap` 引用；darwin 变体 -test 模式活——`sandbox_darwin_test.go` 经 `Wrap` 起 seatbelt 真实进程做行为断言；③ 生产消费路径实为 `sandbox.Argv`（internal/tools/bash/bash.go:205，v7 柱 O 落地时走 trampoline 设计）+ `sandbox.Available()`（cmd/seek/main.go:631），`Wrap` 是旧入口、包文档「Use Available() … Wrap() …」表述已与实现错位。判保留的理由：darwin 变体是活跃行为测试接缝，删 = 连坐删真实 seatbelt 断言；linux/other 变体虽双模式死但属平台孪生实现，单删两枚造成 API 面不对称且收益仅 ~20 行。下一刀若删 linux/other 两变体，需连带修订包文档的 Wrap 段落。
+
 **预估收益**：若 16 个散项全判删（含测试），~100–150 行；若全判「测试接缝保留」，收益 0 但换来一份明确的接缝清单（本身也是本卡的产出物）。
 **风险分级：删函数 / 中**（每个都可能连坐测试；controlplane 一组还在活跃开发期——M2 刚合入，宁可不动）。
 
@@ -144,6 +161,8 @@ comm -23 <(gofmt -s -l . | sort) <(gofmt -l . | sort)   # 空 = 无 -s 专属简
 ## 5. gopls modernize：198 条简化点（生产 71 / 测试 127）
 
 工具：`modernize@v0.23.0`（引入取舍见 §0.2）。**本卡一条都不改**。分类统计：
+
+> **执行状态：裁决 4 已由第 3 刀（c_l3cw6d，2026-11-13）落地**——两轮 `-fix` 全量应用后，modernize 残留命中恰为 2 条 Omitempty（internal/memory/dream.go:34/35，按裁决剔除留人判：改了会变序列化输出）。执行时点命中 208 条（较扫描基线 198 多出 ~10 条，系扫描后合入的 web_search / P1-c 路由等新代码带入），连同唯一纯删项（自定义 `max`）全部落地；期间捕获并修复 modernize slices.Backward 写副本回归 1 处（见执行状态表第 3 刀、pitfalls「write-to-copy no-op」条）。
 
 | 类别 | 条数 | 一句话 |
 |---|---|---|

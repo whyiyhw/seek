@@ -113,11 +113,6 @@ func WithAuditLog(a *hooksconfig.AuditLog) Option {
 	return func(r *ShellRunner) { r.audit = a }
 }
 
-// WithStatusCallback wires status events to the TUI. nil = no UI.
-func WithStatusCallback(fn func(StatusEvent)) Option {
-	return func(r *ShellRunner) { r.onStatus = fn }
-}
-
 // WithVersion stamps the SEEK_VERSION env var. Optional.
 func WithVersion(v string) Option {
 	return func(r *ShellRunner) { r.version = v }
@@ -136,11 +131,6 @@ func WithProjectContext(projectID, projectPath string) Option {
 // WithExecutor swaps the bash exec for tests.
 func WithExecutor(fn func(ctx context.Context, command, cwd string, env []string) (string, int, error)) Option {
 	return func(r *ShellRunner) { r.execCmd = fn }
-}
-
-// WithClock swaps time.Now for tests.
-func WithClock(fn func() time.Time) Option {
-	return func(r *ShellRunner) { r.now = fn }
 }
 
 // NewShellRunner constructs a runner from a merged config. Call

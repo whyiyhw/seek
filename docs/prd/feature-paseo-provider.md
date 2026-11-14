@@ -107,7 +107,7 @@
 ### 4.3 派发与车道
 
 - **第一步（人工通道）**：`butler drive run --only <卡id> --provider seek`——单车道直验，不掺额度选择。
-- **第二步（纳入批量）**：`--providers` 清单加 `seek`（如 `--providers zcode,seek`）。车道按配置序选第一个"有余量"的——**排位即策略**：seek 放末位 = 其余车道额度尽时的兜底（推荐：DeepSeek 按量计费无窗口，天然兜底角色）；想省钱可放首位。
+- **第二步（纳入批量）**：~~`--providers` 清单加 `seek`~~ **用户拍板：不纳入（2026-11-13）**——DeepSeek 按量计费涉及真金白银，不进自动车道清单、不做额度尽时的兜底；seek 车道仅保留 `--only --provider seek` 人工通道（验收与定向任务用）。将来要启用须用户再拍板，agent 不得依据本 PRD 原推荐自行添加。
 - **额度闸零改动**：`paseo usage ls` 没有 seek 的插件条目 → butler 判 `laneUnknown` → **fail-open 照派**（`internal/drive/usagepaseo.go` 现成逻辑），唯一代价是 seek 车道排序退到"已知有余量"车道之后——与"兜底"定位恰好一致。后续可选优化：DeepSeek 余额 API 探针（类比 `bigmodel.go`），非必需、不阻塞验收。
 - 1308 类额度暂停文件、会话自愈等机制与 seek 无关（DeepSeek 按 token，不撞订阅窗口），不适用即不生效。
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -195,14 +196,14 @@ func foldStatusBar(left, right []statusSegment, width int) ([]statusSegment, []s
 	}
 	for !fits() {
 		side, idx, prio := -1, -1, prioPin
-		for i := len(right) - 1; i >= 0; i-- {
-			if right[i].prio > prio {
-				side, idx, prio = 1, i, right[i].prio
+		for i, r := range slices.Backward(right) {
+			if r.prio > prio {
+				side, idx, prio = 1, i, r.prio
 			}
 		}
-		for i := len(left) - 1; i >= 0; i-- {
-			if left[i].prio > prio {
-				side, idx, prio = 0, i, left[i].prio
+		for i, l := range slices.Backward(left) {
+			if l.prio > prio {
+				side, idx, prio = 0, i, l.prio
 			}
 		}
 		if idx < 0 {

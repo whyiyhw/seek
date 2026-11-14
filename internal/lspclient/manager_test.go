@@ -65,7 +65,7 @@ func TestManager_LazyStart_OnePerLang(t *testing.T) {
 	file := filepath.Join(m.rootDir, "x.go")
 	pos := Position{Line: 0, Character: 0}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if _, err := m.References(context.Background(), file, "package x", pos); err != nil {
 			t.Fatalf("References #%d: %v", i, err)
 		}

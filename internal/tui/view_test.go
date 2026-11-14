@@ -153,7 +153,7 @@ func TestRenderTurnFooter_NoCacheNote_WhenNoHits(t *testing.T) {
 // so each checkpoint in history says how long that turn took.
 func TestRenderTurnFooter_ShowsDuration(t *testing.T) {
 	m := Model{
-		opts: Options{Tracker: cache.New(), Model: deepseek.ModelV41Flash},
+		opts:  Options{Tracker: cache.New(), Model: deepseek.ModelV41Flash},
 		turns: 1,
 	}
 	// Zero duration → no time segment; the footer ends at the cost.
@@ -1052,7 +1052,7 @@ func TestRenderPathPicker_FixedHeight(t *testing.T) {
 func TestMenuWindow_FollowsSelection(t *testing.T) {
 	const total = menuMaxRows + 10 // forces a windowed list
 
-	for selected := 0; selected < total; selected++ {
+	for selected := range total {
 		start, end := menuWindow(total, selected)
 		if end-start != menuMaxRows {
 			t.Errorf("selected=%d: window size = %d, want %d", selected, end-start, menuMaxRows)
@@ -1220,7 +1220,7 @@ func TestView_ToolStatusCollapsedOneLine(t *testing.T) {
 
 	countToolRows := func() int {
 		rows := 0
-		for _, l := range strings.Split(stripANSI(m.View().Content), "\n") {
+		for l := range strings.SplitSeq(stripANSI(m.View().Content), "\n") {
 			if strings.Contains(l, "done") || strings.Contains(l, "failed") ||
 				strings.Contains(l, "read(") || strings.Contains(l, "grep(") ||
 				strings.Contains(l, "skill:") {
@@ -1382,7 +1382,7 @@ func TestView_ShownReasoningFoldsToTail(t *testing.T) {
 	}
 	// Gutter rows = marker + tail rows only. Budget = threshold-4 = 8.
 	gutter := 0
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(l, "│") {
 			gutter++
 		}

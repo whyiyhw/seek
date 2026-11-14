@@ -81,7 +81,7 @@ func parseSoul(path, raw string) *Soul {
 }
 
 func parseSoulFrontmatter(front string, s *Soul) {
-	for _, line := range strings.Split(front, "\n") {
+	for line := range strings.SplitSeq(front, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

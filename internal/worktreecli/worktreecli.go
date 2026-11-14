@@ -8,12 +8,12 @@
 // Subcommands:
 //
 //   - list:  enumerate every seek-managed worktree on disk via
-//            git worktree list --porcelain (sees worktrees from
-//            prior sessions too, not just current process).
+//     git worktree list --porcelain (sees worktrees from
+//     prior sessions too, not just current process).
 //   - gc:    prune refs/seek/discarded/<ts> rescue-stash refs
-//            past --older-than (default 48h). The same routine
-//            that runs at seek startup; CLI exposes it for users
-//            who want explicit "I'm cleaning up now".
+//     past --older-than (default 48h). The same routine
+//     that runs at seek startup; CLI exposes it for users
+//     who want explicit "I'm cleaning up now".
 //   - help / --help / -h: print usage.
 //
 // The handlers construct a fresh worktree.Manager rooted at

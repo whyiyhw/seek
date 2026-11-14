@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  seek serve — launchd 用户 agent 可安装模板（由 scripts/install-serve.sh 渲染）
+
+  本文件是模板：SEEK_BIN / SEEK_LOG 两处占位符（双花括号包裹）由安装脚本
+  替换成绝对路径后写入 ~/Library/LaunchAgents/com.whyiyhw.seek-serve.plist。
+  不要手工 cp 这个文件去 LaunchAgents —— launchd 不展开 ~，占位符也不是
+  合法路径，必须经脚本渲染。
+
+  契约要点（完整版见 docs/serve/README.md）：
+  - KeepAlive=true    任意退出都拉起（launchd 用户 agent 没有 per-exit-status
+                       的 KeepAlive 细分，语义等同 systemd Restart=always）
+  - ExitTimeOut=30    > DrainWait(10s) + 2×HandlerGrace(5s) = 20s；
+                       到点 launchd 发 SIGKILL，serve 应早已自己退完
+  - 停机信号          unload/reboot 时 launchd 先发 SIGTERM —— serve 的 main
+                       把 SIGTERM 映射成 ctx cancel 进入 drain
+  - --frontend=web    当前默认构建注册的 frontend 是 fake / web；feishu
+                       （M4/M5）落地后重复一行 <string>--frontend=feishu</string>
+                       即可多开。web 的地址/token 走 ~/.seek/ 下的文件，
+                       密钥不进本 plist
+  - 日志              stdout/stderr 合流写入同一文件（SEEK_LOG 渲染为
+                       ~/Library/Logs/seek-serve.log），append 模式
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.whyiyhw.seek-serve</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{SEEK_BIN}}</string>
+        <string>serve</string>
+        <string>--frontend=web</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>StandardOutPath</key>
+    <string>{{SEEK_LOG}}</string>
+    <key>StandardErrorPath</key>
+    <string>{{SEEK_LOG}}</string>
+</dict>
+</plist>

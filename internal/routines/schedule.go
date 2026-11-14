@@ -277,7 +277,7 @@ func parseCronRange(s string, min, max int) (uint64, error) {
 // like "1-10/3".
 func applyStep(mask uint64, step int) uint64 {
 	var positions []int
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		if mask>>uint(i)&1 == 1 {
 			positions = append(positions, i)
 		}
@@ -327,8 +327,8 @@ func ParseSchedule(raw string) (Schedule, error) {
 
 	// @every <duration> form.
 	const everyPrefix = "@every "
-	if strings.HasPrefix(trimmed, everyPrefix) {
-		dur, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(trimmed, everyPrefix)))
+	if after, ok := strings.CutPrefix(trimmed, everyPrefix); ok {
+		dur, err := time.ParseDuration(strings.TrimSpace(after))
 		if err != nil {
 			return Schedule{}, fmt.Errorf("routines: bad @every duration %q: %v (use Go syntax: 30s, 5m, 2h30m, 24h)", trimmed, err)
 		}
@@ -403,7 +403,7 @@ func (c *CronExpr) Next(after time.Time) time.Time {
 	t := after.Truncate(time.Minute).Add(time.Minute)
 
 	maxAttempts := 366 * 24 * 60 * 4 // ~2M minutes, ~4 years
-	for i := 0; i < maxAttempts; i++ {
+	for range maxAttempts {
 		if c.match(t) {
 			return t.UTC()
 		}

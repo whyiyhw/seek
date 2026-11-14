@@ -37,9 +37,9 @@ func shellStub(t *testing.T, script string) SubprocessFn {
 // for deterministic test runs. All paths land in tempdirs so
 // runs/<id>.jsonl don't pollute the user's real ~/.seek/cron/.
 type tickFixture struct {
-	dir    string
-	store  *Store
-	now    time.Time
+	dir   string
+	store *Store
+	now   time.Time
 }
 
 func newTickFixture(t *testing.T) *tickFixture {
@@ -71,10 +71,10 @@ func (f *tickFixture) createDueJob(t *testing.T, name, prompt string) {
 	}
 	sched, _ := ParseSchedule("@every 5m")
 	j := Job{
-		Name:    name,
+		Name:     name,
 		Schedule: sched,
-		Prompt:  prompt,
-		NextRun: f.now.Add(-1 * time.Minute), // already due
+		Prompt:   prompt,
+		NextRun:  f.now.Add(-1 * time.Minute), // already due
 	}
 	if err := f.store.Create(j, CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -85,10 +85,10 @@ func (f *tickFixture) createNotDueJob(t *testing.T, name string) {
 	t.Helper()
 	sched, _ := ParseSchedule("@every 5m")
 	j := Job{
-		Name:    name,
+		Name:     name,
 		Schedule: sched,
-		Prompt:  "shouldn't run",
-		NextRun: f.now.Add(10 * time.Minute), // future
+		Prompt:   "shouldn't run",
+		NextRun:  f.now.Add(10 * time.Minute), // future
 	}
 	if err := f.store.Create(j, CreateOptions{}); err != nil {
 		t.Fatal(err)
@@ -272,7 +272,7 @@ func TestTick_MultipleDueJobsRunInParallel(t *testing.T) {
 	}
 	f := newTickFixture(t)
 	const N = 4
-	for i := 0; i < N; i++ {
+	for i := range N {
 		f.createDueJob(t, fmt.Sprintf("j%d", i), "")
 	}
 
@@ -428,19 +428,17 @@ func TestTick_ConcurrentMarkRunRaceFree(t *testing.T) {
 		t.Skip("/bin/sh tick stub not available on Windows")
 	}
 	f := newTickFixture(t)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		f.createDueJob(t, fmt.Sprintf("j%d", i), "")
 	}
 	sub := shellStub(t, "echo hi; exit 0")
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_, _ = Tick(context.Background(), f.store, f.opts(sub))
-	}()
+	})
 	// Hammer List during the tick.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		_, _ = f.store.List()
 	}
 	wg.Wait()

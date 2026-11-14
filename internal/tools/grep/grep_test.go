@@ -287,7 +287,7 @@ func TestGrep_DefaultMaxMatchesCapsAt20(t *testing.T) {
 	}
 	// Count match lines (lines starting with '>') — must equal defaultMaxMatches.
 	matchLines := 0
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, ">") {
 			matchLines++
 		}
@@ -305,7 +305,7 @@ func TestGrep_MatchLineMarkedWithArrow(t *testing.T) {
 	}
 	// Lines that look like "  NNN  content" or "> NNN  content" are output lines.
 	// Match lines must start with '>'; context lines must not.
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		trimmed := strings.TrimSpace(line)
 		// Skip header / footer / separator lines (no leading digit after optional '>').
 		if len(trimmed) == 0 || trimmed == "---" {
@@ -344,7 +344,7 @@ func TestGrep_TruncatesLongLines(t *testing.T) {
 		t.Errorf("long line should be truncated with …(truncated) sentinel; got %q", out)
 	}
 	// Sanity: the displayed line should be much shorter than the source.
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(line, "ALPHA") && len(line) > maxLineChars*2 {
 			t.Errorf("line containing match still too long (%d bytes): %q", len(line), line)
 		}
@@ -361,13 +361,13 @@ func TestGrep_HardBytesCap(t *testing.T) {
 	// so the formatted output blows past maxOutputBytes.
 	for i := range 50 {
 		var b strings.Builder
-		for j := 0; j < 20; j++ {
+		for range 20 {
 			// Each match has 7 lines of context (3 before + 3 after by default).
 			// Pad each line to ensure the file is meaty.
 			b.WriteString(strings.Repeat("// padding line ", 8) + "\n")
 		}
 		b.WriteString("TARGET_PATTERN appears here\n")
-		for j := 0; j < 20; j++ {
+		for range 20 {
 			b.WriteString(strings.Repeat("// padding line ", 8) + "\n")
 		}
 		if err := os.WriteFile(filepath.Join(root, fmt.Sprintf("f%02d.txt", i)), []byte(b.String()), 0o644); err != nil {

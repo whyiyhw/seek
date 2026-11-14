@@ -183,6 +183,21 @@ func (m Model) View() tea.View {
 		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
 	}
 
+	// Skill-distill spinner — the /distill skill pass runs in parallel
+	// with the M pass, so both spinners can be up at once; each names
+	// what it's waiting for.
+	if m.skillDistilling {
+		elapsed := formatToolElapsed(time.Since(m.distillSince))
+		label := "distilling skill drafts …"
+		if m.skillDistillGate != "" {
+			label += " · " + m.skillDistillGate
+		}
+		if elapsed != "" {
+			label += " · " + elapsed
+		}
+		fmt.Fprintf(&sb, "%s %s\n", m.spinner.View(), styleToolLine.Render(label))
+	}
+
 	// Streaming assistant text (volatile — committed at MessageEnd).
 	if m.curContent != "" {
 		body := styleAssistantText.Render(wrap(m.curContent, m.width-2))
@@ -270,6 +285,8 @@ func (m Model) View() tea.View {
 		bottomBuf.WriteString(m.renderUserQuestion())
 	case m.distillReviewOpen:
 		bottomBuf.WriteString(m.renderDistillReview())
+	case m.skillReviewOpen:
+		bottomBuf.WriteString(m.renderSkillReview())
 	case m.helpOverlayOpen:
 		bottomBuf.WriteString(m.renderHelpOverlay())
 	case m.commandMenuOpen:
@@ -334,10 +351,7 @@ func (m Model) relayout() Model {
 	// height-10 on short terminals (height ≤ 22 — vertical splits)
 	// re-enables the overflow the threshold exists to prevent.
 	// Chunking every few rows on a tiny terminal beats a frozen screen.
-	base := m.height - 10
-	if base < 4 {
-		base = 4
-	}
+	base := max(m.height-10, 4)
 	m.chunkThreshold = base
 	m.ready = true
 	return m
@@ -531,10 +545,7 @@ func menuWindow(total, selected int) (start, end int) {
 	if total <= menuMaxRows {
 		return 0, total
 	}
-	start = selected - menuMaxRows/2
-	if start < 0 {
-		start = 0
-	}
+	start = max(selected-menuMaxRows/2, 0)
 	end = start + menuMaxRows
 	if end > total {
 		end = total
@@ -956,13 +967,7 @@ func (m Model) renderHelpOverlay() string {
 	// on wide screens — readability tops out around 100 cols. Border
 	// adds 2 cols, padding adds 2 more, so cap the inner content at
 	// min(m.width-6, 100).
-	maxW := m.width - 6
-	if maxW > 100 {
-		maxW = 100
-	}
-	if maxW < 20 {
-		maxW = 20
-	}
+	maxW := max(min(m.width-6, 100), 20)
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(colourMuted).
@@ -1355,10 +1360,9 @@ func foldReasoningTail(reasoning string, width, maxRows int) string {
 	if len(lines) <= maxRows {
 		return wrapped
 	}
-	keep := maxRows - 1 // one row goes to the fold marker
-	if keep < 1 {
-		keep = 1
-	}
+	keep := max(
+		// one row goes to the fold marker
+		maxRows-1, 1)
 	return "… (earlier reasoning folded)\n" + strings.Join(lines[len(lines)-keep:], "\n")
 }
 
@@ -1487,11 +1491,11 @@ func parseSkillName(args string) string {
 // colouring.
 func extractDiffSection(s string) string {
 	const open = "```diff\n"
-	start := strings.Index(s, open)
-	if start == -1 {
+	_, after, ok := strings.Cut(s, open)
+	if !ok {
 		return ""
 	}
-	body := s[start+len(open):]
+	body := after
 	if end := strings.Index(body, "\n```"); end != -1 {
 		body = body[:end]
 	}
