@@ -1,12 +1,12 @@
 # seek serve — 远程控制平面指南 / Remote control plane guide
 
-`seek serve` 起一个**常驻控制平面进程**，把「远程触达 + 常驻在场 + 跨项目调度」做成 frontend-无关的核心：任何聊天/消息渠道只要实现一个 `Frontend` 端口（`Run` 收 + `Send` 发）就能驱动你机器上的 seek。**飞书是第一个 frontend**；§5 用 Telegram 在纸面上验证了第二个渠道能原样落进端口。每条会话可 `/bind` 到一个项目目录，平面在目录里 `exec seek -p … --json` 跑真会话、抓 session id 续多轮，把最终回复送回原会话。
+`seek serve` 起一个**常驻控制平面进程**，把「远程触达 + 常驻在场 + 跨项目调度」做成 frontend-无关的核心：任何聊天/消息渠道只要实现一个 `Frontend` 端口（`Run` 收 + `Send` 发）就能驱动你机器上的 seek。**web 是第一个已交付的 frontend**（内置浏览器聊天页：SSE 流式 + token 认证，`--frontend=web` 即起）；§5 用 Telegram 在纸面上验证了聊天渠道能原样落进同一端口（飞书 adapter 2026-11-13 撤销排期——端口不绑定任何具体渠道）。每条会话可 `/bind` 到一个项目目录，平面在目录里 `exec seek -p … --json` 跑真会话、抓 session id 续多轮，把最终回复送回原会话。
 
-> `seek serve` starts one long-running control-plane process that makes seek reachable from any chat channel and routes each conversation to a bound project directory. Any channel implementing the `Frontend` port (receive via `Run`, reply via `Send`) can drive seek; Feishu is the first implementation and §5 paper-verifies Telegram as the second. The plane exec's the real `seek -p … --json` inside the bound directory, captures the session id for multi-turn resume, and ships the final reply back to the conversation it came from.
+> `seek serve` starts one long-running control-plane process that makes seek reachable from any chat channel and routes each conversation to a bound project directory. Any channel implementing the `Frontend` port (receive via `Run`, reply via `Send`) can drive seek; the bundled web frontend (browser chat over SSE + token auth) is the first shipped implementation, and §5 paper-verifies a Telegram adapter against the same port (the Feishu adapter was descoped 2026-11-13 — the port binds to no specific channel). The plane exec's the real `seek -p … --json` inside the bound directory, captures the session id for multi-turn resume, and ships the final reply back to the conversation it came from.
 
 - 架构与全部设计决策（D-C1…D-F3）：[`docs/prd/feature-remote-control-plane.md`](./prd/feature-remote-control-plane.md)
-- 飞书开放平台一次性配置清单：PRD [§9](./prd/feature-remote-control-plane.md#9-飞书开放平台配置清单用户侧一次性)
-- 本文是 M7 交付的骨架：命令与行为按 PRD 契约书写，随装配线（M1–M7）落地逐步坐实。
+- Web frontend 设计（MVP 已交付）：[`docs/prd/feature-web-frontend.md`](./prd/feature-web-frontend.md)
+- 本文随装配线落地逐步坐实：M1–M3、M6a、M7a 已交付进 main；M4/M5（飞书 adapter）2026-11-13 撤销排期。
 
 ---
 
@@ -14,7 +14,7 @@
 
 ```
  聊天渠道（各自实现 Frontend 端口；SDK 随各自 build tag 进来）
-   feishu (v1: larkws 收 / IM API 发)     telegram (§5 纸面)     web / voice (未来)
+   web (HTTP 收 / SSE 发, 已交付)     feishu / telegram (§5 纸面)     voice (未来)
         │ Run() 推 Inbound（扇入同一 channel）        ▲ Send(conv, reply)
         ▼                                            │
  ┌─────────────────── seek serve 平面核心（frontend-无关，仅 stdlib）──────────────────┐
@@ -38,11 +38,11 @@
 ### 2.1 启动
 
 ```bash
-seek serve --frontend=feishu          # 拉起平面 + 一个 frontend
-seek serve --frontend=feishu --frontend=telegram   # 多 frontend 扇入同一平面
+seek serve --frontend=web             # 拉起平面 + web 聊天页（默认只听 127.0.0.1，token 首启生成）
+seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一平面
 ```
 
-密钥写在 `~/.seek/serve/env`（0600），如 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`；不进 config.json、不进日志。
+聊天渠道密钥写在 `~/.seek/serve/env`（0600），如 `TELEGRAM_BOT_TOKEN`；web frontend 的换票 token 首启自动生成于 `~/.seek/serve/web.token`（0600）。都不进 config.json、不进日志。
 
 ### 2.2 会话内指令（所有 frontend 通用，平面解析）
 
@@ -60,7 +60,7 @@ seek serve --frontend=feishu --frontend=telegram   # 多 frontend 扇入同一�
 
 ## 3. 绑定模型 / The binding model
 
-- **`ConvID = "<frontend>:<native-id>"`**（如 `feishu:oc_abc`、`telegram:-1001234`）：绑定表、串行队列全以它为键，跨渠道天然不撞；native id 自身可含 `:`（首分隔符切分）。
+- **`ConvID = "<frontend>:<native-id>"`**（如 `web:1f3a…`、`telegram:-1001234`）：绑定表、串行队列全以它为键，跨渠道天然不撞；native id 自身可含 `:`（首分隔符切分）。
 - **存储 `~/.seek/serve/bindings.json`**，每条 `{conv_id, project_abs_path, session_id, yolo, updated_at}`。原子写（temp + rename）；损坏自愈：整文件坏 → 重建为空，单条坏 → 跳过，重复 conv_id → 后写赢。
 - **多轮续接**：首条不带 `-resume`，从末行 `agent_end` 事件的顶层 `session_id` 字段抓 id 回写 binding（stdout 保持 parse-clean，诊断全在 stderr）；后续每条带 `-resume <sid>`，返回同一 id 且 prefix cache 命中（远程续聊不亏钱）。
 - **自愈**（责任在平面，坏 id 不卡死会话）：`-resume` 失败 → seek 非零退出、stdout 空 → 降级为首条重跑、回写新 id；mid-run error（有输出行但无 `agent_end`）→ 拿不到 id，弃上下文按首条重开（已知边界）。
@@ -105,7 +105,7 @@ seek serve --frontend=feishu --frontend=telegram   # 多 frontend 扇入同一�
 
 ### 5.3 纸面结论与两条归一化约定
 
-Telegram 与飞书的收发机制完全不同（long-poll+bot API vs WS+IM API），但四个接缝点全部一一落位、无需改端口——**抽象成立**。写的过程中沉淀两条约定，对任何「群里 @ 才触发」的渠道（含飞书 M4 实现）同样适用：
+Telegram 与飞书的收发机制完全不同（long-poll+bot API vs WS+IM API），但四个接缝点全部一一落位、无需改端口——**抽象成立**。写的过程中沉淀两条约定，对任何「群里 @ 才触发」的渠道（含未来任何聊天渠道实现）同样适用：
 
 1. **提及剥离是 frontend 的归一化职责**：`Inbound.Text` 必须是剥完渠道寻址语法（`@botname ` 前缀、`/cmd@botname` 后缀）之后的用户文本——否则路由层的指令前缀匹配会被 `"@mybot /bind …"` 卡住。端口签名不变，这是 `Inbound.Text` 语义的一句文档化澄清。
 2. **去重统一在平面层**：渠道重投（Telegram 重启重投、飞书 ACK 丢失重推）由平面按 `EventID` 去重兜住，frontend 不各自建去重——Telegram 的重启重投恰好是这条切分的免费反例验证。

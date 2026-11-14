@@ -14,7 +14,7 @@
   &nbsp;·&nbsp; <a href="README.zh.md">中文</a>
 </p>
 
-A coding agent that runs as a single **static Go binary** in your terminal — a **~6 MB download**, **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend.** Bring your own model key: **DeepSeek-first**, and it also speaks OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …).
+A coding agent that runs as a single **static Go binary** in your terminal — a **~6 MB download**, **no daemon, no telemetry, no Python/Node runtime, no seek-operated backend.** Bring your own model key: **DeepSeek-first**, **GLM** (own pricing card) alongside OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …).
 
 > **30-second version** — It's Claude Code / aider territory, but **DeepSeek-first**: the autonomous run that audited and fixed *these very docs* (33 files, 212 tool calls) cost **$0.17** at a **97.7% prefix-cache hit**. One binary, your own key, nothing phones home. Scroll down to watch that exact run ↓
 
@@ -93,6 +93,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **`/goal`** | loop across turns until a cheap model judges a condition met — TUI / headless / cron. [📘](docs/guide-goal.md) |
 | **OS sandbox** | seatbelt (macOS) / landlock (Linux) — kernel-level confinement, zero runtime deps. [📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | run seek as an editor agent via the Agent Client Protocol. [📘](docs/guide-zed.md) |
+| **Remote control plane** | `seek serve` — one resident process; drive seek from a browser (bundled web chat: SSE streaming, token auth) or any chat channel via the `Frontend` port. [📘](docs/guide-serve.md) |
 | **Portable skills** | Anthropic Agent Skills format — any Claude Code skill installs unmodified. [📘](docs/guide-skills.md) |
 | **Three-tier memory** | session · project (decay-score GC) · cross-project "soul" (`seek -dream`). [📘](docs/guide-memory.md) |
 | **Checkpoints** | per-turn git snapshot + file-level `/undo` `/redo` `/restore`. [📘](docs/guide-checkpoint.md) |
@@ -101,6 +102,8 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Native vision input** | paste or `@img.png` → image bytes sent natively to the multimodal default model (`deepseek-flash`, V4.1). [📘](docs/guide-vision.md) |
 | **Code review** | effort-graded diff review with `--fix` and `--comment`. [📘](docs/guide-code-review.md) |
 | **MCP client** | pass through any MCP server's tools. [📘](docs/guide-mcp.md) |
+| **Web search** | built-in `web_search` tool over the DeepSeek Search API — fresh docs without leaving the loop. |
+| **Per-agent model routing** | the `agent` tool takes `provider` / `model` — explore on the cheap lane, write on the strong one. |
 | **Push to phone** | cron / autopilot / long-turn completions → webhook. [📘](docs/guide-webhooks.md) |
 | **Dual-axis permissions** | Preference (Deny / Ask / Yolo) × Workflow (None / Plan-analyze / Plan-execute). |
 
@@ -116,6 +119,7 @@ seek -p '<prompt>'         # one-shot print mode (pipeline-friendly)
 seek -resume <sid>         # resume a session (-continue for the most recent)
 seek -rpc                  # JSON-RPC 2.0 server (IDE integration)
 seek acp                   # Agent Client Protocol server (Zed, …)
+seek serve                 # remote control plane; --frontend=web serves the browser chat UI
 
 seek goal       run "<condition>"          # autonomous loop until met
 seek skill      install / list / stats / uninstall / update
@@ -134,7 +138,7 @@ Every subcommand is also `/<name>` in the TUI. TUI-only: `/plan` `/goal` `/steer
 
 ## Built for real, not a weekend build
 
-**~120k lines of Go** (~60k non-test) across **87 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.11.0**.
+**~124k lines of Go** (~61k non-test) across **88 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.11.0**.
 
 Docs: [`docs/`](docs/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 

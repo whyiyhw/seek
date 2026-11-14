@@ -14,7 +14,7 @@
   &nbsp;·&nbsp; <a href="README.md">English</a>
 </p>
 
-一个编码 agent，以单个 **静态 Go 二进制** 跑在你的终端里——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，同时也讲 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）。
+一个编码 agent，以单个 **静态 Go 二进制** 跑在你的终端里——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，**GLM**（独立计价卡）与 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）也在列。
 
 ---
 
@@ -91,14 +91,17 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **`/goal`** | 跨多轮循环，直到一个便宜模型判定条件满足——TUI / headless / cron。[📘](docs/guide-goal.md) |
 | **操作系统沙箱** | seatbelt（macOS）/ landlock（Linux）——内核级隔离，零运行时依赖。[📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | 通过 Agent Client Protocol 把 seek 当编辑器 agent 跑。[📘](docs/guide-zed.md) |
+| **远程控制平面** | `seek serve` ——常驻单进程；浏览器即可驱动（内置 web 聊天页：SSE 流式 + token 认证），任何聊天渠道经 `Frontend` 端口接入。[📘](docs/guide-serve.md) |
 | **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装。[📘](docs/guide-skills.md) |
 | **三层记忆** | 会话 · 项目（衰减分 GC）· 跨项目「soul」（`seek -dream`）。[📘](docs/guide-memory.md) |
 | **Checkpoint** | 每 turn git 快照 + 文件级 `/undo` `/redo` `/restore`。[📘](docs/guide-checkpoint.md) |
 | **后台任务** | 长 build/server 丢后台 → `bg-N`；`monitor` poll / wait / kill。[📘](docs/guide-background.md) |
 | **语义 references** | LSP「谁调用了它」（gopls / pyright / tsserver），grep 兜底。[📘](docs/guide-references.md) |
-| **离线图片 OCR** | `@img.png` 或粘贴图片 → 本地 OCR，无 VLM / 无网络。[📘](docs/guide-ocr.md) |
+| **原生视觉输入** | 粘贴或 `@img.png` → 图片字节原生直发多模态默认模型（`deepseek-flash`，V4.1）。[📘](docs/guide-vision.md) |
 | **代码审查** | 分档深度的 diff 审查，支持 `--fix` 和 `--comment`。[📘](docs/guide-code-review.md) |
 | **MCP client** | 透传任意 MCP server 的工具。[📘](docs/guide-mcp.md) |
+| **Web 搜索** | 内置 `web_search` 工具，走 DeepSeek Search API——查新文档不用跳出循环。 |
+| **子代理模型路由** | `agent` 工具带 `provider` / `model` 参数——探索走便宜车道、写作走强车道。 |
 | **推送到手机** | cron / autopilot / 长回合完成 → webhook。[📘](docs/guide-webhooks.md) |
 | **双轴权限** | Preference（Deny / Ask / Yolo）× Workflow（None / Plan-analyze / Plan-execute）。 |
 
@@ -114,6 +117,7 @@ seek -p '<prompt>'         # 一次性打印模式（pipeline 友好）
 seek -resume <sid>         # 续传指定 session（-continue 续最近）
 seek -rpc                  # JSON-RPC 2.0 server（IDE 接入）
 seek acp                   # Agent Client Protocol server（Zed、…）
+seek serve                 # 远程控制平面；--frontend=web 起浏览器聊天页
 
 seek goal       run "<条件>"               # 自治循环跑到达标
 seek skill      install / list / stats / uninstall / update
@@ -132,7 +136,7 @@ seek hooks      list / check / trust / audit
 
 ## 为真实场景打造，不是周末玩具
 
-**~120k 行 Go**（~60k 非测试），跨 **87 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.11.0**。
+**~124k 行 Go**（~61k 非测试），跨 **88 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.11.0**。
 
 文档：[`docs/`](docs/) · 贡献：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 
