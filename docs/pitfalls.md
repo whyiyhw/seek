@@ -17,7 +17,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Policy
 
-- AI assistants working in this repo: every time you fix a non-obvious bug or discover a surprising constraint, **append an entry here** AND add a `Pitfall:` trailer to the commit (see [`CLAUDE.md`](../CLAUDE.md)).
+- AI assistants working in this repo: every time you fix a non-obvious bug or discover a surprising constraint, **append an entry here** AND add a `Pitfall:` trailer to the commit (see [`AGENTS.md`](../AGENTS.md)).
 - Humans: same convention. Use `scripts/extract-pitfalls.sh` to sanity-check that recent commits' `Pitfall:` trailers line up with entries here.
 
 ## Status: live vs absorbed (audit 2026-11-14)
@@ -1569,3 +1569,13 @@ If you're new to the project, skim entries in this order:
 - **Fix**: `session.Store.ListProject(projectID)` (M-SD2) reads headers only (`loadMeta` discipline) and filters by `paths.ProjectID(info.CWD)`, skipping forked sessions (`ParentID != ""`) so /branch & /compact children can't double-count one conversation as two "independent" recurrences. Commit c_dkgvnp.
 - **Lesson**: when a design doc cites a path as "where X lives", verify against the writer of X, not just the path helper's name. Per-project bucketing of sessions = hash of the header's `cwd`, nothing on disk groups them for you.
 - **Refs**: `internal/session/session.go` (ListProject), `internal/paths/paths.go` (ProjectSessionDir comment), `docs/prd/feature-skill-distill.md` §3.1 D
+
+## Tool-failure self-recovery
+
+Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the two-sentence core + a pointer here). Doctrine: self-recovery first — "ask the user" is the LAST resort.
+
+- **Read the error.** Results carry category-specific hints — webfetch prefixes (`[webfetch: blocked target]`), bash `Hint:` clauses, permission denials suggesting alternatives. The answer is usually IN the error.
+- **Try alternative paths.** webfetch returned garbage on an HTML page? Try raw GitHub, the API reference instead of the rendered doc, a mirror, the project's own `docs/`. bash denied in plan-analyze? Use the purpose-built tool (`git` instead of `bash("git log")`, `webfetch` instead of `curl`). One tool failing rarely makes the question unanswerable.
+- **Check local context first.** `list_dir docs/` + `grep` for keywords before asking the user to paste anything — seek's CWD often already answers the question; the repo is closer than the internet.
+- **Re-frame to source.** "I can't fetch the docs to answer Y" usually becomes "I can answer Y from the code" — for behaviour questions the source beats the docs anyway.
+- **Actually blocked? Ask SPECIFIC questions** via `ask_user` with a 2–4 option picker, not free-form. Shifting lookup work to the user ("fetch this page for me?") inverts seek's value proposition — the *model* does the lookup work.

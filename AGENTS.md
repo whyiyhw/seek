@@ -1,8 +1,6 @@
 # seek — project guide for AI assistants
 
-This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here.
-
-Treat the instructions below as mandatory project conventions.
+Auto-loaded by **seek** at startup (and other `AGENTS.md`-convention tools) — the canonical agent instructions for this repo live here. Treat them as mandatory project conventions.
 
 ## Pitfall recording (load-bearing — read this)
 
@@ -22,7 +20,7 @@ What does **not** count:
 - Routine typos, missing imports, version bumps, refactors.
 - Anything obvious from reading the code or running `go vet`.
 
-If you're not sure: log it — but only for pitfalls produced by the change at hand; if you stumble on something unrelated mid-task, name it in your final message instead of expanding the diff, and let the user decide whether it deserves an entry. Cheap to add, expensive to recover from memory months later.
+If unsure, log it — but only for pitfalls from the change at hand; mid-task discoveries unrelated to this change go in your final message, for the user to decide. Cheap to add, expensive to recover from memory months later.
 
 ## Architecture (non-negotiable)
 
@@ -30,7 +28,7 @@ If you're not sure: log it — but only for pitfalls produced by the change at h
 - **`pkg/deepseek` must not import `pkg/llm`** (CI lint enforces this — see `.github/workflows/ci.yml`). The whole point of the split is that DeepSeek-specific optimisations don't get lowered into a generic interface.
 - **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state. Skill auto-distillation ([`docs/prd/feature-skill-distill.md`](docs/prd/feature-skill-distill.md), M-SD1+M-SD2/SD3 implemented): cognitive funnel + the M-SD2 automatic path (SessionStart background batch, `$SEEK_AUTO_SKILL_DISTILL`, default **off**) both live in `internal/skilldistill`; drafts land in `~/.seek/skills/.drafts/` (a dot dir the loader deliberately skips) via `skillmgr`'s DraftStore, telemetry rows via `skillstats` — the auto path's only direct write is the per-project cadence state under `~/.seek/projects/<pid>/skill-distill-state.json` (same class as memory's dream-state). Iron rule: the automatic path NEVER installs — installing a draft is a human action via the existing `seek skill install`.
 - **Plan-mode subsystem (v2 + v2.x)**: confirmation-gated workflow `analyze → propose → execute → adjust → report`. Driven by the `propose` tool (`internal/tools/propose/`) and progress-tracked by the `plan` tool (`internal/tools/plan/`). Substate state machine lives in `permission.Policy` (Mode / preApproved flag) + agent mode reminder + TUI status bar; transcript event-sourcing reconstructs state on `seek -resume` (see `plan/reconstruct.go`). Plan-approval artifacts (write-once markdown snapshots) land in `~/.seek/projects/<id>/plans/` via `plan/artifact.go`. Full design + status table in [`docs/prd/feature-plan-mode.md`](docs/prd/feature-plan-mode.md).
-- **i18n (view layer only)**: catalogue in `internal/i18n` (`i18n.T`; every key goes in ALL catalogues — parity-tested). Human-facing prose only; LLM-visible strings and the status bar stay English (prefix-cache bytes + width oracle). Language resolves once per session; `/lang` is the only runtime swap. Design + scope: [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md).
+- **i18n (view layer only)**: catalogue in `internal/i18n` (`i18n.T`; every key in ALL catalogues — parity-tested). Human-facing prose only; LLM-visible strings + status bar stay English (prefix-cache bytes + width oracle). Language resolves once per session; `/lang` is the only runtime swap. Scope: [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md).
 - See [`docs/prd/`](docs/prd/) for the full PRD series: v0 initial, v1 Memory, v2 Skill lifecycle, plus standalone feature PRDs (`feature-plan-mode.md`, `feature-webfetch.md`, `feature-permission-refactor.md`, `feature-active-memory.md`, `feature-mcp-client.md`, …).
 
 ## Tool usage workflow (load-bearing)
@@ -39,19 +37,19 @@ When exploring code, follow this order — skipping steps costs tokens and break
 
 1. **grep first** — find exact file + line before reading anything.
 2. **read(offset=N) second** — read only the relevant window, not the whole file.
-3. `read` accepts an optional `limit` parameter (default 200, max 200 — values above error; small files ≤ 32 KiB are always returned whole). Use `offset=N` to page through larger files.
+3. `read`'s `limit` defaults to 200 (values above error; files ≤ 32 KiB always come back whole).
 4. `grep` caps at 20 matches by default (`max_matches` can be raised, but rarely should be).
 
-Never page through a whole file to answer a question grep can answer — small files (≤ 32 KiB) come back whole regardless; the rule targets needless full reads of larger files. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade cache hit rate.
+Never page through a whole file to answer a question grep can answer — the rule targets needless full reads of larger files. The prefix cache survives only when old messages are byte-identical; lazy whole-file reads balloon prompt tokens and degrade the hit rate.
 
-5. **read before edit** — before calling `edit`, first `read(offset=N, path=...)` on the target lines to capture the **exact whitespace** of the `old_string`. Do not guess tab depth from memory; the read output preserves it byte-for-byte. A single read call costs less than the error-fix loop from a mismatched `old_string`.
+5. **read before edit** — `read(offset=N, path=...)` the target lines first to capture the `old_string`'s **exact whitespace** (preserved byte-for-byte; never guess tab depth). One read costs less than the mismatched-`old_string` error-fix loop.
 6. **Git queries: one per git-tool call** — never chain, never bash read-only git; several queries = parallel calls. Rationale: `docs/test-plan-git-tool-shape.md`.
 
 ## Tool descriptions: the highest-leverage behavioural lever
 
 > **Audience: maintainers, not the running agent.** Development guidance for tuning the shipped tool descriptions — not a behavioural rule.
 
-The `const description` inside each `internal/tools/<name>/` is the most effective place to shape behaviour: it rides every tool schema to the API, so the model MUST read it to build a valid `tool_call` — unlike this file, which weaker/faster models may skim. Schemas sit closest to the generation step; a description sentence is ~10× more likely to shape the next `tool_call` than the same sentence in AGENTS.md. Tuning pattern (eval case → baseline → edit → compare) and this repo's tuning-history table live in [`eval/README.md`](eval/README.md).
+The `const description` inside each `internal/tools/<name>/` shapes behaviour ~10× better than a sentence here: it rides every tool schema, so the model MUST read it to build a valid `tool_call` — unlike this file, which weaker/faster models may skim (schemas sit closest to the generation step). Tuning pattern (eval case → baseline → edit → compare) + this repo's tuning-history table: [`eval/README.md`](eval/README.md).
 
 ## Token & prefix-cache constraints (non-negotiable)
 
@@ -60,7 +58,7 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 - **Never modify old messages before sending to the API** — even "compression" or "summarisation" of old tool results invalidates the cache and can cost more than sending the full history.
 - **Token optimisation happens at write-time** (tool output size limits), not at send-time (in-transit mutation).
 - Tool output limits are enforced inside the tool itself. Do not add a post-hoc filter layer in `pkg/agent` or the API path.
-- **Anything that must appear in the prompt prefix for correctness but would otherwise vary is captured ONCE per session — never recomputed per turn.** The canonical example is the session date: it's injected as `sysprompt.Header.Date` (computed once at startup in `cmd/seek` and threaded through every `Compose` call plus the subagent Manager's *static* `SessionDate`), NOT via a `time.Now()` inside the assembler — `Compose` must stay a pure function of its `Header` (the `TestCompose_IsDeterministic` guard enforces this). A per-turn date would mutate the prefix on every request and crater the hit ratio. Refresh only at session boundaries (`-resume` = new process = one accepted bust). See `docs/pitfalls.md` "Today's date belongs in the system prompt".
+- **Anything that must appear in the prompt prefix for correctness but would otherwise vary is captured ONCE per session — never recomputed per turn.** The canonical example is the session date: it's injected as `sysprompt.Header.Date` (computed once at startup in `cmd/seek` and threaded through every `Compose` call plus the subagent Manager's *static* `SessionDate`), NOT via a `time.Now()` inside the assembler — `Compose` must stay a pure function of its `Header` (the `TestCompose_IsDeterministic` guard enforces this). A per-turn date would crater the hit ratio. Refresh only at session boundaries (`-resume` = new process = one accepted bust). See `docs/pitfalls.md` "Today's date belongs in the system prompt".
 
 ## Permission model
 
@@ -81,23 +79,17 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 
 ## When a tool fails or returns unexpected content
 
-Self-recovery first. "Ask the user to do it" is the LAST resort, not the first.
-
-- **Read the error.** Results carry category-specific hints — webfetch prefixes (`[webfetch: blocked target]`), bash `Hint:` clauses, permission denials suggesting alternatives. The answer is usually IN the error.
-- **Try alternative paths.** webfetch returned garbage on an HTML page? Try raw GitHub, the API reference instead of the rendered doc, a mirror, the project's own `docs/`. bash denied in plan-analyze? Use the purpose-built tool (`git` instead of `bash("git log")`, `webfetch` instead of `curl`). One tool failing rarely makes the question unanswerable.
-- **Check local context first.** `list_dir docs/` + `grep` for keywords before asking the user to paste anything — seek's CWD often already answers the question; the repo is closer than the internet.
-- **Re-frame to source.** "I can't fetch the docs to answer Y" usually becomes "I can answer Y from the code" — for behaviour questions the source beats the docs anyway.
-- **Actually blocked? Ask SPECIFIC questions** via `ask_user` with a 2–4 option picker, not free-form. Shifting lookup work to the user ("fetch this page for me?") inverts seek's value proposition — the *model* does the lookup work.
+Self-recovery first — "ask the user" is the LAST resort. Read the error (the hints are usually IN it), try alternative tools/paths, and prefer the repo (plus source code) over the internet; only when truly blocked, ask via `ask_user` with a 2–4 option picker, not free-form. Full playbook with examples: `docs/pitfalls.md` § "Tool-failure self-recovery".
 
 ## Code conventions
 
 - **Stdlib first**. `pkg/deepseek` has zero external deps and should stay that way. New deps live behind sensible boundaries.
 - **Tool JSON schemas are package-level `[]byte` constants**, not built at call time. Identical bytes across turns is what lets DeepSeek's prefix cache hit (`PRD §4.8.1`).
-- **Tool schemas must not expose parameters that let the model bypass output size limits.** Examples: `read` has a `limit` field (default 200, max 200 — values above error; small files ≤ 32 KiB are returned whole); `grep` has `max_matches` defaulting to 20; `propose` has `maxItems: 20` on `steps` (`maxSteps` const); the `plan` tool's `index` is `minimum: 1` and runtime-checked against the active plan's step count. If a limit is safety-critical, reject values above the max with a clear error.
+- **Tool schemas must not expose parameters that let the model bypass output size limits.** Examples: `read`'s `limit` (default/max 200); `grep` has `max_matches` defaulting to 20; `propose` has `maxItems: 20` on `steps` (`maxSteps` const); the `plan` tool's `index` is `minimum: 1` and runtime-checked against the active plan's step count. If a limit is safety-critical, reject values above the max with a clear error.
 - **New tools** live at `internal/tools/<name>/` with a `New(...)` constructor. If the tool can mutate the filesystem or shell, inject a `*permission.Policy`. If the tool wants user choice (picker / approval), inject `*askuser.Policy`.
-- **Sink interfaces: don't break the main contract — add OPTIONAL sibling interfaces.** When a new feature needs more context flowing into a tool's Sink, do NOT add parameters to the existing Sink method (every fake / recording sink in tests breaks). Define a sibling interface (`type FooReporter interface { Foo() ... }`) and upcast at the call site: `if r, ok := sink.(FooReporter); ok { r.Foo() }`. The propose tool currently carries four such optional interfaces (`DuplicateChecker`, `ProgressReporter`, `ContextReceiver`, `ArtifactReporter`); none required a Sink signature change. See `docs/pitfalls.md` "Plan artifact write needs context BEFORE Sink.Approved fires" for the rationale.
+- **Sink interfaces: don't break the main contract — add OPTIONAL sibling interfaces.** When a new feature needs more context flowing into a tool's Sink, do NOT add parameters to the existing Sink method (every fake / recording sink in tests breaks). Define a sibling interface (`type FooReporter interface { Foo() ... }`) and upcast at the call site: `if r, ok := sink.(FooReporter); ok { r.Foo() }`. The propose tool carries four such optional interfaces (`DuplicateChecker`, `ProgressReporter`, `ContextReceiver`, `ArtifactReporter`); none required a Sink signature change. See `docs/pitfalls.md` "Plan artifact write needs context BEFORE Sink.Approved fires".
 - **Wire-format strings are contracts when something parses them.** A tool result string like `[plan: approved]` looks like prose, but `internal/tools/plan/reconstruct.go` scans for that prefix verbatim to seed plan-state on resume. Once a marker has a parser, the marker is wire format — additions go AFTER the closing token (`[plan: approved] (auto-approve-per-step)`), never inside it (`[plan: approved batch]` would silently break reconstruction). When introducing a new variant of an already-parsed result, add a test that asserts on `HasPrefix(out, "<marker>")` so future variants can't slip past.
-- **Permission denials are tool results, not fatal errors** (`internal/permission.ErrDenied`). The agent feeds the message back to the LLM so it can ask the user — never bypass that flow. See the "Permission model" section above for the full denial contract.
+- **Permission denials are tool results, not fatal errors** (`internal/permission.ErrDenied`) — never bypass the flow; full contract in "Permission model" above.
 - **Session format is JSONL** (`schema_version=2`, `.jsonl` extension): line 1 is the header (all scalar metadata), lines 2..N are one `deepseek.Message` per line. Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`. `loadMeta()` reads only line 1 — do not call `Load()` when you only need metadata.
 - **Reconstruct state from the transcript — parallel RUNTIME state counts, not just parallel files.** The transcript is the only durable source of truth. Anything derivable from it should be folded from it on demand, never mirrored. Two forms of the same mistake:
   - **A parallel state file.** Resist adding a sibling `.json` / `.md` that mirrors runtime state — you'll fight drift forever. Artifact files (`~/.seek/projects/<id>/plans/`) are the exception: write-once human-readable snapshots, NOT state.
@@ -113,7 +105,7 @@ Self-recovery first. "Ask the user to do it" is the LAST resort, not the first.
 
 Tests are how seek stays trustworthy. Treat coverage of failure paths as part of the deliverable, not a follow-up.
 
-**The bar: test the failure modes, not just the happy path.** Happy-path-only suites give false confidence and have already let real bugs ship — commit `986a485` was an orphan-tool_calls regression that sat in `pkg/agent` under green CI for weeks because nothing exercised mid-stream cancellation. Every released feature ships with tests for, where applicable:
+**The bar: test the failure modes, not just the happy path.** Happy-path-only suites have already let real bugs ship — `986a485` (orphan-tool_calls regression) sat in `pkg/agent` under green CI for weeks because nothing exercised mid-stream cancellation. Every released feature ships with tests for, where applicable:
 
 - **Cancellation** — any ctx-aware function gets a `ctx.Done` test
 - **Mid-loop interruption** — streams/event-loops cut at a partial state
@@ -121,7 +113,7 @@ Tests are how seek stays trustworthy. Treat coverage of failure paths as part of
 - **Concurrent access** — `-race` is on by default in CI; if a function can be hit concurrently, verify it
 - **Persistence round-trip + recovery** — write, reload, AND verify corrupt-state repair (see `session.Repair`)
 
-If one of these doesn't apply, fine. If you skipped a test for one that does, say why in your final message (and in the PR description, if one is opened). "Real-API behaviour only" is valid; "didn't have time" is not.
+If one doesn't apply, fine. If you skip one that does, say why ("real-API behaviour only" is valid; "didn't have time" is not) — in the final message and the PR description if one is opened.
 
 Coverage is a weak signal but 0% on a function is a strong one. Before claiming a feature done: `go test -race -cover ./...` and look at anything you touched that's not exercised.
 
