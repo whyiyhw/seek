@@ -27,3 +27,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_bg7hax：pitfalls 台账清点：190 条过时/已修复标记（只标记不删）
 - c_3gp2e7：AGENTS.md 预算 ratchet 下一刀：3084→≤2800（每版一刀 · 向 1800 目标收，repo=whyiyhw/seek）
 - c_26ltej：README 双语 v0.11 叙事刷新：平台化定位（多端/自进化/成本三轴）
+- c_tbqxnn：session export：会话导出为 markdown 对话记录
