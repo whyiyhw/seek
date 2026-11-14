@@ -156,7 +156,7 @@ type Subagent struct {
 	Type         Type      `json:"type"`
 	Description  string    `json:"description"`
 	WorktreePath string    `json:"worktree_path,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	StartedAt    time.Time `json:"started_at"`
 	// `omitzero` (Go 1.24+) is the correct elision for time.Time
 	// and nested structs — `omitempty` is a no-op on those because
 	// the zero value still serialises as a full type instance.

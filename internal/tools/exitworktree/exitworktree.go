@@ -2,9 +2,9 @@
 // counterpart to enter_worktree. PRD docs/prd/feature-subagent.md
 // §3.8 wire format:
 //
-//   clean       → [worktree: cleaned]
-//   dirty+keep  → [worktree: kept path=<...> branch=<...> changes=<n>]
-//   dirty+discard → [worktree: discarded changes=<n>] (rescue stash at <ref>)
+//	clean       → [worktree: cleaned]
+//	dirty+keep  → [worktree: kept path=<...> branch=<...> changes=<n>]
+//	dirty+discard → [worktree: discarded changes=<n>] (rescue stash at <ref>)
 //
 // The "rescue stash at <ref>" suffix on the discard path is
 // display-only — the canonical wire-format prefix is just the

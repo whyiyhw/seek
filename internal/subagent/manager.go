@@ -68,6 +68,14 @@ type RunnerJob struct {
 	// (typically by re-registering the parent's tool instances
 	// keyed by name).
 	ToolNames []string
+	// Provider is the resolved routing lane ("" = inherit the
+	// parent session's provider). Set from SpawnArgs via
+	// ResolveRoute — never the raw tool-call value, which
+	// validation has already rejected when unknown.
+	Provider string
+	// Model is the resolved model id. Empty exactly when Provider
+	// is empty (inherit the parent's live session model).
+	Model string
 }
 
 // RunnerResult is what Runner returns on success. Summary is the
@@ -213,6 +221,13 @@ type SpawnArgs struct {
 	// invoking Spawn). Empty for isolation:"none". Goes into the
 	// started event for the /worktrees panel's cross-reference.
 	WorktreePath string
+	// Provider / Model are the optional per-call routing params
+	// (feature-orchestration.md §4.2). Both empty = inherit the
+	// parent session's lane unchanged. Validated via ResolveRoute
+	// in Spawn step 1 — raw tool-call values arrive here verbatim
+	// so Manager stays the single validation point.
+	Provider string
+	Model    string
 }
 
 // Spawn launches one subagent and blocks until it terminates.
@@ -244,6 +259,15 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 	}
 	if args.Prompt == "" {
 		return failResult("", "spawn_error", "prompt required")
+	}
+	// Routing params: unknown provider / model is a validation
+	// failure, same class as unknown subagent_type (feature-
+	// orchestration.md §4.2). Route keeps "" provider for the
+	// inherit path so the Runner's default lane is byte-identical
+	// to the pre-routing behaviour.
+	route, err := ResolveRoute(args.Provider, args.Model)
+	if err != nil {
+		return failResult("", "spawn_error", err.Error())
 	}
 
 	// Step 2: capacity gate. Held BRIEFLY under m.mu — the Runner
@@ -359,6 +383,8 @@ func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
 			Tracker:      childTracker,
 			Policy:       childPolicy,
 			ToolNames:    tmpl.Filter(m.opts.ParentToolNamesFn()),
+			Provider:     route.Provider,
+			Model:        route.Model,
 		})
 	}()
 	cancel() // release any goroutines depending on runCtx

@@ -8,7 +8,7 @@ import (
 
 func pathContainsDir(envPath, dir string, fold bool) bool {
 	dir = filepath.Clean(dir)
-	for _, p := range strings.Split(envPath, string(os.PathListSeparator)) {
+	for p := range strings.SplitSeq(envPath, string(os.PathListSeparator)) {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue

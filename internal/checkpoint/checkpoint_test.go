@@ -115,11 +115,11 @@ func TestGit_OnePerTurn(t *testing.T) {
 	g := &fakeGit{}
 	// Turn 1: rev-parse → true, then for every checkpoint write
 	// queue: rev-parse HEAD, symbolic-ref, stash create, update-ref.
-	g.queue("true\n", "", nil)            // rev-parse --is-inside-work-tree
-	g.queue("abc1234\n", "", nil)         // rev-parse HEAD
-	g.queue("main\n", "", nil)            // symbolic-ref
-	g.queue("deadbeef\n", "", nil)        // stash create
-	g.queue("", "", nil)                  // update-ref
+	g.queue("true\n", "", nil)     // rev-parse --is-inside-work-tree
+	g.queue("abc1234\n", "", nil)  // rev-parse HEAD
+	g.queue("main\n", "", nil)     // symbolic-ref
+	g.queue("deadbeef\n", "", nil) // stash create
+	g.queue("", "", nil)           // update-ref
 	m.runGit = g.run
 
 	ctx := context.Background()
@@ -186,7 +186,7 @@ func TestGit_NotARepoLogsOnce(t *testing.T) {
 	g.queue("", "", fmt.Errorf("not a git repo")) // first rev-parse fails
 	m.runGit = g.run
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.MaybeCreateGit(context.Background(),
 			permission.Action{Kind: permission.KindWrite, Path: "foo"})
 		m.OnPreTurn(context.Background(), nil)
@@ -517,7 +517,7 @@ func TestFile_ConcurrentSnapshots(t *testing.T) {
 	sink := &recordingSink{}
 	m := newTestManager(t, sink)
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

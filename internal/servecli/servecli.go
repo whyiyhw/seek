@@ -36,10 +36,11 @@ import (
 // frontends maps --frontend names to constructors. The default build
 // registers the fake (M1b acceptance) and the web frontend (net/http
 // is stdlib, so the D-F1 SDK gate does not apply — card c_qucxtu).
-// SDK-backed adapters live behind their own build tags (D-F1): the
-// feishu frontend (M4/M5) will register itself from a `//go:build
-// feishu` file's init() in THIS package, so the default binary stays
-// SDK-free while `-tags feishu` gains "feishu" here.
+// SDK-backed adapters live behind their own build tags (D-F1): a chat
+// frontend registers itself from its `//go:build <name>` file's init()
+// in THIS package, so the default binary stays SDK-free while tagged
+// builds gain the frontend here. (The feishu adapter M4/M5 was descoped
+// 2026-11-13 — the slot stays open for any channel.)
 var frontends = map[string]func() controlplane.Frontend{
 	"fake": func() controlplane.Frontend { return fake.New() },
 	"web":  func() controlplane.Frontend { return controlplane.NewWeb(controlplane.WebConfig{}) },

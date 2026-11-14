@@ -41,7 +41,7 @@ func shortSid(subSid string) string {
 // has no usable first line — the caller still emits the prefix
 // without a headline so the wire format stays parseable.
 func headline(summary string) string {
-	for _, line := range strings.Split(summary, "\n") {
+	for line := range strings.SplitSeq(summary, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue

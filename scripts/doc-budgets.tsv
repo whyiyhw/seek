@@ -10,10 +10,12 @@
 #   - a doc ABOVE target keeps a FROZEN ceiling at its current size: it
 #     cannot grow at all until it comes back to target
 #
-# Both agent-instruction files are currently frozen. They are ~2x the
+# The agent-instruction file is currently frozen. It is ~2x the
 # size of the comparable file in dsh (root AGENTS.md ≤ 1600 words) and
-# they grew again in the change that added this gate. Freezing is the
+# grew again in the change that added this gate. Freezing is the
 # point: from here, adding a paragraph requires displacing one.
+# (CLAUDE.md was deleted 2026-11-14 by user decision — AGENTS.md is the
+# single canonical agent-instruction file; its budget row went with it.)
 #
 # SCOPE IS DELIBERATELY NARROW. Only the standing instruction files that
 # every session pays for in prompt tokens are budgeted. Reference docs,
@@ -24,4 +26,3 @@
 # Raising a ceiling requires explicit justification in the PR. Lowering
 # one needs nothing.
 AGENTS.md	3200	1800
-CLAUDE.md	3100	1800

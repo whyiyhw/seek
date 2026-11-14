@@ -268,11 +268,11 @@ func TestAuditLog_ConcurrentAppendNoTear(t *testing.T) {
 	var wg sync.WaitGroup
 	var ts atomic.Int64
 
-	for w := 0; w < Workers; w++ {
+	for w := range Workers {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				ts.Add(1)
 				_ = a.Append(AuditEntry{
 					Event: EventPostTool, Hook: fmt.Sprintf("w%d-h%d", id, i), Tool: "bash", DurationMs: int64(i),
@@ -309,8 +309,8 @@ func TestAverageDurationByHook(t *testing.T) {
 // ---- Gate ----
 
 type fakePrompt struct {
-	answer bool
-	called int32
+	answer  bool
+	called  int32
 	lastReq TrustRequest
 }
 

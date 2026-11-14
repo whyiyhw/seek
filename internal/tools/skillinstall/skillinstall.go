@@ -367,15 +367,15 @@ func frontmatterName(data []byte) (string, error) {
 	}
 	// Find closing ---
 	rest := s[4:]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
+	before, _, ok := strings.Cut(rest, "\n---")
+	if !ok {
 		return "", errors.New("unterminated frontmatter")
 	}
-	front := rest[:end]
-	for _, line := range strings.Split(front, "\n") {
+	front := before
+	for line := range strings.SplitSeq(front, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "name:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "name:")), nil
+		if after, ok := strings.CutPrefix(line, "name:"); ok {
+			return strings.TrimSpace(after), nil
 		}
 	}
 	return "", errors.New("frontmatter has no name field")

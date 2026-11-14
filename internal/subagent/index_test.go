@@ -251,11 +251,11 @@ func TestAppendEvent_ConcurrentDoesNotCorrupt(t *testing.T) {
 	const N = 100
 
 	var wg sync.WaitGroup
-	for w := 0; w < 2; w++ {
+	for w := range 2 {
 		wg.Add(1)
 		go func(worker int) {
 			defer wg.Done()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				_ = appendEvent(path, event{
 					Kind:   "started",
 					SubSid: idFor(worker, i),

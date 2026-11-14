@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -273,14 +272,4 @@ func quarantine(path, reason string) {
 		fmt.Fprintf(os.Stderr, "routines: quarantine rename %s: %v\n", reason, err)
 		_ = os.Remove(path)
 	}
-}
-
-// triggerSubprocess is the default SubprocessFn shape for the
-// trigger path. Reuses DefaultSubprocess from tick.go — the
-// `seek -p '<prompt>'` shell-out is identical to cron jobs.
-// Exposed as a separate symbol only so future trigger-specific
-// flags (e.g. always-set --no-save regardless of job config)
-// can attach here without touching the cron path.
-var triggerSubprocess SubprocessFn = func(ctx context.Context, job Job, runID string) (*exec.Cmd, error) {
-	return DefaultSubprocess(ctx, job, runID)
 }

@@ -411,7 +411,7 @@ type Model struct {
 	// pastedImagePath holds the temp PNG grabbed from the clipboard on
 	// Ctrl+V (M-imgpaste.2). The input shows an image fold marker; on submit
 	// resolvePasteInInput swaps the marker for `@<pastedImagePath>` so the
-	// existing OCR pipeline (ocr.Expand via ExpandInput) reads it. Empty =
+	// vision input router (ExpandInput) attaches the image natively. Empty =
 	// no pending pasted image.
 	pastedImagePath string
 

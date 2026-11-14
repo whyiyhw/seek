@@ -204,11 +204,9 @@ func Serve[M any](ctx context.Context, sources []ServeSource[M], handle func(con
 	}()
 
 	dispatch := func(m M) {
-		workWG.Add(1)
-		go func() {
-			defer workWG.Done()
+		workWG.Go(func() {
 			handle(handlerCtx, m)
-		}()
+		})
 	}
 
 	// Steady state: pump messages until shutdown starts — by ctx

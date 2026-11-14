@@ -183,14 +183,12 @@ func TestSpawn_TooManySubagents(t *testing.T) {
 	mgr.opts.MaxConcurrent = 2
 
 	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 2 {
+		wg.Go(func() {
 			mgr.Spawn(context.Background(), SpawnArgs{
 				Description: "x", Prompt: "y", Type: TypeGeneralPurpose,
 			})
-		}()
+		})
 	}
 	// Wait for the goroutines to register in active.
 	deadline := time.Now().Add(2 * time.Second)
@@ -407,17 +405,15 @@ func TestSpawn_ConcurrentN(t *testing.T) {
 	mgr.opts.MaxConcurrent = N // ensure none fail on capacity gate
 
 	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range N {
+		wg.Go(func() {
 			res := mgr.Spawn(context.Background(), SpawnArgs{
 				Description: "x", Prompt: "y", Type: TypeGeneralPurpose,
 			})
 			if res.Status != StatusCompleted {
 				t.Errorf("concurrent spawn status = %s", res.Status)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if atomic.LoadInt32(&completed) != int32(N) {
@@ -453,7 +449,7 @@ func TestList_FilterByStatus(t *testing.T) {
 	mgr := newManager(t, func(ctx context.Context, j RunnerJob) (RunnerResult, error) {
 		return RunnerResult{Summary: "ok", Turns: 1}, nil
 	})
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_ = mgr.Spawn(context.Background(), SpawnArgs{
 			Description: "x", Prompt: "y", Type: TypeGeneralPurpose,
 		})

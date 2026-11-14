@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -300,7 +301,10 @@ func TestWeb_RunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("token file: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// POSIX mode assertion is Unix-only: Windows chmod is advisory,
+	// Go reports the default 0666 there (same convention as
+	// bindings_test.go).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("token file mode = %v, want 0600", info.Mode().Perm())
 	}
 	tokBytes, err := os.ReadFile(filepath.Join(dir, "web.token"))

@@ -407,7 +407,7 @@ func TestStore_ConcurrentCreateInProcess(t *testing.T) {
 	sched, _ := ParseSchedule("@every 5m")
 	const N = 20
 	errCh := make(chan error, N)
-	for i := 0; i < N; i++ {
+	for i := range N {
 		go func(n int) {
 			j := Job{
 				Name:     "j" + string(rune('a'+n%26)),
@@ -417,7 +417,7 @@ func TestStore_ConcurrentCreateInProcess(t *testing.T) {
 			errCh <- s.Create(j, CreateOptions{Force: true})
 		}(i)
 	}
-	for i := 0; i < N; i++ {
+	for range N {
 		if err := <-errCh; err != nil {
 			t.Errorf("concurrent Create: %v", err)
 		}

@@ -81,8 +81,8 @@ func TestCmdList_JSON(t *testing.T) {
 	// Empty list → empty output (zero JSONL lines), still valid.
 	if strings.TrimSpace(out.String()) != "" {
 		// If there were entries, each line must parse.
-		for _, ln := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-			var v map[string]interface{}
+		for ln := range strings.SplitSeq(strings.TrimSpace(out.String()), "\n") {
+			var v map[string]any
 			if err := json.Unmarshal([]byte(ln), &v); err != nil {
 				t.Errorf("invalid JSONL line %q: %v", ln, err)
 			}
@@ -273,4 +273,3 @@ func TestIntegration_RealGit(t *testing.T) {
 		t.Errorf("HEAD moved: before=%q after=%q", headBefore.String(), headAfter.String())
 	}
 }
-

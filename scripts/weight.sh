@@ -6,13 +6,13 @@
 # docs/budget.json, and appends one trend line per run to
 # out/weight-<UTC-date>.jsonl. READ-ONLY, REPORT-ONLY: over-budget is
 # advice (「SLIM 建议」), never a failure — the hard word freeze for
-# AGENTS.md/CLAUDE.md stays with scripts/verify-doc-budgets.sh; this is
+# AGENTS.md stays with scripts/verify-doc-budgets.sh; this is
 # the soft, wider radar around it.
 #
 # Measured:
 #   code  per-package Go LOC (non-test / test) under internal/ and pkg/,
 #         plus go.mod direct/indirect dependency counts
-#   docs  bytes + lines per area: AGENTS.md, CLAUDE.md, docs/prd (active;
+#   docs  bytes + lines per area: AGENTS.md, docs/prd (active;
 #         docs/prd/archive weighed separately), docs/book, docs/pitfalls.md,
 #         CHANGELOG.md
 #   drift each area vs docs/budget.json — over → SLIM 建议 line
@@ -120,7 +120,7 @@ printf '%-28s %8s %9s\n' "go.mod deps" "$DEP_DIRECT" "$DEP_INDIRECT"
 
 # --- 2. doc side -----------------------------------------------------------
 
-AREAS="AGENTS.md CLAUDE.md docs/prd docs/prd/archive docs/book docs/pitfalls.md CHANGELOG.md"
+AREAS="AGENTS.md docs/prd docs/prd/archive docs/book docs/pitfalls.md CHANGELOG.md"
 
 echo
 echo "weight — docs (bytes / lines vs $(printf '%s' "$BUDGET_FILE") )"

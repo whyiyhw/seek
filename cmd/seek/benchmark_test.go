@@ -20,13 +20,13 @@ import (
 
 func TestBenchmarkThresholds_Pass(t *testing.T) {
 	r := benchmarkReport{
-		Task:          "self-hosting",
-		Description:   "test",
-		Status:        "pass",
-		Turns:         8,
-		CacheHitRatio: 0.72,
-		FIMUsageRatio: 0.55,
-		FIMCalls:      5,
+		Task:           "self-hosting",
+		Description:    "test",
+		Status:         "pass",
+		Turns:          8,
+		CacheHitRatio:  0.72,
+		FIMUsageRatio:  0.55,
+		FIMCalls:       5,
 		TotalToolCalls: 9,
 		Thresholds: benchmarkThresholds{
 			CacheHitRatioMin: 0.60,
@@ -211,7 +211,7 @@ func TestBenchmarkAfterTurn5Delta(t *testing.T) {
 	// Simulate a sequence of per-turn usage records.
 	before := deepseek.Usage{
 		PromptTokens:          1000,
-		PromptCacheHitTokens:  600,  // 60% ratio up to turn 5
+		PromptCacheHitTokens:  600, // 60% ratio up to turn 5
 		PromptCacheMissTokens: 400,
 		CompletionTokens:      200,
 		TotalTokens:           1200,

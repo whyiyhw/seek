@@ -63,13 +63,6 @@ const bannerIndent = "  "
 //	col 20..24 = K      (letter 3)
 var letterEndCols = [4]int{6, 12, 18, 24}
 
-// RenderPixelBanner returns the full wordmark with gradient colouring.
-// Blocks render in their row's tier colour; everything else stays
-// blank (terminal default background).
-func RenderPixelBanner() string {
-	return renderBanner(len(letterEndCols))
-}
-
 // renderBanner is the workhorse — `n` letters visible (clamped to
 // the wordmark's letter count). Per-rune styling because each row
 // uses a different colour tier and only the █ runes need colouring.

@@ -37,7 +37,7 @@ func TestFormatCompleted_PrefixContract(t *testing.T) {
 func TestFormatCompleted_HeadlineCappedAt120(t *testing.T) {
 	long := strings.Repeat("x", 300)
 	out := FormatCompleted("sid-aaa", long, 1, Tokens{})
-	first := strings.SplitN(out, "\n", 2)[0]
+	first, _, _ := strings.Cut(out, "\n")
 	// Headline portion (after "[agent: completed] ") at most 120
 	// chars.
 	headlinePart := strings.TrimPrefix(first, "[agent: completed] ")

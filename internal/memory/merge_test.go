@@ -336,7 +336,7 @@ func TestMergeIntoL_WhyExtension(t *testing.T) {
 func TestMergeIntoL_TooLargePendingRendersNotice(t *testing.T) {
 	// Build a Pending section large enough to exceed maxPendingTokens.
 	var bullets []string
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		bullets = append(bullets, "- **这是一个非常长的用户偏好条目用来测试 Pending 截断逻辑**\n  - sources: proj-a")
 	}
 	existing := strings.Join(bullets, "\n\n")

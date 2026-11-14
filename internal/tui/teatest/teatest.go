@@ -106,7 +106,6 @@ type TestModel struct {
 	out io.ReadWriter
 
 	modelCh chan tea.Model
-	model   tea.Model
 
 	done   sync.Once
 	doneCh chan bool
@@ -203,13 +202,6 @@ type FinalOpts struct {
 // FinalOpt changes FinalOpts.
 type FinalOpt func(opts *FinalOpts)
 
-// WithTimeoutFn allows to define what happens when WaitFinished times out.
-func WithTimeoutFn(fn func(tb testing.TB)) FinalOpt {
-	return func(opts *FinalOpts) {
-		opts.onTimeout = fn
-	}
-}
-
 // WithFinalTimeout allows to set a timeout for how long FinalModel and
 // FinalOutput should wait for the program to complete.
 func WithFinalTimeout(d time.Duration) FinalOpt {
@@ -246,22 +238,6 @@ func (tm *TestModel) WaitFinished(tb testing.TB, opts ...FinalOpt) {
 	tm.waitDone(tb, opts)
 }
 
-// FinalModel returns the resulting model, resulting from program.Run().
-// This method only returns once the program has finished running or when
-// it times out.
-func (tm *TestModel) FinalModel(tb testing.TB, opts ...FinalOpt) tea.Model {
-	tm.waitDone(tb, opts)
-	select {
-	case m := <-tm.modelCh:
-		if m != nil {
-			tm.model = m
-		}
-		return tm.model
-	default:
-		return tm.model
-	}
-}
-
 // FinalOutput returns the program's final output io.Reader.
 // This method only returns once the program has finished running or when
 // it times out.
@@ -278,15 +254,4 @@ func (tm *TestModel) Output() io.Reader {
 // Send sends messages to the underlying program.
 func (tm *TestModel) Send(m tea.Msg) {
 	tm.program.Send(m)
-}
-
-// Quit quits the program and releases the terminal.
-func (tm *TestModel) Quit() error {
-	tm.program.Quit()
-	return nil
-}
-
-// GetProgram gets the TestModel's program.
-func (tm *TestModel) GetProgram() *tea.Program {
-	return tm.program
 }

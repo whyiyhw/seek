@@ -297,3 +297,23 @@ func TestCost_GLM53(t *testing.T) {
 		t.Errorf("Cost(glm-5.3, off-peak) = %v, want same %v (no peak windows)", off, got)
 	}
 }
+
+// TestSearchCost prices the standalone Search API's per-call billing:
+// ¥5 per 1,000 successful calls, converted at the table's 7.0 CNY/USD
+// (≈ $0.000714/call — the card's "5元/千次 ≈ $0.0007").
+func TestSearchCost(t *testing.T) {
+	if got := SearchCost(1); math.Abs(got-5.0/7.0/1000) > 1e-12 {
+		t.Errorf("SearchCost(1) = %v, want 5/7/1000", got)
+	}
+	if got := SearchCost(1000); math.Abs(got-5.0/7.0) > 1e-9 {
+		t.Errorf("SearchCost(1000) = %v, want 5/7 (¥5 per 1k)", got)
+	}
+	if got := SearchCost(0); got != 0 {
+		t.Errorf("SearchCost(0) = %v, want 0 — failed calls are not billable", got)
+	}
+	// Per-call rate is far below FormatCost's sub-cent precision band;
+	// a single search must not round up to a visible dollar amount.
+	if s := FormatCost(SearchCost(1)); s != "$0.0007" {
+		t.Errorf("FormatCost(SearchCost(1)) = %q, want $0.0007", s)
+	}
+}

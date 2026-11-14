@@ -336,7 +336,7 @@ func cmdAdd(args []string, stdout, stderr io.Writer) error {
 
 	var tagList []string
 	if *tags != "" {
-		for _, t := range strings.Split(*tags, ",") {
+		for t := range strings.SplitSeq(*tags, ",") {
 			t = strings.TrimSpace(t)
 			if t != "" {
 				tagList = append(tagList, t)

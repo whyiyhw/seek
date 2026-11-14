@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -191,12 +192,7 @@ func portFor(u *url.URL) int {
 }
 
 func portInAllowlist(port int, allowed []int) bool {
-	for _, p := range allowed {
-		if p == port {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, port)
 }
 
 // isBlockedHostname covers the cheap hostname-string-level rejects

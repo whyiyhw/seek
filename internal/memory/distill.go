@@ -250,11 +250,11 @@ const (
 type FilterReason string
 
 const (
-	FilterReasonOK      FilterReason = "accepted"
-	FilterReasonDup     FilterReason = "duplicate of existing entry"
-	FilterReasonTooVague FilterReason = "too vague — not a concrete project decision"
+	FilterReasonOK        FilterReason = "accepted"
+	FilterReasonDup       FilterReason = "duplicate of existing entry"
+	FilterReasonTooVague  FilterReason = "too vague — not a concrete project decision"
 	FilterReasonUserTrait FilterReason = "user preference — belongs in L layer via dream"
-	FilterReasonTemp     FilterReason = "temporary state, not a lasting decision"
+	FilterReasonTemp      FilterReason = "temporary state, not a lasting decision"
 )
 
 // FilterPrompt frames the V4-Flash thinking call for observe filtering.
