@@ -16,4 +16,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - **Quality**: behavioral eval suite grew 14 → 20 cases (session-id contract, print-mode permission semantics, tool-selection and edit-fallback regressions); three dead-code / gofmt / modernize sweeps.
 
 ## 已进 main、未部署
-
+- c_r5dm2f：v0.11 发布准备：版本号 + CHANGELOG 汇总 + tag 草稿（发版动作留人）
