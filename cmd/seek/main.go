@@ -2042,7 +2042,8 @@ func run() error {
 		resumeGoal = activeSession.Goal
 	}
 	// Clipboard image paste (M-imgpaste.2): Ctrl+V grabs an image off the OS
-	// clipboard to a temp PNG, which the OCR pipeline then reads. The grabber
+	// clipboard to a temp PNG, which the vision input router then attaches
+	// natively (feature-vision; the OCR-era pipeline is gone). The grabber
 	// command comes from SEEK_CLIPBOARD_IMAGE_CMD (else the platform default);
 	// clipimage.Grab degrades to ErrNoImage/ErrNoGrabber → text paste.
 	grabImage := func(gctx context.Context) (string, error) {

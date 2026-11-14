@@ -64,9 +64,9 @@ func MCPConfig() (string, error) {
 }
 
 // Cache returns the user-level cache directory (~/.seek/cache/) for
-// regenerable artifacts — e.g. the compiled macOS Vision OCR helper
-// (柱 Q), built on demand from embedded source. Safe to delete; rebuilt
-// lazily. The caller creates the directory if needed.
+// regenerable artifacts — e.g. the clipboard temp PNGs (M-imgpaste).
+// Safe to delete; contents are recreated as needed. The caller creates
+// the directory if needed.
 func Cache() (string, error) {
 	root, err := Home()
 	if err != nil {

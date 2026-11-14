@@ -48,8 +48,9 @@ type AgentCapabilities struct {
 	LoadSession bool `json:"loadSession"`
 	// PromptCapabilities tells the client what content types it may put in
 	// a session/prompt. Advertising image lets editors (Zed) offer image
-	// attachment; seek OCRs those to text (M-P.5). Omitted when zero so a
-	// text-only agent stays silent.
+	// attachment; seek sends those natively to the multimodal lane
+	// (feature-vision; M-P.5's OCR-to-text is long gone). Omitted when zero
+	// so a text-only agent stays silent.
 	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
 }
 
