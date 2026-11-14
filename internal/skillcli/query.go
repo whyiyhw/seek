@@ -60,6 +60,12 @@ func aggregate(entries []skillstats.Entry, since time.Duration, now time.Time) m
 		cutoff = now.Add(-since)
 	}
 	for _, e := range entries {
+		// Distillation provenance rows (M-SD2) share the file but are
+		// not calls — counting them would make a much-distilled draft
+		// look like the most-used skill in the tree.
+		if e.Provider == skillstats.ProviderDistillAuto {
+			continue
+		}
 		if !cutoff.IsZero() {
 			if ts, err := time.Parse(time.RFC3339, e.TS); err == nil {
 				if ts.Before(cutoff) {

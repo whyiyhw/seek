@@ -22,6 +22,14 @@ import (
 	"sync"
 )
 
+// ProviderDistillAuto marks rows written by the skill auto-distillation
+// path (feature-skill-distill M-SD2): one row per draft written or
+// strengthened, with Name = the draft's name and SessionID = the source
+// session. These rows are provenance telemetry, NOT skill calls —
+// call-count aggregation (skillcli.aggregate) skips them so a draft
+// that was distilled 5 times doesn't show up as "5 calls".
+const ProviderDistillAuto = "distill-auto"
+
 // Entry is one .stats.jsonl row. Every field is intentionally a
 // plain string — even ts — so the JSONL stays grep/jq-friendly and
 // we don't bake in time.Time's marshalling quirks. The caller (in

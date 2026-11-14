@@ -60,6 +60,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skilldistill"
+	"github.com/whyiyhw/seek/internal/skillmgr"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
@@ -1791,6 +1792,39 @@ func run() error {
 	var observeResultChan <-chan memory.ObserveResult
 	if memHook != nil {
 		observeResultChan = memHook.ResultChan
+	}
+
+	// skill auto-distillation (feature-skill-distill M-SD2): the
+	// SessionStart background batch. Off unless $SEEK_AUTO_SKILL_DISTILL
+	// is truthy — the hook itself re-checks on every start, so the env
+	// can be flipped without relaunching wiring. Registered whenever the
+	// reasoner half exists (DeepSeek client + loaded skills); a nil-ish
+	// hook would no-op anyway, but keeping the Registry's Stack honest
+	// about what COULD run is worth the branch.
+	if dsClient != nil && skills != nil {
+		autoDistiller := &skilldistill.Distiller{Client: dsClient}
+		if v := os.Getenv(skilldistill.EnvSkillDistillModel); v != "" {
+			autoDistiller.Model = v // PRD §7: unattended quality-first switch to Pro
+		}
+		var autoMIndex []skilldistill.MEntry
+		if memProject != nil {
+			for _, e := range memProject.Index() {
+				autoMIndex = append(autoMIndex, skilldistill.MEntry{Name: e.Name, Tagline: e.Tagline})
+			}
+		}
+		projDir, perr := paths.ProjectDir(abs)
+		if perr == nil {
+			hooksReg.Register(&skilldistill.AutoHook{
+				Distiller:  autoDistiller,
+				Skills:     skills,
+				MIndex:     autoMIndex,
+				Drafts:     &skillmgr.DraftStore{},
+				Stats:      statsWriter,
+				Sessions:   skilldistill.SessionStore{Store: store},
+				ProjectID:  paths.ProjectID(abs),
+				ProjectDir: projDir,
+			})
+		}
 	}
 
 	var sessionID string

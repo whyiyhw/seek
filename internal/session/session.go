@@ -428,6 +428,10 @@ type SessionInfo struct {
 	Turns     int
 	ToolCalls int
 	ParentID  string
+	// CWD is the working directory recorded in the header. Consumers
+	// that bucket sessions by project hash it with paths.ProjectID
+	// (skill auto-distillation's batch scan, M-SD2).
+	CWD string
 }
 
 // List returns metadata for every session in the store, newest first.
@@ -506,5 +510,36 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		Turns:     sess.Turns,
 		ToolCalls: sess.ToolCalls,
 		ParentID:  sess.ParentID,
+		CWD:       sess.CWD,
 	}, nil
+}
+
+// ListProject returns metadata for this project's sessions, OLDEST
+// first (chronological order — the skill auto-distillation batch walks
+// sessions in the order they happened so recurrence accumulation sees
+// a pattern emerge, not jitter). Sessions forked via /branch or
+// /compact (ParentID set) are skipped: their transcripts overlap the
+// parent's, and L4's "N≥2 INDEPENDENT sessions" recurrence invariant
+// would count one conversation twice. Per-file load errors are dropped
+// silently — one corrupt header must not hide the rest of a project's
+// history from a best-effort background pass.
+func (s *Store) ListProject(projectID string) ([]SessionInfo, error) {
+	infos, _, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	var out []SessionInfo
+	for _, info := range infos {
+		if info.ParentID != "" {
+			continue
+		}
+		if paths.ProjectID(info.CWD) != projectID {
+			continue
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out, nil
 }

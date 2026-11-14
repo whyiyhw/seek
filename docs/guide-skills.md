@@ -102,3 +102,12 @@ When installing, you'll be asked to pick a scope — it's your call:
 | **project** | `<cwd>/.seek/skills/<name>/` | Anyone who clones this repo | Yes (committed to git) |
 
 The agent cannot guess this — it must ask. After install, the new skill is on disk but won't be available until you run `/new` (or restart seek), because the skill manifest is loaded at startup.
+
+## Distilling skills from sessions (drafts + human gate)
+
+Two paths turn a session's hard-won procedure into a skill DRAFT — both stop at the drafts area (`~/.seek/skills/.drafts/`), which sessions never see:
+
+- **Manual**: `/distill` at the end of a session reviews skill candidates alongside memory candidates; accepted ones land as `reviewable` drafts.
+- **Automatic** (`feature-skill-distill` M-SD2): with `$SEEK_AUTO_SKILL_DISTILL=1` (default **off**), every 8 sessions (or 7 days) the NEXT session's start runs a background batch over the project's unprocessed sessions — same four-layer funnel, plus an L3 reasoner filter and N≥2 cross-session recurrence before a draft surfaces. `$SEEK_SKILL_DISTILL_MODEL` switches the batch's reasoner off the Flash default.
+
+Installing a draft is always a human action: `seek skill drafts` lists the inbox, `seek skill install <draft-dir> [--project]` activates it. The automatic path has no install capability — that's a design invariant, not a missing feature. Unreviewed drafts are GC'd after 14 days (inbox capped at 10).

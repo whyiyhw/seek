@@ -9,8 +9,6 @@
 // on (a regression test pins it in draft_test.go).
 //
 // What deliberately does NOT live here (first delivery, PRD §11):
-//   - StrengthenDraft / recurrence merging — automatic path (M-SD2).
-//   - GCDrafts — M-SD3.
 //   - InstallDraft — install is a human action via the EXISTING
 //     `seek skill install <draft-dir>` command; the distillation
 //     pipeline itself never installs. After installing, the draft
@@ -119,6 +117,13 @@ type DraftDetail struct {
 	Info DraftInfo
 	MD   []byte       // raw SKILL.md bytes
 	Side DraftSidecar // zero value when the sidecar is missing/corrupt
+	// Description is the draft SKILL.md's description frontmatter —
+	// populated by ListAllDrafts/ReadDraftDescription for L4's
+	// merge-matching (a recurring candidate can arrive under a
+	// different name than the draft it repeats). Empty when the
+	// SKILL.md is unreadable; the listing tolerates that (the row
+	// still shows, with "(no sidecar)"-style degradation).
+	Description string
 }
 
 // DraftStore owns the drafts directory under a user skills tree.
@@ -203,12 +208,35 @@ func (s *DraftStore) WriteDraft(md []byte, side DraftSidecar) (string, error) {
 	return dir, nil
 }
 
-// ListDrafts returns the drafts inbox, oldest first (oldest = closest
+// ListDrafts returns the drafts INBOX, oldest first (oldest = closest
 // to the 14-day GC horizon, so that's the natural review order).
-// A missing drafts dir is an empty inbox, not an error. Directories
-// without a readable sidecar are listed with Status "(no sidecar)" —
-// hiding a half-written draft would make it undeletable via the inbox.
+// "weak" drafts (automatic path, recurrence=1 — seen in ONE session
+// only) are hidden: they haven't earned a human's attention yet and
+// only occupy GC quota (PRD §4 L4). A missing drafts dir is an empty
+// inbox, not an error. Directories without a readable sidecar are
+// listed with Status "(no sidecar)" — hiding a half-written draft
+// would make it undeletable via the inbox.
 func (s *DraftStore) ListDrafts() ([]DraftInfo, error) {
+	all, err := s.ListAllDrafts()
+	if err != nil {
+		return nil, err
+	}
+	var out []DraftInfo
+	for _, d := range all {
+		if d.Status == DraftStatusWeak {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// ListAllDrafts is ListDrafts without the inbox filter — every draft
+// including "weak" ones, with Description parsed from SKILL.md. Used
+// by GC (weak drafts still age and count against the cap) and by L4
+// merge-matching (a recurring weak draft is exactly the one to
+// strengthen, so it must be findable).
+func (s *DraftStore) ListAllDrafts() ([]DraftInfo, error) {
 	draftsDir, err := s.DraftsDir()
 	if err != nil {
 		return nil, err
@@ -241,6 +269,11 @@ func (s *DraftStore) ListDrafts() ([]DraftInfo, error) {
 				info.CreatedAt = side.CreatedAt
 				info.Sources = side.Sources
 				info.FilterTrace = side.FilterTrace
+			}
+		}
+		if md, err := os.ReadFile(filepath.Join(draftsDir, e.Name(), "SKILL.md")); err == nil {
+			if sk, err := skill.Parse(md, "draft:"+e.Name()); err == nil {
+				info.Description = sk.Description
 			}
 		}
 		out = append(out, info)
@@ -288,6 +321,23 @@ func (s *DraftStore) DeleteDraft(name string) (string, error) {
 // the review target, the sidecar is provenance (Side stays zero, and
 // the caller degrades — approve falls back to scope "project").
 func (s *DraftStore) ReadDraft(name string) (*DraftDetail, error) {
+// StrengthenDraft is L4's merge write (PRD §4): an independent session
+// re-extracted a procedure that already has a draft. Recurrence++,
+// source appended, UpdatedAt refreshed. The SKILL.md is deliberately
+// NOT touched — first write wins for the body; recurrence is
+// provenance, not content.
+//
+// Promotions that ride along:
+//   - recurrence ≥ 2 → status "reviewable" (the draft surfaces in the
+//     ListDrafts inbox — two independent sessions are the evidence a
+//     pattern is not one session's special case).
+//   - sources spanning ≥ 2 distinct project_ids → suggested_scope
+//     upgrades project → user (cross-project recurrence is the "user
+//     work habit" signal, PRD §5.4).
+//
+// extraTrace appends to filter_trace so each strengthening round's
+// funnel verdict stays visible to the human reviewer.
+func (s *DraftStore) StrengthenDraft(name string, src DraftSource, extraEvidence []string, extraTrace []FilterTraceEntry) (*DraftSidecar, error) {
 	if !draftNameRE.MatchString(name) {
 		return nil, fmt.Errorf("skillmgr: invalid draft name %q", name)
 	}
@@ -324,6 +374,145 @@ func (s *DraftStore) ReadDraft(name string) (*DraftDetail, error) {
 		}
 	}
 	return detail, nil
+	sidecarPath := filepath.Join(dir, SidecarName)
+
+	data, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		return nil, fmt.Errorf("skillmgr: strengthen %q: read sidecar: %w", name, err)
+	}
+	var side DraftSidecar
+	if err := json.Unmarshal(data, &side); err != nil {
+		return nil, fmt.Errorf("skillmgr: strengthen %q: parse sidecar: %w", name, err)
+	}
+
+	side.Recurrence++
+	side.Sources = append(side.Sources, src)
+	if len(extraEvidence) > 0 {
+		side.Evidence = append(side.Evidence, extraEvidence...)
+	}
+	side.FilterTrace = append(side.FilterTrace, extraTrace...)
+	if side.Recurrence >= 2 {
+		side.Status = DraftStatusReviewable
+	}
+	if countDistinctProjects(side.Sources) >= 2 {
+		side.SuggestedScope = "user"
+	}
+	side.UpdatedAt = s.now().UTC().Format(time.RFC3339)
+
+	out, err := json.MarshalIndent(side, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("skillmgr: marshal sidecar: %w", err)
+	}
+	if err := atomicWriteFile(sidecarPath, append(out, '\n')); err != nil {
+		return nil, fmt.Errorf("skillmgr: write %s: %w", SidecarName, err)
+	}
+	return &side, nil
+}
+
+func countDistinctProjects(sources []DraftSource) int {
+	seen := map[string]struct{}{}
+	for _, s := range sources {
+		if s.ProjectID != "" {
+			seen[s.ProjectID] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+// GC policy (PRD §4 草稿区 GC / §8 #11). Age is measured from
+// UpdatedAt — a draft that keeps being strengthened is active, not
+// stale, even if it hasn't reached the inbox yet; eviction order under
+// the cap is by CreatedAt ("最旧先清"). Both defaults are PRD-fixed.
+const (
+	DraftTTL  = 14 * 24 * time.Hour
+	MaxDrafts = 10
+)
+
+// GCDrafts enforces the drafts-area garbage policy and returns the
+// removed draft names (for a one-line notification):
+//
+//  1. drafts whose UpdatedAt is older than ttl (14 days) are removed;
+//  2. if more than max (10) remain, the oldest-by-CreatedAt are
+//     removed until the cap holds.
+//
+// "Unreviewed" is every draft in the area — weak AND reviewable —
+// since installing removes the human's copy from the area anyway (the
+// install flow leaves cleanup to `drafts rm`; a leftover installed
+// draft being GC'd is the documented, harmless path).
+func (s *DraftStore) GCDrafts(now time.Time, ttl time.Duration, max int) ([]string, error) {
+	all, err := s.ListAllDrafts()
+	if err != nil {
+		return nil, err
+	}
+	if ttl <= 0 {
+		ttl = DraftTTL
+	}
+	if max <= 0 {
+		max = MaxDrafts
+	}
+
+	var removed []string
+	// Pass 1: age (by UpdatedAt, CreatedAt as fallback for
+	// sidecar-less drafts). Undatable drafts are kept — better to hold
+	// garbage one more cycle than delete something unreadable.
+	var survivors []DraftInfo
+	for _, d := range all {
+		ts := s.readUpdatedAt(d.Name)
+		if ts.IsZero() {
+			if c, err := time.Parse(time.RFC3339, d.CreatedAt); err == nil {
+				ts = c
+			}
+		}
+		if !ts.IsZero() && now.Sub(ts) > ttl {
+			if _, err := s.DeleteDraft(d.Name); err == nil {
+				removed = append(removed, d.Name)
+			}
+			continue
+		}
+		survivors = append(survivors, d)
+	}
+	// Pass 2: cap. Survivors are still oldest-CreatedAt-first
+	// (ListAllDrafts order), so evict from the front.
+	for len(survivors) > max {
+		if _, err := s.DeleteDraft(survivors[0].Name); err == nil {
+			removed = append(removed, survivors[0].Name)
+		}
+		survivors = survivors[1:]
+	}
+	return removed, nil
+}
+
+// readUpdatedAt pulls just the UpdatedAt field off a draft's sidecar.
+// Zero time on any failure — callers treat that as "use CreatedAt".
+func (s *DraftStore) readUpdatedAt(name string) time.Time {
+	draftsDir, err := s.DraftsDir()
+	if err != nil {
+		return time.Time{}
+	}
+	data, err := os.ReadFile(filepath.Join(draftsDir, name, SidecarName))
+	if err != nil {
+		return time.Time{}
+	}
+	var side DraftSidecar
+	if json.Unmarshal(data, &side) != nil {
+		return time.Time{}
+	}
+	if ts, err := time.Parse(time.RFC3339, side.UpdatedAt); err == nil {
+		return ts
+	}
+	return time.Time{}
+}
+
+// atomicWriteFile stages data to <path>.tmp then renames over path —
+// same dance as memory.atomicWrite; duplicated (unexported) because
+// exporting memory's helper would couple the two subsystems for one
+// 10-line function.
+func atomicWriteFile(path string, data []byte) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (s *DraftStore) now() time.Time {
