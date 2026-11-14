@@ -274,7 +274,7 @@ type Reply struct {
 
 ## 8. 未来增强（非 v1）
 
-- **更多 frontend**（端口已就位，各自一个 build tag）：Telegram / Slack / 企业微信 / 网页（WS+SSE）/ 短信 / 语音。
+- **更多 frontend**（端口已就位，各自一个 build tag）：Telegram / Slack / 企业微信 / 网页（WS+SSE，**已立项设计：[`feature-web-frontend.md`](feature-web-frontend.md)——首个真实渠道，纯 stdlib 无需 build tag**）/ 短信 / 语音。
 - **飞书互动卡片审批**（D-C5 v2）：把权限 ask 渲染成卡片按钮，点按回传喂回 seek——远程协作的杀手锏。
 - **流式更新**：边收 `--json` 事件边更新同一条消息/卡片（"思考中…"→逐步成文）。
 - **团队多人**：`Sender` allowlist + per-用户/per-会话 session 隔离 + 审计。

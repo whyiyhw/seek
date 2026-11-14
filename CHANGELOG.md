@@ -22,3 +22,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_jvn3ky：skill-distill 人审 CLI：/skill drafts 列表·预览·审批安装一条流
 - c_oh2dl3：/distill dry-run 预览：显示将产出的草稿不落盘
 - c_kql3ip：eval 扩容：GLM 车道契约用例——路由/计价/cache 字段锁回归
+- c_7pptol：web frontend 设计稿：control-plane 首个真实渠道 + inspect-rpc 数据面并入评估（feature-web-frontend.md）
