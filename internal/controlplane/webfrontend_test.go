@@ -364,3 +364,41 @@ func freeAddr(t *testing.T) string {
 	defer ln.Close()
 	return fmt.Sprintf("127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 }
+
+// TestWeb_DefaultAddrPinned: the zero WebConfig resolves to the
+// loopback default and DefaultWebAddr keeps its shipped value — both
+// are compat surfaces (configs that omit web_addr; scripts and
+// tailscale forwards that point at 127.0.0.1:8790). Temp paths keep
+// the serve dir out of the picture; only Addr resolution is exercised.
+func TestWeb_DefaultAddrPinned(t *testing.T) {
+	if DefaultWebAddr != "127.0.0.1:8790" {
+		t.Errorf("DefaultWebAddr = %q, want 127.0.0.1:8790 (compat pin)", DefaultWebAddr)
+	}
+	dir := t.TempDir()
+	fe := NewWeb(WebConfig{
+		TokenPath: filepath.Join(dir, "web.token"),
+		StorePath: filepath.Join(dir, "bindings.json"),
+	})
+	if fe.cfg.Addr != DefaultWebAddr {
+		t.Errorf("zero WebConfig addr = %q, want DefaultWebAddr", fe.cfg.Addr)
+	}
+}
+
+// TestWeb_RunBadAddr: a malformed address fails Run's listen with the
+// address in the error. The listen IS the validation (syntax and
+// port-in-use alike) and there is never a silent fallback to the
+// default address. Run returns the listen error synchronously, before
+// the serve loop parks, so the call needs no goroutine.
+func TestWeb_RunBadAddr(t *testing.T) {
+	dir := t.TempDir()
+	const bad = "127.0.0.1:no-port-digits"
+	fe := NewWeb(WebConfig{
+		Addr:      bad,
+		TokenPath: filepath.Join(dir, "web.token"),
+		StorePath: filepath.Join(dir, "bindings.json"),
+	})
+	err := fe.Run(context.Background(), make(chan Inbound, 1))
+	if err == nil || !strings.Contains(err.Error(), bad) {
+		t.Fatalf("bad addr must fail Run naming the address, got %v", err)
+	}
+}

@@ -142,6 +142,16 @@ type ServeConfig struct {
 	// cannot run shell commands unless the user explicitly accepts that
 	// exposure here. Per-binding overrides are future work.
 	Yolo bool `json:"yolo,omitempty"`
+
+	// WebAddr overrides the web frontend's listen address (`seek serve
+	// --frontend=web`). Empty = the shipped loopback default
+	// 127.0.0.1:8790 (controlplane.DefaultWebAddr — the value lives
+	// there, one place). A malformed address fails `seek serve` at
+	// startup (the listen is the validation); there is no silent
+	// fallback to the default. Point it at a tailnet IP (e.g.
+	// "100.x.y.z:8790") to serve the plane straight to the tailnet —
+	// or keep loopback and `tailscale serve --tcp=8790` instead.
+	WebAddr string `json:"web_addr,omitempty"`
 }
 
 // ServeYolo reports whether serve-mode child runs start with --yolo.

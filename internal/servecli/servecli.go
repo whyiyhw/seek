@@ -41,9 +41,20 @@ import (
 // in THIS package, so the default binary stays SDK-free while tagged
 // builds gain the frontend here. (The feishu adapter M4/M5 was descoped
 // 2026-11-13 — the slot stays open for any channel.)
-var frontends = map[string]func() controlplane.Frontend{
-	"fake": func() controlplane.Frontend { return fake.New() },
-	"web":  func() controlplane.Frontend { return controlplane.NewWeb(controlplane.WebConfig{}) },
+//
+// Constructors take the serve section (nil = absent) so config-file
+// settings reach every frontend without CLI flags: web maps
+// serve.web_addr onto WebConfig.Addr ("" → DefaultWebAddr; a malformed
+// address fails the listen at startup — the listen IS the validation).
+var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
+	"fake": func(*config.ServeConfig) controlplane.Frontend { return fake.New() },
+	"web": func(sc *config.ServeConfig) controlplane.Frontend {
+		addr := ""
+		if sc != nil {
+			addr = sc.WebAddr
+		}
+		return controlplane.NewWeb(controlplane.WebConfig{Addr: addr})
+	},
 }
 
 // frontendList is a repeatable string flag: --frontend=fake
@@ -83,16 +94,18 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return badConfig(stderr, fmt.Errorf("unexpected argument %q (try --frontend=<name>)", fs.Arg(0)))
 	}
 
-	srcs, err := buildFrontends(fes)
-	if err != nil {
-		return badConfig(stderr, err)
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		// A corrupted config is fatal, same posture as seek core:
 		// never silently run a plane off a file we can't read.
 		return badConfig(stderr, fmt.Errorf("read config: %w", err))
+	}
+
+	// Built AFTER the config load so the serve section reaches the
+	// constructors (web_addr → WebConfig.Addr).
+	srcs, err := buildFrontends(fes, cfg.Serve)
+	if err != nil {
+		return badConfig(stderr, err)
 	}
 
 	// SIGINT/SIGTERM start the graceful drain; Serve owns the
@@ -110,7 +123,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 // buildFrontends resolves --frontend names against the registry.
 // Duplicates are left to Serve to reject (it owns the "two frontends
 // sharing a ConvID prefix is crosstalk" rule); unknown names die here.
-func buildFrontends(names []string) ([]controlplane.Frontend, error) {
+func buildFrontends(names []string, sc *config.ServeConfig) ([]controlplane.Frontend, error) {
 	if len(names) == 0 {
 		return nil, errors.New("no frontends selected — pass --frontend=<name> (v1: fake, web)")
 	}
@@ -120,7 +133,7 @@ func buildFrontends(names []string) ([]controlplane.Frontend, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown frontend %q (registered: %s)", n, registeredNames())
 		}
-		out = append(out, ctor())
+		out = append(out, ctor(sc))
 	}
 	return out, nil
 }
@@ -211,8 +224,12 @@ Usage:
       The web frontend listens on 127.0.0.1:8790 and prints its
       token-bearing URL to stderr on startup; the token also lives
       in ~/.seek/serve/web.token (regenerate by deleting the file).
+      To reach it from a tailnet: keep loopback and run
+      "tailscale serve --tcp=8790", or set serve.web_addr to the
+      machine's tailnet IP (e.g. "100.x.y.z:8790").
 
       Config: the optional "serve" section of ~/.seek/config.json
-      (projects / max_concurrency / yolo — default yolo=false).
+      (projects / max_concurrency / yolo / web_addr — default
+      yolo=false, web_addr=127.0.0.1:8790).
       Older configs without the section work unchanged.`)
 }
