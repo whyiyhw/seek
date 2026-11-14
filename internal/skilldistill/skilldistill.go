@@ -494,6 +494,28 @@ func CheckNovelty(cand SkillCandidate, skills *skill.Set, mIndex []MEntry) L2Res
 	}
 }
 
+// NearestSkill returns the installed skill whose description is most
+// similar to the draft's description+body, plus that similarity,
+// measured with the same trigram-Jaccard metric L2's CheckNovelty
+// uses — so `seek skill drafts show` answers "which existing skill is
+// this draft closest to, and by how much" with the number the funnel
+// itself would have computed. Empty name means "no comparable skill"
+// (empty set, or similarity 0 — nothing overlaps a text shorter than
+// three runes).
+func NearestSkill(draftDescription, draftBody string, skills *skill.Set) (string, float64) {
+	if skills == nil || skills.Len() == 0 {
+		return "", 0
+	}
+	candText := draftDescription + "\n" + draftBody
+	best, bestSim := "", 0.0
+	for _, sk := range skills.List() {
+		if sim := trigramJaccard(candText, sk.Description); sim > bestSim {
+			best, bestSim = sk.Name, sim
+		}
+	}
+	return best, bestSim
+}
+
 func dedupeStrings(in []string) []string {
 	var out []string
 	for i, s := range in {
