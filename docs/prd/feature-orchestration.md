@@ -109,7 +109,7 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 父 turn 收到的即时 tool result（确定性 bytes）：
 
 ```
-[agent: background started sub-sid=20261113-103045-a1b2c3] <description>
+[agent: background started sub-sid=20261113-103045-a1b2c3d4e5f6a7b8] <description>
 
 — runner active; final summary will arrive as a <context> note on a later turn (or on resume). Track via /agents.
 ```
@@ -125,7 +125,7 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 
 ```
 <context>
-[agent: background done sub-sid=20261113-103045-a1b2c3] <headline>
+[agent: background done sub-sid=20261113-103045-a1b2c3d4e5f6a7b8] <headline>
 
 <summary body, capped at MaxSummaryBytes>
 

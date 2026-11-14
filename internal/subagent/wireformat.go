@@ -24,7 +24,7 @@ const MaxSummaryBytes = 4096
 const truncationSuffix = "\n…(truncated)"
 
 // shortSid returns the random suffix of a sub_sid (the part after
-// the last hyphen) — typically 6 hex chars. Used in wire-format
+// the last hyphen) — typically 16 hex chars. Used in wire-format
 // footers as a stable, human-readable identifier without leaking
 // the timestamp prefix that's mostly noise to the reader.
 func shortSid(subSid string) string {
