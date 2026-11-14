@@ -18,8 +18,8 @@ import (
 func TestNewRunID_FormatAndUniqueness(t *testing.T) {
 	now := time.Date(2026, 5, 28, 14, 23, 5, 0, time.UTC)
 	id := NewRunID(now)
-	if len(id) != 22 {
-		t.Errorf("run id length = %d, want 22 — got %q", len(id), id)
+	if len(id) != 32 {
+		t.Errorf("run id length = %d, want 32 — got %q", len(id), id)
 	}
 	if !strings.HasPrefix(id, "20260528-142305-") {
 		t.Errorf("run id missing timestamp prefix: %q", id)

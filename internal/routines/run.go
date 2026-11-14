@@ -12,19 +12,24 @@ import (
 )
 
 // NewRunID returns a fresh run ID in the canonical seek shape:
-// `YYYYMMDD-HHMMSS-<6 hex>`. Same scheme as session.generateID
-// / subagent.newSubSid; independent ID spaces but identical
+// `YYYYMMDD-HHMMSS-<16 hex>`. Same scheme family as session.generateID
+// / subagent.newSubSid (those still carry 6-hex suffixes — same-class
+// widening queued for them); independent ID spaces but identical
 // format so visual inspection of paths immediately tells the
-// reader what kind of artifact they're looking at.
+// reader what kind of artifact they're looking at. 8 random bytes
+// (64 bits): the old 6-hex suffix (24 bits) birthday-collided in CI
+// when the uniqueness test drew 500 ids within one second — thin
+// entropy is a production risk too (runs starting in the same
+// second), not just a test flake.
 //
 // On entropy exhaustion falls back to nanosecond-precision hex
 // so IDs never collide from a zero-valued random buffer.
 func NewRunID(now time.Time) string {
-	var rnd [3]byte
+	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
-		return fmt.Sprintf("%s-%06x",
+		return fmt.Sprintf("%s-%016x",
 			now.Format("20060102-150405"),
-			now.Nanosecond()/1000)
+			uint64(now.UnixNano()))
 	}
 	return fmt.Sprintf("%s-%s",
 		now.Format("20060102-150405"),

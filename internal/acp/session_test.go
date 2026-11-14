@@ -58,13 +58,18 @@ func keepCwd(t *testing.T) string {
 // into that directory. Before the handshake the same read must miss
 // (the file only exists in the session dir), proving the flip.
 func TestAnchorSession_NewSessionCwdEffective(t *testing.T) {
-	oldCwd := keepCwd(t)
 	// Resolve symlinks so os.Getwd() after chdir equals the expected
 	// string verbatim (on macOS t.TempDir lives under /var → /private/var).
 	sessionDir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	// keepCwd AFTER t.TempDir: cleanups run LIFO, so the chdir-back must
+	// register later than TempDir's RemoveAll to run FIRST — the test
+	// ends with the process cwd inside sessionDir, and Windows refuses
+	// to delete a directory still held as a process cwd (unlinkat
+	// EBUSY); Unix tolerates deleting it out from under the cwd.
+	oldCwd := keepCwd(t)
 	const fname, body = "d1-probe.txt", "session-cwd-probe"
 	if err := os.WriteFile(filepath.Join(sessionDir, fname), []byte(body), 0o644); err != nil {
 		t.Fatal(err)

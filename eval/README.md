@@ -107,6 +107,26 @@ Optional per-case hooks (run from the repo root, same cwd as the seek invocation
 - `teardown.sh` — clean up after the run; runs even when the invocation failed.
 - `runner.sh` — **replace the default seek invocation entirely** (`-yolo -no-save … -p`). For cases whose contract is about the CLI shape itself rather than the model's tool-call stream: running without `-yolo` (print-mode permission defaults), chaining multiple invocations (fresh run + `-resume` same session id), isolating `SEEK_HOME`, … Contract: executed with `SEEK_EVAL_BINARY`, `SEEK_EVAL_REPO_ROOT`, `SEEK_EVAL_PROMPT_FILE`, `SEEK_EVAL_MAX_TURNS` in the environment; writes the JSONL event stream to stdout, optionally followed by `{"type":"runner_fact","exit_code":N}` lines per invocation (consumed by the `nonzero_exits` metric). Cases without a `runner.sh` keep the default invocation and its historical behaviour.
 
+## Tool-description tuning (relocated from AGENTS.md 2026-11-14)
+
+The `const description` inside each `internal/tools/<name>/` is the highest-leverage behavioural lever: it rides every tool schema to the API, so the model MUST read it to build a valid `tool_call` — unlike AGENTS.md, which weaker/faster models may skim.
+
+Pattern (proven in `eval/cases/tool-selection/`):
+
+1. **Eval case first** — `prompt.txt` + `expect.json` defining the desired behaviour in measurable terms.
+2. **Baseline** — run and record to `eval/results/` before changing anything.
+3. **Edit the description** — 10–20 words of targeted guidance; zero runtime cost, the string is already sent.
+4. **Compare** — re-run; success is the tool-call sequence changing, not just binary PASS/FAIL.
+
+This repo's own tuning history:
+
+| Tool | Guidance added | Observed effect |
+|---|---|---|
+| `bash` | "Prefer dedicated tools for repo inspection" | Model stops reaching for `bash ls` / `bash cat` |
+| `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
+| `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
+| `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
+
 ## When to read results
 
 Results are checked into git so you can `git log eval/results/` and watch how the agent's behaviour drifts as the codebase, prompts, or model versions change. A single PASS does not mean the bug is fixed; a sustained PASS rate across many runs does.

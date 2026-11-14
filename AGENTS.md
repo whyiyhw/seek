@@ -1,6 +1,6 @@
 # seek — project guide for AI assistants
 
-This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here. [`CLAUDE.md`](CLAUDE.md) mirrors structural content for Claude Code; the two files are related but allowed to diverge where each agent's tooling differs (see [AGENTS.md vs CLAUDE.md](#agentsmd-vs-claudemd--related-but-not-identical)).
+This file is auto-loaded by **seek** at startup (and by other agent tools that follow the `AGENTS.md` convention). The canonical agent instructions for this repo live here.
 
 Treat the instructions below as mandatory project conventions.
 
@@ -26,10 +26,9 @@ If you're not sure: log it — but only for pitfalls produced by the change at h
 
 ## Architecture (non-negotiable)
 
-- **DeepSeek-first, two-tier providers**. `pkg/deepseek` is a first-class client with DeepSeek-specific fields (cache metadata, FIM endpoint, reasoner content). `pkg/llm` is a thin generic interface for second-tier providers (Anthropic / OpenAI / Gemini — landing in M6; GLM via the `compatible` adapter + pinned bigmodel.cn endpoint, no FIM / no cache metadata — `docs/pitfalls.md`).
+- **DeepSeek-first, two-tier providers**. `pkg/deepseek` is a first-class client with DeepSeek-specific fields (cache metadata, FIM endpoint, reasoner content). `pkg/llm` is a thin generic interface for second-tier providers (Anthropic / OpenAI / Gemini; GLM via the `compatible` adapter + pinned bigmodel.cn endpoint, no FIM / no cache metadata — `docs/pitfalls.md`).
 - **`pkg/deepseek` must not import `pkg/llm`** (CI lint enforces this — see `.github/workflows/ci.yml`). The whole point of the split is that DeepSeek-specific optimisations don't get lowered into a generic interface.
-- **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state.; skill auto-distillation (M-SD1 of [`docs/prd/feature-skill-distill.md`](docs/prd/feature-skill-distill.md)): cognitive funnel in `internal/skilldistill` (zero filesystem writes), drafts land in `~/.seek/skills/.drafts/` (a dot dir the loader deliberately skips) via `skillmgr`'s DraftStore — installing a draft is a human action (`seek skill drafts approve`, which delegates to the existing install chain and then removes the draft, or `seek skill install <dir>` directly), never part of the distillation pipeline.
-- **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state.; skill auto-distillation ([`docs/prd/feature-skill-distill.md`](docs/prd/feature-skill-distill.md), M-SD1+M-SD2/SD3 implemented): cognitive funnel + the M-SD2 automatic path (SessionStart background batch, `$SEEK_AUTO_SKILL_DISTILL`, default **off**) both live in `internal/skilldistill`; drafts land in `~/.seek/skills/.drafts/` (a dot dir the loader deliberately skips) via `skillmgr`'s DraftStore, telemetry rows via `skillstats` — the auto path's only direct write is the per-project cadence state under `~/.seek/projects/<pid>/skill-distill-state.json` (same class as memory's dream-state). Iron rule: the automatic path NEVER installs — installing a draft is a human action via the existing `seek skill install`.
+- **Skill subsystem (v2)**: read-only loader in `internal/skill` (Anthropic Agent Skills layout: `<dir>/SKILL.md` + frontmatter); install/uninstall/update in `internal/skillmgr`; call-stats JSONL in `internal/skillstats`; shared CLI/TUI dispatcher in `internal/skillcli`. Loader is the only path that runs at startup; everything else is on-demand. **Never** add filesystem writes under `~/.seek/skills/` outside `internal/skillmgr` and `internal/skillstats` — those are the only two packages allowed to mutate user-level skill state. Skill auto-distillation ([`docs/prd/feature-skill-distill.md`](docs/prd/feature-skill-distill.md), M-SD1+M-SD2/SD3 implemented): cognitive funnel + the M-SD2 automatic path (SessionStart background batch, `$SEEK_AUTO_SKILL_DISTILL`, default **off**) both live in `internal/skilldistill`; drafts land in `~/.seek/skills/.drafts/` (a dot dir the loader deliberately skips) via `skillmgr`'s DraftStore, telemetry rows via `skillstats` — the auto path's only direct write is the per-project cadence state under `~/.seek/projects/<pid>/skill-distill-state.json` (same class as memory's dream-state). Iron rule: the automatic path NEVER installs — installing a draft is a human action via the existing `seek skill install`.
 - **Plan-mode subsystem (v2 + v2.x)**: confirmation-gated workflow `analyze → propose → execute → adjust → report`. Driven by the `propose` tool (`internal/tools/propose/`) and progress-tracked by the `plan` tool (`internal/tools/plan/`). Substate state machine lives in `permission.Policy` (Mode / preApproved flag) + agent mode reminder + TUI status bar; transcript event-sourcing reconstructs state on `seek -resume` (see `plan/reconstruct.go`). Plan-approval artifacts (write-once markdown snapshots) land in `~/.seek/projects/<id>/plans/` via `plan/artifact.go`. Full design + status table in [`docs/prd/feature-plan-mode.md`](docs/prd/feature-plan-mode.md).
 - **i18n (view layer only)**: catalogue in `internal/i18n` (`i18n.T`; every key goes in ALL catalogues — parity-tested). Human-facing prose only; LLM-visible strings and the status bar stay English (prefix-cache bytes + width oracle). Language resolves once per session; `/lang` is the only runtime swap. Design + scope: [`docs/prd/feature-i18n.md`](docs/prd/feature-i18n.md).
 - See [`docs/prd/`](docs/prd/) for the full PRD series: v0 initial, v1 Memory, v2 Skill lifecycle, plus standalone feature PRDs (`feature-plan-mode.md`, `feature-webfetch.md`, `feature-permission-refactor.md`, `feature-active-memory.md`, `feature-mcp-client.md`, …).
@@ -52,30 +51,7 @@ Never page through a whole file to answer a question grep can answer — small f
 
 > **Audience: maintainers, not the running agent.** Development guidance for tuning the shipped tool descriptions — not a behavioural rule.
 
-The `const description` inside each `internal/tools/<name>/` is the most effective place to shape behaviour: it rides every tool schema to the API, so the model MUST read it to build a valid `tool_call` — unlike this file, which weaker/faster models may skim. Schemas sit closest to the generation step; a description sentence is ~10× more likely to shape the next `tool_call` than the same sentence in AGENTS.md.
-
-Pattern (proven in `eval/cases/tool-selection/`; framework in `eval/README.md`):
-1. **Eval case first** — `prompt.txt` + `expect.json` defining the desired behaviour in measurable terms.
-2. **Baseline** — run and record to `eval/results/` before changing anything.
-3. **Edit the description** — 10–20 words of targeted guidance; zero runtime cost, the string is already sent.
-4. **Compare** — re-run; success is the tool-call sequence changing, not just binary PASS/FAIL.
-
-This repo's own tuning history:
-
-| Tool | Guidance added | Observed effect |
-|---|---|---|
-| `bash` | "Prefer dedicated tools for repo inspection" | Model stops reaching for `bash ls` / `bash cat` |
-| `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
-| `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
-| `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
-
-## AGENTS.md vs CLAUDE.md — related but not identical
-
-[`AGENTS.md`](AGENTS.md) is the **canonical** agent-instruction file, auto-loaded by **seek** every session; [`CLAUDE.md`](CLAUDE.md) mirrors it for **Claude Code**. Same pulse, diverging only where the host tooling differs:
-
-- **AGENTS.md** assumes seek's runtime (eval framework, `grep`+`read` workflow, `internal/tools/` layout, plan-mode FSM); **CLAUDE.md** expresses the same behaviours in Claude Code vocabulary (`Glob`+`Read`, …).
-- **Sync rule**: structural sections (Architecture / Permission model / Code conventions) change in BOTH files in the same edit; behavioural sections are maintained per-host.
-- Not byte-identical by design — the goal is equal behaviour, not equal text.
+The `const description` inside each `internal/tools/<name>/` is the most effective place to shape behaviour: it rides every tool schema to the API, so the model MUST read it to build a valid `tool_call` — unlike this file, which weaker/faster models may skim. Schemas sit closest to the generation step; a description sentence is ~10× more likely to shape the next `tool_call` than the same sentence in AGENTS.md. Tuning pattern (eval case → baseline → edit → compare) and this repo's tuning-history table live in [`eval/README.md`](eval/README.md).
 
 ## Token & prefix-cache constraints (non-negotiable)
 
