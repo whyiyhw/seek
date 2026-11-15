@@ -29,6 +29,7 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_26ltej：README 双语 v0.11 叙事刷新：平台化定位（多端/自进化/成本三轴）
 - c_tbqxnn：session export：会话导出为 markdown 对话记录
 - c_bickfj：编排 P1-a：后台子代理生命周期骨架——spawn 可后台化 + 完成事件进 session 流
+- c_zdjkgf：编排 P1-d：后台子代理完成通知的 TUI 呈现——状态徽标在跑→已完成迁移 + /agents MODE 列（bg/送达✓）
 - c_nym2sn：pricing.go 费率刷新：flash 现价 ¥2/M 高峰 miss（快照停 2026-09-10 已过期）+ v4-pro 独立行核对
 - c_mb5d7p：session/subagent ID 熵扩宽 24→64 位（NewRunID 同款修法，v0.11 CI 实录同因，repo=whyiyhw/seek）
 - c_wxbdkz：R0 验证门：read_url 与 function tools 共存性实测（feature-deepseek-app-api §2.2，红则①降级不接）

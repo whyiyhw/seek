@@ -295,7 +295,7 @@ type SpawnArgs struct {
 // child runs under (caller turn ctx vs ManagerOpts.SessionCtx)
 // and where the Result goes (return value vs notice inbox).
 func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
-	sp, fail := m.begin(ctx, args)
+	sp, fail := m.begin(ctx, args, false)
 	if fail != nil {
 		return *fail
 	}
@@ -324,7 +324,7 @@ func (m *Manager) SpawnBackground(args SpawnArgs) Result {
 		return failResult("", "spawn_error",
 			"background spawn unavailable: ManagerOpts.SessionCtx not wired by host")
 	}
-	sp, fail := m.begin(m.opts.SessionCtx, args)
+	sp, fail := m.begin(m.opts.SessionCtx, args, true)
 	if fail != nil {
 		return *fail
 	}
@@ -375,10 +375,13 @@ type spawnSetup struct {
 // index event, active registration under a child ctx derived from
 // parentCtx (the CALLER's ctx for sync Spawn, SessionCtx for
 // SpawnBackground — the one line that makes background real).
+// background records the spawn mode on the `started` event so the
+// fold (and /agents) can present background rows with their terminal
+// states; terminal events stay identical for both modes.
 // A non-nil *Result return means the spawn was refused before the
 // runner started (wire-format failure, no active entry); on success
 // the caller owns the child lifecycle from step 9.
-func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup, *Result) {
+func (m *Manager) begin(parentCtx context.Context, args SpawnArgs, background bool) (*spawnSetup, *Result) {
 	// Step 1: validate args. Failures here produce a wire-format
 	// result with no index event — the spawn never happened.
 	//
@@ -515,6 +518,7 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 		Type:         args.Type,
 		Description:  args.Description,
 		WorktreePath: args.WorktreePath,
+		Background:   background,
 	}); err != nil {
 		r := failResult(subSid, "spawn_error", "write index: "+err.Error())
 		return nil, &r

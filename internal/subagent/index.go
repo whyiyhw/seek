@@ -29,8 +29,13 @@ type event struct {
 	Type         Type      `json:"type,omitempty"`
 	Description  string    `json:"description,omitempty"`
 	WorktreePath string    `json:"worktree_path,omitempty"`
-	Tokens       *Tokens   `json:"tokens,omitempty"`
-	Reason       string    `json:"reason,omitempty"`
+	// Background is set on `started` events emitted by
+	// SpawnBackground (feature-orchestration PRD §4.1 D1). Additive +
+	// omitempty: pre-P1-d indexes simply lack the key and fold to
+	// Background=false (sync), so old and new readers agree.
+	Background bool    `json:"background,omitempty"`
+	Tokens     *Tokens `json:"tokens,omitempty"`
+	Reason     string  `json:"reason,omitempty"`
 }
 
 // indexLock serialises concurrent append callers to a single index
@@ -129,10 +134,11 @@ func readEvents(path string) ([]event, error) {
 // rules:
 //
 //   - The `started` event seeds immutable fields (ParentSid, Type,
-//     Description, WorktreePath, StartedAt).
+//     Description, WorktreePath, StartedAt, Background).
 //   - Subsequent events update Status; terminal events (completed /
 //     failed / killed / orphaned / promoted) also set EndedAt,
-//     Tokens (if present), Reason (if present).
+//     Tokens (if present), Reason (if present). The `notified` event
+//     only sets Notified (delivery marker, non-terminal).
 //   - Events for unknown sub_sid (no preceding started) are skipped
 //     — the index is logically inconsistent there.
 //
@@ -158,6 +164,7 @@ func foldEvents(events []event) []Subagent {
 				Description:  e.Description,
 				WorktreePath: e.WorktreePath,
 				StartedAt:    e.TS,
+				Background:   e.Background,
 				Status:       StatusActive,
 			}
 			order = append(order, e.SubSid)
@@ -192,6 +199,14 @@ func foldEvents(events []event) []Subagent {
 		case "promoted":
 			s.Status = StatusPromoted
 			s.EndedAt = e.TS
+		case "notified":
+			// Delivery marker for background spawns: the completion
+			// notice was ingested into the parent session (written on
+			// drain by the D3/P1-b resume path). Non-terminal — it
+			// annotates the existing Status for presentation (the
+			// /agents MODE column's delivered tick) without altering
+			// the lifecycle fold.
+			s.Notified = true
 		default:
 			// Unknown event kind — ignore. A future seek version
 			// might emit kinds we don't recognise; the safe
