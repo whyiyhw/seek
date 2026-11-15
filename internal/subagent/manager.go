@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
@@ -156,6 +157,16 @@ type ManagerOpts struct {
 	ProjectSectionFn  func() string
 	SkillManifestFn   func() string
 	ParentToolNamesFn func() []string
+
+	// AgentTypes is the typed-agent registry from the P2-a loader
+	// (agenttypes.Load, frozen at session start). Custom (file-scope)
+	// entries become spawnable through the D13 gate in custom.go —
+	// Manager.resolveType adapts them per spawn; a file that shadows
+	// a built-in name (project explore.md) wins over the compile-time
+	// template. Built-in entries keep the compile-time template path
+	// byte-identical. nil = built-ins only (the pre-P2-b behaviour of
+	// every caller that doesn't set it).
+	AgentTypes *agenttypes.Set
 }
 
 // Manager owns the subagents.jsonl index + the in-flight map for
@@ -370,8 +381,17 @@ type spawnSetup struct {
 func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup, *Result) {
 	// Step 1: validate args. Failures here produce a wire-format
 	// result with no index event — the spawn never happened.
-	if !args.Type.IsValid() {
-		r := failResult("", "spawn_error", fmt.Sprintf("unknown subagent_type %q", args.Type))
+	//
+	// Type resolution goes through resolveType (P2-b): a custom
+	// file-defined type (or a file shadowing a built-in name) is
+	// adapted through the D13 gate; built-ins keep the compile-time
+	// template path byte-identical. Gate failures (loosening
+	// workflow, forbidden tools, unknown provider) fail the spawn
+	// with the gate's message — same wire-format class as an unknown
+	// type.
+	tmpl, def, terr := m.resolveType(args.Type)
+	if terr != nil {
+		r := failResult("", "spawn_error", terr.Error())
 		return nil, &r
 	}
 	if args.Description == "" {
@@ -387,7 +407,23 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 	// orchestration.md §4.2). Route keeps "" provider for the
 	// inherit path so the Runner's default lane is byte-identical
 	// to the pre-routing behaviour.
-	route, err := ResolveRoute(args.Provider, args.Model)
+	//
+	// A custom Definition's provider/model (D11) fill the gaps the
+	// per-call params leave; explicit call params win — the caller's
+	// more specific request at call time (routing is not a
+	// permission axis, so override is not a D13 concern). The MERGED
+	// pair is re-validated by ResolveRoute: def provider + call model
+	// from different lanes is a clear error, not a mispriced spawn.
+	provider, model := args.Provider, args.Model
+	if def != nil {
+		if provider == "" {
+			provider = def.Provider
+		}
+		if model == "" {
+			model = def.Model
+		}
+	}
+	route, err := ResolveRoute(provider, model)
 	if err != nil {
 		r := failResult("", "spawn_error", err.Error())
 		return nil, &r
@@ -410,8 +446,7 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 	// subagent's cwd defaults to the parent's; isolation:"worktree"
 	// (when wired in M11.1) will override this to the worktree
 	// path BEFORE Spawn is called — Manager doesn't know about
-	// worktree paths directly.
-	tmpl, _ := TemplateFor(args.Type) // ok by IsValid check above
+	// worktree paths directly. tmpl comes from step 1's resolveType.
 	cwd := m.opts.ParentPolicy.Cwd()
 	if args.WorktreePath != "" {
 		cwd = args.WorktreePath
@@ -507,6 +542,37 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 		cancel:       cancel,
 		inf:          inf,
 	}, nil
+}
+
+// resolveType looks up the spawn-time Template for a subagent_type
+// (P2-b, feature-orchestration.md §5): a custom file-scope definition
+// from ManagerOpts.AgentTypes goes through the D13 gate
+// (ResolveCustomType) — this is also how a project/user file that
+// shadows a built-in name wins over the compile-time template (D11's
+// scope stack applied at spawn). Everything else (built-in names, or
+// AgentTypes not wired) keeps the compile-time template table — the
+// pre-P2-b byte path.
+//
+// The returned *agenttypes.Definition is non-nil only for custom
+// types; begin merges its provider/model routing knobs into the
+// per-call params. A non-nil error fails the spawn before any state
+// is allocated (unknown type name, or a gate rejection — the message
+// is the gate's own).
+func (m *Manager) resolveType(t Type) (Template, *agenttypes.Definition, error) {
+	if m.opts.AgentTypes != nil {
+		if def := m.opts.AgentTypes.Get(string(t)); def != nil && def.Origin != agenttypes.OriginBuiltin {
+			tmpl, err := ResolveCustomType(def, m.opts.ParentToolNamesFn())
+			if err != nil {
+				return Template{}, def, err
+			}
+			return tmpl, def, nil
+		}
+	}
+	tmpl, ok := TemplateFor(t)
+	if !ok {
+		return Template{}, nil, fmt.Errorf("unknown subagent_type %q", t)
+	}
+	return tmpl, nil, nil
 }
 
 // runAndFinish runs the shared steps 9–11: invoke the Runner,

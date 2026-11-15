@@ -25,8 +25,10 @@
 //     This package has NO write API by design; grep-audit acceptance
 //     #4 in the PRD depends on that staying true.
 //   - Spawn-time semantics (registry intersection, policy
-//     restriction, routing). The Definition is data; M-O2.2 wires it
-//     into Manager.Spawn and the `agent` tool schema.
+//     restriction, routing). The Definition is data; since P2-b
+//     internal/subagent's D13 gate (custom.go) adapts it into the
+//     spawn-time Template via ManagerOpts.AgentTypes. The `agent`
+//     tool schema's dynamic enum remains M-O2.2.
 //   - Hot reload — loaded once at session start. A later turn's file
 //     edits are invisible until the next seek launch (deliberate:
 //     schema bytes are frozen per-process for the prefix cache).

@@ -515,6 +515,20 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: "retryable" is not a property of the error, it is a property of the error AND what the consumer already saw. Encode retryability where visibility is known (the streaming function), not at the retry site — the loop cannot tell whether events left the process
 - **Refs**: `pkg/agent/agent.go` (`errEmptyResponse`, retry loop in `Prompt`, both `runTurn*` guards), `pkg/agent/agent_test.go`
 
+### Startup validation of custom agent types must run AFTER the registry is final
+- **Saw**: P2-b's D13 startup pass (warn when a custom type's `tools` aren't in the parent registry) placed naively next to `agenttypes.Load` or at Manager construction flags `plan`/`propose` as unknown for EVERY custom type — they are `reg.Add`ed later than both points.
+- **Why**: the parent tool registry is built in stages (initial set → `agent.New` → agent tool → plan/propose → memory_observe, some env-gated); `ManagerOpts.ParentToolNamesFn` is a closure for exactly this reason. Any snapshot taken before the last `reg.Add` is a partial registry.
+- **Fix**: the pass runs after the last registration in `cmd/seek/main.go` (comment pins the constraint); spawn-time resolution (`Manager.resolveType` → `ResolveCustomType`) re-checks against the live `ParentToolNamesFn()` as the authority, so the startup pass is UX only. Commit (this one).
+- **Lesson**: "validate against the registry" needs a registry-final anchor. Gate validation at the point of use (spawn) and treat startup passes as advisory echoes, or staged construction will manufacture phantom config errors.
+- **Refs**: `cmd/seek/main.go` (startup gate), `internal/subagent/manager.go` (`resolveType`), `internal/subagent/custom.go`
+
+### agenttypes.Definition zero-Origin reads as a built-in — hand-built Sets silently lose their types
+- **Saw**: a test Set built via `agenttypes.NewSet().Add(&Definition{...})` spawned as `unknown subagent_type` — the def was in the Set, spell-checked, everything.
+- **Why**: `Origin` zero value IS `OriginBuiltin`, and the spawn resolver discriminates custom-vs-builtin by `def.Origin != OriginBuiltin` (file defs always get an explicit origin from `Load`; only hand-built ones don't). Zero-Origin defs fall through to the compile-time template table, miss, and read as unknown.
+- **Fix**: test builder sets `Origin: OriginProject` explicitly (`internal/subagent/custom_test.go` `def()` helper, comment explains). Loud failure, never a widening — but a minute lost to it.
+- **Lesson**: when a sentinel enum's zero value is a meaningful category, constructors that bypass the loader must set it explicitly; consider making the zero value the "unset/invalid" case for new enums.
+- **Refs**: `internal/agenttypes/agenttypes.go` (`Origin`), `internal/subagent/manager.go` (`resolveType`)
+
 ## DeepSeek API
 
 ### Server web tools (`deepseek_read_url`/`deepseek_web_search`) have NO working coexistence shape with function tools — the 200 silently strips them

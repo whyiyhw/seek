@@ -39,3 +39,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_kkpwe7：编排 P2-a：类型化 agent 定义格式——配置文件与加载器
 - c_uzmzzi：book v0.11 章节更新：control-plane/GLM 车道/skill-distill 进设计书
 - c_jqwd72：skill-distill 三期：复发累积（N≥2）与蒸馏质量打点报表
+- c_7xmecm：编排 P2-b：per-type 工具白名单接线——permission 层收紧
