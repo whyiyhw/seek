@@ -3,6 +3,10 @@
      Message rendering: minimal markdown per feature-web-frontend §2.6
      — fenced ``` blocks → <pre>, `inline` → <code>, everything else
      verbatim plain text; DOM API only (§5.5), no HTML-parsing sink.
+     Conversation identity (W1.3, D-W3): uuid minted by the browser,
+     persisted in localStorage, carried as X-Seek-Conversation on
+     fetches and ?conv= on the SSE stream (EventSource cannot set
+     headers); the server keeps zero session state.
      Deliberately out of scope: multi-tab sync, history persistence,
      FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
      mobile, real auth (design card c_7pptol owns the full UI). -->
@@ -52,6 +56,29 @@
 'use strict';
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const q = s => s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+
+// 会话身份（W1.3，D-W3）：uuid 浏览器自铸、localStorage 持久；服务端
+// 零会话状态——它只是 bindings 表的键（web:<uuid>）。localStorage 不可
+// 用（隐私模式抛异常）时退化为本次页面加载的临时 uuid。
+const CONV_KEY = 'seek-web-conv';
+function mintConv() {
+  // crypto.randomUUID 仅 secure context（localhost/https）可用；经
+  // tailnet IP 直连是 http，退到 getRandomValues 拼 uuid v4。
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+  return [h.slice(0,8), h.slice(8,12), h.slice(12,16), h.slice(16,20), h.slice(20)].join('-');
+}
+let CONV = null;
+try {
+  CONV = localStorage.getItem(CONV_KEY);
+  if (!CONV || !/^[A-Za-z0-9._-]{1,64}$/.test(CONV)) {
+    CONV = mintConv();
+    localStorage.setItem(CONV_KEY, CONV);
+  }
+} catch (e) { CONV = mintConv(); }
 const status = document.getElementById('status');
 const list = document.getElementById('list');
 const form = document.getElementById('form');
@@ -112,10 +139,10 @@ function addMsg(who, text) {
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
 }
 
-// 绑定状态一行：GET /state（web 会话的 binding）。
+// 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。
 async function refreshState() {
   try {
-    const r = await fetch(q('/state'));
+    const r = await fetch(q('/state'), { headers: { 'X-Seek-Conversation': CONV } });
     if (r.status === 401) return setStatus('token 无效——用 /?token=<serve 启动时打印的值> 打开', false);
     const s = await r.json();
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
@@ -123,10 +150,10 @@ async function refreshState() {
   } catch (e) { setStatus('连不上 /state：' + e, false); }
 }
 
-// SSE 下行：seek 的回复逐条追加。
+// SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数。
 function listen() {
   if (!TOKEN) return;
-  const es = new EventSource(q('/events'));
+  const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.onmessage = ev => {
     try {
       const m = JSON.parse(ev.data);
@@ -148,7 +175,7 @@ form.addEventListener('submit', async ev => {
   try {
     const r = await fetch(q('/msg'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
       body: JSON.stringify({ text }),
     });
     if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
