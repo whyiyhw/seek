@@ -37,3 +37,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_o77s3m：编排 P3-a：hooks 注入面设计——受控注入区与缓存稳定区分离
 - c_iha3fr：web 聊天 markdown 最小渲染：代码块+行内码样式（§2.6 落地，零依赖，c_vn44rc 首卡）
 - c_kkpwe7：编排 P2-a：类型化 agent 定义格式——配置文件与加载器
+- c_uzmzzi：book v0.11 章节更新：control-plane/GLM 车道/skill-distill 进设计书

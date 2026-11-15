@@ -85,6 +85,9 @@
 | ch14 §14.4 | "Anthropic requires consecutive tool results merged into ONE user message" |
 | ch14 §14.5 | "Gemini omits tool call IDs; system message is `systemInstruction`, not a messages-array entry" |
 | ch14 §14.6 | "OpenAI streaming token counts require `stream_options: {include_usage: true}`" |
+| ch14 §14.11 | "GLM (bigmodel.cn paas/v4) is streaming-tool_calls compatible; `reasoning_content` deltas are silently dropped" |
+| ch14 §14.11 | "pricing.Cost bills input ONLY via cache-hit/miss buckets — every second-tier turn priced input at $0" |
+| ch14 §14.11（隐含） | "Headless ACP can't choose its provider by flag — and a stray `ANTHROPIC_API_KEY` in the inherited shell wins the auto-detect" |
 
 ### 来自 Go 语言细节（书中未单独编号但都被 ch5 / ch7 / ch11 / ch13 顺带提到）
 
@@ -176,6 +179,21 @@
 | ch22 §22.5 | "Tick's 'len(due) == 0 → early return' silently skipped triggers + GC for the entire tick" |
 | ch22 §22.8 | "OS scheduler invokes `seek cron tick` with a near-empty env — interactive-shell secrets invisible" |
 | ch22 §22.6 | "A background process must NOT inherit the turn ctx, or it dies when the turn ends" |
+
+### 来自 Skill 自动蒸馏（Ch 17 §17.11 · v0.11 增补）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch17 §17.11 | "PRD said \"sessions are archived per-project\" — they are not; bucket by header CWD" |
+| ch17 §17.11 | "Bare `m.appendHistory(...)` as a statement drops the line — same disease as `_ = tea.Println`" |
+
+### 来自 Control plane / serve（Ch 24 §24.7 · v0.11 增补）
+
+| 书中位置 | pitfalls.md 条目 |
+|---|---|
+| ch24 §24.7 | "A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`" |
+| ch24 §24.7 | "http.Server.Shutdown never returns while SSE handlers are mounted" |
+| ch24 §24.7 | "ProjectID hashes the path STRING, not the directory — one physical dir via /tmp and /private/tmp is two projects" |
 
 ### 来自 Agent loop 补充
 
