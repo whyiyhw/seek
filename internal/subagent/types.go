@@ -64,12 +64,13 @@ const (
 // Used by Manager.Spawn to reject unknown types before doing any
 // work; the LLM-side `agent` tool schema's enum is the first line of
 // defense but this guards against future programmer error too.
+//
+// Delegates to the templates table (adapted from
+// agenttypes.Builtins since P2-a) so validity and the table cannot
+// drift apart the way a hardcoded switch could.
 func (t Type) IsValid() bool {
-	switch t {
-	case TypeGeneralPurpose, TypeExplore, TypePlan:
-		return true
-	}
-	return false
+	_, ok := templates[t]
+	return ok
 }
 
 // Status is the lifecycle state of a subagent, derived by folding
