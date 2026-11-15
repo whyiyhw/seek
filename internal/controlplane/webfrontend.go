@@ -5,16 +5,21 @@ package controlplane
 // to keep frontend SDKs out of the shipped binary, and net/http IS the
 // stdlib, so unlike feishu this adapter needs no build tag.
 //
-// Shape: one fixed conversation ("web:default" — single-user v1, D-C5;
-// per-tab conversations are future work). The page is a go:embed'ed
-// single HTML file (webfrontend.html, zero build chain); commands like
-// /bind pass through as plain text and reuse the M2 router verbatim.
+// Shape: per-conversation addressing (W1.3, webfrontend_conv.go) — the
+// page mints a uuid (crypto.randomUUID, localStorage) and carries it as
+// X-Seek-Conversation; requests without it address the legacy default
+// conv "web:default" (D-W3 compat, bindings stay untouched). The page
+// is a go:embed'ed single HTML file (webfrontend.html, zero build
+// chain); commands like /bind pass through as plain text and reuse the
+// M2 router verbatim.
 //
 //	GET  /        the embedded page (no token — it holds no secrets;
 //	              the token reaches the page via its own URL)
-//	GET  /events  SSE downstream: every Send broadcast to all tabs
+//	GET  /events  SSE downstream: Send broadcast to the conv's tabs
+//	              (?conv= — EventSource cannot set headers)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
-//	GET  /state   the web conversation's binding, for the status line
+//	              (X-Seek-Conversation picks the conv)
+//	GET  /state   the requesting conv's binding, for the status line
 //	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1 envelope; the
 //	              session method set registers at servecli assembly —
 //	              W4.2 — NewWeb itself registers nothing; see
@@ -56,12 +61,13 @@ import (
 //go:embed webfrontend.html
 var webPage []byte
 
-// webConvNative is the single conversation native id: every browser tab
-// is the same conversation. Single-user v1; per-tab ids would multiply
-// bindings for zero MVP value (D-C5 — Sender is unused too).
+// webConvNative is the LEGACY default conversation: pre-W1.3 clients
+// sent no conv id and every tab shared this one conversation. It stays
+// as the address for header-less requests so existing web:default
+// bindings keep working (D-W3 compat: not migrated, not deleted).
 const webConvNative = "default"
 
-// webConvID is the fixed ConvID ("web:default") the frontend speaks.
+// webConvID is that default ConvID ("web:default").
 func webConvID() ConvID { return NewConvID("web", webConvNative) }
 
 // DefaultWebAddr is the listen address of the web frontend. Loopback
@@ -133,8 +139,8 @@ type WebFrontend struct {
 	inbox   chan<- Inbound // set by Run; handlers 503 before that
 
 	mu   sync.Mutex
-	subs map[int]chan string // SSE subscribers: buffered event-json chans
-	next int
+	subs map[ConvID]map[int]chan string // per-conv SSE subscribers (W1.3): buffered event-json chans
+	next int                            // subscriber ids, unique across convs
 }
 
 // Compile-time port check (the fake asserts the same contract).
@@ -282,23 +288,17 @@ func (f *WebFrontend) Run(ctx context.Context, in chan<- Inbound) error {
 	return nil
 }
 
-// Send implements the Frontend port: broadcast one reply to every
-// connected SSE client (all tabs are the same conversation). Best-effort
-// — a full subscriber buffer drops that event for that client, a Send
-// with no subscribers is a silent no-op (documented MVP limitation).
+// Send implements the Frontend port: broadcast one reply to every SSE
+// client subscribed to conv — and only conv (W1.3 isolation; tabs of
+// the same conv still share one stream). Best-effort — a full
+// subscriber buffer drops that event for that client, a Send with no
+// subscribers is a silent no-op (documented MVP limitation).
 func (f *WebFrontend) Send(ctx context.Context, conv ConvID, r Reply) error {
 	ev, err := json.Marshal(map[string]string{"conv": string(conv), "text": r.Text})
 	if err != nil {
 		return err // unreachable for string maps, but the type says it
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, ch := range f.subs {
-		select {
-		case ch <- string(ev):
-		default: // slow client: drop the event, never block the executor
-		}
-	}
+	f.broadcast(conv, string(ev))
 	return nil
 }
 
@@ -320,6 +320,11 @@ func (f *WebFrontend) handleMsg(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
+		return
+	}
+	conv, err := f.convFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	var body struct{ Text string }
@@ -344,7 +349,7 @@ func (f *WebFrontend) handleMsg(w http.ResponseWriter, r *http.Request) {
 	// cannot be collapsed. DirectAt is always true: a browser page IS
 	// the direct audience; there is no group-chatter shape here.
 	select {
-	case in <- Inbound{Conv: webConvID(), Text: body.Text, Sender: "web", DirectAt: true}:
+	case in <- Inbound{Conv: conv, Text: body.Text, Sender: "web", DirectAt: true}:
 	case <-r.Context().Done():
 		return // client gave up; the message was never accepted
 	}
@@ -356,7 +361,12 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
 		return
 	}
-	b, err := f.store.Get(webConvID())
+	conv, err := f.convFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	b, err := f.store.Get(conv)
 	if err != nil && !errors.Is(err, ErrBindingNotFound) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -369,12 +379,18 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleEvents is the SSE downstream. One goroutine per tab: replay
-// nothing, stream replies + a 15s heartbeat (keeps intermediaries from
-// idling the conn; `retry:` makes the browser reconnect after a serve
-// restart), exit on client disconnect or write error.
+// nothing, stream the conv's replies + a 15s heartbeat (keeps
+// intermediaries from idling the conn; `retry:` makes the browser
+// reconnect after a serve restart), exit on client disconnect or write
+// error. The conv comes from ?conv= (EventSource cannot set headers).
 func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !f.auth(r) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
+		return
+	}
+	conv, err := f.convFromRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	fl, ok := w.(http.Flusher)
@@ -387,19 +403,8 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "retry: 3000\n\n") // browser auto-reconnect, 3s
 	fl.Flush()
 
-	f.mu.Lock()
-	if f.subs == nil {
-		f.subs = make(map[int]chan string)
-	}
-	f.next++
-	ch := make(chan string, 16)
-	f.subs[f.next] = ch
-	f.mu.Unlock()
-	defer func() {
-		f.mu.Lock()
-		delete(f.subs, f.next)
-		f.mu.Unlock()
-	}()
+	ch, unsub := f.subscribe(conv)
+	defer unsub()
 
 	beat := time.NewTicker(15 * time.Second)
 	defer beat.Stop()

@@ -49,3 +49,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_3d2bil：编排 P2-c：内置类型包升级——explore/judge/general 类型化+默认路由
 - c_zam44t：web 会话历史·W4.2：session/list|get|messages 三 method（cursor 分页=全文件顺序、尾读不锁）
 - c_snerqc：web 平面契约自测脚本：serve HTTP 三断言进 selftest 家族
+- c_nl4nqg：web 多标签·per-conv 演进：conv-uuid+双 conv 隔离+多 tab 扇出一致（W1.3）
