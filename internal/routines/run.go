@@ -12,14 +12,14 @@ import (
 )
 
 // NewRunID returns a fresh run ID in the canonical seek shape:
-// `YYYYMMDD-HHMMSS-<16 hex>`. Same scheme family as session.generateID
-// / subagent.newSubSid (those still carry 6-hex suffixes — same-class
-// widening queued for them); independent ID spaces but identical
-// format so visual inspection of paths immediately tells the
-// reader what kind of artifact they're looking at. 8 random bytes
-// (64 bits): the old 6-hex suffix (24 bits) birthday-collided in CI
-// when the uniqueness test drew 500 ids within one second — thin
-// entropy is a production risk too (runs starting in the same
+// `YYYYMMDD-HHMMSS-<16 hex>`. Same scheme and width as
+// session.generateID / subagent.newSubSid (all three widened from
+// 6-hex to 16-hex suffixes together); independent ID spaces but
+// identical format so visual inspection of paths immediately tells
+// the reader what kind of artifact they're looking at. 8 random
+// bytes (64 bits): the old 6-hex suffix (24 bits) birthday-collided
+// in CI when the uniqueness test drew 500 ids within one second —
+// thin entropy is a production risk too (runs starting in the same
 // second), not just a test flake.
 //
 // On entropy exhaustion falls back to nanosecond-precision hex
