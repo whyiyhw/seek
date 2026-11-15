@@ -14,7 +14,11 @@
 // a 48-hour window to recover an accidental discard. Manager.
 // PruneDiscarded handles GC (no daemon — called from seek startup
 // and the `seek worktree gc` CLI per PRD §3.8 "zero常驻进程"
-// constraint).
+// constraint). PruneOrphans is the age-based fallback for the
+// other failure shape: sessions that died BEFORE exit_worktree
+// leave no discarded marker, so PruneDiscarded never sees them
+// and the ref/worktree would live forever (2026-11-14 incident:
+// six June worktrees lingered five months until manual cleanup).
 //
 // The package does NOT couple to internal/subagent. The agent
 // orchestration sits in cmd/seek / internal/tools/agent and calls
