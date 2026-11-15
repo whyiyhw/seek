@@ -41,15 +41,16 @@ name=$1
 # 整条字面路径，未匹配即拒——参数只用来选臂，不参与构造路径。
 target_of() {
   case ${1} in
-    acp-smoke) echo "scripts/acp-smoke-test.sh" ;;
-    weight)    echo "scripts/weight.sh" ;;
-    *)         return 1 ;;
+    acp-smoke)  echo "scripts/acp-smoke-test.sh" ;;
+    weight)     echo "scripts/weight.sh" ;;
+    eval-trend) echo "scripts/eval-trend-test.sh" ;;
+    *)          return 1 ;;
   esac
 }
 
 # 登记名清单（--list 与映射自检共用；与 target_of 的 case 臂同步维护——
 # 清单有而 case 无臂会被 --list 的自检抓出来，非零退出）。
-ALL_NAMES="acp-smoke weight"
+ALL_NAMES="acp-smoke weight eval-trend"
 
 # 与白名单调用形态（bash scripts/selftest.sh …）对齐：入口以仓库根解析目标。
 cd "$(dirname "$0")/.." || exit 2
