@@ -288,7 +288,7 @@ loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127
 |---|---|
 | **本机** | 默认 bind 127.0.0.1，零配置 |
 | **tailnet**（推荐远程形态） | 不改 bind；`tailscale serve`/TCP 转发把 tailnet IP 映射到 127.0.0.1:<port>（butler 8787、paseo 6767 两先例）——WireGuard 加密 + token 兜底，无需 TLS 证书 |
-| **LAN 明文** | `--listen 0.0.0.0` + 强制 token；**如实告知风险**：明文 HTTP 下 token 可被同网段嗅探/中间人——内网信任假设，或改走 tailnet。文档明示这是下策 |
+| **LAN 明文** | **已作废**（2026-11-15 scope 闸拍板，§4.4）：`0.0.0.0` 一律拒启动，不再有「显式 flag + 强制 token 即可绑」姿势；LAN 访问一律走 tailnet 转发 |
 
 ### 5.5 安全面注意项（列全）
 
@@ -335,7 +335,7 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 增量）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 缺 token 拒启动。
+- **鉴权全路径**（前半已交付有测试，后半 W1.2 增量）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
 - **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。
