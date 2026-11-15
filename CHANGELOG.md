@@ -35,3 +35,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_lxferp：eval 基线趋势：结果 JSONL 汇总脚本——与上一版对比报告
 - c_onl4et：信号：eval-trend 自测未登记 selftest.sh——c_lxferp 验证「未跑成」阻塞放行
 - c_o77s3m：编排 P3-a：hooks 注入面设计——受控注入区与缓存稳定区分离
+- c_iha3fr：web 聊天 markdown 最小渲染：代码块+行内码样式（§2.6 落地，零依赖，c_vn44rc 首卡）
