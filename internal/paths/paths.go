@@ -101,6 +101,20 @@ func UserSkillStats() (string, error) {
 	return filepath.Join(dir, ".stats.jsonl"), nil
 }
 
+// UserAgents returns the user-level typed-agent definitions directory
+// (~/.seek/agents/), the agent-type counterpart of UserSkills
+// (feature-orchestration.md D10). Project-level definitions live at
+// <project>/.seek/agents/ and are NOT computed here. Read-only at
+// runtime — the loader (internal/agenttypes) scans it; writes belong
+// to a future internal/agentsmgr.
+func UserAgents() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "agents"), nil
+}
+
 // Projects returns the parent directory holding per-project state
 // (~/.seek/projects/). Each project has its own subdirectory keyed by a
 // 16-char SHA-256 prefix of its absolute path — see ProjectID.

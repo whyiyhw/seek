@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/autopilot"
@@ -1096,6 +1097,20 @@ func run() error {
 		fmt.Fprintln(os.Stderr, summary)
 	}
 
+	// Typed agent definitions (feature-orchestration.md P2-a): loaded
+	// ONCE here — no hot reload, the same per-process freeze the skill
+	// manifest breaks out of only via explicit /skill_commit paths.
+	// Custom types are listed by /agents types; wiring them into the
+	// `agent` tool schema + spawn path is M-O2.2. Errors non-fatal,
+	// same posture as skills.
+	agentTypes, agentTypeStats, _ := agenttypes.Load(agenttypes.LoadOptions{ProjectDir: cwd})
+	for _, err := range agentTypeStats.Errors {
+		fmt.Fprintln(os.Stderr, "agents:", err)
+	}
+	if agentTypes.CustomCount() > 0 {
+		fmt.Fprintf(os.Stderr, "Loaded %d custom agent type(s) — /agents types\n", agentTypes.CustomCount())
+	}
+
 	// memProject + activeSession are forward-declared so the Skill tool's
 	// stats EnvFn can read them by reference — both are set further
 	// down (memProject by memory.LoadOrCreate, activeSession by
@@ -2087,6 +2102,7 @@ func run() error {
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,
+		AgentTypes:            agentTypes,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
 		ProviderName:          provLabel,

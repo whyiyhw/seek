@@ -34,6 +34,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
@@ -192,6 +193,16 @@ type Options struct {
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
+
+	// AgentTypes is the typed-agent definition registry
+	// (feature-orchestration.md P2), loaded once at session start by
+	// cmd/seek. Read-only from the TUI: /agents types lists it, and
+	// the default /agents view appends a hint line when custom
+	// (non-builtin) types exist. nil = not wired (--no-save paths);
+	// /agents types reports "unavailable" rather than crash. Hot
+	// reload is deliberately absent — schema bytes freeze per process
+	// for the prefix cache, so type definitions load once per session.
+	AgentTypes *agenttypes.Set
 
 	// Webhook is the v6 柱 M push dispatcher (feature-mobile-push.md),
 	// reused here for the interactive extension: when an interactive turn

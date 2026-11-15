@@ -5,8 +5,64 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/permission"
 )
+
+// TestBuiltinTemplatesByteIdentical locks the P2-a migration
+// (feature-orchestration.md D11): the hardcoded template map retired
+// into agenttypes.Builtins and templates here are adapted from it.
+// With this test, the adapter's output is pinned to the historical
+// hardcoded values — any accidental edit to builtin.go (a role-prompt
+// reword, a tool-list reshuffle) fails here instead of silently
+// resetting every spawned subagent's prompt cache.
+func TestBuiltinTemplatesByteIdentical(t *testing.T) {
+	gp, ok := TemplateFor(TypeGeneralPurpose)
+	if !ok || gp.ToolNames != nil || gp.Extra != "" ||
+		gp.Restriction.Pref != nil || gp.Restriction.Workflow != nil {
+		t.Errorf("general-purpose drifted from historical values: %+v", gp)
+	}
+
+	explore, _ := TemplateFor(TypeExplore)
+	wantExploreTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	if !slices.Equal(explore.ToolNames, wantExploreTools) {
+		t.Errorf("explore.ToolNames = %v, want %v", explore.ToolNames, wantExploreTools)
+	}
+	const wantExploreExtra = "You are in research-only mode. You cannot write, edit, or run mutating commands. Return findings as bulleted summary."
+	if explore.Extra != wantExploreExtra {
+		t.Errorf("explore.Extra drifted (prompt-cache reset):\n got %q\nwant %q", explore.Extra, wantExploreExtra)
+	}
+
+	plan, _ := TemplateFor(TypePlan)
+	if !slices.Equal(plan.ToolNames, wantExploreTools) {
+		t.Errorf("plan.ToolNames = %v, want %v (plan shares explore's read-only subset)", plan.ToolNames, wantExploreTools)
+	}
+	const wantPlanExtra = "You are in plan-analyze mode. Investigate the task and return a numbered, structured plan in your final summary — explicit steps the parent (or a human reviewer) can execute. You cannot run mutating tools yourself."
+	if plan.Extra != wantPlanExtra {
+		t.Errorf("plan.Extra drifted (prompt-cache reset):\n got %q\nwant %q", plan.Extra, wantPlanExtra)
+	}
+}
+
+// TestTemplatesMatchBuiltinNames guards the other direction of the
+// adapter: agenttypes.Builtins must declare exactly the three Type
+// constants — no more (an extra builtin would flow into templates
+// without the schema enum noticing), no fewer (IsValid would silently
+// drop a constant).
+func TestTemplatesMatchBuiltinNames(t *testing.T) {
+	want := []string{string(TypeGeneralPurpose), string(TypeExplore), string(TypePlan)}
+	got := make([]string, 0)
+	for _, d := range agenttypes.Builtins() {
+		got = append(got, d.Name)
+	}
+	slices.Sort(want)
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("agenttypes.Builtins names = %v, want exactly %v", got, want)
+	}
+	if len(templates) != len(want) {
+		t.Errorf("templates table has %d entries, want %d", len(templates), len(want))
+	}
+}
 
 func TestTemplateFor_KnownTypes(t *testing.T) {
 	for _, ty := range []Type{TypeGeneralPurpose, TypeExplore, TypePlan} {
