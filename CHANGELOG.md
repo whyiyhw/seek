@@ -34,3 +34,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_wxbdkz：R0 验证门：read_url 与 function tools 共存性实测（feature-deepseek-app-api §2.2，红则①降级不接）
 - c_lxferp：eval 基线趋势：结果 JSONL 汇总脚本——与上一版对比报告
 - c_onl4et：信号：eval-trend 自测未登记 selftest.sh——c_lxferp 验证「未跑成」阻塞放行
+- c_o77s3m：编排 P3-a：hooks 注入面设计——受控注入区与缓存稳定区分离
