@@ -33,3 +33,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_mb5d7p：session/subagent ID 熵扩宽 24→64 位（NewRunID 同款修法，v0.11 CI 实录同因，repo=whyiyhw/seek）
 - c_wxbdkz：R0 验证门：read_url 与 function tools 共存性实测（feature-deepseek-app-api §2.2，红则①降级不接）
 - c_lxferp：eval 基线趋势：结果 JSONL 汇总脚本——与上一版对比报告
+- c_onl4et：信号：eval-trend 自测未登记 selftest.sh——c_lxferp 验证「未跑成」阻塞放行
