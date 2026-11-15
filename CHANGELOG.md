@@ -41,3 +41,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_jqwd72：skill-distill 三期：复发累积（N≥2）与蒸馏质量打点报表
 - c_7xmecm：编排 P2-b：per-type 工具白名单接线——permission 层收紧
 - c_x7ehom：serve web 地址可配置：serve 段 web_addr（解 MVP 硬编码 loopback）
+- c_c4cs4a：web 会话历史·W4.1：POST /rpc JSON-RPC 2.0 envelope + method registry + 错误码

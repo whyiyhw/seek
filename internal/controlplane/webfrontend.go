@@ -15,6 +15,8 @@ package controlplane
 //	GET  /events  SSE downstream: every Send broadcast to all tabs
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	GET  /state   the web conversation's binding, for the status line
+//	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1; registry ships
+//	              empty until the method sets land — see webfrontend_rpc.go)
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -46,6 +48,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/rpc"
 )
 
 //go:embed webfrontend.html
@@ -116,6 +119,10 @@ type WebFrontend struct {
 
 	store *BindingStore
 
+	// rpcReg serves POST /rpc (W4.1). Built empty in NewWeb, registered
+	// into only before Run — the §3.2 phase contract; handlers dispatch.
+	rpcReg *rpc.Registry
+
 	tokenOnce sync.Once
 	token     string
 	tokenErr  error
@@ -166,8 +173,14 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
 	f.store = OpenBindingStoreAt(f.cfg.StorePath)
+	f.rpcReg = rpc.NewRegistry()
 	return f
 }
+
+// RPCRegistry exposes the /rpc method table for pre-Run wiring (the
+// method sets of W4.2/W4.3). Registration after Run races the
+// handlers' Dispatch — the §3.2 contract forbids it.
+func (f *WebFrontend) RPCRegistry() *rpc.Registry { return f.rpcReg }
 
 // Name implements the Frontend port.
 func (f *WebFrontend) Name() string { return "web" }
@@ -225,6 +238,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
 	mux.HandleFunc("/state", f.handleState)
+	mux.HandleFunc("/rpc", f.handleRPC)
 	return mux
 }
 
