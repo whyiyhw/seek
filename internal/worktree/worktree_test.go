@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -623,6 +624,259 @@ func slicesEqualAnyOrder(a, b []string) bool {
 	return true
 }
 
+// --- PruneOrphans (age-based orphan fallback, 2026-11-14 incident) ---
+
+// orphanRef builds a refs/seek/worktrees/<id> name whose ID embeds
+// a creation timestamp `age` in the past (same shape newID emits).
+func orphanRef(age time.Duration) (ref, id string) {
+	id = time.Now().UTC().Add(-age).Format("20060102-150405") + "-abcdef"
+	return "refs/seek/worktrees/" + id, id
+}
+
+// logCapture returns a logf that appends into a builder, plus a
+// contains-assertion helper.
+func logCapture(t *testing.T) (func(string, ...any), *strings.Builder) {
+	t.Helper()
+	var buf strings.Builder
+	return func(format string, args ...any) {
+		fmt.Fprintf(&buf, format+"\n", args...)
+	}, &buf
+}
+
+// TestPruneOrphans_CollectsOverAgeUnmarked: THE incident shape —
+// an unmarked ref from a dead session, past the age threshold,
+// branch fully merged. The full sequence runs: merge-base guard →
+// worktree remove → (no branch on disk) → update-ref -d. Count=1.
+func TestPruneOrphans_CollectsOverAgeUnmarked(t *testing.T) {
+	ref, _ := orphanRef(30 * 24 * time.Hour) // 30 days old, no marker
+	fg := (&fakeGit{}).
+		push(ref+"\n", "", nil).            // for-each-ref
+		push("", "", nil).                  // merge-base --is-ancestor (exit 0)
+		push("", "", nil).                  // worktree remove
+		push("", "", errors.New("exit 1")). // rev-parse -q: no branch
+		push("", "", nil)                   // update-ref -d
+	mgr := newTestManager(t, fg)
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("PruneOrphans count = %d, want 1 (logs:\n%s)", n, logs.String())
+	}
+	// Guard ran BEFORE any destructive call, against HEAD.
+	guard := fg.argsAt(t, 1)
+	if guard[0] != "merge-base" || guard[1] != "--is-ancestor" || guard[len(guard)-1] != "HEAD" {
+		t.Errorf("guard should be `merge-base --is-ancestor <ref> HEAD`, got %v", guard)
+	}
+	if guard[2] != ref {
+		t.Errorf("guard should test the orphan ref %q, got %v", ref, guard)
+	}
+	// Final call deleted the ref itself.
+	last := fg.argsAt(t, 4)
+	if last[0] != "update-ref" || last[1] != "-d" || last[2] != ref {
+		t.Errorf("expected `update-ref -d %s`, got %v", ref, last)
+	}
+}
+
+// TestPruneOrphans_RecentRefKept: a young orphan (1h) is not this
+// pass's business — no guard, no remove, no log spam.
+func TestPruneOrphans_RecentRefKept(t *testing.T) {
+	ref, _ := orphanRef(time.Hour)
+	fg := (&fakeGit{}).push(ref+"\n", "", nil)
+	mgr := newTestManager(t, fg)
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 for recent ref", n)
+	}
+	if got := len(fg.calls); got != 1 {
+		t.Errorf("recent ref should cost exactly 1 git call (enumerate), got %d", got)
+	}
+	if logs.Len() > 0 {
+		t.Errorf("recent ref should not log: %s", logs.String())
+	}
+}
+
+// TestPruneOrphans_ActiveSessionSkipped: an over-age ref whose ID
+// is in this Manager's active map belongs to a live session — age
+// alone must not collect it.
+func TestPruneOrphans_ActiveSessionSkipped(t *testing.T) {
+	ref, id := orphanRef(30 * 24 * time.Hour)
+	fg := (&fakeGit{}).push(ref+"\n", "", nil)
+	mgr := newTestManager(t, fg)
+	mgr.mu.Lock()
+	mgr.active[id] = Worktree{ID: id}
+	mgr.mu.Unlock()
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 for active-session worktree", n)
+	}
+	if got := len(fg.calls); got != 1 {
+		t.Errorf("active ref should cost exactly 1 git call (enumerate), got %d", got)
+	}
+	if logs.Len() > 0 {
+		t.Errorf("active skip should not log: %s", logs.String())
+	}
+}
+
+// TestPruneOrphans_UnmergedSkippedAndLogged: merge-base exit 1
+// (ref NOT an ancestor of HEAD — real work could be lost) skips
+// the orphan entirely and says why.
+func TestPruneOrphans_UnmergedSkippedAndLogged(t *testing.T) {
+	ref, _ := orphanRef(30 * 24 * time.Hour)
+	fg := (&fakeGit{}).
+		push(ref+"\n", "", nil).           // for-each-ref
+		push("", "", errors.New("exit 1")) // merge-base: not ancestor
+	mgr := newTestManager(t, fg)
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 for unmerged ref", n)
+	}
+	if got := len(fg.calls); got != 2 {
+		t.Errorf("unmerged ref must stop after the guard, got %d calls", got)
+	}
+	if !strings.Contains(logs.String(), "unmerged") || !strings.Contains(logs.String(), ref) {
+		t.Errorf("skip log should mention unmerged + the ref; got:\n%s", logs.String())
+	}
+}
+
+// TestPruneOrphans_MalformedRefSkipped: a ref whose ID doesn't
+// carry a parseable timestamp is never aged by guesswork — same
+// defensive posture as parseDiscardedRefTS.
+func TestPruneOrphans_MalformedRefSkipped(t *testing.T) {
+	fg := (&fakeGit{}).push("refs/seek/worktrees/not-an-id\n", "", nil)
+	mgr := newTestManager(t, fg)
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 for malformed ref", n)
+	}
+	if !strings.Contains(logs.String(), "unparseable") {
+		t.Errorf("malformed skip should be logged; got:\n%s", logs.String())
+	}
+}
+
+// TestPruneOrphans_RemoveRefusedWithDirSkips: `git worktree
+// remove` (no --force) refuses a dirty/locked tree. With the
+// directory still on disk the whole entry is skipped — no branch
+// deletion, no ref deletion, reason logged.
+func TestPruneOrphans_RemoveRefusedWithDirSkips(t *testing.T) {
+	ref, id := orphanRef(30 * 24 * time.Hour)
+	fg := (&fakeGit{}).
+		push(ref+"\n", "", nil).                                                          // for-each-ref
+		push("", "", nil).                                                                // merge-base ok
+		push("", "fatal: ... contains modified or untracked files", errors.New("exit 1")) // remove refused
+	mgr := newTestManager(t, fg)
+	// The worktree dir still exists → remove refusal is real, not
+	// stale metadata.
+	dir := filepath.Join(mgr.homeProjectDir, "worktrees", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("count = %d, want 0 when remove is refused", n)
+	}
+	for _, args := range fg.calls {
+		if args[0] == "update-ref" {
+			t.Errorf("ref must survive a refused remove; saw %v", args)
+		}
+	}
+	if !strings.Contains(logs.String(), "refused") {
+		t.Errorf("refusal should be logged; got:\n%s", logs.String())
+	}
+}
+
+// TestPruneOrphans_DirGoneStillCollects: remove fails but the
+// directory no longer exists (manual cleanup leftovers) — stale
+// metadata only; the ref/branch still get collected.
+func TestPruneOrphans_DirGoneStillCollects(t *testing.T) {
+	ref, _ := orphanRef(30 * 24 * time.Hour)
+	fg := (&fakeGit{}).
+		push(ref+"\n", "", nil).                                       // for-each-ref
+		push("", "", nil).                                             // merge-base ok
+		push("", "fatal: not a working tree", errors.New("exit 128")). // remove: dir gone
+		push("", "", errors.New("exit 1")).                            // rev-parse -q: no branch
+		push("", "", nil)                                              // update-ref -d
+	mgr := newTestManager(t, fg)
+	logf, logs := logCapture(t)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("count = %d, want 1 (dir gone, ref collectable); logs:\n%s", n, logs.String())
+	}
+}
+
+// TestPruneOrphans_DeletesBranchWhenPresent: the auto-generated
+// seek/wt/<id> branch is verified then deleted (best-effort,
+// after the worktree remove so git doesn't refuse a checked-out
+// branch).
+func TestPruneOrphans_DeletesBranchWhenPresent(t *testing.T) {
+	ref, id := orphanRef(30 * 24 * time.Hour)
+	fg := (&fakeGit{}).
+		push(ref+"\n", "", nil).   // for-each-ref
+		push("", "", nil).         // merge-base ok
+		push("", "", nil).         // worktree remove
+		push("abc123\n", "", nil). // rev-parse --verify: branch exists
+		push("", "", nil).         // branch -D
+		push("", "", nil)          // update-ref -d
+	mgr := newTestManager(t, fg)
+
+	n, err := mgr.PruneOrphans(context.Background(), 7*24*time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("count = %d, want 1", n)
+	}
+	branchCall := fg.argsAt(t, 4)
+	if branchCall[0] != "branch" || branchCall[1] != "-D" || branchCall[2] != "seek/wt/"+id {
+		t.Errorf("expected `branch -D seek/wt/%s`, got %v", id, branchCall)
+	}
+	// Branch deletion must come after worktree remove (checked-out
+	// branches refuse deletion).
+	removeIdx, branchIdx := -1, -1
+	for i, args := range fg.calls {
+		if args[0] == "worktree" {
+			removeIdx = i
+		}
+		if args[0] == "branch" {
+			branchIdx = i
+		}
+	}
+	if removeIdx < 0 || branchIdx < 0 || branchIdx < removeIdx {
+		t.Errorf("branch -D must follow worktree remove; remove=%d branch=%d", removeIdx, branchIdx)
+	}
+}
+
 // TestNewManager_NilSafe: methods on nil Manager return clear
 // errors rather than panic. Important because cmd/seek constructs
 // the Manager conditionally (only in git repos) and downstream
@@ -640,6 +894,9 @@ func TestNewManager_NilSafe(t *testing.T) {
 	}
 	if _, err := m.PruneDiscarded(context.Background(), time.Hour); err == nil {
 		t.Error("nil Manager PruneDiscarded should error")
+	}
+	if _, err := m.PruneOrphans(context.Background(), time.Hour, nil); err == nil {
+		t.Error("nil Manager PruneOrphans should error")
 	}
 	// MapToProject and List degrade silently rather than error —
 	// they're called from hot paths (every hook check / every
