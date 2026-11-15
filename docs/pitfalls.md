@@ -1676,3 +1676,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `resolveTypedDef` (manager.go) applies the degrade only for `OriginProject`/`OriginUser`; builtin + config clones keep Filter's intersect. `TestSpawn_ConfigOverrideRoutesBuiltin` pins it with a webfetch-less parent registry.
 - **Lesson**: "route everything through one gate" migrations must diff the SEMANTICS of each old path, not just the code shape — where old paths differed, the shared gate needs origin-aware (or equivalent) rules.
 - **Refs**: `internal/subagent/manager.go` `resolveTypedDef`; `docs/prd/feature-orchestration.md` §5 D13.
+
+## Git / merge
+
+### Merge commits shipped with leftover conflict markers (twice)
+- **Saw**: `920f9e1` (merge main into `drive/c_u4ugnu`) landed `docs/prd/feature-orchestration.md` with `<<<<<<< HEAD` / `=======` / `>>>>>>> main` still inside the PRD 状态行 — second bite of the class (first: CHANGELOG during the `c_zam44t` merge, cleaned in-passing without a pitfall entry). Both share a shape: the conflict lives inside ONE very long line (PRD 状态行 / CHANGELOG entry), so it never reads as a visible "pick a side" block and gets committed half-resolved.
+- **Why**: git commits conflict markers without complaint, and manual per-file review was the only gate — which has now failed twice on exactly this long-single-line shape.
+- **Fix**: ritual after resolving any merge, BEFORE `git commit`: `git grep -n '^<<<<<<< \|^>>>>>>> '` and `git diff --cached --check` (flags "leftover conflict marker" on added lines). Post-hoc audit of an already-made merge: `git diff --check <merge>^1 <merge>` — NOT `git show --check <merge>` (its `--cc` condensed diff suppresses these hunks; verified on `920f9e1`: `show --check` silent, diff-vs-either-parent flags all three marker lines). Cleanup itself: card `c_zxeqih`.
+- **Lesson**: merges touching docs with long single-line status fields get a mechanical marker-grep before commit — two bites is a pattern, not bad luck.
+- **Refs**: `docs/prd/feature-orchestration.md` 状态行; `920f9e1`, `e8eface` (first manual cleanup, same file).
