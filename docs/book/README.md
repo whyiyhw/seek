@@ -165,6 +165,7 @@
 - 14.8 Provider 选择：标志 + env 自动探测
 - 14.9 TUI Provider banner：能力降级的可视化
 - 14.10 一个测试观察：每个 provider 都有 6-7 个 buildRequest 测试
+- 14.11 GLM 订阅车道与 token 三车道（v0.11 增补）——真值/量/兜底三姿态；缓存字段第一次进 `pkg/llm`；路由长在 spawn 边界
 
 **[第 15 章：M7 与 v1.0 发布](chapter-15.md)**
 - 15.1 JSON 输出模式：让脚本能用 seek
@@ -222,6 +223,7 @@
 - 17.8 CLI / TUI 子命令族
 - 17.9 模型驱动的 skill 安装: `skill_fetch` / `skill_commit` 工具
 - 17.10 一个观察:可观测性是 v0 到 v1 的换挡
+- 17.11 Skill 自动蒸馏:四层漏斗与人审闸(v0.11 增补)——`.drafts/` 草稿区、N≥2 复发累积、自动路径永不 install
 
 **[第 18 章：Plan Mode 与交互工具](chapter-18.md)** *(v0.3.x–v0.4.x)*
 - 18.1 从"单向 toggle"到"分析→提案→执行→报告"闭环
@@ -302,6 +304,7 @@
 - 24.4 柱 P：ACP 编辑器集成（适配层，非新 agent）
 - 24.5 柱 Q：离线图片 OCR（go:embed Swift → 首次编译缓存）
 - 24.6 一个观察：如何在"已追上"的市场保持领先
+- 24.7 增补（v0.11）：远程控制平面——Frontend 端口与执行器（收/发分离的端口、`seek -p --json` 子进程执行器、对零-daemon 铁律的隔离偏离）
 
 ---
 
