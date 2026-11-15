@@ -159,6 +159,8 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 
 #### D6 — 配置面（P1 最小形态：内置三 type 的 override）
 
+> **交付勘误（2026-11-14）**：本节为设计稿原文。P1 实际交付未做 config `agents` 段，改为 `agent` 工具的 per-spawn `provider`/`model` 参数（见文首状态行）；config 段去留见 D14 修订。下文按原稿保留。
+
 `~/.seek/config.json` 新增 `agents` 段（user 级先行；project 级 scope 随 P2 的 agents/ 目录一起开，见 D14）：
 
 ```json
@@ -247,7 +249,7 @@ You are a test verifier subagent. …（body = 角色 prompt，替换内置模�
 摘要长度提示与 AGENTS.md/M-index/skill manifest 继承段仍由 ComposeSubagent 拼装，§3.6.1 不变）
 ```
 
-内置三 type 保留为编译期默认（无任何文件时行为与 v0.6.0 完全一致）；文件可覆盖内置名（`explore.md` 覆盖内置 explore——P1 的 config `agents` 段继续有效但优先级最低：**内置默认 < config 段 < agents/*.md**）。
+内置三 type 保留为编译期默认（无任何文件时行为与 v0.6.0 完全一致）；文件可覆盖内置名（`explore.md` 覆盖内置 explore）。设计稿原排布「内置默认 < config 段 < agents/*.md」中的 config `agents` 段**实际未随 P1 落地**（P1 交付时改成了 per-spawn `provider`/`model` 参数形态，见状态行）——P2-a 落地的实际栈为 **project agents/*.md > user ~/.seek/agents/*.md > builtin**；config 段若将来补上（M-O2.3 或后续），再插回 builtin 之上一层。
 
 #### D12 — schema 张力：enum 动态化的字节纪律
 
@@ -266,7 +268,7 @@ You are a test verifier subagent. …（body = 角色 prompt，替换内置模�
 
 #### D14 — 与 P1 config 段的关系
 
-P1 的 config `agents` 段是内置 type 的最小 override（不动文件系统）；P2 的 agents/*.md 是全形态（自定义 type + 工具集 + prompt）。两层并存、优先级见 D11；文档引导用户最终形态写 agents/*.md，config 段定位为"只换模型不改行为"的快捷键。
+设计稿原设想 P1 交付一个 config `agents` 段（内置 type 的最小 override，不动文件系统）与 P2 的 agents/*.md（全形态：自定义 type + 工具集 + prompt）两层并存。**实际交付记录**：P1 落地时换成了 per-spawn `provider`/`model` 参数形态（状态行），config `agents` 段未实现——P2-a 交付面因此只有 project/user/builtin 三层栈（D11 修订）。"只换模型不改行为"的需求现由 per-spawn 参数承接；config 段若仍有价值（免每次传参的默认路由），留给 M-O2.3 或后续版本再议，届时插在 builtin 与文件层之间。
 
 ### P2 验收（沙盒可验证）
 
@@ -274,7 +276,7 @@ P1 的 config `agents` 段是内置 type 的最小 override（不动文件系统
 |---|---|---|
 | 1 | project `.seek/agents/verifier.md` 定义后，`subagent_type` enum 含 `verifier`；同配置两次启动 schema 字节一致 | 单元测试（临时目录 + schema hash） |
 | 2 | spawn `verifier` 子的 Policy/workflow/tools/provider 与 frontmatter 声明一致；`plan-execute` 声明被拒 | 表驱动单元测试（覆盖全部非法形状） |
-| 3 | 同名覆盖：project `explore.md` > user `explore.md` > config 段 > 内置 | 单元测试（scope 栈） |
+| 3 | 同名覆盖：project `explore.md` > user `explore.md` > 内置（设计稿原含 config 段层，该段未随 P1 落地，见 D11/D14 修订） | 单元测试（scope 栈） |
 | 4 | `~/.seek/agents/` 写路径仅 agentsmgr（loader 只读；grep 审计无越界写者） | 代码审查 + 单元测试（loader 无写 API） |
 | 5 | 无任何 agents 文件 + 空 config 时，行为与 v0.6.0 字节同路径（内置三 type 回归） | 柱 G 现有测试零回归 |
 | 6 | body 缺失/空 → 配置错误警告 + 拒绝注册（角色 prompt 是必要字段） | 单元测试 |

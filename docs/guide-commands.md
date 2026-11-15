@@ -32,7 +32,7 @@ All slash commands, key bindings, and CLI flags.
 | `/redo` | `/redo [path]` | Redo a previously undone write or edit |
 | `/restore` | `/restore [turn]` | Restore entire working tree from a git checkpoint |
 | `/goal` | `/goal [<condition> \| clear]` | Work autonomously until a condition is met. No args shows status; `clear` stops |
-| `/agents` | | List subagents for this project (spawn time, type, status, turns, tokens, description) |
+| `/agents` | `/agents [--all\|types]` | List subagents for this project (spawn time, type, status, turns, tokens, description); `types` lists defined agent types (built-in + `.seek/agents`) |
 | `/worktrees` | | List seek-managed git worktrees (id, branch, path) |
 | `/diagnose` | | Print a diagnostic report (version, OS, provider, config, session metadata) |
 | `/keys` | | Show the active keymap (incl. any ~/.seek/keybindings.toml overrides) |
