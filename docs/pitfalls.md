@@ -515,7 +515,7 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: undocumented server-side validation — the docs only forbid mixing *server* tools with each other; the client-tool interaction is enforced (off) or silently disables the server tool (on) with zero error surface.
 - **Fix**: no code — read_url path judged red and closed (PRD §2.2, R1–R4 archived). If ever revisited: probe coexistence with an unknowable-content URL, never trust HTTP 200 alone.
 - **Lesson**: a "green" status code is not a green light — a mixed-declaration request can succeed while the capability is quietly gone. Probe with content the model cannot know, and read the model's own tool inventory in its answer. (Bonus facts from the same run: `usage.server_tool_use` key is absent when all counters are zero; multi-turn round-trip of `server_tool_calls`+`signature` prevents re-fetch & re-billing, dropping it re-fetches; server-side page cache exists but cached re-fetches are still billed.)
-- **Refs**: `docs/prd/feature-deepseek-app-api.md` §2.2 (full 9-call evidence table), api-docs.deepseek.com/guides/web_tools
+- **Refs**: `docs/prd/feature-deepseek-app-api.md` §2.2 (full 10-call evidence table), api-docs.deepseek.com/guides/web_tools
 
 ### `reasoning_content` rule for V4 thinking is the OPPOSITE of the old reasoner — conditional on tool_calls
 - **Saw**: a multi-turn V4 thinking-mode session with a tool_call in turn 1 hit a 400 on turn 2: `The 'reasoning_content' in the thinking mode must be passed back to the API`. We had `pkg/deepseek.StripReasoningContent` unconditionally clearing the field on every assistant message — exactly the wrong shape for V4
