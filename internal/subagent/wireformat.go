@@ -118,3 +118,64 @@ func FormatFailed(subSid string, reason string, hint string) string {
 	sb.WriteString(shortSid(subSid))
 	return sb.String()
 }
+
+// ----- background wire formats (feature-orchestration PRD §4.1 D1/D2) -----
+//
+// Prefix contract for run_in_background spawns: the immediate tool
+// result is `[agent: background started sub-sid=<full>]` and the
+// terminal notice (delivered as a <context> Prepend on a later turn)
+// is `[agent: background done sub-sid=<full>]` or
+// `[agent: background failed reason=<X>]`. Background failure reuses
+// the `reason=` closed enum of the sync path (canceled / timeout /
+// spawn_error / killed). Additions go AFTER the closing bracket —
+// never inside it (wire-format discipline, same as `[plan: approved]`).
+
+// FormatBackgroundStarted builds the immediate tool-result string the
+// `agent` tool returns for run_in_background=true. The parent turn
+// gets this back right away and keeps working; the final summary
+// arrives separately as a <context> notification on a later turn.
+func FormatBackgroundStarted(subSid string, description string) string {
+	var sb strings.Builder
+	sb.WriteString("[agent: background started sub-sid=")
+	sb.WriteString(subSid)
+	sb.WriteString("] ")
+	sb.WriteString(description)
+	sb.WriteString("\n\n— runner active; final summary will arrive as a <context> note on a later turn (or on resume). Track via /agents.")
+	return sb.String()
+}
+
+// FormatBackgroundDone builds the terminal notice body for a
+// background subagent that completed successfully. Same layout as
+// FormatCompleted but under the `[agent: background done ...]` prefix
+// so transcript-side parsers can tell "I already have this result"
+// (background notice) from "this was my blocking tool result"
+// (completed).
+func FormatBackgroundDone(subSid string, summary string, turns int, tokens Tokens) string {
+	var sb strings.Builder
+	sb.WriteString("[agent: background done sub-sid=")
+	sb.WriteString(subSid)
+	sb.WriteString("] ")
+	sb.WriteString(headline(summary))
+	sb.WriteString("\n\n")
+	sb.WriteString(truncateSummary(summary))
+	sb.WriteString("\n\n— sub-sid: ")
+	sb.WriteString(shortSid(subSid))
+	fmt.Fprintf(&sb, " · turns: %d · tokens: %d", turns, tokens.Prompt+tokens.Completion)
+	return sb.String()
+}
+
+// FormatBackgroundFailed is FormatFailed's background counterpart —
+// same closed reason enum, background prefix so parsers (and the
+// model reading its own transcript on resume) can distinguish the
+// async delivery channel from the sync tool result.
+func FormatBackgroundFailed(subSid string, reason string, hint string) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "[agent: background failed reason=%s]", reason)
+	if hint != "" {
+		sb.WriteByte(' ')
+		sb.WriteString(hint)
+	}
+	sb.WriteString("\n\n— sub-sid: ")
+	sb.WriteString(shortSid(subSid))
+	return sb.String()
+}

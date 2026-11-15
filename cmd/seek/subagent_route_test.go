@@ -115,7 +115,7 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 	runner := buildSubagentRunner(subagentRunnerOpts{
 		client:    deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(dsLane.srv.URL)),
 		parentReg: parentReg,
-		hooksReg:  hooks.NewRegistry(),
+		hooksFn:   func() *hooks.Registry { return hooks.NewRegistry() },
 		getModel:  func() string { return deepseek.ModelV41Flash },
 		getEffort: func() string { return "" },
 		routes: map[string]subagentRoute{
@@ -207,7 +207,7 @@ func TestBuildSubagentRunner_RouteWithoutKeyFails(t *testing.T) {
 	runner := buildSubagentRunner(subagentRunnerOpts{
 		client:    deepseek.New(deepseek.WithAPIKey("test")),
 		parentReg: tools.New(),
-		hooksReg:  hooks.NewRegistry(),
+		hooksFn:   func() *hooks.Registry { return hooks.NewRegistry() },
 		getModel:  func() string { return deepseek.ModelV41Flash },
 		getEffort: func() string { return "" },
 		routes:    nil, // no GLM key configured
