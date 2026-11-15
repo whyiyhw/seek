@@ -122,6 +122,15 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: on this codebase, "register a hook" is a broadcast to every agent sharing the registry — parent-session-scoped hooks need explicit exclusion at the child boundary, and the exclusion must be lazy (closure) when the parent registry keeps growing after the children's factory is built. Any future parent-only PrePrompt hook (resume revival, controlplane inbox) rides the same `CloneWithout` seam.
 - **Refs**: `internal/hooks/registry.go:CloneWithout`, `internal/subagent/notifier.go`, `cmd/seek/main.go` (`subagentRunnerOpts.hooksFn`), `docs/prd/feature-orchestration.md` §4.1 D2
 
+## Skill distill (auto path)
+
+### Same session re-entering the distill window double-counted recurrence
+- **Saw**: 巡检卡 c_jqwd72 确认的二期遗留：`StrengthenDraft` counted every merge call unconditionally — a session re-entering the window (mtime touched after the watermark: state reset, overlapping runs) pushed a single-session draft to recurrence 2 → "reviewable", defeating the two-independent-sessions gate. Fix card c_jdwywj.
+- **Why**: the auto-distill window is mtime-based (`prev < UpdatedAt ≤ watermark`, `internal/skilldistill/auto.go:runBatch`). The watermark is the ONLY thing keeping a distilled session out of later batches, and it's a resettable state file — nothing downstream was idempotent.
+- **Fix**: SessionID dedup inside `StrengthenDraft` (the merge choke point — covers mergeDraft's match path AND the write-race fallback): a `src` whose SessionID is already in `sources` is a full no-op — no count, no source/evidence/trace append, no UpdatedAt bump (GC ages on real evidence growth). Empty SessionID never dedups.
+- **Lesson**: window/watermark logic gives at-most-once BATCHING, not at-most-once COUNTING. Any recurrence-style accumulator keyed on "independent sessions" must dedup on session identity at the write that increments it — the watermark is a defense layer, not an invariant.
+- **Refs**: `internal/skillmgr/draft.go:StrengthenDraft`, `internal/skilldistill/auto_test.go:TestAutoPath_SameSessionReentryNoRecount`, `docs/prd/feature-skill-distill.md` §4
+
 ## TUI / terminal
 
 ### A light palette derived by darkening a dark palette stops the "muted" role from receding

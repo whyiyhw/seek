@@ -366,6 +366,15 @@ func (s *DraftStore) ReadDraft(name string) (*DraftDetail, error) {
 // NOT touched — first write wins for the body; recurrence is
 // provenance, not content.
 //
+// Same-session dedup: recurrence counts SESSIONS, not observations.
+// If src.SessionID is already in sources, the same session has
+// re-entered the distill window (the mtime-based window admits a
+// touched session again once the watermark is reset or missed) — the
+// strengthen is a full no-op: no count, no source/evidence/trace
+// append, no UpdatedAt bump (GC ages on real evidence growth, and a
+// re-observed session is none). An empty SessionID never dedups —
+// unknown sessions must not collapse into one.
+//
 // Promotions that ride along:
 //   - recurrence ≥ 2 → status "reviewable" (the draft surfaces in the
 //     ListDrafts inbox — two independent sessions are the evidence a
@@ -394,6 +403,16 @@ func (s *DraftStore) StrengthenDraft(name string, src DraftSource, extraEvidence
 	var side DraftSidecar
 	if err := json.Unmarshal(data, &side); err != nil {
 		return nil, fmt.Errorf("skillmgr: strengthen %q: parse sidecar: %w", name, err)
+	}
+
+	// Same session again → not independent evidence; see the doc
+	// comment. Return the sidecar untouched (no rewrite).
+	if src.SessionID != "" {
+		for _, s := range side.Sources {
+			if s.SessionID == src.SessionID {
+				return &side, nil
+			}
+		}
 	}
 
 	side.Recurrence++
