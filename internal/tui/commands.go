@@ -103,7 +103,7 @@ func allCommands() []command {
 		// v5 柱 G subagent surface (PRD docs/prd/feature-subagent.md §4.2).
 		// M11.0 ships a read-only text table; interactive picker
 		// (Enter for detail / `k` to kill) lands in a v0.6.x dot.
-		{names: []string{"/agents"}, usage: "/agents", description: "List subagents in this project: spawn time, type, status, turns, tokens, description. Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
+		{names: []string{"/agents"}, usage: "/agents [--all|types]", description: "List subagents in this project: spawn time, type, status, turns, tokens, description. `types` lists defined agent types (built-in + .seek/agents). Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
 		// v5 柱 G M11.1 worktree surface (feature-subagent.md §3.8 + §4.2).
 		// Read-only listing; create/cleanup go through the
 		// enter/exit_worktree tools or `seek worktree gc` CLI.
@@ -390,13 +390,17 @@ func knownModelsForProvider(providerName string) []modelChoice {
 	case "", "deepseek":
 		// The retired deepseek-chat / deepseek-reasoner aliases were
 		// removed server-side on 2026-07-24; V4.1 Flash (2026-09-10)
-		// then absorbed the whole V4 lineup — the server routes the old
-		// ids (deepseek-v4-flash, deepseek-v4-flash-vision-exp, and
-		// deepseek-v4-pro after 2026-09-14) to V4.1 Flash and bills
-		// them at Flash prices. Rows for routed ids would mislead
-		// ("you're buying Pro") exactly the way the old reasoner row
-		// did, so the picker surfaces only the real target; freeform
-		// `/model <id>` still accepts any string.
+		// absorbed the legacy flash ids — the server routes
+		// deepseek-v4-flash and deepseek-v4-flash-vision-exp to
+		// V4.1 Flash and bills them at Flash prices. Rows for routed
+		// ids would mislead exactly the way the old reasoner row did,
+		// so the picker surfaces only the real target.
+		// deepseek-v4-pro is NOT in that routed set since 2026-11:
+		// it is its own model again (DeepSeek-V4-Pro-0813) with its
+		// own pricing card in internal/pricing (see ModelV4Pro);
+		// freeform `/model deepseek-v4-pro` works and bills at its
+		// own rates. Whether the picker should surface a Pro row is
+		// a separate UX call, not a routing fact.
 		//
 		// Description kept short deliberately: the picker row must
 		// fit a ~100-col terminal even with the " (current)" suffix
@@ -2174,23 +2178,30 @@ func truncateForCheckpoint(s string, n int) string {
 // worktree work — by then there'll be more state worth navigating.
 
 func cmdAgents(m *Model, args string) cmdResult {
-	if m.opts.Subagents == nil {
-		return cmdResult{text: styleMuted.Render("/agents: unavailable (--no-save or session not initialised)")}
-	}
-
 	// Arg parsing. --all (or -a) widens the filter to the whole
 	// project; default scope is the current session only (PRD §4.2
 	// "当前 session 已 spawn 的子"). subagents.jsonl is project-
 	// scoped on disk and accumulates across sessions, so an
 	// unfiltered dump grows unbounded over a project's lifetime.
+	// `types` (P2-a) switches to the agent-type registry view — kept
+	// as a sub-view of /agents because types and spawns are two
+	// angles on the same feature surface. Dispatch happens BEFORE the
+	// Subagents nil-gate: the registry is loaded independently of the
+	// spawn Manager (it exists even in --no-save sessions).
 	showAll := false
 	for tok := range strings.FieldsSeq(args) {
 		switch tok {
 		case "--all", "-a":
 			showAll = true
+		case "types":
+			return cmdAgentTypes(m)
 		default:
-			return cmdResult{text: styleErr.Render("/agents: unknown arg " + tok + " (only --all / -a)")}
+			return cmdResult{text: styleErr.Render("/agents: unknown arg " + tok + " (only --all / -a / types)")}
 		}
+	}
+
+	if m.opts.Subagents == nil {
+		return cmdResult{text: styleMuted.Render("/agents: unavailable (--no-save or session not initialised)")}
 	}
 
 	// Resolve the current session ID for the default filter. If
@@ -2212,16 +2223,16 @@ func cmdAgents(m *Model, args string) cmdResult {
 	}
 	if len(subs) == 0 {
 		if showAll || currentSid == "" {
-			return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
+			return cmdResult{text: agentTypesHint(m, styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool"))}
 		}
 		// Empty in current session — check if there's project-wide
 		// history so the hint can point at --all rather than just
 		// saying "spawn one".
 		all, _ := m.opts.Subagents.List(subagent.ListFilter{})
 		if len(all) > 0 {
-			return cmdResult{text: styleMuted.Render(fmt.Sprintf("no subagents in this session yet — pass `--all` to see %d from prior sessions in this project", len(all)))}
+			return cmdResult{text: agentTypesHint(m, styleMuted.Render(fmt.Sprintf("no subagents in this session yet — pass `--all` to see %d from prior sessions in this project", len(all))))}
 		}
-		return cmdResult{text: styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool")}
+		return cmdResult{text: agentTypesHint(m, styleMuted.Render("no subagents in this project yet — the model spawns them via the `agent` tool"))}
 	}
 
 	// Column order matches PRD §4.2 — description goes right after
@@ -2264,6 +2275,63 @@ func cmdAgents(m *Model, args string) cmdResult {
 			truncateForCheckpoint(string(s.Status), 10),
 			truncateForCheckpoint(s.Description, 50),
 			tokens)
+	}
+	return cmdResult{text: agentTypesHint(m, strings.TrimRight(b.String(), "\n"))}
+}
+
+// agentTypesHint appends the custom-types pointer line to a default
+// /agents view — but ONLY when custom (non-builtin) types exist. With
+// no agents directories the default view is byte-identical to the
+// pre-P2-a output (feature-orchestration P2-a acceptance #3).
+func agentTypesHint(m *Model, base string) string {
+	if m.opts.AgentTypes == nil || m.opts.AgentTypes.CustomCount() == 0 {
+		return base
+	}
+	return base + "\n" + styleMuted.Render(fmt.Sprintf(
+		"%d custom agent type(s) defined — /agents types to list them",
+		m.opts.AgentTypes.CustomCount()))
+}
+
+// cmdAgentTypes renders the typed-agent registry: every type the
+// session knows, project-defined first (insertion order), then user,
+// then the three built-ins (feature-orchestration.md P2-a / D10-D12).
+// Human-facing counterpart of what M-O2.2 will inject into the
+// `agent` tool schema enum.
+func cmdAgentTypes(m *Model) cmdResult {
+	if m.opts.AgentTypes == nil {
+		return cmdResult{text: styleMuted.Render("/agents types: unavailable (--no-save or session not initialised)")}
+	}
+	defs := m.opts.AgentTypes.List()
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("%d agent type(s) defined (project > user > builtin on name collision)", len(defs))))
+	fmt.Fprintf(&b, "%-18s %-8s %-22s %s\n", "TYPE", "ORIGIN", "LANE", "DESCRIPTION")
+	for _, d := range defs {
+		lane := "inherit"
+		switch {
+		case d.Provider != "" && d.Model != "":
+			lane = d.Provider + "/" + d.Model
+		case d.Provider != "":
+			lane = d.Provider
+		case d.Model != "":
+			lane = d.Model
+		}
+		if d.Effort != "" {
+			lane += " effort=" + d.Effort
+		}
+		fmt.Fprintf(&b, "%-18s %-8s %-22s %s\n",
+			truncateForCheckpoint(d.Name, 18),
+			truncateForCheckpoint(d.Origin.String(), 8),
+			truncateForCheckpoint(lane, 22),
+			truncateForCheckpoint(d.Description, 60))
+	}
+	// Overridden names get a provenance footer so a shadowed
+	// definition (project explore.md over the built-in explore) is
+	// visible rather than a mystery.
+	for _, d := range defs {
+		if sh := m.opts.AgentTypes.Shadowed(d.Name); len(sh) > 0 {
+			fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf(
+				"%s overrides: %s", d.Name, strings.Join(sh, ", "))))
+		}
 	}
 	return cmdResult{text: strings.TrimRight(b.String(), "\n")}
 }

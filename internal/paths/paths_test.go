@@ -63,6 +63,7 @@ func TestSubdirs_ComposeUnderHome(t *testing.T) {
 		{"ServeDir", ServeDir, filepath.Join(override, "serve")},
 		{"MCPConfig", MCPConfig, filepath.Join(override, "mcp.json")},
 		{"UserSkills", UserSkills, filepath.Join(override, "skills")},
+		{"UserAgents", UserAgents, filepath.Join(override, "agents")},
 		{"UserHooksToml", UserHooksToml, filepath.Join(override, "hooks.toml")},
 		{"TrustedProjectsJSON", TrustedProjectsJSON, filepath.Join(override, "trusted-projects.json")},
 		{"HooksAuditLog", HooksAuditLog, filepath.Join(override, "hooks-audit.jsonl")},

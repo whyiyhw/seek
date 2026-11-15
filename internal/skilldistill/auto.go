@@ -16,6 +16,10 @@
 //     (PRD §3.1 D);
 //   - per-project state (dream's is global because dreaming is
 //     cross-project; distillation batches are per-project);
+//   - funnel telemetry (三期, card c_jqwd72): every layer's verdict is
+//     a staged row in .stats.jsonl — an unattended pipeline that
+//     can't show where its candidates die is a pipeline nobody can
+//     tune (report: `seek skill stats --distill`);
 //   - IRON RULE, pinned by tests: this path has no install capability.
 //     Its only writes under ~/.seek/skills/ go through
 //     skillmgr.DraftStore (drafts area) and skillstats (telemetry
@@ -324,8 +328,10 @@ func (h *AutoHook) runBatch(ctx context.Context, prev, watermark time.Time) {
 		}
 		gate := MechanicalGate(msgs)
 		if !gate.Pass {
+			h.statStage(StageL0, VerdictDrop, "", r.ID)
 			continue
 		}
+		h.statStage(StageL0, VerdictPass, "", r.ID)
 		queue = append(queue, batchItem{ref: r, messages: msgs, boosted: gate.Boost})
 	}
 	stableSortQueue(queue)
@@ -339,9 +345,17 @@ func (h *AutoHook) runBatch(ctx context.Context, prev, watermark time.Time) {
 	// priority groups so recurrence accumulation watches the pattern
 	// emerge in order.
 	for _, item := range queue {
-		kept, err := h.extractOne(bctx, item, manifest)
+		kept, rejected, err := h.extractOne(bctx, item, manifest)
 		if err != nil {
-			continue // malformed reasoner output etc: silent log-and-skip (PRD §8 #12)
+			// Malformed reasoner output etc: silent log-and-skip for the
+			// pipeline (PRD §8 #12), but the funnel report still sees it
+			// — an unattended path whose failures are invisible is a
+			// path nobody can trust.
+			h.statStage(StageL1, VerdictError, "", item.ref.ID)
+			continue
+		}
+		for _, rej := range rejected {
+			h.statStage(rej.Stage, VerdictReject, rej.Name, item.ref.ID)
 		}
 		for _, cand := range kept {
 			h.distillCandidate(bctx, cand, item.ref, manifest)
@@ -349,14 +363,35 @@ func (h *AutoHook) runBatch(ctx context.Context, prev, watermark time.Time) {
 	}
 }
 
+// Funnel-stage names for telemetry rows (card c_jqwd72). shape/evidence/
+// L2 ride on Rejection.Stage from Extract; the rest are observed here.
+// StageL1 additionally marks a whole extraction call that failed.
+const (
+	StageL0 = "L0"
+	StageL1 = "L1"
+	StageL3 = "L3"
+	StageL4 = "L4"
+)
+
+// Funnel-verdict names for telemetry rows.
+const (
+	VerdictPass       = "PASS"
+	VerdictDrop       = "DROP"
+	VerdictReject     = "REJECT"
+	VerdictAccept     = "ACCEPT"
+	VerdictError      = "ERROR"
+	VerdictDraft      = "DRAFT"      // L4: a new weak draft was written
+	VerdictStrengthen = "STRENGTHEN" // L4: an existing draft's recurrence++
+)
+
 // extractOne is the per-session reasoner call (L1 prompt-internal
 // dedup + evidence verification + L2 mechanical dedup all live inside
-// Distiller.Extract — same funnel as the manual path).
-func (h *AutoHook) extractOne(ctx context.Context, item batchItem, manifest string) ([]SkillCandidate, error) {
+// Distiller.Extract — same funnel as the manual path). The rejected
+// list flows out so the funnel report can count per-stage drops.
+func (h *AutoHook) extractOne(ctx context.Context, item batchItem, manifest string) ([]SkillCandidate, []Rejection, error) {
 	ctx, cancel := context.WithTimeout(ctx, extractCallTimeout)
 	defer cancel()
-	kept, _, err := h.Distiller.Extract(ctx, item.messages, manifest, h.MIndex, h.Skills)
-	return kept, err
+	return h.Distiller.Extract(ctx, item.messages, manifest, h.MIndex, h.Skills)
 }
 
 // distillCandidate runs L3 (mandatory on the auto path — no human in
@@ -368,13 +403,19 @@ func (h *AutoHook) distillCandidate(ctx context.Context, cand SkillCandidate, re
 
 	greyBodies := h.greyBodies(cand)
 	res, _, err := h.Distiller.Filter(ctx, cand, manifest, h.MIndex, greyBodies)
-	if err != nil || res != FilterAccept {
+	if err != nil {
 		// A filter the auto path can't run is a filter that didn't
 		// pass: reject conservatively ("宁可漏过，不可放过"). The
 		// watermark has already moved, so this candidate is gone —
 		// acceptable for an unattended, human-gated pipeline.
+		h.statStage(StageL3, VerdictError, cand.Name, ref.ID)
 		return
 	}
+	if res != FilterAccept {
+		h.statStage(StageL3, VerdictReject, cand.Name, ref.ID)
+		return
+	}
+	h.statStage(StageL3, VerdictAccept, cand.Name, ref.ID)
 
 	trace := []skillmgr.FilterTraceEntry{{
 		Stage:   "L3",
@@ -393,10 +434,15 @@ func (h *AutoHook) distillCandidate(ctx context.Context, cand SkillCandidate, re
 		ProjectID: h.ProjectID,
 		At:        h.now().UTC().Format(time.RFC3339),
 	}
-	if err := h.mergeDraft(cand, src, trace); err != nil {
+	strengthened, err := h.mergeDraft(cand, src, trace)
+	if err != nil {
 		return
 	}
-	h.stat(cand.Name, ref.ID)
+	verdict := VerdictDraft
+	if strengthened {
+		verdict = VerdictStrengthen
+	}
+	h.statStage(StageL4, verdict, cand.Name, ref.ID)
 }
 
 // greyBodies pulls the bodies of the skills L2 flagged as borderline,
@@ -419,11 +465,12 @@ func (h *AutoHook) greyBodies(cand SkillCandidate) []string {
 // name or description similarity → StrengthenDraft; no match → a new
 // WEAK draft (recurrence=1, invisible in the inbox until a second
 // independent session confirms it). Never installs, never overwrites
-// a draft's SKILL.md.
-func (h *AutoHook) mergeDraft(cand SkillCandidate, src skillmgr.DraftSource, trace []skillmgr.FilterTraceEntry) error {
+// a draft's SKILL.md. The returned flag tells the caller which L4
+// verdict to write (STRENGTHEN vs DRAFT).
+func (h *AutoHook) mergeDraft(cand SkillCandidate, src skillmgr.DraftSource, trace []skillmgr.FilterTraceEntry) (strengthened bool, err error) {
 	all, err := h.Drafts.ListAllDrafts()
 	if err != nil {
-		return err
+		return false, err
 	}
 	match := ""
 	for _, d := range all {
@@ -438,12 +485,12 @@ func (h *AutoHook) mergeDraft(cand SkillCandidate, src skillmgr.DraftSource, tra
 	}
 	if match != "" {
 		_, err := h.Drafts.StrengthenDraft(match, src, cand.Evidence, trace)
-		return err
+		return true, err
 	}
 
 	md, err := RenderSKILLMD(cand)
 	if err != nil {
-		return err
+		return false, err
 	}
 	side := skillmgr.DraftSidecar{
 		Status:         skillmgr.DraftStatusWeak,
@@ -461,15 +508,18 @@ func (h *AutoHook) mergeDraft(cand SkillCandidate, src skillmgr.DraftSource, tra
 		// our list and write. Strengthen theirs — never clobber.
 		if strings.Contains(err.Error(), "already exists") {
 			_, err = h.Drafts.StrengthenDraft(cand.Name, src, cand.Evidence, trace)
+			return true, err
 		}
-		return err
+		return false, err
 	}
-	return nil
+	return false, nil
 }
 
-// stat appends one provenance row to .stats.jsonl (best-effort):
-// provider=distill-auto rows are skipped by call-count aggregation.
-func (h *AutoHook) stat(name, sessionID string) {
+// statStage appends one funnel telemetry row to .stats.jsonl
+// (best-effort): provider=distill-auto rows carry stage+verdict so the
+// funnel report can count hits/drops per layer; call-count aggregation
+// skips them.
+func (h *AutoHook) statStage(stage, verdict, name, sessionID string) {
 	if h.Stats == nil {
 		return
 	}
@@ -480,6 +530,8 @@ func (h *AutoHook) stat(name, sessionID string) {
 		ProjectID: h.ProjectID,
 		Model:     h.Distiller.model(),
 		Provider:  skillstats.ProviderDistillAuto,
+		Stage:     stage,
+		Verdict:   verdict,
 	})
 }
 

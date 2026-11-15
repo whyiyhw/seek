@@ -352,6 +352,25 @@ func TestWeb_RunLifecycle(t *testing.T) {
 	}
 }
 
+// TestWeb_PageAvoidsHTMLParsingSinks pins the XSS discipline (PRD §5.5,
+// card c_iha3fr acceptance): model output reaches the DOM only via
+// createElement/createTextNode/textContent — the embedded page must
+// contain no HTML-string parsing sink, not even in a comment (a
+// mention is a temptation; the static check is belt and braces).
+func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
+	for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
+		if strings.Contains(string(webPage), sink) {
+			t.Errorf("embedded page references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", sink)
+		}
+	}
+	// Positive pin: the §2.6 minimal markdown renderer must exist and
+	// build <pre> through the DOM API (regression guard against a
+	// future "simpler" HTML-string rewrite).
+	if !strings.Contains(string(webPage), "document.createElement('pre')") {
+		t.Error("embedded page lost the fenced-code renderer (document.createElement('pre'))")
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.

@@ -106,10 +106,10 @@ func (s *Session) Fork() *Session {
 
 ```
 > /branch
-branched: 20260121-103045-a1b2c3 → 20260122-091203-f7e8d9 (continuing on new branch; parent intact at ~/.config/seek/sessions)
+branched: 20260121-103045-a1b2c3d4e5f6a7b8 → 20260122-091203-f7e8d9c0b1a23456 (continuing on new branch; parent intact at ~/.config/seek/sessions)
 ```
 
-当前对话继续往下走，但**新消息只追加到 `f7e8d9`**；`a1b2c3` 永久停在分叉点，可以用 `--resume a1b2c3` 找回。
+当前对话继续往下走，但**新消息只追加到 `f7e8d9c0…`**；`a1b2c3d4…` 永久停在分叉点，可以用 `--resume 20260121-103045-a1b2c3d4e5f6a7b8` 找回。
 
 实现：
 
@@ -340,9 +340,9 @@ if m.opts.Tracker != nil {
 `--list` 输出会显示 `ParentID`，让用户能看到关系：
 
 ```
-20260121-103045-a1b2c3      60 turns, deepseek-v4-flash                  (root)
-20260121-103045-a1b2c3      60 turns, deepseek-v4-flash            ← parent of:
-20260122-091203-f7e8d9      8 turns,  deepseek-v4-flash
+20260121-103045-a1b2c3d4e5f6a7b8   60 turns, deepseek-v4-flash            (root)
+20260121-103045-a1b2c3d4e5f6a7b8   60 turns, deepseek-v4-flash      ← parent of:
+20260122-091203-f7e8d9c0b1a23456    8 turns,  deepseek-v4-flash
 ```
 
 目前的展示停在"列出关系"层面，没有 ASCII 树渲染。原因是绝大多数用户的会话图是浅的——主线 + 偶尔分一两个支——线性列表加 parent 标注已经够用。

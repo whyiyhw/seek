@@ -1,6 +1,6 @@
 # 第 17 章：M8 — Skill 生命周期管理
 
-> 对应代码：`internal/skill/`(目录包扩展)、`internal/skillmgr/`、`internal/skillstats/`、`internal/skillcli/`、`internal/tools/skilltool/`(stats 集成)、`cmd/seek/skill_*.go`、TUI `/skill` 命令
+> 对应代码：`internal/skill/`(目录包扩展)、`internal/skillmgr/`、`internal/skillstats/`、`internal/skillcli/`、`internal/tools/skilltool/`(stats 集成)、`cmd/seek/skill_*.go`、TUI `/skill` 命令。§17.11 增补：`internal/skilldistill/`、`internal/skillmgr/draft.go`、TUI `/distill` skill 段 + `/skill drafts`。
 > 起点：第 11 章。Skill 是"把一个 markdown 文件丢进目录就生效"——零安装、零状态、和 Claude Code 生态零摩擦。这在自举阶段是对的。
 > 终点：完整的"装—用—看—卸"闭环。`seek skill install` 支持 local / git / https 三种来源、`seek skill list/status/stats` 查询、`seek skill update` 重新拉源、`.install.json` sidecar 记录怎么来的、`.stats.jsonl` 记录被用过几次、TUI `/skill` 镜像同一套子命令、`seek skill create` 脚手架新 skill。
 
@@ -419,6 +419,49 @@ v2 没有把 v0 推翻——单文件 .md 永远兼容, 没有 "manifest" 或者
 
 ---
 
+## 17.11 Skill 自动蒸馏:四层漏斗与人审闸(v0.11 增补)
+
+17.1 列过 v0 skill 的三个缺口,本章主体(v2)补的是**装—用—看—卸**。到 v0.11 回头看,闭环还缺最后一环:**产**。用户在 seek 里摸索出一套多步骤流程("修 TUI 状态机 bug 的定位顺序"),下次会话一切从零——它不是 M 层该记的决策(第 16 章管"知道什么"),也没有任何机制把它升格成 skill(skill 管"会做什么")。skill 蒸馏补的就是这一环:**从会话历史里提取值得复用的程序性知识,以草稿形态落进隔离草稿区,等人审后安装**。
+
+### 为什么门槛必须远高于 `/distill`
+
+第 16 章的 M 条目写歪了,污染的是**一个项目的索引**;skill 写歪了,污染的是**所有未来会话的 system prompt**——`name+description` 进 manifest(11.4),常驻每一个未来会话。一条好 description 是模型在未来无数会话里自主想起这套流程的触发器;一条烂 description 是永久的 prefix token 死重。这个不对称决定了两件事:新颖性判定要四层漏斗,人审闸要真闸。
+
+### 四层漏斗:越便宜的越早挡
+
+漏斗每一层成本递增,设计目标一句话:**空会话不产草稿、重复会话不产重复草稿、已覆盖的知识不产第 N+1 份**。
+
+- **L0 机械门槛**(零 API):轮数与工具调用次数下限、项目可解析——纯问答会话在这里挡掉;
+- **L1 提示词内判重**(提取调用自带):提取 reasoner 的输入**必须**带全量已装 skill manifest + 当前项目 M 索引,提示词硬性要求语义重叠的不输出、更像项目决策的不输出、无合格候选返回空数组——沿用 v1 蒸馏的空数组纪律("DO NOT invent weak candidates to fill the quota"是蒸馏不产垃圾的关键句);
+- **L2 机械查重**(确定性):name 碰撞直接拒;description+body 对既有 skill 做 trigram Jaccard,灰区送下层;
+- **L3 语义过滤**(一次 Flash thinking 调用):复用第 16 章 `Distiller.Filter` 的 ACCEPT/REJECT 模式,拒绝理由落 sidecar 供人审对照——**手动路径可跳过 L3,人在场就是更强的过滤器;自动路径必过**;
+- **L4 复发累积**(只在自动路径):单会话提取到的候选先以 `weak` 状态落草稿、不进收件箱;**两个不同会话各自独立提取到同一流程**才升 `reviewable`——与第 16 章 dream 的 N≥2 同构:只在单会话出现过的"模式",更可能是该会话的特例而非可复用能力。
+
+各层阈值、触发 cadence、草稿 GC、sidecar schema 以 [`docs/prd/feature-skill-distill.md`](../prd/feature-skill-distill.md) §3–§5 为权威——本节不复述数值。
+
+### 草稿区:一面现成的承重墙
+
+草稿落在 `~/.seek/skills/.drafts/<name>/`——**在 skills 树内、但 loader 不可见**。不可见性不靠新机制:目录包扫描的 `loadFromDir` 本来就跳过 `.` 开头的条目(17.3 的 v2 loader, 注释明言刻意),这面墙那时就砌好了(`.stats.jsonl` 已经开过"seek 私有状态以 dotfile 住在 skills 树里"的先例),蒸馏只需要一条回归测试把它钉死。草稿必须是能被 `skill.Parse` 原样解析的合法包——**"草稿"与"正式包"的差别只在位置,不在格式**:安装 = 目录移动,激活路径零新代码。
+
+写盘纪律对齐本章的既定红线(`~/.seek/skills/` 下写盘只许 `skillmgr` 与 `skillstats`):`.drafts/` 的一切写删独占在 `skillmgr` 的 DraftStore;认知逻辑所在的 `internal/skilldistill` 零文件系统副作用——可测性与第 16 章 Distiller 同款(假 chatClient 注入)。不出现第三个能写 skills 树的包。
+
+### 人审闸:机器提议、人过目、激活可回滚
+
+不变量一句话:**从"会话誊本"到"loader 可见"的通路上,唯一的门是人的显式动作**。自动路径的代码里不存在 install 调用(测试钉死);install 走本章既有的安装链 + scope 选择(17.9 的 scope 语义原样适用——草稿只能**建议** `suggested_scope`,单项目复发留 project、跨项目复发升 user,最终由人选)。
+
+对幻觉程序的核心防线是**证据逐字摘录**:草稿 sidecar 的每段 evidence 必须能在源会话誊本里逐字找到(机械可验)——人审时对照的是"草稿声称的流程在原会话里**真的发生过**",不是"这段话像不像真的"。这和 17.9 的两步安装(先预览再确认)是同一姿态。seek 自己就是被这么治理的(butler 卡片:worktree 写作 → review → merge),蒸馏把同一治理形态内化进了产品——提议、审议、激活、可回滚。
+
+### 触发点选型:一条否决史
+
+自动路径的触发点评估过四个候选,两个是被历史否决的:**SessionEnd 钩子调 reasoner**——v1 M5.7 撞过启发式满意度检测 + 90s 超时卡进程退出,会话结束路径必须保持零 API 调用;**cron/launchd 批量**——违反零-daemon 铁律(第 22 章)。活下来的是两端:`/distill` 扩展(人在场,M 候选审完续审 skill 候选;`--dry-run` 预览全漏斗判定与草稿正文、零落盘)先行跑通链路;**下次 SessionStart 后台批量补蒸馏**(auto-dream 同构:goroutine 慢慢跑,不阻塞首轮 Prompt)做自动化——env 总开关,默认关。
+
+### 两个实坑
+
+- **设计稿引用的路径形状是错的**。PRD 写"会话按项目归档在 `~/.seek/projects/<pid>/sessions/`"——实现时发现那是 checkpoint/子代理的 sidecar 空间,誊本其实平铺在 `~/.seek/sessions/`,项目归属只存在于 JSONL header 的 `cwd` 字段。`session.Store.ListProject` 读 header 过滤(`loadMeta` 纪律),还要**跳过 fork 出来的会话**(`ParentID != ""`)——否则 `/branch`、`/compact` 的子会话会把一次对话数成两次"独立复发",L4 的信号从根上被污染。
+- **拒绝行从未打印**。`/distill` 真跑的 skill 拒绝行一直在调 `appendHistory` 却从未显示——直到做 `--dry-run`(它的全部价值就是与真跑逐字节对照)才暴露的真跑侧旧 bug。
+
+---
+
 ### 相关踩坑
 
 Skill 生命周期管理实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
@@ -434,6 +477,17 @@ Skill 生命周期管理实现中遇到的具体问题，以下是来自 [`docs/
 - **Saw**：Windows CI 上 TempDir 清理失败："The process cannot access the file because it is being used by another process"。
 - **Why**：`t.Cleanup(chdir)` 将工作目录切换到 TempDir，测试完成后 chdir 尚未恢复 TempDir 就被删除。Windows 不允许删除进程当前工作目录。
 - **Fix**：确保 `t.Cleanup(chdir)` 在 `t.TempDir()` 之前注册，或使用绝对路径。
+
+**3. PRD 说"会话按项目归档"——实际不是;按 header CWD 分桶**（§17.11）
+
+- **Saw**：实现自动蒸馏的批量扫描时,PRD 引用的 `~/.seek/projects/<pid>/sessions/` 装的是 checkpoint/子代理 sidecar,誊本平铺在 `~/.seek/sessions/`。
+- **Why**：`ProjectSessionDir` 是给 checkpoint 子系统命名/文档化的;设计稿把路径形状读成了归档位置。
+- **Fix**：`session.Store.ListProject` 只读 header(`loadMeta` 纪律)按 `cwd` 哈希过滤,并跳过 fork 会话(`ParentID != ""`),防 `/branch` `/compact` 子会话把一次对话数成两次"独立复发"。
+
+**4. 裸 `m.appendHistory(...)` 语句丢行——与 `_ = tea.Println` 同病**（§17.11）
+
+- **Saw**：`/distill` 真跑的 skill 拒绝行从未出现在 scrollback,尽管 handler 可见地在调用。
+- **Fix**：返回值链路修正;`--dry-run` 的字节对照价值顺带把它逼了出来。
 
 详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
 
@@ -452,6 +506,7 @@ Skill 生命周期管理实现中遇到的具体问题，以下是来自 [`docs/
 - `seek skill status` 是诊断核心:source + shadowed + frontmatter + install + stats + token 估算一条命令出齐
 - `skill_fetch` / `skill_commit` 提供模型驱动的安装流程, 两步分离实现"预览再确认", scope 参数**必须由用户通过 `ask_user` 选择**, 模型不能默认
 - 整个 v2 不推翻 v0, 只是把"事实"从隐式变成 *外显的* 文件;**复杂度长在功能上, 不长在机制上**
+- **(v0.11 增补)蒸馏补上"产"**: 四层漏斗(机械门槛→提示词内判重→机械查重→语义过滤, 自动路径外加 N≥2 复发累积)落 `.drafts/` 草稿区(loader 不可见的 dot 目录, 草稿即合法包), **自动路径永不 install**——从誊本到 loader 可见的唯一门是人的显式动作, evidence 逐字摘录是对幻觉程序的机械防线
 
 ---
 

@@ -23,3 +23,19 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_oh2dl3：/distill dry-run 预览：显示将产出的草稿不落盘
 - c_kql3ip：eval 扩容：GLM 车道契约用例——路由/计价/cache 字段锁回归
 - c_7pptol：web frontend 设计稿：control-plane 首个真实渠道 + inspect-rpc 数据面并入评估（feature-web-frontend.md）
+- c_c26lvq：DeepSeek 全家桶 API 接入评估设计稿：read_url/文件输入/ASR-TTS/安全参数（feature-deepseek-app-api.md）
+- c_bg7hax：pitfalls 台账清点：190 条过时/已修复标记（只标记不删）
+- c_3gp2e7：AGENTS.md 预算 ratchet 下一刀：3084→≤2800（每版一刀 · 向 1800 目标收，repo=whyiyhw/seek）
+- c_26ltej：README 双语 v0.11 叙事刷新：平台化定位（多端/自进化/成本三轴）
+- c_tbqxnn：session export：会话导出为 markdown 对话记录
+- c_bickfj：编排 P1-a：后台子代理生命周期骨架——spawn 可后台化 + 完成事件进 session 流
+- c_nym2sn：pricing.go 费率刷新：flash 现价 ¥2/M 高峰 miss（快照停 2026-09-10 已过期）+ v4-pro 独立行核对
+- c_mb5d7p：session/subagent ID 熵扩宽 24→64 位（NewRunID 同款修法，v0.11 CI 实录同因，repo=whyiyhw/seek）
+- c_wxbdkz：R0 验证门：read_url 与 function tools 共存性实测（feature-deepseek-app-api §2.2，红则①降级不接）
+- c_lxferp：eval 基线趋势：结果 JSONL 汇总脚本——与上一版对比报告
+- c_onl4et：信号：eval-trend 自测未登记 selftest.sh——c_lxferp 验证「未跑成」阻塞放行
+- c_o77s3m：编排 P3-a：hooks 注入面设计——受控注入区与缓存稳定区分离
+- c_iha3fr：web 聊天 markdown 最小渲染：代码块+行内码样式（§2.6 落地，零依赖，c_vn44rc 首卡）
+- c_kkpwe7：编排 P2-a：类型化 agent 定义格式——配置文件与加载器
+- c_uzmzzi：book v0.11 章节更新：control-plane/GLM 车道/skill-distill 进设计书
+- c_jqwd72：skill-distill 三期：复发累积（N≥2）与蒸馏质量打点报表

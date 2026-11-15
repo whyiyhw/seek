@@ -59,6 +59,12 @@ func TestSkillDrafts_ListsRowsWithInstallHint(t *testing.T) {
 	if !strings.Contains(text, "seek skill drafts show") || !strings.Contains(text, "seek skill drafts approve") {
 		t.Errorf("review-flow hint missing:\n%s", text)
 	}
+	// c_jqwd72 pins the accumulation count in the TEXT listing too:
+	// "recurrence N" is the N≥2 promotion signal a reviewer weighs
+	// first (seedDraft writes recurrence 2).
+	if !strings.Contains(text, "recurrence 2") {
+		t.Errorf("recurrence count missing from the text listing:\n%s", text)
+	}
 }
 
 func TestSkillDrafts_JSON(t *testing.T) {

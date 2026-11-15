@@ -17,8 +17,55 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Policy
 
-- AI assistants working in this repo: every time you fix a non-obvious bug or discover a surprising constraint, **append an entry here** AND add a `Pitfall:` trailer to the commit (see [`CLAUDE.md`](../CLAUDE.md)).
+- AI assistants working in this repo: every time you fix a non-obvious bug or discover a surprising constraint, **append an entry here** AND add a `Pitfall:` trailer to the commit (see [`AGENTS.md`](../AGENTS.md)).
 - Humans: same convention. Use `scripts/extract-pitfalls.sh` to sanity-check that recent commits' `Pitfall:` trailers line up with entries here.
+
+## Status: live vs absorbed (audit 2026-11-14)
+
+Audit basis: branch `drive/c_bg7hax` @ `7777c2f`. **201 entries — 15 absorbed, 186 live.**
+
+**Marking rule** (keep consistent on re-audit):
+
+- `### [已吸收]` at the start of a heading marks an entry whose *subject* has been superseded or removed: the subsystem was deleted, a later commit reversed the design, or the model/dependency the entry constrains is gone. Following the entry today would steer you wrong. Entries are marked, never deleted — history stays readable.
+- Every absorbed entry carries a trailing `- **已吸收**: reason → pointer` bullet naming what superseded it (commit / file / sibling entry).
+- A pitfall whose fix landed but whose constraint still holds is **not** absorbed — that is the normal shape of a live pitfall (bug fixed, knowledge still true). Only design-level supersession marks.
+- **Live pitfall = any `### ` heading without the `[已吸收]` prefix.** `scripts/pitfall-to-eval.sh` should scaffold only from live entries; mechanical filter: skip headings matching `^### \[已吸收\]`.
+- `Reading order for newcomers` is prose navigation, not entries — not counted.
+
+Per-section distribution (total / absorbed / live):
+
+| Section | Total | Absorbed | Live |
+|---|---:|---:|---:|
+| Filesystem / concurrency | 1 | 0 | 1 |
+| Hook / memory | 5 | 0 | 5 |
+| TUI / terminal | 40 | 11 | 29 |
+| Agent loop | 13 | 0 | 13 |
+| DeepSeek API | 21 | 1 | 20 |
+| Go language | 11 | 0 | 11 |
+| Tooling / environment | 22 | 1 | 21 |
+| LLM provider quirks (M6) | 7 | 0 | 7 |
+| Testing / CI | 3 | 0 | 3 |
+| Release / upgrade | 3 | 0 | 3 |
+| Site / landing page | 3 | 0 | 3 |
+| Go (second ledger; plan-mode / TUI / process pits) | 33 | 2 | 31 |
+| Worktree / Windows | 2 | 0 | 2 |
+| Sandbox / OS jail | 1 | 0 | 1 |
+| Cron parser | 1 | 0 | 1 |
+| Feishu / external API | 1 | 0 | 1 |
+| Subprocess / secrets | 1 | 0 | 1 |
+| Tool output | 2 | 0 | 2 |
+| Testing | 1 | 0 | 1 |
+| Tool decorators | 2 | 0 | 2 |
+| Filesystem / model safety | 5 | 0 | 5 |
+| Tooling / line endings | 4 | 0 | 4 |
+| TUI / session stats | 5 | 0 | 5 |
+| CI / gates | 3 | 0 | 3 |
+| Eval / tool descriptions | 4 | 0 | 4 |
+| Build tags / dependency isolation | 1 | 0 | 1 |
+| ACP / editor & headless lanes | 6 | 0 | 6 |
+| **Total** | **201** | **15** | **186** |
+
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 11 absorbed / 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 29 / 1 / 28 · **Go** (both Go sections): 44 / 2 / 42 · **tooling & engineering** (remaining 20 sections): 83 / 1 / 82.
 
 ---
 
@@ -68,6 +115,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any "tracking" struct (counter, accumulator, ring buffer) that satisfies an interface MUST use pointer receivers. The compiler doesn't warn — it'll happily build and silently drop your mutations
 - **Refs**: `internal/hooks/shell_runner.go:limitedWriter`
 
+### A hook registered on the shared Registry fires in EVERY agent that shares it — including subagent children
+- **Saw**: (design-time, caught while wiring the background-completion Notifier) the obvious wiring — `hooksReg.Register(subagent.NewNotifier(mgr))` — silently corrupts delivery: `buildSubagentRunner` hands the SAME `*hooks.Registry` pointer to every child `agent.New`, so a child's `Prompt` runs `ApplyPrePrompt` too. A background sibling finishing just before a child spawns has its completion notice DRAINED into the child's transcript — wrong context, wrong session file, and the parent never sees the result.
+- **Why**: the registry is a live pointer shared parent+children by design (pre_tool deny / post_tool audit must cover subagent tool calls), so registration order can't scope a hook to the parent; any ordering still leaks because children read the registry at spawn time, after everything is registered. The memory hook registering AFTER Manager construction additionally means a snapshot taken at construction time would silently drop it from children.
+- **Fix**: `hooks.Registry.CloneWithout(exclude)` — children resolve their registry through a LAZY `hooksFn` closure (`hooksReg.CloneWithout(bgNotifier)` per spawn) so they get every hook registered so far minus the parent-only drain point. Delivery (Notifier) DRAINS the inbox; the TUI wake PEEKS (`PendingNotices`) — one consumer per semantics. Card c_bickfj (P1-a).
+- **Lesson**: on this codebase, "register a hook" is a broadcast to every agent sharing the registry — parent-session-scoped hooks need explicit exclusion at the child boundary, and the exclusion must be lazy (closure) when the parent registry keeps growing after the children's factory is built. Any future parent-only PrePrompt hook (resume revival, controlplane inbox) rides the same `CloneWithout` seam.
+- **Refs**: `internal/hooks/registry.go:CloneWithout`, `internal/subagent/notifier.go`, `cmd/seek/main.go` (`subagentRunnerOpts.hooksFn`), `docs/prd/feature-orchestration.md` §4.1 D2
+
 ## TUI / terminal
 
 ### A light palette derived by darkening a dark palette stops the "muted" role from receding
@@ -105,26 +159,29 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: don't enable mouse capture unless you actually have pointer-driven UI. The trade `copy ⇄ mouse scroll` is asymmetric — copy is the load-bearing feature
 - **Update (alt-screen era)**: this trade INVERTED once history moved into an in-app viewport. See "Mouse wheel did nothing in alt-screen mode" below — mouse capture is back on, and the click-drag escape hatch is now a modifier-key (Option / Shift)
 
-### Mouse wheel did nothing in alt-screen mode
+### [已吸收] Mouse wheel did nothing in alt-screen mode
 - **Saw**: under the current alt-screen TUI, scroll wheel and trackpad gestures had no effect; the only way to read past context was PgUp/PgDn — even though the viewport visibly *looked* scrollable
 - **Why**: `tea.WithMouseCellMotion()` was removed in `08449cd` (inline-mode era — see entry above) to preserve native click-and-drag selection. Under alt-screen the in-app viewport is the *only* way to see past content (terminal scrollback is gone), so the asymmetry from `08449cd` flipped — wheel scroll became load-bearing
 - **Fix**: re-enabled `tea.WithMouseCellMotion()` in `tui.Run`; added a `case tea.MouseMsg:` arm in `Update()` that forwards to the history viewport, whose default `Update()` already handles `MouseButtonWheelUp/Down` via `ScrollUp/ScrollDown(MouseWheelDelta)` (`bubbles/viewport@v1.0.0/viewport.go:463-494`). Also fixed `appendHistory()` to capture `wasAtBottom` before `SetContent` and only call `GotoBottom()` when true — otherwise every streamed `MessageEnd` / `ToolExecEnd` would yank the user back to the bottom (same logical bug as "Streaming kept yanking the viewport to the bottom" below, regressed across the M4.5 → alt-screen migration). Commit (this one)
 - **Selection escape hatch**: app-side mouse capture suppresses native click-drag selection. Modern terminals bypass the capture when the user holds **Option** (⌥) on macOS Terminal.app / iTerm2, or **Shift** on most Linux terminals (xterm, gnome-terminal, alacritty, kitty) — that drag goes to the terminal, not the app
 - **Lesson**: the mouse-capture cost/benefit flips with rendering mode. Inline → keep it off (terminal owns scroll, copy is the sole mouse interaction worth caring about). Alt-screen → turn it on (app owns scroll, the modifier-key bypass covers the copy use case). Revisit asymmetric trade-offs whenever the underlying architecture changes
 - **Refs**: `internal/tui/run.go`, `internal/tui/update.go:case tea.MouseMsg`, `internal/tui/model.go:appendHistory`
+- **已吸收**: alt-screen-era fix (re-enable mouse capture) was reverted — the current inline TUI has no mouse capture, the terminal owns the wheel → `internal/tui/run.go` architectural note; sibling entry "Mouse drag-to-select did nothing"
 
-### Spacebar scrolled the conversation a page
+### [已吸收] Spacebar scrolled the conversation a page
 - **Saw**: typing a space in the input box also paged the viewport down; typing 'b' paged up; PgUp/PgDn worked but only by accident
 - **Why**: my `Update` was forwarding every `KeyMsg` to **both** the textarea and the viewport. The viewport's default keymap includes ` `, `b`, `f`, `j`, `k` for scrolling, all of which are also normal text input
 - **Fix**: explicit per-key routing in `handleKey()` — global keys → handled inline; PgUp/PgDn/Ctrl+U/Ctrl+D → viewport only; everything else → textarea only. Commit `7daaa3b`
 - **Lesson**: in bubbletea, never forward a `KeyMsg` to two consumers unless you've manually filtered which keys go where. The "default keymaps overlap" footgun is invisible until you trip on it
 - **Refs**: `internal/tui/update.go:handleKey`
+- **已吸收**: the in-app viewport widget was removed in the later TUI reset — terminal-native scrolling, no dual key routing left to get wrong → `internal/tui/update.go` "viewport widget is gone" note; `internal/tui/run.go` architectural note
 
-### Streaming kept yanking the viewport to the bottom
+### [已吸收] Streaming kept yanking the viewport to the bottom
 - **Saw**: scrolling up to read earlier output mid-stream would snap back to the bottom on the next token
 - **Why**: every `agentEventMsg` unconditionally called `viewport.GotoBottom()`
 - **Fix**: capture `wasAtBottom := m.viewport.AtBottom()` before applying the event; only `GotoBottom()` if true. Commit `7daaa3b`
 - **Lesson**: auto-scroll should respect user intent — if they've scrolled away, that's an implicit "stop following"
+- **已吸收**: viewport.GotoBottom/AtBottom went with the viewport widget — native terminal scrollback cannot be "yanked" → `internal/tui/update.go` "viewport widget is gone" note
 
 ### Long streaming replies freeze the screen — inline renderer can't cursor-up past a screen height
 - **Saw**: a long reply (30+ rendered rows) streamed fine for a while, then the visible text froze on an old frame (e.g. mid-heading) while the stream kept going; the turn ended normally and the footer appeared. The full content WAS present — session file, agent message, and scrollback commit were all complete — only the live-region display was stuck
@@ -177,25 +234,28 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: when you clear volatile state on user-cancel, check whether that state contains something the user would want back. "Cancel the current operation" and "clear the edit buffer" are different intents — treat them separately
 - **Refs**: `internal/tui/update.go:handleKey`, `internal/tui/update.go:streamEndMsg`
 
-### Status bar scrolled away with live content instead of staying pinned to the terminal bottom
+### [已吸收] Status bar scrolled away with live content instead of staying pinned to the terminal bottom
 - **Saw**: after a few turns, the status bar drifted upward from the terminal's bottom edge. In long sessions it could be several lines above the bottom, making it hard to spot at a glance
 - **Why**: inline mode replaces the previous View() in-place, but `tea.Println` lines accumulate above the live region, pushing the cursor (and thus the View() output) downward. The status bar, rendered at the end of View(), moved with everything else — the comment said "not pinned" but the user expectation was that a status bar stays at the screen edge
 - **Fix**: added `scrollbackLines` counter to Model, incremented at every `tea.Println` call site (counting actual newlines). `View()` now calculates `cursorRow = welcomeFixedLines + scrollbackLines` and adds padding before the status bar to fill the remaining terminal height, pinning it to the bottom. Commit (this one)
 - **Lesson**: "status bar at the bottom" requires knowing where the cursor is in the terminal. In inline bubbletea, `tea.Println` moves the cursor; you must track the cumulative offset to compute remaining vertical space. A `scrollbackLineCount` helper and explicit counting at each print site is verbose but reliable
 - **Refs**: `internal/tui/model.go:scrollbackLines`, `internal/tui/view.go:View()`
+- **已吸收**: the scrollbackLines counter + bottom-padding pin scheme is explicitly banned by the current inline design → `internal/tui/run.go` "CRITICAL invariant" note; `internal/tui/view.go` header note
 
-### `View()` rendered "starting seek …" for a frame
+### [已吸收] `View()` rendered "starting seek …" for a frame
 - **Saw**: a brief flash of the literal string "starting seek …" on launch
 - **Why**: `View()` returned a placeholder string when `m.ready == false` (i.e. before the first WindowSizeMsg); even the synthetic one needs one Update cycle
 - **Fix**: render the welcome banner in the not-ready branch instead of the placeholder — same content the viewport will hold once we know the dimensions, so no visual jump. Commit `766a045`
 - **Lesson**: a "loading" message that shows for less than one frame should just be a softer first frame, not a string change
+- **已吸收**: the "render the banner in the not-ready branch" fix is not what ships — the !ready branch deliberately shows a minimal i18n hint (`view.starting`); the banner renders inside View once width is known → `internal/tui/view.go` (`!m.ready` branch)
 
-### `_ = tea.Println(line)` silently discards the cmd — scrollbackLines count drifts
+### [已吸收] `_ = tea.Println(line)` silently discards the cmd — scrollbackLines count drifts
 - **Saw**: functions returning `tea.Model` (not `(tea.Model, tea.Cmd)`) called `_ = tea.Println(line)` and incremented `scrollbackLines` — but the line never appeared in the terminal because discarding `tea.Println`'s return discards the print itself. The phantom `scrollbackLines` count shifted the status bar padding calculation in `View()` by the number of discarded prints
 - **Why**: `tea.Println` returns a `tea.Cmd`. Assigning it to `_` means bubbletea never executes it. The pattern in `distillAcceptCurrent` and `exitDistillReview` existed before the `scrollbackLines` counter was added (commit bb27684), but the new counter made the bug visible: phantom lines were counted in `scrollbackLines` but never rendered, causing `cursorRow = welcomeFixedLines + m.scrollbackLines` to over-count and the status bar to sit lower than it should after distill review
 - **Fix**: changed `distillAcceptCurrent`, `distillDropCurrent`, `enterDistillEdit`, and `exitDistillReview` from `tea.Model` → `(tea.Model, tea.Cmd)` so the `tea.Println` cmd propagates through the key handler to `tea.Batch`. Added `TestWelcomeBannerLineCount` to pin the `welcomeFixedLines` constant against the actual banner output. Commit (this one)
 - **Lesson**: `_ = tea.Println(s)` is a silent no-op pattern that looks like it prints but doesn't. Any function returning `tea.Model` that calls `tea.Println` is a pre-existing bug — the callers pass `nil` as the cmd, so the line is lost. When adding instrumentation that depends on side effects at the same call site (like `scrollbackLines`), check whether the print actually fires or you're counting ghosts
 - **Refs**: `internal/tui/distill.go:exitDistillReview`, `internal/tui/distill.go:distillAcceptCurrent`, `internal/tui/banner.go:welcomeFixedLines`, `internal/tui/banner_test.go:TestWelcomeBannerLineCount`
+- **已吸收**: the scrollbackLines counter is gone; the live form of this disease is carried by the appendHistory contract entry → entry "Bare `m.appendHistory(...)` as a statement drops the line"; `internal/tui/run.go` CRITICAL invariant
 
 ### `/model` updated the display but not the Agent's model — API calls still used the old model
 - **Saw**: user ran `/model deepseek-v4-pro` in the TUI; status bar showed `deepseek-v4-pro`, but DeepSeek's backend stats showed all calls as `deepseek-v4-flash`. The model switch had zero effect on actual API requests
@@ -204,27 +264,30 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: any struct whose config is baked at construction and read on every operation must expose a mutator if a CLI/TUI command claims to change the config at runtime. "Effective on next prompt" requires the agent's copy changed, not just the host variable and status bar
 - **Refs**: `pkg/agent/agent.go:SetModel`, `internal/tui/commands.go:cmdModel`, `internal/tui/commands.go:applyModelChoice`
 
-### `/lang` only updated the display and session variable, not the live Agent → no effect until `/new`
+### [已吸收] `/lang` only updated the display and session variable, not the live Agent → no effect until `/new`
 - **Saw**: running `/lang zh` in the TUI updated the status bar and session file, but the LLM continued responding in English. The change only took effect after `/new`, which also lost the conversation history
 - **Why**: the language directive was embedded in the system prompt (frozen at agent creation time). `/lang` only updated `sessionLang` (the host variable) and `m.opts.Lang` (the status bar display), but never modified the live Agent's message state. The LLM continued to see the original system prompt with the old language directive. Unlike `/model` (which had `Agent.SetModel`) and `/effort` (which had `Agent.SetEffort`), there was no `Agent.SetLang()` at all — per-message injection via `langReminder` + `workflowReminder` was chosen over system-prompt mutation because it avoids rebuilding the entire system prompt template while keeping the instruction in the most recent context (recency bias)
 - **Fix**: added `Lang` to `agent.Config`, `Agent.SetLang(lang)` to update it, and `langReminder(lang)` which returns a per-message language suffix injected into every user turn before `workflowReminder`. The suffix only activates when `lang="zh"`; `""` or `"en"` means no suffix (system prompt directive suffices). Updated `applyLangChoice` in the TUI to call `m.opts.Agent.SetLang(value)` so the live agent's config is updated immediately. Commit (this one)
 - **Lesson**: every per-session setting that claims to change behaviour on-the-fly must update the live Agent instance, not just the host variable and display. Per-message injection (like `workflowReminder`) is a viable alternative to system-prompt mutation when the system prompt template is complex and the setting's scope is "from the next user message onward"
 - **Refs**: `pkg/agent/agent.go:SetLang`, `pkg/agent/agent.go:langReminder`, `internal/tui/commands.go:applyLangChoice`, `cmd/seek/main.go:SetLang`
 - **Note**: **Superseded** — `/lang`, `--lang`, `Session.Lang`, and per-message `langReminder` were removed; reply language now follows the user's input (see entry below).
+- **已吸收**: the reply-language `/lang` subsystem (Agent.SetLang / langReminder) was removed wholesale; today's `/lang` is the i18n view-layer switch, where display-only is by design → next entry; `docs/prd/feature-i18n.md`; `internal/tui/commands.go:cmdLang`
 
-### Explicit `/lang` / `--lang` removed — reply language follows user input
+### [已吸收] Explicit `/lang` / `--lang` removed — reply language follows user input
 - **Saw**: users expected `/lang zh` or `--lang zh` to force Chinese replies while typing English prompts; docs and examples still listed the command after removal
 - **Why**: product decision — match-user-input is simpler, avoids fighting prefix cache with per-turn language suffixes, and matches how most users already work (write Chinese → get Chinese). Forcing locale or a slash command added state (`Session.Lang`, `Agent.SetLang`, OS locale detection) that duplicated the system prompt
 - **Fix**: system prompt now starts with `Language: Match the user's input language…`; removed `--lang`, `/lang`, `Session.Lang`, `Agent.SetLang`, and `langReminder`. Synced `docs/guide-sessions.md`, `docs/comparison.md`, `examples/`, and this log. Commit (pending)
 - **Lesson**: if the model should speak language X, the durable fix is "user writes in X" — not a parallel config axis. Breaking removals need the same doc sweep as the code deletion (examples HTML, comparison tables, pitfalls cross-refs)
 - **Refs**: `cmd/seek/main.go:systemPromptTpl`, `docs/guide-sessions.md`
+- **已吸收**: `/lang` was re-introduced by the i18n feature as a view-layer-only switch (persists to ~/.seek/config.json, SEEK_LANG overrides); the "reply language follows user input" half remains current design → `docs/prd/feature-i18n.md`; `internal/tui/commands.go` "/lang [en|zh]"
 
-### `/clear` left the input pinned to the TOP of the terminal instead of the bottom
+### [已吸收] `/clear` left the input pinned to the TOP of the terminal instead of the bottom
 - **Saw**: after `/clear` (or `Ctrl+L`), the input box and status bar rendered at row 1 of the visible viewport with empty space below — breaking the load-bearing "input is always at the bottom" invariant. The bug surfaced as the input glided back down only after the next streamed turn pushed enough content to fill the screen
 - **Why**: `cmdClear` returned `tea.ClearScreen` (ANSI `\x1b[2J\x1b[H` — erase visible + cursor home) but left `m.scrollbackLines` at its pre-clear value. View()'s two bottom-pinning branches both depend on this counter being truthful: the welcome-pad branch (`view.go:138`) was gated on `m.turns == 0` (a stale proxy that excluded post-clear state); the status-bar-pin branch (`view.go:211`) computed `cursorRow = welcomeFixedLines + scrollbackLines` — with a stale 47, `remaining` went negative and no padding was emitted. Result: the next View() drew the live region wherever the cursor parked, which after ClearScreen is row 1
 - **Fix**: (1) `cmdClear` now resets `m.scrollbackLines = 0` (truthful: nothing is visibly above). (2) `Ctrl+L` in `update_key.go` does the same — it bypasses `cmdClear` so the reset has to be duplicated. (3) Welcome-pad gate changed from `m.turns == 0` to `m.scrollbackLines == 0` — the more direct expression of the actual invariant ("nothing has been Println'd above us"). Commit (this one)
 - **Lesson**: `tea.ClearScreen` is a write-only side effect — bubbletea never tells the Model "the screen is empty now". Any state that mirrors terminal layout (cursor row, scrollback line count, padding math) must be reset by hand at the same call site. Using a derived state (`turns == 0`) as a proxy for a layout fact (`scrollbackLines == 0`) sets up exactly this kind of skew the moment something else changes the underlying fact
 - **Refs**: `internal/tui/commands.go:cmdClear`, `internal/tui/update_key.go` (KeyCtrlL case), `internal/tui/view.go:138`, `internal/tui/view.go:211`
+- **已吸收**: both bottom-pin branches (welcome-pad / status-pin) and the scrollbackLines accounting they depended on are gone; there is no post-ClearScreen hand-reconciliation to forget anymore → `internal/tui/run.go` CRITICAL invariant; `internal/tui/view.go` header note
 
 ### Esc-cancel prompt restore can leak a prior chat prompt into the API-key / branch-name field
 - **Saw**: user presses Esc to cancel a streaming turn, then opens `/setup` to configure an API key. The prior chat prompt is restored into the textarea, and on Enter it's saved as the API key into `~/.seek/config.json`. Same path for `/review` branch-name entry
@@ -275,7 +338,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: never bypass a bubbletea component's `Update()` for key-driven mutations — `InsertString` is a data-level operation that skips the component's state machine (cursor, scroll, visual offsets). If a key binding already exists on the component (`InsertNewline`), let the event reach it naturally
 - **Refs**: `internal/tui/update.go:handleKey` (removed KeyCtrlJ case), `internal/tui/model.go:311`
 
-### `welcomeBelowLines` mismatch causes bottom block to jump 4 lines on first send
+### [已吸收] `welcomeBelowLines` mismatch causes bottom block to jump 4 lines on first send
 - **Saw**: after pressing Enter to send the first message, the status bar and bottom rule visibly shifted upward by 4 lines relative to their position on the welcome screen. The welcome screen's padding put them just off the bottom of the viewport; the post-send layout put them at the correct terminal bottom, creating a jarring jump
 - **Why**: `welcomeBelowLines = 4` (input + status) but the actual rendered bottom block is 7 lines: separator(1) + input(3 + trailing \n = 4) + status(1) + rule(1). The welcome screen formula `height - 14 - 4` under-counted by 3 lines, causing the view to overflow the viewport. The active-chat bottom-pin formula uses dynamic `bottomHeight + 2` which correctly accounts for all components, so the transition between the two padding regimes produced a visible shift
 - **Fix**: changed `welcomeBelowLines` from 4 to 7. The padding formula now gives `height - 14 - 7 = height - 21`, which exactly fills the viewport. Updated test expectations (12→9, 42→39). Commit (this one)
@@ -283,13 +346,15 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Refs**: `internal/tui/banner.go:welcomeBelowLines`, `internal/tui/view.go:View()`, bubbletea textarea `View()` padding loop (always emits `\n` after each of `m.height` lines)
 
 ---
+- **已吸收**: `welcomeBelowLines` and the welcome-screen padding formula were removed — the banner renders inside View with a width-gated fallback, no pad math → `internal/tui/view.go` welcome-gate block
 
-### Programmatic submissions bypass `consumeArm` — skill-arm must be inline in the injected prompt
+### [已吸收] Programmatic submissions bypass `consumeArm` — skill-arm must be inline in the injected prompt
 - **Saw**: building `/code-review`, the natural move was to set `m.pendingSkill = "code-review"` so the model would call the Skill tool next turn (mirroring `/skill use`). It would have silently mis-fired.
 - **Why**: `m.pendingSkill` is only consumed by `consumeArm`, which runs at the two **user-typed** submission sites (non-streaming submit, streaming queue/steer). Programmatic submissions (`/review`, `/code-review`) call `submit()` directly and **bypass** `consumeArm` — so the arm survives the programmatic message and wrongly prepends "Please use the X skill" to the user's **next hand-typed** message.
 - **Fix**: bake the `Please use the "code-review" skill` instruction directly into the injected prompt text (`codeReviewPrompt`'s first line); never touch `m.pendingSkill` from a slash command. Commit (this one).
 - **Lesson**: `m.pendingSkill` is for *user-initiated* arming only. A slash command that wants the model to use a skill must put the instruction in the prompt it submits, because the arm-wrapper does not run on the programmatic path.
 - **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/feature-code-review.md` §5.3
+- **已吸收**: the skill arm / `consumeArm` wrapper was removed entirely — /skill fires immediately now → commit `d208986` ("remove skill arm mechanism, fire immediately on /skill use")
 
 ### Adding a builtin skill is prefix-cache-safe ONLY because the manifest is deterministically ordered
 - **Saw**: dropping a 4th file into `internal/skill/builtin/` (`code-review.md`) adds a line to the system-prompt `# Available skills` manifest, which is sent every turn as part of the cached prefix.
@@ -452,6 +517,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## DeepSeek API
 
+### Server web tools (`deepseek_read_url`/`deepseek_web_search`) have NO working coexistence shape with function tools — the 200 silently strips them
+- **Saw**: R0 gate tests (2026-11-14, feature-deepseek-app-api §2.2): function tool + `deepseek_read_url` in one request → thinking off = 400 (`client tools can only be used together with \`deepseek_web_search\`, \`deepseek_read_url\`, \`safety_check\` or \`title\` in thinking mode`); thinking ON = **200 but the server tool is silently stripped** — no `server_tool_calls`, no `server_tool_use`, model literally says "the only tool available to me is a weather lookup". Verified not model discretion via an unknowable-content probe URL (httpbin.org/uuid: alone-declared read_url fetches it under both thinking modes; mixed declaration never fetches). `deepseek_web_search` obeys the same rule (same 400).
+- **Why**: undocumented server-side validation — the docs only forbid mixing *server* tools with each other; the client-tool interaction is enforced (off) or silently disables the server tool (on) with zero error surface.
+- **Fix**: no code — read_url path judged red and closed (PRD §2.2, R1–R4 archived). If ever revisited: probe coexistence with an unknowable-content URL, never trust HTTP 200 alone.
+- **Lesson**: a "green" status code is not a green light — a mixed-declaration request can succeed while the capability is quietly gone. Probe with content the model cannot know, and read the model's own tool inventory in its answer. (Bonus facts from the same run: `usage.server_tool_use` key is absent when all counters are zero; multi-turn round-trip of `server_tool_calls`+`signature` prevents re-fetch & re-billing, dropping it re-fetches; server-side page cache exists but cached re-fetches are still billed.)
+- **Refs**: `docs/prd/feature-deepseek-app-api.md` §2.2 (full 10-call evidence table), api-docs.deepseek.com/guides/web_tools
+
 ### `reasoning_content` rule for V4 thinking is the OPPOSITE of the old reasoner — conditional on tool_calls
 - **Saw**: a multi-turn V4 thinking-mode session with a tool_call in turn 1 hit a 400 on turn 2: `The 'reasoning_content' in the thinking mode must be passed back to the API`. We had `pkg/deepseek.StripReasoningContent` unconditionally clearing the field on every assistant message — exactly the wrong shape for V4
 - **Why**: V4 changed the contract (api-docs.deepseek.com/guides/thinking_mode). Pre-V4 `deepseek-reasoner` REJECTED requests that retained prior `reasoning_content`. V4 thinking REVERSES that for tool-call turns specifically: "if the model performed a tool call, the intermediate assistant's `reasoning_content` must participate in the context concatenation and must be passed back to the API in all subsequent user interaction turns." For plain assistant turns (no tool_calls) `reasoning_content` may still be dropped to save prompt tokens
@@ -489,12 +561,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Lesson**: don't assume an OpenAI-compatible provider's auxiliary endpoints follow the chat shape. Read the docs end to end before extending the client
 - **Refs**: `pkg/deepseek/fim.go`, `pkg/deepseek/client.go:endpointFIM`
 
-### Reasoner doesn't support `tools`, `temperature`, `top_p`, etc.
+### [已吸收] Reasoner doesn't support `tools`, `temperature`, `top_p`, etc.
 - **Saw**: a request to `deepseek-reasoner` with a `tools` array came back 400
 - **Why**: reasoner is configured as a pure CoT-then-answer model; tool calling, sampling parameters, function calling, and parallel tool calls are all unsupported
 - **Fix**: the `think` tool calls reasoner via a fresh, parameter-free `Chat()` call (no tools, no temperature) using a history of just `[system, user]`. Commit `8264f52`
 - **Lesson**: a "model" in the API can be a parameter-restricted variant. Maintain a per-model capability map if you switch between them programmatically
 - **Refs**: `internal/tools/think/think.go`
+- **已吸收**: the legacy `deepseek-reasoner` alias this entry constrains sunset 2026-07-24; think now reasons via the caller's current model in thinking mode (`modelFunc`), no fixed reasoner call → entries "`deepseek-reasoner` without `Thinking`…" and "legacy aliases sunset 2026-07-24" below; `internal/tools/think/think.go` header
 
 ### FIM usage ratio is inherently low — model prefers edit/write over fim_complete
 - **Saw**: both benchmark tasks (`self-hosting`, `fim-patch`) showed FIM ratio well below 50% (0% and 11% respectively) despite `fim-patch` being explicitly designed as a small inline edit. The model consistently chose `edit`/`write` instead of `fim_complete`.
@@ -593,6 +666,13 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: the one-go rename `types.go` prophesied for the vision GA, then a follow-up sweep that removes the retired ids from the registry ENTIRELY: `deepseek-flash` is the only constant left, the default everywhere, the only `IsVisionModel` entry, the only rate-card entry (retired ids bill correctly via the unknown-model fallback — the same card the server charges), and the only budget entry. Sessions carrying a retired id degrade to unknown-model handling: no Thinking flag, 128K budget default, Flash-card pricing — the same precedent as the 2026-07-24 alias removal. The picker collapsed to the single live id (rows for routed ids would mislead "you're buying Pro"). Thinking is sent explicitly for the live id — the server default is thinking-on and leaning on an undocumented default already burned the suggester once. Peak windows gained a Monday–Friday qualifier per the pricing page: `CurrentTier`/`NextTransition` weekend-aware (a weekend "next transition" is Monday 09:00, NOT the nearest calendar boundary — the naive same-day branch would answer "Saturday 12:00 → off-peak", a transition that doesn't exist)
 - **Lesson**: when a vendor announces id routing ("temporarily routed, billed at X"), update client cost/context tables the same day — routed ids keep working, so no runtime error will ever surface the drift. Prefer deleting retired ids outright over keeping deprecated entries: the fallback paths (pricing/budget/thinking) already encode "unknown model" behaviour, so a kept entry is a second source of truth somebody must remember to age out. And re-read the pricing page's window QUALIFIERS (weekdays), not just the numbers
 - **Refs**: `pkg/deepseek/types.go`, `internal/pricing/pricing.go`, `internal/tui/commands.go:knownModelsForProvider`, `internal/budget/budget.go`, api-docs.deepseek.com/quick_start/pricing
+
+### DeepSeek pricing pages are single-currency per language — cross-currency diffs flag phantom rate changes
+- **Saw**: feature-deepseek-app-api.md §0 (2026-11-13) reported flash "repriced" to ¥2/M peak-miss vs pricing.go's $0.30 — but the English page still listed exactly $0.30. No flash price change existed at all; the only real change on the page was deepseek-v4-pro getting its own row again
+- **Why**: the EN page lists USD only, the ZH page CNY only (no dual columns). DeepSeek's own implied rate is ~6.67 CNY/USD (¥2 = $0.30), while the GLM row in pricing.go converts at an assumed 7.0 — comparing a CNY number against a 7.0-converted USD number manufactures a ~5% "change" out of thin air
+- **Fix**: verified 2026-11-14 against BOTH language versions before bumping anything; flash card left unchanged (comment re-dated), deepseek-v4-pro given its own registry entry ($1.32/$0.044/$3.96 peak — it had silently left the Flash-routing legacy list, where the fallback undercharges it ~4×), searchPerCallUSD switched to the natively-listed $0.75/1K
+- **Lesson**: when a price page has per-language currency columns, diff like-for-like currency (or convert with the page's own implied rate) before declaring a rate change. Routing arrangements are as volatile as prices: the "v4-pro is Flash-routed" claim from the 2026-09-10 entry above was true for two months, then reversed — re-read the legacy-id note on every pricing check, not just the numbers
+- **Refs**: `internal/pricing/pricing.go`, `pkg/deepseek/types.go`, docs/prd/feature-deepseek-app-api.md §0, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin)
 
 ### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
 - **Saw**: an effort:max session on a long (99k prompt, 99% cache) turn died with `response truncated (finish_reason=length, max_tokens=16384)` after a hidden-reasoning stretch — the whole 16k completion budget went to `reasoning_content`, content arrived empty or cut at the start. A sibling turn produced the clean-empty variant (`model returned an empty response`)
@@ -722,11 +802,12 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - **Fix**: write the key to `.env` (already in `.gitignore`) via the file-writing tool — that path doesn't touch the classifier's "secret in shell history" check. Then `set -a && . .env && set +a && go run ...` runs the binary without putting the key on any command line
 - **Lesson**: when the classifier blocks something for a stated reason, find the path that doesn't trigger that reason rather than working around the classifier itself
 
-### `glamour@v1.0.0` required a specific `lipgloss` pre-release commit
+### [已吸收] `glamour@v1.0.0` required a specific `lipgloss` pre-release commit
 - **Saw**: `go get` for all four charm packages at once errored: glamour wanted `v1.1.1-0.20250404203927-76690c660834`, not the latest `v1.1.0`
 - **Why**: glamour's `go.mod` pinned a development version of lipgloss with API changes that hadn't shipped in a tagged release
 - **Fix**: pull lipgloss at the exact required pseudo-version first, then everything else. Commit `9be599b`
 - **Lesson**: when fetching a family of related packages, do them one at a time so version conflicts surface with names attached, not as a confusing batch error
+- **已吸收**: the v1 pseudo-version pin chain ended with the v2 migration — go.mod now pins tagged `charm.land/glamour/v2 v2.0.1` + `lipgloss/v2 v2.0.6` → `go.mod`; commit `ba94aea`
 
 ### `go run ./cmd/seek` is slow enough to feel broken
 - **Saw**: between command turns, the TUI launched noticeably slower than expected; iteration on UI tweaks was painful
@@ -1021,13 +1102,14 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when the model systematically wants to pass a parameter, accept it in the schema (with a max) and **reject invalid values with a clear error** rather than `additionalProperties: false` (which gives a generic unknown-field error) or silent clamping (which hides the mistake). The model gets one round-trip to retry, which is acceptable. The key insight: the schema's `maximum` constraint is informational to the LLM; server-side validation is the actual enforcement
 - **Refs**: `cmd/seek/main.go:74` (before/after), `internal/tools/read/read.go:23-31,68-78`, `AGENTS.md:40,59`, commit (this one)
 
-### Adding a new permission mode requires touching 7+ packages
+### [已吸收] Adding a new permission mode requires touching 7+ packages
 - **Saw**: implementing `/review` mode (behavioural twin of `/plan` for code review) needed coordinated changes across `internal/permission`, `internal/tui` (options, commands, update, statusbar, placeholder), `cmd/seek` (flags, prompt, wiring), `internal/session` (struct, New, Fork), and their tests. Missing any one caused a compile error or silent misbehaviour (e.g. mode cycle skipping Review, status bar not showing the badge, session not inheriting Review on Fork)
 - **Why**: permission modes are a cross-cutting concern. The mode constant lives in `permission`, but the TUI reads it via `Options.Review` (model.go) + `SetReview` hook, renders it in `statusbar.go` and `update.go:modeLabel()`, toggles it in `update.go:cycleMode()` and `commands.go:cmdReview`, persists it in `session.go` (struct field + New/Fork), and configures it in `cmd/seek/main.go` (flag + wiring + system prompt). The `Check()` method in `permission.go` must also explicitly handle the new mode alongside `ModePlan` — they share read-only logic but `Check()` uses `mode == ModePlan || mode == ModeReview`, so forgetting either branch silently grants the wrong permissions
 - **Fix**: checklist-driven approach: (1) add `ModeReview` constant, (2) update `Check()` guard, (3) add `Review()` method, (4) add `Options.Review` + `SetReview`, (5) register `/review` command, (6) update `cycleMode`, (7) update `modeLabel`, (8) add status bar badge, (9) update placeholder, (10) add `--review` flag + mutual exclusion, (11) wire `SetReview` in TUI options, (12) update `session.New` signature + all callers + Fork, (13) update `runPrint`/`runJSON`/`runRPC` signatures, (14) inject review workflow reminder in system prompt, (15) update tests for new cycle + new session.New signature. Each step produces a compile error if the next isn't done, so iterate `go build ./... && go test ./...` after each cluster
 - **Lesson**: a new permission mode is a "scaffold across the stack" change. Don't start without a checklist of every touch point. `git grep` for `ModePlan` and `\.Plan` to find all locations that need a parallel path. The session.New signature change (`plan bool` → `plan, review bool`) is particularly invasive — every test file that constructs a Session must be updated, and missing any one produces a build failure that's only caught by `go test ./...` (not `go build` on the main binary)
 - **Refs**: `internal/permission/permission.go:ModeReview`, `internal/tui/commands.go:cmdReview`, `internal/tui/update.go:cycleMode`, `internal/session/session.go:New`, `cmd/seek/main.go:reviewWorkflowReminder`, commit (this commit)
 - **Update**: `/review` was later downgraded from a full permission mode to a simple one-shot shortcut command. See "Permission modes should be reserved for actual permission changes" below.
+- **已吸收**: the single mode enum (ModePlan/ModeReview/…) this checklist scaffolds was replaced by the two-axis Preference × Workflow permission refactor; see also the Update note above → `docs/prd/feature-permission-refactor.md`; `internal/permission/permission.go`
 
 ### Permission modes should be reserved for actual permission changes
 - **Saw**: `/review` was originally implemented as `ModeReview`, a full permission mode constant with its own session field, TUI cycle state, CLI flag, system prompt suffix, and status bar badge. But its permission behaviour was 100% identical to `ModePlan` — the only difference was a code-review "persona" injected into the system prompt. This meant every new permission mode required touching 7+ packages for what was essentially a behavioural tweak.
@@ -1092,13 +1174,14 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when a layout invariant rests on "feature X is currently at terminal row N", and the model can't observe the terminal, the invariant is going to drift — every action that touches the screen becomes a maintenance burden for that one belief. Two patches sharing the same `bannerWiped` flag was the warning sign: the fix wasn't "find every site that scrolls the banner", it was "stop trusting that the banner is at a fixed row". Rendering it inside `View()` puts it in the same reference frame as every other layout element, and `cursorRow = scrollbackLines` becomes the single, stable invariant
 - **Refs**: `internal/tui/view.go` (welcome-screen block + bottom-pin pad), `internal/tui/banner.go` (renderWelcomeHeader is the surviving emitter), `internal/tui/run.go` (no more pre-tea banner print)
 
-### Inline-mode layout drift — the architectural reset to alt-screen
+### [已吸收] Inline-mode layout drift — the architectural reset to alt-screen
 - **Saw**: after three rounds of bug-fix-then-pitfall (banner offset / popup-in-bottomBuf / Esc-leftover-`/`), each fix uncovered another way the model's `scrollbackLines` estimate could disagree with the terminal's real cursor row. The pattern wasn't a single bug — it was a category: inline mode means the program cannot observe where it is on the terminal, so any layout calculation depending on "we are at row N" is going to drift the moment something causes the terminal to scroll (`tea.ClearScreen`, frame overflow, async `WindowSizeMsg`). The status bar would land mid-screen, popups would shift unexpectedly, and the next fix would just plug one path
 - **Why**: bubbletea's inline mode (`tea.NewProgram(m)` with no `WithAltScreen()`) renders View() at the cursor's current position and tracks frame height via internal state — it does NOT query the terminal for cursor coordinates. We bolted on `scrollbackLines` to estimate "rows above the live region" so we could pad to the floor. But that estimate is one-way (model → render), so any time the terminal scrolled because the frame overflowed or because of resize timing, the estimate became fiction. Every patch (`bannerWiped`, post-Esc `input.Reset`, popup-in-sb) addressed a symptom of the same root problem
 - **Fix (root cause)**: switch to `tea.NewProgram(m, tea.WithAltScreen())`. Bubbletea owns the entire viewport, layout becomes absolute (View() output = `m.height` rows, status pinned to last row), and `scrollbackLines` no longer participates in layout math. Conversation history moves from terminal scrollback into a `Model.historyBuf []string` field that View() renders at the top of the viewport. Every `tea.Println` callsite was rewritten as `m.appendHistory(line)` — which buffers the line AND returns a `tea.Println` cmd. Bubbletea's standard renderer queues Println output while alt-screen is active (`standard_renderer.go:190` gates flush on `!altScreenActive`) and flushes the queue to the main screen on program exit. **Free exit-time dump**: the user returns to their shell with the entire conversation in terminal scrollback, no code in run.go required for it
 - **Trade-offs**: in-app scroll of long history is not yet implemented (bubbletea truncates the top of the viewport buffer when View() output exceeds `m.height`). The exit dump preserves everything, so no information is lost. Cmd+F search inside the alt-screen viewport works on what's visible only; for cross-history search the user exits and uses native terminal search on the dump. PRD `run.go:13-18`'s former "NO alt-screen" stance is reversed in commit messages and inline comments
 - **Lesson**: when you find yourself patching the Nth symptom of "model state vs terminal state mismatch", stop and check whether the model has any way to actually observe the terminal. If not, the model is guessing — and every guess can be wrong. The cleanest fix is usually to remove the need to guess (alt-screen takes over the terminal, so there's nothing to guess about) rather than to refine the guess. We spent three iterations refining; one iteration of "stop guessing" replaced them all
 - **Refs**: `internal/tui/run.go` (alt-screen + auto-flush exit dump), `internal/tui/model.go` (`historyBuf` field + `appendHistory` method returning Println cmd), `internal/tui/view.go` (pad math without scrollbackLines), bubbletea `standard_renderer.go:190` (queuedMessageLines flush behaviour)
+- **已吸收**: this alt-screen reset was itself reversed by the Bubble Tea v2 migration — the current architecture is inline again (appendHistory → tea.Println into native scrollback, no WithAltScreen) → `internal/tui/run.go` architectural note; `internal/tui/model.go` inline-mode note; commit `ba94aea`
 
 ### Welcome banner pinned across the entire first turn → user input lands above it, screen "auto-clears" at TurnEnd
 - **Saw**: two reports of the same shape. (1) After the user submits their first prompt, their `▌ you: …` line appears ABOVE the SEEK wordmark banner — the banner stays put at the bottom of the live region while their input scrolls past it. (2) When the assistant finishes replying, the terminal appears to "auto-clear" — real scrollback content (cwd marker, earlier conversation) disappears in a single frame.
@@ -1507,3 +1590,22 @@ If you're new to the project, skim entries in this order:
 - **Fix**: `session.Store.ListProject(projectID)` (M-SD2) reads headers only (`loadMeta` discipline) and filters by `paths.ProjectID(info.CWD)`, skipping forked sessions (`ParentID != ""`) so /branch & /compact children can't double-count one conversation as two "independent" recurrences. Commit c_dkgvnp.
 - **Lesson**: when a design doc cites a path as "where X lives", verify against the writer of X, not just the path helper's name. Per-project bucketing of sessions = hash of the header's `cwd`, nothing on disk groups them for you.
 - **Refs**: `internal/session/session.go` (ListProject), `internal/paths/paths.go` (ProjectSessionDir comment), `docs/prd/feature-skill-distill.md` §3.1 D
+
+## Tool-failure self-recovery
+
+Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the two-sentence core + a pointer here). Doctrine: self-recovery first — "ask the user" is the LAST resort.
+
+- **Read the error.** Results carry category-specific hints — webfetch prefixes (`[webfetch: blocked target]`), bash `Hint:` clauses, permission denials suggesting alternatives. The answer is usually IN the error.
+- **Try alternative paths.** webfetch returned garbage on an HTML page? Try raw GitHub, the API reference instead of the rendered doc, a mirror, the project's own `docs/`. bash denied in plan-analyze? Use the purpose-built tool (`git` instead of `bash("git log")`, `webfetch` instead of `curl`). One tool failing rarely makes the question unanswerable.
+- **Check local context first.** `list_dir docs/` + `grep` for keywords before asking the user to paste anything — seek's CWD often already answers the question; the repo is closer than the internet.
+- **Re-frame to source.** "I can't fetch the docs to answer Y" usually becomes "I can answer Y from the code" — for behaviour questions the source beats the docs anyway.
+- **Actually blocked? Ask SPECIFIC questions** via `ask_user` with a 2–4 option picker, not free-form. Shifting lookup work to the user ("fetch this page for me?") inverts seek's value proposition — the *model* does the lookup work.
+
+## Eval / results data shape
+
+### Early eval result files are pretty-printed concatenated JSON, not one-per-line JSONL
+- **Saw**: a line-oriented reader over `eval/results/*.jsonl` saw 347 lines but only 131 result rows; the pre-v0.5 files (e.g. the 146-line v0.4.1 file) hold each result as a multi-line pretty-printed object, many objects concatenated.
+- **Why**: the current `eval/run.sh` emits one compact object per line, but the files it wrote before ~v0.5 were pretty-printed — the `.jsonl` extension promises a layout the old files don't have.
+- **Fix**: `scripts/eval-trend.sh` jq-parses (`jq -r '… | @tsv'`) instead of splitting lines. Two related bites: `@tsv` without `-r` emits a JSON-encoded string (tabs escaped as `\t`) which silently defeats downstream TSV field-splitting; and rows before the `ran_at` field exist need the filename's UTC-date prefix as a fallback timestamp. Commit (card c_lxferp).
+- **Lesson**: treat `results/*.jsonl` as a *stream of JSON objects*, never as lines — any new results tooling starts at jq.
+- **Refs**: `scripts/eval-trend.sh` (collect_rows), `eval/README.md` "Trend reports"

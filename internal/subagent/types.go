@@ -64,12 +64,13 @@ const (
 // Used by Manager.Spawn to reject unknown types before doing any
 // work; the LLM-side `agent` tool schema's enum is the first line of
 // defense but this guards against future programmer error too.
+//
+// Delegates to the templates table (adapted from
+// agenttypes.Builtins since P2-a) so validity and the table cannot
+// drift apart the way a hardcoded switch could.
 func (t Type) IsValid() bool {
-	switch t {
-	case TypeGeneralPurpose, TypeExplore, TypePlan:
-		return true
-	}
-	return false
+	_, ok := templates[t]
+	return ok
 }
 
 // Status is the lifecycle state of a subagent, derived by folding
@@ -187,21 +188,25 @@ type Result struct {
 }
 
 // newSubSid returns a fresh subagent ID in the same shape as
-// session.generateID — sortable timestamp + 6 random hex chars
-// ("20260121-103045-a1b2c3"). Independent ID space from session
-// IDs per docs/prd/feature-subagent.md §3.3; collisions across
-// the two spaces are harmless because each lives in its own
+// session.generateID — sortable timestamp + 16 random hex chars
+// ("20260121-103045-a1b2c3d4e5f6a7b8"). Independent ID space from
+// session IDs per docs/prd/feature-subagent.md §3.3; collisions
+// across the two spaces are harmless because each lives in its own
 // directory tree.
+//
+// 64 bits of suffix entropy — the same widening NewRunID and
+// session.generateID got; a 24-bit (6 hex) suffix birthday-collides
+// at same-second scale (CI recorded it for run IDs at 500 draws).
 //
 // On entropy exhaustion falls back to nanosecond-precision hex so
 // IDs never collide from a zero-valued random buffer (same fallback
 // the session generator uses).
 func newSubSid(now time.Time) string {
-	var rnd [3]byte
+	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
-		return fmt.Sprintf("%s-%06x",
+		return fmt.Sprintf("%s-%016x",
 			now.Format("20060102-150405"),
-			now.Nanosecond()/1000)
+			uint64(now.UnixNano()))
 	}
 	return fmt.Sprintf("%s-%s",
 		now.Format("20060102-150405"),

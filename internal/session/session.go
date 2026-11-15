@@ -103,18 +103,22 @@ func New(model, cwd, systemPrompt string, yolo, plan bool) *Session {
 	}
 }
 
-// generateID returns a sortable ID: "20260121-103045-a1b2c3"
-// (timestamp + 6 random hex chars). Lexical order == creation order.
-// On entropy exhaustion it falls back to a nanosecond-granularity suffix
-// so sessions never collide from a zero-valued random buffer.
+// generateID returns a sortable ID: "20260121-103045-a1b2c3d4e5f6a7b8"
+// (timestamp + 16 random hex chars). Lexical order == creation order.
+// 8 random bytes (64 bits) of suffix entropy — same widening as
+// internal/routines.NewRunID and subagent.newSubSid: the old 6-hex
+// suffix (24 bits) birthday-collides at same-second scale (CI
+// recorded it for run IDs at 500 draws; concurrent sessions / resume
+// fan-out are the production exposure here).
+// On entropy exhaustion it falls back to a nanosecond-precision hex
+// suffix so sessions never collide from a zero-valued random buffer.
 func generateID(t time.Time) string {
-	var rnd [3]byte
+	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		// Fallback: nanosecond-precision hex suffix from the timestamp.
-		// The fractional seconds make IDs unique even at high concurrency.
-		return fmt.Sprintf("%s-%s",
+		return fmt.Sprintf("%s-%016x",
 			t.Format("20060102-150405"),
-			fmt.Sprintf("%06x", t.Nanosecond()/1000))
+			uint64(t.UnixNano()))
 	}
 	return fmt.Sprintf("%s-%s",
 		t.Format("20060102-150405"),

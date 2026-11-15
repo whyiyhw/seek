@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/whyiyhw/seek/internal/frontmatter"
 )
 
 // Type tags how a Skill was loaded so `seek skill status` can show
@@ -126,38 +128,16 @@ var recognisedFields = map[string]struct{}{
 //
 //	<markdown body>
 //
-// Frontmatter is parsed as a deliberate subset of YAML — see
-// parseFrontmatter for the four supported value shapes. The PRD v2
-// §4.1 spec covers all of them; full YAML grammar is dead weight here.
+// Frontmatter is parsed by internal/frontmatter — the shared
+// Markdown+frontmatter dialect extracted verbatim from this package —
+// so SKILL.md and agents/<name>.md (feature-orchestration.md D10)
+// accept the exact same value shapes. Error strings keep the
+// "skill <source>: ..." prefix that has always wrapped them.
 func Parse(data []byte, source string) (*Skill, error) {
-	// Strip a UTF-8 BOM if present so the `---` check below doesn't
-	// silently miss the opener on files saved from Windows editors.
-	text := strings.TrimPrefix(string(data), "\ufeff")
-	// Be tolerant of leading blank lines — `---` MUST be the first
-	// non-blank content though, otherwise it's not frontmatter.
-	trimmed := strings.TrimLeft(text, "\n\r ")
-	if !strings.HasPrefix(trimmed, "---") {
-		return nil, fmt.Errorf("skill %s: missing frontmatter (file must start with `---`)", source)
+	fields, lists, body, err := frontmatter.Split(data)
+	if err != nil {
+		return nil, fmt.Errorf("skill %s: %w", source, err)
 	}
-
-	// Walk lines so we can locate the closing `---` precisely.
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) < 2 {
-		return nil, fmt.Errorf("skill %s: empty after frontmatter opener", source)
-	}
-	closeIdx := -1
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimRight(lines[i], "\r") == "---" {
-			closeIdx = i
-			break
-		}
-	}
-	if closeIdx < 0 {
-		return nil, fmt.Errorf("skill %s: unterminated frontmatter (no closing `---`)", source)
-	}
-
-	fields, lists := parseFrontmatter(lines[1:closeIdx])
-	body := strings.TrimLeft(strings.Join(lines[closeIdx+1:], "\n"), "\n")
 
 	name := fields["name"]
 	if name == "" {
@@ -196,203 +176,6 @@ func Parse(data []byte, source string) (*Skill, error) {
 		sk.Extra[k] = v
 	}
 	return sk, nil
-}
-
-// parseFrontmatter walks frontmatter lines and returns scalar values
-// (key -> string) and list values (key -> []string) for the four
-// shapes recognised by v2 (PRD §4.1):
-//
-//  1. scalar:        key: value
-//  2. quoted scalar: key: "value"  or  key: 'value'
-//  3. inline list:   key: [a, b, "c"]
-//  4. block list:    key:
-//     - a
-//     - b
-//     block scalar:  key: |
-//     line 1
-//     line 2
-//
-// Multi-line shapes (block list, block scalar) own their continuation
-// lines as long as those lines are indented MORE than the parent key
-// (or are blank). The block ends as soon as we see a non-blank line
-// whose indentation drops back to the parent's column.
-//
-// Comments (`# ...`) and blank lines are skipped at the top level. A
-// line we can't classify is silently ignored — frontmatter is
-// developer-facing, and erroring on every typo would block startup.
-func parseFrontmatter(lines []string) (map[string]string, map[string][]string) {
-	scalars := map[string]string{}
-	lists := map[string][]string{}
-
-	for i := 0; i < len(lines); i++ {
-		raw := strings.TrimRight(lines[i], "\r")
-		trim := strings.TrimSpace(raw)
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		// Only top-level (column 0) keys are scanned here. Indented
-		// lines belong to whatever block we're currently inside, and
-		// the block-consuming branches below advance `i` past them.
-		if leadingSpaces(raw) > 0 {
-			continue
-		}
-		idx := strings.Index(raw, ":")
-		if idx <= 0 {
-			continue
-		}
-		key := strings.TrimSpace(raw[:idx])
-		val := strings.TrimSpace(raw[idx+1:])
-
-		// Shape 4a: block scalar `key: |`
-		if val == "|" || val == "|-" {
-			block, next := readBlockScalar(lines, i+1)
-			scalars[key] = block
-			i = next - 1
-			continue
-		}
-		// Shape 4b: block list when value is empty and next non-blank
-		// line is an indented `- item`.
-		if val == "" {
-			items, next, ok := readBlockList(lines, i+1)
-			if ok {
-				lists[key] = items
-				i = next - 1
-				continue
-			}
-			// Empty value, no block — record as empty scalar so the
-			// presence of the key is at least observable.
-			scalars[key] = ""
-			continue
-		}
-		// Shape 3: inline list `[a, b, "c"]`
-		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			lists[key] = splitInlineList(val[1 : len(val)-1])
-			continue
-		}
-		// Shapes 1 + 2: scalar, optionally quoted.
-		scalars[key] = unquote(val)
-	}
-	return scalars, lists
-}
-
-// leadingSpaces counts spaces (not tabs — frontmatter convention is
-// 2-space indent) at the start of the line. Used to detect whether a
-// line is a top-level key or a continuation of a multi-line block.
-func leadingSpaces(s string) int {
-	n := 0
-	for n < len(s) && s[n] == ' ' {
-		n++
-	}
-	return n
-}
-
-// readBlockScalar consumes lines starting at `from` that are indented
-// (or blank), stripping that indent and joining with `\n`. Returns the
-// joined body and the index of the first un-consumed line.
-//
-// We use the minimum indentation of the *first* non-blank continuation
-// line as the strip amount — matches YAML literal block semantics
-// well enough for skill frontmatter, where authors don't write
-// indentation-sensitive content.
-func readBlockScalar(lines []string, from int) (string, int) {
-	// Find indent off the first non-blank line.
-	indent := -1
-	for i := from; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "" {
-			continue
-		}
-		if leadingSpaces(lines[i]) == 0 {
-			break // unindented = block ended before it began
-		}
-		indent = leadingSpaces(lines[i])
-		break
-	}
-	if indent < 0 {
-		return "", from
-	}
-
-	var out []string
-	i := from
-	for ; i < len(lines); i++ {
-		raw := strings.TrimRight(lines[i], "\r")
-		if strings.TrimSpace(raw) == "" {
-			out = append(out, "")
-			continue
-		}
-		if leadingSpaces(raw) < indent {
-			break
-		}
-		out = append(out, raw[indent:])
-	}
-	// Trim trailing blank lines — they're usually accidental in
-	// frontmatter and noisy in `status` output.
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-	return strings.Join(out, "\n"), i
-}
-
-// readBlockList consumes "  - item" lines starting at `from`, ignoring
-// blank lines. Returns the items, the index of the first un-consumed
-// line, and `ok=false` if the very first non-blank line isn't a list
-// item (in which case the caller treats the parent key as an empty
-// scalar).
-func readBlockList(lines []string, from int) ([]string, int, bool) {
-	var items []string
-	saw := false
-	i := from
-	for ; i < len(lines); i++ {
-		raw := strings.TrimRight(lines[i], "\r")
-		if strings.TrimSpace(raw) == "" {
-			if saw {
-				// Permit blank lines between items, but stop if we
-				// see one before any item appears (avoids consuming
-				// the whole rest of the frontmatter).
-				continue
-			}
-			continue
-		}
-		if leadingSpaces(raw) == 0 {
-			break
-		}
-		t := strings.TrimSpace(raw)
-		if !strings.HasPrefix(t, "- ") && t != "-" {
-			if !saw {
-				return nil, from, false
-			}
-			break
-		}
-		saw = true
-		item := strings.TrimSpace(strings.TrimPrefix(t, "-"))
-		items = append(items, unquote(item))
-	}
-	return items, i, saw
-}
-
-// splitInlineList splits "a, b, \"c\"" into ["a", "b", "c"]. Naïve
-// comma split is fine for skill frontmatter — list items are short
-// identifiers ("Read", "Grep") and never contain commas.
-func splitInlineList(s string) []string {
-	var out []string
-	for part := range strings.SplitSeq(s, ",") {
-		p := unquote(strings.TrimSpace(part))
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// unquote strips wrapping "double" or 'single' quotes if both ends
-// match. Matches what humans write when a value contains a colon.
-func unquote(v string) string {
-	if len(v) >= 2 {
-		if (v[0] == '"' && v[len(v)-1] == '"') ||
-			(v[0] == '\'' && v[len(v)-1] == '\'') {
-			return v[1 : len(v)-1]
-		}
-	}
-	return v
 }
 
 // Set is a name-indexed collection of skills. Construction is via

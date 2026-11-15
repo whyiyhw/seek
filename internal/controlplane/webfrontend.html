@@ -1,8 +1,11 @@
 <!doctype html>
-<!-- seek web MVP (card c_qucxtu) — single page, ~150 lines, zero build
-     chain. Deliberately out of scope: multi-tab sync, history
-     persistence, markdown rendering, task panels, mobile, real auth
-     (design card c_7pptol owns the full UI). -->
+<!-- seek web MVP (card c_qucxtu) — single page, zero build chain.
+     Message rendering: minimal markdown per feature-web-frontend §2.6
+     — fenced ``` blocks → <pre>, `inline` → <code>, everything else
+     verbatim plain text; DOM API only (§5.5), no HTML-parsing sink.
+     Deliberately out of scope: multi-tab sync, history persistence,
+     FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
+     mobile, real auth (design card c_7pptol owns the full UI). -->
 <html lang="zh">
 <head>
 <meta charset="utf-8">
@@ -21,6 +24,10 @@
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
+  .msg pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+             padding: 8px 10px; margin: 6px 0; overflow-x: auto;
+             white-space: pre; font: inherit; }
+  .msg code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
   .you { margin-left: auto; background: #2c3d5f; }
   .seek { background: #242830; }
   .hint { color: #7a8089; font-style: italic; }
@@ -55,10 +62,52 @@ function setStatus(text, ok) {
   status.textContent = text;
   status.className = ok ? 'ok' : 'warn';
 }
+// 行内码：`code` → <code>，未配对反引号原样保留。文本只走
+// createTextNode/textContent——模型输出永远不被当 HTML 解析（§5.5）。
+function appendInline(parent, text) {
+  for (;;) {
+    const i = text.indexOf('`');
+    if (i < 0) break;
+    if (i > 0) parent.appendChild(document.createTextNode(text.slice(0, i)));
+    const j = text.indexOf('`', i + 1);
+    if (j < 0) { parent.appendChild(document.createTextNode(text.slice(i))); return; }
+    const code = document.createElement('code');
+    code.textContent = text.slice(i + 1, j);
+    parent.appendChild(code);
+    text = text.slice(j + 1);
+  }
+  if (text) parent.appendChild(document.createTextNode(text));
+}
+
+// 最小 markdown 渲染（§2.6 MVP，卡 c_iha3fr）：行首 ``` 围栏 → <pre>，
+// 其余纯文本原样（换行交给 .msg 的 pre-wrap）。未闭合围栏吞到文本末尾。
+// 只用 createElement/createTextNode——整页不存在 HTML 字符串解析路径。
+function renderBody(el, text) {
+  const lines = text.split('\n');
+  let i = 0, plain = '';
+  const flush = () => { if (plain) { appendInline(el, plain); plain = ''; } };
+  while (i < lines.length) {
+    if (lines[i].startsWith('```')) {
+      flush();
+      const buf = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) { buf.push(lines[i]); i++; }
+      i++;  // 越过闭合围栏；到 EOF 即未闭合——吞到末尾（已定义行为）
+      const pre = document.createElement('pre');
+      pre.textContent = buf.join('\n');
+      el.appendChild(pre);
+    } else {
+      plain += lines[i] + (i < lines.length - 1 ? '\n' : '');
+      i++;
+    }
+  }
+  flush();
+}
+
 function addMsg(who, text) {
   const el = document.createElement('div');
   el.className = 'msg ' + who;
-  el.textContent = text;               // textContent: no HTML injection, ever
+  renderBody(el, text);                // 纯 DOM 构建：无 HTML 注入面
   list.appendChild(el);
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
 }
