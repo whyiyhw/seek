@@ -441,7 +441,7 @@ v2 没有把 v0 推翻——单文件 .md 永远兼容, 没有 "manifest" 或者
 
 ### 草稿区:一面现成的承重墙
 
-草稿落在 `~/.seek/skills/.drafts/<name>/`——**在 skills 树内、但 loader 不可见**。不可见性不靠新机制:11.3 的扫描本来就跳过 `.` 开头的条目,这面墙 v0 就存在(`.stats.jsonl` 已经开过"seek 私有状态以 dotfile 住在 skills 树里"的先例),蒸馏只需要一条回归测试把它钉死。草稿必须是能被 `skill.Parse` 原样解析的合法包——**"草稿"与"正式包"的差别只在位置,不在格式**:安装 = 目录移动,激活路径零新代码。
+草稿落在 `~/.seek/skills/.drafts/<name>/`——**在 skills 树内、但 loader 不可见**。不可见性不靠新机制:目录包扫描的 `loadFromDir` 本来就跳过 `.` 开头的条目(17.3 的 v2 loader, 注释明言刻意),这面墙那时就砌好了(`.stats.jsonl` 已经开过"seek 私有状态以 dotfile 住在 skills 树里"的先例),蒸馏只需要一条回归测试把它钉死。草稿必须是能被 `skill.Parse` 原样解析的合法包——**"草稿"与"正式包"的差别只在位置,不在格式**:安装 = 目录移动,激活路径零新代码。
 
 写盘纪律对齐本章的既定红线(`~/.seek/skills/` 下写盘只许 `skillmgr` 与 `skillstats`):`.drafts/` 的一切写删独占在 `skillmgr` 的 DraftStore;认知逻辑所在的 `internal/skilldistill` 零文件系统副作用——可测性与第 16 章 Distiller 同款(假 chatClient 注入)。不出现第三个能写 skills 树的包。
 

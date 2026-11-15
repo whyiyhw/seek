@@ -404,7 +404,7 @@ type Frontend interface {
 - **权限**：print 模式的初始 pref 就是 deny（无人可交互审批）——危险动作返回 `ErrDenied` **工具结果**（第 5 章 §5.4 的老朋友），agent 收到后自行调整、run 正常结束。于是远程默认体验是个有趣的倒置：**比本地 TUI 更保守**——能读写项目目录、不能跑任何 shell；per-binding 显式 yolo 是唯一放宽口。
 - **并发**：同会话串行（防 transcript 写冲突 + resume 竞态）、跨会话并行、全局并发上限；`/cancel` 故意放在执行器**外面**——取消指令绝不能排在它要杀的那条 run 后面。
 
-bindings（ConvID ↔ 项目路径 ↔ session id）持久化在 `~/.seek/serve/bindings.json`。这**不违反**第 9 章"从 transcript 重建状态"的纪律：那条约束管的是 agent/plan 状态——平面的路由表在 agent transcript 之外，本来就没有第二个事实来源，持久化它是诚实而不是漂移。
+bindings（ConvID ↔ 项目路径 ↔ session id）持久化在 `~/.seek/serve/bindings.json`。这**不违反**"agent 运行时状态从誊本重建、不养平行状态文件"的纪律：那条约束管的是 agent/plan 状态——平面的路由表在 agent transcript 之外，本来就没有第二个事实来源，持久化它是诚实而不是漂移。
 
 ### 与零-daemon 铁律的正面冲突
 
