@@ -44,3 +44,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_c4cs4a：web 会话历史·W4.1：POST /rpc JSON-RPC 2.0 envelope + method registry + 错误码
 - c_fzqsbi：worktree GC 加年龄兜底：never-discarded 孤儿 ref 永生（6 个 6 月实例手工清除实录）
 - c_jdwywj：skill-distill：StrengthenDraft 按 SessionID 去重缺口（二期遗留，c_jqwd72 巡检确认未修）
+- c_3d2bil：编排 P2-c：内置类型包升级——explore/judge/general 类型化+默认路由

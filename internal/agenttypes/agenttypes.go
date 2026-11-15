@@ -27,8 +27,10 @@
 //   - Spawn-time semantics (registry intersection, policy
 //     restriction, routing). The Definition is data; since P2-b
 //     internal/subagent's D13 gate (custom.go) adapts it into the
-//     spawn-time Template via ManagerOpts.AgentTypes. The `agent`
-//     tool schema's dynamic enum remains M-O2.2.
+//     spawn-time Template via ManagerOpts.AgentTypes, and since P2-c
+//     every origin routes through that one path. The `agent` tool
+//     schema enum is generated from the registry at startup by
+//     internal/tools/agent (D12).
 //   - Hot reload — loaded once at session start. A later turn's file
 //     edits are invisible until the next seek launch (deliberate:
 //     schema bytes are frozen per-process for the prefix cache).
@@ -51,6 +53,12 @@ const (
 	OriginBuiltin Origin = iota
 	OriginProject
 	OriginUser
+	// OriginConfig tags a built-in clone carrying the config `agents`
+	// section's routing overrides (P2-c, D6/D14): provider/model/
+	// effort/max_turns only — tools, body and workflow are copied
+	// verbatim from the built-in, because config routes brains, never
+	// permissions.
+	OriginConfig
 )
 
 // String returns the lowercase tag used in /agents and tests.
@@ -62,6 +70,8 @@ func (o Origin) String() string {
 		return "project"
 	case OriginUser:
 		return "user"
+	case OriginConfig:
+		return "config"
 	default:
 		return "unknown"
 	}

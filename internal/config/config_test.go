@@ -285,3 +285,51 @@ func TestServeYolo_DefaultOff(t *testing.T) {
 		t.Error("yolo must default off")
 	}
 }
+
+// TestAgentsConfig_RoundTrip: the `agents` section (P2-c default
+// routing, feature-orchestration.md D6/D14) survives save/load and
+// stays absent for configs written before the section existed.
+func TestAgentsConfig_RoundTrip(t *testing.T) {
+	withSeekHome(t)
+	cfg := Config{
+		Agents: map[string]AgentConfig{
+			"explore": {Provider: "glm", Model: "glm-5.3", Effort: "low", MaxTurns: 60},
+			"plan":    {Provider: "glm"},
+		},
+	}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := got.Agents["explore"]
+	if !ok {
+		t.Fatal("agents section lost in round-trip")
+	}
+	if e.Provider != "glm" || e.Model != "glm-5.3" || e.Effort != "low" || e.MaxTurns != 60 {
+		t.Errorf("explore entry round-trip: %+v", e)
+	}
+	if p := got.Agents["plan"]; p.Provider != "glm" || p.Model != "" {
+		t.Errorf("plan entry round-trip: %+v", p)
+	}
+}
+
+// TestAgentsConfig_AbsentSectionCompat: a pre-P2-c config (no agents
+// key) loads with a nil map — unknown top-level keys never error, and
+// nil is the "built-ins only" signal cmd/seek branches on.
+func TestAgentsConfig_AbsentSectionCompat(t *testing.T) {
+	withSeekHome(t)
+	cfg := Config{Language: "zh"} // no Agents
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agents != nil {
+		t.Errorf("Agents = %v, want nil for a config without the section", got.Agents)
+	}
+}
