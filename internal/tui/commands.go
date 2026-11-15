@@ -2294,16 +2294,16 @@ func agentTypesHint(m *Model, base string) string {
 
 // cmdAgentTypes renders the typed-agent registry: every type the
 // session knows, project-defined first (insertion order), then user,
-// then the three built-ins (feature-orchestration.md P2-a / D10-D12).
-// Human-facing counterpart of what M-O2.2 will inject into the
-// `agent` tool schema enum.
+// then config overrides, then the three built-ins
+// (feature-orchestration.md P2-a/P2-c / D10-D12). Human-facing
+// counterpart of the `agent` tool schema's dynamic enum (M-O2.2).
 func cmdAgentTypes(m *Model) cmdResult {
 	if m.opts.AgentTypes == nil {
 		return cmdResult{text: styleMuted.Render("/agents types: unavailable (--no-save or session not initialised)")}
 	}
 	defs := m.opts.AgentTypes.List()
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("%d agent type(s) defined (project > user > builtin on name collision)", len(defs))))
+	fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("%d agent type(s) defined (project > user > config > builtin on name collision)", len(defs))))
 	fmt.Fprintf(&b, "%-18s %-8s %-22s %s\n", "TYPE", "ORIGIN", "LANE", "DESCRIPTION")
 	for _, d := range defs {
 		lane := "inherit"

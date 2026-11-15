@@ -22,22 +22,41 @@ type LoadStats struct {
 
 // LoadOptions controls Load. ProjectDir defaults to "." (cwd).
 // UserAgentsDir overrides paths.UserAgents() (~/.seek/agents/) — tests
-// inject fakes through it.
+// inject fakes through it. ConfigAgents is the config `agents` 段
+// (P2-c): per-built-in routing overrides applied between the file
+// scopes and the built-ins (D14's "插在 builtin 与文件层之间").
 type LoadOptions struct {
 	ProjectDir    string
 	UserAgentsDir string // empty = default ~/.seek/agents/
+	ConfigAgents  map[string]RouteOverride
+}
+
+// RouteOverride is one config `agents`-section entry as data — the
+// routing knobs a config layer may set on a built-in type (D6's
+// minimal-override shape, realised in P2-c). Tools/body/workflow are
+// deliberately absent: the override clones a built-in and may only
+// re-route it, never re-permission or re-prompt it (D13's tighten-only
+// axis has no config surface; those fields belong to agents/*.md).
+type RouteOverride struct {
+	Provider string
+	Model    string
+	Effort   string // "" | low | medium | high — legalEfforts, validated in Load
+	MaxTurns int    // > 0 or ignored with a warning
 }
 
 // Load discovers and parses agent-type definitions from the two
-// on-disk scopes plus the compile-time built-ins:
+// on-disk scopes, the config override layer, and the compile-time
+// built-ins:
 //
 //  1. <project>/.seek/agents/   — project-level, checked-in (wins)
 //  2. ~/.seek/agents/           — user-level
-//  3. Builtins()                — general-purpose / explore / plan
+//  3. ConfigAgents              — config `agents` 段 routing overrides
+//  4. Builtins()                — general-purpose / explore / plan
 //
 // First writer wins on name collision, so a project `explore.md`
-// overrides a user `explore.md`, which overrides the built-in explore
-// (D11's scope stack: 内置默认 < agents/*.md, project > user). Bad
+// overrides a user `explore.md`, which overrides a config entry, which
+// overrides the built-in explore (the scope stack 内置默认 < config 段
+// < agents/*.md, project > user — D11 + D14 as landed in P2-c). Bad
 // files are recorded in stats.Errors and skipped — they don't block
 // startup, and they never shadow a working definition of the same name
 // from a lower scope... except within one directory: two files in the
@@ -80,7 +99,10 @@ func Load(opts LoadOptions) (*Set, LoadStats, error) {
 		stats.Errors = append(stats.Errors, errs...)
 	}
 
-	// Built-ins fill the names no file provided.
+	// Config layer (P2-c): between the file scopes and the built-ins.
+	stats.BySource["config agents"] = applyConfigOverrides(set, opts.ConfigAgents, &stats)
+
+	// Built-ins fill the names nothing above provided.
 	for _, def := range Builtins() {
 		if set.Add(def) {
 			stats.BySource["builtin"]++
@@ -88,6 +110,89 @@ func Load(opts LoadOptions) (*Set, LoadStats, error) {
 	}
 
 	return set, stats, nil
+}
+
+// applyConfigOverrides merges the config `agents` 段 into the set as
+// OriginConfig clones of the built-ins. Keys are visited in sorted
+// order so the Set's insertion order (and everything derived from it —
+// /agents types, the schema enum) is deterministic for a given
+// config: the D12 byte-discipline depends on it.
+//
+// Semantics per key:
+//
+//   - names a built-in (and no file claimed it) → clone the built-in,
+//     override the routing knobs, Origin=OriginConfig;
+//   - names a type a FILE already defined → the file wins (config <
+//     files); Add records the loss in Set.Shadowed, silent by design —
+//     same convention as project-over-user;
+//   - names nothing known (no built-in, no file type) → warning into
+//     stats.Errors and ignored: forward-compat, a config written for a
+//     newer seek (or a type since deleted) must not break startup.
+//
+// Field-level shape errors (bad effort, non-positive max_turns) warn
+// and drop just that field, not the whole entry.
+func applyConfigOverrides(set *Set, overrides map[string]RouteOverride, stats *LoadStats) int {
+	if len(overrides) == 0 {
+		return 0
+	}
+	builtinByName := map[string]*Definition{}
+	for _, b := range Builtins() {
+		builtinByName[b.Name] = b
+	}
+
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	applied := 0
+	for _, name := range names {
+		ov := overrides[name]
+		base := builtinByName[name]
+		if base == nil {
+			if set.Get(name) == nil {
+				stats.Errors = append(stats.Errors, fmt.Errorf(
+					"agents: config key %q matches no built-in or file type — ignored", name))
+			} else {
+				// A file type owns the name; config < files. Record
+				// the loss through Add's shadow bookkeeping (a
+				// name-only stub — Add stores nothing on a lost race)
+				// so /agents types shows the override provenance.
+				set.Add(&Definition{Name: name, Source: "config:agents:" + name})
+			}
+			continue
+		}
+		clone := *base // shallow: Tools/Body shared read-only, never mutated
+		if ov.Provider != "" {
+			clone.Provider = ov.Provider
+		}
+		if ov.Model != "" {
+			clone.Model = ov.Model
+		}
+		if ov.Effort != "" {
+			if !legalEfforts[ov.Effort] {
+				stats.Errors = append(stats.Errors, fmt.Errorf(
+					"agents: config %q effort %q — valid: low, medium, high; field ignored", name, ov.Effort))
+			} else {
+				clone.Effort = ov.Effort
+			}
+		}
+		if ov.MaxTurns != 0 {
+			if ov.MaxTurns < 0 {
+				stats.Errors = append(stats.Errors, fmt.Errorf(
+					"agents: config %q max_turns %d — must be positive; field ignored", name, ov.MaxTurns))
+			} else {
+				clone.MaxTurns = ov.MaxTurns
+			}
+		}
+		clone.Origin = OriginConfig
+		clone.Source = "config:agents:" + name
+		if set.Add(&clone) {
+			applied++
+		}
+	}
+	return applied
 }
 
 // loadFromDir reads one scope directory. Missing directory is the
