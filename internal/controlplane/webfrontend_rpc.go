@@ -10,9 +10,12 @@ package controlplane
 // frontend's status-code + JSON-body convention shared with /msg.
 //
 // The registry is built once in NewWeb and only Dispatched by handlers
-// — the §3.2 phase contract. W4.1 ships it empty (every method answers
-// -32601); the session/memory/project method sets (W4.2/W4.3) register
-// into it before Run.
+// — the §3.2 phase contract. NewWeb itself registers nothing (a bare
+// frontend answers -32601 for everything); the session method set
+// (W4.2) hangs off at servecli assembly via
+// methods.NewSessionsFromEnv().RegisterAll — pre-Run, with lazy store
+// resolution — and the memory/project sets (W4.3) follow the same
+// shape.
 
 import (
 	"encoding/json"
