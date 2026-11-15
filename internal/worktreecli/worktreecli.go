@@ -11,9 +11,12 @@
 //     git worktree list --porcelain (sees worktrees from
 //     prior sessions too, not just current process).
 //   - gc:    prune refs/seek/discarded/<ts> rescue-stash refs
-//     past --older-than (default 48h). The same routine
-//     that runs at seek startup; CLI exposes it for users
-//     who want explicit "I'm cleaning up now".
+//     past --older-than (default 48h), PLUS the age-based
+//     orphan fallback: unmarked refs/seek/worktrees/<id> pins
+//     past --orphan-after (default 7d) whose branches carry no
+//     unmerged commits. The same routines that run at seek
+//     startup; CLI exposes them for users who want explicit
+//     "I'm cleaning up now".
 //   - help / --help / -h: print usage.
 //
 // The handlers construct a fresh worktree.Manager rooted at
@@ -60,6 +63,9 @@ Usage:
   seek worktree list                        list seek-managed worktrees on disk
   seek worktree gc [--older-than DURATION]  prune rescue-stash refs (default 48h;
                                             --older-than 0 prunes everything)
+      [--orphan-after DURATION]             also collect unmarked orphan worktrees
+                                            past this age (default 7d; 0 disables;
+                                            skips refs with unmerged commits)
   seek worktree help                        show this help
 
 These worktrees are created by the `+"`agent`"+` tool with isolation="worktree"
@@ -109,14 +115,17 @@ func cmdList(args []string, stdout, stderr io.Writer) error {
 }
 
 // cmdGC prunes refs/seek/discarded/<ts> refs older than the
-// supplied threshold. Mirrors what runs at seek startup —
-// exposing it as a CLI lets users force-prune from a script or
-// shell session without launching the TUI.
+// supplied threshold, then runs the age-based orphan fallback
+// (--orphan-after, default 7d, 0 disables). Mirrors what runs at
+// seek startup — exposing it as a CLI lets users force-prune from
+// a script or shell session without launching the TUI.
 func cmdGC(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("worktree gc", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	olderThan := fs.Duration("older-than", 48*time.Hour,
 		`prune refs older than this (e.g. 48h, 7d=168h, 0 = all)`)
+	orphanAfter := fs.Duration("orphan-after", worktree.DefaultOrphanAge,
+		`collect unmarked orphan worktrees older than this (0 = disable)`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -141,6 +150,22 @@ func cmdGC(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stdout, "pruned 1 discarded ref")
 	} else {
 		fmt.Fprintf(stdout, "pruned %d discarded refs\n", n)
+	}
+	if *orphanAfter <= 0 {
+		return nil
+	}
+	o, err := mgr.PruneOrphans(ctx, *orphanAfter, func(format string, args ...any) {
+		fmt.Fprintf(stderr, format+"\n", args...)
+	})
+	if err != nil {
+		return fmt.Errorf("worktree gc: orphan pass: %w", err)
+	}
+	if o == 0 {
+		fmt.Fprintln(stdout, "no orphan worktrees to collect")
+	} else if o == 1 {
+		fmt.Fprintln(stdout, "collected 1 orphan worktree")
+	} else {
+		fmt.Fprintf(stdout, "collected %d orphan worktrees\n", o)
 	}
 	return nil
 }

@@ -73,11 +73,12 @@ When spawned with `isolation="worktree"`, a subagent works in a temporary git wo
 - Worktrees live at `~/.seek/projects/<pid>/worktrees/<wt-id>/`
 - Anchored by a git ref under `refs/seek/worktrees/<wt-id>` (outside the user's default refspec)
 - Dirty-discard safety net: when discarded, content is stashed to `refs/seek/discarded/<ts>` before hard-reset (48-hour recovery window)
+- Orphan self-healing: a session that dies BEFORE cleanup leaves no marker, so the age-based fallback (`--orphan-after`, default 7d) collects unmarked refs at startup/`gc` — but only with no unmerged commits (`merge-base --is-ancestor` vs HEAD) and a clean removable directory; anything dirty/locked/unmerged is skipped + logged for manual review
 - GC via `seek worktree gc` (runs at startup and on demand)
 
 ```bash
 seek worktree list  # Enumerate seek-managed worktrees on disk (prior sessions included)
-seek worktree gc    # Garbage-collect stale worktrees
+seek worktree gc    # Garbage-collect stale worktrees (discarded refs 48h + orphans 7d)
 ```
 
 ---
@@ -108,7 +109,8 @@ seek worktree gc    # Garbage-collect stale worktrees
 # Subagent management is through the agent tool (TUI/chat), not CLI
 # Worktree management:
 seek worktree list  # Enumerate seek-managed worktrees on disk (prior sessions included)
-seek worktree gc    # Prune stale worktrees (rescue-stash refs older than 48h)
+seek worktree gc    # Prune stale worktrees: discarded refs >48h (--older-than),
+                    #   unmarked orphans >7d (--orphan-after; 0 disables)
 ```
 
 Design docs: [`docs/prd/feature-subagent.md`](prd/feature-subagent.md).  

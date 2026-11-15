@@ -1228,7 +1228,10 @@ func run() error {
 	// tool in the schema list, which the prefix cache wants).
 	//
 	// PruneDiscarded fires at startup as a best-effort GC of
-	// 48h-old rescue stashes (PRD §3.8). Failure here doesn't
+	// 48h-old rescue stashes (PRD §3.8). PruneOrphans is the
+	// age-based fallback for sessions that died before
+	// exit_worktree — without it the ref/worktree lives forever
+	// (2026-11-14: six June zombies). Failure of either doesn't
 	// block startup — the worst case is leftover refs the next
 	// `seek worktree gc` reaps.
 	wtMgr, wtErr := worktree.NewManager(abs)
@@ -1237,6 +1240,11 @@ func run() error {
 	} else {
 		if _, perr := wtMgr.PruneDiscarded(ctx, 48*time.Hour); perr != nil {
 			fmt.Fprintln(os.Stderr, "worktree: prune discarded:", perr)
+		}
+		if _, oerr := wtMgr.PruneOrphans(ctx, worktree.DefaultOrphanAge, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		}); oerr != nil {
+			fmt.Fprintln(os.Stderr, "worktree: prune orphans:", oerr)
 		}
 	}
 
