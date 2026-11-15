@@ -398,6 +398,7 @@ func (m Model) renderStatusBar() string {
 		StreamDeltaBytes: m.streamDeltaBytes,
 		UpgradeAvailable: m.upgradeAvailable,
 		SubagentsActive:  subagentsActiveCount(m.opts.Subagents),
+		SubagentsDone:    subagentsDoneCount(m.opts.Subagents),
 		CronsRegistered:  cronsRegisteredCount(),
 		GoalActive:       m.goalActive,
 		GoalTurns:        m.goalTurns,
@@ -415,6 +416,17 @@ func subagentsActiveCount(m *subagent.Manager) int {
 		return 0
 	}
 	return m.ActiveCount()
+}
+
+// subagentsDoneCount nil-safe wraps len(PendingNotices) — the count
+// of background completions whose notice hasn't been ingested yet.
+// PEEK semantics by contract (the Notifier owns the drain); the only
+// cost is the noticeMu lock, held briefly by the enqueue/drain sides.
+func subagentsDoneCount(m *subagent.Manager) int {
+	if m == nil {
+		return 0
+	}
+	return len(m.PendingNotices())
 }
 
 // cronsRegisteredCount opens the routines Store and counts

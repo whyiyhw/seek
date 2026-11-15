@@ -103,7 +103,7 @@ func allCommands() []command {
 		// v5 柱 G subagent surface (PRD docs/prd/feature-subagent.md §4.2).
 		// M11.0 ships a read-only text table; interactive picker
 		// (Enter for detail / `k` to kill) lands in a v0.6.x dot.
-		{names: []string{"/agents"}, usage: "/agents [--all|types]", description: "List subagents in this project: spawn time, type, status, turns, tokens, description. `types` lists defined agent types (built-in + .seek/agents). Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
+		{names: []string{"/agents"}, usage: "/agents [--all|types]", description: "List subagents in this project: spawn time, type, mode, status, tokens, description. `types` lists defined agent types (built-in + .seek/agents). Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
 		// v5 柱 G M11.1 worktree surface (feature-subagent.md §3.8 + §4.2).
 		// Read-only listing; create/cleanup go through the
 		// enter/exit_worktree tools or `seek worktree gc` CLI.
@@ -2252,7 +2252,15 @@ func cmdAgents(m *Model, args string) cmdResult {
 	// event payload + Subagent struct (see feature-subagent.md
 	// §3.4 schema) rather than re-introducing a placeholder.
 	//
-	// Widths: SUB-SID(8) TYPE(11) STATUS(10) DESCRIPTION(50)
+	// MODE column (feature-orchestration PRD §4.1 D2, M-O1.2 TUI
+	// half): "-" for sync spawns, "bg" for background spawns, "bg✓"
+	// once the completion notice was ingested into the parent
+	// session (the `notified` index event). This is the panel's
+	// answer to "Track via /agents" from the background-started
+	// tool result: which children run detached, their terminal
+	// state, and whether the parent has ingested the result yet.
+	//
+	// Widths: SUB-SID(8) TYPE(11) MODE(4) STATUS(10) DESCRIPTION(50)
 	// TOKENS(right). Total fits a typical 100-col TUI comfortably
 	// even with longer descriptions.
 	var b strings.Builder
@@ -2265,18 +2273,34 @@ func cmdAgents(m *Model, args string) cmdResult {
 	} else {
 		fmt.Fprintf(&b, "%s\n", styleMuted.Render(fmt.Sprintf("scope: current session %s (%d subagents) — pass `--all` for project-wide", shortSubSid(currentSid), len(subs))))
 	}
-	fmt.Fprintf(&b, "%-8s %-11s %-10s %-50s %8s\n",
-		"SUB-SID", "TYPE", "STATUS", "DESCRIPTION", "TOKENS")
+	fmt.Fprintf(&b, "%-8s %-11s %-4s %-10s %-50s %8s\n",
+		"SUB-SID", "TYPE", "MODE", "STATUS", "DESCRIPTION", "TOKENS")
 	for _, s := range subs {
 		tokens := s.Tokens.Prompt + s.Tokens.Completion
-		fmt.Fprintf(&b, "%-8s %-11s %-10s %-50s %8d\n",
+		fmt.Fprintf(&b, "%-8s %-11s %-4s %-10s %-50s %8d\n",
 			truncateForCheckpoint(shortSubSid(s.SubSid), 8),
 			truncateForCheckpoint(string(s.Type), 11),
+			subagentModeLabel(s),
 			truncateForCheckpoint(string(s.Status), 10),
 			truncateForCheckpoint(s.Description, 50),
 			tokens)
 	}
 	return cmdResult{text: agentTypesHint(m, strings.TrimRight(b.String(), "\n"))}
+}
+
+// subagentModeLabel renders the /agents MODE cell: sync "-", bg
+// "bg", bg-with-ingested-notice "bg✓". The ✓ is fine in scrollback
+// (tool-result lines already use it); the status-bar-only
+// width-oracle rule doesn't apply to panel text.
+func subagentModeLabel(s subagent.Subagent) string {
+	switch {
+	case s.Background && s.Notified:
+		return "bg✓"
+	case s.Background:
+		return "bg"
+	default:
+		return "-"
+	}
 }
 
 // agentTypesHint appends the custom-types pointer line to a default
