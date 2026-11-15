@@ -57,10 +57,12 @@ const ModelV4Pro = "deepseek-v4-pro"
 // offPeakDiscount.
 //
 // Numbers track the official pricing page (api-docs.deepseek.com/
-// quick_start/pricing), checked 2026-11-14. The English page lists USD,
-// the Chinese page CNY (¥2/¥0.04/¥8 flash · ¥9/¥0.30/¥27 pro, peak) —
-// the same cards at DeepSeek's own implied ~6.67 CNY/USD, NOT a rate
-// change; diff like-for-like currency before bumping.
+// quick_start/pricing), re-checked 2026-11-15. The English page is the
+// anchor: USD cards below, peak tier, off-peak exactly half. The Chinese
+// page has since diverged into a different regional card — flat CNY,
+// no windows (¥1/¥0.02/¥2 flash · ¥3/¥0.025/¥6 pro) — so cross-page
+// comparison reads as a phantom rate change; billing follows the
+// account's region. Diff like-for-like currency before bumping.
 //
 //	V4.1-Flash (deepseek-flash, served by DeepSeek-V4.1-Flash-1017):
 //	    $0.30 miss · $0.006 hit · $1.20 output — effective
