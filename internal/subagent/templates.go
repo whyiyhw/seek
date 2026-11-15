@@ -17,8 +17,10 @@ import (
 // retired into that package. This file is now the adapter from
 // agenttypes.Definition to the spawn-time shape; the byte-identity
 // of the migration is locked by TestBuiltinTemplatesByteIdentical
-// in templates_test.go. File-defined custom types join this table
-// in M-O2.2, not yet.
+// in templates_test.go. File-defined custom types don't join THIS
+// table: since P2-b they flow through the D13 gate in custom.go
+// (ResolveCustomType) at spawn time, sharing only the defToTemplate
+// adapter so both paths translate identically.
 //
 // See docs/prd/feature-subagent.md §3.6 for the source-of-truth
 // table; changes to the built-in values must edit
@@ -69,24 +71,18 @@ var planAnalyzeWorkflow = permission.WorkflowPlanAnalyze
 var templates = builtinsToTemplates(agenttypes.Builtins())
 
 // builtinsToTemplates maps compile-time type definitions onto the
-// spawn-time Template shape. Workflow "plan-analyze" (the only legal
-// tightening, enforced by agenttypes.Parse for files and simply
-// trusted for the hand-written built-ins) becomes the shared
-// Restriction pointer; Definition.Body becomes Template.Extra
-// verbatim — it lands in child system prompts, so "verbatim" is a
-// prefix-cache contract, not a style choice.
+// spawn-time Template shape via defToTemplate (custom.go) — the same
+// adapter serves file-defined types since P2-b, so a built-in and a
+// custom type with identical declarations adapt identically.
+// Workflow "plan-analyze" (the only legal tightening, enforced by
+// agenttypes.Parse for files and by the D13 gate for every source)
+// becomes the shared Restriction pointer; Definition.Body becomes
+// Template.Extra verbatim — it lands in child system prompts, so
+// "verbatim" is a prefix-cache contract, not a style choice.
 func builtinsToTemplates(defs []*agenttypes.Definition) map[Type]Template {
 	m := make(map[Type]Template, len(defs))
 	for _, d := range defs {
-		t := Template{
-			Type:      Type(d.Name),
-			ToolNames: d.Tools,
-			Extra:     d.Body,
-		}
-		if d.Workflow == "plan-analyze" {
-			t.Restriction = permission.Restriction{Workflow: &planAnalyzeWorkflow}
-		}
-		m[Type(d.Name)] = t
+		m[Type(d.Name)] = defToTemplate(d)
 	}
 	return m
 }

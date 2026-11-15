@@ -1125,9 +1125,11 @@ func run() error {
 	// Typed agent definitions (feature-orchestration.md P2-a): loaded
 	// ONCE here — no hot reload, the same per-process freeze the skill
 	// manifest breaks out of only via explicit /skill_commit paths.
-	// Custom types are listed by /agents types; wiring them into the
-	// `agent` tool schema + spawn path is M-O2.2. Errors non-fatal,
-	// same posture as skills.
+	// Custom types are listed by /agents types and, since P2-b,
+	// spawnable through the Manager (AgentTypes below + the D13 gate
+	// in internal/subagent/custom.go); the `agent` tool schema's
+	// dynamic enum remains M-O2.2. Errors non-fatal, same posture as
+	// skills.
 	agentTypes, agentTypeStats, _ := agenttypes.Load(agenttypes.LoadOptions{ProjectDir: cwd})
 	for _, err := range agentTypeStats.Errors {
 		fmt.Fprintln(os.Stderr, "agents:", err)
@@ -1638,6 +1640,14 @@ func run() error {
 			// 柱 K bgjob ctx-discipline lifted to agent level
 			// (feature-orchestration PRD §4.1 D1).
 			SessionCtx: ctx,
+			// P2-b D13: custom file-defined agent types become
+			// spawnable through the gate (unknown tools degrade to
+			// the general-purpose toolset with the startup warning
+			// below; everything else fails the spawn loudly). The
+			// `agent` tool schema's enum stays built-in-only until
+			// M-O2.2 — the Manager, not the schema, is the
+			// validation point.
+			AgentTypes: agentTypes,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
 				client:    dsClient,
 				provider:  provider,
@@ -1854,6 +1864,26 @@ func run() error {
 			}
 		}
 		hooksReg.Register(memHook)
+	}
+
+	// P2-b D13 startup gate: validate every custom agent type's tool
+	// whitelist against the FINAL parent registry — plan/propose land
+	// above, MCP / env-gated tools (webfetch, fim_complete, think…)
+	// vary the registry earlier, so this pass must run after the last
+	// reg.Add. Unknown tool names are config errors: warn here (the
+	// loud half of D13); at spawn the affected type degrades to the
+	// general-purpose toolset — never silently narrowed. Provider and
+	// workflow errors are warned about too and hard-fail the spawn
+	// with the same message when the type is actually used.
+	if agentTypes != nil && agentTypes.CustomCount() > 0 {
+		for _, def := range agentTypes.List() {
+			if def.Origin == agenttypes.OriginBuiltin {
+				continue
+			}
+			if err := subagent.ValidateCustomType(def, reg.Names()); err != nil {
+				fmt.Fprintf(os.Stderr, "agents: %s: %v\n", def.Source, err)
+			}
+		}
 	}
 
 	var observeResultChan <-chan memory.ObserveResult

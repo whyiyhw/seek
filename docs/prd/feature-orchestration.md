@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature（编排承重轴，平台化线）
 **前置阅读**：[`feature-subagent.md`](feature-subagent.md)（柱 G 已交付面——本文的扩基线）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K 进程级后台先例）、[`v5.md`](v5.md) §2（跨柱约束六条）、[`v7.md`](v7.md)（autopilot/sandbox 已交付面）、[`docs/comparison.md`](../comparison.md) 头部「定位变更」+ §10
-**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· P1 已交付（v0.11.0，per-spawn provider/model 形态；P1-a 生命周期骨架见卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh 唤醒，`run_in_background`+`isolation=worktree` 暂拒，续话复活 D3 留 P1-b）· **P2-a（M-O2.1）已实现**（2026-11-14，卡 c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 共享解析（从 skill 提取）、内置三模板迁移为 `agenttypes.Builtins()` 数据源（spawn 路径字节不变，等值测试锁死）、`/agents types` 列出注册表。M-O2.2（schema 动态 enum + spawn 消费自定义 type）与 M-O2.3（agentsmgr 写路径 + CLI）未做。
+**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· P1 已交付（v0.11.0，per-spawn provider/model 形态；P1-a 生命周期骨架见卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh 唤醒，`run_in_background`+`isolation=worktree` 暂拒，续话复活 D3 留 P1-b）· **P2-a（M-O2.1）已实现**（2026-11-14，卡 c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 共享解析（从 skill 提取）、内置三模板迁移为 `agenttypes.Builtins()` 数据源（spawn 路径字节不变，等值测试锁死）、`/agents types` 列出注册表。· **P2-b 已实现**（2026-11-14，卡 c_7xmecm）：D13 门 `internal/subagent/custom.go`——`ManagerOpts.AgentTypes` 接入后自定义 type 可 spawn（file 覆盖内置名生效、per-call provider/model 覆盖 def 声明、def 补空缺），`ValidateCustomType` 启动警告 + 未知工具名降级 general-purpose 工具集（不静默收窄），非法形状表驱动全测；loader 只读由行为测试钉死（无任何 os 写调用）。M-O2.2 剩余（schema 动态 enum——`agent` 工具 schema 的 subagent_type 仍内置三枚举）与 M-O2.3（agentsmgr 写路径 + CLI）未做。
 **定位依据**：用户 2026-11-13 指认（butler 决策流）——comparison.md 降级的正确口径是「**外围功能不追平，承重轴追平甚至反超**」，编排层四件是承重轴：①复杂任务拆解天花板 = 编排天花板；②dogfood 现在依赖 CC 形态会话管理 seek，编排不补则自举隔一层；③模型路由是三车道设计（DeepSeek 真值 / GLM 量 / 兜底）在编排层的兑现点。领先面确认不重做：无人值守编排（零 daemon cron / autopilot 舰队 / goal headless）与成本纪律。
 
 ---
@@ -361,7 +361,7 @@ max_bytes = 2048                                   # 而不是每次现场生成
 | GLM 车道限流叠加 MaxConcurrent=3 并发放大 | 路由不放宽容量门；config 段可加 `max_turns` 收紧；实战反馈再调 |
 | per-type 路由 + DeepSeek-only 工具（think）静默失败 | D8 启动期过滤 + 验收 #9 |
 | 动态 enum 后 schema 膨胀（type 描述过长） | D12 描述上限 + schema hash 测试钉字节 |
-| frontmatter `tools` 拼错静默放大到全集 | D13 未知工具名 = 配置错误拒绝注册，不 fallback 到全集 |
+| frontmatter `tools` 拼错静默放大到全集 | D13 未知工具名 = 配置错误：启动警告 + 该 type 降级 general-purpose 工具集（响亮且不静默收窄，P2-b 实现） |
 | `pre_prompt_inject` 被滥用改写历史 | 三区模型 + 验收 #3/#5 hash 守护；UserText/system prompt 改写显式否决 |
 | 双 summary 源（completed 事件 vs transcript）漂移 | D5 单源纪律：索引永不带 summary，复活只读 transcript |
 
