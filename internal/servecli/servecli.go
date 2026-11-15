@@ -31,6 +31,7 @@ import (
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/controlplane"
 	"github.com/whyiyhw/seek/internal/controlplane/fake"
+	"github.com/whyiyhw/seek/internal/rpc/methods"
 )
 
 // frontends maps --frontend names to constructors. The default build
@@ -55,7 +56,15 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		if sc != nil {
 			addr = sc.WebAddr
 		}
-		return controlplane.NewWeb(controlplane.WebConfig{Addr: addr})
+		fe := controlplane.NewWeb(controlplane.WebConfig{Addr: addr})
+		// W4.2: hang the session method set on /rpc before Run (the
+		// §3.2 phase contract — NewWeb itself registers nothing, so its
+		// empty-registry contract test stays true). Store resolution is
+		// lazy inside the methods, so this wiring stays free of
+		// filesystem side effects (buildFrontends runs in tests); the
+		// memory/project sets (W4.3) follow the same shape here.
+		methods.NewSessionsFromEnv().RegisterAll(fe.RPCRegistry())
+		return fe
 	},
 }
 

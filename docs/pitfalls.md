@@ -1621,6 +1621,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when a design doc cites a path as "where X lives", verify against the writer of X, not just the path helper's name. Per-project bucketing of sessions = hash of the header's `cwd`, nothing on disk groups them for you.
 - **Refs**: `internal/session/session.go` (ListProject), `internal/paths/paths.go` (ProjectSessionDir comment), `docs/prd/feature-skill-distill.md` §3.1 D
 
+### WebFrontend's cfgErr early-return left RPCRegistry() nil — pre-Run wiring panics on gated-out addresses
+- **Saw**: W4.2 wiring (`methods.NewSessionsFromEnv().RegisterAll(fe.RPCRegistry())` in servecli's web ctor) panicked `assignment to entry in nil map` inside `Registry.Register` — but only in `TestServePlane_BadWebAddrFails`: a web_addr failing the scope gate made NewWeb return before `f.rpcReg = rpc.NewRegistry()`, so RPCRegistry() handed the wiring a zero-value registry.
+- **Why**: NewWeb's failure shape is "hold cfgErr, return early" — fields initialized after the gate stay zero. W4.1's tests only exercised the happy path (its own doc said "the registry constructor cannot fail"), so the nil was latent until the first real pre-Run consumer arrived.
+- **Fix**: build the registry BEFORE the scope gate (webfrontend.go NewWeb) so RPCRegistry() is never nil; registering into a gated-out frontend is harmless because Run fails with cfgErr anyway. Commit with this entry (card c_zam44t).
+- **Lesson**: an accessor exposing a construction-time wiring hook on a constructor with early failure returns must guarantee the hook on EVERY path — otherwise the first downstream wiring becomes a landmine that fires exactly on the failure path, where nobody is looking.
+- **Refs**: `internal/controlplane/webfrontend.go` (NewWeb), `internal/servecli/servecli.go` (web ctor), `internal/rpc/methods/session.go`
+
 ## Tool-failure self-recovery
 
 Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the two-sentence core + a pointer here). Doctrine: self-recovery first — "ask the user" is the LAST resort.

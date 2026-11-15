@@ -15,8 +15,10 @@ package controlplane
 //	GET  /events  SSE downstream: every Send broadcast to all tabs
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	GET  /state   the web conversation's binding, for the status line
-//	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1; registry ships
-//	              empty until the method sets land — see webfrontend_rpc.go)
+//	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1 envelope; the
+//	              session method set registers at servecli assembly —
+//	              W4.2 — NewWeb itself registers nothing; see
+//	              webfrontend_rpc.go)
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -150,6 +152,11 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 		cfg.Banner = os.Stderr
 	}
 	f := &WebFrontend{cfg: cfg}
+	// The registry is built before the scope gate so RPCRegistry() is
+	// never nil even on the cfgErr path — pre-Run method wiring
+	// (W4.2+) must not depend on the address surviving the gate; a
+	// gated-out frontend fails at Run with cfgErr regardless.
+	f.rpcReg = rpc.NewRegistry()
 	// Scope gate before any filesystem work: an out-of-scope address
 	// must fail with the allowlist reason, not a token-file error.
 	if err := checkWebAddr(cfg.Addr); err != nil {
@@ -173,7 +180,6 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
 	f.store = OpenBindingStoreAt(f.cfg.StorePath)
-	f.rpcReg = rpc.NewRegistry()
 	return f
 }
 
