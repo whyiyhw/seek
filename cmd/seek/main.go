@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/autopilot"
@@ -56,9 +58,11 @@ import (
 	"github.com/whyiyhw/seek/internal/sandbox"
 	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/sessioncli"
 	"github.com/whyiyhw/seek/internal/skill"
-	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillcli"
+	"github.com/whyiyhw/seek/internal/skilldistill"
+	"github.com/whyiyhw/seek/internal/skillmgr"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
@@ -86,6 +90,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/wakeup"
 	"github.com/whyiyhw/seek/internal/tools/webfetch"
+	"github.com/whyiyhw/seek/internal/tools/websearch"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
@@ -432,11 +437,30 @@ type subagentRunnerOpts struct {
 	client    *deepseek.Client
 	provider  llm.Provider
 	parentReg *tools.Registry
-	hooksReg  *hooks.Registry
+	// hooksFn resolves the child's hooks Registry per spawn — a
+	// LAZY closure (not a pointer) because the parent's registry
+	// keeps growing after Manager construction (memory hook
+	// registers later), while the child must NEVER see the
+	// background-completion Notifier: a child Prompt runs
+	// ApplyPrePrompt too, and an unscoped Notifier would drain the
+	// parent's pending background notices into the child's
+	// transcript (feature-orchestration §4.1 D2). cmd/seek wires
+	// hooksReg.CloneWithout(notifier). nil = no hooks for children.
+	hooksFn   func() *hooks.Registry
 	maxTokens int
 	maxTurns  int
 	getModel  func() string
 	getEffort func() string
+	// routes maps routing lane names (subagent.ProviderDeepSeek /
+	// ProviderGLM — validated in internal/subagent.ResolveRoute) to
+	// the backend a child spawned on that lane should use
+	// (feature-orchestration.md D7). Built once at startup from
+	// config keys: a lane appears here only when its API key exists,
+	// so "named provider without key" fails the spawn with a
+	// structured error at Runner time instead of silently running on
+	// the parent's lane. Nil/empty map = routing params always fail
+	// (tests that don't exercise routing).
+	routes map[string]subagentRoute
 	// bashGuard, when set, wraps the child's bash tool with a deny check
 	// (v7 柱 N: autopilot subagents deny remote ops). nil = no guard.
 	bashGuard func(command string) (bool, string)
@@ -455,6 +479,41 @@ type subagentRunnerOpts struct {
 	// background manager re-attached; nil disables background jobs in the
 	// subagent (graceful — run_in_background just errors).
 	bgMgr *bgjob.Manager
+}
+
+// subagentRoute is one lane entry in subagentRunnerOpts.routes.
+// Exactly one of client / provider is set, mirroring agent.Config's
+// two-path contract: client = first-class DeepSeek, provider = a
+// pkg/llm lane (GLM rides pkg/llm/compatible with the pinned
+// bigmodel.cn endpoint).
+type subagentRoute struct {
+	client   *deepseek.Client
+	provider llm.Provider
+}
+
+// buildSubagentRoutes constructs the routing table for per-agent
+// model routing (feature-orchestration.md D6/D7): deepseek always
+// (reusing the parent's client when the parent lane IS deepseek, else
+// building one from the config key), glm when GLM_API_KEY /
+// providers.glm is configured. Explicit names only — no key-probing
+// chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
+// table iff its key exists.
+func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute {
+	cfg, _ := config.Load()
+	routes := make(map[string]subagentRoute)
+	if parentClient != nil {
+		routes[subagent.ProviderDeepSeek] = subagentRoute{client: parentClient}
+	} else if k := config.KeyFor(cfg, "deepseek"); k != "" {
+		// Parent session runs a second-tier lane; deepseek routing is
+		// still available when its key is configured.
+		routes[subagent.ProviderDeepSeek] = subagentRoute{client: deepseek.New(deepseek.WithAPIKey(k))}
+	}
+	if k := config.KeyFor(cfg, "glm"); k != "" {
+		routes[subagent.ProviderGLM] = subagentRoute{
+			provider: compatible.New(k, glmBaseURL, "GLM"),
+		}
+	}
+	return routes
 }
 
 // buildSubagentRunner returns the production subagent.Runner that
@@ -519,6 +578,23 @@ func writeSubagentTranscript(job subagent.RunnerJob, msgs []deepseek.Message, mo
 
 func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		// Per-agent model routing (feature-orchestration.md D7):
+		// job.Provider non-empty → resolve the lane's backend from
+		// the route table; empty → inherit the parent instances and
+		// the live session model (the pre-routing path, unchanged).
+		// The effective model feeds agent.Config, Tracker.Record
+		// (per-lane pricing) and the transcript header alike.
+		client, provider, model := opts.client, opts.provider, opts.getModel()
+		if job.Provider != "" {
+			r, ok := opts.routes[job.Provider]
+			if !ok {
+				return subagent.RunnerResult{}, fmt.Errorf(
+					"provider %q has no configured API key — set its env var / config entry, or omit provider to inherit the parent lane", job.Provider)
+			}
+			client, provider = r.client, r.provider
+			model = job.Model // non-empty by ResolveRoute contract
+		}
+
 		// Filter parent registry by ToolNames. The Filter the
 		// Manager performs already strips `agent` and `ask_user`
 		// universally; here we just project parent's registered
@@ -539,6 +615,14 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// policy exists to prevent.
 		childObserved := fsobserve.New()
 		for _, name := range job.ToolNames {
+			// D8 provider-compatibility filter (after the template
+			// Filter): think / fim_complete only work against the
+			// first-class DeepSeek client — a child on any llm.Provider
+			// lane (explicitly routed OR inheriting a second-tier
+			// parent) must not see them.
+			if client == nil && subagent.IsDeepSeekOnlyTool(name) {
+				continue
+			}
 			switch name {
 			case "read":
 				childReg.Add(read.New(job.Policy).WithObserver(childObserved))
@@ -575,18 +659,24 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// instructions. No PrepareMessages (suggester disabled for
 		// subagents per PRD §3.5). Hooks ARE shared with the parent —
 		// pre_tool deny / post_tool observer / audit log all apply to
-		// subagent tool calls (PRD §5.3).
+		// subagent tool calls (PRD §5.3) — resolved through hooksFn
+		// so parent-only hooks (the background Notifier) stay
+		// excluded (see subagentRunnerOpts).
+		var childHooks *hooks.Registry
+		if opts.hooksFn != nil {
+			childHooks = opts.hooksFn()
+		}
 		sub, err := agent.New(agent.Config{
-			Client:         opts.client,
-			Provider:       opts.provider,
-			Model:          opts.getModel(),
-			Effort:         opts.getEffort(),
-			SystemPrompt:   job.SystemPrompt,
+			Client:          client,
+			Provider:        provider,
+			Model:           model,
+			Effort:          opts.getEffort(),
+			SystemPrompt:    job.SystemPrompt,
 			InitialMessages: job.PriorMessages,
-			Tools:          childReg,
-			MaxTokens:      opts.maxTokens,
-			MaxTurns:       opts.maxTurns,
-			Hooks:          opts.hooksReg,
+			Tools:           childReg,
+			MaxTokens:       opts.maxTokens,
+			MaxTurns:        opts.maxTurns,
+			Hooks:           childHooks,
 		})
 		if err != nil {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
@@ -605,7 +695,10 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		for ev := range events {
 			switch e := ev.(type) {
 			case agent.TurnEnd:
-				job.Tracker.Record(e.Usage, opts.getModel(), pricing.CurrentTier(time.Now()))
+				// Effective model, not the parent's — a GLM-routed child
+				// prices at the GLM card (pricing.Cost keys off the model
+				// id; NoOffPeakDiscount keeps flat-rate lanes flat).
+				job.Tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
 			case agent.AgentEnd:
 				totalUsage = e.Usage
 				turnCount = e.Turns
@@ -629,9 +722,9 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// spawn_error rather than wrapping an empty Summary.
 		msgs := sub.Messages()
 		var summary string
-		for i := len(msgs) - 1; i >= 0; i-- {
-			if msgs[i].Role == deepseek.RoleAssistant && len(msgs[i].ToolCalls) == 0 {
-				summary = msgs[i].Content
+		for _, msg := range slices.Backward(msgs) {
+			if msg.Role == deepseek.RoleAssistant && len(msg.ToolCalls) == 0 {
+				summary = msg.Content
 				break
 			}
 		}
@@ -643,7 +736,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// feature-subagent.md §3.3. Extracted to a helper so
 		// the persistence logic is unit-testable without
 		// spinning up the full Runner closure.
-		writeSubagentTranscript(job, msgs, opts.getModel(), totalUsage, turnCount)
+		writeSubagentTranscript(job, msgs, model, totalUsage, turnCount)
 
 		return subagent.RunnerResult{
 			Summary: summary,
@@ -680,6 +773,15 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek session export` — transcript JSONL → human-readable
+	// markdown. Same rationale as skill/memory: export needs neither
+	// API keys nor the agent runtime, and must not collide with the
+	// top-level flags. The markdown renderer lives in
+	// internal/sessionexport (pure, reusable) so the serve web panel
+	// can call it directly when a transcript download button lands.
+	if len(os.Args) >= 2 && os.Args[1] == "session" {
+		return sessioncli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// v3 checkpoint subcommand (PRD docs/prd/feature-checkpoint.md §4.1).
 	// Dispatched ahead of flag.Parse so the user can pass --session etc.
@@ -1024,6 +1126,22 @@ func run() error {
 		fmt.Fprintln(os.Stderr, summary)
 	}
 
+	// Typed agent definitions (feature-orchestration.md P2-a): loaded
+	// ONCE here — no hot reload, the same per-process freeze the skill
+	// manifest breaks out of only via explicit /skill_commit paths.
+	// Custom types are listed by /agents types and, since P2-b,
+	// spawnable through the Manager (AgentTypes below + the D13 gate
+	// in internal/subagent/custom.go); the `agent` tool schema's
+	// dynamic enum remains M-O2.2. Errors non-fatal, same posture as
+	// skills.
+	agentTypes, agentTypeStats, _ := agenttypes.Load(agenttypes.LoadOptions{ProjectDir: cwd})
+	for _, err := range agentTypeStats.Errors {
+		fmt.Fprintln(os.Stderr, "agents:", err)
+	}
+	if agentTypes.CustomCount() > 0 {
+		fmt.Fprintf(os.Stderr, "Loaded %d custom agent type(s) — /agents types\n", agentTypes.CustomCount())
+	}
+
 	// memProject + activeSession are forward-declared so the Skill tool's
 	// stats EnvFn can read them by reference — both are set further
 	// down (memProject by memory.LoadOrCreate, activeSession by
@@ -1114,7 +1232,10 @@ func run() error {
 	// tool in the schema list, which the prefix cache wants).
 	//
 	// PruneDiscarded fires at startup as a best-effort GC of
-	// 48h-old rescue stashes (PRD §3.8). Failure here doesn't
+	// 48h-old rescue stashes (PRD §3.8). PruneOrphans is the
+	// age-based fallback for sessions that died before
+	// exit_worktree — without it the ref/worktree lives forever
+	// (2026-11-14: six June zombies). Failure of either doesn't
 	// block startup — the worst case is leftover refs the next
 	// `seek worktree gc` reaps.
 	wtMgr, wtErr := worktree.NewManager(abs)
@@ -1123,6 +1244,11 @@ func run() error {
 	} else {
 		if _, perr := wtMgr.PruneDiscarded(ctx, 48*time.Hour); perr != nil {
 			fmt.Fprintln(os.Stderr, "worktree: prune discarded:", perr)
+		}
+		if _, oerr := wtMgr.PruneOrphans(ctx, worktree.DefaultOrphanAge, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		}); oerr != nil {
+			fmt.Fprintln(os.Stderr, "worktree: prune orphans:", oerr)
 		}
 	}
 
@@ -1249,6 +1375,14 @@ func run() error {
 	if dsClient != nil {
 		reg.Add(fimcomplete.New(dsClient, *model)).
 			Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
+		// web_search rides the standalone Search API — same DeepSeek
+		// key / base URL as chat (config.KeyFor deepseek), billed per
+		// successful call into the tracker so the status bar's $ total
+		// grows without a token turn. Opt-out mirrors SEEK_NO_WEBFETCH
+		// for air-gapped / privacy-sensitive sessions.
+		if !envBoolTrue("SEEK_NO_WEBSEARCH") {
+			reg.Add(guarded(websearch.New(dsClient, tracker)))
+		}
 	}
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
@@ -1492,6 +1626,7 @@ func run() error {
 	}
 
 	var subagentMgr *subagent.Manager
+	var bgNotifier *subagent.Notifier
 	if !*noSave && activeSession != nil {
 		var smerr error
 		subagentMgr, smerr = subagent.NewManager(subagent.ManagerOpts{
@@ -1512,15 +1647,35 @@ func run() error {
 			// identical to the parent's prompt so the subagent header
 			// matches. See sessionDate above.
 			SessionDate: sessionDate,
+			// Background spawns bind to the process/session ctx so a
+			// parent turn returning (Esc) can never kill them — the
+			// 柱 K bgjob ctx-discipline lifted to agent level
+			// (feature-orchestration PRD §4.1 D1).
+			SessionCtx: ctx,
+			// P2-b D13: custom file-defined agent types become
+			// spawnable through the gate (unknown tools degrade to
+			// the general-purpose toolset with the startup warning
+			// below; everything else fails the spawn loudly). The
+			// `agent` tool schema's enum stays built-in-only until
+			// M-O2.2 — the Manager, not the schema, is the
+			// validation point.
+			AgentTypes: agentTypes,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
-				client:      dsClient,
-				provider:    provider,
-				parentReg:   reg,
-				hooksReg:    hooksReg,
+				client:    dsClient,
+				provider:  provider,
+				parentReg: reg,
+				// Children share the parent's hook surface EXCEPT the
+				// background Notifier (parent-only drain point). Lazy
+				// per-spawn resolution so hooks registered after Manager
+				// construction (memory hook) still reach children.
+				hooksFn: func() *hooks.Registry {
+					return hooksReg.CloneWithout(bgNotifier)
+				},
 				maxTokens:   *maxTokens,
 				maxTurns:    *maxTurns,
 				getModel:    func() string { return sessionModel },
 				getEffort:   func() string { return sessionEffort },
+				routes:      buildSubagentRoutes(dsClient),
 				bashGuard:   autopilotGuard,
 				bashSandbox: autopilotMode,
 				bashEnvKeep: bashEnvKeep,
@@ -1531,6 +1686,21 @@ func run() error {
 			return fmt.Errorf("subagent manager: %w", smerr)
 		}
 		reg.Add(agenttool.New(subagentMgr, wtMgr))
+
+		// Background-completion delivery (feature-orchestration PRD
+		// §4.1 D2): the Notifier drains pending background notices
+		// into the PARENT Prompt as <context> Prepend messages. It
+		// lives on the parent registry only — children get it
+		// stripped via the CloneWithout closure above.
+		bgNotifier = subagent.NewNotifier(subagentMgr)
+		hooksReg.Register(bgNotifier)
+
+		// Clean-exit contract: cancel every still-active subagent
+		// (background children write `failed reason=canceled`
+		// terminal events) and wait for those events to land before
+		// the process tears down — no started-without-terminal
+		// residue for the orphan scanner.
+		defer subagentMgr.Shutdown()
 
 		// On startup, scan the index for `started`-without-terminal
 		// sub_sids (subagents whose owning seek process crashed
@@ -1708,9 +1878,69 @@ func run() error {
 		hooksReg.Register(memHook)
 	}
 
+	// P2-b D13 startup gate: validate every custom agent type's tool
+	// whitelist against the FINAL parent registry — plan/propose land
+	// above, MCP / env-gated tools (webfetch, fim_complete, think…)
+	// vary the registry earlier, so this pass must run after the last
+	// reg.Add. Unknown tool names are config errors: warn here (the
+	// loud half of D13); at spawn the affected type degrades to the
+	// general-purpose toolset — never silently narrowed. Provider and
+	// workflow errors are warned about too and hard-fail the spawn
+	// with the same message when the type is actually used.
+	if agentTypes != nil && agentTypes.CustomCount() > 0 {
+		for _, def := range agentTypes.List() {
+			if def.Origin == agenttypes.OriginBuiltin {
+				continue
+			}
+			if err := subagent.ValidateCustomType(def, reg.Names()); err != nil {
+				fmt.Fprintf(os.Stderr, "agents: %s: %v\n", def.Source, err)
+			}
+		}
+	}
+
 	var observeResultChan <-chan memory.ObserveResult
 	if memHook != nil {
 		observeResultChan = memHook.ResultChan
+	}
+
+	// Background-subagent wake signal for the TUI loop (nil when the
+	// Manager isn't wired — --no-save — the wake handler gates on it).
+	var subagentWakeCh <-chan struct{}
+	if subagentMgr != nil {
+		subagentWakeCh = subagentMgr.WakeCh()
+	}
+
+	// skill auto-distillation (feature-skill-distill M-SD2): the
+	// SessionStart background batch. Off unless $SEEK_AUTO_SKILL_DISTILL
+	// is truthy — the hook itself re-checks on every start, so the env
+	// can be flipped without relaunching wiring. Registered whenever the
+	// reasoner half exists (DeepSeek client + loaded skills); a nil-ish
+	// hook would no-op anyway, but keeping the Registry's Stack honest
+	// about what COULD run is worth the branch.
+	if dsClient != nil && skills != nil {
+		autoDistiller := &skilldistill.Distiller{Client: dsClient}
+		if v := os.Getenv(skilldistill.EnvSkillDistillModel); v != "" {
+			autoDistiller.Model = v // PRD §7: unattended quality-first switch to Pro
+		}
+		var autoMIndex []skilldistill.MEntry
+		if memProject != nil {
+			for _, e := range memProject.Index() {
+				autoMIndex = append(autoMIndex, skilldistill.MEntry{Name: e.Name, Tagline: e.Tagline})
+			}
+		}
+		projDir, perr := paths.ProjectDir(abs)
+		if perr == nil {
+			hooksReg.Register(&skilldistill.AutoHook{
+				Distiller:  autoDistiller,
+				Skills:     skills,
+				MIndex:     autoMIndex,
+				Drafts:     &skillmgr.DraftStore{},
+				Stats:      statsWriter,
+				Sessions:   skilldistill.SessionStore{Store: store},
+				ProjectID:  paths.ProjectID(abs),
+				ProjectDir: projDir,
+			})
+		}
 	}
 
 	var sessionID string
@@ -1928,7 +2158,8 @@ func run() error {
 		resumeGoal = activeSession.Goal
 	}
 	// Clipboard image paste (M-imgpaste.2): Ctrl+V grabs an image off the OS
-	// clipboard to a temp PNG, which the OCR pipeline then reads. The grabber
+	// clipboard to a temp PNG, which the vision input router then attaches
+	// natively (feature-vision; the OCR-era pipeline is gone). The grabber
 	// command comes from SEEK_CLIPBOARD_IMAGE_CMD (else the platform default);
 	// clipimage.Grab degrades to ErrNoImage/ErrNoGrabber → text paste.
 	grabImage := func(gctx context.Context) (string, error) {
@@ -1972,6 +2203,7 @@ func run() error {
 		Keymap:                userKeymap,
 		Suggester:             predictor,
 		Skills:                skills,
+		AgentTypes:            agentTypes,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
 		ProviderName:          provLabel,
@@ -1979,6 +2211,7 @@ func run() error {
 		Distiller:             distiller,
 		SkillDistiller:        skillDistiller,
 		ObserveResultChan:     observeResultChan,
+		SubagentWake:          subagentWakeCh,
 
 		RebuildAgent: func() (*agent.Agent, error) {
 			// /reset rebuilds the agent; we have to re-apply project

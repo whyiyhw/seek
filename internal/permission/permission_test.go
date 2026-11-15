@@ -217,7 +217,7 @@ func TestCheck_ConcurrentCallsRaceFree(t *testing.T) {
 
 	const N = 64
 	var wg sync.WaitGroup
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

@@ -6,27 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
-
-// fakeAgent replays a fixed slice of agent.Events on ag.Prompt calls.
-// It satisfies the same call signature as *agent.Agent but is not a
-// real agent — used only to drive runJSON tests without a network.
-type fakeStream struct {
-	events []agent.Event
-}
-
-func (f *fakeStream) prompt() <-chan agent.Event {
-	ch := make(chan agent.Event, len(f.events))
-	for _, ev := range f.events {
-		ch <- ev
-	}
-	close(ch)
-	return ch
-}
 
 // captureLinesJSON runs runJSON against a fake event stream and returns
 // the decoded JSONL lines emitted to stdout.
@@ -137,13 +122,7 @@ func TestRunJSON_ReasoningDelta(t *testing.T) {
 	lines := captureLinesJSON(t, events)
 
 	types := typeSeq(lines)
-	found := false
-	for _, ty := range types {
-		if ty == "reasoning_delta" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(types, "reasoning_delta")
 	if !found {
 		t.Errorf("expected reasoning_delta in output, got %v", types)
 	}

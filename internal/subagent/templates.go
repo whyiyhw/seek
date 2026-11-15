@@ -1,19 +1,30 @@
 package subagent
 
 import (
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/sysprompt"
 )
 
-// Template is the static configuration for one subagent Type. The
-// three v5 built-in templates (general-purpose / explore / plan)
-// each declare a tool subset, a permission Restriction, and an
-// Extra clause that goes into the child system prompt after the
-// standard subagent role intro.
+// Template is the spawn-time configuration for one subagent Type:
+// a tool subset, a permission Restriction, and an Extra clause that
+// goes into the child system prompt after the standard subagent
+// role intro.
+//
+// Since P2-a (feature-orchestration.md D11) the three built-ins'
+// canonical declarations live as DATA in internal/agenttypes
+// (agenttypes.Builtins) — the hardcoded map that used to sit here
+// retired into that package. This file is now the adapter from
+// agenttypes.Definition to the spawn-time shape; the byte-identity
+// of the migration is locked by TestBuiltinTemplatesByteIdentical
+// in templates_test.go. File-defined custom types don't join THIS
+// table: since P2-b they flow through the D13 gate in custom.go
+// (ResolveCustomType) at spawn time, sharing only the defToTemplate
+// adapter so both paths translate identically.
 //
 // See docs/prd/feature-subagent.md §3.6 for the source-of-truth
-// table; this code is the canonical Go reflection of it. Changes
-// here must update the PRD table in lock-step.
+// table; changes to the built-in values must edit
+// internal/agenttypes/builtin.go in lock-step.
 type Template struct {
 	// Type identifies which built-in this is.
 	Type Type
@@ -47,70 +58,33 @@ type Template struct {
 	Extra string
 }
 
-// planAnalyzePtr is a package-level pointer so the three template
-// declarations can take its address. Using a literal &workflow each
-// time would lose the "monotonic-only intent" expressed by sharing
-// one canonical pointer to the read-only workflow.
+// planAnalyzePtr is a package-level pointer so the adapter can take
+// its address. Using a literal &workflow each time would lose the
+// "monotonic-only intent" expressed by sharing one canonical
+// pointer to the read-only workflow.
 var planAnalyzeWorkflow = permission.WorkflowPlanAnalyze
 
-// templates holds the three v5 built-ins, indexed by Type. New
-// templates added to this map must also extend the LLM-side
-// `agent` tool schema's `subagent_type` enum (PRD §3.1).
-var templates = map[Type]Template{
-	TypeGeneralPurpose: {
-		Type: TypeGeneralPurpose,
-		// nil ToolNames + Filter's universal `agent`/`ask_user`
-		// exclusion = "parent全集 减 agent / ask_user".
-		ToolNames:   nil,
-		Restriction: permission.Restriction{}, // inherit both axes
-		Extra:       "",                        // no extra clause; role intro alone
-	},
-	TypeExplore: {
-		Type: TypeExplore,
-		ToolNames: []string{
-			"read", "grep", "list_dir", "git", "webfetch", "think",
-		},
-		// Force PlanAnalyze even when parent is Yolo. This is the
-		// load-bearing safety property of `explore`: the user picks
-		// "research-only" by Type and trusts the template, not the
-		// parent pref. PRD §8 risk table "PrefYolo + explore" calls
-		// this out explicitly.
-		Restriction: permission.Restriction{Workflow: &planAnalyzeWorkflow},
-		Extra:       "You are in research-only mode. You cannot write, edit, or run mutating commands. Return findings as bulleted summary.",
-	},
-	TypePlan: {
-		Type: TypePlan,
-		// Plan shares explore's read-only subset by design. The
-		// PRD originally had plan inheriting parent全集 to use
-		// the propose tool, but two issues forced a redesign:
-		//
-		//   1. The `propose` tool's sink is bound to the parent's
-		//      session (plan_bridge captures parent activeSession
-		//      / plan panel). A subagent calling propose would
-		//      write artifacts into parent's plan dir and emit
-		//      events into parent's plan panel — cross-context
-		//      pollution.
-		//
-		//   2. With shared parent Tool instances (M11.0
-		//      production wiring) the child's tightened Policy
-		//      (Workflow=PlanAnalyze) isn't consulted by
-		//      individual tool Check() calls — write/edit/bash
-		//      would slip through soft-enforcement. PRD §2.3
-		//      monotonic-收紧 promise would be only as strong as
-		//      the system prompt instruction.
-		//
-		// Resolution (commit <this>): plan = same tools as
-		// explore (read-only); the role prompt below reframes
-		// the output as a structured numbered-step plan rather
-		// than bulleted findings. The parent reads the plan and
-		// may invoke propose itself in the main context.
-		// docs/prd/feature-subagent.md §3.6 reflects this.
-		ToolNames: []string{
-			"read", "grep", "list_dir", "git", "webfetch", "think",
-		},
-		Restriction: permission.Restriction{Workflow: &planAnalyzeWorkflow},
-		Extra:       "You are in plan-analyze mode. Investigate the task and return a numbered, structured plan in your final summary — explicit steps the parent (or a human reviewer) can execute. You cannot run mutating tools yourself.",
-	},
+// templates holds the three v5 built-ins, indexed by Type, adapted
+// from agenttypes.Builtins(). New built-ins added there flow through
+// automatically; they must also extend the LLM-side `agent` tool
+// schema's `subagent_type` enum (PRD §3.1).
+var templates = builtinsToTemplates(agenttypes.Builtins())
+
+// builtinsToTemplates maps compile-time type definitions onto the
+// spawn-time Template shape via defToTemplate (custom.go) — the same
+// adapter serves file-defined types since P2-b, so a built-in and a
+// custom type with identical declarations adapt identically.
+// Workflow "plan-analyze" (the only legal tightening, enforced by
+// agenttypes.Parse for files and by the D13 gate for every source)
+// becomes the shared Restriction pointer; Definition.Body becomes
+// Template.Extra verbatim — it lands in child system prompts, so
+// "verbatim" is a prefix-cache contract, not a style choice.
+func builtinsToTemplates(defs []*agenttypes.Definition) map[Type]Template {
+	m := make(map[Type]Template, len(defs))
+	for _, d := range defs {
+		m[Type(d.Name)] = defToTemplate(d)
+	}
+	return m
 }
 
 // TemplateFor returns the Template for the given Type, or ok=false

@@ -60,6 +60,12 @@ func aggregate(entries []skillstats.Entry, since time.Duration, now time.Time) m
 		cutoff = now.Add(-since)
 	}
 	for _, e := range entries {
+		// Distillation provenance rows (M-SD2) share the file but are
+		// not calls — counting them would make a much-distilled draft
+		// look like the most-used skill in the tree.
+		if e.Provider == skillstats.ProviderDistillAuto {
+			continue
+		}
 		if !cutoff.IsZero() {
 			if ts, err := time.Parse(time.RFC3339, e.TS); err == nil {
 				if ts.Before(cutoff) {
@@ -376,17 +382,61 @@ func sortedHistKeys(h map[string]int) []string {
 
 // ---------- stats ----------
 
+// funnelStageOrder fixes the report's row order: the order candidates
+// actually flow through (card c_jqwd72). Unknown stages (future layers,
+// empty Stage on pre-三期 rows) sort after the known ones, verdicts
+// alphabetically within a stage — deterministic output, no map-order
+// surprises.
+var funnelStageOrder = []string{"L0", "L1", "shape", "evidence", "L2", "L3", "L4"}
+
+func funnelStageRank(stage string) int {
+	for i, s := range funnelStageOrder {
+		if s == stage {
+			return i
+		}
+	}
+	return len(funnelStageOrder)
+}
+
+// aggregateFunnel folds provider=distill-auto rows into stage→verdict
+// counts — the distillation funnel report (`seek skill stats --distill`,
+// feature-skill-distill 三期). Pre-三期 produce rows (no stage) land in
+// "" so historical rows still show up instead of vanishing.
+func aggregateFunnel(entries []skillstats.Entry, since time.Duration, now time.Time) map[string]map[string]int {
+	out := map[string]map[string]int{}
+	cutoff := time.Time{}
+	if since > 0 {
+		cutoff = now.Add(-since)
+	}
+	for _, e := range entries {
+		if e.Provider != skillstats.ProviderDistillAuto {
+			continue
+		}
+		if !cutoff.IsZero() {
+			if ts, err := time.Parse(time.RFC3339, e.TS); err == nil && ts.Before(cutoff) {
+				continue
+			}
+		}
+		if out[e.Stage] == nil {
+			out[e.Stage] = map[string]int{}
+		}
+		out[e.Stage][e.Verdict]++
+	}
+	return out
+}
+
 func cmdSkillStats(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("seek skill stats", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `Usage: seek skill stats [--top N] [--since DURATION] [--json]
+		fmt.Fprintln(stderr, `Usage: seek skill stats [--top N] [--since DURATION] [--distill] [--json]
 
 Flags:`)
 		fs.PrintDefaults()
 	}
 	top := fs.Int("top", 10, "show this many skills (highest call count first); 0 = no limit")
 	since := fs.Duration("since", 30*24*time.Hour, "only count calls newer than this (e.g. 24h, 168h, 720h)")
+	distill := fs.Bool("distill", false, "report the skill-distillation funnel (stage × verdict counts) instead of call counts")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -396,6 +446,10 @@ Flags:`)
 	if err != nil {
 		return err
 	}
+	if *distill {
+		return reportFunnel(entries, *since, *asJSON, stdout)
+	}
+
 	agg := aggregate(entries, *since, time.Now())
 	type ranked struct {
 		Name string
@@ -439,6 +493,49 @@ Flags:`)
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\n",
 			r.Name, r.Count, r.LastUsed, r.TopModel, r.TopProvider)
+	}
+	return tw.Flush()
+}
+
+// reportFunnel renders the distillation funnel report (skill stats
+// --distill): one row per (stage, verdict) pair, stages in funnel
+// order. The counts answer "which layer eats what" (card c_jqwd72):
+// L0 PASS/DROP gate sessions, shape/evidence/L2 REJECT drop
+// candidates, L3 ACCEPT/REJECT/ERROR is the semantic filter, L4
+// DRAFT/STRENGTHEN is recurrence accumulation producing drafts.
+func reportFunnel(entries []skillstats.Entry, since time.Duration, asJSON bool, stdout io.Writer) error {
+	funnel := aggregateFunnel(entries, since, time.Now())
+	if len(funnel) == 0 {
+		fmt.Fprintln(stdout, "no distillation telemetry recorded (rows appear after the auto path runs; $SEEK_AUTO_SKILL_DISTILL=1)")
+		return nil
+	}
+
+	// Deterministic (stage, verdict) pairs: funnel order, then verdict.
+	type pair struct{ stage, verdict string }
+	var pairs []pair
+	for stage, verdicts := range funnel {
+		for verdict := range verdicts {
+			pairs = append(pairs, pair{stage, verdict})
+		}
+	}
+	sort.Slice(pairs, func(i, j int) bool {
+		ri, rj := funnelStageRank(pairs[i].stage), funnelStageRank(pairs[j].stage)
+		if ri != rj {
+			return ri < rj
+		}
+		if pairs[i].stage != pairs[j].stage {
+			return pairs[i].stage < pairs[j].stage
+		}
+		return pairs[i].verdict < pairs[j].verdict
+	})
+
+	if asJSON {
+		return writeJSON(stdout, funnel)
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "STAGE\tVERDICT\tCOUNT")
+	for _, p := range pairs {
+		fmt.Fprintf(tw, "%s\t%s\t%d\n", p.stage, p.verdict, funnel[p.stage][p.verdict])
 	}
 	return tw.Flush()
 }

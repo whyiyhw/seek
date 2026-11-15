@@ -235,7 +235,7 @@ func readInvocations(t *testing.T, dir string) []stubInvocation {
 		t.Fatalf("read invocations: %v", err)
 	}
 	var out []stubInvocation
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -276,7 +276,7 @@ func readTimeline(t *testing.T, dir string) []timelineMark {
 		t.Fatalf("read timeline: %v", err)
 	}
 	var out []timelineMark
-	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(b)), "\n") {
 		if line == "" {
 			continue
 		}
@@ -549,13 +549,11 @@ func TestExecutor_CancelWhileQueuedNeverStarts(t *testing.T) {
 	project := t.TempDir()
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if _, err := ex.Run(context.Background(), ExecRequest{Conv: "feishu:oc_1", Dir: project, Message: "m1"}); err != nil {
 			t.Errorf("first run: %v", err)
 		}
-	}()
+	})
 	time.Sleep(100 * time.Millisecond) // let m1 take the conv gate
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)

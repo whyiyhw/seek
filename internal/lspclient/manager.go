@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -48,10 +49,8 @@ var languages = []language{
 func detectLang(file string) (language, bool) {
 	ext := strings.ToLower(filepath.Ext(file))
 	for _, l := range languages {
-		for _, e := range l.exts {
-			if e == ext {
-				return l, true
-			}
+		if slices.Contains(l.exts, ext) {
+			return l, true
 		}
 	}
 	return language{}, false

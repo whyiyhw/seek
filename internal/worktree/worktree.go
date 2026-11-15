@@ -14,7 +14,14 @@
 // a 48-hour window to recover an accidental discard. Manager.
 // PruneDiscarded handles GC (no daemon — called from seek startup
 // and the `seek worktree gc` CLI per PRD §3.8 "zero常驻进程"
-// constraint).
+// constraint). PruneOrphans is the age-based fallback for the
+// other failure shape: sessions that died BEFORE exit_worktree
+// leave no discarded marker, so PruneDiscarded never sees them
+// and the ref/worktree would live forever (2026-11-14 incident:
+// six June worktrees lingered five months until manual cleanup).
+// It collects only age-expired, non-active refs with no unmerged
+// commits (merge-base --is-ancestor vs HEAD) and lets git refuse
+// dirty/locked directories — see PruneOrphans for the guard list.
 //
 // The package does NOT couple to internal/subagent. The agent
 // orchestration sits in cmd/seek / internal/tools/agent and calls
@@ -45,9 +52,11 @@ import (
 // back to the worktree (Path for cwd-pinning, Branch for git
 // operations, SubSid for cross-reference in subagents.jsonl).
 type Worktree struct {
-	// ID is the seek-internal identifier (timestamp + 6 hex chars,
-	// same shape as session IDs). Used for the on-disk dir name
-	// AND the git ref namespace, so the two stay aligned.
+	// ID is the seek-internal identifier (timestamp + 6 hex chars —
+	// the one remaining short-suffix generator; session/subagent/
+	// run IDs were widened to 16-hex suffixes for entropy). Used for
+	// the on-disk dir name AND the git ref namespace, so the two
+	// stay aligned.
 	ID string
 	// Path is the absolute path to the worktree's root directory.
 	// Callers pinning a child agent's cwd / tool execution
@@ -86,8 +95,8 @@ type CleanupResult struct {
 // collide on filesystem state.
 type Manager struct {
 	mu     sync.Mutex
-	root   string            // abs project working tree path
-	runGit GitRunner         // injectable for tests
+	root   string              // abs project working tree path
+	runGit GitRunner           // injectable for tests
 	active map[string]Worktree // ID → Worktree
 
 	// homeProjectDir caches the resolved ~/.seek/projects/<pid>/
@@ -135,10 +144,12 @@ func NewManagerWithRunner(projectRoot string, run GitRunner) (*Manager, error) {
 	}, nil
 }
 
-// newID returns a fresh worktree ID. Same shape as subagent
-// IDs (timestamp + 6 hex chars) so they sort naturally and visual
-// inspection of ~/.seek/projects/<pid>/worktrees/ shows chronology.
-// Falling back to nanosecond suffix on entropy exhaustion mirrors
+// newID returns a fresh worktree ID. Timestamp + 6 hex chars (same
+// sortable scheme as subagent IDs, which now carry 16-hex suffixes —
+// worktree keeps the short suffix; widen it too if concurrent
+// worktree creation ever collides) so visual inspection of
+// ~/.seek/projects/<pid>/worktrees/ shows chronology. Falling back
+// to nanosecond suffix on entropy exhaustion mirrors
 // internal/session.generateID.
 func newID(now time.Time) string {
 	var rnd [3]byte
@@ -466,18 +477,18 @@ func (m *Manager) ListFromDisk(ctx context.Context) ([]Worktree, error) {
 		if cur.Path == "" {
 			return
 		}
-		if strings.HasPrefix(cur.Path, seekRoot) {
+		if after, ok := strings.CutPrefix(cur.Path, seekRoot); ok {
 			// Recover ID from the path's first segment under
 			// worktrees/. Tail segments (e.g. nested files)
 			// shouldn't occur — git's worktree list only emits
 			// the root.
-			rel := strings.TrimPrefix(cur.Path, seekRoot)
+			rel := after
 			cur.ID = strings.SplitN(rel, string(filepath.Separator), 2)[0]
 			found = append(found, cur)
 		}
 		cur = Worktree{}
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			flush()
@@ -571,7 +582,7 @@ func (m *Manager) PruneDiscarded(ctx context.Context, olderThan time.Duration) (
 	}
 	cutoff := time.Now().UTC().Add(-olderThan)
 	pruned := 0
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -599,8 +610,8 @@ func (m *Manager) PruneDiscarded(ctx context.Context, olderThan time.Duration) (
 // parseDiscardedRefTS extracts the YYYYMMDD-HHMMSS suffix from a
 // refs/seek/discarded/<ts> ref name and parses it as UTC time.
 // Returns ok=false for any ref that doesn't match the expected
-// shape (defensive: future schema changes or manual ref
-// pollution shouldn't crash GC).
+// shape (defensive: future schema changes or manual ref pollution
+// shouldn't crash GC).
 func parseDiscardedRefTS(ref string) (time.Time, bool) {
 	const prefix = "refs/seek/discarded/"
 	if !strings.HasPrefix(ref, prefix) {
@@ -612,4 +623,140 @@ func parseDiscardedRefTS(ref string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return ts.UTC(), true
+}
+
+// DefaultOrphanAge is the age-based fallback threshold used by
+// seek startup: a refs/seek/worktrees/<id> pin older than 7 days
+// whose owning session is long gone is collected by PruneOrphans.
+// Long enough that a week-long worktree session survives a
+// parallel seek's startup GC; short enough that the 2026-11-14
+// failure shape (six June zombies, five months) is impossible.
+const DefaultOrphanAge = 7 * 24 * time.Hour
+
+// PruneOrphans is the age-based GC fallback for worktrees whose
+// session died BEFORE exit_worktree ran: no discarded marker, no
+// Cleanup, so PruneDiscarded never sees them and the ref+branch+
+// directory would live forever. Enumerates refs/seek/worktrees/
+// (seek's own registry — the ID embeds the creation timestamp) and
+// collects entries that pass ALL guards:
+//
+//  1. Age: ref older than olderThan (timestamp parsed from the
+//     ref name, mirroring parseDiscardedRefTS; malformed names
+//     are skipped, never guessed at).
+//  2. Not active: the ID is absent from this Manager's active
+//     map. Cross-process liveness is NOT checked — a worktree
+//     owned by a parallel seek process is protected by age alone
+//     (the 7d default dwarfs any sane session).
+//  3. No unmerged commits: `git merge-base --is-ancestor <ref>
+//     HEAD` must succeed — every commit the orphan's branch made
+//     is already reachable from the current checkout, so deleting
+//     the ref/branch loses nothing (the 2026-11-14 six were all
+//     in main's ancestry). A non-ancestor ref is skipped+logged
+//     for manual review; when HEAD isn't main this guard fails
+//     safe (skips).
+//  4. Clean directory: `git worktree remove` WITHOUT --force —
+//     git itself refuses dirty/locked trees, which is exactly the
+//     conservative answer for unattended GC. A removal failure
+//     with the directory still on disk skips the whole entry; a
+//     failure with the directory already gone (stale metadata,
+//     e.g. after manual cleanup) proceeds to the ref deletion.
+//
+// Branch seek/wt/<id> is deleted when it exists (verify-then-D,
+// best-effort). Returns the count of refs removed; every skip is
+// reported through logf (nil-safe) so `seek worktree gc` and
+// startup can surface WHY something survived.
+func (m *Manager) PruneOrphans(ctx context.Context, olderThan time.Duration, logf func(format string, args ...any)) (int, error) {
+	if m == nil {
+		return 0, errors.New("worktree: nil Manager")
+	}
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	out, errOut, err := m.runGit(ctx, m.root, "for-each-ref", "--format=%(refname)", "refs/seek/worktrees/")
+	if err != nil {
+		return 0, fmt.Errorf("worktree: for-each-ref worktrees: %v: %s", err, strings.TrimSpace(errOut))
+	}
+	cutoff := time.Now().UTC().Add(-olderThan)
+	pruned := 0
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		id, ts, ok := parseWorktreeRefID(line)
+		if !ok {
+			logf("worktree gc: skip %s: unparseable ID (not seek's shape)", line)
+			continue
+		}
+		if ts.After(cutoff) {
+			continue // young — not this pass's business, no log spam
+		}
+		if m.isActive(id) {
+			continue // this process owns it; age is a false positive
+		}
+		// Guard: only collect refs whose commits are all reachable
+		// from HEAD. Exit 1 (not an ancestor) and real git errors
+		// both land in err — treat both as "can't prove safe".
+		if _, _, aerr := m.runGit(ctx, m.root, "merge-base", "--is-ancestor", line, "HEAD"); aerr != nil {
+			logf("worktree gc: skip %s: unmerged commits (not an ancestor of HEAD) — manual review", line)
+			continue
+		}
+		// Directory first: plain remove lets git refuse dirty or
+		// locked trees. Only --force-free removal proceeds.
+		path := filepath.Join(m.homeProjectDir, "worktrees", id)
+		if _, _, rerr := m.runGit(ctx, m.root, "worktree", "remove", path); rerr != nil {
+			if _, serr := os.Stat(path); serr == nil {
+				logf("worktree gc: skip %s: worktree remove refused (dirty or locked?) — manual review", line)
+				continue
+			}
+			// Directory already gone — stale metadata only; fall
+			// through to branch + ref deletion.
+		}
+		branch := "seek/wt/" + id
+		if sha, _, verr := m.runGit(ctx, m.root, "rev-parse", "--verify", "-q", "refs/heads/"+branch); verr == nil && strings.TrimSpace(sha) != "" {
+			if _, derrOut, derr := m.runGit(ctx, m.root, "branch", "-D", branch); derr != nil {
+				logf("worktree gc: branch -D %s failed: %s", branch, strings.TrimSpace(derrOut))
+			}
+		}
+		if _, refErr, uerr := m.runGit(ctx, m.root, "update-ref", "-d", line); uerr != nil {
+			logf("worktree gc: delete %s failed: %s", line, strings.TrimSpace(refErr))
+			continue
+		}
+		pruned++
+	}
+	return pruned, nil
+}
+
+// parseWorktreeRefID splits refs/seek/worktrees/<id> into the
+// worktree ID and its embedded creation timestamp. ID shape is
+// newID's: YYYYMMDD-HHMMSS-<6 hex>; ok=false for anything else
+// (custom or polluted refs are never aged by guesswork).
+func parseWorktreeRefID(ref string) (id string, ts time.Time, ok bool) {
+	const prefix = "refs/seek/worktrees/"
+	if !strings.HasPrefix(ref, prefix) {
+		return "", time.Time{}, false
+	}
+	id = strings.TrimPrefix(ref, prefix)
+	parts := strings.SplitN(id, "-", 3)
+	if len(parts) != 3 || parts[2] == "" {
+		return "", time.Time{}, false
+	}
+	t, err := time.Parse("20060102-150405", parts[0]+"-"+parts[1])
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return id, t.UTC(), true
+}
+
+// isActive reports whether id is registered in this Manager's
+// active map (created by this seek process and not yet cleaned
+// up). Lock-scoped read; empty id never matches.
+func (m *Manager) isActive(id string) bool {
+	if id == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.active[id]
+	return ok
 }

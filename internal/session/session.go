@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -102,18 +103,22 @@ func New(model, cwd, systemPrompt string, yolo, plan bool) *Session {
 	}
 }
 
-// generateID returns a sortable ID: "20260121-103045-a1b2c3"
-// (timestamp + 6 random hex chars). Lexical order == creation order.
-// On entropy exhaustion it falls back to a nanosecond-granularity suffix
-// so sessions never collide from a zero-valued random buffer.
+// generateID returns a sortable ID: "20260121-103045-a1b2c3d4e5f6a7b8"
+// (timestamp + 16 random hex chars). Lexical order == creation order.
+// 8 random bytes (64 bits) of suffix entropy — same widening as
+// internal/routines.NewRunID and subagent.newSubSid: the old 6-hex
+// suffix (24 bits) birthday-collides at same-second scale (CI
+// recorded it for run IDs at 500 draws; concurrent sessions / resume
+// fan-out are the production exposure here).
+// On entropy exhaustion it falls back to a nanosecond-precision hex
+// suffix so sessions never collide from a zero-valued random buffer.
 func generateID(t time.Time) string {
-	var rnd [3]byte
+	var rnd [8]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		// Fallback: nanosecond-precision hex suffix from the timestamp.
-		// The fractional seconds make IDs unique even at high concurrency.
-		return fmt.Sprintf("%s-%s",
+		return fmt.Sprintf("%s-%016x",
 			t.Format("20060102-150405"),
-			fmt.Sprintf("%06x", t.Nanosecond()/1000))
+			uint64(t.UnixNano()))
 	}
 	return fmt.Sprintf("%s-%s",
 		t.Format("20060102-150405"),
@@ -170,8 +175,7 @@ func backfillEmptyToolContent(msgs []deepseek.Message) {
 }
 
 func repairMessages(msgs []deepseek.Message) (_ []deepseek.Message, dropped int) {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for i, m := range slices.Backward(msgs) {
 		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}
@@ -451,6 +455,10 @@ type SessionInfo struct {
 	Turns     int
 	ToolCalls int
 	ParentID  string
+	// CWD is the working directory recorded in the header. Consumers
+	// that bucket sessions by project hash it with paths.ProjectID
+	// (skill auto-distillation's batch scan, M-SD2).
+	CWD string
 }
 
 // List returns metadata for every session in the store, newest first.
@@ -529,5 +537,36 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		Turns:     sess.Turns,
 		ToolCalls: sess.ToolCalls,
 		ParentID:  sess.ParentID,
+		CWD:       sess.CWD,
 	}, nil
+}
+
+// ListProject returns metadata for this project's sessions, OLDEST
+// first (chronological order — the skill auto-distillation batch walks
+// sessions in the order they happened so recurrence accumulation sees
+// a pattern emerge, not jitter). Sessions forked via /branch or
+// /compact (ParentID set) are skipped: their transcripts overlap the
+// parent's, and L4's "N≥2 INDEPENDENT sessions" recurrence invariant
+// would count one conversation twice. Per-file load errors are dropped
+// silently — one corrupt header must not hide the rest of a project's
+// history from a best-effort background pass.
+func (s *Store) ListProject(projectID string) ([]SessionInfo, error) {
+	infos, _, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	var out []SessionInfo
+	for _, info := range infos {
+		if info.ParentID != "" {
+			continue
+		}
+		if paths.ProjectID(info.CWD) != projectID {
+			continue
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	return out, nil
 }

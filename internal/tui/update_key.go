@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -191,11 +192,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// canonical name (or an alias), accept this command.
 			var exactMatch *command
 			for i, c := range m.commandMenuFiltered {
-				for _, name := range c.names {
-					if name == input {
-						exactMatch = &m.commandMenuFiltered[i]
-						break
-					}
+				if slices.Contains(c.names, input) {
+					exactMatch = &m.commandMenuFiltered[i]
 				}
 				if exactMatch != nil {
 					break

@@ -188,6 +188,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
 		}
 
+	case subagentWakeMsg:
+		cmds = append(cmds, m.handleSubagentWake()...)
+
 	case versionCheckDoneMsg:
 		// Store the newer tag for the status-bar segment. Idempotent —
 		// the cmd never re-fires within a session, but a second run

@@ -1,26 +1,30 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform that plans, spawns a team of sub-agents, and ships while you sleep" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
 </p>
 
 <p align="center">
-  <strong>不是又一个 agent demo——而是一个本地 agent 平台：会规划、能派出一队子代理、在你睡觉时把活干完。</strong>
+  <strong>不是又一个 agent demo——而是一个本地 agent 平台：终端、浏览器、IDE、无头车队皆可驱动；跑完的会话可蒸馏成 skill；任务在三条成本车道间路由。</strong>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-f5a623?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/CI-race--tested-2ea043?style=flat-square&logo=github&logoColor=white" alt="CI">
-  <img src="https://img.shields.io/badge/release-v0.10.3-f5a623?style=flat-square" alt="release">
+  <img src="https://img.shields.io/badge/release-v0.11.0-f5a623?style=flat-square" alt="release">
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-2b2b32?style=flat-square" alt="Platforms">
   &nbsp;·&nbsp; <a href="README.md">English</a>
 </p>
 
-一个编码 agent，以单个 **静态 Go 二进制** 跑在你的终端里——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端。** 自带模型 key 即可：**DeepSeek 优先**，同时也讲 OpenAI / Anthropic / Gemini 以及任何 OpenAI 兼容端点（KIMI、…）。
+整个平台就是单个 **静态 Go 二进制**——**~6 MB 下载体积**、**无常驻 daemon、无 telemetry、不依赖 Python/Node 运行时、没有 seek 自营后端**——v0.11 起立在三根轴上：
+
+- **多端驱动。** 原生终端 TUI · 浏览器聊天页（`seek serve --frontend=web`——内嵌页面、SSE 流式、token 认证）· IDE（`seek acp` 接 Zed 等 ACP 客户端、`seek -rpc` JSON-RPC 2.0）· 无头车道：无人值守 ACP 下，派单方传来的 `cwd` 锚定所有工具，`SEEK_ACP_YOLO=1` 自动放行本地动作、照堵 push/PR——seek 自身已作为一个派单车道跑在 ACP 编排器（paseo）之下。
+- **自蒸馏 skill。** `/distill` 把跑完的会话蒸馏成可人审的 SKILL.md 草稿——`--dry-run` 先预览、草稿落在任何会话都不加载的目录、安装永远是一步显式的人工动作。下个月的 agent 带着这个月的教训上岗。
+- **三条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价 · OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
 
 ---
 
 ## seek 与众不同之处
 
-标语里的三句话，每句都有已落地的代码兜底：
+平台的三个承重行为，每个都有已落地的代码兜底：
 
 - **🧭 先规划，再动手** — `/plan` 把工作卡在 `分析 → 提方案 → 你批准 → 执行` 之后。批准前全程只读；执行中你可以中途插话，它会**在不重做已完成步骤的前提下**重新规划。状态从 transcript 重建，所以 `seek -resume` 能精确续上原计划。
 - **👥 派出一队子代理** — 把任务扇出给子代理，**并行执行、各自隔离在独立 git worktree** 里，互不踩踏。权限单调收紧（子永远不松于父），成本自动累加到父 agent 状态栏。用 `/agents` · `/worktrees` 实时观察。→ [文档](docs/guide-subagent.md)
@@ -30,18 +34,18 @@
 
 ## 亲眼看它跑 —— 这些文档是 seek 自己审计的
 
-我们只给了 seek 一个目标——*"审计代码库文档的准确性、修正它们、并把我们的踩坑日志织进 book"*——然后走开。它自己规划、**派出一队子代理**、改了 **33 个文件、覆盖全部 24 个 book 章节**,直到一个便宜模型判定目标达成才停:**120 轮 · 212 次工具调用 · 干净构建 · 97.7% 缓存命中 · $0.17。** 真实跑批,未剪辑(仅加速):
+我们只给了 seek 一个目标——*"审计代码库文档的准确性、修正它们、并把我们的踩坑日志织进 book"*——然后走开。它自己拆解任务、**把 explorer 子代理扇出到整个代码库**、改了 **33 个文件、覆盖全部 24 个 book 章节**，直到一个便宜模型判定目标达成才停：**120 轮 · 212 次工具调用 · 干净构建 · 97.7% 缓存命中 · $0.17。** 真实跑批，未剪辑（仅加速），录制于 v0.8 构建——`/goal` 循环、子代理扇出与判定收尾的机制与今天发布的版本一致：
 
-**1 · 先规划,再派出一队子代理**
-<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek plans the task, then fans out explore sub-agents" width="820"></p>
+**1 · 拆解目标，再派出 explorer 子代理**
+<p align="center"><img src="examples/demo-plan-agents.gif" alt="seek maps the repo structure, then dispatches an explorer sub-agent" width="820"></p>
 
 **2 · 跨整个代码库自治干活**
 <p align="center"><img src="examples/demo-edit.gif" alt="seek edits doc comments and weaves pitfalls into book chapters" width="820"></p>
 
 **3 · 直到便宜模型判定目标达成**
-<p align="center"><img src="examples/demo-goalmet.gif" alt="goal met after 3 turns, clean build, $0.17" width="820"></p>
+<p align="center"><img src="examples/demo-goalmet.gif" alt="goal judge: met after 3 passes — 120 turns, 212 tools, clean build, $0.17" width="820"></p>
 
-本 PR 里的每一处文档改动,都出自那一次 **$0.17** 的跑批。录制脚本:[`examples/demo-fullrun.tape`](examples/demo-fullrun.tape)。
+33 个文件的改动全部出自那一次 **$0.17** 的跑批。录制脚本：[`examples/demo-fullrun.tape`](examples/demo-fullrun.tape)。
 
 ---
 
@@ -70,14 +74,14 @@ seek goal run "./auth 下所有测试通过"        # 自治：一直干到目�
 
 DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.go)）：
 
-| 项 | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
+| 项 | DeepSeek V4.1-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
 |---|---|---|---|
-| 输入（无缓存） | **$0.44** / $0.22¹ | **$1.32** / $0.66¹ | $3 / 1M |
-| 输入（缓存命中） | **$0.014** / $0.007¹ | **$0.044** / $0.022¹ | $0.30 / 1M |
-| 输出 | **$1.32** / $0.66¹ | **$3.96** / $1.98¹ | $15 / 1M |
+| 输入（无缓存） | **$0.30** / $0.15¹ | **$1.32** / $0.66¹ | $3 / 1M |
+| 输入（缓存命中） | **$0.006** / $0.003¹ | **$0.044** / $0.022¹ | $0.30 / 1M |
+| 输出 | **$1.20** / $0.60¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | 错峰² | **−50%** | **−50%** | — |
 
-<sub>¹ 高峰 / 错峰价（错峰 = 高峰半价），2026-08-16 16:00 UTC 起生效——见 [`internal/pricing/pricing.go`](internal/pricing/pricing.go)。² 高峰时段为 01:00–04:00 和 06:00–10:00 UTC（北京 09:00–12:00、14:00–18:00），其余时间全部错峰。</sub>
+<sub>¹ 高峰 / 错峰价（错峰 = 高峰半价）——V4.1-Flash 价 2026-09-10 起执行、V4-Pro 价未变；2026-11-14 对照官方价格页核对，见 [`internal/pricing/pricing.go`](internal/pricing/pricing.go)。² 高峰时段为 01:00–04:00 和 06:00–10:00 UTC（北京 09:00–12:00、14:00–18:00），其余时间全部错峰。</sub>
 
 实测 **95–97% prefix-cache 命中**——是纪律不是运气：tool schema 是字节稳定的 `[]byte` 常量、tool 输出在写入端就限定大小、历史消息发送前从不重写。状态栏实时显示命中率 + 省下的钱。
 
@@ -91,14 +95,17 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **`/goal`** | 跨多轮循环，直到一个便宜模型判定条件满足——TUI / headless / cron。[📘](docs/guide-goal.md) |
 | **操作系统沙箱** | seatbelt（macOS）/ landlock（Linux）——内核级隔离，零运行时依赖。[📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | 通过 Agent Client Protocol 把 seek 当编辑器 agent 跑。[📘](docs/guide-zed.md) |
-| **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装。[📘](docs/guide-skills.md) |
+| **远程控制平面** | `seek serve` ——常驻单进程；浏览器即可驱动（内置 web 聊天页：SSE 流式 + token 认证），任何聊天渠道经 `Frontend` 端口接入。默认只听 loopback；`serve.web_addr` 可绑 tailnet IP（仅放行 loopback 与 CGNAT `100.64.0.0/10`——`0.0.0.0` 一律拒启），或由 `tailscale serve --tcp=8790` 转发 loopback。[📘](docs/guide-serve.md) |
+| **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装；`/distill` 可从你自己的会话蒸馏新 skill 草稿。[📘](docs/guide-skills.md) |
 | **三层记忆** | 会话 · 项目（衰减分 GC）· 跨项目「soul」（`seek -dream`）。[📘](docs/guide-memory.md) |
 | **Checkpoint** | 每 turn git 快照 + 文件级 `/undo` `/redo` `/restore`。[📘](docs/guide-checkpoint.md) |
 | **后台任务** | 长 build/server 丢后台 → `bg-N`；`monitor` poll / wait / kill。[📘](docs/guide-background.md) |
 | **语义 references** | LSP「谁调用了它」（gopls / pyright / tsserver），grep 兜底。[📘](docs/guide-references.md) |
-| **离线图片 OCR** | `@img.png` 或粘贴图片 → 本地 OCR，无 VLM / 无网络。[📘](docs/guide-ocr.md) |
+| **原生视觉输入** | 粘贴或 `@img.png` → 图片字节原生直发多模态默认模型（`deepseek-flash`，V4.1）。[📘](docs/guide-vision.md) |
 | **代码审查** | 分档深度的 diff 审查，支持 `--fix` 和 `--comment`。[📘](docs/guide-code-review.md) |
 | **MCP client** | 透传任意 MCP server 的工具。[📘](docs/guide-mcp.md) |
+| **Web 搜索** | 内置 `web_search` 工具，走 DeepSeek Search API——查新文档不用跳出循环。 |
+| **子代理模型路由** | `agent` 工具带 `provider` / `model` 参数——探索走便宜车道、写作走强车道。 |
 | **推送到手机** | cron / autopilot / 长回合完成 → webhook。[📘](docs/guide-webhooks.md) |
 | **双轴权限** | Preference（Deny / Ask / Yolo）× Workflow（None / Plan-analyze / Plan-execute）。 |
 
@@ -114,6 +121,7 @@ seek -p '<prompt>'         # 一次性打印模式（pipeline 友好）
 seek -resume <sid>         # 续传指定 session（-continue 续最近）
 seek -rpc                  # JSON-RPC 2.0 server（IDE 接入）
 seek acp                   # Agent Client Protocol server（Zed、…）
+seek serve                 # 远程控制平面；--frontend=web 起浏览器聊天页
 
 seek goal       run "<条件>"               # 自治循环跑到达标
 seek skill      install / list / stats / uninstall / update
@@ -132,7 +140,7 @@ seek hooks      list / check / trust / audit
 
 ## 为真实场景打造，不是周末玩具
 
-**~85k 行 Go**（~44k 非测试），跨 **66 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.10.3**。
+**~124k 行 Go**（~61k 非测试），跨 **88 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.11.0**。
 
 文档：[`docs/`](docs/) · 贡献：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 

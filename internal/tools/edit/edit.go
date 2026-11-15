@@ -296,7 +296,7 @@ func closestCandidate(content, needle string) string {
 	bestIdx := -1
 	for i := 0; i+n <= len(contentLines); i++ {
 		score := 0
-		for j := 0; j < n; j++ {
+		for j := range n {
 			if canonForCompare(contentLines[i+j]) == needleNorm[j] {
 				score++
 			}

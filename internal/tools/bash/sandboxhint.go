@@ -167,7 +167,7 @@ func diagnoseSandbox(opt *sandbox.Options, exitCode int, output string) (sandbox
 	// Matched per line with benign notices subtracted, NOT as a substring
 	// of the whole output — see benignSandboxNotices for the incident
 	// that shape prevents.
-	for _, line := range strings.Split(lower, "\n") {
+	for line := range strings.SplitSeq(lower, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || isBenignNotice(line) {
 			continue

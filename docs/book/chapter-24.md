@@ -1,7 +1,7 @@
 # 第 24 章：v7 四柱 — 打擂台 Reasonix（N · O · P · Q）
 
 > **对应版本**：v0.8.x
-> **对应代码**：`internal/autopilot/`、`internal/sandbox/`、`internal/acp/`、`internal/ocr/`、`cmd/seek/main.go`（acp/autopilot dispatch）、`internal/tools/bash/`（sandbox integration）、`internal/subagent/`（buildSubagentRunner sandbox wiring）、`scripts/build-vision-ocr.sh`
+> **对应代码**：`internal/autopilot/`、`internal/sandbox/`、`internal/acp/`、`internal/ocr/`、`cmd/seek/main.go`（acp/autopilot dispatch）、`internal/tools/bash/`（sandbox integration）、`internal/subagent/`（buildSubagentRunner sandbox wiring）、`scripts/build-vision-ocr.sh`。§24.7 增补：`internal/controlplane/`（frontend / router / executor / serve / webfrontend）。
 > **PRD**：[`docs/prd/v7.md`](../prd/v7.md) · `docs/prd/feature-{autopilot,sandbox,acp,image-ocr}.md` · [`docs/comparison.md`](../comparison.md) §R
 > **验收**：四柱全部落地。N autopilot 真环境 e2e（修复两个隔离 bug）；O 双平台 seatbelt + landlock CI 验证；P ACP stdio e2e；Q 真二进制 OCR e2e
 > **起点**：第 23 章（v6 五柱）。v6 把 P1 单点缺口全部补齐后，seek 与 Claude Code 的能力对标已经不再是主线任务——新的竞争对手出现在雷达上：Reasonix，一个同样基于 DeepSeek、同样用 Go 写的编程 agent。
@@ -364,6 +364,56 @@ v7 把这两轴做成了产品：
 
 ---
 
+## 24.7 增补（v0.11）：远程控制平面——Frontend 端口与执行器
+
+24.6 承认过 seek 还没赢的领域里有"生产级 web 前端"。v0.11 平台化线交出的答案是**远程控制平面**：一个常驻的 `seek serve` 进程，把"远程触达 + 常驻在场 + 跨项目调度"做成 frontend-无关的核心——任何聊天渠道或浏览器，只要实现一个三方法的 `Frontend` 端口，就能驱动 seek。
+
+先诚实地划边界（这是设计的第一课）：平面**不扩展 seek 能干什么，它扩展 seek 从哪被驱动**。中枢感来自触达，不来自新权能——`pkg/agent`、agent loop、cron 一字不动，平面驱动 seek 的方式只有一种：exec 它。
+
+### Frontend 端口：收/发分离，不假设双工
+
+所有渠道的收发机制各不相同，而且**天然半双工**：飞书长连接只承载下行事件推送、回消息走独立 HTTPS REST；Telegram long-poll 收、bot API 发；网页 SSE 收、HTTP POST 发。"核心逻辑一份、渠道接入多份"的形态天生是一个端口 + 多个适配器——但抽象的度是刻意收紧的：
+
+```go
+type Frontend interface {
+    Name() string
+    Run(ctx context.Context, in chan<- Inbound) error    // 阻塞收，自管传输+重连
+    Send(ctx context.Context, conv ConvID, r Reply) error // 发一条回复回该会话
+}
+```
+
+三个方法 + 两个结构体。v1 只实现一个 frontend，第二个只做**纸面验证**——把"Telegram frontend 怎么落"写成一段设计文字，写得顺 = 接缝成立，写不顺 = 端口抽错了。这是抽象的验收测试，比先写第二个适配器便宜一个量级。
+
+这个接缝后来被兑现了两次。第一次：用户拍板撤销飞书排期——不绑定具体渠道，Frontend 端口已是资产，渠道选型开放。第二次：**首个真实渠道换成了 web**——纯 stdlib `net/http` + `go:embed` 单页，连 build tag 都不需要（依赖隔离门 D-F1 存在的理由是"frontend SDK 别进默认构建"，而 `net/http` 就是 stdlib）。`ConvID` 带 `<frontend>:` 前缀（如 `web:default`），绑定表与串行队列天然跨渠道不撞键。
+
+### 执行器：子进程 + 稳定 JSONL 契约，自愈是平面的责任
+
+执行器是这个设计里最"不发明"的部分——它不调任何内部 API，就是：
+
+```
+首条:  seek -p '<msg>' --json                 cmd.Dir=<绑定项目目录>
+后续:  seek -p '<msg>' --json -resume <sid>
+```
+
+第 15 章 §15.1 的 `--json` JSONL 输出在这里从"让脚本能用"升格为**平面与 seek 之间的稳定 wire**：末行 `agent_end` 事件的顶层 `session_id` 字段（schema 注释声明为稳定契约）就是多轮续接的全部所需——平面抓 id、回写 binding、下条带 `-resume`；实测 resume 续跑前缀缓存命中，远程多轮的经济性与本地一致。
+
+坑都在边界上，且全部是实测回填的：
+
+- **坏 id**：`-resume` 失败时 seek 直接 exit 1、stdout 全空、不自愈——**自愈必须是平面自己的责任**（检测非零退出，降级为首条重跑、回写新 id）；一次坏 id 不能卡死会话。
+- **mid-run error**：stdout 有事件行但没有 `agent_end`——id 不上 stdout，平面拿不到，只能弃上下文重开（记为已接受边界）。
+- **权限**：print 模式的初始 pref 就是 deny（无人可交互审批）——危险动作返回 `ErrDenied` **工具结果**（第 5 章 §5.4 的老朋友），agent 收到后自行调整、run 正常结束。于是远程默认体验是个有趣的倒置：**比本地 TUI 更保守**——能读写项目目录、不能跑任何 shell；per-binding 显式 yolo 是唯一放宽口。
+- **并发**：同会话串行（防 transcript 写冲突 + resume 竞态）、跨会话并行、全局并发上限；`/cancel` 故意放在执行器**外面**——取消指令绝不能排在它要杀的那条 run 后面。
+
+bindings（ConvID ↔ 项目路径 ↔ session id）持久化在 `~/.seek/serve/bindings.json`。这**不违反**"agent 运行时状态从誊本重建、不养平行状态文件"的纪律：那条约束管的是 agent/plan 状态——平面的路由表在 agent transcript 之外，本来就没有第二个事实来源，持久化它是诚实而不是漂移。
+
+### 与零-daemon 铁律的正面冲突
+
+第 22 章把"零常驻进程"立为 v5 的铁律（cron 靠 OS scheduler 拉起、跑完即退），而平面**必须有进程一直在**（保活连接 / 监听端口）。解法不是重释铁律，而是**隔离偏离**：常驻只活在显式 `seek serve` 里，核心 seek 零改动。铁律管的是"用户没主动要常驻时不得有常驻"——serve 是用户亲手拉起、亲手退出的进程，显式性与 cron 的 OS 拉起同量级。这个措辞上的让步值得较真：**架构铁律的生命力在于偏离必须被显式声明、被隔离在一个入口里**，而不是永不开口子。
+
+> 平面的决策表（D-C1–D-C5）、消息生命周期与验收口径以 [`docs/prd/feature-remote-control-plane.md`](../prd/feature-remote-control-plane.md) 为权威；web 渠道设计见 [`feature-web-frontend.md`](../prd/feature-web-frontend.md)；运维契约（drain 预算、退出码、launchd/systemd）见 [`docs/serve/README.md`](../serve/README.md)。
+
+---
+
 ### 相关踩坑
 
 v7 Autopilot / Sandbox / ACP 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
@@ -394,6 +444,23 @@ v7 Autopilot / Sandbox / ACP 实现中遇到的具体问题，以下是来自 [`
 - **Saw**：WSL 中 `sudo` 启动的进程不在同一进程组，kill 失败，Wait() 超时。
 - **Fix**：使用 `sudo` 配合 `--kill-child` 或直接以非 root 用户运行 sandbox。
 
+**6. 全部文件被 build tag 排除的包，`./...` 静默跳过**（§24.7）
+
+- **Saw**：计划用 `//go:build feishu` 隔离 frontend SDK；实测 `go build/vet/test ./...` 对这种包**静默跳过**，只有直接点名才报错。
+- **Fix**：留一个未打 tag 的 `doc.go` 作包锚点 + 用 `go/build.Default.ImportDir` 在普通 CI 测试里断言默认构建的 `GoFiles == [doc.go]`——排除证明本身跑在默认 tags 下。
+- **Lesson**：`./...` 绿不等于 tag 门接对了；门要双向证明——默认 tags 排除文件 + `-tags` 下编译运行。
+
+**7. 挂着 SSE handler 时 `http.Server.Shutdown` 永不返回**（§24.7）
+
+- **Saw**：web frontend 关停时 `srv.Shutdown(ctx)` 挂死到 deadline，进程带着活连接僵着。
+- **Why**：Shutdown 等"活跃连接转空闲"，而 SSE 连接按设计永远活跃；请求 ctx 由客户端断开触发，不由 Shutdown 触发。
+- **Fix**：平面 ctx 结束后直接 `srv.Close()` 强断；流式端点的"优雅退出"要么逐连接记 cancel，要么承认 force-close 才是正确姿势。
+
+**8. ProjectID 哈希的是路径字符串，不是目录**（§24.7）
+
+- **Saw**：同一物理目录经 `/tmp/...` 与 `/private/tmp/...` 两种拼写产生两个 ProjectID——两套分叉的项目状态空间。
+- **Fix**：保持纯哈希契约（内部 EvalSymlinks 被否决——那是伪装成修复的身份迁移）；真实车道传规范路径即可。
+
 详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
 
-> **下一章**：暂无。v7 四柱交付后，seek 的下一阶段将走向何方——见 [`docs/prd/vision.md`](../prd/vision.md)。
+> **下一章**：暂无。v7 四柱交付后的平台化线（远程控制平面 / web 前端 / GLM 车道 / skill 蒸馏）已以 v0.11 增补节进入第 14、17 章与本章 §24.7；seek 的下一阶段走向见 [`docs/prd/vision.md`](../prd/vision.md)。

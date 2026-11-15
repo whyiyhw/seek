@@ -100,8 +100,8 @@ func mustArgs(t *testing.T, a map[string]any) json.RawMessage {
 
 // headerOf returns the first line of a read result (the header).
 func headerOf(out string) string {
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		return out[:i]
+	if before, _, ok := strings.Cut(out, "\n"); ok {
+		return before
 	}
 	return out
 }

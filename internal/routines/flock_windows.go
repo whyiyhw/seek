@@ -20,9 +20,9 @@ func tryFlockNB(f *os.File) (bool, error) {
 	err := windows.LockFileEx(
 		windows.Handle(f.Fd()),
 		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
-		0,             // reserved
-		0xFFFFFFFF,    // nNumberOfBytesToLockLow — entire file
-		0xFFFFFFFF,    // nNumberOfBytesToLockHigh
+		0,          // reserved
+		0xFFFFFFFF, // nNumberOfBytesToLockLow — entire file
+		0xFFFFFFFF, // nNumberOfBytesToLockHigh
 		&ol,
 	)
 	if err == nil {

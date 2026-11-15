@@ -68,6 +68,15 @@ type MEntry struct {
 	Tagline string
 }
 
+// Rejection stages — which funnel layer dropped the candidate. The
+// /distill --dry-run report tallies these so "which layer ate what"
+// reads off the report without parsing free-text reasons.
+const (
+	StageShape    = "shape"    // parse-level validation (ParseSkillCandidates)
+	StageEvidence = "evidence" // verbatim-transcript verification
+	StageL2       = "L2"       // mechanical dedup (name collision / similarity)
+)
+
 // Rejection records why a candidate never reached the review modal.
 // The TUI echoes these as one muted line each so "the reasoner found
 // something but the funnel ate it" stays observable — silent funnel
@@ -75,6 +84,10 @@ type MEntry struct {
 type Rejection struct {
 	Name   string
 	Reason string
+	// Stage is one of the Stage* constants above; empty = a producer
+	// that doesn't attribute (consumers must tolerate it). String()
+	// deliberately ignores it — real-run scrollback stays byte-stable.
+	Stage string
 }
 
 func (r Rejection) String() string {
@@ -284,13 +297,13 @@ func ParseSkillCandidates(raw string) ([]SkillCandidate, []Rejection, error) {
 	for _, c := range parsed {
 		switch {
 		case c.Name == "":
-			rejected = append(rejected, Rejection{Name: "(unnamed)", Reason: "missing name"})
+			rejected = append(rejected, Rejection{Name: "(unnamed)", Reason: "missing name", Stage: StageShape})
 		case !validName(c.Name):
-			rejected = append(rejected, Rejection{Name: c.Name, Reason: fmt.Sprintf("name %q is not kebab-case ([a-z][a-z0-9-]*)", c.Name)})
+			rejected = append(rejected, Rejection{Name: c.Name, Reason: fmt.Sprintf("name %q is not kebab-case ([a-z][a-z0-9-]*)", c.Name), Stage: StageShape})
 		case strings.TrimSpace(c.Description) == "":
-			rejected = append(rejected, Rejection{Name: c.Name, Reason: "missing description"})
+			rejected = append(rejected, Rejection{Name: c.Name, Reason: "missing description", Stage: StageShape})
 		case strings.TrimSpace(c.Body) == "":
-			rejected = append(rejected, Rejection{Name: c.Name, Reason: "missing body"})
+			rejected = append(rejected, Rejection{Name: c.Name, Reason: "missing body", Stage: StageShape})
 		default:
 			kept = append(kept, c)
 		}
@@ -494,6 +507,28 @@ func CheckNovelty(cand SkillCandidate, skills *skill.Set, mIndex []MEntry) L2Res
 	}
 }
 
+// NearestSkill returns the installed skill whose description is most
+// similar to the draft's description+body, plus that similarity,
+// measured with the same trigram-Jaccard metric L2's CheckNovelty
+// uses — so `seek skill drafts show` answers "which existing skill is
+// this draft closest to, and by how much" with the number the funnel
+// itself would have computed. Empty name means "no comparable skill"
+// (empty set, or similarity 0 — nothing overlaps a text shorter than
+// three runes).
+func NearestSkill(draftDescription, draftBody string, skills *skill.Set) (string, float64) {
+	if skills == nil || skills.Len() == 0 {
+		return "", 0
+	}
+	candText := draftDescription + "\n" + draftBody
+	best, bestSim := "", 0.0
+	for _, sk := range skills.List() {
+		if sim := trigramJaccard(candText, sk.Description); sim > bestSim {
+			best, bestSim = sk.Name, sim
+		}
+	}
+	return best, bestSim
+}
+
 func dedupeStrings(in []string) []string {
 	var out []string
 	for i, s := range in {
@@ -661,13 +696,14 @@ func (d *Distiller) Extract(ctx context.Context, history []deepseek.Message, man
 			rejected = append(rejected, Rejection{
 				Name:   c.Name,
 				Reason: fmt.Sprintf("evidence quote not found verbatim in transcript (%d of %d missing) — presumed hallucinated", len(missing), len(c.Evidence)),
+				Stage:  StageEvidence,
 			})
 			continue
 		}
 		l2 := CheckNovelty(c, skills, mIndex)
 		switch l2.Verdict {
 		case L2Reject:
-			rejected = append(rejected, Rejection{Name: c.Name, Reason: l2.Reason})
+			rejected = append(rejected, Rejection{Name: c.Name, Reason: l2.Reason, Stage: StageL2})
 		default:
 			// PASS and GREY both reach the human; GREY candidates
 			// carry their warning along in L2Note so the modal and
@@ -784,7 +820,7 @@ func RenderSKILLMD(cand SkillCandidate) ([]byte, error) {
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "name: %s\n", cand.Name)
 	sb.WriteString("description: |\n")
-	for _, line := range strings.Split(strings.TrimRight(cand.Description, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(cand.Description, "\n"), "\n") {
 		if line == "" {
 			sb.WriteString("\n")
 			continue

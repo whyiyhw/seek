@@ -249,10 +249,10 @@ func TestSkillCmd_Stats_TopNDescByCount(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	var entries []skillstats.Entry
 	// alpha: 5 calls; beta: 2; gamma: 1
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "alpha", Provider: "deepseek"})
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		entries = append(entries, skillstats.Entry{TS: now, Name: "beta", Provider: "deepseek"})
 	}
 	entries = append(entries, skillstats.Entry{TS: now, Name: "gamma", Provider: "deepseek"})
@@ -314,5 +314,167 @@ func TestSkillCmd_Stats_JSON(t *testing.T) {
 	}
 	if len(rows) != 1 {
 		t.Errorf("got %d rows, want 1", len(rows))
+	}
+}
+
+// Distillation provenance rows (provider=distill-auto, M-SD2) share
+// .stats.jsonl but must not count as skill calls — a much-distilled
+// draft would otherwise top `seek skill stats`.
+func TestAggregate_SkipsDistillAutoRows(t *testing.T) {
+	entries := []skillstats.Entry{
+		{TS: "2026-11-13T09:00:00Z", Name: "real-skill", Model: "m"},
+		{TS: "2026-11-13T09:01:00Z", Name: "draft-name", Provider: skillstats.ProviderDistillAuto},
+		{TS: "2026-11-13T09:02:00Z", Name: "draft-name", Provider: skillstats.ProviderDistillAuto},
+	}
+	agg := aggregate(entries, 0, time.Now())
+	if len(agg) != 1 {
+		t.Fatalf("aggregated %d names, want 1 (distill rows excluded): %+v", len(agg), agg)
+	}
+	if _, ok := agg["real-skill"]; !ok {
+		t.Errorf("real-skill missing from aggregation: %+v", agg)
+	}
+	if _, ok := agg["draft-name"]; ok {
+		t.Errorf("distill-auto row leaked into call counts")
+	}
+}
+
+// ---------- stats --distill (funnel report, 三期 c_jqwd72) ----------
+
+// normalizeTableSpaces collapses runs of tabs/spaces into single
+// spaces, so tabwriter-padded table rows can be matched with plain
+// Contains checks.
+func normalizeTableSpaces(s string) string {
+	var sb strings.Builder
+	space := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' {
+			if !space {
+				sb.WriteByte(' ')
+			}
+			space = true
+			continue
+		}
+		space = false
+		sb.WriteRune(r)
+	}
+	return sb.String()
+}
+
+// seedFunnelStats writes a realistic mixed file: one real call row,
+// staged funnel rows across the layers, and a pre-三期 produce row
+// (provider set, stage empty) that must still surface rather than
+// vanish from the report.
+func seedFunnelStats(t *testing.T) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	writeStats(t, []skillstats.Entry{
+		{TS: now, Name: "go-test-runner", Provider: "deepseek"},
+		{TS: now, Name: "", SessionID: "s1", Provider: skillstats.ProviderDistillAuto, Stage: "L0", Verdict: "PASS"},
+		{TS: now, Name: "", SessionID: "s2", Provider: skillstats.ProviderDistillAuto, Stage: "L0", Verdict: "PASS"},
+		{TS: now, Name: "", SessionID: "s3", Provider: skillstats.ProviderDistillAuto, Stage: "L0", Verdict: "DROP"},
+		{TS: now, Name: "bad-name", SessionID: "s1", Provider: skillstats.ProviderDistillAuto, Stage: "shape", Verdict: "REJECT"},
+		{TS: now, Name: "collide", SessionID: "s2", Provider: skillstats.ProviderDistillAuto, Stage: "L2", Verdict: "REJECT"},
+		{TS: now, Name: "good-one", SessionID: "s1", Provider: skillstats.ProviderDistillAuto, Stage: "L3", Verdict: "ACCEPT"},
+		{TS: now, Name: "good-one", SessionID: "s2", Provider: skillstats.ProviderDistillAuto, Stage: "L3", Verdict: "REJECT"},
+		{TS: now, Name: "good-one", SessionID: "s1", Provider: skillstats.ProviderDistillAuto, Stage: "L4", Verdict: "DRAFT"},
+		{TS: now, Name: "good-one", SessionID: "s2", Provider: skillstats.ProviderDistillAuto, Stage: "L4", Verdict: "STRENGTHEN"},
+		{TS: now, Name: "legacy-draft", SessionID: "s0", Provider: skillstats.ProviderDistillAuto}, // pre-三期
+	})
+}
+
+func TestSkillCmd_Stats_DistillFunnelReport(t *testing.T) {
+	withSeekHome(t)
+	seedFunnelStats(t)
+
+	stdout, _, err := runSkill("stats", "--distill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// tabwriter pads cells; compare on whitespace-normalised lines.
+	norm := normalizeTableSpaces(stdout)
+	// Call rows are NOT funnel events.
+	if strings.Contains(norm, "go-test-runner") {
+		t.Errorf("call row leaked into the funnel report:\n%s", stdout)
+	}
+	// Header + the layer counts.
+	for _, want := range []string{
+		"STAGE VERDICT COUNT",
+		"L0 PASS 2", "L0 DROP 1",
+		"shape REJECT 1",
+		"L2 REJECT 1",
+		"L3 ACCEPT 1", "L3 REJECT 1",
+		"L4 DRAFT 1", "L4 STRENGTHEN 1",
+	} {
+		if !strings.Contains(norm, want) {
+			t.Errorf("funnel report missing %q:\n%s", want, stdout)
+		}
+	}
+	// Stages appear in funnel order: the rank of every known stage
+	// never decreases down the table (equal ranks are the same stage's
+	// multiple verdicts).
+	last := -1
+	for _, line := range strings.Split(stdout, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		r := funnelStageRank(fields[0])
+		if r >= len(funnelStageOrder) {
+			continue // unknown/legacy stage — sorted after, not ranked
+		}
+		if r < last {
+			t.Errorf("stage %s out of funnel order in:\n%s", fields[0], stdout)
+		}
+		last = r
+	}
+}
+
+func TestSkillCmd_Stats_DistillJSON(t *testing.T) {
+	withSeekHome(t)
+	seedFunnelStats(t)
+
+	stdout, _, err := runSkill("stats", "--distill", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var funnel map[string]map[string]int
+	if err := json.Unmarshal([]byte(stdout), &funnel); err != nil {
+		t.Fatalf("--distill --json is not a stage→verdict→count map: %v\n%s", err, stdout)
+	}
+	if funnel["L0"]["PASS"] != 2 || funnel["L3"]["ACCEPT"] != 1 || funnel["L4"]["STRENGTHEN"] != 1 {
+		t.Errorf("funnel JSON counts wrong: %+v", funnel)
+	}
+	// The pre-三期 row (no stage) still counts — under the empty key.
+	if funnel[""]["DRAFT"] != 0 || funnel[""][""] != 1 {
+		t.Errorf("legacy unstaged row must surface under the empty stage: %+v", funnel)
+	}
+}
+
+func TestSkillCmd_Stats_DistillEmpty(t *testing.T) {
+	withSeekHome(t)
+	stdout, _, err := runSkill("stats", "--distill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "no distillation telemetry") {
+		t.Errorf("empty funnel report should explain itself:\n%s", stdout)
+	}
+}
+
+func TestAggregateFunnel_SinceFiltersOldRows(t *testing.T) {
+	old := time.Now().Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	entries := []skillstats.Entry{
+		{TS: old, Provider: skillstats.ProviderDistillAuto, Stage: "L0", Verdict: "DROP"},
+		{TS: fresh, Provider: skillstats.ProviderDistillAuto, Stage: "L0", Verdict: "PASS"},
+		// Not a distill row at all — ignored whatever its age.
+		{TS: fresh, Provider: "deepseek", Stage: "L0", Verdict: "PASS"},
+	}
+	funnel := aggregateFunnel(entries, 30*24*time.Hour, time.Now())
+	if funnel["L0"]["DROP"] != 0 {
+		t.Errorf("90-day-old row leaked past --since: %+v", funnel)
+	}
+	if funnel["L0"]["PASS"] != 1 {
+		t.Errorf("fresh row missing: %+v", funnel)
 	}
 }

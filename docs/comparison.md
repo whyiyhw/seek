@@ -42,7 +42,7 @@
 | LSP 工具（结构化符号/引用） | ✅ | 🔶 **等效替代** | — | v6 柱 L（瘦身版）：`references` 工具走 gopls/pyright/tsserver 拿**语义引用**（grep 替代不了的硬赢）。definition/hover/symbols **故意不做**——Go 里被 grep+`go build` 覆盖，ROI 低（见 `feature-lsp.md` §动机）。会话级 server、零 daemon |
 | Notebook 编辑 | ✅ | ❌ **缺失** | — | Claude Code 有 `NotebookEdit` 原生编辑 Jupyter `.ipynb`；Seek 无 |
 | 后台 bash + 流式监听 | ✅ | ✅ | — | 双方均支持 `run_in_background` + `monitor`（poll/wait/kill）跟踪后台 job。seek 为会话级（随会话生死、零 daemon），v6 柱 K |
-| Web 搜索 | ✅ | ❌ **缺失** | — | Claude Code `WebSearch`；Seek 只有 `webfetch`（HTTPS GET 单页） |
+| Web 搜索 | ✅ | ✅ | — | Seek `web_search`（DeepSeek 原生）：调独立 Search API（2026-10-17 开放，自研引擎，按次计费 ¥5/千次进 status bar），结果含标题/摘要/URL；配合 `webfetch` 取全文。Claude Code `WebSearch` |
 | Fast 模式 | ✅ | ❌ **缺失** | — | Claude Code 有 `/fast` 模式，对简单任务快速低消耗响应 |
 | Headless / 非交互模式 | ✅ | 🔶 **等效替代** | Seek 有 JSON-RPC 2.0 service 模式（`--rpc`）用于 IDE 接入和 `-json` / `-p` 一次性输出，但不是通用 `--headless` 标志 |
 | 会话持久化 | ✅ | ✅ | **对等** | JSONL 格式（`schema_version=3`），自动保存，`/branch` 分支，`/compact` 压缩，断点续传 |
@@ -52,7 +52,7 @@
 | 多行输入 | ✅ | ✅ | **对等** | Textarea 输入，路径自动补全 |
 | 自治达标循环（`/goal`） | ✅ **v2.1.139** | ✅ | **对等，且 seek 更广** | CC `/goal` 单 agent 死磕到达标（Haiku 每轮判），仅 session 级。Seek `/goal`（feature-goal.md）：便宜模型每轮判 + **TUI + headless `seek goal run` + `cron create --goal`**——可定时无人值守跑、push 手机，CC 的 session 级 `/goal` 做不到 |
 
-**小结**：核心 chat/edit 循环对等。原"四件套"差距已收敛：**`Monitor` + 后台 Bash**（柱 K）、**`LSP`**（柱 L `references`，语义引用部分）已补；CC 新增的 **`/goal`** 也已对齐（且 seek 可 headless/cron 组合，更广）；剩 **`NotebookEdit`**（notebook 编辑）、**`WebSearch`**（不止 fetch 单页）。Fast 模式属于 UX 便利功能而非架构级特性。
+**小结**：核心 chat/edit 循环对等。原"四件套"差距已收敛：**`Monitor` + 后台 Bash**（柱 K）、**`LSP`**（柱 L `references`，语义引用部分）、**`WebSearch`**（`web_search`，DeepSeek 原生 Search API）已补；CC 新增的 **`/goal`** 也已对齐（且 seek 可 headless/cron 组合，更广）；剩 **`NotebookEdit`**（notebook 编辑）。Fast 模式属于 UX 便利功能而非架构级特性。
 
 ---
 
@@ -268,7 +268,7 @@
 | **🟢 已交付** | 推送 | **移动端可达（webhook 桥）** | v0.7.0（v6 柱 M）：`push_webhooks` 把 cron/trigger 终态额外 POST 到用户自选渠道（ntfy/slack/discord/raw），离开电脑也能收。**故意不做** native 云 push（反零 daemon/隐私立场，见 §6 边界）——webhook 桥让用户自接渠道，等价覆盖「手机收得到」的需求。`seek cron config check --probe` 验证可达 |
 | **🟠 P2** | MCP | **TUI 内重启 server** | 中等投入 |
 | **🟠 P2** | 工具 | **`NotebookEdit`（Jupyter）** | 数据科学场景；用户群可能小 |
-| **🟠 P2** | 工具 | **`WebSearch`** | 不只是 fetch 单 URL；Seek 已有 webfetch 框架可扩展 |
+| **🟢 已交付** | 工具 | **`web_search`（Web 搜索）** | DeepSeek 独立 Search API 包装（2026-10-17 开放，自研引擎，¥5/千次按成功计费进 status bar）。同 key 同 base URL；无本地 fetch 面（SSRF 天然免疫）；只读工具，plan-analyze 可用 |
 | **🔵 P3** | UX | **Fast 模式** | 模型/路由层打磨 |
 | **🔵 P3** | 平台 | **Devcontainer 检测 / Docker 沙箱** | 与"单二进制零依赖"卖点张力较大 |
 | **🔵 P3** | UI | **语音输入** | macOS 原生路径，中等投入 |
@@ -302,7 +302,7 @@
 
 2. **过去的"最大架构缺口"已关闭（v0.6.x）**：子代理（v0.6.0）、worktree 隔离（v0.6.0）、cron / 唤醒 / 触发 / OS 通知（v0.6.1）三个 🔴 P0 项全部 ship。Seek 不再是"单进程单 agent"——模型可以 spawn 并行子代理（standalone session + token 账户 + 可选 worktree 隔离），可以让自己定时唤醒，可以由外部 CI/IDE 触发跑活。**剩下的"差距"全部是架构选择**而非缺口（云托管 routines vs 本地零 daemon），针对的是不同用户画像。
 
-3. **第二档单点工具缺口（基本收敛）**：结构化 `AskUserQuestion`（柱 I）、复合 review（柱 J）、移动 push（柱 M）、`Monitor` + 后台 bash（柱 K）、`LSP` 语义引用（柱 L `references`）均已 ship；**剩 `NotebookEdit`、`WebSearch`**（+ LSP 的 definition/hover/symbols，经评估 ROI 低、故意不做）。v6 五柱全交付。
+3. **第二档单点工具缺口（基本收敛）**：结构化 `AskUserQuestion`（柱 I）、复合 review（柱 J）、移动 push（柱 M）、`Monitor` + 后台 bash（柱 K）、`LSP` 语义引用（柱 L `references`）、`web_search`（DeepSeek 原生 Search API）均已 ship；**剩 `NotebookEdit`**（+ LSP 的 definition/hover/symbols，经评估 ROI 低、故意不做）。v6 五柱全交付。
 
 4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 
@@ -364,7 +364,7 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 | **Web 前端** | ❌ 仅 TUI + 状态栏 | **生产级** web 前端（SSE 事件流 + REST submit/cancel/approve/plan/compact + context/token 指标；源码非 stub） | **Reasonix** |
 | **语义索引** | ❌ 故意不做（grep+read+`references`） | **有** `codegraph`（含 install + e2e） | Reasonix（路线分歧） |
 | **桌面 / 远程** | webhook push（单向通知） | Tauri 桌面（预发布）+ QQ 双向远程 | Reasonix |
-| **Web search** | webfetch 单页（WebSearch 在 P2） | 多 provider（Bing/Baidu/SearXNG/Tavily/Perplexity） | Reasonix |
+| **Web search** | ✅ `web_search`（DeepSeek 原生 Search API，按次计费）+ webfetch 单页 | 多 provider（Bing/Baidu/SearXNG/Tavily/Perplexity） | **≈ 对等**（seek 单 provider 但零配置——同 DeepSeek key） |
 | **Memory 模型** | L/M/S 三层 + `seek -dream` 跨项目蒸馏 + decay GC | 四分类（user/feedback/project/reference） | 路线不同 |
 | **DeepSeek 深度** | FIM 端点 + 错峰 5 折倒计时 + V4 `think` | billing/balance（**未见** FIM/错峰） | seek 略深 |
 | **规模/心智份额** | 新/小 | **14.9k stars / 870 forks** | **Reasonix（碾压）** |

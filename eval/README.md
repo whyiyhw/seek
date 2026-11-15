@@ -55,6 +55,7 @@ per case it executed, e.g.:
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
 | `bash_chains` | `tool_start` events for `bash` whose raw args contain `;` or `&&` — the multi-command-chaining anti-pattern. `;` isn't even a separator on cmd.exe (Windows), so a POSIX-style chain fails wholesale; `&&` is legal on cmd but still the anti-pattern (target shape: one command per call, or parallel dedicated-tool calls). `|` deliberately NOT counted — pipelines and grep alternations are legitimate |
 | `bash_git_calls` | `tool_start` events for `bash` whose raw args contain a `git` invocation (`\bgit\b`) — read-only git belongs in the dedicated git tool (whitelist + auto-fix); mutating git (commit/push) legitimately lives in bash, so bind this metric only in read-only prompts |
+| `bash_before_dedicated` | `bash` tool_starts occurring BEFORE the first `grep`/`read` tool_start — bash as FIRST resort. Ordering is the honest anti-pattern signal when a case's task legitimately forces shell recovery later (e.g. `read` elided an over-1024-byte line so verbatim text needs awk): a total `bash_calls` bound cannot tell recovery from overreach, this can. A run with no grep/read at all counts every bash call |
 | `git_calls` | `tool_start` events with `name=git` |
 | `git_subcommand_dupes` | `tool_end` events for `git` whose result contains `repeated from args` — the model repeated the subcommand as `args[0]` and the tool auto-fixed it; counts the construction mistake at zero behavioral cost (see `eval/cases/git-subcommand-shape/README.md`) |
 | `probe_reads` | `tool_end` events for `read` whose result contains `0 lines emitted` **and** `from line` — a read past EOF that returned nothing, i.e. the model was probing because it couldn't tell whether more pages existed (see `docs/test-plan-read-tool.md` §3.2) |
@@ -67,6 +68,7 @@ per case it executed, e.g.:
 | `nonzero_exits` | `runner_fact` lines with `exit_code != 0` — a runner.sh's channel for process-level results (exit codes aren't in the JSONL stream); 0 for default-invocation cases |
 | `turns` | `turn_end` events |
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
+| `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
 | `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
 
 Bounds in `expect.json` use the prefix to declare direction:
@@ -105,9 +107,46 @@ Optional per-case hooks (run from the repo root, same cwd as the seek invocation
 - `teardown.sh` — clean up after the run; runs even when the invocation failed.
 - `runner.sh` — **replace the default seek invocation entirely** (`-yolo -no-save … -p`). For cases whose contract is about the CLI shape itself rather than the model's tool-call stream: running without `-yolo` (print-mode permission defaults), chaining multiple invocations (fresh run + `-resume` same session id), isolating `SEEK_HOME`, … Contract: executed with `SEEK_EVAL_BINARY`, `SEEK_EVAL_REPO_ROOT`, `SEEK_EVAL_PROMPT_FILE`, `SEEK_EVAL_MAX_TURNS` in the environment; writes the JSONL event stream to stdout, optionally followed by `{"type":"runner_fact","exit_code":N}` lines per invocation (consumed by the `nonzero_exits` metric). Cases without a `runner.sh` keep the default invocation and its historical behaviour.
 
+## Tool-description tuning (relocated from AGENTS.md 2026-11-14)
+
+The `const description` inside each `internal/tools/<name>/` is the highest-leverage behavioural lever: it rides every tool schema to the API, so the model MUST read it to build a valid `tool_call` — unlike AGENTS.md, which weaker/faster models may skim.
+
+Pattern (proven in `eval/cases/tool-selection/`):
+
+1. **Eval case first** — `prompt.txt` + `expect.json` defining the desired behaviour in measurable terms.
+2. **Baseline** — run and record to `eval/results/` before changing anything.
+3. **Edit the description** — 10–20 words of targeted guidance; zero runtime cost, the string is already sent.
+4. **Compare** — re-run; success is the tool-call sequence changing, not just binary PASS/FAIL.
+
+This repo's own tuning history:
+
+| Tool | Guidance added | Observed effect |
+|---|---|---|
+| `bash` | "Prefer dedicated tools for repo inspection" | Model stops reaching for `bash ls` / `bash cat` |
+| `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
+| `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
+| `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
+
 ## When to read results
 
 Results are checked into git so you can `git log eval/results/` and watch how the agent's behaviour drifts as the codebase, prompts, or model versions change. A single PASS does not mean the bug is fixed; a sustained PASS rate across many runs does.
+
+## Trend reports
+
+`scripts/eval-trend.sh` aggregates every `results/*.jsonl` into
+`trend-report.md` + `trend-report.json` (both checked in, regenerated on
+demand): per-case last-5 pass rate, first-failure time, consecutive-failure
+streak, and drift-suspect flags — most notably `suspect:gap-uncovered`
+(failing run whose previous coverage was >30 days earlier: the failure date
+is only an **upper bound** on when behaviour drifted — the bash-overreach
+lesson) and `suspect:no-baseline` (case with ≤5 recorded runs, first run
+<30 days old, already failing). `--selftest` drives the whole flag matrix
+from a fake results dir. Env knobs (`TREND_WINDOW`, `TREND_GAP_DAYS`,
+`TREND_NOW`, …) are documented in the script header.
+
+Note for tooling: the early result files (pre v0.5) are pretty-printed
+concatenated JSON objects — one result spans many lines — so readers must
+parse with jq, never line-by-line (see `docs/pitfalls.md`).
 
 ## Cost
 

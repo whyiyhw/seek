@@ -11,15 +11,18 @@ const (
 	// / 384K max output. Pricing effective 2026-09-10 12:00 CST — see
 	// internal/pricing.
 	//
-	// The whole V4 lineup retired with this launch: the server still
-	// accepts deepseek-v4-flash / deepseek-v4-pro /
-	// deepseek-v4-flash-vision-exp, routing them to V4.1 Flash and
-	// billing at Flash prices — but seek keeps NO registry entries for
-	// them. Session files carrying a retired id degrade to "unknown
-	// model" handling: no Thinking flag, 128K budget default, and
-	// Flash-card pricing via the pricing fallback (the numbers the
-	// server actually bills anyway). Same precedent as the
-	// deepseek-chat / deepseek-reasoner removal on 2026-07-24.
+	// The rest of the V4 lineup retired with this launch, but the
+	// split has since changed (pricing page checked 2026-11-14):
+	// deepseek-v4-flash / deepseek-v4-flash-vision-exp are still
+	// accepted, server-routed to V4.1 Flash and billed at Flash
+	// prices — seek keeps NO registry entries for them, so session
+	// files carrying them degrade to "unknown model" handling: no
+	// Thinking flag, 128K budget default, and Flash-card pricing via
+	// the pricing fallback (the numbers the server bills anyway).
+	// deepseek-v4-pro, however, was re-listed as its own model with
+	// its own higher rate card — pricing.ModelV4Pro prices it.
+	// Same precedent as the deepseek-chat / deepseek-reasoner removal
+	// on 2026-07-24.
 	ModelV41Flash = "deepseek-flash"
 
 	RoleSystem    = "system"

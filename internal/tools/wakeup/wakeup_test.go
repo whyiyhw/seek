@@ -143,9 +143,9 @@ func TestExecute_DelayAboveMaximum(t *testing.T) {
 func TestExecute_MissingFieldsErrorAtParser(t *testing.T) {
 	tool, _, _ := newTestTool(t)
 	for _, raw := range []string{
-		`{"delay_seconds": 60}`,                 // missing prompt
-		`{"prompt": "p"}`,                       // missing delay
-		`{"delay_seconds": 0, "prompt": "p"}`,   // explicit zero
+		`{"delay_seconds": 60}`,               // missing prompt
+		`{"prompt": "p"}`,                     // missing delay
+		`{"delay_seconds": 0, "prompt": "p"}`, // explicit zero
 	} {
 		_, err := tool.Execute(context.Background(), json.RawMessage(raw))
 		if err == nil {

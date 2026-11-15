@@ -106,11 +106,11 @@ func TestAppend_ConcurrentWritesDoNotInterleave(t *testing.T) {
 	const G = 16
 	const PerGoroutine = 50
 	var wg sync.WaitGroup
-	for g := 0; g < G; g++ {
+	for g := range G {
 		wg.Add(1)
 		go func(g int) {
 			defer wg.Done()
-			for i := 0; i < PerGoroutine; i++ {
+			for range PerGoroutine {
 				_ = w.Append(Entry{
 					TS:   "t",
 					Name: "skill",
@@ -156,5 +156,41 @@ func TestAppend_EmptyOptionalFieldsAreOmitted(t *testing.T) {
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "project_id") {
 		t.Errorf("empty project_id should be omitted; got: %s", data)
+	}
+}
+
+// Funnel telemetry fields (三期, c_jqwd72): stage/verdict ride only on
+// distill rows — call rows keep omitting both, and staged rows
+// round-trip through Read for the report side.
+func TestAppend_FunnelStageVerdictRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".stats.jsonl")
+	w := New(path)
+	call := Entry{TS: "t", Name: "go-test-runner", Provider: "deepseek"}
+	staged := Entry{TS: "t", Name: "good-one", SessionID: "s1", Provider: ProviderDistillAuto, Stage: "L4", Verdict: "DRAFT"}
+	if err := w.Append(call); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Append(staged); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"stage"`) && !strings.Contains(string(data), `"stage":"L4"`) {
+		t.Errorf("call row must not carry a stage field; got: %s", data)
+	}
+	if !strings.Contains(string(data), `"stage":"L4"`) || !strings.Contains(string(data), `"verdict":"DRAFT"`) {
+		t.Errorf("staged row must persist stage+verdict verbatim; got: %s", data)
+	}
+	entries, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	if entries[0].Stage != "" || entries[0].Verdict != "" {
+		t.Errorf("call row gained stage/verdict: %+v", entries[0])
+	}
+	if entries[1].Stage != "L4" || entries[1].Verdict != "DRAFT" {
+		t.Errorf("staged row lost stage/verdict: %+v", entries[1])
 	}
 }

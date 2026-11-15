@@ -53,3 +53,6 @@ bench-*.json
 
 # weight.sh trend files (subtraction mechanism L1) — local only by design
 /out/
+
+# video-agent-kit local cache marker — machine-specific path, never commit
+/.video_agent/

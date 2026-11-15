@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -310,11 +311,11 @@ func TestBindingStore_ConcurrentPuts(t *testing.T) {
 	const workers, perWorker = 8, 25
 
 	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < perWorker; i++ {
+			for i := range perWorker {
 				conv := NewConvID("feishu", fmt.Sprintf("c-%d-%d", w, i))
 				if err := s.Put(Binding{ConvID: conv, ProjectPath: fmt.Sprintf("/p/%d/%d", w, i)}); err != nil {
 					t.Errorf("Put %s: %v", conv, err)
@@ -351,8 +352,12 @@ func TestBindingStore_FilePermissionsAndNoTmp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Errorf("bindings.json mode = %o, want 600", perm)
+	// POSIX mode assertions are Unix-only: Windows chmod is advisory
+	// (no 0600 mapping), so Go reports the platform default 0666.
+	if runtime.GOOS != "windows" {
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("bindings.json mode = %o, want 600", perm)
+		}
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -376,10 +381,13 @@ func TestBindingStore_ServeDirCreatedLazily(t *testing.T) {
 	}
 	fi, err := os.Stat(filepath.Dir(servePath))
 	if err != nil {
-		t.Fatalf("stat serve dir: %v", err)
+		t.Fatalf("stat: %v", err)
 	}
-	if perm := fi.Mode().Perm(); perm != 0o700 {
-		t.Errorf("serve dir mode = %o, want 700", perm)
+	// Unix-only for the same reason as above (Windows reports 0777).
+	if runtime.GOOS != "windows" {
+		if perm := fi.Mode().Perm(); perm != 0o700 {
+			t.Errorf("serve dir mode = %o, want 700", perm)
+		}
 	}
 }
 

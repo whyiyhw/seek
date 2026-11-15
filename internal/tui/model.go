@@ -34,6 +34,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
@@ -166,6 +167,15 @@ type Options struct {
 	// upgrade in v0.6.x dot release).
 	Subagents *subagent.Manager
 
+	// SubagentWake is the background-completion wake signal
+	// (feature-orchestration PRD §4.1 D2), wired from
+	// subagent.Manager.WakeCh by cmd/seek. A receive fires
+	// subagentWakeMsg so the loop refreshes the agents badge and
+	// prints the "background agent finished" hint — the same
+	// channel-wake idiom as ObserveResultChan. nil when Subagents
+	// is nil; the wake handler also nil-checks.
+	SubagentWake <-chan struct{}
+
 	// Worktrees is the v5 柱 G M11.1 worktree Manager (feature-
 	// subagent.md §3.8). nil when seek runs outside a git repo
 	// (cmd/seek skips Manager construction in that case) — the
@@ -192,6 +202,16 @@ type Options struct {
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
+
+	// AgentTypes is the typed-agent definition registry
+	// (feature-orchestration.md P2), loaded once at session start by
+	// cmd/seek. Read-only from the TUI: /agents types lists it, and
+	// the default /agents view appends a hint line when custom
+	// (non-builtin) types exist. nil = not wired (--no-save paths);
+	// /agents types reports "unavailable" rather than crash. Hot
+	// reload is deliberately absent — schema bytes freeze per process
+	// for the prefix cache, so type definitions load once per session.
+	AgentTypes *agenttypes.Set
 
 	// Webhook is the v6 柱 M push dispatcher (feature-mobile-push.md),
 	// reused here for the interactive extension: when an interactive turn
@@ -411,7 +431,7 @@ type Model struct {
 	// pastedImagePath holds the temp PNG grabbed from the clipboard on
 	// Ctrl+V (M-imgpaste.2). The input shows an image fold marker; on submit
 	// resolvePasteInInput swaps the marker for `@<pastedImagePath>` so the
-	// existing OCR pipeline (ocr.Expand via ExpandInput) reads it. Empty =
+	// vision input router (ExpandInput) attaches the image natively. Empty =
 	// no pending pasted image.
 	pastedImagePath string
 
@@ -793,6 +813,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.opts.ObserveResultChan != nil {
 		cmds = append(cmds, waitForObserveResult(m.opts.ObserveResultChan))
+	}
+	if m.opts.SubagentWake != nil {
+		cmds = append(cmds, waitForSubagentWake(m.opts.SubagentWake))
 	}
 	if c := versionCheckCmd("whyiyhw", "seek", VersionString()); c != nil {
 		cmds = append(cmds, c)

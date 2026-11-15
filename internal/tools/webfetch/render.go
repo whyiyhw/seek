@@ -84,8 +84,8 @@ var blockTags = map[string]bool{
 // only the prefix matters.
 func simplifyBody(ct string, body []byte) string {
 	media := ct
-	if idx := strings.Index(ct, ";"); idx >= 0 {
-		media = ct[:idx]
+	if before, _, ok := strings.Cut(ct, ";"); ok {
+		media = before
 	}
 	media = strings.TrimSpace(strings.ToLower(media))
 

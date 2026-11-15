@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -469,11 +470,11 @@ func TestBuildToolResultMsg(t *testing.T) {
 func TestAgent_EmptyToolResult_WirePresent(t *testing.T) {
 	t.Parallel()
 	var (
-		callCount     int32
+		callCount     atomic.Int32
 		secondReqBody []byte
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&callCount, 1)
+		n := callCount.Add(1)
 		if n == 2 {
 			secondReqBody, _ = io.ReadAll(r.Body)
 		}
@@ -1051,8 +1052,7 @@ func assertNoOrphanToolCalls(t *testing.T, hist []deepseek.Message) {
 	if len(hist) == 0 {
 		return
 	}
-	for i := len(hist) - 1; i >= 0; i-- {
-		m := hist[i]
+	for i, m := range slices.Backward(hist) {
 		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}
@@ -1732,9 +1732,9 @@ func TestAgent_SetModeLabelVisibleNextPrompt(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		// Grab the content of the last user message.
-		for i := len(body.Messages) - 1; i >= 0; i-- {
-			if body.Messages[i].Role == "user" {
-				lastUserContent = body.Messages[i].Content
+		for _, v := range slices.Backward(body.Messages) {
+			if v.Role == "user" {
+				lastUserContent = v.Content
 				break
 			}
 		}
@@ -2294,5 +2294,33 @@ func TestRunTurnLLM_UsageNoCacheDetail(t *testing.T) {
 	if got.PromptCacheMissTokens != 500 || got.PromptCacheHitTokens != 0 {
 		t.Errorf("no-detail split = hit %d / miss %d, want 0/500 (all input at miss rate)",
 			got.PromptCacheHitTokens, got.PromptCacheMissTokens)
+	}
+}
+
+// TestAttachPredictedNextWritesThroughIndex pins the write-through-index
+// contract: a modernize slices.Backward rewrite once assigned
+// PredictedNext to the loop COPY (silently no-opping the prediction
+// round-trip through session save/resume) and sailed through a green
+// suite because this path had zero coverage.
+func TestAttachPredictedNextWritesThroughIndex(t *testing.T) {
+	ag, err := New(Config{Client: deepseek.New(deepseek.WithAPIKey("t"))})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag.messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "hi"},
+		{Role: deepseek.RoleAssistant, Content: "has tool calls", ToolCalls: []deepseek.ToolCall{{ID: "c1"}}},
+		{Role: deepseek.RoleTool, Name: "echo", Content: "ok"},
+		{Role: deepseek.RoleAssistant, Content: "final answer"},
+	}
+	ag.AttachPredictedNext("predicted next")
+
+	msgs := ag.Messages()
+	if msgs[3].PredictedNext != "predicted next" {
+		t.Errorf("PredictedNext = %q, want %q on the last tool-call-free assistant message",
+			msgs[3].PredictedNext, "predicted next")
+	}
+	if msgs[1].PredictedNext != "" {
+		t.Errorf("PredictedNext leaked onto the tool-call assistant message: %q", msgs[1].PredictedNext)
 	}
 }

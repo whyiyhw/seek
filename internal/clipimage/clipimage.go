@@ -1,9 +1,10 @@
 // Package clipimage grabs an image off the OS clipboard to a temp file,
 // for the TUI image-paste feature (feature-image-paste.md, M-imgpaste).
-// It does NOT OCR — it just produces a PNG path; the caller inserts an
-// `@<path>` reference that the existing 柱 Q OCR pipeline (ocr.Expand)
-// picks up on submit. Grabbing is PLUGGABLE (env SEEK_CLIPBOARD_IMAGE_CMD)
-// with platform defaults, mirroring how ocr.command is pluggable.
+// It does no model work — it just produces a PNG path; the caller inserts
+// an `@<path>` reference that the vision input router picks up on submit
+// and sends natively to the multimodal lane (feature-vision; the OCR-era
+// pipeline is gone). Grabbing is PLUGGABLE (env SEEK_CLIPBOARD_IMAGE_CMD)
+// with platform defaults.
 package clipimage
 
 import (

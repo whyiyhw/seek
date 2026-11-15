@@ -5,9 +5,9 @@
 #
 # WHY A MECHANICAL GATE AND NOT JUST REVIEW
 #
-# AGENTS.md and CLAUDE.md are read at the start of every session: every
-# word is paid for in prompt tokens, in every conversation, forever. They
-# are also the easiest place to "just add a line", so they accrete. A
+# AGENTS.md is read at the start of every session: every
+# word is paid for in prompt tokens, in every conversation, forever. It
+# is also the easiest place to "just add a line", so it accretes. A
 # prose rule does not stop that — dsh's own note on this records that
 # their accretion happened *while* the current-state rule and reviewer
 # attention already existed, which is why they added a gate.

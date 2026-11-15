@@ -31,6 +31,7 @@ package plan
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -49,8 +50,7 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 	// message. Iterate from the tail so we land on the most recent
 	// approval if multiple exist (re-propose flow).
 	approvalIdx := -1
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for i, m := range slices.Backward(msgs) {
 		if m.Role == deepseek.RoleTool && m.Name == "propose" && strings.HasPrefix(m.Content, approvedMarker) {
 			approvalIdx = i
 			break
@@ -129,8 +129,7 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 // parses its arguments JSON and returns the steps slice. Returns nil
 // on any miss / malformed args.
 func extractProposeSteps(msgs []deepseek.Message, callID string) []string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for _, m := range slices.Backward(msgs) {
 		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}
@@ -154,8 +153,7 @@ func extractProposeSteps(msgs []deepseek.Message, callID string) []string {
 // tool_call with ID == callID and Function.Name == "plan"; parses
 // {action, index}. Returns (_, _, false) on any miss / malformed args.
 func extractPlanCall(msgs []deepseek.Message, callID string) (string, int, bool) {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for _, m := range slices.Backward(msgs) {
 		if m.Role != deepseek.RoleAssistant || len(m.ToolCalls) == 0 {
 			continue
 		}

@@ -16,6 +16,12 @@ func TestLimit_KnownModelAndFallback(t *testing.T) {
 	if got := Limit("deepseek-flash"); got != 1_000_000 {
 		t.Errorf("deepseek-flash = %d, want 1M", got)
 	}
+	// GLM lane (per-agent routing, feature-orchestration.md D9): the
+	// single 1M-context tier — keeps /compact warnings honest for
+	// GLM-routed subagents.
+	if got := Limit("glm-5.3"); got != 1_000_000 {
+		t.Errorf("glm-5.3 = %d, want 1M", got)
+	}
 	for _, retired := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
 		if got := Limit(retired); got != Default {
 			t.Errorf("%s = %d, want Default %d", retired, got, Default)

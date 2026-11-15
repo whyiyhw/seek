@@ -19,8 +19,8 @@ import (
 func tinyPNG(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 3, 2))
-	for x := 0; x < 3; x++ {
-		for y := 0; y < 2; y++ {
+	for x := range 3 {
+		for y := range 2 {
 			img.Set(x, y, color.RGBA{R: uint8(x * 80), B: uint8(y * 120), A: 255})
 		}
 	}

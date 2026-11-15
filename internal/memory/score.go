@@ -93,10 +93,7 @@ func Score(e Entry, now time.Time, halfLife time.Duration) float64 {
 	if e.CreatedAt.After(lastActive) {
 		lastActive = e.CreatedAt
 	}
-	age := now.Sub(lastActive)
-	if age < 0 {
-		age = 0
-	}
+	age := max(now.Sub(lastActive), 0)
 	decay := math.Exp(-float64(age) / float64(halfLife))
 	return float64(e.RecallCount+1) * decay
 }

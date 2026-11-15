@@ -170,7 +170,7 @@ func TestSaveLoad_PreservesEffort(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			header := strings.SplitN(string(raw), "\n", 2)[0]
+			header, _, _ := strings.Cut(string(raw), "\n")
 			hasKey := strings.Contains(header, `"effort"`)
 			if want == "" && hasKey {
 				t.Errorf("empty Effort leaked into header JSON: %s", header)
@@ -287,6 +287,30 @@ func TestGenerateID_IsSortable(t *testing.T) {
 	}
 	if !strings.HasPrefix(a, "20260121-103000-") {
 		t.Errorf("unexpected ID prefix: %s", a)
+	}
+}
+
+// TestGenerateID_FormatAndUniqueness pins the canonical session ID
+// shape: 32 chars, "YYYYMMDD-HHMMSS-<16 hex>" — the same contract as
+// internal/routines.NewRunID and subagent.newSubSid.
+func TestGenerateID_FormatAndUniqueness(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 21, 10, 30, 45, 0, time.UTC)
+	id := generateID(now)
+	if len(id) != 32 {
+		t.Errorf("session id length = %d, want 32 — got %q", len(id), id)
+	}
+	if !strings.HasPrefix(id, "20260121-103045-") {
+		t.Errorf("session id missing timestamp prefix: %q", id)
+	}
+
+	seen := make(map[string]bool, 500)
+	for range 500 {
+		s := generateID(now)
+		if seen[s] {
+			t.Errorf("duplicate session id: %s", s)
+		}
+		seen[s] = true
 	}
 }
 
@@ -597,7 +621,7 @@ func TestSaveLoad_PreservesGoal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			header := strings.SplitN(string(raw), "\n", 2)[0]
+			header, _, _ := strings.Cut(string(raw), "\n")
 			hasKey := strings.Contains(header, `"goal"`)
 			if want == "" && hasKey {
 				t.Errorf("empty Goal leaked into header JSON: %s", header)

@@ -155,7 +155,7 @@ func TestPolicy_ConcurrentAskAndSetMode(t *testing.T) {
 
 	var wg sync.WaitGroup
 	q := Question{Question: "x", Options: []Option{{ID: "a", Label: "a"}, {ID: "b", Label: "b"}}}
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

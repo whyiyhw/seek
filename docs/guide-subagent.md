@@ -31,6 +31,39 @@ Subagents let the parent agent spawn child agents — each with its own session,
 | **explore** | Read-only (read/grep/list_dir/git/webfetch/think) | Plan-analyze | Parallel research |
 | **plan** | Same read-only set as explore | Plan-analyze, output is numbered action plan | Structuring a plan |
 
+### 2.1 自定义类型 / Custom Types（P2-a）
+
+Put a Markdown file with YAML frontmatter in an `agents/` directory to define your own type (same frontmatter dialect as SKILL.md):
+
+```
+<project>/.seek/agents/<name>.md   # project-level, checked-in（优先）
+~/.seek/agents/<name>.md           # user-level
+```
+
+```markdown
+---
+name: verifier                      # optional — falls back to the filename
+description: Runs the test suite and reports failures.
+tools: [read, grep, list_dir, git, bash]   # subset of the parent registry; omitted = full set
+provider: glm                       # optional lane override (deepseek | glm)
+model: glm-5.3                      # optional
+effort: low                         # optional (low | medium | high)
+workflow: plan-analyze              # optional, tighten-only
+max_turns: 60                       # optional
+---
+You are a test verifier subagent. …（body = the type's role prompt）
+```
+
+Rules (validated at load; a bad file is skipped with a startup warning, never fatal):
+
+- `description` and a non-empty body are **required**; `name` must be kebab-case.
+- Same-name resolution: **project > user > builtin**（a project `explore.md` overrides the built-in `explore`）.
+- `tools` may never include `agent` or `ask_user`（hard parse error）; unknown tool names are checked at spawn time.
+- `workflow` accepts only `plan-analyze` — loosening is a config error (permission tightening is monotonic by design).
+- Files load **once at session start**; edits take effect on the next seek launch (no hot reload — tool-schema bytes freeze per process for the prompt cache).
+
+Inspect what's defined with `/agents types`（lists project, user, and builtin types with their lane overrides and shadowing provenance）. Note: custom types are defined and listed as of P2-a; making them spawnable via the `agent` tool lands with the follow-up milestone.
+
 ---
 
 ## 3. Worktree 隔离 / Worktree Isolation
@@ -40,11 +73,12 @@ When spawned with `isolation="worktree"`, a subagent works in a temporary git wo
 - Worktrees live at `~/.seek/projects/<pid>/worktrees/<wt-id>/`
 - Anchored by a git ref under `refs/seek/worktrees/<wt-id>` (outside the user's default refspec)
 - Dirty-discard safety net: when discarded, content is stashed to `refs/seek/discarded/<ts>` before hard-reset (48-hour recovery window)
+- Orphan self-healing: a session that dies BEFORE cleanup leaves no marker, so the age-based fallback (`--orphan-after`, default 7d) collects unmarked refs at startup/`gc` — but only with no unmerged commits (`merge-base --is-ancestor` vs HEAD) and a clean removable directory; anything dirty/locked/unmerged is skipped + logged for manual review
 - GC via `seek worktree gc` (runs at startup and on demand)
 
 ```bash
 seek worktree list  # Enumerate seek-managed worktrees on disk (prior sessions included)
-seek worktree gc    # Garbage-collect stale worktrees
+seek worktree gc    # Garbage-collect stale worktrees (discarded refs 48h + orphans 7d)
 ```
 
 ---
@@ -62,8 +96,9 @@ seek worktree gc    # Garbage-collect stale worktrees
 
 ```bash
 # TUI
-/agents    # List subagents: spawn time, type, status, turns, tokens, description
-/worktrees # List seek-managed worktrees: id, branch, path
+/agents        # List subagents: spawn time, type, status, turns, tokens, description
+/agents types  # List defined agent types (project > user > builtin), with lane + shadowing info
+/worktrees     # List seek-managed worktrees: id, branch, path
 ```
 
 ---
@@ -74,7 +109,8 @@ seek worktree gc    # Garbage-collect stale worktrees
 # Subagent management is through the agent tool (TUI/chat), not CLI
 # Worktree management:
 seek worktree list  # Enumerate seek-managed worktrees on disk (prior sessions included)
-seek worktree gc    # Prune stale worktrees (rescue-stash refs older than 48h)
+seek worktree gc    # Prune stale worktrees: discarded refs >48h (--older-than),
+                    #   unmarked orphans >7d (--orphan-after; 0 disables)
 ```
 
 Design docs: [`docs/prd/feature-subagent.md`](prd/feature-subagent.md).  

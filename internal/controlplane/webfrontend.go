@@ -15,6 +15,8 @@ package controlplane
 //	GET  /events  SSE downstream: every Send broadcast to all tabs
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	GET  /state   the web conversation's binding, for the status line
+//	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1; registry ships
+//	              empty until the method sets land — see webfrontend_rpc.go)
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -46,6 +48,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/rpc"
 )
 
 //go:embed webfrontend.html
@@ -64,11 +67,44 @@ func webConvID() ConvID { return NewConvID("web", webConvNative) }
 // reaches loopback via a TCP forward), never the public internet.
 const DefaultWebAddr = "127.0.0.1:8790"
 
+// tailnetCGNAT is the IPv4 block Tailscale assigns tailnet IPs from
+// (CGNAT 100.64.0.0/10, RFC 6598). Binding there serves the tailnet
+// only — WireGuard-gated, never the public internet.
+var tailnetCGNAT = net.IPNet{
+	IP:   net.IPv4(100, 64, 0, 0).To4(),
+	Mask: net.CIDRMask(10, 32),
+}
+
+// checkWebAddr gates WebConfig.Addr to the two audiences the frontend
+// is built for: this machine (loopback — 127.0.0.1/::1/localhost, i.e.
+// all of 127/8) and the tailnet (CGNAT 100.64.0.0/10). Everything
+// else — 0.0.0.0/::/empty host (all interfaces), LAN and public IPs,
+// arbitrary hostnames — is refused up front (2026-11-15 user decision,
+// c_x7ehom rework): the frontend bears a token that drives seek runs
+// against bound projects, so "listens everywhere" must not be one
+// typo away. Syntax stays the listen's business: an address
+// net.SplitHostPort cannot cut falls through and dies at Run's listen
+// with its own (authoritative) error.
+func checkWebAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil // unparseable: Run's listen is the syntax authority
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || tailnetCGNAT.Contains(ip) {
+			return nil
+		}
+	} else if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	return fmt.Errorf("web: web_addr %q: only loopback (127.0.0.1/::1/localhost) and tailnet CGNAT 100.64.0.0/10 may listen — bind this machine's 100.x.y.z for tailnet access, or keep 127.0.0.1 and forward with `tailscale serve --tcp=8790`", addr)
+}
+
 // WebConfig tunes WebFrontend. The zero value is the production shape:
 // DefaultWebAddr, ~/.seek/serve/web.token and the default binding store.
 // Tests inject temp paths.
 type WebConfig struct {
-	Addr      string    // listen address; "" → DefaultWebAddr
+	Addr      string    // listen address; "" → DefaultWebAddr; scope-gated by checkWebAddr (loopback + tailnet CGNAT only)
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
@@ -82,6 +118,10 @@ type WebFrontend struct {
 	cfgErr error // deferred WebConfig resolution failure, if any
 
 	store *BindingStore
+
+	// rpcReg serves POST /rpc (W4.1). Built empty in NewWeb, registered
+	// into only before Run — the §3.2 phase contract; handlers dispatch.
+	rpcReg *rpc.Registry
 
 	tokenOnce sync.Once
 	token     string
@@ -99,8 +139,9 @@ type WebFrontend struct {
 var _ Frontend = (*WebFrontend)(nil)
 
 // NewWeb builds the frontend, resolving zero WebConfig fields against
-// the serve dir. Resolution errors are held and surfaced by Run (the
-// registry constructor cannot fail, so failure stays lazy-but-loud).
+// the serve dir and scope-gating Addr (checkWebAddr). Resolution and
+// scope errors are held and surfaced by Run (the registry constructor
+// cannot fail, so failure stays lazy-but-loud).
 func NewWeb(cfg WebConfig) *WebFrontend {
 	if cfg.Addr == "" {
 		cfg.Addr = DefaultWebAddr
@@ -109,6 +150,12 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 		cfg.Banner = os.Stderr
 	}
 	f := &WebFrontend{cfg: cfg}
+	// Scope gate before any filesystem work: an out-of-scope address
+	// must fail with the allowlist reason, not a token-file error.
+	if err := checkWebAddr(cfg.Addr); err != nil {
+		f.cfgErr = err
+		return f
+	}
 	if cfg.TokenPath == "" || cfg.StorePath == "" {
 		dir, err := paths.ServeDir()
 		if err != nil {
@@ -126,8 +173,14 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
 	f.store = OpenBindingStoreAt(f.cfg.StorePath)
+	f.rpcReg = rpc.NewRegistry()
 	return f
 }
+
+// RPCRegistry exposes the /rpc method table for pre-Run wiring (the
+// method sets of W4.2/W4.3). Registration after Run races the
+// handlers' Dispatch — the §3.2 contract forbids it.
+func (f *WebFrontend) RPCRegistry() *rpc.Registry { return f.rpcReg }
 
 // Name implements the Frontend port.
 func (f *WebFrontend) Name() string { return "web" }
@@ -185,6 +238,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
 	mux.HandleFunc("/state", f.handleState)
+	mux.HandleFunc("/rpc", f.handleRPC)
 	return mux
 }
 

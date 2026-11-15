@@ -1,6 +1,6 @@
 # 第 14 章：M6 — 多 Provider 支持
 
-> 对应代码：`pkg/llm/`（通用接口）、`pkg/llm/provider/{anthropic,openai,gemini}/`、`pkg/llm/compatible/`、`pkg/agent/translate.go`、`.github/workflows/ci.yml`（layer-lint）。
+> 对应代码：`pkg/llm/`（通用接口）、`pkg/llm/provider/{anthropic,openai,gemini}/`、`pkg/llm/compatible/`、`pkg/agent/translate.go`、`.github/workflows/ci.yml`（layer-lint）。§14.11 增补：`internal/subagent/routing.go`、`internal/pricing/pricing.go`、`cmd/seek/main.go`（glm case / buildSubagentRoutes）。
 > 起点：第 13 章之前，seek 只能跟 DeepSeek 说话。
 > 终点：`--provider=anthropic` / `openai` / `gemini` / `compatible` 让 seek 跑在四类后端上，Agent 循环、TUI、Skill、会话持久化全部不动。
 
@@ -437,6 +437,58 @@ pkg/llm/provider/gemini/client_test.go      6 tests
 
 ---
 
+## 14.11 GLM 订阅车道与 token 三车道（v0.11 增补）
+
+M6 交付后的很长时间里，这一章的四家第二公民 provider 都是"能跑，但没人天天用"的存在——DeepSeek 是唯一的生产车道。v0.11 把这件事正式化了：**token 三车道**。
+
+- **真值车道 = DeepSeek**（第一公民）：前缀缓存元数据、reasoner、FIM——第 13 章的成本纪律全部建立在这条车道上。关键决策（plan、判卷、浓缩）要的是"信得过"。
+- **量车道 = GLM 订阅**（智谱 bigmodel.cn）：包月订阅、平价计费、超长上下文——explore 型"读 50 个文件再总结"的 bulk 工作要的是"便宜量大"。
+- **兜底车道 = 其余第二公民**（anthropic / openai / gemini / compatible）：兼容性存在，无专门优化。
+
+三条车道不是营销分类——它们对应代码里三种不同的接入姿态，而其中最有讲头的是 GLM。
+
+### GLM 是 `compatible` 的第一个"正式租户"
+
+接入 GLM 没有写新协议。paas/v4 端点逐字节讲 OpenAI Chat Completions——流式 `delta.tool_calls[]` 按 `index` 合并、`finish_reason:"tool_calls"`、连 `stream_options.include_usage` 这个 14.6 的开关也被尊重——所以它骑在 14.7 的 `compatible` 上，钉死默认端点：
+
+```go
+case "glm":
+    // Zhipu GLM subscription lane (open.bigmodel.cn). The paas/v4
+    // endpoint speaks OpenAI Chat Completions — including streaming
+    // tool_calls deltas — so it rides the compatible adapter with a
+    // pinned default base URL.
+    apiKey := config.KeyFor(cfg, "glm")
+    ...
+    return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
+```
+
+但 GLM 不是 `--provider=compatible --base-url=...` 的语法糖。`compatible` 面向任意端点：不知道你的模型叫什么、不知道怎么计费、budget 只能落 Default。GLM 是一条**产品化的车道**：默认模型 `glm-5.3`、独立 key 解析（`GLM_API_KEY` / `providers.glm`）、自己的计价卡——且带 `NoOffPeakDiscount` 标记，平价计费的 provider 绝不能吃 DeepSeek 的错峰时钟折扣。一句话：**compatible 是"能连上"，车道是"进了账本"**。
+
+### 逼出来的接口扩展：缓存字段第一次进 `pkg/llm`
+
+14.2 讲过 `TurnDone` 刻意不带缓存字段——"抽象不稀释 DeepSeek"。GLM 车道第一次撬动这条线，撬动的过程值得记。
+
+冒烟时 GLM 车道的钱统只数 output：input cost 恒 $0、cache hit 恒 0/0。当时的结论是"GLM 不回缓存元数据"——**这个结论根本无法证伪**，因为整条链路有三处都在静默丢同一份数据：wire 类型没声明 `prompt_tokens_details`（`encoding/json` 跳过未声明字段，第 5 章那条老坑的流式版）→ `llm.TurnDone` 没有字段可报 → `runTurnLLM` 合成的 `deepseek.Usage` hit/miss 全零。而 `pricing.Cost` 只从 hit/miss 两个桶计 input——第二公民路径的 input 费用**结构性为 $0**，与 provider 无关。
+
+修复给了 `pkg/llm` 第一个可选能力字段 `TurnDone.CachedInputTokens`，openai client 解析 `cached_tokens`，`runTurnLLM` 拆桶回填。之后真 key 冒烟坐实：GLM 的前缀缓存**确实回包**（单会话 cache hit 上万 token），与 seek 的缓存纪律咬合。教训两层：**"降级"必须是可证伪的断言**——链路自己会丢证据的时候，"对方不支持"与"我们没接"无法区分；以及 `pricing.Cost` 按 model id 计价在多车道下从优化项变成了正确性前提——路由表因此**拒绝跨车道的 model id**（deepseek 的 id 打到 GLM 车道会落到错误的计价卡上，宁可 spawn 失败也不静默错账）。
+
+另有一条记录在案的降级：GLM 也发 `reasoning_content` delta（字段名与 DeepSeek 相同），openai client 的 wire 类型不声明它，思考时间渲染成首 token 前的长静默。这是文档化的预期降级，不是 bug——真成了 UX 问题再照 deepseek 的 Reasoning 通道加 passthrough。
+
+### 路由：车道兑现的地方——per-spawn，不是 per-turn
+
+三车道设计在编排层的兑现点是 `agent` 工具的**可选 `provider` / `model` 参数**（第 21 章的子代理）：explore 型子代理打 GLM 量车道、判卷类留 DeepSeek 真值、两个参数都不传 = 继承父会话（v0.6.0 字节同路径）。
+
+为什么路由长在 spawn 边界而不是 turn 边界？**前缀缓存按模型计**——会话中途换模型等于把缓存清零；而子代理的上下文本来就是隔离的（第 21 章），在 spawn 点选车道是零成本的。路由解析是纯静态表（`internal/subagent/routing.go`）：
+
+- **表是代码常量**：provider → 合法 model id 列表，`ResolveRoute` 只做查表 + 默认值填充（provider 缺省给车道默认模型、model 单独给时反推车道），不运行时探测、不嗅探 key。
+- **车道表里没有探测链**。14.8 的 env 自动探测在无人值守环境撞过实坑：daemon 继承的残留 `ANTHROPIC_API_KEY` 顺位上位，"进程起来了"但模型不对。路由表在启动时构建：**key 在，车道才在表里**；点名一条没有 key 的车道，spawn 带结构化错误失败——工具描述里写死了 "never silently falls back"。
+- **DeepSeek-only 工具按 provider 过滤**：`think` / `fim_complete` 从 GLM 子代理的注册表里剔除（模板 Filter 之后再过一道 provider 兼容滤网）——工具 schema 里看得见、调用必失败的工具是最坏形态。
+- **成本沿各自车道归集**：`Tracker.Record(u, model, tier)` 按 record 归因模型，混合车队（父 deepseek + 子 glm）的状态栏合计自动正确，off-peak 折扣只折该折的。
+
+> 路由的配置契约（config `agents` 段、类型化 agent 的 frontmatter 形态、优先级栈）以 [`docs/prd/feature-orchestration.md`](../prd/feature-orchestration.md) §4.2/§5 为权威；GLM 计价数值以 `internal/pricing/pricing.go` 为权威——本节不复述。
+
+---
+
 ### 相关踩坑
 
 多 Provider 支持实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pitfalls.md) 的详细记录：
@@ -458,6 +510,23 @@ pkg/llm/provider/gemini/client_test.go      6 tests
 - **Why**：需要显式设置 `stream_options: {include_usage: true}`。
 - **Fix**：在 buildRequest 中对 OpenAI 路径设置此选项。
 
+**4. GLM 车道的 reasoning_content delta 被静默丢弃**（§14.11）
+
+- **Saw**：`--provider glm` 冒烟全链路通，但 stats 显示 cache hit 0/0，且首 token 前有长静默。
+- **Why**：端点讲 OpenAI 协议但也发 `reasoning_content` delta；wire 类型不声明它，`encoding/json` 直接跳过。
+- **Fix**：作为文档化预期降级保留；真成 UX 问题再加 passthrough。
+
+**5. 第二公民路径的 input 费用结构性为 $0**（§14.11）
+
+- **Saw**：GLM 车道的钱统只数 output，input cost 恒 $0——"对方不回缓存元数据"的结论当时无法证伪。
+- **Why**：三处同丢一份数据——wire 类型未声明 `prompt_tokens_details` → `TurnDone` 无字段可报 → 合成 Usage hit/miss 全零，而 `pricing.Cost` 只从 hit/miss 桶计 input。
+- **Fix**：`TurnDone.CachedInputTokens` + `cached_tokens` 解析 + `runTurnLLM` 拆桶；真 key 冒烟坐实 GLM 前缀缓存确实回包。
+
+**6. 无头车道的 provider 自动探测对残留 key 零抵抗**（§14.11）
+
+- **Saw**：paseo 首次无头冒烟，`seek acp --provider=deepseek` 的 flag 被整个无视，daemon 继承的残留 `ANTHROPIC_API_KEY` 顺位上位——进程健康、模型不对。
+- **Fix**：无头车道姿态只走 env/config 显式钉死；子代理路由表同理——key 在才进表，点名无 key 车道直接结构化失败，never silently falls back。
+
 详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
 
 ---
@@ -475,6 +544,7 @@ pkg/llm/provider/gemini/client_test.go      6 tests
 - Provider 自动探测优先 DeepSeek；要用第二公民必须显式 `--provider=xxx`，避免意外切换
 - TUI banner 明确公开降级（FIM / cache / Reasoner 不可用）——诚实 > 神秘
 - 每个 provider 都有专门的"协议形状测试" + "SSE 解析测试"，捕获 buildRequest 和流解析的所有怪癖
+- **（v0.11 增补）token 三车道**：DeepSeek 真值 / GLM 订阅量 / 其余兜底——GLM 是 `compatible` 的正式租户（钉端点 + 默认模型 + 独立计价卡），缓存字段第一次进 `pkg/llm`（`TurnDone.CachedInputTokens`），路由长在 spawn 边界（per-spawn 静态表、无探测链、DeepSeek-only 工具按 provider 过滤）
 
 下一章——最后一章——讲 M7 与发布：JSON 输出模式、自举（用 seek 开发 seek 的真实记录）、`go install` 体验、`runtime/debug.ReadBuildInfo` 拿版本号的正确姿势、跨平台差异。
 

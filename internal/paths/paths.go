@@ -64,9 +64,9 @@ func MCPConfig() (string, error) {
 }
 
 // Cache returns the user-level cache directory (~/.seek/cache/) for
-// regenerable artifacts — e.g. the compiled macOS Vision OCR helper
-// (柱 Q), built on demand from embedded source. Safe to delete; rebuilt
-// lazily. The caller creates the directory if needed.
+// regenerable artifacts — e.g. the clipboard temp PNGs (M-imgpaste).
+// Safe to delete; contents are recreated as needed. The caller creates
+// the directory if needed.
 func Cache() (string, error) {
 	root, err := Home()
 	if err != nil {
@@ -99,6 +99,20 @@ func UserSkillStats() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, ".stats.jsonl"), nil
+}
+
+// UserAgents returns the user-level typed-agent definitions directory
+// (~/.seek/agents/), the agent-type counterpart of UserSkills
+// (feature-orchestration.md D10). Project-level definitions live at
+// <project>/.seek/agents/ and are NOT computed here. Read-only at
+// runtime — the loader (internal/agenttypes) scans it; writes belong
+// to a future internal/agentsmgr.
+func UserAgents() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "agents"), nil
 }
 
 // Projects returns the parent directory holding per-project state

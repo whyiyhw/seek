@@ -102,10 +102,7 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 
 	contextLines := defaultContextLines
 	if a.ContextLines != nil {
-		contextLines = *a.ContextLines
-		if contextLines < 0 {
-			contextLines = 0
-		}
+		contextLines = max(*a.ContextLines, 0)
 	}
 	if a.MaxMatches <= 0 {
 		a.MaxMatches = defaultMaxMatches
@@ -182,10 +179,7 @@ func truncateOutput(out string) string {
 	const noticeTemplate = "\n... (grep output truncated at %d KiB to protect context budget; %d KiB of additional matches were dropped — refine the `pattern` (more specific regex) or `path` (narrower scope) to see the rest)\n"
 	// Reserve headroom for the notice so the final length stays ≤ budget.
 	headroom := len(fmt.Sprintf(noticeTemplate, maxOutputBytes/1024, 9999)) + 8
-	cut := maxOutputBytes - headroom
-	if cut < 0 {
-		cut = 0
-	}
+	cut := max(maxOutputBytes-headroom, 0)
 	// Back up to the previous newline so we don't slice a line in half.
 	if nl := strings.LastIndex(out[:cut], "\n"); nl >= 0 {
 		cut = nl + 1
@@ -397,9 +391,9 @@ func walkDir(dir string) ([]string, error) {
 // It splits on the first ** and walks from the literal prefix, matching
 // the suffix glob against each candidate path.
 func expandDoubleStarGlob(pattern string) ([]string, error) {
-	idx := strings.Index(pattern, "**")
-	prefix := filepath.Clean(pattern[:idx])
-	suffix := pattern[idx+2:]
+	before, after, _ := strings.Cut(pattern, "**")
+	prefix := filepath.Clean(before)
+	suffix := after
 	// Strip a leading separator via HasPrefix, never suffix[0]: a pattern that
 	// ENDS in ** (e.g. "internal/**") leaves an empty suffix, and indexing it
 	// panicked — in-process, with no recover, so it crashed the whole host.

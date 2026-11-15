@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -300,7 +301,10 @@ func TestWeb_RunLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("token file: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// POSIX mode assertion is Unix-only: Windows chmod is advisory,
+	// Go reports the default 0666 there (same convention as
+	// bindings_test.go).
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Errorf("token file mode = %v, want 0600", info.Mode().Perm())
 	}
 	tokBytes, err := os.ReadFile(filepath.Join(dir, "web.token"))
@@ -348,6 +352,25 @@ func TestWeb_RunLifecycle(t *testing.T) {
 	}
 }
 
+// TestWeb_PageAvoidsHTMLParsingSinks pins the XSS discipline (PRD §5.5,
+// card c_iha3fr acceptance): model output reaches the DOM only via
+// createElement/createTextNode/textContent — the embedded page must
+// contain no HTML-string parsing sink, not even in a comment (a
+// mention is a temptation; the static check is belt and braces).
+func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
+	for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
+		if strings.Contains(string(webPage), sink) {
+			t.Errorf("embedded page references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", sink)
+		}
+	}
+	// Positive pin: the §2.6 minimal markdown renderer must exist and
+	// build <pre> through the DOM API (regression guard against a
+	// future "simpler" HTML-string rewrite).
+	if !strings.Contains(string(webPage), "document.createElement('pre')") {
+		t.Error("embedded page lost the fenced-code renderer (document.createElement('pre'))")
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.
@@ -359,4 +382,122 @@ func freeAddr(t *testing.T) string {
 	}
 	defer ln.Close()
 	return fmt.Sprintf("127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
+}
+
+// TestWeb_DefaultAddrPinned: the zero WebConfig resolves to the
+// loopback default and DefaultWebAddr keeps its shipped value — both
+// are compat surfaces (configs that omit web_addr; scripts and
+// tailscale forwards that point at 127.0.0.1:8790). Temp paths keep
+// the serve dir out of the picture; only Addr resolution is exercised.
+func TestWeb_DefaultAddrPinned(t *testing.T) {
+	if DefaultWebAddr != "127.0.0.1:8790" {
+		t.Errorf("DefaultWebAddr = %q, want 127.0.0.1:8790 (compat pin)", DefaultWebAddr)
+	}
+	dir := t.TempDir()
+	fe := NewWeb(WebConfig{
+		TokenPath: filepath.Join(dir, "web.token"),
+		StorePath: filepath.Join(dir, "bindings.json"),
+	})
+	if fe.cfg.Addr != DefaultWebAddr {
+		t.Errorf("zero WebConfig addr = %q, want DefaultWebAddr", fe.cfg.Addr)
+	}
+}
+
+// TestWeb_RunBadAddr: a malformed address fails Run's listen with the
+// address in the error. The listen owns syntax and port-in-use
+// validation (scope is gated earlier — TestWeb_AddrScope) and there is
+// never a silent fallback to the default address. Run returns the
+// listen error synchronously, before the serve loop parks, so the call
+// needs no goroutine.
+func TestWeb_RunBadAddr(t *testing.T) {
+	dir := t.TempDir()
+	const bad = "127.0.0.1:no-port-digits"
+	fe := NewWeb(WebConfig{
+		Addr:      bad,
+		TokenPath: filepath.Join(dir, "web.token"),
+		StorePath: filepath.Join(dir, "bindings.json"),
+	})
+	err := fe.Run(context.Background(), make(chan Inbound, 1))
+	if err == nil || !strings.Contains(err.Error(), bad) {
+		t.Fatalf("bad addr must fail Run naming the address, got %v", err)
+	}
+}
+
+// TestWeb_AddrScope: the three states of the web_addr allowlist
+// (2026-11-15 decision, c_x7ehom rework) — loopback passes, tailnet
+// CGNAT passes, everything else is refused with the address named.
+// Boundary IPs pin the /10 mask: 100.63.x and 100.128.x are NOT
+// tailnet. 127.0.0.2 documents that the whole 127/8 is loopback.
+func TestWeb_AddrScope(t *testing.T) {
+	for _, tc := range []struct {
+		addr string
+		ok   bool // want allowed
+	}{
+		// Loopback family.
+		{"127.0.0.1:8790", true},
+		{"127.0.0.2:8790", true},
+		{"[::1]:8790", true},
+		{"localhost:8790", true},
+		{"LOCALHOST:8790", true},
+		// Tailnet CGNAT 100.64.0.0/10, boundaries included.
+		{"100.64.0.0:8790", true},
+		{"100.80.25.74:8790", true},
+		{"100.127.255.254:8790", true},
+		// Everything else: all-interfaces, LAN, public, just outside
+		// the CGNAT block, and arbitrary hostnames.
+		{"0.0.0.0:8790", false},
+		{"[::]:8790", false},
+		{":8790", false}, // empty host = every interface
+		{"192.168.1.5:8790", false},
+		{"8.8.8.8:8790", false},
+		{"100.63.255.254:8790", false}, // one below the CGNAT block
+		{"100.128.0.1:8790", false},    // one above it
+		{"example.com:8790", false},
+	} {
+		err := checkWebAddr(tc.addr)
+		if tc.ok {
+			if err != nil {
+				t.Errorf("checkWebAddr(%q) = %v, want allowed", tc.addr, err)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("checkWebAddr(%q) = nil, want refusal", tc.addr)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.addr) {
+			t.Errorf("refusal must name the address %q, got %v", tc.addr, err)
+		}
+		if !strings.Contains(err.Error(), "100.64.0.0/10") {
+			t.Errorf("refusal must state the allowlist for %q, got %v", tc.addr, err)
+		}
+	}
+	// Syntax stays the listen's business (TestWeb_RunBadAddr): an
+	// address SplitHostPort cannot cut is out of the scope check's
+	// jurisdiction and must fall through untouched.
+	if err := checkWebAddr("127.0.0.1:not-a-port"); err != nil {
+		t.Errorf("scope check must not judge syntax, got %v", err)
+	}
+}
+
+// TestWeb_RunForbiddenAddr: a well-formed but out-of-scope web_addr
+// (0.0.0.0) never reaches a listener — NewWeb's deferred cfgErr
+// surfaces synchronously from Run, naming the address and the
+// allowlist (the servecli plane-level exit is TestServePlane_
+// BadWebAddrFails in internal/servecli).
+func TestWeb_RunForbiddenAddr(t *testing.T) {
+	dir := t.TempDir()
+	const bad = "0.0.0.0:8790"
+	fe := NewWeb(WebConfig{
+		Addr:      bad,
+		TokenPath: filepath.Join(dir, "web.token"),
+		StorePath: filepath.Join(dir, "bindings.json"),
+	})
+	err := fe.Run(context.Background(), make(chan Inbound, 1))
+	if err == nil || !strings.Contains(err.Error(), bad) {
+		t.Fatalf("out-of-scope addr must fail Run naming the address, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "100.64.0.0/10") {
+		t.Errorf("refusal must state the allowlist, got %v", err)
+	}
 }

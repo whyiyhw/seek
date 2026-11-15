@@ -65,6 +65,7 @@ type Tracker struct {
 	turns     []turnRecord
 	baseUsage deepseek.Usage // cumulative from prior session; included in Cumulative() only
 	baseCost  float64        // dollar cost of baseUsage
+	extraCost float64        // flat per-call costs (Search API) — cost-only, never a turn
 	children  []*Tracker     // adopted subagent Trackers (see AdoptChild)
 	hasBase   bool           // SetBase has been called — gates AdoptChild's double-count guard
 }
@@ -232,17 +233,37 @@ func (t *Tracker) Cumulative() deepseek.Usage {
 	return sum
 }
 
+// RecordFlatCost adds a flat USD amount to the session total without
+// fabricating a token turn — the Search API bills per successful call
+// (pricing.SearchCost), which has no Usage to Record. Cumulative() /
+// Last() / LastCost() are untouched, so the ctx% indicator and per-turn
+// footer stay token-pure; only CumulativeCost() grows.
+//
+// In-memory only: flat costs are lost across a resume because
+// session.Usage carries tokens and nothing to re-derive dollars from.
+// Accepted for a ≈$0.0007/call line item rather than growing the
+// session schema (docs/pitfalls.md "flat search cost is not resumed").
+func (t *Tracker) RecordFlatCost(usd float64) {
+	if usd == 0 {
+		return
+	}
+	t.mu.Lock()
+	t.extraCost += usd
+	t.mu.Unlock()
+}
+
 // CumulativeCost returns the sum of per-turn costs (USD), including the
-// base cost from SetBase AND every adopted subagent Tracker's
-// CumulativeCost. Because each turn's cost was priced at the model+tier
-// that were active when the turn was recorded, switching model or
-// crossing a tier boundary does not retroactively re-price prior turns.
-// Children apply the same rule independently inside their own walk.
+// base cost from SetBase, flat costs added via RecordFlatCost, AND every
+// adopted subagent Tracker's CumulativeCost. Because each turn's cost
+// was priced at the model+tier that were active when the turn was
+// recorded, switching model or crossing a tier boundary does not
+// retroactively re-price prior turns. Children apply the same rule
+// independently inside their own walk.
 //
 // Concurrency: same snapshot-then-release pattern as Cumulative.
 func (t *Tracker) CumulativeCost() float64 {
 	t.mu.Lock()
-	sum := t.baseCost
+	sum := t.baseCost + t.extraCost
 	for _, r := range t.turns {
 		sum += r.Cost
 	}

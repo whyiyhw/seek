@@ -514,7 +514,7 @@ func TestStatusBar_NoRetiredEmojiGlyphs(t *testing.T) {
 		bar := stripANSI(RenderStatusBar(StatusSnapshot{
 			Model: deepseek.ModelV41Flash, Effort: "max",
 			Tier: tier, NextTier: nt, NextAt: na, Now: at,
-			Streaming: true,
+			Streaming:     true,
 			StreamElapsed: 5 * time.Second, StreamDeltaBytes: 4096,
 			LastUsage:        deepseek.Usage{PromptTokens: 10_000_000}, // force ctx critical
 			SubagentsActive:  2,
@@ -545,7 +545,7 @@ func TestRenderModelPicker_RowsFitNarrowTerminal(t *testing.T) {
 	for i := range m.modelPickerFiltered {
 		m.modelPickerSelected = i
 		out := m.renderModelPicker()
-		for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(out, "\n"), "\n") {
 			if w := lipgloss.Width(stripANSI(line)); w > 100 {
 				t.Errorf("picker row %d physically %d cols (>100): %q", i, w, stripANSI(line))
 			}

@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -354,16 +355,11 @@ func isAllowedContentType(ct string) bool {
 		return false
 	}
 	media := ct
-	if idx := strings.Index(ct, ";"); idx >= 0 {
-		media = ct[:idx]
+	if before, _, ok := strings.Cut(ct, ";"); ok {
+		media = before
 	}
 	media = strings.TrimSpace(strings.ToLower(media))
-	for _, allowed := range allowedContentTypes {
-		if media == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowedContentTypes, media)
 }
 
 // formatSuccess builds the model-readable result text on a 2xx.
@@ -389,10 +385,7 @@ func formatSuccess(originalURL string, resp *http.Response, body string, truncat
 // nextMaxBytesHint suggests a larger max_bytes value for re-fetch.
 // Doubles up to the hard ceiling.
 func nextMaxBytesHint(current int) int {
-	next := current * 2
-	if next > hardMaxBytes {
-		next = hardMaxBytes
-	}
+	next := min(current*2, hardMaxBytes)
 	return next
 }
 

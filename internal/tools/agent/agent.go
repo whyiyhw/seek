@@ -47,7 +47,7 @@ var schemaBytes = []byte(`{
     },
     "prompt": {
       "type": "string",
-      "description": "The full task for the subagent. The subagent sees NOTHING else from the parent — write a self-contained briefing including any context the subagent needs."
+      "description": "The full task for the subagent. The subagent sees NOTHING else from the parent — write a self-contained briefing including any context the subagent needs (or, when continuing via session_id, only the FOLLOW-UP instruction)."
     },
     "subagent_type": {
       "type": "string",
@@ -59,16 +59,29 @@ var schemaBytes = []byte(`{
       "enum": ["none", "worktree"],
       "description": "none (default): subagent works in the parent's cwd. worktree: creates a temporary git worktree so the subagent works on an isolated copy; useful for parallel implementation attempts. Auto-cleaned if no changes. (worktree not yet implemented — use \"none\" until v0.6.0 ships M11.1.)"
     },
+    "run_in_background": {
+      "type": "boolean",
+      "description": "Run detached: return a handle immediately instead of blocking until the subagent finishes. Composes with session_id (continue a prior subagent in the background). The final summary is delivered as a <context> notification on your next turn (or on session resume). Never fabricate or predict a pending agent's results — the notification is never something you write yourself. Use for long research/implementation tasks you want to overlap with other work; do not wait idly, keep making progress. Default false (blocking, current behavior)."
+    },
     "session_id": {
       "type": "string",
-      "description": "CONTINUE a prior subagent instead of spawning fresh: pass its sub-sid — the full id, or the short value from a previous result's \"— sub-sid:\" footer (uniquely resolved). The prior run's conversation is restored as context and your prompt is delivered as the next instruction — write only the follow-up, do not repeat the original briefing. The prior run must have finished; a still-running, promoted, transcript-less (failed/killed/orphaned) or unknown id returns a clear error. The continuation gets a NEW sub-sid (footer shows resumed-from); quote that new id for further continuations. When set, subagent_type is inherited from the original run and ignored here."
+      "description": "CONTINUE a prior subagent instead of spawning fresh: pass its sub-sid — the full id, or the short value from a previous result's \"— sub-sid:\" footer (uniquely resolved). The prior run's conversation is restored as context and your prompt is delivered as the next instruction — write only the follow-up, do not repeat the original briefing. Works for sync AND background runs (compose with run_in_background to detach the follow-up). The prior run must have finished; a still-running, promoted, transcript-less (failed/killed/orphaned) or unknown id returns a clear error. The continuation gets a NEW sub-sid (footer shows resumed-from); quote that new id for further continuations. When set, subagent_type is inherited from the original run and ignored here."
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["deepseek", "glm"],
+      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); deepseek = first-class DeepSeek. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
+    },
+    "model": {
+      "type": "string",
+      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
     }
   },
   "required": ["description", "prompt"],
   "additionalProperties": false
 }`)
 
-const description = `Launch a subagent with isolated context to perform a focused task, or (pass session_id) continue a prior subagent with its context restored and a follow-up instruction. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide (or, for continuations, its own prior transcript). Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review), iterative follow-ups on a finished subagent's work (session_id — e.g. "now audit the edge cases in what you found"). Costs roll up into your session's total automatically. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
+const description = `Launch a subagent with isolated context to perform a focused task, or (pass session_id) continue a prior subagent with its context restored and a follow-up instruction. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide (or, for continuations, its own prior transcript). Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review), iterative follow-ups on a finished subagent's work (session_id — e.g. "now audit the edge cases in what you found"). run_in_background detaches any of these (spawn or continuation) — the handle returns immediately and the final summary arrives as a <context> notification on a later turn. Costs roll up into your session's total automatically, priced per each subagent's own provider/model. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
 
 // Args is the strict-decode target. JSON tags must match schemaBytes
 // field names exactly (DisallowUnknownFields rejects mismatches).
@@ -77,10 +90,25 @@ type Args struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
+	// RunInBackground (feature-orchestration PRD §4.1 D1) selects
+	// Manager.SpawnBackground / ContinueBackground: the tool returns
+	// a "[agent: background started sub-sid=...]" handle immediately
+	// and the final summary arrives as a <context> notification on
+	// a later turn. Default false = the sync path, byte-identical
+	// to pre-feature behaviour.
+	RunInBackground bool `json:"run_in_background,omitempty"`
 	// SessionID, when non-empty, switches Execute from fresh-spawn to
-	// continuation: Manager.Continue restores the prior run's context
-	// and delivers Prompt as the follow-up. See schemaBytes.
+	// continuation: Manager.Continue / ContinueBackground restores the
+	// prior run's context and delivers Prompt as the follow-up. See
+	// schemaBytes.
 	SessionID string `json:"session_id,omitempty"`
+	// Provider / Model are the optional routing params (P1-c,
+	// feature-orchestration.md §4.2). Both empty = inherit the
+	// parent session's lane unchanged. Passed through verbatim —
+	// Manager.Spawn / Manager.Continue are the single validation
+	// point (same split as subagent_type).
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 }
 
 // Length caps enforced in Execute. Schema's `description` field
@@ -152,8 +180,8 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 //
 // Without this marker, parallel `agent` tool calls in the same
 // turn (e.g. "spawn 3 explore subagents to research X / Y / Z")
-// would serialise at the agent loop, defeating the entire point of
-// subagents. With it, the user sees max(t1, t2, t3) wall time
+// would serialise at the agent loop, defeating the entire point
+// of subagents. With it, the user sees max(t1, t2, t3) wall time
 // instead of sum.
 //
 // Side note: mixing agent + a non-read-only tool in the same batch
@@ -163,14 +191,17 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 // still keep their relative order among themselves.
 func (*Tool) ReadOnly() bool { return true }
 
-// Execute parses args and dispatches to Manager.Spawn. The Result's
+// Execute parses args and dispatches to the four Manager entry
+// points: Spawn / SpawnBackground (fresh run) × sync / background,
+// Continue / ContinueBackground (prior run restored). The Result's
 // Summary field is ALWAYS a well-formed wire-format string (success
-// path = "[agent: completed] ..." / any failure = "[agent: failed
-// reason=...] ...") so the LLM can read the prefix to decide next
-// action. Execute returns (Summary, nil) for every Manager outcome
-// — including subagent failure — so the agent loop feeds the
-// structured result back without wrapping it in an error frame
-// that would lose the wire-format signal.
+// path = "[agent: completed] ..." / "[agent: background started
+// ...]" / any failure = "[agent: failed reason=...] ...") so the
+// LLM can read the prefix to decide next action. Execute returns
+// (Summary, nil) for every Manager outcome — including subagent
+// failure — so the agent loop feeds the structured result back
+// without wrapping it in an error frame that would lose the
+// wire-format signal.
 //
 // The error return is reserved for argument-parsing failures
 // (strict unmarshal, missing required field, runtime length
@@ -181,7 +212,7 @@ func (*Tool) ReadOnly() bool { return true }
 func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("agent", raw, &a,
-		"description", "prompt", "subagent_type", "isolation", "session_id"); err != nil {
+		"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model"); err != nil {
 		return "", err
 	}
 	// Fresh spawns require an explicit description (it names a NEW
@@ -189,11 +220,11 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 	// already identifies the lineage, so a default label suffices.
 	if a.Description == "" && a.SessionID == "" {
 		return "", tools.MissingField("agent", "description", raw,
-			"description", "prompt", "subagent_type", "isolation", "session_id")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model")
 	}
 	if a.Prompt == "" {
 		return "", tools.MissingField("agent", "prompt", raw,
-			"description", "prompt", "subagent_type", "isolation", "session_id")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model")
 	}
 
 	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
@@ -248,7 +279,62 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
 	}
 
-	// Dispatch. Fresh spawn vs continuation (P1-b): session_id
+	// Background dispatch (feature-orchestration PRD §4.1 D1 +
+	// P1-b continuation composition). run_in_background selects the
+	// detached entry point for BOTH fresh spawns (SpawnBackground)
+	// and continuations (ContinueBackground): the tool returns a
+	// "[agent: background started sub-sid=...]" handle immediately;
+	// the runner goroutine is bound to the SESSION ctx (not this
+	// turn's ctx), and the final summary arrives as a <context>
+	// notification on a later turn via the Notifier hook.
+	//
+	// worktree + background is refused for now: worktree cleanup
+	// rides the sync path after the run returns, and there is no
+	// owner left to run it once the tool result goes out. Revisit
+	// when cleanup can ride the notice path.
+	if a.RunInBackground {
+		if worktreePath != "" {
+			return failNoSpawn("spawn_error",
+				"run_in_background with isolation=\"worktree\" is not supported yet (worktree cleanup rides the sync path); use isolation=\"none\""), nil
+		}
+		if a.SessionID != "" {
+			bgRes := t.mgr.ContinueBackground(subagent.ContinueArgs{
+				FromSubSid:  a.SessionID,
+				Description: a.Description,
+				Prompt:      a.Prompt,
+				// Routing params pass through raw, same as the sync
+				// paths — beginContinue runs the identical
+				// ResolveRoute validation.
+				Provider: a.Provider,
+				Model:    a.Model,
+				// ParentTurn: 0, same as every other path — the
+				// counter isn't threaded through the tool interface
+				// yet.
+			})
+			return bgRes.Summary, nil
+		}
+		// subagent_type defaults to general-purpose when omitted,
+		// matching the PRD schema description.
+		st := subagent.Type(a.SubagentType)
+		if st == "" {
+			st = subagent.TypeGeneralPurpose
+		}
+		bgRes := t.mgr.SpawnBackground(subagent.SpawnArgs{
+			Description: a.Description,
+			Prompt:      a.Prompt,
+			Type:        st,
+			// Routing params pass through raw, same as the sync
+			// path — Manager.SpawnBackground runs the identical
+			// ResolveRoute validation via begin step 1.
+			Provider: a.Provider,
+			Model:    a.Model,
+			// ParentTurn: 0, same as the sync path — the counter
+			// isn't threaded through the tool interface yet.
+		})
+		return bgRes.Summary, nil
+	}
+
+	// Sync dispatch. Fresh spawn vs continuation (P1-b): session_id
 	// switches the entry point. Both return a Result whose Summary
 	// is the wire-format string handed back unchanged; continuations
 	// additionally carry PriorMessages seeded from the prior run's
@@ -260,6 +346,10 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			Description:  a.Description,
 			Prompt:       a.Prompt,
 			WorktreePath: worktreePath,
+			// Routing params pass through raw; beginContinue
+			// validates them (ResolveRoute) exactly like begin.
+			Provider: a.Provider,
+			Model:    a.Model,
 			// ParentTurn is 0 — same M11.0 limitation as the spawn
 			// path below.
 			ParentTurn: 0,
@@ -280,12 +370,16 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			Prompt:       a.Prompt,
 			Type:         st,
 			WorktreePath: worktreePath,
-			// ParentTurn is 0 in M11.0 — the parent turn counter
-			// isn't threaded through the tool interface yet. The
-			// index event still records the spawn timing via the
-			// timestamp, and the /agents panel doesn't depend on
-			// parent_turn for MVP. Will thread through Sink in a
-			// follow-up if the UI needs it.
+			// Routing params pass through raw; Manager.Spawn validates
+			// them (ResolveRoute) and fills lane defaults into the
+			// RunnerJob. Empty strings = inherit parent lane.
+			Provider: a.Provider,
+			Model:    a.Model,
+			// ParentTurn is 0 in M11.0 — the parent turn counter isn't
+			// threaded through the tool interface yet. The index event
+			// still records the spawn timing via the timestamp, and the
+			// /agents panel doesn't depend on parent_turn for MVP. Will
+			// thread through Sink in a follow-up if the UI needs it.
 			ParentTurn: 0,
 		})
 	}
@@ -346,7 +440,7 @@ func failNoSpawn(reason, hint string) string {
 // Sentinel error returned when New is called with nil manager but
 // the caller wants to recover rather than panic. Not currently
 // used; kept as a hook for future test seams.
-var errNilManager = errors.New("agent: nil Manager")
+var errNilManager = errors.New("agent: nil manager")
 
 // Compile-time assertions: Tool satisfies the tools.Tool contract
 // AND the tools.ReadOnlyTool extension. These are free — they

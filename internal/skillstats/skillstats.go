@@ -22,6 +22,17 @@ import (
 	"sync"
 )
 
+// ProviderDistillAuto marks rows written by the skill auto-distillation
+// path (feature-skill-distill M-SD2): with Name = the draft's name and
+// SessionID = the source session. Since 三期 (card c_jqwd72) every row
+// also carries Stage/Verdict — one row per funnel event (L0 gate
+// pass/drop, extraction-layer rejects, L3 verdicts, L4 draft/strengthen).
+// These rows are provenance telemetry, NOT skill calls — call-count
+// aggregation (skillcli.aggregate) skips them so a draft that was
+// distilled 5 times doesn't show up as "5 calls"; the funnel report
+// (`seek skill stats --distill`) is their read side.
+const ProviderDistillAuto = "distill-auto"
+
 // Entry is one .stats.jsonl row. Every field is intentionally a
 // plain string — even ts — so the JSONL stays grep/jq-friendly and
 // we don't bake in time.Time's marshalling quirks. The caller (in
@@ -36,6 +47,17 @@ type Entry struct {
 	ProjectID string `json:"project_id,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Provider  string `json:"provider,omitempty"`
+
+	// Stage / Verdict are the distillation-funnel telemetry fields
+	// (card c_jqwd72, feature-skill-distill 三期). They are set only on
+	// provider=distill-auto rows: Stage names the funnel layer the row
+	// observed ("L0" gate, "L1" extraction, "shape"/"evidence" post-parse
+	// checks, "L2" dedup, "L3" semantic filter, "L4" recurrence merge),
+	// Verdict the outcome ("PASS"/"DROP", "REJECT", "ACCEPT", "ERROR",
+	// "DRAFT"/"STRENGTHEN"). Call rows leave both empty, and pre-三期
+	// distill rows have neither — readers must tolerate both absences.
+	Stage   string `json:"stage,omitempty"`
+	Verdict string `json:"verdict,omitempty"`
 }
 
 // Writer appends Entries to a JSONL file. Safe for concurrent use:

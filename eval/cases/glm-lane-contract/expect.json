@@ -1,0 +1,9 @@
+{
+  "description": "GLM 订阅车道契约（c_kql3ip，锁 2026-11-12/13 两次真 key 烟测，butler 事件 11-12 18:09 / 11-13 01:29，PR #2897）：① --provider=glm 链式 fresh→-resume，resume 轮 agent_end 带 cache_hit_tokens ≥1（两次烟测均实证 10944；链路 GLM paas/v4 prompt_tokens_details.cached_tokens → streamUsage → TurnDone.CachedInputTokens → runTurnLLM hit/miss 分桶）；② print 模式 stats footer est. cost 非 $0 整零形状（glm-5.3 费率卡 + 三桶计价回归；runJSON 无 footer，故由 runner 第三腿 print 模式取证，断言失败经 runner_fact exit_code 上浮为 nonzero_exits）；③ --provider 显式优先于 env 竞品——DEEPSEEK/ANTHROPIC_API_KEY 垃圾值在 env（KeyFor env 优先于 config），错路由即 auth 失败无 agent_end，且 footer model: 必须是 glm*。需 GLM key（env / .env / ~/.seek/config.json），无 key 时 runner_fact exit_code=78 大声 FAIL。",
+  "max_turns": 4,
+  "exact_agent_ends": 2,
+  "max_session_id_missing": 0,
+  "exact_session_id_distinct": 1,
+  "min_cache_hit_tokens": 1,
+  "max_nonzero_exits": 0
+}

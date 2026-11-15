@@ -26,6 +26,7 @@ package suggester
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,11 +76,6 @@ type Predictor struct {
 // Option configures a Predictor.
 type Option func(*Predictor)
 
-// WithModel overrides the default prediction model.
-func WithModel(model string) Option {
-	return func(p *Predictor) { p.model = model }
-}
-
 // New constructs a Predictor. client must be non-nil; the predictor
 // shares it with the main agent (the main client's transport, retries,
 // auth all transparently apply to side-channel calls too).
@@ -111,8 +107,8 @@ func predictionSuffix(msgs []deepseek.Message, maxTurns int) []deepseek.Message 
 	// user message (counting from the end). Drop everything before it.
 	seen := 0
 	start := 0
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == deepseek.RoleUser {
+	for i, msg := range slices.Backward(msgs) {
+		if msg.Role == deepseek.RoleUser {
 			seen++
 			if seen >= maxTurns {
 				start = i
@@ -234,7 +230,7 @@ func cleanPrediction(raw string) string {
 	}
 	// First non-empty line.
 	var line string
-	for _, l := range strings.Split(raw, "\n") {
+	for l := range strings.SplitSeq(raw, "\n") {
 		l = strings.TrimSpace(l)
 		if l != "" {
 			line = l

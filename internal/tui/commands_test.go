@@ -9,11 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/i18n"
@@ -80,10 +82,8 @@ func runHandler(t *testing.T, m *Model, input string) cmdResult {
 		args = strings.TrimSpace(parts[1])
 	}
 	for _, c := range allCommands() {
-		for _, n := range c.names {
-			if n == name {
-				return c.handler(m, args)
-			}
+		if slices.Contains(c.names, name) {
+			return c.handler(m, args)
 		}
 	}
 	t.Fatalf("no handler for %q", input)
@@ -373,6 +373,115 @@ func TestCmdAgents_UnknownArgErrors(t *testing.T) {
 	res := runHandler(t, m, "/agents --tail 10")
 	if !strings.Contains(res.text, "unknown arg") {
 		t.Errorf("expected 'unknown arg' for /agents --tail 10, got: %q", res.text)
+	}
+}
+
+// ----- P2-a typed-agent registry view (feature-orchestration.md D10) -----
+
+// newCmdTestAgentTypes loads a registry from explicit temp dirs —
+// UserAgentsDir is always pinned so the test never touches the real
+// ~/.seek/agents.
+func newCmdTestAgentTypes(t *testing.T, projectDir, userDir string) *agenttypes.Set {
+	t.Helper()
+	set, stats, err := agenttypes.Load(agenttypes.LoadOptions{
+		ProjectDir:    projectDir,
+		UserAgentsDir: userDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range stats.Errors {
+		t.Errorf("unexpected load error: %v", e)
+	}
+	return set
+}
+
+func TestCmdAgents_Types_NilRegistry(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	// Called directly (and via "/agents types" before the Subagents
+	// gate): a nil registry must degrade to "unavailable", not crash.
+	res := cmdAgentTypes(m)
+	if !strings.Contains(res.text, "unavailable") {
+		t.Errorf("expected 'unavailable' for nil AgentTypes, got: %q", res.text)
+	}
+}
+
+func TestCmdAgents_Types_ListsBuiltins(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.AgentTypes = newCmdTestAgentTypes(t, t.TempDir(), filepath.Join(t.TempDir(), "none"))
+	res := runHandler(t, m, "/agents types")
+	for _, frag := range []string{
+		"agent type(s) defined",
+		"TYPE", "ORIGIN", "LANE", "DESCRIPTION", // headers
+		"general-purpose", "explore", "plan",
+		"builtin",
+	} {
+		if !strings.Contains(res.text, frag) {
+			t.Errorf("/agents types missing %q in:\n%s", frag, res.text)
+		}
+	}
+}
+
+func TestCmdAgents_Types_ListsCustomWithLane(t *testing.T) {
+	t.Parallel()
+	project := t.TempDir()
+	dir := filepath.Join(project, ".seek", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "---\nname: verifier\ndescription: runs tests\ntools: [read, bash]\nprovider: glm\nmodel: glm-5.3\n---\nVerify."
+	if err := os.WriteFile(filepath.Join(dir, "verifier.md"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := emptyModel()
+	m.opts.AgentTypes = newCmdTestAgentTypes(t, project, filepath.Join(t.TempDir(), "none"))
+	res := runHandler(t, m, "/agents types")
+	for _, frag := range []string{"verifier", "project", "glm/glm-5.3", "runs tests"} {
+		if !strings.Contains(res.text, frag) {
+			t.Errorf("/agents types missing %q in:\n%s", frag, res.text)
+		}
+	}
+}
+
+// TestCmdAgents_DefaultViewUnchangedWithoutCustomTypes pins P2-a
+// acceptance #3 on the TUI surface: with no custom types the default
+// /agents output carries NO types hint — byte-comparable to pre-P2-a.
+func TestCmdAgents_DefaultViewUnchangedWithoutCustomTypes(t *testing.T) {
+	mgr, _ := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	m.opts.AgentTypes = newCmdTestAgentTypes(t, t.TempDir(), filepath.Join(t.TempDir(), "none"))
+	res := runHandler(t, m, "/agents")
+	if strings.Contains(res.text, "agent type") {
+		t.Errorf("default view grew a types hint with zero custom types:\n%s", res.text)
+	}
+}
+
+// TestCmdAgents_DefaultViewHintsAtCustomTypes: with custom types
+// present the default view appends exactly one muted pointer line.
+func TestCmdAgents_DefaultViewHintsAtCustomTypes(t *testing.T) {
+	mgr, _ := newCmdTestSubagentMgr(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+	project := t.TempDir()
+	dir := filepath.Join(project, ".seek", "agents")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "verifier.md"),
+		[]byte("---\nname: verifier\ndescription: d\n---\nB."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := emptyModel()
+	m.opts.Subagents = mgr
+	m.opts.AgentTypes = newCmdTestAgentTypes(t, project, filepath.Join(t.TempDir(), "none"))
+	res := runHandler(t, m, "/agents")
+	if !strings.Contains(res.text, "1 custom agent type(s) defined — /agents types") {
+		t.Errorf("default view missing custom-types hint:\n%s", res.text)
 	}
 }
 
@@ -743,13 +852,11 @@ func TestEffort_NoArg_OpensPicker(t *testing.T) {
 func TestEffort_DescriptionHasPickerHint(t *testing.T) {
 	t.Parallel()
 	for _, c := range allCommands() {
-		for _, n := range c.names {
-			if n == "/effort" {
-				if !strings.Contains(c.description, "No args opens a picker") {
-					t.Errorf("/effort description should mention the picker, got:\n  %s", c.description)
-				}
-				return
+		if slices.Contains(c.names, "/effort") {
+			if !strings.Contains(c.description, "No args opens a picker") {
+				t.Errorf("/effort description should mention the picker, got:\n  %s", c.description)
 			}
+			return
 		}
 	}
 	t.Fatal("/effort not found in allCommands()")

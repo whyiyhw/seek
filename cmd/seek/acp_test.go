@@ -90,11 +90,15 @@ func TestACPBackend_NewSessionAnchorsCwd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chdir(old) })
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Register the chdir-back AFTER t.TempDir so it runs BEFORE the
+	// TempDir RemoveAll (cleanups are LIFO): the test ends with the
+	// process cwd inside dir, which Windows refuses to delete while
+	// it is held as a process cwd (unlinkat EBUSY).
+	t.Cleanup(func() { _ = os.Chdir(old) })
 
 	pol, err := permission.New(old, permission.PrefDeny)
 	if err != nil {

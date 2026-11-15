@@ -125,7 +125,7 @@ Two-section format (mirrors session JSONL):
 {"event": "killed", "ts": "...", "reason": "timeout"}
 ```
 
-`run_id` shares the timestamp + 6-hex shape with session / subagent IDs.
+`run_id` shares the timestamp + 16-hex (64-bit entropy) shape with session / subagent IDs.
 
 ### 3.4 `triggers/<trigger-id>.json` schema (M11.3)
 

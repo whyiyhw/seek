@@ -44,7 +44,7 @@ func TestUnified_Insertion(t *testing.T) {
 	if !strings.Contains(out, "+NEW") {
 		t.Errorf("missing inserted line: %s", out)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
 			t.Errorf("unexpected deletion line in pure insertion: %q\nfull output:\n%s", line, out)
 		}
