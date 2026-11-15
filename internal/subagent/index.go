@@ -29,6 +29,10 @@ type event struct {
 	Type         Type      `json:"type,omitempty"`
 	Description  string    `json:"description,omitempty"`
 	WorktreePath string    `json:"worktree_path,omitempty"`
+	// ResumedFrom is set on `started` events emitted by
+	// Manager.Continue: the sub-sid of the prior run whose transcript
+	// seeds this run's context. Empty on fresh spawns.
+	ResumedFrom string `json:"resumed_from,omitempty"`
 	// Background is set on `started` events emitted by
 	// SpawnBackground (feature-orchestration PRD §4.1 D1). Additive +
 	// omitempty: pre-P1-d indexes simply lack the key and fold to
@@ -163,6 +167,7 @@ func foldEvents(events []event) []Subagent {
 				Type:         e.Type,
 				Description:  e.Description,
 				WorktreePath: e.WorktreePath,
+				ResumedFrom:  e.ResumedFrom,
 				StartedAt:    e.TS,
 				Background:   e.Background,
 				Status:       StatusActive,

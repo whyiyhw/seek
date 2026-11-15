@@ -652,27 +652,31 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			}
 		}
 
-		// Build child agent. No InitialMessages (subagent gets a
-		// fresh context per PRD §2.1); no PrepareMessages (suggester
-		// disabled for subagents per PRD §3.5). Hooks ARE shared
-		// with the parent — pre_tool deny / post_tool observer /
-		// audit log all apply to subagent tool calls (PRD §5.3) —
-		// resolved through hooksFn so parent-only hooks (the
-		// background Notifier) stay excluded (see subagentRunnerOpts).
+		// Build child agent. InitialMessages is nil for fresh spawns
+		// (subagent gets a fresh context per PRD §2.1); continuations
+		// (Manager.Continue) seed job.PriorMessages loaded from the
+		// prior run's transcript — context continuity for follow-up
+		// instructions. No PrepareMessages (suggester disabled for
+		// subagents per PRD §3.5). Hooks ARE shared with the parent —
+		// pre_tool deny / post_tool observer / audit log all apply to
+		// subagent tool calls (PRD §5.3) — resolved through hooksFn
+		// so parent-only hooks (the background Notifier) stay
+		// excluded (see subagentRunnerOpts).
 		var childHooks *hooks.Registry
 		if opts.hooksFn != nil {
 			childHooks = opts.hooksFn()
 		}
 		sub, err := agent.New(agent.Config{
-			Client:       client,
-			Provider:     provider,
-			Model:        model,
-			Effort:       opts.getEffort(),
-			SystemPrompt: job.SystemPrompt,
-			Tools:        childReg,
-			MaxTokens:    opts.maxTokens,
-			MaxTurns:     opts.maxTurns,
-			Hooks:        childHooks,
+			Client:          client,
+			Provider:        provider,
+			Model:           model,
+			Effort:          opts.getEffort(),
+			SystemPrompt:    job.SystemPrompt,
+			InitialMessages: job.PriorMessages,
+			Tools:           childReg,
+			MaxTokens:       opts.maxTokens,
+			MaxTurns:        opts.maxTurns,
+			Hooks:           childHooks,
 		})
 		if err != nil {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)

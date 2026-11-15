@@ -45,4 +45,8 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_c4cs4a：web 会话历史·W4.1：POST /rpc JSON-RPC 2.0 envelope + method registry + 错误码
 - c_fzqsbi：worktree GC 加年龄兜底：never-discarded 孤儿 ref 永生（6 个 6 月实例手工清除实录）
 - c_jdwywj：skill-distill：StrengthenDraft 按 SessionID 去重缺口（二期遗留，c_jqwd72 巡检确认未修）
+<<<<<<< HEAD
+- c_u4ugnu：编排 P1-b：后台子代理续话复活——agent 工具 session_id 续话与 run_in_background 组合（PriorMessages 上下文延续、resumed_from 血统、短 id 唯一解析、后台续话完成经 notice → Notifier 进主会话流）
+=======
 - c_3d2bil：编排 P2-c：内置类型包升级——explore/judge/general 类型化+默认路由
+>>>>>>> main

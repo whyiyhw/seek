@@ -96,7 +96,7 @@ const schemaTmpl = `{
     },
     "prompt": {
       "type": "string",
-      "description": "The full task for the subagent. The subagent sees NOTHING else from the parent — write a self-contained briefing including any context the subagent needs."
+      "description": "The full task for the subagent. The subagent sees NOTHING else from the parent — write a self-contained briefing including any context the subagent needs (or, when continuing via session_id, only the FOLLOW-UP instruction)."
     },
     "subagent_type": {
       "type": "string",
@@ -110,7 +110,11 @@ const schemaTmpl = `{
     },
     "run_in_background": {
       "type": "boolean",
-      "description": "Run detached: return a handle immediately instead of blocking until the subagent finishes. The final summary is delivered as a <context> notification on your next turn (or on session resume). Never fabricate or predict a pending agent's results — the notification is never something you write yourself. Use for long research/implementation tasks you want to overlap with other work; do not wait idly, keep making progress. Default false (blocking, current behavior)."
+      "description": "Run detached: return a handle immediately instead of blocking until the subagent finishes. Composes with session_id (continue a prior subagent in the background). The final summary is delivered as a <context> notification on your next turn (or on session resume). Never fabricate or predict a pending agent's results — the notification is never something you write yourself. Use for long research/implementation tasks you want to overlap with other work; do not wait idly, keep making progress. Default false (blocking, current behavior)."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "CONTINUE a prior subagent instead of spawning fresh: pass its sub-sid — the full id, or the short value from a previous result's \"— sub-sid:\" footer (uniquely resolved). The prior run's conversation is restored as context and your prompt is delivered as the next instruction — write only the follow-up, do not repeat the original briefing. Works for sync AND background runs (compose with run_in_background to detach the follow-up). The prior run must have finished; a still-running, promoted, transcript-less (failed/killed/orphaned) or unknown id returns a clear error. The continuation gets a NEW sub-sid (footer shows resumed-from); quote that new id for further continuations. When set, subagent_type is inherited from the original run and ignored here."
     },
     "provider": {
       "type": "string",
@@ -181,7 +185,7 @@ func typesTail(defs []*agenttypes.Definition) string {
 	return "Available subagent types: " + strings.Join(names, ", ") + "."
 }
 
-const descriptionBase = `Launch a subagent with isolated context to perform a focused task. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide. Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review). Costs roll up into your session's total automatically, priced per each subagent's own provider/model. Optional provider/model params route a subagent to a different lane (e.g. provider="glm" for cheap bulk research) — omit both to inherit the parent session's model. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
+const descriptionBase = `Launch a subagent with isolated context to perform a focused task, or (pass session_id) continue a prior subagent with its context restored and a follow-up instruction. The subagent returns ONE final summary string; it has no access to your conversation history or memory beyond the prompt you provide (or, for continuations, its own prior transcript). Use for: parallel research across multiple independent paths (spawn N explore subagents simultaneously), long-context work that would bloat the main conversation (e.g. "read these 50 files and summarise patterns"), role-specialised passes (plan-analyze proposal that you'll review), iterative follow-ups on a finished subagent's work (session_id — e.g. "now audit the edge cases in what you found"). run_in_background detaches any of these (spawn or continuation) — the handle returns immediately and the final summary arrives as a <context> notification on a later turn. Costs roll up into your session's total automatically, priced per each subagent's own provider/model. Optional provider/model params route a subagent to a different lane (e.g. provider="glm" for cheap bulk research) — omit both to inherit the parent session's model. NOT for: short factual lookups (just grep), tasks needing the user's confirmation mid-run (subagents can't ask the user), or sequencing where one step depends on the previous (subagents run independently). Max 3 concurrent; over the cap returns a failure result and you can retry after one completes.`
 
 // Args is the strict-decode target. JSON tags must match schemaBytes
 // field names exactly (DisallowUnknownFields rejects mismatches).
@@ -191,17 +195,22 @@ type Args struct {
 	SubagentType string `json:"subagent_type,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
 	// RunInBackground (feature-orchestration PRD §4.1 D1) selects
-	// Manager.SpawnBackground: the tool returns a
-	// "[agent: background started sub-sid=...]" handle immediately
+	// Manager.SpawnBackground / ContinueBackground: the tool returns
+	// a "[agent: background started sub-sid=...]" handle immediately
 	// and the final summary arrives as a <context> notification on
 	// a later turn. Default false = the sync path, byte-identical
 	// to pre-feature behaviour.
 	RunInBackground bool `json:"run_in_background,omitempty"`
+	// SessionID, when non-empty, switches Execute from fresh-spawn to
+	// continuation: Manager.Continue / ContinueBackground restores the
+	// prior run's context and delivers Prompt as the follow-up. See
+	// schemaBytes.
+	SessionID string `json:"session_id,omitempty"`
 	// Provider / Model are the optional routing params (P1-c,
 	// feature-orchestration.md §4.2). Both empty = inherit the
 	// parent session's lane unchanged. Passed through verbatim —
-	// Manager.Spawn is the single validation point (same split as
-	// subagent_type).
+	// Manager.Spawn / Manager.Continue are the single validation
+	// point (same split as subagent_type).
 	Provider string `json:"provider,omitempty"`
 	Model    string `json:"model,omitempty"`
 }
@@ -275,8 +284,8 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 //
 // Without this marker, parallel `agent` tool calls in the same
 // turn (e.g. "spawn 3 explore subagents to research X / Y / Z")
-// would serialise at the agent loop, defeating the entire point of
-// subagents. With it, the user sees max(t1, t2, t3) wall time
+// would serialise at the agent loop, defeating the entire point
+// of subagents. With it, the user sees max(t1, t2, t3) wall time
 // instead of sum.
 //
 // Side note: mixing agent + a non-read-only tool in the same batch
@@ -286,14 +295,17 @@ func (*Tool) Schema() json.RawMessage { return schemaBytes }
 // still keep their relative order among themselves.
 func (*Tool) ReadOnly() bool { return true }
 
-// Execute parses args and dispatches to Manager.Spawn. The Result's
+// Execute parses args and dispatches to the four Manager entry
+// points: Spawn / SpawnBackground (fresh run) × sync / background,
+// Continue / ContinueBackground (prior run restored). The Result's
 // Summary field is ALWAYS a well-formed wire-format string (success
-// path = "[agent: completed] ..." / any failure = "[agent: failed
-// reason=...] ...") so the LLM can read the prefix to decide next
-// action. Execute returns (Summary, nil) for every Manager outcome
-// — including subagent failure — so the agent loop feeds the
-// structured result back without wrapping it in an error frame
-// that would lose the wire-format signal.
+// path = "[agent: completed] ..." / "[agent: background started
+// ...]" / any failure = "[agent: failed reason=...] ...") so the
+// LLM can read the prefix to decide next action. Execute returns
+// (Summary, nil) for every Manager outcome — including subagent
+// failure — so the agent loop feeds the structured result back
+// without wrapping it in an error frame that would lose the
+// wire-format signal.
 //
 // The error return is reserved for argument-parsing failures
 // (strict unmarshal, missing required field, runtime length
@@ -304,22 +316,30 @@ func (*Tool) ReadOnly() bool { return true }
 func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("agent", raw, &a,
-		"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model"); err != nil {
+		"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model"); err != nil {
 		return "", err
 	}
-	if a.Description == "" {
+	// Fresh spawns require an explicit description (it names a NEW
+	// task in /agents). Continuations may omit it — the session_id
+	// already identifies the lineage, so a default label suffices.
+	if a.Description == "" && a.SessionID == "" {
 		return "", tools.MissingField("agent", "description", raw,
-			"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model")
 	}
 	if a.Prompt == "" {
 		return "", tools.MissingField("agent", "prompt", raw,
-			"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "session_id", "provider", "model")
 	}
 
 	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
 	// Truncate description with an inline hint so the /agents panel
 	// stays readable; reject oversize prompts outright because a
 	// silent truncation could lose load-bearing context.
+	if a.Description == "" && a.SessionID != "" {
+		// Continuation default label — short by construction, still
+		// run through the cap below for uniformity.
+		a.Description = "continue " + a.SessionID
+	}
 	if len(a.Description) > maxDescriptionLen {
 		a.Description = a.Description[:maxDescriptionLen] + "…(truncated)"
 	}
@@ -331,18 +351,13 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			"prompt exceeds 32 KB; split the task into smaller subagent calls"), nil
 	}
 
-	// subagent_type defaults to general-purpose when omitted, matching
-	// the PRD schema description. Manager.Spawn will reject any other
-	// invalid value at its own validation step; we let it speak.
-	st := subagent.Type(a.SubagentType)
-	if st == "" {
-		st = subagent.TypeGeneralPurpose
-	}
-
 	// Resolve isolation. "none" / "" is the standard path
 	// (spawn under parent cwd); "worktree" creates a seek-managed
 	// worktree BEFORE spawn so the child runs in an isolated git
 	// checkout. M11.1 Phase 2 implementation per PRD §3.8.
+	// Applies to continuations identically (a continuation runs
+	// wherever the caller isolates it — the prior run's worktree
+	// was cleaned up when that run finished).
 	var (
 		worktreePath   string
 		worktreeBranch string
@@ -368,15 +383,17 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
 	}
 
-	// Background dispatch (feature-orchestration PRD §4.1 D1).
-	// Manager.SpawnBackground returns a
+	// Background dispatch (feature-orchestration PRD §4.1 D1 +
+	// P1-b continuation composition). run_in_background selects the
+	// detached entry point for BOTH fresh spawns (SpawnBackground)
+	// and continuations (ContinueBackground): the tool returns a
 	// "[agent: background started sub-sid=...]" handle immediately;
 	// the runner goroutine is bound to the SESSION ctx (not this
 	// turn's ctx), and the final summary arrives as a <context>
 	// notification on a later turn via the Notifier hook.
 	//
 	// worktree + background is refused for now: worktree cleanup
-	// rides the sync path after Spawn returns, and there is no
+	// rides the sync path after the run returns, and there is no
 	// owner left to run it once the tool result goes out. Revisit
 	// when cleanup can ride the notice path.
 	if a.RunInBackground {
@@ -384,11 +401,32 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 			return failNoSpawn("spawn_error",
 				"run_in_background with isolation=\"worktree\" is not supported yet (worktree cleanup rides the sync path); use isolation=\"none\""), nil
 		}
+		if a.SessionID != "" {
+			bgRes := t.mgr.ContinueBackground(subagent.ContinueArgs{
+				FromSubSid:  a.SessionID,
+				Description: a.Description,
+				Prompt:      a.Prompt,
+				// Routing params pass through raw, same as the sync
+				// paths — beginContinue runs the identical
+				// ResolveRoute validation.
+				Provider: a.Provider,
+				Model:    a.Model,
+				// ParentTurn: 0, same as every other path — the
+				// counter isn't threaded through the tool interface
+				// yet.
+			})
+			return bgRes.Summary, nil
+		}
+		// subagent_type defaults to general-purpose when omitted,
+		// matching the PRD schema description.
+		st := subagent.Type(a.SubagentType)
+		if st == "" {
+			st = subagent.TypeGeneralPurpose
+		}
 		bgRes := t.mgr.SpawnBackground(subagent.SpawnArgs{
-			Description:  a.Description,
-			Prompt:       a.Prompt,
-			Type:         st,
-			WorktreePath: "",
+			Description: a.Description,
+			Prompt:      a.Prompt,
+			Type:        st,
 			// Routing params pass through raw, same as the sync
 			// path — Manager.SpawnBackground runs the identical
 			// ResolveRoute validation via begin step 1.
@@ -400,61 +438,94 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 		return bgRes.Summary, nil
 	}
 
-	// Dispatch. Manager.Spawn returns a Result whose Summary is the
-	// wire-format string we hand back unchanged. WorktreePath
-	// (when non-empty) becomes the child Policy's cwd inside
-	// Manager.Spawn — tools the subagent invokes execute against
-	// the worktree.
-	res := t.mgr.Spawn(ctx, subagent.SpawnArgs{
-		Description:  a.Description,
-		Prompt:       a.Prompt,
-		Type:         st,
-		WorktreePath: worktreePath,
-		// Routing params pass through raw; Manager.Spawn validates
-		// them (ResolveRoute) and fills lane defaults into the
-		// RunnerJob. Empty strings = inherit parent lane.
-		Provider: a.Provider,
-		Model:    a.Model,
-		// ParentTurn is 0 in M11.0 — the parent turn counter isn't
-		// threaded through the tool interface yet. The index event
-		// still records the spawn timing via the timestamp, and the
-		// /agents panel doesn't depend on parent_turn for MVP. Will
-		// thread through Sink in a follow-up if the UI needs it.
-		ParentTurn: 0,
-	})
-
-	// Worktree post-spawn cleanup (PRD §3.8 "子结束后自动
-	// exit_worktree (if_dirty: keep)"). Three outcomes:
-	//
-	//   - Cleanup succeeds + status="cleaned" (no dirty files)
-	//     → worktree auto-removed; nothing appended to summary
-	//     (PRD: "无改动时不追加（自动 cleaned）").
-	//   - Cleanup succeeds + status="kept" + changes > 0 →
-	//     worktree stays on disk; append the path/branch/changes
-	//     line so the LLM (and the user reading the transcript)
-	//     knows where to find the work.
-	//   - Cleanup fails → don't lose the subagent's success;
-	//     append a "(worktree cleanup error: ...)" line for
-	//     diagnostics but keep the original Summary intact.
-	//
-	// We deliberately use context.Background() (not the caller's
-	// ctx) so a cancelled parent turn doesn't strand the
-	// worktree mid-cleanup. The cleanup is short — git status +
-	// maybe git worktree remove — bounded latency.
-	if worktreePath != "" {
-		cleanupRes, cleanupErr := t.wtMgr.Cleanup(context.Background(), worktreePath, "keep")
-		switch {
-		case cleanupErr != nil:
-			res.Summary += fmt.Sprintf("\n— worktree cleanup error: %v (path=%s branch=%s)",
-				cleanupErr, worktreePath, worktreeBranch)
-		case cleanupRes.Status == "kept" && cleanupRes.Changes > 0:
-			res.Summary += fmt.Sprintf("\n— worktree: %s (branch %s, %d changes)",
-				cleanupRes.Path, cleanupRes.Branch, cleanupRes.Changes)
+	// Sync dispatch. Fresh spawn vs continuation (P1-b): session_id
+	// switches the entry point. Both return a Result whose Summary
+	// is the wire-format string handed back unchanged; continuations
+	// additionally carry PriorMessages seeded from the prior run's
+	// transcript inside Manager.Continue.
+	var res subagent.Result
+	if a.SessionID != "" {
+		res = t.mgr.Continue(ctx, subagent.ContinueArgs{
+			FromSubSid:   a.SessionID,
+			Description:  a.Description,
+			Prompt:       a.Prompt,
+			WorktreePath: worktreePath,
+			// Routing params pass through raw; beginContinue
+			// validates them (ResolveRoute) exactly like begin.
+			Provider: a.Provider,
+			Model:    a.Model,
+			// ParentTurn is 0 — same M11.0 limitation as the spawn
+			// path below.
+			ParentTurn: 0,
+		})
+	} else {
+		// subagent_type defaults to general-purpose when omitted,
+		// matching the PRD schema description. Manager.Spawn will
+		// reject any other invalid value at its own validation
+		// step; we let it speak. (On the continuation branch the
+		// type is inherited from the prior run — the field is
+		// ignored.)
+		st := subagent.Type(a.SubagentType)
+		if st == "" {
+			st = subagent.TypeGeneralPurpose
 		}
-		// status="cleaned" → no append (the silent happy path).
+		res = t.mgr.Spawn(ctx, subagent.SpawnArgs{
+			Description:  a.Description,
+			Prompt:       a.Prompt,
+			Type:         st,
+			WorktreePath: worktreePath,
+			// Routing params pass through raw; Manager.Spawn validates
+			// them (ResolveRoute) and fills lane defaults into the
+			// RunnerJob. Empty strings = inherit parent lane.
+			Provider: a.Provider,
+			Model:    a.Model,
+			// ParentTurn is 0 in M11.0 — the parent turn counter isn't
+			// threaded through the tool interface yet. The index event
+			// still records the spawn timing via the timestamp, and the
+			// /agents panel doesn't depend on parent_turn for MVP. Will
+			// thread through Sink in a follow-up if the UI needs it.
+			ParentTurn: 0,
+		})
 	}
 
+	res = t.settleWorktree(res, worktreePath, worktreeBranch)
 	return res.Summary, nil
+}
+
+// settleWorktree runs the post-run worktree cleanup (PRD §3.8 "子结束
+// 后自动 exit_worktree (if_dirty: keep)") and returns res with any
+// cleanup note appended to Summary. Three outcomes:
+//
+//   - Cleanup succeeds + status="cleaned" (no dirty files)
+//     → worktree auto-removed; nothing appended to summary
+//     (PRD: "无改动时不追加（自动 cleaned）").
+//   - Cleanup succeeds + status="kept" + changes > 0 →
+//     worktree stays on disk; append the path/branch/changes
+//     line so the LLM (and the user reading the transcript)
+//     knows where to find the work.
+//   - Cleanup fails → don't lose the subagent's success;
+//     append a "(worktree cleanup error: ...)" line for
+//     diagnostics but keep the original Summary intact.
+//
+// No-op when worktreePath is empty. We deliberately use
+// context.Background() (not the caller's ctx) so a cancelled parent
+// turn doesn't strand the worktree mid-cleanup. The cleanup is
+// short — git status + maybe git worktree remove — bounded latency.
+func (t *Tool) settleWorktree(res subagent.Result, worktreePath, worktreeBranch string) subagent.Result {
+	if worktreePath == "" {
+		return res
+	}
+	cleanupRes, cleanupErr := t.wtMgr.Cleanup(context.Background(), worktreePath, "keep")
+	switch {
+	case cleanupErr != nil:
+		res.Summary += fmt.Sprintf("\n— worktree cleanup error: %v (path=%s branch=%s)",
+			cleanupErr, worktreePath, worktreeBranch)
+	case cleanupRes.Status == "kept" && cleanupRes.Changes > 0:
+		res.Summary += fmt.Sprintf("\n— worktree: %s (branch %s, %d changes)",
+			cleanupRes.Path, cleanupRes.Branch, cleanupRes.Changes)
+	}
+	// status="cleaned" → no append (the silent happy path).
+	return res
 }
 
 // failNoSpawn formats a wire-format failure for paths that reject
@@ -473,7 +544,7 @@ func failNoSpawn(reason, hint string) string {
 // Sentinel error returned when New is called with nil manager but
 // the caller wants to recover rather than panic. Not currently
 // used; kept as a hook for future test seams.
-var errNilManager = errors.New("agent: nil Manager")
+var errNilManager = errors.New("agent: nil manager")
 
 // Compile-time assertions: Tool satisfies the tools.Tool contract
 // AND the tools.ReadOnlyTool extension. These are free — they

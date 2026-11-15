@@ -348,6 +348,29 @@ func SaveTo(path string, sess *Session) error {
 	return nil
 }
 
+// LoadFrom reads a session JSONL from an arbitrary path — the
+// load-side sibling of SaveTo. Used by the subagent continuation
+// path (internal/subagent Manager.Continue), which needs to seed a
+// child agent with the messages of a PRIOR subagent's transcript
+// living outside the flat ~/.seek/sessions/<id>.jsonl hierarchy.
+//
+// The returned Session's ID is whatever the file's header carries
+// (for subagent transcripts, the sub-sid) — callers who only need
+// Messages can ignore it. Missing file surfaces as a wrapped
+// *os.PathError so callers can distinguish "no transcript" (broken
+// chain) from "transcript corrupt".
+func LoadFrom(path string) (*Session, error) {
+	if path == "" {
+		return nil, errors.New("session: LoadFrom empty path")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("session: open %s: %w", path, err)
+	}
+	defer f.Close()
+	return decodeJSONL(f, filepath.Base(path))
+}
+
 // Load reads a session by ID.
 func (s *Store) Load(id string) (*Session, error) {
 	if id == "" {

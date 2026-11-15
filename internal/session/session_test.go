@@ -664,3 +664,46 @@ func TestSaveLoad_Roundtrip_Images(t *testing.T) {
 		t.Fatalf("assistant message gained images: %+v", got.Messages[1].Images)
 	}
 }
+
+// TestLoadFrom_ArbitraryPathRoundtrip: LoadFrom is the load-side
+// sibling of SaveTo (P1-b subagent continuation reads a prior
+// subagent's transcript by path). Round-trips messages + header
+// metadata, and a missing file must surface a wrapped error so the
+// caller can distinguish "broken chain" from corrupt content.
+func TestLoadFrom_ArbitraryPathRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "nested", "transcript.jsonl")
+
+	sess := New("test-model", "/tmp/proj", "system prompt", false, false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "survey the adapters"},
+		{Role: deepseek.RoleAssistant, Content: "summary for survey"},
+		{Role: deepseek.RoleUser, Content: "now audit the edge cases"},
+	}
+	if err := SaveTo(path, sess); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	got, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if len(got.Messages) != 3 {
+		t.Fatalf("LoadFrom messages len = %d, want 3", len(got.Messages))
+	}
+	if got.Messages[0].Content != "survey the adapters" || got.Messages[2].Content != "now audit the edge cases" {
+		t.Errorf("round-trip content mismatch: %+v", got.Messages)
+	}
+	if got.Model != sess.Model || got.CWD != sess.CWD {
+		t.Errorf("header metadata mismatch: model=%q cwd=%q", got.Model, got.CWD)
+	}
+
+	// Missing file: error (not a silent empty session).
+	if _, err := LoadFrom(filepath.Join(tmp, "nope.jsonl")); err == nil {
+		t.Error("LoadFrom on missing file must error")
+	}
+	// Empty path: programmer error.
+	if _, err := LoadFrom(""); err == nil {
+		t.Error("LoadFrom empty path must error")
+	}
+}

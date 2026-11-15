@@ -2,7 +2,11 @@
 
 **所属版本**：独立 feature（编排承重轴，平台化线）
 **前置阅读**：[`feature-subagent.md`](feature-subagent.md)（柱 G 已交付面——本文的扩基线）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K 进程级后台先例）、[`v5.md`](v5.md) §2（跨柱约束六条）、[`v7.md`](v7.md)（autopilot/sandbox 已交付面）、[`docs/comparison.md`](../comparison.md) 头部「定位变更」+ §10
+<<<<<<< HEAD
+**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· P1 已交付（v0.11.0，per-spawn provider/model 形态；P1-a 生命周期骨架见卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh 唤醒，`run_in_background`+`isolation=worktree` 暂拒）· **P1-b 续话复活已实现**（2026-11-15，卡 c_u4ugnu）：`agent` 工具 `session_id` 按子 id 再入与追加指令（sync 与 `run_in_background` 后台组合、`resumed_from` 血统、事件溯源零内存重建），D3 的 resume 回灌（M-O1.3）仍留· **P2-a（M-O2.1）已实现**（2026-11-14，卡 c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 共享解析（从 skill 提取）、内置三模板迁移为 `agenttypes.Builtins()` 数据源（spawn 路径字节不变，等值测试锁死）、`/agents types` 列出注册表。· **P2-b 已实现**（2026-11-14，卡 c_7xmecm）：D13 门 `internal/subagent/custom.go`——`ManagerOpts.AgentTypes` 接入后自定义 type 可 spawn（file 覆盖内置名生效、per-call provider/model 覆盖 def 声明、def 补空缺），`ValidateCustomType` 启动警告 + 未知工具名降级 general-purpose 工具集（不静默收窄），非法形状表驱动全测；loader 只读由行为测试钉死（无任何 os 写调用）。M-O2.2 剩余（schema 动态 enum——`agent` 工具 schema 的 subagent_type 仍内置三枚举）与 M-O2.3（agentsmgr 写路径 + CLI）未做。
+=======
 **状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· P1 已交付（v0.11.0，per-spawn provider/model 形态；P1-a 生命周期骨架见卡 c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown` + D2 通知 inbox→Notifier Prepend→TUI WakeCh 唤醒，`run_in_background`+`isolation=worktree` 暂拒，续话复活 D3 留 P1-b）· **P2-a（M-O2.1）已实现**（2026-11-14，卡 c_kkpwe7）：`internal/agenttypes` 只读加载器（双 scope + 内置三层 + 校验）、`internal/frontmatter` 共享解析（从 skill 提取）、内置三模板迁移为 `agenttypes.Builtins()` 数据源（spawn 路径字节不变，等值测试锁死）、`/agents types` 列出注册表。· **P2-b 已实现**（2026-11-14，卡 c_7xmecm）：D13 门 `internal/subagent/custom.go`——`ManagerOpts.AgentTypes` 接入后自定义 type 可 spawn（file 覆盖内置名生效、per-call provider/model 覆盖 def 声明、def 补空缺），`ValidateCustomType` 启动警告 + 未知工具名降级 general-purpose 工具集（不静默收窄），非法形状表驱动全测；loader 只读由行为测试钉死（无任何 os 写调用）。· **P2-c（M-O2.2 + config 段）已实现**（2026-11-15，卡 c_3d2bil）：内置三 type 的 spawn 特例路径退役——`Manager.resolveType` 对注册表内全部 origin 走同一 typed 路径（内置经 Set 与旧编译期表字节等值，`TestSpawn_BuiltinBytePathWithSetWired` 锁死；config 克隆不带降级语义，保 intersect）；config `agents` 段落地为第三层（`agenttypes.OriginConfig` + `RouteOverride`，内置默认 < config 段 < agents/*.md，键=内置名、值=仅路由旋钮 provider/model/effort/max_turns——config 只换脑子不换权限，未知键警告忽略）；`agent` 工具 schema 的 `subagent_type` enum 改启动时从注册表生成（`agenttool.CacheTypesSchema`，package var 缓存、进程内字节恒定、同配置跨启动字节一致、per-type 描述 200 字上限 + 工具 description 尾段）。effort/max_turns 两旋钮为声明态数据，Runner 侧消费未接（与文件 frontmatter 同状）。M-O2.3（agentsmgr 写路径 + CLI）未做。· **P1-d（M-O1.2 TUI 半段）已实现**（2026-11-15，卡 c_zdjkgf）：状态徽标可见状态迁移（`agents N` 在跑 → `bg done M` 已完成待注入 → Notifier 注入后消失；inbox 走 PEEK 口径）+ `/agents` MODE 列（`-`/`bg`/`bg✓`——`started` 事件新增 `background` 布尔标记（additive omitempty，旧索引折叠为 sync）、fold 读 `notified` 事件为送达标记且不改终态；`notified` 的写入面属 P1-b，本卡只做读/呈现）。
+>>>>>>> main
 **定位依据**：用户 2026-11-13 指认（butler 决策流）——comparison.md 降级的正确口径是「**外围功能不追平，承重轴追平甚至反超**」，编排层四件是承重轴：①复杂任务拆解天花板 = 编排天花板；②dogfood 现在依赖 CC 形态会话管理 seek，编排不补则自举隔一层；③模型路由是三车道设计（DeepSeek 真值 / GLM 量 / 兜底）在编排层的兑现点。领先面确认不重做：无人值守编排（零 daemon cron / autopilot 舰队 / goal headless）与成本纪律。
 
 ---
@@ -220,6 +224,17 @@ main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；d
 | **M-O1.3** | resume 回灌（fold + 子 transcript 读取 + orphaned 状态注记） | ~1.5 天 |
 | **M-O1.4** | ProviderRegistry + config `agents` 段 + RunnerJob 传递 + D8 provider 过滤 | ~2 天 |
 | **M-O1.5** | budget 补条目 + 成本交叉测试 + 文档（guide-subagent / guide-config / comparison 勾选） | ~1 天 |
+
+#### P1-b 续话复活（卡 c_u4ugnu，与 P1-a 后台面合流）
+
+§2.1「续话复活」行的模型侧调度面已交付：`agent` 工具新增 `session_id`——传既有子的 sub-sid（全 id 或脚注短后缀，唯一解析）+ 新指令即续话；与 P1-a 的 `run_in_background` 正交组合（后台续话）。落地口径：
+
+- **续话 = 新 sub_sid + 血统字段**，不是同 id 复活：`subagents.jsonl` 的 fold 契约是「一个 sub_sid 恰好一个终态」，同 id 二次 `started` 会被 fold 静默忽略。血统走 `started` 事件的 `resumed_from` 字段（fold 透出为 `Subagent.ResumedFrom`），旧 transcript 不动，新 transcript 自包含（prior messages + 续话轮次）。
+- **上下文延续的实现**：`Manager.Continue` fold 索引定位前运行 → `session.LoadFrom` 读旧 transcript → 消息经 `RunnerJob.PriorMessages` 传给 Runner → 生产 Runner 映射到 `agent.Config.InitialMessages`（系统提示词按前次模板**重新**组合，不沿用旧头部；模板经 `resolveType` 重建，自定义 type 的续话照常工作，def 的 provider/model 补空缺与 spawn 同语义）。全新 Manager（父进程 resume 后）凭盘上事件流即可续话——零内存携带，这就是本卡的「事件溯源重建」验收；后台子与同步子写同一套事件，续话入口不区分。
+- **完成事件合流**：`begin`（首发 1–8 步）/ `beginContinue`（续话 1–8 步）→ 共享 `runAndFinish(sp, background)` 分类尾——终态事件种类、Kill 语义、容量门、成本归集对首发/续话/后台完全一致；续话成功 footer 换 `resumed-from` 血统变体（`FormatContinued` / `FormatBackgroundContinued`），前缀 token 不变。
+- **后台续话（本卡与 P1-a 的组合点）**：`session_id` + `run_in_background` → `Manager.ContinueBackground`——立即返回 background-started 句柄，goroutine 绑 SessionCtx，完成后经 notice inbox → Notifier `<context>` Prepend 进主会话流（与 SpawnBackground 同一条 D2 送达路径）。`run_in_background` + `isolation=worktree` 仍拒（P1-a 口径，续话同样适用）。
+- **可续话状态**：仅 `completed`（生产 Runner 只在成功时写 transcript）；`active` 报 `session_active`，promoted/failed/killed/orphaned/索引在而 transcript 丢失报 `unknown_session`（hint 点名状态与路径）。进程死亡时在跑的后台子由 orphan 扫描归 `orphaned`——resume 后续话它得到明确报错而非复活，这是「resume 重建在跑状态」的答案：状态从事件流重建，死去的孩子不装活。
+- M-O1.3（父 `-resume` 首turn 回灌 completed-未 notified 子的 summary）不在本卡——那是通知面的回灌，见 D3。
 
 ## 5. P2 —— 类型化 agent（M-O2.x）
 
