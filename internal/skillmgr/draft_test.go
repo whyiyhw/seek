@@ -383,6 +383,50 @@ func TestStrengthenDraft(t *testing.T) {
 	}
 }
 
+// TestStrengthenDraft_SameSessionNoRecount: recurrence counts
+// sessions, not observations. The same session re-entering the
+// distill window (touched session, reset watermark) must not push a
+// single-session pattern to reviewable on its own — the strengthen is
+// a full no-op.
+func TestStrengthenDraft_SameSessionNoRecount(t *testing.T) {
+	store := &DraftStore{UserDir: t.TempDir(), Now: pinnedClock(t)}
+	if _, err := store.WriteDraft(validDraftMD("once-only"), DraftSidecar{
+		Status: DraftStatusWeak,
+		Sources: []DraftSource{
+			{SessionID: "sess-1", ProjectID: "p1", At: "2026-11-12T09:00:00Z"},
+		},
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// sess-1 shows up a second time: no recount, no append, still weak.
+	side, err := store.StrengthenDraft("once-only",
+		DraftSource{SessionID: "sess-1", ProjectID: "p1", At: "2026-11-13T09:00:00Z"},
+		[]string{"dup evidence"},
+		[]FilterTraceEntry{{Stage: "L3", Verdict: "ACCEPT"}},
+	)
+	if err != nil {
+		t.Fatalf("strengthen: %v", err)
+	}
+	if side.Recurrence != 1 || side.Status != DraftStatusWeak {
+		t.Errorf("same-session strengthen: recurrence=%d status=%s, want 1/weak", side.Recurrence, side.Status)
+	}
+	if len(side.Sources) != 1 || len(side.Evidence) != 0 || len(side.FilterTrace) != 0 {
+		t.Errorf("same-session strengthen must append nothing: %+v", side)
+	}
+
+	// A genuinely new session still counts — the dedup must not
+	// over-match.
+	side, err = store.StrengthenDraft("once-only",
+		DraftSource{SessionID: "sess-2", ProjectID: "p1", At: "2026-11-13T10:00:00Z"}, nil, nil)
+	if err != nil {
+		t.Fatalf("strengthen new session: %v", err)
+	}
+	if side.Recurrence != 2 || side.Status != DraftStatusReviewable {
+		t.Errorf("new session: recurrence=%d status=%s, want 2/reviewable", side.Recurrence, side.Status)
+	}
+}
+
 func TestGCDrafts_AgeAndCap(t *testing.T) {
 	now := time.Date(2026, 11, 28, 9, 0, 0, 0, time.UTC) // GC moment: 15d after pinnedClock base
 	clock := time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)

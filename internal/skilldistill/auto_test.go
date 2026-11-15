@@ -462,6 +462,39 @@ func TestAutoPath_SecondBatchRecurrence(t *testing.T) {
 	assertLoaderBlind(t, f.userDir)
 }
 
+// TestAutoPath_SameSessionReentryNoRecount: the watermark is the first
+// line of defense, but the window is mtime-based — a session touched
+// after the watermark re-enters the next batch (state reset,
+// overlapping runs). L4 must not recount it: same session, same
+// single observation (card c_jdwywj: 同会话二次进窗不增计).
+func TestAutoPath_SameSessionReentryNoRecount(t *testing.T) {
+	f := newAutoFixture(t, autoExtractOK, autoFilterAccept)
+	f.sessions.add("sess-1", proceduralHistory(autoEvidence), f.now.Add(-2*time.Hour))
+
+	done := f.armDue(t)
+	f.hook.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
+	f.waitDone(t, done)
+	if side := readSidecar(t, f.drafts, "fix-tui-state-bug"); side.Recurrence != 1 {
+		t.Fatalf("batch 1: recurrence = %d, want 1", side.Recurrence)
+	}
+
+	// sess-1 is touched again, newer than batch 1's watermark — it
+	// re-enters batch 2's window as the same session.
+	f.now = f.now.Add(2 * time.Hour)
+	f.sessions.add("sess-1", proceduralHistory(autoEvidence), f.now.Add(-30*time.Minute))
+	done = f.armDue(t)
+	f.hook.OnSessionStart(context.Background(), hooks.SessionStartEvent{})
+	f.waitDone(t, done)
+
+	side := readSidecar(t, f.drafts, "fix-tui-state-bug")
+	if side.Recurrence != 1 || side.Status != skillmgr.DraftStatusWeak {
+		t.Fatalf("same-session re-entry: recurrence=%d status=%s, want 1/weak", side.Recurrence, side.Status)
+	}
+	if len(side.Sources) != 1 || side.Sources[0].SessionID != "sess-1" {
+		t.Errorf("sources after re-entry = %+v, want single sess-1 entry", side.Sources)
+	}
+}
+
 // TestAutoPath_SessionStartDoesNotBlock: the user's first Prompt is
 // moments away — the batch must run behind a gated reasoner while
 // OnSessionStart has already returned (PRD §8 #9, autoDreamDone
