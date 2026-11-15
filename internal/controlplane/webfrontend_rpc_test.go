@@ -100,6 +100,16 @@ func TestWeb_RPCEnvelope(t *testing.T) {
 			wantID:     `2`,
 		},
 		{
+			// An EXPLICIT id:null is a call, not a notification (spec:
+			// only a missing id notifies) — the reply echoes id null.
+			name:       "explicit null id is a call echoing null",
+			body:       `{"jsonrpc":"2.0","id":null,"method":"test/nil"}`,
+			wantStatus: http.StatusOK,
+			wantCode:   0,
+			wantResult: `null`,
+			wantID:     `null`,
+		},
+		{
 			name:       "garbage body is -32700 with null id",
 			body:       `not json`,
 			wantStatus: http.StatusOK,
