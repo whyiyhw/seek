@@ -159,13 +159,13 @@ type ManagerOpts struct {
 	ParentToolNamesFn func() []string
 
 	// AgentTypes is the typed-agent registry from the P2-a loader
-	// (agenttypes.Load, frozen at session start). Custom (file-scope)
-	// entries become spawnable through the D13 gate in custom.go —
-	// Manager.resolveType adapts them per spawn; a file that shadows
-	// a built-in name (project explore.md) wins over the compile-time
-	// template. Built-in entries keep the compile-time template path
-	// byte-identical. nil = built-ins only (the pre-P2-b behaviour of
-	// every caller that doesn't set it).
+	// (agenttypes.Load, frozen at session start). Since P2-c EVERY
+	// entry routes through the same typed path in Manager.resolveType
+	// — file-scope customs via the D13 gate (custom.go), built-ins
+	// byte-identically to the retired compile-time table, config
+	// clones (OriginConfig) carrying their routing knobs. nil =
+	// built-ins only via the compile-time fallback (the pre-P2-b
+	// behaviour of callers that don't set it).
 	AgentTypes *agenttypes.Set
 }
 
@@ -549,23 +549,29 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs, background bo
 }
 
 // resolveType looks up the spawn-time Template for a subagent_type
-// (P2-b, feature-orchestration.md §5): a custom file-scope definition
-// from ManagerOpts.AgentTypes goes through the D13 gate
-// (ResolveCustomType) — this is also how a project/user file that
-// shadows a built-in name wins over the compile-time template (D11's
-// scope stack applied at spawn). Everything else (built-in names, or
-// AgentTypes not wired) keeps the compile-time template table — the
-// pre-P2-b byte path.
+// (P2-c, feature-orchestration.md §5): every definition in
+// ManagerOpts.AgentTypes — built-in, config-override clone, or file
+// scope — routes through the SAME typed path (resolveTypedDef). The
+// built-ins' entries in a Load()ed Set are the compile-time
+// Definitions themselves, so this path is byte-identical to the old
+// compile-time-template special case (locked by
+// TestSpawn_BuiltinBytePathWithSetWired); the special case itself
+// retired in P2-c ("内置三模板进默认路由").
 //
-// The returned *agenttypes.Definition is non-nil only for custom
-// types; begin merges its provider/model routing knobs into the
-// per-call params. A non-nil error fails the spawn before any state
-// is allocated (unknown type name, or a gate rejection — the message
-// is the gate's own).
+// The compile-time table remains only as the fallback for Managers
+// with no AgentTypes wired (nil = pre-P2-b callers, tests) and as the
+// byte-identity oracle for the tests.
+//
+// The returned *agenttypes.Definition is non-nil whenever the Set
+// resolved the name; begin merges its provider/model routing knobs
+// into the per-call params (empty knobs on plain built-ins — a
+// no-op). A non-nil error fails the spawn before any state is
+// allocated (unknown type name, or a gate rejection — the message is
+// the gate's own).
 func (m *Manager) resolveType(t Type) (Template, *agenttypes.Definition, error) {
 	if m.opts.AgentTypes != nil {
-		if def := m.opts.AgentTypes.Get(string(t)); def != nil && def.Origin != agenttypes.OriginBuiltin {
-			tmpl, err := ResolveCustomType(def, m.opts.ParentToolNamesFn())
+		if def := m.opts.AgentTypes.Get(string(t)); def != nil {
+			tmpl, err := m.resolveTypedDef(def)
 			if err != nil {
 				return Template{}, def, err
 			}
@@ -577,6 +583,36 @@ func (m *Manager) resolveType(t Type) (Template, *agenttypes.Definition, error) 
 		return Template{}, nil, fmt.Errorf("unknown subagent_type %q", t)
 	}
 	return tmpl, nil, nil
+}
+
+// resolveTypedDef is the one gate every Set-loaded definition passes
+// through, whatever its origin (P2-c):
+//
+//   - shape (name, tighten-only workflow, forbidden tools) and
+//     provider/model lane validity are checked for ALL origins — the
+//     gate must not trust its feeders (a hand-built Set can carry
+//     anything);
+//   - the unknown-tools DEGRADE (drop the whitelist, fall back to the
+//     general-purpose toolset) applies ONLY to file scopes (project /
+//     user). Built-ins and their config clones keep the historical
+//     intersect-with-parent semantics inside Template.Filter: a parent
+//     registry without webfetch gets explore-minus-webfetch, NOT a
+//     silently widened general-purpose set — the acceptance-#5
+//     byte-path guarantee for "no agents files + empty config".
+func (m *Manager) resolveTypedDef(def *agenttypes.Definition) (Template, error) {
+	if err := customTypeShapeErr(def); err != nil {
+		return Template{}, err
+	}
+	if def.Provider != "" || def.Model != "" {
+		if _, err := ResolveRoute(def.Provider, def.Model); err != nil {
+			return Template{}, err
+		}
+	}
+	switch def.Origin {
+	case agenttypes.OriginProject, agenttypes.OriginUser:
+		return ResolveCustomType(def, m.opts.ParentToolNamesFn())
+	}
+	return defToTemplate(def), nil
 }
 
 // runAndFinish runs the shared steps 9–11: invoke the Runner,
