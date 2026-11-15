@@ -55,7 +55,7 @@ c_qucxtu 已交付并进 main：`internal/controlplane/webfrontend.go`（368 行
 |---|---|---|
 | 代码位置 | `internal/controlplane` 包内三文件（.go/.html/_test.go），同包无 tag 是头注释里记下的有意决策 | **就地同包生长**，不迁移独立包（取舍结论见下） |
 | 注册 | `servecli.frontends["web"] = NewWeb(WebConfig{})`，零值 config 即生产形状 | 构造器携带 config（`--listen` 等 flag 注入，W1.1） |
-| 监听 | `DefaultWebAddr = "127.0.0.1:8790"` 固定口，loopback only，启动行印 `web: up: http://127.0.0.1:8790/?token=<t>` | 非 loopback bind 的 fail-closed 闸（W1.1）；端口保持 8790 不改 |
+| 监听 | `DefaultWebAddr = "127.0.0.1:8790"` 固定口；`serve.web_addr` 可改，scope 闸只放行 loopback + tailnet CGNAT `100.64.0.0/10`（2026-11-15 拍板，已交付）；启动行印 `web: up: http://<addr>/?token=<t>` | 端口保持 8790 不改；原 W1.1「非 loopback bind 的 fail-closed 闸」已被更严的 scope 闸取代（`0.0.0.0` 一律拒，§4.4） |
 | 路由 | `GET /`（页面，不鉴权）/ `GET /events`（SSE：广播 + 15s 心跳 + `retry:3000`）/ `POST /msg`（`{"text"}`→Inbound，202）/ `GET /state`（`{bound,project,session}`） | 四个名字原样沿用；流式= `/events` 增事件类型（W1.4）；新端点（`/subagents`、`/rpc`）按同一无前缀风格命名（§2.5） |
 | 鉴权 | `?token=` 或 `Authorization: Bearer`，constant-time；token 首启生成 hex(24B) 写 `~/.seek/serve/web.token`（目录 0700/文件 0600） | 首跳 303 换票→HttpOnly cookie + URL 擦净、写面 CSRF 闸、Host 校验（W1.2） |
 | 会话 | 固定单会话 `web:default`（`webConvNative="default"`，所有 tab 同一会话，D-C5 取舍） | conv-uuid per 会话（D-W3，W1.3），旧绑定兼容 |
@@ -256,7 +256,7 @@ CI 守门：repo 根无 `package.json`/`node_modules`/锁文件（脚本 grep �
 ### 4.4 默认不监听公网
 
 - 默认 `127.0.0.1:8790`（`DefaultWebAddr`，**已交付**——固定口让 tailscale 转发/书签可预期，启动行印带 token 的完整 URL）；CLI `--listen` 覆盖是 W1.1 增量（`WebConfig.Addr` 注入点已有）。
-- `0.0.0.0`/非 loopback bind：显式 flag 且**强制要求 token**（fail-closed：缺 token 拒启动，对齐 inspect-rpc §3.3 `--rpc-bind` 纪律；W1.1 增量——现状 `Addr` 可经 `WebConfig` 配但无 CLI flag、无此闸）。
+- `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §2.1）。
 - 远程访问的正路是 tailnet 转发（§5.4），不是开 bind。
 
 ## 5. ④ 鉴权与安全面
@@ -288,7 +288,7 @@ loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127
 |---|---|
 | **本机** | 默认 bind 127.0.0.1，零配置 |
 | **tailnet**（推荐远程形态） | 不改 bind；`tailscale serve`/TCP 转发把 tailnet IP 映射到 127.0.0.1:<port>（butler 8787、paseo 6767 两先例）——WireGuard 加密 + token 兜底，无需 TLS 证书 |
-| **LAN 明文** | `--listen 0.0.0.0` + 强制 token；**如实告知风险**：明文 HTTP 下 token 可被同网段嗅探/中间人——内网信任假设，或改走 tailnet。文档明示这是下策 |
+| **LAN 明文** | **已作废**（2026-11-15 scope 闸拍板，§4.4）：`0.0.0.0` 一律拒启动，不再有「显式 flag + 强制 token 即可绑」姿势；LAN 访问一律走 tailnet 转发 |
 
 ### 5.5 安全面注意项（列全）
 
@@ -335,7 +335,7 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 增量）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 缺 token 拒启动。
+- **鉴权全路径**（前半已交付有测试，后半 W1.2 增量）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
 - **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。
@@ -361,7 +361,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 
 | 卡 | 内容 | 验收 |
 |---|---|---|
-| **W1.1** | 配置面：servecli 构造器携带 config（`--listen` 覆盖 `DefaultWebAddr=127.0.0.1:8790`、token 路径可指）+ 非 loopback bind 强制 token 的 fail-closed 闸（§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归；`0.0.0.0` 缺 token 拒启动；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
+| **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr`，b769535；CLI `--listen` flag 仍缺）+ web_addr scope 闸（**已交付**，76ed883——原「非 loopback 强制 token」闸被 2026-11-15 拍板取代为更严的限段拒启，§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归（已钉 `TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启动 exit-2（已钉 `TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
 | **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验 | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
 | **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3；现状固定 `web:default`）、SSE hub per-conv 订阅（现状全 tab 一张订阅表）、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 绑定兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
 | **W1.4** | 流式接线（§2.4 缝落地）：router SendStream→`/events` SSE `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 收口带 session_id（envelope 自 `{"conv","text"}` 扩展，纯加法） | 桩 seek 流式 e2e（§8 流式条目）；/cancel 收口 |

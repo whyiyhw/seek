@@ -251,6 +251,7 @@ func TestServeConfig_RoundTrip(t *testing.T) {
 			Projects:       []string{"/Users/me/code/seek", "/Users/me/code/butler"},
 			MaxConcurrency: 8,
 			Yolo:           true,
+			WebAddr:        "100.80.25.74:8790",
 		},
 	}
 	if err := Save(cfg); err != nil {
@@ -271,6 +272,9 @@ func TestServeConfig_RoundTrip(t *testing.T) {
 	}
 	if !got.ServeYolo() {
 		t.Error("yolo round-trip")
+	}
+	if got.Serve.WebAddr != "100.80.25.74:8790" {
+		t.Errorf("web_addr round-trip: %q", got.Serve.WebAddr)
 	}
 }
 
