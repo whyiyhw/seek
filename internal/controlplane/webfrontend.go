@@ -64,18 +64,11 @@ func webConvID() ConvID { return NewConvID("web", webConvNative) }
 // reaches loopback via a TCP forward), never the public internet.
 const DefaultWebAddr = "127.0.0.1:8790"
 
-// envWebAddr moves the web listener without a CLI flag. The smoke
-// suite (scripts/serve-smoke-test.sh) needs a random high port so a
-// test serve never collides with a production 8790; operators get the
-// same knob for free. Env beats the default but never an explicit
-// WebConfig.Addr.
-const envWebAddr = "SEEK_WEB_ADDR"
-
 // WebConfig tunes WebFrontend. The zero value is the production shape:
-// DefaultWebAddr ($SEEK_WEB_ADDR overrides), ~/.seek/serve/web.token
-// and the default binding store. Tests inject temp paths.
+// DefaultWebAddr, ~/.seek/serve/web.token and the default binding store.
+// Tests inject temp paths.
 type WebConfig struct {
-	Addr      string    // listen address; "" → $SEEK_WEB_ADDR or DefaultWebAddr
+	Addr      string    // listen address; "" → DefaultWebAddr
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
@@ -110,11 +103,7 @@ var _ Frontend = (*WebFrontend)(nil)
 // registry constructor cannot fail, so failure stays lazy-but-loud).
 func NewWeb(cfg WebConfig) *WebFrontend {
 	if cfg.Addr == "" {
-		if v := os.Getenv(envWebAddr); v != "" {
-			cfg.Addr = v
-		} else {
-			cfg.Addr = DefaultWebAddr
-		}
+		cfg.Addr = DefaultWebAddr
 	}
 	if cfg.Banner == nil {
 		cfg.Banner = os.Stderr
