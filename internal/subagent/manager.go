@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,7 +14,9 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/sysprompt"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // defaultMaxConcurrent caps the number of active subagents the LLM
@@ -69,6 +73,18 @@ type RunnerJob struct {
 	// (typically by re-registering the parent's tool instances
 	// keyed by name).
 	ToolNames []string
+	// PriorMessages, when non-empty, seeds the child agent's history
+	// — the message payload loaded from a prior run's transcript at
+	// Manager.Continue time (context continuity). Fresh spawns leave
+	// it nil. Production Runner maps it onto agent.Config.
+	// InitialMessages; stub Runners in tests can assert on it.
+	//
+	// SystemPrompt is NOT part of this payload: it is recomposed
+	// fresh from the prior run's recorded template so the header
+	// reflects the CURRENT parent segments (cwd / project section /
+	// skills) rather than the stale ones baked into the old
+	// transcript header.
+	PriorMessages []deepseek.Message
 	// Provider is the resolved routing lane ("" = inherit the
 	// parent session's provider). Set from SpawnArgs via
 	// ResolveRoute — never the raw tool-call value, which
@@ -159,13 +175,13 @@ type ManagerOpts struct {
 	ParentToolNamesFn func() []string
 
 	// AgentTypes is the typed-agent registry from the P2-a loader
-	// (agenttypes.Load, frozen at session start). Custom (file-scope)
-	// entries become spawnable through the D13 gate in custom.go —
-	// Manager.resolveType adapts them per spawn; a file that shadows
-	// a built-in name (project explore.md) wins over the compile-time
-	// template. Built-in entries keep the compile-time template path
-	// byte-identical. nil = built-ins only (the pre-P2-b behaviour of
-	// every caller that doesn't set it).
+	// (agenttypes.Load, frozen at session start). Since P2-c EVERY
+	// entry routes through the same typed path in Manager.resolveType
+	// — file-scope customs via the D13 gate (custom.go), built-ins
+	// byte-identically to the retired compile-time table, config
+	// clones (OriginConfig) carrying their routing knobs. nil =
+	// built-ins only via the compile-time fallback (the pre-P2-b
+	// behaviour of callers that don't set it).
 	AgentTypes *agenttypes.Set
 }
 
@@ -295,7 +311,7 @@ type SpawnArgs struct {
 // child runs under (caller turn ctx vs ManagerOpts.SessionCtx)
 // and where the Result goes (return value vs notice inbox).
 func (m *Manager) Spawn(ctx context.Context, args SpawnArgs) Result {
-	sp, fail := m.begin(ctx, args)
+	sp, fail := m.begin(ctx, args, false)
 	if fail != nil {
 		return *fail
 	}
@@ -324,7 +340,7 @@ func (m *Manager) SpawnBackground(args SpawnArgs) Result {
 		return failResult("", "spawn_error",
 			"background spawn unavailable: ManagerOpts.SessionCtx not wired by host")
 	}
-	sp, fail := m.begin(m.opts.SessionCtx, args)
+	sp, fail := m.begin(m.opts.SessionCtx, args, true)
 	if fail != nil {
 		return *fail
 	}
@@ -365,9 +381,19 @@ type spawnSetup struct {
 	// Both empty = inherit the parent session's lane.
 	Provider string
 	Model    string
-	runCtx   context.Context
-	cancel   context.CancelFunc
-	inf      *inFlight
+	// fromSid is non-empty ONLY for continuation runs (beginContinue,
+	// Manager.Continue / ContinueBackground): the prior run's sub_sid
+	// whose transcript seeds this run's context. runAndFinish swaps
+	// the success wire format to the lineage-carrying variants
+	// (FormatContinued / FormatBackgroundContinued) when set.
+	fromSid string
+	// priorMessages is the continuation payload loaded from the prior
+	// run's transcript (nil for fresh spawns). Rides through to
+	// RunnerJob.PriorMessages.
+	priorMessages []deepseek.Message
+	runCtx        context.Context
+	cancel        context.CancelFunc
+	inf           *inFlight
 }
 
 // begin runs the shared steps 1–8: validate, capacity-gate, child
@@ -375,10 +401,13 @@ type spawnSetup struct {
 // index event, active registration under a child ctx derived from
 // parentCtx (the CALLER's ctx for sync Spawn, SessionCtx for
 // SpawnBackground — the one line that makes background real).
+// background records the spawn mode on the `started` event so the
+// fold (and /agents) can present background rows with their terminal
+// states; terminal events stay identical for both modes.
 // A non-nil *Result return means the spawn was refused before the
 // runner started (wire-format failure, no active entry); on success
 // the caller owns the child lifecycle from step 9.
-func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup, *Result) {
+func (m *Manager) begin(parentCtx context.Context, args SpawnArgs, background bool) (*spawnSetup, *Result) {
 	// Step 1: validate args. Failures here produce a wire-format
 	// result with no index event — the spawn never happened.
 	//
@@ -515,6 +544,7 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 		Type:         args.Type,
 		Description:  args.Description,
 		WorktreePath: args.WorktreePath,
+		Background:   background,
 	}); err != nil {
 		r := failResult(subSid, "spawn_error", "write index: "+err.Error())
 		return nil, &r
@@ -545,23 +575,29 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs) (*spawnSetup,
 }
 
 // resolveType looks up the spawn-time Template for a subagent_type
-// (P2-b, feature-orchestration.md §5): a custom file-scope definition
-// from ManagerOpts.AgentTypes goes through the D13 gate
-// (ResolveCustomType) — this is also how a project/user file that
-// shadows a built-in name wins over the compile-time template (D11's
-// scope stack applied at spawn). Everything else (built-in names, or
-// AgentTypes not wired) keeps the compile-time template table — the
-// pre-P2-b byte path.
+// (P2-c, feature-orchestration.md §5): every definition in
+// ManagerOpts.AgentTypes — built-in, config-override clone, or file
+// scope — routes through the SAME typed path (resolveTypedDef). The
+// built-ins' entries in a Load()ed Set are the compile-time
+// Definitions themselves, so this path is byte-identical to the old
+// compile-time-template special case (locked by
+// TestSpawn_BuiltinBytePathWithSetWired); the special case itself
+// retired in P2-c ("内置三模板进默认路由").
 //
-// The returned *agenttypes.Definition is non-nil only for custom
-// types; begin merges its provider/model routing knobs into the
-// per-call params. A non-nil error fails the spawn before any state
-// is allocated (unknown type name, or a gate rejection — the message
-// is the gate's own).
+// The compile-time table remains only as the fallback for Managers
+// with no AgentTypes wired (nil = pre-P2-b callers, tests) and as the
+// byte-identity oracle for the tests.
+//
+// The returned *agenttypes.Definition is non-nil whenever the Set
+// resolved the name; begin merges its provider/model routing knobs
+// into the per-call params (empty knobs on plain built-ins — a
+// no-op). A non-nil error fails the spawn before any state is
+// allocated (unknown type name, or a gate rejection — the message is
+// the gate's own).
 func (m *Manager) resolveType(t Type) (Template, *agenttypes.Definition, error) {
 	if m.opts.AgentTypes != nil {
-		if def := m.opts.AgentTypes.Get(string(t)); def != nil && def.Origin != agenttypes.OriginBuiltin {
-			tmpl, err := ResolveCustomType(def, m.opts.ParentToolNamesFn())
+		if def := m.opts.AgentTypes.Get(string(t)); def != nil {
+			tmpl, err := m.resolveTypedDef(def)
 			if err != nil {
 				return Template{}, def, err
 			}
@@ -573,6 +609,376 @@ func (m *Manager) resolveType(t Type) (Template, *agenttypes.Definition, error) 
 		return Template{}, nil, fmt.Errorf("unknown subagent_type %q", t)
 	}
 	return tmpl, nil, nil
+}
+
+// ContinueArgs is the per-call input for continuing a prior
+// subagent run (P1-b "续话复活"). FromSubSid addresses the prior
+// run; Prompt is the follow-up instruction appended after the
+// restored context.
+type ContinueArgs struct {
+	// FromSubSid is the sub-sid of the run being continued. Accepts
+	// the full id or its short random suffix (what the wire-format
+	// footer and /agents panel show — uniquely resolved within this
+	// project's index; ambiguity errors with the full candidates).
+	// Must exist and must NOT be currently active (still running)
+	// or promoted. The prior run's transcript.jsonl is loaded and
+	// becomes the child agent's seed history, so the follow-up
+	// instruction lands in-context.
+	FromSubSid string
+	// Description labels THIS run in /agents (a fresh label, not the
+	// prior one — the index lineage keeps the connection).
+	Description string
+	Prompt      string
+	ParentTurn  int
+	// WorktreePath has the same semantics as SpawnArgs.WorktreePath:
+	// when non-empty the child Policy's cwd is the worktree. Note the
+	// PRIOR run's worktree (if any) was cleaned up after it finished —
+	// continuations do not resurrect worktrees, they run wherever the
+	// caller isolates them (default: parent cwd).
+	WorktreePath string
+	// Provider / Model are the optional per-call routing params,
+	// same semantics as SpawnArgs (both empty = inherit the parent
+	// session's lane; a custom type's Definition fills gaps). NOTE:
+	// a prior run that was routed per-call (not via its type
+	// definition) leaves no route in the index — its continuation
+	// inherits the parent lane unless these params say otherwise.
+	Provider string
+	Model    string
+}
+
+// Continue launches a follow-up run of a prior subagent and blocks
+// until it terminates (the sync counterpart of Spawn): the prior
+// run's transcript is restored as the child's initial context and
+// args.Prompt is delivered as the next instruction. The run gets a
+// FRESH sub_sid — one sub_sid = one lifecycle (the fold contract in
+// types.go) — with the lineage recorded via the started event's
+// resumed_from field.
+//
+// Everything the continuation needs is rebuilt from the on-disk
+// event stream + transcripts: a Manager constructed fresh over the
+// same project (e.g. the parent seek process died and was -resume'd)
+// continues a prior run — sync or background — with zero in-memory
+// carry-over. That is the event-sourcing property this entry point
+// is required to preserve: no parallel runtime state mirrors the
+// index.
+//
+// Completion merges with the spawn path by construction: Continue
+// funnels into the same runAndFinish classify-and-emit tail, so the
+// terminal event kinds, /agents kill semantics, capacity gate, and
+// cost roll-up are identical to a fresh spawn.
+//
+// Failure taxonomy (all pre-run, wire-format results with no new
+// index event):
+//
+//   - unknown id, ended-without-transcript (failed/killed/orphaned),
+//     promoted, or transcript unreadable → reason=unknown_session,
+//     hint says exactly which and why.
+//   - id exists but still running → reason=session_active.
+func (m *Manager) Continue(ctx context.Context, args ContinueArgs) Result {
+	sp, fail := m.beginContinue(ctx, args)
+	if fail != nil {
+		return *fail
+	}
+	return m.runAndFinish(sp, false)
+}
+
+// ContinueBackground is Continue's detached counterpart (the
+// composition this card exists for: continuing a subagent that RAN
+// in background, itself in background). Returns IMMEDIATELY with a
+// "[agent: background started sub-sid=...]" handle; the child
+// goroutine runs under ManagerOpts.SessionCtx and its terminal
+// result flows through the notice inbox → Notifier <context>
+// Prepend into the parent session — the "续话后完成事件进主会话"
+// delivery path, identical to SpawnBackground's.
+func (m *Manager) ContinueBackground(args ContinueArgs) Result {
+	if m.opts.SessionCtx == nil {
+		return failResult("", "spawn_error",
+			"background continuation unavailable: ManagerOpts.SessionCtx not wired by host")
+	}
+	sp, fail := m.beginContinue(m.opts.SessionCtx, args)
+	if fail != nil {
+		return *fail
+	}
+	m.bgWg.Add(1)
+	go func() {
+		defer m.bgWg.Done()
+		res := m.runAndFinish(sp, true)
+		m.enqueueNotice(BackgroundNotice{
+			SubSid:      res.SubSid,
+			Description: args.Description,
+			Status:      res.Status,
+			Summary:     res.Summary,
+		})
+	}()
+	return Result{
+		SubSid:  sp.subSid,
+		Summary: FormatBackgroundStarted(sp.subSid, args.Description),
+		Status:  StatusActive,
+	}
+}
+
+// beginContinue runs the continuation-specific steps 1–8 — the
+// mirror of begin with three divergences: the template comes from
+// the PRIOR run's recorded type (resolveType, so custom
+// file-defined types keep working), the `started` event carries
+// resumed_from lineage, and the RunnerJob is seeded with the prior
+// transcript's messages. Capacity gate, child Policy/Tracker, fresh
+// sub_sid + session dir, system-prompt recomposition, and active
+// registration are byte-for-byte the begin discipline. parentCtx is
+// the CALLER's ctx for sync Continue, ManagerOpts.SessionCtx for
+// ContinueBackground — the same one-line divergence that makes
+// background real in begin.
+func (m *Manager) beginContinue(parentCtx context.Context, args ContinueArgs) (*spawnSetup, *Result) {
+	// Step 1: validate args.
+	if args.FromSubSid == "" {
+		r := failResult("", "unknown_session", "session_id required to continue a prior subagent")
+		return nil, &r
+	}
+	if args.Prompt == "" {
+		r := failResult(args.FromSubSid, "spawn_error", "prompt required")
+		return nil, &r
+	}
+	if args.Description == "" {
+		r := failResult(args.FromSubSid, "spawn_error", "description required")
+		return nil, &r
+	}
+
+	// Step 2: capacity gate — same budget as Spawn, both entry
+	// points draw from the same MaxConcurrent pool.
+	m.mu.Lock()
+	if len(m.active) >= m.opts.MaxConcurrent {
+		n := len(m.active)
+		m.mu.Unlock()
+		r := failResult("", "too_many_subagents",
+			fmt.Sprintf("%d active, retry after one completes", n))
+		return nil, &r
+	}
+	m.mu.Unlock()
+
+	// Step 3: fold the index and locate the prior record. This is
+	// the event-sourcing rebuild: the Manager needs nothing beyond
+	// subagents.jsonl + the prior transcript to continue — background
+	// runs are continuable exactly like sync runs because both write
+	// the same event kinds.
+	recs, err := m.List(ListFilter{})
+	if err != nil {
+		r := failResult(args.FromSubSid, "spawn_error", "read index: "+err.Error())
+		return nil, &r
+	}
+	var rec *Subagent
+	for i := range recs {
+		if recs[i].SubSid == args.FromSubSid {
+			rec = &recs[i]
+			break
+		}
+	}
+	if rec == nil {
+		// Short-form resolution: the wire-format footer (and the
+		// /agents panel) shows only the random suffix of a sub-sid,
+		// so that is what the model naturally quotes back. Resolve
+		// a unique "-<suffix>" match within this project's index;
+		// ambiguity is an error naming the full candidates.
+		var matches []string
+		for i := range recs {
+			if strings.HasSuffix(recs[i].SubSid, "-"+args.FromSubSid) {
+				matches = append(matches, recs[i].SubSid)
+				rec = &recs[i]
+			}
+		}
+		if len(matches) > 1 {
+			r := failResult("", "unknown_session",
+				fmt.Sprintf("sub-sid %q is ambiguous (%d matches: %s) — pass the full sub-sid",
+					args.FromSubSid, len(matches), strings.Join(matches, ", ")))
+			return nil, &r
+		}
+	}
+	if rec == nil {
+		r := failResult("", "unknown_session",
+			fmt.Sprintf("no subagent with sub-sid %q in this project — check the id via /agents or spawn a fresh one", args.FromSubSid))
+		return nil, &r
+	}
+	switch rec.Status {
+	case StatusActive:
+		r := failResult(args.FromSubSid, "session_active",
+			fmt.Sprintf("sub-sid %q is still running — wait for it to finish or kill it via /agents, then continue", args.FromSubSid))
+		return nil, &r
+	case StatusPromoted:
+		r := failResult(args.FromSubSid, "unknown_session",
+			fmt.Sprintf("sub-sid %q was promoted to a top-level session — resume that session instead of continuing the subagent", args.FromSubSid))
+		return nil, &r
+	}
+
+	// Step 4: load the prior transcript. Failed / killed / orphaned
+	// runs never wrote one (the production Runner persists the
+	// transcript only on success), so the load error below IS their
+	// clear failure surface — the hint names the status so the model
+	// understands why the chain is broken. A background run killed
+	// by process death folds to orphaned here — that is the
+	// "resume 重建" answer for in-flight runs: they are dead, the
+	// state is rebuilt from the event stream, and continuation says
+	// so instead of pretending.
+	oldDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, rec.ParentSid, rec.SubSid)
+	if err != nil {
+		r := failResult(args.FromSubSid, "spawn_error", err.Error())
+		return nil, &r
+	}
+	transcriptPath := filepath.Join(oldDir, "transcript.jsonl")
+	priorSess, err := session.LoadFrom(transcriptPath)
+	if err != nil {
+		r := failResult(args.FromSubSid, "unknown_session",
+			fmt.Sprintf("cannot continue sub-sid %q (status=%s): no readable transcript at %s (%v) — only runs that completed leave a continuable context",
+				args.FromSubSid, rec.Status, transcriptPath, err))
+		return nil, &r
+	}
+
+	// Step 5: child Policy / Tracker from the PRIOR run's type —
+	// context continuity includes the same role and tool subset.
+	// resolveType goes through the D13 gate so a custom type (or a
+	// file shadowing a built-in) keeps working on continuation.
+	tmpl, def, terr := m.resolveType(rec.Type)
+	if terr != nil {
+		r := failResult(args.FromSubSid, "spawn_error",
+			fmt.Sprintf("cannot rebuild template for prior run %q (type %q): %v", args.FromSubSid, rec.Type, terr))
+		return nil, &r
+	}
+	// Routing: same merge discipline as begin step 1 — call params
+	// win, the custom Definition fills gaps, ResolveRoute validates.
+	provider, model := args.Provider, args.Model
+	if def != nil {
+		if provider == "" {
+			provider = def.Provider
+		}
+		if model == "" {
+			model = def.Model
+		}
+	}
+	route, rerr := ResolveRoute(provider, model)
+	if rerr != nil {
+		r := failResult(args.FromSubSid, "spawn_error", rerr.Error())
+		return nil, &r
+	}
+	cwd := m.opts.ParentPolicy.Cwd()
+	if args.WorktreePath != "" {
+		cwd = args.WorktreePath
+	}
+	childPolicy, err := m.opts.ParentPolicy.Spawn(cwd, tmpl.Restriction)
+	if err != nil {
+		r := failResult("", "spawn_error", err.Error())
+		return nil, &r
+	}
+	childTracker := cache.New()
+	m.opts.ParentTracker.AdoptChild(childTracker)
+
+	// Step 6: fresh sub_sid + session dir under the CURRENT parent
+	// sid (a /compact-forked parent keeps working; the old dir stays
+	// untouched — append-only discipline).
+	parentSid := m.opts.ParentSidFn()
+	if parentSid == "" {
+		r := failResult("", "spawn_error", "no active parent session (host did not seed ParentSidFn)")
+		return nil, &r
+	}
+	now := m.opts.Now()
+	subSid := newSubSid(now)
+	sessionDir, err := paths.SubagentSessionDir(m.opts.ProjectAbsPath, parentSid, subSid)
+	if err != nil {
+		r := failResult(subSid, "spawn_error", err.Error())
+		return nil, &r
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		r := failResult(subSid, "spawn_error", "mkdir session dir: "+err.Error())
+		return nil, &r
+	}
+
+	// Step 7: system prompt recomposed FRESH (current parent segments
+	// + the prior run's template role) — deliberately not reused from
+	// the old transcript header, which may carry stale cwd / skills.
+	systemPrompt := sysprompt.ComposeSubagent(sysprompt.Header{
+		Cwd:            cwd,
+		ProjectSection: m.opts.ProjectSectionFn(),
+		SkillManifest:  m.opts.SkillManifestFn(),
+		Date:           m.opts.SessionDate,
+	}, tmpl.Role(args.Description))
+
+	// Step 8: emit the lineage-carrying `started` event, register in
+	// m.active. ResumedFrom is the only field that differs from a
+	// fresh spawn's started event.
+	indexPath, err := paths.SubagentsIndex(m.opts.ProjectAbsPath)
+	if err != nil {
+		r := failResult(subSid, "spawn_error", err.Error())
+		return nil, &r
+	}
+	if err := appendEvent(indexPath, event{
+		Kind:         "started",
+		SubSid:       subSid,
+		ParentSid:    parentSid,
+		ParentTurn:   args.ParentTurn,
+		TS:           now,
+		Type:         rec.Type,
+		Description:  args.Description,
+		WorktreePath: args.WorktreePath,
+		ResumedFrom:  rec.SubSid,
+	}); err != nil {
+		r := failResult(subSid, "spawn_error", "write index: "+err.Error())
+		return nil, &r
+	}
+	runCtx, cancel := context.WithCancel(parentCtx)
+	inf := &inFlight{cancel: cancel}
+	m.mu.Lock()
+	m.active[subSid] = inf
+	m.mu.Unlock()
+
+	return &spawnSetup{
+		args: SpawnArgs{
+			Description:  args.Description,
+			Prompt:       args.Prompt,
+			Type:         rec.Type,
+			WorktreePath: args.WorktreePath,
+		},
+		subSid:        subSid,
+		sessionDir:    sessionDir,
+		indexPath:     indexPath,
+		childPolicy:   childPolicy,
+		childTracker:  childTracker,
+		systemPrompt:  systemPrompt,
+		toolNames:     tmpl.Filter(m.opts.ParentToolNamesFn()),
+		Provider:      route.Provider,
+		Model:         route.Model,
+		fromSid:       rec.SubSid,
+		priorMessages: priorSess.Messages,
+		runCtx:        runCtx,
+		cancel:        cancel,
+		inf:           inf,
+	}, nil
+}
+
+// resolveTypedDef is the one gate every Set-loaded definition passes
+// through, whatever its origin (P2-c):
+//
+//   - shape (name, tighten-only workflow, forbidden tools) and
+//     provider/model lane validity are checked for ALL origins — the
+//     gate must not trust its feeders (a hand-built Set can carry
+//     anything);
+//   - the unknown-tools DEGRADE (drop the whitelist, fall back to the
+//     general-purpose toolset) applies ONLY to file scopes (project /
+//     user). Built-ins and their config clones keep the historical
+//     intersect-with-parent semantics inside Template.Filter: a parent
+//     registry without webfetch gets explore-minus-webfetch, NOT a
+//     silently widened general-purpose set — the acceptance-#5
+//     byte-path guarantee for "no agents files + empty config".
+func (m *Manager) resolveTypedDef(def *agenttypes.Definition) (Template, error) {
+	if err := customTypeShapeErr(def); err != nil {
+		return Template{}, err
+	}
+	if def.Provider != "" || def.Model != "" {
+		if _, err := ResolveRoute(def.Provider, def.Model); err != nil {
+			return Template{}, err
+		}
+	}
+	switch def.Origin {
+	case agenttypes.OriginProject, agenttypes.OriginUser:
+		return ResolveCustomType(def, m.opts.ParentToolNamesFn())
+	}
+	return defToTemplate(def), nil
 }
 
 // runAndFinish runs the shared steps 9–11: invoke the Runner,
@@ -598,43 +1004,64 @@ func (m *Manager) runAndFinish(sp *spawnSetup, background bool) Result {
 			}
 		}()
 		runResult, runErr = m.opts.Runner(sp.runCtx, RunnerJob{
-			SubSid:       sp.subSid,
-			SystemPrompt: sp.systemPrompt,
-			UserPrompt:   sp.args.Prompt,
-			SessionDir:   sp.sessionDir,
-			Tracker:      sp.childTracker,
-			Policy:       sp.childPolicy,
-			ToolNames:    sp.toolNames,
-			Provider:     sp.Provider,
-			Model:        sp.Model,
+			SubSid:        sp.subSid,
+			SystemPrompt:  sp.systemPrompt,
+			UserPrompt:    sp.args.Prompt,
+			SessionDir:    sp.sessionDir,
+			Tracker:       sp.childTracker,
+			Policy:        sp.childPolicy,
+			ToolNames:     sp.toolNames,
+			PriorMessages: sp.priorMessages,
+			Provider:      sp.Provider,
+			Model:         sp.Model,
 		})
 	}()
 	sp.cancel() // release any goroutines depending on runCtx
 
-	// Step 10: pop from active under mu, capturing the killed
-	// flag if set.
+	// Pop from active under mu, capturing the killed flag if set.
 	m.mu.Lock()
 	killed := sp.inf.killedByUser
 	delete(m.active, sp.subSid)
 	m.mu.Unlock()
 
-	// Step 11: classify outcome → terminal event + wire-format
-	// result. Order matters: explicit kill takes precedence over
-	// ctx.Canceled detection because Kill sets the flag THEN
-	// cancels, so a Kill is observable both ways.
+	// Classify outcome → terminal event + wire-format result. Order
+	// matters: explicit kill takes precedence over ctx.Canceled
+	// detection because Kill sets the flag THEN cancels, so a Kill
+	// is observable both ways.
 	endTS := m.opts.Now()
 
 	switch {
 	case runErr == nil && runResult.Summary != "":
-		// Happy path.
+		// Happy path. Continuations (sp.fromSid != "") swap the
+		// success wire format to the lineage-carrying variants so
+		// the footer shows resumed-from — the "[agent: completed]"
+		// / "[agent: background done ...]" prefixes stay identical
+		// to fresh runs (a completed continuation IS a completed
+		// run; prefix parsers keep working).
 		tokens := runResult.Tokens
 		_ = appendEvent(sp.indexPath, event{
 			Kind: "completed", SubSid: sp.subSid, TS: endTS, Tokens: &tokens,
 		})
 		if background {
+			if sp.fromSid != "" {
+				return Result{
+					SubSid:  sp.subSid,
+					Summary: FormatBackgroundContinued(sp.subSid, sp.fromSid, runResult.Summary, runResult.Turns, tokens),
+					Status:  StatusCompleted,
+					Tokens:  tokens,
+				}
+			}
 			return Result{
 				SubSid:  sp.subSid,
 				Summary: FormatBackgroundDone(sp.subSid, runResult.Summary, runResult.Turns, tokens),
+				Status:  StatusCompleted,
+				Tokens:  tokens,
+			}
+		}
+		if sp.fromSid != "" {
+			return Result{
+				SubSid:  sp.subSid,
+				Summary: FormatContinued(sp.subSid, sp.fromSid, runResult.Summary, runResult.Turns, tokens),
 				Status:  StatusCompleted,
 				Tokens:  tokens,
 			}

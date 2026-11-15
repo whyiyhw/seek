@@ -196,6 +196,63 @@ func TestFold_TerminalForUnknownSidSkipped(t *testing.T) {
 	}
 }
 
+// TestFold_BackgroundMarkerSeededFromStarted: the started event's
+// background flag lands on the folded record so /agents can present
+// mode per row; sync started events (flag absent, pre-P1-d indexes)
+// fold to false.
+func TestFold_BackgroundMarkerSeededFromStarted(t *testing.T) {
+	events := []event{
+		{Kind: "started", SubSid: "bg", Type: TypeExplore, Background: true, TS: time.Now()},
+		{Kind: "started", SubSid: "sync", Type: TypeExplore, TS: time.Now()},
+	}
+	folded := foldEvents(events)
+	if len(folded) != 2 {
+		t.Fatalf("len = %d, want 2", len(folded))
+	}
+	bySid := map[string]Subagent{}
+	for _, s := range folded {
+		bySid[s.SubSid] = s
+	}
+	if !bySid["bg"].Background {
+		t.Error("background started event did not seed Background=true")
+	}
+	if bySid["sync"].Background {
+		t.Error("sync started event folded Background=true, want false")
+	}
+}
+
+// TestFold_NotifiedMarksDeliveryWithoutTouchingStatus: the `notified`
+// event (consumption marker for background notices, D3/P1-b) sets
+// Notified on the folded record but must NOT alter the terminal
+// Status or EndedAt — it's a delivery annotation, not a lifecycle
+// transition. A notified for an unknown sub_sid is skipped like any
+// other orphan event.
+func TestFold_NotifiedMarksDeliveryWithoutTouchingStatus(t *testing.T) {
+	endTS := time.Date(2026, 1, 1, 10, 5, 0, 0, time.UTC)
+	events := []event{
+		{Kind: "started", SubSid: "s1", Type: TypeExplore, Background: true,
+			TS: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)},
+		{Kind: "completed", SubSid: "s1", TS: endTS},
+		{Kind: "notified", SubSid: "s1", ParentTurn: 4,
+			TS: time.Date(2026, 1, 1, 10, 6, 0, 0, time.UTC)},
+		{Kind: "notified", SubSid: "ghost", TS: time.Now()},
+	}
+	folded := foldEvents(events)
+	if len(folded) != 1 {
+		t.Fatalf("len = %d, want 1 (ghost notified must not create a record)", len(folded))
+	}
+	s := folded[0]
+	if !s.Notified {
+		t.Error("notified event did not set Notified=true")
+	}
+	if s.Status != StatusCompleted {
+		t.Errorf("Status = %s, want completed (notified is not a lifecycle transition)", s.Status)
+	}
+	if !s.EndedAt.Equal(endTS) {
+		t.Errorf("EndedAt = %v, want the completed event's %v", s.EndedAt, endTS)
+	}
+}
+
 // TestOrphanRecover_AppendsOrphanedEvents: the seek-startup hook
 // marks `started`-without-terminal sub_sids as orphaned.
 func TestOrphanRecover_AppendsOrphanedEvents(t *testing.T) {

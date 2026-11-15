@@ -71,6 +71,42 @@ func TestStatusBar_SubagentBadge(t *testing.T) {
 	}
 }
 
+// TestStatusBar_BackgroundDoneBadge pins the M-O1.2 TUI-half badge
+// state migration (feature-orchestration PRD §4.1 D2): "bg done M"
+// appears while background completions await ingest, coexists with
+// the running "agents N" badge, and is suppressed at zero. ASCII
+// label, same width-oracle rule as the agents badge.
+func TestStatusBar_BackgroundDoneBadge(t *testing.T) {
+	base := func(active, done int) string {
+		return stripANSI(RenderStatusBar(StatusSnapshot{
+			Model:           "deepseek-flash",
+			Width:           120,
+			SubagentsActive: active,
+			SubagentsDone:   done,
+		}))
+	}
+
+	// Zero done + zero active — neither badge.
+	if got := base(0, 0); strings.Contains(got, "bg done") || strings.Contains(got, "agents") {
+		t.Errorf("labels leaked at rest: %q", got)
+	}
+
+	// Running only — no done badge yet (nothing finished).
+	if got := base(2, 0); !strings.Contains(got, "agents 2") || strings.Contains(got, "bg done") {
+		t.Errorf("running state should show only 'agents 2': %q", got)
+	}
+
+	// Migration: one finished while another still runs — both badges.
+	if got := base(1, 1); !strings.Contains(got, "agents 1") || !strings.Contains(got, "bg done 1") {
+		t.Errorf("mixed state should show 'agents 1' + 'bg done 1': %q", got)
+	}
+
+	// All finished, notices pending ingest — done badge alone.
+	if got := base(0, 2); !strings.Contains(got, "bg done 2") || strings.Contains(got, "agents") {
+		t.Errorf("post-completion state should show only 'bg done 2': %q", got)
+	}
+}
+
 // TestStatusBar_CronBadge pins the v5 柱 H status-bar
 // indicator: "cron N" when N > 0; suppressed at zero.
 // Label-first ASCII form — no ⏰ glyph — same rationale as

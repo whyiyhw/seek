@@ -5,14 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/worktree"
+	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
 // errBoom is a generic test-side sentinel for "git command failed
@@ -667,5 +670,140 @@ func TestTool_ImplementsReadOnlyTool(t *testing.T) {
 	}
 	if !ro.ReadOnly() {
 		t.Error("Tool.ReadOnly() returned false — pkg/agent.readOnlyCall() will refuse to dispatch concurrent agent calls")
+	}
+}
+
+// ---- session_id continuation (P1-b) -------------------------------------
+
+// transcriptStubRunner mirrors the production Runner's transcript
+// persistence (see internal/subagent's transcriptRunner): writes
+// transcript.jsonl per run so the tool-level continuation chain has
+// a real on-disk context to restore.
+func transcriptStubRunner(t *testing.T) subagent.Runner {
+	t.Helper()
+	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		msgs := make([]deepseek.Message, 0, len(job.PriorMessages)+2)
+		msgs = append(msgs, job.PriorMessages...)
+		msgs = append(msgs,
+			deepseek.Message{Role: deepseek.RoleUser, Content: job.UserPrompt},
+			deepseek.Message{Role: deepseek.RoleAssistant, Content: "summary for " + job.UserPrompt},
+		)
+		sess := session.New("test-model", job.Policy.Cwd(), job.SystemPrompt, true, false)
+		sess.ID = job.SubSid
+		sess.Messages = msgs
+		if err := session.SaveTo(filepath.Join(job.SessionDir, "transcript.jsonl"), sess); err != nil {
+			t.Errorf("stub runner: save transcript %s: %v", job.SubSid, err)
+		}
+		return subagent.RunnerResult{
+			Summary: "summary for " + job.UserPrompt,
+			Turns:   1,
+			Tokens:  subagent.Tokens{Prompt: 10, Completion: 2},
+		}, nil
+	}
+}
+
+// footerShortSid extracts the short sub-sid from a wire-format
+// footer line ("— sub-sid: <short> · …") — the value the model would
+// naturally quote back.
+func footerShortSid(t *testing.T, result string) string {
+	t.Helper()
+	const mark = "— sub-sid: "
+	i := strings.Index(result, mark)
+	if i < 0 {
+		t.Fatalf("no sub-sid footer in:\n%s", result)
+	}
+	rest := result[i+len(mark):]
+	if j := strings.Index(rest, " ·"); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
+
+// TestTool_Execute_ContinueHappyPath drives the model's real
+// workflow: fresh spawn → completed (footer id) → session_id
+// continuation quoting the footer's short id → second completion
+// with lineage footer.
+func TestTool_Execute_ContinueHappyPath(t *testing.T) {
+	tl := newToolWithStubRunner(t, transcriptStubRunner(t))
+
+	first, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"description": "research x", "prompt": "survey the adapters", "subagent_type": "explore"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first, "[agent: completed] ") {
+		t.Fatalf("first call not completed:\n%s", first)
+	}
+	short := footerShortSid(t, first)
+
+	second, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"description": "follow up", "prompt": "now audit the edge cases", "session_id": "`+short+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(second, "[agent: completed] ") {
+		t.Fatalf("continuation not completed:\n%s", second)
+	}
+	if !strings.Contains(second, "resumed-from: "+short) {
+		t.Errorf("continuation missing lineage footer:\n%s", second)
+	}
+	if !strings.Contains(second, "summary for now audit the edge cases") {
+		t.Errorf("continuation missing body:\n%s", second)
+	}
+}
+
+// TestTool_Execute_ContinueUnknownId: a bogus session_id is a
+// wire-format failure (not a tool error) so the model can react.
+func TestTool_Execute_ContinueUnknownId(t *testing.T) {
+	tl := newToolWithStubRunner(t, transcriptStubRunner(t))
+	out, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"description": "follow up", "prompt": "go on", "session_id": "nosuchsid"}`))
+	if err != nil {
+		t.Fatalf("continuation failure must be a tool result, not error: %v", err)
+	}
+	if !strings.HasPrefix(out, "[agent: failed reason=unknown_session]") {
+		t.Errorf("unexpected failure wire format:\n%s", out)
+	}
+	if !strings.Contains(out, "nosuchsid") {
+		t.Errorf("failure does not name the id:\n%s", out)
+	}
+}
+
+// TestTool_Execute_ContinueDefaultsDescription: continuation without
+// description is legal (default label) — description stays required
+// for fresh spawns only.
+func TestTool_Execute_ContinueDefaultsDescription(t *testing.T) {
+	tl := newToolWithStubRunner(t, transcriptStubRunner(t))
+	first, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"description": "first", "prompt": "survey"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := footerShortSid(t, first)
+
+	second, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"prompt": "go deeper", "session_id": "`+short+`"}`))
+	if err != nil {
+		t.Fatalf("description-less continuation errored: %v", err)
+	}
+	if !strings.HasPrefix(second, "[agent: completed] ") {
+		t.Errorf("continuation not completed:\n%s", second)
+	}
+}
+
+// TestTool_Execute_ContinueMissingPrompt: session_id without prompt
+// is an argument error (MissingField path), matching fresh spawns.
+func TestTool_Execute_ContinueMissingPrompt(t *testing.T) {
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		t.Error("Runner invoked despite missing prompt")
+		return subagent.RunnerResult{}, nil
+	})
+	_, err := tl.Execute(context.Background(), json.RawMessage(
+		`{"description": "follow up", "session_id": "abc123"}`))
+	if err == nil {
+		t.Fatal("expected error on missing prompt with session_id")
+	}
+	if !strings.Contains(err.Error(), "prompt") {
+		t.Errorf("error missing field name: %v", err)
 	}
 }
