@@ -48,3 +48,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_u4ugnu：编排 P1-b：后台子代理续话复活——agent 工具 session_id 续话与 run_in_background 组合（PriorMessages 上下文延续、resumed_from 血统、短 id 唯一解析、后台续话完成经 notice → Notifier 进主会话流）
 - c_3d2bil：编排 P2-c：内置类型包升级——explore/judge/general 类型化+默认路由
 - c_zam44t：web 会话历史·W4.2：session/list|get|messages 三 method（cursor 分页=全文件顺序、尾读不锁）
+- c_snerqc：web 平面契约自测脚本：serve HTTP 三断言进 selftest 家族
