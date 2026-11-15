@@ -45,9 +45,11 @@ import (
 // back to the worktree (Path for cwd-pinning, Branch for git
 // operations, SubSid for cross-reference in subagents.jsonl).
 type Worktree struct {
-	// ID is the seek-internal identifier (timestamp + 6 hex chars,
-	// same shape as session IDs). Used for the on-disk dir name
-	// AND the git ref namespace, so the two stay aligned.
+	// ID is the seek-internal identifier (timestamp + 6 hex chars —
+	// the one remaining short-suffix generator; session/subagent/
+	// run IDs were widened to 16-hex suffixes for entropy). Used for
+	// the on-disk dir name AND the git ref namespace, so the two
+	// stay aligned.
 	ID string
 	// Path is the absolute path to the worktree's root directory.
 	// Callers pinning a child agent's cwd / tool execution
@@ -135,10 +137,12 @@ func NewManagerWithRunner(projectRoot string, run GitRunner) (*Manager, error) {
 	}, nil
 }
 
-// newID returns a fresh worktree ID. Same shape as subagent
-// IDs (timestamp + 6 hex chars) so they sort naturally and visual
-// inspection of ~/.seek/projects/<pid>/worktrees/ shows chronology.
-// Falling back to nanosecond suffix on entropy exhaustion mirrors
+// newID returns a fresh worktree ID. Timestamp + 6 hex chars (same
+// sortable scheme as subagent IDs, which now carry 16-hex suffixes —
+// worktree keeps the short suffix; widen it too if concurrent
+// worktree creation ever collides) so visual inspection of
+// ~/.seek/projects/<pid>/worktrees/ shows chronology. Falling back
+// to nanosecond suffix on entropy exhaustion mirrors
 // internal/session.generateID.
 func newID(now time.Time) string {
 	var rnd [3]byte

@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature（编排承重轴，平台化线）
 **前置阅读**：[`feature-subagent.md`](feature-subagent.md)（柱 G 已交付面——本文的扩基线）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K 进程级后台先例）、[`v5.md`](v5.md) §2（跨柱约束六条）、[`v7.md`](v7.md)（autopilot/sandbox 已交付面）、[`docs/comparison.md`](../comparison.md) 头部「定位变更」+ §10
-**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）
+**状态**：📐 设计稿（2026-11-13，卡 c_ur7bup）· 🔨 P1-a 生命周期骨架已落地（2026-11-13，卡 c_bickfj，分支 drive/c_bickfj：D1 `SpawnBackground`/session-ctx/`Shutdown`/schema 字段 + D2 通知 inbox→Notifier Prepend→主会话 transcript + TUI WakeCh 唤醒；`run_in_background`+`isolation=worktree` 暂拒，续话复活 D3 留 P1-b）
 **定位依据**：用户 2026-11-13 指认（butler 决策流）——comparison.md 降级的正确口径是「**外围功能不追平，承重轴追平甚至反超**」，编排层四件是承重轴：①复杂任务拆解天花板 = 编排天花板；②dogfood 现在依赖 CC 形态会话管理 seek，编排不补则自举隔一层；③模型路由是三车道设计（DeepSeek 真值 / GLM 量 / 兜底）在编排层的兑现点。领先面确认不重做：无人值守编排（零 daemon cron / autopilot 舰队 / goal headless）与成本纪律。
 
 ---
@@ -109,7 +109,7 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 父 turn 收到的即时 tool result（确定性 bytes）：
 
 ```
-[agent: background started sub-sid=20261113-103045-a1b2c3] <description>
+[agent: background started sub-sid=20261113-103045-a1b2c3d4e5f6a7b8] <description>
 
 — runner active; final summary will arrive as a <context> note on a later turn (or on resume). Track via /agents.
 ```
@@ -125,7 +125,7 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 
 ```
 <context>
-[agent: background done sub-sid=20261113-103045-a1b2c3] <headline>
+[agent: background done sub-sid=20261113-103045-a1b2c3d4e5f6a7b8] <headline>
 
 <summary body, capped at MaxSummaryBytes>
 

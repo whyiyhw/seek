@@ -58,15 +58,14 @@ type Session struct {
 ### ID 设计：可排序就是免费索引
 
 ```go
-// "20260121-103045-a1b2c3" = 时间戳 + 6 字符随机后缀
+// "20260121-103045-a1b2c3d4e5f6a7b8" = 时间戳 + 16 字符随机后缀
 func generateID(t time.Time) string {
-    var rnd [3]byte
+    var rnd [8]byte
     if _, err := rand.Read(rnd[:]); err != nil {
         // Fallback: nanosecond-precision hex suffix from the timestamp.
-        // The fractional seconds make IDs unique even at high concurrency.
-        return fmt.Sprintf("%s-%s",
+        return fmt.Sprintf("%s-%016x",
             t.Format("20060102-150405"),
-            fmt.Sprintf("%06x", t.Nanosecond()/1000))
+            uint64(t.UnixNano()))
     }
     return fmt.Sprintf("%s-%s",
         t.Format("20060102-150405"),

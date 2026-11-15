@@ -139,6 +139,8 @@ func (t *Tracker) Last() deepseek.Usage {
 
 ## 13.3 `pricing`：定价表 + 离峰窗口
 
+> 现行费率以 `internal/pricing/pricing.go` 为准（官方 en 页 USD 快照 2026-11-15：flash $0.30/$0.006/$1.20 · v4-pro $1.32/$0.044/$3.96，均 peak 档、off-peak 对折；zh 页另有一套 flat CNY 价目，两页口径分叉，billing 跟随账户区域）。本节代码块为示意快照，不随调价同步维护。
+
 ```go
 type ModelPricing struct {
     InputMissPerMTok float64 // cache miss

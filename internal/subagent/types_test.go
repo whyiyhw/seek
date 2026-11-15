@@ -38,9 +38,9 @@ func TestNewSubSid_FormatAndUniqueness(t *testing.T) {
 	now := time.Date(2026, 6, 1, 10, 34, 12, 0, time.UTC)
 	id := newSubSid(now)
 
-	// Shape: "20260601-103412-<6hex>" — 15+1+6 = 22 chars.
-	if len(id) != 22 {
-		t.Errorf("sub-sid length = %d, want 22 — got %q", len(id), id)
+	// Shape: "20260601-103412-<16hex>" — 15+1+16 = 32 chars.
+	if len(id) != 32 {
+		t.Errorf("sub-sid length = %d, want 32 — got %q", len(id), id)
 	}
 	if !strings.HasPrefix(id, "20260601-103412-") {
 		t.Errorf("sub-sid missing timestamp prefix: %q", id)
@@ -52,24 +52,19 @@ func TestNewSubSid_FormatAndUniqueness(t *testing.T) {
 		t.Errorf("different timestamps produced identical IDs: %q", a)
 	}
 
-	// Same-timestamp uniqueness rests entirely on the 24-bit (6 hex)
-	// random suffix. That is NOT collision-free at scale: over 1000 draws
-	// the birthday probability of *some* collision is ~3%
-	// (1000²/(2·2²⁴) ≈ 0.03) — so asserting zero collisions made this
-	// test flake ~1 run in 34 (the original "~6e-4" comment miscalculated
-	// it). What we CAN assert robustly is that the RNG is healthy: a
-	// working suffix yields ~1000 distinct IDs; a degenerate one
-	// (constant / all-zero) yields a handful. Require ≥990 distinct —
-	// tripping that needs ≥11 collisions (P ≈ 1e-15), while a broken RNG
-	// fails immediately. Production is unaffected: real subagent fan-out
-	// is far below 1000 sub-sids/second, and the timestamp disambiguates
-	// across seconds.
+	// Same-timestamp uniqueness rests on the 64-bit (16 hex) random
+	// suffix. Over 1000 draws the birthday probability of *some*
+	// collision is 1000²/(2·2⁶⁴) ≈ 2.7e-14 — asserting zero collisions
+	// is safe; a degenerate RNG (constant / all-zero suffix) still fails
+	// immediately. (The 24-bit predecessor needed a relaxed ≥990 assert
+	// here — see docs/pitfalls.md "birthday-paradox flake trap".)
 	const draws = 1000
 	seen := make(map[string]bool, draws)
 	for range draws {
-		seen[newSubSid(now)] = true
-	}
-	if distinct := len(seen); distinct < 990 {
-		t.Errorf("only %d/%d distinct sub-sids at a fixed timestamp — random suffix looks degenerate", distinct, draws)
+		s := newSubSid(now)
+		if seen[s] {
+			t.Errorf("duplicate sub-sid: %s", s)
+		}
+		seen[s] = true
 	}
 }

@@ -75,18 +75,44 @@ func TestPricingFor_UnknownModelFallsBack(t *testing.T) {
 }
 
 // TestPricingFor_RetiredIdsBilledAtFlashCard pins the V4.1 routing
-// contract: the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp /
-// deepseek-v4-pro ids are served by V4.1 Flash and billed at Flash
-// prices — at BOTH tiers. They carry no registry entries, so this is
-// literally the unknown-model fallback doing the vendor's billing for
-// it.
+// contract: the retired deepseek-v4-flash / deepseek-v4-flash-vision-exp
+// ids are served by V4.1 Flash and billed at Flash prices — at BOTH
+// tiers. They carry no registry entries, so this is literally the
+// unknown-model fallback doing the vendor's billing for it.
+// deepseek-v4-pro is deliberately NOT in this list: the 2026-11-14
+// pricing page re-listed it with its own card (see TestPricingFor_V4Pro).
 func TestPricingFor_RetiredIdsBilledAtFlashCard(t *testing.T) {
-	for _, m := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
+	for _, m := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp"} {
 		for _, tier := range []Tier{TierStandard, TierOffPeak} {
 			if p, want := PricingFor(m, tier), PricingFor(deepseek.ModelV41Flash, tier); p != want {
 				t.Errorf("PricingFor(%s, %v) = %+v, want the V4.1-Flash card %+v", m, tier, p, want)
 			}
 		}
+	}
+}
+
+// TestPricingFor_V4Pro pins deepseek-v4-pro's own card against the
+// 2026-11-14 pricing page (DeepSeek-V4-Pro-0813): $1.32 miss / $0.044
+// hit / $3.96 output peak, exactly half off-peak. Pro left the
+// Flash-routed legacy list, so a registry entry — not the fallback —
+// must price it; without one the status bar would undercharge ~4×.
+func TestPricingFor_V4Pro(t *testing.T) {
+	std := PricingFor(ModelV4Pro, TierStandard)
+	want := ModelPricing{InputMissPerMTok: 1.32, InputHitPerMTok: 0.044, OutputPerMTok: 3.96}
+	if std != want {
+		t.Errorf("v4-pro peak card = %+v, want %+v", std, want)
+	}
+	// Off-peak halves every bucket (pro shares DeepSeek's windows).
+	off := PricingFor(ModelV4Pro, TierOffPeak)
+	if math.Abs(off.InputMissPerMTok-1.32*0.5) > 1e-9 ||
+		math.Abs(off.InputHitPerMTok-0.044*0.5) > 1e-9 ||
+		math.Abs(off.OutputPerMTok-3.96*0.5) > 1e-9 {
+		t.Errorf("v4-pro off-peak card = %+v, want exactly half of peak", off)
+	}
+	// And it must NOT equal the Flash card — the pre-2026-11 fallback
+	// behaviour this entry exists to replace.
+	if std == PricingFor(deepseek.ModelV41Flash, TierStandard) {
+		t.Errorf("v4-pro card must differ from the Flash card")
 	}
 }
 
@@ -299,21 +325,21 @@ func TestCost_GLM53(t *testing.T) {
 }
 
 // TestSearchCost prices the standalone Search API's per-call billing:
-// ¥5 per 1,000 successful calls, converted at the table's 7.0 CNY/USD
-// (≈ $0.000714/call — the card's "5元/千次 ≈ $0.0007").
+// $0.75 per 1,000 successful calls (listed natively on the English
+// pricing page, 2026-11-14 check; the Chinese page shows ¥5/1K).
 func TestSearchCost(t *testing.T) {
-	if got := SearchCost(1); math.Abs(got-5.0/7.0/1000) > 1e-12 {
-		t.Errorf("SearchCost(1) = %v, want 5/7/1000", got)
+	if got := SearchCost(1); math.Abs(got-0.75/1000) > 1e-12 {
+		t.Errorf("SearchCost(1) = %v, want 0.75/1000", got)
 	}
-	if got := SearchCost(1000); math.Abs(got-5.0/7.0) > 1e-9 {
-		t.Errorf("SearchCost(1000) = %v, want 5/7 (¥5 per 1k)", got)
+	if got := SearchCost(1000); math.Abs(got-0.75) > 1e-9 {
+		t.Errorf("SearchCost(1000) = %v, want 0.75 (per 1k calls)", got)
 	}
 	if got := SearchCost(0); got != 0 {
 		t.Errorf("SearchCost(0) = %v, want 0 — failed calls are not billable", got)
 	}
 	// Per-call rate is far below FormatCost's sub-cent precision band;
 	// a single search must not round up to a visible dollar amount.
-	if s := FormatCost(SearchCost(1)); s != "$0.0007" {
-		t.Errorf("FormatCost(SearchCost(1)) = %q, want $0.0007", s)
+	if s := FormatCost(SearchCost(1)); s != "$0.0008" {
+		t.Errorf("FormatCost(SearchCost(1)) = %q, want $0.0008", s)
 	}
 }

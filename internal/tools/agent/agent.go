@@ -59,6 +59,10 @@ var schemaBytes = []byte(`{
       "enum": ["none", "worktree"],
       "description": "none (default): subagent works in the parent's cwd. worktree: creates a temporary git worktree so the subagent works on an isolated copy; useful for parallel implementation attempts. Auto-cleaned if no changes. (worktree not yet implemented — use \"none\" until v0.6.0 ships M11.1.)"
     },
+    "run_in_background": {
+      "type": "boolean",
+      "description": "Run detached: return a handle immediately instead of blocking until the subagent finishes. The final summary is delivered as a <context> notification on your next turn (or on session resume). Never fabricate or predict a pending agent's results — the notification is never something you write yourself. Use for long research/implementation tasks you want to overlap with other work; do not wait idly, keep making progress. Default false (blocking, current behavior)."
+    },
     "provider": {
       "type": "string",
       "enum": ["deepseek", "glm"],
@@ -82,6 +86,13 @@ type Args struct {
 	Prompt       string `json:"prompt"`
 	SubagentType string `json:"subagent_type,omitempty"`
 	Isolation    string `json:"isolation,omitempty"`
+	// RunInBackground (feature-orchestration PRD §4.1 D1) selects
+	// Manager.SpawnBackground: the tool returns a
+	// "[agent: background started sub-sid=...]" handle immediately
+	// and the final summary arrives as a <context> notification on
+	// a later turn. Default false = the sync path, byte-identical
+	// to pre-feature behaviour.
+	RunInBackground bool `json:"run_in_background,omitempty"`
 	// Provider / Model are the optional routing params (P1-c,
 	// feature-orchestration.md §4.2). Both empty = inherit the
 	// parent session's lane unchanged. Passed through verbatim —
@@ -189,16 +200,16 @@ func (*Tool) ReadOnly() bool { return true }
 func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var a Args
 	if err := tools.UnmarshalStrict("agent", raw, &a,
-		"description", "prompt", "subagent_type", "isolation", "provider", "model"); err != nil {
+		"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model"); err != nil {
 		return "", err
 	}
 	if a.Description == "" {
 		return "", tools.MissingField("agent", "description", raw,
-			"description", "prompt", "subagent_type", "isolation", "provider", "model")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model")
 	}
 	if a.Prompt == "" {
 		return "", tools.MissingField("agent", "prompt", raw,
-			"description", "prompt", "subagent_type", "isolation", "provider", "model")
+			"description", "prompt", "subagent_type", "isolation", "run_in_background", "provider", "model")
 	}
 
 	// Runtime length enforcement (PRD §3.1 "Execute-side strict").
@@ -251,6 +262,38 @@ func (t *Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error)
 	default:
 		return failNoSpawn("spawn_error",
 			"isolation must be one of: none, worktree (got "+a.Isolation+")"), nil
+	}
+
+	// Background dispatch (feature-orchestration PRD §4.1 D1).
+	// Manager.SpawnBackground returns a
+	// "[agent: background started sub-sid=...]" handle immediately;
+	// the runner goroutine is bound to the SESSION ctx (not this
+	// turn's ctx), and the final summary arrives as a <context>
+	// notification on a later turn via the Notifier hook.
+	//
+	// worktree + background is refused for now: worktree cleanup
+	// rides the sync path after Spawn returns, and there is no
+	// owner left to run it once the tool result goes out. Revisit
+	// when cleanup can ride the notice path.
+	if a.RunInBackground {
+		if worktreePath != "" {
+			return failNoSpawn("spawn_error",
+				"run_in_background with isolation=\"worktree\" is not supported yet (worktree cleanup rides the sync path); use isolation=\"none\""), nil
+		}
+		bgRes := t.mgr.SpawnBackground(subagent.SpawnArgs{
+			Description:  a.Description,
+			Prompt:       a.Prompt,
+			Type:         st,
+			WorktreePath: "",
+			// Routing params pass through raw, same as the sync
+			// path — Manager.SpawnBackground runs the identical
+			// ResolveRoute validation via begin step 1.
+			Provider: a.Provider,
+			Model:    a.Model,
+			// ParentTurn: 0, same as the sync path — the counter
+			// isn't threaded through the tool interface yet.
+		})
+		return bgRes.Summary, nil
 	}
 
 	// Dispatch. Manager.Spawn returns a Result whose Summary is the

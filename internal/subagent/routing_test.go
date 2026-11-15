@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -213,5 +214,89 @@ func TestIsDeepSeekOnlyTool(t *testing.T) {
 		if IsDeepSeekOnlyTool(name) {
 			t.Errorf("IsDeepSeekOnlyTool(%q) = true, want false", name)
 		}
+	}
+}
+
+// TestSpawnBackground_RoutePlumbedToRunnerJob pins the P1-a × P1-c
+// merge point (card c_bickfj 二次收口): SpawnBackground runs the same
+// begin-step-1 ResolveRoute as sync Spawn, and the resolved route
+// rides the spawnSetup struct into the background RunnerJob — routing
+// a background subagent to another lane must not silently fall back
+// to the parent's lane.
+func TestSpawnBackground_RoutePlumbedToRunnerJob(t *testing.T) {
+	release := make(chan struct{})
+	jobCh := make(chan RunnerJob, 1)
+	runner := func(ctx context.Context, job RunnerJob) (RunnerResult, error) {
+		jobCh <- job
+		<-release
+		return RunnerResult{Summary: "routed findings", Turns: 1}, nil
+	}
+	mgr, _ := newBackgroundManager(t, runner)
+
+	res := mgr.SpawnBackground(SpawnArgs{
+		Description: "glm bulk research",
+		Prompt:      "p",
+		Type:        TypeExplore,
+		Provider:    "glm",
+	})
+	if !strings.HasPrefix(res.Summary, "[agent: background started sub-sid=") {
+		t.Fatalf("bad handle summary:\n%s", res.Summary)
+	}
+
+	// Receive (not a shared variable) so the happens-before edge is
+	// explicit under -race.
+	var gotJob RunnerJob
+	select {
+	case gotJob = <-jobCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runner never received the background job")
+	}
+	close(release)
+	waitFor(t, 5*time.Second, func() bool { return mgr.ActiveCount() == 0 })
+
+	if gotJob.Provider != ProviderGLM {
+		t.Errorf("background job.Provider = %q, want glm", gotJob.Provider)
+	}
+	if gotJob.Model != pricing.ModelGLM53 {
+		t.Errorf("background job.Model = %q, want glm lane default glm-5.3", gotJob.Model)
+	}
+}
+
+// TestSpawnBackground_RejectsInvalidRoute: the background entry runs
+// the identical single-point validation — an unknown provider fails
+// with the wire-format spawn_error (NOT a background handle), the
+// Runner never executes, and no index event is written.
+func TestSpawnBackground_RejectsInvalidRoute(t *testing.T) {
+	runnerRan := false
+	runner := func(ctx context.Context, job RunnerJob) (RunnerResult, error) {
+		runnerRan = true
+		return RunnerResult{Summary: "should not run"}, nil
+	}
+	mgr, _ := newBackgroundManager(t, runner)
+
+	res := mgr.SpawnBackground(SpawnArgs{
+		Description: "bad route",
+		Prompt:      "p",
+		Type:        TypeExplore,
+		Provider:    "sonnet",
+	})
+	if res.Status != StatusFailed {
+		t.Errorf("Status = %s, want failed", res.Status)
+	}
+	if !strings.HasPrefix(res.Summary, "[agent: failed reason=spawn_error]") {
+		t.Errorf("Summary missing spawn_error wire format:\n%s", res.Summary)
+	}
+	if !strings.Contains(res.Summary, `unknown provider "sonnet"`) {
+		t.Errorf("Summary %q missing unknown-provider detail", res.Summary)
+	}
+	if runnerRan {
+		t.Error("Runner executed despite invalid route on background path")
+	}
+	got, err := mgr.List(ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("index has %d events after rejected background spawn, want 0", len(got))
 	}
 }

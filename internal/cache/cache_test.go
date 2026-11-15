@@ -250,14 +250,16 @@ func TestTracker_ConcurrentSafe(t *testing.T) {
 // model+tier active WHEN IT RAN, never retroactively recomputed.
 //
 // Historically this guarded against re-pricing a V4-Flash turn at
-// V4-Pro's 3× card after a mid-session /model switch. Since the
-// 2026-09-10 V4.1 launch every DeepSeek lineage id — including the
-// retired ones — bills at the SAME V4.1-Flash card, so a cross-model
-// re-pricing bug is no longer cost-visible; the mechanism stays
-// cost-visible via the tier axis (TestTracker_TierTransitionDoesNotRePrice).
-// What this test still pins: retired ids bill at the Flash card (the
-// server's routing contract), and the per-model recording path stays
-// exercised across distinct model keys.
+// V4-Pro's 3× card after a mid-session /model switch. Between the
+// 2026-09-10 V4.1 launch and the 2026-11 re-listing every DeepSeek
+// lineage id billed at the same V4.1-Flash card, making that bug
+// cost-invisible; deepseek-v4-pro again carries its own (3.3× on
+// output) card, so the cross-model axis is cost-visible once more —
+// alongside the tier axis (TestTracker_TierTransitionDoesNotRePrice).
+// What this test pins: v4-pro bills at its OWN card (not the fallback),
+// still-retired Flash ids bill at the Flash card (the server's routing
+// contract), and the per-model recording path stays exercised across
+// distinct model keys.
 func TestTracker_CumulativeCostLockedInAtRecord(t *testing.T) {
 	tr := New()
 
@@ -270,25 +272,25 @@ func TestTracker_CumulativeCostLockedInAtRecord(t *testing.T) {
 		t.Errorf("after V4.1-Flash turn: cost = %v, want ≈1.20", got)
 	}
 
-	// Turn 2 — 1M completion @ the retired V4-Pro id: unknown to the
-	// rate card, so the pricing fallback bills it at the V4.1-Flash
-	// card the server actually charges = $1.20. Cumulative = 2.40.
+	// Turn 2 — 1M completion @ deepseek-v4-pro ($3.96/M output peak,
+	// its OWN card since the 2026-11 re-listing) = $3.96.
+	// Cumulative = 5.16.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
 		"deepseek-v4-pro", pricing.TierStandard,
 	)
-	if got := tr.CumulativeCost(); got < 2.399 || got > 2.401 {
-		t.Errorf("after retired V4-Pro turn: cost = %v, want ≈2.40 (billed at Flash price)", got)
+	if got := tr.CumulativeCost(); got < 5.159 || got > 5.161 {
+		t.Errorf("after V4-Pro turn: cost = %v, want ≈5.16 (billed at the v4-pro card)", got)
 	}
 
-	// Turn 3 — 1M completion @ the retired V4-Flash id (also
-	// Flash-billed) = $1.20. Cumulative = 3.60.
+	// Turn 3 — 1M completion @ the retired V4-Flash id (still
+	// Flash-routed, priced via the fallback) = $1.20. Cumulative = 6.36.
 	tr.Record(
 		deepseek.Usage{CompletionTokens: 1_000_000},
 		"deepseek-v4-flash", pricing.TierStandard,
 	)
-	if got := tr.CumulativeCost(); got < 3.599 || got > 3.601 {
-		t.Errorf("after retired V4-Flash turn: cost = %v, want ≈3.60", got)
+	if got := tr.CumulativeCost(); got < 6.359 || got > 6.361 {
+		t.Errorf("after retired V4-Flash turn: cost = %v, want ≈6.36", got)
 	}
 }
 

@@ -2,11 +2,11 @@
 
 **所属版本**：独立 feature PRD（评估 + 分期设计稿，未排期实现）
 **前置阅读**：[`feature-vision.md`](feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
-**状态**：📐 **设计稿（2026-11-13 评估）**。四项结论见 §0；全部里程碑为 2h 卡粒度拆解，**未动工**。
+**状态**：📐 **设计稿（2026-11-13 评估；R0 验证门已执行 2026-11-14 → ① 判红关闭，见 §2.2）**。四项结论见 §0；其余里程碑为 2h 卡粒度拆解，**未动工**。
 **触发起因**：DeepSeek 于 **2026-11-13** 发布「全家桶应用 API」——官方公告 [news261113](https://api-docs.deepseek.com/zh-cn/news/news261113)：对话内联网搜索（含深度思考搜索）、`deepseek_read_url` 链接阅读、文件输入（PDF/Office/图片）、模型安全校验，加独立底层接口 Search / Fetch / OCR / ASR / TTS。同族先例：Search API 2026-10-17 开放，seek 已接（`pkg/deepseek/search.go` + `web_search` 工具，另卡实现）。
 **本文不覆盖**：独立 Search API 的对话内接线（web_search 服务端工具变体）——与 read_url 同属 `tools` 数组声明，但 seek 已有客户端 `web_search` 工具覆盖显式搜索场景；其服务端变体只在「思考模式自主搜索」里顺带评估（§二）。
 
-> **一句话**：四项里**文件输入接**（照 imgrefs 先例扩 filerefs）、**安全校验接**（config 可选、默认关）、**ASR+TTS 接客户端层**（语音 frontend 分期，v1 出站播报、不做实时双工）、**read_url 缓**（一个 2h 验证门卡住「与 function tools 能否共存」这个 make-or-break 未知数，绿则接、红则不接）；OCR 独立接口**不接**（被文件解析覆盖）。
+> **一句话**：四项里**文件输入接**（照 imgrefs 先例扩 filerefs）、**安全校验接**（config 可选、默认关）、**ASR+TTS 接客户端层**（语音 frontend 分期，v1 出站播报、不做实时双工）、**read_url 不接**（R0 实测红 2026-11-14：与 function tools **无共存形态**——thinking off 混用 400、thinking on 混用 200 但 server tool 被静默剥除，两形态交集为空）；OCR 独立接口**不接**（被文件解析覆盖）。
 
 ---
 
@@ -14,12 +14,12 @@
 
 | # | 项目 | 结论 | 一句话理由 | 首卡（2h 粒度） |
 |---|---|---|---|---|
-| ① | `deepseek_read_url` + 思考模式自主搜索 | **缓**（验证门后接） | 服务端抓取零 SSRF、思考模式自主联网是真增量；但**与 seek 自有 function tools 能否同请求共存官方文档 ambiguous**（错误文案 "other tools cannot be used together with…"），红则 agent 主路径不可用——一个 curl 验证卡定生死 | R0 验证卡（§二） |
+| ① | `deepseek_read_url` + 思考模式自主搜索 | **不接**（R0 红关闭，2026-11-14） | 实测共存性为**假绿**：thinking off + function tools 同请求 400（"client tools can only be used together with … in thinking mode"）；thinking on 返回 200 但 server tool 被静默剥除——模型明说「only tool available to me is a weather lookup」，零抓取零 `server_tool_use`。**两形态交集为空**，agent 主路径（恒带 20+ function tools）不可用；web_search 服务端变体同规则 400（「思考模式自主搜索」一并关闭）。R1–R4 关闭；旁路一次性调用维持记档不排期 | ~~R0 验证卡~~ 已执行（§2.2） |
 | ② | 文件输入 PDF/Office | **接** | agent 读 PDF/Office 是高频真需求（现状靠 `pdftotext` 这类不一定装了的 CLI 绕行）；管道与 imgrefs 先例逐点同构（copy-at-submit + 提交期路由 + 永不 error）；计费清晰（解析按页 + token） | F1 `pkg/deepseek` files 客户端（§三） |
 | ③ | OCR / ASR / TTS 独立接口 | OCR **不接**；ASR+TTS **接（客户端层）**，语音 frontend 分期 | OCR 被②的文件解析覆盖（对话面），坐标级提取无 seek 消费场景；ASR+TTS 是 control-plane 语音 frontend 的原料，客户端卡便宜（照 `search.go` 抄）；frontend 本体 v1 只做出站 TTS 播报（收发不对称是 `Frontend` 端口的设计前提），**不做实时双工**（ASR 无流式、TTS 不支持中断续传） | S1 TTS 客户端（§四） |
 | ④ | 模型安全校验 `safety_check` | **接**（小卡） | 自用默认关（拒答会降级 agent 在安全研究类任务上的能力、徒增延迟），但参数暴露为 config 可选项成本极低，且对外提供服务时有合规义务 | SC1（§五） |
 
-**卡外相邻发现（交接主会话，非本文四项）**：现行 [价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 上 `deepseek-flash` 的 token 价为 **¥1/¥2（空闲/高峰）input-miss · ¥0.02/¥0.04 hit · ¥4/¥8 output**（注明 served by *DeepSeek-V4.1-Flash-1017*，并新增 `deepseek-v4-pro` 独立行 ¥4.5/¥9 miss · ¥13.5/¥27 output），而 `internal/pricing/pricing.go` 停在 2026-09-10 快照（$0.30/$0.006/$1.20，≈¥2.1/¥0.042/¥8.4 @7.0）。**两者对不上——要么全线调价、要么模型换代改价，`pricing.go` 已过期**。影响所有成本显示与预算判断，建议独立小卡核对后 bump（本卡只出文档，不动代码）。
+**卡外相邻发现（已收口 2026-11-15，判定者联网核实）**：官方 [en 页](https://api-docs.deepseek.com/quick_start/pricing)（USD，峰谷制）现值 flash **$0.30/$0.006/$1.20** peak（off-peak 对折，served by *DeepSeek-V4.1-Flash-1017*）+ `deepseek-v4-pro` 独立行 **$1.32/$0.044/$3.96** peak（*DeepSeek-V4-Pro-0813*）——与 `internal/pricing/pricing.go` **逐位一致，未过期**。[zh 页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)已分叉为另一套 flat CNY 价目（**¥1/¥0.02/¥2** flash · **¥3/¥0.025/¥6** pro，无峰谷），跨页比价产生「调价」幻影；本卡初稿引述的「¥1/¥2（空闲/高峰）· ¥4/¥8 output · v4-pro ¥4.5/¥9」系误读，作废。billing 跟随账户区域，pricing.go 以 en 页 USD peak 为锚。
 
 ---
 
@@ -79,7 +79,7 @@ seek 侧落地口径（§六详列）：token 费照旧走 `pricing.Cost`（峰�
 
 ---
 
-## 2. ① `deepseek_read_url` + 思考模式自主搜索 —— **缓（验证门后接）**
+## 2. ① `deepseek_read_url` + 思考模式自主搜索 —— **不接（R0 验证门红，2026-11-14）**
 
 ### 2.1 价值与现状差分
 
@@ -89,18 +89,55 @@ seek 现有联网三件套：`web_search`（客户端工具，模型显式调用
 2. **服务端抓取零 SSRF**：与 `web_search` 同理——模型控制的 URL 由 DeepSeek 侧抓，seek 无本地 fetch 面。
 3. 服务端渲染管线（JS 页面）大概率优于 seek 的裸 HTTPS GET。
 
-### 2.2 make-or-break 未知数（缓的全部理由）
+### 2.2 R0 验证实测（2026-11-14，真 API curl）—— **红：假绿**
 
-官方同用限制的表述是「声明 web 工具时不能再声明**其他 server tool**」，但报错文案是 "other tools cannot be used together with `deepseek_web_search`…"——**function tools 是否算 "other tools" 文档没写死**。seek 的 agent 主路径每请求带 20+ 个自有 function tools（`agent.go:776` `req.Tools = a.cfg.Tools.Wire()`）：
+**结论：function tools 与 read_url 无共存形态。** thinking off 混用直接 400；thinking on 混用返回 200 但 **server tool 被静默剥除**（不报错、不抓取、不计费、模型工具清单里根本没有它）。「200」是假绿——比干脆的 400 更危险，因为不实测到「模型说没这工具」那一步根本发现不了。seek agent 主路径（`agent.go:776` 每请求恒带 20+ function tools）不可用 → **①降级为不接，R1–R4 关闭**；web_search 服务端变体实测同规则 400（t7），「思考模式自主搜索」增量一并关闭。
 
-- **绿**（function tools 可共存）→ 按 §2.3 接线，R1–R4 落地；
-- **红**（同请求 400）→ agent 主路径不可用（没有自有工具的 agent 不是 agent）。降级方案只剩旁路一次性调用（侧信道照 `WithoutImages` 先例剥掉 tools 后单发 read_url 请求包 URL），但这只是「SSRF 免疫版 webfetch」，与思考模式自主搜索的卖点无关——**红则不接主路径**，旁路方案记开放问题不排期。
+**10 次真 API 调用的证据表**（t1–t10；其中 t1/t7 为 400 不计费，8 次生成。探针 URL 用 example.com 与 httpbin.org/uuid——后者每次抓取返回新 UUID，可排除「模型凭记忆作答」的假象）：
 
-验证卡成本 ~30 分钟 curl（带一个 function tool + read_url 同请求），这个未知数不值得写任何代码去赌。
+| # | 形态 | thinking | 结果 |
+|---|---|---|---|
+| t1 | function + read_url | off | **400**：`tools: client tools can only be used together with \`deepseek_web_search\`, \`deepseek_read_url\`, \`safety_check\` or \`title\` in thinking mode` |
+| t2 | function + read_url | on | 200 **假绿**：无 server_tool_calls、无 server_tool_use，模型答「I don't have a tool to fetch or browse web pages」 |
+| t3 | read_url 单独 | off | 200 真抓取 ✓ server_tool_calls + signature（1904b），`tool_fetch:1` |
+| t4 | read_url 单独 | on | 200 未抓（example.com 太著名，模型裁量跳过——见 t5 排除） |
+| t5 | read_url 单独 | on | 200 **真抓取** ✓ 逐字返回新鲜 UUID，`tool_fetch:1`——thinking 本身不禁用 read_url |
+| t6 | function + read_url | on | 200 **假绿定谳**：不可知 UUID URL 也零抓取，模型明说「the only tool available to me is a weather lookup」——server tool 被剥除而非模型裁量 |
+| t7 | function + web_search | off | **400 同规则**——web_search 变体同样不能与 function tools 共存 |
+| t8 | read_url 单独（turn 1） | off | 200 抓取 ✓ signature 220b 捕获（注意：返回的 UUID 与 t5 相同 → **服务端有页面缓存**，但重复抓取照计费） |
+| t9 | turn 2 **回传** server_tool_calls | off | 200 **零新抓取**（usage 无 server_tool_use 键），signature 服务端还原页面，答案正确 |
+| t10 | turn 2 **丢弃** server_tool_calls | off | 200 **重复抓取并计费**（`tool_fetch:1`），页面重新注入（prompt 250 vs t9 的 160） |
 
-其余已知约束均可工程化吸收：多轮 `server_tool_calls`/`signature` 回传（照 `Images` 兄弟字段先例）；`annotations` 引用展示；usage 计数折算；mid-stream error 已是 seek 流式路径既有面。
+**② 字段实证（chat/completions 非流式，两 thinking 形态）**——`server_tool_use` 只在 server tool 有活动时出现（全零则整个键缺席，t2/t6/t9 均无此键）；展示计数 `web_search_requests`/`web_fetch_requests` 在本次全部非流式响应中均未出现（文档口径它们存在，疑似 omitempty）：
 
-### 2.3 接线设计（R0 绿之后的形状）
+```json
+// usage（t3，thinking off，抓取 1 页）——注意新旧两族字段并存
+{"prompt_tokens":316,"completion_tokens":11,"total_tokens":327,
+ "prompt_tokens_details":{"cached_tokens":0},
+ "prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":316,
+ "server_tool_use":{"tool_search":0,"tool_fetch":1,"tool_image_search":0}}
+
+// message.server_tool_calls（t3；thinking on 的 t5 同形 + 多 reasoning_content）
+[{"index":0,"calls":[{"index":0,
+   "id":"srvtoolu_rl_00_55af2c0e3e4c40079fff41a39c128d7d",
+   "type":"deepseek_read_url","kind":"read_link",
+   "action":{"type":"read_link","url":"https://example.com"},
+   "status":"completed",
+   "page":{"url":"https://example.com","title":"Example Domain","published_at":null},
+   "signature":"<1904b base64>"}]}]
+// message 键序：off = [content, role, server_tool_calls]；on = [content, reasoning_content, role, server_tool_calls]
+// read_link 直接读页的 annotations 为 null（url_citation 是 web_search 路径的产物）
+```
+
+**③ 多轮回传**：表 t9/t10——回传含 `kind`/`signature` 的 `server_tool_calls` → 第二 turn 零抓取零计费、答案从还原页取；丢弃 → 重复抓取重复计费（官方文档「请求仍成功但页面丢失」实证吻合）。
+
+**④ 计费对账**：8 次计费调用共 4 次计费抓取 ×¥0.005 + ~1.7K in/~0.5K out token ≈ **¥0.027**（实测总花费，远低于 $0.10 预算）；`/user/balance` 精度 ¥0.01 且结算延迟（90s 后才从 51.25 → 51.24），小额度逐单对账在 API 面做不到——**计费数 `tool_fetch` 与真实抓取行为逐调用吻合**（抓=1、未抓=键缺席、signature 还原=0），此为可靠记账依据；平台用量页逐单核对交主会话。
+
+**旁路一次性调用（SSRF 免疫版 webfetch）的可行性随本节实证顺带确认**：read_url 单独声明（thinking off）形态完全可用（t3/t8–t10 的全部证据即其工作形态）。但维持原判记档不排期——它与思考模式自主搜索的卖点无关，且 seek 已有客户端 `webfetch`。
+
+> 原始响应 JSON 留存于执行机 `/tmp/r0-dsx/`（测试卡产物，不进库）；复现命令见卡叙述。
+
+### 2.3 接线设计（**已作废存档**——R0 判红，本节不再实施；保留供 DeepSeek 修复共存性后重启评估时复用）
 
 **pkg/deepseek**：
 
@@ -138,15 +175,15 @@ type ServerToolUse struct {
 
 **引用展示**：`annotations.url_citation` 在 TUI 里淡显为脚注列表（照 `[image: ` 标记族的 replay 样式规则扩展，wire-format 纪律：新前缀 `"[cite: "` 钉 `HasPrefix` 测试）。
 
-### 2.4 里程碑（2h 卡粒度）
+### 2.4 里程碑（2h 卡粒度）——**R0 判红，R1–R4 全部关闭**
 
 | 卡 | 内容 | 依赖 | 验收 |
 |---|---|---|---|
-| **R0 验证门** | curl 真 API（`.env` key）：①function tool + read_url 同请求是否 200；②thinking on/off 两形态的响应/usage 字段名实证（chat/completions 协议下 `server_tool_use` 的确切 JSON 形状）；③两轮对话验证 server_tool_calls/signature 回传与丢弃的差异（第二 turn 是否重复抓取）；④抓取计费数与账单对得上 | — | 结论写回本文 §2.2（绿/红 + 字段实证）；**红则本节降级为不接，R1–R4 关闭** |
-| R1 `pkg/deepseek` 基座 | `ServerTool` 类型 + `ChatRequest` 合并 marshal；`Usage.ServerToolUse` 解析；`Message.ServerToolCalls/Annotations` 兄弟字段 + round-trip；refusal finish_reason 常量 | R0 | httptest fake 断言 wire 形状；**text-only 字节等价 guard**（照 `TestMessageWire_TextOnly_Bytes`） |
-| R2 agent 接线 + 开关 | config `server_tools` 键（加载容忍缺省）；agent 侧按 provider 注入；turn 末 `RecordFlatCost` 折算；pricing 常量接线 | R1 | 带 `server_tools` config 的会话 wire 请求含 server 工具；status bar 累计含工具费；GLM 车道不受影响 |
-| R3 多轮回传 + TUI | server_tool_calls 存 session 并原样回传；annotations 淡显脚注；`[cite: ` 标记族 + replay 规则 | R2 | 两轮真 API：第二 turn 不重复抓取（web_fetch 计数不翻倍）；resume round-trip |
-| R4 文档 | `guide-config.md` 增 `server_tools` 段（默认关、成本形态说明）；本文状态更新 | R3 | — |
+| **R0 验证门** | curl 真 API（`.env` key）：①function tool + read_url 同请求是否 200；②thinking on/off 两形态的响应/usage 字段名实证（chat/completions 协议下 `server_tool_use` 的确切 JSON 形状）；③两轮对话验证 server_tool_calls/signature 回传与丢弃的差异（第二 turn 是否重复抓取）；④抓取计费数与账单对得上 | — | ✅ **已执行 2026-11-14，判红（假绿）**——四点结论与字段实证见 §2.2；①降级为不接，R1–R4 关闭 |
+| ~~R1 `pkg/deepseek` 基座~~ | ~~`ServerTool` 类型 + 合并 marshal；`Usage.ServerToolUse` 解析；兄弟字段 round-trip~~ | ~~R0~~ | **关闭（R0 红）** |
+| ~~R2 agent 接线 + 开关~~ | ~~config `server_tools` 键；agent 注入；`RecordFlatCost` 折算~~ | ~~R1~~ | **关闭（R0 红）** |
+| ~~R3 多轮回传 + TUI~~ | ~~server_tool_calls 存 session 原样回传；annotations 淡显~~ | ~~R2~~ | **关闭（R0 红）**（多轮回传语义本身已被 §2.2 t9/t10 实证，供未来重启复用） |
+| ~~R4 文档~~ | ~~`guide-config.md` 增段~~ | ~~R3~~ | **关闭（R0 红）** |
 
 ---
 
@@ -257,7 +294,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 | 4 | TTS | **¥3/万计费字符**（汉字×2；限时 5 折 ¥1.5，**无截止日期**——常量用刊例价，折扣进注释，与 search 的处理一致：宁可高估不低估） | `TTSCost(chars)` | S1 |
 | 5 | ASR | **¥0.78/小时**，按秒向上取整（5 折 ¥0.39 同上处理） | `ASRCost(seconds)`（内部 ceil） | S2 |
 | 6 | OCR | ¥1.5/千页——**不接不进表**，注释里留一行「OCR 同价未接，见 feature-deepseek-app-api §4.1」 | — | — |
-| 7 | ⚠️ **模型 token 价过期**（卡外发现，§0） | flash 现价 ¥2/M 高峰 miss（pricing.go 停 2026-09-10 的 $0.30）+ 新增 v4-pro 行 | **独立卡**：核对页面上 USD/CNY 双列后 bump `standardRates`；牵动 `docs/book/chapter-13.md` 的「现行见 pricing.go」指针链 | 交接主会话 |
+| 7 | ✅ **已收口（2026-11-15 联网核）** | en 页 USD peak 与 pricing.go 逐位一致（flash 未过期）；「调价」系 zh/en 两页口径分叉的跨币种误判；v4-pro 独立行为本卡真实增量 | 已随本卡收口：chapter-13 §13.3 指针行已补、commands.go 过时注释已正、pricing.go 注释改锚 en 页 | 完成 |
 
 **叠加口径（写进 pricing.go 注释的规范表述）**：单请求总费用 = `Cost(model, tier, usage)`（token，峰谷折价）+ Σ工具平价（per-call/per-page/per-char/per-second，**不折峰谷**）。工具平价全部走 `RecordFlatCost` 家族进 `CumulativeCost`，status bar 无需新 UI。
 
@@ -281,12 +318,12 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 
 ## 8. 决策记录与开放问题
 
-1. **read_url 缓而不直接接**（2026-11-13）：function tools 共存性是 make-or-break 且文档 ambiguous，30 分钟 curl 卡定生死，不赌代码。红则降级不接，旁路一次性调用方案仅记档不排期。
+1. **read_url 判红不接**（2026-11-13 缓 → **2026-11-14 R0 实测红**）：共存性实测为假绿——thinking off 混用 400、thinking on 混用 200 但 server tool 被静默剥除（模型工具清单里没有它），两形态交集为空，agent 主路径不可用。web_search 变体同规则 400。R1–R4 关闭；旁路一次性调用（read_url 单独声明形态已实证可用，§2.2 t3/t8–t10）维持记档不排期。重启条件：官方修复 function tools 与 server tools 混用（届时 §2.3 存档设计可复用）。
 2. **文件输入默认 text_recognition**：图表场景用 `@rich:` 前缀 per-file 升级，不进 config（per-file 属性非全局偏好）。
 3. **语音 v1 只出站**：`Frontend` 端口收发分离的设计前提 + ASR 非流式/TTS 无中断的硬约束，单向播报是唯一「完整可用且不假造能力」的 v1 形态。实时双工明确不做，等官方流式 ASR。
 4. **safety_check 默认关**：自用无对外义务，拒答是纯能力损失；config 暴露满足「将来对外开」的一天。
 5. **工具平价不折峰谷**：官方工具价无峰谷之分，与 token 费分开口径（§1.5）。
-6. **开放问题**：①read_url 与 function tools 共存性（R0）；②`file_id` 前缀缓存参与性（F4 实验）；③web 工具开启时 `deepseek.Usage` 在 chat/completions 协议下的确切字段名（R0 实证，文档示例混了 Responses 形态）；④serve 侧用量面板（远期）；⑤filerefs 映射缓存 vs 无状态懒上传（F4 定，倾向先试无状态）。
+6. **开放问题**：①~~read_url 与 function tools 共存性~~（**已解决 2026-11-14，R0 判红**：off 混用 400 / on 混用静默剥除，见 §2.2）；②`file_id` 前缀缓存参与性（F4 实验）；③~~chat/completions 协议下 `server_tool_use` 确切字段名~~（**已实证 2026-11-14**：计费数 `tool_search`/`tool_fetch`/`tool_image_search`，全零时整键缺席；展示数未见出现，§2.2）；④serve 侧用量面板（远期）；⑤filerefs 映射缓存 vs 无状态懒上传（F4 定，倾向先试无状态）。
 
 ---
 
