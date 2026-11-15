@@ -76,14 +76,14 @@ seek goal run "all tests in ./auth pass" # autonomous: work until the goal is me
 
 DeepSeek pricing (from [`internal/pricing/pricing.go`](internal/pricing/pricing.go)):
 
-| Metric | DeepSeek V4-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
+| Metric | DeepSeek V4.1-Flash | DeepSeek V4-Pro | Claude Sonnet 4 |
 |---|---|---|---|
-| Input (cache miss) | **$0.44** / $0.22¹ | **$1.32** / $0.66¹ | $3 / 1M |
-| Input (cache hit) | **$0.014** / $0.007¹ | **$0.044** / $0.022¹ | $0.30 / 1M |
-| Output | **$1.32** / $0.66¹ | **$3.96** / $1.98¹ | $15 / 1M |
+| Input (cache miss) | **$0.30** / $0.15¹ | **$1.32** / $0.66¹ | $3 / 1M |
+| Input (cache hit) | **$0.006** / $0.003¹ | **$0.044** / $0.022¹ | $0.30 / 1M |
+| Output | **$1.20** / $0.60¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | Off-peak² | **−50%** | **−50%** | — |
 
-<sub>¹ Peak / off-peak rates (off-peak = half price), effective 2026-08-16 16:00 UTC — see [`internal/pricing/pricing.go`](internal/pricing/pricing.go). ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
+<sub>¹ Peak / off-peak rates (off-peak = half price) — V4.1-Flash rates effective 2026-09-10, V4-Pro unchanged; verified 2026-11-14 against the official pricing page, see [`internal/pricing/pricing.go`](internal/pricing/pricing.go). ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
 
 Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas are byte-stable `[]byte` constants, tool output is capped at write-time, and history is never rewritten before send. The status bar shows the live ratio + dollars saved.
 

@@ -390,13 +390,17 @@ func knownModelsForProvider(providerName string) []modelChoice {
 	case "", "deepseek":
 		// The retired deepseek-chat / deepseek-reasoner aliases were
 		// removed server-side on 2026-07-24; V4.1 Flash (2026-09-10)
-		// then absorbed the whole V4 lineup — the server routes the old
-		// ids (deepseek-v4-flash, deepseek-v4-flash-vision-exp, and
-		// deepseek-v4-pro after 2026-09-14) to V4.1 Flash and bills
-		// them at Flash prices. Rows for routed ids would mislead
-		// ("you're buying Pro") exactly the way the old reasoner row
-		// did, so the picker surfaces only the real target; freeform
-		// `/model <id>` still accepts any string.
+		// absorbed the legacy flash ids — the server routes
+		// deepseek-v4-flash and deepseek-v4-flash-vision-exp to
+		// V4.1 Flash and bills them at Flash prices. Rows for routed
+		// ids would mislead exactly the way the old reasoner row did,
+		// so the picker surfaces only the real target.
+		// deepseek-v4-pro is NOT in that routed set since 2026-11:
+		// it is its own model again (DeepSeek-V4-Pro-0813) with its
+		// own pricing card in internal/pricing (see ModelV4Pro);
+		// freeform `/model deepseek-v4-pro` works and bills at its
+		// own rates. Whether the picker should surface a Pro row is
+		// a separate UX call, not a routing fact.
 		//
 		// Description kept short deliberately: the picker row must
 		// fit a ~100-col terminal even with the " (current)" suffix

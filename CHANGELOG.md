@@ -29,3 +29,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_26ltej：README 双语 v0.11 叙事刷新：平台化定位（多端/自进化/成本三轴）
 - c_tbqxnn：session export：会话导出为 markdown 对话记录
 - c_bickfj：编排 P1-a：后台子代理生命周期骨架——spawn 可后台化 + 完成事件进 session 流
+- c_nym2sn：pricing.go 费率刷新：flash 现价 ¥2/M 高峰 miss（快照停 2026-09-10 已过期）+ v4-pro 独立行核对

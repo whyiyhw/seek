@@ -1,8 +1,8 @@
 // Package pricing models DeepSeek's peak/off-peak pricing windows plus
 // the flat-rate cards of providers without such windows (GLM).
-// Embedded rates are the full (peak) rate card effective 2026-08-16
-// 16:00 UTC (verified against api-docs.deepseek.com/quick_start/pricing);
-// off-peak is exactly half the peak rate. Bump them with each release
+// Embedded rates are the peak rate card verified 2026-11-14 against
+// api-docs.deepseek.com/quick_start/pricing (off-peak is exactly half
+// the peak rate). Bump them with each release
 // rather than fetching at runtime — a price-list HTTP call adds a failure
 // mode for an exclusively defensive feature (PRD §4.8.4).
 //
@@ -44,21 +44,39 @@ type ModelPricing struct {
 // endpoint — the default model of seek's --provider=glm lane.
 const ModelGLM53 = "glm-5.3"
 
+// ModelV4Pro is DeepSeek's independent pro build (served by
+// DeepSeek-V4-Pro-0813). It retired into V4.1-Flash routing at the
+// 2026-09-10 V4.1 launch, but the pricing page (checked 2026-11-14)
+// re-lists it with its own — much higher — rate card, and its
+// legacy-name note now names only the two Flash ids. Hence a registry
+// entry: the unknown-model fallback would charge it Flash prices.
+const ModelV4Pro = "deepseek-v4-pro"
+
 // standardRates is the full-rate card per model during DeepSeek's peak
 // windows (a.k.a. the "standard" tier). Off-peak is derived via
 // offPeakDiscount.
 //
-// Numbers track DeepSeek's V4.1 peak/off-peak pricing, effective
-// 2026-09-10 12:00 CST (api-docs.deepseek.com/quick_start/pricing,
-// checked 2026-09-10 against DeepSeek-V4.1-Flash):
+// Numbers track the official pricing page (api-docs.deepseek.com/
+// quick_start/pricing), re-checked 2026-11-15. The English page is the
+// anchor: USD cards below, peak tier, off-peak exactly half. The Chinese
+// page has since diverged into a different regional card — flat CNY,
+// no windows (¥1/¥0.02/¥2 flash · ¥3/¥0.025/¥6 pro) — so cross-page
+// comparison reads as a phantom rate change; billing follows the
+// account's region. Diff like-for-like currency before bumping.
 //
-//	V4.1-Flash: $0.30 miss · $0.006 hit · $1.20 output (peak, per 1M tokens)
+//	V4.1-Flash (deepseek-flash, served by DeepSeek-V4.1-Flash-1017):
+//	    $0.30 miss · $0.006 hit · $1.20 output — effective
+//	    2026-09-10 12:00 CST, unchanged at the 2026-11-14 check
+//	V4-Pro (deepseek-v4-pro, served by DeepSeek-V4-Pro-0813):
+//	    $1.32 miss · $0.044 hit · $3.96 output
 //
-// Off-peak is exactly half of these. deepseek-flash is the only live
-// id; the retired V4 ids (deepseek-v4-flash / -pro /
-// -flash-vision-exp) are server-routed to V4.1 Flash and billed at
-// Flash prices, which is exactly what the unknown-model fallback
-// below charges them — no per-id entries needed. The legacy
+// Off-peak is exactly half of both cards. deepseek-flash is the only
+// live Flash id; the retired deepseek-v4-flash / -flash-vision-exp are
+// server-routed to V4.1 Flash and billed at Flash prices, which is
+// exactly what the unknown-model fallback below charges them — no
+// per-id entries needed. deepseek-v4-pro left that legacy list (see
+// ModelV4Pro): it bills at its own card, roughly 4× Flash on miss and
+// output — the fallback would undercharge it badly. The legacy
 // deepseek-chat / deepseek-reasoner aliases were removed server-side
 // on 2026-07-24.
 //
@@ -78,6 +96,11 @@ var standardRates = map[string]ModelPricing{
 		InputHitPerMTok:  0.006,
 		OutputPerMTok:    1.20,
 	},
+	ModelV4Pro: {
+		InputMissPerMTok: 1.32,
+		InputHitPerMTok:  0.044,
+		OutputPerMTok:    3.96,
+	},
 	ModelGLM53: {
 		InputMissPerMTok:  8 / 7.0,  // ¥8
 		InputHitPerMTok:   2 / 7.0,  // ¥2
@@ -87,11 +110,13 @@ var standardRates = map[string]ModelPricing{
 }
 
 // searchPerCallUSD is the standalone Search API's per-call rate:
-// ¥5 per 1,000 successful requests (listed alongside $0.75/1K USD ≈
-// ¥5.25 — we convert the CNY card at the same 7.0 CNY/USD the GLM row
-// uses, ≈ $0.000714/call). Opened 2026-10-17 with the tool-API family;
-// unlike the token table above, only HTTP-200 calls are billable.
-const searchPerCallUSD = 5.0 / 7.0 / 1000
+// $0.75 per 1,000 successful requests (listed directly on the English
+// pricing page; the Chinese page shows ¥5/1K. The earlier derivation —
+// converting ¥5 at the GLM row's 7.0 CNY/USD — is retired: USD is
+// listed natively now, no conversion needed). Opened 2026-10-17 with
+// the tool-API family; unlike the token table above, only HTTP-200
+// calls are billable.
+const searchPerCallUSD = 0.75 / 1000
 
 // SearchCost returns the USD cost of n successful Search API calls.
 // Failed requests cost nothing — pass only the count that returned 2xx.
@@ -107,8 +132,12 @@ var Shanghai = time.FixedZone("CST", 8*60*60)
 
 // Peak windows (Beijing time): 09:00–12:00 and 14:00–18:00, MONDAY
 // through FRIDAY, matching DeepSeek's published peak hours of
-// 01:00–04:00 and 06:00–10:00 UTC on weekdays (stated on the
-// 2026-09-10 pricing page). Everything else — evenings, mornings,
+// 01:00–04:00 and 06:00–10:00 UTC on weekdays (re-stated on the
+// 2026-11-14 pricing page). The page also excludes Chinese public
+// holidays from peak; we approximate that away on purpose — a holiday
+// table is a data dependency the embedded-card design rejects, and
+// pricing a holiday weekday at peak only overestimates a defensive
+// cost display (err high). Everything else — evenings, mornings,
 // weekends — is off-peak (half price).
 const (
 	peak1StartMins = 9 * 60
@@ -134,8 +163,10 @@ func CurrentTier(now time.Time) Tier {
 
 // PricingFor returns the per-token rate card for a model+tier. Unknown
 // models fall back to V4.1-Flash rates — which is also the card the
-// server bills the retired V4 ids at, so legacy sessions price
-// correctly without their own entries.
+// server bills the retired Flash ids (deepseek-v4-flash /
+// -flash-vision-exp) at, so legacy sessions price correctly without
+// their own entries. deepseek-v4-pro is NOT in that set: it bills at
+// its own registered card above.
 func PricingFor(model string, tier Tier) ModelPricing {
 	p, ok := standardRates[model]
 	if !ok {

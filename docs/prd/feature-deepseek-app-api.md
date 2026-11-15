@@ -19,7 +19,7 @@
 | ③ | OCR / ASR / TTS 独立接口 | OCR **不接**；ASR+TTS **接（客户端层）**，语音 frontend 分期 | OCR 被②的文件解析覆盖（对话面），坐标级提取无 seek 消费场景；ASR+TTS 是 control-plane 语音 frontend 的原料，客户端卡便宜（照 `search.go` 抄）；frontend 本体 v1 只做出站 TTS 播报（收发不对称是 `Frontend` 端口的设计前提），**不做实时双工**（ASR 无流式、TTS 不支持中断续传） | S1 TTS 客户端（§四） |
 | ④ | 模型安全校验 `safety_check` | **接**（小卡） | 自用默认关（拒答会降级 agent 在安全研究类任务上的能力、徒增延迟），但参数暴露为 config 可选项成本极低，且对外提供服务时有合规义务 | SC1（§五） |
 
-**卡外相邻发现（交接主会话，非本文四项）**：现行 [价格页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing) 上 `deepseek-flash` 的 token 价为 **¥1/¥2（空闲/高峰）input-miss · ¥0.02/¥0.04 hit · ¥4/¥8 output**（注明 served by *DeepSeek-V4.1-Flash-1017*，并新增 `deepseek-v4-pro` 独立行 ¥4.5/¥9 miss · ¥13.5/¥27 output），而 `internal/pricing/pricing.go` 停在 2026-09-10 快照（$0.30/$0.006/$1.20，≈¥2.1/¥0.042/¥8.4 @7.0）。**两者对不上——要么全线调价、要么模型换代改价，`pricing.go` 已过期**。影响所有成本显示与预算判断，建议独立小卡核对后 bump（本卡只出文档，不动代码）。
+**卡外相邻发现（已收口 2026-11-15，判定者联网核实）**：官方 [en 页](https://api-docs.deepseek.com/quick_start/pricing)（USD，峰谷制）现值 flash **$0.30/$0.006/$1.20** peak（off-peak 对折，served by *DeepSeek-V4.1-Flash-1017*）+ `deepseek-v4-pro` 独立行 **$1.32/$0.044/$3.96** peak（*DeepSeek-V4-Pro-0813*）——与 `internal/pricing/pricing.go` **逐位一致，未过期**。[zh 页](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)已分叉为另一套 flat CNY 价目（**¥1/¥0.02/¥2** flash · **¥3/¥0.025/¥6** pro，无峰谷），跨页比价产生「调价」幻影；本卡初稿引述的「¥1/¥2（空闲/高峰）· ¥4/¥8 output · v4-pro ¥4.5/¥9」系误读，作废。billing 跟随账户区域，pricing.go 以 en 页 USD peak 为锚。
 
 ---
 
@@ -257,7 +257,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 | 4 | TTS | **¥3/万计费字符**（汉字×2；限时 5 折 ¥1.5，**无截止日期**——常量用刊例价，折扣进注释，与 search 的处理一致：宁可高估不低估） | `TTSCost(chars)` | S1 |
 | 5 | ASR | **¥0.78/小时**，按秒向上取整（5 折 ¥0.39 同上处理） | `ASRCost(seconds)`（内部 ceil） | S2 |
 | 6 | OCR | ¥1.5/千页——**不接不进表**，注释里留一行「OCR 同价未接，见 feature-deepseek-app-api §4.1」 | — | — |
-| 7 | ⚠️ **模型 token 价过期**（卡外发现，§0） | flash 现价 ¥2/M 高峰 miss（pricing.go 停 2026-09-10 的 $0.30）+ 新增 v4-pro 行 | **独立卡**：核对页面上 USD/CNY 双列后 bump `standardRates`；牵动 `docs/book/chapter-13.md` 的「现行见 pricing.go」指针链 | 交接主会话 |
+| 7 | ✅ **已收口（2026-11-15 联网核）** | en 页 USD peak 与 pricing.go 逐位一致（flash 未过期）；「调价」系 zh/en 两页口径分叉的跨币种误判；v4-pro 独立行为本卡真实增量 | 已随本卡收口：chapter-13 §13.3 指针行已补、commands.go 过时注释已正、pricing.go 注释改锚 en 页 | 完成 |
 
 **叠加口径（写进 pricing.go 注释的规范表述）**：单请求总费用 = `Cost(model, tier, usage)`（token，峰谷折价）+ Σ工具平价（per-call/per-page/per-char/per-second，**不折峰谷**）。工具平价全部走 `RecordFlatCost` 家族进 `CumulativeCost`，status bar 无需新 UI。
 
