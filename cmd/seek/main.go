@@ -1126,21 +1126,46 @@ func run() error {
 		fmt.Fprintln(os.Stderr, summary)
 	}
 
-	// Typed agent definitions (feature-orchestration.md P2-a): loaded
-	// ONCE here — no hot reload, the same per-process freeze the skill
-	// manifest breaks out of only via explicit /skill_commit paths.
-	// Custom types are listed by /agents types and, since P2-b,
-	// spawnable through the Manager (AgentTypes below + the D13 gate
-	// in internal/subagent/custom.go); the `agent` tool schema's
-	// dynamic enum remains M-O2.2. Errors non-fatal, same posture as
-	// skills.
-	agentTypes, agentTypeStats, _ := agenttypes.Load(agenttypes.LoadOptions{ProjectDir: cwd})
+	// Typed agent definitions (feature-orchestration.md P2-a + P2-c):
+	// loaded ONCE here — no hot reload, the same per-process freeze
+	// the skill manifest breaks out of only via explicit
+	// /skill_commit paths. Custom types are listed by /agents types
+	// and, since P2-b, spawnable through the Manager (AgentTypes below
+	// + the D13 gate in internal/subagent/custom.go). Since P2-c the
+	// config `agents` 段 rides in as the routing-override layer
+	// between the file scopes and the built-ins (内置 < config <
+	// agents/*.md), and the `agent` tool schema's subagent_type enum
+	// is generated from this registry (agenttool.CacheTypesSchema —
+	// M-O2.2, D12's per-process byte freeze). Errors non-fatal, same
+	// posture as skills.
+	agentCfg, _ := config.Load()
+	var configAgents map[string]agenttypes.RouteOverride
+	if len(agentCfg.Agents) > 0 {
+		configAgents = make(map[string]agenttypes.RouteOverride, len(agentCfg.Agents))
+		for name, ac := range agentCfg.Agents {
+			configAgents[name] = agenttypes.RouteOverride{
+				Provider: ac.Provider,
+				Model:    ac.Model,
+				Effort:   ac.Effort,
+				MaxTurns: ac.MaxTurns,
+			}
+		}
+	}
+	agentTypes, agentTypeStats, _ := agenttypes.Load(agenttypes.LoadOptions{
+		ProjectDir:   cwd,
+		ConfigAgents: configAgents,
+	})
 	for _, err := range agentTypeStats.Errors {
 		fmt.Fprintln(os.Stderr, "agents:", err)
 	}
 	if agentTypes.CustomCount() > 0 {
 		fmt.Fprintf(os.Stderr, "Loaded %d custom agent type(s) — /agents types\n", agentTypes.CustomCount())
 	}
+	// Freeze the dynamic `agent` tool schema from the registry BEFORE
+	// any tool registration can read it (D12: build once per process,
+	// package var cache). With no files + empty config this generates
+	// the built-ins-only schema — same enum members as before P2-c.
+	agenttool.CacheTypesSchema(agentTypes.List())
 
 	// memProject + activeSession are forward-declared so the Skill tool's
 	// stats EnvFn can read them by reference — both are set further
@@ -1655,10 +1680,12 @@ func run() error {
 			// P2-b D13: custom file-defined agent types become
 			// spawnable through the gate (unknown tools degrade to
 			// the general-purpose toolset with the startup warning
-			// below; everything else fails the spawn loudly). The
-			// `agent` tool schema's enum stays built-in-only until
-			// M-O2.2 — the Manager, not the schema, is the
-			// validation point.
+			// below; everything else fails the spawn loudly). P2-c:
+			// EVERY definition routes through the typed registry —
+			// built-ins included (byte-identical to the compile-time
+			// path), config clones bring their routing knobs. The
+			// `agent` tool schema enum is generated from the same
+			// registry at startup (agenttool.CacheTypesSchema above).
 			AgentTypes: agentTypes,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
 				client:    dsClient,
@@ -1878,22 +1905,34 @@ func run() error {
 		hooksReg.Register(memHook)
 	}
 
-	// P2-b D13 startup gate: validate every custom agent type's tool
-	// whitelist against the FINAL parent registry — plan/propose land
-	// above, MCP / env-gated tools (webfetch, fim_complete, think…)
-	// vary the registry earlier, so this pass must run after the last
-	// reg.Add. Unknown tool names are config errors: warn here (the
-	// loud half of D13); at spawn the affected type degrades to the
-	// general-purpose toolset — never silently narrowed. Provider and
-	// workflow errors are warned about too and hard-fail the spawn
-	// with the same message when the type is actually used.
+	// P2-b D13 startup gate + P2-c config layer: validate every
+	// non-built-in definition against the FINAL parent registry —
+	// plan/propose land above, MCP / env-gated tools (webfetch,
+	// fim_complete, think…) vary the registry earlier, so this pass
+	// must run after the last reg.Add. File-scope types
+	// (project/user) get the full D13 check — unknown tool names are
+	// config errors: warn here (the loud half of D13); at spawn the
+	// affected type degrades to the general-purpose toolset — never
+	// silently narrowed. Config-layer clones carry only routing knobs
+	// on top of a built-in (tools are the built-in's own, already
+	// sane), so they get the provider/model lane check only. Provider
+	// and workflow errors are warned about too and hard-fail the
+	// spawn with the same message when the type is actually used.
 	if agentTypes != nil && agentTypes.CustomCount() > 0 {
 		for _, def := range agentTypes.List() {
-			if def.Origin == agenttypes.OriginBuiltin {
+			switch def.Origin {
+			case agenttypes.OriginBuiltin:
 				continue
-			}
-			if err := subagent.ValidateCustomType(def, reg.Names()); err != nil {
-				fmt.Fprintf(os.Stderr, "agents: %s: %v\n", def.Source, err)
+			case agenttypes.OriginConfig:
+				if def.Provider != "" || def.Model != "" {
+					if _, err := subagent.ResolveRoute(def.Provider, def.Model); err != nil {
+						fmt.Fprintf(os.Stderr, "agents: %s: %v\n", def.Source, err)
+					}
+				}
+			default:
+				if err := subagent.ValidateCustomType(def, reg.Names()); err != nil {
+					fmt.Fprintf(os.Stderr, "agents: %s: %v\n", def.Source, err)
+				}
 			}
 		}
 	}

@@ -238,6 +238,57 @@ func TestSpawnBackground_CompletionEventOnDiskNoticeAndStatus(t *testing.T) {
 	}
 }
 
+// TestSpawnMode_IndexMarker: SpawnBackground stamps background:true
+// on the `started` event (so the fold → /agents MODE column can
+// present bg rows), sync Spawn leaves it unset. Terminal events stay
+// identical for both modes.
+func TestSpawnMode_IndexMarker(t *testing.T) {
+	mgr, _ := newBackgroundManager(t, func(ctx context.Context, job RunnerJob) (RunnerResult, error) {
+		return RunnerResult{Summary: "ok", Turns: 1}, nil
+	})
+
+	bg := mgr.SpawnBackground(SpawnArgs{Description: "bg", Prompt: "p", Type: TypeExplore})
+	waitFor(t, 5*time.Second, func() bool { return mgr.ActiveCount() == 0 })
+
+	sync := mgr.Spawn(context.Background(), SpawnArgs{Description: "sync", Prompt: "p", Type: TypeExplore})
+	if sync.Status != StatusCompleted {
+		t.Fatalf("sync status = %s, want completed", sync.Status)
+	}
+
+	startedBg, startedSync := false, true
+	for _, e := range indexEvents(t, mgr) {
+		if e.Kind == "started" && e.SubSid == bg.SubSid {
+			startedBg = e.Background
+		}
+		if e.Kind == "started" && e.SubSid == sync.SubSid {
+			startedSync = e.Background
+		}
+	}
+	if !startedBg {
+		t.Error("SpawnBackground started event missing background:true marker")
+	}
+	if startedSync {
+		t.Error("sync Spawn started event carries background:true, want unset")
+	}
+
+	subs, err := mgr.List(ListFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range subs {
+		switch s.SubSid {
+		case bg.SubSid:
+			if !s.Background {
+				t.Error("folded background row missing Background=true")
+			}
+		case sync.SubSid:
+			if s.Background {
+				t.Error("folded sync row Background=true, want false")
+			}
+		}
+	}
+}
+
 // TestSpawnBackground_FailureNotice: a Runner error produces the
 // same failed index event as the sync path plus the background
 // wire-format notice.

@@ -148,8 +148,9 @@ type Tokens struct {
 // `/agents` panel + `seek subagent list` after folding the index
 // events. Mutable fields (Status, EndedAt, Tokens, Reason) reflect
 // the latest event for this sub_sid; immutable ones (SubSid,
-// ParentSid, ParentTurn, Type, Description, WorktreePath, StartedAt)
-// come from the original `started` event.
+// ParentSid, ParentTurn, Type, Description, WorktreePath,
+// ResumedFrom, StartedAt, Background) come from the original
+// `started` event.
 type Subagent struct {
 	SubSid       string `json:"sub_sid"`
 	ParentSid    string `json:"parent_sid"`
@@ -165,6 +166,17 @@ type Subagent struct {
 	// `started` event's resumed_from field.
 	ResumedFrom string    `json:"resumed_from,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
+	// Background marks a SpawnBackground spawn (feature-orchestration
+	// PRD §4.1 D1): the child runs detached under the session ctx and
+	// its result arrives as a notification instead of the calling
+	// turn's tool result. Seeded from the `started` event's
+	// background marker so /agents can present "在跑/终态" per mode.
+	Background bool `json:"background,omitempty"`
+	// Notified marks that the completion notice for a background
+	// spawn was ingested into the parent session (the `notified`
+	// event, D3/P1-b's consumption marker). Presentation-side state
+	// only — it never changes Status and is not terminal.
+	Notified bool `json:"notified,omitempty"`
 	// `omitzero` (Go 1.24+) is the correct elision for time.Time
 	// and nested structs — `omitempty` is a no-op on those because
 	// the zero value still serialises as a full type instance.

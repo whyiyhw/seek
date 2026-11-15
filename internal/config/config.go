@@ -117,6 +117,36 @@ type Config struct {
 	// existed) means all defaults; loading an old config must not
 	// error — top-level backward compat is the file-format contract.
 	Serve *ServeConfig `json:"serve,omitempty"`
+
+	// Agents is the `agents` section (feature-orchestration.md D6/D14,
+	// P2-c): per-type DEFAULT ROUTING overrides so a lane pin doesn't
+	// have to ride every `agent` tool call ("免每次传参的默认路由").
+	// Keys are agent type names; values carry routing knobs ONLY —
+	// tools/prompt/workflow stay file-layer (agents/*.md) territory
+	// because config routes brains, never permissions (D6: "路由只换
+	// 脑子不换权限"). Priority: built-in default < this section <
+	// agents/*.md — cmd/seek threads it into agenttypes.Load between
+	// the file scopes and the built-ins. Nil/absent = built-ins only.
+	Agents map[string]AgentConfig `json:"agents,omitempty"`
+}
+
+// AgentConfig is one `agents`-section entry: the routing knobs a
+// config override may set on a built-in type. Field semantics mirror
+// the agents/*.md frontmatter contract (D11): empty = inherit the
+// parent session. agenttypes.Load validates effort/max_turns shapes
+// and warns+ignores bad values; provider/model lane names are the
+// routing table's jurisdiction (subagent.ResolveRoute, checked at
+// startup-warning + spawn-gate time, same as file types).
+type AgentConfig struct {
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	// Effort is low | medium | high (the /effort tiers). Parsed and
+	// validated; not yet consumed by the Runner — declared for parity
+	// with the frontmatter contract (D11), which is also data-only
+	// today.
+	Effort string `json:"effort,omitempty"`
+	// MaxTurns overrides the child turn cap when > 0.
+	MaxTurns int `json:"max_turns,omitempty"`
 }
 
 // ServeConfig is the `serve` section of the config file: the plane's

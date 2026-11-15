@@ -318,3 +318,186 @@ func TestBuiltins_ImmutableShape(t *testing.T) {
 		}
 	}
 }
+
+// --- P2-c: the config `agents` routing-override layer (D6/D14) ---
+
+// TestLoad_ConfigOverrideClonesBuiltin: a config entry for a built-in
+// name applies routing knobs onto a CLONE of the built-in — tools,
+// body and workflow stay the built-in's own (config routes brains,
+// never permissions), origin tags config, and the count lands in
+// BySource["config agents"].
+func TestLoad_ConfigOverrideClonesBuiltin(t *testing.T) {
+	set, stats, err := Load(LoadOptions{
+		ProjectDir: t.TempDir(),
+		// no user dir
+		ConfigAgents: map[string]RouteOverride{
+			"explore": {Provider: "glm", Model: "glm-5.3", Effort: "low", MaxTurns: 60},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Errors) != 0 {
+		t.Fatalf("stats.Errors = %v, want none", stats.Errors)
+	}
+	got := set.Get("explore")
+	if got == nil {
+		t.Fatal("explore missing")
+	}
+	if got.Origin != OriginConfig {
+		t.Errorf("origin = %s, want config", got.Origin)
+	}
+	if got.Provider != "glm" || got.Model != "glm-5.3" || got.Effort != "low" || got.MaxTurns != 60 {
+		t.Errorf("routing knobs = %+v, want glm/glm-5.3/low/60", got)
+	}
+	// The non-routing fields must be the built-in's verbatim — the
+	// config layer cannot re-prompt or re-permission.
+	base := set.Get("plan") // untouched sibling proves no cross-talk
+	if base == nil || base.Origin != OriginBuiltin {
+		t.Fatalf("plan origin = %+v, want builtin", base)
+	}
+	builtinExplore := func() *Definition {
+		for _, b := range Builtins() {
+			if b.Name == "explore" {
+				return b
+			}
+		}
+		return nil
+	}()
+	if !strings.EqualFold(got.Body, builtinExplore.Body) && got.Body != builtinExplore.Body {
+		t.Errorf("body = %q, want the built-in's verbatim %q", got.Body, builtinExplore.Body)
+	}
+	if strings.Join(got.Tools, ",") != strings.Join(builtinExplore.Tools, ",") {
+		t.Errorf("tools = %v, want the built-in's %v", got.Tools, builtinExplore.Tools)
+	}
+	if got.Workflow != builtinExplore.Workflow {
+		t.Errorf("workflow = %q, want %q", got.Workflow, builtinExplore.Workflow)
+	}
+	if stats.BySource["config agents"] != 1 {
+		t.Errorf("BySource[config agents] = %d, want 1", stats.BySource["config agents"])
+	}
+	if set.CustomCount() != 1 {
+		t.Errorf("CustomCount() = %d, want 1 (config clone is non-builtin)", set.CustomCount())
+	}
+}
+
+// TestLoad_ScopeStack_ConfigLayer is PRD P2 acceptance #3 for the
+// four-layer stack: project explore.md > user explore.md > config
+// entry > built-in. Each layer is peeled off in turn and the winner
+// must come from the next one down; every loss is recorded in
+// Shadowed (the designed-override visibility).
+func TestLoad_ScopeStack_ConfigLayer(t *testing.T) {
+	project := t.TempDir()
+	user := t.TempDir()
+	write(t, filepath.Join(project, ".seek", "agents", "explore.md"),
+		"---\ndescription: project explore\n---\nFrom project.")
+	write(t, filepath.Join(user, "explore.md"),
+		"---\ndescription: user explore\n---\nFrom user.")
+	cfg := map[string]RouteOverride{"explore": {Provider: "glm"}}
+
+	layers := []struct {
+		name     string
+		opts     LoadOptions
+		wantOr   Origin
+		wantDesc string
+	}{
+		{"project wins", LoadOptions{ProjectDir: project, UserAgentsDir: user, ConfigAgents: cfg},
+			OriginProject, "project explore"},
+		{"user wins next", LoadOptions{ProjectDir: t.TempDir(), UserAgentsDir: user, ConfigAgents: cfg},
+			OriginUser, "user explore"},
+		{"config wins next", LoadOptions{ProjectDir: t.TempDir(), UserAgentsDir: filepath.Join(t.TempDir(), "nope"), ConfigAgents: cfg},
+			OriginConfig, "Read-only parallel research"},
+		{"builtin last", LoadOptions{ProjectDir: t.TempDir(), UserAgentsDir: filepath.Join(t.TempDir(), "nope")},
+			OriginBuiltin, "Read-only parallel research"},
+	}
+	for _, l := range layers {
+		t.Run(l.name, func(t *testing.T) {
+			set, stats, err := Load(l.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(stats.Errors) != 0 {
+				t.Fatalf("stats.Errors = %v, want none (cross-scope shadowing is by design)", stats.Errors)
+			}
+			got := set.Get("explore")
+			if got == nil || got.Origin != l.wantOr {
+				t.Fatalf("explore = %+v, want origin %s", got, l.wantOr)
+			}
+			if !strings.Contains(got.Description, l.wantDesc) {
+				t.Errorf("description = %q, want it to identify the %s layer (%q)", got.Description, l.wantOr, l.wantDesc)
+			}
+		})
+	}
+
+	// Full stack in one load: the shadowed record names every loser.
+	set, _, _ := Load(LoadOptions{ProjectDir: project, UserAgentsDir: user, ConfigAgents: cfg})
+	if sh := set.Shadowed("explore"); len(sh) != 3 { // user file + config clone + builtin
+		t.Errorf("Shadowed(explore) = %v, want 3 entries", sh)
+	}
+	// The config winner of the "config wins next" case carries the
+	// override; the builtin (bottom layer) carries none.
+	cfgSet, _, _ := Load(LoadOptions{
+		ProjectDir:    t.TempDir(),
+		UserAgentsDir: filepath.Join(t.TempDir(), "nope"),
+		ConfigAgents:  cfg,
+	})
+	if ce := cfgSet.Get("explore"); ce.Provider != "glm" {
+		t.Errorf("config-layer explore provider = %q, want glm", ce.Provider)
+	}
+}
+
+// TestLoad_ConfigUnknownKeyAndFileShadow: keys naming nothing known
+// warn (forward-compat); keys naming a FILE type lose to the file
+// silently (config < files) with the loss visible in Shadowed.
+func TestLoad_ConfigUnknownKeyAndFileShadow(t *testing.T) {
+	user := t.TempDir()
+	write(t, filepath.Join(user, "verifier.md"), verifierMD)
+
+	set, stats, err := Load(LoadOptions{
+		ProjectDir:    t.TempDir(),
+		UserAgentsDir: user,
+		ConfigAgents: map[string]RouteOverride{
+			"no-such-type": {Provider: "glm"}, // unknown → warn + ignore
+			"verifier":     {Provider: "glm"}, // file type → file wins, silent
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Errors) != 1 || !strings.Contains(stats.Errors[0].Error(), "no-such-type") {
+		t.Fatalf("stats.Errors = %v, want exactly the no-such-type warning", stats.Errors)
+	}
+	if v := set.Get("verifier"); v.Origin != OriginUser || v.Provider != "" {
+		t.Errorf("verifier = %+v, want the file def (no config knobs)", v)
+	}
+	if sh := set.Shadowed("verifier"); len(sh) != 1 || !strings.Contains(sh[0], "config") {
+		t.Errorf("Shadowed(verifier) = %v, want the config entry recorded", sh)
+	}
+}
+
+// TestLoad_ConfigBadFieldShapes: illegal effort / negative max_turns
+// warn and drop just the field; the rest of the entry still applies.
+func TestLoad_ConfigBadFieldShapes(t *testing.T) {
+	set, stats, err := Load(LoadOptions{
+		ProjectDir: t.TempDir(),
+		ConfigAgents: map[string]RouteOverride{
+			"plan": {Provider: "glm", Effort: "turbo", MaxTurns: -5},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats.Errors) != 2 {
+		t.Fatalf("stats.Errors = %v, want effort + max_turns warnings", stats.Errors)
+	}
+	got := set.Get("plan")
+	if got.Origin != OriginConfig {
+		t.Fatalf("plan origin = %s, want config (entry survives bad fields)", got.Origin)
+	}
+	if got.Provider != "glm" {
+		t.Errorf("provider = %q, want glm (good fields still apply)", got.Provider)
+	}
+	if got.Effort != "" || got.MaxTurns != 0 {
+		t.Errorf("bad fields leaked: effort=%q max_turns=%d, want zero values", got.Effort, got.MaxTurns)
+	}
+}

@@ -78,6 +78,16 @@ type StatusSnapshot struct {
 	// is happening.
 	SubagentsActive int
 
+	// SubagentsDone is the count of background subagents that
+	// reached a terminal state whose completion notice is still
+	// waiting in the Manager's inbox (feature-orchestration PRD
+	// §4.1 D2 / M-O1.2 TUI half). This is the badge's visible
+	// state migration: "agents N" (在跑) → "bg done M" (已完成,
+	// awaiting ingest) → nothing once the Notifier drains the
+	// inbox at the next Prompt. Zero suppresses the badge — same
+	// absence-communicates rule as SubagentsActive.
+	SubagentsDone int
+
 	// CronsRegistered is the count of registered cron jobs at
 	// render time (v5 柱 H; PRD docs/prd/feature-routines.md
 	// §4.3). Zero suppresses the badge — registering a job is
@@ -348,6 +358,18 @@ func rightSegments(s StatusSnapshot) []statusSegment {
 	if s.SubagentsActive > 0 {
 		badge := fmt.Sprintf("agents %d", s.SubagentsActive)
 		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourOk).Render(badge), prioMed})
+	}
+	// Background-done badge: a background subagent finished but its
+	// notice hasn't been ingested yet — "bg done M" appears the
+	// moment the wake fires and disappears at the next Prompt (the
+	// Notifier drains the inbox). Amber rather than the agents
+	// badge's ok-green: this state asks for an action ("send any
+	// message to ingest"), which is informational-attention, not
+	// background-work-progressing. Label-first ASCII, same width-
+	// oracle rule as the agents badge.
+	if s.SubagentsDone > 0 {
+		badge := fmt.Sprintf("bg done %d", s.SubagentsDone)
+		out = append(out, statusSegment{lipgloss.NewStyle().Foreground(colourTool).Render(badge), prioMed})
 	}
 	// Cron badge: shown while at least one cron job is
 	// registered. Counts REGISTERED jobs not active runs — the

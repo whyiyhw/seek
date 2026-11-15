@@ -3,6 +3,7 @@ package subagent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -531,4 +532,91 @@ func TestSpawn_CustomTypeDegradeIsDeterministicAcrossSpawns(t *testing.T) {
 	if reflect.DeepEqual(seen[0], []string{"read"}) {
 		t.Fatal("toolset was silently narrowed to the known subset — D13 forbids this")
 	}
+}
+
+// --- P2-c: config-layer definitions through the unified typed route ---
+
+// TestSpawn_ConfigOverrideRoutesBuiltin: a config-layer clone
+// (OriginConfig — what agenttypes.Load builds from the config
+// `agents` 段) routes the built-in onto another lane while keeping the
+// built-in's everything-else verbatim. Two load-bearing properties:
+//
+//   - def provider/model merge into the spawn route (glm/glm-5.3 on
+//     the RunnerJob) — the "免每次传参的默认路由";
+//   - NO unknown-tools degrade: with webfetch absent from the parent
+//     registry the clone's whitelist INTERSECTS (5 of 6 tools) instead
+//     of degrading to the general-purpose set — the intersect
+//     semantics the compile-time built-in path always had
+//     (acceptance #5's byte-path guarantee, restated for the config
+//     layer).
+func TestSpawn_ConfigOverrideRoutesBuiltin(t *testing.T) {
+	set, stats, err := agenttypes.Load(agenttypes.LoadOptions{
+		ProjectDir:    t.TempDir(),
+		UserAgentsDir: filepath.Join(withHome(t), "nope"),
+		ConfigAgents:  map[string]agenttypes.RouteOverride{"explore": {Provider: "glm"}},
+	})
+	if err != nil || len(stats.Errors) != 0 {
+		t.Fatalf("Load: %v %v", err, stats.Errors)
+	}
+	if e := set.Get("explore"); e == nil || e.Origin != agenttypes.OriginConfig {
+		t.Fatalf("explore origin = %+v, want config clone", e)
+	}
+
+	// Parent registry WITHOUT webfetch — proves intersect vs degrade.
+	noWebfetch := []string{"read", "grep", "list_dir", "git", "think",
+		"agent", "ask_user", "bash", "write", "edit"}
+	var job RunnerJob
+	mgr := newCustomManagerWithTools(t, func(_ context.Context, j RunnerJob) (RunnerResult, error) {
+		job = j
+		return RunnerResult{Summary: "done"}, nil
+	}, permission.PrefYolo, set, noWebfetch)
+
+	res := mgr.Spawn(context.Background(), SpawnArgs{
+		Description: "d", Prompt: "p", Type: TypeExplore, ParentTurn: 1,
+	})
+	if res.Status != StatusCompleted {
+		t.Fatalf("Status = %s (%s)", res.Status, res.Summary)
+	}
+	if job.Provider != "glm" || job.Model != "glm-5.3" {
+		t.Errorf("route = %q/%q, want glm/glm-5.3 from the config override", job.Provider, job.Model)
+	}
+	want := []string{"read", "grep", "list_dir", "git", "think"}
+	if !reflect.DeepEqual(job.ToolNames, want) {
+		t.Errorf("ToolNames = %v, want intersect %v (webfetch dropped, NOT degraded to the general-purpose set)", job.ToolNames, want)
+	}
+	if job.Policy.Workflow() != permission.WorkflowPlanAnalyze {
+		t.Errorf("workflow = %s, want plan-analyze inherited from the cloned builtin", job.Policy.Workflow())
+	}
+	if !strings.Contains(job.SystemPrompt, agenttypes.Builtins()[1].Body) {
+		t.Errorf("SystemPrompt missing the built-in explore body (config cannot re-prompt)")
+	}
+}
+
+// newCustomManagerWithTools is newCustomManager with a configurable
+// parent registry — the fixed helper pins customParentTools, and the
+// config-layer test needs a webfetch-less parent to distinguish
+// intersect from degrade.
+func newCustomManagerWithTools(t *testing.T, runner Runner, pref permission.Preference, set *agenttypes.Set, parentTools []string) *Manager {
+	t.Helper()
+	parentCwd := t.TempDir()
+	policy, err := permission.New(parentCwd, pref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := NewManager(ManagerOpts{
+		ProjectAbsPath:    parentCwd,
+		ParentSidFn:       func() string { return "20260601-100000-parent" },
+		ParentTracker:     cache.New(),
+		ParentPolicy:      policy,
+		ProjectSectionFn:  func() string { return "" },
+		SkillManifestFn:   func() string { return "" },
+		ParentToolNamesFn: func() []string { return parentTools },
+		MaxConcurrent:     3,
+		Runner:            runner,
+		AgentTypes:        set,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mgr
 }

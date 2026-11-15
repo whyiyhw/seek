@@ -1653,3 +1653,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `scripts/eval-trend.sh` jq-parses (`jq -r '… | @tsv'`) instead of splitting lines. Two related bites: `@tsv` without `-r` emits a JSON-encoded string (tabs escaped as `\t`) which silently defeats downstream TSV field-splitting; and rows before the `ran_at` field exist need the filename's UTC-date prefix as a fallback timestamp. Commit (card c_lxferp).
 - **Lesson**: treat `results/*.jsonl` as a *stream of JSON objects*, never as lines — any new results tooling starts at jq.
 - **Refs**: `scripts/eval-trend.sh` (collect_rows), `eval/README.md` "Trend reports"
+
+## Typed agents / orchestration
+
+### Routing built-in agent types through the custom gate silently widens their toolset
+- **Saw**: design-time, caught before landing (P2-c): unifying `Manager.resolveType` so built-ins also flow through `ResolveCustomType` (the "one gate for all origins" refactor) would have made `explore` spawn with ~10 tools including bash/write/edit in any session whose registry lacks `webfetch` (env-gated) — a silent widening of a read-only type.
+- **Why**: D13's unknown-tools rule (any whitelist tool missing from the parent registry → drop the whitelist, degrade to the general-purpose toolset) is the loud-config-error rule for FILE types; built-ins always had intersect-with-parent semantics inside `Template.Filter`. The two rules coexist and ORIGIN decides which applies.
+- **Fix**: `resolveTypedDef` (manager.go) applies the degrade only for `OriginProject`/`OriginUser`; builtin + config clones keep Filter's intersect. `TestSpawn_ConfigOverrideRoutesBuiltin` pins it with a webfetch-less parent registry.
+- **Lesson**: "route everything through one gate" migrations must diff the SEMANTICS of each old path, not just the code shape — where old paths differed, the shared gate needs origin-aware (or equivalent) rules.
+- **Refs**: `internal/subagent/manager.go` `resolveTypedDef`; `docs/prd/feature-orchestration.md` §5 D13.

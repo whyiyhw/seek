@@ -17,10 +17,11 @@ import (
 // retired into that package. This file is now the adapter from
 // agenttypes.Definition to the spawn-time shape; the byte-identity
 // of the migration is locked by TestBuiltinTemplatesByteIdentical
-// in templates_test.go. File-defined custom types don't join THIS
-// table: since P2-b they flow through the D13 gate in custom.go
-// (ResolveCustomType) at spawn time, sharing only the defToTemplate
-// adapter so both paths translate identically.
+// in templates_test.go. Since P2-c even the SPAWN path routes
+// built-ins through the typed registry (Manager.resolveType →
+// resolveTypedDef); the compile-time table below survives as the
+// fallback for Managers with no AgentTypes wired and as the
+// byte-identity oracle for the tests.
 //
 // See docs/prd/feature-subagent.md §3.6 for the source-of-truth
 // table; changes to the built-in values must edit
