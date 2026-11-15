@@ -146,11 +146,14 @@ type ServeConfig struct {
 	// WebAddr overrides the web frontend's listen address (`seek serve
 	// --frontend=web`). Empty = the shipped loopback default
 	// 127.0.0.1:8790 (controlplane.DefaultWebAddr — the value lives
-	// there, one place). A malformed address fails `seek serve` at
-	// startup (the listen is the validation); there is no silent
-	// fallback to the default. Point it at a tailnet IP (e.g.
-	// "100.x.y.z:8790") to serve the plane straight to the tailnet —
-	// or keep loopback and `tailscale serve --tcp=8790` instead.
+	// there, one place). Scope is pinned to loopback (127.0.0.1/::1/
+	// localhost) and tailnet CGNAT 100.64.0.0/10 (2026-11-15 decision):
+	// 0.0.0.0, LAN/public IPs and other hostnames fail `seek serve` at
+	// startup with the allowlist reason; a malformed address fails the
+	// listen itself. Neither failure falls back to the default. Point
+	// it at a tailnet IP (e.g. "100.x.y.z:8790") to serve the plane
+	// straight to the tailnet — or keep loopback and
+	// `tailscale serve --tcp=8790` instead.
 	WebAddr string `json:"web_addr,omitempty"`
 }
 

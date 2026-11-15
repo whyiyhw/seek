@@ -44,8 +44,10 @@ import (
 //
 // Constructors take the serve section (nil = absent) so config-file
 // settings reach every frontend without CLI flags: web maps
-// serve.web_addr onto WebConfig.Addr ("" → DefaultWebAddr; a malformed
-// address fails the listen at startup — the listen IS the validation).
+// serve.web_addr onto WebConfig.Addr ("" → DefaultWebAddr). The address
+// is scope-gated to loopback + tailnet CGNAT (controlplane.checkWebAddr);
+// what slips past the gate dies at the listen — startup fails loud
+// either way, never a silent fallback to the default.
 var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 	"fake": func(*config.ServeConfig) controlplane.Frontend { return fake.New() },
 	"web": func(sc *config.ServeConfig) controlplane.Frontend {
@@ -226,7 +228,9 @@ Usage:
       in ~/.seek/serve/web.token (regenerate by deleting the file).
       To reach it from a tailnet: keep loopback and run
       "tailscale serve --tcp=8790", or set serve.web_addr to the
-      machine's tailnet IP (e.g. "100.x.y.z:8790").
+      machine's tailnet IP (e.g. "100.x.y.z:8790"). web_addr accepts
+      loopback and tailnet CGNAT (100.64.0.0/10) hosts only — 0.0.0.0
+      and any other address are refused at startup.
 
       Config: the optional "serve" section of ~/.seek/config.json
       (projects / max_concurrency / yolo / web_addr — default

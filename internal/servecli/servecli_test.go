@@ -206,30 +206,41 @@ func TestServePlane_WebAddrFromConfig(t *testing.T) {
 	}
 }
 
-// TestServePlane_BadWebAddrFails: a malformed serve.web_addr must
-// fail the plane loudly — the web frontend's listen is the validation
-// — with the exit-2 class, never a silent fallback to the default
-// address. (The listen error naming the address is asserted at the
-// controlplane layer, TestWeb_RunBadAddr; the supervisor's
-// frontend-down line goes to os.Stderr, not this buffer.)
+// TestServePlane_BadWebAddrFails: a serve.web_addr that must not fly —
+// malformed (the listen is the syntax validation) or out of scope
+// (0.0.0.0 / a LAN IP; the allowlist itself is controlplane's
+// TestWeb_AddrScope, 2026-11-15 decision) — fails the plane loudly
+// with the exit-2 class, never a silent fallback to the default
+// address. (The error naming the address is asserted at the
+// controlplane layer, TestWeb_RunBadAddr/TestWeb_RunForbiddenAddr;
+// the supervisor's frontend-down line goes to os.Stderr, not this
+// buffer.)
 func TestServePlane_BadWebAddrFails(t *testing.T) {
-	withHome(t)
-	cfg := config.Config{Serve: &config.ServeConfig{WebAddr: "127.0.0.1:no-port-digits"}}
-	fes, err := buildFrontends([]string{"web"}, cfg.Serve)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var stderr bytes.Buffer
-	err = waitForCancel(t, 10*time.Second, func() error {
-		return servePlane(ctx, fes, cfg, &stderr)
-	})
-	if err == nil {
-		t.Fatal("bad web_addr must fail the plane")
-	}
-	if code := controlplane.ExitCode(err); code != controlplane.ExitFrontendsDown {
-		t.Errorf("bad web_addr exit code = %d, want 2 (err %v)", code, err)
+	for _, bad := range []string{
+		"127.0.0.1:no-port-digits", // syntax: dies at the listen
+		"0.0.0.0:8790",             // scope: all interfaces, refused up front
+		"192.168.1.5:8790",         // scope: LAN IP, refused up front
+	} {
+		t.Run(bad, func(t *testing.T) {
+			withHome(t)
+			cfg := config.Config{Serve: &config.ServeConfig{WebAddr: bad}}
+			fes, err := buildFrontends([]string{"web"}, cfg.Serve)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var stderr bytes.Buffer
+			err = waitForCancel(t, 10*time.Second, func() error {
+				return servePlane(ctx, fes, cfg, &stderr)
+			})
+			if err == nil {
+				t.Fatal("bad web_addr must fail the plane")
+			}
+			if code := controlplane.ExitCode(err); code != controlplane.ExitFrontendsDown {
+				t.Errorf("bad web_addr %q exit code = %d, want 2 (err %v)", bad, code, err)
+			}
+		})
 	}
 }
 
