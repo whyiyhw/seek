@@ -1685,3 +1685,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: ritual after resolving any merge, BEFORE `git commit`: `git grep -n '^<<<<<<< \|^>>>>>>> '` and `git diff --cached --check` (flags "leftover conflict marker" on added lines). Post-hoc audit of an already-made merge: `git diff --check <merge>^1 <merge>` — NOT `git show --check <merge>` (its `--cc` condensed diff suppresses these hunks; verified on `920f9e1`: `show --check` silent, diff-vs-either-parent flags all three marker lines). Cleanup itself: card `c_zxeqih`.
 - **Lesson**: merges touching docs with long single-line status fields get a mechanical marker-grep before commit — two bites is a pattern, not bad luck.
 - **Refs**: `docs/prd/feature-orchestration.md` 状态行; `920f9e1`, `e8eface` (first manual cleanup, same file).
+
+## Subprocess / streaming stdout
+
+### StdoutPipe forbids concurrent Wait — kill-able line-streaming needs cmd.Stdout=io.Writer + io.Pipe
+- **Saw**: line-streaming the executor's seek child (RunStream, W0.1): the existing shape runs `cmd.Wait()` in a goroutine racing a timeout/kill select, but `cmd.StdoutPipe()` documents "it is incorrect to call Wait before all reads from the pipe have completed" — the obvious StdoutPipe+scanner wiring would lose the tail (or hang) on the kill path.
+- **Why**: Wait closes the StdoutPipe read end after reaping; in-flight reads get closed-pipe instead of data. Setting `cmd.Stdout = io.Writer` makes Wait join os/exec's own copy goroutine instead — compatible with concurrent Wait, kill-tree, and the kill-grace expiry posture.
+- **Fix**: `cmd.Stdout = pw` on an `io.Pipe`; a reader goroutine does `bufio.Reader.ReadString('\n')` per line (ReadString, NOT Scanner — Scanner's default 64KB token cap would truncate huge `tool_end.result` lines and lose the agent_end after them); once Wait returns, close pw (io.Pipe is synchronous ⇒ every byte is already inside the reader) so the reader sees EOF and folds a possibly unterminated final line; on kill-grace expiry snapshot under a mutex and walk away, mirroring the old lockedBuf posture (card `c_n3pghs`).
+- **Lesson**: "stream a kill-able child's stdout" has one sound shape: `cmd.Stdout = io.Writer` + your own pipe/reader with close-after-Wait choreography; StdoutPipe is read-then-wait only, and line readers with token caps don't fit JSONL of unbounded line length.
+- **Refs**: `internal/controlplane/executor.go` `attempt` / `streamSink`; `docs/prd/feature-web-frontend.md` §2.4.

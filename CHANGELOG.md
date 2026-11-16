@@ -51,3 +51,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_snerqc：web 平面契约自测脚本：serve HTTP 三断言进 selftest 家族
 - c_nl4nqg：web 多标签·per-conv 演进：conv-uuid+双 conv 隔离+多 tab 扇出一致（W1.3）
 - c_zxeqih：docs 修复：feature-orchestration.md 状态行冲突标记残留（920f9e1 遗留）
+- c_n3pghs：web 流式平面缝·一：executor RunStream + 导出 RunEvent（W0.1）

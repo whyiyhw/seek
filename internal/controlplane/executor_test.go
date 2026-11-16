@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -116,6 +117,39 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		_ = os.WriteFile(filepath.Join(dir, "pids"),
 			[]byte(fmt.Sprintf("%d\n%d\n", os.Getpid(), g.Process.Pid)), 0644)
 		time.Sleep(60 * time.Second)
+		return 0
+	case "stream_batches":
+		// W0.1 RunStream: batches separated by wall-clock gaps so the
+		// parent can prove emits are LIVE (lines land as written, not
+		// dumped at exit). Includes a junk line (must be skipped) and a
+		// reasoning delta (must be delivered — filtering is the
+		// consumer's job) plus the full tool/turn/agent contract.
+		batches := [][]string{
+			{`{"type":"agent_start"}`, `{"type":"turn_start","index":0}`},
+			{`{"type":"text_delta","delta":"Hel"}`, `not json`},
+			{`{"type":"reasoning_delta","delta":"thinking","reasoning":true}`},
+			{`{"type":"text_delta","delta":"lo "}`, `{"type":"text_delta","delta":"world"}`},
+			{`{"type":"tool_start","id":"t1","name":"read","args":"{\"path\":\"x\"}"}`, `{"type":"tool_end","id":"t1","name":"read","result":"data","bytes":4}`},
+			{`{"type":"turn_end","index":0,"prompt_tokens":10,"completion_tokens":5,"cache_hit_tokens":3,"tool_calls":1}`, `{"type":"agent_end","turns":1,"session_id":"SB"}`},
+		}
+		for i, b := range batches {
+			for _, l := range b {
+				fmt.Println(l)
+			}
+			if i == 2 { // long gap between batches 3 and 4 → liveness probe
+				time.Sleep(400 * time.Millisecond)
+			} else if i < len(batches)-1 {
+				time.Sleep(30 * time.Millisecond)
+			}
+		}
+		return 0
+	case "stream_longline":
+		// W0.1: one huge tool_end line — batch parity means NO line
+		// cap in the streaming reader (a bufio.Scanner default would
+		// truncate at 64KB and lose the agent_end that follows).
+		fmt.Println(`{"type":"agent_start"}`)
+		fmt.Printf("{\"type\":\"tool_end\",\"id\":\"t1\",\"name\":\"read\",\"result\":\"%s\",\"bytes\":200000}\n", strings.Repeat("x", 200000))
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SL"}`)
 		return 0
 	default: // happy
 		if sleep > 0 {
@@ -838,5 +872,194 @@ func TestParseSeekJSONL(t *testing.T) {
 				t.Errorf("lines = %d, want %d", got.lines, tc.lines)
 			}
 		})
+	}
+}
+
+// ---- W0.1: RunStream / RunEvent (streaming seam, §2.4 seam 2) ----
+
+// timedEvent pairs one emitted RunEvent with its arrival time, so both
+// the sequence and the liveness (lines observed as the child writes
+// them, not after exit) are assertable.
+type timedEvent struct {
+	ev RunEvent
+	at time.Time
+}
+
+// The stub's stream_batches mode emits six batches with wall-clock
+// gaps (400ms between batches 3 and 4). Assert the exact emit
+// sequence across the full jsonLine contract, field spot-checks, the
+// unchanged aggregation semantics, and that the mid-stream gap is
+// observable in emit timestamps.
+func TestRunStream_EmitSequenceLiveness(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	t.Setenv("CP_STUB_MODE", "stream_batches")
+
+	var got []timedEvent
+	res, err := ex.RunStream(context.Background(), ExecRequest{
+		Conv: "feishu:oc_1", Dir: t.TempDir(), Message: "m",
+	}, func(ev RunEvent) {
+		got = append(got, timedEvent{ev: ev, at: time.Now()})
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// Sequence: full jsonLine contract in stub order. The junk line is
+	// skipped (not emitted); reasoning_delta IS delivered — the
+	// executor streams the whole contract, filtering is W1.4's.
+	wantTypes := []string{
+		"agent_start", "turn_start", "text_delta", "reasoning_delta",
+		"text_delta", "text_delta", "tool_start", "tool_end",
+		"turn_end", "agent_end",
+	}
+	if len(got) != len(wantTypes) {
+		t.Fatalf("emitted %d events, want %d: %v", len(got), len(wantTypes), got)
+	}
+	for i, want := range wantTypes {
+		if got[i].ev.Type != want {
+			t.Errorf("event %d type = %q, want %q", i, got[i].ev.Type, want)
+		}
+	}
+	// Field spot-checks across the contract.
+	if got[1].ev.Index != 0 {
+		t.Errorf("turn_start index = %d, want 0", got[1].ev.Index)
+	}
+	if got[2].ev.Delta != "Hel" {
+		t.Errorf("text_delta[2] delta = %q, want %q", got[2].ev.Delta, "Hel")
+	}
+	if got[3].ev.Delta != "thinking" || !got[3].ev.Reasoning {
+		t.Errorf("reasoning_delta = %+v, want delta=%q reasoning=true", got[3].ev, "thinking")
+	}
+	if got[6].ev.ID != "t1" || got[6].ev.Name != "read" || got[6].ev.Args != `{"path":"x"}` {
+		t.Errorf("tool_start = %+v, want id=t1 name=read args={\"path\":\"x\"}", got[6].ev)
+	}
+	if got[7].ev.Result != "data" || got[7].ev.Bytes != 4 {
+		t.Errorf("tool_end = %+v, want result=data bytes=4", got[7].ev)
+	}
+	if got[8].ev.PromptTokens != 10 || got[8].ev.CompletionTokens != 5 ||
+		got[8].ev.CacheHitTokens != 3 || got[8].ev.ToolCalls != 1 {
+		t.Errorf("turn_end = %+v, want prompt=10 completion=5 cache_hit=3 tool_calls=1", got[8].ev)
+	}
+	if got[9].ev.SessionID != "SB" || got[9].ev.Turns != 1 {
+		t.Errorf("agent_end = %+v, want session_id=SB turns=1", got[9].ev)
+	}
+
+	// Aggregation semantics unchanged (Run's, byte for byte): reply
+	// excludes the reasoning delta, session captured, one attempt.
+	if res.Reply != "Hello world" {
+		t.Errorf("reply = %q, want %q (reasoning excluded from fold)", res.Reply, "Hello world")
+	}
+	if res.SessionID != "SB" || res.Attempts != 1 || res.ContextReset {
+		t.Errorf("result = sid=%q attempts=%d reset=%v, want SB/1/false", res.SessionID, res.Attempts, res.ContextReset)
+	}
+
+	// Liveness: the 400ms stub gap between batches 3 and 4 must show
+	// up between the reasoning_delta emit and the next text_delta —
+	// batch-at-exit delivery would cluster all emits within ~0ms.
+	if gap := got[4].at.Sub(got[3].at); gap < 300*time.Millisecond {
+		t.Errorf("emit gap across the stub sleep = %v, want >= 300ms (lines must arrive as written)", gap)
+	}
+}
+
+// Red line — emit 只读不写终态: a hostile callback mutating its event
+// copy must not alter the aggregated result (events are value-passed;
+// folding runs independently of emit).
+func TestRunStream_EmitCannotMutateResult(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+
+	res, err := ex.RunStream(context.Background(), ExecRequest{
+		Conv: "feishu:oc_1", Dir: t.TempDir(), Message: "m",
+	}, func(ev RunEvent) {
+		ev.Delta = "HACKED"
+		ev.SessionID = "HACKED"
+		ev.Type = "agent_end"
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if res.Reply != "Hello m" || res.SessionID != "S1" {
+		t.Errorf("result mutated through emit: reply=%q sid=%q, want %q/S1", res.Reply, res.SessionID, "Hello m")
+	}
+}
+
+// Run(req) ≡ RunStream(ctx, req, nil): identical requests must produce
+// identical replies and shape. Delegation is structural (Run is a
+// one-liner); this pins it against accidental re-special-casing. The
+// stub mints distinct session ids per invocation (S1, S2, …), so only
+// non-emptiness is comparable there.
+func TestRun_DelegatesToRunStreamNil(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	project := t.TempDir()
+
+	viaRun, err := ex.Run(context.Background(), ExecRequest{Conv: "c1", Dir: project, Message: "same question"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	viaStream, err := ex.RunStream(context.Background(), ExecRequest{Conv: "c2", Dir: project, Message: "same question"}, nil)
+	if err != nil {
+		t.Fatalf("RunStream: %v", err)
+	}
+	if viaRun.Reply != viaStream.Reply {
+		t.Errorf("replies differ: Run=%q RunStream=%q", viaRun.Reply, viaStream.Reply)
+	}
+	if viaRun.Attempts != 1 || viaStream.Attempts != 1 || viaRun.ContextReset || viaStream.ContextReset {
+		t.Errorf("shape differs: Run=%+v RunStream=%+v", viaRun, viaStream)
+	}
+	if viaRun.SessionID == "" || viaStream.SessionID == "" {
+		t.Errorf("session ids must both be non-empty: %q / %q", viaRun.SessionID, viaStream.SessionID)
+	}
+}
+
+// A self-heal rerun restarts the stream: consumers see the failed
+// attempt's lines (through its error event), then a fresh agent_start
+// for the rerun. Final-state semantics unchanged (2 attempts, context
+// reset, fresh session).
+func TestRunStream_SelfHealEmitsBothAttempts(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	t.Setenv("CP_STUB_FAIL_FIRST", "miderr")
+
+	var types []string
+	res, err := ex.RunStream(context.Background(), ExecRequest{
+		Conv: "feishu:oc_1", Dir: t.TempDir(), SessionID: "S_OLD", Message: "m",
+	}, func(ev RunEvent) { types = append(types, ev.Type) })
+	if err != nil {
+		t.Fatalf("self-heal run: %v", err)
+	}
+
+	want := []string{
+		"agent_start", "turn_start", "text_delta", "error", // attempt 1 (miderr)
+		"agent_start", "turn_start", "text_delta", "text_delta", "turn_end", "agent_end", // attempt 2 (happy)
+	}
+	if !slices.Equal(types, want) {
+		t.Errorf("emit sequence = %v, want %v", types, want)
+	}
+	if res.Attempts != 2 || !res.ContextReset || res.SessionID != "S2" {
+		t.Errorf("result = attempts=%d reset=%v sid=%q, want 2/true/S2", res.Attempts, res.ContextReset, res.SessionID)
+	}
+}
+
+// Batch parity on huge lines: the streaming reader has no line cap —
+// tool_end.result can dwarf bufio.Scanner's default token limit, and
+// losing the agent_end after it would flip the self-heal triage.
+func TestRunStream_LongLineSurvives(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	t.Setenv("CP_STUB_MODE", "stream_longline")
+
+	maxResult := 0
+	res, err := ex.RunStream(context.Background(), ExecRequest{
+		Conv: "feishu:oc_1", Dir: t.TempDir(), Message: "m",
+	}, func(ev RunEvent) {
+		if len(ev.Result) > maxResult {
+			maxResult = len(ev.Result)
+		}
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if maxResult != 200000 {
+		t.Errorf("longest emitted result = %d bytes, want 200000 (line truncated?)", maxResult)
+	}
+	if res.SessionID != "SL" {
+		t.Errorf("session id = %q, want SL (agent_end after the long line must survive)", res.SessionID)
 	}
 }
