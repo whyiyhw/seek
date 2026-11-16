@@ -19,7 +19,7 @@
 #   4. 点「💬 聊天」返回：输入框/SSE 聊天面原样可用（W4.4 是加法，零回归）
 #
 # Env:
-#   ADDR=127.0.0.1:8790   监听地址（写进临时 config.json 的 serve.web_addr，
+#   ADDR=127.0.0.1:18790  监听地址（写进临时 config.json 的 serve.web_addr，
 #                          只放行 loopback/tailnet 段——生产代码无 env 出口）
 #   DRY_RUN=1             只打印步骤不动手（butler 自测范式）
 #   KEEP=1                结束后保留临时目录与 serve 进程（人工续查）
@@ -36,7 +36,7 @@ usage() {
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(dirname "${HERE}")"
-ADDR="${ADDR:-127.0.0.1:8790}"
+ADDR="${ADDR:-127.0.0.1:18790}"   # 默认避开生产 8790——撞生产口与头注释承诺相悖
 LONG_SID="20261115-100000-w44longfixture01"
 TINY_SID="20261115-100001-w44tinyfixture02"
 N_LONG=1234   # 50/页 → 24 整页 + 1 尾页 34 条（验收尾页「已到末尾」路径）
