@@ -382,7 +382,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 |---|---|---|
 | **W3.1** | `subagents.jsonl` 只读 reader（fold 状态投影）+ `GET /subagents?parent=` | 手造 jsonl 的表驱动测试（含柱 G 现有事件 + D1/D3 新事件形状前瞻） |
 | **W3.2** | SSE topic `subagents`（tail-follow + 推送，hub 满丢老） | follow 断开注销测试 |
-| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对 | e2e：spawn background 子（stub Runner）→面板实时出条目 |
+| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对（**已交付**，c_ujgmpu——`webfrontend.html` 三视图互斥 + 面板专用 topic 连接只听命名事件；`GET /subagents?sub=` 详情 + `subagent.LastAssistant` transcript 尾读；e2e `TestWeb_PanelE2EBackgroundSpawn` = 真 Manager(stub Runner) → SSE 实时条目 + 原始事件行形状核对。详情未走 `session/messages`：子 transcript 在项目树不在平铺 store（W4.2 落地时的既定分流），`?sub=` 是同一只读 reader 的详情面） | e2e：spawn background 子（stub Runner）→面板实时出条目 |
 
 ### Phase P3 — 资产面（并入 inspect-rpc 数据面，~5 卡）
 
@@ -408,7 +408,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | cookie 写面 CSRF 残余面 | Origin/X-Token 双闸 + SameSite=Lax；验收 403 用例 |
 | embed 资产膨胀破二进制预算 | §4.3 gate + escape hatch 写死（build tag，不回 tarball） |
 | 与 inspect-rpc 双活设计打架 | §3.3 状态注记本次落（inspect-rpc 头部指回本文）；method 名不改，契约单一权威 |
-| P2 抢跑 orchestration 语义 | W3 卡显式依赖 P1；W3.1 表驱动用柱 G 现有事件 + 形状前瞻双夹具，P1 落地后核对（W3.3 内含） |
+| P2 抢跑 orchestration 语义 | W3 卡显式依赖 P1；W3.1 表驱动用柱 G 现有事件 + 形状前瞻双夹具，P1 落地后核对（W3.3 内含；已核对 2026-11-16 c_ujgmpu：真 Manager 事件行与 reader 夹具一致——started 带 background 标记、completed 带 tokens；`notified` 读面就绪、写面仍属未做的 M-O1.3） |
 | 多 tab 同 conv 的 Send 与 SendStream 乱序 | hub 单 goroutine per conv 保序（发送序=executor emit 序）；验收含序断言 |
 | XSS 经模型输出/工具结果 | textContent-only + CSP 'self' + 无 inline；验收含注入用例 |
 

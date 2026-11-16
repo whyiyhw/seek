@@ -1,17 +1,26 @@
 package controlplane
 
-// GET /subagents — the task panel's list source (W3.1,
-// feature-web-frontend §3.2): fold the requesting conv's bound
-// project's subagents.jsonl into the state projection, filtered by
-// ?parent=<sid> (parent session id; empty = all). Strictly read-only
-// — the panel never writes the index; live updates arrive later via
-// the SSE topic (W3.2).
+// GET /subagents — the task panel's data source (W3.1 list + W3.3
+// detail, feature-web-frontend §3.2): fold the requesting conv's
+// bound project's subagents.jsonl into the state projection.
 //
-// Response is the bare folded array, shape-aligned with inspect-rpc
-// §3.1 M12.1 subagent/list ({sub_sid, parent_sid, type, status,
-// description, tokens, started_at, ...} — the Subagent JSON tags
-// carry the projection's additive fields) so P3's RPC method consumes
-// the same reader without a second fold.
+//	?parent=<sid>   list mode: rows filtered by parent session id
+//	                (empty = all). Response is the bare folded array,
+//	                shape-aligned with inspect-rpc §3.1 M12.1
+//	                subagent/list so P3's RPC method consumes the same
+//	                reader without a second fold.
+//	?sub=<sub-sid>  detail mode: ONE row plus the sub transcript's
+//	                last assistant entry (subagent.LastAssistant —
+//	                the summary 单源 discipline, orchestration D5:
+//	                the index carries no summary, the child's own
+//	                transcript is the single source). 404 when the
+//	                sub_sid is not in the fold. `sub` wins over a
+//	                simultaneous `parent` (sub_sid is unique in the
+//	                index).
+//
+// Strictly read-only — the panel never writes the index; live list
+// updates arrive via the SSE topic (W3.2), while the detail is
+// pull-per-click (a terminal push can refresh it, see the page).
 
 import (
 	"errors"
@@ -19,6 +28,14 @@ import (
 
 	"github.com/whyiyhw/seek/internal/subagent"
 )
+
+// subagentDetail is the ?sub= response: the folded row plus the
+// transcript tail. LastAssistant "" = nothing on disk yet (child
+// running, or a terminal run whose Runner wrote no transcript).
+type subagentDetail struct {
+	Sub           subagent.Subagent `json:"sub"`
+	LastAssistant string            `json:"last_assistant"`
+}
 
 func (f *WebFrontend) handleSubagents(w http.ResponseWriter, r *http.Request) {
 	if !f.auth(r) {
@@ -49,6 +66,10 @@ func (f *WebFrontend) handleSubagents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if sub := r.URL.Query().Get("sub"); sub != "" {
+		f.handleSubagentDetail(w, r, b.ProjectPath, sub)
+		return
+	}
 	subs, err := subagent.ListProject(b.ProjectPath, subagent.ListFilter{
 		ParentSid: r.URL.Query().Get("parent"),
 	})
@@ -57,4 +78,30 @@ func (f *WebFrontend) handleSubagents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, subs)
+}
+
+// handleSubagentDetail serves the ?sub= mode: fold the whole project
+// (the fold is the only authority on parent_sid — the detail needs it
+// to address the transcript), find the row, read its transcript tail.
+// A missing row is 404, not 400: the id is well-formed, the resource
+// is absent — same shape session/messages gives an unknown sid.
+func (f *WebFrontend) handleSubagentDetail(w http.ResponseWriter, r *http.Request, project, subSid string) {
+	subs, err := subagent.ListProject(project, subagent.ListFilter{})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	for _, s := range subs {
+		if s.SubSid != subSid {
+			continue
+		}
+		last, err := subagent.LastAssistant(project, s.ParentSid, s.SubSid)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, subagentDetail{Sub: s, LastAssistant: last})
+		return
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "subagent " + subSid + " not found"})
 }

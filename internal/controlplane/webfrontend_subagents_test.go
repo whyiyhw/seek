@@ -204,3 +204,111 @@ func TestWeb_SubagentsBoundProjectWithoutIndex(t *testing.T) {
 		t.Fatalf("got %d rows, want 0", len(rows))
 	}
 }
+
+// TestWeb_SubagentsDetail (W3.3): the ?sub= mode — folded row plus
+// the sub transcript's last assistant entry; unknown sid 404; a row
+// with no transcript on disk answers "" (an answer, not an error);
+// `sub` wins over a simultaneous `parent`.
+func TestWeb_SubagentsDetail(t *testing.T) {
+	fe, _, _ := newTestWeb(t)
+	fe, project := newBoundWebWithIndex(t, fe,
+		// Terminal background row with a transcript to read.
+		`{"event":"started","sub_sid":"bg-2","ts":"2026-01-02T10:00:00Z","parent_sid":"sess-A","type":"explore","description":"audit","background":true}`,
+		`{"event":"completed","sub_sid":"bg-2","ts":"2026-01-02T10:09:00Z","tokens":{"prompt":50,"completion":10,"cache_hit":0}}`,
+		// Active row whose child has not written a transcript yet.
+		`{"event":"started","sub_sid":"bg-1","ts":"2026-01-02T09:00:00Z","parent_sid":"sess-A","type":"general-purpose","description":"scan deps","background":true}`,
+	)
+	seedTranscript(t, project, "sess-A", "bg-2",
+		`{"schema_version":2,"id":"h"}`,
+		`{"role":"user","content":"audit"}`,
+		`{"role":"assistant","content":"first pass"}`,
+		`{"role":"assistant","content":"final audit findings"}`,
+	)
+	srv := httptest.NewServer(fe.handler())
+	defer srv.Close()
+
+	get := func(query string) (*http.Response, subagentDetailBody) {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/subagents" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body subagentDetailBody
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("decode detail: %v", err)
+			}
+		}
+		return resp, body
+	}
+
+	resp, d := get("?token=test-token-0123456789abcdef&sub=bg-2")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail bg-2 = %d, want 200", resp.StatusCode)
+	}
+	if d.Sub.SubSid != "bg-2" || d.Sub.Status != "completed" || !d.Sub.Background {
+		t.Errorf("detail row = %+v, want completed background bg-2", d.Sub)
+	}
+	if d.LastAssistant != "final audit findings" {
+		t.Errorf("last_assistant = %q, want the LAST assistant entry", d.LastAssistant)
+	}
+
+	// sub wins over parent (sub_sid is unique in the index).
+	resp, d = get("?token=test-token-0123456789abcdef&sub=bg-2&parent=sess-B")
+	if resp.StatusCode != http.StatusOK || d.Sub.SubSid != "bg-2" {
+		t.Fatalf("sub+parent = %d %+v, want sub to win", resp.StatusCode, d.Sub)
+	}
+
+	// No transcript yet: "" last_assistant, still 200.
+	resp, d = get("?token=test-token-0123456789abcdef&sub=bg-1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("detail bg-1 = %d, want 200", resp.StatusCode)
+	}
+	if d.Sub.Status != "active" || d.LastAssistant != "" {
+		t.Errorf("detail bg-1 = %+v %+q, want active with empty tail", d.Sub, d.LastAssistant)
+	}
+
+	// Unknown sid: 404.
+	resp, _ = get("?token=test-token-0123456789abcdef&sub=nope")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unknown sub = %d, want 404", resp.StatusCode)
+	}
+}
+
+// subagentDetailBody mirrors subagentDetail for the endpoint tests.
+type subagentDetailBody struct {
+	Sub           subagentFixture `json:"sub"`
+	LastAssistant string          `json:"last_assistant"`
+}
+
+// newBoundWebWithIndex is seedSubagentsIndex returning the bound
+// project path too (the detail tests write transcripts under it).
+func newBoundWebWithIndex(t *testing.T, fe *WebFrontend, lines ...string) (*WebFrontend, string) {
+	t.Helper()
+	seedSubagentsIndex(t, fe, lines...)
+	// seedSubagentsIndex redirects SEEK_HOME then binds a temp project;
+	// recover that project via the default conv's binding.
+	b, err := fe.store.Get(webConvID())
+	if err != nil {
+		t.Fatalf("Get binding: %v", err)
+	}
+	return fe, b.ProjectPath
+}
+
+// seedTranscript writes a sub transcript under the redirected SEEK_HOME
+// (paths.SubagentSessionDir resolves there), the Runner's on-disk shape.
+func seedTranscript(t *testing.T, project, parentSid, subSid string, lines ...string) {
+	t.Helper()
+	dir, err := paths.SubagentSessionDir(project, parentSid, subSid)
+	if err != nil {
+		t.Fatalf("SubagentSessionDir: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "transcript.jsonl"),
+		[]byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+}
