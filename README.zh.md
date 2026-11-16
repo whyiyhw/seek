@@ -95,7 +95,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **`/goal`** | 跨多轮循环，直到一个便宜模型判定条件满足——TUI / headless / cron。[📘](docs/guide-goal.md) |
 | **操作系统沙箱** | seatbelt（macOS）/ landlock（Linux）——内核级隔离，零运行时依赖。[📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | 通过 Agent Client Protocol 把 seek 当编辑器 agent 跑。[📘](docs/guide-zed.md) |
-| **远程控制平面** | `seek serve` ——常驻单进程；浏览器即可驱动（内置 web 聊天页：SSE 流式 + token 认证），任何聊天渠道经 `Frontend` 端口接入。默认只听 loopback；`serve.web_addr` 可绑 tailnet IP（仅放行 loopback 与 CGNAT `100.64.0.0/10`——`0.0.0.0` 一律拒启），或由 `tailscale serve --tcp=8790` 转发 loopback。[📘](docs/guide-serve.md) |
+| **远程控制平面** | `seek serve` ——常驻单进程；浏览器即可驱动（内置 web 工作台：流式聊天 + 会话/记忆/统计浏览器，token 认证），任何聊天渠道经 `Frontend` 端口接入。默认只听 loopback；`serve.web_addr` 可绑 tailnet IP（仅放行 loopback 与 CGNAT `100.64.0.0/10`——`0.0.0.0` 一律拒启），或由 `tailscale serve --tcp=8790` 转发 loopback。[📘](docs/guide-serve.md) |
 | **可移植 skill** | Anthropic Agent Skills 格式——任何 Claude Code skill 零修改安装；`/distill` 可从你自己的会话蒸馏新 skill 草稿。[📘](docs/guide-skills.md) |
 | **三层记忆** | 会话 · 项目（衰减分 GC）· 跨项目「soul」（`seek -dream`）。[📘](docs/guide-memory.md) |
 | **Checkpoint** | 每 turn git 快照 + 文件级 `/undo` `/redo` `/restore`。[📘](docs/guide-checkpoint.md) |

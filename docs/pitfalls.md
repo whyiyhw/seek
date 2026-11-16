@@ -1038,6 +1038,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: for never-ending response bodies (SSE, long-poll), the open helper returning `resp` is a contract: the caller owes a `defer resp.Body.Close()` before anything that closes the server. A cleanup-only close guarantees the hang.
 - **Refs**: `internal/controlplane/webfrontend_topic_test.go:openEventsRaw` callers; W1.3's `openSSE` callers in `webfrontend_conv_test.go` follow the pattern.
 
+### Handler parked on `<-r.Context().Done()` with an unread request body hangs `srv.Close()` forever
+- **Saw**: a ctx-cancel test (handler blocks on `<-r.Context().Done()`, client cancels mid-flight, client call returns fine) wedged the whole test binary until `go test -timeout` — `httptest.Server.Close` waited forever for the parked handler; the server-side request context never fired despite the client having disconnected.
+- **Why**: on HTTP/1.1 the server only cancels `r.Context()` on client disconnect once a background connection read is active, and `net/http` defers starting it until the request body hits EOF (`registerOnHitEOF` in `serveConn`). A handler that parks with the body unconsumed never gets that read started, so the disconnect is invisible.
+- **Fix**: drain the body before parking — `_, _ = io.Copy(io.Discard, r.Body)` then `<-r.Context().Done()`. Commit (this one).
+- **Lesson**: a fake that parks on the request context is also a body consumer. The client's abort and the server's *knowledge* of that abort are two different events; on HTTP/1.1 the second one costs an explicit drain (or any handler-side `r.Body` read to EOF). Same `srv.Close()` hang signature as the SSE entry above, different root cause — LIFO ordering there, background-read deferral here.
+- **Refs**: `pkg/deepseek/asr_test.go:TestASR_ContextCanceled`
+
 ## Release / upgrade
 
 ### `tui.VersionString()` is a formatted banner, not a raw module version
@@ -1765,3 +1772,9 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `mktemp "${TMPDIR:-/tmp}/seek-size.XXXXXX"` (repo precedent: `install-serve.sh:68`, `eval-trend.sh:300`); same commit swept the file's `\s` regexes (grep + awk) to `[[:space:]]` — mawk doesn't take `\s`.
 - **Lesson**: scripts meant for both macOS and CI never use `mktemp -t <name>`; use the `"${TMPDIR:-/tmp}/<name>.XXXXXX"` form, and keep regexes POSIX-class (`[[:space:]]`) when mawk is in the audience.
 - **Refs**: `scripts/web-gate.sh` `build_size` / `baseline`; `.github/workflows/ci.yml` web-gate job.
+
+### Asserting on SSE reply payloads with angle brackets fails — Go's json.Marshal HTML-escapes by default
+- **Saw**: an e2e substring like `用法：/bind <项目路径>` never matches the SSE frame, which reads `用法：/bind \u003c项目路径\u003e` on the wire.
+- **Why**: `json.Marshal` (and the `json.NewEncoder` default) HTML-escape `<`, `>`, `&` to `\u003c` etc.; every `Send`/`SendStream` envelope rides that marshal.
+- **Fix**: assert bracket-free substrings (e.g. `用法：/bind` + `目录必须存在`); commit with card `c_evbzyh`.
+- **Lesson**: substring assertions against marshaled JSON must avoid HTML-sensitive characters — pick neighbouring plain text, don't chase the escape spelling.

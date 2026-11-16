@@ -256,7 +256,7 @@ CI 守门：repo 根无 `package.json`/`node_modules`/锁文件（脚本 grep �
 ### 4.4 默认不监听公网
 
 - 默认 `127.0.0.1:8790`（`DefaultWebAddr`，**已交付**——固定口让 tailscale 转发/书签可预期，启动行印带 token 的完整 URL）；CLI `--listen` 覆盖**已交付**（c_jxhkbr——flag 折进 serve 段再进 `WebConfig.Addr`，与 `web_addr` 同一 scope 闸）。
-- `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §2.1）。
+- `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §5.3）。
 - 远程访问的正路是 tailnet 转发（§5.4），不是开 bind。
 
 ## 5. ④ 鉴权与安全面
@@ -372,9 +372,9 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | 卡 | 内容 | 验收 |
 |---|---|---|
 | **W2.1** | 聊天 UI 增量（消息列表/输入框/SSE 自动重连/textContent 渲染**已交付**）：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage | 手测脚本（浏览器）；XSS 用例（模型吐 `<script>` 转义——现状 textContent 纪律保持） |
-| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新） | 指令 e2e（真 Router + 桩 seek） |
+| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新）（**已交付**，c_evbzyh——顶栏五个指令按钮：零参直发、带参（/bind /switch）预填输入框，全部走同一条 sendText 透传；指令 POST 成功即刷 /state、SSE 重连恢复绑定常显；e2e=`TestWeb_CommandE2E` 真 Router+桩 seek） | 指令 e2e（真 Router + 桩 seek） |
 | **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显（**已交付**，c_npafpi——`webfrontend.html` 状态栏双段化：右段 `#usage` 计量，usage 命名事件逐 turn 累计（$ 恒为服务端 cost_usd 直加、客户端永不算价）、reply 收口带 session_id 短显 `sid xxxxxxxx`；口径=本页生命周期会话累计（与 CLI footer 同向，刷新重计——回放留给 P3）；顺手修正 `#status .ok/.warn` 死选择器（c_qucxtu 起 JS 设的是 header 自身 class，旧选择器从未命中）；多 turn 桩 `web_multi_turn` + `TestWeb_MultiTurnUsageAccumulates` 数值累积断言 + `TestWeb_PageUsageMeter` 页面契约） | 桩 seek 多 turn e2e 断言数值 |
-| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线 | 文档 review |
+| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线（**已交付**，c_mn2wdp——guide-serve 新 §5「Web frontend」收拢启动/token/tailnet/安全清单（§2.1 的 web 专属段并入，76ed883 限段口径逐字保留不回退；Telegram 纸面节顺移 §6，两 PRD 的跨文档引用同步）；README/README.zh 控制面行能力括号刷新为工作台口径（限段句不动）；`web-size-baseline` 棘轮至 W 线完工面 30246587B——W1.5 钉 30216797 后 W2.1–W4.6 增量 29790B，gate 对完工 binary delta 归零，后续增长从完工地基起量） | 文档 review |
 
 ### Phase P2 — 任务面板（依赖 orchestration P1，~3 卡）
 
@@ -382,7 +382,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 |---|---|---|
 | **W3.1** | `subagents.jsonl` 只读 reader（fold 状态投影）+ `GET /subagents?parent=` | 手造 jsonl 的表驱动测试（含柱 G 现有事件 + D1/D3 新事件形状前瞻） |
 | **W3.2** | SSE topic `subagents`（tail-follow + 推送，hub 满丢老） | follow 断开注销测试 |
-| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对 | e2e：spawn background 子（stub Runner）→面板实时出条目 |
+| **W3.3** | 任务面板 UI（后台子列表/状态/tokens + 详情读子 transcript 末条）+ orchestration 落地后事件形状核对（**已交付**，c_ujgmpu——`webfrontend.html` 面板互斥 + 面板专用 topic 连接只听命名事件；`GET /subagents?sub=` 详情 + `subagent.LastAssistant` transcript 尾读；e2e `TestWeb_PanelE2EBackgroundSpawn` = 真 Manager(stub Runner) → SSE 实时条目 + 原始事件行形状核对。详情未走 `session/messages`：子 transcript 在项目树不在平铺 store（W4.2 落地时的既定分流），`?sub=` 是同一只读 reader 的详情面。合并注 2026-11-16：吸收 main 的 W4.5 后任务面板并入其四面板 togglePane 闸（`agents-view` 类），面板进出/换绑的 topic 订阅开合改挂在闸末尾的 `syncTopicStream`） | e2e：spawn background 子（stub Runner）→面板实时出条目 |
 
 ### Phase P3 — 资产面（并入 inspect-rpc 数据面，~5 卡）
 
@@ -393,7 +393,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **W4.3** | memory/projects/stats method 集（`memory/list|get|projects`、`project/list|get`、`stats/cache`） | 临时 SEEK_HOME 夹具表驱动 |
 | **W4.4** | 资产面 UI·一：sessions 浏览器（列表 + 消息 cursor 分页浏览） | 手测脚本；长 transcript 分页不卡（虚拟滚动级量级即可） |
 | **W4.5** | 资产面 UI·二：memory 浏览器 + stats 视图（cache/cost） | 手测脚本 + 体积 gate 复核 |
-| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写） | inspect-rpc §6 对应验收项搬运核对 |
+| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写）（**已交付**，c_igze7m——`internal/rpc/methods/hooks.go`：`hooks/list` 合并 project+user 两层 hooks.toml 按 dispatch 序（只读面不跑 trust gate / 不跑 bash -n，静态跳过经 audit tail 的 static-skip 行呈现）；`hooks/audit/tail` 一次性读全局 audit JSONL——`from_ts` RFC3339 截断（坏 ts 条目按 CLI 同规保留）、`limit` 加参默认 100/上限 1000 tail 语义、`project_id` 经 session header CWD 归属（fork 计入；失联/越权形状 sid 降级为不可归属、不失败）、`follow:true` 明确 -32602 拒（SSE hooks topic 未做，§6 #6/#7 仍开放）；inspect-rpc.md 状态头 + §3.1/§6 已按 W4.1–W4.6 实况逐条注记） | inspect-rpc §6 对应验收项搬运核对（已核 #2/#4/#8(口径替代)/#9/#10(取消替代)/#13/#14/#15；开放 #1/#3/#5(口径替代)/#6/#7/#11/#12，详见其 §6 注记块） |
 
 **估时合计**：Phase 0 ~1 天 · MVP ~3 天 · P2 ~1.5 天 · P3 ~3 天。
 
@@ -408,7 +408,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | cookie 写面 CSRF 残余面 | Origin/X-Token 双闸 + SameSite=Lax；验收 403 用例 |
 | embed 资产膨胀破二进制预算 | §4.3 gate + escape hatch 写死（build tag，不回 tarball） |
 | 与 inspect-rpc 双活设计打架 | §3.3 状态注记本次落（inspect-rpc 头部指回本文）；method 名不改，契约单一权威 |
-| P2 抢跑 orchestration 语义 | W3 卡显式依赖 P1；W3.1 表驱动用柱 G 现有事件 + 形状前瞻双夹具，P1 落地后核对（W3.3 内含） |
+| P2 抢跑 orchestration 语义 | W3 卡显式依赖 P1；W3.1 表驱动用柱 G 现有事件 + 形状前瞻双夹具，P1 落地后核对（W3.3 内含；已核对 2026-11-16 c_ujgmpu：真 Manager 事件行与 reader 夹具一致——started 带 background 标记、completed 带 tokens；`notified` 读面就绪、写面仍属未做的 M-O1.3） |
 | 多 tab 同 conv 的 Send 与 SendStream 乱序 | hub 单 goroutine per conv 保序（发送序=executor emit 序）；验收含序断言 |
 | XSS 经模型输出/工具结果 | textContent-only + CSP 'self' + 无 inline；验收含注入用例 |
 

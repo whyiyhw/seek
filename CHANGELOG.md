@@ -62,3 +62,10 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_w5lidm：web 鉴权演进：?token= 303 换票 cookie + 写面 Origin/X-Token 闸 + Host 校验（W1.2）
 - c_3736yl：web 任务面板·二：SSE topic subagents tail-follow + 推送（W3.2）
 - c_ph2zax：web 页面资产管线：CSP 头 + gzip + CI 体积 gate（W1.5）
+- c_wno3o3：web 资产面·五：memory 浏览器 + stats 视图（W4.5）
+- c_igze7m：web 资产面·六：hooks/audit 只读 + hooks/list + inspect-rpc 状态注记（W4.6）
+- c_mn2wdp：web 前端·guide-serve §web 文档收尾 + 体积 gate 上线（W2.4）
+- c_evbzyh：web 前端·指令快捷按钮 + 绑定状态常显（W2.2 增量）
+- c_ujgmpu：web 任务面板·三：后台子列表/状态/tokens UI + 详情（W3.3）
+- c_5ckroy：deepseek-app-api·S2：pkg/deepseek ASR 客户端 + pricing.ASRCost
+- c_2lu6vb：deepseek-app-api·F2：internal/filerefs 检测器（后缀表+stat 门，照 imgrefs 先例新包）
