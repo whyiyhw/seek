@@ -1698,6 +1698,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: "route everything through one gate" migrations must diff the SEMANTICS of each old path, not just the code shape — where old paths differed, the shared gate needs origin-aware (or equivalent) rules.
 - **Refs**: `internal/subagent/manager.go` `resolveTypedDef`; `docs/prd/feature-orchestration.md` §5 D13.
 
+### A delete path built by filepath.Join(user input) escapes scope — Create's Parse gate covers writes only
+- **Saw**: M-O2.3 review (rework round 1): `agentsmgr.Remove` joined `filepath.Join(dir, opts.Name+".md")` and called `os.Remove` with no name validation — `seek agents remove ../projects/<id>/plans/x` would delete any user-writable .md outside `~/.seek/agents/`, while Create on the same branch had full validation (Parse round-trip + `filepath.Rel` + Lstat-vs-symlink).
+- **Why**: the scope-discipline work was designed around the WRITE path ("validation runs before anything lands on disk"); Remove deletes and so never ran Parse — there was no file content to validate, and the name gate came along only as a side effect of parsing. Deletes need the gate on the NAME itself.
+- **Fix**: `agenttypes.ValidName` (the kebab-case rule, single authority with Parse) gates Remove before any filesystem call, plus the same `filepath.Rel` belt-and-braces as Create; commit on card `c_azqudp` rework round 1.
+- **Lesson**: every filesystem-mutating entry point that builds a path from user input needs its OWN name/containment gate — "the sibling function validates" is not inherited. Check delete paths explicitly: they share the blast radius of writes but none of the validation machinery that usually grows around writes.
+- **Refs**: `internal/agentsmgr/agentsmgr.go` `Remove`; `internal/agenttypes/agenttypes.go` `ValidName`. Sibling exposure NOT fixed in this card: `skillmgr.Uninstall` joins `opts.Name` the same way (see `internal/skillmgr/skillmgr.go:495`).
+
 ## Git / merge
 
 ### Merge commits shipped with leftover conflict markers (twice)

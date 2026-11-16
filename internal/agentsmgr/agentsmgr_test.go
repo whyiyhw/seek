@@ -302,3 +302,39 @@ func TestRemove_MissingNamesHintAtProjectScope(t *testing.T) {
 		t.Fatal("empty Name accepted")
 	}
 }
+
+// TestRemove_RejectsScopeEscapingNames: Remove takes a raw CLI
+// argument as its name; without the kebab-case gate a "../x" name
+// would resolve outside the scope dir and os.Remove an arbitrary .md.
+// Every escaping shape must error with the kebab-case message AND
+// leave the outside-scope sentinel untouched.
+func TestRemove_RejectsScopeEscapingNames(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	if err := os.MkdirAll(user, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Sentinel outside the scope dir: root/x.md is the exact file a
+	// "../x" name resolves to. It must survive every refused Remove.
+	sentinel := filepath.Join(root, "x.md")
+	write(t, sentinel, "outside the scope, must survive")
+
+	for _, name := range []string{"../x", "a/b", `..\x`, "/abs", "..", ".", "con/../../x"} {
+		_, err := Remove(RemoveOptions{Name: name, UserDir: user})
+		if err == nil {
+			t.Errorf("Remove(%q) succeeded, want refusal", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "kebab-case") {
+			t.Errorf("Remove(%q) err = %v, want kebab-case message", name, err)
+		}
+		if data, rerr := os.ReadFile(sentinel); rerr != nil || string(data) != "outside the scope, must survive" {
+			t.Errorf("Remove(%q): out-of-scope sentinel disturbed (%v)", name, rerr)
+		}
+	}
+	// The scope dir itself stayed untouched by the refused names.
+	entries, err := os.ReadDir(user)
+	if err != nil || len(entries) != 0 {
+		t.Errorf("user dir disturbed by refused Removes: %v (%v)", entries, err)
+	}
+}

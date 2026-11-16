@@ -127,6 +127,16 @@ type Definition struct {
 // a tool argument (`subagent_type`) and wants a single canonical form.
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
+// ValidName reports whether name satisfies the kebab-case contract.
+// Exported for agentsmgr: the write path must reject any name that
+// could escape its scope directory BEFORE a filesystem call — Create
+// gets this for free from Parse (it has file content to round-trip);
+// Remove has nothing to Parse, so it consults this directly. Keeping
+// the rule here means loader and writer can never drift apart.
+func ValidName(name string) bool {
+	return nameRE.MatchString(name)
+}
+
 // forbiddenTools are never allowed in a Tools whitelist, regardless of
 // what the parent registry has (D13):
 //
@@ -185,7 +195,7 @@ func Parse(data []byte, fileStem, source string) (*Definition, error) {
 	if def.Name == "" {
 		return nil, fmt.Errorf("no name: frontmatter `name` missing and filename stem empty")
 	}
-	if !nameRE.MatchString(def.Name) {
+	if !ValidName(def.Name) {
 		return nil, fmt.Errorf("name %q must be kebab-case ([a-z][a-z0-9-]*)", def.Name)
 	}
 	if def.Description == "" {

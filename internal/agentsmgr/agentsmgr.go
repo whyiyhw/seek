@@ -9,11 +9,14 @@
 // (they're plain Markdown), but seek itself funnels every write
 // through here so validation runs before anything lands on disk.
 //
-// Scope discipline is the package's second contract: Create can only
-// ever write into one of the two loader-visible scope directories.
-// There is deliberately no --into knob (skillmgr.Create has one) — an
-// arbitrary target parent would place definitions where the loader
-// never looks, which is worse than refusing.
+// Scope discipline is the package's second contract: every write AND
+// delete stays inside one of the two loader-visible scope
+// directories. There is deliberately no --into knob (skillmgr.Create
+// has one) — an arbitrary target parent would place definitions where
+// the loader never looks, which is worse than refusing. Both Create
+// and Remove gate the name through agenttypes' kebab-case rule before
+// any filesystem call and re-assert the resolved path sits inside the
+// scope dir (filepath.Rel) as belt-and-braces.
 //
 // What this package does NOT own:
 //   - Parsing/validation rules — agenttypes.Parse is the single
@@ -146,9 +149,19 @@ type RemoveResult struct {
 // are deliberately not reachable from here — they are checked in and
 // shared by the team, so removal goes through git like any other
 // source edit (same stance as skillmgr.Uninstall).
+//
+// Name validation is the same authority Create inherits from Parse
+// (agenttypes.ValidName): kebab-case admits no separators, dots, or
+// backslashes, so a "../escape" name is refused here, before any
+// filesystem call — Remove takes a raw CLI argument, and without this
+// gate filepath.Join would happily resolve it outside the scope dir
+// and os.Remove would delete an arbitrary .md.
 func Remove(opts RemoveOptions) (*RemoveResult, error) {
 	if opts.Name == "" {
 		return nil, errors.New("agentsmgr: remove: Name is required")
+	}
+	if !agenttypes.ValidName(opts.Name) {
+		return nil, fmt.Errorf("agentsmgr: remove: name %q must be kebab-case ([a-z][a-z0-9-]*)", opts.Name)
 	}
 	if opts.Builtins != nil {
 		if def := opts.Builtins.Get(opts.Name); def != nil && def.Origin == agenttypes.OriginBuiltin {
@@ -164,6 +177,13 @@ func Remove(opts RemoveOptions) (*RemoveResult, error) {
 		dir = p
 	}
 	target := filepath.Join(dir, opts.Name+".md")
+	// Belt-and-braces twin of Create's check: whatever the name rule
+	// admits, the resolved path must stay inside the scope dir. Only
+	// fires if the two checks ever drift apart — cheap insurance for
+	// the "deletes never leave the scope" contract.
+	if rel, err := filepath.Rel(dir, target); err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return nil, fmt.Errorf("agentsmgr: remove: target %q escapes scope dir %q", target, dir)
+	}
 	if err := os.Remove(target); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("agentsmgr: %q not found in %s (project-level agent types are checked in — remove those via git)", opts.Name, dir)
