@@ -1694,3 +1694,19 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `cmd.Stdout = pw` on an `io.Pipe`; a reader goroutine does `bufio.Reader.ReadString('\n')` per line (ReadString, NOT Scanner — Scanner's default 64KB token cap would truncate huge `tool_end.result` lines and lose the agent_end after them); once Wait returns, close pw (io.Pipe is synchronous ⇒ every byte is already inside the reader) so the reader sees EOF and folds a possibly unterminated final line; on kill-grace expiry snapshot under a mutex and walk away, mirroring the old lockedBuf posture (card `c_n3pghs`).
 - **Lesson**: "stream a kill-able child's stdout" has one sound shape: `cmd.Stdout = io.Writer` + your own pipe/reader with close-after-Wait choreography; StdoutPipe is read-then-wait only, and line readers with token caps don't fit JSONL of unbounded line length.
 - **Refs**: `internal/controlplane/executor.go` `attempt` / `streamSink`; `docs/prd/feature-web-frontend.md` §2.4.
+
+## Web frontend / asset plane
+
+### session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message
+- **Saw**: W4.4 sessions browser (first jsdom run against a real serve): `session/list` and `session/get` rendered fine, but the messages pane stayed empty while pagination buttons appeared — every `appendMsg` bailed in its catch.
+- **Why**: `messages` is `[]json.RawMessage` on the Go side (raw bytes preserved verbatim), but raw JSON *embeds* into the response — after one `await r.json()` the elements are already objects. `JSON.parse(object)` coerces to the string `"[object Object]"` and throws; a bare `return` in the catch made it silent.
+- **Fix**: `typeof raw === 'string' ? JSON.parse(raw) : raw` (string branch kept as belt only); commit with card `c_hinacy`.
+- **Lesson**: `json.RawMessage` in a JSON-RPC result is "verbatim JSON", not "a string" — browser consumers get parsed values after `r.json()`, so parse-or-use guards belong at the JS boundary; never let a render-path catch swallow without a trace.
+- **Refs**: `internal/rpc/methods/session.go` `sessionMessagesResult`; `internal/controlplane/webfrontend.html` `appendMsg`.
+
+### macOS bash 3.2 under set -u mangles $VAR followed by a multi-byte character ("TMP\ufeff: unbound variable")
+- **Saw**: manual-test script died in cleanup with `line 60: TMP<EFBBBF>: unbound variable` — no BOM exists in the file.
+- **Why**: `/bin/bash` on macOS is 3.2 (no UTF-8 name parsing); under `set -u`, `$TMP（` reads lead bytes of the full-width character into the variable NAME, then reports that phantom name unset. Reproducible: `bash -uc 'TMP=x; echo "$TMP（"'`.
+- **Fix**: brace every `${VAR}` whose next character is non-ASCII (the KEEP message in `scripts/web-sessions-manual.sh`); commit with card `c_hinacy`.
+- **Lesson**: repo shell scripts must stay bash-3.2-safe (macOS default) — `${VAR}` braces are mandatory before CJK punctuation, and self-check any script whose failure path only runs in cleanup traps.
+- **Refs**: `scripts/web-sessions-manual.sh` cleanup; `scripts/serve-smoke-test.sh` (same bash-3.2 audience).

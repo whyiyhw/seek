@@ -371,6 +371,35 @@ func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
 	}
 }
 
+// TestWeb_PageSessionsBrowser pins the W4.4 asset-plane UI contract: the
+// embedded page consumes exactly the merged W4.2 method set over /rpc and
+// walks messages by cursor. A method rename on either side strands the
+// browser silently (a dead button, not a crash), so the names are pinned
+// here against the page the same way the renderer is pinned above.
+func TestWeb_PageSessionsBrowser(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"session/list",       // list pane
+		"session/get",        // detail meta line
+		"session/messages",   // paginated message body
+		"next_cursor",        // cursor pagination walked, not whole-file
+		"加载更多",             // the load-more affordance exists
+		"q('/rpc')",          // rides the same token'd /rpc route as chat
+		"MSG_PAGE = 50",      // page size matches the server default (messagesDefaultLimit)
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the sessions browser piece %q (W4.4)", need)
+		}
+	}
+	// The chat plane must survive the browser's addition untouched: the
+	// browse toggle hides chat by class, it never unmounts it.
+	for _, keep := range []string{"id=\"form\"", "id=\"list\"", "addEventListener('submit'"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the chat-plane piece %q — W4.4 must be additive", keep)
+		}
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.

@@ -58,3 +58,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_jxhkbr：web serve CLI --listen flag 补缺（W1.1 尾巴）
 - c_pbg5kp：web 流式平面缝·三：agent_start 加 model 字段（W0.3）
 - c_qcmul4：web 流式接线：SendStream→SSE delta/tool/usage 事件族 + reply 收口带 session_id（W1.4，服务端 pricing 算 $，X-Accel-Buffering:no）
+- c_hinacy：web 资产面·四：sessions 浏览器 UI·列表+消息分页（W4.4）

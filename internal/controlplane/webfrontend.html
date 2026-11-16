@@ -7,6 +7,12 @@
      persisted in localStorage, carried as X-Seek-Conversation on
      fetches and ?conv= on the SSE stream (EventSource cannot set
      headers); the server keeps zero session state.
+     Sessions browser (W4.4, asset plane UI #1): a master-detail view
+     over POST /rpc — session/list drives the list pane, a click opens
+     session/get (meta line) + session/messages walked page by page via
+     next_cursor (50/page, "load more" appends; the DOM only ever holds
+     what was paged in, so a long transcript stays at virtual-scroll
+     order of magnitude). Same textContent-only discipline as chat.
      Deliberately out of scope: multi-tab sync, history persistence,
      FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
      mobile, real auth (design card c_7pptol owns the full UI). -->
@@ -43,11 +49,60 @@
   button { background: #2c3d5f; color: inherit; border: 0; border-radius: 6px;
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
+
+  /* ---- 会话浏览器（W4.4 资产面 UI·一）---- */
+  #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
+         border-bottom: 1px solid #2a2e36; }
+  #bar button { padding: 4px 12px; font-size: 13px; }
+  #browser { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  body:not(.browsing) #browser { display: none; }
+  body.browsing #list, body.browsing form { display: none; }
+  #browser-body { flex: 1; display: flex; min-height: 0; }
+  #sess-list { width: 320px; flex: none; overflow-y: auto;
+               border-right: 1px solid #2a2e36; }
+  .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
+              border-bottom: 1px solid #22252c; padding: 8px 12px; }
+  .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
+                  white-space: nowrap; }
+  .sess-row .t2 { display: block; color: #7a8089; font-size: 12px;
+                  margin-top: 2px; }
+  .sess-row.cur { background: #2c3d5f; }
+  #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #sess-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
+               color: #7a8089; white-space: nowrap; overflow: hidden;
+               text-overflow: ellipsis; }
+  #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
+  .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 8px;
+          background: #242830; white-space: pre-wrap; word-break: break-word; }
+  .smsg.user { background: #2c3d5f; }
+  .smsg.tool { background: #1b1e24; color: #9aa0a8; }
+  .smsg.tool pre { background: #14161a; }
+  .swho { font-size: 11px; color: #7a8089; margin-bottom: 4px; }
+  .stool { color: #d8a657; }
+  /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
+  .smsg.tool .sbody { max-height: 260px; overflow-y: auto; }
+  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid #2a2e36;
+               color: #7a8089; }
+  #sess-foot button { width: 100%; }
+  .pane-hint { color: #7a8089; font-style: italic; padding: 14px; }
 </style>
 </head>
 <body>
 <header id="status" class="warn">连接中…</header>
+<nav id="bar">
+  <button id="browse-btn" type="button">📚 会话</button>
+</nav>
 <main id="list"></main>
+<section id="browser">
+  <div id="browser-body">
+    <div id="sess-list"></div>
+    <div id="sess-detail">
+      <div id="sess-meta"></div>
+      <div id="sess-msgs"></div>
+      <div id="sess-foot"></div>
+    </div>
+  </div>
+</section>
 <form id="form">
   <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
   <button id="send">发送</button>
@@ -183,6 +238,159 @@ form.addEventListener('submit', async ev => {
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
   send.disabled = false;
   input.focus();
+});
+
+// ---- 会话浏览器（W4.4 资产面 UI·一）----
+// 消费 W4.2 已合并的 /rpc method 集：session/list 驱动列表、session/get
+// 出元信息行、session/messages 沿 next_cursor 逐页翻（50/页，「加载更多」
+// 追加）。DOM 只装已翻进的页——长 transcript 的常驻渲染量级与虚拟滚动同
+// 级，服务端与页面都不整读。渲染纪律与聊天面同源：textContent-only。
+const browseBtn = document.getElementById('browse-btn');
+const sessList = document.getElementById('sess-list');
+const sessMeta = document.getElementById('sess-meta');
+const sessMsgs = document.getElementById('sess-msgs');
+const sessFoot = document.getElementById('sess-foot');
+const MSG_PAGE = 50;
+let sel = null;  // 打开中的会话分页游标 {sid, next, done, busy}
+
+// JSON-RPC 2.0 envelope（W4.1）：一次 POST 一个调用；错误以异常上抛，
+// 由各窗格自行展示。id 用自增整数——浏览器不重投，无需全局唯一。
+let rpcSeq = 1;
+async function rpc(method, params) {
+  const r = await fetch(q('/rpc'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: rpcSeq++, method, params }),
+  });
+  if (r.status === 401) throw new Error('token 无效——用带 ?token= 的地址打开');
+  const j = await r.json();
+  if (j.error) throw new Error('[' + j.error.code + '] ' + j.error.message);
+  return j.result;
+}
+
+function paneHint(el, text) {
+  const d = document.createElement('div');
+  d.className = 'pane-hint';
+  d.textContent = text;
+  el.replaceChildren(d);
+}
+
+async function loadSessions() {
+  paneHint(sessList, '加载中…');
+  try {
+    const res = await rpc('session/list', {});
+    sessList.replaceChildren();
+    if (!res.sessions.length) return paneHint(sessList, '（没有历史会话）');
+    for (const s of res.sessions) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'sess-row';
+      row.dataset.sid = s.sid;
+      if (sel && sel.sid === s.sid) row.classList.add('cur');
+      const t1 = document.createElement('span');
+      t1.className = 't1';
+      t1.textContent = s.title || '（无标题）';
+      const t2 = document.createElement('span');
+      t2.className = 't2';
+      const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
+      t2.textContent = when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+      row.appendChild(t1);
+      row.appendChild(t2);
+      row.addEventListener('click', () => openSession(s.sid));
+      sessList.appendChild(row);
+    }
+  } catch (e) { paneHint(sessList, 'session/list 失败：' + e.message); }
+}
+
+async function openSession(sid) {
+  sel = { sid, next: '', done: false, busy: false };
+  sessMeta.textContent = '';
+  sessMsgs.replaceChildren();
+  paneHint(sessFoot, '');
+  for (const row of sessList.children) row.classList.toggle('cur', row.dataset.sid === sid);
+  loadMeta(sid);
+  loadMsgs();
+}
+
+// 元信息行：模型/turns/累计 tokens/cwd。装饰性数据，失败只落在本行。
+async function loadMeta(sid) {
+  try {
+    const g = await rpc('session/get', { sid });
+    if (!sel || sel.sid !== sid) return;  // 返回前已切走：丢弃
+    const u = g.cumulative_usage || {};
+    sessMeta.textContent = (g.header.model || '?') + ' · ' + g.turns + ' turns · '
+      + ((u.prompt_tokens || 0) + (u.completion_tokens || 0)) + ' tokens · '
+      + (g.header.cwd || '');
+  } catch (e) { sessMeta.textContent = 'session/get 失败：' + e.message; }
+}
+
+async function loadMsgs() {
+  const me = sel;
+  if (!me || me.busy || me.done) return;
+  me.busy = true;
+  paneHint(sessFoot, me.next ? '加载中…' : '读取中…');
+  try {
+    const params = { sid: me.sid, limit: MSG_PAGE };
+    if (me.next) params.cursor = me.next;
+    const res = await rpc('session/messages', params);
+    if (sel !== me) return;  // 翻页期间切了会话：旧游标作废
+    for (const raw of res.messages) appendMsg(raw);
+    if (res.next_cursor) {
+      me.next = res.next_cursor;
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.textContent = '加载更多（已显示 ' + sessMsgs.children.length + ' 条）';
+      more.addEventListener('click', loadMsgs);
+      sessFoot.replaceChildren(more);
+    } else {
+      me.done = true;
+      paneHint(sessFoot, sessMsgs.children.length ? '— 已到末尾 —' : '（无消息）');
+    }
+  } catch (e) {
+    paneHint(sessFoot, 'session/messages 失败：' + e.message);
+  }
+  me.busy = false;
+}
+
+// 一条消息行：角色标签 + 工具调用摘要（参数截断）+ 正文走 renderBody。
+// reasoning_content 不渲染（与聊天面 §2.5 同取舍）；tool 结果限高由 CSS 承担。
+// messages 元素是服务端的 json.RawMessage——经 r.json() 已是对象；string 分支
+// 只是防御（jse 一致性由 W4.2 的服务端测试钉）。
+function appendMsg(raw) {
+  let m;
+  try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
+  if (!m || typeof m !== 'object') return;
+  const el = document.createElement('div');
+  el.className = 'smsg ' + (m.role || 'other');
+  const who = document.createElement('div');
+  who.className = 'swho';
+  who.textContent = m.role === 'tool' ? 'tool · ' + (m.tool_call_id || '') : (m.role || '?');
+  el.appendChild(who);
+  if (Array.isArray(m.tool_calls)) {
+    for (const tc of m.tool_calls) {
+      const t = document.createElement('div');
+      t.className = 'stool';
+      const fn = tc.function || {};
+      let args = fn.arguments || '';
+      if (args.length > 120) args = args.slice(0, 120) + '…';
+      t.textContent = '⚙ ' + (fn.name || '?') + '(' + args + ')';
+      el.appendChild(t);
+    }
+  }
+  if (m.content) {
+    const body = document.createElement('div');
+    body.className = 'sbody';
+    renderBody(body, m.content);
+    el.appendChild(body);
+  }
+  sessMsgs.appendChild(el);
+}
+
+browseBtn.addEventListener('click', () => {
+  const browsing = !document.body.classList.contains('browsing');
+  document.body.classList.toggle('browsing', browsing);
+  browseBtn.textContent = browsing ? '💬 聊天' : '📚 会话';
+  if (browsing) loadSessions();  // 每次进面板重拉列表（SSE 世界里它会变旧）
 });
 
 if (!TOKEN) {
