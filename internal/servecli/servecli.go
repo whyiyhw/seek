@@ -57,13 +57,17 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 			addr = sc.WebAddr
 		}
 		fe := controlplane.NewWeb(controlplane.WebConfig{Addr: addr})
-		// W4.2: hang the session method set on /rpc before Run (the
-		// §3.2 phase contract — NewWeb itself registers nothing, so its
-		// empty-registry contract test stays true). Store resolution is
-		// lazy inside the methods, so this wiring stays free of
-		// filesystem side effects (buildFrontends runs in tests); the
-		// memory/project sets (W4.3) follow the same shape here.
-		methods.NewSessionsFromEnv().RegisterAll(fe.RPCRegistry())
+		// W4.2/W4.3: hang the asset-plane method sets on /rpc before
+		// Run (the §3.2 phase contract — NewWeb itself registers
+		// nothing, so its empty-registry contract test stays true).
+		// Store resolution is lazy inside the methods, so this wiring
+		// stays free of filesystem side effects (buildFrontends runs
+		// in tests).
+		reg := fe.RPCRegistry()
+		methods.NewSessionsFromEnv().RegisterAll(reg)
+		methods.NewMemories().RegisterAll(reg)
+		methods.NewProjectsFromEnv().RegisterAll(reg)
+		methods.NewStatsFromEnv().RegisterAll(reg)
 		return fe
 	},
 }

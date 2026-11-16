@@ -5,8 +5,8 @@
 // refactor adopts internal/rpc.Registry). All methods are read-only:
 // the write plane stays closed (inspect-rpc §2).
 //
-// W4.2 delivers the session set; the memory/project/stats sets are
-// W4.3 and follow the same shape (one type per family, RegisterAll).
+// W4.2 delivered the session set; W4.3 the memory/project/stats sets
+// — same shape throughout (one type per family, RegisterAll).
 package methods
 
 import (

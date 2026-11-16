@@ -53,3 +53,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_zxeqih：docs 修复：feature-orchestration.md 状态行冲突标记残留（920f9e1 遗留）
 - c_n3pghs：web 流式平面缝·一：executor RunStream + 导出 RunEvent（W0.1）
 - c_7yofgo：web 任务面板·一：subagents.jsonl 只读 reader + GET /subagents（W3.1）
+- c_ydglne：web 资产面·三：memory/projects/stats method 集（W4.3）

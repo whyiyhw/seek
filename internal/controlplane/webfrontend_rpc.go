@@ -11,11 +11,10 @@ package controlplane
 //
 // The registry is built once in NewWeb and only Dispatched by handlers
 // — the §3.2 phase contract. NewWeb itself registers nothing (a bare
-// frontend answers -32601 for everything); the session method set
-// (W4.2) hangs off at servecli assembly via
-// methods.NewSessionsFromEnv().RegisterAll — pre-Run, with lazy store
-// resolution — and the memory/project sets (W4.3) follow the same
-// shape.
+// frontend answers -32601 for everything); the asset-plane method sets
+// (W4.2 session, W4.3 memory/project/stats) hang off at servecli
+// assembly via each family's RegisterAll — pre-Run, with lazy store
+// resolution where a constructor would touch the filesystem.
 
 import (
 	"encoding/json"
