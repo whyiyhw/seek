@@ -11,11 +11,11 @@ import (
 
 // readonly_test.go pins the loader's red line (PRD P2 acceptance #4 /
 // AGENTS.md): internal/agenttypes has NO write API — the write path
-// under ~/.seek/agents/ belongs exclusively to a future
-// internal/agentsmgr, exactly as ~/.seek/skills/ belongs to
-// skillmgr/skillstats. The sandbox-testable form of "no write API" is
-// behavioural: Load must leave the filesystem byte-identical and must
-// not even materialise the directories it reads.
+// under ~/.seek/agents/ belongs exclusively to internal/agentsmgr,
+// exactly as ~/.seek/skills/ belongs to skillmgr/skillstats. The
+// sandbox-testable form of "no write API" is behavioural: Load must
+// leave the filesystem byte-identical and must not even materialise
+// the directories it reads.
 
 // fsSnapshot walks root and records every regular file's path, size,
 // and mtime. Directories are recorded by their mere existence in the

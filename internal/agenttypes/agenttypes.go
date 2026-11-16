@@ -20,8 +20,8 @@
 //     them — the hardcoded map was retired there).
 //
 // What it explicitly does NOT own:
-//   - Writes to ~/.seek/agents/ — those belong to a future
-//     internal/agentsmgr (same red line as skillmgr for skills).
+//   - Writes to ~/.seek/agents/ — those belong to internal/agentsmgr
+//     (same red line as skillmgr for skills; landed in M-O2.3).
 //     This package has NO write API by design; grep-audit acceptance
 //     #4 in the PRD depends on that staying true.
 //   - Spawn-time semantics (registry intersection, policy

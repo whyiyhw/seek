@@ -106,7 +106,7 @@ func UserSkillStats() (string, error) {
 // (feature-orchestration.md D10). Project-level definitions live at
 // <project>/.seek/agents/ and are NOT computed here. Read-only at
 // runtime — the loader (internal/agenttypes) scans it; writes belong
-// to a future internal/agentsmgr.
+// to internal/agentsmgr.
 func UserAgents() (string, error) {
 	root, err := Home()
 	if err != nil {

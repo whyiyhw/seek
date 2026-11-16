@@ -57,12 +57,21 @@ You are a test verifier subagent. …（body = the type's role prompt）
 Rules (validated at load; a bad file is skipped with a startup warning, never fatal):
 
 - `description` and a non-empty body are **required**; `name` must be kebab-case.
-- Same-name resolution: **project > user > builtin**（a project `explore.md` overrides the built-in `explore`）.
+- Same-name resolution: **project > user > config > builtin**（a project `explore.md` overrides the built-in `explore`; a config entry only re-routes a built-in — see [guide-config.md](guide-config.md)）.
 - `tools` may never include `agent` or `ask_user`（hard parse error）; unknown tool names are checked at spawn time.
 - `workflow` accepts only `plan-analyze` — loosening is a config error (permission tightening is monotonic by design).
 - Files load **once at session start**; edits take effect on the next seek launch (no hot reload — tool-schema bytes freeze per process for the prompt cache).
 
-Inspect what's defined with `/agents types`（lists project, user, and builtin types with their lane overrides and shadowing provenance）. Note: custom types are defined and listed as of P2-a; making them spawnable via the `agent` tool lands with the follow-up milestone.
+Inspect what's defined with `/agents types`（lists project, user, config, and builtin types with their lane overrides and shadowing provenance）or from the shell with `seek agents list`. Custom types are spawnable through the `agent` tool（P2-b）. The `seek agents` CLI also scaffolds and validates definitions:
+
+```bash
+seek agents list                    # registry as the next session will load it
+seek agents check                   # validate every definition file (non-zero exit on errors)
+seek agents create verifier --description "Runs the test suite." \
+  --tools read,grep,git --workflow plan-analyze   # scaffold ~/.seek/agents/verifier.md
+seek agents create auditor --description "..." --project   # <cwd>/.seek/agents/ (checked in)
+seek agents remove verifier         # delete a user-scope definition (project ones: git)
+```
 
 ---
 
@@ -106,7 +115,12 @@ seek worktree gc    # Garbage-collect stale worktrees (discarded refs 48h + orph
 ## 6. CLI 参考 / CLI Reference
 
 ```bash
-# Subagent management is through the agent tool (TUI/chat), not CLI
+# Typed-agent definitions (M-O2.3):
+seek agents list                    # List the agent-type registry (project > user > config > builtin)
+seek agents check                   # Validate every definition file; non-zero exit on errors
+seek agents create <name> --description "..." [--project]   # Scaffold a definition
+seek agents remove <name>           # Delete a user-scope definition (project types: git)
+
 # Worktree management:
 seek worktree list  # Enumerate seek-managed worktrees on disk (prior sessions included)
 seek worktree gc    # Prune stale worktrees: discarded refs >48h (--older-than),
@@ -114,4 +128,4 @@ seek worktree gc    # Prune stale worktrees: discarded refs >48h (--older-than),
 ```
 
 Design docs: [`docs/prd/feature-subagent.md`](prd/feature-subagent.md).  
-Code: `internal/subagent/` · `internal/worktree/` · `internal/tools/agent/`.
+Code: `internal/subagent/` · `internal/agenttypes/` · `internal/agentsmgr/` · `internal/agentscli/` · `internal/worktree/` · `internal/tools/agent/`.
