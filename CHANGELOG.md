@@ -65,3 +65,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_wno3o3：web 资产面·五：memory 浏览器 + stats 视图（W4.5）
 - c_igze7m：web 资产面·六：hooks/audit 只读 + hooks/list + inspect-rpc 状态注记（W4.6）
 - c_mn2wdp：web 前端·guide-serve §web 文档收尾 + 体积 gate 上线（W2.4）
+- c_evbzyh：web 前端·指令快捷按钮 + 绑定状态常显（W2.2 增量）

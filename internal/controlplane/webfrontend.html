@@ -24,6 +24,12 @@
      view rides stats/cache (session picker from session/list) — the
      cache/cost card shows hit ratio + cost_usd, priced SERVER-side
      (the client never prices; §2.5).
+     Command quick buttons (W2.2): /bind /projects /switch /new /cancel
+     in the top bar — zero-arg ones send the SAME command text through
+     the shared POST /msg passthrough; /bind /switch prefill the input
+     for the path argument. Binding status stays pinned in the status
+     line: refreshed immediately after a command POST (202) settles on
+     the wire, again on every SSE reply, and again on SSE (re)connect.
      Deliberately out of scope: multi-tab sync, history persistence,
      FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
      mobile, real auth (design card c_7pptol owns the full UI). -->
@@ -61,10 +67,13 @@
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
 
-  /* ---- 会话浏览器（W4.4 资产面 UI·一）---- */
+  /* ---- 会话浏览器（W4.4 资产面 UI·一）+ 指令快捷按钮（W2.2）---- */
   #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
-         border-bottom: 1px solid #2a2e36; }
-  #bar button { padding: 4px 12px; font-size: 13px; }
+         border-bottom: 1px solid #2a2e36; overflow-x: auto; }
+  #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
+  #bar .cmd { background: #242830; }          /* 指令按钮与视图按钮区分 */
+  #browse-btn { margin-left: auto; }          /* 视图按钮组（会话/记忆/统计）靠右 */
+  body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
   /* 三个资产面板共用「browsing 隐聊天」总闸；各自的 *-view 类挑一个面板亮 */
   #browser { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   body:not(.sess-view) #browser { display: none; }
@@ -146,6 +155,13 @@
 <body>
 <header id="status" class="warn">连接中…</header>
 <nav id="bar">
+  <!-- 指令快捷按钮（W2.2）：发的是与手打完全同款的指令文本（POST /msg 纯文本
+       透传）；带参的 /bind /switch 只预填输入框，路径由用户补全后回车。 -->
+  <button id="cmd-bind" class="cmd" type="button" title="绑定/重绑项目，会话重置（需补路径）">/bind</button>
+  <button id="cmd-projects" class="cmd" type="button" title="列出候选项目与当前绑定">/projects</button>
+  <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
+  <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
+  <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
   <button id="browse-btn" type="button">📚 会话</button>
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
@@ -294,8 +310,11 @@ async function refreshState() {
 
 // SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数；
 // 鉴权走 cookie（换票后）或 TOKEN 查询参数（旧形态），两者服务端同权。
+// （重）连上即刷一次绑定状态：断线期间状态行被「SSE 断开」占位，重连后
+// 绑定常显自己回来，不等下一条回复（W2.2）。
 function listen() {
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
+  es.onopen = () => refreshState();
   es.onmessage = ev => {
     try {
       const m = JSON.parse(ev.data);
@@ -306,13 +325,15 @@ function listen() {
   es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
 }
 
-// 上行：POST /msg，指令原样透传给路由（/bind /projects /switch /new /cancel）。
-form.addEventListener('submit', async ev => {
-  ev.preventDefault();
-  const text = input.value.trim();
+// 上行共用路径（W2.2 抽出）：表单提交与指令快捷按钮同走这一条 POST /msg
+// 纯文本透传——按钮与手打完全同权。fromInput 才清空输入框（按钮直发不动
+// 用户打了一半的草稿）。指令（"/" 开头）POST 成功后即时刷一次 /state：
+// 绑定类指令改的是 bindings 表，不等 SSE 回复先把状态行对齐；回复到达时
+// onmessage 的刷新再收敛（两次幂等，竞态最多短暂显示旧值）。
+async function sendText(text, fromInput) {
   if (!text || send.disabled) return;
   addMsg('you', text);
-  input.value = '';
+  if (fromInput) input.value = '';
   send.disabled = true;
   try {
     const r = await fetch(q('/msg'), {
@@ -322,10 +343,38 @@ form.addEventListener('submit', async ev => {
     });
     if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
     else if (!r.ok) addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
+    else if (text.startsWith('/')) refreshState();
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
   send.disabled = false;
+}
+
+form.addEventListener('submit', async ev => {
+  ev.preventDefault();
+  await sendText(input.value.trim(), true);
   input.focus();
 });
+
+// 指令快捷按钮（W2.2）：零参指令（/projects /new /cancel）直发；带参指令
+// （/bind /switch）预填输入框并聚焦等路径——按钮只是「发送同款指令文本」
+// 的快捷方式，不另造协议。
+function wireCmd(id, text) {
+  document.getElementById(id).addEventListener('click', () => {
+    if (send.disabled) return;
+    if (text.endsWith(' ')) {           // 带参指令：预填，光标移到末尾
+      input.value = text;
+      input.setSelectionRange(text.length, text.length);
+      input.focus();
+      return;
+    }
+    sendText(text, false);
+    input.focus();
+  });
+}
+wireCmd('cmd-bind', '/bind ');
+wireCmd('cmd-switch', '/switch ');
+wireCmd('cmd-projects', '/projects');
+wireCmd('cmd-new', '/new');
+wireCmd('cmd-cancel', '/cancel');
 
 // ---- 会话浏览器（W4.4 资产面 UI·一）----
 // 消费 W4.2 已合并的 /rpc method 集：session/list 驱动列表、session/get
