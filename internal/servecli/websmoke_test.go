@@ -9,11 +9,12 @@ package servecli
 // router → Send → SSE, no fake anywhere in the chain.
 //
 // The listen address (web_addr) is injected test-side through
-// WebConfig.Addr on a random loopback port. Production code carries
-// no env/flag outlet for it: the earlier SEEK_WEB_ADDR seam was
-// removed — a test seam must not add an unscoped listen-address
-// escape to shipped code (external configurability belongs to the
-// scope-checked channel from card c_x7ehom, loopback + tailnet only).
+// WebConfig.Addr on a random loopback port. Production outlets are
+// serve.web_addr and --listen (W1.1) — both folded into WebConfig.Addr
+// and both scope-checked by checkWebAddr (loopback + tailnet CGNAT
+// only, card c_x7ehom). The earlier SEEK_WEB_ADDR env seam stays
+// removed: a test seam must not add an UNSCOPED listen-address escape
+// to shipped code.
 //
 //	① GET  /       no token → 200 + the embedded HTML page
 //	② POST /msg    no token → 401

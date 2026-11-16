@@ -3,7 +3,7 @@
 // skeleton). Mirrors routinescli / keyscli structure: Run(args,
 // stdout, stderr) entry, dispatched ahead of flag.Parse in cmd/seek.
 //
-// What it owns: flag parsing (--frontend multi-value), frontend
+// What it owns: flag parsing (--frontend multi-value, --listen), frontend
 // construction from the registry, config loading (the `serve` section
 // with top-level backward compat), SIGINT/SIGTERM → graceful drain,
 // and the exit-code handoff — controlplane.ExitCode is the single
@@ -44,11 +44,14 @@ import (
 // 2026-11-13 — the slot stays open for any channel.)
 //
 // Constructors take the serve section (nil = absent) so config-file
-// settings reach every frontend without CLI flags: web maps
-// serve.web_addr onto WebConfig.Addr ("" → DefaultWebAddr). The address
-// is scope-gated to loopback + tailnet CGNAT (controlplane.checkWebAddr);
-// what slips past the gate dies at the listen — startup fails loud
-// either way, never a silent fallback to the default.
+// settings reach every frontend: web maps serve.web_addr onto
+// WebConfig.Addr ("" → DefaultWebAddr). The section they get is
+// already flag-folded — Run's --listen overrides web_addr before
+// construction (effectiveServe) — so the one mapping serves both
+// sources. The address is scope-gated to loopback + tailnet CGNAT
+// (controlplane.checkWebAddr); what slips past the gate dies at the
+// listen — startup fails loud either way, never a silent fallback to
+// the default.
 var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 	"fake": func(*config.ServeConfig) controlplane.Frontend { return fake.New() },
 	"web": func(sc *config.ServeConfig) controlplane.Frontend {
@@ -97,9 +100,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	var fes frontendList
+	var listen string
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Var(&fes, "frontend", "frontend to launch; repeat the flag for multiple (v1: fake, web)")
+	fs.StringVar(&listen, "listen", "", "web frontend listen address; overrides serve.web_addr (loopback + tailnet CGNAT only)")
 	fs.Usage = func() { printHelp(stderr) }
 	if err := fs.Parse(args); err != nil {
 		// flag already printed the error + help to fs.Output().
@@ -117,8 +122,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	// Built AFTER the config load so the serve section reaches the
-	// constructors (web_addr → WebConfig.Addr).
-	srcs, err := buildFrontends(fes, cfg.Serve)
+	// constructors (web_addr → WebConfig.Addr); a --listen flag folds
+	// over web_addr first (flag > config).
+	srcs, err := buildFrontends(fes, effectiveServe(cfg.Serve, listen))
 	if err != nil {
 		return badConfig(stderr, err)
 	}
@@ -133,6 +139,26 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+// effectiveServe folds the --listen flag over the loaded serve
+// section: an empty flag returns the section untouched (nil included —
+// the absent-section compat path), a set one wins over serve.web_addr
+// (flag > config, core's --provider-over-default_provider posture) by
+// copy, never mutation — cfg stays the file's truth for servePlane.
+// The folded WebAddr walks the exact same constructor path as the
+// config value, so the scope gate (checkWebAddr) and the listen own
+// bad --listen values with the same exit-2, no-fallback posture.
+func effectiveServe(sc *config.ServeConfig, listen string) *config.ServeConfig {
+	if listen == "" {
+		return sc
+	}
+	folded := new(config.ServeConfig)
+	if sc != nil {
+		*folded = *sc
+	}
+	folded.WebAddr = listen
+	return folded
 }
 
 // buildFrontends resolves --frontend names against the registry.
@@ -236,14 +262,20 @@ Usage:
                        Registered in the default build: fake, web.
                        (feishu arrives with -tags feishu, D-F1.)
 
+        --listen ADDR  web frontend listen address; overrides
+                       serve.web_addr for this run. Loopback
+                       (127.0.0.1/::1/localhost) and tailnet CGNAT
+                       100.64.0.0/10 only — anything else refuses
+                       to start (exit 2).
+
       The web frontend listens on 127.0.0.1:8790 and prints its
       token-bearing URL to stderr on startup; the token also lives
       in ~/.seek/serve/web.token (regenerate by deleting the file).
       To reach it from a tailnet: keep loopback and run
-      "tailscale serve --tcp=8790", or set serve.web_addr to the
-      machine's tailnet IP (e.g. "100.x.y.z:8790"). web_addr accepts
-      loopback and tailnet CGNAT (100.64.0.0/10) hosts only — 0.0.0.0
-      and any other address are refused at startup.
+      "tailscale serve --tcp=8790", or set serve.web_addr (one-off:
+      --listen) to the machine's tailnet IP (e.g. "100.x.y.z:8790").
+      Both accept loopback and tailnet CGNAT (100.64.0.0/10) hosts
+      only — 0.0.0.0 and any other address are refused at startup.
 
       Config: the optional "serve" section of ~/.seek/config.json
       (projects / max_concurrency / yolo / web_addr — default

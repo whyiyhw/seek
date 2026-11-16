@@ -44,9 +44,9 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 
 聊天渠道密钥写在 `~/.seek/serve/env`（0600），如 `TELEGRAM_BOT_TOKEN`；web frontend 的换票 token 首启自动生成于 `~/.seek/serve/web.token`（0600）。都不进 config.json、不进日志。
 
-web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` 段的 `web_addr` 指到本机 tailnet IP（如 `"100.x.y.z:8790"`）直接绑私网，或保持 loopback、由该机 `tailscale serve --tcp=8790` 把 tailnet IP 转发进来（tailnet 内 WireGuard 加密、配置持久化在 tailscaled）——两条路都只暴露给私网，不开公网口子。
+web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` 段的 `web_addr` 指到本机 tailnet IP（如 `"100.x.y.z:8790"`）直接绑私网——一次性覆盖用 `seek serve --frontend=web --listen=100.x.y.z:8790`，flag 优先于 config——或保持 loopback、由该机 `tailscale serve --tcp=8790` 把 tailnet IP 转发进来（tailnet 内 WireGuard 加密、配置持久化在 tailscaled）——两条路都只暴露给私网，不开公网口子。
 
-`web_addr` 只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT 段 `100.64.0.0/10`（安全面拍板 2026-11-15）：`0.0.0.0`、局域网/公网 IP、任意域名一律启动即拒并说明原因——web 页挂着能驱动 seek 跑绑定的项目，暴露面不由配置笔误决定。地址语法写错则由 listen 报错。两种失败都整面退出，不回落默认地址。
+`web_addr` / `--listen` 只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT 段 `100.64.0.0/10`（安全面拍板 2026-11-15）：`0.0.0.0`、局域网/公网 IP、任意域名一律启动即拒并说明原因——web 页挂着能驱动 seek 跑绑定的项目，暴露面不由配置笔误决定。地址语法写错则由 listen 报错。两种失败都整面退出，不回落默认地址。
 
 ### 2.2 会话内指令（所有 frontend 通用，平面解析）
 

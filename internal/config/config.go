@@ -174,7 +174,8 @@ type ServeConfig struct {
 	Yolo bool `json:"yolo,omitempty"`
 
 	// WebAddr overrides the web frontend's listen address (`seek serve
-	// --frontend=web`). Empty = the shipped loopback default
+	// --frontend=web`); the --listen flag folds over it at the CLI
+	// (flag > config). Empty = the shipped loopback default
 	// 127.0.0.1:8790 (controlplane.DefaultWebAddr — the value lives
 	// there, one place). Scope is pinned to loopback (127.0.0.1/::1/
 	// localhost) and tailnet CGNAT 100.64.0.0/10 (2026-11-15 decision):

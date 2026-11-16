@@ -55,3 +55,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_7yofgo：web 任务面板·一：subagents.jsonl 只读 reader + GET /subagents（W3.1）
 - c_ydglne：web 资产面·三：memory/projects/stats method 集（W4.3）
 - c_axrls3：web 流式平面缝·二：StreamSender sibling 接口 + router upcast 接线（W0.2）
+- c_jxhkbr：web serve CLI --listen flag 补缺（W1.1 尾巴）

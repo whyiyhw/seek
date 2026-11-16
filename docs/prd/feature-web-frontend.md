@@ -255,7 +255,7 @@ CI 守门：repo 根无 `package.json`/`node_modules`/锁文件（脚本 grep �
 
 ### 4.4 默认不监听公网
 
-- 默认 `127.0.0.1:8790`（`DefaultWebAddr`，**已交付**——固定口让 tailscale 转发/书签可预期，启动行印带 token 的完整 URL）；CLI `--listen` 覆盖是 W1.1 增量（`WebConfig.Addr` 注入点已有）。
+- 默认 `127.0.0.1:8790`（`DefaultWebAddr`，**已交付**——固定口让 tailscale 转发/书签可预期，启动行印带 token 的完整 URL）；CLI `--listen` 覆盖**已交付**（c_jxhkbr——flag 折进 serve 段再进 `WebConfig.Addr`，与 `web_addr` 同一 scope 闸）。
 - `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §2.1）。
 - 远程访问的正路是 tailnet 转发（§5.4），不是开 bind。
 
@@ -361,7 +361,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 
 | 卡 | 内容 | 验收 |
 |---|---|---|
-| **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr`，b769535；CLI `--listen` flag 仍缺）+ web_addr scope 闸（**已交付**，76ed883——原「非 loopback 强制 token」闸被 2026-11-15 拍板取代为更严的限段拒启，§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归（已钉 `TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启动 exit-2（已钉 `TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
+| **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr`，b769535；CLI `--listen` flag **已交付**，c_jxhkbr——`effectiveServe` 折 flag > config）+ web_addr scope 闸（**已交付**，76ed883——原「非 loopback 强制 token」闸被 2026-11-15 拍板取代为更严的限段拒启，§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归（已钉 `TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启动 exit-2（已钉 `TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
 | **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验 | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
 | **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3；现状固定 `web:default`）、SSE hub per-conv 订阅（现状全 tab 一张订阅表）、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 绑定兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
 | **W1.4** | 流式接线（§2.4 缝落地）：router SendStream→`/events` SSE `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 收口带 session_id（envelope 自 `{"conv","text"}` 扩展，纯加法） | 桩 seek 流式 e2e（§8 流式条目）；/cancel 收口 |
