@@ -593,10 +593,10 @@ type streamFake struct {
 	fakeFrontend
 	streamErr bool
 
-	mu      sync.Mutex
-	stream  []RunEvent // recorded SendStream payloads, emit order
-	order   []string   // combined arrival log: "stream:<type>" / "send:<text>"
-	calls   int        // total SendStream invocations
+	mu     sync.Mutex
+	stream []RunEvent // recorded SendStream payloads, emit order
+	order  []string   // combined arrival log: "stream:<type>" / "send:<text>"
+	calls  int        // total SendStream invocations
 }
 
 var _ StreamSender = (*streamFake)(nil)

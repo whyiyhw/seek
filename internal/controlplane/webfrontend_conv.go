@@ -25,6 +25,16 @@ import (
 	"net/http"
 )
 
+// sseFrame is one SSE event queued to a subscriber: an optional event
+// NAME (the W1.4 delta/tool/usage family — named events are invisible
+// to the MVP page's onmessage by SSE design) plus the data-JSON. The
+// MVP reply keeps name empty — a default "message" event — so the
+// pre-W1.4 wire shape is preserved byte-for-byte.
+type sseFrame struct {
+	name string // "" = default (message) event
+	data string // the data: payload JSON
+}
+
 // convHeader carries the browser-minted conversation uuid (D-W3).
 const convHeader = "X-Seek-Conversation"
 
@@ -87,17 +97,17 @@ func truncateConv(s string) string {
 // channel plus the unregister func. The conv's map entry leaves with
 // its last subscriber, so conversations do not accumulate in a serve
 // process that outlives many browser sessions.
-func (f *WebFrontend) subscribe(conv ConvID) (chan string, func()) {
+func (f *WebFrontend) subscribe(conv ConvID) (chan sseFrame, func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.subs == nil {
-		f.subs = make(map[ConvID]map[int]chan string)
+		f.subs = make(map[ConvID]map[int]chan sseFrame)
 	}
 	if f.subs[conv] == nil {
-		f.subs[conv] = make(map[int]chan string)
+		f.subs[conv] = make(map[int]chan sseFrame)
 	}
 	f.next++
-	ch := make(chan string, 16)
+	ch := make(chan sseFrame, 16)
 	id := f.next
 	f.subs[conv][id] = ch
 	return ch, func() {
@@ -114,12 +124,12 @@ func (f *WebFrontend) subscribe(conv ConvID) (chan string, func()) {
 // conv (W1.3 isolation). Best-effort: a full buffer drops the event
 // for that client, a conv with no subscribers is a silent no-op (the
 // documented MVP posture; the executor is never blocked).
-func (f *WebFrontend) broadcast(conv ConvID, ev string) {
+func (f *WebFrontend) broadcast(conv ConvID, fr sseFrame) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, ch := range f.subs[conv] {
 		select {
-		case ch <- ev:
+		case ch <- fr:
 		default: // slow client: drop, never block the executor
 		}
 	}

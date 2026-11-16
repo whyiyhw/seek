@@ -142,8 +142,9 @@ type WebFrontend struct {
 	inbox   chan<- Inbound // set by Run; handlers 503 before that
 
 	mu   sync.Mutex
-	subs map[ConvID]map[int]chan string // per-conv SSE subscribers (W1.3): buffered event-json chans
-	next int                            // subscriber ids, unique across convs
+	subs map[ConvID]map[int]chan sseFrame // per-conv SSE subscribers (W1.3): buffered frame chans
+	next int                              // subscriber ids, unique across convs
+	runs map[ConvID]*webRun               // live streamed run per conv (W1.4); guarded by mu
 }
 
 // Compile-time port check (the fake asserts the same contract).
@@ -297,12 +298,26 @@ func (f *WebFrontend) Run(ctx context.Context, in chan<- Inbound) error {
 // the same conv still share one stream). Best-effort — a full
 // subscriber buffer drops that event for that client, a Send with no
 // subscribers is a silent no-op (documented MVP limitation).
+//
+// W1.4 close-out: when a streamed run is live on conv, the reply
+// envelope carries that run's id (+ session_id from agent_end) so
+// clients replace the streaming bubble with the authoritative text —
+// a PURE addition over the MVP {"conv","text"} shape (webReplyEvent);
+// with no live run (command acks, pre-stream frontends) the envelope
+// stays byte-identical to the MVP marshal.
 func (f *WebFrontend) Send(ctx context.Context, conv ConvID, r Reply) error {
-	ev, err := json.Marshal(map[string]string{"conv": string(conv), "text": r.Text})
-	if err != nil {
-		return err // unreachable for string maps, but the type says it
+	run := f.popRun(conv)
+	var data []byte
+	var err error
+	if run != nil {
+		data, err = json.Marshal(webReplyEvent{Conv: string(conv), Text: r.Text, Run: run.id, SessionID: run.sessionID})
+	} else {
+		data, err = json.Marshal(map[string]string{"conv": string(conv), "text": r.Text})
 	}
-	f.broadcast(conv, string(ev))
+	if err != nil {
+		return err // unreachable for these payloads, but the type says it
+	}
+	f.broadcast(conv, sseFrame{data: string(data)})
 	return nil
 }
 
@@ -383,10 +398,15 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleEvents is the SSE downstream. One goroutine per tab: replay
-// nothing, stream the conv's replies + a 15s heartbeat (keeps
+// nothing, stream the conv's frames — the MVP default-event replies
+// plus the W1.4 named-event family delta/tool/usage (EventSource
+// delivers named events only to addEventListener, so the pre-W1.4
+// page's onmessage is untouched) — and a 15s heartbeat (keeps
 // intermediaries from idling the conn; `retry:` makes the browser
 // reconnect after a serve restart), exit on client disconnect or write
-// error. The conv comes from ?conv= (EventSource cannot set headers).
+// error. Every event is written and flushed immediately (§10: a proxy
+// must never batch it). The conv comes from ?conv= (EventSource cannot
+// set headers).
 func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !f.auth(r) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
@@ -404,6 +424,10 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	// Proxy hint (§10 risk table): tell nginx & co. not to buffer this
+	// stream — every event must reach the client the moment it is
+	// written (per-event Flush below is the other half).
+	w.Header().Set("X-Accel-Buffering", "no")
 	io.WriteString(w, "retry: 3000\n\n") // browser auto-reconnect, 3s
 	fl.Flush()
 
@@ -414,8 +438,13 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer beat.Stop()
 	for {
 		select {
-		case ev := <-ch:
-			if _, err := io.WriteString(w, "data: "+ev+"\n\n"); err != nil {
+		case fr := <-ch:
+			if fr.name != "" { // named event (W1.4 family); "" = MVP default
+				if _, err := io.WriteString(w, "event: "+fr.name+"\n"); err != nil {
+					return // client went away
+				}
+			}
+			if _, err := io.WriteString(w, "data: "+fr.data+"\n\n"); err != nil {
 				return // client went away
 			}
 			fl.Flush()

@@ -151,6 +151,37 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Printf("{\"type\":\"tool_end\",\"id\":\"t1\",\"name\":\"read\",\"result\":\"%s\",\"bytes\":200000}\n", strings.Repeat("x", 200000))
 		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SL"}`)
 		return 0
+	case "web_stream":
+		// W1.4 e2e: the §2.5 family's full input contract —
+		// agent_start WITH model (usage pricing keys off it), two
+		// text deltas split by a wall-clock gap (proves SSE events
+		// land live, not dumped at exit), one tool call start/end
+		// with args/result the SSE side must NOT forward, a turn_end
+		// with cache-hit usage (miss = 1000−800 for the $ check) and
+		// an agent_end carrying the session id for the reply
+		// close-out. reasoning/tool_delta/turn_start ride along to
+		// prove the web layer filters what §2.5 says it filters.
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Println(`{"type":"turn_start","index":0}`)
+		fmt.Println(`{"type":"text_delta","delta":"Hel"}`)
+		time.Sleep(150 * time.Millisecond)
+		fmt.Println(`{"type":"reasoning_delta","delta":"inner monologue","reasoning":true}`)
+		fmt.Println(`{"type":"text_delta","delta":"lo"}`)
+		fmt.Println(`{"type":"tool_start","id":"t1","name":"read","args":"{\"path\":\"x\"}"}`)
+		fmt.Println(`{"type":"tool_delta","id":"t1","name":"read","delta":"partial"}`)
+		fmt.Println(`{"type":"tool_end","id":"t1","name":"read","result":"secret payload","bytes":14}`)
+		time.Sleep(150 * time.Millisecond)
+		fmt.Println(`{"type":"turn_end","index":0,"prompt_tokens":1000,"completion_tokens":200,"cache_hit_tokens":800,"tool_calls":1}`)
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SW1"}`)
+		return 0
+	case "web_hang":
+		// W1.4 /cancel e2e: stream a delta, then hang — the run stays
+		// live until the plane's /cancel kills the process tree; the
+		// stub never reaches agent_end on purpose.
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Println(`{"type":"text_delta","delta":"stuck"}`)
+		time.Sleep(60 * time.Second)
+		return 0
 	default: // happy
 		if sleep > 0 {
 			time.Sleep(sleep)

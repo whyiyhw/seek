@@ -189,14 +189,18 @@ func (e *Executor) Run(ctx context.Context, req ExecRequest) (ExecResult, error)
 }
 
 // RunEvent is one line of the stable `seek -p --json` JSONL contract
-// (cmd/seek main.go jsonLine — the field set mirrors it 1:1; it grows
-// additively with that contract, e.g. the planned agent_start.model).
-// Named + exported so frontends can render the stream without
-// re-parsing raw bytes. Consumers branch on Type; all other fields are
-// type-specific, per the jsonLine contract comment.
+// (cmd/seek main.go jsonLine — the field set mirrors it 1:1 and grows
+// additively with that contract). Named + exported so frontends can
+// render the stream without re-parsing raw bytes. Consumers branch on
+// Type; all other fields are type-specific, per the jsonLine contract
+// comment.
 type RunEvent struct {
 	Type  string `json:"type"`
 	Index int    `json:"index,omitempty"`
+	// agent_start only: model id the run is bound to (the JSONL
+	// contract's agent_start.model, W0.3 — pricing consumers turn
+	// turn_end usage into $ with it, feature-web-frontend §2.5)
+	Model string `json:"model,omitempty"`
 	// text_delta / reasoning_delta / tool_delta
 	Delta     string `json:"delta,omitempty"`
 	Reasoning bool   `json:"reasoning,omitempty"`
