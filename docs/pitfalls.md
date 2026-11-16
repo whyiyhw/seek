@@ -1038,6 +1038,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: for never-ending response bodies (SSE, long-poll), the open helper returning `resp` is a contract: the caller owes a `defer resp.Body.Close()` before anything that closes the server. A cleanup-only close guarantees the hang.
 - **Refs**: `internal/controlplane/webfrontend_topic_test.go:openEventsRaw` callers; W1.3's `openSSE` callers in `webfrontend_conv_test.go` follow the pattern.
 
+### Handler parked on `<-r.Context().Done()` with an unread request body hangs `srv.Close()` forever
+- **Saw**: a ctx-cancel test (handler blocks on `<-r.Context().Done()`, client cancels mid-flight, client call returns fine) wedged the whole test binary until `go test -timeout` — `httptest.Server.Close` waited forever for the parked handler; the server-side request context never fired despite the client having disconnected.
+- **Why**: on HTTP/1.1 the server only cancels `r.Context()` on client disconnect once a background connection read is active, and `net/http` defers starting it until the request body hits EOF (`registerOnHitEOF` in `serveConn`). A handler that parks with the body unconsumed never gets that read started, so the disconnect is invisible.
+- **Fix**: drain the body before parking — `_, _ = io.Copy(io.Discard, r.Body)` then `<-r.Context().Done()`. Commit (this one).
+- **Lesson**: a fake that parks on the request context is also a body consumer. The client's abort and the server's *knowledge* of that abort are two different events; on HTTP/1.1 the second one costs an explicit drain (or any handler-side `r.Body` read to EOF). Same `srv.Close()` hang signature as the SSE entry above, different root cause — LIFO ordering there, background-read deferral here.
+- **Refs**: `pkg/deepseek/asr_test.go:TestASR_ContextCanceled`
+
 ## Release / upgrade
 
 ### `tui.VersionString()` is a formatted banner, not a raw module version

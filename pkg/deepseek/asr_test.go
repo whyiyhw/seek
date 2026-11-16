@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // asrServer mimics the ASR API at /v1/tools/asr and counts requests so
@@ -206,6 +207,49 @@ func TestASR_RetriesOnceThenGivesUp(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(n); got != 2 {
 		t.Errorf("requests = %d, want 2 (retry once, no more)", got)
+	}
+}
+
+// TestASR_ContextCanceled is the ctx.Done path (AGENTS.md "Testing":
+// any ctx-aware function gets one). The handler parks until the
+// client aborts so the cancellation lands mid-flight; the abort must
+// surface as context.Canceled through the "deepseek: http:" wrap and
+// retryCall must NOT retry a cancelled context (retry.go:43 returns
+// unannotated on ctx.Err() != nil).
+//
+// The body MUST be drained before parking: on HTTP/1.1 the server
+// only cancels r.Context() on client disconnect once a background
+// connection read is active, and net/http defers starting it until
+// the request body hits EOF (registerOnHitEOF). A handler that parks
+// with the body unread never learns the client left, so httptest's
+// srv.Close() — which waits for outstanding handlers — hangs forever.
+func TestASR_ContextCanceled(t *testing.T) {
+	srv, n := asrServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	})
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	defer cancel()
+
+	c := New(WithAPIKey("t"), WithBaseURL(srv.URL))
+	resp, err := c.ASR(ctx, &ASRRequest{Audio: wavBytes(32000, 3200)})
+	if err == nil {
+		t.Fatal("want error on cancelled context")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled in chain", err)
+	}
+	if resp != nil {
+		t.Errorf("resp = %+v, want nil", resp)
+	}
+	if got := atomic.LoadInt32(n); got > 1 {
+		t.Errorf("requests = %d, want ≤1 — no retry after cancellation", got)
 	}
 }
 
