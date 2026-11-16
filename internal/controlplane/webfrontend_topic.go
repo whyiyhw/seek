@@ -16,10 +16,19 @@ package controlplane
 // panel protocol is subscribe-FIRST, then GET /subagents for the
 // snapshot: pushes patch it, history never replays.
 //
+// The fanout unit is the FOLLOW, not the topic name: subscriber
+// channels live on the per-index-path topicFollow, and followLoop
+// pushes only to its own follow's subscribers. A topic-name-keyed
+// hub would fan project A's rows to every subagents subscriber
+// including ones bound to project B — the exact cross-project leak
+// the W3.2 rework round fixed; per-follow fanout makes that leak
+// structurally impossible, not key-discipline-enforced.
+//
 // Follow lifecycle (the inspect-rpc §4.2 observer shape): the first
 // subscriber of an index path starts ONE follower goroutine, later
-// subscribers of the same path share it (refcount), the last
-// unsubscribe stops it — a client disconnect can never strand one.
+// subscribers of the same path share it (len(subs) IS the refcount),
+// the last unsubscribe stops it — a client disconnect can never
+// strand one.
 
 import (
 	"encoding/json"
@@ -58,23 +67,28 @@ type topicEvent struct {
 	Sub   subagent.Subagent `json:"sub"`
 }
 
-// topicFollow is one shared tail-follow: refs counts subscribers of
-// the path, stop closes when it reaches zero. Guarded by WebFrontend.mu;
-// the followLoop goroutine owns everything else (its Follower).
+// topicFollow is one shared tail-follow AND its subscriber set: subs
+// holds every topic client of this index path's channel (the fanout
+// set), and its length IS the refcount — stop closes when the last
+// subscriber leaves. subs guarded by WebFrontend.mu; the followLoop
+// goroutine owns everything else (its Follower).
 type topicFollow struct {
 	stop chan struct{}
-	refs int
+	subs map[int]chan string
 }
 
 // subscribeTopic registers one SSE client under BOTH dimensions: conv
 // (a channel identical to W1.3 subscribe's — same 16 buffer in
 // f.subs, so chat fanout and isolation semantics are byte-identical)
-// and topic (the 256 drop-oldest channel in f.topics), and starts or
-// joins the index path's shared follow. The follow pins the project
-// resolved by the CALLER at this moment — a later /bind rebind does
-// not redirect it (resubscribe to follow the new project; GET
-// /subagents always resolves fresh).
-func (f *WebFrontend) subscribeTopic(conv ConvID, topic, indexPath string) (ch, tch chan string, unsub func()) {
+// and topic (the 256 drop-oldest channel on the index path's follow),
+// and starts or joins that path's shared follow. No topic-name
+// registry: the caller has already validated the topic (only
+// "subagents" exists) and resolved the index path — the follow IS the
+// topic subscription. It pins the project resolved by the CALLER at
+// this moment — a later /bind rebind does not redirect it
+// (resubscribe to follow the new project; GET /subagents always
+// resolves fresh).
+func (f *WebFrontend) subscribeTopic(conv ConvID, indexPath string) (ch, tch chan string, unsub func()) {
 	// Anchor at SUBSCRIBE time, not first tick: an event appended
 	// between the two would otherwise be anchored past and missed.
 	// Outside mu on purpose — a stat, not map work.
@@ -87,12 +101,6 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, topic, indexPath string) (ch, 
 	if f.subs[conv] == nil {
 		f.subs[conv] = make(map[int]chan string)
 	}
-	if f.topics == nil {
-		f.topics = make(map[string]map[int]chan string)
-	}
-	if f.topics[topic] == nil {
-		f.topics[topic] = make(map[int]chan string)
-	}
 	if f.follows == nil {
 		f.follows = make(map[string]*topicFollow)
 	}
@@ -101,15 +109,14 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, topic, indexPath string) (ch, 
 	ch = make(chan string, 16)
 	tch = make(chan string, topicChanBuf)
 	f.subs[conv][id] = ch
-	f.topics[topic][id] = tch
 
 	fl := f.follows[indexPath]
 	if fl == nil {
-		fl = &topicFollow{stop: make(chan struct{})}
+		fl = &topicFollow{stop: make(chan struct{}), subs: make(map[int]chan string)}
 		f.follows[indexPath] = fl
-		go f.followLoop(fo, fl.stop)
+		go f.followLoop(fo, fl)
 	}
-	fl.refs++
+	fl.subs[id] = tch
 
 	return ch, tch, func() {
 		f.mu.Lock()
@@ -118,13 +125,9 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, topic, indexPath string) (ch, 
 		if len(f.subs[conv]) == 0 {
 			delete(f.subs, conv)
 		}
-		delete(f.topics[topic], id)
-		if len(f.topics[topic]) == 0 {
-			delete(f.topics, topic)
-		}
 		if fl := f.follows[indexPath]; fl != nil {
-			fl.refs--
-			if fl.refs <= 0 {
+			delete(fl.subs, id)
+			if len(fl.subs) == 0 {
 				delete(f.follows, indexPath)
 				close(fl.stop)
 			}
@@ -134,16 +137,16 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, topic, indexPath string) (ch, 
 
 // followLoop is the shared follower goroutine for one index path. It
 // exits when the last subscriber releases the follow (stop closes) —
-// nothing else stops it, and it stops nothing else (pushTopic is
+// nothing else stops it, and it stops nothing else (pushFollow is
 // best-effort). Per-tick Poll failures are already tolerated inside
 // Follower.Poll (nothing consumed, nothing lost); the loop itself has
 // no failure path that outlives stop.
-func (f *WebFrontend) followLoop(fo *subagent.Follower, stop <-chan struct{}) {
+func (f *WebFrontend) followLoop(fo *subagent.Follower, fl *topicFollow) {
 	tick := time.NewTicker(subagentsTopicPoll)
 	defer tick.Stop()
 	for {
 		select {
-		case <-stop:
+		case <-fl.stop:
 			return
 		case <-tick.C:
 			for _, p := range fo.Poll() {
@@ -151,20 +154,21 @@ func (f *WebFrontend) followLoop(fo *subagent.Follower, stop <-chan struct{}) {
 				if err != nil {
 					continue // Subagent always marshals; defensive only
 				}
-				f.pushTopic(topicSubagents, string(ev))
+				f.pushFollow(fl, string(ev))
 			}
 		}
 	}
 }
 
-// pushTopic fans one event out to every subscriber of topic with
-// drop-OLDEST semantics — never blocking the follower. The retry
+// pushFollow fans one event out to THIS follow's subscribers with
+// drop-OLDEST semantics — never blocking the follower, never reaching
+// another follow's subscribers (another project's clients). The retry
 // after an eviction cannot miss: mu is held and the follower goroutine
 // is the only writer, so the freed slot survives until our send.
-func (f *WebFrontend) pushTopic(topic, ev string) {
+func (f *WebFrontend) pushFollow(fl *topicFollow, ev string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, ch := range f.topics[topic] {
+	for _, ch := range fl.subs {
 		select {
 		case ch <- ev:
 		default:

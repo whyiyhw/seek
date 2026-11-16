@@ -148,10 +148,10 @@ type WebFrontend struct {
 	next int                            // subscriber ids, unique across convs
 
 	// Topic dimension (W3.2, webfrontend_topic.go): the same /events
-	// connections keyed by topic name (second channel, drop-oldest
-	// buffer), plus the shared subagents.jsonl tail-follows behind the
-	// "subagents" topic. Guarded by mu like subs.
-	topics  map[string]map[int]chan string
+	// connections' second channel (drop-oldest buffer) hung on the
+	// shared per-index-path subagents.jsonl tail-follows behind the
+	// "subagents" topic — the FOLLOW is the fanout unit, so pushes
+	// reach only that project's subscribers. Guarded by mu like subs.
 	follows map[string]*topicFollow
 }
 
@@ -448,7 +448,7 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 		unsub func()
 	)
 	if topic != "" {
-		ch, tch, unsub = f.subscribeTopic(conv, topic, indexPath)
+		ch, tch, unsub = f.subscribeTopic(conv, indexPath)
 	} else {
 		ch, unsub = f.subscribe(conv)
 	}

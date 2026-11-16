@@ -4,6 +4,7 @@ package controlplane
 // §3.2, §8): SSE topic `subagents` on /events — push e2e over a
 // hand-made index (no history replay, folded rows, notified silent),
 // conv/topic coexistence in both directions, shared-follow refcount,
+// cross-PROJECT isolation (two convs, two projects, no crosstalk),
 // the drop-oldest buffer, and the follow-disconnect leaktest (same
 // caliber as TestWeb_SSEDisconnectUnsubscribes: hub unregisters, map
 // entries leave with their last user, goroutines exit).
@@ -37,11 +38,21 @@ func fastTopicPoll(t *testing.T) {
 // seedTopicProject binds a conv to a fresh temp project (SEEK_HOME
 // redirected so paths.SubagentsIndex resolves in-test) and seeds the
 // project's subagents.jsonl with lines; returns the index path for
-// the test's appends.
+// the test's appends. One SEEK_HOME per TEST: /events re-resolves
+// the index at subscribe time from the env, so a second conv in the
+// same test must go through seedTopicConv (a second redirect here
+// would resolve conv A's index under conv B's home).
 func seedTopicProject(t *testing.T, fe *WebFrontend, convNative string, lines ...string) string {
 	t.Helper()
 	t.Setenv("SEEK_HOME", t.TempDir())
-	project := t.TempDir()
+	return seedTopicConv(t, fe, convNative, t.TempDir(), lines...)
+}
+
+// seedTopicConv is seedTopicProject's per-conv core for a test that
+// seeds more than one project: same shape, but the project is given
+// and SEEK_HOME stays whatever the first seedTopicProject call set.
+func seedTopicConv(t *testing.T, fe *WebFrontend, convNative, project string, lines ...string) string {
+	t.Helper()
 	conv := NewConvID("web", convNative)
 	if convNative == "default" {
 		conv = webConvID()
@@ -185,23 +196,28 @@ func wantFramesQuiet(t *testing.T, tap <-chan sseMsg, window time.Duration) {
 	}
 }
 
-// topicRefs peeks the follow state for an index path: refs and
-// existence.
-func topicRefs(f *WebFrontend, indexPath string) (int, bool) {
+// topicSubs peeks a follow's state for an index path: subscriber
+// count (which IS the refcount) and existence.
+func topicSubs(f *WebFrontend, indexPath string) (int, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fl, ok := f.follows[indexPath]
 	if !ok {
 		return 0, false
 	}
-	return fl.refs, true
+	return len(fl.subs), true
 }
 
-// topicSubCount peeks the hub's subscriber count for a topic.
-func topicSubCount(f *WebFrontend, topic string) int {
+// topicFanoutCount totals subscribers across every follow — the whole
+// topic hub; 0 when every topic client has disconnected.
+func topicFanoutCount(f *WebFrontend) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return len(f.topics[topic])
+	n := 0
+	for _, fl := range f.follows {
+		n += len(fl.subs)
+	}
+	return n
 }
 
 const (
@@ -350,9 +366,9 @@ func TestWeb_TopicFollowSharedRefcount(t *testing.T) {
 	tap2, resp2 := openEventsRaw(t, srv, fe, "?token=test-token-0123456789abcdef&topic=subagents", "default")
 	defer resp2.Body.Close()
 
-	refs, ok := topicRefs(fe, index)
+	refs, ok := topicSubs(fe, index)
 	if !ok || refs != 2 {
-		t.Fatalf("follow state = (%d, %v), want one shared follow with refs 2", refs, ok)
+		t.Fatalf("follow state = (%d, %v), want one shared follow with 2 subscribers", refs, ok)
 	}
 
 	appendIndexLines(t, index, topicStartedBG)
@@ -362,18 +378,18 @@ func TestWeb_TopicFollowSharedRefcount(t *testing.T) {
 	resp1.Body.Close()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if refs, ok := topicRefs(fe, index); ok && refs == 1 {
+		if refs, ok := topicSubs(fe, index); ok && refs == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("follow did not drop to refs 1 after first disconnect (%d, %v)", refs, ok)
+			t.Fatalf("follow did not drop to 1 subscriber after first disconnect (%d, %v)", refs, ok)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 
 	resp2.Body.Close()
 	for {
-		if _, ok := topicRefs(fe, index); !ok {
+		if _, ok := topicSubs(fe, index); !ok {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -401,14 +417,14 @@ func TestWeb_TopicFollowDisconnectLeak(t *testing.T) {
 
 	waitSubs(t, fe, conv, 0)
 	deadline := time.Now().Add(2 * time.Second)
-	for topicSubCount(fe, topicSubagents) != 0 {
+	for topicFanoutCount(fe) != 0 {
 		if time.Now().After(deadline) {
-			t.Fatalf("topic hub never emptied (has %d)", topicSubCount(fe, topicSubagents))
+			t.Fatalf("topic hub never emptied (has %d)", topicFanoutCount(fe))
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
 	for {
-		if _, ok := topicRefs(fe, index); !ok {
+		if _, ok := topicSubs(fe, index); !ok {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -416,7 +432,7 @@ func TestWeb_TopicFollowDisconnectLeak(t *testing.T) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if refs := topicSubCount(fe, topicSubagents); refs != 0 {
+	if refs := topicFanoutCount(fe); refs != 0 {
 		t.Errorf("topic subscribers = %d, want 0", refs)
 	}
 
@@ -440,8 +456,8 @@ func TestWeb_TopicFollowDisconnectLeak(t *testing.T) {
 	// appended history stays silent and only new lines push).
 	tap2, resp2 := openEventsRaw(t, srv, fe, "?token=test-token-0123456789abcdef&conv=leak-conv&topic=subagents", "leak-conv")
 	defer resp2.Body.Close()
-	if refs, ok := topicRefs(fe, index); !ok || refs != 1 {
-		t.Fatalf("resubscribe follow = (%d, %v), want refs 1", refs, ok)
+	if refs, ok := topicSubs(fe, index); !ok || refs != 1 {
+		t.Fatalf("resubscribe follow = (%d, %v), want 1 subscriber", refs, ok)
 	}
 	wantFramesQuiet(t, tap2, 150*time.Millisecond) // anchored past sync-1
 	appendIndexLines(t, index, topicStartedBG)
@@ -456,16 +472,16 @@ func TestWeb_PushTopicDropsOldest(t *testing.T) {
 	fe, _, _ := newTestWeb(t)
 	const bufCap = 8
 	ch := make(chan string, bufCap)
+	// Seed one follow directly (no server, no goroutine — the buffer
+	// semantics are all this test exercises); pushFollow fans it out.
 	fe.mu.Lock()
-	if fe.topics == nil {
-		fe.topics = make(map[string]map[int]chan string)
-	}
-	fe.topics[topicSubagents] = map[int]chan string{1: ch}
+	fl := &topicFollow{stop: make(chan struct{}), subs: map[int]chan string{1: ch}}
+	fe.follows = map[string]*topicFollow{"test-index": fl}
 	fe.mu.Unlock()
 
 	const total = bufCap + 4
 	for i := 0; i < total; i++ {
-		fe.pushTopic(topicSubagents, fmt.Sprintf("ev-%02d", i))
+		fe.pushFollow(fl, fmt.Sprintf("ev-%02d", i))
 	}
 	if got := len(ch); got != bufCap {
 		t.Fatalf("buffer holds %d, want %d", got, bufCap)
@@ -477,4 +493,46 @@ func TestWeb_PushTopicDropsOldest(t *testing.T) {
 			t.Fatalf("buffer content = %q at position %d, want %q (oldest evicted)", got, i, want)
 		}
 	}
+}
+
+// TestWeb_TopicProjectIsolation is the rework round's target
+// regression (card c_3736yl): two convs bound to DIFFERENT projects,
+// both opted into ?topic=subagents — a line appended to project A's
+// index pushes ONLY to A's subscriber. The original bug: the fanout
+// was keyed by topic name alone, so A's follow pushed its rows into
+// B's stream too (invisible to every earlier test — all single
+// project).
+func TestWeb_TopicProjectIsolation(t *testing.T) {
+	fe, _, _ := newTestWeb(t)
+	fastTopicPoll(t)
+	indexA := seedTopicProject(t, fe, "iso-a", topicStartedSync)
+	indexB := seedTopicConv(t, fe, "iso-b", t.TempDir(), topicStartedSync)
+	srv := httptest.NewServer(fe.handler())
+	defer srv.Close()
+
+	tapA, respA := openEventsRaw(t, srv, fe, "?token=test-token-0123456789abcdef&conv=iso-a&topic=subagents", "iso-a")
+	defer respA.Body.Close()
+	tapB, respB := openEventsRaw(t, srv, fe, "?token=test-token-0123456789abcdef&conv=iso-b&topic=subagents", "iso-b")
+	defer respB.Body.Close()
+
+	// Two follows — one per project — of one subscriber each.
+	if n, ok := topicSubs(fe, indexA); !ok || n != 1 {
+		t.Fatalf("project A follow = (%d, %v), want 1 subscriber", n, ok)
+	}
+	if n, ok := topicSubs(fe, indexB); !ok || n != 1 {
+		t.Fatalf("project B follow = (%d, %v), want 1 subscriber", n, ok)
+	}
+
+	// A appends: A's subscriber gets the row, B's stream stays quiet.
+	appendIndexLines(t, indexA, topicStartedBG)
+	wantTopicMsg(t, tapA, "started", "bg-1")
+	wantFramesQuiet(t, tapB, 250*time.Millisecond)
+
+	// The mirror: B's appends reach only B. Both lines go to B's index
+	// (the fold skips a terminal event for a sub_sid with no preceding
+	// started, so B needs its own started too).
+	appendIndexLines(t, indexB, topicStartedBG, topicDoneBG)
+	wantTopicMsg(t, tapB, "started", "bg-1")
+	wantTopicMsg(t, tapB, "completed", "bg-1")
+	wantFramesQuiet(t, tapA, 250*time.Millisecond)
 }
