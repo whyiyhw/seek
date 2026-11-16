@@ -56,3 +56,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_ydglne：web 资产面·三：memory/projects/stats method 集（W4.3）
 - c_axrls3：web 流式平面缝·二：StreamSender sibling 接口 + router upcast 接线（W0.2）
 - c_jxhkbr：web serve CLI --listen flag 补缺（W1.1 尾巴）
+- c_pbg5kp：web 流式平面缝·三：agent_start 加 model 字段（W0.3）
