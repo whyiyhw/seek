@@ -18,6 +18,14 @@
      next_cursor (50/page, "load more" appends; the DOM only ever holds
      what was paged in, so a long transcript stays at virtual-scroll
      order of magnitude). Same textContent-only discipline as chat.
+     Task panel (W3.3, orchestration P1 visualisation): subagent
+     master-detail over GET /subagents + the SSE topic — a SECOND
+     /events connection opts into ?topic=subagents and listens ONLY
+     for the named event (no onmessage: the conv frames riding the
+     same connection are dropped by the browser, so chat never
+     double-renders). Protocol: subscribe first, then GET /subagents
+     for the snapshot; pushes merge by sub_sid. A detail row reads
+     the sub transcript's LAST assistant entry (?sub=, summary 单源).
      Memory browser + stats view (W4.5, asset plane UI #2): memory/
      projects drives the project picker, memory/list the entry list,
      memory/get the detail (rendered by the chat renderer); the stats
@@ -31,7 +39,7 @@
      line: refreshed immediately after a command POST (202) settles on
      the wire, again on every SSE reply, and again on SSE (re)connect.
      Deliberately out of scope: multi-tab sync, history persistence,
-     FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
+     FULL markdown rendering (P3 §4.2 vendor evaluation),
      mobile, real auth (design card c_7pptol owns the full UI). -->
 <html lang="zh">
 <head>
@@ -72,9 +80,9 @@
          border-bottom: 1px solid #2a2e36; overflow-x: auto; }
   #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
   #bar .cmd { background: #242830; }          /* 指令按钮与视图按钮区分 */
-  #browse-btn { margin-left: auto; }          /* 视图按钮组（会话/记忆/统计）靠右 */
+  #browse-btn { margin-left: auto; }          /* 视图按钮组（会话/记忆/统计/后台）靠右 */
   body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
-  /* 三个资产面板共用「browsing 隐聊天」总闸；各自的 *-view 类挑一个面板亮 */
+  /* 四个视图面板共用「browsing 隐聊天」总闸；各自的 *-view 类挑一个面板亮 */
   #browser { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   body:not(.sess-view) #browser { display: none; }
   body.browsing #list, body.browsing form { display: none; }
@@ -106,6 +114,33 @@
                color: #7a8089; }
   #sess-foot button { width: 100%; }
   .pane-hint { color: #7a8089; font-style: italic; padding: 14px; }
+
+  /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
+  /* 与三个资产面板同一开合闸（browsing=隐聊天 + 恰好一个 *-view 亮面板），
+     故这里只负责「本面板亮」；隐聊天/互斥由 body.browsing 与各 body:not(.x-view)
+     选择器承担（W4.5 拆分后的口径）。 */
+  #agents { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  body.agents-view #agents { display: flex; }
+  #agents-body { flex: 1; display: flex; min-height: 0; }
+  #ag-list { width: 380px; flex: none; overflow-y: auto;
+             border-right: 1px solid #2a2e36; }
+  .ag-row { display: block; width: 100%; text-align: left; border-radius: 0;
+            border-bottom: 1px solid #22252c; padding: 8px 12px; }
+  .ag-row.cur { background: #2c3d5f; }
+  .ag-row .t1 { display: flex; gap: 6px; align-items: baseline; }
+  .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
+                  white-space: nowrap; }
+  .ag-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px; }
+  .ag-badge { font-size: 11px; flex: none; white-space: nowrap; }
+  #ag-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #ag-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
+             color: #7a8089; white-space: nowrap; overflow: hidden;
+             text-overflow: ellipsis; }
+  #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
+  #ag-last pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+                 padding: 8px 10px; margin: 6px 0; overflow-x: auto;
+                 white-space: pre; font: inherit; }
+  #ag-last code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
 
   /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
   .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -165,6 +200,7 @@
   <button id="browse-btn" type="button">📚 会话</button>
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
+  <button id="agents-btn" type="button">🤖 后台</button>
 </nav>
 <main id="list"></main>
 <section id="browser">
@@ -174,6 +210,15 @@
       <div id="sess-meta"></div>
       <div id="sess-msgs"></div>
       <div id="sess-foot"></div>
+    </div>
+  </div>
+</section>
+<section id="agents">
+  <div id="agents-body">
+    <div id="ag-list"></div>
+    <div id="ag-detail">
+      <div id="ag-meta"></div>
+      <div id="ag-last"></div>
     </div>
   </div>
 </section>
@@ -293,7 +338,9 @@ function addMsg(who, text) {
 
 // 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。返回
 // 是否已鉴权——启动时据此决定挂不挂 SSE（W1.2：凭证可能是 cookie，页内
-// 无从预判，探测是唯一权威）。
+// 无从预判，探测是唯一权威）。boundProject 记下当前绑定（或 null）供
+// 任务面板的 topic 订阅判定（W3.3）：换绑项目后重开订阅跟随新项目。
+let boundProject = null;
 async function refreshState() {
   try {
     const r = await fetch(q('/state'), { headers: { 'X-Seek-Conversation': CONV } });
@@ -302,8 +349,10 @@ async function refreshState() {
       return false;
     }
     const s = await r.json();
+    boundProject = s.bound ? s.project : null;
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
                       : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
+    syncTopicStream();               // /bind 落地后面板订阅即时跟上
     return true;
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
@@ -522,19 +571,38 @@ function appendMsg(raw) {
   sessMsgs.appendChild(el);
 }
 
+// ---- 任务面板（W3.3 编排 P1 可视化）----
+// 消费 W3.1 的 GET /subagents（列表 + ?sub= 详情）与 W3.2 的 SSE topic。
+// 面板协议 = 先订阅、再取快照：专用 /events 连接带 ?topic=subagents 且
+// 只 addEventListener('subagents')、不设 onmessage——同连接上捎带的聊天帧
+// 被浏览器静默丢弃，不会与主连接重复渲染。推送按 sub_sid 合并（列表序
+// = 服务端 newest-first，新行 unshift）；终态推送顺手刷新打开中的详情。
+const agentsBtn = document.getElementById('agents-btn');
+const agList = document.getElementById('ag-list');
+const agMeta = document.getElementById('ag-meta');
+const agLast = document.getElementById('ag-last');
+let agRows = [];      // 折叠行（GET 快照 + topic 推送合并后的当前态）
+let agOpen = null;    // 详情打开中的 sub_sid
+let topicES = null;   // 面板专用 SSE 连接（进入面板且已绑定时才开）
+let topicProject = null;
+
 const memBtn = document.getElementById('mem-btn');
 const statBtn = document.getElementById('stat-btn');
 browseBtn.addEventListener('click', () => togglePane('sessions', browseBtn, '📚 会话'));
 memBtn.addEventListener('click', () => togglePane('memory', memBtn, '🧠 记忆'));
 statBtn.addEventListener('click', () => togglePane('stats', statBtn, '📊 统计'));
+agentsBtn.addEventListener('click', () => togglePane('agents', agentsBtn, '🤖 后台'));
 
-// 三面板共用的开合闸（W4.5 把 W4.4 的 browsing 一位类拆成「browsing=隐聊天
-// + 恰好一个 *-view 亮面板」）：再点当前面板的按钮回聊天面。进面板即重拉
-// 数据（磁盘世界会变旧，与 loadSessions 同一取舍）。
+// 四面板共用的开合闸（W4.5 把 W4.4 的 browsing 一位类拆成「browsing=隐
+// 聊天 + 恰好一个 *-view 亮面板」；W3.3 的任务面板并入同一闸）：再点当
+// 前面板的按钮回聊天面。进面板即重拉数据（磁盘世界会变旧，与
+// loadSessions 同一取舍）。末尾的 syncTopicStream 是 W3.3 的接线：agents
+// 面板可见且已绑定才保持专用订阅，离开/换面板即收口。
 const panes = {
   sessions: { btn: browseBtn, label: '📚 会话', cls: 'sess-view', load: loadSessions },
   memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',   load: loadMemPane },
   stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',  load: loadStatPane },
+  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view', load: loadAgentsPane },
 };
 function togglePane(name, btn, label) {
   const active = !document.body.classList.contains(panes[name].cls);
@@ -549,6 +617,127 @@ function togglePane(name, btn, label) {
   } else {
     document.body.classList.remove('browsing');
   }
+  syncTopicStream();
+}
+
+// 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
+// togglePane）：先订阅再取快照（W3.2 协议序——锚点在订阅时刻，订阅→GET
+// 之间的追加靠推送补、不靠快照重读）。
+function loadAgentsPane() {
+  syncTopicStream();
+  loadAgents();
+  if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
+}
+
+const AG_STATUS = {
+  active:    ['在跑',   '#d8a657'],
+  completed: ['完成',   '#7ec699'],
+  failed:    ['失败',   '#d8756f'],
+  killed:    ['已终止', '#9aa0a8'],
+  orphaned:  ['失联',   '#d8756f'],
+  promoted:  ['已晋升', '#7aa2f7'],
+};
+const agStatusView = s => AG_STATUS[s] || [s, '#9aa0a8'];
+
+function agTokensText(t) {
+  if (!t) return '';
+  const n = (t.prompt || 0) + (t.completion || 0) + (t.cache_hit || 0);
+  return n ? 'p' + t.prompt + ' c' + t.completion + ' ch' + t.cache_hit : '';
+}
+
+async function loadAgents() {
+  paneHint(agList, '加载中…');
+  try {
+    const r = await fetch(q('/subagents'), { headers: { 'X-Seek-Conversation': CONV } });
+    if (r.status === 400) return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
+    if (!r.ok) return paneHint(agList, '/subagents 失败：HTTP ' + r.status);
+    agRows = await r.json();
+    renderAgList();
+  } catch (e) { paneHint(agList, '/subagents 失败：' + e); }
+}
+
+// 列表全量重画（面板量级几十行，无所谓）；textContent-only 纪律同聊天面。
+function renderAgList() {
+  agList.replaceChildren();
+  if (!agRows.length) return paneHint(agList, '（还没有子代理记录）');
+  for (const s of agRows) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'ag-row';
+    row.dataset.sid = s.sub_sid;
+    if (agOpen === s.sub_sid) row.classList.add('cur');
+    const t1 = document.createElement('span');
+    t1.className = 't1';
+    const badge = document.createElement('span');
+    badge.className = 'ag-badge';
+    const [label, color] = agStatusView(s.status);
+    badge.textContent = (s.background ? 'bg·' : '') + label + (s.notified ? '✓' : '');
+    badge.style.color = color;
+    const desc = document.createElement('span');
+    desc.className = 'desc';
+    desc.textContent = s.description || '（无描述）';
+    t1.appendChild(badge);
+    t1.appendChild(desc);
+    const t2 = document.createElement('span');
+    t2.className = 't2';
+    const toks = agTokensText(s.tokens);
+    t2.textContent = (s.type || '?') + ' · '
+      + (s.started_at ? new Date(s.started_at).toLocaleString() : '')
+      + (toks ? ' · ' + toks : '');
+    row.appendChild(t1);
+    row.appendChild(t2);
+    row.addEventListener('click', () => openAgent(s.sub_sid));
+    agList.appendChild(row);
+  }
+}
+
+// 详情：GET /subagents?sub= —— 折叠行 + 子 transcript 末条 assistant
+// （summary 单源：索引不带 summary，子自己的 transcript 才是全文）。
+async function openAgent(sid) {
+  agOpen = sid;
+  for (const row of agList.children) row.classList.toggle('cur', row.dataset.sid === sid);
+  agMeta.textContent = '读取中…';
+  agLast.replaceChildren();
+  try {
+    const r = await fetch(q('/subagents?sub=' + encodeURIComponent(sid)),
+                          { headers: { 'X-Seek-Conversation': CONV } });
+    if (!r.ok) { agMeta.textContent = '详情读取失败：HTTP ' + r.status; return; }
+    const d = await r.json();
+    if (agOpen !== sid) return;  // 返回前已切走：丢弃
+    const s = d.sub || {};
+    const [label] = agStatusView(s.status);
+    const toks = agTokensText(s.tokens);
+    agMeta.textContent = (s.background ? '后台 ' : '同步 ') + label + ' · ' + (s.type || '?')
+      + ' · ' + (s.description || '') + (toks ? ' · ' + toks : '');
+    if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
+    else paneHint(agLast, s.status === 'active'
+      ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
+  } catch (e) { agMeta.textContent = '详情读取失败：' + e; }
+}
+
+// topic 订阅生命周期：面板开着且已绑定才连；面板关掉即断；换绑项目后
+// 重连跟随新项目（服务端口径：订阅锚定订阅时的项目，重订阅才跟新）。
+// 未绑定时不开——W3.2 对未绑定 conv 的 topic 请求是 400，EventSource 会
+// 无限重连刷屏（与 W1.2 不挂未鉴权 SSE 同一条纪律）。
+function syncTopicStream() {
+  const want = document.body.classList.contains('agents-view') && boundProject;
+  if (topicES && topicProject !== boundProject) { topicES.close(); topicES = null; }
+  if (want && !topicES) {
+    topicProject = boundProject;
+    topicES = new EventSource(q('/events?conv=' + encodeURIComponent(CONV) + '&topic=subagents'));
+    topicES.addEventListener('subagents', ev => {
+      try {
+        const m = JSON.parse(ev.data);
+        if (!m.sub || !m.sub.sub_sid) return;
+        const i = agRows.findIndex(x => x.sub_sid === m.sub.sub_sid);
+        if (i >= 0) agRows[i] = m.sub; else agRows.unshift(m.sub);
+        renderAgList();
+        if (agOpen === m.sub.sub_sid) openAgent(m.sub.sub_sid);  // 终态推送刷新详情
+      } catch (e) { /* 单条坏帧不毁面板 */ }
+    });
+    // onerror 不处理：EventSource 自动重连；面板关闭由 close() 收口。
+  }
+  if (!want && topicES) { topicES.close(); topicES = null; topicProject = null; }
 }
 
 // ---- 记忆浏览器（W4.5 资产面 UI·二）----
