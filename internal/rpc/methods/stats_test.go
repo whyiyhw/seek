@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -43,6 +45,16 @@ func TestStatsCache(t *testing.T) {
 		if !strings.Contains(string(b), field) {
 			t.Errorf("usage field %q missing from wire: %s", field, b)
 		}
+	}
+	// cost_usd (W4.5 additive): priced server-side by the "client never
+	// prices" rule — expected recomputed with the same call the method
+	// makes, so the assertion holds across tier boundaries.
+	wantCost := pricing.Cost(got.Model, pricing.CurrentTier(time.Now()), wantUsage)
+	if got.CostUSD != wantCost {
+		t.Errorf("cost_usd = %v, want %v (pricing.Cost at current tier)", got.CostUSD, wantCost)
+	}
+	if !strings.Contains(string(b), "cost_usd") {
+		t.Errorf("cost_usd missing from wire: %s", b)
 	}
 
 	// Default sid = newest session (the orphan, saved last).

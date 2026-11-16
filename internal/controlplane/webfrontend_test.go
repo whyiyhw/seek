@@ -400,6 +400,44 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 	}
 }
 
+// TestWeb_PageMemoryStats pins the W4.5 asset-plane UI contract: the
+// page consumes exactly the W4.3 method set (memory/projects|list|get,
+// stats/cache — plus W4.2's session/list as the stats picker) over the
+// same /rpc route. A rename on either side strands a dead button, so
+// the names are pinned against the page like the sessions set above.
+func TestWeb_PageMemoryStats(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"memory/projects", // project picker
+		"memory/list",     // entry list pane
+		"memory/get",      // entry detail
+		"stats/cache",     // the cache/cost view
+		"cost_usd",        // cost is read server-priced, never computed here
+		"q('/rpc')",       // rides the same token'd /rpc route
+		"id=\"mem-proj\"", // the two pickers exist
+		"id=\"stat-sess\"",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the memory/stats piece %q (W4.5)", need)
+		}
+	}
+	// Additivity: chat plane AND the W4.4 sessions browser both survive
+	// the W4.5 panes (the pane switcher hides by class, never unmounts).
+	for _, keep := range []string{
+		"id=\"form\"", "addEventListener('submit'",
+		"id=\"browse-btn\"", "session/messages", "加载更多",
+	} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the prior-plane piece %q — W4.5 must be additive", keep)
+		}
+	}
+	// The client-never-prices rule (§2.5): rate math must not creep into
+	// the page — fmtUSD formats magnitude, it does not price.
+	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing") {
+		t.Errorf("embedded page carries pricing vocabulary — rate cards live only in internal/pricing (§2.5)")
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.

@@ -244,7 +244,10 @@ func (f *WebFrontend) ensureToken() (string, error) {
 // handler builds the route table. Unexported so tests drive it via
 // httptest without a listener; Run is the only production caller. The
 // Host allowlist wraps the whole table (§5.3, webfrontend_auth.go) —
-// rebinding defense sits outside every route, auth included.
+// rebinding defense sits outside every route, auth included. Inside
+// it, the W1.5 asset pipeline (webfrontend_static.go) wraps every
+// route twice: CSP on each response, gzip on the textual ones (SSE
+// passes through uncompressed — flushing beats compressing there).
 func (f *WebFrontend) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", f.handlePage)
@@ -253,7 +256,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
-	return gateHost(mux)
+	return gateHost(withCSP(withGzip(mux)))
 }
 
 // Run implements the Frontend port: listen, serve, park until ctx is
