@@ -13,7 +13,9 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -71,6 +73,14 @@ type statsCacheResult struct {
 	Model    string         `json:"model"`
 	Usage    deepseek.Usage `json:"usage"`
 	HitRatio float64        `json:"hit_ratio"`
+	// CostUSD prices the cumulative Usage at the tier in effect at
+	// query time — an estimate, since the turns accrued across mixed
+	// tiers that the header doesn't record. Server-side by the web's
+	// "client never prices" rule (webfrontend_stream.go §2.5): rate
+	// cards live only in internal/pricing, the same cards as the CLI
+	// footer. Additive W4.5 field; result-field additions are
+	// contract-OK (the W4.3 memory.go precedent).
+	CostUSD float64 `json:"cost_usd"`
 }
 
 func (s *Stats) cache(ctx context.Context, params json.RawMessage) (any, error) {
@@ -114,5 +124,6 @@ func (s *Stats) cache(ctx context.Context, params json.RawMessage) (any, error) 
 		Model:    hdr.Model,
 		Usage:    hdr.Usage,
 		HitRatio: hdr.Usage.HitRatio(),
+		CostUSD:  pricing.Cost(hdr.Model, pricing.CurrentTier(time.Now()), hdr.Usage),
 	}, nil
 }
