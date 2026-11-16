@@ -366,13 +366,33 @@ func (r *Router) handlePrompt(ctx context.Context, m Inbound) {
 	r.trackRun(m.Conv, rc)
 	defer r.untrackRun(m.Conv, rc)
 
-	res, err := r.exec.Run(runCtx, ExecRequest{
+	// Streaming seam (feature-web-frontend.md §2.4 seam 1 + W0.2): the
+	// conversation's frontend MAY implement the optional StreamSender
+	// extension. Upcast at the send site: a hit drives the run through
+	// RunStream, forwarding each live event to the conversation in emit
+	// order; a miss keeps the plain Run path — fake / feishu bytes
+	// unchanged. Either way the final Reply still goes out via Send
+	// below (the streaming bubble closes on the reply; clients key
+	// runs, so dedup is theirs). SendStream is best-effort, same
+	// posture as Send: a failure is logged and dropped, never fed back
+	// into the run.
+	req := ExecRequest{
 		Conv:      string(m.Conv),
 		Dir:       b.ProjectPath,
 		SessionID: b.SessionID,
 		Message:   m.Text,
 		Yolo:      r.cfg.Yolo || b.Yolo,
-	})
+	}
+	var res ExecResult
+	if ss, ok := r.fronts[m.Conv.FrontendName()].(StreamSender); ok {
+		res, err = r.exec.RunStream(runCtx, req, func(ev RunEvent) {
+			if serr := ss.SendStream(ctx, m.Conv, ev); serr != nil {
+				fmt.Fprintf(os.Stderr, "controlplane: router: stream send to %s failed: %v\n", m.Conv, serr)
+			}
+		})
+	} else {
+		res, err = r.exec.Run(runCtx, req)
+	}
 	if err != nil {
 		// Distinguish the two dead-ctx shapes: OUR /cancel fired (run
 		// ctx dead, parent alive) vs shutdown drain (parent dead too).
