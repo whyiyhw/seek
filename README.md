@@ -97,7 +97,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **`/goal`** | loop across turns until a cheap model judges a condition met — TUI / headless / cron. [📘](docs/guide-goal.md) |
 | **OS sandbox** | seatbelt (macOS) / landlock (Linux) — kernel-level confinement, zero runtime deps. [📘](docs/guide-sandbox.md) |
 | **ACP / Zed** | run seek as an editor agent via the Agent Client Protocol. [📘](docs/guide-zed.md) |
-| **Remote control plane** | `seek serve` — one resident process; drive seek from a browser (bundled web chat: SSE streaming, token auth) or any chat channel via the `Frontend` port. Loopback by default; `serve.web_addr` binds a tailnet IP (loopback + CGNAT 100.64.0.0/10 only — 0.0.0.0 refused), or `tailscale serve --tcp=8790` forwards the loopback. [📘](docs/guide-serve.md) |
+| **Remote control plane** | `seek serve` — one resident process; drive seek from a browser (bundled web workbench: streaming chat + sessions/memory/stats browsers, token auth) or any chat channel via the `Frontend` port. Loopback by default; `serve.web_addr` binds a tailnet IP (loopback + CGNAT 100.64.0.0/10 only — 0.0.0.0 refused), or `tailscale serve --tcp=8790` forwards the loopback. [📘](docs/guide-serve.md) |
 | **Portable skills** | Anthropic Agent Skills format — any Claude Code skill installs unmodified; `/distill` drafts new skills from your own sessions. [📘](docs/guide-skills.md) |
 | **Three-tier memory** | session · project (decay-score GC) · cross-project "soul" (`seek -dream`). [📘](docs/guide-memory.md) |
 | **Checkpoints** | per-turn git snapshot + file-level `/undo` `/redo` `/restore`. [📘](docs/guide-checkpoint.md) |

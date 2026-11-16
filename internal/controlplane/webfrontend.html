@@ -26,6 +26,18 @@
      double-renders). Protocol: subscribe first, then GET /subagents
      for the snapshot; pushes merge by sub_sid. A detail row reads
      the sub transcript's LAST assistant entry (?sub=, summary 单源).
+     Memory browser + stats view (W4.5, asset plane UI #2): memory/
+     projects drives the project picker, memory/list the entry list,
+     memory/get the detail (rendered by the chat renderer); the stats
+     view rides stats/cache (session picker from session/list) — the
+     cache/cost card shows hit ratio + cost_usd, priced SERVER-side
+     (the client never prices; §2.5).
+     Command quick buttons (W2.2): /bind /projects /switch /new /cancel
+     in the top bar — zero-arg ones send the SAME command text through
+     the shared POST /msg passthrough; /bind /switch prefill the input
+     for the path argument. Binding status stays pinned in the status
+     line: refreshed immediately after a command POST (202) settles on
+     the wire, again on every SSE reply, and again on SSE (re)connect.
      Deliberately out of scope: multi-tab sync, history persistence,
      FULL markdown rendering (P3 §4.2 vendor evaluation),
      mobile, real auth (design card c_7pptol owns the full UI). -->
@@ -63,12 +75,16 @@
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
 
-  /* ---- 会话浏览器（W4.4 资产面 UI·一）---- */
+  /* ---- 会话浏览器（W4.4 资产面 UI·一）+ 指令快捷按钮（W2.2）---- */
   #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
-         border-bottom: 1px solid #2a2e36; }
-  #bar button { padding: 4px 12px; font-size: 13px; }
+         border-bottom: 1px solid #2a2e36; overflow-x: auto; }
+  #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
+  #bar .cmd { background: #242830; }          /* 指令按钮与视图按钮区分 */
+  #browse-btn { margin-left: auto; }          /* 视图按钮组（会话/记忆/统计/后台）靠右 */
+  body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
+  /* 四个视图面板共用「browsing 隐聊天」总闸；各自的 *-view 类挑一个面板亮 */
   #browser { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  body:not(.browsing) #browser { display: none; }
+  body:not(.sess-view) #browser { display: none; }
   body.browsing #list, body.browsing form { display: none; }
   #browser-body { flex: 1; display: flex; min-height: 0; }
   #sess-list { width: 320px; flex: none; overflow-y: auto;
@@ -100,9 +116,11 @@
   .pane-hint { color: #7a8089; font-style: italic; padding: 14px; }
 
   /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
+  /* 与三个资产面板同一开合闸（browsing=隐聊天 + 恰好一个 *-view 亮面板），
+     故这里只负责「本面板亮」；隐聊天/互斥由 body.browsing 与各 body:not(.x-view)
+     选择器承担（W4.5 拆分后的口径）。 */
   #agents { flex: 1; display: none; flex-direction: column; min-height: 0; }
-  body.agents #agents { display: flex; }
-  body.agents #list, body.agents form, body.agents #browser { display: none; }
+  body.agents-view #agents { display: flex; }
   #agents-body { flex: 1; display: flex; min-height: 0; }
   #ag-list { width: 380px; flex: none; overflow-y: auto;
              border-right: 1px solid #2a2e36; }
@@ -123,12 +141,65 @@
                  padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                  white-space: pre; font: inherit; }
   #ag-last code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+
+  /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
+  .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  body:not(.mem-view) #memory { display: none; }
+  body:not(.stat-view) #stats { display: none; }
+  .pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 14px;
+               border-bottom: 1px solid #2a2e36; }
+  .pane-head select { background: #14161a; color: inherit; border: 1px solid #2a2e36;
+                      border-radius: 6px; padding: 4px 8px; font: inherit;
+                      max-width: 60%; }
+  .pane-head .cnt { color: #7a8089; font-size: 12px; }
+  #mem-body { flex: 1; display: flex; min-height: 0; }
+  #mem-list { width: 320px; flex: none; overflow-y: auto;
+              border-right: 1px solid #2a2e36; }
+  .mem-row { display: block; width: 100%; text-align: left; border-radius: 0;
+             border-bottom: 1px solid #22252c; padding: 8px 12px; }
+  .mem-row.cur { background: #2c3d5f; }
+  .mem-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
+  .mem-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #mem-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36; color: #7a8089; }
+  #mem-tags { padding: 4px 14px; border-bottom: 1px solid #2a2e36; }
+  #mem-tags .chip { display: inline-block; background: #1b1e24; border: 1px solid #2a2e36;
+                    border-radius: 10px; padding: 0 8px; margin: 2px 4px 2px 0;
+                    font-size: 12px; color: #9aa0a8; }
+  #mem-content { flex: 1; overflow-y: auto; padding: 14px;
+                 white-space: pre-wrap; word-break: break-word; }
+  #mem-content pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+                     padding: 8px 10px; margin: 6px 0; overflow-x: auto;
+                     white-space: pre; font: inherit; }
+  #mem-content code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  #stat-body { flex: 1; overflow-y: auto; padding: 14px; }
+  .stat-card { background: #242830; border-radius: 8px; padding: 12px 14px;
+               margin-bottom: 12px; }
+  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: #9aa0a8; font-weight: normal; }
+  .stat-row { display: flex; justify-content: space-between; gap: 12px;
+              padding: 3px 0; }
+  .stat-row .v { color: #d7dae0; }
+  .stat-row .v.usd { color: #7ec699; }
+  .stat-bar { height: 10px; border-radius: 5px; background: #2c3d5f; overflow: hidden;
+              margin-top: 8px; }
+  .stat-bar .hit { height: 100%; background: #7ec699; }
 </style>
 </head>
 <body>
 <header id="status" class="warn">连接中…</header>
 <nav id="bar">
+  <!-- 指令快捷按钮（W2.2）：发的是与手打完全同款的指令文本（POST /msg 纯文本
+       透传）；带参的 /bind /switch 只预填输入框，路径由用户补全后回车。 -->
+  <button id="cmd-bind" class="cmd" type="button" title="绑定/重绑项目，会话重置（需补路径）">/bind</button>
+  <button id="cmd-projects" class="cmd" type="button" title="列出候选项目与当前绑定">/projects</button>
+  <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
+  <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
+  <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
   <button id="browse-btn" type="button">📚 会话</button>
+  <button id="mem-btn" type="button">🧠 记忆</button>
+  <button id="stat-btn" type="button">📊 统计</button>
   <button id="agents-btn" type="button">🤖 后台</button>
 </nav>
 <main id="list"></main>
@@ -150,6 +221,26 @@
       <div id="ag-last"></div>
     </div>
   </div>
+</section>
+<section id="memory" class="pane">
+  <div class="pane-head">
+    <select id="mem-proj" aria-label="项目"></select>
+    <span class="cnt" id="mem-cnt"></span>
+  </div>
+  <div id="mem-body">
+    <div id="mem-list"></div>
+    <div id="mem-detail">
+      <div id="mem-meta"></div>
+      <div id="mem-tags"></div>
+      <div id="mem-content"></div>
+    </div>
+  </div>
+</section>
+<section id="stats" class="pane">
+  <div class="pane-head">
+    <select id="stat-sess" aria-label="会话"></select>
+  </div>
+  <div id="stat-body"></div>
 </section>
 <form id="form">
   <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
@@ -268,8 +359,11 @@ async function refreshState() {
 
 // SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数；
 // 鉴权走 cookie（换票后）或 TOKEN 查询参数（旧形态），两者服务端同权。
+// （重）连上即刷一次绑定状态：断线期间状态行被「SSE 断开」占位，重连后
+// 绑定常显自己回来，不等下一条回复（W2.2）。
 function listen() {
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
+  es.onopen = () => refreshState();
   es.onmessage = ev => {
     try {
       const m = JSON.parse(ev.data);
@@ -280,13 +374,15 @@ function listen() {
   es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
 }
 
-// 上行：POST /msg，指令原样透传给路由（/bind /projects /switch /new /cancel）。
-form.addEventListener('submit', async ev => {
-  ev.preventDefault();
-  const text = input.value.trim();
+// 上行共用路径（W2.2 抽出）：表单提交与指令快捷按钮同走这一条 POST /msg
+// 纯文本透传——按钮与手打完全同权。fromInput 才清空输入框（按钮直发不动
+// 用户打了一半的草稿）。指令（"/" 开头）POST 成功后即时刷一次 /state：
+// 绑定类指令改的是 bindings 表，不等 SSE 回复先把状态行对齐；回复到达时
+// onmessage 的刷新再收敛（两次幂等，竞态最多短暂显示旧值）。
+async function sendText(text, fromInput) {
   if (!text || send.disabled) return;
   addMsg('you', text);
-  input.value = '';
+  if (fromInput) input.value = '';
   send.disabled = true;
   try {
     const r = await fetch(q('/msg'), {
@@ -296,10 +392,38 @@ form.addEventListener('submit', async ev => {
     });
     if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
     else if (!r.ok) addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
+    else if (text.startsWith('/')) refreshState();
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
   send.disabled = false;
+}
+
+form.addEventListener('submit', async ev => {
+  ev.preventDefault();
+  await sendText(input.value.trim(), true);
   input.focus();
 });
+
+// 指令快捷按钮（W2.2）：零参指令（/projects /new /cancel）直发；带参指令
+// （/bind /switch）预填输入框并聚焦等路径——按钮只是「发送同款指令文本」
+// 的快捷方式，不另造协议。
+function wireCmd(id, text) {
+  document.getElementById(id).addEventListener('click', () => {
+    if (send.disabled) return;
+    if (text.endsWith(' ')) {           // 带参指令：预填，光标移到末尾
+      input.value = text;
+      input.setSelectionRange(text.length, text.length);
+      input.focus();
+      return;
+    }
+    sendText(text, false);
+    input.focus();
+  });
+}
+wireCmd('cmd-bind', '/bind ');
+wireCmd('cmd-switch', '/switch ');
+wireCmd('cmd-projects', '/projects');
+wireCmd('cmd-new', '/new');
+wireCmd('cmd-cancel', '/cancel');
 
 // ---- 会话浏览器（W4.4 资产面 UI·一）----
 // 消费 W4.2 已合并的 /rpc method 集：session/list 驱动列表、session/get
@@ -447,9 +571,6 @@ function appendMsg(raw) {
   sessMsgs.appendChild(el);
 }
 
-browseBtn.addEventListener('click', () =>
-  setView(document.body.classList.contains('browsing') ? 'chat' : 'browse'));
-
 // ---- 任务面板（W3.3 编排 P1 可视化）----
 // 消费 W3.1 的 GET /subagents（列表 + ?sub= 详情）与 W3.2 的 SSE topic。
 // 面板协议 = 先订阅、再取快照：专用 /events 连接带 ?topic=subagents 且
@@ -465,25 +586,47 @@ let agOpen = null;    // 详情打开中的 sub_sid
 let topicES = null;   // 面板专用 SSE 连接（进入面板且已绑定时才开）
 let topicProject = null;
 
-// 三视图互斥切换：chat / browse / agents。面板进出时同步 topic 订阅；
-// 进面板先订阅再取快照（W3.2 协议序——锚点在订阅时刻，订阅→GET 之间的
-// 追加靠推送补、不靠快照重读）。
-function setView(v) {
-  const browsing = v === 'browse', agents = v === 'agents';
-  const wasBrowsing = document.body.classList.contains('browsing');
-  const wasAgents = document.body.classList.contains('agents');
-  document.body.classList.toggle('browsing', browsing);
-  document.body.classList.toggle('agents', agents);
-  browseBtn.textContent = browsing ? '💬 聊天' : '📚 会话';
-  agentsBtn.textContent = agents ? '💬 聊天' : '🤖 后台';
-  if (browsing && !wasBrowsing) loadSessions();  // 每次进面板重拉列表
-  if (agents && !wasAgents) {
-    syncTopicStream();
-    loadAgents();
-    if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
-  } else {
-    syncTopicStream();
+const memBtn = document.getElementById('mem-btn');
+const statBtn = document.getElementById('stat-btn');
+browseBtn.addEventListener('click', () => togglePane('sessions', browseBtn, '📚 会话'));
+memBtn.addEventListener('click', () => togglePane('memory', memBtn, '🧠 记忆'));
+statBtn.addEventListener('click', () => togglePane('stats', statBtn, '📊 统计'));
+agentsBtn.addEventListener('click', () => togglePane('agents', agentsBtn, '🤖 后台'));
+
+// 四面板共用的开合闸（W4.5 把 W4.4 的 browsing 一位类拆成「browsing=隐
+// 聊天 + 恰好一个 *-view 亮面板」；W3.3 的任务面板并入同一闸）：再点当
+// 前面板的按钮回聊天面。进面板即重拉数据（磁盘世界会变旧，与
+// loadSessions 同一取舍）。末尾的 syncTopicStream 是 W3.3 的接线：agents
+// 面板可见且已绑定才保持专用订阅，离开/换面板即收口。
+const panes = {
+  sessions: { btn: browseBtn, label: '📚 会话', cls: 'sess-view', load: loadSessions },
+  memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',   load: loadMemPane },
+  stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',  load: loadStatPane },
+  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view', load: loadAgentsPane },
+};
+function togglePane(name, btn, label) {
+  const active = !document.body.classList.contains(panes[name].cls);
+  for (const p of Object.values(panes)) {
+    document.body.classList.toggle(p.cls, false);
+    p.btn.textContent = p.label;
   }
+  if (active) {
+    document.body.classList.add(panes[name].cls, 'browsing');
+    btn.textContent = '💬 聊天';
+    panes[name].load();
+  } else {
+    document.body.classList.remove('browsing');
+  }
+  syncTopicStream();
+}
+
+// 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
+// togglePane）：先订阅再取快照（W3.2 协议序——锚点在订阅时刻，订阅→GET
+// 之间的追加靠推送补、不靠快照重读）。
+function loadAgentsPane() {
+  syncTopicStream();
+  loadAgents();
+  if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
 }
 
 const AG_STATUS = {
@@ -577,7 +720,7 @@ async function openAgent(sid) {
 // 未绑定时不开——W3.2 对未绑定 conv 的 topic 请求是 400，EventSource 会
 // 无限重连刷屏（与 W1.2 不挂未鉴权 SSE 同一条纪律）。
 function syncTopicStream() {
-  const want = document.body.classList.contains('agents') && boundProject;
+  const want = document.body.classList.contains('agents-view') && boundProject;
   if (topicES && topicProject !== boundProject) { topicES.close(); topicES = null; }
   if (want && !topicES) {
     topicProject = boundProject;
@@ -597,8 +740,200 @@ function syncTopicStream() {
   if (!want && topicES) { topicES.close(); topicES = null; topicProject = null; }
 }
 
-agentsBtn.addEventListener('click', () =>
-  setView(document.body.classList.contains('agents') ? 'chat' : 'agents'));
+// ---- 记忆浏览器（W4.5 资产面 UI·二）----
+// 消费 W4.3 的 memory/projects|list|get：项目下拉（memory/projects，新→旧）
+// 挑 project_id，列表出该项目的条目（memory/list，含 stale 标记），点开
+// 单条详情（memory/get，正文走聊天面同一 renderBody）。渲染纪律不变：
+// textContent-only。memSel 防「响应回来前已切走」的串台（与 sel 同构）。
+const memProj = document.getElementById('mem-proj');
+const memCnt = document.getElementById('mem-cnt');
+const memList = document.getElementById('mem-list');
+const memMeta = document.getElementById('mem-meta');
+const memTags = document.getElementById('mem-tags');
+const memContent = document.getElementById('mem-content');
+let memSel = null;  // {proj, name} 当前打开的详情；null = 未开
+
+async function loadMemPane() {
+  paneHint(memList, '加载中…');
+  try {
+    const res = await rpc('memory/projects', {});
+    memProj.replaceChildren();
+    if (!res.projects.length) {
+      memCnt.textContent = '';
+      memSel = null;
+      memMeta.textContent = ''; memTags.replaceChildren(); memContent.replaceChildren();
+      return paneHint(memList, '（磁盘上没有项目——先在终端里用 seek 跑一阵）');
+    }
+    for (const p of res.projects) {
+      const opt = document.createElement('option');
+      opt.value = p.project_id;
+      opt.textContent = p.project_id.slice(0, 8) + ' · ' + p.memories + ' 条 · '
+        + new Date(p.last_active_at).toLocaleDateString();
+      memProj.appendChild(opt);
+    }
+    loadMemList(memProj.value);
+  } catch (e) { paneHint(memList, 'memory/projects 失败：' + e.message); }
+}
+
+async function loadMemList(proj) {
+  memSel = null;
+  memMeta.textContent = ''; memTags.replaceChildren(); memContent.replaceChildren();
+  paneHint(memList, '加载中…');
+  try {
+    const res = await rpc('memory/list', { project_id: proj });
+    memList.replaceChildren();
+    memCnt.textContent = res.memories.length + ' 条记忆';
+    if (!res.memories.length) return paneHint(memList, '（这个项目还没有记忆）');
+    for (const m of res.memories) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'mem-row';
+      row.dataset.name = m.name;
+      const t1 = document.createElement('span');
+      t1.className = 't1';
+      t1.textContent = (m.pinned ? '📌 ' : '') + m.name;
+      const t2 = document.createElement('span');
+      t2.className = 't2';
+      t2.textContent = (m.stale ? '⚠ 过期 · ' : '') + (m.tagline || '')
+        + ' · ' + new Date(m.updated_at).toLocaleDateString();
+      row.appendChild(t1);
+      row.appendChild(t2);
+      row.addEventListener('click', () => openMem(proj, m.name));
+      memList.appendChild(row);
+    }
+  } catch (e) { paneHint(memList, 'memory/list 失败：' + e.message); }
+}
+
+async function openMem(proj, name) {
+  memSel = { proj, name };
+  memMeta.textContent = '读取中…';
+  memTags.replaceChildren();
+  memContent.replaceChildren();
+  for (const row of memList.children) row.classList.toggle('cur', row.dataset.name === name);
+  try {
+    const m = await rpc('memory/get', { project_id: proj, name });
+    if (!memSel || memSel.proj !== proj || memSel.name !== name) return;  // 已切走：丢弃
+    const bits = [m.name, m.tagline || ''];
+    bits.push('建于 ' + new Date(m.created_at).toLocaleString());
+    bits.push('更新 ' + new Date(m.updated_at).toLocaleString());
+    bits.push('召回 ' + m.recall_count + ' 次');
+    if (m.pinned) bits.push('📌 常驻');
+    if (m.stale) bits.push('⚠ 过期待回收');
+    if (m.auto_sourced) bits.push('auto');
+    memMeta.textContent = bits.join(' · ');
+    for (const t of (m.tags || [])) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = '#' + t;
+      memTags.appendChild(chip);
+    }
+    renderBody(memContent, m.content || '（无正文）');
+  } catch (e) {
+    memMeta.textContent = 'memory/get 失败：' + e.message;
+  }
+}
+
+memProj.addEventListener('change', () => loadMemList(memProj.value));
+
+// ---- 统计视图（W4.5 资产面 UI·二）----
+// 消费 W4.3 的 stats/cache（cost_usd 服务端算——「client never prices」，
+// 页面永不带费率卡）+ W4.2 的 session/list 当会话选择器（缺省最新）。
+// 命中率条宽经 CSSOM（el.style.width）设置——style 属性才归 CSP 管，
+// CSSOM 不受 style-src 限制，且宽度只可能是数字。
+const statSess = document.getElementById('stat-sess');
+const statBody = document.getElementById('stat-body');
+
+// 与服务端成本展示同刻度的格式化（只排版数值，不携带任何费率——费率
+// 只住在服务端的费率表里）：
+// $0 / 4 位小数（分以下）/ 3 位（一美元内）/ 2 位。
+function fmtUSD(c) {
+  if (!c) return '$0';
+  if (c < 0.01) return '$' + c.toFixed(4);
+  if (c < 1) return '$' + c.toFixed(3);
+  return '$' + c.toFixed(2);
+}
+
+async function loadStatPane() {
+  paneHint(statBody, '加载中…');
+  try {
+    const res = await rpc('session/list', {});
+    statSess.replaceChildren();
+    if (!res.sessions.length) {
+      return paneHint(statBody, '（没有历史会话——先在终端里用 seek 跑一阵）');
+    }
+    for (const s of res.sessions) {
+      const opt = document.createElement('option');
+      opt.value = s.sid;
+      const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
+      opt.textContent = (s.title || s.sid.slice(0, 8)) + (when ? ' · ' + when : '');
+      statSess.appendChild(opt);
+    }
+    showStats(statSess.value);
+  } catch (e) { paneHint(statBody, 'session/list 失败：' + e.message); }
+}
+
+async function showStats(sid) {
+  if (!sid) return;
+  const me = sid;
+  paneHint(statBody, '读取中…');
+  try {
+    const r = await rpc('stats/cache', { sid });
+    if (statSess.value !== me) return;  // 响应回来前已切走：丢弃
+    const u = r.usage || {};
+    statBody.replaceChildren();
+
+    const cache = document.createElement('div');
+    cache.className = 'stat-card';
+    cache.appendChild(cardTitle('前缀缓存 · ' + r.sid.slice(0, 8) + ' · ' + (r.model || '?')));
+    const hit = u.prompt_cache_hit_tokens || 0, miss = u.prompt_cache_miss_tokens || 0;
+    const prompt = (u.prompt_tokens != null ? u.prompt_tokens : hit + miss);
+    const ratio = (typeof r.hit_ratio === 'number') ? r.hit_ratio : 0;
+    cache.appendChild(statRow('命中 / 未命中', hit.toLocaleString() + ' / ' + miss.toLocaleString()));
+    cache.appendChild(statRow('命中率', (ratio * 100).toFixed(1) + '%'));
+    const bar = document.createElement('div');
+    bar.className = 'stat-bar';
+    const fill = document.createElement('div');
+    fill.className = 'hit';
+    fill.style.width = (Math.min(1, Math.max(0, ratio)) * 100).toFixed(1) + '%';
+    bar.appendChild(fill);
+    cache.appendChild(bar);
+    statBody.appendChild(cache);
+
+    const tok = document.createElement('div');
+    tok.className = 'stat-card';
+    tok.appendChild(cardTitle('累计 tokens'));
+    tok.appendChild(statRow('输入（prompt）', prompt.toLocaleString()));
+    tok.appendChild(statRow('输出（completion）', (u.completion_tokens || 0).toLocaleString()));
+    tok.appendChild(statRow('合计', (u.total_tokens || prompt + (u.completion_tokens || 0)).toLocaleString()));
+    statBody.appendChild(tok);
+
+    const cost = document.createElement('div');
+    cost.className = 'stat-card';
+    cost.appendChild(cardTitle('成本（按当前时段费率估算）'));
+    cost.appendChild(statRow('累计花费', fmtUSD(r.cost_usd), true));
+    statBody.appendChild(cost);
+  } catch (e) { paneHint(statBody, 'stats/cache 失败：' + e.message); }
+}
+
+function cardTitle(text) {
+  const h = document.createElement('h3');
+  h.textContent = text;
+  return h;
+}
+function statRow(k, v, usd) {
+  const row = document.createElement('div');
+  row.className = 'stat-row';
+  const key = document.createElement('span');
+  key.textContent = k;
+  const val = document.createElement('span');
+  val.className = 'v' + (usd ? ' usd' : '');
+  val.textContent = v;
+  row.appendChild(key);
+  row.appendChild(val);
+  return row;
+}
+
+statSess.addEventListener('change', () => showStats(statSess.value));
 
 // 探测式启动（W1.2）：是否有有效凭证（cookie 或 URL token）由 /state 的
 // 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。
