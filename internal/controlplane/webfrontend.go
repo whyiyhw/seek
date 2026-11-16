@@ -13,8 +13,9 @@ package controlplane
 // chain); commands like /bind pass through as plain text and reuse the
 // M2 router verbatim.
 //
-//	GET  /        the embedded page (no token — it holds no secrets;
-//	              the token reaches the page via its own URL)
+//	GET  /        the embedded page (no auth — it holds no secrets; a
+//	              valid ?token= never renders: the first hop 303-
+//	              exchanges it for an HttpOnly cookie, §5.1 W1.2)
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
 //	              (?conv= — EventSource cannot set headers)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
@@ -31,9 +32,12 @@ package controlplane
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
 // accepted as `?token=` (EventSource cannot set headers) or
-// `Authorization: Bearer`. Comparison is constant-time. The full UI
-// (auth, multi-tab sync, history) is deliberately out of MVP scope —
-// design card c_7pptol owns that.
+// `Authorization: Bearer`; since W1.2 also as the HttpOnly cookie the
+// /?token= first hop exchanges (webfrontend_auth.go carries the whole
+// credential/gate stack: authKind, writeGate, gateHost). Comparison is
+// constant-time on every branch. The full UI (auth, multi-tab sync,
+// history) is deliberately out of MVP scope — design card c_7pptol
+// owns that.
 //
 // Known MVP limitation, by design: Send with no connected SSE client
 // drops the reply (chat-history persistence is out of scope; seek runs
@@ -42,7 +46,6 @@ package controlplane
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -229,25 +232,10 @@ func (f *WebFrontend) ensureToken() (string, error) {
 	return f.token, f.tokenErr
 }
 
-// auth enforces the token on every stateful route: Authorization:
-// Bearer first, then ?token= (EventSource cannot set headers — the
-// butler /today precedent). Constant-time compare either way.
-func (f *WebFrontend) auth(r *http.Request) bool {
-	tok, err := f.ensureToken()
-	if err != nil {
-		return false
-	}
-	got := r.URL.Query().Get("token")
-	if got == "" {
-		if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-			got = strings.TrimPrefix(h, "Bearer ")
-		}
-	}
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(tok)) == 1
-}
-
 // handler builds the route table. Unexported so tests drive it via
-// httptest without a listener; Run is the only production caller.
+// httptest without a listener; Run is the only production caller. The
+// Host allowlist wraps the whole table (§5.3, webfrontend_auth.go) —
+// rebinding defense sits outside every route, auth included.
 func (f *WebFrontend) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", f.handlePage)
@@ -256,7 +244,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
-	return mux
+	return gateHost(mux)
 }
 
 // Run implements the Frontend port: listen, serve, park until ctx is
@@ -328,14 +316,37 @@ func (f *WebFrontend) handlePage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// First-hop token exchange (W1.2, §5.1): a VALID ?token= on the
+	// browser entry never renders the page with the token in the URL —
+	// 303 to a bare / with the token moved into an HttpOnly cookie, so
+	// the address bar, history and referer stay clean. Wrong/absent
+	// tokens fall through and serve the page: its fetches then 401 and
+	// the status line says so (a garbage token is scrubbed from
+	// nothing — it was never the secret).
+	if tok := r.URL.Query().Get("token"); tok != "" && f.authKind(r) == credParam {
+		f.setTokenCookie(w, r, tok)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(webPage)
 }
 
 func (f *WebFrontend) handleMsg(w http.ResponseWriter, r *http.Request) {
-	if !f.auth(r) {
+	// Write surface, §5.2 (W1.2): the token'd forms pass as before;
+	// a cookie-authenticated request additionally clears the CSRF bar
+	// (same-origin Origin or X-Seek-Token) — a cookie alone drives
+	// nothing. 403, not 401: the client IS authenticated, it is just
+	// not write-cleared.
+	switch f.authKind(r) {
+	case credNone:
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token (use ?token= or Authorization: Bearer)"})
 		return
+	case credCookie:
+		if !f.writeGate(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cookie-authenticated writes need a same-origin Origin header or X-Seek-Token"})
+			return
+		}
 	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
