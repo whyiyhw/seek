@@ -7,6 +7,11 @@
      persisted in localStorage, carried as X-Seek-Conversation on
      fetches and ?conv= on the SSE stream (EventSource cannot set
      headers); the server keeps zero session state.
+     Auth (W1.2): the /?token= first hop 303-exchanges the token into
+     an HttpOnly cookie and scrubs the URL; this page rides the cookie
+     (fetch/EventSource send it same-origin) — the token never reaches
+     JS. The write side clears the server's Origin gate for free
+     (browsers attach Origin to every POST).
      Sessions browser (W4.4, asset plane UI #1): a master-detail view
      over POST /rpc — session/list drives the list pane, a click opens
      session/get (meta line) + session/messages walked page by page via
@@ -109,6 +114,9 @@
 </form>
 <script>
 'use strict';
+// W1.2 换票：/?token= 首跳被服务端 303 换成 HttpOnly cookie，本页落在
+// 干净的 / 上——正常路径 TOKEN 恒为空，鉴权靠 cookie（fetch/EventSource
+// 同源自带）。仍读 URL 是给未换票直开的形态兜底（能读到的只会是错 token）。
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const q = s => s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
 
@@ -194,20 +202,26 @@ function addMsg(who, text) {
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
 }
 
-// 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。
+// 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。返回
+// 是否已鉴权——启动时据此决定挂不挂 SSE（W1.2：凭证可能是 cookie，页内
+// 无从预判，探测是唯一权威）。
 async function refreshState() {
   try {
     const r = await fetch(q('/state'), { headers: { 'X-Seek-Conversation': CONV } });
-    if (r.status === 401) return setStatus('token 无效——用 /?token=<serve 启动时打印的值> 打开', false);
+    if (r.status === 401) {
+      setStatus('token 无效或未带——用 /?token=<serve 启动时打印的值> 打开', false);
+      return false;
+    }
     const s = await r.json();
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
                       : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
-  } catch (e) { setStatus('连不上 /state：' + e, false); }
+    return true;
+  } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
 
-// SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数。
+// SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数；
+// 鉴权走 cookie（换票后）或 TOKEN 查询参数（旧形态），两者服务端同权。
 function listen() {
-  if (!TOKEN) return;
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.onmessage = ev => {
     try {
@@ -393,12 +407,9 @@ browseBtn.addEventListener('click', () => {
   if (browsing) loadSessions();  // 每次进面板重拉列表（SSE 世界里它会变旧）
 });
 
-if (!TOKEN) {
-  setStatus('缺少 token——用 /?token=<serve 启动时打印的值> 打开', false);
-} else {
-  refreshState();
-  listen();
-}
+// 探测式启动（W1.2）：是否有有效凭证（cookie 或 URL token）由 /state 的
+// 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。
+refreshState().then(ok => { if (ok) listen(); });
 </script>
 </body>
 </html>

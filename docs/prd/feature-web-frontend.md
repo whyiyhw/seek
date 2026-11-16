@@ -161,7 +161,7 @@ POST /msg                {text}                  → 202；归一化 Inbound 进
 GET  /events             (SSE)                   → 事件流：现状 {"conv","text"}，W1.4 扩为下表事件族
 GET  /                   静态页（embed，不鉴权；已交付）
 GET  /state              → 绑定状态 {bound,project,session}（已交付；per-conv 后按 conv 寻址）
-GET  /?token=<t>         303 → / + HttpOnly cookie（URL 擦净，§5；W1.2 增量——现状 ?token= 直接过鉴权）
+GET  /?token=<t>         303 → / + HttpOnly cookie（URL 擦净，§5；已交付 W1.2 c_w5lidm）
 ```
 
 新端点（P2 的 `/subagents`、P3 的 `/rpc`）沿用同一**无前缀**命名风格——现状四路由已无前缀，再引入 `/api/` 前缀就是两套风格并存。
@@ -266,13 +266,13 @@ CI 守门：repo 根无 `package.json`/`node_modules`/锁文件（脚本 grep �
 butler `/today`（2026-11-13 上线，卡 c_clvtsp）验证过的形态，原样对齐：
 
 - **token**（已交付）：hex(24B)（48 字符），serve 首次启动生成，写 `~/.seek/serve/web.token`（目录 0700、文件 0600，同 `env` 文件姿态）；不进 config.json、错误信息不回显。唯一出现处是启动 banner——stderr 印 `web: up: http://127.0.0.1:8790/?token=<t>`（本机可见；「印出来才好点开」是 butler 同款做法；访问日志永不记 token，§5.5）。
-- **浏览器入口**（现状）：`http://127.0.0.1:8790/?token=<t>` 直接过鉴权，页面把 token 续在后续 fetch/SSE 的查询参数上。**增量（W1.2）**：`?token=` 首跳 **303 → `/` + HttpOnly cookie + URL 擦净**（地址栏不留 token，不进历史/不进 referer），查询参数/Bearer 形态保留给 curl/脚本面。
-- **API/SSE**（已交付）：`?token=` 或 `Authorization: Bearer <t>`，constant-time 比较；错/无 → 401（标准 JSON 错误体）。cookie 是 W1.2 加入的第三种凭证。
+- **浏览器入口**（现状）：`http://127.0.0.1:8790/?token=<t>` 直接过鉴权，页面把 token 续在后续 fetch/SSE 的查询参数上。**增量（W1.2，已交付 c_w5lidm）**：`?token=` 首跳 **303 → `/` + HttpOnly cookie + URL 擦净**（地址栏不留 token，不进历史/不进 referer），查询参数/Bearer 形态保留给 curl/脚本面。
+- **API/SSE**（已交付）：`?token=` 或 `Authorization: Bearer <t>`，constant-time 比较；错/无 → 401（标准 JSON 错误体）。cookie 是 W1.2 加入的第三种凭证（已交付）。
 - token 轮换：删文件重启即换；多机共享同一 serve 时同理分发。
 
 ### 5.2 与 `/today` 的关键差异：本渠道能驱动执行 → 写面加 CSRF 闸
 
-`/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸本身是 W1.2 增量；现状写面同样必须带 token，只是凭证只有查询参数/Bearer 两种）：
+`/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸已交付，W1.2 c_w5lidm：仅对 cookie 凭证生效——查询参数/Bearer 形态自带 token 即自带 CSRF 免疫，不经此闸，curl 面零感知）：
 
 - 写面（POST）二选一：同源 `Origin` 头校验（允许集=自身 origin）**或** `X-Seek-Token` 头。跨站页面即使带上了 cookie（Samesite=Lax 已挡大半 POST），Origin 不匹配即 403。
 - 读面（GET 静态/SSE）：cookie 足矣。
@@ -280,7 +280,7 @@ butler `/today`（2026-11-13 上线，卡 c_clvtsp）验证过的形态，原样
 
 ### 5.3 DNS rebinding 与 Host 校验
 
-loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127.0.0.1。防线：Host 头允许集 = {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`}，不匹配 403。**token 才是真闸**（rebinding 页面拿不到 token），Host 校验是纵深防御。
+loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127.0.0.1。防线：Host 头允许集 = {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`}，不匹配 403。**token 才是真闸**（rebinding 页面拿不到 token），Host 校验是纵深防御。（已交付 c_w5lidm，实现取 host 部分：`localhost`（不分大小写）或 loopback/尾网 CGNAT 任一 **IP 字面量**即过、端口不比对——字面量无法被 DNS rebinding，而严格比对 bind 地址会把 §5.4 的尾网转发姿势（Host=尾网 IP）与 httptest 随机端口一并 403；名字（`attacker.com`、`127.0.0.1.evil.com`）一律拒。）
 
 ### 5.4 三种网络场景
 
@@ -335,7 +335,7 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 增量）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
+- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
 - **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。
@@ -362,7 +362,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | 卡 | 内容 | 验收 |
 |---|---|---|
 | **W1.1** | 配置面：servecli 构造器携带 config（**已交付** `serve.web_addr`，b769535；CLI `--listen` flag **已交付**，c_jxhkbr——`effectiveServe` 折 flag > config）+ web_addr scope 闸（**已交付**，76ed883——原「非 loopback 强制 token」闸被 2026-11-15 拍板取代为更严的限段拒启，§4.4）。**不建新包、不搬家**（§2.1） | 默认口 8790 行为零回归（已钉 `TestWeb_DefaultAddrPinned`）；`0.0.0.0`/LAN IP 拒启动 exit-2（已钉 `TestServePlane_BadWebAddrFails`）；`seek serve --frontend=web` 冒烟；现有测试家族零回归 |
-| **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验 | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
+| **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验（**已交付**，c_w5lidm——`webfrontend_auth.go`：`authKind` cookie 第三凭证、`writeGate` 仅卡 cookie 凭证（curl 面零感知）、`gateHost` host 部分白名单；页面改探测式启动吃 cookie） | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
 | **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3；现状固定 `web:default`）、SSE hub per-conv 订阅（现状全 tab 一张订阅表）、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 绑定兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
 | **W1.4** | 流式接线（§2.4 缝落地）：router SendStream→`/events` SSE `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 收口带 session_id（envelope 自 `{"conv","text"}` 扩展，纯加法）（**已交付**，c_qcmul4——`webfrontend_stream.go`：run id 服务端铸造、named event 不打扰旧页 onmessage、usage $ 走 `internal/pricing` 与 CLI 同卡、`X-Accel-Buffering:no`+逐事件 flush；`RunEvent` 补 `model` 镜像） | 桩 seek 流式 e2e（§8 流式条目，`TestWeb_StreamE2EEventFamily` 按序+活性+二 run 换 id）；/cancel 收口（`TestWeb_StreamCancelClosesRun`） |
 | **W1.5** | 页面资产管线：沿单文件 `webfrontend.html` 生长（膨胀再拆 static/，§4.3）、CSP 头、gzip handler、CI 检查（无 package.json + 体积 gate） | 资产 hash 测试；`curl /` 得 CSP 头 |

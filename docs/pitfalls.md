@@ -1710,3 +1710,16 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: brace every `${VAR}` whose next character is non-ASCII (the KEEP message in `scripts/web-sessions-manual.sh`); commit with card `c_hinacy`.
 - **Lesson**: repo shell scripts must stay bash-3.2-safe (macOS default) — `${VAR}` braces are mandatory before CJK punctuation, and self-check any script whose failure path only runs in cleanup traps.
 - **Refs**: `scripts/web-sessions-manual.sh` cleanup; `scripts/serve-smoke-test.sh` (same bash-3.2 audience).
+
+### W1.2 Host allowlist must match the host PART only — literal bind-addr matching 403s the documented tailnet posture and every httptest hit
+- **Saw**: implementing §5.3's literal set {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`} as exact strings rejects legitimate traffic: the §5.4 tailnet posture (bind 127.0.0.1:8790, `tailscale serve --tcp` forward) sends `Host: <tailnet-IP>:8790`, and httptest servers surface `Host: 127.0.0.1:<random>` — never the bind string.
+- **Why**: the Host header carries where the CLIENT thinks it is, not where we bound; forwards and test harnesses both rewrite it. The rebinding threat lives entirely in the NAME part (an attacker-controlled DNS name resolving to loopback) — an IP literal cannot be rebound.
+- **Fix**: `hostAllowed` checks the host part only: `localhost` (case-insensitive) or any loopback / tailnet-CGNAT IP literal passes, every name (including `127.0.0.1.evil.example`) 403s; port never compared; commit with card `c_w5lidm`.
+- **Lesson**: Host allowlists defend against NAMES, so enumerate name-safety (literals/localhost), not client-visible addressing; matching bind addr or port couples the gate to shapes proxies and test servers legitimately rewrite.
+
+### A blanket "POST needs Origin" CSRF gate breaks the script face — the W1.2 write gate is credential-conditional
+- **Saw**: §5.2 read literally ("写面二选一：同源 Origin 或 X-Seek-Token") would 403 every curl POST `/msg?token=` — no Origin header exists outside browsers, and the baseline `TestWeb_MsgRequiresToken` (query token, no Origin → 202) is a pinned zero-regression contract.
+- **Why**: CSRF is a COOKIE-born threat; a request bearing the token as query/Bearer already proves possession of the secret — it is its own CSRF defense. Only cookie-authenticated requests (credentials the browser attaches silently) need the extra bar.
+- **Fix**: `authKind` reports WHICH credential passed; `writeGate` (Origin ∈ {self origin} or constant-time X-Seek-Token) runs only on the `credCookie` path; commit with card `c_w5lidm`.
+- **Lesson**: CSRF gates key off the credential FORM, not the HTTP method — "which requests can a third party make the browser send" is the actual question; script-face credentials are exempt by construction.
+- **Refs**: `internal/controlplane/webfrontend_auth.go` `writeGate`; `docs/prd/feature-web-frontend.md` §5.2.
