@@ -60,3 +60,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_qcmul4：web 流式接线：SendStream→SSE delta/tool/usage 事件族 + reply 收口带 session_id（W1.4，服务端 pricing 算 $，X-Accel-Buffering:no）
 - c_hinacy：web 资产面·四：sessions 浏览器 UI·列表+消息分页（W4.4）
 - c_w5lidm：web 鉴权演进：?token= 303 换票 cookie + 写面 Origin/X-Token 闸 + Host 校验（W1.2）
+- c_3736yl：web 任务面板·二：SSE topic subagents tail-follow + 推送（W3.2）
