@@ -1737,3 +1737,9 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `authKind` reports WHICH credential passed; `writeGate` (Origin ∈ {self origin} or constant-time X-Seek-Token) runs only on the `credCookie` path; commit with card `c_w5lidm`.
 - **Lesson**: CSRF gates key off the credential FORM, not the HTTP method — "which requests can a third party make the browser send" is the actual question; script-face credentials are exempt by construction.
 - **Refs**: `internal/controlplane/webfrontend_auth.go` `writeGate`; `docs/prd/feature-web-frontend.md` §5.2.
+
+### Asserting on SSE reply payloads with angle brackets fails — Go's json.Marshal HTML-escapes by default
+- **Saw**: an e2e substring like `用法：/bind <项目路径>` never matches the SSE frame, which reads `用法：/bind \u003c项目路径\u003e` on the wire.
+- **Why**: `json.Marshal` (and the `json.NewEncoder` default) HTML-escape `<`, `>`, `&` to `\u003c` etc.; every `Send`/`SendStream` envelope rides that marshal.
+- **Fix**: assert bracket-free substrings (e.g. `用法：/bind` + `目录必须存在`); commit with card `c_evbzyh`.
+- **Lesson**: substring assertions against marshaled JSON must avoid HTML-sensitive characters — pick neighbouring plain text, don't chase the escape spelling.

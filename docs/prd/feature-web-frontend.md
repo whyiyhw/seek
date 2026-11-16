@@ -372,7 +372,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | 卡 | 内容 | 验收 |
 |---|---|---|
 | **W2.1** | 聊天 UI 增量（消息列表/输入框/SSE 自动重连/textContent 渲染**已交付**）：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage | 手测脚本（浏览器）；XSS 用例（模型吐 `<script>` 转义——现状 textContent 纪律保持） |
-| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新） | 指令 e2e（真 Router + 桩 seek） |
+| **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新）（**已交付**，c_evbzyh——顶栏五个指令按钮：零参直发、带参（/bind /switch）预填输入框，全部走同一条 sendText 透传；指令 POST 成功即刷 /state、SSE 重连恢复绑定常显；e2e=`TestWeb_CommandE2E` 真 Router+桩 seek） | 指令 e2e（真 Router + 桩 seek） |
 | **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显 | 桩 seek 多 turn e2e 断言数值 |
 | **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线 | 文档 review |
 
