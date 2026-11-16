@@ -18,6 +18,15 @@
      next_cursor (50/page, "load more" appends; the DOM only ever holds
      what was paged in, so a long transcript stays at virtual-scroll
      order of magnitude). Same textContent-only discipline as chat.
+     Streaming bubble (W2.1): the W1.4 named SSE events fold
+     client-side per run id — deltas accumulate into text blocks,
+     tool calls render as single folded status rows (args/results
+     stay server-side by wire contract), interleaved in arrival
+     order; the run-bearing reply replaces the whole bubble with the
+     authoritative final text (a reply whose run was never seen —
+     dropped frames — falls back to the plain message path, which is
+     what makes the fold idempotent). usage events are W2.3's (the
+     token/$ status bar), deliberately unlistened here.
      Deliberately out of scope: multi-tab sync, history persistence,
      FULL markdown rendering (P3 §4.2 vendor evaluation), task panels,
      mobile, real auth (design card c_7pptol owns the full UI). -->
@@ -46,6 +55,14 @@
   .you { margin-left: auto; background: #2c3d5f; }
   .seek { background: #242830; }
   .hint { color: #7a8089; font-style: italic; }
+
+  /* ---- 流式气泡 + 工具行折叠（W2.1）---- */
+  .msg.streaming > .txt:last-child::after {
+    content: '▍'; color: #7a8089; animation: caret 1s steps(1) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+  .trow { color: #9aa0a8; font-size: 12px; padding: 1px 0; }
+  .trow.bad { color: #d8a657; }
   form { display: flex; gap: 8px; padding: 10px 14px; background: #1b1e24;
          border-top: 1px solid #2a2e36; }
   #input { flex: 1; background: #14161a; color: inherit; border: 1px solid #2a2e36;
@@ -219,16 +236,117 @@ async function refreshState() {
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
 
-// SSE 下行：seek 的回复逐条追加。EventSource 不能设头，conv 走查询参数；
-// 鉴权走 cookie（换票后）或 TOKEN 查询参数（旧形态），两者服务端同权。
+// ---- 流式 run 折叠（W2.1，feature-web-frontend §2.4/§2.5 客户端半边）----
+// 服务端把一次 seek 运行的 jsonLine 折成命名 SSE 事件：delta {run,text}、
+// tool {run,id,name,phase,ok}、usage {run,…}（W2.3 状态栏的入项，本卡不
+// 消费——EventSource 对未注册的命名事件静默忽略）；终答走默认事件 reply
+// {conv,text,run?,session_id?}。run id 由服务端铸造（§2.5），页面按 run
+// 聚合：delta 累积进文本块、tool 进单行折叠状态行，按到达顺序交错在
+// 同一个气泡里；带 run 的 reply 到达时整泡替换成权威终文本——客户端
+// 累积只是预览，丢帧/未见过该 run 的 reply 走普通消息路径，天然幂等。
+const runs = new Map();   // runId → {el, cur, tools}
+let raf = 0;
+const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧最多渲一次）
+
+function nearBottom() {
+  return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+}
+// 追加/替换后只在「本来就在底」时跟随滚动——读历史不被流式追加劫持。
+// pin 必须在 DOM 变更前采样：先改 DOM 再测，新增高度本身就把距离撑过阈值。
+function appendPinned(parent, el) {
+  const pin = nearBottom();
+  parent.appendChild(el);
+  if (pin) list.scrollTop = list.scrollHeight;
+}
+
+function runBubble(id) {
+  let r = runs.get(id);
+  if (r) return r;
+  const el = document.createElement('div');
+  el.className = 'msg seek streaming';
+  r = { el, cur: null, tools: new Map() };
+  runs.set(id, r);
+  appendPinned(list, el);
+  return r;
+}
+
+function schedule(r) {
+  dirty.add(r);
+  if (!raf) raf = requestAnimationFrame(flushRuns);
+}
+function flushRuns() {
+  raf = 0;
+  const pin = nearBottom();
+  for (const d of dirty) {
+    if (d.cur) {
+      d.cur.el.replaceChildren();   // 流式重渲：清块再渲累积全文
+      renderBody(d.cur.el, d.cur.text);
+    }
+  }
+  dirty.clear();
+  if (pin) list.scrollTop = list.scrollHeight;
+}
+
+function onDelta(ev) {
+  let d;
+  try { d = JSON.parse(ev.data); } catch (e) { return; }
+  if (!d.run || typeof d.text !== 'string') return;
+  const r = runBubble(d.run);
+  if (!r.cur) {   // 首 delta 或工具行之后：开新文本块，保持到达顺序
+    const b = document.createElement('div');
+    b.className = 'txt';
+    appendPinned(r.el, b);
+    r.cur = { el: b, text: '' };
+  }
+  r.cur.text += d.text;
+  schedule(r);
+}
+
+// 工具行折叠（§2.5：args/result 服务端不下发，名称+状态就是折叠形态）：
+// start →「⚙ name …」，end →「✔ name」/「✘ name」。行按 tool id 幂等——
+// 未见 start 的 end（SSE 丢帧）也补得出行。
+function onTool(ev) {
+  let d;
+  try { d = JSON.parse(ev.data); } catch (e) { return; }
+  if (!d.run || !d.name) return;
+  const r = runBubble(d.run);
+  r.cur = null;   // 工具行截断当前文本块，后续 delta 开新块（交错顺序）
+  let row = r.tools.get(d.id);
+  if (!row) {
+    row = document.createElement('div');
+    row.className = 'trow';
+    appendPinned(r.el, row);
+    r.tools.set(d.id, row);
+  }
+  const end = d.phase === 'end';
+  row.textContent = (end ? (d.ok ? '✔ ' : '✘ ') : '⚙ ') + d.name + (end ? '' : ' …');
+  row.classList.toggle('bad', end && !d.ok);
+}
+
+// SSE 下行。EventSource 不能设头，conv 走查询参数；鉴权走 cookie（换票
+// 后）或 TOKEN 查询参数（旧形态），两者服务端同权。W2.1 起消费 W1.4 的
+// 事件族：命名事件 delta/tool 折进流式气泡；默认事件里带 run 的 reply
+// 是流式收口（整泡替换），无 run 的照旧普通消息。
 function listen() {
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
+  es.addEventListener('delta', onDelta);
+  es.addEventListener('tool', onTool);
   es.onmessage = ev => {
-    try {
-      const m = JSON.parse(ev.data);
-      if (m.text) addMsg('seek', m.text);
-      refreshState();                   // 回复可能改了绑定（/bind 等）
-    } catch (e) { addMsg('hint', '（无法解析的回复）'); }
+    let m;
+    try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
+    const r = m.run && runs.get(m.run);
+    if (r) {   // 收口：替换成服务端权威终文本（§2.4 客户端按 run 幂等）
+      runs.delete(m.run);
+      r.cur = null;                    // 停掉在途的合帧渲染
+      const pin = nearBottom();
+      r.el.classList.remove('streaming');
+      r.el.replaceChildren();
+      if (m.text) renderBody(r.el, m.text); else r.el.remove();
+      if (pin) list.scrollTop = list.scrollHeight;
+    } else if (m.text) {
+      addMsg('seek', m.text);   // 指令应答 / 丢帧回退：普通消息路径
+    }
+    refreshState();             // 回复可能改了绑定（/bind 等）
   };
   es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
 }
