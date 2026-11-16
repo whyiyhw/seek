@@ -108,9 +108,16 @@ func TestWeb_PageHasNoExternalLinks(t *testing.T) {
 	}
 }
 
-// getRaw issues a GET whose response body is NOT transparently
-// decompressed (an explicit Accept-Encoding suppresses the Go
-// transport's auto-decompress), so the test sees the exact wire bytes.
+// rawClient sees the wire as-sent. DisableCompression stops the Go
+// transport from adding its own Accept-Encoding: gzip when the request
+// carries none — and from transparently decoding the answer and
+// stripping Content-Encoding. http.DefaultClient does BOTH behind the
+// caller's back, which is why the "not asked-for" branch of
+// TestWeb_GzipPage previously passed vacuously (see its comment).
+var rawClient = &http.Client{Transport: &http.Transport{DisableCompression: true}}
+
+// getRaw issues a GET through rawClient so the test sees the exact
+// wire bytes and headers, whatever Accept-Encoding the caller sets.
 func getRaw(t *testing.T, url, acceptEnc string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -120,7 +127,7 @@ func getRaw(t *testing.T, url, acceptEnc string) *http.Response {
 	if acceptEnc != "" {
 		req.Header.Set("Accept-Encoding", acceptEnc)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rawClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,12 +161,18 @@ func TestWeb_GzipPage(t *testing.T) {
 		t.Errorf("gunzipped page = %d bytes, want the embedded %d verbatim", len(body), len(webPage))
 	}
 
-	// Not asked-for (transport auto-gzip disabled by NOT sending the
-	// header through the raw client — an empty Accept-Encoding means
-	// the Go transport adds none and passes the response through):
-	// identity bytes.
+	// Not asked-for: with no Accept-Encoding set, rawClient sends none
+	// (DisableCompression suppresses the transport's auto-added "gzip")
+	// and never decodes the answer, so the server's identity path is
+	// what we see. http.DefaultClient here would ask for gzip behind
+	// our back, transparently gunzip, and strip Content-Encoding —
+	// this branch would pass without the server ever being asked not
+	// to compress. Uncompressed is the tripwire for that regression.
 	resp2 := getRaw(t, srv.URL+"/", "")
 	defer resp2.Body.Close()
+	if resp2.Uncompressed {
+		t.Fatal("getRaw response came back transparently decompressed — the rawClient (DisableCompression) wiring regressed")
+	}
 	if resp2.Header.Get("Content-Encoding") != "" {
 		t.Fatalf("no Accept-Encoding on GET / → Content-Encoding %q, want none", resp2.Header.Get("Content-Encoding"))
 	}

@@ -1751,3 +1751,17 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `gzipResponseWriter` decides at WriteHeader/first-Write (Content-Type allowlist, `text/event-stream` deliberately absent), implements `Flush()` that flushes the gzip stream then the underlying flusher, and `close()` finishes the stream after the handler returns; commit with card `c_ph2zax`.
 - **Lesson**: response-wrapping middleware must re-expose every optional interface the wrapped handlers assert (Flusher is the one SSE needs; Hijacker would be the one websockets need) — and "compress everything textual" policies need a streaming carve-out, or per-event delivery dies behind the compressor.
 - **Refs**: `internal/controlplane/webfrontend_static.go` `withGzip`; `TestWeb_GzipSkipsSSE`.
+
+### http.DefaultClient silently asks for gzip and strips Content-Encoding — the "identity path" test passed vacuously
+- **Saw**: `TestWeb_GzipPage`'s not-asked-for branch (no Accept-Encoding → expect identity) was green, but the server's identity path had never executed.
+- **Why**: Go's `http.Transport` adds `Accept-Encoding: gzip` to any request that carries none, then transparently gunzips the answer and DELETES `Content-Encoding` — the test read a decoded body through a header the transport scrubbed. An explicit Accept-Encoding suppresses this; an absent one does not.
+- **Fix**: dedicated `rawClient` (`&http.Transport{DisableCompression: true}`) in `webfrontend_static_test.go`, plus a `resp.Uncompressed` tripwire; commit with card `c_ph2zax` (rework round 1).
+- **Lesson**: any test asserting "server does X when the client doesn't ask" over HTTP must disable the transport's compression negotiation — `DisableCompression` for both directions of the surprise, and check `resp.Uncompressed` as the regression wire.
+- **Refs**: `internal/controlplane/webfrontend_static_test.go` `rawClient` / `getRaw`; `net/http` Transport docs.
+
+### `mktemp -t name` is BSD-only — GNU coreutils reads the argument as a template and dies "too few X's"
+- **Saw**: `scripts/web-gate.sh` (runs on ubuntu-latest) failed at `mktemp -t seek-size` with "too few X's"; under `set -e` the whole gate went red before asserting anything.
+- **Why**: BSD mktemp treats `-t`'s argument as a PREFIX; GNU coreutils (and POSIX's newer `-t` spec) treat it as a TEMPLATE that must contain trailing X's. The portable shape is an explicit path with X's, honoring `TMPDIR`.
+- **Fix**: `mktemp "${TMPDIR:-/tmp}/seek-size.XXXXXX"` (repo precedent: `install-serve.sh:68`, `eval-trend.sh:300`); same commit swept the file's `\s` regexes (grep + awk) to `[[:space:]]` — mawk doesn't take `\s`.
+- **Lesson**: scripts meant for both macOS and CI never use `mktemp -t <name>`; use the `"${TMPDIR:-/tmp}/<name>.XXXXXX"` form, and keep regexes POSIX-class (`[[:space:]]`) when mawk is in the audience.
+- **Refs**: `scripts/web-gate.sh` `build_size` / `baseline`; `.github/workflows/ci.yml` web-gate job.

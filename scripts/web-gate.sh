@@ -45,13 +45,17 @@ echo "no-node: repo root clean (no package.json / lockfiles / node_modules)"
 
 # ---- 2. binary size gate ----
 baseline() {
-  # first non-comment line of the baseline file
-  grep -vE '^\s*(#|$)' "$BASELINE_FILE" | head -1 | tr -d '[:space:]'
+  # first non-comment line of the baseline file ([[:space:]] not \s —
+  # the GNU/mawk regex dialects on ubuntu-latest don't take \s)
+  grep -vE '^[[:space:]]*(#|$)' "$BASELINE_FILE" | head -1 | tr -d '[:space:]'
 }
 
 build_size() {
   local out
-  out="$(mktemp -t seek-size)"
+  # not `mktemp -t seek-size`: GNU coreutils reads -t's arg as a
+  # TEMPLATE and demands X's ("too few X's") — BSD just prefixes.
+  # Path-with-template works everywhere; cf. install-serve.sh:68.
+  out="$(mktemp "${TMPDIR:-/tmp}/seek-size.XXXXXX")"
   # shellcheck disable=SC2064  # trap needs the expansion now
   trap "rm -f '$out'" EXIT
   GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$out" ./cmd/seek
@@ -62,7 +66,7 @@ if [ "${1:-}" = "--update-baseline" ]; then
   size="$(build_size)"
   # rewrite only the number line: comments above it survive verbatim
   awk -v n="$size" '
-    !done && $0 !~ /^\s*(#|$)/ { print n; done=1; next }
+    !done && $0 !~ /^[[:space:]]*(#|$)/ { print n; done=1; next }
     { print }
   ' "$BASELINE_FILE" > "$BASELINE_FILE.tmp" && mv "$BASELINE_FILE.tmp" "$BASELINE_FILE"
   echo "baseline updated: $size bytes ($(basename "$BASELINE_FILE")) — commit it with the change that grew the binary"
