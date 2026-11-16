@@ -224,3 +224,103 @@ func TestBuildFrontendsWebRegistersAssetMethods(t *testing.T) {
 		t.Errorf("unknown memory = %v, want -32002", err)
 	}
 }
+
+// TestBuildFrontendsWebRegistersHooksMethods is the W4.6 sibling: the
+// hooks family answers through the production wiring — merged
+// hooks.toml view over a temporary SEEK_HOME (user + project files),
+// audit tail with project attribution via the env-resolved session
+// store, follow rejected as -32602 (the one-shot contract).
+func TestBuildFrontendsWebRegistersHooksMethods(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+	t.Setenv("SEEK_SESSIONS_DIR", "")
+
+	root := filepath.Join(home, "work", "proj")
+	if err := os.MkdirAll(filepath.Join(root, ".seek"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pid := paths.ProjectID(root)
+	projDir := filepath.Join(home, "projects", pid)
+	if err := os.MkdirAll(projDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	man := memory.Manifest{SchemaVersion: memory.SchemaVersion, ProjectID: pid, AbsPath: root, FirstSeen: now, LastSeen: now}
+	if b, err := json.Marshal(man); err != nil {
+		t.Fatal(err)
+	} else if err := os.WriteFile(filepath.Join(projDir, "manifest.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".seek", "hooks.toml"), []byte(
+		"[[pre_tool]]\nname = \"proj-guard\"\ncommand = \"exit 1\"\nmatch = { tool = \"bash\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "hooks.toml"), []byte(
+		"[[session_start]]\nname = \"user-notify\"\ncommand = \"echo start\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := session.NewStoreAt(filepath.Join(home, "sessions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &session.Session{
+		SchemaVersion: 3,
+		ID:            "20261116-090000-hhhhhhhhhhhhhhhh",
+		Model:         "deepseek-chat",
+		CWD:           root,
+		Messages:      []deepseek.Message{{Role: deepseek.RoleUser, Content: "hooks plane"}},
+	}
+	if err := st.Save(fixture); err != nil {
+		t.Fatal(err)
+	}
+	audit := fmt.Sprintf(
+		`{"ts":"2026-11-16T20:00:00Z","event":"pre_tool","hook":"proj-guard","tool":"bash","session_id":%q,"duration_ms":8,"exit_code":1,"denied":true}`+"\n"+
+			`{"ts":"2026-11-16T21:00:00Z","event":"pre_tool","hook":"proj-guard","tool":"bash","session_id":"20261116-210000-iiiiiiiiiiiiiiii","duration_ms":8,"exit_code":1,"denied":true}`+"\n",
+		fixture.ID)
+	if err := os.WriteFile(filepath.Join(home, "hooks-audit.jsonl"), []byte(audit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fes, err := buildFrontends([]string{"web"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe, ok := fes[0].(*controlplane.WebFrontend)
+	if !ok {
+		t.Fatalf("web frontend = %T, want *controlplane.WebFrontend", fes[0])
+	}
+	reg := fe.RPCRegistry()
+	ctx := context.Background()
+
+	// hooks/list: the only project is the default; project row first,
+	// user row second (dispatch order), shapes as shipped.
+	res, err := reg.Dispatch(ctx, "hooks/list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("hooks/list: %v", err)
+	}
+	b, _ := json.Marshal(res)
+	want := `[{"name":"proj-guard","event":"pre_tool","command":"exit 1","source":"project","tool":"bash","timeout_ms":5000},{"name":"user-notify","event":"session_start","command":"echo start","source":"user","tool":"*","timeout_ms":5000}]`
+	if string(b) != `{"hooks":`+want+`}` {
+		t.Fatalf("hooks/list = %s, want %s", b, want)
+	}
+
+	// hooks/audit/tail: the project filter keeps the entry the fixture
+	// session attributes to this project, drops the gone-session one.
+	res, err = reg.Dispatch(ctx, "hooks/audit/tail", json.RawMessage(fmt.Sprintf(`{"project_id":%q}`, pid)))
+	if err != nil {
+		t.Fatalf("hooks/audit/tail: %v", err)
+	}
+	b, _ = json.Marshal(res)
+	if !strings.Contains(string(b), fixture.ID) || strings.Contains(string(b), "iiiiiiii") {
+		t.Fatalf("hooks/audit/tail = %s, want only the fixture session's entry", b)
+	}
+
+	// follow=true keeps the one-shot contract honest through the
+	// production registry.
+	_, err = reg.Dispatch(ctx, "hooks/audit/tail", json.RawMessage(`{"follow":true}`))
+	var he *rpc.Error
+	if !errors.As(err, &he) || he.Code != rpc.CodeInvalidParams {
+		t.Errorf("follow=true = %v, want -32602", err)
+	}
+}
