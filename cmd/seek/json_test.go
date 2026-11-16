@@ -14,14 +14,15 @@ import (
 )
 
 // captureLinesJSON runs runJSON against a fake event stream and returns
-// the decoded JSONL lines emitted to stdout.
-func captureLinesJSON(t *testing.T, events []agent.Event) []jsonLine {
+// the decoded JSONL lines emitted to stdout. model mirrors runJSON's
+// model parameter (agent_start carries it).
+func captureLinesJSON(t *testing.T, model string, events []agent.Event) []jsonLine {
 	t.Helper()
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 
 	emit := func(line jsonLine) { _ = enc.Encode(line) }
-	emit(jsonLine{Type: "agent_start"})
+	emit(jsonLine{Type: "agent_start", Model: model})
 
 	for _, ev := range events {
 		switch e := ev.(type) {
@@ -88,7 +89,7 @@ func TestRunJSON_PlainTextTurn(t *testing.T) {
 		agent.MessageDelta{Delta: "world"},
 		agent.TurnEnd{Index: 0, Usage: deepseek.Usage{PromptTokens: 10, CompletionTokens: 5}},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	want := []string{"agent_start", "turn_start", "text_delta", "text_delta", "turn_end", "agent_end"}
 	if got := typeSeq(lines); !sliceEq(got, want) {
@@ -119,7 +120,7 @@ func TestRunJSON_ReasoningDelta(t *testing.T) {
 		agent.MessageDelta{Delta: "answer"},
 		agent.TurnEnd{Index: 0},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	types := typeSeq(lines)
 	found := slices.Contains(types, "reasoning_delta")
@@ -135,7 +136,7 @@ func TestRunJSON_ToolCallSuccess(t *testing.T) {
 		agent.ToolExecEnd{CallID: "c1", Name: "read", Result: "file contents"},
 		agent.TurnEnd{Index: 0, Usage: deepseek.Usage{}, ToolCalls: 1},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	want := []string{"agent_start", "turn_start", "tool_start", "tool_end", "turn_end", "agent_end"}
 	if got := typeSeq(lines); !sliceEq(got, want) {
@@ -169,7 +170,7 @@ func TestRunJSON_ToolCallError(t *testing.T) {
 		agent.ToolExecEnd{CallID: "c2", Name: "bash", Err: errors.New("permission denied")},
 		agent.TurnEnd{Index: 0},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	for _, l := range lines {
 		if l.Type == "tool_end" {
@@ -188,7 +189,7 @@ func TestRunJSON_ErrorEvent(t *testing.T) {
 		agent.TurnStart{Index: 0},
 		agent.ErrorEvent{Err: errors.New("api timeout")},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	found := false
 	for _, l := range lines {
@@ -212,7 +213,7 @@ func TestRunJSON_OutputIsValidJSONL(t *testing.T) {
 		agent.MessageDelta{Delta: "line1\nline2\ttab"},
 		agent.TurnEnd{Index: 0},
 	}
-	lines := captureLinesJSON(t, events)
+	lines := captureLinesJSON(t, "deepseek-chat", events)
 
 	for _, l := range lines {
 		if l.Type == "text_delta" {
@@ -221,6 +222,44 @@ func TestRunJSON_OutputIsValidJSONL(t *testing.T) {
 				t.Errorf("delta not round-tripped: %q", l.Delta)
 			}
 		}
+	}
+}
+
+// W0.3 (feature-web-frontend §2.5): agent_start names the run's model
+// so downstream consumers can price turn_end usage without a side channel.
+func TestRunJSON_AgentStartCarriesModel(t *testing.T) {
+	events := []agent.Event{
+		agent.TurnStart{Index: 0},
+		agent.MessageDelta{Delta: "hi"},
+		agent.TurnEnd{Index: 0},
+	}
+	lines := captureLinesJSON(t, "deepseek-reasoner", events)
+
+	if len(lines) == 0 || lines[0].Type != "agent_start" {
+		t.Fatalf("first line is %v, want agent_start", typeSeq(lines))
+	}
+	if lines[0].Model != "deepseek-reasoner" {
+		t.Errorf("agent_start.model=%q, want %q", lines[0].Model, "deepseek-reasoner")
+	}
+	// model rides agent_start only — no other event carries it.
+	for _, l := range lines[1:] {
+		if l.Model != "" {
+			t.Errorf("%s line unexpectedly carries model %q", l.Type, l.Model)
+		}
+	}
+}
+
+// The field is additive: lines without a model must not grow a "model"
+// key, so existing consumers' parses are untouched (executor decode
+// ignores unknown keys either way, but absent keys keep old byte-for-byte
+// expectations honest).
+func TestRunJSON_ModelOmittedWhenEmpty(t *testing.T) {
+	raw, err := json.Marshal(jsonLine{Type: "agent_start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"model"`)) {
+		t.Errorf("empty model leaked into JSON: %s", raw)
 	}
 }
 

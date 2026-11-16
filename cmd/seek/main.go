@@ -2482,9 +2482,14 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 // omitempty so absent data doesn't clutter the output. Consumers should
 // branch on Type; all other fields are type-specific.
 //
+// The field set is as stable as the Type values: ADDING a field (e.g.
+// agent_start's model) is non-breaking — consumers decode into their
+// own structs and ignore unknown keys — while removing or repurposing
+// one is a major-version break, same discipline as the Type list below.
+//
 // Type values (stable contract — breaking changes = major version bump):
 //
-//	agent_start      — one per run
+//	agent_start      — one per run; model names the model bound to this run
 //	turn_start       — one per LLM call; index is 0-based
 //	text_delta       — incremental assistant text; delta is the new chunk
 //	reasoning_delta  — incremental CoT text from thinking-mode responses
@@ -2497,6 +2502,9 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 type jsonLine struct {
 	Type  string `json:"type"`
 	Index int    `json:"index,omitempty"`
+	// agent_start only: model id the run is bound to (pricing consumers
+	// need it to turn turn_end usage into $ — feature-web-frontend §2.5)
+	Model string `json:"model,omitempty"`
 	// text_delta / reasoning_delta / tool_delta
 	Delta     string `json:"delta,omitempty"`
 	Reasoning bool   `json:"reasoning,omitempty"`
@@ -2554,7 +2562,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 		}
 	}
 
-	emit(jsonLine{Type: "agent_start"})
+	emit(jsonLine{Type: "agent_start", Model: model})
 
 	for ev := range ag.Prompt(ctx, text, images...) {
 		switch e := ev.(type) {
