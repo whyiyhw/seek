@@ -159,7 +159,7 @@ func loadAverages(path string, limit int) map[string]float64 {
 func cmdCheck(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("hooks check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	event := fs.String("event", "", "event name (pre_tool|post_tool|pre_prompt|session_start|session_end)")
+	event := fs.String("event", "", "event name (pre_tool|post_tool|pre_prompt|session_start|session_end|subagent_start|subagent_stop|stop|pre_compact|notification)")
 	tool := fs.String("tool", "", "tool name (required for pre_tool/post_tool)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -184,6 +184,16 @@ func cmdCheck(args []string, stdout, stderr io.Writer) error {
 		pool = cfg.SessionStart
 	case hooksconfig.EventSessionEnd:
 		pool = cfg.SessionEnd
+	case hooksconfig.EventSubagentStart:
+		pool = cfg.SubagentStart
+	case hooksconfig.EventSubagentStop:
+		pool = cfg.SubagentStop
+	case hooksconfig.EventStop:
+		pool = cfg.Stop
+	case hooksconfig.EventPreCompact:
+		pool = cfg.PreCompact
+	case hooksconfig.EventNotification:
+		pool = cfg.Notification
 	default:
 		fmt.Fprintf(stderr, "hooks: unknown event %q\n", *event)
 		return nil

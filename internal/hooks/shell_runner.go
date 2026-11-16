@@ -1,7 +1,7 @@
 // ShellRunner is the user-configurable shell-hook implementation of
 // the Registry interfaces (PRD v3 pillar B / feature-shell-hooks).
 //
-// It implements PreToolUseHook + the four observer interfaces in one
+// It implements PreToolUseHook + the nine observer interfaces in one
 // struct so a single Registry.Register call wires everything. Per PRD
 // §3.2:
 //
@@ -12,6 +12,19 @@
 //     byte sequence)
 //   - session_start → SessionStartObserver
 //   - session_end   → SessionEndObserver
+//
+// P3 observer-only events (feature-orchestration §6 D15 /
+// feature-hooks-injection §3.3) — same observer semantics as above,
+// timeout / non-zero exit only audit + status:
+//
+//   - subagent_start / subagent_stop → Subagent{Start,Stop}Observer
+//   - stop        → StopObserver (once per Prompt(), vs PostTurn's
+//     per-model-turn granularity)
+//   - pre_compact → PreCompactObserver
+//   - notification → NotificationObserver
+//
+// The deny surface does NOT grow: pre_tool stays the only event whose
+// outcome can veto anything (feature-hooks-injection §5.3).
 //
 // Note: ShellRunner deliberately lives in package hooks (not
 // internal/hooksconfig) because it implements the Registry interfaces
@@ -27,6 +40,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -234,20 +248,24 @@ func truncatedResult(result string) string {
 // timeout, captures stdout (used as deny reason for pre_tool), and
 // writes the audit row. Returns (stdout, exitCode, timedOut).
 //
+// sid carries the subagent_sid audit field — empty for every event
+// except subagent_start / subagent_stop.
+//
 // Callers MUST short-circuit on h.SkipReason before reaching here —
 // the responsibility lives at each event entry point because the
 // "what does skip mean for THIS event" decision differs (pre_tool
 // skips silently, observer paths log it). Reaching this function with
 // SkipReason set is a programming error; we still defend-in-depth by
 // auditing and returning a benign code.
-func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool string, env []string) (string, int, bool) {
+func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool, sid string, env []string) (string, int, bool) {
 	if h.SkipReason != "" {
 		r.writeAudit(hooksconfig.AuditEntry{
-			Event:    h.Event,
-			Hook:     h.Name,
-			Tool:     tool,
-			ExitCode: 0, // success-equivalent so observer paths don't trip
-			Reason:   "skipped: " + h.SkipReason,
+			Event:       h.Event,
+			Hook:        h.Name,
+			Tool:        tool,
+			SubagentSID: sid,
+			ExitCode:    0, // success-equivalent so observer paths don't trip
+			Reason:      "skipped: " + h.SkipReason,
 		})
 		return "", 0, false
 	}
@@ -277,13 +295,14 @@ func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool stri
 		code = -1
 	}
 	r.writeAudit(hooksconfig.AuditEntry{
-		Event:      h.Event,
-		Hook:       h.Name,
-		Tool:       tool,
-		DurationMs: dur.Milliseconds(),
-		ExitCode:   code,
-		Denied:     h.Event == hooksconfig.EventPreTool && code != 0,
-		Reason:     reason,
+		Event:       h.Event,
+		Hook:        h.Name,
+		Tool:        tool,
+		SubagentSID: sid,
+		DurationMs:  dur.Milliseconds(),
+		ExitCode:    code,
+		Denied:      h.Event == hooksconfig.EventPreTool && code != 0,
+		Reason:      reason,
 	})
 	return stdout, code, timedOut
 }
@@ -342,7 +361,7 @@ func (r *ShellRunner) OnPreToolUse(ctx context.Context, in PreToolUseIn) (PreToo
 			envPrefix+"TOOL_NAME="+in.Name,
 			envPrefix+"TOOL_ARGS_JSON="+argsJSON(in.Args),
 		)
-		stdout, code, timedOut := r.runHook(ctx, h, in.Name, env)
+		stdout, code, timedOut := r.runHook(ctx, h, in.Name, "", env)
 		if timedOut {
 			msg := fmt.Sprintf("hook %q timed out after %dms — treating as deny", h.Name, h.EffectiveTimeoutMs())
 			r.emitStatus(StatusEvent{
@@ -397,7 +416,7 @@ func (r *ShellRunner) OnPostToolUse(ctx context.Context, ev PostToolUseEvent) {
 			envPrefix+"TOOL_RESULT="+truncatedResult(ev.Result),
 			envPrefix+"TOOL_EXIT_OK="+exitOK,
 		)
-		_, code, timedOut := r.runHook(ctx, h, ev.Name, env)
+		_, code, timedOut := r.runHook(ctx, h, ev.Name, "", env)
 		if timedOut || code != 0 {
 			r.emitStatus(StatusEvent{
 				Event:    hooksconfig.EventPostTool,
@@ -416,18 +435,7 @@ func (r *ShellRunner) OnPostToolUse(ctx context.Context, ev PostToolUseEvent) {
 // observer-only — see file-level comment. Hook stdout never reaches
 // the prompt because there's no plumbing in PreTurnObserver for it.
 func (r *ShellRunner) OnPreTurn(ctx context.Context, ev PreTurnEvent) {
-	for _, h := range r.cfg.PrePrompt {
-		env := r.baseEnv(hooksconfig.EventPrePrompt)
-		_, code, timedOut := r.runHook(ctx, h, "", env)
-		if timedOut || code != 0 {
-			r.emitStatus(StatusEvent{
-				Event:    hooksconfig.EventPrePrompt,
-				Hook:     h.Name,
-				TimedOut: timedOut,
-				Reason:   fmt.Sprintf("exit=%d timedOut=%v", code, timedOut),
-			})
-		}
-	}
+	r.runObserverHooks(ctx, r.cfg.PrePrompt, hooksconfig.EventPrePrompt, "", nil)
 }
 
 // ---- SessionStartObserver ----
@@ -442,18 +450,7 @@ func (r *ShellRunner) OnSessionStart(ctx context.Context, ev SessionStartEvent) 
 		r.projectPath = ev.CWD
 	}
 	r.mu.Unlock()
-	for _, h := range r.cfg.SessionStart {
-		env := r.baseEnv(hooksconfig.EventSessionStart)
-		_, code, timedOut := r.runHook(ctx, h, "", env)
-		if timedOut || code != 0 {
-			r.emitStatus(StatusEvent{
-				Event:    hooksconfig.EventSessionStart,
-				Hook:     h.Name,
-				TimedOut: timedOut,
-				Reason:   fmt.Sprintf("exit=%d timedOut=%v", code, timedOut),
-			})
-		}
-	}
+	r.runObserverHooks(ctx, r.cfg.SessionStart, hooksconfig.EventSessionStart, "", nil)
 }
 
 // ---- SessionEndObserver ----
@@ -462,12 +459,77 @@ func (r *ShellRunner) OnSessionStart(ctx context.Context, ev SessionStartEvent) 
 // Per PRD §3.4 we run synchronously (so the audit write happens
 // before process exit). Audit close is best-effort.
 func (r *ShellRunner) OnSessionEnd(ctx context.Context, ev SessionEndEvent) {
-	for _, h := range r.cfg.SessionEnd {
-		env := r.baseEnv(hooksconfig.EventSessionEnd)
-		_, code, timedOut := r.runHook(ctx, h, "", env)
+	r.runObserverHooks(ctx, r.cfg.SessionEnd, hooksconfig.EventSessionEnd, "", nil)
+}
+
+// ---- P3 observer events (orchestration §6 D15) ----
+
+// OnSubagentStart runs subagent_start hooks. Env carries
+// SEEK_SUBAGENT_SID / SEEK_SUBAGENT_TYPE / SEEK_SUBAGENT_DESC
+// (feature-hooks-injection §3.3).
+func (r *ShellRunner) OnSubagentStart(ctx context.Context, ev SubagentStartEvent) {
+	r.runObserverHooks(ctx, r.cfg.SubagentStart, hooksconfig.EventSubagentStart, ev.SID, []string{
+		envPrefix + "SUBAGENT_SID=" + ev.SID,
+		envPrefix + "SUBAGENT_TYPE=" + ev.Type,
+		envPrefix + "SUBAGENT_DESC=" + ev.Desc,
+	})
+}
+
+// OnSubagentStop runs subagent_stop hooks. Env adds
+// SEEK_SUBAGENT_STATUS / SEEK_SUBAGENT_TURNS / SEEK_SUBAGENT_TOKENS on
+// top of the subagent_start set. The audit row's subagent_sid field is
+// populated for both subagent events.
+func (r *ShellRunner) OnSubagentStop(ctx context.Context, ev SubagentStopEvent) {
+	r.runObserverHooks(ctx, r.cfg.SubagentStop, hooksconfig.EventSubagentStop, ev.SID, []string{
+		envPrefix + "SUBAGENT_SID=" + ev.SID,
+		envPrefix + "SUBAGENT_TYPE=" + ev.Type,
+		envPrefix + "SUBAGENT_DESC=" + ev.Desc,
+		envPrefix + "SUBAGENT_STATUS=" + ev.Status,
+		envPrefix + "SUBAGENT_TURNS=" + strconv.Itoa(ev.Turns),
+		envPrefix + "SUBAGENT_TOKENS=" + strconv.FormatInt(ev.Tokens, 10),
+	})
+}
+
+// OnStop runs stop hooks — once per Prompt() round, after the reply
+// has fully settled (any terminal outcome). Env carries
+// SEEK_STOP_TURNS / SEEK_STOP_FINISH.
+func (r *ShellRunner) OnStop(ctx context.Context, ev StopEvent) {
+	r.runObserverHooks(ctx, r.cfg.Stop, hooksconfig.EventStop, "", []string{
+		envPrefix + "STOP_TURNS=" + strconv.Itoa(ev.Turns),
+		envPrefix + "STOP_FINISH=" + ev.Finish,
+	})
+}
+
+// OnPreCompact runs pre_compact hooks before /compact rewrites
+// history. Env carries SEEK_COMPACT_TRIGGER ("manual" today).
+func (r *ShellRunner) OnPreCompact(ctx context.Context, ev PreCompactEvent) {
+	r.runObserverHooks(ctx, r.cfg.PreCompact, hooksconfig.EventPreCompact, "", []string{
+		envPrefix + "COMPACT_TRIGGER=" + ev.Trigger,
+	})
+}
+
+// OnNotification runs notification hooks when something surfaces
+// outside the TUI text plane (OS notification, ask_user picker). Env
+// carries SEEK_NOTIFY_KIND / SEEK_NOTIFY_TITLE.
+func (r *ShellRunner) OnNotification(ctx context.Context, ev NotificationEvent) {
+	r.runObserverHooks(ctx, r.cfg.Notification, hooksconfig.EventNotification, "", []string{
+		envPrefix + "NOTIFY_KIND=" + ev.Kind,
+		envPrefix + "NOTIFY_TITLE=" + ev.Title,
+	})
+}
+
+// runObserverHooks is the shared loop for every observer-only event:
+// run each hook with the event's base env plus the event-specific
+// additions; timeout / non-zero exit only audit + status-emit, never
+// deny (pre_tool is the sole deny point). sid threads the
+// subagent_sid audit field — "" outside the subagent events.
+func (r *ShellRunner) runObserverHooks(ctx context.Context, hs []hooksconfig.Hook, event, sid string, extraEnv []string) {
+	for _, h := range hs {
+		env := append(r.baseEnv(event), extraEnv...)
+		_, code, timedOut := r.runHook(ctx, h, "", sid, env)
 		if timedOut || code != 0 {
 			r.emitStatus(StatusEvent{
-				Event:    hooksconfig.EventSessionEnd,
+				Event:    event,
 				Hook:     h.Name,
 				TimedOut: timedOut,
 				Reason:   fmt.Sprintf("exit=%d timedOut=%v", code, timedOut),

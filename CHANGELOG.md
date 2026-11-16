@@ -69,3 +69,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_ujgmpu：web 任务面板·三：后台子列表/状态/tokens UI + 详情（W3.3）
 - c_5ckroy：deepseek-app-api·S2：pkg/deepseek ASR 客户端 + pricing.ASRCost
 - c_2lu6vb：deepseek-app-api·F2：internal/filerefs 检测器（后缀表+stat 门，照 imgrefs 先例新包）
+- c_wsf7us：orchestration·M-O3.1：hooks 新观察点（SubagentStart/Stop、Stop、PreCompact、Notification）+ shell 事件 + audit

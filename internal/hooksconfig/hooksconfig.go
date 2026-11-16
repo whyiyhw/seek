@@ -59,6 +59,16 @@ const (
 	EventPrePrompt    = "pre_prompt"
 	EventSessionStart = "session_start"
 	EventSessionEnd   = "session_end"
+
+	// P3 observer-only events (feature-orchestration §6 D15 /
+	// feature-hooks-injection §3.3). No deny surface: timeout and
+	// non-zero exit only audit + status; `pre_tool` above remains the
+	// ONLY event whose exit code can veto anything.
+	EventSubagentStart = "subagent_start"
+	EventSubagentStop  = "subagent_stop"
+	EventStop          = "stop"
+	EventPreCompact    = "pre_compact"
+	EventNotification  = "notification"
 )
 
 // DefaultTimeoutMs is the per-hook wall-clock timeout if the toml
@@ -141,6 +151,17 @@ type Config struct {
 	PrePrompt    []Hook `toml:"pre_prompt"`
 	SessionStart []Hook `toml:"session_start"`
 	SessionEnd   []Hook `toml:"session_end"`
+
+	// P3 observer-only events (feature-orchestration §6 D15). Same
+	// Hook schema; Match/timeout carry over unchanged. Match is
+	// meaningless for these (no tool name in scope) and is ignored at
+	// dispatch — kept uniform so the loader / list / trust machinery
+	// needs no per-event special cases.
+	SubagentStart []Hook `toml:"subagent_start"`
+	SubagentStop  []Hook `toml:"subagent_stop"`
+	Stop          []Hook `toml:"stop"`
+	PreCompact    []Hook `toml:"pre_compact"`
+	Notification  []Hook `toml:"notification"`
 }
 
 // IsEmpty reports whether this Config registers any hooks at all.
@@ -148,22 +169,31 @@ type Config struct {
 // when both user and project files are missing.
 func (c Config) IsEmpty() bool {
 	return len(c.PreTool) == 0 && len(c.PostTool) == 0 && len(c.PrePrompt) == 0 &&
-		len(c.SessionStart) == 0 && len(c.SessionEnd) == 0
+		len(c.SessionStart) == 0 && len(c.SessionEnd) == 0 &&
+		len(c.SubagentStart) == 0 && len(c.SubagentStop) == 0 &&
+		len(c.Stop) == 0 && len(c.PreCompact) == 0 && len(c.Notification) == 0
 }
 
 // All flattens the Config into a single slice for callers that want to
 // iterate hooks regardless of event. Order = PreTool, PostTool,
-// PrePrompt, SessionStart, SessionEnd — matches the order a `seek hooks
-// list` would print and is stable across runs. Each Hook's .Event
-// field carries the original event so the consumer can dispatch.
+// PrePrompt, SessionStart, SessionEnd, then the P3 observer events —
+// matches the order a `seek hooks list` would print and is stable
+// across runs. Each Hook's .Event field carries the original event so
+// the consumer can dispatch.
 func (c Config) All() []Hook {
 	out := make([]Hook, 0,
-		len(c.PreTool)+len(c.PostTool)+len(c.PrePrompt)+len(c.SessionStart)+len(c.SessionEnd))
+		len(c.PreTool)+len(c.PostTool)+len(c.PrePrompt)+len(c.SessionStart)+len(c.SessionEnd)+
+			len(c.SubagentStart)+len(c.SubagentStop)+len(c.Stop)+len(c.PreCompact)+len(c.Notification))
 	out = append(out, c.PreTool...)
 	out = append(out, c.PostTool...)
 	out = append(out, c.PrePrompt...)
 	out = append(out, c.SessionStart...)
 	out = append(out, c.SessionEnd...)
+	out = append(out, c.SubagentStart...)
+	out = append(out, c.SubagentStop...)
+	out = append(out, c.Stop...)
+	out = append(out, c.PreCompact...)
+	out = append(out, c.Notification...)
 	return out
 }
 
@@ -219,6 +249,11 @@ func DecodeBytes(body []byte, src Source) (Config, error) {
 	stampSourceEvent(&c.PrePrompt, src, EventPrePrompt)
 	stampSourceEvent(&c.SessionStart, src, EventSessionStart)
 	stampSourceEvent(&c.SessionEnd, src, EventSessionEnd)
+	stampSourceEvent(&c.SubagentStart, src, EventSubagentStart)
+	stampSourceEvent(&c.SubagentStop, src, EventSubagentStop)
+	stampSourceEvent(&c.Stop, src, EventStop)
+	stampSourceEvent(&c.PreCompact, src, EventPreCompact)
+	stampSourceEvent(&c.Notification, src, EventNotification)
 	return c, nil
 }
 
@@ -240,11 +275,16 @@ func stampSourceEvent(hooks *[]Hook, src Source, event string) {
 // run on traffic the project policy would have denied.
 func Merge(project, user Config) Config {
 	return Config{
-		PreTool:      append(append([]Hook{}, project.PreTool...), user.PreTool...),
-		PostTool:     append(append([]Hook{}, project.PostTool...), user.PostTool...),
-		PrePrompt:    append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
-		SessionStart: append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
-		SessionEnd:   append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
+		PreTool:       append(append([]Hook{}, project.PreTool...), user.PreTool...),
+		PostTool:      append(append([]Hook{}, project.PostTool...), user.PostTool...),
+		PrePrompt:     append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
+		SessionStart:  append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
+		SessionEnd:    append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
+		SubagentStart: append(append([]Hook{}, project.SubagentStart...), user.SubagentStart...),
+		SubagentStop:  append(append([]Hook{}, project.SubagentStop...), user.SubagentStop...),
+		Stop:          append(append([]Hook{}, project.Stop...), user.Stop...),
+		PreCompact:    append(append([]Hook{}, project.PreCompact...), user.PreCompact...),
+		Notification:  append(append([]Hook{}, project.Notification...), user.Notification...),
 	}
 }
 
@@ -325,6 +365,11 @@ func StaticCheck(c *Config, chk SyntaxChecker) []string {
 	check(c.PrePrompt)
 	check(c.SessionStart)
 	check(c.SessionEnd)
+	check(c.SubagentStart)
+	check(c.SubagentStop)
+	check(c.Stop)
+	check(c.PreCompact)
+	check(c.Notification)
 	return warnings
 }
 
@@ -343,9 +388,9 @@ type HookSummary struct {
 }
 
 // Summarize returns a stable-ordered slice of HookSummary for display.
-// Order = Event group (pre_tool → session_end) then declaration order
-// within each event, with project hooks before user hooks (matching
-// dispatch order).
+// Order = Event group (pre_tool → session_end, then the P3 observer
+// events) then declaration order within each event, with project hooks
+// before user hooks (matching dispatch order).
 func Summarize(c Config) []HookSummary {
 	groups := []struct {
 		event string
@@ -356,6 +401,11 @@ func Summarize(c Config) []HookSummary {
 		{EventPrePrompt, c.PrePrompt},
 		{EventSessionStart, c.SessionStart},
 		{EventSessionEnd, c.SessionEnd},
+		{EventSubagentStart, c.SubagentStart},
+		{EventSubagentStop, c.SubagentStop},
+		{EventStop, c.Stop},
+		{EventPreCompact, c.PreCompact},
+		{EventNotification, c.Notification},
 	}
 	var out []HookSummary
 	for _, g := range groups {
