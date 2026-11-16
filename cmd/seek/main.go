@@ -1740,6 +1740,23 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "subagent: orphan recover:", oerr)
 			}
 		}
+
+		// D3 resume 回灌 (M-O1.3): rehydrate the delivery queue for
+		// THIS session's background children that reached a terminal
+		// state in a prior process without their notice ever being
+		// ingested (completed-not-notified; orphaned/failed get a
+		// one-line status note). Runs AFTER OrphanRecover so crash
+		// residue folds to orphaned before selection. Delivery rides
+		// the normal path — the Notifier prepends them as <context>
+		// messages on the FIRST Prompt after resume and appends the
+		// `notified` marker, so repeated resumes never re-inject.
+		// No-op for fresh sessions (the ParentSid filter finds
+		// nothing) and when nothing is pending.
+		if n, rerr := subagentMgr.RecoverNotices(); rerr != nil {
+			fmt.Fprintln(os.Stderr, "subagent: notice recover:", rerr)
+		} else if n > 0 {
+			fmt.Fprintf(os.Stderr, "subagent: %d background notice(s) from a prior session — delivered on your next message\n", n)
+		}
 	}
 
 	// v7 柱 N: autopilot takes over before the TUI/print dispatch.
