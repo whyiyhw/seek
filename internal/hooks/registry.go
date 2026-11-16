@@ -14,13 +14,18 @@ import (
 // order too, but by design observers cannot influence each other, so the
 // order is not a semantic contract.
 type Registry struct {
-	prePrompt    []PrePromptHook
-	preToolUse   []PreToolUseHook
-	preTurn      []PreTurnObserver
-	postTurn     []PostTurnObserver
-	postToolUse  []PostToolUseObserver
-	sessionStart []SessionStartObserver
-	sessionEnd   []SessionEndObserver
+	prePrompt     []PrePromptHook
+	preToolUse    []PreToolUseHook
+	preTurn       []PreTurnObserver
+	postTurn      []PostTurnObserver
+	postToolUse   []PostToolUseObserver
+	sessionStart  []SessionStartObserver
+	sessionEnd    []SessionEndObserver
+	subagentStart []SubagentStartObserver
+	subagentStop  []SubagentStopObserver
+	stop          []StopObserver
+	preCompact    []PreCompactObserver
+	notification  []NotificationObserver
 
 	onPanic func(stage string, v any)
 }
@@ -72,6 +77,26 @@ func (r *Registry) Register(h any) {
 		r.sessionEnd = append(r.sessionEnd, x)
 		matched = true
 	}
+	if x, ok := h.(SubagentStartObserver); ok {
+		r.subagentStart = append(r.subagentStart, x)
+		matched = true
+	}
+	if x, ok := h.(SubagentStopObserver); ok {
+		r.subagentStop = append(r.subagentStop, x)
+		matched = true
+	}
+	if x, ok := h.(StopObserver); ok {
+		r.stop = append(r.stop, x)
+		matched = true
+	}
+	if x, ok := h.(PreCompactObserver); ok {
+		r.preCompact = append(r.preCompact, x)
+		matched = true
+	}
+	if x, ok := h.(NotificationObserver); ok {
+		r.notification = append(r.notification, x)
+		matched = true
+	}
 	if !matched {
 		panic(fmt.Sprintf("hooks: Register(%T): value implements no hook interface", h))
 	}
@@ -104,6 +129,11 @@ func (r *Registry) CloneWithout(exclude any) *Registry {
 	clone.postToolUse = filterHooks(r.postToolUse, exclude)
 	clone.sessionStart = filterHooks(r.sessionStart, exclude)
 	clone.sessionEnd = filterHooks(r.sessionEnd, exclude)
+	clone.subagentStart = filterHooks(r.subagentStart, exclude)
+	clone.subagentStop = filterHooks(r.subagentStop, exclude)
+	clone.stop = filterHooks(r.stop, exclude)
+	clone.preCompact = filterHooks(r.preCompact, exclude)
+	clone.notification = filterHooks(r.notification, exclude)
 	return clone
 }
 
@@ -125,13 +155,18 @@ func filterHooks[T any](slots []T, exclude any) []T {
 // for debug logging right after wiring — call Stack and dump to confirm
 // composition before the first user message lands.
 type Stack struct {
-	PrePrompt    []string
-	PreToolUse   []string
-	PreTurn      []string
-	PostTurn     []string
-	PostToolUse  []string
-	SessionStart []string
-	SessionEnd   []string
+	PrePrompt     []string
+	PreToolUse    []string
+	PreTurn       []string
+	PostTurn      []string
+	PostToolUse   []string
+	SessionStart  []string
+	SessionEnd    []string
+	SubagentStart []string
+	SubagentStop  []string
+	Stop          []string
+	PreCompact    []string
+	Notification  []string
 }
 
 func (r *Registry) Stack() Stack {
@@ -159,6 +194,21 @@ func (r *Registry) Stack() Stack {
 	}
 	for _, h := range r.sessionEnd {
 		s.SessionEnd = append(s.SessionEnd, fmt.Sprintf("%T", h))
+	}
+	for _, h := range r.subagentStart {
+		s.SubagentStart = append(s.SubagentStart, fmt.Sprintf("%T", h))
+	}
+	for _, h := range r.subagentStop {
+		s.SubagentStop = append(s.SubagentStop, fmt.Sprintf("%T", h))
+	}
+	for _, h := range r.stop {
+		s.Stop = append(s.Stop, fmt.Sprintf("%T", h))
+	}
+	for _, h := range r.preCompact {
+		s.PreCompact = append(s.PreCompact, fmt.Sprintf("%T", h))
+	}
+	for _, h := range r.notification {
+		s.Notification = append(s.Notification, fmt.Sprintf("%T", h))
 	}
 	return s
 }
@@ -270,6 +320,51 @@ func (r *Registry) NotifySessionEnd(ctx context.Context, ev SessionEndEvent) {
 	}
 	for _, obs := range r.sessionEnd {
 		r.runObserver("SessionEnd", func() { obs.OnSessionEnd(ctx, ev) })
+	}
+}
+
+func (r *Registry) NotifySubagentStart(ctx context.Context, ev SubagentStartEvent) {
+	if r == nil {
+		return
+	}
+	for _, obs := range r.subagentStart {
+		r.runObserver("SubagentStart", func() { obs.OnSubagentStart(ctx, ev) })
+	}
+}
+
+func (r *Registry) NotifySubagentStop(ctx context.Context, ev SubagentStopEvent) {
+	if r == nil {
+		return
+	}
+	for _, obs := range r.subagentStop {
+		r.runObserver("SubagentStop", func() { obs.OnSubagentStop(ctx, ev) })
+	}
+}
+
+func (r *Registry) NotifyStop(ctx context.Context, ev StopEvent) {
+	if r == nil {
+		return
+	}
+	for _, obs := range r.stop {
+		r.runObserver("Stop", func() { obs.OnStop(ctx, ev) })
+	}
+}
+
+func (r *Registry) NotifyPreCompact(ctx context.Context, ev PreCompactEvent) {
+	if r == nil {
+		return
+	}
+	for _, obs := range r.preCompact {
+		r.runObserver("PreCompact", func() { obs.OnPreCompact(ctx, ev) })
+	}
+}
+
+func (r *Registry) NotifyNotification(ctx context.Context, ev NotificationEvent) {
+	if r == nil {
+		return
+	}
+	for _, obs := range r.notification {
+		r.runObserver("Notification", func() { obs.OnNotification(ctx, ev) })
 	}
 }
 

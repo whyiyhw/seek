@@ -9,9 +9,11 @@
 //     sequence of the prompt history, so a non-deterministic decorator
 //     silently destroys cache hit rate.
 //
-//   - Observers (PreTurn, PostTurn, PostToolUse, SessionStart, SessionEnd)
-//     have no return value. The interface signature itself enforces that
-//     they cannot alter the conversation, the request, or control flow.
+//   - Observers (PreTurn, PostTurn, PostToolUse, SessionStart,
+//     SessionEnd, plus the P3 points SubagentStart, SubagentStop, Stop,
+//     PreCompact, Notification) have no return value. The interface
+//     signature itself enforces that they cannot alter the
+//     conversation, the request, or control flow.
 //
 // A single struct may implement multiple interfaces; Registry.Register
 // dispatches it into every slot it satisfies. The v1 memory subsystem
@@ -128,6 +130,57 @@ type SessionEndEvent struct {
 	Usage     deepseek.Usage
 }
 
+// ----- P3 observer events (feature-orchestration §6 D15) -----
+//
+// Five observer-only points. None of them has ANY control-flow effect:
+// the shell-hook implementations treat timeout / non-zero exit as
+// log-and-continue (the pre_tool deny surface stays the ONLY deny
+// point), and the interface signatures carry no return value that
+// could touch prompt bytes (feature-hooks-injection §3.3).
+
+// SubagentStartEvent fires after the subagent Manager emits its
+// `started` event (sync and background spawns alike).
+type SubagentStartEvent struct {
+	SID  string // sub-sid, unique per run
+	Type string // agent type slug ("" = built-in general)
+	Desc string // one-line task description from the spawn args
+}
+
+// SubagentStopEvent fires when a subagent reaches any terminal state
+// (completed / failed / killed / orphaned).
+type SubagentStopEvent struct {
+	SID    string
+	Type   string
+	Desc   string
+	Status string // completed | failed | killed | orphaned
+	Turns  int    // LLM turns the subagent took
+	Tokens int64  // prompt+completion total for the run
+}
+
+// StopEvent fires once per Prompt() call after the whole reply settles
+// — final answer, max turns, ctx cancel, or fatal error, whichever
+// ended it. Distinct granularity from PostTurn: PostTurn fires per
+// model turn (a Prompt may contain several), Stop fires once per
+// round.
+type StopEvent struct {
+	Turns  int    // total model turns in this Prompt() call
+	Finish string // Prompt-level outcome (wiring chooses vocabulary)
+}
+
+// PreCompactEvent fires before /compact rewrites history (before the
+// LLM summarisation call, not after).
+type PreCompactEvent struct {
+	Trigger string // "manual" today; reserved for future auto triggers
+}
+
+// NotificationEvent fires when something surfaces outside the TUI's
+// text plane: an OS notification (pillar H Notifier) or an ask_user
+// picker popping up.
+type NotificationEvent struct {
+	Kind  string // e.g. "os" | "ask_user"
+	Title string
+}
+
 // ----- Observer interfaces -----
 
 type PreTurnObserver interface {
@@ -148,4 +201,24 @@ type SessionStartObserver interface {
 
 type SessionEndObserver interface {
 	OnSessionEnd(ctx context.Context, ev SessionEndEvent)
+}
+
+type SubagentStartObserver interface {
+	OnSubagentStart(ctx context.Context, ev SubagentStartEvent)
+}
+
+type SubagentStopObserver interface {
+	OnSubagentStop(ctx context.Context, ev SubagentStopEvent)
+}
+
+type StopObserver interface {
+	OnStop(ctx context.Context, ev StopEvent)
+}
+
+type PreCompactObserver interface {
+	OnPreCompact(ctx context.Context, ev PreCompactEvent)
+}
+
+type NotificationObserver interface {
+	OnNotification(ctx context.Context, ev NotificationEvent)
 }

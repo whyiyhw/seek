@@ -15,16 +15,21 @@ import (
 
 // AuditEntry mirrors the JSON shape documented in PRD §3.6. Field names
 // match the doc verbatim (wire format — once shipped, third-party
-// monitoring tools may tail this file).
+// monitoring tools may tail this file). SubagentSID is the one additive
+// field (M-O3.1 / orchestration §6 D15): omitempty, set only on
+// subagent_start / subagent_stop rows, so pre-existing lines and
+// readers (web W4.6 hooks/audit/tail deserialises this very struct)
+// round-trip unchanged.
 type AuditEntry struct {
-	TS         string `json:"ts"`
-	Event      string `json:"event"`
-	Hook       string `json:"hook"`
-	Tool       string `json:"tool,omitempty"`
-	SessionID  string `json:"session_id"`
-	DurationMs int64  `json:"duration_ms"`
-	ExitCode   int    `json:"exit_code"`
-	Denied     bool   `json:"denied"`
+	TS          string `json:"ts"`
+	Event       string `json:"event"`
+	Hook        string `json:"hook"`
+	Tool        string `json:"tool,omitempty"`
+	SessionID   string `json:"session_id"`
+	SubagentSID string `json:"subagent_sid,omitempty"`
+	DurationMs  int64  `json:"duration_ms"`
+	ExitCode    int    `json:"exit_code"`
+	Denied      bool   `json:"denied"`
 	// Reason is an optional human-readable explanation. Populated on
 	// timeout / syntax-fail / static-skip so users tailing the log can
 	// distinguish "hook ran and denied" from "hook never ran".
