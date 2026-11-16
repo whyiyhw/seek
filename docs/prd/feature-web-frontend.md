@@ -393,7 +393,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **W4.3** | memory/projects/stats method 集（`memory/list|get|projects`、`project/list|get`、`stats/cache`） | 临时 SEEK_HOME 夹具表驱动 |
 | **W4.4** | 资产面 UI·一：sessions 浏览器（列表 + 消息 cursor 分页浏览） | 手测脚本；长 transcript 分页不卡（虚拟滚动级量级即可） |
 | **W4.5** | 资产面 UI·二：memory 浏览器 + stats 视图（cache/cost） | 手测脚本 + 体积 gate 复核 |
-| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写） | inspect-rpc §6 对应验收项搬运核对 |
+| **W4.6** | hooks/audit 只读 + `hooks/list`；feature-inspect-rpc.md 状态注记核对（本卡 §3.3 已预写）（**已交付**，c_igze7m——`internal/rpc/methods/hooks.go`：`hooks/list` 合并 project+user 两层 hooks.toml 按 dispatch 序（只读面不跑 trust gate / 不跑 bash -n，静态跳过经 audit tail 的 static-skip 行呈现）；`hooks/audit/tail` 一次性读全局 audit JSONL——`from_ts` RFC3339 截断（坏 ts 条目按 CLI 同规保留）、`limit` 加参默认 100/上限 1000 tail 语义、`project_id` 经 session header CWD 归属（fork 计入；失联/越权形状 sid 降级为不可归属、不失败）、`follow:true` 明确 -32602 拒（SSE hooks topic 未做，§6 #6/#7 仍开放）；inspect-rpc.md 状态头 + §3.1/§6 已按 W4.1–W4.6 实况逐条注记） | inspect-rpc §6 对应验收项搬运核对（已核 #2/#4/#8(口径替代)/#9/#10(取消替代)/#13/#14/#15；开放 #1/#3/#5(口径替代)/#6/#7/#11/#12，详见其 §6 注记块） |
 
 **估时合计**：Phase 0 ~1 天 · MVP ~3 天 · P2 ~1.5 天 · P3 ~3 天。
 
