@@ -105,8 +105,6 @@ type TestModel struct {
 	in  *bytes.Buffer
 	out io.ReadWriter
 
-	modelCh chan tea.Model
-
 	done   sync.Once
 	doneCh chan bool
 }
@@ -121,10 +119,9 @@ func NewTestModel(tb testing.TB, m tea.Model, options ...TestOption) *TestModel 
 	}
 
 	tm := &TestModel{
-		in:      bytes.NewBuffer(nil),
-		out:     safe(bytes.NewBuffer(nil)),
-		modelCh: make(chan tea.Model, 1),
-		doneCh:  make(chan bool, 1),
+		in:     bytes.NewBuffer(nil),
+		out:    safe(bytes.NewBuffer(nil)),
+		doneCh: make(chan bool, 1),
 	}
 
 	programOpts := []tea.ProgramOption{
@@ -139,7 +136,7 @@ func NewTestModel(tb testing.TB, m tea.Model, options ...TestOption) *TestModel 
 	tm.program = tea.NewProgram(m, programOpts...)
 
 	go func() {
-		model, err := tm.program.Run()
+		_, err := tm.program.Run()
 		if err != nil {
 			// tb.Errorf panics if the test already completed by the
 			// time Run returns ("Log in goroutine after test has
@@ -148,7 +145,6 @@ func NewTestModel(tb testing.TB, m tea.Model, options ...TestOption) *TestModel 
 			defer func() { _ = recover() }()
 			tb.Errorf("app failed: %s", err)
 		}
-		tm.modelCh <- model
 		tm.doneCh <- true
 	}()
 
