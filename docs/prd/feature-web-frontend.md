@@ -45,7 +45,7 @@ control-plane 的 M1–M3+M6a/M7a 已进 main：`Frontend` 端口（`internal/co
 仓里已有两份涉及 web 的设计，本文是它们的收敛点：
 
 - **feature-remote-control-plane.md §8**：把「网页（WS+SSE）」列为未来增强之一——本文把它做实，并落在端口上（而非旁路）。
-- **feature-inspect-rpc.md**：规划了 HTTP+SSE transport + 独立 tarball 面板（尚未实现）。本文 §3.3 给出结论：其数据面**并入**本文 P3，transport 宿主从「TUI 进程 `--rpc-listen`」迁到 serve 进程，tarball 面板取消。其 stdio transport / registry 重构（IDE 线）不动。
+- **feature-inspect-rpc.md**：规划了 HTTP+SSE transport + 独立 tarball 面板（尚未实现）。本文 §3.3 给出结论：其数据面**并入**本文 P3，transport 宿主从「TUI 进程 `--rpc-listen`」迁到 serve 进程，tarball 面板取消。其 IDE 线（stdio transport / registry 采纳）2026-11-16 关闭归档——`--rpc` stdio 三 method 冻结保留、永不扩；见其状态头。
 
 ### 1.4 与 c_qucxtu MVP 的关系（scope 边界——本文的地面基准）
 
@@ -217,12 +217,12 @@ run id = server-minted uuid（SSE envelope 自带字段；**不是** `Inbound.Ev
 | §3.1 method 集（session/memory/project/stats…）+ §3.5 错误码 + 命名稳定性纪律 | **原样并入本文 P3**（搬运，不改名） | 契约纪律是那份 PRD 的核心价值；method 集设计已对齐「5 个想定 app 视图」回路 |
 | §3.3 HTTP+SSE transport | **并入但换宿主**：从「TUI 进程 `--rpc-listen`」迁到 serve 进程（`POST /rpc`，SSE 并入既有 `/events` 流新增 topic——与聊天面同源同鉴权同命名风格，§2.5） | ① serve 常驻，SSE 天然有宿主；TUI 进程挂 HTTP 要求「面板开着=TUI 开着」，而资产浏览的典型场景恰是**TUI 没开时看看昨晚的会话**。② 面板与聊天同 origin，cookie/token/静态资产一套。③ inspect-rpc 自己的 §1 就预言「应用是同一份契约的另一类消费者」——web frontend 就是那个消费者 |
 | §4.1 独立 tarball 面板 | **取消（替代）**：静态资产 go:embed 进单二进制 | tarball 的存在理由是「保 CLI 单二进制卖点」；§4 取舍后 embed 净增 ~100–150KB 且守住 CI 体积 gate，用户零安装步骤（下载 tarball→解压→打开 是三步摩擦） |
-| stdio transport + §3.2 Registry 重构 | **不动，留在 IDE 线**（`-rpc` 已有用户；`internal/rpc/server.go` 照旧） | 两 transport 共享 method 语义但宿主不同；P3 落地时 method 实现放 transport-agnostic 的位置（`internal/rpc/methods/` 按原计划），stdio/HTTP 各挂各的 |
+| stdio transport + §3.2 Registry 重构 | **不动；IDE 线已关闭（2026-11-16，c_np5gzu）**——`-rpc` 已有用户故三 method 冻结保留；`internal/rpc/server.go` 照旧、永不挂 registry | method 实现放 transport-agnostic 的位置（`internal/rpc/methods/`，已按此落地）；HTTP 单侧挂载即为终态——stdio 冻结不挂（IDE 驱动归 ACP，见 feature-acp.md） |
 | M12.1/M12.2（subagent/worktree/checkpoint/cron method） | 保留为 P3/P2 的后续 method 增量 | 依赖面不变 |
 
 **并入后的 caveat（如实记录）**：serve 进程没有 TUI 进程的内存态（live hooks 事件、当前 turn 实时 usage）。P3 资产面全部从盘读：session JSONL（append-only，tail 读不锁，避开 inspect-rpc §3.4 的 RWMutex 改造——那是 TUI 进程内并发读写才需要解的问题；serve 进程与写 session 的 seek 子进程天然是两个进程，文件系统 append 语义 + 行级 parse 已够）、memory 文件、skillstats JSONL。「实时观察正在跑的 TUI 会话」降级为「读已落盘部分」——每个 `turn_end` 后 `saveTurn` 已落盘（main.go runJSON），粒度是 per-turn，对资产浏览足够。
 
-**两份 PRD 的状态处理**：本文 P3 章节即数据面的权威设计延续；feature-inspect-rpc.md 状态头加注「HTTP+SSE transport 与 tarball 面板已被 feature-web-frontend.md P3 吸收/替代，stdio/registry 归 IDE 线」——避免两份活设计打架（本次文档卡顺手落，见提交）。
+**两份 PRD 的状态处理**：本文 P3 章节即数据面的权威设计延续；feature-inspect-rpc.md 状态头加注「HTTP+SSE transport 与 tarball 面板已被 feature-web-frontend.md P3 吸收/替代，stdio/registry 归 IDE 线」——避免两份活设计打架（本次文档卡顺手落，见提交）。后记 2026-11-16（c_np5gzu）：IDE 线关闭，inspect-rpc.md 整体转入归档态，数据面权威独归本文 P3。
 
 ### 3.4 后续（非本期）
 
@@ -419,7 +419,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **web MVP（c_qucxtu，已进 main）** | **吸收/就地演进**（§1.4）：W1/W2 全部增量建立在 `webfrontend.go` 之上，不推倒、不搬家、不重写 |
 | control-plane M1–M3/M6a/M7a | **扩展不重写**：两条 sibling 缝（§2.4）之外零平面改动；web frontend 是端口第二个实现（已落地，本文使其完整） |
 | feishu（build tag 后的占位） | 并存：注册表现有 `fake`+`web`（c_qucxtu 已落）；feishu 何时启用另议 |
-| `-rpc` stdio（IDE 线） | **零改动**；P3 method 实现层与 stdio 共享语义（§3.3 表） |
+| `-rpc` stdio（IDE 线已关闭 2026-11-16） | **零改动**；stdio 冻结为 3-method 遗留面，P3 method 只挂 /rpc（§3.3 表） |
 | ACP（柱 P） | **零改动零共享**；形状参考写进实现卡注意事项（§6.5） |
 | 柱 G subagents.jsonl / 柱 K bgjob 语义 | P2 只读消费前者；后者仅作编排 P1 的设计先例引用 |
 | webfetch（net/http client 先例） | 依赖树已含 net/http 的实证；无代码复用 |
