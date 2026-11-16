@@ -1,12 +1,12 @@
 # seek serve — 远程控制平面指南 / Remote control plane guide
 
-`seek serve` 起一个**常驻控制平面进程**，把「远程触达 + 常驻在场 + 跨项目调度」做成 frontend-无关的核心：任何聊天/消息渠道只要实现一个 `Frontend` 端口（`Run` 收 + `Send` 发）就能驱动你机器上的 seek。**web 是第一个已交付的 frontend**（内置浏览器聊天页：SSE 流式 + token 认证，`--frontend=web` 即起）；§5 用 Telegram 在纸面上验证了聊天渠道能原样落进同一端口（飞书 adapter 2026-11-13 撤销排期——端口不绑定任何具体渠道）。每条会话可 `/bind` 到一个项目目录，平面在目录里 `exec seek -p … --json` 跑真会话、抓 session id 续多轮，把最终回复送回原会话。
+`seek serve` 起一个**常驻控制平面进程**，把「远程触达 + 常驻在场 + 跨项目调度」做成 frontend-无关的核心：任何聊天/消息渠道只要实现一个 `Frontend` 端口（`Run` 收 + `Send` 发）就能驱动你机器上的 seek。**web 是第一个已交付的 frontend**（内置浏览器工作台：SSE 流式 + token 认证，`--frontend=web` 即起，§5）；§6 用 Telegram 在纸面上验证了聊天渠道能原样落进同一端口（飞书 adapter 2026-11-13 撤销排期——端口不绑定任何具体渠道）。每条会话可 `/bind` 到一个项目目录，平面在目录里 `exec seek -p … --json` 跑真会话、抓 session id 续多轮，把最终回复送回原会话。
 
-> `seek serve` starts one long-running control-plane process that makes seek reachable from any chat channel and routes each conversation to a bound project directory. Any channel implementing the `Frontend` port (receive via `Run`, reply via `Send`) can drive seek; the bundled web frontend (browser chat over SSE + token auth) is the first shipped implementation, and §5 paper-verifies a Telegram adapter against the same port (the Feishu adapter was descoped 2026-11-13 — the port binds to no specific channel). The plane exec's the real `seek -p … --json` inside the bound directory, captures the session id for multi-turn resume, and ships the final reply back to the conversation it came from.
+> `seek serve` starts one long-running control-plane process that makes seek reachable from any chat channel and routes each conversation to a bound project directory. Any channel implementing the `Frontend` port (receive via `Run`, reply via `Send`) can drive seek; the bundled web frontend (browser chat over SSE + token auth) is the first shipped implementation, and §6 paper-verifies a Telegram adapter against the same port (the Feishu adapter was descoped 2026-11-13 — the port binds to no specific channel). The plane exec's the real `seek -p … --json` inside the bound directory, captures the session id for multi-turn resume, and ships the final reply back to the conversation it came from.
 
 - 架构与全部设计决策（D-C1…D-F3）：[`docs/prd/feature-remote-control-plane.md`](./prd/feature-remote-control-plane.md)
-- Web frontend 设计（MVP 已交付）：[`docs/prd/feature-web-frontend.md`](./prd/feature-web-frontend.md)
-- 本文随装配线落地逐步坐实：M1–M3、M6a、M7a 已交付进 main；M4/M5（飞书 adapter）2026-11-13 撤销排期。
+- Web frontend 设计（MVP + 资产面已交付；本文 §5 是使用侧收口）：[`docs/prd/feature-web-frontend.md`](./prd/feature-web-frontend.md)
+- 本文随装配线落地逐步坐实：M1–M3、M6a、M7a 已交付进 main；M4/M5（飞书 adapter）2026-11-13 撤销排期；web W 线逐卡交付状态见该 PRD §9。
 
 ---
 
@@ -14,7 +14,7 @@
 
 ```
  聊天渠道（各自实现 Frontend 端口；SDK 随各自 build tag 进来）
-   web (HTTP 收 / SSE 发, 已交付)     feishu / telegram (§5 纸面)     voice (未来)
+   web (HTTP 收 / SSE 发, 已交付)     feishu / telegram (§6 纸面)     voice (未来)
         │ Run() 推 Inbound（扇入同一 channel）        ▲ Send(conv, reply)
         ▼                                            │
  ┌─────────────────── seek serve 平面核心（frontend-无关，仅 stdlib）──────────────────┐
@@ -42,11 +42,7 @@ seek serve --frontend=web             # 拉起平面 + web 聊天页（默认只
 seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一平面
 ```
 
-聊天渠道密钥写在 `~/.seek/serve/env`（0600），如 `TELEGRAM_BOT_TOKEN`；web frontend 的换票 token 首启自动生成于 `~/.seek/serve/web.token`（0600）。都不进 config.json、不进日志。
-
-web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` 段的 `web_addr` 指到本机 tailnet IP（如 `"100.x.y.z:8790"`）直接绑私网——一次性覆盖用 `seek serve --frontend=web --listen=100.x.y.z:8790`，flag 优先于 config——或保持 loopback、由该机 `tailscale serve --tcp=8790` 把 tailnet IP 转发进来（tailnet 内 WireGuard 加密、配置持久化在 tailscaled）——两条路都只暴露给私网，不开公网口子。
-
-`web_addr` / `--listen` 只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT 段 `100.64.0.0/10`（安全面拍板 2026-11-15）：`0.0.0.0`、局域网/公网 IP、任意域名一律启动即拒并说明原因——web 页挂着能驱动 seek 跑绑定的项目，暴露面不由配置笔误决定。地址语法写错则由 listen 报错。两种失败都整面退出，不回落默认地址。
+聊天渠道密钥写在 `~/.seek/serve/env`（0600），如 `TELEGRAM_BOT_TOKEN`；不进 config.json、不进日志。web frontend 的启动入口、token、tailnet 访问与安全清单集中在 §5。
 
 ### 2.2 会话内指令（所有 frontend 通用，平面解析）
 
@@ -76,10 +72,48 @@ web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` �
 - **执行面 = `seek -p --json`（print 模式）**：初始权限即 `deny` 且不挂起——危险动作返回**拒绝工具结果**（agent 收到后自行调整、run 正常结束），不是死等输入。默认体验：能读、能写**项目目录内**文件；**不能跑任何 shell**（只读白名单除外）、挡 CWD 外读写、挡 memory/skill install。
 - **per-binding `yolo:true`**：该会话的子进程加 `--yolo` 全放行。仅在你完全信任触发渠道（私聊、只有你）时开。
 - **密钥**：`~/.seek/serve/env`（0600），沿用 cron env overlay 姿态；不进 config.json、不进日志。
-- **重投/乱序**：渠道 at-least-once 由平面统一按 `EventID` 去重（frontend 不用各自扫门口，见 §5）。
+- **重投/乱序**：渠道 at-least-once 由平面统一按 `EventID` 去重（frontend 不用各自扫门口，见 §6）。
 - **核心零改动**：平面只 `exec seek`，`pkg/agent` / `pkg/deepseek` / permission 一字不动；frontend SDK 全部隔离在各自 build tag 后面，默认构建产物仍是纯 stdlib 单二进制。
 
-## 5. 接第二个 frontend：纸面验证 Telegram / Paper-verifying a second frontend
+## 5. Web frontend：启动、token、tailnet 与安全清单 / The bundled web frontend
+
+内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。打开即是聊天页：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、顶栏 `/bind` `/projects` `/switch` `/new` `/cancel` 快捷键与绑定状态常显；顶栏另有三个资产视图——**📚 会话**（session 列表 + 消息 cursor 分页浏览）、**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（cache 命中率 + cost，服务端计价，客户端不算钱）。
+
+API 面（一律过 §5.2 的 token 认证）：`POST /msg`（发消息）、`GET /state`（本会话绑定状态）、`GET /events`（SSE 流）、`POST /rpc`（JSON-RPC 2.0 方法集：`session/list|get|messages`、`memory/list|get|projects`、`project/list|get`、`stats/cache`、`hooks/list`、`hooks/audit/tail`）、`GET /subagents`（后台子代理只读投影）。
+
+### 5.1 启动 / Startup
+
+```bash
+seek serve --frontend=web                    # 默认只听 127.0.0.1:8790
+seek serve --frontend=web --listen=<addr>    # 一次性覆盖（flag > config 的 serve.web_addr）
+```
+
+启动 banner 在 stderr 印一次性入口：`web: up: http://127.0.0.1:8790/?token=<t>`——本机可见，直接点开即过鉴权；访问日志永不记 token。
+
+### 5.2 token / Token auth
+
+- 首启自动生成 hex(24B)（48 字符）写 `~/.seek/serve/web.token`（目录 0700、文件 0600）；不进 config.json、不进日志、错误信息不回显。轮换 = 删文件重启即换。
+- **浏览器面**：`/?token=<t>` 首跳 303 换成 `HttpOnly` cookie（`SameSite=Lax`）并擦净 URL——token 不落地址栏/历史/referer，页面 JS 也拿不到它，后续 fetch/SSE 自动带 cookie。
+- **脚本/curl 面**：`?token=` 查询参数或 `Authorization: Bearer <t>`，constant-time 比较；错/无 → 401（统一 JSON 体，不区分「token 错」与「没带」，不给探测面）。
+- **持 token = 坐到你电脑前**：能驱动所有绑定项目上的 seek（等同本机操作）。分发口径同机器密钥，不贴共享场所。
+
+### 5.3 tailnet 访问 / Remote access
+
+web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` 段的 `web_addr` 指到本机 tailnet IP（如 `"100.x.y.z:8790"`）直接绑私网——一次性覆盖用 `seek serve --frontend=web --listen=100.x.y.z:8790`，flag 优先于 config——或保持 loopback、由该机 `tailscale serve --tcp=8790` 把 tailnet IP 转发进来（tailnet 内 WireGuard 加密、配置持久化在 tailscaled）——两条路都只暴露给私网，不开公网口子。
+
+`web_addr` / `--listen` 只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT 段 `100.64.0.0/10`（安全面拍板 2026-11-15）：`0.0.0.0`、局域网/公网 IP、任意域名一律启动即拒并说明原因——web 页挂着能驱动 seek 跑绑定的项目，暴露面不由配置笔误决定。地址语法写错则由 listen 报错。两种失败都整面退出，不回落默认地址。
+
+### 5.4 安全清单 / Security checklist
+
+- **监听面**：默认 `127.0.0.1:8790`；远程只走 §5.3 两条 tailnet 姿势；LAN 明文姿势已作废（2026-11-15 拍板，§5.3 限段闸）。scope 拒启与地址语法错都整面退出（exit-2 类），不回落默认地址。
+- **CSRF 写面闸**：cookie 凭证单独不得过写面——`POST` 须带同源 `Origin` 头（浏览器自动附）或 `X-Seek-Token` 头；跨站页面即使带上了 cookie 也 403。`?token=`/Bearer 形态自带 token 即自带 CSRF 免疫，不经此闸，curl 面零感知。
+- **DNS rebinding**：Host 头校验——`localhost`（不分大小写）或 loopback/CGNAT 的 IP **字面量**放行（字面量无法被 DNS rebinding 到）；域名（`attacker.com`、`127.0.0.1.evil.com`）一律 403。token 才是真闸，Host 校验是纵深防御。
+- **执行面**：继承 §4——默认 print-mode deny（能读写绑定目录内、不能跑 shell）；per-binding `yolo:true` = 远程任意命令面，仅在完全信任触发渠道时开。
+- **XSS/注入**：模型输出与工具结果全部 `textContent` 渲染（无 `innerHTML`）；CSP `default-src 'self'` 且内联 script/style 块以 sha256 钉死——改页面零维护、非出厂脚本一律拒执行；无外链资产。
+- **SSE 资源**：per-client 事件缓冲有界，满则丢事件、永不阻塞执行器；连接随断开注销。连接数上限与 rate limit 均不设（单人 + 192-bit token 模型的有意取舍，PRD §5.5）。
+- **日志**：web 面不落访问日志，也不打 Authorization 头/cookie/token——凭证无处可泄。
+
+## 6. 接第二个 frontend：纸面验证 Telegram / Paper-verifying a second frontend
 
 > PRD §6 末规定的抽象验收测试：**不写代码**，把 Telegram Bot API 逐个接缝点落位；若写不顺 = 端口抽错了。结论先行：**写得顺**，四个接缝点一一落位，没有一处需要改 `Frontend` 端口；过程中沉淀两条**归一化约定**（写进下文，是约定不是改动）。
 
@@ -93,7 +127,7 @@ web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` �
 | `DirectAt` | 私聊（`chat.type=="private"`）true；群 @bot / `/cmd@bot` true；群闲聊 false |
 | 密钥 | `TELEGRAM_BOT_TOKEN` → `~/.seek/serve/env` |
 
-### 5.1 Run：getUpdates long-poll
+### 6.1 Run：getUpdates long-poll
 
 - 主循环 `GET /bot<token>/getUpdates?offset=<o>&timeout=50`（HTTP client Timeout ≥ 60s，ctx.Done 时中断长轮询、`return nil`）。每个响应批量取 `update` 列表，归一化后推 `in`，再推进 `offset = update_id + 1`（内存即可，不持久化）。
 - **归一化**：只认 `message` / `edited_message` 且带 `text` 的更新（照片/贴纸 WARN 跳过不崩——malformed 契约）；`EventID = itoa(update_id)`；`Conv`、`DirectAt` 按上表；**`Text` = 剥掉渠道寻址语法后的用户文本**（见约定①）。
@@ -101,13 +135,13 @@ web 默认只听 `127.0.0.1:8790`。要从 tailnet 访问：把 config `serve` �
 - **重连是 Run 自己的职责**（端口契约："owns its own transport including reconnects"）：429 读 `retry_after` 睡；5xx/网络错误指数退避重试；启动时若 webhook 占用 `getUpdates`（409 Conflict）先 `deleteWebhook` 一次再进循环；401（token 失效）视为**终态** → `return error`，平面标记 frontend down——与飞书「larkws `Start` 返回终态 error 时平面重建 Client」同形。
 - **群 privacy mode 保持默认 ON**：bot 在群里只收得到 @ 它的消息和 `/` 命令，噪音天然小；平面的 `DirectAt` 过滤仍是兜底。顺带红利：`/bind` `/cancel` 天然是 Telegram 原生命令形态，还可用 BotFather `setMyCommands` 注册客户端自动补全。
 
-### 5.2 Send：sendMessage
+### 6.2 Send：sendMessage
 
 - `POST /bot<token>/sendMessage`：`chat_id = conv.Native()`、`text = r.Text`、**不带 `parse_mode`**（v1 纯文本，不吃 Markdown 转义坑）。
 - 4096 字符上限 → frontend 分片多条发（`Reply` 注释明说 chunking 是 frontend 职责，与飞书同款）。
 - best-effort + 失败重试一次（429 尊重 `retry_after`）；再失败丢弃该条、`return error`——绝不能 panic 执行器（端口注释原文）。
 
-### 5.3 纸面结论与两条归一化约定
+### 6.3 纸面结论与两条归一化约定
 
 Telegram 与飞书的收发机制完全不同（long-poll+bot API vs WS+IM API），但四个接缝点全部一一落位、无需改端口——**抽象成立**。写的过程中沉淀两条约定，对任何「群里 @ 才触发」的渠道（含未来任何聊天渠道实现）同样适用：
 

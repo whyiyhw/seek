@@ -256,7 +256,7 @@ CI 守门：repo 根无 `package.json`/`node_modules`/锁文件（脚本 grep �
 ### 4.4 默认不监听公网
 
 - 默认 `127.0.0.1:8790`（`DefaultWebAddr`，**已交付**——固定口让 tailscale 转发/书签可预期，启动行印带 token 的完整 URL）；CLI `--listen` 覆盖**已交付**（c_jxhkbr——flag 折进 serve 段再进 `WebConfig.Addr`，与 `web_addr` 同一 scope 闸）。
-- `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §2.1）。
+- `web_addr` scope 闸（**已交付**，2026-11-15 安全面拍板，取代原「`0.0.0.0` + 显式 flag + 强制 token」方案）：只放行 loopback（`127.0.0.1`/`::1`/`localhost`）与 tailnet CGNAT `100.64.0.0/10`；`0.0.0.0`、`::`、局域网/公网 IP、任意域名一律启动即拒并整面退出、不回落默认——web 页挂着能驱动 seek 跑绑定项目的 token，暴露面不由配置笔误决定（`checkWebAddr`，guide-serve §5.3）。
 - 远程访问的正路是 tailnet 转发（§5.4），不是开 bind。
 
 ## 5. ④ 鉴权与安全面
@@ -374,7 +374,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **W2.1** | 聊天 UI 增量（消息列表/输入框/SSE 自动重连/textContent 渲染**已交付**）：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage | 手测脚本（浏览器）；XSS 用例（模型吐 `<script>` 转义——现状 textContent 纪律保持） |
 | **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新） | 指令 e2e（真 Router + 桩 seek） |
 | **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显 | 桩 seek 多 turn e2e 断言数值 |
-| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线 | 文档 review |
+| **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线（**已交付**，c_mn2wdp——guide-serve 新 §5「Web frontend」收拢启动/token/tailnet/安全清单（§2.1 的 web 专属段并入，76ed883 限段口径逐字保留不回退；Telegram 纸面节顺移 §6，两 PRD 的跨文档引用同步）；README/README.zh 控制面行能力括号刷新为工作台口径（限段句不动）；`web-size-baseline` 棘轮至 W 线完工面 30246587B——W1.5 钉 30216797 后 W2.1–W4.6 增量 29790B，gate 对完工 binary delta 归零，后续增长从完工地基起量） | 文档 review |
 
 ### Phase P2 — 任务面板（依赖 orchestration P1，~3 卡）
 
