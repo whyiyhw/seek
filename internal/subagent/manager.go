@@ -1287,29 +1287,7 @@ type ListFilter struct {
 // concurrently by other goroutines (or other seek processes
 // sharing the same project directory, in theory).
 func (m *Manager) List(f ListFilter) ([]Subagent, error) {
-	indexPath, err := paths.SubagentsIndex(m.opts.ProjectAbsPath)
-	if err != nil {
-		return nil, err
-	}
-	events, err := readEvents(indexPath)
-	if err != nil {
-		return nil, err
-	}
-	folded := foldEvents(events)
-	if f.Status == "" && f.ParentSid == "" {
-		return folded, nil
-	}
-	out := make([]Subagent, 0, len(folded))
-	for _, s := range folded {
-		if f.Status != "" && s.Status != f.Status {
-			continue
-		}
-		if f.ParentSid != "" && s.ParentSid != f.ParentSid {
-			continue
-		}
-		out = append(out, s)
-	}
-	return out, nil
+	return ListProject(m.opts.ProjectAbsPath, f)
 }
 
 // ActiveCount returns the number of currently in-flight subagents.

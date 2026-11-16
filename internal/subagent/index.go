@@ -11,6 +11,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/whyiyhw/seek/internal/paths"
 )
 
 // event is the on-disk record of one lifecycle transition. See
@@ -228,6 +230,42 @@ func foldEvents(events []event) []Subagent {
 		return out[i].StartedAt.After(out[j].StartedAt)
 	})
 	return out
+}
+
+// ListProject returns the folded state of every subagent recorded in
+// projectAbsPath's subagents.jsonl, optionally filtered — the
+// read-only projection for surfaces that fold the event stream
+// without owning a Manager (the web task panel, W3.1; Manager.List
+// delegates here). Reads the index fresh on each call, no in-memory
+// cache: events appended by a live Manager (or, in theory, another
+// seek process on the same project) are visible to the next call.
+//
+// A project with no index yet folds to an empty slice, not an error —
+// fresh projects spawn nothing, and the panel renders an empty list.
+func ListProject(projectAbsPath string, f ListFilter) ([]Subagent, error) {
+	indexPath, err := paths.SubagentsIndex(projectAbsPath)
+	if err != nil {
+		return nil, err
+	}
+	events, err := readEvents(indexPath)
+	if err != nil {
+		return nil, err
+	}
+	folded := foldEvents(events)
+	if f.Status == "" && f.ParentSid == "" {
+		return folded, nil
+	}
+	out := make([]Subagent, 0, len(folded))
+	for _, s := range folded {
+		if f.Status != "" && s.Status != f.Status {
+			continue
+		}
+		if f.ParentSid != "" && s.ParentSid != f.ParentSid {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // OrphanRecover scans path for `started` events whose sub_sid has

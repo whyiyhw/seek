@@ -24,6 +24,9 @@ package controlplane
 //	              session method set registers at servecli assembly —
 //	              W4.2 — NewWeb itself registers nothing; see
 //	              webfrontend_rpc.go)
+//	GET  /subagents  the conv's bound-project subagent state projection
+//	              folded from subagents.jsonl (?parent=<sid> filter;
+//	              W3.1 — see webfrontend_subagents.go)
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -251,6 +254,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/msg", f.handleMsg)
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
+	mux.HandleFunc("/subagents", f.handleSubagents)
 	return mux
 }
 
