@@ -77,7 +77,7 @@ internal/controlplane/         # 就地，不迁移（§1.4 取舍结论）
     webfrontend.html           # 已交付单页（go:embed，零构建链）
     webfrontend_stream.go      # W1.4：SendStream→SSE 事件族（delta/tool/usage/reply）
     webfrontend_conv.go        # W1.3：per-conv hub 演进（现状全 tab 共享 web:default）
-    webfrontend_static.go      # W1.5：CSP/gzip（页面膨胀拆 static/ 时引入）
+    webfrontend_static.go      # W1.5：CSP/gzip（已交付 c_ph2zax；拆 static/ 时沿用）
 ```
 
 （文件切分是示意——增量怎么落文件由实现卡定，约束只有一条：MVP 三个文件不搬家、不重写、语义不动。）
@@ -294,7 +294,7 @@ loopback 服务的标准威胁：攻击者页面把 `attacker.com` 解析到 127
 
 - **token 的权限级**：持 token = 驱动你所有绑定项目上的 seek（等同坐到你电脑前）。分发口径同 butler 机器 token。
 - **执行面继承 D-C5**：默认 print-mode deny（能读写项目目录内、不能跑 shell）；per-binding `yolo:true` 慎开——web 渠道 + yolo = 远程任意命令面。
-- **XSS**：模型输出与工具结果全部 `textContent` 渲染（无 `innerHTML`）；`Content-Security-Policy: default-src 'self'`（无 inline script/eval）；静态资产同源自供，无外链。
+- **XSS**：模型输出与工具结果全部 `textContent` 渲染（无 `innerHTML`）；`Content-Security-Policy: default-src 'self'`（无 inline script/eval）；静态资产同源自供，无外链。（W1.5 落地口径：单文件期页面必有内联 script/style，裸 `'self'` 会把页面打死——policy 改为 `default-src 'self'` + `script-src`/`style-src` 各携内联块的 **sha256 hash**，运行时从 embed 字节推导（`webCSP()`），改页面零维护、非出厂脚本一律拒执行；拆 static/ 后内联块消失，自然退回裸 `'self'`。）
 - **SSE 资源**：per-client 连接上限（默认 8/tab 自动重连由浏览器管；hub 满则丢老——对齐 inspect-rpc §4.2 背压策略，UI 提示 resync）；连接随 ctx 关闭（leaktest 验收）。
 - **日志**：不打 Authorization 头/cookie/token；访问日志只记 method+path+status。
 - **错误面**：401/403 统一 JSON 体，不区分「token 错」与「没带」（不给探测面）；panic recover middleware 不崩 serve。
@@ -365,7 +365,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 | **W1.2** | 鉴权演进（§5.1–5.3；token 生成/0600/Bearer/constant-time **已交付不动**）：`?token=` 首跳 303 换票 + HttpOnly cookie + URL 擦净、写面 Origin/X-Token 闸、Host 校验（**已交付**，c_w5lidm——`webfrontend_auth.go`：`authKind` cookie 第三凭证、`writeGate` 仅卡 cookie 凭证（curl 面零感知）、`gateHost` host 部分白名单；页面改探测式启动吃 cookie） | §8 鉴权增量表驱动测试；现有 token 用例（`TestWeb_MsgRequiresToken` 等）零回归 |
 | **W1.3** | per-conv 演进：`X-Seek-Conversation` 头 conv-uuid（D-W3；现状固定 `web:default`）、SSE hub per-conv 订阅（现状全 tab 一张订阅表）、`Send` 按 conv 寻址、`/state` per-conv、存量 `web:default` 绑定兼容 | 双 conv 隔离 + 多 tab 同 conv 扇出一致；leaktest；未鉴权 SSE 401 零回归 |
 | **W1.4** | 流式接线（§2.4 缝落地）：router SendStream→`/events` SSE `delta`/`tool`/`usage` 事件族（服务端 pricing 算 $）/run 生命周期；`reply` 收口带 session_id（envelope 自 `{"conv","text"}` 扩展，纯加法）（**已交付**，c_qcmul4——`webfrontend_stream.go`：run id 服务端铸造、named event 不打扰旧页 onmessage、usage $ 走 `internal/pricing` 与 CLI 同卡、`X-Accel-Buffering:no`+逐事件 flush；`RunEvent` 补 `model` 镜像） | 桩 seek 流式 e2e（§8 流式条目，`TestWeb_StreamE2EEventFamily` 按序+活性+二 run 换 id）；/cancel 收口（`TestWeb_StreamCancelClosesRun`） |
-| **W1.5** | 页面资产管线：沿单文件 `webfrontend.html` 生长（膨胀再拆 static/，§4.3）、CSP 头、gzip handler、CI 检查（无 package.json + 体积 gate） | 资产 hash 测试；`curl /` 得 CSP 头 |
+| **W1.5** | 页面资产管线：沿单文件 `webfrontend.html` 生长（膨胀再拆 static/，§4.3）、CSP 头、gzip handler、CI 检查（无 package.json + 体积 gate）（**已交付**，c_ph2zax——`webfrontend_static.go`：CSP 以 sha256 钉内联块（§5.5 落地口径）+ gzip 惰性中间件（SSE 永不压缩，保逐事件 flush）；`scripts/web-gate.sh` + CI `web-gate` job：repo 根无 node 链断言 + linux/amd64 体积对 `scripts/web-size-baseline.txt` 净增 <200KB） | 资产 hash 测试；`curl /` 得 CSP 头 |
 
 ### Phase MVP-前端（W2，依赖 W1.3/W1.5，~4 卡）
 

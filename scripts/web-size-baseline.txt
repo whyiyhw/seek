@@ -1,0 +1,12 @@
+# web binary size baseline (bytes) — the number scripts/web-gate.sh
+# compares a GOOS=linux GOARCH=amd64 CGO_ENABLED=0 build of ./cmd/seek
+# against (feature-web-frontend §4.3: net increase budget 200KB,
+# inheriting inspect-rpc §6.13's口径). Headroom note: the embedded web
+# page + net/http serving stack are the budget's subject; if the gate
+# ever trips from P2/P3 asset growth, the written-down escape hatch is
+# the `web` build tag (feishu D-F1 precedent) — never a tarball.
+#
+# Update this number IN THE SAME COMMIT that intentionally grows the
+# binary: scripts/web-gate.sh --update-baseline (re-measures, rewrites
+# the number, keeps these comments).
+30216797

@@ -1737,3 +1737,17 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `authKind` reports WHICH credential passed; `writeGate` (Origin ∈ {self origin} or constant-time X-Seek-Token) runs only on the `credCookie` path; commit with card `c_w5lidm`.
 - **Lesson**: CSRF gates key off the credential FORM, not the HTTP method — "which requests can a third party make the browser send" is the actual question; script-face credentials are exempt by construction.
 - **Refs**: `internal/controlplane/webfrontend_auth.go` `writeGate`; `docs/prd/feature-web-frontend.md` §5.2.
+
+### A single-file page cannot ship bare CSP `default-src 'self'` — hash-pin the inline blocks instead (and the hash guards only element content)
+- **Saw**: §5.5 prescribes `Content-Security-Policy: default-src 'self'` with "no inline script/eval", but the §4.3 single-file `webfrontend.html` carries its JS and CSS INLINE — the literal policy would block both and render the page dead on arrival (blank, unstyled, no logic).
+- **Why**: "no inline" assumes the JS lives in same-origin FILES (the post-static/-split shape); in the single-file era inline is the shape. CSP3's reconciliation is a `sha256-<b64>` hash source on `script-src`/`style-src` over the EXACT bytes between the tags — which the server can derive at startup from the same `//go:embed` it serves, so editing the page never desyncs the policy.
+- **Fix**: `webCSP()` (webfrontend_static.go) scans `<script>/<style>` blocks out of the embed, hashes them, appends the tokens to `default-src 'self'`; commit with card `c_ph2zax`.
+- **Lesson**: the hash covers ELEMENT CONTENT only — inline event-handler attributes (`onclick=`), `eval`, and injected `<script>` all stay blocked, so the page's DOM-API-only discipline (textContent, addEventListener) remains load-bearing for W2+ cards; a second script tag needs no CSP edit (hashes re-derive) but any attribute-borne JS dies silently.
+- **Refs**: `internal/controlplane/webfrontend_static.go` `webCSP`; `docs/prd/feature-web-frontend.md` §5.5 落地口径.
+
+### A gzip middleware must both PRESERVE http.Flusher and EXCLUDE text/event-stream — either miss kills SSE silently
+- **Saw**: two ways the W1.5 wrapper could break `/events`: (a) embedding `http.ResponseWriter` hides the Flusher interface, so the handler's `w.(http.Flusher)` assertion 500s "streaming unsupported"; (b) compressing the event-stream buffers frames — SSE clients see nothing until the gzip window fills, exactly the proxy-batching the `X-Accel-Buffering: no` header exists to prevent.
+- **Why**: middleware wraps the writer BEFORE the handler sets Content-Type, so compression can't be pre-decided; and Go interfaces satisfy on the CONCRETE type — a wrapper struct without its own `Flush` method is not a Flusher however the inner writer is.
+- **Fix**: `gzipResponseWriter` decides at WriteHeader/first-Write (Content-Type allowlist, `text/event-stream` deliberately absent), implements `Flush()` that flushes the gzip stream then the underlying flusher, and `close()` finishes the stream after the handler returns; commit with card `c_ph2zax`.
+- **Lesson**: response-wrapping middleware must re-expose every optional interface the wrapped handlers assert (Flusher is the one SSE needs; Hijacker would be the one websockets need) — and "compress everything textual" policies need a streaming carve-out, or per-event delivery dies behind the compressor.
+- **Refs**: `internal/controlplane/webfrontend_static.go` `withGzip`; `TestWeb_GzipSkipsSSE`.
