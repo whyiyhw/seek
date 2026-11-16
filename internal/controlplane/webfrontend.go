@@ -16,7 +16,9 @@ package controlplane
 //	GET  /        the embedded page (no token — it holds no secrets;
 //	              the token reaches the page via its own URL)
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
-//	              (?conv= — EventSource cannot set headers)
+//	              (?conv= — EventSource cannot set headers); ?topic=
+//	              opts the connection into a topic stream alongside
+//	              (W3.2: "subagents" — see webfrontend_topic.go)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	              (X-Seek-Conversation picks the conv)
 //	GET  /state   the requesting conv's binding, for the status line
@@ -144,6 +146,13 @@ type WebFrontend struct {
 	mu   sync.Mutex
 	subs map[ConvID]map[int]chan string // per-conv SSE subscribers (W1.3): buffered event-json chans
 	next int                            // subscriber ids, unique across convs
+
+	// Topic dimension (W3.2, webfrontend_topic.go): the same /events
+	// connections keyed by topic name (second channel, drop-oldest
+	// buffer), plus the shared subagents.jsonl tail-follows behind the
+	// "subagents" topic. Guarded by mu like subs.
+	topics  map[string]map[int]chan string
+	follows map[string]*topicFollow
 }
 
 // Compile-time port check (the fake asserts the same contract).
@@ -397,6 +406,32 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// Topic dimension (W3.2): ?topic= opts this connection into a
+	// topic stream alongside the conv stream. Validated and resolved
+	// BEFORE the SSE headers so a bad topic or unbound conv answers
+	// plain 400/500 JSON, never a broken event-stream.
+	topic := r.URL.Query().Get("topic")
+	var indexPath string
+	if topic != "" {
+		if topic != topicSubagents {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown topic " + topic + " (only \"subagents\" exists)"})
+			return
+		}
+		b, err := f.store.Get(conv)
+		if err != nil {
+			if errors.Is(err, ErrBindingNotFound) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation not bound to a project (send /bind <path> first)"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		indexPath, err = paths.SubagentsIndex(b.ProjectPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
@@ -407,7 +442,16 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "retry: 3000\n\n") // browser auto-reconnect, 3s
 	fl.Flush()
 
-	ch, unsub := f.subscribe(conv)
+	var (
+		ch    chan string
+		tch   chan string // nil without a topic: a nil chan blocks forever, one select serves both paths
+		unsub func()
+	)
+	if topic != "" {
+		ch, tch, unsub = f.subscribeTopic(conv, topic, indexPath)
+	} else {
+		ch, unsub = f.subscribe(conv)
+	}
 	defer unsub()
 
 	beat := time.NewTicker(15 * time.Second)
@@ -417,6 +461,11 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case ev := <-ch:
 			if _, err := io.WriteString(w, "data: "+ev+"\n\n"); err != nil {
 				return // client went away
+			}
+			fl.Flush()
+		case ev := <-tch:
+			if _, err := io.WriteString(w, "event: "+topicSubagents+"\ndata: "+ev+"\n\n"); err != nil {
+				return
 			}
 			fl.Flush()
 		case <-beat.C:

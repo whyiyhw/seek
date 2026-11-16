@@ -1024,6 +1024,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: with a b-bit random ID you cannot robustly assert "all unique" for any meaningful N — the birthday bound is `N²/2^(b+1)`. Either widen the entropy (if the format allows) or assert a relaxed "distinct ≥ N−k" / "not degenerate" property. Don't paper a too-small ID space with a flaky zero-collision test; and don't widen entropy just to satisfy a test when production fan-out is safe and the format is a shared contract.
 - **Refs**: `internal/subagent/types_test.go:TestNewSubSid_FormatAndUniqueness`, `internal/subagent/types.go:newSubSid` (3-byte suffix), `internal/session/session.go:generateID` (the mirrored format)
 
+### SSE test hangs in `srv.Close()` when the response body only closes via `t.Cleanup`
+- **Saw**: a `/events` (SSE) topic test passed all assertions, then the whole run wedged for 30s until `go test -timeout` dumped stacks — blocked inside `httptest.Server.Close`, "waiting for connections", with the still-open SSE response body registered only as `t.Cleanup(func(){resp.Body.Close()})`.
+- **Why**: `t.Cleanup` callbacks run AFTER the test function's `defer`s. `defer srv.Close()` (registered first, at server start) therefore fires while the SSE body is still open — and `httptest.Server.Close` blocks indefinitely on live connections. Same LIFO family as the chdir/TempDir entry above, but inverted: the cleanup-only close is too LATE instead of too early.
+- **Fix**: every SSE-open helper's caller must `defer resp.Body.Close()` immediately after the open — LIFO then closes the body before the server. Keeping the `t.Cleanup` inside the helper is still fine as a belt-and-suspenders for Fatal-before-return paths (double `Body.Close` is a safe no-op for http bodies). Commit (this one).
+- **Lesson**: for never-ending response bodies (SSE, long-poll), the open helper returning `resp` is a contract: the caller owes a `defer resp.Body.Close()` before anything that closes the server. A cleanup-only close guarantees the hang.
+- **Refs**: `internal/controlplane/webfrontend_topic_test.go:openEventsRaw` callers; W1.3's `openSSE` callers in `webfrontend_conv_test.go` follow the pattern.
+
 ## Release / upgrade
 
 ### `tui.VersionString()` is a formatted banner, not a raw module version
