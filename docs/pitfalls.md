@@ -85,6 +85,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: `defer` freezes the *closure environment*, not the snapshot — anything read inside a deferred func must be captured to a local at schedule time if concurrent writers can move it. The bug class is silent until the shared value moves between schedule and run, which is exactly when two clients race
 - **Refs**: `internal/controlplane/webfrontend_conv.go:subscribe`, `internal/controlplane/webfrontend.go:handleEvents`
 
+### Topic fanout keyed coarser than the producer unit — cross-project SSE leak
+- **Saw**: W3.2's `subagents` topic pushed project A's subagent rows into a stream subscribed for project B (verification round 2, card c_3736yl); every existing test was green because all of them ran a single project
+- **Why**: subscribers were registered in a hub keyed by TOPIC NAME (`f.topics["subagents"]`) while the producer was a per-INDEX-PATH tail-follow (`f.follows[indexPath]`); `followLoop → pushTopic(topic)` fanned out to every subscriber of the name, a set spanning all projects
+- **Fix**: make the follow the fanout unit — subscriber channels live on `topicFollow.subs`, `followLoop` pushes via `pushFollow(fl, ev)` to its own follow only, and the topic-name hub (`f.topics`) is deleted (`len(subs)` also replaces the separate `refs` counter). Rework commit on `drive/c_3736yl`
+- **Lesson**: a fanout registry must be keyed at least as finely as its producer unit — keying it coarser (name vs per-project follow) leaks events across the finer dimension, and single-fixture tests cannot see it. When a subscription has a producer-side shard, hang the subscriber list on that shard instead of a parallel name-keyed map
+- **Refs**: `internal/controlplane/webfrontend_topic.go:topicFollow`, `internal/controlplane/webfrontend_topic_test.go:TestWeb_TopicProjectIsolation`
+
 ## Hook / memory
 
 ### OnSessionStart must reset snapshot state for --resume correctness
@@ -1023,6 +1030,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Fix**: assert RNG *health* instead of perfection — require ≥990/1000 distinct (tripping it needs ≥11 collisions, P≈1e-15; a degenerate/constant suffix fails immediately). Added the missing different-timestamp uniqueness check the comment had claimed. Commit (this one).
 - **Lesson**: with a b-bit random ID you cannot robustly assert "all unique" for any meaningful N — the birthday bound is `N²/2^(b+1)`. Either widen the entropy (if the format allows) or assert a relaxed "distinct ≥ N−k" / "not degenerate" property. Don't paper a too-small ID space with a flaky zero-collision test; and don't widen entropy just to satisfy a test when production fan-out is safe and the format is a shared contract.
 - **Refs**: `internal/subagent/types_test.go:TestNewSubSid_FormatAndUniqueness`, `internal/subagent/types.go:newSubSid` (3-byte suffix), `internal/session/session.go:generateID` (the mirrored format)
+
+### SSE test hangs in `srv.Close()` when the response body only closes via `t.Cleanup`
+- **Saw**: a `/events` (SSE) topic test passed all assertions, then the whole run wedged for 30s until `go test -timeout` dumped stacks — blocked inside `httptest.Server.Close`, "waiting for connections", with the still-open SSE response body registered only as `t.Cleanup(func(){resp.Body.Close()})`.
+- **Why**: `t.Cleanup` callbacks run AFTER the test function's `defer`s. `defer srv.Close()` (registered first, at server start) therefore fires while the SSE body is still open — and `httptest.Server.Close` blocks indefinitely on live connections. Same LIFO family as the chdir/TempDir entry above, but inverted: the cleanup-only close is too LATE instead of too early.
+- **Fix**: every SSE-open helper's caller must `defer resp.Body.Close()` immediately after the open — LIFO then closes the body before the server. Keeping the `t.Cleanup` inside the helper is still fine as a belt-and-suspenders for Fatal-before-return paths (double `Body.Close` is a safe no-op for http bodies). Commit (this one).
+- **Lesson**: for never-ending response bodies (SSE, long-poll), the open helper returning `resp` is a contract: the caller owes a `defer resp.Body.Close()` before anything that closes the server. A cleanup-only close guarantees the hang.
+- **Refs**: `internal/controlplane/webfrontend_topic_test.go:openEventsRaw` callers; W1.3's `openSSE` callers in `webfrontend_conv_test.go` follow the pattern.
 
 ## Release / upgrade
 

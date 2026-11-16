@@ -151,73 +151,19 @@ func readEvents(path string) ([]event, error) {
 // The returned slice is sorted by StartedAt descending (newest
 // first), which is what `/agents` and `seek subagent list` want
 // for default presentation.
+//
+// The per-event rules live in applyEvent (shared with Follower.Poll,
+// the W3.2 incremental tail-follow) — whole-file fold and incremental
+// follow cannot drift apart if there is only one fold core.
 func foldEvents(events []event) []Subagent {
 	bySid := make(map[string]*Subagent, len(events))
 	order := make([]string, 0, len(events))
 	for _, e := range events {
-		if e.Kind == "started" {
-			if _, exists := bySid[e.SubSid]; exists {
-				// Duplicate started for the same sub_sid is a
-				// programmer error (sub_sid space collision).
-				// Keep the first; ignore the dup.
-				continue
-			}
-			bySid[e.SubSid] = &Subagent{
-				SubSid:       e.SubSid,
-				ParentSid:    e.ParentSid,
-				ParentTurn:   e.ParentTurn,
-				Type:         e.Type,
-				Description:  e.Description,
-				WorktreePath: e.WorktreePath,
-				ResumedFrom:  e.ResumedFrom,
-				StartedAt:    e.TS,
-				Background:   e.Background,
-				Status:       StatusActive,
-			}
+		// applyEvent returns non-nil for started-creates and terminal
+		// transitions; order tracks only the creates (a duplicate
+		// started or an orphan terminal never enters the output).
+		if s := applyEvent(bySid, e); s != nil && e.Kind == "started" {
 			order = append(order, e.SubSid)
-			continue
-		}
-		s := bySid[e.SubSid]
-		if s == nil {
-			// Terminal event for a sub_sid we never saw started.
-			// Skip — see method doc.
-			continue
-		}
-		switch e.Kind {
-		case "completed":
-			s.Status = StatusCompleted
-			s.EndedAt = e.TS
-			if e.Tokens != nil {
-				s.Tokens = *e.Tokens
-			}
-		case "failed":
-			s.Status = StatusFailed
-			s.EndedAt = e.TS
-			s.Reason = e.Reason
-			if e.Tokens != nil {
-				s.Tokens = *e.Tokens
-			}
-		case "killed":
-			s.Status = StatusKilled
-			s.EndedAt = e.TS
-		case "orphaned":
-			s.Status = StatusOrphaned
-			s.EndedAt = e.TS
-		case "promoted":
-			s.Status = StatusPromoted
-			s.EndedAt = e.TS
-		case "notified":
-			// Delivery marker for background spawns: the completion
-			// notice was ingested into the parent session (written on
-			// drain by the D3/P1-b resume path). Non-terminal — it
-			// annotates the existing Status for presentation (the
-			// /agents MODE column's delivered tick) without altering
-			// the lifecycle fold.
-			s.Notified = true
-		default:
-			// Unknown event kind — ignore. A future seek version
-			// might emit kinds we don't recognise; the safe
-			// behaviour is "the current state we already have".
 		}
 	}
 	out := make([]Subagent, 0, len(order))
@@ -230,6 +176,79 @@ func foldEvents(events []event) []Subagent {
 		return out[i].StartedAt.After(out[j].StartedAt)
 	})
 	return out
+}
+
+// applyEvent folds ONE event into bySid — the shared core of
+// foldEvents (whole-file) and Follower.Poll (incremental). It returns
+// the touched row when the event is one a panel surfaces (a
+// row-creating `started`, or a terminal transition), nil for
+// everything else: `notified` (annotation only), unknown kinds (state
+// we already have is the safe read), a duplicate `started` (keep the
+// first — sub_sid space collision), and terminals for a sub_sid we
+// never saw started (logically inconsistent index).
+func applyEvent(bySid map[string]*Subagent, e event) *Subagent {
+	if e.Kind == "started" {
+		if _, exists := bySid[e.SubSid]; exists {
+			return nil
+		}
+		s := &Subagent{
+			SubSid:       e.SubSid,
+			ParentSid:    e.ParentSid,
+			ParentTurn:   e.ParentTurn,
+			Type:         e.Type,
+			Description:  e.Description,
+			WorktreePath: e.WorktreePath,
+			ResumedFrom:  e.ResumedFrom,
+			StartedAt:    e.TS,
+			Background:   e.Background,
+			Status:       StatusActive,
+		}
+		bySid[e.SubSid] = s
+		return s
+	}
+	s := bySid[e.SubSid]
+	if s == nil {
+		return nil
+	}
+	switch e.Kind {
+	case "completed":
+		s.Status = StatusCompleted
+		s.EndedAt = e.TS
+		if e.Tokens != nil {
+			s.Tokens = *e.Tokens
+		}
+	case "failed":
+		s.Status = StatusFailed
+		s.EndedAt = e.TS
+		s.Reason = e.Reason
+		if e.Tokens != nil {
+			s.Tokens = *e.Tokens
+		}
+	case "killed":
+		s.Status = StatusKilled
+		s.EndedAt = e.TS
+	case "orphaned":
+		s.Status = StatusOrphaned
+		s.EndedAt = e.TS
+	case "promoted":
+		s.Status = StatusPromoted
+		s.EndedAt = e.TS
+	case "notified":
+		// Delivery marker for background spawns: the completion
+		// notice was ingested into the parent session (written on
+		// drain by the D3/P1-b resume path). Non-terminal — it
+		// annotates the existing Status for presentation (the
+		// /agents MODE column's delivered tick) without altering
+		// the lifecycle fold.
+		s.Notified = true
+		return nil
+	default:
+		// Unknown event kind — ignore. A future seek version
+		// might emit kinds we don't recognise; the safe
+		// behaviour is "the current state we already have".
+		return nil
+	}
+	return s
 }
 
 // ListProject returns the folded state of every subagent recorded in
