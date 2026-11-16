@@ -373,7 +373,7 @@ httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组
 |---|---|---|
 | **W2.1** | 聊天 UI 增量（消息列表/输入框/SSE 自动重连/textContent 渲染**已交付**）：流式气泡 delta 累积→reply 替换、工具行折叠、conv-uuid localStorage | 手测脚本（浏览器）；XSS 用例（模型吐 `<script>` 转义——现状 textContent 纪律保持） |
 | **W2.2** | 会话指令 UI：/bind /projects /switch /new /cancel 快捷按钮（纯文本透传**已交付**）+ 绑定状态常显（`GET /state` **已交付**，升级为指令后即时刷新）（**已交付**，c_evbzyh——顶栏五个指令按钮：零参直发、带参（/bind /switch）预填输入框，全部走同一条 sendText 透传；指令 POST 成功即刷 /state、SSE 重连恢复绑定常显；e2e=`TestWeb_CommandE2E` 真 Router+桩 seek） | 指令 e2e（真 Router + 桩 seek） |
-| **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显 | 桩 seek 多 turn e2e 断言数值 |
+| **W2.3** | 状态栏：turn_end 实时 tokens 累积 + $（usage 事件）+ agent_end 终值/session_id 短显（**已交付**，c_npafpi——`webfrontend.html` 状态栏双段化：右段 `#usage` 计量，usage 命名事件逐 turn 累计（$ 恒为服务端 cost_usd 直加、客户端永不算价）、reply 收口带 session_id 短显 `sid xxxxxxxx`；口径=本页生命周期会话累计（与 CLI footer 同向，刷新重计——回放留给 P3）；顺手修正 `#status .ok/.warn` 死选择器（c_qucxtu 起 JS 设的是 header 自身 class，旧选择器从未命中）；多 turn 桩 `web_multi_turn` + `TestWeb_MultiTurnUsageAccumulates` 数值累积断言 + `TestWeb_PageUsageMeter` 页面契约） | 桩 seek 多 turn e2e 断言数值 |
 | **W2.4** | 文档收尾：guide-serve.md §web（启动/token/tailnet/安全清单）+ README 一行 + 体积 gate 上线（**已交付**，c_mn2wdp——guide-serve 新 §5「Web frontend」收拢启动/token/tailnet/安全清单（§2.1 的 web 专属段并入，76ed883 限段口径逐字保留不回退；Telegram 纸面节顺移 §6，两 PRD 的跨文档引用同步）；README/README.zh 控制面行能力括号刷新为工作台口径（限段句不动）；`web-size-baseline` 棘轮至 W 线完工面 30246587B——W1.5 钉 30216797 后 W2.1–W4.6 增量 29790B，gate 对完工 binary delta 归零，后续增长从完工地基起量） | 文档 review |
 
 ### Phase P2 — 任务面板（依赖 orchestration P1，~3 卡）
