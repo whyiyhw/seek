@@ -4,6 +4,8 @@
 > 日期：2026-11-12 · 分支 `drive/c_evvow4` · 依据：`docs/prd/v1.md`、`docs/prd/v2.md` §4、`internal/memory/`、`internal/skill*/`、`cmd/seek/main.go`、`docs/narrative/seek.md`
 > 背景：`docs/narrative/seek.md:25,51` 已把「skill 不会自动蒸馏」列为自进化内环的缺口，设计卡待开。
 
+> **状态注记（2026-11-16，卡 `c_5fdsqb`）**：§5 P0 两问已由 [`feature-memory-skill-bridge.md`](feature-memory-skill-bridge.md) 出设计稿回答——①落点 = project 级 `<project>/.seek/skills/` + review 第四动作 `s`（击键即闸，不发明新 gate）；②生命周期 = **skill 永生 + 蒸馏判重兜底**（不做 decay 移植，论证见该文 §5.2），`.stats.jsonl` 消费端补 `--idle` 观察视图。§1.3 坐实的 PRD↔代码 GC 偏差已按「实现是对的」在 `v1.md` 三处勘误（2026-11-16）。另两处事实已被时间更新，以现状代码为准：§2.2「没有任何入口」——`skillmgr.DraftStore`（草稿区）、`seek skill drafts approve`（人审安装）、`skilldistill` 全漏斗（M-SD1/2/3，见 `feature-skill-distill.md` 状态行）已落地；§2.2「`.stats.jsonl` 从不读回」——`skillstats.Read` + `seek skill stats [--distill]`（M8.4 / 三期）已是消费端。§5 P1 #4「判重复用 merge.go」在设计稿中修正为复用 `skilldistill.trigramJaccard`（M↔skill 边界的生产实现，CJK 正确；变更记录见 feature 文 §8.2）。
+
 ---
 
 ## 1. 蒸馏漏斗现状（memory 侧产出形态）
