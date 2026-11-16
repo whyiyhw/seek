@@ -147,6 +147,30 @@ func ASRCost(seconds float64) float64 {
 	return math.Ceil(seconds) * asrPerHourUSD / 3600
 }
 
+// ttsPer10kCharsUSD is the standalone TTS API's per-10k-billing-chars
+// rate: $0.45 per 10,000 billing characters, listed natively on the
+// English pricing page (2026-11-16 check; the Chinese page shows
+// ¥3/万 — the known regional-card divergence, see standardRates
+// above). A limited-time 50% discount is running ($0.225 / ¥1.5) with
+// no published end date and is deliberately NOT modelled — same
+// posture as search and ASR: the constant stays at list price so the
+// defensive display never undercharges. A billing character is one
+// rune with Han runes counting two; count them with
+// deepseek.TTSBillableChars.
+const ttsPer10kCharsUSD = 0.45
+
+// TTSCost returns the USD cost of synthesizing billableChars billing
+// characters with the TTS API. The TTS response is raw audio with no
+// JSON envelope, so there is no server-reported count — callers count
+// locally: TTSCost(deepseek.TTSBillableChars(text)) on successful
+// calls only. Failed requests cost nothing.
+func TTSCost(billableChars int) float64 {
+	if billableChars <= 0 {
+		return 0
+	}
+	return float64(billableChars) * ttsPer10kCharsUSD / 10_000
+}
+
 const offPeakDiscount = 0.5
 
 // Shanghai (CST = UTC+8) is DeepSeek's reference timezone. Exported so
