@@ -343,3 +343,44 @@ func TestSearchCost(t *testing.T) {
 		t.Errorf("FormatCost(SearchCost(1)) = %q, want $0.0008", s)
 	}
 }
+
+// TestASRCost prices the standalone ASR API's per-second-of-audio
+// billing: $0.116/hour listed natively on the English pricing page
+// (2026-11-16 check; zh page ¥0.78/h, the known regional divergence).
+// The API bills per second rounded UP — 不足 1 秒按 1 秒 — so the ceil
+// is internal and callers pass raw duration_ms/1000.
+func TestASRCost(t *testing.T) {
+	perSec := 0.116 / 3600
+	// Fractional seconds bill as a full second; exact seconds don't
+	// round further.
+	cases := []struct {
+		seconds  float64
+		billable float64
+		label    string
+	}{
+		{0.1, 1, "sub-second rounds up to one second"},
+		{1.0, 1, "exactly one second"},
+		{1.001, 2, "just past one second bills two"},
+		{3.2, 4, "3.2 s bills four seconds"},
+		{120, 120, "the full 120 s clip cap"},
+		{30, 30, "a 30 s voice note (PRD §4.3 sizing basis)"},
+	}
+	for _, c := range cases {
+		if got := ASRCost(c.seconds); math.Abs(got-c.billable*perSec) > 1e-12 {
+			t.Errorf("%s: ASRCost(%v) = %v, want %v billable seconds (%v)", c.label, c.seconds, got, c.billable, c.billable*perSec)
+		}
+	}
+	// Failed / zero-duration calls are not billable, and a stray
+	// negative must not pay out.
+	if got := ASRCost(0); got != 0 {
+		t.Errorf("ASRCost(0) = %v, want 0", got)
+	}
+	if got := ASRCost(-3); got != 0 {
+		t.Errorf("ASRCost(-3) = %v, want 0", got)
+	}
+	// Integration shape the response feeds: duration_ms 3200 →
+	// 3.2 s → billed as 4 seconds.
+	if got := ASRCost(3200.0 / 1000); math.Abs(got-4*perSec) > 1e-12 {
+		t.Errorf("ASRCost(3.2) = %v, want 4 seconds' worth", got)
+	}
+}
