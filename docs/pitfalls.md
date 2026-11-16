@@ -1744,3 +1744,37 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `authKind` reports WHICH credential passed; `writeGate` (Origin ∈ {self origin} or constant-time X-Seek-Token) runs only on the `credCookie` path; commit with card `c_w5lidm`.
 - **Lesson**: CSRF gates key off the credential FORM, not the HTTP method — "which requests can a third party make the browser send" is the actual question; script-face credentials are exempt by construction.
 - **Refs**: `internal/controlplane/webfrontend_auth.go` `writeGate`; `docs/prd/feature-web-frontend.md` §5.2.
+
+### A single-file page cannot ship bare CSP `default-src 'self'` — hash-pin the inline blocks instead (and the hash guards only element content)
+- **Saw**: §5.5 prescribes `Content-Security-Policy: default-src 'self'` with "no inline script/eval", but the §4.3 single-file `webfrontend.html` carries its JS and CSS INLINE — the literal policy would block both and render the page dead on arrival (blank, unstyled, no logic).
+- **Why**: "no inline" assumes the JS lives in same-origin FILES (the post-static/-split shape); in the single-file era inline is the shape. CSP3's reconciliation is a `sha256-<b64>` hash source on `script-src`/`style-src` over the EXACT bytes between the tags — which the server can derive at startup from the same `//go:embed` it serves, so editing the page never desyncs the policy.
+- **Fix**: `webCSP()` (webfrontend_static.go) scans `<script>/<style>` blocks out of the embed, hashes them, appends the tokens to `default-src 'self'`; commit with card `c_ph2zax`.
+- **Lesson**: the hash covers ELEMENT CONTENT only — inline event-handler attributes (`onclick=`), `eval`, and injected `<script>` all stay blocked, so the page's DOM-API-only discipline (textContent, addEventListener) remains load-bearing for W2+ cards; a second script tag needs no CSP edit (hashes re-derive) but any attribute-borne JS dies silently.
+- **Refs**: `internal/controlplane/webfrontend_static.go` `webCSP`; `docs/prd/feature-web-frontend.md` §5.5 落地口径.
+
+### A gzip middleware must both PRESERVE http.Flusher and EXCLUDE text/event-stream — either miss kills SSE silently
+- **Saw**: two ways the W1.5 wrapper could break `/events`: (a) embedding `http.ResponseWriter` hides the Flusher interface, so the handler's `w.(http.Flusher)` assertion 500s "streaming unsupported"; (b) compressing the event-stream buffers frames — SSE clients see nothing until the gzip window fills, exactly the proxy-batching the `X-Accel-Buffering: no` header exists to prevent.
+- **Why**: middleware wraps the writer BEFORE the handler sets Content-Type, so compression can't be pre-decided; and Go interfaces satisfy on the CONCRETE type — a wrapper struct without its own `Flush` method is not a Flusher however the inner writer is.
+- **Fix**: `gzipResponseWriter` decides at WriteHeader/first-Write (Content-Type allowlist, `text/event-stream` deliberately absent), implements `Flush()` that flushes the gzip stream then the underlying flusher, and `close()` finishes the stream after the handler returns; commit with card `c_ph2zax`.
+- **Lesson**: response-wrapping middleware must re-expose every optional interface the wrapped handlers assert (Flusher is the one SSE needs; Hijacker would be the one websockets need) — and "compress everything textual" policies need a streaming carve-out, or per-event delivery dies behind the compressor.
+- **Refs**: `internal/controlplane/webfrontend_static.go` `withGzip`; `TestWeb_GzipSkipsSSE`.
+
+### http.DefaultClient silently asks for gzip and strips Content-Encoding — the "identity path" test passed vacuously
+- **Saw**: `TestWeb_GzipPage`'s not-asked-for branch (no Accept-Encoding → expect identity) was green, but the server's identity path had never executed.
+- **Why**: Go's `http.Transport` adds `Accept-Encoding: gzip` to any request that carries none, then transparently gunzips the answer and DELETES `Content-Encoding` — the test read a decoded body through a header the transport scrubbed. An explicit Accept-Encoding suppresses this; an absent one does not.
+- **Fix**: dedicated `rawClient` (`&http.Transport{DisableCompression: true}`) in `webfrontend_static_test.go`, plus a `resp.Uncompressed` tripwire; commit with card `c_ph2zax` (rework round 1).
+- **Lesson**: any test asserting "server does X when the client doesn't ask" over HTTP must disable the transport's compression negotiation — `DisableCompression` for both directions of the surprise, and check `resp.Uncompressed` as the regression wire.
+- **Refs**: `internal/controlplane/webfrontend_static_test.go` `rawClient` / `getRaw`; `net/http` Transport docs.
+
+### `mktemp -t name` is BSD-only — GNU coreutils reads the argument as a template and dies "too few X's"
+- **Saw**: `scripts/web-gate.sh` (runs on ubuntu-latest) failed at `mktemp -t seek-size` with "too few X's"; under `set -e` the whole gate went red before asserting anything.
+- **Why**: BSD mktemp treats `-t`'s argument as a PREFIX; GNU coreutils (and POSIX's newer `-t` spec) treat it as a TEMPLATE that must contain trailing X's. The portable shape is an explicit path with X's, honoring `TMPDIR`.
+- **Fix**: `mktemp "${TMPDIR:-/tmp}/seek-size.XXXXXX"` (repo precedent: `install-serve.sh:68`, `eval-trend.sh:300`); same commit swept the file's `\s` regexes (grep + awk) to `[[:space:]]` — mawk doesn't take `\s`.
+- **Lesson**: scripts meant for both macOS and CI never use `mktemp -t <name>`; use the `"${TMPDIR:-/tmp}/<name>.XXXXXX"` form, and keep regexes POSIX-class (`[[:space:]]`) when mawk is in the audience.
+- **Refs**: `scripts/web-gate.sh` `build_size` / `baseline`; `.github/workflows/ci.yml` web-gate job.
+
+### Asserting on SSE reply payloads with angle brackets fails — Go's json.Marshal HTML-escapes by default
+- **Saw**: an e2e substring like `用法：/bind <项目路径>` never matches the SSE frame, which reads `用法：/bind \u003c项目路径\u003e` on the wire.
+- **Why**: `json.Marshal` (and the `json.NewEncoder` default) HTML-escape `<`, `>`, `&` to `\u003c` etc.; every `Send`/`SendStream` envelope rides that marshal.
+- **Fix**: assert bracket-free substrings (e.g. `用法：/bind` + `目录必须存在`); commit with card `c_evbzyh`.
+- **Lesson**: substring assertions against marshaled JSON must avoid HTML-sensitive characters — pick neighbouring plain text, don't chase the escape spelling.
