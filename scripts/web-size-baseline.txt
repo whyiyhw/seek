@@ -9,4 +9,4 @@
 # Update this number IN THE SAME COMMIT that intentionally grows the
 # binary: scripts/web-gate.sh --update-baseline (re-measures, rewrites
 # the number, keeps these comments).
-30216797
+30246587
