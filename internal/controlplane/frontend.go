@@ -51,6 +51,24 @@ type Frontend interface {
 	Send(ctx context.Context, conv ConvID, r Reply) error
 }
 
+// StreamSender is the OPTIONAL streaming extension of Frontend
+// (feature-web-frontend.md §2.4, seam 1 — the Sink sibling-interface
+// discipline: the port's three methods stay untouched, the router
+// upcasts at the send site). Frontends that don't implement it keep
+// the exact one-reply-per-inbound behaviour; the web frontend (W1.4)
+// is the first implementation.
+type StreamSender interface {
+	// SendStream forwards one live run event — the full `seek -p
+	// --json` JSONL contract (RunEvent in executor.go: text_delta,
+	// tool_start/tool_end, turn_end, agent_end …) — to the
+	// conversation, in emit order. Called from the executor's stdout
+	// reader goroutine, so implementations must be safe for concurrent
+	// use with Send (the port's own posture). Best-effort, same as
+	// Send: an error is logged and dropped by the router, never
+	// propagated into the run.
+	SendStream(ctx context.Context, conv ConvID, ev RunEvent) error
+}
+
 // ConvID is the frontend-agnostic conversation key:
 // "<frontend>:<native-id>", e.g. "feishu:oc_abc". The frontend prefix
 // keeps bindings and serialisation queues from colliding across

@@ -14,7 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -576,6 +578,139 @@ func TestRouter_GlobalYoloPassedThrough(t *testing.T) {
 	r.Handle(context.Background(), inbound("go", "e2"))
 	if invs := readInvocations(t, stubDir); !argvHas(invs[len(invs)-1], "--yolo", "") {
 		t.Errorf("global yolo must reach the child: %q", invs[len(invs)-1].Argv)
+	}
+}
+
+// ---- W0.2 streaming seam: StreamSender upcast ----
+
+// streamFake is fakeFrontend plus the OPTIONAL StreamSender extension
+// (frontend.go): it records every SendStream payload plus one combined
+// Send/SendStream arrival log, so tests can pin the seam — events
+// forward in emit order, the final Reply still goes out via Send,
+// commands never stream. streamErr makes every SendStream call fail
+// (the best-effort probe; failed calls still log into order).
+type streamFake struct {
+	fakeFrontend
+	streamErr bool
+
+	mu      sync.Mutex
+	stream  []RunEvent // recorded SendStream payloads, emit order
+	order   []string   // combined arrival log: "stream:<type>" / "send:<text>"
+	calls   int        // total SendStream invocations
+}
+
+var _ StreamSender = (*streamFake)(nil)
+
+func (f *streamFake) Send(ctx context.Context, conv ConvID, r Reply) error {
+	f.mu.Lock()
+	f.order = append(f.order, "send:"+r.Text)
+	f.mu.Unlock()
+	return f.fakeFrontend.Send(ctx, conv, r)
+}
+
+func (f *streamFake) SendStream(ctx context.Context, conv ConvID, ev RunEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.order = append(f.order, "stream:"+ev.Type)
+	f.calls++
+	if f.streamErr {
+		return errors.New("stream sink down")
+	}
+	f.stream = append(f.stream, ev)
+	return nil
+}
+
+func (f *streamFake) recorded() ([]RunEvent, []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RunEvent(nil), f.stream...), append([]string(nil), f.order...)
+}
+
+// The full seam through the real Router: /bind on a StreamSender
+// frontend streams nothing (commands never exec), then a prompt
+// forwards the FULL jsonLine contract in emit order and the final
+// Reply still goes out via Send AFTER the last event — the reply
+// closes the bubble, no stream event may follow it. Session writeback
+// is the executor's own, untouched by the seam.
+func TestRouter_PromptStreamsToStreamSender(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	t.Setenv("CP_STUB_MODE", "stream_batches")
+	store := OpenBindingStoreAt(filepath.Join(t.TempDir(), "bindings.json"))
+	fe := &streamFake{fakeFrontend: fakeFrontend{name: "feishu"}}
+	r := NewRouter([]Frontend{fe}, store, ex, RouterConfig{})
+
+	r.Handle(context.Background(), inbound("/bind "+t.TempDir(), "e1"))
+	if _, order := fe.recorded(); len(order) != 1 || !strings.HasPrefix(order[0], "send:") {
+		t.Fatalf("commands must not stream: %v", order)
+	}
+
+	r.Handle(context.Background(), inbound("hello", "e2"))
+
+	// Event order = the stub's emit order (same contract as the W0.1
+	// executor test; junk line skipped, reasoning_delta delivered).
+	wantTypes := []string{
+		"agent_start", "turn_start", "text_delta", "reasoning_delta",
+		"text_delta", "text_delta", "tool_start", "tool_end",
+		"turn_end", "agent_end",
+	}
+	got, order := fe.recorded()
+	gotTypes := make([]string, len(got))
+	for i, ev := range got {
+		gotTypes[i] = ev.Type
+	}
+	if !slices.Equal(gotTypes, wantTypes) {
+		t.Errorf("streamed types = %v\nwant            %v", gotTypes, wantTypes)
+	}
+	// Spot-check the contract survived the hop unmangled.
+	if len(got) != 10 || got[3].Delta != "thinking" || !got[3].Reasoning ||
+		got[6].Name != "read" || got[9].SessionID != "SB" {
+		t.Errorf("streamed events mangled in transit: %+v", got)
+	}
+
+	// Combined order: 1 bind ack + 10 stream events + the reply Send,
+	// and the Send is LAST (the executor joins its reader before
+	// RunStream returns, so the reply closes the run by construction).
+	if len(order) != 12 {
+		t.Fatalf("combined order = %v\nwant 12 entries (bind ack + 10 stream + reply)", order)
+	}
+	for i, want := range wantTypes {
+		if order[i+1] != "stream:"+want {
+			t.Errorf("order[%d] = %q, want %q", i+1, order[i+1], "stream:"+want)
+		}
+	}
+	if order[11] != "send:Hello world" {
+		t.Errorf("last entry = %q, want the Send reply closing the run", order[11])
+	}
+
+	b, err := store.Get(conv1)
+	if err != nil || b.SessionID != "SB" {
+		t.Errorf("session writeback through the seam: sid=%q err=%v, want SB", b.SessionID, err)
+	}
+}
+
+// Best-effort posture: SendStream failing on EVERY event must not
+// fail the run — the executor's aggregation is emit-independent, the
+// failure is logged and dropped, and the final Reply still arrives
+// via Send. (Happy stub: 6 lines.)
+func TestRouter_StreamSendErrorBestEffort(t *testing.T) {
+	ex, _ := newStubExecutor(t, nil)
+	store := OpenBindingStoreAt(filepath.Join(t.TempDir(), "bindings.json"))
+	fe := &streamFake{fakeFrontend: fakeFrontend{name: "feishu"}, streamErr: true}
+	r := NewRouter([]Frontend{fe}, store, ex, RouterConfig{})
+
+	r.Handle(context.Background(), inbound("/bind "+t.TempDir(), "e1"))
+	r.Handle(context.Background(), inbound("hello", "e2"))
+
+	sends := fe.sends()
+	if len(sends) != 2 || sends[1].Text != "Hello hello" {
+		t.Fatalf("reply must survive SendStream failures: %+v", sends)
+	}
+	_, order := fe.recorded()
+	if len(order) != 8 { // bind ack + 6 failed stream attempts + reply
+		t.Errorf("combined order = %v, want 8 entries", order)
+	}
+	if fe.calls != 6 {
+		t.Errorf("SendStream calls = %d, want 6 (every event still forwarded)", fe.calls)
 	}
 }
 
