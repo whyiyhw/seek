@@ -1,10 +1,12 @@
 package controlplane
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"sync"
@@ -179,7 +181,58 @@ func (e *Executor) acquireConv(ctx context.Context, conv string) (func(), error)
 // "CI / scripted invocations", which is exactly what the plane is.
 // Without it every inbound message would re-trigger cron jobs that the
 // OS scheduler already owns (v5 zero-daemon doctrine).
+//
+// Run is the no-observer entry point; it delegates to RunStream
+// (feature-web-frontend.md §2.4 seam 2).
 func (e *Executor) Run(ctx context.Context, req ExecRequest) (ExecResult, error) {
+	return e.RunStream(ctx, req, nil)
+}
+
+// RunEvent is one line of the stable `seek -p --json` JSONL contract
+// (cmd/seek main.go jsonLine — the field set mirrors it 1:1; it grows
+// additively with that contract, e.g. the planned agent_start.model).
+// Named + exported so frontends can render the stream without
+// re-parsing raw bytes. Consumers branch on Type; all other fields are
+// type-specific, per the jsonLine contract comment.
+type RunEvent struct {
+	Type  string `json:"type"`
+	Index int    `json:"index,omitempty"`
+	// text_delta / reasoning_delta / tool_delta
+	Delta     string `json:"delta,omitempty"`
+	Reasoning bool   `json:"reasoning,omitempty"`
+	// tool_start / tool_delta / tool_end
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Args   string `json:"args,omitempty"`
+	Result string `json:"result,omitempty"`
+	Bytes  int    `json:"bytes,omitempty"`
+	// error field for tool_end and error events
+	Error string `json:"error,omitempty"`
+	// turn_end / agent_end token accounting
+	PromptTokens     int `json:"prompt_tokens,omitempty"`
+	CompletionTokens int `json:"completion_tokens,omitempty"`
+	CacheHitTokens   int `json:"cache_hit_tokens,omitempty"`
+	ToolCalls        int `json:"tool_calls,omitempty"`
+	// agent_end only
+	Turns     int    `json:"turns,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
+// RunStream is Run with an optional per-line observer: emit sees each
+// parseable JSONL line AS IT ARRIVES (line-buffered stdout read),
+// before the subprocess exits. It carries the FULL jsonLine contract —
+// tool_start/tool_end/turn_end/agent_end, not just text_delta — so the
+// web status bar and the P2 panel share one data source; filtering
+// (e.g. reasoning out of the UI) is the consumer's job. A self-heal
+// rerun restarts the stream: a consumer sees a fresh agent_start after
+// the failed attempt's error event.
+//
+// Red line: emit is read-only. Events are passed by value and the
+// folded outcome is computed independently of the callback, so emit
+// can neither observe nor corrupt the final ExecResult. Run(req) ≡
+// RunStream(ctx, req, nil); aggregation and self-heal semantics are
+// exactly Run's.
+func (e *Executor) RunStream(ctx context.Context, req ExecRequest, emit func(RunEvent)) (ExecResult, error) {
 	if req.Conv == "" {
 		return ExecResult{}, errors.New("controlplane: exec: empty Conv")
 	}
@@ -207,7 +260,7 @@ func (e *Executor) Run(ctx context.Context, req ExecRequest) (ExecResult, error)
 	defer func() { <-e.sem }()
 
 	res := ExecResult{}
-	first, err := e.attempt(ctx, req, req.SessionID != "")
+	first, err := e.attempt(ctx, req, req.SessionID != "", emit)
 	res.Attempts = 1
 	if err == nil {
 		res.Reply, res.SessionID = first.reply, first.sessionID
@@ -220,7 +273,7 @@ func (e *Executor) Run(ctx context.Context, req ExecRequest) (ExecResult, error)
 	// Self-heal: rerun as a first turn, abandoning the stored session.
 	res.Attempts = 2
 	res.ContextReset = req.SessionID != ""
-	second, err2 := e.attempt(ctx, req, false)
+	second, err2 := e.attempt(ctx, req, false, emit)
 	if err2 != nil {
 		return res, err2
 	}
@@ -238,8 +291,12 @@ type attemptOutcome struct {
 }
 
 // attempt spawns one seek run; resume selects whether -resume <sid> is
-// passed. See Run for the self-heal policy around its outcomes.
-func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool) (attemptOutcome, error) {
+// passed, emit is the optional per-line observer (nil from the Run
+// path). stdout is streamed line by line through the streamSink — the
+// same fold parseSeekJSONL performs — so emit sees lines as they land
+// while the outcome aggregation stays byte-identical to the batch
+// reader. See RunStream for the self-heal policy around its outcomes.
+func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool, emit func(RunEvent)) (attemptOutcome, error) {
 	args := []string{"-p", req.Message, "--json", "--no-cron-tick"}
 	if resume && req.SessionID != "" {
 		args = append(args, "-resume", req.SessionID)
@@ -257,39 +314,81 @@ func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool) (a
 	cmd.Dir = req.Dir
 	prepareChild(cmd) // platform: process group / kill-tree setup
 
-	var stdout, stderr lockedBuf
-	cmd.Stdout = &stdout
+	// stdout streams through an io.Pipe into a line reader. cmd.Stdout
+	// must stay a plain io.Writer, NOT StdoutPipe: StdoutPipe forbids
+	// calling Wait before reads complete, and the timeout/kill pattern
+	// below needs Wait running concurrently. io.Pipe is synchronous —
+	// when cmd.Wait returns, os/exec's copy goroutine has handed every
+	// byte to our reader, so closing pw afterwards surfaces EOF and
+	// flushes a possibly unterminated final line (same "parse the
+	// trailing partial" semantics the batch reader had).
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	var stderr lockedBuf
 	cmd.Stderr = &stderr
 	cmd.Stdin = nil // /dev/null: -p reads the flag, never stdin
 
+	sink := &streamSink{emit: emit}
+
 	if startErr := cmd.Start(); startErr != nil {
+		pr.Close()
+		pw.Close()
 		// Deterministic (binary missing, bad Dir) — a rerun changes
 		// nothing. Named with the seek path so the reply says it.
 		return attemptOutcome{retryable: false}, fmt.Errorf("controlplane: exec %s: %w", e.cfg.SeekPath, startErr)
 	}
 
+	readerDone := make(chan struct{})
+	go func() {
+		defer close(readerDone)
+		br := bufio.NewReader(pr)
+		for {
+			line, err := br.ReadString('\n')
+			if len(line) > 0 {
+				sink.line(line)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
 
+	// settle runs once Wait has returned: the child is gone and every
+	// stdout byte is already inside the reader (synchronous pipe), so
+	// closing pw lets the reader see EOF, fold the trailing partial
+	// line if any, and exit before the outcome snapshot.
+	settle := func() seekOutcome {
+		pw.Close()
+		<-readerDone
+		return sink.snapshot()
+	}
+
 	var waitErr error
 	killed := false
+	var out seekOutcome
 	select {
 	case waitErr = <-waitDone:
+		out = settle()
 	case <-runCtx.Done():
 		killed = true
 		killTree(cmd)
 		select {
 		case waitErr = <-waitDone:
+			out = settle()
 		case <-time.After(execKillWaitGrace):
+			waitErr = errExecWaitGrace
 			// Pipes still held by a Setsid'd grandchild (seek's own
 			// bash tool does this) can block the pipe copy forever;
 			// same accepted posture as internal/tools/bash — the
-			// SIGKILL is already out, report and move on.
-			waitErr = errExecWaitGrace
+			// SIGKILL is already out, report and move on. The reader
+			// may deliver more lines after we walk away; the snapshot
+			// takes the sink's lock so the race is contained.
+			out = sink.snapshot()
 		}
 	}
-
-	out := parseSeekJSONL(stdout.snapshot())
 
 	if killed {
 		// Both timeout and /cancel are terminal, non-retryable; the
@@ -335,52 +434,101 @@ func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool) (a
 // pipe copy didn't drain within execKillWaitGrace.
 var errExecWaitGrace = errors.New("controlplane: seek process did not exit after kill")
 
-// seekOutcome is the distilled JSONL of one run.
+// seekOutcome is the distilled JSONL of one run. replyBuf accumulates
+// the non-reasoning text_delta stream; snapshot materialises it into
+// reply so the field stays a plain value.
 type seekOutcome struct {
 	reply       string
 	sessionID   string
 	sawAgentEnd bool
 	errLine     string // the runJSON `error` event, if any
 	lines       int    // parseable JSONL lines seen (0 = empty stdout)
+
+	replyBuf strings.Builder
+}
+
+// fold aggregates one parsed line — the SINGLE aggregation step shared
+// by the batch reader (parseSeekJSONL) and the streaming sink, so the
+// two cannot drift.
+func (o *seekOutcome) fold(ev RunEvent) {
+	o.lines++
+	switch ev.Type {
+	case "text_delta":
+		if !ev.Reasoning {
+			o.replyBuf.WriteString(ev.Delta)
+		}
+	case "agent_end":
+		o.sawAgentEnd = true
+		o.sessionID = ev.SessionID
+	case "error":
+		o.errLine = ev.Error
+	}
+}
+
+// parseRunEvent decodes one JSONL line into a RunEvent. ok=false on
+// malformed JSON — the caller skips it (uncounted, unemitted), so a
+// seek bug cannot lose a completed run's agent_end.
+func parseRunEvent(line string) (RunEvent, bool) {
+	var ev RunEvent
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		return RunEvent{}, false
+	}
+	return ev, true
+}
+
+// streamSink folds the live JSONL stream into the same seekOutcome the
+// batch parser produces, handing each parseable line to emit as it
+// lands. The mutex exists for the kill-grace path only: the reader may
+// still be folding when the attempt walks away with a snapshot (the
+// normal path joins the reader via its done channel first).
+type streamSink struct {
+	emit func(RunEvent)
+	mu   sync.Mutex
+	out  seekOutcome
+}
+
+// line handles one raw stdout line (delimiter included): empty and
+// malformed lines are skipped exactly like parseSeekJSONL. fold runs
+// under the lock; emit fires after it, off the lock, with a value copy
+// — the callback can neither deadlock the reader nor touch final
+// state (the RunStream red line).
+func (s *streamSink) line(raw string) {
+	line := strings.TrimRight(raw, "\r\n")
+	if line == "" {
+		return
+	}
+	ev, ok := parseRunEvent(line)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.out.fold(ev)
+	s.mu.Unlock()
+	if s.emit != nil {
+		s.emit(ev)
+	}
+}
+
+// snapshot returns the aggregated outcome with reply materialised.
+func (s *streamSink) snapshot() seekOutcome {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.out // copies replyBuf's bookkeeping; only String() is called on the copy, which is copy-safe
+	out.reply = s.out.replyBuf.String()
+	return out
 }
 
 // parseSeekJSONL walks the -p --json stdout. Malformed lines are
 // skipped (a seek bug must not lose a completed run's agent_end);
 // `lines` counts only parseable ones so "empty stdout" stays
 // distinguishable from "garbage stdout" for the triage above.
+// Implemented on the same streamSink fold the live reader uses.
 func parseSeekJSONL(data []byte) seekOutcome {
-	var out seekOutcome
-	var reply strings.Builder
+	s := &streamSink{}
 	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
-			continue
-		}
-		var ev struct {
-			Type      string `json:"type"`
-			Delta     string `json:"delta"`
-			Reasoning bool   `json:"reasoning"`
-			SessionID string `json:"session_id"`
-			Error     string `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil {
-			continue
-		}
-		out.lines++
-		switch ev.Type {
-		case "text_delta":
-			if !ev.Reasoning {
-				reply.WriteString(ev.Delta)
-			}
-		case "agent_end":
-			out.sawAgentEnd = true
-			out.sessionID = ev.SessionID
-		case "error":
-			out.errLine = ev.Error
-		}
+		s.line(line)
 	}
-	out.reply = reply.String()
-	return out
+	return s.snapshot()
 }
 
 // lockedBuf is a mutex-guarded bytes.Buffer: os/exec pipe-copy
