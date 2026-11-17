@@ -93,3 +93,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_aqbdaz：selftest 登记缺口机制化：新脚本自动进 scripts/selftest.sh（含补登 kernel-deps.sh）
 - c_x3bed4：MCP-D2：sysprompt 新增 MCPSection 段（Header 第五段，SkillManifest 同款 per-session 静态；空段=现状逐字节不变）
 - c_n63pat：web 前端·W4.4：资产面 sessions 浏览器（列表 + 消息 cursor 分页浏览）
+- c_f6ayyg：语音 v2·V2：push-to-talk 入站——VoiceFrontend.Run 录音→ASR→Inbound

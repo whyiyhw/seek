@@ -269,6 +269,8 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 
 （V2 依赖「首个 serve frontend 选型」落地——语音入站需要一个录音 UI 载体，纯终端按键录音体验差；此依赖写明，不虚排。）
 
+**V2 状态（2026-11-17，卡 c_f6ayyg 已实现）**：`internal/controlplane/voicefrontend.go` + web 页面按住说话按钮。录音 UI 载体 = web frontend（前置满足）：页面 MediaRecorder → 16kHz 单声道 16-bit WAV → `POST /voice`（web listener 上的挂载端点，同 token/CSRF/host 闸），`VoiceFrontend.Run` 串行 ASR → 转写回显（命名事件 `voice`）/失败面（`voice-error`）→ `Inbound`（`ConvID=voice:<device-id>`、`DirectAt` 恒 true、`EventID`=录音会话 uuid，去重走 router LRU）。**回复路径**：`Send` 把 voice conv 的回复以 MVP 形状广播到该设备页面的 web conv（刻意不走 `web.Send` 的 run 收口语义——避免误关页面自己流式 run 的气泡）；语音 conv 的绑定独立于页面 web conv 的绑定。servecli：`--frontend=voice` 需与 `--frontend=web` 同启（buildFrontends 内 Attach）。**部署注记**：麦克风要 secure context——localhost 即可；tailnet IP 走明文 `--tcp` 前置拿不到 getUserMedia，手机端需 `tailscale serve`（https）。体积闸基线随本卡 bump（+234KB，其中约 30KB 为本卡增量，其余为此前资产线累计）——余量重新为 200KB，但 ratchet 逼近终点的观察仍然成立（c_n63pat 合并台账已记）。**待办（主会话）**：真机录音冒烟（真 ASR key + 浏览器按住说话）；ASR 用量暂只 stderr 行（无消费者不建 JSONL 写路径，同 §5.5 口径）。
+
 ---
 
 ## 5. ④ 模型安全校验 `safety_check` —— **接**（小卡）
