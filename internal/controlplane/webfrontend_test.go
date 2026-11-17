@@ -379,13 +379,13 @@ func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
 func TestWeb_PageSessionsBrowser(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"session/list",       // list pane
-		"session/get",        // detail meta line
-		"session/messages",   // paginated message body
-		"next_cursor",        // cursor pagination walked, not whole-file
+		"session/list",     // list pane
+		"session/get",      // detail meta line
+		"session/messages", // paginated message body
+		"next_cursor",      // cursor pagination walked, not whole-file
 		"加载更多",             // the load-more affordance exists
-		"q('/rpc')",          // rides the same token'd /rpc route as chat
-		"MSG_PAGE = 50",      // page size matches the server default (messagesDefaultLimit)
+		"q('/rpc')",        // rides the same token'd /rpc route as chat
+		"MSG_PAGE = 50",    // page size matches the server default (messagesDefaultLimit)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the sessions browser piece %q (W4.4)", need)
@@ -396,6 +396,37 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 	for _, keep := range []string{"id=\"form\"", "id=\"list\"", "addEventListener('submit'"} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("embedded page lost the chat-plane piece %q — W4.4 must be additive", keep)
+		}
+	}
+}
+
+// TestWeb_PageStreamingBubble pins the W2.1 chat increment: the page
+// folds the W1.4 named SSE events into a streaming bubble — deltas
+// accumulate per run id, tool calls render as folded single-line
+// status rows — and the run-bearing reply replaces the whole bubble
+// with the authoritative final text. The event names are the §2.5
+// wire contract: a rename on either side silently strands the bubble
+// (an eternal caret, not a crash), so both ends are pinned to the
+// page the same way the renderer and the sessions browser are above.
+func TestWeb_PageStreamingBubble(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"addEventListener('delta'",     // fold text deltas by run id
+		"addEventListener('tool'",      // fold tool status rows by run id
+		"runs.get(m.run)",              // reply close-out keys the live run
+		"classList.remove('streaming'", // caret stops at close-out
+		"renderBody(r.el, m.text)",     // authoritative text replaces the preview
+		"replaceChildren()",            // re-render path clears before rebuilding
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the streaming-bubble piece %q (W2.1)", need)
+		}
+	}
+	// The pre-W2.1 reply path must survive: run-less replies (command
+	// acks, dropped-frame fallback) still render as plain messages.
+	for _, keep := range []string{"addMsg('seek', m.text)", "addEventListener('submit'"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the plain-reply piece %q — W2.1 must be additive", keep)
 		}
 	}
 }
