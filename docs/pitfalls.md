@@ -136,6 +136,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: on this codebase, "register a hook" is a broadcast to every agent sharing the registry — parent-session-scoped hooks need explicit exclusion at the child boundary, and the exclusion must be lazy (closure) when the parent registry keeps growing after the children's factory is built. Any future parent-only PrePrompt hook (resume revival, controlplane inbox) rides the same `CloneWithout` seam.
 - **Refs**: `internal/hooks/registry.go:CloneWithout`, `internal/subagent/notifier.go`, `cmd/seek/main.go` (`subagentRunnerOpts.hooksFn`), `docs/prd/feature-orchestration.md` §4.1 D2
 
+### dropMalformed must list every Config event slice — Validate sees all, drop saw five
+- **Saw**: wiring `pre_prompt_inject` through Gate (M-O3.2) surfaced that a malformed hook (empty `name`/`command`) on any P3 observer event (`subagent_start`/`subagent_stop`/`stop`/`pre_compact`/`notification`) SURVIVED Gate: `Validate` walks `Config.All()` (every event) and errors, but `dropMalformed` only rebuilt the five legacy slices — P3 hooks were copied through as-is, so a nameless hook could reach dispatch
+- **Why**: `dropMalformed` predates the P3 events and nothing ties the two functions together; `All()` grows with every new event, the drop list doesn't unless the author remembers to check
+- **Fix**: `dropMalformed` rebuilds every slice including `PrePromptInject`; `TestGate_MalformedHooksDropped` locks a malformed `stop` + `pre_prompt_inject` hook both being dropped (card c_m2whz2)
+- **Lesson**: when a validation function fans over `All()` but its repair function enumerates fields by hand, adding an event silently desynchronizes them — every new `Config` event field must touch BOTH, and a Gate test with a malformed hook on the new event is the cheap lock
+- **Refs**: `internal/hooksconfig/load.go:dropMalformed`, `internal/hooksconfig/hooksconfig.go:Validate`, `internal/hooksconfig/hooksconfig_test.go:TestGate_MalformedHooksDropped`
+
 ## Skill distill (auto path)
 
 ### Same session re-entering the distill window double-counted recurrence

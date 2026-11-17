@@ -4,10 +4,15 @@
 // a compile-time property rather than a convention:
 //
 //   - Decorators (PrePromptHook, PreToolUseHook) run synchronously in
-//     registration order and may mutate the request. Their output MUST be
-//     deterministic — DeepSeek's prefix cache keys on the exact byte
-//     sequence of the prompt history, so a non-deterministic decorator
-//     silently destroys cache hit rate.
+//     registration order and may mutate the request — but only at the
+//     turn frontier: PrePromptOut's two fields (UserText, Prepend) are
+//     the entire write surface, history is append-only, and injected
+//     bytes commit once and are never rewritten (the three-zone model,
+//     feature-hooks-injection §4.1: only write the future, never the
+//     past, session constants frozen). Non-deterministic decorator
+//     output does NOT break the prefix cache (commit-once guarantees
+//     the old bytes are never re-sent differently); its real cost is
+//     token budget — every turn's new bytes enter history permanently.
 //
 //   - Observers (PreTurn, PostTurn, PostToolUse, SessionStart,
 //     SessionEnd, plus the P3 points SubagentStart, SubagentStop, Stop,
@@ -18,7 +23,9 @@
 // A single struct may implement multiple interfaces; Registry.Register
 // dispatches it into every slot it satisfies. The v1 memory subsystem
 // uses this to plug PrePrompt + PreToolUse + PostTurn + SessionEnd in one
-// place without touching pkg/agent.
+// place without touching pkg/agent. The one shell-side PrePrompt entry
+// is the authorized pre_prompt_inject face (shell_inject.go): opt-in
+// stdout injection through the same Prepend seam, bounded and audited.
 package hooks
 
 import (
@@ -32,8 +39,9 @@ import (
 
 // PrePromptHook fires once per Prompt() call, before the user message is
 // appended to history. Use it to inject memory, expand slash commands, or
-// rewrite the user text. Output must be deterministic across runs given
-// the same input — see package doc.
+// rewrite the user text. Deterministic output is still PREFERRED (it
+// costs zero extra history bytes across turns) but not cache-required —
+// see the package doc for the commit-once argument.
 type PrePromptHook interface {
 	OnPrePrompt(ctx context.Context, in PrePromptIn) (PrePromptOut, error)
 }

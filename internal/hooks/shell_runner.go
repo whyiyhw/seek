@@ -13,6 +13,16 @@
 //   - session_start → SessionStartObserver
 //   - session_end   → SessionEndObserver
 //
+// The ONE authorized exception to the stdout rule is pre_prompt_inject
+// (M-O3.2 / feature-hooks-injection §4.5): stdout of an explicitly
+// opted-in hook may enter the prompt as a <context type="hook"> Prepend
+// message. That face lives in shell_inject.go as a SEPARATE
+// InjectRunner type rather than a method on ShellRunner, purely so the
+// wiring can register it AFTER the in-process PrePrompt hooks (memory
+// snapshot, background notices) while ShellRunner itself stays
+// registered early for the pre_tool deny gate — the PRD's
+// "in-process hooks 之后" ordering without disturbing the deny chain.
+//
 // P3 observer-only events (feature-orchestration §6 D15 /
 // feature-hooks-injection §3.3) — same observer semantics as above,
 // timeout / non-zero exit only audit + status:
@@ -238,16 +248,26 @@ func truncatedResult(result string) string {
 // SkipReason set is a programming error; we still defend-in-depth by
 // auditing and returning a benign code.
 func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool, sid string, env []string) (string, int, bool) {
+	stdout, entry, timedOut := r.execHook(ctx, h, tool, sid, env)
+	r.writeAudit(entry)
+	return stdout, entry.ExitCode, timedOut
+}
+
+// execHook is the exec + audit-row-building half of runHook, split so
+// the pre_prompt_inject face can annotate its row (injected byte
+// count, truncation reason — feature-hooks-injection §4.5) between the
+// run and the audit write. Returns (stdout, auditEntry, timedOut); the
+// caller owns writing the entry.
+func (r *ShellRunner) execHook(ctx context.Context, h hooksconfig.Hook, tool, sid string, env []string) (string, hooksconfig.AuditEntry, bool) {
 	if h.SkipReason != "" {
-		r.writeAudit(hooksconfig.AuditEntry{
+		return "", hooksconfig.AuditEntry{
 			Event:       h.Event,
 			Hook:        h.Name,
 			Tool:        tool,
 			SubagentSID: sid,
 			ExitCode:    0, // success-equivalent so observer paths don't trip
 			Reason:      "skipped: " + h.SkipReason,
-		})
-		return "", 0, false
+		}, false
 	}
 	timeout := time.Duration(h.EffectiveTimeoutMs()) * time.Millisecond
 	cctx, cancel := context.WithTimeout(ctx, timeout)
@@ -274,7 +294,7 @@ func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool, sid
 		reason = err.Error()
 		code = -1
 	}
-	r.writeAudit(hooksconfig.AuditEntry{
+	return stdout, hooksconfig.AuditEntry{
 		Event:       h.Event,
 		Hook:        h.Name,
 		Tool:        tool,
@@ -283,8 +303,7 @@ func (r *ShellRunner) runHook(ctx context.Context, h hooksconfig.Hook, tool, sid
 		ExitCode:    code,
 		Denied:      h.Event == hooksconfig.EventPreTool && code != 0,
 		Reason:      reason,
-	})
-	return stdout, code, timedOut
+	}, timedOut
 }
 
 func (r *ShellRunner) writeAudit(e hooksconfig.AuditEntry) {
