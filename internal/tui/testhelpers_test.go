@@ -157,10 +157,8 @@ func (a *fakeAgent) SetMessages(msgs []deepseek.Message) {
 // ----------------------------------------------------------------------
 
 type testModelBuilder struct {
-	opts        Options
-	mutators    []func(*Model)
-	skipReady   bool
-	skipDefSize bool
+	opts     Options
+	mutators []func(*Model)
 }
 
 // testModel starts a builder with sensible defaults:
@@ -244,14 +242,9 @@ func (b *testModelBuilder) Build() Model {
 	// Apply New() so default fields (input, spinner, historyIdx=-1,
 	// pathPicker, etc.) get their initial values.
 	m := New(b.opts)
-
-	if !b.skipDefSize {
-		m.width = 80
-		m.height = 40
-	}
-	if !b.skipReady {
-		m.ready = true
-	}
+	m.width = 80
+	m.height = 40
+	m.ready = true
 
 	for _, fn := range b.mutators {
 		fn(&m)

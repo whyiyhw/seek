@@ -160,15 +160,6 @@ func TestVerifyEvidence(t *testing.T) {
 
 // ---------- L2 mechanical dedup ----------
 
-func skillSetWith(t *testing.T, names ...string) *skill.Set {
-	t.Helper()
-	set := skill.NewSet()
-	for _, n := range names {
-		set.Add(&skill.Skill{Name: n, Description: "desc " + n})
-	}
-	return set
-}
-
 // nearly-identical texts should cross the reject threshold; disjoint
 // texts should not. tuned by hand against trigramJaccard.
 const l2ExistingDesc = "When fixing TUI state machine bugs where a modal key handler swallows keys, reproduce first with a test"

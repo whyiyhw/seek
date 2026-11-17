@@ -93,30 +93,10 @@ type ShellRunner struct {
 	projectID   string
 	projectPath string
 
-	// onStatus is an optional callback for surfacing per-hook events
-	// (denials, timeouts, slow-hook warnings) to the TUI status bar.
-	// Nil-safe.
-	onStatus func(StatusEvent)
-
 	// now / exec are seams for tests so they can drive time forward
 	// without sleeping and exec without actually shelling out.
 	now     func() time.Time
 	execCmd func(ctx context.Context, command, cwd string, env []string) (stdout string, exitCode int, err error)
-}
-
-// StatusEvent is the payload of the onStatus callback. Carries enough
-// for the TUI to render "hook denied" / "hook slow" / "hook timeout"
-// banners without re-querying the audit log. Wire format INSIDE the
-// process — fields can change between minor versions; the audit log
-// JSON is the public wire surface.
-type StatusEvent struct {
-	Event      string // pre_tool / post_tool / ...
-	Hook       string // hook name
-	Tool       string // tool name (pre/post_tool only)
-	Denied     bool
-	TimedOut   bool
-	DurationMs int64
-	Reason     string // free-text (stdout for deny; bash error for fail)
 }
 
 // Option configures a ShellRunner at construction.
@@ -320,13 +300,6 @@ func (r *ShellRunner) writeAudit(e hooksconfig.AuditEntry) {
 	_ = r.audit.Append(e)
 }
 
-func (r *ShellRunner) emitStatus(ev StatusEvent) {
-	if r.onStatus == nil {
-		return
-	}
-	r.onStatus(ev)
-}
-
 // ---- PreToolUseHook ----
 
 // OnPreToolUse runs every matching pre_tool hook in declaration order.
@@ -364,15 +337,6 @@ func (r *ShellRunner) OnPreToolUse(ctx context.Context, in PreToolUseIn) (PreToo
 		stdout, code, timedOut := r.runHook(ctx, h, in.Name, "", env)
 		if timedOut {
 			msg := fmt.Sprintf("hook %q timed out after %dms — treating as deny", h.Name, h.EffectiveTimeoutMs())
-			r.emitStatus(StatusEvent{
-				Event:      hooksconfig.EventPreTool,
-				Hook:       h.Name,
-				Tool:       in.Name,
-				Denied:     true,
-				TimedOut:   true,
-				DurationMs: int64(h.EffectiveTimeoutMs()),
-				Reason:     msg,
-			})
 			return PreToolUseOut{Deny: msg}, nil
 		}
 		if code != 0 {
@@ -380,13 +344,6 @@ func (r *ShellRunner) OnPreToolUse(ctx context.Context, in PreToolUseIn) (PreToo
 			if reason == "" {
 				reason = fmt.Sprintf("hook %q exited with code %d", h.Name, code)
 			}
-			r.emitStatus(StatusEvent{
-				Event:  hooksconfig.EventPreTool,
-				Hook:   h.Name,
-				Tool:   in.Name,
-				Denied: true,
-				Reason: reason,
-			})
 			return PreToolUseOut{Deny: reason}, nil
 		}
 	}
@@ -416,16 +373,7 @@ func (r *ShellRunner) OnPostToolUse(ctx context.Context, ev PostToolUseEvent) {
 			envPrefix+"TOOL_RESULT="+truncatedResult(ev.Result),
 			envPrefix+"TOOL_EXIT_OK="+exitOK,
 		)
-		_, code, timedOut := r.runHook(ctx, h, ev.Name, "", env)
-		if timedOut || code != 0 {
-			r.emitStatus(StatusEvent{
-				Event:    hooksconfig.EventPostTool,
-				Hook:     h.Name,
-				Tool:     ev.Name,
-				TimedOut: timedOut,
-				Reason:   fmt.Sprintf("exit=%d timedOut=%v", code, timedOut),
-			})
-		}
+		_, _, _ = r.runHook(ctx, h, ev.Name, "", env)
 	}
 }
 
@@ -520,21 +468,13 @@ func (r *ShellRunner) OnNotification(ctx context.Context, ev NotificationEvent) 
 
 // runObserverHooks is the shared loop for every observer-only event:
 // run each hook with the event's base env plus the event-specific
-// additions; timeout / non-zero exit only audit + status-emit, never
-// deny (pre_tool is the sole deny point). sid threads the
-// subagent_sid audit field — "" outside the subagent events.
+// additions; timeout / non-zero exit only audit, never deny (pre_tool
+// is the sole deny point). sid threads the subagent_sid audit field —
+// "" outside the subagent events.
 func (r *ShellRunner) runObserverHooks(ctx context.Context, hs []hooksconfig.Hook, event, sid string, extraEnv []string) {
 	for _, h := range hs {
 		env := append(r.baseEnv(event), extraEnv...)
-		_, code, timedOut := r.runHook(ctx, h, "", sid, env)
-		if timedOut || code != 0 {
-			r.emitStatus(StatusEvent{
-				Event:    event,
-				Hook:     h.Name,
-				TimedOut: timedOut,
-				Reason:   fmt.Sprintf("exit=%d timedOut=%v", code, timedOut),
-			})
-		}
+		_, _, _ = r.runHook(ctx, h, "", sid, env)
 	}
 }
 

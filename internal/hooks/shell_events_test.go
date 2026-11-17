@@ -229,9 +229,10 @@ func TestP3Events_NotTriggered(t *testing.T) {
 }
 
 // TestP3Events_ObserverOnly_TimeoutAndFailure: non-zero exit and
-// timeout surface as status events + audit rows but never veto
-// anything, and the NEXT hook in the chain still runs (no
-// short-circuit — only pre_tool denies).
+// timeout surface as audit rows but never veto anything, and the NEXT
+// hook in the chain still runs (no short-circuit — only pre_tool
+// denies). Status-event plumbing was removed with the emitStatus chain
+// (card c_z4mn6y L2 knife: onStatus had no writer in production).
 func TestP3Events_ObserverOnly_TimeoutAndFailure(t *testing.T) {
 	cfg := hooksconfig.Config{
 		Stop: []hooksconfig.Hook{
@@ -243,9 +244,7 @@ func TestP3Events_ObserverOnly_TimeoutAndFailure(t *testing.T) {
 	fe.Set("boom cmd", fakeResponse{SleepFor: 200 * time.Millisecond}) // times out
 	fe.Set("next cmd", fakeResponse{Exit: 3})                          // fails, observer-style
 
-	var statuses []StatusEvent
 	r, audit := newRunnerForTest(t, cfg, fe)
-	r.onStatus = func(ev StatusEvent) { statuses = append(statuses, ev) }
 
 	start := time.Now()
 	r.OnStop(context.Background(), StopEvent{Turns: 1, Finish: "stop"})
@@ -260,16 +259,6 @@ func TestP3Events_ObserverOnly_TimeoutAndFailure(t *testing.T) {
 	if len(calls) != 2 || calls[0].Command != "boom cmd" || calls[1].Command != "next cmd" {
 		t.Fatalf("calls = %+v, want both hooks in order", calls)
 	}
-	if len(statuses) != 2 {
-		t.Fatalf("status events = %d, want 2 (timeout + failure)", len(statuses))
-	}
-	if !statuses[0].TimedOut || statuses[0].Event != hooksconfig.EventStop {
-		t.Errorf("status[0] = %+v, want timeout on stop", statuses[0])
-	}
-	if statuses[1].TimedOut || statuses[1].Event != hooksconfig.EventStop {
-		t.Errorf("status[1] = %+v, want non-timeout failure on stop", statuses[1])
-	}
-
 	entries, err := hooksconfig.ReadAuditLog(audit.Path())
 	if err != nil {
 		t.Fatal(err)

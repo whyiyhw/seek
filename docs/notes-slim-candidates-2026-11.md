@@ -12,7 +12,9 @@
 | 第 2 刀 2026-11-13 | c_7qjnko | A 类剩余全部（A3/A4/A6–A11、A13、A14）+ C 类全部（C1–C9）+ 连锁（teatest `model` 字段、3 个孤儿 import、testing import）+ gofmt -s 33 文件 + §6.1 计数指针化（appendix-a 不再复述条目数） | 删除前逐条重跑 deadcode 双模式 + U1000 + 全仓 grep 复核零引用；deadcode 43→35、-test 模式清单条目清零。B 类（§2）不满足「零引用」标准未动 |
 | 第 3 刀 2026-11-13 | c_l3cw6d | 裁决 4：modernize@v0.23.0 -fix 全量落地（两轮共 285 fix、106 文件、净 -77 行；omitzero 2 条按裁决剔除——dream.go fix 后整文件还原）；连带删自定义 `max`（§5 唯一纯删项）。**修复 modernize 自身引入的回归 1 处**：slices.Backward 修正在 pkg/agent/agent.go `AttachPredictedNext` 把写穿索引改成写 range 副本（静默 no-op，绿灯漏网——该路径零覆盖），已改回带索引写并补回归测试 `TestAttachPredictedNextWritesThroughIndex`（pitfall 已入册 Tooling 分区） | 验收：`go test -race ./...` 82 包全绿；deadcode 双模式 35/-test 1 与第 2 刀基线一致（-test 的 1 条即下述队列里的 skillSetWith）；gofmt -s 零偏差；modernize 残留命中恰为剔除的 2 条 Omitempty。第 9 条复核结论已回填 §2 |
 
-**第 2 刀新增候选（后续刀的队列，本刀按范围纪律未删）**：
+| 第 4 刀 2026-11-16 | c_z4mn6y | M-SL3 首跑（slim-loop L3 · worktree 单卡死磕）：清空下述「第 2 刀新增候选」队列——internal/hooks emitStatus 永_nil 链（onStatus 字段 + StatusEvent 类型 + emitStatus + 6 调用点；WithStatusCallback 首刀删除后全仓零写入方，nil 守卫 = 二进制内可证明 no-op，4 处 if 块随之清空为 `_, _, _ = runHook(...)`）、teatest `modelCh` write-only 通道（FinalModel 删除后零读者，goroutine 内 `model` 改 `_`）、testModelBuilder `skipDefSize`/`skipReady` 恒 false 字段（Build 无条件化）、skilldistill `skillSetWith`（deadcode -test 清单末条，-test 模式条目就此清零） | 4 文件 +13/−109 净 −96 行；验收 §3.1：go vet 零告警 + `go test -race ./...` 全绿 + eval/run.sh 21 例基线轮 + 改动后双轮无「持续绿→红」（唯一双轮红 bash-overreach 为方差用例：2026-11-13 历史二进制 6 红 3 绿、同一结果文件内 false×3→true×2 交替，非持续绿，且本刀 diff 无因果路径；glm-lane-contract 无 GLM key 环境红、基线同红）。证据 eval/results/2026-11-16-*。sandbox.Wrap linux/other 变体仍留（§2 第 9 条：平台孪生取舍 + 包文档连带修订需人判） |
+
+**第 2 刀新增候选（后续刀的队列，本刀按范围纪律未删）**（→ 已由第 4 刀 2026-11-16 全清，见执行状态表）：
 - `skilldistill_test.go:163 skillSetWith`：skill-distill M-SD1 合入后新增的死测试助手（C 类同性质），扫描基线 5b76ed6 之后才出现，不在本清单原始条目内。
 - `internal/hooks` emitStatus 永_nil 链（首刀遗留）与 `internal/tui/teatest` `modelCh` write-only 通道（本刀删 FinalModel 后唯一读者消失，字段仍有写入方故 U1000 不报）：同属「删除注入器后留下的孤儿读写路径」，需语义判断，不满足机械零引用标准。
 - `testModelBuilder.skipDefSize/skipReady` 字段（本刀删 WithSize/SkipReady 后恒 false，Build 仍读取）：行为零变化，可连 Build 无条件化一起删。
