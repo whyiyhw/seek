@@ -2,7 +2,7 @@
 
 > **对应版本**：v0.4.1
 > **对应代码**：`internal/hooks/shell_runner.go`、`internal/hooksconfig/`、`cmd/seek/hooks_trust.go`
-> **PRD**：[`docs/prd/feature-shell-hooks.md`](../prd/feature-shell-hooks.md)
+> **PRD**：[`docs/prd/archive/feature-shell-hooks.md`](../prd/archive/feature-shell-hooks.md)
 > **验收**：12/12 验收标准全部通过，`go test -race` 全绿
 > **起点**：第 19 章（Checkpoint 安全网）。用户有了可撤销的操作后，下一个需求是"可扩展的操作前/后拦截"。
 

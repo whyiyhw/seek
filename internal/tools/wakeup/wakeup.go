@@ -18,7 +18,7 @@
 // subprocess — the wakeup itself doesn't preserve any context
 // from the calling session; the prompt MUST be self-contained.
 //
-// PRD docs/prd/feature-routines.md §3.7.
+// PRD docs/prd/archive/feature-routines.md §3.7.
 package wakeup
 
 import (

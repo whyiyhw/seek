@@ -1,7 +1,7 @@
 # Feature: 远程控制平面（Remote Control Plane）· Frontend 端口为脊椎
 
 **所属版本**：独立 feature PRD · 🚀 已部分交付（独立于 v8 主线；与 hackathon pitch 同源叙事）
-**前置阅读**：[`vision.md`](vision.md)（§2.3 "手机遥控版"、"持久化守护"——本文是那条线的第一次落地）、[`feature-mobile-push.md`](feature-mobile-push.md)（v6 柱 M·已交付出站 webhook，含 `feishu`/`feishu-flow` format 及其群播局限）、[`feature-routines.md`](feature-routines.md)（v5 柱 H·零 daemon + `triggers/` 文件桥）、[`internal/routines/webhook.go`](../../internal/routines/webhook.go)（出站 POST 现状 + 自定义机器人局限注释 L246–258）、[`internal/paths/paths.go`](../../internal/paths/paths.go)（`ProjectID` L126 = `sha256(absPath)[:16]`、session 平铺 L171）、[`cmd/seek/main.go`](../../cmd/seek/main.go)（`-p`/`-resume`/`-json` 入口 L717–745、`os.Getwd()` 取项目根 L870、`session: <id>` 打印 L2053）、[`v5.md`](v5.md) §"零常驻进程"约束
+**前置阅读**：[`vision.md`](vision.md)（§2.3 "手机遥控版"、"持久化守护"——本文是那条线的第一次落地）、[`feature-mobile-push.md`](archive/feature-mobile-push.md)（v6 柱 M·已交付出站 webhook，含 `feishu`/`feishu-flow` format 及其群播局限）、[`feature-routines.md`](archive/feature-routines.md)（v5 柱 H·零 daemon + `triggers/` 文件桥）、[`internal/routines/webhook.go`](../../internal/routines/webhook.go)（出站 POST 现状 + 自定义机器人局限注释 L246–258）、[`internal/paths/paths.go`](../../internal/paths/paths.go)（`ProjectID` L126 = `sha256(absPath)[:16]`、session 平铺 L171）、[`cmd/seek/main.go`](../../cmd/seek/main.go)（`-p`/`-resume`/`-json` 入口 L717–745、`os.Getwd()` 取项目根 L870、`session: <id>` 打印 L2053）、[`v5.md`](archive/v5.md) §"零常驻进程"约束
 **状态**：🚀 **M1–M3、M6a、M7a 已交付进 main**（2026-11-12/13 一夜装配线，含 §6 三项契约实测回填）。**M4/M5（飞书 adapter）2026-11-13 用户拍板撤销排期**：不绑定飞书——Frontend 端口已是资产，首个 frontend 选型开放（自建 web/HTTP、Telegram、任意聊天渠道均可按端口后续加，参考 paseo 形态）；本文飞书章节（§2.2/§9 与 D-F 组决策、larkws SDK 实测）保留作参考。其余为设计依据与验收口径。
 **预估工作量**：M4/M5 撤销后无剩余排期项；新 frontend 按适配器另估。
 

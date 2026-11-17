@@ -1,5 +1,5 @@
 // Package keymap is the v3 柱 C user-customisable keybindings subsystem
-// (PRD docs/prd/feature-tui-ergonomics.md).
+// (PRD docs/prd/archive/feature-tui-ergonomics.md).
 //
 // Design contract:
 //

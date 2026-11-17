@@ -213,7 +213,7 @@ grep -oE '^### .+' docs/pitfalls.md | sed 's/^### //' | cut -c1-40 | while read 
 
 ### 6.2 notes-memory-skill-gap.md ↔ v1.md：§1 现状盘点复述 v1.md §6
 
-- `docs/prd/notes-memory-skill-gap.md`（14.7 KB，2026-11-12 备料笔记）自述依据 `v1.md`；其 §1「蒸馏漏斗现状」大量复述 v1.md §6 已有事实（证据：`memory_observe` 在 v1.md 出现 36 处 / notes 2 处，`auto_sourced` 40 处 / 12 处——notes 的漏斗表格是 v1.md 事实的另一份表述）。
+- `docs/prd/archive/notes-memory-skill-gap.md`（14.7 KB，2026-11-12 备料笔记）自述依据 `v1.md`；其 §1「蒸馏漏斗现状」大量复述 v1.md §6 已有事实（证据：`memory_observe` 在 v1.md 出现 36 处 / notes 2 处，`auto_sourced` 40 处 / 12 处——notes 的漏斗表格是 v1.md 事实的另一份表述）。
 - **真正的结构性问题**：它的下游设计稿 `docs/prd/feature-skill-distill.md`（30.8 KB，📐 未排期）的「前置阅读」列了 v1/v2/narrative/AGENTS.md/两个 go 文件，**唯独不链这份备料笔记**——同一主题两份事实底座并行，将来只会在其中一份上更新。
 - notes 的**独有价值**（不可删的理由）：6 项重复点/7 项失联点盘点、以及坐实的 PRD↔代码偏差（v1.md「硬豁免永不 stale」vs `score.go` 30 天宽限实现）——~~这个偏差至今没回写 v1.md~~（2026-11-16 已随卡 `c_5fdsqb` 勘误回写；P0 两问也已由 `feature-memory-skill-bridge.md` 出设计稿并双向链回本 notes）。
 
@@ -222,12 +222,12 @@ grep -oE '^### .+' docs/pitfalls.md | sed 's/^### //' | cut -c1-40 | while read 
 
 ```bash
 grep -rn "notes-memory-skill-gap" --include="*.md" . | grep -v "docs/prd/notes-"    # 现状：仅 prd/README.md:43 一处入边
-grep -c "auto_sourced" docs/prd/v1.md docs/prd/notes-memory-skill-gap.md
+grep -c "auto_sourced" docs/prd/archive/v1.md docs/prd/archive/notes-memory-skill-gap.md
 ```
 
 ### 6.3 notes-event-sourcing-adoption.md ↔ AGENTS.md：结论已吸收，但「部分做」建议未实现、notes 是唯一完整出处
 
-- `docs/prd/notes-event-sourcing-adoption.md`（16.4 KB）的核心结论已被 AGENTS.md:128 / CLAUDE.md:116 吸收（"Approval is the shape to avoid … hybrid, hand-synchronised" 一段即该笔记结论的规则化表述）。
+- `docs/prd/archive/notes-event-sourcing-adoption.md`（16.4 KB）的核心结论已被 AGENTS.md:128 / CLAUDE.md:116 吸收（"Approval is the shape to avoid … hybrid, hand-synchronised" 一段即该笔记结论的规则化表述）。
 - 但笔记的「部分做一条」——resume 时读 `[plan: approved] (auto-approve-per-step)` 后缀恢复 batch/preApproved——**实测未实现**（`grep -n batch internal/tools/plan/reconstruct.go` 零命中；marker 只在 propose.go:344 发出，reconstruct.go 只匹配前缀）。即笔记仍是这个已知 resume 缝隙的唯一完整陈述，删了就丢事实。
 
 **候选**（缩文档 / 低-中风险）：等该缝隙「修复或明确否决」后，笔记降级归档（`docs/prd/archive/`），AGENTS.md 现有规则句已够日常用；归档前不收缩。

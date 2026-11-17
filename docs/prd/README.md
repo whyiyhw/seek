@@ -1,74 +1,84 @@
 # seek 产品需求文档（PRD）
 
-本目录按版本组织 PRD，每个版本独立成文，避免新旧需求混杂。
+本目录只放**规划中 / 在飞**的 PRD 与长期锚点。已交付且只剩历史价值的文档在 [`archive/`](archive/)（v8 D5 归档减法，2026-11-17）。
 
-## 版本一览
+## 版本一览（活跃）
 
 | 文件 | 对应版本 | 状态 | 说明 |
 |------|---------|------|------|
-| [`v0.md`](v0.md) | seek v0.0.x ~ v0.1.2 | ✅ 已归档 | 初始版本，M0–M8 全部交付。包含核心设计决策、架构分层原则、里程碑记录。新功能开发时作为架构参考，不再追加新需求。 |
-| [`v1.md`](v1.md) | seek v0.2.x | ✅ 已归档 | 三层认知记忆子系统（L/M/S）+ 自动化层。M5.0–M5.8 全部交付，commit `08660a1` → `374cfad`。 |
-| [`v2.md`](v2.md) | seek v0.3.x（目标） | ✅ 已交付 | Skill 生命周期管理：目录包、install/uninstall/update CLI、本地调用统计。M8.0–M8.7 全部交付，commit `b7d7996` → `75dae10`。 |
-| — | seek v0.3.x+（扩展） | ✅ 已交付 | AI 侧 skill 安装（`skill_fetch`/`skill_commit` 工具）、`ask_user` TUI picker 工具、`/plan` 只读模式、`/steer`/`/review` 命令、`@-highlight`、skill 安装 scope 选择（user vs project）。 |
-| [`v3.md`](v3.md) | seek v0.4.x | ✅ 已交付 | 可逆性、可扩展性、可定制性三柱的总览。详细设计拆到下面三个 feature PRD；本文只维护跨柱设计约束（prefix-cache 字节确定性、hooks Registry 复用、信任前置）+ 总体实现计划。M9.0–M9.5 全部交付。 |
-| [`feature-checkpoint.md`](feature-checkpoint.md) | seek v0.4.0（柱 A）| 🚀 已交付 | 双层 checkpoint：git ref 命名空间快照 working tree（`/restore`）+ 文件 CAS undo/redo（`/undo` `/redo`）。两层互补，分别用 `git read-tree` 和 content-addressed blob 实现。M9.0 + M9.1。 |
-| [`feature-shell-hooks.md`](feature-shell-hooks.md) | seek v0.4.1（柱 B）| 🚀 已交付 | 用户可配置的 shell hooks，作为已有 `internal/hooks` Registry 的实现注册（ShellRunner）。只允许 deny 或 observe，不允许改 prompt 字节。VS Code 风格 trust 询问。M9.2 + M9.3。 |
-| [`feature-tui-ergonomics.md`](feature-tui-ergonomics.md) | seek v0.4.2（柱 C）| 🚀 已交付 | TUI 工效：斜杠命令 Tab 补全（复用 cmdMeta + picker）+ 自定义 keybindings（封闭 action 集合，toml 配置）。M9.4 + M9.5。 |
-| [`v4.md`](v4.md) | seek v0.5.x | 🚀 已交付 | 闭环工效（自校准）的总览。柱 D 是 next-turn 预测 + mispredict 反向注入。`--no-suggest` / `suggest_reply: false` 单一开关贯穿。旁路调用不污染 transcript、session schema 升 v3 向前兼容。M10.0。 |
-| [`feature-suggested-reply.md`](feature-suggested-reply.md) | seek v0.5.0（柱 D）| 🚀 已交付 | 模型在 LLM 回合末尾走旁路调用预测用户下一句，TUI 显示淡灰 placeholder，Tab 接受填入输入框。Mispredict 时下一轮注入 calibration system note 让模型自校准。单一 `--no-suggest` 开关贯穿。M10.0。session schema 升 v3、`suggest_reply` config、反向注入闭环全部 ship。 |
-| [`v5.md`](v5.md) | seek v0.6.x | 🚀 umbrella（已交付） | 代理编排的总览。柱 G 是子代理 + worktree 隔离（空间维度），柱 H 是 cron / wakeup / push（时序维度）。本文维护 v5 新增的跨柱约束（子转录字节隔离、权限单调收紧、零常驻进程、编排状态 transcript-外存）。M11.0–M11.4 全部交付；M11.5+ 收伞三分建议见 [`notes-v5-closeout.md`](notes-v5-closeout.md)（结论：不续期，候选并入 orchestration / 留原地）。 |
-| [`feature-subagent.md`](feature-subagent.md) | seek v0.6.0（柱 G）| 🚀 已交付 | 子代理 + Worktree 隔离：`agent` / `enter_worktree` / `exit_worktree` 三工具 + 三个 `subagent_type` 模板（general-purpose / explore / plan）+ `Policy.Spawn` 权限单调收紧 + `Tracker.AdoptChild` 成本归集 + `/agents` `/worktrees` 面板 + `seek worktree` CLI。M11.0 + M11.1。 |
-| [`feature-routines.md`](feature-routines.md) | seek v0.6.1（柱 H）| 🚀 已交付 | 时序触发 routines：`seek cron {create,list,delete,run,tick}` CLI + `jobs.jsonl` 事件存储 + 零 daemon（OS scheduler 拉起 tick）+ `schedule_wakeup` LLM 工具 + OS 原生通知（osascript / notify-send / Windows toast）+ `triggers/` 文件桥 + GC + env overlay。M11.2 + M11.3。 |
-| [`v6.md`](v6.md) | seek v0.7.x | 🚀 已交付 | 单点工具补齐（P1 closure）的总览。柱 I-M：AskUserQuestion v2 / 复合 code-review skill / Monitor + 后台 bash / LSP references 工具 / 移动端 webhook 桥。5 项**互不耦合**，全部交付。柱 I `cb8ed16`、柱 J `e24b2f9`、柱 K `b640199`、柱 L（瘦身版 `references`）、柱 M `2d53a4d`。|
-| [`feature-bash-monitor.md`](feature-bash-monitor.md) | seek v0.7.0（柱 K）| 🚀 已交付 | Monitor + 后台 bash：`bash run_in_background=true` 非阻塞启动 + `monitor` 工具（poll/wait/kill）跟踪 + 会话级进程组管理（随 session 生死）。不复用前台 timeout/deny。M-K.1–M-K.4。 |
-| [`feature-lsp.md`](feature-lsp.md) | seek v0.7.0（柱 L）| 🚀 已交付 | LSP `references` 语义找引用（gopls / pyright / tsserver · 瘦身版）。懒启动、会话级缓存、crash 重启、缺 binary 降级 grep。definition/hover/symbols 故意不做（ROI 评估）。M-L.1–M-L.4。 |
-| [`feature-askuser-v2.md`](feature-askuser-v2.md) | seek v0.7.0（柱 I）| 🚀 已交付 | AskUserQuestion v2：多题 stack（1–4 题/调用）+ `preview` 字段（侧栏渲染 mockup）+ `header` 字段。**polymorphic schema 单工具**——v1 单题 schema 零破坏。Phase 1 schema+API (`cb8ed16`)、phase 2a TUI stack (`5b775fe`)、phase 2b preview panel（本提交）。已校 v6 §3.1 事实错误（multiSelect + "Other" 已在 v1）。 |
-| [`feature-code-review.md`](feature-code-review.md) | seek v0.7.0（柱 J）| 🚀 已交付 | 复合 code-review skill：内置 `code-review.md`（方法论 + 4 档 effort framing + `--fix`/`--comment` 工作流）+ `/code-review [low\|medium\|high\|max] [--fix] [--comment] [branch]` slash 命令（参数解析，复用 `/review` 的 diff 采集 + picker）。**职责切分**：参数进命令、方法论进 skill Body——因 `Skill` 工具 schema 只有 `{name}`，effort/flag 传不进去（不扩被 prefix-cache 钉死的 schema）。`--fix` 复用 plan-mode v2 propose 路径，`/review` 收敛为 `/code-review medium` 别名。已校 v6 §3.2 三条隐含假设。 |
-| [`feature-mobile-push.md`](feature-mobile-push.md) | seek v0.7.0（柱 M）| 🚀 已交付 | 移动端通知 webhook 桥：cron/trigger 终态时**额外** HTTPS POST 到用户配置的 webhook（ntfy/slack/discord/raw），离开电脑也能收。**不替代**桌面通知、**不做** native push。已校 v6 §3.5 三条假设：① `Notifier(title,body)` 装不下 `events` 过滤 → 走可选 sibling `WebhookDispatcher(event,title,body)`；② 零 daemon 下「连续失败节流」跨 tick 无效 → 改 `cron config check` 预检；③ 用户静态配置的 outbound **放行私网**（自托管用例,显式偏离 webfetch SSRF gate）。挂 v5 柱 H 通知通道。 |
-| [`v7.md`](v7.md) | seek v0.8.x | 🚀 已交付 | 打擂台 Reasonix 专属护城河。深化护城河（柱 N Autopilot，柱 O 沙箱）+ 补触达（柱 P ACP）+ 扩能力（柱 Q OCR）。N autopilot run / sandbox seatbelt+landlock / ACP / 离线 OCR 四柱全部落地。|
-| [`v8.md`](v8.md) | seek v0.12.x 起 | 📐 规划稿 | 薄内核 + 外围插件 + 可度量的自由生长。六柱：R 证据与裁判 / S 摩擦观测 / T 裸核对照与例行消融 / U 薄内核与外围接缝 / V 一次性进程与端 / W 试验田。第一波（R1/S1/T1/T2/U1）已开卡，五项待拍板。|
-| [`feature-autopilot.md`](feature-autopilot.md) | seek v0.8.0（柱 N）| 🚀 已交付 | Autopilot 无人值守编排：`seek autopilot run "<goal>"` → 分解 → 并行 worktree fleet → 聚合 → commit + push 摘要。复用柱 G/H/M 子代理/cron/worktree。子代理默认拒远程操作。真环境 e2e。 |
-| [`feature-sandbox.md`](feature-sandbox.md) | seek v0.8.0（柱 O）| 🚀 已交付 | OS 沙箱（macOS seatbelt / Linux landlock）—— autopilot / --yolo 无人值守的内核级安全边界。零 runtime 依赖，单二进制。子代理 per-worktree confine。网络 confine 仅 macOS（landlock 管不了网络）。 |
-| [`feature-acp.md`](feature-acp.md) | seek v0.8.0（柱 P）| 🚀 已交付 | ACP 编辑器集成（Agent Client Protocol），Zed 等标准 IDE 驱动 seek。`seek acp` + initialize/session.new/prompt/cancel/update。真 server stdio e2e。 |
-| [`archive/feature-image-ocr.md`](archive/feature-image-ocr.md) | seek v0.8.0（柱 Q）| 🕯 已下线 | 图片输入 → 本地 OCR → 文本（Apple Vision / 可插拔 ocr.command）。**已被 [feature-vision.md](feature-vision.md) 取代**（2026-08-22 M-V.0 执行，代码移除与其视觉路径同船：`internal/ocr` 删除、检测逻辑迁 `internal/imgrefs`、`ocr.*` config 摘除）。历史推演见归档件。 |
-| [`feature-vision.md`](feature-vision.md) | seek v0.9.x | 🚀 已交付 | 原生视觉输入：DeepSeek V4-Flash-Vision（2026-08-21 发布）接入。柱 Q 采集管道出口**唯一化**——图片字节作 content 分块直发视觉模型，非视觉模型遇图提示切模型；**柱 Q（OCR）同步整体下线**（M-V.0 同船执行）。`Message.Images` 兄弟字段双形态序列化（text-only 字节不变保缓存）+ 资产库 copy-at-submit + 提交期路由钩子三入口（TUI/print/ACP）。真 API smoke 双向验证。 |
-| [`feature-inspect-rpc.md`](feature-inspect-rpc.md) | seek v0.6.x dot → v0.7.0 | 🗄 已归档 | Inspect RPC + Web 面板：扩展 `--rpc` JSON-RPC 2.0 read-only method 集（session/memory/project/hooks/stats）。**数据面（method 集 + HTTP+SSE transport + 面板）并入 [`feature-web-frontend.md`](feature-web-frontend.md) P3 并已交付（W4.1–W4.6）**；**IDE 线（stdio 扩 method + Registry 采纳）2026-11-16 关闭归档**——ACP（`seek acp`）覆盖 IDE 驱动、`seek serve` /rpc 覆盖数据面；`--rpc` stdio 三 method 冻结保留（永不挂 registry、永不扩）。 |
-| [`feature-web-frontend.md`](feature-web-frontend.md) | 独立 feature（平台化线） | 🚀 MVP 已交付 | Web Frontend——control-plane 首个真实渠道：`seek serve --frontend=web` 纯 stdlib HTTP/SSE 适配器实现 Frontend 端口（Run=HTTP 入站、Send=SSE 下行、流式走 StreamSender sibling 缝 + executor RunStream），ConvID=`web:<uuid>` 复用 M2/M3；浏览器即渠道。**MVP 聊天 2026-11-13 已交付**（流式渲染 /bind token-$ 状态栏）；P2 任务面板（对齐编排 P1）→ P3 资产面（并入 inspect-rpc 数据面）设计中。go:embed 单二进制、无 node 链、butler /today 同款 token 换票、默认只听 127.0.0.1。 |
-| [`feature-mcp-client.md`](feature-mcp-client.md) | M5.4（已交付）+ 规划中 | ✅ MCP infra 已交付 / 📐 深度集成设计中 | MCP 客户端（pkg/mcp/）已于 M5.4 交付。本文是后续深度集成设计：以 Semble 为第一验证目标，定义 prompt 引导、工具路由、效果评估方案。参见 `docs/book/chapter-12.md`。 |
-| [`feature-plan-mode.md`](feature-plan-mode.md) | seek v0.3.x+ | 🚀 已交付 | Plan 模式 v2：ANALYZE → propose → approve → EXECUTE → re-plan 闭环。propose/plan 工具、mode reminder 多态（plan-analyze/plan-execute）、permission 子态联动、TUI task list 面板、event-sourcing resume。替代旧的 [`archive/feature-plan-tasklist.md`](archive/feature-plan-tasklist.md)。 |
-| [`feature-webfetch.md`](feature-webfetch.md) | seek v0.3.x+ | 🚀 已交付 | WebFetch HTTPS GET 工具，专为 plan-analyze 设计的 SSRF 防御外部文档读取路径。gzip 解码 + HTML 渲染 + 私网 IP 拦截。 |
-| [`feature-permission-refactor.md`](feature-permission-refactor.md) | seek v0.3.x+ | 🚀 R1+R1.1 已交付 | Permission 两轴重构：Preference/Workflow 拆分、TUI 元数据剥离、preApproved 封装。 |
-| [`feature-edit-read-before.md`](feature-edit-read-before.md) | 持续 | 📝 方案笔记 | Edit 前强制 read 的软性提示已通过 workflowReminder 实施；结构性方案（如 schema 层约束）待评估。 |
-| [`notes-event-sourcing-adoption.md`](notes-event-sourcing-adoption.md) | 评估笔记（dsh 借鉴线） | 📝 已评估 | 事件溯源 fold 在 seek 的适用性：approval 全量 fold 不值得（策略位已由 header 覆盖、TUI 触发器不在事件源）；部分做一条——resume 读 `[plan: approved]` 后缀恢复 batch/preApproved；todo 无需动作（plan steps 已是 fold 正样板）。顺带坐实 TUI persistSession 不回写 `Session.Plan`。 |
-| [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 独立 feature（平台化 v0.11 线） | 🚀 M1–M3+M6a/M7a 已交付 | 远程控制平面：`Frontend` 端口（收/发分离）+ `seek serve` sidecar + 会话绑定路由 + 直连子进程执行。M4/M5（飞书 adapter）2026-11-13 撤销排期——不绑定具体渠道，首个 frontend 选型开放（web/HTTP 或任意聊天渠道按端口加）。核心 agent loop 零 daemon 不动。 |
-| [`feature-skill-distill.md`](feature-skill-distill.md) | 独立 feature（自进化内环） | 🚀 一~三期已交付 | Skill 自动蒸馏（S→K）：会话历史 → reasoner 提取 → 四层新颖性漏斗（机械门槛/提示词内判重/机械查重/语义过滤 + N≥2 复发累积）→ `.drafts/` 草稿区（loader 不可见）→ 人审 install（scope 选择）。**`/distill` 扩展、`--dry-run` 预览、人审 CLI（`/skill drafts` 列表·预览·审批安装）、自动路径（opt-in，含 L4 N≥2 复发累积）、三期漏斗打点（`seek skill stats --distill` stage×verdict 报表）均已交付**。自动路径永不 install——与 RSI 同构的人审闸。 |
-| [`notes-memory-skill-gap.md`](notes-memory-skill-gap.md) | 盘点笔记（自进化内环备料） | 📝 已盘点 | memory L/M/S 与 skill SKILL.md 的断层：三出口产出形态、decay 规则链、6 项重复点、7 项失联点、P0/P1/P2 打通优先级。坐实一处 PRD↔代码偏差——v1.md 硬豁免永不 stale vs score.go 实现 30 天宽限后正常 GC（实现是对的，PRD 该改）。 |
-| [`notes-memory-skill-gap.md`](notes-memory-skill-gap.md) | 盘点笔记（自进化内环备料） | 📝 已盘点 | memory L/M/S 与 skill SKILL.md 的断层：三出口产出形态、decay 规则链、6 项重复点、7 项失联点、P0/P1/P2 打通优先级。坐实一处 PRD↔代码偏差——v1.md 硬豁免永不 stale vs score.go 实现 30 天宽限后正常 GC（实现是对的，PRD 该改；**已于 2026-11-16 勘误**）。§5 P0 两问已由 feature-memory-skill-bridge.md 接管。 |
-| [`notes-v5-closeout.md`](notes-v5-closeout.md) | 评估笔记（v5 收伞） | ✅ 已拍板 | M11.5+ 候选三分：bg×worktree 解禁与跨 worktree 合并辅助→**并入 orchestration P1 残留**（写明触发条件，暂不立卡）；巡检 cron 化、routines 增强→**不做/留原地按需单卡**；无候选够柱格，**不建议 v5 续期**。2026-11-17 用户拍板照三分执行。 |
-| [`feature-paseo-provider.md`](feature-paseo-provider.md) | 独立 feature（平台化线） | 🚀 已交付 | seek 接入 paseo 作为 acp 型 provider（butler drive 最便宜车道）：`seek acp` 即 ACP server，无需桥进程。读 paseo asar 逆向证实能力协商门控；两个必做缺口——`session/new` cwd 锚定与 `SEEK_ACP_YOLO` 无头权限——**均已随 v0.11 ACP headless hardening 落地**，seek 车道已在 butler drive 日常使用。 |
-| [`feature-slim-loop.md`](feature-slim-loop.md) | 独立 feature（自进化内环） | 📐 设计稿 | 减法机制（L2 账与刀 / L3 自噬循环）：每版一刀（`Slim:` trailer 记账）+ 双周巡检四路证据开 ≤3 卡 + 预算超限即开卡；代码减法=行为不变（go test + eval 全例双轮），文档减法=信息不丢（指针/归档/代码承载三去向）；L3 = goal run 夜间自瘦身 × worktree × 人审 diff（与 skill-distill 人审闸同构）；防自噬=机制自身 ≤500 行 + eval 修剪两口径（flaky/过时，归档不删除）。依赖在飞 L1 卡 c_vt7fiw/c_rtjjsl（秤与网）。 |
-| [`feature-deepseek-app-api.md`](feature-deepseek-app-api.md) | 独立 feature（DeepSeek-first 深化） | 📐 设计稿 | 2026-11-13 全家桶应用 API 四项评估：read_url+思考搜索**不接**（R0 实测红 2026-11-14，R1–R4 关闭）、文件输入 PDF/Office**接**（照 imgrefs 先例扩 filerefs，copy-at-submit + 提交期路由）、ASR+TTS **接客户端层**（语音 frontend 分期：v1 只出站 TTS 播报、不做实时双工——ASR 无流式）、`safety_check` **接**（config 可选默认关）；OCR 不接（被文件解析覆盖）。价格表更新点列全（工具平价不折峰谷，与 token 费分口径）；卡外发现的 flash 价差已由 c_nym2sn 收口（zh/en 两页口径分叉误判，pricing.go 未过期）。 |
-| [`feature-orchestration.md`](feature-orchestration.md) | 独立 feature（编排承重轴） | 📐 设计稿（P1 路由已交付） | 编排层追平（用户 2026-11-13 指认承重轴）：P1 后台子代理生命周期（`agent.run_in_background` + session-ctx + 完成通知 Prepend 注入 + resume 回灌）+ 模型路由（per-type provider/model/effort，explore→GLM 量车道；ProviderRegistry + DeepSeek-only 工具过滤）——**P1 模型路由（`agent` 工具 provider/model 参数）已随 v0.11 交付**，后台子代理在语义合并返工 / P2 类型化 agent（`.seek/agents/*.md` frontmatter，scope 对齐 skills，enum 动态化的字节纪律）/ P3 hooks 面（SubagentStart/Stop、Stop、PreCompact、Notification + 注入通道三区模型：cache-stable 禁注 / cache-volatile 唯一注入区 / session-boundary 启动冻结）。差距矩阵对 CC 实测（ZCode 工具 schema 原文）注明证据；分期验收全沙盒可验证。 |
-| [`feature-hooks-injection.md`](feature-hooks-injection.md) | 独立 feature（编排承重轴 P3-a） | 📐 设计稿 | hooks 注入面：受控注入区与缓存稳定区分离。字节级缓存四命题（中段改写=尾长全失效 / 前沿追加=零边际 / 会话边界=一次性 / 孤儿 tool 消息协议不可行）、生命周期点全清单（现有 7+5，P3 新增 5 观察点 + `pre_prompt_inject` 授权事件，env/audit 契约）、注入通道决策（三区模型 + Prepend 唯一缝；尾部槽位仅会话常量、tool_result 通道 P3 否决）、CC hooks 逐项对照取舍（注入缝 1 vs ≥5、deny 面单点、失败降级不阻断）。对 orchestration D16/D17 细化并精确化两处（非确定性代价=token 预算而非缓存；授权语义=内容信任）。M-O3.1/M-O3.2 实现期验收备好，本文档阶段零代码。 |
-| [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。三层架构（CLI→MCP→系统应用）、视觉闭环、方向而非路线图。 |
+| [`v7.md`](v7.md) | seek v0.8.x | 🚀 已交付 | 打擂台 Reasonix 专属护城河（Autopilot / 沙箱 / ACP / 离线 OCR 四柱落地）。留作 v8 的前置阅读。|
+| [`v8.md`](v8.md) | seek v0.12.x 起 | 📐 规划稿 | 薄内核 + 外围插件 + 可度量的自由生长。六柱：R 证据与裁判 / S 摩擦观测 / T 裸核对照与例行消融 / U 薄内核与外围接缝 / V 一次性进程与端 / W 试验田。第一波（R1/S1/T1/T2/U1）已开卡；§6 五项已拍板（2026-11-17）。|
+| [`vision.md`](vision.md) | 长期（3–5 年） | ⭐ 北向星 | seek 的未来愿景：从编程助手演化为本地计算机智能终端。方向而非路线图。|
 
-> **归档 PRD**：被取代或彻底废弃的设计移到 [`archive/`](archive/) —— 历史推演保留，但不再算路线图条目。当前 2 个：`feature-plan-tasklist.md`（被 `feature-plan-mode.md` 取代）、`feature-image-ocr.md`（柱 Q，被 `feature-vision.md` 的原生视觉取代，代码已于 M-V.0 移除）。
+## 独立 feature PRD（活跃）
+
+| 文件 | 状态 | 说明 |
+|------|------|------|
+| [`feature-orchestration.md`](feature-orchestration.md) | 📐 设计稿（P1 路由已交付） | 编排承重轴：后台子代理生命周期 + 模型路由（P1 已随 v0.11 交付）+ P2 类型化 agent + P3 hooks 面。|
+| [`feature-hooks-injection.md`](feature-hooks-injection.md) | 📐 设计稿 | hooks 注入面（编排 P3-a）：缓存稳定区与受控注入区分离。v8 D3 拍板延后到第二波之后。|
+| [`feature-memory-skill-bridge.md`](feature-memory-skill-bridge.md) | 📐 设计稿 | memory↔skill 打通：蒸馏落点 + 生命周期对齐（c_5fdsqb 设计已进 main，里程碑见其 §9）。|
+| [`feature-deepseek-app-api.md`](feature-deepseek-app-api.md) | 📐 设计稿 | DeepSeek 应用 API 四项评估（文件输入 / ASR+TTS 客户端层 / safety_check）。v8 D3：做完收口。|
+| [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 🚀 已交付（无剩余排期） | Frontend 端口定义所在——`seek serve` sidecar + 会话绑定路由 + 直连执行。v8「新的端只经 Frontend 端口或 ACP」的参照物，故留活跃区。|
+| [`feature-web-frontend.md`](feature-web-frontend.md) | 📐 设计稿（MVP 已交付） | Web Frontend：MVP 聊天已交付；P2 任务面板 → P3 资产面设计中。|
+| [`feature-slim-loop.md`](feature-slim-loop.md) | 📐 设计稿 | 减法机制 L2 账与刀 / L3 自噬循环；本目录的预算由它看管。|
+| [`feature-mcp-client.md`](feature-mcp-client.md) | 📐 深度集成设计中 | MCP 客户端 infra 已于 M5.4 交付；本文是后续深度集成设计。|
+| [`feature-skill-distill.md`](feature-skill-distill.md) | 🚀 一~三期已交付 | Skill 自动蒸馏（S→K）：四层新颖性漏斗 + `.drafts/` 草稿区 + 人审 install 铁律。AGENTS.md 架构节引用。|
+| [`feature-plan-mode.md`](feature-plan-mode.md) | 🚀 已交付 | Plan 模式 v2：analyze → propose → execute 闭环 + event-sourcing resume。AGENTS.md 权限节引用。|
+| [`feature-permission-refactor.md`](feature-permission-refactor.md) | 🚀 已交付 | Permission 两轴（Preference/Workflow）重构。AGENTS.md 权限节引用。|
+| [`feature-inspect-rpc.md`](feature-inspect-rpc.md) | 🗄 已归档（冻结面留此） | RPC 单一数据面权威 + `--rpc` stdio 三 method 冻结的决定记录。AGENTS.md RPC 节引用。|
+| [`feature-webfetch.md`](feature-webfetch.md) | 🚀 已交付 | WebFetch SSRF 防御外部读取。AGENTS.md 架构节引用。|
+| [`feature-active-memory.md`](feature-active-memory.md) | 🚀 已交付 | 主动记忆整理。AGENTS.md 架构节引用。|
+| [`feature-i18n.md`](feature-i18n.md) | 🚀 已交付 | i18n view 层目录 + 奇偶校验。AGENTS.md 架构节引用。|
+
+## 归档区 [`archive/`](archive/)
+
+已交付 / 已决策、只剩历史价值的文档（git mv 保留全文史，一行一条）：
+
+- [`v0.md`](archive/v0.md) — 初始版本 M0–M8：核心设计决策、架构分层、里程碑记录
+- [`v1.md`](archive/v1.md) — v0.2.x 三层记忆 L/M/S + 自动化层
+- [`v2.md`](archive/v2.md) — v0.3.x Skill 生命周期（目录包 / install / 调用统计）
+- [`v3.md`](archive/v3.md) — v0.4.x 三柱总览（可逆 / 可扩展 / 可定制）
+- [`v4.md`](archive/v4.md) — v0.5.x 闭环工效（suggested-reply 自校准）
+- [`v5.md`](archive/v5.md) — v0.6.x 代理编排 umbrella（子代理+worktree / cron+routines）
+- [`v6.md`](archive/v6.md) — v0.7.x 单点工具补齐 P1 closure
+- [`feature-checkpoint.md`](archive/feature-checkpoint.md) — v0.4.0 柱 A：双层 checkpoint（git ref 快照 + 文件 CAS undo/redo）
+- [`feature-shell-hooks.md`](archive/feature-shell-hooks.md) — v0.4.1 柱 B：用户 shell hooks（deny/observe）
+- [`feature-tui-ergonomics.md`](archive/feature-tui-ergonomics.md) — v0.4.2 柱 C：斜杠补全 + 自定义 keybindings
+- [`feature-suggested-reply.md`](archive/feature-suggested-reply.md) — v0.5.0 柱 D：next-turn 预测 + mispredict 反向注入
+- [`feature-subagent.md`](archive/feature-subagent.md) — v0.6.0 柱 G：子代理 + worktree 隔离
+- [`feature-routines.md`](archive/feature-routines.md) — v0.6.1 柱 H：cron / wakeup / push 时序触发（零 daemon）
+- [`feature-askuser-v2.md`](archive/feature-askuser-v2.md) — v0.7.0 柱 I：AskUserQuestion v2 多题 + preview
+- [`feature-code-review.md`](archive/feature-code-review.md) — v0.7.0 柱 J：code-review skill + `/code-review` 命令
+- [`feature-bash-monitor.md`](archive/feature-bash-monitor.md) — v0.7.0 柱 K：后台 bash + monitor 工具
+- [`feature-lsp.md`](archive/feature-lsp.md) — v0.7.0 柱 L：LSP references 语义找引用
+- [`feature-mobile-push.md`](archive/feature-mobile-push.md) — v0.7.0 柱 M：移动端 webhook 桥
+- [`feature-autopilot.md`](archive/feature-autopilot.md) — v0.8.0 柱 N：autopilot 无人值守编排
+- [`feature-sandbox.md`](archive/feature-sandbox.md) — v0.8.0 柱 O：OS 沙箱（seatbelt / landlock）
+- [`feature-acp.md`](archive/feature-acp.md) — v0.8.0 柱 P：ACP 编辑器集成
+- [`feature-vision.md`](archive/feature-vision.md) — v0.9.x：原生视觉输入（取代柱 Q OCR）
+- [`feature-image-paste.md`](archive/feature-image-paste.md) — v0.8.x：剪贴板图片采集（出口已改喂原生视觉）
+- [`feature-goal.md`](archive/feature-goal.md) — v0.8.x：`/goal` 单 agent 死磕达标自治循环
+- [`feature-paseo-provider.md`](archive/feature-paseo-provider.md) — paseo 作为 acp 型 provider（butler drive 车道，缺口已随 v0.11 补齐）
+- [`feature-edit-read-before.md`](archive/feature-edit-read-before.md) — 决策记录（c_hkqvwk）：维持软提示，不接结构性方案
+- [`notes-event-sourcing-adoption.md`](archive/notes-event-sourcing-adoption.md) — 事件溯源 fold 适用性评估（dsh 借鉴线）
+- [`notes-memory-skill-gap.md`](archive/notes-memory-skill-gap.md) — memory↔skill 断层盘点（自进化内环备料）
+- [`notes-v5-closeout.md`](archive/notes-v5-closeout.md) — v5 收伞三分拍板（不续期）
+- [`feature-image-ocr.md`](archive/feature-image-ocr.md) — 柱 Q 本体（被 feature-vision 取代，代码已移除）
+- [`feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) — 被 feature-plan-mode 取代
 
 ## 阅读指引
 
-- **第一次了解 seek 架构**：先读 `v0.md` §1–4（设计决策比交付记录更重要）
-- **参与当前开发**：读路线图（`../README.md` §路线图）或查看最近 commit 了解最新交付
-- **想知道 Memory 怎么工作**：读 `v1.md` —— 已交付 reference，不再追加需求
-- **追 bug / 理解某个包为什么这样设计**：回 `v0.md` 查对应章节 + `docs/book/` 系统设计书
+- **第一次了解 seek 架构**：先读 [`archive/v0.md`](archive/v0.md) §1–4（设计决策比交付记录更重要）
+- **参与当前开发**：读 [`v8.md`](v8.md)（规划稿）或查看最近 commit 了解最新交付
+- **想知道 Memory 怎么工作**：读 [`archive/v1.md`](archive/v1.md) —— 已交付 reference
+- **追 bug / 理解某个包为什么这样设计**：回归档区查对应章节 + `docs/book/` 系统设计书
 
 ## 版本演进规则
 
 1. 每个大版本一个独立 `.md` 文件，不追加已有文件。
 2. 版本之间是**叠加关系**——v1 依赖 v0 的架构基础，除非显式说明"此决策在 v1 中已变更"。
-3. 一个版本交付后，其 PRD 标记为已归档，不再修改（勘误除外）。
+3. 一个版本交付后，其 PRD 移入归档区（git mv，信息不丢），不再修改（勘误除外）。
 
 ## 未来愿景
 
-[`vision.md`](vision.md) 描述了 seek 的长期北向星——从编程助手演化为**本地计算机智能终端**。它不是某个版本的路线图，而是指导远期决策的方向框架，包括三层架构（CLI 核心 → MCP 桥接 → 系统原生应用）、视觉闭环（看见→理解→规划→执行→验证）、以及当前架构与这一愿景之间的差距分析。
-
-愿景文档不随版本迭代更新，只随认知跃迁而修订。
+[`vision.md`](vision.md) 描述了 seek 的长期北向星——从编程助手演化为**本地计算机智能终端**。它不是某个版本的路线图，而是指导远期决策的方向框架。愿景文档不随版本迭代更新，只随认知跃迁而修订。

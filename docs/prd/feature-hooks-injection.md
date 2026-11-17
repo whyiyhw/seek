@@ -1,7 +1,7 @@
 # Feature: hooks 注入面——受控注入区与缓存稳定区分离
 
 **所属版本**：独立 feature（编排承重轴 P3-a，设计启动）
-**前置阅读**：[`feature-orchestration.md`](feature-orchestration.md) §6（P3 骨架 D15–D17，本文是其设计细化）、[`feature-shell-hooks.md`](feature-shell-hooks.md)（柱 B 红线原文）、[`v0.md`](v0.md) §4.8.1（prefix-cache 字节纪律）、根 [`AGENTS.md`](../../AGENTS.md)「Token & prefix-cache constraints」
+**前置阅读**：[`feature-orchestration.md`](feature-orchestration.md) §6（P3 骨架 D15–D17，本文是其设计细化）、[`feature-shell-hooks.md`](archive/feature-shell-hooks.md)（柱 B 红线原文）、[`v0.md`](archive/v0.md) §4.8.1（prefix-cache 字节纪律）、根 [`AGENTS.md`](../../AGENTS.md)「Token & prefix-cache constraints」
 **状态**：📐 设计稿（2026-11-14，卡 c_o77s3m）。只出文档，不含实现。
 **定位**：把「注入内容改 prompt 字节会破 prefix-cache」这一张力**成文为规矩**——给出字节级缓存影响分析、全量生命周期点清单、注入通道的最终决策，以及 CC hooks 能力对照与逐项取舍。实现里程碑（M-O3.1/M-O3.2）沿用 orchestration §6 的排期，本文补全其设计依据。
 

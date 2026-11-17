@@ -14,7 +14,7 @@
 //     agent. Calls ComposeSubagent which produces the same header (so
 //     subagents inherit project conventions and skill manifest) plus
 //     a trailing role + summary-length segment that REPLACES the
-//     parent mode reminder. See docs/prd/feature-subagent.md §3.6.1
+//     parent mode reminder. See docs/prd/archive/feature-subagent.md §3.6.1
 //     for the full system prompt composition rules.
 //
 // Both paths drive the SAME template literal (rootTpl); only the tail
@@ -100,7 +100,7 @@ Today's date: %s — captured once when this session started and held FIXED for 
 // rather than in internal/subagent so sysprompt is the single owner
 // of the assembled byte stream.
 //
-// Wording matches docs/prd/feature-subagent.md §3.6 exactly so future
+// Wording matches docs/prd/archive/feature-subagent.md §3.6 exactly so future
 // PRD updates and code stay in lock-step.
 const summaryHint = "Your final assistant message will be returned to the parent as a summary. Keep it within ~4000 characters; content past that will be truncated."
 
@@ -153,7 +153,7 @@ func Compose(h Header, modeLabel string) string {
 // SubagentRole is the per-template role prompt for a subagent. It is
 // appended after segments 1-3 (header + project + skills) and
 // REPLACES the parent mode reminder. The shape comes from
-// docs/prd/feature-subagent.md §3.6 (three subagent types, each
+// docs/prd/archive/feature-subagent.md §3.6 (three subagent types, each
 // stacking role intro + optional mode-specific extra clause +
 // summary-length hint).
 //

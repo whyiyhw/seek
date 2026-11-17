@@ -1,8 +1,8 @@
 # Feature: Monitor + 后台 bash（v6 柱 K）
 
 **所属版本**：v6（单点工具补齐 umbrella）
-**前置阅读**：[`v6.md`](v6.md) §柱 K + §2 跨柱约束、[`docs/comparison.md`](../comparison.md) §"第二档单点工具缺口"、现有 bash 工具（`internal/tools/bash/{bash.go,proc_linux.go,bash_unix.go}`）
-**状态**：🚀 已交付（v6 柱 K）。`internal/bgjob`（Manager + ring buffer + 生命周期）→ `bash` 接 `run_in_background`（session-ctx 分离）→ `monitor` 工具（poll/wait/kill）→ `cmd/seek` 注入 + Shutdown + sysprompt。新增测试全过，`internal/{bgjob,tools/bash,tools/monitor,sysprompt}` 全 `-race` 绿，全仓 `go test ./...` 绿。Windows 后台为降级路径（kill 走 `taskkill /T /F /PID`，见 §8）。文档见 [`docs/guide-background.md`](../guide-background.md)。
+**前置阅读**：[`v6.md`](v6.md) §柱 K + §2 跨柱约束、[`docs/comparison.md`](../../comparison.md) §"第二档单点工具缺口"、现有 bash 工具（`internal/tools/bash/{bash.go,proc_linux.go,bash_unix.go}`）
+**状态**：🚀 已交付（v6 柱 K）。`internal/bgjob`（Manager + ring buffer + 生命周期）→ `bash` 接 `run_in_background`（session-ctx 分离）→ `monitor` 工具（poll/wait/kill）→ `cmd/seek` 注入 + Shutdown + sysprompt。新增测试全过，`internal/{bgjob,tools/bash,tools/monitor,sysprompt}` 全 `-race` 绿，全仓 `go test ./...` 绿。Windows 后台为降级路径（kill 走 `taskkill /T /F /PID`，见 §8）。文档见 [`docs/guide-background.md`](../../guide-background.md)。
 **目标里程碑**：M-K.1 ~ M-K.4（全部落地）
 **目标发版**：v0.7.x
 **估时**：~5 天（v6 umbrella 表）

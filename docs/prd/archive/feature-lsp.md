@@ -1,7 +1,7 @@
 # Feature: LSP find-references（v6 柱 L · 瘦身版）
 
 **所属版本**：v6（单点工具补齐 umbrella）
-**前置阅读**：[`v6.md`](v6.md) §3.4 柱 L + §2 跨柱约束、[`docs/comparison.md`](../comparison.md) §1（LSP 行）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K——**会话级子进程生命周期**的直接先例）、`pkg/mcp/client.go`（JSON-RPC over stdio + init handshake 先例）
+**前置阅读**：[`v6.md`](v6.md) §3.4 柱 L + §2 跨柱约束、[`docs/comparison.md`](../../comparison.md) §1（LSP 行）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K——**会话级子进程生命周期**的直接先例）、`pkg/mcp/client.go`（JSON-RPC over stdio + init handshake 先例）
 **状态**：🚀 已交付（v6 柱 L · 瘦身版）。`internal/lspclient`（手写 stdlib JSON-RPC + Content-Length 帧 + 读循环解复用）→ manager（懒启动 / 单 session 单 server / crash 重启 / 缺 binary 降级 / Shutdown / 会话级 ctx）→ `internal/tools/references`（1-based↔0-based + symbol 列定位 + 输出截断 + ReadOnly + grep 降级）→ `cmd/seek` 注入 + Shutdown + sysprompt。**零新依赖**（stdlib-only）；新增测试全过，`internal/{lspclient,tools/references,sysprompt}` 全 `-race` 绿，全仓 `go test ./...` 绿，Windows 交叉编译通过。
 **目标里程碑**：M-L.1 ~ M-L.4（全部落地）
 **目标发版**：v0.7.x

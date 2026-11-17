@@ -1,7 +1,7 @@
 # Feature: Autopilot — 无人值守编排交付（spawn 一支团队 · 睡觉时 ship）
 
 **所属版本**：v0.8.x 候选（自治维度；柱 G/H/M 之上的编排层，非新单点工具）
-**前置阅读**：[`comparison.md`](../comparison.md) §R.4（**本 PRD 的战略依据**：seek vs Reasonix 唯一结构性领先的两轴）、[`feature-subagent.md`](feature-subagent.md)（柱 G — 并行子代理 + worktree 隔离）、[`feature-routines.md`](feature-routines.md)（柱 H — cron/wakeup/trigger）、[`feature-mobile-push.md`](feature-mobile-push.md)（柱 M — webhook push）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K — 会话级子进程生命周期 + Shutdown 范式）
+**前置阅读**：[`comparison.md`](../../comparison.md) §R.4（**本 PRD 的战略依据**：seek vs Reasonix 唯一结构性领先的两轴）、[`feature-subagent.md`](feature-subagent.md)（柱 G — 并行子代理 + worktree 隔离）、[`feature-routines.md`](feature-routines.md)（柱 H — cron/wakeup/trigger）、[`feature-mobile-push.md`](feature-mobile-push.md)（柱 M — webhook push）、[`feature-bash-monitor.md`](feature-bash-monitor.md)（柱 K — 会话级子进程生命周期 + Shutdown 范式）
 **状态**：✅ **真环境 e2e 跑通**。`internal/autopilot`：driver（fan-out/caps/kill/panic 隔离）+ Decomposer（deepseek + 健壮解析）+ report 聚合（带 per-task commit SHA）+ fleet adapter（worktree + subagent.Spawn + **per-task 本地 commit**）+ **no-remote 守卫**（`bash.WithDeny` + `IsRemoteMutating`）。`cmd/seek`：`seek autopilot run "<goal>"` + `cron create --autopilot`，复用 subagent.Manager（整体 no-remote 守卫）+ worktree + 柱 M webhook push。
 
 **e2e 结果**（真 DeepSeek + 真 repo，跑"append 一行到 README"）：分解→并行 worktree fleet→聚合→报告 全链路通；**暴露并修复两个真 bug**：

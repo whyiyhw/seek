@@ -1,7 +1,7 @@
 # Feature: 减法机制 slim-loop —— 删代码与缩文档的流程层与自噬层（L2/L3）
 
 **所属版本**：独立 feature PRD · 📐 设计稿 · 未排期（自进化内环第三块：pitfall→eval 是「失败 → 防回归」，skill-distill 是「会话 → 能力」，本文是「长出来的肉 → 代谢掉」）
-**前置阅读**：立项决策（butler 2026-11-13「减法机制立项」：三层 L1 秤与网 / L2 账与刀 / L3 自噬循环）；[`feature-skill-distill.md`](feature-skill-distill.md)（人审闸同构——自动路径永不激活）；[`feature-goal.md`](feature-goal.md)（goal run 循环 + no-remote 守卫 + yolo-local）；[`feature-autopilot.md`](feature-autopilot.md)（worktree 原语 + 本地 commit 不 push 的默认）；[`feature-routines.md`](feature-routines.md)（cron 触发）；[`docs/narrative/seek.md`](../narrative/seek.md)（自我进化平台定位）；[`scripts/doc-budgets.tsv`](../../scripts/doc-budgets.tsv) + [`scripts/verify-doc-budgets.sh`](../../scripts/verify-doc-budgets.sh)（已落地的预算先例）
+**前置阅读**：立项决策（butler 2026-11-13「减法机制立项」：三层 L1 秤与网 / L2 账与刀 / L3 自噬循环）；[`feature-skill-distill.md`](feature-skill-distill.md)（人审闸同构——自动路径永不激活）；[`feature-goal.md`](archive/feature-goal.md)（goal run 循环 + no-remote 守卫 + yolo-local）；[`feature-autopilot.md`](archive/feature-autopilot.md)（worktree 原语 + 本地 commit 不 push 的默认）；[`feature-routines.md`](archive/feature-routines.md)（cron 触发）；[`docs/narrative/seek.md`](../narrative/seek.md)（自我进化平台定位）；[`scripts/doc-budgets.tsv`](../../scripts/doc-budgets.tsv) + [`scripts/verify-doc-budgets.sh`](../../scripts/verify-doc-budgets.sh)（已落地的预算先例）
 **状态**：📐 设计稿（流程已开始运转）。本文只定义流程与口径，无代码。两张 L1 前置卡已合并（c_sv3zwn §1.4 记录）：`c_vt7fiw`（weight.sh 体重秤 + budget.json 预算清单，只读只报）、`c_rtjjsl`（首轮 deadcode/unused 扫描候选清单，只报不删，产物即 [`docs/notes-slim-candidates-2026-11.md`](../notes-slim-candidates-2026-11.md)）——M-SL1 / M-SL3 就此解除阻塞；M-SL3 首跑已落地（§7）。
 
 > **一句话**：给 seek 立一条与「怼功能」对偶的「删冗」流程——**秤先上（L1，在飞）、账与刀进流程（L2，本文）、最后让 seek 自己夜里挥刀、人早上验收（L3，本文）**。安全网只有两张：代码减法行为不变，文档减法信息不丢。

@@ -1,7 +1,7 @@
 # Feature: DeepSeek 全家桶应用 API 接入评估（read_url / 文件输入 / ASR-TTS / 安全校验）
 
 **所属版本**：独立 feature PRD（评估 + 分期设计稿，未排期实现）
-**前置阅读**：[`feature-vision.md`](feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
+**前置阅读**：[`feature-vision.md`](archive/feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
 **状态**：📐 **设计稿（2026-11-13 评估；R0 验证门已执行 2026-11-14 → ① 判红关闭，见 §2.2）**。四项结论见 §0；其余里程碑为 2h 卡粒度拆解，**未动工**。
 **触发起因**：DeepSeek 于 **2026-11-13** 发布「全家桶应用 API」——官方公告 [news261113](https://api-docs.deepseek.com/zh-cn/news/news261113)：对话内联网搜索（含深度思考搜索）、`deepseek_read_url` 链接阅读、文件输入（PDF/Office/图片）、模型安全校验，加独立底层接口 Search / Fetch / OCR / ASR / TTS。同族先例：Search API 2026-10-17 开放，seek 已接（`pkg/deepseek/search.go` + `web_search` 工具，另卡实现）。
 **本文不覆盖**：独立 Search API 的对话内接线（web_search 服务端工具变体）——与 read_url 同属 `tools` 数组声明，但 seek 已有客户端 `web_search` 工具覆盖显式搜索场景；其服务端变体只在「思考模式自主搜索」里顺带评估（§二）。
@@ -191,7 +191,7 @@ type ServerToolUse struct {
 
 ### 3.1 为什么接
 
-agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
+agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](archive/feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
 
 | 环节 | imgrefs 先例 | filerefs 对应 |
 |---|---|---|

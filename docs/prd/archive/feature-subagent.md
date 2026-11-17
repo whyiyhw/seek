@@ -1,7 +1,7 @@
 # Feature: 子代理 + Worktree 隔离
 
 **所属版本**：v5（柱 G · 空间维度编排）
-**前置阅读**：[PRD v5 umbrella](v5.md) §2（v5 特有约束六条）、[PRD v0](v0.md) §4.7（Permission）、§4.8（Tool）、[feature-permission-refactor.md](feature-permission-refactor.md)（R1+R1.1 双轴模型）
+**前置阅读**：[PRD v5 umbrella](v5.md) §2（v5 特有约束六条）、[PRD v0](v0.md) §4.7（Permission）、§4.8（Tool）、[feature-permission-refactor.md](../feature-permission-refactor.md)（R1+R1.1 双轴模型）
 **状态**：🚀 已交付（M11.0 + M11.1 全部落地，v0.6.0）
 **目标里程碑**：M11.0（子代理核心）+ M11.1（worktree 集成）
 **目标发版**：v0.6.0

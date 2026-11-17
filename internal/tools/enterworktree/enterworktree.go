@@ -3,7 +3,7 @@
 // thin-wrapper pattern of internal/tools/agent: schema + Execute
 // here, all logic in internal/worktree.
 //
-// PRD docs/prd/feature-subagent.md §3.8 — the worktree integration
+// PRD docs/prd/archive/feature-subagent.md §3.8 — the worktree integration
 // half of v5 柱 G. The model can call this directly (e.g.
 // "spawn a worktree so I can try this refactor without touching
 // my working copy"), and internal/tools/agent's isolation flow

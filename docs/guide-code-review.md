@@ -4,7 +4,7 @@ seek 内置了 **code-review 能力**——对工作区变更或分支差异进�
 
 > seek has built-in code review — a structured analysis of working-tree changes. Four effort levels from `quick` (precision-first, blocking-only) to `max` (exhaustive, inter-file).
 
-内置 skill 方法论与 effort framing 见 [`internal/skill/builtin/code-review.md`](../internal/skill/builtin/code-review.md)；设计决策见 [`docs/prd/feature-code-review.md`](prd/feature-code-review.md)。
+内置 skill 方法论与 effort framing 见 [`internal/skill/builtin/code-review.md`](../internal/skill/builtin/code-review.md)；设计决策见 [`docs/prd/archive/feature-code-review.md`](prd/archive/feature-code-review.md)。
 
 ---
 

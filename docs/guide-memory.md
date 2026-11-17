@@ -90,6 +90,6 @@ This prevents M-index bloat while keeping truly unused entries recoverable.
 ## Design docs
 
 For the full design rationale, PRD, and implementation details:
-- [`docs/prd/v1.md`](./prd/v1.md) — L/M/S three-tier architecture, decay model, distillation pipeline
+- [`docs/prd/archive/v1.md`](./prd/archive/v1.md) — L/M/S three-tier architecture, decay model, distillation pipeline
 - [`docs/prd/feature-active-memory.md`](./prd/feature-active-memory.md) — planned proactive memory curation (design phase)
 - [`docs/book/chapter-16.md`](./book/chapter-16.md) — in-depth book chapter on the memory subsystem

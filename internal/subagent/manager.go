@@ -25,7 +25,7 @@ import (
 // path), and the cap exists to prevent runaway parallelism that
 // would N× the API rate limit hit.
 //
-// See docs/prd/feature-subagent.md §8 risk "并发 spawn N 个子" for
+// See docs/prd/archive/feature-subagent.md §8 risk "并发 spawn N 个子" for
 // the design rationale.
 const defaultMaxConcurrent = 3
 

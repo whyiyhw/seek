@@ -4,7 +4,7 @@ seek 内置了**双层 checkpoint 安全网**，让你在模型动过代码后�
 
 > seek has a two-layer safety net that lets you undo model changes at two granularities: roll back the entire working tree to the previous turn, or revert a single file to before the last write/edit.
 
-设计决策与验收标准见 [`docs/prd/feature-checkpoint.md`](prd/feature-checkpoint.md)。
+设计决策与验收标准见 [`docs/prd/archive/feature-checkpoint.md`](prd/archive/feature-checkpoint.md)。
 
 ---
 

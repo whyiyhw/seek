@@ -490,7 +490,7 @@ func (w Workflow) String() string {
 // (values may move toward MORE restrictive but never less), so even
 // caller mistakes can't accidentally elevate a child's permissions.
 //
-// See docs/prd/feature-subagent.md §3.5 for the full rule set.
+// See docs/prd/archive/feature-subagent.md §3.5 for the full rule set.
 type Restriction struct {
 	// Pref pins the child's Preference. nil = inherit parent's pref.
 	// Permitted transitions:
@@ -525,7 +525,7 @@ type Restriction struct {
 // stays in WorkflowPlanExecute, the per-step batch-approval gate
 // must be re-established inside the child's own plan flow. This
 // prevents a parent step's auto-approve window from silently
-// extending into a fresh subagent (docs/prd/feature-subagent.md
+// extending into a fresh subagent (docs/prd/archive/feature-subagent.md
 // §3.5). The per-Kind alwaysAllow grants are not inherited either,
 // for the same reason: the user granted them to the PARENT's prompt
 // stream, not to whatever a subagent decides to do.

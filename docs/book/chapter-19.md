@@ -2,7 +2,7 @@
 
 > **对应版本**：v0.4.0
 > **对应代码**：`internal/checkpoint/`、`internal/checkpointcli/`、`internal/paths`
-> **PRD**：[`docs/prd/feature-checkpoint.md`](../prd/feature-checkpoint.md)
+> **PRD**：[`docs/prd/archive/feature-checkpoint.md`](../prd/archive/feature-checkpoint.md)
 > **验收**：12/12 验收标准全部通过，`go test -race` 全绿
 > **起点**：第 18 章（Plan Mode 确认门）。模型有了一套成熟的交互模式（analyze → propose → execute），但所有破坏性操作（write/edit/bash）仍然是"出去就回不来的"。
 

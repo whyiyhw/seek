@@ -60,7 +60,7 @@ var intentPhrases = []string{
 // generic noise); false negatives are graceful (no placeholder, same
 // outcome as before this gate existed).
 //
-// PRD docs/prd/feature-suggested-reply.md §3 (trigger conditions) +
+// PRD docs/prd/archive/feature-suggested-reply.md §3 (trigger conditions) +
 // follow-up dogfood observation: "predicting after every turn shows
 // placeholders on obviously-finished conversations" — see commit
 // log for the threshold-design discussion.

@@ -186,7 +186,7 @@ type Options struct {
 	Worktrees *worktree.Manager
 
 	// Keymap is the v3 柱 C user-customisable keybindings table
-	// (PRD docs/prd/feature-tui-ergonomics.md §4). nil = use the
+	// (PRD docs/prd/archive/feature-tui-ergonomics.md §4). nil = use the
 	// hard-coded defaults from internal/keymap.NewDefault(); the TUI
 	// resolves through m.keymap() which always returns non-nil so
 	// existing tests don't need to construct one.

@@ -1,7 +1,7 @@
 # Feature: `/goal` —— 单 agent 死磕到达标的自治循环（v0.8.x · 对标 Claude Code `/goal`）
 
 **所属版本**：v0.8.x（CC-parity 单点；与 v7 柱 N/H 正交但可组合）
-**前置阅读**：[`feature-autopilot.md`](feature-autopilot.md)（柱 N —— **多** agent fan-out，本特性是它的**单** agent 对偶，别混）、[`comparison.md`](../comparison.md) §1（CC gap 追踪）、CLAUDE.md「Token & prefix-cache constraints」（本特性的循环必须 append-only、不能改写历史）
+**前置阅读**：[`feature-autopilot.md`](feature-autopilot.md)（柱 N —— **多** agent fan-out，本特性是它的**单** agent 对偶，别混）、[`comparison.md`](../../comparison.md) §1（CC gap 追踪）、CLAUDE.md「Token & prefix-cache constraints」（本特性的循环必须 append-only、不能改写历史）
 **状态**：✅ **全部交付（M-goal.1–4）**。.1 driver+judge+caps+stall（97.5%）· .2 TUI `/goal` 事件驱动循环+徽章+Esc · .3 headless `seek goal run`（真 `AgentWorker` + `Driver.OnTurn`，真环境 e2e）+ session `Goal` 字段+resume · .4 `cron create --goal`（仿 `--autopilot`，jobWire round-trip、`DefaultSubprocess` 起 `goal run`）+ **no-remote 守卫**（主 agent bash `WithDeny(IsRemoteMutating)`，因 goal 跑的是主 agent 而非子代理）+ **yolo-local**（dispatch 时 `SetPref(PrefYolo)`，远程仍被守卫挡）+ webhook push（goal.completed/stopped）。**真环境 e2e**：写文件条件 turn1 not-met→turn2 写 DONE.txt→met（证实 yolo-local 能改、多轮续作通）。全仓 vet+race 绿。两项关键决策已拍板（见 §3）。
 **估时**：~3-4 天
 

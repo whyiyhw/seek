@@ -1,12 +1,15 @@
 # Archived PRDs
 
-Designs that **were superseded before / after delivery** and no longer reflect the project's direction, but are kept for historical context: why a particular path was rejected, what alternatives were considered, and the design推演 that's still cited by the继任 PRD.
+Designs that **were superseded before / after delivery**, and **delivered PRDs whose remaining value is historical**, no longer reflecting the project's direction, but kept for historical context: why a particular path was rejected, what alternatives were considered, and the design推演 that's still cited by the继任 PRD.
 
 These are NOT roadmap items, NOT shipped specifications, and NOT planning surface. They live here so future-us doesn't re-design the same dead branch from scratch.
+
+2026-11-17（v8 D5 归档减法）：已交付的 v0–v6 与 19 个 feature PRD、3 份 notes 批量移入本目录（git mv，全文史保留）；完整清单一行一条见 [`../README.md`](../README.md) 归档区。下表只登记「被取代」型归档：
 
 | 文件 | 取代它的 PRD | 归档理由 |
 |---|---|---|
 | [`feature-plan-tasklist.md`](feature-plan-tasklist.md) | [`../feature-plan-mode.md`](../feature-plan-mode.md) | Scope 误判——只覆盖了"执行追踪可视化"，错过 plan 模式核心价值在确认门（ANALYZE → PROPOSE → APPROVE）。继任 PRD 把 task-list 面板 explicitly 推迟到 v2 后由数据驱动决定；当前 plan 模式以工作流闭环 ship，未做面板。 |
+| [`feature-image-ocr.md`](feature-image-ocr.md) | [`feature-vision.md`](feature-vision.md) | 本地 OCR 管道被原生视觉输入整体取代（M-V.0 同船移除 `internal/ocr`，检测逻辑迁 `internal/imgrefs`）。 |
 
 ## 政策
 

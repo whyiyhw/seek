@@ -319,7 +319,7 @@ func (a *Agent) Messages() []deepseek.Message {
 // side-channel prediction so it round-trips through session save +
 // resume and so the next turn's calibration check can read it back.
 //
-// PRD docs/prd/feature-suggested-reply.md §4.5.
+// PRD docs/prd/archive/feature-suggested-reply.md §4.5.
 func (a *Agent) AttachPredictedNext(text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
