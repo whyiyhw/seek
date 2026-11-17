@@ -2,7 +2,7 @@
 
 > **性质**：独立 feature 设计稿（自进化内环）。
 > **状态**：📐 设计稿（butler 卡 `c_5fdsqb`，2026-11-16，分支 `drive/c_5fdsqb`）。本卡**只出设计，零实现**；里程碑见 §9。
-> **依据**：[`notes-memory-skill-gap.md`](notes-memory-skill-gap.md) §5 P0 两问（备料笔记，2026-11-12）；[`feature-skill-distill.md`](feature-skill-distill.md)（M-SD1/2/3 + 草稿收件箱已交付——本文的现状基线）；`internal/memory`、`internal/skilldistill`、`internal/skillmgr`、`internal/skillstats`、`internal/skillcli`、`internal/tui/distill*.go` 源码。
+> **依据**：[`notes-memory-skill-gap.md`](archive/notes-memory-skill-gap.md) §5 P0 两问（备料笔记，2026-11-12）；[`feature-skill-distill.md`](feature-skill-distill.md)（M-SD1/2/3 + 草稿收件箱已交付——本文的现状基线）；`internal/memory`、`internal/skilldistill`、`internal/skillmgr`、`internal/skillstats`、`internal/skillcli`、`internal/tui/distill*.go` 源码。
 > **范围边界**：不动 M-SD2 自动路径（永不 install 的铁律不变）、不动 `.drafts/` 收件箱语义、不动 skill 加载器、不给 skill 加衰减机制（理由见 §5）。
 
 ---

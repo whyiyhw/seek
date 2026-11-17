@@ -54,7 +54,7 @@ type turnRecord struct {
 // (docs/pitfalls.md "cumulative prompt tokens are meaningless").
 //
 // children carries adopted subagent Trackers (v5 柱 G — see
-// docs/prd/feature-subagent.md §3.7). The parent walks the slice on
+// docs/prd/archive/feature-subagent.md §3.7). The parent walks the slice on
 // Cumulative()/CumulativeCost() so a session's displayed total includes
 // every active/completed subagent's usage. children DOES NOT affect
 // Last()/LastCost() — those remain "this Tracker's own most recent
@@ -154,11 +154,11 @@ func (t *Tracker) Record(u deepseek.Usage, model string, tier pricing.Tier) {
 // orchestrator contract" to a runtime check at the exact double-count
 // site. The check is gated on hasBase because in a fresh (non-resumed)
 // parent there's no overlap risk — adopt-recorded-child is benign even
-// if structurally unusual. See docs/prd/feature-subagent.md §8 risk
+// if structurally unusual. See docs/prd/archive/feature-subagent.md §8 risk
 // "resume cost 双重计数" for the rationale.
 //
 // SAFETY — nested adoption is forbidden. v5 limits spawn depth = 1
-// (docs/prd/v5.md §2; feature-subagent.md §2 anti-goals). If child
+// (docs/prd/archive/v5.md §2; feature-subagent.md §2 anti-goals). If child
 // already has children of its own, AdoptChild panics. This is the
 // AdoptChild-side defense in depth; the agent tool's exclusion from
 // subagent registries is the first line.

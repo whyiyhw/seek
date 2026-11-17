@@ -1,5 +1,5 @@
 // Package worktree manages seek-owned git worktrees for v5 柱 G
-// subagent isolation (PRD docs/prd/feature-subagent.md §3.8).
+// subagent isolation (PRD docs/prd/archive/feature-subagent.md §3.8).
 //
 // Each worktree lives at ~/.seek/projects/<pid>/worktrees/<wt-id>/
 // on the filesystem and is anchored by a git ref under

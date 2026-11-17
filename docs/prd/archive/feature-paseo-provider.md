@@ -1,6 +1,6 @@
 # Feature: seek 接入 paseo 作为 provider（可行性设计稿）
 
-**所属版本**：独立 feature（平台化线，与 [`feature-remote-control-plane.md`](feature-remote-control-plane.md) 平行的另一条"外部驱动 seek"路径）
+**所属版本**：独立 feature（平台化线，与 [`feature-remote-control-plane.md`](../feature-remote-control-plane.md) 平行的另一条"外部驱动 seek"路径）
 **前置阅读**：[`feature-acp.md`](feature-acp.md)（柱 P：`seek acp` 现状）、`internal/acp/server.go`、`cmd/seek/main.go` 的 `runACP`/`acpBackend`/`buildProvider`、`~/.paseo/config.json` 的 `agents.providers.zcode`（acp 型 provider 先例）、butler 仓 `internal/drive`（`paseo.go` 派发、`lane.go`/`usagepaseo.go` 车道额度闸）
 **状态**：📐 **设计稿**。只出文档不改代码；落地另开卡（§6 里程碑是拆卡建议）。paseo 侧行为来自对 Paseo.app `app.asar` 内 ACP adapter（`createAcpProviderConnection` / `AcpRuntime`，2026-11-12 快照，SDK `@agentclientprotocol/sdk` v1）的逆向阅读——结论以 capability 协商语义为准，不依赖其内部实现细节。
 
@@ -139,5 +139,5 @@
 ## 7. 与其它 PRD 的关系
 
 - **[`feature-acp.md`](feature-acp.md)**：本卡是其续篇——backlog ⑥（per-session cwd）从"优化项"升格为 paseo 场景**必做**（§2.2）；backlog ①（request_permission 审批）与 ③（多 session）维持不动；backlog ⑦（Zed mcpServers 透传）在 paseo 场景同构存在、同样不做。
-- **[`feature-remote-control-plane.md`](feature-remote-control-plane.md)**：两条平行的"外部驱动 seek"路径——本卡走 **ACP/stdio**（paseo 当 ACP client，每会话一个直连子进程），控制平面走 **Frontend 端口**（`seek serve` sidecar，收发分离）。不共享代码，共享"零 daemon、直连子进程、核心 agent loop 不动"的哲学；paseo 车道落地不依赖控制平面任何部分。
+- **[`feature-remote-control-plane.md`](../feature-remote-control-plane.md)**：两条平行的"外部驱动 seek"路径——本卡走 **ACP/stdio**（paseo 当 ACP client，每会话一个直连子进程），控制平面走 **Frontend 端口**（`seek serve` sidecar，收发分离）。不共享代码，共享"零 daemon、直连子进程、核心 agent loop 不动"的哲学；paseo 车道落地不依赖控制平面任何部分。
 - **架构约束继承**：`internal/acp` 不引入新依赖；协议字节确定性（prefix-cache）不受影响（ACP 是外层传输，不动消息历史）；工具 schema 零改动。

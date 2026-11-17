@@ -2,7 +2,7 @@
 
 > **对应版本**：v0.7.x
 > **对应代码**：`internal/askuser/`、`internal/tools/askuser/`、`internal/skill/builtin/code-review.md`、`internal/tui/commands.go`（`/code-review`）、`internal/bgjob/`、`internal/tools/bash/bg_*.go`、`internal/tools/monitor/`、`internal/lspclient/`、`internal/tools/references/`、`internal/routines/webhook.go`、`internal/config/config.go`（`push_webhooks`）
-> **PRD**：[`docs/prd/v6.md`](../prd/v6.md) · `docs/prd/feature-{askuser-v2,code-review,bash-monitor,lsp,mobile-push}.md`
+> **PRD**：[`docs/prd/archive/v6.md`](../prd/archive/v6.md) · `docs/prd/feature-{askuser-v2,code-review,bash-monitor,lsp,mobile-push}.md`
 > **验收**：5/5 柱全部落地；每柱有独立测试套 `-race` 绿
 > **起点**：第 22 章（v5 柱 H 时序触发 Routines）。v5 关闭了 seek 与 Claude Code 之间最后三个架构级 P0 缺口，剩余的差距收敛为 5 项互不耦合的**单点工具**——每个都是"一天到一周"的量级，没有共享基础设施，可以独立 ship。
 

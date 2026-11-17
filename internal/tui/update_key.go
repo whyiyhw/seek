@@ -15,7 +15,7 @@ import (
 // beepCmd emits a terminal bell (BEL, \a). Written to os.Stderr so it
 // bypasses bubbletea's render buffer — most terminals beep on the byte
 // regardless of alt-screen / cursor state. Used by Tab completion
-// when there's no match (PRD docs/prd/feature-tui-ergonomics.md §3.3).
+// when there's no match (PRD docs/prd/archive/feature-tui-ergonomics.md §3.3).
 //
 // Best-effort: terminals with bell muted or VT-bell-disabled will see
 // nothing, which is fine; the rest of the UI doesn't depend on this
@@ -373,7 +373,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// v4 柱 D suggested-reply: Tab accepts the pending prediction when
 	// no picker / menu wants Tab for its own purpose AND the input box
 	// is empty (Tab on non-empty input is the textarea-native "insert
-	// tab char" / focus-jump). PRD docs/prd/feature-suggested-reply.md §4.4.
+	// tab char" / focus-jump). PRD docs/prd/archive/feature-suggested-reply.md §4.4.
 	if msg.Code == tea.KeyTab &&
 		m.suggestedReply != "" &&
 		m.suggestedReplyValid &&
@@ -390,7 +390,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// raw bubbletea key events into named, user-rebindable Actions. The
 	// switch below dispatches by Action; only the very-special cases
 	// (CRLF-paste insertion, picker key vocabulary) still inspect
-	// msg.Code directly. PRD docs/prd/feature-tui-ergonomics.md §4.
+	// msg.Code directly. PRD docs/prd/archive/feature-tui-ergonomics.md §4.
 	action := m.keymap().Resolve(msg)
 	switch action {
 	case keymap.ActionInterrupt:

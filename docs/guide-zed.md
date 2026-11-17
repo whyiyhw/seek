@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射已跑通（真 Zed 验证），但还简陋——审批门、session resume、slash 命令等见 §5 的优化清单。设计见 [`docs/prd/feature-acp.md`](./prd/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射已跑通（真 Zed 验证），但还简陋——审批门、session resume、slash 命令等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -102,7 +102,7 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 
 > ⚠️ **仅受信本机 headless 场景使用**（paseo provider 的 `env` 块就是典型用法）。`PrefYolo` 放开的是本机 bash 与写文件（远程变更仍被 no-remote 守卫拦下）；env 会被原样继承给子进程，不要在不受信、共享或远程可达的环境里设置。默认关（unset = `Deny`）；只在 `seek acp` 车道生效——shell 里残留的 `SEEK_ACP_YOLO` 对 TUI / print 模式**无**影响。
 
-设计出处：[`docs/prd/feature-paseo-provider.md`](./prd/feature-paseo-provider.md) §3.3（缺口 D-2）。
+设计出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.3（缺口 D-2）。
 
 ---
 

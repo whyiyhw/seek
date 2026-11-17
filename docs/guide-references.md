@@ -4,7 +4,7 @@
 
 > `references` asks the language server who calls/uses a symbol — resolving the real symbol, following aliased imports, ignoring comments and strings. It's the one thing a name-grep can't do.
 
-> **范围说明**：seek 的 LSP 集成是**瘦身版**——只做 `references`。`definition`/`hover`/符号列表经 ROI 评估**故意不做**（Go 里被 grep + `go build` 覆盖，增量低；动态语言里 `references` 才是高价值的硬赢）。设计与取舍见 [`docs/prd/feature-lsp.md`](./prd/feature-lsp.md)。
+> **范围说明**：seek 的 LSP 集成是**瘦身版**——只做 `references`。`definition`/`hover`/符号列表经 ROI 评估**故意不做**（Go 里被 grep + `go build` 覆盖，增量低；动态语言里 `references` 才是高价值的硬赢）。设计与取舍见 [`docs/prd/archive/feature-lsp.md`](./prd/archive/feature-lsp.md)。
 
 ---
 

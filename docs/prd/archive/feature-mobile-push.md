@@ -1,8 +1,8 @@
 # Feature: 移动端通知 webhook 桥（v6 柱 M）
 
 **所属版本**：seek v0.7.0 · v6 柱 M 第三项（柱 I AskUserQuestion v2、柱 J code-review 已 ship）
-**前置阅读**：[`v6.md`](v6.md) §3.5 草稿、[`internal/routines/notify.go`](../../internal/routines/notify.go)（`Notifier` 原语）、[`internal/routines/tick.go`](../../internal/routines/tick.go)（`TickOptions` + 派发点 L523）、[`internal/routines/trigger.go`](../../internal/routines/trigger.go)（trigger 派发点 L245）、[`internal/config/config.go`](../../internal/config/config.go)（`Config` 结构）、[`internal/tools/webfetch/validate.go`](../../internal/tools/webfetch/validate.go)（SSRF gate，**对照而非复用**）、[`docs/prd/feature-routines.md`](feature-routines.md)（v5 柱 H）
-**状态**：🚀 已交付（v0.7.0 · v6 柱 M）。`internal/routines/webhook.go`（`WebhookDispatcher` sibling + 4 format + 5xx 重试一次 + scheme-only 校验放行私网）+ `TickOptions.Webhook` 接线两派发点 + `config.PushWebhook` + `seek cron config check [--probe]` + `routinescli.WebhookDispatcherFromConfig`（三调用点共用）。webhook + config-check 测试全过，`internal/{routines,routinescli,config}` 全 `-race` 绿，全 repo `go test ./...` 绿。文档见 [`guide-cron.md §4`](../guide-cron.md)。
+**前置阅读**：[`v6.md`](v6.md) §3.5 草稿、[`internal/routines/notify.go`](../../../internal/routines/notify.go)（`Notifier` 原语）、[`internal/routines/tick.go`](../../../internal/routines/tick.go)（`TickOptions` + 派发点 L523）、[`internal/routines/trigger.go`](../../../internal/routines/trigger.go)（trigger 派发点 L245）、[`internal/config/config.go`](../../../internal/config/config.go)（`Config` 结构）、[`internal/tools/webfetch/validate.go`](../../../internal/tools/webfetch/validate.go)（SSRF gate，**对照而非复用**）、[`docs/prd/archive/feature-routines.md`](feature-routines.md)（v5 柱 H）
+**状态**：🚀 已交付（v0.7.0 · v6 柱 M）。`internal/routines/webhook.go`（`WebhookDispatcher` sibling + 4 format + 5xx 重试一次 + scheme-only 校验放行私网）+ `TickOptions.Webhook` 接线两派发点 + `config.PushWebhook` + `seek cron config check [--probe]` + `routinescli.WebhookDispatcherFromConfig`（三调用点共用）。webhook + config-check 测试全过，`internal/{routines,routinescli,config}` 全 `-race` 绿，全 repo `go test ./...` 绿。文档见 [`guide-cron.md §4`](../../guide-cron.md)。
 **预估工作量**：~2 天（与 v6 §3.5 估时一致）
 
 ---

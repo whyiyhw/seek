@@ -4,7 +4,7 @@
 // (CI webhooks via file bridge) all share the same Store + tick
 // engine + per-platform OS notification adapter.
 //
-// See docs/prd/feature-routines.md for the full design — in
+// See docs/prd/archive/feature-routines.md for the full design — in
 // particular §3 (data model + signatures) and §5 (integration
 // with subagent / session / permission).
 //

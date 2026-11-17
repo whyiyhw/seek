@@ -70,7 +70,7 @@ Files:
   ~/.seek/trusted-projects.json   Trust store.
   ~/.seek/hooks-audit.jsonl       Audit log.
 
-See docs/prd/feature-shell-hooks.md for the full spec.
+See docs/prd/archive/feature-shell-hooks.md for the full spec.
 `)
 }
 

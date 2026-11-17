@@ -4,7 +4,7 @@ Goal 让 seek **自动多轮工作**直到某个条件满足——不要求你�
 
 > Goal runs seek unattended across multiple turns toward a completion CONDITION, with a cheap model judging after each turn whether the condition is satisfied — met, capped, stalled, or canceled.
 
-设计决策见 [`docs/prd/feature-goal.md`](prd/feature-goal.md)。
+设计决策见 [`docs/prd/archive/feature-goal.md`](prd/archive/feature-goal.md)。
 
 ---
 
@@ -113,4 +113,4 @@ seek cron create --at '0 6 * * *' --goal "<condition>"
 
 - [`docs/guide-autopilot.md`](guide-autopilot.md)——多 agent 并行探索
 - [`docs/guide-cron.md`](guide-cron.md)——定时任务
-- [`docs/prd/feature-goal.md`](prd/feature-goal.md)——Goal 的设计文档与验收标准
+- [`docs/prd/archive/feature-goal.md`](prd/archive/feature-goal.md)——Goal 的设计文档与验收标准

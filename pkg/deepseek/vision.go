@@ -1,7 +1,7 @@
 // vision.go — multimodal (vision) message plumbing: the ImagePart type,
 // the model allow-list, wire-form marshalling, and the send-time
 // asset→data-URL resolution. feature-vision PRD
-// (docs/prd/feature-vision.md) D1–D3.
+// (docs/prd/archive/feature-vision.md) D1–D3.
 //
 // This file is also the DUAL-FORM serialisation station for document
 // parts: Message.Files rides the same two forms as Images (files.go

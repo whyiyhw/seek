@@ -4,7 +4,7 @@ Autopilot 让 seek **在无人值守时自主完成复杂任务**：接收一个
 
 > Autopilot lets seek complete complex goals **while you're away**: take a goal → decompose → parallel worktree sub-agents → aggregate → local commit. It turns your project into a **team that works while you sleep**.
 
-设计与决策见 [`docs/prd/feature-autopilot.md`](prd/feature-autopilot.md)。
+设计与决策见 [`docs/prd/archive/feature-autopilot.md`](prd/archive/feature-autopilot.md)。
 
 ---
 

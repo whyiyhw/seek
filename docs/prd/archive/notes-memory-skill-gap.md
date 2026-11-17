@@ -1,10 +1,10 @@
 # Notes：memory 与 skill 联动现状盘点——蒸馏漏斗里 L/M/S 与 SKILL.md 的断层
 
 > 性质：备料笔记（`notes-` 前缀），为「skill 自动蒸馏」设计卡提供事实底座。只盘点，不改代码，不做设计承诺。
-> 日期：2026-11-12 · 分支 `drive/c_evvow4` · 依据：`docs/prd/v1.md`、`docs/prd/v2.md` §4、`internal/memory/`、`internal/skill*/`、`cmd/seek/main.go`、`docs/narrative/seek.md`
+> 日期：2026-11-12 · 分支 `drive/c_evvow4` · 依据：`docs/prd/archive/v1.md`、`docs/prd/archive/v2.md` §4、`internal/memory/`、`internal/skill*/`、`cmd/seek/main.go`、`docs/narrative/seek.md`
 > 背景：`docs/narrative/seek.md:25,51` 已把「skill 不会自动蒸馏」列为自进化内环的缺口，设计卡待开。
 
-> **状态注记（2026-11-16，卡 `c_5fdsqb`）**：§5 P0 两问已由 [`feature-memory-skill-bridge.md`](feature-memory-skill-bridge.md) 出设计稿回答——①落点 = project 级 `<project>/.seek/skills/` + review 第四动作 `s`（击键即闸，不发明新 gate）；②生命周期 = **skill 永生 + 蒸馏判重兜底**（不做 decay 移植，论证见该文 §5.2），`.stats.jsonl` 消费端补 `--idle` 观察视图。§1.3 坐实的 PRD↔代码 GC 偏差已按「实现是对的」在 `v1.md` 三处勘误（2026-11-16）。另两处事实已被时间更新，以现状代码为准：§2.2「没有任何入口」——`skillmgr.DraftStore`（草稿区）、`seek skill drafts approve`（人审安装）、`skilldistill` 全漏斗（M-SD1/2/3，见 `feature-skill-distill.md` 状态行）已落地；§2.2「`.stats.jsonl` 从不读回」——`skillstats.Read` + `seek skill stats [--distill]`（M8.4 / 三期）已是消费端。§5 P1 #4「判重复用 merge.go」在设计稿中修正为复用 `skilldistill.trigramJaccard`（M↔skill 边界的生产实现，CJK 正确；变更记录见 feature 文 §8.2）。
+> **状态注记（2026-11-16，卡 `c_5fdsqb`）**：§5 P0 两问已由 [`feature-memory-skill-bridge.md`](../feature-memory-skill-bridge.md) 出设计稿回答——①落点 = project 级 `<project>/.seek/skills/` + review 第四动作 `s`（击键即闸，不发明新 gate）；②生命周期 = **skill 永生 + 蒸馏判重兜底**（不做 decay 移植，论证见该文 §5.2），`.stats.jsonl` 消费端补 `--idle` 观察视图。§1.3 坐实的 PRD↔代码 GC 偏差已按「实现是对的」在 `v1.md` 三处勘误（2026-11-16）。另两处事实已被时间更新，以现状代码为准：§2.2「没有任何入口」——`skillmgr.DraftStore`（草稿区）、`seek skill drafts approve`（人审安装）、`skilldistill` 全漏斗（M-SD1/2/3，见 `feature-skill-distill.md` 状态行）已落地；§2.2「`.stats.jsonl` 从不读回」——`skillstats.Read` + `seek skill stats [--distill]`（M8.4 / 三期）已是消费端。§5 P1 #4「判重复用 merge.go」在设计稿中修正为复用 `skilldistill.trigramJaccard`（M↔skill 边界的生产实现，CJK 正确；变更记录见 feature 文 §8.2）。
 
 ---
 
@@ -51,7 +51,7 @@ L  ~/.seek/soul.md（markdown，## Stable / ## Pending 两段）
 - **分数**：`score = (recall_count + 1) × exp(-age / half_life)`，`last_active_at = max(created, updated, last_recalled)`，半衰期默认 30 天（`SEEK_MEMORY_HALFLIFE_DAYS` 可调）。
 - **规则链**（RunGC，SessionStart 跑）：pinned 永不评估 → auto_sourced 宽限期 30 天 → 新条目宽限 7 天 → score ≥0.5 保留 → <0.5 标 stale（剔出索引、仍可 recall）→ stale 且 <0.1 持续 60 天归档 `archived.jsonl`。
 - **升格通道**（与 GC 对称的「生命周期向上」）：`observe_count ≥ 3`（跨 session 重复观察）或 `recall_count ≥ 3`（模型实际在用）→ `auto_sourced` 自动置 false。
-- **⚠ PRD 与实现偏差**：`docs/prd/v1.md:438` 与验收 #14 写的是 auto_sourced **硬豁免**（「无论 score 多低、创建多久，都不被标记 stale 或归档」），但 `score.go:40-46` 实现的是 **30 天宽限后参与正常 GC**（注释明确说硬豁免会导致无界增长）。设计卡引用 GC 语义前需先把这处偏差坐实到 PRD 或代码任一侧。
+- **⚠ PRD 与实现偏差**：`docs/prd/archive/v1.md:438` 与验收 #14 写的是 auto_sourced **硬豁免**（「无论 score 多低、创建多久，都不被标记 stale 或归档」），但 `score.go:40-46` 实现的是 **30 天宽限后参与正常 GC**（注释明确说硬豁免会导致无界增长）。设计卡引用 GC 语义前需先把这处偏差坐实到 PRD 或代码任一侧。
 
 ### 1.4 L 层维护（M5.10/M5.12，已交付）
 
@@ -104,7 +104,7 @@ skill manifest 经 `sysprompt.Compose(SkillManifest)` 进 **system prompt**（`c
 
 ### 3.3 今天唯一的桥（prose 级，无代码）
 
-`docs/prd/v1.md:675`：「Skill 的 `.md` 可引用 `memory_recall("name")` 拉项目决策详情」——改动量标 0。即：skill body 里**写一句话让模型自己去调 memory 工具**。没有 schema、没有校验、没有反向（M 条目不能指向 skill）。代码级两侧零 import（`internal/memory` 不识 skill；`internal/skill*` 不识 memory，grep 到的两处 "memory" 是无关用法）。
+`docs/prd/archive/v1.md:675`：「Skill 的 `.md` 可引用 `memory_recall("name")` 拉项目决策详情」——改动量标 0。即：skill body 里**写一句话让模型自己去调 memory 工具**。没有 schema、没有校验、没有反向（M 条目不能指向 skill）。代码级两侧零 import（`internal/memory` 不识 skill；`internal/skill*` 不识 memory，grep 到的两处 "memory" 是无关用法）。
 
 ## 4. 失联点——漏斗断在哪
 

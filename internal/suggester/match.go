@@ -40,7 +40,7 @@ const matchPrefixRunes = 3
 // prediction" (predicted="用 A"，actual="好的，用 A 方案") AND the
 // inverse ("predicted="用 A 方案"，actual="好的，用 A").
 //
-// PRD docs/prd/feature-suggested-reply.md §4.6.
+// PRD docs/prd/archive/feature-suggested-reply.md §4.6.
 func normalizedMatch(actual, predicted string) bool {
 	a := normalize(actual)
 	p := normalize(predicted)

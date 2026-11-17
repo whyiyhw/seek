@@ -12,7 +12,7 @@
 // output stays byte-identical across turns — and across restarts
 // given the same registry — load-bearing for DeepSeek's prefix cache.
 //
-// See docs/prd/feature-subagent.md for the full design; this file
+// See docs/prd/archive/feature-subagent.md for the full design; this file
 // is the thinnest possible Go reflection of §3.1 (LLM schema) +
 // §3.2 (wire-format result).
 package agent
@@ -52,7 +52,7 @@ import (
 // agenttypes.Builtins() — i.e. no agents files + empty config keeps
 // the three built-ins in the enum, the acceptance-#5 guarantee.
 //
-// Mirrors docs/prd/feature-subagent.md §3.1 verbatim with one
+// Mirrors docs/prd/archive/feature-subagent.md §3.1 verbatim with one
 // deviation: `maxLength` is omitted from the `description` field
 // because tools.UnmarshalStrict doesn't enforce JSON Schema length
 // constraints (only DisallowUnknownFields). Length is enforced in
@@ -220,7 +220,7 @@ type Args struct {
 // enforced by our UnmarshalStrict path; these constants cover the
 // pathology where the model produces a runaway description.
 //
-// Numbers come from docs/prd/feature-subagent.md §3.1 ("description
+// Numbers come from docs/prd/archive/feature-subagent.md §3.1 ("description
 // > 120 chars → 截断 + hint; prompt > 32 KB → 失败 prompt_too_long").
 const (
 	maxDescriptionLen = 120

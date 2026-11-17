@@ -1,5 +1,5 @@
 // visioninput.go — the submit-time router for natively-attached
-// images (feature-vision D3/D4, docs/prd/feature-vision.md).
+// images (feature-vision D3/D4, docs/prd/archive/feature-vision.md).
 //
 // One instance is shared by all three input entries (TUI submit,
 // print/-p/pipe, ACP paste) so the capability decision and the marker

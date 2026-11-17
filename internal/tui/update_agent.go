@@ -199,7 +199,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 // scheduleSuggestion returns a tea.Cmd that runs the suggester's
 // side-channel prediction off the bubbletea thread and surfaces the
 // result via suggestionReadyMsg. Returns nil when prediction
-// shouldn't fire (PRD docs/prd/feature-suggested-reply.md §3):
+// shouldn't fire (PRD docs/prd/archive/feature-suggested-reply.md §3):
 //
 //   - no suggester configured (—no-suggest)
 //   - no agent / no history
@@ -230,7 +230,7 @@ func (m Model) scheduleSuggestion(wasCanceled bool) tea.Cmd {
 	// intent-eliciting phrases). Saves an API call AND saves the
 	// user from a placeholder the model would have padded out
 	// from nothing on an obviously-finished turn.
-	// PRD docs/prd/feature-suggested-reply.md §3 + dogfood follow-up.
+	// PRD docs/prd/archive/feature-suggested-reply.md §3 + dogfood follow-up.
 	if !suggester.ShouldPredict(last.Content) {
 		return nil
 	}

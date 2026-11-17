@@ -112,7 +112,7 @@ import (
 // System prompt assembly (template literal, Compose, ModeLabel)
 // lives in internal/sysprompt. Two callers consume it: cmd/seek (this
 // file, root agent) and internal/subagent (v5 柱 G, subagents). PRD
-// docs/prd/feature-subagent.md §3.6.1 specifies the composition rules
+// docs/prd/archive/feature-subagent.md §3.6.1 specifies the composition rules
 // and the byte-determinism invariant that keeps DeepSeek's prefix
 // cache hot.
 
@@ -801,7 +801,7 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "session" {
 		return sessioncli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
-	// v3 checkpoint subcommand (PRD docs/prd/feature-checkpoint.md §4.1).
+	// v3 checkpoint subcommand (PRD docs/prd/archive/feature-checkpoint.md §4.1).
 	// Dispatched ahead of flag.Parse so the user can pass --session etc.
 	// without colliding with the top-level binary flags.
 	if len(os.Args) >= 2 && os.Args[1] == "checkpoint" {
@@ -816,7 +816,7 @@ func run() error {
 	// `seek hooks ...` — list / check / trust / audit. Dispatched
 	// before global flag parse for the same reason as `skill`:
 	// hooks queries don't need API keys, sessions, or a project
-	// directory. See PRD docs/prd/feature-shell-hooks.md §4.1.
+	// directory. See PRD docs/prd/archive/feature-shell-hooks.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "hooks" {
 		return hookscli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
@@ -842,7 +842,7 @@ func run() error {
 	// PRD §5.1 wants exit code 2 for validation errors (so CI can
 	// distinguish "bad config" from "system failure"); keyscli signals
 	// this via ErrUsage which we unwrap and route to os.Exit(2) here.
-	// See PRD docs/prd/feature-tui-ergonomics.md §5.1.
+	// See PRD docs/prd/archive/feature-tui-ergonomics.md §5.1.
 	if len(os.Args) >= 2 && os.Args[1] == "keys" {
 		if err := keyscli.Run(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if errors.Is(err, keyscli.ErrUsage) {
@@ -1067,7 +1067,7 @@ func run() error {
 	// (they're orthogonal so could in principle co-exist; cmdYolo/
 	// cmdPlan enforce mutual exclusion at the UI layer).
 	//
-	// ACP lane (D-2, docs/prd/feature-paseo-provider.md §3.3): flags
+	// ACP lane (D-2, docs/prd/archive/feature-paseo-provider.md §3.3): flags
 	// NEVER reach it — flag.Parse stops at the "acp" positional — so
 	// --yolo is inexpressible and pref would stay Deny (bash denied
 	// across the board → unattended lanes can't work). The escape
@@ -1339,7 +1339,7 @@ func run() error {
 	bashEnvKeep := bashCfg.BashEnvPassthrough
 	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
 	// No-remote guard for the unattended lanes: goal and SEEK_ACP_YOLO
-	// (docs/prd/feature-paseo-provider.md §3.3) both run yolo with no
+	// (docs/prd/archive/feature-paseo-provider.md §3.3) both run yolo with no
 	// human to ask — yolo opens LOCAL edit/shell only; push/PR-class
 	// remote mutations stay blocked (double insurance with the drive
 	// cards' own "never push" sandbox discipline).
@@ -1582,7 +1582,7 @@ func run() error {
 	// the TUI Options so the loaded KeyMap (or default fallback) is
 	// available at Options.Keymap. Warnings from a malformed
 	// keybindings.toml go to stderr; the file is silently ignored if
-	// absent (common case). PRD docs/prd/feature-tui-ergonomics.md §4.4.
+	// absent (common case). PRD docs/prd/archive/feature-tui-ergonomics.md §4.4.
 	userKeymapPath, _ := paths.UserKeybindings()
 	userKeymap, _ := keymap.Load(userKeymapPath, os.Stderr)
 
@@ -1631,7 +1631,7 @@ func run() error {
 	// Predictor and the InjectCalibration message-preparer are nil —
 	// `agent.runTurn*` no-ops the PrepareMessages hook on nil, and the
 	// TUI suggester goroutine is gated on Options.Suggester != nil.
-	// PRD docs/prd/feature-suggested-reply.md §4.7.
+	// PRD docs/prd/archive/feature-suggested-reply.md §4.7.
 	appCfg, _ := config.Load()
 	suggestEnabled := !*noSuggest && appCfg.SuggestReplyEnabled() && dsClient != nil
 	var predictor *suggester.Predictor
@@ -3264,7 +3264,7 @@ func envBoolTrue(name string) bool {
 // goroutine (v5 柱 H). False when --no-cron-tick opts out, or when the
 // ACP headless lane runs: those processes are short-lived spawns (paseo
 // probes / Zed sessions) that kill the detached tick goroutine mid-run —
-// half-fired cron job risk, zero benefit (docs/prd/feature-paseo-provider.md
+// half-fired cron job risk, zero benefit (docs/prd/archive/feature-paseo-provider.md
 // §2.3). The two axes are independent because --no-cron-tick cannot
 // substitute for acpLane: flag.Parse stops at the "acp" positional, so
 // the flag never reaches that lane.

@@ -4,7 +4,7 @@
 // injects a calibration system note into the next turn's messages so
 // the model can self-correct.
 //
-// See PRD docs/prd/feature-suggested-reply.md.
+// See PRD docs/prd/archive/feature-suggested-reply.md.
 //
 // Design contract:
 //

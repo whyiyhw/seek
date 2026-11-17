@@ -1,7 +1,7 @@
 # Feature: Routines（cron / wakeup / push）
 
 **所属版本**：v5（柱 H · 时序维度编排）
-**前置阅读**：[PRD v5 umbrella](v5.md) §2.5（时序触发零常驻进程约束）、§3.2（共享配置目录）、[`docs/prd/feature-subagent.md`](feature-subagent.md)（柱 G 已交付参考）
+**前置阅读**：[PRD v5 umbrella](v5.md) §2.5（时序触发零常驻进程约束）、§3.2（共享配置目录）、[`docs/prd/archive/feature-subagent.md`](feature-subagent.md)（柱 G 已交付参考）
 **状态**：🚀 已交付（M11.2 + M11.3 全部落地，v0.6.1）
 **目标里程碑**：M11.2（cron 骨架）+ M11.3（wakeup + push + 远程触发）
 **目标发版**：v0.6.1（v0.6.0 ship 完柱 G 后接续）
@@ -219,7 +219,7 @@ seek cron tick
 └── 6. wait all goroutines; release tick.lock; exit
 ```
 
-**Why advisory flock**: cross-platform `golang.org/x/sys/unix.Flock` works on Linux/macOS; Windows uses `LockFileEx`. We wrap via [`internal/pathop`](../../internal/pathop) or a new tiny `internal/flock` helper. Failure to acquire = skip silently — the engine is conservative-pessimistic; "ran zero times this tick" is always recoverable, "ran twice in parallel" is not.
+**Why advisory flock**: cross-platform `golang.org/x/sys/unix.Flock` works on Linux/macOS; Windows uses `LockFileEx`. We wrap via [`internal/pathop`](../../../internal/pathop) or a new tiny `internal/flock` helper. Failure to acquire = skip silently — the engine is conservative-pessimistic; "ran zero times this tick" is always recoverable, "ran twice in parallel" is not.
 
 **Subprocess timeout**: hard 30 min default per job; configurable via `--timeout` on `create`. Beyond timeout → SIGTERM, then SIGKILL after grace. Recorded as `killed`.
 

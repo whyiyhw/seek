@@ -4,7 +4,7 @@ Hooks 是 seek 的**生命周期拦截点**，让你在 agent 的关键事件（
 
 > Hooks define lifecycle interception points for the seek agent — inject custom logic before/after prompts, before/after tool use, and at session boundaries.
 
-设计决策见 [`docs/prd/feature-shell-hooks.md`](prd/feature-shell-hooks.md)。
+设计决策见 [`docs/prd/archive/feature-shell-hooks.md`](prd/archive/feature-shell-hooks.md)。
 
 ---
 

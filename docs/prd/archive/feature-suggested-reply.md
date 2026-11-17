@@ -1,7 +1,7 @@
 # Feature: 建议回复（Suggested Reply / 模型猜下一步）
 
 **所属版本**：v4 · 柱 D（闭环工效 / 模型自校准）
-**前置阅读**：[PRD v3 umbrella](v3.md)、[`feature-tui-ergonomics.md`](feature-tui-ergonomics.md)（M9.5 Tab 补全语义在 input 框的现有约定）、[`internal/tui/update_key.go`](../../internal/tui/update_key.go)（M9.4 后的 keymap 分发）
+**前置阅读**：[PRD v3 umbrella](v3.md)、[`feature-tui-ergonomics.md`](feature-tui-ergonomics.md)（M9.5 Tab 补全语义在 input 框的现有约定）、[`internal/tui/update_key.go`](../../../internal/tui/update_key.go)（M9.4 后的 keymap 分发）
 **状态**：🚀 已交付（M10.0 / v0.5.0）。`--no-suggest` CLI flag（`cmd/seek/main.go:667`）+ `suggest_reply` config + 预测尾调用 + Tab 接受 + `renderSuggestedReplyHint`（`internal/tui/view.go:256`）+ reverse-injection 闭环全部 ship。
 **预估工作量**：~3 天（预测尾调用 + Tab 接受 + UI + 反向注入闭环 + 测试）
 

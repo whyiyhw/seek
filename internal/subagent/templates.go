@@ -23,7 +23,7 @@ import (
 // fallback for Managers with no AgentTypes wired and as the
 // byte-identity oracle for the tests.
 //
-// See docs/prd/feature-subagent.md §3.6 for the source-of-truth
+// See docs/prd/archive/feature-subagent.md §3.6 for the source-of-truth
 // table; changes to the built-in values must edit
 // internal/agenttypes/builtin.go in lock-step.
 type Template struct {

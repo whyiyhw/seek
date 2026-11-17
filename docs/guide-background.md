@@ -4,7 +4,7 @@
 
 > `bash run_in_background` plus the `monitor` tool let the model push **long-running commands** to the background, get the turn back immediately, and check progress whenever. No more a 5-minute build holding a turn hostage until it times out.
 
-这套机制是**会话级**的（柱 K，v6）：后台任务随当前 seek 会话生死，**不写盘、不跨重启**——和 [`seek cron`](./guide-cron.md)（委派 OS 调度器、跨进程）是两套完全不同的东西。设计与决策见 [`docs/prd/feature-bash-monitor.md`](./prd/feature-bash-monitor.md)。
+这套机制是**会话级**的（柱 K，v6）：后台任务随当前 seek 会话生死，**不写盘、不跨重启**——和 [`seek cron`](./guide-cron.md)（委派 OS 调度器、跨进程）是两套完全不同的东西。设计与决策见 [`docs/prd/archive/feature-bash-monitor.md`](./prd/archive/feature-bash-monitor.md)。
 
 ---
 

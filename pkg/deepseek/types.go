@@ -72,7 +72,7 @@ type Message struct {
 	// here (rather than as a sidecar) for proximity: each assistant
 	// message carries the prediction it spawned, and the next user
 	// message's match check can read it via a single-step lookback.
-	// See PRD docs/prd/feature-suggested-reply.md §4.5.
+	// See PRD docs/prd/archive/feature-suggested-reply.md §4.5.
 	PredictedNext string `json:"predicted_next,omitempty"`
 }
 

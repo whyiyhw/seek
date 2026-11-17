@@ -4,7 +4,7 @@ Subagents let the parent agent spawn child agents — each with its own session,
 
 > The parent agent can spawn subagents for parallel execution — isolated sessions, token budgets, and optional git worktrees. Only the summary crosses back, preserving prefix cache.
 
-设计文档见 [`docs/prd/feature-subagent.md`](prd/feature-subagent.md)。
+设计文档见 [`docs/prd/archive/feature-subagent.md`](prd/archive/feature-subagent.md)。
 
 ---
 
@@ -127,5 +127,5 @@ seek worktree gc    # Prune stale worktrees: discarded refs >48h (--older-than),
                     #   unmarked orphans >7d (--orphan-after; 0 disables)
 ```
 
-Design docs: [`docs/prd/feature-subagent.md`](prd/feature-subagent.md).  
+Design docs: [`docs/prd/archive/feature-subagent.md`](prd/archive/feature-subagent.md).  
 Code: `internal/subagent/` · `internal/agenttypes/` · `internal/agentsmgr/` · `internal/agentscli/` · `internal/worktree/` · `internal/tools/agent/`.

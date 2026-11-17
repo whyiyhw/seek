@@ -57,7 +57,7 @@ type Config struct {
 
 	// SuggestReply gates the v4 柱 D suggested-reply subsystem (single
 	// switch covers prediction + UI + calibration injection — PRD
-	// docs/prd/feature-suggested-reply.md §4.7). Pointer so we can
+	// docs/prd/archive/feature-suggested-reply.md §4.7). Pointer so we can
 	// distinguish "field absent → default on" from "field present and
 	// false → user explicitly turned it off"; a bool would silently
 	// default to false for any config file written before v4.
@@ -66,7 +66,7 @@ type Config struct {
 	// PushWebhooks are the v6 柱 M mobile-push targets: cron / trigger
 	// terminal events are POSTed to each (in ADDITION to the OS desktop
 	// notification) so the user is reachable away from the machine.
-	// Empty / absent = no webhooks. See docs/prd/feature-mobile-push.md.
+	// Empty / absent = no webhooks. See docs/prd/archive/feature-mobile-push.md.
 	PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 
 	// SessionNotifySeconds gates the interactive "task finished" push

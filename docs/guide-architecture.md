@@ -12,7 +12,7 @@ seek doesn't start from zero every session. Three layers of persistence capture 
 - **Project Memory (M)** — `<project>/.seek/memory.jsonl`. Project-level decisions (why JSONL? which test pattern?). Accessed via `memory_observe` / `memory_recall`. Auto-indexed into system prompt.
 - **Session (S)** — `<session-dir>/` on disk. Full turn history, checkpoint blobs, skill stats. Live only for the session duration; auto-cleaned on session end (except persistent checkpoints).
 
-Design docs: [`docs/prd/v1.md`](prd/v1.md) (L/M/S three-tier architecture).  
+Design docs: [`docs/prd/archive/v1.md`](prd/archive/v1.md) (L/M/S three-tier architecture).  
 Guide: [`docs/guide-memory.md`](guide-memory.md).  
 Code: `internal/memory/` · `internal/memorycli/` · `cmd/seek/main.go` (dream path).
 
@@ -109,4 +109,4 @@ seek runs **no resident daemon**. Scheduling delegates to the OS (launchd / syst
 - **Explicit env injection** — opt-in `~/.seek/cron/env` overlay file (dotenv format).
 
 Guide: [`docs/guide-cron.md`](guide-cron.md).  
-PRD: `docs/prd/feature-routines.md`.
+PRD: `docs/prd/archive/feature-routines.md`.

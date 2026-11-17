@@ -74,7 +74,7 @@ func truncateSummary(summary string) string {
 }
 
 // FormatCompleted builds the parent tool-result string for a
-// successful subagent run, per docs/prd/feature-subagent.md §3.2.
+// successful subagent run, per docs/prd/archive/feature-subagent.md §3.2.
 //
 // Layout:
 //
