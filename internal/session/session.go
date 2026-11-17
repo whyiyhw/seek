@@ -85,6 +85,15 @@ type Session struct {
 	// doesn't silently leak to future sessions; omitempty keeps the
 	// JSONL header tidy for the common no-override case.
 	Effort string `json:"effort,omitempty"`
+	// Tools records the sorted tool-name set this session runs with
+	// (v8·T1 `-tools` whitelist; the full default registry when the
+	// flag is absent). Additive like Effort — sessions written before
+	// the field exists simply lack it, and a resume of such a session
+	// skips the tool-set-changed warning rather than guessing. The
+	// tools array rides every request, so a mismatch on -resume means
+	// one accepted prefix-cache invalidation — hence the stderr hint
+	// in cmd/seek instead of silently eating the cache bust.
+	Tools []string `json:"tools,omitempty"`
 }
 
 // New constructs a fresh Session with a timestamp-based ID.

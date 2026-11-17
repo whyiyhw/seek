@@ -133,6 +133,37 @@ func (r *Registry) Wire() []deepseek.Tool {
 	return r.frozen
 }
 
+// Whitelist narrows the registry to only the named tools (v8·T1
+// `-tools` bare-core flag). Names not currently registered are
+// silently ignored — callers that need loud validation against the
+// available set do it BEFORE filtering (cmd/seek exits 2 with the
+// name list). An empty keep list is a no-op: the flag's "empty or
+// absent = unchanged" contract lives here so every caller inherits
+// it. Must run before the first Wire() freezes the wire list — same
+// pre-Prompt window the deferred plan/propose/memory_observe
+// registrations rely on.
+func (r *Registry) Whitelist(keep []string) *Registry {
+	if len(keep) == 0 {
+		return r
+	}
+	keepSet := make(map[string]bool, len(keep))
+	for _, n := range keep {
+		keepSet[n] = true
+	}
+	filtered := make([]Tool, 0, len(r.tools))
+	byName := make(map[string]Tool, len(keep))
+	for _, t := range r.tools {
+		if !keepSet[t.Name()] {
+			continue
+		}
+		filtered = append(filtered, t)
+		byName[t.Name()] = t
+	}
+	r.tools = filtered
+	r.byName = byName
+	return r
+}
+
 // Names returns registered tool names in sorted order.
 func (r *Registry) Names() []string {
 	out := make([]string, 0, len(r.byName))
