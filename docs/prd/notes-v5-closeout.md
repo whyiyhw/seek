@@ -1,6 +1,7 @@
 # Notes：v5 收伞评估——M11.5+ 候选三分建议
 
 > 性质：评估笔记（`notes-` 前缀），呈用户拍板；拍板前不为任何候选建卡、不动里程碑表。三分口径：**进 v5 续期 / 并入 orchestration 等 PRD / 不做**。
+> 状态：✅ **已拍板·照三分执行**（2026-11-17，用户主会话拍板：三分全批——①②并入/不做按 §0 归位，③ v5 不续期；orchestration PRD「暂拒」处已补去向指针）。
 > 日期：2026-11-16 · 卡 `c_sv3zwn` · 分支 `drive/c_sv3zwn` · 依据：`docs/prd/v5.md` §6、`docs/prd/feature-orchestration.md`（状态行 + §4.1）、`docs/prd/feature-routines.md` §9、`docs/prd/feature-slim-loop.md` §2.2、`internal/tools/agent/agent.go:395-403`、butler 2026-11-16「全部开卡」拍板
 > 背景：v5 umbrella M11.0–M11.4 全部交付，PRD 索引行「M11.4+ 待定」悬空。本文件收伞：逐候选给去向建议——**无一建议进 v5 续期**。
 
