@@ -81,3 +81,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_azqudp：orchestration·M-O2.3：agentsmgr 写路径 + seek agents list/check CLI
 - c_5xtm74：web 前端聊天增量：流式气泡 delta 累积→reply 整泡替换 + 工具行折叠（W2.1，textContent 纪律保持；无头验收脚本 web-stream-manual.sh + CDP 驱动）
 - c_oixx62：slim-loop·M-SL3 首跑重跑：seek goal run 载体 × worktree × 人审 diff
+- c_2i6sm6：v8·S1：摩擦记账——从 transcript 折叠出按工具的失败/被拒/重复统计（只读）

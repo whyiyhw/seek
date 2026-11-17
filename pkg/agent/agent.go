@@ -1116,6 +1116,14 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 // LLM's history readable without faking a meaningful return value.
 const emptyToolContentPlaceholder = "(no output)"
 
+// ToolErrorPrefix is the wire-format prefix buildToolResultMsg stamps
+// on every failed tool result. It is a contract, not prose:
+// internal/friction scores a tool message as an Error by scanning for
+// this prefix verbatim, so the wording is frozen — additions to the
+// error text go after it, never by rewording it (the [plan: approved]
+// marker precedent for parsed tool-result strings).
+const ToolErrorPrefix = "tool error: "
+
 // buildToolResultMsg constructs the deepseek.Message for a tool result.
 // Centralised so the two dispatch paths (concurrent read-only batch +
 // sequential mixed batch) can't drift, and so the empty-content guard
@@ -1128,7 +1136,7 @@ func buildToolResultMsg(callID, result string, terr error) deepseek.Message {
 		Content:    result,
 	}
 	if terr != nil {
-		msg.Content = fmt.Sprintf("tool error: %v", terr)
+		msg.Content = ToolErrorPrefix + fmt.Sprint(terr)
 	}
 	if msg.Content == "" {
 		msg.Content = emptyToolContentPlaceholder

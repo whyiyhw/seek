@@ -64,14 +64,14 @@ func NewRepeatGuard() *RepeatGuard {
 
 // record bumps the counter for (name, args) and returns the new count.
 func (g *RepeatGuard) record(name string, raw json.RawMessage) int {
-	key := name + "\x00" + canonicalArgs(raw)
+	key := name + "\x00" + CanonicalArgs(raw)
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.counts[key]++
 	return g.counts[key]
 }
 
-// canonicalArgs normalises an argument blob so that logically identical
+// CanonicalArgs normalises an argument blob so that logically identical
 // calls collide regardless of key order or insignificant whitespace.
 //
 // Matching on the WHOLE argument object, not just the tool name, is what
@@ -82,7 +82,12 @@ func (g *RepeatGuard) record(name string, raw json.RawMessage) int {
 // Non-object or malformed JSON falls back to the raw bytes — a tool whose
 // arguments do not parse still deserves loop detection, and the raw form
 // is a sound equality key even if it is not a canonical one.
-func canonicalArgs(raw json.RawMessage) string {
+//
+// Exported because internal/friction must score session-level repeats by
+// exactly this equality key — two implementations of "same call" would
+// drift apart, and the fold has to agree with what the guard nudged
+// about at write time.
+func CanonicalArgs(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
@@ -107,7 +112,7 @@ func reminderFor(name string, raw json.RawMessage, count int) string {
 		return ""
 	}
 
-	preview := canonicalArgs(raw)
+	preview := CanonicalArgs(raw)
 	if len(preview) > maxArgPreview {
 		preview = preview[:maxArgPreview] + "…(truncated)"
 	}
