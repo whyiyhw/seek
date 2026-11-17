@@ -65,3 +65,57 @@ func TestLoadFrom_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
 }
+
+func TestLoadFrom_HintField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	content := `{
+		"mcpServers": {
+			"my-server": {
+				"command": "npx",
+				"args": ["-y", "whatever"],
+				"hint": "Use for X, not for Y"
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if got := cfg.MCPServers["my-server"].Hint; got != "Use for X, not for Y" {
+		t.Errorf("Hint = %q, want %q", got, "Use for X, not for Y")
+	}
+	// Entries without hint parse to "" (zero value), not an error.
+	if got := cfg.MCPServers["missing"]; got.Command != "" || got.Hint != "" {
+		t.Errorf("unexpected entry for absent server: %+v", got)
+	}
+}
+
+func TestPromptEnabled(t *testing.T) {
+	dir := t.TempDir()
+
+	write := func(content string) Config {
+		path := filepath.Join(dir, "mcp.json")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadFrom(path)
+		if err != nil {
+			t.Fatalf("LoadFrom: %v", err)
+		}
+		return cfg
+	}
+
+	if cfg := write(`{"mcpServers": {}}`); !cfg.PromptEnabled() {
+		t.Error("absent mcp_prompt should default to enabled")
+	}
+	if cfg := write(`{"mcpServers": {}, "mcp_prompt": true}`); !cfg.PromptEnabled() {
+		t.Error(`mcp_prompt: true should be enabled`)
+	}
+	if cfg := write(`{"mcpServers": {}, "mcp_prompt": false}`); cfg.PromptEnabled() {
+		t.Error(`mcp_prompt: false should disable the prompt section (A2 eval arm)`)
+	}
+}

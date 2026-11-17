@@ -1845,3 +1845,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `idleRows` runs two aggregates — `inWindow` decides inclusion, `ever` supplies the true last_used; commit with card `c_lz5wxa`.
 - **Lesson**: when one fold answers two questions, windowing it silently degrades the second to the window's edge case. Split the folds, not the fields.
 - **Refs**: `internal/skillcli/query.go` `idleRows`, `docs/prd/feature-memory-skill-bridge.md` §6.
+
+## MCP prompt section
+
+### JSON object key order is data — unmarshalling into a map shuffles prompt bytes
+- **Saw**: rendering MCP tool parameter signatures for the sysprompt MCP section, the obvious `json.Unmarshal` of the input schema into `map[string]…` properties would emit `search(repo, query, content?)` with parameters in random order — nondeterministic bytes inside the system-prompt prefix.
+- **Why**: `encoding/json` into a Go map discards document order and map iteration is deliberately randomized per run; anything whose output must be byte-stable across sessions (sysprompt segments feed the DeepSeek prefix cache) cannot round-trip an ordered JSON object through a map.
+- **Fix**: `schemaParams` in `internal/tools/mcptool/prompt.go` token-walks the `properties` object with `json.Decoder` — keys kept in document order, each value skipped via a `RawMessage` decode; commit with card `c_lgtpgq`.
+- **Lesson**: JSON object key order is insignificant to a parser but load-bearing for byte-deterministic rendering — ordered output needs a token-stream read, never a map.
+- **Refs**: `internal/tools/mcptool/prompt.go` `schemaParams`; determinism contract at `internal/sysprompt/sysprompt.go` (package doc).
