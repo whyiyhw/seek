@@ -2758,7 +2758,10 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 		return fmt.Errorf("autopilot requires a saved session in a git repo (unavailable with --no-save or outside a git project)")
 	}
 	dec := autopilot.NewDeepSeekDecomposer(client, model)
-	fleet := autopilot.NewFleet(mgr, wtMgr)
+	// model is also the lane the worktree subagents run on (they
+	// inherit the parent session's), so the fleet prices each
+	// outcome's tokens with it (v8 柱 R R1).
+	fleet := autopilot.NewFleet(mgr, wtMgr, model)
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
