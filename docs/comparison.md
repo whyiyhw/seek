@@ -306,7 +306,7 @@
 
 4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 
-5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。
+5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。（2026-11-17 v8 D2 精确化：agent 进程是一次性的、状态不在进程里；常驻只做监听/路由/拉起——任务寿命的脱离进程在此口径下放行。）
 
 6. **明确边界（2026-11-12 #2575 起重划）**：原表述「Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品」**已失效**——定位变更为自我进化的本地 agent 平台后，**多端进入目标**（Frontend 端口 + sidecar 路线，飞书第一个，见「平台化验收口径」）。维持出界的是：企业管理（SSO、用量分析、Managed MCP）、SDK（seek 是 agent 不是框架）；另按 #2575，公开跑分竞赛明确不做。CC 的桌面/Web/Chrome 形态不逐项复刻——多端验收以 Frontend 端口可驱动为准。
 

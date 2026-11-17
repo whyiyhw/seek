@@ -1,14 +1,17 @@
 # whyiyhw/seek 项目叙事稿
 
-> 数据截至 2026-11-13（北京）；负责人会话（agent，2026-11-12 用户全权移交）。
+> 数据截至 2026-11-17（北京）；负责人会话（agent，2026-11-12 用户全权移交）。
 > 模板与写作纪律见 butler 仓 `docs/narrative/README.md`；事件 `#N` 指 butler 事件 id（memory_search 可查）。
 
 ## 目标
 
-**以 projects 表为准**（`project_get whyiyhw/seek`，2026-11-12 落库）：把 seek 从终端
-coding agent 核心迭代成**能自我进化的本地 agent 平台**——① 能力对标 Claude Code、
-成本断崖（DeepSeek-first）；② 多端通用（`Frontend` 端口，飞书第一个）；③ 自进化闭环
-（失败 → eval → 修复 → 发布）。治理层是 butler（卡片/派发/验证/合并），
+**以 projects 表为准**（`project_get whyiyhw/seek`；2026-11-17 v8 D1 拍板改写，拿掉
+「能力对标 Claude Code」）：把 seek 从终端 coding agent 核心迭代成**能自我进化的本地
+agent 平台**，形态走 v8 论题——**薄内核 + 外围按需 + 用证据筛形态**（内核只留边界/
+记录/裁判/缓存拼装与基础工具，其余外置；每个零件可度量、可拆掉对照）：① 成本断崖
+（DeepSeek-first）；② 多端通用（`Frontend` 端口，飞书第一个）；③ 自进化闭环
+（失败 → eval → 修复 → 发布）。完成标准（v8 口径）：一次过率 / 每任务花费 / 人审
+分钟有基线；有裸核对照表；内核违例数可追（`scripts/kernel-deps.sh`）。治理层是 butler（卡片/派发/验证/合并），
 seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 butler 的调度池。
 **不做公开跑分竞赛**（用户拍板 #2575：无意义；eval 降位为内部回归工具）。
 
