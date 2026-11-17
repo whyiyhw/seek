@@ -90,3 +90,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_lz5wxa：bridge·M-B4：seek skill stats --idle（Set 外连接）+ ⚡ 模态双存告警 + 测试
 - c_icrm3y：bridge·M-B1：skillmgr.WriteProjectSkill 新入口 + 测试
 - c_mnicm3：docs/prd 归档减法（v8 D5 拍板）：已交付 PRD 移入归档区，weight.sh 回预算
+- c_aqbdaz：selftest 登记缺口机制化：新脚本自动进 scripts/selftest.sh（含补登 kernel-deps.sh）
