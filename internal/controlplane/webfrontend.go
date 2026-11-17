@@ -30,6 +30,8 @@ package controlplane
 //	GET  /subagents  the conv's bound-project subagent state projection
 //	              folded from subagents.jsonl (?parent=<sid> filter;
 //	              W3.1 — see webfrontend_subagents.go)
+//	POST /voice      push-to-talk audio upload (V2, voicefrontend.go —
+//	              mounted only when a VoiceFrontend Attached pre-Run)
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -139,6 +141,12 @@ type WebFrontend struct {
 	// into only before Run — the §3.2 phase contract; handlers dispatch.
 	rpcReg *rpc.Registry
 
+	// voiceMount (V2 push-to-talk, voicefrontend.go): when Attach sets
+	// it, the /voice upload endpoint rides this mux — same listener,
+	// same auth/CSP/host-gate wrap. Mounted at most once, strictly
+	// before Run builds the mux (the §3.2 phase contract again).
+	voiceMount http.HandlerFunc
+
 	tokenOnce sync.Once
 	token     string
 	tokenErr  error
@@ -210,6 +218,10 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 // handlers' Dispatch — the §3.2 contract forbids it.
 func (f *WebFrontend) RPCRegistry() *rpc.Registry { return f.rpcReg }
 
+// mountVoice hosts the voice frontend's upload handler at /voice.
+// Pre-Run only: handler() builds the route table once inside Run.
+func (f *WebFrontend) mountVoice(h http.HandlerFunc) { f.voiceMount = h }
+
 // Name implements the Frontend port.
 func (f *WebFrontend) Name() string { return "web" }
 
@@ -256,6 +268,9 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
+	if f.voiceMount != nil {
+		mux.HandleFunc("/voice", f.voiceMount)
+	}
 	return gateHost(withCSP(withGzip(mux)))
 }
 

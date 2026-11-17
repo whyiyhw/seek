@@ -1842,6 +1842,19 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: transcript readers on the Load path see the disk truth — interrupted-run tails included. Anything assuming API-replayable shape must call `Repair` itself or tolerate orphans; document which at the read site.
 - **Refs**: `internal/session/session.go` `Repair` / `Load`; `internal/friction/friction.go` `Fold`.
 
+### WebFrontend.Send is not a pure broadcast — it pops the conv's live run (the W1.4 close-out)
+- **Saw**: wiring voice V2 replies through `web.Send(ctx, pageConv, r)` looked like the obvious reuse; it would have CLOSED OUT the page's own streaming run bubble with the voice reply's text whenever a typed run was live on the same page conv.
+- **Why**: `Send` calls `popRun` — a reply is the W1.4 terminal event of a streamed run, so Send carries run/session ids and the client replaces the streaming bubble. A secondary frontend delivering into a web conv has no run there; popping steals the page's run id.
+- **Fix**: `VoiceFrontend.Send` broadcasts the MVP `{"conv","text"}` frame directly via `web.broadcast` (no run id → the client's plain-message path); commit with card `c_f6ayyg`.
+- **Lesson**: any NON-web frontend (voice today, future push/TTS channels) delivering through a web conv must `broadcast`, never `web.Send` — Send's close-out semantics belong exclusively to the frontend that owns the conv's runs.
+- **Refs**: `internal/controlplane/webfrontend.go` `Send` / `webfrontend_stream.go` `popRun`; `internal/controlplane/voicefrontend.go` `Send`.
+
+### getUserMedia needs a secure context — the documented tailnet `--tcp` forward cannot record push-to-talk
+- **Saw**: the voice V2 🎤 button works on `http://127.0.0.1:8790` but arrives disabled on a phone reaching the same serve over `tailscale serve --tcp` (tailnet IP, plain http).
+- **Why**: browsers gate `getUserMedia` (and `crypto.randomUUID`'s absence already forced the page's manual uuid fallback) behind a secure context — localhost is one by definition, a `100.x.y.z` host over http is not; `--tcp` forwarding never terminates TLS.
+- **Fix**: the page detects it (`micAvailable()`) and disables the button with the reason; deployment note in `seek serve --help` + PRD §4.3: remote mic needs an HTTPS front (`tailscale serve` proxy mode), not `--tcp`; commit with card `c_f6ayyg`.
+- **Lesson**: browser-capability surfaces (mic/camera/notifications) die silently on non-localhost plain http — when the documented remote-access posture is a TCP forward, the same feature needs an https-front variant or a visible "unavailable here" state, never a mystery.
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
