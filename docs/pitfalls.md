@@ -1829,3 +1829,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: all flags before patterns — `go list -e -f '{{...}}' $PKGS` in `scripts/kernel-deps.sh`; commit with card `c_zcygo2`.
 - **Lesson**: in `go` tool invocations flags precede patterns, always; a wrong-arg-position bug masquerades as extra/missing packages, not a flag complaint.
 - **Refs**: `scripts/kernel-deps.sh` (comment at the resolved-count check).
+
+## Skill stats / --idle
+
+### `--idle` must read last_used from the UNfiltered aggregate — the window-filtered one reports every idle skill as "never"
+- **Saw**: implementing `seek skill stats --idle` (bridge M-B4): the one-aggregate approach (reuse the window-filtered `aggregate`) yields `LastUsed == ""` for every listed skill — their only calls predate the window and were filtered out, making "not called recently" indistinguishable from "never called".
+- **Why**: `skillcli.aggregate(entries, since, now)` answers two questions in one fold (call count AND last-used); windowing it empties both. Idleness (window) and recency (all-time) are different questions over the same rows.
+- **Fix**: `idleRows` runs two aggregates — `inWindow` decides inclusion, `ever` supplies the true last_used; commit with card `c_lz5wxa`.
+- **Lesson**: when one fold answers two questions, windowing it silently degrades the second to the window's edge case. Split the folds, not the fields.
+- **Refs**: `internal/skillcli/query.go` `idleRows`, `docs/prd/feature-memory-skill-bridge.md` §6.

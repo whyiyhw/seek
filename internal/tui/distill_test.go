@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"math"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/memory"
+	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 )
 
 // setupDistillModel builds a Model wired to a real (tempdir-backed)
@@ -283,5 +286,96 @@ func TestRenderDistillReview_HiddenWhenModalClosed(t *testing.T) {
 	m, _ := setupDistillModel(t)
 	if got := m.renderDistillReview(); got != "" {
 		t.Errorf("expected empty render when modal closed, got %q", got)
+	}
+}
+
+// ---------- ⚡ dual-store overlap warning (bridge §8.4 / M-B4) ----------
+
+// newDistillModelWithSkills mirrors setupDistillModel but wires a
+// loaded skill Set — the overlap warning reads it via m.opts.Skills.
+func newDistillModelWithSkills(t *testing.T, set *skill.Set) Model {
+	t.Helper()
+	t.Setenv("SEEK_HOME", t.TempDir())
+	p, err := memory.LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	return New(Options{MemoryProject: p, Skills: set})
+}
+
+// The warning fires exactly at the L2 reject threshold (inclusive) and
+// NOT inside the grey band — the gate is the reject line, not grey.
+// Fixtures are built for exact Jaccard values: with Name/Tagline
+// empty, the compared text normalizes to Content verbatim
+// (whitespace-run collapsing drops the joiner), so hand-counted
+// trigram sets hold: "abcdef" vs "zabcde" → 3/5 = 0.60 exactly;
+// "abcdefgh" vs "zabcdefz" → 4/8 = 0.50 (grey zone).
+func TestDistillOverlapWarning_ThresholdBoundary(t *testing.T) {
+	exact := skill.NewSet()
+	exact.Add(&skill.Skill{Name: "exact-boundary", Description: "zabcde"})
+	grey := skill.NewSet()
+	grey.Add(&skill.Skill{Name: "grey-zone", Description: "zabcdefz"})
+
+	// Fixture sanity first: the sims really are what we counted.
+	if _, sim := skilldistill.NearestSkill(" ", "abcdef", exact); math.Abs(sim-0.60) > 1e-12 {
+		t.Fatalf("exact fixture sim = %v, want 0.60", sim)
+	}
+	if _, sim := skilldistill.NearestSkill(" ", "abcdefgh", grey); math.Abs(sim-0.50) > 1e-12 {
+		t.Fatalf("grey fixture sim = %v, want 0.50", sim)
+	}
+
+	atThreshold := distillOverlapWarning(memory.Candidate{Content: "abcdef"}, exact)
+	if atThreshold == "" {
+		t.Error("sim = 0.60 (>= SimilarityReject) must warn")
+	} else if !strings.Contains(atThreshold, `"exact-boundary"`) {
+		t.Errorf("warning must name the overlapping skill: %q", atThreshold)
+	}
+
+	if w := distillOverlapWarning(memory.Candidate{Content: "abcdefgh"}, grey); w != "" {
+		t.Errorf("grey-zone sim 0.50 must NOT warn (only ≥0.60 does): %q", w)
+	}
+
+	// Degenerate inputs: no skills loaded → nothing to overlap.
+	if w := distillOverlapWarning(memory.Candidate{Content: "abcdef"}, nil); w != "" {
+		t.Errorf("nil skill set must not warn: %q", w)
+	}
+	if w := distillOverlapWarning(memory.Candidate{Content: "abcdef"}, skill.NewSet()); w != "" {
+		t.Errorf("empty skill set must not warn: %q", w)
+	}
+}
+
+func TestRenderDistillReview_OverlapWarningLine(t *testing.T) {
+	desc := "sessions are JSONL because prefix-cache bytes must stay identical"
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "jsonl-session-format", Description: desc})
+	m := newDistillModelWithSkills(t, set)
+	m = openReview(m, []memory.Candidate{{
+		Name:    "keep-sessions-jsonl",
+		Tagline: desc,
+		Content: "always keep " + desc,
+	}})
+
+	got := m.renderDistillReview()
+	for _, want := range []string{"⚠", "overlaps installed skill", `"jsonl-session-format"`, "double-store"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("render missing %q\n got: %s", want, got)
+		}
+	}
+}
+
+// Disjoint texts must render NO warning — pure display also means
+// silence when it doesn't apply.
+func TestRenderDistillReview_NoWarningWhenDisjoint(t *testing.T) {
+	set := skill.NewSet()
+	set.Add(&skill.Skill{Name: "git-rebase-care", Description: "When a git rebase drops commits mid-stack, verify the reflog before force-pushing anything"})
+	m := newDistillModelWithSkills(t, set)
+	m = openReview(m, []memory.Candidate{{
+		Name:    "release-checklist",
+		Tagline: "cut releases from a written checklist",
+		Content: "1. run the full test suite\n2. tag\n3. publish",
+	}})
+
+	if got := m.renderDistillReview(); strings.Contains(got, "⚠") {
+		t.Errorf("disjoint candidate must not warn:\n%s", got)
 	}
 }

@@ -429,7 +429,7 @@ func cmdSkillStats(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("seek skill stats", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, `Usage: seek skill stats [--top N] [--since DURATION] [--distill] [--json]
+		fmt.Fprintln(stderr, `Usage: seek skill stats [--top N] [--since DURATION] [--distill] [--idle DURATION] [--json]
 
 Flags:`)
 		fs.PrintDefaults()
@@ -437,9 +437,26 @@ Flags:`)
 	top := fs.Int("top", 10, "show this many skills (highest call count first); 0 = no limit")
 	since := fs.Duration("since", 30*24*time.Hour, "only count calls newer than this (e.g. 24h, 168h, 720h)")
 	distill := fs.Bool("distill", false, "report the skill-distillation funnel (stage × verdict counts) instead of call counts")
+	idle := fs.Duration("idle", 0, "list LOADED skills with zero calls in this window, least-recently-used first (e.g. 720h)")
 	asJSON := fs.Bool("json", false, "emit JSON instead of a table")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// --idle is its own report with its own window, so the other
+	// report flags don't apply to it. fs.Visit walks only explicitly
+	// set flags — that's what separates "--idle 720h" from "user
+	// silently inherited the since default", which happens to be the
+	// same 720h the PRD uses as its idle example.
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if set["idle"] {
+		if *distill || set["top"] || set["since"] {
+			return fmt.Errorf("stats: --idle cannot be combined with --top, --since or --distill (the window comes from --idle itself)")
+		}
+		if *idle <= 0 {
+			return fmt.Errorf("stats: --idle requires a positive duration (e.g. --idle 720h)")
+		}
 	}
 
 	entries, err := loadStats()
@@ -448,6 +465,13 @@ Flags:`)
 	}
 	if *distill {
 		return reportFunnel(entries, *since, *asJSON, stdout)
+	}
+	if set["idle"] {
+		skills, _, userDir, err := loadAll()
+		if err != nil {
+			return err
+		}
+		return reportIdle(skills, userDir, entries, *idle, *asJSON, stdout)
 	}
 
 	agg := aggregate(entries, *since, time.Now())
@@ -536,6 +560,77 @@ func reportFunnel(entries []skillstats.Entry, since time.Duration, asJSON bool, 
 	fmt.Fprintln(tw, "STAGE\tVERDICT\tCOUNT")
 	for _, p := range pairs {
 		fmt.Fprintf(tw, "%s\t%s\t%d\n", p.stage, p.verdict, funnel[p.stage][p.verdict])
+	}
+	return tw.Flush()
+}
+
+// idleRow is one row of `seek skill stats --idle`: a LOADED skill
+// with zero counted calls inside the window. LastUsed is the skill's
+// true last call (RFC3339, from the unfiltered aggregate) — empty
+// means never called at all, a different fact than "not recently",
+// and the reason the idle view needs two aggregations.
+type idleRow struct {
+	Name     string `json:"name"`
+	Source   string `json:"source"` // project | user | builtin | .claude | other
+	LastUsed string `json:"last_used,omitempty"`
+}
+
+// idleRows is the Set-outer-join at the heart of `--idle`
+// (feature-memory-skill-bridge §6): every loaded skill the
+// window-filtered aggregate has no counted call for — including
+// skills with no stats row at all — becomes a row. Stats rows whose
+// name isn't in the Set (uninstalled leftovers) are ignored: the join
+// is driven from the Set side. Sorted never-used-first, then by
+// last_used ascending (RFC3339 strings sort chronologically), ties by
+// name so output stays deterministic.
+func idleRows(set *skill.Set, userDir string, entries []skillstats.Entry, window time.Duration, now time.Time) []idleRow {
+	if set == nil {
+		return []idleRow{} // non-nil so --json emits [] instead of null
+	}
+	inWindow := aggregate(entries, window, now)
+	ever := aggregate(entries, 0, now)
+	rows := make([]idleRow, 0, set.Len())
+	for _, sk := range set.List() {
+		if a := inWindow[sk.Name]; a != nil && a.Count > 0 {
+			continue
+		}
+		r := idleRow{Name: sk.Name, Source: sourceLabel(sk, userDir)}
+		if a := ever[sk.Name]; a != nil {
+			r.LastUsed = a.LastUsed
+		}
+		rows = append(rows, r)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].LastUsed != rows[j].LastUsed {
+			return rows[i].LastUsed < rows[j].LastUsed
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	return rows
+}
+
+// reportIdle renders `seek skill stats --idle`: the observation view
+// of the skill lifecycle — which loaded skills have zero calls in the
+// window, least-recently-used first. Pure observation, no action:
+// usage is not a verdict (§5.2 of the bridge PRD), the uninstall
+// decision stays human.
+func reportIdle(set *skill.Set, userDir string, entries []skillstats.Entry, window time.Duration, asJSON bool, stdout io.Writer) error {
+	rows := idleRows(set, userDir, entries, window, time.Now())
+	if asJSON {
+		return writeJSON(stdout, rows)
+	}
+	if len(rows) == 0 {
+		fmt.Fprintf(stdout, "no idle skills — every loaded skill was called within %s\n", window)
+		return nil
+	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tLAST_USED\tSOURCE")
+	for _, r := range rows {
+		last := r.LastUsed
+		if last == "" {
+			last = "never"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.Name, last, r.Source)
 	}
 	return tw.Flush()
 }

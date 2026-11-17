@@ -78,7 +78,8 @@ Commands:
   update --all           Re-fetch every managed skill
   list                   Show every loaded skill (source, type, call count, last used)
   status <name>          Detailed view of one skill: source path, install record, shadowing, stats
-  stats                  Top-N skills by call count (default --top 10 --since 30d)
+  stats                  Top-N skills by call count (default --top 10 --since 30d); --idle DURATION
+                         lists loaded skills with zero calls in that window (least-recently-used first)
   create <name>          Scaffold a new skill package (SKILL.md + references/ + README.md)
   drafts                 List skill drafts distilled from sessions (.drafts/, invisible to sessions)
   drafts show <name>     Full draft text + diff vs the nearest installed skill

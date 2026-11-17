@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillstats"
 )
 
@@ -476,5 +477,267 @@ func TestAggregateFunnel_SinceFiltersOldRows(t *testing.T) {
 	}
 	if funnel["L0"]["PASS"] != 1 {
 		t.Errorf("fresh row missing: %+v", funnel)
+	}
+}
+
+// ---------- stats --idle (feature-memory-skill-bridge §6 / M-B4) ----------
+
+// chdirTemp moves CWD to a tempdir for the duration of one test so
+// loadAll()'s ProjectDir probe doesn't pick up the dev tree.
+func chdirTemp(t *testing.T) {
+	t.Helper()
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// installSkill installs a one-line user-level fixture skill so the
+// loaded Set (not just builtins) has join partners.
+func installSkill(t *testing.T, name string) {
+	t.Helper()
+	src := writeFixtureSkill(t, t.TempDir(), "pkg-"+name, name, "fixture for "+name)
+	if _, _, err := runSkill("install", src); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_JoinCompleteness(t *testing.T) {
+	withSeekHome(t)
+	chdirTemp(t)
+	installSkill(t, "alpha-active")
+	installSkill(t, "beta-old")
+	installSkill(t, "gamma-never")
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	old := time.Now().Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	writeStats(t, []skillstats.Entry{
+		{TS: fresh, Name: "alpha-active", Provider: "deepseek"}, // in-window → excluded
+		{TS: old, Name: "beta-old", Provider: "deepseek"},       // pre-window only → idle, last_used = old
+		{TS: fresh, Name: "delta-ghost", Provider: "deepseek"},  // stats row, not loaded → ignored
+		// distill provenance rows not counting as calls is covered at
+		// unit level in TestIdleRows_JoinAndOrder below.
+	})
+
+	stdout, _, err := runSkill("stats", "--idle", "720h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"beta-old", "gamma-never", "never", old, "user"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("idle report missing %q:\n%s", want, stdout)
+		}
+	}
+	for _, absent := range []string{"alpha-active", "delta-ghost"} {
+		if strings.Contains(stdout, absent) {
+			t.Errorf("idle report leaked %q (join must be Set-driven):\n%s", absent, stdout)
+		}
+	}
+	if !strings.Contains(stdout, "LAST_USED") || !strings.Contains(stdout, "SOURCE") {
+		t.Errorf("idle report missing column header:\n%s", stdout)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_OrdersNeverFirstThenAscending(t *testing.T) {
+	withSeekHome(t)
+	chdirTemp(t)
+	installSkill(t, "recent-old")
+	installSkill(t, "ancient-old")
+	installSkill(t, "never-one")
+
+	older := time.Now().Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	newer := time.Now().Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	writeStats(t, []skillstats.Entry{
+		{TS: newer, Name: "recent-old", Provider: "deepseek"},
+		{TS: older, Name: "ancient-old", Provider: "deepseek"},
+	})
+
+	stdout, _, err := runSkill("stats", "--idle", "720h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	iNever := strings.Index(stdout, "never-one")
+	iAncient := strings.Index(stdout, "ancient-old")
+	iRecent := strings.Index(stdout, "recent-old")
+	if iNever == -1 || iAncient == -1 || iRecent == -1 {
+		t.Fatalf("missing rows:\n%s", stdout)
+	}
+	if !(iNever < iAncient && iAncient < iRecent) {
+		t.Errorf("want never < ancient-old < recent-old (last_used ascending); got:\n%s", stdout)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_EmptyStatsFile(t *testing.T) {
+	withSeekHome(t)
+	chdirTemp(t)
+	installSkill(t, "zeta")
+	// No writeStats at all — no .stats.jsonl exists. Every loaded
+	// skill (installed + builtins) must come back as never-used, not
+	// as an error or an empty report.
+	stdout, _, err := runSkill("stats", "--idle", "720h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "zeta") || !strings.Contains(stdout, "never") {
+		t.Errorf("empty stats should list every skill as never:\n%s", stdout)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_ToleratesGarbageLines(t *testing.T) {
+	withSeekHome(t)
+	chdirTemp(t)
+	installSkill(t, "beta-old")
+	installSkill(t, "alpha-active")
+
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	old := time.Now().Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	// Hand-write the file: valid rows interleaved with garbage and a
+	// blank line (truncated-tail shape). Read() must skip the junk,
+	// so the join still sees the valid rows.
+	path, err := paths.UserSkillStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "this line is not json\n" +
+		"{\"ts\":\"" + fresh + "\",\"name\":\"alpha-active\",\"provider\":\"deepseek\"}\n" +
+		"\n" +
+		"{broken json\n" +
+		"{\"ts\":\"" + old + "\",\"name\":\"beta-old\",\"provider\":\"deepseek\"}\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, _, err := runSkill("stats", "--idle", "720h")
+	if err != nil {
+		t.Fatalf("garbage lines must not fail the report: %v", err)
+	}
+	if strings.Contains(stdout, "alpha-active") {
+		t.Errorf("valid fresh row should still exclude alpha-active:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "beta-old") || !strings.Contains(stdout, old) {
+		t.Errorf("valid old row should survive the garbage:\n%s", stdout)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_JSON(t *testing.T) {
+	withSeekHome(t)
+	chdirTemp(t)
+	installSkill(t, "beta-old")
+	installSkill(t, "gamma-never")
+
+	old := time.Now().Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	writeStats(t, []skillstats.Entry{{TS: old, Name: "beta-old", Provider: "deepseek"}})
+
+	stdout, _, err := runSkill("stats", "--idle", "720h", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
+		t.Fatalf("--json output is not valid JSON: %v\n%s", err, stdout)
+	}
+	byName := map[string]map[string]any{}
+	for _, r := range rows {
+		byName[r["name"].(string)] = r
+	}
+	beta, ok := byName["beta-old"]
+	if !ok {
+		t.Fatalf("beta-old missing from idle JSON:\n%s", stdout)
+	}
+	if beta["last_used"] != old {
+		t.Errorf("beta-old last_used = %v, want %q", beta["last_used"], old)
+	}
+	if beta["source"] != "user" {
+		t.Errorf("beta-old source = %v, want user", beta["source"])
+	}
+	gamma, ok := byName["gamma-never"]
+	if !ok {
+		t.Fatalf("gamma-never missing from idle JSON:\n%s", stdout)
+	}
+	if _, has := gamma["last_used"]; has {
+		t.Errorf("never-used row must omit last_used:\n%s", stdout)
+	}
+}
+
+func TestSkillCmd_Stats_Idle_FlagConflicts(t *testing.T) {
+	withSeekHome(t)
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--idle", "720h", "--distill"}, "cannot be combined"},
+		{[]string{"--idle", "720h", "--since", "24h"}, "cannot be combined"},
+		{[]string{"--idle", "720h", "--top", "5"}, "cannot be combined"},
+		{[]string{"--idle", "0"}, "positive duration"},
+		{[]string{"--idle", "-1h"}, "positive duration"},
+	}
+	for _, c := range cases {
+		_, _, err := runSkill(append([]string{"stats"}, c.args...)...)
+		if err == nil {
+			t.Errorf("args=%v should error", c.args)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("args=%v err = %v, want it to mention %q", c.args, err, c.want)
+		}
+	}
+}
+
+// The unit-level join, free of builtin noise: order, ghost rows,
+// distill provenance rows, and the never/timestamp distinction.
+func TestIdleRows_JoinAndOrder(t *testing.T) {
+	now := time.Now()
+	fresh := now.UTC().Format(time.RFC3339)
+	old1 := now.Add(-90 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	old0 := now.Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	entries := []skillstats.Entry{
+		{TS: fresh, Name: "active"},
+		{TS: old1, Name: "old-recent"},
+		{TS: old0, Name: "old-ancient"},
+		{TS: fresh, Name: "ghost"}, // stats row, no loaded skill → ignored
+		// Provenance rows are not calls: a loaded skill with only
+		// distill-auto rows is idle AND never-used.
+		{TS: fresh, Name: "only-distilled", Provider: skillstats.ProviderDistillAuto, Stage: "L4", Verdict: "DRAFT"},
+	}
+	set := skill.NewSet()
+	for _, n := range []string{"active", "old-recent", "old-ancient", "never-a", "never-b", "only-distilled"} {
+		set.Add(&skill.Skill{Name: n})
+	}
+
+	rows := idleRows(set, "", entries, 720*time.Hour, now)
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.Name)
+	}
+	// only-distilled lands in the never group: its only stats row is
+	// provenance telemetry, not a call, so it has no last_used at all.
+	want := []string{"never-a", "never-b", "only-distilled", "old-ancient", "old-recent"}
+	if len(got) != len(want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("rows = %v, want %v (never-first, ties by name, then last_used ascending)", got, want)
+		}
+	}
+	for _, r := range rows {
+		if r.Name == "only-distilled" && r.LastUsed != "" {
+			t.Errorf("distill-auto rows must not count as calls: %+v", r)
+		}
+		if r.Name == "old-ancient" && r.LastUsed != old0 {
+			t.Errorf("old-ancient LastUsed = %q, want the pre-window call time %q", r.LastUsed, old0)
+		}
+	}
+}
+
+// nil Set must yield an empty (not null) slice so --json stays [].
+func TestIdleRows_NilSetIsEmptyJSONArray(t *testing.T) {
+	rows := idleRows(nil, "", nil, 720*time.Hour, time.Now())
+	if rows == nil || len(rows) != 0 {
+		t.Errorf("nil set should give empty non-nil slice, got %#v", rows)
 	}
 }
