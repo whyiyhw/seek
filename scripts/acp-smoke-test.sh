@@ -9,8 +9,9 @@
 # could never run in-lane — c_bnjrw5 item 7 was rejected exactly there
 # ("无法向二进制 stdin 送 ndJson"), and every re-verification fell back
 # to a human hand-running the pipe. Wrapping the pipe inside this script
-# moves it behind the registered selftest entry (`bash scripts/selftest.sh
-# acp-smoke`), which the lane whitelist does approve.
+# moves it behind the selftest entry (`bash scripts/selftest.sh
+# acp-smoke-test`; discovery-based since c_aqbdaz — scripts/*.sh are
+# covered with zero registration), which the lane whitelist does approve.
 #
 # WHAT IT COVERS (and what it deliberately does NOT)
 #
