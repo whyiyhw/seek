@@ -180,16 +180,16 @@ func dropMalformed(c Config) Config {
 	// a gap until M-O3.2 wired pre_prompt_inject through and audited
 	// the function (pitfall logged in docs/pitfalls.md).
 	return Config{
-		PreTool:          drop(c.PreTool),
-		PostTool:         drop(c.PostTool),
-		PrePrompt:        drop(c.PrePrompt),
-		SessionStart:     drop(c.SessionStart),
-		SessionEnd:       drop(c.SessionEnd),
-		SubagentStart:    drop(c.SubagentStart),
-		SubagentStop:     drop(c.SubagentStop),
-		Stop:             drop(c.Stop),
-		PreCompact:       drop(c.PreCompact),
-		Notification:     drop(c.Notification),
-		PrePromptInject:  drop(c.PrePromptInject),
+		PreTool:         drop(c.PreTool),
+		PostTool:        drop(c.PostTool),
+		PrePrompt:       drop(c.PrePrompt),
+		SessionStart:    drop(c.SessionStart),
+		SessionEnd:      drop(c.SessionEnd),
+		SubagentStart:   drop(c.SubagentStart),
+		SubagentStop:    drop(c.SubagentStop),
+		Stop:            drop(c.Stop),
+		PreCompact:      drop(c.PreCompact),
+		Notification:    drop(c.Notification),
+		PrePromptInject: drop(c.PrePromptInject),
 	}
 }

@@ -88,8 +88,8 @@ const (
 // history permanently (token cost, not cache cost); ceiling hard-stops
 // a runaway hook from flooding the transcript every turn.
 const (
-	DefaultMaxBytes   = 2048
-	MaxBytesCeiling   = 8192
+	DefaultMaxBytes = 2048
+	MaxBytesCeiling = 8192
 )
 
 // DefaultTimeoutMs is the per-hook wall-clock timeout if the toml
@@ -326,16 +326,16 @@ func stampSourceEvent(hooks *[]Hook, src Source, event string) {
 // run on traffic the project policy would have denied.
 func Merge(project, user Config) Config {
 	return Config{
-		PreTool:       append(append([]Hook{}, project.PreTool...), user.PreTool...),
-		PostTool:      append(append([]Hook{}, project.PostTool...), user.PostTool...),
-		PrePrompt:     append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
-		SessionStart:  append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
-		SessionEnd:    append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
-		SubagentStart: append(append([]Hook{}, project.SubagentStart...), user.SubagentStart...),
-		SubagentStop:  append(append([]Hook{}, project.SubagentStop...), user.SubagentStop...),
-		Stop:          append(append([]Hook{}, project.Stop...), user.Stop...),
-		PreCompact:    append(append([]Hook{}, project.PreCompact...), user.PreCompact...),
-		Notification:  append(append([]Hook{}, project.Notification...), user.Notification...),
+		PreTool:         append(append([]Hook{}, project.PreTool...), user.PreTool...),
+		PostTool:        append(append([]Hook{}, project.PostTool...), user.PostTool...),
+		PrePrompt:       append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
+		SessionStart:    append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
+		SessionEnd:      append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
+		SubagentStart:   append(append([]Hook{}, project.SubagentStart...), user.SubagentStart...),
+		SubagentStop:    append(append([]Hook{}, project.SubagentStop...), user.SubagentStop...),
+		Stop:            append(append([]Hook{}, project.Stop...), user.Stop...),
+		PreCompact:      append(append([]Hook{}, project.PreCompact...), user.PreCompact...),
+		Notification:    append(append([]Hook{}, project.Notification...), user.Notification...),
 		PrePromptInject: append(append([]Hook{}, project.PrePromptInject...), user.PrePromptInject...),
 	}
 }
