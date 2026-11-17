@@ -36,6 +36,15 @@ func (b *Bridge) Name() string            { return b.effectName }
 func (b *Bridge) Description() string     { return b.def.Description }
 func (b *Bridge) Schema() json.RawMessage { return b.def.InputSchema }
 
+// Server returns the MCP server name this tool was loaded from. The
+// sysprompt MCPSection assembly (cmd/seek, post-LoadServers) groups
+// registered tools by this to present per-server routing context —
+// the effective Name() may carry a conflict prefix, but the owning
+// server is what the model needs for "which external server provides
+// this". Read-only accessor; registration policy stays in
+// LoadServers/loadOne.
+func (b *Bridge) Server() string { return b.serverName }
+
 func (b *Bridge) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	var args map[string]any
 	if err := json.Unmarshal(raw, &args); err != nil {
