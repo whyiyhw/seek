@@ -215,7 +215,7 @@ grep -oE '^### .+' docs/pitfalls.md | sed 's/^### //' | cut -c1-40 | while read 
 
 - `docs/prd/notes-memory-skill-gap.md`（14.7 KB，2026-11-12 备料笔记）自述依据 `v1.md`；其 §1「蒸馏漏斗现状」大量复述 v1.md §6 已有事实（证据：`memory_observe` 在 v1.md 出现 36 处 / notes 2 处，`auto_sourced` 40 处 / 12 处——notes 的漏斗表格是 v1.md 事实的另一份表述）。
 - **真正的结构性问题**：它的下游设计稿 `docs/prd/feature-skill-distill.md`（30.8 KB，📐 未排期）的「前置阅读」列了 v1/v2/narrative/AGENTS.md/两个 go 文件，**唯独不链这份备料笔记**——同一主题两份事实底座并行，将来只会在其中一份上更新。
-- notes 的**独有价值**（不可删的理由）：6 项重复点/7 项失联点盘点、以及坐实的 PRD↔代码偏差（v1.md「硬豁免永不 stale」vs `score.go` 30 天宽限实现）——这个偏差至今没回写 v1.md。
+- notes 的**独有价值**（不可删的理由）：6 项重复点/7 项失联点盘点、以及坐实的 PRD↔代码偏差（v1.md「硬豁免永不 stale」vs `score.go` 30 天宽限实现）——~~这个偏差至今没回写 v1.md~~（2026-11-16 已随卡 `c_5fdsqb` 勘误回写；P0 两问也已由 `feature-memory-skill-bridge.md` 出设计稿并双向链回本 notes）。
 
 **候选**（缩文档 / 中风险）：feature-skill-distill 落地排期时，把 notes 的独有事实（尤其 PRD↔代码偏差）回写 v1.md 对应小节 + PRD 前置阅读补链 notes，然后 notes 整体移入 `docs/prd/archive/`（archive 目录已有先例）。**现在不动**——设计未排期，notes 是唯一完整盘点。
 **复核命令**：
