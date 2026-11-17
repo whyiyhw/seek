@@ -757,6 +757,14 @@ func main() {
 	// no config load, no flag parse. No-op on every other invocation/OS.
 	sandbox.RunTrampolineIfRequested()
 	if err := run(); err != nil {
+		// -tools with unknown names: the error text (unknown list +
+		// available list) was already printed to stderr by
+		// applyToolsWhitelist; exit 2 without the "seek:" prefix so CI
+		// can tell "bad flag value" from "system failure" — same
+		// contract as `seek keys` (keyscli.ErrUsage).
+		if errors.Is(err, errToolsUsage) {
+			os.Exit(2)
+		}
 		fmt.Fprintln(os.Stderr, "seek:", err)
 		os.Exit(1)
 	}
@@ -895,6 +903,10 @@ func run() error {
 		// "this-session-only" by design (see feature-checkpoint
 		// PRD §3.2). Power users debugging across resumes set this.
 		keepCheckpoints = flag.Bool("keep-checkpoints", false, "preserve <session>/checkpoints/ across session end (default: cleaned)")
+		// v8·T1 bare-core comparison lane: freeze the session to an
+		// explicit tool whitelist. Read once here; the tools array is
+		// part of the request prefix, so it cannot change mid-session.
+		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
 	)
 	flag.Parse()
 
@@ -1930,6 +1942,20 @@ func run() error {
 			}
 		}
 		hooksReg.Register(memHook)
+	}
+
+	// v8·T1 `-tools` whitelist (bare-core comparison lane). Runs here —
+	// after the LAST reg.Add (memory_observe above; the D13 gate below
+	// documents why this is the final-composition point) and before the
+	// first Prompt freezes the registry via Wire(). The registry is
+	// mutated in place, so every consumer that already holds the pointer
+	// (agent.Config.Tools, RebuildAgent, ParentToolNamesFn → subagent
+	// child registries) sees the filtered set with no extra wiring.
+	// MCP bridges are loaded further up and simply drop out of the
+	// registry unless listed by registered name — the "load, then
+	// filter" order is what makes an MCP tool name validatable.
+	if err := applyToolsWhitelist(*toolsFlag, reg, loaded, activeSession); err != nil {
+		return err
 	}
 
 	// P2-b D13 startup gate + P2-c config layer: validate every
@@ -3241,4 +3267,100 @@ func envBoolTrue(name string) bool {
 // the flag never reaches that lane.
 func cronAutoTickEnabled(noCronTickFlag, acpLane bool) bool {
 	return !noCronTickFlag && !acpLane
+}
+
+// errToolsUsage is the sentinel behind `-tools` exit code 2: the
+// human-readable complaint (unknown names + available list) is printed
+// to stderr by applyToolsWhitelist BEFORE returning this, so main()
+// routes it straight to os.Exit(2) without the "seek:" prefix — same
+// shape as keyscli.ErrUsage.
+var errToolsUsage = errors.New("tools usage")
+
+// parseToolsFlag splits the comma-separated -tools value into clean
+// tool names: surrounding whitespace trimmed, empty segments dropped,
+// duplicates collapsed (first occurrence keeps order). Empty input
+// (absent flag, "", or "," ) yields nil — the "no whitelist, full
+// default registry" contract.
+func parseToolsFlag(v string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(v, ",") {
+		name := strings.TrimSpace(part)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// applyToolsWhitelist implements the v8·T1 `-tools` flag against the
+// FINAL registry composition (call it after the last reg.Add):
+//
+//   - non-empty value: every listed name must be registered (MCP tools
+//     validate by their registered name); unknown names print the
+//     offender list + available list to stderr and return errToolsUsage
+//     → exit 2. Survivors narrow the registry in place.
+//
+//   - resume: if the loaded session recorded a tool set (session.Tools)
+//     that differs from what this run will use, warn once on stderr —
+//     the tools array is part of the request prefix, so this is exactly
+//     one accepted cache invalidation, mirroring the -resume-new-day
+//     posture. Sessions saved before the field existed have no record;
+//     we skip the warning rather than guess.
+//
+//   - bookkeeping: the live session's Tools field is (re)written so
+//     saves carry the current set and the NEXT resume compares against
+//     it. Under --no-save there is no session to record — nothing to do.
+func applyToolsWhitelist(flagVal string, reg *tools.Registry, resumed, active *session.Session) error {
+	names := parseToolsFlag(flagVal)
+	if len(names) > 0 {
+		avail := reg.Names()
+		known := make(map[string]bool, len(avail))
+		for _, n := range avail {
+			known[n] = true
+		}
+		var unknown []string
+		for _, n := range names {
+			if !known[n] {
+				unknown = append(unknown, n)
+			}
+		}
+		if len(unknown) > 0 {
+			fmt.Fprintf(os.Stderr, "-tools: unknown tool(s): %s\n", strings.Join(unknown, ", "))
+			fmt.Fprintf(os.Stderr, "available tools: %s\n", strings.Join(avail, ", "))
+			return errToolsUsage
+		}
+		reg.Whitelist(names)
+	}
+	if active == nil {
+		return nil
+	}
+	final := reg.Names()
+	if resumed != nil && len(resumed.Tools) > 0 && !equalToolSets(resumed.Tools, final) {
+		fmt.Fprintln(os.Stderr, "tools: 工具集变了，缓存会失效一次")
+	}
+	active.Tools = final
+	return nil
+}
+
+// equalToolSets compares two tool-name collections as sets. Both sides
+// come from reg.Names() in practice (sorted), but the session header
+// round-trips through JSON — compare by membership so an order change
+// can never fabricate a "tool set changed" warning.
+func equalToolSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, n := range a {
+		set[n] = true
+	}
+	for _, n := range b {
+		if !set[n] {
+			return false
+		}
+	}
+	return true
 }
