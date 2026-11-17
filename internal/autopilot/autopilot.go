@@ -44,6 +44,28 @@ type Outcome struct {
 	Summary  string // wire-format subagent summary, or the failure reason
 	Worktree string // worktree path (kept for morning review); empty on early failure
 	Commit   string // short SHA the Fleet committed in the worktree; empty if nothing changed
+
+	// Evidence fields (v8 柱 R R1) — what the run cost and what it
+	// changed. Filled by the production Fleet; zero is a legitimate
+	// value ("nothing to report"), never a sentinel for error.
+
+	// Tokens is the subagent's total token burn, prompt + completion
+	// with cache hits included in prompt — the same convention as the
+	// subagent wire-format footer. 0 on failure paths: Manager rolls
+	// Tokens up only on the completed Result.
+	Tokens int
+	// CostUSD prices Tokens at the subagent's model via
+	// internal/pricing. 0 when the model can't be priced (lane not
+	// wired / empty model id) — the report never guesses a cost it
+	// can't derive; unknown-but-nonempty model ids follow pricing's
+	// documented Flash-card fallback.
+	CostUSD float64
+	// Diff footprint of the local commit (git show --numstat of
+	// Commit). All zero when there is no commit (clean tree, failed
+	// task) — Commit already distinguishes "no commit" from "commit".
+	Files      int
+	Insertions int
+	Deletions  int
 }
 
 // Report aggregates the whole run.
@@ -52,6 +74,10 @@ type Report struct {
 	Outcomes []Outcome
 	Done     int
 	Failed   int
+	// TotalTokens / TotalCostUSD sum the outcome evidence fields so
+	// the morning review reads the run's cost at a glance.
+	TotalTokens  int
+	TotalCostUSD float64
 }
 
 // Caps bound an unattended run so it can't run away / burn the budget.
@@ -150,6 +176,8 @@ func (d *Driver) Run(ctx context.Context, goal string) (Report, error) {
 		} else {
 			rep.Failed++
 		}
+		rep.TotalTokens += o.Tokens
+		rep.TotalCostUSD += o.CostUSD
 	}
 	return rep, nil
 }
