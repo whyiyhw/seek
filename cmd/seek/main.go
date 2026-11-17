@@ -1440,9 +1440,10 @@ func run() error {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{
-				Command: e.Command,
-				Args:    e.Args,
-				Env:     mcptool.EnvMapToSlice(e.Env),
+				Command:  e.Command,
+				Args:     e.Args,
+				Env:      mcptool.EnvMapToSlice(e.Env),
+				NoPrefix: !e.UsePrefix(),
 			}
 		}
 		existing := make(map[string]bool, len(reg.Names()))

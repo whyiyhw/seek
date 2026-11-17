@@ -212,6 +212,146 @@ func TestBridge_NameDescriptionSchema(t *testing.T) {
 	}
 }
 
+// ---------- LoadServers tests ----------
+
+// fakeConnect returns a connectFn serving in-process fake MCP servers
+// keyed by cfg.Command: a Command present in toolsByCommand serves that
+// tool list; any other Command fails to start (simulating a broken
+// server). Pipe cleanup is tied to t.
+func fakeConnect(t *testing.T, toolsByCommand map[string][]mcp.ToolDef) connectFn {
+	t.Helper()
+	return func(_ context.Context, cfg ServerConfig) (*mcp.Client, error) {
+		defs, ok := toolsByCommand[cfg.Command]
+		if !ok {
+			return nil, fmt.Errorf("start %q: command not found", cfg.Command)
+		}
+		srvInR, srvInW := io.Pipe()
+		srvOutR, srvOutW := io.Pipe()
+		runBridgeServer(t, srvInR, srvOutW, defs, func(_ string, _ map[string]any) mcp.CallToolResult {
+			return mcp.CallToolResult{}
+		})
+		t.Cleanup(func() {
+			srvInW.Close()
+			srvOutW.Close()
+		})
+		return mcp.NewClient(srvOutR, srvInW), nil
+	}
+}
+
+// rosterOf renders a LoadResult as the byte-exact registration roster:
+// tool names in registration order, then error strings. This is the
+// "what two startups must agree on byte-for-byte" contract.
+func rosterOf(lr LoadResult) string {
+	var b strings.Builder
+	for _, br := range lr.Bridges {
+		b.WriteString(br.Name())
+		b.WriteString("\n")
+	}
+	for _, e := range lr.Errors {
+		b.WriteString(e.Error())
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// freshExisting copies an initial name set so each run starts from the
+// same state (LoadServers mutates the map it is given).
+func freshExisting(initial map[string]bool) map[string]bool {
+	m := make(map[string]bool, len(initial))
+	for k, v := range initial {
+		m[k] = v
+	}
+	return m
+}
+
+func TestLoadServers_PrefixPolicy(t *testing.T) {
+	toolsByCommand := map[string][]mcp.ToolDef{
+		"ok:semble": {
+			{Name: "search", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "find_related", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		"ok:legacy": {
+			{Name: "free_tool", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, // collides with built-in
+		},
+	}
+	servers := map[string]ServerConfig{
+		"semble": {Command: "ok:semble"},
+		"legacy": {Command: "ok:legacy", NoPrefix: true},
+	}
+	// "read" simulates an already-registered built-in tool.
+	existing := freshExisting(map[string]bool{"read": true})
+
+	lr := loadServers(context.Background(), servers, existing, fakeConnect(t, toolsByCommand))
+
+	if len(lr.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", lr.Errors)
+	}
+	// Lexicographic server order (legacy < semble); within a server the
+	// server's own tool order. Default = "<server>__<tool>"; NoPrefix
+	// keeps bare names except when taken ("read" → "legacy__read").
+	want := "free_tool\nlegacy__read\nsemble__search\nsemble__find_related\n"
+	if got := rosterOf(lr); got != want {
+		t.Errorf("roster:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestLoadServers_DeterministicRoster is the D1 acceptance lock: two
+// loads of the same config must produce a byte-identical roster —
+// registration names, their order, and the error list.
+func TestLoadServers_DeterministicRoster(t *testing.T) {
+	toolsByCommand := map[string][]mcp.ToolDef{
+		"ok:alpha": {
+			{Name: "shared", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "unique_a", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		"ok:mid": {
+			{Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, // collides with built-in
+			{Name: "free_bare", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		"ok:zeta": {
+			{Name: "shared", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "unique_z", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		// "boom" is deliberately absent → connect fails for that server.
+	}
+	newServers := func() map[string]ServerConfig {
+		return map[string]ServerConfig{
+			"zeta":   {Command: "ok:zeta"},
+			"alpha":  {Command: "ok:alpha"},
+			"mid":    {Command: "ok:mid", NoPrefix: true},
+			"broken": {Command: "boom"},
+		}
+	}
+	initialExisting := map[string]bool{"read": true}
+
+	run := func() string {
+		lr := loadServers(context.Background(), newServers(), freshExisting(initialExisting), fakeConnect(t, toolsByCommand))
+		return rosterOf(lr)
+	}
+
+	first, second := run(), run()
+	if first != second {
+		t.Errorf("same config, different rosters:\nfirst  %q\nsecond %q", first, second)
+	}
+	// And the roster is exactly this: servers in lexicographic name
+	// order (alpha, broken, mid, zeta; broken contributes only an
+	// error line, listed after the bridges), mid's bare "read" falls
+	// back to the prefixed form because "read" is already registered.
+	want := "alpha__shared\nalpha__unique_a\nmid__read\nfree_bare\nzeta__shared\nzeta__unique_z\n" +
+		`mcp server "broken": start "boom": command not found` + "\n"
+	if first != want {
+		t.Errorf("roster:\ngot  %q\nwant %q", first, want)
+	}
+}
+
+func TestLoadServers_Empty(t *testing.T) {
+	lr := loadServers(context.Background(), nil, nil, fakeConnect(t, nil))
+	if len(lr.Bridges) != 0 || len(lr.Errors) != 0 {
+		t.Errorf("empty config should be a no-op, got %+v", lr)
+	}
+}
+
 // ---------- helper function tests ----------
 
 func TestEnvMapToSlice_Nil(t *testing.T) {
