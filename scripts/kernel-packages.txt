@@ -1,0 +1,22 @@
+# kernel-packages.txt — the v8 kernel package set (docs/prd/v8.md §3, card c_zcygo2).
+# One package per line, relative to the module root; '#' comments and blank
+# lines are ignored. Consumed by scripts/kernel-deps.sh — the advisory
+# dependency-direction report (kernel must not import non-kernel packages).
+# Editing this list changes what counts as a violation.
+pkg/deepseek
+pkg/agent
+internal/session
+internal/permission
+internal/sandbox
+internal/worktree
+internal/cache
+internal/pricing
+internal/config
+internal/paths
+internal/tools
+# internal/tools: only the five base-tool subpackages are kernel (v8 §3)
+internal/tools/read
+internal/tools/edit
+internal/tools/write
+internal/tools/bash
+internal/tools/grep
