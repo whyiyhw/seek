@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/agentscli"
 	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/assets"
@@ -773,6 +774,15 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek agents ...` — typed-agent definitions (feature-
+	// orchestration.md §5, M-O2.3): list / check (read-only views of
+	// the registry) and create / remove (the write path — the only
+	// legal writers under the agents/ scopes are internal/agentsmgr
+	// via these verbs). Same rationale as skill/memory: no API keys,
+	// no session, no agent runtime.
+	if len(os.Args) >= 2 && os.Args[1] == "agents" {
+		return agentscli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// `seek session export` — transcript JSONL → human-readable
 	// markdown. Same rationale as skill/memory: export needs neither

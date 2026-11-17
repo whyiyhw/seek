@@ -48,6 +48,24 @@ func TestParse_NameFallbackToFilename(t *testing.T) {
 	}
 }
 
+// TestValidName: the exported kebab-case gate agentsmgr relies on for
+// names with no file to Parse. Every separator/dot/backslash shape
+// must be false — those are the path-escape vectors.
+func TestValidName(t *testing.T) {
+	good := []string{"a", "verifier", "plan-v2", "x0-y", "a-b-c", "x-"}
+	bad := []string{"", "A", "Verifier", "-x", "a_b", "a/b", `..\x`, "../x", "/abs", "..", ".", "x y"}
+	for _, n := range good {
+		if !ValidName(n) {
+			t.Errorf("ValidName(%q) = false, want true", n)
+		}
+	}
+	for _, n := range bad {
+		if ValidName(n) {
+			t.Errorf("ValidName(%q) = true, want false", n)
+		}
+	}
+}
+
 // TestParse_Minimal: only the two required fields (description +
 // body); everything else inherits.
 func TestParse_Minimal(t *testing.T) {

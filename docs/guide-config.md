@@ -45,6 +45,7 @@ API 密钥的查找优先级从高到低：
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
 | `session_notify_seconds` | int | 交互回合持续超过此秒数时触发推送通知。缺省 = 60s，设为 0 禁用 |
+| `agents` | object | 子代理类型的默认路由覆写（见下节；键 = 类型名，值 = 仅路由旋钮）|
 
 ---
 
@@ -103,6 +104,24 @@ seek --provider anthropic
 ### 推送通知
 
 将 cron 任务完成、autopilot 结果、长时间交互回合的结束通知推送到手机。配置方式见 [guide-webhooks.md](guide-webhooks.md)。
+
+### 子代理类型路由（`agents` 段）
+
+给子代理类型设**默认路由**，免得每次 `agent` 工具调用都带 provider/model 参数（feature-orchestration.md D6/D14）：
+
+```json
+{
+  "agents": {
+    "explore": { "provider": "glm", "model": "glm-5.3" },
+    "plan":    { "effort": "low", "max_turns": 40 }
+  }
+}
+```
+
+- 键 = 类型名（内置 `general-purpose` / `explore` / `plan`，或文件定义的自定义类型）；值只允许路由旋钮 `provider` / `model` / `effort` / `max_turns`，空 = 继承。
+- **config 只换脑子不换权限**：工具集、prompt、workflow 不能在这里改——那些属于 `agents/*.md` 定义文件（见 [guide-subagent.md](guide-subagent.md)）。
+- 优先级：内置默认 < config 段 < `agents/*.md`（同名时文件层直接压过 config）。未知键名启动时警告并忽略（前向兼容）。
+- `seek agents list` 可查看合并后的注册表（project > user > config > builtin）。
 
 
 
