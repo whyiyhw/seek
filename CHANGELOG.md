@@ -83,3 +83,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_oixx62：slim-loop·M-SL3 首跑重跑：seek goal run 载体 × worktree × 人审 diff
 - c_2i6sm6：v8·S1：摩擦记账——从 transcript 折叠出按工具的失败/被拒/重复统计（只读）
 - c_zcygo2：v8·U1：内核依赖方向报告脚本（只报不拦）
+- c_5fdsqb：memory↔skill 打通·设计卡 P0：蒸馏落点（review 第四动作）+ 生命周期对齐
