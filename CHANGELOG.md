@@ -92,3 +92,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_mnicm3：docs/prd 归档减法（v8 D5 拍板）：已交付 PRD 移入归档区，weight.sh 回预算
 - c_aqbdaz：selftest 登记缺口机制化：新脚本自动进 scripts/selftest.sh（含补登 kernel-deps.sh）
 - c_x3bed4：MCP-D2：sysprompt 新增 MCPSection 段（Header 第五段，SkillManifest 同款 per-session 静态；空段=现状逐字节不变）
+- c_n63pat：web 前端·W4.4：资产面 sessions 浏览器（列表 + 消息 cursor 分页浏览）
