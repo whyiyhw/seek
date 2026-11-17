@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/whyiyhw/seek/internal/tools/mcptool"
+	"github.com/whyiyhw/seek/pkg/mcp"
 )
 
 // detectGlamourStyle has three decision axes:
@@ -211,5 +214,36 @@ func TestCronAutoTickEnabled(t *testing.T) {
 					tt.noCronTick, tt.acpLane, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestMCPPromptSection locks the D2 channel's default assembly
+// (docs/prd/feature-mcp-client.md §3.1): servers listed in dictionary
+// order with their tools (registered names, sorted), byte-deterministic
+// regardless of input bridge order, and zero bytes for an empty bridge
+// set. The per-server routing copy is D3's PromptSection layer — this
+// only guards the minimal listing the channel ships with.
+func TestMCPPromptSection(t *testing.T) {
+	bridges := []*mcptool.Bridge{
+		mcptool.New(nil, "zeta", mcp.ToolDef{Name: "search"}, "zeta__search"),
+		mcptool.New(nil, "semble", mcp.ToolDef{Name: "find_related"}, "find_related"),
+		mcptool.New(nil, "semble", mcp.ToolDef{Name: "search"}, "search"),
+	}
+	want := "MCP tools (external servers loaded this session):\n\n" +
+		"- semble: find_related, search\n\n" +
+		"- zeta: zeta__search"
+	if got := mcpPromptSection(bridges); got != want {
+		t.Errorf("mcpPromptSection mismatch.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	// Determinism: a reshuffled input must produce identical bytes
+	// (the section is a prompt prefix — map/iteration order leaking in
+	// would bust the cache across restarts).
+	shuffled := []*mcptool.Bridge{bridges[2], bridges[0], bridges[1]}
+	if a, b := mcpPromptSection(bridges), mcpPromptSection(shuffled); a != b {
+		t.Errorf("mcpPromptSection not order-invariant:\n%s\nvs\n%s", a, b)
+	}
+	// Empty bridge set → empty string → sysprompt appends zero bytes.
+	if got := mcpPromptSection(nil); got != "" {
+		t.Errorf("mcpPromptSection(nil) = %q, want empty", got)
 	}
 }

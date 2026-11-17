@@ -1434,6 +1434,20 @@ func run() error {
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
 	// a broken MCP server should not prevent seek from starting.
+	//
+	// mcpSection feeds sysprompt.Header.MCPSection (the fifth prompt
+	// segment). Assembled ONCE here, after LoadServers, and never
+	// recomputed — per-session static, same discipline as sessionDate
+	// below: MCP servers load at startup and never change mid-session,
+	// and a mutating prompt segment would invalidate the prefix cache.
+	// Empty when no MCP tools loaded → zero prompt bytes, so no-MCP
+	// users keep a byte-identical prefix (the sysprompt golden locks
+	// this). Note: the -tools whitelist narrows the registry later and
+	// may drop MCP tools this section still names — same static-prose
+	// posture as rootTpl (which documents fim_complete even on non-
+	// DeepSeek providers); the section describes what loaded, the
+	// request's tools array is the callable truth.
+	var mcpSection string
 	if mcpCfg, err := mcpconfig.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp config:", err)
 	} else if len(mcpCfg.MCPServers) > 0 {
@@ -1457,6 +1471,7 @@ func run() error {
 			reg.Add(b)
 		}
 		if len(lr.Bridges) > 0 {
+			mcpSection = mcpPromptSection(lr.Bridges)
 			fmt.Fprintf(os.Stderr, "mcp: loaded %d tool(s)\n", len(lr.Bridges))
 		}
 	}
@@ -1505,6 +1520,7 @@ func run() error {
 		Cwd:            abs,
 		ProjectSection: projMD.Section(),
 		SkillManifest:  skills.Manifest(),
+		MCPSection:     mcpSection,
 		Date:           sessionDate,
 	}, sysprompt.ModeLabel(initialPref, initialWorkflow))
 
@@ -1694,6 +1710,10 @@ func run() error {
 			// identical to the parent's prompt so the subagent header
 			// matches. See sessionDate above.
 			SessionDate: sessionDate,
+			// Same static discipline: MCP servers load once at startup,
+			// so the subagent inherits the parent's MCPSection bytes
+			// verbatim (§3.6.1 inheritance, fifth segment).
+			MCPSection: mcpSection,
 			// Background spawns bind to the process/session ctx so a
 			// parent turn returning (Esc) can never kill them — the
 			// 柱 K bgjob ctx-discipline lifted to agent level
@@ -2325,6 +2345,7 @@ func run() error {
 				Cwd:            abs,
 				ProjectSection: projMD.Section(),
 				SkillManifest:  skills.Manifest(),
+				MCPSection:     mcpSection,
 				Date:           sessionDate,
 			}, sysprompt.ModeLabel(policy.Pref(), policy.Workflow()))
 			newAg, err := agent.New(agent.Config{
@@ -3258,6 +3279,39 @@ func autoDistillEnabled() bool {
 func envBoolTrue(name string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+// mcpPromptSection assembles the sysprompt MCPSection content (the
+// fifth prompt segment) from the bridges LoadServers produced:
+// servers grouped and listed by name in dictionary order, tools listed
+// under their REGISTERED names so whatever prefix policy LoadServers
+// applied is exactly what the model can call. Sorting here makes the
+// section byte-deterministic for a given bridge set regardless of the
+// mcp.json map iteration order. Minimal listing by design — per-server
+// routing copy, mcp.json hint overrides, and the mcp_prompt switch are
+// the D3 layer (mcptool.PromptSection, docs/prd/feature-mcp-client.md
+// §3.2); this is the D2 channel's default content.
+func mcpPromptSection(bridges []*mcptool.Bridge) string {
+	if len(bridges) == 0 {
+		return ""
+	}
+	byServer := make(map[string][]string)
+	for _, b := range bridges {
+		byServer[b.Server()] = append(byServer[b.Server()], b.Name())
+	}
+	names := make([]string, 0, len(byServer))
+	for name := range byServer {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	var sb strings.Builder
+	sb.WriteString("MCP tools (external servers loaded this session):")
+	for _, name := range names {
+		tools := byServer[name]
+		slices.Sort(tools)
+		sb.WriteString("\n\n- " + name + ": " + strings.Join(tools, ", "))
+	}
+	return sb.String()
 }
 
 // cronAutoTickEnabled is the single gate for the startup cron auto-tick

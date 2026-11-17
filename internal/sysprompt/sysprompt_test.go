@@ -226,6 +226,92 @@ func TestComposeSubagent_OmitsExtraWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestCompose_MCPSection_ZeroBytesWhenEmpty is the D2 acceptance
+// guard: an empty MCPSection appends ZERO bytes — Compose output for
+// a no-MCP session must be byte-identical to a Header that never knew
+// the field existed. This is what keeps every existing user's prefix
+// cache hot across the MCP-D2 rollout (docs/prd/feature-mcp-client.md
+// §3.1 "无 MCP 用户零失效").
+func TestCompose_MCPSection_ZeroBytesWhenEmpty(t *testing.T) {
+	base := Header{
+		Cwd:            "/Users/test/proj",
+		ProjectSection: "## Project conventions\nUse tabs.\n",
+		SkillManifest:  "## Available skills\n- foo: bar\n",
+		Date:           "Wednesday, 2026-06-03",
+	}
+	withExplicitEmpty := base
+	withExplicitEmpty.MCPSection = ""
+	a := Compose(base, "ask") // zero value: MCPSection == ""
+	b := Compose(withExplicitEmpty, "ask")
+	if a != b {
+		t.Errorf("zero-value and explicit-empty MCPSection diverged (len %d vs %d)", len(a), len(b))
+	}
+	// And both must equal the pre-MCPSection legacy assembly verbatim.
+	if want := legacyAssemble(base.Cwd, "ask", base.ProjectSection, base.SkillManifest, base.Date); a != want {
+		t.Errorf("empty MCPSection changed output bytes vs legacy assembly.\n--- got (%d bytes) ---\n%s\n--- want (%d bytes) ---\n%s",
+			len(a), a, len(want), want)
+	}
+}
+
+// TestCompose_MCPSection_AppendedAfterSkillManifest locks the "有
+// MCP" golden: the section lands as the fifth segment, after
+// SkillManifest, \n-joined exactly like the other optional segments.
+// Byte-precise on purpose — the placement and glue are wire-format
+// for the prefix cache.
+func TestCompose_MCPSection_AppendedAfterSkillManifest(t *testing.T) {
+	const mcp = "MCP tools (external servers loaded this session):\n\n- semble: search, find_related"
+	h := Header{
+		Cwd:            "/Users/test/proj",
+		ProjectSection: "## Project conventions\nUse tabs.\n",
+		SkillManifest:  "## Available skills\n- foo: bar\n",
+		MCPSection:     mcp,
+		Date:           "Wednesday, 2026-06-03",
+	}
+	got := Compose(h, "ask")
+	want := legacyAssemble(h.Cwd, "ask", h.ProjectSection, h.SkillManifest, h.Date) + "\n" + mcp
+	if got != want {
+		t.Errorf("MCP-section Compose diverged from expected assembly.\n--- got (%d bytes) ---\n%s\n--- want (%d bytes) ---\n%s",
+			len(got), got, len(want), want)
+	}
+	// Placement contract: the section must come AFTER the skill
+	// manifest content, never interleaved before it.
+	if !strings.Contains(got, h.SkillManifest+"\n"+mcp) {
+		t.Errorf("MCPSection not appended directly after SkillManifest in:\n%s", got)
+	}
+	// Section WITHOUT a manifest still lands cleanly after the header
+	// (each optional segment is independently skipped).
+	gotNoManifest := Compose(Header{Cwd: "/p", MCPSection: mcp, Date: "d"}, "yolo")
+	if !strings.HasSuffix(gotNoManifest, "\n"+mcp) {
+		t.Errorf("MCPSection not the trailing segment when manifest absent:\n%s", gotNoManifest)
+	}
+}
+
+// TestComposeSubagent_InheritsMCPSection is the second D2 acceptance
+// guard: ComposeSubagent shares the parent Header, so the MCP section
+// reaches subagent prompts with zero extra wiring (§3.1 "subagent
+// 自动继承"). The inheritance must be byte-exact, not a copy.
+func TestComposeSubagent_InheritsMCPSection(t *testing.T) {
+	const mcp = "MCP tools (external servers loaded this session):\n\n- semble: search, find_related"
+	h := Header{
+		Cwd:            "/proj",
+		ProjectSection: "## Project rules\nFoo.",
+		SkillManifest:  "## Skills\n- bar",
+		MCPSection:     mcp,
+		Date:           "Wednesday, 2026-06-03",
+	}
+	sub := ComposeSubagent(h, SubagentRole{Description: "find Esc handlers"})
+	if !strings.Contains(sub, mcp) {
+		t.Errorf("ComposeSubagent output missing the MCP section:\n%s", sub)
+	}
+	// And the inherited prefix (segments 1-3 + MCP) stays byte-identical
+	// to the parent Compose — the §3.6.1 header-inheritance invariant,
+	// extended to the fifth segment.
+	parent := Compose(h, "subagent")
+	if !strings.HasPrefix(sub, parent) {
+		t.Errorf("ComposeSubagent no longer starts with the parent Compose bytes once MCPSection is set")
+	}
+}
+
 // TestCompose_LargeInputsNoAllocPathologies is a soft check that the
 // strings.Builder pre-allocation doesn't crash or panic on
 // degenerate inputs (empty cwd, very large section). Not a benchmark

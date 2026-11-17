@@ -165,6 +165,16 @@ type ManagerOpts struct {
 	// prompt body.
 	SessionDate string
 
+	// MCPSection is the parent's MCP server listing for the system
+	// prompt (sysprompt.Header.MCPSection), assembled once by cmd/seek
+	// after mcptool.LoadServers and passed verbatim into every
+	// subagent's prompt. Static for the same reason as SessionDate:
+	// MCP servers load at startup and never change mid-session, so the
+	// subagent header must mirror the parent's bytes exactly (§3.6.1
+	// inheritance, fifth segment). Empty when no MCP servers loaded —
+	// which appends zero prompt bytes, same as the parent path.
+	MCPSection string
+
 	// Dynamic accessors — called at each Spawn so RebuildAgent,
 	// skill hot-reload, and session compaction (fork-new-SID) pick
 	// up fresh values. See struct doc above for the rationale per
@@ -524,6 +534,7 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs, background bo
 		Cwd:            cwd,
 		ProjectSection: m.opts.ProjectSectionFn(),
 		SkillManifest:  m.opts.SkillManifestFn(),
+		MCPSection:     m.opts.MCPSection,
 		Date:           m.opts.SessionDate,
 	}, tmpl.Role(args.Description))
 
@@ -896,6 +907,7 @@ func (m *Manager) beginContinue(parentCtx context.Context, args ContinueArgs) (*
 		Cwd:            cwd,
 		ProjectSection: m.opts.ProjectSectionFn(),
 		SkillManifest:  m.opts.SkillManifestFn(),
+		MCPSection:     m.opts.MCPSection,
 		Date:           m.opts.SessionDate,
 	}, tmpl.Role(args.Description))
 

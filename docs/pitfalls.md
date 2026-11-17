@@ -447,6 +447,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 
 ## Agent loop
 
+### Static prompt prose can name tools the request's tools array won't carry — by design
+- **Saw**: wiring `sysprompt.Header.MCPSection` (MCP-D2), the section is assembled right after `mcptool.LoadServers`, but the `-tools` whitelist (`applyToolsWhitelist`) narrows the registry much later — so under `seek -tools read,grep` with MCP servers configured, the prompt's MCP section names tools that are not callable that session. Tempting to "fix" by filtering the section through the final registry.
+- **Why**: startup order is load-bearing — `session.New` freezes the composed prompt BEFORE the whitelist runs (the whitelist itself must see the full registry to validate `-tools` names, including MCP tools, per its own doc). Filtering the section would mean restructuring startup for a lane (bare-core comparison, v8·T1) that explicitly deviates from the default composition.
+- **Fix**: kept the section static and documented the posture inline (`cmd/seek/main.go`, mcpSection declaration): the section describes what loaded; the request's tools array is the callable truth. Same precedent as rootTpl listing `fim_complete` docs on non-DeepSeek providers where the tool never registers.
+- **Lesson**: seek's system prompt is static prose describing the tool landscape, NOT a mirror of the per-request tools array. Don't couple prompt assembly to registry mutation order; if a lane narrows tools, the prose being broader is accepted (and the model discovers unavailability on the refusal, like references-without-LSP).
+- **Refs**: `cmd/seek/main.go` (mcpSection comment, applyToolsWhitelist), `internal/sysprompt/sysprompt.go` (rootTpl static tool docs), `docs/prd/feature-mcp-client.md` §3.1
+
 ### A refusal the model does not learn from is a pure tax — auto-fix unambiguous intent instead
 - **Saw**: the git tool's duplicated-subcommand guard (`git diff --stat` arriving as subcommand "diff" + args ["diff","--stat"]) refused with a precise, actionable error naming the correct shape. Real transcripts showed DeepSeek making the SAME mistake twice in four consecutive calls — recovering each time after the refusal, then repeating the shape on the next call from scratch. Each occurrence cost a full wasted round trip.
 - **Why**: an in-error correction teaches only within the turn it fires in; the next call is built fresh from the schema description and conversation attention, not from the accumulated refusals. When the emitting model has a systematic arg-construction tic, per-call refusals are a recurring cost with no compounding benefit.
