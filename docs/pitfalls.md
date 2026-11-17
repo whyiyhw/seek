@@ -1451,6 +1451,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when a property is maintained by discipline rather than by construction, it needs a test that fails when the discipline lapses — and for provider-scored properties that test has to hit the provider. Mocks establish the format; one key-gated e2e establishes the behaviour. (dsh reaches the same conclusion at `packages/core/agent-loop/tests/request-cache.e2e.ts`; its docstring calls prefix stability "corollary #1" of log-derived requests.)
 - **Refs**: `pkg/agent/cache_e2e_test.go`, `docs/dsh-analysis.md` §8.2
 
+### Injecting filesystem failure for cross-OS tests: chmod lies, file-as-dir is honest
+- **Saw**: (design-time, M-B1) testing "a failed skill write leaves no partial state" wanted a read-only parent dir (`chmod 0500`) to force `MkdirAll`/`WriteFile` to fail. On Windows the directory read-only bit doesn't block `mkdir` (chmod semantics only apply to files), so the injection silently succeeds and the test fails on the third CI OS.
+- **Why**: Go's `os.Chmod` on Windows toggles the FILE read-only attribute; directories keep their ACLs. Related trap: `stat("<file>/child")` returns `ENOTDIR` on Unix but maps to `ENOENT` on Windows, so even asserting *which* error branch fired is not portable.
+- **Fix**: inject with a regular FILE parked where a directory must go (e.g. `<proj>/.seek` as a file) and assert the CONTRACT (error returned + zero residue via a walk), never the branch. `internal/skillmgr/writeproject_test.go` `TestWriteProjectSkill_FailureLeavesNoPartialState`.
+- **Lesson**: on a three-OS CI, failure injection must fail for the same reason everywhere; when it can't, broaden the assertion from "this branch errored" to "the invariant held" (error out, nothing written).
+- **Refs**: `internal/skillmgr/writeproject_test.go`, `.github/workflows/ci.yml`
+
 ## Tool decorators
 
 ### A Tool decorator silently drops the optional interfaces the agent upcasts to
