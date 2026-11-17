@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature PRD · 📐 设计稿 · 未排期（自进化内环第三块：pitfall→eval 是「失败 → 防回归」，skill-distill 是「会话 → 能力」，本文是「长出来的肉 → 代谢掉」）
 **前置阅读**：立项决策（butler 2026-11-13「减法机制立项」：三层 L1 秤与网 / L2 账与刀 / L3 自噬循环）；[`feature-skill-distill.md`](feature-skill-distill.md)（人审闸同构——自动路径永不激活）；[`feature-goal.md`](feature-goal.md)（goal run 循环 + no-remote 守卫 + yolo-local）；[`feature-autopilot.md`](feature-autopilot.md)（worktree 原语 + 本地 commit 不 push 的默认）；[`feature-routines.md`](feature-routines.md)（cron 触发）；[`docs/narrative/seek.md`](../narrative/seek.md)（自我进化平台定位）；[`scripts/doc-budgets.tsv`](../../scripts/doc-budgets.tsv) + [`scripts/verify-doc-budgets.sh`](../../scripts/verify-doc-budgets.sh)（已落地的预算先例）
-**状态**：📐 设计稿。本文只定义流程与口径，无代码。**依赖两张在飞 L1 卡**：`c_vt7fiw`（weight.sh 体重秤 + budget.json 预算清单，只读只报）、`c_rtjjsl`（首轮 deadcode/unused 扫描候选清单，只报不删）——L1 产物未合并前，巡检（M-SL1）与 L3 首跑（M-SL3）都不能启动。
+**状态**：📐 设计稿（流程已开始运转）。本文只定义流程与口径，无代码。两张 L1 前置卡已合并（c_sv3zwn §1.4 记录）：`c_vt7fiw`（weight.sh 体重秤 + budget.json 预算清单，只读只报）、`c_rtjjsl`（首轮 deadcode/unused 扫描候选清单，只报不删，产物即 [`docs/notes-slim-candidates-2026-11.md`](../notes-slim-candidates-2026-11.md)）——M-SL1 / M-SL3 就此解除阻塞；M-SL3 首跑已落地（§7）。
 
 > **一句话**：给 seek 立一条与「怼功能」对偶的「删冗」流程——**秤先上（L1，在飞）、账与刀进流程（L2，本文）、最后让 seek 自己夜里挥刀、人早上验收（L3，本文）**。安全网只有两张：代码减法行为不变，文档减法信息不丢。
 
@@ -28,7 +28,7 @@
 
 | 层 | 名字 | 内容 | 状态 |
 |---|---|---|---|
-| L1 | 秤与网 | weight.sh 体重秤 + budget.json 预算清单 + deadcode 扫描（**只报不删**）；安全网 = go test + eval 全例「行为不变」口径 | 在飞：`c_vt7fiw`（秤 + 预算）、`c_rtjjsl`（首扫清单） |
+| L1 | 秤与网 | weight.sh 体重秤 + budget.json 预算清单 + deadcode 扫描（**只报不删**）；安全网 = go test + eval 全例「行为不变」口径 | 在飞：`c_vt7fiw`（秤 + 预算）、`c_rtjjsl`（首扫清单） → 已合并（2026-11-13 前后，c_sv3zwn §1.4 记录） |
 | L2 | 账与刀 | 每版一刀规矩 + 双周减法巡检 + 文档「信息不丢」口径 | **本文 §2–§3** |
 | L3 | 自噬循环 | seek goal run 夜间自瘦身 + worktree 隔离 + 人审 diff | **本文 §4** |
 
@@ -235,7 +235,7 @@ seek 已有 `internal/budget`（context window 预算）和 `docs/guide-budget.m
 |---|---|---|
 | **M-SL1** | 双周巡检首跑：读 L1 四路证据，开首批 ≤3 张带证据卡 | `c_vt7fiw` + `c_rtjjsl` 合并 |
 | **M-SL2** | 每版一刀记账生效：下一个 minor 版本线发布时核对 `Slim:` 账（或零刀说明）；AGENTS.md 提案（附录 A）由主会话呈用户批 | 本文合并 |
-| **M-SL3** | L3 夜间自瘦身首跑 e2e：cron → worktree → goal run 删首批零引用导出符号 → 测试全绿 → 晨审 merge | M-SL1 + deadcode 清单稳定 |
+| **M-SL3** ✅ | 首跑已落地，两段：c_z4mn6y（2026-11-16，worktree 单卡死磕 −109 行，后判 L2 手工刀合入 main）+ c_oixx62（2026-11-17 载体正名重跑：`seek goal run` × worktree × no-remote 守卫，1 turn 判 met，清单 §2 第 9 条登记队列清空，§3 双轮验收无回归）——「产品自噬 e2e」以后者计；cron 位由工作卡派发代位，夜间 cron 化为后续可选 | M-SL1 + deadcode 清单稳定 |
 | **M-SL4**（可选，不排期） | budget gate 泛化收口：doc-budgets.tsv 同船迁入、单 gate 执行 §5.1 的 500 行预算 | `c_vt7fiw` 落地形态确定 |
 
 ## 8. 风险

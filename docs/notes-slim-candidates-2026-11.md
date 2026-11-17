@@ -14,6 +14,8 @@
 
 | 第 4 刀 2026-11-16 | c_z4mn6y | M-SL3 首跑（slim-loop L3 · worktree 单卡死磕）：清空下述「第 2 刀新增候选」队列——internal/hooks emitStatus 永_nil 链（onStatus 字段 + StatusEvent 类型 + emitStatus + 6 调用点；WithStatusCallback 首刀删除后全仓零写入方，nil 守卫 = 二进制内可证明 no-op，4 处 if 块随之清空为 `_, _, _ = runHook(...)`）、teatest `modelCh` write-only 通道（FinalModel 删除后零读者，goroutine 内 `model` 改 `_`）、testModelBuilder `skipDefSize`/`skipReady` 恒 false 字段（Build 无条件化）、skilldistill `skillSetWith`（deadcode -test 清单末条，-test 模式条目就此清零） | 4 文件 +13/−109 净 −96 行；验收 §3.1：go vet 零告警 + `go test -race ./...` 全绿 + eval/run.sh 21 例基线轮 + 改动后双轮无「持续绿→红」（唯一双轮红 bash-overreach 为方差用例：2026-11-13 历史二进制 6 红 3 绿、同一结果文件内 false×3→true×2 交替，非持续绿，且本刀 diff 无因果路径；glm-lane-contract 无 GLM key 环境红、基线同红）。证据 eval/results/2026-11-16-*。sandbox.Wrap linux/other 变体仍留（§2 第 9 条：平台孪生取舍 + 包文档连带修订需人判） |
 
+| 第 5 刀 2026-11-17 | c_oixx62 | M-SL3 首跑重跑·载体正名：由 `seek goal run` 执行 §2 第 9 条登记队列（产品自噬：yolo-local + no-remote 守卫，1 turn / 31 tool calls / 557,896 tok 即 met）——删 sandbox.Wrap linux/other 两变体 + sandbox.go 包文档 Wrap 段落连带修订 + sandbox_linux.go trampoline 注释 Wrap 提法修正；darwin 变体（seatbelt 行为测试接缝）保留 | 3 文件 +7/−24 净 −17 行；验收 §3.1：vet 零告警 + `go test -race` 全绿 + eval 21 例双轮无「持续绿→红」（r1 红 4：bash-overreach / grep-refine-not-flood 为既有交替方差例，code-review-effort-max 与 glm-lane-contract 基线已红——后者无 GLM key 环境红；r2 红 2：仅后两例）。载体证据：刀 commit 26dce15 trailer（Slim:/Goal-Run:）+ goal run 日志 + git checkpoint refs `refs/seek/checkpoints/20261117-022046-f73acb78e9c05e9d/8`（turn-8 checkpoint 提交即刀 diff） |
+
 **第 2 刀新增候选（后续刀的队列，本刀按范围纪律未删）**（→ 已由第 4 刀 2026-11-16 全清，见执行状态表）：
 - `skilldistill_test.go:163 skillSetWith`：skill-distill M-SD1 合入后新增的死测试助手（C 类同性质），扫描基线 5b76ed6 之后才出现，不在本清单原始条目内。
 - `internal/hooks` emitStatus 永_nil 链（首刀遗留）与 `internal/tui/teatest` `modelCh` write-only 通道（本刀删 FinalModel 后唯一读者消失，字段仍有写入方故 U1000 不报）：同属「删除注入器后留下的孤儿读写路径」，需语义判断，不满足机械零引用标准。
@@ -102,6 +104,8 @@ grep -rn "sandbox.Wrap\|\.Wrap(" --include="*.go" --exclude="*_test.go" .   # �
 
 **第 9 条复核结论（2026-11-13，卡 c_l3cw6d 回填）——判：保留（三变体整组），linux/other 两变体登记为下一刀候选。**
 证据：① GOOS=linux / GOOS=windows `go build ./...` + `go vet ./internal/sandbox/` 全过（含第 3 刀 modernize 改动后）；② deadcode 跨 GOOS 复扫（host 构建 + GOOS env；注意 `GOOS=x go tool deadcode` 会把工具本体也按目标平台编译导致 exec format error，须先 host 构建二进制再传 env）：linux 变体（sandbox_linux.go:54）与 other 变体（sandbox_other.go:18）在生产与 -test 双模式**均死**——`sandbox_linux_test.go` 零 `Wrap` 引用；darwin 变体 -test 模式活——`sandbox_darwin_test.go` 经 `Wrap` 起 seatbelt 真实进程做行为断言；③ 生产消费路径实为 `sandbox.Argv`（internal/tools/bash/bash.go:205，v7 柱 O 落地时走 trampoline 设计）+ `sandbox.Available()`（cmd/seek/main.go:631），`Wrap` 是旧入口、包文档「Use Available() … Wrap() …」表述已与实现错位。判保留的理由：darwin 变体是活跃行为测试接缝，删 = 连坐删真实 seatbelt 断言；linux/other 变体虽双模式死但属平台孪生实现，单删两枚造成 API 面不对称且收益仅 ~20 行。下一刀若删 linux/other 两变体，需连带修订包文档的 Wrap 段落。
+
+**第 5 刀已执行（2026-11-17，c_oixx62）**：linux/other 两变体已删、包文档 Wrap 段落已连带修订（见执行状态表第 5 刀）；darwin 变体作为测试接缝保留——生产模式 deadcode 仍单列 darwin Wrap，「测试接缝」的 B 类定性不变。
 
 **预估收益**：若 16 个散项全判删（含测试），~100–150 行；若全判「测试接缝保留」，收益 0 但换来一份明确的接缝清单（本身也是本卡的产出物）。
 **风险分级：删函数 / 中**（每个都可能连坐测试；controlplane 一组还在活跃开发期——M2 刚合入，宁可不动）。
