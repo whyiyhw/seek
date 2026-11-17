@@ -159,7 +159,7 @@ func loadAverages(path string, limit int) map[string]float64 {
 func cmdCheck(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("hooks check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	event := fs.String("event", "", "event name (pre_tool|post_tool|pre_prompt|session_start|session_end|subagent_start|subagent_stop|stop|pre_compact|notification)")
+	event := fs.String("event", "", "event name (pre_tool|post_tool|pre_prompt|session_start|session_end|subagent_start|subagent_stop|stop|pre_compact|notification|pre_prompt_inject)")
 	tool := fs.String("tool", "", "tool name (required for pre_tool/post_tool)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -194,6 +194,8 @@ func cmdCheck(args []string, stdout, stderr io.Writer) error {
 		pool = cfg.PreCompact
 	case hooksconfig.EventNotification:
 		pool = cfg.Notification
+	case hooksconfig.EventPrePromptInject:
+		pool = cfg.PrePromptInject
 	default:
 		fmt.Fprintf(stderr, "hooks: unknown event %q\n", *event)
 		return nil
@@ -215,8 +217,12 @@ func cmdCheck(args []string, stdout, stderr io.Writer) error {
 		if h.SkipReason != "" {
 			skip = " [skipped: " + h.SkipReason + "]"
 		}
-		fmt.Fprintf(stdout, "  %-30s  source=%s  timeout=%dms%s\n",
-			h.Name, h.Source, h.EffectiveTimeoutMs(), skip)
+		budget := ""
+		if *event == hooksconfig.EventPrePromptInject {
+			budget = fmt.Sprintf("  max_bytes=%d", h.EffectiveMaxBytes())
+		}
+		fmt.Fprintf(stdout, "  %-30s  source=%s  timeout=%dms%s%s\n",
+			h.Name, h.Source, h.EffectiveTimeoutMs(), budget, skip)
 	}
 	if matched == 0 {
 		fmt.Fprintf(stdout, "no hooks match event=%s tool=%s\n", *event, *tool)

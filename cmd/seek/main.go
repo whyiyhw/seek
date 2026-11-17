@@ -1964,6 +1964,20 @@ func run() error {
 		hooksReg.Register(memHook)
 	}
 
+	// M-O3.2 pre_prompt_inject: the authorized shell stdout-injection
+	// face (feature-hooks-injection §4.5 / orchestration §6 D17).
+	// Registered AFTER the in-process PrePrompt hooks (background
+	// notifier, memory) so its <context type="hook"> messages land
+	// behind them in the turn's frontier batch — the PRD's "in-process
+	// hooks 之后" ordering. ShellRunner itself stays registered early
+	// for the pre_tool deny gate; this separate face is what lets both
+	// orderings hold at once. Children inherit it via the
+	// CloneWithout-on-bgNotifier closure (inject hooks fire per child
+	// Prompt too — same shared-surface semantics as pre_tool).
+	if shellRunner != nil && shellRunner.HasInjectHooks() {
+		hooksReg.Register(shellRunner.InjectHook())
+	}
+
 	// v8·T1 `-tools` whitelist (bare-core comparison lane). Runs here —
 	// after the LAST reg.Add (memory_observe above; the D13 gate below
 	// documents why this is the final-composition point) and before the

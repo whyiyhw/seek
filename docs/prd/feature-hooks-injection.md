@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature（编排承重轴 P3-a，设计启动）
 **前置阅读**：[`feature-orchestration.md`](feature-orchestration.md) §6（P3 骨架 D15–D17，本文是其设计细化）、[`feature-shell-hooks.md`](archive/feature-shell-hooks.md)（柱 B 红线原文）、[`v0.md`](archive/v0.md) §4.8.1（prefix-cache 字节纪律）、根 [`AGENTS.md`](../../AGENTS.md)「Token & prefix-cache constraints」
-**状态**：📐 设计稿（2026-11-14，卡 c_o77s3m）。只出文档，不含实现。
+**状态**：📐 设计稿（2026-11-14，卡 c_o77s3m）→ ✅ **M-O3.2 已实现**（2026-11-17，卡 c_m2whz2）：`pre_prompt_inject` 授权事件全链路落地（hooksconfig 事件 + `max_bytes` 预算 + `InjectRunner` PrePromptHook 面（`internal/hooks/shell_inject.go`，注册于 in-process hooks 之后）+ audit `injected_bytes` 留痕）；三区模型守护测试 `internal/hooks/zones_test.go`（前段字节不变断言）+ 用户文档 `docs/guide-hooks.md` §1–2；§8 状态栏开放问题已拍板（不做）。M-O3.1（五观察点）此前已交付（卡 c_wsf7us）。
 **定位**：把「注入内容改 prompt 字节会破 prefix-cache」这一张力**成文为规矩**——给出字节级缓存影响分析、全量生命周期点清单、注入通道的最终决策，以及 CC hooks 能力对照与逐项取舍。实现里程碑（M-O3.1/M-O3.2）沿用 orchestration §6 的排期，本文补全其设计依据。
 
 ---
@@ -294,7 +294,7 @@ CC 的注入扇出依托 Anthropic prompt caching 的 **TTL 模型**：缓存按
 ## 8. 开放问题
 
 - **PostToolUse 结果追加注入**（通道 E）：若 P1 后台通知落地后有「工具结果旁提示」的强需求再评估；前提是 decorator 限定「只准尾追、不准改写」。
-- **状态栏注入字节数提示**（orchestration §9 遗留）：M-O3.2 实现时以信息密度定夺。
+- ~~**状态栏注入字节数提示**（orchestration §9 遗留）：M-O3.2 实现时以信息密度定夺。~~ **已拍板（M-O3.2，2026-11-17）：不做。** 字节量已沉淀在 transcript 的 `<context type="hook">` 块、audit 有结构化 `injected_bytes` 可聚合；状态栏 per-turn 计数信息密度不抵常驻宽度，且状态事件链已作为死代码移除（卡 c_z4mn6y），不为低密度指标复活写者。失败提示同 observer 纪律走 audit + 启动 stderr。
 - **`pre_prompt_inject` 的 per-hook 条件触发**（如仅特定子目录 / 仅 plan 模式）：P3 最小形态不做 matcher，实战反馈再议（柱 B 当年也是先 `tool` 精确匹配后 glob 的教训）。
 
 ## 9. 与已交付面的关系

@@ -69,6 +69,27 @@ const (
 	EventStop          = "stop"
 	EventPreCompact    = "pre_compact"
 	EventNotification  = "notification"
+
+	// EventPrePromptInject (M-O3.2 / feature-hooks-injection §3.4+§4.5)
+	// is the one EXCEPTION to "shell stdout never enters the prompt":
+	// an explicitly opt-in per-hook authorization whose stdout is
+	// wrapped in a <context type="hook"> user message and injected at
+	// the frontier via PrePromptHook.Prepend — the same single seam the
+	// memory subsystem uses. The authorization the user signs is a
+	// CONTENT-trust decision (let an external process's output reach
+	// the model's view), not a cache one: channel D is byte-safe by
+	// construction (§2.3 commit-once). Failure (non-zero exit /
+	// timeout) skips that hook's injection — it never blocks the turn.
+	EventPrePromptInject = "pre_prompt_inject"
+)
+
+// Byte budgets for EventPrePromptInject stdout (feature-hooks-injection
+// §4.5): default conservative because injected bytes are committed to
+// history permanently (token cost, not cache cost); ceiling hard-stops
+// a runaway hook from flooding the transcript every turn.
+const (
+	DefaultMaxBytes = 2048
+	MaxBytesCeiling = 8192
 )
 
 // DefaultTimeoutMs is the per-hook wall-clock timeout if the toml
@@ -107,6 +128,13 @@ type Hook struct {
 	// (PRD §3.4); observer paths just log it.
 	TimeoutMs int `toml:"timeout_ms"`
 
+	// MaxBytes caps how many stdout bytes a pre_prompt_inject hook may
+	// contribute to the prompt (feature-hooks-injection §4.5). Excess
+	// is hard-truncated and marked " [truncated]". Meaningful ONLY for
+	// pre_prompt_inject; ignored by every other event. <=0 means
+	// DefaultMaxBytes; values above MaxBytesCeiling clamp to it.
+	MaxBytes int `toml:"max_bytes"`
+
 	// SkipReason, when non-empty, marks this hook as static-check
 	// failed (bash -n rejected the command). Such hooks are kept in
 	// the Config so `seek hooks list` can show them with the failure
@@ -127,6 +155,19 @@ func (h Hook) EffectiveTimeoutMs() int {
 		return h.TimeoutMs
 	}
 	return DefaultTimeoutMs
+}
+
+// EffectiveMaxBytes returns MaxBytes if positive, clamped to
+// MaxBytesCeiling; <=0 means DefaultMaxBytes. Centralised so call sites
+// can't disagree (mirrors EffectiveTimeoutMs).
+func (h Hook) EffectiveMaxBytes() int {
+	if h.MaxBytes <= 0 {
+		return DefaultMaxBytes
+	}
+	if h.MaxBytes > MaxBytesCeiling {
+		return MaxBytesCeiling
+	}
+	return h.MaxBytes
 }
 
 // MatchTool returns true when this hook should fire for the given tool
@@ -162,6 +203,12 @@ type Config struct {
 	Stop          []Hook `toml:"stop"`
 	PreCompact    []Hook `toml:"pre_compact"`
 	Notification  []Hook `toml:"notification"`
+
+	// PrePromptInject is the authorized stdout-injection event
+	// (M-O3.2 / feature-hooks-injection §4.5). Opt-in, no defaults.
+	// Match is meaningless here (ignored at dispatch, same as the
+	// observer events); MaxBytes carries the per-hook byte budget.
+	PrePromptInject []Hook `toml:"pre_prompt_inject"`
 }
 
 // IsEmpty reports whether this Config registers any hooks at all.
@@ -171,7 +218,8 @@ func (c Config) IsEmpty() bool {
 	return len(c.PreTool) == 0 && len(c.PostTool) == 0 && len(c.PrePrompt) == 0 &&
 		len(c.SessionStart) == 0 && len(c.SessionEnd) == 0 &&
 		len(c.SubagentStart) == 0 && len(c.SubagentStop) == 0 &&
-		len(c.Stop) == 0 && len(c.PreCompact) == 0 && len(c.Notification) == 0
+		len(c.Stop) == 0 && len(c.PreCompact) == 0 && len(c.Notification) == 0 &&
+		len(c.PrePromptInject) == 0
 }
 
 // All flattens the Config into a single slice for callers that want to
@@ -183,7 +231,8 @@ func (c Config) IsEmpty() bool {
 func (c Config) All() []Hook {
 	out := make([]Hook, 0,
 		len(c.PreTool)+len(c.PostTool)+len(c.PrePrompt)+len(c.SessionStart)+len(c.SessionEnd)+
-			len(c.SubagentStart)+len(c.SubagentStop)+len(c.Stop)+len(c.PreCompact)+len(c.Notification))
+			len(c.SubagentStart)+len(c.SubagentStop)+len(c.Stop)+len(c.PreCompact)+len(c.Notification)+
+			len(c.PrePromptInject))
 	out = append(out, c.PreTool...)
 	out = append(out, c.PostTool...)
 	out = append(out, c.PrePrompt...)
@@ -194,6 +243,7 @@ func (c Config) All() []Hook {
 	out = append(out, c.Stop...)
 	out = append(out, c.PreCompact...)
 	out = append(out, c.Notification...)
+	out = append(out, c.PrePromptInject...)
 	return out
 }
 
@@ -254,6 +304,7 @@ func DecodeBytes(body []byte, src Source) (Config, error) {
 	stampSourceEvent(&c.Stop, src, EventStop)
 	stampSourceEvent(&c.PreCompact, src, EventPreCompact)
 	stampSourceEvent(&c.Notification, src, EventNotification)
+	stampSourceEvent(&c.PrePromptInject, src, EventPrePromptInject)
 	return c, nil
 }
 
@@ -275,16 +326,17 @@ func stampSourceEvent(hooks *[]Hook, src Source, event string) {
 // run on traffic the project policy would have denied.
 func Merge(project, user Config) Config {
 	return Config{
-		PreTool:       append(append([]Hook{}, project.PreTool...), user.PreTool...),
-		PostTool:      append(append([]Hook{}, project.PostTool...), user.PostTool...),
-		PrePrompt:     append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
-		SessionStart:  append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
-		SessionEnd:    append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
-		SubagentStart: append(append([]Hook{}, project.SubagentStart...), user.SubagentStart...),
-		SubagentStop:  append(append([]Hook{}, project.SubagentStop...), user.SubagentStop...),
-		Stop:          append(append([]Hook{}, project.Stop...), user.Stop...),
-		PreCompact:    append(append([]Hook{}, project.PreCompact...), user.PreCompact...),
-		Notification:  append(append([]Hook{}, project.Notification...), user.Notification...),
+		PreTool:         append(append([]Hook{}, project.PreTool...), user.PreTool...),
+		PostTool:        append(append([]Hook{}, project.PostTool...), user.PostTool...),
+		PrePrompt:       append(append([]Hook{}, project.PrePrompt...), user.PrePrompt...),
+		SessionStart:    append(append([]Hook{}, project.SessionStart...), user.SessionStart...),
+		SessionEnd:      append(append([]Hook{}, project.SessionEnd...), user.SessionEnd...),
+		SubagentStart:   append(append([]Hook{}, project.SubagentStart...), user.SubagentStart...),
+		SubagentStop:    append(append([]Hook{}, project.SubagentStop...), user.SubagentStop...),
+		Stop:            append(append([]Hook{}, project.Stop...), user.Stop...),
+		PreCompact:      append(append([]Hook{}, project.PreCompact...), user.PreCompact...),
+		Notification:    append(append([]Hook{}, project.Notification...), user.Notification...),
+		PrePromptInject: append(append([]Hook{}, project.PrePromptInject...), user.PrePromptInject...),
 	}
 }
 
@@ -370,6 +422,7 @@ func StaticCheck(c *Config, chk SyntaxChecker) []string {
 	check(c.Stop)
 	check(c.PreCompact)
 	check(c.Notification)
+	check(c.PrePromptInject)
 	return warnings
 }
 
@@ -385,12 +438,17 @@ type HookSummary struct {
 	Tool       string // "*" or specific tool name
 	TimeoutMs  int
 	SkipReason string
+	// MaxBytes is the effective stdout byte budget; meaningful only
+	// for pre_prompt_inject rows (0 elsewhere, matching EffectiveMaxBytes
+	// callers that check the event first).
+	MaxBytes int
 }
 
 // Summarize returns a stable-ordered slice of HookSummary for display.
 // Order = Event group (pre_tool → session_end, then the P3 observer
-// events) then declaration order within each event, with project hooks
-// before user hooks (matching dispatch order).
+// events, pre_prompt_inject last) then declaration order within each
+// event, with project hooks before user hooks (matching dispatch
+// order).
 func Summarize(c Config) []HookSummary {
 	groups := []struct {
 		event string
@@ -406,6 +464,7 @@ func Summarize(c Config) []HookSummary {
 		{EventStop, c.Stop},
 		{EventPreCompact, c.PreCompact},
 		{EventNotification, c.Notification},
+		{EventPrePromptInject, c.PrePromptInject},
 	}
 	var out []HookSummary
 	for _, g := range groups {
@@ -413,6 +472,10 @@ func Summarize(c Config) []HookSummary {
 			tool := strings.TrimSpace(h.Match.Tool)
 			if tool == "" {
 				tool = "*"
+			}
+			maxBytes := 0
+			if g.event == EventPrePromptInject {
+				maxBytes = h.EffectiveMaxBytes()
 			}
 			out = append(out, HookSummary{
 				Source:     h.Source,
@@ -422,6 +485,7 @@ func Summarize(c Config) []HookSummary {
 				Tool:       tool,
 				TimeoutMs:  h.EffectiveTimeoutMs(),
 				SkipReason: h.SkipReason,
+				MaxBytes:   maxBytes,
 			})
 		}
 	}
