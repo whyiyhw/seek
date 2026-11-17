@@ -187,3 +187,40 @@ func TestDriver_Timeout(t *testing.T) {
 		t.Fatalf("timed-out tasks should be failed, got %+v", rep)
 	}
 }
+
+// TestDriver_AggregatesEvidence: the report totals sum the per-outcome
+// evidence fields across all four outcome states — done-with-diff,
+// done-clean, failed, canceled. This is the fake-Fleet view (the
+// production field FILLING is covered by the managerFleet tests in
+// fleet_test.go); what's under test here is the Driver's aggregation.
+func TestDriver_AggregatesEvidence(t *testing.T) {
+	fleet := &fakeFleet{run: func(ctx context.Context, tk Task) Outcome {
+		switch tk.ID {
+		case "t0": // done with a diff + token burn
+			return Outcome{Task: tk, Status: "done", Worktree: "/wt/a", Commit: "abc1234",
+				Tokens: 5100, CostUSD: 0.02, Files: 2, Insertions: 10, Deletions: 3}
+		case "t1": // done, clean worktree — tokens still count
+			return Outcome{Task: tk, Status: "done", Worktree: "/wt/b",
+				Tokens: 2000, CostUSD: 0.01}
+		case "t2": // failed — zero evidence by contract
+			return Outcome{Task: tk, Status: "failed", Summary: "boom"}
+		default: // canceled mid-run — zero evidence by contract
+			return Outcome{Task: tk, Status: "failed", Summary: "canceled"}
+		}
+	}}
+	d := New(fakeDecomposer{tasks: tasks(4)}, fleet, Caps{})
+	rep, err := d.Run(context.Background(), "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Done != 2 || rep.Failed != 2 {
+		t.Fatalf("done/failed = %d/%d, want 2/2", rep.Done, rep.Failed)
+	}
+	if rep.TotalTokens != 7100 {
+		t.Fatalf("TotalTokens = %d, want 5100+2000 = 7100 (failed/canceled add nothing)", rep.TotalTokens)
+	}
+	wantCost := 0.02 + 0.01
+	if rep.TotalCostUSD != wantCost {
+		t.Fatalf("TotalCostUSD = %v, want %v", rep.TotalCostUSD, wantCost)
+	}
+}
