@@ -1,6 +1,7 @@
 package hooksconfig
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -516,5 +517,134 @@ func TestAuditLog_TimestampUsesClock(t *testing.T) {
 	entries, _ := ReadAuditLog(p)
 	if entries[0].TS != "2026-05-27T12:00:00Z" {
 		t.Errorf("clock not honored: %q", entries[0].TS)
+	}
+}
+
+// ---- P3 observer events (feature-orchestration §6 D15) ----
+
+const sampleP3TOML = `
+[[subagent_start]]
+name = "bg-announce"
+command = "echo started"
+
+[[subagent_stop]]
+name = "bg-lint"
+command = "make lint"
+
+[[stop]]
+name = "chime"
+command = "afplay ding.aiff"
+
+[[pre_compact]]
+name = "snapshot"
+command = "cp transcript.jsonl backup.jsonl"
+
+[[notification]]
+name = "mirror"
+command = "echo notified"
+`
+
+func TestDecode_P3EventsStamped(t *testing.T) {
+	cfg, err := DecodeBytes([]byte(sampleP3TOML), SourceProject)
+	if err != nil {
+		t.Fatalf("DecodeBytes: %v", err)
+	}
+	for _, tc := range []struct {
+		event string
+		hooks []Hook
+	}{
+		{EventSubagentStart, cfg.SubagentStart},
+		{EventSubagentStop, cfg.SubagentStop},
+		{EventStop, cfg.Stop},
+		{EventPreCompact, cfg.PreCompact},
+		{EventNotification, cfg.Notification},
+	} {
+		if len(tc.hooks) != 1 {
+			t.Errorf("%s: want 1 hook got %d", tc.event, len(tc.hooks))
+			continue
+		}
+		if tc.hooks[0].Event != tc.event {
+			t.Errorf("%s: event stamp = %q", tc.event, tc.hooks[0].Event)
+		}
+		if tc.hooks[0].Source != SourceProject {
+			t.Errorf("%s: source stamp = %q", tc.event, tc.hooks[0].Source)
+		}
+	}
+	if cfg.IsEmpty() {
+		t.Errorf("P3 hooks should make IsEmpty false")
+	}
+}
+
+func TestMerge_P3EventsProjectFirst(t *testing.T) {
+	user, _ := DecodeBytes([]byte(`
+[[stop]]
+name = "user stop"
+command = "echo u"
+`), SourceUser)
+	project, _ := DecodeBytes([]byte(`
+[[stop]]
+name = "team stop"
+command = "echo p"
+
+[[notification]]
+name = "team notify"
+command = "echo n"
+`), SourceProject)
+	merged := Merge(project, user)
+	if len(merged.Stop) != 2 || merged.Stop[0].Name != "team stop" || merged.Stop[1].Name != "user stop" {
+		t.Errorf("merged Stop order: %+v", merged.Stop)
+	}
+	if len(merged.Notification) != 1 || merged.Notification[0].Name != "team notify" {
+		t.Errorf("merged Notification: %+v", merged.Notification)
+	}
+	all := merged.All()
+	if len(all) != 3 {
+		t.Errorf("All(): want 3 got %d", len(all))
+	}
+}
+
+func TestSummarize_IncludesP3EventsInOrder(t *testing.T) {
+	cfg, _ := DecodeBytes([]byte(sampleP3TOML), SourceUser)
+	sum := Summarize(cfg)
+	if len(sum) != 5 {
+		t.Fatalf("Summarize: want 5 got %d", len(sum))
+	}
+	wantOrder := []string{
+		EventSubagentStart, EventSubagentStop, EventStop, EventPreCompact, EventNotification,
+	}
+	for i, ev := range wantOrder {
+		if sum[i].Event != ev {
+			t.Errorf("Summarize[%d].Event = %q, want %q", i, sum[i].Event, ev)
+		}
+	}
+}
+
+// TestAuditEntry_SubagentSIDWireShape: subagent_sid is omitempty — a
+// row without it marshals exactly like the pre-M-O3.1 wire shape
+// (web W4.6's hooks/audit/tail re-marshals these entries into RPC
+// results; old rows must not grow the key), and a row with it keeps
+// the documented spelling.
+func TestAuditEntry_SubagentSIDWireShape(t *testing.T) {
+	old, err := json.Marshal(AuditEntry{TS: "t", Event: EventPreTool, Hook: "h", SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(old), "subagent_sid") {
+		t.Errorf("old-shape row grew subagent_sid: %s", old)
+	}
+	neu, err := json.Marshal(AuditEntry{Event: EventSubagentStop, Hook: "h", SessionID: "s", SubagentSID: "sub-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(neu), `"subagent_sid":"sub-1"`) {
+		t.Errorf("subagent row missing subagent_sid: %s", neu)
+	}
+	// And the old JSON round-trips through the new struct.
+	var back AuditEntry
+	if err := json.Unmarshal(old, &back); err != nil {
+		t.Fatalf("old line no longer parses: %v", err)
+	}
+	if back.SubagentSID != "" || back.Event != EventPreTool {
+		t.Errorf("round-trip drifted: %+v", back)
 	}
 }

@@ -13,6 +13,7 @@ package pricing
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -122,6 +123,52 @@ const searchPerCallUSD = 0.75 / 1000
 // Failed requests cost nothing — pass only the count that returned 2xx.
 func SearchCost(calls int) float64 {
 	return float64(calls) * searchPerCallUSD
+}
+
+// asrPerHourUSD is the standalone ASR API's per-hour-of-audio rate:
+// $0.116 per hour, listed natively on the English pricing page
+// (2026-11-16 check; the Chinese page shows ¥0.78/h — the known
+// regional-card divergence, see standardRates above). A limited-time
+// 50% discount is running ($0.058 / ¥0.39) with no published end
+// date and is deliberately NOT modelled — same posture as search:
+// the constant stays at list price so the defensive display never
+// undercharges. Billing is per second of audio, rounded up.
+const asrPerHourUSD = 0.116
+
+// ASRCost returns the USD cost of transcribing seconds of audio with
+// the ASR API. The API bills per second with fractional seconds
+// counting as a full second (不足 1 秒按 1 秒) — the ceil is INTERNAL,
+// so pass the raw duration_ms/1000 from the ASRResponse. Zero or
+// negative duration (failed calls) costs nothing.
+func ASRCost(seconds float64) float64 {
+	if seconds <= 0 {
+		return 0
+	}
+	return math.Ceil(seconds) * asrPerHourUSD / 3600
+}
+
+// ttsPer10kCharsUSD is the standalone TTS API's per-10k-billing-chars
+// rate: $0.45 per 10,000 billing characters, listed natively on the
+// English pricing page (2026-11-16 check; the Chinese page shows
+// ¥3/万 — the known regional-card divergence, see standardRates
+// above). A limited-time 50% discount is running ($0.225 / ¥1.5) with
+// no published end date and is deliberately NOT modelled — same
+// posture as search and ASR: the constant stays at list price so the
+// defensive display never undercharges. A billing character is one
+// rune with Han runes counting two; count them with
+// deepseek.TTSBillableChars.
+const ttsPer10kCharsUSD = 0.45
+
+// TTSCost returns the USD cost of synthesizing billableChars billing
+// characters with the TTS API. The TTS response is raw audio with no
+// JSON envelope, so there is no server-reported count — callers count
+// locally: TTSCost(deepseek.TTSBillableChars(text)) on successful
+// calls only. Failed requests cost nothing.
+func TTSCost(billableChars int) float64 {
+	if billableChars <= 0 {
+		return 0
+	}
+	return float64(billableChars) * ttsPer10kCharsUSD / 10_000
 }
 
 const offPeakDiscount = 0.5

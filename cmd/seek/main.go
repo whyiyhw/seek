@@ -25,6 +25,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/agentscli"
 	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/assets"
@@ -773,6 +774,15 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "memory" {
 		return memorycli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek agents ...` — typed-agent definitions (feature-
+	// orchestration.md §5, M-O2.3): list / check (read-only views of
+	// the registry) and create / remove (the write path — the only
+	// legal writers under the agents/ scopes are internal/agentsmgr
+	// via these verbs). Same rationale as skill/memory: no API keys,
+	// no session, no agent runtime.
+	if len(os.Args) >= 2 && os.Args[1] == "agents" {
+		return agentscli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// `seek session export` — transcript JSONL → human-readable
 	// markdown. Same rationale as skill/memory: export needs neither
@@ -1739,6 +1749,23 @@ func run() error {
 			if _, oerr := subagent.OrphanRecover(indexPath); oerr != nil {
 				fmt.Fprintln(os.Stderr, "subagent: orphan recover:", oerr)
 			}
+		}
+
+		// D3 resume 回灌 (M-O1.3): rehydrate the delivery queue for
+		// THIS session's background children that reached a terminal
+		// state in a prior process without their notice ever being
+		// ingested (completed-not-notified; orphaned/failed get a
+		// one-line status note). Runs AFTER OrphanRecover so crash
+		// residue folds to orphaned before selection. Delivery rides
+		// the normal path — the Notifier prepends them as <context>
+		// messages on the FIRST Prompt after resume and appends the
+		// `notified` marker, so repeated resumes never re-inject.
+		// No-op for fresh sessions (the ParentSid filter finds
+		// nothing) and when nothing is pending.
+		if n, rerr := subagentMgr.RecoverNotices(); rerr != nil {
+			fmt.Fprintln(os.Stderr, "subagent: notice recover:", rerr)
+		} else if n > 0 {
+			fmt.Fprintf(os.Stderr, "subagent: %d background notice(s) from a prior session — delivered on your next message\n", n)
 		}
 	}
 

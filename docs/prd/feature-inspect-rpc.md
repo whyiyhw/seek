@@ -2,8 +2,10 @@
 
 **所属版本**：v0.6.x dot release（M12.0 并行于 v5；M12.1/M12.2 依赖 v5 数据）
 **前置阅读**：[PRD v0](v0.md) §4.5（JSON-RPC 服务模式）、[PRD v5 umbrella](v5.md) §2.5（零常驻进程约束）、[`internal/rpc/server.go`](../../internal/rpc/server.go)（已有 method 集）
-**状态**：📐 设计稿 · **部分并入 [`feature-web-frontend.md`](feature-web-frontend.md)（2026-11-13）**——§3.1 method 集/§3.5 错误码/命名稳定性纪律原样并入其 P3 资产面；§3.3 HTTP+SSE transport 换宿主（TUI 进程 `--rpc-listen` → `seek serve` web frontend 进程）；§4 独立 tarball 面板**取消**（go:embed 进单二进制取代）。stdio transport 与 §3.2 Registry 重构仍归本设计（IDE 线）。数据面权威设计以 feature-web-frontend.md §3.3 为准。
+**状态**：🗄️ **已归档（2026-11-16，c_np5gzu）** · 数据面 **并入 [`feature-web-frontend.md`](feature-web-frontend.md)（2026-11-13）并已交付**——§3.1 method 集/§3.5 错误码/命名稳定性纪律原样并入其 P3 资产面（W4.1–W4.6）；§3.3 HTTP+SSE transport 换宿主（TUI 进程 `--rpc-listen` → `seek serve` web frontend 进程）；§4 独立 tarball 面板**取消**（go:embed 进单二进制取代）。**IDE 线（stdio transport + Registry 采纳）2026-11-16 关线归档**，理由见「交付实况」末段。数据面权威设计以 feature-web-frontend.md §3.3 为准。
 **交付实况（2026-11-16 核对，资产面 W4.1–W4.6 已并 main）**：数据面随 web 资产面落地——`POST /rpc` envelope + `internal/rpc/registry.go`（§3.2 形状的 Registry 即两 transport 共享位；stdio `server.go` 保留自身 switch、尚未改挂）+ §3.5 错误码（W4.1，c_c4cs4a）；session / memory / project / stats / hooks 五族 method 在 `internal/rpc/methods/`（W4.2 c_zam44t · W4.3 c_ydglne · W4.6 c_igze7m）。未随本面交付：`agent/info` 的 `methods` 清单与两 transport 字节一致（§6 #1/#3）——待 IDE 线采纳 registry；hooks follow / SSE topic（§6 #6/#7）——`hooks/audit/tail` 现为一次性快照，`follow:true` 答 -32602。口径被取代的两项：§3.4 RWMutex 改造（web 侧是跨进程磁盘读，append-only + 行级 parse 已够，§6 #5 相应改写）；「非 loopback 强制 token」（§6 #8）被更严的 web_addr scope 闸取代（2026-11-15 拍板，非 loopback/tailnet-CGNAT 一律拒启）。
+
+**IDE 线关线决策（2026-11-16，c_np5gzu）**——前置问题「ACP（柱 P）已覆盖 IDE 集成主路径，Zed 外 IDE 还需要 `--rpc` stdio 吗？」答案**否**：① IDE 驱动面的标准是 ACP（`seek acp`，[`feature-acp.md`](feature-acp.md)，真 Zed GUI 验证）——ACP 自身即 stdio JSON-RPC，且是 Zed/VS Code 等编辑器驱动 agent 的标准协议（book ch.24 明言 `-rpc` 是自定协议、无工具链支持）；为自定三 method 方言扩 method 集买不到生态兼容，任何 bespoke 客户端不如直接说 ACP。② 数据面唯一权威已落地：共享 `internal/rpc/registry.go` + `seek serve POST /rpc`（五族 method），HTTP 比 stdio 更可消费（curl/任意语言/浏览器），stdio 复刻同一 registry 没有消费者。③ `--rpc` stdio 自 M7 交付以来零已知增量消费者（仓库无 IDE 扩展、文档无用户证据；comparison.md R.2 IDE 集成行已按 ACP 计分）。处置：`--rpc` stdio 三 method（agent/prompt、agent/info、session/list）**冻结保留**——自有 switch、永不挂 registry、永不扩 method（§6 #2 已验证零回归）；`internal/rpc/registry.go` 是数据面 method 唯一权威（新 read-only method 只进 registry/serve 面）；IDE 驱动需求一律指 `seek acp`。§6 #1/#3 随线关闭；M12.1/M12.2 method 增量归 web-frontend P3/P2；#6/#7（hooks follow/SSE topic）若做，宿主是 web `/events` topic hub（web-frontend 线）。
 **目标里程碑**：M12.0 + M12.1 + M12.2
 **目标发版**：M12.0 → v0.6.x dot；M12.1/M12.2 → v0.7.0
 
@@ -50,7 +52,7 @@ seek 长期路线图（用户口述）：**未来要做应用**——桌面 / �
 
 | Method | params | result | 说明 |
 |---|---|---|---|
-| `agent/info` | — | `{version, model, yolo, plan, methods: [...]}` | 扩展现有：`methods` 列表 + `panel_protocol_version`。🔲 归 IDE 线（web /rpc 未挂，§6 #1） |
+| `agent/info` | — | `{version, model, yolo, plan, methods: [...]}` | 扩展现有：`methods` 列表 + `panel_protocol_version`。❌ 随 IDE 线关闭（2026-11-16）——stdio 冻结不扩；web /rpc 未挂 agent/info，capability 清单若未来需要，加在 web 面（web-frontend 增量，未排期） |
 | `session/list` | `{include_subagents?: bool}` | `[{sid, title, started_at, last_at, turns, model}]` | 扩展现有：`include_subagents` flag。✅W4.2（flag 宽容忽略——子代理走 W3.1 `GET /subagents` 与 M12.1） |
 | `session/get` | `{sid}` | `{header, turns, cumulative_usage}` | header + 元数据；不含完整 messages。✅W4.2 |
 | `session/messages` | `{sid, cursor?: string, limit?: int=50}` | `{messages: [...], next_cursor?: string}` | cursor 分页（基于 line offset），稳定于追加。✅W4.2（limit 上限 500） |
@@ -102,6 +104,8 @@ func (r *Registry) Dispatch(ctx context.Context, name string, params json.RawMes
 
 `Server.handleCall` 改为 `s.registry.Dispatch(...)`；现有三个 method (`agent/prompt` / `agent/info` / `session/list`) 通过 wrapper 注册进去保持向后兼容。
 
+**关线注记（2026-11-16）**：Registry 本体**已交付**（`internal/rpc/registry.go`，即上述形状；宿主 = `seek serve` POST /rpc，web-frontend W4.1）。IDE 线关闭后，stdio `server.go` **永不**改挂本 registry：其三 method 冻结为遗留控制面（理由见状态头「IDE 线关线决策」）。数据面新 method 只进 registry / serve 一处——单一权威、不双写。
+
 **契约稳定性约束**：
 
 - Method 名字一旦进入 `agent/info` 响应的 `methods` 列表就**不能改名**——破坏性 rename 走 deprecation：先双名 + 旧名打 deprecation flag，至少一个 minor 版本后下线
@@ -110,7 +114,7 @@ func (r *Registry) Dispatch(ctx context.Context, name string, params json.RawMes
 
 ### 3.3 Transport：stdio（保留）+ HTTP+SSE（新增）
 
-**stdio**（现有）：保持不动，每行一个 JSON-RPC 对象，已有 IDE 集成用户零回归。
+**stdio**（现有，**已冻结**）：保持不动，每行一个 JSON-RPC 对象，已有 IDE 集成用户零回归。IDE 线关闭（2026-11-16）后此面**永久冻结**——不挂 registry、不扩 method；IDE 集成主路径是 ACP（`seek acp`，[`feature-acp.md`](feature-acp.md)），数据查询走 `seek serve` /rpc。
 
 **HTTP+SSE**（M12.0 新增）：
 
@@ -294,13 +298,13 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 
 | # | 实况 | 落点 |
 |---|---|---|
-| 1 | 🔲 `agent/info.methods` 清单未随 web 面交付（/rpc registry 无 agent/info） | IDE 线采纳 registry 时一并 |
-| 2 | ✅ stdio 三 method 零改动——`server.go` 保留自身 switch，`server_test.go` 零修改绿 | 2026-11-16 全量 `-race` 复跑 |
-| 3 | 🔲 两 transport 字节一致未达——method 集现仅挂 serve `/rpc` | 同 #1 |
+| 1 | ❌ 随 IDE 线关闭（2026-11-16）——stdio 冻结不扩 method；capability 清单若需要，加在 web /rpc 面（未排期） | c_np5gzu 关线决策（状态头） |
+| 2 | ✅ stdio 三 method 零改动——`server.go` 保留自身 switch，`server_test.go` 零修改绿；此即**终态**（永不挂 registry） | 2026-11-16 全量 `-race` 复跑 |
+| 3 | ❌ 随 IDE 线关闭（2026-11-16）——stdio 冻结为 3-method 遗留面，两 transport 各自为已 ship 契约（`session/list` 两形状并存即此结果），不再追求一致 | c_np5gzu |
 | 4 | ✅ `session/messages` 分页遍历=全文件顺序（cursor=消息行 offset，追加稳定） | W4.2 表驱动钉死 |
 | 5 | 替代——web 侧为跨进程磁盘读（append-only JSONL + 行级 parse，尾读不锁）；§3.4 RWMutex 是 TUI 进程内问题，web 面不需要 | §3.3 caveat（feature-web-frontend）；`-race` 全量绿 |
-| 6 | 🔲 follow=true 未交付——现 -32602 明拒 | SSE hooks topic 落地时补 leaktest |
-| 7 | 部分——`/events` hub 已有满丢老不阻塞语义（聊天/subagents topic 同栈）；hooks topic 未接 | W3.2 |
+| 6 | 🔲 follow=true 未交付——现 -32602 明拒；随本 PRD 归档，开放项归 web-frontend `/events` topic 线（未排期） | 落地时补 leaktest |
+| 7 | 部分——`/events` hub 已有满丢老不阻塞语义（聊天/subagents topic 同栈）；hooks topic 未接（归 web-frontend 线，未排期） | W3.2 |
 | 8 | 替代（更严）——web_addr scope 闸：非 loopback/tailnet-CGNAT 一律拒启 exit-2 | `TestWeb_AddrScope` / `TestWeb_RunForbiddenAddr` / `TestServePlane_BadWebAddrFails` |
 | 9 | ✅（更严）——web 面全状态路由一律 token（401 家族），不分是否 loopback | W1.2 鉴权族测试 |
 | 10 | 取消替代——tarball 被 go:embed 取代；体积由 CI web-gate 守（净增 <200KB） | W1.5（c_ph2zax） |

@@ -67,4 +67,16 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_mn2wdp：web 前端·guide-serve §web 文档收尾 + 体积 gate 上线（W2.4）
 - c_evbzyh：web 前端·指令快捷按钮 + 绑定状态常显（W2.2 增量）
 - c_ujgmpu：web 任务面板·三：后台子列表/状态/tokens UI + 详情（W3.3）
+- c_5ckroy：deepseek-app-api·S2：pkg/deepseek ASR 客户端 + pricing.ASRCost
+- c_2lu6vb：deepseek-app-api·F2：internal/filerefs 检测器（后缀表+stat 门，照 imgrefs 先例新包）
+- c_wsf7us：orchestration·M-O3.1：hooks 新观察点（SubagentStart/Stop、Stop、PreCompact、Notification）+ shell 事件 + audit
+- c_npafpi：web 前端·状态栏 tokens/$ 实时累积 + session_id 短显（W2.3）
+- c_fepxy2：orchestration·M-O1.3：resume 回灌（fold completed-未 notified 子）+ notified 写面
+- c_bkdnej：deepseek-app-api·F1：pkg/deepseek files 客户端（UploadFile multipart + file 分块 wire 形态）
+- c_k4iejt：deepseek-app-api·S1：pkg/deepseek TTS 客户端 + pricing.TTSCost
+- c_sv3zwn：v5 收伞评估：M11.5+ 候选梳理（run_in_background×worktree 解禁、巡检 cron 化等）
+- c_hkqvwk：edit-read-before 结构性方案评估（低优先，产出三选一决策）
+- c_np5gzu：inspect-rpc IDE 线：--rpc stdio transport + Registry 重构（做前先答是否还需要）
+- c_z4mn6y：slim-loop·L3 首跑（M-SL3）：goal run 夜间自瘦身 × worktree × 人审 diff
+- c_azqudp：orchestration·M-O2.3：agentsmgr 写路径 + seek agents list/check CLI
 - c_5xtm74：web 前端聊天增量：流式气泡 delta 累积→reply 整泡替换 + 工具行折叠（W2.1，textContent 纪律保持；无头验收脚本 web-stream-manual.sh + CDP 驱动）

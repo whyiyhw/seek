@@ -48,6 +48,17 @@ type Message struct {
 	// images are a 400).
 	Images []ImagePart `json:"images,omitempty"`
 
+	// Files carries natively-attached document parts — the file
+	// sibling of Images (feature-deepseek-app-api §3). Session
+	// persistence stores Asset references; ResolveFiles (F4)
+	// materialises them into Files API ids on the request copy before
+	// send (lazy upload / expiry re-upload). Empty for every legacy /
+	// text-only message — the default struct marshal then omits the
+	// field, so JSONL bytes stay identical. Legal on USER messages
+	// only, same constraint as Images (content-array parts are a
+	// user-message shape).
+	Files []FilePart `json:"files,omitempty"`
+
 	// ReasoningContent is populated by V4 thinking-mode responses.
 	// It MUST be stripped before sending the message back to the API in a
 	// subsequent request — DeepSeek rejects requests that include prior

@@ -60,7 +60,7 @@ All slash commands, key bindings, and CLI flags.
 seek                        # Start TUI (interactive)
 seek -p "question"          # One-shot prompt (non-interactive)
 seek -json                  # JSON output mode (for piping)
-seek --rpc                  # JSON-RPC 2.0 server mode (IDE integration)
+seek --rpc                  # JSON-RPC 2.0 server mode (frozen legacy: 3 methods; for IDE use `seek acp` — see guide-zed.md; for data queries use `seek serve` /rpc)
 seek --resume <id>          # Resume a saved session by ID (see seek -list)
 seek --continue             # Resume the most-recently-updated session
 seek --model <name>         # Override model selection

@@ -182,6 +182,25 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"text_delta","delta":"stuck"}`)
 		time.Sleep(60 * time.Second)
 		return 0
+	case "web_multi_turn":
+		// W2.3 usage-meter e2e: ONE run, TWO turns — turn_end fires per
+		// turn, so the page's meter must ADD across turns (1000/200/800
+		// then 1200/150/1100 → 2200/350/1900 cumulative, $ summed from
+		// the per-turn server prices). Turn totals are deliberately
+		// distinct so a last-event-wins meter fails the e2e arithmetic;
+		// the session id rides only the agent_end close-out.
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Println(`{"type":"turn_start","index":0}`)
+		fmt.Println(`{"type":"text_delta","delta":"Hel"}`)
+		fmt.Println(`{"type":"text_delta","delta":"lo"}`)
+		fmt.Println(`{"type":"turn_end","index":0,"prompt_tokens":1000,"completion_tokens":200,"cache_hit_tokens":800,"tool_calls":0}`)
+		fmt.Println(`{"type":"turn_start","index":1}`)
+		fmt.Println(`{"type":"tool_start","id":"t1","name":"read","args":"{\"path\":\"x\"}"}`)
+		fmt.Println(`{"type":"tool_end","id":"t1","name":"read","result":"data","bytes":4}`)
+		fmt.Println(`{"type":"text_delta","delta":"more"}`)
+		fmt.Println(`{"type":"turn_end","index":1,"prompt_tokens":1200,"completion_tokens":150,"cache_hit_tokens":1100,"tool_calls":1}`)
+		fmt.Println(`{"type":"agent_end","turns":2,"session_id":"SW2"}`)
+		return 0
 	default: // happy
 		if sleep > 0 {
 			time.Sleep(sleep)

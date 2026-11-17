@@ -3,6 +3,10 @@
 // asset→data-URL resolution. feature-vision PRD
 // (docs/prd/feature-vision.md) D1–D3.
 //
+// This file is also the DUAL-FORM serialisation station for document
+// parts: Message.Files rides the same two forms as Images (files.go
+// owns the Files API client; only the shared marshalling lives here).
+//
 // Two serialisation forms coexist BY DESIGN:
 //
 //   - session/transcript form (the default struct marshal): `content`
@@ -13,6 +17,8 @@
 //   - wire form (ChatRequest.MarshalJSON): image-bearing user messages
 //     get array-form `content` ([{type:text},{type:image_url},…]) and
 //     the `images` / `predicted_next` fields never cross the API.
+//     File-bearing messages are the same station one step later:
+//     [{type:file,file_id:…}] parts join the array (files.go / F1).
 
 package deepseek
 
@@ -137,7 +143,8 @@ func WithoutImages(msgs []Message) []Message {
 }
 
 // wireImageURL / wireContentPart are the array-form `content` blocks
-// the vision API accepts on user messages.
+// the multimodal API accepts on user messages — image_url parts
+// (vision) and file parts (Files API) share the array.
 type wireImageURL struct {
 	URL string `json:"url"`
 }
@@ -146,13 +153,14 @@ type wireContentPart struct {
 	Type     string        `json:"type"`
 	Text     string        `json:"text,omitempty"`
 	ImageURL *wireImageURL `json:"image_url,omitempty"`
+	FileID   string        `json:"file_id,omitempty"`
 }
 
 // wireMessage is the on-wire form of Message: identical fields except
-// `content` (array of parts when the message carries images) and the
-// two fields that NEVER cross the API boundary — PredictedNext
-// (session-only UX hint) and Images (seek's persistence shape; its
-// parts are inlined into content instead).
+// `content` (array of parts when the message carries images or files)
+// and the fields that NEVER cross the API boundary — PredictedNext
+// (session-only UX hint) and Images / Files (seek's persistence
+// shapes; their parts are inlined into content instead).
 type wireMessage struct {
 	Role             string          `json:"role"`
 	Content          json.RawMessage `json:"content,omitempty"`
@@ -163,8 +171,10 @@ type wireMessage struct {
 }
 
 // toWire converts one Message. An Asset-only part at this point means
-// the caller skipped ResolveImages — fail the marshal loudly rather
-// than silently dropping an image the user attached.
+// the caller skipped ResolveImages / ResolveFiles — fail the marshal
+// loudly rather than silently dropping an attachment the user made.
+// Part order within one message: text first, then image_url parts,
+// then file parts.
 func toWire(m Message) (wireMessage, error) {
 	w := wireMessage{
 		Role:             m.Role,
@@ -173,7 +183,7 @@ func toWire(m Message) (wireMessage, error) {
 		ToolCalls:        m.ToolCalls,
 		ReasoningContent: m.ReasoningContent,
 	}
-	if len(m.Images) == 0 {
+	if len(m.Images) == 0 && len(m.Files) == 0 {
 		if m.Content != "" {
 			b, err := json.Marshal(m.Content)
 			if err != nil {
@@ -183,7 +193,7 @@ func toWire(m Message) (wireMessage, error) {
 		}
 		return w, nil
 	}
-	parts := make([]wireContentPart, 0, len(m.Images)+1)
+	parts := make([]wireContentPart, 0, len(m.Images)+len(m.Files)+1)
 	if m.Content != "" {
 		parts = append(parts, wireContentPart{Type: "text", Text: m.Content})
 	}
@@ -196,6 +206,15 @@ func toWire(m Message) (wireMessage, error) {
 			ImageURL: &wireImageURL{URL: p.URL},
 		})
 	}
+	for _, p := range m.Files {
+		if p.FileID == "" {
+			return w, fmt.Errorf("deepseek: file part %q has no file_id — run ResolveFiles before sending", p.Asset)
+		}
+		parts = append(parts, wireContentPart{
+			Type:   "file",
+			FileID: p.FileID,
+		})
+	}
 	b, err := json.Marshal(parts)
 	if err != nil {
 		return w, err
@@ -205,8 +224,8 @@ func toWire(m Message) (wireMessage, error) {
 }
 
 // MarshalJSON renders the API request form: Messages are converted to
-// wireMessage (array-form content for image-bearing user messages;
-// session-only fields stripped). Text-only MESSAGES render
+// wireMessage (array-form content for attachment-bearing user
+// messages; session-only fields stripped). Text-only MESSAGES render
 // byte-identically to the pre-vision encoding — pinned by
 // TestMessageWire_TextOnly_Bytes — because that is what becomes prompt
 // tokens (and what DeepSeek's prefix cache keys on). Request-object key
@@ -230,11 +249,12 @@ func (r ChatRequest) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON accepts BOTH content forms so a session line remains
 // loadable regardless of what wrote it: a plain string (seek's native
-// form — images ride the sibling `images` field) or an array of parts
-// (the wire form — text parts concatenate into Content in order,
-// image_url parts become URL-bearing ImageParts). The string fast path
-// is the common one; the array path is forward-compat for external
-// tools and hand-edited transcripts.
+// form — attachments ride the sibling `images` / `files` fields) or an
+// array of parts (the wire form — text parts concatenate into Content
+// in order, image_url parts become URL-bearing ImageParts, file parts
+// become FileID-bearing FileParts). The string fast path is the common
+// one; the array path is forward-compat for external tools and
+// hand-edited transcripts.
 func (m *Message) UnmarshalJSON(data []byte) error {
 	type alias Message
 	var raw struct {
@@ -265,6 +285,10 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		case "image_url":
 			if p.ImageURL != nil && p.ImageURL.URL != "" {
 				m.Images = append(m.Images, ImagePart{URL: p.ImageURL.URL})
+			}
+		case "file":
+			if p.FileID != "" {
+				m.Files = append(m.Files, FilePart{FileID: p.FileID})
 			}
 		}
 	}

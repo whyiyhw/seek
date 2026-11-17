@@ -231,3 +231,74 @@ func FormatBackgroundFailed(subSid string, reason string, hint string) string {
 	sb.WriteString(shortSid(subSid))
 	return sb.String()
 }
+
+// ----- resume-backfill wire formats (feature-orchestration PRD §4.1 D3) -----
+//
+// These build the Turn-1 notices the resume path rehydrates from disk
+// (fold subagents.jsonl + read the child transcript tail). Two shapes:
+//
+//   - FormatBackgroundResumed: a completed run whose summary is
+//     recoverable from the child transcript. Same
+//     `[agent: background done sub-sid=<full>]` prefix token as the
+//     live D2 notice (a parser can't tell and doesn't need to tell a
+//     resumed delivery from a live one); the footer omits `turns:`
+//     because the turn count is deliberately not persisted in the
+//     index (D5 — Cost 不入索引, and turns with it) and fabricating a
+//     0 would be a lie in a wire format.
+//   - FormatBackgroundLost: the one-line status note for terminal
+//     background runs with NO trusted summary — orphaned (owning
+//     process died before terminal state), or a completed run whose
+//     transcript is gone. New `lost` prefix token in the background
+//     family; the reason enum inside `[agent: background failed
+//     reason=...]` stays closed (D3: orphaned/failed 回灌一行状态
+//     注记, not a summary).
+
+// FormatBackgroundResumed builds the D3 resume notice for a completed
+// background run: live-D2 layout (headline + body) under the done
+// prefix, with the disk-recoverable footer (sub-sid, lineage, tokens)
+// and a resume-delivery marker so the model understands why a result
+// it never saw a handle-completion for arrives now.
+func FormatBackgroundResumed(subSid, fromSid, summary string, tokens Tokens) string {
+	var sb strings.Builder
+	sb.WriteString("[agent: background done sub-sid=")
+	sb.WriteString(subSid)
+	sb.WriteString("] ")
+	sb.WriteString(headline(summary))
+	sb.WriteString("\n\n")
+	sb.WriteString(truncateSummary(summary))
+	sb.WriteString("\n\n— sub-sid: ")
+	sb.WriteString(shortSid(subSid))
+	if fromSid != "" {
+		sb.WriteString(" · resumed-from: ")
+		sb.WriteString(shortSid(fromSid))
+	}
+	fmt.Fprintf(&sb, " · tokens: %d — delivered on session resume", tokens.Prompt+tokens.Completion)
+	return sb.String()
+}
+
+// FormatBackgroundLost builds the D3 one-line status note for a
+// terminal background run whose summary cannot be trusted or read:
+// orphaned runs (the owning seek process died before writing a
+// terminal event — no summary was ever produced) and completed runs
+// whose transcript.jsonl is missing (记录在、transcript 失联). PRD D3:
+// these get a status annotation, never a fabricated summary.
+func FormatBackgroundLost(subSid string, status Status, description string) string {
+	var sb strings.Builder
+	sb.WriteString("[agent: background lost sub-sid=")
+	sb.WriteString(subSid)
+	sb.WriteString("] status=")
+	sb.WriteString(string(status))
+	if description != "" {
+		sb.WriteString(" — ")
+		sb.WriteString(description)
+	}
+	sb.WriteString("\n\n— no summary available (")
+	switch status {
+	case StatusOrphaned:
+		sb.WriteString("owning process died before this run finished")
+	default:
+		sb.WriteString("transcript missing")
+	}
+	sb.WriteString("); check /agents or re-spawn the task if still needed.")
+	return sb.String()
+}
