@@ -1,0 +1,12 @@
+{
+  "comment": "seek 本机部署位清单（c_qur4ib；机制 = c_vurhga deploy-local 扩第二仓，用户 2026-11-17 拍板选 A）——repo 源到部署位的唯一真相，根治「进了 main 不等于生效」。消费方在 butler 仓：drive merge 合并进 main 后的 DeploySync 自动 apply（失败只警告），巡检每 2h --check 漂移落 blocker；两侧契约 = butler internal/deploylocal 的 ManifestPath 常量（deploy/local-manifest.json），清单缺席 = 正常态不动作。口径沿 butler 先例：auto = 能机械同步的；manual = 只检查报漂移、永不自动改。盘点结论（2026-11-17）：本机能进清单的部署位只有 seek 二进制一项——①serve 未常驻化（~/Library/LaunchAgents/com.whyiyhw.seek-serve.plist 缺席、launchctl 无此 label、8790 无监听；~/.seek/serve/{bindings.json,web.token} 在，11-13 手动起过一次）；②deploy/seek-serve.plist 是模板（{{SEEK_BIN}}/{{SEEK_LOG}} 占位符），部署物是 scripts/install-serve.sh 渲染产物，「模板→渲染」关系 copy 哈希口径认不了（入清单 = 永久假漂移），且装载/卸载要走 launchctl（坑 8，主会话动作）——故 plist 不入清单，serve 常驻化/更新走 scripts/install-serve.sh（渲染 + launchctl load，主会话执行）；③webfrontend 是 serve 进程内监听（DefaultWebAddr=127.0.0.1:8790，token 认证），随二进制走，无独立部署物；④scripts/install-serve.sh 只从 repo 运行，无 repo 外落点；⑤~/.seek/serve/ 是运行时密钥/绑定状态，非 repo 源，不入清单。dst 的 ~ 按 HOME 展开。",
+  "auto": [
+    {
+      "kind": "build",
+      "src": "./cmd/seek",
+      "dst": "~/.local/bin/seek",
+      "note": "seek 二进制（CLI 全量，serve/webfrontend 都在其中；也是 scripts/install-serve.sh 的默认 SEEK_BIN）。apply 时从 main 源码 go build（buildvcs 默认开）；check 比部署二进制内嵌 vcs.revision 与 main HEAD——构建产物比内容哈希无意义。"
+    }
+  ],
+  "manual": []
+}

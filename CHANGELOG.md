@@ -85,3 +85,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_zcygo2：v8·U1：内核依赖方向报告脚本（只报不拦）
 - c_5fdsqb：memory↔skill 打通·设计卡 P0：蒸馏落点（review 第四动作）+ 生命周期对齐
 - c_miutmh：v8·T1：顶层 -tools 白名单 flag（裸核对照用，会话启动时冻结）
+- c_qur4ib：部署位 A：seek 建 deploy/local-manifest.json 纳入 deploy-local 自动同步
