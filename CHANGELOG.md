@@ -87,3 +87,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_miutmh：v8·T1：顶层 -tools 白名单 flag（裸核对照用，会话启动时冻结）
 - c_qur4ib：部署位 A：seek 建 deploy/local-manifest.json 纳入 deploy-local 自动同步
 - c_vunyoz：v8·R1：autopilot Outcome 补证据字段（token/成本 + diffstat）并进 Report 文本
+- c_lz5wxa：bridge·M-B4：seek skill stats --idle（Set 外连接）+ ⚡ 模态双存告警 + 测试

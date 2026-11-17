@@ -6,6 +6,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/memory"
+	"github.com/whyiyhw/seek/internal/skill"
+	"github.com/whyiyhw/seek/internal/skilldistill"
 )
 
 // memoryCandidates keeps the pending-hold plumbing readable — the M
@@ -241,6 +243,30 @@ func saveDistillCandidate(p *memory.Project, c memory.Candidate) error {
 	})
 }
 
+// distillOverlapWarning is the ⚡ review's dual-store alert
+// (feature-memory-skill-bridge §8.4): a memory candidate whose
+// name+tagline+content overlaps an installed skill's description at or
+// above the L2 reject threshold would store the same knowledge in two
+// layers if `y`'d. Pure display — no gate; the y/n/e review stays the
+// arbiter. Runs the same trigram-Jaccard (via skilldistill.NearestSkill)
+// the novelty funnel itself uses, so the number behind this line is the
+// one L2 would have computed.
+//
+// The hint says "editing the skill" where the PRD sketch says
+// "consider s / editing the skill": the `s` convert-to-skill action is
+// M-B2 and lands as a separate card — this line must not advertise a
+// key the modal doesn't handle yet. M-B2 should extend the text.
+func distillOverlapWarning(cand memory.Candidate, skills *skill.Set) string {
+	if skills == nil || skills.Len() == 0 {
+		return ""
+	}
+	name, sim := skilldistill.NearestSkill(cand.Name+" "+cand.Tagline, cand.Content, skills)
+	if sim < skilldistill.SimilarityReject {
+		return ""
+	}
+	return fmt.Sprintf("⚠ overlaps installed skill %q — pressing y will double-store; consider editing the skill", name)
+}
+
 // renderDistillReview draws the modal shown while the user is reviewing
 // distillation candidates. Two variants — y/n/e/q prompt and the
 // in-place content editor (when distillEditing is true). Both share the
@@ -260,6 +286,13 @@ func (m Model) renderDistillReview() string {
 
 	if cand.Tagline != "" {
 		sb.WriteString(styleMuted.Render("  " + cand.Tagline))
+		sb.WriteString("\n")
+	}
+
+	// Dual-store alert (§8.4) sits under the tagline so both review
+	// variants — prompt and edit mode — keep it in view.
+	if warn := distillOverlapWarning(cand, m.opts.Skills); warn != "" {
+		sb.WriteString(styleErr.Render("  " + warn))
 		sb.WriteString("\n")
 	}
 

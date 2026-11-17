@@ -1836,3 +1836,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `parseNumstat` in `internal/autopilot/fleet.go` treats `-` as 0 line deltas (file still counts), accepts any `≥3 tab-separated fields` line (paths containing tabs just get extra fields), and skips malformed lines instead of erroring — numstat is evidence, not a parser contract. Probed-output fixture in `internal/autopilot/fleet_test.go` (`TestCommitDiffstat_RealGit`).
 - **Lesson**: when tallying a git diff from CLI output, pin the exact line grammar against a real repo probe (binary + rename + tab-in-path) before writing the parser; `--numstat`'s tab-separated shape is a display convention, not a schema.
 - **Refs**: `internal/autopilot/fleet.go:parseNumstat`, `internal/autopilot/fleet_test.go:TestParseNumstat`/`TestCommitDiffstat_RealGit`.
+
+## Skill stats / --idle
+
+### `--idle` must read last_used from the UNfiltered aggregate — the window-filtered one reports every idle skill as "never"
+- **Saw**: implementing `seek skill stats --idle` (bridge M-B4): the one-aggregate approach (reuse the window-filtered `aggregate`) yields `LastUsed == ""` for every listed skill — their only calls predate the window and were filtered out, making "not called recently" indistinguishable from "never called".
+- **Why**: `skillcli.aggregate(entries, since, now)` answers two questions in one fold (call count AND last-used); windowing it empties both. Idleness (window) and recency (all-time) are different questions over the same rows.
+- **Fix**: `idleRows` runs two aggregates — `inWindow` decides inclusion, `ever` supplies the true last_used; commit with card `c_lz5wxa`.
+- **Lesson**: when one fold answers two questions, windowing it silently degrades the second to the window's edge case. Split the folds, not the fields.
+- **Refs**: `internal/skillcli/query.go` `idleRows`, `docs/prd/feature-memory-skill-bridge.md` §6.
