@@ -2,11 +2,13 @@ package rpc
 
 // Transport-agnostic method registry + JSON-RPC 2.0 envelope types +
 // error model: feature-inspect-rpc §3.2/§3.5, absorbed by feature-web-
-// frontend P3 (its §3.3). This file is the shared contract both
-// transports hang methods off — the serve process POST /rpc host today
-// (internal/controlplane/webfrontend_rpc.go), the stdio Server once
-// the IDE-line refactor adopts it. It deliberately does NOT touch the
-// stdio dispatch in server.go, which keeps its own switch until then.
+// frontend P3 (its §3.3). This file is the single authority for
+// data-plane methods — hosted by the serve process POST /rpc
+// (internal/controlplane/webfrontend_rpc.go). The stdio Server keeps
+// its own frozen 3-method switch in server.go forever: the IDE line
+// was closed 2026-11-16 (ACP covers IDE drive; see the status header
+// of docs/prd/feature-inspect-rpc.md) — stdio never adopts this
+// registry and never grows its method set.
 
 import (
 	"context"

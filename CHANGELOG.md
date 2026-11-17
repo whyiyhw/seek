@@ -76,3 +76,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_k4iejt：deepseek-app-api·S1：pkg/deepseek TTS 客户端 + pricing.TTSCost
 - c_sv3zwn：v5 收伞评估：M11.5+ 候选梳理（run_in_background×worktree 解禁、巡检 cron 化等）
 - c_hkqvwk：edit-read-before 结构性方案评估（低优先，产出三选一决策）
+- c_np5gzu：inspect-rpc IDE 线：--rpc stdio transport + Registry 重构（做前先答是否还需要）
