@@ -73,3 +73,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_npafpi：web 前端·状态栏 tokens/$ 实时累积 + session_id 短显（W2.3）
 - c_fepxy2：orchestration·M-O1.3：resume 回灌（fold completed-未 notified 子）+ notified 写面
 - c_bkdnej：deepseek-app-api·F1：pkg/deepseek files 客户端（UploadFile multipart + file 分块 wire 形态）
+- c_k4iejt：deepseek-app-api·S1：pkg/deepseek TTS 客户端 + pricing.TTSCost

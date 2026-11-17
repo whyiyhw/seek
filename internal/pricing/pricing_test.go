@@ -384,3 +384,37 @@ func TestASRCost(t *testing.T) {
 		t.Errorf("ASRCost(3.2) = %v, want 4 seconds' worth", got)
 	}
 }
+
+// TestTTSCost prices the standalone TTS API's per-billing-character
+// billing: $0.45 per 10,000 billing characters listed natively on the
+// English pricing page (2026-11-16 check; zh page ¥3/万, the known
+// regional divergence). Han runes count 2 — the counting helper lives
+// in pkg/deepseek (TTSBillableChars); here the input is already the
+// billable count.
+func TestTTSCost(t *testing.T) {
+	if got := TTSCost(10_000); math.Abs(got-0.45) > 1e-12 {
+		t.Errorf("TTSCost(10000) = %v, want 0.45 per 10k billing chars", got)
+	}
+	// PRD §4.3's sizing basis: a 100-Han-char notification = 200
+	// billable ≈ ¥0.06 list / $0.009.
+	if got := TTSCost(200); math.Abs(got-0.45/50) > 1e-12 {
+		t.Errorf("TTSCost(200) = %v, want 0.45×200/10000", got)
+	}
+	// The per-request cap is the most a single call can bill.
+	if got := TTSCost(deepseek.TTSMaxBillableChars); got != TTSCost(10_000) {
+		t.Errorf("TTSCost(cap) = %v, want the full 10k rate %v", got, TTSCost(10_000))
+	}
+	// Failed / empty calls are not billable, and a stray negative must
+	// not pay out.
+	if got := TTSCost(0); got != 0 {
+		t.Errorf("TTSCost(0) = %v, want 0", got)
+	}
+	if got := TTSCost(-5); got != 0 {
+		t.Errorf("TTSCost(-5) = %v, want 0", got)
+	}
+	// Sub-cent precision band: one notification must render visibly,
+	// not round away to nothing.
+	if s := FormatCost(TTSCost(200)); s != "$0.0090" {
+		t.Errorf("FormatCost(TTSCost(200)) = %q, want $0.0090", s)
+	}
+}
