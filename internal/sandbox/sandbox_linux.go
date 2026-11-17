@@ -3,7 +3,6 @@
 package sandbox
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,7 +22,7 @@ import (
 //
 // Landlock applies irreversibly to the calling process and is inherited
 // across exec, but Go offers no post-fork/pre-exec hook, so we use a
-// re-exec TRAMPOLINE: Argv/Wrap return `seek <trampolineArg> <opts> --
+// re-exec TRAMPOLINE: Argv returns `seek <trampolineArg> <opts> --
 // <cmd> <args…>`; main() calls RunTrampolineIfRequested() first thing,
 // which (in that re-exec'd seek) applies Landlock to itself and then
 // unix.Exec's the real command — which inherits the jail.
@@ -48,12 +47,6 @@ func Available() bool { return landlockABI() >= 1 }
 func Argv(opt Options, name string, args ...string) (string, []string) {
 	out := append([]string{trampolineArg, encodeOptions(opt), "--", name}, args...)
 	return self(), out
-}
-
-// Wrap is Argv as an *exec.Cmd bound to ctx.
-func Wrap(ctx context.Context, opt Options, name string, args ...string) *exec.Cmd {
-	p, a := Argv(opt, name, args...)
-	return exec.CommandContext(ctx, p, a...)
 }
 
 // RunTrampolineIfRequested must be the FIRST thing main() calls. In a
