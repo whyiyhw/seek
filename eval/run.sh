@@ -98,6 +98,17 @@ extract_metric() {
     grep_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="grep")] | length' "$path"
       ;;
+    mcp_calls)
+      # tool_start events whose tool name CONTAINS the "__" infix —
+      # MCP bridge tools register under "<server>__<tool>" (D1's
+      # default prefix policy, internal/tools/mcptool/bridge.go; no
+      # built-in tool name contains "__"). Assumes D1 has landed:
+      # before it the bridge registered bare server-side names
+      # (prefix only on conflict), so this reads 0 even when MCP
+      # tools are actively used. Basis of the mcp-semble-routing
+      # three-arm comparison, docs/prd/feature-mcp-client.md §5.2.
+      $JQ -s '[.[] | select(.type=="tool_start" and ((.name // "") | test("__")))] | length' "$path"
+      ;;
     list_dir_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="list_dir")] | length' "$path"
       ;;
@@ -341,6 +352,7 @@ run_one() {
     --argjson total_tool_calls     "$(extract_metric total_tool_calls     "$out_file")" \
     --argjson read_calls           "$(extract_metric read_calls           "$out_file")" \
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
+    --argjson mcp_calls            "$(extract_metric mcp_calls            "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
@@ -361,7 +373,7 @@ run_one() {
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

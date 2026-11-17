@@ -1,0 +1,1 @@
+In this codebase, where does a permission denial get turned into a tool result instead of a fatal error? Locate the mechanism and answer with file:line plus a one-sentence explanation.

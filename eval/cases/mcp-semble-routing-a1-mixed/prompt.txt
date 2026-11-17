@@ -1,0 +1,1 @@
+Under what conditions does the references tool degrade and tell the model to fall back to grep? Locate the mechanism and answer with file:line plus one sentence.
