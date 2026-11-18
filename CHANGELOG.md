@@ -109,3 +109,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_rto2rb：MCP-D3 接线：cmd/seek main.go 消费 mcptool.PromptSection（hint/mcp_prompt 生效）
 - c_2q5hlj：GLM-5.3 在 seek 走路充值余额而非 GLM Coding Plan 额度——端点分流（paas/v4 vs coding/paas/v4）
 - c_lrilqc：信号：eval bash-overreach 例完整车道持续 FAIL（11-13 起）根因待定性
+- c_5gy5h6：deepseek-app-api·F4：ResolveFiles 发送路径 + session round-trip + file_id 前缀缓存实测

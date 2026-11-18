@@ -1941,6 +1941,9 @@ func run() error {
 		// computable; nil only in pathological setups, where an
 		// unresolved image fails the request loudly at marshal time.
 		ImageLoader: imageAssetsLoader(abs),
+		// feature-deepseek-app-api F4: the document sibling — lazy
+		// upload / expiry re-upload of file_id from the asset library.
+		FileResolver: fileResolver(abs, dsClient),
 	})
 	if err != nil {
 		return err
@@ -2861,6 +2864,38 @@ func imageAssetsLoader(projectAbs string) deepseek.ImageLoader {
 	return func(asset string) (string, error) {
 		return assets.Load(dir, asset)
 	}
+}
+
+// fileAssetsLoader returns the send-time Asset→bytes loader for the
+// project's document store (feature-deepseek-app-api F4) — the file
+// sibling of imageAssetsLoader. Paired with fileResolver below: the
+// loader supplies the ONLY durable copy for a re-upload (the Files API
+// cannot re-download originals), the client supplies the upload.
+func fileAssetsLoader(projectAbs string) deepseek.FileLoader {
+	dir, err := paths.ProjectAssets(projectAbs)
+	if err != nil {
+		return nil
+	}
+	return func(asset string) ([]byte, error) {
+		return assets.LoadDoc(dir, asset)
+	}
+}
+
+// fileResolver builds the send-time document resolver (F4). One
+// instance per session: it carries the process-scoped transport cache
+// that keeps an expired file_id from being re-parsed (and re-billed) on
+// every turn. A nil client (non-DeepSeek lane) still gets a resolver:
+// live ids pass through, unhealable parts degrade to in-band notes.
+func fileResolver(projectAbs string, client *deepseek.Client) *deepseek.FileResolver {
+	load := fileAssetsLoader(projectAbs)
+	if load == nil {
+		return nil // pathological setup: unresolved parts fail loudly at marshal time, as with images
+	}
+	var up deepseek.FileUploader
+	if client != nil {
+		up = client
+	}
+	return deepseek.NewFileResolver(load, up)
 }
 
 // runAutopilot drives the v7 柱 N unattended loop: decompose the goal,

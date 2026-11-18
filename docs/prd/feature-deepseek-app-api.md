@@ -209,11 +209,15 @@ agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片
 
 **D-F3 file_id 是传输优化，不是状态。** 资产库存原文件（唯一副本），`~/.seek/projects/<id>/filerefs.json` 记 `sha256 → {file_id, purpose, uploaded_at, expires_at}` 的映射缓存（**这是传输缓存不是平行状态**——丢了可重建，镜像 plan artifact 的 write-once 定位而非 `reconstruct` 纪律之争；实现卡里如发现可完全无状态化——每次会话首轮懒上传——则砍掉此文件，**先试无状态版**）。
 
+> **F4 定案（2026-11-18）：无状态版胜出，`filerefs.json` 不建。** 生命周期/purpose 直接记在 `FilePart` 上（`expires_at` / `purpose` 两个 omitempty 字段随 session JSONL 走），谁都知道「这个 id 什么时候死、当初按什么 purpose 解析的」，无需旁路文件；`ResolveFiles` 只在发送副本上换 id，历史不动。唯一的运行时补充是一个**进程内**的 `asset → {id,purpose,expiresAt}` 运输缓存（`FileResolver`，随会话死亡、丢了最多多重传一次解析），用来避免「过期后每轮重上传」的重复解析费。真 API 读数见 §3.3 F4 行与 `docs/pitfalls.md` "DeepSeek Files API / file_id"。
+
 **D-F4 大小/页数门在路由器。** 100 MiB / 1000 页 / 每请求 20 文档 / 8 MiB 文字合计——超限 in-band note 降级（照 vision 的 never-error 哲学），不 fatal。
 
 **D-F5 web 面拖拽 = 契约注记，不是本卡交付。** Web 面板（[feature-inspect-rpc](feature-inspect-rpc.md)，📐 未交付）与 control-plane web frontend 都在未排期状态。这里只立契约：未来 `Inbound`（control-plane D-C1）加可选 `Attachments []Attachment{Path,Mime}` 字段，平面原样落盘后走与 TUI 相同的 `fileRouter`（拖拽 = 平面写临时文件 + 注入 `@路径` 引用，**不新造管道**）。验收：契约字段写进本文即算（不写代码）。
 
 **D-F6 前缀缓存。** `file_id` 字符串逐轮字节稳定 → 与 base64 图同理由可参与前缀缓存（vision M-V.3 已实测 base64 图参与缓存；file_id 是否等价**未验证**——照 vision §7.2 的先例，实测归入 F4 验收，结论无论哪边记 `docs/pitfalls.md`）。
+
+> **F4 实测（2026-11-18）：参与，而且比预期更稳。** 同文档两轮 `prompt_tokens=1964 / hit=1792 / miss=172`（91%），无文档对照臂 `1220 / hit=1024`，文件臂多出的 ≈736 token 全在命中侧；session JSON 往返后再发一轮仍是 `1964 / 1792 / 172`。机制上 file_id 串根本没进 prompt token 流——服务端把解析结果展开成文档文字，缓存按文字命中——所以**换 id / 过期重传都不击穿缓存**。读数与推论见 `docs/pitfalls.md` "file_id 引用参与前缀缓存"。
 
 ### 3.3 里程碑（2h 卡粒度）
 
@@ -222,7 +226,7 @@ agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片
 | **F1 `pkg/deepseek` files 客户端** | `UploadFile`（multipart，purpose 在 file 前）、`FileObject` 类型、wire 形态 `file` 分块进 `ChatRequest.MarshalJSON`（与 `image_url` 分块同站） | httptest fake 断言 multipart 字段序 + wire 形状；text-only 字节等价 guard |
 | **F2 `internal/filerefs` 检测器** | 后缀表 + stat 门 + `cleanToken` 复用（从 imgrefs 提或直接内联，倾向复制保持两包独立——检测语义已分叉） | 假阳性用例照 imgrefs 测试集（代码片段/URL 里的 `.pdf` 不是引用） |
 | **F3 提交期路由 + copy-at-submit** | `fileRouter`（三入口共用）；资产库写入；上传 + 解析费 `RecordFlatCost`（按返回页数）；`@rich:` 前缀解析；in-band 标记族 | 提交 `@report.pdf` → 标记 + file_id 就位；100 MiB 超限降级不 fatal |
-| **F4 发送路径 + resume + 缓存实验** | `ResolveFiles`（懒上传/过期重传）；session round-trip；侧信道 `WithoutFiles`（照 `WithoutImages`）；**file_id 前缀缓存实测**（同文档两轮，看 `prompt_cache_hit_tokens`） | 真 API：上传→引用→模型答出文档内容；resume 后继续；实验结论记 pitfalls |
+| **F4 发送路径 + resume + 缓存实验** | `ResolveFiles`（懒上传/过期重传）；session round-trip；侧信道 `WithoutFiles`（照 `WithoutImages`）；**file_id 前缀缓存实测**（同文档两轮，看 `prompt_cache_hit_tokens`） | ✅ **2026-11-18（卡 c_5gy5h6）**：真 API 上传→引用→答出文档内容（`KESTREL-7781` / `433 MHz` / `Dr. Ines Vasquez` 三问全中，三问同一页内）；resume（JSON 往返）后继续引用仍 91% 命中（`1962/1792/170`）；缓存实验参与（doc 臂 `1964/1792/172` 对无文档对照臂 `1220/1024`，文档权重 ≈736 token 全在命中侧）；懒上传路径同跑（ResolveFiles 对真 client）。三条读数（含「上传响应不发 page_count/expires_at」「同一 PDF 解析偶发只含第 1 页」）记 `docs/pitfalls.md` |
 | **F5 展示 + 文档 + 契约注记** | replay 淡显标记（`[file: ` 族）；`guide-vision.md` 或新 `guide-files.md`；`Inbound.Attachments` 契约段落（D-F5）；价格表核对（§六） | 文档链路齐 |
 
 ---
@@ -329,7 +333,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 3. **语音 v1 只出站**：`Frontend` 端口收发分离的设计前提 + ASR 非流式/TTS 无中断的硬约束，单向播报是唯一「完整可用且不假造能力」的 v1 形态。实时双工明确不做，等官方流式 ASR。
 4. **safety_check 默认关**：自用无对外义务，拒答是纯能力损失；config 暴露满足「将来对外开」的一天。
 5. **工具平价不折峰谷**：官方工具价无峰谷之分，与 token 费分开口径（§1.5）。
-6. **开放问题**：①~~read_url 与 function tools 共存性~~（**已解决 2026-11-14，R0 判红**：off 混用 400 / on 混用静默剥除，见 §2.2）；②`file_id` 前缀缓存参与性（F4 实验）；③~~chat/completions 协议下 `server_tool_use` 确切字段名~~（**已实证 2026-11-14**：计费数 `tool_search`/`tool_fetch`/`tool_image_search`，全零时整键缺席；展示数未见出现，§2.2）；④serve 侧用量面板（远期）；⑤filerefs 映射缓存 vs 无状态懒上传（F4 定，倾向先试无状态）。
+6. **开放问题**：①~~read_url 与 function tools 共存性~~（**已解决 2026-11-14，R0 判红**：off 混用 400 / on 混用静默剥除，见 §2.2）；②~~`file_id` 前缀缓存参与性~~（**F4 实测 2026-11-18：参与**，命中覆盖文档 token 且 id 换新不击穿缓存，§3.2 D-F6 + `docs/pitfalls.md`）；③~~chat/completions 协议下 `server_tool_use` 确切字段名~~（**已实证 2026-11-14**：计费数 `tool_search`/`tool_fetch`/`tool_image_search`，全零时整键缺席；展示数未见出现，§2.2）；④serve 侧用量面板（远期）；⑤~~filerefs 映射缓存 vs 无状态懒上传~~（**F4 定：无状态**，`filerefs.json` 不建，见 D-F3 注）。
 
 ---
 
