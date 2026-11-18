@@ -453,14 +453,17 @@ M6 交付后的很长时间里，这一章的四家第二公民 provider 都是"
 
 ```go
 case "glm":
-    // Zhipu GLM subscription lane (open.bigmodel.cn). The paas/v4
-    // endpoint speaks OpenAI Chat Completions — including streaming
-    // tool_calls deltas — so it rides the compatible adapter with a
-    // pinned default base URL.
+    // Zhipu GLM lane (open.bigmodel.cn). Both endpoints speak OpenAI
+    // Chat Completions — the pinned default is pay-as-you-go; a Coding
+    // Plan subscription overrides it via providers.glm.base_url /
+    // GLM_BASE_URL / --base-url.
     apiKey := config.KeyFor(cfg, "glm")
     ...
+    base := glmEndpoint(cfg, baseURLFlag)
     return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
 ```
+
+智谱的钱按 **URL 分账**，不按 key 分账：`/api/paas/v4` 扣充值余额，`/api/coding/paas/v4` 才走 Coding Plan 订阅额度——同一个 coding-plan key 打错端点，要么静默扣余额，要么报 `1113`。所以车道默认值只能选一边（多数 key 是充值制，默认留在 paas/v4），另一边用 `providers.glm.base_url` / `GLM_BASE_URL` 显式覆盖。这是"默认值即产品决策"的一个实例：把两群用户放在同一条 URL 上，任何默认都会反向踩另一半。
 
 但 GLM 不是 `--provider=compatible --base-url=...` 的语法糖。`compatible` 面向任意端点：不知道你的模型叫什么、不知道怎么计费、budget 只能落 Default。GLM 是一条**产品化的车道**：默认模型 `glm-5.3`、独立 key 解析（`GLM_API_KEY` / `providers.glm`）、自己的计价卡——且带 `NoOffPeakDiscount` 标记，平价计费的 provider 绝不能吃 DeepSeek 的错峰时钟折扣。一句话：**compatible 是"能连上"，车道是"进了账本"**。
 

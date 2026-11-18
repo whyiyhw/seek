@@ -41,6 +41,7 @@ API 密钥的查找优先级从高到低：
 | `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm` / `opencode`）。空字符串 = 不指定，走自动检测 |
 | `providers` | object | 各 provider 的凭证配置，key 为 provider 名 |
 | `providers.<name>.api_key` | string | API 密钥 |
+| `providers.<name>.base_url` | string | 可选端点覆盖（**完整 POST URL**，不会自动补 `/chat/completions`）。当前用于 `glm`：Coding Plan 订阅必须指向 `/api/coding/paas/v4`，见 §3 |
 | `path_prompt_done` | bool | Windows 上"添加到 PATH"提示是否已显示过 |
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
@@ -64,6 +65,38 @@ API 密钥的查找优先级从高到低：
 | OpenCode（Go 订阅） | `OPENCODE_API_KEY` | `opencode` |
 
 GLM 与 OpenCode 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
+
+### GLM Coding Plan 订阅端点（`--provider=glm`）
+
+智谱按 **URL 分账**，不按 key 形状分账：同一个 GLM key 打在 `/api/paas/v4` 扣的是**充值余额**（按 token 计费），打在 `/api/coding/paas/v4` 才走 **Coding Plan 订阅额度**。seek 的默认端点是 `https://open.bigmodel.cn/api/paas/v4/chat/completions`（多数用户是充值制，默认不动）；Coding Plan 订阅用户**必须显式覆盖**，否则会继续扣余额——余额为空时接口直接报 `1113`（「余额不足或无可用资源包」）。
+
+端点覆盖优先级（高 → 低）：
+
+1. `GLM_BASE_URL` 环境变量
+2. `~/.seek/config.json` 的 `providers.glm.base_url`
+3. `--base-url` 旗标
+4. 默认 `https://open.bigmodel.cn/api/paas/v4/chat/completions`
+
+```json
+{
+  "providers": {
+    "glm": {
+      "api_key": "<你的 GLM coding-plan key>",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  }
+}
+```
+
+```bash
+# 或单次运行覆盖（写在 .env / secret manager 里，别进命令行历史）
+export GLM_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
+seek --provider glm
+```
+
+> 智谱官方 coding-plan quick-start 列出三个 Base URL：`/api/anthropic`（Anthropic 协议，seek 不走）、`/api/coding/paas/v4`、`/api/v1`。seek 的 OpenAI 兼容车道用 `/api/coding/paas/v4/chat/completions`——`base_url` 是完整 POST 目标，seek 不会替你补路径。
+>
+> 首启向导选 GLM 保存完 key 后会打印这段提示；不确定自己是哪种 key 时，先用默认端点跑一次，报 `1113` 就是 Coding Plan key，切到 `/api/coding/paas/v4` 即可。
 
 ### OpenCode Go 订阅车道（`--provider=opencode`）
 

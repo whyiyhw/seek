@@ -502,7 +502,12 @@ type subagentRoute struct {
 // providers.opencode is. Explicit names only — no key-probing
 // chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
 // table iff its key exists.
-func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute {
+//
+// baseURLFlag is the parent's --base-url: the GLM route resolves its
+// endpoint through the same glmEndpoint precedence as the startup lane,
+// so a Coding Plan preset (config/env or flag) also governs subagents —
+// otherwise explore/plan children silently bill the recharge balance.
+func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[string]subagentRoute {
 	cfg, _ := config.Load()
 	routes := make(map[string]subagentRoute)
 	if parentClient != nil {
@@ -514,7 +519,7 @@ func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute
 	}
 	if k := config.KeyFor(cfg, "glm"); k != "" {
 		routes[subagent.ProviderGLM] = subagentRoute{
-			provider: compatible.New(k, glmBaseURL, "GLM"),
+			provider: newGLMProvider(cfg, k, baseURLFlag),
 		}
 	}
 	if k := config.KeyFor(cfg, "opencode"); k != "" {
@@ -1792,7 +1797,7 @@ func run() error {
 				maxTurns:    *maxTurns,
 				getModel:    func() string { return sessionModel },
 				getEffort:   func() string { return sessionEffort },
-				routes:      buildSubagentRoutes(dsClient),
+				routes:      buildSubagentRoutes(dsClient, *baseURL),
 				bashGuard:   autopilotGuard,
 				bashSandbox: autopilotMode,
 				bashEnvKeep: bashEnvKeep,
@@ -3467,22 +3472,22 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		return geminiprov.New(apiKey), nil, "Gemini", "gemini-2.0-flash", nil
 
 	case "glm":
-		// Zhipu GLM subscription lane (open.bigmodel.cn). The paas/v4
-		// endpoint speaks OpenAI Chat Completions — including streaming
-		// tool_calls deltas — so it rides the compatible adapter with a
-		// pinned default base URL (--base-url overrides, e.g. for
-		// proxies). Expected degradation vs DeepSeek: no FIM, no cache
-		// metadata, reasoning_content deltas are silently skipped by the
-		// openai client's wire types.
+		// Zhipu GLM lane (open.bigmodel.cn). Both endpoints speak OpenAI
+		// Chat Completions — including streaming tool_calls deltas — so
+		// the lane rides the compatible adapter with a pinned default
+		// base URL. Endpoint precedence: providers.glm.base_url /
+		// GLM_BASE_URL > --base-url > glmBaseURL. The override matters
+		// because Zhipu bills a Coding Plan subscription ONLY on
+		// /api/coding/paas/v4: a coding-plan key pointed at the default
+		// /api/paas/v4 path charges the recharge balance (or fails with
+		// error 1113 「余额不足或无可用资源包」). Expected degradation vs
+		// DeepSeek: no FIM, no cache metadata, reasoning_content deltas
+		// are silently skipped by the openai client's wire types.
 		apiKey := config.KeyFor(cfg, "glm")
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no GLM API key — set GLM_API_KEY or add providers.glm.api_key to ~/.seek/config.json")
 		}
-		base := glmBaseURL
-		if baseURLFlag != "" {
-			base = baseURLFlag
-		}
-		return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
+		return newGLMProvider(cfg, apiKey, baseURLFlag), nil, "GLM", "glm-5.3", nil
 
 	case "opencode":
 		// OpenCode Go subscription lane (opencode.ai/inference/go):
@@ -3533,10 +3538,53 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 }
 
 // glmBaseURL is the default endpoint for --provider=glm: Zhipu's
-// OpenAI-compatible Chat Completions path (subscription and pay-as-you-go
-// keys share it). Full chat-completions path, matching the openai client's
-// expectation that baseURL is the POST target.
+// pay-as-you-go OpenAI-compatible Chat Completions path. It is NOT the
+// Coding Plan endpoint — a subscription is billed only on
+// glmCodingPlanBaseURL; a coding-plan key sent to paas/v4 charges the
+// recharge balance, or fails with error 1113 when that balance is empty.
+// The default stays pay-as-you-go (the majority of keys are pay-as-you-
+// go; flipping it would break them in the opposite direction) and
+// Coding Plan users override per lane via providers.glm.base_url /
+// GLM_BASE_URL / --base-url. Full chat-completions path, matching the
+// openai client's expectation that baseURL is the POST target.
 const glmBaseURL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+// glmCodingPlanBaseURL is Zhipu's GLM Coding Plan subscription endpoint
+// (one of the three OpenAI-compatible Base URLs Zhipu documents:
+// /api/anthropic, /api/coding/paas/v4, /api/v1). Not wired as a default —
+// named here so docs, the setup wizard tip, and future 1113 diagnostics
+// all point at one string. Value for providers.glm.base_url / GLM_BASE_URL.
+const glmCodingPlanBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+
+// glmEndpoint resolves the effective GLM POST target. Precedence is
+// per-provider override > --base-url flag > compiled default:
+//
+//	providers.glm.base_url / GLM_BASE_URL  ← the Coding Plan preset
+//	--base-url                             ← one-off / proxy
+//	glmBaseURL (pay-as-you-go)             ← the majority
+//
+// The config-file/env layer deliberately beats the flag: it is the
+// per-provider statement of intent written once, while --base-url is a
+// generic override shared by every lane. Pure function so the precedence
+// is unit-testable without a live endpoint.
+func glmEndpoint(cfg config.Config, baseURLFlag string) string {
+	base := glmBaseURL
+	if baseURLFlag != "" {
+		base = baseURLFlag
+	}
+	if override := config.BaseURLFor(cfg, "glm"); override != "" {
+		base = override
+	}
+	return base
+}
+
+// newGLMProvider is the single construction point for the GLM lane:
+// startup (buildProvider), ACP laneFor, and subagent routes all reach
+// glmEndpoint through here, so no path can disagree about the endpoint
+// (a divergent child lane would silently bill the recharge balance).
+func newGLMProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider {
+	return compatible.New(apiKey, glmEndpoint(cfg, baseURLFlag), "GLM")
+}
 
 // opencodeBaseURL is the default endpoint for --provider=opencode: the
 // OpenCode Go plan's inference gateway, OpenAI-compatible. Same

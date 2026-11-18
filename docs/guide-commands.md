@@ -110,5 +110,6 @@ seek worktree gc                   # Garbage-collect stale worktrees
 | `OPENAI_API_KEY` | OpenAI API key |
 | `GEMINI_API_KEY` | Gemini API key |
 | `GLM_API_KEY` | Zhipu bigmodel.cn API key (glm provider) |
+| `GLM_BASE_URL` | GLM endpoint override — Coding Plan subscriptions must use `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions` (see [guide-config.md](guide-config.md) §3) |
 | `SEEK_HOME` | Override `~/.seek/` location |
 | `SEEK_WEBFETCH_ALLOW_HTTP=1` | Allow http:// URLs in webfetch (dev only) |
