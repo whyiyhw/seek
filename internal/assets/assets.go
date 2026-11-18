@@ -1,5 +1,6 @@
-// Package assets — content-addressed image store under
-// ~/.seek/projects/<id>/assets/ (feature-vision D5).
+// Package assets — content-addressed asset store under
+// ~/.seek/projects/<id>/assets/ (feature-vision D5; documents joined
+// via StoreDoc, feature-deepseek-app-api §3.1).
 //
 // Copy-at-submit: the submit-time router copies each detected image
 // here BEFORE the message is sent, so a cancelled send still leaves
@@ -19,6 +20,7 @@
 //   - Size gate mirrors the API's single-image cap (32 MiB for
 //     base64/URL images) so a too-big image degrades at ROUTE time
 //     (in-band note) instead of failing the whole request at send time.
+//     Documents gate at their own 100 MiB cap (MaxDocBytes).
 package assets
 
 import (
@@ -42,6 +44,23 @@ var allowedExt = map[string]string{
 	".webp": "image/webp",
 	".gif":  "image/gif",
 }
+
+// docExt is the document extension table (feature-deepseek-app-api
+// D-F2: PDF/Word/PPT, the Files API's parseable set). A set, not a
+// mime map: documents upload as raw multipart bytes, never as a data
+// URL, so there is nothing for a mime to label.
+var docExt = map[string]bool{
+	".pdf": true, ".doc": true, ".docx": true,
+	".ppt": true, ".pptx": true,
+}
+
+// MaxDocBytes caps one stored document, mirroring the Files API's
+// 100 MiB document limit (same value as pkg/deepseek.FileMaxBytes,
+// restated so this package stays stdlib-only). Var for the same test
+// reason as MaxAssetBytes. The Files API cannot re-download originals:
+// the local copy is the ONLY source of truth for re-uploads, which is
+// why documents store at all (feature-deepseek-app-api §3.1 持久层).
+var MaxDocBytes = 100 << 20
 
 // Store writes data under dir under its content-addressed name and
 // returns that name. Existing content is left untouched (dedup).
@@ -80,6 +99,39 @@ func StoreFile(dir, src string) (string, error) {
 		return "", err
 	}
 	return Store(dir, filepath.Base(src), data)
+}
+
+// StoreDoc writes a document under dir under its content-addressed
+// name and returns that name — the document sibling of Store, SAME
+// library (feature-deepseek-app-api §3.1 同库复用), same atomic
+// write, same dedup. Extension gate is the doc table; size gate the
+// document cap.
+func StoreDoc(dir, origName string, data []byte) (string, error) {
+	ext := strings.ToLower(filepath.Ext(origName))
+	if !docExt[ext] {
+		return "", fmt.Errorf("assets: unsupported document extension %q", ext)
+	}
+	if len(data) > MaxDocBytes {
+		return "", fmt.Errorf("assets: %d bytes exceeds %d MiB document cap", len(data), MaxDocBytes>>20)
+	}
+	sum := sha256.Sum256(data)
+	name := hex.EncodeToString(sum[:6]) + ext // 12 hex chars
+	dst := filepath.Join(dir, name)
+	if _, err := os.Stat(dst); err == nil {
+		return name, nil // identical content already stored
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return "", err
+	}
+	return name, nil
 }
 
 // Path returns the absolute path of asset within dir. The name must be

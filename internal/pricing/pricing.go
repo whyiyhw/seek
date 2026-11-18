@@ -198,6 +198,28 @@ func TTSCost(billableChars int) float64 {
 	return float64(billableChars) * ttsPer10kCharsUSD / 10_000
 }
 
+// parsePerPageUSD is the Files-API document-parsing rate: $0.225 per
+// 1,000 pages (¥1.5/千页 on the Chinese pricing page; the English page
+// no longer lists the tools family, so this converts at the same ratio
+// the search row documents natively — ¥5/1K → $0.75/1K). Billed once,
+// at upload: the parse IS the upload (a returned file id means the
+// document already parsed), same price for text_recognition and
+// rich_layout_recognition (PRD feature-deepseek-app-api §1.2/§6 row 3).
+// Same-posture note as search/ASR/TTS: list price only, no discounts
+// modelled — the defensive display errs high.
+const parsePerPageUSD = 0.225 / 1000
+
+// ParseCost returns the USD cost of parsing pages document pages via
+// the Files API. A page count of 0 or less (server omitted it / failed
+// upload) costs nothing — the router records this off the FileObject
+// the upload RETURNED, never off "an upload was attempted".
+func ParseCost(pages int) float64 {
+	if pages <= 0 {
+		return 0
+	}
+	return float64(pages) * parsePerPageUSD
+}
+
 const offPeakDiscount = 0.5
 
 // Shanghai (CST = UTC+8) is DeepSeek's reference timezone. Exported so
