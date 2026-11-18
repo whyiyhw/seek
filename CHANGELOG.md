@@ -95,3 +95,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_n63pat：web 前端·W4.4：资产面 sessions 浏览器（列表 + 消息 cursor 分页浏览）
 - c_f6ayyg：语音 v2·V2：push-to-talk 入站——VoiceFrontend.Run 录音→ASR→Inbound
 - c_m2whz2：编排 M-O3.2：pre_prompt_inject 授权注入通道 + 三区模型落地——opt-in shell stdout 经 Prepend 单缝注入（max_bytes 默认 2048/上限 8192 + 截断标记），deny 路径只断注入不断 turn，audit 记 injected_bytes，守护测试锁「注入后 prefix 前段字节不变」，状态栏字节数提示拍板不做
+- c_4ejhhs：MCP-D1：MCP 工具默认 server__tool 前缀 + LoadServers 注册顺序确定化（bridge.go）

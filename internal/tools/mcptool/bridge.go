@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/whyiyhw/seek/pkg/mcp"
@@ -21,8 +22,8 @@ type Bridge struct {
 }
 
 // New wraps one MCP tool definition. effectName is the name under which
-// the tool will be registered — normally def.Name, but the caller may
-// prefix it (e.g. "server__tool") to resolve conflicts with built-in tools.
+// the tool will be registered — by convention "<server>__<tool>" (e.g.
+// semble__search); loadOne computes it, see the naming policy there.
 func New(client *mcp.Client, serverName string, def mcp.ToolDef, effectName string) *Bridge {
 	return &Bridge{
 		client:     client,
@@ -73,6 +74,13 @@ type ServerConfig struct {
 	// Env holds additional "KEY=VALUE" pairs to merge on top of the
 	// inherited environment. nil means no additions.
 	Env []string
+	// NoPrefix opts this server out of the default "<server>__<tool>"
+	// registration name, keeping the server's bare tool names instead.
+	// It is the escape hatch behind mcp.json's "prefix": false. If a
+	// bare name collides with something already registered, the tool
+	// falls back to the prefixed form — the bare name is simply not
+	// available. Zero value (false) = prefix on, the default.
+	NoPrefix bool
 }
 
 // LoadResult holds the Bridges and per-server Errors from LoadServers.
@@ -84,14 +92,36 @@ type LoadResult struct {
 // LoadServers starts each MCP server, runs the initialize handshake,
 // lists tools, and returns Bridge instances ready for registration.
 //
+// Servers are visited in lexicographic order of their names so the
+// same config produces a byte-identical registration roster (names
+// and order) on every startup — map iteration order never leaks in.
 // Each server's error is collected independently — one broken server
 // does not block the others. existingNames is the set of tool names
-// already in the seek registry; conflicting MCP tool names are
-// prefixed with "<serverName>__" to avoid registry panics.
+// already in the seek registry.
 func LoadServers(ctx context.Context, servers map[string]ServerConfig, existingNames map[string]bool) LoadResult {
+	return loadServers(ctx, servers, existingNames, func(ctx context.Context, cfg ServerConfig) (*mcp.Client, error) {
+		return mcp.StartServer(ctx, mcp.ServerConfig{
+			Command: cfg.Command,
+			Args:    cfg.Args,
+			Env:     cfg.Env,
+		})
+	})
+}
+
+// connectFn launches one MCP server subprocess and returns a client.
+// A seam so tests can substitute in-process fake servers.
+type connectFn func(ctx context.Context, cfg ServerConfig) (*mcp.Client, error)
+
+func loadServers(ctx context.Context, servers map[string]ServerConfig, existingNames map[string]bool, connect connectFn) LoadResult {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var result LoadResult
-	for serverName, cfg := range servers {
-		bridges, err := loadOne(ctx, serverName, cfg, existingNames)
+	for _, serverName := range names {
+		bridges, err := loadOne(ctx, serverName, servers[serverName], existingNames, connect)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("mcp server %q: %w", serverName, err))
 			continue
@@ -104,12 +134,8 @@ func LoadServers(ctx context.Context, servers map[string]ServerConfig, existingN
 	return result
 }
 
-func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing map[string]bool) ([]*Bridge, error) {
-	client, err := mcp.StartServer(ctx, mcp.ServerConfig{
-		Command: cfg.Command,
-		Args:    cfg.Args,
-		Env:     cfg.Env,
-	})
+func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing map[string]bool, connect connectFn) ([]*Bridge, error) {
+	client, err := connect(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +153,14 @@ func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing 
 
 	bridges := make([]*Bridge, 0, len(defs))
 	for _, def := range defs {
-		effectName := def.Name
-		if existing[effectName] {
-			effectName = serverName + "__" + def.Name
+		// Default: register as "<server>__<tool>" (e.g. semble__search).
+		// The prefix carries ownership in the name and makes cross-server
+		// collisions impossible. NoPrefix (mcp.json's "prefix": false
+		// escape hatch) keeps the bare name when it is free, falling
+		// back to the prefixed form when something already holds it.
+		effectName := serverName + "__" + def.Name
+		if cfg.NoPrefix && !existing[def.Name] {
+			effectName = def.Name
 		}
 		bridges = append(bridges, New(client, serverName, def, effectName))
 	}

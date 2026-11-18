@@ -271,31 +271,30 @@ func (b *Bridge) Execute(ctx context.Context, raw json.RawMessage) (string, erro
 
 ---
 
-## 12.6 名称冲突：动态前缀
+## 12.6 名称策略：默认 server 前缀
 
 ```go
 // internal/tools/mcptool/bridge.go
 for _, def := range defs {
-    effectName := def.Name
-    if existing[effectName] {
-        effectName = serverName + "__" + def.Name
+    // Default: register as "<server>__<tool>" (e.g. semble__search).
+    effectName := serverName + "__" + def.Name
+    if cfg.NoPrefix && !existing[def.Name] {
+        effectName = def.Name
     }
     bridges = append(bridges, New(client, serverName, def, effectName))
 }
 ```
 
-一个真实问题：`filesystem` MCP server 提供一个叫 `read_file` 的工具——名字跟 seek 自带的 `read` 工具不冲突。但如果某个 MCP server 提供了一个也叫 `read` 的工具呢？
+MCP 工具一律默认注册为 `<server>__<tool>`（如 `semble__search`）——`server` 名自带归属与语义，对路由和引导是免费的信号；server 名在 map 里天然唯一，跨 server 撞名从结构上不可能。先例是 Claude Code 的 `mcp__<server>__<tool>` 三段式；seek 没有 `mcp` 顶层域需求，双下划线单前缀就够。
 
-注册到 `tools.Registry` 时会覆盖（或 panic，取决于实现）。Bridge 的处理是**只在冲突时**前缀：
+这个策略是后来改的（MCP-D1，`docs/prd/feature-mcp-client.md` §4.1）。最初版本是「只在冲突时前缀」：裸名没撞就用裸名，撞了（比如 server 提供了跟内置 `read` 同名的工具）才前缀成 `<server>__<read>`。它有两个问题：
 
-- 没冲突：直接用 server 给的名字 `read_file`
-- 冲突：前缀成 `<server>__<tool>`，如 `myserver__read`
+- **名字不自带归属**——`search` 什么都不说，`semble__search` 才能被引导文案稳定引用；
+- **注册顺序影响最终名字**——server A 先注册裸名 `foo`，server B 的 `foo` 就变 `B__foo`，顺序翻转结果翻转。而遍历顺序来自 Go map 迭代（不确定），同一份 mcp.json 启动两次可能给出不同的名单。
 
-为什么不**永远**加前缀？因为大多数 MCP server 的工具名字本来就独特（`read_file` / `query` / `gh_create_issue`），强制前缀会让 LLM 看到的工具名字变长、变难记。"够独特就保持原名，冲突才加前缀" 是一个 just-enough 策略。
+修法是一对：默认前缀 + `LoadServers` 按 server name **字典序**遍历 `mcpServers`。前者让撞名几乎不可能，后者让「同配置两次启动、注册名单逐字节一致」成为可测试的属性（`TestLoadServers_DeterministicRoster` 就是这个锁）。
 
-副作用：**注册顺序影响最终名字**。如果 server A 先注册了 `foo`，server B 的 `foo` 就变成 `B__foo`；反过来注册顺序就翻转。当前实现按 `mcp.json` 里 `mcpServers` map 的 Go 迭代顺序（**不确定**），所以严格说同一份配置启动两次可能给出不同的最终名字。
-
-这是一个**已知缺陷**——目前还没修，因为冲突在实际使用中极少发生。一旦真发生，修法是显然的：按 server name 字典序遍历 `mcpServers`，让顺序确定下来。坑录里没记，但应该记——埋一下。
+兼容逃生口：`mcp.json` 里 server 条目可写 `"prefix": false` 退回裸名——只为存量工作流兜底，不做宣传；裸名若已被占用（内置工具或先注册的 server），该工具自动落回前缀形，因为裸名根本拿不到。坑录有条目（`docs/pitfalls.md` "同一份 mcp.json 两次启动可能注册出不同的工具名"）。
 
 ---
 
@@ -460,7 +459,7 @@ MCP 客户端实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md
 - `initialize` 后必须发 `notifications/initialized` 通知——容易漏的协议礼仪
 - `InputSchema` 用 `json.RawMessage` 不解析 = 透明转发，不假装通用契约
 - Bridge **不**用 `UnmarshalStrict`——MCP 工具的 schema 契约归 server，seek 是透明传递层
-- 名称冲突时按 `<server>__<tool>` 前缀；遍历顺序不确定是已知缺陷（按 server name 排序可修）
+- 默认按 `<server>__<tool>` 前缀注册（`"prefix": false` 可退回裸名）；`LoadServers` 按 server name 字典序遍历，同配置两次启动名单逐字节一致
 - `mcp.json` 格式兼容 Claude Code / Cursor——已有用户零迁移成本
 - 错误隔离：单 server 失败不阻塞其他，启动失败不致命，文件缺失不当错误
 

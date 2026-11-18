@@ -17,6 +17,19 @@ type ServerEntry struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
 	Env     map[string]string `json:"env"`
+	// Prefix opts out of the default "<server>__<tool>" registration:
+	// an explicit false restores the server's bare tool names. Absent
+	// or true keeps the prefixed form (the default). Pointer so the
+	// absent case is distinguishable from an explicit false. Escape
+	// hatch only — not advertised.
+	Prefix *bool `json:"prefix,omitempty"`
+}
+
+// UsePrefix reports whether this server's tools should register under
+// the "<server>__<tool>" form (the default). False only when the
+// config says "prefix": false explicitly.
+func (e ServerEntry) UsePrefix() bool {
+	return e.Prefix == nil || *e.Prefix
 }
 
 // Config is the top-level structure of mcp.json.

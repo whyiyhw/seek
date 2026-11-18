@@ -65,3 +65,50 @@ func TestLoadFrom_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON, got nil")
 	}
 }
+
+func TestLoadFrom_PrefixField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mcp.json")
+	content := `{
+		"mcpServers": {
+			"default1": {"command": "a"},
+			"explicit-true": {"command": "b", "prefix": true},
+			"opt-out": {"command": "c", "prefix": false}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	cases := []struct {
+		server string
+		prefix *bool
+		want   bool // expected UsePrefix
+	}{
+		{"default1", nil, true},
+		{"explicit-true", boolPtr(true), true},
+		{"opt-out", boolPtr(false), false},
+	}
+	for _, c := range cases {
+		e, ok := cfg.MCPServers[c.server]
+		if !ok {
+			t.Fatalf("MCPServers[%q] missing", c.server)
+		}
+		if (e.Prefix == nil) != (c.prefix == nil) {
+			t.Errorf("%s: Prefix = %v, want %v", c.server, e.Prefix, c.prefix)
+			continue
+		}
+		if c.prefix != nil && *e.Prefix != *c.prefix {
+			t.Errorf("%s: *Prefix = %v, want %v", c.server, *e.Prefix, *c.prefix)
+		}
+		if got := e.UsePrefix(); got != c.want {
+			t.Errorf("%s: UsePrefix() = %v, want %v", c.server, got, c.want)
+		}
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
