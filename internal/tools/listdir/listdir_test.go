@@ -159,3 +159,68 @@ func TestListDir_DirsBeforeFiles(t *testing.T) {
 		t.Errorf("dirs should precede files:\n%s", out)
 	}
 }
+
+// TestListDir_DefaultDepthNamesRecovery is the regression for the
+// bash-overreach red-green alternation (eval, 2026-11): a default-depth
+// listing cannot answer recursive count-/size-questions, and without an
+// in-band pointer the model's visible recovery path was `bash find |
+// wc`. The hint names the dedicated re-call explicitly, same idiom as
+// the truncation notice.
+func TestListDir_DefaultDepthNamesRecovery(t *testing.T) {
+	root := setup(t)
+	out, err := run(t, Args{Path: root}) // default depth=1
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "1 subdirectories not expanded at depth=1") {
+		t.Errorf("missing unexpanded-subdirs hint:\n%s", out)
+	}
+	if !strings.Contains(out, "depth=2") {
+		t.Errorf("hint must name the depth=2 recovery:\n%s", out)
+	}
+}
+
+func TestListDir_ExpandedDepthNoHint(t *testing.T) {
+	root := setup(t)
+	out, err := run(t, Args{Path: root, Depth: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "not expanded") {
+		t.Errorf("no expansion hint expected once depth was requested:\n%s", out)
+	}
+}
+
+func TestListDir_FlatDirNoHint(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "only.txt"), "x")
+	out, err := run(t, Args{Path: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "not expanded") {
+		t.Errorf("nothing to expand — no hint expected:\n%s", out)
+	}
+}
+
+func TestListDir_HiddenSubdirNotCountedForHint(t *testing.T) {
+	root := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(root, ".hid"), 0o755))
+	mustWrite(t, filepath.Join(root, ".hid", "x.txt"), "x")
+
+	out, err := run(t, Args{Path: root}) // hidden=false: .hid invisible → no hint
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "not expanded") {
+		t.Errorf("hidden subdir must not trigger the hint:\n%s", out)
+	}
+
+	out, err = run(t, Args{Path: root, ShowHidden: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "1 subdirectories not expanded") {
+		t.Errorf("visible hidden subdir should trigger the hint:\n%s", out)
+	}
+}
