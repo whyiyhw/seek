@@ -34,6 +34,11 @@ const (
 	// ProviderGLM is Zhipu's GLM lane (pkg/llm/compatible on the
 	// pinned bigmodel.cn endpoint, default glm-5.3).
 	ProviderGLM = "glm"
+	// ProviderOpenCode is the OpenCode Go subscription lane
+	// (pkg/llm/compatible on opencode.ai/inference/go, flat
+	// request-window plan, default deepseek-v4.1-flash; requires
+	// OPENCODE_API_KEY).
+	ProviderOpenCode = "opencode"
 )
 
 // knownModels is the provider→model routing table. Slice order
@@ -46,6 +51,7 @@ const (
 var knownModels = map[string][]string{
 	ProviderDeepSeek: {deepseek.ModelV41Flash},
 	ProviderGLM:      {pricing.ModelGLM53},
+	ProviderOpenCode: {pricing.ModelOpenCodeV41Flash},
 }
 
 // Route is the resolved per-spawn routing decision. Empty Provider
@@ -90,7 +96,7 @@ func ResolveRoute(provider, model string) (Route, error) {
 	}
 	models, ok := knownModels[provider]
 	if !ok {
-		return Route{}, fmt.Errorf("unknown provider %q — valid: deepseek, glm", provider)
+		return Route{}, fmt.Errorf("unknown provider %q — valid: deepseek, glm, opencode", provider)
 	}
 	if model == "" {
 		return Route{Provider: provider, Model: models[0]}, nil

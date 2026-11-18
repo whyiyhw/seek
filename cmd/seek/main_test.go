@@ -189,6 +189,71 @@ func TestBuildProvider_GLM(t *testing.T) {
 	})
 }
 
+// buildProvider("opencode", ...) wiring, mirroring the GLM paradigm:
+// label, lane default model (id per opencode.ai/docs/console/models,
+// 待核 against /v1/models with a real key), key resolution via
+// OPENCODE_API_KEY → providers.opencode, and the --base-url override.
+func TestBuildProvider_OpenCode(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+
+	t.Run("env key, default label and model", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "k")
+		provider, dsClient, label, modelDefault, err := buildProvider("opencode", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if dsClient != nil {
+			t.Errorf("opencode must not build a deepseek client")
+		}
+		if provider == nil || provider.Name() != "OpenCode" {
+			t.Errorf("provider label = %v, want OpenCode", provider)
+		}
+		if label != "OpenCode" {
+			t.Errorf("provLabel = %q, want \"OpenCode\"", label)
+		}
+		if modelDefault != "deepseek-v4.1-flash" {
+			t.Errorf("modelDefault = %q, want deepseek-v4.1-flash", modelDefault)
+		}
+	})
+
+	t.Run("config-file key", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "")
+		home := t.TempDir()
+		t.Setenv("SEEK_HOME", home)
+		cfgJSON := `{"providers": {"opencode": {"api_key": "from-config"}}}`
+		if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		provider, _, label, modelDefault, err := buildProvider("opencode", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if provider == nil || label != "OpenCode" || modelDefault != "deepseek-v4.1-flash" {
+			t.Errorf("opencode from config-file key: provider=%v label=%q model=%q", provider, label, modelDefault)
+		}
+	})
+
+	t.Run("no key errors", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "")
+		t.Setenv("SEEK_HOME", t.TempDir())
+		_, _, _, _, err := buildProvider("opencode", "", "")
+		if err == nil || !strings.Contains(err.Error(), "no OpenCode API key") {
+			t.Errorf("expected no-key error, got %v", err)
+		}
+	})
+
+	t.Run("base-url override accepted", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "k")
+		provider, _, _, _, err := buildProvider("opencode", "http://localhost:9/v1/chat/completions", "")
+		if err != nil {
+			t.Fatalf("buildProvider with --base-url: %v", err)
+		}
+		if provider == nil {
+			t.Errorf("nil provider with --base-url override")
+		}
+	})
+}
+
 // cronAutoTickEnabled has two independent off-switches: --no-cron-tick
 // (explicit opt-out) and the ACP headless lane (always off — its processes
 // are short-lived spawns where a detached tick goroutine is a half-fired

@@ -57,6 +57,18 @@ func TestResolveRoute(t *testing.T) {
 			wantRoute: Route{Provider: ProviderDeepSeek, Model: "deepseek-flash"},
 		},
 		{
+			name:      "opencode provider only takes lane default",
+			provider:  "opencode",
+			model:     "",
+			wantRoute: Route{Provider: ProviderOpenCode, Model: pricing.ModelOpenCodeV41Flash},
+		},
+		{
+			name:      "model only opencode id (distinct from direct deepseek-flash)",
+			provider:  "",
+			model:     "deepseek-v4.1-flash",
+			wantRoute: Route{Provider: ProviderOpenCode, Model: "deepseek-v4.1-flash"},
+		},
+		{
 			name:     "unknown provider rejected",
 			provider: "anthropic",
 			model:    "",

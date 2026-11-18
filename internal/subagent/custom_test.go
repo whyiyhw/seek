@@ -284,7 +284,7 @@ func TestSpawn_CustomType(t *testing.T) {
 		},
 		{
 			name: "pref inherited unchanged under plan-analyze tighten",
-			def: def("v", func(d *agenttypes.Definition) { d.Workflow = "plan-analyze" }),
+			def:  def("v", func(d *agenttypes.Definition) { d.Workflow = "plan-analyze" }),
 			want: want{
 				toolNames: generalPurposeSet(),
 				workflow:  permission.WorkflowPlanAnalyze, pref: permission.PrefDeny,

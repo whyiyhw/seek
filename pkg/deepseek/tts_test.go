@@ -124,12 +124,12 @@ func TestTTS_BillableChars(t *testing.T) {
 	}{
 		{"", 0},
 		{"hello", 5},
-		{"任务完成", 8},                 // 4 Han × 2
-		{"任务完成。", 9},                // 。 is punctuation, not Han
-		{"第1条：done", 10},             // 第条=2+2, "1"=1, ：=1 (full-width colon is not Han), "done"=4
-		{"こんにちは", 5},                // kana count 1
-		{"한국어", 3},                   // hangul counts 1
-		{"😀 emoji", 7},                // 😀 is a rune like any other
+		{"任务完成", 8},                          // 4 Han × 2
+		{"任务完成。", 9},                         // 。 is punctuation, not Han
+		{"第1条：done", 10},                     // 第条=2+2, "1"=1, ：=1 (full-width colon is not Han), "done"=4
+		{"こんにちは", 5},                         // kana count 1
+		{"한국어", 3},                           // hangul counts 1
+		{"😀 emoji", 7},                       // 😀 is a rune like any other
 		{strings.Repeat("汉", 5_000), 10_000}, // the cap boundary
 	}
 	for _, tc := range cases {

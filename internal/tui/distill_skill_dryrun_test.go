@@ -62,10 +62,10 @@ func TestRenderSkillDryRunReport_LayerVerdicts(t *testing.T) {
 		"skill candidate rejected — dup-skill:",
 		"skill candidate 1/2: pin-go-version — dry-run, nothing written",
 		"skill candidate 2/2: repro-flaky-first — dry-run, nothing written",
-		"L2: PASS",          // survivor 1 verdict
-		"L2: GREY",          // survivor 2 verdict
-		"similarity 0.48",   // grey note rides along
-		"nothing written",   // the dry-run guarantee
+		"L2: PASS",        // survivor 1 verdict
+		"L2: GREY",        // survivor 2 verdict
+		"similarity 0.48", // grey note rides along
+		"nothing written", // the dry-run guarantee
 		"rerun /distill to review and save",
 	} {
 		if !strings.Contains(report, want) {
