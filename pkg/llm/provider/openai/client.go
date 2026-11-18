@@ -10,12 +10,32 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/pkg/llm"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1/chat/completions"
+
+// seekUserAgent identifies seek to every endpoint this client POSTs to.
+// The OpenCode Go lane requires a self-identifying User-Agent — a
+// generic client-library name (or none at all) routes Go-plan requests
+// to per-token billing — and it is good etiquette elsewhere. Derived
+// from build info so it needs no per-release bump: "seek/v0.11.0" for
+// release builds, "seek/dev" for local ones. Deliberately not
+// internal/tui's VersionString: pkg/ stays clean of internal deps, and
+// the " · hash+" suffix there is human-banner formatting, not UA fuel.
+var seekUserAgent = func() string {
+	v := "dev"
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if mv := info.Main.Version; mv != "" && mv != "(devel)" && !strings.HasPrefix(mv, "v0.0.0-") {
+			v = mv
+		}
+	}
+	return "seek/" + v
+}()
 
 // Client is a streaming OpenAI Chat Completions client satisfying llm.Provider.
 type Client struct {
@@ -193,6 +213,16 @@ func (c *Client) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan ll
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	// Self-identify on every lane (see seekUserAgent). The session
+	// header is the OpenCode Go lane's routing/prompt-cache contract:
+	// one stable value per conversation, so it rides the per-request
+	// ChatRequest rather than the client — an absent SessionID (deepseek
+	// lane, --no-save, older callers) sends nothing, byte-identical to
+	// the pre-opencode wire shape.
+	httpReq.Header.Set("User-Agent", seekUserAgent)
+	if req.SessionID != "" {
+		httpReq.Header.Set("x-opencode-session", req.SessionID)
+	}
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {

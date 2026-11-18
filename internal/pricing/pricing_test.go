@@ -300,6 +300,38 @@ func TestPricingFor_GLM53(t *testing.T) {
 	}
 }
 
+// TestPricingFor_OpenCodeGoLane pins the OpenCode Go lane's default
+// model card against opencode.ai/docs/console/models (checked
+// 2026-11-17): deepseek-v4.1-flash $0.30 miss / $0.006 cached /
+// $1.20 output — numerically the direct DeepSeek Flash card, but a
+// separate id string and entry, and flat across tiers: the Go plan is
+// a request-window subscription, so per-token values are display-only
+// and off-peak halving would be fictional precision.
+func TestPricingFor_OpenCodeGoLane(t *testing.T) {
+	std := PricingFor(ModelOpenCodeV41Flash, TierStandard)
+	if math.Abs(std.InputMissPerMTok-0.30) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash miss = %v, want 0.30", std.InputMissPerMTok)
+	}
+	if math.Abs(std.InputHitPerMTok-0.006) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash hit = %v, want 0.006", std.InputHitPerMTok)
+	}
+	if math.Abs(std.OutputPerMTok-1.20) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash output = %v, want 1.20", std.OutputPerMTok)
+	}
+
+	off := PricingFor(ModelOpenCodeV41Flash, TierOffPeak)
+	if off != std {
+		t.Errorf("Go-lane card must be flat-rate: off-peak %+v differs from standard %+v", off, std)
+	}
+
+	// The lane default must NOT resolve through the unknown-model
+	// fallback (same numbers today, but a future Flash bump on the
+	// direct card must not silently move the Go lane with it).
+	if _, ok := standardRates[ModelOpenCodeV41Flash]; !ok {
+		t.Error("deepseek-v4.1-flash needs its own registry entry, not the Flash fallback")
+	}
+}
+
 // TestCost_GLM53 prices one usage block across all three buckets. This
 // is the shape runTurnLLM produces for the GLM lane: full prompt split
 // into hit/miss from prompt_tokens_details.cached_tokens.

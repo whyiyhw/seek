@@ -453,7 +453,8 @@ type subagentRunnerOpts struct {
 	getModel  func() string
 	getEffort func() string
 	// routes maps routing lane names (subagent.ProviderDeepSeek /
-	// ProviderGLM — validated in internal/subagent.ResolveRoute) to
+	// ProviderGLM / ProviderOpenCode — validated in
+	// internal/subagent.ResolveRoute) to
 	// the backend a child spawned on that lane should use
 	// (feature-orchestration.md D7). Built once at startup from
 	// config keys: a lane appears here only when its API key exists,
@@ -496,7 +497,8 @@ type subagentRoute struct {
 // model routing (feature-orchestration.md D6/D7): deepseek always
 // (reusing the parent's client when the parent lane IS deepseek, else
 // building one from the config key), glm when GLM_API_KEY /
-// providers.glm is configured. Explicit names only — no key-probing
+// providers.glm is configured, opencode when OPENCODE_API_KEY /
+// providers.opencode is. Explicit names only — no key-probing
 // chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
 // table iff its key exists.
 func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute {
@@ -512,6 +514,11 @@ func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute
 	if k := config.KeyFor(cfg, "glm"); k != "" {
 		routes[subagent.ProviderGLM] = subagentRoute{
 			provider: compatible.New(k, glmBaseURL, "GLM"),
+		}
+	}
+	if k := config.KeyFor(cfg, "opencode"); k != "" {
+		routes[subagent.ProviderOpenCode] = subagentRoute{
+			provider: compatible.New(k, opencodeBaseURL, "OpenCode"),
 		}
 	}
 	return routes
@@ -678,6 +685,11 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			MaxTokens:       opts.maxTokens,
 			MaxTurns:        opts.maxTurns,
 			Hooks:           childHooks,
+			// The child's conversation identity is its sub-sid (fresh
+			// per run, continuations included) — a subagent on the
+			// OpenCode lane thus gets its own stable x-opencode-session,
+			// distinct from the parent's and from sibling spawns.
+			SessionID: func() string { return job.SubSid },
 		})
 		if err != nil {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
@@ -883,8 +895,8 @@ func run() error {
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
-		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | compatible")
-		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm")
+		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | compatible")
+		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag     = flag.String("theme", "auto", "color theme: auto|dark|light")
 		rpcMode       = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
@@ -1855,6 +1867,20 @@ func run() error {
 		}()
 	}
 
+	// sessionIDFn feeds agent.Config.SessionID — ChatRequest.SessionID,
+	// emitted as x-opencode-session by the openai client (OpenCode Go
+	// lane's per-conversation routing/prompt-cache contract; inert on
+	// every other lane). Live read, not a captured value: /compact
+	// forks the session under a new ID while this agent object lives
+	// on — same pattern as planBridge.sessionID below. "" under
+	// --no-save (no session) sends no header.
+	sessionIDFn := func() string {
+		if activeSession == nil {
+			return ""
+		}
+		return activeSession.ID
+	}
+
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
 		Provider:        provider,
@@ -1868,6 +1894,7 @@ func run() error {
 		InitialMessages: initialMsgs,
 		Hooks:           hooksReg,
 		PrepareMessages: prepareMessages,
+		SessionID:       sessionIDFn,
 		// feature-vision: resolve Asset-referenced images into data
 		// URLs at send time. Wired whenever the project assets dir is
 		// computable; nil only in pathological setups, where an
@@ -2373,6 +2400,7 @@ func run() error {
 				MaxTokens:    *maxTokens,
 				MaxTurns:     *maxTurns,
 				AutoContinue: *autoContinue,
+				SessionID:    sessionIDFn,
 			})
 			if err != nil {
 				return nil, err
@@ -3248,6 +3276,32 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		}
 		return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
 
+	case "opencode":
+		// OpenCode Go subscription lane (opencode.ai/inference/go):
+		// a flat $10/month plan over an open-weight + frontier model
+		// pool, billed per request window (5h/week/month) — never per
+		// token. OpenAI Chat-Completions wire, so it rides the
+		// compatible adapter like GLM. The Go endpoint's client
+		// contract: a self-identifying User-Agent plus a stable
+		// x-opencode-session header per conversation — both injected by
+		// the openai client from ChatRequest.SessionID; without them
+		// Go-plan requests can degrade to per-token billing. The
+		// *-Free models are OpenCode-client-only and not usable here;
+		// paid endpoints on the plan are shielded from
+		// train-on-requests by default. Default model
+		// deepseek-v4.1-flash per opencode.ai/docs/console/models
+		// (2026-11-17) — ids still 待核 against GET /v1/models once a
+		// real key exists; --base-url overrides the endpoint.
+		apiKey := config.KeyFor(cfg, "opencode")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("no OpenCode API key — set OPENCODE_API_KEY or add providers.opencode.api_key to ~/.seek/config.json")
+		}
+		base := opencodeBaseURL
+		if baseURLFlag != "" {
+			base = baseURLFlag
+		}
+		return compatible.New(apiKey, base, "OpenCode"), nil, "OpenCode", "deepseek-v4.1-flash", nil
+
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
 		// accept OPENAI_API_KEY or DEEPSEEK_API_KEY (common shapes for
@@ -3266,7 +3320,7 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		return compatible.New(apiKey, baseURLFlag, provName), nil, provName, "", nil
 
 	default:
-		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | compatible", provFlag)
+		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | opencode | compatible", provFlag)
 	}
 }
 
@@ -3275,6 +3329,15 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 // keys share it). Full chat-completions path, matching the openai client's
 // expectation that baseURL is the POST target.
 const glmBaseURL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+// opencodeBaseURL is the default endpoint for --provider=opencode: the
+// OpenCode Go plan's inference gateway, OpenAI-compatible. Same
+// full-POST-target shape as glmBaseURL. The /v1/chat/completions path is
+// the documented expectation (base https://opencode.ai/inference/go,
+// model list GET /v1/models) but the official harness page 404s at the
+// time of wiring — 待核 with a real key via curl before relying on a
+// non-default path; --base-url overrides.
+const opencodeBaseURL = "https://opencode.ai/inference/go/v1/chat/completions"
 
 // autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
 // a truthy value (1/true/yes/on). Controls memory_observe tool registration;

@@ -104,7 +104,7 @@ type Definition struct {
 
 	// Provider / Model / Effort / MaxTurns are optional routing knobs
 	// (D11). Provider and Model are carried verbatim — lane validity
-	// (deepseek/glm, model∈lane) is resolved at spawn time by
+	// (deepseek/glm/opencode, model∈lane) is resolved at spawn time by
 	// subagent.ResolveRoute, which owns the routing table; duplicating
 	// it here would give it two sources of truth.
 	Provider string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -245,5 +246,83 @@ func TestChatStream_UsageCachedTokens(t *testing.T) {
 	d2 := findTurnDone(t, drain(ch2))
 	if d2.CachedInputTokens != 0 {
 		t.Errorf("CachedInputTokens without detail object = %d, want 0", d2.CachedInputTokens)
+	}
+}
+
+// recordingServer captures the headers of every request it serves, so
+// the identification tests below can assert on the real wire shape.
+func recordingServer(t *testing.T) (*httptest.Server, *[]*http.Request) {
+	t.Helper()
+	var got []*http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: " + `{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: " + `{"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got
+}
+
+// TestChatStream_IdentifiesAsSeek pins the OpenCode Go lane's client
+// contract, first half: every request carries a non-empty User-Agent
+// that names seek (a generic or absent UA degrades Go-plan requests to
+// per-token billing; the openai client is where all OpenAI-compatible
+// lanes — openai / glm / compatible / opencode — send from, so the
+// header rides them all).
+func TestChatStream_IdentifiesAsSeek(t *testing.T) {
+	srv, reqs := recordingServer(t)
+	if _, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*reqs) != 1 {
+		t.Fatalf("server saw %d requests, want 1", len(*reqs))
+	}
+	ua := (*reqs)[0].Header.Get("User-Agent")
+	if ua == "" {
+		t.Error("User-Agent is empty — the OpenCode Go lane requires a self-identifying UA")
+	}
+	if !strings.Contains(ua, "seek") {
+		t.Errorf("User-Agent = %q, want it to contain \"seek\"", ua)
+	}
+}
+
+// TestChatStream_SessionHeaderStableWithinConversation pins the
+// contract's second half: the same conversation's requests carry the
+// same x-opencode-session value (stable per-session routing / prompt-
+// cache affinity), a different conversation's carry a different one,
+// and requests without a SessionID (deepseek lane, --no-save, older
+// callers) send NO header — byte-identical to the pre-opencode wire
+// shape, so the header can never surprise a strict gateway.
+func TestChatStream_SessionHeaderStableWithinConversation(t *testing.T) {
+	srv, reqs := recordingServer(t)
+	c := NewCompatible("k", srv.URL)
+
+	const convA1, convA2 = "20261117-100000-aaaa", "20261117-100000-aaaa" // two turns, one conversation
+	const convB = "20261117-100001-bbbb"                                  // a second conversation
+	for _, sid := range []string{convA1, convA2, convB, ""} {
+		req := llm.ChatRequest{SessionID: sid}
+		if _, err := c.ChatStream(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(*reqs) != 4 {
+		t.Fatalf("server saw %d requests, want 4", len(*reqs))
+	}
+
+	h := func(i int) string { return (*reqs)[i].Header.Get("x-opencode-session") }
+	if h(0) == "" || h(0) != h(1) {
+		t.Errorf("same conversation across turns: header %q vs %q, want equal non-empty", h(0), h(1))
+	}
+	if h(0) == h(2) {
+		t.Errorf("different conversations must differ: both %q", h(0))
+	}
+	if h(2) != convB {
+		t.Errorf("header = %q, want the caller's session id %q verbatim", h(2), convB)
+	}
+	if h(3) != "" {
+		t.Errorf("empty SessionID must send no header, got %q", h(3))
 	}
 }

@@ -308,6 +308,8 @@ func envVarFor(providerName string) string {
 		return "GEMINI_API_KEY"
 	case "glm":
 		return "GLM_API_KEY"
+	case "opencode":
+		return "OPENCODE_API_KEY"
 	}
 	return ""
 }

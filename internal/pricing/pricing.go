@@ -45,6 +45,13 @@ type ModelPricing struct {
 // endpoint — the default model of seek's --provider=glm lane.
 const ModelGLM53 = "glm-5.3"
 
+// ModelOpenCodeV41Flash is DeepSeek's V4.1 Flash as addressed on
+// OpenCode's Go-plan gateway — the default model of seek's
+// --provider=opencode lane. A DIFFERENT id string from the direct
+// API's deepseek.ModelV41Flash ("deepseek-flash"): same model, two
+// lanes, two rate entries so neither falls to the other's fallback.
+const ModelOpenCodeV41Flash = "deepseek-v4.1-flash"
+
 // ModelV4Pro is DeepSeek's independent pro build (served by
 // DeepSeek-V4-Pro-0813). It retired into V4.1-Flash routing at the
 // 2026-09-10 V4.1 launch, but the pricing page (checked 2026-11-14)
@@ -106,6 +113,26 @@ var standardRates = map[string]ModelPricing{
 		InputMissPerMTok:  8 / 7.0,  // ¥8
 		InputHitPerMTok:   2 / 7.0,  // ¥2
 		OutputPerMTok:     28 / 7.0, // ¥28
+		NoOffPeakDiscount: true,
+	},
+	// OpenCode Go lane (--provider=opencode): a flat $10/month
+	// REQUEST-WINDOW plan (5h/weekly/monthly request quotas) — the
+	// per-token values below are never what the user pays; they exist
+	// only so the defensive cost display shows a sensible number.
+	// NoOffPeakDiscount because a subscription has no windows. Source:
+	// opencode.ai/docs/console/models, checked 2026-11-17 —
+	// deepseek-v4.1-flash $0.30 miss · $0.006 cached · $1.20 output
+	// (happens to equal the direct DeepSeek card above). NB the Go
+	// pool's glm-5.3 ($1.40/$0.26/$4.40 on the same page) COLLIDES
+	// with the ModelGLM53 key, which stays at Zhipu's direct card —
+	// that row prices the glm lane's real per-token billing, and Go-
+	// lane glm-5.3 reuse of it is display-only either way. Other
+	// Go-pool ids fall to the Flash fallback until a verified
+	// /v1/models list lands (post-merge follow-up card).
+	ModelOpenCodeV41Flash: {
+		InputMissPerMTok:  0.30,
+		InputHitPerMTok:   0.006,
+		OutputPerMTok:     1.20,
 		NoOffPeakDiscount: true,
 	},
 }

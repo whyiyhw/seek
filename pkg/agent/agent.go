@@ -62,6 +62,17 @@ type Config struct {
 	// those few bytes differ across turns).
 	ModeLabel string
 
+	// SessionID, when non-nil, is read before every second-tier LLM
+	// request and sent as ChatRequest.SessionID — which the openai
+	// client emits as x-opencode-session, the OpenCode Go lane's
+	// per-conversation routing/prompt-cache contract. A func, not a
+	// string: /compact forks the session under a new ID while the
+	// agent object lives on, so the value must be read live at each
+	// call (same pattern as cmd/seek's planBridge.sessionID). nil or
+	// "" = no session identity (deepseek path, --no-save, tests) and
+	// the header is simply not sent.
+	SessionID func() string
+
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
 	// SystemPrompt is still placed first; InitialMessages are
@@ -416,6 +427,7 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 		Model:     a.cfg.Model,
 		Messages:  msgs,
 		MaxTokens: a.cfg.MaxTokens,
+		SessionID: a.sessionID(),
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)
@@ -902,6 +914,16 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	return assistant, usage, finish, nil
 }
 
+// sessionID returns the live conversation identity for
+// ChatRequest.SessionID (x-opencode-session on the OpenCode lane); ""
+// when Config.SessionID is unset.
+func (a *Agent) sessionID() string {
+	if a.cfg.SessionID == nil {
+		return ""
+	}
+	return a.cfg.SessionID()
+}
+
 // runTurnLLM is the second-tier streaming path using llm.Provider.
 // It translates messages to/from the generic format and reassembles the
 // assistant turn as a deepseek.Message so the rest of the agent loop
@@ -920,6 +942,7 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		Messages:  msgsToLLM(prepared),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
+		SessionID: a.sessionID(),
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)
