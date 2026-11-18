@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, multiple cost lanes" width="820">
 </p>
 
 <p align="center">

@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, multiple cost lanes" width="820">
 </p>
 
 <p align="center">
-  <strong>Not an agent demo — a local agent platform: drive it from a terminal, browser, IDE, or a headless fleet; it distills its own sessions into skills; it routes work across three cost lanes.</strong>
+  <strong>Not an agent demo — a local agent platform: drive it from a terminal, browser, IDE, or a headless fleet; it distills its own sessions into skills; it routes work across multiple cost lanes.</strong>
 </p>
 
 <p align="center">
