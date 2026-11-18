@@ -204,7 +204,7 @@ seek web 现状：单文件手写 HTML（内联 CSS/JS、零构建链），`inte
 | 会话列表（ui-workspace） | W4.4 sessions 面板（已交付） | 有列表，无状态点/分组/Fork | RPC `session/list` 已有 title/turns/tool_calls/model（`internal/rpc/methods/session.go:92-100`）；**缺**：会话运行态（点色）、pending 审批标志、服务端搜索（现本地过滤）、workspace 分组概念 |
 | 转录流（ui-chat） | 聊天气泡流 W2.1 | 有流式气泡+usage 状态栏 | SSE 有 delta/tool/usage（`webfrontend_stream.go:153-173`）；**缺**：reasoning（显式过滤，`webfrontend_stream.go:31-34`，已抽查——策略决定不推，对齐需重新决策）、tool args/results 载荷（现只推 name+phase）、turn 边界事件、工具卡结构化渲染（前端全缺） |
 | 工具调用卡片（ui-tool） | 无 | **全新** | 见上；`tool` 事件需扩 args 摘要与 result 头尾截断（截断可先做前端，SSE 不推全文与 §2.5 过滤纪律一致） |
-| 审批卡（ui-approval） | **无对应物**（web 子进程 PrefDeny 自动拒，`internal/controlplane/executor.go:181,194-196`） | **空白=最大差距** | 需：serve 侧 askFn 桥到 SSE `approval/request` + 决策回注 + 前端 composer 覆盖卡；TUI 的 y/N 语义已有（`internal/tui/messages.go:12-17` 可参照措辞） |
+| 审批卡（ui-approval） | **无对应物**（web 子进程 PrefDeny 自动拒：`cmd/seek/main.go:1098-1101` 的 `initialPref` 仅在 `--yolo`/ACP yolo 时翻 `PrefYolo`，而 `internal/controlplane/executor.go:164,309` 显示子进程仅在 binding Yolo 时才追加 `--yolo`） | **空白=最大差距** | 需：serve 侧 askFn 桥到 SSE `approval/request` + 决策回注 + 前端 composer 覆盖卡；TUI 的 y/N 语义已有（`internal/tui/messages.go:12-17` 可参照措辞） |
 | plan chip | 无（plan-mode 仅 TUI，状态栏 PLAN badge） | 规划中 | 需 plan 状态事件（propose/plan 工具调用已在转录事件里，可投影）+ `/plan` 命令通道 |
 | goal 条 | 无 goal 概念 | — | 跳过或远期（seek 无 goals 域） |
 | jobs 弹层 | 🤖 后台任务面板 W3.3（subagents topic） | 有（整页切换） | 数据已有（`webfrontend_topic.go` subagents 流）；对齐=改成会话头弹层+StateDot 语言 |
