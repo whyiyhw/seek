@@ -566,6 +566,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: when a sentinel enum's zero value is a meaningful category, constructors that bypass the loader must set it explicitly; consider making the zero value the "unset/invalid" case for new enums.
 - **Refs**: `internal/agenttypes/agenttypes.go` (`Origin`), `internal/subagent/manager.go` (`resolveType`)
 
+### `finish_reason:"refusal"` with empty content is not an "empty response" — and its marker must stream as a delta
+- **Saw**: adding the `safety_check` opt-in (SC1), a refusal response (HTTP 200, zero deltas, `finish_reason:"refusal"`) hit the empty-response guard and surfaced `agent: model returned an empty response` — a documented, deliberate outcome reading as an upstream failure. Fixing that (in-band marker + nil error) then rendered a blank assistant block in the TUI.
+- **Why**: two separate assumptions. (1) The empty guard classifies by content shape, not finish_reason — a refusal is the one empty that IS the final answer. (2) `MessageEnd`'s `Message` is the persistence/side-channel view; the TUI commits the deltas it accumulated (`m.curContent`), so content injected only at end-of-turn never reaches the screen.
+- **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
+- **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
+- **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+
 ## DeepSeek API
 
 ### Server web tools (`deepseek_read_url`/`deepseek_web_search`) have NO working coexistence shape with function tools — the 200 silently strips them

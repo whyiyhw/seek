@@ -100,3 +100,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_yijdy4：语音 v1·V1a：播报 sink——serve Speaker（Reply→TTS→播放）+ routines Notifier sibling
 - c_nxirmj：首启向导 provider 单扩容：opencode/glm 两行进菜单（deepseek 仍居首，验证 ping 仍仅 deepseek），重试提示的范围文案按 len(providerOptions) 动态生成（原写死 1–4 会骗人），向导侧 envVarFor 镜像同步 glm/opencode（否则 env-only 用户会被误触导向导），keyHint 均未经真实 key 验证（opencode 留空省略格式行、glm 按 <32hex>.<hex> 形态给示意）
 - c_axqkif：deepseek-app-api·F3：fileRouter 提交期路由 + copy-at-submit + ParseCost
+- c_djswic：deepseek-app-api·SC1：safety_check config 键 + ChatRequest 字段 + refusal 处理（小卡）

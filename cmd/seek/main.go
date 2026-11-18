@@ -1664,6 +1664,12 @@ func run() error {
 	// PRD docs/prd/archive/feature-suggested-reply.md §4.7.
 	appCfg, _ := config.Load()
 	suggestEnabled := !*noSuggest && appCfg.SuggestReplyEnabled() && dsClient != nil
+	// Model safety check (feature-deepseek-app-api.md §5): config-only
+	// opt-in, read ONCE here — no in-session switch, because the value
+	// rides every request body and a mid-session flip would change all
+	// subsequent requests (same discipline as language / the retired
+	// server_tools switch). DeepSeek lane only; other providers ignore it.
+	safetyCheck := appCfg.SafetyCheckLevel()
 	var predictor *suggester.Predictor
 	var prepareMessages func([]deepseek.Message) []deepseek.Message
 	if suggestEnabled {
@@ -1887,6 +1893,7 @@ func run() error {
 		Provider:        provider,
 		Model:           *model,
 		Effort:          sessionEffort,
+		SafetyCheck:     safetyCheck,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
 		MaxTokens:       *maxTokens,
@@ -2409,6 +2416,7 @@ func run() error {
 				Provider:     provider,
 				Model:        sessionModel,
 				Effort:       sessionEffort,
+				SafetyCheck:  safetyCheck,
 				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTokens:    *maxTokens,

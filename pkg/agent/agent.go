@@ -52,6 +52,20 @@ type Config struct {
 	// expose their own thinking knobs out of band.
 	Effort string
 
+	// SafetyCheck, when non-empty, is sent as
+	// deepseek.ChatRequest.SafetyCheck on every DeepSeek-lane request
+	// ("high" — the only documented level; cmd/seek maps
+	// config.SafetyCheckLevel() into it once per session). Empty = the
+	// key is absent from the wire body so text-only requests stay
+	// byte-identical (prefix-cache discipline). DeepSeek lane only: the
+	// second-tier llm.ChatRequest has no such field. A fixed session
+	// posture, not a per-turn knob — changing it mid-conversation would
+	// alter every subsequent request body (the discipline /lang follows).
+	//
+	// When the check flags a response, runTurnDeepSeek records the
+	// in-band safetyRefusalMarker instead of failing the turn.
+	SafetyCheck string
+
 	// ModeLabel is the current permission mode label for per-message
 	// injection. Empty string → no reminder (the system-prompt tool
 	// descriptions already cover Ask/Deny behaviour). Non-empty values
@@ -754,6 +768,24 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 	return a.runTurnDeepSeek(ctx, out)
 }
 
+// safetyRefusalMarker is the in-band assistant content recorded when
+// DeepSeek's model safety check refuses a response instead of producing
+// prose. It is wire format for the transcript — resume replays assistant
+// content verbatim, and `seek -resume` users (plus internal consumers
+// like the /goal judge) read it as "the model declined"; change the text
+// only with a migration in mind (same rule as the `[plan: …]` markers).
+const safetyRefusalMarker = "[safety: 拒答（safety_check 命中）]"
+
+// isSafetyRefusal reports whether a finish_reason means "the model's
+// safety filter stopped this response". DeepSeek documents "refusal"
+// (the safety_check hit signal); "content_filter" is the same class of
+// terminal outcome on adjacent OpenAI-compatible shapes. Applied in
+// runTurnDeepSeek — the lane the safety_check parameter belongs to; the
+// second-tier path passes provider stop reasons through untouched.
+func isSafetyRefusal(finish string) bool {
+	return finish == "refusal" || finish == "content_filter"
+}
+
 // runTurnDeepSeek is the original DeepSeek-specific streaming path.
 func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	msgs := deepseek.StripReasoningContent(a.messages)
@@ -800,6 +832,12 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	}
 	if a.cfg.Tools != nil {
 		req.Tools = a.cfg.Tools.Wire()
+	}
+	// Model safety check (config `safety_check: "high"`, read once at
+	// session startup). Absent when off, keeping the body byte-identical
+	// to a pre-SC1 request — the prefix cache keys on those bytes.
+	if a.cfg.SafetyCheck != "" {
+		req.SafetyCheck = &deepseek.SafetyCheck{Level: a.cfg.SafetyCheck}
 	}
 
 	stream, err := a.cfg.Client.ChatStream(ctx, req)
@@ -894,6 +932,34 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	// poisoning the next API request.
 	if err := ctx.Err(); err != nil {
 		return assistant, usage, finish, err
+	}
+
+	// Safety refusal (config `safety_check: "high"`): the model declined
+	// to answer and the API terminated the stream with finish_reason
+	// "refusal". That is a legitimate terminal outcome, NOT a stream
+	// failure — the documented client contract is to replace whatever
+	// was shown with the refusal text. Record the in-band marker as the
+	// assistant content and let the turn end normally: no ErrorEvent, no
+	// retry (a retried refusal just re-triggers the filter and burns
+	// tokens). Placed BEFORE the empty-response guard so a contentless
+	// refusal isn't mistaken for a silent model.
+	if isSafetyRefusal(finish) {
+		assistant.Content = safetyRefusalMarker
+		// A refusal has no answer to act on. Drop any half-streamed
+		// tool_calls — Prompt's invariant check requires
+		// tool_calls ⇔ finish_reason="tool_calls", and a refusal can
+		// never carry that pairing.
+		assistant.ToolCalls = nil
+		if !started {
+			out <- MessageStart{Message: assistant}
+			started = true
+		}
+		// Surface the marker in the live stream too: usually nothing
+		// streamed before the refusal, so without this delta the TUI
+		// would commit an empty assistant block and the turn would end
+		// silently on screen. (If a partial answer did stream, the
+		// marker follows it as the "this was replaced" notice.)
+		out <- MessageDelta{Delta: safetyRefusalMarker}
 	}
 
 	// Empty-response guard: the assistant message has nothing to say.
