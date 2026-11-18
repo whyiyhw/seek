@@ -1367,6 +1367,150 @@ func TestAgent_ReasoningOnlyEmpty_NotRetried(t *testing.T) {
 	assertNoOrphanToolCalls(t, ag.Messages())
 }
 
+// safetyRefusalSSE is the fake refusal response: DeepSeek documents the
+// safety-check hit as finish_reason "refusal" with no content (the
+// client is expected to replace whatever it showed with refusal text).
+func safetyRefusalSSE(finish string) string {
+	return strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"` + finish + `"}]}`,
+		``,
+		`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":0,"total_tokens":5}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+}
+
+// TestAgent_SafetyRefusal_TurnEndsNormally is the SC1 acceptance path
+// (docs/prd/feature-deepseek-app-api.md §5): with safety_check enabled
+// the API can end a response with finish_reason "refusal" and no
+// content. That is a legitimate terminal outcome, not a stream failure —
+// the agent records the in-band marker as the assistant content and the
+// turn ends normally: no ErrorEvent, no retry, no AutoContinue.
+func TestAgent_SafetyRefusal_TurnEndsNormally(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	var body atomic.Value // string — the request body as sent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if b, err := io.ReadAll(r.Body); err == nil {
+			body.Store(string(b))
+		}
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, safetyRefusalSSE("refusal"))
+	}))
+	defer srv.Close()
+
+	ag, err := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		SafetyCheck:  deepseek.SafetyCheckHigh,
+		AutoContinue: true,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+
+	if len(res.errors) > 0 {
+		t.Fatalf("refusal must not surface an error (never-error philosophy), got: %v", res.errors)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Errorf("server hits = %d, want 1 — a refusal must never be retried or auto-continued", got)
+	}
+	if res.assistant.Content != safetyRefusalMarker {
+		t.Errorf("assistant content = %q, want the safety marker %q", res.assistant.Content, safetyRefusalMarker)
+	}
+	if len(res.assistant.ToolCalls) != 0 {
+		t.Errorf("refusal must not carry tool_calls, got %d", len(res.assistant.ToolCalls))
+	}
+	joined := strings.Join(res.events, ",")
+	if strings.Contains(joined, "ErrorEvent") {
+		t.Errorf("refusal must not emit an ErrorEvent, events: %v", res.events)
+	}
+	if !strings.Contains(joined, "TurnEnd") {
+		t.Errorf("turn must end normally with TurnEnd, events: %v", res.events)
+	}
+	// The marker must reach the live stream too: the TUI commits deltas,
+	// not MessageEnd's content, so a refusal without a delta would end
+	// the turn silently on screen.
+	if !strings.Contains(joined, "MessageDelta") {
+		t.Errorf("refusal marker must stream as a delta, events: %v", res.events)
+	}
+	// Transcript: the marker is the last assistant message, so a resumed
+	// session (and the next request's history) carries it verbatim.
+	hist := ag.Messages()
+	if n := len(hist); n == 0 || hist[n-1].Role != deepseek.RoleAssistant || hist[n-1].Content != safetyRefusalMarker {
+		t.Errorf("history tail = %+v, want the safety marker as the last assistant message", hist)
+	}
+	// Wiring: safety_check rode the DeepSeek request.
+	sent, _ := body.Load().(string)
+	if !strings.Contains(sent, `"safety_check":{"level":"high"}`) {
+		t.Errorf("request body missing safety_check: %s", sent)
+	}
+}
+
+// TestAgent_SafetyRefusal_ContentFilterSamePath: "content_filter" is the
+// adjacent-provider spelling of the same terminal outcome and must take
+// the identical never-error path — the marker lands, the turn settles.
+func TestAgent_SafetyRefusal_ContentFilterSamePath(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, safetyRefusalSSE("content_filter"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) > 0 {
+		t.Fatalf("content_filter must not surface an error, got: %v", res.errors)
+	}
+	if res.assistant.Content != safetyRefusalMarker {
+		t.Errorf("assistant content = %q, want the safety marker", res.assistant.Content)
+	}
+}
+
+// TestAgent_SafetyCheckOff_AbsentFromRequest: the default (off) lane must
+// not send the key at all. Text-only request bytes then stay identical to
+// their pre-SC1 shape, which is what keeps existing prefix-cache hits
+// hitting (feature-deepseek-app-api.md §5, PRD §7 字节等价 guard).
+func TestAgent_SafetyCheckOff_AbsentFromRequest(t *testing.T) {
+	t.Parallel()
+	var body atomic.Value // string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if b, err := io.ReadAll(r.Body); err == nil {
+			body.Store(string(b))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"ok"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) > 0 {
+		t.Fatalf("plain turn must not error: %v", res.errors)
+	}
+	sent, _ := body.Load().(string)
+	if strings.Contains(sent, "safety_check") {
+		t.Errorf("safety_check must be absent from the body when off: %s", sent)
+	}
+}
+
 // TestAgent_MalformedToolArgs_RecordedAsToolError covers the
 // not-the-orphan but adjacent case: the stream completes cleanly with
 // finish=tool_calls, but the arguments string isn't valid JSON. The

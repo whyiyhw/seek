@@ -45,6 +45,7 @@ API 密钥的查找优先级从高到低：
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
 | `session_notify_seconds` | int | 交互回合持续超过此秒数时触发推送通知。缺省 = 60s，设为 0 禁用 |
+| `safety_check` | string | DeepSeek 模型安全校验（只认 `"high"` 一档；缺省/空 = 关）。命中拒答时回合内记 `[safety: 拒答（safety_check 命中）]`。**会话启动读一次**，不支持对话中切换（见下文「模型安全校验」）|
 | `agents` | object | 子代理类型的默认路由覆写（见下节；键 = 类型名，值 = 仅路由旋钮）|
 
 ---
@@ -118,6 +119,21 @@ seek --provider anthropic
 ### 推送通知
 
 将 cron 任务完成、autopilot 结果、长时间交互回合的结束通知推送到手机。配置方式见 [guide-webhooks.md](guide-webhooks.md)。
+
+### 模型安全校验（`safety_check`）
+
+```json
+{
+  "safety_check": "high"
+}
+```
+
+- **默认关**。开启后 DeepSeek 对模型的输入输出过一遍安全审核，命中风险时拒答（`finish_reason: "refusal"`）。seek 把拒答记为 assistant 消息的 in-band 标记 `[safety: 拒答（safety_check 命中）]`，**回合正常结束**——不报错、不重试、不中断会话。
+- 只认 `"high"` 一档（官方目前只提供这一档）；缺省 / 空 / 其它值一律视为关。
+- **会话启动时读取一次**，不支持对话中切换：该值随每个请求体发送，中途改动会改变请求字节、击穿前缀缓存（与 `/lang` 同纪律）。
+- 仅对 DeepSeek 车道生效；其它 provider 忽略此键。
+- 自用默认关的理由：拒答会削弱 agent 在安全研究、漏洞分析等合法任务上的能力，并增加延迟；seek 自身没有对外服务义务。
+- **合规注记**：若你**对外提供服务**（把 seek 接进面向他人的产品或服务），开启本参数、并承担内容安全审核、大模型登记、AI 生成内容标识等义务，属于**你（服务运营者）的法定义务侧事项**——seek 只提供这个开关，不承担审核或合规责任。
 
 ### 子代理类型路由（`agents` 段）
 

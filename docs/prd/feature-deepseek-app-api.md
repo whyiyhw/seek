@@ -284,6 +284,8 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 
 **里程碑**：**SC1**（2h）——config 键 + `ChatRequest.SafetyCheck` 字段 + agent 接线（DeepSeek 车道 only）+ refusal 处理 + httptest fake 测试（refusal 响应路径）+ guide 行。一张卡完事。
 
+**SC1 状态（2026-11-18，卡 c_djswic 已实现）**：`internal/config` 顶层 `SafetyCheck` + `SafetyCheckLevel()`（只认 `high`，大小写/空白容忍）；`pkg/deepseek.ChatRequest.SafetyCheck`（object 形 `{"level":"high"}`，nil = 不出现在 wire body——text-only 请求字节等价 guard 已加）；`pkg/agent` 在 `runTurnDeepSeek` 里注入（`SafetyCheck` 为空即不发，二线 provider 无此字段）；`finish_reason: refusal|content_filter` → assistant 内容记 in-band `[safety: 拒答（safety_check 命中）]` + 正常结束（不 fatal、不重试、不 AutoContinue）。cmd/seek 会话启动读一次并同时喂给 `/new` 重建路径。`docs/guide-config.md` 已加合规注记。真 API 账单核实（价格页无独立条目）留待 smoke 卡。
+
 ---
 
 ## 6. 价格表更新点（列全）

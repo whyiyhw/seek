@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/whyiyhw/seek/internal/paths"
 )
@@ -110,6 +111,21 @@ type Config struct {
 	// Only human-facing prose follows it — LLM-visible strings and the
 	// status bar stay English by design (docs/prd/feature-i18n.md §1.2).
 	Language string `json:"language,omitempty"`
+
+	// SafetyCheck opts the DeepSeek lane into the model safety check
+	// (docs/prd/feature-deepseek-app-api.md §5): DeepSeek documents one
+	// tier, "high"; empty/absent = off — the self-hosting default,
+	// because a refusal is pure capability loss for the agent's own work
+	// (security research included) plus latency. It exists for users who
+	// expose seek as a service: turning it on is then their compliance
+	// obligation, seek only supplies the switch (docs/guide-config.md).
+	//
+	// Read ONCE at session startup, never switched in-session: the value
+	// rides every request body, so a mid-session flip would change the
+	// shape of every subsequent request mid-conversation — the same
+	// discipline /lang and the retired server_tools switch follow. See
+	// SafetyCheckLevel for the wire mapping.
+	SafetyCheck string `json:"safety_check,omitempty"`
 
 	// Serve configures the remote control plane (`seek serve` —
 	// docs/prd/feature-remote-control-plane.md, wired in M1b). Nil
@@ -219,6 +235,20 @@ func (c Config) ReadWholeReadBytes() int {
 		return 32 * 1024
 	}
 	return c.Read.WholeReadBytes
+}
+
+// SafetyCheckLevel returns the level to send in
+// deepseek.ChatRequest.SafetyCheck: "high" when the user opted in, ""
+// (off) otherwise. Only "high" is documented
+// (docs/prd/feature-deepseek-app-api.md §5), so any other value reads as
+// off instead of being forwarded as a guess — a typo must not silently
+// select some half-supported tier. Matching is whitespace-trimmed and
+// case-insensitive so hand-edited config files stay forgiving.
+func (c Config) SafetyCheckLevel() string {
+	if strings.EqualFold(strings.TrimSpace(c.SafetyCheck), "high") {
+		return "high"
+	}
+	return ""
 }
 
 // SessionNotifySecondsOrDefault returns the interactive-notify duration
