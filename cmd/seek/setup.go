@@ -114,6 +114,12 @@ var providerOptions = []providerOption{
 	{"anthropic", "Anthropic Claude", "sk-ant-", "https://console.anthropic.com/account/keys"},
 	{"openai", "OpenAI GPT", "sk-", "https://platform.openai.com/api-keys"},
 	{"gemini", "Google Gemini", "AIza", "https://aistudio.google.com/app/apikey"},
+	// keyHint: opencode's key shape is unverified against a real key,
+	// so it ships empty and the format line is simply omitted (see
+	// promptAPIKey); glm's hint sketches the <32hex>.<hex> shape rather
+	// than a literal prefix — Zhipu keys have no fixed leading chars.
+	{"opencode", "OpenCode Go (subscription — open-weight models)", "", "https://console.opencode.ai"},
+	{"glm", "Zhipu GLM", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.", "https://open.bigmodel.cn/usercenter/apikeys"},
 }
 
 func promptProvider(out io.Writer, scanner *bufio.Scanner) (string, error) {
@@ -128,7 +134,7 @@ func promptProvider(out io.Writer, scanner *bufio.Scanner) (string, error) {
 		}
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
-			fmt.Fprintln(out, "  (enter a number 1–4, or Ctrl+C to abort)")
+			fmt.Fprintf(out, "  (enter a number 1–%d, or Ctrl+C to abort)\n", len(providerOptions))
 			continue
 		}
 		// Accept both digit and provider name — power users will
@@ -139,7 +145,7 @@ func promptProvider(out io.Writer, scanner *bufio.Scanner) (string, error) {
 				return p.id, nil
 			}
 		}
-		fmt.Fprintf(out, "  unrecognised choice %q — enter 1–4 or a provider name\n", line)
+		fmt.Fprintf(out, "  unrecognised choice %q — enter 1–%d or a provider name\n", line, len(providerOptions))
 	}
 }
 
@@ -153,7 +159,9 @@ func promptAPIKey(out io.Writer, scanner *bufio.Scanner, provider string) (strin
 	}
 	fmt.Fprintf(out, "  Step 2/2 — paste your %s API key:\n", opt.label)
 	fmt.Fprintf(out, "    Get one from %s\n", opt.docsURL)
-	fmt.Fprintf(out, "    Format usually starts with %q\n", opt.keyHint)
+	if opt.keyHint != "" {
+		fmt.Fprintf(out, "    Format usually starts with %q\n", opt.keyHint)
+	}
 	for {
 		fmt.Fprint(out, "  > ")
 		if !scanner.Scan() {
@@ -197,6 +205,10 @@ func envVarFor(provider string) string {
 		return "OPENAI_API_KEY"
 	case "gemini":
 		return "GEMINI_API_KEY"
+	case "glm":
+		return "GLM_API_KEY"
+	case "opencode":
+		return "OPENCODE_API_KEY"
 	}
 	return ""
 }

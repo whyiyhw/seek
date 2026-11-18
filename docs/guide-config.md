@@ -62,11 +62,13 @@ API 密钥的查找优先级从高到低：
 | GLM（智谱 bigmodel.cn） | `GLM_API_KEY` | `glm` |
 | OpenCode（Go 订阅） | `OPENCODE_API_KEY` | `opencode` |
 
+GLM 与 OpenCode 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
+
 ### OpenCode Go 订阅车道（`--provider=opencode`）
 
 [OpenCode Go](https://opencode.ai/console/go) 是 $10/月的订阅制推理池（32 个开放权重 + 前沿模型：Kimi K3、Qwen3.8 Max、GLM-5.x、DeepSeek V4.x、Grok 4.7、GPT-6 Luna、Claude Haiku 5.5 等），**按 5 小时/周/月的请求数窗口限额，不按 token 扣费**——适合把便宜的批量任务（如 explore 子代理）放到这条车道。
 
-- **Key 获取**：在 [console.opencode.ai](https://console.opencode.ai) 生成，`export OPENCODE_API_KEY=...`（或写 `providers.opencode.api_key`）。
+- **Key 获取**：在 [console.opencode.ai](https://console.opencode.ai) 生成，`export OPENCODE_API_KEY=...`（或写 `providers.opencode.api_key`，首启向导也可直接选 OpenCode 粘贴）。
 - **端点**：`https://opencode.ai/inference/go/v1/chat/completions`（OpenAI 兼容；`--base-url` 可覆盖）。
 - **默认模型**：`deepseek-v4.1-flash`（模型 id 以 [官方列表](https://opencode.ai/docs/console/models) 为准；接口下线/改名时用 `--model` 指定）。
 - **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺少这两个头的请求可能退化成按 token 扣账户余额。
