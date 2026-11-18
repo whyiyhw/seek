@@ -1,5 +1,7 @@
 package routines
 
+import "context"
+
 // Notifier is the cross-platform OS notification primitive.
 // Production callers use the package-level DefaultNotifier
 // (set per build tag in notify_{darwin,linux,windows,other}.go);
@@ -13,6 +15,18 @@ package routines
 // notification in headless server" — the user loses the popup,
 // not the data.
 type Notifier func(title, body string) error
+
+// SpeakerDispatcher is the optional TTS-broadcast sibling of Notifier
+// (feature-deepseek-app-api §4.3 card V1a — "任务完成播报"): same
+// (event, title, body) payload and best-effort posture as
+// WebhookDispatcher, so a speech sink subscribes to terminal events
+// exactly like a webhook target. A plain func type next to the Notifier
+// it extends (webhook.go carries the webhook family; speech is its own)
+// — and deliberately with NO TTS machinery here: routines never
+// imports the synth stack; the production adapter comes from the
+// caller (Go func types match structurally), nil = no speech. The
+// adapter owns its own throttling.
+type SpeakerDispatcher func(ctx context.Context, event, title, body string)
 
 // shouldNotify decides whether to dispatch a notification for
 // the (job, terminal-status) pair. Pure function — kept here

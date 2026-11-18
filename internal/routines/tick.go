@@ -159,6 +159,15 @@ type TickOptions struct {
 	// Job.Notify — the desktop popup and the remote channel are
 	// orthogonal knobs (§D4).
 	Webhook WebhookDispatcher
+
+	// Speaker is the optional TTS-broadcast sibling of Notifier and
+	// Webhook (feature-deepseek-app-api §4.3 V1a — "任务完成播报"):
+	// terminal events are ALSO spoken through local audio, the same
+	// away-from-the-screen audience webhooks serve. Same posture as
+	// Webhook: fires INDEPENDENT of Job.Notify, best-effort, never
+	// touches the run record. nil → no speech (the default; the
+	// adapter owns its own per-minute throttle).
+	Speaker SpeakerDispatcher
 }
 
 func (o *TickOptions) now() time.Time {
@@ -300,13 +309,14 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 	runTimeout := opts.runTimeout()
 	notifier := opts.notifier()
 	webhook := opts.Webhook
+	speaker := opts.Speaker
 
 	var wg sync.WaitGroup
 	for _, j := range due {
 		wg.Add(1)
 		go func(j Job) {
 			defer wg.Done()
-			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn, notifier, webhook)
+			runOne(ctx, store, tp.runsDir, tp.cronDir, j, now, runTimeout, subFn, notifier, webhook, speaker)
 		}(j)
 	}
 	wg.Wait()
@@ -317,7 +327,7 @@ func Tick(ctx context.Context, store *Store, opts TickOptions) (TickResult, erro
 	// the rest, and the directory-listing error is the only
 	// thing that bubbles up (rare — ENOENT degrades silently).
 	triggersDir := filepath.Join(tp.cronDir, "triggers")
-	if dispatched, terr := processTriggers(ctx, triggersDir, tp.runsDir, now, subFn, notifier, webhook); terr != nil {
+	if dispatched, terr := processTriggers(ctx, triggersDir, tp.runsDir, now, subFn, notifier, webhook, speaker); terr != nil {
 		fmt.Fprintf(os.Stderr, "routines: triggers: %v\n", terr)
 	} else {
 		res.TriggersDispatched = dispatched
@@ -379,7 +389,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 	if err != nil {
 		return err
 	}
-	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess(), opts.notifier(), opts.Webhook)
+	runOne(parentCtx, store, tp.runsDir, tp.cronDir, job, opts.now(), opts.runTimeout(), opts.subprocess(), opts.notifier(), opts.Webhook, opts.Speaker)
 	return nil
 }
 
@@ -392,7 +402,7 @@ func RunOne(parentCtx context.Context, store *Store, name string, opts TickOptio
 //     prior fire; skip silently.
 //   - lock acquire I/O error → log to stderr, skip; don't crash
 //     the whole tick.
-func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) {
+func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, job Job, ranAt time.Time, timeout time.Duration, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher, speaker SpeakerDispatcher) {
 	jobLockPath := filepath.Join(runsDir, job.Name+".lock")
 	jobLock, ok, err := TryLock(jobLockPath)
 	if err != nil {
@@ -556,6 +566,12 @@ func runOne(parentCtx context.Context, store *Store, runsDir, cronDir string, jo
 	// touches the already-written run record.
 	if webhook != nil {
 		webhook(parentCtx, "cron."+terminalStatus, title, terminalNote)
+	}
+	// Speech broadcast — the third sibling, same posture as webhook
+	// (feature-deepseek-app-api §4.3 V1a): independent of Job.Notify,
+	// best-effort, the adapter owns throttling and failure handling.
+	if speaker != nil {
+		speaker(parentCtx, "cron."+terminalStatus, title, terminalNote)
 	}
 
 	_ = cronDir // reserved for triggers/ dispatcher (M11.3 follow-up)
