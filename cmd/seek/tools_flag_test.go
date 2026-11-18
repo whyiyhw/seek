@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -237,6 +238,13 @@ func buildSeekBin(t *testing.T) string {
 		}
 		seekBinDir = dir
 		out := filepath.Join(dir, "seek-e2e")
+		if runtime.GOOS == "windows" {
+			// CreateProcess only executes files carrying a known
+			// extension (.exe); an extensionless path fails as
+			// "executable file not found in %PATH%" even though go
+			// build wrote the file (2026-11-18 nightly).
+			out += ".exe"
+		}
 		cmd := exec.Command("go", "build", "-o", out, ".")
 		cmd.Dir = "." // package main lives here
 		if buf, err := cmd.CombinedOutput(); err != nil {

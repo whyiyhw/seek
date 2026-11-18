@@ -1806,6 +1806,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: "stream a kill-able child's stdout" has one sound shape: `cmd.Stdout = io.Writer` + your own pipe/reader with close-after-Wait choreography; StdoutPipe is read-then-wait only, and line readers with token caps don't fit JSONL of unbounded line length.
 - **Refs**: `internal/controlplane/executor.go` `attempt` / `streamSink`; `docs/prd/feature-web-frontend.md` §2.4.
 
+### exec'ing an extensionless go build output fails on Windows as "not found" — CreateProcess needs the .exe name
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: every `TestToolsFlagE2E_*` died with `exec: "C:\...\seek-e2e-bin-…\seek-e2e": executable file not found in %PATH%` — though `go build -o` had just written that exact path.
+- **Why**: Windows CreateProcess (under os/exec) only executes files carrying a known extension; for an extensionless path it searches for `<path>.exe` and reports ENOENT. `go build -o <name>` writes the file under exactly `<name>` (no suffix added), so the artifact exists but is unexecutable by that name.
+- **Fix**: `buildSeekBin` (cmd/seek/tools_flag_test.go) appends `.exe` when `runtime.GOOS == "windows"`; card c_45npoi.
+- **Lesson**: any test/helper that builds-and-execs a helper binary must derive BOTH the `-o` target and the exec path from one `runtime.GOOS`-aware name. Green on macOS/Linux says nothing about this class — it only ever fires on the Windows CI lane.
+- **Refs**: `cmd/seek/tools_flag_test.go` `buildSeekBin`
+
 ## Web frontend / asset plane
 
 ### session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message
@@ -1895,6 +1902,18 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Why**: browsers gate `getUserMedia` (and `crypto.randomUUID`'s absence already forced the page's manual uuid fallback) behind a secure context — localhost is one by definition, a `100.x.y.z` host over http is not; `--tcp` forwarding never terminates TLS.
 - **Fix**: the page detects it (`micAvailable()`) and disables the button with the reason; deployment note in `seek serve --help` + PRD §4.3: remote mic needs an HTTPS front (`tailscale serve` proxy mode), not `--tcp`; commit with card `c_f6ayyg`.
 - **Lesson**: browser-capability surfaces (mic/camera/notifications) die silently on non-localhost plain http — when the documented remote-access posture is a TCP forward, the same feature needs an https-front variant or a visible "unavailable here" state, never a mystery.
+
+### strings.Contains on a RAW JSON frame can never match a Windows path or angle bracket — needles need the escaped spelling too
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_CommandE2E` failed as `default frame …"text":"候选项目：\n• C:\\Users\\RUNNER~1\\…\\001…"} lacks "C:\\Users\\RUNNER~1\\…\\001"` — needle and haystack PRINT identically in the failure message.
+- **Why**: the assertion runs `strings.Contains` against the raw SSE data line (Go-marshalled JSON, never decoded), where `\` rides doubled and `<`/`>`/`&` as `\u003c`-class escapes. A verbatim needle containing either can only match after the same escaping — on `/`-path platforms the bug is invisible because `/` and CJK need no escaping (the old "/bind usage" test had hand-avoided `<` for exactly this reason).
+- **Fix**: `containsFrameText` (webfrontend_cmd_test.go) tries the verbatim needle, then its `json.Marshal`-escaped form (quotes stripped); `TestContainsFrameText` builds a Windows-shaped frame with the same Marshal so `/`-path lanes exercise it; card c_45npoi.
+- **Lesson**: asserting substrings against marshalled-JSON wire text is only portable through an escaping-aware matcher — or decode the frame first. Any new raw-frame assertion helper must go through `containsFrameText`, not bare `strings.Contains`.
+
+### go:embed serves the WORKING-TREE bytes — a Windows autocrlf checkout drifts a hash-pinned embedded asset
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_AssetHashPinned` reported `got: f3415179… want: b4323190…` with no code change anywhere near the page.
+- **Why**: `go:embed` bakes the bytes as they sit on disk; GitHub's windows runner defaults `core.autocrlf=true`, so checkout rewrites the LF-committed `webfrontend.html` to CRLF locally, and the embedded page (and its sha256 pin) drift. Computed locally: LF version hashes to the pin, CRLF version to exactly the CI's `got` — the file in git was never wrong.
+- **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
+- **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
 
 ## Tooling / go list
 

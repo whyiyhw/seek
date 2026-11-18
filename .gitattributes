@@ -2,3 +2,10 @@
 # would otherwise turn them CRLF, which breaks strict bash on WSL/Linux
 # — see docs/test-plan-read-tool.md §执行环境).
 *.sh text eol=lf
+# go:embed serves the WORKING-TREE bytes, and the W1.5 hash test pins
+# them (webPageSHA256 in webfrontend_static_test.go). A Windows
+# core.autocrlf checkout rewrites LF→CRLF on disk, the embedded page
+# drifts (nightly 2026-11-18: got f3415179… vs want b4323190…), and the
+# pin fails. Embedded assets must be byte-identical on every platform —
+# same rationale as the *.sh rule above.
+internal/controlplane/webfrontend.html text eol=lf
