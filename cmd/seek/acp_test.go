@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/acp"
+	"github.com/whyiyhw/seek/internal/fileroute"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -153,6 +155,7 @@ func TestImageExtForMime(t *testing.T) {
 
 func TestBuildACPPromptText(t *testing.T) {
 	vroute := visionRouter{assetsDir: t.TempDir()}
+	froute := fileroute.Router{} // no client → document refs degrade to lane notes
 	png := base64.StdEncoding.EncodeToString([]byte("fake png bytes"))
 
 	img := func(data, mime string) acp.ContentBlock {
@@ -160,7 +163,8 @@ func TestBuildACPPromptText(t *testing.T) {
 	}
 	txt := func(s string) acp.ContentBlock { return acp.ContentBlock{Type: "text", Text: s} }
 	build := func(model string, blocks ...acp.ContentBlock) (string, []deepseek.ImagePart) {
-		return buildACPPromptText(model, acp.PromptParams{Prompt: blocks}, vroute)
+		got, parts, _ := buildACPPromptText(context.Background(), model, acp.PromptParams{Prompt: blocks}, vroute, froute)
+		return got, parts
 	}
 
 	if got, parts := build(deepseek.ModelV41Flash, txt("hi")); got != "hi" || parts != nil {
@@ -195,5 +199,31 @@ func TestBuildACPPromptText(t *testing.T) {
 	// Non-image mimeType → skipped.
 	if got, parts := build(deepseek.ModelV41Flash, txt("keep"), img(png, "application/pdf")); got != "keep" || parts != nil {
 		t.Fatalf("non-image mime must be skipped: %q %v", got, parts)
+	}
+}
+
+// TestBuildACPPromptText_FileRefs: a document reference typed into the
+// ACP prompt text routes through the file router (feature-deepseek-
+// app-api F3) — here with no client, so the lane note lands in-band
+// and no parts ride.
+func TestBuildACPPromptText_FileRefs(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "report.pdf")
+	if err := os.WriteFile(doc, []byte("%PDF-1.4"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	froute := fileroute.Router{} // no client → lane note; assetsDir never reached
+
+	got, images, files := buildACPPromptText(context.Background(), deepseek.ModelV41Flash,
+		acp.PromptParams{Prompt: []acp.ContentBlock{{Type: "text", Text: "read @" + doc}}},
+		visionRouter{assetsDir: t.TempDir()}, froute)
+	if !strings.HasPrefix(got, "read @"+doc) {
+		t.Fatalf("original text must be preserved: %q", got)
+	}
+	if !strings.Contains(got, "[file: report.pdf — 文件输入需 DeepSeek 车道") {
+		t.Fatalf("lane note missing: %q", got)
+	}
+	if len(images) != 0 || len(files) != 0 {
+		t.Fatalf("no client → no parts: %+v %+v", images, files)
 	}
 }

@@ -82,3 +82,85 @@ func TestDetect_ImageExtIsNotDocRef(t *testing.T) {
 		t.Fatalf("image extension must not be a document reference, got %v", got)
 	}
 }
+
+// TestDetectRefs_RichPrefix: "@rich:report.pdf" upgrades the upload
+// purpose (D-F1); the prefix is stat-gated like everything else, and
+// plain + rich forms of the same file in one message dedup to the
+// first occurrence's flag.
+func TestDetectRefs_RichPrefix(t *testing.T) {
+	doc := writeDoc(t, "report.pdf")
+
+	// Plain form → Rich=false.
+	refs := DetectRefs("read " + doc)
+	if len(refs) != 1 || refs[0].Path != doc || refs[0].Rich {
+		t.Fatalf("plain: %+v", refs)
+	}
+
+	// @rich: form → same path, Rich=true.
+	refs = DetectRefs("read @rich:" + doc)
+	if len(refs) != 1 || refs[0].Path != doc || !refs[0].Rich {
+		t.Fatalf("rich: %+v", refs)
+	}
+
+	// Wrapped + punctuated rich ref still resolves.
+	refs = DetectRefs("see (@rich:" + doc + "),")
+	if len(refs) != 1 || refs[0].Path != doc || !refs[0].Rich {
+		t.Fatalf("wrapped rich: %+v", refs)
+	}
+
+	// @rich: on a non-existent path is not a reference (stat gate).
+	refs = DetectRefs("read @rich:/nope/missing.pdf")
+	if len(refs) != 0 {
+		t.Fatalf("missing rich target must not detect: %+v", refs)
+	}
+
+	// First occurrence wins: plain-then-rich and rich-then-plain both
+	// dedup to one ref carrying the FIRST form's flag.
+	refs = DetectRefs(doc + " and @rich:" + doc)
+	if len(refs) != 1 || refs[0].Rich {
+		t.Fatalf("plain-first: %+v", refs)
+	}
+	refs = DetectRefs("@rich:" + doc + " and " + doc)
+	if len(refs) != 1 || !refs[0].Rich {
+		t.Fatalf("rich-first: %+v", refs)
+	}
+
+	// A file literally named "rich:x.pdf" (relative token, the whole
+	// token IS the path) keeps working: the prefix only binds when the
+	// remainder stats as a document — which here it doesn't, so the
+	// token itself is tried verbatim.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rich:x.pdf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldWd) }()
+	refs = DetectRefs("open rich:x.pdf")
+	if len(refs) != 1 || refs[0].Path != "rich:x.pdf" || refs[0].Rich {
+		t.Fatalf("literal rich-named file: %+v", refs)
+	}
+}
+
+// TestDetect_DetectRefsAgreement: Detect is the projection of
+// DetectRefs — same order, same paths.
+func TestDetect_DetectRefsAgreement(t *testing.T) {
+	a := writeDoc(t, "a.pdf")
+	b := writeDoc(t, "b.docx")
+	text := "first " + a + " then @rich:" + b + " then " + a
+	refs := DetectRefs(text)
+	paths := Detect(text)
+	if len(refs) != 2 || len(paths) != 2 {
+		t.Fatalf("refs=%v paths=%v", refs, paths)
+	}
+	for i := range refs {
+		if refs[i].Path != paths[i] {
+			t.Fatalf("disagreement at %d: %+v vs %v", i, refs[i], paths)
+		}
+	}
+}

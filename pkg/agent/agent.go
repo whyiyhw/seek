@@ -477,6 +477,16 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 // images are unaffected (variadic keeps every existing call site
 // source-compatible).
 func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.ImagePart) <-chan Event {
+	return a.PromptFiles(ctx, userText, images, nil)
+}
+
+// PromptFiles is Prompt with document parts joined on the same user
+// message (feature-deepseek-app-api F3): images and files are sibling
+// attachment families, legal on user messages only. Prompt keeps its
+// variadic signature for every existing caller; this slice-shaped
+// sibling is the one new attachment surfaces route through (Go allows
+// only one variadic, so the sibling is the non-breaking shape).
+func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deepseek.ImagePart, files []deepseek.FilePart) <-chan Event {
 	out := make(chan Event, 32)
 
 	go func() {
@@ -510,6 +520,9 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 		}
 		if len(images) > 0 {
 			userMsg.Images = images
+		}
+		if len(files) > 0 {
+			userMsg.Files = files
 		}
 		a.appendMessage(userMsg)
 		out <- AgentStart{}

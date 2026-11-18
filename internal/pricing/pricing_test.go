@@ -450,3 +450,32 @@ func TestTTSCost(t *testing.T) {
 		t.Errorf("FormatCost(TTSCost(200)) = %q, want $0.0090", s)
 	}
 }
+
+// TestParseCost prices the Files-API document parsing: $0.225 per 1,000
+// pages (zh page ¥1.5/千页, PRD feature-deepseek-app-api §6 row 3), billed
+// once at upload off the page count the FileObject RETURNED.
+func TestParseCost(t *testing.T) {
+	if got := ParseCost(1000); math.Abs(got-0.225) > 1e-12 {
+		t.Errorf("ParseCost(1000) = %v, want 0.225 per 1k pages", got)
+	}
+	if got := ParseCost(1); math.Abs(got-0.225/1000) > 1e-12 {
+		t.Errorf("ParseCost(1) = %v, want 0.225/1000", got)
+	}
+	// A thick document parses for well under a cent — the F3 router's
+	// per-submit line item.
+	if got := ParseCost(34); math.Abs(got-34*0.225/1000) > 1e-12 {
+		t.Errorf("ParseCost(34) = %v, want 34×0.225/1000", got)
+	}
+	// Server omitted the page count / upload failed → nothing billable;
+	// a stray negative must not pay out.
+	if got := ParseCost(0); got != 0 {
+		t.Errorf("ParseCost(0) = %v, want 0", got)
+	}
+	if got := ParseCost(-2); got != 0 {
+		t.Errorf("ParseCost(-2) = %v, want 0", got)
+	}
+	// Sub-cent band: one document must render visibly, not round away.
+	if s := FormatCost(ParseCost(34)); s != "$0.0076" {
+		t.Errorf("FormatCost(ParseCost(34)) = %q, want $0.0076", s)
+	}
+}

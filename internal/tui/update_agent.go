@@ -287,7 +287,28 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		text, images = m.opts.ExpandInput(m.opts.Model, text)
 	}
 
-	ch := m.opts.Agent.Prompt(ctx, text, images...)
+	// feature-deepseek-app-api F3: route document references at the
+	// same submit station, one step after images (file markers append
+	// after image markers). The hook uploads inline — the parse fee
+	// and file_id settle before the prompt leaves; it never errors.
+	var files []deepseek.FilePart
+	if m.opts.ExpandFiles != nil {
+		text, files = m.opts.ExpandFiles(ctx, m.opts.Model, text)
+	}
+
+	var ch <-chan agent.Event
+	if len(files) > 0 {
+		// Optional sibling interface (see filePrompter): a fake agent
+		// without document support still compiles; its files (which
+		// its tests never produce) simply don't ride.
+		if fp, ok := m.opts.Agent.(filePrompter); ok {
+			ch = fp.PromptFiles(ctx, text, images, files)
+		} else {
+			ch = m.opts.Agent.Prompt(ctx, text, images...)
+		}
+	} else {
+		ch = m.opts.Agent.Prompt(ctx, text, images...)
+	}
 	m.stream = ch
 
 	printUser := renderUserBlock(text, m.width)

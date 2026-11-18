@@ -37,6 +37,7 @@ import (
 	"github.com/whyiyhw/seek/internal/clipimage"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/controlplane"
+	"github.com/whyiyhw/seek/internal/fileroute"
 	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -1909,6 +1910,12 @@ func run() error {
 	// (print, TUI, ACP) so capability decisions are byte-identical.
 	vroute := newVisionRouter(abs)
 
+	// The submit-time document router, same three entries
+	// (feature-deepseek-app-api F3). dsClient is nil on non-DeepSeek
+	// lanes — the router then degrades every reference to an in-band
+	// lane note instead of uploading.
+	froute := fileroute.New(dsClient, abs, tracker)
+
 	// Register the plan + propose tools AFTER agent.New so both Sinks
 	// can route into ag.EmitEvent. Same deferred-registration pattern
 	// as memorytool.NewObserve below (the Registry's tool list isn't
@@ -2136,10 +2143,12 @@ func run() error {
 	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
 	// feature-vision: pasted image blocks route through the same
 	// submit-time vision router as the TUI (native attach / switch note).
+	// feature-deepseek-app-api F3: document references in the prompt
+	// text route through the same submit-time file router as the TUI.
 	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
 	// initialPref above — nothing to flip here.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), policy)
+		return runACP(ctx, ag, newVisionRouter(abs), froute, policy)
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2172,10 +2181,14 @@ func run() error {
 		// vision model attaches bytes natively, anything else gets an
 		// in-band switch-model note. Never errors (M-V.2).
 		text, imageParts := vroute.route(ag.Model(), text)
+		// feature-deepseek-app-api F3: route document references at
+		// the same station — copy-at-submit + eager upload + parse
+		// fee, every failure in-band. Never errors.
+		text, fileParts := froute.Route(ctx, ag.Model(), text)
 		if *jsonOut {
-			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
+			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
 		}
-		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
+		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
@@ -2334,6 +2347,7 @@ func run() error {
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
 		ExpandInput:           vroute.route,
+		ExpandFiles:           froute.Route,
 		GoalJudge:             goalJudge,
 		ResumeGoal:            resumeGoal,
 		GrabImage:             grabImage,
@@ -2488,7 +2502,7 @@ func stdinIsPiped() bool {
 // tool indicators + stats footer to stderr. Suitable for piping.
 // The session is saved after every TurnEnd so a crash or interrupt
 // mid-run preserves progress up to the last completed turn.
-func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
 	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
@@ -2528,7 +2542,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		}
 	}
 
-	for ev := range ag.Prompt(ctx, text, images...) {
+	for ev := range ag.PromptFiles(ctx, text, images, files) {
 		switch e := ev.(type) {
 		case agent.MessageDelta:
 			if !gotFirst {
@@ -2646,7 +2660,7 @@ type jsonLine struct {
 // runJSON is the machine-readable output mode: one JSON object per line
 // on stdout. Human-readable diagnostics (tier, stats footer) go to
 // stderr so stdout stays parse-clean.
-func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store) error {
 	enc := json.NewEncoder(os.Stdout)
 
 	emit := func(line jsonLine) {
@@ -2681,7 +2695,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 
 	emit(jsonLine{Type: "agent_start", Model: model})
 
-	for ev := range ag.Prompt(ctx, text, images...) {
+	for ev := range ag.PromptFiles(ctx, text, images, files) {
 		switch e := ev.(type) {
 
 		case agent.TurnStart:
@@ -2846,7 +2860,8 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 // event channel out as ACP session/update notifications.
 type acpBackend struct {
 	ag     *agent.Agent
-	route  visionRouter // feature-vision: submit-time image router
+	route  visionRouter     // feature-vision: submit-time image router
+	froute fileroute.Router // feature-deepseek-app-api F3: submit-time document router
 	policy *permission.Policy
 }
 
@@ -2884,9 +2899,13 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 // an ACP session/prompt: the text blocks, plus one in-band marker block
 // per image content block — native attach on vision models, a
 // switch-model note otherwise (feature-vision M-V.2, replacing the
-// 柱 Q OCR path). Corrupt base64 / unhandled mimeType degrade silently
-// (the block is skipped). Pure (no agent) so it's unit-testable.
-func buildACPPromptText(model string, p acp.PromptParams, vroute visionRouter) (string, []deepseek.ImagePart) {
+// 柱 Q OCR path). Document references in the text then route through
+// the file router (feature-deepseek-app-api F3) — copy-at-submit +
+// eager upload, every failure in-band. Corrupt base64 / unhandled
+// mimeType degrade silently (the block is skipped). The upload needs
+// a context, so this is the one impure seam; it still touches no agent
+// state and stays unit-testable.
+func buildACPPromptText(ctx context.Context, model string, p acp.PromptParams, vroute visionRouter, froute fileroute.Router) (string, []deepseek.ImagePart, []deepseek.FilePart) {
 	text := p.PromptText()
 	var parts []deepseek.ImagePart
 	for _, blk := range p.ImageBlocks() {
@@ -2907,7 +2926,8 @@ func buildACPPromptText(model string, p acp.PromptParams, vroute visionRouter) (
 			parts = append(parts, part)
 		}
 	}
-	return text, parts
+	text, files := froute.Route(ctx, model, text)
+	return text, parts, files
 }
 
 // imageExtForMime maps an ACP image block's mimeType to a file extension
@@ -2935,11 +2955,11 @@ func imageExtForMime(m string) string {
 }
 
 func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
-	text, images := buildACPPromptText(b.ag.Model(), p, b.route)
+	text, images, files := buildACPPromptText(ctx, b.ag.Model(), p, b.route, b.froute)
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
-	for ev := range b.ag.Prompt(ctx, text, images...) {
+	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
 			return acp.PromptResult{}, e.Err
 		}
@@ -3032,7 +3052,7 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 // logging goes to stderr. pol is the shared permission policy the whole
 // tool registry was built on; session/new re-anchors it to the client's
 // cwd (D-1).
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, pol *permission.Policy) error {
+func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -3048,7 +3068,7 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, pol *perm
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute, policy: pol}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute, froute: froute, policy: pol}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace
