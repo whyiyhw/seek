@@ -67,6 +67,63 @@ type NewSessionParams struct {
 
 type NewSessionResult struct {
 	SessionID string `json:"sessionId"`
+	// ConfigOptions is the session-scoped configuration menu (model
+	// selector). Non-nil ⇒ ACP clients (paseo) render a model dropdown
+	// and may follow up with session/set_config_option; nil/null ⇒ the
+	// client filters the session-configure capability and shows nothing
+	// (the pre-C behaviour). Wire shape reverse-engineered from the
+	// @agentclientprotocol/sdk schema + the zcode-acp-server reference
+	// bridge; see SetConfigOptionParams for the switch direction.
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
+// ConfigOption is one entry of the session configuration menu carried on
+// session/new (and echoed back, with an updated CurrentValue, on every
+// session/set_config_option response). Schema: SessionConfigOption with
+// the select variant flattened — id/name/description/category plus
+// type:"select" with currentValue/options inlined on the same object.
+// seek deliberately serves ONLY the select variant: the boolean variant
+// (an on/off toggle) exists in the schema but nothing in seek needs it,
+// and a client sending one would fail SetConfigOptionParams decoding
+// (loud, by design) rather than half-work.
+type ConfigOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Category is UX-only metadata ("model" groups it with model pickers
+	// in client UIs; the zcode bridge uses the same category string).
+	Category     string               `json:"category,omitempty"`
+	Type         string               `json:"type"` // "select"
+	CurrentValue string               `json:"currentValue"`
+	Options      []ConfigSelectOption `json:"options"`
+}
+
+// ConfigSelectOption is one selectable value of a select-type
+// ConfigOption. Value is the wire id echoed back by the client in
+// session/set_config_option; Name is the human label.
+type ConfigSelectOption struct {
+	Value string `json:"value"`
+	Name  string `json:"name"`
+}
+
+// SetConfigOptionParams is the request the client sends when the user
+// picks a value in the config dropdown. Schema: sessionId + configId +
+// a value that is a BARE STRING for select-type options (no "type"
+// field on the wire — the string variant is the default when type is
+// absent). seek's multi-provider model menu encodes the choice as
+// "<provider>:<model>" (e.g. "glm:glm-5.3"); the cmd/seek backend owns
+// the parsing.
+type SetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
+// SetConfigOptionResult must carry the FULL option set with the new
+// CurrentValue — the schema marks configOptions required on this
+// response, and clients re-render their dropdown from it (a partial
+// echo would blank the menu).
+type SetConfigOptionResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
 }
 
 type ContentBlock struct {
@@ -118,6 +175,11 @@ type Backend interface {
 	// becomes a session/update notification) and returns when the turn
 	// ends or ctx is cancelled.
 	Prompt(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
+	// SetConfigOption applies a dropdown pick (session/set_config_option).
+	// The server only calls it between turns — a prompt in flight gets the
+	// request rejected in dispatch — so implementations may swap turn-lane
+	// state (the model/provider) without locks against concurrent turns.
+	SetConfigOption(p SetConfigOptionParams) (SetConfigOptionResult, error)
 }
 
 // Server speaks ACP over r/w to a single client.
@@ -174,7 +236,53 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 		}
 		s.reply(req.ID, res)
 	case "session/prompt":
-		go s.handlePrompt(ctx, req)
+		// Parse + cancel registration happen SYNCHRONOUSLY here, before
+		// the goroutine is spawned. That ordering is what makes the
+		// set_config_option lane-swap below race-free: the read loop is
+		// serial, so by the time a later dispatch runs, this prompt is
+		// either visible in s.cancels (swap rejected) or its goroutine
+		// was created after the swap completed — and the `go` statement
+		// is a happens-before edge, so the turn is guaranteed to see the
+		// swapped lane state. Registration used to live inside
+		// handlePrompt; moving it here closed the spawn-to-register
+		// window (feature-paseo-provider.md C).
+		var p PromptParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			s.replyErr(req.ID, -32602, "bad prompt params: "+err.Error())
+			return
+		}
+		pctx, cancel := context.WithCancel(ctx)
+		s.mu.Lock()
+		s.cancels[p.SessionID] = cancel
+		s.mu.Unlock()
+		go s.handlePrompt(pctx, req, p, cancel)
+	case "session/set_config_option":
+		var p SetConfigOptionParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			// Only the select variant is served (see SetConfigOptionParams)
+			// — a boolean payload (type:"boolean", value:true) fails here,
+			// loudly, instead of being half-applied.
+			s.replyErr(req.ID, -32602, "bad config option params: "+err.Error())
+			return
+		}
+		// Model/provider swaps are between turns only: any prompt in
+		// flight (its cancel is registered) rejects the switch. The check
+		// is under mu for the same race argument as above — a prompt
+		// registered after this point was spawned after dispatch returns,
+		// hence sees the post-swap state by construction.
+		s.mu.Lock()
+		busy := len(s.cancels) > 0
+		s.mu.Unlock()
+		if busy {
+			s.replyErr(req.ID, -32000, "config change rejected: a prompt is in flight (switch models between turns)")
+			return
+		}
+		res, err := s.backend.SetConfigOption(p)
+		if err != nil {
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		s.reply(req.ID, res)
 	case "session/cancel":
 		var p struct {
 			SessionID string `json:"sessionId"`
@@ -189,16 +297,10 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 	}
 }
 
-func (s *Server) handlePrompt(parent context.Context, req request) {
-	var p PromptParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.replyErr(req.ID, -32602, "bad prompt params: "+err.Error())
-		return
-	}
-	ctx, cancel := context.WithCancel(parent)
-	s.mu.Lock()
-	s.cancels[p.SessionID] = cancel
-	s.mu.Unlock()
+// handlePrompt is the prompt goroutine body. Params were parsed and the
+// cancel registered synchronously in dispatch (see the race note there);
+// this func owns the turn itself plus deregistration.
+func (s *Server) handlePrompt(ctx context.Context, req request, p PromptParams, cancel context.CancelFunc) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.cancels, p.SessionID)

@@ -971,6 +971,33 @@ func run() error {
 		return printSessionList(store)
 	}
 
+	// `seek acp` lane marker, hoisted to the very top of the shared
+	// init (it used to live just before initialPref) because the ACP
+	// provider/model pins below must land BEFORE buildProvider runs.
+	// flag.Parse treats "acp" as a positional and stops there, so no
+	// command-line flag can ever reach this lane — same story as
+	// SEEK_ACP_YOLO (feature-paseo-provider.md §3.3–3.4).
+	acpLane := len(os.Args) >= 2 && os.Args[1] == "acp"
+	if acpLane {
+		// Startup pins for the lane's provider/model. Precedence is
+		// flag (unreachable here, the guard is belt-and-braces) > env >
+		// buildProvider auto-detect. Embedding hosts (paseo provider
+		// entries) set these per entry the same way they pin
+		// ZCODE_PROVIDER on the zcode bridge. A pinned provider also
+		// suppresses the first-run wizard below — a headless spawn must
+		// never sit in an interactive paste prompt.
+		if *providerFlag == "" {
+			if p, _ := acp.ProviderModelFromEnv(os.Getenv); p != "" {
+				*providerFlag = p
+			}
+		}
+		if *model == "" {
+			if _, m := acp.ProviderModelFromEnv(os.Getenv); m != "" {
+				*model = m
+			}
+		}
+	}
+
 	// First-run setup wizard. Only fires when there's truly no auth
 	// anywhere (env + config both empty) AND stdin is a TTY (otherwise
 	// scripts get an honest error instead of a hung interactive prompt).
@@ -1069,10 +1096,9 @@ func run() error {
 			*plan = loaded.Plan
 		}
 	}
-	// `seek acp` (v7 柱 P). Hoisted here because the ACP lane needs it
-	// before initialPref resolves (SEEK_ACP_YOLO below); the actual
+	// acpLane is declared near the top of the shared init (before
+	// buildProvider) so the env pins land in time; the actual ACP
 	// short-circuit sits further down, after the agent is up.
-	acpLane := len(os.Args) >= 2 && os.Args[1] == "acp"
 	// Print mode (-p / piped stdin) can't realistically interrupt to
 	// ask, so it stays in Deny preference unless --yolo is explicit.
 	// The TUI path overrides to Ask further down so per-call approval
@@ -2153,9 +2179,11 @@ func run() error {
 	// feature-deepseek-app-api F3: document references in the prompt
 	// text route through the same submit-time file router as the TUI.
 	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
-	// initialPref above — nothing to flip here.
+	// initialPref above — nothing to flip here. The model menu is built
+	// from the startup lane (*model already carries the env pin / loaded
+	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), froute, policy)
+		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model))
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2871,6 +2899,19 @@ type acpBackend struct {
 	route  visionRouter     // feature-vision: submit-time image router
 	froute fileroute.Router // feature-deepseek-app-api F3: submit-time document router
 	policy *permission.Policy
+	// menu is the configOptions model select (nil ⇒ the client filters
+	// the dropdown away, pre-C behaviour). Built once at startup from
+	// the startup lane; SetConfigOption rewrites CurrentValue in place.
+	// Only touched from the transport's serial read loop (dispatch), so
+	// no lock — prompt goroutines never read it.
+	menu []acp.ConfigOption
+	// laneFor builds a provider lane on demand — a closure over
+	// buildProvider so the switch path and the startup path share one
+	// source of truth for keys/endpoints/defaults.
+	laneFor func(provider string) (llm.Provider, *deepseek.Client, string, error)
+	// sessionID is the single live session ("one seek process = one
+	// session"); anchored by NewSession, checked by SetConfigOption.
+	sessionID string
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2892,15 +2933,136 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // policy, so read/edit/write/bash (policy-anchored) and
 // git/grep/list_dir (process-anchored) all follow. The sessionId
 // becomes the project name (directory base) — the fixed "seek" id
-// pre-D-1 carried no information. Empty cwd keeps the current
+// pre-D1 carried no information. Empty cwd keeps the current
 // directory (Zed-equivalent, a behavioural no-op under Zed).
+// Since C, the result also carries the model configOptions menu —
+// a non-nil menu is what makes ACP clients render the dropdown.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
 	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
 	if err != nil {
 		return acp.NewSessionResult{}, err
 	}
+	b.sessionID = anchor.Name
 	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s\n", anchor.Abs, anchor.ProjectID)
-	return acp.NewSessionResult{SessionID: anchor.Name}, nil
+	return acp.NewSessionResult{SessionID: anchor.Name, ConfigOptions: b.menu}, nil
+}
+
+// SetConfigOption applies a model-dropdown pick. configId "model" is
+// the only option seek serves; value ids are "<provider>:<model>"
+// (acpModelMenu). The transport rejects the request while a prompt is
+// in flight (internal/acp dispatch — see the happens-before note
+// there), so the lane swap below races nothing.
+func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfigOptionResult, error) {
+	if b.sessionID == "" || p.SessionID != b.sessionID {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown session %q", p.SessionID)
+	}
+	if p.ConfigID != "model" {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown config id %q (only \"model\" is served)", p.ConfigID)
+	}
+	if len(b.menu) != 1 || b.menu[0].ID != "model" {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("model selection unavailable on this session (no model menu was served)")
+	}
+	// Only advertised values are accepted — a client echoing a stale or
+	// hand-crafted id gets a loud error instead of a lane that dies at
+	// the next API call.
+	known := false
+	for _, o := range b.menu[0].Options {
+		if o.Value == p.Value {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown model value %q", p.Value)
+	}
+	prov, model, ok := strings.Cut(p.Value, ":")
+	if !ok {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("malformed model value %q (want \"provider:model\")", p.Value)
+	}
+	provider, dsClient, _, err := b.laneFor(prov)
+	if err != nil {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("switch to %s: %w", prov, err)
+	}
+	b.ag.SetLane(provider, dsClient, model)
+	b.menu[0].CurrentValue = p.Value
+	fmt.Fprintf(os.Stderr, "acp: model switched provider=%s model=%s\n", prov, model)
+	return acp.SetConfigOptionResult{ConfigOptions: b.menu}, nil
+}
+
+// acpLaneModels is the ACP model dropdown's curated table — the
+// multi-provider analogue of the TUI /model picker's list (internal/tui
+// commands.go knownModelsForProvider). Deliberately a separate table,
+// same decoupling as the TUI's: dropdown rows and terminal picker rows
+// serve different surfaces and evolve at their own pace. Keep the model
+// IDs in lockstep with that list (and pricing's constants) when either
+// changes — the dropdown must never offer an id the lane can't serve.
+var acpLaneModels = []struct {
+	provider string
+	models   []struct{ id, label string }
+}{
+	{"deepseek", []struct{ id, label string }{
+		{deepseek.ModelV41Flash, "deepseek-flash (V4.1-Flash)"},
+	}},
+	{"anthropic", []struct{ id, label string }{
+		{"claude-sonnet-4-20250514", "claude-sonnet-4 (Anthropic)"},
+		{"claude-3-5-sonnet-20241022", "claude-3.5-sonnet (Anthropic)"},
+	}},
+	{"openai", []struct{ id, label string }{
+		{"gpt-4o", "gpt-4o (OpenAI)"},
+		{"gpt-4o-mini", "gpt-4o-mini (OpenAI)"},
+	}},
+	{"gemini", []struct{ id, label string }{
+		{"gemini-2.0-flash", "gemini-2.0-flash (Gemini)"},
+		{"gemini-1.5-pro", "gemini-1.5-pro (Gemini)"},
+	}},
+	{"glm", []struct{ id, label string }{
+		{pricing.ModelGLM53, "glm-5.3 (GLM)"},
+	}},
+	{"opencode", []struct{ id, label string }{
+		{pricing.ModelOpenCodeV41Flash, "deepseek-v4.1-flash (OpenCode Go)"},
+	}},
+}
+
+// acpModelMenu builds the session/new configOptions model select.
+// Providers appear only when their key resolves (config.KeyFor — same
+// presence gate as buildSubagentRoutes), value ids are
+// "<provider>:<model>" so they're unique across providers and can be
+// split back without a lookup table. currentValue is matched by the
+// STARTUP model id alone — the curated ids are unique across lanes, so
+// the provider name isn't needed (and buildProvider's auto-detect
+// result isn't visible out here). A startup model outside the curated
+// set (freeform --model / env pin) yields a nil menu: a select with a
+// currentValue it doesn't list would lie to the dropdown, and the
+// client-side fallback is simply no dropdown (pre-C behaviour).
+func acpModelMenu(currentModel string) []acp.ConfigOption {
+	cfg, _ := config.Load()
+	var opts []acp.ConfigSelectOption
+	current := ""
+	for _, lane := range acpLaneModels {
+		if config.KeyFor(cfg, lane.provider) == "" {
+			continue
+		}
+		for _, m := range lane.models {
+			opts = append(opts, acp.ConfigSelectOption{
+				Value: lane.provider + ":" + m.id,
+				Name:  m.label,
+			})
+			if m.id == currentModel {
+				current = lane.provider + ":" + m.id
+			}
+		}
+	}
+	if len(opts) == 0 || current == "" {
+		return nil
+	}
+	return []acp.ConfigOption{{
+		ID:           "model",
+		Name:         "Model",
+		Category:     "model",
+		Type:         "select",
+		CurrentValue: current,
+		Options:      opts,
+	}}
 }
 
 // buildACPPromptText assembles the prompt seek's agent actually sees from
@@ -3059,8 +3221,10 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
 // logging goes to stderr. pol is the shared permission policy the whole
 // tool registry was built on; session/new re-anchors it to the client's
-// cwd (D-1).
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy) error {
+// cwd (D-1). menu is the model configOptions select (nil hides the
+// client's model dropdown); session/set_config_option swaps the agent's
+// lane between turns.
+func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy, menu []acp.ConfigOption) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -3076,7 +3240,21 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fi
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute, froute: froute, policy: pol}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{
+		ag:     ag,
+		route:  vroute,
+		froute: froute,
+		policy: pol,
+		menu:   menu,
+		// Same construction path as the startup lane: buildProvider owns
+		// key resolution and per-provider endpoints; "" baseURL keeps the
+		// pinned defaults (a passthrough --base-url can't reach this
+		// lane anyway — flags never parse past "acp").
+		laneFor: func(provider string) (llm.Provider, *deepseek.Client, string, error) {
+			p, c, _, modelDefault, err := buildProvider(provider, "", "")
+			return p, c, modelDefault, err
+		},
+	}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

@@ -178,6 +178,25 @@ func (a *Agent) SetModel(model string) {
 	a.cfg.Model = model
 }
 
+// SetLane swaps the whole provider lane — the (Provider, Client, Model)
+// triple — in one step. Provider and Client are mutually exclusive by
+// construction (nil Provider ⇒ first-class DeepSeek Client lane), so a
+// mid-provider switch (deepseek ↔ glm) must rewrite both halves together
+// or runTurn's dispatch (cfg.Provider != nil) would read a torn lane.
+// Same contract as SetModel: safe to call between (not during) turns;
+// takes effect on the next Prompt call. The ACP backend is the caller —
+// the transport layer rejects session/set_config_option while a prompt
+// is in flight, so no concurrent turn can observe the swap (see
+// internal/acp/server.go dispatch for the happens-before argument).
+// Downstream readers that resolve the lane at call time (runTurn,
+// summariseLLM) follow automatically; consumers that captured a client
+// reference at construction (subagent routes) deliberately do NOT.
+func (a *Agent) SetLane(provider llm.Provider, client *deepseek.Client, model string) {
+	a.cfg.Provider = provider
+	a.cfg.Client = client
+	a.cfg.Model = model
+}
+
 // Model returns the active model id. Mirrors Effort()'s role: callers
 // that need the CURRENT model at a moment other than construction
 // (e.g. the ACP backend routing pasted images, runPrint picking the
