@@ -833,6 +833,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 
 ## Tooling / environment
 
+### jq without input files and without -n runs the filter zero times — empty output, exit 0
+- **Saw**: `table=$(jq -r --slurpfile a f1 --slurpfile b f2 '<program>')` in a script returned an EMPTY string with exit code 0 — not even the program's constant-string lines printed — so the script happily shipped a header-only "table"
+- **Why**: with no input files and no `-n`, jq runs the filter once per JSON value on **stdin**; a script has no stdin lines, so the filter executes 0 times. Output empty, rc 0 — the classic silent-swallow. (Sibling trap in the same fix: with `--slurpfile v FILE`, `$v` is *already* the array of the file's JSON values — `$v[0]` is the first VALUE, not the value array; indexing into a row object then iterating it with `map(.case)` walks the object's string fields and dies with `Cannot index string with string "case"`.)
+- **Fix**: `jq -n -r --slurpfile …` in `eval/ablate.sh`, plus an explicit `[[ -z "$table" ]] && exit 2` guard so a future silent-empty can never pass as success. `$v` used directly as the row array.
+- **Lesson**: a jq program whose inputs are all `--slurpfile` variables needs `-n`; and any `$(jq …)` whose output feeds a generated artifact should assert non-empty — jq has failure modes that look exactly like success
+- **Refs**: `eval/ablate.sh` (the `-n` note above the table jq + the empty-table guard)
+
 ### Grep tool with broad pattern can deadlock the agent — no recovery via /compact
 - **Saw**: User reports that running `grep "llm"` against a large codebase twice fills the model's context completely. `/compact` can't recover because the compact call itself requires another LLM round-trip through an already-overflowed history → hard deadlock
 - **Why**: grep's `max_matches` cap (200) governs **count of matches** but not the **total bytes** of formatted output. Real-world worst case: 20 matches × 7 context lines × variable line length (think minified JS, generated TypeScript, multi-MB JSON-on-one-line) easily hits 50 KiB per call. Two such calls = 100 KiB ≈ 25K tokens of pure grep output, on top of system prompt + history + other tool outputs. DeepSeek 128K context fills up; `/compact` can't fit its own pre-prompt into the remaining budget, so the rescue path itself fails
@@ -1808,6 +1815,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: brace every `${VAR}` whose next character is non-ASCII (the KEEP message in `scripts/web-sessions-manual.sh`); commit with card `c_hinacy`.
 - **Lesson**: repo shell scripts must stay bash-3.2-safe (macOS default) — `${VAR}` braces are mandatory before CJK punctuation, and self-check any script whose failure path only runs in cleanup traps.
 - **Refs**: `scripts/web-sessions-manual.sh` cleanup; `scripts/serve-smoke-test.sh` (same bash-3.2 audience).
+
+### `${VAR-default}` under set -u passes a set-but-EMPTY value through — the `:-` form is the house discipline; and mktemp'd $tmp must be canonicalised before string-matching it
+- **Saw** (c_w3vhcm rework, 2026-11-18): two self-test bugs in one session. (a) `case_filter=${1-}` style defaults kept an explicitly-empty arg empty (`ablate.sh '' ''` → binary="" instead of the default). (b) A byte-compare self-test normalised sandbox paths with `sed "s|$tmp|...|"` — never matched, because macOS `TMPDIR` ends in `/` so mktemp's returned string contains `//`, and `/var` is a symlink to `/private/var`, while every path the script-under-test prints has round-tripped `cd`+`pwd` (physical, separator-collapsed).
+- **Why**: `${VAR-default}` only substitutes on UNSET; empty-but-set sails through (`:-` substitutes on both). And string comparison of paths compares the STRING, not the file — mktemp's return value is not canonical on macOS.
+- **Fix**: default expansions in eval/ shell scripts use `:-` throughout (`eval/ablate.sh`); `scripts/eval-ablate-test.sh` canonicalises `tmp=$(cd "$tmp" && pwd)` immediately after mktemp, and asserts normalised output is non-empty — the first revision had a malformed sed expression that normalised BOTH sides to empty and `cmp`'d two empty files green.
+- **Lesson**: any "compare two outputs" test needs a negative control (inject a one-char difference, watch it go red) and a non-empty guard on both sides — symmetric degradation of both arms is the silent false-green mode. Bash-3.2 family discipline (previous entry) applies to every `scripts/*.sh`.
+- **Refs**: `eval/ablate.sh`; `scripts/eval-ablate-test.sh` (norm/cleanup); commit on card c_w3vhcm.
 
 ### W1.2 Host allowlist must match the host PART only — literal bind-addr matching 403s the documented tailnet posture and every httptest hit
 - **Saw**: implementing §5.3's literal set {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`} as exact strings rejects legitimate traffic: the §5.4 tailnet posture (bind 127.0.0.1:8790, `tailscale serve --tcp` forward) sends `Host: <tailnet-IP>:8790`, and httptest servers surface `Host: 127.0.0.1:<random>` — never the bind string.

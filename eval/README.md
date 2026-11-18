@@ -15,12 +15,14 @@ across versions are what matter.
 ```
 eval/
 ├── run.sh          # eval/run.sh [case] [binary]   (defaults: all cases, ./seek)
+├── ablate.sh       # eval/ablate.sh [case] [binary] — bare-core vs full dual run (below)
 ├── cases/
 │   └── <name>/
 │       ├── README.md   # what the case probes + the bug it came from
 │       ├── prompt.txt  # exact text passed via `seek -p`
 │       └── expect.json # PASS/FAIL bounds; see "Metric vocabulary" below
-└── results/        # checked-in JSONL of each pass; one row per case
+├── results/        # checked-in JSONL of each pass; one row per case
+└── ablation/       # dual-run lanes + comparison tables (NOT trend data)
 ```
 
 ## Running
@@ -147,6 +149,55 @@ from a fake results dir. Env knobs (`TREND_WINDOW`, `TREND_GAP_DAYS`,
 Note for tooling: the early result files (pre v0.5) are pretty-printed
 concatenated JSON objects — one result spans many lines — so readers must
 parse with jq, never line-by-line (see `docs/pitfalls.md`).
+
+## Ablation: bare-core vs full dual run (v8 pillar T)
+
+`eval/ablate.sh [case] [binary]` runs every case **twice** — once with
+the default (full) tool registry, once with the bare v8 kernel five
+(`-tools read,edit,write,bash,grep`) — and prints a per-case F/B
+comparison table (pass, turns, tool_calls, prompt/completion tokens,
+cost) plus a TOTAL row. The table also lands in
+`eval/ablation/<date>-<version>.md`; per-lane JSONL rows stay in
+`eval/ablation/{full,bare}/`. Output files are **not** checked in
+automatically — commit a `.md` by hand when a run is meant to backfill
+[`docs/prd/v8.md`](../docs/prd/v8.md) §9.
+
+**Both lanes write to `eval/ablation/`, never to `eval/results/`** —
+that dir is the trend reports' data source, and ablation rows there
+would fabricate regressions. The isolation rides on two `run.sh` env
+knobs (both unset = historical behaviour, byte for byte):
+
+| Env var | Effect |
+|---|---|
+| `SEEK_EVAL_RESULTS_DIR` | redirect the JSONL sink (default `eval/results`) |
+| `SEEK_EVAL_EXTRA_ARGS` | extra seek args appended to the default invocation (space-separated flag list, word-split by design); also passed through to `runner.sh` cases in the env — runners that build their own invocations opt in by forwarding it (none do yet, so their F/B rows are lane-invariant; `ablate.sh` footnotes them) |
+
+Cost in the table uses the deepseek-v4.1-flash card
+(`internal/pricing`); rows carry no model id, so on other lanes read
+the F/B ratio, not the absolute `$`. Per-case FAILs are ablation data,
+not a script failure — `ablate.sh` exits 0 whenever both lanes
+measured, 2 on setup errors.
+
+### Self-test (deterministic, no key)
+
+`scripts/eval-ablate-test.sh` (auto-discovered by the
+[`scripts/selftest.sh`](../scripts/selftest.sh) lane, name
+`eval-ablate-test`) re-verifies the ablation plumbing mechanically —
+the original card's sandbox acceptance could not be re-run (the
+permission layer refuses ad-hoc fake binaries), so the fake binary now
+lives inside a checked-in test. A fake `seek` prints a fixed JSONL
+stream and switches streams when it sees `-tools`; the test asserts
+the dual run exits 0, the table lands in `eval/ablation/` with
+lane-distinct F/B cells (`tool_calls 1/2` proves `SEEK_EVAL_EXTRA_ARGS`
+actually reached the invocation), `eval/results/` gains nothing, and —
+with both env knobs unset — `run.sh`'s stdout, stderr and result rows
+are byte-identical to the last pre-knob `run.sh` blob (extracted
+mechanically from git history; only fields that differ between any two
+runs of the *same* script — timestamps, elapsed seconds, date stamps,
+sandbox paths — are normalised). The test cleans up its own artifacts
+under `eval/ablation/` (mtime-guarded: pre-existing ablation data is
+untouched) and fails loudly if normalisation ever degrades to empty
+output — an early revision shipped exactly that false-green.
 
 ## Cost
 
