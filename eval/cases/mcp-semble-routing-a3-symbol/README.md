@@ -8,20 +8,13 @@ Three-arm comparison case for MCP tool routing (docs/prd/feature-mcp-client.md �
 - Engine: `eval/tools/mcp-arm-runner.sh` (arm isolation via scratch SEEK_HOME under eval/tmp/mcp-semble-routing/)
 - Siblings: `mcp-semble-routing-{a1,a2,a3}-{nl,symbol,mixed}` — same prompt per probe, only the environment differs
 
-DATA CAVEAT: valid only after D1 + D3 final guidance copy; per the D4 card, A3 is re-run after D3's copy is final (min_mcp_calls fails by construction until then).
+DATA NOTE: D1 + D3's final guidance copy are in main; this arm was (re)collected on that tree 2026-11-18, see the arm-gate note below.
 
-## expect.json — add at collection time (arm gate)
+## expect.json (landed at collection time)
 
-This case ships WITHOUT expect.json on purpose: the suite skips a case
-without it (`eval/README.md` scaffold convention), and this arm's data is
-invalid until its prerequisite lands (see DATA CAVEAT above). When the arm
-becomes collectable, write exactly:
-
-```json
-{
-  "description": "mcp-semble-routing arm a3 / probe symbol",
-  "max_turns": 10,
-  "exact_agent_ends": 1,
-  "max_nonzero_exits": 0, "max_mcp_calls": 0
-}
-```
+The arm gate is lifted (D1/D3 landed in main): this case's `expect.json`
+is checked in as of the 2026-11-18 three-arm collection, so the suite no
+longer skips it. Bounds are the common set (`max_turns: 10`,
+`exact_agent_ends: 1`, `max_nonzero_exits: 0`) plus the arm probe's own
+bound — `min_mcp_calls: 1` on a3-nl, `max_mcp_calls: 0` on a3-symbol.
+Collection results: `eval/results/mcp-semble-routing-three-arm-2026-11-18.md`.

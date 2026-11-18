@@ -1,0 +1,6 @@
+{
+  "description": "mcp-semble-routing arm a2 / probe mixed",
+  "max_turns": 10,
+  "exact_agent_ends": 1,
+  "max_nonzero_exits": 0
+}

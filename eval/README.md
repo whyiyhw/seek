@@ -22,6 +22,7 @@ eval/
 │       ├── prompt.txt  # exact text passed via `seek -p`
 │       └── expect.json # PASS/FAIL bounds; see "Metric vocabulary" below
 ├── results/        # checked-in JSONL of each pass; one row per case
+├── tools/          # shared case engines/scorers (mcp-arm-*, mcp-semble-score, mcp-first-gold-read, …)
 └── ablation/       # dual-run lanes + comparison tables (NOT trend data)
 ```
 

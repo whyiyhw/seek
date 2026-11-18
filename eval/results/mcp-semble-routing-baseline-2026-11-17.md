@@ -1,5 +1,9 @@
 # mcp-semble-routing 三臂对照 — 采集状态与 Phase 1 判定数据
 
+> **已被 [`mcp-semble-routing-three-arm-2026-11-18.md`](mcp-semble-routing-three-arm-2026-11-18.md) 取代**
+> （三臂完整数据，A1 同 binary 重采）。本文件保留为 2026-11-17 的采样记录与 A1-only
+> 基线历史。
+
 Card **MCP-D4**（c_eyuxqm）· 设计依据 `docs/prd/feature-mcp-client.md` §5（d25aba8 设计稿，
 main 尚为旧版 PRD——回填判定时以合并后的 §5.4 为准）。
 

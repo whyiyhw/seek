@@ -8,20 +8,13 @@ Three-arm comparison case for MCP tool routing (docs/prd/feature-mcp-client.md �
 - Engine: `eval/tools/mcp-arm-runner.sh` (arm isolation via scratch SEEK_HOME under eval/tmp/mcp-semble-routing/)
 - Siblings: `mcp-semble-routing-{a1,a2,a3}-{nl,symbol,mixed}` — same prompt per probe, only the environment differs
 
-DATA CAVEAT: valid only after D1 (server__tool naming) — before it, mcp_calls reads 0 even when the model does call the tools; also reconcile the mcp_prompt field placement with D3's landed mcpconfig schema before collecting.
+DATA NOTE: D1 (`<server>__<tool>` naming) and D3 (top-level `mcp_prompt` key) are both in main; the 2026-11-18 collection ran on that tree, see the arm-gate note below.
 
-## expect.json — add at collection time (arm gate)
+## expect.json (landed at collection time)
 
-This case ships WITHOUT expect.json on purpose: the suite skips a case
-without it (`eval/README.md` scaffold convention), and this arm's data is
-invalid until its prerequisite lands (see DATA CAVEAT above). When the arm
-becomes collectable, write exactly:
-
-```json
-{
-  "description": "mcp-semble-routing arm a2 / probe symbol",
-  "max_turns": 10,
-  "exact_agent_ends": 1,
-  "max_nonzero_exits": 0
-}
-```
+The arm gate is lifted (D1/D3 landed in main): this case's `expect.json`
+is checked in as of the 2026-11-18 three-arm collection, so the suite no
+longer skips it. Bounds are the common set (`max_turns: 10`,
+`exact_agent_ends: 1`, `max_nonzero_exits: 0`) plus the arm probe's own
+bound — `min_mcp_calls: 1` on a3-nl, `max_mcp_calls: 0` on a3-symbol.
+Collection results: `eval/results/mcp-semble-routing-three-arm-2026-11-18.md`.
