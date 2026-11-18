@@ -1957,3 +1957,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: 卡 `c_nxirmj`：提示改按 `len(providerOptions)` 动态生成；envVarFor 镜像补 glm/opencode 两 case，`TestEnvVarFor_KnownProviders` 同步扩表锁死。
 - **Lesson**: 向导扩 provider 的清单：providerOptions 行 + setup.go envVarFor case + internal/config envVarFor case（范围文案已动态化）。凡是「镜像别处枚举」的 switch，扩表当轮就补测试用例。
 - **Refs**: `cmd/seek/setup.go` `providerOptions`/`envVarFor`/`shouldTriggerWizard`，`internal/config/config.go` `envVarFor`。
+
+## MCP prompt section
+
+### JSON object key order is data — unmarshalling into a map shuffles prompt bytes
+- **Saw**: rendering MCP tool parameter signatures for the sysprompt MCP section, the obvious `json.Unmarshal` of the input schema into `map[string]…` properties would emit `search(repo, query, content?)` with parameters in random order — nondeterministic bytes inside the system-prompt prefix.
+- **Why**: `encoding/json` into a Go map discards document order and map iteration is deliberately randomized per run; anything whose output must be byte-stable across sessions (sysprompt segments feed the DeepSeek prefix cache) cannot round-trip an ordered JSON object through a map.
+- **Fix**: `schemaParams` in `internal/tools/mcptool/prompt.go` token-walks the `properties` object with `json.Decoder` — keys kept in document order, each value skipped via a `RawMessage` decode; commit with card `c_lgtpgq`.
+- **Lesson**: JSON object key order is insignificant to a parser but load-bearing for byte-deterministic rendering — ordered output needs a token-stream read, never a map.
+- **Refs**: `internal/tools/mcptool/prompt.go` `schemaParams`; determinism contract at `internal/sysprompt/sysprompt.go` (package doc).
