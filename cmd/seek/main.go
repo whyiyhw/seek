@@ -1481,7 +1481,9 @@ func run() error {
 	// and a mutating prompt segment would invalidate the prefix cache.
 	// Empty when no MCP tools loaded → zero prompt bytes, so no-MCP
 	// users keep a byte-identical prefix (the sysprompt golden locks
-	// this). Note: the -tools whitelist narrows the registry later and
+	// this). Also empty under an explicit `"mcp_prompt": false` — tools
+	// still register, only the guidance segment goes away (the A2 eval
+	// arm). Note: the -tools whitelist narrows the registry later and
 	// may drop MCP tools this section still names — same static-prose
 	// posture as rootTpl (which documents fim_complete even on non-
 	// DeepSeek providers); the section describes what loaded, the
@@ -1511,7 +1513,7 @@ func run() error {
 			reg.Add(b)
 		}
 		if len(lr.Bridges) > 0 {
-			mcpSection = mcpPromptSection(lr.Bridges)
+			mcpSection = mcpSectionFromBridges(lr.Bridges, mcpCfg)
 			fmt.Fprintf(os.Stderr, "mcp: loaded %d tool(s)\n", len(lr.Bridges))
 		}
 	}
@@ -3565,37 +3567,46 @@ func envBoolTrue(name string) bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
-// mcpPromptSection assembles the sysprompt MCPSection content (the
-// fifth prompt segment) from the bridges LoadServers produced:
-// servers grouped and listed by name in dictionary order, tools listed
-// under their REGISTERED names so whatever prefix policy LoadServers
-// applied is exactly what the model can call. Sorting here makes the
-// section byte-deterministic for a given bridge set regardless of the
-// mcp.json map iteration order. Minimal listing by design — per-server
-// routing copy, mcp.json hint overrides, and the mcp_prompt switch are
-// the D3 layer (mcptool.PromptSection, docs/prd/feature-mcp-client.md
-// §3.2); this is the D2 channel's default content.
-func mcpPromptSection(bridges []*mcptool.Bridge) string {
-	if len(bridges) == 0 {
+// mcpSectionFromBridges assembles the sysprompt MCPSection content (the
+// fifth prompt segment) from the bridges LoadServers produced. It is
+// the single assembly path (MCP-D3): the copy itself lives in
+// mcptool.PromptSection — tier-1 mcp.json "hint" verbatim, tier-2
+// built-in curated copy, tier-3 bare listing — so this layer only maps
+// bridges onto mcptool.ServerInfo. Tools keep bridge registration order
+// (the same order the model sees in the tools array); PromptSection
+// sorts servers by name, so mcp.json map iteration order never reaches
+// the prompt bytes.
+//
+// Empty string when no bridges loaded, or when mcp.json sets an
+// explicit `"mcp_prompt": false`: tools stay registered (the A2
+// "tool exists, no guidance" eval arm), only the prompt guidance is
+// suppressed.
+func mcpSectionFromBridges(bridges []*mcptool.Bridge, cfg mcpconfig.Config) string {
+	if len(bridges) == 0 || !cfg.PromptEnabled() {
 		return ""
 	}
-	byServer := make(map[string][]string)
+	toolsByServer := make(map[string][]mcptool.ToolInfo, len(bridges))
+	names := make([]string, 0, len(bridges))
 	for _, b := range bridges {
-		byServer[b.Server()] = append(byServer[b.Server()], b.Name())
+		name := b.Server()
+		if _, seen := toolsByServer[name]; !seen {
+			names = append(names, name)
+		}
+		toolsByServer[name] = append(toolsByServer[name], mcptool.ToolInfo{
+			Name:        b.Name(),
+			Description: b.Description(),
+			Schema:      b.Schema(),
+		})
 	}
-	names := make([]string, 0, len(byServer))
-	for name := range byServer {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	var sb strings.Builder
-	sb.WriteString("MCP tools (external servers loaded this session):")
+	servers := make([]mcptool.ServerInfo, 0, len(names))
 	for _, name := range names {
-		tools := byServer[name]
-		slices.Sort(tools)
-		sb.WriteString("\n\n- " + name + ": " + strings.Join(tools, ", "))
+		servers = append(servers, mcptool.ServerInfo{
+			Name:  name,
+			Hint:  cfg.MCPServers[name].Hint,
+			Tools: toolsByServer[name],
+		})
 	}
-	return sb.String()
+	return mcptool.PromptSection(servers)
 }
 
 // cronAutoTickEnabled is the single gate for the startup cron auto-tick
