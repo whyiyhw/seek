@@ -1,13 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
+	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
+	"github.com/whyiyhw/seek/pkg/llm"
 	"github.com/whyiyhw/seek/pkg/mcp"
 )
 
@@ -189,6 +196,124 @@ func TestBuildProvider_GLM(t *testing.T) {
 			t.Errorf("nil provider with --base-url override")
 		}
 	})
+
+	t.Run("config base_url beats --base-url on the wire", func(t *testing.T) {
+		// The regression this card exists for: a Coding Plan key must be
+		// able to live at /api/coding/paas/v4 via config alone. Assert on
+		// the path the HTTP layer actually POSTs to — a precedence bug
+		// here silently bills the recharge balance again.
+		t.Setenv("GLM_API_KEY", "k")
+		t.Setenv("GLM_BASE_URL", "") // isolate from the developer's shell
+		home := t.TempDir()
+		t.Setenv("SEEK_HOME", home)
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+		}))
+		defer srv.Close()
+		cfgJSON := `{"providers": {"glm": {"api_key": "k", "base_url": "` + srv.URL + `/from-config"}}}`
+		if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		provider, _, _, _, err := buildProvider("glm", srv.URL+"/from-flag", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		ch, err := provider.ChatStream(context.Background(), llm.ChatRequest{
+			Model:    "glm-5.3",
+			Messages: []llm.Message{{Role: "user", Content: "hi"}},
+		})
+		if err != nil {
+			t.Fatalf("ChatStream: %v", err)
+		}
+		for range ch { // drain so the request fully lands
+		}
+		if gotPath != "/from-config" {
+			t.Errorf("request path = %q, want /from-config (config base_url must beat --base-url)", gotPath)
+		}
+	})
+}
+
+// TestGLMEndpoint_Precedence pins the three-layer endpoint resolution —
+// providers.glm.base_url / GLM_BASE_URL > --base-url > pay-as-you-go
+// default — and that the default itself did NOT move. Keeping the
+// default on paas/v4 is deliberate: the majority of keys are pay-as-you-
+// go, so flipping it would break them in the opposite direction. The
+// endpoint strings are contract: /api/paas/v4 bills the recharge
+// balance, /api/coding/paas/v4 bills the Coding Plan.
+func TestGLMEndpoint_Precedence(t *testing.T) {
+	t.Setenv("GLM_BASE_URL", "")
+	const (
+		wantDefault = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+		wantCoding  = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+		flagURL     = "http://localhost:9/from-flag"
+	)
+	if glmBaseURL != wantDefault {
+		t.Errorf("glmBaseURL = %q, want %q (default must stay pay-as-you-go)", glmBaseURL, wantDefault)
+	}
+	if glmCodingPlanBaseURL != wantCoding {
+		t.Errorf("glmCodingPlanBaseURL = %q, want %q", glmCodingPlanBaseURL, wantCoding)
+	}
+	cfgWith := func(u string) config.Config {
+		return config.Config{Providers: map[string]config.ProviderConfig{
+			"glm": {APIKey: "k", BaseURL: u},
+		}}
+	}
+
+	if got := glmEndpoint(config.Config{}, ""); got != wantDefault {
+		t.Errorf("default layer = %q, want %q", got, wantDefault)
+	}
+	if got := glmEndpoint(config.Config{}, flagURL); got != flagURL {
+		t.Errorf("flag layer = %q, want %q", got, flagURL)
+	}
+	if got := glmEndpoint(cfgWith(wantCoding), flagURL); got != wantCoding {
+		t.Errorf("config layer must beat the flag, got %q", got)
+	}
+	t.Setenv("GLM_BASE_URL", "https://from-env.example/v4/chat/completions")
+	if got := glmEndpoint(cfgWith(wantCoding), flagURL); got != "https://from-env.example/v4/chat/completions" {
+		t.Errorf("GLM_BASE_URL must beat the config file, got %q", got)
+	}
+}
+
+// TestBuildSubagentRoutes_GLMEndpoint guards the SECOND construction site
+// for the GLM lane: subagent routes used to hardcode glmBaseURL, so a
+// Coding Plan parent would still spawn recharge-balance-billed children.
+// config base_url must reach the child's POST target too.
+func TestBuildSubagentRoutes_GLMEndpoint(t *testing.T) {
+	t.Setenv("GLM_API_KEY", "k")
+	t.Setenv("GLM_BASE_URL", "")
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+	}))
+	defer srv.Close()
+	cfgJSON := `{"providers": {"glm": {"api_key": "k", "base_url": "` + srv.URL + `/coding"}}}`
+	if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	route, ok := buildSubagentRoutes(nil, "")[subagent.ProviderGLM]
+	if !ok || route.provider == nil {
+		t.Fatalf("glm route missing from subagent table: %+v", route)
+	}
+	ch, err := route.provider.ChatStream(context.Background(), llm.ChatRequest{
+		Model:    "glm-5.3",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("child ChatStream: %v", err)
+	}
+	for range ch {
+	}
+	if gotPath != "/coding" {
+		t.Errorf("child GLM request path = %q, want /coding (config base_url must reach subagent routes)", gotPath)
+	}
 }
 
 // buildProvider("opencode", ...) wiring, mirroring the GLM paradigm:
