@@ -57,8 +57,12 @@ cases_dir="$eval_root/cases"
 ablation_root="$eval_root/ablation"
 BARE_TOOLS="read,edit,write,bash,grep"
 
-case_filter=${1-}
-binary=${2-$repo_root/seek}
+# Default expansions use the :- form throughout (set-but-empty counts as
+# unset) — bash 3.2 + set -u discipline, same family as the pitfalls.md
+# "bash 3.2 under set -u" entry. `${1-}` would pass an explicitly-empty
+# arg through, e.g. `ablate.sh '' ''` → binary="" instead of ./seek.
+case_filter=${1:-}
+binary=${2:-$repo_root/seek}
 
 if [[ ! -x "$binary" ]]; then
   echo "ablate: binary not found or not executable: $binary" >&2
@@ -78,7 +82,7 @@ mkdir -p "$ablation_root/full" "$ablation_root/bare"
 # names it <date>-<version>.jsonl and appends on same-day reruns, so
 # newest-by-mtime is the file this lane just wrote).
 lane() {
-  local label=$1 subdir=$2 extra=${3-}
+  local label=$1 subdir=$2 extra=${3:-}
   echo
   echo "==================================================================="
   echo "ablate: lane $label  (results: $ablation_root/$subdir/)"

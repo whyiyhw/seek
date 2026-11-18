@@ -178,6 +178,27 @@ the F/B ratio, not the absolute `$`. Per-case FAILs are ablation data,
 not a script failure — `ablate.sh` exits 0 whenever both lanes
 measured, 2 on setup errors.
 
+### Self-test (deterministic, no key)
+
+`scripts/eval-ablate-test.sh` (auto-discovered by the
+[`scripts/selftest.sh`](../scripts/selftest.sh) lane, name
+`eval-ablate-test`) re-verifies the ablation plumbing mechanically —
+the original card's sandbox acceptance could not be re-run (the
+permission layer refuses ad-hoc fake binaries), so the fake binary now
+lives inside a checked-in test. A fake `seek` prints a fixed JSONL
+stream and switches streams when it sees `-tools`; the test asserts
+the dual run exits 0, the table lands in `eval/ablation/` with
+lane-distinct F/B cells (`tool_calls 1/2` proves `SEEK_EVAL_EXTRA_ARGS`
+actually reached the invocation), `eval/results/` gains nothing, and —
+with both env knobs unset — `run.sh`'s stdout, stderr and result rows
+are byte-identical to the last pre-knob `run.sh` blob (extracted
+mechanically from git history; only fields that differ between any two
+runs of the *same* script — timestamps, elapsed seconds, date stamps,
+sandbox paths — are normalised). The test cleans up its own artifacts
+under `eval/ablation/` (mtime-guarded: pre-existing ablation data is
+untouched) and fails loudly if normalisation ever degrades to empty
+output — an early revision shipped exactly that false-green.
+
 ## Cost
 
 Each pass is one full `seek` invocation against DeepSeek's API. Budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out. The full 3-case suite is well under $0.20.
