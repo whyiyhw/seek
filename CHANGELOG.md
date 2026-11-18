@@ -98,3 +98,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_4ejhhs：MCP-D1：MCP 工具默认 server__tool 前缀 + LoadServers 注册顺序确定化（bridge.go）
 - c_z5zxru：opencode 车道：--provider=opencode 接入 OpenCode Go 订阅（$10/月请求窗口制）——ChatRequest.SessionID→x-opencode-session 每会话稳定头 + openai client 统一发自有 UA seek/<version>（缺头会退化按 token 扣费），默认模型 deepseek-v4.1-flash（id 待 /v1/models 实测核对），pricing 加 Go lane 行（per-token 仅展示口径），子代理路由表/工具 schema 同步，文档三处
 - c_yijdy4：语音 v1·V1a：播报 sink——serve Speaker（Reply→TTS→播放）+ routines Notifier sibling
+- c_nxirmj：首启向导 provider 单扩容：opencode/glm 两行进菜单（deepseek 仍居首，验证 ping 仍仅 deepseek），重试提示的范围文案按 len(providerOptions) 动态生成（原写死 1–4 会骗人），向导侧 envVarFor 镜像同步 glm/opencode（否则 env-only 用户会被误触导向导），keyHint 均未经真实 key 验证（opencode 留空省略格式行、glm 按 <32hex>.<hex> 形态给示意）
