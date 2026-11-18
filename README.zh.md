@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, three cost lanes" width="820">
+  <img src="examples/hero.svg" alt="seek — a local agent platform: one binary, every surface, self-distilling, multiple cost lanes" width="820">
 </p>
 
 <p align="center">
-  <strong>不是又一个 agent demo——而是一个本地 agent 平台：终端、浏览器、IDE、无头车队皆可驱动；跑完的会话可蒸馏成 skill；任务在三条成本车道间路由。</strong>
+  <strong>不是又一个 agent demo——而是一个本地 agent 平台：终端、浏览器、IDE、无头车队皆可驱动；跑完的会话可蒸馏成 skill；任务在多条成本车道间路由。</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 - **多端驱动。** 原生终端 TUI · 浏览器聊天页（`seek serve --frontend=web`——内嵌页面、SSE 流式、token 认证）· IDE（`seek acp` 接 Zed 等 ACP 客户端、`seek -rpc` JSON-RPC 2.0）· 无头车道：无人值守 ACP 下，派单方传来的 `cwd` 锚定所有工具，`SEEK_ACP_YOLO=1` 自动放行本地动作、照堵 push/PR——seek 自身已作为一个派单车道跑在 ACP 编排器（paseo）之下。
 - **自蒸馏 skill。** `/distill` 把跑完的会话蒸馏成可人审的 SKILL.md 草稿——`--dry-run` 先预览、草稿落在任何会话都不加载的目录、安装永远是一步显式的人工动作。下个月的 agent 带着这个月的教训上岗。
-- **三条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价 · OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
+- **多条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价 · **OpenCode Go** 订阅包月 $10（请求数窗口限额、开放权重模型池；seek 以自有 `User-Agent` + 每会话 `x-opencode-session` 头自报身份）· OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
 
 ---
 

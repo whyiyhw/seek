@@ -72,7 +72,7 @@ type Message struct {
 	// here (rather than as a sidecar) for proximity: each assistant
 	// message carries the prediction it spawned, and the next user
 	// message's match check can read it via a single-step lookback.
-	// See PRD docs/prd/feature-suggested-reply.md §4.5.
+	// See PRD docs/prd/archive/feature-suggested-reply.md §4.5.
 	PredictedNext string `json:"predicted_next,omitempty"`
 }
 
@@ -139,7 +139,31 @@ type ChatRequest struct {
 	// values are not documented for V4 and may be silently ignored;
 	// internal callers like the `think` tool also stick to high/max.)
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+
+	// SafetyCheck opts this request into DeepSeek's model safety check
+	// (wire shape "safety_check": {"level": "high"} — the only tier
+	// documented today; docs/prd/feature-deepseek-app-api.md §5). nil =
+	// off, and the key is then absent from the marshalled body, so
+	// text-only requests stay byte-identical to their pre-SC1 shape
+	// (prefix-cache discipline). A response the check flags ends with
+	// finish_reason "refusal" (its documented stop_reason;
+	// "content_filter" is the same class on adjacent shapes) — the agent
+	// renders that in-band rather than treating it as an error.
+	SafetyCheck *SafetyCheck `json:"safety_check,omitempty"`
 }
+
+// SafetyCheck is the wire shape of DeepSeek's request-side model safety
+// check. Object-shaped (not a bare string) so DeepSeek can extend it
+// without a client change; "high" is the only level documented as of
+// 2026-11.
+type SafetyCheck struct {
+	Level string `json:"level"`
+}
+
+// SafetyCheckHigh is the one documented SafetyCheck level. The config
+// layer accepts exactly this token ("safety_check": "high"); an unknown
+// value reads as off rather than being forwarded blindly.
+const SafetyCheckHigh = "high"
 
 // ThinkingMode controls V4's thinking parameter. As of 2026-01 the
 // only fields documented are Type ∈ {"enabled", "disabled"}; the

@@ -67,7 +67,9 @@ func getState(t *testing.T, srv *httptest.Server, tok string) map[string]any {
 // the MVP reply shape command acks and run close-outs ride) while the
 // W1.4 named family — delta/tool/usage of the interleaved prompt run —
 // passes by unasserted. Substrings are checked on the ONE frame that
-// matched the default shape, mirroring wantFrame's strictness.
+// matched the default shape, mirroring wantFrame's strictness — via
+// containsFrameText, which also matches the needle's JSON-escaped
+// spelling (see there).
 func wantDefaultFrame(t *testing.T, tap <-chan wireFrame, substrs ...string) wireFrame {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
@@ -81,7 +83,7 @@ func wantDefaultFrame(t *testing.T, tap <-chan wireFrame, substrs ...string) wir
 				continue // delta/tool/usage of an interleaved run
 			}
 			for _, s := range substrs {
-				if !strings.Contains(fr.data, s) {
+				if !containsFrameText(fr.data, s) {
 					t.Fatalf("default frame %s lacks %q", fr.data, s)
 				}
 			}
@@ -89,6 +91,53 @@ func wantDefaultFrame(t *testing.T, tap <-chan wireFrame, substrs ...string) wir
 		case <-deadline:
 			t.Fatalf("no default frame containing %v arrived within 5s", substrs)
 		}
+	}
+}
+
+// containsFrameText matches s inside a RAW SSE data line (Go-marshalled
+// JSON, never decoded). A needle rides that wire in two spellings:
+// verbatim (CJK, plain ASCII — json.Marshal leaves them untouched) or
+// JSON-escaped (backslashes doubled, < > & as \u003c-class escapes).
+// Windows temp paths (`C:\Users\…`, doubled on the wire) and
+// angle-bracket text can ONLY match the escaped spelling, so both are
+// tried. Without this the /projects assertions pass on `/`-paths and
+// fail on Windows nightly (2026-11-18), and the < case has to be
+// dodged by hand (the old "/bind usage" comment's workaround).
+func containsFrameText(data, s string) bool {
+	if strings.Contains(data, s) {
+		return true
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return false // unmarshalable needle can't ride the wire anyway
+	}
+	return strings.Contains(data, string(b[1:len(b)-1])) // strip outer quotes
+}
+
+// TestContainsFrameText pins the helper against a Windows-shaped frame:
+// built by the SAME json.Marshal the production pump uses, so the wire
+// carries doubled backslashes and \u003c escapes — exactly what a
+// `/`-path CI lane never exercises. All three needle classes must
+// match, and absent needles must not.
+func TestContainsFrameText(t *testing.T) {
+	payload := map[string]string{"text": "bound to " + `C:\Users\runner\proj` + " <here>, 已绑定"}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := string(b)
+	for _, s := range []string{
+		"bound",                // plain ASCII: verbatim spelling
+		`C:\Users\runner\proj`, // Windows path: escaped-only spelling
+		"<here>",               // angle brackets: \u003c-escaped on the wire
+		"已绑定",                  // CJK: verbatim
+	} {
+		if !containsFrameText(frame, s) {
+			t.Errorf("containsFrameText(windows frame, %q) = false, want true", s)
+		}
+	}
+	if containsFrameText(frame, "absent-needle") {
+		t.Error("containsFrameText must not match absent needles")
 	}
 }
 
@@ -114,9 +163,9 @@ func TestWeb_CommandE2E(t *testing.T) {
 	wantDefaultFrame(t, tap, "该会话还没绑定项目")
 
 	// /bind without its path argument (the prefilled input sent
-	// incomplete): usage text, binding untouched. (Substrings avoid
-	// angle brackets: the SSE payload is Go-marshaled JSON, where <
-	// rides as \u003c.)
+	// incomplete): usage text, binding untouched. (Needles containing
+	// angle brackets are fine now — containsFrameText also matches the
+	// JSON-escaped spelling, where < rides as \u003c.)
 	postMsg(t, srv, tok, "/bind")
 	wantDefaultFrame(t, tap, "用法：/bind", "目录必须存在")
 	if m := getState(t, srv, tok); m["bound"] != false {

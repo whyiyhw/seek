@@ -16,7 +16,7 @@ import (
 )
 
 // event is the on-disk record of one lifecycle transition. See
-// docs/prd/feature-subagent.md §3.4 for the per-event-kind schema.
+// docs/prd/archive/feature-subagent.md §3.4 for the per-event-kind schema.
 //
 // The Kind field is exported as "event" in JSON so the on-disk
 // representation matches the PRD examples verbatim. New event kinds
@@ -136,7 +136,7 @@ func readEvents(path string) ([]event, error) {
 }
 
 // foldEvents collapses the event stream into the current Subagent
-// state per sub_sid, per docs/prd/feature-subagent.md §3.4 folding
+// state per sub_sid, per docs/prd/archive/feature-subagent.md §3.4 folding
 // rules:
 //
 //   - The `started` event seeds immutable fields (ParentSid, Type,

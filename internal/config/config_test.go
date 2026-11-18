@@ -316,6 +316,55 @@ func TestAgentsConfig_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSafetyCheckLevel_OnlyHighOptsIn pins the SC1 mapping
+// (feature-deepseek-app-api.md §5): the config key is a string so future
+// tiers can join, but today exactly one token — "high" — enables the
+// model safety check. Anything else reads as off; a typo must never
+// forward a half-supported value to the API.
+func TestSafetyCheckLevel_OnlyHighOptsIn(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"high", "HIGH", " High ", "\thigh\n"} {
+		if got := (Config{SafetyCheck: s}).SafetyCheckLevel(); got != "high" {
+			t.Errorf("SafetyCheckLevel(%q) = %q, want %q", s, got, "high")
+		}
+	}
+	for _, s := range []string{"", "low", "medium", "max", "off", "true", "1", "high,low", "high risk"} {
+		if got := (Config{SafetyCheck: s}).SafetyCheckLevel(); got != "" {
+			t.Errorf("SafetyCheckLevel(%q) = %q, want off", s, got)
+		}
+	}
+}
+
+// TestSafetyCheckConfig_RoundTrip: the hand-editable key survives
+// Save/Load, and a config written before SC1 (no key) loads as "off" —
+// top-level backward compat is the file-format contract.
+func TestSafetyCheckConfig_RoundTrip(t *testing.T) {
+	withSeekHome(t)
+	if err := Save(Config{SafetyCheck: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SafetyCheck != "high" || got.SafetyCheckLevel() != "high" {
+		t.Errorf("safety_check round-trip: field=%q level=%q", got.SafetyCheck, got.SafetyCheckLevel())
+	}
+
+	dir := withSeekHome(t)
+	pre := `{"default_provider": "deepseek", "providers": {"deepseek": {"api_key": "sk-x"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := Load()
+	if err != nil {
+		t.Fatalf("pre-SC1 config must load clean: %v", err)
+	}
+	if old.SafetyCheckLevel() != "" {
+		t.Errorf("absent safety_check must mean off, got %q", old.SafetyCheckLevel())
+	}
+}
+
 // TestAgentsConfig_AbsentSectionCompat: a pre-P2-c config (no agents
 // key) loads with a nil map — unknown top-level keys never error, and
 // nil is the "built-ins only" signal cmd/seek branches on.

@@ -71,7 +71,7 @@ type StatusSnapshot struct {
 	UpgradeAvailable string
 
 	// SubagentsActive is the count of in-flight subagents at render
-	// time (v5 柱 G; PRD docs/prd/feature-subagent.md §4.3).
+	// time (v5 柱 G; PRD docs/prd/archive/feature-subagent.md §4.3).
 	// Zero suppresses the badge so idle sessions show nothing —
 	// the indicator's job is to remind the user "something is
 	// happening in the background", and zero count means nothing
@@ -89,7 +89,7 @@ type StatusSnapshot struct {
 	SubagentsDone int
 
 	// CronsRegistered is the count of registered cron jobs at
-	// render time (v5 柱 H; PRD docs/prd/feature-routines.md
+	// render time (v5 柱 H; PRD docs/prd/archive/feature-routines.md
 	// §4.3). Zero suppresses the badge — registering a job is
 	// a one-time action; the indicator's job is to remind the
 	// user "I have N background routines configured" when the

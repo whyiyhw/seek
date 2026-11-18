@@ -38,13 +38,14 @@ API 密钥的查找优先级从高到低：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm`）。空字符串 = 不指定，走自动检测 |
+| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm` / `opencode`）。空字符串 = 不指定，走自动检测 |
 | `providers` | object | 各 provider 的凭证配置，key 为 provider 名 |
 | `providers.<name>.api_key` | string | API 密钥 |
 | `path_prompt_done` | bool | Windows 上"添加到 PATH"提示是否已显示过 |
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
 | `session_notify_seconds` | int | 交互回合持续超过此秒数时触发推送通知。缺省 = 60s，设为 0 禁用 |
+| `safety_check` | string | DeepSeek 模型安全校验（只认 `"high"` 一档；缺省/空 = 关）。命中拒答时回合内记 `[safety: 拒答（safety_check 命中）]`。**会话启动读一次**，不支持对话中切换（见下文「模型安全校验」）|
 | `agents` | object | 子代理类型的默认路由覆写（见下节；键 = 类型名，值 = 仅路由旋钮）|
 
 ---
@@ -60,6 +61,22 @@ API 密钥的查找优先级从高到低：
 | OpenAI | `OPENAI_API_KEY` | `openai` |
 | Gemini | `GEMINI_API_KEY` | `gemini` |
 | GLM（智谱 bigmodel.cn） | `GLM_API_KEY` | `glm` |
+| OpenCode（Go 订阅） | `OPENCODE_API_KEY` | `opencode` |
+
+GLM 与 OpenCode 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
+
+### OpenCode Go 订阅车道（`--provider=opencode`）
+
+[OpenCode Go](https://opencode.ai/console/go) 是 $10/月的订阅制推理池（32 个开放权重 + 前沿模型：Kimi K3、Qwen3.8 Max、GLM-5.x、DeepSeek V4.x、Grok 4.7、GPT-6 Luna、Claude Haiku 5.5 等），**按 5 小时/周/月的请求数窗口限额，不按 token 扣费**——适合把便宜的批量任务（如 explore 子代理）放到这条车道。
+
+- **Key 获取**：在 [console.opencode.ai](https://console.opencode.ai) 生成，`export OPENCODE_API_KEY=...`（或写 `providers.opencode.api_key`，首启向导也可直接选 OpenCode 粘贴）。
+- **端点**：`https://opencode.ai/inference/go/v1/chat/completions`（OpenAI 兼容；`--base-url` 可覆盖）。
+- **默认模型**：`deepseek-v4.1-flash`（模型 id 以 [官方列表](https://opencode.ai/docs/console/models) 为准；接口下线/改名时用 `--model` 指定）。
+- **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺少这两个头的请求可能退化成按 token 扣账户余额。
+- **免费模型限制**：`*-Free` 结尾的模型只能在 OpenCode 自家客户端内使用，seek 不支持。
+- **隐私**：Go 计划默认屏蔽「用请求训练模型」的付费端点（详见官方文档）。
+
+注意：状态栏里该车道显示的美元成本是按官方 per-token 牌价的**估算展示**（订阅本身不按 token 计费）。
 
 ### 切换默认 Provider
 
@@ -104,6 +121,21 @@ seek --provider anthropic
 ### 推送通知
 
 将 cron 任务完成、autopilot 结果、长时间交互回合的结束通知推送到手机。配置方式见 [guide-webhooks.md](guide-webhooks.md)。
+
+### 模型安全校验（`safety_check`）
+
+```json
+{
+  "safety_check": "high"
+}
+```
+
+- **默认关**。开启后 DeepSeek 对模型的输入输出过一遍安全审核，命中风险时拒答（`finish_reason: "refusal"`）。seek 把拒答记为 assistant 消息的 in-band 标记 `[safety: 拒答（safety_check 命中）]`，**回合正常结束**——不报错、不重试、不中断会话。
+- 只认 `"high"` 一档（官方目前只提供这一档）；缺省 / 空 / 其它值一律视为关。
+- **会话启动时读取一次**，不支持对话中切换：该值随每个请求体发送，中途改动会改变请求字节、击穿前缀缓存（与 `/lang` 同纪律）。
+- 仅对 DeepSeek 车道生效；其它 provider 忽略此键。
+- 自用默认关的理由：拒答会削弱 agent 在安全研究、漏洞分析等合法任务上的能力，并增加延迟；seek 自身没有对外服务义务。
+- **合规注记**：若你**对外提供服务**（把 seek 接进面向他人的产品或服务），开启本参数、并承担内容安全审核、大模型登记、AI 生成内容标识等义务，属于**你（服务运营者）的法定义务侧事项**——seek 只提供这个开关，不承担审核或合规责任。
 
 ### 子代理类型路由（`agents` 段）
 

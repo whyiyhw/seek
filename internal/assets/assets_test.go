@@ -112,3 +112,39 @@ func TestStoreFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestStoreDoc mirrors the image Store suite for the document sibling
+// (feature-deepseek-app-api F3): same library, same content
+// addressing, doc extension table, doc size cap.
+func TestStoreDoc(t *testing.T) {
+	dir := t.TempDir()
+	name1, err := StoreDoc(dir, "report.pdf", []byte("%PDF-1.4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(name1, ".pdf") || len(name1) != len("ab12cd34ef56.pdf") {
+		t.Fatalf("name shape: %q", name1)
+	}
+	// Same content dedups even under a different original name.
+	name2, err := StoreDoc(dir, "quarterly.PDF", []byte("%PDF-1.4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name1 != name2 {
+		t.Fatalf("identical content must dedup: %q vs %q", name1, name2)
+	}
+	if _, err := StoreDoc(dir, "notes.txt", []byte("hi")); err == nil {
+		t.Fatal("non-doc extension must be rejected")
+	}
+	// Image extension is NOT a document (family separation, both ways).
+	if _, err := StoreDoc(dir, "shot.png", []byte("hi")); err == nil {
+		t.Fatal("image extension must be rejected by StoreDoc")
+	}
+	// Size gate at the doc cap.
+	old := MaxDocBytes
+	MaxDocBytes = 4
+	defer func() { MaxDocBytes = old }()
+	if _, err := StoreDoc(dir, "big.docx", []byte("too-long")); err == nil {
+		t.Fatal("oversize document must error")
+	}
+}

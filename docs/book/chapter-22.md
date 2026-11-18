@@ -2,7 +2,7 @@
 
 > **对应版本**：v0.6.1
 > **对应代码**：`internal/routines/`、`internal/routinescli/`、`internal/paths/`、`internal/tools/wakeup/`、`cmd/seek/`（cron dispatch + auto-tick）
-> **PRD**：[`docs/prd/v5.md`](../prd/v5.md) · [`docs/prd/feature-routines.md`](../prd/feature-routines.md)
+> **PRD**：[`docs/prd/archive/v5.md`](../prd/archive/v5.md) · [`docs/prd/archive/feature-routines.md`](../prd/archive/feature-routines.md)
 > **验收**：M11.2 + M11.3 全部落地；`go test -race ./internal/routines/... ./internal/routinescli/...` 全绿
 > **起点**：第 21 章（v5 柱 G 子代理 + Worktree）。柱 G 让 seek 在空间维度上可以分裂自己——一个 turn 内 spawn 多个隔离子代理并行干活。但 seek 仍然是"用户敲完回车才跑"，时序维度上是个空洞。柱 H 补上这一半。
 

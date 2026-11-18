@@ -648,3 +648,177 @@ func TestAuditEntry_SubagentSIDWireShape(t *testing.T) {
 		t.Errorf("round-trip drifted: %+v", back)
 	}
 }
+
+// ---- pre_prompt_inject (feature-hooks-injection §4.5, M-O3.2) ----
+
+const sampleInjectTOML = `
+[[pre_prompt_inject]]
+name = "ci-status"
+command = "cat .seek/ci-context.txt 2>/dev/null"
+max_bytes = 2048
+
+[[pre_prompt_inject]]
+name = "noisy"
+command = "uptime"
+`
+
+func TestDecode_PrePromptInjectStamped(t *testing.T) {
+	cfg, err := DecodeBytes([]byte(sampleInjectTOML), SourceUser)
+	if err != nil {
+		t.Fatalf("DecodeBytes: %v", err)
+	}
+	if len(cfg.PrePromptInject) != 2 {
+		t.Fatalf("PrePromptInject = %d, want 2", len(cfg.PrePromptInject))
+	}
+	h := cfg.PrePromptInject[0]
+	if h.Event != EventPrePromptInject || h.Source != SourceUser {
+		t.Errorf("stamps: event=%q source=%q", h.Event, h.Source)
+	}
+	if h.MaxBytes != 2048 {
+		t.Errorf("max_bytes = %d, want 2048 decoded", h.MaxBytes)
+	}
+	if cfg.PrePromptInject[1].EffectiveMaxBytes() != DefaultMaxBytes {
+		t.Errorf("unset max_bytes should default to %d", DefaultMaxBytes)
+	}
+	if cfg.IsEmpty() {
+		t.Errorf("inject hooks should make IsEmpty false")
+	}
+	// All() carries them with the right event for Validate/Gate.
+	for _, a := range cfg.All() {
+		if a.Name == "ci-status" && a.Event != EventPrePromptInject {
+			t.Errorf("All(): ci-status event = %q", a.Event)
+		}
+	}
+}
+
+func TestMerge_PrePromptInjectProjectFirst(t *testing.T) {
+	project, _ := DecodeBytes([]byte(`
+[[pre_prompt_inject]]
+name = "team ctx"
+command = "cat team.txt"
+`), SourceProject)
+	user, _ := DecodeBytes([]byte(`
+[[pre_prompt_inject]]
+name = "my ctx"
+command = "cat mine.txt"
+`), SourceUser)
+	merged := Merge(project, user)
+	if len(merged.PrePromptInject) != 2 ||
+		merged.PrePromptInject[0].Name != "team ctx" ||
+		merged.PrePromptInject[1].Name != "my ctx" {
+		t.Errorf("merged inject order: %+v", merged.PrePromptInject)
+	}
+}
+
+func TestSummarize_IncludesPrePromptInjectLast(t *testing.T) {
+	cfg, _ := DecodeBytes([]byte(sampleInjectTOML), SourceUser)
+	sum := Summarize(cfg)
+	if len(sum) != 2 {
+		t.Fatalf("Summarize = %d rows, want 2", len(sum))
+	}
+	last := sum[len(sum)-1]
+	if last.Event != EventPrePromptInject {
+		t.Errorf("last event = %q, want pre_prompt_inject", last.Event)
+	}
+	if sum[0].MaxBytes != 2048 || last.MaxBytes != DefaultMaxBytes {
+		t.Errorf("MaxBytes summaries = %d / %d, want 2048 / %d", sum[0].MaxBytes, last.MaxBytes, DefaultMaxBytes)
+	}
+}
+
+func TestStaticCheck_CoversPrePromptInject(t *testing.T) {
+	cfg, _ := DecodeBytes([]byte(`
+[[pre_prompt_inject]]
+name = "broken"
+command = "fi"
+`), SourceUser)
+	warnings := StaticCheck(&cfg, func(cmd string) error {
+		if cmd == "fi" {
+			return errors.New("syntax error")
+		}
+		return nil
+	})
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want 1", warnings)
+	}
+	if cfg.PrePromptInject[0].SkipReason == "" {
+		t.Errorf("SkipReason not stamped on the inject hook")
+	}
+}
+
+// Content-trust deny path (§4.5 精确化 2): a project-level inject hook
+// the user REFUSED to trust must vanish from the merged config — its
+// stdout can then never reach the prompt.
+func TestGate_ProjectRefused_InjectHooksDisabled(t *testing.T) {
+	dir := t.TempDir()
+	projPath := filepath.Join(dir, "project.toml")
+	writeFile(t, projPath, `[[pre_prompt_inject]]
+name = "untrusted-inject"
+command = "cat /etc/passwd"
+`)
+	store, _ := NewTrustStore(filepath.Join(dir, "trust.json"))
+	cfg, warnings := Gate("", projPath, "/abs", store, &fakePrompt{answer: false}, func(string) error { return nil })
+	if !cfg.IsEmpty() {
+		t.Errorf("refused inject project should yield empty cfg, got %+v", cfg.PrePromptInject)
+	}
+	if len(warnings) == 0 {
+		t.Errorf("expected a refusal warning")
+	}
+}
+
+// dropMalformed must cover EVERY event slice: a malformed inject hook
+// (and, since the M-O3.2 audit of this function, a malformed P3 hook
+// too) is dropped individually instead of surviving Gate.
+func TestGate_MalformedHooksDropped(t *testing.T) {
+	dir := t.TempDir()
+	projPath := filepath.Join(dir, "project.toml")
+	writeFile(t, projPath, `
+[[pre_prompt_inject]]
+name = "no-command"
+
+[[stop]]
+command = "no-name"
+
+[[pre_prompt_inject]]
+name = "fine"
+command = "true"
+`)
+	store, _ := NewTrustStore(filepath.Join(dir, "trust.json"))
+	cfg, warnings := Gate("", projPath, "/abs", store, &fakePrompt{answer: true}, func(string) error { return nil })
+	if len(warnings) == 0 {
+		t.Errorf("expected malformed-hook warnings")
+	}
+	if len(cfg.PrePromptInject) != 1 || cfg.PrePromptInject[0].Name != "fine" {
+		t.Errorf("malformed inject hooks must be dropped, kept: %+v", cfg.PrePromptInject)
+	}
+	if len(cfg.Stop) != 0 {
+		t.Errorf("malformed stop hook must be dropped, kept: %+v", cfg.Stop)
+	}
+}
+
+// TestAuditEntry_InjectedBytesWireShape: injected_bytes is omitempty —
+// rows from every other event marshal exactly like the pre-M-O3.2 wire
+// shape (web W4.6's reader must not see the key), and inject rows keep
+// the documented spelling.
+func TestAuditEntry_InjectedBytesWireShape(t *testing.T) {
+	old, err := json.Marshal(AuditEntry{TS: "t", Event: EventPreTool, Hook: "h", SessionID: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(old), "injected_bytes") {
+		t.Errorf("old-shape row grew injected_bytes: %s", old)
+	}
+	neu, err := json.Marshal(AuditEntry{Event: EventPrePromptInject, Hook: "h", SessionID: "s", InjectedBytes: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(neu), `"injected_bytes":42`) {
+		t.Errorf("inject row missing injected_bytes: %s", neu)
+	}
+	var back AuditEntry
+	if err := json.Unmarshal(old, &back); err != nil {
+		t.Fatalf("old line no longer parses: %v", err)
+	}
+	if back.InjectedBytes != 0 || back.Event != EventPreTool {
+		t.Errorf("round-trip drifted: %+v", back)
+	}
+}

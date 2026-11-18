@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,12 @@ func (b *anchorBackend) NewSession(p NewSessionParams) (NewSessionResult, error)
 
 func (b *anchorBackend) Prompt(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
 	return PromptResult{StopReason: "end_turn"}, nil
+}
+
+func (b *anchorBackend) SetConfigOption(p SetConfigOptionParams) (SetConfigOptionResult, error) {
+	// The anchor contract under test has no model menu; refuse like the
+	// real backend would when nothing was served.
+	return SetConfigOptionResult{}, errors.New("no config options on this backend")
 }
 
 // keepCwd restores the process working directory on exit —

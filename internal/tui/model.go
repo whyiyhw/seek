@@ -84,6 +84,15 @@ type predictionAttacher interface {
 	AttachPredictedNext(text string)
 }
 
+// filePrompter is an OPTIONAL sibling interface in the same shape:
+// the submit path type-asserts it only when ExpandFiles produced
+// document parts (feature-deepseek-app-api F3), so fakes without
+// document support keep compiling and their files simply don't ride.
+// *agent.Agent satisfies this structurally.
+type filePrompter interface {
+	PromptFiles(ctx context.Context, text string, images []deepseek.ImagePart, files []deepseek.FilePart) <-chan agent.Event
+}
+
 // Options bundles everything cmd/seek hands the TUI. Hooks let in-app
 // slash commands (/reset, /model, /yolo) update host-owned state.
 type Options struct {
@@ -100,6 +109,14 @@ type Options struct {
 	// the text with in-band marker blocks appended plus the image
 	// parts to attach to the outgoing user message. nil = identity.
 	ExpandInput func(model, text string) (string, []deepseek.ImagePart)
+
+	// ExpandFiles, if set, is the submit-time document router
+	// (feature-deepseek-app-api F3): same station as ExpandInput, one
+	// step later — file marker blocks append after image markers. The
+	// hook uploads inline, so the parse fee and file_id settle before
+	// the prompt leaves; it never errors — failures arrive as in-band
+	// notes. nil = identity.
+	ExpandFiles func(ctx context.Context, model, text string) (string, []deepseek.FilePart)
 
 	// GoalJudge backs the `/goal` loop (M-goal.2): after each turn it
 	// assesses whether the goal condition is met. nil = `/goal` is
@@ -186,7 +203,7 @@ type Options struct {
 	Worktrees *worktree.Manager
 
 	// Keymap is the v3 柱 C user-customisable keybindings table
-	// (PRD docs/prd/feature-tui-ergonomics.md §4). nil = use the
+	// (PRD docs/prd/archive/feature-tui-ergonomics.md §4). nil = use the
 	// hard-coded defaults from internal/keymap.NewDefault(); the TUI
 	// resolves through m.keymap() which always returns non-nil so
 	// existing tests don't need to construct one.

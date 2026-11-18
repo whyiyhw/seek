@@ -4,7 +4,7 @@
 
 > `seek cron` runs your scheduled prompts, model-self-scheduled wakeups, and external triggers from your machine's native scheduler — **seek itself has no resident process**. Setup means teaching the OS scheduler to run `seek cron tick` every minute; seek handles the rest.
 
-本指南覆盖三平台的 schedule 注册、env 注入、OS 通知现状，以及外部触发文件桥。CLI 参考见 `seek cron help`；架构与设计见 [`docs/prd/feature-routines.md`](./prd/feature-routines.md)。
+本指南覆盖三平台的 schedule 注册、env 注入、OS 通知现状，以及外部触发文件桥。CLI 参考见 `seek cron help`；架构与设计见 [`docs/prd/archive/feature-routines.md`](./prd/archive/feature-routines.md)。
 
 ---
 
@@ -156,7 +156,7 @@ tail -F ~/.seek/cron/runs/*.jsonl   # 看最近 run 的 stderr
 | Linux | `notify-send` (libnotify) | ✅ 桌面（`$DISPLAY`/`$WAYLAND_DISPLAY` 都空时自动 no-op） |
 | Windows | 无 | ⚠️ **当前 no-op**——`internal/routines/notify_windows.go` 显式返回 nil |
 
-Windows 用户启用 `--notify always` 不会收到任何弹窗——这是 v0.6.1 已知限制。两个可行路径都有代价（BurntToast PowerShell 模块要 `Install-Module`；WinRT 要 CGO，破坏 zero-dependency 立场）。v0.6.x dot 计划补 BurntToast 适配，详见 [`feature-routines.md §3.8`](./prd/feature-routines.md)。
+Windows 用户启用 `--notify always` 不会收到任何弹窗——这是 v0.6.1 已知限制。两个可行路径都有代价（BurntToast PowerShell 模块要 `Install-Module`；WinRT 要 CGO，破坏 zero-dependency 立场）。v0.6.x dot 计划补 BurntToast 适配，详见 [`feature-routines.md §3.8`](./prd/archive/feature-routines.md)。
 
 **临时方案**：Windows 用户依赖 `seek cron list` 看 `last_status` + `tail -F %USERPROFILE%\.seek\cron\runs\*.jsonl` 查最近运行，而不是依赖通知。
 
@@ -275,7 +275,7 @@ EOF
 | 解析 env 文件报错就 spawn fail | **设计如此**——比静默更安全 | 修文件语法；再跑 |
 | `tick.lock` held 看到 "skipped" | 上一次 tick 还没退出（应该 < 1 分钟） | 极少见；若每分钟都 skip，看是否上一 tick 死锁 |
 
-CLI 帮助：`seek cron help`。完整 PRD：[`feature-routines.md`](./prd/feature-routines.md)。
+CLI 帮助：`seek cron help`。完整 PRD：[`feature-routines.md`](./prd/archive/feature-routines.md)。
 
 ---
 

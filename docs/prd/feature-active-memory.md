@@ -221,7 +221,7 @@ func (h *Hook) OnPostTurn(ctx context.Context, ev hooks.PostTurnEvent) {
 - `internal/memory/dream.go` — 阶段 2 后参考改造为"事件触发"的评估器骨架
 - `internal/hooks/hooks.go` — `PostTurnEvent`、`SessionEndEvent`（已有，可直接接）
 - `pkg/agent/agent.go` — `NotifyPostTurn`（已有，每轮触发，是阶段 1 的事件源）
-- `docs/prd/v1.md` §6 — 原始 decay 模型（设计假设的源头）
+- `docs/prd/archive/v1.md` §6 — 原始 decay 模型（设计假设的源头）
 
 ## 九、为什么这是"主动智能"的核心
 

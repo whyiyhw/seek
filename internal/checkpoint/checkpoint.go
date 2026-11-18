@@ -1,5 +1,5 @@
 // Package checkpoint implements seek's two-layer "safety net" for
-// model-driven changes (PRD v3 柱 A · docs/prd/feature-checkpoint.md).
+// model-driven changes (PRD v3 柱 A · docs/prd/archive/feature-checkpoint.md).
 //
 // Two layers, intentionally complementary:
 //

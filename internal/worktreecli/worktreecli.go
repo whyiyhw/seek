@@ -1,5 +1,5 @@
 // Package worktreecli implements the `seek worktree ...` CLI
-// surface (PRD docs/prd/feature-subagent.md §3.8 + §9 v0.6.x
+// surface (PRD docs/prd/archive/feature-subagent.md §3.8 + §9 v0.6.x
 // dot). Mirrors the structure of internal/checkpointcli /
 // internal/hookscli / internal/skillcli: a Run(args, stdout,
 // stderr) entry point that dispatches verbs to per-subcommand

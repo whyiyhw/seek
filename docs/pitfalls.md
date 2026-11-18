@@ -136,6 +136,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: on this codebase, "register a hook" is a broadcast to every agent sharing the registry — parent-session-scoped hooks need explicit exclusion at the child boundary, and the exclusion must be lazy (closure) when the parent registry keeps growing after the children's factory is built. Any future parent-only PrePrompt hook (resume revival, controlplane inbox) rides the same `CloneWithout` seam.
 - **Refs**: `internal/hooks/registry.go:CloneWithout`, `internal/subagent/notifier.go`, `cmd/seek/main.go` (`subagentRunnerOpts.hooksFn`), `docs/prd/feature-orchestration.md` §4.1 D2
 
+### dropMalformed must list every Config event slice — Validate sees all, drop saw five
+- **Saw**: wiring `pre_prompt_inject` through Gate (M-O3.2) surfaced that a malformed hook (empty `name`/`command`) on any P3 observer event (`subagent_start`/`subagent_stop`/`stop`/`pre_compact`/`notification`) SURVIVED Gate: `Validate` walks `Config.All()` (every event) and errors, but `dropMalformed` only rebuilt the five legacy slices — P3 hooks were copied through as-is, so a nameless hook could reach dispatch
+- **Why**: `dropMalformed` predates the P3 events and nothing ties the two functions together; `All()` grows with every new event, the drop list doesn't unless the author remembers to check
+- **Fix**: `dropMalformed` rebuilds every slice including `PrePromptInject`; `TestGate_MalformedHooksDropped` locks a malformed `stop` + `pre_prompt_inject` hook both being dropped (card c_m2whz2)
+- **Lesson**: when a validation function fans over `All()` but its repair function enumerates fields by hand, adding an event silently desynchronizes them — every new `Config` event field must touch BOTH, and a Gate test with a malformed hook on the new event is the cheap lock
+- **Refs**: `internal/hooksconfig/load.go:dropMalformed`, `internal/hooksconfig/hooksconfig.go:Validate`, `internal/hooksconfig/hooksconfig_test.go:TestGate_MalformedHooksDropped`
+
 ## Skill distill (auto path)
 
 ### Same session re-entering the distill window double-counted recurrence
@@ -376,7 +383,7 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: `m.pendingSkill` is only consumed by `consumeArm`, which runs at the two **user-typed** submission sites (non-streaming submit, streaming queue/steer). Programmatic submissions (`/review`, `/code-review`) call `submit()` directly and **bypass** `consumeArm` — so the arm survives the programmatic message and wrongly prepends "Please use the X skill" to the user's **next hand-typed** message.
 - **Fix**: bake the `Please use the "code-review" skill` instruction directly into the injected prompt text (`codeReviewPrompt`'s first line); never touch `m.pendingSkill` from a slash command. Commit (this one).
 - **Lesson**: `m.pendingSkill` is for *user-initiated* arming only. A slash command that wants the model to use a skill must put the instruction in the prompt it submits, because the arm-wrapper does not run on the programmatic path.
-- **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/feature-code-review.md` §5.3
+- **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/archive/feature-code-review.md` §5.3
 - **已吸收**: the skill arm / `consumeArm` wrapper was removed entirely — /skill fires immediately now → commit `d208986` ("remove skill arm mechanism, fire immediately on /skill use")
 
 ### Adding a builtin skill is prefix-cache-safe ONLY because the manifest is deterministically ordered
@@ -447,6 +454,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 
 ## Agent loop
 
+### Static prompt prose can name tools the request's tools array won't carry — by design
+- **Saw**: wiring `sysprompt.Header.MCPSection` (MCP-D2), the section is assembled right after `mcptool.LoadServers`, but the `-tools` whitelist (`applyToolsWhitelist`) narrows the registry much later — so under `seek -tools read,grep` with MCP servers configured, the prompt's MCP section names tools that are not callable that session. Tempting to "fix" by filtering the section through the final registry.
+- **Why**: startup order is load-bearing — `session.New` freezes the composed prompt BEFORE the whitelist runs (the whitelist itself must see the full registry to validate `-tools` names, including MCP tools, per its own doc). Filtering the section would mean restructuring startup for a lane (bare-core comparison, v8·T1) that explicitly deviates from the default composition.
+- **Fix**: kept the section static and documented the posture inline (`cmd/seek/main.go`, mcpSection declaration): the section describes what loaded; the request's tools array is the callable truth. Same precedent as rootTpl listing `fim_complete` docs on non-DeepSeek providers where the tool never registers.
+- **Lesson**: seek's system prompt is static prose describing the tool landscape, NOT a mirror of the per-request tools array. Don't couple prompt assembly to registry mutation order; if a lane narrows tools, the prose being broader is accepted (and the model discovers unavailability on the refusal, like references-without-LSP).
+- **Refs**: `cmd/seek/main.go` (mcpSection comment, applyToolsWhitelist), `internal/sysprompt/sysprompt.go` (rootTpl static tool docs), `docs/prd/feature-mcp-client.md` §3.1
+
 ### A refusal the model does not learn from is a pure tax — auto-fix unambiguous intent instead
 - **Saw**: the git tool's duplicated-subcommand guard (`git diff --stat` arriving as subcommand "diff" + args ["diff","--stat"]) refused with a precise, actionable error naming the correct shape. Real transcripts showed DeepSeek making the SAME mistake twice in four consecutive calls — recovering each time after the refusal, then repeating the shape on the next call from scratch. Each occurrence cost a full wasted round trip.
 - **Why**: an in-error correction teaches only within the turn it fires in; the next call is built fresh from the schema description and conversation attention, not from the accumulated refusals. When the emitting model has a systematic arg-construction tic, per-call refusals are a recurring cost with no compounding benefit.
@@ -515,14 +529,14 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: `exec.Cmd{}` with `cmd.Env == nil` "inherits the current process's environment" — but the "current process" here is `seek cron tick`, itself invoked by launchd/systemd/cron with whatever env THOSE handed it. launchd typically gives `PATH=/usr/bin:/bin` and not much else; systemd user units inherit only what `EnvironmentFile=`/`Environment=` named; classic cron(1) often has no `HOME` and a stripped `PATH`. The interactive-shell env never crosses the boundary. The bug was unobservable in tests (the test harness runs in the dev shell with everything set) and only surfaced post-install on real user machines
 - **Fix**: `DefaultSubprocess` now sets `cmd.Env` EXPLICITLY (`os.Environ()` + opt-in `~/.seek/cron/env` overlay via `LoadEnvFile` + `MergeEnv`). The overlay is dotenv-format (KEY=VALUE / `#` comments / quote-stripping / no shell expansion) and a parse error in it FAILS the spawn loudly rather than silently dropping a misformatted line. systemd users get bonus convenience: point `EnvironmentFile=` at the same file. Commit (this one)
 - **Lesson**: any `cmd.Env = nil` in code that spawns a subprocess inside a daemon / scheduler / hook is a latent env-injection failure — the inherited env shape depends on who invoked the parent, which is hidden from the test harness. Default to explicit `cmd.Env = ...` at every spawn site in this category, even if today's behaviour is identical, so the path is auditable. Also: any "secret injection" mechanism MUST fail loud on misconfig — a typo'd env file that silently runs without the API key is far worse than one that refuses to launch
-- **Refs**: `internal/routines/env.go`, `internal/routines/tick.go:DefaultSubprocess`, `internal/paths/paths.go:CronEnv`, `docs/prd/feature-routines.md §3.9`
+- **Refs**: `internal/routines/env.go`, `internal/routines/tick.go:DefaultSubprocess`, `internal/paths/paths.go:CronEnv`, `docs/prd/archive/feature-routines.md §3.9`
 
 ### `cache.Tracker.AdoptChild` had no resume-double-count guard — informal contract was load-bearing
 - **Saw**: audit of v5 柱 G shipping state found `cache.Tracker.AdoptChild` documented a SAFETY contract ("do not adopt a child whose token usage has already been folded into this Tracker's baseUsage") but enforced nothing. Future resume code that restored prior-session subagent Trackers from disk and re-adopted them post-`SetBase` would silently double-count those tokens in `Cumulative()` / `CumulativeCost()` — wrong status-bar dollar figure, no panic, no log
 - **Why**: AdoptChild's prior validation only blocked spawn-depth > 1 (nested children panic). The harder-to-spot case — a child whose `turns` or `baseUsage` are non-zero being adopted by a `SetBase`'d parent — passed through. The whole point of `SetBase` is to seed `baseUsage` with last-session's cumulative INCLUDING every child that ran in that session; then walking a re-adopted child via the `children` slice adds those same tokens a second time. Production today doesn't trigger it (children Trackers die with their session and aren't restored), but the doc-only contract meant any future "show me prior subagents in the status bar" code path could land the bug
 - **Fix**: add `Tracker.hasBase bool`, set by `SetBase`. `AdoptChild` now captures `childHasUsage` under `child.mu` (same critical section as the nesting check), and after pointer-dedup panics if `t.hasBase && childHasUsage`. Pointer-dedup runs FIRST so the spawn-retry idempotence path still works. Tests pin both panicking branches (Recorded turns; child SetBase) and both pass-through branches (fresh child after resume; recorded child without resume — used by the existing idempotence test). Commit (this one)
 - **Lesson**: an "informal contract" doc comment is a regression deferred, not avoided. If a check is cheap (here: a single bool flag set + one bool conjunction) and the failure mode is silent-mis-pricing, write the runtime guard. Defense in depth at the data-structure boundary catches future callers the original author never imagined; the existing nested-children panic is the precedent — same pattern, different invariant
-- **Refs**: `internal/cache/cache.go:AdoptChild`; `docs/prd/feature-subagent.md §8 risk "resume cost 双重计数"`; tests `TestTracker_AdoptChild_DoubleCountAfterResumePanics`, `TestTracker_AdoptChild_DoubleCountGuardCoversChildBase`, `TestTracker_AdoptChild_FreshChildAfterResumeOK`, `TestTracker_AdoptChild_NonFreshChildWithoutResumeOK`
+- **Refs**: `internal/cache/cache.go:AdoptChild`; `docs/prd/archive/feature-subagent.md §8 risk "resume cost 双重计数"`; tests `TestTracker_AdoptChild_DoubleCountAfterResumePanics`, `TestTracker_AdoptChild_DoubleCountGuardCoversChildBase`, `TestTracker_AdoptChild_FreshChildAfterResumeOK`, `TestTracker_AdoptChild_NonFreshChildWithoutResumeOK`
 
 ### `json.Unmarshal` silently drops unknown fields — LLM typos produce useless errors
 - **Saw**: model called `list_dir({"directory": "/path", "depth": 1})` (wrong field name). Error returned: `list_dir: path is required` — no mention of `directory` being unknown, no hint about valid fields. Model retried with identical args and hit the same wall
@@ -552,6 +566,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: when a sentinel enum's zero value is a meaningful category, constructors that bypass the loader must set it explicitly; consider making the zero value the "unset/invalid" case for new enums.
 - **Refs**: `internal/agenttypes/agenttypes.go` (`Origin`), `internal/subagent/manager.go` (`resolveType`)
 
+### `finish_reason:"refusal"` with empty content is not an "empty response" — and its marker must stream as a delta
+- **Saw**: adding the `safety_check` opt-in (SC1), a refusal response (HTTP 200, zero deltas, `finish_reason:"refusal"`) hit the empty-response guard and surfaced `agent: model returned an empty response` — a documented, deliberate outcome reading as an upstream failure. Fixing that (in-band marker + nil error) then rendered a blank assistant block in the TUI.
+- **Why**: two separate assumptions. (1) The empty guard classifies by content shape, not finish_reason — a refusal is the one empty that IS the final answer. (2) `MessageEnd`'s `Message` is the persistence/side-channel view; the TUI commits the deltas it accumulated (`m.curContent`), so content injected only at end-of-turn never reaches the screen.
+- **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
+- **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
+- **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+
 ## DeepSeek API
 
 ### Server web tools (`deepseek_read_url`/`deepseek_web_search`) have NO working coexistence shape with function tools — the 200 silently strips them
@@ -574,7 +595,7 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 ### Prefix cache hits are best-effort and short prompts don't trigger
 - **Saw**: three back-to-back identical short prompts (110 tokens each) all showed `prompt_cache_hit_tokens=0`
 - **Why**: DeepSeek's prefix cache is disk-backed and "best effort". A prefix needs to be at least ~64 tokens (and there's no SLA — the server may evict even longer ones)
-- **Fix**: nothing to "fix" code-wise; documented in `docs/prd/v0.md §4.8.1`. Our M2 smoke (system prompt + 5 tools = ~2KB prefix) consistently hits 70%+ across turns; the M0 11-token smoke can't
+- **Fix**: nothing to "fix" code-wise; documented in `docs/prd/archive/v0.md §4.8.1`. Our M2 smoke (system prompt + 5 tools = ~2KB prefix) consistently hits 70%+ across turns; the M0 11-token smoke can't
 - **Lesson**: "cache hit ratio" benchmarks should always use realistic-sized prompts; otherwise you'll conclude "the cache doesn't work" when it does
 
 ### Empty tool result + `omitempty` on `Message.Content` → "missing field `content`" from DeepSeek
@@ -611,7 +632,7 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: two compounding causes. (1) Denominator: ratio was `fimCalls / totalToolCalls`, which counts `read`/`bash`/`grep` — tools that *can't* use FIM — diluting the numerator. (2) Pairing constraint: a `fim_complete` call doesn't write to disk; its output must be applied by a subsequent `edit` (book ch6 §6.5). So `FIM / (FIM+edit)` caps at ~50% even when the model takes the FIM path every chance it gets. (3) The model's training corpus also biases toward `edit`/`write` for general-purpose tools, but that's secondary to the math.
 - **Fix**: PRD §6 acceptance criterion was revised in commit `0e4153e` from "ratio ≥ 50%" to per-task absolute count `FIMMinCalls` (`self-hosting: 0`, `fim-patch: 1`). The ratio still appears in the JSON report for visibility but no longer participates in the pass/fail verdict. Designing a meaningful ratio metric (candidate: FIM-saved tokens / total prompt tokens) was deferred to v1.1, when there's more real-world usage data to anchor it.
 - **Lesson**: when a metric's denominator includes terms that can never be the numerator, the ceiling is structurally lower than you think. Verify the upper bound of any "X / Y ≥ Z%" metric *before* setting Z, especially for pairing constraints like "every FIM needs a follow-up edit". An aspirational threshold that turns out to be mathematically unreachable trains everyone to ignore the metric.
-- **Refs**: `cmd/seek/benchmark.go`, `docs/prd/v0.md §6 / §8`, commit `0e4153e`
+- **Refs**: `cmd/seek/benchmark.go`, `docs/prd/archive/v0.md §6 / §8`, commit `0e4153e`
 
 ### Streamed tool calls arrive as deltas keyed by `index`
 - **Saw**: first attempt at handling tool calls assumed each chunk contained a complete `tool_call` — wound up with split, garbled JSON in arguments
@@ -711,6 +732,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: when a price page has per-language currency columns, diff like-for-like currency (or convert with the page's own implied rate) before declaring a rate change. Routing arrangements are as volatile as prices: the "v4-pro is Flash-routed" claim from the 2026-09-10 entry above was true for two months, then reversed — re-read the legacy-id note on every pricing check, not just the numbers
 - **Refs**: `internal/pricing/pricing.go`, `pkg/deepseek/types.go`, docs/prd/feature-deepseek-app-api.md §0, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin)
 
+### The tools-family rates have LEFT the pricing pages entirely (2026-11-18 check)
+- **Saw**: pricing.go's ASR/TTS comments say "$0.116/h / $0.45 per 10k listed natively on the English pricing page (2026-11-16 check)" — but on 2026-11-18 BOTH pricing pages list only model tokens (en keeps Search/Fetch $0.75/1K; zh doesn't even keep those). File-parsing (¥1.5/千页, PRD feature-deepseek-app-api §1.2/§6) appears on NEITHER page — its live source is the Files API / document-parsing guide pages
+- **Why**: the tools family (OCR/ASR/TTS/file parsing) is documented on per-tool guide pages, not the quick-start pricing page; the pricing page's tool coverage drifts (search/fetch stayed on en, the rest silently vanished). A future rate bump that opens the pricing page first will conclude the constants are unsourced
+- **Fix**: parsePerPageUSD (F3) anchored on the PRD's ¥1.5/千页, USD derived at the search row's own documented native ratio (¥5/1K → $0.75/1K ⇒ $0.225/1K pages) with the derivation in the constant's comment; list-price-only posture (no discounts modelled) unchanged
+- **Lesson**: before bumping any tools-family constant, check the tool's own guide page (api-docs.deepseek.com/guides/files_api, /asr, /tts, …), not quick_start/pricing — and re-verify the guide page too, because that's where these prices live now. Where only a CNY figure exists, convert at the ratio the page natively documents for a sibling tool rather than inventing a rate
+- **Refs**: `internal/pricing/pricing.go` (`parsePerPageUSD` comment), docs/prd/feature-deepseek-app-api.md §1.2/§6, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin, both checked 2026-11-18)
+
 ### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
 - **Saw**: an effort:max session on a long (99k prompt, 99% cache) turn died with `response truncated (finish_reason=length, max_tokens=16384)` after a hidden-reasoning stretch — the whole 16k completion budget went to `reasoning_content`, content arrived empty or cut at the start. A sibling turn produced the clean-empty variant (`model returned an empty response`)
 - **Why**: seek sends `max_tokens` explicitly (default 16384, a lineage of 4096→8192→16384 raises that all predate thinking-mode semantics). DeepSeek's API, when `max_tokens` is OMITTED, defaults to 8K non-thinking / **64K thinking** (`reasoning_effort=max`) — so the explicit 16k actively undercuts the budget the endpoint itself would grant for the exact mode /effort max selects, and reasoning + content share one budget (the suggested-reply entry below already documented the burn)
@@ -799,11 +827,18 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: seek's tool `ctx` is the **turn** ctx — cancelled when the agent turn completes or is interrupted. Foreground bash WANTS that (a hung command dies with the turn). A background job's whole point is to outlive the turn that started it; binding it to the turn ctx is a category error
 - **Fix**: `runBackground` uses plain `exec.Command` (no ctx) and registers a kill closure with the session-scoped `bgjob.Manager`. Cleanup is via `monitor(action=kill)` or `Manager.Shutdown()` at session end — never turn cancellation. The *observer* (`monitor wait`) IS bound to the turn ctx, so Esc stops watching without killing the job
 - **Lesson**: separate the two lifetimes explicitly — turn-scoped (foreground exec, wait/observe) vs session-scoped (the background process itself). When a value should outlive the turn, the turn ctx is the wrong leash. Tested with an already-cancelled ctx in `TestBash_Background_IgnoresTurnCtx`
-- **Refs**: `internal/tools/bash/bash.go:runBackground`, `internal/bgjob/bgjob.go` (Shutdown), `internal/tools/monitor/monitor.go` (wait propagates ctx.Err), `docs/prd/feature-bash-monitor.md` §4 D5
+- **Refs**: `internal/tools/bash/bash.go:runBackground`, `internal/bgjob/bgjob.go` (Shutdown), `internal/tools/monitor/monitor.go` (wait propagates ctx.Err), `docs/prd/archive/feature-bash-monitor.md` §4 D5
 
 ---
 
 ## Tooling / environment
+
+### jq without input files and without -n runs the filter zero times — empty output, exit 0
+- **Saw**: `table=$(jq -r --slurpfile a f1 --slurpfile b f2 '<program>')` in a script returned an EMPTY string with exit code 0 — not even the program's constant-string lines printed — so the script happily shipped a header-only "table"
+- **Why**: with no input files and no `-n`, jq runs the filter once per JSON value on **stdin**; a script has no stdin lines, so the filter executes 0 times. Output empty, rc 0 — the classic silent-swallow. (Sibling trap in the same fix: with `--slurpfile v FILE`, `$v` is *already* the array of the file's JSON values — `$v[0]` is the first VALUE, not the value array; indexing into a row object then iterating it with `map(.case)` walks the object's string fields and dies with `Cannot index string with string "case"`.)
+- **Fix**: `jq -n -r --slurpfile …` in `eval/ablate.sh`, plus an explicit `[[ -z "$table" ]] && exit 2` guard so a future silent-empty can never pass as success. `$v` used directly as the row array.
+- **Lesson**: a jq program whose inputs are all `--slurpfile` variables needs `-n`; and any `$(jq …)` whose output feeds a generated artifact should assert non-empty — jq has failure modes that look exactly like success
+- **Refs**: `eval/ablate.sh` (the `-n` note above the table jq + the empty-table guard)
 
 ### Grep tool with broad pattern can deadlock the agent — no recovery via /compact
 - **Saw**: User reports that running `grep "llm"` against a large codebase twice fills the model's context completely. `/compact` can't recover because the compact call itself requires another LLM round-trip through an already-overflowed history → hard deadlock
@@ -964,6 +999,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Fix**: ① 改 `chrome.exitCode !== null` 同步查活；② `BASE="${BASE%/}"` 去尾斜杠；③ 快照断言改 contains（三段俱全 + `pres>0` + 无 `⚙` 残留），不做全文相等。另给驱动加了 120s watchdog + 每景 trace——第一版挂死时零输出，没法定位
 - **Lesson**: 验收脚本自己也是会被卡死的代码：任何"等外部进程"的循环都要有总闸超时和阶段 trace；拼 URL 的 base 永远先去尾斜杠（307 是静默杀手）；对 DOM 文本断言只 contains 不 equal，除非页面是你手拼的纯文本节点
 - **Refs**: `scripts/web-stream-headless.mjs` `web-stream-manual.sh`, `internal/controlplane/webfrontend.html` renderBody
+
+### 新验收脚本忘了登记 selftest.sh → 验证车道拒跑、整卡 unverified 停人审（已机制化：登记制→发现制）
+- **Saw**: 连续两张卡（c_6py7gh、c_zcygo2）的验证车道均拒绝跑新写的验收脚本——don't-ask 白名单只放行 `bash scripts/selftest.sh:*` 一条，直接 `bash scripts/<新脚本>` 不在名单，而新脚本又没登记进 selftest.sh 的 `target_of`/`ALL_NAMES`——整卡落 unverified 停人审，主会话手跑补证收口（#7848）
+- **Why**: 覆盖与否寄托在「写完脚本的会话记得回到另一个文件加两行登记」上——写完脚本的那一刻任务感已完整，登记这步恰好最容易被忘
+- **Fix**: selftest.sh 改发现制（c_aqbdaz）：名单 = `scripts/*.sh` 基名全量 − 显式排除表（逐项注理由）；裸跑非自测形态但自带自测 flag 的经 `dispatch_args` 字面量臂传参（kernel-deps → `--self-test`）。参数仍禁构造路径——只与 glob 派生基名比对、含 `/` 或 `..` 先拒，c_ck6djl 否决边界（白名单层禁通配、防 /tmp 穿越）原样保留
+- **Lesson**: 依赖「作者记得去另一个文件补第二步」的机制，覆盖一定在第一步自我感觉完成时漏掉——把默认值倒过来：新工件默认被覆盖、不适宜的显式排除并注明理由，而不是默认不覆盖、记得了才登记
+- **Refs**: `scripts/selftest.sh` 头注释，butler `docs/mechanisms.md` selftest 行，`scripts/eval-trend-test.sh`（wrapper 形态先例）
 
 ---
 
@@ -1451,6 +1493,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when a property is maintained by discipline rather than by construction, it needs a test that fails when the discipline lapses — and for provider-scored properties that test has to hit the provider. Mocks establish the format; one key-gated e2e establishes the behaviour. (dsh reaches the same conclusion at `packages/core/agent-loop/tests/request-cache.e2e.ts`; its docstring calls prefix stability "corollary #1" of log-derived requests.)
 - **Refs**: `pkg/agent/cache_e2e_test.go`, `docs/dsh-analysis.md` §8.2
 
+### Injecting filesystem failure for cross-OS tests: chmod lies, file-as-dir is honest
+- **Saw**: (design-time, M-B1) testing "a failed skill write leaves no partial state" wanted a read-only parent dir (`chmod 0500`) to force `MkdirAll`/`WriteFile` to fail. On Windows the directory read-only bit doesn't block `mkdir` (chmod semantics only apply to files), so the injection silently succeeds and the test fails on the third CI OS.
+- **Why**: Go's `os.Chmod` on Windows toggles the FILE read-only attribute; directories keep their ACLs. Related trap: `stat("<file>/child")` returns `ENOTDIR` on Unix but maps to `ENOENT` on Windows, so even asserting *which* error branch fired is not portable.
+- **Fix**: inject with a regular FILE parked where a directory must go (e.g. `<proj>/.seek` as a file) and assert the CONTRACT (error returned + zero residue via a walk), never the branch. `internal/skillmgr/writeproject_test.go` `TestWriteProjectSkill_FailureLeavesNoPartialState`.
+- **Lesson**: on a three-OS CI, failure injection must fail for the same reason everywhere; when it can't, broaden the assertion from "this branch errored" to "the invariant held" (error out, nothing written).
+- **Refs**: `internal/skillmgr/writeproject_test.go`, `.github/workflows/ci.yml`
+
 ## Tool decorators
 
 ### A Tool decorator silently drops the optional interfaces the agent upcasts to
@@ -1640,7 +1689,7 @@ If you're new to the project, skim entries in this order:
 - **Why**: the tool layer deliberately has two cwd conventions — policy-anchored (file tools + bash, so worktree subagents can't leak into the main tree) and process-anchored (walking tools + exec defaults). A session-level cwd must move BOTH anchors or the toolbox splits across directories.
 - **Fix**: `acp.AnchorSession` (`internal/acp/session.go`): `os.Chdir(abs)` + `Policy.Reanchor(abs)` as one atomic handshake step; cwd that can't be entered fails the session loud (-32000) instead of silently running in the daemon dir. `Policy.Reanchor` (`internal/permission`) is the one sanctioned post-construction cwd change — tools hold the `*Policy` by pointer, so the re-anchor reaches them without rebuilding the registry.
 - **Lesson**: "make cwd effective" in this codebase is TWO operations, not one. Any future per-session cwd consumer (multi-session backlog ③) must go through both anchors — or enumerate which convention each affected tool uses. Zed-compat falls out for free: it sends the spawn dir as cwd, so the anchor is a no-op there.
-- **Refs**: `internal/acp/session.go`, `internal/permission/permission.go` (Reanchor), `cmd/seek/main.go` (acpBackend.NewSession), `docs/prd/feature-paseo-provider.md` §2.2 D-1
+- **Refs**: `internal/acp/session.go`, `internal/permission/permission.go` (Reanchor), `cmd/seek/main.go` (acpBackend.NewSession), `docs/prd/archive/feature-paseo-provider.md` §2.2 D-1
 
 ### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
 - **Saw**: implementing SEEK_ACP_YOLO, the obvious wiring was `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent at main.go:1732). It would have been silently half-broken: the gate would allow bash while the system prompt header still read `Mode: deny` (and the bash tool description says "Refused under the current permission mode"), so the model would likely never attempt a bash call at all.
@@ -1652,16 +1701,22 @@ If you're new to the project, skim entries in this order:
 ### Headless ACP can't choose its provider by flag — and a stray ANTHROPIC_API_KEY in the inherited shell wins the auto-detect
 - **Saw**: 2026-11-13 paseo provider 首次无头冒烟：想显式钉 DeepSeek，但 `seek acp --provider=deepseek` 里 flag 被整个无视；同时 daemon 继承的 shell 环境残留 `ANTHROPIC_API_KEY`（而 DeepSeek key 只在交互 shell 里 export、不在 daemon env / config），车道的自动探测静默选中 Anthropic，首轮就用 claude-sonnet-4 跑起来——进程健康、模型不对。
 - **Why**: 两层叠加。①`seek acp` 以 `os.Args[1]=="acp"` 判定车道，Go 的 `flag.Parse` 在第一个位置参数处就停止——ACP 车道一个命令行 flag 都不消费，`--provider` 是死字。② `buildProvider` 的解析顺序是 `--provider` flag → DeepSeek key → Anthropic key → OpenAI → Gemini → GLM → `cfg.DefaultProvider`；flag 恒空时，DeepSeek key 不在 env/config 就直接落到下一家，残留的 Anthropic key 顺位上位，无任何告警。
-- **Fix**: 无头车道的 provider 姿态只能走 env/config：paseo provider 块的 `env` 显式带 `DEEPSEEK_API_KEY`（或写进 `~/.seek/config.json` 的 providers 段，`config.KeyFor` 会读到）；冒烟判据补一条——首轮实际模型必须是 DeepSeek（看 `/model` 等价的启动日志或回复里的 model），"进程起来了"不算通。本卡 c_vv2mde 仅记录，未改代码。
+- **Fix**: 无头车道的 provider 姿态只能走 env/config：paseo provider 块的 `env` 显式带 `DEEPSEEK_API_KEY`（或写进 `~/.seek/config.json` 的 providers 段，`config.KeyFor` 会读到）；冒烟判据补一条——首轮实际模型必须是 DeepSeek（看 `/model` 等价的启动日志或回复里的 model），"进程起来了"不算通。本卡 c_vv2mde 仅记录，未改代码。→ 2026-11-18（c_6thhqc）补：`SEEK_ACP_PROVIDER`/`SEEK_ACP_MODEL` env 钉定落地（`internal/acp/headless.go`，`buildProvider` 前注入）+ `session/set_config_option` 运行时换车道，本条"未改代码"已成历史；"冒烟必须验实际选了谁"的判据照旧。
 - **Lesson**: 无 flag 车道（acp）的启动姿态——provider / 权限 / 模型——只能经 env 或 config 表达；自动化环境继承的 env 不是干净的，冒烟必须验"实际选了谁"，不能验"进程活着"。provider 自动探测的优先级对残留 key 零抵抗，daemon 侧要显式钉死。
-- **Refs**: `cmd/seek/main.go`（`flag.Parse` ≈782、`acpLane` ≈933、`buildProvider` ≈2763）, `internal/config/config.go:KeyFor`, `internal/acp/headless.go`, `docs/prd/feature-paseo-provider.md` §3.3, `docs/guide-zed.md` §5.1
+- **Refs**: `cmd/seek/main.go`（`flag.Parse` ≈782、`acpLane` ≈933、`buildProvider` ≈2763）, `internal/config/config.go:KeyFor`, `internal/acp/headless.go`, `docs/prd/archive/feature-paseo-provider.md` §3.3, `docs/guide-zed.md` §5.1
 
 ### ProjectID hashes the path STRING, not the directory — one physical dir via /tmp and /private/tmp is two projects
 - **Saw**: 2026-11-13 paseo smoke (c_bnjrw5, D-1 verification): the same physical sandbox reached as `/tmp/...` and `/private/tmp/...` produced two different ProjectIDs (be6a800f… vs 6e7915a5…) — i.e. two forked project-identity namespaces under `~/.seek/projects/`.
 - **Why**: `paths.ProjectID` = `sha256(absPath)[:16]`, byte-for-byte. On macOS `/tmp` is a symlink to `/private/tmp`, and Go's `os.Getwd` returns the shell's *logical* `$PWD` whenever it stats equal to `.` (verified empirically: same cwd, `PWD=/tmp/...` → `/tmp/...`; PWD unset → `/private/tmp/...`). So the spelling depends on how the process arrived, not on where it is.
 - **Fix**: decision c_4c6dar — keep `ProjectID` pure (Option A: canonical-path contract), NOT internal EvalSymlinks. The contract is now documented on `paths.ProjectID` and pinned by `TestProjectID_AliasSpellingsDiffer`; callers that care resolve cwd once with `filepath.EvalSymlinks` at the single point it's made absolute. The memory lane is already alias-tolerant regardless: `<project>/.seek/project-id` (internal/memory `resolveProjectID`) pins the ID inside the physical dir, which every spelling reads identically. Commit `5bc9846` (card c_4c6dar).
 - **Lesson**: internal normalisation was rejected because it's an identity migration disguised as a fix: EvalSymlinks errors on not-yet-created paths (worktrees anchor before dirs exist) so the no-error signature forces a silent fallback — identity would then depend on filesystem state; and every project whose stored path contains a symlink component gets re-keyed, orphaning pointer-less state (checkpoints, subagents.jsonl, plans/, assets/). Real lanes (Zed spawn dir, paseo `--cwd`) pass canonical paths, so the fork only bites symlink-resident sandboxes. Revisit only if a lane starts reconciling state across machines BY ProjectID (e.g. controlplane bindings).
-- **Refs**: `internal/paths/paths.go` (ProjectID contract), `internal/paths/paths_test.go:TestProjectID_AliasSpellingsDiffer`, `internal/memory/project.go` (resolveProjectID pointer), `docs/prd/feature-paseo-provider.md` §2.2 (smoke trail)
+- **Refs**: `internal/paths/paths.go` (ProjectID contract), `internal/paths/paths_test.go:TestProjectID_AliasSpellingsDiffer`, `internal/memory/project.go` (resolveProjectID pointer), `docs/prd/archive/feature-paseo-provider.md` §2.2 (smoke trail)
+
+### ACP configOptions: the dropdown exists only if session/new RETURNS it — and the select value is a bare string with no "type" field
+- **Saw**: implementing model selection (c_6thhqc): `paseo provider diagnostic seek` printed `models=0; modes=0` while the agent was fully functional — no dropdown, no `set_config_option` traffic, ever. The PRD's only record was the behavioural one-liner "seek 两者皆空 → paseo 过滤掉 session.configure 能力" — field types, the switch method's params, and the response contract were recorded nowhere in-repo.
+- **Why**: ACP session configuration is a pull contract — the client renders ONLY what `session/new` returns (`configOptions`; `modes` likewise), and unknown methods stay -32601 forever. Wire specifics that bit: `SessionConfigOption` is discriminated by `type` ("select" | "boolean") with the payload FLATTENED onto the same object (`currentValue`/`options` inlined next to `id`/`name`); `session/set_config_option`'s string variant carries `value` as a BARE string with NO `type` field on the wire (the boolean variant does carry `type:"boolean"`); and its response REQUIRES the full `configOptions` set back — a partial echo blanks the client's menu.
+- **Fix**: implemented in `internal/acp/server.go` (types + dispatch) + `cmd/seek` acpBackend (`acpModelMenu`, value ids `"<provider>:<model>"`) — c_6thhqc. Authoritative shape read from the locally bundled SDK (`~/.paseo/zcode-acp/node_modules/@agentclientprotocol/sdk/schema/schema.json`), cross-checked against zcode-acp-server's `CONFIG_META` (configId `"model"`, category `"model"` — the exact strings paseo renders).
+- **Lesson**: ACP capability discovery is "what the agent reports", never "what the agent supports": a healthy handshake with an empty result set = UI silently filtered, no error anywhere. For any future ACP feature (modes, request_permission, mcpServers), reverse the local SDK schema FIRST — paseo/zcode bundles it on this machine; guessing field names produces a green handshake and a permanently empty UI. Same lesson class as `--rpc`'s frozen-surface decision: check the contract, not the capability.
 
 ### http.Server.Shutdown never returns while SSE handlers are mounted
 - **Saw**: 2026-11-13 web frontend first draft (card c_qucxtu): a `srv.Shutdown(ctx)` at plane shutdown never came back — the process hung with live /events connections until the deadline.
@@ -1751,6 +1806,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: "stream a kill-able child's stdout" has one sound shape: `cmd.Stdout = io.Writer` + your own pipe/reader with close-after-Wait choreography; StdoutPipe is read-then-wait only, and line readers with token caps don't fit JSONL of unbounded line length.
 - **Refs**: `internal/controlplane/executor.go` `attempt` / `streamSink`; `docs/prd/feature-web-frontend.md` §2.4.
 
+### exec'ing an extensionless go build output fails on Windows as "not found" — CreateProcess needs the .exe name
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: every `TestToolsFlagE2E_*` died with `exec: "C:\...\seek-e2e-bin-…\seek-e2e": executable file not found in %PATH%` — though `go build -o` had just written that exact path.
+- **Why**: Windows CreateProcess (under os/exec) only executes files carrying a known extension; for an extensionless path it searches for `<path>.exe` and reports ENOENT. `go build -o <name>` writes the file under exactly `<name>` (no suffix added), so the artifact exists but is unexecutable by that name.
+- **Fix**: `buildSeekBin` (cmd/seek/tools_flag_test.go) appends `.exe` when `runtime.GOOS == "windows"`; card c_45npoi.
+- **Lesson**: any test/helper that builds-and-execs a helper binary must derive BOTH the `-o` target and the exec path from one `runtime.GOOS`-aware name. Green on macOS/Linux says nothing about this class — it only ever fires on the Windows CI lane.
+- **Refs**: `cmd/seek/tools_flag_test.go` `buildSeekBin`
+
 ## Web frontend / asset plane
 
 ### session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message
@@ -1766,6 +1828,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: brace every `${VAR}` whose next character is non-ASCII (the KEEP message in `scripts/web-sessions-manual.sh`); commit with card `c_hinacy`.
 - **Lesson**: repo shell scripts must stay bash-3.2-safe (macOS default) — `${VAR}` braces are mandatory before CJK punctuation, and self-check any script whose failure path only runs in cleanup traps.
 - **Refs**: `scripts/web-sessions-manual.sh` cleanup; `scripts/serve-smoke-test.sh` (same bash-3.2 audience).
+
+### `${VAR-default}` under set -u passes a set-but-EMPTY value through — the `:-` form is the house discipline; and mktemp'd $tmp must be canonicalised before string-matching it
+- **Saw** (c_w3vhcm rework, 2026-11-18): two self-test bugs in one session. (a) `case_filter=${1-}` style defaults kept an explicitly-empty arg empty (`ablate.sh '' ''` → binary="" instead of the default). (b) A byte-compare self-test normalised sandbox paths with `sed "s|$tmp|...|"` — never matched, because macOS `TMPDIR` ends in `/` so mktemp's returned string contains `//`, and `/var` is a symlink to `/private/var`, while every path the script-under-test prints has round-tripped `cd`+`pwd` (physical, separator-collapsed).
+- **Why**: `${VAR-default}` only substitutes on UNSET; empty-but-set sails through (`:-` substitutes on both). And string comparison of paths compares the STRING, not the file — mktemp's return value is not canonical on macOS.
+- **Fix**: default expansions in eval/ shell scripts use `:-` throughout (`eval/ablate.sh`); `scripts/eval-ablate-test.sh` canonicalises `tmp=$(cd "$tmp" && pwd)` immediately after mktemp, and asserts normalised output is non-empty — the first revision had a malformed sed expression that normalised BOTH sides to empty and `cmp`'d two empty files green.
+- **Lesson**: any "compare two outputs" test needs a negative control (inject a one-char difference, watch it go red) and a non-empty guard on both sides — symmetric degradation of both arms is the silent false-green mode. Bash-3.2 family discipline (previous entry) applies to every `scripts/*.sh`.
+- **Refs**: `eval/ablate.sh`; `scripts/eval-ablate-test.sh` (norm/cleanup); commit on card c_w3vhcm.
 
 ### W1.2 Host allowlist must match the host PART only — literal bind-addr matching 403s the documented tailnet posture and every httptest hit
 - **Saw**: implementing §5.3's literal set {bind 地址, `localhost[:port]`, `127.0.0.1[:port]`} as exact strings rejects legitimate traffic: the §5.4 tailnet posture (bind 127.0.0.1:8790, `tailscale serve --tcp` forward) sends `Host: <tailnet-IP>:8790`, and httptest servers surface `Host: 127.0.0.1:<random>` — never the bind string.
@@ -1821,6 +1890,31 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: transcript readers on the Load path see the disk truth — interrupted-run tails included. Anything assuming API-replayable shape must call `Repair` itself or tolerate orphans; document which at the read site.
 - **Refs**: `internal/session/session.go` `Repair` / `Load`; `internal/friction/friction.go` `Fold`.
 
+### WebFrontend.Send is not a pure broadcast — it pops the conv's live run (the W1.4 close-out)
+- **Saw**: wiring voice V2 replies through `web.Send(ctx, pageConv, r)` looked like the obvious reuse; it would have CLOSED OUT the page's own streaming run bubble with the voice reply's text whenever a typed run was live on the same page conv.
+- **Why**: `Send` calls `popRun` — a reply is the W1.4 terminal event of a streamed run, so Send carries run/session ids and the client replaces the streaming bubble. A secondary frontend delivering into a web conv has no run there; popping steals the page's run id.
+- **Fix**: `VoiceFrontend.Send` broadcasts the MVP `{"conv","text"}` frame directly via `web.broadcast` (no run id → the client's plain-message path); commit with card `c_f6ayyg`.
+- **Lesson**: any NON-web frontend (voice today, future push/TTS channels) delivering through a web conv must `broadcast`, never `web.Send` — Send's close-out semantics belong exclusively to the frontend that owns the conv's runs.
+- **Refs**: `internal/controlplane/webfrontend.go` `Send` / `webfrontend_stream.go` `popRun`; `internal/controlplane/voicefrontend.go` `Send`.
+
+### getUserMedia needs a secure context — the documented tailnet `--tcp` forward cannot record push-to-talk
+- **Saw**: the voice V2 🎤 button works on `http://127.0.0.1:8790` but arrives disabled on a phone reaching the same serve over `tailscale serve --tcp` (tailnet IP, plain http).
+- **Why**: browsers gate `getUserMedia` (and `crypto.randomUUID`'s absence already forced the page's manual uuid fallback) behind a secure context — localhost is one by definition, a `100.x.y.z` host over http is not; `--tcp` forwarding never terminates TLS.
+- **Fix**: the page detects it (`micAvailable()`) and disables the button with the reason; deployment note in `seek serve --help` + PRD §4.3: remote mic needs an HTTPS front (`tailscale serve` proxy mode), not `--tcp`; commit with card `c_f6ayyg`.
+- **Lesson**: browser-capability surfaces (mic/camera/notifications) die silently on non-localhost plain http — when the documented remote-access posture is a TCP forward, the same feature needs an https-front variant or a visible "unavailable here" state, never a mystery.
+
+### strings.Contains on a RAW JSON frame can never match a Windows path or angle bracket — needles need the escaped spelling too
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_CommandE2E` failed as `default frame …"text":"候选项目：\n• C:\\Users\\RUNNER~1\\…\\001…"} lacks "C:\\Users\\RUNNER~1\\…\\001"` — needle and haystack PRINT identically in the failure message.
+- **Why**: the assertion runs `strings.Contains` against the raw SSE data line (Go-marshalled JSON, never decoded), where `\` rides doubled and `<`/`>`/`&` as `\u003c`-class escapes. A verbatim needle containing either can only match after the same escaping — on `/`-path platforms the bug is invisible because `/` and CJK need no escaping (the old "/bind usage" test had hand-avoided `<` for exactly this reason).
+- **Fix**: `containsFrameText` (webfrontend_cmd_test.go) tries the verbatim needle, then its `json.Marshal`-escaped form (quotes stripped); `TestContainsFrameText` builds a Windows-shaped frame with the same Marshal so `/`-path lanes exercise it; card c_45npoi.
+- **Lesson**: asserting substrings against marshalled-JSON wire text is only portable through an escaping-aware matcher — or decode the frame first. Any new raw-frame assertion helper must go through `containsFrameText`, not bare `strings.Contains`.
+
+### go:embed serves the WORKING-TREE bytes — a Windows autocrlf checkout drifts a hash-pinned embedded asset
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_AssetHashPinned` reported `got: f3415179… want: b4323190…` with no code change anywhere near the page.
+- **Why**: `go:embed` bakes the bytes as they sit on disk; GitHub's windows runner defaults `core.autocrlf=true`, so checkout rewrites the LF-committed `webfrontend.html` to CRLF locally, and the embedded page (and its sha256 pin) drift. Computed locally: LF version hashes to the pin, CRLF version to exactly the CI's `got` — the file in git was never wrong.
+- **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
+- **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
@@ -1845,3 +1939,30 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `idleRows` runs two aggregates — `inWindow` decides inclusion, `ever` supplies the true last_used; commit with card `c_lz5wxa`.
 - **Lesson**: when one fold answers two questions, windowing it silently degrades the second to the window's edge case. Split the folds, not the fields.
 - **Refs**: `internal/skillcli/query.go` `idleRows`, `docs/prd/feature-memory-skill-bridge.md` §6.
+
+## MCP bridge / tool naming
+
+### 同一份 mcp.json 两次启动可能注册出不同的工具名
+- **Saw**: chapter-12 §12.6 埋过的雷：旧「仅冲突时前缀」策略下，裸名归谁取决于哪个 server 先被遍历到（Go map 迭代序随机），同一份配置两次启动的注册名/顺序都可能不同。
+- **Why**: `LoadServers` 直接按 map 迭代序遍历 `mcpServers`，注册名成为迭代序的函数。
+- **Fix**: D1（`docs/prd/feature-mcp-client.md` §4.1）：一律默认 `<server>__<tool>` 前缀 + 按 server name 字典序遍历；`TestLoadServers_DeterministicRoster` 锁死「同配置两次注册名单逐字节一致」。Commit with card `c_4ejhhs`。
+- **Lesson**: 凡是名字/名单从 map 迭代派生、又要给用户或 LLM 看的，必须先排序——否则配置不是契约，哈希种子才是。
+- **Refs**: `internal/tools/mcptool/bridge.go`、`docs/book/chapter-12.md` §12.6。
+
+## Setup wizard / provider menu
+
+### providerOptions 扩行需三处同步——setup.go 的 envVarFor 镜像漏更会静默误触导向导
+- **Saw**: 给 providerOptions 加 opencode/glm 行时，若不同步 setup.go 本地 envVarFor（镜像 internal/config 同名函数），env-only 用户（已 export `OPENCODE_API_KEY`/`GLM_API_KEY`）仍被 shouldTriggerWizard 判为「零 key」弹向导；向导保存完的 Tip 行也渲染成 `=... seek`（envVarFor 返回空串）。另有第三处：两处重试提示独立写死范围 "1–4"，与菜单数据无联动，加行即失真。
+- **Why**: envVarFor 按 providerOptions 逐项查 env，镜像少一个 case 新 lane 的 env 凭证就查不到；范围文案与菜单行数是两份手抄数据。
+- **Fix**: 卡 `c_nxirmj`：提示改按 `len(providerOptions)` 动态生成；envVarFor 镜像补 glm/opencode 两 case，`TestEnvVarFor_KnownProviders` 同步扩表锁死。
+- **Lesson**: 向导扩 provider 的清单：providerOptions 行 + setup.go envVarFor case + internal/config envVarFor case（范围文案已动态化）。凡是「镜像别处枚举」的 switch，扩表当轮就补测试用例。
+- **Refs**: `cmd/seek/setup.go` `providerOptions`/`envVarFor`/`shouldTriggerWizard`，`internal/config/config.go` `envVarFor`。
+
+## MCP prompt section
+
+### JSON object key order is data — unmarshalling into a map shuffles prompt bytes
+- **Saw**: rendering MCP tool parameter signatures for the sysprompt MCP section, the obvious `json.Unmarshal` of the input schema into `map[string]…` properties would emit `search(repo, query, content?)` with parameters in random order — nondeterministic bytes inside the system-prompt prefix.
+- **Why**: `encoding/json` into a Go map discards document order and map iteration is deliberately randomized per run; anything whose output must be byte-stable across sessions (sysprompt segments feed the DeepSeek prefix cache) cannot round-trip an ordered JSON object through a map.
+- **Fix**: `schemaParams` in `internal/tools/mcptool/prompt.go` token-walks the `properties` object with `json.Decoder` — keys kept in document order, each value skipped via a `RawMessage` decode; commit with card `c_lgtpgq`.
+- **Lesson**: JSON object key order is insignificant to a parser but load-bearing for byte-deterministic rendering — ordered output needs a token-stream read, never a map.
+- **Refs**: `internal/tools/mcptool/prompt.go` `schemaParams`; determinism contract at `internal/sysprompt/sysprompt.go` (package doc).

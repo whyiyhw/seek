@@ -1,5 +1,5 @@
 // Package exitworktree implements the `exit_worktree` tool —
-// counterpart to enter_worktree. PRD docs/prd/feature-subagent.md
+// counterpart to enter_worktree. PRD docs/prd/archive/feature-subagent.md
 // §3.8 wire format:
 //
 //	clean       → [worktree: cleaned]

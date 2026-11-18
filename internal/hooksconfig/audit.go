@@ -15,11 +15,11 @@ import (
 
 // AuditEntry mirrors the JSON shape documented in PRD §3.6. Field names
 // match the doc verbatim (wire format — once shipped, third-party
-// monitoring tools may tail this file). SubagentSID is the one additive
-// field (M-O3.1 / orchestration §6 D15): omitempty, set only on
-// subagent_start / subagent_stop rows, so pre-existing lines and
-// readers (web W4.6 hooks/audit/tail deserialises this very struct)
-// round-trip unchanged.
+// monitoring tools may tail this file). Additive omitempty fields:
+// SubagentSID (M-O3.1, set only on subagent_start / subagent_stop rows)
+// and InjectedBytes (M-O3.2, set only on pre_prompt_inject rows) —
+// pre-existing lines and readers (web W4.6 hooks/audit/tail
+// deserialises this very struct) round-trip unchanged.
 type AuditEntry struct {
 	TS          string `json:"ts"`
 	Event       string `json:"event"`
@@ -30,6 +30,12 @@ type AuditEntry struct {
 	DurationMs  int64  `json:"duration_ms"`
 	ExitCode    int    `json:"exit_code"`
 	Denied      bool   `json:"denied"`
+	// InjectedBytes records how many stdout bytes of this
+	// pre_prompt_inject hook actually entered the prompt AFTER
+	// truncation (feature-hooks-injection §4.5 留痕). Zero-value (and
+	// the key itself) on every other event's rows; absent for
+	// pre-M-O3.2 lines.
+	InjectedBytes int `json:"injected_bytes,omitempty"`
 	// Reason is an optional human-readable explanation. Populated on
 	// timeout / syntax-fail / static-skip so users tailing the log can
 	// distinguish "hook ran and denied" from "hook never ran".

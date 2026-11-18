@@ -248,7 +248,7 @@ func SessionCheckpointDir(absPath, sid string) (string, error) {
 // SubagentsIndex returns ~/.seek/projects/<id>/subagents.jsonl — the
 // project-wide event-source index of parent → subagent relations
 // (one event per spawn / completion / failure / kill / orphan). See
-// docs/prd/feature-subagent.md §3.4 for the event schema and folding
+// docs/prd/archive/feature-subagent.md §3.4 for the event schema and folding
 // rules. Does NOT create the file or parent directory; callers
 // MkdirAll the project dir and append to the file lazily.
 //
@@ -270,7 +270,7 @@ func SubagentsIndex(absPath string) (string, error) {
 // JSONL, schema_version=2), plus optional plans/ and checkpoints/
 // subdirectories that are created lazily when the subagent calls
 // propose or triggers a destructive operation. See feature PRD
-// docs/prd/feature-subagent.md §3.3 for the full layout.
+// docs/prd/archive/feature-subagent.md §3.3 for the full layout.
 //
 // Does NOT create the directory. Both `sid` (parent session id) and
 // `subSid` (subagent's own short id) are required.
@@ -387,7 +387,7 @@ func ServeDir() (string, error) {
 // UserKeybindings returns the user-level keybindings file
 // (~/.seek/keybindings.toml). May not exist — that's the common case
 // for users who never customise; callers (internal/keymap.Load)
-// silently fall back to defaults. See PRD docs/prd/feature-tui-ergonomics.md §4.1.
+// silently fall back to defaults. See PRD docs/prd/archive/feature-tui-ergonomics.md §4.1.
 //
 // Keybindings are user-level only by design: rebinding is personal
 // muscle memory that shouldn't be forced on teammates via a checked-in
@@ -403,7 +403,7 @@ func UserKeybindings() (string, error) {
 // UserHooksToml returns the user-level shell hooks file
 // (~/.seek/hooks.toml). May not exist — having no user hooks
 // configured is a normal state; callers treat ENOENT as "no
-// user hooks". See PRD docs/prd/feature-shell-hooks.md §3.1.
+// user hooks". See PRD docs/prd/archive/feature-shell-hooks.md §3.1.
 func UserHooksToml() (string, error) {
 	root, err := Home()
 	if err != nil {

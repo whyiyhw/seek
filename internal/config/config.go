@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/whyiyhw/seek/internal/paths"
 )
@@ -57,7 +58,7 @@ type Config struct {
 
 	// SuggestReply gates the v4 柱 D suggested-reply subsystem (single
 	// switch covers prediction + UI + calibration injection — PRD
-	// docs/prd/feature-suggested-reply.md §4.7). Pointer so we can
+	// docs/prd/archive/feature-suggested-reply.md §4.7). Pointer so we can
 	// distinguish "field absent → default on" from "field present and
 	// false → user explicitly turned it off"; a bool would silently
 	// default to false for any config file written before v4.
@@ -66,7 +67,7 @@ type Config struct {
 	// PushWebhooks are the v6 柱 M mobile-push targets: cron / trigger
 	// terminal events are POSTed to each (in ADDITION to the OS desktop
 	// notification) so the user is reachable away from the machine.
-	// Empty / absent = no webhooks. See docs/prd/feature-mobile-push.md.
+	// Empty / absent = no webhooks. See docs/prd/archive/feature-mobile-push.md.
 	PushWebhooks []PushWebhook `json:"push_webhooks,omitempty"`
 
 	// SessionNotifySeconds gates the interactive "task finished" push
@@ -110,6 +111,21 @@ type Config struct {
 	// Only human-facing prose follows it — LLM-visible strings and the
 	// status bar stay English by design (docs/prd/feature-i18n.md §1.2).
 	Language string `json:"language,omitempty"`
+
+	// SafetyCheck opts the DeepSeek lane into the model safety check
+	// (docs/prd/feature-deepseek-app-api.md §5): DeepSeek documents one
+	// tier, "high"; empty/absent = off — the self-hosting default,
+	// because a refusal is pure capability loss for the agent's own work
+	// (security research included) plus latency. It exists for users who
+	// expose seek as a service: turning it on is then their compliance
+	// obligation, seek only supplies the switch (docs/guide-config.md).
+	//
+	// Read ONCE at session startup, never switched in-session: the value
+	// rides every request body, so a mid-session flip would change the
+	// shape of every subsequent request mid-conversation — the same
+	// discipline /lang and the retired server_tools switch follow. See
+	// SafetyCheckLevel for the wire mapping.
+	SafetyCheck string `json:"safety_check,omitempty"`
 
 	// Serve configures the remote control plane (`seek serve` —
 	// docs/prd/feature-remote-control-plane.md, wired in M1b). Nil
@@ -221,6 +237,20 @@ func (c Config) ReadWholeReadBytes() int {
 	return c.Read.WholeReadBytes
 }
 
+// SafetyCheckLevel returns the level to send in
+// deepseek.ChatRequest.SafetyCheck: "high" when the user opted in, ""
+// (off) otherwise. Only "high" is documented
+// (docs/prd/feature-deepseek-app-api.md §5), so any other value reads as
+// off instead of being forwarded as a guess — a typo must not silently
+// select some half-supported tier. Matching is whitespace-trimmed and
+// case-insensitive so hand-edited config files stay forgiving.
+func (c Config) SafetyCheckLevel() string {
+	if strings.EqualFold(strings.TrimSpace(c.SafetyCheck), "high") {
+		return "high"
+	}
+	return ""
+}
+
 // SessionNotifySecondsOrDefault returns the interactive-notify duration
 // gate in seconds — 60 when unset (the default-on threshold), or the
 // explicit value (0 disables interactive notify). Use this so the
@@ -308,6 +338,8 @@ func envVarFor(providerName string) string {
 		return "GEMINI_API_KEY"
 	case "glm":
 		return "GLM_API_KEY"
+	case "opencode":
+		return "OPENCODE_API_KEY"
 	}
 	return ""
 }

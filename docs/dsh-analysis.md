@@ -310,7 +310,7 @@ tool/call 落日志 → presentCall → pre-execute → guard → approval
 
 核心是一句默认提问：**新功能需要状态时，先问"这能不能从转录 fold 出来"，再考虑"加字段 + 加重建函数"。** 正样板是 plan（`propose` 参数与 `plan(start|complete|skip)` 调用**就是**状态，`reconstruct.go` 重放，无镜像）；反样板是 approval（运行时 Policy + 转录重建的混合态）。嗅探测试：**如果你正在给一个同时还存在 struct 字段里的东西写 `reconstruct()`，你已经有两个真相源了。**
 
-#### 这条纪律的边界（`docs/prd/v5.md:73` 已有定论）
+#### 这条纪律的边界（`docs/prd/archive/v5.md:73` 已有定论）
 
 **它只适用于"事件源自 LLM 调用"的那类状态**，也就是 plan-mode 的形状。跨会话 / 跨进程的编排状态（cron、routines）**不适用**——那里的事件源自 OS 级调度器，转录根本不是 single source of truth，硬套会让 `-resume` 的行为变得不可预测。
 

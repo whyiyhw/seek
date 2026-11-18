@@ -1,7 +1,7 @@
 // Package keyscli implements the `seek keys` family of subcommands —
 // list / check / actions. Dispatched ahead of flag.Parse in
 // cmd/seek/main.go so flags like --json don't collide with seek's
-// top-level binary flags. PRD docs/prd/feature-tui-ergonomics.md §5.1.
+// top-level binary flags. PRD docs/prd/archive/feature-tui-ergonomics.md §5.1.
 package keyscli
 
 import (
@@ -34,7 +34,7 @@ Commands:
 Flags (where applicable):
   --json              Emit JSON on stdout instead of human-readable text.
 
-See PRD docs/prd/feature-tui-ergonomics.md for the full spec.
+See PRD docs/prd/archive/feature-tui-ergonomics.md for the full spec.
 `
 
 // ErrUsage is returned by Run when the user invokes the command in a

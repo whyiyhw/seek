@@ -37,6 +37,7 @@ import (
 	"github.com/whyiyhw/seek/internal/clipimage"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/controlplane"
+	"github.com/whyiyhw/seek/internal/fileroute"
 	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/hooks"
@@ -112,7 +113,7 @@ import (
 // System prompt assembly (template literal, Compose, ModeLabel)
 // lives in internal/sysprompt. Two callers consume it: cmd/seek (this
 // file, root agent) and internal/subagent (v5 柱 G, subagents). PRD
-// docs/prd/feature-subagent.md §3.6.1 specifies the composition rules
+// docs/prd/archive/feature-subagent.md §3.6.1 specifies the composition rules
 // and the byte-determinism invariant that keeps DeepSeek's prefix
 // cache hot.
 
@@ -453,7 +454,8 @@ type subagentRunnerOpts struct {
 	getModel  func() string
 	getEffort func() string
 	// routes maps routing lane names (subagent.ProviderDeepSeek /
-	// ProviderGLM — validated in internal/subagent.ResolveRoute) to
+	// ProviderGLM / ProviderOpenCode — validated in
+	// internal/subagent.ResolveRoute) to
 	// the backend a child spawned on that lane should use
 	// (feature-orchestration.md D7). Built once at startup from
 	// config keys: a lane appears here only when its API key exists,
@@ -496,7 +498,8 @@ type subagentRoute struct {
 // model routing (feature-orchestration.md D6/D7): deepseek always
 // (reusing the parent's client when the parent lane IS deepseek, else
 // building one from the config key), glm when GLM_API_KEY /
-// providers.glm is configured. Explicit names only — no key-probing
+// providers.glm is configured, opencode when OPENCODE_API_KEY /
+// providers.opencode is. Explicit names only — no key-probing
 // chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
 // table iff its key exists.
 func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute {
@@ -512,6 +515,11 @@ func buildSubagentRoutes(parentClient *deepseek.Client) map[string]subagentRoute
 	if k := config.KeyFor(cfg, "glm"); k != "" {
 		routes[subagent.ProviderGLM] = subagentRoute{
 			provider: compatible.New(k, glmBaseURL, "GLM"),
+		}
+	}
+	if k := config.KeyFor(cfg, "opencode"); k != "" {
+		routes[subagent.ProviderOpenCode] = subagentRoute{
+			provider: compatible.New(k, opencodeBaseURL, "OpenCode"),
 		}
 	}
 	return routes
@@ -678,6 +686,11 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			MaxTokens:       opts.maxTokens,
 			MaxTurns:        opts.maxTurns,
 			Hooks:           childHooks,
+			// The child's conversation identity is its sub-sid (fresh
+			// per run, continuations included) — a subagent on the
+			// OpenCode lane thus gets its own stable x-opencode-session,
+			// distinct from the parent's and from sibling spawns.
+			SessionID: func() string { return job.SubSid },
 		})
 		if err != nil {
 			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
@@ -801,7 +814,7 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "session" {
 		return sessioncli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
-	// v3 checkpoint subcommand (PRD docs/prd/feature-checkpoint.md §4.1).
+	// v3 checkpoint subcommand (PRD docs/prd/archive/feature-checkpoint.md §4.1).
 	// Dispatched ahead of flag.Parse so the user can pass --session etc.
 	// without colliding with the top-level binary flags.
 	if len(os.Args) >= 2 && os.Args[1] == "checkpoint" {
@@ -816,7 +829,7 @@ func run() error {
 	// `seek hooks ...` — list / check / trust / audit. Dispatched
 	// before global flag parse for the same reason as `skill`:
 	// hooks queries don't need API keys, sessions, or a project
-	// directory. See PRD docs/prd/feature-shell-hooks.md §4.1.
+	// directory. See PRD docs/prd/archive/feature-shell-hooks.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "hooks" {
 		return hookscli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
@@ -842,7 +855,7 @@ func run() error {
 	// PRD §5.1 wants exit code 2 for validation errors (so CI can
 	// distinguish "bad config" from "system failure"); keyscli signals
 	// this via ErrUsage which we unwrap and route to os.Exit(2) here.
-	// See PRD docs/prd/feature-tui-ergonomics.md §5.1.
+	// See PRD docs/prd/archive/feature-tui-ergonomics.md §5.1.
 	if len(os.Args) >= 2 && os.Args[1] == "keys" {
 		if err := keyscli.Run(os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			if errors.Is(err, keyscli.ErrUsage) {
@@ -883,8 +896,8 @@ func run() error {
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
-		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | compatible")
-		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm")
+		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | compatible")
+		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag     = flag.String("theme", "auto", "color theme: auto|dark|light")
 		rpcMode       = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
@@ -956,6 +969,33 @@ func run() error {
 
 	if *list {
 		return printSessionList(store)
+	}
+
+	// `seek acp` lane marker, hoisted to the very top of the shared
+	// init (it used to live just before initialPref) because the ACP
+	// provider/model pins below must land BEFORE buildProvider runs.
+	// flag.Parse treats "acp" as a positional and stops there, so no
+	// command-line flag can ever reach this lane — same story as
+	// SEEK_ACP_YOLO (feature-paseo-provider.md §3.3–3.4).
+	acpLane := len(os.Args) >= 2 && os.Args[1] == "acp"
+	if acpLane {
+		// Startup pins for the lane's provider/model. Precedence is
+		// flag (unreachable here, the guard is belt-and-braces) > env >
+		// buildProvider auto-detect. Embedding hosts (paseo provider
+		// entries) set these per entry the same way they pin
+		// ZCODE_PROVIDER on the zcode bridge. A pinned provider also
+		// suppresses the first-run wizard below — a headless spawn must
+		// never sit in an interactive paste prompt.
+		if *providerFlag == "" {
+			if p, _ := acp.ProviderModelFromEnv(os.Getenv); p != "" {
+				*providerFlag = p
+			}
+		}
+		if *model == "" {
+			if _, m := acp.ProviderModelFromEnv(os.Getenv); m != "" {
+				*model = m
+			}
+		}
 	}
 
 	// First-run setup wizard. Only fires when there's truly no auth
@@ -1056,10 +1096,9 @@ func run() error {
 			*plan = loaded.Plan
 		}
 	}
-	// `seek acp` (v7 柱 P). Hoisted here because the ACP lane needs it
-	// before initialPref resolves (SEEK_ACP_YOLO below); the actual
+	// acpLane is declared near the top of the shared init (before
+	// buildProvider) so the env pins land in time; the actual ACP
 	// short-circuit sits further down, after the agent is up.
-	acpLane := len(os.Args) >= 2 && os.Args[1] == "acp"
 	// Print mode (-p / piped stdin) can't realistically interrupt to
 	// ask, so it stays in Deny preference unless --yolo is explicit.
 	// The TUI path overrides to Ask further down so per-call approval
@@ -1067,7 +1106,7 @@ func run() error {
 	// (they're orthogonal so could in principle co-exist; cmdYolo/
 	// cmdPlan enforce mutual exclusion at the UI layer).
 	//
-	// ACP lane (D-2, docs/prd/feature-paseo-provider.md §3.3): flags
+	// ACP lane (D-2, docs/prd/archive/feature-paseo-provider.md §3.3): flags
 	// NEVER reach it — flag.Parse stops at the "acp" positional — so
 	// --yolo is inexpressible and pref would stay Deny (bash denied
 	// across the board → unattended lanes can't work). The escape
@@ -1339,7 +1378,7 @@ func run() error {
 	bashEnvKeep := bashCfg.BashEnvPassthrough
 	goalBash := bash.New(policy).WithBackground(bgMgr).WithEnvPassthrough(bashEnvKeep)
 	// No-remote guard for the unattended lanes: goal and SEEK_ACP_YOLO
-	// (docs/prd/feature-paseo-provider.md §3.3) both run yolo with no
+	// (docs/prd/archive/feature-paseo-provider.md §3.3) both run yolo with no
 	// human to ask — yolo opens LOCAL edit/shell only; push/PR-class
 	// remote mutations stay blocked (double insurance with the drive
 	// cards' own "never push" sandbox discipline).
@@ -1434,15 +1473,32 @@ func run() error {
 
 	// Load MCP servers and register their tools. Errors are non-fatal:
 	// a broken MCP server should not prevent seek from starting.
+	//
+	// mcpSection feeds sysprompt.Header.MCPSection (the fifth prompt
+	// segment). Assembled ONCE here, after LoadServers, and never
+	// recomputed — per-session static, same discipline as sessionDate
+	// below: MCP servers load at startup and never change mid-session,
+	// and a mutating prompt segment would invalidate the prefix cache.
+	// Empty when no MCP tools loaded → zero prompt bytes, so no-MCP
+	// users keep a byte-identical prefix (the sysprompt golden locks
+	// this). Also empty under an explicit `"mcp_prompt": false` — tools
+	// still register, only the guidance segment goes away (the A2 eval
+	// arm). Note: the -tools whitelist narrows the registry later and
+	// may drop MCP tools this section still names — same static-prose
+	// posture as rootTpl (which documents fim_complete even on non-
+	// DeepSeek providers); the section describes what loaded, the
+	// request's tools array is the callable truth.
+	var mcpSection string
 	if mcpCfg, err := mcpconfig.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp config:", err)
 	} else if len(mcpCfg.MCPServers) > 0 {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{
-				Command: e.Command,
-				Args:    e.Args,
-				Env:     mcptool.EnvMapToSlice(e.Env),
+				Command:  e.Command,
+				Args:     e.Args,
+				Env:      mcptool.EnvMapToSlice(e.Env),
+				NoPrefix: !e.UsePrefix(),
 			}
 		}
 		existing := make(map[string]bool, len(reg.Names()))
@@ -1457,6 +1513,7 @@ func run() error {
 			reg.Add(b)
 		}
 		if len(lr.Bridges) > 0 {
+			mcpSection = mcpSectionFromBridges(lr.Bridges, mcpCfg)
 			fmt.Fprintf(os.Stderr, "mcp: loaded %d tool(s)\n", len(lr.Bridges))
 		}
 	}
@@ -1505,6 +1562,7 @@ func run() error {
 		Cwd:            abs,
 		ProjectSection: projMD.Section(),
 		SkillManifest:  skills.Manifest(),
+		MCPSection:     mcpSection,
 		Date:           sessionDate,
 	}, sysprompt.ModeLabel(initialPref, initialWorkflow))
 
@@ -1582,7 +1640,7 @@ func run() error {
 	// the TUI Options so the loaded KeyMap (or default fallback) is
 	// available at Options.Keymap. Warnings from a malformed
 	// keybindings.toml go to stderr; the file is silently ignored if
-	// absent (common case). PRD docs/prd/feature-tui-ergonomics.md §4.4.
+	// absent (common case). PRD docs/prd/archive/feature-tui-ergonomics.md §4.4.
 	userKeymapPath, _ := paths.UserKeybindings()
 	userKeymap, _ := keymap.Load(userKeymapPath, os.Stderr)
 
@@ -1631,9 +1689,15 @@ func run() error {
 	// Predictor and the InjectCalibration message-preparer are nil —
 	// `agent.runTurn*` no-ops the PrepareMessages hook on nil, and the
 	// TUI suggester goroutine is gated on Options.Suggester != nil.
-	// PRD docs/prd/feature-suggested-reply.md §4.7.
+	// PRD docs/prd/archive/feature-suggested-reply.md §4.7.
 	appCfg, _ := config.Load()
 	suggestEnabled := !*noSuggest && appCfg.SuggestReplyEnabled() && dsClient != nil
+	// Model safety check (feature-deepseek-app-api.md §5): config-only
+	// opt-in, read ONCE here — no in-session switch, because the value
+	// rides every request body and a mid-session flip would change all
+	// subsequent requests (same discipline as language / the retired
+	// server_tools switch). DeepSeek lane only; other providers ignore it.
+	safetyCheck := appCfg.SafetyCheckLevel()
 	var predictor *suggester.Predictor
 	var prepareMessages func([]deepseek.Message) []deepseek.Message
 	if suggestEnabled {
@@ -1694,6 +1758,10 @@ func run() error {
 			// identical to the parent's prompt so the subagent header
 			// matches. See sessionDate above.
 			SessionDate: sessionDate,
+			// Same static discipline: MCP servers load once at startup,
+			// so the subagent inherits the parent's MCPSection bytes
+			// verbatim (§3.6.1 inheritance, fifth segment).
+			MCPSection: mcpSection,
 			// Background spawns bind to the process/session ctx so a
 			// parent turn returning (Esc) can never kill them — the
 			// 柱 K bgjob ctx-discipline lifted to agent level
@@ -1834,11 +1902,26 @@ func run() error {
 		}()
 	}
 
+	// sessionIDFn feeds agent.Config.SessionID — ChatRequest.SessionID,
+	// emitted as x-opencode-session by the openai client (OpenCode Go
+	// lane's per-conversation routing/prompt-cache contract; inert on
+	// every other lane). Live read, not a captured value: /compact
+	// forks the session under a new ID while this agent object lives
+	// on — same pattern as planBridge.sessionID below. "" under
+	// --no-save (no session) sends no header.
+	sessionIDFn := func() string {
+		if activeSession == nil {
+			return ""
+		}
+		return activeSession.ID
+	}
+
 	ag, err := agent.New(agent.Config{
 		Client:          dsClient,
 		Provider:        provider,
 		Model:           *model,
 		Effort:          sessionEffort,
+		SafetyCheck:     safetyCheck,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
 		MaxTokens:       *maxTokens,
@@ -1847,6 +1930,7 @@ func run() error {
 		InitialMessages: initialMsgs,
 		Hooks:           hooksReg,
 		PrepareMessages: prepareMessages,
+		SessionID:       sessionIDFn,
 		// feature-vision: resolve Asset-referenced images into data
 		// URLs at send time. Wired whenever the project assets dir is
 		// computable; nil only in pathological setups, where an
@@ -1860,6 +1944,12 @@ func run() error {
 	// The submit-time image router, shared by all three input entries
 	// (print, TUI, ACP) so capability decisions are byte-identical.
 	vroute := newVisionRouter(abs)
+
+	// The submit-time document router, same three entries
+	// (feature-deepseek-app-api F3). dsClient is nil on non-DeepSeek
+	// lanes — the router then degrades every reference to an in-band
+	// lane note instead of uploading.
+	froute := fileroute.New(dsClient, abs, tracker)
 
 	// Register the plan + propose tools AFTER agent.New so both Sinks
 	// can route into ag.EmitEvent. Same deferred-registration pattern
@@ -1942,6 +2032,20 @@ func run() error {
 			}
 		}
 		hooksReg.Register(memHook)
+	}
+
+	// M-O3.2 pre_prompt_inject: the authorized shell stdout-injection
+	// face (feature-hooks-injection §4.5 / orchestration §6 D17).
+	// Registered AFTER the in-process PrePrompt hooks (background
+	// notifier, memory) so its <context type="hook"> messages land
+	// behind them in the turn's frontier batch — the PRD's "in-process
+	// hooks 之后" ordering. ShellRunner itself stays registered early
+	// for the pre_tool deny gate; this separate face is what lets both
+	// orderings hold at once. Children inherit it via the
+	// CloneWithout-on-bgNotifier closure (inject hooks fire per child
+	// Prompt too — same shared-surface semantics as pre_tool).
+	if shellRunner != nil && shellRunner.HasInjectHooks() {
+		hooksReg.Register(shellRunner.InjectHook())
 	}
 
 	// v8·T1 `-tools` whitelist (bare-core comparison lane). Runs here —
@@ -2074,10 +2178,14 @@ func run() error {
 	// v7 柱 P: `seek acp` → speak the Agent Client Protocol over stdio.
 	// feature-vision: pasted image blocks route through the same
 	// submit-time vision router as the TUI (native attach / switch note).
+	// feature-deepseek-app-api F3: document references in the prompt
+	// text route through the same submit-time file router as the TUI.
 	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
-	// initialPref above — nothing to flip here.
+	// initialPref above — nothing to flip here. The model menu is built
+	// from the startup lane (*model already carries the env pin / loaded
+	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), policy)
+		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model))
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2110,10 +2218,14 @@ func run() error {
 		// vision model attaches bytes natively, anything else gets an
 		// in-band switch-model note. Never errors (M-V.2).
 		text, imageParts := vroute.route(ag.Model(), text)
+		// feature-deepseek-app-api F3: route document references at
+		// the same station — copy-at-submit + eager upload + parse
+		// fee, every failure in-band. Never errors.
+		text, fileParts := froute.Route(ctx, ag.Model(), text)
 		if *jsonOut {
-			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
+			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
 		}
-		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, activeSession, store)
+		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
 	}
 
 	// Now that we know we're entering the TUI, upgrade the policy
@@ -2272,6 +2384,7 @@ func run() error {
 		Model:                 sessionModel,
 		Effort:                sessionEffort,
 		ExpandInput:           vroute.route,
+		ExpandFiles:           froute.Route,
 		GoalJudge:             goalJudge,
 		ResumeGoal:            resumeGoal,
 		GrabImage:             grabImage,
@@ -2325,6 +2438,7 @@ func run() error {
 				Cwd:            abs,
 				ProjectSection: projMD.Section(),
 				SkillManifest:  skills.Manifest(),
+				MCPSection:     mcpSection,
 				Date:           sessionDate,
 			}, sysprompt.ModeLabel(policy.Pref(), policy.Workflow()))
 			newAg, err := agent.New(agent.Config{
@@ -2332,11 +2446,13 @@ func run() error {
 				Provider:     provider,
 				Model:        sessionModel,
 				Effort:       sessionEffort,
+				SafetyCheck:  safetyCheck,
 				SystemPrompt: sp,
 				Tools:        reg,
 				MaxTokens:    *maxTokens,
 				MaxTurns:     *maxTurns,
 				AutoContinue: *autoContinue,
+				SessionID:    sessionIDFn,
 			})
 			if err != nil {
 				return nil, err
@@ -2424,7 +2540,7 @@ func stdinIsPiped() bool {
 // tool indicators + stats footer to stderr. Suitable for piping.
 // The session is saved after every TurnEnd so a crash or interrupt
 // mid-run preserves progress up to the last completed turn.
-func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
+func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store) error {
 	tier := pricing.CurrentTier(time.Now())
 	nextTier, nextAt := pricing.NextTransition(time.Now())
 	fmt.Fprintf(os.Stderr, "\x1b[2mtier: %s → next %s at %s\x1b[0m\n",
@@ -2464,7 +2580,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 		}
 	}
 
-	for ev := range ag.Prompt(ctx, text, images...) {
+	for ev := range ag.PromptFiles(ctx, text, images, files) {
 		switch e := ev.(type) {
 		case agent.MessageDelta:
 			if !gotFirst {
@@ -2582,7 +2698,7 @@ type jsonLine struct {
 // runJSON is the machine-readable output mode: one JSON object per line
 // on stdout. Human-readable diagnostics (tier, stats footer) go to
 // stderr so stdout stays parse-clean.
-func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, activeSession *session.Session, store *session.Store) error {
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store) error {
 	enc := json.NewEncoder(os.Stdout)
 
 	emit := func(line jsonLine) {
@@ -2617,7 +2733,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 
 	emit(jsonLine{Type: "agent_start", Model: model})
 
-	for ev := range ag.Prompt(ctx, text, images...) {
+	for ev := range ag.PromptFiles(ctx, text, images, files) {
 		switch e := ev.(type) {
 
 		case agent.TurnStart:
@@ -2782,8 +2898,22 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 // event channel out as ACP session/update notifications.
 type acpBackend struct {
 	ag     *agent.Agent
-	route  visionRouter // feature-vision: submit-time image router
+	route  visionRouter     // feature-vision: submit-time image router
+	froute fileroute.Router // feature-deepseek-app-api F3: submit-time document router
 	policy *permission.Policy
+	// menu is the configOptions model select (nil ⇒ the client filters
+	// the dropdown away, pre-C behaviour). Built once at startup from
+	// the startup lane; SetConfigOption rewrites CurrentValue in place.
+	// Only touched from the transport's serial read loop (dispatch), so
+	// no lock — prompt goroutines never read it.
+	menu []acp.ConfigOption
+	// laneFor builds a provider lane on demand — a closure over
+	// buildProvider so the switch path and the startup path share one
+	// source of truth for keys/endpoints/defaults.
+	laneFor func(provider string) (llm.Provider, *deepseek.Client, string, error)
+	// sessionID is the single live session ("one seek process = one
+	// session"); anchored by NewSession, checked by SetConfigOption.
+	sessionID string
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2805,24 +2935,149 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // policy, so read/edit/write/bash (policy-anchored) and
 // git/grep/list_dir (process-anchored) all follow. The sessionId
 // becomes the project name (directory base) — the fixed "seek" id
-// pre-D-1 carried no information. Empty cwd keeps the current
+// pre-D1 carried no information. Empty cwd keeps the current
 // directory (Zed-equivalent, a behavioural no-op under Zed).
+// Since C, the result also carries the model configOptions menu —
+// a non-nil menu is what makes ACP clients render the dropdown.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
 	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
 	if err != nil {
 		return acp.NewSessionResult{}, err
 	}
+	b.sessionID = anchor.Name
 	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s\n", anchor.Abs, anchor.ProjectID)
-	return acp.NewSessionResult{SessionID: anchor.Name}, nil
+	return acp.NewSessionResult{SessionID: anchor.Name, ConfigOptions: b.menu}, nil
+}
+
+// SetConfigOption applies a model-dropdown pick. configId "model" is
+// the only option seek serves; value ids are "<provider>:<model>"
+// (acpModelMenu). The transport rejects the request while a prompt is
+// in flight (internal/acp dispatch — see the happens-before note
+// there), so the lane swap below races nothing.
+func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfigOptionResult, error) {
+	if b.sessionID == "" || p.SessionID != b.sessionID {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown session %q", p.SessionID)
+	}
+	if p.ConfigID != "model" {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown config id %q (only \"model\" is served)", p.ConfigID)
+	}
+	if len(b.menu) != 1 || b.menu[0].ID != "model" {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("model selection unavailable on this session (no model menu was served)")
+	}
+	// Only advertised values are accepted — a client echoing a stale or
+	// hand-crafted id gets a loud error instead of a lane that dies at
+	// the next API call.
+	known := false
+	for _, o := range b.menu[0].Options {
+		if o.Value == p.Value {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown model value %q", p.Value)
+	}
+	prov, model, ok := strings.Cut(p.Value, ":")
+	if !ok {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("malformed model value %q (want \"provider:model\")", p.Value)
+	}
+	provider, dsClient, _, err := b.laneFor(prov)
+	if err != nil {
+		return acp.SetConfigOptionResult{}, fmt.Errorf("switch to %s: %w", prov, err)
+	}
+	b.ag.SetLane(provider, dsClient, model)
+	b.menu[0].CurrentValue = p.Value
+	fmt.Fprintf(os.Stderr, "acp: model switched provider=%s model=%s\n", prov, model)
+	return acp.SetConfigOptionResult{ConfigOptions: b.menu}, nil
+}
+
+// acpLaneModels is the ACP model dropdown's curated table — the
+// multi-provider analogue of the TUI /model picker's list (internal/tui
+// commands.go knownModelsForProvider). Deliberately a separate table,
+// same decoupling as the TUI's: dropdown rows and terminal picker rows
+// serve different surfaces and evolve at their own pace. Keep the model
+// IDs in lockstep with that list (and pricing's constants) when either
+// changes — the dropdown must never offer an id the lane can't serve.
+var acpLaneModels = []struct {
+	provider string
+	models   []struct{ id, label string }
+}{
+	{"deepseek", []struct{ id, label string }{
+		{deepseek.ModelV41Flash, "deepseek-flash (V4.1-Flash)"},
+	}},
+	{"anthropic", []struct{ id, label string }{
+		{"claude-sonnet-4-20250514", "claude-sonnet-4 (Anthropic)"},
+		{"claude-3-5-sonnet-20241022", "claude-3.5-sonnet (Anthropic)"},
+	}},
+	{"openai", []struct{ id, label string }{
+		{"gpt-4o", "gpt-4o (OpenAI)"},
+		{"gpt-4o-mini", "gpt-4o-mini (OpenAI)"},
+	}},
+	{"gemini", []struct{ id, label string }{
+		{"gemini-2.0-flash", "gemini-2.0-flash (Gemini)"},
+		{"gemini-1.5-pro", "gemini-1.5-pro (Gemini)"},
+	}},
+	{"glm", []struct{ id, label string }{
+		{pricing.ModelGLM53, "glm-5.3 (GLM)"},
+	}},
+	{"opencode", []struct{ id, label string }{
+		{pricing.ModelOpenCodeV41Flash, "deepseek-v4.1-flash (OpenCode Go)"},
+	}},
+}
+
+// acpModelMenu builds the session/new configOptions model select.
+// Providers appear only when their key resolves (config.KeyFor — same
+// presence gate as buildSubagentRoutes), value ids are
+// "<provider>:<model>" so they're unique across providers and can be
+// split back without a lookup table. currentValue is matched by the
+// STARTUP model id alone — the curated ids are unique across lanes, so
+// the provider name isn't needed (and buildProvider's auto-detect
+// result isn't visible out here). A startup model outside the curated
+// set (freeform --model / env pin) yields a nil menu: a select with a
+// currentValue it doesn't list would lie to the dropdown, and the
+// client-side fallback is simply no dropdown (pre-C behaviour).
+func acpModelMenu(currentModel string) []acp.ConfigOption {
+	cfg, _ := config.Load()
+	var opts []acp.ConfigSelectOption
+	current := ""
+	for _, lane := range acpLaneModels {
+		if config.KeyFor(cfg, lane.provider) == "" {
+			continue
+		}
+		for _, m := range lane.models {
+			opts = append(opts, acp.ConfigSelectOption{
+				Value: lane.provider + ":" + m.id,
+				Name:  m.label,
+			})
+			if m.id == currentModel {
+				current = lane.provider + ":" + m.id
+			}
+		}
+	}
+	if len(opts) == 0 || current == "" {
+		return nil
+	}
+	return []acp.ConfigOption{{
+		ID:           "model",
+		Name:         "Model",
+		Category:     "model",
+		Type:         "select",
+		CurrentValue: current,
+		Options:      opts,
+	}}
 }
 
 // buildACPPromptText assembles the prompt seek's agent actually sees from
 // an ACP session/prompt: the text blocks, plus one in-band marker block
 // per image content block — native attach on vision models, a
 // switch-model note otherwise (feature-vision M-V.2, replacing the
-// 柱 Q OCR path). Corrupt base64 / unhandled mimeType degrade silently
-// (the block is skipped). Pure (no agent) so it's unit-testable.
-func buildACPPromptText(model string, p acp.PromptParams, vroute visionRouter) (string, []deepseek.ImagePart) {
+// 柱 Q OCR path). Document references in the text then route through
+// the file router (feature-deepseek-app-api F3) — copy-at-submit +
+// eager upload, every failure in-band. Corrupt base64 / unhandled
+// mimeType degrade silently (the block is skipped). The upload needs
+// a context, so this is the one impure seam; it still touches no agent
+// state and stays unit-testable.
+func buildACPPromptText(ctx context.Context, model string, p acp.PromptParams, vroute visionRouter, froute fileroute.Router) (string, []deepseek.ImagePart, []deepseek.FilePart) {
 	text := p.PromptText()
 	var parts []deepseek.ImagePart
 	for _, blk := range p.ImageBlocks() {
@@ -2843,7 +3098,8 @@ func buildACPPromptText(model string, p acp.PromptParams, vroute visionRouter) (
 			parts = append(parts, part)
 		}
 	}
-	return text, parts
+	text, files := froute.Route(ctx, model, text)
+	return text, parts, files
 }
 
 // imageExtForMime maps an ACP image block's mimeType to a file extension
@@ -2871,11 +3127,11 @@ func imageExtForMime(m string) string {
 }
 
 func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
-	text, images := buildACPPromptText(b.ag.Model(), p, b.route)
+	text, images, files := buildACPPromptText(ctx, b.ag.Model(), p, b.route, b.froute)
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
-	for ev := range b.ag.Prompt(ctx, text, images...) {
+	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
 			return acp.PromptResult{}, e.Err
 		}
@@ -2967,8 +3223,10 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
 // logging goes to stderr. pol is the shared permission policy the whole
 // tool registry was built on; session/new re-anchors it to the client's
-// cwd (D-1).
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, pol *permission.Policy) error {
+// cwd (D-1). menu is the model configOptions select (nil hides the
+// client's model dropdown); session/set_config_option swaps the agent's
+// lane between turns.
+func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy, menu []acp.ConfigOption) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -2984,7 +3242,21 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, pol *perm
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{ag: ag, route: vroute, policy: pol}).Serve(ctx)
+	return acp.NewServer(r, w, &acpBackend{
+		ag:     ag,
+		route:  vroute,
+		froute: froute,
+		policy: pol,
+		menu:   menu,
+		// Same construction path as the startup lane: buildProvider owns
+		// key resolution and per-provider endpoints; "" baseURL keeps the
+		// pinned defaults (a passthrough --base-url can't reach this
+		// lane anyway — flags never parse past "acp").
+		laneFor: func(provider string) (llm.Provider, *deepseek.Client, string, error) {
+			p, c, _, modelDefault, err := buildProvider(provider, "", "")
+			return p, c, modelDefault, err
+		},
+	}).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace
@@ -3212,6 +3484,32 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		}
 		return compatible.New(apiKey, base, "GLM"), nil, "GLM", "glm-5.3", nil
 
+	case "opencode":
+		// OpenCode Go subscription lane (opencode.ai/inference/go):
+		// a flat $10/month plan over an open-weight + frontier model
+		// pool, billed per request window (5h/week/month) — never per
+		// token. OpenAI Chat-Completions wire, so it rides the
+		// compatible adapter like GLM. The Go endpoint's client
+		// contract: a self-identifying User-Agent plus a stable
+		// x-opencode-session header per conversation — both injected by
+		// the openai client from ChatRequest.SessionID; without them
+		// Go-plan requests can degrade to per-token billing. The
+		// *-Free models are OpenCode-client-only and not usable here;
+		// paid endpoints on the plan are shielded from
+		// train-on-requests by default. Default model
+		// deepseek-v4.1-flash per opencode.ai/docs/console/models
+		// (2026-11-17) — ids still 待核 against GET /v1/models once a
+		// real key exists; --base-url overrides the endpoint.
+		apiKey := config.KeyFor(cfg, "opencode")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("no OpenCode API key — set OPENCODE_API_KEY or add providers.opencode.api_key to ~/.seek/config.json")
+		}
+		base := opencodeBaseURL
+		if baseURLFlag != "" {
+			base = baseURLFlag
+		}
+		return compatible.New(apiKey, base, "OpenCode"), nil, "OpenCode", "deepseek-v4.1-flash", nil
+
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
 		// accept OPENAI_API_KEY or DEEPSEEK_API_KEY (common shapes for
@@ -3230,7 +3528,7 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		return compatible.New(apiKey, baseURLFlag, provName), nil, provName, "", nil
 
 	default:
-		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | compatible", provFlag)
+		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | opencode | compatible", provFlag)
 	}
 }
 
@@ -3239,6 +3537,15 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 // keys share it). Full chat-completions path, matching the openai client's
 // expectation that baseURL is the POST target.
 const glmBaseURL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+
+// opencodeBaseURL is the default endpoint for --provider=opencode: the
+// OpenCode Go plan's inference gateway, OpenAI-compatible. Same
+// full-POST-target shape as glmBaseURL. The /v1/chat/completions path is
+// the documented expectation (base https://opencode.ai/inference/go,
+// model list GET /v1/models) but the official harness page 404s at the
+// time of wiring — 待核 with a real key via curl before relying on a
+// non-default path; --base-url overrides.
+const opencodeBaseURL = "https://opencode.ai/inference/go/v1/chat/completions"
 
 // autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
 // a truthy value (1/true/yes/on). Controls memory_observe tool registration;
@@ -3260,11 +3567,53 @@ func envBoolTrue(name string) bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
+// mcpSectionFromBridges assembles the sysprompt MCPSection content (the
+// fifth prompt segment) from the bridges LoadServers produced. It is
+// the single assembly path (MCP-D3): the copy itself lives in
+// mcptool.PromptSection — tier-1 mcp.json "hint" verbatim, tier-2
+// built-in curated copy, tier-3 bare listing — so this layer only maps
+// bridges onto mcptool.ServerInfo. Tools keep bridge registration order
+// (the same order the model sees in the tools array); PromptSection
+// sorts servers by name, so mcp.json map iteration order never reaches
+// the prompt bytes.
+//
+// Empty string when no bridges loaded, or when mcp.json sets an
+// explicit `"mcp_prompt": false`: tools stay registered (the A2
+// "tool exists, no guidance" eval arm), only the prompt guidance is
+// suppressed.
+func mcpSectionFromBridges(bridges []*mcptool.Bridge, cfg mcpconfig.Config) string {
+	if len(bridges) == 0 || !cfg.PromptEnabled() {
+		return ""
+	}
+	toolsByServer := make(map[string][]mcptool.ToolInfo, len(bridges))
+	names := make([]string, 0, len(bridges))
+	for _, b := range bridges {
+		name := b.Server()
+		if _, seen := toolsByServer[name]; !seen {
+			names = append(names, name)
+		}
+		toolsByServer[name] = append(toolsByServer[name], mcptool.ToolInfo{
+			Name:        b.Name(),
+			Description: b.Description(),
+			Schema:      b.Schema(),
+		})
+	}
+	servers := make([]mcptool.ServerInfo, 0, len(names))
+	for _, name := range names {
+		servers = append(servers, mcptool.ServerInfo{
+			Name:  name,
+			Hint:  cfg.MCPServers[name].Hint,
+			Tools: toolsByServer[name],
+		})
+	}
+	return mcptool.PromptSection(servers)
+}
+
 // cronAutoTickEnabled is the single gate for the startup cron auto-tick
 // goroutine (v5 柱 H). False when --no-cron-tick opts out, or when the
 // ACP headless lane runs: those processes are short-lived spawns (paseo
 // probes / Zed sessions) that kill the detached tick goroutine mid-run —
-// half-fired cron job risk, zero benefit (docs/prd/feature-paseo-provider.md
+// half-fired cron job risk, zero benefit (docs/prd/archive/feature-paseo-provider.md
 // §2.3). The two axes are independent because --no-cron-tick cannot
 // substitute for acpLane: flag.Parse stops at the "acp" positional, so
 // the flag never reaches that lane.

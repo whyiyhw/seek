@@ -1,9 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/whyiyhw/seek/internal/mcpconfig"
+	"github.com/whyiyhw/seek/internal/tools/mcptool"
+	"github.com/whyiyhw/seek/pkg/mcp"
 )
 
 // detectGlamourStyle has three decision axes:
@@ -186,6 +191,71 @@ func TestBuildProvider_GLM(t *testing.T) {
 	})
 }
 
+// buildProvider("opencode", ...) wiring, mirroring the GLM paradigm:
+// label, lane default model (id per opencode.ai/docs/console/models,
+// 待核 against /v1/models with a real key), key resolution via
+// OPENCODE_API_KEY → providers.opencode, and the --base-url override.
+func TestBuildProvider_OpenCode(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+
+	t.Run("env key, default label and model", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "k")
+		provider, dsClient, label, modelDefault, err := buildProvider("opencode", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if dsClient != nil {
+			t.Errorf("opencode must not build a deepseek client")
+		}
+		if provider == nil || provider.Name() != "OpenCode" {
+			t.Errorf("provider label = %v, want OpenCode", provider)
+		}
+		if label != "OpenCode" {
+			t.Errorf("provLabel = %q, want \"OpenCode\"", label)
+		}
+		if modelDefault != "deepseek-v4.1-flash" {
+			t.Errorf("modelDefault = %q, want deepseek-v4.1-flash", modelDefault)
+		}
+	})
+
+	t.Run("config-file key", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "")
+		home := t.TempDir()
+		t.Setenv("SEEK_HOME", home)
+		cfgJSON := `{"providers": {"opencode": {"api_key": "from-config"}}}`
+		if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		provider, _, label, modelDefault, err := buildProvider("opencode", "", "")
+		if err != nil {
+			t.Fatalf("buildProvider: %v", err)
+		}
+		if provider == nil || label != "OpenCode" || modelDefault != "deepseek-v4.1-flash" {
+			t.Errorf("opencode from config-file key: provider=%v label=%q model=%q", provider, label, modelDefault)
+		}
+	})
+
+	t.Run("no key errors", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "")
+		t.Setenv("SEEK_HOME", t.TempDir())
+		_, _, _, _, err := buildProvider("opencode", "", "")
+		if err == nil || !strings.Contains(err.Error(), "no OpenCode API key") {
+			t.Errorf("expected no-key error, got %v", err)
+		}
+	})
+
+	t.Run("base-url override accepted", func(t *testing.T) {
+		t.Setenv("OPENCODE_API_KEY", "k")
+		provider, _, _, _, err := buildProvider("opencode", "http://localhost:9/v1/chat/completions", "")
+		if err != nil {
+			t.Fatalf("buildProvider with --base-url: %v", err)
+		}
+		if provider == nil {
+			t.Errorf("nil provider with --base-url override")
+		}
+	})
+}
+
 // cronAutoTickEnabled has two independent off-switches: --no-cron-tick
 // (explicit opt-out) and the ACP headless lane (always off — its processes
 // are short-lived spawns where a detached tick goroutine is a half-fired
@@ -212,4 +282,106 @@ func TestCronAutoTickEnabled(t *testing.T) {
 			}
 		})
 	}
+}
+
+// mcpSectionFromBridges is the MCP-D3 wiring boundary: bridges from
+// LoadServers plus the parsed mcp.json go in, the sysprompt MCPSection
+// bytes come out. The copy bytes themselves are locked by
+// internal/tools/mcptool's own suite; what's proven here is the three
+// seams that suite cannot see — (1) an mcp.json "hint" reaches the
+// section and beats the built-in semble copy, (2) an explicit
+// "mcp_prompt": false yields an empty section (tools register before
+// this call, so only the guidance disappears — the A2 eval arm), and
+// (3) server blocks are byte-stable regardless of bridge order while
+// each server's tools keep bridge registration order.
+func TestMCPSectionFromBridges(t *testing.T) {
+	bridges := func() []*mcptool.Bridge {
+		return []*mcptool.Bridge{
+			mcptool.New(nil, "semble", mcp.ToolDef{
+				Name:        "search",
+				Description: "Search code in a repo using hybrid BM25 + semantic retrieval.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"repo":{"type":"string"},"query":{"type":"string"}},"required":["repo","query"]}`),
+			}, "semble__search"),
+			mcptool.New(nil, "semble", mcp.ToolDef{
+				Name:        "find_related",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer"}},"required":["file","line"]}`),
+			}, "semble__find_related"),
+			mcptool.New(nil, "zeta", mcp.ToolDef{Name: "search"}, "zeta__search"),
+		}
+	}
+	noPromptConfig := func() mcpconfig.Config {
+		servers := map[string]mcpconfig.ServerEntry{"semble": {}, "zeta": {}}
+		return mcpconfig.Config{MCPServers: servers}
+	}
+
+	t.Run("no hint: built-in semble copy, tools in registration order", func(t *testing.T) {
+		got := mcpSectionFromBridges(bridges(), noPromptConfig())
+		if !strings.Contains(got, "- semble (semantic code search, local & indexed):") {
+			t.Errorf("built-in semble copy missing:\n%s", got)
+		}
+		if !strings.Contains(got, "  Tools: semble__search(repo, query), semble__find_related(file, line).") {
+			t.Errorf("tools line wrong or not in registration order:\n%s", got)
+		}
+		// zeta is unknown to seek and has no hint → tier-3 listing, and
+		// dictionary order puts semble before zeta.
+		if !strings.Contains(got, "- zeta (external MCP server):") {
+			t.Errorf("tier-3 listing missing for zeta:\n%s", got)
+		}
+		if si, zi := strings.Index(got, "- semble"), strings.Index(got, "- zeta"); !(si >= 0 && si < zi) {
+			t.Errorf("servers not in dictionary order (semble@%d zeta@%d):\n%s", si, zi, got)
+		}
+	})
+
+	t.Run("hint from mcp.json overrides built-in copy", func(t *testing.T) {
+		cfg := noPromptConfig()
+		entry := cfg.MCPServers["semble"]
+		entry.Hint = "Prefer semble for intent queries\nnot for exact symbols"
+		cfg.MCPServers["semble"] = entry
+
+		got := mcpSectionFromBridges(bridges(), cfg)
+		if !strings.Contains(got, "- semble:\n") {
+			t.Errorf("hinted server block missing:\n%s", got)
+		}
+		if !strings.Contains(got, "  Prefer semble for intent queries\n  not for exact symbols\n") {
+			t.Errorf("hint not rendered verbatim:\n%s", got)
+		}
+		if strings.Contains(got, "semantic code search") {
+			t.Errorf("built-in copy leaked through a tier-1 hint:\n%s", got)
+		}
+	})
+
+	t.Run("mcp_prompt false yields empty section", func(t *testing.T) {
+		cfg := noPromptConfig()
+		off := false
+		cfg.MCPPrompt = &off
+		if got := mcpSectionFromBridges(bridges(), cfg); got != "" {
+			t.Errorf("mcp_prompt:false must suppress the section, got:\n%s", got)
+		}
+		// Explicit true is the same as absent: the section is assembled.
+		on := true
+		cfg.MCPPrompt = &on
+		if got := mcpSectionFromBridges(bridges(), cfg); got == "" {
+			t.Error("mcp_prompt:true must keep the section")
+		}
+	})
+
+	t.Run("bridge order does not change bytes", func(t *testing.T) {
+		in := bridges()
+		want := mcpSectionFromBridges(in, noPromptConfig())
+		// Shuffle across servers only: within one server, registration
+		// order is part of the contract (asserted above).
+		shuffled := []*mcptool.Bridge{in[2], in[0], in[1]}
+		if got := mcpSectionFromBridges(shuffled, noPromptConfig()); got != want {
+			t.Errorf("bridge order leaked into the section:\n--- want ---\n%s\n--- got ---\n%s", want, got)
+		}
+	})
+
+	t.Run("empty bridges yield empty section", func(t *testing.T) {
+		if got := mcpSectionFromBridges(nil, noPromptConfig()); got != "" {
+			t.Errorf("mcpSectionFromBridges(nil) = %q, want empty", got)
+		}
+		if got := mcpSectionFromBridges([]*mcptool.Bridge{}, noPromptConfig()); got != "" {
+			t.Errorf("mcpSectionFromBridges(empty) = %q, want empty", got)
+		}
+	})
 }

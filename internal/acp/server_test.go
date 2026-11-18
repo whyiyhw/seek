@@ -10,17 +10,25 @@ import (
 
 // fakeBackend is a scriptable ACP Backend.
 type fakeBackend struct {
-	prompt func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
+	prompt    func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
+	menu      []ConfigOption                                               // returned by NewSession (nil default)
+	setConfig func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
 }
 
 func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
 	return InitializeResult{ProtocolVersion: p.ProtocolVersion, AgentCapabilities: AgentCapabilities{LoadSession: true}}
 }
 func (f fakeBackend) NewSession(p NewSessionParams) (NewSessionResult, error) {
-	return NewSessionResult{SessionID: "sess-1"}, nil
+	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu}, nil
 }
 func (f fakeBackend) Prompt(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
 	return f.prompt(ctx, p, send)
+}
+func (f fakeBackend) SetConfigOption(p SetConfigOptionParams) (SetConfigOptionResult, error) {
+	if f.setConfig != nil {
+		return f.setConfig(p)
+	}
+	return SetConfigOptionResult{ConfigOptions: f.menu}, nil
 }
 
 // startServer wires a Server to an in-process client over two pipes and
@@ -208,5 +216,151 @@ func TestPromptParams_ImageBlocks(t *testing.T) {
 	// PromptText must still ignore image blocks (text-only).
 	if got := p.PromptText(); got != "look at this" {
 		t.Fatalf("PromptText should only return text blocks, got %q", got)
+	}
+}
+
+func testMenu() []ConfigOption {
+	return []ConfigOption{{
+		ID:           "model",
+		Name:         "Model",
+		Category:     "model",
+		Type:         "select",
+		CurrentValue: "deepseek:deepseek-flash",
+		Options: []ConfigSelectOption{
+			{Value: "deepseek:deepseek-flash", Name: "deepseek-flash (V4.1-Flash)"},
+			{Value: "glm:glm-5.3", Name: "glm-5.3 (GLM)"},
+		},
+	}}
+}
+
+func TestServer_NewSessionCarriesConfigOptions(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{menu: testMenu()})
+	send(t, enc, 6, "session/new", NewSessionParams{Cwd: "/x"})
+	msg := readMsg(t, dec)
+	var res NewSessionResult
+	if err := json.Unmarshal(msg["result"], &res); err != nil {
+		t.Fatalf("no result: %v (%v)", err, msg)
+	}
+	if len(res.ConfigOptions) != 1 {
+		t.Fatalf("configOptions = %+v, want 1 entry", res.ConfigOptions)
+	}
+	opt := res.ConfigOptions[0]
+	if opt.ID != "model" || opt.Type != "select" || opt.CurrentValue != "deepseek:deepseek-flash" || len(opt.Options) != 2 {
+		t.Fatalf("bad model option: %+v", opt)
+	}
+	// The wire object must flatten the select variant (currentValue/
+	// options inlined next to id/name/type), not nest it — that shape is
+	// what the client SDK schema (and paseo) deserialises.
+	var raw struct {
+		ConfigOptions []map[string]json.RawMessage `json:"configOptions"`
+	}
+	if err := json.Unmarshal(msg["result"], &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.ConfigOptions) != 1 {
+		t.Fatalf("wire configOptions = %s", msg["result"])
+	}
+	for _, key := range []string{"id", "name", "type", "currentValue", "options"} {
+		if _, ok := raw.ConfigOptions[0][key]; !ok {
+			t.Fatalf("wire configOption missing %q: %s", key, msg["result"])
+		}
+	}
+}
+
+func TestServer_SetConfigOption(t *testing.T) {
+	var got SetConfigOptionParams
+	menu := testMenu()
+	b := fakeBackend{menu: menu, setConfig: func(p SetConfigOptionParams) (SetConfigOptionResult, error) {
+		got = p
+		menu[0].CurrentValue = p.Value // the real backend updates in place
+		return SetConfigOptionResult{ConfigOptions: menu}, nil
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 7, "session/set_config_option", SetConfigOptionParams{
+		SessionID: "sess-1", ConfigID: "model", Value: "glm:glm-5.3",
+	})
+	msg := readMsg(t, dec)
+	var res SetConfigOptionResult
+	if err := json.Unmarshal(msg["result"], &res); err != nil {
+		t.Fatalf("no result: %v (%v)", err, msg)
+	}
+	if got.ConfigID != "model" || got.Value != "glm:glm-5.3" {
+		t.Fatalf("backend saw %+v", got)
+	}
+	if len(res.ConfigOptions) != 1 || res.ConfigOptions[0].CurrentValue != "glm:glm-5.3" {
+		t.Fatalf("response must echo the FULL option set with the new current: %+v", res)
+	}
+}
+
+func TestServer_SetConfigOption_BackendError(t *testing.T) {
+	b := fakeBackend{setConfig: func(p SetConfigOptionParams) (SetConfigOptionResult, error) {
+		return SetConfigOptionResult{}, io.ErrClosedPipe // any backend failure → -32000
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 8, "session/set_config_option", SetConfigOptionParams{SessionID: "s", ConfigID: "nope", Value: "x"})
+	msg := readMsg(t, dec)
+	var e rpcError
+	if err := json.Unmarshal(msg["error"], &e); err != nil {
+		t.Fatalf("expected error, got %v", msg)
+	}
+	if e.Code != -32000 {
+		t.Fatalf("code = %d, want -32000", e.Code)
+	}
+}
+
+func TestServer_SetConfigOption_BooleanPayloadRejected(t *testing.T) {
+	// seek only serves select-type options; the boolean wire variant
+	// (type:"boolean", value:true) must fail decoding loudly (-32602)
+	// rather than half-apply.
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 9, "session/set_config_option", map[string]any{
+		"sessionId": "sess-1", "configId": "model", "type": "boolean", "value": true,
+	})
+	msg := readMsg(t, dec)
+	var e rpcError
+	if err := json.Unmarshal(msg["error"], &e); err != nil {
+		t.Fatalf("expected error, got %v", msg)
+	}
+	if e.Code != -32602 {
+		t.Fatalf("code = %d, want -32602", e.Code)
+	}
+}
+
+func TestServer_SetConfigOption_RejectedWhilePromptInFlight(t *testing.T) {
+	// A model switch during a turn would race the turn's lane reads;
+	// dispatch must reject it while the prompt's cancel is registered.
+	started := make(chan struct{})
+	b := fakeBackend{
+		menu: testMenu(),
+		prompt: func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
+			close(started)
+			<-ctx.Done()
+			return PromptResult{}, ctx.Err()
+		},
+		setConfig: func(p SetConfigOptionParams) (SetConfigOptionResult, error) {
+			t.Error("backend.SetConfigOption must not be called while a prompt is in flight")
+			return SetConfigOptionResult{}, nil
+		},
+	}
+	enc, dec := startServer(t, b)
+	send(t, enc, 10, "session/prompt", PromptParams{SessionID: "sess-1"})
+	<-started
+	send(t, enc, 11, "session/set_config_option", SetConfigOptionParams{SessionID: "sess-1", ConfigID: "model", Value: "glm:glm-5.3"})
+
+	// The switch rejection lands while the turn is still running...
+	msg := readMsg(t, dec)
+	var e rpcError
+	if err := json.Unmarshal(msg["error"], &e); err != nil {
+		t.Fatalf("expected error, got %v", msg)
+	}
+	if e.Code != -32000 {
+		t.Fatalf("code = %d, want -32000 (in-flight rejection)", e.Code)
+	}
+	// ...then the cancelled turn's result.
+	send(t, enc, -1, "session/cancel", map[string]string{"sessionId": "sess-1"})
+	var res PromptResult
+	json.Unmarshal(readMsg(t, dec)["result"], &res)
+	if res.StopReason != "cancelled" {
+		t.Fatalf("stop reason = %q, want cancelled", res.StopReason)
 	}
 }

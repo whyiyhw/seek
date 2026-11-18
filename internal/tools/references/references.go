@@ -2,7 +2,7 @@
 // find-references via a language server (v6 柱 L 瘦身版). It is the one
 // thing grep can't do — resolve the actual symbol, follow aliased
 // imports, ignore comments/strings — so it's the only LSP operation seek
-// exposes (see docs/prd/feature-lsp.md for the ROI rationale).
+// exposes (see docs/prd/archive/feature-lsp.md for the ROI rationale).
 //
 // The tool owns presentation: 1-based→0-based position conversion (LSP's
 // headline footgun), locating the symbol's column on the given line,

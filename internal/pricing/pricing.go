@@ -45,6 +45,13 @@ type ModelPricing struct {
 // endpoint — the default model of seek's --provider=glm lane.
 const ModelGLM53 = "glm-5.3"
 
+// ModelOpenCodeV41Flash is DeepSeek's V4.1 Flash as addressed on
+// OpenCode's Go-plan gateway — the default model of seek's
+// --provider=opencode lane. A DIFFERENT id string from the direct
+// API's deepseek.ModelV41Flash ("deepseek-flash"): same model, two
+// lanes, two rate entries so neither falls to the other's fallback.
+const ModelOpenCodeV41Flash = "deepseek-v4.1-flash"
+
 // ModelV4Pro is DeepSeek's independent pro build (served by
 // DeepSeek-V4-Pro-0813). It retired into V4.1-Flash routing at the
 // 2026-09-10 V4.1 launch, but the pricing page (checked 2026-11-14)
@@ -108,6 +115,26 @@ var standardRates = map[string]ModelPricing{
 		OutputPerMTok:     28 / 7.0, // ¥28
 		NoOffPeakDiscount: true,
 	},
+	// OpenCode Go lane (--provider=opencode): a flat $10/month
+	// REQUEST-WINDOW plan (5h/weekly/monthly request quotas) — the
+	// per-token values below are never what the user pays; they exist
+	// only so the defensive cost display shows a sensible number.
+	// NoOffPeakDiscount because a subscription has no windows. Source:
+	// opencode.ai/docs/console/models, checked 2026-11-17 —
+	// deepseek-v4.1-flash $0.30 miss · $0.006 cached · $1.20 output
+	// (happens to equal the direct DeepSeek card above). NB the Go
+	// pool's glm-5.3 ($1.40/$0.26/$4.40 on the same page) COLLIDES
+	// with the ModelGLM53 key, which stays at Zhipu's direct card —
+	// that row prices the glm lane's real per-token billing, and Go-
+	// lane glm-5.3 reuse of it is display-only either way. Other
+	// Go-pool ids fall to the Flash fallback until a verified
+	// /v1/models list lands (post-merge follow-up card).
+	ModelOpenCodeV41Flash: {
+		InputMissPerMTok:  0.30,
+		InputHitPerMTok:   0.006,
+		OutputPerMTok:     1.20,
+		NoOffPeakDiscount: true,
+	},
 }
 
 // searchPerCallUSD is the standalone Search API's per-call rate:
@@ -169,6 +196,28 @@ func TTSCost(billableChars int) float64 {
 		return 0
 	}
 	return float64(billableChars) * ttsPer10kCharsUSD / 10_000
+}
+
+// parsePerPageUSD is the Files-API document-parsing rate: $0.225 per
+// 1,000 pages (¥1.5/千页 on the Chinese pricing page; the English page
+// no longer lists the tools family, so this converts at the same ratio
+// the search row documents natively — ¥5/1K → $0.75/1K). Billed once,
+// at upload: the parse IS the upload (a returned file id means the
+// document already parsed), same price for text_recognition and
+// rich_layout_recognition (PRD feature-deepseek-app-api §1.2/§6 row 3).
+// Same-posture note as search/ASR/TTS: list price only, no discounts
+// modelled — the defensive display errs high.
+const parsePerPageUSD = 0.225 / 1000
+
+// ParseCost returns the USD cost of parsing pages document pages via
+// the Files API. A page count of 0 or less (server omitted it / failed
+// upload) costs nothing — the router records this off the FileObject
+// the upload RETURNED, never off "an upload was attempted".
+func ParseCost(pages int) float64 {
+	if pages <= 0 {
+		return 0
+	}
+	return float64(pages) * parsePerPageUSD
 }
 
 const offPeakDiscount = 0.5

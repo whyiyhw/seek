@@ -13,7 +13,7 @@ import (
 // the model recognises the pattern across turns and so future log
 // readers / pitfall investigations can grep for "[calibration]".
 //
-// PRD docs/prd/feature-suggested-reply.md §4.6.
+// PRD docs/prd/archive/feature-suggested-reply.md §4.6.
 const calibrationTemplate = "[calibration] Prior turn predicted the user would say: %q. They actually said: %q. Update your model of the user's intent for this turn."
 
 // actualPrefixLen is the prefix of the user's actual message included

@@ -117,7 +117,7 @@ type observeDoneMsg struct {
 // sentinel (timed out, errored, model refused) — Update should clear
 // any pending placeholder rather than show empty hint.
 //
-// See PRD docs/prd/feature-suggested-reply.md §4.1.
+// See PRD docs/prd/archive/feature-suggested-reply.md §4.1.
 type suggestionReadyMsg struct {
 	Text string
 	// Turn is the assistant turn index this prediction was generated

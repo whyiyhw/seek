@@ -14,7 +14,7 @@
 //     agent. Calls ComposeSubagent which produces the same header (so
 //     subagents inherit project conventions and skill manifest) plus
 //     a trailing role + summary-length segment that REPLACES the
-//     parent mode reminder. See docs/prd/feature-subagent.md §3.6.1
+//     parent mode reminder. See docs/prd/archive/feature-subagent.md §3.6.1
 //     for the full system prompt composition rules.
 //
 // Both paths drive the SAME template literal (rootTpl); only the tail
@@ -32,8 +32,9 @@ import (
 // rootTpl is the constant header shared by every system prompt. The
 // three %s slots are the working directory (segment 1), the mode
 // label (segment 4 in the PRD §3.6.1 numbering), and the session date
-// (appended after the mode line); ProjectSection (segment 2) and
-// SkillManifest (segment 3) are appended by Compose.
+// (appended after the mode line); ProjectSection (segment 2),
+// SkillManifest (segment 3), and MCPSection (segment 5, empty = skip)
+// are appended by Compose.
 //
 // The date is a Header FIELD, not a time.Now() call inside this
 // package — Compose must stay a pure function of its inputs. The
@@ -100,7 +101,7 @@ Today's date: %s — captured once when this session started and held FIXED for 
 // rather than in internal/subagent so sysprompt is the single owner
 // of the assembled byte stream.
 //
-// Wording matches docs/prd/feature-subagent.md §3.6 exactly so future
+// Wording matches docs/prd/archive/feature-subagent.md §3.6 exactly so future
 // PRD updates and code stay in lock-step.
 const summaryHint = "Your final assistant message will be returned to the parent as a summary. Keep it within ~4000 characters; content past that will be truncated."
 
@@ -110,19 +111,26 @@ const summaryHint = "Your final assistant message will be returned to the parent
 // directory: %s" slot. ProjectSection is the AGENTS.md / CLAUDE.md
 // content from internal/projectmd (empty = skip). SkillManifest is
 // the per-session skill listing from internal/skill (empty = skip).
-// Date is the human-readable session date (e.g. "Wednesday,
-// 2026-06-03"); goes into the "Today's date: %s" slot. It MUST be
-// captured once at session start and reused unchanged for every turn
-// — see the rootTpl comment for why a per-turn time.Now() would break
-// the prefix cache.
+// MCPSection is the per-session MCP server listing (empty = skip) —
+// the fifth segment, same per-session-static discipline as
+// SkillManifest: assembled once by cmd/seek after mcptool.LoadServers
+// and never recomputed mid-session (calling stats are cache-volatile
+// data and must NEVER land here). Date is the human-readable session
+// date (e.g. "Wednesday, 2026-06-03"); goes into the "Today's date:
+// %s" slot. It MUST be captured once at session start and reused
+// unchanged for every turn — see the rootTpl comment for why a
+// per-turn time.Now() would break the prefix cache.
 //
-// All four fields are byte-stable across turns for a given session,
+// All five fields are byte-stable across turns for a given session,
 // which is what keeps the prefix cache hot. They change only on /new
-// (RebuildAgent) or session resume.
+// (RebuildAgent) or session resume. An empty MCPSection appends zero
+// bytes — users without MCP servers see a byte-identical prompt to
+// the pre-MCPSection build (the golden test locks this).
 type Header struct {
 	Cwd            string
 	ProjectSection string
 	SkillManifest  string
+	MCPSection     string
 	Date           string
 }
 
@@ -137,7 +145,7 @@ type Header struct {
 // existing session in the wild).
 func Compose(h Header, modeLabel string) string {
 	var sb strings.Builder
-	sb.Grow(len(rootTpl) + len(h.ProjectSection) + len(h.SkillManifest) + len(h.Date) + 16)
+	sb.Grow(len(rootTpl) + len(h.ProjectSection) + len(h.SkillManifest) + len(h.MCPSection) + len(h.Date) + 16)
 	fmt.Fprintf(&sb, rootTpl, h.Cwd, modeLabel, h.Date)
 	if h.ProjectSection != "" {
 		sb.WriteByte('\n')
@@ -147,13 +155,21 @@ func Compose(h Header, modeLabel string) string {
 		sb.WriteByte('\n')
 		sb.WriteString(h.SkillManifest)
 	}
+	// MCPSection is the fifth segment, appended after SkillManifest.
+	// Empty = zero bytes appended, keeping no-MCP sessions byte-
+	// identical to the pre-MCPSection build (prefix-cache invariant;
+	// locked by sysprompt_test.go).
+	if h.MCPSection != "" {
+		sb.WriteByte('\n')
+		sb.WriteString(h.MCPSection)
+	}
 	return sb.String()
 }
 
 // SubagentRole is the per-template role prompt for a subagent. It is
 // appended after segments 1-3 (header + project + skills) and
 // REPLACES the parent mode reminder. The shape comes from
-// docs/prd/feature-subagent.md §3.6 (three subagent types, each
+// docs/prd/archive/feature-subagent.md §3.6 (three subagent types, each
 // stacking role intro + optional mode-specific extra clause +
 // summary-length hint).
 //

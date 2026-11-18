@@ -12,7 +12,7 @@ import (
 )
 
 // The lane composition cmd/seek mounts on every unattended lane (goal /
-// autopilot / SEEK_ACP_YOLO ACP, docs/prd/feature-paseo-provider.md
+// autopilot / SEEK_ACP_YOLO ACP, docs/prd/archive/feature-paseo-provider.md
 // §3.3): a YOLO policy (no human to ask) + the no-remote guard. Yolo
 // opens LOCAL edit/shell only — push/PR-class remote mutations stay
 // blocked, double-insuring the drive cards' own "never push" rule.

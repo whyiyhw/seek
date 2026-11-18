@@ -76,7 +76,7 @@ const webhookTimeout = 5 * time.Second
 // model chose, and self-hosted / LAN push (ntfy on a homelab box, a Slack
 // relay on the intranet) is a first-class use case. The only check is the
 // scheme — http/https — to catch config typos and reject exotic schemes
-// (file://, gopher://, …). See docs/prd/feature-mobile-push.md §D3.
+// (file://, gopher://, …). See docs/prd/archive/feature-mobile-push.md §D3.
 func ValidateWebhookURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -267,7 +267,7 @@ func SendTestWebhook(ctx context.Context, target WebhookTarget, client *http.Cli
 }
 
 // buildWebhookRequest constructs the POST for one target + payload,
-// per-format. See docs/prd/feature-mobile-push.md §D6.
+// per-format. See docs/prd/archive/feature-mobile-push.md §D6.
 func buildWebhookRequest(t WebhookTarget, event, title, body string) (*http.Request, error) {
 	switch t.Format {
 	case FormatNtfy:

@@ -2,7 +2,7 @@
 
 **Probes**: does DeepSeek actually *differentiate* the `code-review` skill's effort
 levels, or are `low`…`max` just prompt-framing theater? (PRD
-[`feature-code-review.md`](../../../docs/prd/feature-code-review.md) §D4 flagged this as the
+[`feature-code-review.md`](../../../docs/prd/archive/feature-code-review.md) §D4 flagged this as the
 load-bearing unknown.)
 
 This case is one half of a controlled A/B. It shares a **byte-identical fixture** with

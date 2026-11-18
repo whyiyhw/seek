@@ -74,6 +74,15 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		methods.NewHooksFromEnv().RegisterAll(reg)
 		return fe
 	},
+	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides
+	// the web page's recorder UI, so it only starts together with web
+	// (buildFrontends attaches the two below). The ASR adapter reads
+	// DEEPSEEK_API_KEY like every other DeepSeek consumer; a missing
+	// key fails per upload with a visible error in the page, not at
+	// startup.
+	"voice": func(*config.ServeConfig) controlplane.Frontend {
+		return controlplane.NewVoice(controlplane.NewDeepSeekVoiceASR())
+	},
 }
 
 // frontendList is a repeatable string flag: --frontend=fake
@@ -104,7 +113,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	var listen string
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Var(&fes, "frontend", "frontend to launch; repeat the flag for multiple (v1: fake, web)")
+	fs.Var(&fes, "frontend", "frontend to launch; repeat the flag for multiple (v1: fake, web, voice)")
 	fs.StringVar(&listen, "listen", "", "web frontend listen address; overrides serve.web_addr (loopback + tailnet CGNAT only)")
 	fs.Usage = func() { printHelp(stderr) }
 	if err := fs.Parse(args); err != nil {
@@ -165,9 +174,11 @@ func effectiveServe(sc *config.ServeConfig, listen string) *config.ServeConfig {
 // buildFrontends resolves --frontend names against the registry.
 // Duplicates are left to Serve to reject (it owns the "two frontends
 // sharing a ConvID prefix is crosstalk" rule); unknown names die here.
+// After construction, cross-frontend wiring runs: voice hosts its
+// upload endpoint on web (pre-Run only, the mount contract).
 func buildFrontends(names []string, sc *config.ServeConfig) ([]controlplane.Frontend, error) {
 	if len(names) == 0 {
-		return nil, errors.New("no frontends selected — pass --frontend=<name> (v1: fake, web)")
+		return nil, errors.New("no frontends selected — pass --frontend=<name> (v1: fake, web, voice)")
 	}
 	out := make([]controlplane.Frontend, 0, len(names))
 	for _, n := range names {
@@ -176,6 +187,25 @@ func buildFrontends(names []string, sc *config.ServeConfig) ([]controlplane.Fron
 			return nil, fmt.Errorf("unknown frontend %q (registered: %s)", n, registeredNames())
 		}
 		out = append(out, ctor(sc))
+	}
+
+	// V2 wiring pass: the voice frontend has no transport of its own —
+	// attach it to the web frontend built in THIS call (the page is its
+	// recorder UI). Voice without web is a config mistake: fail here,
+	// not later as a dead frontend.
+	var web *controlplane.WebFrontend
+	for _, f := range out {
+		if w, ok := f.(*controlplane.WebFrontend); ok {
+			web = w
+		}
+	}
+	for _, f := range out {
+		if v, ok := f.(*controlplane.VoiceFrontend); ok {
+			if web == nil {
+				return nil, errors.New("--frontend=voice needs --frontend=web in the same serve (voice uses the web page as its recorder UI)")
+			}
+			v.Attach(web)
+		}
 	}
 	return out, nil
 }
@@ -260,8 +290,9 @@ Usage:
 
       Flags:
         --frontend N   frontend to launch; repeat for multiple.
-                       Registered in the default build: fake, web.
-                       (feishu arrives with -tags feishu, D-F1.)
+                       Registered in the default build: fake, web,
+                       voice (voice needs web too — it uses the web
+                       page's push-to-talk button as its recorder UI).
 
         --listen ADDR  web frontend listen address; overrides
                        serve.web_addr for this run. Loopback
@@ -277,6 +308,16 @@ Usage:
       --listen) to the machine's tailnet IP (e.g. "100.x.y.z:8790").
       Both accept loopback and tailnet CGNAT (100.64.0.0/10) hosts
       only — 0.0.0.0 and any other address are refused at startup.
+
+      --frontend=voice adds push-to-talk to the web page (hold 🎤,
+      speak ≤120 s, release): the clip is transcribed by DeepSeek's
+      ASR (DEEPSEEK_API_KEY, billed per second) and enters the plane
+      as a message of its own conversation voice:<device-id> — bind
+      it separately with "/bind <项目路径>" by voice or from the
+      same page after a voice message. Microphone access needs a
+      secure context: localhost works out of the box; over a tailnet
+      use an HTTPS front ("tailscale serve", not --tcp) or browsers
+      deny getUserMedia.
 
       Config: the optional "serve" section of ~/.seek/config.json
       (projects / max_concurrency / yolo / web_addr — default

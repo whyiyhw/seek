@@ -10,6 +10,16 @@
 # Each case appends one JSON row to:
 #   eval/results/<UTC-date>-<binary-version>.jsonl
 #
+# Env knobs (ablation lane steering, see eval/ablate.sh + eval/README.md
+# § Ablation; both UNSET = historical behaviour, byte for byte):
+#   SEEK_EVAL_RESULTS_DIR   redirect the JSONL sink away from
+#                           eval/results (the regression-trend data
+#                           source — ablation rows must never land there)
+#   SEEK_EVAL_EXTRA_ARGS    extra seek args appended to the default
+#                           invocation (word-split on spaces, e.g.
+#                           "-tools read,edit,write,bash,grep"); also
+#                           passed through to runner.sh cases in the env
+#
 # Exit code: 0 if every executed case passed, 1 if any failed, 2 on
 # setup error (missing binary, unparseable expect.json, etc.).
 
@@ -39,6 +49,12 @@ if command -v cygpath >/dev/null 2>&1; then
   cases_dir=$(cygpath -m "$cases_dir")
   results_dir=$(cygpath -m "$results_dir")
 fi
+
+# v8·T2 ablation hooks — both default to the historical behaviour when
+# unset, so the no-env output stays byte-identical (card c_w3vhcm
+# acceptance ②).
+results_dir=${SEEK_EVAL_RESULTS_DIR-"$results_dir"}
+seek_extra_args=${SEEK_EVAL_EXTRA_ARGS-}
 
 case_filter=${1-}
 binary=${2-$repo_root/seek}
@@ -303,6 +319,7 @@ run_one() {
       SEEK_EVAL_REPO_ROOT="$repo_root" \
       SEEK_EVAL_PROMPT_FILE="$prompt_file" \
       SEEK_EVAL_MAX_TURNS="$max_turns" \
+      SEEK_EVAL_EXTRA_ARGS="$seek_extra_args" \
       bash "$runner_file" ) > "$out_file" 2>/dev/null
   else
   # -no-save: don't pollute ~/.seek/sessions/ with eval runs.
@@ -310,7 +327,10 @@ run_one() {
   #           grep/read/list_dir run without inline approval prompts.
   # cwd:     repo root, so the agent has the actual seek codebase to
   #          inspect (most cases reference real files).
-  ( cd "$repo_root" && "$binary" -yolo -no-save -max-turns "$max_turns" -json -p "$prompt" ) \
+  # $seek_extra_args (unquoted by intent — a space-separated flag
+  # list, e.g. the ablation lane's "-tools read,edit,write,bash,grep")
+  # is empty for every non-ablation invocation.
+  ( cd "$repo_root" && "$binary" -yolo -no-save -max-turns "$max_turns" -json $seek_extra_args -p "$prompt" ) \
     > "$out_file" 2>/dev/null
   fi
   local elapsed=$(( $(date +%s) - started_at ))

@@ -6,7 +6,7 @@
 
 当前支持两个平台：**macOS Seatbelt** 和 **Linux Landlock**。不支持的平台（Windows、BSD）静默降级为 worktree 逻辑隔离。
 
-设计与决策见 [`docs/prd/feature-sandbox.md`](prd/feature-sandbox.md)。
+设计与决策见 [`docs/prd/archive/feature-sandbox.md`](prd/archive/feature-sandbox.md)。
 
 ---
 

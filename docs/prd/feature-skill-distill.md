@@ -1,7 +1,7 @@
 # Feature: Skill 自动蒸馏（auto skill-distillation）——S→K 蒸馏、草稿区、人审闸
 
 **所属版本**：独立 feature PRD · 📐 设计稿 · 未排期（自进化内环第二块；第一块 pitfall→eval 见 butler 卡 `c_w7kob6`）
-**前置阅读**：[`v1.md`](v1.md) §6（`/distill`、`memory_observe`、auto-dream，及 M5.7「SessionEnd 调 reasoner」的弃用史）、[`v2.md`](v2.md)（skill 生命周期 + §6.1 AI 侧两段式安装）、[`docs/narrative/seek.md`](../narrative/seek.md)（自进化闭环定位）、本仓 `AGENTS.md`（「`~/.seek/skills/` 写盘只许 skillmgr/skillstats」约束）、[`internal/skill/loader.go`](../../internal/skill/loader.go)（dotfile 跳过是本设计的承重墙）、[`internal/memory/hook.go`](../../internal/memory/hook.go)（`OnSessionEnd` no-op 注释 = v1 弃用实录）
+**前置阅读**：[`v1.md`](archive/v1.md) §6（`/distill`、`memory_observe`、auto-dream，及 M5.7「SessionEnd 调 reasoner」的弃用史）、[`v2.md`](archive/v2.md)（skill 生命周期 + §6.1 AI 侧两段式安装）、[`docs/narrative/seek.md`](../narrative/seek.md)（自进化闭环定位）、本仓 `AGENTS.md`（「`~/.seek/skills/` 写盘只许 skillmgr/skillstats」约束）、[`internal/skill/loader.go`](../../internal/skill/loader.go)（dotfile 跳过是本设计的承重墙）、[`internal/memory/hook.go`](../../internal/memory/hook.go)（`OnSessionEnd` no-op 注释 = v1 弃用实录）
 **状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）；§6.2 的 `/skill drafts` 收件箱人审流（list/show/approve/reject，卡 `c_jvn3ky`）已实施——approve 走既有 skillmgr.Install（scope 默认取 sidecar 建议，`--project/--user` 覆盖），未做模态 scope picker。M-SD2/SD3 未动。
 **状态**：📐 设计稿；M-SD1（/distill 扩展手动链路）已实施（butler 卡 `c_j5qzb7`，2026-11-13）。M-SD2/SD3（自动路径 + GC + 失败路径测试）已实施（butler 卡 `c_dkgvnp`，2026-11-13）：`internal/skilldistill/auto.go` 的 SessionStart 后台批量、L4 复发累积、per-project state、`$SEEK_AUTO_SKILL_DISTILL`（默认关）、草稿 GC。偏差两处：①§7 表中「internal/hooks」一行实际落位 `internal/skilldistill/auto.go`（hooks 包保持通用，AutoHook 经 Registry 注册，结构逐行对照 maybeAutoDream）；②打点复用 `.stats.jsonl`（provider=`distill-auto`，调用数聚合并跳过该标记）而非新文件。三期（butler 卡 `c_jqwd72`，2026-11-14）已实施：蒸馏漏斗打点——`skillstats.Entry` 加可选 `stage`/`verdict` 字段（旧行两缺皆空，读侧兼容），自动路径每个漏斗事件一行（L0 PASS/DROP、L1 ERROR、shape/evidence/L2 REJECT、L3 ACCEPT/REJECT/ERROR、L4 DRAFT/STRENGTHEN），报表读面为 `seek skill stats --distill`（stage×verdict 计数表，`--json` 给脚本；三期前的无 stage 旧行归入空 stage 桶不丢失）；`/skill drafts` 列表的 recurrence 计数（M-SD2 已有）补文本输出测试钉死。TUI scrollback 通知未做（不在 §9 的 M-SD2 交付清单里），留待后续。另：`/distill --dry-run` 预览已实施（butler 卡 `c_oh2dl3`，2026-11-13）——跑完整漏斗（L0→L1→证据→L2）、报告各层判定 + 每候选草稿正文前 20 行预览，零落盘不开模态，M 段跳过；拒绝行与真跑字节一致便于对照（顺手修复了真跑拒绝行因 appendHistory cmd 丢弃而从未打印的旧 bug，见 pitfalls.md）。
 **预估工作量**：~6 天（M-SD1 ~3d / M-SD2 ~2d / M-SD3 ~1d）。
@@ -48,7 +48,7 @@ v2 已经把 skill 的「装—用—看—卸」闭环做完（install/stats/st
 
 ### 1.3 为什么 description 是全系统杠杆最高的一个字段
 
-`Set.Manifest()` 把每个 skill 的 name+description 注进**每个未来会话**的 system prompt（[v2 §6](v2.md) prefix-cache 约束：manifest 启动时固定）。这意味着：
+`Set.Manifest()` 把每个 skill 的 name+description 注进**每个未来会话**的 system prompt（[v2 §6](archive/v2.md) prefix-cache 约束：manifest 启动时固定）。这意味着：
 
 - 一条好 description = 模型在未来无数会话里**自主想起**这套流程的触发器；
 - 一条烂 description = 永久的 prefix token 死重 + 模型永不用它。
@@ -171,7 +171,7 @@ memory 的演进序是 `/distill`（手动）→ `memory_observe`（实时模型
 
 ### 5.2 `.distill.json` sidecar（seek 私有，作者可无视）
 
-与 `.install.json` 同一设计哲学（作者编辑的文件与 seek 写的本地状态分离，[v2 §4.2](v2.md)）：
+与 `.install.json` 同一设计哲学（作者编辑的文件与 seek 写的本地状态分离，[v2 §4.2](archive/v2.md)）：
 
 ```json
 {
@@ -281,7 +281,7 @@ author: distilled
 
 **包边界一句话**：`skilldistill` 负责「想」（LLM I/O，无副作用），`skillmgr` 负责「落」（文件系统，独占写权）——与 v2 已有的 `skill`（读）/`skillmgr`（管）切分同构，不出现第三个能写 `~/.seek/skills/` 的包。
 
-**模型选型**：手动路径 Flash + thinking（交互延迟优先，与 `/distill`/observe 过滤一致）；自动路径默认 Flash + thinking、`$SEEK_SKILL_DISTILL_MODEL` 可切 Pro——自动批跑无人值守、产物吃人审注意力、频率低（cadence 8 会话/7 天），质量优先的参数空间与 dream 选型同款（[v1 §6 模型选型](v1.md)），但有 L3+人审双闸兜着，Pro 非必需。
+**模型选型**：手动路径 Flash + thinking（交互延迟优先，与 `/distill`/observe 过滤一致）；自动路径默认 Flash + thinking、`$SEEK_SKILL_DISTILL_MODEL` 可切 Pro——自动批跑无人值守、产物吃人审注意力、频率低（cadence 8 会话/7 天），质量优先的参数空间与 dream 选型同款（[v1 §6 模型选型](archive/v1.md)），但有 L3+人审双闸兜着，Pro 非必需。
 
 ## 8. 验收标准
 

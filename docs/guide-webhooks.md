@@ -4,7 +4,7 @@ seek 可以把 cron 任务完成、autopilot 结果、长时间交互回合的�
 
 > seek can push job completions, autopilot results, and long-turn end notifications to your phone — via a webhook bridge to your preferred channel.
 
-设计决策见 [`docs/prd/feature-mobile-push.md`](prd/feature-mobile-push.md)。
+设计决策见 [`docs/prd/archive/feature-mobile-push.md`](prd/archive/feature-mobile-push.md)。
 
 ---
 

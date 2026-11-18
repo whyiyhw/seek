@@ -36,6 +36,11 @@ var contextLimits = map[string]int{
 	// glm-5.3 on open.bigmodel.cn ships a single 1M-context tier —
 	// same source as the pricing table's GLM row.
 	"glm-5.3": 1_000_000,
+	// OpenCode Go lane (--provider=opencode): the same DeepSeek V4.1
+	// Flash as the entry above, addressed by the gateway's own id
+	// string (1M context). Other Go-pool ids aren't catalogued and hit
+	// Default — conservative, never over-reports capacity.
+	"deepseek-v4.1-flash": 1_000_000,
 }
 
 // Default is returned when an unknown model is queried. Since most

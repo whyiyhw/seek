@@ -3,8 +3,12 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/whyiyhw/seek/internal/config"
 )
 
 // drive runs the named prompt against canned input + collects output.
@@ -151,11 +155,130 @@ func TestEnvVarFor_KnownProviders(t *testing.T) {
 		"anthropic": "ANTHROPIC_API_KEY",
 		"openai":    "OPENAI_API_KEY",
 		"gemini":    "GEMINI_API_KEY",
+		"glm":       "GLM_API_KEY",
+		"opencode":  "OPENCODE_API_KEY",
 		"unknown":   "",
 	}
 	for provider, want := range cases {
 		if got := envVarFor(provider); got != want {
 			t.Errorf("envVarFor(%q) = %q, want %q", provider, got, want)
+		}
+	}
+}
+
+func TestPromptProvider_MenuRendersAllOptions(t *testing.T) {
+	// Every providerOption must appear as a numbered row — a row
+	// missing from the render is a row the user can't pick.
+	_, out, err := drive(t,
+		func(s *bufio.Scanner, b *bytes.Buffer) (string, error) {
+			return promptProvider(b, s)
+		},
+		"1\n")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	for i, p := range providerOptions {
+		want := fmt.Sprintf("    %d) %s\n", i+1, p.label)
+		if !strings.Contains(out, want) {
+			t.Errorf("menu missing row %d (%s); got menu:\n%s", i+1, p.id, out)
+		}
+	}
+	if n := len(providerOptions); n != 6 {
+		t.Errorf("providerOptions has %d entries, want 6 (wizard menu row count)", n)
+	}
+}
+
+func TestPromptProvider_AcceptsDigitForNewLanes(t *testing.T) {
+	// opencode sits at slot 5 — the digit channel must reach past the
+	// original four rows.
+	got, _, err := drive(t,
+		func(s *bufio.Scanner, b *bytes.Buffer) (string, error) {
+			return promptProvider(b, s)
+		},
+		"5\n")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != "opencode" {
+		t.Errorf("got %q, want opencode (option 5)", got)
+	}
+}
+
+func TestPromptProvider_AcceptsNameForNewLanes(t *testing.T) {
+	got, _, err := drive(t,
+		func(s *bufio.Scanner, b *bytes.Buffer) (string, error) {
+			return promptProvider(b, s)
+		},
+		"glm\n")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got != "glm" {
+		t.Errorf("got %q, want glm", got)
+	}
+}
+
+func TestPromptProvider_HintShowsDynamicRange(t *testing.T) {
+	// The retry hints must state the real menu size, derived from
+	// len(providerOptions) — a hardcoded range would lie the moment a
+	// provider is added. Expected range is computed, not hardcoded, so
+	// this test also stays truthful if rows are added later.
+	wantRange := fmt.Sprintf("1–%d", len(providerOptions))
+	_, out, err := drive(t,
+		func(s *bufio.Scanner, b *bytes.Buffer) (string, error) {
+			return promptProvider(b, s)
+		},
+		"nope\n\n1\n")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	bad := fmt.Sprintf("unrecognised choice %q — enter %s or a provider name", "nope", wantRange)
+	if !strings.Contains(out, bad) {
+		t.Errorf("unrecognised-input hint lacks dynamic range %q, got: %s", wantRange, out)
+	}
+	empty := fmt.Sprintf("(enter a number %s, or Ctrl+C to abort)", wantRange)
+	if !strings.Contains(out, empty) {
+		t.Errorf("empty-input hint lacks dynamic range %q, got: %s", wantRange, out)
+	}
+}
+
+func TestPromptAPIKey_OmitsFormatLineWhenHintUnknown(t *testing.T) {
+	// opencode's key shape is unverified, so its keyHint is empty and
+	// the "Format usually starts with" line must be omitted entirely —
+	// printing it with an empty prefix would look broken.
+	_, out, err := drive(t,
+		func(s *bufio.Scanner, b *bytes.Buffer) (string, error) {
+			return promptAPIKey(b, s, "opencode")
+		},
+		"some-key\n")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if strings.Contains(out, "Format usually starts with") {
+		t.Errorf("expected no format line for empty keyHint, got: %s", out)
+	}
+	if !strings.Contains(out, "https://console.opencode.ai") {
+		t.Errorf("expected docs URL for opencode, got: %s", out)
+	}
+}
+
+func TestSetKey_RoundTripsMenuProviderIDs(t *testing.T) {
+	// The wizard persists via config.SetKey(cfg, p.id, key) — every
+	// menu id must land on (and survive a config-file round-trip under)
+	// its own provider key, glm/opencode included.
+	for _, p := range providerOptions {
+		var cfg config.Config
+		config.SetKey(&cfg, p.id, "wizard-test-key")
+		data, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var back config.Config
+		if err := json.Unmarshal(data, &back); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got := back.Providers[p.id].APIKey; got != "wizard-test-key" {
+			t.Errorf("round-trip for %q: got key %q, want wizard-test-key", p.id, got)
 		}
 	}
 }

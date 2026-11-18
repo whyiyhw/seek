@@ -88,3 +88,22 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_qur4ib：部署位 A：seek 建 deploy/local-manifest.json 纳入 deploy-local 自动同步
 - c_vunyoz：v8·R1：autopilot Outcome 补证据字段（token/成本 + diffstat）并进 Report 文本
 - c_lz5wxa：bridge·M-B4：seek skill stats --idle（Set 外连接）+ ⚡ 模态双存告警 + 测试
+- c_icrm3y：bridge·M-B1：skillmgr.WriteProjectSkill 新入口 + 测试
+- c_mnicm3：docs/prd 归档减法（v8 D5 拍板）：已交付 PRD 移入归档区，weight.sh 回预算
+- c_aqbdaz：selftest 登记缺口机制化：新脚本自动进 scripts/selftest.sh（含补登 kernel-deps.sh）
+- c_x3bed4：MCP-D2：sysprompt 新增 MCPSection 段（Header 第五段，SkillManifest 同款 per-session 静态；空段=现状逐字节不变）
+- c_n63pat：web 前端·W4.4：资产面 sessions 浏览器（列表 + 消息 cursor 分页浏览）
+- c_f6ayyg：语音 v2·V2：push-to-talk 入站——VoiceFrontend.Run 录音→ASR→Inbound
+- c_m2whz2：编排 M-O3.2：pre_prompt_inject 授权注入通道 + 三区模型落地——opt-in shell stdout 经 Prepend 单缝注入（max_bytes 默认 2048/上限 8192 + 截断标记），deny 路径只断注入不断 turn，audit 记 injected_bytes，守护测试锁「注入后 prefix 前段字节不变」，状态栏字节数提示拍板不做
+- c_4ejhhs：MCP-D1：MCP 工具默认 server__tool 前缀 + LoadServers 注册顺序确定化（bridge.go）
+- c_z5zxru：opencode 车道：--provider=opencode 接入 OpenCode Go 订阅（$10/月请求窗口制）——ChatRequest.SessionID→x-opencode-session 每会话稳定头 + openai client 统一发自有 UA seek/<version>（缺头会退化按 token 扣费），默认模型 deepseek-v4.1-flash（id 待 /v1/models 实测核对），pricing 加 Go lane 行（per-token 仅展示口径），子代理路由表/工具 schema 同步，文档三处
+- c_yijdy4：语音 v1·V1a：播报 sink——serve Speaker（Reply→TTS→播放）+ routines Notifier sibling
+- c_nxirmj：首启向导 provider 单扩容：opencode/glm 两行进菜单（deepseek 仍居首，验证 ping 仍仅 deepseek），重试提示的范围文案按 len(providerOptions) 动态生成（原写死 1–4 会骗人），向导侧 envVarFor 镜像同步 glm/opencode（否则 env-only 用户会被误触导向导），keyHint 均未经真实 key 验证（opencode 留空省略格式行、glm 按 <32hex>.<hex> 形态给示意）
+- c_axqkif：deepseek-app-api·F3：fileRouter 提交期路由 + copy-at-submit + ParseCost
+- c_djswic：deepseek-app-api·SC1：safety_check config 键 + ChatRequest 字段 + refusal 处理（小卡）
+- c_w3vhcm：v8·T2：eval 裸核/完整双跑对照脚本（结果不进回归趋势）
+- c_6thhqc：feat(acp): C 完整模型选择——session/new configOptions + session/set_config_option + SEEK_ACP_PROVIDER/SEEK_ACP_MODEL env 钉定
+- c_lgtpgq：MCP-D3：mcp.json hint 字段 + mcptool.PromptSection 文案组装 + semble 内置 known-server 文案
+- c_yyqtnh：MCP 深度集成设计稿：Semble 第一验证目标（prompt 引导/工具路由/效果评估）
+- c_lmrp73：v8 第一波数据回填：基线三数（一次过率/每任务花费/人审分钟）+ 裸核对照表 + §9 回填与第二波范围建议
+- c_rto2rb：MCP-D3 接线：cmd/seek main.go 消费 mcptool.PromptSection（hint/mcp_prompt 生效）

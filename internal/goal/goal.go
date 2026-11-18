@@ -15,7 +15,7 @@
 // is unit-testable with fakes (no real LLM / agent). The concrete adapters
 // (agent.Agent turn + deepseek judge) wire at M-goal.2/.3.
 //
-// PRD: docs/prd/feature-goal.md.
+// PRD: docs/prd/archive/feature-goal.md.
 package goal
 
 import (

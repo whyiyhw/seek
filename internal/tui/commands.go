@@ -98,9 +98,9 @@ func allCommands() []command {
 		{names: []string{"/lang"}, usage: "/lang [en|zh]", description: "Show or switch the interface language (view text only — model-facing text and the status bar stay English). Persists to ~/.seek/config.json; SEEK_LANG overrides per-launch.", handler: cmdLang},
 		{names: []string{"/diagnose"}, usage: "/diagnose", description: "Print a diagnostic report with version, OS, provider, config and session metadata — paste into bug reports.", handler: cmdDiagnose},
 		{names: []string{"/upgrade"}, usage: "/upgrade [--force] [--dry-run]", description: "Download the latest release and replace this binary in place.", handler: cmdUpgrade},
-		// v3 柱 A checkpoint surface (PRD docs/prd/feature-checkpoint.md §4.2).
+		// v3 柱 A checkpoint surface (PRD docs/prd/archive/feature-checkpoint.md §4.2).
 		{names: []string{"/checkpoints"}, usage: "/checkpoints", description: "List git checkpoints for this session (the per-turn working-tree snapshots seek wrote before destructive actions).", handler: cmdCheckpoints},
-		// v5 柱 G subagent surface (PRD docs/prd/feature-subagent.md §4.2).
+		// v5 柱 G subagent surface (PRD docs/prd/archive/feature-subagent.md §4.2).
 		// M11.0 ships a read-only text table; interactive picker
 		// (Enter for detail / `k` to kill) lands in a v0.6.x dot.
 		{names: []string{"/agents"}, usage: "/agents [--all|types]", description: "List subagents in this project: spawn time, type, mode, status, tokens, description. `types` lists defined agent types (built-in + .seek/agents). Read-only in M11.0; killing active subagents from here lands with the picker upgrade.", handler: cmdAgents},
@@ -205,7 +205,7 @@ func cmdHelp(m *Model, args string) cmdResult {
 // cmdKeys opens the help overlay scoped to the keys section. Mirrors
 // `/help keys` but is a first-class command so users with custom
 // keybindings have a shortcut that bypasses the topic picker.
-// PRD docs/prd/feature-tui-ergonomics.md §5.2.
+// PRD docs/prd/archive/feature-tui-ergonomics.md §5.2.
 func cmdKeys(m *Model, _ string) cmdResult {
 	m.helpOverlayOpen = true
 	m.helpContent = buildHelpTopic(m.keymap(), "keys")

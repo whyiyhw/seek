@@ -7,7 +7,7 @@
 // mirrors the bash / memory / propose pattern where the orchestrating
 // state machine and the tool surface are separate.
 //
-// See docs/prd/feature-subagent.md for the full design — in
+// See docs/prd/archive/feature-subagent.md for the full design — in
 // particular §3 (data model + signatures) and §5 (integration with
 // permission / cache / hooks / plan-mode).
 //
@@ -74,7 +74,7 @@ func (t Type) IsValid() bool {
 }
 
 // Status is the lifecycle state of a subagent, derived by folding
-// the subagents.jsonl event stream per docs/prd/feature-subagent.md
+// the subagents.jsonl event stream per docs/prd/archive/feature-subagent.md
 // §3.4. A subagent has exactly one terminal status (Completed /
 // Failed / Killed / Orphaned / Promoted) — once written, no further
 // events are emitted for that sub_sid.
@@ -137,7 +137,7 @@ func (s Status) IsTerminal() bool {
 // parent.Tracker.CumulativeCost() (which transitively includes the
 // child Tracker via AdoptChild) at render time. Persisting cost
 // would couple the on-disk schema to the pricing table version —
-// see docs/prd/feature-subagent.md §3.4 "Cost 不入索引".
+// see docs/prd/archive/feature-subagent.md §3.4 "Cost 不入索引".
 type Tokens struct {
 	Prompt     int `json:"prompt"`
 	Completion int `json:"completion"`
@@ -193,7 +193,7 @@ type Subagent struct {
 }
 
 // Result is what Manager.Spawn returns. Summary is ALWAYS a
-// well-formed wire-format string per docs/prd/feature-subagent.md
+// well-formed wire-format string per docs/prd/archive/feature-subagent.md
 // §3.2 — success path produces "[agent: completed] ..." and any
 // failure path produces "[agent: failed reason=...] ...". The
 // caller (the `agent` tool's Execute) returns Summary verbatim as
@@ -211,7 +211,7 @@ type Result struct {
 // newSubSid returns a fresh subagent ID in the same shape as
 // session.generateID — sortable timestamp + 16 random hex chars
 // ("20260121-103045-a1b2c3d4e5f6a7b8"). Independent ID space from
-// session IDs per docs/prd/feature-subagent.md §3.3; collisions
+// session IDs per docs/prd/archive/feature-subagent.md §3.3; collisions
 // across the two spaces are harmless because each lives in its own
 // directory tree.
 //

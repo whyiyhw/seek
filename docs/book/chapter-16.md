@@ -460,4 +460,4 @@ agent 不知道 memory 存在;memory 不修改 agent。中间只有 `internal/ho
 
 ---
 
-*对应 commit:`08660a1`(hooks substrate) → `374cfad`(M5.8) → `378404b`(M5.9-M5.11) → `31856c0`(M5.13)。运行 `go test -race ./internal/memory/...` 验证 (~170 tests)。详 PRD 见 `docs/prd/v1.md`。*
+*对应 commit:`08660a1`(hooks substrate) → `374cfad`(M5.8) → `378404b`(M5.9-M5.11) → `31856c0`(M5.13)。运行 `go test -race ./internal/memory/...` 验证 (~170 tests)。详 PRD 见 `docs/prd/archive/v1.md`。*

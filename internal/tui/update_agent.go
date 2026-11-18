@@ -199,7 +199,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 // scheduleSuggestion returns a tea.Cmd that runs the suggester's
 // side-channel prediction off the bubbletea thread and surfaces the
 // result via suggestionReadyMsg. Returns nil when prediction
-// shouldn't fire (PRD docs/prd/feature-suggested-reply.md §3):
+// shouldn't fire (PRD docs/prd/archive/feature-suggested-reply.md §3):
 //
 //   - no suggester configured (—no-suggest)
 //   - no agent / no history
@@ -230,7 +230,7 @@ func (m Model) scheduleSuggestion(wasCanceled bool) tea.Cmd {
 	// intent-eliciting phrases). Saves an API call AND saves the
 	// user from a placeholder the model would have padded out
 	// from nothing on an obviously-finished turn.
-	// PRD docs/prd/feature-suggested-reply.md §3 + dogfood follow-up.
+	// PRD docs/prd/archive/feature-suggested-reply.md §3 + dogfood follow-up.
 	if !suggester.ShouldPredict(last.Content) {
 		return nil
 	}
@@ -287,7 +287,28 @@ func (m Model) submit(text string) (tea.Model, tea.Cmd) {
 		text, images = m.opts.ExpandInput(m.opts.Model, text)
 	}
 
-	ch := m.opts.Agent.Prompt(ctx, text, images...)
+	// feature-deepseek-app-api F3: route document references at the
+	// same submit station, one step after images (file markers append
+	// after image markers). The hook uploads inline — the parse fee
+	// and file_id settle before the prompt leaves; it never errors.
+	var files []deepseek.FilePart
+	if m.opts.ExpandFiles != nil {
+		text, files = m.opts.ExpandFiles(ctx, m.opts.Model, text)
+	}
+
+	var ch <-chan agent.Event
+	if len(files) > 0 {
+		// Optional sibling interface (see filePrompter): a fake agent
+		// without document support still compiles; its files (which
+		// its tests never produce) simply don't ride.
+		if fp, ok := m.opts.Agent.(filePrompter); ok {
+			ch = fp.PromptFiles(ctx, text, images, files)
+		} else {
+			ch = m.opts.Agent.Prompt(ctx, text, images...)
+		}
+	} else {
+		ch = m.opts.Agent.Prompt(ctx, text, images...)
+	}
 	m.stream = ch
 
 	printUser := renderUserBlock(text, m.width)

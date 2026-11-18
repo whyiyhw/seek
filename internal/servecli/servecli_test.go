@@ -149,6 +149,24 @@ func TestBuildFrontends(t *testing.T) {
 	}
 }
 
+// TestBuildFrontends_VoiceWiring (voice V2): voice resolves only
+// together with web — the page is its recorder UI and the upload
+// endpoint must be mounted on web pre-Run. Order must not matter.
+func TestBuildFrontends_VoiceWiring(t *testing.T) {
+	if _, err := buildFrontends([]string{"voice"}, nil); err == nil || !strings.Contains(err.Error(), "--frontend=web") {
+		t.Errorf("voice without web must fail with the pairing hint, got %v", err)
+	}
+	for _, names := range [][]string{{"web", "voice"}, {"voice", "web"}} {
+		got, err := buildFrontends(names, nil)
+		if err != nil {
+			t.Fatalf("buildFrontends(%v): %v", names, err)
+		}
+		if len(got) != 2 || got[0].Name() == got[1].Name() {
+			t.Fatalf("buildFrontends(%v) = %d frontends, want web+voice", names, len(got))
+		}
+	}
+}
+
 // freeWebAddr grabs an OS-assigned loopback address for a wiring test
 // (same accepted listen-close-reuse posture as controlplane's
 // freeAddr).

@@ -174,11 +174,22 @@ func dropMalformed(c Config) Config {
 		}
 		return out
 	}
+	// Every event slice must be listed here — Validate walks Config.All
+	// (all events), so a slice missing below means malformed hooks from
+	// that event survive Gate. The P3 observer events were exactly such
+	// a gap until M-O3.2 wired pre_prompt_inject through and audited
+	// the function (pitfall logged in docs/pitfalls.md).
 	return Config{
-		PreTool:      drop(c.PreTool),
-		PostTool:     drop(c.PostTool),
-		PrePrompt:    drop(c.PrePrompt),
-		SessionStart: drop(c.SessionStart),
-		SessionEnd:   drop(c.SessionEnd),
+		PreTool:         drop(c.PreTool),
+		PostTool:        drop(c.PostTool),
+		PrePrompt:       drop(c.PrePrompt),
+		SessionStart:    drop(c.SessionStart),
+		SessionEnd:      drop(c.SessionEnd),
+		SubagentStart:   drop(c.SubagentStart),
+		SubagentStop:    drop(c.SubagentStop),
+		Stop:            drop(c.Stop),
+		PreCompact:      drop(c.PreCompact),
+		Notification:    drop(c.Notification),
+		PrePromptInject: drop(c.PrePromptInject),
 	}
 }

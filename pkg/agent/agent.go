@@ -52,6 +52,20 @@ type Config struct {
 	// expose their own thinking knobs out of band.
 	Effort string
 
+	// SafetyCheck, when non-empty, is sent as
+	// deepseek.ChatRequest.SafetyCheck on every DeepSeek-lane request
+	// ("high" — the only documented level; cmd/seek maps
+	// config.SafetyCheckLevel() into it once per session). Empty = the
+	// key is absent from the wire body so text-only requests stay
+	// byte-identical (prefix-cache discipline). DeepSeek lane only: the
+	// second-tier llm.ChatRequest has no such field. A fixed session
+	// posture, not a per-turn knob — changing it mid-conversation would
+	// alter every subsequent request body (the discipline /lang follows).
+	//
+	// When the check flags a response, runTurnDeepSeek records the
+	// in-band safetyRefusalMarker instead of failing the turn.
+	SafetyCheck string
+
 	// ModeLabel is the current permission mode label for per-message
 	// injection. Empty string → no reminder (the system-prompt tool
 	// descriptions already cover Ask/Deny behaviour). Non-empty values
@@ -61,6 +75,17 @@ type Config struct {
 	// cache (the reminder is at the tail of the user message — only
 	// those few bytes differ across turns).
 	ModeLabel string
+
+	// SessionID, when non-nil, is read before every second-tier LLM
+	// request and sent as ChatRequest.SessionID — which the openai
+	// client emits as x-opencode-session, the OpenCode Go lane's
+	// per-conversation routing/prompt-cache contract. A func, not a
+	// string: /compact forks the session under a new ID while the
+	// agent object lives on, so the value must be read live at each
+	// call (same pattern as cmd/seek's planBridge.sessionID). nil or
+	// "" = no session identity (deepseek path, --no-save, tests) and
+	// the header is simply not sent.
+	SessionID func() string
 
 	// InitialMessages, if non-empty, seeds the agent's history.
 	// Used by --resume / --continue to restore a saved session. The
@@ -150,6 +175,25 @@ type Agent struct {
 // SetModel changes the active model. Safe to call between (not during) turns.
 // The change takes effect on the next Prompt call.
 func (a *Agent) SetModel(model string) {
+	a.cfg.Model = model
+}
+
+// SetLane swaps the whole provider lane — the (Provider, Client, Model)
+// triple — in one step. Provider and Client are mutually exclusive by
+// construction (nil Provider ⇒ first-class DeepSeek Client lane), so a
+// mid-provider switch (deepseek ↔ glm) must rewrite both halves together
+// or runTurn's dispatch (cfg.Provider != nil) would read a torn lane.
+// Same contract as SetModel: safe to call between (not during) turns;
+// takes effect on the next Prompt call. The ACP backend is the caller —
+// the transport layer rejects session/set_config_option while a prompt
+// is in flight, so no concurrent turn can observe the swap (see
+// internal/acp/server.go dispatch for the happens-before argument).
+// Downstream readers that resolve the lane at call time (runTurn,
+// summariseLLM) follow automatically; consumers that captured a client
+// reference at construction (subagent routes) deliberately do NOT.
+func (a *Agent) SetLane(provider llm.Provider, client *deepseek.Client, model string) {
+	a.cfg.Provider = provider
+	a.cfg.Client = client
 	a.cfg.Model = model
 }
 
@@ -319,7 +363,7 @@ func (a *Agent) Messages() []deepseek.Message {
 // side-channel prediction so it round-trips through session save +
 // resume and so the next turn's calibration check can read it back.
 //
-// PRD docs/prd/feature-suggested-reply.md §4.5.
+// PRD docs/prd/archive/feature-suggested-reply.md §4.5.
 func (a *Agent) AttachPredictedNext(text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -416,6 +460,7 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 		Model:     a.cfg.Model,
 		Messages:  msgs,
 		MaxTokens: a.cfg.MaxTokens,
+		SessionID: a.sessionID(),
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)
@@ -465,6 +510,16 @@ func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error
 // images are unaffected (variadic keeps every existing call site
 // source-compatible).
 func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.ImagePart) <-chan Event {
+	return a.PromptFiles(ctx, userText, images, nil)
+}
+
+// PromptFiles is Prompt with document parts joined on the same user
+// message (feature-deepseek-app-api F3): images and files are sibling
+// attachment families, legal on user messages only. Prompt keeps its
+// variadic signature for every existing caller; this slice-shaped
+// sibling is the one new attachment surfaces route through (Go allows
+// only one variadic, so the sibling is the non-breaking shape).
+func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deepseek.ImagePart, files []deepseek.FilePart) <-chan Event {
 	out := make(chan Event, 32)
 
 	go func() {
@@ -498,6 +553,9 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 		}
 		if len(images) > 0 {
 			userMsg.Images = images
+		}
+		if len(files) > 0 {
+			userMsg.Files = files
 		}
 		a.appendMessage(userMsg)
 		out <- AgentStart{}
@@ -729,6 +787,24 @@ func (a *Agent) runTurn(ctx context.Context, out chan<- Event) (deepseek.Message
 	return a.runTurnDeepSeek(ctx, out)
 }
 
+// safetyRefusalMarker is the in-band assistant content recorded when
+// DeepSeek's model safety check refuses a response instead of producing
+// prose. It is wire format for the transcript — resume replays assistant
+// content verbatim, and `seek -resume` users (plus internal consumers
+// like the /goal judge) read it as "the model declined"; change the text
+// only with a migration in mind (same rule as the `[plan: …]` markers).
+const safetyRefusalMarker = "[safety: 拒答（safety_check 命中）]"
+
+// isSafetyRefusal reports whether a finish_reason means "the model's
+// safety filter stopped this response". DeepSeek documents "refusal"
+// (the safety_check hit signal); "content_filter" is the same class of
+// terminal outcome on adjacent OpenAI-compatible shapes. Applied in
+// runTurnDeepSeek — the lane the safety_check parameter belongs to; the
+// second-tier path passes provider stop reasons through untouched.
+func isSafetyRefusal(finish string) bool {
+	return finish == "refusal" || finish == "content_filter"
+}
+
 // runTurnDeepSeek is the original DeepSeek-specific streaming path.
 func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	msgs := deepseek.StripReasoningContent(a.messages)
@@ -775,6 +851,12 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	}
 	if a.cfg.Tools != nil {
 		req.Tools = a.cfg.Tools.Wire()
+	}
+	// Model safety check (config `safety_check: "high"`, read once at
+	// session startup). Absent when off, keeping the body byte-identical
+	// to a pre-SC1 request — the prefix cache keys on those bytes.
+	if a.cfg.SafetyCheck != "" {
+		req.SafetyCheck = &deepseek.SafetyCheck{Level: a.cfg.SafetyCheck}
 	}
 
 	stream, err := a.cfg.Client.ChatStream(ctx, req)
@@ -871,6 +953,34 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		return assistant, usage, finish, err
 	}
 
+	// Safety refusal (config `safety_check: "high"`): the model declined
+	// to answer and the API terminated the stream with finish_reason
+	// "refusal". That is a legitimate terminal outcome, NOT a stream
+	// failure — the documented client contract is to replace whatever
+	// was shown with the refusal text. Record the in-band marker as the
+	// assistant content and let the turn end normally: no ErrorEvent, no
+	// retry (a retried refusal just re-triggers the filter and burns
+	// tokens). Placed BEFORE the empty-response guard so a contentless
+	// refusal isn't mistaken for a silent model.
+	if isSafetyRefusal(finish) {
+		assistant.Content = safetyRefusalMarker
+		// A refusal has no answer to act on. Drop any half-streamed
+		// tool_calls — Prompt's invariant check requires
+		// tool_calls ⇔ finish_reason="tool_calls", and a refusal can
+		// never carry that pairing.
+		assistant.ToolCalls = nil
+		if !started {
+			out <- MessageStart{Message: assistant}
+			started = true
+		}
+		// Surface the marker in the live stream too: usually nothing
+		// streamed before the refusal, so without this delta the TUI
+		// would commit an empty assistant block and the turn would end
+		// silently on screen. (If a partial answer did stream, the
+		// marker follows it as the "this was replaced" notice.)
+		out <- MessageDelta{Delta: safetyRefusalMarker}
+	}
+
 	// Empty-response guard: the assistant message has nothing to say.
 	// Committing it would leave an orphan assistant turn with no content
 	// and no tool_calls, which DeepSeek rejects on the next request as
@@ -902,6 +1012,16 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	return assistant, usage, finish, nil
 }
 
+// sessionID returns the live conversation identity for
+// ChatRequest.SessionID (x-opencode-session on the OpenCode lane); ""
+// when Config.SessionID is unset.
+func (a *Agent) sessionID() string {
+	if a.cfg.SessionID == nil {
+		return ""
+	}
+	return a.cfg.SessionID()
+}
+
 // runTurnLLM is the second-tier streaming path using llm.Provider.
 // It translates messages to/from the generic format and reassembles the
 // assistant turn as a deepseek.Message so the rest of the agent loop
@@ -920,6 +1040,7 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		Messages:  msgsToLLM(prepared),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
+		SessionID: a.sessionID(),
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)

@@ -1,7 +1,7 @@
 # Feature: DeepSeek 全家桶应用 API 接入评估（read_url / 文件输入 / ASR-TTS / 安全校验）
 
 **所属版本**：独立 feature PRD（评估 + 分期设计稿，未排期实现）
-**前置阅读**：[`feature-vision.md`](feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
+**前置阅读**：[`feature-vision.md`](archive/feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
 **状态**：📐 **设计稿（2026-11-13 评估；R0 验证门已执行 2026-11-14 → ① 判红关闭，见 §2.2）**。四项结论见 §0；其余里程碑为 2h 卡粒度拆解，**未动工**。
 **触发起因**：DeepSeek 于 **2026-11-13** 发布「全家桶应用 API」——官方公告 [news261113](https://api-docs.deepseek.com/zh-cn/news/news261113)：对话内联网搜索（含深度思考搜索）、`deepseek_read_url` 链接阅读、文件输入（PDF/Office/图片）、模型安全校验，加独立底层接口 Search / Fetch / OCR / ASR / TTS。同族先例：Search API 2026-10-17 开放，seek 已接（`pkg/deepseek/search.go` + `web_search` 工具，另卡实现）。
 **本文不覆盖**：独立 Search API 的对话内接线（web_search 服务端工具变体）——与 read_url 同属 `tools` 数组声明，但 seek 已有客户端 `web_search` 工具覆盖显式搜索场景；其服务端变体只在「思考模式自主搜索」里顺带评估（§二）。
@@ -191,7 +191,7 @@ type ServerToolUse struct {
 
 ### 3.1 为什么接
 
-agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
+agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](archive/feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
 
 | 环节 | imgrefs 先例 | filerefs 对应 |
 |---|---|---|
@@ -269,6 +269,10 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 
 （V2 依赖「首个 serve frontend 选型」落地——语音入站需要一个录音 UI 载体，纯终端按键录音体验差；此依赖写明，不虚排。）
 
+**V2 状态（2026-11-17，卡 c_f6ayyg 已实现）**：`internal/controlplane/voicefrontend.go` + web 页面按住说话按钮。录音 UI 载体 = web frontend（前置满足）：页面 MediaRecorder → 16kHz 单声道 16-bit WAV → `POST /voice`（web listener 上的挂载端点，同 token/CSRF/host 闸），`VoiceFrontend.Run` 串行 ASR → 转写回显（命名事件 `voice`）/失败面（`voice-error`）→ `Inbound`（`ConvID=voice:<device-id>`、`DirectAt` 恒 true、`EventID`=录音会话 uuid，去重走 router LRU）。**回复路径**：`Send` 把 voice conv 的回复以 MVP 形状广播到该设备页面的 web conv（刻意不走 `web.Send` 的 run 收口语义——避免误关页面自己流式 run 的气泡）；语音 conv 的绑定独立于页面 web conv 的绑定。servecli：`--frontend=voice` 需与 `--frontend=web` 同启（buildFrontends 内 Attach）。**部署注记**：麦克风要 secure context——localhost 即可；tailnet IP 走明文 `--tcp` 前置拿不到 getUserMedia，手机端需 `tailscale serve`（https）。体积闸基线随本卡 bump（+234KB，其中约 30KB 为本卡增量，其余为此前资产线累计）——余量重新为 200KB，但 ratchet 逼近终点的观察仍然成立（c_n63pat 合并台账已记）。**待办（主会话）**：真机录音冒烟（真 ASR key + 浏览器按住说话）；ASR 用量暂只 stderr 行（无消费者不建 JSONL 写路径，同 §5.5 口径）。
+
+**V1a 状态（2026-11-18，卡 c_yijdy4 已实现）**：`internal/controlplane/speaker.go` —— `Speaker` = Reply.Text → `VoiceTTS` seam（S1 适配器 `DeepSeekVoiceTTS`，恒请求 wav 容器）→ 写 wav 文件 → 播放（`DefaultPlayer`：运行时 LookPath 挑 macOS `afplay` / Linux `paplay`|`aplay`；无播放器或播放失败一律降级为「wav 文件即交付」，路径 stderr 告知——即本卡沙盒可测路径）。**节流**：每会话每滑动分钟上限（默认 3，`SpeakerConfig.MaxPerConvPerMin`，计尝试不计成功）；**记账**：§6 的 serve 侧缺口落地——每次计费合成 append 一行 `<serve>/voice-usage.jsonl`（billable chars 汉字×2 + `pricing.TTSCost` USD + outcome）。挂点：`RouterConfig.Speaker` 可选字段，`reply()` 在 `Send` **之后**播报（音频为次信道：节流/合成失败只丢声音，永不吃文字回复）。routines 面：`SpeakerDispatcher` sibling（notify.go，形状同 WebhookDispatcher 的 `(ctx,event,title,body)`，Go 函数类型结构化匹配、两包零 import），`TickOptions.Speaker` + cron/trigger 两终态派发点，与 `Job.Notify` 正交；适配器 `Speaker.SpeakNotification`（节流键 `routines:<event>`）。**接线刻意留白**：servecli/routinescli 均不构造 Speaker——启用面归 V1b 的 `voice.enabled`，届时接线各一行赋值。**待办（主会话）**：真 API 冒烟（真 key 合成 + 真机 afplay 播放）。
+
 ---
 
 ## 5. ④ 模型安全校验 `safety_check` —— **接**（小卡）
@@ -279,6 +283,8 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 - 合规注记进 `guide-config.md`：若用 seek 对外提供服务，开启本参数是用户的法定义务侧事项，seek 只提供开关。
 
 **里程碑**：**SC1**（2h）——config 键 + `ChatRequest.SafetyCheck` 字段 + agent 接线（DeepSeek 车道 only）+ refusal 处理 + httptest fake 测试（refusal 响应路径）+ guide 行。一张卡完事。
+
+**SC1 状态（2026-11-18，卡 c_djswic 已实现）**：`internal/config` 顶层 `SafetyCheck` + `SafetyCheckLevel()`（只认 `high`，大小写/空白容忍）；`pkg/deepseek.ChatRequest.SafetyCheck`（object 形 `{"level":"high"}`，nil = 不出现在 wire body——text-only 请求字节等价 guard 已加）；`pkg/agent` 在 `runTurnDeepSeek` 里注入（`SafetyCheck` 为空即不发，二线 provider 无此字段）；`finish_reason: refusal|content_filter` → assistant 内容记 in-band `[safety: 拒答（safety_check 命中）]` + 正常结束（不 fatal、不重试、不 AutoContinue）。cmd/seek 会话启动读一次并同时喂给 `/new` 重建路径。`docs/guide-config.md` 已加合规注记。真 API 账单核实（价格页无独立条目）留待 smoke 卡。
 
 ---
 

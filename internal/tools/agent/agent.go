@@ -12,7 +12,7 @@
 // output stays byte-identical across turns — and across restarts
 // given the same registry — load-bearing for DeepSeek's prefix cache.
 //
-// See docs/prd/feature-subagent.md for the full design; this file
+// See docs/prd/archive/feature-subagent.md for the full design; this file
 // is the thinnest possible Go reflection of §3.1 (LLM schema) +
 // §3.2 (wire-format result).
 package agent
@@ -52,7 +52,7 @@ import (
 // agenttypes.Builtins() — i.e. no agents files + empty config keeps
 // the three built-ins in the enum, the acceptance-#5 guarantee.
 //
-// Mirrors docs/prd/feature-subagent.md §3.1 verbatim with one
+// Mirrors docs/prd/archive/feature-subagent.md §3.1 verbatim with one
 // deviation: `maxLength` is omitted from the `description` field
 // because tools.UnmarshalStrict doesn't enforce JSON Schema length
 // constraints (only DisallowUnknownFields). Length is enforced in
@@ -118,12 +118,12 @@ const schemaTmpl = `{
     },
     "provider": {
       "type": "string",
-      "enum": ["deepseek", "glm"],
-      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); deepseek = first-class DeepSeek. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
+      "enum": ["deepseek", "glm", "opencode"],
+      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); opencode = OpenCode Go subscription lane (opencode.ai/inference/go, flat request-window plan over an open-weight pool, requires OPENCODE_API_KEY; per-token cost display is indicative only); deepseek = first-class DeepSeek. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
     },
     "model": {
       "type": "string",
-      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
+      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3; opencode: deepseek-v4.1-flash), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
     }
   },
   "required": ["description", "prompt"],
@@ -220,7 +220,7 @@ type Args struct {
 // enforced by our UnmarshalStrict path; these constants cover the
 // pathology where the model produces a runaway description.
 //
-// Numbers come from docs/prd/feature-subagent.md §3.1 ("description
+// Numbers come from docs/prd/archive/feature-subagent.md §3.1 ("description
 // > 120 chars → 截断 + hint; prompt > 32 KB → 失败 prompt_too_long").
 const (
 	maxDescriptionLen = 120

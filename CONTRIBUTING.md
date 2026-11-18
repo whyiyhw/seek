@@ -42,7 +42,7 @@ seek 的 README 说它是「Claude Code 的工作流，DeepSeek 的价格」。�
 
 - [`AGENTS.md`](AGENTS.md) —— AI 助理的项目指南（人类也应该读）
 - [`docs/pitfalls.md`](docs/pitfalls.md) —— 181KB 的经验教训，**每次修非明显 bug 都要追加**
-- [`docs/prd/v0.md`](docs/prd/v0.md) §1–4 —— 核心设计决策
+- [`docs/prd/archive/v0.md`](docs/prd/archive/v0.md) §1–4 —— 核心设计决策
 - [`docs/prd/`](docs/prd/) 下你改动的对应版本 PRD
 - 相关 feature PRD（如果改的是 permission，读 `feature-permission-refactor.md`；改的是 plan mode，读 `feature-plan-mode.md`）
 

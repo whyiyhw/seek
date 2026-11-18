@@ -300,6 +300,38 @@ func TestPricingFor_GLM53(t *testing.T) {
 	}
 }
 
+// TestPricingFor_OpenCodeGoLane pins the OpenCode Go lane's default
+// model card against opencode.ai/docs/console/models (checked
+// 2026-11-17): deepseek-v4.1-flash $0.30 miss / $0.006 cached /
+// $1.20 output — numerically the direct DeepSeek Flash card, but a
+// separate id string and entry, and flat across tiers: the Go plan is
+// a request-window subscription, so per-token values are display-only
+// and off-peak halving would be fictional precision.
+func TestPricingFor_OpenCodeGoLane(t *testing.T) {
+	std := PricingFor(ModelOpenCodeV41Flash, TierStandard)
+	if math.Abs(std.InputMissPerMTok-0.30) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash miss = %v, want 0.30", std.InputMissPerMTok)
+	}
+	if math.Abs(std.InputHitPerMTok-0.006) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash hit = %v, want 0.006", std.InputHitPerMTok)
+	}
+	if math.Abs(std.OutputPerMTok-1.20) > 1e-9 {
+		t.Errorf("deepseek-v4.1-flash output = %v, want 1.20", std.OutputPerMTok)
+	}
+
+	off := PricingFor(ModelOpenCodeV41Flash, TierOffPeak)
+	if off != std {
+		t.Errorf("Go-lane card must be flat-rate: off-peak %+v differs from standard %+v", off, std)
+	}
+
+	// The lane default must NOT resolve through the unknown-model
+	// fallback (same numbers today, but a future Flash bump on the
+	// direct card must not silently move the Go lane with it).
+	if _, ok := standardRates[ModelOpenCodeV41Flash]; !ok {
+		t.Error("deepseek-v4.1-flash needs its own registry entry, not the Flash fallback")
+	}
+}
+
 // TestCost_GLM53 prices one usage block across all three buckets. This
 // is the shape runTurnLLM produces for the GLM lane: full prompt split
 // into hit/miss from prompt_tokens_details.cached_tokens.
@@ -416,5 +448,34 @@ func TestTTSCost(t *testing.T) {
 	// not round away to nothing.
 	if s := FormatCost(TTSCost(200)); s != "$0.0090" {
 		t.Errorf("FormatCost(TTSCost(200)) = %q, want $0.0090", s)
+	}
+}
+
+// TestParseCost prices the Files-API document parsing: $0.225 per 1,000
+// pages (zh page ¥1.5/千页, PRD feature-deepseek-app-api §6 row 3), billed
+// once at upload off the page count the FileObject RETURNED.
+func TestParseCost(t *testing.T) {
+	if got := ParseCost(1000); math.Abs(got-0.225) > 1e-12 {
+		t.Errorf("ParseCost(1000) = %v, want 0.225 per 1k pages", got)
+	}
+	if got := ParseCost(1); math.Abs(got-0.225/1000) > 1e-12 {
+		t.Errorf("ParseCost(1) = %v, want 0.225/1000", got)
+	}
+	// A thick document parses for well under a cent — the F3 router's
+	// per-submit line item.
+	if got := ParseCost(34); math.Abs(got-34*0.225/1000) > 1e-12 {
+		t.Errorf("ParseCost(34) = %v, want 34×0.225/1000", got)
+	}
+	// Server omitted the page count / upload failed → nothing billable;
+	// a stray negative must not pay out.
+	if got := ParseCost(0); got != 0 {
+		t.Errorf("ParseCost(0) = %v, want 0", got)
+	}
+	if got := ParseCost(-2); got != 0 {
+		t.Errorf("ParseCost(-2) = %v, want 0", got)
+	}
+	// Sub-cent band: one document must render visibly, not round away.
+	if s := FormatCost(ParseCost(34)); s != "$0.0076" {
+		t.Errorf("FormatCost(ParseCost(34)) = %q, want $0.0076", s)
 	}
 }

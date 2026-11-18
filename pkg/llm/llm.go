@@ -36,6 +36,16 @@ type ChatRequest struct {
 	Messages  []Message
 	Tools     []ToolDef
 	MaxTokens int // completion token cap; 0 = provider default
+
+	// SessionID, when non-empty, identifies the conversation this
+	// request belongs to. The openai client sends it as an
+	// x-opencode-session header — the OpenCode Go lane's client
+	// contract (stable per-session value for routing optimisation and
+	// prompt-cache affinity; missing it plus a generic User-Agent
+	// degrades Go-plan requests to per-token billing). Providers
+	// without such a contract (anthropic / gemini, and the first-class
+	// deepseek client) ignore the field.
+	SessionID string
 }
 
 // Message is the canonical provider-agnostic message type.
