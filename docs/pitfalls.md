@@ -819,6 +819,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 
 ## Tooling / environment
 
+### jq without input files and without -n runs the filter zero times — empty output, exit 0
+- **Saw**: `table=$(jq -r --slurpfile a f1 --slurpfile b f2 '<program>')` in a script returned an EMPTY string with exit code 0 — not even the program's constant-string lines printed — so the script happily shipped a header-only "table"
+- **Why**: with no input files and no `-n`, jq runs the filter once per JSON value on **stdin**; a script has no stdin lines, so the filter executes 0 times. Output empty, rc 0 — the classic silent-swallow. (Sibling trap in the same fix: with `--slurpfile v FILE`, `$v` is *already* the array of the file's JSON values — `$v[0]` is the first VALUE, not the value array; indexing into a row object then iterating it with `map(.case)` walks the object's string fields and dies with `Cannot index string with string "case"`.)
+- **Fix**: `jq -n -r --slurpfile …` in `eval/ablate.sh`, plus an explicit `[[ -z "$table" ]] && exit 2` guard so a future silent-empty can never pass as success. `$v` used directly as the row array.
+- **Lesson**: a jq program whose inputs are all `--slurpfile` variables needs `-n`; and any `$(jq …)` whose output feeds a generated artifact should assert non-empty — jq has failure modes that look exactly like success
+- **Refs**: `eval/ablate.sh` (the `-n` note above the table jq + the empty-table guard)
+
 ### Grep tool with broad pattern can deadlock the agent — no recovery via /compact
 - **Saw**: User reports that running `grep "llm"` against a large codebase twice fills the model's context completely. `/compact` can't recover because the compact call itself requires another LLM round-trip through an already-overflowed history → hard deadlock
 - **Why**: grep's `max_matches` cap (200) governs **count of matches** but not the **total bytes** of formatted output. Real-world worst case: 20 matches × 7 context lines × variable line length (think minified JS, generated TypeScript, multi-MB JSON-on-one-line) easily hits 50 KiB per call. Two such calls = 100 KiB ≈ 25K tokens of pure grep output, on top of system prompt + history + other tool outputs. DeepSeek 128K context fills up; `/compact` can't fit its own pre-prompt into the remaining budget, so the rescue path itself fails
