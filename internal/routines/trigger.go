@@ -61,7 +61,7 @@ type Trigger struct {
 // directory listing surface; per-file errors are stderr WARN
 // and processing continues (one broken trigger doesn't block
 // the rest).
-func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) (int, error) {
+func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher, speaker SpeakerDispatcher) (int, error) {
 	entries, err := os.ReadDir(triggersDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -84,7 +84,7 @@ func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.
 			continue // ignore non-JSON files in the inbox
 		}
 		path := filepath.Join(triggersDir, name)
-		if processed := processOneTrigger(ctx, path, runsDir, now, subFn, notify, webhook); processed {
+		if processed := processOneTrigger(ctx, path, runsDir, now, subFn, notify, webhook, speaker); processed {
 			dispatched++
 		}
 	}
@@ -96,7 +96,7 @@ func processTriggers(ctx context.Context, triggersDir, runsDir string, now time.
 // false on skip/expire/malformed paths. Each non-dispatch
 // reason gets a stderr WARN naming the file so launchd /
 // systemd logs surface actionable hints.
-func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher) bool {
+func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time, subFn SubprocessFn, notify Notifier, webhook WebhookDispatcher, speaker SpeakerDispatcher) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "routines: trigger %s: stat: %v\n", path, err)
@@ -249,6 +249,11 @@ func processOneTrigger(ctx context.Context, path, runsDir string, now time.Time,
 	// Webhook push — best-effort, independent of OS notification (§D4).
 	if webhook != nil {
 		webhook(ctx, "trigger."+terminalStatus, title, terminalNote)
+	}
+	// Speech broadcast — third sibling, same posture as webhook
+	// (feature-deepseek-app-api §4.3 V1a).
+	if speaker != nil {
+		speaker(ctx, "trigger."+terminalStatus, title, terminalNote)
 	}
 	return true
 }

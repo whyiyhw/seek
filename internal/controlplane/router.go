@@ -49,6 +49,15 @@ type RouterConfig struct {
 	Yolo bool
 	// DedupCapacity bounds the EventID seen-set; <=0 → default.
 	DedupCapacity int
+	// Speaker is the OPTIONAL outbound-voice sink (V1a,
+	// feature-deepseek-app-api §4.3): when set, every reply the router
+	// delivers via Send is ALSO synthesized and spoken on the serve
+	// host, after Send — audio is the secondary channel and never
+	// delays the text. nil → replies stay text-only (the default;
+	// production enablement lands with V1b's voice.enabled). The
+	// speaker owns its own per-conv throttle; its failures are logged
+	// and dropped, the plane's universal best-effort posture.
+	Speaker *Speaker
 }
 
 // Router is the plane's inbound handler: hand it to Serve as `handle`
@@ -451,6 +460,10 @@ func (r *Router) untrackRun(conv ConvID, rc *runCancel) {
 // reply delivers one Reply through the frontend the conversation came
 // from (Send-by-prefix, D-C1). Best-effort: a failed Send is logged
 // and dropped — the Frontend port's own posture — never propagated.
+// When a Speaker is configured (V1a) the same text is also spoken,
+// AFTER Send: the text answer is the primary channel, and Speak's own
+// best-effort posture (throttle drops, synth failures, wav-file
+// degrade) only ever loses the audio.
 func (r *Router) reply(ctx context.Context, conv ConvID, text string) {
 	fe, ok := r.fronts[conv.FrontendName()]
 	if !ok {
@@ -459,6 +472,11 @@ func (r *Router) reply(ctx context.Context, conv ConvID, text string) {
 	}
 	if err := fe.Send(ctx, conv, Reply{Text: text}); err != nil {
 		fmt.Fprintf(os.Stderr, "controlplane: router: send to %s failed: %v\n", conv, err)
+	}
+	if r.cfg.Speaker != nil {
+		if err := r.cfg.Speaker.Speak(ctx, conv, text); err != nil {
+			fmt.Fprintf(os.Stderr, "controlplane: router: speak to %s: %v\n", conv, err)
+		}
 	}
 }
 
