@@ -49,3 +49,27 @@ no shell needed.
   `list_dir` call answers from its per-entry sizes, so
   `max_bash_calls=0` is honest for the whole task again. The count
   question is unchanged. `expect.json` unchanged.
+- **Root-caused (2026-11-18, card c_lrilqc)** — the post-repair full
+  lane record is **red-green ALTERNATING, not regressed**: 4 PASS /
+  7 FAIL, with both outcomes on the SAME binary (2d16948: F F P P ·
+  b914a22: P F F · 26dce15: F P · 56ec735 ablation full arm: F).
+  Prompt + `list_dir`/`bash` descriptions are byte-stable since the
+  11-13 repair (`f99707f`) — no drift; and the case never had a green
+  baseline at all (born 2026-05-28 with EMPTY result stubs, first
+  measured 11-13), so "failing since 11-13" is really "coin flip
+  since first measurement". Verdict: **fragile case at a stochastic
+  margin**, aggravated by a structural trap — `list_dir` defaults
+  `depth=1`, so the natural first call on `internal/tools/` lists the
+  24 package dirs and answers NEITHER question, and nothing in the
+  output pointed at the `depth` re-call; the model then coin-flips
+  between `list_dir(depth=2)` and a `bash find | wc` recovery. Every
+  post-repair FAIL row has `list_dir ≤ 1, bash ≥ 1`; every PASS row
+  is exactly `list_dir=1, bash=0` — that arg is the whole
+  discriminator. Fix (code, this card): default-depth listings that
+  contain subdirectories now end with an in-band expansion hint
+  naming the `depth=2` re-call (truncation-notice idiom,
+  `internal/tools/listdir/listdir.go`) — the recovery path is finally
+  signposted in-band instead of only in the description. Expected
+  trend: green; confirm with the ≥5-round re-run (card acceptance ③,
+  deferred post-merge pending the real-key scope decision on
+  c_lmrp73).

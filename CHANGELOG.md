@@ -108,3 +108,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_lmrp73：v8 第一波数据回填：基线三数（一次过率/每任务花费/人审分钟）+ 裸核对照表 + §9 回填与第二波范围建议
 - c_rto2rb：MCP-D3 接线：cmd/seek main.go 消费 mcptool.PromptSection（hint/mcp_prompt 生效）
 - c_2q5hlj：GLM-5.3 在 seek 走路充值余额而非 GLM Coding Plan 额度——端点分流（paas/v4 vs coding/paas/v4）
+- c_lrilqc：信号：eval bash-overreach 例完整车道持续 FAIL（11-13 起）根因待定性

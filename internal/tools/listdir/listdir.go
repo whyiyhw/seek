@@ -84,50 +84,68 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	header := fmt.Sprintf("%s (depth=%d, hidden=%v)\n", root, a.Depth, a.ShowHidden)
 	out.WriteString(header)
 
-	if err := walk(root, "", a.Depth, a.ShowHidden, &out, &count, &truncated); err != nil {
+	rootDirs, err := walk(root, "", a.Depth, a.ShowHidden, &out, &count, &truncated)
+	if err != nil {
 		return "", fmt.Errorf("list_dir: %w", err)
 	}
 	if truncated {
 		out.WriteString(fmt.Sprintf("\n… truncated after %d entries — re-call with a narrower path\n", maxEntries))
+	}
+	// A default-depth listing stops at the top level, so a recursive
+	// question ("how many .go files under X", "which is smallest") is
+	// NOT answered — and nothing in the output says the rest of the
+	// tree is one cheap re-call away, so the model's visible recovery
+	// path is `bash find | wc`. Name the dedicated recovery in-band,
+	// same idiom as the truncation notice above (eval bash-overreach
+	// red-green alternation, 2026-11; description already promises
+	// "one call answers count-questions about a tree" — only true when
+	// depth covers the tree, so the default-depth output owes the model
+	// that pointer).
+	if a.Depth == 1 && rootDirs > 0 {
+		out.WriteString(fmt.Sprintf("\n… %d subdirectories not expanded at depth=1 — re-call with depth=2 (max 3) to list their entries and sizes\n", rootDirs))
 	}
 	return out.String(), nil
 }
 
 // walk recursively lists entries up to the requested depth. It writes
 // indent-prefixed lines so the model can read the structure at a
-// glance. We stop early once the global entry cap is hit.
-func walk(dir, indent string, depthLeft int, showHidden bool, out *strings.Builder, count *int, truncated *bool) error {
+// glance. We stop early once the global entry cap is hit. Returns the
+// number of DIRECTORY entries it listed at this level (feeds the
+// default-depth expansion hint in Execute).
+func walk(dir, indent string, depthLeft int, showHidden bool, out *strings.Builder, count *int, truncated *bool) (int, error) {
 	if depthLeft <= 0 || *truncated {
-		return nil
+		return 0, nil
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// Stable order: dirs first, then files, both alphabetical. Matches
 	// what users expect from `ls -la --group-directories-first`.
 	sort.Slice(entries, func(i, j int) bool {
 		di, dj := entries[i].IsDir(), entries[j].IsDir()
 		if di != dj {
-			return di // true (dir) before false
+			return di // true (dir) before false (file)
 		}
 		return entries[i].Name() < entries[j].Name()
 	})
 
+	dirs := 0
 	for _, e := range entries {
 		if !showHidden && strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
 		if *count >= maxEntries {
 			*truncated = true
-			return nil
+			return dirs, nil
 		}
 		*count++
 
 		name := e.Name()
 		if e.IsDir() {
+			dirs++
 			fmt.Fprintf(out, "%s%s/\n", indent, name)
-			if err := walk(filepath.Join(dir, name), indent+"  ", depthLeft-1, showHidden, out, count, truncated); err != nil {
+			if _, err := walk(filepath.Join(dir, name), indent+"  ", depthLeft-1, showHidden, out, count, truncated); err != nil {
 				// Skip subdirs we can't read (permission errors) — keep
 				// listing the rest.
 				fmt.Fprintf(out, "%s  (unreadable: %v)\n", indent, err)
@@ -142,5 +160,5 @@ func walk(dir, indent string, depthLeft int, showHidden bool, out *strings.Build
 			fmt.Fprintf(out, "%s%s  %d B\n", indent, name, info.Size())
 		}
 	}
-	return nil
+	return dirs, nil
 }
