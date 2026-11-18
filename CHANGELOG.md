@@ -103,3 +103,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_djswic：deepseek-app-api·SC1：safety_check config 键 + ChatRequest 字段 + refusal 处理（小卡）
 - c_w3vhcm：v8·T2：eval 裸核/完整双跑对照脚本（结果不进回归趋势）
 - c_6thhqc：feat(acp): C 完整模型选择——session/new configOptions + session/set_config_option + SEEK_ACP_PROVIDER/SEEK_ACP_MODEL env 钉定
+- c_lgtpgq：MCP-D3：mcp.json hint 字段 + mcptool.PromptSection 文案组装 + semble 内置 known-server 文案
