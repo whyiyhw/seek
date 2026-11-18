@@ -14,6 +14,9 @@ import (
 // Image parts are dropped (llm.Message is text-only for now; per-
 // provider image formats are M-V.4) with an in-band note so the model
 // knows content existed — same never-error posture as the vision router.
+// Document parts (feature-deepseek-app-api F4) get the sibling note for
+// the same reason: the Files API is DeepSeek-only, and a provider
+// switch must not silently erase a document from the model's view.
 func msgsToLLM(msgs []deepseek.Message) []llm.Message {
 	out := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
@@ -25,6 +28,9 @@ func msgsToLLM(msgs []deepseek.Message) []llm.Message {
 		}
 		if len(m.Images) > 0 {
 			lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前 provider 不支持图片输入]", len(m.Images))
+		}
+		if len(m.Files) > 0 {
+			lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前 provider 不支持文件输入]", len(m.Files))
 		}
 		for _, tc := range m.ToolCalls {
 			lm.ToolCalls = append(lm.ToolCalls, llm.ToolCall{

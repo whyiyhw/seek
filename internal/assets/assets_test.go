@@ -148,3 +148,34 @@ func TestStoreDoc(t *testing.T) {
 		t.Fatal("oversize document must error")
 	}
 }
+
+// TestLoadDoc: the load sibling of StoreDoc — raw bytes back (no data
+// URL), the same asset-name traversal guard as Path, and the doc size
+// cap enforced on read (a corrupted/oversized asset must degrade at
+// load, not mid-request).
+func TestLoadDoc(t *testing.T) {
+	dir := t.TempDir()
+	name, err := StoreDoc(dir, "report.pdf", []byte("%PDF-1.4 body"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadDoc(dir, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "%PDF-1.4 body" {
+		t.Fatalf("bytes = %q", got)
+	}
+	if _, err := LoadDoc(dir, "../escape.pdf"); err == nil {
+		t.Fatal("traversal must be rejected")
+	}
+	if _, err := LoadDoc(dir, "nope.pdf"); err == nil {
+		t.Fatal("missing asset must error")
+	}
+	old := MaxDocBytes
+	MaxDocBytes = 4
+	defer func() { MaxDocBytes = old }()
+	if _, err := LoadDoc(dir, name); err == nil {
+		t.Fatal("oversize asset must error on load")
+	}
+}

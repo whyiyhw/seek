@@ -102,6 +102,17 @@ type Config struct {
 	// whenever a session exists).
 	ImageLoader deepseek.ImageLoader
 
+	// FileResolver, when set, materialises Asset-referenced documents
+	// into live Files API ids on every DeepSeek-path request
+	// (feature-deepseek-app-api F4) — lazily uploading a part that has
+	// none and re-uploading one whose recorded expiry has passed. It is
+	// the send-time sibling of ImageLoader and carries the session's
+	// transport cache, so one instance must live as long as the
+	// session's agent (cmd/seek builds it once). nil leaves file parts
+	// untouched: live ids still send, anything unhealable degrades to an
+	// in-band note inside ResolveFiles.
+	FileResolver *deepseek.FileResolver
+
 	// Hooks, when non-nil, receive lifecycle callbacks: PrePrompt /
 	// PreToolUse decorators (synchronous, ordered, can mutate the
 	// request) and PreTurn / PostTurn / PostToolUse observers
@@ -436,10 +447,11 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 
 	req := &deepseek.ChatRequest{
 		Model: a.cfg.Model,
-		// Images stripped: the briefing only needs prior TEXT (the
-		// attached-image markers live in Content), and this side-channel
-		// call must not pay for — or depend on resolving — image bytes.
-		Messages: deepseek.WithoutImages(deepseek.StripReasoningContent(history)),
+		// Attachments stripped: the briefing only needs prior TEXT (the
+		// attached-image / attached-document markers live in Content),
+		// and this side-channel call must not pay for — or depend on
+		// resolving — image bytes or document ids.
+		Messages: deepseek.WithoutFiles(deepseek.WithoutImages(deepseek.StripReasoningContent(history))),
 	}
 	resp, err := a.cfg.Client.Chat(ctx, req)
 	if err != nil {
@@ -822,6 +834,12 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	// ResolveImages — they never abort the turn.
 	if a.cfg.ImageLoader != nil {
 		msgs = deepseek.ResolveImages(msgs, a.cfg.ImageLoader)
+	}
+	// feature-deepseek-app-api F4: same station for documents — lazily
+	// upload a missing file_id, re-upload an expired one from the local
+	// asset, degrade in-band on failure. Never aborts the turn.
+	if a.cfg.FileResolver != nil {
+		msgs = deepseek.ResolveFiles(ctx, msgs, a.cfg.FileResolver)
 	}
 	if a.cfg.PrepareMessages != nil {
 		msgs = a.cfg.PrepareMessages(msgs)

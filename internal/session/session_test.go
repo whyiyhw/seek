@@ -665,6 +665,55 @@ func TestSaveLoad_Roundtrip_Images(t *testing.T) {
 	}
 }
 
+// TestSaveLoad_Roundtrip_Files: the document sibling of the images
+// round-trip (feature-deepseek-app-api F4). A resumed session must keep
+// asset + live file_id + expiry + purpose — that quartet is what lets
+// the send path keep referencing the parsed document without
+// re-uploading, and re-upload faithfully once the id dies. No sidecar
+// cache exists, so this round-trip IS the resume contract.
+func TestSaveLoad_Roundtrip_Files(t *testing.T) {
+	// No t.Parallel() — uses newStoreIn(t) which calls t.Setenv().
+	store := newStoreIn(t)
+	sess := New(deepseek.ModelV41Flash, "/tmp", "sys", false, false)
+	sess.Messages = []deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "summarise\n\n[file: report.pdf — uploaded · text · 12 pages · file-api-1]",
+			Files: []deepseek.FilePart{{
+				Asset:     "ab12cd34ef56.pdf",
+				FileID:    "file-api-1",
+				ExpiresAt: 1765392000,
+				Purpose:   deepseek.PurposeRichLayoutRecognition,
+			}}},
+		{Role: deepseek.RoleAssistant, Content: "twelve pages"},
+	}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages: %+v", got.Messages)
+	}
+	fs := got.Messages[0].Files
+	if len(fs) != 1 {
+		t.Fatalf("file parts lost: %+v", fs)
+	}
+	want := deepseek.FilePart{
+		Asset:     "ab12cd34ef56.pdf",
+		FileID:    "file-api-1",
+		ExpiresAt: 1765392000,
+		Purpose:   deepseek.PurposeRichLayoutRecognition,
+	}
+	if fs[0] != want {
+		t.Fatalf("file part drifted: %+v, want %+v", fs[0], want)
+	}
+	// Text-only messages stay file-free.
+	if len(got.Messages[1].Files) != 0 {
+		t.Fatalf("assistant message gained files: %+v", got.Messages[1].Files)
+	}
+}
+
 // TestLoadFrom_ArbitraryPathRoundtrip: LoadFrom is the load-side
 // sibling of SaveTo (P1-b subagent continuation reads a prior
 // subagent's transcript by path). Round-trips messages + header
