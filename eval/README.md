@@ -45,6 +45,42 @@ per case it executed, e.g.:
 {"case":"tool-args-hallucination","pass":true,"metrics":{"unknown_field_errors":0,"think_calls":1,"turns":4},"prompt_tokens":12834,"completion_tokens":612,"elapsed_s":21}
 ```
 
+## Isolation: the SEEK_HOME sandbox
+
+Every seek invocation run.sh launches — default lane and `runner.sh`
+cases alike — inherits a **pinned `SEEK_HOME`**:
+
+- caller sets a non-empty `SEEK_HOME` → respected verbatim (an outer
+  sandbox redirecting the redirect);
+- otherwise → forced to `eval/tmp/seek-home` (gitignored), and an
+  inherited `SEEK_SESSIONS_DIR` is stripped — it ranks ABOVE
+  `SEEK_HOME` in `session.NewStore`'s resolution ladder and would
+  silently bypass the sandbox for sessions.
+
+seek resolves all user-data writes (sessions, `projects/`,
+dream-state, cron, skill stats, upgrade-check) through
+`paths.Home()` = `$SEEK_HOME`-or-`~/.seek`, so an eval run
+**cannot** write the real `~/.seek` — not even a run whose API call
+fails instantly (a fake-key probe still wrote four paths there before
+this pin landed; card c_clip4i). Deliberate side effect: evals no
+longer inherit the running machine's user skills / memory /
+mcp.json — measurements are hermetic and comparable across machines.
+
+The API key does NOT live in the sandbox: `internal/config` resolves
+env var first (`DEEPSEEK_API_KEY` > `$SEEK_HOME/config.json`), so a
+key that used to sit in `~/.seek/config.json` must be exported for
+eval runs once SEEK_HOME is pinned.
+
+Who may burn a real key at all: unattended lanes (batch cards,
+resident loops, steward sweeps) run **fake-key by rule** — a real key
+is only for a human-named `--only` run or a card that explicitly
+authorizes it ([`docs/prd/v8.md`](../docs/prd/v8.md) §9.1). The
+pinning mechanism AND the zero-real-HOME guarantee are held by
+`scripts/eval-home-isolation-test.sh` (selftest lane
+`eval-home-isolation-test`: mechanism asserts via a fake binary +
+a real-binary canary-HOME A/B whose control arm proves the canary
+catches writes in the first place).
+
 ## Metric vocabulary (extracted by `run.sh` from the JSONL stream)
 
 | Metric | What it counts |
