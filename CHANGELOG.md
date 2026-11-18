@@ -106,3 +106,4 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - c_lgtpgq：MCP-D3：mcp.json hint 字段 + mcptool.PromptSection 文案组装 + semble 内置 known-server 文案
 - c_yyqtnh：MCP 深度集成设计稿：Semble 第一验证目标（prompt 引导/工具路由/效果评估）
 - c_lmrp73：v8 第一波数据回填：基线三数（一次过率/每任务花费/人审分钟）+ 裸核对照表 + §9 回填与第二波范围建议
+- c_rto2rb：MCP-D3 接线：cmd/seek main.go 消费 mcptool.PromptSection（hint/mcp_prompt 生效）
