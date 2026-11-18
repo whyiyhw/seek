@@ -1932,3 +1932,19 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: 卡 `c_nxirmj`：提示改按 `len(providerOptions)` 动态生成；envVarFor 镜像补 glm/opencode 两 case，`TestEnvVarFor_KnownProviders` 同步扩表锁死。
 - **Lesson**: 向导扩 provider 的清单：providerOptions 行 + setup.go envVarFor case + internal/config envVarFor case（范围文案已动态化）。凡是「镜像别处枚举」的 switch，扩表当轮就补测试用例。
 - **Refs**: `cmd/seek/setup.go` `providerOptions`/`envVarFor`/`shouldTriggerWizard`，`internal/config/config.go` `envVarFor`。
+
+## Distill review `s` / memory↔skill bridge
+
+### 模态内异步结果消息的 stale 判定不能只带位置参数——idx 回绕后旧消息会拼接进新回合
+- **Saw**: ⚡ review 的 `s` 转换是异步 tea.Cmd；第一版守卫写的是 `msg.idx != m.distillIdx` 就丢弃。按 q 中途退出后再开新 review（idx 从 0 重新开始），迟到的旧结果 idx 同为 0，会把「上一轮候选的预览态」拼接进新一轮的第一个候选。
+- **Why**: bubbletea 的 async Cmd 与模态生命周期解耦，idx 是候选位置、不是轮次标识；review 关闭再重开让位置回绕，位置相等 ≠ 同一轮。
+- **Fix**: 卡 `c_2lbcck`（bridge M-B2）：守卫三元组 `!distillReviewOpen || !distillConverting || msg.idx != m.distillConvertIdx`。`distillConverting` 在 exitDistillReview、结果落地（成功/错误行）两条路径都会清零，天然充当「本轮转换仍在被等待」的世代位。`TestDistillConvert_QDuringConvertDropsLateResult` 钉死回绕场景。
+- **Lesson**: 模态里的异步结果消息，除了位置还要带「该次调用仍在被等待」的状态位，并在模态 teardown 里清零；只用位置判 stale 的守卫， reopening 即失效。
+- **Refs**: `internal/tui/distill.go` `handleDistillConvertDone`/`exitDistillReview`，`internal/tui/distill_convert_test.go`。
+
+### trigram-Jaccard 阈值 fixture 手算两错同一处——先 sanity assert 再断行为
+- **Saw**: 写 ConvertToSkill 的 L2 边界测试时手算 "abcdef" vs "zabcdefz" 当作 0.50（GREY），实际 4/6 ≈ 0.67（REJECT）——5 元 vs 8 元的并集算错。distill_test.go 的既有注释里明写 "Fixture sanity first: the sims really are what we counted"，同一坑第二次踩。
+- **Why**: 短串 trigram 集合大小 ≠ 字符数-直觉估计，交并集脑算在 4-8 个 trigram 规模上就不可靠。
+- **Fix**: 卡 `c_2lbcck`：GREY fixture 改用 "abcdefgh" vs "zabcdefz"（4/8 = 0.50，与既有测试同一对），并在用例注释里写死算式。
+- **Lesson**: 凡是给相似度阈值造 fixture，第一步永远是先用度量函数本身 sanity-assert 期望值，再断言行为——不要复用「看起来差不多」的旧串对。
+- **Refs**: `internal/skilldistill/convert_test.go` `TestConvertToSkill_L2OverlapThresholds`、`internal/tui/distill_test.go` `TestDistillOverlapWarning_ThresholdBoundary`。

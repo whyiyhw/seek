@@ -213,11 +213,12 @@ func (m Model) openMReviewFromPending(cands memoryCandidates) (tea.Model, tea.Cm
 	m.distillIdx = 0
 	m.distillSaved = 0
 	m.distillDropped = 0
+	m.distillSkilled = 0
 	m.distillEditing = false
 	m.distillReviewOpen = true
 	m.input.Blur()
 	return m, m.appendHistory(styleMuted.Render(fmt.Sprintf(
-		"  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [q] quit", len(cands))))
+		"  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [s] → skill  [q] quit", len(cands))))
 }
 
 // saveSkillDraft renders the candidate and writes it via DraftStore,

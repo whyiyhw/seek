@@ -665,6 +665,22 @@ type Model struct {
 	// cancels and returns to the y/n/e/q prompt.
 	distillEditing bool
 
+	// `s` conversion state (feature-memory-skill-bridge §3.1, M-B2).
+	// converting = one reasoner round-trip is in flight (spinner
+	// line; all keys inert except abort). convertIdx stamps which
+	// candidate owns the in-flight call — a result that arrives
+	// after the review closed or advanced past it is dropped, never
+	// spliced into a different candidate's turn. converted != nil =
+	// the preview state: y installs to <project>/.seek/skills, n
+	// backs out to the prompt, q quits. convertNote carries the L2
+	// GREY warning into the preview render; skilled counts installs
+	// for the review-done summary ("K → skill").
+	distillConverting  bool
+	distillConvertIdx  int
+	distillConverted   *skilldistill.SkillCandidate
+	distillConvertNote string
+	distillSkilled     int
+
 	// distilling is true while the asynchronous reasoner call for
 	// /distill is in-flight. View() renders a spinner line with
 	// elapsed time so the user knows the TUI hasn't hung.
