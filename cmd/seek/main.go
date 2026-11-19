@@ -3217,7 +3217,7 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 		u := map[string]any{
 			"sessionUpdate": "tool_call",
 			"toolCallId":    e.CallID,
-			"title":         e.Name,
+			"title":         acpToolTitle(e.Name, e.Args),
 			"name":          e.Name,
 			"kind":          acpToolKind(e.Name),
 			"status":        "in_progress",
@@ -3225,8 +3225,8 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 		if locs := acpToolLocations(e.Args, cwd); locs != nil {
 			u["locations"] = locs
 		}
-		if raw := acpTruncate(e.Args, acpRawCap); raw != "" {
-			u["rawInput"] = raw
+		if e.Args != "" {
+			u["rawInput"] = acpRawValue(acpTruncate(e.Args, acpRawCap))
 		}
 		return acp.SessionUpdate{SessionID: sessionID, Update: u}, true
 	case agent.ToolExecEnd:
@@ -3247,7 +3247,7 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 			out = e.Err.Error()
 		}
 		if out != "" {
-			u["rawOutput"] = acpTruncate(out, acpRawCap)
+			u["rawOutput"] = acpRawValue(acpTruncate(out, acpRawCap))
 		}
 		return acp.SessionUpdate{SessionID: sessionID, Update: u}, true
 	}
@@ -3276,6 +3276,64 @@ func acpTruncate(s string, max int) string {
 		cut--
 	}
 	return s[:cut] + "\n…[truncated]"
+}
+
+// acpRawValue coerces a wire payload to the shape clients render best:
+// paseo's own mock agent (the known-good pattern against its UI) sends
+// rawInput/rawOutput as JSON OBJECTS, which its detail panel
+// pretty-prints into the "Input"/"Output" sections. Anything that
+// parses as JSON rides as the parsed value; plain text stays a string.
+// Truncation happens BEFORE the call, so a cut JSON string that no
+// longer parses simply degrades to the truncated-string form.
+func acpRawValue(s string) any {
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err == nil {
+		return v
+	}
+	return s
+}
+
+// acpToolTitle builds the human title from the tool's args — the one
+// line a client shows collapsed. A bare tool name ("read") says
+// nothing; "read notes.txt" or "bash go test ./..." does. Extraction
+// is best-effort per known arg names, degrading to the bare name.
+func acpToolTitle(name, args string) string {
+	var a map[string]any
+	if err := json.Unmarshal([]byte(args), &a); err != nil {
+		return name
+	}
+	arg := func(k string) string {
+		s, _ := a[k].(string)
+		return s
+	}
+	var what string
+	switch name {
+	case "read", "list_dir", "write", "edit", "fim_complete":
+		what = arg("path")
+	case "grep":
+		if p := arg("pattern"); p != "" {
+			what = p
+		}
+	case "bash":
+		what = arg("command")
+	case "git":
+		if s := arg("subcommand"); s != "" {
+			what = s
+		}
+	case "think":
+		what = arg("task")
+	case "webfetch":
+		what = arg("url")
+	case "monitor":
+		what = arg("command")
+	}
+	if what == "" {
+		return name
+	}
+	if len(what) > 80 {
+		what = what[:80] + "…"
+	}
+	return name + " " + what
 }
 
 // acpToolKind maps seek tool names to ACP ToolKind values (clients pick
