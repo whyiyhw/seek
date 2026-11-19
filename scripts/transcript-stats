@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+"""transcript-stats — 离线分析 seek session transcript 的行为形状（c_254zzz）。
+
+为什么存在
+    21 个 eval case 都是二值纪律断言（「有没有越界」），测不出真实任务上
+    的效率**分布**（eval-v2 §1.3 诊断的能力面留白）。本脚本不调模型、不发
+    请求，只回放已经落盘的 transcript，把「打了多少轮、多少调用是白打的、
+    read 是不是在翻页死循环」量出来。纯离线、非常驻：跑完即退出，无状态、
+    无定时器、无网络。
+
+口径（每个数字怎么算，写死在这里 = 报告可复算的唯一真源）
+    session           一个 *.jsonl 文件；首行元数据，其余行是
+                      deepseek.Message（tool_calls 挂在 assistant 行）。
+    tool_call         每行 assistant 消息里 tool_calls[] 的每一项。
+    fingerprint       同一会话内 (name, arguments 原始字节) 完全相同。
+    dup.extra         Σ per-fingerprint (次数-1) —— 「白打出去的调用数」。
+    dup.repeated      Σ 出现次数>1 的 fingerprint 的全部次数 —— 其中既含
+                      第一次（可能有用）也含重复。**报告头条用这个 / 总调用**，
+                      与 2026-11-19 调研的 6.2% 同口径。
+    read 文件身份     参数里 path > file_path > file 第一个存在的键。实测
+                      （2026-11-19 全量 5601 次 read）：path 是绝对主体，
+                      file_path 在 read 参数里**从未出现**（它只出现在
+                      bash/edit 参数与工具输出文本里），file 有 2 次、
+                      另有 1 次把路径塞进了 offset。三键兼容是防御性
+                      要求（schema 演进 + 异构客户端），不是当前事实。
+                      三者都没有 = unresolved，单独计数、**绝不并进同一个
+                      桶**（并桶会凭空造出「同文件重读」假信号）。
+    reread.extra      Σ 同会话内同一文件 (read 次数-1) —— 多余调用口径。
+    pagination        在被重读的文件里，不同 offset 值 >1 的比例（offset
+                      缺省视作 1，与 read 工具默认一致）。
+    offset step       同会话内同一文件去重后的 offset 集合按升序相邻差
+                      （跳页步长；同 offset 的重复由 dup 口径覆盖，所以
+                      先集合去重再求差，不重复计同一跳）。
+
+用法
+    scripts/transcript-stats                        # 扫 $SEEK_HOME/sessions 或 ~/.seek/sessions
+    scripts/transcript-stats --sessions-dir DIR     # 参数化数据源（fixture / 归档用）
+    scripts/transcript-stats --json OUT.json        # 同一份指标另存机器可读
+    scripts/transcript-stats --selftest             # fixture 断言（不碰真实数据）
+    scripts/transcript-stats --read-key-mode path-only|naive-bucket   # 反例诊断
+
+只读保证
+    session 文件只以 'r' 打开、从不写；唯一写出的路径是 --json 指定的
+    文件（--selftest 只写 mktemp 目录，退出即删）。
+"""
+
+import argparse
+import glob
+import json
+import os
+import shutil
+import sys
+import tempfile
+
+READ_PATH_KEYS = ("path", "file_path", "file")
+NAIVE_BUCKET = "<naive-bucket>"
+READ_KEY_MODES = ("auto", "path-only", "naive-bucket")
+
+
+# ---------------------------------------------------------------- 读取
+
+
+def default_sessions_dir():
+    home = os.environ.get("SEEK_HOME") or os.path.join(os.path.expanduser("~"), ".seek")
+    return os.path.join(home, "sessions")
+
+
+def load_sessions(paths):
+    """读一组 jsonl → (sessions, skipped, malformed)。
+
+    权限不足 / 读不动的文件计入 skipped（跳过并计数，不是失败）；
+    解析不了的行计入 malformed，不中断（老 session 里有手改/截断行）。
+    """
+    sessions, skipped, malformed = [], [], 0
+    for path in paths:
+        try:
+            fh = open(path, "r", encoding="utf-8", errors="replace")
+        except OSError:
+            skipped.append(path)
+            continue
+        header, calls = None, []
+        with fh:
+            for i, line in enumerate(fh):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    malformed += 1
+                    continue
+                if i == 0:
+                    if not isinstance(obj, dict):
+                        malformed += 1
+                        continue
+                    header = obj
+                    continue
+                if not isinstance(obj, dict):
+                    malformed += 1
+                    continue
+                for tc in obj.get("tool_calls") or []:
+                    fn = (tc or {}).get("function") or {}
+                    name = fn.get("name")
+                    if not name:
+                        malformed += 1
+                        continue
+                    calls.append({"name": name, "raw": fn.get("arguments") or ""})
+        if header is None:
+            malformed += 1
+            continue
+        sessions.append({"file": path, "header": header, "calls": calls})
+    return sessions, skipped, malformed
+
+
+# ---------------------------------------------------------------- 口径
+
+
+def _pct(n, d):
+    return (100.0 * n / d) if d else 0.0
+
+
+def _percentile(sorted_vals, p):
+    if not sorted_vals:
+        return 0
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    idx = int(round((p / 100.0) * (len(sorted_vals) - 1)))
+    return sorted_vals[idx]
+
+
+def parse_args(raw):
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def read_path(args, mode):
+    """把 read 参数解析成文件身份；mode 见 --read-key-mode。"""
+    keys = READ_PATH_KEYS if mode == "auto" else ("path",)
+    for k in keys:
+        v = args.get(k)
+        if isinstance(v, str) and v:
+            return v
+    if mode == "naive-bucket":
+        # 复现旧原型的假信号：只认 path 键，所有解析失败的 read 并进同一个桶。
+        return NAIVE_BUCKET
+    return None
+
+
+def offset_of(args):
+    v = args.get("offset")
+    if isinstance(v, bool) or not isinstance(v, int):
+        return 1
+    return v
+
+
+# ---------------------------------------------------------------- 分析
+
+
+def _new_group(model, month):
+    return {"model": model, "month": month, "sessions": 0, "calls": 0,
+            "dup_extra": 0, "dup_repeated": 0, "read_calls": 0,
+            "reread_extra": 0, "reread_files": 0, "paginated_files": 0}
+
+
+def analyse(sessions, skipped, malformed, read_key_mode="auto"):
+    total_calls = 0
+    tool_totals, tool_dup_extra, tool_dup_rep = {}, {}, {}
+    dup_extra = dup_repeated = 0
+    read_calls = read_unresolved = read_unparsed = 0
+    read_files = 0
+    reread_extra = reread_files = paginated_files = 0
+    step_counts = {}
+    schema_versions, model_counts = {}, {}
+    turns, calls_per_session = [], []
+    group = {}
+    sessions_with_dup = sessions_with_reread = 0
+
+    for sess in sessions:
+        header = sess["header"]
+        calls = sess["calls"]
+        model = header.get("model") or "?"
+        created = header.get("created_at") or ""
+        month = created[:7] if len(created) >= 7 else "?"
+        sv = header.get("schema_version")
+        schema_versions[str(sv)] = schema_versions.get(str(sv), 0) + 1
+        model_counts[model] = model_counts.get(model, 0) + 1
+        if isinstance(header.get("turns"), int):
+            turns.append(header["turns"])
+        calls_per_session.append(len(calls))
+        total_calls += len(calls)
+
+        g = group.setdefault((model, month), _new_group(model, month))
+        g["sessions"] += 1
+        g["calls"] += len(calls)
+
+        # ---- 完全重复指纹（同会话内 name + arguments 逐字节相同）
+        fps = {}
+        for c in calls:
+            fp = (c["name"], c["raw"])
+            fps[fp] = fps.get(fp, 0) + 1
+            tool_totals[c["name"]] = tool_totals.get(c["name"], 0) + 1
+
+        sess_dup_extra = 0
+        sess_dup_rep = 0
+        for (name, _raw), n in fps.items():
+            if n > 1:
+                sess_dup_extra += n - 1
+                sess_dup_rep += n
+                tool_dup_extra[name] = tool_dup_extra.get(name, 0) + (n - 1)
+                tool_dup_rep[name] = tool_dup_rep.get(name, 0) + n
+        dup_extra += sess_dup_extra
+        dup_repeated += sess_dup_rep
+        g["dup_extra"] += sess_dup_extra
+        g["dup_repeated"] += sess_dup_rep
+        if sess_dup_extra:
+            sessions_with_dup += 1
+
+        # ---- read：同文件重读 / 翻页 / offset 步长
+        per_file = {}
+        for c in calls:
+            if c["name"] != "read":
+                continue
+            read_calls += 1
+            g["read_calls"] += 1
+            args = parse_args(c["raw"])
+            if args is None:
+                read_unparsed += 1
+                continue
+            fp = read_path(args, read_key_mode)
+            if fp is None:
+                read_unresolved += 1
+                continue
+            per_file.setdefault(fp, []).append(offset_of(args))
+        read_files += len(per_file)
+
+        sess_extra = 0
+        for offsets in per_file.values():
+            if len(offsets) < 2:
+                continue
+            reread_files += 1
+            g["reread_files"] += 1
+            extra = len(offsets) - 1
+            reread_extra += extra
+            sess_extra += extra
+            if len(set(offsets)) > 1:
+                paginated_files += 1
+                g["paginated_files"] += 1
+                uniq = sorted(set(offsets))
+                for prev, nxt in zip(uniq, uniq[1:]):
+                    step_counts[nxt - prev] = step_counts.get(nxt - prev, 0) + 1
+        g["reread_extra"] += sess_extra
+        if sess_extra:
+            sessions_with_reread += 1
+
+    tools = [
+        {
+            "name": name,
+            "calls": n,
+            "share": round(_pct(n, total_calls), 2),
+            "dup_extra": tool_dup_extra.get(name, 0),
+            "dup_repeated": tool_dup_rep.get(name, 0),
+            "dup_extra_rate": round(_pct(tool_dup_extra.get(name, 0), n), 2),
+            "dup_repeated_rate": round(_pct(tool_dup_rep.get(name, 0), n), 2),
+        }
+        for name, n in sorted(tool_totals.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+
+    top_steps = sorted(step_counts.items(), key=lambda kv: (-kv[1], -kv[0]))
+
+    def dist(vals):
+        s = sorted(vals)
+        if not s:
+            return {"n": 0}
+        return {"n": len(s), "min": s[0], "p50": _percentile(s, 50),
+                "p90": _percentile(s, 90), "max": s[-1],
+                "mean": round(sum(s) / len(s), 1), "sum": sum(s)}
+
+    groups = []
+    for g in sorted(group.values(), key=lambda x: (-x["calls"], x["model"], x["month"])):
+        groups.append({
+            "model": g["model"], "month": g["month"],
+            "sessions": g["sessions"], "calls": g["calls"],
+            "dup_extra": g["dup_extra"],
+            "dup_extra_rate": round(_pct(g["dup_extra"], g["calls"]), 2),
+            "dup_repeated_rate": round(_pct(g["dup_repeated"], g["calls"]), 2),
+            "read_calls": g["read_calls"],
+            "reread_extra": g["reread_extra"],
+            "reread_rate": round(_pct(g["reread_extra"], g["read_calls"]), 2),
+            "reread_files": g["reread_files"],
+            "pagination_share": round(_pct(g["paginated_files"], g["reread_files"]), 2),
+        })
+
+    return {
+        "read_key_mode": read_key_mode,
+        "sessions": len(sessions),
+        "tool_calls": total_calls,
+        "skipped_files": len(skipped),
+        "skipped_paths": skipped,
+        "malformed_lines": malformed,
+        "schema_versions": schema_versions,
+        "models": model_counts,
+        "turns": dist(turns),
+        "calls_per_session": dist(calls_per_session),
+        "tools": tools,
+        "dup": {"calls": total_calls, "extra": dup_extra, "repeated": dup_repeated,
+                "extra_rate": round(_pct(dup_extra, total_calls), 2),
+                "repeated_rate": round(_pct(dup_repeated, total_calls), 2),
+                "sessions_with_dup": sessions_with_dup},
+        "read": {"calls": read_calls, "unresolved": read_unresolved,
+                 "unparsed": read_unparsed, "files": read_files,
+                 "reread_files": reread_files, "reread_extra": reread_extra,
+                 "reread_rate": round(_pct(reread_extra, read_calls), 2),
+                 "paginated_files": paginated_files,
+                 "pagination_share": round(_pct(paginated_files, reread_files), 2),
+                 "sessions_with_reread": sessions_with_reread},
+        "offset_steps": {"distinct": len(step_counts), "total": sum(step_counts.values()),
+                         "top": [{"delta": d, "count": n} for d, n in top_steps[:5]],
+                         "all": [{"delta": d, "count": n} for d, n in top_steps]},
+        "groups": groups,
+    }
+
+
+# ---------------------------------------------------------------- 渲染
+
+
+def render(res, top_n=5):
+    out = []
+    w = out.append
+    w("# transcript-stats")
+    w("")
+    w("read-key-mode=%s  sessions=%d  tool_calls=%d  skipped=%d  malformed_lines=%d"
+      % (res["read_key_mode"], res["sessions"], res["tool_calls"],
+         res["skipped_files"], res["malformed_lines"]))
+    w("")
+    w("## 分布：turns / tool_calls 每会话")
+    w("")
+    w("| 指标 | n | min | p50 | p90 | max | mean | sum |")
+    w("|---|---|---|---|---|---|---|---|")
+    for label, key in (("turns", "turns"), ("tool_calls", "calls_per_session")):
+        d = res[key]
+        if not d.get("n"):
+            w("| %s | 0 | - | - | - | - | - | - |" % label)
+            continue
+        w("| %s | %d | %d | %d | %d | %d | %s | %d |"
+          % (label, d["n"], d["min"], d["p50"], d["p90"], d["max"], d["mean"], d["sum"]))
+    w("")
+    w("## 工具名分布 + 完全重复指纹（同会话内 name+arguments 逐字节相同）")
+    w("")
+    w("| 工具 | calls | share% | dup_extra | dup_extra% | dup_repeated | dup_repeated% |")
+    w("|---|---|---|---|---|---|---|")
+    for t in res["tools"][:top_n]:
+        w("| %s | %d | %.2f | %d | %.2f | %d | %.2f |"
+          % (t["name"], t["calls"], t["share"], t["dup_extra"],
+             t["dup_extra_rate"], t["dup_repeated"], t["dup_repeated_rate"]))
+    rest = res["tools"][top_n:]
+    if rest:
+        rc = sum(t["calls"] for t in rest)
+        re_ = sum(t["dup_extra"] for t in rest)
+        rr = sum(t["dup_repeated"] for t in rest)
+        w("| (其余 %d 个工具) | %d | %.2f | %d | %.2f | %d | %.2f |"
+          % (len(rest), rc, _pct(rc, res["tool_calls"]), re_, _pct(re_, rc),
+             rr, _pct(rr, rc)))
+    w("")
+    d = res["dup"]
+    w("**总重复率** dup_extra=%d/%d=%.2f%%   **dup_repeated=%d/%d=%.2f%%**（头条口径）"
+      % (d["extra"], d["calls"], d["extra_rate"],
+         d["repeated"], d["calls"], d["repeated_rate"]))
+    w("")
+    r = res["read"]
+    w("## read 同文件重读 / 翻页 / offset 步长")
+    w("")
+    w("| 指标 | 值 |")
+    w("|---|---|")
+    w("| read 总调用 | %d |" % r["calls"])
+    w("| 解析不出文件身份（unresolved，单列不并桶） | %d |" % r["unresolved"])
+    w("| 参数非法（unparsed） | %d |" % r["unparsed"])
+    w("| 被读文件数（会话内去重后求和） | %d |" % r["files"])
+    w("| 被重读文件数 | %d |" % r["reread_files"])
+    w("| 多余重读调用（Σ 次数-1） | %d |" % r["reread_extra"])
+    w("| **重读率** = 多余调用 / read 总数 | **%.2f%%** |" % r["reread_rate"])
+    w("| 翻页形态文件数（被重读中不同 offset>1） | %d |" % r["paginated_files"])
+    w("| **翻页占比** = 翻页 / 被重读 | **%.2f%%** |" % r["pagination_share"])
+    w("")
+    st = res["offset_steps"]
+    w("offset 步长 top%d（同会话同文件 offset 集合去重后升序相邻差，共 %d 次）"
+      % (min(top_n, len(st["top"])) or top_n, st["total"]))
+    w("")
+    w("| delta | 次数 | 占比 |")
+    w("|---|---|---|")
+    for s in st["top"][:top_n]:
+        w("| %+d | %d | %.2f%% |" % (s["delta"], s["count"], _pct(s["count"], st["total"])))
+    w("")
+    w("## model × 月份（防版本混杂：老 v0.x 与当月不可混算）")
+    w("")
+    w("| model | month | sessions | calls | dup_extra% | dup_repeated% | read_calls | reread% | 翻页% |")
+    w("|---|---|---|---|---|---|---|---|---|")
+    for g in res["groups"]:
+        w("| %s | %s | %d | %d | %.2f | %.2f | %d | %.2f | %.2f |"
+          % (g["model"], g["month"], g["sessions"], g["calls"], g["dup_extra_rate"],
+             g["dup_repeated_rate"], g["read_calls"], g["reread_rate"],
+             g["pagination_share"]))
+    w("")
+    w("schema_version 分布：%s" % json.dumps(res["schema_versions"], sort_keys=True))
+    w("")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- 自测
+
+FIXTURE_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 os.pardir, "eval", "fixtures", "transcript-stats"))
+
+
+def _selftest():
+    """fixture 断言：新旧 schema 四形态 + path/file_path 双键兼容反例。
+
+    全程只写 mktemp 目录；真实 ~/.seek 数据一概不碰。
+    """
+    fails = []
+
+    def check(name, got, want):
+        if got != want:
+            fails.append("%s: got %r want %r" % (name, got, want))
+
+    def checkf(name, got, want, tol=0.05):
+        if abs(got - want) > tol:
+            fails.append("%s: got %r want %r±%r" % (name, got, want, tol))
+
+    if not os.path.isdir(FIXTURE_DIR):
+        print("selftest: 缺 fixture 目录 %s" % FIXTURE_DIR, file=sys.stderr)
+        return 2
+
+    tmp = tempfile.mkdtemp(prefix="transcript-stats-selftest-")
+    locked = os.path.join(tmp, "20990101-000000-locked.jsonl")
+    try:
+        for name in sorted(os.listdir(FIXTURE_DIR)):
+            if name.endswith(".jsonl"):
+                shutil.copyfile(os.path.join(FIXTURE_DIR, name),
+                                os.path.join(tmp, name))
+
+        # 权限受限文件：跳过并计数。以 root 跑时构造不出不可读文件，
+        # 此时把探测文件删掉，保证其余断言的口径不受影响（降级为 SKIP）。
+        with open(locked, "w", encoding="utf-8") as fh:
+            fh.write('{"schema_version":2,"model":"x"}\n')
+        os.chmod(locked, 0)
+        can_lock = True
+        try:
+            open(locked, "r", encoding="utf-8").close()
+            can_lock = False
+        except OSError:
+            pass
+        if not can_lock:
+            os.chmod(locked, 0o600)
+            os.unlink(locked)
+
+        paths = sorted(glob.glob(os.path.join(tmp, "*.jsonl")))
+        sessions, skipped, malformed = load_sessions(paths)
+        res = analyse(sessions, skipped, malformed, read_key_mode="auto")
+
+        # --- 四形态之一：两个会话、工具名分布（老=read，新=read+edit）
+        check("sessions", res["sessions"], 2)
+        check("tool_calls", res["tool_calls"], 10)
+        check("malformed_lines", res["malformed_lines"], 1)
+        tools = {t["name"]: t["calls"] for t in res["tools"]}
+        check("tool.read", tools.get("read"), 8)
+        check("tool.edit", tools.get("edit"), 2)
+        check("schema_versions", res["schema_versions"], {"3": 1, "2": 1})
+
+        # --- 四形态之二/三：file_path 单读 + 正常重读（判别双键是否都认）
+        r = res["read"]
+        check("read.calls", r["calls"], 8)
+        check("read.unresolved", r["unresolved"], 0)
+        check("read.unparsed", r["unparsed"], 0)
+        check("read.files", r["files"], 4)             # a,b（path）+ c,d（file_path）
+        check("read.reread_files", r["reread_files"], 3)   # a,c 翻页重读 + b 同页重读
+        check("read.reread_extra", r["reread_extra"], 4)   # a:2 + b:1 + c:1；d 是正常单读
+        checkf("read.reread_rate", r["reread_rate"], 50.0)
+        check("read.paginated_files", r["paginated_files"], 2)  # a,c
+        checkf("read.pagination_share", r["pagination_share"], 66.67)
+
+        # --- 四形态之四：完全重复调用（老 schema 的 read 重复 + 新 schema 的 edit 重复）
+        d = res["dup"]
+        check("dup.extra", d["extra"], 2)
+        check("dup.repeated", d["repeated"], 4)
+        checkf("dup.repeated_rate", d["repeated_rate"], 40.0)
+        check("dup.sessions_with_dup", d["sessions_with_dup"], 2)
+
+        # --- offset 步长：+50 三连主导（老 a 两次 + 新 c 一次）
+        check("steps.total", res["offset_steps"]["total"], 3)
+        check("steps.top0", res["offset_steps"]["top"][0], {"delta": 50, "count": 3})
+
+        # --- model × 月份分组（防版本混杂）
+        gs = {(g["model"], g["month"]): g for g in res["groups"]}
+        check("group.count", len(gs), 2)
+        check("group.old.calls", gs[("deepseek-chat", "2026-05")]["calls"], 5)
+        check("group.new.calls", gs[("deepseek-v4-flash", "2026-11")]["calls"], 5)
+        check("group.old.reread_extra", gs[("deepseek-chat", "2026-05")]["reread_extra"], 3)
+        check("group.new.reread_extra", gs[("deepseek-v4-flash", "2026-11")]["reread_extra"], 1)
+        check("group.old.dup_extra", gs[("deepseek-chat", "2026-05")]["dup_extra"], 1)
+        check("group.new.dup_extra", gs[("deepseek-v4-flash", "2026-11")]["dup_extra"], 1)
+
+        # --- 权限受限文件跳过并计数
+        if can_lock:
+            check("skipped_files", res["skipped_files"], 1)
+            check("skipped_paths", len(res["skipped_paths"]), 1)
+        else:
+            print("selftest: SKIP 权限断言（以 root 跑，构造不出不可读文件）")
+
+        # --- 反例①：只认 path 键 → 4 次新格式 read 全部 unresolved。
+        #     正确行为是「单列并计数」，而不是并成一个文件。
+        resp = analyse(sessions, skipped, malformed, read_key_mode="path-only")
+        check("path-only.read.calls", resp["read"]["calls"], 8)
+        check("path-only.unresolved", resp["read"]["unresolved"], 3)
+        check("path-only.files", resp["read"]["files"], 2)        # 老 a,b
+        check("path-only.reread_extra", resp["read"]["reread_extra"], 3)  # a:2 + b:1
+        checkf("path-only.reread_rate", resp["read"]["reread_rate"], 37.5)
+
+        # --- 反例②：单键 + 把失败并进一个桶 → 凭空造出「同文件重读/翻页」。
+        #     这正是调研时踩的坑（单键解析把失败全聚成一桶 → 假重读率）。
+        resn = analyse(sessions, skipped, malformed, read_key_mode="naive-bucket")
+        check("naive.unresolved", resn["read"]["unresolved"], 0)
+        check("naive.files", resn["read"]["files"], 3)            # a,b,<bucket>
+        check("naive.reread_files", resn["read"]["reread_files"], 3)   # a,b,bucket
+        check("naive.reread_extra", resn["read"]["reread_extra"], 5)   # a:2 b:1 bucket:2
+        checkf("naive.reread_rate", resn["read"]["reread_rate"], 62.5)
+        # 断言组的意义：auto(50.0%) ≠ path-only(37.5%) ≠ naive(62.5%)。
+        # 任何把双键兼容改回「只认 path」的回归，都会让前两行数字塌到
+        # naive 的形状或 post 出 unresolved>0 —— 立即转红。
+
+        # --- 渲染不崩、可用 --json 序列化
+        text = render(res)
+        if "transcript-stats" not in text:
+            fails.append("render: 输出缺标题")
+        if "read 同文件重读" not in text:
+            fails.append("render: 输出缺 read 段")
+        json.dumps(res)
+
+        # --- 基线报告与快照 JSON 一致（报告引用的四个数字可机械复算）。
+        #     只在本仓有该批文件时检查；缺失则 SKIP（不阻塞 fixture 断言）。
+        repo = os.path.dirname(os.path.dirname(FIXTURE_DIR))
+        snap = os.path.join(repo, "transcript-baseline", "2026-11-19.json")
+        report = os.path.join(repo, "transcript-baseline", "2026-11-19.md")
+        if os.path.isfile(snap) and os.path.isfile(report):
+            with open(snap, "r", encoding="utf-8") as fh:
+                base = json.load(fh)
+            with open(report, "r", encoding="utf-8") as fh:
+                md = fh.read()
+            top = base["offset_steps"]["top"][0]
+            wants = [
+                "**%.2f%%**" % base["dup"]["repeated_rate"],
+                "**%.2f%%**" % base["read"]["reread_rate"],
+                "**%.2f%%**" % base["read"]["pagination_share"],
+                "**%+d，%d 次**" % (top["delta"], top["count"]),
+            ]
+            for token in wants:
+                if token not in md:
+                    fails.append("baseline: 报告缺 %r（与快照 JSON 不一致）" % token)
+        else:
+            print("selftest: SKIP 基线一致性断言（缺 transcript-baseline 快照）")
+    finally:
+        if os.path.exists(locked):
+            try:
+                os.chmod(locked, 0o600)
+            except OSError:
+                pass
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    if fails:
+        for f in fails:
+            print("transcript-stats selftest: FAIL: %s" % f, file=sys.stderr)
+        print("transcript-stats selftest: %d 项断言失败" % len(fails), file=sys.stderr)
+        return 1
+    print("transcript-stats selftest: PASS（四形态 + 双键兼容反例 2 组）")
+    return 0
+
+
+# ---------------------------------------------------------------- main
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(
+        prog="transcript-stats",
+        description="离线分析 seek session transcript 的行为形状（只读）")
+    ap.add_argument("--sessions-dir", default=None,
+                    help="transcript 目录（默认 $SEEK_HOME/sessions 或 ~/.seek/sessions）")
+    ap.add_argument("--json", default=None, help="把同一份指标写到该文件")
+    ap.add_argument("--top", type=int, default=5, help="工具/步长表行数（默认 5）")
+    ap.add_argument("--read-key-mode", default="auto", choices=READ_KEY_MODES,
+                    help="read 参数键兼容模式：auto=path>file_path>file（默认）；"
+                         "path-only / naive-bucket 是反例诊断用")
+    ap.add_argument("--selftest", action="store_true", help="跑 fixture 断言")
+    args = ap.parse_args(argv)
+
+    if args.selftest:
+        return _selftest()
+
+    sdir = args.sessions_dir or default_sessions_dir()
+    if not os.path.isdir(sdir):
+        print("transcript-stats: 目录不存在：%s" % sdir, file=sys.stderr)
+        return 2
+    paths = sorted(glob.glob(os.path.join(sdir, "*.jsonl")))
+    sessions, skipped, malformed = load_sessions(paths)
+    res = analyse(sessions, skipped, malformed, read_key_mode=args.read_key_mode)
+    sys.stdout.write(render(res, top_n=args.top) + "\n")
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(res, fh, ensure_ascii=False, indent=2, sort_keys=True)
+            fh.write("\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

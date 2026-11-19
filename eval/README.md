@@ -22,7 +22,9 @@ eval/
 │       ├── prompt.txt  # exact text passed via `seek -p`
 │       └── expect.json # PASS/FAIL bounds; see "Metric vocabulary" below
 ├── results/        # checked-in JSONL of each pass; one row per case
-└── ablation/       # dual-run lanes + comparison tables (NOT trend data)
+├── ablation/       # dual-run lanes + comparison tables (NOT trend data)
+├── transcript-baseline/  # offline transcript snapshots (see "transcript-stats 与口径")
+└── fixtures/       # synthetic transcripts for scripts/transcript-stats --selftest
 ```
 
 ## Running
@@ -128,6 +130,49 @@ This repo's own tuning history:
 | `edit` | "Read target lines first — don't guess whitespace" | Model reads before constructing `old_string` |
 | `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
 | `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
+
+## transcript-stats 与口径（离线，不调模型）
+
+`scripts/transcript-stats` 是**离线**分析器：不调模型、不发请求、不需要 key，
+只回放已经落盘的 `~/.seek/sessions/*.jsonl`。它和 `eval/cases` 的分工是：
+
+| | `eval/cases` + `run.sh` | `scripts/transcript-stats` |
+|---|---|---|
+| 判什么 | **边界纪律**：这一步有没有越界（二值 PASS/FAIL） | **真实任务分布上的行为形状**：打了多少轮、多少调用是白打的、read 是不是在翻页循环 |
+| 数据来自 | 现跑一次（真 API，随机性，单次判定） | 历史 transcript（确定性、可复算、零成本） |
+| 回答 | 「这个 bug 修好了吗」 | 「这一类任务平均长什么样」 |
+| 粒度 | 单例 | 全部会话 / 按 model×月份分组 |
+| 用在 | 回归闸门、发版前 | 连续效率趋势、参数调优的改前/改后对照 |
+
+它填的是 [`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1.3
+诊断的留白——用例集由 pitfalls 台账孵化，本质是「历史 bug 的回归集」，测不了
+「复杂任务上的效率分布」。这个工具补的正是后者：同一批 transcript 上量出
+**连续量**，而不是再补一条二值断言。
+
+首个基线报告：[`eval/transcript-baseline/2026-11-19.md`](transcript-baseline/2026-11-19.md)
+（含四个关键数字：重复率 6.16% / read 重读率 67.99% / 翻页占比 92.00% /
+offset 步长 `+50` 991 次）。
+
+### 口径定义（复算以 `scripts/transcript-stats` 的头注释为唯一真源）
+
+| 指标 | 定义 |
+|---|---|
+| session | 一个 `*.jsonl`；首行元数据（`schema_version`/`model`/`created_at`/`turns`），其余为 `deepseek.Message`，`tool_calls[]` 挂在 assistant 行 |
+| fingerprint | 同一会话内 `(tool name, arguments 原始字节)` 完全相同 |
+| `dup_extra` | Σ per-fingerprint (次数 − 1) —— 「白打出去的调用数」，按工具分列 |
+| `dup_repeated` | Σ 出现次数 > 1 的 fingerprint 的**全部次数** / 总调用 —— 头条重复率口径（与 6.2% 调研数字同口径） |
+| read 文件身份 | 参数里 `path` > `file_path` > `file` 第一个存在的键。解析失败的 read 单列 `unresolved` 计数，**绝不并进同一个桶**（并桶会凭空造出「同文件重读」假信号）。三键兼容是防御性契约：实测 2026-11-19 全量 read 参数里 `path` 是绝对主体、`file_path` 一次未出现、`file` 有 2 次——但键漂移的失败模式（静默丢信号）代价远高于三行兼容代码 |
+| `reread_rate` | Σ 同会话同文件 (`read 次数 − 1`) / read 总数 —— 多余调用口径 |
+| `pagination_share` | 被重读文件里 offset 出现过 >1 个不同值的比例（offset 缺省视作 1） |
+| `offset_steps` | 同会话同文件 offset 集合**去重后升序**相邻差（跳页步长分布，top5） |
+| 分组 | 指标同时按 `model × created_at[:7]` 汇总——5 月 v0.x 时代占 82% 的调用量，不分组会把版本混杂读成趋势 |
+
+读取侧纪律：权限受限文件跳过并计数（`skipped_files`）；解析失败行计数
+（`malformed_lines`）而不中断；数据路径可参数化（`--sessions-dir`）供 fixture
+使用。`--selftest` 用 `eval/fixtures/transcript-stats/` 的新旧两种 schema 样例
+断言四形态（`path` 键 / `file_path` 键 / 完全重复调用 / 翻页读），并带
+`--read-key-mode path-only|naive-bucket` 两组反例，证明单键解析会丢信号或造
+假信号。裸跑即自测的入口：`bash scripts/selftest.sh transcript-stats-test`。
 
 ## When to read results
 

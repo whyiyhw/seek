@@ -1,0 +1,13 @@
+{"schema_version": 2, "id": "20260522-110925-aaaaaa", "created_at": "2026-05-22T11:09:25.188868Z", "updated_at": "2026-05-22T11:09:25.188868Z", "model": "deepseek-chat", "yolo": true, "cwd": "/tmp/fixture", "system_prompt": "fixture", "turns": 3, "tool_calls": 5, "usage": {"prompt_tokens": 100, "completion_tokens": 10, "total_tokens": 110, "prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 20}}
+{"role": "user", "content": "read the fixture"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "call_00", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/f/a.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "call_00", "content": "/f/a.md 1..50"}
+{"role": "assistant", "content": "truncated by desi
+{"role": "assistant", "content": null, "tool_calls": [{"id": "call_00", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/f/a.md\",\"offset\":51}"}}]}
+{"role": "tool", "tool_call_id": "call_00", "content": "/f/a.md 51..100"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "call_00", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/f/a.md\",\"offset\":101}"}}]}
+{"role": "tool", "tool_call_id": "call_00", "content": "/f/a.md 101..150"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "call_00", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/f/b.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "call_00", "content": "/f/b.md 1..30"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "call_00", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/f/b.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "call_00", "content": "/f/b.md 1..30"}
