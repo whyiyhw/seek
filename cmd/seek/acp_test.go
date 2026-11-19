@@ -43,7 +43,9 @@ func TestACPUpdate_Mapping(t *testing.T) {
 	}
 
 	// tool call start: full protocol surface — name, kind, locations,
-	// rawInput alongside the id/title/status triple.
+	// rawInput (parsed to an object — paseo's detail panel renders
+	// objects, its own mock sends them) alongside the id/title/status
+	// triple, and the title carries the arg summary.
 	ts := upd(agent.ToolExecStart{
 		CallID: "c1", Name: "bash",
 		Args: `{"command":"go test ./..."}`,
@@ -54,8 +56,11 @@ func TestACPUpdate_Mapping(t *testing.T) {
 	if ts["name"] != "bash" || ts["kind"] != "execute" {
 		t.Fatalf("tool start name/kind → %v", ts)
 	}
-	if ts["rawInput"] != `{"command":"go test ./..."}` {
-		t.Fatalf("tool start rawInput → %v", ts["rawInput"])
+	if ts["title"] != "bash go test ./..." {
+		t.Fatalf("tool start title → %v", ts["title"])
+	}
+	if ri, ok := ts["rawInput"].(map[string]any); !ok || ri["command"] != "go test ./..." {
+		t.Fatalf("tool start rawInput should be the parsed object → %T %v", ts["rawInput"], ts["rawInput"])
 	}
 	if _, has := ts["locations"]; has {
 		t.Fatalf("bash args carry no path — no locations: %v", ts)
@@ -67,7 +72,7 @@ func TestACPUpdate_Mapping(t *testing.T) {
 		t.Fatalf("tool end ok → %v", teOK)
 	}
 	if teOK["rawOutput"] != "ok" {
-		t.Fatalf("tool end rawOutput → %v", teOK["rawOutput"])
+		t.Fatalf("tool end rawOutput (plain text stays string) → %v", teOK["rawOutput"])
 	}
 	if c, _ := teOK["content"].([]map[string]any); len(c) != 1 || c[0]["type"] != "content" || c[0]["text"] != "ok" {
 		t.Fatalf("tool end content → %v", teOK["content"])
@@ -95,6 +100,46 @@ func TestACPUpdate_Dropped(t *testing.T) {
 		if _, ok := acpUpdate("s", "/proj", ev); ok {
 			t.Errorf("%T should not surface as a session/update", ev)
 		}
+	}
+}
+
+// TestACPToolTitle: the collapsed one-liner carries the arg summary for
+// the tools that have one and degrades to the bare name otherwise
+// (unknown args shapes included).
+func TestACPToolTitle(t *testing.T) {
+	cases := []struct{ name, args, want string }{
+		{"read", `{"path":"notes.txt"}`, "read notes.txt"},
+		{"edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "edit a.go"},
+		{"bash", `{"command":"go test ./..."}`, "bash go test ./..."},
+		{"think", `{"task":"plan the migration"}`, "think plan the migration"},
+		{"grep", `{"pattern":"foo","path":"."}`, "grep foo"},
+		{"bash", `{bad json`, "bash"},
+		{"memory_observe", `{}`, "memory_observe"},
+		{"read", `{"offset":5}`, "read"}, // no path key → bare name
+		{"bash", `{"command":"` + strings.Repeat("x", 100) + `"}`, "bash " + strings.Repeat("x", 80) + "…"},
+	}
+	for _, c := range cases {
+		if got := acpToolTitle(c.name, c.args); got != c.want {
+			t.Errorf("acpToolTitle(%q, %.40s…) = %q, want %q", c.name, c.args, got, c.want)
+		}
+	}
+}
+
+// TestACPRawValue: JSON parses into objects/arrays (paseo's renderable
+// form), everything else stays a string — including a string that was
+// truncated mid-JSON.
+func TestACPRawValue(t *testing.T) {
+	if v, ok := acpRawValue(`{"a":1}`).(map[string]any); !ok || v["a"] != float64(1) {
+		t.Errorf("object passthrough: %T %v", acpRawValue(`{"a":1}`), acpRawValue(`{"a":1}`))
+	}
+	if _, ok := acpRawValue(`[1,2]`).([]any); !ok {
+		t.Errorf("array passthrough: %T", acpRawValue(`[1,2]`))
+	}
+	if s, ok := acpRawValue("plain text").(string); !ok || s != "plain text" {
+		t.Errorf("text stays string: %T", acpRawValue("plain text"))
+	}
+	if _, ok := acpRawValue(`{"a":1`).(string); !ok {
+		t.Errorf("truncated JSON degrades to string: %T", acpRawValue(`{"a":1`))
 	}
 }
 
