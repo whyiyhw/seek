@@ -221,6 +221,14 @@ func (t Tool) WithDeny(fn func(command string) (deny bool, reason string)) Tool 
 	return t
 }
 
+// denyHint is the recovery line appended to every command-guard refusal.
+// The permission deny path (plan-analyze) already ends in "Hint: …"; the
+// two denial families must read alike or the model learns the wrong
+// recovery move — on a guard hit it used to go looking for a rewrite the
+// matcher would miss. The guard is a lane policy, not a permission state
+// to flip: the move is to hand the command to the human (c_ajza7r).
+const denyHint = "a command guard refused this — the command did not run. Do not rephrase it to dodge the match; if the user asked for it in this session, hand it back for them to run in their terminal or via a shell script."
+
 // WithBackground wires the session's background-job manager, enabling
 // run_in_background. Optional: without it, background launches are
 // refused while foreground bash keeps working — keeps 柱 K independently
@@ -247,7 +255,12 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	// model-visible result, not a fatal error, so the model adapts.
 	if t.deny != nil {
 		if blocked, reason := t.deny(a.Command); blocked {
-			return fmt.Sprintf("[bash: blocked — %s]\n$ %s", reason, a.Command), nil
+			// Keep the "[bash: blocked — " prefix byte-identical (wire
+			// format — tests and the model match on it, same class as
+			// "[plan: approved]"), and append the same Hint: shape the
+			// permission deny path uses so the two refusal families read
+			// alike (c_ajza7r).
+			return fmt.Sprintf("[bash: blocked — %s]\n$ %s\nHint: %s", reason, a.Command, denyHint), nil
 		}
 	}
 

@@ -18,3 +18,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 更早的版本见 [GitHub Releases](https://github.com/whyiyhw/seek/releases)——每个 release body 与其 annotated tag 同文。本文件只保留当前版本，历史版本查 git 历史（`git show vX.Y.Z:CHANGELOG.md`）。
 
 ## 已进 main、未部署
+- c_ajza7r：机制：no-remote 闸的拒绝文案——区分「无人值守被拦」与「人在场被要求推」
