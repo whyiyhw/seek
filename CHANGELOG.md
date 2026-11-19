@@ -18,4 +18,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 更早的版本见 [GitHub Releases](https://github.com/whyiyhw/seek/releases)——每个 release body 与其 annotated tag 同文。本文件只保留当前版本，历史版本查 git 历史（`git show vX.Y.Z:CHANGELOG.md`）。
 
 ## 已进 main、未部署
-- c_ajza7r：机制：no-remote 闸的拒绝文案——区分「无人值守被拦」与「人在场被要求推」
+- **no-remote 闸的拒绝文案改了（行为变更，只改文案）**。`git push` / `gh pr create` 一类远端动作在无人值守车道上仍被拦，但返回的拒绝不再声称「autopilot 无人值守」——那句话在 `seek acp` + `SEEK_ACP_YOLO` 上是错的（人在场、而且可能就是本人要求的）。现在它说清三件事：这个闸是尽力而为的字符串匹配、不是安全边界；它挂在哪条车道（`autopilot` / `goal` / `acp`，逐车道点名）；用户在本会话明确要求这项操作时，该由用户在终端或经脚本执行，而不是绕过去。bash 的拒绝串沿用 `[bash: blocked — ` 前缀并补了一行 `Hint:`，与 plan-analyze 的拒绝同形，模型能一致地自恢复。`IsRemoteMutating` 签名与拦截面零变化。
