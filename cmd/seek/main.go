@@ -489,9 +489,11 @@ type subagentRunnerOpts struct {
 	// the parent's lane. Nil/empty map = routing params always fail
 	// (tests that don't exercise routing).
 	routes map[string]subagentRoute
-	// bashGuard, when set, wraps the child's bash tool with a deny check
-	// (v7 柱 N: autopilot subagents deny remote ops). nil = no guard.
-	bashGuard func(command string) (bool, string)
+	// bashGuardLane, when non-empty, wraps the child's bash tool with the
+	// no-remote guard bound to that lane (v7 柱 N: autopilot subagents deny
+	// remote ops). "" = no guard. A lane label rather than a plain func so
+	// the refusal names the lane it was actually mounted on (c_ajza7r).
+	bashGuardLane string
 	// bashSandbox, when true, confines the child's bash to its own
 	// worktree via the OS sandbox (v7 柱 O integration; macOS only for
 	// now). Each autopilot subagent thus can't write outside the worktree
@@ -507,6 +509,15 @@ type subagentRunnerOpts struct {
 	// background manager re-attached; nil disables background jobs in the
 	// subagent (graceful — run_in_background just errors).
 	bgMgr *bgjob.Manager
+}
+
+// laneGuard binds the no-remote check to the lane it is being mounted on:
+// the shape bash.Tool.WithDeny wants, with the lane named in the refusal
+// (c_ajza7r — a refusal must not claim a posture its lane doesn't have).
+func laneGuard(lane string) func(command string) (bool, string) {
+	return func(command string) (bool, string) {
+		return autopilot.IsRemoteMutatingOnLane(lane, command)
+	}
 }
 
 // subagentRoute is one lane entry in subagentRunnerOpts.routes.
@@ -681,8 +692,10 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 				if opts.bgMgr != nil {
 					bt = bt.WithBackground(opts.bgMgr)
 				}
-				if opts.bashGuard != nil {
-					bt = bt.WithDeny(opts.bashGuard)
+				if opts.bashGuardLane != "" {
+					// Bind the guard to the lane this run is on so the
+					// refusal names it (c_ajza7r).
+					bt = bt.WithDeny(laneGuard(opts.bashGuardLane))
 				}
 				if opts.bashSandbox {
 					if wt := job.Policy.CWD(); wt != "" && sandbox.Available() {
@@ -1515,9 +1528,17 @@ func run() error {
 	// (docs/prd/archive/feature-paseo-provider.md §3.3) both run yolo with no
 	// human to ask — yolo opens LOCAL edit/shell only; push/PR-class
 	// remote mutations stay blocked (double insurance with the drive
-	// cards' own "never push" sandbox discipline).
+	// cards' own "never push" sandbox discipline). The lane label rides
+	// the refusal so an ACP session (where a human IS present) is not
+	// told it is goal mode (c_ajza7r). Both flags cannot be true at once
+	// (goalMode/acpYolo key off mutually exclusive argv[1]); ACP is
+	// checked first so the ordering is explicit if that ever changes.
 	if goalMode || acpYolo {
-		goalBash = goalBash.WithDeny(autopilot.IsRemoteMutating)
+		lane := autopilot.LaneGoal
+		if acpYolo {
+			lane = autopilot.LaneACP
+		}
+		goalBash = goalBash.WithDeny(laneGuard(lane))
 	}
 
 	// Repeat-call guard (one counter per session). Wrapped around the
@@ -1865,9 +1886,18 @@ func run() error {
 	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
 		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
 	}
-	var autopilotGuard func(string) (bool, string)
-	if autopilotMode || acpYolo {
-		autopilotGuard = autopilot.IsRemoteMutating
+	// Lane label for the no-remote guard mounted on every subagent bash in
+	// this run; "" = no guard. A label rather than a func so the child
+	// wiring passes the REAL lane into the refusal (c_ajza7r: under
+	// SEEK_ACP_YOLO the old wording claimed "autopilot runs unattended"
+	// while a human was present and had asked for the push). ACP first —
+	// the two modes are mutually exclusive today (argv[1]), order makes
+	// the precedence explicit rather than accidental.
+	autopilotGuardLane := ""
+	if acpYolo {
+		autopilotGuardLane = autopilot.LaneACP
+	} else if autopilotMode {
+		autopilotGuardLane = autopilot.LaneAutopilot
 	}
 
 	var subagentMgr *subagent.Manager
@@ -1922,15 +1952,15 @@ func run() error {
 				hooksFn: func() *hooks.Registry {
 					return hooksReg.CloneWithout(bgNotifier)
 				},
-				maxTokens:   *maxTokens,
-				maxTurns:    *maxTurns,
-				getModel:    func() string { return sessionModel },
-				getEffort:   func() string { return sessionEffort },
-				routes:      buildSubagentRoutes(dsClient, *baseURL),
-				bashGuard:   autopilotGuard,
-				bashSandbox: autopilotMode,
-				bashEnvKeep: bashEnvKeep,
-				bgMgr:       bgMgr,
+				maxTokens:     *maxTokens,
+				maxTurns:      *maxTurns,
+				getModel:      func() string { return sessionModel },
+				getEffort:     func() string { return sessionEffort },
+				routes:        buildSubagentRoutes(dsClient, *baseURL),
+				bashGuardLane: autopilotGuardLane,
+				bashSandbox:   autopilotMode,
+				bashEnvKeep:   bashEnvKeep,
+				bgMgr:         bgMgr,
 			}),
 		})
 		if smerr != nil {
@@ -3031,7 +3061,7 @@ func fileResolver(projectAbs string, client *deepseek.Client) *deepseek.FileReso
 
 // runAutopilot drives the v7 柱 N unattended loop: decompose the goal,
 // fan out to no-remote-guarded worktree subagents, aggregate, push the
-// summary. The subagents are already guarded (bashGuard set on their
+// summary. The subagents are already guarded (bashGuardLane set on their
 // manager for the whole autopilot process), so they produce LOCAL commits
 // only — the user reviews + pushes in the morning.
 func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {

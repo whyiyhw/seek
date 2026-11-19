@@ -42,6 +42,39 @@ func TestGuardedYoloBash_BlocksRemoteMutating(t *testing.T) {
 	}
 }
 
+// The incident's regression guard (2026-11-19 v0.12.1): an ACP session
+// with a human present was told it was unattended. The lane-bound guard
+// must name the real lane and reach the model with the same Hint: shape
+// the permission deny path uses (c_ajza7r).
+func TestGuardedYoloBash_ACPRefusalNamesLane(t *testing.T) {
+	p, err := permission.New(t.TempDir(), permission.PrefYolo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := bash.New(p).WithDeny(func(cmd string) (bool, string) {
+		return IsRemoteMutatingOnLane(LaneACP, cmd)
+	})
+
+	raw, _ := json.Marshal(bash.Args{Command: "git push origin main"})
+	out, err := tool.Execute(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("deny must be a tool result, not a fatal error: %v", err)
+	}
+	if !strings.HasPrefix(out, "[bash: blocked — ") {
+		t.Errorf("blocked prefix is wire format and must not change: %q", out)
+	}
+	if !strings.Contains(out, LaneACP) {
+		t.Errorf("ACP refusal must name the acp lane: %q", out)
+	}
+	if !strings.Contains(out, "\nHint: ") {
+		t.Errorf("guard refusal must carry a Hint: line like the plan-analyze path: %q", out)
+	}
+	// The exact false claim that sent the model looking for a bypass.
+	if strings.Contains(out, "unattended") {
+		t.Errorf("refusal must not assert nobody is watching — the guard cannot know: %q", out)
+	}
+}
+
 func TestGuardedYoloBash_AllowsLocal(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX exec smoke; pattern-level allows (go test / git commit / ls) run on all platforms in guard_test.go")

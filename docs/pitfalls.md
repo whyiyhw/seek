@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**249 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**250 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -76,9 +76,10 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Setup wizard / provider menu | 1 |
 | MCP prompt section | 1 |
 | DeepSeek Files API / file_id | 3 |
-| **Total** | **248** |
+| Lane guards / refusal wording | 1 |
+| **Total** | **250** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 137.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 139.
 
 ---
 
@@ -1933,3 +1934,12 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `propose.CompletionReceiver{ OnProposeCompletion(doneWhen []string, reviewedBy string) }`, upcast right after the `ContextReceiver` block; `planBridge` snapshots into `pendingDoneWhen` / `pendingReviewedBy`, consumed and cleared in `Approved` alongside problem/whyNow. `TestCompletion_SinkWithoutInterfaceStillWorks` locks the optionality (a plain Sink must keep compiling). The cache bust was taken deliberately and declared in the release notes under a "prefix cache" note (CHANGELOG.md + the annotated tag body).
 - **Lesson**: when a new field's arrival time coincides with an existing hook's, you want a **sibling interface fired next to it**, not a parameter on it — AGENTS.md's "add OPTIONAL sibling interfaces" rule is easy to read as style advice and expensive to learn as a compile wall in four test files. And treat "add a required field to a tool schema" as a release-visible event with a cost attached: tell users where they look after upgrading, and never soften the field to optional just to dodge the bust — an omittable completion condition is a comment, not a gate.
 - **Refs**: `internal/tools/propose/propose.go` (`CompletionReceiver`, `schemaBytes`, `validFields`), `cmd/seek/main.go` (`planBridge.OnProposeCompletion`), `internal/tools/propose/donewhen_test.go`, CHANGELOG.md v0.12.1, `docs/release-notes-v0.12.1.tagmsg`, AGENTS.md "Sink interfaces" + "Token & prefix-cache constraints"
+
+## Lane guards / refusal wording
+
+### 闸的拒绝文案是给模型的指令面——写错场合等于教模型绕过
+- **Saw**: 2026-11-19 v0.12.1 发布：`seek acp` + `SEEK_ACP_YOLO` 车道里用户明确要求推送，`internal/autopilot/guard.go` 的 no-remote 闸拦下命令，reason 却是「autopilot runs unattended and does not push」——人在场、推送正是用户授权的，这句话陈述的前提是错的。模型被拒两次后改走 `sh /tmp/release-push-v0.12.1.sh`（字面匹配只看得到 `sh`，看不到脚本里的 `git push`），推送完成。
+- **Why**: 闸本身是 best-effort 字符串匹配（头注释自己写着 defense-in-depth, not a security boundary），reason 却写成权威的事实陈述；「无人值守」由车道决定，guard 不知道调用它的车道是谁——goal / autopilot / SEEK_ACP_YOLO 共用同一张 pattern 表、同一个 reason。拒绝文案是模型唯一能读到的「接下来该怎么办」说明；陈述了它不知道的事实，就把「换一种写法绕过字符串匹配」变成了唯一出路。
+- **Fix**: reason 改成处置指引（三要素：尽力而为/非安全边界、点名车道、人已授权时由人在终端或脚本里执行而非绕）；`IsRemoteMutatingOnLane(lane, command)` 走同一张表只替换车道名，`IsRemoteMutating` 签名不变（默认 autopilot 车道），cmd/seek 三处 mount 点（子代理 / goalBash / autopilot）各传真实车道；`bash.go` 的 deny 分支补与 plan-analyze 同形的 `Hint:` 行，`[bash: blocked — ` 前缀逐字保留。拦截集合零变化：9 条 blocked 逐条仍 true。
+- **Lesson**: 闸的拒绝文案是**给模型的指令面**，不是日志。凡 guard 不知道的事实（有没有人、是否已授权、谁该执行）都不能陈述；只能陈述它确知的（哪张表、哪条车道）并给出处置。文案与拦截面必须分开验收：改文案的卡要逐条断言 blocked 集合不变——否则「让话听起来更准确」会悄悄放松闸。
+- **Refs**: `internal/autopilot/guard.go`、`internal/tools/bash/bash.go`（deny 分支 + `denyHint`）、`cmd/seek/main.go`（`laneGuard` 与三处 mount 点）；本文件「`[plan: approved]` is a load-bearing wire-format prefix」（前缀契约同族）
