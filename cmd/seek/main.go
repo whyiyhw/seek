@@ -3190,10 +3190,12 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 }
 
 // acpUpdate maps one agent event to an ACP session/update payload. ok is
-// false for events that don't surface to the client (reasoning chunks,
-// turn bookkeeping). Pure + table-testable (acp_test.go) so the mapping
-// is verified without a live Zed client. cwd (the anchored session root)
-// makes tool-call locations absolute per the schema contract.
+// false for events that don't surface to the client (turn bookkeeping);
+// reasoning streams surface on the thought channel (agent_thought_chunk,
+// opened by user decision 2026-11-19). Pure + table-testable
+// (acp_test.go) so the mapping is verified without a live Zed client.
+// cwd (the anchored session root) makes tool-call locations absolute
+// per the schema contract.
 //
 // Tool calls ride the full protocol surface (2026-11-18, "放出去"):
 // name + kind (icon/UI treatment), locations (client follow-along),
@@ -3207,10 +3209,28 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 	switch e := ev.(type) {
 	case agent.MessageDelta:
 		if e.Reasoning {
-			return acp.SessionUpdate{}, false // CoT not surfaced as message content
+			// The model's chain-of-thought rides the protocol's thought
+			// channel (agent_thought_chunk), NOT as message content —
+			// clients render it as a separate collapsible region. Surfaced
+			// by user decision 2026-11-19 ("开放"); the prior posture
+			// dropped it entirely. Trade-off accepted: CoT now reaches
+			// client-side logs.
+			return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
+				"sessionUpdate": "agent_thought_chunk",
+				"content":       map[string]any{"type": "text", "text": e.Delta},
+			}}, true
 		}
 		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
 			"sessionUpdate": "agent_message_chunk",
+			"content":       map[string]any{"type": "text", "text": e.Delta},
+		}}, true
+	case agent.ToolDelta:
+		// The think tool streams both its chain-of-thought (Reasoning)
+		// and its answer text — both are thought-channel material: the
+		// process is the point ("过程"), and the final answer already
+		// lands in the tool call's rawOutput when it completes.
+		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
+			"sessionUpdate": "agent_thought_chunk",
 			"content":       map[string]any{"type": "text", "text": e.Delta},
 		}}, true
 	case agent.ToolExecStart:

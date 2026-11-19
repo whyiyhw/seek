@@ -42,6 +42,26 @@ func TestACPUpdate_Mapping(t *testing.T) {
 		t.Fatalf("chunk text lost: %v", m)
 	}
 
+	// reasoning rides the thought channel (user decision 2026-11-19),
+	// never as message content
+	m = upd(agent.MessageDelta{Delta: "hmm…", Reasoning: true})
+	if m["sessionUpdate"] != "agent_thought_chunk" {
+		t.Fatalf("reasoning delta → %v, want agent_thought_chunk", m)
+	}
+	if c, _ := m["content"].(map[string]any); c["text"] != "hmm…" {
+		t.Fatalf("thought text lost: %v", m)
+	}
+	// the think tool's live stream (CoT and answer alike) is thought
+	// material — the process is the point
+	m = upd(agent.ToolDelta{CallID: "c9", Name: "think", Delta: "step 1…", Reasoning: true})
+	if m["sessionUpdate"] != "agent_thought_chunk" {
+		t.Fatalf("think CoT delta → %v, want agent_thought_chunk", m)
+	}
+	m = upd(agent.ToolDelta{CallID: "c9", Name: "think", Delta: "the answer is…"})
+	if m["sessionUpdate"] != "agent_thought_chunk" {
+		t.Fatalf("think answer delta → %v, want agent_thought_chunk", m)
+	}
+
 	// tool call start: full protocol surface — name, kind, locations,
 	// rawInput (parsed to an object — paseo's detail panel renders
 	// objects, its own mock sends them) alongside the id/title/status
@@ -90,9 +110,9 @@ func TestACPUpdate_Mapping(t *testing.T) {
 }
 
 func TestACPUpdate_Dropped(t *testing.T) {
-	// Reasoning chunks and turn bookkeeping must NOT surface to the client.
+	// Turn bookkeeping must NOT surface to the client. (Reasoning now
+	// rides the thought channel — see TestACPUpdate_Mapping.)
 	for _, ev := range []agent.Event{
-		agent.MessageDelta{Delta: "thinking…", Reasoning: true},
 		agent.TurnStart{},
 		agent.TurnEnd{},
 		agent.AgentStart{},
