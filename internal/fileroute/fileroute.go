@@ -23,12 +23,14 @@
 //     from the vision router / 柱 Q pipeline). A failed upload still
 //     leaves the asset stored, so F4's lazy re-upload can heal it.
 //
-// Deliberate simplification (F4 owns the rest of the pipeline): each
-// submit uploads its references anew — a doc referenced twice across
-// two submits parses (and bills) twice, matching the API's own
-// "同 file_id 多次引用按多次计" posture; a cross-turn file_id cache is
-// F4's ResolveFiles business. The wire marshal (vision.go toWire)
-// sends FileID directly; F4 adds expiry re-upload for stale ids.
+// Deliberate simplification: each submit uploads its references anew —
+// a doc referenced twice across two submits parses (and bills the
+// per-page parse fee) twice. Re-REFERENCING one file_id in later turns
+// does not re-charge the parse (PRD §1.2: parsing bills once at upload;
+// chat references then cost only input tokens). The send path owns the
+// other half: deepseek.ResolveFiles heals a missing/expired id by
+// re-uploading from this same asset library, and the FilePart records
+// expires_at + purpose so that decision needs no sidecar cache.
 package fileroute
 
 import (
@@ -155,7 +157,12 @@ func (r Router) routeOne(ctx context.Context, ref filerefs.Ref) (string, deepsee
 	if r.cost != nil {
 		r.cost.RecordFlatCost(pricing.ParseCost(fo.PageCount))
 	}
-	return attachMarker(name, purpose, fo), deepseek.FilePart{Asset: asset, FileID: fo.ID}
+	return attachMarker(name, purpose, fo), deepseek.FilePart{
+		Asset:     asset,
+		FileID:    fo.ID,
+		ExpiresAt: fo.ExpiresAt, // send path's expiry-reupload trigger
+		Purpose:   purpose,      // faithful re-upload of a @rich doc
+	}
 }
 
 func laneNote(name string) string {

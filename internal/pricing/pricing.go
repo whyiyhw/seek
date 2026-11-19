@@ -1,10 +1,19 @@
 // Package pricing models DeepSeek's peak/off-peak pricing windows plus
-// the flat-rate cards of providers without such windows (GLM).
+// the flat-rate cards of providers without such windows (GLM, and the
+// OpenCode Go pool).
+//
 // Embedded rates are the peak rate card verified 2026-11-14 against
 // api-docs.deepseek.com/quick_start/pricing (off-peak is exactly half
-// the peak rate). Bump them with each release
-// rather than fetching at runtime — a price-list HTTP call adds a failure
-// mode for an exclusively defensive feature (PRD §4.8.4).
+// the peak rate). Bump them with each release rather than fetching at
+// runtime — a price-list HTTP call adds a failure mode for an
+// exclusively defensive feature (PRD §4.8.4).
+//
+// One lane is exempt from that rule for the same reason it is exempt in
+// budget: OpenCode Go publishes per-model cost blocks at a documented
+// endpoint, and its pool churns weekly (models appear and are deprecated
+// on a days-long cadence). internal/opencatalog refreshes that list at
+// session start and installs the result through SetModelRates; the
+// embedded cards below remain the offline baseline and the merge target.
 //
 // All times use Asia/Shanghai (UTC+8, no DST). We hardcode the offset to
 // avoid depending on the system tzdata, which is often missing on minimal
@@ -14,6 +23,7 @@ package pricing
 import (
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -51,6 +61,61 @@ const ModelGLM53 = "glm-5.3"
 // API's deepseek.ModelV41Flash ("deepseek-flash"): same model, two
 // lanes, two rate entries so neither falls to the other's fallback.
 const ModelOpenCodeV41Flash = "deepseek-v4.1-flash"
+
+// OpenCodeGoModel is one row of the Go lane's chat-completions
+// catalogue.
+type OpenCodeGoModel struct {
+	ID string // wire model id — also the standardRates key
+	// Label is a short picker description. The TUI renders a 32-column
+	// id followed by it, so it must stay short enough for a ~100-col
+	// terminal even with the " (current)" suffix.
+	Label string
+}
+
+// OpenCodeGoModels is the lane's entire menu: ACP's session/new dropdown
+// and the TUI /model picker both render from this slice, so a model can't
+// exist in one surface and not the other. Verified 2026-11-18 against the
+// gateway's public (no key) GET https://opencode.ai/inference/go/v1/models:
+// these are the Go-allowance models that speak Chat-Completions — seek's
+// compatible-adapter wire. Deliberately absent:
+//   - grok-4.7, gpt-5.6-luna, gpt-6-luna, muse-spark-1.{2,3}-contributor:
+//     Responses API only;
+//   - claude-haiku-5-5, minimax-m3, qwen3.7-plus, qwen3.8-max,
+//     qwen3.8-flash, qwen4-max: Anthropic messages wire;
+//   - gemini-4-argon: generate-content wire;
+//   - nothing else: the four *-Free ids (beam-free, iceman-contributor-free,
+//     longcat-2.5-free, hy4-flash-free) ARE part of this provider's
+//     catalogue. "Free" is defined by the docs as an opencode /
+//     opencode-go model with no input price: same gateway, same key,
+//     just not metered against the Go allowance (their
+//     go.monthly_usage is null and their cost block is all zeros).
+//     They only become unavailable when a workspace sets
+//     OPENCODE_DISABLE_FREE_MODELS — the gateway then answers "Model
+//     unavailable" in-band, which is an honest error rather than a
+//     silent fallback.
+var OpenCodeGoModels = []OpenCodeGoModel{
+	{ModelOpenCodeV41Flash, "1M ctx · vision · lane default"},
+	{ModelV4Pro, "1M ctx · pro"},
+	{ModelGLM53, "1M ctx · top GLM"},
+	{"glm-5.2", "1M ctx · previous GLM"},
+	{"glm-5.3-flash", "1M ctx · fast GLM"},
+	{"kimi-k3", "1M ctx · long output"},
+	{"kimi-k3.1-pro", "1M ctx · top Kimi"},
+	{"kimi-k2.7-code", "256K ctx · code-tuned"},
+	{"minimax-m3.1-flash", "1M ctx · fast"},
+	{"mimo-v2.6-flash", "1M ctx · fast"},
+	{"mimo-v2.6-pro", "1M ctx"},
+	{"longcat-2.0", "1M ctx"},
+	{"hy4", "1M ctx"},
+	{"hy4-preview", "1M ctx · preview"},
+	{"hy3", "256K ctx"},
+	{"step-5-preview", "1M ctx · preview"},
+	// Free (time-limited) rows — $0 cards, no monthly allowance.
+	{"beam-free", "free · 1M ctx"},
+	{"hy4-flash-free", "free · 1M ctx · vision"},
+	{"longcat-2.5-free", "free · 1M ctx · 100/day"},
+	{"iceman-contributor-free", "free · 256K ctx"},
+}
 
 // ModelV4Pro is DeepSeek's independent pro build (served by
 // DeepSeek-V4-Pro-0813). It retired into V4.1-Flash routing at the
@@ -115,24 +180,133 @@ var standardRates = map[string]ModelPricing{
 		OutputPerMTok:     28 / 7.0, // ¥28
 		NoOffPeakDiscount: true,
 	},
-	// OpenCode Go lane (--provider=opencode): a flat $10/month
-	// REQUEST-WINDOW plan (5h/weekly/monthly request quotas) — the
-	// per-token values below are never what the user pays; they exist
-	// only so the defensive cost display shows a sensible number.
-	// NoOffPeakDiscount because a subscription has no windows. Source:
-	// opencode.ai/docs/console/models, checked 2026-11-17 —
-	// deepseek-v4.1-flash $0.30 miss · $0.006 cached · $1.20 output
-	// (happens to equal the direct DeepSeek card above). NB the Go
-	// pool's glm-5.3 ($1.40/$0.26/$4.40 on the same page) COLLIDES
-	// with the ModelGLM53 key, which stays at Zhipu's direct card —
-	// that row prices the glm lane's real per-token billing, and Go-
-	// lane glm-5.3 reuse of it is display-only either way. Other
-	// Go-pool ids fall to the Flash fallback until a verified
-	// /v1/models list lands (post-merge follow-up card).
+	// --- OpenCode Go lane (--provider=opencode) ---
+	// A flat $10/month REQUEST-WINDOW subscription (5h / weekly /
+	// monthly request quotas), so the per-token values below are never
+	// what the user pays — they exist only so the defensive cost
+	// display shows a sensible number. NoOffPeakDiscount on every row:
+	// a subscription has no DeepSeek peak clock.
+	//
+	// Source: the gateway's own GET /v1/models (checked 2026-11-18) —
+	// each model carries a cost.text block in USD per 1M tokens, which
+	// matches the docs' pricing table except that the docs print the
+	// PEAK figure for the two DeepSeek ids: the API quotes
+	// deepseek-v4.1-flash at $0.15 / $0.003 / $0.60 with a 2×
+	// Mon–Fri 01:00–04:00 & 06:00–10:00 UTC multiplier, and v4-pro at
+	// $0.66 / $0.022 / $1.98 with the same 2×. Both cards below keep
+	// the peak figure (err high, same posture as search/ASR/TTS). None
+	// of the other pool ids carries a multiplier, so listed == peak.
+	//
+	// glm-5.3 and deepseek-v4-pro already have rows of their own
+	// (ModelGLM53 / ModelV4Pro) from the direct-API lanes; they are NOT
+	// repeated here, because the registry is keyed by wire id alone.
+	// Display-only either way — ModelGLM53's CNY-derived card
+	// (~$1.14/$0.29/$4.00) sits close to the Go pool's
+	// $1.40/$0.26/$4.40, and ModelV4Pro's direct card already equals
+	// the Go peak price exactly. The shared key also means those two
+	// inherit the DeepSeek peak clock: their Go-lane figure halves
+	// off-peak even though the Go plan has no off-peak. A known
+	// display-only artifact — fixing it needs a lane-aware pricing key,
+	// which is not worth the surface for a subscription's estimate.
 	ModelOpenCodeV41Flash: {
 		InputMissPerMTok:  0.30,
 		InputHitPerMTok:   0.006,
 		OutputPerMTok:     1.20,
+		NoOffPeakDiscount: true,
+	},
+	"glm-5.2": {
+		InputMissPerMTok:  1.40,
+		InputHitPerMTok:   0.26,
+		OutputPerMTok:     4.40,
+		NoOffPeakDiscount: true,
+	},
+	"glm-5.3-flash": {
+		InputMissPerMTok:  0.15,
+		InputHitPerMTok:   0.03,
+		OutputPerMTok:     0.50,
+		NoOffPeakDiscount: true,
+	},
+	"kimi-k3": {
+		InputMissPerMTok:  3.00,
+		InputHitPerMTok:   0.30,
+		OutputPerMTok:     15.00,
+		NoOffPeakDiscount: true,
+	},
+	"kimi-k3.1-pro": {
+		InputMissPerMTok:  2.00,
+		InputHitPerMTok:   0.20,
+		OutputPerMTok:     10.00,
+		NoOffPeakDiscount: true,
+	},
+	"kimi-k2.7-code": {
+		InputMissPerMTok:  0.95,
+		InputHitPerMTok:   0.19,
+		OutputPerMTok:     4.00,
+		NoOffPeakDiscount: true,
+	},
+	"minimax-m3.1-flash": {
+		InputMissPerMTok:  0.15,
+		InputHitPerMTok:   0.015,
+		OutputPerMTok:     0.60,
+		NoOffPeakDiscount: true,
+	},
+	"mimo-v2.6-flash": {
+		InputMissPerMTok:  0.14,
+		InputHitPerMTok:   0.0028,
+		OutputPerMTok:     0.28,
+		NoOffPeakDiscount: true,
+	},
+	"mimo-v2.6-pro": {
+		InputMissPerMTok:  0.435,
+		InputHitPerMTok:   0.003625,
+		OutputPerMTok:     0.87,
+		NoOffPeakDiscount: true,
+	},
+	"longcat-2.0": {
+		InputMissPerMTok:  0.30,
+		InputHitPerMTok:   0.006,
+		OutputPerMTok:     1.20,
+		NoOffPeakDiscount: true,
+	},
+	"hy4": {
+		InputMissPerMTok:  0.834,
+		InputHitPerMTok:   0.042,
+		OutputPerMTok:     2.501,
+		NoOffPeakDiscount: true,
+	},
+	"hy4-preview": {
+		InputMissPerMTok:  0.834,
+		InputHitPerMTok:   0.042,
+		OutputPerMTok:     2.501,
+		NoOffPeakDiscount: true,
+	},
+	"hy3": {
+		InputMissPerMTok:  0.14,
+		InputHitPerMTok:   0.035,
+		OutputPerMTok:     0.58,
+		NoOffPeakDiscount: true,
+	},
+	"step-5-preview": {
+		InputMissPerMTok:  1.00,
+		InputHitPerMTok:   0.10,
+		OutputPerMTok:     2.70,
+		NoOffPeakDiscount: true,
+	},
+	// Free (time-limited) pool rows: the API's cost block is all zeros,
+	// so the card is too — a Go-lane turn on one of these displays $0,
+	// which is the truth. An explicit entry (rather than letting the
+	// unknown-model fallback price them as Flash) keeps a free model from
+	// showing a non-zero estimate.
+	"beam-free": {
+		NoOffPeakDiscount: true,
+	},
+	"hy4-flash-free": {
+		NoOffPeakDiscount: true,
+	},
+	"longcat-2.5-free": {
+		NoOffPeakDiscount: true,
+	},
+	"iceman-contributor-free": {
 		NoOffPeakDiscount: true,
 	},
 }
@@ -199,10 +373,10 @@ func TTSCost(billableChars int) float64 {
 }
 
 // parsePerPageUSD is the Files-API document-parsing rate: $0.225 per
-// 1,000 pages (¥1.5/千页 on the Chinese pricing page; the English page
-// no longer lists the tools family, so this converts at the same ratio
-// the search row documents natively — ¥5/1K → $0.75/1K). Billed once,
-// at upload: the parse IS the upload (a returned file id means the
+// 1,000 pages, listed natively on the English pricing page (2026-11-18
+// check — the tools family IS on the EN page again, retiring the old
+// ¥→$ derivation note; ¥1.5/千页 on the Chinese page, same value). Billed
+// once, at upload: the parse IS the upload (a returned file id means the
 // document already parsed), same price for text_recognition and
 // rich_layout_recognition (PRD feature-deepseek-app-api §1.2/§6 row 3).
 // Same-posture note as search/ASR/TTS: list price only, no discounts
@@ -257,14 +431,15 @@ func CurrentTier(now time.Time) Tier {
 	return TierOffPeak
 }
 
-// PricingFor returns the per-token rate card for a model+tier. Unknown
-// models fall back to V4.1-Flash rates — which is also the card the
-// server bills the retired Flash ids (deepseek-v4-flash /
-// -flash-vision-exp) at, so legacy sessions price correctly without
-// their own entries. deepseek-v4-pro is NOT in that set: it bills at
-// its own registered card above.
+// PricingFor returns the per-token rate card for a model+tier. Cards
+// installed by SetModelRates (OpenCode Go catalogue refresh) win over the
+// embedded table. Unknown models fall back to V4.1-Flash rates — which is
+// also the card the server bills the retired Flash ids
+// (deepseek-v4-flash / -flash-vision-exp) at, so legacy sessions price
+// correctly without their own entries. deepseek-v4-pro is NOT in that
+// set: it bills at its own registered card above.
 func PricingFor(model string, tier Tier) ModelPricing {
-	p, ok := standardRates[model]
+	p, ok := LookupRate(model)
 	if !ok {
 		p = standardRates[deepseek.ModelV41Flash]
 	}
@@ -274,6 +449,55 @@ func PricingFor(model string, tier Tier) ModelPricing {
 		p.OutputPerMTok *= offPeakDiscount
 	}
 	return p
+}
+
+// overrides, when non-nil, wins over standardRates for the ids it names.
+// Installed once per session by the OpenCode catalogue refresh
+// (internal/opencatalog); see the package comment. Guarded because
+// PricingFor runs on the per-turn cost path while a background refresh
+// may be installing the new table.
+var (
+	overrideMu sync.RWMutex
+	overrides  map[string]ModelPricing
+)
+
+// SetModelRates installs runtime rate cards, overriding standardRates for
+// the named ids; nil clears them. Sanctioned caller:
+// internal/opencatalog. Cards are copied, and every installed card is
+// forced flat-rate (NoOffPeakDiscount) — a subscription lane has no
+// DeepSeek peak clock, and a remote cost block must never be halved by
+// one.
+func SetModelRates(m map[string]ModelPricing) {
+	clean := make(map[string]ModelPricing, len(m))
+	for id, card := range m {
+		if card.InputMissPerMTok < 0 || card.InputHitPerMTok < 0 || card.OutputPerMTok < 0 {
+			continue
+		}
+		card.NoOffPeakDiscount = true
+		clean[id] = card
+	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
+	if len(clean) == 0 {
+		overrides = nil
+		return
+	}
+	overrides = clean
+}
+
+// LookupRate resolves a model's card: runtime overrides first, then the
+// embedded table. The bool reports whether ANY card exists — callers that
+// must distinguish "priced" from "fallback" (the catalogue merge, which
+// seeds its baseline from here) use this, not a comparison against the
+// Flash card's numbers.
+func LookupRate(model string) (ModelPricing, bool) {
+	overrideMu.RLock()
+	defer overrideMu.RUnlock()
+	if p, ok := overrides[model]; ok {
+		return p, true
+	}
+	p, ok := standardRates[model]
+	return p, ok
 }
 
 // Cost returns the USD cost of running one Usage block at the given

@@ -316,11 +316,19 @@ func (c *Config) SuggestReplyEnabled() bool {
 	return *c.SuggestReply
 }
 
-// ProviderConfig holds the per-provider state. APIKey is the only
-// field today; future additions (base URL overrides, organization IDs,
-// model defaults) slot in here without changing the file location.
+// ProviderConfig holds the per-provider state. APIKey and BaseURL are
+// the only fields today; future additions (organization IDs, model
+// defaults) slot in here without changing the file location.
+//
+// BaseURL is an optional endpoint override for lanes that ship a pinned
+// default. Wired for glm today (the Coding Plan / pay-as-you-go split —
+// see buildProvider's glm case); other lanes still use their compiled
+// default or the --base-url flag. The value is the FULL POST target, not
+// a base URL — the OpenAI-compatible client POSTs it verbatim. Empty
+// means "use the lane's compiled default".
 type ProviderConfig struct {
-	APIKey string `json:"api_key,omitempty"`
+	APIKey  string `json:"api_key,omitempty"`
+	BaseURL string `json:"base_url,omitempty"`
 }
 
 // envVarFor returns the canonical environment variable a provider
@@ -429,6 +437,38 @@ func KeyFor(cfg Config, providerName string) string {
 	}
 	if p, ok := cfg.Providers[providerName]; ok && p.APIKey != "" {
 		return p.APIKey
+	}
+	return ""
+}
+
+// baseURLEnvFor returns the canonical environment variable for a
+// provider's endpoint override, mirroring envVarFor for keys. glm needs
+// one for the Coding Plan / pay-as-you-go split (docs/guide-config.md
+// §3); opencode has one so a proxy/mirror can front the Go gateway
+// without editing config.json.
+func baseURLEnvFor(providerName string) string {
+	switch providerName {
+	case "glm":
+		return "GLM_BASE_URL"
+	case "opencode":
+		return "OPENCODE_BASE_URL"
+	}
+	return ""
+}
+
+// BaseURLFor resolves an optional endpoint override for providerName
+// with the same env > config precedence as KeyFor. An empty result
+// means "no override" — callers then fall back to their own flag /
+// compiled default (buildProvider's order: config/env > --base-url >
+// lane default).
+func BaseURLFor(cfg Config, providerName string) string {
+	if env := baseURLEnvFor(providerName); env != "" {
+		if v := os.Getenv(env); v != "" {
+			return v
+		}
+	}
+	if p, ok := cfg.Providers[providerName]; ok && p.BaseURL != "" {
+		return p.BaseURL
 	}
 	return ""
 }

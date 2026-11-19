@@ -18,3 +18,15 @@ without making this a flaky eval. Both cases are therefore **record-only**. See 
 [`-low` README](../code-review-effort-low/README.md) for the full A/B data, the single-pair
 trap it exposed, and the two recommended follow-ups (collapse to 2 levels, or give high/max
 mechanical teeth).
+
+## Recalibration (2026-11-18)
+
+The 6000 `max_completion_tokens` ceiling was set from the n=3 first calibration
+(`{2389, 3174, 2705}`) and had already stopped bounding runaways by 2026-11-13, the day
+v0.11.0 was tagged. Ten recorded runs across 11-13…11-18: `3587, 4540, 7172, 8243, 9368,
+10527, 11851, 13701, 14122, 14757` — a bimodal shape (terse ~3.5k vs exhaustive 7–15k) with
+`review_line_refs` 16–30 against the calibration's 4–13. The ceiling was gating *thoroughness*,
+which is the one thing this record-only case is not supposed to gate. Raised to **20000** —
+~35 % above the observed maximum, so it fires only on a true runaway. First run under the new
+ceiling: 12186 tokens, 30 line refs, PASS. The case remains record-only; the trend, not the
+bound, is the evidence.

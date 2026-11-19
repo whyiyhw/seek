@@ -22,6 +22,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
@@ -65,7 +66,7 @@ func allCommands() []command {
 		{names: []string{"/help", "/?"}, usage: "/help", description: "Show this help.", handler: cmdHelp},
 		{names: []string{"/keys"}, usage: "/keys", description: "Show the active keymap (including any ~/.seek/keybindings.toml overrides).", handler: cmdKeys},
 		{names: []string{"/clear", "/new"}, usage: "/clear", description: "Start a fresh conversation (saves the current session, opens a new one, clears the screen). Ctrl+L if you only want to blank the visible terminal without resetting state.", handler: cmdNew},
-		{names: []string{"/model"}, usage: "/model [id]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-flash).", handler: cmdModel},
+		{names: []string{"/model"}, usage: "/model [id|refresh]", description: "Switch the active model. No args opens a picker; pass an id to skip it (e.g. /model deepseek-flash); `refresh` re-fetches the OpenCode Go catalogue.", handler: cmdModel},
 		{names: []string{"/exit", "/quit", "/q"}, usage: "/exit", description: "Save the current session and quit seek.", handler: cmdQuit},
 		{names: []string{"/effort"}, usage: "/effort [off|high|max]", description: "Set DeepSeek reasoning_effort for this session. No args opens a picker. off clears the override; high/max force Thinking on and tune the depth. Think tool runs one level above. Under the default --max-tokens, max also raises the per-call completion cap to 64k (reasoning draws from the same budget).", handler: cmdEffort},
 		{names: []string{"/yolo"}, usage: "/yolo", description: "Toggle --yolo for the rest of this session.", handler: cmdYolo},
@@ -425,12 +426,60 @@ func knownModelsForProvider(providerName string) []modelChoice {
 			{"gemini-2.0-flash", "Gemini 2.0 Flash — fast"},
 			{"gemini-1.5-pro", "Gemini 1.5 Pro — large context (2M)"},
 		}
+	case "opencode":
+		// Compiled baseline. When cmd/seek wired a live catalogue
+		// (Options.OpenCodeModels), modelChoices uses that instead — this
+		// branch is the offline/no-wiring fallback, rendered from the
+		// same pricing.OpenCodeGoModels slice ACP's dropdown uses, so a
+		// model can't be selectable in one surface and absent from the
+		// other. Descriptions there are written to the picker's width
+		// budget: 32-col id column + label must fit ~100 cols with the
+		// " (current)" suffix.
+		models := make([]modelChoice, 0, len(pricing.OpenCodeGoModels))
+		for _, m := range pricing.OpenCodeGoModels {
+			models = append(models, modelChoice{m.ID, m.Label})
+		}
+		return models
 	default:
 		return nil
 	}
 }
 
+// modelChoices resolves the picker's rows for the active provider: the
+// live OpenCode catalogue when cmd/seek injected one (it may carry ids a
+// refresh discovered, and drops ids the vendor removed), else the
+// compiled table.
+func (m *Model) modelChoices() []modelChoice {
+	if m.opts.OpenCodeModels != nil && strings.EqualFold(m.opts.ProviderName, "opencode") {
+		if rows := m.opts.OpenCodeModels(); len(rows) > 0 {
+			out := make([]modelChoice, 0, len(rows))
+			for _, r := range rows {
+				out = append(out, modelChoice{r.ID, r.Label})
+			}
+			return out
+		}
+	}
+	return knownModelsForProvider(m.opts.ProviderName)
+}
+
+// catalogRefreshedMsg is the async result of `/model refresh`.
+type catalogRefreshedMsg struct {
+	rows int
+	err  error
+}
+
 func cmdModel(m *Model, args string) cmdResult {
+	// `refresh` re-fetches the OpenCode catalogue. It's a subcommand, not
+	// an id — no curated model is named "refresh".
+	if strings.EqualFold(strings.TrimSpace(args), "refresh") {
+		if m.opts.RefreshOpenCodeModels == nil {
+			return cmdResult{text: styleMuted.Render("model refresh: no live model catalogue on this lane (only --provider=opencode has one)")}
+		}
+		return cmdResult{
+			text:  styleMuted.Render("model refresh: fetching the OpenCode catalogue…"),
+			extra: startCatalogRefreshCmd(m),
+		}
+	}
 	// Args path: keep the original "type the id directly" flow for
 	// power users and for providers we don't curate (compatible).
 	if args != "" {
@@ -448,7 +497,7 @@ func cmdModel(m *Model, args string) cmdResult {
 	// No args: open the picker if we have a curated list for this
 	// provider; otherwise fall back to the old "print current + usage"
 	// message (compatible endpoints have freeform model ids).
-	models := knownModelsForProvider(m.opts.ProviderName)
+	models := m.modelChoices()
 	if len(models) == 0 {
 		return cmdResult{text: styleMuted.Render(fmt.Sprintf(
 			"current model: %s\nusage: /model <id>  (no curated list for provider %q)",
@@ -1870,6 +1919,39 @@ func (m *Model) handleUpgradeDone(msg upgradeDoneMsg) []tea.Cmd {
 		// We just wrote the new binary; clear the nudge so the bar
 		// doesn't keep advertising the upgrade after it's done.
 		m.upgradeAvailable = ""
+	}
+	return []tea.Cmd{m.appendHistory(line)}
+}
+
+// startCatalogRefreshCmd runs the OpenCode catalogue fetch off the render
+// loop. It borrows the session context so Ctrl+C-quit cancels an
+// in-flight request instead of leaving a goroutine behind.
+func startCatalogRefreshCmd(m *Model) tea.Cmd {
+	refresh := m.opts.RefreshOpenCodeModels
+	parentCtx := m.opts.Ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(parentCtx, 20*time.Second)
+		defer cancel()
+		n, err := refresh(ctx)
+		return catalogRefreshedMsg{rows: n, err: err}
+	}
+}
+
+// handleCatalogRefreshed renders the `/model refresh` outcome. A failure
+// is informational, not fatal: the previously installed catalogue (or the
+// compiled baseline) stays in force.
+func (m *Model) handleCatalogRefreshed(msg catalogRefreshedMsg) []tea.Cmd {
+	var line string
+	switch {
+	case msg.err != nil:
+		line = lipgloss.NewStyle().Foreground(colourToolErr).Render(
+			fmt.Sprintf("/model refresh failed: %v (keeping the current list)", msg.err))
+	default:
+		line = lipgloss.NewStyle().Foreground(colourOk).Render(
+			fmt.Sprintf("/model refresh: %d models — /model to pick", msg.rows))
 	}
 	return []tea.Cmd{m.appendHistory(line)}
 }

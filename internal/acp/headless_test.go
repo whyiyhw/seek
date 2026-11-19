@@ -49,6 +49,39 @@ func TestYoloFromEnv(t *testing.T) {
 	}
 }
 
+func TestProviderModelFromEnv(t *testing.T) {
+	cases := []struct {
+		name         string
+		env          map[string]string
+		wantProvider string
+		wantModel    string
+	}{
+		{"unset", nil, "", ""},
+		{"both set", map[string]string{ProviderEnvVar: "glm", ModelEnvVar: "glm-5.3"}, "glm", "glm-5.3"},
+		{"provider only", map[string]string{ProviderEnvVar: "glm"}, "glm", ""},
+		{"model only", map[string]string{ModelEnvVar: "deepseek-flash"}, "", "deepseek-flash"},
+		{"whitespace-only counts as unset", map[string]string{ProviderEnvVar: "  ", ModelEnvVar: "\t"}, "", ""},
+		{"names are NOT truthiness-parsed, just trimmed", map[string]string{ProviderEnvVar: " deepseek ", ModelEnvVar: " deepseek-v4-pro "}, "deepseek", "deepseek-v4-pro"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, m := ProviderModelFromEnv(stubEnv(c.env))
+			if p != c.wantProvider || m != c.wantModel {
+				t.Errorf("ProviderModelFromEnv(%v) = (%q, %q), want (%q, %q)", c.env, p, m, c.wantProvider, c.wantModel)
+			}
+		})
+	}
+	// nil getenv (defensive branch): no pins.
+	if p, m := ProviderModelFromEnv(nil); p != "" || m != "" {
+		t.Errorf("ProviderModelFromEnv(nil) = (%q, %q), want empty", p, m)
+	}
+	// Env vars must be consulted by their exported names — paseo provider
+	// entries spell them with (same contract class as SEEK_ACP_YOLO).
+	if ProviderEnvVar != "SEEK_ACP_PROVIDER" || ModelEnvVar != "SEEK_ACP_MODEL" {
+		t.Errorf("env var names = (%q, %q), want (SEEK_ACP_PROVIDER, SEEK_ACP_MODEL)", ProviderEnvVar, ModelEnvVar)
+	}
+}
+
 // TestACPHeadlessPrefBashGate covers the two runtime paths the `seek acp`
 // lane takes through the permission gate (D-2, docs/prd/
 // feature-paseo-provider.md §3.3): env unset → the lane initialises at

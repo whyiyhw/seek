@@ -172,3 +172,25 @@ func Load(dir, asset string) (string, error) {
 	}
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
+
+// LoadDoc reads a stored document back as raw bytes — the Load sibling
+// for the Files API's send-time re-upload
+// (deepseek.ResolveFiles' FileLoader; feature-deepseek-app-api F4).
+// Documents never become data URLs (they upload as multipart bodies),
+// so there is no mime to resolve. Same name guard and size cap as Load;
+// the cap mirrors the upload cap so a corrupted/oversized asset
+// degrades at load, not mid-request.
+func LoadDoc(dir, asset string) ([]byte, error) {
+	p, err := Path(dir, asset)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxDocBytes {
+		return nil, fmt.Errorf("assets: %d bytes exceeds %d MiB document cap", len(data), MaxDocBytes>>20)
+	}
+	return data, nil
+}

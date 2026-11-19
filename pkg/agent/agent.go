@@ -102,6 +102,17 @@ type Config struct {
 	// whenever a session exists).
 	ImageLoader deepseek.ImageLoader
 
+	// FileResolver, when set, materialises Asset-referenced documents
+	// into live Files API ids on every DeepSeek-path request
+	// (feature-deepseek-app-api F4) — lazily uploading a part that has
+	// none and re-uploading one whose recorded expiry has passed. It is
+	// the send-time sibling of ImageLoader and carries the session's
+	// transport cache, so one instance must live as long as the
+	// session's agent (cmd/seek builds it once). nil leaves file parts
+	// untouched: live ids still send, anything unhealable degrades to an
+	// in-band note inside ResolveFiles.
+	FileResolver *deepseek.FileResolver
+
 	// Hooks, when non-nil, receive lifecycle callbacks: PrePrompt /
 	// PreToolUse decorators (synchronous, ordered, can mutate the
 	// request) and PreTurn / PostTurn / PostToolUse observers
@@ -175,6 +186,25 @@ type Agent struct {
 // SetModel changes the active model. Safe to call between (not during) turns.
 // The change takes effect on the next Prompt call.
 func (a *Agent) SetModel(model string) {
+	a.cfg.Model = model
+}
+
+// SetLane swaps the whole provider lane — the (Provider, Client, Model)
+// triple — in one step. Provider and Client are mutually exclusive by
+// construction (nil Provider ⇒ first-class DeepSeek Client lane), so a
+// mid-provider switch (deepseek ↔ glm) must rewrite both halves together
+// or runTurn's dispatch (cfg.Provider != nil) would read a torn lane.
+// Same contract as SetModel: safe to call between (not during) turns;
+// takes effect on the next Prompt call. The ACP backend is the caller —
+// the transport layer rejects session/set_config_option while a prompt
+// is in flight, so no concurrent turn can observe the swap (see
+// internal/acp/server.go dispatch for the happens-before argument).
+// Downstream readers that resolve the lane at call time (runTurn,
+// summariseLLM) follow automatically; consumers that captured a client
+// reference at construction (subagent routes) deliberately do NOT.
+func (a *Agent) SetLane(provider llm.Provider, client *deepseek.Client, model string) {
+	a.cfg.Provider = provider
+	a.cfg.Client = client
 	a.cfg.Model = model
 }
 
@@ -417,10 +447,11 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 
 	req := &deepseek.ChatRequest{
 		Model: a.cfg.Model,
-		// Images stripped: the briefing only needs prior TEXT (the
-		// attached-image markers live in Content), and this side-channel
-		// call must not pay for — or depend on resolving — image bytes.
-		Messages: deepseek.WithoutImages(deepseek.StripReasoningContent(history)),
+		// Attachments stripped: the briefing only needs prior TEXT (the
+		// attached-image / attached-document markers live in Content),
+		// and this side-channel call must not pay for — or depend on
+		// resolving — image bytes or document ids.
+		Messages: deepseek.WithoutFiles(deepseek.WithoutImages(deepseek.StripReasoningContent(history))),
 	}
 	resp, err := a.cfg.Client.Chat(ctx, req)
 	if err != nil {
@@ -804,6 +835,12 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	if a.cfg.ImageLoader != nil {
 		msgs = deepseek.ResolveImages(msgs, a.cfg.ImageLoader)
 	}
+	// feature-deepseek-app-api F4: same station for documents — lazily
+	// upload a missing file_id, re-upload an expired one from the local
+	// asset, degrade in-band on failure. Never aborts the turn.
+	if a.cfg.FileResolver != nil {
+		msgs = deepseek.ResolveFiles(ctx, msgs, a.cfg.FileResolver)
+	}
 	if a.cfg.PrepareMessages != nil {
 		msgs = a.cfg.PrepareMessages(msgs)
 	}
@@ -1128,14 +1165,14 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 
 	if a.cfg.Tools == nil {
 		err := fmt.Errorf("agent: no tools registered; LLM requested %q", tc.Function.Name)
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err, Args: tc.Function.Arguments}
 		return "", err
 	}
 
 	tool := a.cfg.Tools.Lookup(tc.Function.Name)
 	if tool == nil {
 		err := fmt.Errorf("%w: %s (known: %v)", tools.ErrUnknownTool, tc.Function.Name, a.cfg.Tools.Names())
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err, Args: tc.Function.Arguments}
 		return "", err
 	}
 
@@ -1149,14 +1186,14 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Args:   args,
 	})
 	if hookErr != nil {
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: hookErr}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: hookErr, Args: tc.Function.Arguments}
 		return "", hookErr
 	}
 	if preTool.Deny != "" {
 		a.cfg.Hooks.NotifyPostToolUse(ctx, hooks.PostToolUseEvent{
 			CallID: tc.ID, Name: tc.Function.Name, Args: args, Result: preTool.Deny,
 		})
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Result: preTool.Deny}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Result: preTool.Deny, Args: tc.Function.Arguments}
 		return preTool.Deny, nil
 	}
 	if preTool.Args != nil {
@@ -1203,6 +1240,7 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Name:   tc.Function.Name,
 		Result: result,
 		Err:    err,
+		Args:   tc.Function.Arguments,
 	}
 	return result, err
 }

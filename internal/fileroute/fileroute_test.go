@@ -88,7 +88,7 @@ func writePDF(t *testing.T, name string, size int) string {
 }
 
 func okObj() *deepseek.FileObject {
-	return &deepseek.FileObject{ID: "file-api-test123", PageCount: 34}
+	return &deepseek.FileObject{ID: "file-api-test123", PageCount: 34, ExpiresAt: 1765392000}
 }
 
 func TestRoute_AttachesFileID(t *testing.T) {
@@ -129,6 +129,12 @@ func TestRoute_AttachesFileID(t *testing.T) {
 	}
 	if !strings.HasSuffix(parts[0].Asset, ".pdf") {
 		t.Fatalf("asset name = %q", parts[0].Asset)
+	}
+	// The part records the upload's lifecycle + parse mode (F4): the
+	// send path uses them to decide "still live" vs re-upload, and to
+	// re-upload a @rich doc faithfully — no sidecar cache needed.
+	if parts[0].ExpiresAt != 1765392000 || parts[0].Purpose != deepseek.PurposeTextRecognition {
+		t.Fatalf("part lifecycle fields = %+v", parts[0])
 	}
 	// Copy-at-submit really copied.
 	if _, err := os.Stat(filepath.Join(r.assetsDir, parts[0].Asset)); err != nil {

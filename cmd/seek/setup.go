@@ -97,6 +97,17 @@ func runSetupWizard(ctx context.Context, in io.Reader, out io.Writer) (provider 
 	fmt.Fprintf(out, "  Saved to %s.\n", path)
 	fmt.Fprintln(out, "  Tip: set the matching env var to override on a single run, e.g.")
 	fmt.Fprintf(out, "       %s=... seek\n", envVarFor(provider))
+	if provider == "glm" {
+		// Zhipu splits the billing realm by URL, not by key shape: the
+		// same coding-plan key silently charges the recharge balance (or
+		// fails with error 1113) on the default pay-as-you-go path. The
+		// wizard can't tell the two key kinds apart, so state the override.
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  Using a GLM Coding Plan subscription? Point the lane at the plan endpoint —")
+		fmt.Fprintln(out, "  a coding-plan key bills against the plan ONLY on /api/coding/paas/v4:")
+		fmt.Fprintf(out, "       GLM_BASE_URL=%s seek\n", glmCodingPlanBaseURL)
+		fmt.Fprintln(out, "  or add \"base_url\" under providers.glm in ~/.seek/config.json.")
+	}
 	fmt.Fprintln(out, "")
 	return provider, nil
 }

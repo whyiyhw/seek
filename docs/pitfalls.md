@@ -20,52 +20,65 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 - AI assistants working in this repo: every time you fix a non-obvious bug or discover a surprising constraint, **append an entry here** AND add a `Pitfall:` trailer to the commit (see [`AGENTS.md`](../AGENTS.md)).
 - Humans: same convention. Use `scripts/extract-pitfalls.sh` to sanity-check that recent commits' `Pitfall:` trailers line up with entries here.
 
-## Status: live vs absorbed (audit 2026-11-14)
+## Status: live vs absorbed (archive pass 2026-11-19)
 
-Audit basis: branch `drive/c_bg7hax` @ `7777c2f`. **201 entries — 15 absorbed, 186 live.**
+**248 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
-- `### [已吸收]` at the start of a heading marks an entry whose *subject* has been superseded or removed: the subsystem was deleted, a later commit reversed the design, or the model/dependency the entry constrains is gone. Following the entry today would steer you wrong. Entries are marked, never deleted — history stays readable.
+- `### [已吸收]` at the start of a heading marks an entry whose *subject* has been superseded or removed: the subsystem was deleted, a later commit reversed the design, or the model/dependency the entry constrains is gone. Following the entry today would steer you wrong.
 - Every absorbed entry carries a trailing `- **已吸收**: reason → pointer` bullet naming what superseded it (commit / file / sibling entry).
 - A pitfall whose fix landed but whose constraint still holds is **not** absorbed — that is the normal shape of a live pitfall (bug fixed, knowledge still true). Only design-level supersession marks.
-- **Live pitfall = any `### ` heading without the `[已吸收]` prefix.** `scripts/pitfall-to-eval.sh` should scaffold only from live entries; mechanical filter: skip headings matching `^### \[已吸收\]`.
+- **Live pitfall = any `### ` heading without the `[已吸收]` prefix.** `scripts/pitfall-to-eval.sh` scaffolds only from live entries; mechanical filter: skip headings matching `^### \[已吸收\]`.
+- **Archive pass**: marked entries stay in place until a periodic pass moves them (content verbatim, nothing deleted) into `pitfalls-archive.md`, whose header records the pass date and size. Two files instead of one keeps this ledger searchable for live knowledge without losing the history.
 - `Reading order for newcomers` is prose navigation, not entries — not counted.
 
-Per-section distribution (total / absorbed / live):
+Per-section distribution (live entries; every section's absorbed count is 0 after the 2026-11-19 pass):
 
-| Section | Total | Absorbed | Live |
-|---|---:|---:|---:|
-| Filesystem / concurrency | 1 | 0 | 1 |
-| Hook / memory | 5 | 0 | 5 |
-| TUI / terminal | 40 | 11 | 29 |
-| Agent loop | 13 | 0 | 13 |
-| DeepSeek API | 21 | 1 | 20 |
-| Go language | 11 | 0 | 11 |
-| Tooling / environment | 22 | 1 | 21 |
-| LLM provider quirks (M6) | 7 | 0 | 7 |
-| Testing / CI | 3 | 0 | 3 |
-| Release / upgrade | 3 | 0 | 3 |
-| Site / landing page | 3 | 0 | 3 |
-| Go (second ledger; plan-mode / TUI / process pits) | 33 | 2 | 31 |
-| Worktree / Windows | 2 | 0 | 2 |
-| Sandbox / OS jail | 1 | 0 | 1 |
-| Cron parser | 1 | 0 | 1 |
-| Feishu / external API | 1 | 0 | 1 |
-| Subprocess / secrets | 1 | 0 | 1 |
-| Tool output | 2 | 0 | 2 |
-| Testing | 1 | 0 | 1 |
-| Tool decorators | 2 | 0 | 2 |
-| Filesystem / model safety | 5 | 0 | 5 |
-| Tooling / line endings | 4 | 0 | 4 |
-| TUI / session stats | 5 | 0 | 5 |
-| CI / gates | 3 | 0 | 3 |
-| Eval / tool descriptions | 4 | 0 | 4 |
-| Build tags / dependency isolation | 1 | 0 | 1 |
-| ACP / editor & headless lanes | 6 | 0 | 6 |
-| **Total** | **201** | **15** | **186** |
+| Section | Live |
+|---|---:|
+| Filesystem / concurrency | 3 |
+| Hook / memory | 7 |
+| Skill distill (auto path) | 1 |
+| TUI / terminal | 29 |
+| Agent loop | 17 |
+| DeepSeek API | 24 |
+| Go language | 12 |
+| Tooling / environment | 24 |
+| LLM provider quirks (M6) | 9 |
+| Testing / CI | 7 |
+| Release / upgrade | 3 |
+| Site / landing page | 3 |
+| Go | 31 |
+| Worktree / Windows | 3 |
+| Sandbox / OS jail | 1 |
+| Cron parser | 1 |
+| Feishu / external API | 1 |
+| Subprocess / secrets | 1 |
+| Tool output | 2 |
+| Testing | 2 |
+| Tool decorators | 2 |
+| Filesystem / model safety | 5 |
+| Tooling / line endings | 4 |
+| TUI / session stats | 5 |
+| CI / gates | 3 |
+| Eval / tool descriptions | 5 |
+| Build tags / dependency isolation | 1 |
+| ACP / editor & headless lanes | 11 |
+| Eval / results data shape | 1 |
+| Typed agents / orchestration | 2 |
+| Git / merge | 2 |
+| Subprocess / streaming stdout | 2 |
+| Web frontend / asset plane | 15 |
+| Tooling / go list | 2 |
+| Skill stats / --idle | 1 |
+| MCP bridge / tool naming | 1 |
+| Setup wizard / provider menu | 1 |
+| MCP prompt section | 1 |
+| DeepSeek Files API / file_id | 3 |
+| **Total** | **248** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 11 absorbed / 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 29 / 1 / 28 · **Go** (both Go sections): 44 / 2 / 42 · **tooling & engineering** (remaining 20 sections): 83 / 1 / 82.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 137.
 
 ---
 
@@ -189,30 +202,6 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: don't enable mouse capture unless you actually have pointer-driven UI. The trade `copy ⇄ mouse scroll` is asymmetric — copy is the load-bearing feature
 - **Update (alt-screen era)**: this trade INVERTED once history moved into an in-app viewport. See "Mouse wheel did nothing in alt-screen mode" below — mouse capture is back on, and the click-drag escape hatch is now a modifier-key (Option / Shift)
 
-### [已吸收] Mouse wheel did nothing in alt-screen mode
-- **Saw**: under the current alt-screen TUI, scroll wheel and trackpad gestures had no effect; the only way to read past context was PgUp/PgDn — even though the viewport visibly *looked* scrollable
-- **Why**: `tea.WithMouseCellMotion()` was removed in `08449cd` (inline-mode era — see entry above) to preserve native click-and-drag selection. Under alt-screen the in-app viewport is the *only* way to see past content (terminal scrollback is gone), so the asymmetry from `08449cd` flipped — wheel scroll became load-bearing
-- **Fix**: re-enabled `tea.WithMouseCellMotion()` in `tui.Run`; added a `case tea.MouseMsg:` arm in `Update()` that forwards to the history viewport, whose default `Update()` already handles `MouseButtonWheelUp/Down` via `ScrollUp/ScrollDown(MouseWheelDelta)` (`bubbles/viewport@v1.0.0/viewport.go:463-494`). Also fixed `appendHistory()` to capture `wasAtBottom` before `SetContent` and only call `GotoBottom()` when true — otherwise every streamed `MessageEnd` / `ToolExecEnd` would yank the user back to the bottom (same logical bug as "Streaming kept yanking the viewport to the bottom" below, regressed across the M4.5 → alt-screen migration). Commit (this one)
-- **Selection escape hatch**: app-side mouse capture suppresses native click-drag selection. Modern terminals bypass the capture when the user holds **Option** (⌥) on macOS Terminal.app / iTerm2, or **Shift** on most Linux terminals (xterm, gnome-terminal, alacritty, kitty) — that drag goes to the terminal, not the app
-- **Lesson**: the mouse-capture cost/benefit flips with rendering mode. Inline → keep it off (terminal owns scroll, copy is the sole mouse interaction worth caring about). Alt-screen → turn it on (app owns scroll, the modifier-key bypass covers the copy use case). Revisit asymmetric trade-offs whenever the underlying architecture changes
-- **Refs**: `internal/tui/run.go`, `internal/tui/update.go:case tea.MouseMsg`, `internal/tui/model.go:appendHistory`
-- **已吸收**: alt-screen-era fix (re-enable mouse capture) was reverted — the current inline TUI has no mouse capture, the terminal owns the wheel → `internal/tui/run.go` architectural note; sibling entry "Mouse drag-to-select did nothing"
-
-### [已吸收] Spacebar scrolled the conversation a page
-- **Saw**: typing a space in the input box also paged the viewport down; typing 'b' paged up; PgUp/PgDn worked but only by accident
-- **Why**: my `Update` was forwarding every `KeyMsg` to **both** the textarea and the viewport. The viewport's default keymap includes ` `, `b`, `f`, `j`, `k` for scrolling, all of which are also normal text input
-- **Fix**: explicit per-key routing in `handleKey()` — global keys → handled inline; PgUp/PgDn/Ctrl+U/Ctrl+D → viewport only; everything else → textarea only. Commit `7daaa3b`
-- **Lesson**: in bubbletea, never forward a `KeyMsg` to two consumers unless you've manually filtered which keys go where. The "default keymaps overlap" footgun is invisible until you trip on it
-- **Refs**: `internal/tui/update.go:handleKey`
-- **已吸收**: the in-app viewport widget was removed in the later TUI reset — terminal-native scrolling, no dual key routing left to get wrong → `internal/tui/update.go` "viewport widget is gone" note; `internal/tui/run.go` architectural note
-
-### [已吸收] Streaming kept yanking the viewport to the bottom
-- **Saw**: scrolling up to read earlier output mid-stream would snap back to the bottom on the next token
-- **Why**: every `agentEventMsg` unconditionally called `viewport.GotoBottom()`
-- **Fix**: capture `wasAtBottom := m.viewport.AtBottom()` before applying the event; only `GotoBottom()` if true. Commit `7daaa3b`
-- **Lesson**: auto-scroll should respect user intent — if they've scrolled away, that's an implicit "stop following"
-- **已吸收**: viewport.GotoBottom/AtBottom went with the viewport widget — native terminal scrollback cannot be "yanked" → `internal/tui/update.go` "viewport widget is gone" note
-
 ### Long streaming replies freeze the screen — inline renderer can't cursor-up past a screen height
 - **Saw**: a long reply (30+ rendered rows) streamed fine for a while, then the visible text froze on an old frame (e.g. mid-heading) while the stream kept going; the turn ended normally and the footer appeared. The full content WAS present — session file, agent message, and scrollback commit were all complete — only the live-region display was stuck
 - **Why**: the bubbletea inline standard renderer assumes the live region fits the terminal height. Once the streaming body exceeds it, every full redraw (and the spinner/status-bar segments force full redraws, not append-only diffs) must cursor-up past the screen top to reach the live region's origin. The terminal clamps cursor-up at the top of the screen, so the renderer's position bookkeeping diverges from reality: subsequent frames are painted at the wrong rows, new deltas land off-screen, and the visible text appears frozen. Content integrity is unaffected — the freeze is purely presentational
@@ -264,60 +253,12 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: when you clear volatile state on user-cancel, check whether that state contains something the user would want back. "Cancel the current operation" and "clear the edit buffer" are different intents — treat them separately
 - **Refs**: `internal/tui/update.go:handleKey`, `internal/tui/update.go:streamEndMsg`
 
-### [已吸收] Status bar scrolled away with live content instead of staying pinned to the terminal bottom
-- **Saw**: after a few turns, the status bar drifted upward from the terminal's bottom edge. In long sessions it could be several lines above the bottom, making it hard to spot at a glance
-- **Why**: inline mode replaces the previous View() in-place, but `tea.Println` lines accumulate above the live region, pushing the cursor (and thus the View() output) downward. The status bar, rendered at the end of View(), moved with everything else — the comment said "not pinned" but the user expectation was that a status bar stays at the screen edge
-- **Fix**: added `scrollbackLines` counter to Model, incremented at every `tea.Println` call site (counting actual newlines). `View()` now calculates `cursorRow = welcomeFixedLines + scrollbackLines` and adds padding before the status bar to fill the remaining terminal height, pinning it to the bottom. Commit (this one)
-- **Lesson**: "status bar at the bottom" requires knowing where the cursor is in the terminal. In inline bubbletea, `tea.Println` moves the cursor; you must track the cumulative offset to compute remaining vertical space. A `scrollbackLineCount` helper and explicit counting at each print site is verbose but reliable
-- **Refs**: `internal/tui/model.go:scrollbackLines`, `internal/tui/view.go:View()`
-- **已吸收**: the scrollbackLines counter + bottom-padding pin scheme is explicitly banned by the current inline design → `internal/tui/run.go` "CRITICAL invariant" note; `internal/tui/view.go` header note
-
-### [已吸收] `View()` rendered "starting seek …" for a frame
-- **Saw**: a brief flash of the literal string "starting seek …" on launch
-- **Why**: `View()` returned a placeholder string when `m.ready == false` (i.e. before the first WindowSizeMsg); even the synthetic one needs one Update cycle
-- **Fix**: render the welcome banner in the not-ready branch instead of the placeholder — same content the viewport will hold once we know the dimensions, so no visual jump. Commit `766a045`
-- **Lesson**: a "loading" message that shows for less than one frame should just be a softer first frame, not a string change
-- **已吸收**: the "render the banner in the not-ready branch" fix is not what ships — the !ready branch deliberately shows a minimal i18n hint (`view.starting`); the banner renders inside View once width is known → `internal/tui/view.go` (`!m.ready` branch)
-
-### [已吸收] `_ = tea.Println(line)` silently discards the cmd — scrollbackLines count drifts
-- **Saw**: functions returning `tea.Model` (not `(tea.Model, tea.Cmd)`) called `_ = tea.Println(line)` and incremented `scrollbackLines` — but the line never appeared in the terminal because discarding `tea.Println`'s return discards the print itself. The phantom `scrollbackLines` count shifted the status bar padding calculation in `View()` by the number of discarded prints
-- **Why**: `tea.Println` returns a `tea.Cmd`. Assigning it to `_` means bubbletea never executes it. The pattern in `distillAcceptCurrent` and `exitDistillReview` existed before the `scrollbackLines` counter was added (commit bb27684), but the new counter made the bug visible: phantom lines were counted in `scrollbackLines` but never rendered, causing `cursorRow = welcomeFixedLines + m.scrollbackLines` to over-count and the status bar to sit lower than it should after distill review
-- **Fix**: changed `distillAcceptCurrent`, `distillDropCurrent`, `enterDistillEdit`, and `exitDistillReview` from `tea.Model` → `(tea.Model, tea.Cmd)` so the `tea.Println` cmd propagates through the key handler to `tea.Batch`. Added `TestWelcomeBannerLineCount` to pin the `welcomeFixedLines` constant against the actual banner output. Commit (this one)
-- **Lesson**: `_ = tea.Println(s)` is a silent no-op pattern that looks like it prints but doesn't. Any function returning `tea.Model` that calls `tea.Println` is a pre-existing bug — the callers pass `nil` as the cmd, so the line is lost. When adding instrumentation that depends on side effects at the same call site (like `scrollbackLines`), check whether the print actually fires or you're counting ghosts
-- **Refs**: `internal/tui/distill.go:exitDistillReview`, `internal/tui/distill.go:distillAcceptCurrent`, `internal/tui/banner.go:welcomeFixedLines`, `internal/tui/banner_test.go:TestWelcomeBannerLineCount`
-- **已吸收**: the scrollbackLines counter is gone; the live form of this disease is carried by the appendHistory contract entry → entry "Bare `m.appendHistory(...)` as a statement drops the line"; `internal/tui/run.go` CRITICAL invariant
-
 ### `/model` updated the display but not the Agent's model — API calls still used the old model
 - **Saw**: user ran `/model deepseek-v4-pro` in the TUI; status bar showed `deepseek-v4-pro`, but DeepSeek's backend stats showed all calls as `deepseek-v4-flash`. The model switch had zero effect on actual API requests
 - **Why**: `cmdModel` (and `applyModelChoice` for the picker) only updated `m.opts.Model` (status bar display) and called `SetModel(args)` (updated `sessionModel` in main.go). But the Agent's `a.cfg.Model` is frozen at creation time (`agent.New`), and `/model` never rebuilt the agent or updated its config. `RebuildAgent` is only called on `/new`. So every subsequent API call still used the original model from startup
 - **Fix**: added `Agent.SetModel(model)` in `pkg/agent/agent.go` that mutates `a.cfg.Model` in place (safe between turns). Both `cmdModel` and `applyModelChoice` now call `m.opts.Agent.SetModel(args)` after updating the display. Commit (this one)
 - **Lesson**: any struct whose config is baked at construction and read on every operation must expose a mutator if a CLI/TUI command claims to change the config at runtime. "Effective on next prompt" requires the agent's copy changed, not just the host variable and status bar
 - **Refs**: `pkg/agent/agent.go:SetModel`, `internal/tui/commands.go:cmdModel`, `internal/tui/commands.go:applyModelChoice`
-
-### [已吸收] `/lang` only updated the display and session variable, not the live Agent → no effect until `/new`
-- **Saw**: running `/lang zh` in the TUI updated the status bar and session file, but the LLM continued responding in English. The change only took effect after `/new`, which also lost the conversation history
-- **Why**: the language directive was embedded in the system prompt (frozen at agent creation time). `/lang` only updated `sessionLang` (the host variable) and `m.opts.Lang` (the status bar display), but never modified the live Agent's message state. The LLM continued to see the original system prompt with the old language directive. Unlike `/model` (which had `Agent.SetModel`) and `/effort` (which had `Agent.SetEffort`), there was no `Agent.SetLang()` at all — per-message injection via `langReminder` + `workflowReminder` was chosen over system-prompt mutation because it avoids rebuilding the entire system prompt template while keeping the instruction in the most recent context (recency bias)
-- **Fix**: added `Lang` to `agent.Config`, `Agent.SetLang(lang)` to update it, and `langReminder(lang)` which returns a per-message language suffix injected into every user turn before `workflowReminder`. The suffix only activates when `lang="zh"`; `""` or `"en"` means no suffix (system prompt directive suffices). Updated `applyLangChoice` in the TUI to call `m.opts.Agent.SetLang(value)` so the live agent's config is updated immediately. Commit (this one)
-- **Lesson**: every per-session setting that claims to change behaviour on-the-fly must update the live Agent instance, not just the host variable and display. Per-message injection (like `workflowReminder`) is a viable alternative to system-prompt mutation when the system prompt template is complex and the setting's scope is "from the next user message onward"
-- **Refs**: `pkg/agent/agent.go:SetLang`, `pkg/agent/agent.go:langReminder`, `internal/tui/commands.go:applyLangChoice`, `cmd/seek/main.go:SetLang`
-- **Note**: **Superseded** — `/lang`, `--lang`, `Session.Lang`, and per-message `langReminder` were removed; reply language now follows the user's input (see entry below).
-- **已吸收**: the reply-language `/lang` subsystem (Agent.SetLang / langReminder) was removed wholesale; today's `/lang` is the i18n view-layer switch, where display-only is by design → next entry; `docs/prd/feature-i18n.md`; `internal/tui/commands.go:cmdLang`
-
-### [已吸收] Explicit `/lang` / `--lang` removed — reply language follows user input
-- **Saw**: users expected `/lang zh` or `--lang zh` to force Chinese replies while typing English prompts; docs and examples still listed the command after removal
-- **Why**: product decision — match-user-input is simpler, avoids fighting prefix cache with per-turn language suffixes, and matches how most users already work (write Chinese → get Chinese). Forcing locale or a slash command added state (`Session.Lang`, `Agent.SetLang`, OS locale detection) that duplicated the system prompt
-- **Fix**: system prompt now starts with `Language: Match the user's input language…`; removed `--lang`, `/lang`, `Session.Lang`, `Agent.SetLang`, and `langReminder`. Synced `docs/guide-sessions.md`, `docs/comparison.md`, `examples/`, and this log. Commit (pending)
-- **Lesson**: if the model should speak language X, the durable fix is "user writes in X" — not a parallel config axis. Breaking removals need the same doc sweep as the code deletion (examples HTML, comparison tables, pitfalls cross-refs)
-- **Refs**: `cmd/seek/main.go:systemPromptTpl`, `docs/guide-sessions.md`
-- **已吸收**: `/lang` was re-introduced by the i18n feature as a view-layer-only switch (persists to ~/.seek/config.json, SEEK_LANG overrides); the "reply language follows user input" half remains current design → `docs/prd/feature-i18n.md`; `internal/tui/commands.go` "/lang [en|zh]"
-
-### [已吸收] `/clear` left the input pinned to the TOP of the terminal instead of the bottom
-- **Saw**: after `/clear` (or `Ctrl+L`), the input box and status bar rendered at row 1 of the visible viewport with empty space below — breaking the load-bearing "input is always at the bottom" invariant. The bug surfaced as the input glided back down only after the next streamed turn pushed enough content to fill the screen
-- **Why**: `cmdClear` returned `tea.ClearScreen` (ANSI `\x1b[2J\x1b[H` — erase visible + cursor home) but left `m.scrollbackLines` at its pre-clear value. View()'s two bottom-pinning branches both depend on this counter being truthful: the welcome-pad branch (`view.go:138`) was gated on `m.turns == 0` (a stale proxy that excluded post-clear state); the status-bar-pin branch (`view.go:211`) computed `cursorRow = welcomeFixedLines + scrollbackLines` — with a stale 47, `remaining` went negative and no padding was emitted. Result: the next View() drew the live region wherever the cursor parked, which after ClearScreen is row 1
-- **Fix**: (1) `cmdClear` now resets `m.scrollbackLines = 0` (truthful: nothing is visibly above). (2) `Ctrl+L` in `update_key.go` does the same — it bypasses `cmdClear` so the reset has to be duplicated. (3) Welcome-pad gate changed from `m.turns == 0` to `m.scrollbackLines == 0` — the more direct expression of the actual invariant ("nothing has been Println'd above us"). Commit (this one)
-- **Lesson**: `tea.ClearScreen` is a write-only side effect — bubbletea never tells the Model "the screen is empty now". Any state that mirrors terminal layout (cursor row, scrollback line count, padding math) must be reset by hand at the same call site. Using a derived state (`turns == 0`) as a proxy for a layout fact (`scrollbackLines == 0`) sets up exactly this kind of skew the moment something else changes the underlying fact
-- **Refs**: `internal/tui/commands.go:cmdClear`, `internal/tui/update_key.go` (KeyCtrlL case), `internal/tui/view.go:138`, `internal/tui/view.go:211`
-- **已吸收**: both bottom-pin branches (welcome-pad / status-pin) and the scrollbackLines accounting they depended on are gone; there is no post-ClearScreen hand-reconciliation to forget anymore → `internal/tui/run.go` CRITICAL invariant; `internal/tui/view.go` header note
 
 ### Esc-cancel prompt restore can leak a prior chat prompt into the API-key / branch-name field
 - **Saw**: user presses Esc to cancel a streaming turn, then opens `/setup` to configure an API key. The prior chat prompt is restored into the textarea, and on Enter it's saved as the API key into `~/.seek/config.json`. Same path for `/review` branch-name entry
@@ -367,24 +308,6 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Fix**: removed the `case tea.KeyCtrlJ:` intercept entirely. The textarea already has `ta.KeyMap.InsertNewline.SetKeys("ctrl+j")` configured (model.go:311), so Ctrl+J now falls through to `m.input.Update(msg)` and the textarea handles it natively, including viewport scrolling and cursor tracking. Commit (this one)
 - **Lesson**: never bypass a bubbletea component's `Update()` for key-driven mutations — `InsertString` is a data-level operation that skips the component's state machine (cursor, scroll, visual offsets). If a key binding already exists on the component (`InsertNewline`), let the event reach it naturally
 - **Refs**: `internal/tui/update.go:handleKey` (removed KeyCtrlJ case), `internal/tui/model.go:311`
-
-### [已吸收] `welcomeBelowLines` mismatch causes bottom block to jump 4 lines on first send
-- **Saw**: after pressing Enter to send the first message, the status bar and bottom rule visibly shifted upward by 4 lines relative to their position on the welcome screen. The welcome screen's padding put them just off the bottom of the viewport; the post-send layout put them at the correct terminal bottom, creating a jarring jump
-- **Why**: `welcomeBelowLines = 4` (input + status) but the actual rendered bottom block is 7 lines: separator(1) + input(3 + trailing \n = 4) + status(1) + rule(1). The welcome screen formula `height - 14 - 4` under-counted by 3 lines, causing the view to overflow the viewport. The active-chat bottom-pin formula uses dynamic `bottomHeight + 2` which correctly accounts for all components, so the transition between the two padding regimes produced a visible shift
-- **Fix**: changed `welcomeBelowLines` from 4 to 7. The padding formula now gives `height - 14 - 7 = height - 21`, which exactly fills the viewport. Updated test expectations (12→9, 42→39). Commit (this one)
-- **Lesson**: `welcomeBelowLines` must be manually kept in sync with the actual bottom block components rendered in `View()`. Any addition or removal (separator, rule, textarea height change, extra `\n` after input) requires updating it. The active-chat path avoids this by measuring bottomBuf height dynamically — consider refactoring the welcome path to do the same if bottom components change again
-- **Refs**: `internal/tui/banner.go:welcomeBelowLines`, `internal/tui/view.go:View()`, bubbletea textarea `View()` padding loop (always emits `\n` after each of `m.height` lines)
-
----
-- **已吸收**: `welcomeBelowLines` and the welcome-screen padding formula were removed — the banner renders inside View with a width-gated fallback, no pad math → `internal/tui/view.go` welcome-gate block
-
-### [已吸收] Programmatic submissions bypass `consumeArm` — skill-arm must be inline in the injected prompt
-- **Saw**: building `/code-review`, the natural move was to set `m.pendingSkill = "code-review"` so the model would call the Skill tool next turn (mirroring `/skill use`). It would have silently mis-fired.
-- **Why**: `m.pendingSkill` is only consumed by `consumeArm`, which runs at the two **user-typed** submission sites (non-streaming submit, streaming queue/steer). Programmatic submissions (`/review`, `/code-review`) call `submit()` directly and **bypass** `consumeArm` — so the arm survives the programmatic message and wrongly prepends "Please use the X skill" to the user's **next hand-typed** message.
-- **Fix**: bake the `Please use the "code-review" skill` instruction directly into the injected prompt text (`codeReviewPrompt`'s first line); never touch `m.pendingSkill` from a slash command. Commit (this one).
-- **Lesson**: `m.pendingSkill` is for *user-initiated* arming only. A slash command that wants the model to use a skill must put the instruction in the prompt it submits, because the arm-wrapper does not run on the programmatic path.
-- **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/archive/feature-code-review.md` §5.3
-- **已吸收**: the skill arm / `consumeArm` wrapper was removed entirely — /skill fires immediately now → commit `d208986` ("remove skill arm mechanism, fire immediately on /skill use")
 
 ### Adding a builtin skill is prefix-cache-safe ONLY because the manifest is deterministically ordered
 - **Saw**: dropping a 4th file into `internal/skill/builtin/` (`code-review.md`) adds a line to the system-prompt `# Available skills` manifest, which is sent every turn as part of the cached prefix.
@@ -619,14 +542,6 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: don't assume an OpenAI-compatible provider's auxiliary endpoints follow the chat shape. Read the docs end to end before extending the client
 - **Refs**: `pkg/deepseek/fim.go`, `pkg/deepseek/client.go:endpointFIM`
 
-### [已吸收] Reasoner doesn't support `tools`, `temperature`, `top_p`, etc.
-- **Saw**: a request to `deepseek-reasoner` with a `tools` array came back 400
-- **Why**: reasoner is configured as a pure CoT-then-answer model; tool calling, sampling parameters, function calling, and parallel tool calls are all unsupported
-- **Fix**: the `think` tool calls reasoner via a fresh, parameter-free `Chat()` call (no tools, no temperature) using a history of just `[system, user]`. Commit `8264f52`
-- **Lesson**: a "model" in the API can be a parameter-restricted variant. Maintain a per-model capability map if you switch between them programmatically
-- **Refs**: `internal/tools/think/think.go`
-- **已吸收**: the legacy `deepseek-reasoner` alias this entry constrains sunset 2026-07-24; think now reasons via the caller's current model in thinking mode (`modelFunc`), no fixed reasoner call → entries "`deepseek-reasoner` without `Thinking`…" and "legacy aliases sunset 2026-07-24" below; `internal/tools/think/think.go` header
-
 ### FIM usage ratio is inherently low — model prefers edit/write over fim_complete
 - **Saw**: both benchmark tasks (`self-hosting`, `fim-patch`) showed FIM ratio well below 50% (0% and 11% respectively) despite `fim-patch` being explicitly designed as a small inline edit. The model consistently chose `edit`/`write` instead of `fim_complete`.
 - **Why**: two compounding causes. (1) Denominator: ratio was `fimCalls / totalToolCalls`, which counts `read`/`bash`/`grep` — tools that *can't* use FIM — diluting the numerator. (2) Pairing constraint: a `fim_complete` call doesn't write to disk; its output must be applied by a subsequent `edit` (book ch6 §6.5). So `FIM / (FIM+edit)` caps at ~50% even when the model takes the FIM path every chance it gets. (3) The model's training corpus also biases toward `edit`/`write` for general-purpose tools, but that's secondary to the math.
@@ -829,6 +744,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: separate the two lifetimes explicitly — turn-scoped (foreground exec, wait/observe) vs session-scoped (the background process itself). When a value should outlive the turn, the turn ctx is the wrong leash. Tested with an already-cancelled ctx in `TestBash_Background_IgnoresTurnCtx`
 - **Refs**: `internal/tools/bash/bash.go:runBackground`, `internal/bgjob/bgjob.go` (Shutdown), `internal/tools/monitor/monitor.go` (wait propagates ctx.Err), `docs/prd/archive/feature-bash-monitor.md` §4 D5
 
+### go flag: a requested -h is a VALUE (flag.ErrHelp), and ExitOnError hides the verb surface
+- **Saw**: `seek serve --frontend=web -h` exited 2 with the usage text on stderr. Separately, `seek --help` listed only flags — enough for a reader to conclude the CLI had no subcommands at all (serve / cron / skill … all invisible)
+- **Why**: two distinct shapes of the same contract. (1) A sub-FlagSet uses `ContinueOnError`, so `-h` returns `flag.ErrHelp` as an error — servecli's catch-all fed it to `badConfig`, exit 2. Only `args[0]` was checked for help, so a flag placed before `-h` slipped past. (2) `flag.CommandLine` is `ExitOnError`, and its built-in `-h` prints the DEFAULT usage — `PrintDefaults` only, on stderr — so verbs dispatched by `main` before `flag.Parse` never appear
+- **Fix**: recognise `-h`/`--help` anywhere before the `--` terminator (not just args[0]) and print help to stdout with a clean exit; keep `errors.Is(err, flag.ErrHelp) → nil` as a belt-and-braces guard; set a custom `flag.Usage` that prints the command list before `PrintDefaults`, invoked explicitly before `flag.Parse` once the flag set is registered (so the listing has both halves)
+- **Lesson**: a requested help is never an error — do not let a catch-all error path own `flag.ErrHelp`, and do not let `args[0]` be the only position that counts. `flag.PrintDefaults` is not a CLI's discoverability story: whatever `main` dispatches by hand must be listed by hand
+- **Refs**: `internal/servecli/servecli.go:Run`, `cmd/seek/main.go:helpRequested` / `printUsage`, tests `TestRun_HelpFlag_AnywhereBeforeTerminator`, `TestHelpRequested`, `TestPrintUsage_ListsCommands`
+
 ---
 
 ## Tooling / environment
@@ -880,13 +802,6 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Why**: the harness's safety classifier flags any command that embeds a credential-looking string. Even one-off smoke tests with a real key trigger it
 - **Fix**: write the key to `.env` (already in `.gitignore`) via the file-writing tool — that path doesn't touch the classifier's "secret in shell history" check. Then `set -a && . .env && set +a && go run ...` runs the binary without putting the key on any command line
 - **Lesson**: when the classifier blocks something for a stated reason, find the path that doesn't trigger that reason rather than working around the classifier itself
-
-### [已吸收] `glamour@v1.0.0` required a specific `lipgloss` pre-release commit
-- **Saw**: `go get` for all four charm packages at once errored: glamour wanted `v1.1.1-0.20250404203927-76690c660834`, not the latest `v1.1.0`
-- **Why**: glamour's `go.mod` pinned a development version of lipgloss with API changes that hadn't shipped in a tagged release
-- **Fix**: pull lipgloss at the exact required pseudo-version first, then everything else. Commit `9be599b`
-- **Lesson**: when fetching a family of related packages, do them one at a time so version conflicts surface with names attached, not as a confusing batch error
-- **已吸收**: the v1 pseudo-version pin chain ended with the v2 migration — go.mod now pins tagged `charm.land/glamour/v2 v2.0.1` + `lipgloss/v2 v2.0.6` → `go.mod`; commit `ba94aea`
 
 ### `go run ./cmd/seek` is slow enough to feel broken
 - **Saw**: between command turns, the TUI launched noticeably slower than expected; iteration on UI tweaks was painful
@@ -1046,6 +961,14 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: "OpenAI-compatible" needs exactly three verifications before trusting a lane: streaming tool_calls delta shape, usage-in-stream opt-in, and what the model emits that your wire types DON'T parse — that last one is where silent degradation hides
 - **Refs**: `cmd/seek/main.go:buildProvider` (glm case + `glmBaseURL`), `pkg/llm/provider/openai/client.go:streamDelta` (undeclared fields are skipped by unmarshal)
 
+### Zhipu bills by URL, not by key: a Coding Plan key on /api/paas/v4 charges the recharge balance (or errors 1113)
+- **Saw**: `--provider=glm` with a GLM Coding Plan key never touched the plan quota — calls billed the recharge balance instead; when that balance is empty the same key returns `1113`「余额不足或无可用资源包」. The lane's pinned default was `/api/paas/v4`, `ProviderConfig` had no `base_url`, so the only override was the `--base-url` flag (invisible in the TUI).
+- **Why**: Zhipu splits billing by endpoint, not by key shape: `https://open.bigmodel.cn/api/paas/v4/chat/completions` = pay-as-you-go (recharge balance); `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions` = Coding Plan subscription quota (`/api/anthropic` is the third documented Base URL, Anthropic protocol). The old code comment "subscription and pay-as-you-go keys share it" was wrong; the keys look identical, so seek can't tell them apart.
+- **Fix**: `config.ProviderConfig.BaseURL` (`json:"base_url"`) + `config.BaseURLFor` (env `GLM_BASE_URL` > config), resolved by `glmEndpoint(cfg, flag)` as override > `--base-url` > `glmBaseURL`. Default deliberately unchanged (pay-as-you-go is the majority; flipping it would break them in the opposite direction). Setup wizard prints the Coding Plan override after saving a GLM key; `docs/guide-config.md` §3 carries the JSON example.
+- **Lesson**: when a vendor splits billing by URL, the endpoint is part of the provider contract — a pinned default silently mis-bills the other side. Ship a per-provider endpoint override *with* the default, and never write "both share it" without a real-key test on both paths.
+- **Confirmed on a live key** (2026-11-18): `…/api/coding/paas/v4/chat/completions` answers 200 for a Coding Plan key, and `/api/monitor/usage/quota/limit` (raw key in `Authorization`, no `Bearer`) reports the plan's 5h + weekly windows — that pair is the two-minute check for "is this key subscription-billed?". Truncating the path to `…/api/coding/paas/v4` returns 404 (`path:"/v4"`), because the client POSTs `base_url` verbatim; a 401 means the key itself is stale, not the endpoint.
+- **Refs**: `cmd/seek/main.go:glmEndpoint` / `glmBaseURL` / `glmCodingPlanBaseURL`, `internal/config/config.go:ProviderConfig` / `BaseURLFor`, `cmd/seek/setup.go` (GLM tip), `docs/guide-config.md` §3
+
 ### propose in print mode always errors "askuser: no callback registered" — plan approval can't be picked headless
 - **Saw**: `--plan -p "..."` smoke: the model correctly called `propose` during plan-analyze, and the tool returned `ERROR: propose: askuser: no callback registered (programming error)`; the model recovered by presenting the plan inline (exit 0, zero edits — the read-only gate held)
 - **Why**: `askPolicy.SetAskFn` (and the permission approval channel) are wired AFTER the `-p`/`-json`/piped-stdin branch returns in `main.go` — only the TUI path registers them. Print mode never wires an askFn, so any tool that asks (propose's approval picker, ask_user) hits `ErrNoCallback`. Pre-existing harness gap, surfaced by the GLM plan-mode smoke; provider-independent
@@ -1060,7 +983,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 45 / 1
 - **Lesson**: for "cost shows $0" bugs, read what the billing function consumes, not whether the call happened — usage carried `prompt_tokens` all along and Cost never looked at it. And: a wire type that doesn't declare a field makes "server didn't send it" and "client dropped it" observationally identical; verifying a wire contract requires dumping the raw stream, not reading your own parsed structs
 - **Refs**: `internal/pricing/pricing.go:Cost`, `pkg/agent/agent.go:runTurnLLM`, `pkg/llm/provider/openai/client.go:streamUsage`, previous entry "GLM … reasoning_content deltas are silently dropped"
 
----
+### OpenCode Go: the model list needs no key, the base URL has three routable aliases, and each new lane re-invents the hardcoded-endpoint bug
+- **Saw**: wiring the lane had left three `待核` markers ("ids unverified until a real key exists", "official harness page 404s", "`*-Free` models unusable here"). All three fell to facts that were free: `GET https://opencode.ai/inference/go/v1/models` returns 32 chat models **unauthenticated**, each carrying `api.chat-completions.base_url`, `limit.context/output`, a `cost` block, `capabilities` (tools/reasoning/effort) and `go.monthly_usage`. Probing `POST` without `x-opencode-session` returns `400 MissingSessionID`; with the header and a bogus key, `401 Invalid credential`; a made-up path returns `404`.
+- **Why**: three aliases all route (`/inference/go/openai/v1/chat/completions` = the per-model advertised base, `/inference/openai/v1/…` = the docs table, `/inference/go/v1/…` = what seek had pinned), so a wrong-but-routable path is invisible until something downstream (usage attribution) depends on the prefix. And the subagent route hardcoded `opencodeBaseURL` while the parent honoured `--base-url` only — the exact divergence the GLM lane had already grown `glmEndpoint` to fix, recurring on the next lane because the resolver wasn't shared.
+- **Fix**: pinned the metadata-canonical `/go/openai/v1` target plus a test against drift; `opencodeEndpoint(cfg, flag)` + `newOpenCodeProvider` now mirror `glmEndpoint` (env `OPENCODE_BASE_URL` / `providers.opencode.base_url` > `--base-url` > default) and both construction sites (startup, subagent routes) go through them; comments and `docs/guide-config.md` §3 replaced the `待核` guesses with the verified contract. The same list also seeded the lane's model menu: `pricing.OpenCodeGoModels` (20 ids — the 16 metered Chat-Completions rows plus the 4 zero-price `*-Free` rows) is rendered by ACP's `session/new` dropdown *and* the TUI `/model` picker, each id carries its own card and `budget` context window, and three tests pin the triple (id → card → window). Free rows carry an explicit $0 card: without one they'd hit the Flash fallback and display a price for a turn that costs nothing. Pricing card unchanged: the docs table ($0.30/$1.20/$0.006) is the **peak** price — `/v1/models` quotes half that plus a 2× Mon–Fri 01–04 & 06–10 UTC multiplier.
+- **Lesson**: before wiring a provider, `curl` its model list and one unauthenticated POST — a public catalogue turns "wait for a key" into a five-minute verification. And when a lane gains an endpoint override, route **every** construction site through one resolver the same day; the second site is where the divergence always lands. Corollary for menus: one exported catalogue slice, N surfaces rendering it — a hand-maintained list per surface drifts the moment the second surface is added. And read the provider's own definition before excluding rows: "`monthly_usage: null` means no allowance" and "means unusable" are different claims — the docs' line was "free = an opencode-go model with no input price", i.e. unmetered, not unavailable. The first read cost a round trip.
+- **Dynamic follow-up** (`internal/opencatalog`, same day): the pool churns weekly, so hand-copying it was the wrong shape. The lane now fetches its own catalogue with the lane key (the unkeyed list is the public superset — installing it would offer models the workspace can't call), caches it in `~/.seek/opencode-catalog.json` (24h fresh / 7d stale), and installs rates + context windows as runtime overrides (`pricing.SetModelRates`, `budget.SetLimits`). Both packages are compiled-table-first by design, so the override layer is the deliberate exception and is documented as such in their package comments — the guards are: write-once-per-startup, mutex-guarded reads (the render path reads concurrently), no TTY probing, and every failure falls back to the compiled rows. Two traps worth remembering: (1) a remote cost block must be force-flattened (`NoOffPeakDiscount`) or DeepSeek's peak clock halves a subscription lane's estimate at night; (2) the pricing registry is keyed by wire id, so a dynamic card for `glm-5.3` / `deepseek-v4-pro` would silently reprice the *direct* lanes sharing that id — the catalogue skips those ids rather than "fixing" them.
+- **Refs**: `cmd/seek/main.go:opencodeBaseURL` / `opencodeEndpoint` / `newOpenCodeProvider` / `acpLaneModels`, `internal/pricing/pricing.go:OpenCodeGoModels`, `internal/budget/budget.go:contextLimits`, `internal/tui/commands.go:knownModelsForProvider`, `internal/config/config.go:baseURLEnvFor`, `cmd/seek/main_test.go:TestOpenCodeEndpoint_Precedence` / `TestBuildSubagentRoutes_OpenCodeEndpoint` / `TestACPMenu_OpenCodeCatalogue`, `internal/pricing/pricing_test.go:TestOpenCodeGoCatalogue`, `docs/guide-config.md` §3, the GLM entry above
 
 ---
 
@@ -1223,15 +1152,6 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: when the model systematically wants to pass a parameter, accept it in the schema (with a max) and **reject invalid values with a clear error** rather than `additionalProperties: false` (which gives a generic unknown-field error) or silent clamping (which hides the mistake). The model gets one round-trip to retry, which is acceptable. The key insight: the schema's `maximum` constraint is informational to the LLM; server-side validation is the actual enforcement
 - **Refs**: `cmd/seek/main.go:74` (before/after), `internal/tools/read/read.go:23-31,68-78`, `AGENTS.md:40,59`, commit (this one)
 
-### [已吸收] Adding a new permission mode requires touching 7+ packages
-- **Saw**: implementing `/review` mode (behavioural twin of `/plan` for code review) needed coordinated changes across `internal/permission`, `internal/tui` (options, commands, update, statusbar, placeholder), `cmd/seek` (flags, prompt, wiring), `internal/session` (struct, New, Fork), and their tests. Missing any one caused a compile error or silent misbehaviour (e.g. mode cycle skipping Review, status bar not showing the badge, session not inheriting Review on Fork)
-- **Why**: permission modes are a cross-cutting concern. The mode constant lives in `permission`, but the TUI reads it via `Options.Review` (model.go) + `SetReview` hook, renders it in `statusbar.go` and `update.go:modeLabel()`, toggles it in `update.go:cycleMode()` and `commands.go:cmdReview`, persists it in `session.go` (struct field + New/Fork), and configures it in `cmd/seek/main.go` (flag + wiring + system prompt). The `Check()` method in `permission.go` must also explicitly handle the new mode alongside `ModePlan` — they share read-only logic but `Check()` uses `mode == ModePlan || mode == ModeReview`, so forgetting either branch silently grants the wrong permissions
-- **Fix**: checklist-driven approach: (1) add `ModeReview` constant, (2) update `Check()` guard, (3) add `Review()` method, (4) add `Options.Review` + `SetReview`, (5) register `/review` command, (6) update `cycleMode`, (7) update `modeLabel`, (8) add status bar badge, (9) update placeholder, (10) add `--review` flag + mutual exclusion, (11) wire `SetReview` in TUI options, (12) update `session.New` signature + all callers + Fork, (13) update `runPrint`/`runJSON`/`runRPC` signatures, (14) inject review workflow reminder in system prompt, (15) update tests for new cycle + new session.New signature. Each step produces a compile error if the next isn't done, so iterate `go build ./... && go test ./...` after each cluster
-- **Lesson**: a new permission mode is a "scaffold across the stack" change. Don't start without a checklist of every touch point. `git grep` for `ModePlan` and `\.Plan` to find all locations that need a parallel path. The session.New signature change (`plan bool` → `plan, review bool`) is particularly invasive — every test file that constructs a Session must be updated, and missing any one produces a build failure that's only caught by `go test ./...` (not `go build` on the main binary)
-- **Refs**: `internal/permission/permission.go:ModeReview`, `internal/tui/commands.go:cmdReview`, `internal/tui/update.go:cycleMode`, `internal/session/session.go:New`, `cmd/seek/main.go:reviewWorkflowReminder`, commit (this commit)
-- **Update**: `/review` was later downgraded from a full permission mode to a simple one-shot shortcut command. See "Permission modes should be reserved for actual permission changes" below.
-- **已吸收**: the single mode enum (ModePlan/ModeReview/…) this checklist scaffolds was replaced by the two-axis Preference × Workflow permission refactor; see also the Update note above → `docs/prd/feature-permission-refactor.md`; `internal/permission/permission.go`
-
 ### Permission modes should be reserved for actual permission changes
 - **Saw**: `/review` was originally implemented as `ModeReview`, a full permission mode constant with its own session field, TUI cycle state, CLI flag, system prompt suffix, and status bar badge. But its permission behaviour was 100% identical to `ModePlan` — the only difference was a code-review "persona" injected into the system prompt. This meant every new permission mode required touching 7+ packages for what was essentially a behavioural tweak.
 - **Why**: permission modes (`ModeDeny`, `ModeAsk`, `ModeYolo`, `ModePlan`) control what tools can do (write, bash, read outside CWD). Mixing "persona" (how the model should behave) into the permission system created an N×M explosion: each new persona (reviewer, tester, documenter...) would need a new mode constant + session field + TUI state + flag + status badge.
@@ -1294,15 +1214,6 @@ If you're new to the project, skim entries in this order:
 - **Fix (architectural — replaces the `bannerWiped` patch family)**: stop printing the banner to stdout before bubbletea starts. Render it INSIDE `View()` instead, via the already-existing `renderWelcomeHeader(opts)`, gated on `scrollbackLines == 0` (same gate as the post-`/clear` welcome path that already worked). With the banner now in `sb`, `cursorRow` simplifies to just `m.scrollbackLines` and the load-bearing 14-row assumption is gone — along with `bannerWiped`, `welcomeFixedLines`, `welcomePadding`, `PrintPixelWelcomeBanner`, `animateBanner`, and `shouldAnimate`. UX side-effect: banner is now "welcome state only" (no longer reachable from terminal scrollback after the first turn), and the startup reveal animation is dropped (can come back later as a bubbletea tickMsg). Commits: the staged refactor (this one) supersedes the earlier `bannerWiped` patches
 - **Lesson**: when a layout invariant rests on "feature X is currently at terminal row N", and the model can't observe the terminal, the invariant is going to drift — every action that touches the screen becomes a maintenance burden for that one belief. Two patches sharing the same `bannerWiped` flag was the warning sign: the fix wasn't "find every site that scrolls the banner", it was "stop trusting that the banner is at a fixed row". Rendering it inside `View()` puts it in the same reference frame as every other layout element, and `cursorRow = scrollbackLines` becomes the single, stable invariant
 - **Refs**: `internal/tui/view.go` (welcome-screen block + bottom-pin pad), `internal/tui/banner.go` (renderWelcomeHeader is the surviving emitter), `internal/tui/run.go` (no more pre-tea banner print)
-
-### [已吸收] Inline-mode layout drift — the architectural reset to alt-screen
-- **Saw**: after three rounds of bug-fix-then-pitfall (banner offset / popup-in-bottomBuf / Esc-leftover-`/`), each fix uncovered another way the model's `scrollbackLines` estimate could disagree with the terminal's real cursor row. The pattern wasn't a single bug — it was a category: inline mode means the program cannot observe where it is on the terminal, so any layout calculation depending on "we are at row N" is going to drift the moment something causes the terminal to scroll (`tea.ClearScreen`, frame overflow, async `WindowSizeMsg`). The status bar would land mid-screen, popups would shift unexpectedly, and the next fix would just plug one path
-- **Why**: bubbletea's inline mode (`tea.NewProgram(m)` with no `WithAltScreen()`) renders View() at the cursor's current position and tracks frame height via internal state — it does NOT query the terminal for cursor coordinates. We bolted on `scrollbackLines` to estimate "rows above the live region" so we could pad to the floor. But that estimate is one-way (model → render), so any time the terminal scrolled because the frame overflowed or because of resize timing, the estimate became fiction. Every patch (`bannerWiped`, post-Esc `input.Reset`, popup-in-sb) addressed a symptom of the same root problem
-- **Fix (root cause)**: switch to `tea.NewProgram(m, tea.WithAltScreen())`. Bubbletea owns the entire viewport, layout becomes absolute (View() output = `m.height` rows, status pinned to last row), and `scrollbackLines` no longer participates in layout math. Conversation history moves from terminal scrollback into a `Model.historyBuf []string` field that View() renders at the top of the viewport. Every `tea.Println` callsite was rewritten as `m.appendHistory(line)` — which buffers the line AND returns a `tea.Println` cmd. Bubbletea's standard renderer queues Println output while alt-screen is active (`standard_renderer.go:190` gates flush on `!altScreenActive`) and flushes the queue to the main screen on program exit. **Free exit-time dump**: the user returns to their shell with the entire conversation in terminal scrollback, no code in run.go required for it
-- **Trade-offs**: in-app scroll of long history is not yet implemented (bubbletea truncates the top of the viewport buffer when View() output exceeds `m.height`). The exit dump preserves everything, so no information is lost. Cmd+F search inside the alt-screen viewport works on what's visible only; for cross-history search the user exits and uses native terminal search on the dump. PRD `run.go:13-18`'s former "NO alt-screen" stance is reversed in commit messages and inline comments
-- **Lesson**: when you find yourself patching the Nth symptom of "model state vs terminal state mismatch", stop and check whether the model has any way to actually observe the terminal. If not, the model is guessing — and every guess can be wrong. The cleanest fix is usually to remove the need to guess (alt-screen takes over the terminal, so there's nothing to guess about) rather than to refine the guess. We spent three iterations refining; one iteration of "stop guessing" replaced them all
-- **Refs**: `internal/tui/run.go` (alt-screen + auto-flush exit dump), `internal/tui/model.go` (`historyBuf` field + `appendHistory` method returning Println cmd), `internal/tui/view.go` (pad math without scrollbackLines), bubbletea `standard_renderer.go:190` (queuedMessageLines flush behaviour)
-- **已吸收**: this alt-screen reset was itself reversed by the Bubble Tea v2 migration — the current architecture is inline again (appendHistory → tea.Println into native scrollback, no WithAltScreen) → `internal/tui/run.go` architectural note; `internal/tui/model.go` inline-mode note; commit `ba94aea`
 
 ### Welcome banner pinned across the entire first turn → user input lands above it, screen "auto-clears" at TurnEnd
 - **Saw**: two reports of the same shape. (1) After the user submits their first prompt, their `▌ you: …` line appears ABOVE the SEEK wordmark banner — the banner stays put at the bottom of the live region while their input scrolls past it. (2) When the assistant finishes replying, the terminal appears to "auto-clear" — real scrollback content (cwd marker, earlier conversation) disappears in a single frame.
@@ -1673,6 +1584,14 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: an eval case that quotes repo content is coupled to that content's SIZE — when a `max_*_calls=0` assertion starts failing months later, first check whether any dedicated tool can still answer the prompt at all (line caps, truncation) before blaming model drift. And prefer order-sensitive bounds (`bash_before_dedicated`) over loosened totals when recovery is legitimate: they keep the anti-pattern failing while tolerating forced recovery.
 - **Refs**: `internal/tools/read/read.go` (`maxLineBytes`), `internal/tools/grep/grep.go` (`maxLineChars`), `eval/cases/tool-selection/README.md` (drift history), `eval/cases/bash-overreach/README.md`, `eval/run.sh` (`bash_before_dedicated`)
 
+### Default-depth `list_dir` answers nothing about a tree — and its output never said so (bash-overreach alternation)
+- **Saw**: `bash-overreach` failed red-green ALTERNATING on identical binaries since 11-13 (post-repair full-lane record 4 PASS / 7 FAIL; every FAIL `list_dir ≤ 1, bash ≥ 1`, every PASS exactly `list_dir=1, bash=0`) — read as "persistent regression since 11-13" by two cards before the same-binary alternation was spotted.
+- **Why**: the prompt asks a recursive question ("how many .go files under `internal/tools/`"); `list_dir` defaults `depth=1`, so the natural first call lists the 24 package dirs and answers neither count nor size — and its output gave no pointer to the `depth` re-call, leaving `bash find | wc` as the equally-cheap visible recovery. The description's "one call answers count-questions about a tree" is only true when `depth` covers the tree, so the model's choice at that margin is a coin flip. Not drift (prompt + both tool descriptions byte-stable since `f99707f`) and not a regression (the case was born 2026-05-28 with EMPTY result stubs — no green baseline ever existed); it is a fragile case at a real tool-boundary margin.
+- **Fix**: in-band recovery hint — default-depth listings that contain subdirectories now end with `… N subdirectories not expanded at depth=1 — re-call with depth=2 (max 3) to list their entries and sizes` (`internal/tools/listdir/listdir.go`, same idiom as the truncation notice). Commit with card `c_lrilqc`.
+- **Follow-up (2026-11-18)**: the hint is read but does not flip the case — 5 fresh rounds on `11b2366` gave **2/5 green** (re-called `list_dir(depth=2/3)` and stopped) vs 3/5 still `bash find | wc`. All 5 put `list_dir` FIRST, so the residual is recovery-after-dedicated, not overreach: `max_bash_calls=0` was bounding "needed a shell", not "reached for one". Recalibrated to the ordering bound the suite already preaches — `max_bash_calls 0→1` + `max_bash_before_dedicated: 0`, and that metric now counts `list_dir` as a dedicated tool (adding a tool can only lower it). See `eval/cases/bash-overreach/README.md`.
+- **Lesson**: a `max_bash_calls=0` case whose task a dedicated tool can only answer with a NON-DEFAULT argument is stochastic unless the tool's default output names that argument — if the recovery path isn't visible in-band, bash is the only signposted route. And: read a trend-report "failing since" flag against per-run rows on the SAME binary — alternation there is flakiness, not regression.
+- **Refs**: `internal/tools/listdir/listdir.go`, `eval/cases/bash-overreach/README.md` (drift history), `eval/results/` 2026-11-13…18 rows, card `c_lrilqc`
+
 ## Build tags / dependency isolation
 
 ### A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`
@@ -1701,7 +1620,7 @@ If you're new to the project, skim entries in this order:
 ### Headless ACP can't choose its provider by flag — and a stray ANTHROPIC_API_KEY in the inherited shell wins the auto-detect
 - **Saw**: 2026-11-13 paseo provider 首次无头冒烟：想显式钉 DeepSeek，但 `seek acp --provider=deepseek` 里 flag 被整个无视；同时 daemon 继承的 shell 环境残留 `ANTHROPIC_API_KEY`（而 DeepSeek key 只在交互 shell 里 export、不在 daemon env / config），车道的自动探测静默选中 Anthropic，首轮就用 claude-sonnet-4 跑起来——进程健康、模型不对。
 - **Why**: 两层叠加。①`seek acp` 以 `os.Args[1]=="acp"` 判定车道，Go 的 `flag.Parse` 在第一个位置参数处就停止——ACP 车道一个命令行 flag 都不消费，`--provider` 是死字。② `buildProvider` 的解析顺序是 `--provider` flag → DeepSeek key → Anthropic key → OpenAI → Gemini → GLM → `cfg.DefaultProvider`；flag 恒空时，DeepSeek key 不在 env/config 就直接落到下一家，残留的 Anthropic key 顺位上位，无任何告警。
-- **Fix**: 无头车道的 provider 姿态只能走 env/config：paseo provider 块的 `env` 显式带 `DEEPSEEK_API_KEY`（或写进 `~/.seek/config.json` 的 providers 段，`config.KeyFor` 会读到）；冒烟判据补一条——首轮实际模型必须是 DeepSeek（看 `/model` 等价的启动日志或回复里的 model），"进程起来了"不算通。本卡 c_vv2mde 仅记录，未改代码。
+- **Fix**: 无头车道的 provider 姿态只能走 env/config：paseo provider 块的 `env` 显式带 `DEEPSEEK_API_KEY`（或写进 `~/.seek/config.json` 的 providers 段，`config.KeyFor` 会读到）；冒烟判据补一条——首轮实际模型必须是 DeepSeek（看 `/model` 等价的启动日志或回复里的 model），"进程起来了"不算通。本卡 c_vv2mde 仅记录，未改代码。→ 2026-11-18（c_6thhqc）补：`SEEK_ACP_PROVIDER`/`SEEK_ACP_MODEL` env 钉定落地（`internal/acp/headless.go`，`buildProvider` 前注入）+ `session/set_config_option` 运行时换车道，本条"未改代码"已成历史；"冒烟必须验实际选了谁"的判据照旧。
 - **Lesson**: 无 flag 车道（acp）的启动姿态——provider / 权限 / 模型——只能经 env 或 config 表达；自动化环境继承的 env 不是干净的，冒烟必须验"实际选了谁"，不能验"进程活着"。provider 自动探测的优先级对残留 key 零抵抗，daemon 侧要显式钉死。
 - **Refs**: `cmd/seek/main.go`（`flag.Parse` ≈782、`acpLane` ≈933、`buildProvider` ≈2763）, `internal/config/config.go:KeyFor`, `internal/acp/headless.go`, `docs/prd/archive/feature-paseo-provider.md` §3.3, `docs/guide-zed.md` §5.1
 
@@ -1711,6 +1630,12 @@ If you're new to the project, skim entries in this order:
 - **Fix**: decision c_4c6dar — keep `ProjectID` pure (Option A: canonical-path contract), NOT internal EvalSymlinks. The contract is now documented on `paths.ProjectID` and pinned by `TestProjectID_AliasSpellingsDiffer`; callers that care resolve cwd once with `filepath.EvalSymlinks` at the single point it's made absolute. The memory lane is already alias-tolerant regardless: `<project>/.seek/project-id` (internal/memory `resolveProjectID`) pins the ID inside the physical dir, which every spelling reads identically. Commit `5bc9846` (card c_4c6dar).
 - **Lesson**: internal normalisation was rejected because it's an identity migration disguised as a fix: EvalSymlinks errors on not-yet-created paths (worktrees anchor before dirs exist) so the no-error signature forces a silent fallback — identity would then depend on filesystem state; and every project whose stored path contains a symlink component gets re-keyed, orphaning pointer-less state (checkpoints, subagents.jsonl, plans/, assets/). Real lanes (Zed spawn dir, paseo `--cwd`) pass canonical paths, so the fork only bites symlink-resident sandboxes. Revisit only if a lane starts reconciling state across machines BY ProjectID (e.g. controlplane bindings).
 - **Refs**: `internal/paths/paths.go` (ProjectID contract), `internal/paths/paths_test.go:TestProjectID_AliasSpellingsDiffer`, `internal/memory/project.go` (resolveProjectID pointer), `docs/prd/archive/feature-paseo-provider.md` §2.2 (smoke trail)
+
+### ACP configOptions: the dropdown exists only if session/new RETURNS it — and the select value is a bare string with no "type" field
+- **Saw**: implementing model selection (c_6thhqc): `paseo provider diagnostic seek` printed `models=0; modes=0` while the agent was fully functional — no dropdown, no `set_config_option` traffic, ever. The PRD's only record was the behavioural one-liner "seek 两者皆空 → paseo 过滤掉 session.configure 能力" — field types, the switch method's params, and the response contract were recorded nowhere in-repo.
+- **Why**: ACP session configuration is a pull contract — the client renders ONLY what `session/new` returns (`configOptions`; `modes` likewise), and unknown methods stay -32601 forever. Wire specifics that bit: `SessionConfigOption` is discriminated by `type` ("select" | "boolean") with the payload FLATTENED onto the same object (`currentValue`/`options` inlined next to `id`/`name`); `session/set_config_option`'s string variant carries `value` as a BARE string with NO `type` field on the wire (the boolean variant does carry `type:"boolean"`); and its response REQUIRES the full `configOptions` set back — a partial echo blanks the client's menu.
+- **Fix**: implemented in `internal/acp/server.go` (types + dispatch) + `cmd/seek` acpBackend (`acpModelMenu`, value ids `"<provider>:<model>"`) — c_6thhqc. Authoritative shape read from the locally bundled SDK (`~/.paseo/zcode-acp/node_modules/@agentclientprotocol/sdk/schema/schema.json`), cross-checked against zcode-acp-server's `CONFIG_META` (configId `"model"`, category `"model"` — the exact strings paseo renders).
+- **Lesson**: ACP capability discovery is "what the agent reports", never "what the agent supports": a healthy handshake with an empty result set = UI silently filtered, no error anywhere. For any future ACP feature (modes, request_permission, mcpServers), reverse the local SDK schema FIRST — paseo/zcode bundles it on this machine; guessing field names produces a green handshake and a permanently empty UI. Same lesson class as `--rpc`'s frozen-surface decision: check the contract, not the capability.
 
 ### http.Server.Shutdown never returns while SSE handlers are mounted
 - **Saw**: 2026-11-13 web frontend first draft (card c_qucxtu): a `srv.Shutdown(ctx)` at plane shutdown never came back — the process hung with live /events connections until the deadline.
@@ -1746,6 +1671,15 @@ If you're new to the project, skim entries in this order:
 - **Fix**: build the registry BEFORE the scope gate (webfrontend.go NewWeb) so RPCRegistry() is never nil; registering into a gated-out frontend is harmless because Run fails with cfgErr anyway. Commit with this entry (card c_zam44t).
 - **Lesson**: an accessor exposing a construction-time wiring hook on a constructor with early failure returns must guarantee the hook on EVERY path — otherwise the first downstream wiring becomes a landmine that fires exactly on the failure path, where nobody is looking.
 - **Refs**: `internal/controlplane/webfrontend.go` (NewWeb), `internal/servecli/servecli.go` (web ctor), `internal/rpc/methods/session.go`
+
+### ACP ToolCallContent has NO shape that validates on every SDK generation — diff blocks do; text blocks silently degrade
+- **Saw**: emitting tool_call content (2026-11-18, "放出去"), the wire shape had three candidate spellings and no obviously right one: the v1 TS type says `(Content & {type:"content"})` — a spread whose zod translation (`zContent.and(type:"content")`) requires `type` to be BOTH "text" and "content" and therefore accepts NOTHING; the zcode bridge sends nested `{type:"content", content:{type:"text",…}}`, which fails v1 zod the same way; and the v2 draft redefines the union entirely.
+- **Why**: schema codegen of `oneOf {type:const} + allOf $ref` is broken for Content (the ref carries its own conflicting discriminator), and the `x-deserialize-default-on-error` on toolCall content means a failing item is silently SKIPPED — so zcode's nested blocks have plausibly been dropped by clients forever with nobody noticing (matching the "信息少" symptom).
+- **Fix**: seek sends edit results as protocol DIFF blocks (`{type:"diff", path, oldText, newText}` — Diff has no conflicting discriminator, validates on every generation, and paseo's bundle really renders oldText/newText) and everything else as the spread-intent text block `{type:"content", text:…}` (newer SDKs accept it; older ones drop it silently — degrades to no preview, never an error). Locations/rawInput/rawOutput are plain-typed and validate everywhere; paseo's bundle references `locations` (239×) and zero `rawOutput` refs.
+- **Update (same day, user acceptance round)**: paseo's UI confirmed the analysis — tool cards render but the detail pane says "No additional details available". Decisive finds in the paseo.app bundles: (a) paseo's OWN bundled SDK carries the same broken `zContent.and(type:"content")` intersection (asar @agentclientprotocol/sdk) — text content blocks are unrenderable from ANY agent, paseo's own included; (b) paseo's built-in mock agent — the one shape proven against its own UI — sends NO content at all and instead rides `rawInput`/`rawOutput` as JSON OBJECTS (`z.unknown()` accepts them), which the frontend `toolCallDetails` panel pretty-prints as Input/Output sections. Fix follow-up (77f2250): seek now sends rawInput/rawOutput as PARSED objects (truncated JSON that stops parsing degrades to string) and builds `title` with an arg summary ("read notes.txt", not bare "read"). Also note: the earlier "zero rawOutput refs in asar" claim in this entry was a binary-grep artifact — grep -a over asar misses matches; slice by byte offset instead.
+- **Update 2 (the stuck-spinner bite)**: the original Fix line's "text block … degrades to no preview, never an error" was WRONG, and the user caught the symptom: every tool call spun in_progress forever. paseo's `zToolCallUpdate` declares `content: z.array(zToolCallContent).nullish()` with NO skip-invalid wrapper — one item failing the never-satisfiable text union makes the ENTIRE update fail validation, so `status:"completed"` and `rawOutput` never land. A bad content item doesn't degrade to "no preview", it POISONS the whole update. Final shape (seek): text content blocks are never sent at all; content = edit-success diff blocks ONLY; result/error detail rides rawOutput exclusively.
+- **Lesson**: for any ACP field whose schema rides `allOf`+discriminator, check what the CLIENT's bundled SDK actually accepts before choosing a spelling — and prefer variants without conflicting discriminators (diff over content-block) when the information allows. An item-array field with no skip-invalid semantics turns one bad item into a dropped MESSAGE — when you can't verify the client's array leniency, send only provably-valid items or none. And when a client ships its own mock agent, THAT is the reference wire shape — cheaper than schema archaeology. Binary grep over .asar is unreliable; use `grep -abo` + byte-offset slicing.
+- **Refs**: `cmd/seek/main.go` `acpToolContent` / `acpRawValue` / `acpToolTitle` (comments pin the decisions), `@agentclientprotocol/sdk` dist/schema/zod.gen.js `zToolCallContent`, paseo.app asar (bundled SDK zToolCallContent ~byte 2619232, zToolCallUpdate's bare `z.array(zToolCallContent)` ~2622104; mock agent's rawInput/rawOutput objects ~2559484), paseo app-dist frontend `toolCallDetails:{input,output,empty}`, zcode-acp-server dispatch.js:406 (the nested shape)
 
 ## Tool-failure self-recovery
 
@@ -1784,6 +1718,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 
 ## Git / merge
 
+### Concurrent drive merges on the SHARED main checkout silently erase uncommitted edits — do card work in a worktree
+- **Saw**: mid-card (2026-11-18), an uncommitted `pkg/agent/events.go` edit vanished: `git status` clean, edit gone, two new merge commits (`c_5gy5h6`, `c_wwpdxp`) on main that landed while the edit sat in the working tree. The butler drive flow merges into the same checkout other sessions edit from.
+- **Why**: a drive merge (or its cleanup) runs checkout/reset-class git operations on the shared working tree; any uncommitted foreign changes are not theirs to preserve, and lose.
+- **Fix**: implement every card in its own `git worktree` on a `drive/...` branch (e.g. `/tmp/seek-wt-<card>` from main), test there, commit there, then merge back from the main checkout in one short window — same discipline the drive sessions' own "worktree 沙盒" acceptance already implies.
+- **Lesson**: on this repo the main checkout is a SHARED merge target, not a private workspace. Uncommitted work there has no owner protecting it.
+- **Refs**: butler drive flow (merges `drive/c_*` → main); `git worktree add /tmp/seek-wt-acptools -b drive/acp-toolcall main`
+
 ### Merge commits shipped with leftover conflict markers (twice)
 - **Saw**: `920f9e1` (merge main into `drive/c_u4ugnu`) landed `docs/prd/feature-orchestration.md` with `<<<<<<< HEAD` / `=======` / `>>>>>>> main` still inside the PRD 状态行 — second bite of the class (first: CHANGELOG during the `c_zam44t` merge, cleaned in-passing without a pitfall entry). Both share a shape: the conflict lives inside ONE very long line (PRD 状态行 / CHANGELOG entry), so it never reads as a visible "pick a side" block and gets committed half-resolved.
 - **Why**: git commits conflict markers without complaint, and manual per-file review was the only gate — which has now failed twice on exactly this long-single-line shape.
@@ -1799,6 +1740,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `cmd.Stdout = pw` on an `io.Pipe`; a reader goroutine does `bufio.Reader.ReadString('\n')` per line (ReadString, NOT Scanner — Scanner's default 64KB token cap would truncate huge `tool_end.result` lines and lose the agent_end after them); once Wait returns, close pw (io.Pipe is synchronous ⇒ every byte is already inside the reader) so the reader sees EOF and folds a possibly unterminated final line; on kill-grace expiry snapshot under a mutex and walk away, mirroring the old lockedBuf posture (card `c_n3pghs`).
 - **Lesson**: "stream a kill-able child's stdout" has one sound shape: `cmd.Stdout = io.Writer` + your own pipe/reader with close-after-Wait choreography; StdoutPipe is read-then-wait only, and line readers with token caps don't fit JSONL of unbounded line length.
 - **Refs**: `internal/controlplane/executor.go` `attempt` / `streamSink`; `docs/prd/feature-web-frontend.md` §2.4.
+
+### exec'ing an extensionless go build output fails on Windows as "not found" — CreateProcess needs the .exe name
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: every `TestToolsFlagE2E_*` died with `exec: "C:\...\seek-e2e-bin-…\seek-e2e": executable file not found in %PATH%` — though `go build -o` had just written that exact path.
+- **Why**: Windows CreateProcess (under os/exec) only executes files carrying a known extension; for an extensionless path it searches for `<path>.exe` and reports ENOENT. `go build -o <name>` writes the file under exactly `<name>` (no suffix added), so the artifact exists but is unexecutable by that name.
+- **Fix**: `buildSeekBin` (cmd/seek/tools_flag_test.go) appends `.exe` when `runtime.GOOS == "windows"`; card c_45npoi.
+- **Lesson**: any test/helper that builds-and-execs a helper binary must derive BOTH the `-o` target and the exec path from one `runtime.GOOS`-aware name. Green on macOS/Linux says nothing about this class — it only ever fires on the Windows CI lane.
+- **Refs**: `cmd/seek/tools_flag_test.go` `buildSeekBin`
 
 ## Web frontend / asset plane
 
@@ -1890,6 +1838,18 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: the page detects it (`micAvailable()`) and disables the button with the reason; deployment note in `seek serve --help` + PRD §4.3: remote mic needs an HTTPS front (`tailscale serve` proxy mode), not `--tcp`; commit with card `c_f6ayyg`.
 - **Lesson**: browser-capability surfaces (mic/camera/notifications) die silently on non-localhost plain http — when the documented remote-access posture is a TCP forward, the same feature needs an https-front variant or a visible "unavailable here" state, never a mystery.
 
+### strings.Contains on a RAW JSON frame can never match a Windows path or angle bracket — needles need the escaped spelling too
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_CommandE2E` failed as `default frame …"text":"候选项目：\n• C:\\Users\\RUNNER~1\\…\\001…"} lacks "C:\\Users\\RUNNER~1\\…\\001"` — needle and haystack PRINT identically in the failure message.
+- **Why**: the assertion runs `strings.Contains` against the raw SSE data line (Go-marshalled JSON, never decoded), where `\` rides doubled and `<`/`>`/`&` as `\u003c`-class escapes. A verbatim needle containing either can only match after the same escaping — on `/`-path platforms the bug is invisible because `/` and CJK need no escaping (the old "/bind usage" test had hand-avoided `<` for exactly this reason).
+- **Fix**: `containsFrameText` (webfrontend_cmd_test.go) tries the verbatim needle, then its `json.Marshal`-escaped form (quotes stripped); `TestContainsFrameText` builds a Windows-shaped frame with the same Marshal so `/`-path lanes exercise it; card c_45npoi.
+- **Lesson**: asserting substrings against marshalled-JSON wire text is only portable through an escaping-aware matcher — or decode the frame first. Any new raw-frame assertion helper must go through `containsFrameText`, not bare `strings.Contains`.
+
+### go:embed serves the WORKING-TREE bytes — a Windows autocrlf checkout drifts a hash-pinned embedded asset
+- **Saw**: 2026-11-17/18 nightlies, Windows lane only: `TestWeb_AssetHashPinned` reported `got: f3415179… want: b4323190…` with no code change anywhere near the page.
+- **Why**: `go:embed` bakes the bytes as they sit on disk; GitHub's windows runner defaults `core.autocrlf=true`, so checkout rewrites the LF-committed `webfrontend.html` to CRLF locally, and the embedded page (and its sha256 pin) drift. Computed locally: LF version hashes to the pin, CRLF version to exactly the CI's `got` — the file in git was never wrong.
+- **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
+- **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
@@ -1932,6 +1892,38 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: 卡 `c_nxirmj`：提示改按 `len(providerOptions)` 动态生成；envVarFor 镜像补 glm/opencode 两 case，`TestEnvVarFor_KnownProviders` 同步扩表锁死。
 - **Lesson**: 向导扩 provider 的清单：providerOptions 行 + setup.go envVarFor case + internal/config envVarFor case（范围文案已动态化）。凡是「镜像别处枚举」的 switch，扩表当轮就补测试用例。
 - **Refs**: `cmd/seek/setup.go` `providerOptions`/`envVarFor`/`shouldTriggerWizard`，`internal/config/config.go` `envVarFor`。
+
+## MCP prompt section
+
+### JSON object key order is data — unmarshalling into a map shuffles prompt bytes
+- **Saw**: rendering MCP tool parameter signatures for the sysprompt MCP section, the obvious `json.Unmarshal` of the input schema into `map[string]…` properties would emit `search(repo, query, content?)` with parameters in random order — nondeterministic bytes inside the system-prompt prefix.
+- **Why**: `encoding/json` into a Go map discards document order and map iteration is deliberately randomized per run; anything whose output must be byte-stable across sessions (sysprompt segments feed the DeepSeek prefix cache) cannot round-trip an ordered JSON object through a map.
+- **Fix**: `schemaParams` in `internal/tools/mcptool/prompt.go` token-walks the `properties` object with `json.Decoder` — keys kept in document order, each value skipped via a `RawMessage` decode; commit with card `c_lgtpgq`.
+- **Lesson**: JSON object key order is insignificant to a parser but load-bearing for byte-deterministic rendering — ordered output needs a token-stream read, never a map.
+- **Refs**: `internal/tools/mcptool/prompt.go` `schemaParams`; determinism contract at `internal/sysprompt/sysprompt.go` (package doc).
+
+## DeepSeek Files API / file_id
+
+### file_id 引用参与前缀缓存——文档按「解析后的文字」进 prompt，id 本身不是 token
+- **Saw**: F4 真 API 实测（2026-11-18，卡 c_5gy5h6，2 页 PDF ≈12741 字节）：同文档两轮，第 2 轮 `prompt_tokens=1964 / hit=1792 / miss=172`（91% 命中）；加长后的无文档对照臂 `1205→1220`、`hit=1024`，文件臂比对照臂多出的 ≈736 token **全部落在命中侧**。session JSON 往返（resume）后再发一轮：`1962 / 1792 / 170`——字节稳定到缓存连得上。另一次运行换了一个全新的 file_id（文档字节相同，走的是 ResolveFiles 的懒上传路径），首轮同样 `hit=1792`。
+- **Why**: `{"type":"file","file_id":…}` 不是文本——file_id 串不进 prompt token 流；服务端在拼 prompt 前把解析结果展开成文档文字，缓存按展开后的 token 序列命中。所以换 id、重新上传都不击穿前缀缓存，只有文档内容或前序消息变化才会。
+- **Fix**: 无代码改动（结论本身是交付物）；实验形状固化在 `pkg/deepseek/files_smoke_test.go` `TestFiles_RealAPI_UploadReferenceResumeCache`（文件臂 + 文本对照臂 + resume 臂，断言命中覆盖文档权重的一半以上，并打印完整读数）。
+- **Lesson**: 「引用形态是否参与缓存」不能靠类比推断（base64 图 M-V.3 也是实测出来的）：file_id 与图 URL 一样可缓存，而且更稳——id 变了前缀照样命中，所以 ResolveFiles 的过期重传不会让用户多付一次 cache miss。
+- **Refs**: `docs/prd/feature-deepseek-app-api.md` §3.2 D-F6、§5 开放问题②；`pkg/deepseek/resolve.go`；`docs/prd/archive/feature-vision.md` M-V.3（base64 图先例）。
+
+### POST /files 响应里没有 page_count / expires_at——按页计费与过期重传都拿不到数据
+- **Saw**: F4 真 API 上传（2026-11-18）返回体只有 `{id, object, bytes, created_at, filename, purpose}`：`page_count`、`expires_at` 文档里写了、实际不发（`text_recognition` 与 `rich_layout_recognition` 两种 purpose 各传一次，同一 2 页 PDF，均缺）。后果：F3 的 `pricing.ParseCost(fo.PageCount)` 恒记 $0；F4 的过期重传因 `expires_at=0`（= 未声明过期）永不主动触发。
+- **Why**: 上传响应是 FileObject 的最小子集，解析产物（页数）与生命周期（过期时间）都不在其中；也没有别的查询接口可用——原始文件与解析结果均不支持下载/回读。
+- **Fix**: 语义不改：`0 = 未声明过期 = 不主动重传` 是有意的保守选择（宁可一个死 id 在发送时报错，也不要每轮重上传、重复计解析费）。烟测把字段缺失记为**读数**而不是失败，并在日志里点明后果（`files_smoke_test.go`）。
+- **Lesson**: 文档字段 ≠ 实际响应字段；凡是拿返回字段算钱的，真 API 首跑必须把原始响应体打出来核对。要接实按页计费，只能本地数页（仅 PDF 可行）或等 API 补字段——留给 F5 价格核对卡定夺。
+- **Refs**: `pkg/deepseek/files.go` `FileObject`；`internal/fileroute/fileroute.go`（计费点与 marker）；`docs/prd/feature-deepseek-app-api.md` §1.2 / §6。
+
+### 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文
+- **Saw**: F4 烟测（2026-11-18）同一份 2 页 PDF、同一字节内容，上传后立刻发问：多数运行 `prompt_tokens≈1941`（两页文字全在），但有一次只有 `1079`——第 1 页的事实答得出来，只存在于第 2 页的口令直接答 `NOT IN DOCUMENT`。同一进程再发一轮（`1102`）依旧没有第 2 页，说明不是「等一会儿就好」的异步补齐。`page_count` 又不返回（见上一条），客户端无法自检「解析是否完整」。
+- **Why**: 未定论。可能是服务端按页/按块切分解析并各自入索引，某一页在 id 返回时仍未就绪；也可能是解析有截断上限。反例也观察到过一次（`prompt_tokens≈1022` 时第 2 页事实仍答对），所以既不能假设「id 到手 = 全文可用」，也不能断言必然丢页。
+- **Fix**: 无代码改动。F4 的烟测只断言**第 1 页**的事实（`files_smoke_test.go` 里写死了原因），把「页 2 是否在场」留作观察而不是失败条件。
+- **Lesson**: e2e 断言要挑「最不容易被服务端实现细节削掉」的证据：同一页内的事实比「某一页存在」稳。真 API 测试里凡是依赖「解析完整性」的断言，都该先跑三次看稳定性。
+- **Refs**: `pkg/deepseek/files_smoke_test.go`；上一条 `page_count / expires_at` 缺失（同一族的「文档字段 ≠ 实际行为」）。
 
 ## Distill review `s` / memory↔skill bridge
 

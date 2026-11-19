@@ -158,16 +158,21 @@ extract_metric() {
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash" and ((.args // "") | test("(^|[;&|[:space:]\"])git([[:space:]]|$)")))] | length' "$path"
       ;;
     bash_before_dedicated)
-      # Bash calls made BEFORE the first dedicated read/grep call —
+      # Bash calls made BEFORE the first dedicated inspection call —
       # bash as FIRST resort. Ordering is the honest anti-pattern
       # signal when a case's task legitimately forces shell recovery
       # LATER (e.g. read elided an over-1024-byte line and verbatim
       # text needs awk/sed): a total bash_calls bound cannot tell
-      # recovery from overreach, this can. No grep/read at all →
-      # every bash call counts (sentinel index past the array end).
+      # recovery from overreach, this can. `list_dir` joined the
+      # dedicated set 2026-11-18: bash-overreach's legitimate answer
+      # path is list_dir(depth=2), so excluding it scored
+      # list_dir→bash recovery as overreach (3/5 rounds). Adding a
+      # tool to the set can only LOWER this metric, so no existing
+      # bound gets stricter. No dedicated call at all → every bash
+      # call counts (sentinel index past the array end).
       $JQ -s '
         [ .[] | select(.type=="tool_start") ] as $ts
-        | [ range(0; $ts|length) as $i | select($ts[$i].name=="grep" or $ts[$i].name=="read") | $i ] as $ded_idx
+        | [ range(0; $ts|length) as $i | select($ts[$i].name=="grep" or $ts[$i].name=="read" or $ts[$i].name=="list_dir") | $i ] as $ded_idx
         | ( if ($ded_idx|length) > 0 then $ded_idx[0] else 999999999 end ) as $first_ded
         | [ range(0; $ts|length) as $i | select($ts[$i].name=="bash" and $i < $first_ded) ] | length
       ' "$path"

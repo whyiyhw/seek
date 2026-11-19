@@ -17,11 +17,12 @@
 | [`feature-orchestration.md`](feature-orchestration.md) | 📐 设计稿（P1 路由已交付） | 编排承重轴：后台子代理生命周期 + 模型路由（P1 已随 v0.11 交付）+ P2 类型化 agent + P3 hooks 面。|
 | [`feature-hooks-injection.md`](feature-hooks-injection.md) | 📐 设计稿 | hooks 注入面（编排 P3-a）：缓存稳定区与受控注入区分离。v8 D3 拍板延后到第二波之后。|
 | [`feature-memory-skill-bridge.md`](feature-memory-skill-bridge.md) | 📐 设计稿 | memory↔skill 打通：蒸馏落点 + 生命周期对齐（c_5fdsqb 设计已进 main，里程碑见其 §9）。|
-| [`feature-deepseek-app-api.md`](feature-deepseek-app-api.md) | 📐 设计稿 | DeepSeek 应用 API 四项评估（文件输入 / ASR+TTS 客户端层 / safety_check）。v8 D3：做完收口。|
+| [`feature-deepseek-app-api.md`](feature-deepseek-app-api.md) | 🚀 ②③④ 已交付（v0.12.0）· ① 判红关闭 | DeepSeek 应用 API 四项评估：②文件输入（F1–F5）/ ③ASR+TTS 客户端 + 语音 frontend（V1a 播报无 CLI 开关，V2 按住说话已通）/ ④`safety_check` 全落地；①`read_url` 因与 function tools 共存性实测为红不接。v8 D3：归档待办。|
 | [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 🚀 已交付（无剩余排期） | Frontend 端口定义所在——`seek serve` sidecar + 会话绑定路由 + 直连执行。v8「新的端只经 Frontend 端口或 ACP」的参照物，故留活跃区。|
 | [`feature-web-frontend.md`](feature-web-frontend.md) | 📐 设计稿（MVP 已交付） | Web Frontend：MVP 聊天已交付；P2 任务面板 → P3 资产面设计中。|
 | [`feature-slim-loop.md`](feature-slim-loop.md) | 📐 设计稿 | 减法机制 L2 账与刀 / L3 自噬循环；本目录的预算由它看管。|
-| [`feature-mcp-client.md`](feature-mcp-client.md) | 📐 深度集成设计中 | MCP 客户端 infra 已于 M5.4 交付；本文是后续深度集成设计。|
+| [`feature-eval-v2.md`](feature-eval-v2.md) | 📐 设计稿（2026-11-19） | eval 判定口径重做：单次抽样 → `--rounds` + `min_pass_rate`；补 plan / 后台子代理 / serve-web 三条承重轴；发版 release lane + 夜间 core 入口；能确定化的检查移回 Go 单测。|
+| [`feature-mcp-client.md`](feature-mcp-client.md) | 📐 深度集成设计完成（可开卡） | MCP 客户端 infra 已于 M5.4 交付。深度集成设计（2026-11-16）以 Semble 为第一验证目标：引导三层落点（工具 schema / sysprompt MCPSection / AGENTS.md）+ 路由决策（默认 `server__tool` 前缀、grep 结果内 hint 后手、否决调度层拦截）+ 三臂对照评估口径，拆 D1–D5 五张 2h 卡。|
 | [`feature-skill-distill.md`](feature-skill-distill.md) | 🚀 一~三期已交付 | Skill 自动蒸馏（S→K）：四层新颖性漏斗 + `.drafts/` 草稿区 + 人审 install 铁律。AGENTS.md 架构节引用。|
 | [`feature-plan-mode.md`](feature-plan-mode.md) | 🚀 已交付 | Plan 模式 v2：analyze → propose → execute 闭环 + event-sourcing resume。AGENTS.md 权限节引用。|
 | [`feature-permission-refactor.md`](feature-permission-refactor.md) | 🚀 已交付 | Permission 两轴（Preference/Workflow）重构。AGENTS.md 权限节引用。|

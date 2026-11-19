@@ -1306,26 +1306,29 @@ func (m Model) renderInput() string {
 // wrap natively; live always passes m.width > 0.
 func renderUserBlock(text string, width int) string {
 	label := styleUserLabel.Render("▌ you")
-	body := dimImageMarkers(highlightRefs(text))
+	body := dimMarkers(highlightRefs(text))
 	if width > 0 {
 		body = lipgloss.NewStyle().Width(width - 2).Render(body)
 	}
 	return "\n" + label + "\n" + body
 }
 
-// dimImageMarkers mutes every "[image: " marker line — the collapsed
-// display for natively-attached and OCR-era images (feature-vision
-// §7.3: folded marker, not thumbnail). One rule covers live submit,
-// scrollback and replay since they all go through renderUserBlock; the
-// prefix is the wire-format family shared with the 柱 Q blocks, so
-// both generations dim identically.
-func dimImageMarkers(s string) string {
-	if !strings.Contains(s, "[image: ") {
+// dimMarkers mutes every "[image: " and "[file: " marker line — the
+// collapsed display for natively-attached and OCR-era images
+// (feature-vision §7.3: folded marker, not thumbnail) and for routed
+// documents (feature-deepseek-app-api F5). One rule covers live
+// submit, scrollback and replay since they all go through
+// renderUserBlock; each prefix is a wire-format family ("[image: "
+// shared with the 柱 Q blocks, "[file: " pinned by
+// fileroute.TestMarker_Family), so every variant of either marker
+// dims identically.
+func dimMarkers(s string) string {
+	if !strings.Contains(s, "[image: ") && !strings.Contains(s, "[file: ") {
 		return s
 	}
 	lines := strings.Split(s, "\n")
 	for i, l := range lines {
-		if strings.HasPrefix(l, "[image: ") {
+		if strings.HasPrefix(l, "[image: ") || strings.HasPrefix(l, "[file: ") {
 			lines[i] = styleMuted.Render(l)
 		}
 	}

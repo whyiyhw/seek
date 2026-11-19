@@ -148,6 +148,78 @@ func TestKeyFor_GLMEnvVar(t *testing.T) {
 	}
 }
 
+// TestBaseURLFor_GLMPrecedence: endpoint overrides follow the same
+// env > config precedence as keys. This is the Coding Plan escape hatch:
+// a coding-plan key must be pointed at /api/coding/paas/v4 or it bills
+// the recharge balance / fails with 1113.
+func TestBaseURLFor_GLMPrecedence(t *testing.T) {
+	withSeekHome(t)
+	_ = os.Unsetenv("GLM_BASE_URL")
+	cfg := Config{Providers: map[string]ProviderConfig{
+		"glm": {APIKey: "k", BaseURL: "https://from-config.example/v4/chat/completions"},
+	}}
+	if got := BaseURLFor(cfg, "glm"); got != "https://from-config.example/v4/chat/completions" {
+		t.Errorf("config fallback failed, got %q", got)
+	}
+	_ = os.Setenv("GLM_BASE_URL", "https://from-env.example/v4/chat/completions")
+	t.Cleanup(func() { _ = os.Unsetenv("GLM_BASE_URL") })
+	if got := BaseURLFor(cfg, "glm"); got != "https://from-env.example/v4/chat/completions" {
+		t.Errorf("glm env override should win, got %q", got)
+	}
+}
+
+func TestBaseURLFor_NoOverride(t *testing.T) {
+	// Empty means "no override": the lane's compiled default applies.
+	// A key-only provider block must not read as a URL, and unknown
+	// providers have no canonical env var to consult.
+	withSeekHome(t)
+	_ = os.Unsetenv("GLM_BASE_URL")
+	if got := BaseURLFor(Config{}, "glm"); got != "" {
+		t.Errorf("missing override = %q, want empty", got)
+	}
+	cfg := Config{Providers: map[string]ProviderConfig{"glm": {APIKey: "k"}}}
+	if got := BaseURLFor(cfg, "glm"); got != "" {
+		t.Errorf("key-only block = %q, want empty", got)
+	}
+	if got := BaseURLFor(Config{}, "my-custom"); got != "" {
+		t.Errorf("unknown provider = %q, want empty", got)
+	}
+}
+
+// TestProviderConfig_BaseURLRoundTrip: base_url is a hand-edited field —
+// it must survive Save/Load, and an api_key-only block (every config
+// written before this field existed) must still load clean.
+func TestProviderConfig_BaseURLRoundTrip(t *testing.T) {
+	withSeekHome(t)
+	const wantURL = "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+	cfg := Config{Providers: map[string]ProviderConfig{
+		"glm": {APIKey: "k", BaseURL: wantURL},
+	}}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Providers["glm"].BaseURL != wantURL || got.Providers["glm"].APIKey != "k" {
+		t.Errorf("glm block round-trip: %+v", got.Providers["glm"])
+	}
+
+	dir := withSeekHome(t)
+	pre := `{"providers": {"glm": {"api_key": "old"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := Load()
+	if err != nil {
+		t.Fatalf("pre-base_url config must load clean: %v", err)
+	}
+	if old.Providers["glm"].BaseURL != "" || old.Providers["glm"].APIKey != "old" {
+		t.Errorf("pre-base_url block parsed wrong: %+v", old.Providers["glm"])
+	}
+}
+
 func TestSetKey_CreatesMap(t *testing.T) {
 	// nil Providers map should not panic — SetKey allocates.
 	cfg := Config{}

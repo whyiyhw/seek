@@ -41,6 +41,7 @@ API 密钥的查找优先级从高到低：
 | `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm` / `opencode`）。空字符串 = 不指定，走自动检测 |
 | `providers` | object | 各 provider 的凭证配置，key 为 provider 名 |
 | `providers.<name>.api_key` | string | API 密钥 |
+| `providers.<name>.base_url` | string | 可选端点覆盖（**完整 POST URL**，不会自动补 `/chat/completions`）。当前用于 `glm`：Coding Plan 订阅必须指向 `/api/coding/paas/v4`，见 §3 |
 | `path_prompt_done` | bool | Windows 上"添加到 PATH"提示是否已显示过 |
 | `suggest_reply` | bool | 启用/禁用建议回复（suggested reply）功能。指针类型，缺省 = 启用 |
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
@@ -65,15 +66,60 @@ API 密钥的查找优先级从高到低：
 
 GLM 与 OpenCode 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
 
+### GLM Coding Plan 订阅端点（`--provider=glm`）
+
+智谱按 **URL 分账**，不按 key 形状分账：同一个 GLM key 打在 `/api/paas/v4` 扣的是**充值余额**（按 token 计费），打在 `/api/coding/paas/v4` 才走 **Coding Plan 订阅额度**。seek 的默认端点是 `https://open.bigmodel.cn/api/paas/v4/chat/completions`（多数用户是充值制，默认不动）；Coding Plan 订阅用户**必须显式覆盖**，否则会继续扣余额——余额为空时接口直接报 `1113`（「余额不足或无可用资源包」）。
+
+端点覆盖优先级（高 → 低）：
+
+1. `GLM_BASE_URL` 环境变量
+2. `~/.seek/config.json` 的 `providers.glm.base_url`
+3. `--base-url` 旗标
+4. 默认 `https://open.bigmodel.cn/api/paas/v4/chat/completions`
+
+```json
+{
+  "providers": {
+    "glm": {
+      "api_key": "<你的 GLM coding-plan key>",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+    }
+  }
+}
+```
+
+```bash
+# 或单次运行覆盖（写在 .env / secret manager 里，别进命令行历史）
+export GLM_BASE_URL=https://open.bigmodel.cn/api/coding/paas/v4/chat/completions
+seek --provider glm
+```
+
+> 智谱官方 coding-plan quick-start 列出三个 Base URL：`/api/anthropic`（Anthropic 协议，seek 不走）、`/api/coding/paas/v4`、`/api/v1`。seek 的 OpenAI 兼容车道用 `/api/coding/paas/v4/chat/completions`——`base_url` 是完整 POST 目标，seek 不会替你补路径。
+>
+> 首启向导选 GLM 保存完 key 后会打印这段提示；不确定自己是哪种 key 时，先用默认端点跑一次，报 `1113` 就是 Coding Plan key，切到 `/api/coding/paas/v4` 即可。
+
+**症状对照 / symptom → fix**
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| 充值余额一直在掉、Coding Plan 用量不动 | 仍在打默认 `/api/paas/v4` 端点（本节描述的坑） | 按上面任一方式覆盖 `base_url`（优先级：`GLM_BASE_URL` > config `base_url` > `--base-url`） |
+| 报 `1113`「余额不足或无可用资源包」 | key 是订阅制，端点却仍是 `/api/paas/v4`，且充值余额已空 | 同上，切到 `/api/coding/paas/v4/chat/completions` |
+| 报 `404`（响应体里 `path` 只剩 `/v4`） | `base_url` 不是完整 POST 目标——最常见是只写了 `…/api/coding/paas/v4`，漏掉 `/chat/completions`。seek 把该值**原样 POST**，不替你补路径 | 补全为 `…/api/coding/paas/v4/chat/completions` |
+| 报 `401` | key 本身失效/已被轮换——与端点无关（端点写错回的是 404，不是 401） | 去控制台重新生成 key |
+
+改配置文件后要**新开进程**：`base_url` 只在启动时读取，已在跑的 TUI / `seek acp` 会话不会热加载。判断自己有没有 Coding Plan 订阅：登录 [bigmodel.cn 控制台](https://open.bigmodel.cn/usercenter/apikeys)，订阅套餐页有用量记录即订阅制账户。
+
 ### OpenCode Go 订阅车道（`--provider=opencode`）
 
 [OpenCode Go](https://opencode.ai/console/go) 是 $10/月的订阅制推理池（32 个开放权重 + 前沿模型：Kimi K3、Qwen3.8 Max、GLM-5.x、DeepSeek V4.x、Grok 4.7、GPT-6 Luna、Claude Haiku 5.5 等），**按 5 小时/周/月的请求数窗口限额，不按 token 扣费**——适合把便宜的批量任务（如 explore 子代理）放到这条车道。
 
 - **Key 获取**：在 [console.opencode.ai](https://console.opencode.ai) 生成，`export OPENCODE_API_KEY=...`（或写 `providers.opencode.api_key`，首启向导也可直接选 OpenCode 粘贴）。
-- **端点**：`https://opencode.ai/inference/go/v1/chat/completions`（OpenAI 兼容；`--base-url` 可覆盖）。
+- **端点**：`https://opencode.ai/inference/go/openai/v1/chat/completions`（OpenAI 兼容；`--base-url` / `OPENCODE_BASE_URL` / `providers.opencode.base_url` 均可覆盖，优先级 env·config > flag，子代理路由同样遵守）。该路径取自 `GET https://opencode.ai/inference/go/v1/models` 里每个模型的 `api.chat-completions.base_url`；`/inference/openai/v1/...` 与旧的 `/inference/go/v1/...` 也都能路由，但 `/go` 前缀才把用量记在 Go 计划上。
 - **默认模型**：`deepseek-v4.1-flash`（模型 id 以 [官方列表](https://opencode.ai/docs/console/models) 为准；接口下线/改名时用 `--model` 指定）。
-- **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺少这两个头的请求可能退化成按 token 扣账户余额。
-- **免费模型限制**：`*-Free` 结尾的模型只能在 OpenCode 自家客户端内使用，seek 不支持。
+- **可选模型**：Go 池里 20 个走 Chat-Completions 原生的模型都进了菜单（TUI `/model` 选择器 + ACP `session/new` 下拉），名单的唯一来源是 `pricing.OpenCodeGoModels`：deepseek-v4.1-flash / v4-pro、glm-5.3 / 5.2 / 5.3-flash、kimi-k3 / k3.1-pro / k2.7-code、minimax-m3.1-flash、mimo-v2.6-flash / pro、longcat-2.0、hy4 / hy4-preview / hy3、step-5-preview，外加 4 个限时免费模型 beam-free / hy4-flash-free / longcat-2.5-free / iceman-contributor-free。**没进来的**：grok-4.7 / gpt-5.6 / gpt-6 / muse-spark（只走 Responses API）、claude-haiku-5-5 / minimax-m3 / qwen 系列（只走 Anthropic messages）、gemini-4-argon（generate-content）——seek 的兼容适配器说不了这些协议。
+- **动态目录**：上面的表是编译期基线，不是天花板。车道启动时（`--provider=opencode` 且有 key）会带 key 请求 `GET /v1/models`：先装 `~/.seek/opencode-catalog.json` 里的缓存（24h 内有效；最多容忍 7 天陈旧），再后台刷新一次。刷新成功后菜单、成本估算、`/compact` 阈值都跟着换新——厂商新上的模型不用等发版；被下线的模型也会自动从菜单消失。抓取失败、超时、403、坏 JSON、缓存损坏一律**静默退回编译期基线**，不阻塞启动、不影响推理。`SEEK_OPENCODE_CATALOG=off` 可整体关闭（完全离线）；TUI 里 `/model refresh` 可手动刷新一次。目录只喂菜单/成本/上下文，**不进 system prompt**，因此不影响前缀缓存。
+- **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺 `x-opencode-session` 会被网关直接 `400 MissingSessionID` 拒掉；UA 是通用 SDK 名时按文档可能退化成按 token 扣账户余额。
+- **免费模型**：官方定义是「`opencode` / `opencode-go` 池里 input price 为 0 的模型」——同一个网关、同一把 key，只是不计量（`go.monthly_usage: null`），seek 的报价卡也是 $0，选它跑出来的成本显示就是 `$0`。它们都有各自的限速（如 longcat-2.5-free 100 请求/天）与地区/训练条款；工作区若设了 `OPENCODE_DISABLE_FREE_MODELS=1`，选中会在请求时收到 `Model unavailable` 这类带内错误——不是静默回退。
 - **隐私**：Go 计划默认屏蔽「用请求训练模型」的付费端点（详见官方文档）。
 
 注意：状态栏里该车道显示的美元成本是按官方 per-token 牌价的**估算展示**（订阅本身不按 token 计费）。
@@ -161,8 +207,13 @@ seek --provider anthropic
 
 ```bash
 # 查看当前配置
-seek --help              # 查看所有 CLI 标志
+seek --help              # 子命令清单 + 所有 CLI 标志
+seek <command> help      # 单个子命令的详细帮助（如 seek serve help）
 seek --provider <name>   # 临时指定 provider
+
+# 常驻控制平面 + 内置浏览器工作台
+seek serve --frontend=web      # 监听 127.0.0.1:8790，启动时把带 token 的 URL 打到 stderr
+seek serve --frontend=web -h   # -h/--help 放在标志之后同样有效
 
 # 环境变量（最高优先级）
 export DEEPSEEK_API_KEY="sk-..."

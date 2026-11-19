@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature PRD（评估 + 分期设计稿，未排期实现）
 **前置阅读**：[`feature-vision.md`](archive/feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
-**状态**：📐 **设计稿（2026-11-13 评估；R0 验证门已执行 2026-11-14 → ① 判红关闭，见 §2.2）**。四项结论见 §0；其余里程碑为 2h 卡粒度拆解，**未动工**。
+**状态**：🚀 **②③④ 已交付（v0.12.0，2026-11-18）；① 判红关闭（R0 验证门 2026-11-14，见 §2.2）**。四项结论见 §0。交付清单：②文件输入 F1–F5 全落地（files 客户端 / filerefs / 提交期路由 / ResolveFiles + file_id 缓存实测 / replay 淡显 + guide-files）；③ASR+TTS 客户端 S1/S2 + 语音 frontend V1a（`Speaker` 播报 sink）/ V2（按住说话入站）——V1a 尚无 CLI 开关，实时双工按设计不做；④`safety_check` SC1 落地（opt-in）。OCR 不接（被文件解析覆盖）。收口待办：本文归档（v8 D3 口径）与播报 CLI 开关各自的卡。
 **触发起因**：DeepSeek 于 **2026-11-13** 发布「全家桶应用 API」——官方公告 [news261113](https://api-docs.deepseek.com/zh-cn/news/news261113)：对话内联网搜索（含深度思考搜索）、`deepseek_read_url` 链接阅读、文件输入（PDF/Office/图片）、模型安全校验，加独立底层接口 Search / Fetch / OCR / ASR / TTS。同族先例：Search API 2026-10-17 开放，seek 已接（`pkg/deepseek/search.go` + `web_search` 工具，另卡实现）。
 **本文不覆盖**：独立 Search API 的对话内接线（web_search 服务端工具变体）——与 read_url 同属 `tools` 数组声明，但 seek 已有客户端 `web_search` 工具覆盖显式搜索场景；其服务端变体只在「思考模式自主搜索」里顺带评估（§二）。
 
@@ -209,11 +209,17 @@ agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片
 
 **D-F3 file_id 是传输优化，不是状态。** 资产库存原文件（唯一副本），`~/.seek/projects/<id>/filerefs.json` 记 `sha256 → {file_id, purpose, uploaded_at, expires_at}` 的映射缓存（**这是传输缓存不是平行状态**——丢了可重建，镜像 plan artifact 的 write-once 定位而非 `reconstruct` 纪律之争；实现卡里如发现可完全无状态化——每次会话首轮懒上传——则砍掉此文件，**先试无状态版**）。
 
+> **F4 定案（2026-11-18）：无状态版胜出，`filerefs.json` 不建。** 生命周期/purpose 直接记在 `FilePart` 上（`expires_at` / `purpose` 两个 omitempty 字段随 session JSONL 走），谁都知道「这个 id 什么时候死、当初按什么 purpose 解析的」，无需旁路文件；`ResolveFiles` 只在发送副本上换 id，历史不动。唯一的运行时补充是一个**进程内**的 `asset → {id,purpose,expiresAt}` 运输缓存（`FileResolver`，随会话死亡、丢了最多多重传一次解析），用来避免「过期后每轮重上传」的重复解析费。真 API 读数见 §3.3 F4 行与 `docs/pitfalls.md` "DeepSeek Files API / file_id"。
+
 **D-F4 大小/页数门在路由器。** 100 MiB / 1000 页 / 每请求 20 文档 / 8 MiB 文字合计——超限 in-band note 降级（照 vision 的 never-error 哲学），不 fatal。
 
 **D-F5 web 面拖拽 = 契约注记，不是本卡交付。** Web 面板（[feature-inspect-rpc](feature-inspect-rpc.md)，📐 未交付）与 control-plane web frontend 都在未排期状态。这里只立契约：未来 `Inbound`（control-plane D-C1）加可选 `Attachments []Attachment{Path,Mime}` 字段，平面原样落盘后走与 TUI 相同的 `fileRouter`（拖拽 = 平面写临时文件 + 注入 `@路径` 引用，**不新造管道**）。验收：契约字段写进本文即算（不写代码）。
 
+> **F5 注记（2026-11-18）**：契约段落已随本卡定稿如上，并同步钉到 `internal/controlplane/frontend.go` `Inbound` 结构体的注释里（仅注释，无实现）——未来实现者在定义处就能看到，不用翻 PRD。
+
 **D-F6 前缀缓存。** `file_id` 字符串逐轮字节稳定 → 与 base64 图同理由可参与前缀缓存（vision M-V.3 已实测 base64 图参与缓存；file_id 是否等价**未验证**——照 vision §7.2 的先例，实测归入 F4 验收，结论无论哪边记 `docs/pitfalls.md`）。
+
+> **F4 实测（2026-11-18）：参与，而且比预期更稳。** 同文档两轮 `prompt_tokens=1964 / hit=1792 / miss=172`（91%），无文档对照臂 `1220 / hit=1024`，文件臂多出的 ≈736 token 全在命中侧；session JSON 往返后再发一轮仍是 `1964 / 1792 / 172`。机制上 file_id 串根本没进 prompt token 流——服务端把解析结果展开成文档文字，缓存按文字命中——所以**换 id / 过期重传都不击穿缓存**。读数与推论见 `docs/pitfalls.md` "file_id 引用参与前缀缓存"。
 
 ### 3.3 里程碑（2h 卡粒度）
 
@@ -222,8 +228,8 @@ agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片
 | **F1 `pkg/deepseek` files 客户端** | `UploadFile`（multipart，purpose 在 file 前）、`FileObject` 类型、wire 形态 `file` 分块进 `ChatRequest.MarshalJSON`（与 `image_url` 分块同站） | httptest fake 断言 multipart 字段序 + wire 形状；text-only 字节等价 guard |
 | **F2 `internal/filerefs` 检测器** | 后缀表 + stat 门 + `cleanToken` 复用（从 imgrefs 提或直接内联，倾向复制保持两包独立——检测语义已分叉） | 假阳性用例照 imgrefs 测试集（代码片段/URL 里的 `.pdf` 不是引用） |
 | **F3 提交期路由 + copy-at-submit** | `fileRouter`（三入口共用）；资产库写入；上传 + 解析费 `RecordFlatCost`（按返回页数）；`@rich:` 前缀解析；in-band 标记族 | 提交 `@report.pdf` → 标记 + file_id 就位；100 MiB 超限降级不 fatal |
-| **F4 发送路径 + resume + 缓存实验** | `ResolveFiles`（懒上传/过期重传）；session round-trip；侧信道 `WithoutFiles`（照 `WithoutImages`）；**file_id 前缀缓存实测**（同文档两轮，看 `prompt_cache_hit_tokens`） | 真 API：上传→引用→模型答出文档内容；resume 后继续；实验结论记 pitfalls |
-| **F5 展示 + 文档 + 契约注记** | replay 淡显标记（`[file: ` 族）；`guide-vision.md` 或新 `guide-files.md`；`Inbound.Attachments` 契约段落（D-F5）；价格表核对（§六） | 文档链路齐 |
+| **F4 发送路径 + resume + 缓存实验** | `ResolveFiles`（懒上传/过期重传）；session round-trip；侧信道 `WithoutFiles`（照 `WithoutImages`）；**file_id 前缀缓存实测**（同文档两轮，看 `prompt_cache_hit_tokens`） | ✅ **2026-11-18（卡 c_5gy5h6）**：真 API 上传→引用→答出文档内容（`KESTREL-7781` / `433 MHz` / `Dr. Ines Vasquez` 三问全中，三问同一页内）；resume（JSON 往返）后继续引用仍 91% 命中（`1962/1792/170`）；缓存实验参与（doc 臂 `1964/1792/172` 对无文档对照臂 `1220/1024`，文档权重 ≈736 token 全在命中侧）；懒上传路径同跑（ResolveFiles 对真 client）。三条读数（含「上传响应不发 page_count/expires_at」「同一 PDF 解析偶发只含第 1 页」）记 `docs/pitfalls.md` |
+| **F5 展示 + 文档 + 契约注记** | replay 淡显标记（`[file: ` 族）；`guide-vision.md` 或新 `guide-files.md`；`Inbound.Attachments` 契约段落（D-F5）；价格表核对（§六） | ✅ **2026-11-18（卡 c_czsz7b）**：TUI `dimMarkers` 一条规则盖 `[image: `/`[file: ` 两族（live/scrollback/replay 共用 `renderUserBlock`，测试钉混排）；新 `docs/guide-files.md`（README 双语特性表挂链）；`Inbound` 契约注记进结构体注释（D-F5）；价格核对见 §六行 8——常量全一致，另录「服务端 web 工具 2026-11-18 12:00 起免费」公告与 page_count 计费缺口的维持现状决定 |
 
 ---
 
@@ -301,6 +307,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 | 5 | ASR | **¥0.78/小时**，按秒向上取整（5 折 ¥0.39 同上处理） | `ASRCost(seconds)`（内部 ceil） | S2 |
 | 6 | OCR | ¥1.5/千页——**不接不进表**，注释里留一行「OCR 同价未接，见 feature-deepseek-app-api §4.1」 | — | — |
 | 7 | ✅ **已收口（2026-11-15 联网核）** | en 页 USD peak 与 pricing.go 逐位一致（flash 未过期）；「调价」系 zh/en 两页口径分叉的跨币种误判；v4-pro 独立行为本卡真实增量 | 已随本卡收口：chapter-13 §13.3 指针行已补、commands.go 过时注释已正、pricing.go 注释改锚 en 页 | 完成 |
+| 8 | ✅ **F5 价格核对（2026-11-18 联网核，en+zh 双页）** | 工具族**重新挂回 en 页且原生化**：parse/OCR **$0.225/1K 页**、search/fetch $0.75/1K、TTS $0.45/万字符、ASR $0.116/h——与 pricing.go 四常量**逐位一致**（parsePerPageUSD 旧注释「en 页不列工具族需换算」作废已正，值巧合相同）；模型 token 价 en 页亦未变。**新公告：模型调用内的服务端搜索/网页抓取自 2026-11-18 12:00（北京时间）起不再单独计费（仅 token 费）**——本表行 1/2 的 fetch 计费折算已无现实消费点（R2 本就判红关闭）；read_url 关闭判定不受影响（判红依据是 function-tools 共存性，不是价格）。**page_count 计费缺口维持现状**（pitfalls「POST /files 响应里没有 page_count」：`ParseCost` 按返回页数记 $0，本地数页只对 PDF 可行且引入脆弱解析，不做——等 API 补字段，解析费以平台账单页为准） | pricing.go parsePerPageUSD 注释已随本卡更新 | F5 |
 
 **叠加口径（写进 pricing.go 注释的规范表述）**：单请求总费用 = `Cost(model, tier, usage)`（token，峰谷折价）+ Σ工具平价（per-call/per-page/per-char/per-second，**不折峰谷**）。工具平价全部走 `RecordFlatCost` 家族进 `CumulativeCost`，status bar 无需新 UI。
 
@@ -329,7 +336,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 3. **语音 v1 只出站**：`Frontend` 端口收发分离的设计前提 + ASR 非流式/TTS 无中断的硬约束，单向播报是唯一「完整可用且不假造能力」的 v1 形态。实时双工明确不做，等官方流式 ASR。
 4. **safety_check 默认关**：自用无对外义务，拒答是纯能力损失；config 暴露满足「将来对外开」的一天。
 5. **工具平价不折峰谷**：官方工具价无峰谷之分，与 token 费分开口径（§1.5）。
-6. **开放问题**：①~~read_url 与 function tools 共存性~~（**已解决 2026-11-14，R0 判红**：off 混用 400 / on 混用静默剥除，见 §2.2）；②`file_id` 前缀缓存参与性（F4 实验）；③~~chat/completions 协议下 `server_tool_use` 确切字段名~~（**已实证 2026-11-14**：计费数 `tool_search`/`tool_fetch`/`tool_image_search`，全零时整键缺席；展示数未见出现，§2.2）；④serve 侧用量面板（远期）；⑤filerefs 映射缓存 vs 无状态懒上传（F4 定，倾向先试无状态）。
+6. **开放问题**：①~~read_url 与 function tools 共存性~~（**已解决 2026-11-14，R0 判红**：off 混用 400 / on 混用静默剥除，见 §2.2）；②~~`file_id` 前缀缓存参与性~~（**F4 实测 2026-11-18：参与**，命中覆盖文档 token 且 id 换新不击穿缓存，§3.2 D-F6 + `docs/pitfalls.md`）；③~~chat/completions 协议下 `server_tool_use` 确切字段名~~（**已实证 2026-11-14**：计费数 `tool_search`/`tool_fetch`/`tool_image_search`，全零时整键缺席；展示数未见出现，§2.2）；④serve 侧用量面板（远期）；⑤~~filerefs 映射缓存 vs 无状态懒上传~~（**F4 定：无状态**，`filerefs.json` 不建，见 D-F3 注）。
 
 ---
 

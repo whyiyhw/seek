@@ -5,7 +5,8 @@
 // feature-paseo-provider.md §3.3 D-2). Behaviour knobs therefore
 // arrive as env vars, parsed here so the resolution is testable
 // without spawning a process. Transport-level env (SEEK_ACP_LOG) is
-// read in cmd/seek's runACP; this file owns the permission posture.
+// read in cmd/seek's runACP; this file owns the permission posture
+// and the provider/model startup pins.
 package acp
 
 import (
@@ -39,4 +40,32 @@ func YoloFromEnv(getenv func(string) string) bool {
 		return true
 	}
 	return false
+}
+
+// Startup pins for the lane's provider/model (feature-paseo-provider.md
+// §3.4). With configOptions + session/set_config_option live, clients
+// can switch models over the protocol at runtime — but the STARTUP lane
+// still needs a channel flags can't reach (flag.Parse never gets past
+// the "acp" positional), and embedding hosts (paseo provider entries)
+// pin a default per entry exactly the way they pin ZCODE_PROVIDER on
+// the zcode bridge. Both are plain names, no truthiness parsing:
+// whitespace-only counts as unset. Scoped to the ACP lane at the call
+// site in cmd/seek (gated on acpLane) so a stray exported var can't
+// silently redirect the TUI — same posture as SEEK_ACP_YOLO above.
+const (
+	ProviderEnvVar = "SEEK_ACP_PROVIDER"
+	ModelEnvVar    = "SEEK_ACP_MODEL"
+)
+
+// ProviderModelFromEnv resolves the startup provider/model pins.
+// getenv is injected (os.Getenv in cmd/seek, a stub in tests) so the
+// parsing is deterministic under test. Empty strings mean "not pinned —
+// fall through to buildProvider's auto-detect".
+func ProviderModelFromEnv(getenv func(string) string) (provider, model string) {
+	if getenv == nil {
+		return "", ""
+	}
+	provider = strings.TrimSpace(getenv(ProviderEnvVar))
+	model = strings.TrimSpace(getenv(ModelEnvVar))
+	return provider, model
 }

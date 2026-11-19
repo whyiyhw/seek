@@ -141,6 +141,14 @@ type Inbound struct {
 	Sender   string // opaque sender id (single-user v1: unused)
 	EventID  string // channel-native event id, dedup key
 	DirectAt bool   // should trigger: p2p true / group @bot true / group chatter false
+
+	// Contract note (feature-deepseek-app-api §3.2 D-F5, pinned by F5;
+	// NOT implemented): a future optional field
+	//   Attachments []Attachment // {Path, Mime}
+	// lands HERE. The plane stores each attachment to disk verbatim and
+	// injects an "@<path>" reference into Text, so attachments flow
+	// through the SAME fileroute.Router as TUI submits (web-panel
+	// drag-drop = temp file + @-ref; no parallel pipeline).
 }
 
 // Reply is the plane's answer to one Inbound, delivered via

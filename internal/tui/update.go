@@ -202,6 +202,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case upgradeDoneMsg:
 		cmds = append(cmds, m.handleUpgradeDone(msg)...)
+
+	case catalogRefreshedMsg:
+		cmds = append(cmds, m.handleCatalogRefreshed(msg)...)
 	}
 
 	return m, tea.Batch(cmds...)

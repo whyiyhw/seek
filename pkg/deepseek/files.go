@@ -60,8 +60,7 @@ var validPurposes = map[string]bool{
 }
 
 // FilePart is one document attached to a user message — the file
-// sibling of ImagePart (feature-deepseek-app-api §3.1). Exactly one of
-// Asset / FileID is populated:
+// sibling of ImagePart (feature-deepseek-app-api §3.1).
 //
 //   - Asset: the durable session/persistence form — a content-addressed
 //     name under the project assets dir (same library as images; the
@@ -70,9 +69,19 @@ var validPurposes = map[string]bool{
 //   - FileID: the sendable form — a Files API id ("file-api-…") that
 //     ResolveFiles (F4) materialises just before the request, with
 //     lazy upload / expiry re-upload from the asset library.
+//   - ExpiresAt / Purpose: the upload's lifecycle and parse mode,
+//     recorded next to the id so the send path can tell "still live"
+//     from "re-upload from the asset" WITHOUT a sidecar cache — the
+//     transcript stays the only source of truth (D-F3's "fully
+//     stateless" option; the PRD's filerefs.json was the alternative).
+//     ExpiresAt is unix seconds, 0/absent = no expiry (the API
+//     documents 1 h – 30 days or permanent). Both fields are session-
+//     persistence only: toWire emits file_id alone.
 type FilePart struct {
-	Asset  string `json:"asset,omitempty"`
-	FileID string `json:"file_id,omitempty"`
+	Asset     string `json:"asset,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	ExpiresAt int64  `json:"expires_at,omitempty"` // unix seconds; 0 = permanent / unknown
+	Purpose   string `json:"purpose,omitempty"`    // Purpose* const; "" = text_recognition (legacy parts)
 }
 
 // FileObject is the POST /files 200 body. The parse already ran by the

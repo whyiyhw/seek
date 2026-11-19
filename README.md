@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-f5a623?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/CI-race--tested-2ea043?style=flat-square&logo=github&logoColor=white" alt="CI">
-  <img src="https://img.shields.io/badge/release-v0.11.0-f5a623?style=flat-square" alt="release">
+  <img src="https://img.shields.io/badge/release-v0.12.0-f5a623?style=flat-square" alt="release">
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-2b2b32?style=flat-square" alt="Platforms">
   &nbsp;·&nbsp; <a href="README.zh.md">中文</a>
 </p>
@@ -18,7 +18,7 @@ The whole platform is one **static Go binary** — a **~6 MB download**, **no da
 
 - **Every surface.** Native terminal TUI · browser chat (`seek serve --frontend=web` — embedded page, SSE streaming, token auth) · IDE (`seek acp` for Zed and other ACP clients, `seek -rpc` JSON-RPC 2.0) · headless lanes: unattended ACP where the dispatcher's `cwd` anchors every tool and `SEEK_ACP_YOLO=1` auto-approves local actions while push/PR stay blocked — seek itself runs as a dispatch lane under an ACP fleet manager (paseo).
 - **Self-distilling skills.** `/distill` turns a finished session into a reviewable SKILL.md draft — `--dry-run` previews it, drafts sit in a directory no session loads, and installing one stays an explicit human action. Next month's agent carries this month's lessons.
-- **Cost lanes.** Bring your own key: **DeepSeek-first** per-token (measured 95–97% prefix-cache hits) · **GLM** on its own pricing card · **OpenCode Go** — a flat $10/month subscription (request-window quotas over an open-weight pool; seek self-identifies with its own `User-Agent` + per-session `x-opencode-session`) · OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …) as the fallback lane — and sub-agents can ride a cheaper lane than their parent.
+- **Cost lanes.** Bring your own key: **DeepSeek-first** per-token (measured 95–97% prefix-cache hits) · **GLM** on its own pricing card (**Coding Plan** subscribers must point `providers.glm.base_url` at the `/api/coding/paas/v4` endpoint — Zhipu bills by URL, not by key, so the default `/api/paas/v4` charges the recharge balance; [guide](docs/guide-config.md)) · **OpenCode Go** — a flat $10/month subscription (request-window quotas over an open-weight pool; seek self-identifies with its own `User-Agent` + per-session `x-opencode-session`) · OpenAI / Anthropic / Gemini and any OpenAI-compatible endpoint (KIMI, …) as the fallback lane — and sub-agents can ride a cheaper lane than their parent.
 
 > **30-second version** — It's Claude Code / aider territory, but **DeepSeek-first**: the autonomous run that audited and fixed *these very docs* (33 files, 212 tool calls) cost **$0.17** at a **97.7% prefix-cache hit**. One binary, your own key, nothing phones home. Scroll down to watch that exact run ↓
 
@@ -104,6 +104,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Background jobs** | detach long builds/servers → `bg-N`; `monitor` polls / waits / kills. [📘](docs/guide-background.md) |
 | **Semantic references** | LSP "who calls this?" (gopls / pyright / tsserver), grep fallback. [📘](docs/guide-references.md) |
 | **Native vision input** | paste or `@img.png` → image bytes sent natively to the multimodal default model (`deepseek-flash`, V4.1). [📘](docs/guide-vision.md) |
+| **Document input** | `@report.pdf` → uploaded & parsed via the DeepSeek Files API (`@rich:` for layout); the local asset library keeps the only copy. [📘](docs/guide-files.md) |
 | **Code review** | effort-graded diff review with `--fix` and `--comment`. [📘](docs/guide-code-review.md) |
 | **MCP client** | pass through any MCP server's tools. [📘](docs/guide-mcp.md) |
 | **Web search** | built-in `web_search` tool over the DeepSeek Search API — fresh docs without leaving the loop. |
@@ -143,7 +144,7 @@ Every subcommand is also `/<name>` in the TUI. TUI-only: `/plan` `/goal` `/steer
 
 ## Built for real, not a weekend build
 
-**~124k lines of Go** (~61k non-test) across **88 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.11.0**.
+**~161k lines of Go** (~74k non-test) across **98 packages**, `-race` tested on macOS / Linux / Windows in CI. PRD-driven — [`docs/prd/`](docs/prd/) holds the v0–v7 design history; a [pitfalls log](docs/pitfalls.md) and a behavioral [eval harness](eval/) keep it honest. Zero external deps in the DeepSeek client; **stdlib-first** throughout. Current release: **v0.12.0**.
 
 Docs: [`docs/`](docs/) · contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 

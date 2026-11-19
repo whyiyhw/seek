@@ -91,6 +91,7 @@
 - **stdout 是协议通道**：acp 模式日志全走 stderr（现状已保证）；首验排查用 `SEEK_ACP_LOG` tee 原始收发（已有，`main.go:2557`）。
 - **无桌面依赖**：DeepSeek 直连 API key 认证，无 OAuth/验证码/桌面 App 会话——zcode 桥"headless 不能用 start-plan 套餐"那类坑在本路径**不存在**（那是订阅套餐绑桌面验证码的产物；seek 用 API key）。
 - **模型钉法**：acp 模式吃不到 `--model`，用默认 `deepseek.ModelV41Flash`（`main.go:2751`）——恰是"最便宜车道"的题中之义。将来要可选型号：加 `SEEK_MODEL` env 或实现 ACP `modes`/`configOptions` 让 paseo UI 出模型选择，均留后续卡。
+  > ✅ **两条路都已落地**（卡 c_6thhqc，2026-11-18，"C 一步到位"拍板）：①env 钉定改名 `SEEK_ACP_PROVIDER`/`SEEK_ACP_MODEL`（与 `SEEK_ACP_YOLO` 同款 ACP-scoped 命名，`internal/acp/headless.go`，在 `buildProvider` 之前注入）；②完整 configOptions——`session/new` 返回 `configOptions`（`id:"model"` select，value id 为 `"<provider>:<model>"`，按 key 在不在门控）+ `session/set_config_option` 分发 + `agent.SetLane` 回合间整车道换挡（prompt 的 cancel 注册前移到 dispatch 同步段，换挡窗口无竞争；回合中切换回 `-32000` 拒）。wire 形状逆向自本机 `@agentclientprotocol/sdk` schema + zcode-acp-server 参照桥（`~/.paseo/zcode-acp/`）。用法与限制见 `docs/guide-zed.md` §5.2。`modes`（plan-mode 映射）仍留后续。
 
 ## 4. ③ 验收路径：butler drive 最小卡
 

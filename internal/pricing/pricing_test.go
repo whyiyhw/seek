@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,6 +330,71 @@ func TestPricingFor_OpenCodeGoLane(t *testing.T) {
 	// direct card must not silently move the Go lane with it).
 	if _, ok := standardRates[ModelOpenCodeV41Flash]; !ok {
 		t.Error("deepseek-v4.1-flash needs its own registry entry, not the Flash fallback")
+	}
+}
+
+// TestOpenCodeGoCatalogue guards the menu/rate-card invariant for the
+// lane's whole catalogue (pricing.OpenCodeGoModels is what ACP's dropdown
+// and the TUI /model picker render): every offered id must resolve
+// through its OWN registry entry — falling back would price a $15/M
+// kimi-k3 turn at Flash rates and understate the display by 10× — and
+// every card must be flat-rate, because the Go plan is a request-window
+// subscription with no DeepSeek peak clock. Labels are also width-budget
+// checked: the TUI pads the id column to 32 and appends " (current)", so
+// an overlong label soft-wraps the picker.
+func TestOpenCodeGoCatalogue(t *testing.T) {
+	// Two Go-pool ids are also live ids on a direct-API lane, and the
+	// registry is keyed by wire id alone — so they reuse that lane's
+	// card and inherit its peak/off-peak clock. The Go display is
+	// display-only, so the artifact is documented rather than solved
+	// with a second key the pricing API can't express.
+	sharedWithDirectLane := map[string]bool{ModelGLM53: true, ModelV4Pro: true}
+
+	seen := make(map[string]bool, len(OpenCodeGoModels))
+	for _, m := range OpenCodeGoModels {
+		if seen[m.ID] {
+			t.Errorf("%s: duplicate row in OpenCodeGoModels", m.ID)
+		}
+		seen[m.ID] = true
+		if m.Label == "" {
+			t.Errorf("%s: empty picker label", m.ID)
+		}
+		// 32-col id + label + " (current)" must fit a 100-col terminal
+		// with room for the "▸ " marker and padding.
+		if len(m.Label) > 55 {
+			t.Errorf("%s: label %q is %d chars, want <= 55 (picker row width)", m.ID, m.Label, len(m.Label))
+		}
+
+		card, ok := standardRates[m.ID]
+		if !ok {
+			t.Errorf("%s: no registry entry — the unknown-model fallback would price it as Flash", m.ID)
+			continue
+		}
+		// The pool's "-free" rows are the docs' zero-input-price models:
+		// their card must be exactly $0 (the fallback would otherwise
+		// bill a free turn at Flash rates). Everything else must be a
+		// real, positive card.
+		if isFree := strings.HasSuffix(m.ID, "-free"); isFree {
+			if card.InputMissPerMTok != 0 || card.InputHitPerMTok != 0 || card.OutputPerMTok != 0 {
+				t.Errorf("%s: free row must carry a $0 card, got %+v", m.ID, card)
+			}
+			if got := Cost(m.ID, TierStandard, deepseek.Usage{PromptCacheMissTokens: 1_000_000, CompletionTokens: 1_000_000}); got != 0 {
+				t.Errorf("%s: Cost = %v, want 0 for a free model", m.ID, got)
+			}
+		} else if card.InputMissPerMTok <= 0 || card.InputHitPerMTok < 0 || card.OutputPerMTok <= 0 {
+			t.Errorf("%s: non-positive rate card %+v", m.ID, card)
+		}
+		if !card.NoOffPeakDiscount && !sharedWithDirectLane[m.ID] {
+			t.Errorf("%s: Go-pool card must be flat-rate (NoOffPeakDiscount)", m.ID)
+		}
+		if !sharedWithDirectLane[m.ID] {
+			if off := PricingFor(m.ID, TierOffPeak); off != card {
+				t.Errorf("%s: off-peak %+v differs from standard %+v", m.ID, off, card)
+			}
+		}
+	}
+	if !seen[ModelOpenCodeV41Flash] {
+		t.Errorf("lane default %s missing from OpenCodeGoModels", ModelOpenCodeV41Flash)
 	}
 }
 

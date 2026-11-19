@@ -300,6 +300,48 @@ func TestRun_Help(t *testing.T) {
 	}
 }
 
+// TestRun_HelpFlag_AnywhereBeforeTerminator is the reported bug:
+// `seek serve --frontend=web -h` used to reach flag.Parse, whose -h
+// arrives as flag.ErrHelp and badConfig turned a help REQUEST into
+// exit 2 with the text on stderr. Help is help wherever it sits, as
+// long as the "--" terminator hasn't been crossed: stdout, clean exit.
+func TestRun_HelpFlag_AnywhereBeforeTerminator(t *testing.T) {
+	withHome(t)
+	for _, args := range [][]string{
+		{"--frontend=web", "-h"},
+		{"--frontend=web", "--help"},
+		{"-h", "--frontend=web"},
+	} {
+		var out, errOut bytes.Buffer
+		if err := Run(args, &out, &errOut); err != nil {
+			t.Fatalf("Run(%v): help must be clean, got %v", args, err)
+		}
+		if !strings.Contains(out.String(), "--frontend") {
+			t.Errorf("Run(%v): help belongs on stdout, got %q", args, out.String())
+		}
+		if errOut.Len() != 0 {
+			t.Errorf("Run(%v): help must not touch stderr, got %q", args, errOut.String())
+		}
+	}
+}
+
+// TestRun_HelpFlagAfterTerminator: past "--" the token is a positional,
+// not a help request — the exit-2 usage contract still owns it.
+func TestRun_HelpFlagAfterTerminator(t *testing.T) {
+	withHome(t)
+	var out, errOut bytes.Buffer
+	err := Run([]string{"--", "-h"}, &out, &errOut)
+	if err == nil {
+		t.Fatal("`-- -h` is a stray positional; it must fail")
+	}
+	if code := controlplane.ExitCode(err); code != controlplane.ExitFrontendsDown {
+		t.Errorf("exit code = %d, want 2 (err %v)", code, err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("nothing belongs on stdout for a usage error, got %q", out.String())
+	}
+}
+
 // TestEffectiveServe pins the --listen fold in isolation: no flag
 // passes the section through untouched (nil included — the
 // absent-section compat path), a set flag wins over serve.web_addr by

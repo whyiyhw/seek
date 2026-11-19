@@ -9,7 +9,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-f5a623?style=flat-square" alt="MIT">
   <img src="https://img.shields.io/badge/CI-race--tested-2ea043?style=flat-square&logo=github&logoColor=white" alt="CI">
-  <img src="https://img.shields.io/badge/release-v0.11.0-f5a623?style=flat-square" alt="release">
+  <img src="https://img.shields.io/badge/release-v0.12.0-f5a623?style=flat-square" alt="release">
   <img src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-2b2b32?style=flat-square" alt="Platforms">
   &nbsp;·&nbsp; <a href="README.md">English</a>
 </p>
@@ -18,7 +18,7 @@
 
 - **多端驱动。** 原生终端 TUI · 浏览器聊天页（`seek serve --frontend=web`——内嵌页面、SSE 流式、token 认证）· IDE（`seek acp` 接 Zed 等 ACP 客户端、`seek -rpc` JSON-RPC 2.0）· 无头车道：无人值守 ACP 下，派单方传来的 `cwd` 锚定所有工具，`SEEK_ACP_YOLO=1` 自动放行本地动作、照堵 push/PR——seek 自身已作为一个派单车道跑在 ACP 编排器（paseo）之下。
 - **自蒸馏 skill。** `/distill` 把跑完的会话蒸馏成可人审的 SKILL.md 草稿——`--dry-run` 先预览、草稿落在任何会话都不加载的目录、安装永远是一步显式的人工动作。下个月的 agent 带着这个月的教训上岗。
-- **多条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价 · **OpenCode Go** 订阅包月 $10（请求数窗口限额、开放权重模型池；seek 以自有 `User-Agent` + 每会话 `x-opencode-session` 头自报身份）· OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
+- **多条成本车道。** 自带 key 任选：**DeepSeek 优先**按量计费（实测 95–97% prefix-cache 命中）· **GLM** 独立计价（**Coding Plan** 订阅用户必须把 `providers.glm.base_url` 指到 `/api/coding/paas/v4` 端点——智谱按 URL 分账不按 key 分账，默认的 `/api/paas/v4` 扣的是充值余额，见 [配置文档](docs/guide-config.md)） · **OpenCode Go** 订阅包月 $10（请求数窗口限额、开放权重模型池；seek 以自有 `User-Agent` + 每会话 `x-opencode-session` 头自报身份）· OpenAI / Anthropic / Gemini 及任意 OpenAI 兼容端点（KIMI、…）兜底——子代理还能骑比父代理更便宜的车道。
 
 ---
 
@@ -102,6 +102,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **后台任务** | 长 build/server 丢后台 → `bg-N`；`monitor` poll / wait / kill。[📘](docs/guide-background.md) |
 | **语义 references** | LSP「谁调用了它」（gopls / pyright / tsserver），grep 兜底。[📘](docs/guide-references.md) |
 | **原生视觉输入** | 粘贴或 `@img.png` → 图片字节原生直发多模态默认模型（`deepseek-flash`，V4.1）。[📘](docs/guide-vision.md) |
+| **文档输入** | `@report.pdf` → 走 DeepSeek Files API 上传解析（`@rich:` 看图文混排），本地资产库存唯一副本。[📘](docs/guide-files.md) |
 | **代码审查** | 分档深度的 diff 审查，支持 `--fix` 和 `--comment`。[📘](docs/guide-code-review.md) |
 | **MCP client** | 透传任意 MCP server 的工具。[📘](docs/guide-mcp.md) |
 | **Web 搜索** | 内置 `web_search` 工具，走 DeepSeek Search API——查新文档不用跳出循环。 |
@@ -140,7 +141,7 @@ seek hooks      list / check / trust / audit
 
 ## 为真实场景打造，不是周末玩具
 
-**~124k 行 Go**（~61k 非测试），跨 **88 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.11.0**。
+**~161k 行 Go**（~74k 非测试），跨 **98 个包**，CI 在 macOS / Linux / Windows 上 `-race` 通过。PRD 驱动——[`docs/prd/`](docs/prd/) 留着 v0–v7 完整设计史；一份 [踩坑日志](docs/pitfalls.md) 和一套行为 [eval harness](eval/) 让它保持诚实。DeepSeek 客户端零外部依赖；全程 **stdlib 优先**。当前 release：**v0.12.0**。
 
 文档：[`docs/`](docs/) · 贡献：[`CONTRIBUTING.md`](CONTRIBUTING.md) / [`AGENTS.md`](AGENTS.md)
 

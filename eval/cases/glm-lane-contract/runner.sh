@@ -77,9 +77,13 @@ export ANTHROPIC_API_KEY="glm-lane-contract-provider-priority-probe"
 
 # Optional endpoint override for hermetic plumbing shakedowns; unset on
 # real runs so the pinned bigmodel.cn paas/v4 URL is exercised.
+# GLM_BASE_URL rides along because env beats providers.glm.base_url in the
+# copied config (glmEndpoint precedence) — otherwise a developer's Coding
+# Plan preset would hijack the fake-server leg.
 base_url_args=()
 if [[ -n "${SEEK_EVAL_GLM_BASE_URL:-}" ]]; then
   base_url_args=(--base-url "$SEEK_EVAL_GLM_BASE_URL")
+  export GLM_BASE_URL="$SEEK_EVAL_GLM_BASE_URL"
 fi
 
 prompt=$(cat "$SEEK_EVAL_PROMPT_FILE")

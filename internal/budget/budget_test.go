@@ -1,6 +1,10 @@
 package budget
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/whyiyhw/seek/internal/pricing"
+)
 
 // pct returns floor(limit * fraction). Helper because Go's constant
 // folding refuses to truncate a constant float to int at compile time,
@@ -22,13 +26,36 @@ func TestLimit_KnownModelAndFallback(t *testing.T) {
 	if got := Limit("glm-5.3"); got != 1_000_000 {
 		t.Errorf("glm-5.3 = %d, want 1M", got)
 	}
-	for _, retired := range []string{"deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"} {
+	// deepseek-v4-pro is NOT retired any more (own model since the
+	// 2026-11 re-listing — see pricing.ModelV4Pro), so it carries a
+	// real limit rather than the conservative fallback.
+	if got := Limit("deepseek-v4-pro"); got != 1_000_000 {
+		t.Errorf("deepseek-v4-pro = %d, want 1M", got)
+	}
+	for _, retired := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp"} {
 		if got := Limit(retired); got != Default {
 			t.Errorf("%s = %d, want Default %d", retired, got, Default)
 		}
 	}
 	if got := Limit("unknown-model-x"); got != Default {
 		t.Errorf("fallback = %d, want %d", got, Default)
+	}
+}
+
+// TestLimit_OpenCodeGoCatalogue pins the lane against the other half of
+// the same invariant pricing tests: every model the lane's menus offer
+// must have an explicit window. A missing entry silently falls to
+// Default (128K), which would nag /compact at an eighth of a 1M window.
+func TestLimit_OpenCodeGoCatalogue(t *testing.T) {
+	for _, m := range pricing.OpenCodeGoModels {
+		got, ok := contextLimits[m.ID]
+		if !ok {
+			t.Errorf("%s: no explicit context limit (would fall to Default %d)", m.ID, Default)
+			continue
+		}
+		if got <= Default {
+			t.Errorf("%s = %d, want > Default %d", m.ID, got, Default)
+		}
 	}
 }
 

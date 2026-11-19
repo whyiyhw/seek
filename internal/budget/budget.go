@@ -2,12 +2,21 @@
 // thresholds at which seek's UI surfaces a "you're about to hit the
 // limit" warning.
 //
-// We deliberately keep these as hard-coded constants — vendor docs
-// can change, but a stale table failing safe (under-reporting capacity)
-// is much better than a runtime probe that could leak the OSC-11 / TTY
-// detection class of problems we already fought once (docs/pitfalls.md
-// §"Garbage `]11;rgb…").
+// The table is hard-coded — vendor docs can change, but a stale table
+// failing safe (under-reporting capacity) is much better than a runtime
+// probe that could leak the OSC-11 / TTY detection class of problems we
+// already fought once (docs/pitfalls.md §"Garbage `]11;rgb…").
+//
+// The one sanctioned exception is SetLimits: the OpenCode Go lane
+// publishes its whole catalogue — including `limit.context` — at a
+// documented HTTPS endpoint (GET /v1/models), so internal/opencatalog
+// refreshes that table at session start and installs the result here.
+// The compiled entries stay as the offline baseline, and a failed refresh
+// simply leaves them in place. Anything that needs a TTY probe still has
+// no business here.
 package budget
+
+import "sync"
 
 // contextLimits is the input+context size (in tokens) for the models
 // seek can talk to. Values reflect what each provider advertises as of
@@ -38,9 +47,32 @@ var contextLimits = map[string]int{
 	"glm-5.3": 1_000_000,
 	// OpenCode Go lane (--provider=opencode): the same DeepSeek V4.1
 	// Flash as the entry above, addressed by the gateway's own id
-	// string (1M context). Other Go-pool ids aren't catalogued and hit
-	// Default — conservative, never over-reports capacity.
+	// string (1M context). The rest of the Go pool speaks
+	// Chat-Completions too and is offered in the lane's model menus
+	// (pricing.OpenCodeGoModels) — each gets its own limit here, taken
+	// from the same GET /v1/models `limit.context` field (checked
+	// 2026-11-18). Missing entries would hit Default (128K) and nag
+	// /compact at an eighth of the real window.
 	"deepseek-v4.1-flash": 1_000_000,
+	"deepseek-v4-pro":     1_000_000,
+	"glm-5.2":             1_000_000,
+	"glm-5.3-flash":       1_000_000,
+	"kimi-k3":             1_048_576,
+	"kimi-k3.1-pro":       1_048_576,
+	"kimi-k2.7-code":      262_144,
+	"minimax-m3.1-flash":  1_000_000,
+	"mimo-v2.6-flash":     1_048_576,
+	"mimo-v2.6-pro":       1_048_576,
+	"longcat-2.0":         1_000_000,
+	"hy4":                 1_048_576,
+	"hy4-preview":         1_024_000,
+	"hy3":                 256_000,
+	"step-5-preview":      1_000_000,
+	// Free (time-limited) pool rows — same source, same field.
+	"beam-free":               1_048_576,
+	"hy4-flash-free":          1_048_576,
+	"longcat-2.5-free":        1_000_000,
+	"iceman-contributor-free": 262_144,
 }
 
 // Default is returned when an unknown model is queried. Since most
@@ -50,10 +82,54 @@ var contextLimits = map[string]int{
 // genuinely small model overflows.
 const Default = 128_000
 
+// overrides, when non-nil, wins over contextLimits. Installed once per
+// session by the OpenCode catalogue refresh (internal/opencatalog), so a
+// newly-listed model gets its real window instead of Default. Guarded
+// because Limit runs on the status-bar render path while a background
+// refresh may be installing the new table.
+var (
+	overrideMu sync.RWMutex
+	overrides  map[string]int
+)
+
+// SetLimits installs a runtime limit override; nil clears it. Sanctioned
+// caller: internal/opencatalog (see the package comment). Values <= 0 are
+// dropped — a zero window would make Classify divide by zero.
+func SetLimits(m map[string]int) {
+	clean := make(map[string]int, len(m))
+	for id, v := range m {
+		if v > 0 {
+			clean[id] = v
+		}
+	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
+	if len(clean) == 0 {
+		overrides = nil
+		return
+	}
+	overrides = clean
+}
+
+// Known returns the explicit window for model, if any (override first,
+// then the compiled table), WITHOUT the Default fallback. Callers that
+// must tell "catalogued" from "guessed" — the catalogue merge, mostly —
+// use this instead of comparing against Default, which would misread a
+// model that genuinely has a 128K window.
+func Known(model string) (int, bool) {
+	overrideMu.RLock()
+	defer overrideMu.RUnlock()
+	if v, ok := overrides[model]; ok {
+		return v, true
+	}
+	v, ok := contextLimits[model]
+	return v, ok
+}
+
 // Limit returns the context window size for a model. Unknown models
 // fall back to Default.
 func Limit(model string) int {
-	if v, ok := contextLimits[model]; ok {
+	if v, ok := Known(model); ok {
 		return v
 	}
 	return Default

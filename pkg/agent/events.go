@@ -69,6 +69,11 @@ type ToolExecEnd struct {
 	Name   string
 	Result string
 	Err    error
+	// Args mirrors ToolExecStart.Args (raw JSON the LLM produced).
+	// Consumers that only see the end event — the ACP mapping, which
+	// builds tool_call_update content (e.g. edit's diff block) from the
+	// args — need it without re-plumbing the start event through.
+	Args string
 }
 
 // ErrorEvent surfaces a non-recoverable error mid-stream. The channel will
