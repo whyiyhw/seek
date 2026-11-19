@@ -1720,6 +1720,20 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: a ratio over "repeated things" must name its denominator in the same breath as the number, and both variants belong in the output — the reader cannot reconstruct which one was used from the value alone.
 - **Refs**: `scripts/transcript-stats` `analyse()`, `eval/transcript-baseline/2026-11-19.md` § "工具名分布 + 重复指纹"
 
+### A frozen baseline keeps asserting a shell-parameter shape that has since been changed
+- **Saw**: the 2026-11-19 baseline's headline `+50, 991 次` (offset step = the 50-line read page) was read downstream as "read still paginates at 50", but `2f0f1df` (2026-08-14) had already raised `limit` 50 → 200 and added whole-file reads. The number is still correct *as history*; only the tense was missing. Verified: all 991 `+50` steps come from sessions created before 2026-08-14; the 20 later sessions contribute 0.
+- **Why**: a baseline is immutable by design (it's the "before" half of an A/B), so it cannot be regenerated when the shell changes — meaning every reader of it gets a snapshot of a world that no longer exists, and nothing in the numbers says so.
+- **Fix**: `eval/transcript-baseline/2026-11-19.md` now carries an explicit "this is historical shape, not current behaviour" note at both quote sites (key-numbers block + next-card checklist) naming the commit, the date, and the old/new values.
+- **Lesson**: any frozen measurement whose subject is a **tunable shell parameter** must be stamped with "as measured under <value>, changed at <commit/date>" at every place a reader meets the number — not just in the header. The follow-up card is exactly the reader who will misread it.
+- **Refs**: `eval/transcript-baseline/2026-11-19.md` § "四个关键数字" / "下一张卡（预告）", commit `2f0f1df`
+
+### Committed metric snapshots must not embed absolute home paths
+- **Saw**: `skipped_paths` in the committed baseline JSON carried `/Users/<name>/.seek/sessions/...` — the username and home layout enter public git history through a diagnostics field nobody reads.
+- **Why**: the analyser's `skipped_paths` is a debugging affordance (which files were unreadable), and the cheapest implementation is "the path you already have" — but the JSON's destination is a repo, not a terminal. A field's *purpose* and its *audience* diverge after it's committed.
+- **Fix**: `transcript-stats` emits `os.path.basename(p)` in `skipped_paths`; `--selftest` asserts the entry equals the basename and contains no path separator.
+- **Lesson**: when a diagnostics field is written into a committed artifact, store the **minimum identity** the reader needs (filename), and get full paths from a local re-run. Add the assertion at write time — a privacy leak is invisible in review diffs of a 30 KB JSON.
+- **Refs**: `scripts/transcript-stats` (`analyse`, `_selftest`), `eval/transcript-baseline/2026-11-19.json`
+
 ## Typed agents / orchestration
 
 ### Routing built-in agent types through the custom gate silently widens their toolset

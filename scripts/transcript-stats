@@ -298,7 +298,10 @@ def analyse(sessions, skipped, malformed, read_key_mode="auto"):
         "sessions": len(sessions),
         "tool_calls": total_calls,
         "skipped_files": len(skipped),
-        "skipped_paths": skipped,
+        # 只落文件名，不落本机绝对路径：这份 JSON 会进仓库，绝对路径会把
+        # 用户名/家目录布局带进公开历史（c_254zzz 验收②）。诊断要全路径时
+        # 看 stderr / 本地重跑，别指望快照。
+        "skipped_paths": [os.path.basename(p) for p in skipped],
         "malformed_lines": malformed,
         "schema_versions": schema_versions,
         "models": model_counts,
@@ -507,6 +510,12 @@ def _selftest():
         if can_lock:
             check("skipped_files", res["skipped_files"], 1)
             check("skipped_paths", len(res["skipped_paths"]), 1)
+            # 只留文件名：这份 JSON 会进仓库，绝对路径会带上用户名/家目录
+            # 布局。断言用 basename 相等且不含路径分隔符（c_254zzz 验收②）。
+            check("skipped_paths.basename", res["skipped_paths"][0],
+                  os.path.basename(locked))
+            check("skipped_paths.no_sep",
+                  [s for s in res["skipped_paths"] if "/" in s or "\\" in s], [])
         else:
             print("selftest: SKIP 权限断言（以 root 跑，构造不出不可读文件）")
 
@@ -559,6 +568,12 @@ def _selftest():
             for token in wants:
                 if token not in md:
                     fails.append("baseline: 报告缺 %r（与快照 JSON 不一致）" % token)
+            # 进仓库的快照不得带绝对路径（用户名/家目录布局），见 analyse()
+            # 中 skipped_paths 的注释。
+            leaked = [s for s in base.get("skipped_paths", [])
+                      if "/" in s or "\\" in s]
+            if leaked:
+                fails.append("baseline: skipped_paths 含绝对路径 %r" % leaked)
         else:
             print("selftest: SKIP 基线一致性断言（缺 transcript-baseline 快照）")
     finally:

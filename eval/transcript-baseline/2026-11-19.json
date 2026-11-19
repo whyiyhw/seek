@@ -1643,7 +1643,7 @@
   "sessions": 273,
   "skipped_files": 1,
   "skipped_paths": [
-    "/Users/whyiyhw/.seek/sessions/20260813-143434-dcab9a.jsonl"
+    "20260813-143434-dcab9a.jsonl"
   ],
   "tool_calls": 15041,
   "tools": [
