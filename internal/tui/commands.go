@@ -22,6 +22,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
@@ -425,6 +426,18 @@ func knownModelsForProvider(providerName string) []modelChoice {
 			{"gemini-2.0-flash", "Gemini 2.0 Flash — fast"},
 			{"gemini-1.5-pro", "Gemini 1.5 Pro — large context (2M)"},
 		}
+	case "opencode":
+		// The Go lane's catalogue lives in one place
+		// (pricing.OpenCodeGoModels) and is shared with ACP's dropdown,
+		// so a model can't be selectable in one surface and absent from
+		// the other. Descriptions there are written to the picker's
+		// width budget: 32-col id column + label must fit ~100 cols with
+		// the " (current)" suffix.
+		models := make([]modelChoice, 0, len(pricing.OpenCodeGoModels))
+		for _, m := range pricing.OpenCodeGoModels {
+			models = append(models, modelChoice{m.ID, m.Label})
+		}
+		return models
 	default:
 		return nil
 	}

@@ -503,10 +503,11 @@ type subagentRoute struct {
 // chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
 // table iff its key exists.
 //
-// baseURLFlag is the parent's --base-url: the GLM route resolves its
-// endpoint through the same glmEndpoint precedence as the startup lane,
-// so a Coding Plan preset (config/env or flag) also governs subagents —
-// otherwise explore/plan children silently bill the recharge balance.
+// baseURLFlag is the parent's --base-url: the GLM and OpenCode routes
+// resolve their endpoints through the same <lane>Endpoint precedence as
+// the startup lane, so a Coding Plan preset or a proxy/mirror override
+// (config/env or flag) also governs subagents — otherwise explore/plan
+// children silently bill the wrong endpoint.
 func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[string]subagentRoute {
 	cfg, _ := config.Load()
 	routes := make(map[string]subagentRoute)
@@ -524,7 +525,7 @@ func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[
 	}
 	if k := config.KeyFor(cfg, "opencode"); k != "" {
 		routes[subagent.ProviderOpenCode] = subagentRoute{
-			provider: compatible.New(k, opencodeBaseURL, "OpenCode"),
+			provider: newOpenCodeProvider(cfg, k, baseURLFlag),
 		}
 	}
 	return routes
@@ -3060,9 +3061,19 @@ var acpLaneModels = []struct {
 	{"glm", []struct{ id, label string }{
 		{pricing.ModelGLM53, "glm-5.3 (GLM)"},
 	}},
-	{"opencode", []struct{ id, label string }{
-		{pricing.ModelOpenCodeV41Flash, "deepseek-v4.1-flash (OpenCode Go)"},
-	}},
+	{"opencode", opencodeACPMenuModels()},
+}
+
+// opencodeACPMenuModels expands the lane's catalogue
+// (pricing.OpenCodeGoModels) into dropdown rows. The ACP label keeps the
+// pre-existing "<id> (OpenCode Go)" shape — the dropdown's job is picking
+// an id, and the same ids appear on other lanes' labels the same way.
+func opencodeACPMenuModels() []struct{ id, label string } {
+	out := make([]struct{ id, label string }, 0, len(pricing.OpenCodeGoModels))
+	for _, m := range pricing.OpenCodeGoModels {
+		out = append(out, struct{ id, label string }{m.ID, m.ID + " (OpenCode Go)"})
+	}
+	return out
 }
 
 // acpModelMenu builds the session/new configOptions model select.
@@ -3751,23 +3762,23 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		// compatible adapter like GLM. The Go endpoint's client
 		// contract: a self-identifying User-Agent plus a stable
 		// x-opencode-session header per conversation — both injected by
-		// the openai client from ChatRequest.SessionID; without them
-		// Go-plan requests can degrade to per-token billing. The
-		// *-Free models are OpenCode-client-only and not usable here;
-		// paid endpoints on the plan are shielded from
-		// train-on-requests by default. Default model
-		// deepseek-v4.1-flash per opencode.ai/docs/console/models
-		// (2026-11-17) — ids still 待核 against GET /v1/models once a
-		// real key exists; --base-url overrides the endpoint.
+		// the openai client from ChatRequest.SessionID; omitting the
+		// session header is a hard 400 MissingSessionID (verified
+		// 2026-11-18), and a generic UA is the documented per-token
+		// degradation path. Default model deepseek-v4.1-flash was
+		// confirmed in GET /v1/models (public): recommended_api
+		// chat-completions, tools + reasoning (effort low/high/max),
+		// 1M context / 384K output. The menu offers the whole
+		// Chat-Completions slice of the Go pool (pricing.OpenCodeGoModels
+		// — 20 ids, of which 4 are the time-limited zero-price rows:
+		// the docs define "free" as an opencode-go model with no input
+		// price, same gateway and key, just unmetered). --base-url
+		// overrides the endpoint.
 		apiKey := config.KeyFor(cfg, "opencode")
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no OpenCode API key — set OPENCODE_API_KEY or add providers.opencode.api_key to ~/.seek/config.json")
 		}
-		base := opencodeBaseURL
-		if baseURLFlag != "" {
-			base = baseURLFlag
-		}
-		return compatible.New(apiKey, base, "OpenCode"), nil, "OpenCode", "deepseek-v4.1-flash", nil
+		return newOpenCodeProvider(cfg, apiKey, baseURLFlag), nil, "OpenCode", "deepseek-v4.1-flash", nil
 
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
@@ -3842,12 +3853,40 @@ func newGLMProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider 
 
 // opencodeBaseURL is the default endpoint for --provider=opencode: the
 // OpenCode Go plan's inference gateway, OpenAI-compatible. Same
-// full-POST-target shape as glmBaseURL. The /v1/chat/completions path is
-// the documented expectation (base https://opencode.ai/inference/go,
-// model list GET /v1/models) but the official harness page 404s at the
-// time of wiring — 待核 with a real key via curl before relying on a
-// non-default path; --base-url overrides.
-const opencodeBaseURL = "https://opencode.ai/inference/go/v1/chat/completions"
+// full-POST-target shape as glmBaseURL. Verified 2026-11-18 against
+// GET https://opencode.ai/inference/go/v1/models (public, no key): each
+// chat model carries api.chat-completions.base_url =
+// "https://opencode.ai/inference/go/openai/v1", so the POST target is
+// that base plus /chat/completions. Two aliases also route (docs table
+// lists /inference/openai/v1/chat/completions, and the older
+// /inference/go/v1/chat/completions) — keep the /go/openai one so the
+// request is scoped to the Go plan, which is what the lane bills
+// against. --base-url overrides.
+const opencodeBaseURL = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+
+// opencodeEndpoint resolves the lane's POST target with the same
+// precedence as glmEndpoint: env (OPENCODE_BASE_URL) / providers.opencode
+// .base_url > --base-url > the compiled default. baseURLFlag alone used
+// to be honoured here while config-file overrides were silently dropped —
+// the GLM lane already grew this exit after its own children diverged.
+func opencodeEndpoint(cfg config.Config, baseURLFlag string) string {
+	base := opencodeBaseURL
+	if baseURLFlag != "" {
+		base = baseURLFlag
+	}
+	if override := config.BaseURLFor(cfg, "opencode"); override != "" {
+		base = override
+	}
+	return base
+}
+
+// newOpenCodeProvider is the single construction point for the OpenCode
+// lane: startup (buildProvider), ACP laneFor and subagent routes all
+// reach opencodeEndpoint through here, so a proxy / mirror override
+// can't apply to a parent and miss its children.
+func newOpenCodeProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider {
+	return compatible.New(apiKey, opencodeEndpoint(cfg, baseURLFlag), "OpenCode")
+}
 
 // autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
 // a truthy value (1/true/yes/on). Controls memory_observe tool registration;

@@ -21,6 +21,7 @@ import (
 	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/subagent"
@@ -696,6 +697,28 @@ func TestExit_SetsQuit(t *testing.T) {
 	res := runHandler(t, emptyModel(), "/exit")
 	if !res.quit {
 		t.Errorf("expected quit=true")
+	}
+}
+
+// TestKnownModelsForProvider_OpenCode pins the TUI half of the Go lane's
+// menu: the picker reads pricing.OpenCodeGoModels, so the row count and
+// the ids must match the catalogue ACP's dropdown renders — a model must
+// never be selectable in one surface and missing from the other. The
+// width assertion restates the picker's row budget: 32-col id column +
+// description + " (current)" inside a ~100-col terminal.
+func TestKnownModelsForProvider_OpenCode(t *testing.T) {
+	t.Parallel()
+	got := knownModelsForProvider("OpenCode") // the lane label buildProvider returns
+	if len(got) != len(pricing.OpenCodeGoModels) {
+		t.Fatalf("picker rows = %d, catalogue = %d", len(got), len(pricing.OpenCodeGoModels))
+	}
+	for i, m := range pricing.OpenCodeGoModels {
+		if got[i].id != m.ID || got[i].description != m.Label {
+			t.Errorf("row %d = {%q,%q}, want {%q,%q}", i, got[i].id, got[i].description, m.ID, m.Label)
+		}
+		if w := len(got[i].id) + len(got[i].description); w > 90 {
+			t.Errorf("row %q too wide: %d cols (id+description must fit ~100 with suffix)", got[i].id, w)
+		}
 	}
 }
 

@@ -442,12 +442,16 @@ func KeyFor(cfg Config, providerName string) string {
 }
 
 // baseURLEnvFor returns the canonical environment variable for a
-// provider's endpoint override, mirroring envVarFor for keys. Only glm
-// has one today — the Coding Plan / pay-as-you-go split needs a
-// per-lane endpoint knob (docs/guide-config.md §3).
+// provider's endpoint override, mirroring envVarFor for keys. glm needs
+// one for the Coding Plan / pay-as-you-go split (docs/guide-config.md
+// §3); opencode has one so a proxy/mirror can front the Go gateway
+// without editing config.json.
 func baseURLEnvFor(providerName string) string {
-	if providerName == "glm" {
+	switch providerName {
+	case "glm":
 		return "GLM_BASE_URL"
+	case "opencode":
+		return "OPENCODE_BASE_URL"
 	}
 	return ""
 }

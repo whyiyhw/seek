@@ -38,9 +38,32 @@ var contextLimits = map[string]int{
 	"glm-5.3": 1_000_000,
 	// OpenCode Go lane (--provider=opencode): the same DeepSeek V4.1
 	// Flash as the entry above, addressed by the gateway's own id
-	// string (1M context). Other Go-pool ids aren't catalogued and hit
-	// Default — conservative, never over-reports capacity.
+	// string (1M context). The rest of the Go pool speaks
+	// Chat-Completions too and is offered in the lane's model menus
+	// (pricing.OpenCodeGoModels) — each gets its own limit here, taken
+	// from the same GET /v1/models `limit.context` field (checked
+	// 2026-11-18). Missing entries would hit Default (128K) and nag
+	// /compact at an eighth of the real window.
 	"deepseek-v4.1-flash": 1_000_000,
+	"deepseek-v4-pro":     1_000_000,
+	"glm-5.2":             1_000_000,
+	"glm-5.3-flash":       1_000_000,
+	"kimi-k3":             1_048_576,
+	"kimi-k3.1-pro":       1_048_576,
+	"kimi-k2.7-code":      262_144,
+	"minimax-m3.1-flash":  1_000_000,
+	"mimo-v2.6-flash":     1_048_576,
+	"mimo-v2.6-pro":       1_048_576,
+	"longcat-2.0":         1_000_000,
+	"hy4":                 1_048_576,
+	"hy4-preview":         1_024_000,
+	"hy3":                 256_000,
+	"step-5-preview":      1_000_000,
+	// Free (time-limited) pool rows — same source, same field.
+	"beam-free":               1_048_576,
+	"hy4-flash-free":          1_048_576,
+	"longcat-2.5-free":        1_000_000,
+	"iceman-contributor-free": 262_144,
 }
 
 // Default is returned when an unknown model is queried. Since most

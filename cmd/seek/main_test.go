@@ -12,6 +12,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -317,11 +318,24 @@ func TestBuildSubagentRoutes_GLMEndpoint(t *testing.T) {
 }
 
 // buildProvider("opencode", ...) wiring, mirroring the GLM paradigm:
-// label, lane default model (id per opencode.ai/docs/console/models,
-// 待核 against /v1/models with a real key), key resolution via
+// label, lane default model (id confirmed against the gateway's public
+// GET /v1/models on 2026-11-18), key resolution via
 // OPENCODE_API_KEY → providers.opencode, and the --base-url override.
 func TestBuildProvider_OpenCode(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
+
+	// The endpoint is contract, like glmBaseURL: /go/openai/v1 is the
+	// base_url the gateway's own GET /v1/models advertises for every
+	// chat model, and the /go prefix is what scopes a request to the Go
+	// plan. The doc's /inference/openai/v1/... and the older
+	// /inference/go/v1/... aliases also route — pinning keeps a future
+	// edit from silently drifting onto one of them.
+	t.Run("default endpoint is the documented Go base", func(t *testing.T) {
+		const want = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+		if opencodeBaseURL != want {
+			t.Errorf("opencodeBaseURL = %q, want %q", opencodeBaseURL, want)
+		}
+	})
 
 	t.Run("env key, default label and model", func(t *testing.T) {
 		t.Setenv("OPENCODE_API_KEY", "k")
@@ -379,6 +393,113 @@ func TestBuildProvider_OpenCode(t *testing.T) {
 			t.Errorf("nil provider with --base-url override")
 		}
 	})
+}
+
+// opencodeEndpoint mirrors glmEndpoint's precedence: OPENCODE_BASE_URL /
+// providers.opencode.base_url > --base-url > compiled default. The config
+// and env layers used to be ignored on this lane (only the flag was read),
+// so a proxy/mirror fronting the Go gateway applied to the parent session
+// but not to subagent routes.
+func TestOpenCodeEndpoint_Precedence(t *testing.T) {
+	t.Setenv("OPENCODE_BASE_URL", "")
+	const (
+		wantDefault = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+		flagURL     = "http://localhost:9/from-flag"
+		cfgURL      = "http://localhost:9/from-config"
+	)
+	if got := opencodeEndpoint(config.Config{}, ""); got != wantDefault {
+		t.Errorf("default layer = %q, want %q", got, wantDefault)
+	}
+	if got := opencodeEndpoint(config.Config{}, flagURL); got != flagURL {
+		t.Errorf("flag layer = %q, want %q", got, flagURL)
+	}
+	cfg := config.Config{Providers: map[string]config.ProviderConfig{
+		"opencode": {APIKey: "k", BaseURL: cfgURL},
+	}}
+	if got := opencodeEndpoint(cfg, flagURL); got != cfgURL {
+		t.Errorf("config layer must beat the flag, got %q", got)
+	}
+	t.Setenv("OPENCODE_BASE_URL", "https://from-env.example/v1/chat/completions")
+	if got := opencodeEndpoint(cfg, flagURL); got != "https://from-env.example/v1/chat/completions" {
+		t.Errorf("OPENCODE_BASE_URL must beat the config file, got %q", got)
+	}
+}
+
+// TestBuildSubagentRoutes_OpenCodeEndpoint guards the second construction
+// site for the OpenCode lane, same shape as the GLM guard above: the route
+// used to hardcode opencodeBaseURL, so a providers.opencode.base_url
+// override would govern the parent session but not explore/plan children.
+func TestBuildSubagentRoutes_OpenCodeEndpoint(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "k")
+	t.Setenv("OPENCODE_BASE_URL", "")
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n")
+	}))
+	defer srv.Close()
+	cfgJSON := `{"providers": {"opencode": {"api_key": "k", "base_url": "` + srv.URL + `/mirror"}}}`
+	if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	route, ok := buildSubagentRoutes(nil, "")[subagent.ProviderOpenCode]
+	if !ok || route.provider == nil {
+		t.Fatalf("opencode route missing from subagent table: %+v", route)
+	}
+	ch, err := route.provider.ChatStream(context.Background(), llm.ChatRequest{
+		Model:    "deepseek-v4.1-flash",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("child ChatStream: %v", err)
+	}
+	for range ch {
+	}
+	if gotPath != "/mirror" {
+		t.Errorf("child OpenCode request path = %q, want /mirror (config base_url must reach subagent routes)", gotPath)
+	}
+}
+
+// TestACPMenu_OpenCodeCatalogue guards the ACP half of the Go lane's
+// menu: the session/new dropdown must offer every row of
+// pricing.OpenCodeGoModels (the same slice the TUI /model picker renders)
+// and keep currentValue pointing at the startup model. A curated list
+// that drifts from the catalogue would let one surface offer a model the
+// other can't select.
+func TestACPMenu_OpenCodeCatalogue(t *testing.T) {
+	for _, env := range []string{
+		"DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+		"GEMINI_API_KEY", "GLM_API_KEY",
+	} {
+		t.Setenv(env, "")
+	}
+	t.Setenv("OPENCODE_API_KEY", "k")
+	t.Setenv("SEEK_HOME", t.TempDir())
+
+	menu := acpModelMenu(pricing.ModelOpenCodeV41Flash)
+	if len(menu) != 1 {
+		t.Fatalf("menu = %+v, want exactly the model select", menu)
+	}
+	opts := menu[0].Options
+	if len(opts) != len(pricing.OpenCodeGoModels) {
+		t.Fatalf("dropdown rows = %d, catalogue = %d", len(opts), len(pricing.OpenCodeGoModels))
+	}
+	for i, m := range pricing.OpenCodeGoModels {
+		wantValue := "opencode:" + m.ID
+		if opts[i].Value != wantValue {
+			t.Errorf("row %d value = %q, want %q", i, opts[i].Value, wantValue)
+		}
+		if wantName := m.ID + " (OpenCode Go)"; opts[i].Name != wantName {
+			t.Errorf("row %d name = %q, want %q", i, opts[i].Name, wantName)
+		}
+	}
+	if want := "opencode:" + pricing.ModelOpenCodeV41Flash; menu[0].CurrentValue != want {
+		t.Errorf("currentValue = %q, want %q", menu[0].CurrentValue, want)
+	}
 }
 
 // cronAutoTickEnabled has two independent off-switches: --no-cron-tick

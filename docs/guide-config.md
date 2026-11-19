@@ -114,10 +114,11 @@ seek --provider glm
 [OpenCode Go](https://opencode.ai/console/go) 是 $10/月的订阅制推理池（32 个开放权重 + 前沿模型：Kimi K3、Qwen3.8 Max、GLM-5.x、DeepSeek V4.x、Grok 4.7、GPT-6 Luna、Claude Haiku 5.5 等），**按 5 小时/周/月的请求数窗口限额，不按 token 扣费**——适合把便宜的批量任务（如 explore 子代理）放到这条车道。
 
 - **Key 获取**：在 [console.opencode.ai](https://console.opencode.ai) 生成，`export OPENCODE_API_KEY=...`（或写 `providers.opencode.api_key`，首启向导也可直接选 OpenCode 粘贴）。
-- **端点**：`https://opencode.ai/inference/go/v1/chat/completions`（OpenAI 兼容；`--base-url` 可覆盖）。
+- **端点**：`https://opencode.ai/inference/go/openai/v1/chat/completions`（OpenAI 兼容；`--base-url` / `OPENCODE_BASE_URL` / `providers.opencode.base_url` 均可覆盖，优先级 env·config > flag，子代理路由同样遵守）。该路径取自 `GET https://opencode.ai/inference/go/v1/models` 里每个模型的 `api.chat-completions.base_url`；`/inference/openai/v1/...` 与旧的 `/inference/go/v1/...` 也都能路由，但 `/go` 前缀才把用量记在 Go 计划上。
 - **默认模型**：`deepseek-v4.1-flash`（模型 id 以 [官方列表](https://opencode.ai/docs/console/models) 为准；接口下线/改名时用 `--model` 指定）。
-- **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺少这两个头的请求可能退化成按 token 扣账户余额。
-- **免费模型限制**：`*-Free` 结尾的模型只能在 OpenCode 自家客户端内使用，seek 不支持。
+- **可选模型**：Go 池里 20 个走 Chat-Completions 原生的模型都进了菜单（TUI `/model` 选择器 + ACP `session/new` 下拉），名单的唯一来源是 `pricing.OpenCodeGoModels`：deepseek-v4.1-flash / v4-pro、glm-5.3 / 5.2 / 5.3-flash、kimi-k3 / k3.1-pro / k2.7-code、minimax-m3.1-flash、mimo-v2.6-flash / pro、longcat-2.0、hy4 / hy4-preview / hy3、step-5-preview，外加 4 个限时免费模型 beam-free / hy4-flash-free / longcat-2.5-free / iceman-contributor-free。**没进来的**：grok-4.7 / gpt-5.6 / gpt-6 / muse-spark（只走 Responses API）、claude-haiku-5-5 / minimax-m3 / qwen 系列（只走 Anthropic messages）、gemini-4-argon（generate-content）——seek 的兼容适配器说不了这些协议。
+- **客户端识别**：OpenCode 通过请求头识别第三方客户端——seek 会自动发送 `User-Agent: seek/<version>` 和每会话稳定的 `x-opencode-session: <会话id>`（主会话与子代理各持各的 id）。缺 `x-opencode-session` 会被网关直接 `400 MissingSessionID` 拒掉；UA 是通用 SDK 名时按文档可能退化成按 token 扣账户余额。
+- **免费模型**：官方定义是「`opencode` / `opencode-go` 池里 input price 为 0 的模型」——同一个网关、同一把 key，只是不计量（`go.monthly_usage: null`），seek 的报价卡也是 $0，选它跑出来的成本显示就是 `$0`。它们都有各自的限速（如 longcat-2.5-free 100 请求/天）与地区/训练条款；工作区若设了 `OPENCODE_DISABLE_FREE_MODELS=1`，选中会在请求时收到 `Model unavailable` 这类带内错误——不是静默回退。
 - **隐私**：Go 计划默认屏蔽「用请求训练模型」的付费端点（详见官方文档）。
 
 注意：状态栏里该车道显示的美元成本是按官方 per-token 牌价的**估算展示**（订阅本身不按 token 计费）。

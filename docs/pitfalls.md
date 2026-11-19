@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**246 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**247 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -45,7 +45,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek API | 24 |
 | Go language | 11 |
 | Tooling / environment | 24 |
-| LLM provider quirks (M6) | 8 |
+| LLM provider quirks (M6) | 9 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -76,9 +76,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Setup wizard / provider menu | 1 |
 | MCP prompt section | 1 |
 | DeepSeek Files API / file_id | 3 |
-| **Total** | **246** |
+| **Total** | **247** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 33 · **Go** (both Go sections): 42 · **tooling & engineering** (remaining sections): 137.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 42 · **tooling & engineering** (remaining sections): 137.
 
 ---
 
@@ -976,7 +976,12 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Lesson**: for "cost shows $0" bugs, read what the billing function consumes, not whether the call happened — usage carried `prompt_tokens` all along and Cost never looked at it. And: a wire type that doesn't declare a field makes "server didn't send it" and "client dropped it" observationally identical; verifying a wire contract requires dumping the raw stream, not reading your own parsed structs
 - **Refs**: `internal/pricing/pricing.go:Cost`, `pkg/agent/agent.go:runTurnLLM`, `pkg/llm/provider/openai/client.go:streamUsage`, previous entry "GLM … reasoning_content deltas are silently dropped"
 
----
+### OpenCode Go: the model list needs no key, the base URL has three routable aliases, and each new lane re-invents the hardcoded-endpoint bug
+- **Saw**: wiring the lane had left three `待核` markers ("ids unverified until a real key exists", "official harness page 404s", "`*-Free` models unusable here"). All three fell to facts that were free: `GET https://opencode.ai/inference/go/v1/models` returns 32 chat models **unauthenticated**, each carrying `api.chat-completions.base_url`, `limit.context/output`, a `cost` block, `capabilities` (tools/reasoning/effort) and `go.monthly_usage`. Probing `POST` without `x-opencode-session` returns `400 MissingSessionID`; with the header and a bogus key, `401 Invalid credential`; a made-up path returns `404`.
+- **Why**: three aliases all route (`/inference/go/openai/v1/chat/completions` = the per-model advertised base, `/inference/openai/v1/…` = the docs table, `/inference/go/v1/…` = what seek had pinned), so a wrong-but-routable path is invisible until something downstream (usage attribution) depends on the prefix. And the subagent route hardcoded `opencodeBaseURL` while the parent honoured `--base-url` only — the exact divergence the GLM lane had already grown `glmEndpoint` to fix, recurring on the next lane because the resolver wasn't shared.
+- **Fix**: pinned the metadata-canonical `/go/openai/v1` target plus a test against drift; `opencodeEndpoint(cfg, flag)` + `newOpenCodeProvider` now mirror `glmEndpoint` (env `OPENCODE_BASE_URL` / `providers.opencode.base_url` > `--base-url` > default) and both construction sites (startup, subagent routes) go through them; comments and `docs/guide-config.md` §3 replaced the `待核` guesses with the verified contract. The same list also seeded the lane's model menu: `pricing.OpenCodeGoModels` (20 ids — the 16 metered Chat-Completions rows plus the 4 zero-price `*-Free` rows) is rendered by ACP's `session/new` dropdown *and* the TUI `/model` picker, each id carries its own card and `budget` context window, and three tests pin the triple (id → card → window). Free rows carry an explicit $0 card: without one they'd hit the Flash fallback and display a price for a turn that costs nothing. Pricing card unchanged: the docs table ($0.30/$1.20/$0.006) is the **peak** price — `/v1/models` quotes half that plus a 2× Mon–Fri 01–04 & 06–10 UTC multiplier.
+- **Lesson**: before wiring a provider, `curl` its model list and one unauthenticated POST — a public catalogue turns "wait for a key" into a five-minute verification. And when a lane gains an endpoint override, route **every** construction site through one resolver the same day; the second site is where the divergence always lands. Corollary for menus: one exported catalogue slice, N surfaces rendering it — a hand-maintained list per surface drifts the moment the second surface is added. And read the provider's own definition before excluding rows: "`monthly_usage: null` means no allowance" and "means unusable" are different claims — the docs' line was "free = an opencode-go model with no input price", i.e. unmetered, not unavailable. The first read cost a round trip.
+- **Refs**: `cmd/seek/main.go:opencodeBaseURL` / `opencodeEndpoint` / `newOpenCodeProvider` / `acpLaneModels`, `internal/pricing/pricing.go:OpenCodeGoModels`, `internal/budget/budget.go:contextLimits`, `internal/tui/commands.go:knownModelsForProvider`, `internal/config/config.go:baseURLEnvFor`, `cmd/seek/main_test.go:TestOpenCodeEndpoint_Precedence` / `TestBuildSubagentRoutes_OpenCodeEndpoint` / `TestACPMenu_OpenCodeCatalogue`, `internal/pricing/pricing_test.go:TestOpenCodeGoCatalogue`, `docs/guide-config.md` §3, the GLM entry above
 
 ---
 
