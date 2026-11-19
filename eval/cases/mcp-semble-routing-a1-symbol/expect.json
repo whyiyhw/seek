@@ -1,0 +1,7 @@
+{
+  "description": "mcp-semble-routing arm a1 / probe symbol: exact-symbol locate — the ANTI-OVER-GUIDANCE case (grep should win; PRD §5.4 #3)",
+  "exact_agent_ends": 1,
+  "exact_mcp_calls": 0,
+  "max_nonzero_exits": 0,
+  "max_turns": 10
+}

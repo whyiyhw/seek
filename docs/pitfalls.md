@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**254 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -62,7 +62,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Tooling / line endings | 4 |
 | TUI / session stats | 5 |
 | CI / gates | 3 |
-| Eval / tool descriptions | 5 |
+| Eval / tool descriptions | 6 |
 | Build tags / dependency isolation | 1 |
 | ACP / editor & headless lanes | 11 |
 | Eval / results data shape | 1 |
@@ -78,9 +78,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **253** |
+| **Total** | **255** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 142.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
 
 ---
 
@@ -1602,6 +1602,12 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: a `max_bash_calls=0` case whose task a dedicated tool can only answer with a NON-DEFAULT argument is stochastic unless the tool's default output names that argument — if the recovery path isn't visible in-band, bash is the only signposted route. And: read a trend-report "failing since" flag against per-run rows on the SAME binary — alternation there is flakiness, not regression.
 - **Refs**: `internal/tools/listdir/listdir.go`, `eval/cases/bash-overreach/README.md` (drift history), `eval/results/` 2026-11-13…18 rows, card `c_lrilqc`
 
+### mcp.json 的键写错层级会被 encoding/json 静默忽略——A2 评估臂可无声等同 A3
+- **Saw**: D4 三臂 runner 早期把 `"mcp_prompt": false` 写在 `mcpServers.semble` 里（设计稿的 per-server 形状）；loader 只读顶层 `Config.MCPPrompt`，`json.Unmarshal` 默认忽略未知键，于是 a2 臂照样拿到完整 MCPSection——测出的「无引导」其实是「有引导」，而所有指标照常产出。
+- **Why**: Go `encoding/json` 对未知字段不报错；`mcp_prompt` 的落点（顶层）与直觉的 per-server 位置不同，写错不失败。
+- **Fix**: `eval/tools/mcp-arm-runner.sh` 改写顶层键 + `jq -r '.mcp_prompt'` 断言为 `false`，不符即 `exit 65`；三臂首 turn prompt_tokens（A1 16066 / A2 17027 / A3 17165）成为隔离生效的实证（工具 schema +~960 tok、MCPSection +~138 tok）。Card `c_eyuxqm`。
+- **Lesson**: 评估臂的环境开关必须在 runner 里断言「生效位置」——被静默忽略的配置键会让对照组与实验组悄悄合并，数据依旧整齐，结论全错。
+- **Refs**: `internal/mcpconfig/config.go` `Config.MCPPrompt`；`eval/tools/mcp-arm-runner.sh`；`eval/results/mcp-semble-routing-three-arm-2026-11-18.md`。
 ## Build tags / dependency isolation
 
 ### A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...`

@@ -172,6 +172,20 @@ targets faster; otherwise try broader terms or list_dir]
 
 **Phase 3（grep 结果内 hint）触发 = 引导被证伪**：A3 中 case 1 仍有 >30% 的 run `mcp_calls = 0` **且** 这些 run 的 `gold_hit` 低于 A1。两个条件都要——只前者（模型不用）可能是工具确实不好用，只后者（成功率低）可能是任务本身难。此时才开 hint 卡；否则 Phase 3 永远不做（数据说了算）。
 
+**Phase 1 采集结果（2026-11-18，MCP-D4，三臂 × 3 probe × 5 run）**：
+数据与推导见 [`eval/results/mcp-semble-routing-three-arm-2026-11-18.md`](../../eval/results/mcp-semble-routing-three-arm-2026-11-18.md)。
+
+| # | 判定 | 实测 | 结果 |
+|---|------|------|------|
+| 1 | A3 vs A2：case nl `mcp_calls` ≈0 → 每 run ≥1 | A3-nl 0/5、A2-nl 0/5；A3 的 reasoning 从未提及 semble/MCP | **FAIL**——引导未生效（工具已注册、引导段已入 prompt，由首 turn prompt_tokens +960/+138 tok 证明） |
+| 2 | A3 vs A1：case nl `completion_tokens` 降 ≥30% | 1692.8 → 1254.0，−25.9% | **FAIL**——且 0 次 MCP 调用，差异不可归因于机制 |
+| 3 | A3 case symbol `mcp_calls` = 0 | 5/5 run 为 0 | **PASS**——防过度引导成立 |
+| 4 | A3 `cache_hit_tokens` 无异常塌方 | 命中率 92.3–93.6%（A1 91.5–93.7%） | **PASS** |
+
+Phase 3 触发双条件：① A3-nl `mcp_calls=0` 占比 100% > 30% ✅；② 这些 run 的 `gold_hit`
+（5/5）低于 A1（5/5）❌ → 未同时成立，按规则不触发。Phase 1 结论为①②未过
+（引导未生效、亦无成本收益，成功率与 A1 持平）；go/no-go 由 D5 判定并回填本节。
+
 ### 5.5 日常统计（可选，Phase 3 的长期数据源）
 
 `internal/mcpstats`：MCP 工具调用 JSONL（skillstats 六字段同款：ts/name/server/session_id/project_id/model）。写侧挂 Bridge.Execute，读侧暂不做（有 eval + 短期判定已够，避免无消费者的写路径）。开卡与否由 D5 决策时定。
