@@ -22,10 +22,12 @@ func (r Report) Title() string {
 }
 
 // Body is the human-readable summary — the push body and the
-// `seek autopilot` stdout. One header line (with the run's total cost)
-// + one line per task, each pointing at its worktree so the user can
-// review the commits, with the evidence suffix
-// "Δ<files>f +<ins>/-<del> · <tokens>tok · $<cost>" (v8 柱 R R1).
+// `seek autopilot` stdout. One header line (with the run's total cost
+// and, when verification ran, the pass/doubt/fail counts) + one line
+// per task, each pointing at its worktree so the user can review the
+// commits, with the evidence suffix
+// "Δ<files>f +<ins>/-<del> · <tokens>tok · $<cost> · verdict=<v>"
+// (v8 柱 R R1 + R2).
 func (r Report) Body() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "autopilot %q — %d/%d done", trunc(r.Goal, 60), r.Done, len(r.Outcomes))
@@ -33,6 +35,9 @@ func (r Report) Body() string {
 		fmt.Fprintf(&b, ", %d failed", r.Failed)
 	}
 	fmt.Fprintf(&b, ", %s", pricing.FormatCost(r.TotalCostUSD))
+	if r.VerifiedPass+r.VerifiedDoubt+r.VerifiedFail > 0 {
+		fmt.Fprintf(&b, ", verify %d/%d/%d pass/doubt/fail", r.VerifiedPass, r.VerifiedDoubt, r.VerifiedFail)
+	}
 	b.WriteByte('\n')
 	for _, o := range r.Outcomes {
 		mark := "✓"
@@ -48,6 +53,9 @@ func (r Report) Body() string {
 		}
 		fmt.Fprintf(&b, "  Δ%df +%d/-%d · %dtok · %s",
 			o.Files, o.Insertions, o.Deletions, o.Tokens, pricing.FormatCost(o.CostUSD))
+		if s := o.Verdict.Summary(); s != "" {
+			fmt.Fprintf(&b, " · %s", s)
+		}
 		b.WriteByte('\n')
 	}
 	return strings.TrimRight(b.String(), "\n")

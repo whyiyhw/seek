@@ -105,6 +105,18 @@ type Manager struct {
 	homeProjectDir string
 }
 
+// Root returns the project working tree path this Manager was
+// constructed with — the MAIN tree worktrees are branched from.
+// Consumers that police main-tree isolation (the v8 R2 verifier's
+// scope check) need it to snapshot/diff the tree the workers were
+// forbidden to touch.
+func (m *Manager) Root() string {
+	if m == nil {
+		return ""
+	}
+	return m.root
+}
+
 // NewManager constructs a Manager. projectRoot must be the
 // absolute path to the user's project working tree (the git repo
 // root); ENOENT or non-git inputs are NOT detected here — the

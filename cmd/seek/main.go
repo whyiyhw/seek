@@ -98,6 +98,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
+	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/internal/worktreecli"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -3077,8 +3078,10 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 	dec := autopilot.NewDeepSeekDecomposer(client, model)
 	// model is also the lane the worktree subagents run on (they
 	// inherit the parent session's), so the fleet prices each
-	// outcome's tokens with it (v8 柱 R R1).
-	fleet := autopilot.NewFleet(mgr, wtMgr, model)
+	// outcome's tokens with it (v8 柱 R R1). The same lane judges
+	// each completed task (v8 柱 R R2): the verifier is built here,
+	// on demand for this run — no resident anything.
+	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(client, model))
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
