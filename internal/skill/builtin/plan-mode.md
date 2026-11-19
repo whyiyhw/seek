@@ -47,13 +47,15 @@ When you can answer "what's the problem?" and "what's the plan?" without hedging
 
 ### Step 2 — PROPOSE (still plan-analyze; gate to execute)
 
-Call `propose(problem, steps, why_now?)`. This pops a picker for the user with three options: **approve**, **adjust** (with optional free-text feedback), **cancel**.
+Call `propose(problem, done_when, steps, why_now?, reviewed_by?)`. This pops a picker for the user with three options: **approve**, **adjust** (with optional free-text feedback), **cancel**.
 
 What makes a good proposal:
 
 - **Problem statement**: one paragraph, self-contained. The user reads this in the picker — assume they've forgotten the prior turn.
+- **Done when** (`done_when`, **required**): 3–5 numbered assertions, each checkable against something concrete — a test, a command + expected output, a file + the line to grep, an invariant that must still hold, a page. The tool refuses a plan without it. For the vocabulary of "checkable" (seven classes) and the gate-placement judgement, load the `plan-contract` skill — this file only covers the tool mechanics.
 - **Steps**: 3–8 verifiable actions typical, up to 20 for larger migrations. Each step is something a human could check ("Add X handler in handlers.go", "Update integration tests for Y"), **not** an internal phase ("think about Z", "consider edge cases"). Don't nest sub-bullets — if a step is too big, refine it.
 - **Why now** (optional): use to surface hidden assumptions ("this assumes #234 is merged", "skipping mobile because it's frozen until March 5").
+- **Reviewed by** (`reviewed_by`, optional): who checks the *result*, from a source that did not produce it, and with what material. Name it whenever a step is irreversible or the output nobody reads item by item.
 
 Example translation from a `think` reasoner output to a `propose` call:
 
@@ -62,6 +64,12 @@ Example translation from a `think` reasoner output to a `propose` call:
 ```
 propose(
   problem="Auth middleware currently shares a process-wide token store, which makes per-request token rotation impossible. We need to migrate to a per-request store without breaking existing handler call sites.",
+  done_when=[
+    "go test -race ./internal/auth/... exits 0",
+    "grep -r 'processWideStore' internal/auth returns nothing",
+    "a test rotates the token between two requests in one session and both succeed",
+    "cmd/server/main.go wires the per-request store (grep finds the new constructor)"
+  ],
   steps=[
     "Inventory current middleware call sites (grep RequireAuth)",
     "Define TokenStore interface in internal/auth/store.go",
@@ -69,7 +77,8 @@ propose(
     "Wire new middleware in cmd/server/main.go",
     "Update integration tests"
   ],
-  why_now="This depends on the session cookie refactor (#234) which merged yesterday."
+  why_now="This depends on the session cookie refactor (#234) which merged yesterday.",
+  reviewed_by="new agent session given plan + diff; human decides what to fix"
 )
 ```
 
@@ -137,7 +146,7 @@ When you see `permission denied: plan mode: bash is not allowed for this command
 
 Sometimes the right answer really is `curl` / `docker` / `kubectl` / `go test` / etc. — commands that can't be turned into whitelisted inspectors. In that case, here are the three legitimate options, **in order of preference**:
 
-1. **Propose the work as a plan step.** Call `propose(problem, steps)` including the action in `steps`. Once the user approves, you'll be in `plan-execute` substate where `bash` is allowed (subject to per-call y/N or batch-approval if they picked auto-approve-per-step). This is the most plan-mode-aligned path — the work is gated by the user's explicit approval of scope, not by a backdoor escape.
+1. **Propose the work as a plan step.** Call `propose(problem, done_when, steps)` including the action in `steps`. Once the user approves, you'll be in `plan-execute` substate where `bash` is allowed (subject to per-call y/N or batch-approval if they picked auto-approve-per-step). This is the most plan-mode-aligned path — the work is gated by the user's explicit approval of scope, not by a backdoor escape.
 
 2. **Tell the user to switch modes in-session.** Two zero-restart paths:
    - `Shift+Tab` cycles modes: Ask → Plan → Yolo → Ask. One keystroke.

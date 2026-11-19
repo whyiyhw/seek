@@ -39,6 +39,18 @@ const (
 	// paragraphs — the cap prevents "rephrase the entire design
 	// doc into a single step" patterns.
 	maxStepLength = 200
+
+	// done_when caps. A plan's completion conditions are numbered
+	// assertions, each independently checkable — 3–5 is the typical
+	// shape, 12 the ceiling before the plan is really three plans.
+	// The per-assertion cap matches maxStepLength: an assertion that
+	// needs 240 chars is usually two assertions, or prose.
+	maxDoneWhen       = 12
+	maxDoneWhenLength = 240
+	// reviewed_by is one sentence: who checks the result, from where,
+	// with what material. Longer than this and it stops being a
+	// routing decision and becomes an essay.
+	maxReviewedByLength = 240
 )
 
 var schemaBytes = []byte(`{
@@ -47,6 +59,13 @@ var schemaBytes = []byte(`{
     "problem": {
       "type": "string",
       "description": "One-paragraph problem statement: what the user wants and what makes it non-trivial. Self-contained — assume the reader hasn't read prior turns."
+    },
+    "done_when": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "description": "REQUIRED. Completion conditions — numbered assertions, each independently checkable by someone who did not write the plan. 3-5 typical, 12 max, each <= 240 chars. Every entry must name what it is checked against: a test, a command + expected exit/output, a file + the line to grep, an invariant that must still hold, a page to open. Not prose (\"works correctly\"), and not a restatement of a step (\"step 2 done\"). If you cannot fill this, the task is not plannable yet — keep analyzing, or tell the user so instead of proposing a description.",
+      "items": {"type": "string"}
     },
     "steps": {
       "type": "array",
@@ -58,13 +77,17 @@ var schemaBytes = []byte(`{
     "why_now": {
       "type": "string",
       "description": "Optional. Briefly: why is now the right time to commit to this plan? Surfaces hidden assumptions to the user (e.g. \"this assumes the auth refactor in #234 is merged\")."
+    },
+    "reviewed_by": {
+      "type": "string",
+      "description": "Optional but strongly recommended when any step is irreversible or its output nobody reads item by item: who checks the RESULT, from a source that did not produce it, and with what material. One sentence, <= 240 chars (e.g. \"new agent session given plan + diff + the original message; human decides what to fix\")."
     }
   },
-  "required": ["problem", "steps"],
+  "required": ["problem", "done_when", "steps"],
   "additionalProperties": false
 }`)
 
-const description = "Propose a concrete plan (problem + ordered steps) to the user and wait for explicit approval. Use only in plan mode after gathering enough context to define what you'll do and how. Returns the user's choice (approve / adjust with feedback / cancel) as a structured string. Approval unlocks writes (plan-analyze → plan-execute substate). Do NOT use for: clarifying questions before you understand the problem (use ask_user); reporting status mid-execution (narrate in chat); asking which of N alternatives to pick (use ask_user)."
+const description = "Propose a concrete plan to the user and wait for explicit approval. Use only in plan mode after gathering enough context to define what you'll do and how. `done_when` is required: numbered completion conditions, each checkable against something concrete (a test, a command + expected output, a grep target, an invariant, a page). If you cannot write them, the task isn't plannable yet — keep analyzing or say so; do not propose prose. `reviewed_by` names who checks the RESULT from a source that did not produce it. Returns the user's choice (approve / adjust with feedback / cancel) as a structured string. Approval unlocks writes (plan-analyze → plan-execute substate). Do NOT use for: clarifying questions before you understand the problem (use ask_user); reporting status mid-execution (narrate in chat); asking which of N alternatives to pick (use ask_user)."
 
 // Sink is the optional observer that's notified about the user's
 // choice. The P2 wiring (pkg/agent event types + cmd/seek injection)
@@ -133,6 +156,21 @@ type ContextReceiver interface {
 	OnProposeStart(problem string, steps []string, whyNow string)
 }
 
+// CompletionReceiver is an OPTIONAL sibling of ContextReceiver
+// (added with done_when/reviewed_by rather than by widening
+// OnProposeStart — widening the signature would break every existing
+// implementation and fake, and the AGENTS.md convention is to add a
+// sibling interface and upcast at the call site).
+//
+// When present, propose calls OnProposeCompletion immediately AFTER
+// OnProposeStart, with the completion conditions and the reviewer
+// routing. Hosts that write plan artifacts use it to render the
+// `## Done when` / `## Reviewed by` sections; hosts that don't can
+// ignore it. Both slices/strings are the args verbatim.
+type CompletionReceiver interface {
+	OnProposeCompletion(doneWhen []string, reviewedBy string)
+}
+
 // ArtifactReporter is an OPTIONAL interface a Sink may implement.
 // After Approved returns, propose calls LastArtifactStatus and folds
 // the result into the approve-path tool text:
@@ -163,14 +201,32 @@ func (Tool) Description() string     { return description }
 func (Tool) Schema() json.RawMessage { return schemaBytes }
 
 type args struct {
-	Problem string   `json:"problem"`
-	Steps   []string `json:"steps"`
-	WhyNow  string   `json:"why_now,omitempty"`
+	Problem    string   `json:"problem"`
+	DoneWhen   []string `json:"done_when"`
+	Steps      []string `json:"steps"`
+	WhyNow     string   `json:"why_now,omitempty"`
+	ReviewedBy string   `json:"reviewed_by,omitempty"`
+}
+
+// validFields is the canonical field list used by every recovery
+// error. Kept as one slice so UnmarshalStrict / MissingField never
+// disagree about what the schema accepts.
+var validFields = []string{"problem", "done_when", "steps", "why_now", "reviewed_by"}
+
+// clipArgs renders the raw args for a recovery error, capped so a
+// pathological input can't flood the model's context with its own
+// echo. Mirrors tools.truncateArgs (unexported there).
+func clipArgs(raw json.RawMessage) string {
+	const max = 200
+	if len(raw) <= max {
+		return string(raw)
+	}
+	return string(raw[:max]) + "…"
 }
 
 func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a args
-	if err := tools.UnmarshalStrict(toolName, raw, &a, "problem", "steps", "why_now"); err != nil {
+	if err := tools.UnmarshalStrict(toolName, raw, &a, validFields...); err != nil {
 		return "", err
 	}
 	if t.policy == nil {
@@ -178,10 +234,10 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	}
 
 	if strings.TrimSpace(a.Problem) == "" {
-		return "", tools.MissingField(toolName, "problem", raw, "problem", "steps", "why_now")
+		return "", tools.MissingField(toolName, "problem", raw, validFields...)
 	}
 	if len(a.Steps) == 0 {
-		return "", tools.MissingField(toolName, "steps", raw, "problem", "steps", "why_now")
+		return "", tools.MissingField(toolName, "steps", raw, validFields...)
 	}
 	if len(a.Steps) > maxSteps {
 		return "", fmt.Errorf("%s: too many steps (got %d, max %d). Split the plan into a smaller first batch and propose again after the first batch completes.",
@@ -195,6 +251,36 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 			return "", fmt.Errorf("%s: step %d is %d chars (max %d). Tighten the wording — steps describe one verifiable action, not a paragraph.",
 				toolName, i, len(s), maxStepLength)
 		}
+	}
+
+	// done_when is the gate. Before it existed, a "plan" could be a
+	// paragraph plus a to-do list — approvable, but not closable:
+	// nothing in it said when to stop, and nobody could check the
+	// answer without re-reading the chat. The error below is written
+	// to steer the model back to analysis rather than to fill the
+	// array with "it works" lines.
+	if len(a.DoneWhen) == 0 {
+		return "", fmt.Errorf("%s: done_when is required — a plan without completion conditions is a description, not a plan. "+
+			"Write 3-5 assertions, each naming what it is checked against (a test, a command + expected output, a file + the line to grep, an invariant that must still hold, a page to open). "+
+			"If you cannot, the task is not plannable yet: keep analyzing, or tell the user what is still unknown and propose again once it isn't. Got: %s. Valid fields: %s",
+			toolName, clipArgs(raw), strings.Join(validFields, ", "))
+	}
+	if len(a.DoneWhen) > maxDoneWhen {
+		return "", fmt.Errorf("%s: too many done_when entries (got %d, max %d). This is probably more than one plan — split it, or keep the 3-5 that actually decide done.",
+			toolName, len(a.DoneWhen), maxDoneWhen)
+	}
+	for i, d := range a.DoneWhen {
+		if strings.TrimSpace(d) == "" {
+			return "", fmt.Errorf("%s: done_when[%d] is empty", toolName, i)
+		}
+		if len(d) > maxDoneWhenLength {
+			return "", fmt.Errorf("%s: done_when[%d] is %d chars (max %d). An assertion that long is usually two assertions — split it, or drop the narrative.",
+				toolName, i, len(d), maxDoneWhenLength)
+		}
+	}
+	if len(a.ReviewedBy) > maxReviewedByLength {
+		return "", fmt.Errorf("%s: reviewed_by is %d chars (max %d). One sentence: who checks the result, from where, with what material.",
+			toolName, len(a.ReviewedBy), maxReviewedByLength)
 	}
 
 	// Duplicate-of-last-approved short-circuit. The model sometimes
@@ -216,6 +302,13 @@ func (t Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	// later if/when the user approves.
 	if cr, ok := t.sink.(ContextReceiver); ok {
 		cr.OnProposeStart(a.Problem, a.Steps, a.WhyNow)
+	}
+	// Completion conditions travel through a sibling interface
+	// (AGENTS.md: extend by sibling, not by widening the existing
+	// Sink method) so recording sinks and third-party implementations
+	// of ContextReceiver keep compiling unchanged.
+	if cr, ok := t.sink.(CompletionReceiver); ok {
+		cr.OnProposeCompletion(a.DoneWhen, a.ReviewedBy)
 	}
 
 	q := buildQuestion(a)
@@ -241,6 +334,14 @@ func buildQuestion(a args) auser.Question {
 	if a.WhyNow != "" {
 		sb.WriteString("\n\nWhy now: ")
 		sb.WriteString(a.WhyNow)
+	}
+	sb.WriteString("\n\nDone when:")
+	for i, d := range a.DoneWhen {
+		fmt.Fprintf(&sb, "\n  %d. %s", i+1, d)
+	}
+	if a.ReviewedBy != "" {
+		sb.WriteString("\n\nReviewed by: ")
+		sb.WriteString(a.ReviewedBy)
 	}
 	sb.WriteString("\n\nPlan:")
 	for i, s := range a.Steps {
@@ -289,7 +390,7 @@ func (t Tool) handleAnswer(a args, ans auser.Answer) string {
 			t.sink.Approved(a.Steps, false)
 		}
 		path, werr := t.artifactStatus()
-		return approveResult(a.Steps, false, path, werr)
+		return approveResult(a, false, path, werr)
 	}
 
 	if pickedID(ans, "approve_batch") {
@@ -297,7 +398,7 @@ func (t Tool) handleAnswer(a args, ans auser.Answer) string {
 			t.sink.Approved(a.Steps, true)
 		}
 		path, werr := t.artifactStatus()
-		return approveResult(a.Steps, true, path, werr)
+		return approveResult(a, true, path, werr)
 	}
 
 	// Defensive: shouldn't be reachable given single-select picker
@@ -334,7 +435,7 @@ func (t Tool) artifactStatus() (string, error) {
 	return "", nil
 }
 
-func approveResult(steps []string, batch bool, artifactPath string, artifactErr error) string {
+func approveResult(a args, batch bool, artifactPath string, artifactErr error) string {
 	// The "[plan: approved]" prefix is load-bearing — the resume
 	// path (internal/tools/plan/reconstruct.go) scans for it
 	// verbatim to find the seeding point. Variants go AFTER the
@@ -345,8 +446,24 @@ func approveResult(steps []string, batch bool, artifactPath string, artifactErr 
 	} else {
 		sb.WriteString("[plan: approved]\nProposal accepted by user. You are now in plan-execute substate — write/edit/bash will prompt for per-call confirmation. Execute the plan step by step and narrate progress in chat. Use plan(action=\"start\", index=N) and plan(action=\"complete\", index=N) to track progress.\n\nApproved plan:")
 	}
-	for i, s := range steps {
+	for i, s := range a.Steps {
 		fmt.Fprintf(&sb, "\n  %d. %s", i+1, s)
+	}
+	// Echo the completion conditions back. The args are already in the
+	// transcript, but the model reads the tool result on the very next
+	// turn — repeating them here is what keeps "what counts as done"
+	// in working attention for the whole execution, instead of being
+	// one more thing it has to scroll back for.
+	if len(a.DoneWhen) > 0 {
+		sb.WriteString("\n\nDone when (check these before reporting completion — they are the plan's acceptance criteria, not a summary of the steps):")
+		for i, d := range a.DoneWhen {
+			fmt.Fprintf(&sb, "\n  %d. %s", i+1, d)
+		}
+	}
+	if a.ReviewedBy != "" {
+		sb.WriteString("\n\nReviewed by: ")
+		sb.WriteString(a.ReviewedBy)
+		sb.WriteString("\nDo NOT claim the result is verified yourself — report against (a) the assertions above and (b) the reviewer above. If no reviewer was named, say so plainly rather than implying the work was checked.")
 	}
 	if artifactErr != nil {
 		// Failure surfaces in the model-visible tool result AND on

@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**248 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**249 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -1925,3 +1925,11 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: 无代码改动。F4 的烟测只断言**第 1 页**的事实（`files_smoke_test.go` 里写死了原因），把「页 2 是否在场」留作观察而不是失败条件。
 - **Lesson**: e2e 断言要挑「最不容易被服务端实现细节削掉」的证据：同一页内的事实比「某一页存在」稳。真 API 测试里凡是依赖「解析完整性」的断言，都该先跑三次看稳定性。
 - **Refs**: `pkg/deepseek/files_smoke_test.go`；上一条 `page_count / expires_at` 缺失（同一族的「文档字段 ≠ 实际行为」）。
+
+
+### Adding a required field to a tool schema: sibling interface for the wiring, a declared cache bust for the cost
+- **Saw**: `done_when` / `reviewed_by` had to reach two places — the host's artifact writer (via the propose Sink) and the request prefix (every tool schema rides the tools array). Wiring by widening `OnProposeStart` would have broken `recordingSink`, `artifactSink`, `duplicateArtifactSink` and `planBridge` at once; making the field optional to spare the cache would have left the hole it closes ("a description passes as a plan") wide open.
+- **Why**: the Sink family is deliberately a set of small single-purpose interfaces, each upcast at the call site, so widening one is a breaking change for every implementation including test doubles in other packages — while the *existing* channel "almost" carries the data (problem rides through `OnProposeStart`), which is exactly the temptation to widen instead. Separately, `schemaBytes` is embedded in every request by design (identical bytes are what lets DeepSeek's cache hit), so any schema edit is a one-shot cost proportional to the current context — not a free change, and not avoidable by feature-flagging two schema variants, which would double the prompt variants and cost more than one miss.
+- **Fix**: `propose.CompletionReceiver{ OnProposeCompletion(doneWhen []string, reviewedBy string) }`, upcast right after the `ContextReceiver` block; `planBridge` snapshots into `pendingDoneWhen` / `pendingReviewedBy`, consumed and cleared in `Approved` alongside problem/whyNow. `TestCompletion_SinkWithoutInterfaceStillWorks` locks the optionality (a plain Sink must keep compiling). The cache bust was taken deliberately and declared in the release notes under a "prefix cache" note (CHANGELOG.md + the annotated tag body).
+- **Lesson**: when a new field's arrival time coincides with an existing hook's, you want a **sibling interface fired next to it**, not a parameter on it — AGENTS.md's "add OPTIONAL sibling interfaces" rule is easy to read as style advice and expensive to learn as a compile wall in four test files. And treat "add a required field to a tool schema" as a release-visible event with a cost attached: tell users where they look after upgrading, and never soften the field to optional just to dodge the bust — an omittable completion condition is a comment, not a gate.
+- **Refs**: `internal/tools/propose/propose.go` (`CompletionReceiver`, `schemaBytes`, `validFields`), `cmd/seek/main.go` (`planBridge.OnProposeCompletion`), `internal/tools/propose/donewhen_test.go`, CHANGELOG.md v0.12.1, `docs/release-notes-v0.12.1.tagmsg`, AGENTS.md "Sink interfaces" + "Token & prefix-cache constraints"

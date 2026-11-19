@@ -401,11 +401,20 @@ artifact **不替代** transcript。adjust / re-propose / cancel / duplicate 都
 
 <problem text from propose args, verbatim>
 
+## Done when
+
+- [ ] 1. <done_when[0] — omitted entirely when the list is empty>
+- [ ] 2. <done_when[1]>
+
 ## Steps
 
 1. <step 1>
 2. <step 2>
 ...
+
+## Reviewed by
+
+<reviewed_by if present in propose args; section omitted otherwise>
 
 ## Why now
 
@@ -483,7 +492,7 @@ artifact **不替代** transcript。adjust / re-propose / cancel / duplicate 都
 
 1. **文件路径 schema** `~/.seek/projects/<id>/plans/<YYYYMMDD>-<HHMM>-<slug>.md` —— 锁定。用户脚本可能 `ls` 这个路径。
 2. **front-matter 字段名**：`Approved` / `Session` / `Approval mode` / `Project` —— 锁定。新字段可加，旧字段不删不改语义。
-3. **section 标题**：`## Problem` / `## Steps` / `## Why now` —— 锁定。
+3. **section 标题**：`## Problem` / `## Done when` / `## Reviewed by` / `## Steps` / `## Why now` —— 锁定（`Done when` 与 `Reviewed by` 于 v0.12.1 随 `done_when` / `reviewed_by` 加入，位于 `## Problem` 之后、`## Steps` 之前 / 之后）。
 4. **footnote 段** —— 文案可调；位置（文末分隔线之后）锁定。
 
 未锁定（v3 可改）：slug 提取算法、冲突计数器格式、failure note 文案。

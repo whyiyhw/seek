@@ -12,9 +12,15 @@ import (
 
 // validArgs is the canonical "well-formed args" fixture reused by
 // happy-path tests. Sized at 3 steps so it's also covered by the
-// approved-result step echoing checks.
+// approved-result step echoing checks. Carries done_when because the
+// tool now rejects a plan without completion conditions.
 const validArgs = `{
 	"problem": "Refactor auth middleware for per-request token store",
+	"done_when": [
+		"go test -race ./internal/auth/... exits 0",
+		"grep -r 'tokenStore' internal/auth returns only the new interface",
+		"per-request rotation covered by a test that fails on the old store"
+	],
 	"steps": ["Inventory call sites", "Define interface", "Migrate store"]
 }`
 
@@ -311,7 +317,7 @@ func TestQuestion_IncludesWhyNow(t *testing.T) {
 		return auser.Answer{ChosenIDs: []string{"approve"}}
 	})
 
-	raw := json.RawMessage(`{"problem":"x","steps":["a"],"why_now":"because the bug is breaking prod"}`)
+	raw := json.RawMessage(`{"problem":"x","done_when":["a test"],"steps":["a"],"why_now":"because the bug is breaking prod"}`)
 	if _, err := New(p, nil).Execute(context.Background(), raw); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}

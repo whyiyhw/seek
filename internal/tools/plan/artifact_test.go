@@ -14,8 +14,10 @@ func sampleMeta(t *testing.T, approvedAt time.Time) ArtifactMetadata {
 	t.Setenv("SEEK_HOME", root)
 	return ArtifactMetadata{
 		Problem:        "Refactor auth middleware to use a per-request token store.",
+		DoneWhen:       []string{"go test -race ./internal/auth/... exits 0", "grep finds tokenStore only in internal/auth"},
 		Steps:          []string{"Inventory call sites", "Define interface", "Migrate store"},
 		WhyNow:         "This unblocks the mobile launch.",
+		ReviewedBy:     "a new agent session given plan + diff; human decides what to fix",
 		SessionID:      "sess-abc12345",
 		ProjectAbsPath: "/abs/path/to/project",
 		Batch:          false,
@@ -57,10 +59,15 @@ func TestWriteArtifact_WritesFileWithExpectedShape(t *testing.T) {
 		"- **Project**: /abs/path/to/project",
 		"## Problem",
 		"Refactor auth middleware to use a per-request token store.",
+		"## Done when",
+		"- [ ] 1. go test -race ./internal/auth/... exits 0",
+		"- [ ] 2. grep finds tokenStore only in internal/auth",
 		"## Steps",
 		"1. Inventory call sites",
 		"2. Define interface",
 		"3. Migrate store",
+		"## Reviewed by",
+		"a new agent session given plan + diff; human decides what to fix",
 		"## Why now",
 		"This unblocks the mobile launch.",
 		"---",
@@ -69,6 +76,63 @@ func TestWriteArtifact_WritesFileWithExpectedShape(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("artifact body missing %q\nFULL:\n%s", want, s)
 		}
+	}
+	// Section order is a contract for human readers: completion
+	// conditions come before the work items, because that is the
+	// question "is this plan closeable?" — and Reviewed by before Why
+	// now, since it is a gate decision while Why now is rationale.
+	if strings.Index(s, "## Done when") > strings.Index(s, "## Steps") {
+		t.Errorf("Done when must precede Steps in the artifact:\n%s", s)
+	}
+	if strings.Index(s, "## Reviewed by") > strings.Index(s, "## Why now") {
+		t.Errorf("Reviewed by must precede Why now in the artifact:\n%s", s)
+	}
+}
+
+func TestWriteArtifact_OmitsDoneWhenSectionWhenEmpty(t *testing.T) {
+	// Defensive: the propose tool requires done_when, but the artifact
+	// writer is a standalone API. An empty list must render nothing
+	// rather than an empty heading.
+	meta := sampleMeta(t, time.Now())
+	meta.DoneWhen = nil
+	path, err := WriteArtifact(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	if strings.Contains(string(body), "## Done when") {
+		t.Errorf("empty DoneWhen should omit the section:\n%s", body)
+	}
+	if strings.Contains(string(body), "- [ ]") {
+		t.Errorf("empty DoneWhen should emit no checkboxes:\n%s", body)
+	}
+}
+
+func TestWriteArtifact_OmitsReviewedBySectionWhenEmpty(t *testing.T) {
+	meta := sampleMeta(t, time.Now())
+	meta.ReviewedBy = ""
+	path, err := WriteArtifact(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	if strings.Contains(string(body), "## Reviewed by") {
+		t.Errorf("empty ReviewedBy should omit the section:\n%s", body)
+	}
+}
+
+func TestWriteArtifact_DoneWhenTrimmed(t *testing.T) {
+	// Assertions travel verbatim from the model, which sometimes pads.
+	// The checkbox line must not carry the padding.
+	meta := sampleMeta(t, time.Now())
+	meta.DoneWhen = []string{"  padded assertion  "}
+	path, err := WriteArtifact(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), "- [ ] 1. padded assertion\n") {
+		t.Errorf("done_when entry should be trimmed on render:\n%s", body)
 	}
 }
 

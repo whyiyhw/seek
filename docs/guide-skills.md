@@ -23,7 +23,12 @@ A project skill shadows a user skill of the same name. Built-ins are always lowe
 | `code-review` | Structured diff review — checks current working-tree changes for correctness bugs and cleanup opportunities. Quick (precision-first, blocking only) or thorough (exhaustive). `/code-review` (alias `/review`) |
 | `dual-model` | Non-trivial multi-step tasks — plans first with V4 reasoning mode (`Thinking.Type=enabled, ReasoningEffort=high`), executes with regular chat, then reviews |
 | `go-test-runner` | Running, debugging, or analyzing Go test failures |
+| `plan-contract` | What a plan must *contain*: completion conditions as checkable assertions, where a gate belongs (irreversible / unread output), routing decisions to 检 script / 查 different-source agent / 定 human, and how a lesson becomes a dated pending entry instead of another permanent rule. Auto-read before `propose` on non-trivial work |
 | `plan-mode` | Explains the analyze → propose → execute → report loop. Auto-read when the mode reminder says `plan-analyze` or `plan-execute`, or user types `/plan` |
+
+`plan-mode` is the **mechanism** (substates, `propose`/`plan` tools, re-propose on adjust);
+`plan-contract` is the **content** (what makes a plan closable, who checks it, what "done"
+means). They are complementary — load both for a non-trivial task.
 
 ## Writing a skill
 

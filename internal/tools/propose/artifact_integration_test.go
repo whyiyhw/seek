@@ -44,7 +44,7 @@ func (s *artifactSink) LastArtifactStatus() (string, error) {
 func TestArtifact_ContextReceiverFiresBeforePicker(t *testing.T) {
 	policy := newPolicyReturning(auser.Answer{ChosenIDs: []string{"approve"}})
 	sink := &artifactSink{}
-	raw := `{"problem":"refactor auth","steps":["a","b","c"],"why_now":"unblock mobile"}`
+	raw := `{"problem":"refactor auth","done_when":["a test"],"steps":["a","b","c"],"why_now":"unblock mobile"}`
 	if _, err := New(policy, sink).Execute(context.Background(), json.RawMessage(raw)); err != nil {
 		t.Fatal(err)
 	}

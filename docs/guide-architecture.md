@@ -78,10 +78,11 @@ Guide: [`docs/guide-sessions.md`](guide-sessions.md).
 
 ## 7. Plan Mode v2 — confirmation-gated workflow
 
-`/plan` enables confirmation-gated mode. The model analyzes context, proposes a problem definition + step list via the `propose` tool, waits for user **approve / adjust / cancel**, then enters the EXECUTE substate with per-step pre-approval via the `plan` tool.
+`/plan` enables confirmation-gated mode. The model analyzes context, proposes a problem definition + completion conditions + step list via the `propose` tool, waits for user **approve / adjust / cancel**, then enters the EXECUTE substate with per-step pre-approval via the `plan` tool.
 
 - **State machine via transcript** — substate reconstructed on `seek -resume` by replaying `propose` args + `plan` events. No parallel state file.
-- **Plan artifact** — every approve writes a read-only markdown snapshot to `~/.seek/projects/<id>/plans/`.
+- **`done_when` is required** — a `propose` call without completion conditions is rejected with a recovery error, so "what counts as done" is a field rather than prose in the problem statement. `reviewed_by` (optional) names who checks the result from a source that did not produce it.
+- **Plan artifact** — every approve writes a read-only markdown snapshot to `~/.seek/projects/<id>/plans/`, with `## Done when` rendered as a checkbox list between Problem and Steps.
 - **approve_batch** — opt-in fast-path for auto-approve-per-step.
 
 Code: `internal/tools/propose/` · `internal/tools/plan/` · `docs/prd/feature-plan-mode.md`.

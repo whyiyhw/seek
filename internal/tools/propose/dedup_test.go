@@ -98,7 +98,7 @@ func TestDedup_DifferentStepsStillShowsPicker(t *testing.T) {
 	}
 
 	// Different steps → picker shows again.
-	otherArgs := `{"problem":"p","steps":["wholly different step"]}`
+	otherArgs := `{"problem":"p","done_when":["a test"],"steps":["wholly different step"]}`
 	if _, err := tool.Execute(context.Background(), json.RawMessage(otherArgs)); err != nil {
 		t.Fatal(err)
 	}

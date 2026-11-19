@@ -43,11 +43,20 @@ import (
 type ArtifactMetadata struct {
 	// Problem is the propose tool's problem statement verbatim.
 	Problem string
+	// DoneWhen is the propose tool's completion conditions verbatim,
+	// in order. Rendered as `## Done when` with numbered checkboxes:
+	// each entry is meant to be ticked off against something concrete,
+	// so the checkbox shape (`- [ ] 1. …`) is deliberate — it reads as
+	// a checklist in a markdown preview instead of prose.
+	DoneWhen []string
 	// Steps is the propose tool's steps verbatim.
 	Steps []string
 	// WhyNow is the optional rationale; empty string omits the
 	// "## Why now" section.
 	WhyNow string
+	// ReviewedBy is the optional "who checks the result, from what
+	// source, with what material" sentence. Empty omits the section.
+	ReviewedBy string
 	// SessionID identifies the session in which approval happened.
 	// Empty string is tolerated (e.g. --no-save mode) — the
 	// "Session" front-matter line is then omitted.
@@ -171,9 +180,28 @@ func renderArtifact(meta ArtifactMetadata, slug string) string {
 
 	sb.WriteString("\n## Problem\n\n")
 	sb.WriteString(strings.TrimSpace(meta.Problem))
-	sb.WriteString("\n\n## Steps\n\n")
+
+	// Done when sits between Problem and Steps on purpose: it is the
+	// section that decides whether the plan can be closed, so it reads
+	// before the work items rather than after them. Checkboxes because
+	// the artifact is meant to be ticked off by hand — one assertion,
+	// one `- [ ]`.
+	if len(meta.DoneWhen) > 0 {
+		sb.WriteString("\n\n## Done when\n\n")
+		for i, d := range meta.DoneWhen {
+			fmt.Fprintf(&sb, "- [ ] %d. %s\n", i+1, strings.TrimSpace(d))
+		}
+	}
+
+	sb.WriteString("\n## Steps\n\n")
 	for i, s := range meta.Steps {
 		fmt.Fprintf(&sb, "%d. %s\n", i+1, strings.TrimSpace(s))
+	}
+
+	if strings.TrimSpace(meta.ReviewedBy) != "" {
+		sb.WriteString("\n## Reviewed by\n\n")
+		sb.WriteString(strings.TrimSpace(meta.ReviewedBy))
+		sb.WriteString("\n")
 	}
 
 	if strings.TrimSpace(meta.WhyNow) != "" {

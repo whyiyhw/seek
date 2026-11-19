@@ -208,15 +208,18 @@ type planBridge struct {
 	// path on success or a "(note: …)" line on failure. PRD §8.7.
 	lastArtifactPath string
 	lastArtifactErr  error
-	// pendingProblem / pendingWhyNow carry the propose args from the
-	// in-flight Execute call into Approved, which only receives steps
-	// and batch. RecordProposalContext sets them before sink.Approved
-	// fires; Approved clears them after consuming.
-	pendingProblem string
-	pendingWhyNow  string
-	getAgent       func() *agent.Agent
-	planTool       *plantool.Tool
-	policy         *permission.Policy
+	// pendingProblem / pendingWhyNow / pendingDoneWhen /
+	// pendingReviewedBy carry the propose args from the in-flight
+	// Execute call into Approved, which only receives steps and
+	// batch. OnProposeStart + OnProposeCompletion fill them before
+	// sink.Approved fires; Approved clears them after consuming.
+	pendingProblem    string
+	pendingWhyNow     string
+	pendingDoneWhen   []string
+	pendingReviewedBy string
+	getAgent          func() *agent.Agent
+	planTool          *plantool.Tool
+	policy            *permission.Policy
 	// sessionID returns the live session ID (closure so /compact / /reset
 	// rebuilds don't strand a stale value). Returns "" in --no-save
 	// mode; we use that signal to skip artifact writes entirely.
@@ -239,13 +242,18 @@ func (b *planBridge) Approved(steps []string, batch bool) {
 	// subsequent propose calls. We copy so a later mutation by
 	// callers can't shift our reference.
 	b.lastApproved = append(b.lastApproved[:0], steps...)
-	// Consume the in-flight propose context (set by OnProposeStart).
-	// We hold these only until the next propose, so consuming here
-	// avoids stale data leaking into the next adjust loop.
+	// Consume the in-flight propose context (set by OnProposeStart +
+	// OnProposeCompletion). We hold these only until the next propose,
+	// so consuming here avoids stale data leaking into the next adjust
+	// loop.
 	problem := b.pendingProblem
 	whyNow := b.pendingWhyNow
+	doneWhen := append([]string(nil), b.pendingDoneWhen...)
+	reviewedBy := b.pendingReviewedBy
 	b.pendingProblem = ""
 	b.pendingWhyNow = ""
+	b.pendingDoneWhen = nil
+	b.pendingReviewedBy = ""
 	enabled := b.artifactEnabled
 	projectAbs := b.projectAbs
 	now := b.now
@@ -265,8 +273,10 @@ func (b *planBridge) Approved(steps []string, batch bool) {
 		}
 		path, werr := plantool.WriteArtifact(plantool.ArtifactMetadata{
 			Problem:        problem,
+			DoneWhen:       doneWhen,
 			Steps:          steps,
 			WhyNow:         whyNow,
+			ReviewedBy:     reviewedBy,
 			SessionID:      sid,
 			ProjectAbsPath: projectAbs,
 			Batch:          batch,
@@ -310,6 +320,17 @@ func (b *planBridge) OnProposeStart(problem string, _ []string, whyNow string) {
 	b.pendingWhyNow = whyNow
 }
 
+// OnProposeCompletion implements propose.CompletionReceiver — the
+// sibling of ContextReceiver added when done_when/reviewed_by landed.
+// Snapshotting here (rather than widening OnProposeStart) keeps every
+// existing ContextReceiver implementation compiling unchanged.
+func (b *planBridge) OnProposeCompletion(doneWhen []string, reviewedBy string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pendingDoneWhen = append(b.pendingDoneWhen[:0], doneWhen...)
+	b.pendingReviewedBy = reviewedBy
+}
+
 // LastArtifactStatus implements propose.ArtifactReporter. Reset
 // during Approved (either to a real path/err pair or to zeros),
 // returned verbatim here for propose to fold into the tool result.
@@ -329,6 +350,8 @@ func (b *planBridge) Cancelled() {
 	b.lastApproved = nil
 	b.pendingProblem = ""
 	b.pendingWhyNow = ""
+	b.pendingDoneWhen = nil
+	b.pendingReviewedBy = ""
 	// Clear artifact status too — a previous turn's success path
 	// should not leak into the cancel's tool result (currently
 	// cancel doesn't call LastArtifactStatus, but defensive).
@@ -4124,26 +4147,6 @@ func opencodeEndpoint(cfg config.Config, baseURLFlag string) string {
 // can't apply to a parent and miss its children.
 func newOpenCodeProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider {
 	return compatible.New(apiKey, opencodeEndpoint(cfg, baseURLFlag), "OpenCode")
-}
-
-// autoDistillEnabled returns true when $SEEK_AUTO_DISTILL is unset or set to
-// a truthy value (1/true/yes/on). Controls memory_observe tool registration;
-// default enabled because real-time notifications provide the safety net
-// (PRD §6 v2).
-func autoDistillEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("SEEK_AUTO_DISTILL")))
-	if v == "" {
-		return true // default: enabled
-	}
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
-
-// envBoolTrue returns true when the named env var is set to a truthy
-// value (1/true/yes/on). Empty/unset is false. Use for kill-switch /
-// opt-in flags where "absent = disabled" is the safer default.
-func envBoolTrue(name string) bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
 // mcpSectionFromBridges assembles the sysprompt MCPSection content (the

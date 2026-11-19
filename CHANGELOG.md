@@ -1,24 +1,19 @@
 # 更新日志（CHANGELOG）
 
-## v0.12.0（2026-11-18）
+## v0.12.1（2026-11-18）
 
-v0.12.0 — 多一条包月车道、多一张嘴：**OpenCode Go** 以 $10/月订阅价加入 DeepSeek / GLM / OpenAI 兼容车道；`seek serve` 长出**按住说话**（录音 → DeepSeek ASR → 一条真正的会话）；子代理可后台跑、可按 id 唤醒续话；MCP server 的工具拿到命名空间与提示文案；DeepSeek 文档输入（`@report.pdf`）与可选的 `safety_check` 落地。内核也开始公开减重：`-tools` 白名单和只读的摩擦报告，是 v8 里第一批能拿数字验证的刀。
+v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。计划里「怎么算做完」从散文变成 `done_when` 字段——没有完成条件的提案会被工具直接拒收，并要求模型回去继续分析；`reviewed_by` 记录「谁来验结果、从哪个源验」。配套新增内置 skill `plan-contract`（关卡该加在哪、决策该交给脚本/异源/人、教训什么时候不该变成永久规则）。同时开始拆 `cmd/seek/main.go`：`envgate.go` 是第一个搬出去的文件，纯搬移、零行为变化。
 
 ### Notable changes
 
-- **OpenCode Go 车道（新）**. `--provider=opencode` 接 OpenCode Go 订阅（$10/月，请求窗口限额、开放权重模型池）。seek 以自有 `User-Agent` + 每会话稳定的 `x-opencode-session` 头自报身份——缺这个头会静默退化成按 token 扣费。车道默认模型 `deepseek-v4.1-flash`；首启向导、子代理路由表、pricing 行（该车道只作参考单价展示）同步更新，`--base-url` 现在也能覆盖 GLM 与 opencode 的端点。
-- **按住说话（新）**. `seek serve --frontend=web --frontend=voice` 给网页加一个 🎤 按钮：按住、说话（≤120 秒）、松开——音频经 DeepSeek ASR 转写（按秒计费），以独立会话 `voice:<device-id>` 进入控制平面，和别的会话一样用 `/bind` 绑定项目。麦克风需要安全上下文（localhost 直接可用；走 tailnet 要用 HTTPS 前置）。播报侧（TTS）的 `Speaker` 积木与计价已落地，CLI 开关尚未接。
-- **文档输入（新）**. `@report.pdf` 走 DeepSeek Files API：提交期路由（copy-at-submit，本地资产库保留唯一副本）、复用 `file_id` 保住前缀缓存、`@rich:` 取图文混排布局；重放时文件标记淡显。`read_url` 在 R0 验证门里与 function tools 共存实测为红，**判定不接**。
-- **`safety_check`（新，需显式开启）**. 配到 `high` 时 DeepSeek 车道带上模型安全校验参数；被拒会作为正常回合返回，而不是报错中断。
-- **MCP 深度集成（行为变更）**. 工具默认注册为 `server__tool`（如 `semble__search`）；`mcp.json` 的 `prefix: false` 在裸名空闲时保留裸名，撞名仍回退到前缀形态。sysprompt 新增 `MCPSection` 段（每会话静态；空段与之前逐字节一致）承载 `hint` / `mcp_prompt` 文案；server 注册顺序确定化。
-- **子代理：后台 + 续话**. `run_in_background` 的子代理完成事件进入主会话流（状态徽标、`/agents` MODE 列）；带 `session_id` 可连上下文与血统一起复活；`-resume` 回灌「已完成未通知」的子代理，完成事件不再丢。
-- **类型化 agent 定义**. `~/.seek/agents/` 与 `<project>/.seek/agents/` 下的 SKILL.md 式定义（frontmatter 与 skill 共用一套方言）；`seek agents list/check/create/remove` 是唯一写入口，per-type 工具白名单接进权限层，内置 explore / judge / general 三个模板并带默认车道。
-- **hooks 扩容**. 新增 SubagentStart/Stop、Stop、PreCompact、Notification 观察点与 shell 事件；`pre_prompt_inject` 是 opt-in 的单缝注入通道（默认 2048 B / 上限 8192 B、带截断标记、注入字节进 audit），守护测试锁住「注入后前缀前段字节不变」。
-- **ACP 完整化**. `session/new` 返回 `configOptions`、`session/set_config_option` 运行时换模型、`SEEK_ACP_PROVIDER` / `SEEK_ACP_MODEL` 可钉定；`tool_call` 放出 kind/locations/rawInput/rawOutput/content，思考流走 `agent_thought_chunk`，文本 content 块不再污染整帧——结果只走 `rawOutput`。
-- **web 工作台 W0–W4**. 流式聊天（delta 累积、工具行折叠）、会话浏览器（cursor 分页）、记忆与统计视图、后台子代理任务面板（SSE tail-follow）、`?token=` 换票 cookie + 写面 Origin/Host 闸，以及 CSP、gzip、CI 体积 gate。
-- **薄内核旋钮与度量**. 顶层 `-tools` 白名单（会话启动即冻结，未知名 exit 2）；`/rpc` 新增只读 `stats/friction`（从 transcript 折叠出按工具的失败/被拒/重复）；`scripts/kernel-deps.sh` 内核依赖方向报告；`eval/ablate.sh` 裸核 vs 完整双跑对照；selftest 改发现制（新脚本自动进名单）；autopilot Outcome 带 token/成本与 diffstat。
-- **修复**. `list_dir` 默认深度的输出补上「重新调用拿更深一层」的带内提示（`bash-overreach` 反复红绿交替的根因）；`seek agents remove` 先校验名字再碰文件系统；worktree GC 加年龄兜底；session / subagent ID 熵 24→64 位；`seek session export` 把 transcript 渲染成 markdown。
-- **Quality**. eval 增加 ablate 双跑车道与趋势雷达；两个用例按实测重标定（`bash-overreach` 改绑「bash 不得先手」的排序界，`code-review-effort-max` 放宽 runaway 上限）；减法第 4、5 刀（含 `sandbox.Wrap` 的 linux/other 变体）清掉孤儿读写路径；29 篇已交付 PRD 归档进 `docs/prd/archive/`。
+- **`done_when`（行为变更，必填）**. `propose` 的 schema 现在要求 `done_when`：1–12 条断言（建议 3–5，每条 ≤240 字符），每条都要说清拿什么去对照——一个测试、一条命令加预期输出、一个文件加要 grep 的词、一条必须仍成立的不变量、一个页面。缺失时工具返回可恢复的错误并把模型推回 ANALYZE，而不是让一份「描述」冒充计划。通过后的工具结果会把这些断言回显一遍，执行期间一直在工作记忆里。
+- **`reviewed_by`（新，可选）**. 一句话写明结果评审的来源与材料（「新开会话，喂 plan + diff + 原始消息，人决定改不改」）。写出它时，工具结果会明确禁止模型自称已验证。
+- **plan 快照多两节**. `~/.seek/projects/<id>/plans/*.md` 新增 `## Done when`（复选框列表，位于 Problem 与 Steps 之间）与 `## Reviewed by`。旧快照不受影响，节标题在 PRD §8.12 里追加为锁定项。
+- **新内置 skill `plan-contract`**. 讲计划**内容**而不讲工具机制（后者仍是 `plan-mode`）：关卡该加在什么地方（撤不回的一步之前 / 没人逐项看的产出往下走之前）、每个决策按答案出处路由到「检」（脚本）/「查」（异源 agent 或换车道）/「定」（人，批量问）、以及复盘的三种下落——规则、关卡、或带关闭日的待定条目（并且「测不出来」按撤回算，不按通过）。写作动机是仓库自己的账：`docs/pitfalls.md` 现在 249 条、关闭 0 条。
+- **内核减重第一刀**. `cmd/seek/main.go` 开始按主题拆文件：`envgate.go`（`envBoolTrue` / `autoDistillEnabled`）。纯搬移，`go build` / `go vet` / `go test -race ./...` 全绿，CLI 表面逐字节不变。
+- **修复**. `seek serve --frontend=web -h` 不再以退出码 2 打印 usage；`-h` / `--help` 现在在任何位置都算求助，`--help` 也会列出动词。OpenCode Go 车道补上浏览器登录与实时模型目录。
+
+> **前缀缓存**：`propose` 的 schema 字节变了，升级后的第一次会话会全量重算 prompt 前缀（一次），之后照常命中。
 
 更早的版本见 [GitHub Releases](https://github.com/whyiyhw/seek/releases)——每个 release body 与其 annotated tag 同文。本文件只保留当前版本，历史版本查 git 历史（`git show vX.Y.Z:CHANGELOG.md`）。
 

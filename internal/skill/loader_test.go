@@ -106,6 +106,34 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 	if !strings.Contains(cr.Description, "/code-review") && !strings.Contains(cr.Description, "--fix") {
 		t.Errorf("code-review description should mention the command or its flags so it loads at the right time; got %q", cr.Description)
 	}
+
+	// plan-contract carries the plan's *content* rules (completion
+	// conditions as assertions, gate placement, 检/查/定 routing).
+	// Same load-bearing test as the others: it must fire on the propose
+	// trigger, and it must not be silently shadowed by plan-mode — the
+	// two are complementary (mechanism vs content), not duplicates, so
+	// a future edit that merges them should have to delete this test
+	// deliberately.
+	pc := set.Get("plan-contract")
+	if pc == nil {
+		t.Fatalf("builtin plan-contract not present; loaded: %v", listNames(set))
+	}
+	if !strings.Contains(pc.Description, "propose") && !strings.Contains(pc.Description, "plan") {
+		t.Errorf("plan-contract description should mention propose/plan so it loads before a plan is written; got %q", pc.Description)
+	}
+	if pc.Type != TypeBuiltin {
+		t.Errorf("plan-contract.Type = %v, want TypeBuiltin", pc.Type)
+	}
+	// The body is only read on demand, so the two things that must
+	// survive any future edit are the vocabulary (so the model and the
+	// user name the same mechanism the same way) and the closing rule
+	// (§8: rules are a liability; a lesson with no evidence becomes a
+	// dated pending entry, not another permanent rule).
+	for _, want := range []string{"done_when", "pending entry", "Review by"} {
+		if !strings.Contains(pc.Body, want) {
+			t.Errorf("plan-contract body lost %q — it is a contract term, not prose", want)
+		}
+	}
 }
 
 func TestLoad_PriorityCascade(t *testing.T) {
