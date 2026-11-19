@@ -20,6 +20,12 @@
 #                           "-tools read,edit,write,bash,grep"); also
 #                           passed through to runner.sh cases in the env
 #
+# SEEK_HOME is pinned to a sandbox (eval/tmp/seek-home, gitignored;
+# a caller-set non-empty value is respected) so no eval write can
+# reach the real ~/.seek — see the isolation block below and
+# eval/README.md § Isolation. Unattended lanes run fake-key by rule
+# (docs/prd/v8.md §9.1).
+#
 # Exit code: 0 if every executed case passed, 1 if any failed, 2 on
 # setup error (missing binary, unparseable expect.json, etc.).
 
@@ -49,6 +55,41 @@ if command -v cygpath >/dev/null 2>&1; then
   cases_dir=$(cygpath -m "$cases_dir")
   results_dir=$(cygpath -m "$results_dir")
 fi
+
+# --- SEEK_HOME isolation (card c_clip4i) --------------------------------
+# Structural guarantee: nothing an eval run writes may land in the real
+# ~/.seek. seek resolves ALL user-data paths (sessions, projects/,
+# dream-state, cron/, skill stats, upgrade-check, …) through
+# paths.Home() = $SEEK_HOME-or-~/.seek, so pinning SEEK_HOME at a
+# sandbox under eval/tmp (gitignored) makes real-HOME writes impossible
+# from the eval lane. This is not hypothetical hygiene: a probe
+# (2026-11-18) showed a single invocation whose API call fails
+# INSTANTLY on a fake key still writes four things under ~/.seek
+# (dream-state.json, projects/<id>/manifest.json, sessions/,
+# cron/tick.lock). An unattended lane (CI / batch / steward loop) has
+# no human watching for that pollution — and a real HOME would also
+# leak machine-local user state (skills, memory, mcp.json) INTO the
+# measurements. Hermetic-by-default is a fidelity win too.
+#
+# A caller-provided non-empty SEEK_HOME is respected verbatim (an outer
+# sandbox redirecting the redirect). Empty-but-set is treated as unset:
+# os.Getenv treats "" as unset as well, and exporting "" would silently
+# re-open the real ~/.seek.
+#
+# SEEK_SESSIONS_DIR ranks ABOVE SEEK_HOME in session.NewStore's
+# resolution ladder, so an inherited stray value would bypass the
+# sandbox for sessions specifically — unset it. No eval lane uses it
+# (ablation lanes steer via SEEK_EVAL_* knobs only).
+#
+# Silent by design — no output line is added: scripts/
+# eval-ablate-test.sh byte-compares run.sh's no-env stdout/stderr/
+# result rows against a pre-knob blob extracted from git history.
+# The mechanism itself is pinned by scripts/eval-home-isolation-test.sh.
+if [[ -z "${SEEK_HOME-}" ]]; then
+  export SEEK_HOME="$eval_root/tmp/seek-home"
+fi
+unset SEEK_SESSIONS_DIR
+mkdir -p "$SEEK_HOME"
 
 # v8·T2 ablation hooks — both default to the historical behaviour when
 # unset, so the no-env output stays byte-identical (card c_w3vhcm
