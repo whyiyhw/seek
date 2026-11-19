@@ -199,10 +199,10 @@ func TTSCost(billableChars int) float64 {
 }
 
 // parsePerPageUSD is the Files-API document-parsing rate: $0.225 per
-// 1,000 pages (¥1.5/千页 on the Chinese pricing page; the English page
-// no longer lists the tools family, so this converts at the same ratio
-// the search row documents natively — ¥5/1K → $0.75/1K). Billed once,
-// at upload: the parse IS the upload (a returned file id means the
+// 1,000 pages, listed natively on the English pricing page (2026-11-18
+// check — the tools family IS on the EN page again, retiring the old
+// ¥→$ derivation note; ¥1.5/千页 on the Chinese page, same value). Billed
+// once, at upload: the parse IS the upload (a returned file id means the
 // document already parsed), same price for text_recognition and
 // rich_layout_recognition (PRD feature-deepseek-app-api §1.2/§6 row 3).
 // Same-posture note as search/ASR/TTS: list price only, no discounts

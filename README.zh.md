@@ -102,6 +102,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **后台任务** | 长 build/server 丢后台 → `bg-N`；`monitor` poll / wait / kill。[📘](docs/guide-background.md) |
 | **语义 references** | LSP「谁调用了它」（gopls / pyright / tsserver），grep 兜底。[📘](docs/guide-references.md) |
 | **原生视觉输入** | 粘贴或 `@img.png` → 图片字节原生直发多模态默认模型（`deepseek-flash`，V4.1）。[📘](docs/guide-vision.md) |
+| **文档输入** | `@report.pdf` → 走 DeepSeek Files API 上传解析（`@rich:` 看图文混排），本地资产库存唯一副本。[📘](docs/guide-files.md) |
 | **代码审查** | 分档深度的 diff 审查，支持 `--fix` 和 `--comment`。[📘](docs/guide-code-review.md) |
 | **MCP client** | 透传任意 MCP server 的工具。[📘](docs/guide-mcp.md) |
 | **Web 搜索** | 内置 `web_search` 工具，走 DeepSeek Search API——查新文档不用跳出循环。 |
