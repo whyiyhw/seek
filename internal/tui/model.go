@@ -667,19 +667,29 @@ type Model struct {
 
 	// `s` conversion state (feature-memory-skill-bridge §3.1, M-B2).
 	// converting = one reasoner round-trip is in flight (spinner
-	// line; all keys inert except abort). convertIdx stamps which
-	// candidate owns the in-flight call — a result that arrives
-	// after the review closed or advanced past it is dropped, never
-	// spliced into a different candidate's turn. converted != nil =
-	// the preview state: y installs to <project>/.seek/skills, n
-	// backs out to the prompt, q quits. convertNote carries the L2
-	// GREY warning into the preview render; skilled counts installs
-	// for the review-done summary ("K → skill").
-	distillConverting  bool
-	distillConvertIdx  int
-	distillConverted   *skilldistill.SkillCandidate
-	distillConvertNote string
-	distillSkilled     int
+	// line; keys inert except aborts and `n` retreat). convertIdx
+	// stamps which candidate owns the in-flight call — a result that
+	// arrives after the review closed or advanced past it is dropped,
+	// never spliced into a different candidate's turn. convertGen is
+	// the generation counter that makes the drop airtight once `n`
+	// retreat + a same-idx refire became possible (M-B2 rework): idx +
+	// converting alone would re-admit the orphaned first call's late
+	// result as if it were the refire's. converted != nil = the
+	// preview state: y installs to <project>/.seek/skills, n backs out
+	// to the prompt, q quits. convertNote carries the L2 GREY warning
+	// into the preview render; skilled counts installs for the
+	// review-done summary ("K → skill"). convertCache is the pay-once
+	// cache (§3.2, 2026-11-19 拍板): completed (err==nil) conversion
+	// outcomes filed by candidate idx, replayed by a later `s` on the
+	// same candidate without a second reasoner call; reset whenever a
+	// review opens (idx values recycle) and torn down on exit.
+	distillConverting   bool
+	distillConvertIdx   int
+	distillConvertGen   int
+	distillConverted    *skilldistill.SkillCandidate
+	distillConvertNote  string
+	distillSkilled      int
+	distillConvertCache map[int]distillConvertEntry
 
 	// distilling is true while the asynchronous reasoner call for
 	// /distill is in-flight. View() renders a spinner line with

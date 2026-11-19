@@ -215,6 +215,9 @@ func (m Model) openMReviewFromPending(cands memoryCandidates) (tea.Model, tea.Cm
 	m.distillDropped = 0
 	m.distillSkilled = 0
 	m.distillEditing = false
+	// Same per-review reset as handleDistillDone: the pay-once cache is
+	// keyed by idx, which recycles across reviews.
+	m.distillConvertCache = nil
 	m.distillReviewOpen = true
 	m.input.Blur()
 	return m, m.appendHistory(styleMuted.Render(fmt.Sprintf(

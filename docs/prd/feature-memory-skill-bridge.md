@@ -74,13 +74,16 @@ func WriteProjectSkill(opts WriteProjectOptions) (dir string, err error)
 
 ### 3.1 交互流与状态机
 
-`internal/tui/distill.go` 的 `handleDistillKey` 增加 `s` 分支；模态新增三个字段：`distillConverting bool`、`distillConverted *skilldistill.SkillCandidate`、`distillConvertNote string`（承载 GREY 判定文案）。
+`internal/tui/distill.go` 的 `handleDistillKey` 增加 `s` 分支；模态新增字段组：`distillConverting bool`、`distillConverted *skilldistill.SkillCandidate`、`distillConvertNote string`（承载 GREY 判定文案），外加 M-B2 返工（2026-11-19 拍板）补的两个：`distillConvertGen int`（转换世代号，`n` 退场 + 同 idx 重发时隔离在飞旧结果）与 `distillConvertCache map[int]…`（按候选 idx 的「只付一次」缓存，见 §3.2）。
 
 ```
 ⚡ candidate i/j ── s ──▶ converting（spinner 行 "· converting to skill…"，
-   y/n/e/q/s              异步一次 reasoner 调用，90s 上限，ctx 挂 m.opts.Ctx）
-                              │ err ──▶ 错误行，回到 candidate 提示态（y/n/e/s/q 仍可用）
-                              │ L2 REJECT ──▶ 拒绝行（同名/重叠 ≥0.60），回到 candidate 提示态
+   y/n/e/q/s              异步一次 reasoner 调用，90s 上限，ctx 挂 m.opts.Ctx；
+                          idx 缓存命中则跳过本态直接回放结果）
+                              │ err ──▶ 错误行，回到 candidate 提示态（y/n/e/s/q 仍可用；不缓存，s 可重试重付）
+                              │ L2 REJECT ──▶ 拒绝行（同名/重叠 ≥0.60），回到 candidate 提示态（结果入 idx 缓存）
+                              │ n ──▶ 回到 candidate 提示态（y/n/e/s 仍可用；在飞调用作废——世代号 +1，
+                              │        迟到结果按世代丢弃，同 idx 立即重发 s 也不会把旧结果当新结果回拼）
                               ▼
                           converted 预览态：description（重写后的 when-to-use）置顶
                           + GREY ⚠（若有）+ body（=content 直译）
@@ -88,7 +91,8 @@ func WriteProjectSkill(opts WriteProjectOptions) (dir string, err error)
                               │ y ──▶ WriteProjectSkill ──▶ 成功行
                               │        "· skill installed: <dir> (takes effect next session)"
                               │        计数 distillSkilled++，advance 到下一条
-                              │ n ──▶ 回到 candidate 提示态（y/n/e/s 仍可用——改主意还可以落 M）
+                              │ n ──▶ 回到 candidate 提示态（y/n/e/s 仍可用——改主意还可以落 M；
+                              │        再按 s 从 idx 缓存回放预览，不重付 reasoner）
                               ▼
                           review 结束行扩展："…, N saved, M dropped, K → skill, …"
 ```
@@ -103,6 +107,8 @@ func WriteProjectSkill(opts WriteProjectOptions) (dir string, err error)
 - **B. 按需转换**（按下 `s` 才发一次 V4-Flash thinking 调用）：成本只在真用 `s` 时付；转换器可以拿到 skill manifest 与 M 索引做上下文；模态状态机代价可控（§3.1）。✓
 
 选 B。模型与 `Distiller` 一致（V4-Flash + thinking，90s bound，同 M-SD1 的 `startSkillDistillCmd` 口径）。
+
+**「转换只付一次」的口径**（2026-11-19 拍板）：**按候选 idx 缓存**——一次**完成且无错**（`err == nil`，含 PASS/GREY/REJECT）的转换结果，按候选 idx 存入 `distillConvertCache`；同一候选回退（预览态 `n`、converting 态 `n`）后再按 `s`，直接回放缓存结果（PASS/GREY 重开预览、REJECT 重放拒绝行），**不再发第二次 reasoner 调用**。缓存生命周期 = 单次 review 会话（review 开启时重置——idx 跨会话回绕、不重置会拿上一个 review 的转换冒充本 review 的候选 0；退出时随其余 `s` 状态一并拆除）。**err 不缓存**（传输/解析/护栏失败）：错误行本身承诺「retry with s」，重试必须真的能重发重付，否则一次瞬时故障就把该候选的 `s` 永久砖死。REJECT 入缓存的理由：novelty 判定对同一 skills/M 索引是确定性的，重跑只是重付一次必然同判定的调用。
 
 ### 3.3 转换器契约（落位 `internal/skilldistill/convert.go`）
 
@@ -245,12 +251,14 @@ M-B1 单独可发布；M-B2 依赖 M-B1；M-B3/M-B4 相互独立。
 | 10 | M-SD2 自动路径行为零变化（无直写能力）；`.drafts/` 语义零变化 | 既有测试全绿（回归即红线） |
 | 11 | skills 树写入仍仅发生于 `internal/skillmgr`（grep 断言无新写者） | CI/审查 |
 | 12 | v1.md 三处 GC 勘误落盘且与 `score.go` 语义一致（宽限 30 天 → 正常参与） | 文档审查（本卡已交付，§7） |
+| 13 | converting 态按 `n` 回候选提示态（y/n/e/s 可用）；在飞结果作废——同 idx 重发 `s` 后旧结果仍被世代号丢弃（2026-11-19 拍板增补） | 单元测试（M-B2 返工） |
+| 14 | 同候选再次 `s` 走 idx 缓存零新调用：PASS/GREY 回放预览、REJECT 回放拒绝行；err 不缓存、重试可重付（2026-11-19 拍板增补） | 单元测试（M-B2 返工） |
 
 ## 11. 风险
 
 | 风险 | 缓解 |
 |---|---|
-| 转换调用在模态内的延迟（Flash thinking 数秒~数十秒） | spinner 行 + 90s 上限；`n` 随时可退；转换只付一次 |
+| 转换调用在模态内的延迟（Flash thinking 数秒~数十秒） | spinner 行 + 90s 上限；`n` 随时可退（含 converting 态：世代号隔离在飞旧结果，防同 idx 重发回拼）；转换只付一次（`err==nil` 结果按候选 idx 缓存，回退后再 `s` 不重付；err 不缓存、可重试，§3.2） |
 | 重写后的 description 质量差 → manifest 污染 | 预览态 y/n 人在环；§8.1 机械护栏挡最差情形（拷贝）；错了 git revert |
 | manifest 随 `s` 使用逐渐膨胀 | 入口判重 + review 闸限速；`--idle` + `seek skill list` 观察；uninstall 出口 |
 | 用户把 `s` 误解为「存草稿」 | 提示行明写 `install to project` + 成功行明写下次会话生效；草稿语义仍由 `y` 承载 |

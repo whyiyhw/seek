@@ -49,6 +49,10 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 	m.distillDropped = 0
 	m.distillSkilled = 0
 	m.distillEditing = false
+	// Pay-once cache is per-review: idx values recycle across reviews
+	// (every review restarts at 0), so a stale entry would hand the
+	// PREVIOUS review's conversion to this review's candidate 0.
+	m.distillConvertCache = nil
 	m.distillReviewOpen = true
 	m.input.Blur()
 	return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf("  · distill: %d candidate(s) — review with [y] save  [n] drop  [e] edit  [s] → skill  [q] quit", len(msg.candidates))))}
@@ -60,9 +64,10 @@ func (m *Model) handleDistillDone(msg distillDoneMsg) []tea.Cmd {
 //     editor; Enter commits the edit (saves the candidate), Esc
 //     cancels back to the y/n/e/q prompt.
 //   - distillConverting == true: an `s` reasoner round-trip is in
-//     flight. All keys are inert except the aborts (q/Esc/Ctrl+C) —
-//     the late result msg is dropped by the stale guard in
-//     handleDistillConvertDone.
+//     flight. Keys are inert except the aborts (q/Esc/Ctrl+C) and
+//     `n`, which retreats to the candidate prompt and orphans the
+//     in-flight call — its late result msg is dropped by the stale
+//     guard (generation counter) in handleDistillConvertDone.
 //   - distillConverted != nil: the converted-skill preview. y installs
 //     to <project>/.seek/skills (WriteProjectSkill), n backs out to
 //     the prompt (y/n/e/s all usable again), q quits.
@@ -85,8 +90,21 @@ func (m Model) handleDistillKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			return m.exitDistillReview(true)
 		}
-		if len(msg.Text) == 1 && strings.ToLower(msg.Text) == "q" {
-			return m.exitDistillReview(true)
+		if len(msg.Text) == 1 {
+			switch strings.ToLower(msg.Text) {
+			case "q":
+				return m.exitDistillReview(true)
+			case "n":
+				// §11: `n` retreats from the conversion too — back to
+				// the candidate prompt, y/n/e/s live again. The
+				// in-flight call is orphaned, not cancelled: bump the
+				// generation so its late result stays stale even after
+				// an immediate `s` refire on the same idx (idx +
+				// converting alone would re-admit it).
+				m.distillConverting = false
+				m.distillConvertGen++
+				return m, nil
+			}
 		}
 		return m, nil
 	}
@@ -105,7 +123,8 @@ func (m Model) handleDistillKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.distillInstallConverted()
 		case "n":
 			// Back out of the preview — the candidate is still
-			// undecided; y (save to M) / e / s all remain open.
+			// undecided; y (save to M) / e / s all remain open (a new
+			// s replays this cached conversion; it does not re-pay).
 			m.distillConverted = nil
 			m.distillConvertNote = ""
 			return m, nil
@@ -247,21 +266,37 @@ func (m Model) handleDistillEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // ---------- `s`: convert-to-skill fast lane (bridge §3.1, M-B2) ----------
 
 // distillConvertDoneMsg carries the async ConvertToSkill result. idx is
-// the candidate index the call was fired for — the stale guard in the
-// handler drops results whose review closed or advanced past them.
+// the candidate index the call was fired for; gen is the conversion
+// generation it was fired under — the stale guard in the handler drops
+// results whose review closed, advanced past them, or whose generation
+// was orphaned by an `n` retreat (same-idx refire would otherwise
+// re-admit the old result).
 type distillConvertDoneMsg struct {
 	idx  int
+	gen  int
 	cand skilldistill.SkillCandidate
 	l2   skilldistill.L2Result
 	err  error
 }
 
+// distillConvertEntry is the pay-once cache payload (§3.2, 2026-11-19
+// 拍板「按候选 idx 缓存」): a completed (err==nil) conversion outcome —
+// the converted candidate plus its L2 verdict — replayable by a later
+// `s` on the same candidate without a second reasoner round-trip.
+// Errors never enter the cache: their messages promise "retry with s",
+// and a retry must be able to re-pay.
+type distillConvertEntry struct {
+	cand skilldistill.SkillCandidate
+	l2   skilldistill.L2Result
+}
+
 // distillStartConvert is the `s` entry: cross-layer same-name refusal
 // first (§2.3 — any of project/user/builtin owning the name means
 // "edit the existing skill", never a second copy; the loader's Set is
-// already the merged cascade), then flip to the converting state and
-// fire one reasoner round-trip. Every refusal is a line + stay on the
-// prompt: y/n/e keep working.
+// already the merged cascade), then the pay-once cache (a completed
+// conversion for this idx replays instead of re-paying), and only then
+// flip to the converting state and fire one reasoner round-trip. Every
+// refusal is a line + stay on the prompt: y/n/e keep working.
 func (m Model) distillStartConvert() (tea.Model, tea.Cmd) {
 	if m.distillIdx >= len(m.distillCandidates) {
 		return m.exitDistillReview(false)
@@ -278,16 +313,22 @@ func (m Model) distillStartConvert() (tea.Model, tea.Cmd) {
 				"  ! skill %q already installed (source %s) — edit the existing skill (`seek skill update` / edit the file) instead of converting this candidate", cand.Name, existing.Source)))
 		}
 	}
+	if entry, ok := m.distillConvertCache[m.distillIdx]; ok {
+		cmds := (&m).routeConvertOutcome(m.distillIdx, entry.cand, entry.l2, false)
+		return m, tea.Batch(cmds...)
+	}
 
 	m.distillConverting = true
 	m.distillConvertIdx = m.distillIdx
-	return m, startDistillConvertCmd(&m, m.distillIdx)
+	m.distillConvertGen++
+	return m, startDistillConvertCmd(&m, m.distillIdx, m.distillConvertGen)
 }
 
 // startDistillConvertCmd runs the conversion round-trip as a tea.Cmd —
 // same 90s bound and parent-ctx propagation as the two distill passes
-// (§3.2: one reasoner call, paid only when `s` is pressed).
-func startDistillConvertCmd(m *Model, idx int) tea.Cmd {
+// (§3.2: one reasoner call, paid only when `s` is pressed and the idx
+// cache misses).
+func startDistillConvertCmd(m *Model, idx, gen int) tea.Cmd {
 	distiller := m.opts.SkillDistiller
 	mc := m.distillCandidates[idx] // copied by value below
 	skills := m.opts.Skills
@@ -306,19 +347,21 @@ func startDistillConvertCmd(m *Model, idx int) tea.Cmd {
 		defer cancel()
 		cand := skilldistill.MCandidate{Name: mc.Name, Tagline: mc.Tagline, Content: mc.Content, Tags: mc.Tags}
 		sc, l2, err := distiller.ConvertToSkill(ctx, cand, skills, mIndex)
-		return distillConvertDoneMsg{idx: idx, cand: sc, l2: l2, err: err}
+		return distillConvertDoneMsg{idx: idx, gen: gen, cand: sc, l2: l2, err: err}
 	}
 }
 
-// handleDistillConvertDone routes the conversion result. err / L2Reject
-// print one line and return to the candidate prompt (degrade, never
-// terminate — §3.1); PASS/GREY flip to the preview state with the GREY
-// warning riding along. The stale guard is load-bearing: a result whose
-// review closed (q mid-convert) or whose candidate index no longer
-// matches would otherwise splice into a different candidate's turn —
-// idx alone is NOT enough because a fresh review restarts at 0.
+// handleDistillConvertDone routes the conversion result. err prints one
+// line and returns to the candidate prompt (degrade, never terminate —
+// §3.1); anything else hands over to routeConvertOutcome. The stale
+// guard is load-bearing: a result whose review closed (q mid-convert),
+// whose candidate index no longer matches, or whose generation was
+// orphaned by an `n` retreat would otherwise splice into a different
+// turn — idx alone is NOT enough because a fresh review restarts at 0,
+// and idx + converting alone are not enough because `n` + a same-idx
+// refire re-arms both.
 func (m *Model) handleDistillConvertDone(msg distillConvertDoneMsg) []tea.Cmd {
-	if !m.distillReviewOpen || !m.distillConverting || msg.idx != m.distillConvertIdx {
+	if !m.distillReviewOpen || !m.distillConverting || msg.idx != m.distillConvertIdx || msg.gen != m.distillConvertGen {
 		return nil
 	}
 	m.distillConverting = false
@@ -326,15 +369,30 @@ func (m *Model) handleDistillConvertDone(msg distillConvertDoneMsg) []tea.Cmd {
 	if msg.err != nil {
 		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! convert to skill failed: " + msg.err.Error()))}
 	}
-	if msg.l2.Verdict == skilldistill.L2Reject {
-		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! skill conversion rejected — " + msg.l2.Reason))}
-	}
+	return m.routeConvertOutcome(msg.idx, msg.cand, msg.l2, true)
+}
 
-	cand := msg.cand
+// routeConvertOutcome is the single router a live result and a cache
+// replay share: L2Reject prints its line and stays on the prompt,
+// PASS/GREY open the preview with the GREY warning riding along.
+// cache=true (live results only) also files the outcome into the
+// per-idx pay-once cache — a completed round-trip is never paid twice
+// for the same candidate (§3.2). Errors never reach this router, so
+// they are never cached and "retry with s" stays honest.
+func (m *Model) routeConvertOutcome(idx int, cand skilldistill.SkillCandidate, l2 skilldistill.L2Result, cache bool) []tea.Cmd {
+	if cache {
+		if m.distillConvertCache == nil {
+			m.distillConvertCache = make(map[int]distillConvertEntry)
+		}
+		m.distillConvertCache[idx] = distillConvertEntry{cand: cand, l2: l2}
+	}
+	if l2.Verdict == skilldistill.L2Reject {
+		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! skill conversion rejected — " + l2.Reason))}
+	}
 	m.distillConverted = &cand
 	m.distillConvertNote = ""
-	if msg.l2.Verdict == skilldistill.L2Grey {
-		m.distillConvertNote = msg.l2.Reason
+	if l2.Verdict == skilldistill.L2Grey {
+		m.distillConvertNote = l2.Reason
 	}
 	return nil
 }
@@ -396,11 +454,13 @@ func (m Model) exitDistillReview(aborted bool) (tea.Model, tea.Cmd) {
 	m.distillIdx = 0
 	// Also tear down any `s` state: an in-flight convert's late result
 	// must find !distillConverting (stale guard), a preview must not
-	// leak into the next review.
+	// leak into the next review, and the pay-once cache dies with the
+	// review that paid for it.
 	m.distillConverting = false
 	m.distillConvertIdx = 0
 	m.distillConverted = nil
 	m.distillConvertNote = ""
+	m.distillConvertCache = nil
 	m.input.SetHeight(3)
 	m.input.Focus()
 

@@ -121,11 +121,13 @@ func TestDistillConvert_SFlipsToConvertingWithSpinner(t *testing.T) {
 	if got := mm.renderDistillReview(); !strings.Contains(got, "converting to skill") {
 		t.Errorf("render must show the converting spinner line:\n%s", got)
 	}
-	// While converting, decision keys are inert — no double-act.
-	for _, r := range []rune{'y', 'n', 'e', 's'} {
+	// While converting, decision keys are inert — no double-act. (`n`
+	// is NOT inert: §11 "`n` 随时可退" — its retreat is covered by
+	// TestDistillConvert_NDuringConvertingBacksOutOrphansResult.)
+	for _, r := range []rune{'y', 'e', 's'} {
 		out2, _ := mm.handleDistillKey(keyRune(r))
 		m2 := out2.(Model)
-		if m2.distillIdx != 0 || m2.distillSaved != 0 || m2.distillConverted != nil {
+		if m2.distillIdx != 0 || m2.distillSaved != 0 || m2.distillConverted != nil || !m2.distillConverting {
 			t.Errorf("key %q acted during conversion", r)
 		}
 	}
@@ -487,6 +489,175 @@ func TestDistillConvert_QDuringConvertDropsLateResult(t *testing.T) {
 	if m.distillConverted != nil {
 		t.Fatal("stale result must not splice into a fresh review at the same idx")
 	}
+}
+
+// ---------- n during converting: retreat + generation orphan (§11) ----------
+
+// §11 "`n` 随时可退" includes the converting state: n must return to
+// the candidate prompt (y/n/e/s live again) and orphan the in-flight
+// call. The orphaning is what the generation counter is for — after a
+// same-idx refire the OLD result must stay stale; idx + converting
+// alone would re-admit it as if it were the refire's.
+func TestDistillConvert_NDuringConvertingBacksOutOrphansResult(t *testing.T) {
+	fake := &convertFakeClient{resp: `{"description": "When X, do Y."}`}
+	m, _, _ := setupConvertModel(t, fake, nil)
+	m = openReview(m, convertCands())
+
+	out, firstCmd := m.handleDistillKey(keyRune('s'))
+	m = out.(Model)
+	if !m.distillConverting {
+		t.Fatal("precondition: converting")
+	}
+
+	// n retreats: prompt state again, candidate not consumed.
+	out, _ = m.handleDistillKey(keyRune('n'))
+	m = out.(Model)
+	if m.distillConverting || m.distillConverted != nil || !m.distillReviewOpen || m.distillIdx != 0 {
+		t.Fatalf("n must back out to the prompt: converting=%v converted=%v open=%v idx=%d",
+			m.distillConverting, m.distillConverted != nil, m.distillReviewOpen, m.distillIdx)
+	}
+	if got := m.renderDistillReview(); !strings.Contains(got, "[y] save") || !strings.Contains(got, "[s] → skill") {
+		t.Errorf("after n the y/n/e/s prompt footer must be back:\n%s", got)
+	}
+
+	// Refire on the same idx, then let the ORPHANED first result land:
+	// gen mismatch must drop it even though converting && idx match.
+	out, secondCmd := m.handleDistillKey(keyRune('s'))
+	m = out.(Model)
+	if !m.distillConverting {
+		t.Fatal("precondition: refire entered converting")
+	}
+	m.handleDistillConvertDone(firstCmd().(distillConvertDoneMsg))
+	if m.distillConverted != nil || !m.distillConverting {
+		t.Fatal("orphaned (old-generation) result must stay stale after a same-idx refire")
+	}
+
+	// The refire's own result is admitted and the review continues.
+	m.handleDistillConvertDone(secondCmd().(distillConvertDoneMsg))
+	if m.distillConverted == nil {
+		t.Fatal("the refire's result must open the preview")
+	}
+	out, _ = m.handleDistillKey(keyRune('y'))
+	if mm := out.(Model); mm.distillSkilled != 1 || mm.distillIdx != 1 {
+		t.Errorf("y after n-retreat + refire: skilled=%d idx=%d", mm.distillSkilled, mm.distillIdx)
+	}
+}
+
+// ---------- pay-once cache: s again on the same idx does not re-pay ----------
+
+// 2026-11-19 拍板: 「转换只付一次」= per-candidate idx cache. A completed
+// (err==nil) round-trip files its outcome; a later `s` on the same
+// candidate replays it — preview for PASS/GREY, the rejection line for
+// REJECT — with zero further reasoner calls. Errors are NOT cached:
+// their messages say "retry with s" and a retry must be able to re-pay.
+func TestDistillConvert_SecondSOnSameIdxReplaysFromCache(t *testing.T) {
+	t.Run("pass replays preview without a second call", func(t *testing.T) {
+		fake := &convertFakeClient{resp: `{"description": "When reading or writing sessions, follow the JSONL layout."}`}
+		m, p, cwd := setupConvertModel(t, fake, nil)
+		m = openReview(m, convertCands())
+
+		out, cmd := m.handleDistillKey(keyRune('s'))
+		m = out.(Model)
+		m.handleDistillConvertDone(cmd().(distillConvertDoneMsg))
+		if m.distillConverted == nil || fake.calls != 1 {
+			t.Fatalf("first s must pay once and preview: converted=%v calls=%d", m.distillConverted != nil, fake.calls)
+		}
+
+		// Preview → n → s again: cache hit, same preview, no new call,
+		// no cmd fired at all.
+		out, _ = m.handleDistillKey(keyRune('n'))
+		m = out.(Model)
+		out, cmd2 := m.handleDistillKey(keyRune('s'))
+		m = out.(Model)
+		if cmd2 != nil {
+			t.Error("cache hit must not fire any tea.Cmd (no reasoner, no line)")
+		}
+		if fake.calls != 1 {
+			t.Errorf("pay-once violated: calls=%d", fake.calls)
+		}
+		if m.distillConverted == nil || !strings.Contains(m.renderDistillReview(), "When reading or writing sessions") {
+			t.Fatal("cache hit must reopen the same preview")
+		}
+
+		// And the replayed preview installs for real.
+		out, _ = m.handleDistillKey(keyRune('y'))
+		mm := out.(Model)
+		if mm.distillSkilled != 1 || mm.distillIdx != 1 {
+			t.Errorf("install from cached preview: skilled=%d idx=%d", mm.distillSkilled, mm.distillIdx)
+		}
+		if _, err := os.Stat(filepath.Join(cwd, ".seek", "skills", "jsonl-sessions", "SKILL.md")); err != nil {
+			t.Errorf("cached preview install must write SKILL.md: %v", err)
+		}
+		if _, ok := p.Get("jsonl-sessions"); ok {
+			t.Errorf("s is save-AS — M must stay unwritten")
+		}
+		if fake.calls != 1 {
+			t.Errorf("calls after full round: %d", fake.calls)
+		}
+	})
+
+	t.Run("reject replays its line without a second call", func(t *testing.T) {
+		fake := &convertFakeClient{resp: `{"description": "When X, do Y."}`}
+		m, _, _ := setupConvertModel(t, fake, nil)
+		m = openReview(m, convertCands())
+
+		// Hand-route a live REJECT (same shape ErrorDegradesNotTerminates
+		// uses) so the outcome lands in the cache.
+		m.distillConverting = true
+		m.distillConvertIdx = 0
+		var gotLine string
+		for _, c := range m.handleDistillConvertDone(distillConvertDoneMsg{idx: 0, l2: skilldistill.L2Result{
+			Verdict: skilldistill.L2Reject, Reason: "overlaps installed skill"}}) {
+			if l := firstLine(t, c); l != "" {
+				gotLine = l
+			}
+		}
+		if !strings.Contains(gotLine, "rejected") || m.distillConverted != nil {
+			t.Fatalf("live reject: line=%q converted=%v", gotLine, m.distillConverted != nil)
+		}
+
+		// s again on the same idx: the line replays, the reasoner is
+		// NOT re-paid (a re-run would be deterministic anyway — same
+		// skills, same M index).
+		out, cmd := m.handleDistillKey(keyRune('s'))
+		mm := out.(Model)
+		if mm.distillConverting || mm.distillConverted != nil {
+			t.Fatalf("cached reject must stay on the prompt: converting=%v converted=%v",
+				mm.distillConverting, mm.distillConverted != nil)
+		}
+		if line := firstLine(t, cmd); !strings.Contains(line, "rejected") {
+			t.Errorf("cached reject must replay its line: %q", line)
+		}
+		if fake.calls != 0 {
+			t.Errorf("cached reject must not re-pay: calls=%d", fake.calls)
+		}
+	})
+
+	t.Run("errors are not cached — retry re-fires", func(t *testing.T) {
+		fake := &convertFakeClient{err: fmt.Errorf("boom")}
+		m, _, _ := setupConvertModel(t, fake, nil)
+		m = openReview(m, convertCands())
+
+		out, cmd := m.handleDistillKey(keyRune('s'))
+		m = out.(Model)
+		m.handleDistillConvertDone(cmd().(distillConvertDoneMsg))
+		if fake.calls != 1 || m.distillConverting {
+			t.Fatalf("first s: calls=%d converting=%v", fake.calls, m.distillConverting)
+		}
+
+		// s again must genuinely retry (transport errors promise
+		// "retry with s"; caching them would brick the retry).
+		out, cmd2 := m.handleDistillKey(keyRune('s'))
+		mm := out.(Model)
+		if !mm.distillConverting || cmd2 == nil {
+			t.Fatalf("retry after error must re-fire: converting=%v cmd=%v",
+				mm.distillConverting, cmd2 != nil)
+		}
+		msg2 := cmd2().(distillConvertDoneMsg)
+		if fake.calls != 2 || msg2.err == nil {
+			t.Errorf("retry must re-pay the reasoner: calls=%d err=%v", fake.calls, msg2.err)
+		}
+	})
 }
 
 // ---------- ctx propagation (90s bound rides on opts.Ctx) ----------
