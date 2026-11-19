@@ -15,6 +15,7 @@ import (
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/opencatalog"
+	"github.com/whyiyhw/seek/internal/opencodeauth"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
@@ -381,8 +382,11 @@ func TestBuildProvider_OpenCode(t *testing.T) {
 		t.Setenv("OPENCODE_API_KEY", "")
 		t.Setenv("SEEK_HOME", t.TempDir())
 		_, _, _, _, err := buildProvider("opencode", "", "")
-		if err == nil || !strings.Contains(err.Error(), "no OpenCode API key") {
-			t.Errorf("expected no-key error, got %v", err)
+		// The message must name BOTH credential routes: a user who never
+		// heard of the browser login would otherwise only see the env var.
+		if err == nil || !strings.Contains(err.Error(), "seek auth opencode") ||
+			!strings.Contains(err.Error(), "OPENCODE_API_KEY") {
+			t.Errorf("expected a both-routes error, got %v", err)
 		}
 	})
 
@@ -467,6 +471,97 @@ func TestBuildSubagentRoutes_OpenCodeEndpoint(t *testing.T) {
 	}
 }
 
+// TestLaneHasCredential pins the presence gate shared by the ACP dropdown
+// and the subagent routing table: a browser login counts for the opencode
+// lane (a lane that appears in the dropdown must not fail on the first
+// prompt), but must not leak credentials to any other lane.
+func TestLaneHasCredential(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("OPENCODE_API_KEY", "")
+
+	if laneHasCredential(config.Config{}, "opencode") {
+		t.Error("no key and no login must mean no credential")
+	}
+	if err := opencodeauth.Save(opencodeauth.Credentials{
+		ClientID: "oac_x", AccessToken: "st_x", ExpiresAt: time.Now().Add(time.Hour), OrgID: "org_x",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !laneHasCredential(config.Config{}, "opencode") {
+		t.Error("a stored login must satisfy the opencode gate")
+	}
+	if laneHasCredential(config.Config{}, "glm") {
+		t.Error("a stored opencode login must not authenticate other lanes")
+	}
+
+	t.Setenv("OPENCODE_API_KEY", "k")
+	if !laneHasCredential(config.Config{}, "opencode") {
+		t.Error("a static key must satisfy the gate too")
+	}
+}
+
+// TestBuildSubagentRoutes_OpenCodeOAuth: children inherit the browser
+// login, otherwise the lane's cost argument (route explore/plan there)
+// vanishes the moment the user stops using a static key.
+func TestBuildSubagentRoutes_OpenCodeOAuth(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("GLM_API_KEY", "")
+	if err := opencodeauth.Save(opencodeauth.Credentials{
+		ClientID: "oac_x", AccessToken: "st_x", RefreshToken: "rt_x",
+		ExpiresAt: time.Now().Add(time.Hour), OrgID: "org_x", OrgName: "Personal",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	route, ok := buildSubagentRoutes(nil, "")[subagent.ProviderOpenCode]
+	if !ok || route.provider == nil {
+		t.Fatalf("opencode route missing with OAuth creds: %+v", route)
+	}
+}
+
+// TestBuildProvider_OpenCodeOAuth pins the credential fallback: with no
+// static key but a stored browser login, buildProvider returns a client
+// instead of the "no credentials" error; a login without a workspace is
+// rejected (the gateway would 403 every request).
+func TestBuildProvider_OpenCodeOAuth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+	t.Setenv("OPENCODE_API_KEY", "")
+	write := func(cred opencodeauth.Credentials) {
+		t.Helper()
+		if err := opencodeauth.Save(cred); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+	}
+
+	write(opencodeauth.Credentials{
+		ClientID: "oac_x", AccessToken: "st_x", RefreshToken: "rt_x",
+		ExpiresAt: time.Now().Add(time.Hour), OrgID: "org_x", OrgName: "Personal",
+	})
+	provider, dsClient, label, modelDefault, err := buildProvider("opencode", "", "")
+	if err != nil {
+		t.Fatalf("buildProvider with OAuth creds: %v", err)
+	}
+	if dsClient != nil || provider == nil || label != "OpenCode" || modelDefault != pricing.ModelOpenCodeV41Flash {
+		t.Errorf("provider=%v ds=%v label=%q model=%q", provider, dsClient, label, modelDefault)
+	}
+
+	// No workspace recorded → error at build time, not a 403 later.
+	write(opencodeauth.Credentials{ClientID: "oac_x", AccessToken: "st_x", ExpiresAt: time.Now().Add(time.Hour)})
+	if _, _, _, _, err := buildProvider("opencode", "", ""); err == nil ||
+		!strings.Contains(err.Error(), "no workspace") {
+		t.Errorf("missing-workspace login = %v, want a build-time error", err)
+	}
+
+	// An explicit key still wins over the stored login (checked by the
+	// existing env-key subtest; here we prove the OAuth path is skipped
+	// when a key resolves, by storing a broken login and passing a key).
+	t.Setenv("OPENCODE_API_KEY", "k")
+	if _, _, _, _, err := buildProvider("opencode", "", ""); err != nil {
+		t.Errorf("explicit key must win over a broken stored login: %v", err)
+	}
+}
+
 // TestACPMenu_OpenCodeCatalogue guards the ACP half of the Go lane's
 // menu: the session/new dropdown must offer every row of
 // pricing.OpenCodeGoModels (the same slice the TUI /model picker renders)
@@ -533,15 +628,16 @@ func TestInitOpenCatalog_OffKeepsBaseline(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
 	t.Setenv("OPENCODE_API_KEY", "")
 	t.Setenv("SEEK_OPENCODE_CATALOG", "off")
-	oldCat, oldKey := openCatalog, openCatalogKey
-	t.Cleanup(func() { openCatalog, openCatalogKey = oldCat, oldKey })
+	oldCat := openCatalog
+	t.Cleanup(func() { openCatalog = oldCat })
 
 	initOpenCatalog()
 	if openCatalog == nil {
 		t.Fatal("initOpenCatalog must seed a catalogue even when disabled")
 	}
-	if openCatalogKey != "" {
-		t.Errorf("key = %q, want empty (no refresh goroutine without a key)", openCatalogKey)
+	if openCatalog.APIKey != "" || openCatalog.Bearer != nil {
+		t.Errorf("catalogue credentials set with the switch off: key=%q bearer=%v",
+			openCatalog.APIKey, openCatalog.Bearer != nil)
 	}
 	rows := openCatalogRows()
 	if len(rows) != len(pricing.OpenCodeGoModels) {
@@ -555,8 +651,8 @@ func TestInitOpenCatalog_UsesFreshCache(t *testing.T) {
 	t.Setenv("SEEK_HOME", t.TempDir())
 	t.Setenv("OPENCODE_API_KEY", "")
 	t.Setenv("SEEK_OPENCODE_CATALOG", "")
-	oldCat, oldKey := openCatalog, openCatalogKey
-	t.Cleanup(func() { openCatalog, openCatalogKey = oldCat, oldKey })
+	oldCat := openCatalog
+	t.Cleanup(func() { openCatalog = oldCat })
 
 	cached := opencatalog.Snapshot{
 		FetchedAt: time.Now().Add(-time.Hour),

@@ -148,6 +148,11 @@ type Catalogue struct {
 	// URL overrides DefaultModelsURL (tests point this at an httptest
 	// server). Empty means the default.
 	URL string
+	// APIKey is the static credential (OPENCODE_API_KEY / config).
+	APIKey string
+	// Bearer, when set, resolves the credential per refresh: a rotating
+	// OAuth token plus the workspace id. Takes precedence over APIKey.
+	Bearer func(ctx context.Context) (token, orgID string, err error)
 
 	mu   sync.RWMutex
 	snap Snapshot
@@ -208,8 +213,18 @@ func (c *Catalogue) Snapshot() Snapshot {
 // Refresh fetches the catalogue, installs it and caches it. It returns
 // the number of rows installed. Any error leaves the current catalogue
 // untouched.
-func (c *Catalogue) Refresh(ctx context.Context, apiKey string, client *http.Client) (int, error) {
-	snap, err := Fetch(ctx, c.url(), apiKey, client)
+func (c *Catalogue) Refresh(ctx context.Context, client *http.Client) (int, error) {
+	var snap Snapshot
+	var err error
+	if c.Bearer != nil {
+		token, org, aerr := c.Bearer(ctx)
+		if aerr != nil {
+			return 0, aerr
+		}
+		snap, err = FetchBearer(ctx, c.url(), token, org, client)
+	} else {
+		snap, err = Fetch(ctx, c.url(), c.APIKey, client)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -277,13 +292,21 @@ func DefaultClient() *http.Client {
 	return &http.Client{Timeout: 5 * time.Second}
 }
 
-// Fetch performs one catalogue request. An empty apiKey is a hard error:
-// the docs say an unkeyed list contains every public model, and offering
-// models the workspace can't call is worse than an empty menu (the caller
-// keeps the embedded baseline).
+// Fetch performs one catalogue request with a static API key. An empty
+// key is a hard error: the docs say an unkeyed list contains every public
+// model, and offering models the workspace can't call is worse than an
+// empty menu (the caller keeps the embedded baseline).
 func Fetch(ctx context.Context, url, apiKey string, client *http.Client) (Snapshot, error) {
-	if apiKey == "" {
-		return Snapshot{}, fmt.Errorf("opencatalog: no API key — the unkeyed list is not workspace-scoped")
+	return FetchBearer(ctx, url, apiKey, "", client)
+}
+
+// FetchBearer is Fetch with an explicit bearer + the workspace header the
+// OpenCode gateway requires when the credential is an OAuth token
+// ("Workspace selection is required" 403 otherwise). orgID may be empty
+// for static API keys, which are workspace-bound already.
+func FetchBearer(ctx context.Context, url, bearer, orgID string, client *http.Client) (Snapshot, error) {
+	if bearer == "" {
+		return Snapshot{}, fmt.Errorf("opencatalog: no credential — the unkeyed list is not workspace-scoped")
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -292,7 +315,10 @@ func Fetch(ctx context.Context, url, apiKey string, client *http.Client) (Snapsh
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("opencatalog: build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	if orgID != "" {
+		req.Header.Set("x-org-id", orgID)
+	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent())
 

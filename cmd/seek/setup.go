@@ -170,6 +170,12 @@ func promptAPIKey(out io.Writer, scanner *bufio.Scanner, provider string) (strin
 	}
 	fmt.Fprintf(out, "  Step 2/2 — paste your %s API key:\n", opt.label)
 	fmt.Fprintf(out, "    Get one from %s\n", opt.docsURL)
+	if opt.id == "opencode" {
+		// The lane has a better path than copy-paste: a browser device
+		// login. Say so here — the wizard is exactly where a user who
+		// doesn't know about `seek auth` will land first.
+		fmt.Fprintln(out, "    No key handy? `seek auth opencode` logs in through the browser instead (recommended).")
+	}
 	if opt.keyHint != "" {
 		fmt.Fprintf(out, "    Format usually starts with %q\n", opt.keyHint)
 	}

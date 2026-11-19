@@ -51,6 +51,7 @@ import (
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
 	"github.com/whyiyhw/seek/internal/opencatalog"
+	"github.com/whyiyhw/seek/internal/opencodeauth"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -528,6 +529,11 @@ func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[
 		routes[subagent.ProviderOpenCode] = subagentRoute{
 			provider: newOpenCodeProvider(cfg, k, baseURLFlag),
 		}
+	} else if p, err := newOpenCodeOAuthProvider(cfg, baseURLFlag); err == nil {
+		// Browser-login credentials count for children too — otherwise a
+		// parent on the OAuth lane couldn't route explore/plan subagents
+		// to it, which is the lane's main cost argument.
+		routes[subagent.ProviderOpenCode] = subagentRoute{provider: p}
 	}
 	return routes
 }
@@ -834,6 +840,7 @@ Commands:
   session      export a transcript to markdown (export)
   checkpoint   file checkpoints (list / restore / prune); undo / redo are aliases
   keys         keybinding config (list / check / actions)
+  auth         browser login for a provider lane (opencode)
   goal         unattended main-agent loop:   seek goal run "<goal>"
   autopilot    unattended orchestration:     seek autopilot run "<goal>"
 
@@ -876,6 +883,14 @@ func run() error {
 	// top-level flags. The markdown renderer lives in
 	// internal/sessionexport (pure, reusable) so the serve web panel
 	// can call it directly when a transcript download button lands.
+	// `seek auth opencode` — browser device login for the OpenCode Go
+	// lane, stored at ~/.seek/opencode-auth.json. Dispatched early for
+	// the same reason as the other verbs: it needs no provider probe,
+	// no session and no project, and it must work when the lane is
+	// currently unauthenticated (which is the whole point).
+	if len(os.Args) >= 2 && os.Args[1] == "auth" {
+		return opencodeauth.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
 	if len(os.Args) >= 2 && os.Args[1] == "session" {
 		return sessioncli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
@@ -3156,6 +3171,22 @@ var acpLaneModels = []struct {
 	{"opencode", opencodeACPMenuModels(pricing.OpenCodeGoModels)},
 }
 
+// laneHasCredential reports whether a curated lane has anything to
+// authenticate with: a static key for any lane, or — for opencode — a
+// stored browser login. Same presence gate as buildProvider, so a lane
+// never appears in the ACP dropdown and then fails on the first prompt.
+func laneHasCredential(cfg config.Config, provider string) bool {
+	if config.KeyFor(cfg, provider) != "" {
+		return true
+	}
+	if provider == "opencode" {
+		if cred, ok := opencodeauth.Load(); ok && cred.Valid() {
+			return true
+		}
+	}
+	return false
+}
+
 // opencodeACPMenuModels expands a Go-lane catalogue into dropdown rows.
 // The ACP label keeps the pre-existing "<id> (OpenCode Go)" shape — the
 // dropdown's job is picking an id, and the same ids appear on other
@@ -3192,7 +3223,7 @@ func acpModelMenu(currentModel string, openCodeRows []pricing.OpenCodeGoModel) [
 	var opts []acp.ConfigSelectOption
 	current := ""
 	for _, lane := range acpLaneModels {
-		if config.KeyFor(cfg, lane.provider) == "" {
+		if !laneHasCredential(cfg, lane.provider) {
 			continue
 		}
 		models := lane.models
@@ -3878,11 +3909,20 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		// the docs define "free" as an opencode-go model with no input
 		// price, same gateway and key, just unmetered). --base-url
 		// overrides the endpoint.
-		apiKey := config.KeyFor(cfg, "opencode")
-		if apiKey == "" {
-			return nil, nil, "", "", fmt.Errorf("no OpenCode API key — set OPENCODE_API_KEY or add providers.opencode.api_key to ~/.seek/config.json")
+		//
+		// Credential precedence: an explicit API key (env or config)
+		// always wins over the stored browser login — an operator who
+		// pinned a key must not be silently switched onto OAuth by a
+		// login performed earlier. With neither, the error names both
+		// routes instead of just the env var.
+		if apiKey := config.KeyFor(cfg, "opencode"); apiKey != "" {
+			return newOpenCodeProvider(cfg, apiKey, baseURLFlag), nil, "OpenCode", "deepseek-v4.1-flash", nil
 		}
-		return newOpenCodeProvider(cfg, apiKey, baseURLFlag), nil, "OpenCode", "deepseek-v4.1-flash", nil
+		provider, err := newOpenCodeOAuthProvider(cfg, baseURLFlag)
+		if err != nil {
+			return nil, nil, "", "", fmt.Errorf("no OpenCode credentials — run `seek auth opencode` (browser login) or set OPENCODE_API_KEY: %w", err)
+		}
+		return provider, nil, "OpenCode", "deepseek-v4.1-flash", nil
 
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
@@ -3973,10 +4013,7 @@ const opencodeBaseURL = "https://opencode.ai/inference/go/openai/v1/chat/complet
 // otherwise. nil for every other lane — readers must treat nil as "use
 // the compiled list". Populated once by initOpenCatalog; the background
 // refresh installs new snapshots under the catalogue's own lock.
-var (
-	openCatalog    *opencatalog.Catalogue
-	openCatalogKey string
-)
+var openCatalog *opencatalog.Catalogue
 
 // initOpenCatalog seeds the process-wide catalogue at startup: a usable
 // disk snapshot first (so a warm start is offline-complete), then one
@@ -3995,14 +4032,19 @@ func initOpenCatalog() {
 	if err != nil {
 		return
 	}
-	openCatalogKey = config.KeyFor(cfg, "opencode")
-	if openCatalogKey == "" {
+	// Same credential precedence as buildProvider: an explicit key wins
+	// over the stored browser login.
+	if key := config.KeyFor(cfg, "opencode"); key != "" {
+		openCatalog.APIKey = key
+	} else if cred, ok := opencodeauth.Load(); ok && cred.Valid() {
+		openCatalog.Bearer = opencodeCatalogBearer
+	} else {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_, _ = openCatalog.Refresh(ctx, openCatalogKey, opencatalog.DefaultClient())
+		_, _ = openCatalog.Refresh(ctx, opencatalog.DefaultClient())
 	}()
 }
 
@@ -4026,10 +4068,38 @@ func refreshOpenCatalog(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("opencode catalogue: lane not active")
 	case !opencatalog.Enabled():
 		return 0, fmt.Errorf("opencode catalogue: disabled by SEEK_OPENCODE_CATALOG")
-	case openCatalogKey == "":
-		return 0, fmt.Errorf("opencode catalogue: no API key")
+	case openCatalog.APIKey == "" && openCatalog.Bearer == nil:
+		return 0, fmt.Errorf("opencode catalogue: not logged in — run `seek auth opencode`")
 	}
-	return openCatalog.Refresh(ctx, openCatalogKey, opencatalog.DefaultClient())
+	return openCatalog.Refresh(ctx, opencatalog.DefaultClient())
+}
+
+// opencodeCatalogBearer adapts the browser login to the catalogue's
+// credential hook: both fetch a rotating bearer and the workspace header.
+func opencodeCatalogBearer(ctx context.Context) (string, string, error) {
+	return opencodeauth.Token(ctx, opencodeauth.New())
+}
+
+// newOpenCodeOAuthProvider builds the lane's client from the stored
+// browser login (`seek auth opencode`): a self-refreshing bearer plus the
+// x-org-id header. The header is static per login — the workspace id does
+// not rotate with token refreshes — and omitting it is the difference
+// between 200 and 403 "Workspace selection is required".
+func newOpenCodeOAuthProvider(cfg config.Config, baseURLFlag string) (llm.Provider, error) {
+	cred, ok := opencodeauth.Load()
+	if !ok || !cred.Valid() {
+		return nil, opencodeauth.ErrNoCredentials
+	}
+	if cred.OrgID == "" {
+		return nil, fmt.Errorf("stored login has no workspace — re-run `seek auth opencode`")
+	}
+	c := compatible.New("", opencodeEndpoint(cfg, baseURLFlag), "OpenCode")
+	c.SetHeader("x-org-id", cred.OrgID)
+	c.SetTokenSource(func(ctx context.Context) (string, error) {
+		token, _, err := opencodeauth.Token(ctx, opencodeauth.New())
+		return token, err
+	})
+	return c, nil
 }
 
 // opencodeEndpoint resolves the lane's POST target with the same

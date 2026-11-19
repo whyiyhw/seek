@@ -42,6 +42,13 @@ type Client struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	// tokenSource, when set, supplies the bearer per request instead of
+	// apiKey (OpenCode OAuth: a 30-day token that refreshes itself).
+	// Set before the first request; never mutated afterwards.
+	tokenSource func(ctx context.Context) (string, error)
+	// headers are static extra headers (e.g. OpenCode's x-org-id, which
+	// the gateway requires alongside an OAuth bearer).
+	headers map[string]string
 }
 
 // New returns a Client pointed at the official OpenAI endpoint.
@@ -52,6 +59,23 @@ func New(apiKey string) *Client {
 // NewCompatible returns a Client pointed at an OpenAI-compatible endpoint.
 func NewCompatible(apiKey, baseURL string) *Client {
 	return &Client{apiKey: apiKey, baseURL: baseURL, http: &http.Client{Timeout: 5 * time.Minute}}
+}
+
+// SetTokenSource replaces the static apiKey with a per-request credential
+// source. Used by the OpenCode OAuth lane, whose bearer rotates. An error
+// from the source aborts the request rather than sending an empty bearer
+// (the gateway would answer 401 and the user would see a misleading
+// "invalid key").
+func (c *Client) SetTokenSource(fn func(ctx context.Context) (string, error)) {
+	c.tokenSource = fn
+}
+
+// SetHeader adds a header to every request from this client.
+func (c *Client) SetHeader(key, value string) {
+	if c.headers == nil {
+		c.headers = map[string]string{}
+	}
+	c.headers[key] = value
 }
 
 // Name satisfies llm.Provider.
@@ -211,8 +235,18 @@ func (c *Client) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan ll
 	if err != nil {
 		return nil, fmt.Errorf("openai: build request: %w", err)
 	}
+	bearer := c.apiKey
+	if c.tokenSource != nil {
+		bearer, err = c.tokenSource(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("openai: credential: %w", err)
+		}
+	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+bearer)
+	for k, v := range c.headers {
+		httpReq.Header.Set(k, v)
+	}
 	// Self-identify on every lane (see seekUserAgent). The session
 	// header is the OpenCode Go lane's routing/prompt-cache contract:
 	// one stable value per conversation, so it rides the per-request

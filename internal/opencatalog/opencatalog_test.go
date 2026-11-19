@@ -322,7 +322,8 @@ func TestCatalogue_RefreshInstallsAndCaches(t *testing.T) {
 
 	c := New()
 	c.URL = srv.URL
-	n, err := c.Refresh(context.Background(), "k", srv.Client())
+	c.APIKey = "k"
+	n, err := c.Refresh(context.Background(), srv.Client())
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -343,7 +344,7 @@ func TestCatalogue_RefreshInstallsAndCaches(t *testing.T) {
 	defer bad.Close()
 	c.URL = bad.URL
 	before := len(c.Rows())
-	if _, err := c.Refresh(context.Background(), "k", bad.Client()); err == nil {
+	if _, err := c.Refresh(context.Background(), bad.Client()); err == nil {
 		t.Error("500 must be an error")
 	}
 	if got := len(c.Rows()); got != before {
