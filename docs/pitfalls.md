@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**250 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**253 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -75,11 +75,12 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | MCP bridge / tool naming | 1 |
 | Setup wizard / provider menu | 1 |
 | MCP prompt section | 1 |
-| DeepSeek Files API / file_id | 3 |
+| DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
-| **Total** | **250** |
+| Distill review `s` / memory↔skill bridge | 3 |
+| **Total** | **253** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 139.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 142.
 
 ---
 
@@ -1943,3 +1944,25 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: reason 改成处置指引（三要素：尽力而为/非安全边界、点名车道、人已授权时由人在终端或脚本里执行而非绕）；`IsRemoteMutatingOnLane(lane, command)` 走同一张表只替换车道名，`IsRemoteMutating` 签名不变（默认 autopilot 车道），cmd/seek 三处 mount 点（子代理 / goalBash / autopilot）各传真实车道；`bash.go` 的 deny 分支补与 plan-analyze 同形的 `Hint:` 行，`[bash: blocked — ` 前缀逐字保留。拦截集合零变化：9 条 blocked 逐条仍 true。
 - **Lesson**: 闸的拒绝文案是**给模型的指令面**，不是日志。凡 guard 不知道的事实（有没有人、是否已授权、谁该执行）都不能陈述；只能陈述它确知的（哪张表、哪条车道）并给出处置。文案与拦截面必须分开验收：改文案的卡要逐条断言 blocked 集合不变——否则「让话听起来更准确」会悄悄放松闸。
 - **Refs**: `internal/autopilot/guard.go`、`internal/tools/bash/bash.go`（deny 分支 + `denyHint`）、`cmd/seek/main.go`（`laneGuard` 与三处 mount 点）；本文件「`[plan: approved]` is a load-bearing wire-format prefix」（前缀契约同族）
+## Distill review `s` / memory↔skill bridge
+
+### 模态内异步结果消息的 stale 判定不能只带位置参数——idx 回绕后旧消息会拼接进新回合
+- **Saw**: ⚡ review 的 `s` 转换是异步 tea.Cmd；第一版守卫写的是 `msg.idx != m.distillIdx` 就丢弃。按 q 中途退出后再开新 review（idx 从 0 重新开始），迟到的旧结果 idx 同为 0，会把「上一轮候选的预览态」拼接进新一轮的第一个候选。
+- **Why**: bubbletea 的 async Cmd 与模态生命周期解耦，idx 是候选位置、不是轮次标识；review 关闭再重开让位置回绕，位置相等 ≠ 同一轮。
+- **Fix**: 卡 `c_2lbcck`（bridge M-B2）：守卫三元组 `!distillReviewOpen || !distillConverting || msg.idx != m.distillConvertIdx`。`distillConverting` 在 exitDistillReview、结果落地（成功/错误行）两条路径都会清零，天然充当「本轮转换仍在被等待」的世代位。`TestDistillConvert_QDuringConvertDropsLateResult` 钉死回绕场景。
+- **Lesson**: 模态里的异步结果消息，除了位置还要带「该次调用仍在被等待」的状态位，并在模态 teardown 里清零；只用位置判 stale 的守卫， reopening 即失效。
+- **Refs**: `internal/tui/distill.go` `handleDistillConvertDone`/`exitDistillReview`，`internal/tui/distill_convert_test.go`。
+
+### trigram-Jaccard 阈值 fixture 手算两错同一处——先 sanity assert 再断行为
+- **Saw**: 写 ConvertToSkill 的 L2 边界测试时手算 "abcdef" vs "zabcdefz" 当作 0.50（GREY），实际 4/6 ≈ 0.67（REJECT）——5 元 vs 8 元的并集算错。distill_test.go 的既有注释里明写 "Fixture sanity first: the sims really are what we counted"，同一坑第二次踩。
+- **Why**: 短串 trigram 集合大小 ≠ 字符数-直觉估计，交并集脑算在 4-8 个 trigram 规模上就不可靠。
+- **Fix**: 卡 `c_2lbcck`：GREY fixture 改用 "abcdefgh" vs "zabcdefz"（4/8 = 0.50，与既有测试同一对），并在用例注释里写死算式。
+- **Lesson**: 凡是给相似度阈值造 fixture，第一步永远是先用度量函数本身 sanity-assert 期望值，再断言行为——不要复用「看起来差不多」的旧串对。
+- **Refs**: `internal/skilldistill/convert_test.go` `TestConvertToSkill_L2OverlapThresholds`、`internal/tui/distill_test.go` `TestDistillOverlapWarning_ThresholdBoundary`。
+
+### converting 吞 `n`，且「状态位当世代号」在允许退场重发后失效——风险表缓解条款即契约
+- **Saw**: 验证会话抓到 ⚡ review converting 态只认 q/Esc/Ctrl+C，`n` 被吞，与 PRD §11「`n` 随时可退」冲突（测试甚至断言 n 无效——把违约钉成了绿灯）。修的时候暴露第二层：上一条坑里「`distillConverting` 天然充当世代位」的论证在 n 退场合法化后破产——n 清 flag、同 idx 再按 s 重新置位，旧在飞结果落地时 idx+converting 全对上，会被当新结果放行。
+- **Why**: §11 风险表缓解列（「`n` 随时可退；转换只付一次」）写进 PRD 就是接口契约，实现/测试与它冲突时违约的是实现不是文档；而「复合状态位充当世代号」只在「该位只被单调事件清零」时成立，一旦出现「清零后可原位重置」的路径（retreat+refire 同 idx），就必须换成真正的单调计数器。
+- **Fix**: 卡 `c_2lbcck`（M-B2 返工，2026-11-19 拍板）：converting 态 `n` → 回候选提示态 + `distillConvertGen++` 作废在飞调用；stale 守卫加第四元 `msg.gen != m.distillConvertGen`；「只付一次」定为按候选 idx 缓存 `err==nil` 结果（PASS/GREY 回放预览、REJECT 回放拒绝行、不重付；err 不缓存，保住「retry with s」）。测试 `TestDistillConvert_NDuringConvertingBacksOutOrphansResult` / `TestDistillConvert_SecondSOnSameIdxReplaysFromCache`。
+- **Lesson**: ①PRD 风险表的缓解条款按契约验收，不是背景散文；②拿状态位当 stale 世代号前先问它有没有「清零后同 key 重新置位」的路径，有就上单调计数器；③「只付一次」类承诺要有可机械验证的口径（按什么键、缓存什么、err 入不入缓存），否则实现各自解读。
+- **Refs**: `internal/tui/distill.go` `handleDistillKey`（converting 分支）/`handleDistillConvertDone`/`routeConvertOutcome`，`docs/prd/feature-memory-skill-bridge.md` §3.1/§3.2/§11/§10 #13-14。

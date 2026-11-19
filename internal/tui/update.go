@@ -182,6 +182,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case skillDistillDoneMsg:
 		cmds = append(cmds, m.handleSkillDistillDone(msg)...)
 
+	case distillConvertDoneMsg:
+		cmds = append(cmds, m.handleDistillConvertDone(msg)...)
+
 	case observeDoneMsg:
 		cmds = append(cmds, m.handleObserveDone(msg)...)
 		if m.opts.ObserveResultChan != nil {
