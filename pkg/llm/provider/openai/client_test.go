@@ -2,6 +2,8 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -324,5 +326,102 @@ func TestChatStream_SessionHeaderStableWithinConversation(t *testing.T) {
 	}
 	if h(3) != "" {
 		t.Errorf("empty SessionID must send no header, got %q", h(3))
+	}
+}
+
+// TestChatStream_ImagesArrayForm: an image-bearing message must reach the
+// wire as array-form content — one text block plus one image_url block
+// per attachment — while a text-only message keeps the plain-string form
+// byte-for-byte (the OpenCode Go lane and every OpenAI-compatible lane
+// depend on both halves).
+func TestChatStream_ImagesArrayForm(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{
+			{Role: "system", Content: "sys"},
+			{
+				Role:    "user",
+				Content: "what is this",
+				Images: []llm.Image{
+					{URL: "data:image/png;base64,QUJD"},
+					{URL: "https://example.com/x.jpg"},
+				},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(ch)
+
+	var req struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode request: %v (%s)", err, body)
+	}
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %d, want 3: %s", len(req.Messages), body)
+	}
+	// Text-only messages keep the string form.
+	if string(req.Messages[0].Content) != `"sys"` {
+		t.Errorf("system content = %s, want a plain string", req.Messages[0].Content)
+	}
+	if string(req.Messages[2].Content) != `"plain"` {
+		t.Errorf("text-only user content = %s, want a plain string", req.Messages[2].Content)
+	}
+	// Image-bearing message: array form, text first.
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if err := json.Unmarshal(req.Messages[1].Content, &parts); err != nil {
+		t.Fatalf("image content is not an array: %v (%s)", err, req.Messages[1].Content)
+	}
+	if len(parts) != 3 {
+		t.Fatalf("parts = %d, want 3: %s", len(parts), req.Messages[1].Content)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "what is this" {
+		t.Errorf("part 0 = %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL.URL != "data:image/png;base64,QUJD" {
+		t.Errorf("part 1 = %+v", parts[1])
+	}
+	if parts[2].Type != "image_url" || parts[2].ImageURL.URL != "https://example.com/x.jpg" {
+		t.Errorf("part 2 = %+v", parts[2])
+	}
+}
+
+// TestChatStream_ImagesOnlyNoText: an image with empty text must not emit
+// an empty text block (some gateways reject it) — just the image part.
+func TestChatStream_ImagesOnlyNoText(t *testing.T) {
+	msgs := convertMessages([]llm.Message{{
+		Role:   "user",
+		Images: []llm.Image{{URL: "data:image/png;base64,QQ"}},
+	}})
+	parts, ok := msgs[0].Content.([]openAIContentPart)
+	if !ok || len(parts) != 1 || parts[0].Type != "image_url" {
+		t.Fatalf("content = %#v", msgs[0].Content)
+	}
+	// An all-empty image list degrades to the plain string, never an
+	// empty array (a 400 on strict gateways).
+	msgs = convertMessages([]llm.Message{{Role: "user", Content: "hi", Images: []llm.Image{{URL: ""}}}})
+	if s, ok := msgs[0].Content.(string); !ok || s != "hi" {
+		t.Fatalf("empty-URL content = %#v, want the plain string", msgs[0].Content)
 	}
 }

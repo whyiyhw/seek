@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/tools"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -825,8 +826,10 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	// but /model can switch a session to a non-vision model while
 	// image-bearing messages sit in history — sending them would 400
 	// the whole turn. Drop them (in-band markers stay in Content, so
-	// the transcript remains self-describing).
-	if len(msgs) > 0 && !deepseek.IsVisionModel(a.cfg.Model) {
+	// the transcript remains self-describing). modelcap is the single
+	// capability authority; its static table + the OpenCode catalogue
+	// override cover every lane, not just this one.
+	if len(msgs) > 0 && !modelcap.Vision(a.cfg.Model) {
 		msgs = deepseek.WithoutImages(msgs)
 	}
 	// feature-vision: materialise Asset references into data URLs at
@@ -1045,17 +1048,28 @@ func (a *Agent) sessionID() string {
 // assistant turn as a deepseek.Message so the rest of the agent loop
 // (history, session save, TUI rendering) is unchanged.
 func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
-	// Apply PrepareMessages on the deepseek.Message form (where
-	// calibration injection makes sense) then convert to llm.Message.
-	// msgsToLLM is the byte-shape conversion; it shouldn't know about
-	// calibration semantics.
+	// Same attachment station as the DeepSeek path (see
+	// runTurnDeepSeek), in the same order: capability gate → resolve
+	// assets → PrepareMessages → convert. The gate is evaluated here,
+	// at send time, because /model can swap the model (and ACP the
+	// whole lane) between the submit and this request.
 	prepared := a.messages
+	vision := modelcap.Vision(a.cfg.Model)
+	if len(prepared) > 0 && !vision {
+		prepared = deepseek.WithoutImages(prepared)
+	}
+	if a.cfg.ImageLoader != nil {
+		prepared = deepseek.ResolveImages(prepared, a.cfg.ImageLoader)
+	}
 	if a.cfg.PrepareMessages != nil {
 		prepared = a.cfg.PrepareMessages(prepared)
 	}
+	// msgsToLLMWithImages is the byte-shape conversion; it shouldn't
+	// know about calibration semantics — and it must not decide
+	// capability itself (the gate above already did).
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  msgsToLLM(prepared),
+		Messages:  msgsToLLMWithImages(prepared, vision),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
 		SessionID: a.sessionID(),

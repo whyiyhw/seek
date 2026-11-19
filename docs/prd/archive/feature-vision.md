@@ -5,6 +5,7 @@
 **状态**：🚀 **已交付（2026-08-22）**。M-V.0 ~ M-V.3 全部实施，`go vet` + `go test ./...` 全绿，真 API smoke 双向验证（vision 模型读出图中文字 "SEEK VISION 42"；非 vision 模型收到切模型提示并转告用户）。§五 各里程碑标 ✅ + 落地处；M-V.4（Files API / 二线透传 / 工具产图）为后续储备。
 **GA 更新（2026-09-10）**：DeepSeek 发布 V4.1 Flash（`deepseek-flash`），**视觉原生并入默认模型**；`deepseek-v4-flash-vision-exp` 随之退役。seek 侧已把模型注册表统一收敛到 `deepseek-flash` 单个 id（常量、`IsVisionModel`、`/model` 选择器、费率、预算），切模型提示目标同步改为 `deepseek-flash`——本文的"切视觉模型"步骤自此仅对显式非视觉模型会话（二线 provider 等）仍有意义，默认会话开箱即视觉。旧名一律按未知模型退化（计价走 Flash 卡、预算 128K、历史图片丢弃），`/model deepseek-flash` 可恢复。
 **触发起因**：DeepSeek 于 **2026-08-21** 发布 `deepseek-v4-flash-vision-exp`——DeepSeek API 平台首个 agent 级视觉模型（文本能力对齐 V4-Flash，Terminal Bench 2.1 **83.9**，多模态 agent 接近 Opus-4.8；每图封顶 384 token 按 Flash 价计）。官方公告 [news260821](https://api-docs.deepseek.com/news/news260821/)。
+**M-V.4 更新（2026-11-19）**：二线透传**已落地**（本文 §五 M-V.4 的储备项之一）。起因是一个真 bug：OpenCode Go 车道（`--provider=opencode`，`deepseek-v4.1-flash`）贴图被提示"当前模型不支持图片输入"并丢弃——该模型实测吃图，而 `IsVisionModel` 是 `pkg/deepseek` 里的一张只含 `deepseek-flash` 的单 id 白名单。能力判定已迁至新包 `internal/modelcap`（静态表覆盖各车道默认模型 + `internal/opencatalog` 按网关 `modalities.input` 装运行时 grant），`llm.Message` 增加 `Images`，三个 adapter 各自编码（openai `image_url` 数组形 / anthropic base64 `image` block / gemini `inlineData`），`runTurnLLM` 与 `runTurnDeepSeek` 同站做"能力门 → ResolveImages → PrepareMessages"。文件透传（Files API 二线）与工具产图仍未做——`[file: … 未透传]` note 保持不变。
 **估时**：M-V.0 ~ M-V.3 ≈ **2.5–4 天**（含柱 Q 下线）；M-V.4 后续储备。
 
 **一句话**：柱 Q 铺好的图片采集管道（`@引用` + Ctrl+V 贴图 + stat-gated 检测）出口**唯一化**——图片字节作为 content 分块直发视觉模型，非视觉模型遇图提示切模型；柱 Q（OCR 转文字）随之**整体下线**（M-V.0）。**采集层零新建，旧出口整体拔除。**
@@ -189,6 +190,8 @@ ExpandInput func(model, text string) (string, []deepseek.ImagePart)
 ### M-V.4 — 后续储备（不在本 PRD 首版估时内）
 
 Files API 切换（§7.2 A/B 实验后视结论）、二线 provider 图片透传、工具产图路径（screenshot / webfetch 图档直读）。
+
+> **2026-11-19**：二线 provider 图片透传**已交付**（见文首 M-V.4 更新）。剩余两项未动。
 
 ## 六、测试计划（对照 AGENTS.md failure-mode 标准）
 

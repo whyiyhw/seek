@@ -217,3 +217,69 @@ func TestChatStream_ErrorStatus(t *testing.T) {
 		t.Errorf("error = %q, want mention of 403", err.Error())
 	}
 }
+
+// TestBuildRequest_Images: a user message with attachments emits one
+// inlineData part per image after the text part; a text-only message
+// keeps exactly the single text part it always had.
+func TestBuildRequest_Images(t *testing.T) {
+	body, err := buildRequest(llm.ChatRequest{
+		Model: "gemini-2.0-flash",
+		Messages: []llm.Message{
+			{Role: "system", Content: "sys"},
+			{
+				Role:    "user",
+				Content: "what is this",
+				Images: []llm.Image{
+					{URL: "data:image/png;base64,QUJD"},
+					{URL: "https://example.com/x.jpg"}, // not inline-able → skipped
+				},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Contents []struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text       string `json:"text"`
+				InlineData *struct {
+					MimeType string `json:"mimeType"`
+					Data     string `json:"data"`
+				} `json:"inlineData"`
+			} `json:"parts"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	if len(req.Contents) != 2 {
+		t.Fatalf("contents = %d, want 2 (system rides systemInstruction)", len(req.Contents))
+	}
+	parts := req.Contents[0].Parts
+	if len(parts) != 2 {
+		t.Fatalf("parts = %+v, want text + 1 inlineData", parts)
+	}
+	if parts[0].Text != "what is this" {
+		t.Errorf("part 0 = %+v", parts[0])
+	}
+	if parts[1].InlineData == nil || parts[1].InlineData.MimeType != "image/png" || parts[1].InlineData.Data != "QUJD" {
+		t.Errorf("part 1 = %+v", parts[1])
+	}
+	// Text-only message keeps the single text part, no inlineData keys.
+	if len(req.Contents[1].Parts) != 1 || req.Contents[1].Parts[0].Text != "plain" ||
+		req.Contents[1].Parts[0].InlineData != nil {
+		t.Errorf("text-only parts = %+v", req.Contents[1].Parts)
+	}
+}
+
+// TestBuildRequest_ImagesUnusableDegrades: no usable data URL → the
+// message keeps its single text part.
+func TestBuildRequest_ImagesUnusableDegrades(t *testing.T) {
+	parts := userParts(llm.Message{Role: "user", Content: "hi", Images: []llm.Image{{URL: "https://x/y.jpg"}}})
+	if len(parts) != 1 || parts[0].Text != "hi" || parts[0].InlineData != nil {
+		t.Fatalf("parts = %+v", parts)
+	}
+}

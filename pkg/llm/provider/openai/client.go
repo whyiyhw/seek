@@ -104,6 +104,21 @@ type openAIMessage struct {
 	Name       string           `json:"name,omitempty"`
 }
 
+// openAIContentPart is one block of the array-form `content` the
+// multimodal Chat-Completions wire accepts (OpenAI, and every
+// compatible endpoint that speaks it — the OpenCode Go gateway among
+// them). Text-only messages keep the plain-string form, so their bytes
+// are unchanged.
+type openAIContentPart struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL *openAIImageURL `json:"image_url,omitempty"`
+}
+
+type openAIImageURL struct {
+	URL string `json:"url"`
+}
+
 type openAIToolCall struct {
 	ID       string           `json:"id"`
 	Type     string           `json:"type"`
@@ -200,11 +215,43 @@ func convertMessages(msgs []llm.Message) []openAIMessage {
 				om.Content = m.Content
 			}
 		default:
-			om.Content = m.Content
+			om.Content = contentFor(m)
 		}
 		out[i] = om
 	}
 	return out
+}
+
+// contentFor renders one message's content: the plain string when
+// there are no images (byte-identical to the pre-vision wire shape, so
+// text-only prompts keep their prefix-cache behaviour), else the
+// array form — text block first, then one image_url block per image.
+func contentFor(m llm.Message) any {
+	if len(m.Images) == 0 {
+		return m.Content
+	}
+	parts := make([]openAIContentPart, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, openAIContentPart{Type: "text", Text: m.Content})
+	}
+	images := 0
+	for _, img := range m.Images {
+		if img.URL == "" {
+			continue
+		}
+		parts = append(parts, openAIContentPart{
+			Type:     "image_url",
+			ImageURL: &openAIImageURL{URL: img.URL},
+		})
+		images++
+	}
+	if images == 0 {
+		// Nothing sendable — keep the plain-string form rather than an
+		// array holding only text (some gateways reject array-form
+		// content with no media block).
+		return m.Content
+	}
+	return parts
 }
 
 func convertTools(tools []llm.ToolDef) []openAITool {

@@ -7,27 +7,6 @@ import (
 	"testing"
 )
 
-func TestIsVisionModel(t *testing.T) {
-	cases := map[string]bool{
-		// V4.1 Flash (2026-09-10) made vision native on the default
-		// model. The retired ids — including the old -Exp vision
-		// build — are plain unknowns now: NOT matched, exactly like
-		// any custom model string.
-		ModelV41Flash:                  true,
-		"deepseek-v4-flash-vision-exp": false,
-		"deepseek-v4-flash":            false,
-		"deepseek-v4-pro":              false,
-		"deepseek-v4-flash-vision":     false, // never-shipped GA name — NOT matched
-		"vision":                       false, // substring must never match
-		"":                             false,
-	}
-	for model, want := range cases {
-		if got := IsVisionModel(model); got != want {
-			t.Errorf("IsVisionModel(%q) = %v, want %v", model, got, want)
-		}
-	}
-}
-
 // TestMessageWire_TextOnly_Bytes pins the wire bytes of text-only
 // messages: they must stay byte-identical to the pre-vision encoding
 // (load-bearing for DeepSeek's prefix cache — the rendered prompt

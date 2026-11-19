@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/whyiyhw/seek/internal/budget"
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/pricing"
 )
 
@@ -22,6 +23,7 @@ func resetOverrides(t *testing.T) {
 	t.Cleanup(func() {
 		pricing.SetModelRates(nil)
 		budget.SetLimits(nil)
+		modelcap.SetVision(nil)
 	})
 }
 
@@ -96,6 +98,18 @@ func TestParse_FiltersAndNormalises(t *testing.T) {
 	}
 	if flash.Free {
 		t.Error("flash must not be marked free")
+	}
+	// Vision rides the endpoint's own modalities declaration — this is
+	// what makes an OpenCode model seek has never heard of usable for
+	// image pastes without waiting for a release.
+	if !flash.Vision {
+		t.Error("deepseek-v4.1-flash declares image/png input → Vision must be true")
+	}
+	if byID["beam-free"].Vision {
+		t.Error("beam-free declares text-only modalities → Vision must be false")
+	}
+	if byID["brand-new-model"].Vision {
+		t.Error("brand-new-model declares text-only modalities → Vision must be false")
 	}
 
 	beam := byID["beam-free"]
@@ -197,6 +211,46 @@ func TestInstall_RatesAndLimits(t *testing.T) {
 	// id, so overwriting would misprice the other lane's turns).
 	if got := budget.Limit("glm-5.3"); got != 1_000_000 {
 		t.Errorf("glm-5.3 context = %d, want the compiled 1M", got)
+	}
+}
+
+// TestInstall_VisionGrants: the catalogue's modalities answer must reach
+// internal/modelcap for every row — including ids the compiled table
+// never heard of, and including direct-lane ids (a capability is not a
+// price card; the skip that protects the rate table must not protect
+// this one).
+func TestInstall_VisionGrants(t *testing.T) {
+	resetOverrides(t)
+	if modelcap.Vision("kimi-k3") {
+		t.Fatal("kimi-k3 must not be vision before the catalogue installs")
+	}
+	payload := `{"data":[
+	  {"id":"kimi-k3","type":"chat","api":{"chat-completions":{}},
+	   "cost":{"text":{"input":{"price":3,"cache":{"read":0.3}},"output":{"price":15}}},
+	   "limit":{"context":1048576},
+	   "modalities":{"input":["text","image/png"],"output":["text"]}},
+	  {"id":"deepseek-v4-pro","type":"chat","api":{"chat-completions":{}},
+	   "cost":{"text":{"input":{"price":1.32,"cache":{"read":0.044}},"output":{"price":3.96}}},
+	   "limit":{"context":1000000},
+	   "modalities":{"input":["text","image/jpeg"],"output":["text"]}}
+	]}`
+	snap, err := Parse([]byte(payload), time.Now())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	New().Install(snap)
+
+	if !modelcap.Vision("kimi-k3") {
+		t.Error("kimi-k3: catalogue declared image input but modelcap says no")
+	}
+	if !modelcap.Vision("deepseek-v4-pro") {
+		t.Error("deepseek-v4-pro: vision grant must not be skipped with the rate card")
+	}
+	// The compiled POSITIVE rows must survive an install that doesn't
+	// mention them (grants are additive — an older cache has no vision
+	// key at all, so absence cannot mean "no").
+	if !modelcap.Vision("deepseek-flash") {
+		t.Error("a catalogue that doesn't list deepseek-flash must not demote it")
 	}
 }
 

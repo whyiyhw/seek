@@ -28,6 +28,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/assets"
 	"github.com/whyiyhw/seek/internal/imgrefs"
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -66,7 +67,7 @@ func (r visionRouter) route(model, text string) (string, []deepseek.ImagePart) {
 }
 
 func (r visionRouter) routeOne(model, name, path string) (string, deepseek.ImagePart) {
-	if !deepseek.IsVisionModel(model) {
+	if !modelcap.Vision(model) {
 		return switchModelNote(name), deepseek.ImagePart{}
 	}
 	data, err := os.ReadFile(path)
@@ -80,7 +81,7 @@ func (r visionRouter) routeOne(model, name, path string) (string, deepseek.Image
 // display is the human-readable name; ext is appended to the stored
 // name when display carries no extension.
 func (r visionRouter) routeBytes(model, display string, data []byte, ext string) (string, deepseek.ImagePart) {
-	if !deepseek.IsVisionModel(model) {
+	if !modelcap.Vision(model) {
 		return switchModelNote(display), deepseek.ImagePart{}
 	}
 	if r.assetsDir == "" {
@@ -100,8 +101,15 @@ func (r visionRouter) routeBytes(model, display string, data []byte, ext string)
 	return attachMarker(display, data), deepseek.ImagePart{Asset: asset}
 }
 
+// switchModelNote is the in-band note for an image that reached the
+// router on a model with no image capability. It deliberately names no
+// model id: the suggestion used to hard-code "deepseek-flash", which is
+// only a valid id on the DeepSeek lane — on every other lane /model
+// lists that lane's own ids. The "[image: " family prefix and the
+// "当前模型不支持图片输入" phrase are wire format (replay styling +
+// tests) and stay put.
 func switchModelNote(name string) string {
-	return fmt.Sprintf("[image: %s — 当前模型不支持图片输入，/model %s 切换]", name, deepseek.ModelV41Flash)
+	return fmt.Sprintf("[image: %s — 当前模型不支持图片输入，用 /model 选一个支持视觉的模型]", name)
 }
 
 // attachMarker is the transcript self-description for a natively

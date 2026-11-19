@@ -10,14 +10,30 @@ import (
 )
 
 // msgsToLLM converts the agent's internal deepseek.Message history into
-// the provider-agnostic llm.Message format for second-tier providers.
-// Image parts are dropped (llm.Message is text-only for now; per-
-// provider image formats are M-V.4) with an in-band note so the model
-// knows content existed — same never-error posture as the vision router.
-// Document parts (feature-deepseek-app-api F4) get the sibling note for
-// the same reason: the Files API is DeepSeek-only, and a provider
-// switch must not silently erase a document from the model's view.
+// the provider-agnostic llm.Message format for second-tier providers,
+// dropping attachments with an in-band note so the model knows content
+// existed — same never-error posture as the vision router. This is the
+// TRANSCRIPT-shaped conversion (summarise / compact), where paying for
+// image bytes is waste: the markers inside Content remain.
+//
+// Carrying images to a provider is the sibling below
+// (msgsToLLMWithImages) — an opt-in, not the default, so the side
+// channels can't start uploading bytes by accident.
 func msgsToLLM(msgs []deepseek.Message) []llm.Message {
+	return msgsToLLMWithImages(msgs, false)
+}
+
+// msgsToLLMWithImages is msgsToLLM with the capability decision made by
+// the caller: keep is the result of asking whoever knows whether the
+// active model accepts images (internal/modelcap), evaluated at send
+// time exactly as the DeepSeek path's gate is. When keep is true, every
+// URL-form ImagePart rides along as an llm.Image; Asset-only parts are
+// skipped because the caller resolves assets BEFORE conversion
+// (deepseek.ResolveImages at the same send station).
+//
+// Document parts have no second-tier transport (the Files API is
+// DeepSeek-only), so they always degrade to the sibling note.
+func msgsToLLMWithImages(msgs []deepseek.Message, keep bool) []llm.Message {
 	out := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
 		lm := llm.Message{
@@ -27,7 +43,16 @@ func msgsToLLM(msgs []deepseek.Message) []llm.Message {
 			ToolName:   m.Name,
 		}
 		if len(m.Images) > 0 {
-			lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前 provider 不支持图片输入]", len(m.Images))
+			if keep {
+				for _, p := range m.Images {
+					if p.URL != "" {
+						lm.Images = append(lm.Images, llm.Image{URL: p.URL})
+					}
+				}
+			}
+			if len(lm.Images) == 0 {
+				lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前 provider 不支持图片输入]", len(m.Images))
+			}
 		}
 		if len(m.Files) > 0 {
 			lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前 provider 不支持文件输入]", len(m.Files))

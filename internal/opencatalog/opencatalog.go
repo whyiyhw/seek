@@ -41,6 +41,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/budget"
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/pricing"
 )
@@ -77,6 +78,13 @@ type Model struct {
 	Hit     float64 `json:"hit_per_mtok"`
 	Output  float64 `json:"output_per_mtok"`
 	Free    bool    `json:"free"`
+	// Vision mirrors the endpoint's `modalities.input`: true when the
+	// model accepts image content parts. It is the lane's authoritative
+	// answer for ids the compiled table (internal/modelcap) has never
+	// heard of — without it, seek asked only its DeepSeek-shaped
+	// allow-list and told OpenCode users their vision model couldn't
+	// see the screenshot they had just pasted.
+	Vision bool `json:"vision"`
 }
 
 // Snapshot is a full catalogue as of one fetch (or the embedded baseline).
@@ -107,15 +115,27 @@ var directLaneIDs = map[string]bool{
 	"deepseek-v4-pro": true, // direct DeepSeek API
 }
 
-// Install pushes the snapshot's rates and context windows into the
-// pricing / budget override layers. Every card is installed flat-rate:
-// the Go plan is a request-window subscription with no DeepSeek peak
-// clock, and a remote cost block must never be halved by one.
+// Install pushes the snapshot's rates, context windows and vision
+// capabilities into the pricing / budget / modelcap override layers.
+// Every card is installed flat-rate: the Go plan is a request-window
+// subscription with no DeepSeek peak clock, and a remote cost block must
+// never be halved by one.
+//
+// Vision is installed for EVERY row, including directLaneIDs: the skip
+// above exists because a shared id's rate card belongs to its other
+// lane, not because the capability answer differs. modelcap treats the
+// map as additive grants (its static table stays the deny-by-default
+// floor — see that package's comment for why absence can't mean "no").
 func (s Snapshot) Install() {
 	rates := make(map[string]pricing.ModelPricing, len(s.Models))
 	limits := make(map[string]int, len(s.Models))
+	vision := make(map[string]bool, len(s.Models))
 	for _, m := range s.Models {
-		if m.ID == "" || directLaneIDs[m.ID] {
+		if m.ID == "" {
+			continue
+		}
+		vision[m.ID] = m.Vision
+		if directLaneIDs[m.ID] {
 			continue
 		}
 		rates[m.ID] = pricing.ModelPricing{
@@ -129,6 +149,7 @@ func (s Snapshot) Install() {
 	}
 	pricing.SetModelRates(rates)
 	budget.SetLimits(limits)
+	modelcap.SetVision(vision)
 }
 
 // Rows renders the snapshot as picker rows, in the order the catalogue
@@ -166,11 +187,17 @@ func New() *Catalogue {
 
 // Embedded builds the compiled baseline as a Snapshot: ids and labels
 // from pricing.OpenCodeGoModels, rates from the pricing table, windows
-// from budget, free rows detected by a $0 card.
+// from budget, vision from modelcap's static table, free rows detected
+// by a $0 card.
 func Embedded() Snapshot {
 	models := make([]Model, 0, len(pricing.OpenCodeGoModels))
 	for _, row := range pricing.OpenCodeGoModels {
-		m := Model{ID: row.ID, Label: row.Label, Free: strings.HasSuffix(row.ID, "-free")}
+		m := Model{
+			ID:     row.ID,
+			Label:  row.Label,
+			Free:   strings.HasSuffix(row.ID, "-free"),
+			Vision: modelcap.Vision(row.ID),
+		}
 		if w, ok := budget.Known(row.ID); ok {
 			m.Context = w
 		}
@@ -383,6 +410,7 @@ func Parse(body []byte, now time.Time) (Snapshot, error) {
 			Hit:     w.Cost.Text.Input.Cache.Read * factor,
 			Output:  w.Cost.Text.Output.Price * factor,
 			Free:    free,
+			Vision:  acceptsImages(w.Modalities.Input),
 		})
 	}
 	if len(snap.Models) == 0 {
@@ -430,16 +458,26 @@ func labelFor(w wireModel, free bool) string {
 	if c := contextLabel(w.Limit.Context); c != "" {
 		parts = append(parts, c)
 	}
-	for _, mod := range w.Modalities.Input {
-		if strings.HasPrefix(mod, "image/") || strings.HasPrefix(mod, "video/") {
-			parts = append(parts, "vision")
-			break
-		}
+	if acceptsImages(w.Modalities.Input) {
+		parts = append(parts, "vision")
 	}
 	if w.Name != "" {
 		parts = append(parts, w.Name)
 	}
 	return truncateRunes(strings.Join(parts, " · "), maxLabelRunes)
+}
+
+// acceptsImages reports whether a model's declared input modalities
+// include an image (or video) type. The single definition both the
+// picker label and the installed vision grant read, so the "vision" tag
+// a user sees and the capability seek acts on can never disagree.
+func acceptsImages(modalities []string) bool {
+	for _, mod := range modalities {
+		if strings.HasPrefix(mod, "image/") || strings.HasPrefix(mod, "video/") {
+			return true
+		}
+	}
+	return false
 }
 
 // contextLabel renders a window the way the picker rows do: "1M ctx" /

@@ -73,6 +73,17 @@ type contentBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	// Source carries an image block's payload (type:"image" blocks).
+	// Anthropic takes base64 bytes + a media_type, so the adapter splits
+	// the data: URL the caller hands it.
+	Source *imageSource `json:"source,omitempty"`
+}
+
+// imageSource is one image block's payload.
+type imageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // "image/png", …
+	Data      string `json:"data"`       // base64, no data: prefix
 }
 
 type anthropicTool struct {
@@ -163,7 +174,33 @@ func buildRequest(req llm.ChatRequest) anthropicRequest {
 			continue
 		}
 
-		// Plain user or assistant message.
+		// Plain user or assistant message. Images — user-only by
+		// contract — turn the content into a block array: text first,
+		// then one base64 image block per attachment.
+		if len(m.Images) > 0 {
+			var blocks []contentBlock
+			if m.Content != "" {
+				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
+			}
+			images := 0
+			for _, img := range m.Images {
+				if b, ok := imageBlock(img.URL); ok {
+					blocks = append(blocks, b)
+					images++
+				}
+			}
+			if images == 0 {
+				// Every URL was unusable → keep the message text-shaped
+				// rather than sending an array with no media block.
+				ar.Messages = append(ar.Messages, anthropicMessage{Role: m.Role, Content: m.Content})
+				i++
+				continue
+			}
+			ar.Messages = append(ar.Messages, anthropicMessage{Role: m.Role, Content: blocks})
+			i++
+			continue
+		}
+
 		ar.Messages = append(ar.Messages, anthropicMessage{
 			Role:    m.Role,
 			Content: m.Content,
@@ -172,6 +209,35 @@ func buildRequest(req llm.ChatRequest) anthropicRequest {
 	}
 
 	return ar
+}
+
+// imageBlock renders one user attachment as an Anthropic image block.
+// Anthropic takes base64 bytes plus a media_type, so the data: URL the
+// caller supplies is split; URLs that aren't base64 data URLs (an
+// https link, a malformed string) are skipped — the same never-error
+// posture as the rest of the attachment plumbing.
+func imageBlock(url string) (contentBlock, bool) {
+	const prefix = "data:"
+	if !strings.HasPrefix(url, prefix) {
+		return contentBlock{}, false
+	}
+	rest := url[len(prefix):]
+	comma := strings.Index(rest, ",")
+	if comma < 0 {
+		return contentBlock{}, false
+	}
+	meta, data := rest[:comma], rest[comma+1:]
+	if !strings.HasSuffix(meta, ";base64") {
+		return contentBlock{}, false
+	}
+	mediaType := strings.TrimSuffix(meta, ";base64")
+	if mediaType == "" || data == "" {
+		return contentBlock{}, false
+	}
+	return contentBlock{
+		Type:   "image",
+		Source: &imageSource{Type: "base64", MediaType: mediaType, Data: data},
+	}, true
 }
 
 // ---------------------------------------------------------------------------

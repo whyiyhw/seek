@@ -396,3 +396,67 @@ func TestChatStream_ErrorStatus(t *testing.T) {
 		t.Errorf("error %q should mention status 429", err.Error())
 	}
 }
+
+// TestBuildRequest_Images: a user message with attachments becomes a
+// content-block array — text block first, then one base64 image block
+// per data URL — while a text-only message keeps the plain string.
+func TestBuildRequest_Images(t *testing.T) {
+	req := buildRequest(llm.ChatRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 64,
+		Messages: []llm.Message{
+			{Role: "system", Content: "sys"},
+			{
+				Role:    "user",
+				Content: "what is this",
+				Images: []llm.Image{
+					{URL: "data:image/png;base64,QUJD"},
+					{URL: "https://example.com/x.jpg"}, // not a data URL → skipped
+				},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	if req.System != "sys" {
+		t.Fatalf("system = %q", req.System)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2", len(req.Messages))
+	}
+	blocks, ok := req.Messages[0].Content.([]contentBlock)
+	if !ok {
+		t.Fatalf("image message content = %#v, want a block array", req.Messages[0].Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("blocks = %+v, want text + 1 image (the https URL is skipped)", blocks)
+	}
+	if blocks[0].Type != "text" || blocks[0].Text != "what is this" {
+		t.Errorf("block 0 = %+v", blocks[0])
+	}
+	if blocks[1].Type != "image" || blocks[1].Source == nil ||
+		blocks[1].Source.Type != "base64" ||
+		blocks[1].Source.MediaType != "image/png" ||
+		blocks[1].Source.Data != "QUJD" {
+		t.Errorf("block 1 = %+v (%+v)", blocks[1], blocks[1].Source)
+	}
+	// Text-only message stays a plain string — byte-identical to before.
+	if s, ok := req.Messages[1].Content.(string); !ok || s != "plain" {
+		t.Errorf("text-only content = %#v", req.Messages[1].Content)
+	}
+}
+
+// TestBuildRequest_ImagesUnusableDegrades: an attachment list with no
+// usable data URL must fall back to the text shape, never an empty
+// content array (Anthropic rejects that).
+func TestBuildRequest_ImagesUnusableDegrades(t *testing.T) {
+	req := buildRequest(llm.ChatRequest{
+		Messages: []llm.Message{{
+			Role:    "user",
+			Content: "hi",
+			Images:  []llm.Image{{URL: "https://example.com/x.jpg"}, {URL: "data:not base64"}},
+		}},
+	})
+	if s, ok := req.Messages[0].Content.(string); !ok || s != "hi" {
+		t.Fatalf("content = %#v, want the plain string", req.Messages[0].Content)
+	}
+}

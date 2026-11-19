@@ -42,17 +42,14 @@ type ImagePart struct {
 	URL   string `json:"url,omitempty"`
 }
 
-// IsVisionModel reports whether the model id natively accepts image
-// content parts. Explicit allow-list, NOT substring matching: a
-// silently-drifting pattern would send images to a model that answers
-// 400. V4.1 Flash made vision native on the default model. Retired
-// ids — including the old -Exp vision build — are simply unknown and
-// NOT listed: resuming such a session drops history images (the
-// in-band markers stay, so the transcript remains self-describing).
-// An unknown id degrades via the submit-time router's in-band note.
-func IsVisionModel(model string) bool {
-	return model == ModelV41Flash
-}
+// IsVisionModel was removed: "does this model accept images" is no
+// longer a DeepSeek-only fact. The single authority is
+// internal/modelcap.Vision, which knows every lane's ids (the static
+// table) plus the OpenCode catalogue's live `modalities.input`. Keeping
+// a second copy here is how the OpenCode lane ended up telling users
+// their vision model couldn't see images (the bug that motivated the
+// move) — pkg/deepseek cannot import internal/, so the fact could not
+// be shared from here.
 
 // ImageLoader resolves a persisted asset name to a sendable data: URL.
 // Implemented by callers (the agent layer owns the assets directory) —

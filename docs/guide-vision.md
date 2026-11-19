@@ -16,12 +16,25 @@ seek 支持把图片**原样**发给多模态模型：剪贴板截图、本地�
 ## 行为细节
 
 - **抓图器（平台默认）**：macOS 走 `osascript`；Linux 走 `wl-paste`（Wayland）/ `xclip`（X11）；**Windows 走 Windows PowerShell**（WinForms 读剪贴板位图，实测约 0.3 s）。要换抓图器就设 `SEEK_CLIPBOARD_IMAGE_CMD` —— 值按空白拆分成参数，所以参数里（含脚本路径）别带空格。
-- **非视觉模型遇图**：不发图（API 会 400），改为注入一条 in-band 提示，模型会告诉你切换 `/model deepseek-flash`。典型场景是二线 provider（Anthropic / OpenAI / Gemini）——vision 仅 DeepSeek Flash 档支持。
+- **非视觉模型遇图**：不发图（API 会 400），改为注入一条 in-band 提示，请你用 `/model` 选一个支持视觉的模型。能力判定见下文（`internal/modelcap`），不是"只有 DeepSeek 能看图"。
 - **资产库**：提交时图片被复制到 `~/.seek/projects/<id>/assets/`（内容寻址，相同图片自动去重）。session JSONL 只存引用，不膨胀；`-resume` 后历史图片照常重发。
 - **前缀缓存**：同一图片每轮重发的字节稳定，可正常命中缓存；每图最多计 384 prompt token。
 - **限制**：单图 ≤ 32 MiB；JPEG/PNG/GIF/WebP；图片只进 user 消息。
 - **回放**：图片消息渲染为折叠标记 `[image: 名字 · 尺寸 · 大小]`（暗色），原文路径保留在 transcript 里，可自行用看图器打开。
 
-## 二线 provider（Anthropic / OpenAI / Gemini）
+## 二线 provider（Anthropic / OpenAI / Gemini / GLM / OpenCode Go）
 
-首版不透传图片：带图消息会附一条"未透传"提示。per-provider 图片格式透传是后续工作（feature-vision M-V.4）。
+**图片照常透传**（feature-vision M-V.4，2026-11-19 交付）。每个 adapter 用自己协议的编码：
+
+- OpenAI 兼容车道（含 GLM、OpenCode Go）：数组形 `content`，`{"type":"image_url","image_url":{"url":"data:…"}}`；纯文本消息仍是纯字符串，字节与改动前一致。
+- Anthropic：`{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` block。
+- Gemini：`{"inlineData":{"mimeType":…,"data":…}}` part。
+
+**能力判定只有一处**：`internal/modelcap.Vision(model)`。两层来源——
+
+1. 编译期静态表：各车道的默认模型（`deepseek-flash` / OpenCode 的 `deepseek-v4.1-flash` / `claude-*` / `gpt-4o*` / `gemini-*`）。
+2. 运行时 grant：OpenCode Go 的目录刷新（`internal/opencatalog`）按网关自己声明的 `modalities.input` 装进来——所以该车道里任何标了 `vision` 的模型（`kimi-k3`、`glm-5.3-flash`、`hy4`…）开箱可用，不用等 seek 发版。grant 只做**升级**不做降级（旧缓存里根本没有这个字段，缺席不能当成"不支持"）。
+
+未知模型按"不支持"处理（宁可一条 in-band 提示，也不要一个 400 毁掉整回合）。让某个自定义 id 收图：若它在 OpenCode 目录里，刷新即生效；否则等静态表补行。
+
+**文件**（PDF/Word/PPT）仍不透传——Files API 是 DeepSeek 专属，二线车道照旧收到 `[file: … 未透传]` 提示。

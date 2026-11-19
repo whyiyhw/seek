@@ -103,7 +103,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Checkpoints** | per-turn git snapshot + file-level `/undo` `/redo` `/restore`. [📘](docs/guide-checkpoint.md) |
 | **Background jobs** | detach long builds/servers → `bg-N`; `monitor` polls / waits / kills. [📘](docs/guide-background.md) |
 | **Semantic references** | LSP "who calls this?" (gopls / pyright / tsserver), grep fallback. [📘](docs/guide-references.md) |
-| **Native vision input** | paste or `@img.png` → image bytes sent natively to the multimodal default model (`deepseek-flash`, V4.1). [📘](docs/guide-vision.md) |
+| **Native vision input** | paste or `@img.png` → image bytes sent natively to any vision-capable model, on every lane (DeepSeek, GLM, OpenAI-compatible, Anthropic, Gemini, OpenCode Go). [📘](docs/guide-vision.md) |
 | **Document input** | `@report.pdf` → uploaded & parsed via the DeepSeek Files API (`@rich:` for layout); the local asset library keeps the only copy. [📘](docs/guide-files.md) |
 | **Code review** | effort-graded diff review with `--fix` and `--comment`. [📘](docs/guide-code-review.md) |
 | **MCP client** | pass through any MCP server's tools. [📘](docs/guide-mcp.md) |

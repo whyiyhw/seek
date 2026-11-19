@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -59,6 +60,15 @@ type geminiPart struct {
 	Text             string          `json:"text,omitempty"`
 	FunctionCall     *geminiFuncCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFuncResp `json:"functionResponse,omitempty"`
+	// InlineData carries one image attachment (base64 bytes + mime
+	// type) — Gemini's shape for bytes sent inside the request.
+	InlineData *geminiInlineData `json:"inlineData,omitempty"`
+}
+
+// geminiInlineData is one inline binary part.
+type geminiInlineData struct {
+	MimeType string `json:"mimeType"`
+	Data     string `json:"data"` // base64, no data: prefix
 }
 
 type geminiFuncCall struct {
@@ -157,9 +167,7 @@ func buildRequest(req llm.ChatRequest) ([]byte, error) {
 		case "assistant":
 			gr.Contents = append(gr.Contents, geminiContent{Role: "model", Parts: assistantParts(m)})
 		default:
-			gr.Contents = append(gr.Contents, geminiContent{
-				Role: "user", Parts: []geminiPart{{Text: m.Content}},
-			})
+			gr.Contents = append(gr.Contents, geminiContent{Role: "user", Parts: userParts(m)})
 		}
 	}
 
@@ -177,6 +185,53 @@ func buildRequest(req llm.ChatRequest) ([]byte, error) {
 		gr.GenerationConfig = &geminiGenConfig{MaxOutputTokens: req.MaxTokens}
 	}
 	return json.Marshal(gr)
+}
+
+// userParts converts a user message to Gemini parts: the text part
+// first, then one inlineData part per image attachment (Gemini's shape
+// for bytes carried inside the request). A message with no images keeps
+// exactly the single text part it always had.
+func userParts(m llm.Message) []geminiPart {
+	if len(m.Images) == 0 {
+		return []geminiPart{{Text: m.Content}}
+	}
+	parts := make([]geminiPart, 0, len(m.Images)+1)
+	if m.Content != "" {
+		parts = append(parts, geminiPart{Text: m.Content})
+	}
+	for _, img := range m.Images {
+		if d, ok := inlineData(img.URL); ok {
+			parts = append(parts, geminiPart{InlineData: d})
+		}
+	}
+	if len(parts) == 0 {
+		return []geminiPart{{Text: m.Content}}
+	}
+	return parts
+}
+
+// inlineData splits a data: URL into Gemini's inlineData shape
+// (mimeType + bare base64). Non-data URLs and malformed strings are
+// skipped, never fatal — same posture as the other adapters.
+func inlineData(url string) (*geminiInlineData, bool) {
+	const prefix = "data:"
+	if !strings.HasPrefix(url, prefix) {
+		return nil, false
+	}
+	rest := url[len(prefix):]
+	comma := strings.Index(rest, ",")
+	if comma < 0 {
+		return nil, false
+	}
+	meta, data := rest[:comma], rest[comma+1:]
+	if !strings.HasSuffix(meta, ";base64") || data == "" {
+		return nil, false
+	}
+	mime := strings.TrimSuffix(meta, ";base64")
+	if mime == "" {
+		return nil, false
+	}
+	return &geminiInlineData{MimeType: mime, Data: data}, true
 }
 
 // assistantParts converts an assistant message (with optional tool calls) to Gemini parts.

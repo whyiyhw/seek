@@ -55,9 +55,23 @@ type Message struct {
 	Role      string     // "system" | "user" | "assistant" | "tool"
 	Content   string     // plain-text content (may be empty for tool-only turns)
 	ToolCalls []ToolCall // set on assistant messages with function calls
+	// Images are the user message's image attachments, already
+	// materialised as data: URLs (the caller resolves asset references
+	// at send time, exactly as the DeepSeek path does). Each adapter
+	// re-encodes them into its own wire shape; a message with no Images
+	// keeps the plain-string `content` it always had. Legal on user
+	// messages only — providers 400 on images anywhere else.
+	Images []Image
 	// ToolCallID and ToolName are set on role="tool" result messages.
 	ToolCallID string
 	ToolName   string
+}
+
+// Image is one image attachment in its sendable form: a data: URL
+// ("data:image/png;base64,…") or, for providers that accept them, an
+// https URL.
+type Image struct {
+	URL string
 }
 
 // ToolCall is a single function-call request issued by the assistant.

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/assets"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -95,11 +96,42 @@ func TestVisionRouter_Route(t *testing.T) {
 
 	// Non-vision model (retired id = plain unknown) → switch note, no parts.
 	got, parts = vr.route("deepseek-v4-pro", "look "+img)
-	if !strings.Contains(got, "[image: shot.png — 当前模型不支持图片输入，/model deepseek-flash 切换]") {
+	if !strings.Contains(got, "[image: shot.png — 当前模型不支持图片输入，用 /model") {
 		t.Fatalf("switch note = %q", got)
+	}
+	if strings.Contains(got, "deepseek-flash 切换") {
+		t.Fatalf("note must not suggest a lane-specific id: %q", got)
 	}
 	if len(parts) != 0 {
 		t.Fatalf("parts = %+v", parts)
+	}
+}
+
+// TestVisionRouter_OpenCodeLaneAttaches: the regression this whole change
+// exists for. deepseek-v4.1-flash is the OpenCode Go lane's id for the
+// same vision-capable model; before internal/modelcap the router asked
+// pkg/deepseek's one-id allow-list, answered "no vision", and replaced
+// the user's pasted screenshot with a switch-model note.
+func TestVisionRouter_OpenCodeLaneAttaches(t *testing.T) {
+	dir := t.TempDir()
+	vr := visionRouter{assetsDir: t.TempDir()}
+	img := writePNG(t, dir, "shot.png")
+
+	got, parts := vr.route(pricing.ModelOpenCodeV41Flash, "look "+img)
+	if !strings.Contains(got, "attached natively") {
+		t.Fatalf("OpenCode lane image must attach natively: %q", got)
+	}
+	if strings.Contains(got, "不支持图片输入") {
+		t.Fatalf("false-negative vision note on a vision model: %q", got)
+	}
+	if len(parts) != 1 {
+		t.Fatalf("parts = %+v", parts)
+	}
+
+	// Bytes path (ACP paste) shares the decision.
+	block, part := vr.routeBytes(pricing.ModelOpenCodeV41Flash, "pasted-image.png", tinyPNG(t), ".png")
+	if part.Asset == "" || !strings.Contains(block, "attached natively") {
+		t.Fatalf("routeBytes on OpenCode lane = %q %+v", block, part)
 	}
 }
 
