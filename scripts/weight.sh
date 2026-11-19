@@ -14,7 +14,7 @@
 #         plus go.mod direct/indirect dependency counts
 #   docs  bytes + lines per area: AGENTS.md, docs/prd (active;
 #         docs/prd/archive weighed separately), docs/book, docs/pitfalls.md,
-#         CHANGELOG.md
+#         docs/pitfalls-archive.md, CHANGELOG.md
 #   drift each area vs docs/budget.json — over → SLIM 建议 line
 #
 # Budget baseline (see docs/budget.json): actual bytes +10% headroom,
@@ -120,7 +120,7 @@ printf '%-28s %8s %9s\n' "go.mod deps" "$DEP_DIRECT" "$DEP_INDIRECT"
 
 # --- 2. doc side -----------------------------------------------------------
 
-AREAS="AGENTS.md docs/prd docs/prd/archive docs/book docs/pitfalls.md CHANGELOG.md"
+AREAS="AGENTS.md docs/prd docs/prd/archive docs/book docs/pitfalls.md docs/pitfalls-archive.md CHANGELOG.md"
 
 echo
 echo "weight — docs (bytes / lines vs $(printf '%s' "$BUDGET_FILE") )"

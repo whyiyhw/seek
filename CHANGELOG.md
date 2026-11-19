@@ -20,19 +20,6 @@ v0.12.0 — 多一条包月车道、多一张嘴：**OpenCode Go** 以 $10/月�
 - **修复**. `list_dir` 默认深度的输出补上「重新调用拿更深一层」的带内提示（`bash-overreach` 反复红绿交替的根因）；`seek agents remove` 先校验名字再碰文件系统；worktree GC 加年龄兜底；session / subagent ID 熵 24→64 位；`seek session export` 把 transcript 渲染成 markdown。
 - **Quality**. eval 增加 ablate 双跑车道与趋势雷达；两个用例按实测重标定（`bash-overreach` 改绑「bash 不得先手」的排序界，`code-review-effort-max` 放宽 runaway 上限）；减法第 4、5 刀（含 `sandbox.Wrap` 的 linux/other 变体）清掉孤儿读写路径；29 篇已交付 PRD 归档进 `docs/prd/archive/`。
 
-## v0.11.0（2026-11-13）
-
-v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary into one long-running, channel-agnostic service you can drive from a chat app or a browser; GLM (Zhipu bigmodel.cn) joins the provider list; sub-agents can run on a model of their own; and `/distill` turns a finished session into a reviewable skill draft.
-
-### Notable changes
-
-- **`seek serve` — remote control plane (new)**. Run seek as one resident process — drive it from a browser with the bundled web frontend (next item), or from any chat channel via the pluggable `Frontend` port (the port binds to no specific vendor). Each conversation binds to a project directory (`/bind` / `/projects` / `/switch` / `/new` / `/cancel`); messages exec the real `seek -p` inside that directory, keep the session id for multi-turn resume, serialize per conversation, and self-heal on crash. Graceful drain on shutdown; a macOS launchd template ships in `deploy/`. Guide: [`docs/guide-serve.md`](docs/guide-serve.md).
-- **Web frontend**. `seek serve --frontend=web` serves an embedded chat page (zero build chain) with SSE streaming replies and token auth — point a browser at your machine or tailnet and drive seek from there.
-- **GLM provider**. `glm` joins `deepseek` / `openai` / `anthropic` / `gemini`: set `GLM_API_KEY` (or a `providers.glm` block) and seek talks to the pinned bigmodel.cn OpenAI-compatible endpoint. glm-5.3 carries its own pricing card, so the live dollar stats stay accurate off the DeepSeek lane.
-- **Per-sub-agent model routing**. The `agent` tool takes optional `provider` / `model` params — fan out cheap explore agents on one lane while the parent writes on another. Omitted params inherit the parent lane unchanged.
-- **`/distill` — session → skill draft**. Distill the current session transcript into a SKILL.md draft under `~/.seek/skills/.drafts/` — drafts land in a dot directory no session ever loads, and installing one stays an explicit human `seek skill install`. Preview without writing anything via `/distill --dry-run`; review drafts on the CLI with `/skill drafts` (list · preview · approve-install). The opt-in auto path (batch-distill on session start) never installs on its own.
-- **ACP headless hardening**. The `cwd` your editor passes with `session/new` now anchors every tool to that workspace (git, grep, read/edit/write/bash alike). For unattended runs, `SEEK_ACP_YOLO=1` auto-approves local actions while still blocking remote-mutating bash commands, and skips the cron auto-tick.
-- **Fixed**: write/edit permission checks misjudged relative paths as "outside the workspace" whenever the shell sat behind a symlink (macOS `/tmp` → `/private/tmp` being the common case), wrongly denying edits. Both sides of the check now resolve symlinks through the same pipeline.
-- **Quality**: behavioral eval suite grew 14 → 21 cases (session-id contract, print-mode permission semantics, tool-selection and edit-fallback regressions, glm-lane contract); three dead-code / gofmt / modernize sweeps.
+更早的版本见 [GitHub Releases](https://github.com/whyiyhw/seek/releases)——每个 release body 与其 annotated tag 同文。本文件只保留当前版本，历史版本查 git 历史（`git show vX.Y.Z:CHANGELOG.md`）。
 
 ## 已进 main、未部署
