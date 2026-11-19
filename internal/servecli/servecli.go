@@ -101,9 +101,18 @@ func (f *frontendList) Set(v string) error {
 // it onto the process exit code via controlplane.ExitCode WITHOUT
 // re-printing.
 func Run(args []string, stdout, stderr io.Writer) error {
-	if len(args) > 0 {
-		switch args[0] {
-		case "help", "--help", "-h":
+	// Help is honoured anywhere before the "--" terminator, not just at
+	// args[0]: `seek serve --frontend=web -h` used to fall through to
+	// flag.Parse, whose -h comes back as flag.ErrHelp — routed through
+	// badConfig that read as exit 2 with the usage text buried on
+	// stderr. A requested help is a clean exit 0 on stdout (the
+	// skillcli/keyscli posture). "help" stays first-position-only: it
+	// is the verb alias, and a stray positional must keep failing as one.
+	for i, a := range args {
+		if a == "--" {
+			break
+		}
+		if (i == 0 && a == "help") || a == "-h" || a == "--help" {
 			printHelp(stdout)
 			return nil
 		}
@@ -117,6 +126,14 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	fs.StringVar(&listen, "listen", "", "web frontend listen address; overrides serve.web_addr (loopback + tailnet CGNAT only)")
 	fs.Usage = func() { printHelp(stderr) }
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			// Belt and braces: the scan above covers -h/--help, so this
+			// is unreachable today — but if a future flag-set change
+			// lets one through, fs.Usage has already printed the text,
+			// and a help request must still be a clean exit 0, never
+			// badConfig's exit 2.
+			return nil
+		}
 		// flag already printed the error + help to fs.Output().
 		return badConfig(nil, err)
 	}

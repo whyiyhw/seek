@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -630,4 +631,57 @@ func TestMCPSectionFromBridges(t *testing.T) {
 			t.Errorf("mcpSectionFromBridges(empty) = %q, want empty", got)
 		}
 	})
+}
+
+// TestHelpRequested pins the pre-flag.Parse scan that routes -h to
+// stdout/exit 0: anywhere before the "--" terminator counts, past it
+// nothing does (there it is a positional, and flag.Parse owns it).
+func TestHelpRequested(t *testing.T) {
+	for _, args := range [][]string{
+		{"-h"},
+		{"--help"},
+		{"help"},
+		{"--frontend=web", "-h"},
+		{"-h", "-yolo"},
+	} {
+		if !helpRequested(args) {
+			t.Errorf("helpRequested(%v) = false, want true", args)
+		}
+	}
+	for _, args := range [][]string{
+		nil,
+		{"-p", "hello"},
+		{"-hx"},
+		{"-help"}, // flag.Parse's own special case, not this scan's
+		{"--", "-h"},
+		{"--frontend=web"},
+	} {
+		if helpRequested(args) {
+			t.Errorf("helpRequested(%v) = true, want false", args)
+		}
+	}
+}
+
+// TestPrintUsage_ListsCommands guards the discovery surface `seek -h`:
+// a flags-only listing (flag.PrintDefaults alone) is what made the verb
+// surface — serve included — look like the whole CLI. Commands must
+// print, before the flag half.
+func TestPrintUsage_ListsCommands(t *testing.T) {
+	var buf bytes.Buffer
+	printUsage(&buf)
+	out := buf.String()
+	for _, want := range []string{
+		"Commands:",
+		"serve",
+		"--frontend=web",
+		"autopilot",
+		"Flags:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Index(out, "Commands:") > strings.Index(out, "Flags:") {
+		t.Error("the commands block must come before the flag listing")
+	}
 }

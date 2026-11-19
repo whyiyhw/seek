@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**247 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**248 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -43,7 +43,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | TUI / terminal | 29 |
 | Agent loop | 17 |
 | DeepSeek API | 24 |
-| Go language | 11 |
+| Go language | 12 |
 | Tooling / environment | 24 |
 | LLM provider quirks (M6) | 9 |
 | Testing / CI | 7 |
@@ -76,9 +76,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Setup wizard / provider menu | 1 |
 | MCP prompt section | 1 |
 | DeepSeek Files API / file_id | 3 |
-| **Total** | **247** |
+| **Total** | **248** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 42 · **tooling & engineering** (remaining sections): 137.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 34 · **Go** (both Go sections): 43 · **tooling & engineering** (remaining sections): 137.
 
 ---
 
@@ -743,6 +743,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `runBackground` uses plain `exec.Command` (no ctx) and registers a kill closure with the session-scoped `bgjob.Manager`. Cleanup is via `monitor(action=kill)` or `Manager.Shutdown()` at session end — never turn cancellation. The *observer* (`monitor wait`) IS bound to the turn ctx, so Esc stops watching without killing the job
 - **Lesson**: separate the two lifetimes explicitly — turn-scoped (foreground exec, wait/observe) vs session-scoped (the background process itself). When a value should outlive the turn, the turn ctx is the wrong leash. Tested with an already-cancelled ctx in `TestBash_Background_IgnoresTurnCtx`
 - **Refs**: `internal/tools/bash/bash.go:runBackground`, `internal/bgjob/bgjob.go` (Shutdown), `internal/tools/monitor/monitor.go` (wait propagates ctx.Err), `docs/prd/archive/feature-bash-monitor.md` §4 D5
+
+### go flag: a requested -h is a VALUE (flag.ErrHelp), and ExitOnError hides the verb surface
+- **Saw**: `seek serve --frontend=web -h` exited 2 with the usage text on stderr. Separately, `seek --help` listed only flags — enough for a reader to conclude the CLI had no subcommands at all (serve / cron / skill … all invisible)
+- **Why**: two distinct shapes of the same contract. (1) A sub-FlagSet uses `ContinueOnError`, so `-h` returns `flag.ErrHelp` as an error — servecli's catch-all fed it to `badConfig`, exit 2. Only `args[0]` was checked for help, so a flag placed before `-h` slipped past. (2) `flag.CommandLine` is `ExitOnError`, and its built-in `-h` prints the DEFAULT usage — `PrintDefaults` only, on stderr — so verbs dispatched by `main` before `flag.Parse` never appear
+- **Fix**: recognise `-h`/`--help` anywhere before the `--` terminator (not just args[0]) and print help to stdout with a clean exit; keep `errors.Is(err, flag.ErrHelp) → nil` as a belt-and-braces guard; set a custom `flag.Usage` that prints the command list before `PrintDefaults`, invoked explicitly before `flag.Parse` once the flag set is registered (so the listing has both halves)
+- **Lesson**: a requested help is never an error — do not let a catch-all error path own `flag.ErrHelp`, and do not let `args[0]` be the only position that counts. `flag.PrintDefaults` is not a CLI's discoverability story: whatever `main` dispatches by hand must be listed by hand
+- **Refs**: `internal/servecli/servecli.go:Run`, `cmd/seek/main.go:helpRequested` / `printUsage`, tests `TestRun_HelpFlag_AnywhereBeforeTerminator`, `TestHelpRequested`, `TestPrintUsage_ListsCommands`
 
 ---
 

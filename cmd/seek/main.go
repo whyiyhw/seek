@@ -789,6 +789,64 @@ func main() {
 	}
 }
 
+// helpRequested reports whether help was asked for: `help` as the first
+// word (the verb-alias convention every subcommand CLI here follows),
+// or -h/--help anywhere before the "--" terminator. Deliberately a flat
+// scan: `-p -h` reads as help here where flag.Parse would take -h as
+// -p's value — a prompt of literally "-h" is not a case worth
+// preserving, and every other reading of the token means help. Tokens
+// flag itself special-cases (-help, --h) still reach flag.Usage via
+// flag.Parse: exit 0, text on stderr.
+func helpRequested(args []string) bool {
+	for i, a := range args {
+		if a == "--" {
+			return false
+		}
+		if (i == 0 && a == "help") || a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+// printUsage is `seek -h` / `seek --help` / `seek help`: the verb
+// surface FIRST — run() dispatches those ahead of flag.Parse, so the
+// flag listing alone hides them, which is exactly how seek came to look
+// like a flags-only CLI — then the standard flag listing. Each verb's
+// own flags live in `<command> help`; keep the one-liners here honest.
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, `seek — terminal coding agent: bare `+"`seek`"+` opens the TUI, the verbs below do everything else
+
+Usage:
+  seek [flags]                 interactive TUI (print mode with -p / -json)
+  seek <command> [args]        run a command; <command> help has its detail
+
+Commands:
+  serve        remote control plane; --frontend=web also serves the browser workbench
+  acp          Agent Client Protocol over stdio (IDE integration)
+  cron         schedule prompts to run unattended (create / list / delete / tick / config)
+  skill        skill lifecycle (install / update / list / stats / create / drafts)
+  memory       project memory (list / show / search / add / archive)
+  agents       typed-agent definitions (list / check / create / remove)
+  hooks        shell hooks (list / check / trust / audit)
+  worktree     seek-owned git worktrees (list / gc)
+  session      export a transcript to markdown (export)
+  checkpoint   file checkpoints (list / restore / prune); undo / redo are aliases
+  keys         keybinding config (list / check / actions)
+  goal         unattended main-agent loop:   seek goal run "<goal>"
+  autopilot    unattended orchestration:     seek autopilot run "<goal>"
+
+Flags:
+`)
+	// PrintDefaults follows CommandLine's output; point it at w for the
+	// duration and put it back so a later flag.Parse error still lands
+	// on stderr (main() never runs twice, tests might).
+	prev := flag.CommandLine.Output()
+	flag.CommandLine.SetOutput(w)
+	defer flag.CommandLine.SetOutput(prev)
+	flag.PrintDefaults()
+}
+
 func run() error {
 	// Skill subcommand surface (PRD v2 §5.1). Dispatched ahead of
 	// every global flag and provider/session probe so `seek skill
@@ -927,6 +985,26 @@ func run() error {
 		// part of the request prefix, so it cannot change mid-session.
 		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
 	)
+
+	// Top-level help runs BEFORE flag.Parse but AFTER the flag set is
+	// registered, so the listing below carries both halves: the verbs
+	// (dispatched above) and the flags (defaults from the block just
+	// closed). flag.CommandLine is ExitOnError — its built-in -h exits
+	// 0 with the text on stderr and shows only the flags, which is how
+	// seek came to read as a flags-only CLI while serve & co. stayed
+	// invisible. A requested help goes to stdout (the skillcli/keyscli
+	// posture); flag.Usage below keeps the malformed-flag path on
+	// stderr.
+	if helpRequested(os.Args[1:]) {
+		printUsage(os.Stdout)
+		return nil
+	}
+
+	// Malformed flags: the flag package prints "flag provided but not
+	// defined: -x" and then calls this — same stream (stderr) so the two
+	// halves stay together. User-requested help never reaches here: the
+	// helpRequested branch above already took it to stdout.
+	flag.Usage = func() { printUsage(flag.CommandLine.Output()) }
 	flag.Parse()
 
 	// --yolo and --plan are mutually exclusive.

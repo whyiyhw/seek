@@ -206,8 +206,13 @@ seek --provider anthropic
 
 ```bash
 # 查看当前配置
-seek --help              # 查看所有 CLI 标志
+seek --help              # 子命令清单 + 所有 CLI 标志
+seek <command> help      # 单个子命令的详细帮助（如 seek serve help）
 seek --provider <name>   # 临时指定 provider
+
+# 常驻控制平面 + 内置浏览器工作台
+seek serve --frontend=web      # 监听 127.0.0.1:8790，启动时把带 token 的 URL 打到 stderr
+seek serve --frontend=web -h   # -h/--help 放在标志之后同样有效
 
 # 环境变量（最高优先级）
 export DEEPSEEK_API_KEY="sk-..."
