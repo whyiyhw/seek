@@ -3199,12 +3199,10 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 //
 // Tool calls ride the full protocol surface (2026-11-18, "放出去"):
 // name + kind (icon/UI treatment), locations (client follow-along),
-// rawInput/rawOutput (collapsible originals), and content — where edit
-// emits a protocol diff block (the old/new text ride in the ARGS; the
-// tool's own result is just a confirmation line) and everything else a
-// text block of the result. Wire shapes reverse-engineered from the
-// @agentclientprotocol/sdk schema; see acpToolContent for the content
-// variant's validation quirk.
+// rawInput/rawOutput (collapsible originals; the detail carrier — see
+// acpToolContent for why text content blocks are never sent), and
+// content as edit-only diff blocks. Wire shapes reverse-engineered
+// from the @agentclientprotocol/sdk schema + paseo's own bundle.
 func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) {
 	switch e := ev.(type) {
 	case agent.MessageDelta:
@@ -3274,15 +3272,12 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 	return acp.SessionUpdate{}, false
 }
 
-// Byte caps for ACP tool-call payloads. Tool results can be a whole
+// Byte cap for ACP tool-call raw payloads. Tool results can be a whole
 // file; the wire copy exists for the client's collapsible card, not for
 // re-transporting the file — the model still receives the full result
-// through the normal tool-result message, so these caps never touch the
+// through the normal tool-result message, so this cap never touches the
 // prompt path (prefix-cache unfazed).
-const (
-	acpRawCap     = 16 << 10
-	acpContentCap = 4 << 10
-)
+const acpRawCap = 16 << 10
 
 // acpTruncate cuts s to at most max bytes on a rune boundary, appending
 // an ellipsis marker when it cut anything. Rune-safe so the JSON wire
@@ -3404,48 +3399,39 @@ func acpToolLocations(args, cwd string) []map[string]any {
 	return []map[string]any{loc}
 }
 
-// acpToolContent builds the tool_call_update content blocks. edit emits
-// a protocol diff block — path/old/new ride in the args and Diff has no
-// conflicting discriminator field, so the block validates against every
-// SDK generation. Everything else (and failures) emit a text block.
+// acpToolContent builds the tool_call_update content blocks — diff
+// blocks for successful edits ONLY. Diff has no conflicting
+// discriminator field, so it validates against every SDK generation;
+// it is the one content variant that reaches clients.
 //
-// The text-block spelling is {"type":"content","text":…} — the spread
-// shape the CURRENT schema generation intends (Content & {type:
-// "content"}). The v1 zod intersection (zContent.and(type:"content"))
-// can never pass, so an older client silently drops the block via
-// x-deserialize-default-on-error — degrades to no preview, never an
-// error. Do NOT "fix" this by nesting ({"content":{…}}, the zcode
-// bridge's shape): that fails every generation the same way with extra
-// bytes. Empirically settled against paseo's bundle + the SDK schemas.
+// Text content blocks are NOT SENT AT ALL, and that is load-bearing
+// (2026-11-19, user-reported stuck spinners): paseo's runtime zod is
+// `content: z.array(zToolCallContent)` with NO skip-invalid wrapper —
+// one item failing the (never-satisfiable) text union makes the ENTIRE
+// tool_call_update fail validation, so status:"completed" and
+// rawOutput never land and the call spins forever. A bad content item
+// doesn't degrade to "no preview", it poisons the whole update. Result
+// detail rides rawOutput (acpRawValue) for every tool; failures carry
+// their error text there too. Do not reintroduce text blocks without a
+// client that provably parses them.
 func acpToolContent(name, args, result string, err error) []map[string]any {
-	if name == "edit" && err == nil {
-		var a struct {
-			Path      string `json:"path"`
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
-		}
-		if jerr := json.Unmarshal([]byte(args), &a); jerr == nil && a.Path != "" {
-			return []map[string]any{{
-				"type":    "diff",
-				"path":    a.Path,
-				"oldText": a.OldString, // empty old_string is invalid for edit anyway; block renders as new content
-				"newText": a.NewString,
-			}}
-		}
-	}
-	text := acpTruncate(result, acpContentCap)
-	if err != nil {
-		msg := acpTruncate(err.Error(), acpContentCap)
-		if text != "" {
-			text = msg + "\n" + text
-		} else {
-			text = msg
-		}
-	}
-	if text == "" {
+	if name != "edit" || err != nil {
 		return nil
 	}
-	return []map[string]any{{"type": "content", "text": text}}
+	var a struct {
+		Path      string `json:"path"`
+		OldString string `json:"old_string"`
+		NewString string `json:"new_string"`
+	}
+	if jerr := json.Unmarshal([]byte(args), &a); jerr != nil || a.Path == "" {
+		return nil
+	}
+	return []map[string]any{{
+		"type":    "diff",
+		"path":    a.Path,
+		"oldText": a.OldString, // empty old_string is invalid for edit anyway; block renders as new content
+		"newText": a.NewString,
+	}}
 }
 
 // runGoal drives the headless `/goal` loop (M-goal.3): a single agent works

@@ -94,15 +94,12 @@ func TestACPUpdate_Mapping(t *testing.T) {
 	if teOK["rawOutput"] != "ok" {
 		t.Fatalf("tool end rawOutput (plain text stays string) → %v", teOK["rawOutput"])
 	}
-	if c, _ := teOK["content"].([]map[string]any); len(c) != 1 || c[0]["type"] != "content" || c[0]["text"] != "ok" {
-		t.Fatalf("tool end content → %v", teOK["content"])
+	if _, has := teOK["content"]; has {
+		t.Fatalf("text content blocks must NOT be sent (they poison the whole update on paseo): %v", teOK)
 	}
 	teErr := upd(agent.ToolExecEnd{CallID: "c2", Name: "read", Err: errors.New("boom")})
 	if teErr["status"] != "failed" {
 		t.Fatalf("tool end err → %v", teErr)
-	}
-	if c, _ := teErr["content"].([]map[string]any); len(c) != 1 || c[0]["text"] != "boom" {
-		t.Fatalf("tool end err content should carry the error text: %v", teErr["content"])
 	}
 	if teErr["rawOutput"] != "boom" {
 		t.Fatalf("tool end err rawOutput → %v", teErr["rawOutput"])
@@ -207,39 +204,48 @@ func TestACPUpdate_Locations(t *testing.T) {
 	}
 }
 
-// TestACPUpdate_Content: edit emits the protocol diff block (validates
-// on every SDK generation), everything else a text block, failures
-// carry the error text, and everything truncates rune-safely.
+// TestACPUpdate_Content: ONLY edit-success emits a diff block — the
+// single content variant that validates on every SDK generation.
+// Everything else (other tools, failures, unparseable args) emits
+// NOTHING: paseo's runtime zod has no skip-invalid on the content
+// array, so a never-satisfiable text block poisons the whole
+// tool_call_update (stuck-spinner failure mode, 2026-11-19).
 func TestACPUpdate_Content(t *testing.T) {
 	diff := acpToolContent("edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "ok", nil)
 	if len(diff) != 1 || diff[0]["type"] != "diff" || diff[0]["path"] != "a.go" ||
 		diff[0]["oldText"] != "x" || diff[0]["newText"] != "y" {
-		t.Fatalf("edit → diff block, got %v", diff)
+		t.Fatalf("edit success → diff block, got %v", diff)
 	}
-	// edit failure falls back to the text block (a diff for an edit that
-	// never landed would lie).
-	txt := acpToolContent("edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "", errors.New("denied"))
-	if len(txt) != 1 || txt[0]["type"] != "content" || txt[0]["text"] != "denied" {
-		t.Fatalf("edit failure → error text block, got %v", txt)
+	// edit failure: a diff for an edit that never landed would lie — and
+	// an error text block would poison the update. Nothing at all.
+	if c := acpToolContent("edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "", errors.New("denied")); c != nil {
+		t.Fatalf("edit failure → no content, got %v", c)
 	}
-	// edit with unparseable args: still a text block, never a crash.
-	txt = acpToolContent("edit", `{bad`, "done", nil)
-	if len(txt) != 1 || txt[0]["type"] != "content" || txt[0]["text"] != "done" {
-		t.Fatalf("edit bad args → text block, got %v", txt)
+	if c := acpToolContent("edit", `{bad`, "done", nil); c != nil {
+		t.Fatalf("edit bad args → no content, got %v", c)
+	}
+	if c := acpToolContent("read", `{"path":"x"}`, "contents", nil); c != nil {
+		t.Fatalf("non-edit → no content (rawOutput carries it), got %v", c)
 	}
 	if c := acpToolContent("read", `{"path":"x"}`, "", nil); c != nil {
-		t.Fatalf("empty result → no content block, got %v", c)
+		t.Fatalf("empty result → no content, got %v", c)
 	}
-	// Truncation is rune-safe: the cut never splits a multi-byte rune,
-	// and the marker lands after it.
-	long := strings.Repeat("界", 3*acpContentCap) // 9 bytes per rune
-	c := acpToolContent("read", `{"path":"x"}`, long, nil)
-	got := c[0]["text"].(string)
-	if utf8.ValidString(long[:len(got)-len("\n…[truncated]")]) == false {
-		t.Fatalf("truncated text is not valid UTF-8")
+}
+
+// TestACPTruncate: the cut never splits a multi-byte rune and the
+// marker lands after it (raw payloads ride JSON — broken UTF-8 would
+// corrupt the wire).
+func TestACPTruncate(t *testing.T) {
+	long := strings.Repeat("界", acpRawCap) // 3 bytes per rune
+	got := acpTruncate(long, acpRawCap)
+	if !utf8.ValidString(got) {
+		t.Fatal("truncated string is not valid UTF-8")
 	}
 	if !strings.HasSuffix(got, "…[truncated]") {
 		t.Fatalf("truncation marker missing: %q", got[len(got)-40:])
+	}
+	if acpTruncate("short", acpRawCap) != "short" {
+		t.Fatal("under-cap strings pass through untouched")
 	}
 }
 
