@@ -20,6 +20,18 @@
 #                           "-tools read,edit,write,bash,grep"); also
 #                           passed through to runner.sh cases in the env
 #
+# Env knobs (provider lane, see eval/README.md § "Provider lane"; all
+# four UNSET = historical DeepSeek lane, byte for byte):
+#   SEEK_EVAL_PROVIDER      opencode | compatible — steer eval traffic
+#                           onto the OpenCode Go subscription (default
+#                           lane model deepseek-v4.1-flash) or any
+#                           OpenAI-compatible endpoint, so batch/
+#                           unattended runs never burn the metered key
+#   SEEK_EVAL_MODEL         model id override (passed as -model)
+#   SEEK_EVAL_BASE_URL      endpoint override (full POST target)
+#   SEEK_EVAL_API_KEY       lane credential (exported as the lane's
+#                           canonical env var)
+#
 # Exit code: 0 if every executed case passed, 1 if any failed, 2 on
 # setup error (missing binary, unparseable expect.json, etc.).
 
@@ -55,6 +67,87 @@ fi
 # acceptance ②).
 results_dir=${SEEK_EVAL_RESULTS_DIR-"$results_dir"}
 seek_extra_args=${SEEK_EVAL_EXTRA_ARGS-}
+
+# --- Provider lane (c_ffzic2, 2026-11-19): batch/unattended evals bill ---
+# --- the OpenCode Go subscription, never the metered DeepSeek key.     ---
+# 口径 (docs/prd/v8.md §9.1): 测试默认 OpenCode Go 套餐 DeepSeek（订阅
+# 内）；计量真 key 仅 --only 人工指名或卡面明示授权。All four knobs unset
+# = historical DeepSeek lane, byte for byte (same contract as the
+# ablation knobs above — scripts/eval-ablate-test.sh ③ pins it).
+#
+#   SEEK_EVAL_PROVIDER   opencode | compatible (unset = historical lane).
+#                        opencode = OpenCode Go plan ($10/mo subscription)
+#                        riding seek's own -provider opencode lane, whose
+#                        default model IS deepseek-v4.1-flash — pass
+#                        SEEK_EVAL_MODEL only to override it. Credentials
+#                        resolve inside seek: OPENCODE_API_KEY env >
+#                        providers.opencode.api_key > the stored browser
+#                        login. This harness NEVER reads — and NEVER
+#                        refreshes — ~/.seek/opencode-auth.json itself:
+#                        the refresh token is single-use, so a side
+#                        refresh would invalidate the copy seek holds.
+#                        An expired login surfaces as loud API errors and
+#                        a human re-logs in; it is never self-healed here.
+#                        compatible = any OpenAI-compatible endpoint;
+#                        requires SEEK_EVAL_BASE_URL + SEEK_EVAL_MODEL.
+#   SEEK_EVAL_MODEL      model id, passed through as -model.
+#   SEEK_EVAL_BASE_URL   endpoint override (the FULL POST target), passed
+#                        as -base-url AND exported as the lane's own env
+#                        override (OPENCODE_BASE_URL) so a config.json
+#                        preset can't out-rank the flag (config.BaseURLFor
+#                        beats --base-url inside seek; env beats config).
+#   SEEK_EVAL_API_KEY    lane credential, exported as the lane's canonical
+#                        env var (OPENCODE_API_KEY for opencode,
+#                        OPENAI_API_KEY for compatible). Never write a
+#                        real key into card text, logs or expect files —
+#                        source it from the machine environment.
+#
+# While a lane is active, DEEPSEEK_API_KEY is scrubbed from this shell so
+# no child (seek invocation, runner.sh, setup/teardown) can see it: the
+# metered key must have ZERO reach into a switched lane — seek's
+# `compatible` case would otherwise read DEEPSEEK_API_KEY as a fallback
+# credential. runner.sh cases that build their own invocations forward
+# the lane with the exported SEEK_EVAL_PROVIDER_ARGS (empty = lane off;
+# reference as ${SEEK_EVAL_PROVIDER_ARGS-} under set -u) — contract in
+# eval/README.md § "Provider lane".
+seek_eval_provider=${SEEK_EVAL_PROVIDER-}
+seek_eval_model=${SEEK_EVAL_MODEL-}
+seek_eval_base_url=${SEEK_EVAL_BASE_URL-}
+seek_eval_api_key=${SEEK_EVAL_API_KEY-}
+provider_args=""
+if [ -n "$seek_eval_provider" ]; then
+  case "$seek_eval_provider" in
+    opencode)
+      # No further requirements: model defaults to the lane's
+      # deepseek-v4.1-flash inside seek; credentials may legitimately be
+      # absent from this harness when seek's stored login serves them.
+      ;;
+    compatible)
+      if [ -z "$seek_eval_base_url" ] || [ -z "$seek_eval_model" ]; then
+        echo "eval: SEEK_EVAL_PROVIDER=compatible needs SEEK_EVAL_BASE_URL and SEEK_EVAL_MODEL" >&2
+        exit 2
+      fi
+      ;;
+    *)
+      echo "eval: unknown SEEK_EVAL_PROVIDER '$seek_eval_provider' (opencode | compatible)" >&2
+      exit 2
+      ;;
+  esac
+  provider_args="-provider $seek_eval_provider"
+  [ -n "$seek_eval_model" ] && provider_args="$provider_args -model $seek_eval_model"
+  [ -n "$seek_eval_base_url" ] && provider_args="$provider_args -base-url $seek_eval_base_url"
+  if [ -n "$seek_eval_api_key" ]; then
+    case "$seek_eval_provider" in
+      opencode) export OPENCODE_API_KEY="$seek_eval_api_key" ;;
+      *)        export OPENAI_API_KEY="$seek_eval_api_key" ;;
+    esac
+  fi
+  if [ "$seek_eval_provider" = opencode ] && [ -n "$seek_eval_base_url" ]; then
+    export OPENCODE_BASE_URL="$seek_eval_base_url"
+  fi
+  unset DEEPSEEK_API_KEY || true
+  export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
+fi
 
 case_filter=${1-}
 binary=${2-$repo_root/seek}
@@ -305,7 +398,10 @@ run_one() {
   # SEEK_EVAL_REPO_ROOT, SEEK_EVAL_PROMPT_FILE and SEEK_EVAL_MAX_TURNS in
   # the environment; writes the JSONL event stream to stdout, optionally
   # followed by {"type":"runner_fact","exit_code":N} lines (see the
-  # nonzero_exits metric) to surface process-level results.
+  # nonzero_exits metric) to surface process-level results. Runners that
+  # want the provider lane forward ${SEEK_EVAL_PROVIDER_ARGS-} into their
+  # own invocations (exported above; empty when the lane is off) and
+  # inherit the lane's exported credential env vars.
   local runner_file="$case_dir/runner.sh"
   if [[ -f "$runner_file" ]]; then
     ( cd "$repo_root" && \
@@ -314,6 +410,7 @@ run_one() {
       SEEK_EVAL_PROMPT_FILE="$prompt_file" \
       SEEK_EVAL_MAX_TURNS="$max_turns" \
       SEEK_EVAL_EXTRA_ARGS="$seek_extra_args" \
+      SEEK_EVAL_PROVIDER_ARGS="$provider_args" \
       bash "$runner_file" ) > "$out_file" 2>/dev/null
   else
   # -no-save: don't pollute ~/.seek/sessions/ with eval runs.
@@ -323,8 +420,9 @@ run_one() {
   #          inspect (most cases reference real files).
   # $seek_extra_args (unquoted by intent — a space-separated flag
   # list, e.g. the ablation lane's "-tools read,edit,write,bash,grep")
-  # is empty for every non-ablation invocation.
-  ( cd "$repo_root" && "$binary" -yolo -no-save -max-turns "$max_turns" -json $seek_extra_args -p "$prompt" ) \
+  # is empty for every non-ablation invocation. $provider_args likewise
+  # (provider-lane flags, empty on the historical DeepSeek lane).
+  ( cd "$repo_root" && "$binary" -yolo -no-save -max-turns "$max_turns" -json $seek_extra_args $provider_args -p "$prompt" ) \
     > "$out_file" 2>/dev/null
   fi
   local elapsed=$(( $(date +%s) - started_at ))

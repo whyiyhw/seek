@@ -199,6 +199,36 @@ under `eval/ablation/` (mtime-guarded: pre-existing ablation data is
 untouched) and fails loudly if normalisation ever degrades to empty
 output — an early revision shipped exactly that false-green.
 
+## Provider lane: test traffic on the OpenCode Go plan (c_ffzic2)
+
+**口径（v8.md §9.1）：测试默认 OpenCode Go 套餐 DeepSeek（订阅内）；计量真 key 仍仅 `--only` 人工指名或卡面明示授权。** Batch/unattended eval runs (three-arm comparisons, regressions, ablation lanes) must never burn the metered DeepSeek key — the harness therefore steers every seek invocation onto a switchable OpenAI-compatible provider, defaulting to the OpenCode Go subscription's `deepseek-v4.1-flash`.
+
+Four `run.sh` env knobs (all unset = historical DeepSeek lane, byte for byte — same contract as the ablation knobs):
+
+| Env var | Effect |
+|---|---|
+| `SEEK_EVAL_PROVIDER` | `opencode` (OpenCode Go plan; seek's own lane, default model `deepseek-v4.1-flash`) or `compatible` (any OpenAI-compatible endpoint). Unset = historical lane |
+| `SEEK_EVAL_MODEL` | model id, passed as `-model`; with `opencode` unset it IS `deepseek-v4.1-flash` (seek's lane default) |
+| `SEEK_EVAL_BASE_URL` | endpoint override (full POST target), passed as `-base-url` **and** exported as `OPENCODE_BASE_URL` so a `providers.opencode.base_url` config preset can't out-rank the flag inside seek |
+| `SEEK_EVAL_API_KEY` | lane credential, exported as the lane's canonical env var (`OPENCODE_API_KEY` / `OPENAI_API_KEY`); never write real keys into card text, logs or expect files |
+
+While a lane is active, `run.sh` **scrubs `DEEPSEEK_API_KEY` from the child environment** — the metered key has zero reach into a switched lane (seek's `compatible` case would otherwise read it as a fallback credential). Credential resolution itself happens inside seek: `OPENCODE_API_KEY` env > `providers.opencode.api_key` > the stored browser login.
+
+**Token rule (hard): the harness never reads — and never refreshes — `~/.seek/opencode-auth.json`.** The refresh token is single-use; a side refresh invalidates the copy seek holds. An expired login surfaces as loud API errors and a human re-logs in; it is never self-healed by eval tooling.
+
+**runner.sh forwarding contract.** Cases that build their own invocations (e.g. the mcp-semble-routing arm engine) opt in by forwarding the exported lane args — the same opt-in shape as `SEEK_EVAL_EXTRA_ARGS`:
+
+```bash
+"$SEEK_EVAL_BINARY" -yolo -no-save -max-turns "$SEEK_EVAL_MAX_TURNS" \
+  -json ${SEEK_EVAL_PROVIDER_ARGS-} -p "$prompt"
+```
+
+`SEEK_EVAL_PROVIDER_ARGS` is empty when the lane is off (`${VAR-}` is the `set -u`-safe reference), and the lane's exported credential env vars ride along automatically. Wiring the arm runner this way is the follow-up for the mcp-semble line (card c_eyuxqm ② 复核 and later MCP-lane tests default to this provider).
+
+**Hermetic proof.** `eval/tools/fake_openai_compat.py` is a local fake OpenAI-compatible endpoint (one text delta + usage + `[DONE]`, same wire shape as `fake_paas_glm.py`) that records every POST's path / auth / model to a JSONL log. `scripts/eval-provider-test.sh` (auto-discovered by the [`scripts/selftest.sh`](../scripts/selftest.sh) lane, name `eval-provider-test`) drives the REAL seek binary against it with fake keys and asserts the four knobs map into argv/env, the request target/credential/model actually switch on the wire, the OpenCode lane's default model is `deepseek-v4.1-flash` without passing `-model`, a config-preset endpoint hijack is out-ranked, both env-side and config-side metered-key canaries never reach the endpoint, and the runner contract above holds. Real-plan smoke (≥3 runs + metered-key usage delta check) is a human/main-session action, not a selftest.
+
+Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
+
 ## Cost
 
 Each pass is one full `seek` invocation against DeepSeek's API. Budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out. The full 3-case suite is well under $0.20.
