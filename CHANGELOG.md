@@ -1,5 +1,25 @@
 # 更新日志（CHANGELOG）
 
+## v0.12.0（2026-11-18）
+
+v0.12.0 — 多一条包月车道、多一张嘴：**OpenCode Go** 以 $10/月订阅价加入 DeepSeek / GLM / OpenAI 兼容车道；`seek serve` 长出**按住说话**（录音 → DeepSeek ASR → 一条真正的会话）；子代理可后台跑、可按 id 唤醒续话；MCP server 的工具拿到命名空间与提示文案；DeepSeek 文档输入（`@report.pdf`）与可选的 `safety_check` 落地。内核也开始公开减重：`-tools` 白名单和只读的摩擦报告，是 v8 里第一批能拿数字验证的刀。
+
+### Notable changes
+
+- **OpenCode Go 车道（新）**. `--provider=opencode` 接 OpenCode Go 订阅（$10/月，请求窗口限额、开放权重模型池）。seek 以自有 `User-Agent` + 每会话稳定的 `x-opencode-session` 头自报身份——缺这个头会静默退化成按 token 扣费。车道默认模型 `deepseek-v4.1-flash`；首启向导、子代理路由表、pricing 行（该车道只作参考单价展示）同步更新，`--base-url` 现在也能覆盖 GLM 与 opencode 的端点。
+- **按住说话（新）**. `seek serve --frontend=web --frontend=voice` 给网页加一个 🎤 按钮：按住、说话（≤120 秒）、松开——音频经 DeepSeek ASR 转写（按秒计费），以独立会话 `voice:<device-id>` 进入控制平面，和别的会话一样用 `/bind` 绑定项目。麦克风需要安全上下文（localhost 直接可用；走 tailnet 要用 HTTPS 前置）。播报侧（TTS）的 `Speaker` 积木与计价已落地，CLI 开关尚未接。
+- **文档输入（新）**. `@report.pdf` 走 DeepSeek Files API：提交期路由（copy-at-submit，本地资产库保留唯一副本）、复用 `file_id` 保住前缀缓存、`@rich:` 取图文混排布局；重放时文件标记淡显。`read_url` 在 R0 验证门里与 function tools 共存实测为红，**判定不接**。
+- **`safety_check`（新，需显式开启）**. 配到 `high` 时 DeepSeek 车道带上模型安全校验参数；被拒会作为正常回合返回，而不是报错中断。
+- **MCP 深度集成（行为变更）**. 工具默认注册为 `server__tool`（如 `semble__search`）；`mcp.json` 的 `prefix: false` 在裸名空闲时保留裸名，撞名仍回退到前缀形态。sysprompt 新增 `MCPSection` 段（每会话静态；空段与之前逐字节一致）承载 `hint` / `mcp_prompt` 文案；server 注册顺序确定化。
+- **子代理：后台 + 续话**. `run_in_background` 的子代理完成事件进入主会话流（状态徽标、`/agents` MODE 列）；带 `session_id` 可连上下文与血统一起复活；`-resume` 回灌「已完成未通知」的子代理，完成事件不再丢。
+- **类型化 agent 定义**. `~/.seek/agents/` 与 `<project>/.seek/agents/` 下的 SKILL.md 式定义（frontmatter 与 skill 共用一套方言）；`seek agents list/check/create/remove` 是唯一写入口，per-type 工具白名单接进权限层，内置 explore / judge / general 三个模板并带默认车道。
+- **hooks 扩容**. 新增 SubagentStart/Stop、Stop、PreCompact、Notification 观察点与 shell 事件；`pre_prompt_inject` 是 opt-in 的单缝注入通道（默认 2048 B / 上限 8192 B、带截断标记、注入字节进 audit），守护测试锁住「注入后前缀前段字节不变」。
+- **ACP 完整化**. `session/new` 返回 `configOptions`、`session/set_config_option` 运行时换模型、`SEEK_ACP_PROVIDER` / `SEEK_ACP_MODEL` 可钉定；`tool_call` 放出 kind/locations/rawInput/rawOutput/content，思考流走 `agent_thought_chunk`，文本 content 块不再污染整帧——结果只走 `rawOutput`。
+- **web 工作台 W0–W4**. 流式聊天（delta 累积、工具行折叠）、会话浏览器（cursor 分页）、记忆与统计视图、后台子代理任务面板（SSE tail-follow）、`?token=` 换票 cookie + 写面 Origin/Host 闸，以及 CSP、gzip、CI 体积 gate。
+- **薄内核旋钮与度量**. 顶层 `-tools` 白名单（会话启动即冻结，未知名 exit 2）；`/rpc` 新增只读 `stats/friction`（从 transcript 折叠出按工具的失败/被拒/重复）；`scripts/kernel-deps.sh` 内核依赖方向报告；`eval/ablate.sh` 裸核 vs 完整双跑对照；selftest 改发现制（新脚本自动进名单）；autopilot Outcome 带 token/成本与 diffstat。
+- **修复**. `list_dir` 默认深度的输出补上「重新调用拿更深一层」的带内提示（`bash-overreach` 反复红绿交替的根因）；`seek agents remove` 先校验名字再碰文件系统；worktree GC 加年龄兜底；session / subagent ID 熵 24→64 位；`seek session export` 把 transcript 渲染成 markdown。
+- **Quality**. eval 增加 ablate 双跑车道与趋势雷达；两个用例按实测重标定（`bash-overreach` 改绑「bash 不得先手」的排序界，`code-review-effort-max` 放宽 runaway 上限）；减法第 4、5 刀（含 `sandbox.Wrap` 的 linux/other 变体）清掉孤儿读写路径；29 篇已交付 PRD 归档进 `docs/prd/archive/`。
+
 ## v0.11.0（2026-11-13）
 
 v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary into one long-running, channel-agnostic service you can drive from a chat app or a browser; GLM (Zhipu bigmodel.cn) joins the provider list; sub-agents can run on a model of their own; and `/distill` turns a finished session into a reviewable skill draft.
@@ -16,99 +36,3 @@ v0.11.0 — seek grows a remote control plane: `seek serve` turns the binary int
 - **Quality**: behavioral eval suite grew 14 → 21 cases (session-id contract, print-mode permission semantics, tool-selection and edit-fallback regressions, glm-lane contract); three dead-code / gofmt / modernize sweeps.
 
 ## 已进 main、未部署
-- c_r5dm2f：v0.11 发布准备：版本号 + CHANGELOG 汇总 + tag 草稿（发版动作留人）
-- c_mvv5td：book 与 PRD 重复事实清单（缩并备料，只盘点不改）
-- c_7afk5i：文档预算首轮缩并：budget.json 超限区开刀（每版一刀文档刀）
-- c_jvn3ky：skill-distill 人审 CLI：/skill drafts 列表·预览·审批安装一条流
-- c_oh2dl3：/distill dry-run 预览：显示将产出的草稿不落盘
-- c_kql3ip：eval 扩容：GLM 车道契约用例——路由/计价/cache 字段锁回归
-- c_7pptol：web frontend 设计稿：control-plane 首个真实渠道 + inspect-rpc 数据面并入评估（feature-web-frontend.md）
-- c_c26lvq：DeepSeek 全家桶 API 接入评估设计稿：read_url/文件输入/ASR-TTS/安全参数（feature-deepseek-app-api.md）
-- c_bg7hax：pitfalls 台账清点：190 条过时/已修复标记（只标记不删）
-- c_3gp2e7：AGENTS.md 预算 ratchet 下一刀：3084→≤2800（每版一刀 · 向 1800 目标收，repo=whyiyhw/seek）
-- c_26ltej：README 双语 v0.11 叙事刷新：平台化定位（多端/自进化/成本三轴）
-- c_tbqxnn：session export：会话导出为 markdown 对话记录
-- c_bickfj：编排 P1-a：后台子代理生命周期骨架——spawn 可后台化 + 完成事件进 session 流
-- c_zdjkgf：编排 P1-d：后台子代理完成通知的 TUI 呈现——状态徽标在跑→已完成迁移 + /agents MODE 列（bg/送达✓）
-- c_nym2sn：pricing.go 费率刷新：flash 现价 ¥2/M 高峰 miss（快照停 2026-09-10 已过期）+ v4-pro 独立行核对
-- c_mb5d7p：session/subagent ID 熵扩宽 24→64 位（NewRunID 同款修法，v0.11 CI 实录同因，repo=whyiyhw/seek）
-- c_wxbdkz：R0 验证门：read_url 与 function tools 共存性实测（feature-deepseek-app-api §2.2，红则①降级不接）
-- c_lxferp：eval 基线趋势：结果 JSONL 汇总脚本——与上一版对比报告
-- c_onl4et：信号：eval-trend 自测未登记 selftest.sh——c_lxferp 验证「未跑成」阻塞放行
-- c_o77s3m：编排 P3-a：hooks 注入面设计——受控注入区与缓存稳定区分离
-- c_iha3fr：web 聊天 markdown 最小渲染：代码块+行内码样式（§2.6 落地，零依赖，c_vn44rc 首卡）
-- c_kkpwe7：编排 P2-a：类型化 agent 定义格式——配置文件与加载器
-- c_uzmzzi：book v0.11 章节更新：control-plane/GLM 车道/skill-distill 进设计书
-- c_jqwd72：skill-distill 三期：复发累积（N≥2）与蒸馏质量打点报表
-- c_7xmecm：编排 P2-b：per-type 工具白名单接线——permission 层收紧
-- c_x7ehom：serve web 地址可配置：serve 段 web_addr（解 MVP 硬编码 loopback）
-- c_c4cs4a：web 会话历史·W4.1：POST /rpc JSON-RPC 2.0 envelope + method registry + 错误码
-- c_fzqsbi：worktree GC 加年龄兜底：never-discarded 孤儿 ref 永生（6 个 6 月实例手工清除实录）
-- c_jdwywj：skill-distill：StrengthenDraft 按 SessionID 去重缺口（二期遗留，c_jqwd72 巡检确认未修）
-- c_u4ugnu：编排 P1-b：后台子代理续话复活——agent 工具 session_id 续话与 run_in_background 组合（PriorMessages 上下文延续、resumed_from 血统、短 id 唯一解析、后台续话完成经 notice → Notifier 进主会话流）
-- c_3d2bil：编排 P2-c：内置类型包升级——explore/judge/general 类型化+默认路由
-- c_zam44t：web 会话历史·W4.2：session/list|get|messages 三 method（cursor 分页=全文件顺序、尾读不锁）
-- c_snerqc：web 平面契约自测脚本：serve HTTP 三断言进 selftest 家族
-- c_nl4nqg：web 多标签·per-conv 演进：conv-uuid+双 conv 隔离+多 tab 扇出一致（W1.3）
-- c_zxeqih：docs 修复：feature-orchestration.md 状态行冲突标记残留（920f9e1 遗留）
-- c_n3pghs：web 流式平面缝·一：executor RunStream + 导出 RunEvent（W0.1）
-- c_7yofgo：web 任务面板·一：subagents.jsonl 只读 reader + GET /subagents（W3.1）
-- c_ydglne：web 资产面·三：memory/projects/stats method 集（W4.3）
-- c_axrls3：web 流式平面缝·二：StreamSender sibling 接口 + router upcast 接线（W0.2）
-- c_jxhkbr：web serve CLI --listen flag 补缺（W1.1 尾巴）
-- c_pbg5kp：web 流式平面缝·三：agent_start 加 model 字段（W0.3）
-- c_qcmul4：web 流式接线：SendStream→SSE delta/tool/usage 事件族 + reply 收口带 session_id（W1.4，服务端 pricing 算 $，X-Accel-Buffering:no）
-- c_hinacy：web 资产面·四：sessions 浏览器 UI·列表+消息分页（W4.4）
-- c_w5lidm：web 鉴权演进：?token= 303 换票 cookie + 写面 Origin/X-Token 闸 + Host 校验（W1.2）
-- c_3736yl：web 任务面板·二：SSE topic subagents tail-follow + 推送（W3.2）
-- c_ph2zax：web 页面资产管线：CSP 头 + gzip + CI 体积 gate（W1.5）
-- c_wno3o3：web 资产面·五：memory 浏览器 + stats 视图（W4.5）
-- c_igze7m：web 资产面·六：hooks/audit 只读 + hooks/list + inspect-rpc 状态注记（W4.6）
-- c_mn2wdp：web 前端·guide-serve §web 文档收尾 + 体积 gate 上线（W2.4）
-- c_evbzyh：web 前端·指令快捷按钮 + 绑定状态常显（W2.2 增量）
-- c_ujgmpu：web 任务面板·三：后台子列表/状态/tokens UI + 详情（W3.3）
-- c_5ckroy：deepseek-app-api·S2：pkg/deepseek ASR 客户端 + pricing.ASRCost
-- c_2lu6vb：deepseek-app-api·F2：internal/filerefs 检测器（后缀表+stat 门，照 imgrefs 先例新包）
-- c_wsf7us：orchestration·M-O3.1：hooks 新观察点（SubagentStart/Stop、Stop、PreCompact、Notification）+ shell 事件 + audit
-- c_npafpi：web 前端·状态栏 tokens/$ 实时累积 + session_id 短显（W2.3）
-- c_fepxy2：orchestration·M-O1.3：resume 回灌（fold completed-未 notified 子）+ notified 写面
-- c_bkdnej：deepseek-app-api·F1：pkg/deepseek files 客户端（UploadFile multipart + file 分块 wire 形态）
-- c_k4iejt：deepseek-app-api·S1：pkg/deepseek TTS 客户端 + pricing.TTSCost
-- c_sv3zwn：v5 收伞评估：M11.5+ 候选梳理（run_in_background×worktree 解禁、巡检 cron 化等）
-- c_hkqvwk：edit-read-before 结构性方案评估（低优先，产出三选一决策）
-- c_np5gzu：inspect-rpc IDE 线：--rpc stdio transport + Registry 重构（做前先答是否还需要）
-- c_z4mn6y：slim-loop·L3 首跑（M-SL3）：goal run 夜间自瘦身 × worktree × 人审 diff
-- c_azqudp：orchestration·M-O2.3：agentsmgr 写路径 + seek agents list/check CLI
-- c_5xtm74：web 前端聊天增量：流式气泡 delta 累积→reply 整泡替换 + 工具行折叠（W2.1，textContent 纪律保持；无头验收脚本 web-stream-manual.sh + CDP 驱动）
-- c_oixx62：slim-loop·M-SL3 首跑重跑：seek goal run 载体 × worktree × 人审 diff
-- c_2i6sm6：v8·S1：摩擦记账——从 transcript 折叠出按工具的失败/被拒/重复统计（只读）
-- c_zcygo2：v8·U1：内核依赖方向报告脚本（只报不拦）
-- c_5fdsqb：memory↔skill 打通·设计卡 P0：蒸馏落点（review 第四动作）+ 生命周期对齐
-- c_miutmh：v8·T1：顶层 -tools 白名单 flag（裸核对照用，会话启动时冻结）
-- c_qur4ib：部署位 A：seek 建 deploy/local-manifest.json 纳入 deploy-local 自动同步
-- c_vunyoz：v8·R1：autopilot Outcome 补证据字段（token/成本 + diffstat）并进 Report 文本
-- c_lz5wxa：bridge·M-B4：seek skill stats --idle（Set 外连接）+ ⚡ 模态双存告警 + 测试
-- c_icrm3y：bridge·M-B1：skillmgr.WriteProjectSkill 新入口 + 测试
-- c_mnicm3：docs/prd 归档减法（v8 D5 拍板）：已交付 PRD 移入归档区，weight.sh 回预算
-- c_aqbdaz：selftest 登记缺口机制化：新脚本自动进 scripts/selftest.sh（含补登 kernel-deps.sh）
-- c_x3bed4：MCP-D2：sysprompt 新增 MCPSection 段（Header 第五段，SkillManifest 同款 per-session 静态；空段=现状逐字节不变）
-- c_n63pat：web 前端·W4.4：资产面 sessions 浏览器（列表 + 消息 cursor 分页浏览）
-- c_f6ayyg：语音 v2·V2：push-to-talk 入站——VoiceFrontend.Run 录音→ASR→Inbound
-- c_m2whz2：编排 M-O3.2：pre_prompt_inject 授权注入通道 + 三区模型落地——opt-in shell stdout 经 Prepend 单缝注入（max_bytes 默认 2048/上限 8192 + 截断标记），deny 路径只断注入不断 turn，audit 记 injected_bytes，守护测试锁「注入后 prefix 前段字节不变」，状态栏字节数提示拍板不做
-- c_4ejhhs：MCP-D1：MCP 工具默认 server__tool 前缀 + LoadServers 注册顺序确定化（bridge.go）
-- c_z5zxru：opencode 车道：--provider=opencode 接入 OpenCode Go 订阅（$10/月请求窗口制）——ChatRequest.SessionID→x-opencode-session 每会话稳定头 + openai client 统一发自有 UA seek/<version>（缺头会退化按 token 扣费），默认模型 deepseek-v4.1-flash（id 待 /v1/models 实测核对），pricing 加 Go lane 行（per-token 仅展示口径），子代理路由表/工具 schema 同步，文档三处
-- c_yijdy4：语音 v1·V1a：播报 sink——serve Speaker（Reply→TTS→播放）+ routines Notifier sibling
-- c_nxirmj：首启向导 provider 单扩容：opencode/glm 两行进菜单（deepseek 仍居首，验证 ping 仍仅 deepseek），重试提示的范围文案按 len(providerOptions) 动态生成（原写死 1–4 会骗人），向导侧 envVarFor 镜像同步 glm/opencode（否则 env-only 用户会被误触导向导），keyHint 均未经真实 key 验证（opencode 留空省略格式行、glm 按 <32hex>.<hex> 形态给示意）
-- c_axqkif：deepseek-app-api·F3：fileRouter 提交期路由 + copy-at-submit + ParseCost
-- c_djswic：deepseek-app-api·SC1：safety_check config 键 + ChatRequest 字段 + refusal 处理（小卡）
-- c_w3vhcm：v8·T2：eval 裸核/完整双跑对照脚本（结果不进回归趋势）
-- c_6thhqc：feat(acp): C 完整模型选择——session/new configOptions + session/set_config_option + SEEK_ACP_PROVIDER/SEEK_ACP_MODEL env 钉定
-- c_lgtpgq：MCP-D3：mcp.json hint 字段 + mcptool.PromptSection 文案组装 + semble 内置 known-server 文案
-- c_yyqtnh：MCP 深度集成设计稿：Semble 第一验证目标（prompt 引导/工具路由/效果评估）
-- c_lmrp73：v8 第一波数据回填：基线三数（一次过率/每任务花费/人审分钟）+ 裸核对照表 + §9 回填与第二波范围建议
-- c_rto2rb：MCP-D3 接线：cmd/seek main.go 消费 mcptool.PromptSection（hint/mcp_prompt 生效）
-- c_2q5hlj：GLM-5.3 在 seek 走路充值余额而非 GLM Coding Plan 额度——端点分流（paas/v4 vs coding/paas/v4）
-- c_lrilqc：信号：eval bash-overreach 例完整车道持续 FAIL（11-13 起）根因待定性
-- c_5gy5h6：deepseek-app-api·F4：ResolveFiles 发送路径 + session round-trip + file_id 前缀缓存实测
-- c_wwpdxp：dsh web app 解剖：交互语言规格（web 前端重设计波次第 1 张，只读不改代码）
-- c_czsz7b：deepseek-app-api·F5：file 标记 replay 展示 + guide 文档 + Inbound.Attachments 契约注记

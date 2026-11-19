@@ -1,7 +1,8 @@
 {
-  "description": "Repo-inspection task solvable with list_dir + read; bash should not be needed.",
+  "description": "Repo-inspection task solvable with list_dir + read; bash must never be the FIRST resort. One bash recovery AFTER a dedicated tool is allowed — recalibrated 2026-11-18 against a 6-run record (see README), matching tool-selection's ordering-not-total doctrine.",
   "max_turns": 10,
   "max_total_tool_calls": 8,
-  "max_bash_calls": 0,
+  "max_bash_calls": 1,
+  "max_bash_before_dedicated": 0,
   "min_list_dir_calls": 1
 }

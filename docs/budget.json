@@ -5,5 +5,5 @@
   "docs/prd/archive": {"budget_bytes": 653500, "why": "retired PRDs; grows when work is archived INTO it — raised in the v8 D5 bulk-archive change (2026-11-17); actual 593735 +10%"},
   "docs/book": {"budget_bytes": 558500, "why": "reference prose, length legitimate when every line is a fact; actual 507547 +10%"},
   "docs/pitfalls.md": {"budget_bytes": 327000, "why": "append-mostly ledger; actual 297205 +10%"},
-  "CHANGELOG.md": {"budget_bytes": 3500, "why": "release notes grow by design; tripwire only; raised in the v0.11.0 release change (entry folded the staging list); actual 2961 +10%"}
+  "CHANGELOG.md": {"budget_bytes": 9000, "why": "release notes grow by design; tripwire only; raised in the v0.12.0 release change (folded a 96-card staging list; history is never pruned, so this rises per release until old entries move to an archive — slim candidate); actual 8007 +10%"}
 }
