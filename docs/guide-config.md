@@ -98,6 +98,17 @@ seek --provider glm
 >
 > 首启向导选 GLM 保存完 key 后会打印这段提示；不确定自己是哪种 key 时，先用默认端点跑一次，报 `1113` 就是 Coding Plan key，切到 `/api/coding/paas/v4` 即可。
 
+**症状对照 / symptom → fix**
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| 充值余额一直在掉、Coding Plan 用量不动 | 仍在打默认 `/api/paas/v4` 端点（本节描述的坑） | 按上面任一方式覆盖 `base_url`（优先级：`GLM_BASE_URL` > config `base_url` > `--base-url`） |
+| 报 `1113`「余额不足或无可用资源包」 | key 是订阅制，端点却仍是 `/api/paas/v4`，且充值余额已空 | 同上，切到 `/api/coding/paas/v4/chat/completions` |
+| 报 `404`（响应体里 `path` 只剩 `/v4`） | `base_url` 不是完整 POST 目标——最常见是只写了 `…/api/coding/paas/v4`，漏掉 `/chat/completions`。seek 把该值**原样 POST**，不替你补路径 | 补全为 `…/api/coding/paas/v4/chat/completions` |
+| 报 `401` | key 本身失效/已被轮换——与端点无关（端点写错回的是 404，不是 401） | 去控制台重新生成 key |
+
+改配置文件后要**新开进程**：`base_url` 只在启动时读取，已在跑的 TUI / `seek acp` 会话不会热加载。判断自己有没有 Coding Plan 订阅：登录 [bigmodel.cn 控制台](https://open.bigmodel.cn/usercenter/apikeys)，订阅套餐页有用量记录即订阅制账户。
+
 ### OpenCode Go 订阅车道（`--provider=opencode`）
 
 [OpenCode Go](https://opencode.ai/console/go) 是 $10/月的订阅制推理池（32 个开放权重 + 前沿模型：Kimi K3、Qwen3.8 Max、GLM-5.x、DeepSeek V4.x、Grok 4.7、GPT-6 Luna、Claude Haiku 5.5 等），**按 5 小时/周/月的请求数窗口限额，不按 token 扣费**——适合把便宜的批量任务（如 explore 子代理）放到这条车道。
