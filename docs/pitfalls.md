@@ -1767,6 +1767,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: an accessor exposing a construction-time wiring hook on a constructor with early failure returns must guarantee the hook on EVERY path — otherwise the first downstream wiring becomes a landmine that fires exactly on the failure path, where nobody is looking.
 - **Refs**: `internal/controlplane/webfrontend.go` (NewWeb), `internal/servecli/servecli.go` (web ctor), `internal/rpc/methods/session.go`
 
+### ACP ToolCallContent has NO shape that validates on every SDK generation — diff blocks do; text blocks silently degrade
+- **Saw**: emitting tool_call content (2026-11-18, "放出去"), the wire shape had three candidate spellings and no obviously right one: the v1 TS type says `(Content & {type:"content"})` — a spread whose zod translation (`zContent.and(type:"content")`) requires `type` to be BOTH "text" and "content" and therefore accepts NOTHING; the zcode bridge sends nested `{type:"content", content:{type:"text",…}}`, which fails v1 zod the same way; and the v2 draft redefines the union entirely.
+- **Why**: schema codegen of `oneOf {type:const} + allOf $ref` is broken for Content (the ref carries its own conflicting discriminator), and the `x-deserialize-default-on-error` on toolCall content means a failing item is silently SKIPPED — so zcode's nested blocks have plausibly been dropped by clients forever with nobody noticing (matching the "信息少" symptom).
+- **Fix**: seek sends edit results as protocol DIFF blocks (`{type:"diff", path, oldText, newText}` — Diff has no conflicting discriminator, validates on every generation, and paseo's bundle really renders oldText/newText) and everything else as the spread-intent text block `{type:"content", text:…}` (newer SDKs accept it; older ones drop it silently — degrades to no preview, never an error). Locations/rawInput/rawOutput are plain-typed and validate everywhere; paseo's bundle references `locations` (239×) and zero `rawOutput` refs.
+- **Lesson**: for any ACP field whose schema rides `allOf`+discriminator, check what the CLIENT's bundled SDK actually accepts before choosing a spelling — and prefer variants without conflicting discriminators (diff over content-block) when the information allows. A field that silently no-ops (`x-deserialize-default-on-error`) can hide a forever-dropped payload.
+- **Refs**: `cmd/seek/main.go` `acpToolContent` (the comment there pins the decision), `@agentclientprotocol/sdk` dist/schema/zod.gen.js `zToolCallContent`, paseo.app bundle (oldText/newText/diff present, rawOutput absent), zcode-acp-server dispatch.js:406 (the nested shape)
+
 ## Tool-failure self-recovery
 
 Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the two-sentence core + a pointer here). Doctrine: self-recovery first — "ask the user" is the LAST resort.
@@ -1803,6 +1810,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Refs**: `internal/agentsmgr/agentsmgr.go` `Remove`; `internal/agenttypes/agenttypes.go` `ValidName`. Sibling exposure NOT fixed in this card: `skillmgr.Uninstall` joins `opts.Name` the same way (see `internal/skillmgr/skillmgr.go:495`).
 
 ## Git / merge
+
+### Concurrent drive merges on the SHARED main checkout silently erase uncommitted edits — do card work in a worktree
+- **Saw**: mid-card (2026-11-18), an uncommitted `pkg/agent/events.go` edit vanished: `git status` clean, edit gone, two new merge commits (`c_5gy5h6`, `c_wwpdxp`) on main that landed while the edit sat in the working tree. The butler drive flow merges into the same checkout other sessions edit from.
+- **Why**: a drive merge (or its cleanup) runs checkout/reset-class git operations on the shared working tree; any uncommitted foreign changes are not theirs to preserve, and lose.
+- **Fix**: implement every card in its own `git worktree` on a `drive/...` branch (e.g. `/tmp/seek-wt-<card>` from main), test there, commit there, then merge back from the main checkout in one short window — same discipline the drive sessions' own "worktree 沙盒" acceptance already implies.
+- **Lesson**: on this repo the main checkout is a SHARED merge target, not a private workspace. Uncommitted work there has no owner protecting it.
+- **Refs**: butler drive flow (merges `drive/c_*` → main); `git worktree add /tmp/seek-wt-acptools -b drive/acp-toolcall main`
 
 ### Merge commits shipped with leftover conflict markers (twice)
 - **Saw**: `920f9e1` (merge main into `drive/c_u4ugnu`) landed `docs/prd/feature-orchestration.md` with `<<<<<<< HEAD` / `=======` / `>>>>>>> main` still inside the PRD 状态行 — second bite of the class (first: CHANGELOG during the `c_zam44t` merge, cleaned in-passing without a pitfall entry). Both share a shape: the conflict lives inside ONE very long line (PRD 状态行 / CHANGELOG entry), so it never reads as a visible "pick a side" block and gets committed half-resolved.

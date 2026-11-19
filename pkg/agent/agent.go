@@ -1165,14 +1165,14 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 
 	if a.cfg.Tools == nil {
 		err := fmt.Errorf("agent: no tools registered; LLM requested %q", tc.Function.Name)
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err, Args: tc.Function.Arguments}
 		return "", err
 	}
 
 	tool := a.cfg.Tools.Lookup(tc.Function.Name)
 	if tool == nil {
 		err := fmt.Errorf("%w: %s (known: %v)", tools.ErrUnknownTool, tc.Function.Name, a.cfg.Tools.Names())
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: err, Args: tc.Function.Arguments}
 		return "", err
 	}
 
@@ -1186,14 +1186,14 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Args:   args,
 	})
 	if hookErr != nil {
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: hookErr}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Err: hookErr, Args: tc.Function.Arguments}
 		return "", hookErr
 	}
 	if preTool.Deny != "" {
 		a.cfg.Hooks.NotifyPostToolUse(ctx, hooks.PostToolUseEvent{
 			CallID: tc.ID, Name: tc.Function.Name, Args: args, Result: preTool.Deny,
 		})
-		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Result: preTool.Deny}
+		out <- ToolExecEnd{CallID: tc.ID, Name: tc.Function.Name, Result: preTool.Deny, Args: tc.Function.Arguments}
 		return preTool.Deny, nil
 	}
 	if preTool.Args != nil {
@@ -1240,6 +1240,7 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		Name:   tc.Function.Name,
 		Result: result,
 		Err:    err,
+		Args:   tc.Function.Arguments,
 	}
 	return result, err
 }

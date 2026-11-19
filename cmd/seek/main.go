@@ -3171,11 +3171,15 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
+	// cwd makes tool-call locations absolute (schema contract: "the
+	// absolute file path"), resolved once per turn — the session cwd was
+	// anchored at session/new (D-1) so this is the project root.
+	cwd, _ := os.Getwd()
 	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
 			return acp.PromptResult{}, e.Err
 		}
-		if u, ok := acpUpdate(p.SessionID, ev); ok {
+		if u, ok := acpUpdate(p.SessionID, cwd, ev); ok {
 			sendU(u)
 		}
 	}
@@ -3188,8 +3192,18 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 // acpUpdate maps one agent event to an ACP session/update payload. ok is
 // false for events that don't surface to the client (reasoning chunks,
 // turn bookkeeping). Pure + table-testable (acp_test.go) so the mapping
-// is verified without a live Zed client.
-func acpUpdate(sessionID string, ev agent.Event) (acp.SessionUpdate, bool) {
+// is verified without a live Zed client. cwd (the anchored session root)
+// makes tool-call locations absolute per the schema contract.
+//
+// Tool calls ride the full protocol surface (2026-11-18, "放出去"):
+// name + kind (icon/UI treatment), locations (client follow-along),
+// rawInput/rawOutput (collapsible originals), and content — where edit
+// emits a protocol diff block (the old/new text ride in the ARGS; the
+// tool's own result is just a confirmation line) and everything else a
+// text block of the result. Wire shapes reverse-engineered from the
+// @agentclientprotocol/sdk schema; see acpToolContent for the content
+// variant's validation quirk.
+func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) {
 	switch e := ev.(type) {
 	case agent.MessageDelta:
 		if e.Reasoning {
@@ -3200,19 +3214,160 @@ func acpUpdate(sessionID string, ev agent.Event) (acp.SessionUpdate, bool) {
 			"content":       map[string]any{"type": "text", "text": e.Delta},
 		}}, true
 	case agent.ToolExecStart:
-		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
-			"sessionUpdate": "tool_call", "toolCallId": e.CallID, "title": e.Name, "status": "in_progress",
-		}}, true
+		u := map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    e.CallID,
+			"title":         e.Name,
+			"name":          e.Name,
+			"kind":          acpToolKind(e.Name),
+			"status":        "in_progress",
+		}
+		if locs := acpToolLocations(e.Args, cwd); locs != nil {
+			u["locations"] = locs
+		}
+		if raw := acpTruncate(e.Args, acpRawCap); raw != "" {
+			u["rawInput"] = raw
+		}
+		return acp.SessionUpdate{SessionID: sessionID, Update: u}, true
 	case agent.ToolExecEnd:
 		status := "completed"
 		if e.Err != nil {
 			status = "failed"
 		}
-		return acp.SessionUpdate{SessionID: sessionID, Update: map[string]any{
-			"sessionUpdate": "tool_call_update", "toolCallId": e.CallID, "status": status,
-		}}, true
+		u := map[string]any{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    e.CallID,
+			"status":        status,
+		}
+		if content := acpToolContent(e.Name, e.Args, e.Result, e.Err); content != nil {
+			u["content"] = content
+		}
+		out := e.Result
+		if e.Err != nil {
+			out = e.Err.Error()
+		}
+		if out != "" {
+			u["rawOutput"] = acpTruncate(out, acpRawCap)
+		}
+		return acp.SessionUpdate{SessionID: sessionID, Update: u}, true
 	}
 	return acp.SessionUpdate{}, false
+}
+
+// Byte caps for ACP tool-call payloads. Tool results can be a whole
+// file; the wire copy exists for the client's collapsible card, not for
+// re-transporting the file — the model still receives the full result
+// through the normal tool-result message, so these caps never touch the
+// prompt path (prefix-cache unfazed).
+const (
+	acpRawCap     = 16 << 10
+	acpContentCap = 4 << 10
+)
+
+// acpTruncate cuts s to at most max bytes on a rune boundary, appending
+// an ellipsis marker when it cut anything. Rune-safe so the JSON wire
+// copy never carries a broken UTF-8 sequence.
+func acpTruncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "\n…[truncated]"
+}
+
+// acpToolKind maps seek tool names to ACP ToolKind values (clients pick
+// icons / UI treatment by them). Default "other" covers memory_*,
+// worktree, subagent and anything new — the map only needs the names a
+// client would treat specially.
+func acpToolKind(name string) string {
+	switch name {
+	case "read", "list_dir", "references":
+		return "read"
+	case "grep":
+		return "search"
+	case "edit", "write", "fim_complete":
+		return "edit"
+	case "bash", "git", "monitor":
+		return "execute"
+	case "think", "plan", "propose":
+		return "think"
+	case "webfetch":
+		return "fetch"
+	default:
+		return "other"
+	}
+}
+
+// acpToolLocations derives the follow-along location(s) from a tool's
+// args: any tool carrying a "path" (read/edit/write/list_dir/grep/…)
+// gets one entry, made absolute against cwd (schema: "the absolute
+// file path"); read's "offset" (1-based line) rides as the line hint.
+// Args without a path (bash, think, …) and unparseable args get nil —
+// fail-soft, the location is UX sugar, never correctness.
+func acpToolLocations(args, cwd string) []map[string]any {
+	var a struct {
+		Path   string `json:"path"`
+		Offset int    `json:"offset"`
+	}
+	if err := json.Unmarshal([]byte(args), &a); err != nil || a.Path == "" {
+		return nil
+	}
+	p := a.Path
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(cwd, p)
+	}
+	loc := map[string]any{"path": p}
+	if a.Offset > 0 {
+		loc["line"] = a.Offset
+	}
+	return []map[string]any{loc}
+}
+
+// acpToolContent builds the tool_call_update content blocks. edit emits
+// a protocol diff block — path/old/new ride in the args and Diff has no
+// conflicting discriminator field, so the block validates against every
+// SDK generation. Everything else (and failures) emit a text block.
+//
+// The text-block spelling is {"type":"content","text":…} — the spread
+// shape the CURRENT schema generation intends (Content & {type:
+// "content"}). The v1 zod intersection (zContent.and(type:"content"))
+// can never pass, so an older client silently drops the block via
+// x-deserialize-default-on-error — degrades to no preview, never an
+// error. Do NOT "fix" this by nesting ({"content":{…}}, the zcode
+// bridge's shape): that fails every generation the same way with extra
+// bytes. Empirically settled against paseo's bundle + the SDK schemas.
+func acpToolContent(name, args, result string, err error) []map[string]any {
+	if name == "edit" && err == nil {
+		var a struct {
+			Path      string `json:"path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if jerr := json.Unmarshal([]byte(args), &a); jerr == nil && a.Path != "" {
+			return []map[string]any{{
+				"type":    "diff",
+				"path":    a.Path,
+				"oldText": a.OldString, // empty old_string is invalid for edit anyway; block renders as new content
+				"newText": a.NewString,
+			}}
+		}
+	}
+	text := acpTruncate(result, acpContentCap)
+	if err != nil {
+		msg := acpTruncate(err.Error(), acpContentCap)
+		if text != "" {
+			text = msg + "\n" + text
+		} else {
+			text = msg
+		}
+	}
+	if text == "" {
+		return nil
+	}
+	return []map[string]any{{"type": "content", "text": text}}
 }
 
 // runGoal drives the headless `/goal` loop (M-goal.3): a single agent works

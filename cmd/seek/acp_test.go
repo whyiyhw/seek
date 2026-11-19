@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/acp"
 	"github.com/whyiyhw/seek/internal/config"
@@ -22,7 +23,7 @@ import (
 // the mapping (柱 P) without a live Zed client.
 func TestACPUpdate_Mapping(t *testing.T) {
 	upd := func(ev agent.Event) map[string]any {
-		u, ok := acpUpdate("s1", ev)
+		u, ok := acpUpdate("s1", "/proj", ev)
 		if !ok {
 			t.Fatalf("expected a surfaced update for %T", ev)
 		}
@@ -41,20 +42,45 @@ func TestACPUpdate_Mapping(t *testing.T) {
 		t.Fatalf("chunk text lost: %v", m)
 	}
 
-	// tool call start
-	ts := upd(agent.ToolExecStart{CallID: "c1", Name: "bash"})
+	// tool call start: full protocol surface — name, kind, locations,
+	// rawInput alongside the id/title/status triple.
+	ts := upd(agent.ToolExecStart{
+		CallID: "c1", Name: "bash",
+		Args: `{"command":"go test ./..."}`,
+	})
 	if ts["sessionUpdate"] != "tool_call" || ts["toolCallId"] != "c1" || ts["status"] != "in_progress" {
 		t.Fatalf("tool start → %v", ts)
 	}
+	if ts["name"] != "bash" || ts["kind"] != "execute" {
+		t.Fatalf("tool start name/kind → %v", ts)
+	}
+	if ts["rawInput"] != `{"command":"go test ./..."}` {
+		t.Fatalf("tool start rawInput → %v", ts["rawInput"])
+	}
+	if _, has := ts["locations"]; has {
+		t.Fatalf("bash args carry no path — no locations: %v", ts)
+	}
 
 	// tool call end (success + failure)
-	teOK := upd(agent.ToolExecEnd{CallID: "c1"})
+	teOK := upd(agent.ToolExecEnd{CallID: "c1", Name: "bash", Result: "ok", Args: `{"command":"ls"}`})
 	if teOK["sessionUpdate"] != "tool_call_update" || teOK["status"] != "completed" {
 		t.Fatalf("tool end ok → %v", teOK)
 	}
-	teErr := upd(agent.ToolExecEnd{CallID: "c2", Err: errors.New("boom")})
+	if teOK["rawOutput"] != "ok" {
+		t.Fatalf("tool end rawOutput → %v", teOK["rawOutput"])
+	}
+	if c, _ := teOK["content"].([]map[string]any); len(c) != 1 || c[0]["type"] != "content" || c[0]["text"] != "ok" {
+		t.Fatalf("tool end content → %v", teOK["content"])
+	}
+	teErr := upd(agent.ToolExecEnd{CallID: "c2", Name: "read", Err: errors.New("boom")})
 	if teErr["status"] != "failed" {
 		t.Fatalf("tool end err → %v", teErr)
+	}
+	if c, _ := teErr["content"].([]map[string]any); len(c) != 1 || c[0]["text"] != "boom" {
+		t.Fatalf("tool end err content should carry the error text: %v", teErr["content"])
+	}
+	if teErr["rawOutput"] != "boom" {
+		t.Fatalf("tool end err rawOutput → %v", teErr["rawOutput"])
 	}
 }
 
@@ -66,9 +92,89 @@ func TestACPUpdate_Dropped(t *testing.T) {
 		agent.TurnEnd{},
 		agent.AgentStart{},
 	} {
-		if _, ok := acpUpdate("s", ev); ok {
+		if _, ok := acpUpdate("s", "/proj", ev); ok {
 			t.Errorf("%T should not surface as a session/update", ev)
 		}
+	}
+}
+
+// TestACPUpdate_ToolKind pins the name→kind table (clients pick icons
+// by it; unknown tools must fall to "other", never "").
+func TestACPUpdate_ToolKind(t *testing.T) {
+	for name, want := range map[string]string{
+		"read": "read", "list_dir": "read", "references": "read",
+		"grep": "search",
+		"edit": "edit", "write": "edit", "fim_complete": "edit",
+		"bash": "execute", "git": "execute", "monitor": "execute",
+		"think": "think", "plan": "think", "propose": "think",
+		"webfetch":       "fetch",
+		"memory_observe": "other", "agent": "other", "totally-new-tool": "other",
+	} {
+		if got := acpToolKind(name); got != want {
+			t.Errorf("acpToolKind(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestACPUpdate_Locations: relative paths join against cwd (schema
+// wants absolute), read's offset rides as line, tools without a path
+// and unparseable args get nothing — fail-soft.
+func TestACPUpdate_Locations(t *testing.T) {
+	locs := acpToolLocations(`{"path":"internal/acp/server.go","offset":12}`, "/proj")
+	if len(locs) != 1 || locs[0]["path"] != "/proj/internal/acp/server.go" || locs[0]["line"] != 12 {
+		t.Fatalf("relative+offset → %v", locs)
+	}
+	locs = acpToolLocations(`{"path":"/abs/x.go"}`, "/proj")
+	if len(locs) != 1 || locs[0]["path"] != "/abs/x.go" {
+		t.Fatalf("absolute passthrough → %v", locs)
+	}
+	if locs := acpToolLocations(`{"path":"/abs/x.go","offset":0}`, "/proj"); locs[0]["line"] != nil {
+		t.Fatalf("offset 0 = default → no line hint: %v", locs)
+	}
+	if locs := acpToolLocations(`{"command":"ls"}`, "/proj"); locs != nil {
+		t.Fatalf("no path → nil, got %v", locs)
+	}
+	if locs := acpToolLocations(`{not json`, "/proj"); locs != nil {
+		t.Fatalf("bad JSON → nil, got %v", locs)
+	}
+	if locs := acpToolLocations("", "/proj"); locs != nil {
+		t.Fatalf("empty args → nil, got %v", locs)
+	}
+}
+
+// TestACPUpdate_Content: edit emits the protocol diff block (validates
+// on every SDK generation), everything else a text block, failures
+// carry the error text, and everything truncates rune-safely.
+func TestACPUpdate_Content(t *testing.T) {
+	diff := acpToolContent("edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "ok", nil)
+	if len(diff) != 1 || diff[0]["type"] != "diff" || diff[0]["path"] != "a.go" ||
+		diff[0]["oldText"] != "x" || diff[0]["newText"] != "y" {
+		t.Fatalf("edit → diff block, got %v", diff)
+	}
+	// edit failure falls back to the text block (a diff for an edit that
+	// never landed would lie).
+	txt := acpToolContent("edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "", errors.New("denied"))
+	if len(txt) != 1 || txt[0]["type"] != "content" || txt[0]["text"] != "denied" {
+		t.Fatalf("edit failure → error text block, got %v", txt)
+	}
+	// edit with unparseable args: still a text block, never a crash.
+	txt = acpToolContent("edit", `{bad`, "done", nil)
+	if len(txt) != 1 || txt[0]["type"] != "content" || txt[0]["text"] != "done" {
+		t.Fatalf("edit bad args → text block, got %v", txt)
+	}
+	if c := acpToolContent("read", `{"path":"x"}`, "", nil); c != nil {
+		t.Fatalf("empty result → no content block, got %v", c)
+	}
+	// Truncation is rune-safe: the cut never splits a multi-byte rune,
+	// and the marker lands after it.
+	long := strings.Repeat("界", 3*acpContentCap) // 9 bytes per rune
+	c := acpToolContent("read", `{"path":"x"}`, long, nil)
+	got := c[0]["text"].(string)
+	if utf8.ValidString(long[:len(got)-len("\n…[truncated]")]) == false {
+		t.Fatalf("truncated text is not valid UTF-8")
+	}
+	if !strings.HasSuffix(got, "…[truncated]") {
+		t.Fatalf("truncation marker missing: %q", got[len(got)-40:])
 	}
 }
 
