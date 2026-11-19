@@ -50,6 +50,7 @@ import (
 	"github.com/whyiyhw/seek/internal/mcpconfig"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/memorycli"
+	"github.com/whyiyhw/seek/internal/opencatalog"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
@@ -1115,6 +1116,17 @@ func run() error {
 	)
 	if err != nil {
 		return err
+	}
+
+	// OpenCode Go lane: seed the model catalogue from the disk cache and
+	// kick a background refresh. Both are best-effort — every failure
+	// path leaves the compiled baseline (pricing.OpenCodeGoModels, already
+	// installed as Rows()) in place, and the goroutine never blocks
+	// startup or an inference call. The catalogue feeds menus, the cost
+	// display and the /compact threshold only; it is not part of the
+	// system prompt, so a refresh can't disturb the prefix cache.
+	if provLabel == "OpenCode" {
+		initOpenCatalog()
 	}
 
 	// Resolve which session we're operating on. Priority:
@@ -2272,7 +2284,7 @@ func run() error {
 	// from the startup lane (*model already carries the env pin / loaded
 	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model))
+		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model, openCatalogRows()))
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2499,6 +2511,8 @@ func run() error {
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
 		ProviderName:          provLabel,
+		OpenCodeModels:        openCatalogRows,
+		RefreshOpenCodeModels: refreshOpenCatalog,
 		MemoryProject:         memProject,
 		Distiller:             distiller,
 		SkillDistiller:        skillDistiller,
@@ -3139,16 +3153,18 @@ var acpLaneModels = []struct {
 	{"glm", []struct{ id, label string }{
 		{pricing.ModelGLM53, "glm-5.3 (GLM)"},
 	}},
-	{"opencode", opencodeACPMenuModels()},
+	{"opencode", opencodeACPMenuModels(pricing.OpenCodeGoModels)},
 }
 
-// opencodeACPMenuModels expands the lane's catalogue
-// (pricing.OpenCodeGoModels) into dropdown rows. The ACP label keeps the
-// pre-existing "<id> (OpenCode Go)" shape — the dropdown's job is picking
-// an id, and the same ids appear on other lanes' labels the same way.
-func opencodeACPMenuModels() []struct{ id, label string } {
-	out := make([]struct{ id, label string }, 0, len(pricing.OpenCodeGoModels))
-	for _, m := range pricing.OpenCodeGoModels {
+// opencodeACPMenuModels expands a Go-lane catalogue into dropdown rows.
+// The ACP label keeps the pre-existing "<id> (OpenCode Go)" shape — the
+// dropdown's job is picking an id, and the same ids appear on other
+// lanes' labels the same way. Callers pass the live rows when the
+// catalogue has refreshed (see acpModelMenu) or pricing.OpenCodeGoModels
+// for the compiled baseline.
+func opencodeACPMenuModels(rows []pricing.OpenCodeGoModel) []struct{ id, label string } {
+	out := make([]struct{ id, label string }, 0, len(rows))
+	for _, m := range rows {
 		out = append(out, struct{ id, label string }{m.ID, m.ID + " (OpenCode Go)"})
 	}
 	return out
@@ -3165,7 +3181,13 @@ func opencodeACPMenuModels() []struct{ id, label string } {
 // set (freeform --model / env pin) yields a nil menu: a select with a
 // currentValue it doesn't list would lie to the dropdown, and the
 // client-side fallback is simply no dropdown (pre-C behaviour).
-func acpModelMenu(currentModel string) []acp.ConfigOption {
+//
+// openCodeRows, when non-empty, replaces the compiled Go-lane rows —
+// that is the refreshed catalogue (opencatalog), which can carry ids the
+// binary has never heard of and can drop ones the vendor removed. A
+// startup model that the refreshed list no longer offers therefore
+// yields nil, same as any other unlisted model.
+func acpModelMenu(currentModel string, openCodeRows []pricing.OpenCodeGoModel) []acp.ConfigOption {
 	cfg, _ := config.Load()
 	var opts []acp.ConfigSelectOption
 	current := ""
@@ -3173,7 +3195,11 @@ func acpModelMenu(currentModel string) []acp.ConfigOption {
 		if config.KeyFor(cfg, lane.provider) == "" {
 			continue
 		}
-		for _, m := range lane.models {
+		models := lane.models
+		if lane.provider == "opencode" && len(openCodeRows) > 0 {
+			models = opencodeACPMenuModels(openCodeRows)
+		}
+		for _, m := range models {
 			opts = append(opts, acp.ConfigSelectOption{
 				Value: lane.provider + ":" + m.id,
 				Name:  m.label,
@@ -3941,6 +3967,70 @@ func newGLMProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider 
 // request is scoped to the Go plan, which is what the lane bills
 // against. --base-url overrides.
 const opencodeBaseURL = "https://opencode.ai/inference/go/openai/v1/chat/completions"
+
+// openCatalog is the OpenCode lane's live model catalogue: the compiled
+// baseline (pricing.OpenCodeGoModels) unless a cache or a refresh says
+// otherwise. nil for every other lane — readers must treat nil as "use
+// the compiled list". Populated once by initOpenCatalog; the background
+// refresh installs new snapshots under the catalogue's own lock.
+var (
+	openCatalog    *opencatalog.Catalogue
+	openCatalogKey string
+)
+
+// initOpenCatalog seeds the process-wide catalogue at startup: a usable
+// disk snapshot first (so a warm start is offline-complete), then one
+// keyed refresh in the background. Every failure is silent by design —
+// the compiled baseline is already installed, and a menu that lags the
+// vendor by a release is better than a startup that waits on HTTP.
+func initOpenCatalog() {
+	openCatalog = opencatalog.New()
+	if !opencatalog.Enabled() {
+		return
+	}
+	if snap, ok := opencatalog.LoadCached(); ok && snap.Usable(time.Now()) {
+		openCatalog.Install(snap)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return
+	}
+	openCatalogKey = config.KeyFor(cfg, "opencode")
+	if openCatalogKey == "" {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = openCatalog.Refresh(ctx, openCatalogKey, opencatalog.DefaultClient())
+	}()
+}
+
+// openCatalogRows is the single reader the ACP dropdown and the TUI
+// picker share. nil (lane inactive) means "fall back to the compiled
+// list", which both surfaces already do.
+func openCatalogRows() []pricing.OpenCodeGoModel {
+	if openCatalog == nil {
+		return nil
+	}
+	return openCatalog.Rows()
+}
+
+// refreshOpenCatalog backs the TUI's `/model refresh`: a synchronous
+// fetch (the caller runs it inside a tea.Cmd) that installs and caches
+// the new list. Errors are returned verbatim — that surface has room to
+// show them.
+func refreshOpenCatalog(ctx context.Context) (int, error) {
+	switch {
+	case openCatalog == nil:
+		return 0, fmt.Errorf("opencode catalogue: lane not active")
+	case !opencatalog.Enabled():
+		return 0, fmt.Errorf("opencode catalogue: disabled by SEEK_OPENCODE_CATALOG")
+	case openCatalogKey == "":
+		return 0, fmt.Errorf("opencode catalogue: no API key")
+	}
+	return openCatalog.Refresh(ctx, openCatalogKey, opencatalog.DefaultClient())
+}
 
 // opencodeEndpoint resolves the lane's POST target with the same
 // precedence as glmEndpoint: env (OPENCODE_BASE_URL) / providers.opencode

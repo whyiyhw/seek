@@ -722,6 +722,110 @@ func TestKnownModelsForProvider_OpenCode(t *testing.T) {
 	}
 }
 
+// TestModelChoices_LiveCatalogue pins the dynamic path: when cmd/seek
+// injected a catalogue getter, the picker renders that (it can carry ids
+// a refresh discovered) instead of the compiled table — and it re-reads
+// on every /model, so a refresh is visible without reopening the session.
+func TestModelChoices_LiveCatalogue(t *testing.T) {
+	t.Parallel()
+	m := emptyModel()
+	m.opts.ProviderName = "OpenCode"
+
+	// No getter → compiled baseline (pricing.OpenCodeGoModels).
+	if got := m.modelChoices(); len(got) != len(pricing.OpenCodeGoModels) {
+		t.Fatalf("compiled rows = %d, want %d", len(got), len(pricing.OpenCodeGoModels))
+	}
+
+	var rows = []pricing.OpenCodeGoModel{{ID: "brand-new-model", Label: "1M ctx · Brand New"}}
+	m.opts.OpenCodeModels = func() []pricing.OpenCodeGoModel { return rows }
+	got := m.modelChoices()
+	if len(got) != 1 || got[0].id != "brand-new-model" || got[0].description != "1M ctx · Brand New" {
+		t.Fatalf("live rows = %+v, want the injected catalogue", got)
+	}
+
+	// A getter that returns nothing (lane not active) falls back rather
+	// than emptying the picker.
+	m.opts.OpenCodeModels = func() []pricing.OpenCodeGoModel { return nil }
+	if got := m.modelChoices(); len(got) != len(pricing.OpenCodeGoModels) {
+		t.Errorf("empty live rows must fall back to the compiled list, got %d rows", len(got))
+	}
+
+	// The getter is only consulted for the OpenCode lane.
+	m.opts.ProviderName = "Anthropic"
+	if got := m.modelChoices(); len(got) != 2 || got[0].id != "claude-sonnet-4-20250514" {
+		t.Errorf("anthropic rows = %+v, want the anthropic curated list", got)
+	}
+}
+
+// TestModel_Refresh covers /model refresh end to end: the guard when the
+// lane has no catalogue hook, the async fetch, and both render paths.
+func TestModel_Refresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no hook", func(t *testing.T) {
+		res := runHandler(t, emptyModel(), "/model refresh")
+		if !strings.Contains(res.text, "no live model catalogue") {
+			t.Errorf("text = %q, want the unavailable notice", res.text)
+		}
+		if res.extra != nil {
+			t.Error("no hook must not schedule an async cmd")
+		}
+	})
+
+	t.Run("fetch ok", func(t *testing.T) {
+		m := emptyModel()
+		m.opts.ProviderName = "OpenCode"
+		called := false
+		m.opts.RefreshOpenCodeModels = func(ctx context.Context) (int, error) {
+			called = true
+			return 7, nil
+		}
+		res := runHandler(t, m, "/model refresh")
+		if res.extra == nil {
+			t.Fatal("expected an async cmd")
+		}
+		msg, ok := res.extra().(catalogRefreshedMsg)
+		if !ok {
+			t.Fatalf("msg type = %T, want catalogRefreshedMsg", msg)
+		}
+		if !called || msg.err != nil || msg.rows != 7 {
+			t.Fatalf("msg = %+v called=%v", msg, called)
+		}
+		if cmds := m.handleCatalogRefreshed(msg); len(cmds) == 0 {
+			t.Error("success must append a history line")
+		}
+	})
+
+	t.Run("fetch fails", func(t *testing.T) {
+		m := emptyModel()
+		m.opts.RefreshOpenCodeModels = func(context.Context) (int, error) {
+			return 0, errors.New("boom")
+		}
+		res := runHandler(t, m, "/model refresh")
+		msg := res.extra().(catalogRefreshedMsg)
+		if msg.err == nil {
+			t.Fatal("want the fetch error carried through")
+		}
+		if cmds := m.handleCatalogRefreshed(msg); len(cmds) == 0 {
+			t.Error("failure must still append a history line (keeping the old list)")
+		}
+	})
+
+	t.Run("refresh is not a model id", func(t *testing.T) {
+		// REGRESSION GUARD: the arg path used to swallow any string as a
+		// model id, so `/model refresh` would have set the model to
+		// "refresh". The subcommand branch must win.
+		m := emptyModel()
+		var set string
+		m.opts.SetModel = func(s string) { set = s }
+		m.opts.RefreshOpenCodeModels = func(context.Context) (int, error) { return 1, nil }
+		runHandler(t, m, "/model refresh")
+		if set != "" {
+			t.Errorf("SetModel(%q) — `refresh` must not be treated as a model id", set)
+		}
+	})
+}
+
 func TestModel_NoArg_OpensPicker(t *testing.T) {
 	t.Parallel()
 	// Behaviour change: `/model` with no args opens the model picker

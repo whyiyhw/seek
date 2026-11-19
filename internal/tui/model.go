@@ -42,6 +42,7 @@ import (
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/routines"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/skill"
@@ -248,6 +249,18 @@ type Options struct {
 	// renders a banner warning that DeepSeek-exclusive features are disabled.
 	// Empty string = DeepSeek (no banner).
 	ProviderName string
+
+	// OpenCodeModels, when set, is the live OpenCode Go catalogue: the
+	// compiled baseline with any cached/refreshed snapshot installed on
+	// top (internal/opencatalog). The /model picker prefers it over the
+	// static table so ids added by a refresh show up without a rebuild.
+	// nil = use internal/tui's compiled list.
+	OpenCodeModels func() []pricing.OpenCodeGoModel
+
+	// RefreshOpenCodeModels forces a catalogue refresh for `/model
+	// refresh`; it runs inside a tea.Cmd, so it may block. nil = the
+	// subcommand reports "unavailable".
+	RefreshOpenCodeModels func(ctx context.Context) (int, error)
 
 	RebuildAgent func() (*agent.Agent, error)
 	SetModel     func(string)

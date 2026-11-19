@@ -10,9 +10,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/mcpconfig"
+	"github.com/whyiyhw/seek/internal/opencatalog"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/tools/mcptool"
@@ -481,7 +483,7 @@ func TestACPMenu_OpenCodeCatalogue(t *testing.T) {
 	t.Setenv("OPENCODE_API_KEY", "k")
 	t.Setenv("SEEK_HOME", t.TempDir())
 
-	menu := acpModelMenu(pricing.ModelOpenCodeV41Flash)
+	menu := acpModelMenu(pricing.ModelOpenCodeV41Flash, nil)
 	if len(menu) != 1 {
 		t.Fatalf("menu = %+v, want exactly the model select", menu)
 	}
@@ -500,6 +502,75 @@ func TestACPMenu_OpenCodeCatalogue(t *testing.T) {
 	}
 	if want := "opencode:" + pricing.ModelOpenCodeV41Flash; menu[0].CurrentValue != want {
 		t.Errorf("currentValue = %q, want %q", menu[0].CurrentValue, want)
+	}
+
+	// Non-nil live rows replace the compiled list entirely: the refreshed
+	// catalogue is the vendor's truth, so an id it dropped must leave the
+	// dropdown even though the binary still ships it.
+	live := []pricing.OpenCodeGoModel{
+		{ID: "brand-new-model", Label: "1M ctx · Brand New"},
+		{ID: pricing.ModelOpenCodeV41Flash, Label: "1M ctx · vision · lane default"},
+	}
+	menu = acpModelMenu("brand-new-model", live)
+	if len(menu) != 1 {
+		t.Fatalf("live menu = %+v, want exactly the model select", menu)
+	}
+	if got := len(menu[0].Options); got != len(live) {
+		t.Fatalf("live rows = %d, want %d", got, len(live))
+	}
+	if menu[0].Options[0].Value != "opencode:brand-new-model" {
+		t.Errorf("row 0 = %q, want the refreshed id", menu[0].Options[0].Value)
+	}
+	if menu[0].CurrentValue != "opencode:brand-new-model" {
+		t.Errorf("currentValue = %q, want the refreshed startup model", menu[0].CurrentValue)
+	}
+}
+
+// TestInitOpenCatalog_OffKeepsBaseline pins the failure posture: with the
+// switch off (or no cache, no key) the compiled rows are what the menus
+// see, and nothing reaches the network.
+func TestInitOpenCatalog_OffKeepsBaseline(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("SEEK_OPENCODE_CATALOG", "off")
+	oldCat, oldKey := openCatalog, openCatalogKey
+	t.Cleanup(func() { openCatalog, openCatalogKey = oldCat, oldKey })
+
+	initOpenCatalog()
+	if openCatalog == nil {
+		t.Fatal("initOpenCatalog must seed a catalogue even when disabled")
+	}
+	if openCatalogKey != "" {
+		t.Errorf("key = %q, want empty (no refresh goroutine without a key)", openCatalogKey)
+	}
+	rows := openCatalogRows()
+	if len(rows) != len(pricing.OpenCodeGoModels) {
+		t.Errorf("rows = %d, want the compiled baseline %d", len(rows), len(pricing.OpenCodeGoModels))
+	}
+}
+
+// TestInitOpenCatalog_UsesFreshCache: a warm start installs the cached
+// snapshot before any network work, so the menu is complete offline.
+func TestInitOpenCatalog_UsesFreshCache(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("SEEK_OPENCODE_CATALOG", "")
+	oldCat, oldKey := openCatalog, openCatalogKey
+	t.Cleanup(func() { openCatalog, openCatalogKey = oldCat, oldKey })
+
+	cached := opencatalog.Snapshot{
+		FetchedAt: time.Now().Add(-time.Hour),
+		Models: []opencatalog.Model{
+			{ID: "cached-model", Label: "cached", Context: 1_000_000},
+		},
+	}
+	if err := opencatalog.SaveCached(cached); err != nil {
+		t.Fatalf("SaveCached: %v", err)
+	}
+	initOpenCatalog()
+	rows := openCatalogRows()
+	if len(rows) != 1 || rows[0].ID != "cached-model" {
+		t.Fatalf("rows = %+v, want the cached snapshot", rows)
 	}
 }
 

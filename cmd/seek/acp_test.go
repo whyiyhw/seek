@@ -583,7 +583,7 @@ func TestACPModelMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	menu := acpModelMenu(deepseek.ModelV41Flash)
+	menu := acpModelMenu(deepseek.ModelV41Flash, nil)
 	if len(menu) != 1 {
 		t.Fatalf("menu = %+v, want exactly the model select", menu)
 	}
@@ -599,13 +599,13 @@ func TestACPModelMenu(t *testing.T) {
 	}
 
 	// Startup on glm: current follows.
-	menu = acpModelMenu("glm-5.3")
+	menu = acpModelMenu("glm-5.3", nil)
 	if len(menu) != 1 || menu[0].CurrentValue != "glm:glm-5.3" {
 		t.Fatalf("glm startup menu = %+v", menu)
 	}
 
 	// Freeform startup model: no menu at all (client hides dropdown).
-	if menu := acpModelMenu("deepseek-v4-pro"); menu != nil {
+	if menu := acpModelMenu("deepseek-v4-pro", nil); menu != nil {
 		t.Fatalf("freeform startup model must yield nil menu, got %+v", menu)
 	}
 }

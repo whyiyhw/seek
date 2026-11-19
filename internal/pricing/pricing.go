@@ -1,10 +1,19 @@
 // Package pricing models DeepSeek's peak/off-peak pricing windows plus
-// the flat-rate cards of providers without such windows (GLM).
+// the flat-rate cards of providers without such windows (GLM, and the
+// OpenCode Go pool).
+//
 // Embedded rates are the peak rate card verified 2026-11-14 against
 // api-docs.deepseek.com/quick_start/pricing (off-peak is exactly half
-// the peak rate). Bump them with each release
-// rather than fetching at runtime — a price-list HTTP call adds a failure
-// mode for an exclusively defensive feature (PRD §4.8.4).
+// the peak rate). Bump them with each release rather than fetching at
+// runtime — a price-list HTTP call adds a failure mode for an
+// exclusively defensive feature (PRD §4.8.4).
+//
+// One lane is exempt from that rule for the same reason it is exempt in
+// budget: OpenCode Go publishes per-model cost blocks at a documented
+// endpoint, and its pool churns weekly (models appear and are deprecated
+// on a days-long cadence). internal/opencatalog refreshes that list at
+// session start and installs the result through SetModelRates; the
+// embedded cards below remain the offline baseline and the merge target.
 //
 // All times use Asia/Shanghai (UTC+8, no DST). We hardcode the offset to
 // avoid depending on the system tzdata, which is often missing on minimal
@@ -14,6 +23,7 @@ package pricing
 import (
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -421,14 +431,15 @@ func CurrentTier(now time.Time) Tier {
 	return TierOffPeak
 }
 
-// PricingFor returns the per-token rate card for a model+tier. Unknown
-// models fall back to V4.1-Flash rates — which is also the card the
-// server bills the retired Flash ids (deepseek-v4-flash /
-// -flash-vision-exp) at, so legacy sessions price correctly without
-// their own entries. deepseek-v4-pro is NOT in that set: it bills at
-// its own registered card above.
+// PricingFor returns the per-token rate card for a model+tier. Cards
+// installed by SetModelRates (OpenCode Go catalogue refresh) win over the
+// embedded table. Unknown models fall back to V4.1-Flash rates — which is
+// also the card the server bills the retired Flash ids
+// (deepseek-v4-flash / -flash-vision-exp) at, so legacy sessions price
+// correctly without their own entries. deepseek-v4-pro is NOT in that
+// set: it bills at its own registered card above.
 func PricingFor(model string, tier Tier) ModelPricing {
-	p, ok := standardRates[model]
+	p, ok := LookupRate(model)
 	if !ok {
 		p = standardRates[deepseek.ModelV41Flash]
 	}
@@ -438,6 +449,55 @@ func PricingFor(model string, tier Tier) ModelPricing {
 		p.OutputPerMTok *= offPeakDiscount
 	}
 	return p
+}
+
+// overrides, when non-nil, wins over standardRates for the ids it names.
+// Installed once per session by the OpenCode catalogue refresh
+// (internal/opencatalog); see the package comment. Guarded because
+// PricingFor runs on the per-turn cost path while a background refresh
+// may be installing the new table.
+var (
+	overrideMu sync.RWMutex
+	overrides  map[string]ModelPricing
+)
+
+// SetModelRates installs runtime rate cards, overriding standardRates for
+// the named ids; nil clears them. Sanctioned caller:
+// internal/opencatalog. Cards are copied, and every installed card is
+// forced flat-rate (NoOffPeakDiscount) — a subscription lane has no
+// DeepSeek peak clock, and a remote cost block must never be halved by
+// one.
+func SetModelRates(m map[string]ModelPricing) {
+	clean := make(map[string]ModelPricing, len(m))
+	for id, card := range m {
+		if card.InputMissPerMTok < 0 || card.InputHitPerMTok < 0 || card.OutputPerMTok < 0 {
+			continue
+		}
+		card.NoOffPeakDiscount = true
+		clean[id] = card
+	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
+	if len(clean) == 0 {
+		overrides = nil
+		return
+	}
+	overrides = clean
+}
+
+// LookupRate resolves a model's card: runtime overrides first, then the
+// embedded table. The bool reports whether ANY card exists — callers that
+// must distinguish "priced" from "fallback" (the catalogue merge, which
+// seeds its baseline from here) use this, not a comparison against the
+// Flash card's numbers.
+func LookupRate(model string) (ModelPricing, bool) {
+	overrideMu.RLock()
+	defer overrideMu.RUnlock()
+	if p, ok := overrides[model]; ok {
+		return p, true
+	}
+	p, ok := standardRates[model]
+	return p, ok
 }
 
 // Cost returns the USD cost of running one Usage block at the given

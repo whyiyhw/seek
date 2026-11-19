@@ -2,12 +2,21 @@
 // thresholds at which seek's UI surfaces a "you're about to hit the
 // limit" warning.
 //
-// We deliberately keep these as hard-coded constants — vendor docs
-// can change, but a stale table failing safe (under-reporting capacity)
-// is much better than a runtime probe that could leak the OSC-11 / TTY
-// detection class of problems we already fought once (docs/pitfalls.md
-// §"Garbage `]11;rgb…").
+// The table is hard-coded — vendor docs can change, but a stale table
+// failing safe (under-reporting capacity) is much better than a runtime
+// probe that could leak the OSC-11 / TTY detection class of problems we
+// already fought once (docs/pitfalls.md §"Garbage `]11;rgb…").
+//
+// The one sanctioned exception is SetLimits: the OpenCode Go lane
+// publishes its whole catalogue — including `limit.context` — at a
+// documented HTTPS endpoint (GET /v1/models), so internal/opencatalog
+// refreshes that table at session start and installs the result here.
+// The compiled entries stay as the offline baseline, and a failed refresh
+// simply leaves them in place. Anything that needs a TTY probe still has
+// no business here.
 package budget
+
+import "sync"
 
 // contextLimits is the input+context size (in tokens) for the models
 // seek can talk to. Values reflect what each provider advertises as of
@@ -73,10 +82,54 @@ var contextLimits = map[string]int{
 // genuinely small model overflows.
 const Default = 128_000
 
+// overrides, when non-nil, wins over contextLimits. Installed once per
+// session by the OpenCode catalogue refresh (internal/opencatalog), so a
+// newly-listed model gets its real window instead of Default. Guarded
+// because Limit runs on the status-bar render path while a background
+// refresh may be installing the new table.
+var (
+	overrideMu sync.RWMutex
+	overrides  map[string]int
+)
+
+// SetLimits installs a runtime limit override; nil clears it. Sanctioned
+// caller: internal/opencatalog (see the package comment). Values <= 0 are
+// dropped — a zero window would make Classify divide by zero.
+func SetLimits(m map[string]int) {
+	clean := make(map[string]int, len(m))
+	for id, v := range m {
+		if v > 0 {
+			clean[id] = v
+		}
+	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
+	if len(clean) == 0 {
+		overrides = nil
+		return
+	}
+	overrides = clean
+}
+
+// Known returns the explicit window for model, if any (override first,
+// then the compiled table), WITHOUT the Default fallback. Callers that
+// must tell "catalogued" from "guessed" — the catalogue merge, mostly —
+// use this instead of comparing against Default, which would misread a
+// model that genuinely has a 128K window.
+func Known(model string) (int, bool) {
+	overrideMu.RLock()
+	defer overrideMu.RUnlock()
+	if v, ok := overrides[model]; ok {
+		return v, true
+	}
+	v, ok := contextLimits[model]
+	return v, ok
+}
+
 // Limit returns the context window size for a model. Unknown models
 // fall back to Default.
 func Limit(model string) int {
-	if v, ok := contextLimits[model]; ok {
+	if v, ok := Known(model); ok {
 		return v
 	}
 	return Default
