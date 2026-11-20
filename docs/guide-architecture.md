@@ -111,3 +111,19 @@ seek runs **no resident daemon**. Scheduling delegates to the OS (launchd / syst
 
 Guide: [`docs/guide-cron.md`](guide-cron.md).  
 PRD: `docs/prd/archive/feature-routines.md`.
+
+---
+
+## 10. Eval Lane — judgement is a distribution, not a sample (eval v2 E1)
+
+`eval/run.sh` is the behaviour-comparison lane (not CI, not a unit test): it pipes a case's `prompt.txt` through a real `seek -json` run and checks the event stream against `expect.json` bounds. Because the model is stochastic, a single sample cannot tell a regression from noise — so the judgement is a pass **rate** over N rounds:
+
+- **`--rounds N`** (default 1 = historical single-sample behaviour, byte for byte). Each round is a full case lifecycle appending its own row with `round: k`; with N > 1 an aggregate row (`type:"aggregate"`, deliberately **no** `pass` key so `scripts/eval-trend.sh` cannot double-count it) records the verdict.
+- **`expect.json` gate config** — `min_pass_rate` (`0 < m <= 1`, default 1.0, INCLUSIVE `>=` on IEEE doubles: 3/5 vs 0.6 passes, 0.67 does *not* equal 2/3) and `record_only: true` (recorded in its own column, never red, never green). Config lives in `expect.json` rather than a separate calibration table: one file already owns a case's judgement, and a second would be a parallel source of truth keyed by name.
+- **Crashed rounds count in the denominator** (a run with no `agent_end` fails any `exact_agent_ends`-class bound); no separate error class yet.
+
+Run it on demand — it is **not a resident mechanism**: no daemon, no CI job, no new startup path. Cost is per invocation (~$0.02–0.05 per case per round); unattended lanes run fake-key by rule ([`docs/prd/v8.md`](prd/v8.md) §9.1). Mechanism-budget answer: nothing new is resident, and the path this retires is manual multi-run re-review (the 2026-11-19 three-reds-two-false-alarms triage), now taken over by the aggregate verdict.
+
+**No butler-sensitive path is touched.** The lane writes only `eval/results/*.jsonl` (checked-in data), the gitignored `eval/tmp/`, and — because `SEEK_HOME` is pinned to `eval/tmp/seek-home` — seek's own user-data writes land in that sandbox instead of the real `~/.seek`. It never writes `~/.local/bin`, `~/.agents`, or `~/Library/LaunchAgents`, and it makes no butler MCP calls. Mechanism self-tests: `scripts/eval-rounds-test.sh` (rounds/gate/record-only/malformed-input) and `scripts/eval-ablate-test.sh` (no-flag byte equivalence), both auto-discovered by `scripts/selftest.sh`.
+
+PRD: [`docs/prd/feature-eval-v2.md`](prd/feature-eval-v2.md) · Guide: [`eval/README.md`](../eval/README.md).

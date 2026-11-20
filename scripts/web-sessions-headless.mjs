@@ -167,7 +167,7 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 const base = await snapshot();
-ck('基线 scripts=1（仅页面内联脚本）', base.nscript === 1, `got ${base.nscript}`);
+ck('基线 scripts=2（内联页面脚本 + static/markdown.js）', base.nscript === 2, `got ${base.nscript}`);
 ck('基线在聊天面（未 browsing）', !base.browsing && base.listShown && base.formShown, '');
 
 // 轮询直到谓词过或超时；返回最后一次快照。
@@ -246,7 +246,7 @@ try {
   ck('XSS：<img onerror> 字面渲染为文本', s.lastMsg.includes('<img src=x onerror='), '');
   ck('XSS：脚本未执行（window.__xss undefined）', s.xss1 === 'undefined', `got ${s.xss1}`);
   ck('XSS：onerror 未执行（window.__xss2 undefined）', s.xss2 === 'undefined', `got ${s.xss2}`);
-  ck('XSS：document.scripts 不增（仍 1）', s.nscript === 1, `got ${s.nscript}`);
+  ck('XSS：document.scripts 不增（仍 2）', s.nscript === 2, `got ${s.nscript}`);
   ck('XSS：无 img 元素落地', s.nimg === 0, `got ${s.nimg}`);
   await clickRow(LONG_SID);
   const back = await until('切回长会话首页', s => s.nmsgs === 50, 8000);

@@ -1,8 +1,14 @@
 <!doctype html>
 <!-- seek web MVP (card c_qucxtu) — single page, zero build chain.
-     Message rendering: minimal markdown per feature-web-frontend §2.6
-     — fenced ``` blocks → <pre>, `inline` → <code>, everything else
-     verbatim plain text; DOM API only (§5.5), no HTML-parsing sink.
+     Message rendering (W5, card c_x2au4t): markdown SUBSET renderer —
+     fenced ``` blocks, `inline` code, # headings, - / 1. lists, and
+     [links](url) with a protocol allowlist — vendored as a handwritten
+     DOM-API renderer in static/markdown.js (the first non-inline
+     asset; marked/markdown-it both bust the ≤25KB quota AND their
+     HTML-string output would need a parse-string-into-DOM sink, which
+     §5.5 forbids). Model output NEVER enters an HTML-parsing path: text
+     rides createTextNode/textContent, elements come from a fixed tag
+     whitelist (PRE/CODE/UL/OL/LI/H1-6/A).
      Conversation identity (W1.3, D-W3): uuid minted by the browser,
      persisted in localStorage, carried as X-Seek-Conversation on
      fetches and ?conv= on the SSE stream (EventSource cannot set
@@ -66,8 +72,9 @@
      is NOT (browsers deny getUserMedia) — front it with an HTTPS
      proxy (tailscale serve) to talk from a phone.
      Deliberately out of scope: multi-tab sync, history persistence,
-     FULL markdown rendering (P3 §4.2 vendor evaluation),
-     mobile, real auth (design card c_7pptol owns the full UI). -->
+     bold/italic/table/quote markdown (the W5 subset covers the chat
+     load; renderer lives in static/markdown.js), mobile, real auth
+     (design card c_7pptol owns the full UI). -->
 <html lang="zh">
 <head>
 <meta charset="utf-8">
@@ -94,6 +101,19 @@
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font: inherit; }
   .msg code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  /* ---- markdown 子集排版（W5 卡 c_x2au4t）----
+     标题在气泡内取收敛尺寸（浏览器 h1 默认 2em 会撑爆聊天行高）；
+     列表收边距；链接配色与主题同谱。四个正文容器（聊天气泡/会话
+     正文/子代理末读/记忆正文）共用一套。 */
+  .msg h1, .sbody h1, #ag-last h1, #mem-content h1 { font-size: 1.3em; margin: 10px 0 4px; }
+  .msg h2, .sbody h2, #ag-last h2, #mem-content h2 { font-size: 1.2em; margin: 10px 0 4px; }
+  .msg h3, .sbody h3, #ag-last h3, #mem-content h3,
+  .msg h4, .sbody h4, #ag-last h4, #mem-content h4,
+  .msg h5, .sbody h5, #ag-last h5, #mem-content h5,
+  .msg h6, .sbody h6, #ag-last h6, #mem-content h6 { font-size: 1.1em; margin: 8px 0 4px; }
+  .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
+  .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em; }
+  .msg a, .sbody a, #ag-last a, #mem-content a { color: #7aa2f7; }
   .you { margin-left: auto; background: #2c3d5f; }
   .seek { background: #242830; }
   .hint { color: #7a8089; font-style: italic; }
@@ -290,6 +310,11 @@
   <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
   <button id="send">发送</button>
 </form>
+<!-- markdown 子集渲染器（W5 卡 c_x2au4t）：static/ 拆分的第一个非内联
+     资产，同源由 /static/ 自供——CSP 的 script-src 'self' 直接覆盖，无需
+     hash 钉（内联块才钉）。相对 src，不带协议/双斜杠（无外链断言口径）。
+     置于内联脚本之前：经典 script 保序，渲染器先到，页面脚本可用。 -->
+<script src="static/markdown.js"></script>
 <script>
 'use strict';
 // W1.2 换票：/?token= 首跳被服务端 303 换成 HttpOnly cookie，本页落在
@@ -353,46 +378,14 @@ function renderMeter() {
   usageEl.textContent = (meter.prompt + meter.completion) + ' tok · ' + fmtUsd(meter.costUsd)
       + (meter.sid ? ' · sid ' + meter.sid.slice(0, 8) : '');
 }
-// 行内码：`code` → <code>，未配对反引号原样保留。文本只走
-// createTextNode/textContent——模型输出永远不被当 HTML 解析（§5.5）。
-function appendInline(parent, text) {
-  for (;;) {
-    const i = text.indexOf('`');
-    if (i < 0) break;
-    if (i > 0) parent.appendChild(document.createTextNode(text.slice(0, i)));
-    const j = text.indexOf('`', i + 1);
-    if (j < 0) { parent.appendChild(document.createTextNode(text.slice(i))); return; }
-    const code = document.createElement('code');
-    code.textContent = text.slice(i + 1, j);
-    parent.appendChild(code);
-    text = text.slice(j + 1);
-  }
-  if (text) parent.appendChild(document.createTextNode(text));
-}
-
-// 最小 markdown 渲染（§2.6 MVP，卡 c_iha3fr）：行首 ``` 围栏 → <pre>，
-// 其余纯文本原样（换行交给 .msg 的 pre-wrap）。未闭合围栏吞到文本末尾。
-// 只用 createElement/createTextNode——整页不存在 HTML 字符串解析路径。
+// 消息正文渲染（W5 卡 c_x2au4t）：markdown 子集渲染器外置在
+// static/markdown.js（围栏/行内码/标题/列表/链接；DOM API 白名单构造，
+// 无 HTML 解析 sink）。seekMD.render 自带清空语义（replaceChildren 后渲
+// 染）。资产未载的极端情形（script 被网络/CSP 拦）退纯文本——可用性
+// 优先于格式，页面不因渲染器缺席而断流。
 function renderBody(el, text) {
-  const lines = text.split('\n');
-  let i = 0, plain = '';
-  const flush = () => { if (plain) { appendInline(el, plain); plain = ''; } };
-  while (i < lines.length) {
-    if (lines[i].startsWith('```')) {
-      flush();
-      const buf = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) { buf.push(lines[i]); i++; }
-      i++;  // 越过闭合围栏；到 EOF 即未闭合——吞到末尾（已定义行为）
-      const pre = document.createElement('pre');
-      pre.textContent = buf.join('\n');
-      el.appendChild(pre);
-    } else {
-      plain += lines[i] + (i < lines.length - 1 ? '\n' : '');
-      i++;
-    }
-  }
-  flush();
+  if (window.seekMD) seekMD.render(el, text);
+  else el.textContent = text;
 }
 
 function addMsg(who, text) {
@@ -466,10 +459,10 @@ function flushRuns() {
   raf = 0;
   const pin = nearBottom();
   for (const d of dirty) {
-    if (d.cur) {
-      d.cur.el.replaceChildren();   // 流式重渲：清块再渲累积全文
-      renderBody(d.cur.el, d.cur.text);
-    }
+    // 流式重渲（W5 轻量路径）：seekMD.render 清块后重渲累积全文——
+    // 线性单趟、rAF 合帧（SSE 突发一帧最多渲一次），聊天级文本亚毫秒；
+    // 未闭合围栏/半截 [ ` 保持字面可渲，故过程态与收口同一条渲染线。
+    if (d.cur) renderBody(d.cur.el, d.cur.text);
   }
   dirty.clear();
   if (pin) list.scrollTop = list.scrollHeight;
@@ -526,12 +519,12 @@ function listen() {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
     const r = m.run && runs.get(m.run);
-    if (r) {   // 收口：替换成服务端权威终文本（§2.4 客户端按 run 幂等）
+    if (r) {   // 收口：替换成服务端权威终文本（§2.4 客户端按 run 幂等）；
+               // renderBody 自带清空——整泡重渲即「收口重渲」（W5）
       runs.delete(m.run);
       r.cur = null;                    // 停掉在途的合帧渲染
       const pin = nearBottom();
       r.el.classList.remove('streaming');
-      r.el.replaceChildren();
       if (m.text) renderBody(r.el, m.text); else r.el.remove();
       if (pin) list.scrollTop = list.scrollHeight;
     } else if (m.text) {

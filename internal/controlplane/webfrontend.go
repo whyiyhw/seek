@@ -16,6 +16,9 @@ package controlplane
 //	GET  /        the embedded page (no auth — it holds no secrets; a
 //	              valid ?token= never renders: the first hop 303-
 //	              exchanges it for an HttpOnly cookie, §5.1 W1.2)
+//	GET  /static/ the page's asset family (W5, c_x2au4t: markdown.js
+//	              is the first non-inline resident; same 'self' CSP,
+//	              no auth — same no-secrets posture as the page)
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
 //	              (?conv= — EventSource cannot set headers); ?topic=
 //	              opts the connection into a topic stream alongside
@@ -263,6 +266,7 @@ func (f *WebFrontend) ensureToken() (string, error) {
 func (f *WebFrontend) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", f.handlePage)
+	mux.HandleFunc("/static/", f.handleStatic) // W5 asset family (markdown.js — c_x2au4t)
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
 	mux.HandleFunc("/state", f.handleState)

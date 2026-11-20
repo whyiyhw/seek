@@ -9,3 +9,7 @@
 # pin fails. Embedded assets must be byte-identical on every platform —
 # same rationale as the *.sh rule above.
 internal/controlplane/webfrontend.html text eol=lf
+# static/ embed assets (W5, c_x2au4t): served verbatim from /static/
+# and asserted byte-identical in TestWeb_StaticAsset — same autocrlf
+# exposure as the page above, same rule.
+internal/controlplane/static/* text eol=lf

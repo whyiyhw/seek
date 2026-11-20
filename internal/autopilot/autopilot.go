@@ -22,11 +22,17 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/whyiyhw/seek/internal/verifier"
 )
 
 const (
 	defaultMaxTasks      = 8
 	defaultMaxConcurrent = 8
+	// maxDoneWhenPerTask caps a decomposed task's done_when list —
+	// same spirit as the propose tool's maxDoneWhen (12), tightened
+	// because a fleet task is smaller than a user-facing plan.
+	maxDoneWhenPerTask = 6
 )
 
 // Task is one scoped unit of work, produced by Decomposer and handed to
@@ -35,6 +41,10 @@ type Task struct {
 	ID     string
 	Title  string
 	Prompt string
+	// DoneWhen are the task's checkable completion conditions — the
+	// verifier's input (v8 柱 R R2). Produced by the decomposer in
+	// the same shape as the propose tool's plan-level done_when.
+	DoneWhen []string
 }
 
 // Outcome is the result of running one Task.
@@ -66,6 +76,15 @@ type Outcome struct {
 	Files      int
 	Insertions int
 	Deletions  int
+
+	// Verdict is the independent verifier's judgment of this task
+	// against its DoneWhen (v8 柱 R R2): per-assertion rows with
+	// grounded evidence, mechanical invariants, overall
+	// pass/fail/doubt. Nil when no verifier was wired (nil fleet
+	// verifier) — never on a judge failure, which lands as doubt.
+	// The verdict OBSERVES; it does not flip Status — autopilot's
+	// morning review remains the merge gate.
+	Verdict *verifier.Verdict
 }
 
 // Report aggregates the whole run.
@@ -78,6 +97,12 @@ type Report struct {
 	// the morning review reads the run's cost at a glance.
 	TotalTokens  int
 	TotalCostUSD float64
+	// Verdict counts (v8 柱 R R2): how many verified tasks the
+	// independent judge passed / flagged doubt / failed. The §9.1
+	// 存疑率 remeasure reads exactly these.
+	VerifiedPass  int
+	VerifiedDoubt int
+	VerifiedFail  int
 }
 
 // Caps bound an unattended run so it can't run away / burn the budget.
@@ -178,6 +203,16 @@ func (d *Driver) Run(ctx context.Context, goal string) (Report, error) {
 		}
 		rep.TotalTokens += o.Tokens
 		rep.TotalCostUSD += o.CostUSD
+		switch {
+		case o.Verdict == nil:
+			// no verifier wired — nothing to count
+		case o.Verdict.Overall == verifier.Fail:
+			rep.VerifiedFail++
+		case o.Verdict.Overall == verifier.Doubt:
+			rep.VerifiedDoubt++
+		default:
+			rep.VerifiedPass++
+		}
 	}
 	return rep, nil
 }

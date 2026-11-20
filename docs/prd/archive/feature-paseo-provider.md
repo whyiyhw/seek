@@ -21,8 +21,8 @@
 
 | 阶段 | paseo 做什么 | seek 现状 |
 |---|---|---|
-| provider 注册 | spawn 一个**探测进程**，发 `initialize`（`clientInfo: paseo`，10s 超时），读回 `agentCapabilities` 后关闭该进程 | ✅ `initialize` 回显 protocolVersion + `loadSession:false` + `promptCapabilities.image:true` |
-| 能力折算 | `loadSession:true` → session.persistence；`sessionCapabilities.list` → session.list；`promptCapabilities.image` → prompt.image | seek 报 `loadSession:false` → paseo **永不**调 `session/load`、不持久化 native session id；不报 list → **不**调 `session/list` |
+| provider 注册 | spawn 一个**探测进程**，发 `initialize`（`clientInfo: paseo`，10s 超时），读回 `agentCapabilities` 后关闭该进程 | ✅ `initialize` 回显 protocolVersion + `loadSession:true`（有持久化时）+ `promptCapabilities.image:true`。**2026-11-19 起** `loadSession` 不再恒 false |
+| 能力折算 | `loadSession:true` → session.persistence；`sessionCapabilities.list` → session.list；`promptCapabilities.image` → prompt.image | seek 报 `loadSession:true` → paseo 开 session.persistence 并调 `session/load`（**2026-11-19 已实现**，见 §2.4）；不报 list → **不**调 `session/list` |
 | 每个会话 | **再 spawn 一个独立进程**，`session/new {cwd, mcpServers, _meta._paseo{…}}` → `session.ready` | ✅ 处理（D-1 已修：cwd 生效，见 §2.2） |
 | 对话轮 | `session/prompt {sessionId, prompt[]}`，串行排队（promptLane），收 `session/update` 流，等 `stopReason`；打断 = `session/cancel` | ✅ 全支持（Zed 已验证同一路径） |
 | 进程退出 | stdin 关闭 → seek rc=0 退出；会话中异常退出 → `session.runtime_failed` | ✅ EOF 干净退出（e2e 有测） |
@@ -52,6 +52,19 @@
 ### 2.3 D-0（注册前置）：探测进程必须活着过 initialize
 
 `seek acp` 的 acp 分支在 `buildProvider`（`cmd/seek/main.go:844`）**之后**；无 DeepSeek key 时 buildProvider 直接返回错误、进程退出 → paseo 探测进程 initialize 超时/失败 → **provider 注册不上**。所以"机器上有 key"是注册硬前置（来源见 §3.1），不是"用到时才报错"。另注意探测进程是短命 spawn：`seek acp` 启动路径上的任何慢副作用都会被无谓触发——**cron auto-tick**（`cmd/seek/main.go:1532`，acp 分支之前执行）会在每个探测/会话进程里拉起 tick goroutine。建议 acp 模式跳过 auto-tick（与 `--no-cron-tick` 等价的分支内判断），实现卡顺手带上。
+
+### 2.4 session/load（2026-11-19 落地）
+
+paseo 侧行为（asar 实证）：`initialize` 探测到 `loadSession:true` 才开 `session.persistence`；"继续对话"时**先 spawn 进程**、`initialize`、然后 `connection.loadSession({sessionId, cwd, mcpServers})`，且**在 `session/load` 解析之前**就把 native id 注册好——它靠 "ACP agents replay the loaded session's updates before session/load resolves" 这条注释解释顺序。因此实现必须满足两条硬约束：
+
+1. **通知先于响应**。回放帧全部写出后才回 result；`internal/acp` 的 dispatch 里 `session/load` 走同步路径（不可打断、不持有 prompt 需要的锁），回放与响应共用同一把写锁保证顺序。
+2. **session/new 返回的 id 必须是持久 transcript id**。原先是项目目录名（`filepath.Base(cwd)`），既指不到文件、也会随目录变化——paseo 存下来永远 load 不回来。现在返回 `session.ID`（JSONL 文件名）；`--no-save` 无持久化时退回项目名，且 `loadSession` 申报 false。
+
+实现要点（`cmd/seek/acp_replay.go` + `acpBackend.LoadSession`）：读 transcript → 跑与 `-resume` 同一套 `Repair()` → `AnchorSession(cwd)` 重锚 → 按 session 记录的 model 恢复车道（`subagent.ResolveRoute` 反查 provider）→ `*b.sess = *loaded` **就地换指针**（main 的 subagent parent-sid / x-opencode-session / checkpoint 闭包都捕获了原指针，reassign 会让它们继续描述旧会话）→ `ag.Reset(messages)` → 逐帧回放。回放映射：system 跳过（系统提示词按进程重算）、user/assistant → `*_message_chunk`、assistant 的 tool_calls → `tool_call(status=completed)`、tool 结果 → `tool_call_update(rawOutput=…)`。
+
+顺带补上的另一半：**ACP 车道原先不落盘**（只有 TUI / print / rpc 保存 session），`session/load` 无米下锅。`acpBackend.Prompt` 现在按 turn 保存（`agent.TurnEnd` 后一写，与 runPrint 同频；整文件原子重写，按事件写会把文件重写几百次）。
+
+真 stdio e2e（两个独立进程，`SEEK_HOME` 隔离）：P1 `session/new` → prompt → 关闭；P2 `initialize`（caps `loadSession:true`）→ `session/load` → 收到 2 帧回放（`user_message_chunk`, `agent_message_chunk`）→ 跟随 prompt 正确答出 P1 埋的词；未知 id 回 `-32000` 并带上该 id。注意 `--no-save` 在 ACP 车道**够不到**（`flag.Parse` 停在 `acp` 位置参数，见 §3.3），所以实际部署里 `loadSession` 恒为 true；`acpBackend.Initialize` 的 `store != nil && sess != nil` 判断是给 store 为空的历史/测试路径留的belt-and-braces（那时 load 明确回「persistence is off」而不是假装成功）。
 
 ## 3. ② provider env、DeepSeek key 来源与无头注意事项
 
@@ -123,9 +136,9 @@
 
 ## 5. 风险 / 开放问题
 
-- **paseo adapter 是私有的**：本设计对 paseo 侧行为的断言来自当前版本 asar 快照。但接口契约是公共 ACP spec + capability 协商——只要 seek 严格按 spec 的必需子集说话、可选能力如实申报（loadSession:false），paseo 升级不应破坏。若未来 paseo 把某可选项变必需，seek 回 -32601 会显式失败（fail-loud），不会静默错。
+- **paseo adapter 是私有的**：本设计对 paseo 侧行为的断言来自当前版本 asar 快照。但接口契约是公共 ACP spec + capability 协商——只要 seek 严格按 spec 的必需子集说话、可选能力如实申报（`loadSession` 现按持久化能力申报 true/false），paseo 升级不应破坏。若未来 paseo 把某可选项变必需，seek 回 -32601 会显式失败（fail-loud），不会静默错。
 - **`_meta._paseo.systemPrompt` 不生效**：paseo 里给 agent 配的系统提示词到不了 seek（seek 用自己的 sysprompt + AGENTS.md）。drive 场景无碍（卡面即用户消息）；若未来想透传，需 seek 读 `_meta`（开放问题，暂不做）。
-- **会话持久化缺席**：loadSession:false → paseo 不存 native session id → 每次"继续对话"是新进程新会话（seek 自身的 JSONL transcript 仍按 project 落盘，`seek -resume` 可手动续）。对 drive 卡（一卡一回合）零影响。
+- **会话持久化（2026-11-19 已补）**：`loadSession:true` → paseo 把 `session/new` 返回的 id 存为 native session id，"继续对话"时先 spawn 进程再 `session/load`，seek 读回该 JSONL、重锚 cwd、恢复模型车道并把历史回放成 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)`。因此 `session/new` 的 sessionId **必须**是持久 transcript id（原先是项目目录名，无法 load），`--no-save` 下退回项目名且不申报 `loadSession`。实现：`cmd/seek/acp_replay.go` + `acpBackend.LoadSession`。
 - **验收用的 seek 二进制版本**：装机版落后于源码时症状诡异（没有 D-1/D-2 的 acp 进程"能跑但全错"）——§4.1 第 1 步的重装不可省。
 - **cron auto-tick 副作用**（§2.3）：探测进程短命、tick goroutine 被杀，理论上有半途 cron 任务的风险；M1 里跳过即除根。
 
