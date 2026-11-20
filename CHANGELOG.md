@@ -54,3 +54,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_arpcox：二线车道文件透传：PDF/Word/PPT 按 modelcap/Images 先例扩 Files
 - c_oyp2qf：web 对齐 dsh·顶栏 ContextMeter（上下文余量/车道显示/断线重连灯）
 - c_yhpfsp：pitfalls 台账分流 triage：255 live / 0 absorbed——一轮「坑→修复卡/eval/吸收」全量分流
+- c_4doebx：web 对齐 dsh·子代理面板升级（/rpc 挂 subagent/*，收口 inspect-rpc #12）

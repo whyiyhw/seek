@@ -330,10 +330,22 @@
                   white-space: nowrap; }
   .ag-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px; }
   .ag-badge { font-size: 11px; flex: none; white-space: nowrap; }
+  /* 三态徽标（卡 c_4doebx）：running/done/error 走类名而不是内联色——
+     颜色一处定义，无头验收读 class/dataset.status 即断言面。 */
+  .ag-badge.st-running { color: #d8a657; }
+  .ag-badge.st-done    { color: #7ec699; }
+  .ag-badge.st-error   { color: #d8756f; }
   #ag-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #ag-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
              color: #7a8089; white-space: nowrap; overflow: hidden;
              text-overflow: ellipsis; }
+  /* 详情字段表（卡 c_4doebx）：与 /subagents?sub= 同信息量的可读面。 */
+  #ag-fields { padding: 6px 14px; border-bottom: 1px solid #2a2e36; }
+  #ag-fields:empty { display: none; }
+  .ag-field { display: flex; gap: 10px; font-size: 12px; padding: 1px 0; }
+  .ag-field .k { color: #7a8089; flex: none; min-width: 96px; }
+  .ag-field .v { color: #d7dae0; overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
   #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
   #ag-last pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
                  padding: 8px 10px; margin: 6px 0; overflow-x: auto;
@@ -437,6 +449,7 @@
         <div id="ag-list"></div>
         <div id="ag-detail">
           <div id="ag-meta"></div>
+          <div id="ag-fields"></div>
           <div id="ag-last"></div>
         </div>
       </div>
@@ -782,7 +795,10 @@ function dragHasFiles(ev) {
 // 是否已鉴权——启动时据此决定挂不挂 SSE（W1.2：凭证可能是 cookie，页内
 // 无从预判，探测是唯一权威）。boundProject 记下当前绑定（或 null）供
 // 任务面板的 topic 订阅判定（W3.3）：换绑项目后重开订阅跟随新项目。
+// boundProjectID 是同一绑定的 /rpc 键（服务端算好的 16 hex）——子代理面板
+// 走 subagent/list|get 时要它，页面不自己哈希路径。
 let boundProject = null;
+let boundProjectID = '';
 let boundSession = null;  // 本 conv 的绑定会话（侧栏当前项高亮的退化基准）
 // 「上一次 refreshState 看到的绑定会话」：变了就说明新会话已落盘（首条消息
 // 跑完、/new、/bind）——侧栏是常驻面，得跟着磁盘世界刷新一次列表，否则新
@@ -798,10 +814,12 @@ async function refreshState() {
     }
     const s = await r.json();
     boundProject = s.bound ? s.project : null;
+    boundProjectID = s.bound ? (s.project_id || '') : '';
     boundSession = s.session || null;
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
                       : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
     syncTopicStream();               // /bind 落地后面板订阅即时跟上
+    syncAgentRefresh();              // 绑定到位后定时刷新才敢起（c_4doebx）
     if (sessList) markCur();         // 侧栏当前项跟随绑定（W5 侧栏）
     // 绑定会话变了 = 磁盘上多了一条（或换了一条）：常驻侧栏跟着刷新，否则
     // 新会话要等整页刷新才出现在列表里。首帧由 boot 的 loadSessions 拉。
@@ -1585,6 +1603,7 @@ function appendMsg(raw) {
 const agentsBtn = document.getElementById('agents-btn');
 const agList = document.getElementById('ag-list');
 const agMeta = document.getElementById('ag-meta');
+const agFields = document.getElementById('ag-fields');
 const agLast = document.getElementById('ag-last');
 let agRows = [];      // 折叠行（GET 快照 + topic 推送合并后的当前态）
 let agOpen = null;    // 详情打开中的 sub_sid
@@ -1625,26 +1644,56 @@ function togglePane(name) {
     input.focus();   // 收起回聊天面
   }
   syncTopicStream();
+  syncAgentRefresh();
 }
 
 // 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
 // togglePane）：先订阅再取快照（W3.2 协议序——锚点在订阅时刻，订阅→GET
-// 之间的追加靠推送补、不靠快照重读）。
+// 之间的追加靠推送补、不靠快照重读）。卡 c_4doebx 起数据源换成 /rpc 的
+// subagent/list|get（inspect-rpc §6 #12 收口）；旧 GET /subagents 仍是
+// 兼容口（同一份磁盘折叠，别的消费者照旧可用）。
 function loadAgentsPane() {
   syncTopicStream();
   loadAgents();
-  if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
+  if (!agOpen) {
+    agMeta.textContent = '';
+    agFields.replaceChildren();
+    paneHint(agLast, '（在左侧选一条记录看末条输出）');
+  }
 }
 
+// 状态徽标三态（卡 c_4doebx）：running / done / error。颜色由类名承载
+// （CSS 一处定义），dataset.status 保留折叠原值——验收与用户读到同一份
+// 状态。细分标签仍按折叠状态给：killed 是用户主动终止，算 done 不算
+// error；orphaned 是 owner 崩了，算 error。
 const AG_STATUS = {
-  active:    ['在跑',   '#d8a657'],
-  completed: ['完成',   '#7ec699'],
-  failed:    ['失败',   '#d8756f'],
-  killed:    ['已终止', '#9aa0a8'],
-  orphaned:  ['失联',   '#d8756f'],
-  promoted:  ['已晋升', '#7aa2f7'],
+  active:    { label: '在跑',   cls: 'st-running', kind: 'running' },
+  completed: { label: '完成',   cls: 'st-done',    kind: 'done' },
+  promoted:  { label: '已晋升', cls: 'st-done',    kind: 'done' },
+  killed:    { label: '已终止', cls: 'st-done',    kind: 'done' },
+  failed:    { label: '失败',   cls: 'st-error',   kind: 'error' },
+  orphaned:  { label: '失联',   cls: 'st-error',   kind: 'error' },
 };
-const agStatusView = s => AG_STATUS[s] || [s, '#9aa0a8'];
+const agStatusView = s => AG_STATUS[s] || { label: s || '?', cls: 'st-error', kind: 'error' };
+
+// 面板刷新（卡 c_4doebx 的「定时刷新或事件驱动刷新」，两条都要）：
+//   事件驱动 = W3.2 的 subagents topic（live 追加的推送，下面的
+//   syncTopicStream）；定时 = 本 ticker 兜底，因为推送只在订阅之后、
+//   且跨进程写盘没有 in-process 信号（Follower 本身也是 1s 轮询）。
+// 面板关掉即停——后台 tab 不空转。10s 对任务面板是零感知成本（一次
+// 磁盘折叠），比 SSE 断流后一直显示旧状态好。
+const AG_REFRESH_MS = 10000;
+let agTimer = null;
+let agLoads = 0;      // 快照重载计数（无头验收读它证明定时器真的在跑）
+function syncAgentRefresh() {
+  const want = document.body.classList.contains('agents-view') && !!boundProjectID;
+  if (agTimer && !want) { clearInterval(agTimer); agTimer = null; }
+  if (want && !agTimer) {
+    agTimer = setInterval(() => {
+      if (document.body.classList.contains('agents-view')) loadAgents();
+    }, AG_REFRESH_MS);
+  }
+}
 
 function agTokensText(t) {
   if (!t) return '';
@@ -1653,14 +1702,22 @@ function agTokensText(t) {
 }
 
 async function loadAgents() {
-  paneHint(agList, '加载中…');
+  if (!boundProjectID) {
+    return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
+  }
+  agLoads++;
   try {
-    const r = await fetch(q('/subagents'), { headers: { 'X-Seek-Conversation': CONV } });
-    if (r.status === 400) return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
-    if (!r.ok) return paneHint(agList, '/subagents 失败：HTTP ' + r.status);
-    agRows = await r.json();
+    const res = await rpc('subagent/list', { project_id: boundProjectID });
+    agRows = res.subagents || [];
     renderAgList();
-  } catch (e) { paneHint(agList, '/subagents 失败：' + e); }
+    // 打开中的详情跟着列表态走（同一行刷新徽标/元信息，transcript 尾读
+    // 交给 openAgent 自己按需重读）。
+    if (agOpen) {
+      const row = agRows.find(x => x.sub_sid === agOpen);
+      if (row) renderAgDetail({ sub: row, last_assistant: null, _keepLast: true });
+      else { agOpen = null; agFields.replaceChildren(); paneHint(agLast, '（这条记录已不在索引里）'); }
+    }
+  } catch (e) { paneHint(agList, 'subagent/list 失败：' + e.message); }
 }
 
 // 列表全量重画（面板量级几十行，无所谓）；textContent-only 纪律同聊天面。
@@ -1672,14 +1729,16 @@ function renderAgList() {
     row.type = 'button';
     row.className = 'ag-row';
     row.dataset.sid = s.sub_sid;
+    row.dataset.status = s.status || '';
     if (agOpen === s.sub_sid) row.classList.add('cur');
     const t1 = document.createElement('span');
     t1.className = 't1';
     const badge = document.createElement('span');
-    badge.className = 'ag-badge';
-    const [label, color] = agStatusView(s.status);
-    badge.textContent = (s.background ? 'bg·' : '') + label + (s.notified ? '✓' : '');
-    badge.style.color = color;
+    const st = agStatusView(s.status);
+    badge.className = 'ag-badge ' + st.cls;
+    badge.dataset.kind = st.kind;
+    badge.dataset.status = s.status || '';
+    badge.textContent = (s.background ? 'bg·' : '') + st.label + (s.notified ? '✓' : '');
     const desc = document.createElement('span');
     desc.className = 'desc';
     desc.textContent = s.description || '（无描述）';
@@ -1698,28 +1757,66 @@ function renderAgList() {
   }
 }
 
-// 详情：GET /subagents?sub= —— 折叠行 + 子 transcript 末条 assistant
-// （summary 单源：索引不带 summary，子自己的 transcript 才是全文）。
+// 详情（卡 c_4doebx「详情展开」）：/rpc subagent/get —— 折叠行 + 子
+// transcript 末条 assistant，与旧 /subagents?sub= 同信息量（summary 单源：
+// 索引不带 summary，子自己的 transcript 才是全文）。
 async function openAgent(sid) {
   agOpen = sid;
   for (const row of agList.children) row.classList.toggle('cur', row.dataset.sid === sid);
   agMeta.textContent = '读取中…';
+  agFields.replaceChildren();
   agLast.replaceChildren();
   try {
-    const r = await fetch(q('/subagents?sub=' + encodeURIComponent(sid)),
-                          { headers: { 'X-Seek-Conversation': CONV } });
-    if (!r.ok) { agMeta.textContent = '详情读取失败：HTTP ' + r.status; return; }
-    const d = await r.json();
+    const d = await rpc('subagent/get', { sub_sid: sid, project_id: boundProjectID });
     if (agOpen !== sid) return;  // 返回前已切走：丢弃
-    const s = d.sub || {};
-    const [label] = agStatusView(s.status);
-    const toks = agTokensText(s.tokens);
-    agMeta.textContent = (s.background ? '后台 ' : '同步 ') + label + ' · ' + (s.type || '?')
-      + ' · ' + (s.description || '') + (toks ? ' · ' + toks : '');
-    if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
-    else paneHint(agLast, s.status === 'active'
-      ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
-  } catch (e) { agMeta.textContent = '详情读取失败：' + e; }
+    renderAgDetail(d);
+  } catch (e) { agMeta.textContent = '详情读取失败：' + e.message; }
+}
+
+// renderAgDetail 画详情栏：#ag-meta 一行摘要 + #ag-fields 字段表 +
+// #ag-last transcript 尾。d._keepLast=true 时（定时刷新带回来的行）不动
+// transcript 尾——那是 openAgent 的活，刷新只更新状态。
+function renderAgDetail(d) {
+  const s = d.sub || {};
+  const st = agStatusView(s.status);
+  const toks = agTokensText(s.tokens);
+  agMeta.textContent = (s.background ? '后台 ' : '同步 ') + st.label + ' · ' + (s.type || '?')
+    + ' · ' + (s.description || '') + (toks ? ' · ' + toks : '')
+    + (s.reason ? ' · reason=' + s.reason : '');
+  agFields.replaceChildren();
+  const fields = [
+    ['sub_sid', s.sub_sid],
+    ['parent_sid', s.parent_sid],
+    ['状态', s.status + (st.kind !== 'running' ? '' : '（进行中）')],
+    ['类型', s.type],
+    ['模式', s.background ? '后台（结果经通知回到父会话）' : '同步'],
+    ['开始', s.started_at ? new Date(s.started_at).toLocaleString() : ''],
+    ['结束', s.ended_at ? new Date(s.ended_at).toLocaleString() : ''],
+    ['tokens', toks ? toks + '（p/cache_hit）' : ''],
+    ['worktree', s.worktree_path || ''],
+    ['resumed_from', s.resumed_from || ''],
+    ['失败原因', s.reason || ''],
+    ['通知已送达', s.notified ? '是' : ''],
+    ['项目', d.project_root || ''],
+  ];
+  for (const [k, v] of fields) {
+    if (v === undefined || v === null || v === '') continue;
+    const line = document.createElement('div');
+    line.className = 'ag-field';
+    const key = document.createElement('span');
+    key.className = 'k';
+    key.textContent = k;
+    const val = document.createElement('span');
+    val.className = 'v';
+    val.textContent = String(v);
+    line.appendChild(key);
+    line.appendChild(val);
+    agFields.appendChild(line);
+  }
+  if (d._keepLast) return;
+  if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
+  else paneHint(agLast, s.status === 'active'
+    ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
 }
 
 // topic 订阅生命周期：面板开着且已绑定才连；面板关掉即断；换绑项目后
