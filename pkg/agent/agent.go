@@ -537,6 +537,36 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 	go func() {
 		defer close(out)
+		// Stop observer (feature-orchestration D15): fires ONCE per
+		// Prompt() round after the reply fully settles — final answer,
+		// max turns, ctx cancel, or fatal error. Distinct granularity
+		// from PostTurn (per model turn).
+		//
+		// Defer order (LIFO): currentEvents cleared → Stop → close(out).
+		// Stop runs after the event sink is detached (a hook calling
+		// EmitEvent cannot inject into the finished prompt) and before
+		// the channel closes, so a caller draining
+		// `for ev := range ch` observes the hook side effect by the
+		// time the range ends — no "assert after range" race.
+		//
+		// The defer closes over these vars, so it reads their FINAL
+		// values (passing the values inline would capture the zero
+		// value — the classic defer-argument trap).
+		settledTurns := 0
+		stopFinish := "max_turns"
+		defer func() {
+			hookCtx := ctx
+			if hookCtx == nil {
+				hookCtx = context.Background()
+			}
+			// WithoutCancel: a cancelled turn must still report its
+			// Stop event — the hook observes the outcome, it does not
+			// inherit the cancellation that produced it.
+			a.cfg.Hooks.NotifyStop(context.WithoutCancel(hookCtx), hooks.StopEvent{
+				Turns:  settledTurns,
+				Finish: stopFinish,
+			})
+		}()
 		// Expose the channel so tools can EmitEvent during their
 		// Execute (e.g. propose pushes Plan* events on user choice).
 		// Cleared before close(out) runs (LIFO defer order) so a
@@ -553,6 +583,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			History:  append([]deepseek.Message{}, a.messages...),
 		})
 		if err != nil {
+			stopFinish = "error"
 			out <- ErrorEvent{Err: err}
 			return
 		}
@@ -656,9 +687,11 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				// by tool messages". Drop the turn entirely and let
 				// the user continue from the prior valid state.
 				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					stopFinish = "canceled"
 					out <- AgentEnd{Usage: totalUsage, Turns: turns - 1, ToolCalls: totalToolCalls}
 					return
 				}
+				stopFinish = "error"
 				out <- ErrorEvent{Err: err}
 				return
 			}
@@ -679,6 +712,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// this branch handles every other path to the same bad
 			// state (including exhausted retries).
 			if len(assistant.ToolCalls) > 0 && finish != "tool_calls" {
+				stopFinish = "error"
 				out <- ErrorEvent{Err: fmt.Errorf(
 					"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
 					len(assistant.ToolCalls), finish)}
@@ -706,12 +740,21 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 					ToolCalls: 0,
 					Finish:    finish,
 				})
+				settledTurns++
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
 					a.appendMessage(deepseek.Message{
 						Role:    deepseek.RoleUser,
 						Content: "continue" + modeReminder(a.cfg.ModeLabel),
 					})
 					continue
+				}
+				// The round settles HERE: this turn produced no tool
+				// calls, so Prompt() is about to return. finish is the
+				// model's own reason ("stop" for a real answer,
+				// "length" for a truncated one).
+				stopFinish = finish
+				if stopFinish == "" {
+					stopFinish = "stop"
 				}
 				break
 			}
@@ -770,6 +813,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				ToolCalls: toolCount,
 				Finish:    finish,
 			})
+			settledTurns++
 		}
 
 		out <- AgentEnd{Usage: totalUsage, Turns: turns, ToolCalls: totalToolCalls}

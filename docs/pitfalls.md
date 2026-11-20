@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**256 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -38,7 +38,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Section | Live |
 |---|---:|
 | Filesystem / concurrency | 3 |
-| Hook / memory | 7 |
+| Hook / memory | 8 |
 | Skill distill (auto path) | 1 |
 | TUI / terminal | 29 |
 | Agent loop | 17 |
@@ -115,6 +115,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `OnSessionStart` now resets `snapshotInjected = false` and `snapshotEntryNames = nil` before running GC. This ensures the first `OnPrePrompt` after every session boundary (fresh or resume) rebuilds the snapshot from current data. Commit (M5.9)
 - **Lesson**: any Hook struct field that tracks per-session state MUST be reset in `OnSessionStart`. The Hook is reusable across agent lifetimes (--resume), not 1:1 with sessions. Don't assume zero-init at construction covers all paths
 - **Refs**: `internal/memory/hook.go:OnSessionStart`, `internal/memory/hook.go:Hook.snapshotInjected`
+
+### The terminal lifecycle observer must be the LAST defer registered — and must not inherit the cancelled ctx
+- **Saw**: wiring the P3-a trigger points (card c_xt6ql7) produced two near-misses. (1) `defer reg.NotifyStop(...)` registered right after `defer close(out)` runs *after* the channel closes, so `for ev := range ch` returns before the hook side effect is observable — the test asserting on hook state after draining was a latent flake. (2) `NotifySubagentStop` in `runAndFinish` fires after `sp.cancel()`, so handing it `sp.runCtx` gives every shell hook a `context.Canceled` context: `exec.CommandContext` kills `bash -c` immediately, so the hook "fires" (audit row written, exit -1) without ever running its command — an observer that silently never observes.
+- **Why**: Go defers run LIFO, so "register later" means "run earlier"; and a terminal event is a *report about* a cancelled/finished thing, not a participant in it — inheriting cancellation at that seam is always wrong.
+- **Fix**: in `PromptFiles` the defer order is now `currentEvents` cleared → Stop → `close(out)` (Stop registered last ⇒ runs first); both `NotifyStop` and the Manager's `NotifySubagentStart`/`NotifySubagentStop` dispatch with `context.WithoutCancel(ctx)` (nil-guarded before the call — `WithoutCancel(nil)` panics). Locked by `TestAgent_Stop_*` (natural / canceled / error / max_turns) and `TestSubagentStartStop_*`.
+- **Lesson**: two independent rules for every new terminal observer — (a) it is the last defer registered in the goroutine that owns the lifecycle, so it lands before the channel/return that signals "done" to callers; (b) it gets `context.WithoutCancel`. Both have a test-shaped tell: "assert after `range ch`" for (a), "hook ran but did nothing" for (b).
+- **Refs**: `pkg/agent/agent.go:PromptFiles`, `internal/subagent/manager.go:runAndFinish`, `docs/prd/feature-orchestration.md` D15
 
 ### ObserveEnqueue accept counter races with non-blocking ResultChan send
 - **Saw**: `go test -race ./internal/memory` failed in `TestObserveEnqueue_RespectsSessionCap` on `h.observeAcceptCt++` — two filter goroutines could increment concurrently

@@ -17,6 +17,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/config"
+	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
@@ -1961,6 +1962,7 @@ func (m *Model) handleCatalogRefreshed(msg catalogRefreshedMsg) []tea.Cmd {
 // of any later state changes on m.
 func startCompactCmd(m *Model) tea.Cmd {
 	ag := m.opts.Agent
+	hreg := m.opts.Hooks
 	parentCtx := m.opts.Ctx
 	if parentCtx == nil {
 		parentCtx = context.Background()
@@ -1970,6 +1972,14 @@ func startCompactCmd(m *Model) tea.Cmd {
 		// applies via parent ctx cancellation if the user hits Ctrl+C.
 		ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 		defer cancel()
+		// PreCompact observer (feature-orchestration D15) — fired HERE,
+		// inside the tea.Cmd and immediately before the summariser call,
+		// not on the Update goroutine: a shell hook may block for its
+		// timeout and freezing the UI mid-/compact is a real regression.
+		// Firing here also guarantees the event precedes the LLM call,
+		// which is the point of the point. "manual" is the only trigger
+		// today (auto-compaction would add its own label).
+		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: "manual"})
 		summary, usage, err := ag.Summarise(ctx)
 		return compactDoneMsg{summary: summary, usage: usage, err: err}
 	}

@@ -156,6 +156,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Single-select picker uses keyboard nav, not textarea; blur.
 		// We re-focus when the user picks "Other" so they can type.
 		m.input.Blur()
+		// Notification observer (feature-orchestration D15): a picker
+		// popping up is one of the two "surfaced outside the text
+		// plane" events. Rides a Cmd so a shell hook's timeout can't
+		// freeze the picker.
+		if cmd := askUserNotificationCmd(m.opts.Hooks, req.Question.Question); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case askUserBatchRequestMsg:
 		// New v2 batch request — initialise stack state at Q1.
@@ -172,6 +179,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingQuestionCursor = 0
 		m.pendingQuestionFreeText = false
 		m.input.Blur()
+		// Notification observer — same seam as the v1 picker above.
+		// Title names the batch by its first question (that is what
+		// the user is being asked right now) with a count suffix when
+		// the batch has more, so a hook can tell 1-of-1 from 1-of-4.
+		if cmd := askUserNotificationCmd(m.opts.Hooks, batchNotificationTitle(req.Batch)); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 
 	case compactDoneMsg:
 		cmds = append(cmds, m.handleCompactDone(msg)...)

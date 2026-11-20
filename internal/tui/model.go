@@ -39,6 +39,7 @@ import (
 	"github.com/whyiyhw/seek/internal/cache"
 	"github.com/whyiyhw/seek/internal/checkpoint"
 	"github.com/whyiyhw/seek/internal/goal"
+	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/keymap"
 	"github.com/whyiyhw/seek/internal/memory"
 	"github.com/whyiyhw/seek/internal/permission"
@@ -243,6 +244,18 @@ type Options struct {
 	// forth doesn't spam). 0 = interactive notify disabled. Resolved from
 	// config.SessionNotifySecondsOrDefault() (default 60) by cmd/seek.
 	SessionNotifySeconds int
+
+	// Hooks is the parent session's in-process hook registry
+	// (feature-orchestration D15 trigger wiring). The TUI fires two
+	// observers through it: PreCompact from cmdCompact (before the
+	// summariser call) and Notification from the ask_user picker
+	// handlers. nil = no observation (tests); every dispatch helper
+	// is nil-safe.
+	//
+	// Both are fired inside tea.Cmds, never on the Update goroutine —
+	// a shell hook may block for its full timeout, and the TUI loop
+	// must stay responsive.
+	Hooks *hooks.Registry
 
 	// ProviderName, when non-empty, means a second-tier provider is active
 	// (Anthropic, OpenAI, Gemini, or a compatible endpoint). The TUI
