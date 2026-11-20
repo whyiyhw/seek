@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**257 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -64,7 +64,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | CI / gates | 3 |
 | Eval / tool descriptions | 6 |
 | Build tags / dependency isolation | 1 |
-| ACP / editor & headless lanes | 11 |
+| ACP / editor & headless lanes | 13 |
 | Eval / results data shape | 1 |
 | Typed agents / orchestration | 2 |
 | Git / merge | 2 |
@@ -1632,6 +1632,20 @@ If you're new to the project, skim entries in this order:
 - **Fix**: `acp.AnchorSession` (`internal/acp/session.go`): `os.Chdir(abs)` + `Policy.Reanchor(abs)` as one atomic handshake step; cwd that can't be entered fails the session loud (-32000) instead of silently running in the daemon dir. `Policy.Reanchor` (`internal/permission`) is the one sanctioned post-construction cwd change — tools hold the `*Policy` by pointer, so the re-anchor reaches them without rebuilding the registry.
 - **Lesson**: "make cwd effective" in this codebase is TWO operations, not one. Any future per-session cwd consumer (multi-session backlog ③) must go through both anchors — or enumerate which convention each affected tool uses. Zed-compat falls out for free: it sends the spawn dir as cwd, so the anchor is a no-op there.
 - **Refs**: `internal/acp/session.go`, `internal/permission/permission.go` (Reanchor), `cmd/seek/main.go` (acpBackend.NewSession), `docs/prd/archive/feature-paseo-provider.md` §2.2 D-1
+
+### ACP session/load is an ORDER contract, and the id it loads must outlive the process
+- **Saw**: `loadSession` had been advertised `false` since 柱 P shipped, so ACP clients (paseo, Zed) never offered "continue this conversation" — the item sat in the backlog as "just implement session/load". Implementing it revealed the backlog line was the smallest part: three separate contracts had to line up first.
+- **Why**: (1) The schema's own words for `session/load` are "stream the entire conversation history back to the client via notifications", and paseo's bundle says why it matters — it registers the native session id BEFORE awaiting the load because "ACP agents replay the loaded session's updates before session/load resolves". A result-first implementation silently drops the whole history. (2) `session/new` was returning `filepath.Base(cwd)` as the sessionId — a directory name. ACP's contract is that this id is what the client hands back to `session/load`, so a name that indexes no file can never be loaded, and it even changes when the client opens a different directory. (3) The ACP lane was the one lane that never persisted: TUI/print/rpc all call `store.Save`, so `session/load` had no transcript to read in the first place.
+- **Fix**: `session/load` in `internal/acp` dispatch runs inline (uninterruptible, and the replay + result share the write mutex, so ordering is structural); `cmd/seek/acp_replay.go` is the pure transcript→update mapper (system skipped, user/assistant → `*_message_chunk`, tool_calls → `tool_call` completed, tool results → `tool_call_update` with rawOutput); `acpBackend.LoadSession` loads → `Repair()` → `AnchorSession(cwd)` → restores the model lane via `subagent.ResolveRoute` → `*b.sess = *loaded` (pointer mutation, see next bullet) → `ag.Reset`. `NewSession` now returns `session.ID`, `Initialize` advertises `LoadSession` only when a store exists, and `Prompt` saves once per `agent.TurnEnd` (whole-file atomic rewrite — per-event would rewrite hundreds of times a turn).
+- **Lesson**: a capability flag is a two-sided promise. `loadSession:true` means "ids I hand you are durable AND I will replay" — flipping the boolean without the id contract and the write path produces a client whose persistence UX half-works and silently loses history. When a backlog line is "implement <protocol method>", read the method's ordered obligations (what must precede the response?) and the identity contract (what must the id mean?) before wiring the handler.
+- **Refs**: `internal/acp/server.go` (`session/load` dispatch, `LoadSessionParams`), `cmd/seek/acp_replay.go`, `cmd/seek/main.go` (`acpBackend.LoadSession` / `NewSession` / `saveTurn` / `Initialize`), `docs/prd/archive/feature-paseo-provider.md` §2.4
+
+### Live state captured by closures must be MUTATED in place, not reassigned
+- **Saw**: resuming a session in the ACP lane, the natural expression is `b.sess = loaded`. That compiles and passes every test that inspects `b.sess` — while silently leaving main's four closures (`subagentMgr`'s `ParentSidFn`, `agent.Config.SessionID`'s x-opencode-session, the checkpoint `Manager`'s session scope, the plan-bridge sid) pointing at the ORIGINAL session object. The run would then write subagent transcripts and session headers under the pre-load id, and `-resume` would see two divergent files.
+- **Why**: those closures captured `activeSession` (the pointer) at construction, precisely so `/compact` can fork a session and have everybody follow. Reassigning the backend's field creates a second pointer to a new value while the captured one keeps its old target — the "two sources of truth" smell from AGENTS.md, in pointer form.
+- **Fix**: `*b.sess = *loaded` in `acpBackend.LoadSession`, with a comment naming the closures. Every captured closure keeps working because it dereferences the same address.
+- **Lesson**: in this codebase "the session" is a long-lived POINTER shared by closures; any resume/swap path must copy INTO it. The smell to watch for: assigning to a field of type `*session.Session` after startup.
+- **Refs**: `cmd/seek/main.go` (`acpBackend.LoadSession`, `acpBackend.sess` field comment), `subagent.ManagerOpts.ParentSidFn`, `agent.Config.SessionID`
 
 ### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
 - **Saw**: implementing SEEK_ACP_YOLO, the obvious wiring was `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent at main.go:1732). It would have been silently half-broken: the gate would allow bash while the system prompt header still read `Mode: deny` (and the bash tool description says "Refused under the current permission mode"), so the model would likely never attempt a bash call at all.

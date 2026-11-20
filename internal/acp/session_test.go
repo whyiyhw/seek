@@ -39,6 +39,12 @@ func (b *anchorBackend) Prompt(ctx context.Context, p PromptParams, send func(Se
 	return PromptResult{StopReason: "end_turn"}, nil
 }
 
+// LoadSession is not part of the cwd-anchor contract under test; it
+// exists so *anchorBackend satisfies Backend.
+func (b *anchorBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {
+	return LoadSessionResult{}, errors.New("session/load not served by this backend")
+}
+
 func (b *anchorBackend) SetConfigOption(p SetConfigOptionParams) (SetConfigOptionResult, error) {
 	// The anchor contract under test has no model menu; refuse like the
 	// real backend would when nothing was served.

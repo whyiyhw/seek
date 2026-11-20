@@ -65,6 +65,29 @@ type NewSessionParams struct {
 	Cwd string `json:"cwd"`
 }
 
+// LoadSessionParams is session/load's request (ACP schema
+// LoadSessionRequest). SessionID is the handle the agent minted at
+// session/new — for seek that is the durable transcript id, because a
+// resumable handle must outlive the process. Cwd is where the session
+// runs; seek re-anchors both cwd conventions to it exactly as
+// session/new does. MCPServers / AdditionalDirectories are decoded for
+// schema fidelity and ignored: seek has no MCP passthrough yet and
+// multi-root sessions are not supported, so silently honouring half of
+// them would be worse than ignoring all of them.
+type LoadSessionParams struct {
+	SessionID             string          `json:"sessionId"`
+	Cwd                   string          `json:"cwd"`
+	MCPServers            json.RawMessage `json:"mcpServers,omitempty"`
+	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
+}
+
+// LoadSessionResult is session/load's response. Every field is optional
+// in the schema; seek returns the config menu so the client's model
+// dropdown reflects the RESUMED session rather than the process default.
+type LoadSessionResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
+
 type NewSessionResult struct {
 	SessionID string `json:"sessionId"`
 	// ConfigOptions is the session-scoped configuration menu (model
@@ -171,6 +194,13 @@ type SessionUpdate struct {
 type Backend interface {
 	Initialize(p InitializeParams) InitializeResult
 	NewSession(p NewSessionParams) (NewSessionResult, error)
+	// LoadSession resumes a previous conversation (session/load). It
+	// replays the whole history to the client through send — the schema
+	// asks for exactly that ("Stream the entire conversation history back
+	// to the client via notifications") — and returns the session's
+	// config menu so the client's dropdown reflects the RESUMED lane
+	// rather than the process default.
+	LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
 	// Prompt runs one turn. It streams progress by calling send (each call
 	// becomes a session/update notification) and returns when the turn
 	// ends or ctx is cancelled.
@@ -231,6 +261,43 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 		_ = json.Unmarshal(req.Params, &p)
 		res, err := s.backend.NewSession(p)
 		if err != nil {
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		s.reply(req.ID, res)
+	case "session/load":
+		// session/load is request/response like session/new, but it also
+		// REPLAYS the transcript through session/update notifications
+		// before the response — the schema's own words. Ordering is the
+		// contract here: all replay notifications are written (under mu,
+		// in order) before the result frame, so a client that renders
+		// updates as they arrive shows the history and then accepts the
+		// loaded session. Running it inline in the read loop is correct
+		// because load is not interruptible and holds no lock the prompt
+		// path needs; a prompt arriving later is serialised behind it.
+		//
+		// Loading WHILE a turn runs is rejected (same rule and same race
+		// argument as set_config_option): load swaps the agent's whole
+		// history via Reset, which would yank the floor out from under the
+		// in-flight turn.
+		s.mu.Lock()
+		busy := len(s.cancels) > 0
+		s.mu.Unlock()
+		if busy {
+			s.replyErr(req.ID, -32000, "session/load rejected: a prompt is in flight (load between turns)")
+			return
+		}
+		var p LoadSessionParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			s.replyErr(req.ID, -32602, "bad load params: "+err.Error())
+			return
+		}
+		send := func(u SessionUpdate) { s.notify("session/update", u) }
+		res, err := s.backend.LoadSession(p, send)
+		if err != nil {
+			// -32000 (server error) rather than -32601: the method IS
+			// handled; the requested session is what failed. Clients
+			// distinguish "capability missing" from "load refused".
 			s.replyErr(req.ID, -32000, err.Error())
 			return
 		}
