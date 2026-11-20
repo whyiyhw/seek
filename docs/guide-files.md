@@ -11,10 +11,10 @@ seek 支持把 PDF / Word / PPT 文档直接发给 DeepSeek：提交时上传并
 ## 行为细节
 
 - **资产库**：提交时文档被复制到 `~/.seek/projects/<id>/assets/`（sha256 内容寻址，相同内容自动去重）。服务端**不支持下载**原文件与解析结果，本地这份是唯一副本——file_id 过期后发送路径会从它按原 purpose 自动重传，无需重新提交。
-- **计费**：解析按页一次性计费 ¥1.5/千页（$0.225/1K），上传成功才收；对话引用不再收解析费（按拼入上下文的输入 token 计）。注意：上传响应不含页数（实测见 `docs/pitfalls.md` "DeepSeek Files API"），seek 的成本条暂时记不出这笔解析费——以平台账单页为准。
+- **计费**：解析按页一次性计费 ¥1.5/千页（$0.225/1K），上传成功才收；对话引用不再收解析费（按拼入上下文的输入 token 计）。上传响应不含页数（实测见 `docs/pitfalls.md` "DeepSeek Files API"），所以缺页数时 seek 按文件字节数**估算**记费（`ceil(bytes÷104857)`，仅为「不留 $0」的兜底，误差方向随格式漂），并在标记与 transcript 里打「估」旗（`~N pages·估` / `pages_est`）；要精确数请以平台账单页为准。
 - **前缀缓存**：参与，且比图片更稳——文档按「解析后的文字」进 prompt，file_id 本身不占 token，换 id / 过期重传都**不击穿缓存**（实测同文档两轮 91% 命中）。
 - **限制**：单文档 ≤ 100 MiB；每请求 ≤ 20 个文档、文字合计 ≤ 8 MiB；每账号同时 15 个文档；file_id 有效期 1h–30 天或永久。超限 / 失败一律降级为 in-band 提示，不 fatal。
-- **回放**：文档消息渲染为折叠标记 `[file: 名字 — uploaded · text · 12 pages · file-api-xxxx]`（暗色，与图片标记同一样式）；读取失败 / 超限 / 上传失败也是同族标记，原文路径保留在 transcript 里。
+- **回放**：文档消息渲染为折叠标记 `[file: 名字 — uploaded · text · 12 pages · file-api-xxxx]`（暗色，与图片标记同一样式；估算页数写作 `~12 pages·估`）；读取失败 / 超限 / 上传失败也是同族标记，原文路径保留在 transcript 里。
 - **纯文本类不走上传**：txt / md / csv / json / 代码由 `read` 工具免费直读（无上传往返）；XLSX / EPUB 暂不在后缀表。
 
 ## 二线 provider（Anthropic / OpenAI / Gemini 等）

@@ -21,4 +21,12 @@
 # keeps every toolchain's margin exactly as it was instead of baking
 # this machine's skew in. Gate runners: pass GOTOOLCHAIN=go1.25.8
 # locally to reproduce CI's numbers. (Pitfall logged in docs/pitfalls.)
-30494824
+# 2026-11-19 c_txz6vz ratchet: +8192B (persistent collapsible session
+# sidebar — page CSS/markup/JS ~9.3KB source, no new Go). Same rule as
+# the c_x2au4t entry above: DELTA-added, not re-measured. Both
+# toolchains agree on the delta (go1.25.8: 29206864→29215056 =
+# +8192B; go1.27.3: 31017169→31025353 = +8184B), well inside the
+# §13.3 ≤20KB quota for this card. Final go1.25.8 build after the
+# refreshState list-refresh wiring: 29214992B (−64B from first
+# measurement, still +8128B over the pre-card base).
+30503016

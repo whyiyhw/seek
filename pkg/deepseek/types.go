@@ -142,7 +142,7 @@ type ChatRequest struct {
 
 	// SafetyCheck opts this request into DeepSeek's model safety check
 	// (wire shape "safety_check": {"level": "high"} — the only tier
-	// documented today; docs/prd/feature-deepseek-app-api.md §5). nil =
+	// documented today; docs/prd/archive/feature-deepseek-app-api.md §5). nil =
 	// off, and the key is then absent from the marshalled body, so
 	// text-only requests stay byte-identical to their pre-SC1 shape
 	// (prefix-cache discipline). A response the check flags ends with

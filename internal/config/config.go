@@ -115,7 +115,7 @@ type Config struct {
 	Language string `json:"language,omitempty"`
 
 	// SafetyCheck opts the DeepSeek lane into the model safety check
-	// (docs/prd/feature-deepseek-app-api.md §5): DeepSeek documents one
+	// (docs/prd/archive/feature-deepseek-app-api.md §5): DeepSeek documents one
 	// tier, "high"; empty/absent = off — the self-hosting default,
 	// because a refusal is pure capability loss for the agent's own work
 	// (security research included) plus latency. It exists for users who
@@ -313,7 +313,7 @@ func (c Config) ReadWholeReadBytes() int {
 // SafetyCheckLevel returns the level to send in
 // deepseek.ChatRequest.SafetyCheck: "high" when the user opted in, ""
 // (off) otherwise. Only "high" is documented
-// (docs/prd/feature-deepseek-app-api.md §5), so any other value reads as
+// (docs/prd/archive/feature-deepseek-app-api.md §5), so any other value reads as
 // off instead of being forwarded as a guess — a typo must not silently
 // select some half-supported tier. Matching is whitespace-trimmed and
 // case-insensitive so hand-edited config files stay forgiving.
