@@ -1,5 +1,7 @@
 # kernel-packages.txt — the v8 kernel package set (docs/prd/v8.md §3, card c_zcygo2;
-# revised 2026-11-19 per the U1 verdict table at docs/prd/v8.md §9.5, card c_3acz3q).
+# revised 2026-11-19 per the U1 verdict table at docs/prd/v8.md §9.5, card c_3acz3q;
+# re-checked 2026-11-20 after merging main: internal/budget admitted (verdicts #10/#11,
+# same static-authority-table family as pricing/modelcap — see §9.5 复检).
 # One package per line, relative to the module root; '#' comments and blank
 # lines are ignored. Consumed by scripts/kernel-deps.sh — the advisory
 # dependency-direction report (kernel must not import non-kernel packages).
@@ -21,6 +23,7 @@ internal/sandbox
 internal/worktree
 internal/cache
 internal/pricing
+internal/budget
 internal/modelcap
 internal/config
 internal/paths
