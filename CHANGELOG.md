@@ -35,3 +35,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_erzfzx：MCP-D5：Phase 3 决策卡——按 §5.4 判定数据定 grep 结果内 hint 后手 go/no-go（读数非实现）
 - c_254zzz：transcript-stats 离线分析器 + 历史效率基线报告：重复率/翻页率/read 重读落 eval/
 - c_ennnwa：eval v2 E1：--rounds 多轮跑（轮次聚合 + 崩溃分母）+ expect.json min_pass_rate 标量界（界前缀扫描排除）+ eval-rounds-test.sh 自测
+- c_ums2k4：bridge·M-B5：收尾——AGENTS.md skill 段一行注记 + pitfalls + v1.md 勘误核对
