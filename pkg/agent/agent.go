@@ -436,6 +436,13 @@ Keep it under ~400 words. Bullet points where they help. Do not narrate that you
 // NOT modified — callers decide whether to swap in via Reset(). Tools
 // are intentionally omitted from the request: we want prose, not a
 // function call.
+//
+// When the history overflows the model's context window — the state
+// /compact exists to rescue — the full-history request itself cannot
+// fit, so the call degrades instead of failing: oversized bodies are
+// truncated and the oldest messages dropped until the request fits
+// (compact_rescue.go). Fitting histories go out byte-identical to the
+// pre-rescue shape.
 func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 	if a.cfg.Provider != nil {
 		return a.summariseLLM(ctx)
@@ -446,15 +453,27 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 		Content: summariserPrompt,
 	})
 
+	// Attachments stripped: the briefing only needs prior TEXT (the
+	// attached-image / attached-document markers live in Content),
+	// and this side-channel call must not pay for — or depend on
+	// resolving — image bytes or document ids.
+	msgs := deepseek.WithoutFiles(deepseek.WithoutImages(deepseek.StripReasoningContent(history)))
+	budgetTokens := rescueBudget(a.cfg.Model, a.cfg.MaxTokens)
 	req := &deepseek.ChatRequest{
-		Model: a.cfg.Model,
-		// Attachments stripped: the briefing only needs prior TEXT (the
-		// attached-image / attached-document markers live in Content),
-		// and this side-channel call must not pay for — or depend on
-		// resolving — image bytes or document ids.
-		Messages: deepseek.WithoutFiles(deepseek.WithoutImages(deepseek.StripReasoningContent(history))),
+		Model:    a.cfg.Model,
+		Messages: prepareSummariseMessages(msgs, budgetTokens),
 	}
 	resp, err := a.cfg.Client.Chat(ctx, req)
+	if isContextOverflowError(err) {
+		// The estimator said the request fit; the API disagrees. Retry
+		// once at half budget — one halving absorbs far more than the
+		// estimator's worst-case drift, and both attempts failing
+		// surfaces the error unchanged. Re-derives from the original
+		// msgs so the elision note is never doubled.
+		retry := *req
+		retry.Messages = prepareSummariseMessages(msgs, budgetTokens/2)
+		resp, err = a.cfg.Client.Chat(ctx, &retry)
+	}
 	if err != nil {
 		return "", deepseek.Usage{}, err
 	}
@@ -465,18 +484,35 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 }
 
 // summariseLLM is the second-tier path for Summarise: uses ChatStream
-// (no non-streaming equivalent in the llm.Provider interface).
+// (no non-streaming equivalent in the llm.Provider interface). Carries
+// the same compact-overflow rescue as the DeepSeek path — the deadlock
+// shape (full history through an overflowing window) is lane-agnostic.
 func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error) {
-	msgs := msgsToLLM(a.messages)
-	msgs = append(msgs, llm.Message{Role: "user", Content: summariserPrompt})
+	src := append([]deepseek.Message{}, a.messages...)
+	src = append(src, deepseek.Message{Role: deepseek.RoleUser, Content: summariserPrompt})
+	budgetTokens := rescueBudget(a.cfg.Model, a.cfg.MaxTokens)
+
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  msgs,
+		Messages:  msgsToLLM(prepareSummariseMessages(src, budgetTokens)),
 		MaxTokens: a.cfg.MaxTokens,
 		SessionID: a.sessionID(),
 	}
+	summary, usage, err := drainSummariseStream(ctx, a.cfg.Provider, req)
+	if isContextOverflowError(err) {
+		// Same reactive story as the DeepSeek path: one retry at half
+		// budget, re-derived from the original messages.
+		retry := req
+		retry.Messages = msgsToLLM(prepareSummariseMessages(src, budgetTokens/2))
+		summary, usage, err = drainSummariseStream(ctx, a.cfg.Provider, retry)
+	}
+	return summary, usage, err
+}
 
-	stream, err := a.cfg.Provider.ChatStream(ctx, req)
+// drainSummariseStream runs one second-tier ChatStream summariser
+// request to completion, collecting text deltas and usage.
+func drainSummariseStream(ctx context.Context, p llm.Provider, req llm.ChatRequest) (string, deepseek.Usage, error) {
+	stream, err := p.ChatStream(ctx, req)
 	if err != nil {
 		return "", deepseek.Usage{}, err
 	}
@@ -1050,26 +1086,33 @@ func (a *Agent) sessionID() string {
 func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	// Same attachment station as the DeepSeek path (see
 	// runTurnDeepSeek), in the same order: capability gate → resolve
-	// assets → PrepareMessages → convert. The gate is evaluated here,
+	// assets → PrepareMessages → convert. The gates are evaluated here,
 	// at send time, because /model can swap the model (and ACP the
 	// whole lane) between the submit and this request.
 	prepared := a.messages
 	vision := modelcap.Vision(a.cfg.Model)
+	docs := modelcap.Files(a.cfg.Model)
 	if len(prepared) > 0 && !vision {
 		prepared = deepseek.WithoutImages(prepared)
 	}
 	if a.cfg.ImageLoader != nil {
 		prepared = deepseek.ResolveImages(prepared, a.cfg.ImageLoader)
 	}
+	// Documents on the second-tier path materialise as data: URLs (the
+	// Files API's file_id is DeepSeek-wire-only). The FileResolver's
+	// loader is wired on every lane; its Upload half stays nil here.
+	if docs && a.cfg.FileResolver != nil && a.cfg.FileResolver.Load != nil {
+		prepared = deepseek.ResolveFileData(prepared, a.cfg.FileResolver.Load)
+	}
 	if a.cfg.PrepareMessages != nil {
 		prepared = a.cfg.PrepareMessages(prepared)
 	}
-	// msgsToLLMWithImages is the byte-shape conversion; it shouldn't
+	// msgsToLLMWithAttachments is the byte-shape conversion; it shouldn't
 	// know about calibration semantics — and it must not decide
-	// capability itself (the gate above already did).
+	// capability itself (the gates above already did).
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  msgsToLLMWithImages(prepared, vision),
+		Messages:  msgsToLLMWithAttachments(prepared, vision, docs),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
 		SessionID: a.sessionID(),

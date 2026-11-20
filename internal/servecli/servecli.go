@@ -76,6 +76,10 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		// plane (the M12.1 rows). GET /subagents stays as the panel's
 		// compatibility口 — both read the same disk fold.
 		methods.NewSubagents().RegisterAll(reg)
+		// W5 c_n37tnr: the approval hub methods are frontend-native
+		// state (not a disk-backed asset family), so they register on
+		// the frontend itself — still pre-Run, same phase contract.
+		fe.RegisterApprovalMethods(reg)
 		return fe
 	},
 	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides

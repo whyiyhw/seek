@@ -48,4 +48,4 @@ Shell Hooks 实现中的关键教训，以下是来自 [`docs/pitfalls.md`](../p
 - **Saw**：shell-hooks trust 对话框通过 `askuser.Policy` 触发，但初次信任发生在 TUI 启动前，`SetAskFn` 尚无回调。
 - **Fix**：构建独立 `stdinTrustPrompt`，在 `tea.NewProgram` 前通过 stdin 完成信任确认。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。

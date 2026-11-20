@@ -387,6 +387,8 @@ func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
 // walks messages by cursor. A method rename on either side strands the
 // browser silently (a dead button, not a crash), so the names are pinned
 // here against the page the same way the renderer is pinned above.
+// (W5 c_txz6vz kept the data plane verbatim — only the chrome moved from
+// a popup pane to the persistent sidebar, so these pins still hold.)
 func TestWeb_PageSessionsBrowser(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
@@ -407,6 +409,39 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 	for _, keep := range []string{"id=\"form\"", "id=\"list\"", "addEventListener('submit'"} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("embedded page lost the chat-plane piece %q — W4.4 must be additive", keep)
+		}
+	}
+}
+
+// TestWeb_PageSessionSidebar pins the W5 sidebar card (c_txz6vz): the
+// sessions list is a PERSISTENT left rail — collapse bit persisted in
+// localStorage with a narrow-viewport default, a ＋新建 that rides the
+// same /new command text, a title filter, and an updated-sorted row list
+// paged SESS_PAGE at a time. It also asserts the retired W4.4 popup left
+// no dead references behind (the card's acceptance ③): no browse button,
+// no sess-view class, no sessions entry in the pane switcher.
+func TestWeb_PageSessionSidebar(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"id=\"side\"",              // the rail itself
+		"id=\"side-toggle\"",       // collapse affordance
+		"id=\"side-search\"",       // title filter input
+		"id=\"side-new\"",          // new-session button
+		"seek-side-collapsed",      // the remembered bit's key
+		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
+		"innerWidth < 1024",        // narrow viewport defaults to collapsed
+		"SESS_PAGE = 30",           // row page size (filter+page are client-side)
+		"sendText('/new', false)",  // ＋新建 is the /new command, not a new protocol
+		"sess-detail",              // main area swaps to a transcript on row click
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz)", need)
+		}
+	}
+	// Acceptance ③ — the 📚 popup code is retired with no dead references.
+	for _, gone := range []string{"browse-btn", "sess-view", "togglePane('sessions'"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("embedded page still carries the retired W4.4 popup piece %q (W5 c_txz6vz must leave no dead reference)", gone)
 		}
 	}
 }
@@ -463,11 +498,13 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 			t.Errorf("embedded page lost the memory/stats piece %q (W4.5)", need)
 		}
 	}
-	// Additivity: chat plane AND the W4.4 sessions browser both survive
-	// the W4.5 panes (the pane switcher hides by class, never unmounts).
+	// Additivity: chat plane AND the sessions browser both survive the
+	// W4.5 panes (the pane switcher hides by class, never unmounts).
+	// W5 c_txz6vz moved the sessions list into the persistent sidebar
+	// (the 📚 popup button retired), so the pin rides the sidebar ids.
 	for _, keep := range []string{
 		"id=\"form\"", "addEventListener('submit'",
-		"id=\"browse-btn\"", "session/messages", "加载更多",
+		"id=\"sess-list\"", "id=\"side-toggle\"", "session/messages", "加载更多",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("embedded page lost the prior-plane piece %q — W4.5 must be additive", keep)

@@ -600,7 +600,7 @@ v1.0 不是终点, 是节奏的换挡。第 15.7 节那份验收清单全绿之�
 - **Saw**：构建脚本在 macOS 上失败，因为 bash 3.2 没有 `mapfile`/`readarray` 命令。
 - **Fix**：使用兼容 POSIX 的循环替代。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

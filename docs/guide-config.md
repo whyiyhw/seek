@@ -47,6 +47,7 @@ API 密钥的查找优先级从高到低：
 | `push_webhooks` | array | 推送通知 webhook 配置（见 [guide-webhooks.md](guide-webhooks.md)）|
 | `session_notify_seconds` | int | 交互回合持续超过此秒数时触发推送通知。缺省 = 60s，设为 0 禁用 |
 | `safety_check` | string | DeepSeek 模型安全校验（只认 `"high"` 一档；缺省/空 = 关）。命中拒答时回合内记 `[safety: 拒答（safety_check 命中）]`。**会话启动读一次**，不支持对话中切换（见下文「模型安全校验」）|
+| `auto_compact` | object | 自动压缩触发点（`at_tokens` 绝对 token 数 / `at_fraction` 占模型窗口的比例；缺省 = 关）。见 [guide-budget.md](guide-budget.md) §2.5 |
 | `agents` | object | 子代理类型的默认路由覆写（见下节；键 = 类型名，值 = 仅路由旋钮）|
 
 ---

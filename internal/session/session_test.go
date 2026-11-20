@@ -676,12 +676,14 @@ func TestSaveLoad_Roundtrip_Files(t *testing.T) {
 	store := newStoreIn(t)
 	sess := New(deepseek.ModelV41Flash, "/tmp", "sys", false, false)
 	sess.Messages = []deepseek.Message{
-		{Role: deepseek.RoleUser, Content: "summarise\n\n[file: report.pdf — uploaded · text · 12 pages · file-api-1]",
+		{Role: deepseek.RoleUser, Content: "summarise\n\n[file: report.pdf — uploaded · rich · ~12 pages·估 · file-api-1]",
 			Files: []deepseek.FilePart{{
-				Asset:     "ab12cd34ef56.pdf",
-				FileID:    "file-api-1",
-				ExpiresAt: 1765392000,
-				Purpose:   deepseek.PurposeRichLayoutRecognition,
+				Asset:          "ab12cd34ef56.pdf",
+				FileID:         "file-api-1",
+				ExpiresAt:      1765392000,
+				Purpose:        deepseek.PurposeRichLayoutRecognition,
+				Pages:          12,
+				PagesEstimated: true,
 			}}},
 		{Role: deepseek.RoleAssistant, Content: "twelve pages"},
 	}
@@ -704,6 +706,12 @@ func TestSaveLoad_Roundtrip_Files(t *testing.T) {
 		FileID:    "file-api-1",
 		ExpiresAt: 1765392000,
 		Purpose:   deepseek.PurposeRichLayoutRecognition,
+		// The parse-observation pair (card c_y2akdi) rides the same
+		// line: the post-hoc reconciliation reads {file_id, pages,
+		// estimate flag} off the JSONL alone, so losing either field
+		// here would silently void the observation surface.
+		Pages:          12,
+		PagesEstimated: true,
 	}
 	if fs[0] != want {
 		t.Fatalf("file part drifted: %+v, want %+v", fs[0], want)

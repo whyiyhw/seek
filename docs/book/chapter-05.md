@@ -375,7 +375,7 @@ type Args struct {
 
 - **Lesson**：权限模式是横切关注点，新增 `Mode` 值的 checklis 包括：`permission.go` 的常量定义、`Check` 的 switch/case、TUI 状态栏渲染、plan-mode 子态判断等 7 个以上位置。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

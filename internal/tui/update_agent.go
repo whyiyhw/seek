@@ -188,12 +188,100 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	// bubbletea thread. Fires only at "at rest, ready for next user
 	// input" (no queue / steer auto-fired above). PRD §3 triggers
 	// gate further inside scheduleSuggestion.
+	//
+	// Auto-compact runs FIRST and, when it fires, returns immediately:
+	// the summariser is about to rewrite the history, so scheduling a
+	// prediction against the old one would just be dropped on arrival
+	// (scheduleSuggestion's turn check). It also never fires alongside a
+	// queue/steer/goal — those mean another turn is already on its way,
+	// and that turn's own stream-end re-checks the same threshold.
+	if cmd, notice := m.maybeAutoCompact(wasCanceled); cmd != nil {
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  "+notice)), cmd)
+		return m, tea.Batch(cmds...)
+	}
+
 	if cmd := m.scheduleSuggestion(wasCanceled); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 
 	_ = msg
 	return m, tea.Batch(cmds...)
+}
+
+// autoCompactAt resolves the configured trigger for the LIVE model (a
+// /model switch changes the window, so a fraction-configured trigger
+// moves with it). 0 = off.
+func (m Model) autoCompactAt() int {
+	if m.opts.AutoCompactAt == nil {
+		return 0
+	}
+	return m.opts.AutoCompactAt(m.opts.Model)
+}
+
+// contextUsed returns the current context size in tokens — the last
+// completed turn's prompt+completion, i.e. what the status bar's ctx%
+// reads. Zero before any turn has landed this run (a resumed session
+// starts at zero even with a large history: the trigger needs one turn
+// of real measurement, which is the honest reading).
+func (m Model) contextUsed() int {
+	if m.opts.Tracker == nil {
+		return 0
+	}
+	u := m.opts.Tracker.Last()
+	return u.PromptTokens + u.CompletionTokens
+}
+
+// maybeAutoCompact starts an automatic compaction when the turn that
+// just ended left the context at or above the configured trigger.
+// Returns (nil, "") when nothing fires.
+//
+// Deliberately narrow: only at TRUE REST (no queued/steered message, no
+// active /goal loop, no user Esc), because the summariser rewrites the
+// agent's history — running it underneath a turn that is already being
+// dispatched would swap the history out from under that turn.
+//
+// The fork-snapshot semantics of /compact are inherited unchanged, so an
+// automatic compaction never destroys history: the pre-compact session
+// stays on disk and the child session carries the summary.
+func (m *Model) maybeAutoCompact(wasCanceled bool) (tea.Cmd, string) {
+	if wasCanceled || m.streaming || m.compacting {
+		return nil, ""
+	}
+	at := m.autoCompactAt()
+	if at <= 0 || m.opts.Agent == nil {
+		return nil, ""
+	}
+	// No persistence = no snapshot = an automatic compaction would
+	// destroy the only copy of the history. Manual /compact stays
+	// available there (the user asked for it, knowing --no-save); the
+	// unattended path does not get to make that call.
+	if m.opts.Session == nil || m.opts.Store == nil {
+		return nil, ""
+	}
+	// Another turn is already lined up — its own stream-end re-checks.
+	if m.queuedText != "" || m.pendingSteerText != "" || m.goalActive {
+		return nil, ""
+	}
+	// ≤ 2 messages is [system, maybe one user msg]: nothing to summarise.
+	msgs := len(m.opts.Agent.Messages())
+	if msgs <= 2 {
+		return nil, ""
+	}
+	// The last compaction just happened and nothing has been added since
+	// (a user message and an assistant reply are +2). Re-summarising the
+	// freshly-compacted pair would pay a full request per turn for no
+	// gain.
+	if m.compactedMsgs > 0 && msgs <= m.compactedMsgs+2 {
+		return nil, ""
+	}
+	used := m.contextUsed()
+	if used < at {
+		return nil, ""
+	}
+	m.compacting = true
+	return startCompactCmd(m), fmt.Sprintf(
+		"ctx %s ≥ auto-compact at %s — compacting (snapshot preserved)…",
+		formatTokensK(used), formatTokensK(at))
 }
 
 // scheduleSuggestion returns a tea.Cmd that runs the suggester's
@@ -706,6 +794,9 @@ func unclosedFence(s string) bool {
 // The chain is traversable via --resume and visible in --list, so no
 // history is ever permanently lost.
 func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
+	// Clear the re-entry latch first: whichever way this compaction
+	// resolved, the next stream-end is allowed to try again.
+	m.compacting = false
 	if msg.err != nil {
 		return []tea.Cmd{m.appendHistory(styleErr.Render("  ! compact failed: " + msg.err.Error()))}
 	}
@@ -758,6 +849,9 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 
 	// 3. Write summary messages to the child session.
 	m.persistSession()
+	// Remember the post-compact history size so the next few turns can't
+	// immediately re-trigger on the same tiny history.
+	m.compactedMsgs = len(m.opts.Agent.Messages())
 
 	var notice string
 	if snapshotID != "" && m.opts.Session != nil {

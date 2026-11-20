@@ -160,6 +160,58 @@ const (
 	CriticalFraction = 0.75
 )
 
+// warnRatioOfCritical keeps the amber tint in proportion to whatever
+// critical point is in force. With the compiled defaults it reproduces
+// WarnFraction/CriticalFraction (0.60/0.75) exactly; with a configured
+// auto-compact trigger it puts the warning at 80% of the point where
+// compaction actually happens, instead of leaving the bar mute until
+// the trigger fires. TestClassifyAt_MatchesCompiledFractions pins the
+// two paths together.
+const warnRatioOfCritical = 0.8
+
+// AutoCompactAt resolves the auto-compact trigger in TOKENS for a
+// model. An explicit token count wins — it is model-independent, which
+// is what you want when you know your working set ("compact at 350k"
+// regardless of which lane is live). Otherwise the fraction scales the
+// model's CURRENT window, so a /model switch moves the trigger with
+// it. A non-positive result means "disabled".
+//
+// The fraction is deliberately not clamped: > 1 yields a trigger above
+// the window, which simply never fires (fail-safe — a typo must not
+// cause compaction storms).
+func AutoCompactAt(model string, tokens int, fraction float64) int {
+	if tokens > 0 {
+		return tokens
+	}
+	if fraction <= 0 {
+		return 0
+	}
+	limit := Limit(model)
+	if limit <= 0 {
+		return 0
+	}
+	return int(float64(limit) * fraction)
+}
+
+// ClassifyAt is Classify with an explicit critical threshold in tokens
+// — the resolved auto-compact point, so the status bar escalates where
+// compaction will actually happen rather than at a compiled constant.
+// criticalAt <= 0 falls back to Classify (compiled fractions), which is
+// also what a disabled auto-compact gives you.
+func ClassifyAt(model string, usedTokens, criticalAt int) Severity {
+	if criticalAt <= 0 {
+		return Classify(model, usedTokens)
+	}
+	switch {
+	case usedTokens >= criticalAt:
+		return SeverityCritical
+	case float64(usedTokens) >= warnRatioOfCritical*float64(criticalAt):
+		return SeverityWarn
+	default:
+		return SeverityOK
+	}
+}
+
 // Classify returns the severity for usedTokens against the given
 // model's limit.
 func Classify(model string, usedTokens int) Severity {

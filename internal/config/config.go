@@ -26,8 +26,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/whyiyhw/seek/internal/budget"
 	"github.com/whyiyhw/seek/internal/paths"
 )
 
@@ -113,7 +115,7 @@ type Config struct {
 	Language string `json:"language,omitempty"`
 
 	// SafetyCheck opts the DeepSeek lane into the model safety check
-	// (docs/prd/feature-deepseek-app-api.md §5): DeepSeek documents one
+	// (docs/prd/archive/feature-deepseek-app-api.md §5): DeepSeek documents one
 	// tier, "high"; empty/absent = off — the self-hosting default,
 	// because a refusal is pure capability loss for the agent's own work
 	// (security research included) plus latency. It exists for users who
@@ -144,6 +146,77 @@ type Config struct {
 	// agents/*.md — cmd/seek threads it into agenttypes.Load between
 	// the file scopes and the built-ins. Nil/absent = built-ins only.
 	Agents map[string]AgentConfig `json:"agents,omitempty"`
+
+	// AutoCompact arms the automatic /compact trigger (see
+	// AutoCompactConfig). Nil = off, which is the shipped default: an
+	// automatic history rewrite is a behaviour change to the
+	// conversation, so it stays opt-in.
+	AutoCompact *AutoCompactConfig `json:"auto_compact,omitempty"`
+}
+
+// AutoCompactConfig is the `auto_compact` section: when the last turn's
+// context usage crosses this point, seek runs the same summariser
+// `/compact` runs (fork-snapshot, so the full history stays on disk) at
+// the end of the turn instead of waiting for the user to notice the
+// status bar.
+//
+// Two ways to say "when", because they answer different questions:
+//
+//   - AtTokens is model-INDEPENDENT: "compact at 350k" holds whichever
+//     lane is live. Wins when both are set.
+//   - AtFraction scales the CURRENT model's window: 0.35 of a 1M window
+//     is 350k, and a /model switch moves the trigger with the window.
+//
+// Both zero/absent = disabled. Values are clamped to a sane floor
+// (a trigger below ~1k tokens would compact constantly, and the
+// summariser call itself costs more than the history it replaces).
+type AutoCompactConfig struct {
+	AtTokens   int     `json:"at_tokens,omitempty"`
+	AtFraction float64 `json:"at_fraction,omitempty"`
+}
+
+// minAutoCompactTokens is the floor under any configured trigger. The
+// summariser request re-sends the whole history, so compacting a
+// handful of tokens is a net loss; 1k is well under any useful working
+// set and well over the cost of the call.
+const minAutoCompactTokens = 1000
+
+// AutoCompactThreshold returns the configured trigger in tokens for the
+// given model, or 0 when auto-compact is off. Nil-safe. The fraction
+// path is resolved against the LIVE model so /model moves the trigger;
+// an explicit at_tokens ignores the model entirely.
+//
+// $SEEK_AUTO_COMPACT overrides the file for one launch, same precedence
+// shape as SEEK_LANG: a bare number with a dot ("0.35") is a fraction of
+// the model's window, a plain integer ("350000") is an absolute token
+// count, and "0" / "off" / "false" disables it. An empty or unparsable
+// value is ignored (the file's setting stands) rather than guessed at —
+// an empty env var is the shell's way of saying "nothing here", not of
+// saying "off".
+func (c Config) AutoCompactThreshold(model string) int {
+	tokens, fraction := 0, 0.0
+	if c.AutoCompact != nil {
+		tokens, fraction = c.AutoCompact.AtTokens, c.AutoCompact.AtFraction
+	}
+	if raw, ok := os.LookupEnv("SEEK_AUTO_COMPACT"); ok {
+		switch v := strings.ToLower(strings.TrimSpace(raw)); {
+		case v == "0", v == "off", v == "false":
+			tokens, fraction = 0, 0
+		case strings.ContainsAny(v, ".e"):
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				tokens, fraction = 0, f
+			}
+		default:
+			if n, err := strconv.Atoi(v); err == nil {
+				tokens, fraction = n, 0
+			}
+		}
+	}
+	at := budget.AutoCompactAt(model, tokens, fraction)
+	if at < minAutoCompactTokens {
+		return 0
+	}
+	return at
 }
 
 // AgentConfig is one `agents`-section entry: the routing knobs a
@@ -240,7 +313,7 @@ func (c Config) ReadWholeReadBytes() int {
 // SafetyCheckLevel returns the level to send in
 // deepseek.ChatRequest.SafetyCheck: "high" when the user opted in, ""
 // (off) otherwise. Only "high" is documented
-// (docs/prd/feature-deepseek-app-api.md §5), so any other value reads as
+// (docs/prd/archive/feature-deepseek-app-api.md §5), so any other value reads as
 // off instead of being forwarded as a guess — a typo must not silently
 // select some half-supported tier. Matching is whitespace-trimmed and
 // case-insensitive so hand-edited config files stay forgiving.

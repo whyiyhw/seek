@@ -365,6 +365,6 @@ feat(M11.1): agent.isolation=worktree end-to-end (Phase 2)          [ddaab85]
 - **Why**：`agent` 工具没有实现 `ReadOnlyTool` 接口，调度器不知道它可以安全并行。
 - **Fix**：给 agent tool 加上 `ReadOnly() bool { return true }` 方法。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 阅读本章前建议先读 PRD `v5.md` + `feature-subagent.md`，再 `go test -race ./internal/subagent/... ./internal/worktree/... ./internal/tools/{agent,enterworktree,exitworktree}/...` 跑一遍验收测试理解边界行为。

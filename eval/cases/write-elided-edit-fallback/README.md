@@ -1,6 +1,6 @@
 # write-elided-edit-fallback
 
-**Source pitfall**: docs/pitfalls.md "Filesystem / model safety" — *"A read that reached EOF but got elided still vouched for the whole file"* (line 1273). A full read whose output exceeded the 64 KiB result cap recorded an elided note instead of an observation, so the write guard refuses with `StatusElided` — whose message names `edit` as the recovery, explicitly NOT "read it again" (the same parts elide every time; re-reading can never clear the note). Scaffolded by `scripts/pitfall-to-eval.sh --make 1273`, hand-finished as one of the first three seeded cases.
+**Source pitfall**: docs/pitfalls.md "Filesystem" — *"A read that reached EOF but got elided still vouched for the whole file"*（行号随文件增长漂移，按标题 grep）. A full read whose output exceeded the 64 KiB result cap recorded an elided note instead of an observation, so the write guard refuses with `StatusElided` — whose message names `edit` as the recovery, explicitly NOT "read it again" (the same parts elide every time; re-reading can never clear the note). Scaffolded by `scripts/pitfall-to-eval.sh --make`, hand-finished as one of the first three seeded cases.
 
 ## What this probes
 
