@@ -6,9 +6,10 @@ through `seek -json` and checks the resulting tool-call stream
 against the case's `expect.json`.
 
 This is **not** a unit-test suite — it's a black-box probe of LLM
-behaviour against the real DeepSeek API, with all the stochasticity
-that implies. A single failing run is signal, not proof; trends
-across versions are what matter.
+behaviour against a real model API (default lane since 2026-11-20:
+the OpenCode Go subscription's DeepSeek — see § "Provider lane"),
+with all the stochasticity that implies. A single failing run is
+signal, not proof; trends across versions are what matter.
 
 ## Layout
 
@@ -203,7 +204,13 @@ automatically — commit a `.md` by hand when a run is meant to backfill
 **Both lanes write to `eval/ablation/`, never to `eval/results/`** —
 that dir is the trend reports' data source, and ablation rows there
 would fabricate regressions. The isolation rides on two `run.sh` env
-knobs (both unset = historical behaviour, byte for byte):
+knobs (both unset = historical behaviour, byte for byte). The
+provider lane is orthogonal: `ablate.sh` sets no `SEEK_EVAL_PROVIDER*`
+knobs, so both ablation lanes ride run.sh's DEFAULT provider lane
+(the OpenCode Go subscription since the 2026-11-20 user call —
+ablation runs are batch by definition and must not burn the metered
+key either; the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback is a
+human decision, see § "Provider lane"):
 
 | Env var | Effect |
 |---|---|
@@ -237,8 +244,38 @@ under `eval/ablation/` (mtime-guarded: pre-existing ablation data is
 untouched) and fails loudly if normalisation ever degrades to empty
 output — an early revision shipped exactly that false-green.
 
+## Provider lane: test traffic on the OpenCode Go plan (c_ffzic2)
+
+**口径（v8.md §9.1）：测试默认 OpenCode Go 套餐 DeepSeek（订阅内）；计量真 key 仍仅 `--only` 人工指名或卡面明示授权。** Batch/unattended eval runs (three-arm comparisons, regressions, ablation lanes) must never burn the metered DeepSeek key — since the 2026-11-20 user call (疑点 A option (a)) the harness's **default lane IS the OpenCode Go subscription's `deepseek-v4.1-flash`**: all four knobs unset steers every seek invocation there, and the only way back to the metered key lane is the explicit `SEEK_EVAL_PROVIDER=deepseek` (a human decision — the env form of 人工指名).
+
+Four `run.sh` env knobs (all four unset = **default opencode lane**, not the historical metered lane):
+
+| Env var | Effect |
+|---|---|
+| `SEEK_EVAL_PROVIDER` | `deepseek` \| `opencode` \| `compatible`. Unset = `opencode` (OpenCode Go plan; seek's own lane, default model `deepseek-v4.1-flash`). `deepseek` = explicit fallback to the metered key lane — the historical invocation shape (no `-provider` flag, env `DEEPSEEK_API_KEY` untouched by the scrub). `compatible` = any OpenAI-compatible endpoint |
+| `SEEK_EVAL_MODEL` | model id, passed as `-model`; with `opencode` unset it IS `deepseek-v4.1-flash` (seek's lane default) |
+| `SEEK_EVAL_BASE_URL` | endpoint override (full POST target), passed as `-base-url` **and** exported as `OPENCODE_BASE_URL` so a `providers.opencode.base_url` config preset can't out-rank the flag inside seek |
+| `SEEK_EVAL_API_KEY` | lane credential, exported as the lane's canonical env var (`DEEPSEEK_API_KEY` / `OPENCODE_API_KEY` / `OPENAI_API_KEY`); never write real keys into card text, logs or expect files |
+
+While the opencode/compatible lane is active, `run.sh` **scrubs `DEEPSEEK_API_KEY` from the child environment** — the metered key has zero reach into a switched lane (seek's `compatible` case would otherwise read it as a fallback credential). The deepseek lane is the metered lane itself, so only there the env key survives. Credential resolution itself happens inside seek: `OPENCODE_API_KEY` env > `providers.opencode.api_key` > the stored browser login.
+
+**Token rule (hard): the harness never reads — and never refreshes — `~/.seek/opencode-auth.json`.** The refresh token is single-use; a side refresh invalidates the copy seek holds. An expired login surfaces as loud API errors and a human re-logs in; it is never self-healed by eval tooling.
+
+**runner.sh forwarding contract.** Cases that build their own invocations (e.g. the mcp-semble-routing arm engine) opt in by forwarding the exported lane args — the same opt-in shape as `SEEK_EVAL_EXTRA_ARGS`:
+
+```bash
+"$SEEK_EVAL_BINARY" -yolo -no-save -max-turns "$SEEK_EVAL_MAX_TURNS" \
+  -json ${SEEK_EVAL_PROVIDER_ARGS-} -p "$prompt"
+```
+
+`SEEK_EVAL_PROVIDER_ARGS` is empty only on the explicit `deepseek` fallback lane (`${VAR-}` is the `set -u`-safe reference; the default opencode lane forwards `-provider opencode`), and the lane's exported credential env vars ride along automatically. Wiring the arm runner this way is the follow-up for the mcp-semble line (card c_eyuxqm ② 复核 and later MCP-lane tests default to this provider).
+
+**Hermetic proof.** `eval/tools/fake_openai_compat.py` is a local fake OpenAI-compatible endpoint (one text delta + usage + `[DONE]`, same wire shape as `fake_paas_glm.py`) that records every POST's path / auth / model to a JSONL log. `scripts/eval-provider-test.sh` (auto-discovered by the [`scripts/selftest.sh`](../scripts/selftest.sh) lane, name `eval-provider-test`) drives the REAL seek binary against it with fake keys and asserts **both the default path (all four knobs unset → `-provider opencode`, metered key scrubbed, wire model `deepseek-v4.1-flash`) and the explicit `deepseek` fallback path (no `-provider`, metered key intact)**, plus the four knobs mapping into argv/env, the request target/credential/model actually switching on the wire, a config-preset endpoint hijack being out-ranked, both env-side and config-side metered-key canaries never reaching the endpoint, and the runner contract above holding. Real-plan smoke (≥3 runs + metered-key usage delta check) is a human/main-session action, not a selftest.
+
+Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
+
 ## Cost
 
-Each pass is one full `seek` invocation against DeepSeek's API. Budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out. The full 3-case suite is well under $0.20.
+Each pass is one full `seek` invocation. On the default lane (since 2026-11-20: the OpenCode Go subscription's `deepseek-v4.1-flash`) it bills the subscription, not the metered API. On the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback it is one metered DeepSeek call — budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out (full 3-case suite well under $0.20).
 
 Rows also carry `cache_hit_tokens` (for cost accounting — see `docs/test-plan-read-tool.md` §3.3) and `final_text` (joined assistant text, capped at 2000 chars, for offline gold-answer scoring).
