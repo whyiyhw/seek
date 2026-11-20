@@ -258,6 +258,8 @@
   #side-head button, #side-new { padding: 4px 8px; font-size: 13px;
                                  background: #242830; }
   #side-toggle { flex: none; width: 26px; padding: 4px 0; }
+  #side-arch { flex: none; width: 26px; padding: 4px 0; background: #242830; }
+  #side-arch.on { background: #2c3d5f; }   /* 归档可见位：高亮记开关态 */
   #side-new { margin: 8px 10px 6px; display: flex; gap: 6px; align-items: center;
               justify-content: center; }
   #side-search { margin: 0 10px 8px; background: #14161a; color: inherit;
@@ -285,13 +287,31 @@
   body.sess-detail #list, body.sess-detail form,
   body.browsing #list, body.browsing form { display: none; }
   #browser-body { flex: 1; display: flex; min-height: 0; }
+  /* 行元素是 div（role=button）：行内还要装 ✏/🗄 操作钮与改名输入框，
+     button 套 button/input 是非法嵌套，div 承载才装得下（W5 c_rqcuaa）。 */
   .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
-              border-bottom: 1px solid #22252c; padding: 8px 12px; }
+              border-bottom: 1px solid #22252c; padding: 8px 12px;
+              cursor: pointer; position: relative; }
   .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
   .sess-row .t2 { display: block; color: #7a8089; font-size: 12px;
                   margin-top: 2px; }
   .sess-row.cur { background: #2c3d5f; }
+  .sess-row.arch { opacity: .55; }
+  .sess-row:focus-visible { outline: 1px solid #4a5568; }
+  /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
+  .sess-acts { position: absolute; right: 6px; top: 50%;
+               transform: translateY(-50%); display: none; gap: 2px;
+               background: #1b1e24; padding: 2px; border-radius: 6px; }
+  .sess-row:hover .sess-acts, .sess-row:focus-within .sess-acts { display: flex; }
+  .sess-acts button { padding: 2px 7px; font-size: 12px; background: #242830; }
+  /* 行内改名：编辑态下标题/操作让位给输入框（Enter 提交 / Esc 取消） */
+  .sess-edit { display: none; width: calc(100% - 16px); background: #14161a;
+               color: inherit; border: 1px solid #4a5568; border-radius: 6px;
+               padding: 4px 8px; font: inherit; font-size: 13px; outline: none; }
+  .sess-row.editing .sess-edit { display: block; }
+  .sess-row.editing .t1, .sess-row.editing .t2,
+  .sess-row.editing .sess-acts { display: none; }
   #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #browser-head { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
                   border-bottom: 1px solid #2a2e36; }
@@ -412,6 +432,7 @@
     <div id="side-head">
       <span id="side-title">会话</span>
       <button id="side-new" type="button" title="项目不变，开新会话（与 /new 同一条）">＋<span class="lbl">新建</span></button>
+      <button id="side-arch" type="button" title="显示归档会话">🗄</button>
       <button id="side-toggle" type="button" title="收起/展开会话侧栏">⟨</button>
     </div>
     <input id="side-search" type="search" autocomplete="off" placeholder="按标题搜索…" aria-label="按标题搜索会话">
@@ -1352,6 +1373,9 @@ mic.addEventListener('contextmenu', ev => ev.preventDefault());
 // 消费 W4.2 已合并的 /rpc method 集：session/list 驱动侧栏列表（updated
 // 倒序、标题子串过滤、30 条一页「加载更多」）、session/get 出元信息行、
 // session/messages 沿 next_cursor 逐页翻（50/页，「加载更多」追加）。
+// W5 c_rqcuaa 增写面：session/rename（行内改名，Enter 提交）+
+// session/archive（归档=列表过滤位；归档行默认隐藏，侧栏脚「显示归档」
+// 切换，切开后归档行沉底 + 变淡 + ⤴ 取消归档）。
 // DOM 只装已翻进的页——长 transcript 的常驻渲染量级与虚拟滚动同级，
 // 服务端与页面都不整读。渲染纪律与聊天面同源：textContent-only。
 const sessList = document.getElementById('sess-list');
@@ -1367,6 +1391,13 @@ const SESS_PAGE = 30;   // 侧栏一页行数（「加载更多」累加，与�
 let sel = null;         // 打开中的会话分页游标 {sid, next, done, busy}
 let allSessions = [];   // session/list 当前快照（过滤 + 分页的唯一来源）
 let shownSessions = SESS_PAGE;
+// 归档可见位（c_rqcuaa）：默认隐藏；记忆进 localStorage，刷新后保持——
+// 与收起位同款退化（隐私模式走内存值）。
+const ARCH_KEY = 'seek-show-archived';
+function readShowArch() {
+  try { return localStorage.getItem(ARCH_KEY) === '1'; } catch (e) { return false; }
+}
+let showArchived = readShowArch();
 
 // 收起状态记忆（验收②）：bit 落 localStorage，刷新后保持。首次访问按
 // 视口宽度定缺省（<1024px 窄屏默认收起，与 notes-dsh-ui-spec 的
@@ -1395,12 +1426,31 @@ function setSideCollapsed(v) {
 sideToggle.addEventListener('click', () => setSideCollapsed(!sideCollapsed));
 applySide();
 
+// 🗄 归档可见切换（c_rqcuaa）：头部图标钮——侧栏脚留给「加载更多」
+// （c_txz6vz 无头断言探的就是 #side-foot button，别占位）。点按翻转
+// showArchived 并整表重拉（include_archived 走服务端过滤口径）。
+const sideArch = document.getElementById('side-arch');
+function applyArchBtn() {
+  sideArch.classList.toggle('on', showArchived);
+  sideArch.title = showArchived ? '隐藏归档会话' : '显示归档会话';
+}
+sideArch.addEventListener('click', () => {
+  showArchived = !showArchived;
+  try { localStorage.setItem(ARCH_KEY, showArchived ? '1' : '0'); } catch (e) { /* 内存态即可 */ }
+  applyArchBtn();
+  loadSessions();
+});
+applyArchBtn();
+
 // 标题过滤（子串、忽略大小写）+ updated 倒序。服务端已按最新在前给，
-// 页面再排一次只为「过滤后顺序稳定」——不引入第二套排序口径。
+// 页面再排一次只为「过滤后顺序稳定」——不引入第二套排序口径。归档行
+// （仅在「显示归档」开时由服务端带回）同序过滤后沉底——活跃会话永远
+// 占视口上部。
 function filteredSessions() {
   const term = sideSearch.value.trim().toLowerCase();
   const rows = allSessions.filter(s => !term || (s.title || '').toLowerCase().includes(term));
-  return rows.sort((a, b) => new Date(b.last_at || 0) - new Date(a.last_at || 0));
+  rows.sort((a, b) => new Date(b.last_at || 0) - new Date(a.last_at || 0));
+  return rows.filter(s => !s.archived).concat(rows.filter(s => s.archived));
 }
 // 当前项 = 主区打开的那条，退化为已绑定的会话（两者都是「你正在看的」）。
 function curSid() { return (sel && sel.sid) || boundSession; }
@@ -1416,15 +1466,18 @@ function renderSessRows() {
   sessList.replaceChildren();
   sideFoot.replaceChildren();
   if (!rows.length) {
-    return paneHint(sessList, allSessions.length ? '（没有匹配的会话）' : '（没有历史会话）');
+    paneHint(sessList, allSessions.length ? '（没有匹配的会话）' : '（没有历史会话）');
+    return;
   }
   const upto = Math.min(rows.length, Math.max(shownSessions, SESS_PAGE));
   shownSessions = upto;
   for (const s of rows.slice(0, upto)) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'sess-row';
+    // div 承载（CSS 注）：行内要装操作钮/输入框，button 嵌套不合法；
+    // 键盘路径 Enter/Space 开会话，与 click 同一条 openSession。
+    const row = document.createElement('div');
+    row.className = 'sess-row' + (s.archived ? ' arch' : '');
     row.dataset.sid = s.sid;
+    row.tabIndex = 0;
     if (s.sid === curSid()) row.classList.add('cur');
     const t1 = document.createElement('span');
     t1.className = 't1';
@@ -1432,10 +1485,35 @@ function renderSessRows() {
     const t2 = document.createElement('span');
     t2.className = 't2';
     const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
-    t2.textContent = when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+    t2.textContent = (s.archived ? '已归档 · ' : '') + when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
     row.appendChild(t1);
     row.appendChild(t2);
+    const acts = document.createElement('span');
+    acts.className = 'sess-acts';
+    const ren = document.createElement('button');
+    ren.type = 'button';
+    ren.title = '重命名（Enter 提交，Esc 取消）';
+    ren.textContent = '✏';
+    ren.addEventListener('click', ev => { ev.stopPropagation(); startRename(row, s); });
+    const arc = document.createElement('button');
+    arc.type = 'button';
+    if (s.archived) { arc.title = '取消归档'; arc.textContent = '⤴'; }
+    else { arc.title = '归档（列表隐藏，不删文件）'; arc.textContent = '🗄'; }
+    arc.addEventListener('click', ev => {
+      ev.stopPropagation();
+      rpc('session/archive', { sid: s.sid, archived: !s.archived })
+        .then(() => loadSessions())
+        .catch(e => sideErr((s.archived ? '取消归档' : '归档') + '失败：' + e.message));
+    });
+    acts.appendChild(ren);
+    acts.appendChild(arc);
+    row.appendChild(acts);
     row.addEventListener('click', () => openSession(s.sid));
+    row.addEventListener('keydown', ev => {
+      if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+      ev.preventDefault();
+      openSession(s.sid);
+    });
     sessList.appendChild(row);
   }
   if (upto < rows.length) {
@@ -1443,14 +1521,56 @@ function renderSessRows() {
     more.type = 'button';
     more.textContent = '加载更多（已显示 ' + upto + ' 条）';
     more.addEventListener('click', () => { shownSessions = upto + SESS_PAGE; renderSessRows(); });
-    sideFoot.replaceChildren(more);
+    sideFoot.appendChild(more);
   }
+}
+
+// 侧栏写面错误位：落在侧栏脚（下一次渲染自然清空），不动列表本体。
+function sideErr(msg) {
+  const d = document.createElement('div');
+  d.className = 'pane-hint';
+  d.textContent = msg;
+  sideFoot.prepend(d);
+}
+
+// 行内改名（c_rqcuaa）：✏ 把行切进编辑态，Enter 提交（改了才发
+// session/rename，成功后整表刷新——排序键是 last_at，改名原位更新）、
+// Esc/失焦取消。输入框 click/keydown 都拦冒泡，别触发「点行开会话」。
+function startRename(row, s) {
+  if (row.classList.contains('editing')) return;
+  row.classList.add('editing');
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'sess-edit';
+  inp.value = s.title || '';
+  row.appendChild(inp);
+  inp.focus();
+  inp.select();
+  let done = false;
+  const finish = commit => {
+    if (done) return;
+    done = true;
+    const v = inp.value.trim();
+    inp.remove();
+    row.classList.remove('editing');
+    if (!commit || !v || v === (s.title || '')) return;
+    rpc('session/rename', { sid: s.sid, title: v })
+      .then(() => loadSessions())
+      .catch(e => sideErr('改名失败：' + e.message));
+  };
+  inp.addEventListener('keydown', ev => {
+    ev.stopPropagation();
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape') finish(false);
+  });
+  inp.addEventListener('click', ev => ev.stopPropagation());
+  inp.addEventListener('blur', () => finish(false));
 }
 
 async function loadSessions() {
   if (!allSessions.length) paneHint(sessList, '加载中…');
   try {
-    const res = await rpc('session/list', {});
+    const res = await rpc('session/list', showArchived ? { include_archived: true } : {});
     allSessions = res.sessions || [];
     shownSessions = SESS_PAGE;
     renderSessRows();

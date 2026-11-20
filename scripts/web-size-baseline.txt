@@ -44,4 +44,16 @@
 # those merges (they claimed headroom instead — c_n37tnr's note). The
 # pin still carries ~1.16MB of go1.25-side slack, so the gate stays
 # green either way; this entry ratchets ONLY this card's delta.
-30517907
+# 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
+# internal/sessmeta state+audit pair, session/rename|archive methods +
+# list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
+# DELTA-added on the go1.25.8 line (29338041→29391137, measured
+# against this branch's base 557f4b45). Over the §13.3 ≤8KB card quota
+# — compile body of the two-method write plane + store dominates
+# (~44KB Go for ~12KB source, c_n37tnr's precedent shape: comment
+# trimming is not a lever, the UI embed is the feature); the overage
+# eats the W5 pack's remaining margin (~127KB/175KB cumulative), gate
+# pin keeps ~1.1MB slack. MarshalIndent→plain-Marshal measured −24B
+# (already linked — not a lever either); the Encoder+Sync save dance
+# costs +0.6KB over WriteFile and buys crash-safe atomicity, kept.
+30571003
