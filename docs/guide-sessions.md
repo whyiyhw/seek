@@ -66,6 +66,8 @@ Long sessions accumulate token cost. `/compact` summarises the older portion of 
 
 Run `/compact` before a long task if you're near your context limit.
 
+**Auto-compact** (`auto_compact` in `~/.seek/config.json`, or `$SEEK_AUTO_COMPACT` for one launch) runs the same thing by itself when the context crosses a configured point — `{"at_tokens": 350000}` or `{"at_fraction": 0.35}`. It fires only at rest (no queued message, no pending steer, no `/goal` loop, not after Esc), and inherits the fork-snapshot behaviour: the pre-compact history stays on disk, `--resume <old-id>` still reaches it. See [guide-budget.md](guide-budget.md) §2.5.
+
 ## Distilling with /distill
 
 `/distill` scans the current session's conversation history and uses the DeepSeek reasoning model to propose ≤3 project-level decisions worth remembering. Each candidate is presented for y/n/e review before being written to project memory (M layer).

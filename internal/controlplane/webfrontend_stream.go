@@ -13,6 +13,11 @@ package controlplane
 //	                                          SERVER-side (below)
 //	reply  {"conv","text"} + run/session_id ← Send close-out (the MVP
 //	                                          envelope, purely extended)
+//	approval {id, conv, run, kind, summary,
+//	          command, diff, state, decision} ← approval_request /
+//	          approval_cancel run events + decide/cancel receipts — the
+//	          approval hub owns the family (webfrontend_approval.go);
+//	          W5 c_n37tnr
 //
 // Run lifecycle: the run id is a SERVER-minted random id (§2.5 —
 // deliberately NOT Inbound.EventID, which web leaves empty so the
@@ -101,6 +106,20 @@ func (f *WebFrontend) SendStream(ctx context.Context, conv ConvID, ev RunEvent) 
 			return nil // reasoning stays out of the MVP UI (§2.5)
 		}
 		fr = sseFrame{name: "delta", data: webJSON(webDeltaEvent{Run: run.id, Text: ev.Delta})}
+	case "approval_request":
+		// W5 c_n37tnr: the additive approval seam. The hub broadcasts
+		// the card frame itself; the decide callback is nil here — the
+		// decision's ride back into the child (stdin write) is the
+		// follow-up card, and the hub contract (webfrontend_approval.go)
+		// takes it as a drop-in.
+		f.RequestApproval(conv, ApprovalPayload{
+			ID: ev.ReqID, Run: run.id, Kind: ev.Kind,
+			Summary: ev.Summary, Command: ev.Command, Diff: ev.Diff,
+		}, nil)
+		return nil
+	case "approval_cancel":
+		f.CancelApproval(ev.ReqID)
+		return nil
 	case "tool_start":
 		fr = sseFrame{name: "tool", data: webJSON(webToolEvent{Run: run.id, ID: ev.ID, Name: ev.Name, Phase: "start"})}
 	case "tool_end":
