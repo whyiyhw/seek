@@ -98,6 +98,15 @@ type FilePart struct {
 
 	Pages          int  `json:"pages,omitempty"`     // pages the upload claimed (reported or estimated)
 	PagesEstimated bool `json:"pages_est,omitempty"` // true = Pages is the size estimate, not a server reading
+	// Data is the SECOND-TIER sendable form — a data: URL
+	// ("data:application/pdf;base64,…") materialised by ResolveFileData
+	// on the request copy, the byte-carrier sibling of FileID (which is
+	// the DeepSeek lane's sendable form). Request-copy only, exactly
+	// like a materialised FileID: the transcript keeps the durable
+	// Asset form, so this field never crosses into session JSONL. It
+	// also never reaches the DeepSeek wire — toWire emits file_id
+	// alone.
+	Data string `json:"data,omitempty"`
 }
 
 // FileObject is the POST /files 200 body. Structurally it models the
