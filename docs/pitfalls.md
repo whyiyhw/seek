@@ -1887,6 +1887,20 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
 - **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
 
+### web-gate 的 size 基线钉在「哪个工具链量的」上——±1.8MB 的 skew，棘轮要按 delta 加不要按绝对值重测
+- **Saw**: 2026-11-19 c_x2au4t 验收 `scripts/web-gate.sh`：本机默认 go1.27.3 交叉构建报超基线 +440KB——但 `git stash` 后未改动的 main@2e7ad39 同样报 +426KB（零改动超线）；换 `GOTOOLCHAIN=go1.25.8`（CI 的版本线）重测，同一棵树只有 29.1MB，比基线低 1.37MB。
+- **Why**: 基线数字是某台机器某个 Go 版本某次交叉编译的绝对值，而 Go 小版本间的代码生成差异能搬动 MB 级体积（1.25.8→1.27.3 同源差 ~1.8MB）。`--update-baseline` 的「重测绝对值」语义只在测量环境不变时成立；基线文件里没有任何工具链信息，skew 无法从文件本身看出来。
+- **Fix**: c_x2au4t 的棘轮改按 delta 加（实测本卡净增 +14109B/go1.27、+13557B/go1.25.8，配额 ≤30KB 内），基线注释记下两侧工具链的实测数与复现口径（`GOTOOLCHAIN=go1.25.8 bash scripts/web-gate.sh` 对齐 CI）；未动 gate 脚本本身。
+- **Lesson**: 体积门比较的是「同尺子下的差」不是「绝对数」——本地跑 gate 先确认工具链与 CI 同线，不同线就按 delta 说话；给基线写棘轮注释时把工具链版本当数据记进去。长期解（gate 内钉 GOTOOLCHAIN、或 CI 钉具体补丁版）是独立设计决定，不在渲染卡内顺手做。
+- **Refs**: `scripts/web-size-baseline.txt` 尾注；`scripts/web-gate.sh` `build_size`；`.github/workflows/ci.yml` `go-version: '1.25'`。
+
+### 页面新增一个静态资产，两个既有无头验收的 scripts=1 基线同刻全断——资产数变化要顺手改全仓 script-count 钉
+- **Saw**: c_x2au4t 把渲染器外置成 `<script src="static/markdown.js">` 后，W2.1（web-stream-headless.mjs）与 W4.4（web-sessions-headless.mjs）各自断言的 `document.scripts === 1` 全数失败——两处基线都不在本卡文件清单里，纯靠跑回归才看见。
+- **Why**: 两脚本把「页面只有内联脚本」当 XSS 基线钉死（scripts 不增 = 注入未执行）；页面脚本元素从 1 变 2 是结构事实变化，不是回归，但断言读不出区别。
+- **Fix**: 同卡把两处基线更新为 2 并注明构成（内联页面脚本 + static/markdown.js），重跑两套无头验收全绿；commit 带 c_x2au4t。
+- **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
+- **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
