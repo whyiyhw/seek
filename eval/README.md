@@ -119,8 +119,10 @@ to the no-flag run (the no-flag-vs-pre-E1 equivalence stays pinned by
 `scripts/eval-ablate-test.sh`'s git-history blob compare); a 5-round run
 writes 5 round-tagged rows whose crashed rounds judge red **and stay in
 the denominator**; the inclusive boundary is pinned from both sides
-(3/5 vs 0.6 → green, 3/5 vs 0.7 → red); record-only never colours the
-exit code; malformed `--rounds` / `min_pass_rate` / `record_only` /
+(3/5 vs 0.6 → green, 3/5 vs 0.7 → red) and re-pinned on the `--rounds=3`
+form (2/3 vs 0.66 → green, vs 0.67 → red — the "0.67 is not 2/3"
+lesson, testable); record-only never colours the exit code at either
+round count; malformed `--rounds` / `min_pass_rate` / `record_only` /
 broken JSON exit 2 with zero rows written; and a round-bearing results
 dir fed through `eval-trend.sh` counts the round rows only (aggregate
 rows skip, proving no double-count).

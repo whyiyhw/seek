@@ -15,11 +15,13 @@
 #      （PRD §六 开放问题 1 的 E1 取向：崩溃轮 = 红轮，不设独立 error
 #      类、不引入 max_error_rate——那是 E2+ 的决定）；
 #   ③ min_pass_rate 边界各一例：3/5 对 0.6（含边界）判绿、3/5 对 0.7
-#      判红——钉死「≥ 含边界」口径。PRD §三 E1 行原文「0.6 在 3/5 时判红」
-#      按字面是严格不等号，但与 §2.1「取 2/3」自相矛盾（0.67 ≠ 2/3）；
-#      实现取 ≥（IEEE 除法与字面量解析舍入到同一 double，3/5 与 0.6
-#      精确相等），理由与 E2 标定建议（取恰为 k/n 的阈值）见
-#      eval/README.md §Judgment；
+#      判红；再用卡面点名的 --rounds 3 fixture 复验一遍同一口径
+#      （2/3 对 0.66 判绿、对 0.67 判红——0.67 不是 2/3，恰好钉死
+#      「≥ 是 double 上的 ≥，写死的十进制不保证等于 k/n」）。PRD §三
+#      E1 行原文「0.6 在 3/5 时判红」按字面是严格不等号，但与 §2.1
+#      「取 2/3」自相矛盾（0.67 ≠ 2/3）；实现取 ≥（IEEE 除法与字面量
+#      解析舍入到同一 double，3/5 与 0.6 精确相等），理由与 E2 标定
+#      建议（取恰为 k/n 的阈值）见 eval/README.md §Judgment；
 #   ④ record_only：只记录不判红不判绿——RECORD 行、exit 0、汇总分列
 #      recorded、聚合行 verdict=record；
 #   ⑤ 畸形输入启动即 exit 2 且零行写入：--rounds 0 / --rounds abc /
@@ -171,6 +173,33 @@ jq -e -s 'any(.[]; .type == "aggregate" and .verdict == "pass" and .pass_rate ==
 grep -q '"round"' "$tmp/b1/noflag/"*.jsonl && fail "① no-flag row must not carry a round field"
 grep -q '"aggregate"' "$tmp/b1/noflag/"*.jsonl && fail "① no-flag run must not write an aggregate row"
 
+# ---- ③b：卡面点名的 --rounds=3 fixture（等号形态 + 2/3 两侧边界） --------
+# 用 --rounds=3（等号形态；空格形态已被 ② 覆盖）跑同一分布（前 2 轮好、
+# 第 3 轮崩溃 → 2/3）：对 0.66 判绿、对 0.67 判红。这条同时钉两件事：
+# ① 卡面验收②的 fixture 形状就是 --rounds=3；② 阈值的比较是 double 上的
+# ≥——0.67 写死时 2/3=0.666… 严格小于它，因此判红（E2 标定须取恰为 k/n
+# 的值，见 eval/README.md §Judgment）。
+export GOOD_N=2
+printf '{"max_turns":3,"min_turns":1,"exact_agent_ends":1,"min_pass_rate":0.66}\n' > "$sb/eval/cases/$CASE/expect.json"
+mkdir -p "$tmp/r3g"
+: > "$tmp/state"
+run_eval "$tmp/r3g" --rounds=3 > "$tmp/r3g.out" 2>/dev/null
+rc=$?
+[ "$rc" -eq 0 ] || fail "③b --rounds=3, 2/3 vs min 0.66 exited ${rc} (want 0)"
+grep -q '^PASS  zrounds-gate  aggregate (2/3 rounds >= min_pass_rate 0.66)$' "$tmp/r3g.out" \
+  || fail "③b missing/incorrect --rounds=3 boundary-green line: $(grep aggregate "$tmp/r3g.out")"
+r3_rows=$(jq -s '[.[] | select(.type != "aggregate")] | length' "$tmp/r3g/"*.jsonl)
+[ "$r3_rows" = "3" ] || fail "③b --rounds=3 must write 3 round rows, got ${r3_rows}"
+
+printf '{"max_turns":3,"min_turns":1,"exact_agent_ends":1,"min_pass_rate":0.67}\n' > "$sb/eval/cases/$CASE/expect.json"
+mkdir -p "$tmp/r3r"
+: > "$tmp/state"
+run_eval "$tmp/r3r" --rounds=3 > "$tmp/r3r.out" 2>/dev/null
+rc=$?
+[ "$rc" -eq 1 ] || fail "③b --rounds=3, 2/3 vs min 0.67 exited ${rc} (want 1 — 0.67 is not 2/3)"
+grep -q '^FAIL  zrounds-gate  aggregate (2/3 rounds < min_pass_rate 0.67)$' "$tmp/r3r.out" \
+  || fail "③b missing/incorrect --rounds=3 boundary-red line: $(grep aggregate "$tmp/r3r.out")"
+
 # ---- ④：record_only 只记录，不红不绿 --------------------------------------
 export GOOD_N=1
 mkdir -p "$tmp/arec"
@@ -185,6 +214,21 @@ grep -q '^eval: 0 passed, 0 failed, 1 recorded (record-only)$' "$tmp/arec.out" \
   || fail "④ summary must split recorded column: $(grep 'eval:' "$tmp/arec.out" | tail -1)"
 jq -e -s 'any(.[]; .type == "aggregate" and .verdict == "record" and .record_only == true and .passed == 1 and .rounds == 3)' "$tmp/arec/"*.jsonl >/dev/null \
   || fail "④ record-only aggregate row wrong: $(jq -c 'select(.type == "aggregate")' "$tmp/arec/"*.jsonl)"
+
+# ④b：record_only 在 rounds=1（历史单采样路径）同样不进闸门——该轮本身
+# 判红（崩溃流），但退出码必须是 0、汇总记在 recorded 列、且不写聚合行。
+# 这是与 ④ 不同的代码臂（rounds==1 分支），手工验证过，这里补钉。
+mkdir -p "$tmp/arec1"
+: > "$tmp/state"
+export STATE="$tmp/state" GOOD_N=0
+SEEK_EVAL_RESULTS_DIR="$tmp/arec1" bash "$sb/eval/run.sh" "$REC" "$fake" > "$tmp/arec1.out" 2>/dev/null
+rc=$?
+[ "$rc" -eq 0 ] || fail "④b record-only single-round exited ${rc} (want 0 — a red round must not gate)"
+grep -q '^RECORD  zrounds-record  (0/1 rounds, record-only — not gated)$' "$tmp/arec1.out" \
+  || fail "④b missing/incorrect single-round RECORD line: $(grep RECORD "$tmp/arec1.out")"
+grep -q '^eval: 0 passed, 0 failed, 1 recorded (record-only)$' "$tmp/arec1.out" \
+  || fail "④b single-round summary must split recorded column: $(grep 'eval:' "$tmp/arec1.out" | tail -1)"
+grep -q '"aggregate"' "$tmp/arec1/"*.jsonl && fail "④b rounds=1 must not write an aggregate row"
 
 # ---- ⑤：畸形输入启动即 exit 2、零行写入 -----------------------------------
 malformed_rc2() { # malformed_rc2 LABEL EXPECT_JSON ARGS...
@@ -237,7 +281,7 @@ results_after=$(find eval/results 2>/dev/null | sort)
 [ "$results_before" = "$results_after" ] || fail "eval/results inventory changed: $(diff <(printf '%s\n' "$results_before") <(printf '%s\n' "$results_after") | head -5)"
 
 if [ "$fails" -eq 0 ]; then
-  echo "eval-rounds selftest: PASS (rounds-1 byte-equivalence + 5-round aggregation w/ crash denominator + boundary green/red + record-only + malformed exit-2 + trend no-double-count)"
+  echo "eval-rounds selftest: PASS (rounds-1 byte-equivalence + 5-round aggregation w/ crash denominator + boundary green/red @rounds5 & @rounds=3 + record-only + malformed exit-2 + trend no-double-count)"
   exit 0
 fi
 echo "eval-rounds selftest: FAIL (${fails} assertion(s))" >&2
