@@ -1,8 +1,8 @@
 # Feature: DeepSeek 全家桶应用 API 接入评估（read_url / 文件输入 / ASR-TTS / 安全校验）
 
 **所属版本**：独立 feature PRD（评估 + 分期设计稿，未排期实现）
-**前置阅读**：[`feature-vision.md`](archive/feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
-**状态**：🚀 **②③④ 已交付（v0.12.0，2026-11-18）；① 判红关闭（R0 验证门 2026-11-14，见 §2.2）**。四项结论见 §0。交付清单：②文件输入 F1–F5 全落地（files 客户端 / filerefs / 提交期路由 / ResolveFiles + file_id 缓存实测 / replay 淡显 + guide-files）；③ASR+TTS 客户端 S1/S2 + 语音 frontend V1a（`Speaker` 播报 sink）/ V2（按住说话入站）——V1a 尚无 CLI 开关，实时双工按设计不做；④`safety_check` SC1 落地（opt-in）。OCR 不接（被文件解析覆盖）。收口待办：本文归档（v8 D3 口径）与播报 CLI 开关各自的卡。
+**前置阅读**：[`feature-vision.md`](feature-vision.md)（imgrefs 先例——本文②的管道蓝本）、[`feature-remote-control-plane.md`](../feature-remote-control-plane.md)（语音 frontend 的宿主——本文③的骨架落点）、[`internal/tools/websearch/websearch.go`](../../../internal/tools/websearch/websearch.go)（按次计费工具 + `RecordFlatCost` 先例）、AGENTS.md「Token & prefix-cache constraints」
+**状态**：🚀 **②③④ 已交付（v0.12.0，2026-11-18）；① 判红关闭（R0 验证门 2026-11-14，见 §2.2）**。四项结论见 §0。交付清单：②文件输入 F1–F5 全落地（files 客户端 / filerefs / 提交期路由 / ResolveFiles + file_id 缓存实测 / replay 淡显 + guide-files）；③ASR+TTS 客户端 S1/S2 + 语音 frontend V1a（`Speaker` 播报 sink）/ V2（按住说话入站）——V1a 尚无 CLI 开关，实时双工按设计不做；④`safety_check` SC1 落地（opt-in）。OCR 不接（被文件解析覆盖）。收口：本文已归档（2026-11-20，c_3mryc3）；播报 CLI 开关待卡。
 **触发起因**：DeepSeek 于 **2026-11-13** 发布「全家桶应用 API」——官方公告 [news261113](https://api-docs.deepseek.com/zh-cn/news/news261113)：对话内联网搜索（含深度思考搜索）、`deepseek_read_url` 链接阅读、文件输入（PDF/Office/图片）、模型安全校验，加独立底层接口 Search / Fetch / OCR / ASR / TTS。同族先例：Search API 2026-10-17 开放，seek 已接（`pkg/deepseek/search.go` + `web_search` 工具，另卡实现）。
 **本文不覆盖**：独立 Search API 的对话内接线（web_search 服务端工具变体）——与 read_url 同属 `tools` 数组声明，但 seek 已有客户端 `web_search` 工具覆盖显式搜索场景；其服务端变体只在「思考模式自主搜索」里顺带评估（§二）。
 
@@ -191,7 +191,7 @@ type ServerToolUse struct {
 
 ### 3.1 为什么接
 
-agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](archive/feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
+agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片）。现状绕行路径 = bash + `pdftotext`/`pandoc` 这类**不一定安装**的 CLI，且丢版面。文件解析接口把这些整个变成服务端能力：上传即解析、按页计费、图文可选。管道与 [feature-vision](feature-vision.md) 的 imgrefs 先例**逐点同构**，没有新发明：
 
 | 环节 | imgrefs 先例 | filerefs 对应 |
 |---|---|---|
@@ -213,7 +213,7 @@ agent 读 PDF/Word/PPT 是高频真需求（论文、合同、报告、幻灯片
 
 **D-F4 大小/页数门在路由器。** 100 MiB / 1000 页 / 每请求 20 文档 / 8 MiB 文字合计——超限 in-band note 降级（照 vision 的 never-error 哲学），不 fatal。
 
-**D-F5 web 面拖拽 = 契约注记，不是本卡交付。** Web 面板（[feature-inspect-rpc](feature-inspect-rpc.md)，📐 未交付）与 control-plane web frontend 都在未排期状态。这里只立契约：未来 `Inbound`（control-plane D-C1）加可选 `Attachments []Attachment{Path,Mime}` 字段，平面原样落盘后走与 TUI 相同的 `fileRouter`（拖拽 = 平面写临时文件 + 注入 `@路径` 引用，**不新造管道**）。验收：契约字段写进本文即算（不写代码）。
+**D-F5 web 面拖拽 = 契约注记，不是本卡交付。** Web 面板（[feature-inspect-rpc](../feature-inspect-rpc.md)，📐 未交付）与 control-plane web frontend 都在未排期状态。这里只立契约：未来 `Inbound`（control-plane D-C1）加可选 `Attachments []Attachment{Path,Mime}` 字段，平面原样落盘后走与 TUI 相同的 `fileRouter`（拖拽 = 平面写临时文件 + 注入 `@路径` 引用，**不新造管道**）。验收：契约字段写进本文即算（不写代码）。
 
 > **F5 注记（2026-11-18）**：契约段落已随本卡定稿如上，并同步钉到 `internal/controlplane/frontend.go` `Inbound` 结构体的注释里（仅注释，无实现）——未来实现者在定义处就能看到，不用翻 PRD。
 
@@ -245,7 +245,7 @@ OCR 独立接口（`/v1/tools/ocr`）与文件解析同价（¥1.5/千页）但*
 
 ### 4.3 语音渠道骨架（control-plane 语音 frontend 设计稿）
 
-宿主：[feature-remote-control-plane](feature-remote-control-plane.md) 的 `Frontend` 端口（`Run` 收 / `Send` 发 / `Name`，收发分离、不假设双工——§1.3 的设计前提正好为语音定制）。M4/M5（飞书）已撤销排期，**首个 frontend 选型开放**——语音可以是其中之一。
+宿主：[feature-remote-control-plane](../feature-remote-control-plane.md) 的 `Frontend` 端口（`Run` 收 / `Send` 发 / `Name`，收发分离、不假设双工——§1.3 的设计前提正好为语音定制）。M4/M5（飞书）已撤销排期，**首个 frontend 选型开放**——语音可以是其中之一。
 
 ```
 ┌─ VoiceFrontend（实现 Frontend 端口）─────────────────────────┐
