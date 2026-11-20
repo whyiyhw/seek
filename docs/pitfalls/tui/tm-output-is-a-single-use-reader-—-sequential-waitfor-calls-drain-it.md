@@ -1,0 +1,6 @@
+### `tm.Output()` is a single-use reader — sequential `WaitFor` calls drain it
+- **Saw**: a test with two consecutive `teatest.WaitFor(t, tm.Output(), ...)` calls: first asserted on string A (passed), second on string B (timed out with empty buffer), even though both A and B were clearly in the program's output dump from the first failure
+- **Why**: `tm.Output()` returns the same underlying pipe/reader on every call. `teatest.WaitFor` reads bytes from it incrementally; once the predicate matches it stops, and the bytes it consumed are gone. The second `WaitFor` reads from the same position — anything not since written by the program is unavailable. When the program is idle (e.g. help overlay rendered once, no spinner re-renders) there are no new bytes
+- **Fix**: one `WaitFor` per test; if multiple signals must be checked, compose them into a single predicate (`bytes.Contains(b, a) && bytes.Contains(b, c)`). Commit (this one)
+- **Lesson**: treat `tm.Output()` as a stream, not a buffer. Multiple sequential reads work only when the model produces new output between them — never assume earlier bytes are still readable
+- **Refs**: `internal/tui/render_test.go` (the `waitFor` helper takes a single needle for this reason)

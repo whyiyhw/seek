@@ -1,0 +1,6 @@
+### `s[:n]` on a multi-byte UTF-8 string produces broken runes
+- **Saw**: queued Chinese text (Enter during a stream) showed garbled characters in the "↰ queued:" preview, and any Chinese text clipped by `truncateOneLine` rendered as invalid UTF-8 (� characters) wherever it appeared (tool args, permission prompts)
+- **Why**: `truncateOneLine` used `len(s)` (byte count) and `s[:n]` (byte slicing) on a UTF-8 string. Chinese characters are 3 bytes in UTF-8; when `n` landed in the middle of a 3-byte sequence, the resulting string contained an incomplete/invalid UTF-8 sequence. Same root cause as the banner bug — byte-level indexing on a multi-byte string
+- **Fix**: changed `truncateOneLine` to use `[]rune(s)` for length comparison and slicing — rune-level slicing never splits a multi-byte character. Commit (this commit)
+- **Lesson**: any Go code that truncates, clips, or paginates user-visible text by length must use `[]rune` for the count and the slice operation. `string` indexing is byte-level; multi-byte characters (Chinese, emoji, CJK punctuation) will be silently corrupted. The function signature says "n chars" — make sure the implementation actually counts chars, not bytes
+- **Refs**: `internal/tui/update.go:truncateOneLine`, sibling entry "`for j, r := range string` gives BYTE indices, not rune indices" (same root cause, different surface)

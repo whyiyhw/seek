@@ -1,0 +1,6 @@
+### 无头浏览器验收脚本三连坑：await 死亡 Promise 当查活、bash 拼 URL 双斜杠 307、跨块 textContent 无分隔
+- **Saw**: W2.1 无头验收脚本（card c_5xtm74）三处各吞一个调试循环：① node 驱动等 Chrome DevTools 目标时永远挂起——代码是 `await chromeDead`（`new Promise(res => chrome.on('exit', ...))`），Chrome 活着才对，Promise 永不 resolve，"查活"变成了"等死"；② bash 里 `BASE` 带尾斜杠拼 `"$BASE/msg"` 得 `//msg`，Go mux 回 307 重定向，POST 静默没送达、SSE 订阅 curl 拿到的是重定向体——自检全红但谁也没报错；③ 对 DOM 快照断言 `m.txt === 期望全文` 永远不成立——`renderBody` 产出的 `<pre>` 是块级元素，`textContent` 在块间**不插任何分隔符**，"A\n" + pre + "B" 读回是 `A\nfuncB` 形状
+- **Why**: ① 把"可能永远不 resolve 的 Promise"当布尔条件 await 是 Node 常见反模式，同步语义应该用 `chrome.exitCode !== null`；② `http.ServeMux` 对不洁路径（`//x`）先 301/307 重定向再匹配，curl POST 默认不跟 307 之外的方法语义、`curl -sN` 订阅流拿到重定向体就"完成"了——两层都静默；③ textContent 是纯文本拼接，不携带任何结构信息，块级边界的换行在源文本里、不在序列化结果里
+- **Fix**: ① 改 `chrome.exitCode !== null` 同步查活；② `BASE="${BASE%/}"` 去尾斜杠；③ 快照断言改 contains（三段俱全 + `pres>0` + 无 `⚙` 残留），不做全文相等。另给驱动加了 120s watchdog + 每景 trace——第一版挂死时零输出，没法定位
+- **Lesson**: 验收脚本自己也是会被卡死的代码：任何"等外部进程"的循环都要有总闸超时和阶段 trace；拼 URL 的 base 永远先去尾斜杠（307 是静默杀手）；对 DOM 文本断言只 contains 不 equal，除非页面是你手拼的纯文本节点
+- **Refs**: `scripts/web-stream-headless.mjs` `web-stream-manual.sh`, `internal/controlplane/webfrontend.html` renderBody
