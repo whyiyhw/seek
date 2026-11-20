@@ -109,6 +109,30 @@
   #status.ok #status-l { color: #7ec699; }
   #status.warn #status-l { color: #d8a657; }
   #usage { flex: none; white-space: nowrap; color: #7a8089; }
+  /* ---- SSE 连接灯 + 顶栏 ContextMeter（W5 卡 c_oyp2qf）----
+     #conn：状态灯——绿=已连、黄=断线重连中；#connbar：断线提示条（带
+     手动重连钮），连上即收起。#ctx：上下文余量计量——模型·车道 + 色阶
+     进度条 + 百分比/余量，随 usage 事件（源=turn_end）更新，色阶对齐
+     internal/budget Classify（≥60% 黄、≥75% 红）。 */
+  #conn { flex: none; }
+  #conn::before { content: '●'; }
+  #conn.ok::before { color: #7ec699; }
+  #conn.warn::before { color: #d8a657; }
+  #connbar { display: flex; align-items: center; justify-content: center;
+             gap: 10px; padding: 5px 14px; background: #3a3222;
+             color: #d8a657; border-bottom: 1px solid #2a2e36; font-size: 13px; }
+  #connbar[hidden] { display: none; }
+  #connbar button { padding: 3px 12px; font-size: 13px; background: #2c3d5f; }
+  #ctx { flex: none; display: flex; align-items: center; gap: 6px;
+         white-space: nowrap; color: #7a8089; }
+  #ctx[hidden] { display: none; }
+  #ctx .bar { width: 56px; height: 5px; flex: none; background: #2a2e36;
+              border-radius: 3px; overflow: hidden; }
+  #ctx .bar i { display: block; height: 100%; width: 0; background: #7ec699; }
+  #ctx.warn { color: #d8a657; }
+  #ctx.warn .bar i { background: #d8a657; }
+  #ctx.crit { color: #e06c75; }
+  #ctx.crit .bar i { background: #e06c75; }
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
@@ -329,7 +353,8 @@
 </style>
 </head>
 <body>
-<header id="status" class="warn"><span id="status-l">连接中…</span><span id="usage"></span></header>
+<header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态"></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
+<div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" type="button">手动重连</button></div>
 <nav id="bar">
   <!-- 指令快捷按钮（W2.2）：发的是与手打完全同款的指令文本（POST /msg 纯文本
        透传）；带参的 /bind /switch 只预填输入框，路径由用户补全后回车。 -->
@@ -480,6 +505,44 @@ function renderMeter() {
   if (!meter.prompt && !meter.completion) return;  // 首个 turn_end 前不占位
   usageEl.textContent = (meter.prompt + meter.completion) + ' tok · ' + fmtUsd(meter.costUsd)
       + (meter.sid ? ' · sid ' + meter.sid.slice(0, 8) : '');
+}
+
+// ---- 顶栏 ContextMeter + SSE 连接灯（W5 卡 c_oyp2qf）----
+// 余量口径对齐 dsh ContextMeter（窗口占用百分比）与 TUI formatBudget：
+// 占用代理 = 末个 turn_end 的 prompt+completion（累计值随历史逐轮重发
+// 二次膨胀，不反映窗口现状）；上限 ctx_limit 与车道 lane 由服务端随
+// usage 事件下发（budget.Limit / modelcap.LaneOf——同源判定，页面不自建
+// 表）。色阶与 internal/budget Classify 同阈值：≥60% 黄、≥75% 红。
+const ctxEl = document.getElementById('ctx');
+const ctxM = document.getElementById('ctx-m');
+const ctxFill = ctxEl.querySelector('.bar i');
+const ctxP = document.getElementById('ctx-p');
+const ctx = { used: 0, limit: 0, model: '', lane: '' };
+function fmtTok(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+function renderCtx() {
+  if (!ctx.model || !ctx.limit) { ctxEl.hidden = true; return; }
+  ctxEl.hidden = false;
+  ctxM.textContent = ctx.model + (ctx.lane ? ' · ' + ctx.lane : '');
+  const frac = Math.min(ctx.used / ctx.limit, 1);
+  ctxFill.style.width = (frac * 100).toFixed(1) + '%';
+  ctxP.textContent = Math.round(frac * 100) + '% · 余 ' + fmtTok(Math.max(ctx.limit - ctx.used, 0));
+  ctxEl.title = '上下文 ~' + fmtTok(ctx.used) + ' / ' + fmtTok(ctx.limit);
+  ctxEl.className = frac >= 0.75 ? 'crit' : frac >= 0.6 ? 'warn' : '';
+}
+// 连接灯：绿=已连、黄=断线重连中；断线提示条 #connbar 与灯同源开合。
+// 首连成功前的「连接中」不算断线（不弹提示条）；绑定状态行不再被断线
+// 文案占位——断线这件事由灯+提示条专职表达。
+const connEl = document.getElementById('conn');
+const connBar = document.getElementById('connbar');
+let connEverOpen = false;
+function connSet(ok) {
+  connEl.className = ok ? 'ok' : 'warn';
+  connBar.hidden = ok || !connEverOpen;
+  if (ok) connEverOpen = true;
 }
 // 消息正文渲染（W5 卡 c_x2au4t）：markdown 子集渲染器外置在
 // static/markdown.js（围栏/行内码/标题/列表/链接；DOM API 白名单构造，
@@ -729,14 +792,17 @@ async function apResync() {
 // 后）或 TOKEN 查询参数（旧形态），两者服务端同权。W2.1 起消费 W1.4 的
 // 事件族：命名事件 delta/tool 折进流式气泡；默认事件里带 run 的 reply
 // 是流式收口（整泡替换），无 run 的照旧普通消息。（重）连上即刷一次绑定
-// 状态（W2.2）：断线期间状态行被「SSE 断开」占位，重连后绑定常显自己
-// 回来，不等下一条回复。
+// 状态（W2.2）；断线态由连接灯+提示条表达（W5 c_oyp2qf），绑定行不被
+// 占位——重连后 onopen 的刷新自然收敛。listen 幂等（旧连接先 close），
+// 手动重连钮与启动挂流同走这一条，绝不双连。
+let es = null;
 function listen() {
-  const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
+  if (es) es.close();
+  es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.addEventListener('delta', onDelta);
   es.addEventListener('tool', onTool);
   es.addEventListener('approval', onApproval);   // W5 c_n37tnr：审批卡族
-  es.onopen = () => { refreshState(); apResync(); };  // 重连即快照重建卡片栈
+  es.onopen = () => { connSet(true); refreshState(); apResync(); };  // 重连即快照重建卡片栈
   es.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
@@ -758,7 +824,8 @@ function listen() {
     }
     refreshState();             // 回复可能改了绑定（/bind 等）
   };
-  // usage（源=turn_end）：多 turn 逐次累加，turn 间即实时上屏。
+  // usage（源=turn_end）：多 turn 逐次累加，turn 间即实时上屏；W5 起
+  // 同帧带 ContextMeter 三件（model/lane/ctx_limit）——末轮占用即时刷新。
   es.addEventListener('usage', ev => {
     try {
       const u = JSON.parse(ev.data);
@@ -767,9 +834,16 @@ function listen() {
       meter.cacheHit += u.cache_hit || 0;
       meter.costUsd += u.cost_usd || 0;
       renderMeter();
+      if (u.model) {
+        ctx.model = u.model;
+        ctx.lane = u.lane || '';
+        ctx.limit = u.ctx_limit || 0;
+      }
+      ctx.used = (u.prompt || 0) + (u.completion || 0);  // 占用代理：末轮口径
+      renderCtx();
     } catch (e) { /* 坏帧跳过——计量不因单帧畸形中断 */ }
   });
-  es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
+  es.onerror = () => connSet(false);   // 灯转黄+提示条；EventSource 自带 3s 重试
   // push-to-talk（voice V2）：转写回显与失败面。命名事件不进 onmessage
   // （SSE 设计，旧页面零感知）；voice conv 的 seek 回复走上面的默认事件
   // 路径（无 run id → 普通气泡）。
@@ -780,6 +854,10 @@ function listen() {
     try { const d = JSON.parse(ev.data); addMsg('hint', '（' + (d.error || '语音识别失败') + '）'); } catch (e) {}
   });
 }
+// 手动重连（W5 c_oyp2qf）：断线提示条上的出口——不等 3s 自动重试，立即
+// 重建连接（listen 幂等，先 close 旧的）。服务端仍不可用则新连接照旧
+// onerror 转黄、提示条保持，可反复点。
+document.getElementById('reconn').addEventListener('click', () => listen());
 
 // 上行共用路径（W2.2 抽出）：表单提交与指令快捷按钮同走这一条 POST /msg
 // 纯文本透传——按钮与手打完全同权。fromInput 才清空输入框（按钮直发不动

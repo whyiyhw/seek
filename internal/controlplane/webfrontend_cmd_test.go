@@ -241,7 +241,7 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		"wireCmd('cmd-new', '/new')",
 		"wireCmd('cmd-cancel', '/cancel')",
 		"text.startsWith('/')",             // command POST → immediate /state refresh
-		"es.onopen = () => { refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr)
+		"es.onopen = () => { connSet(true); refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr) + the conn light (W5 c_oyp2qf)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W2.2 command-UI piece %q", need)
