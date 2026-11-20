@@ -412,4 +412,16 @@ func TestMsgsToLLM_FilesRideWhenKept(t *testing.T) {
 	if len(out[0].Files) != 0 || !strings.Contains(out[0].Content, "[file: 2 个文档未透传") {
 		t.Fatalf("keepFiles=false must note all: %+v / %q", out[0].Files, out[0].Content)
 	}
+	// The two causes must read differently: an incapable model must not be
+	// told its Word file "isn't PDF" (the format is irrelevant — nothing
+	// would ride), and a capable one must not be told its model can't take
+	// documents.
+	if !strings.Contains(out[0].Content, "当前模型不支持文件输入") ||
+		strings.Contains(out[0].Content, "仅支持 PDF") {
+		t.Fatalf("incapable-model note must name the model, not the format: %q", out[0].Content)
+	}
+	out = msgsToLLMWithAttachments(msgs, false, true)
+	if strings.Contains(out[0].Content, "当前模型不支持文件输入") {
+		t.Fatalf("format-only drop must not claim the model is incapable: %q", out[0].Content)
+	}
 }

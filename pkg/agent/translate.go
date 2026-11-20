@@ -56,9 +56,8 @@ func msgsToLLMWithAttachments(msgs []deepseek.Message, keepImages, keepFiles boo
 			}
 		}
 		if len(m.Files) > 0 {
-			dropped := len(m.Files)
+			dropped := 0
 			if keepFiles {
-				dropped = 0
 				for _, p := range m.Files {
 					f := llm.File{Filename: p.Asset, URL: p.Data}
 					if f.Sendable() {
@@ -68,8 +67,16 @@ func msgsToLLMWithAttachments(msgs []deepseek.Message, keepImages, keepFiles boo
 					}
 				}
 			}
-			if dropped > 0 {
-				lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前模型不支持文件输入或该格式（二线车道仅支持 PDF）]", dropped)
+			// Two distinct causes, two distinct notes: the model can't take
+			// documents at all (gate said no), or it can but this format is
+			// not on the second-tier wire (Word/PPT — PDF is the only one
+			// every adapter encodes). Collapsing them into one sentence
+			// leaves the user guessing which fix applies.
+			switch {
+			case !keepFiles:
+				lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前模型不支持文件输入]", len(m.Files))
+			case dropped > 0:
+				lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 二线车道仅支持 PDF 附件（Word/PPT 需 DeepSeek 车道）]", dropped)
 			}
 		}
 		for _, tc := range m.ToolCalls {

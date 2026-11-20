@@ -225,26 +225,48 @@ func TestRoute_UploadFailKeepsAsset(t *testing.T) {
 	}
 }
 
-// TestRoute_IncapableModelNote: a model outside modelcap's Files axis
-// (unknown id, or a lane whose endpoint has no document input — GLM)
-// gets the switch-model note, before any stat/read/store/upload work.
+// TestRoute_IncapableModelNote: on a second-tier lane (client nil) a
+// model outside modelcap's Files axis (unknown id, or a lane whose
+// endpoint has no document input — GLM) gets the switch-model note,
+// before any stat/read/store/upload work.
 func TestRoute_IncapableModelNote(t *testing.T) {
-	up := &fakeUploader{obj: okObj()}
-	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+	r := Router{assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
+	got, parts := r.Route(context.Background(), "glm-5.3", "@"+doc)
 	if !strings.Contains(got, "[file: report.pdf — 当前模型不支持文件输入") {
 		t.Fatalf("switch-model note = %q", got)
 	}
 	if len(parts) != 0 {
 		t.Fatalf("incapable model must not attach: %+v", parts)
 	}
-	if up.calls() != 0 {
-		t.Fatalf("incapable model must not upload, got %d", up.calls())
-	}
 	if ents, _ := os.ReadDir(r.assetsDir); len(ents) != 0 {
 		t.Fatalf("incapable model must not store, got %d entries", len(ents))
+	}
+}
+
+// TestRoute_DeepSeekLaneIgnoresModelTable: file input on the DeepSeek
+// lane is account-level (the Files API parses server-side), so an id the
+// modelcap table has never heard of — deepseek-v4-pro, or a freeform id
+// — must still upload. Gating this lane on a per-id table is exactly the
+// regression the vision allow-list taught (docs/pitfalls.md): a capable
+// model silently answered "unsupported".
+func TestRoute_DeepSeekLaneIgnoresModelTable(t *testing.T) {
+	for _, model := range []string{deepseek.ModelV41Flash, "deepseek-v4-pro", "some-freeform-id", ""} {
+		up := &fakeUploader{obj: okObj()}
+		r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+		doc := writePDF(t, "report.pdf", 8)
+
+		got, parts := r.Route(context.Background(), model, "@"+doc)
+		if !strings.Contains(got, "— uploaded · text") {
+			t.Fatalf("model %q: marker = %q", model, got)
+		}
+		if len(parts) != 1 || parts[0].FileID == "" {
+			t.Fatalf("model %q: parts = %+v", model, parts)
+		}
+		if up.calls() != 1 {
+			t.Fatalf("model %q: uploads = %d, want 1", model, up.calls())
+		}
 	}
 }
 

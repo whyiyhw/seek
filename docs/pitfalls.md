@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**256 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**258 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -44,8 +44,8 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Agent loop | 17 |
 | DeepSeek API | 24 |
 | Go language | 12 |
-| Tooling / environment | 24 |
-| LLM provider quirks (M6) | 11 |
+| Tooling / environment | 25 |
+| LLM provider quirks (M6) | 12 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -78,9 +78,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **256** |
+| **Total** | **258** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 37 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 144.
 
 ---
 
@@ -1014,6 +1014,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `pkg/llm` carries the transport truth — `fileMediaTypes` = {application/pdf} + `File.Sendable()`; `internal/fileroute` gates on it at submit (a .docx never gains an "attached" marker a later send would walk back) and `pkg/agent/translate.go` degrades unsendable formats in-band. `modelcap.Files` answers the per-MODEL question, deliberately not the per-FORMAT one.
 - **Lesson**: capability has two axes — "does this model take documents" (modelcap) and "does this lane's wire take THIS format" (transport). Don't collapse them: adding `application/msword` to the transport set later requires re-checking each provider's docs per lane, not flipping one shared constant on faith.
 - **Refs**: `pkg/llm/llm.go` (`fileMediaTypes` comment carries the three doc URLs), `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `internal/fileroute/fileroute.go:formatNote`
+
+### The new `modelcap.Files` gate was applied to the DeepSeek lane too — `deepseek-v4-pro` (and every freeform id) silently lost file input
+- **Saw**: routing `@report.pdf` on the DeepSeek lane with any model id outside modelcap's static table produced `[file: report.pdf — 当前模型不支持文件输入，用 /model 选一个支持文件的模型]` and uploaded nothing. On the base commit the same input uploaded fine — the old router gated on "is a Files API client wired", not on the model.
+- **Why**: the file-passthrough change replaced that lane gate with `modelcap.Files(model)` unconditionally, folding two different questions into one. Modelcap answers "does this MODEL's wire format carry a document part" — true only for the curated second-tier ids. On the DeepSeek lane the question is different and account-level: the Files API parses server-side and the chat part is just a `file_id`, so every model id on that lane can take a document. Re-using the per-model table there re-created, one lane over, exactly the `IsVisionModel` failure this whole subsystem replaced.
+- **Fix**: `Router.routeOne` gates only when `r.client == nil` (second-tier). DeepSeek lane keeps the account-level behaviour; `TestRoute_DeepSeekLaneIgnoresModelTable` pins it for `deepseek-v4-pro`, a freeform id, and the empty string.
+- **Lesson**: when a capability table is the new authority, audit EVERY call site it replaces — each may have been answering a different question ("which lane am I on?" vs "which model is selected?"). A gate that is right for one lane can be a regression on another, and the silent in-band note makes the regression look like a product decision.
+- **Refs**: `internal/fileroute/fileroute.go:routeOne`, `internal/fileroute/fileroute_test.go:TestRoute_DeepSeekLaneIgnoresModelTable`, `internal/modelcap/modelcap.go`, prior entry "Vision capability was a one-id allow-list inside pkg/deepseek"
 
 ---
 

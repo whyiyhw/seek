@@ -521,3 +521,75 @@ func TestChatStream_FilesOnlyNoText(t *testing.T) {
 		t.Fatalf("empty-URL content = %#v, want the plain string", msgs[0].Content)
 	}
 }
+
+// TestChatStream_TextOnlyWireBytes pins the exact request body of a
+// text-only conversation — the prefix-cache contract. Adding the Files
+// field must not have moved a single byte here: these goldens were
+// captured from this branch's base (which predates the file-passthrough
+// change) and the adapters' output was diffed against it byte-for-byte.
+// Any drift means the whole prompt prefix misses cache on every lane,
+// which costs ~10× the tokens of a hit.
+func TestChatStream_TextOnlyWireBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "plain two-message",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+				},
+			},
+			want: `{"model":"m","messages":[{"role":"system","content":"sys"},` +
+				`{"role":"user","content":"hi"}],"max_tokens":128,"stream":true,` +
+				`"stream_options":{"include_usage":true}}`,
+		},
+		{
+			name: "tool-call history",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+					{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path":"a"}`}}},
+					{Role: "tool", ToolCallID: "c1", ToolName: "read", Content: "ok"},
+					{Role: "user", Content: "again"},
+				},
+				Tools: []llm.ToolDef{{Name: "read", Description: "r", Schema: []byte(`{"type":"object"}`)}},
+			},
+			want: `{"model":"m","messages":[{"role":"system","content":"sys"},` +
+				`{"role":"user","content":"hi"},` +
+				`{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function",` +
+				`"function":{"name":"read","arguments":"{\"path\":\"a\"}"}}]},` +
+				`{"role":"tool","content":"ok","tool_call_id":"c1","name":"read"},` +
+				`{"role":"user","content":"again"}],"max_tokens":128,` +
+				`"tools":[{"type":"function","function":{"name":"read","description":"r",` +
+				`"parameters":{"type":"object"}}}],"stream":true,` +
+				`"stream_options":{"include_usage":true}}`,
+		},
+	}
+	for _, c := range cases {
+		var body []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+		}))
+		ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), c.req)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		drain(ch)
+		srv.Close()
+		if string(body) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, body, c.want)
+		}
+	}
+}

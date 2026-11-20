@@ -334,3 +334,62 @@ func TestBuildRequest_Files(t *testing.T) {
 		t.Errorf("text-only parts = %+v", req.Contents[1].Parts)
 	}
 }
+
+// TestBuildRequest_TextOnlyWireBytes pins the exact JSON body of a
+// text-only conversation — the prefix-cache contract. The goldens were
+// captured from this branch's base (before the file-passthrough change)
+// and the adapter's output was diffed against it byte-for-byte: adding
+// llm.Message.Files must not move a byte on messages that carry no files.
+func TestBuildRequest_TextOnlyWireBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "plain two-message",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+				},
+			},
+			want: `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],` +
+				`"systemInstruction":{"parts":[{"text":"sys"}]},` +
+				`"generationConfig":{"maxOutputTokens":128}}`,
+		},
+		{
+			name: "tool-call history",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+					{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path":"a"}`}}},
+					{Role: "tool", ToolCallID: "c1", ToolName: "read", Content: "ok"},
+					{Role: "user", Content: "again"},
+				},
+				Tools: []llm.ToolDef{{Name: "read", Description: "r", Schema: []byte(`{"type":"object"}`)}},
+			},
+			want: `{"contents":[{"role":"user","parts":[{"text":"hi"}]},` +
+				`{"role":"model","parts":[{"functionCall":{"name":"read","args":{"path":"a"}}}]},` +
+				`{"role":"user","parts":[{"functionResponse":{"name":"read","response":{"content":"ok"}}}]},` +
+				`{"role":"user","parts":[{"text":"again"}]}],` +
+				`"tools":[{"functionDeclarations":[{"name":"read","description":"r","parameters":{"type":"object"}}]}],` +
+				`"systemInstruction":{"parts":[{"text":"sys"}]},` +
+				`"generationConfig":{"maxOutputTokens":128}}`,
+		},
+	}
+	for _, c := range cases {
+		b, err := buildRequest(c.req)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(b) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, b, c.want)
+		}
+	}
+}

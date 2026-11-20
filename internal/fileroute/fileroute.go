@@ -5,9 +5,9 @@
 // routing decision and the marker text are identical wherever a
 // document enters. Per reference:
 //
-//   - model without file capability (modelcap.Files, the single
-//     authority across lanes): an in-band switch-model note, nothing
-//     stored or uploaded.
+//   - second-tier lane (client nil) on a model without file capability
+//     (modelcap.Files, the single authority across lanes): an in-band
+//     switch-model note, nothing stored or uploaded.
 //   - DeepSeek lane (client set): copy into the asset library (the
 //     Files API cannot re-download originals — the local copy is the
 //     ONLY durable source for re-uploads) → upload eagerly with the
@@ -76,7 +76,7 @@ type CostSink interface {
 
 // Router routes document references at submit time.
 type Router struct {
-	client    Uploader // nil → file input unavailable on this lane, degrade to notes
+	client    Uploader // nil → second-tier lane (no Files API): store-and-attach, capability-gated by modelcap
 	assetsDir string   // "" → asset store unavailable, degrade to notes
 	cost      CostSink // nil → parse fee not recorded
 	maxBytes  int64    // per-document size gate; deepseek.FileMaxBytes by default
@@ -96,11 +96,11 @@ func New(client Uploader, projectAbs string, cost CostSink) Router {
 // Route scans text for stat-gated document references and decides each
 // one's fate. The original text is preserved; one marker block is
 // appended per reference (mirrors the vision router's injection shape
-// so one replay styling family covers both). The per-model gate is
-// modelcap.Files — file input stopped being a DeepSeek-lane-only fact
-// when the second-tier transports learned to carry PDF bytes, and the
-// same static-table + catalogue-grant authority answers for every
-// lane.
+// so one replay styling family covers both). modelcap.Files gates the
+// SECOND-tier lanes only (see routeOne): there the model's own wire
+// format is what can or cannot carry a document part. The DeepSeek
+// lane answers to the Files API instead, which is account-level and
+// format-agnostic (PDF/Word/PPT all parse server-side).
 func (r Router) Route(ctx context.Context, model, text string) (string, []deepseek.FilePart) {
 	refs := filerefs.DetectRefs(text)
 	if len(refs) == 0 {
@@ -120,9 +120,19 @@ func (r Router) Route(ctx context.Context, model, text string) (string, []deepse
 
 // routeOne walks one reference through the gates. Every exit but the
 // last two is a note + empty part.
+//
+// The capability gate only applies to SECOND-tier lanes (client nil):
+// there the model decides whether its own wire format carries document
+// parts, so modelcap.Files — the static table + catalogue grants — is
+// the authority. On the DeepSeek lane (client set) file input is an
+// ACCOUNT-level capability (the Files API parses server-side and the
+// chat part is just a file_id), so every model id on that lane can take
+// a document; gating it on a per-id table would re-grow the vision
+// allow-list bug that silently denied working models (deepseek-v4-pro
+// among them — see docs/pitfalls.md).
 func (r Router) routeOne(ctx context.Context, model string, ref filerefs.Ref) (string, deepseek.FilePart) {
 	name := filepath.Base(ref.Path)
-	if !modelcap.Files(model) {
+	if r.client == nil && !modelcap.Files(model) {
 		return switchModelNote(name), deepseek.FilePart{}
 	}
 	// Size gate BEFORE reading: a 100 MiB+ document shouldn't be
