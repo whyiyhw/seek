@@ -1974,6 +1974,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
 - **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
 
+### SSE tool 事件的 ok 是 omitempty 布尔——失败帧整个键缺席，「d.ok?」把失败读成成功
+- **Saw**: c_ux7lvk 调用树验收：桩 seek 吐 `tool_end error:"exit 1"`，页面却渲染 `✔ bash`（无 bad 态）——旧代码 `d.ok ? '✔ ' : '✘ '` 与 `!d.ok` 的读法自 W2.1 起就把每一帧失败都显示成成功（仅 .bad 类碰巧由 `!d.ok` 点亮，图标与文案互相矛盾）。
+- **Why**: `webToolEvent.OK` 是 `json:"ok,omitempty"`——Go 的 omitempty 对布尔零值整键不发，wire 上只有 `ok:true`（成功）与「键不在」（失败）两态；JS 侧 `undefined` 在 truthy 判断里归入成功侧。
+- **Fix**: 判定改为显式 `d.ok === true`（end 帧 true 才算成功），trowPaint/toolPlainRow 两路同口径；commit 带 c_ux7lvk。
+- **Lesson**: 消费 omitempty 布尔时，三态压成两态的合流方向在「读的人」手里——凡是「只在 true 时出现」的键，判定必须写 `=== true`，truthy 读法永远把缺席帧读成反面语义的反面。给 wire 布尔加 omitempty 时，注释里要写明「缺席=假」的消费口径。
+- **Refs**: `internal/controlplane/webfrontend_stream.go` `webToolEvent`；`internal/controlplane/webfrontend.html` `toolTreeRow`/`toolPlainRow`。
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
