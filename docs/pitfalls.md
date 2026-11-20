@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**266 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**267 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -64,7 +64,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | CI / gates | 3 |
 | Eval / tool descriptions | 6 |
 | Build tags / dependency isolation | 1 |
-| ACP / editor & headless lanes | 13 |
+| ACP / editor & headless lanes | 14 |
 | Eval / results data shape | 2 |
 | Transcript analysis / offline metrics | 4 |
 | Typed agents / orchestration | 2 |
@@ -1724,6 +1724,13 @@ If you're new to the project, skim entries in this order:
 - **Update 2 (the stuck-spinner bite)**: the original Fix line's "text block … degrades to no preview, never an error" was WRONG, and the user caught the symptom: every tool call spun in_progress forever. paseo's `zToolCallUpdate` declares `content: z.array(zToolCallContent).nullish()` with NO skip-invalid wrapper — one item failing the never-satisfiable text union makes the ENTIRE update fail validation, so `status:"completed"` and `rawOutput` never land. A bad content item doesn't degrade to "no preview", it POISONS the whole update. Final shape (seek): text content blocks are never sent at all; content = edit-success diff blocks ONLY; result/error detail rides rawOutput exclusively.
 - **Lesson**: for any ACP field whose schema rides `allOf`+discriminator, check what the CLIENT's bundled SDK actually accepts before choosing a spelling — and prefer variants without conflicting discriminators (diff over content-block) when the information allows. An item-array field with no skip-invalid semantics turns one bad item into a dropped MESSAGE — when you can't verify the client's array leniency, send only provably-valid items or none. And when a client ships its own mock agent, THAT is the reference wire shape — cheaper than schema archaeology. Binary grep over .asar is unreliable; use `grep -abo` + byte-offset slicing.
 - **Refs**: `cmd/seek/main.go` `acpToolContent` / `acpRawValue` / `acpToolTitle` (comments pin the decisions), `@agentclientprotocol/sdk` dist/schema/zod.gen.js `zToolCallContent`, paseo.app asar (bundled SDK zToolCallContent ~byte 2619232, zToolCallUpdate's bare `z.array(zToolCallContent)` ~2622104; mock agent's rawInput/rawOutput objects ~2559484), paseo app-dist frontend `toolCallDetails:{input,output,empty}`, zcode-acp-server dispatch.js:406 (the nested shape)
+
+### Flipping loadSession on exposes every id ever handed out under the old scheme
+- **Saw**: the first real "continue conversation" after shipping session/load failed with `session: open ~/.seek/sessions/seek.jsonl: no such file or directory` — paseo had stored the PRE-upgrade sessionId, which was the project directory name ("seek"), and the raw ENOENT reached the client looking like a broken install.
+- **Why**: clients persist the ids the agent hands out across agent upgrades. Advertising `loadSession:true` makes every historical id loadable-in-principle; ids from the project-name era index no transcript (and the ACP lane did not persist at all then), so those loads can never succeed — but they now reach the new code path.
+- **Fix**: `acpBackend.LoadSession` maps `os.ErrNotExist` to guidance naming the id and the era ("sessions created before session/load shipped … start a new conversation; it will resume fine"); other load errors keep the wrapped form.
+- **Lesson**: when a protocol capability flips on, enumerate what OLD handles do against the new path — the migration surface is every id ever issued, not just fresh ones.
+- **Refs**: `cmd/seek/main.go` (`acpBackend.LoadSession`), `cmd/seek/acp_load_test.go` (`TestACPBackend_LoadSession_MissingTranscript`), sibling entry "ACP session/load is an ORDER contract…" (the id-durability contract this is the migration tail of)
 
 ## Tool-failure self-recovery
 

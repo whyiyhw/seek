@@ -3211,6 +3211,18 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	}
 	loaded, err := b.store.Load(p.SessionID)
 	if err != nil {
+		// A missing transcript is the EXPECTED shape for conversations
+		// started before durable ids existed: session/new used to hand
+		// out the project directory name (so paseo holds ids like
+		// "seek" that index no file), and the ACP lane did not persist
+		// at all — there is nothing on disk to resume whatever the id
+		// says. Surface that as guidance; the raw ENOENT reads like a
+		// broken install.
+		if errors.Is(err, os.ErrNotExist) {
+			return acp.LoadSessionResult{}, fmt.Errorf(
+				"session/load %s: no stored transcript. Sessions created before session/load shipped (ids were project names) were never persisted and cannot be resumed — start a new conversation; it will resume fine",
+				p.SessionID)
+		}
 		return acp.LoadSessionResult{}, fmt.Errorf("session/load %s: %w", p.SessionID, err)
 	}
 	// Same repair -resume runs: a transcript cut mid-tool-call would

@@ -180,12 +180,26 @@ func TestACPBackend_LoadSession_RestoresAndReplays(t *testing.T) {
 
 // TestACPBackend_LoadSession_MissingTranscript: an unknown id fails loud
 // with the id in the message — a client showing "continue" needs to know
-// the transcript is gone, not that something vaguely broke.
+// the transcript is gone, not that something vaguely broke. "seek" is the
+// real-world stale id: pre-durable-id sessions handed paseo the project
+// DIRECTORY NAME as sessionId, and the ACP lane never persisted, so such
+// ids index no transcript and never will — the error must say that and
+// point at the way out instead of surfacing the raw ENOENT path.
 func TestACPBackend_LoadSession_MissingTranscript(t *testing.T) {
 	b, _ := loadTestBackend(t)
-	_, err := b.LoadSession(acp.LoadSessionParams{SessionID: "20260101-000000-deadbeefdeadbeef"}, func(acp.SessionUpdate) {})
-	if err == nil || !strings.Contains(err.Error(), "20260101-000000-deadbeefdeadbeef") {
+	_, err := b.LoadSession(acp.LoadSessionParams{SessionID: "seek"}, func(acp.SessionUpdate) {})
+	if err == nil {
+		t.Fatal("load of an unknown id must error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "seek") {
 		t.Fatalf("err = %v, want it to name the missing id", err)
+	}
+	if !strings.Contains(msg, "start a new conversation") {
+		t.Fatalf("err = %v, want the stale-id guidance", err)
+	}
+	if strings.Contains(msg, ".jsonl") {
+		t.Fatalf("err = %v, raw fs path leaked", err)
 	}
 }
 
