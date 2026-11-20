@@ -9,8 +9,11 @@ package controlplane
 //	delta  {run, text}                      ← text_delta (non-reasoning)
 //	tool   {run, id, name, phase, ok}       ← tool_start / tool_end
 //	usage  {run, prompt, completion,
-//	        cache_hit, cost_usd}            ← turn_end; $ computed
-//	                                          SERVER-side (below)
+//	        cache_hit, cost_usd,
+//	        model?, lane?, ctx_limit?}      ← turn_end; $ computed
+//	                                          SERVER-side (below); the
+//	                                          last three feed the top-bar
+//	                                          ContextMeter (W5 c_oyp2qf)
 //	reply  {"conv","text"} + run/session_id ← Send close-out (the MVP
 //	                                          envelope, purely extended)
 //	approval {id, conv, run, kind, summary,
@@ -45,6 +48,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/budget"
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -125,12 +130,26 @@ func (f *WebFrontend) SendStream(ctx context.Context, conv ConvID, ev RunEvent) 
 	case "tool_end":
 		fr = sseFrame{name: "tool", data: webJSON(webToolEvent{Run: run.id, ID: ev.ID, Name: ev.Name, Phase: "end", OK: ev.Error == ""})}
 	case "turn_end":
+		// W5 c_oyp2qf: the usage row also carries the ContextMeter's
+		// inputs — model + its lane label (modelcap, the display
+		// authority) + the context window (budget, same-source as the
+		// TUI status bar). All three additive and empty without a
+		// model-bearing agent_start, so pre-W5 frames stay byte-shape
+		// compatible.
+		_, laneLbl := modelcap.LaneOf(run.model)
+		ctxLimit := 0
+		if run.model != "" {
+			ctxLimit = budget.Limit(run.model)
+		}
 		fr = sseFrame{name: "usage", data: webJSON(webUsageEvent{
 			Run:        run.id,
 			Prompt:     ev.PromptTokens,
 			Completion: ev.CompletionTokens,
 			CacheHit:   ev.CacheHitTokens,
 			CostUSD:    turnCostUSD(run.model, ev, time.Now()),
+			Model:      run.model,
+			Lane:       laneLbl,
+			CtxLimit:   ctxLimit,
 		})}
 	default:
 		// agent_start/agent_end fed the run table above; turn_start,
@@ -188,13 +207,19 @@ type webToolEvent struct {
 // webUsageEvent is the turn_end token/cost row. cost_usd is computed
 // SERVER-side (§2.5): the client never prices, so rate cards live in
 // exactly one place — internal/pricing, the same cards seek itself
-// uses for its CLI footer.
+// uses for its CLI footer. model/lane/ctx_limit (W5 c_oyp2qf) feed the
+// top-bar ContextMeter: the lane label is modelcap's determination and
+// the window is budget.Limit — both omitempty so a model-less stub run
+// (no agent_start.model) emits the pre-W5 shape.
 type webUsageEvent struct {
 	Run        string  `json:"run"`
 	Prompt     int     `json:"prompt"`
 	Completion int     `json:"completion"`
 	CacheHit   int     `json:"cache_hit"`
 	CostUSD    float64 `json:"cost_usd"`
+	Model      string  `json:"model,omitempty"`
+	Lane       string  `json:"lane,omitempty"`
+	CtxLimit   int     `json:"ctx_limit,omitempty"`
 }
 
 // turnCostUSD prices one turn_end event at the tier in effect at now —

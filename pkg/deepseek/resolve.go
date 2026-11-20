@@ -25,8 +25,11 @@ package deepseek
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -250,6 +253,87 @@ func WithoutFiles(msgs []Message) []Message {
 	out := make([]Message, len(msgs))
 	for i, m := range msgs {
 		m.Files = nil
+		out[i] = m
+	}
+	return out
+}
+
+// fileMediaByExt maps the document extensions the submit-time router
+// detects (internal/filerefs' PDF/Word/PPT set) to their MIME types.
+// Local map, not mime.TypeByExtension: the stdlib consults the OS
+// mime database, which is empty on clean Windows installs — the type
+// must not drift with the host.
+var fileMediaByExt = map[string]string{
+	".pdf":  "application/pdf",
+	".doc":  "application/msword",
+	".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	".ppt":  "application/vnd.ms-powerpoint",
+	".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+// FileMediaType maps a document filename (or bare extension) to its
+// MIME type; unknown extensions get application/octet-stream. Shared by
+// ResolveFileData (data-URL construction) and the submit-time router's
+// second-tier format gate (internal/fileroute).
+func FileMediaType(name string) string {
+	if mt, ok := fileMediaByExt[strings.ToLower(filepath.Ext(name))]; ok {
+		return mt
+	}
+	return "application/octet-stream"
+}
+
+// ResolveFileData materialises every file part's Asset into a data:
+// URL on a request copy — the second-tier transport's sendable form
+// (ResolveFiles produces FileIDs for the DeepSeek wire; this produces
+// bytes for llm.Message.Files). Load failures NEVER abort the send:
+// the part is dropped and the same in-band note family records why.
+// Call it on the send-time copy only; the transcript keeps the durable
+// Asset form. Parts already carrying Data pass through untouched.
+func ResolveFileData(msgs []Message, load FileLoader) []Message {
+	has := false
+	for _, m := range msgs {
+		if len(m.Files) > 0 {
+			has = true
+			break
+		}
+	}
+	if !has {
+		return msgs
+	}
+	out := make([]Message, len(msgs))
+	for i, m := range msgs {
+		if len(m.Files) == 0 {
+			out[i] = m
+			continue
+		}
+		parts := make([]FilePart, 0, len(m.Files))
+		for _, p := range m.Files {
+			if p.Data != "" {
+				parts = append(parts, p)
+				continue
+			}
+			if p.Asset == "" {
+				m.Content += fileResolveNote(p.Asset, "file part has no asset to materialise")
+				continue
+			}
+			if load == nil {
+				m.Content += fileResolveNote(p.Asset, "no file loader wired")
+				continue
+			}
+			data, err := load(p.Asset)
+			if err != nil {
+				m.Content += fileResolveNote(p.Asset, err.Error())
+				continue
+			}
+			np := p
+			np.Data = "data:" + FileMediaType(p.Asset) + ";base64," + base64.StdEncoding.EncodeToString(data)
+			parts = append(parts, np)
+		}
+		if len(parts) == 0 {
+			m.Files = nil
+		} else {
+			m.Files = parts
+		}
 		out[i] = m
 	}
 	return out

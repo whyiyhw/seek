@@ -1,6 +1,6 @@
 # edit-unicode-read-first
 
-**Source pitfall**: docs/pitfalls.md "Tooling / environment" — *"`edit` tool: small models burn turns retrying byte-mismatched `old_string`"* (line 744). A v4-flash session ran ~10 failed `edit` calls in a row on a Unicode-dense file (`─` `🌙` `○` `▊`) — visually identical strings, byte-different `old_string`. Scaffolded by `scripts/pitfall-to-eval.sh --make 744`, hand-finished as one of the first three seeded cases.
+**Source pitfall**: docs/pitfalls.md "Tooling" — *"`edit` tool: small models burn turns retrying byte-mismatched `old_string`"*（行号随文件增长漂移，按标题 grep）. A v4-flash session ran ~10 failed `edit` calls in a row on a Unicode-dense file (`─` `🌙` `○` `▊`) — visually identical strings, byte-different `old_string`. Scaffolded by `scripts/pitfall-to-eval.sh --make`, hand-finished as one of the first three seeded cases.
 
 ## What this probes
 

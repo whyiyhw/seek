@@ -306,7 +306,7 @@ FIM 工具本身是只读的——它返回补全文本，不直接应用到文�
 - **Saw**：使用 `deepseek-reasoner` 模型但未设置 `Thinking` 参数时，模型以快速聊天模式运行而非推理模式，静默退化而非报错。
 - **Fix**：自动添加 `Thinking.Type=enabled`，由 `pkg/deepseek` 统一处理。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 
