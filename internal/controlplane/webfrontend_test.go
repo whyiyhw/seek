@@ -354,20 +354,31 @@ func TestWeb_RunLifecycle(t *testing.T) {
 
 // TestWeb_PageAvoidsHTMLParsingSinks pins the XSS discipline (PRD §5.5,
 // card c_iha3fr acceptance): model output reaches the DOM only via
-// createElement/createTextNode/textContent — the embedded page must
+// createElement/createTextNode/textContent — the embedded page AND its
+// static assets (the markdown renderer is a resident since W5) must
 // contain no HTML-string parsing sink, not even in a comment (a
 // mention is a temptation; the static check is belt and braces).
 func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
-	for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
-		if strings.Contains(string(webPage), sink) {
-			t.Errorf("embedded page references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", sink)
+	srcs := map[string]string{"page": string(webPage)}
+	for _, e := range []string{"markdown.js"} {
+		b, err := webStatic.ReadFile("static/" + e)
+		if err != nil {
+			t.Fatalf("static asset %s missing from embed: %v", e, err)
+		}
+		srcs[e] = string(b)
+	}
+	for name, src := range srcs {
+		for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
+			if strings.Contains(src, sink) {
+				t.Errorf("%s references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", name, sink)
+			}
 		}
 	}
-	// Positive pin: the §2.6 minimal markdown renderer must exist and
-	// build <pre> through the DOM API (regression guard against a
-	// future "simpler" HTML-string rewrite).
-	if !strings.Contains(string(webPage), "document.createElement('pre')") {
-		t.Error("embedded page lost the fenced-code renderer (document.createElement('pre'))")
+	// Positive pin: the W5 markdown renderer must exist as the first
+	// static asset and build <pre> through the DOM API (regression
+	// guard against a future "simpler" HTML-string rewrite).
+	if !strings.Contains(srcs["markdown.js"], "document.createElement('pre')") {
+		t.Error("static/markdown.js lost the fenced-code renderer (document.createElement('pre'))")
 	}
 }
 

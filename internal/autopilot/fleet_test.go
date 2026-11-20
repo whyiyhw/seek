@@ -12,6 +12,7 @@ import (
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -220,6 +221,13 @@ func TestTokenCost(t *testing.T) {
 // the test sandbox.
 func newManagerFleet(t *testing.T, runner subagent.Runner) Fleet {
 	t.Helper()
+	return newManagerFleetWithVerifier(t, runner, nil)
+}
+
+// newManagerFleetWithVerifier is newManagerFleet with the R2 verifier
+// injected (nil = not wired).
+func newManagerFleetWithVerifier(t *testing.T, runner subagent.Runner, ver *verifier.Verifier) Fleet {
+	t.Helper()
 	t.Setenv("SEEK_HOME", t.TempDir())
 	repo := initRepo(t)
 	policy, err := permission.New(repo, permission.PrefYolo)
@@ -246,7 +254,7 @@ func newManagerFleet(t *testing.T, runner subagent.Runner) Fleet {
 	}
 	// GLM-5.3: flat-rate card, so the cost assertions below are exact
 	// regardless of the peak/off-peak clock.
-	return NewFleet(mgr, wtMgr, pricing.ModelGLM53)
+	return NewFleet(mgr, wtMgr, pricing.ModelGLM53, ver)
 }
 
 var evidenceTokens = subagent.Tokens{Prompt: 5000, Completion: 100, CacheHit: 4500}
@@ -351,5 +359,69 @@ func TestManagerFleet_CtxCancel(t *testing.T) {
 	if out.Commit != "" || out.Files != 0 || out.Insertions != 0 || out.Deletions != 0 ||
 		out.Tokens != 0 || out.CostUSD != 0 {
 		t.Fatalf("cancelled outcome must carry zero evidence, got %+v", out)
+	}
+}
+
+// stubJudge implements verifier.Judge for the fleet-level wiring test.
+type stubJudge struct{ got int }
+
+func (s *stubJudge) Judge(ctx context.Context, model, bundle string) (verifier.Judgement, error) {
+	s.got++
+	return verifier.Judgement{
+		Assertions: []verifier.JudgedAssertion{
+			{Index: 1, Verdict: verifier.Pass, Evidence: []string{"D"}, Note: "diff shows it"},
+		},
+		Note:   "ok",
+		Tokens: 4321,
+	}, nil
+}
+
+// TestManagerFleet_VerdictWired: v8 柱 R R2 — a done task with
+// DoneWhen gets a verdict built from ITS OWN facts: WorkDir is the
+// task worktree, the diff is the committed deliverable, the scope
+// root is the main repo, and the assertions are the task's done_when.
+// The verdict observes — Status stays "done".
+func TestManagerFleet_VerdictWired(t *testing.T) {
+	j := &stubJudge{}
+	fleet := newManagerFleetWithVerifier(t, func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		if err := os.WriteFile(filepath.Join(job.Policy.Cwd(), "out.txt"), []byte("verifiable\n"), 0o644); err != nil {
+			return subagent.RunnerResult{}, err
+		}
+		return subagent.RunnerResult{Summary: "wrote out.txt", Tokens: evidenceTokens, Turns: 1}, nil
+	}, verifier.NewWithJudge(j, "fixture-model"))
+
+	out := fleet.Run(context.Background(), Task{
+		ID: "t9", Title: "write file", Prompt: "do it",
+		DoneWhen: []string{"out.txt exists with content"},
+	})
+	if out.Status != "done" {
+		t.Fatalf("status = %q, want done (summary: %s)", out.Status, out.Summary)
+	}
+	if out.Verdict == nil {
+		t.Fatal("expected a wired verdict on a done task")
+	}
+	if out.Verdict.Overall != verifier.Pass {
+		t.Fatalf("overall = %q, want pass (invariants %+v judgeErr %q)",
+			out.Verdict.Overall, out.Verdict.Invariants, out.Verdict.JudgeError)
+	}
+	// The judge saw the task's assertion and the committed diff —
+	// the per-assertion row is grounded in the deliverable.
+	if j.got != 1 || len(out.Verdict.Assertions) != 1 {
+		t.Fatalf("judge calls = %d, rows = %+v", j.got, out.Verdict.Assertions)
+	}
+	if out.Verdict.Diff.Commit != out.Commit || len(out.Verdict.Diff.ChangedPaths) != 1 || out.Verdict.Diff.ChangedPaths[0] != "out.txt" {
+		t.Fatalf("verdict diff must be the deliverable commit, got %+v", out.Verdict.Diff)
+	}
+}
+
+// TestManagerFleet_VerdictNilWithoutVerifier: no verifier wired →
+// Outcome.Verdict stays nil (the report renders no verdict suffix).
+func TestManagerFleet_VerdictNilWithoutVerifier(t *testing.T) {
+	fleet := newManagerFleet(t, func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "noop", Tokens: evidenceTokens, Turns: 1}, nil
+	})
+	out := fleet.Run(context.Background(), Task{ID: "t10", Title: "noop", Prompt: "do it", DoneWhen: []string{"x"}})
+	if out.Status != "done" || out.Verdict != nil {
+		t.Fatalf("status = %q verdict = %+v, want done + nil verdict", out.Status, out.Verdict)
 	}
 }

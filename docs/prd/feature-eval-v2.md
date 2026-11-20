@@ -2,7 +2,14 @@
 
 **主题**：重做 eval 的**判定口径**与**覆盖面**——把每例跑一次就判 PASS/FAIL 的做法换成「N 轮 + 通过率界」，补上三条承重轴（plan / 后台子代理 / serve-web）的端到端用例，给 eval 一个夜间入口，并把能确定化的检查明确移回 Go 单测，让 eval 只承担「模型在给定 schema/prompt 下的选择倾向」这一件它真正能测的事。
 
-**状态**：📐 设计稿（2026-11-19）。本文只设计，未动工。
+**状态**：📐 设计稿（2026-11-19），E1 已落地（c_ennnwa，2026-11-20）：`--rounds` /
+`min_pass_rate` / `record_only` / 行内 `round` / 聚合行进 `eval/run.sh`，机制自测
+`scripts/eval-rounds-test.sh`。**与本文两处口径修正**：① §三 E1 行原文「`min_pass_rate:
+0.6` 在 3/5 时判红」按字面是严格不等号，但与 §2.1「取 2/3」自相矛盾（0.67 ≠ 2/3）；
+实现取 **≥（含边界）**——3/5 对 0.6 判绿，两侧边界由自测钉死，理由与 E2 标定建议
+（取恰为 k/n 的阈值）见 `eval/README.md` §Judgment。② §六开放问题 1 的 E1 取向定为：
+崩溃轮 = 红轮（现有 `exact_agent_ends` 类界可显式抓手），不设独立 error 类、不引入
+`max_error_rate`——留 E2+ 按需再议。其余里程碑（E2–E7）未动工。
 
 **前置阅读**：[`eval/README.md`](../../eval/README.md)（判分机制与 metric 词表）、[`feature-slim-loop.md`](feature-slim-loop.md) §3（「单次红是 signal 不是 proof，判回归须双轮」——本文把它从纪律变成机制）、[`v8.md`](v8.md) 柱 T（裸核/完整消融，本文的 `--lane` 与之共用结果目录隔离）、[`../../AGENTS.md`](../../AGENTS.md) 测试节（failure-mode 清单）。
 
@@ -48,7 +55,7 @@
 三条硬约束：
 
 1. **默认行为逐字节不变**——不传 `--rounds` 时 stdout/结果行与今天一致，照 `scripts/eval-ablate-test.sh` 的 no-env 守护测试同一口径加断言。
-2. **`min_pass_rate` 是分布口径，不是放水**：`bash-overreach` 的真信号形状是「1/6 开局即 bash」，取 `min_pass_rate: 0.67`（3 轮全过才算过？否——取 2/3）仍会在连续越界时红。**取值由 E2 的实测标定表决定，不在本文拍死。**
+2. **`min_pass_rate` 是分布口径，不是放水**：`bash-overreach` 的真信号形状是「1/6 开局即 bash」，取 `min_pass_rate: 0.67`（3 轮全过才算过？否——取 2/3）仍会在连续越界时红。**取值由 E2 的实测标定表决定，不在本文拍死。**（E1 落地补注：比较是 IEEE double 上的含边界 `≥`——写 0.67 **不是** 2/3，会把「2/3 轮过」卡成红；E2 标定取恰为 k/n 的阈值：0.5 / 0.6 / 0.75 / 0.8。）
 3. **record-only 用例不进闸门**：`min_pass_rate` 缺省 + `expect.json` 标 `"record_only": true` 的用例只记录不判红（`code-review-effort-*` 归此类），runner 汇总时分列「gate 通过率」与「record 集」。
 
 ### 2.2 B — 三条承重轴用例（只进发版门禁）
@@ -88,7 +95,7 @@ GitHub Actions `schedule` 跑 **core 子集**（约 8 例低成本 + 2 轮），
 
 | 卡 | 内容 | 验收 |
 |---|---|---|
-| **E1 判定口径** | `run.sh --rounds N` + `expect.json: min_pass_rate / record_only` + 行内 `round` 字段 + 汇总分列 gate/record | 不传 flag 时输出与结果行字节等价（守护测试）；`--rounds 5` 写 5 行，`min_pass_rate: 0.6` 在 3/5 时判红、4/5 时判绿 |
+| **E1 判定口径** | `run.sh --rounds N` + `expect.json: min_pass_rate / record_only` + 行内 `round` 字段 + 汇总分列 gate/record | 不传 flag 时输出与结果行字节等价（守护测试）；`--rounds 5` 写 5 行，`min_pass_rate: 0.6` 在 3/5 时判绿（含边界，≥ 口径——原文「判红」按字面与 §2.1「取 2/3」矛盾，随实现修正）、3/5 对 0.7 判红。**已落地**（c_ennnwa） |
 | **E2 标定表** | 用 `eval/results/` 历史行 + 每例 5 轮实测，产出「每例 预期通过率 / 闸门取值 / 是否 record-only」表落 `eval/README.md`；三个已知 flaky 明确处置 | 表覆盖全部 21 例；`bash-overreach` 取到能抓住「开局即 bash」的界；`code-review-effort-*` 标 record-only |
 | **E3 plan-e2e** | 承重轴用例之一：propose→批准→执行→改需求→resume | 批准前零写入断言；resume 不重跑已完成步骤；用例 README 记录 baseline 与判分口径 |
 | **E4 subagent-bg-resume** | 承重轴用例之二：后台子代理完成通知 + 续话血统 | 完成通知进主流；续话 run 带 `resumed_from`；产物路径断言 |

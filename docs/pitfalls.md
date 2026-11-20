@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**257 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**271 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -41,11 +41,11 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Hook / memory | 7 |
 | Skill distill (auto path) | 1 |
 | TUI / terminal | 29 |
-| Agent loop | 17 |
+| Agent loop | 18 |
 | DeepSeek API | 24 |
 | Go language | 12 |
 | Tooling / environment | 25 |
-| LLM provider quirks (M6) | 10 |
+| LLM provider quirks (M6) | 11 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -56,7 +56,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Feishu / external API | 1 |
 | Subprocess / secrets | 1 |
 | Tool output | 2 |
-| Testing | 2 |
+| Testing | 3 |
 | Tool decorators | 2 |
 | Filesystem / model safety | 5 |
 | Tooling / line endings | 4 |
@@ -64,12 +64,13 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | CI / gates | 3 |
 | Eval / tool descriptions | 6 |
 | Build tags / dependency isolation | 1 |
-| ACP / editor & headless lanes | 11 |
-| Eval / results data shape | 1 |
+| ACP / editor & headless lanes | 14 |
+| Eval / results data shape | 2 |
+| Transcript analysis / offline metrics | 4 |
 | Typed agents / orchestration | 2 |
-| Git / merge | 2 |
+| Git / merge | 3 |
 | Subprocess / streaming stdout | 2 |
-| Web frontend / asset plane | 15 |
+| Web frontend / asset plane | 17 |
 | Tooling / go list | 3 |
 | Skill stats / --idle | 1 |
 | MCP bridge / tool naming | 1 |
@@ -78,9 +79,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **257** |
+| **Total** | **271** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 145.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 158.
 
 ---
 
@@ -497,6 +498,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
 - **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
 - **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+
+### /compact's own rescue call cannot fit an overflowed context — the recovery path was the deadlock
+- **Saw**: the general shape of the grep-deadlock entry below (§Tooling): once the history overflows the model's window, `/compact` — the one command that exists to shrink the session — sends the FULL history to the summariser and gets the same `maximum context length` 400 every other prompt gets. Reproduced deterministically in `TestSummarise_OverflowRescue_Completes` (fixture ≈ 159K tokens vs a 128K window): the rescue request itself is rejected, so the session is unrecoverable in-app
+- **Why**: `Summarise` built its request from the untrimmed history by design — the summary should cover everything. But "everything" is exactly what no longer fits; a recovery path that requires the resource it is recovering cannot terminate. A second trap hides in the obvious fix: dropping the oldest MESSAGES one by one can strand a tool result without its assistant `tool_calls` parent — an orphaned tool message is a second kind of 400, so the "rescue" can resurrect the deadlock in a new shape
+- **Fix** (card c_idisqf): degradation path in `pkg/agent/compact_rescue.go`, wired into both lanes' Summarise. Pre-flight estimate (`estimateTokens`: ASCII ≈ 4 B/token, CJK ≈ 1 token/rune — conservative so Chinese-heavy histories err high) against `budget.Limit(model)` minus an output reserve; over budget → stage 1 caps oversized bodies in place (keep-head + constant marker; content truncation cannot break tool pairing), stage 2 drops the OLDEST messages (never system, never the summariser turn), skipping cut points that would orphan a tool result. Elision note appended to the summariser prompt so the briefing states what it does NOT cover. Belt-and-braces: a loose `isContextOverflowError` match triggers ONE reactive retry at half budget for estimator drift. Fitting histories pass through the identical slice — zero byte change (prefix-cache discipline; `TestSummarise_NormalPath_BytesUnchanged` guards both lanes)
+- **Lesson**: every recovery path must be sized to run in the failure state it recovers — ask "does the rescue itself fit the budget it is rescuing?" at design time. And when trimming conversation history, the cut unit must respect wire invariants (tool_call/tool_result pairing), not just token counts: prefer truncating CONTENT over dropping structural messages, and when dropping messages never let a tool result outlive its parent
+- **Refs**: `pkg/agent/compact_rescue.go`, `pkg/agent/agent.go:Summarise`/`summariseLLM`, tests `pkg/agent/compact_rescue_test.go`; sibling entry §Tooling "Grep tool with broad pattern can deadlock" (the byte-cap half of this fix)
 
 ## DeepSeek API
 
@@ -1007,6 +1015,12 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: new `internal/modelcap` — the single capability authority (static table for every lane's default + additive runtime grants installed by `internal/opencatalog` from the gateway's own `modalities.input`, same shape as `pricing.SetModelRates` / `budget.SetLimits`); `deepseek.IsVisionModel` deleted. `llm.Message.Images []llm.Image` (data URLs) encoded by each adapter (openai array-form `image_url`, anthropic base64 `image` blocks, gemini `inlineData`), with text-only messages keeping their exact previous wire bytes. `runTurnLLM` mirrors `runTurnDeepSeek`'s send station: gate → `ResolveImages` → `PrepareMessages` → convert.
 - **Lesson**: "which models support X" is a cross-cutting capability fact, not a provider fact — parking it in the package of whoever shipped X first means every new lane silently answers "no". Also: a `false` from an allow-list and a `false` from "never heard of this id" are indistinguishable to the caller, and a silent in-band downgrade makes the wrong answer look like a product decision rather than a bug; the note's suggested fix (`/model <id>`) must never name an id that only exists on another lane.
 - **Refs**: `internal/modelcap/modelcap.go`, `internal/opencatalog/opencatalog.go` (`Model.Vision` / `Install` / `acceptsImages`), `pkg/llm/llm.go` (`Image`), `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `pkg/agent/translate.go` (`msgsToLLMWithImages`), `pkg/agent/agent.go:runTurnLLM`, `cmd/seek/visioninput.go:switchModelNote`
+### Switching eval off DeepSeek is a request-level claim — the compatible lane eats DEEPSEEK_API_KEY and config beats --base-url
+- **Saw**: steering eval onto an OpenAI-compatible lane with `-provider compatible -base-url <url>` looked switched (flags correct), but two silent reach-backs remained: (1) the `compatible` case resolves its credential from `OPENAI_API_KEY` **or `DEEPSEEK_API_KEY`** — a shell still exporting the metered key keeps using it on the "switched" lane; (2) `opencodeEndpoint` / `glmEndpoint` let `providers.<lane>.base_url` config **out-rank the `--base-url` flag**, so a config preset silently re-routes a flag-pointed invocation.
+- **Why**: `buildProvider`'s compatible case deliberately accepts `DEEPSEEK_API_KEY` as a vLLM/Ollama-shaped fallback (comment in the case), and endpoint precedence is config/env > flag > compiled default — intentional per-provider-statement-of-intent design, documented at `glmEndpoint`.
+- **Fix**: eval/run.sh's provider lane (c_ffzic2) scrubs `DEEPSEEK_API_KEY` from the child environment while a lane is active and exports `OPENCODE_BASE_URL` alongside `-base-url` (env > config closes the preset hole). Hermetic proof in `scripts/eval-provider-test.sh`: env-side AND config-side metered-key canaries plus a config-preset hijack endpoint are all planted; the test asserts zero canary hits at the fake endpoint and the request staying on the override target.
+- **Lesson**: "provider switched" must be proven at the endpoint (path/auth/model on the wire), not at the argv; and migrating traffic OFF a metered key means scrubbing the old credential from the environment, not just stopping naming it.
+- **Refs**: `cmd/seek/main.go:buildProvider` (compatible case), `cmd/seek/main.go:opencodeEndpoint`, `eval/run.sh` (provider lane block), `scripts/eval-provider-test.sh`
 
 ---
 
@@ -1428,6 +1442,14 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: on a three-OS CI, failure injection must fail for the same reason everywhere; when it can't, broaden the assertion from "this branch errored" to "the invariant held" (error out, nothing written).
 - **Refs**: `internal/skillmgr/writeproject_test.go`, `.github/workflows/ci.yml`
 
+### `t.Setenv` inside a `t.Parallel` test panics — and the panic surfaces from a helper, not the test
+
+- **Saw**: `go test ./internal/tui/` blew up with `panic: testing: t.Setenv() called after t.Parallel()` and a stack that pointed at `persistSessionTestFixture` → a shared test helper, not at the new test. The new test's own body was clean; the `t.Parallel()` was two frames up.
+- **Why**: Go forbids `t.Setenv` after `t.Parallel()` because the process environment is global — a parallel test mutating it would race every other test. The guard is on the `*testing.T` receiver, so ANY helper that receives the parallel test's `t` inherits the restriction. Test helpers that call `t.Setenv` (this repo's `persistSessionTestFixture`, `withSeekHome`) are therefore silently unusable from parallel tests.
+- **Fix**: drop `t.Parallel()` from the tests that reach a `t.Setenv` helper. Do not "fix" it by hoisting the `Setenv` into `TestMain` — that would make the sandbox dir global and defeat per-test isolation.
+- **Lesson**: a test helper's hidden requirements travel with `t`. When a new test panics in a helper you did not touch, check whether the helper calls `t.Setenv` / `t.Chdir` / `os.Setenv` and whether the test declared `t.Parallel()`. Same class as "the failure surfaces where the invariant is checked, not where it was broken".
+- **Refs**: `internal/tui/persist_test.go` (`persistSessionTestFixture`), `internal/config/config_test.go` (`withSeekHome`)
+
 ## Tool decorators
 
 ### A Tool decorator silently drops the optional interfaces the agent upcasts to
@@ -1633,6 +1655,20 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: "make cwd effective" in this codebase is TWO operations, not one. Any future per-session cwd consumer (multi-session backlog ③) must go through both anchors — or enumerate which convention each affected tool uses. Zed-compat falls out for free: it sends the spawn dir as cwd, so the anchor is a no-op there.
 - **Refs**: `internal/acp/session.go`, `internal/permission/permission.go` (Reanchor), `cmd/seek/main.go` (acpBackend.NewSession), `docs/prd/archive/feature-paseo-provider.md` §2.2 D-1
 
+### ACP session/load is an ORDER contract, and the id it loads must outlive the process
+- **Saw**: `loadSession` had been advertised `false` since 柱 P shipped, so ACP clients (paseo, Zed) never offered "continue this conversation" — the item sat in the backlog as "just implement session/load". Implementing it revealed the backlog line was the smallest part: three separate contracts had to line up first.
+- **Why**: (1) The schema's own words for `session/load` are "stream the entire conversation history back to the client via notifications", and paseo's bundle says why it matters — it registers the native session id BEFORE awaiting the load because "ACP agents replay the loaded session's updates before session/load resolves". A result-first implementation silently drops the whole history. (2) `session/new` was returning `filepath.Base(cwd)` as the sessionId — a directory name. ACP's contract is that this id is what the client hands back to `session/load`, so a name that indexes no file can never be loaded, and it even changes when the client opens a different directory. (3) The ACP lane was the one lane that never persisted: TUI/print/rpc all call `store.Save`, so `session/load` had no transcript to read in the first place.
+- **Fix**: `session/load` in `internal/acp` dispatch runs inline (uninterruptible, and the replay + result share the write mutex, so ordering is structural); `cmd/seek/acp_replay.go` is the pure transcript→update mapper (system skipped, user/assistant → `*_message_chunk`, tool_calls → `tool_call` completed, tool results → `tool_call_update` with rawOutput); `acpBackend.LoadSession` loads → `Repair()` → `AnchorSession(cwd)` → restores the model lane via `subagent.ResolveRoute` → `*b.sess = *loaded` (pointer mutation, see next bullet) → `ag.Reset`. `NewSession` now returns `session.ID`, `Initialize` advertises `LoadSession` only when a store exists, and `Prompt` saves once per `agent.TurnEnd` (whole-file atomic rewrite — per-event would rewrite hundreds of times a turn).
+- **Lesson**: a capability flag is a two-sided promise. `loadSession:true` means "ids I hand you are durable AND I will replay" — flipping the boolean without the id contract and the write path produces a client whose persistence UX half-works and silently loses history. When a backlog line is "implement <protocol method>", read the method's ordered obligations (what must precede the response?) and the identity contract (what must the id mean?) before wiring the handler.
+- **Refs**: `internal/acp/server.go` (`session/load` dispatch, `LoadSessionParams`), `cmd/seek/acp_replay.go`, `cmd/seek/main.go` (`acpBackend.LoadSession` / `NewSession` / `saveTurn` / `Initialize`), `docs/prd/archive/feature-paseo-provider.md` §2.4
+
+### Live state captured by closures must be MUTATED in place, not reassigned
+- **Saw**: resuming a session in the ACP lane, the natural expression is `b.sess = loaded`. That compiles and passes every test that inspects `b.sess` — while silently leaving main's four closures (`subagentMgr`'s `ParentSidFn`, `agent.Config.SessionID`'s x-opencode-session, the checkpoint `Manager`'s session scope, the plan-bridge sid) pointing at the ORIGINAL session object. The run would then write subagent transcripts and session headers under the pre-load id, and `-resume` would see two divergent files.
+- **Why**: those closures captured `activeSession` (the pointer) at construction, precisely so `/compact` can fork a session and have everybody follow. Reassigning the backend's field creates a second pointer to a new value while the captured one keeps its old target — the "two sources of truth" smell from AGENTS.md, in pointer form.
+- **Fix**: `*b.sess = *loaded` in `acpBackend.LoadSession`, with a comment naming the closures. Every captured closure keeps working because it dereferences the same address.
+- **Lesson**: in this codebase "the session" is a long-lived POINTER shared by closures; any resume/swap path must copy INTO it. The smell to watch for: assigning to a field of type `*session.Session` after startup.
+- **Refs**: `cmd/seek/main.go` (`acpBackend.LoadSession`, `acpBackend.sess` field comment), `subagent.ManagerOpts.ParentSidFn`, `agent.Config.SessionID`
+
 ### Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label
 - **Saw**: implementing SEEK_ACP_YOLO, the obvious wiring was `policy.SetPref(PrefYolo)` at the `seek acp` short-circuit (goal-mode precedent at main.go:1732). It would have been silently half-broken: the gate would allow bash while the system prompt header still read `Mode: deny` (and the bash tool description says "Refused under the current permission mode"), so the model would likely never attempt a bash call at all.
 - **Why**: the permission gate is live state — SetPref takes effect on the next Check — but the sysprompt Mode label is baked ONCE at startup into the prefix (`sysprompt.Compose(..., ModeLabel(initialPref, ...))`). Only the interactive TUI keeps them in sync mid-session via `Agent.SetModeLabel` per-message reminders; headless lanes (acp/goal/rpc) never set that label.
@@ -1704,6 +1740,13 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: for any ACP field whose schema rides `allOf`+discriminator, check what the CLIENT's bundled SDK actually accepts before choosing a spelling — and prefer variants without conflicting discriminators (diff over content-block) when the information allows. An item-array field with no skip-invalid semantics turns one bad item into a dropped MESSAGE — when you can't verify the client's array leniency, send only provably-valid items or none. And when a client ships its own mock agent, THAT is the reference wire shape — cheaper than schema archaeology. Binary grep over .asar is unreliable; use `grep -abo` + byte-offset slicing.
 - **Refs**: `cmd/seek/main.go` `acpToolContent` / `acpRawValue` / `acpToolTitle` (comments pin the decisions), `@agentclientprotocol/sdk` dist/schema/zod.gen.js `zToolCallContent`, paseo.app asar (bundled SDK zToolCallContent ~byte 2619232, zToolCallUpdate's bare `z.array(zToolCallContent)` ~2622104; mock agent's rawInput/rawOutput objects ~2559484), paseo app-dist frontend `toolCallDetails:{input,output,empty}`, zcode-acp-server dispatch.js:406 (the nested shape)
 
+### Flipping loadSession on exposes every id ever handed out under the old scheme
+- **Saw**: the first real "continue conversation" after shipping session/load failed with `session: open ~/.seek/sessions/seek.jsonl: no such file or directory` — paseo had stored the PRE-upgrade sessionId, which was the project directory name ("seek"), and the raw ENOENT reached the client looking like a broken install.
+- **Why**: clients persist the ids the agent hands out across agent upgrades. Advertising `loadSession:true` makes every historical id loadable-in-principle; ids from the project-name era index no transcript (and the ACP lane did not persist at all then), so those loads can never succeed — but they now reach the new code path.
+- **Fix**: `acpBackend.LoadSession` maps `os.ErrNotExist` to guidance naming the id and the era ("sessions created before session/load shipped … start a new conversation; it will resume fine"); other load errors keep the wrapped form.
+- **Lesson**: when a protocol capability flips on, enumerate what OLD handles do against the new path — the migration surface is every id ever issued, not just fresh ones.
+- **Refs**: `cmd/seek/main.go` (`acpBackend.LoadSession`), `cmd/seek/acp_load_test.go` (`TestACPBackend_LoadSession_MissingTranscript`), sibling entry "ACP session/load is an ORDER contract…" (the id-durability contract this is the migration tail of)
+
 ## Tool-failure self-recovery
 
 Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the two-sentence core + a pointer here). Doctrine: self-recovery first — "ask the user" is the LAST resort.
@@ -1722,6 +1765,43 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `scripts/eval-trend.sh` jq-parses (`jq -r '… | @tsv'`) instead of splitting lines. Two related bites: `@tsv` without `-r` emits a JSON-encoded string (tabs escaped as `\t`) which silently defeats downstream TSV field-splitting; and rows before the `ran_at` field exist need the filename's UTC-date prefix as a fallback timestamp. Commit (card c_lxferp).
 - **Lesson**: treat `results/*.jsonl` as a *stream of JSON objects*, never as lines — any new results tooling starts at jq.
 - **Refs**: `scripts/eval-trend.sh` (collect_rows), `eval/README.md` "Trend reports"
+
+### expect.json 新增标量键撞上 `max_/min_/exact_` 界前缀扫描——每轮全红 "unknown metric"
+- **Saw**: E1 给 expect.json 加 `min_pass_rate` 后首次冒烟，好流轮次也全 FAIL，failures 里是 `(unknown metric pass_rate)`。
+- **Why**: run.sh 的界检查用 jq `select(.key | startswith("max_")/…)` 扫描 expect.json 全部键——任何以界前缀开头的新标量键都会被当成 metric 界去查词表。`max_turns` 早就以同机制「兼职」turns 上限（既有行为，无人受伤），轮到 `min_pass_rate` 才暴露。
+- **Fix**: 卡 `c_ennnwa`（eval v2 E1）：界扫描加 `select(.key != "min_pass_rate")` 排除。今后再加标量键：要么避开三个前缀，要么同步扩这个排除表并配测试。
+- **Lesson**: 前缀路由（`max_`/`min_`/`exact_`）把 expect.json 的「键空间」分包给了 metric 界——往这个文件加配置键是在别人的命名空间里动土，先看扫描器。
+- **Refs**: `eval/run.sh` 界检查块（`min_pass_rate` 排除处注释）、`eval/README.md` 标量配置表。
+
+## Transcript analysis / offline metrics
+
+### read-argument key is schema-dependent; single-key parsing silently buckets the misses into a fake "one incredibly popular file"
+- **Saw**: prototyping an analyser that read only `"path"` while treating every parse failure as the same file produced a "file read 3800+ times" — which coincidentally looked like the 68% reread rate we were trying to measure, so the artefact was indistinguishable from the finding. Measured on this corpus (2026-11-19): both `schema_version=2` and `=3` sessions overwhelmingly use `"path"`, 2 early calls use `"file"`, 1 call puts the filename in `"offset"`, and `"file_path"` never appears in a `read` argument (it only shows up inside `bash`/`edit` payloads and tool *output* text).
+- **Why**: the read tool's accepted key is `path` today, so a single-key reader loses only a couple of calls here — but the failure mode is structural, not statistical: an unparsed read that lands in a shared bucket inflates whichever file identity the bucket is keyed to, and the larger the unparsed population grows (a future schema change, an argument-shape regression) the more plausible the fake number looks. `grep file_path` on transcripts matches tool *output* far more often than arguments, which is exactly how the "new format uses file_path" impression forms.
+- **Fix**: `scripts/transcript-stats` resolves `path` > `file_path` > `file` and counts unresolvable reads in a separate `unresolved` field that never enters a per-file bucket. `--read-key-mode path-only|naive-bucket` reproduces both failure shapes, and `--selftest` asserts all three modes land on different numbers (50.0% vs 37.5% vs 62.5% on the fixture).
+- **Lesson**: when an analyser has a "can't parse this" branch, the branch must be **counted and named**, never folded into the metric's denominator or its grouping key — folding makes the data-quality problem indistinguishable from the phenomenon. And confirm a claimed schema drift against *arguments* only: grepping a key name across transcript files mostly hits tool output.
+- **Refs**: `scripts/transcript-stats` (`read_path`), `eval/fixtures/transcript-stats/`, `eval/transcript-baseline/2026-11-19.md` § "双键兼容"
+
+### Duplicate-fingerprint rate has two defensible denominators; quoting one as the other shifts the headline 3.6% ↔ 6.2%
+- **Saw**: the same corpus yields "3.6% of tool calls are duplicates" and "6.2% are duplicates" depending on whether you sum `count-1` per fingerprint (extra call = wasted) or `count` for every fingerprint seen more than once (includes the one legitimate first call). The research note quoted the first for the total and the second per tool, producing "bash is worst at 9%" where the honest per-tool extra number is 8.5%.
+- **Why**: both definitions are correct answers to different questions ("how many calls were wasted" vs "how much of the stream is repeat activity"), and the difference is non-trivial whenever repeat clusters are large (a fingerprint appearing 5 times contributes 4 vs 5).
+- **Fix**: `scripts/transcript-stats` reports both (`dup_extra`, `dup_repeated`) side by side and names the headline explicitly; the baseline report flags the mixing in the source note rather than silently picking one.
+- **Lesson**: a ratio over "repeated things" must name its denominator in the same breath as the number, and both variants belong in the output — the reader cannot reconstruct which one was used from the value alone.
+- **Refs**: `scripts/transcript-stats` `analyse()`, `eval/transcript-baseline/2026-11-19.md` § "工具名分布 + 重复指纹"
+
+### A frozen baseline keeps asserting a shell-parameter shape that has since been changed
+- **Saw**: the 2026-11-19 baseline's headline `+50, 991 次` (offset step = the 50-line read page) was read downstream as "read still paginates at 50", but `2f0f1df` (2026-08-14) had already raised `limit` 50 → 200 and added whole-file reads. The number is still correct *as history*; only the tense was missing. Verified: all 991 `+50` steps come from sessions created before 2026-08-14; the 20 later sessions contribute 0.
+- **Why**: a baseline is immutable by design (it's the "before" half of an A/B), so it cannot be regenerated when the shell changes — meaning every reader of it gets a snapshot of a world that no longer exists, and nothing in the numbers says so.
+- **Fix**: `eval/transcript-baseline/2026-11-19.md` now carries an explicit "this is historical shape, not current behaviour" note at both quote sites (key-numbers block + next-card checklist) naming the commit, the date, and the old/new values.
+- **Lesson**: any frozen measurement whose subject is a **tunable shell parameter** must be stamped with "as measured under <value>, changed at <commit/date>" at every place a reader meets the number — not just in the header. The follow-up card is exactly the reader who will misread it.
+- **Refs**: `eval/transcript-baseline/2026-11-19.md` § "四个关键数字" / "下一张卡（预告）", commit `2f0f1df`
+
+### Committed metric snapshots must not embed absolute home paths
+- **Saw**: `skipped_paths` in the committed baseline JSON carried `/Users/<name>/.seek/sessions/...` — the username and home layout enter public git history through a diagnostics field nobody reads.
+- **Why**: the analyser's `skipped_paths` is a debugging affordance (which files were unreadable), and the cheapest implementation is "the path you already have" — but the JSON's destination is a repo, not a terminal. A field's *purpose* and its *audience* diverge after it's committed.
+- **Fix**: `transcript-stats` emits `os.path.basename(p)` in `skipped_paths`; `--selftest` asserts the entry equals the basename and contains no path separator.
+- **Lesson**: when a diagnostics field is written into a committed artifact, store the **minimum identity** the reader needs (filename), and get full paths from a local re-run. Add the assertion at write time — a privacy leak is invisible in review diffs of a 30 KB JSON.
+- **Refs**: `scripts/transcript-stats` (`analyse`, `_selftest`), `eval/transcript-baseline/2026-11-19.json`
 
 ## Typed agents / orchestration
 
@@ -1754,6 +1834,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: ritual after resolving any merge, BEFORE `git commit`: `git grep -n '^<<<<<<< \|^>>>>>>> '` and `git diff --cached --check` (flags "leftover conflict marker" on added lines). Post-hoc audit of an already-made merge: `git diff --check <merge>^1 <merge>` — NOT `git show --check <merge>` (its `--cc` condensed diff suppresses these hunks; verified on `920f9e1`: `show --check` silent, diff-vs-either-parent flags all three marker lines). Cleanup itself: card `c_zxeqih`.
 - **Lesson**: merges touching docs with long single-line status fields get a mechanical marker-grep before commit — two bites is a pattern, not bad luck.
 - **Refs**: `docs/prd/feature-orchestration.md` 状态行; `920f9e1`, `e8eface` (first manual cleanup, same file).
+
+### 纯搬移拆文件时 `git diff -M` 检不出 rename——一份源拆成两份，配对是一对多
+- **Saw**: 卡 c_3mny65 把 `cmd/seek/main.go` 的两块（planBridge / subagent glue）各拆成新文件，卡面验收写的是「`git diff -M` rename 检出」；提交后 `git diff -M -C --find-copies-harder --summary` 仍报两个 `create mode`，没有一处 `rename`，`--stat` 只有 `main.go −662 / planbridge.go +315 / subagent_glue.go +386`。
+- **Why**: rename 检测是「一个删除 ↔ 一个新增」的相似度配对；一次拆成 N 个新文件时，被删的 662 行要同时对上两个新增块，任何单侧相似度都低于阈值。`-C` / `--find-copies-harder` 只扩大候选集，不改一对一配对模型，所以拆分永远显示成 delete + create。
+- **Fix**: 等值口径换成「区段 diff 为空」——`diff <(git show HEAD:cmd/seek/main.go | sed -n '122,161p;196,456p') <(sed -n '15,315p' cmd/seek/planbridge.go)` 无输出 ⇒ 函数体零改动；再对 main.go 剩余部分做「挖掉两块后与 HEAD 逐行比对（只允许空行规整 + 少两条已搬走的 import）」证明没有夹带。
+- **Lesson**: 「纯搬移可核」的手段随拆分形态变——整文件搬家（`envgate.go`）用 `-M`，一块代码分到多个新文件用区段 diff。把验收写法钉死成 `-M`，会让正确的纯搬移看起来像没做。
+- **Refs**: `cmd/seek/main.go`, `cmd/seek/planbridge.go`, `cmd/seek/subagent_glue.go`; 整文件搬家先例 `cmd/seek/envgate.go`（0a66450）
 
 ## Subprocess / streaming stdout
 
@@ -1872,6 +1959,20 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Why**: `go:embed` bakes the bytes as they sit on disk; GitHub's windows runner defaults `core.autocrlf=true`, so checkout rewrites the LF-committed `webfrontend.html` to CRLF locally, and the embedded page (and its sha256 pin) drift. Computed locally: LF version hashes to the pin, CRLF version to exactly the CI's `got` — the file in git was never wrong.
 - **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
 - **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
+
+### web-gate 的 size 基线钉在「哪个工具链量的」上——±1.8MB 的 skew，棘轮要按 delta 加不要按绝对值重测
+- **Saw**: 2026-11-19 c_x2au4t 验收 `scripts/web-gate.sh`：本机默认 go1.27.3 交叉构建报超基线 +440KB——但 `git stash` 后未改动的 main@2e7ad39 同样报 +426KB（零改动超线）；换 `GOTOOLCHAIN=go1.25.8`（CI 的版本线）重测，同一棵树只有 29.1MB，比基线低 1.37MB。
+- **Why**: 基线数字是某台机器某个 Go 版本某次交叉编译的绝对值，而 Go 小版本间的代码生成差异能搬动 MB 级体积（1.25.8→1.27.3 同源差 ~1.8MB）。`--update-baseline` 的「重测绝对值」语义只在测量环境不变时成立；基线文件里没有任何工具链信息，skew 无法从文件本身看出来。
+- **Fix**: c_x2au4t 的棘轮改按 delta 加（实测本卡净增 +14109B/go1.27、+13557B/go1.25.8，配额 ≤30KB 内），基线注释记下两侧工具链的实测数与复现口径（`GOTOOLCHAIN=go1.25.8 bash scripts/web-gate.sh` 对齐 CI）；未动 gate 脚本本身。
+- **Lesson**: 体积门比较的是「同尺子下的差」不是「绝对数」——本地跑 gate 先确认工具链与 CI 同线，不同线就按 delta 说话；给基线写棘轮注释时把工具链版本当数据记进去。长期解（gate 内钉 GOTOOLCHAIN、或 CI 钉具体补丁版）是独立设计决定，不在渲染卡内顺手做。
+- **Refs**: `scripts/web-size-baseline.txt` 尾注；`scripts/web-gate.sh` `build_size`；`.github/workflows/ci.yml` `go-version: '1.25'`。
+
+### 页面新增一个静态资产，两个既有无头验收的 scripts=1 基线同刻全断——资产数变化要顺手改全仓 script-count 钉
+- **Saw**: c_x2au4t 把渲染器外置成 `<script src="static/markdown.js">` 后，W2.1（web-stream-headless.mjs）与 W4.4（web-sessions-headless.mjs）各自断言的 `document.scripts === 1` 全数失败——两处基线都不在本卡文件清单里，纯靠跑回归才看见。
+- **Why**: 两脚本把「页面只有内联脚本」当 XSS 基线钉死（scripts 不增 = 注入未执行）；页面脚本元素从 1 变 2 是结构事实变化，不是回归，但断言读不出区别。
+- **Fix**: 同卡把两处基线更新为 2 并注明构成（内联页面脚本 + static/markdown.js），重跑两套无头验收全绿；commit 带 c_x2au4t。
+- **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
+- **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
 
 ## Tooling / go list
 

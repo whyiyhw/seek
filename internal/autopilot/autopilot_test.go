@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/whyiyhw/seek/internal/verifier"
 )
 
 // fakeDecomposer returns a fixed task list (or error).
@@ -222,5 +224,32 @@ func TestDriver_AggregatesEvidence(t *testing.T) {
 	wantCost := 0.02 + 0.01
 	if rep.TotalCostUSD != wantCost {
 		t.Fatalf("TotalCostUSD = %v, want %v", rep.TotalCostUSD, wantCost)
+	}
+}
+
+// TestDriver_AggregatesVerdictCounts: v8 柱 R R2 — the report's
+// pass/doubt/fail verdict counters mirror the outcomes' verdicts, and
+// a nil verdict (verifier not wired) counts nowhere.
+func TestDriver_AggregatesVerdictCounts(t *testing.T) {
+	fleet := &fakeFleet{run: func(ctx context.Context, tk Task) Outcome {
+		o := Outcome{Task: tk, Status: "done"}
+		switch tk.ID {
+		case "t0":
+			o.Verdict = &verifier.Verdict{Overall: verifier.Pass}
+		case "t1":
+			o.Verdict = &verifier.Verdict{Overall: verifier.Doubt}
+		case "t2":
+			o.Verdict = &verifier.Verdict{Overall: verifier.Fail}
+		}
+		return o
+	}}
+	d := New(fakeDecomposer{tasks: tasks(4)}, fleet, Caps{})
+	rep, err := d.Run(context.Background(), "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.VerifiedPass != 1 || rep.VerifiedDoubt != 1 || rep.VerifiedFail != 1 {
+		t.Fatalf("verify counts = %d/%d/%d, want 1/1/1 (nil verdict counts nowhere)",
+			rep.VerifiedPass, rep.VerifiedDoubt, rep.VerifiedFail)
 	}
 }

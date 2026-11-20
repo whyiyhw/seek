@@ -244,6 +244,14 @@ type Options struct {
 	// config.SessionNotifySecondsOrDefault() (default 60) by cmd/seek.
 	SessionNotifySeconds int
 
+	// AutoCompactAt resolves the auto-compact trigger in tokens for a
+	// model id, or 0 when the feature is off. A func, not a value, for
+	// the same reason SessionID is: /model switches the window mid-
+	// session, and a fraction-configured trigger must follow it. Wired
+	// to config.Config.AutoCompactThreshold (which also honours
+	// $SEEK_AUTO_COMPACT) by cmd/seek; nil = never auto-compact.
+	AutoCompactAt func(model string) int
+
 	// ProviderName, when non-empty, means a second-tier provider is active
 	// (Anthropic, OpenAI, Gemini, or a compatible endpoint). The TUI
 	// renders a banner warning that DeepSeek-exclusive features are disabled.
@@ -408,6 +416,19 @@ type Model struct {
 
 	stream    <-chan agent.Event
 	streaming bool
+
+	// compacting is true while an automatic /compact's summariser call is
+	// in flight. It gates re-entry (a second stream-end must not start a
+	// second summariser against the same history) and is cleared by
+	// handleCompactDone on both the success and failure paths.
+	compacting bool
+
+	// compactedMsgs is len(Agent.Messages()) right after the last
+	// successful compaction. Auto-compact refuses to fire again until at
+	// least one further exchange has landed — without it a very low
+	// trigger would re-summarise the just-compacted three-message history
+	// on every turn, paying a full summariser request each time.
+	compactedMsgs int
 
 	// cancelStream cancels the context that backs the in-flight
 	// agent.Prompt. Triggered by Esc; cleared on streamEndMsg.
@@ -724,6 +745,7 @@ type Model struct {
 	skillIdx         int
 	skillSaved       int
 	skillDropped     int
+	skillInstalled   int // `s` direct-installs to project level (bridge M-B3)
 	pendingSkill     []skilldistill.SkillCandidate
 	skillDistilling  bool
 	skillDistillGate string // L0 gate detail, shown on the spinner line

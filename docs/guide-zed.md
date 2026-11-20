@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射已跑通（真 Zed 验证），但还简陋——审批门、session resume、slash 命令等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——审批门、slash 命令等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -79,11 +79,11 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | 项 | 现状 | 后续优化方向 |
 |---|---|---|
 | **审批门 / approval** | ACP 路径**没有 per-action 审批 UI**，且权限姿态钉死 `Deny`（flag 够不到，见 §5.1）：cwd 内写/编辑直接放行、**bash 全拒**（`go vet` 类 read-only 白名单除外）。无头场景可用 `SEEK_ACP_YOLO=1` 放开（§5.1）。 | 实现 ACP `session/request_permission`，把工具审批弹到 Zed 原生权限 UI（"允许 seek 编辑 X?"）。 |
-| **session resume** | `agentCapabilities.loadSession=false`，不能恢复历史会话。 | 实现 `session/load`，对接 seek 的 JSONL session 持久化。 |
-| **会话数** | 一个 `seek` 进程 = 一个会话（MVP）。 | 支持多 `session/new` 复用同进程。 |
+| **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | 唯一缺口：`sessionCapabilities.list`（paseo 的"列出历史会话"）仍未申报。 |
+| **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。模型选择已有协议通道替代（§5.2）。 |
 | **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
-| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）；sessionId 变为项目目录名。 | 多 session 各持独立栈（见 backlog ③）。 |
+| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch

@@ -16,6 +16,9 @@ package controlplane
 //	GET  /        the embedded page (no auth — it holds no secrets; a
 //	              valid ?token= never renders: the first hop 303-
 //	              exchanges it for an HttpOnly cookie, §5.1 W1.2)
+//	GET  /static/ the page's asset family (W5, c_x2au4t: markdown.js
+//	              is the first non-inline resident; same 'self' CSP,
+//	              no auth — same no-secrets posture as the page)
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
 //	              (?conv= — EventSource cannot set headers); ?topic=
 //	              opts the connection into a topic stream alongside
@@ -32,6 +35,13 @@ package controlplane
 //	              W3.1 — see webfrontend_subagents.go)
 //	POST /voice      push-to-talk audio upload (V2, voicefrontend.go —
 //	              mounted only when a VoiceFrontend Attached pre-Run)
+//
+// Approval cards (W5 c_n37tnr) ride the CONV stream as the named SSE
+// event `approval` (not the ?topic= dimension — that one is for the
+// file-follow backed panels; a card must pop in every view, and the
+// main /events connection is the always-on carrier, voice precedent).
+// Decisions go through POST /rpc approval/decide — see
+// webfrontend_approval.go for the whole contract.
 //
 // Token posture mirrors butler's /today precedent (localhost / tailnet
 // audience): a per-install random token in ~/.seek/serve/web.token,
@@ -159,6 +169,13 @@ type WebFrontend struct {
 	next int                              // subscriber ids, unique across convs
 	runs map[ConvID]*webRun               // live streamed run per conv (W1.4); guarded by mu
 
+	// Approval hub (W5 c_n37tnr, webfrontend_approval.go): pending and
+	// recently-terminal cards keyed by request id, plus the terminal
+	// eviction FIFO. Guarded by mu like subs/runs — the hub is hub
+	// state.
+	approvals   map[string]*webApproval
+	approvalDone []string
+
 	// Topic dimension (W3.2, webfrontend_topic.go): the same /events
 	// connections' second channel (drop-oldest buffer) hung on the
 	// shared per-index-path subagents.jsonl tail-follows behind the
@@ -263,6 +280,7 @@ func (f *WebFrontend) ensureToken() (string, error) {
 func (f *WebFrontend) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", f.handlePage)
+	mux.HandleFunc("/static/", f.handleStatic) // W5 asset family (markdown.js — c_x2au4t)
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
 	mux.HandleFunc("/state", f.handleState)
@@ -437,7 +455,8 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 
 // handleEvents is the SSE downstream. One goroutine per tab: replay
 // nothing, stream the conv's frames — the MVP default-event replies
-// plus the W1.4 named-event family delta/tool/usage (EventSource
+// plus the W1.4 named-event family delta/tool/usage and the approval
+// family (W5 c_n37tnr; EventSource
 // delivers named events only to addEventListener, so the pre-W1.4
 // page's onmessage is untouched) — and a 15s heartbeat (keeps
 // intermediaries from idling the conn; `retry:` makes the browser

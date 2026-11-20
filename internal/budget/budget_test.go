@@ -91,3 +91,71 @@ func TestFraction(t *testing.T) {
 		t.Errorf("zero usage = %v", got)
 	}
 }
+
+// TestAutoCompactAt pins the trigger resolution: an explicit token count
+// wins and ignores the model; a fraction scales the live window; zero /
+// negative means off; and a fraction above 1 is NOT clamped (a trigger
+// past the window simply never fires — the safe direction for a typo).
+func TestAutoCompactAt(t *testing.T) {
+	m := "deepseek-flash" // 1M
+	cases := []struct {
+		name     string
+		model    string
+		tokens   int
+		fraction float64
+		want     int
+	}{
+		{"off — both zero", m, 0, 0, 0},
+		{"tokens only", m, 350_000, 0, 350_000},
+		{"fraction only", m, 0, 0.35, 350_000},
+		{"tokens win over fraction", m, 350_000, 0.5, 350_000},
+		{"fraction follows a smaller window", "gpt-4o", 0, 0.35, 44_800},
+		{"negative fraction is off", m, 0, -0.1, 0},
+		{"fraction > 1 is not clamped", m, 0, 1.5, 1_500_000},
+	}
+	for _, c := range cases {
+		if got := AutoCompactAt(c.model, c.tokens, c.fraction); got != c.want {
+			t.Errorf("%s: AutoCompactAt(%q, %d, %v) = %d, want %d",
+				c.name, c.model, c.tokens, c.fraction, got, c.want)
+		}
+	}
+}
+
+// TestClassifyAt_MatchesCompiledFractions pins ClassifyAt to Classify
+// when no trigger is configured — the two paths must not drift, or the
+// status bar's colours would change for users who never touch the
+// setting. The warn point is 0.8 × critical, which reproduces the
+// compiled 0.60/0.75 pair exactly.
+func TestClassifyAt_MatchesCompiledFractions(t *testing.T) {
+	m := "deepseek-flash"
+	limit := Limit(m)
+	for _, used := range []int{0, pct(limit, 0.3), pct(limit, 0.61), pct(limit, 0.70), pct(limit, 0.76), limit + 1} {
+		if got, want := ClassifyAt(m, used, 0), Classify(m, used); got != want {
+			t.Errorf("ClassifyAt(%d, 0) = %v, want Classify = %v", used, got, want)
+		}
+	}
+}
+
+// TestClassifyAt_ConfiguredTriggerMovesEscalation: with a trigger set,
+// critical lands AT the trigger and warn at 80% of it — so a 350k
+// trigger on a 1M window goes red at 350k rather than at 750k.
+func TestClassifyAt_ConfiguredTriggerMovesEscalation(t *testing.T) {
+	m := "deepseek-flash"
+	at := 350_000
+	cases := []struct {
+		used int
+		want Severity
+	}{
+		{0, SeverityOK},
+		{279_999, SeverityOK},
+		{280_000, SeverityWarn}, // 0.8 × 350k
+		{349_999, SeverityWarn},
+		{350_000, SeverityCritical},
+		{900_000, SeverityCritical},
+	}
+	for _, c := range cases {
+		if got := ClassifyAt(m, c.used, at); got != c.want {
+			t.Errorf("ClassifyAt(%d, %d) = %v, want %v", c.used, at, got, c.want)
+		}
+	}
+}

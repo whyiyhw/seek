@@ -71,6 +71,8 @@ window.SEEK_DOCS_INDEX = [
       "模型上下文限制",
       "Warnings",
       "预算警告",
+      "Auto-compact",
+      "自动压缩",
       "What Happens at the Limit",
       "达到限制后的行为",
       "Design Notes",

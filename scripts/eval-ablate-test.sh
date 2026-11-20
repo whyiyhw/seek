@@ -1,7 +1,8 @@
 #!/bin/bash
 # eval-ablate-test.sh — eval/ablate.sh 与 run.sh env 钩子的确定性自测
-# （c_w3vhcm 返工增补①，2026-11-18；脚本自动进 selftest 发现名单，
-#  裸跑即自测，无需 dispatch 参数）。
+# （c_w3vhcm 返工增补①，2026-11-18；provider 缺省翻转同步 c_ffzic2
+#  人拍 2026-11-20；脚本自动进 selftest 发现名单，裸跑即自测，无需
+#  dispatch 参数）。
 #
 # 为什么存在：原卡验收①②靠沙盒里临时手跑假二进制，被验证车道权限层
 # 拒跑、事后无法机械复跑（主会话判「验证存疑」退返工）。本脚本把同一套
@@ -18,15 +19,23 @@
 #      的版本），与当前版本在两个临时沙盒各跑一遍假二进制，stdout+stderr+
 #      结果 JSONL 行归一化后 cmp。归一化只动「同一脚本连跑两次也会变」的
 #      字段：ran_at、elapsed_s、结果文件名里的日期戳、沙盒 tmp 路径——
-#      不动任何行为语义。
+#      不动任何行为语义。本测试只守 ablation 钩子（RESULTS_DIR /
+#      EXTRA_ARGS）的 no-env 不变量；provider 车道缺省行为（人拍
+#      2026-11-20 起四旋钮全不设 = opencode 车道，argv 多 -provider
+#      opencode）由 scripts/eval-provider-test.sh 钉死——假二进制只看
+#      -tools 不看 -provider，故该 argv 差异不进本对比的输出面。
 #
 # 假二进制与合成用例只写进 mktemp 沙盒与 eval/cases/<临时名>/，退场时
 # 全部清掉；本测试落在 eval/ablation/ 的文件按 mtime 晚于测试起点识别并
 # 删除——预先存在的真实消融数据（若有）分毫不动。
 #
-# golden 的时效性：③ 把「当前 run.sh 无 env 行为 == 最后一个改动前版本
-# 的行为」钉成不变量。未来卡片若有意改 run.sh 的无 env 输出，本测试转
-# 红——届时随那张卡更新基准（这正是验收②要守的东西）。
+# golden 的时效性：③ 把「当前 run.sh 无 env 输出 == 最后一个改动前版本
+# 的输出」钉成不变量。未来卡片若有意改 run.sh 的无 env 输出，本测试转
+# 红——届时随那张卡更新基准（这正是验收②要守的东西）。边界：改的是
+# 无 env 的 argv/env 面（如 c_ffzic2 人拍缺省车道翻转：argv 多
+# -provider opencode、擦 DEEPSEEK_API_KEY）而假二进制对其不敏感时，
+# 本对比仍绿——那类行为变化由 scripts/eval-provider-test.sh 的缺省/
+# 回退腿守，本测试只对输出面负责。
 #
 # macOS bash 3.2 兼容（selftest 通道全仓口径）：无 mapfile / 关联数组；
 # ${VAR} 后紧跟非 ASCII 字符一律加花括号；默认值展开一律 :- 形态。
@@ -113,7 +122,10 @@ printf '{"max_turns":3,"min_turns":1,"exact_agent_ends":1}\n' > "eval/cases/$CAS
 results_before=$(find eval/results 2>/dev/null | sort)
 
 # ---- 验收①：ablate.sh 双跑 + 对照表 ------------------------------------
-bash eval/ablate.sh "$CASE" "$fake" > "$tmp/ablate.out" 2> "$tmp/ablate.err"
+# 四个 provider 旋钮同 ③ 一并 -u：ablate 双跑经 run.sh 缺省走 opencode
+# 车道（人拍口径），残留旋钮值会把它拐进别的车道甚至形状校验 exit 2。
+env -u SEEK_EVAL_PROVIDER -u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY \
+  bash eval/ablate.sh "$CASE" "$fake" > "$tmp/ablate.out" 2> "$tmp/ablate.err"
 ablate_rc=$?
 if [ "$ablate_rc" -ne 0 ]; then
   fail "ablate.sh exited ${ablate_rc} (want 0)"
@@ -175,11 +187,15 @@ for side in old new; do
   cp "eval/cases/$CASE/prompt.txt" "eval/cases/$CASE/expect.json" "$tmp/$side/eval/cases/$CASE/"
 done
 
-# env -u：车道环境里即使残留这两个变量也不影响「不设」口径。
+# env -u：车道环境里即使残留这些变量也不影响「不设」口径。四个
+# provider 旋钮必须一并清（人拍缺省翻转后残留值会把两侧 run.sh 拐进
+# 别的车道甚至形状校验 exit 2，污染本测试所守的 ablation 对比面）。
 env -u SEEK_EVAL_RESULTS_DIR -u SEEK_EVAL_EXTRA_ARGS \
+  -u SEEK_EVAL_PROVIDER -u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY \
   bash "$tmp/old/eval/run.sh" "$CASE" "$fake" > "$tmp/old.out" 2> "$tmp/old.err"
 old_rc=$?
 env -u SEEK_EVAL_RESULTS_DIR -u SEEK_EVAL_EXTRA_ARGS \
+  -u SEEK_EVAL_PROVIDER -u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY \
   bash "$tmp/new/eval/run.sh" "$CASE" "$fake" > "$tmp/new.out" 2> "$tmp/new.err"
 new_rc=$?
 [ "$old_rc" -eq 0 ] || fail "pre-change run.sh exited ${old_rc} (want 0)"
