@@ -332,7 +332,7 @@ cmd_selftest() {
   grep -q '无条目（已迁移或空文件）——空操作' "$d/o2" \
     || { echo "✗ 自测2：应报告空操作"; sed 's/^/      /' "$d/o2"; rc=1; }
   after=$(find "$root/pitfalls" -name '*.md' | sort | wc -l | tr -d ' ')
-  [ "$before" = "$after" ] || { echo "✗ 自测2：空操作不应增减文件（$before → $after）"; rc=1; }
+  [ "$before" = "$after" ] || { echo "✗ 自测2：空操作不应增减文件（$before → ${after}）"; rc=1; }
 
   # 3) 在途分支模拟：旧文件换成「少一条中文、多一条 Fourth」的变体 →
   #    只转出 Fourth，其余跳过；不在源里的旧文件原样保留。
