@@ -276,6 +276,7 @@ butler `/today`（2026-11-13 上线，卡 c_clvtsp）验证过的形态，原样
 `/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸已交付，W1.2 c_w5lidm：仅对 cookie 凭证生效——查询参数/Bearer 形态自带 token 即自带 CSRF 免疫，不经此闸，curl 面零感知）：
 
 - 写面（POST）二选一：同源 `Origin` 头校验（允许集=自身 origin）**或** `X-Seek-Token` 头。跨站页面即使带上了 cookie（Samesite=Lax 已挡大半 POST），Origin 不匹配即 403。
+- **`POST /rpc` 同吃此闸（c_n37tnr，2026-11-20）**。/rpc 交付时是纯只读数据面，只带 token 门；`approval/decide` 是它上面**第一个状态变更型 method**（浏览器的 y/N/a 回答移动的是执行放行权），所以「cookie 单独不得驱动执行」必须对这个承载决定的 route 成立，不只是聊天 route。闸加在 route 级而非逐 method 判写：method 写集是第二份真相表，添 method 忘登记的那天就腐了。浏览器每次 POST 都带 Origin、页面自身 fetch 同源，浏览器面零感知；query/Bearer 调用方自带 token，与 /msg 同款免闸。
 - 读面（GET 静态/SSE）：cookie 足矣。
 - Cookie 属性：`HttpOnly; Secure(若 TLS); SameSite=Lax; Path=/`。
 
@@ -336,7 +337,7 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
+- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / `/rpc` 同款（`TestWeb_RPCWriteGate`，c_n37tnr） / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
 - **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。

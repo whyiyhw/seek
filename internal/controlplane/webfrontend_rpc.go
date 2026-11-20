@@ -31,10 +31,30 @@ const rpcBodyLimit = 1 << 20
 
 // handleRPC serves POST /rpc behind the same token gate as every
 // stateful route (asset plane and chat share one origin/auth, §3.3).
+//
+// The CSRF bar (§5.2) applies here exactly as on /msg: /rpc was a
+// read-only data plane when this route shipped, so it only ever needed
+// the token. approval/decide (c_n37tnr) is the FIRST state-mutating
+// method on it — the browser's y/N/a answer moves execution permission
+// — and "cookie alone drives nothing" must hold for the route that
+// carries the decision, not just for the chat route. Applying the bar
+// to the whole route (rather than to a per-method write set) is
+// deliberate: a method-write classification is a second registry of
+// truth that rots the first time someone adds a method and forgets to
+// list it. Browsers attach Origin to every POST, and the page's own
+// fetch is same-origin, so the browser face is unaffected; query/Bearer
+// callers (scripts, curl) bear the token itself and skip the bar, as
+// they do on /msg.
 func (f *WebFrontend) handleRPC(w http.ResponseWriter, r *http.Request) {
-	if !f.auth(r) {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
+	switch f.authKind(r) {
+	case credNone:
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token (use ?token= or Authorization: Bearer)"})
 		return
+	case credCookie:
+		if !f.writeGate(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cookie-authenticated writes need a same-origin Origin header or X-Seek-Token"})
+			return
+		}
 	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST only"})
