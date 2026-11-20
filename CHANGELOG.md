@@ -33,3 +33,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_zdkwoa：web 对齐 dsh·总纲：feature-web-frontend.md 增补 W5 计划与 size 预算分配
 - c_ffzic2：eval 测试调用切换 OpenCode Go 套餐 DeepSeek（deepseek-v4.1-flash）——批量/无人值守不吃计量真 key
 - c_erzfzx：MCP-D5：Phase 3 决策卡——按 §5.4 判定数据定 grep 结果内 hint 后手 go/no-go（读数非实现）
+- c_254zzz：transcript-stats 离线分析器 + 历史效率基线报告：重复率/翻页率/read 重读落 eval/
