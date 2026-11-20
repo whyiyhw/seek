@@ -271,7 +271,7 @@ func TestFormatCost(t *testing.T) {
 }
 
 // TestPricingFor_GLM53 pins the GLM-5.3 card against bigmodel.cn's
-// paas listing (checked 2026-11-12): ¥8 miss / ¥2 hit / ¥28 output per
+// paas listing: ¥8 miss / ¥2 hit / ¥28 output per
 // 1M tokens, converted at 7.0 CNY/USD. GLM has no peak/off-peak
 // windows, so the card must be identical at both tiers — CurrentTier
 // describes DeepSeek's clock, and callers pass it unconditionally.

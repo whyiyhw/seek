@@ -83,7 +83,7 @@ DeepSeek pricing (from [`internal/pricing/pricing.go`](internal/pricing/pricing.
 | Output | **$1.20** / $0.60¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | Off-peak² | **−50%** | **−50%** | — |
 
-<sub>¹ Peak / off-peak rates (off-peak = half price) — V4.1-Flash rates effective 2026-09-10, V4-Pro unchanged; verified 2026-11-14 against the official pricing page, see [`internal/pricing/pricing.go`](internal/pricing/pricing.go). ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
+<sub>¹ Peak / off-peak rates (off-peak = half price) — V4.1-Flash rates effective 2026-09-10, V4-Pro unchanged; rate cards live in [`internal/pricing/pricing.go`](internal/pricing/pricing.go), and each model's verification date + source URL live in the [`verified-on ledger`](internal/pricing/ledger.go) — that is the file to check before trusting a number or bumping it. ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
 
 Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas are byte-stable `[]byte` constants, tool output is capped at write-time, and history is never rewritten before send. The status bar shows the live ratio + dollars saved.
 
