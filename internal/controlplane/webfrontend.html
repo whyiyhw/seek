@@ -71,6 +71,16 @@
      a secure context: localhost is one; a tailnet IP over plain http
      is NOT (browsers deny getUserMedia) — front it with an HTTPS
      proxy (tailscale serve) to talk from a phone.
+     Approval cards (W5, card c_n37tnr): permission y/N delivered to
+     the browser — the conv stream's named `approval` events drive a
+     bottom-right card stack (summary + command summary + y/N/a
+     buttons, permission.Policy semantics: a = always-allow for the
+     kind), decisions POST via /rpc approval/decide, receipts
+     (resolved/cancelled) withdraw the card in every tab. Idempotent
+     both sides: click disables the whole card (no double POST), the
+     hub fires the decide callback exactly once per id. Empty state is
+     zero-footprint (badge hidden, stack :empty). Reconnect resyncs
+     via approval/list with a tombstone set against snapshot races.
      Deliberately out of scope: multi-tab sync, history persistence,
      bold/italic/table/quote markdown (the W5 subset covers the chat
      load; renderer lives in static/markdown.js), mobile, real auth
@@ -137,6 +147,30 @@
      防长按选中周围文字（touch 长按尤其会） */
   #mic { padding: 8px 12px; user-select: none; -webkit-user-select: none; touch-action: none; }
   #mic.rec { background: #8f4a4a; }
+
+  /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
+  /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
+     不属于某个面板。空态零侵入：容器 :empty 即 display:none，顶栏角标
+     hidden 属性默认在，无未决时页面零痕迹。 */
+  #approvals { position: fixed; right: 14px; bottom: 76px; z-index: 10;
+               width: min(420px, calc(100vw - 28px));
+               display: flex; flex-direction: column; gap: 8px;
+               max-height: 60vh; overflow-y: auto; }
+  #approvals:empty { display: none; }
+  .apcard { background: #1b1e24; border: 1px solid #2a2e36; border-radius: 8px;
+            padding: 10px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  .apcard .apt { color: #d8a657; font-size: 12px; margin-bottom: 4px; }
+  .apcard .aps { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
+  .apcard pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+                padding: 6px 8px; margin: 4px 0; overflow: auto;
+                white-space: pre-wrap; word-break: break-all; font: inherit;
+                max-height: 120px; }
+  .apcard .apb { display: flex; gap: 8px; margin-top: 8px; }
+  .apcard .apb button { flex: 1; padding: 5px 8px; font-size: 13px; }
+  #ap-badge { flex: none; align-self: center; background: #8f4a4a; color: #f0d7b8;
+              border-radius: 10px; padding: 2px 10px; font-size: 12px;
+              white-space: nowrap; }
+  #ap-badge[hidden] { display: none; }
 
   /* ---- 会话浏览器（W4.4 资产面 UI·一）+ 指令快捷按钮（W2.2）---- */
   #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
@@ -260,6 +294,9 @@
   <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
   <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
   <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
+  <!-- 审批未决角标（W5 c_n37tnr）：有待审批卡片时常显计数；hidden 默认在
+       ——空态不占顶栏（验收③零侵入）。 -->
+  <span id="ap-badge" hidden></span>
   <button id="browse-btn" type="button">📚 会话</button>
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
@@ -305,6 +342,10 @@
   </div>
   <div id="stat-body"></div>
 </section>
+<!-- 审批卡片栈（W5 卡 c_n37tnr）：悬浮层不进任何面板闸——权限决定要在
+     任何视图弹出。卡片由 SSE approval 事件驱动增删（webfrontend_approval.go
+     的服务端 hub 是单源），按钮走 POST /rpc approval/decide。 -->
+<div id="approvals" aria-live="polite"></div>
 <form id="form">
   <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
   <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
@@ -504,6 +545,112 @@ function onTool(ev) {
   row.classList.toggle('bad', end && !d.ok);
 }
 
+// ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）----
+// 服务端审批 hub 的浏览器半边：SSE approval 事件（pending 弹卡 /
+// resolved|cancelled 撤卡）+ /rpc approval/decide（y|n|a 对齐 permission
+// 语义）。幂等：卡按 id 增删；点击即整卡禁用（防抖不双发）。空态零侵入
+// （角标 hidden、卡栈 :empty 隐藏）。重连快照重建走墓碑集——快照可能取在
+// 回执前，直接回填会复活刚撤的卡（subagents 面板同款竞态）。
+const apBox = document.getElementById('approvals');
+const apBadge = document.getElementById('ap-badge');
+const apCards = new Map();   // id → {root, done}
+const apTomb = [];           // 最近撤下的 id（防快照复活；保底 32 条）
+
+function apBadgeRender() {
+  const n = apCards.size;
+  apBadge.textContent = n ? '⏳ 待审批 ' + n : '';
+  apBadge.hidden = n === 0;           // 空态零侵入：无未决不占顶栏
+}
+
+function apDrop(id) {
+  const c = apCards.get(id);
+  if (!c) return;                     // 重复回执/未知撤卡：幂等无感
+  apCards.delete(id);
+  c.root.remove();
+  if (!apTomb.includes(id)) {
+    apTomb.push(id);
+    if (apTomb.length > 32) apTomb.shift();
+  }
+  apBadgeRender();
+}
+
+// 命令摘要按模型产物处理：textContent-only，无 HTML 解析面（§5.5）。
+function apAdd(v) {
+  if (!v || !v.id || apCards.has(v.id)) return;
+  const root = document.createElement('div');
+  root.className = 'apcard';
+  root.dataset.id = v.id;
+  const t = document.createElement('div');
+  t.className = 'apt';
+  t.textContent = '🔑 审批 · ' + (v.kind || '?') + (v.run ? ' · run ' + v.run.slice(0, 8) : '');
+  const s = document.createElement('p');
+  s.className = 'aps';
+  s.textContent = v.summary || '（无描述）';
+  root.appendChild(t);
+  root.appendChild(s);
+  if (v.command) {
+    const pre = document.createElement('pre');
+    pre.textContent = v.command;
+    root.appendChild(pre);
+  }
+  const bar = document.createElement('div');
+  bar.className = 'apb';
+  for (const [dec, label, tip] of [
+    ['y', '✅ 允许', '允许这一次'],
+    ['n', '❌ 拒绝', '拒绝；拒绝仍是工具结果，不是致命错'],
+    ['a', '♾ 总是允许', '本次会话内同类操作不再询问（always-allow）'],
+  ]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = tip;
+    b.addEventListener('click', () => apDecide(v.id, dec));
+    bar.appendChild(b);
+  }
+  root.appendChild(bar);
+  apBox.appendChild(root);
+  apCards.set(v.id, { root, done: false });
+  apBadgeRender();
+}
+
+// 决定上行：先整卡禁用（防抖——重复点击不二次发 POST），RPC 失败才复能；
+// 成功即撤卡（SSE 回执会再撤一次，apDrop 幂等；其它标签页靠同一回执撤）。
+async function apDecide(id, dec) {
+  const c = apCards.get(id);
+  if (!c || c.done) return;
+  c.done = true;
+  for (const b of c.root.querySelectorAll('button')) b.disabled = true;
+  try {
+    await rpc('approval/decide', { id, decision: dec });
+    apDrop(id);
+  } catch (e) {
+    c.done = false;                   // 决定未落账：复能重试
+    for (const b of c.root.querySelectorAll('button')) b.disabled = false;
+    addMsg('hint', '（审批操作失败：' + e.message + '）');
+  }
+}
+
+function onApproval(ev) {
+  try {
+    const v = JSON.parse(ev.data);
+    if (!v || !v.id) return;
+    if (v.state === 'pending') apAdd(v);
+    else apDrop(v.id);
+  } catch (e) { /* 单条坏帧不毁卡片栈 */ }
+}
+
+// 快照重建（页面加载 / SSE 重连）：墓碑里的 id 跳过（撤卡先到、快照后到
+// 的竞态）。失败静默——SSE 推送仍可用，与资产面同款取舍。
+async function apResync() {
+  try {
+    const res = await rpc('approval/list', { conv: CONV });
+    for (const v of (res.approvals || [])) {
+      if (apTomb.includes(v.id)) continue;
+      apAdd(v);
+    }
+  } catch (e) { /* 快照拉不到不算错：卡片栈靠推送维持 */ }
+}
+
 // SSE 下行。EventSource 不能设头，conv 走查询参数；鉴权走 cookie（换票
 // 后）或 TOKEN 查询参数（旧形态），两者服务端同权。W2.1 起消费 W1.4 的
 // 事件族：命名事件 delta/tool 折进流式气泡；默认事件里带 run 的 reply
@@ -514,7 +661,8 @@ function listen() {
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.addEventListener('delta', onDelta);
   es.addEventListener('tool', onTool);
-  es.onopen = () => refreshState();
+  es.addEventListener('approval', onApproval);   // W5 c_n37tnr：审批卡族
+  es.onopen = () => { refreshState(); apResync(); };  // 重连即快照重建卡片栈
   es.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
