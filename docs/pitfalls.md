@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**258 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**259 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -42,7 +42,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Skill distill (auto path) | 1 |
 | TUI / terminal | 29 |
 | Agent loop | 17 |
-| DeepSeek API | 24 |
+| DeepSeek API | 25 |
 | Go language | 12 |
 | Tooling / environment | 24 |
 | LLM provider quirks (M6) | 10 |
@@ -655,6 +655,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: parsePerPageUSD (F3) anchored on the PRD's ¥1.5/千页, USD derived at the search row's own documented native ratio (¥5/1K → $0.75/1K ⇒ $0.225/1K pages) with the derivation in the constant's comment; list-price-only posture (no discounts modelled) unchanged
 - **Lesson**: before bumping any tools-family constant, check the tool's own guide page (api-docs.deepseek.com/guides/files_api, /asr, /tts, …), not quick_start/pricing — and re-verify the guide page too, because that's where these prices live now. Where only a CNY figure exists, convert at the ratio the page natively documents for a sibling tool rather than inventing a rate
 - **Refs**: `internal/pricing/pricing.go` (`parsePerPageUSD` comment), docs/prd/feature-deepseek-app-api.md §1.2/§6, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin, both checked 2026-11-18)
+
+### 核价日期搬进台账后，文档里的同款日期戳变成过期副本——判据是「哪份文件是唯一权威」，不是「哪份文件被改过」
+- **Saw**: verified-on 台账落地（c_ldu44u）把 pricing.go 注释里 7 处 checked/verified 日期收拢进 `ledger.go`，`go test -race ./...` 全绿、自测 9/9；验收时才发现 README.md:86 / README.zh.md:84 的脚注仍写着「verified 2026-11-14 … 见 pricing.go」——而台账里 DeepSeek 两张卡已 bump 到 2026-11-20，文档比现实旧了六天。同一轮还漏了 pricing_test.go:274 的 `checked 2026-11-12`
+- **Why**: 「迁移数据源」这个动作天然只覆盖被指定的那个文件；日期戳是以散文形式散布在代码注释、测试注释、README、PRD 里的**同一条事实的多份副本**，谁被 grep 到谁才被改。测试和自测都盯不到文档——它们是断言代码行为，不读 README 里的散文
+- **Fix**: 两处脚注改成「价目看 pricing.go，逐模型核价日期/来源 URL 看 ledger.go」，刻意**不再写具体日期**——说明性文档不该持有会过期的快照，只该给一条能继续追的路径；同一轮清掉 pricing_test.go 的残留日期戳
+- **Lesson**: 把一条事实从「散落的副本」收拢成「单一权威文件」时，收尾动作是 grep 全文里该事实的**旧写法**（这里：`20\d\d-\d\d-\d\d` 紧邻 `checked`/`verified`/`核对`），而不是只改指定的那个文件。文档里凡是能换成指针的日期，都换成指针——文档持有常量，必然再漂一次
+- **Refs**: `internal/pricing/ledger.go`（权威）、`README.md:86`、`README.zh.md:84`、`internal/pricing/pricing_test.go:274`、`docs/price-audit-2026-11-20.md`
 
 ### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
 - **Saw**: an effort:max session on a long (99k prompt, 99% cache) turn died with `response truncated (finish_reason=length, max_tokens=16384)` after a hidden-reasoning stretch — the whole 16k completion budget went to `reasoning_content`, content arrived empty or cut at the start. A sibling turn produced the clean-empty variant (`model returned an empty response`)

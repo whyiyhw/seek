@@ -81,7 +81,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | 输出 | **$1.20** / $0.60¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | 错峰² | **−50%** | **−50%** | — |
 
-<sub>¹ 高峰 / 错峰价（错峰 = 高峰半价）——V4.1-Flash 价 2026-09-10 起执行、V4-Pro 价未变；2026-11-14 对照官方价格页核对，见 [`internal/pricing/pricing.go`](internal/pricing/pricing.go)。² 高峰时段为 01:00–04:00 和 06:00–10:00 UTC（北京 09:00–12:00、14:00–18:00），其余时间全部错峰。</sub>
+<sub>¹ 高峰 / 错峰价（错峰 = 高峰半价）——V4.1-Flash 价 2026-09-10 起执行、V4-Pro 价未变；价目见 [`internal/pricing/pricing.go`](internal/pricing/pricing.go)，逐模型的核价日期与来源 URL 见 [`verified-on 台账`](internal/pricing/ledger.go)——改价或信价之前先看这一份。² 高峰时段为 01:00–04:00 和 06:00–10:00 UTC（北京 09:00–12:00、14:00–18:00），其余时间全部错峰。</sub>
 
 实测 **95–97% prefix-cache 命中**——是纪律不是运气：tool schema 是字节稳定的 `[]byte` 常量、tool 输出在写入端就限定大小、历史消息发送前从不重写。状态栏实时显示命中率 + 省下的钱。
 
