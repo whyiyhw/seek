@@ -1843,6 +1843,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: any test/helper that builds-and-execs a helper binary must derive BOTH the `-o` target and the exec path from one `runtime.GOOS`-aware name. Green on macOS/Linux says nothing about this class — it only ever fires on the Windows CI lane.
 - **Refs**: `cmd/seek/tools_flag_test.go` `buildSeekBin`
 
+### 子进程 stdin 决定管道用 os.Pipe，不用 io.Pipe；写手要在 emit 之前登记
+- **Saw**: 把审批决定从平面写回 `seek -p` 子进程 stdin 时，两个坑叠在一起：①`io.Pipe` 的 Write 会阻塞到读者读走——平面 RPC handler 写一行决定就可能挂住一个 HTTP 请求直到子进程调度；②若在 `emit(ev)` 之后才登记 req_id 的 delivery 闭包，浏览器可能在「卡片已弹出、写手还没登记」的窗口里点按钮，决定落空、子进程一直等。
+- **Why**: os/exec 对 `*os.File` 直接传 fd（不启 copy goroutine），内核缓冲吸收写入；`io.Pipe` 是同步无缓冲的，语义上等于 goroutine 手递手。顺序问题则是「卡片的可见性」与「决定的可达性」耦合：hub 一广播卡，点击就可能发生。
+- **Fix**: `attempt` 里 `os.Pipe()`，读端给 `cmd.Stdin`、写端由 `writeDecision` 在 decMu 下写；attempt 结束（成功/失败/超时/取消）`closeApprovalPipe` 关闭两端，于是迟到的决定变成 no-op 而不是挂住或 double-close。路由包一层 observer：先 `router.Route(id, write)` 再 `emit(ev)`，并在 attempt 的 defer 里 `router.Cancel()` 撤掉没人答的卡。
+- **Lesson**: 「谁先可见」决定「谁先登记」——把外部可触发的入口（卡片广播、事件 emit）放在资源登记之后。管道选型看谁写：别的 goroutine 写子进程 stdin ⇒ os.Pipe。
+- **Refs**: `internal/controlplane/executor.go` `attempt`（ApprovalRouter 段）；`internal/controlplane/webfrontend_approval.go` `runApprovals`；卡 `c_n37tnr` 子进程半边。
+
 ## Web frontend / asset plane
 
 ### session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message
@@ -1951,6 +1958,14 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: c_x2au4t 的棘轮改按 delta 加（实测本卡净增 +14109B/go1.27、+13557B/go1.25.8，配额 ≤30KB 内），基线注释记下两侧工具链的实测数与复现口径（`GOTOOLCHAIN=go1.25.8 bash scripts/web-gate.sh` 对齐 CI）；未动 gate 脚本本身。
 - **Lesson**: 体积门比较的是「同尺子下的差」不是「绝对数」——本地跑 gate 先确认工具链与 CI 同线，不同线就按 delta 说话；给基线写棘轮注释时把工具链版本当数据记进去。长期解（gate 内钉 GOTOOLCHAIN、或 CI 钉具体补丁版）是独立设计决定，不在渲染卡内顺手做。
 - **Refs**: `scripts/web-size-baseline.txt` 尾注；`scripts/web-gate.sh` `build_size`；`.github/workflows/ci.yml` `go-version: '1.25'`。
+
+### 体积记账的 delta 锚点必须钉「直接父提交」，别锚功能语义起点——中间吸收的无关内容会污染净增
+- **Saw**: 2026-11-20 c_n37tnr 子进程半边收尾轮复测：上一会话给 PRD §13.3 记的「+52 059B（a5b420f→本卡终态）」两种端点口径都对不上——按 a5b420f→终态实测 +59 966B（多出 12 283B），按直接父 031f099→终态实测 +47 683B（少 4 376B）。
+- **Why**: 工作基线 031f099 是个 merge，除了 a5b420f 的 web 半边还吸收了 c_idisqf 的 compact_rescue 等内容（`git diff a5b420f 031f099` 有 1119 行插入）。以「功能的语义起点」为基点量净增，把别人卡的内容记进自己账上；而上会话的 52 059B 两个口径都不再现，说明测量时树的状态与终态也不一致——数字一旦落进 PRD 记账就成了「已验证事实」，收尾轮只能推倒重测。
+- **Fix**: 收尾轮以 `git worktree add --detach <tmp> <parent>` 逐端点同工具链（GOTOOLCHAIN=go1.25.8）构建实测，PRD §13.3/CHANGELOG 同步改成 +47 683B 并写明口径（031f099→终态）与 a5b420f 口径的差值来源；commit 8379319。
+- **Lesson**: 「净增」是一个 diff 概念——锚点写错，数字再准也是别人的账。写进 PRD/CHANGELOG 的体积数字必须同时写「锚点提交 + 工具链」两个口径参数，缺一个，下个会话就得重测一遍才能信。
+- **Refs**: `docs/prd/feature-web-frontend.md` §13.3 c_n37tnr 行；上条「web-gate 的 size 基线」（工具链侧的同族坑）。
+
 
 ### 页面新增一个静态资产，两个既有无头验收的 scripts=1 基线同刻全断——资产数变化要顺手改全仓 script-count 钉
 - **Saw**: c_x2au4t 把渲染器外置成 `<script src="static/markdown.js">` 后，W2.1（web-stream-headless.mjs）与 W4.4（web-sessions-headless.mjs）各自断言的 `document.scripts === 1` 全数失败——两处基线都不在本卡文件清单里，纯靠跑回归才看见。

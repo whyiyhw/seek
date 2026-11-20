@@ -13,6 +13,7 @@ package controlplane
 // Same re-exec idiom as internal/sandbox/sandbox_linux_test.go.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -181,6 +182,40 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
 		fmt.Println(`{"type":"text_delta","delta":"stuck"}`)
 		time.Sleep(60 * time.Second)
+		return 0
+	case "approval_roundtrip":
+		// W5 c_n37tnr child-half acceptance: exactly the real child's
+		// shape — emit an approval_request, BLOCK reading one decision
+		// line off stdin (the executor's pipe), echo it back as a
+		// text_delta so the parent can prove the line really arrived,
+		// then finish. Without --approval-stdin the real child would
+		// never emit the request, but the stub keys off the env only:
+		// the executor's argv is asserted separately in the test.
+		reqID := os.Getenv("CP_STUB_REQID")
+		if reqID == "" {
+			reqID = "ap-stub-1"
+		}
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Printf("{\"type\":\"approval_request\",\"req_id\":%q,\"kind\":\"bash\",\"summary\":\"在桩项目里跑一次全量测试\",\"command\":\"go test ./...\"}\n", reqID)
+		sc := bufio.NewScanner(os.Stdin)
+		decision := ""
+		if sc.Scan() {
+			decision = sc.Text()
+		}
+		if decision == "" {
+			fmt.Println(`{"type":"error","error":"no decision line on stdin"}`)
+			return 1
+		}
+		fmt.Printf("{\"type\":\"text_delta\",\"delta\":%q}\n", "decision:"+decision)
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SAP"}`)
+		return 0
+	case "approval_leftover":
+		// The run ends while a card is still pending: emit the request,
+		// never read stdin, finish. Proves the attempt-end Cancel
+		// withdraws the browser card.
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Printf("{\"type\":\"approval_request\",\"req_id\":%q,\"kind\":\"bash\",\"summary\":\"没人回答就结束\"}\n", os.Getenv("CP_STUB_REQID"))
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SAL"}`)
 		return 0
 	case "web_multi_turn":
 		// W2.3 usage-meter e2e: ONE run, TWO turns — turn_end fires per

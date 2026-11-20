@@ -1011,6 +1011,7 @@ func run() error {
 		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
 		noSuggest     = flag.Bool("no-suggest", false, "disable v4 柱 D suggested-reply (predictor + UI placeholder + calibration injection); equivalent to suggest_reply=false in ~/.seek/config.json")
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
+		approvalStdin = flag.Bool("approval-stdin", false, "print mode (--json) only: surface permission prompts as approval_request lines on stdout and read the decision lines from stdin (the remote control plane's approval channel)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
 		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | compatible")
@@ -1063,6 +1064,15 @@ func run() error {
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
 		return fmt.Errorf("--yolo and --plan are mutually exclusive")
+	}
+
+	// --approval-stdin belongs to the JSONL print lane only: it turns the
+	// child's stdout into an event stream carrying approval_request lines
+	// and its stdin into the decision channel (W5 c_n37tnr). Asking for it
+	// in the TUI or plain-print lanes is a caller bug — say so instead of
+	// silently ignoring it.
+	if *approvalStdin && !*jsonOut {
+		return fmt.Errorf("--approval-stdin requires --json (the approval channel is part of the JSONL contract)")
 	}
 
 	// -version / -upgrade short-circuit before any provider / session
@@ -1268,10 +1278,17 @@ func run() error {
 	// no-remote bash guard further down (goalBash + subagent runner
 	// wiring). The guard is a property of the yolo lane specifically —
 	// a Deny ACP session (Zed) keeps the plain permission gate.
+	//
+	// W5 c_n37tnr child half: --approval-stdin (--json only) makes print
+	// mode's prompts answerable from stdin, so the pref has to be Ask —
+	// resolved HERE for the same reason SEEK_ACP_YOLO is: the system
+	// prompt's Mode label is composed below and must agree with the gate.
 	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
 	initialPref := permission.PrefDeny
 	if *yolo || acpYolo {
 		initialPref = permission.PrefYolo
+	} else if *approvalStdin && *jsonOut {
+		initialPref = permission.PrefAsk
 	}
 	initialWorkflow := permission.WorkflowNone
 	if *plan {
@@ -2399,7 +2416,29 @@ func run() error {
 		// fee, every failure in-band. Never errors.
 		text, fileParts := froute.Route(ctx, ag.Model(), text)
 		if *jsonOut {
-			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
+			// W5 c_n37tnr child half: --approval-stdin turns print mode's
+			// silence into a decision channel. The relay emits
+			// approval_request lines on the same JSONL stream and blocks
+			// on the decision line the host writes to stdin; "a" grants
+			// the per-Kind session allowlist, everything else is the
+			// usual ErrDenied tool result. The policy's PrefAsk was
+			// resolved with initialPref above (before the system prompt
+			// was composed, so the mode label matches the gate).
+			var relay *approvalRelay
+			if *approvalStdin {
+				if *prompt == "" {
+					return fmt.Errorf("--approval-stdin needs -p <prompt>: stdin carries decision lines, not the prompt")
+				}
+				if *yolo {
+					// --yolo never consults askFn; say so instead of
+					// silently leaving the channel dark.
+					fmt.Fprintln(os.Stderr, "seek: --approval-stdin ignored under --yolo (nothing is gated)")
+				}
+				relay = newApprovalRelay(os.Stdin)
+				relay.grant = policy.SetAlwaysAllow
+				policy.SetAskFn(relay.askFn(ctx))
+			}
+			return runJSON(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store, relay)
 		}
 		return runPrint(ctx, ag, tracker, *model, *yolo, *plan, text, imageParts, fileParts, activeSession, store)
 	}
@@ -2846,6 +2885,11 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 //	turn_end         — LLM call settled; token counts + tool_calls count
 //	agent_end        — run complete; cumulative stats; session_id if saved
 //	error            — fatal error; message is the error string
+//	approval_request — a gated action awaits a human decision; req_id keys
+//	                   the round-trip, kind/summary/command/diff describe it
+//	                   (W5 c_n37tnr, `--approval-stdin` only: the decision
+//	                   line arrives on stdin — cmd/seek/approval_stdin.go)
+//	approval_cancel  — that request is withdrawn (run ended first); req_id
 type jsonLine struct {
 	Type  string `json:"type"`
 	Index int    `json:"index,omitempty"`
@@ -2871,16 +2915,43 @@ type jsonLine struct {
 	// agent_end only
 	Turns     int    `json:"turns,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// approval_request / approval_cancel only (W5 c_n37tnr; the field set
+	// mirrors controlplane.RunEvent 1:1 — additive, consumers ignore
+	// unknown keys). ReqID keys the decision line that comes back on
+	// stdin under --approval-stdin.
+	ReqID   string `json:"req_id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Command string `json:"command,omitempty"`
+	Diff    string `json:"diff,omitempty"`
 }
 
 // runJSON is the machine-readable output mode: one JSON object per line
 // on stdout. Human-readable diagnostics (tier, stats footer) go to
 // stderr so stdout stays parse-clean.
-func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store) error {
+//
+// approval is the OPTIONAL approval relay of --approval-stdin (W5 card
+// c_n37tnr): nil keeps print mode's exact previous behaviour (deny, no
+// extra lines). Non-nil wires the relay's emitter to this file's one
+// encoder — two encoders on stdout could interleave a card line inside
+// an event line — and withdraws any still-pending card when the run
+// ends so the browser never keeps a throwaway prompt up.
+func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model string, yolo, plan bool, text string, images []deepseek.ImagePart, files []deepseek.FilePart, activeSession *session.Session, store *session.Store, approval *approvalRelay) error {
 	enc := json.NewEncoder(os.Stdout)
 
+	// One mutex for every write to stdout: json.Encoder is not safe for
+	// concurrent use, and with --approval-stdin a card line is emitted
+	// from the TOOL goroutine (the askFn) while the main loop is folding
+	// the event stream — an interleaved half-line would corrupt both.
+	var outMu sync.Mutex
 	emit := func(line jsonLine) {
+		outMu.Lock()
+		defer outMu.Unlock()
 		_ = enc.Encode(line) // json.Encoder always writes a trailing \n
+	}
+	if approval != nil {
+		approval.emit = emit
+		defer approval.CancelPending()
 	}
 
 	var (

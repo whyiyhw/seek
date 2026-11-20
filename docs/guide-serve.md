@@ -21,6 +21,7 @@
  │  去重(EventID) → DirectAt 过滤 → 指令/路由(ConvID→binding) → per-Conv 串行队列        │
  │                                       │                                             │
  │        exec: seek -p '<msg>' --json --no-cron-tick [-resume <sid>] [--yolo]          │
+ │              [--approval-stdin]   ← web 前端：审批卡片决定经 stdin 回注（W5）        │
  │              cmd.Dir = 绑定的项目目录                                                 │
  │                                       │  JSONL: 最终文本 + 末行 agent_end.session_id │
  │        回写 binding.session_id ──► Reply ──► 按 ConvID 前缀找回 frontend → Send() ───┘
