@@ -92,6 +92,15 @@ var (
 // directives the single-file shape needs. When the static/ split
 // lands, the blocks vanish and this collapses to default-src 'self'
 // on its own.
+//
+// img-src 'self' data: is the ONE widening (W5 attachment previews,
+// c_56yrcj): a pasted/dropped image is previewed from a FileReader
+// data: URL before it is uploaded, and `default-src 'self'` would block
+// that. data: is the narrower of the two candidates — blob: would let
+// page script mint arbitrary same-origin documents; a data: URL cannot
+// execute, it can only be an image the page itself read from the user's
+// file. Serving staged attachments back over HTTP was rejected: it would
+// add a file-read route for a preview we already hold in memory.
 func webCSP() string {
 	cspOnce.Do(func() {
 		p := "default-src 'self'"
@@ -101,6 +110,7 @@ func webCSP() string {
 		if toks := cspHashTokens(styleBlockRE); len(toks) > 0 {
 			p += "; style-src 'self' " + strings.Join(toks, " ")
 		}
+		p += "; img-src 'self' data:"
 		cspVal = p
 	})
 	return cspVal
