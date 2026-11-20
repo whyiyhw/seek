@@ -9,20 +9,26 @@
 #   ① 配置读取：SEEK_EVAL_PROVIDER/MODEL/BASE_URL/API_KEY 四旋钮 →
 #      默认调用的 argv（-provider/-model/-base-url）与导出的车道环境
 #      变量（OPENCODE_API_KEY / OPENAI_API_KEY / OPENCODE_BASE_URL /
-#      SEEK_EVAL_PROVIDER_ARGS）。假二进制记录 argv+env 视图逐项断言；
-#      四旋钮全不设 = 历史行为（argv 无 -provider，计量 key 原样可见）。
+#      SEEK_EVAL_PROVIDER_ARGS）。假二进制记录 argv+env 视图逐项断言。
+#      人拍缺省（2026-11-20，疑点 A 选 (a)）两条路径都钉死：
+#      四旋钮全不设 = opencode 缺省车道（argv 带 -provider opencode、
+#      env 侧计量 key 被擦）；SEEK_EVAL_PROVIDER=deepseek = 显式回退
+#      计量 key 车道（argv 无 -provider、计量 key 原样可见——回到计量
+#      只能显式人工指名，批量/无人值守永不缺省烧计量 key）。
 #   ② 请求目标切换 + 计量 key 零引用：真 seek 二进制 × 本地假
 #      OpenAI 兼容端点（eval/tools/fake_openai_compat.py 记录每个 POST
-#      的 path/auth/model）。compatible 与 opencode 两条车道各跑一遍：
+#      的 path/auth/model）。compatible、显式 opencode、缺省 opencode
+#      （仅设 BASE_URL/API_KEY 旁路旋钮，PROVIDER 不设）三条腿：
 #      断言请求打到了假端点的路径、Bearer 是假车道 key、body 里的 model
 #      与旋钮一致（opencode 不传 -model 时线上就是 deepseek-v4.1-flash
-#      ——车道缺省模型的在线证明）；计量 key 金丝雀（env 侧 + 临时
-#      SEEK_HOME 的 config 侧各埋一只）在服务端日志零出现；
-#      opencode 车道还埋了 config preset 劫持端点，断言被
+#      ——车道缺省模型的在线证明，缺省腿同样成立）；计量 key 金丝雀
+#      （env 侧 + 临时 SEEK_HOME 的 config 侧各埋一只）在服务端日志
+#      零出现；opencode 车道还埋了 config preset 劫持端点，断言被
 #      OPENCODE_BASE_URL 导出压过（请求没打到劫持端口）。
 #   ③ runner 转发契约：带 runner.sh 的用例收到导出的
 #      SEEK_EVAL_PROVIDER_ARGS / 车道凭证 env、且看不到被擦除的
-#      DEEPSEEK_API_KEY（mcp-arm-runner 类自建调用转发的一行接线形状）。
+#      DEEPSEEK_API_KEY（mcp-arm-runner 类自建调用转发的一行接线形状）；
+#      deepseek 回退腿反证计量 key 只在 deepseek 车道对 runner 可见。
 #   ④ 形状校验：compatible 缺 BASE_URL / 未知 provider → exit 2 带说明。
 #
 # 全部产物落 mktemp 沙盒与 eval/cases/zprovider-*（z 前缀远离真实用例
@@ -125,19 +131,41 @@ slice() { # slice FROM_LINE — 本腿新增行
 CANARY=seek-eval-metered-canary
 
 # ---- ① 配置读取（假二进制；四旋钮映射进 argv 与导出 env）--------------
-# 腿 A：车道关（历史行为）——argv 无 -provider；env 侧计量 key 原样可见
-#       （擦除只发生在车道开启时，历史车道分毫不动）。
+# 腿 A：缺省（四旋钮全不设，人拍 2026-11-20）——argv 带 -provider
+#       opencode（不带 -model/-base-url）；凭证未设时不导出（seek 内部
+#       解析存储登录）；env 侧计量 key 被擦；ARGS 契约变量非空导出。
 s=$(snap)
 env -u SEEK_EVAL_PROVIDER -u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY \
   DEEPSEEK_API_KEY="$CANARY" SEEK_EVAL_RESULTS_DIR="$tmp/ra" \
   bash eval/run.sh "$CASE1" "$fake" > "$tmp/legA.out" 2> "$tmp/legA.err" \
-  || fail "leg A (lane off) run.sh exited non-zero"
+  || fail "leg A (default) run.sh exited non-zero"
+blk=$(slice "$s")
+grep -q 'argv:.*-provider opencode' <<<"$blk" || fail "leg A: default lane argv missing '-provider opencode': $blk"
+case "$blk" in
+  *"-model"*|*"-base-url"*) fail "leg A: unexpected -model/-base-url with knobs unset: $blk" ;;
+esac
+grep -q 'env:OPENCODE_API_KEY=<UNSET>' <<<"$blk" || fail "leg A: no knob key must not export OPENCODE_API_KEY: $blk"
+grep -q 'env:DEEPSEEK_API_KEY=<UNSET>' <<<"$blk" || fail "leg A: metered key not scrubbed on the default lane: $blk"
+grep -q 'env:SEEK_EVAL_PROVIDER_ARGS=-provider opencode' <<<"$blk" \
+  || fail "leg A: SEEK_EVAL_PROVIDER_ARGS contract var not exported: $blk"
+
+# 腿 A2：显式回退（SEEK_EVAL_PROVIDER=deepseek）——argv 无 -provider
+#        （deepseek 是 seek 缺省 provider，historical 形状）；env 侧
+#        计量 key 原样可见（deepseek 车道就是计量车道，不擦）；ARGS
+#        契约变量为空串（导出但空，runner 的 ${VAR-} 空安全）。
+s=$(snap)
+SEEK_EVAL_PROVIDER=deepseek \
+  DEEPSEEK_API_KEY="$CANARY" SEEK_EVAL_RESULTS_DIR="$tmp/ra2" \
+  bash eval/run.sh "$CASE1" "$fake" > "$tmp/legA2.out" 2> "$tmp/legA2.err" \
+  || fail "leg A2 (deepseek fallback) run.sh exited non-zero"
 blk=$(slice "$s")
 case "$blk" in
-  *"-provider"*) fail "leg A: lane off but argv carries -provider: $blk" ;;
+  *"-provider"*) fail "leg A2: deepseek fallback argv must not carry -provider: $blk" ;;
 esac
 grep -q "env:DEEPSEEK_API_KEY=$CANARY" <<<"$blk" \
-  || fail "leg A: historical lane must still see DEEPSEEK_API_KEY (scrub is lane-scoped): $blk"
+  || fail "leg A2: deepseek lane must leave env DEEPSEEK_API_KEY alone: $blk"
+grep -q 'env:SEEK_EVAL_PROVIDER_ARGS=$' <<<"$blk" \
+  || fail "leg A2: SEEK_EVAL_PROVIDER_ARGS must be exported empty on deepseek fallback: $blk"
 
 # 腿 B：opencode 车道，仅 provider+key —— argv 只有 -provider opencode；
 #       凭证导出为 OPENCODE_API_KEY；计量 key 被擦；ARGS 契约变量导出。
@@ -205,17 +233,21 @@ grep -q 'rargs:-provider opencode' <<<"$blk" || fail "runner leg: SEEK_EVAL_PROV
 grep -q 'renv:OPENCODE_API_KEY=fake-lane-key' <<<"$blk" || fail "runner leg: lane credential not visible to runner: $blk"
 grep -q 'renv:DEEPSEEK_API_KEY=<RUNNER-UNSET>' <<<"$blk" || fail "runner leg: metered key visible to runner: $blk"
 grep -q 'argv:.*-provider opencode' <<<"$blk" || fail "runner leg: forwarded invocation missing -provider: $blk"
-# 车道关：ARGS 为空串（run.sh 显式传，非未设）、argv 不带 -provider。
+# deepseek 回退腿：ARGS 为空串（run.sh 显式传，非未设）、argv 不带
+# -provider、计量 key 对 runner 可见（deepseek 车道不擦——擦除只守
+# 订阅/兼容车道，计量车道本身就是它的凭证车道）。
 s=$(snap)
-env -u SEEK_EVAL_PROVIDER -u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY \
+SEEK_EVAL_PROVIDER=deepseek DEEPSEEK_API_KEY="$CANARY" \
   SEEK_EVAL_RESULTS_DIR="$tmp/ri" \
   bash eval/run.sh "$CASE2" "$fake" > "$tmp/legI.out" 2> "$tmp/legI.err" \
-  || fail "runner leg (lane off) run.sh exited non-zero"
+  || fail "runner leg (deepseek fallback) run.sh exited non-zero"
 blk=$(slice "$s")
-grep -q 'rargs:$' <<<"$blk" || fail "runner leg (off): SEEK_EVAL_PROVIDER_ARGS should be empty string: $blk"
+grep -q 'rargs:$' <<<"$blk" || fail "runner leg (deepseek): SEEK_EVAL_PROVIDER_ARGS should be empty string: $blk"
 case "$blk" in
-  *"-provider"*) fail "runner leg (off): argv carries -provider: $blk" ;;
+  *"-provider"*) fail "runner leg (deepseek): argv carries -provider: $blk" ;;
 esac
+grep -q "renv:DEEPSEEK_API_KEY=$CANARY" <<<"$blk" \
+  || fail "runner leg (deepseek): metered key must be visible on the metered lane: $blk"
 
 # ---- ② 请求目标切换 + 计量 key 零引用（真二进制 × 假端点）---------------
 go build -o "$tmp/seek-real" ./cmd/seek \
@@ -293,13 +325,40 @@ jq -e '.model == "deepseek-v4.1-flash"' <<<"$g_rec" > /dev/null \
 grep -q canary "$server_log" && fail "leg G: metered-key canary reached the endpoint"
 grep -q "preset-hijack" "$server_log" && fail "leg G: preset hijack endpoint leaked into a request"
 
+# 腿 G2：缺省车道（PROVIDER 不设，人拍缺省=opencode）+ 旁路旋钮指假端点
+#        ——证明「四旋钮全不设的缺省车道」在真二进制真调用下同样切走：
+#        请求到假端点、Bearer 是车道假 key、线上 model 是车道缺省
+#        deepseek-v4.1-flash（无 -model flag）、计量金丝雀零泄漏。
+s2=$(grep -c '' "$server_log")
+env -u SEEK_EVAL_PROVIDER \
+  SEEK_HOME="$home_dir" \
+  SEEK_OPENCODE_CATALOG=0 \
+  SEEK_EVAL_BASE_URL="$fake_url" \
+  SEEK_EVAL_API_KEY=fake-key-3 \
+  DEEPSEEK_API_KEY="$CANARY" \
+  SEEK_EVAL_RESULTS_DIR="$tmp/rg2" \
+  bash eval/run.sh "$CASE1" "$tmp/seek-real" > "$tmp/legG2.out" 2> "$tmp/legG2.err" \
+  || fail "leg G2 (real default lane) run.sh exited non-zero"
+row=$(jq -c 'select(.case=="'"$CASE1"'")' "$tmp/rg2/"*.jsonl 2>/dev/null | tail -1)
+[ "$(jq -r '.pass' <<<"$row")" = "true" ] || fail "leg G2: case row not PASS: $row"
+g2_rec=$(tail -1 "$server_log")
+jq -e '.path == "/v1/chat/completions"' <<<"$g2_rec" > /dev/null \
+  || fail "leg G2: default-lane request did not reach the fake endpoint: $g2_rec"
+jq -e '.auth == "Bearer fake-key-3"' <<<"$g2_rec" > /dev/null || fail "leg G2: auth not the lane key: $g2_rec"
+jq -e '.model == "deepseek-v4.1-flash"' <<<"$g2_rec" > /dev/null \
+  || fail "leg G2: default-lane model on the wire must be deepseek-v4.1-flash: $g2_rec"
+tail -n +"$((s2 + 1))" "$server_log" | grep -q canary \
+  && fail "leg G2: metered-key canary reached the endpoint"
+tail -n +"$((s2 + 1))" "$server_log" | grep -q "preset-hijack" \
+  && fail "leg G2: preset hijack endpoint leaked into a request"
+
 # ---- 全程零污染：eval/results/ 清单跑前跑后逐字节相等 --------------------
 results_after=$(find eval/results 2>/dev/null | sort)
 [ "$results_before" = "$results_after" ] \
   || fail "eval/results inventory changed (provider-lane test must never write trend data)"
 
 if [ "$fails" -eq 0 ]; then
-  echo "eval-provider selftest: PASS (knob→argv/env mapping + fake-endpoint request-target/credential proofs + runner contract + shape checks)"
+  echo "eval-provider selftest: PASS (default opencode + explicit deepseek-fallback paths + knob→argv/env mapping + fake-endpoint request-target/credential proofs + runner contract + shape checks)"
   exit 0
 fi
 echo "eval-provider selftest: FAIL (${fails} assertion(s))" >&2
