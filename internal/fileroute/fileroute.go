@@ -14,8 +14,10 @@
 //     library (the Files API cannot re-download originals — the local
 //     copy is the ONLY durable source for re-uploads) → upload with
 //     the purpose the reference chose (text default, @rich: upgrade)
-//     → record the parse fee off the RETURNED page count → attach a
-//     FilePart carrying both the asset name and the live file_id.
+//     → record the parse fee off the returned page count, or the
+//     flagged size estimate when the server omits it (c_y2akdi) →
+//     attach a FilePart carrying the asset name, the live file_id,
+//     and the claimed pages.
 //   - any other lane: an in-band note, nothing uploaded.
 //   - every failure mode (unreadable file, oversize, store failure,
 //     upload failure) is an in-band note — the router NEVER errors
@@ -152,16 +154,29 @@ func (r Router) routeOne(ctx context.Context, ref filerefs.Ref) (string, deepsee
 		// Asset stays stored — F4's lazy re-upload heals from it.
 		return uploadFailNote(name, err), deepseek.FilePart{}
 	}
-	// Parse fee keys off the RETURNED page count — only a successful
-	// upload parsed (and 0/absent pages bills nothing).
-	if r.cost != nil {
-		r.cost.RecordFlatCost(pricing.ParseCost(fo.PageCount))
+	// Billing + observation (card c_y2akdi): the live API returns
+	// page_count in neither the response nor any read-back endpoint
+	// (GET /files/{id} is metadata-only — docs/pitfalls.md), so a
+	// missing count falls back to the size estimate instead of the
+	// old flat $0. The fee still keys off THIS upload only (failed
+	// uploads billed nothing above); every estimated reading is
+	// flagged on the marker and the FilePart, never passed off as
+	// exact.
+	pages, est := fo.PageCount, false
+	if pages <= 0 {
+		pages = pricing.EstimateParsePages(int64(len(data)))
+		est = true
 	}
-	return attachMarker(name, purpose, fo), deepseek.FilePart{
-		Asset:     asset,
-		FileID:    fo.ID,
-		ExpiresAt: fo.ExpiresAt, // send path's expiry-reupload trigger
-		Purpose:   purpose,      // faithful re-upload of a @rich doc
+	if r.cost != nil {
+		r.cost.RecordFlatCost(pricing.ParseCost(pages))
+	}
+	return attachMarker(name, purpose, fo, pages, est), deepseek.FilePart{
+		Asset:          asset,
+		FileID:         fo.ID,
+		ExpiresAt:      fo.ExpiresAt, // send path's expiry-reupload trigger
+		Purpose:        purpose,      // faithful re-upload of a @rich doc
+		Pages:          pages,        // claimed pages: reported, or estimated
+		PagesEstimated: est,
 	}
 }
 
@@ -190,20 +205,26 @@ func oversizeNote(name string, max int64) string {
 }
 
 // attachMarker is the transcript self-description for a routed
-// document: the purpose it parsed at, the page count the server
-// returned (omitted when absent), and the live file_id — the marker is
-// what makes the transcript self-describing when the part is dropped
-// (lane switch, resume on another machine). Family prefix "[file: "
-// is wire format — pinned by TestMarker_Family; variants may only
+// document: the purpose it parsed at, the pages the upload claimed,
+// and the live file_id — the marker is what makes the transcript
+// self-describing when the part is dropped (lane switch, resume on
+// another machine). pages/est come from the caller's exact-or-
+// estimated decision (the server reading when page_count came back,
+// else the flagged size estimate) — the marker ALWAYS quantifies the
+// pages now, because it doubles as the parse-completeness
+// observation record: file id + claimed pages is the client's whole
+// reconciliation material against actual context usage (card c_y2akdi;
+// the API offers no read-back of either). Family prefix "[file: " is
+// wire format — pinned by TestMarker_Family; variants may only
 // extend AFTER the prefix (AGENTS.md wire-format rule).
-func attachMarker(name, purpose string, fo *deepseek.FileObject) string {
+func attachMarker(name, purpose string, fo *deepseek.FileObject, pages int, est bool) string {
 	p := "text"
 	if purpose == deepseek.PurposeRichLayoutRecognition {
 		p = "rich"
 	}
-	pages := ""
-	if fo.PageCount > 0 {
-		pages = fmt.Sprintf(" · %d pages", fo.PageCount)
+	pg := fmt.Sprintf(" · %d pages", pages)
+	if est {
+		pg = fmt.Sprintf(" · ~%d pages·估", pages)
 	}
-	return fmt.Sprintf("[file: %s — uploaded · %s%s · %s]", name, p, pages, fo.ID)
+	return fmt.Sprintf("[file: %s — uploaded · %s%s · %s]", name, p, pg, fo.ID)
 }
