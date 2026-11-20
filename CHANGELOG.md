@@ -52,3 +52,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_kwiajf：信号：验证车道跑不成无头 manual 脚本——selftest 排除表理由过时（等 Enter 已不成立），c_txz6vz 验证停摆卡 W5 串行链
 - c_y2akdi：Files API 观测补口：page_count 缺失的计费兜底 + 同文件重复解析差异自检
 - c_arpcox：二线车道文件透传：PDF/Word/PPT 按 modelcap/Images 先例扩 Files
+- c_oyp2qf：web 对齐 dsh·顶栏 ContextMeter（上下文余量/车道显示/断线重连灯）
