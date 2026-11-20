@@ -23,6 +23,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
 **257 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -66,6 +67,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Build tags / dependency isolation | 1 |
 | ACP / editor & headless lanes | 13 |
 | Eval / results data shape | 1 |
+| Transcript analysis / offline metrics | 2 |
 | Typed agents / orchestration | 2 |
 | Git / merge | 2 |
 | Subprocess / streaming stdout | 2 |
@@ -1742,6 +1744,36 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `scripts/eval-trend.sh` jq-parses (`jq -r '… | @tsv'`) instead of splitting lines. Two related bites: `@tsv` without `-r` emits a JSON-encoded string (tabs escaped as `\t`) which silently defeats downstream TSV field-splitting; and rows before the `ran_at` field exist need the filename's UTC-date prefix as a fallback timestamp. Commit (card c_lxferp).
 - **Lesson**: treat `results/*.jsonl` as a *stream of JSON objects*, never as lines — any new results tooling starts at jq.
 - **Refs**: `scripts/eval-trend.sh` (collect_rows), `eval/README.md` "Trend reports"
+
+## Transcript analysis / offline metrics
+
+### read-argument key is schema-dependent; single-key parsing silently buckets the misses into a fake "one incredibly popular file"
+- **Saw**: prototyping an analyser that read only `"path"` while treating every parse failure as the same file produced a "file read 3800+ times" — which coincidentally looked like the 68% reread rate we were trying to measure, so the artefact was indistinguishable from the finding. Measured on this corpus (2026-11-19): both `schema_version=2` and `=3` sessions overwhelmingly use `"path"`, 2 early calls use `"file"`, 1 call puts the filename in `"offset"`, and `"file_path"` never appears in a `read` argument (it only shows up inside `bash`/`edit` payloads and tool *output* text).
+- **Why**: the read tool's accepted key is `path` today, so a single-key reader loses only a couple of calls here — but the failure mode is structural, not statistical: an unparsed read that lands in a shared bucket inflates whichever file identity the bucket is keyed to, and the larger the unparsed population grows (a future schema change, an argument-shape regression) the more plausible the fake number looks. `grep file_path` on transcripts matches tool *output* far more often than arguments, which is exactly how the "new format uses file_path" impression forms.
+- **Fix**: `scripts/transcript-stats` resolves `path` > `file_path` > `file` and counts unresolvable reads in a separate `unresolved` field that never enters a per-file bucket. `--read-key-mode path-only|naive-bucket` reproduces both failure shapes, and `--selftest` asserts all three modes land on different numbers (50.0% vs 37.5% vs 62.5% on the fixture).
+- **Lesson**: when an analyser has a "can't parse this" branch, the branch must be **counted and named**, never folded into the metric's denominator or its grouping key — folding makes the data-quality problem indistinguishable from the phenomenon. And confirm a claimed schema drift against *arguments* only: grepping a key name across transcript files mostly hits tool output.
+- **Refs**: `scripts/transcript-stats` (`read_path`), `eval/fixtures/transcript-stats/`, `eval/transcript-baseline/2026-11-19.md` § "双键兼容"
+
+### Duplicate-fingerprint rate has two defensible denominators; quoting one as the other shifts the headline 3.6% ↔ 6.2%
+- **Saw**: the same corpus yields "3.6% of tool calls are duplicates" and "6.2% are duplicates" depending on whether you sum `count-1` per fingerprint (extra call = wasted) or `count` for every fingerprint seen more than once (includes the one legitimate first call). The research note quoted the first for the total and the second per tool, producing "bash is worst at 9%" where the honest per-tool extra number is 8.5%.
+- **Why**: both definitions are correct answers to different questions ("how many calls were wasted" vs "how much of the stream is repeat activity"), and the difference is non-trivial whenever repeat clusters are large (a fingerprint appearing 5 times contributes 4 vs 5).
+- **Fix**: `scripts/transcript-stats` reports both (`dup_extra`, `dup_repeated`) side by side and names the headline explicitly; the baseline report flags the mixing in the source note rather than silently picking one.
+- **Lesson**: a ratio over "repeated things" must name its denominator in the same breath as the number, and both variants belong in the output — the reader cannot reconstruct which one was used from the value alone.
+- **Refs**: `scripts/transcript-stats` `analyse()`, `eval/transcript-baseline/2026-11-19.md` § "工具名分布 + 重复指纹"
+
+### A frozen baseline keeps asserting a shell-parameter shape that has since been changed
+- **Saw**: the 2026-11-19 baseline's headline `+50, 991 次` (offset step = the 50-line read page) was read downstream as "read still paginates at 50", but `2f0f1df` (2026-08-14) had already raised `limit` 50 → 200 and added whole-file reads. The number is still correct *as history*; only the tense was missing. Verified: all 991 `+50` steps come from sessions created before 2026-08-14; the 20 later sessions contribute 0.
+- **Why**: a baseline is immutable by design (it's the "before" half of an A/B), so it cannot be regenerated when the shell changes — meaning every reader of it gets a snapshot of a world that no longer exists, and nothing in the numbers says so.
+- **Fix**: `eval/transcript-baseline/2026-11-19.md` now carries an explicit "this is historical shape, not current behaviour" note at both quote sites (key-numbers block + next-card checklist) naming the commit, the date, and the old/new values.
+- **Lesson**: any frozen measurement whose subject is a **tunable shell parameter** must be stamped with "as measured under <value>, changed at <commit/date>" at every place a reader meets the number — not just in the header. The follow-up card is exactly the reader who will misread it.
+- **Refs**: `eval/transcript-baseline/2026-11-19.md` § "四个关键数字" / "下一张卡（预告）", commit `2f0f1df`
+
+### Committed metric snapshots must not embed absolute home paths
+- **Saw**: `skipped_paths` in the committed baseline JSON carried `/Users/<name>/.seek/sessions/...` — the username and home layout enter public git history through a diagnostics field nobody reads.
+- **Why**: the analyser's `skipped_paths` is a debugging affordance (which files were unreadable), and the cheapest implementation is "the path you already have" — but the JSON's destination is a repo, not a terminal. A field's *purpose* and its *audience* diverge after it's committed.
+- **Fix**: `transcript-stats` emits `os.path.basename(p)` in `skipped_paths`; `--selftest` asserts the entry equals the basename and contains no path separator.
+- **Lesson**: when a diagnostics field is written into a committed artifact, store the **minimum identity** the reader needs (filename), and get full paths from a local re-run. Add the assertion at write time — a privacy leak is invisible in review diffs of a 30 KB JSON.
+- **Refs**: `scripts/transcript-stats` (`analyse`, `_selftest`), `eval/transcript-baseline/2026-11-19.json`
 
 ## Typed agents / orchestration
 
