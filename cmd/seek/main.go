@@ -2524,6 +2524,15 @@ func run() error {
 		sessionNotifySeconds = cfg.SessionNotifySecondsOrDefault()
 	}
 
+	// Auto-compact trigger: config's `auto_compact` section (or
+	// $SEEK_AUTO_COMPACT for one launch), resolved per model at call time
+	// so a /model switch moves a fraction-configured trigger with the
+	// window. Loaded once — the section is read at startup like every
+	// other standing posture; the ENV override is re-read on each call so
+	// a shell that exports it always wins.
+	autoCompactCfg, _ := config.Load()
+	autoCompactAt := autoCompactCfg.AutoCompactThreshold
+
 	// /goal judge (M-goal.2): a cheap per-turn "is the condition met?" call.
 	// Uses the session model for now (guaranteed valid); a dedicated cheap
 	// goal.judge_model lands with the headless path. nil on non-DeepSeek
@@ -2587,6 +2596,7 @@ func run() error {
 		AgentTypes:            agentTypes,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
+		AutoCompactAt:         autoCompactAt,
 		ProviderName:          provLabel,
 		OpenCodeModels:        openCatalogRows,
 		RefreshOpenCodeModels: refreshOpenCatalog,

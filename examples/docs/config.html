@@ -184,6 +184,7 @@
           <tr><td><code>suggest_reply</code></td><td>*bool</td><td data-lang="en">Enable/disable suggested replies. Absent = enabled.</td><td data-lang="zh" hidden">启用/禁用建议回复。缺省 = 启用。</td></tr>
           <tr><td><code>push_webhooks</code></td><td>array</td><td data-lang="en">Push notification webhook targets.</td><td data-lang="zh" hidden">推送通知 webhook 配置。</td></tr>
           <tr><td><code>session_notify_seconds</code></td><td>*int</td><td data-lang="en">Interactive turn threshold for push notification. Default 60s, 0 = disabled.</td><td data-lang="zh" hidden">交互回合推送通知阈值秒数。缺省 60s，0 禁用。</td></tr>
+          <tr><td><code>auto_compact</code></td><td>object</td><td data-lang="en">Auto-compact trigger: <code>at_tokens</code> (absolute, wins) or <code>at_fraction</code> (of the live window). Absent = off. See <a href="budget.html">Budget</a>.</td><td data-lang="zh" hidden">自动压缩触发点：<code>at_tokens</code>（绝对 token 数，优先）或 <code>at_fraction</code>（占当前窗口比例）。缺省 = 关。见<a href="budget.html">预算</a>。</td></tr>
         </tbody>
       </table>
     </div>

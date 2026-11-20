@@ -390,6 +390,7 @@ func (m Model) renderStatusBar() string {
 		NextAt:           nextAt,
 		Usage:            m.opts.Tracker.Cumulative(),
 		LastUsage:        m.opts.Tracker.Last(),
+		AutoCompactAt:    m.autoCompactAt(),
 		CumulativeCost:   m.opts.Tracker.CumulativeCost(),
 		Streaming:        m.streaming,
 		Now:              now,

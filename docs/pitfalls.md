@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**268 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**269 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -56,7 +56,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Feishu / external API | 1 |
 | Subprocess / secrets | 1 |
 | Tool output | 2 |
-| Testing | 2 |
+| Testing | 3 |
 | Tool decorators | 2 |
 | Filesystem / model safety | 5 |
 | Tooling / line endings | 4 |
@@ -1441,6 +1441,14 @@ If you're new to the project, skim entries in this order:
 - **Fix**: inject with a regular FILE parked where a directory must go (e.g. `<proj>/.seek` as a file) and assert the CONTRACT (error returned + zero residue via a walk), never the branch. `internal/skillmgr/writeproject_test.go` `TestWriteProjectSkill_FailureLeavesNoPartialState`.
 - **Lesson**: on a three-OS CI, failure injection must fail for the same reason everywhere; when it can't, broaden the assertion from "this branch errored" to "the invariant held" (error out, nothing written).
 - **Refs**: `internal/skillmgr/writeproject_test.go`, `.github/workflows/ci.yml`
+
+### `t.Setenv` inside a `t.Parallel` test panics — and the panic surfaces from a helper, not the test
+
+- **Saw**: `go test ./internal/tui/` blew up with `panic: testing: t.Setenv() called after t.Parallel()` and a stack that pointed at `persistSessionTestFixture` → a shared test helper, not at the new test. The new test's own body was clean; the `t.Parallel()` was two frames up.
+- **Why**: Go forbids `t.Setenv` after `t.Parallel()` because the process environment is global — a parallel test mutating it would race every other test. The guard is on the `*testing.T` receiver, so ANY helper that receives the parallel test's `t` inherits the restriction. Test helpers that call `t.Setenv` (this repo's `persistSessionTestFixture`, `withSeekHome`) are therefore silently unusable from parallel tests.
+- **Fix**: drop `t.Parallel()` from the tests that reach a `t.Setenv` helper. Do not "fix" it by hoisting the `Setenv` into `TestMain` — that would make the sandbox dir global and defeat per-test isolation.
+- **Lesson**: a test helper's hidden requirements travel with `t`. When a new test panics in a helper you did not touch, check whether the helper calls `t.Setenv` / `t.Chdir` / `os.Setenv` and whether the test declared `t.Parallel()`. Same class as "the failure surfaces where the invariant is checked, not where it was broken".
+- **Refs**: `internal/tui/persist_test.go` (`persistSessionTestFixture`), `internal/config/config_test.go` (`withSeekHome`)
 
 ## Tool decorators
 
