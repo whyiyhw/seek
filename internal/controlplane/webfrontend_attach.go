@@ -134,7 +134,7 @@ func (f *WebFrontend) handleAttach(w http.ResponseWriter, r *http.Request) {
 		kind, capBytes = "image", int64(assets.MaxAssetBytes)
 	} else if !attachDocExt[ext] {
 		fail(http.StatusUnsupportedMediaType,
-			"不支持的类型 %q（图片 png/jpg/jpeg/webp/gif；文档 pdf/doc/docx/ppt/pptx）", ext)
+			"不支持的文件类型 %q（图片 png/jpg/jpeg/webp/gif；文档 pdf/doc/docx/ppt/pptx）", ext)
 		return
 	}
 
