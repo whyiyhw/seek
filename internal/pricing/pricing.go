@@ -384,9 +384,12 @@ func TTSCost(billableChars int) float64 {
 const parsePerPageUSD = 0.225 / 1000
 
 // ParseCost returns the USD cost of parsing pages document pages via
-// the Files API. A page count of 0 or less (server omitted it / failed
-// upload) costs nothing — the router records this off the FileObject
-// the upload RETURNED, never off "an upload was attempted".
+// the Files API. A page count of 0 or less costs nothing — the router
+// bills only after a successful upload (a returned id means a parse
+// ran) and substitutes EstimateParsePages when the response omits the
+// count, so on the live billing path `pages` is never 0; the guard is
+// for callers pricing a failed/absent upload, never a stand-in for
+// "the server didn't say".
 func ParseCost(pages int) float64 {
 	if pages <= 0 {
 		return 0
@@ -406,27 +409,31 @@ const parseEstBytesPerPage int64 = 100 * (1 << 20) / 1000
 // (live API behaviour, docs/pitfalls.md "POST /files 响应里没有
 // page_count" — F3's ParseCost would otherwise record a flat $0 for
 // every real parse). 口径 (documented basis): pages ≈ ceil(bytes ÷
-// 104857), clamped to [1, 1000] — both clamps are the API's own
-// published limits (a successful upload parsed at least one page; no
-// document exceeds 1000 pages). Error direction is format-dependent:
-// dense text PDFs (≈6 KiB/page in the F4 smoke) UNDERestimate pages,
-// scanned/image PDFs OVERestimate — which is why every estimate is
-// flagged as such by the caller (FilePart.PagesEstimated / marker
-// "估") and never silently mixed into exact readings. bytes ≤ 0
-// returns 0: estimation only ever runs after a successful upload of a
-// non-empty body.
+// 104857), capped at 1000 — the divisor and the cap are the API's own
+// published limits (100 MiB / 1000 pages), so no external data is
+// needed; rounding up guarantees ≥ 1 page for any non-empty body
+// (bytes ≥ 1 ⇒ quotient ≥ 1), which is why there is no lower clamp.
+// Error direction is format-dependent: dense text PDFs
+// (≈6 KiB/page in the F4 smoke) UNDERestimate pages, scanned/image
+// PDFs OVERestimate — which is why every estimate is flagged as such
+// by the caller (FilePart.PagesEstimated / marker "估") and never
+// silently mixed into exact readings. bytes ≤ 0 returns 0: estimation
+// only ever runs after a successful upload of a non-empty body.
 func EstimateParsePages(bytes int64) int {
 	if bytes <= 0 {
 		return 0
 	}
-	pages := int((bytes + parseEstBytesPerPage - 1) / parseEstBytesPerPage)
-	if pages < 1 {
-		pages = 1
+	// Divide-then-round-up (not (bytes+div-1)/div) so a pathological
+	// near-MaxInt64 argument cannot overflow. The clamp happens in
+	// int64 BEFORE the int conversion, so a 32-bit int can't wrap.
+	pages := bytes / parseEstBytesPerPage
+	if bytes%parseEstBytesPerPage != 0 {
+		pages++
 	}
 	if pages > 1000 {
 		pages = 1000
 	}
-	return pages
+	return int(pages)
 }
 
 const offPeakDiscount = 0.5

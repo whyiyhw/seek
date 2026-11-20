@@ -548,7 +548,7 @@ func TestParseCost(t *testing.T) {
 
 // TestEstimateParsePages locks the size-based fallback's 口径: pages ≈
 // ceil(bytes ÷ 104857) — the average page size implied by the API's
-// own caps (≤100 MiB AND ≤1000 pages) — clamped to [1, 1000] (card
+// own caps (≤100 MiB AND ≤1000 pages) — capped at 1000 (card
 // c_y2akdi). The estimator exists because the live API omits
 // page_count everywhere, which left ParseCost recording a flat $0 for
 // every real parse; error direction is format-dependent by design and
@@ -567,6 +567,10 @@ func TestEstimateParsePages(t *testing.T) {
 		{"divisor+1 crosses the ceil", 104858, 2},
 		{"published page cap at the size cap", 100 << 20, 1000},
 		{"clamped: nothing above 1000 pages", 1 << 30, 1000},
+		// Overflow guard: the round-up must not add to a near-MaxInt64
+		// argument, and the 1000 cap must land in int64 before the int
+		// conversion (a 32-bit int would wrap a MaxInt64 page count).
+		{"MaxInt64 clamps without overflowing", math.MaxInt64, 1000},
 	}
 	for _, tc := range cases {
 		if got := EstimateParsePages(tc.bytes); got != tc.want {
@@ -577,5 +581,12 @@ func TestEstimateParsePages(t *testing.T) {
 	// bills a non-zero, order-of-magnitude-sane amount instead of $0.
 	if got := ParseCost(EstimateParsePages(12741)); got <= 0 {
 		t.Errorf("ParseCost(EstimateParsePages(12741)) = %v, want > 0 (no more flat $0)", got)
+	}
+	// Every non-empty body estimates at least one page — the lower
+	// bound the removed `if pages < 1` clamp used to provide.
+	for _, n := range []int64{1, 2, 104856, 104857} {
+		if got := EstimateParsePages(n); got != 1 {
+			t.Errorf("lower bound: EstimateParsePages(%d) = %d, want 1", n, got)
+		}
 	}
 }

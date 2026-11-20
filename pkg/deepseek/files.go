@@ -100,10 +100,17 @@ type FilePart struct {
 	PagesEstimated bool `json:"pages_est,omitempty"` // true = Pages is the size estimate, not a server reading
 }
 
-// FileObject is the POST /files 200 body. The parse already ran by the
-// time this comes back, so PageCount (the ¥1.5/千页 billing basis F3
-// records) and ExpiresAt (lifecycle is 1 h – 30 days or permanent;
-// 0/absent = no expiry advertised) are settled at upload time.
+// FileObject is the POST /files 200 body. Structurally it models the
+// documented file object, so PageCount (the ¥1.5/千页 billing basis)
+// and ExpiresAt (lifecycle is 1 h – 30 days or permanent) live here —
+// but the LIVE API sends NEITHER (checked 2026-11-18/19; see
+// docs/pitfalls.md "POST /files 响应里没有 page_count"). They stay
+// declared so a response that does carry them decodes, and so a future
+// server-side addition needs no client change; callers must treat 0 as
+// "not reported" and fall back (fileroute bills
+// pricing.EstimateParsePages and flags the reading as an estimate).
+// GET /files and GET /files/{id} return this same field set — no
+// endpoint reports a page count for a Files-API document.
 type FileObject struct {
 	ID        string `json:"id"` // "file-api-…" form
 	Object    string `json:"object"`
@@ -112,7 +119,7 @@ type FileObject struct {
 	Filename  string `json:"filename"`
 	Purpose   string `json:"purpose"`
 
-	PageCount int   `json:"page_count,omitempty"` // parse output — per-page billing basis
+	PageCount int   `json:"page_count,omitempty"` // documented, never actually sent — 0 means "not reported"
 	ExpiresAt int64 `json:"expires_at,omitempty"` // Unix seconds; 0/absent = permanent
 }
 
@@ -132,8 +139,10 @@ type FileUploadRequest struct {
 // Transient failures (5xx, 429, transport) retry once via the same
 // retryCall policy as Chat / ASR; other 4xx (bad purpose, oversize,
 // user_data'd PDF, auth) fail fast. Only a 2xx counts as billable —
-// the parse fee keys off this returning nil and pricing FileObject.
-// PageCount, never off "an upload was attempted".
+// "a parse ran", never "an upload was attempted". The page count to
+// bill is NOT in this response (live behaviour, see FileObject's doc);
+// the caller derives it (server reading when present, flagged size
+// estimate otherwise).
 func (c *Client) UploadFile(ctx context.Context, req *FileUploadRequest) (*FileObject, error) {
 	if req == nil {
 		return nil, errors.New("deepseek: nil file upload request")
