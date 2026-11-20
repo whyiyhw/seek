@@ -165,6 +165,8 @@
     <h2 data-lang="zh" hidden">用 /compact 压缩</h2>
     <p data-lang="en">Long sessions accumulate token cost. <code>/compact</code> summarises the older portion of the history into a single assistant message, then continues. Run <code>/compact</code> before a long task if you're near your context limit.</p>
     <p data-lang="zh" hidden">长会话会累积 token 成本。<code>/compact</code> 将较早的历史摘要为一条助手消息。接近上下文限制时运行它。</p>
+    <p data-lang="en"><strong>Auto-compact</strong> (<code>auto_compact</code> in <code>~/.seek/config.json</code>, or <code>$SEEK_AUTO_COMPACT</code> for one launch) runs the same thing by itself when the context crosses a configured point — <code>{"at_tokens": 350000}</code> or <code>{"at_fraction": 0.35}</code>. It fires only at rest, inherits the fork-snapshot behaviour (the pre-compact history stays on disk), and is off by default. See <a href="budget.html">Budget</a>.</p>
+    <p data-lang="zh" hidden"><strong>自动压缩</strong>（<code>~/.seek/config.json</code> 的 <code>auto_compact</code> 段，或单次启动的 <code>$SEEK_AUTO_COMPACT</code>）在上下文越过配置点时自动做同一件事——<code>{"at_tokens": 350000}</code> 或 <code>{"at_fraction": 0.35}</code>。只在真空闲时触发，沿用 fork-snapshot（压缩前历史留在磁盘），默认关。见<a href="budget.html">预算</a>。</p>
 
     <h2 data-lang="en">Distilling with /distill</h2>
     <h2 data-lang="zh" hidden">用 /distill 提炼</h2>
