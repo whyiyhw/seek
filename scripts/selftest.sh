@@ -71,6 +71,7 @@ excluded_reason() {
 dispatch_args() {
   case ${1} in
     kernel-deps) echo "--self-test" ;;  # 报告模式恒 exit 0（advisory），自测在 --self-test（c_zcygo2 自带）
+    pitfalls-count) echo "--selftest" ;;  # 裸跑=报表恒 exit 0（advisory），夹具自测在 --selftest（c_554rlg 自带）
     *)           return 1 ;;
   esac
 }

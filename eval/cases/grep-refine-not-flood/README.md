@@ -1,6 +1,6 @@
 # grep-refine-not-flood
 
-**Source pitfall**: docs/pitfalls.md "Tooling / environment" — *"Grep tool with broad pattern can deadlock the agent — no recovery via /compact"* (line 670). Two broad greps on a large codebase filled the whole context; the 16 KiB output cap (the pitfall's fix) now bounds each call and its truncation notice tells the model to refine — but the model still has to TAKE that exit instead of enumerating. Scaffolded by `scripts/pitfall-to-eval.sh --make 670`, hand-finished as one of the first three seeded cases.
+**Source pitfall**: docs/pitfalls.md "Tooling" — *"Grep tool with broad pattern can deadlock the agent — no recovery via /compact"*（行号随文件增长漂移，按标题 grep，别按行号）. Two broad greps on a large codebase filled the whole context; the 16 KiB output cap (the pitfall's fix) now bounds each call and its truncation notice tells the model to refine — but the model still has to TAKE that exit instead of enumerating. Scaffolded by `scripts/pitfall-to-eval.sh --make`, hand-finished as one of the first three seeded cases.
 
 ## What this probes
 

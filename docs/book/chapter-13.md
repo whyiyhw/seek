@@ -478,7 +478,7 @@ if m.opts.Tracker != nil {
 - **Saw**：短 prompt 几乎不触发缓存；首次请求缓存命中率 0%。
 - **Lesson**：前缀缓存要求提示词前缀 ≥ ~64 token 且字节完全一致。短 prompt 不值得优化。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

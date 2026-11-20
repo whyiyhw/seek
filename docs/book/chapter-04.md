@@ -322,7 +322,7 @@ Agent 循环实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`
 - **Saw**：V4 思考模式可能产生只有 `reasoning_content` 而没有 `content` 和 `tool_calls` 的消息。
 - **Fix**：发回 API 前过滤或补全此类消息。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 
