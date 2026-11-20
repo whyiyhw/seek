@@ -37,6 +37,9 @@ eval/run.sh tool-args-hallucination
 
 # Against a different binary (e.g. an older release for A/B comparison)
 eval/run.sh tool-args-hallucination /tmp/seek-baseline
+
+# N-round distribution sampling (see "Judgment" below)
+eval/run.sh --rounds 5 tool-args-hallucination
 ```
 
 The runner appends one row to `results/<UTC-date>-<binary-version>.jsonl`
@@ -45,6 +48,82 @@ per case it executed, e.g.:
 ```json
 {"case":"tool-args-hallucination","pass":true,"metrics":{"unknown_field_errors":0,"think_calls":1,"turns":4},"prompt_tokens":12834,"completion_tokens":612,"elapsed_s":21}
 ```
+
+## Judgment: single sample vs N rounds (E1)
+
+Historically every case ran **once** and that single sample was the
+PASS/FAIL verdict — noise could flip either way (the v0.12.0 pre-release
+run had 3 reds of which 2 were false alarms; see
+[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1).
+`--rounds N` (default 1 = historical behaviour, byte for byte) changes
+the judgement to a **distribution**:
+
+- Each round is a full case lifecycle (`setup.sh` → seek → `teardown.sh`)
+  appending its own result row, carrying `round: k` (the field appears
+  **only** when `--rounds > 1`, so single-round rows keep their exact
+  historical shape for the trend readers).
+- After the rounds, a **gate** case passes iff `passed_rounds / rounds >=
+  min_pass_rate` — **inclusive**: 3/5 against 0.6 passes. The comparison
+  runs on IEEE doubles, and division and decimal parsing round to the
+  same double, so a written threshold that is exactly k/n (0.6, 0.75,
+  0.8, 0.5) behaves as intended — but `0.67` is **not** 2/3 and will
+  gate one round stricter than a naive "2 of 3" reading suggests.
+  Calibration (E2) should pick k/n-representable thresholds.
+- A `record_only: true` case is **never gated**: per-round rows and the
+  summary line record it (`RECORD <case> (k/N rounds, record-only — not
+  gated)`), it counts in a separate "recorded" column, and it cannot
+  make the run red or green. This is the machine-enforced home for
+  cases whose bounds only bound runaways (today's self-described
+  RECORD-ONLY `code-review-effort-*`; marking them is E2's job).
+- **Crashed rounds** (seek died mid-flight, no `agent_end`) are simply
+  failing rounds — their metrics come out near-zero and any bound like
+  `exact_agent_ends` fails; the denominator always counts them. No
+  separate error class yet (`max_error_rate` is an open question in the
+  PRD §6, deliberately not invented here).
+- Interruption safety is structural: each round's row is appended only
+  after that round completes (one `echo`, one line), so Ctrl-C mid-run
+  loses nothing already written and cannot produce half-line JSONL.
+
+With `--rounds > 1` an **aggregate row** follows the round rows:
+
+```json
+{"case":"bash-overreach","type":"aggregate","rounds":5,"passed":4,"pass_rate":0.8,"min_pass_rate":0.67,"record_only":false,"verdict":"pass","ran_at":"…"}
+```
+
+It deliberately carries **no `pass` key**: `scripts/eval-trend.sh`
+selects sample rows on `pass` being a boolean, so aggregate rows can
+never double-count as samples — the trend keeps seeing one sample per
+round, which is exactly the distribution data it wants.
+
+`min_pass_rate` / `record_only` live in `expect.json` (not a separate
+calibration table): expect.json is already the per-case judgement
+authority — a second file would be a parallel source of truth for the
+same case, plus a name-join to maintain (the drift risk the repo's
+transcript-vs-state discipline exists to avoid). Both keys are
+validated at case start; anything malformed (non-number, ≤ 0, > 1,
+non-boolean, unparseable JSON) exits 2 before any round runs — never
+silently coerced to 1.0/false.
+
+**E2 will calibrate the values** (`docs/prd/feature-eval-v2.md` §三):
+no case in this repo carries `min_pass_rate` or `record_only` yet —
+this section describes the mechanism, the calibration table lands with
+E2.
+
+### Judgment self-test (deterministic, no key)
+
+`scripts/eval-rounds-test.sh` (auto-discovered by the
+[`scripts/selftest.sh`](../scripts/selftest.sh) lane, name
+`eval-rounds-test`) pins the judgement mechanics with an
+invocation-counting fake binary: explicit `--rounds 1` is byte-identical
+to the no-flag run (the no-flag-vs-pre-E1 equivalence stays pinned by
+`scripts/eval-ablate-test.sh`'s git-history blob compare); a 5-round run
+writes 5 round-tagged rows whose crashed rounds judge red **and stay in
+the denominator**; the inclusive boundary is pinned from both sides
+(3/5 vs 0.6 → green, 3/5 vs 0.7 → red); record-only never colours the
+exit code; malformed `--rounds` / `min_pass_rate` / `record_only` /
+broken JSON exit 2 with zero rows written; and a round-bearing results
+dir fed through `eval-trend.sh` counts the round rows only (aggregate
+rows skip, proving no double-count).
 
 ## Isolation: the SEEK_HOME sandbox
 
@@ -124,7 +203,9 @@ Bounds in `expect.json` use the prefix to declare direction:
 | Key | Meaning |
 |---|---|
 | `description` | human-readable summary |
-| `max_turns` | passed to `seek -max-turns` |
+| `max_turns` | passed to `seek -max-turns` (NB it also rides the `max_` prefix scan, so it doubles as a turns ceiling — pre-existing behaviour) |
+| `min_pass_rate` | gate threshold over the round set, `0 < m <= 1`, default 1.0, INCLUSIVE `>=` — see "Judgment" above (E2 calibrates; validated, exit 2 on malformed) |
+| `record_only` | boolean, default false — record the case, never gate it (see "Judgment" above) |
 
 ## Adding a case
 
