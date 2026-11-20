@@ -248,7 +248,7 @@ func TestSkillReview_RenderIncludesEvidenceAndGate(t *testing.T) {
 		candidates: []skilldistill.SkillCandidate{sampleSkillCandidate("render-me")},
 	})
 	view := m.renderSkillReview()
-	for _, want := range []string{"skill candidate 1/1", "render-me", "evidence", "--- FAIL: TestFlaky", "seek skill install"} {
+	for _, want := range []string{"skill candidate 1/1", "render-me", "evidence", "--- FAIL: TestFlaky", "[s] install to project"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("modal render missing %q:\n%s", want, view)
 		}

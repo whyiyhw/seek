@@ -6,9 +6,18 @@ package tui
 //
 //   - M candidate 'y'  → Project.Add (distill.go)
 //   - skill candidate 'y' → skillmgr.DraftStore.WriteDraft — a DRAFT
-//     under ~/.seek/skills/.drafts/, invisible to every session. The
-//     distillation pipeline NEVER installs; installing is the human's
-//     explicit `seek skill install <dir>` (the review gate, PRD §6).
+//     under ~/.seek/skills/.drafts/, invisible to every session until
+//     the human's `seek skill drafts approve` (the M-SD2 gate).
+//   - skill candidate 's' → skillmgr.WriteProjectSkill — a DIRECT
+//     install to <project>/.seek/skills/ (bridge §4, M-B3). The 🛠
+//     candidate's description is already a reasoner-written
+//     when-to-use (the extraction prompt's hard constraint), so `s`
+//     needs ZERO conversion calls: render + write, done. The review
+//     keystroke is the gate — the user has read description, evidence
+//     and body line by line in this very modal (bridge §2.2: gate
+//     looseness follows "has a human seen the content"). `y` keeps the
+//     slow draft lane untouched; the automatic M-SD2 path still has
+//     NO direct-write ability whatsoever.
 //
 // Scheduling: cmdDistill fires both reasoner passes in parallel. Whose
 // result arrives first opens its modal; the other's result waits in
@@ -98,15 +107,16 @@ func (m *Model) openSkillReview(candidates []skilldistill.SkillCandidate) []tea.
 	m.skillIdx = 0
 	m.skillSaved = 0
 	m.skillDropped = 0
+	m.skillInstalled = 0
 	m.skillReviewOpen = true
 	m.input.Blur()
 	return []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf(
-		"  · skill distill: %d draft candidate(s) — [y] save draft  [n] drop  [q] quit", len(candidates))))}
+		"  · skill distill: %d draft candidate(s) — [y] save draft  [s] install to project  [n] drop  [q] quit", len(candidates))))}
 }
 
-// handleSkillDistillKey is the skill review modal's handler. y/n/q
-// only — no edit mode in the first delivery: a draft is an ordinary
-// file, editing it post-save (`seek skill status` / any editor) is the
+// handleSkillDistillKey is the skill review modal's handler. y/s/n/q —
+// no edit mode in the first delivery: a draft is an ordinary file,
+// editing it post-save (`seek skill status` / any editor) is the
 // natural place, and the modal's job here is the accept/drop decision.
 func (m Model) handleSkillDistillKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if !m.skillReviewOpen {
@@ -122,12 +132,70 @@ func (m Model) handleSkillDistillKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch strings.ToLower(msg.Text) {
 	case "y":
 		return m.skillAcceptCurrent()
+	case "s":
+		return m.skillInstallCurrent()
 	case "n":
 		return m.skillDropCurrent()
 	case "q":
 		return m.exitSkillReview(true)
 	}
 	return m, nil
+}
+
+// skillInstallCurrent is `s`: install the current candidate straight
+// to <project>/.seek/skills/ (bridge §4, M-B3). Zero conversion calls
+// — unlike the ⚡ review's `s`, whose M candidate must pay a reasoner
+// round-trip to rewrite tagline→description, the 🛠 candidate's
+// description IS the extraction reasoner's when-to-use already. The
+// overlap verdict needs no re-run either: the candidate only reached
+// this modal by passing L2 CheckNovelty against this same Set in this
+// same review session (§4). The same-name refusal is the caller-side
+// contract from §2.3: any layer owning the name means "edit the
+// existing skill", never a second copy — refused with a line, no
+// advance, y/n stay live. Render/write failures degrade exactly like
+// skillAcceptCurrent's: error line, count as dropped, advance — the
+// review survives one bad candidate.
+func (m Model) skillInstallCurrent() (tea.Model, tea.Cmd) {
+	if m.skillIdx >= len(m.skillCandidates) {
+		return m.exitSkillReview(false)
+	}
+	cand := m.skillCandidates[m.skillIdx]
+
+	if m.opts.Skills != nil {
+		if existing := m.opts.Skills.Get(cand.Name); existing != nil {
+			return m, m.appendHistory(styleErr.Render(fmt.Sprintf(
+				"  ! skill %q already installed (source %s) — edit the existing skill (`seek skill update` / edit the file) instead of installing this candidate", cand.Name, existing.Source)))
+		}
+	}
+
+	var cmds []tea.Cmd
+	md, err := skilldistill.RenderProjectSkillMD(cand, nil)
+	if err == nil {
+		var dir string
+		dir, err = skillmgr.WriteProjectSkill(skillmgr.WriteProjectOptions{
+			ProjectDir: m.opts.CWD,
+			Name:       cand.Name,
+			MD:         md,
+		})
+		if err == nil {
+			m.skillInstalled++
+			cmds = append(cmds, m.appendHistory(styleMuted.Render(fmt.Sprintf(
+				"  · skill installed: %s (takes effect next session)", dir))))
+		}
+	}
+	if err != nil {
+		cmds = append(cmds, m.appendHistory(styleErr.Render(fmt.Sprintf(
+			"  ! install skill %q failed: %v", cand.Name, err))))
+		m.skillDropped++
+	}
+
+	m.skillIdx++
+	if m.skillIdx >= len(m.skillCandidates) {
+		m2, cmd := m.exitSkillReview(false)
+		cmds = append(cmds, cmd)
+		return m2, tea.Batch(cmds...)
+	}
+	return m, tea.Batch(cmds...)
 }
 
 // skillAcceptCurrent writes the current candidate as a draft via
@@ -185,9 +253,11 @@ func (m Model) exitSkillReview(aborted bool) (tea.Model, tea.Cmd) {
 	if aborted && remaining > 0 {
 		suffix = fmt.Sprintf(", %d skipped", remaining)
 	}
-	cmds := []tea.Cmd{m.appendHistory(styleMuted.Render(fmt.Sprintf(
-		"  · skill distill review done: %d draft(s) saved, %d dropped%s",
-		m.skillSaved, m.skillDropped, suffix)))}
+	summary := fmt.Sprintf("  · skill distill review done: %d draft(s) saved, %d dropped", m.skillSaved, m.skillDropped)
+	if m.skillInstalled > 0 {
+		summary += fmt.Sprintf(", %d installed", m.skillInstalled)
+	}
+	cmds := []tea.Cmd{m.appendHistory(styleMuted.Render(summary + suffix))}
 
 	// Chain: if the M pass finished while the skill review was open,
 	// its candidates were held in distill.go's pending queue — open
@@ -325,7 +395,7 @@ func (m Model) renderSkillReview() string {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
-	sb.WriteString(styleMuted.Render("  [y] save draft  [n] drop  [q] quit review (install stays manual: seek skill install <dir>)"))
+	sb.WriteString(styleMuted.Render("  [y] save draft  [s] install to project  [n] drop  [q] quit review"))
 	sb.WriteString("\n")
 	return sb.String()
 }
