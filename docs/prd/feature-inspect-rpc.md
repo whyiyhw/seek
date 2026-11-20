@@ -309,7 +309,7 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 | 9 | ✅（更严）——web 面全状态路由一律 token（401 家族），不分是否 loopback | W1.2 鉴权族测试 |
 | 10 | 取消替代——tarball 被 go:embed 取代；体积由 CI web-gate 守（净增 <200KB） | W1.5（c_ph2zax） |
 | 11 | 🔲 UI 线验收项，本卡不涉 | W4.4/W4.5 手测 |
-| 12 | web 对应形态已交付——`GET /subagents` + `/events` topic `subagents`；`subagent/*` method 未挂 /rpc | W3.1（c_7yofgo）/ W3.2（c_3736yl） |
+| 12 | ✅ 已收口（2026-11-20，c_4doebx）——`subagent/list`/`subagent/get` 挂 /rpc（同一磁盘折叠，`CodeSubagentNotFound=-32006`）；`tree` 不挂：v5 深度=1，树即带 parent_sid 的平表，挂 schema 是折叠兑现不了的承诺；`GET /subagents` 保留为兼容口，与 /rpc 同源同形（`TestWeb_SubagentMethodsMatchCompatEndpoint` 钉死）；任务面板数据源已切 /rpc，徽标三态 + 定时/事件双路刷新 | W3.1（c_7yofgo）/ W3.2（c_3736yl）/ c_4doebx |
 | 13 | ✅ CI binary 体积 gate | W1.5 web-gate job |
 | 14 | ✅ `go test -race ./internal/rpc/...`（含 methods 子包）绿 | 2026-11-16 复跑 |
 | 15 | ✅ 全量 `-race` 套件零回归 | 2026-11-16 复跑（W4.6 卡内） |

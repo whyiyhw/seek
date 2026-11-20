@@ -16,24 +16,25 @@ import (
 // TRANSCRIPT-shaped conversion (summarise / compact), where paying for
 // image bytes is waste: the markers inside Content remain.
 //
-// Carrying images to a provider is the sibling below
-// (msgsToLLMWithImages) — an opt-in, not the default, so the side
+// Carrying attachments to a provider is the sibling below
+// (msgsToLLMWithAttachments) — an opt-in, not the default, so the side
 // channels can't start uploading bytes by accident.
 func msgsToLLM(msgs []deepseek.Message) []llm.Message {
-	return msgsToLLMWithImages(msgs, false)
+	return msgsToLLMWithAttachments(msgs, false, false)
 }
 
-// msgsToLLMWithImages is msgsToLLM with the capability decision made by
-// the caller: keep is the result of asking whoever knows whether the
-// active model accepts images (internal/modelcap), evaluated at send
-// time exactly as the DeepSeek path's gate is. When keep is true, every
-// URL-form ImagePart rides along as an llm.Image; Asset-only parts are
-// skipped because the caller resolves assets BEFORE conversion
-// (deepseek.ResolveImages at the same send station).
-//
-// Document parts have no second-tier transport (the Files API is
-// DeepSeek-only), so they always degrade to the sibling note.
-func msgsToLLMWithImages(msgs []deepseek.Message, keep bool) []llm.Message {
+// msgsToLLMWithAttachments is msgsToLLM with the capability decisions
+// made by the caller: keepImages / keepFiles are the results of asking
+// whoever knows whether the active model accepts each attachment class
+// (internal/modelcap), evaluated at send time exactly as the DeepSeek
+// path's gates are. When keep is true, every URL-form ImagePart rides
+// along as an llm.Image and every file part materialised by
+// deepseek.ResolveFileData rides as an llm.File (the caller resolves
+// assets BEFORE conversion, at the same send station the DeepSeek path
+// uses). Files whose media type the second-tier transports can't
+// encode (Word/PPT — PDF is the only shared format) stay behind with
+// their own note.
+func msgsToLLMWithAttachments(msgs []deepseek.Message, keepImages, keepFiles bool) []llm.Message {
 	out := make([]llm.Message, 0, len(msgs))
 	for _, m := range msgs {
 		lm := llm.Message{
@@ -43,7 +44,7 @@ func msgsToLLMWithImages(msgs []deepseek.Message, keep bool) []llm.Message {
 			ToolName:   m.Name,
 		}
 		if len(m.Images) > 0 {
-			if keep {
+			if keepImages {
 				for _, p := range m.Images {
 					if p.URL != "" {
 						lm.Images = append(lm.Images, llm.Image{URL: p.URL})
@@ -51,11 +52,32 @@ func msgsToLLMWithImages(msgs []deepseek.Message, keep bool) []llm.Message {
 				}
 			}
 			if len(lm.Images) == 0 {
-				lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前 provider 不支持图片输入]", len(m.Images))
+				lm.Content += fmt.Sprintf("\n\n[image: %d 张图片未透传 — 当前模型不支持图片输入]", len(m.Images))
 			}
 		}
 		if len(m.Files) > 0 {
-			lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前 provider 不支持文件输入]", len(m.Files))
+			dropped := 0
+			if keepFiles {
+				for _, p := range m.Files {
+					f := llm.File{Filename: p.Asset, URL: p.Data}
+					if f.Sendable() {
+						lm.Files = append(lm.Files, f)
+					} else {
+						dropped++
+					}
+				}
+			}
+			// Two distinct causes, two distinct notes: the model can't take
+			// documents at all (gate said no), or it can but this format is
+			// not on the second-tier wire (Word/PPT — PDF is the only one
+			// every adapter encodes). Collapsing them into one sentence
+			// leaves the user guessing which fix applies.
+			switch {
+			case !keepFiles:
+				lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 当前模型不支持文件输入]", len(m.Files))
+			case dropped > 0:
+				lm.Content += fmt.Sprintf("\n\n[file: %d 个文档未透传 — 二线车道仅支持 PDF 附件（Word/PPT 需 DeepSeek 车道）]", dropped)
+			}
 		}
 		for _, tc := range m.ToolCalls {
 			lm.ToolCalls = append(lm.ToolCalls, llm.ToolCall{
