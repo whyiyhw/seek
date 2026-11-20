@@ -31,6 +31,13 @@
 # 真实 LLM key/网络的、闸语义（超限即红是职责）的、有真实副作用的，
 # 一律进排除表并逐项注理由——排除表非空且每项有理由是硬要求。
 #
+# 排除理由会腐化（c_kwiajf，2026-11-20）：理由描述的是脚本「此刻」的形态。
+# 脚本后来改进——web-sessions-manual 拿到 Chrome+node 无头分支、跑完自己
+# 退出、不再等人按键——原来的「交互阻塞」判据就失效了。同一条理由连续被
+# 三轮验证会话标注可疑（c_n63pat 附注、c_hinacy not-in-lane、c_txz6vz
+# 停卡）不是措辞问题，是判据过时：默认倾向重判进名单，不是润色文案。
+# 改脚本形态（加无头/自测分支）时顺手重读本表。
+#
 # 用法：bash scripts/selftest.sh <名>    分发跑单个自测脚本（透传退出码）
 #       bash scripts/selftest.sh --list  列发现名单与排除表
 set -u
@@ -59,8 +66,10 @@ excluded_reason() {
       echo "体积/零构建链闸：trip 即红是职责（同 verify-doc-budgets 闸语义）+ 每跑一次全量交叉编译 linux/amd64 二进制，重" ;;
     pkg-inventory)
       echo "测量报告工具：全仓 go test -cover 分钟级、且测试失败也不红（|| true 吞掉）——绿无可信度、费时不增值" ;;
-    web-memory-manual|web-sessions-manual|web-stream-manual)
-      echo "手测脚本：起真 serve 后打印手测清单、等人按 Enter 收尾（交互阻塞），浏览器验收是人活" ;;
+    web-memory-manual)
+      echo "手测脚本：无无头分支（浏览器断言只在人眼里），裸跑打印清单等人按 Enter——无人值守无出口（c_kwiajf 核定，2026-11-20）" ;;
+    web-stream-manual)
+      echo "有无头分支（c_kwiajf 2026-11-20 沙盒实跑全绿），但无头条件不全时仍落到 read：非 TTY 下读空即过、给出无凭据的绿——移出前先补 web-sessions-manual 同款非 TTY exit 3" ;;
     *)
       return 1 ;;
   esac

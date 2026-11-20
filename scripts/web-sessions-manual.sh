@@ -11,8 +11,15 @@
 #   - 本机有 Chrome + node≥22 → scripts/web-sessions-headless.mjs 无头跑
 #     全部断言（面板开合/首页 50 条/翻页走完 1234 + 页界连续 + 每页时延/
 #     切换无串台/XSS 不执行/回聊天零回归）；
-#   - 缺任一 → 打印人工清单等人按 Enter。
+#   - 缺任一 → 打印人工清单等人按 Enter（仅 TTY；见下条退路口径）。
 # 全程不碰真实 ~/.seek 与生产 8790（除非 ADDR 指向它，别这么干）。
+#
+# 无人值守退路口径（c_kwiajf，2026-11-20）：本脚本在 selftest 发现名单里
+# 可被验证车道直接跑（`bash scripts/selftest.sh web-sessions-manual`），
+# 前提是无头条件齐。无头条件不全时车道 stdin 不是 TTY——此时 `read` 要么
+# 挂到车道超时、要么在 stdin 已关时读空即过（无凭据的绿）。两条都不接受：
+# 非 TTY 直接退 3 并点名缺 Chrome 还是 node，让车道报「环境能力缺」而不是
+# 挂死或假装绿。绿灯只由无头断言给出。
 #
 # 手测清单（无头不可用时脚本原样打印）：
 #   1. 打开 URL → 右上「📚 会话」进面板：列表见两条（长会话标题=首条用户消息）
@@ -30,7 +37,8 @@
 #   DRY_RUN=1             只打印步骤不动手（butler 自测范式）
 #   KEEP=1                结束后保留临时目录与 serve 进程（人工续查）
 #
-# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误。
+# 退出码：0 自检+无头断言全绿（或人工清单在 TTY 上走完）；1 失败；2 用法错误；
+#         3 无头条件缺且 stdin 非 TTY（无人值守车道——人工清单无处可走）。
 # 依赖：go、curl；无头验收另需 Chrome 与 node≥22（缺则退人工清单）。
 set -u
 
@@ -54,7 +62,7 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: SEEK_HOME=\$TMP \$TMP/seek serve --frontend=web &（stderr 抓 banner URL）"
   echo "DRY_RUN: curl 自检：GET / 200+HTML；session/list 两 sid；messages 首页 50+next_cursor=50；"
   echo "DRY_RUN:   cursor=1200 → 34 条无 next_cursor；短会话 2 条无 next_cursor"
-  echo "DRY_RUN: 浏览器：Chrome+node 在 → 无头断言；缺 → 人工清单等 Enter；清理"
+  echo "DRY_RUN: 浏览器：Chrome+node 在 → 无头断言；缺 → TTY 才打印人工清单，非 TTY 退 3；清理"
   exit 0
 fi
 
@@ -194,6 +202,17 @@ if [ "$HEADLESS" = "1" ]; then
   [ "$rc" = 0 ] || exit 1
   echo "无头验收全绿。现场已清理（KEEP=1 可保留复跑）"
   exit 0
+fi
+
+# 无头条件缺 + 非 TTY = 无人值守车道：人工清单无处可走。read 在这里要么
+# 挂到车道超时，要么 stdin 已关时读空即过——后者会给出无凭据的绿。退 3，
+# 点名缺哪样能力（c_kwiajf：让车道报「环境能力缺」，不假装绿也不挂死）。
+if [ ! -t 0 ]; then
+  miss=""
+  [ -x "$CHROME_BIN" ] || miss="Chrome（${CHROME_BIN}）"
+  [ -n "$NODE_BIN" ] || miss="${miss:+${miss} + }node"
+  echo "FAIL: 无头验收条件缺（${miss}）且 stdin 非 TTY——无人值守没有人工清单可走。装上缺的组件或 CHROME=<路径> 重跑。" >&2
+  exit 3
 fi
 
 cat <<EOF
