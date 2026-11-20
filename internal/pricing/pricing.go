@@ -2,9 +2,11 @@
 // the flat-rate cards of providers without such windows (GLM, and the
 // OpenCode Go pool).
 //
-// Embedded rates are the peak rate card verified 2026-11-14 against
-// api-docs.deepseek.com/quick_start/pricing (off-peak is exactly half
-// the peak rate). Bump them with each release rather than fetching at
+// Embedded rates are the peak rate card (off-peak is exactly half
+// the peak rate). Each card's verification date, source URL, and
+// native currency live in the verified-on ledger (ledger.go) — the
+// single source for dates, patrolled by scripts/price-audit.sh.
+// Bump them with each release rather than fetching at
 // runtime — a price-list HTTP call adds a failure mode for an
 // exclusively defensive feature (PRD §4.8.4).
 //
@@ -74,9 +76,10 @@ type OpenCodeGoModel struct {
 
 // OpenCodeGoModels is the lane's entire menu: ACP's session/new dropdown
 // and the TUI /model picker both render from this slice, so a model can't
-// exist in one surface and not the other. Verified 2026-11-18 against the
-// gateway's public (no key) GET https://opencode.ai/inference/go/v1/models:
-// these are the Go-allowance models that speak Chat-Completions — seek's
+// exist in one surface and not the other. Verified against the
+// gateway's public (no key) GET https://opencode.ai/inference/go/v1/models
+// (date in ledger.go): these are the Go-allowance models that speak
+// Chat-Completions — seek's
 // compatible-adapter wire. Deliberately absent:
 //   - grok-4.7, gpt-5.6-luna, gpt-6-luna, muse-spark-1.{2,3}-contributor:
 //     Responses API only;
@@ -119,8 +122,8 @@ var OpenCodeGoModels = []OpenCodeGoModel{
 
 // ModelV4Pro is DeepSeek's independent pro build (served by
 // DeepSeek-V4-Pro-0813). It retired into V4.1-Flash routing at the
-// 2026-09-10 V4.1 launch, but the pricing page (checked 2026-11-14)
-// re-lists it with its own — much higher — rate card, and its
+// 2026-09-10 V4.1 launch, but the pricing page has since re-listed
+// it with its own — much higher — rate card, and its
 // legacy-name note now names only the two Flash ids. Hence a registry
 // entry: the unknown-model fallback would charge it Flash prices.
 const ModelV4Pro = "deepseek-v4-pro"
@@ -130,8 +133,9 @@ const ModelV4Pro = "deepseek-v4-pro"
 // offPeakDiscount.
 //
 // Numbers track the official pricing page (api-docs.deepseek.com/
-// quick_start/pricing), re-checked 2026-11-15. The English page is the
-// anchor: USD cards below, peak tier, off-peak exactly half. The Chinese
+// quick_start/pricing; per-card verification dates in ledger.go). The
+// English page is the anchor: USD cards below, peak tier, off-peak
+// exactly half. The Chinese
 // page has since diverged into a different regional card — flat CNY,
 // no windows (¥1/¥0.02/¥2 flash · ¥3/¥0.025/¥6 pro) — so cross-page
 // comparison reads as a phantom rate change; billing follows the
@@ -139,7 +143,7 @@ const ModelV4Pro = "deepseek-v4-pro"
 //
 //	V4.1-Flash (deepseek-flash, served by DeepSeek-V4.1-Flash-1017):
 //	    $0.30 miss · $0.006 hit · $1.20 output — effective
-//	    2026-09-10 12:00 CST, unchanged at the 2026-11-14 check
+//	    2026-09-10 12:00 CST
 //	V4-Pro (deepseek-v4-pro, served by DeepSeek-V4-Pro-0813):
 //	    $1.32 miss · $0.044 hit · $3.96 output
 //
@@ -155,7 +159,8 @@ const ModelV4Pro = "deepseek-v4-pro"
 //
 // The GLM row prices Zhipu's GLM-5.3 on open.bigmodel.cn (paas/v4),
 // flat-rate — no peak/off-peak windows, hence NoOffPeakDiscount. Source:
-// docs.bigmodel.cn/cn/guide/start/pricing, checked 2026-11-12: ¥8 input
+// docs.bigmodel.cn/cn/guide/start/pricing (verification date in
+// ledger.go): ¥8 input
 // · ¥2 cache-hit · ¥28 output per 1M tokens (single 1M-context tier;
 // cache storage was 限时免费 at check time). Converted to USD at 7.0
 // CNY/USD — the table's unit is USD because Cost feeds the $ status
@@ -187,7 +192,7 @@ var standardRates = map[string]ModelPricing{
 	// display shows a sensible number. NoOffPeakDiscount on every row:
 	// a subscription has no DeepSeek peak clock.
 	//
-	// Source: the gateway's own GET /v1/models (checked 2026-11-18) —
+	// Source: the gateway's own GET /v1/models (date in ledger.go) —
 	// each model carries a cost.text block in USD per 1M tokens, which
 	// matches the docs' pricing table except that the docs print the
 	// PEAK figure for the two DeepSeek ids: the API quotes
@@ -328,7 +333,7 @@ func SearchCost(calls int) float64 {
 
 // asrPerHourUSD is the standalone ASR API's per-hour-of-audio rate:
 // $0.116 per hour, listed natively on the English pricing page
-// (2026-11-16 check; the Chinese page shows ¥0.78/h — the known
+// (the Chinese page shows ¥0.78/h — the known
 // regional-card divergence, see standardRates above). A limited-time
 // 50% discount is running ($0.058 / ¥0.39) with no published end
 // date and is deliberately NOT modelled — same posture as search:
@@ -350,14 +355,14 @@ func ASRCost(seconds float64) float64 {
 
 // ttsPer10kCharsUSD is the standalone TTS API's per-10k-billing-chars
 // rate: $0.45 per 10,000 billing characters, listed natively on the
-// English pricing page (2026-11-16 check; the Chinese page shows
+// English pricing page (the Chinese page shows
 // ¥3/万 — the known regional-card divergence, see standardRates
 // above). A limited-time 50% discount is running ($0.225 / ¥1.5) with
 // no published end date and is deliberately NOT modelled — same
 // posture as search and ASR: the constant stays at list price so the
 // defensive display never undercharges. A billing character is one
 // rune with Han runes counting two; count them with
-// deepseek.TTSBillableChars.
+// deepseek.TTSBillableChars. Ledger row: tool:tts (ledger.go).
 const ttsPer10kCharsUSD = 0.45
 
 // TTSCost returns the USD cost of synthesizing billableChars billing
@@ -380,7 +385,8 @@ func TTSCost(billableChars int) float64 {
 // document already parsed), same price for text_recognition and
 // rich_layout_recognition (PRD feature-deepseek-app-api §1.2/§6 row 3).
 // Same-posture note as search/ASR/TTS: list price only, no discounts
-// modelled — the defensive display errs high.
+// modelled — the defensive display errs high. Ledger row:
+// tool:parse (ledger.go).
 const parsePerPageUSD = 0.225 / 1000
 
 // ParseCost returns the USD cost of parsing pages document pages via
