@@ -545,3 +545,48 @@ func TestParseCost(t *testing.T) {
 		t.Errorf("FormatCost(ParseCost(34)) = %q, want $0.0076", s)
 	}
 }
+
+// TestEstimateParsePages locks the size-based fallback's 口径: pages ≈
+// ceil(bytes ÷ 104857) — the average page size implied by the API's
+// own caps (≤100 MiB AND ≤1000 pages) — capped at 1000 (card
+// c_y2akdi). The estimator exists because the live API omits
+// page_count everywhere, which left ParseCost recording a flat $0 for
+// every real parse; error direction is format-dependent by design and
+// every caller flags the reading as an estimate.
+func TestEstimateParsePages(t *testing.T) {
+	cases := []struct {
+		name  string
+		bytes int64
+		want  int
+	}{
+		{"no upload is no estimate", 0, 0},
+		{"negative is no estimate", -5, 0},
+		{"one byte parsed one page", 1, 1},
+		{"F4 smoke PDF: 12741 B ≈ 2 text pages, estimate says 1", 12741, 1},
+		{"exactly one divisor", 104857, 1},
+		{"divisor+1 crosses the ceil", 104858, 2},
+		{"published page cap at the size cap", 100 << 20, 1000},
+		{"clamped: nothing above 1000 pages", 1 << 30, 1000},
+		// Overflow guard: the round-up must not add to a near-MaxInt64
+		// argument, and the 1000 cap must land in int64 before the int
+		// conversion (a 32-bit int would wrap a MaxInt64 page count).
+		{"MaxInt64 clamps without overflowing", math.MaxInt64, 1000},
+	}
+	for _, tc := range cases {
+		if got := EstimateParsePages(tc.bytes); got != tc.want {
+			t.Errorf("%s: EstimateParsePages(%d) = %d, want %d", tc.name, tc.bytes, got, tc.want)
+		}
+	}
+	// The fallback's whole point: a parse with a missing count now
+	// bills a non-zero, order-of-magnitude-sane amount instead of $0.
+	if got := ParseCost(EstimateParsePages(12741)); got <= 0 {
+		t.Errorf("ParseCost(EstimateParsePages(12741)) = %v, want > 0 (no more flat $0)", got)
+	}
+	// Every non-empty body estimates at least one page — the lower
+	// bound the removed `if pages < 1` clamp used to provide.
+	for _, n := range []int64{1, 2, 104856, 104857} {
+		if got := EstimateParsePages(n); got != 1 {
+			t.Errorf("lower bound: EstimateParsePages(%d) = %d, want 1", n, got)
+		}
+	}
+}

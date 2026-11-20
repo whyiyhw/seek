@@ -85,6 +85,10 @@ type Model struct {
 	// allow-list and told OpenCode users their vision model couldn't
 	// see the screenshot they had just pasted.
 	Vision bool `json:"vision"`
+	// Files is the document sibling of Vision: true when
+	// `modalities.input` declares a document media type
+	// (application/pdf). Installed into modelcap.SetFiles.
+	Files bool `json:"files"`
 }
 
 // Snapshot is a full catalogue as of one fetch (or the embedded baseline).
@@ -115,26 +119,29 @@ var directLaneIDs = map[string]bool{
 	"deepseek-v4-pro": true, // direct DeepSeek API
 }
 
-// Install pushes the snapshot's rates, context windows and vision
-// capabilities into the pricing / budget / modelcap override layers.
-// Every card is installed flat-rate: the Go plan is a request-window
-// subscription with no DeepSeek peak clock, and a remote cost block must
-// never be halved by one.
+// Install pushes the snapshot's rates, context windows, vision and
+// file capabilities into the pricing / budget / modelcap override
+// layers. Every card is installed flat-rate: the Go plan is a
+// request-window subscription with no DeepSeek peak clock, and a
+// remote cost block must never be halved by one.
 //
-// Vision is installed for EVERY row, including directLaneIDs: the skip
-// above exists because a shared id's rate card belongs to its other
-// lane, not because the capability answer differs. modelcap treats the
-// map as additive grants (its static table stays the deny-by-default
-// floor — see that package's comment for why absence can't mean "no").
+// Vision and Files are installed for EVERY row, including
+// directLaneIDs: the skip above exists because a shared id's rate card
+// belongs to its other lane, not because the capability answer differs.
+// modelcap treats the maps as additive grants (its static tables stay
+// the deny-by-default floor — see that package's comment for why
+// absence can't mean "no").
 func (s Snapshot) Install() {
 	rates := make(map[string]pricing.ModelPricing, len(s.Models))
 	limits := make(map[string]int, len(s.Models))
 	vision := make(map[string]bool, len(s.Models))
+	files := make(map[string]bool, len(s.Models))
 	for _, m := range s.Models {
 		if m.ID == "" {
 			continue
 		}
 		vision[m.ID] = m.Vision
+		files[m.ID] = m.Files
 		if directLaneIDs[m.ID] {
 			continue
 		}
@@ -150,6 +157,7 @@ func (s Snapshot) Install() {
 	pricing.SetModelRates(rates)
 	budget.SetLimits(limits)
 	modelcap.SetVision(vision)
+	modelcap.SetFiles(files)
 }
 
 // Rows renders the snapshot as picker rows, in the order the catalogue
@@ -187,8 +195,8 @@ func New() *Catalogue {
 
 // Embedded builds the compiled baseline as a Snapshot: ids and labels
 // from pricing.OpenCodeGoModels, rates from the pricing table, windows
-// from budget, vision from modelcap's static table, free rows detected
-// by a $0 card.
+// from budget, vision and files from modelcap's static tables, free
+// rows detected by a $0 card.
 func Embedded() Snapshot {
 	models := make([]Model, 0, len(pricing.OpenCodeGoModels))
 	for _, row := range pricing.OpenCodeGoModels {
@@ -197,6 +205,7 @@ func Embedded() Snapshot {
 			Label:  row.Label,
 			Free:   strings.HasSuffix(row.ID, "-free"),
 			Vision: modelcap.Vision(row.ID),
+			Files:  modelcap.Files(row.ID),
 		}
 		if w, ok := budget.Known(row.ID); ok {
 			m.Context = w
@@ -411,6 +420,7 @@ func Parse(body []byte, now time.Time) (Snapshot, error) {
 			Output:  w.Cost.Text.Output.Price * factor,
 			Free:    free,
 			Vision:  acceptsImages(w.Modalities.Input),
+			Files:   acceptsFiles(w.Modalities.Input),
 		})
 	}
 	if len(snap.Models) == 0 {
@@ -448,8 +458,8 @@ func merge(embedded []pricing.OpenCodeGoModel, fetched []Model) []Model {
 }
 
 // labelFor builds a picker label from the endpoint's own metadata:
-// "free · 1M ctx · vision · DeepSeek V4.1 Flash 1017", truncated to the
-// picker's width budget.
+// "free · 1M ctx · vision · files · DeepSeek V4.1 Flash 1017",
+// truncated to the picker's width budget.
 func labelFor(w wireModel, free bool) string {
 	var parts []string
 	if free {
@@ -460,6 +470,9 @@ func labelFor(w wireModel, free bool) string {
 	}
 	if acceptsImages(w.Modalities.Input) {
 		parts = append(parts, "vision")
+	}
+	if acceptsFiles(w.Modalities.Input) {
+		parts = append(parts, "files")
 	}
 	if w.Name != "" {
 		parts = append(parts, w.Name)
@@ -474,6 +487,20 @@ func labelFor(w wireModel, free bool) string {
 func acceptsImages(modalities []string) bool {
 	for _, mod := range modalities {
 		if strings.HasPrefix(mod, "image/") || strings.HasPrefix(mod, "video/") {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptsFiles is the document sibling of acceptsImages: a declared
+// application/pdf input modality means the model takes document parts.
+// PDF only, deliberately narrow: it is the one document format every
+// second-tier wire format accepts (see pkg/llm's file transport notes),
+// so a broader match would grant a capability the transport can't use.
+func acceptsFiles(modalities []string) bool {
+	for _, mod := range modalities {
+		if mod == "application/pdf" {
 			return true
 		}
 	}
