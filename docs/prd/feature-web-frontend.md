@@ -174,6 +174,7 @@ SSE 事件（webfrontend 自有 envelope，`data:` 为 JSON；`delta/tool/usage/
 | `tool` | `{run, id, name, phase: start\|end, ok}` | RunEvent `tool_start`/`tool_end`（折叠形态，args/result 不下发——UI 显示工具名+状态即可；`tool_end.result` 可能很大，MVP 不传） |
 | `usage` | `{run, prompt, completion, cache_hit, cost_usd}` | RunEvent `turn_end`；**cost 由服务端算**（webfrontend import `internal/pricing`，含 off-peak tier），客户端不算钱 |
 | `reply` | `{run, text, session_id}` | 平面 `Send`（authoritative 最终文本 + session_id） |
+| `approval` | `{id, conv, run, kind, summary, command, diff, state, decision}` | 审批 hub（W5 c_n37tnr，`webfrontend_approval.go`）：state=pending 弹卡 / resolved\|cancelled 撤卡回执；决定上行走 `/rpc approval/decide`（不是事件） |
 | `notice` | `{text}` | 平面指令应答（`/bind` 结果等也走 Send→reply；notice 留给鉴权/连接层提示） |
 
 run id = server-minted uuid（SSE envelope 自带字段；**不是** `Inbound.EventID`——后者现状有意留空，见 §2.2）。客户端按 run 聚合：deltas 累积成流式气泡 → `reply` 到达时替换收口（服务端权威，去重天然成立）。
@@ -226,8 +227,8 @@ run id = server-minted uuid（SSE envelope 自带字段；**不是** `Inbound.Ev
 
 ### 3.4 后续（非本期）
 
-- 资产面只读边界打破（`session/branch` 等写 method）——对齐 inspect-rpc §9，应用阶段再议。
-- 远程审批卡片（权限 y/N 进 web UI）——父 PRD §8 的杀手锏项。
+- 资产面只读边界打破（`session/branch` 等写 method）——对齐 inspect-rpc §9，应用阶段再议。（注：W5 c_n37tnr 的 `approval/decide` 已开了第一个**交互控制面**写 method——它不是资产面写，是审批回执；资产面只读边界不变。）
+- ~~远程审批卡片（权限 y/N 进 web UI）——父 PRD §8 的杀手锏项。~~ **W5 已落地 web 半边**（c_n37tnr，2026-11-20）：SSE `approval` 事件族 + 卡片 UI + `/rpc approval/decide|list` + 顶栏未决角标，假事件全流转/幂等/空态三项验收过（Go 测试 + 沙盒 E2E 双脚本）。**子进程半边拆后续卡**：`seek -p` 的 askFn → `approval_request` jsonLine → stdin 决定回读（接口契约见 §13.1 c_n37tnr 行）。
 - 跨项目聚合视图（inspect-rpc §9 cross-project）。
 
 ## 4. ③ 零依赖纪律
@@ -275,6 +276,7 @@ butler `/today`（2026-11-13 上线，卡 c_clvtsp）验证过的形态，原样
 `/today` 只读，cookie 单独够用；web frontend 的 `POST /msg` 会驱动 seek 执行——**cookie 单独不得过写面**（闸已交付，W1.2 c_w5lidm：仅对 cookie 凭证生效——查询参数/Bearer 形态自带 token 即自带 CSRF 免疫，不经此闸，curl 面零感知）：
 
 - 写面（POST）二选一：同源 `Origin` 头校验（允许集=自身 origin）**或** `X-Seek-Token` 头。跨站页面即使带上了 cookie（Samesite=Lax 已挡大半 POST），Origin 不匹配即 403。
+- **`POST /rpc` 同吃此闸（c_n37tnr，2026-11-20）**。/rpc 交付时是纯只读数据面，只带 token 门；`approval/decide` 是它上面**第一个状态变更型 method**（浏览器的 y/N/a 回答移动的是执行放行权），所以「cookie 单独不得驱动执行」必须对这个承载决定的 route 成立，不只是聊天 route。闸加在 route 级而非逐 method 判写：method 写集是第二份真相表，添 method 忘登记的那天就腐了。浏览器每次 POST 都带 Origin、页面自身 fetch 同源，浏览器面零感知；query/Bearer 调用方自带 token，与 /msg 同款免闸。
 - 读面（GET 静态/SSE）：cookie 足矣。
 - Cookie 属性：`HttpOnly; Secure(若 TLS); SameSite=Lax; Path=/`。
 
@@ -335,7 +337,7 @@ dsh-analysis §7：`apps/web`（React 18）+ `packages/web/*` 30+ 个 `ui-*` Cor
 
 httptest + fake seek 桩（脚本吐分批 JSONL 行）+ 真实 controlplane 组件（Router/Executor 用真实现，seek 二进制用桩）——**零真实 API key**。**基线**：`webfrontend_test.go` 现有 8 条（页面 embed / token 必需 / Inbound 推送 / 坏 body / SSE 回复 / 无订阅者丢弃 / `/state` 绑定 / Run 生命周期）全程零回归，是每张 W 卡验收的一部分：
 
-- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
+- **鉴权全路径**（前半已交付有测试，后半 W1.2 已交付 c_w5lidm——`webfrontend_auth_test.go` 表驱动）：无 token 401 / 错 token 401 / Bearer 过 / `?token=` 过（既有家族）∥ cookie 过 / `?token=` 303+Set-Cookie+Location 无 token / 写面无 Origin 无 X-Token 头 403 / `/rpc` 同款（`TestWeb_RPCWriteGate`，c_n37tnr） / Host 不匹配 403 / `0.0.0.0` bind 一律拒启动（scope 闸已交付，取代旧「缺 token 拒启动」——`TestWeb_AddrScope`/`TestWeb_RunForbiddenAddr`/`TestServePlane_BadWebAddrFails`）。
 - **流式**：桩 seek 分批吐行（含延迟）→ SSE 按序收到 delta/tool/usage/reply；进程 kill（/cancel）→ 流以错误事件收口不挂起。
 - **SSE 生命周期**：客户端断开 → hub 注销 + goroutine 退出（leaktest）；多 tab 扇出一致；hub 满丢老不阻塞 executor。
 - **并发**（`-race`）：同 conv 两 POST 串行（复用 M3 语义，回归）；不同 conv 并行；emit 回调在 executor goroutine 上调用而 SendStream 在 hub 锁内——锁序测试。
@@ -446,14 +448,14 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 | **c_x2au4t** markdown 渲染 | `ui-renderer`（渲染 slot 装配 + 应用根）+ `ui-chat`（会话节点渲染器/细节面） | `renderBody`/`appendInline` 最小渲染已落（代码围栏 + 行内码，c_iha3fr）；DOM 全程 createElement/textContent，页面无 HTML 解析 sink（§5.5 纪律） | checked-in vendor 单文件渲染器 ≤25KB（§4.2 先例）；渲染输出仍走 DOM-api 白名单构造（不 innerHTML），XSS 面不扩；**static/ 拆分随本卡落**（§4.3 预写路径，渲染器为第一个非内联资产，CSP 退回裸 `'self'` 的条件就位） |
 | **c_ux7lvk** 工具调用树 | `ui-tool`（tool call-tree 渲染器 + 按 tool key 的展示 slot——**精确对应**） | 直播流单行折叠工具行（W2.1 `⚙ read …`）；`tool` SSE 事件只带 name/phase/ok（§2.5 刻意不传 args/result——`tool_end.result` 可能很大）；sessions 浏览器 tool_calls 平铺显示 | 服务端 `tool` 事件载荷 additive 扩展（args 摘要 + result 截断，钉输出上限——工具输出限额在工具侧的既有纪律）+ 可展开调用树 UI；W2.1 折叠行为保持兼容（默认仍单行，展开是加法） |
 | **c_5m3fm6** 停止按钮 | `ui-conversation`（composer/queue/view 导航承载停止控制——dsh 无独立 stop 包） | `/cancel` 顶栏按钮已有（W2.2，平面指令→执行器 kill，含流收口 W1.4 `TestWeb_StreamCancelClosesRun`） | 输入区运行态切换：有活跃 run 时「发送」变「停止」直发 /cancel——客户端已知 run 生命周期（W1.4 run id），纯 UX 增量、零服务端改动 |
-| **c_7lsngm** 输入增强 | `ui-input-trigger`（'/'与'@' 触发管线 + 候选菜单 + pick 路由）+ `ui-commands`（命令面三种 UI 形态——**精确对应**） | 纯文本输入框 + 五个指令快捷按钮（W2.2，全部走同一条 sendText 透传）；无补全无历史 | '/' 触发候选菜单（候源=平面指令集 + 输入历史）；'@' 文件/会话引用（dsh `ui-reference` 形态）列远期、不在本卡 |
+| **c_7lsngm** 输入增强 | `ui-input-trigger`（'/'与'@' 触发管线 + 候选菜单 + pick 路由）+ `ui-commands`（命令面三种 UI 形态——**精确对应**） | 纯文本输入框 + 五个指令快捷按钮（W2.2，全部走同一条 sendText 透传）；无补全无历史 | **已交付**（2026-11-20）：`#input` 换 textarea（Enter 发送 / Shift+Enter 原生换行，`grow()` 自长高、CSS max-height 兜滚动）；`/` 弹命令面板（候源=页面内 `CMDS` 注册表：/bind /projects /switch /new /cancel /resume，注册表驱动可扩展），↑↓ 移高亮 / Tab·Enter 补全（带参指令落「/cmd 」留空格）/ Esc 关闭；`@` 弹最近会话（`/rpc session/list` 现成只读 method，不另立协议），选中原位换 `@<sid>` 并自动发 `/resume <sid>`——「切换语义」就是平面新增的 `/resume` 指令（见 §13.1 下方注）。两个候源共用 ONE 弹层（`#menu` 一行 DOM），导航键全挂 `#input` 的 keydown，页面**不新增全局 keydown 监听**（关着时 Esc 完全放行，不劫持）。窄屏 ≤640px 降级：弹层满宽、条目换行、输入 16px（防 iOS 聚焦缩放）。**文件引用（dsh `ui-reference` 的 @file 半边）仍列远期**——本卡只做会话引用 |
 | **c_56yrcj** 附件上传 | `ui-attachment`（输入区/消息/轨迹三处图片 slot——**精确对应**） | 能力面已就位：`internal/modelcap.Vision` 判定 + `llm.Message.Images` 透传（124b6f4），TUI/print/ACP 三入口已有；web 二进制上传 seam 有现成先例（`POST /voice` + 自定义头，c_f6ayyg） | 图片粘贴/拖入/选择 → data URL → 上行（/voice 同款二进制端点或 /msg 扩展，实现卡定）→ **平面缝**：Inbound 可选附件字段（sibling 加法）+ 执行器转发 CLI vision 入口；非图片文件维持「不透传」提示（CHANGELOG 既有口径） |
 | **c_txz6vz** 会话侧栏 | `ui-sidebar`（会话多级树/搜索/分组/状态点）+ `ui-session`（Session Controller 适配）——**精确对应** | 四面板 togglePane 全屏覆盖（sessions/memory/stats/agents，W4.4/W4.5/W3.3）；会话切换=conv-uuid localStorage（W1.3）+ `/new`；sessions 浏览器能看不能切 | 常驻可折叠左栏：当前 web 会话（conv 列表）+ 从 sessions 面板一键续接既有 session（`-resume` 语义走绑定面）；页面骨架重排——**后续三卡（重命名/主题/计量）的挂点**（§13.5） |
 | **c_rqcuaa** 重命名归档 | `ui-session`（session/title 事件面）+ `ui-sidebar`（树面入口）——dsh 重命名是事件溯源（`session/title` append 事件，不重写日志） | 无重命名/归档写面；sessions 列表标题=首条用户消息首行（派生，W4.4）；session JSONL 由子进程 seek 拥有（serve 只读） | 服务端小写 method + 侧栏入口。**存储决策留实现卡**，口径先钉两条：serve 进程不写子进程拥有的 session JSONL（transcript 归属纪律）；标题覆盖优先考虑 projects 元数据侧记（bindings 同族），归档=列表过滤位、不删文件 |
 | **c_4doebx** 子代理面板 | `ui-subagent`（子代理会话目录/续跑路由/@ 引用源） | W3.3 已交付基础面：列表/状态/tokens + transcript 尾读详情（c_ujgmpu）；`notified` 读面就绪（W4.6 核对，写面仍属未做的 M-O1.3） | 面上增量：多 run 聚合/失败原因直显/background 标记呈现等；续跑路由与 @ 引用（dsh 形态）列远期不在本卡 |
 | **c_xz2bey** hooks 审计 | **无直接对应**——dsh 的 hooks 即 Cordis 插件本身（dsh-analysis §1），无独立审计面；形状参考 `ui-trajectory`（事件台账 fold，pure-consumer 无服务） | 服务端已全：`hooks/list`（两层 hooks.toml 按 dispatch 序合并）+ `hooks/audit/tail`（from_ts/limit/project_id，W4.6 c_igze7m）；SSE hooks topic 未做（inspect-rpc §6 #6/#7 开放） | 审计面板 UI：hooks 定义表 + audit tail 视图（过滤参数对齐 method 面）；SSE topic 化维持开放、不在本卡 |
 | **c_6xktw4** 统计趋势 | **无对应**——dsh 遥测外发（dsh-base telemetry），无本地趋势面；形状参考 `ui-trajectory` 的 interactive timing overview | W4.5 stats 视图=单会话 cache/cost 快照（c_wno3o3）；`#usage` 计量=本页生命周期会话累计（W2.3，刷新重计） | 跨会话趋势：fold 各 session JSONL 的 `turn_end` usage 行（/rpc 读面 method 增量或复用 W4.2 reader）+ 无依赖 SVG/canvas 手绘图（零 vendor） |
-| **c_n37tnr** 审批卡片 | `ui-approval`（composer takeover，挂 Remote Event waterfall——**精确对应**）+ `ui-user-questions`（ask_user/plan review 面，远期参考） | print 模式 `ErrDenied` 工具结果即默认体验（§6 已验证②）；无远程审批通道——`askFn` 只在 TUI 进程内，平面无审批事件 | 本组最重一张。**平面缝**：`seek -p` 增 additive run 事件（approval/requested，含 Action/Display）+ 决定回注路径（run id 键控）；卡片 UI 对齐 `permission.Policy` 语义（y/N/always-allow，Denial 仍是工具结果不是致命错）。父 PRD §8 杀手锏项首落地；超 2h 粒度时实现卡内自拆服务端/前端两半 |
+| **c_n37tnr** 审批卡片 | `ui-approval`（composer takeover，挂 Remote Event waterfall——**精确对应**）+ `ui-user-questions`（ask_user/plan review 面，远期参考） | print 模式 `ErrDenied` 工具结果即默认体验（§6 已验证②）；无远程审批通道——`askFn` 只在 TUI 进程内，平面无审批事件 | **web 半边已交付**（2026-11-20）：审批 hub（`webfrontend_approval.go`，pending 表 + 终态 FIFO 留存供幂等复读）+ SSE `approval` 事件族（conv 流命名事件——**不是** `?topic=` 维度：卡片要在任何视图弹出，主 `/events` 连接是常开载体，voice 先例）+ `/rpc approval/decide|list`（decide 是平面首个状态变更型 method：交互控制面，与只读资产面分立）+ 卡片 UI（描述+命令摘要+y/N/a，对齐 `permission.Policy` 语义；a=always-allow，Denial 仍是工具结果）+ 顶栏未决角标 + 空态零侵入（角标 hidden/卡栈 :empty）。幂等结构性成立：决定回调每 id 恰好一次、复读 applied=false、生产者重试同 id 不复活卡。验收：Go 测试（全流转/幂等/空态/conv 隔离/流翻译）+ 沙盒 E2E 双脚本（`scripts/web-approval-manual.sh` + `-headless.mjs`：curl 服务端三项 + 无头浏览器卡片/角标/防抖/双发）全绿；web-gate 过（钉 GOTOOLCHAIN 口径净增 ~46KB，超 §13.3 配额 25KB——注释瘦身仅省 200B，余为功能编译本体；gate 余量 1.25MB，W5 包合计 ~60KB/175KB 仍在包内，如实记账不棘轮）。**子进程半边拆后续卡（>2h）**，契约：①`seek -p` 增 askFn 路径，吐 additive jsonLine `{"type":"approval_request","req_id":"<子进程铸>","kind":"bash","summary":"…","command":"…","diff":"…"}` 后**阻塞读 stdin**，决定行 `{"type":"approval_decision","req_id":"…","decision":"y\|n\|a"}` 回读（`a` → allow + SetAlwaysAllow(Kind)；denial 走工具结果）；run 中止吐 `{"type":"approval_cancel","req_id":"…"}`；②平面侧：executor 事件面已就绪（RunEvent 增 req_id/kind/summary/command/diff 字段，`SendStream` 已翻进 hub），要补的只是 decide 回调 → 子进程 stdin 写回的管道（executor attempt 持 stdin writer、按 req_id 路由）+ run 终止时 hub 撤卡（`CancelApproval` 已备）；③卡片超时/会话期 always-allow 状态落点随该卡定 |
 | **c_ni7mzw** 主题设置 | `ui-theme`（light/dark/system 三态 ThemeRuntime + `--dsw-*` token 体系 + Appearance 设置行——**精确对应**） | 单一暗色硬编码 hex（#14161a 等），无 CSS 自定义属性、无主题态、无设置面 | `--seek-*` token 化改写既有样式 + light/dark/system 三态（localStorage 持久 + `prefers-color-scheme` 跟随）；零服务端改动；dsh 的 ThemeRuntime 是插件服务，seek 侧一个 JS 对象够（两赛道论 §7） |
 | **c_oyp2qf** 顶栏 ContextMeter | **无常驻 context 计量条**；最接近 `ui-conversation` 的 request/header\|context 检查面（ConversationPromptSnapshot——请求级快照回放，非实时计量） | `#usage` 计量=会话累计 tokens/$（W2.3，usage 命名事件）；无 context 窗口占用显示 | 顶栏 context 填充计量：`turn_end` PromptTokens 为占用代理 / 窗口上限取模型目录同源数据（pricing/opencatalog 族，不另立表）；挂点在 c_txz6vz 骨架之后（§13.5） |
 
@@ -475,14 +477,14 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 | c_x2au4t markdown 渲染 | ≤30KB | **大头先占位**：vendor 渲染器 ≤25KB + 接线/样式 ~5KB；static/ 拆分的目录/embed 骨架也计在本卡 |
 | c_ux7lvk 工具调用树 | ≤15KB | tool 事件载荷扩展（服务端）+ 树 UI |
 | c_5m3fm6 停止按钮 | ≤3KB | 纯 composer UX |
-| c_7lsngm 输入增强 | ≤10KB | '/' 触发候选菜单 |
+| c_7lsngm 输入增强 | ≤10KB | '/' 触发候选菜单。**实际 ~13KB**（`-trimpath` 口径 +13195B，2026-11-20 交付时；同尺同路径量得）：页面 textarea+弹层/键盘线 12296B + 平面 `/resume` 缝 899B；超配额 ~3KB，吃包内余量、gate 余量 1.2MB 未棘轮（如实记账，同 c_n37tnr 口径） |
 | c_56yrcj 附件上传 | ≤20KB | 平面缝 + 前端预览 |
 | c_txz6vz 会话侧栏 | ≤20KB | 布局骨架 + 会话树 |
 | c_rqcuaa 重命名归档 | ≤8KB | 服务端小 method + 侧栏入口 |
 | c_4doebx 子代理面板 | ≤8KB | W3.3 面上增量 |
 | c_xz2bey hooks 审计 | ≤10KB | 审计面板（服务端 W4.6 已全） |
 | c_6xktw4 统计趋势 | ≤12KB | usage fold + 无依赖图表 |
-| c_n37tnr 审批卡片 | ≤25KB | 平面缝 + 卡片 UI（本组最重） |
+| c_n37tnr 审批卡片 | ≤25KB | 平面缝 + 卡片 UI（本组最重）。**实际 ~46KB**（钉 GOTOOLCHAIN 口径，2026-11-20 交付时）：注释瘦身仅省 200B，余为 hub/RPC/UI 编译本体；超配额部分吃包内 25KB 余量（累计 ~60KB/175KB），gate 仍有 1.25MB 余量、未棘轮——超在记账、不在 gate |
 | c_ni7mzw 主题设置 | ≤8KB | token 化 + 三态切换 |
 | c_oyp2qf 顶栏 ContextMeter | ≤6KB | 计量条 |
 | **合计** | **175KB** | **余 25KB（12.5%）**留给棘轮误差与测试夹具 |

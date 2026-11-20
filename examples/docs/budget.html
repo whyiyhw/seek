@@ -176,8 +176,25 @@
     <p data-lang="en">Warnings are passive (no popup, no picker). The TUI status bar (top-right) shows:</p>
     <p data-lang="zh" hidden">警告不打断对话，TUI 右上角显示：</p>
     <pre><span class="prompt">ctx 42%</span>          <span class="dim"># safe zone — muted grey</span>
-<span class="prompt">⚠ ctx 63%</span>        <span class="dim"># &gt; 60% — amber warning</span>
-<span class="prompt">⚠ ctx 77% — /compact soon</span>  <span class="dim"># &gt; 75% — red bold</span></pre>
+<span class="prompt">! ctx 63%</span>        <span class="dim"># &gt; 60% — amber warning</span>
+<span class="prompt">! ctx 77% — /compact soon</span>  <span class="dim"># &gt; 75% — red bold</span></pre>
+
+    <h2 data-lang="en">Auto-compact</h2>
+    <h2 data-lang="zh" hidden">自动压缩</h2>
+    <p data-lang="en">Set a trigger in <code>~/.seek/config.json</code> (or <code>$SEEK_AUTO_COMPACT</code> for one launch) and seek runs the same summariser <code>/compact</code> runs, by itself, when the context crosses that point. Off by default — it rewrites the conversation, so it stays opt-in.</p>
+    <p data-lang="zh" hidden">在 <code>~/.seek/config.json</code> 里设触发点（或用 <code>$SEEK_AUTO_COMPACT</code> 单次覆盖），上下文越过该点时 seek 自动执行与 <code>/compact</code> 相同的摘要调用。<strong>默认关</strong>——它会改写对话历史，所以必须显式开启。</p>
+    <pre>{ <span class="dim">"auto_compact"</span>: { <span class="dim">"at_tokens"</span>: 350000 } }     <span class="dim"># model-independent</span>
+{ <span class="dim">"auto_compact"</span>: { <span class="dim">"at_fraction"</span>: 0.35 } }    <span class="dim"># 0.35 × current window</span></pre>
+    <ul>
+      <li data-lang="en"><code>at_tokens</code> wins when both are set; <code>at_fraction</code> follows the live model, so a <code>/model</code> switch moves the trigger with the window</li>
+      <li data-lang="zh" hidden">两者都设时 <code>at_tokens</code> 优先；<code>at_fraction</code> 跟随当前模型，<code>/model</code> 换模型时触发点跟着窗口走</li>
+      <li data-lang="en">Fires only at rest — no queued message, no pending steer, no <code>/goal</code> loop, never after Esc; and never under <code>--no-save</code> (no snapshot = no way back)</li>
+      <li data-lang="zh" hidden">只在真空闲时触发——排队消息、待发 steer、<code>/goal</code> 循环中、Esc 取消后都不触发；<code>--no-save</code> 下也不触发（没有 snapshot 就没有退路）</li>
+      <li data-lang="en">Inherits fork-snapshot: the pre-compact history stays on disk, <code>--resume &lt;old-id&gt;</code> still reaches it</li>
+      <li data-lang="zh" hidden">沿用 fork-snapshot 语义：压缩前的完整历史留在磁盘，<code>--resume &lt;旧 id&gt;</code> 仍能找回</li>
+      <li data-lang="en">With a trigger set, the ctx% segment turns red AT the trigger and reads <code>— auto-compact</code> instead of <code>/compact soon</code>; the warn tint lands at 80% of it</li>
+      <li data-lang="zh" hidden">配置后 ctx% 段在触发点变红并显示 <code>— auto-compact</code>（不再是 <code>/compact soon</code>），warn 色落在触发点的 80%</li>
+    </ul>
 
     <h2 data-lang="en">What Happens at the Limit</h2>
     <h2 data-lang="zh" hidden">达到限制后的行为</h2>

@@ -309,6 +309,19 @@ const bubblesNow = (await snap()).bubbles;
   }
   ck('面板关闭后 Enter 走发送路径', s.val === '' && s.bubbles > bubblesNow,
     JSON.stringify({ val: s.val, bubbles: s.bubbles }));
+
+  // 等这一跑的回写落定再进 C：Handle 每个 inbound 一个 goroutine，命令
+  // 不走执行器闸，所以 /resume 可能抢在在跑的 prompt 之前落绑定——随后
+  // prompt 的 session 回写把它盖掉（/new /switch 同款既有暴露）。C 要断言
+  // 「/resume 之后绑定等于夹具 sid」，就必须先让上一跑收口：应答气泡落地
+  // = agent_end 已回、回写已完成。
+  for (let i = 0; i < 80; i++) {
+    s = await snap();
+    if (s.bubbles >= bubblesNow + 2) break;   // you + reply
+    await delay(100);
+  }
+  ck('上一跑已收口（回写落定后再验 @）', s.bubbles >= bubblesNow + 2,
+    JSON.stringify({ bubbles: s.bubbles, want: bubblesNow + 2 }));
 }
 
 // ---- C. '@' 会话引用：候选来自 session/list，选中即落引用 + 切换语义 ----

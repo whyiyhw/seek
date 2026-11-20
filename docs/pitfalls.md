@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**267 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**270 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -41,11 +41,11 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Hook / memory | 7 |
 | Skill distill (auto path) | 1 |
 | TUI / terminal | 29 |
-| Agent loop | 17 |
+| Agent loop | 18 |
 | DeepSeek API | 24 |
 | Go language | 12 |
-| Tooling / environment | 24 |
-| LLM provider quirks (M6) | 10 |
+| Tooling / environment | 25 |
+| LLM provider quirks (M6) | 11 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -56,7 +56,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Feishu / external API | 1 |
 | Subprocess / secrets | 1 |
 | Tool output | 2 |
-| Testing | 2 |
+| Testing | 3 |
 | Tool decorators | 2 |
 | Filesystem / model safety | 5 |
 | Tooling / line endings | 4 |
@@ -68,9 +68,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Eval / results data shape | 2 |
 | Transcript analysis / offline metrics | 4 |
 | Typed agents / orchestration | 2 |
-| Git / merge | 2 |
+| Git / merge | 3 |
 | Subprocess / streaming stdout | 2 |
-| Web frontend / asset plane | 15 |
+| Web frontend / asset plane | 18 |
 | Tooling / go list | 2 |
 | Skill stats / --idle | 1 |
 | MCP bridge / tool naming | 1 |
@@ -79,9 +79,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **255** |
+| **Total** | **269** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 156.
 
 ---
 
@@ -498,6 +498,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
 - **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
 - **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+
+### /compact's own rescue call cannot fit an overflowed context — the recovery path was the deadlock
+- **Saw**: the general shape of the grep-deadlock entry below (§Tooling): once the history overflows the model's window, `/compact` — the one command that exists to shrink the session — sends the FULL history to the summariser and gets the same `maximum context length` 400 every other prompt gets. Reproduced deterministically in `TestSummarise_OverflowRescue_Completes` (fixture ≈ 159K tokens vs a 128K window): the rescue request itself is rejected, so the session is unrecoverable in-app
+- **Why**: `Summarise` built its request from the untrimmed history by design — the summary should cover everything. But "everything" is exactly what no longer fits; a recovery path that requires the resource it is recovering cannot terminate. A second trap hides in the obvious fix: dropping the oldest MESSAGES one by one can strand a tool result without its assistant `tool_calls` parent — an orphaned tool message is a second kind of 400, so the "rescue" can resurrect the deadlock in a new shape
+- **Fix** (card c_idisqf): degradation path in `pkg/agent/compact_rescue.go`, wired into both lanes' Summarise. Pre-flight estimate (`estimateTokens`: ASCII ≈ 4 B/token, CJK ≈ 1 token/rune — conservative so Chinese-heavy histories err high) against `budget.Limit(model)` minus an output reserve; over budget → stage 1 caps oversized bodies in place (keep-head + constant marker; content truncation cannot break tool pairing), stage 2 drops the OLDEST messages (never system, never the summariser turn), skipping cut points that would orphan a tool result. Elision note appended to the summariser prompt so the briefing states what it does NOT cover. Belt-and-braces: a loose `isContextOverflowError` match triggers ONE reactive retry at half budget for estimator drift. Fitting histories pass through the identical slice — zero byte change (prefix-cache discipline; `TestSummarise_NormalPath_BytesUnchanged` guards both lanes)
+- **Lesson**: every recovery path must be sized to run in the failure state it recovers — ask "does the rescue itself fit the budget it is rescuing?" at design time. And when trimming conversation history, the cut unit must respect wire invariants (tool_call/tool_result pairing), not just token counts: prefer truncating CONTENT over dropping structural messages, and when dropping messages never let a tool result outlive its parent
+- **Refs**: `pkg/agent/compact_rescue.go`, `pkg/agent/agent.go:Summarise`/`summariseLLM`, tests `pkg/agent/compact_rescue_test.go`; sibling entry §Tooling "Grep tool with broad pattern can deadlock" (the byte-cap half of this fix)
 
 ## DeepSeek API
 
@@ -1435,6 +1442,14 @@ If you're new to the project, skim entries in this order:
 - **Lesson**: on a three-OS CI, failure injection must fail for the same reason everywhere; when it can't, broaden the assertion from "this branch errored" to "the invariant held" (error out, nothing written).
 - **Refs**: `internal/skillmgr/writeproject_test.go`, `.github/workflows/ci.yml`
 
+### `t.Setenv` inside a `t.Parallel` test panics — and the panic surfaces from a helper, not the test
+
+- **Saw**: `go test ./internal/tui/` blew up with `panic: testing: t.Setenv() called after t.Parallel()` and a stack that pointed at `persistSessionTestFixture` → a shared test helper, not at the new test. The new test's own body was clean; the `t.Parallel()` was two frames up.
+- **Why**: Go forbids `t.Setenv` after `t.Parallel()` because the process environment is global — a parallel test mutating it would race every other test. The guard is on the `*testing.T` receiver, so ANY helper that receives the parallel test's `t` inherits the restriction. Test helpers that call `t.Setenv` (this repo's `persistSessionTestFixture`, `withSeekHome`) are therefore silently unusable from parallel tests.
+- **Fix**: drop `t.Parallel()` from the tests that reach a `t.Setenv` helper. Do not "fix" it by hoisting the `Setenv` into `TestMain` — that would make the sandbox dir global and defeat per-test isolation.
+- **Lesson**: a test helper's hidden requirements travel with `t`. When a new test panics in a helper you did not touch, check whether the helper calls `t.Setenv` / `t.Chdir` / `os.Setenv` and whether the test declared `t.Parallel()`. Same class as "the failure surfaces where the invariant is checked, not where it was broken".
+- **Refs**: `internal/tui/persist_test.go` (`persistSessionTestFixture`), `internal/config/config_test.go` (`withSeekHome`)
+
 ## Tool decorators
 
 ### A Tool decorator silently drops the optional interfaces the agent upcasts to
@@ -1820,6 +1835,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: merges touching docs with long single-line status fields get a mechanical marker-grep before commit — two bites is a pattern, not bad luck.
 - **Refs**: `docs/prd/feature-orchestration.md` 状态行; `920f9e1`, `e8eface` (first manual cleanup, same file).
 
+### 纯搬移拆文件时 `git diff -M` 检不出 rename——一份源拆成两份，配对是一对多
+- **Saw**: 卡 c_3mny65 把 `cmd/seek/main.go` 的两块（planBridge / subagent glue）各拆成新文件，卡面验收写的是「`git diff -M` rename 检出」；提交后 `git diff -M -C --find-copies-harder --summary` 仍报两个 `create mode`，没有一处 `rename`，`--stat` 只有 `main.go −662 / planbridge.go +315 / subagent_glue.go +386`。
+- **Why**: rename 检测是「一个删除 ↔ 一个新增」的相似度配对；一次拆成 N 个新文件时，被删的 662 行要同时对上两个新增块，任何单侧相似度都低于阈值。`-C` / `--find-copies-harder` 只扩大候选集，不改一对一配对模型，所以拆分永远显示成 delete + create。
+- **Fix**: 等值口径换成「区段 diff 为空」——`diff <(git show HEAD:cmd/seek/main.go | sed -n '122,161p;196,456p') <(sed -n '15,315p' cmd/seek/planbridge.go)` 无输出 ⇒ 函数体零改动；再对 main.go 剩余部分做「挖掉两块后与 HEAD 逐行比对（只允许空行规整 + 少两条已搬走的 import）」证明没有夹带。
+- **Lesson**: 「纯搬移可核」的手段随拆分形态变——整文件搬家（`envgate.go`）用 `-M`，一块代码分到多个新文件用区段 diff。把验收写法钉死成 `-M`，会让正确的纯搬移看起来像没做。
+- **Refs**: `cmd/seek/main.go`, `cmd/seek/planbridge.go`, `cmd/seek/subagent_glue.go`; 整文件搬家先例 `cmd/seek/envgate.go`（0a66450）
+
 ## Subprocess / streaming stdout
 
 ### StdoutPipe forbids concurrent Wait — kill-able line-streaming needs cmd.Stdout=io.Writer + io.Pipe
@@ -1951,6 +1973,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: 同卡把两处基线更新为 2 并注明构成（内联页面脚本 + static/markdown.js），重跑两套无头验收全绿；commit 带 c_x2au4t。
 - **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
 - **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
+
+### 跨目录比对二进制体积要先 `-trimpath`——同一棵树换个路径就差 17KB
+- **Saw**: 2026-11-20 c_7lsngm 收尾时用两个临时目录（`/tmp/sz` 与 `/tmp/p1`）分别构建 main 作参照，同一个 commit 得到 29258219B 与 29258227B；再把同一个 main 解到 `/tmp/averyvery...experiment` 试，涨到 29275459B——**零代码差异，17KB 的「增长」**。跨目录对照一度把本卡净增量出 13163B / 17806B 两个数（真值 13195B）。
+- **Why**: Go 把每个包的**绝对导入路径**编码进构建产物（行号表/类型元数据里的文件名字符串）。`web-gate.sh` 比较基线时在同一棵树、同一路径上构建，所以不受影响；而「把 main 解到另一个目录当参照」这种卡内自测常用于拿 delta，路径长度就混进了差值——**而且参照树与工作树的路径长度差是不对称的**，同一个 commit 在短路径与长路径下可以差 17KB。
+- **Fix**: 参照测量统一加 `-trimpath`（与工作树同一套 build flags），跨目录对照即稳定（实测两次独立复现都是 29169937B）：`GOTOOLCHAIN=go1.25.8 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false`。本卡的 delta 记账即按 trimpath 口径（main 29169937B → 本卡 29183132B，+13195B）。**gate 本身不改**——它同路径比对，没有这个问题。
+- **Lesson**: 体积 delta 只有在「同 flags + 同工具链 + 同路径形状」三者都对齐时才可比；跨目录自测时 `-trimpath` 是把路径变量消掉的开关。和上一条（工具链 skew）是同一类错误的两个方向：**测量环境变了，delta 就不是 delta**。
+- **Refs**: `scripts/web-gate.sh` `build_size`（无 `-trimpath`，同路径语义）；`docs/prd/feature-web-frontend.md` §13.3 记账口径。
 
 ## Tooling / go list
 

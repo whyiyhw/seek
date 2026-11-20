@@ -73,6 +73,10 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		methods.NewProjectsFromEnv().RegisterAll(reg)
 		methods.NewStatsFromEnv().RegisterAll(reg)
 		methods.NewHooksFromEnv().RegisterAll(reg)
+		// W5 c_n37tnr: the approval hub methods are frontend-native
+		// state (not a disk-backed asset family), so they register on
+		// the frontend itself — still pre-Run, same phase contract.
+		fe.RegisterApprovalMethods(reg)
 		return fe
 	},
 	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides
@@ -286,26 +290,24 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 }
 
 // sessionLookup adapts the sessions store to the router's /resume seam.
-// The store resolves lazily (session.NewStore creates the directory, and
-// serve must not touch the filesystem before a frontend exists) and only
-// the header is read — a resume needs the session's cwd, not its messages.
+// A store is resolved per call rather than cached: session.NewStore is
+// stateless (env ladder + MkdirAll, both idempotent), /resume is a
+// user-initiated action far from any hot path, and a cached store would
+// need synchronisation — Router.Handle runs one goroutine per inbound, so
+// two conversations can /resume concurrently. Only the header is read: a
+// resume needs the session's cwd, not its messages. Resolution happens at
+// CALL time, so serve still touches no filesystem before a frontend exists.
 func sessionLookup() func(string) (string, error) {
-	var (
-		store *session.Store
-		err   error
-	)
 	return func(id string) (string, error) {
-		if store == nil && err == nil {
-			store, err = session.NewStore()
-		}
+		store, err := session.NewStore()
 		if err != nil {
 			return "", err
 		}
-		sess, lerr := store.Load(id)
+		hdr, lerr := store.LoadHeader(id)
 		if lerr != nil {
 			return "", lerr
 		}
-		return sess.CWD, nil
+		return hdr.CWD, nil
 	}
 }
 

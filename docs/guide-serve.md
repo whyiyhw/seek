@@ -52,6 +52,7 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 | `/projects` | 列出候选项目与当前绑定 |
 | `/switch <项目路径>` | 改绑 + 清 session |
 | `/new` | 留项目 + 清 session（开新话题） |
+| `/resume <会话 id>` | 续接既有 transcript（绑定指向该 id；会话自带的 cwd 优先——web 页 `@` 引用的去处） |
 | `/cancel` | 中断当前 run（kill 子进程） |
 
 未绑定的会话发普通消息 → 回提示先 `/bind`。
@@ -78,6 +79,8 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 ## 5. Web frontend：启动、token、tailnet 与安全清单 / The bundled web frontend
 
 内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。打开即是聊天页：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、顶栏 `/bind` `/projects` `/switch` `/new` `/cancel` 快捷键与绑定状态常显；顶栏另有三个资产视图——**📚 会话**（session 列表 + 消息 cursor 分页浏览）、**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（cache 命中率 + cost，服务端计价，客户端不算钱）。
+
+输入区（c_7lsngm）：多行（Enter 发送 / Shift+Enter 换行）+ 一个候选弹层两种候源——`/` 弹指令面板（`CMDS` 注册表驱动，↑↓ 选、Tab/Enter 补全、Esc 关闭）、`@` 弹最近会话（`session/list`，选中即落 `@<sid>` 并发 `/resume <sid>`）。导航键只挂输入框，页面无全局 keydown 监听；≤640px 弹层满宽、条目换行、输入 16px。文件引用（`@` 指文件）仍列远期。
 
 API 面（一律过 §5.2 的 token 认证）：`POST /msg`（发消息）、`GET /state`（本会话绑定状态）、`GET /events`（SSE 流）、`POST /rpc`（JSON-RPC 2.0 方法集：`session/list|get|messages`、`memory/list|get|projects`、`project/list|get`、`stats/cache`、`hooks/list`、`hooks/audit/tail`）、`GET /subagents`（后台子代理只读投影）。
 
