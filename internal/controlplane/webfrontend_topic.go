@@ -57,7 +57,11 @@ const topicChanBuf = 256
 // subagents.jsonl are seek child processes in other processes — no
 // in-process signal exists and stdlib has no watcher, so the follow is
 // stat+read polling. Lifecycle events are sparse; 1s is invisible
-// latency for a task panel at ~zero CPU. A var so tests tighten it.
+// latency for a task panel at ~zero CPU. A var so tests tighten it —
+// but read it ONLY in subscribeTopic (the handler goroutine): the
+// follower reads its interval as a parameter, so a test's t.Cleanup
+// restore can never race a follower goroutine that started late (see
+// pitfalls.md; hooksTopicPoll learned this the hard way).
 var subagentsTopicPoll = time.Second
 
 // topicEvent is the SSE envelope of one topic push. No "conv" field:
@@ -116,7 +120,14 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, indexPath string) (ch chan sse
 	if fl == nil {
 		fl = &topicFollow{stop: make(chan struct{}), subs: make(map[int]chan string)}
 		f.follows[indexPath] = fl
-		go f.followLoop(fo, fl)
+		// Read the interval HERE, not in the loop: this runs on the
+		// handler goroutine (joined by httptest.Server.Close before
+		// t.Cleanup restores the var), so both of a test's swap and
+		// restore are happens-before-ordered against this read. The
+		// spawned goroutine itself may outlive the handler with no
+		// ordering edge to the cleanup write.
+		poll := subagentsTopicPoll
+		go f.followLoop(fo, fl, poll)
 	}
 	fl.subs[id] = tch
 
@@ -148,9 +159,11 @@ func (f *WebFrontend) dropTopicSub(conv ConvID, id int, path string) {
 // nothing else stops it, and it stops nothing else (pushFollow is
 // best-effort). Per-tick Poll failures are already tolerated inside
 // Follower.Poll (nothing consumed, nothing lost); the loop itself has
-// no failure path that outlives stop.
-func (f *WebFrontend) followLoop(fo *subagent.Follower, fl *topicFollow) {
-	tick := time.NewTicker(subagentsTopicPoll)
+// no failure path that outlives stop. poll arrives as a parameter
+// (captured by the handler goroutine at spawn time) — this goroutine
+// never reads the package var.
+func (f *WebFrontend) followLoop(fo *subagent.Follower, fl *topicFollow, poll time.Duration) {
+	tick := time.NewTicker(poll)
 	defer tick.Stop()
 	for {
 		select {

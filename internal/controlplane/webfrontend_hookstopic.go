@@ -46,7 +46,10 @@ const topicHooks = "hooks"
 // hooksTopicPoll is the audit-log tail-follow poll interval, the same
 // stat+read cadence rationale as subagentsTopicPoll. Hook executions
 // are human-cadence events; 1s is invisible latency at ~zero CPU. A
-// var so tests tighten it.
+// var so tests tighten it — but read it ONLY in subscribeHooksTopic
+// (the handler goroutine): the follower reads its interval as a
+// parameter, so a test's t.Cleanup restore can never race a follower
+// goroutine that started late (see pitfalls.md).
 var hooksTopicPoll = time.Second
 
 // subscribeHooksTopic registers one SSE client under BOTH dimensions
@@ -78,7 +81,14 @@ func (f *WebFrontend) subscribeHooksTopic(conv ConvID, auditPath string) (ch cha
 	if fl == nil {
 		fl = &topicFollow{stop: make(chan struct{}), subs: make(map[int]chan string)}
 		f.follows[auditPath] = fl
-		go f.hooksFollowLoop(fo, fl)
+		// Read the interval HERE, not in the loop: this runs on the
+		// handler goroutine (joined by httptest.Server.Close before
+		// t.Cleanup restores the var), so both of a test's swap and
+		// restore are happens-before-ordered against this read. The
+		// spawned goroutine itself may outlive the handler with no
+		// ordering edge to the cleanup write.
+		poll := hooksTopicPoll
+		go f.hooksFollowLoop(fo, fl, poll)
 	}
 	fl.subs[id] = tch
 
@@ -89,8 +99,10 @@ func (f *WebFrontend) subscribeHooksTopic(conv ConvID, auditPath string) (ch cha
 // same lifecycle contract as followLoop: exits when the last
 // subscriber releases the follow, stops nothing else, pushFollow is
 // best-effort. Each poll's lines go out verbatim (see file header).
-func (f *WebFrontend) hooksFollowLoop(fo *hooksconfig.AuditFollower, fl *topicFollow) {
-	tick := time.NewTicker(hooksTopicPoll)
+// poll arrives as a parameter (captured by the handler goroutine at
+// spawn time) — this goroutine never reads the package var.
+func (f *WebFrontend) hooksFollowLoop(fo *hooksconfig.AuditFollower, fl *topicFollow, poll time.Duration) {
+	tick := time.NewTicker(poll)
 	defer tick.Stop()
 	for {
 		select {
