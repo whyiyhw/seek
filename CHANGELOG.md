@@ -34,7 +34,7 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_2lbcck：bridge·M-B2：skilldistill.ConvertToSkill + ⚡ review s 全状态机 + 测试
 - c_eyuxqm：MCP-D4：eval 三臂对照（A1 无 semble / A2 有无引导 / A3 全开）+ mcp_calls metric + Phase 1 判定数据
 - c_clip4i：eval 隔离钉死：run.sh 强制 SEEK_HOME 沙盒 + 无人值守真 key 禁用规矩落文
-- c_cjewsn：v8·R2：独立 verifier——done_when 断言的异会话裁判（第二波首卡） 背景：v8.md §9.3 拍板第二波首卡（2026-11-18 §9.4 止损线读数已回填，随时开工）。堵点数据（§9.1 基线，c_lmrp73 2026-11-18 回填）：验证存疑率 25.0%（28/112，与全仓 24.3% 交叉验证一致）、人审分钟中位 113′/均值 328′、待决总停留 218.7h（≈117′/验证卡）、>4h 停留 11 例——R2 若把存疑率打下来，R3（本地收件箱）按 §9.3 缓开条款同口径复测再判。verifier 形态（§5）：全新上下文独立会话，跑测试、读 diff、对照任务条件，只下结论不合并。硬约束（§3 I1 + §8 行 76 ❌ 条）：verifier/评估/壳自身配置不得放在 core 写得到的地方。咬合点：v0.12.1 propose 已落 done_when（1-12 条可对照断言，计划快照 §Done When 节）与 reviewed_by 字段——正是 verifier 的输入材料与落位；R1（c_vunyoz，done）Outcome 已有证据字段（token/成本+diffstat），排期表「R2 依赖 R1」已就位。与 butler drive 验证车道分层：那是治理层合并闸（verdict 四值分诊），R2 是 seek 自进化闭环的内环裁判件（autopilot 任务完成判定）；本卡不做 butler 侧接线与跨系统复用。 任务：①素材定位先行：定位 §5 所指历史事故「子代理写进主树、测试全绿」——查 docs/pitfalls.md（249 条）、butler 事件台账、git 历史；候选 pitfalls.md:104（W3.2 subagents topic 跨项目泄漏、既有测试全绿因全是单项目）形状相近但不确认，找到确切事故做成回归用例，确认找不到则以最接近的 pitfall 条为素材并在卡面写明依据；②verifier 实现：独立会话新上下文，输入=plan 的 done_when 断言清单+diff+可跑测试命令，输出=verdict（逐断言给对照材料与结论，总判 pass/fail/存疑）；verdict 值域与落位自定但须写明设计理由（若与 butler 四值对齐须说明）；③配置位置按 §8 ❌ 条款：verifier 提示词/配置不得放 core 写得到的地方（编译期常量/独立路径/其它，选型写明理由），并有测试钉死「core 会话写不到」；④verdict 落 R1 证据字段面（Outcome/Report），使 §9.1 口径（存疑率/人审分钟）可复测；⑤回归用例=过关标准（§5）：verifier 对「子代理写进主树、测试全绿」形态必须判不通过——不能被测试全绿骗过。 验收：①回归用例过关：fixture 化、车道内可跑，verifier 判不通过且有机械证据；②done_when 断言逐条对照有机械证据（哪条断言、对照了什么、结论），非散文总判，{车道可跑：go test 对应用例}；③配置位置符合 §8：core 写不到 + 测试钉死，{车道可跑：go test}；④eval 隔离继承（§9.0）：verifier 会话经 eval/run.sh 车道同样 hermetic（SEEK_HOME 沙盒），无人值守假 key，verifier 跑真测试命令的执行目录与权限面写明，{车道可跑：scripts/eval-home-isolation-test.sh 口径核对}；⑤go test ./... 绿 + go vet 无输出，新增自测脚本挂 selftest 入口并写明跑法；⑥机制预算答问：verifier 触发面（每次任务完成=按需会话，非常驻循环？）/成本/冷热逐条答，并答「退役或归档哪条旧机制」；⑦架构页同步义务：seek 仓功能卡，不触 butler 的 internal/cron、internal/drive、常驻设施表或部署形态，写明无需同步（或注明理由）。 实测一律沙盒（SEEK_HOME 临时目录）；真 key 零使用（§9.0 无人值守规矩）。预告：R2 合并后按 §9.1 同口径复测，决定 R3 开不开；第二波结束复测一次过率/人审分钟两锚点（§9.4）。
+- c_cjewsn：v8·R2：独立 verifier——done_when 断言的异会话裁判（第二波首卡）（2026-11-19）
 - c_4msvmv：bridge·M-B3：🛠 review s 直写 project 级 + 提示行更新 + 测试
 - c_zdkwoa：web 对齐 dsh·总纲：feature-web-frontend.md 增补 W5 计划与 size 预算分配
 - c_ffzic2：eval 测试调用切换 OpenCode Go 套餐 DeepSeek（deepseek-v4.1-flash）——批量/无人值守不吃计量真 key
@@ -42,12 +42,12 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_254zzz：transcript-stats 离线分析器 + 历史效率基线报告：重复率/翻页率/read 重读落 eval/
 - c_ennnwa：eval v2 E1：--rounds 多轮跑（轮次聚合 + 崩溃分母）+ expect.json min_pass_rate 标量界（界前缀扫描排除）+ eval-rounds-test.sh 自测
 - c_ums2k4：bridge·M-B5：收尾——AGENTS.md skill 段一行注记 + pitfalls + v1.md 勘误核对
-- c_idisqf：/compact 溢出死锁救援：compact 自身装不进剩余预算时的降级路径 背景：pitfalls.md:767——grep 宽 pattern 死锁的字节顶已修，但「compact 的 pre-prompt 自身装不进剩余上下文预算 → 硬死锁、无救援」的通用形状未收。 任务：①复现测试：fixture 构造超限上下文证明死锁形状（超时/挂起可观测）；②降级路径设计+实现：compact 装不下时改用最小救援（截断保尾/丢弃最旧工具结果等，选型写明理由）；③正常路径字节零变化（前缀缓存纪律）。 验收：①复现测试由死锁变可完成；②正常路径字节不变守护测试；③go test -race 绿（含超时守护）；④pitfalls.md 更新；⑤机制预算答问；⑥架构页不适用。沙盒。
-- c_3mny65：main.go 减重第二刀：planBridge 与 subagent glue 各拆一文件（纯搬移） 背景：v0.12.1 第一刀 envgate.go 口径（CHANGELOG.md:13：纯搬移、零行为变化、CLI 表面逐字节不变）。main.go 现 4330 行，本卡拆两块：planBridge（main.go:196-463）与 subagent glue/routes/runner（:458-816）各成一文件；run() 主体、ACP backend、provider 构建等后续刀各自开卡（本卡不做，防单卡过载）。 任务：①两块各拆一文件，纯搬移；②「每版一刀」纪律（AGENTS.md seek 仓）本卡即 v0.12.x 的一刀，卡面注明。 验收：①diff 纯搬移可核（函数体零改动，git diff -M rename 检出）；②go test -race ./... 全绿 + go vet 干净；③CLI 表面不变（既有守护测试引用或补 flags 快照测试）；④机制预算：纯搬移零新机制（写明）；⑤架构页不适用。沙盒。
+- c_idisqf：/compact 溢出死锁救援：compact 自身装不进剩余预算时的降级路径（2026-11-19）
+- c_3mny65：main.go 减重第二刀：planBridge 与 subagent glue 各拆一文件（纯搬移）（2026-11-20）
 - c_56yrcj：web 对齐 dsh·附件上传（拖放/粘贴，图片走 modelcap 二线车道）
 - c_554rlg：减法卡：pitfalls/CHANGELOG 派生态机械化——计数表改生成，CHANGELOG 条目不再抄整张卡面
-- c_ldu44u：价卡/模型目录漂移防御：verified-on 台账 + 核价巡检脚本（六条同族坑收口） 背景：docs/pitfalls.md 六条同族坑：退役 id 静默应答价卡错 4.4 倍（:638）、别名日落孤儿引用（:617、:574）、跨币种幻影差价（:645）、工具族价格离开价格页（:652）、峰谷窗口翻转（:624）——全部零运行时信号，核价靠人肉记。 任务：①pricing 静态表加 verified-on 台账字段（每模型：核价日期/来源 URL/币种）；②scripts/price-audit.sh：扫台账过期（>90 天）与孤儿（代码引用台账外模型 id）两检查，输出报告不拦构建；③巡检人工触发不进 cron（机制预算写明理由）。 验收：①fixture：过期/孤儿/正常三态各一断言；②现网真实价目只读跑一次，报告落 docs/（只读零写入）；③脚本零登记自动进 selftest；④机制预算答「退役或归档哪条旧机制」；⑤架构页不适用。沙盒。
-- c_3acz3q：v8·U1 后继：内核依赖八违例逐条定性——倒置/搬移/误报，修订内核清单 背景：v8.md:133（§9.3 U3 条款）——「U1 的 8 违例（tools/{edit,read,write}→fsobserve×3、tools/bash→{bgjob,childenv}、pkg/agent→{hooks,llm}，内核现读 10541 LOC）先逐条定性，清单修订后外移才有靶子」。本卡是清单修订分析卡，不是 U3 外移本体（U3 未开、拍板不动内核）。 任务：①跑 scripts/kernel-deps.sh 取现读数（与 10541 LOC 对比）；②八违例逐条定性：倒置（依赖方向错）/搬移候选（该挪）/误报（合理依赖），各给调用点行号依据；③v8.md §3 内核清单按定性修订（「U1 出数后修订」占位兑现）；④误报类写判定理由防将来反复。 验收：①八条全定性、每条有调用点行号；②内核清单修订 diff 落 v8.md；③kernel-deps.sh 读数复跑一致；④机制预算：分析卡零新机制；⑤架构页不触 butler 写明。git 只读 + 文档改，沙盒。
+- c_ldu44u：价卡/模型目录漂移防御：verified-on 台账 + 核价巡检脚本（六条同族坑收口）（2026-11-20）
+- c_3acz3q：v8·U1 后继：内核依赖八违例逐条定性——倒置/搬移/误报，修订内核清单（2026-11-20）
 - c_3mryc3：docs/prd 超预算 25293B 处置：盘点→归档/裁剪方案→verify-doc-budgets 收绿（c_554rlg 交接③）
 - c_kwiajf：信号：验证车道跑不成无头 manual 脚本——selftest 排除表理由过时（等 Enter 已不成立），c_txz6vz 验证停摆卡 W5 串行链
 - c_y2akdi：Files API 观测补口：page_count 缺失的计费兜底 + 同文件重复解析差异自检
@@ -55,3 +55,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_oyp2qf：web 对齐 dsh·顶栏 ContextMeter（上下文余量/车道显示/断线重连灯）
 - c_yhpfsp：pitfalls 台账分流 triage：255 live / 0 absorbed——一轮「坑→修复卡/eval/吸收」全量分流
 - c_4doebx：web 对齐 dsh·子代理面板升级（/rpc 挂 subagent/*，收口 inspect-rpc #12）
+- c_nqvbdu：CHANGELOG 裁剪清单消费：三条机器写超长条目按 notes-changelog-trim-2026-11-20 清单裁剪
