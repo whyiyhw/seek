@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**267 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**268 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -41,7 +41,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Hook / memory | 7 |
 | Skill distill (auto path) | 1 |
 | TUI / terminal | 29 |
-| Agent loop | 17 |
+| Agent loop | 18 |
 | DeepSeek API | 24 |
 | Go language | 12 |
 | Tooling / environment | 24 |
@@ -498,6 +498,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
 - **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
 - **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+
+### /compact's own rescue call cannot fit an overflowed context — the recovery path was the deadlock
+- **Saw**: the general shape of the grep-deadlock entry below (§Tooling): once the history overflows the model's window, `/compact` — the one command that exists to shrink the session — sends the FULL history to the summariser and gets the same `maximum context length` 400 every other prompt gets. Reproduced deterministically in `TestSummarise_OverflowRescue_Completes` (fixture ≈ 159K tokens vs a 128K window): the rescue request itself is rejected, so the session is unrecoverable in-app
+- **Why**: `Summarise` built its request from the untrimmed history by design — the summary should cover everything. But "everything" is exactly what no longer fits; a recovery path that requires the resource it is recovering cannot terminate. A second trap hides in the obvious fix: dropping the oldest MESSAGES one by one can strand a tool result without its assistant `tool_calls` parent — an orphaned tool message is a second kind of 400, so the "rescue" can resurrect the deadlock in a new shape
+- **Fix** (card c_idisqf): degradation path in `pkg/agent/compact_rescue.go`, wired into both lanes' Summarise. Pre-flight estimate (`estimateTokens`: ASCII ≈ 4 B/token, CJK ≈ 1 token/rune — conservative so Chinese-heavy histories err high) against `budget.Limit(model)` minus an output reserve; over budget → stage 1 caps oversized bodies in place (keep-head + constant marker; content truncation cannot break tool pairing), stage 2 drops the OLDEST messages (never system, never the summariser turn), skipping cut points that would orphan a tool result. Elision note appended to the summariser prompt so the briefing states what it does NOT cover. Belt-and-braces: a loose `isContextOverflowError` match triggers ONE reactive retry at half budget for estimator drift. Fitting histories pass through the identical slice — zero byte change (prefix-cache discipline; `TestSummarise_NormalPath_BytesUnchanged` guards both lanes)
+- **Lesson**: every recovery path must be sized to run in the failure state it recovers — ask "does the rescue itself fit the budget it is rescuing?" at design time. And when trimming conversation history, the cut unit must respect wire invariants (tool_call/tool_result pairing), not just token counts: prefer truncating CONTENT over dropping structural messages, and when dropping messages never let a tool result outlive its parent
+- **Refs**: `pkg/agent/compact_rescue.go`, `pkg/agent/agent.go:Summarise`/`summariseLLM`, tests `pkg/agent/compact_rescue_test.go`; sibling entry §Tooling "Grep tool with broad pattern can deadlock" (the byte-cap half of this fix)
 
 ## DeepSeek API
 

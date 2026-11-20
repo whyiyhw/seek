@@ -36,3 +36,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_254zzz：transcript-stats 离线分析器 + 历史效率基线报告：重复率/翻页率/read 重读落 eval/
 - c_ennnwa：eval v2 E1：--rounds 多轮跑（轮次聚合 + 崩溃分母）+ expect.json min_pass_rate 标量界（界前缀扫描排除）+ eval-rounds-test.sh 自测
 - c_ums2k4：bridge·M-B5：收尾——AGENTS.md skill 段一行注记 + pitfalls + v1.md 勘误核对
+- c_idisqf：/compact 溢出死锁救援：compact 自身装不进剩余预算时的降级路径 背景：pitfalls.md:767——grep 宽 pattern 死锁的字节顶已修，但「compact 的 pre-prompt 自身装不进剩余上下文预算 → 硬死锁、无救援」的通用形状未收。 任务：①复现测试：fixture 构造超限上下文证明死锁形状（超时/挂起可观测）；②降级路径设计+实现：compact 装不下时改用最小救援（截断保尾/丢弃最旧工具结果等，选型写明理由）；③正常路径字节零变化（前缀缓存纪律）。 验收：①复现测试由死锁变可完成；②正常路径字节不变守护测试；③go test -race 绿（含超时守护）；④pitfalls.md 更新；⑤机制预算答问；⑥架构页不适用。沙盒。
