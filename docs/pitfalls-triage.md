@@ -1,29 +1,29 @@
-# pitfalls 台账分流 triage（2026-11-20 返工版，卡 c_yhpfsp）
+# pitfalls 台账分流 triage（2026-11-20 返工+补齐版，卡 c_yhpfsp）
 
-> **一次性快照，非常驻机制。** 首版产出在 `777b4ff`（267 live）；第一轮复核把锚点改到当时分支现状（270 live）。本轮（返工）吸收 `git merge main`（main 的 `f05d23cc` 把台账 Status 节计数换成 `scripts/pitfalls-count.sh` 生成块、合并六组同前缀段、词条增至 277）：270 条旧行去向按**完整标题**继承，main 新增 7 条逐条人判补齐，行号与节列全部按合并后文件重算。
+> **一次性快照，非常驻机制。** 首版产出在 `777b4ff`（267 live）；第一轮复核把锚点改到当时分支现状（270 live）。返工轮吸收 `git merge main`（main 的 `f05d23cc` 把台账 Status 节计数换成 `scripts/pitfalls-count.sh` 生成块、合并六组同前缀段、词条增至 277）：270 条旧行去向按**完整标题**继承，main 新增 7 条逐条人判补齐。补齐轮再吸收 main 前进的 16 提交（词条 277→281）：277 条旧行去向仍按完整标题继承，main 新增 4 条逐条人判（均 W1，修复已随本合并落地）；FC-4 已被 main 的 c_y2akdi 修复，移出 §2 候选清单（FC 5→4）；行号与节列按补齐合并后文件重算。
 >
-> **快照锚定（防下次 main 再动整体漂移）**：本表锚 `docs/pitfalls.md` @ blob `de100ab233fad445e3efe5d1a80f90495f3be83c`（446 031 B，`grep -c '^### '` = 278 含模板 → **277 live**）。下轮若 `git hash-object docs/pitfalls.md` ≠ 此值，先按 §6 口径重算行号/节列（去向按标题继承），不要沿用本表行号。
+> **快照锚定（防下次 main 再动整体漂移）**：本表锚 `docs/pitfalls.md` @ blob `3eb99f30f44d0a411285a145a652b92a7885bd15`（453 994 B，`grep -c '^### '` = 282 含模板 → **281 live**）。下轮若 `git hash-object docs/pitfalls.md` ≠ 此值，先按 §6 口径重算行号/节列（去向按标题继承），不要沿用本表行号。
 >
-> 数据面：`bash scripts/pitfalls-count.sh --check` 绿（live=277 / absorbed=0 / 35 段）；`grep -c '^### \[已吸收\]'` = 0；`parse_entries` TSV = 277 条。
+> 数据面：`bash scripts/pitfalls-count.sh --check` 绿（live=281 / absorbed=0 / 35 段）；`grep -c '^### \[已吸收\]'` = 0；`parse_entries` TSV = 281 条。
 
 ## 0. 结论速览（验收三数，均可机械复核）
 
 | 项 | 值 | 复核法 |
 |---|---|:---|
-| **live（分流后）** | **277** | `bash scripts/pitfalls-count.sh --check` → live=277；§5 表行数 = 277 |
+| **live（分流后）** | **281** | `bash scripts/pitfalls-count.sh --check` → live=281；§5 表行数 = 281 |
 | **absorbed** | **0 条硬候补**（另有 2 条边缘候补留下次 archive pass 人判，§4） | 逐条按台账 Status 节标记规则复查「主题是否被取代且仍会走偏」 |
-| **修复卡候选（本卡不开卡）** | **5** | §2，每条带本轮实测证据 + 当前行号 |
+| **修复卡候选（本卡不开卡）** | **4** | §2，每条带实测证据 + 当前行号（FC-4 已在 main 修复，移出） |
 
-其余去向：eval 已覆盖 **13** · eval 候选（未孵化）**2** · 留观 **257**。§5 表内逐行统计与上表同源：
+其余去向：eval 已覆盖 **13** · eval 候选（未孵化）**2** · 留观 **262**。§5 表内逐行统计与上表同源：
 
 ```
-FC 5 · EC 2 · EV 13 · W1 239 · W1n 6 · W2 10 · W3 2  = 277
-留观 = 277 − 5(FC) − 2(EC) − 13(EV) = 257 = 239 + 6 + 10 + 2  ✓
+FC 4 · EC 2 · EV 13 · W1 243 · W1n 7 · W2 10 · W3 2  = 281
+留观 = 281 − 4(FC) − 2(EC) − 13(EV) = 262 = 243 + 7 + 10 + 2  ✓
 ```
 
 ## 1. 数据面、落盘选型与幂等
 
-排序产出：`scripts/pitfall-to-eval.sh` 的 `parse_entries` → 277 条，score = 模型行为可能性启发式（标题 / Fix / Lesson 的 behavioural 信号加权和）。四条去向的判据：
+排序产出：`scripts/pitfall-to-eval.sh` 的 `parse_entries` → 281 条，score = 模型行为可能性启发式（标题 / Fix / Lesson 的 behavioural 信号加权和）。四条去向的判据：
 
 | 去向 | 含义 | 判据 |
 |---|---|---|
@@ -34,7 +34,7 @@ FC 5 · EC 2 · EV 13 · W1 239 · W1n 6 · W2 10 · W3 2  = 277
 
 **为什么落独立文件 `docs/pitfalls-triage.md` 而非台账内注记**（选型沿用首版，理由本轮复核仍成立）：
 
-1. `pitfalls.md` 是每会话被 agent 读的活文档（append-only 记新坑；现 446 031 B，超 `docs/budget.json` 预算 `327000` 约 119 KB），逐条插入注记会让体量再近翻倍，且与既有「Status: live vs absorbed」节职责重叠；
+1. `pitfalls.md` 是每会话被 agent 读的活文档（append-only 记新坑；现 453 994 B，超 `docs/budget.json` 预算 `327000` 约 127 KB），逐条插入注记会让体量再近翻倍，且与既有「Status: live vs absorbed」节职责重叠；
 2. 本仓纪律（AGENTS.md「Reconstruct state from the transcript」）：**一次性分析快照不是常驻状态**，不镜像进活文档——快照落独立文件、标注源与生成口径，下轮 triage / archive pass 整体重生成；
 3. absorbed 的正式标记（`### [已吸收]` + 尾注）与搬移是 **archive pass 的职责**（规则在台账 Status 节「Marking rule」）；本 triage 只提候选，**不改任何词条正文**。
 
@@ -48,26 +48,27 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 
 | 口径 | 读数 | 结论 |
 |---|---:|---|
-| `grep -c '^### '` − 模板 1 | 277 | 机械计数 |
-| `bash scripts/pitfalls-count.sh --check` | live=277 · absorbed=0 · 35 段 | ✓（exit 0） |
-| 生成块 Per-section 表 35 行逐行合计 | 277 | ✓ |
-| 生成块 `**Total**` 单元格 | 277 | ✓ |
-| 四桶 rollup（TUI 34 · API 37 · Go 43 · 其余 163） | 277 | ✓ |
-| `parse_entries` TSV 行数 | 277 | ✓ |
+| `grep -c '^### '` − 模板 1 | 281 | 机械计数 |
+| `bash scripts/pitfalls-count.sh --check` | live=281 · absorbed=0 · 35 段 | ✓（exit 0） |
+| 生成块 Per-section 表 35 行逐行合计 | 281 | ✓ |
+| 生成块 `**Total**` 单元格 | 281 | ✓ |
+| 四桶 rollup（TUI 34 · API 39 · Go 43 · 其余 165） | 281 | ✓ |
+| `parse_entries` TSV 行数 | 281 | ✓ |
 
 卡面所引「255 live」是**首版之前**那张表的过期 Total（表内 42 行实合 263、Total 手写 255，本就差 8）。该表已由首版（`777b4ff`，255→267）、main 侧随后几刀（267→268→269→270）与 `f05d23cc` 的生成块（270→277，含六段合并后的逐段重计）逐次修正到位。CHANGELOG 原文（`CHANGELOG.md:12`）的「249 条、关闭 0 条」是 v0.12.1 写作时读数，同属历史计数，不是当前错误。
 
-## 2. 修复卡候选清单（5 张，供后续开卡直接引用；本卡不开卡）
+## 2. 修复卡候选清单（4 张，供后续开卡直接引用；本卡不开卡）
 
-行号 = **当前 `docs/pitfalls.md`** 的词条起始行；证据列 = 本轮（2026-11-20）逐条 `grep`/`read` 实测。
+行号 = **当前 `docs/pitfalls.md`** 的词条起始行；证据列 = 返工轮（2026-11-20）逐条 `grep`/`read` 实测，补齐轮合并（16 提交）后复测仍成立（三处锚位见各行，均未被 main 触及）。
 
 | # | 行 | 主题（建议卡名起点） | 现状证据（本轮实测） |
 |---|---|---|---|
 | FC-1 | :1133 | 无头车道 askFn 接线（print 模式 `propose` / `ask_user` 恒 `ErrNoCallback`） | **仍成立**：`cmd/seek/main.go:1742` `return runPrint(...)` 早于 :1759 `policy.SetAskFn` 与 :1783 `askPolicy.SetAskFn`（两者都在其后的 TUI 块内）；`runPrint` 函数体（:2069 起）内无 `SetAskFn`。词条自记「not fixed here (out of card scope)」。开卡方向：auto-deny + 「plan printed, rerun interactively」契约，或 stdin 回调 |
-| FC-2 | :1331 | thinking 工件 token 的 post-write 过滤 / CI 闸 | **仍成立**：`grep -rn 'end▁of▁thinking' --include=*.go --include=*.sh --include=*.yml` = **0 命中**（只有 `docs/pitfalls*.md` 提到）；词条 Fix 的两句（audit 写工具做 post-strip / 加 CI grep 闸）均未执行 |
-| FC-3 | :1873 | `skillmgr.Uninstall` 名字闸（同族暴露） | **仍成立**：`internal/skillmgr/skillmgr.go:478` `Uninstall` 直接把 `opts.Name` 拼进 `filepath.Join(userDir, …)` 后 `Stat` / `RemoveAll`，无 `ValidName` + `filepath.Rel` 闸；对照 `internal/agentsmgr/agentsmgr.go:163` 已有 `agenttypes.ValidName` 闸（兄弟同卡已修）。词条明记 sibling NOT fixed |
-| FC-4 | :2077 | Files API 按页计费恒 $0 | **仍成立（merge 后复核）**：上传响应无 `page_count`；`internal/fileroute/fileroute.go:158` `pricing.ParseCost(fo.PageCount)` 恒等于 `ParseCost(0)`，而 `internal/pricing/pricing.go:396` 对 `pages<=0` 直接返回 0（main 的 price-audit 卡 c_ldu44u 只搬了注释与核价台账，闸逻辑原样）。词条 Refs 的 PRD 路径已随归档改为 `docs/prd/archive/feature-deepseek-app-api.md`。留给「F5 价格核对卡」定夺：本地数页（仅 PDF 可行）或等 API 补字段 |
+| FC-2 | :1352 | thinking 工件 token 的 post-write 过滤 / CI 闸 | **仍成立**：`grep -rn 'end▁of▁thinking' --include=*.go --include=*.sh --include=*.yml` = **0 命中**（只有 `docs/pitfalls*.md` 提到）；词条 Fix 的两句（audit 写工具做 post-strip / 加 CI grep 闸）均未执行 |
+| FC-3 | :1894 | `skillmgr.Uninstall` 名字闸（同族暴露） | **仍成立**：`internal/skillmgr/skillmgr.go:478` `Uninstall` 直接把 `opts.Name` 拼进 `filepath.Join(userDir, …)` 后 `Stat` / `RemoveAll`，无 `ValidName` + `filepath.Rel` 闸；对照 `internal/agentsmgr/agentsmgr.go:163` 已有 `agenttypes.ValidName` 闸（兄弟同卡已修）。词条明记 sibling NOT fixed |
 | FC-5 | :629 | FIM 比率指标设计（v1.1 遗留） | **低优先，维持 deferred**：验收判据已由 PRD §6 降为绝对次数（`cmd/seek/benchmark.go:51` `FIMMinCalls`，取值见 :60 / :66），比率仅作可见性读数；开卡前提是拿到真实用量数据 |
+
+**FC-4（Files API 按页计费恒 $0，词条 :2105）已移出候选清单——已在 main 修复（c_y2akdi）**：`internal/pricing/pricing.go:428` 新增 `EstimateParsePages`（口径 ceil(bytes÷104857)、上限 1000 页，除数与上限均由 API 公布限制推出），`internal/fileroute/fileroute.go:218-225` 缺 `page_count` 时按 live billing path 估算计费并双面打旗（marker `~N pages·估` + `FilePart.PagesEstimated`），恒 $0 已消除。遗留：resolve 复传路径休眠不记费（API 补 `expires_at` 时需一并补 sink）——§5 该行改判 W1n。
 
 ## 3. eval 去向
 
@@ -81,13 +82,13 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 | :856 | grep 大 pattern 卡死 agent | `grep-refine-not-flood` |
 | :924 | 小模型 byte-mismatch 烧轮次 | `edit-unicode-read-first` |
 | :1118 | GLM 车道契约族 | `glm-lane-contract` |
-| :1345 | `limit` 参数面（曾 advertised 但不存在） | `read-whole-file` / `read-tail-fact` / `read-eof-blind` |
-| :1602 | git 重复子命令 | `git-subcommand-shape`（auto-fix 已在库：`TestExecute_DuplicateSubcommandArgAutoFixed`） |
-| :1657 | 提示层禁令 vs 工具描述（`--list` 榜首 22 分） | `git-multi-query-no-bash`（`bash_chains` / `bash_git_calls` 指标） |
-| :1671 | 拒绝 → 自恢复（Hint 语义） | `print-deny-semantics` |
-| :1678 | eval 提词耦合工具上限 | `tool-selection` / `bash-overreach` |
-| :1685 | `list_dir` 默认深度边界 | `bash-overreach`（重校后同族） |
-| :1787 | 面向模型的 id 形态 | `session-id-contract` |
+| :1366 | `limit` 参数面（曾 advertised 但不存在） | `read-whole-file` / `read-tail-fact` / `read-eof-blind` |
+| :1623 | git 重复子命令 | `git-subcommand-shape`（auto-fix 已在库：`TestExecute_DuplicateSubcommandArgAutoFixed`） |
+| :1678 | 提示层禁令 vs 工具描述（`--list` 榜首 22 分） | `git-multi-query-no-bash`（`bash_chains` / `bash_git_calls` 指标） |
+| :1692 | 拒绝 → 自恢复（Hint 语义） | `print-deny-semantics` |
+| :1699 | eval 提词耦合工具上限 | `tool-selection` / `bash-overreach` |
+| :1706 | `list_dir` 默认深度边界 | `bash-overreach`（重校后同族） |
+| :1808 | 面向模型的 id 形态 | `session-id-contract` |
 
 `--list` 的高分位 22 / 19 / 15 / 14 / 13 都能在上表找到对应 case —— 高分模型行为坑在 eval 侧的覆盖是实的。
 
@@ -95,20 +96,20 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 
 | # | 行 | score | case 草图 |
 |---|---|---:|---|
-| EC-1 | :1401 | 19（榜眼） | `skill-commit-scope-ask`：给「把这个 skill 装上」类任务，量测模型是否**先 `ask_user` 问 scope**（user / project）再调 `skill_commit`，而非默默选边。工具描述已写死「REQUIRED: ASK THE USER FIRST」（`internal/tools/skillinstall/skillinstall.go:159` / `:170`），这条 case 量的正是「描述能不能管住行为」 |
-| EC-2 | :2101 | 0 | 拒绝文案 = 指令面：收到带处置指引的 deny 后，模型照 Hint 换形 / 停手，而不是绕字符串匹配（v0.12.1 推送绕闸事故的模型侧回归）。构造需注意车道：闸在 autopilot / goal 车道，eval 需造 reachable 的等价 deny 面 |
+| EC-1 | :1422 | 19（榜眼） | `skill-commit-scope-ask`：给「把这个 skill 装上」类任务，量测模型是否**先 `ask_user` 问 scope**（user / project）再调 `skill_commit`，而非默默选边。工具描述已写死「REQUIRED: ASK THE USER FIRST」（`internal/tools/skillinstall/skillinstall.go:159` / `:170`），这条 case 量的正是「描述能不能管住行为」 |
+| EC-2 | :2129 | 0 | 拒绝文案 = 指令面：收到带处置指引的 deny 后，模型照 Hint 换形 / 停手，而不是绕字符串匹配（v0.12.1 推送绕闸事故的模型侧回归）。构造需注意车道：闸在 autopilot / goal 车道，eval 需造 reachable 的等价 deny 面 |
 
 `eval/cases/` 现 30 个目录，`grep -l 'scope-ask\|deny-hint'` = 0 —— 两条确实未孵化。
 
 ## 4. absorbed 候补（0 硬 / 2 边缘）
 
-- **硬候补 0**：按台账标记规则（「跟随今天会走偏」才算 absorbed）复查全部 277 条（270 条旧词条逐条复读 + main 新增 7 条逐条人判），未发现主题已被取代且仍会误导的词条。与 2026-11-19 archive pass 的「0 absorbed」**独立得出同一结论**，互证。
+- **硬候补 0**：按台账标记规则（「跟随今天会走偏」才算 absorbed）复查全部 277 条（270 条旧词条逐条复读 + main 新增 7 条逐条人判），未发现主题已被取代且仍会误导的词条。与 2026-11-19 archive pass 的「0 absorbed」**独立得出同一结论**，互证。补齐轮复查：main 新增 4 条（:1169 / :1176 / :1258 / :2054）修复均已随本合并落地（W1），不构成 absorbed 候补；硬候补仍 0。
 - **边缘 2 条**（表内 W1n，处置权归下次 archive pass 人判）：
   - `:649` `deepseek-reasoner` 无 `Thinking` 参数时静默降级——别名 2026-07-24 已死、`ModelChat` / `ModelReasoner` 常量已清扫（全仓 grep 0 命中），但 `ShouldEnableThinking` 的建议仍正确、不误导；
   - `:656` legacy 别名日落——「切默认」动作已执行完毕，词条属已执行历史。
   - 若判吸收：按规则搬 `pitfalls-archive.md` 时保留方法论指向——「同一日落类事故再发怎么办」活在 `:699`（别名日落静默孤儿引用）与 `:720`（retired id 仍应答、客户端价卡漂移）。
 
-## 5. 全量逐条表（277 行，验收①②）
+## 5. 全量逐条表（281 行，验收①②）
 
 表列：当前行号 · 节 · **完整标题**（不截断——标题是去向继承的键，截断会让下一轮重跑失去锚）· `--list` score · 去向 · 注。**W1 行**注记统一为 `—`（= 修复已落地、教训仍立，台账 :31 的 live 正常形态；W1 中带遗留注记的仍逐条写明）；**非 W1 行**逐条写明理由。
 
@@ -265,145 +266,149 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 | 1147 | LLM provider quirks (M6) | OpenCode Go: the model list needs no key, the base URL has three routable aliases, and each new lane re-invents the hardcoded-endpoint bug | 12 | W1 | — |
 | 1156 | LLM provider quirks (M6) | Vision capability was a one-id allow-list inside pkg/deepseek — every second-tier lane silently lost pasted images | 4 | W1 | — |
 | 1162 | LLM provider quirks (M6) | Switching eval off DeepSeek is a request-level claim — the compatible lane eats DEEPSEEK_API_KEY and config beats --base-url | 0 | W1 | — |
-| 1173 | Testing | t.Cleanup(chdir) after t.TempDir() breaks Windows TempDir removal | 0 | W1 | — |
-| 1180 | Testing | Two `time.Now()` calls in the same nanosecond make Equal-based timestamp assertions flaky | 1 | W1 | — |
-| 1187 | Testing | Asserting zero collisions over N random IDs is a birthday-paradox flake trap | 0 | W1 | — |
-| 1194 | Testing | SSE test hangs in `srv.Close()` when the response body only closes via `t.Cleanup` | 1 | W1 | — |
-| 1201 | Testing | Handler parked on `<-r.Context().Done()` with an unread request body hangs `srv.Close()` forever | 1 | W1 | — |
-| 1208 | Testing | `r.FormFile` can't see multipart FIELD ORDER — walk `MultipartReader` parts to assert it | 0 | W1 | — |
-| 1215 | Testing | Exec-based E2E binary can't live in any test's `t.TempDir()` — own its lifecycle in `TestMain` | 0 | W1 | — |
-| 1222 | Testing | Cache-hit tests against a fake backend prove the parser, not the behaviour | 6 | W1 | — |
-| 1229 | Testing | Injecting filesystem failure for cross-OS tests: chmod lies, file-as-dir is honest | 1 | W1 | — |
-| 1236 | Testing | `t.Setenv` inside a `t.Parallel` test panics — and the panic surfaces from a helper, not the test | 0 | W1 | 纪律仍生效（复核）：全仓 8 个测试文件、95 处引用 `persistSessionTestFixture` / `withSeekHome`（涉及 81 个 Test 函数），无一同时声明 `t.Parallel()`；`internal/tui/persist_test.go:68` 注释即此规矩 |
-| 1246 | Release / upgrade | `tui.VersionString()` is a formatted banner, not a raw module version | 1 | W1 | — |
-| 1252 | Release / upgrade | Atomic self-replace requires same-filesystem temp file | 0 | W1 | — |
-| 1258 | Release / upgrade | `<br>` inside `<code>` survives display but `textContent` drops it — copy-paste silently corrupts multi-line install commands | 2 | W1 | — |
-| 1269 | Site / landing page | Explicit clean-URL rewrites in `_redirects` loop forever on Cloudflare Pages | 0 | W1 | — |
-| 1276 | Site / landing page | Pixel "SEEK" banner read as "98%" on mobile — font-glyph block-art is not portable | 0 | W1 | — |
-| 1283 | Site / landing page | README hero SVG clipped on the right on GitHub — its monospace is wider than local Menlo | 0 | W1 | — |
-| 1303 | Go | Function-local type can't be referenced from another function | 0 | W1 | — |
-| 1310 | Go | RWMutex not reentrant — unexported helpers can't lock if caller holds lock | 0 | W1 | — |
-| 1317 | Go | Adding a slash command changes `/m` prefix-match test expectations | 0 | W1 | — |
-| 1324 | Go | Go slice aliasing: a returned struct with a slice field shares the backing array | 1 | W1 | — |
-| 1331 | Go | LLM thinking-mode artifact tokens leaked into generated source code | 4 | FC | post-write 过滤/CI 闸未建（见 §2 FC-2） |
-| 1338 | Go | Time-dependent sort key breaks prefix-cache byte-stability | 4 | W1 | — |
-| 1345 | Go | System prompt advertised non-existent `limit` parameter → resolved by accepting `limit` with max-50 enforcement | 15 | EV | 既有：read-whole-file / read-tail-fact / read-eof-blind |
-| 1352 | Go | Permission modes should be reserved for actual permission changes | 6 | W1 | — |
-| 1359 | Go | Paste-folding "any key to expand" UX shock → marker persists, resolved on Enter | 1 | W1 | — |
-| 1366 | Go | reviewBranchEntry Esc checked after streaming → Esc cancels stream, not branch entry | 0 | W1 | — |
-| 1373 | Go | `s[:n]` on a multi-byte UTF-8 string produces broken runes | 1 | W1 | — |
-| 1380 | Go | Custom color tokens (`--dim`) must be verified against WCAG AA in both themes | 0 | W1 | — |
-| 1387 | Go | SVG data-URI in CSS `content:` needs explicit width/height on pseudo-element | 0 | W1 | — |
-| 1394 | Go | Alt+Enter steer doesn't work on macOS terminals | 0 | W1 | — |
-| 1401 | Go | skill_commit must not silently pick a scope — the model has no signal for user intent | 19 | EC | 建议孵化 skill-commit-scope-ask（见 §3.2） |
-| 1408 | Go | Slash menu / status bar floated mid-screen on /clear, /help close, and other "banner gone" states | 2 | W1 | — |
-| 1415 | Go | Welcome banner pinned across the entire first turn → user input lands above it, screen "auto-clears" at TurnEnd | 6 | W1 | — |
-| 1422 | Go | Plan artifact write needs context BEFORE Sink.Approved fires — added a separate ContextReceiver interface | 0 | W1 | — |
-| 1429 | Go | `[plan: approved]` is a load-bearing wire-format prefix shared between propose and the plan reconstructor | 10 | W1 | — |
-| 1436 | Go | `/help` documented `?` hotkey not implemented; overlay lacked picker pattern | 0 | W1 | — |
-| 1443 | Go | Auto-opened picker key-passthrough allow-list is a second, out-of-sync registry | 0 | W1 | — |
-| 1450 | Go | Legacy conhost (blue PowerShell 5.x window) TUI streaming cascades (use Windows Terminal) | 0 | W2 | 支持面文档化：WT 为支持宿主，不做 per-emulator 适配 |
-| 1457 | Go | WM_SETTINGCHANGE broadcast blocks startup on busy Windows desktops | 0 | W1 | — |
-| 1464 | Go | Windows CRLF paste without bracketed mode submits after the first line | 0 | W1 | — |
-| 1471 | Go | Child process steals /dev/tty, Esc can't interrupt bash | 3 | W1 | — |
-| 1478 | Go | Setsid + pipe stdout = orphan grandchildren deadlock Wait() | 0 | W1 | — |
-| 1485 | Go | V4-Flash prediction returns empty content when Thinking isn't explicitly disabled | 5 | W1 | — |
-| 1492 | Go | Cross-compile failure: platform-specific syscall in non-tagged file | 0 | W1 | — |
-| 1499 | Go | WSL sudo escapes process-group kill, bash Wait() hangs past timeout | 2 | W1 | — |
-| 1506 | Go | ObserveEnqueue goroutine captures entry parameter by reference | 2 | W1 | — |
-| 1513 | Go | /proc/PID/children empty on CI — descendant walk returns nothing | 0 | W1 | — |
-| 1522 | Worktree / Windows | Worktree-isolated subagent edited the MAIN tree (isolation silently bypassed) | 0 | W1n | 修复已落地：permission.Resolve（permission.go:876）实证；词条 left-uncommitted 注记已过时 |
-| 1529 | Worktree / Windows | /worktrees panel empty on Windows despite seek-managed worktrees existing | 0 | W1 | — |
-| 1536 | Worktree / Windows | never-discarded worktree refs outlive every GC (six June zombies, 2026-11-14) | 0 | W1 | — |
-| 1545 | Sandbox / OS jail | Landlock create_ruleset returns EINVAL if you "handle" an access right the kernel's ABI doesn't know | 1 | W1 | — |
-| 1554 | Cron parser | `*` wildcard is not a number — must be handled before `strconv.Atoi` in field-item parser | 0 | W1 | — |
-| 1563 | Feishu / external API | Feishu IM API returns HTTP 200 on business errors — must parse body `code`, and `content` is double-encoded JSON | 3 | W1 | — |
-| 1572 | Subprocess | Go's `exec.Cmd` with nil `Env` hands the child EVERY parent variable — including the API key | 0 | W1 | — |
-| 1579 | Subprocess | StdoutPipe forbids concurrent Wait — kill-able line-streaming needs cmd.Stdout=io.Writer + io.Pipe | 0 | W1 | — |
-| 1586 | Subprocess | exec'ing an extensionless go build output fails on Windows as "not found" — CreateProcess needs the .exe name | 0 | W1 | — |
-| 1595 | Tool output | Head-only truncation of command output drops the verdict and produces a SILENT wrong answer | 6 | W1 | — |
-| 1602 | Tool output | git tool: a duplicated subcommand arg surfaces git's cryptic "ambiguous argument" error | 9 | EV | 既有：git-subcommand-shape；词条 uncommitted 注记已被 auto-fix 卡落地 |
-| 1611 | Tool decorators | A Tool decorator silently drops the optional interfaces the agent upcasts to | 1 | W1 | — |
-| 1618 | Tool decorators | A tool result appended on the success path vanishes whenever the tool also returns an error | 6 | W1 | — |
-| 1627 | CI / gates | A self-skipping test suite makes a missing CI secret look like a pass | 0 | W1 | — |
-| 1634 | CI / gates | A benign log line sharing a prefix with a fatal one turns every ordinary failure into a false diagnosis | 0 | W1 | — |
-| 1641 | CI / gates | Prose rules do not stop documentation accretion — the files that are read every session need a mechanical ceiling | 1 | W1 | — |
-| 1648 | CI / gates | Hand-maintained counts drift silently — generate the block, then make the drift a red light | 0 | W1 | — |
-| 1657 | Eval | Explicit bash bans in prompts underperform tool-description guidance — measured | 22 | EV | 既有：git-multi-query-no-bash（--list 榜首 22 分） |
-| 1664 | Eval | The per-turn `workflowReminder` taught `read→grep→read` while AGENTS.md and the book promised `grep→read` | 2 | W1 | — |
-| 1671 | Eval | `sysprompt.go` rule 5 ("denials → stop") discarded the Hint-carrying denial design | 6 | EV | 既有：print-deny-semantics |
-| 1678 | Eval | Eval prompts that demand verbatim quoting silently break when the target line crosses read's 1024-byte cap | 8 | EV | 既有：tool-selection / bash-overreach |
-| 1685 | Eval | Default-depth `list_dir` answers nothing about a tree — and its output never said so (bash-overreach alternation) | 7 | EV | 既有：bash-overreach（重校后同族） |
-| 1693 | Eval | mcp.json 的键写错层级会被 encoding/json 静默忽略——A2 评估臂可无声等同 A3 | 7 | W1 | — |
-| 1700 | Eval | Early eval result files are pretty-printed concatenated JSON, not one-per-line JSONL | 0 | W1 | — |
-| 1707 | Eval | expect.json 新增标量键撞上 `max_/min_/exact_` 界前缀扫描——每轮全红 "unknown metric" | 1 | W1 | — |
-| 1716 | Build tags / dependency isolation | A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...` | 0 | W1 | — |
-| 1725 | ACP / editor & headless lanes | Session cwd has TWO resolution conventions — anchoring only one leaves half the toolbox in the daemon's dir | 0 | W1 | — |
-| 1732 | ACP / editor & headless lanes | ACP session/load is an ORDER contract, and the id it loads must outlive the process | 10 | W1 | — |
-| 1739 | ACP / editor & headless lanes | Live state captured by closures must be MUTATED in place, not reassigned | 2 | W1 | — |
-| 1746 | ACP / editor & headless lanes | Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label | 11 | W1 | — |
-| 1753 | ACP / editor & headless lanes | Headless ACP can't choose its provider by flag — and a stray ANTHROPIC_API_KEY in the inherited shell wins the auto-detect | 0 | W1 | — |
-| 1760 | ACP / editor & headless lanes | ProjectID hashes the path STRING, not the directory — one physical dir via /tmp and /private/tmp is two projects | 1 | W2 | 决策 c_4c6dar：ProjectID 保持纯函数（canonical-path 契约），测试钉死 |
-| 1767 | ACP / editor & headless lanes | ACP configOptions: the dropdown exists only if session/new RETURNS it — and the select value is a bare string with no "type" field | 5 | W1 | — |
-| 1773 | ACP / editor & headless lanes | http.Server.Shutdown never returns while SSE handlers are mounted | 0 | W1 | — |
-| 1780 | ACP / editor & headless lanes | Subagent continuation must mint a NEW sub_sid — same-id resurrection corrupts the fold | 4 | W1 | — |
-| 1787 | ACP / editor & headless lanes | 面向模型的 id 参数必须接受模型实际看得到的形态——agent 脚注只露 sub-sid 短后缀 | 6 | EV | 既有：session-id-contract |
-| 1794 | ACP / editor & headless lanes | PRD said "sessions are archived per-project" — they are not; bucket by header CWD | 2 | W1 | — |
-| 1801 | ACP / editor & headless lanes | WebFrontend's cfgErr early-return left RPCRegistry() nil — pre-Run wiring panics on gated-out addresses | 3 | W1 | — |
-| 1808 | ACP / editor & headless lanes | ACP ToolCallContent has NO shape that validates on every SDK generation — diff blocks do; text blocks silently degrade | 7 | W1 | — |
-| 1817 | ACP / editor & headless lanes | Flipping loadSession on exposes every id ever handed out under the old scheme | 4 | W1 | — |
-| 1836 | Transcript analysis / offline metrics | read-argument key is schema-dependent; single-key parsing silently buckets the misses into a fake "one incredibly popular file" | 14 | W1 | — |
-| 1843 | Transcript analysis / offline metrics | Duplicate-fingerprint rate has two defensible denominators; quoting one as the other shifts the headline 3.6% ↔ 6.2% | 4 | W1 | — |
-| 1850 | Transcript analysis / offline metrics | A frozen baseline keeps asserting a shell-parameter shape that has since been changed | 4 | W1 | — |
-| 1857 | Transcript analysis / offline metrics | Committed metric snapshots must not embed absolute home paths | 4 | W1 | — |
-| 1866 | Typed agents / orchestration | Routing built-in agent types through the custom gate silently widens their toolset | 0 | W1 | — |
-| 1873 | Typed agents / orchestration | A delete path built by filepath.Join(user input) escapes scope — Create's Parse gate covers writes only | 0 | FC | skillmgr.Uninstall 名字闸缺失（见 §2 FC-3） |
-| 1882 | Git / merge | Concurrent drive merges on the SHARED main checkout silently erase uncommitted edits — do card work in a worktree | 0 | W1 | — |
-| 1889 | Git / merge | Merge commits shipped with leftover conflict markers (twice) | 0 | W1 | — |
-| 1896 | Git / merge | 纯搬移拆文件时 `git diff -M` 检不出 rename——一份源拆成两份，配对是一对多 | 0 | W1 | 方法论条目（Fix = 等值口径随拆分形态变，`c_3mny65` 已执行）；三个文件锚 `cmd/seek/main.go` / `planbridge.go` / `subagent_glue.go` 均在库 |
-| 1903 | Git / merge | 合并后追加的编号小节与 main 撞号——`### 9.5` 出现两次、`### 9.4` 消失 | 0 | W1 | — |
-| 1912 | Web frontend / asset plane | session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message | 0 | W1 | — |
-| 1919 | Web frontend / asset plane | macOS bash 3.2 under set -u mangles $VAR followed by a multi-byte character ("TMP\ufeff: unbound variable") | 0 | W1 | — |
-| 1926 | Web frontend / asset plane | `${VAR-default}` under set -u passes a set-but-EMPTY value through — the `:-` form is the house discipline; and mktemp'd $tmp must be canonicalised before string-matching it | 1 | W1 | — |
-| 1933 | Web frontend / asset plane | W1.2 Host allowlist must match the host PART only — literal bind-addr matching 403s the documented tailnet posture and every httptest hit | 0 | W1 | — |
-| 1939 | Web frontend / asset plane | A blanket "POST needs Origin" CSRF gate breaks the script face — the W1.2 write gate is credential-conditional | 0 | W1 | — |
-| 1946 | Web frontend / asset plane | A single-file page cannot ship bare CSP `default-src 'self'` — hash-pin the inline blocks instead (and the hash guards only element content) | 0 | W1 | — |
-| 1953 | Web frontend / asset plane | A gzip middleware must both PRESERVE http.Flusher and EXCLUDE text/event-stream — either miss kills SSE silently | 0 | W1 | — |
-| 1960 | Web frontend / asset plane | http.DefaultClient silently asks for gzip and strips Content-Encoding — the "identity path" test passed vacuously | 0 | W1 | — |
-| 1967 | Web frontend / asset plane | `mktemp -t name` is BSD-only — GNU coreutils reads the argument as a template and dies "too few X's" | 0 | W1 | — |
-| 1974 | Web frontend / asset plane | Asserting on SSE reply payloads with angle brackets fails — Go's json.Marshal HTML-escapes by default | 0 | W1 | — |
-| 1980 | Web frontend / asset plane | Store.Load returns raw un-repaired transcripts — orphan tool_calls reach transcript readers | 2 | W1 | — |
-| 1987 | Web frontend / asset plane | WebFrontend.Send is not a pure broadcast — it pops the conv's live run (the W1.4 close-out) | 0 | W1 | — |
-| 1994 | Web frontend / asset plane | getUserMedia needs a secure context — the documented tailnet `--tcp` forward cannot record push-to-talk | 0 | W1 | — |
-| 2000 | Web frontend / asset plane | strings.Contains on a RAW JSON frame can never match a Windows path or angle bracket — needles need the escaped spelling too | 0 | W1 | — |
-| 2006 | Web frontend / asset plane | go:embed serves the WORKING-TREE bytes — a Windows autocrlf checkout drifts a hash-pinned embedded asset | 0 | W1 | — |
-| 2012 | Web frontend / asset plane | web-gate 的 size 基线钉在「哪个工具链量的」上——±1.8MB 的 skew，棘轮要按 delta 加不要按绝对值重测 | 0 | W1 | — |
-| 2019 | Web frontend / asset plane | 页面新增一个静态资产，两个既有无头验收的 scripts=1 基线同刻全断——资产数变化要顺手改全仓 script-count 钉 | 0 | W1 | — |
-| 2026 | Web frontend / asset plane | 无外链闸的 `url\(` 分支会误杀 `readAsDataURL(` 调用——调用形状用拼串绕开并留注释 | 0 | W1 | — |
-| 2034 | Skill stats / --idle | `--idle` must read last_used from the UNfiltered aggregate — the window-filtered one reports every idle skill as "never" | 0 | W1 | — |
-| 2043 | MCP bridge / tool naming | 同一份 mcp.json 两次启动可能注册出不同的工具名 | 0 | W1 | — |
-| 2052 | Setup wizard / provider menu | providerOptions 扩行需三处同步——setup.go 的 envVarFor 镜像漏更会静默误触导向导 | 0 | W1 | — |
-| 2061 | MCP prompt section | JSON object key order is data — unmarshalling into a map shuffles prompt bytes | 10 | W1 | — |
-| 2070 | DeepSeek Files API / file_id | file_id 引用参与前缀缓存——文档按「解析后的文字」进 prompt，id 本身不是 token | 2 | W2 | 读数即交付：file_id 参与前缀缓存的实测结论，无代码改动 |
-| 2077 | DeepSeek Files API / file_id | POST /files 响应里没有 page_count / expires_at——按页计费与过期重传都拿不到数据 | 0 | FC | 按页计费恒 $0（见 §2 FC-4） |
-| 2084 | DeepSeek Files API / file_id | 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文 | 2 | W2 | 观察记录：服务端解析完整性未定论，烟测只断言第 1 页 |
-| 2092 | DeepSeek Files API / file_id | Adding a required field to a tool schema: sibling interface for the wiring, a declared cache bust for the cost | 10 | W1 | — |
-| 2101 | Lane guards / refusal wording | 闸的拒绝文案是给模型的指令面——写错场合等于教模型绕过 | 0 | EC | 建议孵化 deny-hint 处置回归（见 §3.2） |
-| 2110 | Distill review `s` / memory↔skill bridge | 模态内异步结果消息的 stale 判定不能只带位置参数——idx 回绕后旧消息会拼接进新回合 | 0 | W1 | — |
-| 2117 | Distill review `s` / memory↔skill bridge | trigram-Jaccard 阈值 fixture 手算两错同一处——先 sanity assert 再断行为 | 0 | W1 | — |
-| 2124 | Distill review `s` / memory↔skill bridge | converting 吞 `n`，且「状态位当世代号」在允许退场重发后失效——风险表缓解条款即契约 | 1 | W1 | — |
+| 1169 | LLM provider quirks (M6) | Second-tier file wire formats are PDF-only — Word/PPT pass ONLY on DeepSeek's Files API | 0 | W1 | — |
+| 1176 | LLM provider quirks (M6) | The new `modelcap.Files` gate was applied to the DeepSeek lane too — `deepseek-v4-pro` (and every freeform id) silently lost file input | 2 | W1 | — |
+| 1187 | Testing | t.Cleanup(chdir) after t.TempDir() breaks Windows TempDir removal | 0 | W1 | — |
+| 1194 | Testing | Two `time.Now()` calls in the same nanosecond make Equal-based timestamp assertions flaky | 1 | W1 | — |
+| 1201 | Testing | Asserting zero collisions over N random IDs is a birthday-paradox flake trap | 0 | W1 | — |
+| 1208 | Testing | SSE test hangs in `srv.Close()` when the response body only closes via `t.Cleanup` | 1 | W1 | — |
+| 1215 | Testing | Handler parked on `<-r.Context().Done()` with an unread request body hangs `srv.Close()` forever | 1 | W1 | — |
+| 1222 | Testing | `r.FormFile` can't see multipart FIELD ORDER — walk `MultipartReader` parts to assert it | 0 | W1 | — |
+| 1229 | Testing | Exec-based E2E binary can't live in any test's `t.TempDir()` — own its lifecycle in `TestMain` | 0 | W1 | — |
+| 1236 | Testing | Cache-hit tests against a fake backend prove the parser, not the behaviour | 6 | W1 | — |
+| 1243 | Testing | Injecting filesystem failure for cross-OS tests: chmod lies, file-as-dir is honest | 1 | W1 | — |
+| 1250 | Testing | `t.Setenv` inside a `t.Parallel` test panics — and the panic surfaces from a helper, not the test | 0 | W1 | 纪律仍生效（复核）：全仓 8 个测试文件、95 处引用 `persistSessionTestFixture` / `withSeekHome`（涉及 81 个 Test 函数），无一同时声明 `t.Parallel()`；`internal/tui/persist_test.go:68` 注释即此规矩 |
+| 1258 | Testing | 折叠侧栏的宽度断言要等 CSS transition 落定，不能只等 class 翻面 | 0 | W1 | — |
+| 1267 | Release / upgrade | `tui.VersionString()` is a formatted banner, not a raw module version | 1 | W1 | — |
+| 1273 | Release / upgrade | Atomic self-replace requires same-filesystem temp file | 0 | W1 | — |
+| 1279 | Release / upgrade | `<br>` inside `<code>` survives display but `textContent` drops it — copy-paste silently corrupts multi-line install commands | 2 | W1 | — |
+| 1290 | Site / landing page | Explicit clean-URL rewrites in `_redirects` loop forever on Cloudflare Pages | 0 | W1 | — |
+| 1297 | Site / landing page | Pixel "SEEK" banner read as "98%" on mobile — font-glyph block-art is not portable | 0 | W1 | — |
+| 1304 | Site / landing page | README hero SVG clipped on the right on GitHub — its monospace is wider than local Menlo | 0 | W1 | — |
+| 1324 | Go | Function-local type can't be referenced from another function | 0 | W1 | — |
+| 1331 | Go | RWMutex not reentrant — unexported helpers can't lock if caller holds lock | 0 | W1 | — |
+| 1338 | Go | Adding a slash command changes `/m` prefix-match test expectations | 0 | W1 | — |
+| 1345 | Go | Go slice aliasing: a returned struct with a slice field shares the backing array | 1 | W1 | — |
+| 1352 | Go | LLM thinking-mode artifact tokens leaked into generated source code | 4 | FC | post-write 过滤/CI 闸未建（见 §2 FC-2） |
+| 1359 | Go | Time-dependent sort key breaks prefix-cache byte-stability | 4 | W1 | — |
+| 1366 | Go | System prompt advertised non-existent `limit` parameter → resolved by accepting `limit` with max-50 enforcement | 15 | EV | 既有：read-whole-file / read-tail-fact / read-eof-blind |
+| 1373 | Go | Permission modes should be reserved for actual permission changes | 6 | W1 | — |
+| 1380 | Go | Paste-folding "any key to expand" UX shock → marker persists, resolved on Enter | 1 | W1 | — |
+| 1387 | Go | reviewBranchEntry Esc checked after streaming → Esc cancels stream, not branch entry | 0 | W1 | — |
+| 1394 | Go | `s[:n]` on a multi-byte UTF-8 string produces broken runes | 1 | W1 | — |
+| 1401 | Go | Custom color tokens (`--dim`) must be verified against WCAG AA in both themes | 0 | W1 | — |
+| 1408 | Go | SVG data-URI in CSS `content:` needs explicit width/height on pseudo-element | 0 | W1 | — |
+| 1415 | Go | Alt+Enter steer doesn't work on macOS terminals | 0 | W1 | — |
+| 1422 | Go | skill_commit must not silently pick a scope — the model has no signal for user intent | 19 | EC | 建议孵化 skill-commit-scope-ask（见 §3.2） |
+| 1429 | Go | Slash menu / status bar floated mid-screen on /clear, /help close, and other "banner gone" states | 2 | W1 | — |
+| 1436 | Go | Welcome banner pinned across the entire first turn → user input lands above it, screen "auto-clears" at TurnEnd | 6 | W1 | — |
+| 1443 | Go | Plan artifact write needs context BEFORE Sink.Approved fires — added a separate ContextReceiver interface | 0 | W1 | — |
+| 1450 | Go | `[plan: approved]` is a load-bearing wire-format prefix shared between propose and the plan reconstructor | 10 | W1 | — |
+| 1457 | Go | `/help` documented `?` hotkey not implemented; overlay lacked picker pattern | 0 | W1 | — |
+| 1464 | Go | Auto-opened picker key-passthrough allow-list is a second, out-of-sync registry | 0 | W1 | — |
+| 1471 | Go | Legacy conhost (blue PowerShell 5.x window) TUI streaming cascades (use Windows Terminal) | 0 | W2 | 支持面文档化：WT 为支持宿主，不做 per-emulator 适配 |
+| 1478 | Go | WM_SETTINGCHANGE broadcast blocks startup on busy Windows desktops | 0 | W1 | — |
+| 1485 | Go | Windows CRLF paste without bracketed mode submits after the first line | 0 | W1 | — |
+| 1492 | Go | Child process steals /dev/tty, Esc can't interrupt bash | 3 | W1 | — |
+| 1499 | Go | Setsid + pipe stdout = orphan grandchildren deadlock Wait() | 0 | W1 | — |
+| 1506 | Go | V4-Flash prediction returns empty content when Thinking isn't explicitly disabled | 5 | W1 | — |
+| 1513 | Go | Cross-compile failure: platform-specific syscall in non-tagged file | 0 | W1 | — |
+| 1520 | Go | WSL sudo escapes process-group kill, bash Wait() hangs past timeout | 2 | W1 | — |
+| 1527 | Go | ObserveEnqueue goroutine captures entry parameter by reference | 2 | W1 | — |
+| 1534 | Go | /proc/PID/children empty on CI — descendant walk returns nothing | 0 | W1 | — |
+| 1543 | Worktree / Windows | Worktree-isolated subagent edited the MAIN tree (isolation silently bypassed) | 0 | W1n | 修复已落地：permission.Resolve（permission.go:876）实证；词条 left-uncommitted 注记已过时 |
+| 1550 | Worktree / Windows | /worktrees panel empty on Windows despite seek-managed worktrees existing | 0 | W1 | — |
+| 1557 | Worktree / Windows | never-discarded worktree refs outlive every GC (six June zombies, 2026-11-14) | 0 | W1 | — |
+| 1566 | Sandbox / OS jail | Landlock create_ruleset returns EINVAL if you "handle" an access right the kernel's ABI doesn't know | 1 | W1 | — |
+| 1575 | Cron parser | `*` wildcard is not a number — must be handled before `strconv.Atoi` in field-item parser | 0 | W1 | — |
+| 1584 | Feishu / external API | Feishu IM API returns HTTP 200 on business errors — must parse body `code`, and `content` is double-encoded JSON | 3 | W1 | — |
+| 1593 | Subprocess | Go's `exec.Cmd` with nil `Env` hands the child EVERY parent variable — including the API key | 0 | W1 | — |
+| 1600 | Subprocess | StdoutPipe forbids concurrent Wait — kill-able line-streaming needs cmd.Stdout=io.Writer + io.Pipe | 0 | W1 | — |
+| 1607 | Subprocess | exec'ing an extensionless go build output fails on Windows as "not found" — CreateProcess needs the .exe name | 0 | W1 | — |
+| 1616 | Tool output | Head-only truncation of command output drops the verdict and produces a SILENT wrong answer | 6 | W1 | — |
+| 1623 | Tool output | git tool: a duplicated subcommand arg surfaces git's cryptic "ambiguous argument" error | 9 | EV | 既有：git-subcommand-shape；词条 uncommitted 注记已被 auto-fix 卡落地 |
+| 1632 | Tool decorators | A Tool decorator silently drops the optional interfaces the agent upcasts to | 1 | W1 | — |
+| 1639 | Tool decorators | A tool result appended on the success path vanishes whenever the tool also returns an error | 6 | W1 | — |
+| 1648 | CI / gates | A self-skipping test suite makes a missing CI secret look like a pass | 0 | W1 | — |
+| 1655 | CI / gates | A benign log line sharing a prefix with a fatal one turns every ordinary failure into a false diagnosis | 0 | W1 | — |
+| 1662 | CI / gates | Prose rules do not stop documentation accretion — the files that are read every session need a mechanical ceiling | 1 | W1 | — |
+| 1669 | CI / gates | Hand-maintained counts drift silently — generate the block, then make the drift a red light | 0 | W1 | — |
+| 1678 | Eval | Explicit bash bans in prompts underperform tool-description guidance — measured | 22 | EV | 既有：git-multi-query-no-bash（--list 榜首 22 分） |
+| 1685 | Eval | The per-turn `workflowReminder` taught `read→grep→read` while AGENTS.md and the book promised `grep→read` | 2 | W1 | — |
+| 1692 | Eval | `sysprompt.go` rule 5 ("denials → stop") discarded the Hint-carrying denial design | 6 | EV | 既有：print-deny-semantics |
+| 1699 | Eval | Eval prompts that demand verbatim quoting silently break when the target line crosses read's 1024-byte cap | 8 | EV | 既有：tool-selection / bash-overreach |
+| 1706 | Eval | Default-depth `list_dir` answers nothing about a tree — and its output never said so (bash-overreach alternation) | 7 | EV | 既有：bash-overreach（重校后同族） |
+| 1714 | Eval | mcp.json 的键写错层级会被 encoding/json 静默忽略——A2 评估臂可无声等同 A3 | 7 | W1 | — |
+| 1721 | Eval | Early eval result files are pretty-printed concatenated JSON, not one-per-line JSONL | 0 | W1 | — |
+| 1728 | Eval | expect.json 新增标量键撞上 `max_/min_/exact_` 界前缀扫描——每轮全红 "unknown metric" | 1 | W1 | — |
+| 1737 | Build tags / dependency isolation | A package whose .go files are ALL tag-excluded errors on direct reference, silently tolerated by `./...` | 0 | W1 | — |
+| 1746 | ACP / editor & headless lanes | Session cwd has TWO resolution conventions — anchoring only one leaves half the toolbox in the daemon's dir | 0 | W1 | — |
+| 1753 | ACP / editor & headless lanes | ACP session/load is an ORDER contract, and the id it loads must outlive the process | 10 | W1 | — |
+| 1760 | ACP / editor & headless lanes | Live state captured by closures must be MUTATED in place, not reassigned | 2 | W1 | — |
+| 1767 | ACP / editor & headless lanes | Late SetPref desyncs the permission gate from the baked-in sysprompt Mode label | 11 | W1 | — |
+| 1774 | ACP / editor & headless lanes | Headless ACP can't choose its provider by flag — and a stray ANTHROPIC_API_KEY in the inherited shell wins the auto-detect | 0 | W1 | — |
+| 1781 | ACP / editor & headless lanes | ProjectID hashes the path STRING, not the directory — one physical dir via /tmp and /private/tmp is two projects | 1 | W2 | 决策 c_4c6dar：ProjectID 保持纯函数（canonical-path 契约），测试钉死 |
+| 1788 | ACP / editor & headless lanes | ACP configOptions: the dropdown exists only if session/new RETURNS it — and the select value is a bare string with no "type" field | 5 | W1 | — |
+| 1794 | ACP / editor & headless lanes | http.Server.Shutdown never returns while SSE handlers are mounted | 0 | W1 | — |
+| 1801 | ACP / editor & headless lanes | Subagent continuation must mint a NEW sub_sid — same-id resurrection corrupts the fold | 4 | W1 | — |
+| 1808 | ACP / editor & headless lanes | 面向模型的 id 参数必须接受模型实际看得到的形态——agent 脚注只露 sub-sid 短后缀 | 6 | EV | 既有：session-id-contract |
+| 1815 | ACP / editor & headless lanes | PRD said "sessions are archived per-project" — they are not; bucket by header CWD | 2 | W1 | — |
+| 1822 | ACP / editor & headless lanes | WebFrontend's cfgErr early-return left RPCRegistry() nil — pre-Run wiring panics on gated-out addresses | 3 | W1 | — |
+| 1829 | ACP / editor & headless lanes | ACP ToolCallContent has NO shape that validates on every SDK generation — diff blocks do; text blocks silently degrade | 7 | W1 | — |
+| 1838 | ACP / editor & headless lanes | Flipping loadSession on exposes every id ever handed out under the old scheme | 4 | W1 | — |
+| 1857 | Transcript analysis / offline metrics | read-argument key is schema-dependent; single-key parsing silently buckets the misses into a fake "one incredibly popular file" | 14 | W1 | — |
+| 1864 | Transcript analysis / offline metrics | Duplicate-fingerprint rate has two defensible denominators; quoting one as the other shifts the headline 3.6% ↔ 6.2% | 4 | W1 | — |
+| 1871 | Transcript analysis / offline metrics | A frozen baseline keeps asserting a shell-parameter shape that has since been changed | 4 | W1 | — |
+| 1878 | Transcript analysis / offline metrics | Committed metric snapshots must not embed absolute home paths | 4 | W1 | — |
+| 1887 | Typed agents / orchestration | Routing built-in agent types through the custom gate silently widens their toolset | 0 | W1 | — |
+| 1894 | Typed agents / orchestration | A delete path built by filepath.Join(user input) escapes scope — Create's Parse gate covers writes only | 0 | FC | skillmgr.Uninstall 名字闸缺失（见 §2 FC-3） |
+| 1903 | Git / merge | Concurrent drive merges on the SHARED main checkout silently erase uncommitted edits — do card work in a worktree | 0 | W1 | — |
+| 1910 | Git / merge | Merge commits shipped with leftover conflict markers (twice) | 0 | W1 | — |
+| 1917 | Git / merge | 纯搬移拆文件时 `git diff -M` 检不出 rename——一份源拆成两份，配对是一对多 | 0 | W1 | 方法论条目（Fix = 等值口径随拆分形态变，`c_3mny65` 已执行）；三个文件锚 `cmd/seek/main.go` / `planbridge.go` / `subagent_glue.go` 均在库 |
+| 1924 | Git / merge | 合并后追加的编号小节与 main 撞号——`### 9.5` 出现两次、`### 9.4` 消失 | 0 | W1 | — |
+| 1933 | Web frontend / asset plane | session/messages elements arrive as objects after r.json() — JSON.parse on them throws and silently drops every message | 0 | W1 | — |
+| 1940 | Web frontend / asset plane | macOS bash 3.2 under set -u mangles $VAR followed by a multi-byte character ("TMP\ufeff: unbound variable") | 0 | W1 | — |
+| 1947 | Web frontend / asset plane | `${VAR-default}` under set -u passes a set-but-EMPTY value through — the `:-` form is the house discipline; and mktemp'd $tmp must be canonicalised before string-matching it | 1 | W1 | — |
+| 1954 | Web frontend / asset plane | W1.2 Host allowlist must match the host PART only — literal bind-addr matching 403s the documented tailnet posture and every httptest hit | 0 | W1 | — |
+| 1960 | Web frontend / asset plane | A blanket "POST needs Origin" CSRF gate breaks the script face — the W1.2 write gate is credential-conditional | 0 | W1 | — |
+| 1967 | Web frontend / asset plane | A single-file page cannot ship bare CSP `default-src 'self'` — hash-pin the inline blocks instead (and the hash guards only element content) | 0 | W1 | — |
+| 1974 | Web frontend / asset plane | A gzip middleware must both PRESERVE http.Flusher and EXCLUDE text/event-stream — either miss kills SSE silently | 0 | W1 | — |
+| 1981 | Web frontend / asset plane | http.DefaultClient silently asks for gzip and strips Content-Encoding — the "identity path" test passed vacuously | 0 | W1 | — |
+| 1988 | Web frontend / asset plane | `mktemp -t name` is BSD-only — GNU coreutils reads the argument as a template and dies "too few X's" | 0 | W1 | — |
+| 1995 | Web frontend / asset plane | Asserting on SSE reply payloads with angle brackets fails — Go's json.Marshal HTML-escapes by default | 0 | W1 | — |
+| 2001 | Web frontend / asset plane | Store.Load returns raw un-repaired transcripts — orphan tool_calls reach transcript readers | 2 | W1 | — |
+| 2008 | Web frontend / asset plane | WebFrontend.Send is not a pure broadcast — it pops the conv's live run (the W1.4 close-out) | 0 | W1 | — |
+| 2015 | Web frontend / asset plane | getUserMedia needs a secure context — the documented tailnet `--tcp` forward cannot record push-to-talk | 0 | W1 | — |
+| 2021 | Web frontend / asset plane | strings.Contains on a RAW JSON frame can never match a Windows path or angle bracket — needles need the escaped spelling too | 0 | W1 | — |
+| 2027 | Web frontend / asset plane | go:embed serves the WORKING-TREE bytes — a Windows autocrlf checkout drifts a hash-pinned embedded asset | 0 | W1 | — |
+| 2033 | Web frontend / asset plane | web-gate 的 size 基线钉在「哪个工具链量的」上——±1.8MB 的 skew，棘轮要按 delta 加不要按绝对值重测 | 0 | W1 | — |
+| 2040 | Web frontend / asset plane | 页面新增一个静态资产，两个既有无头验收的 scripts=1 基线同刻全断——资产数变化要顺手改全仓 script-count 钉 | 0 | W1 | — |
+| 2047 | Web frontend / asset plane | 无外链闸的 `url\(` 分支会误杀 `readAsDataURL(` 调用——调用形状用拼串绕开并留注释 | 0 | W1 | — |
+| 2054 | Web frontend / asset plane | 同一页面里第二份 `function loadSessions` 静默胜出——函数声明吊起，重复定义不报错只改行为 | 0 | W1 | — |
+| 2062 | Skill stats / --idle | `--idle` must read last_used from the UNfiltered aggregate — the window-filtered one reports every idle skill as "never" | 0 | W1 | — |
+| 2071 | MCP bridge / tool naming | 同一份 mcp.json 两次启动可能注册出不同的工具名 | 0 | W1 | — |
+| 2080 | Setup wizard / provider menu | providerOptions 扩行需三处同步——setup.go 的 envVarFor 镜像漏更会静默误触导向导 | 0 | W1 | — |
+| 2089 | MCP prompt section | JSON object key order is data — unmarshalling into a map shuffles prompt bytes | 10 | W1 | — |
+| 2098 | DeepSeek Files API / file_id | file_id 引用参与前缀缓存——文档按「解析后的文字」进 prompt，id 本身不是 token | 2 | W2 | 读数即交付：file_id 参与前缀缓存的实测结论，无代码改动 |
+| 2105 | DeepSeek Files API / file_id | POST /files 响应里没有 page_count / expires_at——按页计费与过期重传都拿不到数据 | 0 | W1n | 已在 main 修复（c_y2akdi）：缺 page_count 改记 `pricing.EstimateParsePages`（fileroute.go:220 live billing path + 双面打旗）；遗留：resolve 复传路径休眠不记费——已移出 §2 候选清单 |
+| 2112 | DeepSeek Files API / file_id | 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文 | 5 | W2 | 观察记录：服务端解析完整性未定论，烟测只断言第 1 页 |
+| 2120 | DeepSeek Files API / file_id | Adding a required field to a tool schema: sibling interface for the wiring, a declared cache bust for the cost | 10 | W1 | — |
+| 2129 | Lane guards / refusal wording | 闸的拒绝文案是给模型的指令面——写错场合等于教模型绕过 | 0 | EC | 建议孵化 deny-hint 处置回归（见 §3.2） |
+| 2138 | Distill review `s` / memory↔skill bridge | 模态内异步结果消息的 stale 判定不能只带位置参数——idx 回绕后旧消息会拼接进新回合 | 0 | W1 | — |
+| 2145 | Distill review `s` / memory↔skill bridge | trigram-Jaccard 阈值 fixture 手算两错同一处——先 sanity assert 再断行为 | 0 | W1 | — |
+| 2152 | Distill review `s` / memory↔skill bridge | converting 吞 `n`，且「状态位当世代号」在允许退场重发后失效——风险表缓解条款即契约 | 1 | W1 | — |
 <!-- triage-table:end -->
 
 ## 6. 再生成口径（幂等验证法，验收③）
 
 - 三个输入：①当前 `docs/pitfalls.md`（解析同 `scripts/pitfall-to-eval.sh` 的 `parse_entries`：`---` 之后、跳过 `Short symptom title` 模板、`### ` 起始行 = 行号锚）；②同一套 behavioural 打分（标题 + Fix + Lesson 的加权和，复制自该脚本）；③**本文件上一版的 §5 表**（按完整标题继承去向与注记）。
 - 输出：整体覆盖 §5 表区间；散文节（§0–§4、§7）人工维护，不在生成器里。
-- **幂等实测（本轮真跑过）**：把本文件的 §5 表读回 → 以「当前台账 + 读回的去向/注记」重算整表 → 写回后**再跑一遍** → 两次输出 `diff` 空：`277 行 / 逐字节相同（IDEMPOTENT: byte-identical）`。同一份 `pitfalls.md` 重跑永远得到同一张表：表按行号升序、无追加路径、无时间戳、无计数器。
+- **幂等实测（补齐轮重跑过）**：把本文件的 §5 表读回 → 以「当前台账 + 读回的去向/注记」重算整表 → 写回后**再跑一遍** → 两次输出 `diff` 空：`281 行 / 逐字节相同（IDEMPOTENT: byte-identical）`。同一份 `pitfalls.md` 重跑永远得到同一张表：表按行号升序、无追加路径、无时间戳、无计数器。
 - **可复核命令**（不新增仓内脚本，这里给一次性口径）：解析 = `awk`（行为同 `scripts/pitfall-to-eval.sh` 的 `parse_entries`：`---` 之后、跳过 `Short symptom title`、`### ` 起始行）；打分 = 同一段 awk 的 behavioural 加权；继承 = 按**完整标题**（去掉 `\|` 转义后精确匹配；重拼被管道符切开的标题列时**逐段保留内部空格**，只对整行做首尾 strip——本轮实测先撞过「转义管道后空格被 strip 吃掉」导致 1 条继承失败）。三段拼起来跑一遍，与 §5 表 `diff` 空即通过。
-- **锚点会漂、注记不会重**：台账新增词条使后续行号整体下移（首版→复核轮实测偏移 `+0 / +7 / +15 / +22`；复核轮→本轮 merge 后六组同段合并 + 7 条新增，全表行号整体重算）；漂移只影响行号列，去向与注记按标题继承，所以**重复执行不会产生第二条注记**。新词条进台账时继承会失败并打印未分流标题清单——那是「下一轮 triage 全量重生成」的预期入口，不是静默默认值（首版撞到 3 条 §7.1 C，本轮撞到 7 条 §7.5）。
-- 后续动作分工：FC 五张由后续开卡直接引用 §2 的行号 + 证据；absorbed 硬候补 0、边缘 2 条（`:649` / `:656`）由下次 archive pass 按台账 Status 节规则人判；EC 两条由 eval 维护者 `scripts/pitfall-to-eval.sh --make 1401` / `--make 2101` 孵化（README / prompt 草稿即起，`expect.json` 仍是人审闸）。
+- **锚点会漂、注记不会重**：台账新增词条使后续行号整体下移（首版→复核轮实测偏移 `+0 / +7 / +15 / +22`；复核轮→返工轮 merge 后六组同段合并 + 7 条新增；返工轮→补齐轮 merge 再 +4 条新增，全表行号整体重算）；漂移只影响行号列，去向与注记按标题继承，所以**重复执行不会产生第二条注记**。新词条进台账时继承会失败并打印未分流标题清单——那是「下一轮 triage 全量重生成」的预期入口，不是静默默认值（首版撞到 3 条 §7.1 C，返工轮撞到 7 条 §7.5，补齐轮撞到 4 条 §7.6）。
+- 后续动作分工：FC 四张由后续开卡直接引用 §2 的行号 + 证据；absorbed 硬候补 0、边缘 2 条（`:649` / `:656`）由下次 archive pass 按台账 Status 节规则人判；EC 两条由 eval 维护者 `scripts/pitfall-to-eval.sh --make 1422` / `--make 2129` 孵化（README / prompt 草稿即起，`expect.json` 仍是人审闸）。
 
-## 7. 自查记录（§7.1–7.4 = 复核轮记录；§7.5 = 返工轮（merge main 后）记录）
+## 7. 自查记录（§7.1–7.4 = 复核轮记录；§7.5 = 返工轮记录；§7.6 = 补齐轮记录）
 
 ### 7.1 已修正的偏差（复核轮）
 
@@ -456,3 +461,22 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 
 - `--list` 的输出把**段边界词条**（每段最后一条）标成下一个段的名（如 `:1081` Tooling 条被标 `LLM provider quirks (M6)`）——与首版 §7.1-D 的生成器缺陷同源；本表节列一律按「向上最近 `## `」自算，不受影响。`--list` 的 score/行号不受此缺陷影响（本轮以直接调用 `parse_entries` 的 TSV 为权威）。
 - 本轮生成器又踩一个自坑：重拼被 `\|` 切开的标题列时逐段 `.strip()`，把转义管道后的空格吃掉（`$x |c` ≠ `$x | c`），1 条继承失败——已修（逐段保留内部空格、整行首尾 strip），教训并入 §6 可复核命令段。连同 K 项（截断标题当 join key），两轮共两个「join key 必须无损」实例。
+
+### 7.6 补齐轮记录（用户 2026-11-20 拍板：补齐后立即合并，勿再等下一轮漂移）
+
+卡面五步全部执行：
+
+| # | 补齐指令 | 执行结果 |
+|---|---|---|
+| 1 | `git merge main`（预计仅 pitfalls.md 生成块小冲突，同上轮口径取 main 版） | ✅ 合并 16 提交，**实际零冲突**——上轮返工已把 pitfalls.md 整文件取 main 版，本分支自 merge-base（`ca2ba816`）起对它零改动（`git diff ca2ba816..HEAD -- docs/pitfalls.md` 为空），main 侧的生成块更新（277→281）直接快进，「取 main 版」的效果平凡达成。merge 后 `bash scripts/pitfalls-count.sh --check` = **OK（live=281 / absorbed=0 / 35 段，rollup TUI 34 · API 39 · Go 43 · 其余 165）** |
+| 2 | 4 条新词条人判去向 | ✅ 逐条人判 + 代码锚实测，均 **W1**：`Second-tier file wire formats are PDF-only`（:1169，`pkg/llm/llm.go:111/119/125` fileMediaTypes + Sendable 实测）· `modelcap.Files gate 也用于 DeepSeek lane`（:1176，`fileroute_test.go:256` `TestRoute_DeepSeekLaneIgnoresModelTable` 实测）· `折叠侧栏宽度断言 CSS transition`（:1258，`web-sessions-headless.mjs:222/328/338` 几何谓词实测）· `第二份 loadSessions 静默胜出`（:2054，`grep -c 'function loadSessions' webfrontend.html` = 1 + `webfrontend_test.go:433` `SESS_PAGE = 30` 钉实测） |
+| 3 | FC-4 移出候选清单、§2 改注「已在 main 修复（c_y2akdi）」 | ✅ §2 缩为 4 张 + 移出注记段（含遗留：resolve 复传路径休眠不记费）；§5 该行（:2105）改判 **W1n**。修复证据实测：`internal/pricing/pricing.go:428` `EstimateParsePages`（ceil(bytes÷104857)、上限 1000 页）+ `internal/fileroute/fileroute.go:218-225` live billing path 缺 `page_count` 即估算 + 双面打旗 |
+| 4 | §0 blob 锚更新为合并后新 blob，三数与 §5 表逐节同步 | ✅ 锚 `3eb99f30f44d0a411285a145a652b92a7885bd15`（453 994 B，`grep -c '^### '` = 282 含模板）；三数 **281 / 0（+2 边缘）/ 4**；分桶 `FC 4 · EC 2 · EV 13 · W1 243 · W1n 7 · W2 10 · W3 2` = 281；§1.1 六口径读数、§2/§3.1/§3.2 行号引用、§6 幂等读数与 `--make` 行号全部重算同步 |
+| 5 | 坑 8 归因（assets PDF）不阻塞本卡，随 c_bhtnvh 统一拍板 | ✅ 未动：`:2112`「同一份 PDF 的两次上传」维持 **W2 观察记录**原判原注；其 assets-PDF 配对归因不在本卡拍板，写回正文交接 c_bhtnvh |
+
+按标题继承的机械复核（补齐轮新增）：277 条旧标题 → 281 条新表，**added=4 / removed=0 / 变动=2**——变动仅 FC-4（FC→W1n，人判覆盖）与 `:2112` 的 score 2→5（c_y2akdi 扩写 Fix 后按 §6 口径从当前文件重算打分，新 Fix 文本含 transcript/prompt_tokens 行为信号词；去向与注记未动）。其余 275 条去向/注记/分数逐字节继承。
+
+顺带发现（记录，不改判）：
+
+- 生成器第三坑：§1 散文里**引用**的 marker 字符串（`` `<!-- triage-table:start -->` ``）会被朴素 `text.split(marker)` 撞上，把「§1 的提及」当「§5 的真表」切开——本轮首跑全量继承失败（277 条全部 UNTRIAGED）即此因。已修：定位按**整行 strip 后精确等于 marker**，与 K（截断 key）、管道空格并列为「快照生成器的三个自坑」；下轮若再生成，直接从 §6 口径里带上这条。
+- 本次 merge 零冲突印证上轮「整文件取 main」的选型：把快照类文件对本仓活文档的本地改动清零后，后续合并自然退化为 fast-forward 式吸收，不再需要人工解冲突。
