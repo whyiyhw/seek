@@ -78,9 +78,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **255** |
+| **Total** | **257** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 145.
 
 ---
 
