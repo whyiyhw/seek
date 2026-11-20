@@ -24,6 +24,14 @@
 #   SEEK_EVAL_RESULTS_DIR  — per-lane JSONL sink
 #   SEEK_EVAL_EXTRA_ARGS   — appended seek args (bare lane only)
 #
+# PROVIDER LANE: this script sets no SEEK_EVAL_PROVIDER* knobs, so both
+# lanes ride run.sh's DEFAULT lane — the OpenCode Go subscription's
+# deepseek-v4.1-flash since the 2026-11-20 user call (ablation runs are
+# batch by definition; they must not burn the metered key either).
+# Falling back to the metered key lane for an ablation run means
+# explicitly exporting SEEK_EVAL_PROVIDER=deepseek (a human decision —
+# see eval/README.md § "Provider lane").
+#
 # runner.sh cases: the bare lane only differs from full if the runner
 # forwards SEEK_EVAL_EXTRA_ARGS into its own invocations (run.sh passes
 # it through in the env contract; no existing runner reads it yet) —

@@ -28,7 +28,7 @@ import (
 // updates this pin IN THE SAME COMMIT:
 //
 //	shasum -a 256 internal/controlplane/webfrontend.html
-const webPageSHA256 = "b432319014f380d18a0634d3ee95811d2dc878263da7d14e7bed1cf56295e61f"
+const webPageSHA256 = "e5e8684f14c3393fb9f0950aed748f12d4196322d8638512048023d70161e0a4"
 
 func TestWeb_AssetHashPinned(t *testing.T) {
 	sum := sha256.Sum256(webPage)
@@ -66,7 +66,13 @@ func TestWeb_CSPHeader(t *testing.T) {
 		}
 	}
 	for _, m := range scriptBlockRE.FindAllSubmatchIndex(webPage, -1) {
-		sum := sha256.Sum256(webPage[m[2]:m[3]])
+		content := webPage[m[2]:m[3]]
+		// mirror cspHashTokens: external <script src> blocks carry no
+		// inline content — nothing to pin (the fetch rides 'self').
+		if len(bytes.TrimSpace(content)) == 0 {
+			continue
+		}
+		sum := sha256.Sum256(content)
 		want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 		if !toks[want] {
 			t.Errorf("inline <script> block hash %s missing from CSP %q — the policy and the served page disagree", want, csp)
@@ -132,6 +138,70 @@ func getRaw(t *testing.T, url, acceptEnc string) *http.Response {
 		t.Fatal(err)
 	}
 	return resp
+}
+
+// TestWeb_StaticAsset pins the W5 /static/ route (card c_x2au4t): the
+// markdown renderer rides the same CSP/gzip middleware stack as the
+// page, answers with the embedded bytes verbatim, and the flat-name
+// lookup refuses listings and traversal shapes.
+func TestWeb_StaticAsset(t *testing.T) {
+	fe, _, _ := newTestWeb(t)
+	srv := httptest.NewServer(fe.handler())
+	defer srv.Close()
+
+	want, err := webStatic.ReadFile("static/markdown.js")
+	if err != nil {
+		t.Fatal("embed missing static/markdown.js:", err)
+	}
+
+	// Served verbatim with the JS content type and the CSP stamp (the
+	// asset is same-origin, so 'self' admits it — no hash needed).
+	resp := getRaw(t, srv.URL+"/static/markdown.js", "")
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET /static/markdown.js = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/javascript; charset=utf-8" {
+		t.Errorf("Content-Type = %q, want application/javascript; charset=utf-8", ct)
+	}
+	if resp.Header.Get("Content-Security-Policy") == "" {
+		t.Error("static asset response carries no CSP — withCSP must wrap every route")
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("served asset = %d bytes, want the embedded %d verbatim", len(got), len(want))
+	}
+
+	// The transport covers the new asset too: asked-for gzip arrives
+	// compressed and round-trips.
+	zr := getRaw(t, srv.URL+"/static/markdown.js", "gzip")
+	defer zr.Body.Close()
+	if zr.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("Accept-Encoding: gzip on /static/markdown.js → Content-Encoding %q, want gzip", zr.Header.Get("Content-Encoding"))
+	}
+	dec, err := gzip.NewReader(zr.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(dec); err != nil {
+		t.Fatal("gunzipped asset does not parse:", err)
+	}
+
+	// Flat directory, exact names only: no listing, no unknown file,
+	// no traversal shape reaches the embed.
+	for _, bad := range []string{"/static/", "/static/nope.js", "/static/markdown.js/x", "/static/..%5Cwebfrontend.html"} {
+		r, err := http.Get(srv.URL + bad)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Body.Close()
+		if r.StatusCode == 200 {
+			t.Errorf("GET %s = 200, want a refusal (404/redirect to it)", bad)
+		}
+	}
 }
 
 func TestWeb_GzipPage(t *testing.T) {

@@ -65,8 +65,9 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
   开关（c_rewul5：ACP 车道 flag 全不解析，env 在 sysprompt 之前并进 `initialPref`）；
   paseo provider 块已接通并冒烟，butler drive `--provider seek` 可派单。**本卡
   （c_vv2mde）即车道首单**——worktree→干活→commit→`.butler-commit.md` 写回全流程
-  跑通即验收，之后纳入常规调度池。剩余 backlog：session 多路复用、`session/load`
-  恢复、MCP 透传（docs/guide-zed.md §5 表）。
+  跑通即验收，之后纳入常规调度池。剩余 backlog：session 多路复用、MCP 透传
+  （docs/guide-zed.md §5 表）；`session/load` 恢复已于 2026-11-19 落地
+  （`cmd/seek/acp_replay.go` + `acpBackend.LoadSession`，ACP 车道同时开始按 turn 落盘）。
 - **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
   eval 用例随每次 dogfood 失败持续扩容。
 - **治理**：c_hi3lv5 已拍板（改，#2977），实现卡 c_gk6cb2 在飞；paseo 两缺口卡

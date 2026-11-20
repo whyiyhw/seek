@@ -98,6 +98,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
+	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/internal/worktreecli"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -2352,7 +2353,15 @@ func run() error {
 	// from the startup lane (*model already carries the env pin / loaded
 	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model, openCatalogRows()))
+		return runACP(ctx, acpOptions{
+			ag:     ag,
+			vroute: newVisionRouter(abs),
+			froute: froute,
+			policy: policy,
+			menu:   acpModelMenu(*model, openCatalogRows()),
+			sess:   activeSession,
+			store:  store,
+		})
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -3077,8 +3086,10 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 	dec := autopilot.NewDeepSeekDecomposer(client, model)
 	// model is also the lane the worktree subagents run on (they
 	// inherit the parent session's), so the fleet prices each
-	// outcome's tokens with it (v8 柱 R R1).
-	fleet := autopilot.NewFleet(mgr, wtMgr, model)
+	// outcome's tokens with it (v8 柱 R R1). The same lane judges
+	// each completed task (v8 柱 R R2): the verifier is built here,
+	// on demand for this run — no resident anything.
+	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(client, model))
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
@@ -3102,6 +3113,14 @@ type acpBackend struct {
 	route  visionRouter     // feature-vision: submit-time image router
 	froute fileroute.Router // feature-deepseek-app-api F3: submit-time document router
 	policy *permission.Policy
+	// sess + store are the persistence pair behind session/load and the
+	// sessionId session/new hands out. nil/zero under --no-save, where
+	// loadSession is not advertised. sess is the live session POINTER
+	// main's closures (subagent parent-sid, x-opencode-session, the
+	// checkpoint manager) captured — LoadSession mutates it in place so
+	// those closures keep describing the conversation actually running.
+	sess  *session.Session
+	store *session.Store
 	// menu is the configOptions model select (nil ⇒ the client filters
 	// the dropdown away, pre-C behaviour). Built once at startup from
 	// the startup lane; SetConfigOption rewrites CurrentValue in place.
@@ -3113,7 +3132,8 @@ type acpBackend struct {
 	// source of truth for keys/endpoints/defaults.
 	laneFor func(provider string) (llm.Provider, *deepseek.Client, string, error)
 	// sessionID is the single live session ("one seek process = one
-	// session"); anchored by NewSession, checked by SetConfigOption.
+	// session"); anchored by NewSession / LoadSession, checked by
+	// SetConfigOption.
 	sessionID string
 }
 
@@ -3121,6 +3141,13 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 	return acp.InitializeResult{
 		ProtocolVersion: p.ProtocolVersion,
 		AgentCapabilities: acp.AgentCapabilities{
+			// loadSession is a promise that a sessionId survives the
+			// process, so it is only made when a transcript store exists
+			// (not under --no-save). ACP clients gate their whole
+			// persistence/continue UX on this one boolean: advertising it
+			// with nothing behind it turns "continue this conversation"
+			// into a hard error at the client.
+			LoadSession: b.store != nil && b.sess != nil,
 			// Advertise image so editors (Zed) offer image attachment;
 			// on a vision model the bytes attach natively, otherwise an
 			// in-band note tells the model to suggest switching.
@@ -3134,10 +3161,16 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // spawn seek without a cwd, so the project root only arrives here.
 // acp.AnchorSession chdirs the process AND re-anchors the shared
 // policy, so read/edit/write/bash (policy-anchored) and
-// git/grep/list_dir (process-anchored) all follow. The sessionId
-// becomes the project name (directory base) — the fixed "seek" id
-// pre-D1 carried no information. Empty cwd keeps the current
-// directory (Zed-equivalent, a behavioural no-op under Zed).
+// git/grep/list_dir (process-anchored) all follow.
+//
+// The returned sessionId is seek's DURABLE transcript id, not the
+// project name it used to be: ACP's own contract is that the id a
+// client gets here is what it later hands back to `session/load`
+// ("The ID of the session to load"), and paseo persists exactly this
+// value as its native session id. A project-name id could never be
+// loaded — it names no file and changes when the client opens a
+// different directory. With --no-save there is no durable id, so the
+// project name stays (and Initialize stops advertising loadSession).
 // Since C, the result also carries the model configOptions menu —
 // a non-nil menu is what makes ACP clients render the dropdown.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
@@ -3145,9 +3178,114 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 	if err != nil {
 		return acp.NewSessionResult{}, err
 	}
-	b.sessionID = anchor.Name
-	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s\n", anchor.Abs, anchor.ProjectID)
-	return acp.NewSessionResult{SessionID: anchor.Name, ConfigOptions: b.menu}, nil
+	id := anchor.Name
+	if b.sess != nil {
+		// One seek process = one live session, so a second session/new
+		// re-anchors the existing one rather than minting another. Keep
+		// the transcript's CWD honest when the anchor moved.
+		b.sess.CWD = anchor.Abs
+		if b.sess.ID != "" {
+			id = b.sess.ID
+		}
+	}
+	b.sessionID = id
+	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, id)
+	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu}, nil
+}
+
+// LoadSession resumes a stored session (session/load): load, re-anchor,
+// restore the lane and history, then replay the transcript as the
+// session/update sequence the client would have seen live.
+//
+// The live session pointer is MUTATED IN PLACE (`*b.sess = *loaded`)
+// rather than reassigned: main's closures — the subagent parent-sid, the
+// x-opencode-session id, the checkpoint manager — all captured the
+// original pointer, and reassigning would leave them describing the
+// previous conversation while the agent runs the loaded one.
+func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.SessionUpdate)) (acp.LoadSessionResult, error) {
+	if b.store == nil || b.sess == nil {
+		return acp.LoadSessionResult{}, errors.New("session/load: persistence is off (--no-save) — no transcript to load")
+	}
+	if p.SessionID == "" {
+		return acp.LoadSessionResult{}, errors.New("session/load: empty sessionId")
+	}
+	loaded, err := b.store.Load(p.SessionID)
+	if err != nil {
+		// A missing transcript is the EXPECTED shape for conversations
+		// started before durable ids existed: session/new used to hand
+		// out the project directory name (so paseo holds ids like
+		// "seek" that index no file), and the ACP lane did not persist
+		// at all — there is nothing on disk to resume whatever the id
+		// says. Surface that as guidance; the raw ENOENT reads like a
+		// broken install.
+		if errors.Is(err, os.ErrNotExist) {
+			return acp.LoadSessionResult{}, fmt.Errorf(
+				"session/load %s: no stored transcript. Sessions created before session/load shipped (ids were project names) were never persisted and cannot be resumed — start a new conversation; it will resume fine",
+				p.SessionID)
+		}
+		return acp.LoadSessionResult{}, fmt.Errorf("session/load %s: %w", p.SessionID, err)
+	}
+	// Same repair -resume runs: a transcript cut mid-tool-call would
+	// otherwise 400 the next request and lock the session out.
+	if n := loaded.Repair(); n > 0 {
+		fmt.Fprintf(os.Stderr, "acp: session %s: repaired %d trailing message(s) with orphan tool_calls\n", loaded.ID, n)
+	}
+	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
+	if err != nil {
+		return acp.LoadSessionResult{}, err
+	}
+	// Restore the lane the session was last using. ResolveRoute infers
+	// the provider from the model id (the registry is keyed by wire id);
+	// a freeform id belonging to no lane keeps the current lane and just
+	// re-points the model, which is what `-resume` of such a session does.
+	if loaded.Model != "" && loaded.Model != b.ag.Model() {
+		if route, rerr := subagent.ResolveRoute("", loaded.Model); rerr == nil {
+			provider, dsClient, _, lerr := b.laneFor(route.Provider)
+			if lerr != nil {
+				return acp.LoadSessionResult{}, fmt.Errorf("session/load: restore lane %s: %w", route.Provider, lerr)
+			}
+			b.ag.SetLane(provider, dsClient, loaded.Model)
+		} else {
+			b.ag.SetModel(loaded.Model)
+		}
+		b.setMenuCurrent(loaded.Model)
+	}
+
+	// Swap the live session in place (see the doc comment) and reseed the
+	// agent. Both must happen BEFORE the replay notifications go out: the
+	// client renders the history and may prompt immediately after the
+	// response resolves.
+	*b.sess = *loaded
+	b.sess.CWD = anchor.Abs
+	originalID := loaded.ID
+	b.sessionID = originalID
+	b.ag.Reset(loaded.Messages)
+
+	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
+		sendU(u)
+	}
+	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
+	return acp.LoadSessionResult{ConfigOptions: b.menu}, nil
+}
+
+// setMenuCurrent re-points the model dropdown at a model id after a
+// session/load. Ids are curated-per-lane, so the first option whose model
+// half matches wins; an unlisted model leaves the menu untouched (the
+// dropdown then shows a lane the session isn't on — a lie the client can
+// only avoid by re-reading session/load's configOptions, which is why
+// they are returned).
+func (b *acpBackend) setMenuCurrent(model string) {
+	for _, opt := range b.menu {
+		if opt.ID != "model" {
+			continue
+		}
+		for _, v := range opt.Options {
+			if _, m, ok := strings.Cut(v.Value, ":"); ok && m == model {
+				b.menu[0].CurrentValue = v.Value
+				return
+			}
+		}
+	}
 }
 
 // SetConfigOption applies a model-dropdown pick. configId "model" is
@@ -3376,16 +3514,43 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	cwd, _ := os.Getwd()
 	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
+			b.saveTurn()
 			return acp.PromptResult{}, e.Err
 		}
 		if u, ok := acpUpdate(p.SessionID, cwd, ev); ok {
 			sendU(u)
 		}
+		// Persist per turn, exactly like runPrint: a client that kills
+		// the process mid-conversation (paseo closes stdin on tab close)
+		// must still find everything up to the last completed turn, and
+		// session/load is only meaningful because this happens.
+		// Per-turn, not per-event: the transcript is a whole-file
+		// atomic rewrite, so saving on every delta would rewrite the
+		// file hundreds of times a turn.
+		if _, ok := ev.(agent.TurnEnd); ok {
+			b.saveTurn()
+		}
 	}
+	b.saveTurn()
 	if ctx.Err() != nil {
 		return acp.PromptResult{StopReason: "cancelled"}, nil
 	}
 	return acp.PromptResult{StopReason: "end_turn"}, nil
+}
+
+// saveTurn snapshots the live session to disk. Best-effort: a failed
+// write is a warning, never a turn failure — the answer already went to
+// the client, and losing a transcript must not lose the conversation.
+// No-op under --no-save (either pointer is nil there).
+func (b *acpBackend) saveTurn() {
+	if b.sess == nil || b.store == nil {
+		return
+	}
+	b.sess.Messages = b.ag.Messages()
+	b.sess.Model = b.ag.Model()
+	if err := b.store.Save(b.sess); err != nil {
+		fmt.Fprintf(os.Stderr, "acp: warning: session save failed: %v\n", err)
+	}
 }
 
 // acpUpdate maps one agent event to an ACP session/update payload. ok is
@@ -3677,14 +3842,31 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 	return nil
 }
 
+// acpOptions bundles what runACP needs. A struct rather than another
+// five-argument signature: session/load added the persistence pair, and
+// every field here is "the thing main already owns, handed over once".
+type acpOptions struct {
+	ag     *agent.Agent
+	vroute visionRouter
+	froute fileroute.Router
+	policy *permission.Policy
+	menu   []acp.ConfigOption
+	// sess/store back session/load + the durable sessionId. Both nil
+	// under --no-save, which is what makes Initialize stop advertising
+	// loadSession.
+	sess  *session.Session
+	store *session.Store
+}
+
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
-// logging goes to stderr. pol is the shared permission policy the whole
-// tool registry was built on; session/new re-anchors it to the client's
-// cwd (D-1). menu is the model configOptions select (nil hides the
-// client's model dropdown); session/set_config_option swaps the agent's
-// lane between turns.
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy, menu []acp.ConfigOption) error {
+// logging goes to stderr. The shared permission policy the whole tool
+// registry was built on is re-anchored by session/new to the client's
+// cwd (D-1). A nil menu hides the client's model dropdown;
+// session/set_config_option swaps the agent's lane between turns. When a
+// session store is present the lane also serves session/load, resuming a
+// past conversation by transcript id.
+func runACP(ctx context.Context, o acpOptions) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -3701,11 +3883,11 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fi
 		}
 	}
 	return acp.NewServer(r, w, &acpBackend{
-		ag:     ag,
-		route:  vroute,
-		froute: froute,
-		policy: pol,
-		menu:   menu,
+		ag:     o.ag,
+		route:  o.vroute,
+		froute: o.froute,
+		policy: o.policy,
+		menu:   o.menu,
 		// Same construction path as the startup lane: buildProvider owns
 		// key resolution and per-provider endpoints; "" baseURL keeps the
 		// pinned defaults (a passthrough --base-url can't reach this
@@ -3714,6 +3896,8 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fi
 			p, c, _, modelDefault, err := buildProvider(provider, "", "")
 			return p, c, modelDefault, err
 		},
+		sess:  o.sess,
+		store: o.store,
 	}).Serve(ctx)
 }
 

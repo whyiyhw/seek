@@ -2,7 +2,7 @@
 
 **主题**：seek 的 MCP 客户端（M5.4）已交付，但"能连 MCP server"不等于"agent 会用"。本 PRD 以 Semble 语义代码搜索为第一验证目标，定义 MCP 工具在 agent 循环中的最佳实践：prompt 工程、工具路由、效果评估。
 
-**状态**：📐 设计完成（可开卡，2026-11-16）。MCP 客户端基础设施已于 M5.4 交付（`45c71af`）；§二–§六 是深度集成的落地设计与 D1–D5 卡片拆分，§七起为背景材料。设计核实过的代码落点以本文为准——旧版所写 `pkg/agent/prompt.go` 不存在，system prompt 组装实际在 `internal/sysprompt`。
+**状态**：✅ D1–D5 完结（2026-11-19，D5 判定 Phase 3 no-go）。MCP 客户端基础设施已于 M5.4 交付（`45c71af`）；§二–§六 是深度集成的落地设计与 D1–D5 卡片拆分（D1–D4 已进 main，三臂评估结论在 §5.4，Phase 3 判定在 §4.3），§七起为背景材料。设计核实过的代码落点以本文为准——旧版所写 `pkg/agent/prompt.go` 不存在，system prompt 组装实际在 `internal/sysprompt`。
 
 ## 一、现状审计
 
@@ -87,7 +87,7 @@ MCP tools (external servers loaded this session):
 
 ### 3.3 与 L3 的关系
 
-L2 只写与内置工具的路由关系（通用）；项目特有的覆盖（"本仓库某目录别索引"、“这个 monorepo 用 X server 而不是 Y"）归 AGENTS.md——项目作者已有通道，seek 不在 L2 替他们做决定。本 repo 自己的 AGENTS.md "Tool usage workflow" 节是否加 Semble 条目，等 D4 数据说话（避免无证据时把官方工作流改成依赖一个可选组件）。
+L2 只写与内置工具的路由关系（通用）；项目特有的覆盖（"本仓库某目录别索引"、“这个 monorepo 用 X server 而不是 Y"）归 AGENTS.md——项目作者已有通道，seek 不在 L2 替他们做决定。本 repo 自己的 AGENTS.md "Tool usage workflow" 节是否加 Semble 条目，等 D4 数据说话（避免无证据时把官方工作流改成依赖一个可选组件）。**D4 数据已到（2026-11-18）：不加**——引导段在场时模型仍 0/5 调用、gold_hit 与 grep-first 基线持平（5/5），grep-first 在本仓三探针全中，无任何证据支持改绑可选组件。
 
 ## 四、工具路由设计（D1 卡 + Phase 3 决策依据）
 
@@ -105,7 +105,7 @@ L2 只写与内置工具的路由关系（通用）；项目特有的覆盖（"�
 
 不写路由代码。模型在 L1（带归属的工具名 + server description）+ L2（路由规则段）双引导下自选。这与内置工具间已有的 grep/references/list_dir 分工机制完全同构——references 工具没配 gopls 时模型自己降级 grep，靠的就是 description 里的降级条款。
 
-### 4.3 硬路由后手：grep 结果内 hint（Phase 3，数据触发）
+### 4.3 硬路由后手：grep 结果内 hint（Phase 3，no-go——2026-11-19 D5 判定）
 
 若 D4 评估显示引导失灵（触发条件见 §5.4），落点是 grep 工具的**结果内 advisory**，不是调度层：
 
@@ -116,6 +116,8 @@ targets faster; otherwise try broader terms or list_dir]
 ```
 
 仅当（a）注册表中存在搜索类 MCP 工具 且（b）grep 零命中或结果全部 <N 字符上下文时追加。先例：bash 工具的 `[hint: ...]`（`eval/cases/bash-overreach` 修复路径）。零核心循环侵入，不改正文只加尾注。
+
+**D5 判定（2026-11-19，c_erzfzx，读数非实现）：no-go，Phase 3 不做。** §5.4 双条件只满足其一：A3-nl `mcp_calls=0` 占比 100%（5/5 > 30%）✅，但这些 run 的 `gold_hit` 为 5/5，与 A1 持平而非低于 ❌。按"两个条件都要"的规则不触发——模型不用该工具且成功率无损，正是规则预设的"工具在此负载上无增量"形态（只满足前者，可能是工具确实不好用）；此时追加 hint 只会把模型推向一个实测零收益的工具，制造提示噪声。Phase 1 读数同向：①② FAIL（引导未生效）、③④ PASS（无损害、无过度引导）。证据边界：三探针均为"精确 file:line 定位式"提问、跑在 grep-first 约定的 seek 自仓——这是语义搜索优势最小的负载区间，但对本 PRD 而言数据已说了算：上文设计保留作未采用的备选，不落卡不实现；若未来出现 grep 明显失手的新负载证据，属新决策，不在本文件内复活。
 
 ### 4.4 明确否决
 
@@ -184,11 +186,13 @@ targets faster; otherwise try broader terms or list_dir]
 
 Phase 3 触发双条件：① A3-nl `mcp_calls=0` 占比 100% > 30% ✅；② 这些 run 的 `gold_hit`
 （5/5）低于 A1（5/5）❌ → 未同时成立，按规则不触发。Phase 1 结论为①②未过
-（引导未生效、亦无成本收益，成功率与 A1 持平）；go/no-go 由 D5 判定并回填本节。
+（引导未生效、亦无成本收益，成功率与 A1 持平）。**D5 判定（2026-11-19，c_erzfzx）：no-go**
+——双条件未同时成立，Phase 3 关闭；决策与理由回填 §4.3，关联决策（§3.3 AGENTS.md 条目、
+§5.5 mcpstats 卡）同步落定。
 
 ### 5.5 日常统计（可选，Phase 3 的长期数据源）
 
-`internal/mcpstats`：MCP 工具调用 JSONL（skillstats 六字段同款：ts/name/server/session_id/project_id/model）。写侧挂 Bridge.Execute，读侧暂不做（有 eval + 短期判定已够，避免无消费者的写路径）。开卡与否由 D5 决策时定。
+`internal/mcpstats`：MCP 工具调用 JSONL（skillstats 六字段同款：ts/name/server/session_id/project_id/model）。写侧挂 Bridge.Execute，读侧暂不做（有 eval + 短期判定已够，避免无消费者的写路径）。开卡与否由 D5 决策时定。**D5 决策（2026-11-19）：不开卡。** 三臂 45 个有效 run 的 MCP 调用总数为 0——无使用即无统计对象，读侧本就缺消费者，开卡只会造出本文自己反对的"无消费者写路径"。留待真实日常 MCP 使用出现（且先有读侧需求）再议。
 
 ## 六、卡片拆分（每张 ≤2h，依赖有序）
 

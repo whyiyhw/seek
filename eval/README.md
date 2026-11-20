@@ -6,9 +6,10 @@ through `seek -json` and checks the resulting tool-call stream
 against the case's `expect.json`.
 
 This is **not** a unit-test suite — it's a black-box probe of LLM
-behaviour against the real DeepSeek API, with all the stochasticity
-that implies. A single failing run is signal, not proof; trends
-across versions are what matter.
+behaviour against a real model API (default lane since 2026-11-20:
+the OpenCode Go subscription's DeepSeek — see § "Provider lane"),
+with all the stochasticity that implies. A single failing run is
+signal, not proof; trends across versions are what matter.
 
 ## Layout
 
@@ -23,7 +24,9 @@ eval/
 │       └── expect.json # PASS/FAIL bounds; see "Metric vocabulary" below
 ├── results/        # checked-in JSONL of each pass; one row per case
 ├── tools/          # shared case engines/scorers (mcp-arm-*, mcp-semble-score, mcp-first-gold-read, …)
-└── ablation/       # dual-run lanes + comparison tables (NOT trend data)
+├── ablation/       # dual-run lanes + comparison tables (NOT trend data)
+├── transcript-baseline/  # offline transcript snapshots (see "transcript-stats 与口径")
+└── fixtures/       # synthetic transcripts for scripts/transcript-stats --selftest
 ```
 
 ## Running
@@ -37,6 +40,9 @@ eval/run.sh tool-args-hallucination
 
 # Against a different binary (e.g. an older release for A/B comparison)
 eval/run.sh tool-args-hallucination /tmp/seek-baseline
+
+# N-round distribution sampling (see "Judgment" below)
+eval/run.sh --rounds 5 tool-args-hallucination
 ```
 
 The runner appends one row to `results/<UTC-date>-<binary-version>.jsonl`
@@ -45,6 +51,84 @@ per case it executed, e.g.:
 ```json
 {"case":"tool-args-hallucination","pass":true,"metrics":{"unknown_field_errors":0,"think_calls":1,"turns":4},"prompt_tokens":12834,"completion_tokens":612,"elapsed_s":21}
 ```
+
+## Judgment: single sample vs N rounds (E1)
+
+Historically every case ran **once** and that single sample was the
+PASS/FAIL verdict — noise could flip either way (the v0.12.0 pre-release
+run had 3 reds of which 2 were false alarms; see
+[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1).
+`--rounds N` (default 1 = historical behaviour, byte for byte) changes
+the judgement to a **distribution**:
+
+- Each round is a full case lifecycle (`setup.sh` → seek → `teardown.sh`)
+  appending its own result row, carrying `round: k` (the field appears
+  **only** when `--rounds > 1`, so single-round rows keep their exact
+  historical shape for the trend readers).
+- After the rounds, a **gate** case passes iff `passed_rounds / rounds >=
+  min_pass_rate` — **inclusive**: 3/5 against 0.6 passes. The comparison
+  runs on IEEE doubles, and division and decimal parsing round to the
+  same double, so a written threshold that is exactly k/n (0.6, 0.75,
+  0.8, 0.5) behaves as intended — but `0.67` is **not** 2/3 and will
+  gate one round stricter than a naive "2 of 3" reading suggests.
+  Calibration (E2) should pick k/n-representable thresholds.
+- A `record_only: true` case is **never gated**: per-round rows and the
+  summary line record it (`RECORD <case> (k/N rounds, record-only — not
+  gated)`), it counts in a separate "recorded" column, and it cannot
+  make the run red or green. This is the machine-enforced home for
+  cases whose bounds only bound runaways (today's self-described
+  RECORD-ONLY `code-review-effort-*`; marking them is E2's job).
+- **Crashed rounds** (seek died mid-flight, no `agent_end`) are simply
+  failing rounds — their metrics come out near-zero and any bound like
+  `exact_agent_ends` fails; the denominator always counts them. No
+  separate error class yet (`max_error_rate` is an open question in the
+  PRD §6, deliberately not invented here).
+- Interruption safety is structural: each round's row is appended only
+  after that round completes (one `echo`, one line), so Ctrl-C mid-run
+  loses nothing already written and cannot produce half-line JSONL.
+
+With `--rounds > 1` an **aggregate row** follows the round rows:
+
+```json
+{"case":"bash-overreach","type":"aggregate","rounds":5,"passed":4,"pass_rate":0.8,"min_pass_rate":0.67,"record_only":false,"verdict":"pass","ran_at":"…"}
+```
+
+It deliberately carries **no `pass` key**: `scripts/eval-trend.sh`
+selects sample rows on `pass` being a boolean, so aggregate rows can
+never double-count as samples — the trend keeps seeing one sample per
+round, which is exactly the distribution data it wants.
+
+`min_pass_rate` / `record_only` live in `expect.json` (not a separate
+calibration table): expect.json is already the per-case judgement
+authority — a second file would be a parallel source of truth for the
+same case, plus a name-join to maintain (the drift risk the repo's
+transcript-vs-state discipline exists to avoid). Both keys are
+validated at case start; anything malformed (non-number, ≤ 0, > 1,
+non-boolean, unparseable JSON) exits 2 before any round runs — never
+silently coerced to 1.0/false.
+
+**E2 will calibrate the values** (`docs/prd/feature-eval-v2.md` §三):
+no case in this repo carries `min_pass_rate` or `record_only` yet —
+this section describes the mechanism, the calibration table lands with
+E2.
+
+### Judgment self-test (deterministic, no key)
+
+`scripts/eval-rounds-test.sh` (auto-discovered by the
+[`scripts/selftest.sh`](../scripts/selftest.sh) lane, name
+`eval-rounds-test`) pins the judgement mechanics with an
+invocation-counting fake binary: explicit `--rounds 1` is byte-identical
+to the no-flag run (the no-flag-vs-pre-E1 equivalence stays pinned by
+`scripts/eval-ablate-test.sh`'s git-history blob compare); a 5-round run
+writes 5 round-tagged rows whose crashed rounds judge red **and stay in
+the denominator**; the inclusive boundary is pinned from both sides
+(3/5 vs 0.6 → green, 3/5 vs 0.7 → red) and re-pinned on the `--rounds=3`
+form (2/3 vs 0.66 → green, vs 0.67 → red — the "0.67 is not 2/3"
+lesson, testable); record-only never colours the exit code at either
+round count; malformed `--rounds` / `min_pass_rate` / `record_only` /
+broken JSON exit 2 with zero rows written; and a round-bearing results
+dir fed through `eval-trend.sh` counts the round rows only (aggregate
+rows skip, proving no double-count).
 
 ## Isolation: the SEEK_HOME sandbox
 
@@ -124,7 +208,9 @@ Bounds in `expect.json` use the prefix to declare direction:
 | Key | Meaning |
 |---|---|
 | `description` | human-readable summary |
-| `max_turns` | passed to `seek -max-turns` |
+| `max_turns` | passed to `seek -max-turns` (NB it also rides the `max_` prefix scan, so it doubles as a turns ceiling — pre-existing behaviour) |
+| `min_pass_rate` | gate threshold over the round set, `0 < m <= 1`, default 1.0, INCLUSIVE `>=` — see "Judgment" above (E2 calibrates; validated, exit 2 on malformed) |
+| `record_only` | boolean, default false — record the case, never gate it (see "Judgment" above) |
 
 ## Adding a case
 
@@ -167,6 +253,49 @@ This repo's own tuning history:
 | `git` | "Prefer grep+read over git show/cat-file" | Model uses `grep`+`read` instead of `git show HEAD:file` |
 | `list_dir` + `bash` (2026-11-13) | "One call answers count-/size-questions about a tree" / "counting files or comparing sizes is list_dir work, not find/wc/stat" | Model stops reaching for `bash find \| wc -l` / `find -exec stat \| sort` (`eval/cases/bash-overreach` drift repair) |
 
+## transcript-stats 与口径（离线，不调模型）
+
+`scripts/transcript-stats` 是**离线**分析器：不调模型、不发请求、不需要 key，
+只回放已经落盘的 `~/.seek/sessions/*.jsonl`。它和 `eval/cases` 的分工是：
+
+| | `eval/cases` + `run.sh` | `scripts/transcript-stats` |
+|---|---|---|
+| 判什么 | **边界纪律**：这一步有没有越界（二值 PASS/FAIL） | **真实任务分布上的行为形状**：打了多少轮、多少调用是白打的、read 是不是在翻页循环 |
+| 数据来自 | 现跑一次（真 API，随机性，单次判定） | 历史 transcript（确定性、可复算、零成本） |
+| 回答 | 「这个 bug 修好了吗」 | 「这一类任务平均长什么样」 |
+| 粒度 | 单例 | 全部会话 / 按 model×月份分组 |
+| 用在 | 回归闸门、发版前 | 连续效率趋势、参数调优的改前/改后对照 |
+
+它填的是 [`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §1.3
+诊断的留白——用例集由 pitfalls 台账孵化，本质是「历史 bug 的回归集」，测不了
+「复杂任务上的效率分布」。这个工具补的正是后者：同一批 transcript 上量出
+**连续量**，而不是再补一条二值断言。
+
+首个基线报告：[`eval/transcript-baseline/2026-11-19.md`](transcript-baseline/2026-11-19.md)
+（含四个关键数字：重复率 6.16% / read 重读率 67.99% / 翻页占比 92.00% /
+offset 步长 `+50` 991 次）。
+
+### 口径定义（复算以 `scripts/transcript-stats` 的头注释为唯一真源）
+
+| 指标 | 定义 |
+|---|---|
+| session | 一个 `*.jsonl`；首行元数据（`schema_version`/`model`/`created_at`/`turns`），其余为 `deepseek.Message`，`tool_calls[]` 挂在 assistant 行 |
+| fingerprint | 同一会话内 `(tool name, arguments 原始字节)` 完全相同 |
+| `dup_extra` | Σ per-fingerprint (次数 − 1) —— 「白打出去的调用数」，按工具分列 |
+| `dup_repeated` | Σ 出现次数 > 1 的 fingerprint 的**全部次数** / 总调用 —— 头条重复率口径（与 6.2% 调研数字同口径） |
+| read 文件身份 | 参数里 `path` > `file_path` > `file` 第一个存在的键。解析失败的 read 单列 `unresolved` 计数，**绝不并进同一个桶**（并桶会凭空造出「同文件重读」假信号）。三键兼容是防御性契约：实测 2026-11-19 全量 read 参数里 `path` 是绝对主体、`file_path` 一次未出现、`file` 有 2 次——但键漂移的失败模式（静默丢信号）代价远高于三行兼容代码 |
+| `reread_rate` | Σ 同会话同文件 (`read 次数 − 1`) / read 总数 —— 多余调用口径 |
+| `pagination_share` | 被重读文件里 offset 出现过 >1 个不同值的比例（offset 缺省视作 1） |
+| `offset_steps` | 同会话同文件 offset 集合**去重后升序**相邻差（跳页步长分布，top5） |
+| 分组 | 指标同时按 `model × created_at[:7]` 汇总——5 月 v0.x 时代占 82% 的调用量，不分组会把版本混杂读成趋势 |
+
+读取侧纪律：权限受限文件跳过并计数（`skipped_files`）；解析失败行计数
+（`malformed_lines`）而不中断；数据路径可参数化（`--sessions-dir`）供 fixture
+使用。`--selftest` 用 `eval/fixtures/transcript-stats/` 的新旧两种 schema 样例
+断言四形态（`path` 键 / `file_path` 键 / 完全重复调用 / 翻页读），并带
+`--read-key-mode path-only|naive-bucket` 两组反例，证明单键解析会丢信号或造
+假信号。裸跑即自测的入口：`bash scripts/selftest.sh transcript-stats-test`。
+
 ## When to read results
 
 Results are checked into git so you can `git log eval/results/` and watch how the agent's behaviour drifts as the codebase, prompts, or model versions change. A single PASS does not mean the bug is fixed; a sustained PASS rate across many runs does.
@@ -203,7 +332,13 @@ automatically — commit a `.md` by hand when a run is meant to backfill
 **Both lanes write to `eval/ablation/`, never to `eval/results/`** —
 that dir is the trend reports' data source, and ablation rows there
 would fabricate regressions. The isolation rides on two `run.sh` env
-knobs (both unset = historical behaviour, byte for byte):
+knobs (both unset = historical behaviour, byte for byte). The
+provider lane is orthogonal: `ablate.sh` sets no `SEEK_EVAL_PROVIDER*`
+knobs, so both ablation lanes ride run.sh's DEFAULT provider lane
+(the OpenCode Go subscription since the 2026-11-20 user call —
+ablation runs are batch by definition and must not burn the metered
+key either; the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback is a
+human decision, see § "Provider lane"):
 
 | Env var | Effect |
 |---|---|
@@ -237,8 +372,38 @@ under `eval/ablation/` (mtime-guarded: pre-existing ablation data is
 untouched) and fails loudly if normalisation ever degrades to empty
 output — an early revision shipped exactly that false-green.
 
+## Provider lane: test traffic on the OpenCode Go plan (c_ffzic2)
+
+**口径（v8.md §9.1）：测试默认 OpenCode Go 套餐 DeepSeek（订阅内）；计量真 key 仍仅 `--only` 人工指名或卡面明示授权。** Batch/unattended eval runs (three-arm comparisons, regressions, ablation lanes) must never burn the metered DeepSeek key — since the 2026-11-20 user call (疑点 A option (a)) the harness's **default lane IS the OpenCode Go subscription's `deepseek-v4.1-flash`**: all four knobs unset steers every seek invocation there, and the only way back to the metered key lane is the explicit `SEEK_EVAL_PROVIDER=deepseek` (a human decision — the env form of 人工指名).
+
+Four `run.sh` env knobs (all four unset = **default opencode lane**, not the historical metered lane):
+
+| Env var | Effect |
+|---|---|
+| `SEEK_EVAL_PROVIDER` | `deepseek` \| `opencode` \| `compatible`. Unset = `opencode` (OpenCode Go plan; seek's own lane, default model `deepseek-v4.1-flash`). `deepseek` = explicit fallback to the metered key lane — the historical invocation shape (no `-provider` flag, env `DEEPSEEK_API_KEY` untouched by the scrub). `compatible` = any OpenAI-compatible endpoint |
+| `SEEK_EVAL_MODEL` | model id, passed as `-model`; with `opencode` unset it IS `deepseek-v4.1-flash` (seek's lane default) |
+| `SEEK_EVAL_BASE_URL` | endpoint override (full POST target), passed as `-base-url` **and** exported as `OPENCODE_BASE_URL` so a `providers.opencode.base_url` config preset can't out-rank the flag inside seek |
+| `SEEK_EVAL_API_KEY` | lane credential, exported as the lane's canonical env var (`DEEPSEEK_API_KEY` / `OPENCODE_API_KEY` / `OPENAI_API_KEY`); never write real keys into card text, logs or expect files |
+
+While the opencode/compatible lane is active, `run.sh` **scrubs `DEEPSEEK_API_KEY` from the child environment** — the metered key has zero reach into a switched lane (seek's `compatible` case would otherwise read it as a fallback credential). The deepseek lane is the metered lane itself, so only there the env key survives. Credential resolution itself happens inside seek: `OPENCODE_API_KEY` env > `providers.opencode.api_key` > the stored browser login.
+
+**Token rule (hard): the harness never reads — and never refreshes — `~/.seek/opencode-auth.json`.** The refresh token is single-use; a side refresh invalidates the copy seek holds. An expired login surfaces as loud API errors and a human re-logs in; it is never self-healed by eval tooling.
+
+**runner.sh forwarding contract.** Cases that build their own invocations (e.g. the mcp-semble-routing arm engine) opt in by forwarding the exported lane args — the same opt-in shape as `SEEK_EVAL_EXTRA_ARGS`:
+
+```bash
+"$SEEK_EVAL_BINARY" -yolo -no-save -max-turns "$SEEK_EVAL_MAX_TURNS" \
+  -json ${SEEK_EVAL_PROVIDER_ARGS-} -p "$prompt"
+```
+
+`SEEK_EVAL_PROVIDER_ARGS` is empty only on the explicit `deepseek` fallback lane (`${VAR-}` is the `set -u`-safe reference; the default opencode lane forwards `-provider opencode`), and the lane's exported credential env vars ride along automatically. Wiring the arm runner this way is the follow-up for the mcp-semble line (card c_eyuxqm ② 复核 and later MCP-lane tests default to this provider).
+
+**Hermetic proof.** `eval/tools/fake_openai_compat.py` is a local fake OpenAI-compatible endpoint (one text delta + usage + `[DONE]`, same wire shape as `fake_paas_glm.py`) that records every POST's path / auth / model to a JSONL log. `scripts/eval-provider-test.sh` (auto-discovered by the [`scripts/selftest.sh`](../scripts/selftest.sh) lane, name `eval-provider-test`) drives the REAL seek binary against it with fake keys and asserts **both the default path (all four knobs unset → `-provider opencode`, metered key scrubbed, wire model `deepseek-v4.1-flash`) and the explicit `deepseek` fallback path (no `-provider`, metered key intact)**, plus the four knobs mapping into argv/env, the request target/credential/model actually switching on the wire, a config-preset endpoint hijack being out-ranked, both env-side and config-side metered-key canaries never reaching the endpoint, and the runner contract above holding. Real-plan smoke (≥3 runs + metered-key usage delta check) is a human/main-session action, not a selftest.
+
+Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
+
 ## Cost
 
-Each pass is one full `seek` invocation against DeepSeek's API. Budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out. The full 3-case suite is well under $0.20.
+Each pass is one full `seek` invocation. On the default lane (since 2026-11-20: the OpenCode Go subscription's `deepseek-v4.1-flash`) it bills the subscription, not the metered API. On the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback it is one metered DeepSeek call — budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out (full 3-case suite well under $0.20).
 
 Rows also carry `cache_hit_tokens` (for cost accounting — see `docs/test-plan-read-tool.md` §3.3) and `final_text` (joined assistant text, capped at 2000 chars, for offline gold-answer scoring).

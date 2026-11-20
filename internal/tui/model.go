@@ -724,6 +724,7 @@ type Model struct {
 	skillIdx         int
 	skillSaved       int
 	skillDropped     int
+	skillInstalled   int // `s` direct-installs to project level (bridge M-B3)
 	pendingSkill     []skilldistill.SkillCandidate
 	skillDistilling  bool
 	skillDistillGate string // L0 gate detail, shown on the spinner line

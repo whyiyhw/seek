@@ -13,6 +13,7 @@ type fakeBackend struct {
 	prompt    func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
 	menu      []ConfigOption                                               // returned by NewSession (nil default)
 	setConfig func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
+	load      func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
 }
 
 func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
@@ -20,6 +21,12 @@ func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
 }
 func (f fakeBackend) NewSession(p NewSessionParams) (NewSessionResult, error) {
 	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu}, nil
+}
+func (f fakeBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {
+	if f.load != nil {
+		return f.load(p, send)
+	}
+	return LoadSessionResult{ConfigOptions: f.menu}, nil
 }
 func (f fakeBackend) Prompt(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
 	return f.prompt(ctx, p, send)
@@ -362,5 +369,132 @@ func TestServer_SetConfigOption_RejectedWhilePromptInFlight(t *testing.T) {
 	json.Unmarshal(readMsg(t, dec)["result"], &res)
 	if res.StopReason != "cancelled" {
 		t.Fatalf("stop reason = %q, want cancelled", res.StopReason)
+	}
+}
+
+// TestServer_LoadSession_ReplaysThenReplies pins the wire ordering the ACP
+// schema asks for: session/load streams the whole conversation back as
+// session/update notifications and only then answers the request. Clients
+// (paseo) assert this order — they register the session id before the
+// replay arrives, so a result-first implementation loses the history.
+func TestServer_LoadSession_ReplaysThenReplies(t *testing.T) {
+	var got LoadSessionParams
+	b := fakeBackend{load: func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {
+		got = p
+		send(SessionUpdate{SessionID: p.SessionID, Update: map[string]any{"sessionUpdate": "user_message_chunk"}})
+		send(SessionUpdate{SessionID: p.SessionID, Update: map[string]any{"sessionUpdate": "agent_message_chunk"}})
+		return LoadSessionResult{ConfigOptions: testMenu()}, nil
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 20, "session/load", LoadSessionParams{
+		SessionID: "20260101-000000-abcdef0123456789",
+		Cwd:       "/proj",
+	})
+
+	var updates int
+	for {
+		msg := readMsg(t, dec)
+		if _, isResult := msg["result"]; isResult {
+			var res LoadSessionResult
+			if err := json.Unmarshal(msg["result"], &res); err != nil {
+				t.Fatalf("result: %v", err)
+			}
+			if len(res.ConfigOptions) != 1 || res.ConfigOptions[0].ID != "model" {
+				t.Fatalf("load result must carry the resumed session's menu: %+v", res)
+			}
+			break
+		}
+		var method string
+		_ = json.Unmarshal(msg["method"], &method)
+		if method != "session/update" {
+			t.Fatalf("unexpected message before the result: %v", msg)
+		}
+		updates++
+	}
+	if updates != 2 {
+		t.Fatalf("replay updates = %d, want 2 (all of them before the result)", updates)
+	}
+	if got.SessionID != "20260101-000000-abcdef0123456789" || got.Cwd != "/proj" {
+		t.Fatalf("backend saw %+v", got)
+	}
+}
+
+// TestServer_LoadSession_ErrorIsNotMethodNotFound: a failed load is a
+// server error (-32000), NOT -32601. The distinction is what lets a client
+// tell "this agent can't load sessions" (fall back to new) from "this
+// session id is bad" (surface the error).
+func TestServer_LoadSession_ErrorIsNotMethodNotFound(t *testing.T) {
+	b := fakeBackend{load: func(LoadSessionParams, func(SessionUpdate)) (LoadSessionResult, error) {
+		return LoadSessionResult{}, io.ErrUnexpectedEOF
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 21, "session/load", LoadSessionParams{SessionID: "nope"})
+	var e rpcError
+	if err := json.Unmarshal(readMsg(t, dec)["error"], &e); err != nil {
+		t.Fatalf("expected an error: %v", err)
+	}
+	if e.Code != -32000 {
+		t.Fatalf("code = %d, want -32000 (handled method, failed load)", e.Code)
+	}
+}
+
+// TestServer_LoadSession_BadParams: a malformed payload fails decoding
+// loudly (-32602) instead of loading something arbitrary.
+func TestServer_LoadSession_BadParams(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 22, "session/load", map[string]any{"sessionId": 42})
+	var e rpcError
+	if err := json.Unmarshal(readMsg(t, dec)["error"], &e); err != nil {
+		t.Fatalf("expected an error: %v", err)
+	}
+	if e.Code != -32602 {
+		t.Fatalf("code = %d, want -32602", e.Code)
+	}
+}
+
+// TestServer_LoadSessionReplayIsSilentWhenEmpty: a session with no
+// messages still answers (and emits nothing) rather than hanging or
+// sending a stray notification.
+func TestServer_LoadSessionReplayIsSilentWhenEmpty(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 23, "session/load", LoadSessionParams{SessionID: "empty"})
+	msg := readMsg(t, dec)
+	if _, isResult := msg["result"]; !isResult {
+		t.Fatalf("first message must be the result for an empty replay, got %v", msg)
+	}
+}
+
+// TestServer_LoadSession_RejectedWhilePromptInFlight: a load swaps the
+// agent's whole history (Reset), which must not happen under a running
+// turn — same in-flight rule and race argument as set_config_option.
+func TestServer_LoadSession_RejectedWhilePromptInFlight(t *testing.T) {
+	started := make(chan struct{})
+	b := fakeBackend{
+		prompt: func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
+			close(started)
+			<-ctx.Done()
+			return PromptResult{}, ctx.Err()
+		},
+		load: func(LoadSessionParams, func(SessionUpdate)) (LoadSessionResult, error) {
+			t.Error("backend.LoadSession must not run while a prompt is in flight")
+			return LoadSessionResult{}, nil
+		},
+	}
+	enc, dec := startServer(t, b)
+	send(t, enc, 30, "session/prompt", PromptParams{SessionID: "sess-1"})
+	<-started
+	send(t, enc, 31, "session/load", LoadSessionParams{SessionID: "sess-1"})
+	var e rpcError
+	if err := json.Unmarshal(readMsg(t, dec)["error"], &e); err != nil {
+		t.Fatalf("expected a rejection: %v", err)
+	}
+	if e.Code != -32000 {
+		t.Fatalf("code = %d, want -32000", e.Code)
+	}
+	send(t, enc, -1, "session/cancel", map[string]string{"sessionId": "sess-1"})
+	var res PromptResult
+	json.Unmarshal(readMsg(t, dec)["result"], &res)
+	if res.StopReason != "cancelled" {
+		t.Fatalf("stop reason = %q", res.StopReason)
 	}
 }

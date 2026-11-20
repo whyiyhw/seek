@@ -47,12 +47,17 @@ NO coordination between workers — so prefer tasks that touch disjoint files an
 don't depend on each other's output.
 
 Output ONLY a JSON array, no prose and no code fences:
-[{"title": "<short label>", "prompt": "<self-contained instruction for one worker>"}]
+[{"title": "<short label>", "prompt": "<self-contained instruction for one worker>", "done_when": ["<checkable completion condition>", "..."]}]
 
 Rules:
 - Fewer, well-scoped, non-overlapping tasks beat many entangled ones.
 - If the goal is a single unit of work, return exactly one task.
-- Each "prompt" must be self-contained: the worker sees only it, not the others.`, max)
+- Each "prompt" must be self-contained: the worker sees only it, not the others.
+- Each task carries 1-6 "done_when" conditions an INDEPENDENT verifier will
+  check after the worker finishes: each one checkable against something
+  concrete (a test, a command + expected output, a grep target, an invariant).
+  A task without checkable completion conditions is unverifiable — write them
+  or split the task until you can.`, max)
 }
 
 // parseTasks extracts a JSON task array from the model's reply, tolerating
@@ -66,8 +71,9 @@ func parseTasks(content string, max int) ([]Task, error) {
 		return nil, fmt.Errorf("decomposer reply has no JSON array: %.120q", content)
 	}
 	var raw []struct {
-		Title  string `json:"title"`
-		Prompt string `json:"prompt"`
+		Title    string   `json:"title"`
+		Prompt   string   `json:"prompt"`
+		DoneWhen []string `json:"done_when"`
 	}
 	if err := json.Unmarshal([]byte(content[start:end+1]), &raw); err != nil {
 		return nil, fmt.Errorf("decomposer reply not valid JSON: %w", err)
@@ -83,10 +89,26 @@ func parseTasks(content string, max int) ([]Task, error) {
 		if title == "" {
 			title = firstLine(prompt)
 		}
+		// done_when: trimmed, empties dropped, capped — the verifier
+		// judges exactly these strings. A model that omits them
+		// produces a task whose verdict will land on doubt (nothing
+		// checkable), which is the honest outcome, not a parse error.
+		// Omitted stays nil (empty-but-non-nil would read as "came
+		// back empty after trimming" — a different fact).
+		var dw []string
+		for _, d := range r.DoneWhen {
+			if d = strings.TrimSpace(d); d != "" {
+				dw = append(dw, d)
+			}
+			if len(dw) >= maxDoneWhenPerTask {
+				break
+			}
+		}
 		out = append(out, Task{
-			ID:     fmt.Sprintf("task-%d", len(out)+1),
-			Title:  title,
-			Prompt: prompt,
+			ID:       fmt.Sprintf("task-%d", len(out)+1),
+			Title:    title,
+			Prompt:   prompt,
+			DoneWhen: dw,
 		})
 		if len(out) >= max {
 			break

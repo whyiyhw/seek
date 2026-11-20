@@ -22,12 +22,51 @@ package controlplane
 import (
 	"compress/gzip"
 	"crypto/sha256"
+	"embed"
 	"encoding/base64"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
 )
+
+// ---- static/ assets (W5, card c_x2au4t) ----
+
+// webStatic holds the page's non-inline asset family. The markdown
+// renderer (static/markdown.js) is the FIRST resident — the static/
+// split the §4.3 rule pre-wrote for the day the single file bloats.
+// Served same-origin from /static/, so CSP's script-src 'self' covers
+// them with no hash pinning (only INLINE blocks hash below).
+//
+//go:embed static
+var webStatic embed.FS
+
+// handleStatic serves /static/<name>: flat directory, exact-name
+// lookup only — no listing, no traversal (ServeMux's path cleaning is
+// the outer belt; the explicit checks are the braces). No auth, the
+// page's own posture: assets carry no secrets and must load before
+// any token exchange could matter.
+func (f *WebFrontend) handleStatic(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/static/")
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := webStatic.ReadFile("static/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ct := "application/octet-stream"
+	switch {
+	case strings.HasSuffix(name, ".js"):
+		ct = "application/javascript; charset=utf-8"
+	case strings.HasSuffix(name, ".css"):
+		ct = "text/css; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Write(b)
+}
 
 // ---- Content-Security-Policy ----
 
@@ -70,7 +109,15 @@ func webCSP() string {
 func cspHashTokens(re *regexp.Regexp) []string {
 	var toks []string
 	for _, m := range re.FindAllSubmatchIndex(webPage, -1) {
-		sum := sha256.Sum256(webPage[m[2]:m[3]])
+		content := webPage[m[2]:m[3]]
+		// Empty/whitespace content = an external <script src=…></script>
+		// shape (W5's /static/ assets) — CSP hashes pin INLINE content,
+		// an empty block needs no permission, and the src fetch rides
+		// 'self'. Hashing "" would pin a meaningless token.
+		if len(strings.TrimSpace(string(content))) == 0 {
+			continue
+		}
+		sum := sha256.Sum256(content)
 		toks = append(toks, "'sha256-"+base64.StdEncoding.EncodeToString(sum[:])+"'")
 	}
 	return toks
