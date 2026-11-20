@@ -377,7 +377,7 @@ if m.opts.Tracker != nil {
 - **Saw**：对包含中文的摘要做 `s[:n]` 切片，破坏了 UTF-8 序列，显示乱码。
 - **Fix**：先转 `[]rune(s)` 再按字符位置切片。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

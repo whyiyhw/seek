@@ -1382,7 +1382,7 @@ func safetyRefusalSSE(finish string) string {
 }
 
 // TestAgent_SafetyRefusal_TurnEndsNormally is the SC1 acceptance path
-// (docs/prd/feature-deepseek-app-api.md §5): with safety_check enabled
+// (docs/prd/archive/feature-deepseek-app-api.md §5): with safety_check enabled
 // the API can end a response with finish_reason "refusal" and no
 // content. That is a legitimate terminal outcome, not a stream failure —
 // the agent records the in-band marker as the assistant content and the

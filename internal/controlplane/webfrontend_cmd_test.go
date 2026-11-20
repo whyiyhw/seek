@@ -233,15 +233,16 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		`id="cmd-switch"`,
 		`id="cmd-new"`,
 		`id="cmd-cancel"`,
-		"sendText(input.value.trim(), true)", // the form still rides it
-		"sendText(text, false)",              // …and so do the buttons
-		"wireCmd('cmd-bind', '/bind ')",      // arg commands prefill…
+		"sendText(typed, true, ready)",  // the form still rides the shared passthrough
+		"sendText(text, false)",         // …and so do the buttons
+		"wireCmd('cmd-bind', '/bind ')", // arg commands prefill…
 		"wireCmd('cmd-switch', '/switch ')",
 		"wireCmd('cmd-projects', '/projects')", // …zero-arg send verbatim
 		"wireCmd('cmd-new', '/new')",
 		"wireCmd('cmd-cancel', '/cancel')",
-		"text.startsWith('/')",             // command POST → immediate /state refresh
-		"es.onopen = () => refreshState()", // reconnect restores the binding display
+		"typed.startsWith('/')", // command POST → immediate /state refresh
+		"body.startsWith('/')",
+		"es.onopen = () => { refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr)
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the W2.2 command-UI piece %q", need)

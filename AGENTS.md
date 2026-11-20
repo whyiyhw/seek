@@ -6,7 +6,7 @@ Auto-loaded by **seek** at startup (and other `AGENTS.md`-convention tools) — 
 
 When you fix a non-obvious bug, discover an undocumented API constraint, or find a surprising piece of behaviour:
 
-1. **Append an entry to [`docs/pitfalls.md`](docs/pitfalls.md)** using the template at the top of that file. Categorise it (TUI / DeepSeek API / Go / Tooling / etc.); keep it terse — symptom, root cause, fix, lesson, refs.
+1. **Append an entry to [`docs/pitfalls.md`](docs/pitfalls.md)** using the template at the top of that file. Categorise it (TUI / DeepSeek API / Go / Tooling / etc.); keep it terse — symptom, root cause, fix, lesson, refs. The counts in that file's header are a **generated block** — run `bash scripts/pitfalls-count.sh --write` afterwards (`--check` fails on drift; one prefix = one section).
 2. **Add a `Pitfall: <one-line summary>` trailer** to the commit message. Multiple pitfalls in one commit = multiple trailers.
 3. The trailer is what `scripts/extract-pitfalls.sh` reads — it's the redundant signal so `docs/pitfalls.md` can be regenerated if it ever falls out of sync.
 

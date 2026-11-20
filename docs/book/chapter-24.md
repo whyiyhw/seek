@@ -462,6 +462,6 @@ v7 Autopilot / Sandbox / ACP 实现中遇到的具体问题，以下是来自 [`
 - **Saw**：同一物理目录经 `/tmp/...` 与 `/private/tmp/...` 两种拼写产生两个 ProjectID——两套分叉的项目状态空间。
 - **Fix**：保持纯哈希契约（内部 EvalSymlinks 被否决——那是伪装成修复的身份迁移）；真实车道传规范路径即可。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 > **下一章**：暂无。v7 四柱交付后的平台化线（远程控制平面 / web 前端 / GLM 车道 / skill 蒸馏）已以 v0.11 增补节进入第 14、17 章与本章 §24.7；seek 的下一阶段走向见 [`docs/prd/vision.md`](../prd/vision.md)。

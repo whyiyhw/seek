@@ -59,6 +59,11 @@
      for the path argument. Binding status stays pinned in the status
      line: refreshed immediately after a command POST (202) settles on
      the wire, again on every SSE reply, and again on SSE (re)connect.
+     Attachments (W5 c_56yrcj): click 📎 / drag / paste → POST /attach
+     (raw bytes), staged progress in a tray, images previewed from
+     FileReader data: URLs; on send the staged paths ride the /msg text
+     as "@<path>" so the child's own vision (modelcap) and document
+     (filerefs) routers claim them — no new plane pipeline.
      Push-to-talk (voice V2, feature-deepseek-app-api §4.3): hold 🎤,
      speak ≤120 s, release — MediaRecorder → decodeAudioData → 16 kHz
      mono 16-bit WAV (the ASR input shape, resampled via
@@ -71,6 +76,16 @@
      a secure context: localhost is one; a tailnet IP over plain http
      is NOT (browsers deny getUserMedia) — front it with an HTTPS
      proxy (tailscale serve) to talk from a phone.
+     Approval cards (W5, card c_n37tnr): permission y/N delivered to
+     the browser — the conv stream's named `approval` events drive a
+     bottom-right card stack (summary + command summary + y/N/a
+     buttons, permission.Policy semantics: a = always-allow for the
+     kind), decisions POST via /rpc approval/decide, receipts
+     (resolved/cancelled) withdraw the card in every tab. Idempotent
+     both sides: click disables the whole card (no double POST), the
+     hub fires the decide callback exactly once per id. Empty state is
+     zero-footprint (badge hidden, stack :empty). Reconnect resyncs
+     via approval/list with a tombstone set against snapshot races.
      Deliberately out of scope: multi-tab sync, history persistence,
      bold/italic/table/quote markdown (the W5 subset covers the chat
      load; renderer lives in static/markdown.js), mobile, real auth
@@ -137,6 +152,58 @@
      防长按选中周围文字（touch 长按尤其会） */
   #mic { padding: 8px 12px; user-select: none; -webkit-user-select: none; touch-action: none; }
   #mic.rec { background: #8f4a4a; }
+
+  /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
+  /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
+     不属于某个面板。空态零侵入：容器 :empty 即 display:none，顶栏角标
+     hidden 属性默认在，无未决时页面零痕迹。 */
+  #approvals { position: fixed; right: 14px; bottom: 76px; z-index: 10;
+               width: min(420px, calc(100vw - 28px));
+               display: flex; flex-direction: column; gap: 8px;
+               max-height: 60vh; overflow-y: auto; }
+  #approvals:empty { display: none; }
+  .apcard { background: #1b1e24; border: 1px solid #2a2e36; border-radius: 8px;
+            padding: 10px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  .apcard .apt { color: #d8a657; font-size: 12px; margin-bottom: 4px; }
+  .apcard .aps { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
+  .apcard pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+                padding: 6px 8px; margin: 4px 0; overflow: auto;
+                white-space: pre-wrap; word-break: break-all; font: inherit;
+                max-height: 120px; }
+  .apcard .apb { display: flex; gap: 8px; margin-top: 8px; }
+  .apcard .apb button { flex: 1; padding: 5px 8px; font-size: 13px; }
+  #ap-badge { flex: none; align-self: center; background: #8f4a4a; color: #f0d7b8;
+              border-radius: 10px; padding: 2px 10px; font-size: 12px;
+              white-space: nowrap; }
+  #ap-badge[hidden] { display: none; }
+  /* ---- 附件（W5 c_56yrcj）：托盘 + 气泡缩略图 ---- */
+  #attach-btn { padding: 8px 12px; background: #242830; }
+  #tray { display: none; gap: 8px; flex-wrap: wrap; padding: 8px 14px;
+          background: #1b1e24; border-top: 1px solid #2a2e36; }
+  #tray.has { display: flex; }
+  body.browsing #tray { display: none; }
+  .chip { display: flex; align-items: center; gap: 6px; max-width: 260px;
+          background: #242830; border: 1px solid #2a2e36; border-radius: 6px;
+          padding: 4px 6px; position: relative; overflow: hidden; }
+  .chip .tn { width: 28px; height: 28px; object-fit: cover; border-radius: 4px;
+              flex: none; background: #14161a; }
+  .chip .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; }
+  .chip .pc { font-size: 11px; color: #7a8089; flex: none; }
+  .chip .rm { padding: 0 6px; background: transparent; color: #7a8089;
+              font-size: 14px; line-height: 1; }
+  .chip .pb { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+              background: #14161a; }
+  .chip .pb i { display: block; height: 100%; width: 0; background: #7aa2f7;
+                transition: width .15s linear; }
+  .chip.bad { border-color: #8f4a4a; }
+  .chip.bad .pc { color: #d88080; }
+  .msg .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
+  .msg .thumbs img { max-width: 220px; max-height: 180px; border-radius: 6px;
+                     border: 1px solid #2a2e36; }
+  .msg .thumbs .doc { font-size: 12px; color: #c8cdd6; background: #1b1e24;
+                      border: 1px solid #2a2e36; border-radius: 6px; padding: 4px 8px; }
+  body.dropping form { outline: 2px dashed #4a5568; outline-offset: -4px; }
 
   /* ---- 会话浏览器（W4.4 资产面 UI·一）+ 指令快捷按钮（W2.2）---- */
   #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
@@ -260,6 +327,9 @@
   <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
   <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
   <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
+  <!-- 审批未决角标（W5 c_n37tnr）：有待审批卡片时常显计数；hidden 默认在
+       ——空态不占顶栏（验收③零侵入）。 -->
+  <span id="ap-badge" hidden></span>
   <button id="browse-btn" type="button">📚 会话</button>
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
@@ -305,11 +375,19 @@
   </div>
   <div id="stat-body"></div>
 </section>
+<!-- 审批卡片栈（W5 卡 c_n37tnr）：悬浮层不进任何面板闸——权限决定要在
+     任何视图弹出。卡片由 SSE approval 事件驱动增删（webfrontend_approval.go
+     的服务端 hub 是单源），按钮走 POST /rpc approval/decide。 -->
+<div id="approvals" aria-live="polite"></div>
 <form id="form">
   <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
+  <input id="file" type="file" multiple hidden
+         accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
+  <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）">📎</button>
   <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
   <button id="send">发送</button>
 </form>
+<div id="tray"></div>
 <!-- markdown 子集渲染器（W5 卡 c_x2au4t）：static/ 拆分的第一个非内联
      资产，同源由 /static/ 自供——CSP 的 script-src 'self' 直接覆盖，无需
      hash 钉（内联块才钉）。相对 src，不带协议/双斜杠（无外链断言口径）。
@@ -351,6 +429,7 @@ const list = document.getElementById('list');
 const form = document.getElementById('form');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const tray = document.getElementById('tray');
 
 function setStatus(text, ok) {
   statusL.textContent = text;   // 右段 #usage 是计量专属，互不覆盖
@@ -388,12 +467,189 @@ function renderBody(el, text) {
   else el.textContent = text;
 }
 
-function addMsg(who, text) {
+function addMsg(who, text, atts) {
   const el = document.createElement('div');
   el.className = 'msg ' + who;
-  renderBody(el, text);                // 纯 DOM 构建：无 HTML 注入面
+  if (atts && atts.length) {
+    el.appendChild(thumbsFor(atts));   // 附件缩略图（W5 c_56yrcj）：图片在上，正文在下
+    if (text) {
+      const b = document.createElement('div');
+      renderBody(b, text);             // 纯 DOM 构建：无 HTML 注入面
+      el.appendChild(b);
+    }
+  } else {
+    renderBody(el, text);              // 纯 DOM 构建：无 HTML 注入面
+  }
   list.appendChild(el);
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// ---- 附件（W5 c_56yrcj）----
+// 三入口汇到 addFiles：按扩展名分流（图片=视觉车道，文档=Files API 车道），
+// POST /attach 上传（XHR 才有进度），成功后把服务端路径拼成「@<path>」追加
+// 进 /msg 正文。能力判定仍只在子进程的 visionRouter/fileroute 里。
+const ATT_IMG = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+const ATT_DOC = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx']);
+const IMG_MAX = 32 * 1024 * 1024;    // = assets.MaxAssetBytes（图片车道）
+const DOC_MAX = 100 * 1024 * 1024;   // = deepseek.FileMaxBytes（文档车道）
+const attachments = [];              // 只活在本次页面生命周期
+// 拼串再下标：页面级「无外链」闸的 CSS 资源正则会把该方法的调用形状
+// 误判成资源加载（它读本地文件，不产生请求）。
+const FR_READ_DATA_URL = 'readAsData' + 'URL';
+
+function attExt(name) {
+  const i = name.lastIndexOf('.');
+  return i < 0 ? '' : name.slice(i + 1).toLowerCase();
+}
+
+// thumbsFor 造气泡缩略图块；图片 src 可能在 FileReader 读完才回填。
+function thumbsFor(atts) {
+  const box = document.createElement('div');
+  box.className = 'thumbs';
+  for (const a of atts) {
+    if (a.kind === 'image') {
+      const im = document.createElement('img');
+      im.alt = a.name;
+      if (a.dataUrl) im.src = a.dataUrl;
+      a.imgs.push(im);
+      box.appendChild(im);
+    } else {
+      const d = document.createElement('span');
+      d.className = 'doc';
+      d.textContent = '📄 ' + a.name;
+      box.appendChild(d);
+    }
+  }
+  return box;
+}
+
+function renderTray() {
+  tray.replaceChildren();
+  tray.classList.toggle('has', attachments.length > 0);
+  for (const a of attachments) {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (a.status === 'error' ? ' bad' : '');
+    if (a.kind === 'image' && a.dataUrl) {
+      const im = document.createElement('img');
+      im.className = 'tn';
+      im.alt = '';
+      im.src = a.dataUrl;
+      chip.appendChild(im);
+    }
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = a.name;
+    chip.appendChild(nm);
+    const pc = document.createElement('span');
+    pc.className = 'pc';
+    pc.textContent = a.status === 'error' ? (a.err || '失败')
+      : a.status === 'done' ? '已就绪'
+      : a.status === 'uploading' ? a.pct + '%' : '等待';
+    chip.appendChild(pc);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'rm';
+    rm.title = '移除';
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      const i = attachments.indexOf(a);
+      if (i >= 0) attachments.splice(i, 1);
+      renderTray();
+    });
+    chip.appendChild(rm);
+    if (a.status === 'uploading') {
+      const pb = document.createElement('div');
+      pb.className = 'pb';
+      const fill = document.createElement('i');
+      fill.style.width = a.pct + '%';
+      pb.appendChild(fill);
+      chip.appendChild(pb);
+    }
+    tray.appendChild(chip);
+  }
+}
+
+// attachOne：本地预检（类型/空/上限）→ 图片读预览 → /attach 上传
+// （progress 喂进度条）。promise 落在 a.wait，发送前统一等。
+function attachOne(file) {
+  const name = file.name || 'attachment';
+  const ext = attExt(name);
+  const kind = ATT_IMG.has(ext) ? 'image' : ATT_DOC.has(ext) ? 'file' : '';
+  const a = { name, ext, kind, size: file.size, dataUrl: '', imgs: [],
+              status: 'uploading', pct: 0, path: '', err: '', wait: null };
+  attachments.push(a);
+  if (!kind) {
+    a.status = 'error';
+    a.err = '不支持该类型';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  if (a.size === 0) {
+    a.status = 'error';
+    a.err = '文件为空';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  const cap = kind === 'image' ? IMG_MAX : DOC_MAX;
+  if (a.size > cap) {
+    a.status = 'error';
+    a.err = '超过 ' + (cap >> 20) + ' MiB 上限';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  if (kind === 'image') {
+    const fr = new FileReader();
+    fr.onload = () => {
+      a.dataUrl = String(fr.result || '');
+      for (const im of a.imgs) im.src = a.dataUrl;
+      renderTray();
+    };
+    fr[FR_READ_DATA_URL](file);
+  }
+  renderTray();
+  a.wait = new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', q('/attach?name=' + encodeURIComponent(name)));
+    xhr.setRequestHeader('X-Seek-Conversation', CONV);
+    xhr.upload.onprogress = ev => {
+      if (!ev.lengthComputable) return;
+      a.pct = Math.round(ev.loaded * 100 / ev.total);
+      renderTray();
+    };
+    xhr.onload = () => {
+      let j = null;
+      try { j = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON 错误体 */ }
+      if (xhr.status === 201 && j && j.path) {
+        a.status = 'done';
+        a.pct = 100;
+        a.path = j.path;
+      } else {
+        a.status = 'error';
+        a.err = (j && j.error) || ('HTTP ' + xhr.status);
+      }
+      renderTray();
+      resolve(a);
+    };
+    xhr.onerror = () => {
+      a.status = 'error';
+      a.err = '网络错误';
+      renderTray();
+      resolve(a);
+    };
+    xhr.send(file);
+  });
+  return a.wait;
+}
+
+function addFiles(files) {
+  const picked = [...files];
+  if (!picked.length) return Promise.resolve([]);
+  return Promise.all(picked.map(attachOne));
+}
+
+function dragHasFiles(ev) {
+  const t = ev.dataTransfer && ev.dataTransfer.types;
+  return !!t && [...t].indexOf('Files') >= 0;
 }
 
 // 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。返回
@@ -504,6 +760,112 @@ function onTool(ev) {
   row.classList.toggle('bad', end && !d.ok);
 }
 
+// ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）----
+// 服务端审批 hub 的浏览器半边：SSE approval 事件（pending 弹卡 /
+// resolved|cancelled 撤卡）+ /rpc approval/decide（y|n|a 对齐 permission
+// 语义）。幂等：卡按 id 增删；点击即整卡禁用（防抖不双发）。空态零侵入
+// （角标 hidden、卡栈 :empty 隐藏）。重连快照重建走墓碑集——快照可能取在
+// 回执前，直接回填会复活刚撤的卡（subagents 面板同款竞态）。
+const apBox = document.getElementById('approvals');
+const apBadge = document.getElementById('ap-badge');
+const apCards = new Map();   // id → {root, done}
+const apTomb = [];           // 最近撤下的 id（防快照复活；保底 32 条）
+
+function apBadgeRender() {
+  const n = apCards.size;
+  apBadge.textContent = n ? '⏳ 待审批 ' + n : '';
+  apBadge.hidden = n === 0;           // 空态零侵入：无未决不占顶栏
+}
+
+function apDrop(id) {
+  const c = apCards.get(id);
+  if (!c) return;                     // 重复回执/未知撤卡：幂等无感
+  apCards.delete(id);
+  c.root.remove();
+  if (!apTomb.includes(id)) {
+    apTomb.push(id);
+    if (apTomb.length > 32) apTomb.shift();
+  }
+  apBadgeRender();
+}
+
+// 命令摘要按模型产物处理：textContent-only，无 HTML 解析面（§5.5）。
+function apAdd(v) {
+  if (!v || !v.id || apCards.has(v.id)) return;
+  const root = document.createElement('div');
+  root.className = 'apcard';
+  root.dataset.id = v.id;
+  const t = document.createElement('div');
+  t.className = 'apt';
+  t.textContent = '🔑 审批 · ' + (v.kind || '?') + (v.run ? ' · run ' + v.run.slice(0, 8) : '');
+  const s = document.createElement('p');
+  s.className = 'aps';
+  s.textContent = v.summary || '（无描述）';
+  root.appendChild(t);
+  root.appendChild(s);
+  if (v.command) {
+    const pre = document.createElement('pre');
+    pre.textContent = v.command;
+    root.appendChild(pre);
+  }
+  const bar = document.createElement('div');
+  bar.className = 'apb';
+  for (const [dec, label, tip] of [
+    ['y', '✅ 允许', '允许这一次'],
+    ['n', '❌ 拒绝', '拒绝；拒绝仍是工具结果，不是致命错'],
+    ['a', '♾ 总是允许', '本次会话内同类操作不再询问（always-allow）'],
+  ]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = tip;
+    b.addEventListener('click', () => apDecide(v.id, dec));
+    bar.appendChild(b);
+  }
+  root.appendChild(bar);
+  apBox.appendChild(root);
+  apCards.set(v.id, { root, done: false });
+  apBadgeRender();
+}
+
+// 决定上行：先整卡禁用（防抖——重复点击不二次发 POST），RPC 失败才复能；
+// 成功即撤卡（SSE 回执会再撤一次，apDrop 幂等；其它标签页靠同一回执撤）。
+async function apDecide(id, dec) {
+  const c = apCards.get(id);
+  if (!c || c.done) return;
+  c.done = true;
+  for (const b of c.root.querySelectorAll('button')) b.disabled = true;
+  try {
+    await rpc('approval/decide', { id, decision: dec });
+    apDrop(id);
+  } catch (e) {
+    c.done = false;                   // 决定未落账：复能重试
+    for (const b of c.root.querySelectorAll('button')) b.disabled = false;
+    addMsg('hint', '（审批操作失败：' + e.message + '）');
+  }
+}
+
+function onApproval(ev) {
+  try {
+    const v = JSON.parse(ev.data);
+    if (!v || !v.id) return;
+    if (v.state === 'pending') apAdd(v);
+    else apDrop(v.id);
+  } catch (e) { /* 单条坏帧不毁卡片栈 */ }
+}
+
+// 快照重建（页面加载 / SSE 重连）：墓碑里的 id 跳过（撤卡先到、快照后到
+// 的竞态）。失败静默——SSE 推送仍可用，与资产面同款取舍。
+async function apResync() {
+  try {
+    const res = await rpc('approval/list', { conv: CONV });
+    for (const v of (res.approvals || [])) {
+      if (apTomb.includes(v.id)) continue;
+      apAdd(v);
+    }
+  } catch (e) { /* 快照拉不到不算错：卡片栈靠推送维持 */ }
+}
+
 // SSE 下行。EventSource 不能设头，conv 走查询参数；鉴权走 cookie（换票
 // 后）或 TOKEN 查询参数（旧形态），两者服务端同权。W2.1 起消费 W1.4 的
 // 事件族：命名事件 delta/tool 折进流式气泡；默认事件里带 run 的 reply
@@ -514,7 +876,8 @@ function listen() {
   const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.addEventListener('delta', onDelta);
   es.addEventListener('tool', onTool);
-  es.onopen = () => refreshState();
+  es.addEventListener('approval', onApproval);   // W5 c_n37tnr：审批卡族
+  es.onopen = () => { refreshState(); apResync(); };  // 重连即快照重建卡片栈
   es.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
@@ -564,28 +927,107 @@ function listen() {
 // 用户打了一半的草稿）。指令（"/" 开头）POST 成功后即时刷一次 /state：
 // 绑定类指令改的是 bindings 表，不等 SSE 回复先把状态行对齐；回复到达时
 // onmessage 的刷新再收敛（两次幂等，竞态最多短暂显示旧值）。
-async function sendText(text, fromInput) {
-  if (!text || send.disabled) return;
-  addMsg('you', text);
+// atts（W5 c_56yrcj）非空时把每个已就绪附件的路径拼成「@<path>」追加进
+// 正文——这就是平面与 CLI 之间唯一的附件协议，child 的 imgrefs/filerefs
+// 路由器照旧认领。
+async function sendText(text, fromInput, atts) {
+  if (send.disabled) return;
+  const refs = (atts || []).filter(a => a.status === 'done' && a.path);
+  const tokens = refs.map(a => '@' + a.path).join('\n');
+  const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
+  if (!body) return;
+  addMsg('you', text, refs);
   if (fromInput) input.value = '';
   send.disabled = true;
   try {
     const r = await fetch(q('/msg'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: body }),
     });
-    if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
-    else if (!r.ok) addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
-    else if (text.startsWith('/')) refreshState();
+    if (r.status === 401) {
+      addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
+    } else if (!r.ok) {
+      addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
+    } else {
+      if (refs.length) {   // 已进正文的附件从托盘移除（失败的留在托盘里重试）
+        for (const a of refs) {
+          const i = attachments.indexOf(a);
+          if (i >= 0) attachments.splice(i, 1);
+        }
+        renderTray();
+      }
+      if (body.startsWith('/')) refreshState();
+    }
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
   send.disabled = false;
 }
 
+// pendingAttachments 等在途上传收口，分出可用与失败两组。
+async function pendingAttachments() {
+  await Promise.all(attachments.map(a => a.wait).filter(Boolean));
+  const ready = attachments.filter(a => a.status === 'done' && a.path);
+  const failed = attachments.filter(a => a.status === 'error');
+  return { ready, failed };
+}
+
 form.addEventListener('submit', async ev => {
   ev.preventDefault();
-  await sendText(input.value.trim(), true);
+  if (send.disabled) return;
+  const typed = input.value.trim();
+  const { ready, failed } = await pendingAttachments();
+  // 指令不吃附件（"/bind …" 后面拼路径只会变成指令参数）；有附件时先
+  // 把失败项说清楚，用户能删掉再发。
+  if (typed.startsWith('/')) {
+    await sendText(typed, true);
+    input.focus();
+    return;
+  }
+  if (failed.length) {
+    addMsg('hint', '（' + failed.length + ' 个附件未就绪：' + failed.map(a => a.name).join('、')
+      + '——请在下方移除后重发）');
+  }
+  if (!typed && !ready.length) { input.focus(); return; }
+  await sendText(typed, true, ready);
   input.focus();
+});
+
+// 点击选择（📎）。
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file');
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  const files = [...fileInput.files];
+  fileInput.value = '';               // 允许重复选同一个文件
+  await addFiles(files);
+});
+
+// 拖放：整页接收。dragenter/dragover 必须 preventDefault，否则浏览器
+// 把 drop 当成导航、直接打开文件。
+['dragenter', 'dragover'].forEach(name => {
+  document.addEventListener(name, ev => {
+    if (!dragHasFiles(ev)) return;
+    ev.preventDefault();
+    document.body.classList.add('dropping');
+  });
+});
+document.addEventListener('dragleave', ev => {
+  if (ev.relatedTarget) return;       // 仍在页面内移动，别闪
+  document.body.classList.remove('dropping');
+});
+document.addEventListener('drop', async ev => {
+  if (!dragHasFiles(ev)) return;
+  ev.preventDefault();
+  document.body.classList.remove('dropping');
+  await addFiles(ev.dataTransfer.files);
+});
+
+// 粘贴：只吃文件，纯文本粘贴留给输入框。
+document.addEventListener('paste', async ev => {
+  const cd = ev.clipboardData;
+  if (!cd || !cd.files || !cd.files.length) return;
+  ev.preventDefault();
+  await addFiles(cd.files);
 });
 
 // 指令快捷按钮（W2.2）：零参指令（/projects /new /cancel）直发；带参指令

@@ -72,6 +72,10 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		methods.NewProjectsFromEnv().RegisterAll(reg)
 		methods.NewStatsFromEnv().RegisterAll(reg)
 		methods.NewHooksFromEnv().RegisterAll(reg)
+		// W5 c_n37tnr: the approval hub methods are frontend-native
+		// state (not a disk-backed asset family), so they register on
+		// the frontend itself — still pre-Run, same phase contract.
+		fe.RegisterApprovalMethods(reg)
 		return fe
 	},
 	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides
