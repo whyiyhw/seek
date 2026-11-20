@@ -51,3 +51,23 @@ func changelogEntry(cid, title string) string {
 **为什么要改源头而不是只清存量**：存量清一次就完了，源头不改，下一张带背景段的卡照样注入 3 KB。
 `changelogAppend` 是幂等的（同卡号已在则不追加），所以历史条目被人工裁短之后不会被机器写回长版本 ——
 **但**同卡号的行只要还在，机器就不会再碰它，所以「人工裁短」对存量是安全的。
+
+## 4. 消费记录（卡 `c_nqvbdu`，2026-11-20）
+
+上面三条已按本清单第 2 节裁短（`docs/pitfalls.md`「CHANGELOG 条目行首 `- <cid>：` 是 wire format」条记了为什么日期只能挂尾）：
+
+| 卡号 | 裁前 | 裁后 | 现文 |
+|---|---:|---:|---|
+| `c_cjewsn` | 3 799 B | 114 B | `- c_cjewsn：v8·R2：独立 verifier——done_when 断言的异会话裁判（第二波首卡）（2026-11-19）` |
+| `c_idisqf` | 807 B | 112 B | `- c_idisqf：/compact 溢出死锁救援：compact 自身装不进剩余预算时的降级路径（2026-11-19）` |
+| `c_3mny65` | 912 B | 114 B | `- c_3mny65：main.go 减重第二刀：planBridge 与 subagent glue 各拆一文件（纯搬移）（2026-11-20）` |
+
+合计 5 518 B → 340 B，**省 5 178 B**；「已进 main、未部署」节 18 316 B → 13 139 B，全文 21 378 B → 16 200 B。
+与清单预估差 48 B：日期括注（各 ~16 B）是清单第 2 节的建议形态里没有的，见下条。
+
+**口径修正（与本清单第 2 节的字面建议不同）**：卡的验收口径是「时间+卡号+一句话」，但**日期不能放行首**——
+butler 的幂等判定是 `strings.Contains(content, "- "+cid+"：")`（`internal/drive/changelog.go:changelogAppend`），
+`scripts/deploy.sh` 的 `changelog_promote` 也按行首 `- ` 认条目。日期插在 `- ` 与卡号之间会让子串失配，
+同一张卡下次 merge 会再追加一条整卡面长条目。故取「`- <cid>：<一句话>（YYYY-MM-DD）`」：日期挂尾，行首 wire 形状不动。
+
+合并窗口里补记的两条（`c_56yrcj` 94 B、`c_554rlg` 126 B）核对过——均为单句卡标题，未膨胀，**不裁**。
