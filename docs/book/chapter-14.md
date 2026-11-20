@@ -530,7 +530,7 @@ case "glm":
 - **Saw**：paseo 首次无头冒烟，`seek acp --provider=deepseek` 的 flag 被整个无视，daemon 继承的残留 `ANTHROPIC_API_KEY` 顺位上位——进程健康、模型不对。
 - **Fix**：无头车道姿态只走 env/config 显式钉死；子代理路由表同理——key 在才进表，点名无 key 车道直接结构化失败，never silently falls back。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

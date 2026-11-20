@@ -290,6 +290,6 @@ v6 单点工具实现中遇到的具体问题，以下是来自 [`docs/pitfalls.
 - **Saw**：代码评审的 `--fix` 模式绕过 `consumeArm` 保护，直接执行修复。
 - **Fix**：skill arm 内联在注入 prompt 中而非依赖 TUI 交互。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 > **下一章**：v7 四柱——从追赶 Reasonix 到深化护城河。

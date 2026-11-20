@@ -260,6 +260,6 @@ seek cron tick              # 扫一遍所有 job 并执行到期的
 - **Saw**：`@every 30d` 解析失败。
 - **Fix**：在 `@every` 解析器中包装 `time.ParseDuration`，添加天/周的支持。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 阅读本章前建议先读 PRD，再 `go test -race ./internal/routines/... ./internal/routinescli/...` 跑一遍验收测试理解边界行为。

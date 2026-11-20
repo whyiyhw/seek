@@ -489,7 +489,7 @@ Skill 生命周期管理实现中遇到的具体问题，以下是来自 [`docs/
 - **Saw**：`/distill` 真跑的 skill 拒绝行从未出现在 scrollback,尽管 handler 可见地在调用。
 - **Fix**：返回值链路修正;`--dry-run` 的字节对照价值顺带把它逼了出来。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 
