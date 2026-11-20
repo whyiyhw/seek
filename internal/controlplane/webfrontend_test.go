@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -445,6 +446,72 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 		}
 	}
 }
+
+// TestWeb_PageThemeSettings pins the W5 theme/settings card (c_ni7mzw):
+// the two token blocks and the single-attribute switch, the head
+// bootstrap that runs BEFORE the stylesheet (that ordering is the whole
+// anti-FOUC mechanism — a <script> after <style> would flash), the
+// three-state runtime, and the read-only settings panel that consumes
+// the `settings/get` method. Also pins the no-naked-colour rule: the
+// style block must not carry raw hex outside the two token blocks, or a
+// new component would silently stop following the theme.
+func TestWeb_PageThemeSettings(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		":root[data-theme=\"light\"]",       // the light token block exists
+		"--seek-inset",                        // semantic token names, not hex at call sites
+		"localStorage.getItem('seek-theme')",  // remembered choice
+		"localStorage.setItem(THEME_KEY",      // ... written on toggle
+		"localStorage.removeItem(THEME_KEY)",  // system state = no remembered value
+		"prefers-color-scheme: light",         // system follow
+		"dataset.mode",                        // the three-state button group
+		"settings/get",                        // the read-only snapshot method
+		"id=\"set-body\"",                     // settings pane container
+		"id=\"set-btn\"",                      // nav entry
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the theme/settings piece %q (W5 c_ni7mzw)", need)
+		}
+	}
+	// Anti-FOUC ordering: the bootstrap block must come BEFORE <style>.
+	// Anything else means the first paint uses the default theme and the
+	// attribute lands afterwards — exactly the flash this card removes.
+	// (The "<style>" search starts at the tag itself: prose higher in the
+	// <head> names the tag too.)
+	style := strings.Index(page, "\n<style>\n")
+	boot := strings.Index(page, "localStorage.getItem('seek-theme')")
+	if boot < 0 || style < 0 {
+		t.Fatalf("page shape changed: boot=%d style=%d", boot, style)
+	}
+	if boot > style {
+		t.Errorf("theme bootstrap (%d) sits AFTER <style> (%d) — that is the FOUC this card must remove", boot, style)
+	}
+	// Two token blocks, and the light one flips color-scheme too (native
+	// scrollbars/form controls follow it).
+	if strings.Count(page, "color-scheme:") < 2 {
+		t.Errorf("want a color-scheme declaration per theme (dark + light)")
+	}
+	// No naked colour outside the token blocks: component rules must all
+	// go through var(--seek-*), or the next component silently ignores
+	// the theme. The two palette blocks are the exemption (they ARE the
+	// palette), so the check starts after the light block's last line.
+	styleEnd := strings.Index(page, "</style>")
+	palAnchor := strings.Index(page, "--seek-shadow:0 4px 14px rgba(0,0,0,.12);")
+	if styleEnd < 0 || palAnchor < 0 {
+		t.Fatalf("palette shape changed: styleEnd=%d palAnchor=%d", styleEnd, palAnchor)
+	}
+	palEnd := strings.Index(page[palAnchor:], "}")
+	if palEnd < 0 {
+		t.Fatal("light token block unterminated")
+	}
+	rest := page[palAnchor+palEnd : styleEnd]
+	if m := hexColourRE.FindString(rest); m != "" {
+		t.Errorf("component CSS carries a naked colour %q — use a var(--seek-*) token so both themes follow", m)
+	}
+}
+
+// hexColourRE matches #rgb / #rrggbb literals in CSS.
+var hexColourRE = regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
 
 // TestWeb_PageStreamingBubble pins the W2.1 chat increment: the page
 // folds the W1.4 named SSE events into a streaming bubble — deltas

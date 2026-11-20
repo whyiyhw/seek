@@ -1,12 +1,13 @@
 package tui
 
 import (
-	"fmt"
 	"image/color"
 	"runtime/debug"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/whyiyhw/seek/internal/buildinfo"
 )
 
 // seekRow is one line of the wordmark plus its colour tier.
@@ -132,64 +133,22 @@ func bannerWithLettersRevealed(n int) string {
 const Creator = "whyiyhw"
 
 // VersionString returns the build identity for the running binary as
-// a single human-readable string. Pulled from runtime/debug.BuildInfo
-// so it picks up the module version, short git hash, and `+` dirty
-// marker automatically.
+// a single human-readable string ("v0.1.0 · abc1234", "dev · abc1234+",
+// "dev", "unknown").
 //
-// Examples:
-//
-//	"v0.1.0 · abc1234"   — clean release
-//	"dev · abc1234+"     — local build, uncommitted changes
-//	"dev"                — local build, no VCS info
-//	"unknown"            — buildinfo unavailable (extremely rare)
-func VersionString() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
-	}
-	return formatVersion(info)
-}
+// The implementation moved to internal/buildinfo (card c_ni7mzw) the
+// day a non-TUI surface — the web page's About row, via
+// controlplane.ServeSettings.Version — needed the same string: the rule
+// belongs to build identity, not to the render stack. This wrapper
+// stays because it is what cmd/seek, the banner and the upgrade checks
+// already call (and because it keeps this package's public surface
+// unchanged). One formatting rule, two names.
+func VersionString() string { return buildinfo.Version() }
 
-// formatVersion is the pure-function core of VersionString. Split
-// out so tests can construct synthetic BuildInfo without depending
-// on the real build environment.
-func formatVersion(info *debug.BuildInfo) string {
-	version := info.Main.Version
-	// "(devel)" is go-build's marker for a tag-less build. Pseudo-
-	// versions like "v0.0.0-YYYYMMDDHHMMSS-<hash>" mean the same
-	// thing — collapse both to "dev" so the line stays readable;
-	// the short hash from vcs.revision carries the actual identity.
-	switch {
-	case version == "" || version == "(devel)":
-		version = "dev"
-	case strings.HasPrefix(version, "v0.0.0-"):
-		version = "dev"
-	}
-
-	var (
-		rev      string
-		modified bool
-	)
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			if len(s.Value) >= 7 {
-				rev = s.Value[:7]
-			}
-		case "vcs.modified":
-			modified = s.Value == "true"
-		}
-	}
-
-	if rev == "" {
-		return version
-	}
-	suffix := ""
-	if modified {
-		suffix = "+"
-	}
-	return fmt.Sprintf("%s · %s%s", version, rev, suffix)
-}
+// formatVersion is the pure-function core of VersionString, kept as a
+// thin alias for the tests that construct synthetic BuildInfo
+// (banner_test's four shapes).
+func formatVersion(info *debug.BuildInfo) string { return buildinfo.Format(info) }
 
 // pixelBannerMinWidth is the minimum terminal width (in cells) at
 // which the 5×7 pixel wordmark renders cleanly. The full banner is

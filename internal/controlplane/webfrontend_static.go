@@ -79,9 +79,30 @@ var (
 // tags, verbatim — CSP3 hashes the exact element content, no trimming
 // (a leading newline is part of it). Attributed tags (<script
 // type=...>) match too; the hash still covers content only.
+//
+// Opening tags are LINE-ANCHORED. The page's tags all sit at column 0,
+// while prose that NAMES a tag ("<style>") in an HTML comment sits
+// mid-line — the anchor is what keeps a comment mention from opening a
+// phantom block. An unanchored styleBlockRE did exactly that (W5
+// c_ni7mzw): a comment above the real <style> said "解析到 <style> 时",
+// the match ran from that mention across </script> to the real
+// </style>, and the browser — which hashes the REAL block — refused
+// the stylesheet under the mismatched policy: every CSS var
+// unresolved, whole page unstyled. Go-side tests stayed green because
+// they re-derived expectations from the same broken regex; the pin
+// against this class is the strip-comments cross-check in
+// TestWeb_CSPHeader. Keep the column-0 convention in the HTML, or
+// widen the anchor consciously.
+//
+// Closing tags stay UNanchored on purpose: `<script src=…></script>`
+// closes on its own opening line, and an anchored `^</script>` would
+// make the lazy group swallow everything up to the NEXT line-initial
+// close tag (one phantom mega-block). Inside a real block an inline
+// `</script>`/`</style>` terminates it for the HTML parser too, so the
+// unanchored close matches browser semantics exactly.
 var (
-	scriptBlockRE = regexp.MustCompile(`(?s)<script\b[^>]*>(.*?)</script>`)
-	styleBlockRE  = regexp.MustCompile(`(?s)<style\b[^>]*>(.*?)</style>`)
+	scriptBlockRE = regexp.MustCompile(`(?sm)^<script\b[^>]*>(.*?)</script>`)
+	styleBlockRE  = regexp.MustCompile(`(?sm)^<style\b[^>]*>(.*?)</style>`)
 )
 
 // webCSP derives the Content-Security-Policy from the embedded page,

@@ -95,27 +95,98 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>seek</title>
+<!-- 首屏主题 bootstrap（W5 卡 c_ni7mzw，防 FOUC）：必须在样式表之前同步
+     跑完——浏览器解析到样式表时 data-theme 已落定，首帧就是目标主题，
+     不存在「先画暗再翻亮」的闪白/闪黑。三态：localStorage 里的显式选择
+     （"light" / "dark"）优先；没有选择（或 localStorage 抛异常，如隐私
+     模式）时跟随系统 prefers-color-scheme。全部逻辑收敛在这一个内联块里，
+     页尾的主题 JS 只在用户点切换时复用同一套读写。 -->
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('seek-theme'); } catch (e) { /* 隐私模式：当作未选择 */ }
+  if (t !== 'light' && t !== 'dark') {
+    try {
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    } catch (e) { t = 'dark'; }
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
 <style>
-  :root { color-scheme: dark; }
+  /* ---- 主题 token（W5 卡 c_ni7mzw）----
+     两套值、一个属性开关：`html[data-theme="light"]` 只翻变量层，组件
+     CSS 一律 var(--seek-*)，没有任何裸色值（dsh 的三层体系缩成两层：
+     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色，
+     与 W5 之前逐字节同色（c_ni7mzw 之前是硬编码 hex，值原样搬过来）。
+     首屏由 <head> 里的内联 bootstrap 在样式表解析前写好 data-theme，
+     故不存在「先画暗再翻亮」的闪烁；CSP 对该内联块的 sha256 由
+     webfrontend_static.go 从同一份 embed 现算，手改页面不会失配。 */
+  :root {
+    color-scheme: dark;
+    --seek-inset: #14161a;   /* 页面底/代码块底/输入框底 */
+    --seek-panel: #1b1e24;   /* 顶栏/状态栏/侧栏/卡片/表单底 */
+    --seek-soft:  #242830;   /* 气泡/统计卡/次级按钮底 */
+    --seek-accent:#2c3d5f;   /* 用户气泡/当前行/主按钮底 */
+    --seek-line:  #2a2e36;   /* 主分隔线/边框 */
+    --seek-line-2:#22252c;   /* 列表行分隔线（更淡一档） */
+    --seek-line-focus:#4b586b; /* 输入聚焦边框 */
+    --seek-fg:    #d7dae0;   /* 正文 */
+    --seek-fg-dim:#8f959f;   /* 次级文字：门槛是「压得住所有常见底」——
+                                panel(#1b1e24) 5.3、soft(#242830) 4.75。
+                                首版 #858b93 在 soft 上 4.3 红（设置卡/
+                                统计卡的 k 列都长在 soft 上）；accent 底
+                                上的次级文字由组件规则升主文色，不靠这条 */
+    --seek-fg-soft:#9aa0a8;  /* 工具行/徽标/卡片标题 */
+    --seek-ok:    #7ec699;
+    --seek-warn:  #d8a657;
+    --seek-err:   #d8756f;
+    --seek-link:  #7aa2f7;
+    --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
+    --seek-rec-fg:#f0d7b8;
+    --seek-shadow:0 4px 14px rgba(0,0,0,.45);
+  }
+  /* 亮色：同一组语义名换值，快捷键只有 data-theme 一个属性。选值口径
+     = 每对文字/底色 ≥4.5:1（WCAG AA 正文），面板间不靠色相只靠明度差。 */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --seek-inset: #ffffff;
+    --seek-panel: #f4f5f7;
+    --seek-soft:  #eceef2;
+    --seek-accent:#dbe5fb;
+    --seek-line:  #d6dae1;
+    --seek-line-2:#e6e9ee;
+    --seek-line-focus:#7b8798;
+    --seek-fg:    #1b1e24;
+    --seek-fg-dim:#5b6270;
+    --seek-fg-soft:#4b5361;
+    --seek-ok:    #1f7a43;
+    --seek-warn:  #8a5a00;
+    --seek-err:   #b3261e;
+    --seek-link:  #1a56c4;
+    --seek-rec:   #b3261e;
+    --seek-rec-fg:#ffffff;
+    --seek-shadow:0 4px 14px rgba(0,0,0,.12);
+  }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.5 ui-monospace, Menlo, monospace;
-         background: #14161a; color: #d7dae0; display: flex; flex-direction: column;
+         background: var(--seek-inset); color: var(--seek-fg); display: flex; flex-direction: column;
          height: 100vh; }
   /* 双段状态栏（W2.3）：左段绑定/连接态可截断，右段 usage 计量恒完整 */
   #status { display: flex; align-items: baseline; gap: 12px; padding: 8px 14px;
-            background: #1b1e24; border-bottom: 1px solid #2a2e36; }
+            background: var(--seek-panel); border-bottom: 1px solid var(--seek-line); }
   #status-l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
               text-overflow: ellipsis; }
-  #status.ok #status-l { color: #7ec699; }
-  #status.warn #status-l { color: #d8a657; }
-  #usage { flex: none; white-space: nowrap; color: #7a8089; }
+  #status.ok #status-l { color: var(--seek-ok); }
+  #status.warn #status-l { color: var(--seek-warn); }
+  #usage { flex: none; white-space: nowrap; color: var(--seek-fg-dim); }
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
-  .msg pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  .msg pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font: inherit; }
-  .msg code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  .msg code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
   /* ---- markdown 子集排版（W5 卡 c_x2au4t）----
      标题在气泡内取收敛尺寸（浏览器 h1 默认 2em 会撑爆聊天行高）；
      列表收边距；链接配色与主题同谱。四个正文容器（聊天气泡/会话
@@ -128,30 +199,33 @@
   .msg h6, .sbody h6, #ag-last h6, #mem-content h6 { font-size: 1.1em; margin: 8px 0 4px; }
   .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
   .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em; }
-  .msg a, .sbody a, #ag-last a, #mem-content a { color: #7aa2f7; }
-  .you { margin-left: auto; background: #2c3d5f; }
-  .seek { background: #242830; }
-  .hint { color: #7a8089; font-style: italic; }
+  .msg a, .sbody a, #ag-last a, #mem-content a { color: var(--seek-link); }
+  .you { margin-left: auto; background: var(--seek-accent); }
+  .seek { background: var(--seek-soft); }
+  .hint { color: var(--seek-fg-dim); font-style: italic; }
 
   /* ---- 流式气泡 + 工具行折叠（W2.1）---- */
   .msg.streaming > .txt:last-child::after {
-    content: '▍'; color: #7a8089; animation: caret 1s steps(1) infinite;
+    content: '▍'; color: var(--seek-fg-dim); animation: caret 1s steps(1) infinite;
   }
   @keyframes caret { 50% { opacity: 0; } }
-  .trow { color: #9aa0a8; font-size: 12px; padding: 1px 0; }
-  .trow.bad { color: #d8a657; }
-  form { display: flex; gap: 8px; padding: 10px 14px; background: #1b1e24;
-         border-top: 1px solid #2a2e36; }
-  #input { flex: 1; background: #14161a; color: inherit; border: 1px solid #2a2e36;
+  .trow { color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
+  .trow.bad { color: var(--seek-warn); }
+  form { display: flex; gap: 8px; padding: 10px 14px; background: var(--seek-panel);
+         border-top: 1px solid var(--seek-line); }
+  #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
            border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
-  #input:focus { border-color: #4a5568; }
-  button { background: #2c3d5f; color: inherit; border: 0; border-radius: 6px;
+  #input:focus { border-color: var(--seek-line-focus); }
+  button { background: var(--seek-accent); color: inherit; border: 0; border-radius: 6px;
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
   /* 按住说话（voice V2）：按下即录音中——红点态一目了然；user-select 关掉
      防长按选中周围文字（touch 长按尤其会） */
   #mic { padding: 8px 12px; user-select: none; -webkit-user-select: none; touch-action: none; }
-  #mic.rec { background: #8f4a4a; }
+  /* 录音态文字换 --seek-rec-fg 而非继承 fg：亮色继承 fg 压在 --seek-rec
+     上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
+     （ap-badge 同款接线，两处共用同一对 token）。 */
+  #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
 
   /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
   /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
@@ -162,26 +236,26 @@
                display: flex; flex-direction: column; gap: 8px;
                max-height: 60vh; overflow-y: auto; }
   #approvals:empty { display: none; }
-  .apcard { background: #1b1e24; border: 1px solid #2a2e36; border-radius: 8px;
-            padding: 10px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
-  .apcard .apt { color: #d8a657; font-size: 12px; margin-bottom: 4px; }
+  .apcard { background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 8px;
+            padding: 10px 12px; box-shadow: 0 4px 14px var(--seek-shadow); }
+  .apcard .apt { color: var(--seek-warn); font-size: 12px; margin-bottom: 4px; }
   .apcard .aps { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
-  .apcard pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  .apcard pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
                 padding: 6px 8px; margin: 4px 0; overflow: auto;
                 white-space: pre-wrap; word-break: break-all; font: inherit;
                 max-height: 120px; }
   .apcard .apb { display: flex; gap: 8px; margin-top: 8px; }
   .apcard .apb button { flex: 1; padding: 5px 8px; font-size: 13px; }
-  #ap-badge { flex: none; align-self: center; background: #8f4a4a; color: #f0d7b8;
+  #ap-badge { flex: none; align-self: center; background: var(--seek-rec); color: var(--seek-rec-fg);
               border-radius: 10px; padding: 2px 10px; font-size: 12px;
               white-space: nowrap; }
   #ap-badge[hidden] { display: none; }
 
   /* ---- 指令快捷按钮（W2.2）+ 会话侧栏（W5 卡 c_txz6vz——W4.4 的 📚 弹出面板在此退役）---- */
-  #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
-         border-bottom: 1px solid #2a2e36; overflow-x: auto; }
+  #bar { display: flex; gap: 8px; padding: 6px 14px; background: var(--seek-panel);
+         border-bottom: 1px solid var(--seek-line); overflow-x: auto; }
   #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
-  #bar .cmd { background: #242830; }          /* 指令按钮与视图按钮区分 */
+  #bar .cmd { background: var(--seek-soft); }          /* 指令按钮与视图按钮区分 */
   #mem-btn { margin-left: auto; }             /* 视图按钮组（记忆/统计/后台）靠右 */
   body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
 
@@ -190,25 +264,25 @@
      prefers-reduced-motion 兜底同 W5 既有口径（无动画依赖，纯装饰）。 */
   #shell { flex: 1; display: flex; min-height: 0; }
   #side { width: 260px; flex: none; display: flex; flex-direction: column;
-          min-height: 0; background: #1b1e24; border-right: 1px solid #2a2e36;
+          min-height: 0; background: var(--seek-panel); border-right: 1px solid var(--seek-line);
           transition: width .15s; }
   body.side-collapsed #side { width: 44px; }
   #side-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-               border-bottom: 1px solid #2a2e36; }
+               border-bottom: 1px solid var(--seek-line); }
   #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
-                color: #9aa0a8; font-size: 12px; letter-spacing: .04em; }
+                color: var(--seek-fg-soft); font-size: 12px; letter-spacing: .04em; }
   #side-head button, #side-new { padding: 4px 8px; font-size: 13px;
-                                 background: #242830; }
+                                 background: var(--seek-soft); }
   #side-toggle { flex: none; width: 26px; padding: 4px 0; }
   #side-new { margin: 8px 10px 6px; display: flex; gap: 6px; align-items: center;
               justify-content: center; }
-  #side-search { margin: 0 10px 8px; background: #14161a; color: inherit;
-                 border: 1px solid #2a2e36; border-radius: 6px; padding: 5px 8px;
+  #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
+                 border: 1px solid var(--seek-line); border-radius: 6px; padding: 5px 8px;
                  font: inherit; font-size: 13px; outline: none; }
-  #side-search:focus { border-color: #4a5568; }
+  #side-search:focus { border-color: var(--seek-line-focus); }
   #sess-list { flex: 1; overflow-y: auto; min-height: 0; }
-  #side-foot { border-top: 1px solid #2a2e36; }
-  #side-foot button { width: 100%; border-radius: 0; background: #242830;
+  #side-foot { border-top: 1px solid var(--seek-line); }
+  #side-foot button { width: 100%; border-radius: 0; background: var(--seek-soft);
                       font-size: 12px; padding: 6px; }
   /* 收起态：标题/搜索/列表/翻页让位，新建与折叠钮收成图标轨 */
   body.side-collapsed #side-title, body.side-collapsed #side-search,
@@ -227,33 +301,39 @@
   body.sess-detail #list, body.sess-detail form,
   body.browsing #list, body.browsing form { display: none; }
   #browser-body { flex: 1; display: flex; min-height: 0; }
+  /* 列表行是 <button>，但不该吃全局 button 的 accent 底：显式透明落回
+     panel 底（dim 压 accent 只有 ~3.2:1）；.cur 的 accent 底在各自规则里 */
   .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
-              border-bottom: 1px solid #22252c; padding: 8px 12px; }
+              border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+              background: transparent; }
   .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
-  .sess-row .t2 { display: block; color: #7a8089; font-size: 12px;
+  .sess-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px;
                   margin-top: 2px; }
-  .sess-row.cur { background: #2c3d5f; }
+  .sess-row.cur { background: var(--seek-accent); }
+  /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
+  .sess-row.cur .t2 { color: var(--seek-fg); }
   #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #browser-head { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
-                  border-bottom: 1px solid #2a2e36; }
-  #sess-back { flex: none; padding: 4px 12px; font-size: 13px; background: #242830; }
-  #sess-meta { flex: 1; min-width: 0; color: #7a8089; white-space: nowrap;
+                  border-bottom: 1px solid var(--seek-line); }
+  #sess-back { flex: none; padding: 4px 12px; font-size: 13px; background: var(--seek-soft); }
+  #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; }
   #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
   .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 8px;
-          background: #242830; white-space: pre-wrap; word-break: break-word; }
-  .smsg.user { background: #2c3d5f; }
-  .smsg.tool { background: #1b1e24; color: #9aa0a8; }
-  .smsg.tool pre { background: #14161a; }
-  .swho { font-size: 11px; color: #7a8089; margin-bottom: 4px; }
-  .stool { color: #d8a657; }
+          background: var(--seek-soft); white-space: pre-wrap; word-break: break-word; }
+  .smsg.user { background: var(--seek-accent); }
+  .smsg.user .swho { color: var(--seek-fg); }   /* 同 .cur：accent 底不压 dim */
+  .smsg.tool { background: var(--seek-panel); color: var(--seek-fg-soft); }
+  .smsg.tool pre { background: var(--seek-inset); }
+  .swho { font-size: 11px; color: var(--seek-fg-dim); margin-bottom: 4px; }
+  .stool { color: var(--seek-warn); }
   /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
   .smsg.tool .sbody { max-height: 260px; overflow-y: auto; }
-  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid #2a2e36;
-               color: #7a8089; }
+  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid var(--seek-line);
+               color: var(--seek-fg-dim); }
   #sess-foot button { width: 100%; }
-  .pane-hint { color: #7a8089; font-style: italic; padding: 14px; }
+  .pane-hint { color: var(--seek-fg-dim); font-style: italic; padding: 14px; }
 
   /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
   /* 与三个资产面板同一开合闸（browsing=隐聊天 + 恰好一个 *-view 亮面板），
@@ -263,68 +343,95 @@
   body.agents-view #agents { display: flex; }
   #agents-body { flex: 1; display: flex; min-height: 0; }
   #ag-list { width: 380px; flex: none; overflow-y: auto;
-             border-right: 1px solid #2a2e36; }
+             border-right: 1px solid var(--seek-line); }
   .ag-row { display: block; width: 100%; text-align: left; border-radius: 0;
-            border-bottom: 1px solid #22252c; padding: 8px 12px; }
-  .ag-row.cur { background: #2c3d5f; }
+            border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+            background: transparent; }
+  .ag-row.cur { background: var(--seek-accent); }
   .ag-row .t1 { display: flex; gap: 6px; align-items: baseline; }
   .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
-  .ag-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px; }
+  .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
   .ag-badge { font-size: 11px; flex: none; white-space: nowrap; }
   #ag-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #ag-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
-             color: #7a8089; white-space: nowrap; overflow: hidden;
+  #ag-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line);
+             color: var(--seek-fg-dim); white-space: nowrap; overflow: hidden;
              text-overflow: ellipsis; }
   #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
-  #ag-last pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  #ag-last pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
                  padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                  white-space: pre; font: inherit; }
-  #ag-last code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  #ag-last code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
 
   /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
   .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   body:not(.mem-view) #memory { display: none; }
   body:not(.stat-view) #stats { display: none; }
   .pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 14px;
-               border-bottom: 1px solid #2a2e36; }
-  .pane-head select { background: #14161a; color: inherit; border: 1px solid #2a2e36;
+               border-bottom: 1px solid var(--seek-line); }
+  .pane-head select { background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
                       border-radius: 6px; padding: 4px 8px; font: inherit;
                       max-width: 60%; }
-  .pane-head .cnt { color: #7a8089; font-size: 12px; }
+  .pane-head .cnt { color: var(--seek-fg-dim); font-size: 12px; }
   #mem-body { flex: 1; display: flex; min-height: 0; }
   #mem-list { width: 320px; flex: none; overflow-y: auto;
-              border-right: 1px solid #2a2e36; }
+              border-right: 1px solid var(--seek-line); }
   .mem-row { display: block; width: 100%; text-align: left; border-radius: 0;
-             border-bottom: 1px solid #22252c; padding: 8px 12px; }
-  .mem-row.cur { background: #2c3d5f; }
+             border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+             background: transparent; }
+  .mem-row.cur { background: var(--seek-accent); }
   .mem-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
-  .mem-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px;
+  .mem-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px;
                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #mem-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36; color: #7a8089; }
-  #mem-tags { padding: 4px 14px; border-bottom: 1px solid #2a2e36; }
-  #mem-tags .chip { display: inline-block; background: #1b1e24; border: 1px solid #2a2e36;
+  #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
+  #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
+  #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
                     border-radius: 10px; padding: 0 8px; margin: 2px 4px 2px 0;
-                    font-size: 12px; color: #9aa0a8; }
+                    font-size: 12px; color: var(--seek-fg-soft); }
   #mem-content { flex: 1; overflow-y: auto; padding: 14px;
                  white-space: pre-wrap; word-break: break-word; }
-  #mem-content pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  #mem-content pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
                      padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                      white-space: pre; font: inherit; }
-  #mem-content code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  #mem-content code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
   #stat-body { flex: 1; overflow-y: auto; padding: 14px; }
-  .stat-card { background: #242830; border-radius: 8px; padding: 12px 14px;
+  .stat-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
                margin-bottom: 12px; }
-  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: #9aa0a8; font-weight: normal; }
+  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft); font-weight: normal; }
   .stat-row { display: flex; justify-content: space-between; gap: 12px;
               padding: 3px 0; }
-  .stat-row .v { color: #d7dae0; }
-  .stat-row .v.usd { color: #7ec699; }
-  .stat-bar { height: 10px; border-radius: 5px; background: #2c3d5f; overflow: hidden;
+  .stat-row .v { color: var(--seek-fg); }
+  .stat-row .v.usd { color: var(--seek-ok); }
+  .stat-bar { height: 10px; border-radius: 5px; background: var(--seek-accent); overflow: hidden;
               margin-top: 8px; }
-  .stat-bar .hit { height: 100%; background: #7ec699; }
+  .stat-bar .hit { height: 100%; background: var(--seek-ok); }
+
+  /* ---- 设置面板（W5 卡 c_ni7mzw：设置只读展示 + 关于区）----
+     与三个资产面板同一副「中栏一个面」骨架（.pane + *-view 类），故只
+     负责本面板亮；隐聊天/互斥由 body.browsing 与各 :not() 选择器承担。
+     只读口径写在卡面：可写面（默认模型/温度）需要配置写入 + 重启路径，
+     远超本卡 ≤8KB 配额，故本轮只展示 serve 侧已生效的配置。 */
+  #settings { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  body.settings-view #settings { display: flex; }
+  body:not(.settings-view) #settings { display: none; }
+  #set-body { flex: 1; overflow-y: auto; padding: 14px; }
+  .set-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
+              margin-bottom: 12px; }
+  .set-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft);
+                 font-weight: normal; }
+  .set-row { display: flex; justify-content: space-between; gap: 12px;
+             padding: 3px 0; }
+  .set-row .k { color: var(--seek-fg-dim); }
+  .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all; }
+  .set-note { color: var(--seek-fg-dim); font-size: 12px; margin-top: 6px;
+              line-height: 1.45; }
+  /* 主题三态切换（亮/暗/跟随系统）：按钮组，当前态高亮。 */
+  #set-theme { display: flex; gap: 8px; flex-wrap: wrap; }
+  #set-theme button { padding: 5px 12px; font-size: 13px; background: var(--seek-soft);
+                      border: 1px solid var(--seek-line); }
+  #set-theme button.on { background: var(--seek-accent); border-color: var(--seek-line-focus); }
 </style>
 </head>
 <body>
@@ -343,6 +450,7 @@
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
   <button id="agents-btn" type="button">🤖 后台</button>
+  <button id="set-btn" type="button">⚙ 设置</button>
 </nav>
 <!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
      📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
@@ -400,6 +508,14 @@
         <select id="stat-sess" aria-label="会话"></select>
       </div>
       <div id="stat-body"></div>
+    </section>
+    <!-- 设置面板（W5 c_ni7mzw）：外观（主题三态，纯前端）+ serve 侧
+         配置只读展示 + 关于区（版本、入口 token 短显）。数据来自
+         /rpc settings/get——serve 侧把启动时生效的配置投影成一份快照，
+         页面不读文件、不猜默认值。 -->
+    <section id="settings" class="pane">
+      <div class="pane-head"><span class="cnt">设置 · 只读展示（改配置 = 编辑 ~/.seek/config.json 后重启）</span></div>
+      <div id="set-body"></div>
     </section>
     <form id="form">
       <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
@@ -1219,18 +1335,21 @@ let topicProject = null;
 
 const memBtn = document.getElementById('mem-btn');
 const statBtn = document.getElementById('stat-btn');
+const setBtn = document.getElementById('set-btn');
 memBtn.addEventListener('click', () => togglePane('memory'));
 statBtn.addEventListener('click', () => togglePane('stats'));
 agentsBtn.addEventListener('click', () => togglePane('agents'));
+setBtn.addEventListener('click', () => togglePane('settings'));
 
 // 三面板共用的开合闸（W4.5 的「browsing=隐聊天 + 恰好一个 *-view 亮面板」；
 // W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
 // 会话列表现在是常驻左栏，不再抢中栏。中栏三个面互斥：会话正文
 // （sess-detail）、记忆/统计/后台任选其一、或聊天面（默认）。
 const panes = {
-  memory: { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',   load: loadMemPane },
-  stats:  { btn: statBtn,   label: '📊 统计', cls: 'stat-view',  load: loadStatPane },
-  agents: { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view', load: loadAgentsPane },
+  memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',      load: loadMemPane },
+  stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',     load: loadStatPane },
+  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view',   load: loadAgentsPane },
+  settings: { btn: setBtn,    label: '⚙ 设置',  cls: 'settings-view', load: loadSetPane },
 };
 function closePanes() {
   for (const p of Object.values(panes)) {
@@ -1262,15 +1381,18 @@ function loadAgentsPane() {
   if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
 }
 
+// 状态色走主题 token（var() 在内联 style 里同样解析）：这里曾是 JS 硬编码
+// hex（暗色谱），亮色主题上线后 badge ≈2:1 对比度红——token 层才是唯一
+// 色源，JS 不私藏第二套（c_ni7mzw 两主题对比度抽查）。
 const AG_STATUS = {
-  active:    ['在跑',   '#d8a657'],
-  completed: ['完成',   '#7ec699'],
-  failed:    ['失败',   '#d8756f'],
-  killed:    ['已终止', '#9aa0a8'],
-  orphaned:  ['失联',   '#d8756f'],
-  promoted:  ['已晋升', '#7aa2f7'],
+  active:    ['在跑',   'var(--seek-warn)'],
+  completed: ['完成',   'var(--seek-ok)'],
+  failed:    ['失败',   'var(--seek-err)'],
+  killed:    ['已终止', 'var(--seek-fg-soft)'],
+  orphaned:  ['失联',   'var(--seek-err)'],
+  promoted:  ['已晋升', 'var(--seek-link)'],
 };
-const agStatusView = s => AG_STATUS[s] || [s, '#9aa0a8'];
+const agStatusView = s => AG_STATUS[s] || [s, 'var(--seek-fg-soft)'];
 
 function agTokensText(t) {
   if (!t) return '';
@@ -1564,6 +1686,158 @@ function statRow(k, v, usd) {
   row.appendChild(key);
   row.appendChild(val);
   return row;
+}
+
+// ---- 主题运行时（W5 卡 c_ni7mzw）----
+// 首屏那一步在 <head> 的内联 bootstrap 里（防 FOUC：样式表解析前
+// data-theme 已落定）。这里只管「用户点切换」与「system 态跟随系统」：
+// 三态选择 = light / dark / 不写记忆位（跟随系统）。属性是唯一开关，
+// 颜色全在 CSS 变量层（:root / :root[data-theme="light"]）。
+const THEME_KEY = 'seek-theme';
+const themeMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+
+// 读记忆位：'light' / 'dark' / null（= 跟随系统）。隐私模式抛异常按
+// 「跟随系统」处理，与 bootstrap 同一口径。
+function storedTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return (v === 'light' || v === 'dark') ? v : null;
+  } catch (e) { return null; }
+}
+
+// 解析后的实际主题（记忆位优先，否则按系统）。
+function effectiveTheme() {
+  const v = storedTheme();
+  if (v) return v;
+  return (themeMQ && themeMQ.matches) ? 'light' : 'dark';
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', effectiveTheme());
+  for (const b of document.querySelectorAll('#set-theme button')) {
+    b.classList.toggle('on', b.dataset.mode === (storedTheme() || 'system'));
+  }
+  syncThemeNote();   // 说明行随每次应用翻新（面板未开/未建 note 时它自 no-op；
+                     // 收在这里而非 setThemeMode，system 态的实时跟随也同步刷）
+}
+
+// 三态切换：写记忆位（system = 删掉记忆位）→ 立刻应用 → 重绘画设置行。
+function setThemeMode(mode) {
+  try {
+    if (mode === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, mode);
+  } catch (e) { /* 隐私模式：本次会话仍切，刷新回系统 */ }
+  applyTheme();
+}
+
+// system 态下系统主题变了要跟着翻（浏览器只在有监听器时才通知）。
+if (themeMQ) {
+  const onSystemTheme = () => { if (!storedTheme()) applyTheme(); };
+  if (themeMQ.addEventListener) themeMQ.addEventListener('change', onSystemTheme);
+  else if (themeMQ.addListener) themeMQ.addListener(onSystemTheme);
+}
+
+// ---- 设置面板（W5 卡 c_ni7mzw）----
+// 三段：外观（三态主题，纯前端，立即生效并记忆） / serve 侧配置（只读，
+// 来自 /rpc settings/get —— serve 进程把启动时生效的配置投影成快照，
+// 页面不读文件也不猜默认值） / 关于（版本 + 入口 token 短显）。
+// 只读口径写在卡面：可写面要配置写入 + 重启路径，超本卡配额，故本轮
+// 只展示「现在生效的是什么」，改配置 = 编辑 ~/.seek/config.json 后重启。
+const setBody = document.getElementById('set-body');
+
+function setCard(title) {
+  const c = document.createElement('div');
+  c.className = 'set-card';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  c.appendChild(h);
+  return c;
+}
+function setRow(card, k, v) {
+  const row = document.createElement('div');
+  row.className = 'set-row';
+  const kk = document.createElement('span');
+  kk.className = 'k';
+  kk.textContent = k;
+  const vv = document.createElement('span');
+  vv.className = 'v';
+  vv.textContent = v;
+  row.appendChild(kk);
+  row.appendChild(vv);
+  card.appendChild(row);
+}
+function setNote(card, text) {
+  const d = document.createElement('div');
+  d.className = 'set-note';
+  d.textContent = text;
+  card.appendChild(d);
+  return d;
+}
+
+// 外观卡：三态按钮 + 一句「当前实际颜色」的说明（system 态下用户要知道
+// 现在真的是亮还是暗）。
+function renderAppearance() {
+  const c = setCard('外观');
+  const group = document.createElement('div');
+  group.id = 'set-theme';
+  for (const [mode, label] of [['light', '☀ 亮'], ['dark', '🌙 暗'], ['system', '🖥 跟随系统']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.mode = mode;
+    b.textContent = label;
+    b.addEventListener('click', () => setThemeMode(mode));
+    group.appendChild(b);
+  }
+  c.appendChild(group);
+  const note = document.createElement('div');
+  note.className = 'set-note';
+  note.id = 'set-theme-note';
+  c.appendChild(note);
+  setBody.appendChild(c);
+  applyTheme();   // 末尾顺带把说明行刷成当前态（note 刚建好）
+}
+
+function syncThemeNote() {
+  const note = document.getElementById('set-theme-note');
+  if (!note) return;
+  const stored = storedTheme();
+  note.textContent = (stored ? '记忆位：' + stored : '跟随系统（无记忆位）')
+    + ' · 当前生效：' + effectiveTheme()
+    + (stored ? '' : '（系统切换会自动跟随）');
+}
+
+async function loadSetPane() {
+  setBody.replaceChildren();
+  renderAppearance();
+  try {
+    const r = await rpc('settings/get', {});
+    const cfg = setCard('serve 侧配置（只读）');
+    setRow(cfg, '默认 provider', r.default_provider || '（未设 —— 子进程按已配 key 自动选车道）');
+    setRow(cfg, '默认模型', r.model || '（无配置项 —— serve 子进程用车道默认）');
+    setRow(cfg, '温度', '（无配置项 —— 用车道默认）');
+    setRow(cfg, '并发上限', String(r.max_concurrency));
+    setRow(cfg, 'yolo（子进程权限）', r.yolo ? '开（全放行）' : '关（受权限闸，默认）');
+    setRow(cfg, 'web 监听', r.web_addr);
+    setRow(cfg, '自动压缩', r.auto_compact || '关');
+    setRow(cfg, '候选项目', String((r.projects || []).length));
+    for (const p of r.projects || []) setRow(cfg, '·', p);
+    setNote(cfg, '改这些值 = 编辑 ~/.seek/config.json 的 serve / default_provider / auto_compact 段后重启 seek serve。'
+      + '本轮设置面板按卡面口径只读：写口要配置写入 + 重启路径，超本卡配额，不在范围内。');
+
+    const about = setCard('关于');
+    setRow(about, '版本', r.version || 'unknown');
+    setRow(about, '入口 token（短显）', r.token_tail ? '…' + r.token_tail + '（后 6 位）' : '（未取到）');
+    setRow(about, '会话 id（短显）', CONV ? CONV.slice(0, 8) : '?');
+    setNote(about, '完整 token 只在 ~/.seek/serve/web.token（0600）与启动 banner 里；本页只显示后 6 位供核对。');
+    // 两卡挂载：setCard 只建不挂（外观卡由 renderAppearance 自己挂），
+    // 这里漏挂是真实踩过的坑——卡建好填好却从不上树，面板只见外观卡。
+    setBody.appendChild(cfg);
+    setBody.appendChild(about);
+  } catch (e) {
+    const c = setCard('设置读取失败');
+    setNote(c, 'settings/get 失败：' + e.message + '（serve 侧未挂设置方法时属预期）');
+    setBody.appendChild(c);
+  }
 }
 
 statSess.addEventListener('change', () => showStats(statSess.value));

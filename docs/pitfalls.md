@@ -1960,6 +1960,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `.gitattributes` pins `internal/controlplane/webfrontend.html text eol=lf` (same rationale as the existing `*.sh` rule); card c_45npoi.
 - **Lesson**: every `go:embed`-ed asset whose bytes are asserted (hash pins, CSP inline hashes, byte-compare) must be eol-pinned in `.gitattributes` — otherwise "the test asserts the artifact" silently becomes "the test asserts the checkout configuration". A hash pin failing on ONE OS with a clean working tree is the autocrlf signature.
 
+### CSP 内联块提取正则被注释里的 `<style>` 字样开出一个幻影块——浏览器拒掉整页样式，Go 测试却自洽地绿
+- **Saw**: 主题卡（c_ni7mzw）实测：无头浏览器里整页无样式（每个 CSS var 未解析、`document.styleSheets` 为空、body 透明），console 报「Applying inline style violates style-src 'sha256-0IpZ…'」——服务端发的 CSP hash 与页面真实 `<style>` 块 hash 不一致；但 `TestWeb_CSPHeader`（双向校验）与 curl 自检全绿。
+- **Why**: `webfrontend_static.go` 的 `styleBlockRE` 是非锚定 `(?s)<style\b[^>]*>(.*?)</style>`——HTML 注释里写着「浏览器解析到 <style> 时」（提及标签的散文，位于真实 `<style>` 之前、任何 script 块之外），正则从注释里的字样开匹配、跨越 `</script>` 到真实 `</style>`，hash 算的是这段跨块内容；浏览器按真实块校验必然失配 → 拒掉样式。测试绿是因为它用**同一个正则**双向推导期望——错得自洽。curl 自检只数 sha256 个数，也不验内容。
+- **Fix**: 开标签行首锚定 `(?sm)^<style\b[^>]*>(.*?)</style>`（script 同款；闭标签刻意**不**锚定——`<script src=…></script>` 同行闭合，锚了会让惰性组吞到下一个行首闭标签、造出跨块巨块，且块内闭标签本就终止解析、与浏览器语义一致）；`TestWeb_CSPHeader` 增加独立视角互证（剥 HTML 注释 + 非锚定正则重推导，与 CSP 对比）——两条不同原理的推导才抓得住「正则自身开错块」这一类。页面注释同批改为只说「样式表」不写字面量。
+- **Lesson**: ①对「从文本提取块再 hash」的提取器，测试不能用同一提取器当 oracle——要有一条不同原理的对照推导（这里是剥注释）；②单文件页面里任何提及 `<style>`/`<script>` 的散文都在与提取正则博弈，标签保持行首顶格是提取器依赖的书写约定，别在注释里写标签字面量；③「整页 CSS var 未解析 + styleSheets 空」就是 CSP 拒了 `<style>` 块的特征签名（script 块的 hash 若对，页面 JS 照常跑，更迷惑）。
+- **Refs**: `internal/controlplane/webfrontend_static.go` `scriptBlockRE`/`styleBlockRE`（锚定注释里有完整事故叙述）、`webfrontend_static_test.go` `TestWeb_CSPHeader` 剥注释互证；卡 c_ni7mzw。
+
 ### web-gate 的 size 基线钉在「哪个工具链量的」上——±1.8MB 的 skew，棘轮要按 delta 加不要按绝对值重测
 - **Saw**: 2026-11-19 c_x2au4t 验收 `scripts/web-gate.sh`：本机默认 go1.27.3 交叉构建报超基线 +440KB——但 `git stash` 后未改动的 main@2e7ad39 同样报 +426KB（零改动超线）；换 `GOTOOLCHAIN=go1.25.8`（CI 的版本线）重测，同一棵树只有 29.1MB，比基线低 1.37MB。
 - **Why**: 基线数字是某台机器某个 Go 版本某次交叉编译的绝对值，而 Go 小版本间的代码生成差异能搬动 MB 级体积（1.25.8→1.27.3 同源差 ~1.8MB）。`--update-baseline` 的「重测绝对值」语义只在测量环境不变时成立；基线文件里没有任何工具链信息，skew 无法从文件本身看出来。
