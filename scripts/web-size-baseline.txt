@@ -44,4 +44,10 @@
 # those merges (they claimed headroom instead — c_n37tnr's note). The
 # pin still carries ~1.16MB of go1.25-side slack, so the gate stays
 # green either way; this entry ratchets ONLY this card's delta.
-30517907
+# 2026-11-20 c_5m3fm6 ratchet: +4072B (生成中停止键——dsh InputBar 中断
+# 对齐：page CSS/JS/markup ~4.7KB source，click 层分岔 + renderSend 键态
+# + 保留式中断收口；无新 Go)。DELTA-added on the go1.25.8 line (29367822
+# →29371894, measured against this branch's HEAD e7fb1a75; go1.27.3 side:
+# +4232B, both agree). 验收脚本对 scripts/web-stop-manual.sh +
+# web-stop-headless.mjs 不进 embed，不计入。
+30521979
