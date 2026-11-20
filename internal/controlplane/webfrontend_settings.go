@@ -8,10 +8,14 @@ package controlplane
 // (`serve` / `default_provider` / `auto_compact`) that the serve
 // process consumed once — changing one means editing the file and
 // restarting, so an in-page write face would need a config writer, a
-// restart path and a validation story, which is far past this card's
-// ≤8KB budget and its own "读为主" wording. What the panel adds over
-// reading the file is the EFFECTIVE view: defaults resolved (max
-// concurrency 4, web_addr 127.0.0.1:8790), the build identity, and
+// restart path and a validation story: a subsystem, not a slice of
+// this card, and its own "读为主" wording already said read (the card's
+// ≤8KB quota was for the token/theming rewrite alone; the delivered
+// card measured ~31KB on the CI toolchain line — html +14.7KB source,
+// ~290 lines of Go — and that overrun is recorded in
+// feature-web-frontend §13.3 rather than glossed here). What the panel
+// adds over reading the file is the EFFECTIVE view: defaults resolved
+// (max concurrency 4, web_addr 127.0.0.1:8790), the build identity, and
 // which token this page is riding.
 //
 // The method hangs off the frontend (not internal/rpc/methods) for the

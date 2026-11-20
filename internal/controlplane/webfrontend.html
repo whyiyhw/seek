@@ -412,7 +412,8 @@
      与三个资产面板同一副「中栏一个面」骨架（.pane + *-view 类），故只
      负责本面板亮；隐聊天/互斥由 body.browsing 与各 :not() 选择器承担。
      只读口径写在卡面：可写面（默认模型/温度）需要配置写入 + 重启路径，
-     远超本卡 ≤8KB 配额，故本轮只展示 serve 侧已生效的配置。 */
+     是一个子系统而不是本卡的一刀（本卡 ≤8KB 配额只覆盖 token/主题改写，
+     实际 ~31KB 已在 PRD §13.3 如实记账），故本轮只展示 serve 侧已生效的配置。 */
   #settings { flex: 1; display: none; flex-direction: column; min-height: 0; }
   body.settings-view #settings { display: flex; }
   body:not(.settings-view) #settings { display: none; }

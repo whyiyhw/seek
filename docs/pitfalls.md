@@ -1981,6 +1981,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
 - **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
 
+### PRD 里的「零服务端改动」和配额行是开工时的承诺，交付时不改写就没有任何东西会红
+- **Saw**: c_ni7mzw 交付后独立验证判返工两项，全在文档而非代码：`feature-web-frontend.md` §13.1 该卡行仍写「零服务端改动」（实际新增 `settings/get` + `internal/buildinfo` + `servecli SetSettings`），§13.3 配额行仍写「≤8KB」且无实测（实际 CI 线 +31934B）。同文件 `:487` c_n37tnr 已有「**实际 ~46KB**」的记账先例，本卡没照做。
+- **Why**: 计划期的口径（「零服务端改动」「≤8KB」）写进表格后看起来像事实，但没有任何 gate 读它——`go test`/`web-gate` 都只量绝对体积和阈值，读不出「这一行的说法与 diff 矛盾」。超配额只体现在基线没被棘轮（因为净增仍为负），于是「低于基线」被误当成「配额没超」。
+- **Fix**: 交付时在**同一行**改写：§13.1 的增量口径列改成实况 + `**已交付**（卡号，分支）`；§13.3 配额行按 `:487` 先例补「**实际 ~xxKB**（钉 GOTOOLCHAIN 口径）」+ 超配额余量归属；代码注释里引用配额的地方（`webfrontend_settings.go` 头注）同步不再把 ≤8KB 当已兑现的预算说事。
+- **Lesson**: ①PRD 里的「零 X 改动」「≤N KB」是**待验证的承诺**，卡收尾时逐行对照 `git diff --stat` 复核，别让验收者当第一个读者；②`web-gate` 通过 ≠ 配额没超——gate 量的是相对基线的净增，配额量的是本卡自己的增量，两个数字方向可以相反；③配额的「钉 GOTOOLCHAIN 口径」必须成对给（CI 线 + 本机默认线），否则下一个人复现不出同一个数。
+- **Refs**: `docs/prd/feature-web-frontend.md` §13.1 c_ni7mzw 行 / §13.3 配额行（含 c_n37tnr 先例）；`scripts/web-size-baseline.txt` 的 delta 追加注释；卡 c_ni7mzw。
+
 ### 同一页面里第二份 `function loadSessions` 静默胜出——函数声明吊起，重复定义不报错只改行为
 - **Saw**: W5 侧栏卡（c_txz6vz）把 `loadSessions` 重写成「快照 + 过滤 + 30 行分页」后，无头验收报 `rows=32`（应 30）、搜索过滤完全不生效、点行不开正文——而新代码在源码里看起来「明明写着」。
 - **Why**: 旧 W4.4 的 `loadSessions`/`openSession` 仍留在文件后半段；`function` 声明整体吊起到同一作用域，**后出现的定义覆盖先出现的**，页面零报错，`node --check` 也过。所有调用点都静默落到旧版（全量渲染、无过滤、不开 `sess-detail`）。

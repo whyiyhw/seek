@@ -456,7 +456,7 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 | **c_xz2bey** hooks 审计 | **无直接对应**——dsh 的 hooks 即 Cordis 插件本身（dsh-analysis §1），无独立审计面；形状参考 `ui-trajectory`（事件台账 fold，pure-consumer 无服务） | 服务端已全：`hooks/list`（两层 hooks.toml 按 dispatch 序合并）+ `hooks/audit/tail`（from_ts/limit/project_id，W4.6 c_igze7m）；SSE hooks topic 未做（inspect-rpc §6 #6/#7 开放） | 审计面板 UI：hooks 定义表 + audit tail 视图（过滤参数对齐 method 面）；SSE topic 化维持开放、不在本卡 |
 | **c_6xktw4** 统计趋势 | **无对应**——dsh 遥测外发（dsh-base telemetry），无本地趋势面；形状参考 `ui-trajectory` 的 interactive timing overview | W4.5 stats 视图=单会话 cache/cost 快照（c_wno3o3）；`#usage` 计量=本页生命周期会话累计（W2.3，刷新重计） | 跨会话趋势：fold 各 session JSONL 的 `turn_end` usage 行（/rpc 读面 method 增量或复用 W4.2 reader）+ 无依赖 SVG/canvas 手绘图（零 vendor） |
 | **c_n37tnr** 审批卡片 | `ui-approval`（composer takeover，挂 Remote Event waterfall——**精确对应**）+ `ui-user-questions`（ask_user/plan review 面，远期参考） | print 模式 `ErrDenied` 工具结果即默认体验（§6 已验证②）；无远程审批通道——`askFn` 只在 TUI 进程内，平面无审批事件 | **web 半边已交付**（2026-11-20）：审批 hub（`webfrontend_approval.go`，pending 表 + 终态 FIFO 留存供幂等复读）+ SSE `approval` 事件族（conv 流命名事件——**不是** `?topic=` 维度：卡片要在任何视图弹出，主 `/events` 连接是常开载体，voice 先例）+ `/rpc approval/decide|list`（decide 是平面首个状态变更型 method：交互控制面，与只读资产面分立）+ 卡片 UI（描述+命令摘要+y/N/a，对齐 `permission.Policy` 语义；a=always-allow，Denial 仍是工具结果）+ 顶栏未决角标 + 空态零侵入（角标 hidden/卡栈 :empty）。幂等结构性成立：决定回调每 id 恰好一次、复读 applied=false、生产者重试同 id 不复活卡。验收：Go 测试（全流转/幂等/空态/conv 隔离/流翻译）+ 沙盒 E2E 双脚本（`scripts/web-approval-manual.sh` + `-headless.mjs`：curl 服务端三项 + 无头浏览器卡片/角标/防抖/双发）全绿；web-gate 过（钉 GOTOOLCHAIN 口径净增 ~46KB，超 §13.3 配额 25KB——注释瘦身仅省 200B，余为功能编译本体；gate 余量 1.25MB，W5 包合计 ~60KB/175KB 仍在包内，如实记账不棘轮）。**子进程半边拆后续卡（>2h）**，契约：①`seek -p` 增 askFn 路径，吐 additive jsonLine `{"type":"approval_request","req_id":"<子进程铸>","kind":"bash","summary":"…","command":"…","diff":"…"}` 后**阻塞读 stdin**，决定行 `{"type":"approval_decision","req_id":"…","decision":"y\|n\|a"}` 回读（`a` → allow + SetAlwaysAllow(Kind)；denial 走工具结果）；run 中止吐 `{"type":"approval_cancel","req_id":"…"}`；②平面侧：executor 事件面已就绪（RunEvent 增 req_id/kind/summary/command/diff 字段，`SendStream` 已翻进 hub），要补的只是 decide 回调 → 子进程 stdin 写回的管道（executor attempt 持 stdin writer、按 req_id 路由）+ run 终止时 hub 撤卡（`CancelApproval` 已备）；③卡片超时/会话期 always-allow 状态落点随该卡定 |
-| **c_ni7mzw** 主题设置 | `ui-theme`（light/dark/system 三态 ThemeRuntime + `--dsw-*` token 体系 + Appearance 设置行——**精确对应**） | 单一暗色硬编码 hex（#14161a 等），无 CSS 自定义属性、无主题态、无设置面 | `--seek-*` token 化改写既有样式 + light/dark/system 三态（localStorage 持久 + `prefers-color-scheme` 跟随）；零服务端改动；dsh 的 ThemeRuntime 是插件服务，seek 侧一个 JS 对象够（两赛道论 §7） |
+| **c_ni7mzw** 主题设置 | `ui-theme`（light/dark/system 三态 ThemeRuntime + `--dsw-*` token 体系 + Appearance 设置行——**精确对应**） | 单一暗色硬编码 hex（#14161a 等），无 CSS 自定义属性、无主题态、无设置面。**已交付**（c_ni7mzw，drive/c_ni7mzw）——亮/暗/跟随系统三态 + 设置面板（只读）+ 关于区 | **已交付**（2026-11-20）：`--seek-*` token 两套（亮/暗）改写既有样式，单属性 `data-theme` 开关 + 三态（localStorage 持久；`system` 态实时跟随 `prefers-color-scheme`）；`<head>` 内联 bootstrap 在样式表之前同步落 `data-theme` 防首屏闪烁（CSP 三个内联块 sha256 由 `webfrontend_static.go` 从同一份 embed 现算）；设置面板**只读**——`/rpc settings/get`（挂在 frontend 上，同 `approval/*` 先例：token 半属于前端自有状态）投影 serve 启动时生效的配置 + 默认值解析（并发/web_addr/自动压缩/候选项目），面板写明改法（编辑 `~/.seek/config.json` 后重启），写口需配置写入 + 重启路径、超本卡配额故不做；关于区＝版本（`VersionString` 迁至 `internal/buildinfo`，TUI 薄委托）+ 入口 token 后 6 位（完整 token 不出服务端）。服务端增量：`settings/get`、`internal/buildinfo`、`servecli SetSettings`——**不是零服务端改动**（原口径已按实况改写） |
 | **c_oyp2qf** 顶栏 ContextMeter | **无常驻 context 计量条**；最接近 `ui-conversation` 的 request/header\|context 检查面（ConversationPromptSnapshot——请求级快照回放，非实时计量） | `#usage` 计量=会话累计 tokens/$（W2.3，usage 命名事件）；无 context 窗口占用显示 | 顶栏 context 填充计量：`turn_end` PromptTokens 为占用代理 / 窗口上限取模型目录同源数据（pricing/opencatalog 族，不另立表）；挂点在 c_txz6vz 骨架之后（§13.5） |
 
 ### 13.2 范围翻案与维持（§2.6 已就地改注，此处记理由）
@@ -468,9 +468,9 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 - **WebSocket**：W5 的全部新增交互形状仍是「下行=事件流（SSE，含 topic 化）、上行=POST」——审批决定是一次 POST、附件上传是一次 POST（/voice 先例）、面板数据是 GET+SSE。没有出现需要双向低延迟帧的需求（编辑器协作类），§2.2 的论证原样成立；为 W5 引入 WS 等于为一个不存在的需求重造鉴权/CSRF/背压语义。
 - **多用户/发言人隔离**：审批卡片把「决定权」送到了浏览器，但决定者仍是同一单人（token 持有者）——单人自用的 D-C5 立场不变，`Sender` 字段继续休眠。第二个审批者才需要身份隔离，那是 D-C5 的重开条件，不是 W5 的。
 
-### 13.3 体积预算分配（<200KB gate；基线现值 30480715B）
+### 13.3 体积预算分配（<200KB gate；基线现值 30503016B）
 
-`scripts/web-size-baseline.txt` 现值 **30480715B**（c_f6ayyg 202ad58 棘轮；W2.4 曾棘轮至 30246587B，voice/W4.5/W4.6 其间增长已并入基线）。gate 口径不变（§4.3）：linux/amd64 构建对基线**净增 <200KB**。W5 是一个整体预算包，13 张卡的配额（配额=该卡全部净增的上限，含 .go 编译产物与 embed 资产；embed 资产按源字节 1:1 计）：
+`scripts/web-size-baseline.txt` 现值 **30503016B**（c_f6ayyg 202ad58 棘轮 30480715B，此后 c_x2au4t +14109B、c_txz6vz +8192B 按 delta 追加；W2.4 曾棘轮至 30246587B，voice/W4.5/W4.6 其间增长已并入基线）。gate 口径不变（§4.3）：linux/amd64 构建对基线**净增 <200KB**。W5 是一个整体预算包，13 张卡的配额（配额=该卡全部净增的上限，含 .go 编译产物与 embed 资产；embed 资产按源字节 1:1 计）：
 
 | 卡 | 配额 | 备注 |
 |---|---|---|
@@ -485,11 +485,11 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 | c_xz2bey hooks 审计 | ≤10KB | 审计面板（服务端 W4.6 已全） |
 | c_6xktw4 统计趋势 | ≤12KB | usage fold + 无依赖图表 |
 | c_n37tnr 审批卡片 | ≤25KB | 平面缝 + 卡片 UI（本组最重）。**实际 ~46KB**（钉 GOTOOLCHAIN 口径，2026-11-20 交付时）：注释瘦身仅省 200B，余为 hub/RPC/UI 编译本体；超配额部分吃包内 25KB 余量（累计 ~60KB/175KB），gate 仍有 1.25MB 余量、未棘轮——超在记账、不在 gate |
-| c_ni7mzw 主题设置 | ≤8KB | token 化 + 三态切换 |
+| c_ni7mzw 主题设置 | ≤8KB | token 化 + 三态切换。**实际 ~31KB**（钉 GOTOOLCHAIN 口径，2026-11-20 交付时，相对开工点 65284a13）：go1.25.8（CI 线）29274891→29306825 = **+31934B**，本机默认 go1.27.3 同法 31080890→31121857 = +40967B——`webfrontend.html` 源字节 +15031B（76543B→91574B，§13.3 embed 按源字节 1:1 计）+ Go 新增 ~290 行（`settings/get`/`internal/buildinfo`/servecli 接线/静态块锚定）。超配额者不在减法空间：三态+防 FOUC+只读面板+关于区本身就是卡面四项验收；超配额部分吃包内余量（W5 已交付四卡实际合计：c_x2au4t +13.6KB、c_txz6vz +8.2KB、c_n37tnr ~46KB、本卡 +31.9KB ≈ **100KB**，仍在包预算 175KB 内——对照配额表这四卡名义上限合计 83KB，超出的 ~17KB 吃掉表底 25KB 余量中的 17KB（**余 ~8KB**）；剩余 9 卡名义上限合计 92KB 而包内实际可用 ~75KB——后续卡须按实测收紧，不得再默认宽裕），gate 未棘轮（CI 线 29306825B 比基线 30503016B 低 1.19MB，`GOTOOLCHAIN=go1.25.8 bash scripts/web-gate.sh` 复现） |
 | c_oyp2qf 顶栏 ContextMeter | ≤6KB | 计量条 |
-| **合计** | **175KB** | **余 25KB（12.5%）**留给棘轮误差与测试夹具 |
+| **合计** | **175KB** | 名义余 25KB（12.5%，留给棘轮误差与测试夹具）。**已交付四卡实测 ≈100KB/175KB**，其中超各自配额 ~17KB；余量剩 ~8KB、剩余 9 卡可用 ~75KB（名义 92KB）——见上 c_ni7mzw 行 |
 
-参照系：W2.1–W4.6 十卡合计净增 29790B（均 ~3KB/卡）——配额是宽松上限不是目标，**超配额即超 gate**，卡内先做减法（每 minor 一刀的减法纪律）再谈棘轮。源码侧同步约束：`webfrontend.html` 现值 59649B（58KB），static/ 拆分后全部前端源（html+js+css+vendor）合计维持 **<200KB**——超线即触发 §4.3 escape hatch 评审（build tag，不回 tarball）。
+参照系：W2.1–W4.6 十卡合计净增 29790B（均 ~3KB/卡）——配额是宽松上限不是目标，**超配额即超 gate**，卡内先做减法（每 minor 一刀的减法纪律）再谈棘轮。源码侧同步约束：`webfrontend.html` 现值 91574B（89KB，c_ni7mzw 交付面；另有 `static/markdown.js` 6267B），static/ 拆分后全部前端源（html+js+css+vendor）合计维持 **<200KB**——超线即触发 §4.3 escape hatch 评审（build tag，不回 tarball）。
 
 ### 13.4 W4.5 交付标注核对
 
