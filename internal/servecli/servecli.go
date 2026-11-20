@@ -72,6 +72,10 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		methods.NewProjectsFromEnv().RegisterAll(reg)
 		methods.NewStatsFromEnv().RegisterAll(reg)
 		methods.NewHooksFromEnv().RegisterAll(reg)
+		// inspect-rpc §6 #12 close-out: subagent/list|get on the /rpc
+		// plane (the M12.1 rows). GET /subagents stays as the panel's
+		// compatibility口 — both read the same disk fold.
+		methods.NewSubagents().RegisterAll(reg)
 		return fe
 	},
 	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides

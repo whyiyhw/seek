@@ -59,7 +59,7 @@ excluded_reason() {
       echo "体积/零构建链闸：trip 即红是职责（同 verify-doc-budgets 闸语义）+ 每跑一次全量交叉编译 linux/amd64 二进制，重" ;;
     pkg-inventory)
       echo "测量报告工具：全仓 go test -cover 分钟级、且测试失败也不红（|| true 吞掉）——绿无可信度、费时不增值" ;;
-    web-memory-manual|web-sessions-manual|web-stream-manual)
+    web-memory-manual|web-sessions-manual|web-stream-manual|web-md-manual|web-subagents-manual)
       echo "手测脚本：起真 serve 后打印手测清单、等人按 Enter 收尾（交互阻塞），浏览器验收是人活" ;;
     *)
       return 1 ;;

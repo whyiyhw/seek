@@ -432,10 +432,19 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// project_id is the /rpc families' key (subagent/list & co. take one):
+	// deriving it here keeps the page from hashing paths in JS. Unbound
+	// stays "" — the zero-binding path must not hash an empty string into
+	// a plausible-looking id.
+	projectID := ""
+	if err == nil {
+		projectID = paths.ProjectID(b.ProjectPath)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bound":   err == nil,
-		"project": b.ProjectPath,
-		"session": b.SessionID,
+		"bound":      err == nil,
+		"project":    b.ProjectPath,
+		"project_id": projectID,
+		"session":    b.SessionID,
 	})
 }
 
