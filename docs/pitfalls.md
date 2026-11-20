@@ -44,8 +44,8 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Agent loop | 17 |
 | DeepSeek API | 24 |
 | Go language | 12 |
-| Tooling / environment | 24 |
-| LLM provider quirks (M6) | 10 |
+| Tooling / environment | 25 |
+| LLM provider quirks (M6) | 11 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -70,7 +70,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Typed agents / orchestration | 2 |
 | Git / merge | 2 |
 | Subprocess / streaming stdout | 2 |
-| Web frontend / asset plane | 15 |
+| Web frontend / asset plane | 17 |
 | Tooling / go list | 2 |
 | Skill stats / --idle | 1 |
 | MCP bridge / tool naming | 1 |
@@ -79,9 +79,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **255** |
+| **Total** | **267** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 154.
 
 ---
 
