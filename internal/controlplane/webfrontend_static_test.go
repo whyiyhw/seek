@@ -28,7 +28,7 @@ import (
 // updates this pin IN THE SAME COMMIT:
 //
 //	shasum -a 256 internal/controlplane/webfrontend.html
-const webPageSHA256 = "52994a9b8f8135d354cc55e40cccdc3e4ec0eb05177386f8c4bd6dd8c1cdbc52"
+const webPageSHA256 = "80f19e96bceaba2df7892fc7b8df33862a80f81083ac27e2f04933edcb833e3b"
 
 func TestWeb_AssetHashPinned(t *testing.T) {
 	sum := sha256.Sum256(webPage)

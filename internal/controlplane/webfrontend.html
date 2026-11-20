@@ -1788,8 +1788,9 @@ function syncTopicStream() {
 // 快照落地后补放（hkSeen 整行去重——审计行没有行内唯一 id，断线重连的
 // 补拉快照与实时推送靠整行相等折叠；真正的全同重复行会被误折，这是
 // method 面契约的边界，不是本视图能修的）。
-// 三交互：滚动追加（贴底自动跟随，上翻不拽回、计数提示）、暂停/恢复
-// （冻结渲染不冻结积累，恢复即补齐）、按 hook 名子串过滤（大小写不敏感）。
+// 三交互：滚动追加（贴底自动跟随，上翻不拽回、计数提示，点计数或滚回
+// 贴底即补渲染漏掉的行）、暂停/恢复（冻结渲染不冻结积累，恢复即补齐）、
+// 按 hook 名子串过滤（大小写不敏感）。
 const hkLog = document.getElementById('hk-log');
 const hkFilterEl = document.getElementById('hk-filter');
 const hkPauseBtn = document.getElementById('hk-pause');
@@ -1870,7 +1871,11 @@ function hkUpdateCnt() {
 hkCnt.addEventListener('click', () => {  // 有积压时可点跳底（fresh 态才有意义）
   if ((hkFreeze ? hkRows.length - hkFreeze.length : hkUnread) > 0) hkJump();
 });
-function hkJump() { hkLog.scrollTop = hkLog.scrollHeight; }
+// 跳底必须走补渲染而非只设 scrollTop：上翻期间的新行只入了 hkRows 不在
+// DOM（hkAppend 不贴底不渲染），纯滚到底滚的是旧内容的底，漏行要等下一
+// 次推送才出现。hkRender(true) 从持有行全量补画并贴底（行已在客户端，
+// 无需重拉；冻结态则渲染冻结快照，跳到冻结视图的底，语义不变）。
+function hkJump() { hkRender(true); }
 
 // 追加若干行（推送/快照补放共用）：整行去重入窗，贴底即渲染跟随，否则
 // 只积累并计「新行」数。暂停时不动渲染（积压=冻结差，见 hkUpdateCnt）。
@@ -1961,8 +1966,11 @@ hkPauseBtn.addEventListener('click', () => {
 });
 
 hkFilterEl.addEventListener('input', () => hkRender(hkAtBottom()));
-hkLog.addEventListener('scroll', () => {  // 回贴底即清「新行」提示
-  if (hkAtBottom() && !hkFreeze && hkUnread) { hkUnread = 0; hkUpdateCnt(); }
+// 手动滚回贴底与点计数跳底同一条纪律：hkUnread>0 即 DOM 缺行，须补渲染
+// （hkRender(true) 渲染后重设 scrollTop 会再触发本监听器，届时 hkUnread
+// 已被清零，无循环）。冻结态不补——恢复按钮才解冻。
+hkLog.addEventListener('scroll', () => {
+  if (hkAtBottom() && !hkFreeze && hkUnread) hkRender(true);
 });
 
 // ---- 记忆浏览器（W4.5 资产面 UI·二）----

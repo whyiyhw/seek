@@ -131,7 +131,9 @@ async function evalJS(expr) {
 
 // 审计面板的页面快照：面板态/渲染行数/持有数/冻结/计数/贴底/滚动位。
 // sessions 取自页面状态（行文本不渲染 session_id/reason——reason 在
-// title 悬停里），断言内容在场/恰一次用它，不看 logText。
+// title 悬停里），断言内容在场/恰一次用它，不看 logText；lastRow 取末位
+// DOM 行文本——景 5 断言「点计数跳底后 DOM 真的有这行」必须看 DOM 而非
+// 页面状态（上翻期间新行只入 hkRows 不入 DOM，看状态会掩盖缺行缺陷）。
 const hkSnap = () => evalJS(`(() => {
   const log = document.getElementById('hk-log');
   const rows = log.querySelectorAll('.hk-row');
@@ -144,6 +146,7 @@ const hkSnap = () => evalJS(`(() => {
     atBottom: log.scrollHeight - log.scrollTop - log.clientHeight < 24,
     scrollTop: log.scrollTop,
     logText: log.textContent,
+    lastRow: rows.length ? rows[rows.length - 1].textContent : '',
     sessions: hkRows.map(r => r.session_id),
   };
 })()`);
@@ -243,18 +246,27 @@ try {
   ck('恢复：补齐并贴底', s.rendered === base + 3 && s.atBottom, `rendered=${s.rendered}`);
 } catch (e) { ck('暂停/恢复', false, e.message); await dump(); }
 
-// 景 5：上翻不拽回——滚到顶追加：视图不动 + 新行计数；点计数跳底。
+// 景 5：上翻不拽回——滚到顶追加：视图不动 + 新行计数；点计数跳底后 DOM
+// 补渲染（上翻期间新行只入 hkRows 不入 DOM，跳底必须补画——断言全走 DOM
+// 侧 rendered/lastRow，不看页面状态 sessions，否则缺行缺陷会被掩盖）。
 trace('景 5：上翻不拽回');
 try {
   await evalJS(`document.getElementById('hk-log').scrollTop = 0`);
-  appendAudit(mint('fmt', 'scroll-top'));
+  const stLine = mint('fmt', 'scroll-top');
+  const st = JSON.parse(stLine);
+  appendAudit(stLine);
   await delay(1_800);
   let s = await hkSnap();
   ck('上翻：不被新行拽回（scrollTop≈0）', s.scrollTop < 10 && !s.atBottom, `scrollTop=${s.scrollTop}`);
   ck('上翻：新行计数提示', s.cnt.includes('新行'), `cnt=${s.cnt}`);
-  await click('hk-cnt');   // fresh 态可点跳底
-  s = await until('跳底', s => s.atBottom, 2_000);
-  ck('上翻：点计数跳底见新行', s.atBottom && s.sessions.includes('scroll-top'), '');
+  ck('上翻：新行未渲染进 DOM（rendered 仍 base+3）', s.rendered === base + 3 && s.held === base + 4,
+    `rendered=${s.rendered} held=${s.held}`);
+  await click('hk-cnt');   // fresh 态可点跳底（= hkRender(true) 补渲染 + 贴底）
+  s = await until('跳底补渲染', s => s.atBottom && s.rendered === base + 4, 2_000);
+  const tsDisp = st.ts.replace('T', ' ').slice(5, 19);
+  ck('上翻：点计数跳底 DOM 行=base+4', s.rendered === base + 4, `rendered=${s.rendered}`);
+  ck('上翻：末位 DOM 行即新行（scroll-top 的 ts+时长）',
+    s.lastRow.includes(tsDisp) && s.lastRow.includes(st.duration_ms + 'ms'), `lastRow=${s.lastRow}`);
 } catch (e) { ck('上翻不拽回', false, e.message); await dump(); }
 
 // 景 6：断线补拉——杀 serve、断线期间追加两行、重启：自动重连 + 补拉，

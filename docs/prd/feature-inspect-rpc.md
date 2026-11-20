@@ -304,7 +304,7 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 | 4 | ✅ `session/messages` 分页遍历=全文件顺序（cursor=消息行 offset，追加稳定） | W4.2 表驱动钉死 |
 | 5 | 替代——web 侧为跨进程磁盘读（append-only JSONL + 行级 parse，尾读不锁）；§3.4 RWMutex 是 TUI 进程内问题，web 面不需要 | §3.3 caveat（feature-web-frontend）；`-race` 全量绿 |
 | 6 | ✅ 收口（2026-11-20，W5 c_xz2bey）——follow 面=serve `/events` SSE `hooks` topic（全局审计 JSONL tail-follow，帧=审计行 verbatim，无需 conv 绑定）；断连后 follow 随最后一个订阅者关闭、handler/follower goroutine 退出（leaktest 同 W3.2 口径：`TestWeb_TopicHooksSharedRefcountAndLeak`）；`follow:true` 仍 -32602 但指路该 topic | W5 c_xz2bey（webfrontend_hookstopic.go + hooksconfig/follow.go） |
-| 7 | ✅ 收口（2026-11-20，W5 c_xz2bey）——hooks topic 接入同一 hub（`pushFollow` 满丢老不阻塞同栈，`TestWeb_PushTopicDropsOldest` 语义共用）；面板的「N 新行」计数即 lagged 提示，点计数跳底后重拉补洞 | W3.2 + W5 c_xz2bey |
+| 7 | ✅ 收口（2026-11-20，W5 c_xz2bey）——hooks topic 接入同一 hub（`pushFollow` 满丢老不阻塞同栈，`TestWeb_PushTopicDropsOldest` 语义共用）；面板的「N 新行」计数即 lagged 提示，点计数或手动滚回贴底即补渲染积累的行（上翻期间新行只积累不渲染，行已在客户端持有，补渲染即可、无需重拉） | W3.2 + W5 c_xz2bey |
 | 8 | 替代（更严）——web_addr scope 闸：非 loopback/tailnet-CGNAT 一律拒启 exit-2 | `TestWeb_AddrScope` / `TestWeb_RunForbiddenAddr` / `TestServePlane_BadWebAddrFails` |
 | 9 | ✅（更严）——web 面全状态路由一律 token（401 家族），不分是否 loopback | W1.2 鉴权族测试 |
 | 10 | 取消替代——tarball 被 go:embed 取代；体积由 CI web-gate 守（净增 <200KB） | W1.5（c_ph2zax） |

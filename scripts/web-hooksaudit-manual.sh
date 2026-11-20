@@ -97,8 +97,11 @@ AUDIT="$TMP/hooks-audit.jsonl"
 echo "== seed audit =="
 : > "$AUDIT"
 i=0
+# 注意 printf 形状：JSON 整体作格式串（%02d/%d 由参数展开）。上一轮写成
+# printf '%s\n' "$json含%02d" "$i"——%s 不展开格式符，ts 里落了字面 %02d，
+# 且 $i 被 %s\n 复用格式串多打出一行裸数字（follower 当坏行吞掉）。
 while [ $i -lt 40 ]; do
-  printf '%s\n' "{\"ts\":\"2026-11-20T08:%02d:00Z\",\"event\":\"post_tool_use\",\"hook\":\"fmt\",\"tool\":\"bash\",\"session_id\":\"pad-$i\",\"duration_ms\":$((i+1)),\"exit_code\":0}" "$i" >> "$AUDIT"
+  printf '{"ts":"2026-11-20T08:%02d:00Z","event":"post_tool_use","hook":"fmt","tool":"bash","session_id":"pad-%d","duration_ms":%d,"exit_code":0}\n' "$i" "$i" $((i+1)) >> "$AUDIT"
   i=$((i+1))
 done
 printf '%s\n' '{"ts":"2026-11-20T09:00:00Z","event":"post_tool_use","hook":"fmt","tool":"bash","session_id":"s1","duration_ms":12,"exit_code":0}' >> "$AUDIT"
@@ -197,8 +200,8 @@ fi
 
 echo "== 人工清单（Chrome 或 node≥22 不可用）=="
 cat <<'LIST'
-1. 浏览器打开上面的 URL → 顶栏「🪝 审计」：面板应显示 43 行快照
-   （40 垫高 + fmt/lint/ctx 各一），贴底。
+1. 浏览器打开上面的 URL → 顶栏「🪝 审计」：面板应显示 44 行快照
+   （40 垫高 + fmt/lint/ctx 各一 + 自检的 live1），贴底。
 2. 等 1–2 秒后手动追加一行（命令在下）→ 面板底部滚出新行，无需刷新。
 3. 「⏸ 暂停」→ 再追加两行 → 画面冻结，右上计数出现「2 新行」；
    「▶ 恢复」→ 立即补齐到最新并贴底。
