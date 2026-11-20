@@ -225,6 +225,42 @@ func TestBuildFrontendsWebRegistersAssetMethods(t *testing.T) {
 	}
 }
 
+// TestBuildFrontendsWebRegistersApprovalMethods is the W5 c_n37tnr
+// sibling: the approval hub's two methods answer through the
+// production wiring (the hub is frontend-native state, so its methods
+// register on the frontend itself, not the internal/rpc/methods
+// families). Without this wiring the page's cards would 404 on every
+// decide — the pin exists so a registry-line deletion fails here.
+func TestBuildFrontendsWebRegistersApprovalMethods(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("SEEK_SESSIONS_DIR", "")
+
+	fes, err := buildFrontends([]string{"web"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fe, ok := fes[0].(*controlplane.WebFrontend)
+	if !ok {
+		t.Fatalf("web frontend = %T, want *controlplane.WebFrontend", fes[0])
+	}
+	reg := fe.RPCRegistry()
+	ctx := context.Background()
+
+	res, err := reg.Dispatch(ctx, "approval/list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("approval/list: %v", err)
+	}
+	if b, _ := json.Marshal(res); !strings.Contains(string(b), `"approvals":[]`) {
+		t.Errorf("empty approval/list = %s, want empty approvals", b)
+	}
+
+	_, err = reg.Dispatch(ctx, "approval/decide", json.RawMessage(`{"id":"nope","decision":"y"}`))
+	var ae *rpc.Error
+	if !errors.As(err, &ae) || ae.Code != rpc.CodeInvalidParams {
+		t.Errorf("unknown-id decide = %v, want -32602", err)
+	}
+}
+
 // TestBuildFrontendsWebRegistersHooksMethods is the W4.6 sibling: the
 // hooks family answers through the production wiring — merged
 // hooks.toml view over a temporary SEEK_HOME (user + project files),

@@ -220,6 +220,21 @@ type RunEvent struct {
 	// agent_end only
 	Turns     int    `json:"turns,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
+	// approval_request / approval_cancel only (W5 card c_n37tnr, the
+	// additive plane seam): a print-mode child surfacing a permission
+	// decision to a human. ReqID keys the whole round-trip (the child
+	// waits on it, the web approval hub files the card under it, the
+	// decision comes back keyed by it); Kind/Summary/Command/Diff
+	// mirror permission.Action's decision-relevant subset plus Display's
+	// rendering hints. No shipped seek emits these yet — the contract
+	// exists so the web side (webfrontend_approval.go) and the sandbox
+	// stubs can speak it; wiring the real child (askFn → event → stdin
+	// decision read-back) is the follow-up card.
+	ReqID   string `json:"req_id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Command string `json:"command,omitempty"`
+	Diff    string `json:"diff,omitempty"`
 }
 
 // RunStream is Run with an optional per-line observer: emit sees each
