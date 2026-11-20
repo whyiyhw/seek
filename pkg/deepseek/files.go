@@ -1,6 +1,6 @@
 // files.go — the Files API (POST /files) + document file parts on chat
 // messages, part of the 2026-11 tool/API family
-// (docs/prd/feature-deepseek-app-api.md §1.2 / §3, card F1).
+// (docs/prd/archive/feature-deepseek-app-api.md §1.2 / §3, card F1).
 //
 // The upload is the parse: POSTing a document with a recognition
 // purpose parses it server-side BEFORE the id comes back — a returned

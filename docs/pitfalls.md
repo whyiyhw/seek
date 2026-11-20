@@ -571,7 +571,7 @@ Coarse four-bucket rollup — **TUI**: 34 live · **API**: 36 live · **Go**: 43
 - **Why**: two separate assumptions. (1) The empty guard classifies by content shape, not finish_reason — a refusal is the one empty that IS the final answer. (2) `MessageEnd`'s `Message` is the persistence/side-channel view; the TUI commits the deltas it accumulated (`m.curContent`), so content injected only at end-of-turn never reaches the screen.
 - **Fix**: `isSafetyRefusal(finish)` (`refusal` | `content_filter`) handled BEFORE the empty guard → `safetyRefusalMarker` becomes the assistant content, plus an explicit MessageStart/MessageDelta so the live region renders it; no ErrorEvent, no retry, no AutoContinue. Tests pin one request, no ErrorEvent, marker in both history and the delta stream (`pkg/agent/agent_test.go:TestAgent_SafetyRefusal_*`).
 - **Lesson**: classify terminal outcomes by finish_reason before applying shape-based guards, and route any synthetic assistant content through the delta path — MessageEnd alone is invisible to the UI.
-- **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/feature-deepseek-app-api.md` §5
+- **Refs**: `pkg/agent/agent.go` (`isSafetyRefusal`, refusal branch in `runTurnDeepSeek`), `internal/tui/update_agent.go:350`, `docs/prd/archive/feature-deepseek-app-api.md` §5
 
 ### /compact's own rescue call cannot fit an overflowed context — the recovery path was the deadlock
 - **Saw**: the general shape of the grep-deadlock entry below (§Tooling): once the history overflows the model's window, `/compact` — the one command that exists to shrink the session — sends the FULL history to the summariser and gets the same `maximum context length` 400 every other prompt gets. Reproduced deterministically in `TestSummarise_OverflowRescue_Completes` (fixture ≈ 159K tokens vs a 128K window): the rescue request itself is rejected, so the session is unrecoverable in-app
@@ -587,7 +587,7 @@ Coarse four-bucket rollup — **TUI**: 34 live · **API**: 36 live · **Go**: 43
 - **Why**: undocumented server-side validation — the docs only forbid mixing *server* tools with each other; the client-tool interaction is enforced (off) or silently disables the server tool (on) with zero error surface.
 - **Fix**: no code — read_url path judged red and closed (PRD §2.2, R1–R4 archived). If ever revisited: probe coexistence with an unknowable-content URL, never trust HTTP 200 alone.
 - **Lesson**: a "green" status code is not a green light — a mixed-declaration request can succeed while the capability is quietly gone. Probe with content the model cannot know, and read the model's own tool inventory in its answer. (Bonus facts from the same run: `usage.server_tool_use` key is absent when all counters are zero; multi-turn round-trip of `server_tool_calls`+`signature` prevents re-fetch & re-billing, dropping it re-fetches; server-side page cache exists but cached re-fetches are still billed.)
-- **Refs**: `docs/prd/feature-deepseek-app-api.md` §2.2 (full 10-call evidence table), api-docs.deepseek.com/guides/web_tools
+- **Refs**: `docs/prd/archive/feature-deepseek-app-api.md` §2.2 (full 10-call evidence table), api-docs.deepseek.com/guides/web_tools
 
 ### `reasoning_content` rule for V4 thinking is the OPPOSITE of the old reasoner — conditional on tool_calls
 - **Saw**: a multi-turn V4 thinking-mode session with a tool_call in turn 1 hit a 400 on turn 2: `The 'reasoning_content' in the thinking mode must be passed back to the API`. We had `pkg/deepseek.StripReasoningContent` unconditionally clearing the field on every assistant message — exactly the wrong shape for V4
@@ -729,14 +729,14 @@ Coarse four-bucket rollup — **TUI**: 34 live · **API**: 36 live · **Go**: 43
 - **Why**: the EN page lists USD only, the ZH page CNY only (no dual columns). DeepSeek's own implied rate is ~6.67 CNY/USD (¥2 = $0.30), while the GLM row in pricing.go converts at an assumed 7.0 — comparing a CNY number against a 7.0-converted USD number manufactures a ~5% "change" out of thin air
 - **Fix**: verified 2026-11-14 against BOTH language versions before bumping anything; flash card left unchanged (comment re-dated), deepseek-v4-pro given its own registry entry ($1.32/$0.044/$3.96 peak — it had silently left the Flash-routing legacy list, where the fallback undercharges it ~4×), searchPerCallUSD switched to the natively-listed $0.75/1K
 - **Lesson**: when a price page has per-language currency columns, diff like-for-like currency (or convert with the page's own implied rate) before declaring a rate change. Routing arrangements are as volatile as prices: the "v4-pro is Flash-routed" claim from the 2026-09-10 entry above was true for two months, then reversed — re-read the legacy-id note on every pricing check, not just the numbers
-- **Refs**: `internal/pricing/pricing.go`, `pkg/deepseek/types.go`, docs/prd/feature-deepseek-app-api.md §0, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin)
+- **Refs**: `internal/pricing/pricing.go`, `pkg/deepseek/types.go`, docs/prd/archive/feature-deepseek-app-api.md §0, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin)
 
 ### The tools-family rates have LEFT the pricing pages entirely (2026-11-18 check)
 - **Saw**: pricing.go's ASR/TTS comments say "$0.116/h / $0.45 per 10k listed natively on the English pricing page (2026-11-16 check)" — but on 2026-11-18 BOTH pricing pages list only model tokens (en keeps Search/Fetch $0.75/1K; zh doesn't even keep those). File-parsing (¥1.5/千页, PRD feature-deepseek-app-api §1.2/§6) appears on NEITHER page — its live source is the Files API / document-parsing guide pages
 - **Why**: the tools family (OCR/ASR/TTS/file parsing) is documented on per-tool guide pages, not the quick-start pricing page; the pricing page's tool coverage drifts (search/fetch stayed on en, the rest silently vanished). A future rate bump that opens the pricing page first will conclude the constants are unsourced
 - **Fix**: parsePerPageUSD (F3) anchored on the PRD's ¥1.5/千页, USD derived at the search row's own documented native ratio (¥5/1K → $0.75/1K ⇒ $0.225/1K pages) with the derivation in the constant's comment; list-price-only posture (no discounts modelled) unchanged
 - **Lesson**: before bumping any tools-family constant, check the tool's own guide page (api-docs.deepseek.com/guides/files_api, /asr, /tts, …), not quick_start/pricing — and re-verify the guide page too, because that's where these prices live now. Where only a CNY figure exists, convert at the ratio the page natively documents for a sibling tool rather than inventing a rate
-- **Refs**: `internal/pricing/pricing.go` (`parsePerPageUSD` comment), docs/prd/feature-deepseek-app-api.md §1.2/§6, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin, both checked 2026-11-18)
+- **Refs**: `internal/pricing/pricing.go` (`parsePerPageUSD` comment), docs/prd/archive/feature-deepseek-app-api.md §1.2/§6, api-docs.deepseek.com/quick_start/pricing (+ /zh-cn/ twin, both checked 2026-11-18)
 
 ### /effort max turns hit finish_reason=length at 16k — seek's explicit cap undercut DeepSeek's implicit thinking budget
 - **Saw**: an effort:max session on a long (99k prompt, 99% cache) turn died with `response truncated (finish_reason=length, max_tokens=16384)` after a hidden-reasoning stretch — the whole 16k completion budget went to `reasoning_content`, content arrived empty or cut at the start. A sibling turn produced the clean-empty variant (`model returned an empty response`)
@@ -2037,14 +2037,14 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Why**: `{"type":"file","file_id":…}` 不是文本——file_id 串不进 prompt token 流；服务端在拼 prompt 前把解析结果展开成文档文字，缓存按展开后的 token 序列命中。所以换 id、重新上传都不击穿前缀缓存，只有文档内容或前序消息变化才会。
 - **Fix**: 无代码改动（结论本身是交付物）；实验形状固化在 `pkg/deepseek/files_smoke_test.go` `TestFiles_RealAPI_UploadReferenceResumeCache`（文件臂 + 文本对照臂 + resume 臂，断言命中覆盖文档权重的一半以上，并打印完整读数）。
 - **Lesson**: 「引用形态是否参与缓存」不能靠类比推断（base64 图 M-V.3 也是实测出来的）：file_id 与图 URL 一样可缓存，而且更稳——id 变了前缀照样命中，所以 ResolveFiles 的过期重传不会让用户多付一次 cache miss。
-- **Refs**: `docs/prd/feature-deepseek-app-api.md` §3.2 D-F6、§5 开放问题②；`pkg/deepseek/resolve.go`；`docs/prd/archive/feature-vision.md` M-V.3（base64 图先例）。
+- **Refs**: `docs/prd/archive/feature-deepseek-app-api.md` §3.2 D-F6、§5 开放问题②；`pkg/deepseek/resolve.go`；`docs/prd/archive/feature-vision.md` M-V.3（base64 图先例）。
 
 ### POST /files 响应里没有 page_count / expires_at——按页计费与过期重传都拿不到数据
 - **Saw**: F4 真 API 上传（2026-11-18）返回体只有 `{id, object, bytes, created_at, filename, purpose}`：`page_count`、`expires_at` 文档里写了、实际不发（`text_recognition` 与 `rich_layout_recognition` 两种 purpose 各传一次，同一 2 页 PDF，均缺）。后果：F3 的 `pricing.ParseCost(fo.PageCount)` 恒记 $0；F4 的过期重传因 `expires_at=0`（= 未声明过期）永不主动触发。
 - **Why**: 上传响应是 FileObject 的最小子集，解析产物（页数）与生命周期（过期时间）都不在其中；也没有别的查询接口可用——原始文件与解析结果均不支持下载/回读。
 - **Fix**: 语义不改：`0 = 未声明过期 = 不主动重传` 是有意的保守选择（宁可一个死 id 在发送时报错，也不要每轮重上传、重复计解析费）。烟测把字段缺失记为**读数**而不是失败，并在日志里点明后果（`files_smoke_test.go`）。
 - **Lesson**: 文档字段 ≠ 实际响应字段；凡是拿返回字段算钱的，真 API 首跑必须把原始响应体打出来核对。要接实按页计费，只能本地数页（仅 PDF 可行）或等 API 补字段——留给 F5 价格核对卡定夺。
-- **Refs**: `pkg/deepseek/files.go` `FileObject`；`internal/fileroute/fileroute.go`（计费点与 marker）；`docs/prd/feature-deepseek-app-api.md` §1.2 / §6。
+- **Refs**: `pkg/deepseek/files.go` `FileObject`；`internal/fileroute/fileroute.go`（计费点与 marker）；`docs/prd/archive/feature-deepseek-app-api.md` §1.2 / §6。
 
 ### 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文
 - **Saw**: F4 烟测（2026-11-18）同一份 2 页 PDF、同一字节内容，上传后立刻发问：多数运行 `prompt_tokens≈1941`（两页文字全在），但有一次只有 `1079`——第 1 页的事实答得出来，只存在于第 2 页的口令直接答 `NOT IN DOCUMENT`。同一进程再发一轮（`1102`）依旧没有第 2 页，说明不是「等一会儿就好」的异步补齐。`page_count` 又不返回（见上一条），客户端无法自检「解析是否完整」。
