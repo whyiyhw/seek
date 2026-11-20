@@ -32,6 +32,7 @@ import (
 	"github.com/whyiyhw/seek/internal/controlplane"
 	"github.com/whyiyhw/seek/internal/controlplane/fake"
 	"github.com/whyiyhw/seek/internal/rpc/methods"
+	"github.com/whyiyhw/seek/internal/session"
 )
 
 // frontends maps --frontend names to constructors. The default build
@@ -261,8 +262,9 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 	// The M2 router is the inbound handler: dedup → DirectAt →
 	// command/binding route → exec → session writeback → Send.
 	router := controlplane.NewRouter(fes, store, exec, controlplane.RouterConfig{
-		Projects: projects,
-		Yolo:     cfg.ServeYolo(),
+		Projects:      projects,
+		Yolo:          cfg.ServeYolo(),
+		LookupSession: sessionLookup(),
 	})
 
 	names := make([]string, len(fes))
@@ -281,6 +283,30 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 		fmt.Fprintln(stderr, "serve: plane down: drained cleanly")
 	}
 	return err
+}
+
+// sessionLookup adapts the sessions store to the router's /resume seam.
+// The store resolves lazily (session.NewStore creates the directory, and
+// serve must not touch the filesystem before a frontend exists) and only
+// the header is read — a resume needs the session's cwd, not its messages.
+func sessionLookup() func(string) (string, error) {
+	var (
+		store *session.Store
+		err   error
+	)
+	return func(id string) (string, error) {
+		if store == nil && err == nil {
+			store, err = session.NewStore()
+		}
+		if err != nil {
+			return "", err
+		}
+		sess, lerr := store.Load(id)
+		if lerr != nil {
+			return "", lerr
+		}
+		return sess.CWD, nil
+	}
 }
 
 // badConfig prints (unless out is nil — the flag package already

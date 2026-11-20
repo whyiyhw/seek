@@ -346,6 +346,100 @@ func TestRouter_ProjectsRendering(t *testing.T) {
 	}
 }
 
+// ---- /resume (c_7lsngm: the web page's @ session reference rides this) ----
+
+// /resume <sid> points the binding at an existing session, adopts that
+// session's own project when the lookup seam knows it, and the next
+// message carries -resume <sid> on the child argv. An unknown id is
+// refused by the seam (not silently written), and without the seam the
+// id is taken on trust with the current project kept.
+func TestRouter_ResumeExistingSession(t *testing.T) {
+	projA, projB := t.TempDir(), t.TempDir()
+	r, fe, store, stubDir := newTestRouter(t, nil, RouterConfig{
+		LookupSession: func(id string) (string, error) {
+			if id == "OLD-SESSION" {
+				return projB, nil
+			}
+			return "", errors.New("no such session")
+		},
+	})
+	if err := store.Put(Binding{ConvID: conv1, ProjectPath: projA}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Usage errors come back as replies, never as execs.
+	r.Handle(context.Background(), inbound("/resume", "e1"))
+	if s := fe.sends(); len(s) != 1 || !strings.Contains(s[0].Text, "用法：/resume") {
+		t.Fatalf("bare /resume reply = %+v", s)
+	}
+	r.Handle(context.Background(), inbound("/resume ../etc/passwd", "e2"))
+	if s := fe.sends(); len(s) != 2 || !strings.Contains(s[1].Text, "不合法") {
+		t.Fatalf("traversal-shaped id must be refused: %+v", s)
+	}
+
+	// Unknown id: the seam's error is surfaced, the binding untouched.
+	r.Handle(context.Background(), inbound("/resume NO-SUCH", "e3"))
+	if s := fe.sends(); len(s) != 3 || !strings.Contains(s[2].Text, "找不到会话") {
+		t.Fatalf("unknown id reply = %+v", s)
+	}
+	if b, err := store.Get(conv1); err != nil || b.ProjectPath != projA || b.SessionID != "" {
+		t.Fatalf("failed /resume must not touch the binding: %+v %v", b, err)
+	}
+
+	// The real thing: session stored, binding follows the session's cwd.
+	r.Handle(context.Background(), inbound("/resume OLD-SESSION", "e4"))
+	b, err := store.Get(conv1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.SessionID != "OLD-SESSION" || b.ProjectPath != projB {
+		t.Fatalf("/resume stored %+v, want sid OLD-SESSION in project %q", b, projB)
+	}
+	if s := fe.sends(); !strings.Contains(s[3].Text, "已续接会话 OLD-SESSION") {
+		t.Errorf("/resume ack = %q", s[3].Text)
+	}
+
+	// The next prompt rides the resumed id onto the child's argv.
+	r.Handle(context.Background(), inbound("continue please", "e5"))
+	invs := readInvocations(t, stubDir)
+	if len(invs) != 1 || !argvHas(invs[0], "-resume", "OLD-SESSION") {
+		t.Fatalf("prompt after /resume must pass -resume OLD-SESSION: %+v", invs)
+	}
+}
+
+// Without the lookup seam (bare routers, fake frontends) /resume takes
+// the id on trust and keeps the current project: the executor's own
+// -resume self-heal is what corrects a bad id on the next message.
+func TestRouter_ResumeWithoutLookupKeepsProject(t *testing.T) {
+	proj := t.TempDir()
+	r, fe, store, _ := newTestRouter(t, nil, RouterConfig{})
+	if err := store.Put(Binding{ConvID: conv1, ProjectPath: proj}); err != nil {
+		t.Fatal(err)
+	}
+
+	r.Handle(context.Background(), inbound("/resume ANY-ID", "e1"))
+	b, err := store.Get(conv1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.SessionID != "ANY-ID" || b.ProjectPath != proj {
+		t.Fatalf("/resume without seam = %+v, want sid ANY-ID + project preserved", b)
+	}
+	if s := fe.sends(); len(s) != 1 || !strings.Contains(s[0].Text, "已续接会话") {
+		t.Errorf("/resume ack = %+v", s)
+	}
+}
+
+// Unbound conversation: /resume answers the shared /bind hint, like
+// /new and /switch do.
+func TestRouter_ResumeUnboundHintsBind(t *testing.T) {
+	r, fe, _, _ := newTestRouter(t, nil, RouterConfig{})
+	r.Handle(context.Background(), inbound("/resume SOME-SID", "e1"))
+	if s := fe.sends(); len(s) != 1 || !strings.Contains(s[0].Text, "/bind") {
+		t.Fatalf("unbound /resume should hint /bind: %+v", s)
+	}
+}
+
 // ---- /cancel ----
 
 // /cancel mid-run: the ack fires, the run dies with the terminal

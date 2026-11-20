@@ -610,3 +610,57 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 		t.Errorf("refusal must state the allowlist, got %v", err)
 	}
 }
+
+// TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
+// multi-line input that sends on Enter and newlines on Shift+Enter, a
+// registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'
+// session reference fed by session/list. The keyboard paths are the
+// acceptance surface, and every one of them is a string in the page — a
+// rename or a "simpler" rewrite strands the feature silently, so they are
+// pinned here the way W2.1/W4.4/W4.5 pin their own pieces.
+func TestWeb_PageInputEnhancements(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		// ① multi-line: textarea, Enter sends, Shift+Enter falls through
+		`<textarea id="input"`,
+		"ev.key === 'Enter' && !ev.shiftKey",
+		"Shift+Enter",     // the comment stating the contract
+		"function grow()", // height follows content
+		// ② '/' command menu: registry + filter + keyboard navigation
+		"const CMDS = [",
+		"'/bind'", "'/projects'", "'/switch'", "'/new'", "'/cancel'",
+		"function slashHits()",
+		"ev.key === 'ArrowDown'",
+		"ev.key === 'ArrowUp'",
+		"ev.key === 'Tab'",
+		"ev.key === 'Escape'",
+		"function pick(i)",
+		// ③ '@' session reference: session/list source + resume semantics
+		"function atToken()",
+		"rpc('session/list', {})",
+		"sendText('/resume ' + sid, false)",
+		// the overlay itself, and its narrow-screen degradation
+		`id="menu"`,
+		"@media (max-width: 640px)",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the c_7lsngm input-enhancement piece %q", need)
+		}
+	}
+	// The chat plane keeps its old entry points: the form still submits
+	// through the ONE passthrough, and the quick buttons stay wired.
+	for _, keep := range []string{
+		`id="form"`, "sendText(input.value.trim(), true)", "wireCmd('cmd-bind', '/bind ')",
+	} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("input enhancement must be additive — lost %q", keep)
+		}
+	}
+	// The overlay must never capture keys globally: every listener that
+	// touches menu navigation hangs off the input element, and the page
+	// adds no document/window keydown handler.
+	if strings.Contains(page, "document.addEventListener('keydown'") ||
+		strings.Contains(page, "window.addEventListener('keydown'") {
+		t.Error("input enhancement must not install a global keydown handler (Esc must not be hijacked page-wide)")
+	}
+}
