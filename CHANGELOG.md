@@ -47,3 +47,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_3acz3q：v8·U1 后继：内核依赖八违例逐条定性——倒置/搬移/误报，修订内核清单 背景：v8.md:133（§9.3 U3 条款）——「U1 的 8 违例（tools/{edit,read,write}→fsobserve×3、tools/bash→{bgjob,childenv}、pkg/agent→{hooks,llm}，内核现读 10541 LOC）先逐条定性，清单修订后外移才有靶子」。本卡是清单修订分析卡，不是 U3 外移本体（U3 未开、拍板不动内核）。 任务：①跑 scripts/kernel-deps.sh 取现读数（与 10541 LOC 对比）；②八违例逐条定性：倒置（依赖方向错）/搬移候选（该挪）/误报（合理依赖），各给调用点行号依据；③v8.md §3 内核清单按定性修订（「U1 出数后修订」占位兑现）；④误报类写判定理由防将来反复。 验收：①八条全定性、每条有调用点行号；②内核清单修订 diff 落 v8.md；③kernel-deps.sh 读数复跑一致；④机制预算：分析卡零新机制；⑤架构页不触 butler 写明。git 只读 + 文档改，沙盒。
 - c_3mryc3：docs/prd 超预算 25293B 处置：盘点→归档/裁剪方案→verify-doc-budgets 收绿（c_554rlg 交接③）
 - c_kwiajf：信号：验证车道跑不成无头 manual 脚本——selftest 排除表理由过时（等 Enter 已不成立），c_txz6vz 验证停摆卡 W5 串行链
+- c_y2akdi：Files API 观测补口：page_count 缺失的计费兜底 + 同文件重复解析差异自检
