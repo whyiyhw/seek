@@ -56,6 +56,13 @@ type StatusSnapshot struct {
 	// meaningless as a context-limit signal.
 	LastUsage deepseek.Usage
 
+	// AutoCompactAt is the configured auto-compact trigger in tokens for
+	// the live model (0 = off). When non-zero it REPLACES the compiled
+	// warn/critical fractions as the escalation point: the bar should go
+	// red where compaction actually happens, not at a fixed 75% that may
+	// sit far above (or below) the user's own trigger.
+	AutoCompactAt int
+
 	// CumulativeCost is the session's total dollar cost, with each
 	// turn priced at the (model, tier) that were active when it ran.
 	// The status bar reads this directly rather than recomputing via
@@ -391,7 +398,7 @@ func rightSegments(s StatusSnapshot) []statusSegment {
 // already carries any urgency.
 func ctxPrio(s StatusSnapshot) int {
 	used := s.LastUsage.PromptTokens + s.LastUsage.CompletionTokens
-	switch budget.Classify(s.Model, used) {
+	switch budget.ClassifyAt(s.Model, used, s.AutoCompactAt) {
 	case budget.SeverityCritical:
 		return prioPin
 	case budget.SeverityWarn:
@@ -402,8 +409,14 @@ func ctxPrio(s StatusSnapshot) int {
 }
 
 // formatBudget renders the context-window utilisation. Stays muted in
-// the safe zone; tints amber above budget.WarnFraction (60%); tints red
-// above budget.CriticalFraction (75%) with a `/compact` nudge.
+// the safe zone; tints amber above the warn point; tints red above the
+// critical point with a `/compact` nudge.
+//
+// The critical point is the configured auto-compact trigger when one is
+// set (s.AutoCompactAt), otherwise budget.CriticalFraction (75%). In
+// the auto-compact case the nudge is redundant — the turn-end will
+// compact by itself — so the label says "auto-compact" instead of
+// telling the user to type a command that is already queued.
 func formatBudget(s StatusSnapshot) string {
 	// Use the last turn's prompt tokens, not the cumulative sum.
 	// Cumulative grows quadratically (each turn re-sends the full history)
@@ -418,14 +431,18 @@ func formatBudget(s StatusSnapshot) string {
 	// state.
 	label := fmt.Sprintf("ctx %d%%", pct)
 
-	switch budget.Classify(s.Model, used) {
+	switch budget.ClassifyAt(s.Model, used, s.AutoCompactAt) {
 	// "!" not "⚠": U+26A0 is East-Asian-ambiguous and often gets emoji
 	// presentation — a width-oracle hazard in the bar (foldStatusBar's
 	// note). The colour tint + bold carry the urgency; the glyph only
 	// needs to mark "attention", which ASCII does at a deterministic
 	// one cell.
 	case budget.SeverityCritical:
-		return lipgloss.NewStyle().Foreground(colourToolErr).Bold(true).Render("! " + label + " — /compact soon")
+		nudge := " — /compact soon"
+		if s.AutoCompactAt > 0 {
+			nudge = " — auto-compact"
+		}
+		return lipgloss.NewStyle().Foreground(colourToolErr).Bold(true).Render("! " + label + nudge)
 	case budget.SeverityWarn:
 		return lipgloss.NewStyle().Foreground(colourTool).Render("! " + label)
 	default:

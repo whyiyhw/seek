@@ -230,6 +230,13 @@ func (b *testModelBuilder) WithTurns(n int) *testModelBuilder {
 	return b
 }
 
+// WithAutoCompact arms the auto-compact trigger at a fixed token count
+// for every model — the shape cmd/seek wires from config. 0 disables.
+func (b *testModelBuilder) WithAutoCompact(at int) *testModelBuilder {
+	b.opts.AutoCompactAt = func(string) int { return at }
+	return b
+}
+
 // WithCustomState lets tests reach into any field that doesn't have
 // a dedicated knob. Prefer a dedicated method when the field is used
 // by ≥2 tests; this escape hatch is for one-off arrangement.
