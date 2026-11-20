@@ -151,8 +151,8 @@ for (let i = 0; i < 100; i++) {
   if (ready) break;
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
-const baseScript = await snapshot();   // 基线：脚本数（页面自身 1 个）
-ck('基线 scripts=1（仅页面内联脚本）', baseScript.nscript === 1, `got ${baseScript.nscript}`);
+const baseScript = await snapshot();   // 基线：脚本数（内联页面脚本 1 + static/markdown.js 1，W5 c_x2au4t）
+ck('基线 scripts=2（内联页面脚本 + static/markdown.js）', baseScript.nscript === 2, `got ${baseScript.nscript}`);
 
 // 轮询直到谓词过或超时；返回最后一次快照。history 收集过程态。
 async function until(what, pred, ms) {

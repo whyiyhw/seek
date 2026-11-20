@@ -9,4 +9,16 @@
 # Update this number IN THE SAME COMMIT that intentionally grows the
 # binary: scripts/web-gate.sh --update-baseline (re-measures, rewrites
 # the number, keeps these comments).
-30480715
+#
+# 2026-11-19 c_x2au4t ratchet: +14109B (markdown.js embed 6.3KB +
+# /static/ route + page wiring). Added as a DELTA to the existing pin,
+# NOT via --update-baseline's absolute re-measure — the absolute
+# depends ~MBs on the measuring toolchain: main@2e7ad39 builds at
+# 29105173B under go1.25.8 (CI's line, GOTOOLCHAIN-pinned locally) but
+# 30907349B under the local go1.27.3 default — either side of this pin
+# with zero change. The old pin already carries ~1.37MB of go1.25-side
+# slack (whose toolchain minted it, 202ad58, is unknown); delta-adding
+# keeps every toolchain's margin exactly as it was instead of baking
+# this machine's skew in. Gate runners: pass GOTOOLCHAIN=go1.25.8
+# locally to reproduce CI's numbers. (Pitfall logged in docs/pitfalls.)
+30494824
