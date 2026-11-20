@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**271 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**272 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -68,7 +68,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Eval / results data shape | 2 |
 | Transcript analysis / offline metrics | 4 |
 | Typed agents / orchestration | 2 |
-| Git / merge | 3 |
+| Git / merge | 4 |
 | Subprocess / streaming stdout | 2 |
 | Web frontend / asset plane | 17 |
 | Tooling / go list | 3 |
@@ -79,9 +79,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **271** |
+| **Total** | **272** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 158.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 159.
 
 ---
 
@@ -1842,6 +1842,14 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: 「纯搬移可核」的手段随拆分形态变——整文件搬家（`envgate.go`）用 `-M`，一块代码分到多个新文件用区段 diff。把验收写法钉死成 `-M`，会让正确的纯搬移看起来像没做。
 - **Refs**: `cmd/seek/main.go`, `cmd/seek/planbridge.go`, `cmd/seek/subagent_glue.go`; 整文件搬家先例 `cmd/seek/envgate.go`（0a66450）
 
+### 合并后追加的编号小节与 main 撞号——`### 9.5` 出现两次、`### 9.4` 消失
+
+- **Saw**: 卡 c_3acz3q 在分支里给 `docs/prd/v8.md` §9 追加了「### 9.5 内核清单修订…」，而 main 同时新增了「### 9.4 止损线读数」「### 9.5 R2 落地记录」。`git merge main` **不报冲突**（两处新增落在不同位置，文本不重叠），合并结果成了两个 9.5、没有 9.4；读者按「§9.5」查引用时指向哪节取决于读的是哪一行，独立验证才抓出来。
+- **Why**: 编号小节（`### 9.x`）是**手写序号**，git 只做文本合并，不知道序号是共享命名空间；「追加到小节列表末尾」这个动作在两边同时发生，于是各自占用了同一个"下一个号"。
+- **Fix**: merge 后按号核对一遍：`awk '/^### 9\./{print NR": "$0}' <file>`；重号就把本卡小节改到**最大号之后**（本节 9.5→9.6），main 的两节原样保留（逐字比对：`git show main:<file>` 的节区段与当前文件相等）；再 `grep -rn '§9\.[0-9]'` 把交叉引用一并改。
+- **Lesson**: 往「手写编号列表」追加条目是合并冲突的**隐形形状**——文本不冲突，语义冲突。merge 后要按编号做一次机械核对，别信 `git merge` 的 "Automatic merge went well"。
+- **Refs**: `docs/prd/v8.md` §9.4/§9.5/§9.6、`scripts/kernel-packages.txt` 注释、`docs/pitfalls.md` GOOS 条；card c_3acz3q 返工第 1 轮。
+
 ## Subprocess / streaming stdout
 
 ### StdoutPipe forbids concurrent Wait — kill-able line-streaming needs cmd.Stdout=io.Writer + io.Pipe
@@ -1986,9 +1994,9 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 ### `kernel-deps.sh` 的 LOC 读数是 GOOS 相关的 — 同一棵树 mac 与 Linux 差 200 行
 - **Saw**: 拿卡片里记的「内核 10541 LOC」对不上现读数 11168，一度怀疑是清单漂移或自己算错；`git archive 1a8e124` 复跑后 mac 读数正好 10541，而同一棵树 `GOOS=linux` 读 10742。
 - **Why**: 报告用 `go list -f '{{range .GoFiles}}…'` 数**非测试文件**，`.GoFiles` 是按**当前目标平台**过滤后的集合。`internal/sandbox`（`sandbox_{darwin,linux,other}.go`）和 `internal/tools/bash`（`bash_{unix,windows}.go`、`proc_{linux,other_unix}.go`）都有对称的构建约束分支，于是行数随 `GOOS` 变——darwin 11168 / linux 11369，差 201 行全在这两个包里。
-- **Fix**: 不改脚本（报告自身没错，是口径没写明）；`docs/prd/v8.md` §9.5 的读数表**双列记录** darwin / `GOOS=linux`，并注明复跑命令。卡片与 PRD 引用这个数时一并写平台。
+- **Fix**: 不改脚本（报告自身没错，是口径没写明）；`docs/prd/v8.md` §9.6 的读数表**双列记录** darwin / `GOOS=linux`，并注明复跑命令。卡片与 PRD 引用这个数时一并写平台。
 - **Lesson**: 任何"数非测试行数"的读数工具，跨机器比对前先固定 `GOOS`（CI 跑 Linux，本机多半 darwin）。差几百行先查构建约束，别先怀疑清单或自己的算术——**同一棵树在两个平台上本来就会报两个数**。顺带：违例条目**集合**本身是 GOOS 无关的（改动前 9 条、改动后 1 条，darwin/linux/windows/freebsd 逐字相同），只有 LOC 变。
-- **Refs**: `scripts/kernel-deps.sh:92`（`{{range .GoFiles}}`）、`docs/prd/v8.md` §9.5 读数表、card c_3acz3q。
+- **Refs**: `scripts/kernel-deps.sh:92`（`{{range .GoFiles}}`）、`docs/prd/v8.md` §9.6 读数表、card c_3acz3q。
 
 ### `git show --numstat` emits `-\t-` for binaries and one `old => new` line for renames
 - **Saw**: parsing numstat output as "two integers + path" trips on two line shapes: binary files render `-\t-\tb.bin` (dash counts), and a rename is ONE line `0\t1\ta.txt => renamed.txt` (or `dir/{old => new}/f.go`) even when content also changed — the old path never appears as its own delete line.
