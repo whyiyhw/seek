@@ -383,6 +383,21 @@
   .stat-bar { height: 10px; border-radius: 5px; background: #2c3d5f; overflow: hidden;
               margin-top: 8px; }
   .stat-bar .hit { height: 100%; background: #7ec699; }
+
+  /* ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）---- */
+  body:not(.hooks-view) #hooks { display: none; }
+  #hk-log { flex: 1; overflow-y: auto; padding: 8px 14px;
+            font: 12px/1.8 ui-monospace, Menlo, Consolas, monospace; }
+  .hk-row { display: flex; gap: 10px; white-space: nowrap; }
+  .hk-row .hk-ts { color: #7a8089; flex: none; }
+  .hk-row .hk-hook { color: #7aa2f7; flex: none; max-width: 180px;
+                     overflow: hidden; text-overflow: ellipsis; }
+  .hk-row .hk-ev { color: #d8a657; flex: none; }
+  .hk-row .hk-rest { color: #9aa0a8; overflow: hidden; text-overflow: ellipsis; }
+  .hk-row.denied .hk-rest, .hk-row.denied .hk-ev { color: #d8756f; }
+  #hk-cnt { cursor: default; }
+  #hk-cnt.fresh { color: #d8a657; cursor: pointer; }
+  #hk-pause.held { background: #2c3d5f; }
 </style>
 </head>
 <body>
@@ -403,6 +418,9 @@
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
   <button id="agents-btn" type="button">🤖 后台</button>
+  <!-- hooks 实时审计（W5 c_xz2bey）：审计 tail 视图 + /events 的 hooks
+       topic 实时追加。 -->
+  <button id="hk-btn" type="button">🪝 审计</button>
 </nav>
 <!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
      📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
@@ -460,6 +478,18 @@
         <select id="stat-sess" aria-label="会话"></select>
       </div>
       <div id="stat-body"></div>
+    </section>
+    <!-- hooks 审计视图（W5 c_xz2bey）：订阅先行的 tail——专用 /events 连接带
+         ?topic=hooks（审计日志是全局的，无需 /bind），快照走 POST /rpc
+         hooks/audit/tail；推送逐行追加，可暂停/按 hook 名过滤。 -->
+    <section id="hooks" class="pane">
+      <div class="pane-head">
+        <input id="hk-filter" type="search" autocomplete="off"
+               placeholder="按 hook 名过滤…" aria-label="按 hook 名过滤审计行">
+        <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）">⏸ 暂停</button>
+        <span class="cnt" id="hk-cnt" title="显示行数"></span>
+      </div>
+      <div id="hk-log"></div>
     </section>
     <form id="form">
       <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
@@ -1593,18 +1623,21 @@ let topicProject = null;
 
 const memBtn = document.getElementById('mem-btn');
 const statBtn = document.getElementById('stat-btn');
+const hkBtn = document.getElementById('hk-btn');
 memBtn.addEventListener('click', () => togglePane('memory'));
 statBtn.addEventListener('click', () => togglePane('stats'));
 agentsBtn.addEventListener('click', () => togglePane('agents'));
+hkBtn.addEventListener('click', () => togglePane('hooks'));
 
 // 三面板共用的开合闸（W4.5 的「browsing=隐聊天 + 恰好一个 *-view 亮面板」；
 // W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
-// 会话列表现在是常驻左栏，不再抢中栏。中栏三个面互斥：会话正文
-// （sess-detail）、记忆/统计/后台任选其一、或聊天面（默认）。
+// 会话列表现在是常驻左栏，不再抢中栏。中栏面板互斥：会话正文
+// （sess-detail）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
 const panes = {
   memory: { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',   load: loadMemPane },
   stats:  { btn: statBtn,   label: '📊 统计', cls: 'stat-view',  load: loadStatPane },
   agents: { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view', load: loadAgentsPane },
+  hooks:  { btn: hkBtn,     label: '🪝 审计', cls: 'hooks-view', load: loadHooksPane },
 };
 function closePanes() {
   for (const p of Object.values(panes)) {
@@ -1625,6 +1658,7 @@ function togglePane(name) {
     input.focus();   // 收起回聊天面
   }
   syncTopicStream();
+  syncHooksStream();
 }
 
 // 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
@@ -1746,6 +1780,190 @@ function syncTopicStream() {
   }
   if (!want && topicES) { topicES.close(); topicES = null; topicProject = null; }
 }
+
+// ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）----
+// 消费 /events 的 hooks topic（webfrontend_hookstopic.go：全局审计日志
+// tail-follow，帧=审计行 verbatim）+ /rpc hooks/audit/tail 快照。协议与任务
+// 面板同序：先订阅（锚点在订阅时刻）、再取快照；期间到达的推送先入队，
+// 快照落地后补放（hkSeen 整行去重——审计行没有行内唯一 id，断线重连的
+// 补拉快照与实时推送靠整行相等折叠；真正的全同重复行会被误折，这是
+// method 面契约的边界，不是本视图能修的）。
+// 三交互：滚动追加（贴底自动跟随，上翻不拽回、计数提示）、暂停/恢复
+// （冻结渲染不冻结积累，恢复即补齐）、按 hook 名子串过滤（大小写不敏感）。
+const hkLog = document.getElementById('hk-log');
+const hkFilterEl = document.getElementById('hk-filter');
+const hkPauseBtn = document.getElementById('hk-pause');
+const hkCnt = document.getElementById('hk-cnt');
+const HK_CAP = 500;    // 持有窗口上限（快照/补拉同 limit，与服务端 max 1000 内）
+let hkRows = [];       // 持有行（旧→新）；渲染来源（暂停时渲染 hkFreeze）
+let hkFreeze = null;   // 暂停时刻的行快照：null=未暂停
+let hkSeen = new Set();  // 持有行整行 JSON 键（去重 + 重连补拉折叠）
+let hkLiveQueue = [];  // 快照/补拉在途时缓存的实时推送
+let hkFetchBusy = false;
+let hkSyncChain = Promise.resolve();
+let hooksES = null;    // 面板专用 SSE 连接（面板开着才连；无需绑定项目）
+let hkEverOpened = false;
+let hkUnread = 0;      // 未贴底期间错过渲染的新行数（回贴底清零）
+
+// 一行审计的可视元素：时间/hook/事件/其余元数据，textContent-only 纪律。
+function hkRowEl(r) {
+  const el = document.createElement('div');
+  el.className = 'hk-row' + (r.denied ? ' denied' : '');
+  const ts = document.createElement('span');
+  ts.className = 'hk-ts';
+  ts.textContent = (r.ts || '').replace('T', ' ').slice(5, 19);
+  const hook = document.createElement('span');
+  hook.className = 'hk-hook';
+  hook.textContent = r.hook || '?';
+  const ev = document.createElement('span');
+  ev.className = 'hk-ev';
+  ev.textContent = r.event || '';
+  const rest = document.createElement('span');
+  rest.className = 'hk-rest';
+  const bits = [r.tool || '', (r.duration_ms || 0) + 'ms', 'exit' + (r.exit_code || 0)];
+  if (r.injected_bytes) bits.push('+' + r.injected_bytes + 'B');
+  if (r.denied) bits.push('denied');
+  rest.textContent = bits.filter(Boolean).join(' · ');
+  if (r.reason) el.title = r.reason;  // 超时/static-skip 等原因悬停可读
+  el.appendChild(ts); el.appendChild(hook); el.appendChild(ev); el.appendChild(rest);
+  return el;
+}
+
+function hkMatches(r) {
+  const f = hkFilterEl.value.trim().toLowerCase();
+  return !f || (r.hook || '').toLowerCase().includes(f);
+}
+
+function hkAtBottom() {
+  return hkLog.scrollHeight - hkLog.scrollTop - hkLog.clientHeight < 24;
+}
+
+// 全量重画（≤500 行，面板量级无所谓）。过滤变化/补拉/恢复后走这里；
+// 实时追加在贴底时也走全量重画后回贴底（行数小，简单胜过增量拼接）。
+function hkRender(stick) {
+  const rows = hkFreeze || hkRows;
+  hkLog.replaceChildren();
+  let shown = 0;
+  for (const r of rows) {
+    if (!hkMatches(r)) continue;
+    hkLog.appendChild(hkRowEl(r));
+    shown++;
+  }
+  if (!rows.length) paneHint(hkLog, '（还没有 hooks 审计记录——hooks 在子进程 seek 里执行后落审计日志）');
+  else if (!shown) paneHint(hkLog, '（过滤后无匹配行）');
+  if (stick) { hkLog.scrollTop = hkLog.scrollHeight; hkUnread = 0; }
+  hkUpdateCnt();
+}
+
+// 计数行：显示「匹配/持有 · N 新行」。N = 暂停冻结后的积累，或未贴底时
+// 错过渲染的新行（回贴底自动清零）；fresh 态可点跳底。
+function hkUpdateCnt() {
+  const backlog = hkFreeze ? hkRows.length - hkFreeze.length : hkUnread;
+  const rows = hkFreeze || hkRows;
+  let shown = 0;
+  for (const r of rows) if (hkMatches(r)) shown++;
+  hkCnt.classList.toggle('fresh', backlog > 0);
+  const base = shown === rows.length ? rows.length + ' 行' : shown + '/' + rows.length + ' 行';
+  hkCnt.textContent = base + (backlog ? ' · ' + backlog + ' 新行' : '');
+}
+
+hkCnt.addEventListener('click', () => {  // 有积压时可点跳底（fresh 态才有意义）
+  if ((hkFreeze ? hkRows.length - hkFreeze.length : hkUnread) > 0) hkJump();
+});
+function hkJump() { hkLog.scrollTop = hkLog.scrollHeight; }
+
+// 追加若干行（推送/快照补放共用）：整行去重入窗，贴底即渲染跟随，否则
+// 只积累并计「新行」数。暂停时不动渲染（积压=冻结差，见 hkUpdateCnt）。
+function hkAppend(rows) {
+  let added = 0;
+  for (const r of rows) {
+    const k = JSON.stringify(r);
+    if (hkSeen.has(k)) continue;
+    hkSeen.add(k);
+    hkRows.push(r);
+    added++;
+  }
+  while (hkRows.length > HK_CAP) hkRows.shift();
+  if (!added) return;
+  if (!hkFreeze && hkAtBottom()) hkRender(true);
+  else {
+    if (!hkFreeze) hkUnread += added;
+    hkUpdateCnt();
+  }
+}
+
+// 快照/补拉落库：整窗替换为服务端 tail（与服务端「锚点后推送」拼起来无
+// 洞无重：见函数尾注释），再补放在途推送。
+function hkSeed(rows) {
+  hkRows = rows.slice(-HK_CAP);
+  hkSeen = new Set(hkRows.map(JSON.stringify));
+  if (!hkFreeze) hkRender(true);
+}
+
+// 取快照并整窗重播（首次打开与断线重连共用——EventSource 的 retry:3000
+// 自动重连后 onopen 再触发一次，补拉即把断线窗口漏掉的行捞回来，验收②
+// 「断线重连不丢行」的页面半边）。在途期间推送入队，落地后 hkAppend 补放：
+// 队里的行要么晚于快照末行（直接追加，序不变），要么已在快照里（整行
+// 去重折叠）——两条路都不乱序不重复。
+function hkSync() {
+  hkFetchBusy = true;
+  hkSyncChain = hkSyncChain.then(async () => {
+    try {
+      const res = await rpc('hooks/audit/tail', { limit: HK_CAP });
+      hkSeed(res.entries || []);
+    } catch (e) {  // 已持有行不因取快照失败而被抹掉；只在空窗时亮错
+      if (!hkRows.length) paneHint(hkLog, 'hooks/audit/tail 失败：' + e.message);
+    }
+    hkFetchBusy = false;
+    const queued = hkLiveQueue; hkLiveQueue = [];
+    hkAppend(queued);
+  });
+  return hkSyncChain;
+}
+
+// 面板专用 SSE 生命周期：面板开着才连（无需绑定项目——审计日志全局），
+// 关掉即断；重开/重连都经 onopen → hkSync 补拉，状态跨面板开合不断档。
+function syncHooksStream() {
+  const want = document.body.classList.contains('hooks-view');
+  if (want && !hooksES) {
+    hooksES = new EventSource(q('/events?conv=' + encodeURIComponent(CONV) + '&topic=hooks'));
+    hooksES.addEventListener('hooks', ev => {
+      try {
+        const row = JSON.parse(ev.data);
+        if (hkFetchBusy) hkLiveQueue.push(row); else hkAppend([row]);
+      } catch (e) { /* 单条坏帧不毁面板 */ }
+    });
+    hooksES.onopen = () => { hkSync(); hkEverOpened = true; };
+    // onerror 不处理：EventSource 自动重连（retry:3000）；面板关闭由 close() 收口。
+  }
+  if (!want && hooksES) { hooksES.close(); hooksES = null; }
+}
+
+function loadHooksPane() {
+  syncHooksStream();
+  if (!hkEverOpened) paneHint(hkLog, '连接中…');
+}
+
+// 暂停/恢复：冻结的是渲染（快照 hkFreeze），不是积累——期间推送照常入
+// hkRows，恢复即全量补齐。上翻浏览不被新行拽走由「不贴底不渲染」承担。
+hkPauseBtn.addEventListener('click', () => {
+  if (hkFreeze) {
+    hkFreeze = null;
+    hkPauseBtn.textContent = '⏸ 暂停';
+    hkPauseBtn.classList.remove('held');
+    hkRender(true);  // 恢复：补齐到最新并回贴底
+  } else {
+    hkFreeze = hkRows.slice();
+    hkPauseBtn.textContent = '▶ 恢复';
+    hkPauseBtn.classList.add('held');
+    hkUpdateCnt();
+  }
+});
+
+hkFilterEl.addEventListener('input', () => hkRender(hkAtBottom()));
+hkLog.addEventListener('scroll', () => {  // 回贴底即清「新行」提示
+  if (hkAtBottom() && !hkFreeze && hkUnread) { hkUnread = 0; hkUpdateCnt(); }
+});
 
 // ---- 记忆浏览器（W4.5 资产面 UI·二）----
 // 消费 W4.3 的 memory/projects|list|get：项目下拉（memory/projects，新→旧）

@@ -8,13 +8,15 @@ package controlplane
 // topic rides a SECOND channel on the same connection (nil-chan-
 // blocks-forever lets handleEvents select over both uniformly).
 //
-// Today's only topic is `subagents` — the task panel's lifecycle
-// pushes (started / terminal transitions). The producer is a shared
-// tail-follow of the conv's bound-project subagents.jsonl (the W3.1
-// reader's file; subagent.Follower folds with the same applyEvent
-// core as ListProject, so list and push are one projection). The
-// panel protocol is subscribe-FIRST, then GET /subagents for the
-// snapshot: pushes patch it, history never replays.
+// Today's topics are `subagents` (the task panel's lifecycle pushes —
+// started / terminal transitions; the producer is a shared tail-follow
+// of the conv's bound-project subagents.jsonl, the W3.1 reader's file,
+// where subagent.Follower folds with the same applyEvent core as
+// ListProject, so list and push are one projection) and `hooks` (the
+// audit tail — W5 c_xz2bey, webfrontend_hookstopic.go, same mechanics
+// with a global follow and verbatim lines). The panel protocol is
+// subscribe-FIRST, then the one-shot snapshot for the list: pushes
+// patch it, history never replays.
 //
 // The fanout unit is the FOLLOW, not the topic name: subscriber
 // channels live on the per-index-path topicFollow, and followLoop
@@ -39,7 +41,7 @@ import (
 
 // topicSubagents names the subagents lifecycle topic — the SSE
 // `event:` field AND the envelope's "topic" value. A constant so a
-// future topic (the W4 family) extends the set deliberately.
+// future topic extends the set deliberately (hooks did, W5 c_xz2bey).
 const topicSubagents = "subagents"
 
 // topicChanBuf is the per-client topic buffer: 256 queued events with
@@ -118,19 +120,25 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, indexPath string) (ch chan sse
 	}
 	fl.subs[id] = tch
 
-	return ch, tch, func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		delete(f.subs[conv], id)
-		if len(f.subs[conv]) == 0 {
-			delete(f.subs, conv)
-		}
-		if fl := f.follows[indexPath]; fl != nil {
-			delete(fl.subs, id)
-			if len(fl.subs) == 0 {
-				delete(f.follows, indexPath)
-				close(fl.stop)
-			}
+	return ch, tch, func() { f.dropTopicSub(conv, id, indexPath) }
+}
+
+// dropTopicSub is the unsub body shared by every topic subscribe
+// (subagents and hooks): drop the conv channel, drop the follow
+// membership, and stop the follow with its last subscriber — len(subs)
+// IS the refcount, so a client disconnect can never strand one.
+func (f *WebFrontend) dropTopicSub(conv ConvID, id int, path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.subs[conv], id)
+	if len(f.subs[conv]) == 0 {
+		delete(f.subs, conv)
+	}
+	if fl := f.follows[path]; fl != nil {
+		delete(fl.subs, id)
+		if len(fl.subs) == 0 {
+			delete(f.follows, path)
+			close(fl.stop)
 		}
 	}
 }
