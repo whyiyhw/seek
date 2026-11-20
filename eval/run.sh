@@ -6,9 +6,20 @@
 #   eval/run.sh <case-name>                  # one case, ./seek
 #   eval/run.sh <case-name> <binary-path>    # one case, named binary
 #   eval/run.sh '' <binary-path>             # all cases, named binary
+#   eval/run.sh --rounds 5 <case-name>       # N-round distribution sampling
 #
-# Each case appends one JSON row to:
+# Each case appends one JSON row PER ROUND to:
 #   eval/results/<UTC-date>-<binary-version>.jsonl
+#
+# --rounds N (eval v2 E1, docs/prd/feature-eval-v2.md §2.1): defaults to
+# 1, which is the historical single-sample behaviour BYTE FOR BYTE —
+# no `round` field, no aggregate row, no extra stdout. With N > 1 each
+# round is a full case lifecycle (setup → seek → teardown) appending its
+# own row carrying `round: k`, and judgement reads the round set's pass
+# rate against the case's `min_pass_rate` (expect.json, default 1.0,
+# INCLUSIVE `>=`); `record_only: true` cases are recorded, never gated.
+# Cost warning: rounds multiply API spend — see the cost table in
+# eval/README.md before raising N on the full case set.
 #
 # Env knobs (ablation lane steering, see eval/ablate.sh + eval/README.md
 # § Ablation; both UNSET = historical behaviour, byte for byte):
@@ -212,8 +223,44 @@ if [ "$seek_eval_provider" != deepseek ]; then
 fi
 export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
 
-case_filter=${1-}
-binary=${2-$repo_root/seek}
+# --- --rounds flag parsing (E1) ------------------------------------------
+# Positional interface (<case> <binary>) is unchanged; flags are stripped
+# wherever they appear in argv before the positional reads. rounds=1 is
+# the historical behaviour, byte for byte (guard test:
+# scripts/eval-rounds-test.sh, sibling of eval-ablate-test's no-env
+# equivalence pin). Malformed values exit 2 at startup — never silently
+# degrade to 1 (same doctrine as min_pass_rate below).
+rounds=1
+positional=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --rounds)
+      # POSIX-glob digit check (bash 3.2-safe, no =~): empty or any
+      # non-digit char lands in the reject arm.
+      case "${2-}" in
+        ''|*[!0-9]*) ;;
+        *) [[ "$2" -ge 1 ]] && { rounds=$2; shift 2; continue; } ;;
+      esac
+      echo "eval: --rounds needs an integer >= 1 (got: ${2-<missing>})" >&2
+      exit 2
+      ;;
+    --rounds=*)
+      arg_rounds=${1#--rounds=}
+      case "$arg_rounds" in
+        ''|*[!0-9]*) ;;
+        *) [[ "$arg_rounds" -ge 1 ]] && { rounds=$arg_rounds; shift; continue; } ;;
+      esac
+      echo "eval: --rounds needs an integer >= 1 (got: $arg_rounds)" >&2
+      exit 2
+      ;;
+    *)
+      positional+=("$1")
+      shift
+      ;;
+  esac
+done
+case_filter=${positional[0]-}
+binary=${positional[1]-$repo_root/seek}
 
 if [[ ! -x "$binary" ]]; then
   echo "eval: binary not found or not executable: $binary" >&2
@@ -425,18 +472,22 @@ extract_metric() {
   esac
 }
 
-# run_one CASE_DIR → echoes a JSON row, sets pass_total / fail_total.
+# run_one CASE_DIR [ROUND_NO] → executes ONE round of one case: appends
+# its JSON row to the results file, prints the per-round PASS/FAIL lines,
+# and sets round_pass (1/0). Never touches the gate totals — judgement
+# (single-round legacy vs N-round aggregate) belongs to run_case below.
+# ROUND_NO is 1..rounds; the row's `round` field and the stdout round tag
+# appear only when rounds > 1, keeping the rounds=1 path byte-identical
+# to the pre-E1 script.
 run_one() {
   local case_dir=$1
+  local round_no=${2:-1}
   local case_name
   case_name=$(basename "$case_dir")
+  round_pass=0
 
   local prompt_file="$case_dir/prompt.txt"
   local expect_file="$case_dir/expect.json"
-  if [[ ! -f "$prompt_file" ]] || [[ ! -f "$expect_file" ]]; then
-    echo "eval: skipping $case_name (missing prompt.txt or expect.json)" >&2
-    return
-  fi
 
   local max_turns
   max_turns=$($JQ -r '.max_turns // 10' "$expect_file")
@@ -564,11 +615,17 @@ run_one() {
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got
-  # actual" lines, empty when everything passed.
+  # actual" lines, empty when everything passed. `min_pass_rate` (E1
+  # gate config) is excluded from the scan — it rides a `min_` prefix
+  # but is not a metric bound (first smoke run had every round fail
+  # with "(unknown metric pass_rate)" before this exclusion).
+  # NB `max_turns` IS scanned as a turns ceiling — pre-existing
+  # behaviour, left untouched.
   local failures
   failures=$($JQ -r --argjson m "$metrics" '
     [ to_entries[]
       | select(.key | startswith("max_") or startswith("min_") or startswith("exact_"))
+      | select(.key != "min_pass_rate")
       | . as $entry
       | ($entry.key | sub("^(max|min|exact)_"; "")) as $metric
       | ($entry.key | capture("^(?<op>max|min|exact)_") | .op) as $op
@@ -589,7 +646,16 @@ run_one() {
 
   local row
   # -c: jq 1.7+ pretty-prints -n object output by default; results must
-  # stay strict single-line JSONL.
+  # stay strict single-line JSONL. The `round` key is appended AFTER
+  # ran_at and only when rounds > 1 (`obj + {}` is the identity at
+  # rounds=1, so the single-round row keeps its exact historical bytes —
+  # pinned by scripts/eval-rounds-test.sh). The gate is the GLOBAL rounds
+  # count ($emit_round), not the round number — round 1 of a 3-round run
+  # must carry `round: 1` too.
+  local emit_round=0
+  if (( rounds > 1 )); then
+    emit_round=1
+  fi
   row=$($JQ -cn \
     --arg case "$case_name" \
     --argjson pass "$pass" \
@@ -602,16 +668,23 @@ run_one() {
     --arg version "$version_full" \
     --arg final_text "$final_text" \
     --arg ran_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{case:$case, pass:$pass, metrics:$metrics, prompt_tokens:$prompt_tokens, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens, elapsed_s:$elapsed_s, failures:$failures, binary_version:$version, final_text:$final_text, ran_at:$ran_at}')
+    --argjson round "$round_no" \
+    --argjson emit_round "$emit_round" \
+    '{case:$case, pass:$pass, metrics:$metrics, prompt_tokens:$prompt_tokens, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens, elapsed_s:$elapsed_s, failures:$failures, binary_version:$version, final_text:$final_text, ran_at:$ran_at}
+     + (if $emit_round == 1 then {round:$round} else {} end)')
 
   echo "$row" >> "$results_file"
 
+  local round_tag=""
+  if (( rounds > 1 )); then
+    round_tag="  r${round_no}/${rounds}"
+  fi
   if [[ "$pass" == "true" ]]; then
-    pass_total=$((pass_total + 1))
-    echo "PASS  $case_name  (${elapsed}s, $(echo "$metrics" | $JQ -c .))"
+    round_pass=1
+    echo "PASS  $case_name${round_tag}  (${elapsed}s, $(echo "$metrics" | $JQ -c .))"
   else
-    fail_total=$((fail_total + 1))
-    echo "FAIL  $case_name  (${elapsed}s)"
+    round_pass=0
+    echo "FAIL  $case_name${round_tag}  (${elapsed}s)"
     echo "$failures" | $JQ -r '.[]' | sed 's/^/      /'
     echo "      metrics: $(echo "$metrics" | $JQ -c .)"
   fi
@@ -619,8 +692,142 @@ run_one() {
   rm -f "$out_file"
 }
 
+# read_gate_config EXPECT_FILE → sets record_only (true/false) and
+# min_pass_rate (empty when unset, decimal string otherwise). Exits 2 on
+# any malformed gate config — never silently coerce: a threshold read as
+# garbage and defaulted to 1.0 would gate on the wrong side of every
+# judgement (PRD §四: 不许静默当 1.0). An unparseable expect.json dies
+# here too, honouring the "exit 2 on unparseable expect.json" contract
+# in the header (previously it leaked empty max_turns into seek).
+read_gate_config() {
+  local expect_file=$1
+  record_only=$($JQ -r '
+    if .record_only == null then "false"
+    elif (.record_only | type) == "boolean" then (.record_only | tostring)
+    else "ERR" end' "$expect_file" 2>/dev/null) || record_only="ERR"
+  if [[ "$record_only" == "ERR" ]]; then
+    echo "eval: $expect_file: record_only must be a boolean (or absent)" >&2
+    exit 2
+  fi
+  min_pass_rate=$($JQ -r '
+    if .min_pass_rate == null then ""
+    elif (.min_pass_rate | type) != "number" then "ERR"
+    else (.min_pass_rate | tostring) end' "$expect_file" 2>/dev/null) || min_pass_rate="ERR"
+  if [[ "$min_pass_rate" == "ERR" ]]; then
+    echo "eval: $expect_file: min_pass_rate must be a number (or absent)" >&2
+    exit 2
+  fi
+  if [[ -n "$min_pass_rate" ]]; then
+    # Range rule: 0 < min_pass_rate <= 1. Zero is rejected as well: an
+    # always-green gate is not a gate — that case wants record_only.
+    local ok
+    ok=$($JQ -n --arg m "$min_pass_rate" '($m|tonumber) > 0 and ($m|tonumber) <= 1')
+    if [[ "$ok" != "true" ]]; then
+      echo "eval: $expect_file: min_pass_rate must satisfy 0 < m <= 1 (got: $min_pass_rate)" >&2
+      exit 2
+    fi
+  fi
+}
+
+# run_case CASE_DIR → owns the judgement for one case (E1): reads its
+# gate config, runs `rounds` full case lifecycles via run_one, then
+# aggregates — legacy single-round verdict when rounds == 1 (and not
+# record_only), pass-rate gate or record-only marking otherwise.
+run_case() {
+  local case_dir=$1
+  local case_name
+  case_name=$(basename "$case_dir")
+
+  local prompt_file="$case_dir/prompt.txt"
+  local expect_file="$case_dir/expect.json"
+  if [[ ! -f "$prompt_file" ]] || [[ ! -f "$expect_file" ]]; then
+    echo "eval: skipping $case_name (missing prompt.txt or expect.json)" >&2
+    return
+  fi
+
+  read_gate_config "$expect_file"
+
+  local k passed_rounds=0
+  for (( k=1; k <= rounds; k++ )); do
+    run_one "$case_dir" "$k"
+    passed_rounds=$(( passed_rounds + round_pass ))
+  done
+
+  local rate=""
+  if (( rounds > 1 )); then
+    rate=$($JQ -n --argjson p "$passed_rounds" --argjson n "$rounds" '$p / $n')
+  fi
+  local verdict=""
+
+  if [[ "$record_only" == "true" ]]; then
+    # Record-only: never red, never green — counted in its own column.
+    record_total=$(( record_total + 1 ))
+    verdict="record"
+    echo "RECORD  $case_name  (${passed_rounds}/${rounds} rounds, record-only — not gated)"
+  elif (( rounds == 1 )); then
+    # Historical single-sample path: the round IS the verdict. run_one
+    # already printed the classic PASS/FAIL line; totals only, so the
+    # no-flag output stays byte-identical to the pre-E1 script.
+    if (( round_pass )); then
+      pass_total=$(( pass_total + 1 ))
+    else
+      fail_total=$(( fail_total + 1 ))
+    fi
+  else
+    # Gate: pass rate over the round set must reach min_pass_rate
+    # (default 1.0), INCLUSIVE — 3/5 rounds against 0.6 passes, since
+    # IEEE division and decimal parsing both round to the same double.
+    # E2 calibration guidance: pick thresholds that are exactly k/n
+    # (0.6, 0.75, 0.8) — a written 0.67 is NOT 2/3 and will gate one
+    # round stricter than intended (eval/README.md § Judgment).
+    local min_num=1
+    if [[ -n "$min_pass_rate" ]]; then
+      min_num=$min_pass_rate
+    fi
+    local gate_ok
+    gate_ok=$($JQ -n --argjson p "$passed_rounds" --argjson n "$rounds" --argjson m "$min_num" '$p / $n >= $m')
+    if [[ "$gate_ok" == "true" ]]; then
+      verdict="pass"
+      pass_total=$(( pass_total + 1 ))
+      echo "PASS  $case_name  aggregate (${passed_rounds}/${rounds} rounds >= min_pass_rate ${min_num})"
+    else
+      verdict="fail"
+      fail_total=$(( fail_total + 1 ))
+      echo "FAIL  $case_name  aggregate (${passed_rounds}/${rounds} rounds < min_pass_rate ${min_num})"
+    fi
+  fi
+
+  # Aggregate row (rounds > 1 only): the judgement itself, recorded
+  # alongside the per-round rows. Deliberately NO `pass` key —
+  # scripts/eval-trend.sh selects rows on `pass` being boolean, so an
+  # aggregate row can never double-count as a sample.
+  if (( rounds > 1 )); then
+    local min_json=null
+    if [[ -n "$min_pass_rate" ]]; then
+      min_json=$min_pass_rate
+    fi
+    local ro_json=false
+    if [[ "$record_only" == "true" ]]; then
+      ro_json=true
+    fi
+    local agg_row
+    agg_row=$($JQ -cn \
+      --arg case "$case_name" \
+      --argjson rounds "$rounds" \
+      --argjson passed "$passed_rounds" \
+      --argjson rate "$rate" \
+      --argjson min "$min_json" \
+      --argjson ro "$ro_json" \
+      --arg verdict "$verdict" \
+      --arg ran_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{case:$case, type:"aggregate", rounds:$rounds, passed:$passed, pass_rate:$rate, min_pass_rate:$min, record_only:$ro, verdict:$verdict, ran_at:$ran_at}')
+    echo "$agg_row" >> "$results_file"
+  fi
+}
+
 pass_total=0
 fail_total=0
+record_total=0
 
 if [[ -n "$case_filter" ]]; then
   case_dir="$cases_dir/$case_filter"
@@ -628,14 +835,18 @@ if [[ -n "$case_filter" ]]; then
     echo "eval: no such case: $case_filter" >&2
     exit 2
   fi
-  run_one "$case_dir"
+  run_case "$case_dir"
 else
   shopt -s nullglob
   for case_dir in "$cases_dir"/*/; do
-    run_one "${case_dir%/}"
+    run_case "${case_dir%/}"
   done
 fi
 
 echo
-echo "eval: $pass_total passed, $fail_total failed"
+summary_recorded=""
+if (( record_total > 0 )); then
+  summary_recorded=", $record_total recorded (record-only)"
+fi
+echo "eval: $pass_total passed, $fail_total failed${summary_recorded}"
 exit $(( fail_total > 0 ? 1 : 0 ))

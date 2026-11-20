@@ -22,8 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**257 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
-**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
+**266 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API, transcript analysis).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -66,8 +65,8 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | Eval / tool descriptions | 6 |
 | Build tags / dependency isolation | 1 |
 | ACP / editor & headless lanes | 13 |
-| Eval / results data shape | 1 |
-| Transcript analysis / offline metrics | 2 |
+| Eval / results data shape | 2 |
+| Transcript analysis / offline metrics | 4 |
 | Typed agents / orchestration | 2 |
 | Git / merge | 2 |
 | Subprocess / streaming stdout | 2 |
@@ -1744,6 +1743,13 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Fix**: `scripts/eval-trend.sh` jq-parses (`jq -r '… | @tsv'`) instead of splitting lines. Two related bites: `@tsv` without `-r` emits a JSON-encoded string (tabs escaped as `\t`) which silently defeats downstream TSV field-splitting; and rows before the `ran_at` field exist need the filename's UTC-date prefix as a fallback timestamp. Commit (card c_lxferp).
 - **Lesson**: treat `results/*.jsonl` as a *stream of JSON objects*, never as lines — any new results tooling starts at jq.
 - **Refs**: `scripts/eval-trend.sh` (collect_rows), `eval/README.md` "Trend reports"
+
+### expect.json 新增标量键撞上 `max_/min_/exact_` 界前缀扫描——每轮全红 "unknown metric"
+- **Saw**: E1 给 expect.json 加 `min_pass_rate` 后首次冒烟，好流轮次也全 FAIL，failures 里是 `(unknown metric pass_rate)`。
+- **Why**: run.sh 的界检查用 jq `select(.key | startswith("max_")/…)` 扫描 expect.json 全部键——任何以界前缀开头的新标量键都会被当成 metric 界去查词表。`max_turns` 早就以同机制「兼职」turns 上限（既有行为，无人受伤），轮到 `min_pass_rate` 才暴露。
+- **Fix**: 卡 `c_ennnwa`（eval v2 E1）：界扫描加 `select(.key != "min_pass_rate")` 排除。今后再加标量键：要么避开三个前缀，要么同步扩这个排除表并配测试。
+- **Lesson**: 前缀路由（`max_`/`min_`/`exact_`）把 expect.json 的「键空间」分包给了 metric 界——往这个文件加配置键是在别人的命名空间里动土，先看扫描器。
+- **Refs**: `eval/run.sh` 界检查块（`min_pass_rate` 排除处注释）、`eval/README.md` 标量配置表。
 
 ## Transcript analysis / offline metrics
 
