@@ -1974,6 +1974,20 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 - **Lesson**: headless 验收里「计数型基线」（scripts/img/元素数）是跨卡耦合面——任何给页面加资产的卡，验收清单除自己的新脚本外必须全仓 grep 同名断言（`grep -rn "nscript\|scripts ===" scripts/`）并同卡更新；计数断言旁写清「数的是什么」能救下一张卡。
 - **Refs**: `scripts/web-stream-headless.mjs`、`scripts/web-sessions-headless.mjs` 基线断言；`scripts/web-md-headless.mjs`（本卡新验收，同样钉 2）。
 
+### 同一页面里第二份 `function loadSessions` 静默胜出——函数声明吊起，重复定义不报错只改行为
+- **Saw**: W5 侧栏卡（c_txz6vz）把 `loadSessions` 重写成「快照 + 过滤 + 30 行分页」后，无头验收报 `rows=32`（应 30）、搜索过滤完全不生效、点行不开正文——而新代码在源码里看起来「明明写着」。
+- **Why**: 旧 W4.4 的 `loadSessions`/`openSession` 仍留在文件后半段；`function` 声明整体吊起到同一作用域，**后出现的定义覆盖先出现的**，页面零报错，`node --check` 也过。所有调用点都静默落到旧版（全量渲染、无过滤、不开 `sess-detail`）。
+- **Fix**: 删掉旧实现（同一提交里 `internal/controlplane/webfrontend_test.go` 的新钉 `SESS_PAGE = 30`/`sess-detail` 与无头断言共同兜住复发）。
+- **Lesson**: 单文件内联 JS 没有模块边界，重构一个函数时**先 grep 全文件同名声明**再动手；「行为像没改」的怪现象优先怀疑重复声明，而不是逻辑 bug。
+- **Refs**: `internal/controlplane/webfrontend.html`（侧栏段）；`scripts/web-sessions-headless.mjs`。
+
+### 折叠侧栏的宽度断言要等 CSS transition 落定，不能只等 class 翻面
+- **Saw**: 无头验收点「⟨」后立刻读 `getBoundingClientRect().width`，`body.side-collapsed` 已为 true 但宽度仍是 260（展开方向同样：class 翻了、宽度还在 44）。
+- **Why**: `transition: width .15s` 期间 computed width 连续插值；class 翻面与几何落定是两个时刻。断言写「class 变了就认为收起了」会间歇性红。
+- **Fix**: 验收谓词改成 `collapsed && sideW <= 48`（展开 `!collapsed && sideW > 200`）——同一份快照里等两者同时成立。
+- **Lesson**: 任何带 transition 的几何断言，等待条件要把**几何量**写进谓词，别只等状态位。
+- **Refs**: `scripts/web-sessions-headless.mjs` 景 5；`internal/controlplane/webfrontend.html` `#side { transition: width .15s; }`。
+
 ## Tooling / go list
 
 ### go list stops flag-parsing at the first package argument — a trailing `-f` becomes a package named "-f"
