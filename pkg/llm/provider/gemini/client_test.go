@@ -283,3 +283,54 @@ func TestBuildRequest_ImagesUnusableDegrades(t *testing.T) {
 		t.Fatalf("parts = %+v", parts)
 	}
 }
+
+// TestBuildRequest_Files: a document attachment rides as one more
+// inlineData part — {"inlineData":{"mimeType":"application/pdf",
+// "data":"…"}}, Gemini's document-understanding shape (inline PDFs,
+// same part type as images). Text-only messages keep the single text
+// part byte-for-byte.
+func TestBuildRequest_Files(t *testing.T) {
+	body, err := buildRequest(llm.ChatRequest{
+		Model: "gemini-2.0-flash",
+		Messages: []llm.Message{
+			{
+				Role:    "user",
+				Content: "summarize",
+				Files:   []llm.File{{Filename: "report.pdf", URL: "data:application/pdf;base64,SUQ="}},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req struct {
+		Contents []struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text       string `json:"text"`
+				InlineData *struct {
+					MimeType string `json:"mimeType"`
+					Data     string `json:"data"`
+				} `json:"inlineData"`
+			} `json:"parts"`
+		} `json:"contents"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode: %v (%s)", err, body)
+	}
+	parts := req.Contents[0].Parts
+	if len(parts) != 2 || parts[0].Text != "summarize" {
+		t.Fatalf("parts = %+v, want text + inlineData", parts)
+	}
+	if parts[1].InlineData == nil ||
+		parts[1].InlineData.MimeType != "application/pdf" ||
+		parts[1].InlineData.Data != "SUQ=" {
+		t.Fatalf("file part = %+v", parts[1])
+	}
+	// Text-only message keeps the single text part, no inlineData keys.
+	if len(req.Contents[1].Parts) != 1 || req.Contents[1].Parts[0].Text != "plain" ||
+		req.Contents[1].Parts[0].InlineData != nil {
+		t.Errorf("text-only parts = %+v", req.Contents[1].Parts)
+	}
+}

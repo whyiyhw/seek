@@ -82,6 +82,15 @@ type FilePart struct {
 	FileID    string `json:"file_id,omitempty"`
 	ExpiresAt int64  `json:"expires_at,omitempty"` // unix seconds; 0 = permanent / unknown
 	Purpose   string `json:"purpose,omitempty"`    // Purpose* const; "" = text_recognition (legacy parts)
+	// Data is the SECOND-TIER sendable form — a data: URL
+	// ("data:application/pdf;base64,…") materialised by ResolveFileData
+	// on the request copy, the byte-carrier sibling of FileID (which is
+	// the DeepSeek lane's sendable form). Request-copy only, exactly
+	// like a materialised FileID: the transcript keeps the durable
+	// Asset form, so this field never crosses into session JSONL. It
+	// also never reaches the DeepSeek wire — toWire emits file_id
+	// alone.
+	Data string `json:"data,omitempty"`
 }
 
 // FileObject is the POST /files 200 body. The parse already ran by the

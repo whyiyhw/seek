@@ -162,7 +162,7 @@ func TestRoute_RichPrefix(t *testing.T) {
 	textDoc := writePDF(t, "text.pdf", 8)
 	richDoc := writePDF(t, "figures.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "compare @rich:"+richDoc+" with "+textDoc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "compare @rich:"+richDoc+" with "+textDoc)
 	if len(parts) != 2 {
 		t.Fatalf("parts = %+v", parts)
 	}
@@ -185,7 +185,7 @@ func TestRoute_OversizeDegradesNotFatal(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: 32}
 	big := writePDF(t, "huge.pdf", 64)
 
-	got, parts := r.Route(context.Background(), "m", "read @rich:"+big)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "read @rich:"+big)
 	if !strings.Contains(got, "[file: huge.pdf — 超过单文档 32 B 上限]") {
 		t.Fatalf("oversize note = %q", got)
 	}
@@ -213,7 +213,7 @@ func TestRoute_UploadFailKeepsAsset(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 16)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
 	if !strings.Contains(got, "[file: report.pdf — 上传失败: boom 500]") {
 		t.Fatalf("upload-fail note = %q", got)
 	}
@@ -225,18 +225,74 @@ func TestRoute_UploadFailKeepsAsset(t *testing.T) {
 	}
 }
 
-func TestRoute_NoClientLaneNote(t *testing.T) {
-	// GLM/opencode lanes have no Files API client — degrade with a
-	// note, upload nothing.
-	r := Router{assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+// TestRoute_IncapableModelNote: a model outside modelcap's Files axis
+// (unknown id, or a lane whose endpoint has no document input — GLM)
+// gets the switch-model note, before any stat/read/store/upload work.
+func TestRoute_IncapableModelNote(t *testing.T) {
+	up := &fakeUploader{obj: okObj()}
+	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
 	got, parts := r.Route(context.Background(), "m", "@"+doc)
-	if !strings.Contains(got, "[file: report.pdf — 文件输入需 DeepSeek 车道") {
-		t.Fatalf("lane note = %q", got)
+	if !strings.Contains(got, "[file: report.pdf — 当前模型不支持文件输入") {
+		t.Fatalf("switch-model note = %q", got)
 	}
 	if len(parts) != 0 {
-		t.Fatalf("non-DeepSeek lane must not attach: %+v", parts)
+		t.Fatalf("incapable model must not attach: %+v", parts)
+	}
+	if up.calls() != 0 {
+		t.Fatalf("incapable model must not upload, got %d", up.calls())
+	}
+	if ents, _ := os.ReadDir(r.assetsDir); len(ents) != 0 {
+		t.Fatalf("incapable model must not store, got %d entries", len(ents))
+	}
+}
+
+// TestRoute_SecondTierAttaches: no Files API client, but the model is
+// file-capable (modelcap) — the PDF is stored and attached Asset-only;
+// nothing is uploaded, no parse fee is recorded. The send path owns
+// materialisation (deepseek.ResolveFileData).
+func TestRoute_SecondTierAttaches(t *testing.T) {
+	cs := &costSink{}
+	r := Router{assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "report.pdf", 8)
+
+	got, parts := r.Route(context.Background(), "gpt-4o", "@"+doc)
+	if !strings.Contains(got, "[file: report.pdf — attached · 8 B]") {
+		t.Fatalf("attach marker = %q", got)
+	}
+	if len(parts) != 1 || parts[0].Asset == "" || parts[0].FileID != "" {
+		t.Fatalf("second-tier part must be Asset-only: %+v", parts)
+	}
+	if _, err := os.Stat(filepath.Join(r.assetsDir, parts[0].Asset)); err != nil {
+		t.Fatalf("asset not stored: %v", err)
+	}
+	if cs.total() != 0 {
+		t.Fatalf("second-tier attach must bill no parse fee, got %v", cs.total())
+	}
+}
+
+// TestRoute_SecondTierPDFOnly: Word/PPT have no second-tier wire
+// format (pkg/llm's transport set is PDF-only) — the router says so at
+// submit time and attaches nothing, so the transcript never gains an
+// "attached" marker a later send would have to walk back.
+func TestRoute_SecondTierPDFOnly(t *testing.T) {
+	r := Router{assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+	dir := t.TempDir()
+	docx := filepath.Join(dir, "spec.docx")
+	if err := os.WriteFile(docx, []byte("PK\x03\x04docx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, parts := r.Route(context.Background(), "claude-sonnet-4-20250514", "@"+docx)
+	if !strings.Contains(got, "[file: spec.docx — 二线车道仅支持 PDF 附件") {
+		t.Fatalf("format note = %q", got)
+	}
+	if len(parts) != 0 {
+		t.Fatalf("docx must not attach on a second-tier lane: %+v", parts)
+	}
+	if ents, _ := os.ReadDir(r.assetsDir); len(ents) != 0 {
+		t.Fatalf("docx must not be stored on a second-tier lane, got %d entries", len(ents))
 	}
 }
 
@@ -250,7 +306,7 @@ func TestRoute_StatGateNoFalsePositive(t *testing.T) {
 		`if strings.HasSuffix(name, ".pdf") { parse(name) }`,
 		"plain text, no refs",
 	} {
-		got, parts := r.Route(context.Background(), "m", text)
+		got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, text)
 		if got != text || len(parts) != 0 || up.calls() != 0 {
 			t.Fatalf("false positive on %q: %q %+v", text, got, parts)
 		}
@@ -263,13 +319,15 @@ func TestRoute_StatGateNoFalsePositive(t *testing.T) {
 // AFTER the family prefix (AGENTS.md wire-format rule).
 func TestMarker_Family(t *testing.T) {
 	markers := []string{
-		laneNote("x.pdf"),
+		switchModelNote("x.pdf"),
+		formatNote("x.docx"),
 		oversizeNote("x.pdf", deepseek.FileMaxBytes),
 		attachMarker("x.pdf", deepseek.PurposeTextRecognition, okObj()),
 		attachMarker("x.pdf", deepseek.PurposeRichLayoutRecognition, &deepseek.FileObject{ID: "file-api-y"}),
 		fmtMarkerReadFail(),
 		fmtMarkerStoreFail(),
 		fmtMarkerUploadFail(),
+		fmtMarkerAttached(),
 	}
 	for _, m := range markers {
 		if !strings.HasPrefix(m, "[file: ") {
@@ -283,6 +341,7 @@ func TestMarker_Family(t *testing.T) {
 func fmtMarkerReadFail() string   { return readFailNote("x.pdf", errors.New("e")) }
 func fmtMarkerStoreFail() string  { return storeFailNote("x.pdf", errors.New("e")) }
 func fmtMarkerUploadFail() string { return uploadFailNote("x.pdf", errors.New("e")) }
+func fmtMarkerAttached() string   { r := Router{}; m, _ := r.routeAttach("x.pdf", ""); return m }
 
 // TestRoute_NeverErrors: no input combination may panic or block the
 // submit — every failure lands in-band (mirrors the vision router's
@@ -309,7 +368,7 @@ func TestRoute_CtxCancel(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(ctx, "m", "@"+doc)
+	got, parts := r.Route(ctx, deepseek.ModelV41Flash, "@"+doc)
 	if !strings.Contains(got, "[file: report.pdf — 上传失败: context canceled") {
 		t.Fatalf("cancel note = %q", got)
 	}
@@ -324,7 +383,7 @@ func TestRoute_CostSinkOptional(t *testing.T) {
 	up := &fakeUploader{obj: okObj()}
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
-	if _, parts := r.Route(context.Background(), "m", "@"+doc); len(parts) != 1 {
+	if _, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc); len(parts) != 1 {
 		t.Fatalf("parts = %+v", parts)
 	}
 }
@@ -337,7 +396,7 @@ func TestRoute_ZeroPagesNoCost(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
 	if len(parts) != 1 {
 		t.Fatalf("parts = %+v", parts)
 	}

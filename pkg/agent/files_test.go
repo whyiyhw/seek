@@ -264,3 +264,152 @@ func TestMsgsToLLM_FilesNote(t *testing.T) {
 		t.Fatalf("original text lost: %q", out[0].Content)
 	}
 }
+
+// TestPrompt_LLMPath_CarriesFiles: the second-tier send path must
+// materialise and carry document bytes on a file-capable model — the
+// file sibling of TestPrompt_LLMPath_CarriesImages. The FileResolver
+// is wired exactly as cmd/seek wires it on second-tier lanes (loader
+// set, no uploader).
+func TestPrompt_LLMPath_CarriesFiles(t *testing.T) {
+	prov := &recordingProvider{}
+	ag, err := New(Config{
+		Provider: prov,
+		Model:    "gpt-4o", // file-capable, second-tier lane
+		FileResolver: deepseek.NewFileResolver(
+			func(asset string) ([]byte, error) { return []byte("%PDF-1.4"), nil }, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ev := range ag.PromptFiles(context.Background(), "read this", nil,
+		[]deepseek.FilePart{{Asset: "ab12cd34.pdf"}}) {
+		if e, ok := ev.(ErrorEvent); ok {
+			t.Fatalf("unexpected error: %v", e.Err)
+		}
+	}
+	req := prov.last(t)
+	var found bool
+	for _, m := range req.Messages {
+		if len(m.Files) == 1 && m.Files[0].Filename == "ab12cd34.pdf" &&
+			m.Files[0].URL == "data:application/pdf;base64,JVBERi0xLjQ=" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("file part did not reach the provider: %+v", req.Messages)
+	}
+	// History keeps the durable Asset form, never the data URL.
+	for _, m := range ag.Messages() {
+		for _, p := range m.Files {
+			if p.Data != "" || p.Asset != "ab12cd34.pdf" {
+				t.Fatalf("history must keep the Asset form: %+v", p)
+			}
+		}
+	}
+}
+
+// TestPrompt_LLMPath_IncapableModelNotesFiles: a model outside
+// modelcap's Files axis degrades the parts to the in-band note — never
+// hands a 400-triggering payload to the provider.
+func TestPrompt_LLMPath_IncapableModelNotesFiles(t *testing.T) {
+	prov := &recordingProvider{}
+	ag, err := New(Config{
+		Provider: prov,
+		Model:    "glm-5.3", // no file part on the compatible endpoint
+		FileResolver: deepseek.NewFileResolver(
+			func(string) ([]byte, error) { return []byte("%PDF-1.4"), nil }, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag.Reset([]deepseek.Message{{
+		Role:    deepseek.RoleUser,
+		Content: "read\n\n[file: r.pdf — attached · 1.0 KiB]",
+		Files:   []deepseek.FilePart{{Asset: "r.pdf"}},
+	}})
+	for ev := range ag.Prompt(context.Background(), "and now?") {
+		if e, ok := ev.(ErrorEvent); ok {
+			t.Fatalf("incapable replay must not error: %v", e.Err)
+		}
+	}
+	req := prov.last(t)
+	for _, m := range req.Messages {
+		if len(m.Files) > 0 {
+			t.Fatalf("files leaked to an incapable model: %+v", m)
+		}
+		if strings.Contains(m.Content, "attached · 1.0 KiB") && !strings.Contains(m.Content, "未透传") {
+			t.Fatalf("marker without degradation note: %q", m.Content)
+		}
+	}
+	var noted bool
+	for _, m := range req.Messages {
+		if strings.Contains(m.Content, "[file: 1 个文档未透传") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("degradation note missing: %+v", req.Messages)
+	}
+}
+
+// TestPrompt_LLMPath_UnsendableFormatNotes: a capable model still
+// can't carry a .docx — PDF is the only format every second-tier wire
+// accepts — so the part degrades with the format note at conversion.
+func TestPrompt_LLMPath_UnsendableFormatNotes(t *testing.T) {
+	prov := &recordingProvider{}
+	ag, err := New(Config{
+		Provider: prov,
+		Model:    "claude-sonnet-4-20250514",
+		FileResolver: deepseek.NewFileResolver(
+			func(string) ([]byte, error) { return []byte("PK\x03\x04"), nil }, nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ev := range ag.PromptFiles(context.Background(), "read this", nil,
+		[]deepseek.FilePart{{Asset: "spec.docx"}}) {
+		if e, ok := ev.(ErrorEvent); ok {
+			t.Fatalf("unexpected error: %v", e.Err)
+		}
+	}
+	req := prov.last(t)
+	for _, m := range req.Messages {
+		if len(m.Files) > 0 {
+			t.Fatalf("docx must not ride a second-tier lane: %+v", m.Files)
+		}
+	}
+	var noted bool
+	for _, m := range req.Messages {
+		if strings.Contains(m.Content, "[file: 1 个文档未透传") && strings.Contains(m.Content, "仅支持 PDF") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Fatalf("format note missing: %+v", req.Messages)
+	}
+}
+
+// TestMsgsToLLM_FilesRideWhenKept pins the conversion itself: keepFiles
+// passes materialised sendable parts through as llm.File (filename =
+// asset name) and drops nothing; keepFiles=false notes everything.
+func TestMsgsToLLM_FilesRideWhenKept(t *testing.T) {
+	msgs := []deepseek.Message{{
+		Role: deepseek.RoleUser,
+		Files: []deepseek.FilePart{
+			{Asset: "r.pdf", Data: "data:application/pdf;base64,SUQ="},
+			{Asset: "s.docx", Data: "data:application/msword;base64,SUQ="},
+		},
+	}}
+	out := msgsToLLMWithAttachments(msgs, false, true)
+	if len(out[0].Files) != 1 || out[0].Files[0].Filename != "r.pdf" {
+		t.Fatalf("sendable files must ride: %+v", out[0].Files)
+	}
+	if !strings.Contains(out[0].Content, "[file: 1 个文档未透传") ||
+		!strings.Contains(out[0].Content, "仅支持 PDF") {
+		t.Fatalf("docx must stay behind with the format note: %q", out[0].Content)
+	}
+	out = msgsToLLMWithAttachments(msgs, false, false)
+	if len(out[0].Files) != 0 || !strings.Contains(out[0].Content, "[file: 2 个文档未透传") {
+		t.Fatalf("keepFiles=false must note all: %+v / %q", out[0].Files, out[0].Content)
+	}
+}

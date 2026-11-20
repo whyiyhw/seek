@@ -22,7 +22,7 @@ Keep entries **terse**. If you find yourself writing a paragraph, the lesson is 
 
 ## Status: live vs absorbed (archive pass 2026-11-19)
 
-**255 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
+**256 live entries, 0 absorbed in this file.** The 15 entries the 2026-11-14 audit marked `[已吸收]` were moved verbatim to [`pitfalls-archive.md`](pitfalls-archive.md) (26 031 B) — one file for live knowledge, one for superseded history. The 2026-11-14 pre-archive baseline was 201 entries / 15 absorbed / 186 live; the ledger has grown since (new sections: agents/orchestration, MCP, web frontend, Files API).
 
 **Marking rule** (keep consistent on re-audit):
 
@@ -45,7 +45,7 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek API | 24 |
 | Go language | 12 |
 | Tooling / environment | 24 |
-| LLM provider quirks (M6) | 10 |
+| LLM provider quirks (M6) | 11 |
 | Testing / CI | 7 |
 | Release / upgrade | 3 |
 | Site / landing page | 3 |
@@ -78,9 +78,9 @@ Per-section distribution (live entries; every section's absorbed count is 0 afte
 | DeepSeek Files API / file_id | 4 |
 | Lane guards / refusal wording | 1 |
 | Distill review `s` / memory↔skill bridge | 3 |
-| **Total** | **255** |
+| **Total** | **256** |
 
-Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 35 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
+Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 live · **API** (DeepSeek API + LLM provider quirks + Feishu): 36 live · **Go** (both Go sections): 43 live · **tooling & engineering** (remaining sections): 143.
 
 ---
 
@@ -1007,6 +1007,13 @@ Coarse four-bucket rollup — **TUI** (TUI/terminal + TUI/session stats): 34 liv
 - **Fix**: new `internal/modelcap` — the single capability authority (static table for every lane's default + additive runtime grants installed by `internal/opencatalog` from the gateway's own `modalities.input`, same shape as `pricing.SetModelRates` / `budget.SetLimits`); `deepseek.IsVisionModel` deleted. `llm.Message.Images []llm.Image` (data URLs) encoded by each adapter (openai array-form `image_url`, anthropic base64 `image` blocks, gemini `inlineData`), with text-only messages keeping their exact previous wire bytes. `runTurnLLM` mirrors `runTurnDeepSeek`'s send station: gate → `ResolveImages` → `PrepareMessages` → convert.
 - **Lesson**: "which models support X" is a cross-cutting capability fact, not a provider fact — parking it in the package of whoever shipped X first means every new lane silently answers "no". Also: a `false` from an allow-list and a `false` from "never heard of this id" are indistinguishable to the caller, and a silent in-band downgrade makes the wrong answer look like a product decision rather than a bug; the note's suggested fix (`/model <id>`) must never name an id that only exists on another lane.
 - **Refs**: `internal/modelcap/modelcap.go`, `internal/opencatalog/opencatalog.go` (`Model.Vision` / `Install` / `acceptsImages`), `pkg/llm/llm.go` (`Image`), `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `pkg/agent/translate.go` (`msgsToLLMWithImages`), `pkg/agent/agent.go:runTurnLLM`, `cmd/seek/visioninput.go:switchModelNote`
+
+### Second-tier file wire formats are PDF-only — Word/PPT pass ONLY on DeepSeek's Files API
+- **Saw**: the file sibling of the vision passthrough looked like "PDF/Word/PPT" everywhere (that's what DeepSeek's Files API parses), but checking the three second-tier lanes' official docs before designing found none of them accepts Office formats natively.
+- **Why**: each lane's document input is a different wire shape with its own narrow media set — OpenAI Chat Completions `file` content part (`file_data` data URL): PDF only ("for other file types, read the file in your application and send its text"); Anthropic `document` block base64 source: `media_type` must be `application/pdf` (others 400); Gemini document understanding: inline `application/pdf`. The intersection is exactly PDF.
+- **Fix**: `pkg/llm` carries the transport truth — `fileMediaTypes` = {application/pdf} + `File.Sendable()`; `internal/fileroute` gates on it at submit (a .docx never gains an "attached" marker a later send would walk back) and `pkg/agent/translate.go` degrades unsendable formats in-band. `modelcap.Files` answers the per-MODEL question, deliberately not the per-FORMAT one.
+- **Lesson**: capability has two axes — "does this model take documents" (modelcap) and "does this lane's wire take THIS format" (transport). Don't collapse them: adding `application/msword` to the transport set later requires re-checking each provider's docs per lane, not flipping one shared constant on faith.
+- **Refs**: `pkg/llm/llm.go` (`fileMediaTypes` comment carries the three doc URLs), `pkg/llm/provider/{openai,anthropic,gemini}/client.go`, `internal/fileroute/fileroute.go:formatNote`
 
 ---
 

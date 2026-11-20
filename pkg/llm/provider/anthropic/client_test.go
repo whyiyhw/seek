@@ -460,3 +460,59 @@ func TestBuildRequest_ImagesUnusableDegrades(t *testing.T) {
 		t.Fatalf("content = %#v, want the plain string", req.Messages[0].Content)
 	}
 }
+
+// TestBuildRequest_Files: a document attachment becomes an Anthropic
+// document block — {"type":"document","source":{"type":"base64",
+// "media_type":"application/pdf","data":"…"}} per the PDF-support guide
+// (base64 sources accept application/pdf only) — while a text-only
+// message keeps the plain string, byte-for-byte.
+func TestBuildRequest_Files(t *testing.T) {
+	req := buildRequest(llm.ChatRequest{
+		Messages: []llm.Message{
+			{
+				Role:    "user",
+				Content: "summarize",
+				Images:  []llm.Image{{URL: "data:image/png;base64,QUJD"}},
+				Files: []llm.File{
+					{Filename: "report.pdf", URL: "data:application/pdf;base64,SUQ="},
+					{Filename: "spec.docx", URL: "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,SUQ="}, // not pdf → skipped
+				},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	blocks, ok := req.Messages[0].Content.([]contentBlock)
+	if !ok {
+		t.Fatalf("file message content = %#v, want a block array", req.Messages[0].Content)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("blocks = %+v, want text + image + document", blocks)
+	}
+	doc := blocks[2]
+	if doc.Type != "document" || doc.Source == nil ||
+		doc.Source.Type != "base64" ||
+		doc.Source.MediaType != "application/pdf" ||
+		doc.Source.Data != "SUQ=" {
+		t.Fatalf("document block = %+v (%+v)", doc, doc.Source)
+	}
+	// Text-only message stays a plain string (prefix-cache guard).
+	if s, ok := req.Messages[1].Content.(string); !ok || s != "plain" {
+		t.Errorf("text-only content = %#v", req.Messages[1].Content)
+	}
+}
+
+// TestBuildRequest_FilesUnusableDegrades: a files list whose only entry
+// isn't PDF falls back to the text shape — same never-empty-array rule
+// as images.
+func TestBuildRequest_FilesUnusableDegrades(t *testing.T) {
+	req := buildRequest(llm.ChatRequest{
+		Messages: []llm.Message{{
+			Role:    "user",
+			Content: "hi",
+			Files:   []llm.File{{Filename: "a.docx", URL: "data:application/msword;base64,SUQ="}},
+		}},
+	})
+	if s, ok := req.Messages[0].Content.(string); !ok || s != "hi" {
+		t.Fatalf("content = %#v, want the plain string", req.Messages[0].Content)
+	}
+}

@@ -516,3 +516,95 @@ func TestWithoutFiles(t *testing.T) {
 		t.Fatal("file-free slice must pass through unchanged")
 	}
 }
+
+// TestResolveFileData: the second-tier send station materialises every
+// Asset-only file part into a data: URL on the request copy (media
+// type from the asset extension), leaves already-materialised parts
+// alone, and never mutates the input — the byte-carrier sibling of
+// ResolveFiles' file_id materialisation.
+func TestResolveFileData(t *testing.T) {
+	in := []Message{
+		{Role: RoleUser, Content: "hi"},
+		{Role: RoleUser, Content: "read",
+			Files: []FilePart{
+				{Asset: "ab12.pdf"},
+				{Asset: "cd34.docx"},
+				{Asset: "ef56.pdf", Data: "data:application/pdf;base64,QQ=="}, // already materialised
+			}},
+	}
+	load := func(asset string) ([]byte, error) { return []byte("%PDF-" + asset), nil }
+	out := ResolveFileData(in, load)
+	if len(out[0].Files) != 0 {
+		t.Fatalf("file-free message changed: %+v", out[0])
+	}
+	fs := out[1].Files
+	if len(fs) != 3 {
+		t.Fatalf("parts = %+v", fs)
+	}
+	if fs[0].Data != "data:application/pdf;base64,JVBERi1hYjEyLnBkZg==" {
+		t.Fatalf("pdf data URL = %q", fs[0].Data)
+	}
+	if !strings.HasPrefix(fs[1].Data, "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,") {
+		t.Fatalf("docx must keep its true media type: %q", fs[1].Data)
+	}
+	if fs[2].Data != "data:application/pdf;base64,QQ==" {
+		t.Fatalf("materialised part must pass through: %q", fs[2].Data)
+	}
+	// The transcript-shaped input keeps the durable Asset form.
+	if in[1].Files[0].Data != "" {
+		t.Fatalf("input mutated: %+v", in[1].Files[0])
+	}
+	// File-free input returns the same slice (the fast path).
+	plain := []Message{{Role: RoleUser, Content: "hi"}}
+	if got := ResolveFileData(plain, load); &got[0] != &plain[0] {
+		t.Fatal("file-free slice must pass through unchanged")
+	}
+}
+
+// TestResolveFileData_FailuresDegradeInBand: a part with no asset, a
+// nil loader, and a load error each degrade to the "[file: " note
+// family instead of aborting — same never-error posture as
+// ResolveImages / ResolveFiles.
+func TestResolveFileData_FailuresDegradeInBand(t *testing.T) {
+	boom := func(string) ([]byte, error) { return nil, errors.New("asset gone") }
+	out := ResolveFileData([]Message{{Role: RoleUser, Content: "read", Files: []FilePart{
+		{FileID: "file-api-1"}, // no asset to materialise
+		{Asset: "ab12.pdf"},    // loader fails below
+	}}}, boom)
+	if len(out[0].Files) != 0 {
+		t.Fatalf("failed parts must be dropped: %+v", out[0].Files)
+	}
+	if !strings.Contains(out[0].Content, "[file: ? — 附件不可用: file part has no asset") &&
+		!strings.Contains(out[0].Content, "file part has no asset") {
+		t.Fatalf("no-asset note missing: %q", out[0].Content)
+	}
+	if !strings.Contains(out[0].Content, "[file: ab12.pdf — 附件不可用: asset gone]") {
+		t.Fatalf("load-fail note missing: %q", out[0].Content)
+	}
+	// Nil loader: same degradation, different reason.
+	out = ResolveFileData([]Message{{Role: RoleUser, Files: []FilePart{{Asset: "ab12.pdf"}}}}, nil)
+	if !strings.Contains(out[0].Content, "no file loader wired") {
+		t.Fatalf("nil-loader note missing: %q", out[0].Content)
+	}
+}
+
+// TestFileMediaType pins the extension map: the five document
+// extensions filerefs detects, octet-stream for everything else. A
+// local map, not mime.TypeByExtension, so the answer can't drift with
+// the host OS.
+func TestFileMediaType(t *testing.T) {
+	cases := map[string]string{
+		"x.pdf":      "application/pdf",
+		"x.PDF":      "application/pdf", // case-insensitive
+		"x.docx":     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		"x.ppt":      "application/vnd.ms-powerpoint",
+		"ab12cd.pdf": "application/pdf", // content-addressed asset names keep the extension
+		"x.txt":      "application/octet-stream",
+		"noext":      "application/octet-stream",
+	}
+	for name, want := range cases {
+		if got := FileMediaType(name); got != want {
+			t.Errorf("FileMediaType(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
