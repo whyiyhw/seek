@@ -394,6 +394,41 @@ func ParseCost(pages int) float64 {
 	return float64(pages) * parsePerPageUSD
 }
 
+// parseEstBytesPerPage is the divisor of the size-based page estimate:
+// the average page size implied by the API's own published caps
+// (documents ≤ 100 MiB AND ≤ 1000 pages → ≤ 104857.6 bytes/page,
+// floored to 104857). Not a measured density — no external data —
+// just the only page-size number the API itself documents.
+const parseEstBytesPerPage int64 = 100 * (1 << 20) / 1000
+
+// EstimateParsePages estimates a document's page count from its byte
+// size, for the billing fallback when POST /files omits page_count
+// (live API behaviour, docs/pitfalls.md "POST /files 响应里没有
+// page_count" — F3's ParseCost would otherwise record a flat $0 for
+// every real parse). 口径 (documented basis): pages ≈ ceil(bytes ÷
+// 104857), clamped to [1, 1000] — both clamps are the API's own
+// published limits (a successful upload parsed at least one page; no
+// document exceeds 1000 pages). Error direction is format-dependent:
+// dense text PDFs (≈6 KiB/page in the F4 smoke) UNDERestimate pages,
+// scanned/image PDFs OVERestimate — which is why every estimate is
+// flagged as such by the caller (FilePart.PagesEstimated / marker
+// "估") and never silently mixed into exact readings. bytes ≤ 0
+// returns 0: estimation only ever runs after a successful upload of a
+// non-empty body.
+func EstimateParsePages(bytes int64) int {
+	if bytes <= 0 {
+		return 0
+	}
+	pages := int((bytes + parseEstBytesPerPage - 1) / parseEstBytesPerPage)
+	if pages < 1 {
+		pages = 1
+	}
+	if pages > 1000 {
+		pages = 1000
+	}
+	return pages
+}
+
 const offPeakDiscount = 0.5
 
 // Shanghai (CST = UTC+8) is DeepSeek's reference timezone. Exported so

@@ -1937,14 +1937,14 @@ Moved from AGENTS.md 2026-11-14 (budget ratchet 3084→2787; AGENTS.md keeps the
 ### POST /files 响应里没有 page_count / expires_at——按页计费与过期重传都拿不到数据
 - **Saw**: F4 真 API 上传（2026-11-18）返回体只有 `{id, object, bytes, created_at, filename, purpose}`：`page_count`、`expires_at` 文档里写了、实际不发（`text_recognition` 与 `rich_layout_recognition` 两种 purpose 各传一次，同一 2 页 PDF，均缺）。后果：F3 的 `pricing.ParseCost(fo.PageCount)` 恒记 $0；F4 的过期重传因 `expires_at=0`（= 未声明过期）永不主动触发。
 - **Why**: 上传响应是 FileObject 的最小子集，解析产物（页数）与生命周期（过期时间）都不在其中；也没有别的查询接口可用——原始文件与解析结果均不支持下载/回读。
-- **Fix**: 语义不改：`0 = 未声明过期 = 不主动重传` 是有意的保守选择（宁可一个死 id 在发送时报错，也不要每轮重上传、重复计解析费）。烟测把字段缺失记为**读数**而不是失败，并在日志里点明后果（`files_smoke_test.go`）。
+- **Fix**: 语义不改：`0 = 未声明过期 = 不主动重传` 是有意的保守选择（宁可一个死 id 在发送时报错，也不要每轮重上传、重复计解析费）。烟测把字段缺失记为**读数**而不是失败，并在日志里点明后果（`files_smoke_test.go`）。**计费兜底（2026-11-19，卡 c_y2akdi）**：F3 路由缺 page_count 时改记 `pricing.EstimateParsePages(bytes)`（口径：`ceil(bytes÷104857)`，clamp [1,1000]——除数与两端都是 API 公布上限 100 MiB/1000 页推出的；误差方向随格式漂，密文本 PDF 低估、扫描件高估），不再恒 $0；估算双面打旗（marker `~N pages·估` + `FilePart.PagesEstimated`）。F5「维持现状」决定就此作废——当时否决的是本地数页的脆弱解析，字节估算不是数页。resolve.go 复传路径仍不记费（expires_at 永不返回 → 路径休眠；API 补字段时需一并补 sink）。
 - **Lesson**: 文档字段 ≠ 实际响应字段；凡是拿返回字段算钱的，真 API 首跑必须把原始响应体打出来核对。要接实按页计费，只能本地数页（仅 PDF 可行）或等 API 补字段——留给 F5 价格核对卡定夺。
 - **Refs**: `pkg/deepseek/files.go` `FileObject`；`internal/fileroute/fileroute.go`（计费点与 marker）；`docs/prd/feature-deepseek-app-api.md` §1.2 / §6。
 
 ### 同一份 PDF 的两次上传，解析结果并不总是完整——上传返回 id ≠ 全部页面已进上下文
 - **Saw**: F4 烟测（2026-11-18）同一份 2 页 PDF、同一字节内容，上传后立刻发问：多数运行 `prompt_tokens≈1941`（两页文字全在），但有一次只有 `1079`——第 1 页的事实答得出来，只存在于第 2 页的口令直接答 `NOT IN DOCUMENT`。同一进程再发一轮（`1102`）依旧没有第 2 页，说明不是「等一会儿就好」的异步补齐。`page_count` 又不返回（见上一条），客户端无法自检「解析是否完整」。
 - **Why**: 未定论。可能是服务端按页/按块切分解析并各自入索引，某一页在 id 返回时仍未就绪；也可能是解析有截断上限。反例也观察到过一次（`prompt_tokens≈1022` 时第 2 页事实仍答对），所以既不能假设「id 到手 = 全文可用」，也不能断言必然丢页。
-- **Fix**: 无代码改动。F4 的烟测只断言**第 1 页**的事实（`files_smoke_test.go` 里写死了原因），把「页 2 是否在场」留作观察而不是失败条件。
+- **Fix**: 无代码改动。F4 的烟测只断言**第 1 页**的事实（`files_smoke_test.go` 里写死了原因），把「页 2 是否在场」留作观察而不是失败条件。**观测面（2026-11-19，卡 c_y2akdi）**：API 复核（en 版 files_api 指南）确认无读口——`GET /files/{id}` 只回元数据、解析结果与原文件均不可下载——故走客户端断言材料：transcript 每次上传记 `{file_id, 声称页数, 估旗}`（`FilePart.Pages`/`PagesEstimated` + marker 恒量化页数），同文件多次上传按内容寻址 asset 配对即可事后对账；对账另一半是运行时 usage 行的 prompt_tokens（tracker 只在内存、session 仅存累计值——逐轮 token 不落盘是已知边界）。
 - **Lesson**: e2e 断言要挑「最不容易被服务端实现细节削掉」的证据：同一页内的事实比「某一页存在」稳。真 API 测试里凡是依赖「解析完整性」的断言，都该先跑三次看稳定性。
 - **Refs**: `pkg/deepseek/files_smoke_test.go`；上一条 `page_count / expires_at` 缺失（同一族的「文档字段 ≠ 实际行为」）。
 

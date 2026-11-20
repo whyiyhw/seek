@@ -77,11 +77,27 @@ var validPurposes = map[string]bool{
 //     ExpiresAt is unix seconds, 0/absent = no expiry (the API
 //     documents 1 h – 30 days or permanent). Both fields are session-
 //     persistence only: toWire emits file_id alone.
+//   - Pages / PagesEstimated: the parse-completeness observation
+//     record (card c_y2akdi). Pages is the page count the upload
+//     claimed — server-reported when page_count came back, else the
+//     submit-time size estimate (pricing.EstimateParsePages) — and
+//     PagesEstimated marks which. The live API returns NEITHER the
+//     count nor any read-back endpoint (GET /files/{id} is
+//     metadata-only, parse results are not downloadable), so this pair
+//     plus the file id is the client's whole assertion material for
+//     post-hoc reconciliation against actual context usage (the
+//     same-PDF-twice parse gap, docs/pitfalls.md). Persistence only:
+//     toWire emits file_id alone; resolve-time re-uploads keep the
+//     original submit-time claim (the durable record), never mint a
+//     new one.
 type FilePart struct {
 	Asset     string `json:"asset,omitempty"`
 	FileID    string `json:"file_id,omitempty"`
 	ExpiresAt int64  `json:"expires_at,omitempty"` // unix seconds; 0 = permanent / unknown
 	Purpose   string `json:"purpose,omitempty"`    // Purpose* const; "" = text_recognition (legacy parts)
+
+	Pages          int  `json:"pages,omitempty"`     // pages the upload claimed (reported or estimated)
+	PagesEstimated bool `json:"pages_est,omitempty"` // true = Pages is the size estimate, not a server reading
 }
 
 // FileObject is the POST /files 200 body. The parse already ran by the

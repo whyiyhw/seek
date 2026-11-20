@@ -2,7 +2,9 @@ package fileroute
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -265,8 +267,8 @@ func TestMarker_Family(t *testing.T) {
 	markers := []string{
 		laneNote("x.pdf"),
 		oversizeNote("x.pdf", deepseek.FileMaxBytes),
-		attachMarker("x.pdf", deepseek.PurposeTextRecognition, okObj()),
-		attachMarker("x.pdf", deepseek.PurposeRichLayoutRecognition, &deepseek.FileObject{ID: "file-api-y"}),
+		attachMarker("x.pdf", deepseek.PurposeTextRecognition, okObj(), 34, false),
+		attachMarker("x.pdf", deepseek.PurposeRichLayoutRecognition, &deepseek.FileObject{ID: "file-api-y"}, 2, true),
 		fmtMarkerReadFail(),
 		fmtMarkerStoreFail(),
 		fmtMarkerUploadFail(),
@@ -329,9 +331,13 @@ func TestRoute_CostSinkOptional(t *testing.T) {
 	}
 }
 
-// TestRoute_ZeroPagesNoCost: server omitted the page count → no parse
-// fee billed ("按上传返回页数" — never off "an upload was attempted").
-func TestRoute_ZeroPagesNoCost(t *testing.T) {
+// TestRoute_MissingPageCountFallsBackToEstimate: the live API omits
+// page_count (docs/pitfalls.md) — the router must NOT bill a flat $0
+// for a parse that really happened; it records the flagged size
+// estimate instead (card c_y2akdi, 口径 in pricing.EstimateParsePages).
+// The upload-failure path still bills nothing: only a returned id
+// means a parse ran.
+func TestRoute_MissingPageCountFallsBackToEstimate(t *testing.T) {
 	up := &fakeUploader{obj: &deepseek.FileObject{ID: "file-api-nopg"}}
 	cs := &costSink{}
 	r := Router{client: up, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
@@ -341,11 +347,23 @@ func TestRoute_ZeroPagesNoCost(t *testing.T) {
 	if len(parts) != 1 {
 		t.Fatalf("parts = %+v", parts)
 	}
-	if cs.total() != 0 {
-		t.Fatalf("zero pages must bill nothing, got %v", cs.total())
+	wantPages := pricing.EstimateParsePages(8) // 8 B fixture → 1 page
+	if wantPages != 1 {
+		t.Fatalf("fixture sanity: EstimateParsePages(8) = %d, want 1", wantPages)
 	}
-	if strings.Contains(got, "pages") {
-		t.Fatalf("absent page count must not render: %q", got)
+	if want := pricing.ParseCost(wantPages); cs.total() != want {
+		t.Fatalf("estimated cost = %v, want %v (no more flat $0)", cs.total(), want)
+	}
+	if cs.total() <= 0 {
+		t.Fatalf("missing page_count must still bill: %v", cs.total())
+	}
+	// The observation record flags the estimate on BOTH surfaces: the
+	// marker (human/transcript) and the FilePart (machine/JSONL).
+	if !strings.Contains(got, "· ~1 pages·估 · file-api-nopg") {
+		t.Fatalf("marker = %q", got)
+	}
+	if parts[0].Pages != 1 || !parts[0].PagesEstimated {
+		t.Fatalf("part observation fields = %+v", parts[0])
 	}
 }
 
@@ -391,10 +409,184 @@ func TestRoute_RealClientIntegration(t *testing.T) {
 	if len(parts) != 1 || parts[0].FileID != "file-api-int1" {
 		t.Fatalf("parts = %+v", parts)
 	}
+	// Exact state (acceptance ①'s other half): a returned page_count
+	// bills precisely and the observation record reads it as exact.
+	if parts[0].Pages != 12 || parts[0].PagesEstimated {
+		t.Fatalf("exact-state observation fields = %+v", parts[0])
+	}
 	if !strings.Contains(got, "12 pages · file-api-int1") {
 		t.Fatalf("marker = %q", got)
 	}
 	if want := pricing.ParseCost(12); cs.total() != want {
 		t.Fatalf("cost = %v, want %v", cs.total(), want)
+	}
+}
+
+// TestRoute_RealClient_PageCountFallback is acceptance ①'s missing-
+// count state on a REAL *deepseek.Client behind httptest: the live
+// API shape (id/bytes/filename/purpose, no page_count) must bill the
+// flagged size estimate, never the old flat $0. The exact state is
+// pinned by TestRoute_RealClientIntegration (page_count=12 →
+// ParseCost(12)); together the two tests are the two-state assertion.
+func TestRoute_RealClient_PageCountFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/files" || r.Method != http.MethodPost {
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// Live-API response shape (2026-11-18 finding): no page_count,
+		// no expires_at — bytes/created_at/filename/purpose only.
+		_, _ = w.Write([]byte(`{"id":"file-api-live1","object":"file","bytes":4096,` +
+			`"created_at":1764000000,"filename":"report.pdf",` +
+			`"purpose":"text_recognition"}`))
+	}))
+	defer srv.Close()
+
+	client := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
+	cs := &costSink{}
+	r := Router{client: client, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "report.pdf", 4096)
+
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
+	if len(parts) != 1 || parts[0].FileID != "file-api-live1" {
+		t.Fatalf("parts = %+v", parts)
+	}
+	// Estimated state: cost off the size estimate, flagged everywhere.
+	if want := pricing.ParseCost(pricing.EstimateParsePages(4096)); cs.total() != want || cs.total() <= 0 {
+		t.Fatalf("cost = %v, want estimated %v (not $0)", cs.total(), want)
+	}
+	if parts[0].Pages != pricing.EstimateParsePages(4096) || !parts[0].PagesEstimated {
+		t.Fatalf("part observation fields = %+v", parts[0])
+	}
+	if !strings.Contains(got, "[file: report.pdf — uploaded · text · ~1 pages·估 · file-api-live1]") {
+		t.Fatalf("marker = %q", got)
+	}
+}
+
+// seqUploader hands out one FileObject per call in order — the shape
+// the observation fixture needs: same document submitted twice, two
+// distinct file ids (what the live API mints per upload).
+type seqUploader struct {
+	mu   sync.Mutex
+	objs []*deepseek.FileObject
+	i    int
+}
+
+func (s *seqUploader) UploadFile(ctx context.Context, req *deepseek.FileUploadRequest) (*deepseek.FileObject, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.i >= len(s.objs) {
+		return nil, errors.New("fake: no more objects")
+	}
+	o := s.objs[s.i]
+	s.i++
+	return o, nil
+}
+
+// TestRoute_ObservationRecordReconcilable is acceptance ②: the
+// transcript's parse-observation records must (a) carry the whole
+// client-side assertion material — file id + claimed pages + the
+// estimate flag — through the session JSONL round-trip, and (b) make
+// the post-hoc reconciliation computable from the records alone:
+// recorded dollars re-derive from ParseCost(pages), and the
+// same-document-twice uploads of the pitfall pair up by their shared
+// content-addressed asset. (The API side offers nothing to reconcile
+// against: GET /files/{id} is metadata-only and parse results are not
+// downloadable — checked 2026-11-19 — so the runtime usage rows /
+// smoke test are the other half, out of this file.)
+func TestRoute_ObservationRecordReconcilable(t *testing.T) {
+	// Three submits: the same PDF twice with the live-API response
+	// shape (no page_count → estimated), then a different document
+	// whose server DOES return a count (exact reading; a different
+	// file so its content-addressed asset is its own).
+	up := &seqUploader{objs: []*deepseek.FileObject{
+		{ID: "file-api-a", Bytes: 8192, Purpose: deepseek.PurposeTextRecognition},
+		{ID: "file-api-b", Bytes: 8192, Purpose: deepseek.PurposeTextRecognition},
+		okObj(), // exact: PageCount 34
+	}}
+	cs := &costSink{}
+	r := Router{client: up, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "twice.pdf", 8192)
+	other := writePDF(t, "exact.pdf", 64)
+
+	var session []deepseek.Message // what session JSONL lines 2..N hold
+	for _, d := range []string{doc, doc, other} {
+		got, parts := r.Route(context.Background(), "m", "@"+d)
+		if len(parts) != 1 {
+			t.Fatalf("parts = %+v", parts)
+		}
+		if !strings.Contains(got, parts[0].FileID) {
+			t.Fatalf("marker %q does not carry the id", got)
+		}
+		session = append(session, deepseek.Message{Role: deepseek.RoleUser, Content: got, Files: parts})
+	}
+
+	// (a) Record shape survives the JSONL round-trip with the estimate
+	// flag on exactly the estimated parts.
+	var reloaded []deepseek.Message
+	for _, m := range session {
+		line, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back deepseek.Message
+		if err := json.Unmarshal(line, &back); err != nil {
+			t.Fatal(err)
+		}
+		reloaded = append(reloaded, back)
+		raw := string(line)
+		if i := len(reloaded) - 1; i < 2 { // the two live-API-shape uploads
+			p := reloaded[i].Files[0]
+			if p.FileID == "" || p.Pages != pricing.EstimateParsePages(8192) || !p.PagesEstimated {
+				t.Fatalf("estimated record %d lost its shape: %+v", i, p)
+			}
+			if !strings.Contains(raw, `"pages_est":true`) {
+				t.Fatalf("estimated record %d must persist the flag: %s", i, raw)
+			}
+		} else { // exact reading
+			p := reloaded[i].Files[0]
+			if p.Pages != 34 || p.PagesEstimated {
+				t.Fatalf("exact record lost its shape: %+v", p)
+			}
+			if strings.Contains(raw, "pages_est") {
+				t.Fatalf("exact record must not carry an estimate flag: %s", raw)
+			}
+		}
+	}
+
+	// (b1) Dollars re-derive from the records alone: recorded flat
+	// costs == Σ ParseCost(recorded pages).
+	var fromRecords float64
+	for _, m := range reloaded {
+		for _, p := range m.Files {
+			fromRecords += pricing.ParseCost(p.Pages)
+		}
+	}
+	if math.Abs(fromRecords-cs.total()) > 1e-15 {
+		t.Fatalf("reconciled cost %v != recorded %v", fromRecords, cs.total())
+	}
+
+	// (b2) The pitfall's scenario — same document parsed twice — pairs
+	// up by the content-addressed asset: two ids, one asset, one
+	// claimed-pages pair to diff against the runtime usage rows.
+	byAsset := map[string][]deepseek.FilePart{}
+	for _, m := range reloaded {
+		for _, p := range m.Files {
+			byAsset[p.Asset] = append(byAsset[p.Asset], p)
+		}
+	}
+	paired := 0
+	for asset, recs := range byAsset {
+		if len(recs) == 1 {
+			continue // the exact-reading document, its own asset
+		}
+		if len(recs) != 2 || recs[0].FileID == recs[1].FileID {
+			t.Fatalf("asset %q: want two distinct upload ids, got %+v", asset, recs)
+		}
+		paired++
+	}
+	if paired != 1 {
+		t.Fatalf("want exactly one twice-parsed asset pairing, got %d", paired)
 	}
 }
