@@ -25,6 +25,11 @@ package controlplane
 //	              (W3.2: "subagents" — see webfrontend_topic.go)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	              (X-Seek-Conversation picks the conv)
+//	POST /attach  one attachment's raw bytes (?name=<filename>) → staged
+//	              under the serve dir; the page turns the path into an
+//	              "@<path>" token in its /msg text, so the child's
+//	              existing image/document routers keep owning capability
+//	              judgement (webfrontend_attach.go)
 //	GET  /state   the requesting conv's binding, for the status line
 //	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1 envelope; the
 //	              session method set registers at servecli assembly —
@@ -140,6 +145,12 @@ type WebFrontend struct {
 
 	store *BindingStore
 
+	// attachDir is where POST /attach stages uploaded bytes
+	// (webfrontend_attach.go): <ServeDir>/attachments. Derived next to
+	// the token/bindings paths so a test-injected store keeps uploads
+	// in its own temp tree.
+	attachDir string
+
 	// rpcReg serves POST /rpc (W4.1). Built empty in NewWeb, registered
 	// into only before Run — the §3.2 phase contract; handlers dispatch.
 	rpcReg *rpc.Registry
@@ -209,6 +220,9 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 			f.cfg.StorePath = filepath.Join(dir, "bindings.json")
 		}
 	}
+	// Attachments live BESIDE the config pair, never at the real
+	// ~/.seek (a test/CLI override moves all three together).
+	f.attachDir = filepath.Join(filepath.Dir(f.cfg.StorePath), attachDirName)
 	// This store handle is read-only (Get for /state); the router's own
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
@@ -269,6 +283,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/static/", f.handleStatic) // W5 asset family (markdown.js — c_x2au4t)
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
+	mux.HandleFunc("/attach", f.handleAttach) // W5: attachment intake (webfrontend_attach.go)
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
