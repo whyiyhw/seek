@@ -3,32 +3,31 @@
 # web-sessions-manual.sh — W4.4 资产面 UI·一（sessions 浏览器）的手测脚本
 # （feature-web-frontend §9 W4.4 验收：「手测脚本；长 transcript 分页不卡」）。
 #
-# 干什么：临时 SEEK_HOME 里造两个会话夹具——一条 1234 条消息的长
+# 干什么：临时 SEEK_HOME 里造会话夹具——一条 1234 条消息的长
 # transcript（含代码围栏/工具调用/2KB 工具结果，模拟真实体积分布）加一条
 # 2 条的短会话（助手消息带 <script>/<img onerror> 注入载荷——XSS 用例，
-# 验 textContent 纪律在资产面板同样成立）——起 `seek serve --frontend=web`，
+# 验 textContent 纪律在会话正文同样成立），再加 30 条 old 时间戳的小会话
+# （W5 c_txz6vz 侧栏分页：30/页 → 首屏「加载更多」出现；它们比两条主夹具
+# 旧，故不影响新→旧的前两行断言）——起 `seek serve --frontend=web`，
 # 先跑服务端自检（curl /rpc 的列表/分页契约），再走浏览器验收：
 #   - 本机有 Chrome + node≥22 → scripts/web-sessions-headless.mjs 无头跑
-#     全部断言（面板开合/首页 50 条/翻页走完 1234 + 页界连续 + 每页时延/
-#     切换无串台/XSS 不执行/回聊天零回归）；
-#   - 缺任一 → 打印人工清单等人按 Enter（仅 TTY；见下条退路口径）。
+#     全部断言（侧栏列表/高亮/新建/搜索/收起展开+刷新保持/长 transcript
+#     分页/XSS/回聊天零回归）；
+#   - 缺任一 → 打印人工清单等人按 Enter。
 # 全程不碰真实 ~/.seek 与生产 8790（除非 ADDR 指向它，别这么干）。
 #
-# 无人值守退路口径（c_kwiajf，2026-11-20）：本脚本在 selftest 发现名单里
-# 可被验证车道直接跑（`bash scripts/selftest.sh web-sessions-manual`），
-# 前提是无头条件齐。无头条件不全时车道 stdin 不是 TTY——此时 `read` 要么
-# 挂到车道超时、要么在 stdin 已关时读空即过（无凭据的绿）。两条都不接受：
-# 非 TTY 直接退 3 并点名缺 Chrome 还是 node，让车道报「环境能力缺」而不是
-# 挂死或假装绿。绿灯只由无头断言给出。
-#
 # 手测清单（无头不可用时脚本原样打印）：
-#   1. 打开 URL → 右上「📚 会话」进面板：列表见两条（长会话标题=首条用户消息）
-#   2. 点长会话：即刻渲染第 1 页 50 条（不整读 1234 条）；元信息行有
-#      model/turns/tokens；滚到底点「加载更多」反复翻——翻页响应及时、
-#      滚动不卡（虚拟滚动级量级即可），翻空出现「— 已到末尾 —」
+#   1. 打开 URL → 左栏常驻「会话」列表：新→旧，首屏 30 条（底部「加载
+#      更多」），长会话标题=首条用户消息
+#   2. 点长会话：中栏出正文，第 1 页 50 条即刻渲染（不整读 1234 条）；
+#      元信息行有 model/turns/tokens；滚到底点「加载更多」反复翻——翻页
+#      响应及时、滚动不卡，翻空出现「— 已到末尾 —」；该行在左栏高亮
 #   3. 中途切短会话再切回：分页游标从头开始，无串台；短会话里的
 #      <script>/<img onerror> 显示为纯文本、无执行痕迹
-#   4. 点「💬 聊天」返回：输入框/SSE 聊天面原样可用（W4.4 是加法，零回归）
+#   4. 搜索框输入「tiny」：列表只剩短会话；清空恢复
+#   5. 点「⟨」收起 → 左栏成 44px 图标轨；刷新页面仍是收起；再点「⟩」展开
+#   6. 点「＋新建」：发出与 /new 同款指令（未绑定时得未绑定提示），侧栏刷新
+#   7. 点「💬 聊天」返回：输入框/SSE 聊天面原样可用（侧栏是加法，零回归）
 #
 # Env:
 #   ADDR=127.0.0.1:18790  监听地址（写进临时 config.json 的 serve.web_addr，
@@ -37,8 +36,7 @@
 #   DRY_RUN=1             只打印步骤不动手（butler 自测范式）
 #   KEEP=1                结束后保留临时目录与 serve 进程（人工续查）
 #
-# 退出码：0 自检+无头断言全绿（或人工清单在 TTY 上走完）；1 失败；2 用法错误；
-#         3 无头条件缺且 stdin 非 TTY（无人值守车道——人工清单无处可走）。
+# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误。
 # 依赖：go、curl；无头验收另需 Chrome 与 node≥22（缺则退人工清单）。
 set -u
 
@@ -57,12 +55,12 @@ N_LONG=1234   # 50/页 → 24 整页 + 1 尾页 34 条（验收尾页「已到�
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: go build ./cmd/seek → \$TMP/seek"
-  echo "DRY_RUN: 造夹具 \$TMP/sessions/{$LONG_SID,$TINY_SID}.jsonl（${N_LONG}+2 条消息，短会话助手消息含 XSS 载荷）"
+  echo "DRY_RUN: 造夹具 \$TMP/sessions/{$LONG_SID,$TINY_SID}.jsonl（${N_LONG}+2 条消息，短会话助手消息含 XSS 载荷）+ 30 条 old 小会话（侧栏 30/页分页）"
   echo "DRY_RUN: 写 \$TMP/config.json {\"serve\":{\"web_addr\":\"$ADDR\"}}"
   echo "DRY_RUN: SEEK_HOME=\$TMP \$TMP/seek serve --frontend=web &（stderr 抓 banner URL）"
-  echo "DRY_RUN: curl 自检：GET / 200+HTML；session/list 两 sid；messages 首页 50+next_cursor=50；"
-  echo "DRY_RUN:   cursor=1200 → 34 条无 next_cursor；短会话 2 条无 next_cursor"
-  echo "DRY_RUN: 浏览器：Chrome+node 在 → 无头断言；缺 → TTY 才打印人工清单，非 TTY 退 3；清理"
+  echo "DRY_RUN: curl 自检：GET / 200+HTML（侧栏骨架、无 browse-btn）；session/list 32 条；"
+  echo "DRY_RUN:   messages 首页 50+next_cursor=50；cursor=1200 → 34 条无 next_cursor；短会话 2 条无 next_cursor"
+  echo "DRY_RUN: 浏览器：Chrome+node 在 → 无头断言（侧栏列表/高亮/搜索/分页/收起展开+刷新保持/窄屏缺省/新建/回聊天）；缺 → 人工清单等 Enter；清理"
   exit 0
 fi
 
@@ -126,7 +124,20 @@ printf '{"role":"user","content":"tiny fixture：你好"}\n' >> "$TINY"
 # XSS 用例（验收原文）：助手消息带注入载荷，只走 磁盘→/rpc→页面 textContent
 # 这条线——页面源里从不出现，执行与否由无头断言/人工清单核。
 printf '{"role":"assistant","content":"tiny fixture：<script>window.__xss=1</script><img src=x onerror=\\"window.__xss2=1\\">上面两段应显示为纯文本。"}\n' >> "$TINY"
-wc -l "$LONG" "$TINY"
+
+# 侧栏分页夹具（W5 c_txz6vz）：30 条更旧的小会话——两条主夹具仍占新→旧
+# 前两位，总数 32 > 30/页，故首屏必现「加载更多（已显示 30 条）」。
+OLD_SID_PREFIX="20261101-0900"
+for n in $(seq 1 30); do
+  # 两位数序号（补零）让 sid 长度一致、排序稳定
+  OLD_SID="$OLD_SID_PREFIX$(printf '%02d' "$n")-w5oldsess$(printf '%02d' "$n")"
+  OLD="$TMP/sessions/$OLD_SID.jsonl"
+  hdr "$OLD_SID" "2026-11-01T08:00:00+08:00" "2026-11-01T08:0$(( n % 10 )):00+08:00" 1 0 10 5 > "$OLD"
+  printf '{"role":"user","content":"old fixture #%s：侧栏分页夹具"}\n' "$n" >> "$OLD"
+  printf '{"role":"assistant","content":"old reply #%s"}\n' "$n" >> "$OLD"
+done
+N_TOTAL=$(( 2 + 30 ))
+wc -l "$LONG" "$TINY" | tail -1
 
 # ---- 3. 临时 config：serve.web_addr（生产代码无 env 监听出口，走 config 通道）----
 printf '{"serve":{"web_addr":"%s"}}\n' "$ADDR" > "$TMP/config.json"
@@ -165,11 +176,14 @@ page_count() { printf '%s' "$1" | grep -o '"role"' | wc -l | tr -d ' '; }
 has_cursor() { printf '%s' "$1" | grep -o "\"next_cursor\":\"[0-9]*\"" | head -1; }
 
 html=$(curl -s "${URL%%\?*}")
-ck "GET / 200+页面" "yes" "$(printf '%s' "$html" | grep -q 'id="browse-btn"' && echo yes || echo no)"
+ck "GET / 200+页面（侧栏骨架）" "yes" "$(printf '%s' "$html" | grep -q 'id="side-toggle"' && echo yes || echo no)"
+ck "原 📚 弹出面板已退役" "yes" "$(printf '%s' "$html" | grep -q 'browse-btn' && echo no || echo yes)"
 
 list=$(rpcc session/list '{}')
 ck "session/list 含长会话" "yes" "$(printf '%s' "$list" | grep -q "$LONG_SID" && echo yes || echo no)"
 ck "session/list 含短会话" "yes" "$(printf '%s' "$list" | grep -q "$TINY_SID" && echo yes || echo no)"
+ck "session/list 全量 ${N_TOTAL} 条（侧栏 30/页 → 有翻页）" "$N_TOTAL" \
+  "$(printf '%s' "$list" | grep -o '"sid"' | wc -l | tr -d ' ')"
 
 p1=$(rpcc session/messages "{\"sid\":\"$LONG_SID\",\"limit\":50}")
 ck "首页 50 条" "50" "$(page_count "$p1")"
@@ -219,15 +233,22 @@ cat <<EOF
 
 == 无头条件缺（Chrome/node）——人工手测清单（浏览器）==
   打开：$URL
-  1. 点「📚 会话」→ 列表两条：长会话标题≈「第 1 条：请读一下这段代码并解释。」，
-     短会话「tiny fixture：你好」；新→旧排序
-  2. 点长会话：首屏 50 条即刻渲染；元信息行 model/turns/tokens；
-     「加载更多」连翻到 1234 条——翻页跟手、滚动不卡；末尾「— 已到末尾 —」
+  1. 左栏常驻「会话」列表：新→旧，首屏 30 行（底部「加载更多（已显示 30
+     条）」，点一次到 32 条）；长会话标题≈「第 1 条：请读一下这段代码并
+     解释。」，短会话「tiny fixture：你好」
+  2. 点长会话：中栏切正文（输入框/聊天面让位），首屏 50 条即刻渲染；
+     元信息行 model/turns/tokens；「加载更多」连翻到 1234 条——翻页跟手、
+     滚动不卡；末尾「— 已到末尾 —」；该行在左栏高亮
   3. 翻几页后中途切短会话：2 条 + 立即「— 已到末尾 —」（<script>/<img
      onerror> 载荷显示为纯文本，无执行痕迹）；再切回长会话，
      从第 1 页重开、无串台
-  4. 「💬 聊天」返回：输入框/状态行/SSE 聊天原样（W4.4 零回归面）
-  5. 长按滚动/快速翻页几下：无卡顿（分页外无整读；工具结果限高）
+  4. 搜索框输入「tiny」：只剩短会话；输入「OLD FIXTURE #7」大小写无关也
+     命中；清空恢复 30 行；乱输入出现「（没有匹配的会话）」
+  5. 点「⟨」收起 → 左栏成 44px 图标轨（新建/展开钮在轨上）；刷新页面仍
+     收起；点「⟩」展开后刷新仍展开
+  6. 点「＋新建」：发出与 /new 同款指令（未绑定项目时得未绑定提示）
+  7. 点「💬 聊天」返回：输入框/状态行/SSE 聊天原样（零回归面）；侧栏仍在
+  8. 长按滚动/快速翻页几下：无卡顿（分页外无整读；工具结果限高）
 
 按 Enter 结束并清理（KEEP=1 保留现场）…
 EOF
