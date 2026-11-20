@@ -1,6 +1,7 @@
 // Package modelcap answers capability questions about a model id —
-// today "does this model accept image input" (Vision) and "does it
-// accept document file input" (Files).
+// today "does this model accept image input" (Vision), "does it
+// accept document file input" (Files), and "which provider lane
+// speaks this id" (lane.go's LaneOf).
 //
 // Why it exists: the vision fact used to live in pkg/deepseek as
 // IsVisionModel, a one-id allow-list ("deepseek-flash", the direct-API

@@ -201,6 +201,23 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"turn_end","index":1,"prompt_tokens":1200,"completion_tokens":150,"cache_hit_tokens":1100,"tool_calls":1}`)
 		fmt.Println(`{"type":"agent_end","turns":2,"session_id":"SW2"}`)
 		return 0
+	case "web_lane":
+		// W5 c_oyp2qf ContextMeter e2e: agent_start.model comes from
+		// CP_STUB_MODEL so one stub shape serves BOTH lane samples —
+		// the direct-API id and the Go-gateway id of the same model
+		// family. One turn; usage is tiny (1M windows make sane
+		// percentages need big numbers, so the page-side drill uses the
+		// manual stub instead).
+		model := os.Getenv("CP_STUB_MODEL")
+		if model == "" {
+			model = "deepseek-flash"
+		}
+		fmt.Printf("{\"type\":\"agent_start\",\"model\":%q}\n", model)
+		fmt.Println(`{"type":"turn_start","index":0}`)
+		fmt.Println(`{"type":"text_delta","delta":"lane check"}`)
+		fmt.Println(`{"type":"turn_end","index":0,"prompt_tokens":600000,"completion_tokens":50000,"cache_hit_tokens":100000,"tool_calls":0}`)
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SWL"}`)
+		return 0
 	default: // happy
 		if sleep > 0 {
 			time.Sleep(sleep)
