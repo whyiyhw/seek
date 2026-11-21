@@ -22,7 +22,8 @@ package controlplane
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
 //	              (?conv= — EventSource cannot set headers); ?topic=
 //	              opts the connection into a topic stream alongside
-//	              (W3.2: "subagents" — see webfrontend_topic.go)
+//	              (W3.2: "subagents" — webfrontend_topic.go; W5 c_xz2bey:
+//	              "hooks" — webfrontend_hookstopic.go)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	              (X-Seek-Conversation picks the conv)
 //	POST /attach  one attachment's raw bytes (?name=<filename>) → staged
@@ -515,26 +516,37 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Topic dimension (W3.2): ?topic= opts this connection into a
 	// topic stream alongside the conv stream. Validated and resolved
 	// BEFORE the SSE headers so a bad topic or unbound conv answers
-	// plain 400/500 JSON, never a broken event-stream.
+	// plain 400/500 JSON, never a broken event-stream. `subagents`
+	// resolves the conv's bound-project index (W3.2); `hooks` resolves
+	// the GLOBAL audit log (W5 c_xz2bey) — no binding needed, the file
+	// is machine-global.
 	topic := r.URL.Query().Get("topic")
-	var indexPath string
+	var indexPath, auditPath string
 	if topic != "" {
-		if topic != topicSubagents {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown topic " + topic + " (only \"subagents\" exists)"})
-			return
-		}
-		b, err := f.store.Get(conv)
-		if err != nil {
-			if errors.Is(err, ErrBindingNotFound) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation not bound to a project (send /bind <path> first)"})
+		switch topic {
+		case topicSubagents:
+			b, err := f.store.Get(conv)
+			if err != nil {
+				if errors.Is(err, ErrBindingNotFound) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation not bound to a project (send /bind <path> first)"})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		indexPath, err = paths.SubagentsIndex(b.ProjectPath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			indexPath, err = paths.SubagentsIndex(b.ProjectPath)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		case topicHooks:
+			var err error
+			if auditPath, err = paths.HooksAuditLog(); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown topic " + topic + " (only \"subagents\" and \"hooks\" exist)"})
 			return
 		}
 	}
@@ -557,9 +569,12 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 		tch   chan string // nil without a topic: a nil chan blocks forever, one select serves both paths
 		unsub func()
 	)
-	if topic != "" {
+	switch topic {
+	case topicHooks:
+		ch, tch, unsub = f.subscribeHooksTopic(conv, auditPath)
+	case topicSubagents:
 		ch, tch, unsub = f.subscribeTopic(conv, indexPath)
-	} else {
+	default:
 		ch, unsub = f.subscribe(conv)
 	}
 	defer unsub()
@@ -579,7 +594,9 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			fl.Flush()
 		case ev := <-tch:
-			if _, err := io.WriteString(w, "event: "+topicSubagents+"\ndata: "+ev+"\n\n"); err != nil {
+			// The event name is the connection's topic ("subagents" /
+			// "hooks" — tch is nil, this case dead, without one).
+			if _, err := io.WriteString(w, "event: "+topic+"\ndata: "+ev+"\n\n"); err != nil {
 				return
 			}
 			fl.Flush()
