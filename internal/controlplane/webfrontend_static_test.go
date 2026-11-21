@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,7 @@ import (
 // updates this pin IN THE SAME COMMIT:
 //
 //	shasum -a 256 internal/controlplane/webfrontend.html
-const webPageSHA256 = "101e403536604ef39b7a4a14b1dc308d7560de7342bae5ddcfa490b3471007b0"
+const webPageSHA256 = "658afef71865da88822ce77eb38cfa6f662fd8edef7f756a4ee33257972042d5"
 
 func TestWeb_AssetHashPinned(t *testing.T) {
 	sum := sha256.Sum256(webPage)
@@ -87,6 +88,33 @@ func TestWeb_CSPHeader(t *testing.T) {
 	}
 	if len(toks) == 0 {
 		t.Errorf("single-file page carries inline script/style; CSP %q pins no hashes — both blocks would be blocked", csp)
+	}
+
+	// Independent cross-check (W5 c_ni7mzw): re-derive the block set by
+	// a DIFFERENT route — strip HTML comments, then run UNanchored
+	// regexes — and require every hash to match the policy. The loops
+	// above re-run the production regexes, so a regex that opens a
+	// phantom block inside a comment ("<style>" named in prose) stays
+	// self-consistent and green while the browser refuses the REAL
+	// block; this second derivation can't be fooled the same way, so it
+	// pins the whole class of extraction drift, not one instance.
+	htmlCommentRE := regexp.MustCompile(`(?s)<!--.*?-->`)
+	stripped := htmlCommentRE.ReplaceAll(webPage, nil)
+	for _, probe := range []*regexp.Regexp{
+		regexp.MustCompile(`(?s)<script\b[^>]*>(.*?)</script>`),
+		regexp.MustCompile(`(?s)<style\b[^>]*>(.*?)</style>`),
+	} {
+		for _, m := range probe.FindAllSubmatchIndex(stripped, -1) {
+			content := stripped[m[2]:m[3]]
+			if len(bytes.TrimSpace(content)) == 0 {
+				continue
+			}
+			sum := sha256.Sum256(content)
+			want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+			if !toks[want] {
+				t.Errorf("comment-stripped re-derivation found block hash %s missing from CSP %q — the extraction regexes disagree with a comment-free view of the page", want, csp)
+			}
+		}
 	}
 
 	// The middleware is route-uniform (a future static/ asset inherits
@@ -302,4 +330,236 @@ func TestWeb_GzipSkipsSSE(t *testing.T) {
 	if string(hdr) != "retry: 3000" {
 		t.Errorf("first SSE bytes = %q, want the retry frame", hdr)
 	}
+}
+
+// ---- merge-semantics structure guard (card c_lxe3lz) ----
+//
+// 2026-11-21, two same-day merge semantic conflicts: af1be012's
+// auto-merge silently swallowed the </section> of
+// <section id="settings"> — form+tray ended up inside the
+// display:none settings pane (0×0, whole document refused focus)
+// while `go test` ran 96 packages all green; only headless
+// acceptance caught it. 5b57c1ba lost a sync import the same day
+// (compile-time — the build gate catches that class). The compiler
+// cannot see HTML: webfrontend.html is one embedded data asset no
+// toolchain parses, while drive/* pre-merges ride textual
+// auto-merge — the more concurrent the cards, the more of these.
+// Three assertion groups move "page silently broken" from
+// headless-acceptance time to go-test time. Pure test assertions,
+// no production surface (mechanisms.md 口径: test-only code is not
+// a resident mechanism).
+//
+// The good state runs against the embedded webPage; the bad states
+// in the paired Detect* tests are transforms of that same string —
+// no fixture files, so the guard can never rot behind a stale
+// sample that the real page drifted away from.
+
+// mergeSwallowHint rides every failure line, so a red points at the
+// likely cause first: a textually-clean auto-merge that ate markup.
+const mergeSwallowHint = "疑似合并吞标签，见 pitfalls 自动合并条目（docs/pitfalls/git-merge/，判例 af1be012）"
+
+// tagBalanceREs: the page is inline-HTML style — no self-closing
+// shapes for these four, so open/close COUNTS must pair. Verified
+// scope: all their occurrences live in the markup region; the main
+// <script> block builds DOM via createElement, so today a
+// whole-page count cannot be perturbed by JS string content. If a
+// future edit ever puts tag-shaped strings inside script blocks
+// this guard goes red — that is it doing its job: make the
+// decision consciously.
+var tagBalanceREs = []struct {
+	tag  string
+	open *regexp.Regexp
+}{
+	{"section", regexp.MustCompile(`<section[\s>]`)},
+	{"form", regexp.MustCompile(`<form[\s>]`)},
+	{"script", regexp.MustCompile(`<script[\s>]`)},
+	{"div", regexp.MustCompile(`<div[\s>]`)},
+}
+
+func tagBalanceProblems(page []byte) []string {
+	var problems []string
+	for _, t := range tagBalanceREs {
+		nOpen := len(t.open.FindAllIndex(page, -1))
+		nClose := bytes.Count(page, []byte("</"+t.tag+">"))
+		if nOpen != nClose {
+			problems = append(problems, fmt.Sprintf("<%s> 开标签 %d 个 vs 闭标签 %d 个不配平——%s", t.tag, nOpen, nClose, mergeSwallowHint))
+		}
+	}
+	return problems
+}
+
+// idAttrRE: every id="…" on the page. All occurrences live in
+// static markup (the JS block carries none — it createElement's its
+// DOM), so a whole-page scan is the honest scope.
+var idAttrRE = regexp.MustCompile(`\bid="([^"]+)"`)
+
+func idUniquenessProblems(page []byte) []string {
+	count := map[string]int{}
+	var order []string
+	for _, m := range idAttrRE.FindAllSubmatch(page, -1) {
+		id := string(m[1])
+		if count[id] == 0 {
+			order = append(order, id)
+		}
+		count[id]++
+	}
+	var problems []string
+	for _, id := range order {
+		if count[id] > 1 {
+			problems = append(problems, fmt.Sprintf("id=%q 出现 %d 次（全页必须唯一）——%s", id, count[id], mergeSwallowHint))
+		}
+	}
+	return problems
+}
+
+// keyComponentIDs: the input surface. af1be012's failure shape was
+// exactly these swallowed into a hidden panel — each must appear
+// EXACTLY once (zero = swallowed by a merge; two = a merge kept
+// both sides).
+var keyComponentIDs = []string{"form", "input", "menu", "send"}
+
+// textareaInputRE: <textarea … id="input". The real tag spans a
+// newline (rows/placeholder attrs on the next line) — [^>]* crosses
+// newlines fine.
+var textareaInputRE = regexp.MustCompile(`<textarea\b[^>]*\bid="input"`)
+
+func keyComponentProblems(page []byte) []string {
+	var problems []string
+	for _, id := range keyComponentIDs {
+		if n := bytes.Count(page, []byte(`id="`+id+`"`)); n != 1 {
+			problems = append(problems, fmt.Sprintf("关键部件 id=%q 应恰一次，现 %d 次——%s", id, n, mergeSwallowHint))
+		}
+	}
+	if !textareaInputRE.Match(page) {
+		problems = append(problems, `textarea#input 不在场（输入面被吞）——`+mergeSwallowHint)
+	}
+	return problems
+}
+
+// TestWeb_PageStructureGuard is the GOOD state: the embedded page
+// as shipped satisfies all three groups. The paired Detect* tests
+// prove each group goes red on constructed corruption — two states
+// per group, or the green here could be vacuous.
+func TestWeb_PageStructureGuard(t *testing.T) {
+	for _, g := range []struct {
+		name  string
+		check func([]byte) []string
+	}{
+		{"tag-balance", tagBalanceProblems},
+		{"id-uniqueness", idUniquenessProblems},
+		{"key-components", keyComponentProblems},
+	} {
+		if probs := g.check(webPage); len(probs) > 0 {
+			t.Errorf("结构守卫 %s 组对当前页面报红（好样本应绿）：%s", g.name, strings.Join(probs, "; "))
+		}
+	}
+}
+
+// TestWeb_StructureGuardDetectsSwallowedCloseTag: the af1be012
+// replica. Drop exactly ONE closing tag and the balance group must
+// go red naming the tag — including the incident's own shape (the
+// settings section's close, not just any first occurrence).
+func TestWeb_StructureGuardDetectsSwallowedCloseTag(t *testing.T) {
+	// The incident shape: the </section> belonging to
+	// <section id="settings"> (first close AFTER that open — the
+	// section nests no sections).
+	s := bytes.Index(webPage, []byte(`<section id="settings"`))
+	if s < 0 {
+		t.Fatal(`页面上找不到 <section id="settings"> —— 取样锚点漂了，换仍存在的锚点`)
+	}
+	c := bytes.Index(webPage[s:], []byte(`</section>`))
+	swallowed := append([]byte{}, webPage[:s+c]...)
+	swallowed = append(swallowed, webPage[s+c+len("</section>"):]...)
+	probs := tagBalanceProblems(swallowed)
+	if len(probs) == 0 {
+		t.Error("吞掉 settings 的 </section> 未被检出（af1be012 形状）")
+	} else if !strings.Contains(probs[0], "section") || !strings.Contains(probs[0], mergeSwallowHint) {
+		t.Errorf("失败信息应点名 section 并带合并提示，得：%s", probs[0])
+	}
+
+	// The generic loop: first-occurrence swallow of every guarded tag.
+	for _, tag := range []string{"section", "form", "script", "div"} {
+		corrupt := bytes.Replace(webPage, []byte("</"+tag+">"), nil, 1)
+		if bytes.Equal(corrupt, webPage) {
+			t.Fatalf("</%s> 在页面上不存在——取样锚点漂了", tag)
+		}
+		if probs := tagBalanceProblems(corrupt); len(probs) == 0 {
+			t.Errorf("吞掉第一个 </%s> 未被检出", tag)
+		}
+	}
+}
+
+// TestWeb_StructureGuardDetectsDuplicateID: two cards adding an
+// element with the same id is the other silent auto-merge shape.
+// Rename one existing id onto another's value and the uniqueness
+// group must go red naming the duplicated id.
+func TestWeb_StructureGuardDetectsDuplicateID(t *testing.T) {
+	corrupt := bytes.Replace(webPage, []byte(`id="settings"`), []byte(`id="tray"`), 1)
+	if bytes.Equal(corrupt, webPage) {
+		t.Fatal(`id="settings" 在页面上不存在——取样锚点漂了`)
+	}
+	probs := idUniquenessProblems(corrupt)
+	if len(probs) == 0 {
+		t.Fatal(`把 settings 改名成 tray 造出双 id="tray" 未被检出`)
+	}
+	found := false
+	for _, p := range probs {
+		if strings.Contains(p, `id="tray"`) && strings.Contains(p, mergeSwallowHint) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf(`失败信息应点名 id="tray" 并带合并提示，得：%s`, strings.Join(probs, "; "))
+	}
+}
+
+// TestWeb_StructureGuardDetectsMissingKeyComponent: the input
+// surface swallowed, three shapes. Note the first one: a WHOLE
+// paired element vanishing keeps open==close — the balance group
+// stays green — which is exactly why the exactly-once group exists
+// separately.
+func TestWeb_StructureGuardDetectsMissingKeyComponent(t *testing.T) {
+	t.Run("form block excised", func(t *testing.T) {
+		re := regexp.MustCompile(`(?s)<form id="form">.*?</form>`)
+		if !re.Match(webPage) {
+			t.Fatal(`页面上找不到 <form id="form">…</form> —— 取样锚点漂了`)
+		}
+		corrupt := re.ReplaceAll(webPage, nil)
+		if probs := keyComponentProblems(corrupt); len(probs) == 0 {
+			t.Error("整个 form 块被吞未检出——此时配平组仍绿（form 0==0），恰一次断言才是这形状的守卫")
+		}
+	})
+	t.Run("send id dropped", func(t *testing.T) {
+		corrupt := bytes.Replace(webPage, []byte(` id="send"`), nil, 1)
+		if bytes.Equal(corrupt, webPage) {
+			t.Fatal(` id="send" 在页面上不存在——取样锚点漂了`)
+		}
+		if probs := keyComponentProblems(corrupt); len(probs) == 0 {
+			t.Error("send 按钮的 id 被吞未检出")
+		}
+	})
+	t.Run("textarea input id renamed", func(t *testing.T) {
+		corrupt := bytes.Replace(webPage, []byte(`id="input"`), []byte(`id="input2"`), 1)
+		if bytes.Equal(corrupt, webPage) {
+			t.Fatal(`id="input" 在页面上不存在——取样锚点漂了`)
+		}
+		probs := keyComponentProblems(corrupt)
+		if len(probs) == 0 {
+			t.Fatal("textarea 的 input id 被改名未检出")
+		}
+		// The rename must trip BOTH the exactly-once count and the
+		// textarea#input presence probe.
+		var sawCount, sawTextarea bool
+		for _, p := range probs {
+			if strings.Contains(p, `id="input"`) {
+				sawCount = true
+			}
+			if strings.Contains(p, "textarea") {
+				sawTextarea = true
+			}
+		}
+		if !sawCount || !sawTextarea {
+			t.Errorf("改名应同时红「input 恰一次」与「textarea#input 在场」两条，得：%s", strings.Join(probs, "; "))
+		}
+	})
 }

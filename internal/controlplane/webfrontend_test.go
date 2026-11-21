@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -446,6 +447,72 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 	}
 }
 
+// TestWeb_PageThemeSettings pins the W5 theme/settings card (c_ni7mzw):
+// the two token blocks and the single-attribute switch, the head
+// bootstrap that runs BEFORE the stylesheet (that ordering is the whole
+// anti-FOUC mechanism — a <script> after <style> would flash), the
+// three-state runtime, and the read-only settings panel that consumes
+// the `settings/get` method. Also pins the no-naked-colour rule: the
+// style block must not carry raw hex outside the two token blocks, or a
+// new component would silently stop following the theme.
+func TestWeb_PageThemeSettings(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		":root[data-theme=\"light\"]",       // the light token block exists
+		"--seek-inset",                        // semantic token names, not hex at call sites
+		"localStorage.getItem('seek-theme')",  // remembered choice
+		"localStorage.setItem(THEME_KEY",      // ... written on toggle
+		"localStorage.removeItem(THEME_KEY)",  // system state = no remembered value
+		"prefers-color-scheme: light",         // system follow
+		"dataset.mode",                        // the three-state button group
+		"settings/get",                        // the read-only snapshot method
+		"id=\"set-body\"",                     // settings pane container
+		"id=\"set-btn\"",                      // nav entry
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the theme/settings piece %q (W5 c_ni7mzw)", need)
+		}
+	}
+	// Anti-FOUC ordering: the bootstrap block must come BEFORE <style>.
+	// Anything else means the first paint uses the default theme and the
+	// attribute lands afterwards — exactly the flash this card removes.
+	// (The "<style>" search starts at the tag itself: prose higher in the
+	// <head> names the tag too.)
+	style := strings.Index(page, "\n<style>\n")
+	boot := strings.Index(page, "localStorage.getItem('seek-theme')")
+	if boot < 0 || style < 0 {
+		t.Fatalf("page shape changed: boot=%d style=%d", boot, style)
+	}
+	if boot > style {
+		t.Errorf("theme bootstrap (%d) sits AFTER <style> (%d) — that is the FOUC this card must remove", boot, style)
+	}
+	// Two token blocks, and the light one flips color-scheme too (native
+	// scrollbars/form controls follow it).
+	if strings.Count(page, "color-scheme:") < 2 {
+		t.Errorf("want a color-scheme declaration per theme (dark + light)")
+	}
+	// No naked colour outside the token blocks: component rules must all
+	// go through var(--seek-*), or the next component silently ignores
+	// the theme. The two palette blocks are the exemption (they ARE the
+	// palette), so the check starts after the light block's last line.
+	styleEnd := strings.Index(page, "</style>")
+	palAnchor := strings.Index(page, "--seek-shadow:0 4px 14px rgba(0,0,0,.12);")
+	if styleEnd < 0 || palAnchor < 0 {
+		t.Fatalf("palette shape changed: styleEnd=%d palAnchor=%d", styleEnd, palAnchor)
+	}
+	palEnd := strings.Index(page[palAnchor:], "}")
+	if palEnd < 0 {
+		t.Fatal("light token block unterminated")
+	}
+	rest := page[palAnchor+palEnd : styleEnd]
+	if m := hexColourRE.FindString(rest); m != "" {
+		t.Errorf("component CSS carries a naked colour %q — use a var(--seek-*) token so both themes follow", m)
+	}
+}
+
+// hexColourRE matches #rgb / #rrggbb literals in CSS.
+var hexColourRE = regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
+
 // TestWeb_PageStreamingBubble pins the W2.1 chat increment: the page
 // folds the W1.4 named SSE events into a streaming bubble — deltas
 // accumulate per run id, tool calls render as folded single-line
@@ -473,6 +540,147 @@ func TestWeb_PageStreamingBubble(t *testing.T) {
 	for _, keep := range []string{"addMsg('seek', m.text)", "addEventListener('submit'"} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("embedded page lost the plain-reply piece %q — W2.1 must be additive", keep)
+		}
+	}
+}
+
+// TestWeb_PageStopButton pins the c_5m3fm6 dsh-InputBar alignment: while
+// a streamed run is live the SEND key becomes the STOP key. The fork
+// lives at the click layer — a submit event names #send as the
+// submitter for Enter's implicit submission too, so click vs Enter
+// cannot be told apart at submit — and the stop click sends the SAME
+// /cancel command text as the top bar. The armed run's run-bearing ack
+// closes the bubble WITHOUT the authoritative replace (on an
+// interrupted run the accumulated deltas ARE the content): a cut
+// marker is appended instead, stream state resets, and the key state
+// follows the run table (first stream event flips it, close-out
+// reverts it — no stop key when idle).
+func TestWeb_PageStopButton(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"renderSend()",                 // key state is a function of the run table
+		"runs.size > 0",                // busy = a live streamed run
+		"classList.toggle('stop'",      // the visual stop state
+		"send.addEventListener('click'", // the fork sits at click, before submit
+		"sendText('/cancel', false)",   // stop click = the /cancel command text
+		"m.run === stopping",           // interrupted close keys the armed run
+		"—— 已中断 ——",                  // the cut marker keeps the partial
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the stop-button piece %q (c_5m3fm6)", need)
+		}
+	}
+	// Additivity: the plain send/stream paths must survive — Enter with a
+	// draft still submits (conv-gate queuing is prior semantics).
+	for _, keep := range []string{"addEventListener('submit'", "renderBody(r.el, m.text)"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the prior send/stream piece %q — c_5m3fm6 must be additive", keep)
+		}
+	}
+}
+
+// pageFuncBody returns the source of a top-level JS function in the
+// embedded page: from its declaration line (sig, e.g. "function
+// closePhantom(") to the first "\n}\n" — a closing brace at column 0,
+// which inside this page means the end of a top-level function. Fails
+// when the declaration is gone: a renamed/deleted function is exactly
+// what the pins below exist to catch.
+//
+// Why scope the assertions instead of a page-wide Contains: a page-wide
+// check passes as soon as ANY code in the file spells the token, so a
+// moved or rewritten function keeps the test green while the behaviour
+// it pinned is gone.
+func pageFuncBody(t *testing.T, page, sig string) string {
+	t.Helper()
+	i := strings.Index(page, sig)
+	if i < 0 {
+		t.Fatalf("embedded page lost the %q declaration", sig)
+	}
+	rest := page[i:]
+	if j := strings.Index(rest, "\n}\n"); j > 0 {
+		return rest[:j+2]
+	}
+	t.Fatalf("%q has no closing brace at column 0 — page structure changed shape", sig)
+	return "" // unreachable
+}
+
+// TestWeb_PagePhantomRunResetsStopKey pins c_6mbjfq: the stop key must
+// not stay stuck at ⏹ when a run's close-out frame was lost.
+//
+// The bug: SSE replays nothing, so a run that ends while the page is
+// disconnected leaves the client-side run table holding an entry whose
+// close-out never arrives — renderSend keeps reading runs.size > 0 and
+// the send key stays a stop key forever. Clicking it sends /cancel,
+// which the server answers run-less ("当前没有正在运行的任务。") — and
+// the pre-fix page dropped that answer on the plain-message path
+// without touching the table, so the key never recovered.
+//
+// The fix is client-only and adds no mechanism: reuse the c_5m3fm6
+// "armed run" slot. A /cancel that comes back run-less is proof the
+// server had no run left to interrupt, i.e. the armed run is over and
+// only its close-out is missing — so close that entry the way an
+// interrupted run is closed (keep the partial, mark it) and let
+// renderSend take its runs.size = 0 branch.
+//
+// Rejected alternative (recorded here because the shape recurs): clear
+// the run table on every (re)connect. EventSource reconnects on ANY
+// transient blip, so that would drop the bookkeeping of a genuinely
+// live run mid-stream — its later deltas would open a second bubble and
+// the half already on screen would be orphaned. Age-based pruning needs
+// per-run timestamps plus a sweep, i.e. a new resident mechanism.
+func TestWeb_PagePhantomRunResetsStopKey(t *testing.T) {
+	page := string(webPage)
+
+	// The close helper itself: leaves the table, disarms /cancel at it,
+	// reuses the c_5m3fm6 preserving close, and lets renderSend follow.
+	body := pageFuncBody(t, page, "function closePhantom(")
+	for _, need := range []string{
+		"runs.delete(id)",                  // the phantom leaves the run table
+		"if (lastRun === id) lastRun = ''", // …and stops arming /cancel at it
+		"r.el.classList.remove('streaming')",
+		"—— 已中断 ——",    // a lost close-out is still an interrupted run
+		"renderSend()", // key state follows the table → runs.size = 0 → 发送
+	} {
+		if !strings.Contains(body, need) {
+			t.Errorf("closePhantom lost %q — the phantom run would never leave the table (c_6mbjfq)", need)
+		}
+	}
+
+	// The trigger is the armed /cancel's run-less answer — and only when
+	// a stop was actually armed. Resetting on every run-less reply would
+	// flip the key back to 发送 under a genuinely live run whenever some
+	// other command's ack (commands skip the executor gate) lands
+	// mid-stream.
+	i := strings.Index(page, "} else if (m.text) {")
+	if i < 0 {
+		t.Fatal("page lost the run-less reply branch — the fix has nowhere to fire")
+	}
+	rest := page[i:]
+	j := strings.Index(rest, "if (m.session_id)")
+	if j < 0 {
+		t.Fatal("page lost the session_id fold after the reply branches")
+	}
+	branch := rest[:j]
+	for _, need := range []string{
+		"if (stopping)", // gated on an armed run, never blanket
+		"closePhantom(", // the armed run is closed as a phantom
+		"stopping = ''", // and the arming is spent either way
+	} {
+		if !strings.Contains(branch, need) {
+			t.Errorf("run-less /cancel answer does not reset the key: branch lost %q (c_6mbjfq)", need)
+		}
+	}
+
+	// The rejected fix must stay rejected: a blunt table clear on
+	// (re)connect drops live runs, and the page must carry no such call.
+	if strings.Contains(page, "runs.clear()") {
+		t.Error("page clears the whole run table — EventSource reconnects on any blip, so this orphans genuinely live bubbles (c_6mbjfq)")
+	}
+	// Additivity: the plain message path and the c_5m3fm6 run-bearing
+	// close-out both survive the new branch.
+	for _, keep := range []string{"addMsg('seek', m.text)", "m.run === stopping", "runs.delete(m.run)"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the prior close-out piece %q — c_6mbjfq must be additive", keep)
 		}
 	}
 }
@@ -514,43 +722,6 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 	// the page — fmtUSD formats magnitude, it does not price.
 	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing") {
 		t.Errorf("embedded page carries pricing vocabulary — rate cards live only in internal/pricing (§2.5)")
-	}
-}
-
-// TestWeb_PageStatsTrend pins the cross-session trend card (c_6xktw4):
-// the page consumes stats/trend over the same /rpc route, draws with
-// hand-written SVG (document.createElementNS, zero vendor — §4.2), keeps
-// the hover readout + window switcher, carries an empty-state hint, and
-// still never prices anything itself (§2.5).
-func TestWeb_PageStatsTrend(t *testing.T) {
-	page := string(webPage)
-	for _, need := range []string{
-		"stats/trend",                   // the aggregation method
-		"createElementNS",               // hand-drawn SVG, no chart library
-		"id=\"trend-plot\"",             // the plot host
-		"id=\"trend-tools\"",            // window switcher + legend live here
-		"trend-tip",                     // hover readout (built at render time)
-		"pointermove",                   // hover interaction
-		"TREND_WINDOWS",                 // time-window switching
-		"还没有历史会话",                       // empty-state copy
-		"折线需要 ≥2 个点",                    // one-point boundary copy
-	} {
-		if !strings.Contains(page, need) {
-			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)
-		}
-	}
-	// Zero-vendor (§4.2): no chart library may sneak in as an asset.
-	for _, gone := range []string{"chart.js", "d3.min", "echarts", "plotly"} {
-		if strings.Contains(strings.ToLower(page), gone) {
-			t.Errorf("page references a chart vendor %q — the trend line is hand-drawn SVG (zero build chain)", gone)
-		}
-	}
-	// The sidebar cost column is formatted server-priced data, never a rate.
-	if !strings.Contains(page, "t2c") {
-		t.Error("sidebar row lost its per-session cost cell (c_6xktw4)")
-	}
-	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing.") {
-		t.Error("page carries pricing vocabulary — cost_usd is read server-priced (§2.5)")
 	}
 }
 
@@ -682,5 +853,62 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "100.64.0.0/10") {
 		t.Errorf("refusal must state the allowlist, got %v", err)
+	}
+}
+
+// TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
+// multi-line input that sends on Enter and newlines on Shift+Enter, a
+// registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'
+// session reference fed by session/list. The keyboard paths are the
+// acceptance surface, and every one of them is a string in the page — a
+// rename or a "simpler" rewrite strands the feature silently, so they are
+// pinned here the way W2.1/W4.4/W4.5 pin their own pieces.
+func TestWeb_PageInputEnhancements(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		// ① multi-line: textarea, Enter sends, Shift+Enter falls through
+		`<textarea id="input"`,
+		"ev.key === 'Enter' && !ev.shiftKey",
+		"Shift+Enter",     // the comment stating the contract
+		"function grow()", // height follows content
+		// ② '/' command menu: registry + filter + keyboard navigation
+		"const CMDS = [",
+		"'/bind'", "'/projects'", "'/switch'", "'/new'", "'/cancel'",
+		"function slashHits()",
+		"ev.key === 'ArrowDown'",
+		"ev.key === 'ArrowUp'",
+		"ev.key === 'Tab'",
+		"ev.key === 'Escape'",
+		"function pick(i)",
+		// ③ '@' session reference: session/list source + resume semantics
+		"function atToken()",
+		"rpc('session/list', {})",
+		"sendText('/resume ' + sid, false)",
+		// the overlay itself, and its narrow-screen degradation
+		`id="menu"`,
+		"@media (max-width: 640px)",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the c_7lsngm input-enhancement piece %q", need)
+		}
+	}
+	// The chat plane keeps its old entry points: the form still submits
+	// through the ONE passthrough, and the quick buttons stay wired.
+	// Enter does not grow a second send path — it calls form.requestSubmit(),
+	// so the attachment gate / "/" argument rule stay single-sourced.
+	for _, keep := range []string{
+		`id="form"`, "sendText(typed, true, ready)", "form.requestSubmit()",
+		"wireCmd('cmd-bind', '/bind ')",
+	} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("input enhancement must be additive — lost %q", keep)
+		}
+	}
+	// The overlay must never capture keys globally: every listener that
+	// touches menu navigation hangs off the input element, and the page
+	// adds no document/window keydown handler.
+	if strings.Contains(page, "document.addEventListener('keydown'") ||
+		strings.Contains(page, "window.addEventListener('keydown'") {
+		t.Error("input enhancement must not install a global keydown handler (Esc must not be hijacked page-wide)")
 	}
 }

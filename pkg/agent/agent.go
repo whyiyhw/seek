@@ -573,6 +573,36 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 	go func() {
 		defer close(out)
+		// Stop observer (feature-orchestration D15): fires ONCE per
+		// Prompt() round after the reply fully settles — final answer,
+		// max turns, ctx cancel, or fatal error. Distinct granularity
+		// from PostTurn (per model turn).
+		//
+		// Defer order (LIFO): currentEvents cleared → Stop → close(out).
+		// Stop runs after the event sink is detached (a hook calling
+		// EmitEvent cannot inject into the finished prompt) and before
+		// the channel closes, so a caller draining
+		// `for ev := range ch` observes the hook side effect by the
+		// time the range ends — no "assert after range" race.
+		//
+		// The defer closes over these vars, so it reads their FINAL
+		// values (passing the values inline would capture the zero
+		// value — the classic defer-argument trap).
+		settledTurns := 0
+		stopFinish := "max_turns"
+		defer func() {
+			hookCtx := ctx
+			if hookCtx == nil {
+				hookCtx = context.Background()
+			}
+			// WithoutCancel: a cancelled turn must still report its
+			// Stop event — the hook observes the outcome, it does not
+			// inherit the cancellation that produced it.
+			a.cfg.Hooks.NotifyStop(context.WithoutCancel(hookCtx), hooks.StopEvent{
+				Turns:  settledTurns,
+				Finish: stopFinish,
+			})
+		}()
 		// Expose the channel so tools can EmitEvent during their
 		// Execute (e.g. propose pushes Plan* events on user choice).
 		// Cleared before close(out) runs (LIFO defer order) so a
@@ -589,6 +619,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			History:  append([]deepseek.Message{}, a.messages...),
 		})
 		if err != nil {
+			stopFinish = "error"
 			out <- ErrorEvent{Err: err}
 			return
 		}
@@ -613,6 +644,10 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			totalUsage     deepseek.Usage
 			totalToolCalls int
 			turns          int
+			// emptyPlaceholders counts CONSECUTIVE turns that closed with
+			// emptyResponseMarker. Any turn that produces real content
+			// resets it (see the reset below the retry loop).
+			emptyPlaceholders int
 		)
 
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
@@ -681,6 +716,47 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				}
 			}
 
+			// Empty-completion exhaustion (card c_jdel6u): the retry
+			// budget is spent and the upstream still produced nothing.
+			// Returning an error here used to kill the whole turn — in
+			// practice the whole session, since the run that hit it was
+			// mid-task and half its context was unrecoverable (11-20
+			// opencode:deepseek-v4.1-flash lane, 8+ occurrences).
+			//
+			// Instead record emptyResponseMarker as a REAL assistant
+			// message and let the turn end normally. Two properties
+			// matter:
+			//   - the transcript stays valid: an assistant message with
+			//     non-empty content satisfies DeepSeek's "content or
+			//     tool_calls must be set" contract, so the next request
+			//     is a legal continuation instead of a 400;
+			//   - it is visible: the sentinel guarantees nothing streamed,
+			//     so the UI block was never opened — open it and emit the
+			//     marker as a delta (the TUI commits deltas, not
+			//     MessageEnd's content, same as safetyRefusalMarker).
+			placeholderTurn := false
+			if err != nil && errors.Is(err, errEmptyResponse) && ctx.Err() == nil {
+				assistant = deepseek.Message{
+					Role:    deepseek.RoleAssistant,
+					Content: emptyResponseMarker,
+				}
+				// Keep usage (it was really billed) but the response is
+				// complete-as-far-as-it-goes: finish=stop, no error.
+				finish = "stop"
+				err = nil
+				placeholderTurn = true
+				out <- MessageStart{Message: assistant}
+				out <- MessageDelta{Delta: emptyResponseMarker}
+			}
+			if placeholderTurn {
+				emptyPlaceholders++
+			} else {
+				// Any turn that produced something (text, tool_calls)
+				// resets the streak: the gate is about CONSECUTIVE
+				// placeholders, not a lifetime tally.
+				emptyPlaceholders = 0
+			}
+
 			if err != nil {
 				// User-initiated cancellation (Esc / Ctrl+C) is the
 				// common case here. We must NOT append the partial
@@ -692,9 +768,11 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				// by tool messages". Drop the turn entirely and let
 				// the user continue from the prior valid state.
 				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					stopFinish = "canceled"
 					out <- AgentEnd{Usage: totalUsage, Turns: turns - 1, ToolCalls: totalToolCalls}
 					return
 				}
+				stopFinish = "error"
 				out <- ErrorEvent{Err: err}
 				return
 			}
@@ -715,6 +793,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// this branch handles every other path to the same bad
 			// state (including exhausted retries).
 			if len(assistant.ToolCalls) > 0 && finish != "tool_calls" {
+				stopFinish = "error"
 				out <- ErrorEvent{Err: fmt.Errorf(
 					"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
 					len(assistant.ToolCalls), finish)}
@@ -742,12 +821,53 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 					ToolCalls: 0,
 					Finish:    finish,
 				})
+				settledTurns++
+				// Placeholder turn: the marker is already committed above,
+				// so history is non-empty and the next request is legal.
+				// Keep going without asking the user — the point of the
+				// self-heal is that a flaky upstream stops costing a whole
+				// session. Give up after emptyPlaceholderHardStop
+				// CONSECUTIVE placeholders: at that point the upstream is
+				// not flaking, it is broken, and silently padding the
+				// transcript forever is worse than a clear error.
+				if placeholderTurn {
+					if emptyPlaceholders >= emptyPlaceholderHardStop {
+						out <- ErrorEvent{Err: fmt.Errorf(
+							"agent: 连续空补全占位 %d 次 —— 上游持续返回空补全（已按 %s 记账），停止本回合",
+							emptyPlaceholders, emptyResponseMarker)}
+						return
+					}
+					// The placeholder is an assistant message, so history
+					// now ENDS with assistant. DeepSeek rejects a request
+					// whose last message is assistant unless beta prefix
+					// mode is on ("The last message … must be a user
+					// message, or an assistant message with prefix mode
+					// on"), so the continuation has to be a user turn —
+					// exactly what AutoContinue does. Without it the
+					// self-heal would trade a 502-ish empty response for
+					// a 400.
+					if turn < a.cfg.MaxTurns-1 {
+						a.appendMessage(deepseek.Message{
+							Role:    deepseek.RoleUser,
+							Content: "continue" + modeReminder(a.cfg.ModeLabel),
+						})
+					}
+					continue
+				}
 				if a.cfg.AutoContinue && finish == "stop" && turn < a.cfg.MaxTurns-1 {
 					a.appendMessage(deepseek.Message{
 						Role:    deepseek.RoleUser,
 						Content: "continue" + modeReminder(a.cfg.ModeLabel),
 					})
 					continue
+				}
+				// The round settles HERE: this turn produced no tool
+				// calls, so Prompt() is about to return. finish is the
+				// model's own reason ("stop" for a real answer,
+				// "length" for a truncated one).
+				stopFinish = finish
+				if stopFinish == "" {
+					stopFinish = "stop"
 				}
 				break
 			}
@@ -806,6 +926,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				ToolCalls: toolCount,
 				Finish:    finish,
 			})
+			settledTurns++
 		}
 
 		out <- AgentEnd{Usage: totalUsage, Turns: turns, ToolCalls: totalToolCalls}
@@ -826,6 +947,23 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 // is excluded too: the budget was the problem, and an identical retry
 // would be deterministic waste.
 var errEmptyResponse = errors.New("agent: model returned an empty response (no content and no tool calls)")
+
+// emptyResponseMarker is the in-band assistant content recorded when the
+// clean-empty retry budget is exhausted and the upstream still returns
+// nothing. Like safetyRefusalMarker it is wire format for the transcript —
+// resume replays assistant content verbatim and the next request's history
+// carries it as ordinary text, so change the text only with a migration in
+// mind (same rule as the `[plan: …]` markers). Non-empty on purpose: an
+// assistant message with neither content nor tool_calls makes DeepSeek
+// reject the following request with "content or tool_calls must be set",
+// which is exactly the 400 this placeholder exists to prevent.
+const emptyResponseMarker = "[empty: 上游空补全，已重试1次]"
+
+// emptyPlaceholderHardStop is the number of CONSECUTIVE placeholder turns
+// allowed before Prompt gives up. A single flake is worth self-healing
+// through; two in a row means the upstream is not flaking, and padding the
+// transcript with markers indefinitely only hides a broken lane.
+const emptyPlaceholderHardStop = 2
 
 // runTurn routes to the DeepSeek or second-tier path depending on which
 // provider was configured.

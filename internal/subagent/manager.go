@@ -12,6 +12,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/agenttypes"
 	"github.com/whyiyhw/seek/internal/cache"
+	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/session"
@@ -193,6 +194,18 @@ type ManagerOpts struct {
 	// built-ins only via the compile-time fallback (the pre-P2-b
 	// behaviour of callers that don't set it).
 	AgentTypes *agenttypes.Set
+
+	// Hooks, when non-nil, receives the P3-a subagent lifecycle
+	// observers: SubagentStart right after the `started` event lands,
+	// SubagentStop after any terminal event is written
+	// (completed / failed / killed). nil = no observation (the
+	// pre-P3-a behaviour; every dispatch helper is nil-safe).
+	//
+	// This is the PARENT session's registry (cmd/seek passes
+	// hooksReg). Children get their own copy via CloneWithout, so a
+	// subagent_start/stop shell hook fires exactly once per spawn —
+	// from here, not from inside the child.
+	Hooks *hooks.Registry
 }
 
 // Manager owns the subagents.jsonl index + the in-flight map for
@@ -568,6 +581,24 @@ func (m *Manager) begin(parentCtx context.Context, args SpawnArgs, background bo
 	m.active[subSid] = inf
 	m.mu.Unlock()
 
+	// SubagentStart observer (feature-orchestration D15): fires once
+	// per spawn, sync and background alike, immediately after the
+	// `started` index event. Deliberately AFTER m.mu is released —
+	// a hook implementation may call back into the Manager (list /
+	// active count) and must not deadlock on the lock we just took.
+	// runAndFinish is still ahead of us on both paths (Spawn calls it
+	// after begin returns; SpawnBackground starts its goroutine after
+	// begin returns), so Start can never be overtaken by Stop.
+	//
+	// WithoutCancel for the same reason as SubagentStop: the event
+	// reports that a spawn happened, so it must not be dropped because
+	// the caller's ctx was cancelled a moment later.
+	m.opts.Hooks.NotifySubagentStart(context.WithoutCancel(parentCtx), hooks.SubagentStartEvent{
+		SID:  subSid,
+		Type: string(args.Type),
+		Desc: args.Description,
+	})
+
 	return &spawnSetup{
 		args:         args,
 		subSid:       subSid,
@@ -939,6 +970,16 @@ func (m *Manager) beginContinue(parentCtx context.Context, args ContinueArgs) (*
 	m.active[subSid] = inf
 	m.mu.Unlock()
 
+	// SubagentStart observer — same contract as begin (see the
+	// comment there). Type comes from the PRIOR run's recorded type
+	// (the continuation inherits it), not from args.Type, which is
+	// empty on this path.
+	m.opts.Hooks.NotifySubagentStart(context.WithoutCancel(parentCtx), hooks.SubagentStartEvent{
+		SID:  subSid,
+		Type: string(rec.Type),
+		Desc: args.Description,
+	})
+
 	return &spawnSetup{
 		args: SpawnArgs{
 			Description:  args.Description,
@@ -1001,7 +1042,7 @@ func (m *Manager) resolveTypedDef(def *agenttypes.Definition) (Template, error) 
 // result; the background path's Result flows into the notice inbox
 // as "[agent: background done/failed ...]" for the Notifier.
 // Terminal index events are IDENTICAL for both paths.
-func (m *Manager) runAndFinish(sp *spawnSetup, background bool) Result {
+func (m *Manager) runAndFinish(sp *spawnSetup, background bool) (final Result) {
 	// Step 9: run. This blocks. Recover from panics so a buggy
 	// Runner can't take down the seek process — convert panic to
 	// a failed event with reason=spawn_error.
@@ -1009,6 +1050,27 @@ func (m *Manager) runAndFinish(sp *spawnSetup, background bool) Result {
 		runResult RunnerResult
 		runErr    error
 	)
+
+	// SubagentStop observer (feature-orchestration D15): fires once
+	// per run, after EVERY terminal path has written its index event
+	// (completed / failed / killed). Registered first so it is the
+	// LAST thing to run — the terminal event is on disk by then, and
+	// a hook that reads the index sees the settled row.
+	//
+	// Context: sp.runCtx is cancelled a few lines below (sp.cancel()),
+	// so the observer must not inherit that cancellation — a Stop
+	// event is the report of the outcome, not a participant in it.
+	defer func() {
+		m.opts.Hooks.NotifySubagentStop(context.WithoutCancel(sp.runCtx), hooks.SubagentStopEvent{
+			SID:    sp.subSid,
+			Type:   string(sp.args.Type),
+			Desc:   sp.args.Description,
+			Status: string(final.Status),
+			Turns:  runResult.Turns,
+			Tokens: int64(runResult.Tokens.Prompt + runResult.Tokens.Completion),
+		})
+	}()
+
 	func() {
 		defer func() {
 			if r := recover(); r != nil {

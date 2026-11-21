@@ -388,6 +388,7 @@ func TestBuildACPPromptText(t *testing.T) {
 // lane (no Files API client) gets the store-and-attach path — the part
 // carries the asset and the send path materialises the bytes.
 func TestBuildACPPromptText_FileRefs(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir()) // butler c_rzsvk5：fileroute.New→ProjectAssets 会写进真实 ~/.seek
 	dir := t.TempDir()
 	doc := filepath.Join(dir, "report.pdf")
 	if err := os.WriteFile(doc, []byte("%PDF-1.4"), 0o644); err != nil {

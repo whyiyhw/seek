@@ -466,6 +466,70 @@ extract_metric() {
         | length
       ' "$path"
       ;;
+    sse_delta_frames)
+      # serve-web-stream (E5): delta frames on the W1.4 SSE wire, as
+      # captured+paired by the case's runner.sh into sse_frame rows.
+      $JQ -s '[.[] | select(.type=="sse_frame" and .event=="delta")] | length' "$path"
+      ;;
+    sse_usage_frames)
+      # usage frames (turn_end translated server-side, webfrontend_stream.go).
+      $JQ -s '[.[] | select(.type=="sse_frame" and .event=="usage")] | length' "$path"
+      ;;
+    sse_frame_order_ok)
+      # Wire-order invariant: every named (delta/usage/tool) frame of the
+      # close-out's run PRECEDES the close-out default frame (the run
+      # table's events…reply contract). 1/0; 0 when no close-out exists.
+      $JQ -s '
+        [ .[] | select(.type=="sse_frame") ] as $f
+        | [ $f | to_entries[] | select(.value.event=="" and (.value.data.run // null) != null) ] as $co
+        | if ($co|length) < 1 then 0
+          else ($co|last) as $c
+            | [ $f | to_entries[]
+                | select((.value.event=="delta" or .value.event=="usage" or .value.event=="tool"))
+                | select(.value.data.run == $c.value.data.run and .key >= $c.key) ] | length
+            | if . == 0 then 1 else 0 end
+          end
+      ' "$path"
+      ;;
+    sse_delta_accum_ok)
+      # Accumulation: the delta frames' text, concatenated in wire order,
+      # equals the close-out frame's text (the authoritative replacement).
+      $JQ -s '
+        [ .[] | select(.type=="sse_frame") ] as $f
+        | [ $f | to_entries[] | select(.value.event=="" and (.value.data.run // null) != null) ] as $co
+        | if ($co|length) < 1 then 0
+          else ($co|last.value.data) as $r
+            | [ $f | to_entries[] | select(.value.event=="delta" and .value.data.run == $r.run) | .value.data.text ] | join("") as $acc
+            | if $acc == $r.text then 1 else 0 end
+          end
+      ' "$path"
+      ;;
+    sse_reply_closeout_ok)
+      # Close-out shape: the reply frame carries a non-empty run (equal to
+      # every delta frame's run) and a non-empty session_id (the W1.4
+      # close-out addition over the MVP envelope).
+      $JQ -s '
+        [ .[] | select(.type=="sse_frame") ] as $f
+        | [ $f | to_entries[] | select(.value.event=="" and (.value.data.run // null) != null) ] as $co
+        | if ($co|length) < 1 then 0
+          else ($co|last.value.data) as $r
+            | [ $f | to_entries[] | select(.value.event=="delta") | .value.data.run ] as $druns
+            | if (($r.run // "") != "" and ($r.session_id // "") != "" and ($druns|length) > 0 and ($druns|all(. == $r.run))) then 1 else 0 end
+          end
+      ' "$path"
+      ;;
+    session_list_hits)
+      # Persistence axis: /rpc session/list sessions[].sid entries matching
+      # the close-out frame's session_id (child wrote it under the same
+      # SEEK_HOME ladder the rpc plane reads back through).
+      $JQ -s '
+        [ .[] | select(.type=="sse_frame" and .event=="" and ((.data.session_id // "") != "")) ] as $co
+        | if ($co|length) < 1 then 0
+          else ($co|last.data.session_id) as $sid
+            | [ .[] | select(.type=="session_list") | (.sids // [])[] | select(. == $sid) ] | length
+          end
+      ' "$path"
+      ;;
     *)
       echo "0"
       ;;
@@ -612,6 +676,30 @@ run_one() {
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
     '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
+
+  # Serve-plane metrics (E5 serve-web-stream, card c_lbtdqw): merged in
+  # ONLY for streams that actually carry sse_frame rows — a
+  # content-conditional extension, so every non-serve case's row keeps
+  # its exact historical byte shape (the no-env equivalence pinned by
+  # scripts/eval-ablate-test.sh) while the serve case's rows gain the
+  # six-axis wire metrics. A serve case that crashed before producing
+  # any frame skips this block and its expect bounds read "(unknown
+  # metric …)" — red, with the failing axis named in the row.
+  if grep -q '"type":"sse_frame"' "$out_file" 2>/dev/null; then
+    # -cn, not -c: this is a pure filter over $m — without -n jq would
+    # consume stdin (empty under run_one) and silently emit nothing,
+    # clobbering metrics and turning the failures scan's --argjson m ''
+    # into an "invalid JSON text" error instead of a judgement.
+    metrics=$($JQ -cn \
+      --argjson sse_delta_frames       "$(extract_metric sse_delta_frames       "$out_file")" \
+      --argjson sse_usage_frames       "$(extract_metric sse_usage_frames       "$out_file")" \
+      --argjson sse_frame_order_ok     "$(extract_metric sse_frame_order_ok     "$out_file")" \
+      --argjson sse_delta_accum_ok     "$(extract_metric sse_delta_accum_ok     "$out_file")" \
+      --argjson sse_reply_closeout_ok  "$(extract_metric sse_reply_closeout_ok  "$out_file")" \
+      --argjson session_list_hits      "$(extract_metric session_list_hits      "$out_file")" \
+      --argjson m "$metrics" \
+      '$m + {sse_delta_frames:$sse_delta_frames, sse_usage_frames:$sse_usage_frames, sse_frame_order_ok:$sse_frame_order_ok, sse_delta_accum_ok:$sse_delta_accum_ok, sse_reply_closeout_ok:$sse_reply_closeout_ok, session_list_hits:$session_list_hits}')
+  fi
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

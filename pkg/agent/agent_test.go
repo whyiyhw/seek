@@ -1219,25 +1219,25 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 }
 
 // TestAgent_EmptyChoicesUsageOnly verifies that a stream yielding no
-// content and no tool_calls produces an error. The empty assistant message
-// would otherwise poison the next request: on the following turn,
-// StripReasoningContent removes the (absent) reasoning_content, leaving
-// role=assistant with no content and no tool_calls, which DeepSeek
-// rejects with "content or tool_calls must be set".
+// content and no tool_calls can never poison the next request: the empty
+// assistant message would otherwise leave role=assistant with no content
+// and no tool_calls, which DeepSeek rejects with "content or tool_calls
+// must be set".
+//
+// Since card c_jdel6u the exhausted retry no longer errors immediately —
+// the turn closes with emptyResponseMarker and the loop continues. Two
+// consecutive placeholder turns then trip the hard-stop, which IS an
+// error: this test pins that the terminal outcome still surfaces loudly,
+// that history never holds a contentless assistant message, and that the
+// gate fires only after the per-turn retry budget is spent (2 attempts per
+// turn = 4 requests).
 func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 	t.Parallel()
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
-		io.WriteString(w, strings.Join([]string{
-			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-			``,
-			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0,"total_tokens":3}}`,
-			``,
-			`data: [DONE]`,
-			``,
-		}, "\n"))
+		io.WriteString(w, cleanEmptySSE())
 	}))
 	defer srv.Close()
 
@@ -1247,18 +1247,23 @@ func TestAgent_EmptyChoicesUsageOnly(t *testing.T) {
 	})
 	res := drainAgent(ag.Prompt(context.Background(), "hello"))
 	if len(res.errors) == 0 {
-		t.Fatal("expected error for empty response (no content, no tool_calls), got none")
+		t.Fatal("expected the consecutive-placeholder hard-stop for an always-empty upstream, got none")
 	}
-	if !strings.Contains(res.errors[0].Error(), "empty response") {
-		t.Errorf("error should mention empty response, got: %v", res.errors[0])
+	if !strings.Contains(res.errors[0].Error(), "连续空补全占位") {
+		t.Errorf("error should be the placeholder hard-stop, got: %v", res.errors[0])
 	}
-	// Retry budget: a clean empty is re-issued exactly once before the
-	// error surfaces — two attempts total.
-	if got := hits.Load(); got != 2 {
-		t.Errorf("server hits = %d, want 2 (one retry)", got)
+	// Retry budget: each placeholder turn is re-issued once; the gate
+	// fires on the second turn — 4 requests total.
+	if got := hits.Load(); got != 4 {
+		t.Errorf("server hits = %d, want 4 (two turns, one retry each)", got)
 	}
-	// No orphan tool_calls — the empty message is NOT committed.
+	// No orphan tool_calls, and no assistant message with empty content.
 	assertNoOrphanToolCalls(t, ag.Messages())
+	for _, m := range ag.Messages() {
+		if m.Role == deepseek.RoleAssistant && m.Content == "" && len(m.ToolCalls) == 0 {
+			t.Errorf("history holds a contentless assistant message: %+v", ag.Messages())
+		}
+	}
 }
 
 // TestAgent_EmptyResponse_RetriedOnceAndRecovers: the first attempt is a
@@ -1321,6 +1326,191 @@ func TestAgent_EmptyResponse_RetriedOnceAndRecovers(t *testing.T) {
 	hist := ag.Messages()
 	if n := len(hist); n == 0 || hist[n-1].Content != "recovered" {
 		t.Errorf("history tail = %+v, want the recovered assistant message", hist)
+	}
+}
+
+// cleanEmptySSE is the pure-flake shape: 200, finish=stop, zero deltas.
+// Both retry attempts returning this is what exhausts the empty budget.
+func cleanEmptySSE() string {
+	return strings.Join([]string{
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":0,"total_tokens":3}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+}
+
+// TestAgent_EmptyResponse_ExhaustedBooksMarkerAndContinues: the retry
+// budget is spent and the upstream is STILL empty. Instead of killing the
+// turn (which killed whole sessions on the opencode:deepseek-v4.1-flash
+// lane, card c_jdel6u), the agent books emptyResponseMarker as a real
+// assistant message and keeps going: the next turn's history is non-empty
+// and therefore a legal request.
+func TestAgent_EmptyResponse_ExhaustedBooksMarkerAndContinues(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		if hits.Add(1) <= 2 {
+			io.WriteString(w, cleanEmptySSE())
+			return
+		}
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) > 0 {
+		t.Fatalf("exhausted clean empty must self-heal, not error: %v", res.errors)
+	}
+	// 2 attempts for the placeholder turn + 1 for the recovering turn.
+	if got := hits.Load(); got != 3 {
+		t.Errorf("server hits = %d, want 3 (retry budget 2, then one recovery turn)", got)
+	}
+	joined := strings.Join(res.events, ",")
+	if strings.Contains(joined, "ErrorEvent") {
+		t.Errorf("placeholder turn must not surface an error, events: %v", res.events)
+	}
+	if n := strings.Count(joined, "TurnEnd"); n != 2 {
+		t.Errorf("TurnEnd count = %d, want 2 (placeholder turn + recovering turn): %v", n, res.events)
+	}
+	// The marker reached the live stream (the TUI commits deltas).
+	if n := strings.Count(joined, "MessageDelta"); n < 2 {
+		t.Errorf("marker + recovery must both stream deltas, events: %v", res.events)
+	}
+	// Exactly one marker in history, and it is a legal assistant message.
+	hist := ag.Messages()
+	markers := 0
+	for _, m := range hist {
+		if m.Role == deepseek.RoleAssistant && m.Content == emptyResponseMarker {
+			markers++
+			if len(m.ToolCalls) != 0 {
+				t.Errorf("placeholder must carry no tool_calls, got %d", len(m.ToolCalls))
+			}
+		}
+	}
+	if markers != 1 {
+		t.Errorf("history holds %d empty markers, want exactly 1: %+v", markers, hist)
+	}
+	if n := len(hist); n == 0 || hist[n-1].Content != "recovered" {
+		t.Errorf("history tail = %+v, want the recovered assistant message", hist)
+	}
+	assertNoOrphanToolCalls(t, ag.Messages())
+}
+
+// TestAgent_EmptyResponse_ConsecutivePlaceholdersHardStop: two turns in a
+// row closing with the marker means the upstream is broken, not flaking.
+// Prompt must stop with an error that names the count, so it is
+// distinguishable from a plain empty-response error.
+func TestAgent_EmptyResponse_ConsecutivePlaceholdersHardStop(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, cleanEmptySSE())
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) == 0 {
+		t.Fatalf("two consecutive placeholders must hard-stop, events: %v", res.events)
+	}
+	if msg := res.errors[0].Error(); !strings.Contains(msg, "连续空补全占位 2 次") {
+		t.Errorf("hard-stop error must name the count, got: %v", res.errors[0])
+	}
+	// 2 attempts per placeholder turn × 2 turns.
+	if got := hits.Load(); got != 4 {
+		t.Errorf("server hits = %d, want 4 (two turns, two attempts each)", got)
+	}
+	// Both placeholder turns are committed before the gate fires, so the
+	// history stays a valid continuation for whatever the user does next.
+	markers := 0
+	for _, m := range ag.Messages() {
+		if m.Content == emptyResponseMarker {
+			markers++
+		}
+	}
+	if markers != 2 {
+		t.Errorf("history holds %d markers, want 2", markers)
+	}
+	assertNoOrphanToolCalls(t, ag.Messages())
+}
+
+// TestAgent_EmptyResponse_StreakResetsOnRealContent: the hard-stop counts
+// CONSECUTIVE placeholders. A turn that produces real content in between
+// resets the streak, so a flaky lane that recovers once must not trip the
+// gate on the next placeholder.
+func TestAgent_EmptyResponse_StreakResetsOnRealContent(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		// First prompt: hits 1-2 empty (placeholder turn), hit 3 text.
+		// Second prompt: hits 4-5 empty (another placeholder turn, allowed
+		// because the streak was reset), hit 6 text.
+		if n <= 2 || (n >= 4 && n <= 5) {
+			io.WriteString(w, cleanEmptySSE())
+			return
+		}
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`+"\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+	})
+	// First Prompt: placeholder, then recovery — the streak is reset by
+	// the real content.
+	res := drainAgent(ag.Prompt(context.Background(), "hello"))
+	if len(res.errors) > 0 {
+		t.Fatalf("first prompt must self-heal: %v", res.errors)
+	}
+	// Second Prompt: another single placeholder turn. It must be allowed
+	// (streak was reset) rather than tripping the 2-in-a-row gate, and
+	// the following turn recovers again.
+	res2 := drainAgent(ag.Prompt(context.Background(), "again"))
+	if len(res2.errors) > 0 {
+		t.Fatalf("a lone placeholder after real content must not hard-stop: %v", res2.errors)
+	}
+	if n := strings.Count(strings.Join(res2.events, ","), "TurnEnd"); n != 2 {
+		t.Errorf("second prompt TurnEnd count = %d, want 2 (placeholder + recovery): %v", n, res2.events)
 	}
 }
 

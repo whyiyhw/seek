@@ -10,7 +10,8 @@
 # 先跑服务端自检（curl：页面部件 / 无 HTML 解析 sink / SSE 事件族与
 # §2.5 过滤——args/result、reasoning 不下发），再走浏览器验收：
 #   - 本机有 Chrome + node≥22 → scripts/web-stream-headless.mjs 无头跑全
-#     部断言（流式过程态/收口替换/XSS 不执行/cancel 收口）；
+#     部断言（流式过程态/收口替换/XSS 不执行/cancel 保留式收口——c_5m3fm6
+#     起半截保留 + 标注，不再被 ack 整泡替换）；
 #   - 缺任一 → 打印人工清单等人按 Enter。
 # 全程不碰真实 ~/.seek 与生产 8790。桩场景按消息文本切换：流式 / 注入 /
 # 卡住 / 其它（默认应答）。
@@ -21,8 +22,9 @@
 #      收口后整泡替换成终文本（``` 围栏渲染成代码块），工具行消失
 #   3. 发「注入」：<script>/<img onerror> 全部显示为纯文本，页面无弹窗、
 #      无新增脚本执行痕迹
-#   4. 发「卡住」→ 见 stuck 气泡后发 /cancel：气泡被「已中断 当前 run」
-#      收口替换，随后「run 已中断。」独立成条
+#   4. 发「卡住」→ 见 stuck 气泡后发 /cancel（或点生成中的停止键，见
+#      web-stop-manual.sh）：stuck 半截保留、尾部「—— 已中断 ——」标注，
+#      随后「run 已中断。」独立成条
 #   5. 顶栏状态行随指令即时刷新（/bind 后变「已绑定 …」）
 #
 # Env:
@@ -31,7 +33,8 @@
 #   DRY_RUN=1              只打印步骤不动手
 #   KEEP=1                 结束后保留临时目录与 serve 进程（人工续查）
 #
-# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误。
+# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误；
+#         3 无头条件缺且 stdin 非 TTY（无人值守车道：报环境能力缺，不假装绿）。
 # 依赖：go、curl；无头验收另需 Chrome 与 node≥22（缺则退人工清单）。
 set -u
 
@@ -220,6 +223,18 @@ if [ "$HEADLESS" = 1 ]; then
   exit 0
 fi
 
+# 无头条件缺 + 非 TTY = 无人值守车道：人工清单无处可走。read 在这里要么
+# 挂到车道超时，要么 stdin 已关时读空即过——后者会给出无凭据的绿。退 3，
+# 点名缺哪样能力（c_kwiajf 判据，web-sessions-manual.sh:221-230 同款；
+# c_gqo32q 补此块后方移出 selftest 排除表）。
+if [ ! -t 0 ]; then
+  miss=""
+  [ -x "$CHROME_BIN" ] || miss="Chrome（${CHROME_BIN}）"
+  [ -n "$NODE_BIN" ] || miss="${miss:+${miss} + }node"
+  echo "FAIL: 无头验收条件缺（${miss}）且 stdin 非 TTY——无人值守没有人工清单可走。装上缺的组件或 CHROME=<路径> 重跑。" >&2
+  exit 3
+fi
+
 cat <<EOF
 
 == 无头条件缺（Chrome/node）——人工手测清单（浏览器）==
@@ -228,8 +243,8 @@ cat <<EOF
   2. 发「流式」：⚙ read … 工具行 + ▍光标部分文本逐段上屏；收口后
      整泡替换成终文本（\`\`\` 围栏成代码块），工具行消失
   3. 发「注入」：<script>/<img onerror> 显示为纯文本，无脚本执行
-  4. 发「卡住」→ stuck 气泡出现后发 /cancel：气泡被 ack 收口替换，
-     「run 已中断。」独立成条
+  4. 发「卡住」→ stuck 气泡出现后发 /cancel：stuck 半截保留、尾部
+     「—— 已中断 ——」标注，「run 已中断。」独立成条
   5. 断开网络/杀 serve 再起：EventSource 自动重连（W1.x 既有面零回归）
 
 按 Enter 结束并清理（KEEP=1 保留现场）…

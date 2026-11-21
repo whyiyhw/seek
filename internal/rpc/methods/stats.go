@@ -58,7 +58,6 @@ func (s *Stats) open() (*session.Store, error) {
 func (s *Stats) RegisterAll(r *rpc.Registry) {
 	r.Register("stats/cache", s.cache)
 	r.Register("stats/friction", s.friction)
-	r.Register("stats/trend", s.trend)
 }
 
 // statsSIDParams is the family's params convention: sid optional —
@@ -182,86 +181,4 @@ func (s *Stats) friction(ctx context.Context, params json.RawMessage) (any, erro
 		SID:     sess.ID,
 		Summary: friction.Fold(sess.Messages),
 	}, nil
-}
-
-// stats/trend — c_6xktw4: the cross-session trend the stats pane plots.
-// One point per recent session, OLDEST first so a line drawn left→right
-// reads as time. Folded from the same header read stats/cache uses
-// (Store.List decodes line 1 only), so the cost is O(N) header decodes
-// and never touches the message bodies.
-//
-// Boundaries the UI must survive:
-//   - empty store → {"points":[]} — an EMPTY SUCCESS, not -32001: "no
-//     history yet" is a normal state for a trend line, unlike a
-//     per-session read where there is no session to answer for.
-//   - one point  → a single point; a polyline needs two.
-// Per-file load errors are dropped silently, the session/list rule: one
-// corrupt header must not hide the whole trend.
-
-const (
-	trendDefaultLimit = 20
-	trendMaxLimit     = 100
-)
-
-type statsTrendParams struct {
-	Limit *int `json:"limit,omitempty"` // pointer: explicit 0 is invalid, not "default"
-}
-
-type trendPoint struct {
-	SID          string    `json:"sid"`
-	At           time.Time `json:"at"` // session UpdatedAt — the point's x
-	Model        string    `json:"model"`
-	PromptTokens int       `json:"prompt_tokens"`
-	CompTokens   int       `json:"completion_tokens"`
-	CacheHit     int       `json:"cache_hit_tokens"`
-	CacheMiss    int       `json:"cache_miss_tokens"`
-	HitRatio     float64   `json:"hit_ratio"`
-	CostUSD      float64   `json:"cost_usd"`
-}
-
-type statsTrendResult struct {
-	Points []trendPoint `json:"points"` // never null: a walkable array for JS
-}
-
-func (s *Stats) trend(ctx context.Context, params json.RawMessage) (any, error) {
-	var p statsTrendParams
-	if err := decodeParams(params, &p); err != nil {
-		return nil, err
-	}
-	limit := trendDefaultLimit
-	if p.Limit != nil {
-		if *p.Limit < 1 || *p.Limit > trendMaxLimit {
-			return nil, rpc.Errorf(rpc.CodeInvalidParams, "limit %d: want 1..%d", *p.Limit, trendMaxLimit)
-		}
-		limit = *p.Limit
-	}
-	store, err := s.open()
-	if err != nil {
-		return nil, err
-	}
-	infos, _, err := store.List() // newest first
-	if err != nil {
-		return nil, err
-	}
-	if len(infos) > limit {
-		infos = infos[:limit]
-	}
-	tier := pricing.CurrentTier(time.Now())
-	points := make([]trendPoint, 0, len(infos))
-	for i := len(infos) - 1; i >= 0; i-- { // newest-first → oldest-first
-		info := infos[i]
-		u := info.Usage
-		points = append(points, trendPoint{
-			SID:          info.ID,
-			At:           info.UpdatedAt,
-			Model:        info.Model,
-			PromptTokens: u.PromptTokens,
-			CompTokens:   u.CompletionTokens,
-			CacheHit:     u.PromptCacheHitTokens,
-			CacheMiss:    u.PromptCacheMissTokens,
-			HitRatio:     u.HitRatio(),
-			CostUSD:      pricing.Cost(info.Model, tier, u),
-		})
-	}
-	return statsTrendResult{Points: points}, nil
 }

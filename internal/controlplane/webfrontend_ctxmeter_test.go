@@ -71,6 +71,15 @@ func TestWeb_UsageCarriesLaneAndWindow(t *testing.T) {
 			if u.Lane == "" {
 				t.Errorf("usage frame carried no lane label: %s", ufr.data)
 			}
+
+			// Wait out the run's close-out before returning (c_2vst75):
+			// the usage frame rides mid-run; the per-message goroutine
+			// still owes the D-C3 session writeback (store.Put into this
+			// test's first TempDir) plus this reply. Without the wait
+			// that write raced t.TempDir's RemoveAll ("directory not
+			// empty" under load) — the close-out is handlePrompt's last
+			// act, so observing it orders the writeback before cleanup.
+			wantFrame(t, tap, "", `"conv":"web:default"`, `"session_id":"SWL"`)
 		})
 	}
 }
