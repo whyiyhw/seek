@@ -95,6 +95,11 @@
      a secure context: localhost is one; a tailnet IP over plain http
      is NOT (browsers deny getUserMedia) — front it with an HTTPS
      proxy (tailscale serve) to talk from a phone.
+     Input enhancements (c_7lsngm, dsh ui-input-trigger + ui-commands):
+     textarea (Enter sends / Shift+Enter newlines) + ONE candidate
+     overlay — '/' commands (CMDS registry below) and '@' recent sessions
+     (/rpc session/list → /resume <sid>). Navigation keys bind on the
+     input only, so Escape never hijacks the page.
      Approval cards (W5, card c_n37tnr): permission y/N delivered to
      the browser — the conv stream's named `approval` events drive a
      bottom-right card stack (summary + command summary + y/N/a
@@ -313,11 +318,42 @@
           font-size: 12px; color: var(--seek-fg-soft); }
   /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
   .msg .cut { color: var(--seek-fg-soft); font-size: 12px; padding-top: 2px; }
-  form { display: flex; gap: 8px; padding: 10px 14px; background: var(--seek-panel);
+  /* 输入区底对齐（c_7lsngm）：按钮跟到多行输入的底边；position:relative
+     是候选弹层的定位父级——贴表单上沿、宽度跟表单（窄屏自然满宽）。 */
+  form { position: relative; display: flex; gap: 8px; align-items: flex-end;
+         padding: 10px 14px; background: var(--seek-panel);
          border-top: 1px solid var(--seek-line); }
+  /* 多行输入（c_7lsngm）：Enter 发送 / Shift+Enter 换行——textarea 才有
+     换行；高度按内容长（grow() 写 style.height），上限 CSS 兜底滚动 */
   #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
-           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
+           border-radius: 6px; padding: 8px 10px; font: inherit; outline: none;
+           resize: none; line-height: 1.45; min-height: 36px; max-height: 40vh;
+           overflow-y: auto; }
   #input:focus { border-color: var(--seek-line-focus); }
+  /* ---- 输入增强弹层（c_7lsngm）：'/' 指令补全 + '@' 会话引用 ----
+     绝对定位贴在表单上沿（form 是定位父级），文档流不位移。 */
+  #menu { position: absolute; left: 14px; right: 14px; bottom: 100%;
+          margin-bottom: 2px; max-height: 46vh; overflow-y: auto;
+          background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 8px;
+          box-shadow: 0 -6px 18px rgba(0,0,0,.35); }
+  #menu[hidden] { display: none; }
+  #menu .mi { display: flex; gap: 10px; align-items: baseline;
+              padding: 6px 12px; cursor: pointer;
+              border-bottom: 1px solid var(--seek-line); }
+  #menu .mi:last-child { border-bottom: 0; }
+  #menu .mi.hl { background: var(--seek-accent); }
+  #menu .mi .nm { color: var(--seek-fg-soft); white-space: nowrap; }
+  #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
+                  text-overflow: ellipsis; white-space: nowrap; }
+  #menu .mi .sid { color: var(--seek-fg-dim); font-size: 12px; margin-left: auto; }
+  /* 窄屏降级（验收 ③）：弹层满宽、条目换行、输入 16px 防 iOS 聚焦缩放 */
+  @media (max-width: 640px) {
+    #menu { left: 0; right: 0; bottom: 100%; border-radius: 8px 8px 0 0; }
+    #menu .mi { flex-wrap: wrap; }
+    #menu .mi .sid { margin-left: 0; }
+    #input { font-size: 16px; }
+    form { padding: 8px; }
+  }
   button { background: var(--seek-accent); color: inherit; border: 0; border-radius: 6px;
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
@@ -685,6 +721,7 @@
     <section id="settings" class="pane">
       <div class="pane-head"><span class="cnt">设置 · 只读展示（改配置 = 编辑 ~/.seek/config.json 后重启）</span></div>
       <div id="set-body"></div>
+    </section>
     <!-- hooks 审计视图（W5 c_xz2bey）：订阅先行的 tail——专用 /events 连接带
          ?topic=hooks（审计日志是全局的，无需 /bind），快照走 POST /rpc
          hooks/audit/tail；推送逐行追加，可暂停/按 hook 名过滤。 -->
@@ -698,7 +735,11 @@
       <div id="hk-log"></div>
     </section>
     <form id="form">
-      <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
+      <!-- 多行输入（c_7lsngm）：Enter 发送、Shift+Enter 换行；#menu 是 '/' 指令补全
+           与 '@' 会话引用共用的候选弹层（一行 DOM，两种候源），贴着表单上沿。 -->
+      <textarea id="input" autocomplete="off" rows="1" spellcheck="false"
+                placeholder="/bind <项目路径>，/ 看指令，@ 引用会话，或直接发消息" autofocus></textarea>
+      <div id="menu" role="listbox" aria-label="候选" hidden></div>
       <input id="file" type="file" multiple hidden
              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
       <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）">📎</button>
@@ -1486,6 +1527,7 @@ form.addEventListener('submit', async ev => {
   // 把失败项说清楚，用户能删掉再发。
   if (typed.startsWith('/')) {
     await sendText(typed, true);
+    grow();
     input.focus();
     return;
   }
@@ -1495,13 +1537,207 @@ form.addEventListener('submit', async ev => {
   }
   if (!typed && !ready.length) { input.focus(); return; }
   await sendText(typed, true, ready);
+  grow();
   input.focus();
+});
+
+// ---- 输入增强（c_7lsngm；对齐 dsh ui-input-trigger + ui-commands）----
+// 全挂在输入框这条 input/keydown 线上，不碰全局键：Enter 发送 /
+// Shift+Enter 原生换行；'/' 指令补全（候源 = 下面这张注册表）；
+// '@' 最近会话（session/list），选中落 @<sid> 并发 /resume <sid>。
+// 弹层开着时导航键就地消化，关掉即全部放行（Esc 不劫持页面）。
+const CMDS = [
+  { name: '/bind',     args: true,  desc: '绑定/重绑项目（会话重置，需补路径）' },
+  { name: '/projects', args: false, desc: '列出候选项目与当前绑定' },
+  { name: '/switch',   args: true,  desc: '切换到另一项目（需补路径）' },
+  { name: '/new',      args: false, desc: '项目不变，开新会话' },
+  { name: '/cancel',   args: false, desc: '中断本会话运行中的任务' },
+  { name: '/resume',   args: true,  desc: '续到某个历史会话（@ 引用用它）' },
+];
+
+const menu = document.getElementById('menu');
+let menuItems = [], menuHl = -1, menuCtx = null;  // 候选 / 高亮 / 上次判定的上下文
+
+function closeMenu() {
+  menu.hidden = true;
+  menu.replaceChildren();
+  menuItems = [];
+  menuHl = -1;
+}
+
+function renderMenu() {
+  menu.replaceChildren();
+  menuItems.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'mi' + (i === menuHl ? ' hl' : '');
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', i === menuHl ? 'true' : 'false');
+    for (const [cls, text] of [['nm', it.label], ['ds', it.desc], ['sid', it.meta]]) {
+      if (!text) continue;
+      const span = document.createElement('span');
+      span.className = cls;
+      span.textContent = text;
+      row.appendChild(span);
+    }
+    // mousedown 而非 click：click 前 textarea 会先 blur 丢掉弹层局部态。
+    row.addEventListener('mousedown', ev => { ev.preventDefault(); pick(i); });
+    menu.appendChild(row);
+  });
+}
+
+function moveHl(dir) {
+  if (!menuItems.length) return;
+  menuHl = (menuHl + dir + menuItems.length) % menuItems.length;
+  renderMenu();
+  const hl = menu.children[menuHl];
+  if (hl && hl.scrollIntoView) hl.scrollIntoView({ block: 'nearest' });
+}
+
+function pick(i) {
+  const it = menuItems[i];
+  if (!it) return;
+  closeMenu();
+  it.apply();
+}
+
+function grow() {   // 高度自长，上限由 CSS max-height 兜
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px';
+}
+
+// '/' 触发：草稿以 '/' 开头且还没有空格（= 还在打指令名）才弹。
+function slashHits() {
+  const v = input.value;
+  if (!v.startsWith('/') || v.includes(' ')) return null;
+  const q = v.slice(1).toLowerCase();
+  const hits = CMDS.filter(c => c.name.slice(1).startsWith(q));
+  if (!hits.length) return null;
+  return hits.map(c => ({
+    label: c.name,
+    desc: c.desc,
+    apply: () => {
+      const t = c.name + (c.args ? ' ' : '');
+      input.value = t;
+      input.setSelectionRange(t.length, t.length);
+      grow();
+      input.focus();
+    },
+  }));
+}
+
+// '@' 触发：光标往左扫到 '@'、中间无空白 = 正在打一个引用。
+function atToken() {
+  const v = input.value, caret = input.selectionStart;
+  if (caret == null) return null;
+  for (let i = caret - 1; i >= 0; i--) {
+    if (/\s/.test(v.charAt(i))) return null;
+    if (v.charAt(i) === '@') return { start: i, query: v.slice(i + 1, caret) };
+  }
+  return null;
+}
+
+// 候源只在首次触发拉一次并缓存；失败/空也给一行提示（不静默无弹层）。
+let atCache = null, atErr = null, atPending = false;
+
+async function loadSessionsForAt() {
+  if (atCache !== null || atPending) return;
+  atPending = true;
+  try {
+    atCache = (await rpc('session/list', {})).sessions || [];
+    atErr = null;
+  } catch (e) {
+    atCache = [];
+    atErr = e.message || String(e);
+  }
+  atPending = false;
+  if (atToken()) updateMenu();   // 拉回来时弹层还该开着：补上候选
+}
+
+function atHits() {
+  if (atCache === null && !atErr) { loadSessionsForAt(); return null; }
+  const notice = text => [{ label: text, desc: 'Esc 关闭', apply: () => {} }];
+  if (atErr) return notice('（会话列表取不到：' + atErr + '）');
+  const tok = atToken(), q = tok ? tok.query.toLowerCase() : '';
+  const rows = atCache.filter(s => !q || s.sid.toLowerCase().includes(q)
+                     || (s.title || '').toLowerCase().includes(q));
+  if (!rows.length) return notice('（没有匹配的会话）');
+  return rows.slice(0, 8).map(s => ({
+    label: s.title || s.sid.slice(0, 8),
+    desc: s.last_at ? new Date(s.last_at).toLocaleString() : '',
+    meta: s.sid.slice(0, 8),
+    apply: () => applyAt(s.sid),
+  }));
+}
+
+// 把 @query 原位换成 @<sid>；再走平面已有的指令通道（POST /msg 纯文本）
+// 发切换语义——入参即 session id。
+function applyAt(sid) {
+  const tok = atToken();
+  if (!tok) return;
+  const v = input.value;
+  input.value = v.slice(0, tok.start) + '@' + sid + ' ' + v.slice(input.selectionStart);
+  const caret = tok.start + sid.length + 2;
+  input.setSelectionRange(caret, caret);
+  grow();
+  input.focus();
+  sendText('/resume ' + sid, false);
+}
+
+// 候选上下文（触发位 + 查询词）：没变就不动现状——保 ↑↓ 高亮，也保 Esc
+// 关掉后不被同一按键的 keyup 立刻重新弹开。
+function ctxNow() {
+  if (slashHits()) return 'slash|' + input.value;
+  const at = atToken();
+  return at ? 'at|' + at.start + '|' + at.query : '';
+}
+
+function updateMenu() {
+  let items = slashHits();
+  if (!items) items = atToken() ? atHits() : null;
+  const ctx = items ? ctxNow() : '';
+  if (ctx === menuCtx) return;
+  menuCtx = ctx;
+  if (!items) { closeMenu(); return; }
+  menuItems = items;
+  menuHl = 0;
+  renderMenu();
+  menu.hidden = false;
+}
+
+// keyup/click 必须包一层空箭头——直接挂 updateMenu 会把 Event 当实参，
+// 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。
+input.addEventListener('input', () => { grow(); updateMenu(); });
+input.addEventListener('keyup', () => updateMenu());
+input.addEventListener('click', () => updateMenu());
+input.addEventListener('blur', () => setTimeout(closeMenu, 0));  // 点别处才关
+
+input.addEventListener('keydown', ev => {
+  if (!menu.hidden && menuItems.length) {   // 导航键只作用于弹层
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); moveHl(1); return; }
+    if (ev.key === 'ArrowUp')   { ev.preventDefault(); moveHl(-1); return; }
+    if (ev.key === 'Escape')    { ev.preventDefault(); closeMenu(); return; }
+    if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing)) {
+      ev.preventDefault();
+      pick(menuHl);
+      return;
+    }
+  }
+  if (ev.key === 'Escape') { closeMenu(); return; }   // 无处可关 = 空操作，不放 preventDefault
+  if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+    ev.preventDefault();                              // Shift+Enter 走原生换行
+    closeMenu();
+    // Enter 不另起发送路径（pitfall：enter-发送别自己再写一条）——收口到
+    // 唯一的 submit 链，附件门 / '/' 参数规则保持单源。
+    form.requestSubmit();
+  }
 });
 
 // 生成中的发送键=停止键（c_5m3fm6）：分岔放在 click 层——submit 事件无法
 // 区分按钮点击与回车（Enter 的隐式提交 submitter 同是本键），点击先于
 // submit 触发，preventDefault 吞掉提交后只发 /cancel（草稿不动）。回车带
 // 草稿仍走上面的 submit 原路：conv 闸排队是既有语义，本卡不收窄。
+// （c_7lsngm 的 Enter 走 form.requestSubmit()，不经按钮 click——与这条
+//   停止分岔天然互不触发。）
 send.addEventListener('click', ev => {
   if (!runs.size) return;            // 非生成中：照常提交（发送）
   ev.preventDefault();               // 生成中：本次点击=停止，不进 submit
@@ -1555,6 +1791,7 @@ function wireCmd(id, text) {
     if (text.endsWith(' ')) {           // 带参指令：预填，光标移到末尾
       input.value = text;
       input.setSelectionRange(text.length, text.length);
+      grow();                           // 多行输入（c_7lsngm）：预填后高度回落到一行
       input.focus();
       return;
     }

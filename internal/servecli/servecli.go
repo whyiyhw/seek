@@ -33,6 +33,7 @@ import (
 	"github.com/whyiyhw/seek/internal/controlplane"
 	"github.com/whyiyhw/seek/internal/controlplane/fake"
 	"github.com/whyiyhw/seek/internal/rpc/methods"
+	"github.com/whyiyhw/seek/internal/session"
 )
 
 // frontends maps --frontend names to constructors. The default build
@@ -330,8 +331,9 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 	// The M2 router is the inbound handler: dedup → DirectAt →
 	// command/binding route → exec → session writeback → Send.
 	router := controlplane.NewRouter(fes, store, exec, controlplane.RouterConfig{
-		Projects: projects,
-		Yolo:     cfg.ServeYolo(),
+		Projects:      projects,
+		Yolo:          cfg.ServeYolo(),
+		LookupSession: sessionLookup(),
 	})
 
 	names := make([]string, len(fes))
@@ -350,6 +352,28 @@ func servePlane(ctx context.Context, fes []controlplane.Frontend, cfg config.Con
 		fmt.Fprintln(stderr, "serve: plane down: drained cleanly")
 	}
 	return err
+}
+
+// sessionLookup adapts the sessions store to the router's /resume seam.
+// A store is resolved per call rather than cached: session.NewStore is
+// stateless (env ladder + MkdirAll, both idempotent), /resume is a
+// user-initiated action far from any hot path, and a cached store would
+// need synchronisation — Router.Handle runs one goroutine per inbound, so
+// two conversations can /resume concurrently. Only the header is read: a
+// resume needs the session's cwd, not its messages. Resolution happens at
+// CALL time, so serve still touches no filesystem before a frontend exists.
+func sessionLookup() func(string) (string, error) {
+	return func(id string) (string, error) {
+		store, err := session.NewStore()
+		if err != nil {
+			return "", err
+		}
+		hdr, lerr := store.LoadHeader(id)
+		if lerr != nil {
+			return "", lerr
+		}
+		return hdr.CWD, nil
+	}
 }
 
 // badConfig prints (unless out is nil — the flag package already
