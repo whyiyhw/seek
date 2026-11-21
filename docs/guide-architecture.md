@@ -29,7 +29,9 @@ Permission lives on two orthogonal axes — never crammed into a single enum:
 
 Permission denials are **tool results, not errors** — the agent sees the denial message and asks the user (or reconsiders), rather than crashing the loop.
 
-Code: `internal/permission/` · see `docs/prd/feature-permission-refactor.md`.
+**One seam, three lanes.** Every dangerous action routes through `Policy.askFn`; lanes only differ in transport — TUI (`approvalCh` → askuser widget), print/web (`--approval-stdin` JSONL cards on stdin, driven by the web hub's `ApprovalRouter`), and ACP (`session/request_permission` agent→client JSON-RPC, `cmd/seek/acp_approval.go`). `allow_always` / `"a"` / the TUI's `[a] always: <kind>` all land on `Policy.SetAlwaysAllow`. No answer (EOF / disconnect / timeout / client `-32601`) denies — never a hang.
+
+Code: `internal/permission/` · `cmd/seek/approval_stdin.go` · `cmd/seek/acp_approval.go` · see `docs/prd/feature-permission-refactor.md`.
 
 ---
 
