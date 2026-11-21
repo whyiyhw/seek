@@ -69,6 +69,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。
+- ✅ **上下文余量上报（2026-11-21，卡 c_uzlczr）**：每个完成的模型回合通过 `session/update` 发一帧 ACP 的 `usage_update`，客户端据此显示余量条/百分比。字段是**协议自己的**（[RFC/RFD "Session Context Size and Cost"](https://agentclientprotocol.com/rfds/session-usage)）：`used`（当前上下文占用量）+ `size`（该模型窗口大小），余量与百分比由客户端自己算（`size - used` / `used/size`）。seek 额外把 `percent` / `severity` 放在协议预留的 `_meta.seek.ctx` 里，近阈值那一帧再多 `alert` + 一句 `notice`（详见 §5.3）。数字口径与 TUI 状态栏 `formatBudget`、Web 顶栏 ctxmeter **同源**：占用 = **末个回合**的 prompt+completion（累计值会随历史逐轮重发二次膨胀），窗口 = `internal/budget.Limit(model)`，阈值 = `budget.Classify` 的 0.60/0.75。零新数据源、零新表。
 
 ---
 
@@ -124,6 +125,32 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 两个都可选、可单用；`SEEK_ACP_PROVIDER` 同时压掉首启向导（无头进程不该进交互式贴 key 提示）。只影响 `seek acp` 车道，shell 里残留的值对 TUI / print 模式无影响。paseo 侧典型用法：复制一个 provider 条目（如 `seek-glm`）写上 env，同一台机器 DeepSeek / GLM 两条入口并存——与 zcode 桥的 `ZCODE_PROVIDER`/`ZCODE_MODEL` 钉法同款。
 
 wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.4（C 落地记录）。
+
+### 5.3 上下文余量 `usage_update` / Context-window reporting
+
+**每一轮的形状**（走 `session/update`，不是新 method）：
+
+```json
+{"jsonrpc":"2.0","method":"session/update","params":{
+  "sessionId":"20261121-160406-…",
+  "update":{
+    "sessionUpdate":"usage_update",
+    "used":800012,
+    "size":1000000,
+    "_meta":{"seek":{"ctx":{"percent":80,"severity":"critical"}}}
+  }}}
+```
+
+- `used` / `size` 是 **ACP 协议字段**（RFD "Session Context Size and Cost"，ACP 1.2 起进 schema；paseo 的 `zUsageUpdate` 正是 `z.object({used, size})`）。协议里**没有** percent 字段——客户端自己除。所以 seek 不自造字段名，把补充信息放进协议预留的 `_meta`（"Implementations MUST NOT make assumptions about values at these keys"）。
+- `_meta.seek.ctx.percent`：取整的占用百分比，与 TUI 状态栏那个 `ctx NN%` 是同一个数。
+- `_meta.seek.ctx.severity`：`ok` / `warn` / `critical`，三档对应 `budget.Classify`。
+- **告警帧**：只在**跨过阈值的那一帧**额外发一帧（同一 used/size），多带 `alert`（= 该档 severity）与 `notice`（`warn` → `"ctx 70%"`，`critical` → `"ctx 80% — /compact soon"`，措辞照抄 `formatBudget`）。为什么不把 alert 挂在每一帧上：每次 arrival 都会被客户端渲染成一次仪表更新，每轮重复告警是噪声；只报"刚跨过"才是一条真正的信号。落回阈值以下、或 `session/load` 换进来一个会话，跨越记忆会重置。
+- **开关**：`SEEK_ACP_CTX_ALERT=0`（或 `false`/`no`/`off`，大小写不敏感）关掉告警帧，普通 `usage_update` 照常每轮发——余量条不会因此消失。默认**开**。ACP 车道不吃任何 flag（同 §5.1 的理由），所以只能走 env。
+- **阈值的边界**：这里用 `budget.Classify`（编译期 0.60 / 0.75），与 Web 顶栏 ctxmeter 的色阶一致。TUI 的 `formatBudget` 在**配了 `auto_compact`** 时会把红色点挪到触发点的 80%（`ClassifyAt`）——ACP 不跟这个会话级配置走：余量条是客户端自己的 UI，阈值该是协议面上稳定的常量，会话级自定义属于客户端侧。
+- **不发的情形**：窗口大小不可用（`budget.Limit` ≤ 0）。RFD 明确没有 `size: null` 这种状态，协议自己也说"无法给出有意义的窗口就干脆不要发"。
+- **`session/load` 之后**：回放的是历史消息帧（`user_message_chunk` / `agent_message_chunk` / `tool_call*`），**不含** `usage_update`——transcript 里只有累计用量，没有"上一回合的 prompt+completion"这个口径值，硬凑一个就是新造数据源。所以恢复会话后余量条从**下一回合**开始显示（客户端在收到第一帧前不渲染这个部件即可）。
+
+验证：`bash scripts/acp-smoke-test.sh` 用真二进制跑两态——低用量（1000/1M → `percent=0 severity=ok` 单帧）与近满（800000/1M → `percent=80 severity=critical` 且恰好多一帧告警、`notice` 带 `/compact`）——断言在解析后的 JSON 上做（`used`/`size` 必须是 int、`size` 必须等于 `budget.Limit("glm-5.3")`=1,000,000），不是字符串 grep。设计说明与 wire 形状出处写在 `internal/acp/usage.go`。
 
 ---
 
