@@ -9,7 +9,14 @@
 实现取 **≥（含边界）**——3/5 对 0.6 判绿，两侧边界由自测钉死，理由与 E2 标定建议
 （取恰为 k/n 的阈值）见 `eval/README.md` §Judgment。② §六开放问题 1 的 E1 取向定为：
 崩溃轮 = 红轮（现有 `exact_agent_ends` 类界可显式抓手），不设独立 error 类、不引入
-`max_error_rate`——留 E2+ 按需再议。其余里程碑（E2–E7）未动工。
+`max_error_rate`——留 E2+ 按需再议。**E2 已落地**（c_347nnh，2026-11-21）：标定表 +
+record-only 名单 + 逐例轮数落 `eval/README.md` §Calibration。随卡再落两处口径：
+③ 轮数取 §2.5 而非 §五的矛盾表述（「便宜读类 5 轮 / 承重轴 3 轮」弃用）——5 轮只给
+已知 flaky 与承重轴，其余 3 轮；④ 三个已知 flaky 处置——bash-overreach 调界
+`min_pass_rate 0.8`@5（容实测 ~1/6「开局即 bash」噪声，≥2 红轮判红，构造行验证），
+code-review-effort-\* record-only，glm-lane-contract record-only（环境 429 整窗全红，
+阈值无解，回闸归 E6 额度窗口）；另按历史行新增 a3-nl record-only（0/5 是 §5.4① 判定
+数据非故障）与 grep-refine-not-flood 升 flaky 类（0.6@5）。其余里程碑（E3–E7）未动工。
 
 **前置阅读**：[`eval/README.md`](../../eval/README.md)（判分机制与 metric 词表）、[`feature-slim-loop.md`](feature-slim-loop.md) §3（「单次红是 signal 不是 proof，判回归须双轮」——本文把它从纪律变成机制）、[`v8.md`](v8.md) 柱 T（裸核/完整消融，本文的 `--lane` 与之共用结果目录隔离）、[`../../AGENTS.md`](../../AGENTS.md) 测试节（failure-mode 清单）。
 
@@ -96,7 +103,7 @@ GitHub Actions `schedule` 跑 **core 子集**（约 8 例低成本 + 2 轮），
 | 卡 | 内容 | 验收 |
 |---|---|---|
 | **E1 判定口径** | `run.sh --rounds N` + `expect.json: min_pass_rate / record_only` + 行内 `round` 字段 + 汇总分列 gate/record | 不传 flag 时输出与结果行字节等价（守护测试）；`--rounds 5` 写 5 行，`min_pass_rate: 0.6` 在 3/5 时判绿（含边界，≥ 口径——原文「判红」按字面与 §2.1「取 2/3」矛盾，随实现修正）、3/5 对 0.7 判红。**已落地**（c_ennnwa） |
-| **E2 标定表** | 用 `eval/results/` 历史行 + 每例 5 轮实测，产出「每例 预期通过率 / 闸门取值 / 是否 record-only」表落 `eval/README.md`；三个已知 flaky 明确处置 | 表覆盖全部 21 例；`bash-overreach` 取到能抓住「开局即 bash」的界；`code-review-effort-*` 标 record-only |
+| **E2 标定表** | 用 `eval/results/` 历史行 + 每例 5 轮实测，产出「每例 预期通过率 / 闸门取值 / 是否 record-only」表落 `eval/README.md`；三个已知 flaky 明确处置 | 表覆盖全部 21 例；`bash-overreach` 取到能抓住「开局即 bash」的界；`code-review-effort-*` 标 record-only。**已落地**（c_347nnh，2026-11-21；表覆盖实存 30 例 = 21 + 9 mcp 臂，5 轮实测按 §2.5 改为 flaky/承重轴专用，标定以历史行 + 构造行验证；承重轴三例留表位待 E3/E4/E5 回填） |
 | **E3 plan-e2e** | 承重轴用例之一：propose→批准→执行→改需求→resume | 批准前零写入断言；resume 不重跑已完成步骤；用例 README 记录 baseline 与判分口径 |
 | **E4 subagent-bg-resume** | 承重轴用例之二：后台子代理完成通知 + 续话血统 | 完成通知进主流；续话 run 带 `resumed_from`；产物路径断言 |
 | **E5 serve-web-stream** | 承重轴用例之三：`/rpc` → SSE → 会话落盘 | 事件序列与 `session/list` 双断言；复用 `serve-smoke-test.sh` 的启动/收尾 |
