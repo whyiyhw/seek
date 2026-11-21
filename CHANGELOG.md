@@ -76,3 +76,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_o3osoh：seek 工具链单一源：全线迁移 go1.27.3 线 + web-gate 基线重铸（用户 2026-11-21 重拍方案 B；方案 A 实测死路留档 54e3ea4b）
 - c_2vst75：修 flaky：TestWeb_ApprovalRunEndWithdrawsCard 全套高负载下确定性红（TempDir 清理竞态）验收：①根因定位=哪个异步写手在测试结束后仍写其 TempDir /001（goroutine/子进程泄…
 - c_6mbjfq：web SSE 重连不清理 runs 表：丢 reply 的 run 停止键停在 ⏹ 不复位（c_5m3fm6 验证发现）
+- c_lxe3lz：webfrontend.html 结构守卫：标签配平+id 唯一断言进 static 测试——合并语义冲突止血（af1be012 吞 /section、5b57c1ba 丢 import 两例背景）
