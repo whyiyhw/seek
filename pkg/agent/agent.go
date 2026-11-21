@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -573,6 +574,20 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 	go func() {
 		defer close(out)
+		// Panic containment (c_vfgeam termination inventory): a panic
+		// anywhere in the turn used to take the whole process down —
+		// on the unattended ACP lane that is a silent death the client
+		// can only attribute to a timeout. Recovered here it becomes a
+		// first-class ErrorEvent, which every consumer already routes:
+		// the TUI error view, and the ACP stopReason classifier
+		// (internal_error, stack in the detail). Registered BEFORE the
+		// currentEvents reset so LIFO runs it after that reset but
+		// still before close(out) — the send lands on an open channel.
+		defer func() {
+			if r := recover(); r != nil {
+				out <- ErrorEvent{Err: fmt.Errorf("agent: recovered from panic: %v\n%s", r, debug.Stack())}
+			}
+		}()
 		// Expose the channel so tools can EmitEvent during their
 		// Execute (e.g. propose pushes Plan* events on user choice).
 		// Cleared before close(out) runs (LIFO defer order) so a
@@ -613,6 +628,10 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			totalUsage     deepseek.Usage
 			totalToolCalls int
 			turns          int
+			// lastFinish carries the most recent COMPLETED turn's finish
+			// reason out of the loop for AgentEnd.Finish (turn-local
+			// `finish` goes out of scope each iteration).
+			lastFinish string
 			// emptyPlaceholders counts CONSECUTIVE turns that closed with
 			// emptyResponseMarker. Any turn that produces real content
 			// resets it (see the reset below the retry loop).
@@ -780,6 +799,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
+				lastFinish = finish
 				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
 				a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
 					Index:     turn,
@@ -876,6 +896,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				out <- MessageEnd{Message: msg}
 			}
 
+			lastFinish = finish
 			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}
 			a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
 				Index:     turn,
@@ -885,7 +906,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			})
 		}
 
-		out <- AgentEnd{Usage: totalUsage, Turns: turns, ToolCalls: totalToolCalls}
+		out <- AgentEnd{Usage: totalUsage, Turns: turns, ToolCalls: totalToolCalls, Finish: lastFinish}
 	}()
 
 	return out
@@ -1355,29 +1376,43 @@ func (a *Agent) dispatchTool(ctx context.Context, tc deepseek.ToolCall, out chan
 		result string
 		err    error
 	)
-	if st, ok := tool.(tools.StreamingTool); ok {
-		// push is the tool's only way to surface intermediate output.
-		// The select makes the call ctx-aware: if the agent's event
-		// channel is full AND ctx gets cancelled (Esc), push returns
-		// the cancel error so the tool can bail. No pump goroutine
-		// needed — the callback IS the pump.
-		push := func(d tools.StreamDelta) error {
-			select {
-			case out <- ToolDelta{
-				CallID:    tc.ID,
-				Name:      tc.Function.Name,
-				Delta:     d.Delta,
-				Reasoning: d.Reasoning,
-			}:
-				return nil
-			case <-ctx.Done():
-				return ctx.Err()
+	// Panic containment for the tool body (c_vfgeam): tools run on
+	// dispatch goroutines of their own (partitioned dispatch), so the
+	// main loop's recover never sees a tool panic — without this one a
+	// panicking tool kills the whole process. Contained here it degrades
+	// to a failed tool call: the model sees the error, retries or
+	// works around it, and the turn still terminates observably.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				result, err = "", fmt.Errorf("agent: tool %s panicked: %v\n%s",
+					tc.Function.Name, r, debug.Stack())
 			}
+		}()
+		if st, ok := tool.(tools.StreamingTool); ok {
+			// push is the tool's only way to surface intermediate output.
+			// The select makes the call ctx-aware: if the agent's event
+			// channel is full AND ctx gets cancelled (Esc), push returns
+			// the cancel error so the tool can bail. No pump goroutine
+			// needed — the callback IS the pump.
+			push := func(d tools.StreamDelta) error {
+				select {
+				case out <- ToolDelta{
+					CallID:    tc.ID,
+					Name:      tc.Function.Name,
+					Delta:     d.Delta,
+					Reasoning: d.Reasoning,
+				}:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			result, err = st.ExecuteStream(ctx, args, push)
+		} else {
+			result, err = tool.Execute(ctx, args)
 		}
-		result, err = st.ExecuteStream(ctx, args, push)
-	} else {
-		result, err = tool.Execute(ctx, args)
-	}
+	}()
 
 	a.cfg.Hooks.NotifyPostToolUse(ctx, hooks.PostToolUseEvent{
 		CallID: tc.ID,

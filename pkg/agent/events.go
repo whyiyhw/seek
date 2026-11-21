@@ -15,6 +15,16 @@ type AgentEnd struct {
 	Usage     deepseek.Usage
 	Turns     int
 	ToolCalls int
+	// Finish is the upstream finish_reason of the FINAL completed turn
+	// ("stop" / "length" / "max_tokens" / "refusal" / "content_filter"
+	// / …; lane-normalised vocabulary, never the "stream_error:" /
+	// "decode_error:" prefixes). It is the typed signal consumers use
+	// to classify HOW the conversation ended — the ACP backend maps it
+	// onto the protocol's stopReason (max_tokens for the
+	// finish_reason=length family) instead of string-matching notice
+	// text. Empty when the prompt was cancelled mid-turn (the turn
+	// never completed, so there is no honest finish to report).
+	Finish string
 }
 
 // TurnStart begins a single LLM call iteration. Turns are zero-indexed.

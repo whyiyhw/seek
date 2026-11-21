@@ -20,14 +20,22 @@
 #             process launch dir → assert the D-1 double anchor actually
 #             moved (sessionId = basename, stderr anchor line carries the
 #             absolute cwd + 16-hex project id) → bad cwd fails loud with
-#             a JSON-RPC error → stdin EOF → clean exit rc=0.
-#   NOT       session/prompt — that needs a real LLM round-trip (key +
-#             network), which is not deterministic lane material. The
-#             prompt path is covered in-process by internal/acp tests
-#             with fake backends, and by manual real-key smoke when
-#             needed. No API call is made here: a DUMMY DeepSeek key
-#             satisfies startup provider resolution (env beats config,
-#             DeepSeek wins auto-detect), SEEK_HOME isolates ~/.seek.
+#             a JSON-RPC error → session/prompt (empty text: terminates
+#             without a key or network) asserts the c_vfgeam structured
+#             termination — exactly one _seek_turn_stop session/update,
+#             stopReason end_turn with a readable detail, preceding the
+#             response and matching its spec-side stopReason → stdin EOF
+#             → clean exit rc=0.
+#   NOT       session/prompt with CONTENT — that needs a real LLM
+#             round-trip (key + network), which is not deterministic
+#             lane material. The content-bearing termination states
+#             (length truncation / cancel / timeout / internal error)
+#             are covered in-process by cmd/seek fixture tests
+#             (TestACPBackend_Prompt_TerminationFixtures) and by manual
+#             real-key smoke when needed. No API call is made here: a
+#             DUMMY DeepSeek key satisfies startup provider resolution
+#             (env beats config, DeepSeek wins auto-detect), SEEK_HOME
+#             isolates ~/.seek.
 #
 # Marker on success: ACP-NDJSON-SMOKE-OK (echoes the D1-SMOKE-OK lineage
 # from c_bnjrw5's hand-run smoke).
@@ -111,13 +119,18 @@ echo "acp-smoke: initialize ok (protocolVersion=1, image capability advertised)"
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":2' 'session/new' 15
-grep -q "\"sessionId\":\"smoke-ws\"" "$OUT" || fail "session/new: sessionId != smoke-ws (got: $(grep '"id":2' "$OUT"))"
+# sessionId is the DURABLE transcript id (session/load contract, guide-zed
+# §5) — the pre-durable assertion ("smoke-ws", the basename) drifted red
+# when that landed; the anchor itself is proven by the stderr line below.
+SID="$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$OUT" | head -1)"
+echo "$SID" | grep -Eq '^[0-9]{8}-[0-9]{6}-[0-9a-f]{16}$' \
+  || fail "session/new: sessionId is not a durable transcript id (got: ${SID:-none}; $(grep '"id":2' "$OUT"))"
 # stderr anchor line: absolute workspace path + 16-hex project id.
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" >/dev/null \
   || fail "session/new: anchor line missing cwd=$WS"
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -Eq 'project=[0-9a-f]{16}' \
   || fail "session/new: anchor line project id is not 16-hex"
-echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex)"
+echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex, durable id $SID)"
 
 # --- 3. bad cwd fails loud (no silent daemon-dir session) ---------------------
 BAD="$SANDBOX/no-such-dir"
@@ -127,8 +140,39 @@ grep '"id":3' "$OUT" | grep -q '"error"'      || fail 'bad cwd: no JSON-RPC erro
 grep '"id":3' "$OUT" | grep -q '\-32000'     || fail 'bad cwd: error code != -32000'
 echo "acp-smoke: bad cwd rejected loud (-32000)"
 
+# --- 3.5 session/prompt termination frame (c_vfgeam) ---------------------------
+# The one prompt shape that terminates deterministically WITHOUT a key
+# or network: an empty text block routes to no text at all, so the
+# backend answers immediately. That is enough to assert the structured
+# termination on the REAL binary: exactly one _seek_turn_stop
+# session/update, carrying the frame stopReason, AND it precedes the
+# session/prompt response. (The other termination states — length
+# truncation, cancel, timeout, internal error — need an LLM round-trip
+# or a stalled upstream; they are covered by the cmd/seek fixture
+# tests, TestACPBackend_Prompt_TerminationFixtures.)
+rpc 4 session/prompt "{\"sessionId\":\"$SID\",\"prompt\":[{\"type\":\"text\",\"text\":\"\"}]}"
+wait_for '_seek_turn_stop' 'session/prompt termination frame' 15
+wait_for '"id":4' 'session/prompt response' 15
+# exactly one termination frame per prompt…
+frames=$(grep -c -F '"_seek_turn_stop"' "$OUT")
+[ "$frames" -eq 1 ] || fail "termination frames = $frames, want exactly 1 per session/prompt"
+# …it says end_turn with a readable detail…
+grep -F '"sessionUpdate":"_seek_turn_stop"' "$OUT" | grep -qF '"stopReason":"end_turn"' \
+  || fail "termination frame stopReason != end_turn: $(grep -F '_seek_turn_stop' "$OUT")"
+grep -F '"_seek_turn_stop"' "$OUT" | grep -qF '"detail":' \
+  || fail "termination frame carries no readable detail"
+# …and it PRECEDES the response (frame-then-response is the ordering
+# clients rely on to attribute a missing frame to process death).
+frame_line=$(grep -n -F '"_seek_turn_stop"' "$OUT" | head -1 | cut -d: -f1)
+resp_line=$(grep -n -F '"id":4' "$OUT" | head -1 | cut -d: -f1)
+[ "$frame_line" -lt "$resp_line" ] || fail "termination frame (line $frame_line) must precede the response (line $resp_line)"
+# the response keeps the spec-side stopReason in sync with the frame.
+grep -F '"id":4' "$OUT" | grep -qF '"stopReason":"end_turn"' \
+  || fail "response stopReason != end_turn: $(grep -F '"id":4' "$OUT")"
+echo "acp-smoke: termination frame ok (_seek_turn_stop end_turn, precedes response)"
+
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
-echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new anchor=$WS rc=0"
+echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+prompt-term anchor=$WS rc=0"
