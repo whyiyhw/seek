@@ -18,8 +18,8 @@ import (
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/rpc/methods"
-	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/sessmeta"
 )
 
 func TestWeb_RPCSessionWritePermission(t *testing.T) {

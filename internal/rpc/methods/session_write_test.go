@@ -84,7 +84,10 @@ func TestSessionRename(t *testing.T) {
 	}
 
 	// Error tiers.
-	for _, tc := range []struct{ name, params string; want int }{
+	for _, tc := range []struct {
+		name, params string
+		want         int
+	}{
 		{"missing session", `{"sid":"` + unknownSID + `","title":"x"}`, rpc.CodeSessionNotFound},
 		{"empty title", `{"sid":"` + mainSID + `","title":"   "}`, rpc.CodeInvalidParams},
 		{"too long title", `{"sid":"` + mainSID + `","title":"` + strings.Repeat("长", 81) + `"}`, rpc.CodeInvalidParams},
@@ -171,7 +174,10 @@ func TestSessionArchive(t *testing.T) {
 	}
 
 	// Error tiers.
-	for _, tc := range []struct{ name, params string; want int }{
+	for _, tc := range []struct {
+		name, params string
+		want         int
+	}{
 		{"missing session", `{"sid":"` + unknownSID + `"}`, rpc.CodeSessionNotFound},
 		{"traversal sid", `{"sid":"a/b"}`, rpc.CodeInvalidParams},
 		{"no sid", `{}`, rpc.CodeInvalidParams},

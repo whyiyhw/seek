@@ -29,8 +29,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/rpc"
-	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -51,9 +51,9 @@ type Sessions struct {
 	// embedders that only browse keep hermetic constructors.
 	metaResolve func() (*sessmeta.Store, error)
 
-	metaOnce  sync.Once
-	meta      *sessmeta.Store
-	metaErr   error
+	metaOnce sync.Once
+	meta     *sessmeta.Store
+	metaErr  error
 }
 
 // NewSessions binds the family to an already-resolved store (tests,

@@ -52,7 +52,7 @@ type Entry struct {
 // idempotent API surface, not a state transition, so it writes no row.
 type auditEvent struct {
 	TS    string `json:"ts"`
-	Event string `json:"event"`           // "rename" | "archive" | "unarchive"
+	Event string `json:"event"` // "rename" | "archive" | "unarchive"
 	SID   string `json:"sid"`
 	Title string `json:"title,omitempty"` // rename: the new title
 	Prev  string `json:"prev,omitempty"`  // rename: the override it replaced ("" = was derived)

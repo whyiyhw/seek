@@ -180,6 +180,18 @@ if [ "$HEADLESS" = "1" ]; then
   exit 0
 fi
 
+# 无头条件缺 + 非 TTY = 无人值守车道：人工清单无处可走（read 要么挂到
+# 超时、要么 stdin 已关时读空即过，给出无凭据的绿）。退 3 点名缺哪样——
+# 与 web-sessions-manual 同一口径（c_kwiajf / docs/pitfalls/tooling
+# 「手测脚本的『等人按 Enter』在无人值守车道会变成假绿」）。
+if [ ! -t 0 ]; then
+  miss=""
+  [ -x "$CHROME_BIN" ] || miss="Chrome（${CHROME_BIN}）"
+  [ -n "$NODE_BIN" ] || miss="${miss:+${miss} + }node"
+  echo "FAIL: 无头验收条件缺（${miss}）且 stdin 非 TTY——无人值守没有人工清单可走。装上缺的组件或 CHROME=<路径> 重跑。" >&2
+  exit 3
+fi
+
 echo
 echo "== 人工清单（无 Chrome 或 node≥22 时）=="
 echo "1. 打开 $URL"
