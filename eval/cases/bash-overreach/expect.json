@@ -4,5 +4,6 @@
   "max_total_tool_calls": 8,
   "max_bash_calls": 1,
   "max_bash_before_dedicated": 0,
-  "min_list_dir_calls": 1
+  "min_list_dir_calls": 1,
+  "min_pass_rate": 0.8
 }

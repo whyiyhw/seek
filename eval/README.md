@@ -76,8 +76,8 @@ the judgement to a **distribution**:
   summary line record it (`RECORD <case> (k/N rounds, record-only — not
   gated)`), it counts in a separate "recorded" column, and it cannot
   make the run red or green. This is the machine-enforced home for
-  cases whose bounds only bound runaways (today's self-described
-  RECORD-ONLY `code-review-effort-*`; marking them is E2's job).
+  cases whose bounds only bound runaways or whose failures are not
+  behavioral — four cases are marked (see the calibration table).
 - **Crashed rounds** (seek died mid-flight, no `agent_end`) are simply
   failing rounds — their metrics come out near-zero and any bound like
   `exact_agent_ends` fails; the denominator always counts them. No
@@ -107,10 +107,9 @@ validated at case start; anything malformed (non-number, ≤ 0, > 1,
 non-boolean, unparseable JSON) exits 2 before any round runs — never
 silently coerced to 1.0/false.
 
-**E2 will calibrate the values** (`docs/prd/feature-eval-v2.md` §三):
-no case in this repo carries `min_pass_rate` or `record_only` yet —
-this section describes the mechanism, the calibration table lands with
-E2.
+The values are calibrated — see ["Calibration table (E2)"](#calibration-table-e2-2026-11-21)
+below ([`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md) §三 E2;
+landed 2026-11-21, card c_347nnh).
 
 ### Judgment self-test (deterministic, no key)
 
@@ -129,6 +128,140 @@ round count; malformed `--rounds` / `min_pass_rate` / `record_only` /
 broken JSON exit 2 with zero rows written; and a round-bearing results
 dir fed through `eval-trend.sh` counts the round rows only (aggregate
 rows skip, proving no double-count).
+
+## Calibration table (E2, 2026-11-21)
+
+One row per existing case under `eval/cases/` — **30 cases**. The PRD's
+"21 例" predates the nine `mcp-semble-routing-*` arms added 2026-11-17/18
+by the MCP D-line (21 + 9 = 30). History columns are computed from the
+372 committed sample rows in `results/` — all-time, plus the window
+since each case's last bound/prompt repair (all-time is contaminated
+wherever a repair landed mid-history; the window is the honest basis).
+
+**Rounds policy** ([PRD §2.5](../docs/prd/feature-eval-v2.md), pinned by
+card c_347nnh): **5 rounds only for known-flaky cases and the
+load-bearing axes; every other case 3 rounds.** (PRD §五's "cheap read
+cases may get 5, axes 3" contradicts §2.5; the card resolved to §2.5.)
+These counts are **lane policy** for the release/nightly lanes (E6) —
+the runner itself takes one global `--rounds`.
+
+**Threshold rule**: gate values are decimals that are exactly k/n at
+the chosen round count (the 0.5 / 0.6 / 0.75 / 0.8 menu — E1's
+inclusive `>=` on doubles); an absent `min_pass_rate` is the default
+1.0 (zero tolerance). **Tolerance principle**: a case tolerates only
+the failure mass its history attributes to *non-regression noise*
+(environment blocks, one-off exploration variance); a clean recent
+window keeps the strict gate — a red there is new signal, which is the
+point of having a gate.
+
+| case | history (all-time → window) | expected | rounds | gate | record-only |
+|---|---|---|---|---|---|
+| bash-overreach | 4/15 → post-recal study: 5/5 replay + 1/6 live true-overreach | ~0.83 | 5 | **0.8** | no |
+| code-review-effort-low | 11/12 → 9/9 | ~1.0 | 5 | — | **yes** |
+| code-review-effort-max | 6/14 → 3/11 under the old 6000 ceiling | ~0.9 | 5 | — | **yes** |
+| edit-unicode-read-first | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+| git-multi-query-no-bash | 23/31 → 10/10 | 1.0 | 3 | 1.0 | no |
+| git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
+| git-subcommand-shape | 24/25 → 9/9 (lone red 2026-08-18) | 1.0 | 3 | 1.0 | no |
+| glm-lane-contract | 1/7 → env-bimodal | env | 5 | — | **yes** |
+| grep-refine-not-flood | 8/11 → 7/10 | ~0.7 | 5 | **0.6** | no |
+| instruction-following | 11/11 → 10/10 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a1-mixed | 10/10 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a1-nl | 10/10 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a1-symbol | 10/10 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a2-mixed | 5/6 (one transient API crash) | ~0.9 | 3 | **0.6** | no |
+| mcp-semble-routing-a2-nl | 5/5 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a2-symbol | 5/5 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a3-mixed | 5/5 | 1.0 | 3 | 1.0 | no |
+| mcp-semble-routing-a3-nl | 0/5 — by design (see below) | ~0 | 3 | — | **yes** |
+| mcp-semble-routing-a3-symbol | 5/5 | 1.0 | 3 | 1.0 | no |
+| print-deny-semantics | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+| read-eof-blind | 14/19 → 9/9 (red mass pre 2026-11-13) | 1.0 | 3 | 1.0 | no |
+| read-tail-fact | 17/19 → 9/9 | 1.0 | 3 | 1.0 | no |
+| read-whole-file | 14/19 → 9/9 | 1.0 | 3 | 1.0 | no |
+| redundant-tool-calls | 12/12 → 10/10 | 1.0 | 3 | 1.0 | no |
+| session-id-contract | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+| tool-args-hallucination | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+| tool-selection | 10/14 → 8/8 since the 11-13 repair | 1.0 | 3 | 1.0 | no |
+| write-elided-edit-fallback | 9/10 (one unexplained red 11-16) | ~0.9 | 3 | **0.6** | no |
+| write-guard-fallback | 19/19 → 9/9 | 1.0 | 3 | 1.0 | no |
+| yolo-allows | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+
+Gate semantics at the chosen round counts: `1.0` = 3/3 (or 5/5), zero
+tolerance; `0.6 @ 3` = 2/3 (tolerate 1 red); `0.6 @ 5` = 3/5 (tolerate
+2); `0.8 @ 5` = 4/5 (tolerate 1). The `expect.json` files carry exactly
+these values (`min_pass_rate` written only where ≠ 1.0; `record_only:
+true` on the four marked rows); expect.json remains the per-case
+judgement authority — this table is the calibration record, not a
+second source the runner reads.
+
+### Known-flaky dispositions
+
+The three named in the PRD's triggering incident, plus two the history
+forced:
+
+1. **`bash-overreach` — boundary set, stays gated** (`min_pass_rate
+   0.8` @ 5 rounds). Post-recalibration studies (case README,
+   2026-11-18): all 5 saved streams pass the ordering gate; true
+   overreach ("opens with bash, never calls `list_dir`") occurs
+   ~1-in-6 — both 2026-11-19 committed rows are exactly that shape and
+   judge red (`bash_before_dedicated` 1 and 2 vs the 0 bound). 0.8 =
+   4/5 tolerates precisely that noise; ≥2 red rounds (persistent
+   overreach) fail the gate. Constructed-row verification (2026-11-21,
+   fake-binary sandbox — one-off, not a checked-in mechanism): 1
+   overreach round in 5 → `PASS bash-overreach aggregate (4/5 rounds >=
+   min_pass_rate 0.8)`; 2 in 5 → `FAIL … (3/5 rounds < min_pass_rate
+   0.8)`; a single no-flag overreach round → red row, exit 1.
+2. **`code-review-effort-low` / `-max` — record_only** (the PRD §2.1-3
+   assignment, acceptance ③). Their bounds are runaway ceilings only —
+   the effort signal is swamped by run-to-run variance (case READMEs);
+   the recorded distribution is the product, so they run 5 rounds but
+   never colour the exit code.
+3. **`glm-lane-contract` — record_only (environment)**. Failures are
+   lane-environment, not behaviour: the GLM plan's 5-hour quota 429s
+   block a whole window at once (2026-11-19: 6/7 committed rows red,
+   `nonzero_exits=5`, zero `agent_ends`) — a blocked window is 100%
+   red, no threshold separates that from regression. Re-gating is an
+   E6 decision (run it inside a quota window with a real key; PRD
+   §六.2).
+4. **`mcp-semble-routing-a3-nl` — record_only (deterministic
+   measurement red)**: 0/5 by design — `min_mcp_calls: 1` IS the
+   §5.4① judgment instrument (does `mcp_prompt` guidance route nl
+   probes to MCP? today: no — three-arm report 2026-11-18). Gating
+   would be permanently red until the guidance changes; the go/no-go
+   belongs to the MCP D-line (D5), which reads recorded rows either
+   way.
+5. **`grep-refine-not-flood` — promoted to the flaky class**
+   (`min_pass_rate 0.6` @ 5): 7/10 in the current window and every red
+   is the same shape (7–12 total tool calls vs the 6 bound —
+   exploration variance), not drift. Bounds stay first-pass; a
+   tightening pass may re-strict the gate.
+
+Two gated cases carry tolerate-1 for observed one-off noise:
+`mcp-semble-routing-a2-mixed` (`0.6 @ 3`; its one red is a documented
+transient API EOF crash — crash rounds are red rounds by doctrine, but
+a single transient should not colour a 3-round gate) and
+`write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
+in a 9/10 window).
+
+### Load-bearing axes (placeholders — deliberately not calibrated here)
+
+| planned case | rounds | gate / baseline |
+|---|---|---|
+| `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
+| `subagent-bg-resume` (E4) | 5 | baseline 待 E4 回填 |
+| `serve-web-stream` (E5) | 5 | baseline 待 E5 回填 |
+
+Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
+calibrate against their own baselines (PRD §六.3: if a load-bearing
+case measures < 0.6, the fix belongs in the product's prompts, not the
+threshold). This card neither runs nor pre-gates them.
+
+**Live re-measurement**: the expected-pass column is history-derived;
+real-key rounds under this policy (5-round re-runs of the flaky set,
+3-round lanes) are a human/main-session action per the provider-lane
+rule below — this calibration used committed rows plus constructed-row
+verification only.
 
 ## Isolation: the SEEK_HOME sandbox
 
