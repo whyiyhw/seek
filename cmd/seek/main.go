@@ -605,28 +605,38 @@ func run() error {
 	//
 	// ACP lane (D-2, docs/prd/archive/feature-paseo-provider.md §3.3): flags
 	// NEVER reach it — flag.Parse stops at the "acp" positional — so
-	// --yolo is inexpressible and pref would stay Deny (bash denied
-	// across the board → unattended lanes can't work). The escape
+	// --yolo is inexpressible; pre-P0-2 pref therefore stayed Deny (bash
+	// denied across the board → unattended lanes can't work). The escape
 	// hatch is the SEEK_ACP_YOLO env var, resolved HERE rather than at
 	// the acp short-circuit so sysprompt.Compose's Mode label matches
-	// the gate (a late SetPref would leave "Mode: deny" in the prompt
-	// and the model wouldn't even try bash). Env-scoped and gated on
-	// acpLane: a stray SEEK_ACP_YOLO in the shell must not silently
-	// yolo the TUI. Same "no human to ask" posture as goal/autopilot.
-	// Resolved once, consumed twice: initialPref here, and the
-	// no-remote bash guard further down (goalBash + subagent runner
-	// wiring). The guard is a property of the yolo lane specifically —
-	// a Deny ACP session (Zed) keeps the plain permission gate.
+	// the gate (a late SetPref would leave a stale "Mode: deny" in the
+	// prompt and the model wouldn't even try bash). Env-scoped and
+	// gated on acpLane: a stray SEEK_ACP_YOLO in the shell must not
+	// silently yolo the TUI. Same "no human to ask" posture as
+	// goal/autopilot. Resolved once, consumed twice: initialPref here,
+	// and the no-remote bash guard further down (goalBash + subagent
+	// runner wiring). The guard is a property of the yolo lane
+	// specifically — a non-yolo ACP session (Zed) answers per-action
+	// permission requests instead (P0-2 below).
 	//
 	// W5 c_n37tnr child half: --approval-stdin (--json only) makes print
 	// mode's prompts answerable from stdin, so the pref has to be Ask —
 	// resolved HERE for the same reason SEEK_ACP_YOLO is: the system
 	// prompt's Mode label is composed below and must agree with the gate.
+	//
+	// ACP·P0-2 (backlog ①): the non-yolo ACP lane joins Ask the same
+	// way — its askFn (acp_approval.go) surfaces permission requests as
+	// session/request_permission over the protocol, and EVERY
+	// no-answer ending (timeout / disconnect / client error — e.g.
+	// headless drivers answering -32601) denies, so the previous
+	// Deny-lane posture is the worst case, never a regression. YOLO
+	// keeps priority: it is checked FIRST, and runACP doesn't even
+	// install the askFn on that lane, so no request can be sent.
 	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
 	initialPref := permission.PrefDeny
 	if *yolo || acpYolo {
 		initialPref = permission.PrefYolo
-	} else if *approvalStdin && *jsonOut {
+	} else if (*approvalStdin && *jsonOut) || acpLane {
 		initialPref = permission.PrefAsk
 	}
 	initialWorkflow := permission.WorkflowNone
@@ -1705,7 +1715,9 @@ func run() error {
 	// feature-deepseek-app-api F3: document references in the prompt
 	// text route through the same submit-time file router as the TUI.
 	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
-	// initialPref above — nothing to flip here. The model menu is built
+	// initialPref above — nothing to flip here; runACP additionally
+	// installs the session/request_permission askFn on the non-yolo lane
+	// (P0-2, acp_approval.go). The model menu is built
 	// from the startup lane (*model already carries the env pin / loaded
 	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
@@ -1717,6 +1729,7 @@ func run() error {
 			menu:   acpModelMenu(*model, openCatalogRows()),
 			sess:   activeSession,
 			store:  store,
+			yolo:   acpYolo,
 		})
 	}
 
@@ -2555,6 +2568,10 @@ type acpBackend struct {
 	// session"); anchored by NewSession / LoadSession, checked by
 	// SetConfigOption.
 	sessionID string
+	// ask is the ACP approval lane (acp_approval.go, P0-2): nil on the
+	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
+	// scopes it per-turn so a permission request dies with its turn.
+	ask *acpApproval
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2928,6 +2945,14 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	if text == "" {
 		return acp.PromptResult{StopReason: "end_turn"}, nil
 	}
+	// Scope the approval lane to THIS turn before the first tool can
+	// fire: the askFn resolves ctx/sessionID from it, so session/cancel
+	// (which cancels this ctx) also unblocks an in-flight permission
+	// request instead of leaving the agent waiting on a dead turn.
+	if b.ask != nil {
+		b.ask.beginTurn(ctx, p.SessionID)
+		defer b.ask.endTurn()
+	}
 	// cwd makes tool-call locations absolute (schema contract: "the
 	// absolute file path"), resolved once per turn — the session cwd was
 	// anchored at session/new (D-1) so this is the project root.
@@ -3276,6 +3301,10 @@ type acpOptions struct {
 	// loadSession.
 	sess  *session.Session
 	store *session.Store
+	// yolo marks the SEEK_ACP_YOLO lane: PrefYolo, so runACP skips
+	// installing the approval askFn entirely (P0-2's short-circuit
+	// priority — no permission request can ever be sent).
+	yolo bool
 }
 
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
@@ -3302,7 +3331,7 @@ func runACP(ctx context.Context, o acpOptions) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{
+	b := &acpBackend{
 		ag:     o.ag,
 		route:  o.vroute,
 		froute: o.froute,
@@ -3318,7 +3347,20 @@ func runACP(ctx context.Context, o acpOptions) error {
 		},
 		sess:  o.sess,
 		store: o.store,
-	}).Serve(ctx)
+	}
+	srv := acp.NewServer(r, w, b)
+	// ACP·P0-2: install the approval askFn on the non-yolo lane. The
+	// policy was born PrefAsk (initialPref), so until this lands a
+	// dangerous action would fall to prefGate's deny branch — the
+	// pre-P0-2 posture; nothing runs between here and Serve anyway.
+	// On the yolo lane the askFn stays unset: prefGate never consults
+	// it under PrefYolo and no request can be sent (P0-2 ③).
+	if !o.yolo && o.policy != nil {
+		ask := newACPApproval(srv, o.policy.SetAlwaysAllow, acpPermissionTimeoutFromEnv(os.Getenv))
+		b.ask = ask
+		o.policy.SetAskFn(ask.ask)
+	}
+	return srv.Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

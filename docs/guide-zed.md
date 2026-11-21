@@ -78,7 +78,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 | 项 | 现状 | 后续优化方向 |
 |---|---|---|
-| **审批门 / approval** | ACP 路径**没有 per-action 审批 UI**，且权限姿态钉死 `Deny`（flag 够不到，见 §5.1）：cwd 内写/编辑直接放行、**bash 全拒**（`go vet` 类 read-only 白名单除外）。无头场景可用 `SEEK_ACP_YOLO=1` 放开（§5.1）。 | 实现 ACP `session/request_permission`，把工具审批弹到 Zed 原生权限 UI（"允许 seek 编辑 X?"）。 |
+| **审批门 / approval** | **已修（P0-2）**：非 yolo 的 ACP 车道权限姿态为 `Ask`，危险动作经 `session/request_permission` 弹到客户端原生权限 UI（"允许 seek 运行 X?"），三选项 allow_once / allow_always / reject_once；`allow_always` 即 TUI 的「[a] always: \<kind\>」语义（同 Kind 本会话不再问）。**无应答默认拒**：客户端断线、超时（默认 10 分钟，`SEEK_ACP_PERMISSION_TIMEOUT` 秒数可调）、或无头 driver 回 `-32601`，一律拒绝并照常完成回合——不会卡死。无头无人值守场景仍用 `SEEK_ACP_YOLO=1` 直接放行（§5.1，优先级高于审批门）。 | Zed 客户端面板较旧、暂不渲染权限弹窗的实机验证；`reject_always`（协议有、Policy 无 per-Kind 拒绝清单）未接——目前不提供也不接受该选项。 |
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | 唯一缺口：`sessionCapabilities.list`（paseo 的"列出历史会话"）仍未申报。 |
 | **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。模型选择已有协议通道替代（§5.2）。 |
@@ -88,7 +88,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch
 
-`seek acp` 以 `os.Args[1]=="acp"` 短路启动，而 `flag.Parse` 在第一个位置参数处就停止——**一个命令行 flag 都不消费**，`--yolo` 根本表达不到这条路。权限姿态因此默认钉死 `Deny`：cwd 内写/编辑放行，**bash 全拒**（read-only 白名单如 `go vet` 除外）。交互场景（Zed）这是合理默认；**无头场景**（paseo / ACP driver 派单，没有人回答 y/N）会直接卡死——`git commit`、`go test` 都跑不了。
+`seek acp` 以 `os.Args[1]=="acp"` 短路启动，而 `flag.Parse` 在第一个位置参数处就停止——**一个命令行 flag 都不消费**，`--yolo` 根本表达不到这条路。默认姿态（P0-2 起）是 `Ask`：危险动作经 `session/request_permission` 交给客户端（§5 审批行），**没有应答就拒**——交互场景（Zed）弹原生权限 UI；**无头场景**（paseo / ACP driver 派单，没有人回答）每个 bash 都等满超时才拒，效率极差。无头无人值守车道应该用下面的开关直接放行。
 
 开关：给 ACP 进程注入环境变量（真值：`1`/`true`/`yes`/`on`，大小写不敏感；其它值一律视为关）：
 
@@ -100,7 +100,9 @@ seek 在 ACP 车道**初始化时**就以 `PrefYolo` 起栈（不是事后翻转
 
 yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守卫同时挂上（主会话与 subagent 的 bash 都过 `IsRemoteMutating` 检查），`git push`、`gh pr create` 等 push/PR 类远程变更照旧被拒——无人值守车道能改本地、不能动远端。
 
-> ⚠️ **仅受信本机 headless 场景使用**（paseo provider 的 `env` 块就是典型用法）。`PrefYolo` 放开的是本机 bash 与写文件（远程变更仍被 no-remote 守卫拦下）；env 会被原样继承给子进程，不要在不受信、共享或远程可达的环境里设置。默认关（unset = `Deny`）；只在 `seek acp` 车道生效——shell 里残留的 `SEEK_ACP_YOLO` 对 TUI / print 模式**无**影响。
+> ⚠️ **仅受信本机 headless 场景使用**（paseo provider 的 `env` 块就是典型用法）。`PrefYolo` 放开的是本机 bash 与写文件（远程变更仍被 no-remote 守卫拦下）；env 会被原样继承给子进程，不要在不受信、共享或远程可达的环境里设置。默认关（unset = `Ask` 审批门，见 §5 审批行）；只在 `seek acp` 车道生效——shell 里残留的 `SEEK_ACP_YOLO` 对 TUI / print 模式**无**影响。
+
+审批门超时（可选）：`SEEK_ACP_PERMISSION_TIMEOUT=<秒>`（默认 600）。一个权限请求等不到应答时，到点默认拒并继续回合——既防「客户端活着但永不回答」的挂死，也方便无头车道把等待压到几秒。`SEEK_ACP_YOLO=1` 时整个审批门不安装，此变量无效。
 
 设计出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.3（缺口 D-2）。
 

@@ -20,14 +20,23 @@
 #             process launch dir → assert the D-1 double anchor actually
 #             moved (sessionId = basename, stderr anchor line carries the
 #             absolute cwd + 16-hex project id) → bad cwd fails loud with
-#             a JSON-RPC error → stdin EOF → clean exit rc=0.
+#             a JSON-RPC error → [P0-2] reply frames (id, no method) are
+#             routed to permission waiters / silently ignored — never
+#             answered with -32601 — and $/cancel_request for an unknown
+#             id is ignored, both WITHOUT killing the read loop → stdin
+#             EOF → clean exit rc=0.
 #   NOT       session/prompt — that needs a real LLM round-trip (key +
 #             network), which is not deterministic lane material. The
 #             prompt path is covered in-process by internal/acp tests
 #             with fake backends, and by manual real-key smoke when
-#             needed. No API call is made here: a DUMMY DeepSeek key
-#             satisfies startup provider resolution (env beats config,
-#             DeepSeek wins auto-detect), SEEK_HOME isolates ~/.seek.
+#             needed. The session/request_permission APPROVAL LOOP
+#             (P0-2) likewise lives in-process: cmd/seek's
+#             acp_approval_e2e_test.go drives the real binary against a
+#             fake OpenAI-compatible backend through all four lanes
+#             (allow / reject / timeout-deny / yolo-never-asks). No API
+#             call is made here: a DUMMY DeepSeek key satisfies startup
+#             provider resolution (env beats config, DeepSeek wins
+#             auto-detect), SEEK_HOME isolates ~/.seek.
 #
 # Marker on success: ACP-NDJSON-SMOKE-OK (echoes the D1-SMOKE-OK lineage
 # from c_bnjrw5's hand-run smoke).
@@ -111,13 +120,18 @@ echo "acp-smoke: initialize ok (protocolVersion=1, image capability advertised)"
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":2' 'session/new' 15
-grep -q "\"sessionId\":\"smoke-ws\"" "$OUT" || fail "session/new: sessionId != smoke-ws (got: $(grep '"id":2' "$OUT"))"
+# sessionId is the DURABLE transcript id (session/load work, 2026-11-19):
+# YYYYMMDD-HHMMSS-16hex — NOT the project name the smoke used to assert
+# (that expectation predated persistence and had gone stale). The real
+# anchor proof stays in the stderr line below.
+grep '"id":2' "$OUT" | grep -Eq '"sessionId":"[0-9]{8}-[0-9]{6}-[0-9a-f]{16}"' \
+  || fail "session/new: sessionId not a durable transcript id (got: $(grep '"id":2' "$OUT"))"
 # stderr anchor line: absolute workspace path + 16-hex project id.
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" >/dev/null \
   || fail "session/new: anchor line missing cwd=$WS"
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -Eq 'project=[0-9a-f]{16}' \
   || fail "session/new: anchor line project id is not 16-hex"
-echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex)"
+echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex, durable sessionId)"
 
 # --- 3. bad cwd fails loud (no silent daemon-dir session) ---------------------
 BAD="$SANDBOX/no-such-dir"
@@ -126,6 +140,25 @@ wait_for '"id":3' 'session/new(bad cwd)' 15
 grep '"id":3' "$OUT" | grep -q '"error"'      || fail 'bad cwd: no JSON-RPC error'
 grep '"id":3' "$OUT" | grep -q '\-32000'     || fail 'bad cwd: error code != -32000'
 echo "acp-smoke: bad cwd rejected loud (-32000)"
+
+# --- 3b. P0-2: reply frames route, never dispatch (approval-lane transport) ---
+# session/request_permission made the server RECEIVE reply frames (id,
+# no method). Two rules the read loop must now honour, asserted against
+# the real binary without an LLM:
+#   a) a stray reply nobody waits for is silently ignored — pre-P0-2 it
+#      fell into dispatch's default case and got ANSWERED with a -32601
+#      error, protocol noise on every permission answer;
+#   b) $/cancel_request for an unknown id is ignored.
+# Both must leave the read loop alive (the initialize probes after each
+# prove it) and neither may ever produce a "method not handled" error.
+printf '%s\n' '{"jsonrpc":"2.0","id":"p99","result":{"outcome":{"outcome":"cancelled"}}}' >&3
+printf '%s\n' '{"jsonrpc":"2.0","method":"$/cancel_request","params":{"id":"p1"}}' >&3
+rpc 4 initialize '{"protocolVersion":1}'
+wait_for '"id":4' 'post-stray-frames initialize' 15
+if grep -q 'method not handled' "$OUT"; then
+  fail 'stray reply/cancel frames were dispatched as methods (-32601 noise)'
+fi
+echo "acp-smoke: reply + cancel frames routed/ignored, read loop alive (P0-2)"
 
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
