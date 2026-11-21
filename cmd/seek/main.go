@@ -70,6 +70,7 @@ import (
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/sysprompt"
+	"github.com/whyiyhw/seek/internal/taskcli"
 	"github.com/whyiyhw/seek/internal/tools"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
@@ -213,6 +214,8 @@ Commands:
   agents       typed-agent definitions (list / check / create / remove)
   hooks        shell hooks (list / check / trust / audit)
   worktree     seek-owned git worktrees (list / gc)
+  task         tasks that outlive seek (run / ps / attach / kill)
+  ps           list task processes (alias of "seek task ps")
   session      export a transcript to markdown (export)
   checkpoint   file checkpoints (list / restore / prune); undo / redo are aliases
   keys         keybinding config (list / check / actions)
@@ -305,6 +308,21 @@ func run() error {
 	// feature-routines.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "cron" {
 		return routinescli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek task ...` + the ps / attach / kill aliases (v8 柱 V1,
+	// docs/prd/feature-task-lifetime.md). Same rationale as cron/worktree:
+	// the management verbs read ~/.seek/tasks/ and nothing else, so they
+	// must work without API keys, sessions, or the agent runtime — and
+	// `seek attach` in particular has to be usable from a shell that never
+	// runs the TUI. `task exec` is the detached wrapper this dispatches
+	// into; it is the process whose lifetime IS the task's.
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "task":
+			return taskcli.Run(os.Args[2:], os.Stdout, os.Stderr)
+		case "ps", "attach", "kill":
+			return taskcli.RunAlias(os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
+		}
 	}
 	// `seek keys ...` — list / check / actions. Same rationale: keymap
 	// queries don't need API keys, sessions, or a project directory.
