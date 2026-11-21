@@ -41,7 +41,7 @@ seek 的 README 说它是「Claude Code 的工作流，DeepSeek 的价格」。�
 在提交 PR 之前，请先读这些文件——它们是项目的共享上下文：
 
 - [`AGENTS.md`](AGENTS.md) —— AI 助理的项目指南（人类也应该读）
-- [`docs/pitfalls.md`](docs/pitfalls.md) —— 181KB 的经验教训，**每次修非明显 bug 都要追加**
+- [`docs/pitfalls/`](docs/pitfalls/) —— 经验教训的唯一真相来源，**一条目一文件**（`<段>/<slug>.md`，`absorbed/` 归档已吸收条目）；格式模板与 live/absorbed 规则见 [`docs/pitfalls/README.md`](docs/pitfalls/README.md)，**每次修非明显 bug 都要新建一个条目文件**
 - [`docs/prd/archive/v0.md`](docs/prd/archive/v0.md) §1–4 —— 核心设计决策
 - [`docs/prd/`](docs/prd/) 下你改动的对应版本 PRD
 - 相关 feature PRD（如果改的是 permission，读 `feature-permission-refactor.md`；改的是 plan mode，读 `feature-plan-mode.md`）
@@ -115,7 +115,8 @@ internal/
 docs/
   prd/             # 每个版本 + 每个 feature 的设计文档
   book/            # 系统设计书
-  pitfalls.md      # 非明显 bug 和学习记录
+  pitfalls/        # 一条目一文件的经验教训：<段>/<slug>.md（README.md 是模板与规则）
+  pitfalls.md      # 静态指针桩——条目不要写这里，写 pitfalls/
 eval/              # 行为比较测试框架
 ```
 
@@ -144,7 +145,7 @@ eval/              # 行为比较测试框架
 3. `pkg/agent/agent.go` —— agent 循环
 4. `internal/permission/permission.go` —— 权限模型
 5. `internal/tools/<某个工具>/` —— 比如 `read/` 或 `bash/`
-6. `docs/pitfalls.md` —— 按分类浏览，了解曾经出过什么问题
+6. `docs/pitfalls/` —— 按段目录浏览（`agent-loop/`、`tui/`、`deepseek-api/` …），了解曾经出过什么问题
 
 ### 关键代码约定
 
@@ -164,10 +165,10 @@ eval/              # 行为比较测试框架
 **门槛**：你复现了它，你找到了根因，你写了测试来防止回归。
 
 如果修复的是非明显 bug（你花了超过一分钟才搞明白的），**必须**：
-1. 在 `docs/pitfalls.md` 追加一条记录（用文件顶部的模板）
+1. 新建 `docs/pitfalls/<段>/<slug>.md` 单文件条目（模板与 slug 规则见 [`docs/pitfalls/README.md`](docs/pitfalls/README.md)；段目录复用已有的）
 2. commit message 加 `Pitfall: <一句话总结>` trailer
 
-`scripts/extract-pitfalls.sh` 会检查 commit 的 Pitfall trailer 和 `docs/pitfalls.md` 是否一致——不一致会被 CI 标记（计划中）。
+`scripts/extract-pitfalls.sh` 会打印 commit 里的 `Pitfall:` trailer（与条目文件的冗余信号，账本丢了可据此重建）；条目格式由 CI 用 `scripts/pitfalls-count.sh --check` 校验——缺标题或 Saw/Why/Fix/Lesson 字段会红。
 
 ### ✨ 新功能
 
@@ -196,11 +197,11 @@ seek 有一个 PRD 驱动的设计文化。在新功能（尤其涉及 3+ 文件
 - **并发测试** —— 如果函数可以被并发调用，`go test -race` 必须通过
 - **持久化往返测试** —— 写入、重载、**并验证损坏状态修复**
 
-一个好的 starter PR：为一个已有 suite 但缺少 failure-path 覆盖的工具加测试。见 `docs/pitfalls.md` 第一条——`commit 986a485` 那个 bug 就是因为没有取消路径测试而在 CI 下绿了几周。
+一个好的 starter PR：为一个已有 suite 但缺少 failure-path 覆盖的工具加测试。见 [`agent-loop/` 里的 Esc-中断条目](docs/pitfalls/agent-loop/esc-mid-stream-poisoned-the-session-orphan-tool-calls-rejected-on-every-subsequent-turn.md)——`commit 986a485` 那个 bug 就是因为没有取消路径测试而在 CI 下绿了几周。
 
 ### 📖 文档
 
-- **pitfalls.md** —— 如果你修了一个非明显 bug 却**没有**追加记录，你的 PR 会被打回
+- **pitfalls** —— 如果你修了一个非明显 bug 却**没有**新建条目文件（`docs/pitfalls/<段>/<slug>.md`），你的 PR 会被打回
 - **PRD** —— 纠正事实错误、补充遗漏的设计权衡
 - **指南** —— `docs/guide-*.md` 系列，修复流程或跨平台问题
 
@@ -240,7 +241,7 @@ Eval 框架（`eval/`）是 seek 衡量模型行为随时间变化的方法。�
 
 **trailer**：
 - `Co-Authored-By: seek (DeepSeek) <service@deepseek.com>` —— AI 写的代码必须加这个
-- `Pitfall: <一句话总结>` —— 修复非明显 bug 时加
+- `Pitfall: <一句话总结>` —— 修复非明显 bug 时加（并同步新建 `docs/pitfalls/<段>/<slug>.md` 条目）
 
 示例：
 ```
@@ -290,7 +291,7 @@ Co-Authored-By: seek (DeepSeek) <service@deepseek.com>
 
 ### 文档
 
-- `docs/pitfalls.md` 是**非明显 bug 的唯一真相来源**。修了就要写。
+- `docs/pitfalls/` 是**非明显 bug 的唯一真相来源**——一条目一文件（`<段>/<slug>.md`），修了就要新建。计数现算（`bash scripts/pitfalls-count.sh`），不写生成块。
 - PRD 是设计容器，不是事后笔记。在新功能编码前创建或更新。
 - 所有文档的 line wrap 用 ~80 列（英文）或自然段（中文）。
 
@@ -307,7 +308,7 @@ Co-Authored-By: seek (DeepSeek) <service@deepseek.com>
 - AI 生成的代码也要遵循项目的测试标准——failure path 覆盖、race detection、cross-platform
 - AI 无法理解 prefix-cache 字节确定性——你需要 review 生成的代码，确保没有引入运行时构建的 schema 或输出端后处理
 - 如果你用 AI 写 commit message，确保它遵循 conventional-commit 格式和 trailer 约定
-- 鼓励 AI 助理在非明显修复后追加 `docs/pitfalls.md`——它们往往比你更记得住要写
+- 鼓励 AI 助理在非明显修复后新建 `docs/pitfalls/<段>/<slug>.md` 条目——它们往往比你更记得住要写
 
 ### 如果你是 AI 助理
 
@@ -315,7 +316,7 @@ Co-Authored-By: seek (DeepSeek) <service@deepseek.com>
 
 - 编码前先读相关代码——用 `grep` 定位，`read(offset)` 读窗口，不要整文件读
 - 改 `edit` 前先 `read` 目标行获取精确空白
-- 修非明显 bug 后：追加 `docs/pitfalls.md` + commit 加 `Pitfall:` trailer
+- 修非明显 bug 后：新建 `docs/pitfalls/<段>/<slug>.md` 条目 + commit 加 `Pitfall:` trailer
 - `pkg/deepseek` 不能导入 `pkg/llm`——不要在建议中违反这个约束
 - 权限拒绝不是错误——它们是工具结果。不要绕过这个流程。
 
@@ -324,7 +325,7 @@ Co-Authored-By: seek (DeepSeek) <service@deepseek.com>
 ## 8. 沟通
 
 - **Issue / PR** 用中文或英文都可以——维护者双语
-- **问题**：先在 `docs/pitfalls.md` 和已有的 issue 里搜一下
+- **问题**：先在 `docs/pitfalls/` 和已有的 issue 里搜一下（引用旧文件名的说法按标题 grep：`grep -rl '<条目标题>' docs/pitfalls/`）
 - **功能请求**：准备好讨论设计权衡，不只是提需求。建议附带一个简短的 PRD 草稿
 - **IRL**：维护者在 UTC+8，回复可能在 24 小时内
 
@@ -350,7 +351,7 @@ go test -race ./...
 ### Key files to read before contributing
 
 - [`AGENTS.md`](AGENTS.md) — project guide for AI assistants (humans should read too)
-- [`docs/pitfalls.md`](docs/pitfalls.md) — institutional memory, 181KB of hard-won lessons
+- [`docs/pitfalls/`](docs/pitfalls/) — institutional memory, one entry per file under `<section>/<slug>.md` (template + live/absorbed rules in [`docs/pitfalls/README.md`](docs/pitfalls/README.md))
 - [`docs/prd/`](docs/prd/) — design docs, version by version
 - [`docs/prd/feature-permission-refactor.md`](docs/prd/feature-permission-refactor.md) if you touch permission gating
 - [`docs/prd/feature-plan-mode.md`](docs/prd/feature-plan-mode.md) if you touch the plan subsystem
@@ -360,7 +361,7 @@ go test -race ./...
 1. **PRD-first design** — write the design doc before the code, not after
 2. **Prefix-cache byte determinism** — never rewrite history, never build schemas at runtime
 3. **Failure-path tests** — cancellation, mid-loop interruption, malformed input, concurrent access, persistence round-trip
-4. **Pitfall recording** — non-obvious bug fix = `docs/pitfalls.md` entry + `Pitfall:` commit trailer
+4. **Pitfall recording** — non-obvious bug fix = a new `docs/pitfalls/<section>/<slug>.md` entry + `Pitfall:` commit trailer
 5. **Sink interface stability** — sibling interfaces, not signature changes
 
 ### How to contribute
@@ -387,7 +388,7 @@ Pitfall: <summary>  # if fixing a non-obvious bug
 ### Communication
 
 - Issues and PRs welcome in Chinese or English
-- Search `docs/pitfalls.md` and existing issues before filing duplicates
+- Search `docs/pitfalls/` and existing issues before filing duplicates
 - Feature requests should come with design thinking, not just a wishlist
 - Maintainer is in UTC+8; responses typically within 24h
 - MIT license, **be excellent to each other**
