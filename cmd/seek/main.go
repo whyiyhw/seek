@@ -2974,9 +2974,20 @@ func imageExtForMime(m string) string {
 }
 
 func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
+	// turnStop emits the structured termination frame (c_vfgeam). Exactly
+	// one call per exit path, always immediately before the return — that
+	// invariant is what lets a client treat "no frame and no response" as
+	// "the process died mid-turn". sendU writes under the server's lock,
+	// and the response frame is written after Prompt returns, so ordering
+	// (frame before response) holds by construction.
+	turnStop := func(reason, detail, finish string) {
+		sendU(acp.SessionUpdate{SessionID: p.SessionID, Update: acp.NewTurnStop(reason, detail, finish)})
+	}
+
 	text, images, files := buildACPPromptText(ctx, b.ag.Model(), p, b.route, b.froute)
 	if text == "" {
-		return acp.PromptResult{StopReason: "end_turn"}, nil
+		turnStop(acp.FrameStopEndTurn, "empty prompt: no text after image/file routing", "")
+		return acp.PromptResult{StopReason: acp.StopEndTurn}, nil
 	}
 	// Scope the approval lane to THIS turn before the first tool can
 	// fire: the askFn resolves ctx/sessionID from it, so session/cancel
@@ -2990,10 +3001,29 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	// absolute file path"), resolved once per turn — the session cwd was
 	// anchored at session/new (D-1) so this is the project root.
 	cwd, _ := os.Getwd()
+	var (
+		// pendingErr holds the FIRST ErrorEvent instead of returning on
+		// it: an ErrorEvent is fatal only when the stream closes without
+		// an AgentEnd behind it. The one advisory producer — the
+		// finish_reason=length truncation notice — is followed by
+		// TurnEnd + AgentEnd, and draining to the close costs nothing
+		// (the goroutine returns right after a fatal event). Holding the
+		// error also keeps the turn's streamed content flowing to the
+		// client while classification waits for the stream's verdict.
+		pendingErr error
+		finish     string // AgentEnd.Finish — the final turn's upstream finish reason
+		sawEnd     bool
+	)
 	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
-		if e, ok := ev.(agent.ErrorEvent); ok {
-			b.saveTurn()
-			return acp.PromptResult{}, e.Err
+		switch e := ev.(type) {
+		case agent.ErrorEvent:
+			if pendingErr == nil {
+				pendingErr = e.Err
+			}
+			continue
+		case agent.AgentEnd:
+			sawEnd = true
+			finish = e.Finish
 		}
 		if u, ok := acpUpdate(p.SessionID, cwd, ev); ok {
 			sendU(u)
@@ -3009,11 +3039,62 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 			b.saveTurn()
 		}
 	}
-	b.saveTurn()
-	if ctx.Err() != nil {
-		return acp.PromptResult{StopReason: "cancelled"}, nil
+	// The advisory verdict: an error that the agent itself carried past
+	// (AgentEnd present) AND whose finish says token-limit truncation is
+	// the length notice, not a turn failure. The finish guard is
+	// belt-and-suspenders against a future fatal producer that happens
+	// to emit AgentEnd too — a real failure with a length finish is not
+	// a thing today, and if it becomes one the honest classification is
+	// still "truncated", not "internal error".
+	notice := ""
+	if pendingErr != nil && sawEnd && acp.IsLengthFinish(finish) {
+		notice = pendingErr.Error()
+		pendingErr = nil
 	}
-	return acp.PromptResult{StopReason: "end_turn"}, nil
+	b.saveTurn()
+	switch {
+	case pendingErr != nil:
+		// Fatal turn error. Classification rides the frame; the
+		// spec-side surface stays the JSON-RPC error response (the
+		// spec's error channel — its stopReason enum has no
+		// error/timeout value). A cancel-shaped error answers
+		// cancelled instead, so the client sees one truth.
+		frameReason := acp.FrameStopFromError(pendingErr)
+		turnStop(frameReason, pendingErr.Error(), finish)
+		if frameReason == acp.FrameStopCancelled {
+			return acp.PromptResult{StopReason: acp.StopCancelled}, nil
+		}
+		return acp.PromptResult{}, pendingErr
+	case ctx.Err() != nil:
+		// Drain finished without an error event but the ctx is done:
+		// the agent's gentle-cancel path (AgentEnd, no ErrorEvent).
+		// Canceled → the user hit stop; DeadlineExceeded → a
+		// driver-imposed bound ran out, the closest in-process analogue
+		// of the silent-stall death (frame names it; the spec response
+		// has no timeout value, so it answers cancelled).
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			turnStop(acp.FrameStopSilentTimeout, "turn deadline exceeded before any error surfaced", finish)
+		} else {
+			turnStop(acp.FrameStopCancelled, "client cancelled the turn", "")
+		}
+		return acp.PromptResult{StopReason: acp.StopCancelled}, nil
+	case notice != "":
+		// finish_reason=length family: the turn COMPLETED (partial
+		// answer delivered, transcript saved) — the truncation is
+		// reported, not raised.
+		turnStop(acp.FrameStopMaxTokens, notice, finish)
+		return acp.PromptResult{StopReason: acp.StopMaxTokens}, nil
+	default:
+		detail := "turn completed; finish_reason=" + finish
+		if acp.IsLengthFinish(finish) {
+			// Lanes that truncate without the agent-level notice
+			// (Anthropic passes stop_reason=max_tokens through
+			// verbatim; only "length" gets a notice in pkg/agent).
+			detail = "upstream finish_reason=" + finish + " — output truncated by token limit"
+		}
+		turnStop(acp.FrameStopFromFinish(finish), detail, finish)
+		return acp.PromptResult{StopReason: acp.ResponseStopReason(finish)}, nil
+	}
 }
 
 // saveTurn snapshots the live session to disk. Best-effort: a failed

@@ -191,7 +191,13 @@ func (p PromptParams) ImageBlocks() []ContentBlock {
 }
 
 type PromptResult struct {
-	StopReason string `json:"stopReason"` // "end_turn" | "cancelled" | "refusal"
+	// StopReason is the spec's session/prompt response enum (v1):
+	// end_turn | max_tokens | refusal | cancelled (constants in
+	// stopreason.go). Internal errors do not appear here — they ride
+	// the JSON-RPC error response; the finer-grained classification
+	// (silent_timeout / internal_error) and a readable detail live on
+	// the _seek_turn_stop termination frame instead.
+	StopReason string `json:"stopReason"`
 }
 
 // SessionUpdate is the payload of a session/update notification (agent →
