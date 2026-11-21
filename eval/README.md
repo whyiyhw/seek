@@ -164,7 +164,13 @@ pinning mechanism AND the zero-real-HOME guarantee are held by
 `scripts/eval-home-isolation-test.sh` (selftest lane
 `eval-home-isolation-test`: mechanism asserts via a fake binary +
 a real-binary canary-HOME A/B whose control arm proves the canary
-catches writes in the first place).
+catches writes in the first place). That real-binary arm pins the
+provider lane to `SEEK_EVAL_PROVIDER=deepseek` on purpose (card
+c_f734of): the default lane scrubs `DEEPSEEK_API_KEY` from the child,
+so a runner that carries no lane credentials dies at the setup wizard
+and writes **nothing** — indistinguishable, at the assertion, from
+"the sandbox redirect broke". The `SEEK_HOME` pin itself sits above
+the lane block and is lane-independent.
 
 ## Metric vocabulary (extracted by `run.sh` from the JSONL stream)
 

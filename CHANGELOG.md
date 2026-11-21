@@ -66,3 +66,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_gqo32q：信号：手测脚本新增即进 selftest 排除表无闸——UI 验证车道两撞（c_txz6vz/c_5m3fm6）、c_ni7mzw 在途
 - c_a7nfpd：审批卡片·子进程半边：seek -p askFn→approval_request jsonLine→stdin 决定回读（c_n37tnr 拆卡）
 - c_5m3fm6：web 对齐 dsh·生成中停止按钮（/cancel 按钮化）
+- c_f734of：修 selftest 基线红：eval-home-isolation-test 稳定红转绿（c_pdqymy 放行尾巴）
