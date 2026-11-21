@@ -92,4 +92,17 @@
 # information that matters). Post-migration slack: the gate's 200KB
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
-31205746
+# c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
+31332461
+# 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
+# internal/sessmeta state+audit pair, session/rename|archive methods +
+# list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
+# DELTA-added on the go1.25.8 line (29338041→29391137, measured
+# against this branch's base 557f4b45). Over the §13.3 ≤8KB card quota
+# — compile body of the two-method write plane + store dominates
+# (~44KB Go for ~12KB source, c_n37tnr's precedent shape: comment
+# trimming is not a lever, the UI embed is the feature); the overage
+# eats the W5 pack's remaining margin (~127KB/175KB cumulative), gate
+# pin keeps ~1.1MB slack. MarshalIndent→plain-Marshal measured −24B
+# (already linked — not a lever either); the Encoder+Sync save dance
+# costs +0.6KB over WriteFile and buys crash-safe atomicity, kept.
