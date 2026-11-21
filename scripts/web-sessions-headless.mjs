@@ -49,6 +49,10 @@ if (typeof WebSocket !== 'function') {
   console.error('need Node ≥22 (global WebSocket) — 或改跑人工清单');
   process.exit(1);
 }
+// BASE_SCRIPTS：页面基线脚本数。W5 c_ni7mzw 的 head 主题 bootstrap 是第三个
+// 内联块（防 FOUC 必须在样式表前同步跑），与 markdown.js、页面脚本并列。
+// XSS 断言拿它当基线：渲染管线不许再增一个 script。
+const BASE_SCRIPTS = 3;
 const WATCHDOG_MS = 240_000;
 // 总闸 watchdog：任何一景卡死都不许把脚本挂成无限等（CDP 无回包、页面
 // 死循环等都可能）——超时退出码 1，现场由各景自身的 dump 兜。
@@ -292,7 +296,7 @@ try {
   ck('XSS：<img onerror> 字面渲染为文本', s.lastMsg.includes('<img src=x onerror='), '');
   ck('XSS：脚本未执行（window.__xss undefined）', s.xss1 === 'undefined', `got ${s.xss1}`);
   ck('XSS：onerror 未执行（window.__xss2 undefined）', s.xss2 === 'undefined', `got ${s.xss2}`);
-  ck('XSS：document.scripts 不增（仍 2）', s.nscript === 2, `got ${s.nscript}`);
+  ck('XSS：document.scripts 不增（仍 ' + BASE_SCRIPTS + '）', s.nscript === BASE_SCRIPTS, `got ${s.nscript}`);
   ck('XSS：无 img 元素落地', s.nimg === 0, `got ${s.nimg}`);
   ck('短会话行接棒高亮', s.rows.find(r => r.cur)?.sid === TINY_SID,
     JSON.stringify(s.rows.filter(r => r.cur).map(r => r.sid)));

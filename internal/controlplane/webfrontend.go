@@ -141,6 +141,14 @@ type WebConfig struct {
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
+
+	// Settings is the read-only serve-side snapshot the page's settings
+	// panel renders (W5 c_ni7mzw, webfrontend_settings.go). servecli
+	// fills it from the same config.Load result the plane runs off;
+	// nil = a bare frontend (tests/embedders) whose settings/get
+	// answers -32603 and whose page shows "settings unavailable".
+	// controlplane deliberately never reads config.json itself.
+	Settings *ServeSettings
 }
 
 // WebFrontend is the browser-chat Frontend. Safe for concurrent use:
@@ -461,10 +469,19 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// project_id is the /rpc families' key (subagent/list & co. take one):
+	// deriving it here keeps the page from hashing paths in JS. Unbound
+	// stays "" — the zero-binding path must not hash an empty string into
+	// a plausible-looking id.
+	projectID := ""
+	if err == nil {
+		projectID = paths.ProjectID(b.ProjectPath)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bound":   err == nil,
-		"project": b.ProjectPath,
-		"session": b.SessionID,
+		"bound":      err == nil,
+		"project":    b.ProjectPath,
+		"project_id": projectID,
+		"session":    b.SessionID,
 	})
 }
 

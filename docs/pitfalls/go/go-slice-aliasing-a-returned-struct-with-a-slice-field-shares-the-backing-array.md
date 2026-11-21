@@ -1,0 +1,6 @@
+### Go slice aliasing: a returned struct with a slice field shares the backing array
+- **Saw**: `Project.Entries()` returned `[]Entry` where each `Entry` had a `Tags []string`. A caller doing `entries[0].Tags = append(entries[0].Tags, "x")` could silently mutate the project's internal entry map when the backing array had spare capacity, or silently appear to work when it didn't — non-deterministic behaviour
+- **Why**: Go's slice header is a (ptr, len, cap) triplet. Copying an `Entry` struct copies the `Tags` header, but the header points to the same underlying array. `append` with spare capacity writes into that shared array; without spare capacity, it allocates a new one. The result depends on the exact capacity at call time
+- **Fix**: added defensive `make+copy` in both `Entries()` (on read-out) and `Add()` (on store-in). Three lines each, zero runtime cost for entries without Tags
+- **Lesson**: any exported method that returns a struct containing a slice, or accepts one and stores it, must defensively copy the slice to prevent non-deterministic aliasing. The bug class is invisible when callers never mutate the slice — and explodes the first time they do
+- **Refs**: `internal/memory/project.go:Entries`, `project.go:Add`
