@@ -23,20 +23,26 @@
 #             a JSON-RPC error → [P0-2] reply frames (id, no method) are
 #             routed to permission waiters / silently ignored — never
 #             answered with -32601 — and $/cancel_request for an unknown
-#             id is ignored, both WITHOUT killing the read loop → stdin
-#             EOF → clean exit rc=0.
-#   NOT       session/prompt — that needs a real LLM round-trip (key +
-#             network), which is not deterministic lane material. The
-#             prompt path is covered in-process by internal/acp tests
-#             with fake backends, and by manual real-key smoke when
-#             needed. The session/request_permission APPROVAL LOOP
-#             (P0-2) likewise lives in-process: cmd/seek's
+#             id is ignored, both WITHOUT killing the read loop →
+#             [P1-3] initialize(protocolVersion:2) is answered with the
+#             negotiated 1 (+ a stderr downgrade line), an ACP image
+#             content block is accepted and degrades silently instead of
+#             crashing → stdin EOF → clean exit rc=0.
+#   NOT       session/prompt against a real model — that needs an LLM
+#             round-trip (key + network), which is not deterministic lane
+#             material. The prompt path is covered in-process by
+#             internal/acp tests with fake backends, and by manual real-key
+#             smoke when needed. The session/request_permission APPROVAL
+#             LOOP (P0-2) likewise lives in-process: cmd/seek's
 #             acp_approval_e2e_test.go drives the real binary against a
 #             fake OpenAI-compatible backend through all four lanes
-#             (allow / reject / timeout-deny / yolo-never-asks). No API
-#             call is made here: a DUMMY DeepSeek key satisfies startup
-#             provider resolution (env beats config, DeepSeek wins
-#             auto-detect), SEEK_HOME isolates ~/.seek.
+#             (allow / reject / timeout-deny / yolo-never-asks), and the
+#             P1-3 image fixtures (acp_image_e2e_test.go +
+#             cmd/seek/testdata/acp-image/*.json) do the same for
+#             image-only / text+image+text. No API call is made here: a
+#             DUMMY DeepSeek key satisfies startup provider resolution
+#             (env beats config, DeepSeek wins auto-detect), SEEK_HOME
+#             isolates ~/.seek.
 #
 # Marker on success: ACP-NDJSON-SMOKE-OK (echoes the D1-SMOKE-OK lineage
 # from c_bnjrw5's hand-run smoke).
@@ -117,6 +123,23 @@ grep -q '"agentCapabilities"'        "$OUT" || fail 'initialize: no agentCapabil
 grep -q '"image":true'               "$OUT" || fail 'initialize: promptCapabilities.image not advertised'
 echo "acp-smoke: initialize ok (protocolVersion=1, image capability advertised)"
 
+# --- 1b. P1-3: protocolVersion is NEGOTIATED, not echoed ---------------------
+# Before card c_4pczu3 the server returned whatever integer the client sent,
+# so a client asking for a version seek cannot speak was told "yes" and then
+# tripped over wire differences. The spec's rule (and seek's): the response
+# carries the NEWEST version the agent supports that is ≤ the request. A
+# client asking for 2 must therefore be answered 1 — the downgrade declaration
+# is the response itself.
+rpc 21 initialize '{"protocolVersion":2}'
+wait_for '"id":21' 'initialize(v2 downgrade)' 15
+grep '"id":21' "$OUT" | grep -q '"protocolVersion":1' \
+  || fail "initialize(2): expected a negotiated downgrade to 1, got $(grep '"id":21' "$OUT")"
+grep '"id":21' "$OUT" | grep -q '"image":true' \
+  || fail 'initialize(2): downgrade must not drop promptCapabilities.image'
+grep -F 'acp: initialize negotiated requested=2 answered=1' "$SMOKE_ERR" >/dev/null \
+  || fail 'initialize(2): downgrade not declared on stderr'
+echo "acp-smoke: initialize negotiates (requested 2 → answered 1, downgrade declared)"
+
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":2' 'session/new' 15
@@ -140,6 +163,29 @@ wait_for '"id":3' 'session/new(bad cwd)' 15
 grep '"id":3' "$OUT" | grep -q '"error"'      || fail 'bad cwd: no JSON-RPC error'
 grep '"id":3' "$OUT" | grep -q '\-32000'     || fail 'bad cwd: error code != -32000'
 echo "acp-smoke: bad cwd rejected loud (-32000)"
+
+# --- 3c. P1-3: an image content block is accepted, never fatal ----------------
+# ACP image blocks (type:"image" + base64 data + mimeType) must be decoded
+# and handled, not crash the server. This probe is deterministic WITHOUT an
+# LLM: the block's base64 is corrupt, so the block degrades to nothing, the
+# prompt text stays empty, and acpBackend.Prompt answers end_turn immediately
+# (the same short-circuit a pure image prompt used to hit — now reached only
+# after the block has actually been parsed). A crash or a -32000 here means
+# the image block shape regressed.
+# The full path — real PNG in, marker into the model's request — is the
+# fixture e2e: cmd/seek/testdata/acp-image/{image-only,mixed}.json driven by
+# cmd/seek/acp_image_e2e_test.go against the real binary + a fake backend.
+rpc 5 session/prompt '{"sessionId":"smoke","prompt":[{"type":"image","data":"!!!not-base64!!!","mimeType":"image/png"}]}'
+wait_for '"id":5' 'session/prompt(image block)' 20
+grep '"id":5' "$OUT" | grep -q '"stopReason":"end_turn"' \
+  || fail "image block: expected end_turn, got $(grep '"id":5' "$OUT")"
+grep '"id":5' "$OUT" | grep -q '"error"' \
+  && fail 'image block: corrupt block must degrade silently, not error'
+kill -0 "$SEEKPID" 2>/dev/null || fail 'image block: server died on an image content block'
+if grep -qi 'panic' "$SMOKE_ERR"; then
+  fail 'image block: panic in stderr'
+fi
+echo "acp-smoke: image content block accepted + degraded silently, read loop alive (P1-3)"
 
 # --- 3b. P0-2: reply frames route, never dispatch (approval-lane transport) ---
 # session/request_permission made the server RECEIVE reply frames (id,

@@ -64,7 +64,8 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 真 Zed（1.4.x）端到端验证过：
 
-- ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。
+- ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。协议版本是**真协商**（P1-3）：响应带的是「客户端请求的版本」与「seek 支持的版本」的交集里最高的那个，不是回显——客户端报 2 会拿到 1，降级在响应里申报，seek 侧另在 stderr 记一行（§5）。
+- ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.3）。
 - ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 与 `think` 工具的实时输出都会出现；代价：CoT 会进客户端侧日志）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
@@ -82,7 +83,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | 唯一缺口：`sessionCapabilities.list`（paseo 的"列出历史会话"）仍未申报。 |
 | **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。模型选择已有协议通道替代（§5.2）。 |
-| **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
+| **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
 
@@ -126,6 +127,19 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 两个都可选、可单用；`SEEK_ACP_PROVIDER` 同时压掉首启向导（无头进程不该进交互式贴 key 提示）。只影响 `seek acp` 车道，shell 里残留的值对 TUI / print 模式无影响。paseo 侧典型用法：复制一个 provider 条目（如 `seek-glm`）写上 env，同一台机器 DeepSeek / GLM 两条入口并存——与 zcode 桥的 `ZCODE_PROVIDER`/`ZCODE_MODEL` 钉法同款。
 
 wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.4（C 落地记录）。
+
+### 5.3 图片输入 / Image input（P1-3）
+
+`initialize` 申报 `promptCapabilities.image=true`，所以 Zed 肯把附图发给 seek。之后每张图是一个 ACP image content block（`type:"image"`，`data` 是 base64，`mimeType` 如 `image/png`），seek **按块序**处理：
+
+- **视觉模型**（如默认的 `deepseek-flash` / `deepseek-v4.1-flash`、`gpt-4o`、`claude-sonnet-4`、`gemini-2.0-flash`）：图片字节落进项目资产库、以原生 image part 随消息发出，模型直接看图；行内留一行 `[image: pasted-image.png — attached natively · 2x2 · …]` 作为对话记录的自我描述。
+- **非视觉模型**：**不发送图片字节**，改为行内注一行 `[image: … — 当前模型不支持图片输入，用 /model 选一个支持视觉的模型]`，回合照常完成（提示模型自己建议换模型，而不是让 API 报 400）。
+- **块序保持**：文本 + 图 + 文本 的混合 prompt，那张图的上述标记落在两段文字**中间**，不挪到末尾——写明「这是第一张，这是第二张」的 prompt 才读得对。
+- **降级不炸**：坏 base64、不是图片的 `mimeType`、超过单图 32 MiB、资产库不可用——该块静默跳过或降级成一行说明，进程不崩、其余块照常。
+
+**纯图 prompt** 也成一回合（旧行为是 `text==""` 直接 `end_turn`、什么都不做）。
+
+不申报的东西：`embeddedContext`（编辑器选中的代码上下文）——seek 不处理该块类型，客户端因此不会发。真 Zed 附图的人工实机验证仍待补（沙盒里能证的是"块被收下、标记按序进了请求"：`cmd/seek/testdata/acp-image/*.json` + `cmd/seek/acp_image_e2e_test.go` 驱动真二进制对假端点断言）。
 
 ---
 

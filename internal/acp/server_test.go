@@ -107,6 +107,41 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 }
 
+// TestNegotiateVersion pins the negotiation table (backlog ⑤ / M-P.5):
+// the answer is the highest version BOTH sides speak, never an echo of
+// whatever the client sent. A newer client gets the newest supported
+// (the downgrade declaration); an equal request is answered verbatim;
+// a request with no intersection reports ok=false so the caller can say
+// so out loud while still answering something usable.
+func TestNegotiateVersion(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested int
+		want      int
+		wantOK    bool
+	}{
+		{"current", 1, 1, true},
+		{"newer client downgrades", 2, 1, true},
+		{"much newer client downgrades", 99, 1, true},
+		{"older client", 0, ProtocolVersion, false},
+		{"negative", -3, ProtocolVersion, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := NegotiateVersion(c.requested)
+			if got != c.want || ok != c.wantOK {
+				t.Errorf("NegotiateVersion(%d) = (%d, %v), want (%d, %v)", c.requested, got, ok, c.want, c.wantOK)
+			}
+		})
+	}
+	// The supported set must contain the advertised newest version —
+	// otherwise "answer ProtocolVersion" would name something we can't
+	// speak.
+	if _, ok := NegotiateVersion(ProtocolVersion); !ok {
+		t.Fatalf("supportedVersions does not contain ProtocolVersion=%d", ProtocolVersion)
+	}
+}
+
 func TestServer_NewSession(t *testing.T) {
 	enc, dec := startServer(t, fakeBackend{})
 	send(t, enc, 2, "session/new", NewSessionParams{Cwd: "/x"})
@@ -223,6 +258,46 @@ func TestPromptParams_ImageBlocks(t *testing.T) {
 	// PromptText must still ignore image blocks (text-only).
 	if got := p.PromptText(); got != "look at this" {
 		t.Fatalf("PromptText should only return text blocks, got %q", got)
+	}
+}
+
+// TestPromptParams_Segments pins wire order (card c_4pczu3 ④): text and
+// image blocks come out interleaved exactly as sent, so a backend can
+// place each image's marker between the sentences that surround it.
+// Blocks with no payload (empty text, empty image data) and block types
+// seek declares no capability for are dropped — they carry nothing to
+// forward, and forwarding an empty text block would insert a stray
+// newline.
+func TestPromptParams_Segments(t *testing.T) {
+	p := PromptParams{Prompt: []ContentBlock{
+		{Type: "text", Text: "before"},
+		{Type: "image", Data: "Zm9v", MimeType: "image/png"},
+		{Type: "text", Text: "   "},
+		{Type: "text", Text: "after"},
+		{Type: "audio", Data: "zzz"},                     // no capability → dropped
+		{Type: "image", Data: "", MimeType: "image/png"}, // payload-less → kept out
+		{Type: "resource_link", Text: "x"},               // unknown kind → dropped
+	}}
+	segs := p.Segments()
+	want := []string{"text:before", "image:image/png", "text:   ", "text:after"}
+	if len(segs) != len(want) {
+		t.Fatalf("segments = %d, want %d: %+v", len(segs), len(want), segs)
+	}
+	for i, w := range want {
+		var got string
+		if segs[i].Image != nil {
+			got = "image:" + segs[i].Image.MimeType
+		} else {
+			got = "text:" + segs[i].Text
+		}
+		if got != w {
+			t.Fatalf("segment %d = %q, want %q", i, got, w)
+		}
+	}
+	// The image segment must point AT the prompt's own block (the backend
+	// reads Data off it), not at a copy.
+	if segs[1].Image != &p.Prompt[1] {
+		t.Fatal("image segment must alias the prompt block")
 	}
 }
 
