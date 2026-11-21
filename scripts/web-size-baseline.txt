@@ -10,6 +10,16 @@
 # binary: scripts/web-gate.sh --update-baseline (re-measures, rewrites
 # the number, keeps these comments).
 #
+# Measuring line (2026-11-20 c_o3osoh 方案 B migration): ONE line —
+# go.mod `go 1.27.3` + CI setup-go pinned '1.27.3' (exact patch, no
+# minor-version alias). The local default toolchain IS the gate line:
+# run `bash scripts/web-gate.sh` bare, no env. The GOTOOLCHAIN advice
+# inside the ratchet entries below is pre-migration history —
+# reproducing a 1.25.8-line reading now also needs the pre-migration
+# go.mod (a go directive newer than the pinned toolchain refuses to
+# build), so GOTOOLCHAIN=go1.25.8 is archaeology for old entries, not
+# a runner requirement.
+#
 # 2026-11-19 c_x2au4t ratchet: +14109B (markdown.js embed 6.3KB +
 # /static/ route + page wiring). Added as a DELTA to the existing pin,
 # NOT via --update-baseline's absolute re-measure — the absolute
@@ -57,4 +67,23 @@
 # it. Committing the card's shape would have turned CI red on all
 # three OSes. The GOTOOLCHAIN=go1.25.8 advice above stays the only
 # working mechanism.
-30517907
+# 2026-11-20 c_o3osoh 方案 B MIGRATION RE-FORGE: the direction was
+# re-decided — migrate the whole repo to the 1.27 line instead of
+# pinning back to 1.25.8. go.mod `go` directive 1.25.8→1.27.3, every
+# CI setup-go pinned to exact '1.27.3', and this baseline re-measured
+# via --update-baseline on the bare local default (31,205,746B). The
+# absolute jump 30,517,907→31,205,746 (+687,839B) is NOT code growth:
+# same-tree measurement says the toolchain line diff alone is
+# +1,810,518B (go1.25.8: 29,395,228B — identical to c_ni7mzw's final
+# 1.25.8-line reading, this card adds zero Go code — vs go1.27.3:
+# 31,205,746B), and the old pin carried 1,122,679B of un-ratcheted
+# 1.25.8-side merge slack (30,517,907−29,395,228) that this re-forge
+# absorbs: +1,810,518 − 1,122,679 = +687,839. RATCHET HISTORY BREAK:
+# the 2026-11-19/20 delta entries above were measured on the 1.25.8
+# line and do NOT chain onto this pin — from here on, deltas and
+# ratchets are accounted on the 1.27.3 line only (both lines agreed
+# on deltas within ~500B historically, so the break loses no
+# information that matters). Post-migration slack: the gate's 200KB
+# budget now measures against a tight same-line pin — no inherited
+# MB-scale headroom.
+31205746

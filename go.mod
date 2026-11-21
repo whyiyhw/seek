@@ -1,6 +1,6 @@
 module github.com/whyiyhw/seek
 
-go 1.25.8
+go 1.27.3
 
 require (
 	charm.land/bubbles/v2 v2.1.1
