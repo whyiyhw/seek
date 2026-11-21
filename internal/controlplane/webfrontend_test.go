@@ -544,6 +544,41 @@ func TestWeb_PageStreamingBubble(t *testing.T) {
 	}
 }
 
+// TestWeb_PageStopButton pins the c_5m3fm6 dsh-InputBar alignment: while
+// a streamed run is live the SEND key becomes the STOP key. The fork
+// lives at the click layer — a submit event names #send as the
+// submitter for Enter's implicit submission too, so click vs Enter
+// cannot be told apart at submit — and the stop click sends the SAME
+// /cancel command text as the top bar. The armed run's run-bearing ack
+// closes the bubble WITHOUT the authoritative replace (on an
+// interrupted run the accumulated deltas ARE the content): a cut
+// marker is appended instead, stream state resets, and the key state
+// follows the run table (first stream event flips it, close-out
+// reverts it — no stop key when idle).
+func TestWeb_PageStopButton(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"renderSend()",                 // key state is a function of the run table
+		"runs.size > 0",                // busy = a live streamed run
+		"classList.toggle('stop'",      // the visual stop state
+		"send.addEventListener('click'", // the fork sits at click, before submit
+		"sendText('/cancel', false)",   // stop click = the /cancel command text
+		"m.run === stopping",           // interrupted close keys the armed run
+		"—— 已中断 ——",                  // the cut marker keeps the partial
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the stop-button piece %q (c_5m3fm6)", need)
+		}
+	}
+	// Additivity: the plain send/stream paths must survive — Enter with a
+	// draft still submits (conv-gate queuing is prior semantics).
+	for _, keep := range []string{"addEventListener('submit'", "renderBody(r.el, m.text)"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the prior send/stream piece %q — c_5m3fm6 must be additive", keep)
+		}
+	}
+}
+
 // TestWeb_PageMemoryStats pins the W4.5 asset-plane UI contract: the
 // page consumes exactly the W4.3 method set (memory/projects|list|get,
 // stats/cache — plus W4.2's session/list as the stats picker) over the

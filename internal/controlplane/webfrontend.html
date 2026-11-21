@@ -64,6 +64,20 @@
      for the path argument. Binding status stays pinned in the status
      line: refreshed immediately after a command POST (202) settles on
      the wire, again on every SSE reply, and again on SSE (re)connect.
+     Stop key (c_5m3fm6, dsh InputBar alignment): while a streamed run
+     is live the SEND key becomes the STOP key — the click is forked at
+     the click layer (preventDefault; a submit event names #send as
+     the submitter for Enter's implicit submission too, so click vs
+     Enter cannot be told apart at submit) and sends the SAME /cancel
+     command text as the top bar; Enter with a draft still submits as
+     before (conv-gate queuing is prior semantics, not narrowed here).
+     The armed run's close-out is a PRESERVING one: the ack reply is
+     run-bearing but its text is just a receipt — the accumulated
+     deltas ARE the content of an interrupted run, so a 「—— 已中断 ——」
+     marker is appended instead of the authoritative replace, and the
+     server's terminal 「run 已中断。」 lands run-less as its own
+     bubble. Key state follows the run table: the first stream event
+     flips it, close-out reverts it — no stop key when idle.
      Attachments (W5 c_56yrcj): click 📎 / drag / paste → POST /attach
      (raw bytes), staged progress in a tray, images previewed from
      FileReader data: URLs; on send the staged paths ride the /msg text
@@ -297,6 +311,8 @@
           margin: 2px 0 8px; overflow: auto; white-space: pre-wrap;
           word-break: break-all; max-height: 220px; font: inherit;
           font-size: 12px; color: var(--seek-fg-soft); }
+  /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
+  .msg .cut { color: var(--seek-fg-soft); font-size: 12px; padding-top: 2px; }
   form { display: flex; gap: 8px; padding: 10px 14px; background: var(--seek-panel);
          border-top: 1px solid var(--seek-line); }
   #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
@@ -312,6 +328,8 @@
      上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
      （ap-badge 同款接线，两处共用同一对 token）。 */
   #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
+  /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——红底与录音态同色系（token 对齐） */
+  #send.stop { background: var(--seek-rec); color: var(--seek-rec-fg); }
 
   /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
   /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
@@ -1043,8 +1061,20 @@ async function refreshState() {
 // 同一个气泡里；带 run 的 reply 到达时整泡替换成权威终文本——客户端
 // 累积只是预览，丢帧/未见过该 run 的 reply 走普通消息路径，天然幂等。
 const runs = new Map();   // runId → {el, cur, tools}
+let lastRun = '';         // 最新流式 run：/cancel 武装的对象（服务端每 conv 至多一个活跃 run，即最新泡）
+let stopping = '';        // 已发 /cancel 待收口的 run id：它的 run-bearing reply 走保留式中断收口（c_5m3fm6）
 let raf = 0;
 const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧最多渲一次）
+
+// ---- 发送/停止键态（c_5m3fm6，对齐 dsh InputBar 中断语义）----
+// 生成中（本 conv 有活跃 run——首个 delta/tool 事件起、reply 收口止）发送键
+// 变停止键；键态只跟 runs 表走，流事件开、收口关，无生成时恒为发送键。
+function renderSend() {
+  const busy = runs.size > 0;
+  send.textContent = busy ? '⏹ 停止' : '发送';
+  send.classList.toggle('stop', busy);
+  send.title = busy ? '中断当前生成（等同 /cancel）' : '';
+}
 
 function nearBottom() {
   return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -1064,6 +1094,8 @@ function runBubble(id) {
   el.className = 'msg seek streaming';
   r = { el, cur: null, tools: new Map(), tick: 0 };  // tick: 耗时跳动 interval id
   runs.set(id, r);
+  lastRun = id;
+  renderSend();               // 首个流事件即键态切换（c_5m3fm6）
   appendPinned(list, el);
   return r;
 }
@@ -1329,10 +1361,27 @@ function listen() {
       if (r.tick) { clearInterval(r.tick); r.tick = 0; }   // 停掉耗时跳动
       const pin = nearBottom();
       r.el.classList.remove('streaming');
-      if (m.text) renderBody(r.el, m.text); else r.el.remove();
+      if (m.run === stopping) {
+        // 中断收口（c_5m3fm6）：这份 run-bearing reply 是 /cancel 的 ack——
+        // 文本只是回执，已累积的半截才是被中断 run 的内容。保留气泡 + 尾部
+        // 标注中断，不做权威替换；服务端终态「run 已中断。」随后 run-less
+        // 独立成条。ack/终态谁先带 run 不定（服务端只保「恰一条」），两条
+        // 路径在此同形。
+        stopping = '';
+        const cut = document.createElement('div');
+        cut.className = 'cut';
+        cut.textContent = '—— 已中断 ——';
+        r.el.appendChild(cut);
+      } else if (m.text) {
+        renderBody(r.el, m.text);
+      } else {
+        r.el.remove();
+      }
       if (pin) list.scrollTop = list.scrollHeight;
+      renderSend();                    // 收口即键态复位（c_5m3fm6）
     } else if (m.text) {
       addMsg('seek', m.text);   // 指令应答 / 丢帧回退：普通消息路径
+      stopping = '';            // run-less 应答落定（no-op ack 或终态），中断请求收尾
     }
     if (m.session_id) {         // W2.3：agent_end 终值——run 收口带 sid
       meter.sid = m.session_id;
@@ -1389,6 +1438,10 @@ async function sendText(text, fromInput, atts) {
   const tokens = refs.map(a => '@' + a.path).join('\n');
   const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
   if (!body) return;
+  // /cancel（停止键、顶栏按钮、手打三入口同此一条）：武装被中断的 run——
+  // 它的 run-bearing ack 走保留式收口而非权威替换（c_5m3fm6）。无活跃 run
+  // 时无从武装，ack 自会以普通消息路径给出「当前没有正在运行的任务。」。
+  if (body.trim() === '/cancel') stopping = runs.size ? lastRun : '';
   addMsg('you', text, refs);
   if (fromInput) input.value = '';
   send.disabled = true;
@@ -1443,6 +1496,16 @@ form.addEventListener('submit', async ev => {
   if (!typed && !ready.length) { input.focus(); return; }
   await sendText(typed, true, ready);
   input.focus();
+});
+
+// 生成中的发送键=停止键（c_5m3fm6）：分岔放在 click 层——submit 事件无法
+// 区分按钮点击与回车（Enter 的隐式提交 submitter 同是本键），点击先于
+// submit 触发，preventDefault 吞掉提交后只发 /cancel（草稿不动）。回车带
+// 草稿仍走上面的 submit 原路：conv 闸排队是既有语义，本卡不收窄。
+send.addEventListener('click', ev => {
+  if (!runs.size) return;            // 非生成中：照常提交（发送）
+  ev.preventDefault();               // 生成中：本次点击=停止，不进 submit
+  if (!send.disabled) sendText('/cancel', false);
 });
 
 // 点击选择（📎）。
