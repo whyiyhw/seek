@@ -52,7 +52,7 @@ seek 的 README 说它是「Claude Code 的工作流，DeepSeek 的价格」。�
 
 ### 前置依赖
 
-- Go 1.25+（你需要 go.mod 里面那个版本或更新的）
+- Go 1.27.3+（你需要 go.mod 里面那个版本或更新的）
 - Make（非必需，但 `go test ./...` 你必须会跑）
 
 ### 构建
