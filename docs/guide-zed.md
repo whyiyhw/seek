@@ -84,7 +84,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。模型选择已有协议通道替代（§5.2）。 |
 | **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
-| **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
+| **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.3）。 | 多 session 各自一套 roster（当前一进程一 session，roster 变更只告警不热换）。 |
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch
 
@@ -124,6 +124,36 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 两个都可选、可单用；`SEEK_ACP_PROVIDER` 同时压掉首启向导（无头进程不该进交互式贴 key 提示）。只影响 `seek acp` 车道，shell 里残留的值对 TUI / print 模式无影响。paseo 侧典型用法：复制一个 provider 条目（如 `seek-glm`）写上 env，同一台机器 DeepSeek / GLM 两条入口并存——与 zcode 桥的 `ZCODE_PROVIDER`/`ZCODE_MODEL` 钉法同款。
 
 wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.4（C 落地记录）。
+
+### 5.3 MCP 透传 / MCP passthrough（session/new 的 `mcpServers`）
+
+ACP 客户端可以在 `session/new`（和 `session/load`）里带一份 MCP roster，seek 会**按声明**把这些 server 接进会话——这是 backlog ⑦，也是"把任意工具面喂进 seek 会话"的通道（butler 卡面 MCP 这类跨系统组合）。
+
+**声明 → 起连 → 进工具面 → 随会话清理**，四步各自落点：
+
+| 步 | 做什么 | 代码 |
+|---|---|---|
+| 声明 | 解 `mcpServers` 数组；只认 `stdio`（`pkg/mcp` 就是 stdio 传输），`http`/`sse`/`acp` 跳过并在 stderr 说明 | `internal/acp/mcp.go` |
+| 起连 | **复用 `~/.seek/mcp.json` 那一套客户端栈**：`mcptool.LoadServers` → `pkg/mcp.StartServer`（握手 + `tools/list`，无第二套实现） | `internal/tools/mcptool`、`cmd/seek/acp_mcp.go` |
+| 进工具面 | 注册进同一个 registry，名字 **`mcp__<server>__<tool>`** | `cmd/seek/acp_mcp.go` |
+| 随会话清理 | 会话结束（stdin EOF / 进程退出）→ 关客户端 → 子进程被 kill + 回收 | `cmd/seek` 的 `runACP` defer |
+
+几点必须知道的边界：
+
+- **名字是 `mcp__<server>__<tool>`，不是 `mcp.<server>.<tool>`。** 点号过不了模型 API 的函数名约束（`^[a-zA-Z0-9_-]{1,64}$`，DeepSeek / OpenAI / Anthropic 一致），首个请求就会 400。三段式把客户端注入的 server 与 `mcp.json` 的 `<server>__<tool>` 分开；server 名与工具名都会折进上面那个安全字母表（`card.read` → `mcp__butler__card_read`）。
+- **声明里给的 `env` 是子进程拿到凭据的唯一途径。** seek 先按 `internal/childenv` 擦掉父环境里的凭据形状变量（`*_API_KEY`、`*_TOKEN`、`SEEK_*` …），再叠加声明里的 `env`——所以 server 需要 key 就明写在声明里。
+- **坏声明不失败。** 起不来的 server / 不支持的传输只写 stderr，`session/new` 照常回 `sessionId`；会话照常能用，只是少了那批工具。
+- **一个进程 = 一个 session = 一份 roster。** 重复的 `session/new` 带同一份声明是幂等 no-op（paseo 重锚时会重发）；带**不同**声明只告警、不热换（registry 无法遗忘已注册的工具，换 roster 请重开 `seek acp`）。
+- **不进 system prompt。** `MCPSection` 在启动时组装并冻结（前缀缓存纪律），注入的 server 只出现在 tools 数组里。模型靠工具名与 description 认它。
+- **roster 必须在会话首轮之前到。** tools 数组在首轮就冻结（`Registry.Wire`），此后再来的 roster 会被拒并打一行说明——那些工具模型根本看不到，起了子进程也没人调；重开 `seek acp` 即可。实践中客户端在 `session/new` 就带上，所以不会撞到。
+- **不带 `mcpServers` 时零变化**：不起子进程、不动 registry、stderr 一行 `acp: mcp:` 都不会多出来（`scripts/acp-smoke-test.sh` 的两态断言之一）。
+
+调试就看 stderr 的 `acp: mcp:` 行——连接/注册/回收各一行，工具名会原样列出：
+
+```
+acp: mcp: registered 2 tool(s) from 1 server(s): mcp__butler__card_read mcp__butler__echo
+acp: mcp closed 1 server(s)
+```
 
 ---
 

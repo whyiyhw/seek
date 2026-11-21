@@ -10,16 +10,20 @@ import (
 
 // fakeBackend is a scriptable ACP Backend.
 type fakeBackend struct {
-	prompt    func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
-	menu      []ConfigOption                                               // returned by NewSession (nil default)
-	setConfig func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
-	load      func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
+	prompt     func(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error)
+	menu       []ConfigOption                                               // returned by NewSession (nil default)
+	setConfig  func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
+	load       func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
+	newSession func(p NewSessionParams) (NewSessionResult, error) // nil default = canned success
 }
 
 func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
 	return InitializeResult{ProtocolVersion: p.ProtocolVersion, AgentCapabilities: AgentCapabilities{LoadSession: true}}
 }
 func (f fakeBackend) NewSession(p NewSessionParams) (NewSessionResult, error) {
+	if f.newSession != nil {
+		return f.newSession(p)
+	}
 	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu}, nil
 }
 func (f fakeBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {

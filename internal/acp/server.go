@@ -63,6 +63,13 @@ type PromptCapabilities struct {
 
 type NewSessionParams struct {
 	Cwd string `json:"cwd"`
+	// MCPServers is the client's MCP roster for this session (ACP schema
+	// NewSessionRequest.mcpServers). seek connects its stdio entries for
+	// the session's lifetime and registers their tools as
+	// "mcp__<server>__<tool>" (backlog ⑦, internal/acp/mcp.go). Absent or
+	// empty ⇒ exactly the pre-passthrough behaviour: no child processes,
+	// no extra tools, no prompt bytes.
+	MCPServers []MCPServer `json:"mcpServers,omitempty"`
 }
 
 // LoadSessionParams is session/load's request (ACP schema
@@ -70,15 +77,18 @@ type NewSessionParams struct {
 // session/new — for seek that is the durable transcript id, because a
 // resumable handle must outlive the process. Cwd is where the session
 // runs; seek re-anchors both cwd conventions to it exactly as
-// session/new does. MCPServers / AdditionalDirectories are decoded for
-// schema fidelity and ignored: seek has no MCP passthrough yet and
-// multi-root sessions are not supported, so silently honouring half of
-// them would be worse than ignoring all of them.
+// session/new does.
+//
+// MCPServers gets the same treatment as on session/new: resuming a
+// conversation must not silently lose the tools the client declared for
+// it (paseo re-sends the roster here). AdditionalDirectories stays
+// decoded-and-ignored — multi-root sessions are still unsupported, and
+// honouring half of them would be worse than ignoring all.
 type LoadSessionParams struct {
-	SessionID             string          `json:"sessionId"`
-	Cwd                   string          `json:"cwd"`
-	MCPServers            json.RawMessage `json:"mcpServers,omitempty"`
-	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
+	SessionID             string      `json:"sessionId"`
+	Cwd                   string      `json:"cwd"`
+	MCPServers            []MCPServer `json:"mcpServers,omitempty"`
+	AdditionalDirectories []string    `json:"additionalDirectories,omitempty"`
 }
 
 // LoadSessionResult is session/load's response. Every field is optional
@@ -258,7 +268,28 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 		s.reply(req.ID, s.backend.Initialize(p))
 	case "session/new":
 		var p NewSessionParams
+		// Decode errors stay lenient here for the same reason they always
+		// were: session/new's historical contract is "whatever parses, use
+		// it" (a roster-less client must see zero change). A malformed
+		// mcpServers element therefore yields no roster rather than a
+		// protocol error — the same non-fatal posture as a server that
+		// will not start.
 		_ = json.Unmarshal(req.Params, &p)
+		// A declared MCP roster registers tools, and the registry is read
+		// by a running turn (and frozen after the first one) — so the
+		// connect belongs to the between-turns window, exactly like
+		// set_config_option's lane swap. A roster-less session/new keeps
+		// its historical behaviour (re-anchor mid-turn is tolerated), so
+		// clients that never send mcpServers see no change at all.
+		if len(p.MCPServers) > 0 {
+			s.mu.Lock()
+			busy := len(s.cancels) > 0
+			s.mu.Unlock()
+			if busy {
+				s.replyErr(req.ID, -32000, "session/new rejected: a prompt is in flight (attach MCP servers between turns)")
+				return
+			}
+		}
 		res, err := s.backend.NewSession(p)
 		if err != nil {
 			s.replyErr(req.ID, -32000, err.Error())

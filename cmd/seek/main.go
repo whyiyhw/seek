@@ -1729,6 +1729,7 @@ func run() error {
 			froute: froute,
 			policy: policy,
 			menu:   acpModelMenu(*model, openCatalogRows()),
+			reg:    reg,
 			sess:   activeSession,
 			store:  store,
 		})
@@ -2570,6 +2571,20 @@ type acpBackend struct {
 	// session"); anchored by NewSession / LoadSession, checked by
 	// SetConfigOption.
 	sessionID string
+	// reg is the live tool registry, so session/new can register the
+	// servers a client declared in mcpServers (backlog ⑦). Never nil on
+	// the real lane — runACP gets the same registry agent.New was built
+	// with; nil only in tests that do not exercise passthrough.
+	reg *tools.Registry
+	// mcp is the connected passthrough roster (nil = none declared).
+	// Owned by the backend because it outlives a single session/new:
+	// children are closed when the roster is replaced or the transport
+	// ends (runACP's deferred closeMCP).
+	mcp *acpMCP
+	// runCtx is the lane's lifecycle context (set by runACP): injected
+	// MCP children are bound to it, so a signalled process reaps them even
+	// if the deferred close is skipped. nil in tests.
+	runCtx context.Context
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2608,6 +2623,12 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // project name stays (and Initialize stops advertising loadSession).
 // Since C, the result also carries the model configOptions menu —
 // a non-nil menu is what makes ACP clients render the dropdown.
+//
+// Since the MCP passthrough (backlog ⑦), p.MCPServers is connected here
+// too — see acp_mcp.go. The connection has to be made BEFORE the first
+// prompt, because the registry's wire list freezes on the first turn
+// (tools.Registry.Wire); a server connected later would never reach the
+// model.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
 	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
 	if err != nil {
@@ -2625,6 +2646,7 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 	}
 	b.sessionID = id
 	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, id)
+	b.connectMCP(p.MCPServers)
 	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu}, nil
 }
 
@@ -2699,6 +2721,11 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
 		sendU(u)
 	}
+	// paseo re-sends the session's MCP roster on load (the array belongs
+	// to the session, not just its creation). Same connect path, same
+	// non-fatal posture — a declared server that will not start must not
+	// block the history replay that already went out.
+	b.connectMCP(p.MCPServers)
 	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
 	return acp.LoadSessionResult{ConfigOptions: b.menu}, nil
 }
@@ -3286,6 +3313,11 @@ type acpOptions struct {
 	froute fileroute.Router
 	policy *permission.Policy
 	menu   []acp.ConfigOption
+	// reg is the tool registry the agent already runs on. session/new
+	// registers client-declared MCP servers into it (backlog ⑦); it must
+	// be the SAME registry, because the tool list freezes on the first
+	// turn and the agent dispatches through this one.
+	reg *tools.Registry
 	// sess/store back session/load + the durable sessionId. Both nil
 	// under --no-save, which is what makes Initialize stop advertising
 	// loadSession.
@@ -3317,12 +3349,14 @@ func runACP(ctx context.Context, o acpOptions) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{
+	b := &acpBackend{
 		ag:     o.ag,
 		route:  o.vroute,
 		froute: o.froute,
 		policy: o.policy,
 		menu:   o.menu,
+		reg:    o.reg,
+		runCtx: ctx,
 		// Same construction path as the startup lane: buildProvider owns
 		// key resolution and per-provider endpoints; "" baseURL keeps the
 		// pinned defaults (a passthrough --base-url can't reach this
@@ -3333,7 +3367,13 @@ func runACP(ctx context.Context, o acpOptions) error {
 		},
 		sess:  o.sess,
 		store: o.store,
-	}).Serve(ctx)
+	}
+	// Session end = transport end (stdin EOF, or the process ctx being
+	// cancelled). Client-injected MCP children are reaped HERE, not at
+	// process exit: they belong to the session, which is why this is a
+	// defer rather than the mcp.json path's live-forever posture.
+	defer func() { _ = b.closeMCP() }()
+	return acp.NewServer(r, w, b).Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace
