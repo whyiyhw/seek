@@ -96,9 +96,11 @@ type LoadSessionParams struct {
 
 // LoadSessionResult is session/load's response. Every field is optional
 // in the schema; seek returns the config menu so the client's model
-// dropdown reflects the RESUMED session rather than the process default.
+// dropdown reflects the RESUMED session rather than the process default,
+// and the mode state so a plan-mode session resumes as plan (ACP·P2).
 type LoadSessionResult struct {
-	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
+	Modes         *SessionModeState `json:"modes,omitempty"`
 }
 
 type NewSessionResult struct {
@@ -111,6 +113,11 @@ type NewSessionResult struct {
 	// @agentclientprotocol/sdk schema + the zcode-acp-server reference
 	// bridge; see SetConfigOptionParams for the switch direction.
 	ConfigOptions []ConfigOption `json:"configOptions"`
+	// Modes is the session-mode capability advertisement (ACP·P2,
+	// backlog ④): non-nil ⇒ the client may render a mode switcher and
+	// drive it with session/set_mode. Absent ⇒ no mode support (the
+	// backend doesn't implement ModeSwitcher, or the lane has none).
+	Modes *SessionModeState `json:"modes,omitempty"`
 }
 
 // ConfigOption is one entry of the session configuration menu carried on
@@ -520,6 +527,46 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 			return
 		}
 		s.reply(req.ID, res)
+	case "session/set_mode":
+		// Mode switches are between turns — same rule and same race
+		// argument as set_config_option above: SetMode flips the shared
+		// permission workflow + the agent's mode label, which an
+		// in-flight turn's gate checks would race. (The ACP schema
+		// allows mode changes "at any point"; an error reply is how an
+		// agent declines, and clients retry between turns.)
+		var p SetModeParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			s.replyErr(req.ID, -32602, "bad set_mode params: "+err.Error())
+			return
+		}
+		sw, ok := s.backend.(ModeSwitcher)
+		if !ok {
+			// Backend without mode support: the standard unknown-method
+			// answer, not a server error — clients treat it as "this
+			// agent has no modes" and hide their switcher.
+			s.replyErr(req.ID, -32601, "method not handled: session/set_mode (no session modes)")
+			return
+		}
+		s.mu.Lock()
+		busy := len(s.cancels) > 0
+		s.mu.Unlock()
+		if busy {
+			s.replyErr(req.ID, -32000, "mode change rejected: a prompt is in flight (switch modes between turns)")
+			return
+		}
+		if err := sw.SetMode(p); err != nil {
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		// The response itself carries no mode info (schema: _meta only),
+		// so the current_mode_update notification is the client's ONLY
+		// confirmation — sent before the response, same notifications-
+		// then-result ordering session/load uses.
+		s.notify("session/update", SessionUpdate{
+			SessionID: p.SessionID,
+			Update:    CurrentModeUpdate{SessionUpdate: "current_mode_update", CurrentModeID: p.ModeID},
+		})
+		s.reply(req.ID, struct{}{})
 	case "session/cancel":
 		var p struct {
 			SessionID string `json:"sessionId"`

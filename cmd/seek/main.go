@@ -2660,7 +2660,7 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 	}
 	b.sessionID = id
 	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, id)
-	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu}, nil
+	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu, Modes: acpSessionModes(b.policy.Workflow())}, nil
 }
 
 // LoadSession resumes a stored session (session/load): load, re-anchor,
@@ -2735,7 +2735,7 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 		sendU(u)
 	}
 	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
-	return acp.LoadSessionResult{ConfigOptions: b.menu}, nil
+	return acp.LoadSessionResult{ConfigOptions: b.menu, Modes: acpSessionModes(b.policy.Workflow())}, nil
 }
 
 // setMenuCurrent re-points the model dropdown at a model id after a
@@ -2798,6 +2798,57 @@ func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfig
 	b.menu[0].CurrentValue = p.Value
 	fmt.Fprintf(os.Stderr, "acp: model switched provider=%s model=%s\n", prov, model)
 	return acp.SetConfigOptionResult{ConfigOptions: b.menu}, nil
+}
+
+// SetMode is session/set_mode's backend half (ACP·P2, backlog ④): the
+// protocol channel for what the TUI does with /plan. Exactly the
+// TUI SetPlan callback's two branches — policy.SetWorkflow on the
+// Workflow axis (never Pref) plus the agent's per-message mode label,
+// which rides the NEXT user turn (prefix-cache safe; the sysprompt's
+// baked label is never rewritten mid-session, the P0-2 desync lesson).
+// Only called between turns (transport rejects in-flight prompts), so
+// the unlocked policy flip races nothing.
+func (b *acpBackend) SetMode(p acp.SetModeParams) error {
+	if b.sessionID == "" || p.SessionID != b.sessionID {
+		return fmt.Errorf("unknown session %q", p.SessionID)
+	}
+	switch p.ModeID {
+	case acp.ModePlan:
+		b.policy.SetWorkflow(permission.WorkflowPlanAnalyze)
+		b.ag.SetModeLabel("plan-analyze")
+	case acp.ModeDefault:
+		b.policy.SetWorkflow(permission.WorkflowNone)
+		b.ag.SetModeLabel("")
+	default:
+		return fmt.Errorf("unknown mode %q (available: %s, %s)", p.ModeID, acp.ModeDefault, acp.ModePlan)
+	}
+	fmt.Fprintf(os.Stderr, "acp: mode set %s\n", p.ModeID)
+	return nil
+}
+
+// acpSessionModes is the session-mode table seek advertises on
+// session/new and session/load — the capability half of the mode
+// channel (ACP·P2). Two modes map onto the Workflow axis: "plan" ==
+// WorkflowPlanAnalyze, "default" == WorkflowNone. WorkflowPlanExecute
+// (propose approved) is a TUI propose-picker substate and deliberately
+// NOT a third wire mode: it is reachable in the TUI lane only, and the
+// client-visible surface stays a two-way toggle. currentModeId is
+// derived from the policy's live workflow, so it stays honest if the
+// process ever starts in a non-None workflow.
+func acpSessionModes(w permission.Workflow) *acp.SessionModeState {
+	current := acp.ModeDefault
+	if w != permission.WorkflowNone {
+		current = acp.ModePlan
+	}
+	return &acp.SessionModeState{
+		CurrentModeID: current,
+		AvailableModes: []acp.SessionMode{
+			{ID: acp.ModeDefault, Name: "Default",
+				Description: "Normal operation — reads and writes follow the permission preference."},
+			{ID: acp.ModePlan, Name: "Plan",
+				Description: "Read-only analysis: explore, then propose a plan; writes are denied until you switch back."},
+		},
+	}
 }
 
 // acpLaneModels is the ACP model dropdown's curated table — the
