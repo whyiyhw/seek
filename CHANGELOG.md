@@ -87,3 +87,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_xt6ql7：hooks 五观察点触发接线：agent Prompt 落定 / subagent 起终态 / TUI cmdCompact / Notifier 四调用点补接
 - c_cy7q2v：AGENTS.md 词预算超线 40 词处置：起草压缩 diff 或调线方案呈用户（c_6mbjfq 悬项承接）验收：①产出二选一方案——压缩 diff（≥40 词、零语义损失、逐条可核）或调线 3200→3300 一行（含理由）；②AGE…
 - c_7kco3z：agent 循环会话死刑降级×2：length 截断 tool_calls 自愈 + reasoning-only 空响应并入自愈（c_jdel6u 同款）
+- c_2aymtn：v8·R2 落地后复测：verifier 产线触发实况 + §9.1 同口径存疑率复测（基线 24.3%）+ R3 收件箱开缓判定
