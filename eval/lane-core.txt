@@ -1,0 +1,24 @@
+# eval/lane-core.txt — nightly core lane case list (eval v2 E6, card
+# c_rkoeiy; docs/prd/feature-eval-v2.md §2.3 "约 8 例低成本"). Consumed
+# by: eval/run.sh --lane core — in CI via the eval-nightly schedule job
+# (.github/workflows/ci.yml, --rounds 2) and ad-hoc.
+#
+# Format: one case name per line; '#' comments and blank lines are
+# ignored; every entry must name an existing eval/cases/<name>/ dir or
+# run.sh exits 2 before running anything.
+#
+# Selection criterion (低成本子集): cheap single-purpose cases — small
+# prompts, one default invocation, no MCP server fixtures, no
+# multi-file review fan-out — all gate-1.0 stable per the E2 calibration
+# table, plus serve-web-stream (fake-key lane: zero API spend,
+# deterministic, the W5 serve-plane regression net). Order is
+# cheapest-first so an early infra failure wastes the least budget.
+
+instruction-following
+read-eof-blind
+read-tail-fact
+read-whole-file
+redundant-tool-calls
+tool-args-hallucination
+session-id-contract
+serve-web-stream
