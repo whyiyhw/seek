@@ -67,3 +67,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_a7nfpd：审批卡片·子进程半边：seek -p askFn→approval_request jsonLine→stdin 决定回读（c_n37tnr 拆卡）
 - c_5m3fm6：web 对齐 dsh·生成中停止按钮（/cancel 按钮化）
 - c_f734of：修 selftest 基线红：eval-home-isolation-test 稳定红转绿（c_pdqymy 放行尾巴）
+- c_jdel6u：空补全重试穷尽后不再杀会话——合成 `[empty: 上游空补全，已重试1次]` assistant 消息续跑（reasoning-only/length 分支不动），连续 2 次占位硬停（文案「连续空补全占位 N 次」）drive/c_jdel6u
