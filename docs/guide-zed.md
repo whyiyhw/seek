@@ -70,6 +70,45 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。
+- ✅ **终止可观测**（2026-11-21，c_vfgeam）：每轮 `session/prompt` 结束时，seek 在响应帧**之前**发一条结构化终止通知，`stopReason` 五值枚举 + 可读 detail + 原始 `finishReason`——断流/静默死亡不再无声，见 §4.1。
+
+---
+
+## 4.1 终止可观测 / Turn termination observability
+
+一轮对话怎么结束的，现在是**协议面上一等公民**，不再是"没消息就是好消息"的猜谜。两层结构：
+
+**① `session/prompt` 响应的 `stopReason`（ACP 规范枚举）**：`end_turn` / `max_tokens` / `refusal` / `cancelled`。以前 seek 对一切正常路径都答 `end_turn`、把 `finish_reason=length` 断流藏在一个泛型 JSON-RPC 错误里；现在长度断流答 **`max_tokens`**（规范自己的值，Zed 认识），拒答答 `refusal`。内部错误仍走 JSON-RPC 错误帧（-32000 + detail 文本）——那是规范的错误通道。
+
+**② 终止通知帧 `_seek_turn_stop`（seek 扩展）**：每轮结束、响应帧**之前**，发一条：
+
+```json
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"…","update":{
+  "sessionUpdate":"_seek_turn_stop",
+  "stopReason":"max_tokens",
+  "detail":"agent: response truncated (finish_reason=length, max_tokens=8192) — use /compact to free context or ask me to continue",
+  "finishReason":"length"
+}}}
+```
+
+`stopReason` 枚举（五值 + 规范词表复用）：
+
+| 值 | 含义 | 典型来源 |
+|---|---|---|
+| `end_turn` | 正常完成 | `finish_reason=stop`（含空补全自愈占位轮） |
+| `max_tokens` | 长度断流 | `finish_reason=length`（DeepSeek/OpenAI 兼容/opencode 车道；Gemini 归一成 length）/ `max_tokens`（Anthropic 原样透传）——**c_qpcdtc 定性的 opencode 断流家族在 ACP 面就此可辨** |
+| `refusal` | 模型拒答 | DeepSeek `refusal` / `content_filter` / Anthropic `refusal` |
+| `silent_timeout` | 静默超时 | 上游停更、HTTP 5 分钟 deadline 兜底炸出（`context deadline exceeded` / net timeout）；或 driver 侧给回合设的期限先到 |
+| `cancelled` | 客户端取消 | `session/cancel` / ctx cancel |
+| `internal_error` | 内部错误 | API 报错、流解码失败、**已恢复的 panic**（栈在 detail 里） |
+
+`detail` 永远人类可读；`finishReason` 是原始上游 finish_reason，机读不用解析 prose——paseo/butler 据此秒判死亡形态（c_w3zimi 检测卡的 agent 侧一半）。
+
+**进程死亡判别规则（给无头 driver）**：终止帧**每轮恰一条、永远先于响应帧**。若 `session/prompt` 既无响应也无终止帧（stdin 还开着），唯一解释是 **seek 进程本身死了**（kill -9 / 未捕获的内核级崩溃）——进程死无法自报，帧的缺席就是信号，客户端应在自身超时上直接归因"agent 进程死亡"而非"上游慢"。已知边界：工具/主循环 panic 已在进程内恢复成 `internal_error`；网络层断供由 5 分钟 HTTP 超时兜成 `silent_timeout`。
+
+**兼容性**：`_seek_turn_stop` 用 ACP v2 schema 为实现方扩展保留的下划线前缀命名。v2 客户端把它收进 `Other` 变体；**v1 schema 客户端（当前 Zed）会丢弃未知 tag 的通知并记一行日志**——ndJson 每行独立，丢一条不影响流，Zed 从响应 `stopReason` 拿同一信息（`max_tokens` 它本来就认）。paseo 的 JS 客户端 switch 不命中即忽略，随后按需消费。用 `SEEK_ACP_LOG`（§6）可以直接看到这些帧的原始 JSON。
+
+设计出处：`internal/acp/stopreason.go`（枚举 + 分类器，含 wire-shape 测试）、`cmd/seek` `acpBackend.Prompt`（逐出口发帧 + 分类）、`pkg/agent`（`AgentEnd.Finish` 携带最终 finish_reason；panic 恢复成 ErrorEvent）。
 
 ---
 
