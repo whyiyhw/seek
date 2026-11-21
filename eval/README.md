@@ -131,10 +131,13 @@ rows skip, proving no double-count).
 
 ## Calibration table (E2, 2026-11-21)
 
-One row per existing case under `eval/cases/` — **30 cases**. The PRD's
-"21 例" predates the nine `mcp-semble-routing-*` arms added 2026-11-17/18
-by the MCP D-line (21 + 9 = 30). History columns are computed from the
-372 committed sample rows in `results/` — all-time, plus the window
+One row per existing case under `eval/cases/` — **30 cases** at E2
+time. The PRD's "21 例" predates the nine `mcp-semble-routing-*` arms
+added 2026-11-17/18 by the MCP D-line (21 + 9 = 30); E5's
+`serve-web-stream` (2026-11-21) makes it 31 — its row lives in the
+load-bearing table below, not in this history table (it has no
+pre-landing history by construction). History columns are computed from
+the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
 wherever a repair landed mid-history; the window is the honest basis).
 
@@ -244,18 +247,32 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (placeholders — deliberately not calibrated here)
+### Load-bearing axes (E3/E4 placeholders; E5 backfilled 2026-11-21)
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
 | `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
 | `subagent-bg-resume` (E4) | 5 | baseline 待 E4 回填 |
-| `serve-web-stream` (E5) | 5 | baseline 待 E5 回填 |
+| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
 case measures < 0.6, the fix belongs in the product's prompts, not the
-threshold). This card neither runs nor pre-gates them.
+threshold). E2 neither ran nor pre-gated them.
+
+**`serve-web-stream` baseline (E5, c_lbtdqw)**: landed with the case —
+[`eval/cases/serve-web-stream/`](cases/serve-web-stream/)（README 记
+判分口径与代码锚点）。Fake-key lane（卡面硬规定：无人值守假 key，本地
+`eval/tools/fake_openai_compat.py` 两段 delta）实测 3/3 绿（1 单轮 +
+2 rounds 聚合，`eval/results/2026-11-21-v0.12.2-…jsonl`）+ 六轴构造行
+负验证（换序/帧序倒置/sid 未命中/收口缺 session_id/崩溃形各自单独翻红）。
+**Gate `1.0`**：假 key 车道全链确定性（端点固定两段 delta、serve 排干契约
+0），红即真回归——W5 组再动 `webfrontend_stream/conv/rpc` 任何一处即翻红，
+这正是把 serve/web 平面纳入保护网的目的（PRD §1.2 零覆盖清单）。**真 key
+口径留待 E6 发版道**：同 runner 不清空车道凭证、不设 GLM 假端点即走真车道
+（env-in/env-out 同一接缝），届时按 §2.5 在 5 轮上重标定（真流多 delta 多
+turn，`min_sse_delta_frames: 2` 照常成立；PRD §六.3 的「< 0.6 修产品提示
+不修阈值」规则届时适用）。轮数随 E6 发版道名单定（本卡单轮/多轮均已验通）。
 
 **Live re-measurement**: the expected-pass column is history-derived;
 real-key rounds under this policy (5-round re-runs of the flaky set,
@@ -333,6 +350,12 @@ the lane block and is lane-independent.
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
 | `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
+| `sse_delta_frames` | serve-web-stream only: `delta` frames on the W1.4 SSE wire — the case's runner.sh pairs captured `event:`/`data:` lines into `sse_frame` rows first; **content-conditional** (merged into the metrics object only when the stream carries `sse_frame` rows, so non-serve rows keep their historical byte shape — see the ablate no-env guard) |
+| `sse_usage_frames` | serve-web-stream only: `usage` frames (turn_end translated server-side, `internal/controlplane/webfrontend_stream.go`) |
+| `sse_frame_order_ok` | serve-web-stream only, 1/0: every `delta`/`usage`/`tool` frame of the close-out's run PRECEDES the close-out default frame — the per-conv `events…reply` wire invariant |
+| `sse_delta_accum_ok` | serve-web-stream only, 1/0: the delta frames' `text` concatenated in wire order equals the close-out frame's `text` (the authoritative replacement) — the fake endpoint ships two deltas so a swap or a drop breaks it |
+| `sse_reply_closeout_ok` | serve-web-stream only, 1/0: the close-out frame carries a non-empty `run` (equal to every delta frame's run) and a non-empty `session_id` |
+| `session_list_hits` | serve-web-stream only: `/rpc session/list` `sessions[].sid` entries matching the close-out frame's `session_id` — the persistence axis (child wrote it under the same `SEEK_HOME` ladder the rpc plane reads through) |
 
 Bounds in `expect.json` use the prefix to declare direction:
 
