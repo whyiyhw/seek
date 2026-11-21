@@ -206,14 +206,16 @@ try {
 // ---- 景 B：会话浏览器调用树（history）----
 trace('景 B：会话面板 + 夹具');
 try {
-  await clickSel('#browse-btn');
+  // 📚 弹出面板已随 main 的侧栏常驻化（c_txz6vz）退役——列表常驻 #sess-list，
+  // 无头视口窄可能默认收起，显式展开后再断言可见性。
+  await evalJS(`typeof setSideCollapsed === 'function' && setSideCollapsed(false), 'ok'`);
   const srows = () => evalJS(`(() => ({
-    sessView: document.body.classList.contains('sess-view'),
+    sideOpen: !document.body.classList.contains('side-collapsed'),
     rows: [...document.querySelectorAll('#sess-list .sess-row')].map(r => r.dataset.sid),
   }))()`);
   const { s: listed } = await until('会话列表', srows,
     s => s.rows.includes(`${treeSid}`), 10000);
-  ck('面板开：夹具会话在列', listed.sessView, '');
+  ck('侧栏开：夹具会话在列', listed.sideOpen, '');
 
   await evalJS(`(document.querySelector(${JSON.stringify(
     `#sess-list .sess-row[data-sid="${treeSid}"]`)})||{click(){}}).click(),'ok'`);
@@ -241,7 +243,7 @@ try {
     `got ${tr.ntoolBubble}`);
   ck('XSS：args 字面渲染、未执行',
     !!xssRow && xssRow.sm.includes('<script>') && tr.xssTree === 'undefined'
-    && tr.nscript === 2,
+    && tr.nscript === 3,  // 2 → 3：main 主题切换的 <head> 防 FOUC 内联块（c_ni7mzw）
     JSON.stringify(xssRow) + ` xssTree=${tr.xssTree} nscript=${tr.nscript}`);
 
   // 展开 read 行：参数全文 + 结果摘要截断（END_MARK 不进 DOM）。
