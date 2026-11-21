@@ -91,6 +91,32 @@
      hub fires the decide callback exactly once per id. Empty state is
      zero-footprint (badge hidden, stack :empty). Reconnect resyncs
      via approval/list with a tombstone set against snapshot races.
+     Tool call tree (card c_ux7lvk, dsh-aligned presentation): the two
+     tool-row surfaces become call trees over their EXISTING data
+     sources (no wire changes). Live bubble rows: one row per call =
+     name + duration (client-measured gap between the start/end SSE
+     frames — the server forwards each frame as it arrives; ticking
+     while in flight, frozen at end), nested sub-calls indented by
+     interval containment: depth = in-flight count at start (seek's
+     partitioned dispatch runs read-only calls concurrently, so
+     overlap renders as parent/child — flame-graph semantics,
+     presenting overlap, not claiming causality; sequential runs stay
+     flat). args/results are NOT on the /events wire (§2.5 —
+     tool_end.result can be huge), so live rows stay folded
+     one-liners. The expandable 参数/结果摘要 lives in the sessions
+     browser: appendMsgTree pairs each assistant tool_calls[] row with
+     its tool-role result by tool_call_id (ids match — both are
+     deepseek.ToolCall.ID), renders summaries capped at 4000 chars in
+     a scrollable pre, and 复制全文 copies the full string held in a
+     JS closure (clipboard API on secure contexts, execCommand
+     fallback for tailnet plain-http, which is NOT a secure context).
+     Tool-role messages keep their standalone bubbles (the W4.4
+     one-.smsg-per-message render contract stays untouched — zero
+     regression); the tree registers their content by tool_call_id so
+     the expand panel and the row's size tag read it.
+     Per-message degradation: tree render throws → legacy
+     folded rendering → （消息渲染失败） placeholder — never a blank
+     page; the live tree degrades to the pre-tree single-line row.
      Deliberately out of scope: multi-tab sync, history persistence,
      bold/italic/table/quote markdown (the W5 subset covers the chat
      load; renderer lives in static/markdown.js), mobile, real auth
@@ -249,6 +275,28 @@
   @keyframes caret { 50% { opacity: 0; } }
   .trow { color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
   .trow.bad { color: var(--seek-warn); }
+  /* ---- 会话浏览器调用树（c_ux7lvk，dsh 对齐）----
+     行=名称+参数摘要+结果规模；点行展开 .tdetail 看参数/结果摘要（超长
+     截断进限高滚动 pre，「复制全文」从 JS 闭包取整串——DOM 只装摘要）。 */
+  .ttree { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 2px; }
+  .tnode { display: flex; align-items: baseline; gap: 8px; width: 100%;
+           text-align: left; background: var(--seek-panel); border: 1px solid var(--seek-line);
+           border-radius: 6px; padding: 4px 10px; font: inherit;
+           font-size: 12px; color: var(--seek-fg-soft); cursor: pointer; }
+  .tnode:hover { border-color: var(--seek-line-focus); }
+  .tnode .nm { flex: none; color: var(--seek-warn); }
+  .tnode .sm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; }
+  .tnode .rs { flex: none; color: var(--seek-fg-dim); white-space: nowrap; }
+  .tdetail { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+             padding: 8px 10px; }
+  .tlabel { display: flex; align-items: baseline; gap: 8px; font-size: 11px;
+            color: var(--seek-fg-dim); margin: 2px 0; }
+  .tlabel .tcopy { margin-left: auto; padding: 1px 10px; font-size: 11px; }
+  .tpre { background: var(--seek-panel); border-radius: 4px; padding: 6px 8px;
+          margin: 2px 0 8px; overflow: auto; white-space: pre-wrap;
+          word-break: break-all; max-height: 220px; font: inherit;
+          font-size: 12px; color: var(--seek-fg-soft); }
   form { display: flex; gap: 8px; padding: 10px 14px; background: var(--seek-panel);
          border-top: 1px solid var(--seek-line); }
   #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
@@ -985,7 +1033,7 @@ function runBubble(id) {
   if (r) return r;
   const el = document.createElement('div');
   el.className = 'msg seek streaming';
-  r = { el, cur: null, tools: new Map() };
+  r = { el, cur: null, tools: new Map(), tick: 0 };  // tick: 耗时跳动 interval id
   runs.set(id, r);
   appendPinned(list, el);
   return r;
@@ -1023,25 +1071,101 @@ function onDelta(ev) {
   schedule(r);
 }
 
-// 工具行折叠（§2.5：args/result 服务端不下发，名称+状态就是折叠形态）：
-// start →「⚙ name …」，end →「✔ name」/「✘ name」。行按 tool id 幂等——
-// 未见 start 的 end（SSE 丢帧）也补得出行。
+// 工具行 → 调用树（c_ux7lvk，对齐 dsh 的工具调用树呈现；§2.5 线不变：
+// args/result 服务端不下发，tool_end.result 可以巨大）。每次调用一行 =
+// 名称+耗时：耗时是 start/end 两帧到达的墙钟差（SSE 逐帧即时转发，目测
+// 级足够），在途每 300ms 跳动、end 冻结；未见 start 的 end（丢帧）行照
+// 补但无耗时。嵌套缩进 = 区间包含：start 时刻在途（已 start 未 end）调
+// 用数即深度——seek 分区派发让只读调用并发，重叠区间呈现为父子缩进
+// （火焰图口径：呈现重叠，不主张因果；串行运行的区间不嵌，树保持平）。
+// 行按 tool id 幂等。树渲染抛错时退 toolPlainRow（升级前的名称+状态
+// 单行折叠）——流式面不白屏。
 function onTool(ev) {
   let d;
   try { d = JSON.parse(ev.data); } catch (e) { return; }
   if (!d.run || !d.name) return;
+  try { toolTreeRow(d); } catch (e) { toolPlainRow(d); }
+}
+
+// 耗时排版：<1s 毫秒整数；<60s 一位小数秒；再上分秒。
+function fmtDur(ms) {
+  if (ms < 0) ms = 0;
+  if (ms < 1000) return Math.max(1, Math.round(ms)) + 'ms';
+  const s = ms / 1000;
+  if (s < 60) return s.toFixed(1) + 's';
+  return Math.floor(s / 60) + 'm' + String(Math.round(s % 60)).padStart(2, '0') + 's';
+}
+
+function trowPaint(n, now) {
+  const end = n.phase === 'end';
+  let dur = '';
+  if (n.t0) {
+    const ms = (end ? n.t1 : (now || performance.now())) - n.t0;
+    if (ms >= 0) dur = ' · ' + fmtDur(ms);
+  }
+  n.el.textContent = (end ? (n.ok ? '✔ ' : '✘ ') : '⚙ ') + n.name + (end ? '' : ' …') + dur;
+  n.el.classList.toggle('bad', end && !n.ok);
+}
+
+function toolTreeRow(d) {
   const r = runBubble(d.run);
   r.cur = null;   // 工具行截断当前文本块，后续 delta 开新块（交错顺序）
-  let row = r.tools.get(d.id);
-  if (!row) {
-    row = document.createElement('div');
-    row.className = 'trow';
-    appendPinned(r.el, row);
-    r.tools.set(d.id, row);
+  let n = r.tools.get(d.id);
+  if (!n) {
+    let depth = 0;   // 在途数=区间包含深度（页头注释口径）
+    for (const t of r.tools.values()) if (t.phase !== 'end') depth++;
+    const el = document.createElement('div');
+    el.className = 'trow';
+    if (depth > 0) el.style.marginLeft = depth * 16 + 'px';   // CSSOM：数值宽度
+    appendPinned(r.el, el);
+    n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
+    r.tools.set(d.id, n);
+  }
+  n.phase = d.phase === 'end' ? 'end' : 'start';
+  // ok 是 omitempty 布尔（webToolEvent wire 契约）：end 帧只在成功时带
+  // ok:true，失败帧整个键缺席——判定必须按「true 才算成功」读，旧代码
+  // 的 d.ok? 把失败帧也读成 ✔（c_ux7lvk 随调用树一并修正）。
+  n.ok = d.ok === true;
+  if (n.phase === 'end') {
+    n.t1 = performance.now();
+    trowPaint(n);
+    // 全部收口即停表（reply 丢帧时也只多跳一拍）
+    let live = false;
+    for (const t of r.tools.values()) if (t.phase !== 'end') live = true;
+    if (!live && r.tick) { clearInterval(r.tick); r.tick = 0; }
+  } else {
+    if (!n.t0) n.t0 = performance.now();
+    trowPaint(n);
+    toolTick(r);
+  }
+}
+
+// 一个 run 一只节拍器：在途行统一重画（合帧，不逐行起 interval）。
+function toolTick(r) {
+  if (r.tick) return;
+  r.tick = setInterval(() => {
+    let live = false;
+    const now = performance.now();
+    for (const t of r.tools.values()) if (t.phase !== 'end') { live = true; trowPaint(t, now); }
+    if (!live) { clearInterval(r.tick); r.tick = 0; }
+  }, 300);
+}
+
+// 兜底＝升级前的折叠形态（名称+状态单行，无耗时/缩进）。
+function toolPlainRow(d) {
+  const r = runBubble(d.run);
+  r.cur = null;
+  let n = r.tools.get(d.id);
+  if (!n) {
+    const el = document.createElement('div');
+    el.className = 'trow';
+    appendPinned(r.el, el);
+    n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
+    r.tools.set(d.id, n);
   }
   const end = d.phase === 'end';
-  row.textContent = (end ? (d.ok ? '✔ ' : '✘ ') : '⚙ ') + d.name + (end ? '' : ' …');
-  row.classList.toggle('bad', end && !d.ok);
+  n.el.textContent = (end ? (d.ok === true ? '✔ ' : '✘ ') : '⚙ ') + d.name + (end ? '' : ' …');
+  n.el.classList.toggle('bad', end && d.ok !== true);   // omitempty：失败帧无 ok 键
 }
 
 // ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）----
@@ -1173,6 +1297,7 @@ function listen() {
                // renderBody 自带清空——整泡重渲即「收口重渲」（W5）
       runs.delete(m.run);
       r.cur = null;                    // 停掉在途的合帧渲染
+      if (r.tick) { clearInterval(r.tick); r.tick = 0; }   // 停掉耗时跳动
       const pin = nearBottom();
       r.el.classList.remove('streaming');
       if (m.text) renderBody(r.el, m.text); else r.el.remove();
@@ -1509,6 +1634,13 @@ const sideToggle = document.getElementById('side-toggle');
 const sideSearch = document.getElementById('side-search');
 const sessBack = document.getElementById('sess-back');
 const MSG_PAGE = 50;
+// 调用树登记表（c_ux7lvk，随 sel 同生命周期——openSession 清空）：
+// 行按 call id（assistant 的 tool_calls[].id ↔ tool 消息的 tool_call_id，
+// 同一 deepseek.ToolCall.ID）；结果全文存 JS 表——DOM 只装摘要（复制全文
+// 从这里取，超长不进 DOM 是硬界）。
+const treeRows = new Map();     // call id → {row, rs, args}
+const treeResults = new Map();  // call id → 结果全文（string；空串=空结果）
+const TREE_SUMMARY_MAX = 4000;  // 进 DOM 的摘要字符上限
 const SESS_PAGE = 30;   // 侧栏一页行数（「加载更多」累加，与消息页独立）
 let sel = null;         // 打开中的会话分页游标 {sid, next, done, busy}
 let allSessions = [];   // session/list 当前快照（过滤 + 分页的唯一来源）
@@ -1610,6 +1742,8 @@ sideSearch.addEventListener('input', () => { shownSessions = SESS_PAGE; renderSe
 // ——「同时只亮一个面」的口径从四面板闸沿用到这里。
 async function openSession(sid) {
   sel = { sid, next: '', done: false, busy: false };
+  treeRows.clear();      // 调用树登记表随会话同生命周期（c_ux7lvk）
+  treeResults.clear();
   closePanes();
   document.body.classList.add('sess-detail');
   sessMeta.textContent = '';
@@ -1688,11 +1822,29 @@ async function loadMsgs() {
   me.busy = false;
 }
 
-// 一条消息行：角色标签 + 工具调用摘要（参数截断）+ 正文走 renderBody。
-// reasoning_content 不渲染（与聊天面 §2.5 同取舍）；tool 结果限高由 CSS 承担。
-// messages 元素是服务端的 json.RawMessage——经 r.json() 已是对象；string 分支
-// 只是防御（jse 一致性由 W4.2 的服务端测试钉）。
+// 一条消息行（c_ux7lvk 升级为调用树渲染）。逐条降级：树渲染抛错 → 老形态
+// （appendMsgPlain，升级前的工具行摘要+独立结果泡）→ 再抛 → 占位行——
+// 单条消息的渲染异常绝不断整页（不白屏）。耗时不在历史线里（transcript
+// 无逐消息时间戳）——名称+耗时在流式面（toolTreeRow），历史行的行尾给
+// 结果规模。messages 元素是服务端的 json.RawMessage——经 r.json() 已是
+// 对象；string 分支只是防御（jse 一致性由 W4.2 的服务端测试钉）。
 function appendMsg(raw) {
+  try {
+    appendMsgTree(raw);
+    return;
+  } catch (e) { /* 树渲染异常：整条退老形态 */ }
+  try {
+    appendMsgPlain(raw);
+  } catch (e) {
+    const d = document.createElement('div');
+    d.className = 'smsg other';
+    d.textContent = '（消息渲染失败）';
+    sessMsgs.appendChild(d);
+  }
+}
+
+// 老形态（升级前 verbatim）：工具摘要行 + tool 结果独立成泡（限高由 CSS）。
+function appendMsgPlain(raw) {
   let m;
   try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
   if (!m || typeof m !== 'object') return;
@@ -1720,6 +1872,187 @@ function appendMsg(raw) {
     el.appendChild(body);
   }
   sessMsgs.appendChild(el);
+}
+
+// 树形态：助手消息的 tool_calls → 调用树（每次调用一行，点行展开参数/
+// 结果摘要）。tool 角色消息按 tool_call_id 把结果登记进对应行（展开面板
+// 与行尾规模读它）——消息本身仍按 W4.4 逐条渲染契约独立成泡（nmsgs=页内
+// 消息数的断言口径不动，零回归）。落 DOM 是收尾动作——此前任何异常都
+// 未沾页面，appendMsgPlain 可整条重来（不双渲染）。
+function appendMsgTree(raw) {
+  let m;
+  try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return; }
+  if (!m || typeof m !== 'object') return;
+
+  if (m.role === 'tool') {
+    const id = m.tool_call_id || '';
+    if (id && treeRows.has(id)) {
+      treeResults.set(id, typeof m.content === 'string' ? m.content : '');
+      try { refreshTreeRow(id); } catch (e) { /* 行态刷新失败不升级：结果已入表 */ }
+    }
+    // 孤儿（无对应行）只走通用渲染；有行的也继续成泡（下方通用路径）
+  }
+
+  const el = document.createElement('div');
+  el.className = 'smsg ' + (m.role || 'other');
+  const who = document.createElement('div');
+  who.className = 'swho';
+  who.textContent = m.role === 'tool' ? 'tool · ' + (m.tool_call_id || '') : (m.role || '?');
+  el.appendChild(who);
+  const made = [];   // 本条消息建出的调用行（落 DOM 后才登记——中途异常不残留）
+  if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+    const tree = document.createElement('div');
+    tree.className = 'ttree';
+    for (const tc of m.tool_calls) {
+      const node = callNode(tc);
+      made.push(node);
+      tree.appendChild(node.frag);
+    }
+    el.appendChild(tree);
+  }
+  if (m.content) {
+    const body = document.createElement('div');
+    body.className = 'sbody';
+    renderBody(body, m.content);
+    el.appendChild(body);
+  }
+  sessMsgs.appendChild(el);   // 收尾动作：此前任何异常都未沾页面，老路径可整条重来
+  for (const node of made) {
+    if (!node.id) continue;
+    treeRows.set(node.id, node.entry);
+    refreshTreeRow(node.id);   // 结果已先入表的顺序异常防御
+  }
+}
+
+// 一个调用节点 = 行按钮 + 懒建展开面板（首点才装内容——长结果不进 DOM
+// 直到用户要看）。textContent-only 纪律与全页一致（模型产物零 HTML 面）。
+// 只构建、不登记——登记由 appendMsgTree 在落 DOM 后统一做。
+function callNode(tc) {
+  const fn = (tc && typeof tc === 'object' && tc.function) || {};
+  const id = (tc && tc.id) || '';
+  const name = fn.name || '?';
+  const args = typeof fn.arguments === 'string' ? fn.arguments : '';
+
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'tnode';
+  const nm = document.createElement('span');
+  nm.className = 'nm';
+  nm.textContent = '⚙ ' + name;
+  const sm = document.createElement('span');
+  sm.className = 'sm';
+  sm.textContent = clipOneLine(args, 72) || '（无参数）';
+  const rs = document.createElement('span');
+  rs.className = 'rs';
+  row.appendChild(nm);
+  row.appendChild(sm);
+  row.appendChild(rs);
+
+  const detail = document.createElement('div');
+  detail.className = 'tdetail';
+  detail.hidden = true;
+  row.addEventListener('click', () => {
+    if (detail.hidden) { buildTreeDetail(detail, id, args); detail.hidden = false; }
+    else detail.hidden = true;
+  });
+
+  const frag = document.createDocumentFragment();
+  frag.appendChild(row);
+  frag.appendChild(detail);
+  return { frag, id, entry: { row, rs, args } };
+}
+
+// 行尾结果态：未到=「…」，已并入=字符规模（全文只在 treeResults）。
+function refreshTreeRow(id) {
+  const n = treeRows.get(id);
+  if (!n) return;
+  n.rs.textContent = treeResults.has(id)
+    ? '· ' + treeResults.get(id).length + ' 字符'
+    : '· 结果…';
+}
+
+// 展开面板：参数节 + 结果节。结果未随页载入（跨页）给指引文案。
+function buildTreeDetail(detail, id, args) {
+  detail.replaceChildren();
+  detail.appendChild(treeDetailSec('参数', args, !args && '（无参数）'));
+  const got = treeResults.has(id) ? treeResults.get(id) : undefined;
+  detail.appendChild(treeDetailSec('结果', got,
+    got === undefined ? '（结果未载入——跨页时先「加载更多」再展开）'
+    : got === '' ? '（空结果）' : null));
+}
+
+// 一节 = 标签行（名+规模+复制全文）+ 摘要 pre。复制拿闭包里的整串。
+function treeDetailSec(label, text, emptyNote) {
+  const box = document.createElement('div');
+  const lab = document.createElement('div');
+  lab.className = 'tlabel';
+  const nm = document.createElement('span');
+  nm.textContent = label;
+  lab.appendChild(nm);
+  if (typeof text === 'string' && text) {
+    const cnt = document.createElement('span');
+    cnt.textContent = '共 ' + text.length + ' 字符';
+    lab.appendChild(cnt);
+    lab.appendChild(copyBtn(text));
+  }
+  box.appendChild(lab);
+  const pre = document.createElement('pre');
+  pre.className = 'tpre';
+  pre.textContent = emptyNote || clipText(text, TREE_SUMMARY_MAX);
+  box.appendChild(pre);
+  return box;
+}
+
+// 摘要截断：超长尾部换提示行（复制全文得完整内容）。
+function clipText(text, max) {
+  if (typeof text !== 'string' || text.length <= max) return text || '';
+  return text.slice(0, max) + '\n…（已截断，共 ' + text.length + ' 字符——「复制全文」得完整内容）';
+}
+
+function clipOneLine(text, max) {
+  if (typeof text !== 'string' || !text) return '';
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length <= max ? t : t.slice(0, max) + '…';
+}
+
+// 复制全文：secure context 走 clipboard API；tailnet 明文 http 不是
+// secure context（页头 voice 段同一条纪律——getUserMedia/clipboard 同源
+// 限制），退 execCommand 兜底。按钮文案即时反馈，1.5s 后还原。
+function copyBtn(text) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'tcopy';
+  b.textContent = '复制全文';
+  b.addEventListener('click', ev => {
+    ev.stopPropagation();   // 不触发行的展开/收起
+    copyText(text, b);
+  });
+  return b;
+}
+function copyText(text, btn) {
+  const done = ok => {
+    btn.textContent = ok ? '已复制' : '复制失败';
+    setTimeout(() => { btn.textContent = '复制全文'; }, 1500);
+  };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => done(true),
+                                            () => done(fallbackCopy(text)));
+  } else {
+    done(fallbackCopy(text));
+  }
+}
+function fallbackCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch (e) { return false; }
 }
 
 // ---- 任务面板（W3.3 编排 P1 可视化）----

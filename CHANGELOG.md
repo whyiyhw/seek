@@ -58,3 +58,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_nqvbdu：CHANGELOG 裁剪清单消费：三条机器写超长条目按 notes-changelog-trim-2026-11-20 清单裁剪
 - c_3vct6k：read 截断参数调优：按 transcript-stats 基线（修订版）重新评估调参对象
 - c_ni7mzw：web 对齐 dsh·主题切换与设置面板（亮暗+防 FOUC）
+- c_ux7lvk：web 对齐 dsh·工具调用树（可展开参数/结果/耗时）
