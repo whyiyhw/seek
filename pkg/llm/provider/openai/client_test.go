@@ -425,3 +425,171 @@ func TestChatStream_ImagesOnlyNoText(t *testing.T) {
 		t.Fatalf("empty-URL content = %#v, want the plain string", msgs[0].Content)
 	}
 }
+
+// TestChatStream_FilesArrayForm: a document attachment reaches the wire
+// as a type:"file" content part — {"file":{"filename":…,"file_data":
+// "data:application/pdf;base64,…"}} per OpenAI's file-inputs guide
+// (PDF only) — while text-only messages keep the plain-string content
+// byte-for-byte. The compatible adapter (GLM lane) shares this
+// encoding; a lane that lacks the part type fails loudly at the
+// gateway, which is the modelcap gate's job to prevent upstream.
+func TestChatStream_FilesArrayForm(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{
+			{
+				Role:    "user",
+				Content: "summarize this",
+				Images:  []llm.Image{{URL: "data:image/png;base64,QUJD"}},
+				Files: []llm.File{
+					{Filename: "report.pdf", URL: "data:application/pdf;base64,SUQ="},
+					{Filename: "empty.pdf", URL: ""}, // skipped, never an empty part
+				},
+			},
+			{Role: "user", Content: "plain"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain(ch)
+
+	var req struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode request: %v (%s)", err, body)
+	}
+	// Text-only message keeps the string form (prefix-cache guard).
+	if string(req.Messages[1].Content) != `"plain"` {
+		t.Errorf("text-only content = %s, want a plain string", req.Messages[1].Content)
+	}
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+		File struct {
+			Filename string `json:"filename"`
+			FileData string `json:"file_data"`
+		} `json:"file"`
+	}
+	if err := json.Unmarshal(req.Messages[0].Content, &parts); err != nil {
+		t.Fatalf("file content is not an array: %v (%s)", err, req.Messages[0].Content)
+	}
+	if len(parts) != 3 {
+		t.Fatalf("parts = %d, want 3: %s", len(parts), req.Messages[0].Content)
+	}
+	if parts[0].Type != "text" || parts[0].Text != "summarize this" {
+		t.Errorf("part 0 = %+v", parts[0])
+	}
+	if parts[1].Type != "image_url" || parts[1].ImageURL.URL != "data:image/png;base64,QUJD" {
+		t.Errorf("part 1 = %+v", parts[1])
+	}
+	if parts[2].Type != "file" || parts[2].File.Filename != "report.pdf" ||
+		parts[2].File.FileData != "data:application/pdf;base64,SUQ=" {
+		t.Errorf("part 2 = %+v", parts[2])
+	}
+}
+
+// TestChatStream_FilesOnlyNoText: a file with empty text emits just the
+// file part; an all-unusable list degrades to the plain string (the
+// shared never-empty-array rule).
+func TestChatStream_FilesOnlyNoText(t *testing.T) {
+	msgs := convertMessages([]llm.Message{{
+		Role:  "user",
+		Files: []llm.File{{Filename: "r.pdf", URL: "data:application/pdf;base64,SUQ="}},
+	}})
+	parts, ok := msgs[0].Content.([]openAIContentPart)
+	if !ok || len(parts) != 1 || parts[0].Type != "file" || parts[0].File == nil {
+		t.Fatalf("content = %#v", msgs[0].Content)
+	}
+	msgs = convertMessages([]llm.Message{{Role: "user", Content: "hi", Files: []llm.File{{Filename: "r.pdf"}}}})
+	if s, ok := msgs[0].Content.(string); !ok || s != "hi" {
+		t.Fatalf("empty-URL content = %#v, want the plain string", msgs[0].Content)
+	}
+}
+
+// TestChatStream_TextOnlyWireBytes pins the exact request body of a
+// text-only conversation — the prefix-cache contract. Adding the Files
+// field must not have moved a single byte here: these goldens were
+// captured from this branch's base (which predates the file-passthrough
+// change) and the adapters' output was diffed against it byte-for-byte.
+// Any drift means the whole prompt prefix misses cache on every lane,
+// which costs ~10× the tokens of a hit.
+func TestChatStream_TextOnlyWireBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "plain two-message",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+				},
+			},
+			want: `{"model":"m","messages":[{"role":"system","content":"sys"},` +
+				`{"role":"user","content":"hi"}],"max_tokens":128,"stream":true,` +
+				`"stream_options":{"include_usage":true}}`,
+		},
+		{
+			name: "tool-call history",
+			req: llm.ChatRequest{
+				Model:     "m",
+				MaxTokens: 128,
+				Messages: []llm.Message{
+					{Role: "system", Content: "sys"},
+					{Role: "user", Content: "hi"},
+					{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read", Arguments: `{"path":"a"}`}}},
+					{Role: "tool", ToolCallID: "c1", ToolName: "read", Content: "ok"},
+					{Role: "user", Content: "again"},
+				},
+				Tools: []llm.ToolDef{{Name: "read", Description: "r", Schema: []byte(`{"type":"object"}`)}},
+			},
+			want: `{"model":"m","messages":[{"role":"system","content":"sys"},` +
+				`{"role":"user","content":"hi"},` +
+				`{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function",` +
+				`"function":{"name":"read","arguments":"{\"path\":\"a\"}"}}]},` +
+				`{"role":"tool","content":"ok","tool_call_id":"c1","name":"read"},` +
+				`{"role":"user","content":"again"}],"max_tokens":128,` +
+				`"tools":[{"type":"function","function":{"name":"read","description":"r",` +
+				`"parameters":{"type":"object"}}}],"stream":true,` +
+				`"stream_options":{"include_usage":true}}`,
+		},
+	}
+	for _, c := range cases {
+		var body []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+		}))
+		ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), c.req)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		drain(ch)
+		srv.Close()
+		if string(body) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, body, c.want)
+		}
+	}
+}

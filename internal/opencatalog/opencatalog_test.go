@@ -24,6 +24,7 @@ func resetOverrides(t *testing.T) {
 		pricing.SetModelRates(nil)
 		budget.SetLimits(nil)
 		modelcap.SetVision(nil)
+		modelcap.SetFiles(nil)
 	})
 }
 
@@ -39,7 +40,7 @@ const samplePayload = `{
      "cost": {"text": {"input": {"price": 0.15, "cache": {"read": 0.003}}, "output": {"price": 0.6}},
               "multipliers": [{"when": {}, "factor": 2}]},
      "limit": {"context": 1000000, "output": 384000},
-     "modalities": {"input": ["text", "image/png"], "output": ["text"]}},
+     "modalities": {"input": ["text", "image/png", "application/pdf"], "output": ["text"]}},
     {"id": "brand-new-model", "object": "model", "name": "Brand New", "type": "chat",
      "api": {"chat-completions": {}},
      "cost": {"text": {"input": {"price": 1.5, "cache": {"read": 0.2}}, "output": {"price": 6}}},
@@ -110,6 +111,18 @@ func TestParse_FiltersAndNormalises(t *testing.T) {
 	}
 	if byID["brand-new-model"].Vision {
 		t.Error("brand-new-model declares text-only modalities → Vision must be false")
+	}
+	// Files is the document sibling: application/pdf in modalities.input
+	// → grant + "files" picker tag (the label a user sees and the
+	// capability seek acts on read the same declaration).
+	if !flash.Files {
+		t.Error("deepseek-v4.1-flash declares application/pdf input → Files must be true")
+	}
+	if !strings.Contains(flash.Label, "files") {
+		t.Errorf("flash label = %q, want a files marker", flash.Label)
+	}
+	if byID["beam-free"].Files || byID["brand-new-model"].Files {
+		t.Error("text-only modalities must not grant Files")
 	}
 
 	beam := byID["beam-free"]
@@ -228,7 +241,7 @@ func TestInstall_VisionGrants(t *testing.T) {
 	  {"id":"kimi-k3","type":"chat","api":{"chat-completions":{}},
 	   "cost":{"text":{"input":{"price":3,"cache":{"read":0.3}},"output":{"price":15}}},
 	   "limit":{"context":1048576},
-	   "modalities":{"input":["text","image/png"],"output":["text"]}},
+	   "modalities":{"input":["text","image/png","application/pdf"],"output":["text"]}},
 	  {"id":"deepseek-v4-pro","type":"chat","api":{"chat-completions":{}},
 	   "cost":{"text":{"input":{"price":1.32,"cache":{"read":0.044}},"output":{"price":3.96}}},
 	   "limit":{"context":1000000},
@@ -251,6 +264,17 @@ func TestInstall_VisionGrants(t *testing.T) {
 	// key at all, so absence cannot mean "no").
 	if !modelcap.Vision("deepseek-flash") {
 		t.Error("a catalogue that doesn't list deepseek-flash must not demote it")
+	}
+	// The document axis rides the same install: pdf-declared → grant;
+	// image-but-no-pdf → no file grant (the axes are independent).
+	if !modelcap.Files("kimi-k3") {
+		t.Error("kimi-k3: catalogue declared application/pdf input but modelcap says no")
+	}
+	if modelcap.Files("deepseek-v4-pro") {
+		t.Error("deepseek-v4-pro declared no pdf input → no file grant")
+	}
+	if !modelcap.Files("deepseek-flash") {
+		t.Error("a catalogue that doesn't list deepseek-flash must not demote its file capability")
 	}
 }
 

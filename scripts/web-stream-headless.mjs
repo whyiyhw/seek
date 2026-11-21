@@ -43,6 +43,10 @@ if (typeof WebSocket !== 'function') {
   console.error('need Node ≥22 (global WebSocket) — 或改跑人工清单');
   process.exit(1);
 }
+// BASE_SCRIPTS：页面基线脚本数。W5 c_ni7mzw 的 head 主题 bootstrap 是第三个
+// 内联块（防 FOUC 必须在样式表前同步跑），与 markdown.js、页面脚本并列。
+// XSS 断言拿它当基线：渲染管线不许再增一个 script。
+const BASE_SCRIPTS = 3;
 const WATCHDOG_MS = 120_000;
 // 总闸 watchdog：任何一景卡死都不许把脚本挂成无限等（CDP 无回包、页面
 // 死循环等都可能）——超时退出码 1，现场由各景自身的 dump 兜。
@@ -152,7 +156,7 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 const baseScript = await snapshot();   // 基线：脚本数（内联页面脚本 1 + static/markdown.js 1，W5 c_x2au4t）
-ck('基线 scripts=2（内联页面脚本 + static/markdown.js）', baseScript.nscript === 2, `got ${baseScript.nscript}`);
+ck('基线 scripts=3（head 主题 bootstrap + 内联页面脚本 + static/markdown.js）', baseScript.nscript === BASE_SCRIPTS, `got ${baseScript.nscript}`);
 
 // 轮询直到谓词过或超时；返回最后一次快照。history 收集过程态。
 async function until(what, pred, ms) {

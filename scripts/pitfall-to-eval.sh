@@ -2,11 +2,12 @@
 #
 # pitfall-to-eval.sh — semi-automatic pitfall → eval-case seeding.
 #
-# Purpose: the first link of the self-evolution inner loop. Parses
-# docs/pitfalls.md entries (template at the head of that file), ranks
-# them by how likely they are MODEL-BEHAVIOUR pitfalls the agent can
-# still step on (as opposed to one-off code bugs), and scaffolds a
-# draft eval/cases/<slug>/ for a picked entry.
+# Purpose: the first link of the self-evolution inner loop. Reads the
+# one-entry-per-file ledger under docs/pitfalls/ (layout since 2026-11-20,
+# card c_uxznyn — before that a single docs/pitfalls.md), ranks entries by
+# how likely they are MODEL-BEHAVIOUR pitfalls the agent can still step on
+# (as opposed to one-off code bugs), and scaffolds a draft eval/cases/<slug>/
+# for a picked entry. absorbed/ entries are never candidates.
 #
 # This is deliberately SEMI-automatic: the script drafts and triages,
 # a human decides. A scaffolded draft contains README.md + prompt.txt
@@ -16,46 +17,49 @@
 # Usage:
 #   scripts/pitfall-to-eval.sh                     # list ranked candidates
 #   scripts/pitfall-to-eval.sh --list              # same, explicit
-#   scripts/pitfall-to-eval.sh --make <line>       # scaffold draft for the
-#                                                  # entry starting at <line>
-#   scripts/pitfall-to-eval.sh --make <line> <slug>
-#   scripts/pitfall-to-eval.sh --make <line> <slug> --force
+#   scripts/pitfall-to-eval.sh --make <entry>      # scaffold draft for the
+#                                                  # entry file <entry> — a
+#                                                  # path under docs/pitfalls/
+#                                                  # as printed by --list
+#   scripts/pitfall-to-eval.sh --make <entry> <slug>
+#   scripts/pitfall-to-eval.sh --make <entry> <slug> --force
 #
-# <line> is the docs/pitfalls.md line number of the `### ` header, as
-# printed by --list. <slug> overrides the kebab-case name derived from
-# the title.
+# <slug> overrides the kebab-case name derived from the title.
 #
 # bash 3.2 compatible (macOS ships 3.2; no mapfile, no assoc arrays).
 
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
-pitfalls="$repo_root/docs/pitfalls.md"
+pitfalls="$repo_root/docs/pitfalls"
 cases_dir="$repo_root/eval/cases"
 
 # --- parse -----------------------------------------------------------------
-# Emit one TSV row per entry (tab-separated, tabs stripped from fields):
-#   line  category  title  saw  why  fix  lesson  refs
-# Entries start at a `### ` header; the file header (Format/Policy, up to
-# the `---` rule) and the literal template entry are skipped. Scoring runs
-# in the same pass (title+fix+lesson are the behavioural signal).
+# Emit one TSV row per live entry (tab-separated, tabs stripped from fields):
+#   path  category  title  saw  why  fix  lesson  refs  score
+# path is relative to docs/pitfalls/ ("<section>/<slug>.md"); category is the
+# section directory name. Scoring = model-behaviour likelihood heuristic
+# (title + body behavioural signals, unchanged from the single-file era).
 parse_entries() {
+  local files
+  files=$(find "$pitfalls" -name '*.md' ! -name README.md ! -path '*/absorbed/*' 2>/dev/null | sort)
+  [ -n "$files" ] || return 0
+  # shellcheck disable=SC2086
   awk -v OFS='\t' '
-    BEGIN { started = 0; score = 0 }
-    /^---$/ { if (!started) { started = 1 }; next }
-    !started { next }
-    /^## /   { cat = $0; sub(/^## /, "", cat); next }
-    /^### /  {
-      if (title != "" && title != "Short symptom title")
-        print line, cat, title, saw, why, fix, lesson, refs, score
-      title = $0; sub(/^### /, "", title)
-      saw = why = fix = lesson = refs = ""; score = 0
-      line = NR
-      low = tolower(title)
-      if (low ~ /the model/) score += 3
-      if (low ~ /llm/) score += 2
-      next
+    FNR == 1 {
+      if (title != "") print path, cat, title, saw, why, fix, lesson, refs, score
+      title = saw = why = fix = lesson = refs = ""; score = 0
+      n = split(FILENAME, p, "/")
+      cat = p[n-1]; path = p[n-1] "/" p[n]
+      # 不 next：本行就是本文件的 `### ` 标题，交给下面的分支处理
     }
+    /^### /  { if (title != "") print path, cat, title, saw, why, fix, lesson, refs, score
+               title = $0; sub(/^### /, "", title)
+               saw = why = fix = lesson = refs = ""; score = 0
+               low = tolower(title)
+               if (low ~ /the model/) score += 3
+               if (low ~ /llm/) score += 2
+               next }
     title == "" { next }
     {
       low = tolower($0)
@@ -78,9 +82,8 @@ parse_entries() {
     /^- \*\*Fix\*\*: /    { fix = $0;    sub(/^- \*\*Fix\*\*: /, "", fix); gsub(/\t/, " ", fix); next }
     /^- \*\*Lesson\*\*: / { lesson = $0; sub(/^- \*\*Lesson\*\*: /, "", lesson); gsub(/\t/, " ", lesson); next }
     /^- \*\*Refs\*\*: /   { refs = $0;   sub(/^- \*\*Refs\*\*: /, "", refs); gsub(/\t/, " ", refs); next }
-    END { if (title != "" && title != "Short symptom title")
-            print line, cat, title, saw, why, fix, lesson, refs, score }
-  ' "$pitfalls"
+    END { if (title != "") print path, cat, title, saw, why, fix, lesson, refs, score }
+  ' $files
 }
 
 slugify() {
@@ -95,11 +98,11 @@ clip() {
   local text=$1 max=$2
   local n=${#text}
   if (( n <= max )); then printf '%s' "$text"; return; fi
-  printf '%s …(clipped, see docs/pitfalls.md)' "${text:0:max}"
+  printf '%s …(clipped — read the entry file)' "${text:0:max}"
 }
 
 usage() {
-  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 # --- modes ------------------------------------------------------------------
@@ -112,30 +115,38 @@ case "$mode" in
     ;;
   --list)
     echo "# pitfall → eval candidates (score = model-behaviour likelihood heuristic)"
-    echo "# columns: score  line(category)  [slug]  title"
-    echo "# scaffold with: scripts/pitfall-to-eval.sh --make <line> [slug]"
+    echo "# columns: score  (section) path  [slug]  title"
+    echo "# scaffold with: scripts/pitfall-to-eval.sh --make <section>/<slug>.md"
     echo
-    parse_entries | sort -t$'\t' -k9,9rn -k1,1n \
-      | while IFS=$'\t' read -r ln cat title _saw _why _fix _lesson _refs score; do
-          printf '%3d  %-4d %-28s [%s]\n      %s\n' \
-            "$score" "$ln" "($(clip "$cat" 26))" "$(slugify "$title")" "$(clip "$title" 90)"
+    parse_entries | sort -t$'\t' -k9,9rn -k1,1 \
+      | while IFS=$'\t' read -r path cat title _saw _why _fix _lesson _refs score; do
+          printf '%3d  (%s) %s [%s]\n      %s\n' \
+            "$score" "$(clip "$cat" 26)" "$path" "$(slugify "$title")" "$(clip "$title" 90)"
         done
     ;;
   --make)
     shift
-    line_no=${1:-}
+    entry=${1:-}
     slug=${2:-}
     force=${3:-}
-    if [[ -z "$line_no" ]]; then
-      echo "pitfall-to-eval: --make needs the entry's line number (see --list)" >&2
+    if [[ -z "$entry" ]]; then
+      echo "pitfall-to-eval: --make needs an entry path (see --list)" >&2
       exit 2
     fi
-    row=$(parse_entries | awk -F'\t' -v ln="$line_no" '$1 == ln')
+    # 归一：允许带 docs/pitfalls/ 前缀；拒绝目录穿越与 absorbed
+    entry=${entry#docs/pitfalls/}
+    case "$entry" in
+      /*|*..*|absorbed/*)
+        echo "pitfall-to-eval: 非法条目路径：$entry（须为 <section>/<slug>.md，absorbed 不孵化）" >&2
+        exit 2
+        ;;
+    esac
+    row=$(parse_entries | awk -F'\t' -v p="$entry" '$1 == p')
     if [[ -z "$row" ]]; then
-      echo "pitfall-to-eval: no entry starts at line $line_no of docs/pitfalls.md" >&2
+      echo "pitfall-to-eval: no live entry at docs/pitfalls/$entry (see --list)" >&2
       exit 2
     fi
-    IFS=$'\t' read -r ln cat title saw why fix lesson refs _score <<<"$row"
+    IFS=$'\t' read -r path cat title saw why fix lesson refs _score <<<"$row"
     [[ -z "$slug" ]] && slug=$(slugify "$title")
     case_dir="$cases_dir/$slug"
     if [[ -d "$case_dir" && "$force" != "--force" ]]; then
@@ -147,7 +158,7 @@ case "$mode" in
     cat > "$case_dir/README.md" <<EOF
 # $slug (DRAFT — expect.json pending human review)
 
-> Scaffolded by \`scripts/pitfall-to-eval.sh\` from \`docs/pitfalls.md\` line $ln
+> Scaffolded by \`scripts/pitfall-to-eval.sh\` from \`docs/pitfalls/$path\`
 > (category: $cat). \`eval/run.sh\` SKIPS this case until \`expect.json\`
 > exists — filling it in is the human review gate, by design.
 

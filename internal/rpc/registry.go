@@ -35,6 +35,13 @@ const (
 	CodeProjectNotFound  = -32003
 	CodePermissionDenied = -32004 // reserved; the read-only phase never emits it
 	CodeRateLimited      = -32005
+	// CodeSubagentNotFound — subagent/get found no folded row for the
+	// requested sub_sid in the resolved project's index (inspect-rpc
+	// §6 #12 close-out). A distinct code from -32001 because the id
+	// space is different: a sub_sid is not a session id, and the panel
+	// must not tell the user to go look for a transcript that was never
+	// a session of its own.
+	CodeSubagentNotFound = -32006
 )
 
 // Error is the JSON-RPC error object. Method implementations return

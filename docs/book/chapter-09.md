@@ -508,7 +508,7 @@ func TestLoadMeta_DoesNotReadMessages(t *testing.T) {
 - **Saw**：M4.5 TUI 改造后，`--resume` 使用 `replay.go` 回放历史时跳过了 `RoleTool` 消息且原始渲染 Markdown，导致回放滚动与实况的滚动历史不一致。
 - **Fix**：统一消息格式和渲染路径，回放时使用与实况相同的渲染代码。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

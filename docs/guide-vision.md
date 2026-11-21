@@ -37,4 +37,4 @@ seek 支持把图片**原样**发给多模态模型：剪贴板截图、本地�
 
 未知模型按"不支持"处理（宁可一条 in-band 提示，也不要一个 400 毁掉整回合）。让某个自定义 id 收图：若它在 OpenCode 目录里，刷新即生效；否则等静态表补行。
 
-**文件**（PDF/Word/PPT）仍不透传——Files API 是 DeepSeek 专属，二线车道照旧收到 `[file: … 未透传]` 提示。
+**文件**（PDF）同样透传（2026-11-19，按图片先例）：二线车道的三份官方文档都只收 PDF（OpenAI 兼容 `file` 块 / Anthropic `document` 块 / Gemini `inlineData`），所以 Word/PPT 在二线车道提交期就降级成 `[file: … 仅支持 PDF]` 提示；DeepSeek 车道仍走 Files API，三种格式都收。详见 [guide-files.md](guide-files.md)。

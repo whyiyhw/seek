@@ -174,22 +174,29 @@ func buildRequest(req llm.ChatRequest) anthropicRequest {
 			continue
 		}
 
-		// Plain user or assistant message. Images — user-only by
-		// contract — turn the content into a block array: text first,
-		// then one base64 image block per attachment.
-		if len(m.Images) > 0 {
+		// Plain user or assistant message. Images and documents — user-only
+		// by contract — turn the content into a block array: text first,
+		// then one base64 image block per image, then one document block
+		// per file.
+		if len(m.Images) > 0 || len(m.Files) > 0 {
 			var blocks []contentBlock
 			if m.Content != "" {
 				blocks = append(blocks, contentBlock{Type: "text", Text: m.Content})
 			}
-			images := 0
+			media := 0
 			for _, img := range m.Images {
 				if b, ok := imageBlock(img.URL); ok {
 					blocks = append(blocks, b)
-					images++
+					media++
 				}
 			}
-			if images == 0 {
+			for _, f := range m.Files {
+				if b, ok := documentBlock(f); ok {
+					blocks = append(blocks, b)
+					media++
+				}
+			}
+			if media == 0 {
 				// Every URL was unusable → keep the message text-shaped
 				// rather than sending an array with no media block.
 				ar.Messages = append(ar.Messages, anthropicMessage{Role: m.Role, Content: m.Content})
@@ -217,27 +224,49 @@ func buildRequest(req llm.ChatRequest) anthropicRequest {
 // https link, a malformed string) are skipped — the same never-error
 // posture as the rest of the attachment plumbing.
 func imageBlock(url string) (contentBlock, bool) {
+	src, ok := base64Source(url)
+	if !ok {
+		return contentBlock{}, false
+	}
+	return contentBlock{Type: "image", Source: src}, true
+}
+
+// documentBlock renders one user document attachment as an Anthropic
+// document block — the PDF shape from the PDF-support guide:
+// {"type":"document","source":{"type":"base64","media_type":
+// "application/pdf","data":"…"}}. The base64 source accepts
+// application/pdf only (the API 400s other media types), so anything
+// else is skipped, never fatal.
+func documentBlock(f llm.File) (contentBlock, bool) {
+	src, ok := base64Source(f.URL)
+	if !ok || src.MediaType != "application/pdf" {
+		return contentBlock{}, false
+	}
+	return contentBlock{Type: "document", Source: src}, true
+}
+
+// base64Source splits a data: URL into Anthropic's base64 source
+// shape (media_type + bare base64). Shared by image and document
+// blocks, which differ only in their block type.
+func base64Source(url string) (*imageSource, bool) {
 	const prefix = "data:"
 	if !strings.HasPrefix(url, prefix) {
-		return contentBlock{}, false
+		return nil, false
 	}
 	rest := url[len(prefix):]
 	comma := strings.Index(rest, ",")
 	if comma < 0 {
-		return contentBlock{}, false
+		return nil, false
 	}
 	meta, data := rest[:comma], rest[comma+1:]
 	if !strings.HasSuffix(meta, ";base64") {
-		return contentBlock{}, false
+		return nil, false
 	}
 	mediaType := strings.TrimSuffix(meta, ";base64")
 	if mediaType == "" || data == "" {
-		return contentBlock{}, false
+		return nil, false
 	}
-	return contentBlock{
-		Type:   "image",
-		Source: &imageSource{Type: "base64", MediaType: mediaType, Data: data},
-	}, true
+	return &imageSource{Type: "base64", MediaType: mediaType, Data: data}, true
 }
 
 // ---------------------------------------------------------------------------

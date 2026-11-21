@@ -188,23 +188,33 @@ func buildRequest(req llm.ChatRequest) ([]byte, error) {
 }
 
 // userParts converts a user message to Gemini parts: the text part
-// first, then one inlineData part per image attachment (Gemini's shape
-// for bytes carried inside the request). A message with no images keeps
+// first, then one inlineData part per image attachment, then one per
+// document attachment (Gemini's shape for bytes carried inside the
+// request — document understanding reads inline application/pdf, per
+// the document-processing guide). A message with no attachments keeps
 // exactly the single text part it always had.
 func userParts(m llm.Message) []geminiPart {
-	if len(m.Images) == 0 {
+	if len(m.Images) == 0 && len(m.Files) == 0 {
 		return []geminiPart{{Text: m.Content}}
 	}
-	parts := make([]geminiPart, 0, len(m.Images)+1)
+	parts := make([]geminiPart, 0, len(m.Images)+len(m.Files)+1)
 	if m.Content != "" {
 		parts = append(parts, geminiPart{Text: m.Content})
 	}
+	media := 0
 	for _, img := range m.Images {
 		if d, ok := inlineData(img.URL); ok {
 			parts = append(parts, geminiPart{InlineData: d})
+			media++
 		}
 	}
-	if len(parts) == 0 {
+	for _, f := range m.Files {
+		if d, ok := inlineData(f.URL); ok {
+			parts = append(parts, geminiPart{InlineData: d})
+			media++
+		}
+	}
+	if media == 0 {
 		return []geminiPart{{Text: m.Content}}
 	}
 	return parts

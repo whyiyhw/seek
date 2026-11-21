@@ -445,7 +445,7 @@ MCP 客户端实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md
 - **Saw**：`edit` 工具的 `old_string` 在 Windows CRLF 文件上匹配失败。
 - **Fix**：在匹配前规范化换行符。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 
