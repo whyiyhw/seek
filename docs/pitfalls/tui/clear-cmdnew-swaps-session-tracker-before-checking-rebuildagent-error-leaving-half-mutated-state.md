@@ -1,0 +1,6 @@
+### /clear (cmdNew) swaps session/tracker before checking RebuildAgent error, leaving half-mutated state
+- **Saw**: `/new` fails with a transient network error (RebuildAgent timeout). Before the error check, the code already swapped `m.opts.Session` to a fresh empty session and reset `m.opts.Tracker`. The old agent with its message history survives, but the new session file (empty) was already written to disk and the usage tracker (zeroed) lost the cumulative cost. Subsequent user prompts send the OLD messages (m.opts.Agent unchanged) through the API but record them under the NEW session ID with zero cost tracked
+- **Why**: the original code ordered operations as: persist old session → create new session + save to disk → reset tracker → call RebuildAgent → check error. The error check happened last, but the two state mutations (session swap, tracker reset) were already committed
+- **Fix**: reordered to: persist old session → call RebuildAgent → check error → (only on success) swap session + reset tracker
+- **Lesson**: when a function has multiple state-mutating steps and the last one can fail, order the steps so that the failure-prone one comes first and the mutations only happen after it succeeds. "Validate then mutate" applies at the function level too.
+- **Refs**: `internal/tui/commands.go:cmdNew`

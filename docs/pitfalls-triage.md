@@ -4,6 +4,8 @@
 >
 > **快照锚定（防下次 main 再动整体漂移）**：本表锚 `docs/pitfalls.md` @ blob `3eb99f30f44d0a411285a145a652b92a7885bd15`（453 994 B，`grep -c '^### '` = 282 含模板 → **281 live**）。下轮若 `git hash-object docs/pitfalls.md` ≠ 此值，先按 §6 口径重算行号/节列（去向按标题继承），不要沿用本表行号。
 >
+> **⚠ 锚点已整体失效（2026-11-20，卡 c_uxznyn）**：台账已拆成「一条目一文件」（`docs/pitfalls/<段>/<slug>.md`），`docs/pitfalls.md` 收缩为静态说明桩、`docs/pitfalls-archive.md` 并入 `docs/pitfalls/absorbed/`——本表的**行号列与 blob 锚自此全部作废**，勿再重算。§5 各行的**完整标题**仍是稳定键：按标题用 `grep -rl '<标题>' docs/pitfalls/` 定位到条目文件（段列 = 文件所在目录名）。下轮 triage 应以目录为源重生成本表（`scripts/pitfall-to-eval.sh --list` 已按新布局输出）。
+>
 > 数据面：`bash scripts/pitfalls-count.sh --check` 绿（live=281 / absorbed=0 / 35 段）；`grep -c '^### \[已吸收\]'` = 0；`parse_entries` TSV = 281 条。
 
 ## 0. 结论速览（验收三数，均可机械复核）

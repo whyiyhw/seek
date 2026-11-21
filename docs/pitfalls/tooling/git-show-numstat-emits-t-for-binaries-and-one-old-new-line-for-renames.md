@@ -1,0 +1,6 @@
+### `git show --numstat` emits `-\t-` for binaries and one `old => new` line for renames
+- **Saw**: parsing numstat output as "two integers + path" trips on two line shapes: binary files render `-\t-\tb.bin` (dash counts), and a rename is ONE line `0\t1\ta.txt => renamed.txt` (or `dir/{old => new}/f.go`) even when content also changed — the old path never appears as its own delete line.
+- **Why**: numstat has no line granularity for binaries, and rename detection (default-on since git 2.9) collapses the delete+add pair into a single path column.
+- **Fix**: `parseNumstat` in `internal/autopilot/fleet.go` treats `-` as 0 line deltas (file still counts), accepts any `≥3 tab-separated fields` line (paths containing tabs just get extra fields), and skips malformed lines instead of erroring — numstat is evidence, not a parser contract. Probed-output fixture in `internal/autopilot/fleet_test.go` (`TestCommitDiffstat_RealGit`).
+- **Lesson**: when tallying a git diff from CLI output, pin the exact line grammar against a real repo probe (binary + rename + tab-in-path) before writing the parser; `--numstat`'s tab-separated shape is a display convention, not a schema.
+- **Refs**: `internal/autopilot/fleet.go:parseNumstat`, `internal/autopilot/fleet_test.go:TestParseNumstat`/`TestCommitDiffstat_RealGit`.

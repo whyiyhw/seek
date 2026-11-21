@@ -1,0 +1,6 @@
+### `initialSizeCmd` clobbers `teatest.WithInitialTermSize` in test environments
+- **Saw**: writing a teatest case with `WithInitialTermSize(80, 40)`; the model still rendered as 80x24, clipping the help overlay panel so the title scrolled off-screen and assertions on top-of-panel strings ("Help — seek") timed out even though the overlay was clearly rendering
+- **Why**: `Init()` returns `initialSizeCmd()` which calls `term.GetSize(os.Stdout.Fd())`. In `go test` stdout isn't a TTY, so it fails and the function falls back to the hard-coded `(80, 24)`, sending a `WindowSizeMsg` that overrides whatever size teatest provided. Even sending an explicit `WindowSizeMsg` after `NewTestModel` racing against `initialSizeCmd`'s goroutine is non-deterministic
+- **Fix**: assert on strings that ARE in the bottom-of-panel visible viewport ("Shift+Tab", "Scrollback:") instead of the title. Document the constraint inline in the test so the next writer doesn't fight it. Commit (this one)
+- **Lesson**: when adding teatest cases, design assertions for a 24-row viewport — bubbletea writes only what fits, not the full rendered buffer, regardless of what your code generates. If you genuinely need a taller viewport, patch `initialSizeCmd` to honour a test-only env var rather than racing it
+- **Refs**: `internal/tui/model.go:initialSizeCmd`, `internal/tui/render_test.go`

@@ -1,0 +1,6 @@
+### OnSessionStart must reset snapshot state for --resume correctness
+- **Saw**: after implementing the M5.9 snapshot+delta strategy, `--resume` would inject a stale snapshot based on the previous session's first `OnPrePrompt` call, because `snapshotInjected` was still `true` from the prior agent lifetime
+- **Why**: the Hook struct fields `snapshotInjected` and `snapshotEntryNames` survive across agent lifetimes when the registry is reused (which happens on `--resume`). Without explicit reset, the second session's first `OnPrePrompt` would skip `injectSnapshot()` and produce no soul/index context at all — the model would lose all memory context
+- **Fix**: `OnSessionStart` now resets `snapshotInjected = false` and `snapshotEntryNames = nil` before running GC. This ensures the first `OnPrePrompt` after every session boundary (fresh or resume) rebuilds the snapshot from current data. Commit (M5.9)
+- **Lesson**: any Hook struct field that tracks per-session state MUST be reset in `OnSessionStart`. The Hook is reusable across agent lifetimes (--resume), not 1:1 with sessions. Don't assume zero-init at construction covers all paths
+- **Refs**: `internal/memory/hook.go:OnSessionStart`, `internal/memory/hook.go:Hook.snapshotInjected`
