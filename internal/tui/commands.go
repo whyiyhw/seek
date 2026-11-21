@@ -1828,7 +1828,7 @@ func cmdCompact(m *Model, _ string) cmdResult {
 	m.compacting = true
 	return cmdResult{
 		text:  styleMuted.Render(fmt.Sprintf("compacting %d messages — calling %s …", len(msgs)-1, m.opts.Model)),
-		extra: startCompactCmd(m),
+		extra: startCompactCmd(m, "manual"),
 	}
 }
 
@@ -1967,7 +1967,7 @@ func (m *Model) handleCatalogRefreshed(msg catalogRefreshedMsg) []tea.Cmd {
 // startCompactCmd returns the tea.Cmd that actually runs Summarise. We
 // capture the agent + ctx by value here so the closure is independent
 // of any later state changes on m.
-func startCompactCmd(m *Model) tea.Cmd {
+func startCompactCmd(m *Model, trigger string) tea.Cmd {
 	ag := m.opts.Agent
 	hreg := m.opts.Hooks
 	parentCtx := m.opts.Ctx
@@ -1975,7 +1975,7 @@ func startCompactCmd(m *Model) tea.Cmd {
 		parentCtx = context.Background()
 	}
 	return func() tea.Msg {
-		// Bound the summariser to a minute — same Esc-style escape hatch
+		// 60s ceiling on the summariser. Ctrl+C at the TUI level
 		// applies via parent ctx cancellation if the user hits Ctrl+C.
 		ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
 		defer cancel()
@@ -1984,9 +1984,9 @@ func startCompactCmd(m *Model) tea.Cmd {
 		// not on the Update goroutine: a shell hook may block for its
 		// timeout and freezing the UI mid-/compact is a real regression.
 		// Firing here also guarantees the event precedes the LLM call,
-		// which is the point of the point. "manual" is the only trigger
-		// today (auto-compaction would add its own label).
-		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: "manual"})
+		// which is the point of the point. trigger labels who asked:
+		// "manual" (/compact) or "auto" (maybeAutoCompact).
+		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: trigger})
 		summary, usage, err := ag.Summarise(ctx)
 		return compactDoneMsg{summary: summary, usage: usage, err: err}
 	}

@@ -282,6 +282,28 @@ func TestNotificationObserver_NilSenderReturnsNil(t *testing.T) {
 	}
 }
 
+// TestAutoCompact_FiresPreCompactTriggerAuto: the automatic path rides
+// the same startCompactCmd as /compact, so the PreCompact payload must
+// say trigger=auto — a hook keyed on "manual" would otherwise log every
+// unattended compaction as user-initiated.
+func TestAutoCompact_FiresPreCompactTriggerAuto(t *testing.T) {
+	rec := &notifyRecorder{}
+	m, _ := autoCompactModel(t, 350_000, 400_000)
+	m.opts.Hooks = newNotifyRegistry(rec)
+	cmd, _ := m.maybeAutoCompact(false)
+	if cmd == nil {
+		t.Fatal("expected an auto-compact cmd")
+	}
+	cmd() // fakeAgent's Summarise completes immediately
+	got := rec.Compacts()
+	if len(got) != 1 {
+		t.Fatalf("PreCompact fired %d times, want 1", len(got))
+	}
+	if got[0].Trigger != "auto" {
+		t.Errorf("Trigger = %q, want auto", got[0].Trigger)
+	}
+}
+
 func readBody(r *http.Request) string {
 	b, _ := io.ReadAll(r.Body)
 	return string(b)
