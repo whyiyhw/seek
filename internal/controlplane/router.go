@@ -392,8 +392,16 @@ func (r *Router) handlePrompt(ctx context.Context, m Inbound) {
 		Message:   m.Text,
 		Yolo:      r.cfg.Yolo || b.Yolo,
 	}
+	fe := r.fronts[m.Conv.FrontendName()]
+	// Approval seam (W5 c_n37tnr child half): a frontend with an
+	// approval surface gets a per-run router, which turns on the child's
+	// --approval-stdin channel. A frontend without one leaves Approval
+	// nil — the child's argv and deny-by-default posture are unchanged.
+	if af, ok := fe.(ApprovalFrontend); ok {
+		req.Approval = af.ApprovalRoute()
+	}
 	var res ExecResult
-	if ss, ok := r.fronts[m.Conv.FrontendName()].(StreamSender); ok {
+	if ss, ok := fe.(StreamSender); ok {
 		res, err = r.exec.RunStream(runCtx, req, func(ev RunEvent) {
 			if serr := ss.SendStream(ctx, m.Conv, ev); serr != nil {
 				fmt.Fprintf(os.Stderr, "controlplane: router: stream send to %s failed: %v\n", m.Conv, serr)

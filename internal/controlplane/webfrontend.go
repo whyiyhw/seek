@@ -192,8 +192,14 @@ type WebFrontend struct {
 	// recently-terminal cards keyed by request id, plus the terminal
 	// eviction FIFO. Guarded by mu like subs/runs — the hub is hub
 	// state.
-	approvals   map[string]*webApproval
+	approvals    map[string]*webApproval
 	approvalDone []string
+	// approvalDeliver holds the live run's stdin writers keyed by
+	// req_id (child half): the executor's ApprovalRouter.Route files
+	// one per approval_request it sees, SendStream consumes it when it
+	// turns the event into a card, and approval/decide calls it with
+	// the human's answer. Guarded by mu.
+	approvalDeliver map[string]func(decision string)
 
 	// Topic dimension (W3.2, webfrontend_topic.go): the same /events
 	// connections' second channel (drop-oldest buffer) hung on the
