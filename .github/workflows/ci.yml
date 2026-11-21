@@ -5,6 +5,7 @@ name: CI
 # duplicated that gate dozens of times a day. CI now runs:
 #   - workflow_dispatch  — on-demand verification pass (the "验证阶段")
 #   - schedule nightly   — once-a-day cross-OS drift catch (cheap middle ground)
+#                          + the eval-nightly job below (observe-only, E6)
 #   - pull_request       — fork/contributor signal, unchanged (keyless, always-green)
 #   - release-time full pass — owned by release.yml on v* tags (unchanged)
 on:
@@ -86,3 +87,114 @@ jobs:
           cache: true
       - name: zero-build-chain assertion + binary size gate
         run: scripts/web-gate.sh
+
+  # eval v2 E6 (docs/prd/feature-eval-v2.md §2.3, card c_rkoeiy):
+  # nightly observation of the core eval lane. Schedule-ONLY — it never
+  # runs on pull_request or workflow_dispatch, so ci.yml's keyless,
+  # forkable, always-green PR story above is untouched ("nightly 只观测
+  # 不阻塞 PR" is structural, not a promise). This is the one deliberate
+  # exception to e2e.yml's "secret-consuming jobs live in their own
+  # file" doctrine: that doctrine protects the PR trigger path, and this
+  # job is not on it — a skipped job costs a PR nothing.
+  eval-nightly:
+    name: eval-nightly (core lane, observe-only)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - run: go build -o seek ./cmd/seek
+
+      # Cross-night streak persistence WITHOUT pushes: nightly rows ride
+      # the actions cache in a dir SEPARATE from eval/results (committed
+      # repo data must stay untouched, and a cached copy of eval/results
+      # would revert rows committed after the cache entry). Unique save
+      # key + prefix restore = newest previous night; actions/cache only
+      # saves on job success, so a red night is not double-appended on a
+      # re-run. A cache eviction (7 idle days) resets streak counting —
+      # the conservative direction (fewer fails), acceptable for
+      # observation.
+      - uses: actions/cache@v4
+        with:
+          path: ~/eval-nightly-results
+          key: eval-nightly-results-${{ github.run_id }}
+          restore-keys: eval-nightly-results-
+
+      # Observe-only preflight: a missing key skips tonight (loudly)
+      # instead of failing — unlike e2e.yml's hard preflight, this job is
+      # not a safety net whose silence would read as green; it is an
+      # observer. Key choice honours docs/prd/v8.md §9.1: unattended
+      # lanes bill the OpenCode Go subscription (OPENCODE_API_KEY env is
+      # the lane's credential), never the metered DeepSeek key.
+      - name: preflight (key presence)
+        id: keycheck
+        env:
+          SEEK_EVAL_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -z "$SEEK_EVAL_API_KEY" ]; then
+            echo "::warning::OPENCODE_API_KEY secret not set — skipping tonight's eval observation. Configure the repository secret to enable it (the metered DEEPSEEK_API_KEY is deliberately not used unattended; docs/prd/v8.md §9.1)."
+            echo "have_key=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: eval core lane (2 rounds)
+        if: steps.keycheck.outputs.have_key == 'true'
+        env:
+          SEEK_EVAL_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          mkdir -p "$HOME/eval-nightly-results"
+          # Red case-rounds are DATA, not job failure — the streak gate
+          # below is the only failure policy (连续 3 次同向失败才 fail).
+          # run.sh exit 2 (setup errors) still fails the job.
+          set +e
+          SEEK_EVAL_RESULTS_DIR="$HOME/eval-nightly-results" \
+            eval/run.sh --lane core --rounds 2 '' "$PWD/seek"
+          rc=$?
+          set -e
+          echo "eval-nightly: run.sh exit $rc (0 = all green, 1 = red rounds recorded — see the streak gate)"
+          [ "$rc" -le 1 ] || exit "$rc"
+
+      # Failure policy, verbatim from the E6 card: fail only on ≥3
+      # consecutive same-direction failures, REUSING eval-trend.sh's
+      # existing streak implementation (streak_failures counts
+      # consecutive failing result rows from the latest back — no new
+      # counting code here). Nightly core writes 2 rows/case/night, so
+      # the threshold trips on the second fully-red night; a green row
+      # in between resets the count. Gated to the core-lane names so
+      # red history of non-core cases (e.g. glm-lane-contract's
+      # environment reds) can never colour this job.
+      - name: streak gate (eval-trend streak >= 3, core lane only)
+        if: steps.keycheck.outputs.have_key == 'true'
+        run: |
+          TREND_RESULTS="$HOME/eval-nightly-results" scripts/eval-trend.sh
+          # artifacts are uploaded from the workspace (upload-artifact
+          # does not expand ~) — stage the reports here.
+          cp "$HOME/eval-nightly-results/trend-report.md" \
+             "$HOME/eval-nightly-results/trend-report.json" .
+          sed -e 's/#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' \
+            eval/lane-core.txt > core-cases.txt
+          jq -r '.cases[] | select((.streak_failures // 0) >= 3) | .case' \
+            "$HOME/eval-nightly-results/trend-report.json" > streak-red.txt || true
+          if grep -Fx -f core-cases.txt streak-red.txt > streak-hits.txt; then
+            echo "::error::core-lane cases with >= 3 consecutive failures (eval-trend.sh streak_failures): $(paste -sd, - < streak-hits.txt)"
+            exit 1
+          fi
+          echo "eval-nightly: no core-lane case at streak >= 3 — observation only"
+
+      # PRD §2.3: upload the trend reports as artifacts (30 days ≈ a
+      # release cycle of nightly reports).
+      - name: upload trend report
+        if: steps.keycheck.outputs.have_key == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-nightly-trend
+          path: |
+            trend-report.md
+            trend-report.json
+          retention-days: 30
+          if-no-files-found: error

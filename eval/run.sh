@@ -7,6 +7,8 @@
 #   eval/run.sh <case-name> <binary-path>    # one case, named binary
 #   eval/run.sh '' <binary-path>             # all cases, named binary
 #   eval/run.sh --rounds 5 <case-name>       # N-round distribution sampling
+#   eval/run.sh --lane release               # curated case list (E6)
+#   eval/run.sh --lane core --rounds 2       # lane + rounds compose
 #
 # Each case appends one JSON row PER ROUND to:
 #   eval/results/<UTC-date>-<binary-version>.jsonl
@@ -20,6 +22,19 @@
 # INCLUSIVE `>=`); `record_only: true` cases are recorded, never gated.
 # Cost warning: rounds multiply API spend — see the cost table in
 # eval/README.md before raising N on the full case set.
+#
+# --lane NAME (eval v2 E6, docs/prd/feature-eval-v2.md §2.3/§三): run the
+# curated case list in eval/lane-<name>.txt instead of all cases — one
+# case name per line, '#' comments and blank lines ignored. Every entry
+# must name an existing eval/cases/<name>/ dir (a name with no case dir
+# exits 2 at startup, before any case runs — the list is policy, a typo
+# in it must fail loud, not skip silently). Mutually exclusive with an
+# explicit <case-name> positional. Shipped lanes (eval/README.md §
+# "发版前跑什么"): release = load-bearing axes + calibration-stable
+# cases (the pre-release human gate), core = the low-cost nightly
+# subset. No --lane = all cases, byte for byte the historical behaviour
+# (guard: scripts/eval-lane-test.sh pins the no-flag output against the
+# pre-E6 run.sh blob from git history).
 #
 # Env knobs (ablation lane steering, see eval/ablate.sh + eval/README.md
 # § Ablation; both UNSET = historical behaviour, byte for byte):
@@ -223,14 +238,15 @@ if [ "$seek_eval_provider" != deepseek ]; then
 fi
 export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
 
-# --- --rounds flag parsing (E1) ------------------------------------------
+# --- --rounds / --lane flag parsing (E1 / E6) ----------------------------
 # Positional interface (<case> <binary>) is unchanged; flags are stripped
-# wherever they appear in argv before the positional reads. rounds=1 is
-# the historical behaviour, byte for byte (guard test:
-# scripts/eval-rounds-test.sh, sibling of eval-ablate-test's no-env
-# equivalence pin). Malformed values exit 2 at startup — never silently
-# degrade to 1 (same doctrine as min_pass_rate below).
+# wherever they appear in argv before the positional reads. rounds=1 and
+# lane="" are the historical behaviour, byte for byte (guard tests:
+# scripts/eval-rounds-test.sh + scripts/eval-lane-test.sh, siblings of
+# eval-ablate-test's no-env equivalence pin). Malformed values exit 2 at
+# startup — never silently degrade (same doctrine as min_pass_rate below).
 rounds=1
+lane=""
 positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -252,6 +268,29 @@ while [[ $# -gt 0 ]]; do
       esac
       echo "eval: --rounds needs an integer >= 1 (got: $arg_rounds)" >&2
       exit 2
+      ;;
+    --lane)
+      # Charset gate [a-z0-9-] doubles as the path-safety gate: '/' and
+      # '.' are outside it, so no --lane value can escape eval/lane-*.txt.
+      # Any name with a matching lane file is valid (release/core are the
+      # shipped two, not a hardcoded pair).
+      case "${2-}" in
+        ''|*[!a-z0-9-]*)
+          echo "eval: --lane needs a lane name [a-z0-9-], e.g. release | core (got: ${2-<missing>})" >&2
+          exit 2
+          ;;
+        *) lane=$2; shift 2; continue ;;
+      esac
+      ;;
+    --lane=*)
+      arg_lane=${1#--lane=}
+      case "$arg_lane" in
+        ''|*[!a-z0-9-]*)
+          echo "eval: --lane needs a lane name [a-z0-9-], e.g. release | core (got: $arg_lane)" >&2
+          exit 2
+          ;;
+        *) lane=$arg_lane; shift; continue ;;
+      esac
       ;;
     *)
       positional+=("$1")
@@ -282,6 +321,41 @@ else
   JQ=jq.exe
 fi
 
+# --- lane list loading (E6) ------------------------------------------------
+# Read + validate the WHOLE list before running anything: a lane entry
+# naming a nonexistent case, a --lane paired with an explicit case name,
+# or an effectively empty list all exit 2 here, before mkdir/results side
+# effects — same startup-rejection doctrine as malformed --rounds /
+# min_pass_rate. Lane files always resolve against the REPO's eval/ dir
+# ($eval_root), never against a redirected SEEK_EVAL_RESULTS_DIR: the
+# list is lane policy (repo content), the results dir is data.
+lane_cases=()
+if [[ -n "$lane" ]]; then
+  if [[ -n "$case_filter" ]]; then
+    echo "eval: --lane and an explicit case name are mutually exclusive (the lane runs its whole list)" >&2
+    exit 2
+  fi
+  lane_file="$eval_root/lane-$lane.txt"
+  if [[ ! -f "$lane_file" ]]; then
+    echo "eval: no such lane file: $lane_file (see eval/README.md for the lane list format)" >&2
+    exit 2
+  fi
+  while read -r lane_raw || [[ -n "$lane_raw" ]]; do
+    lane_entry=${lane_raw%%#*}
+    lane_entry=$(printf '%s' "$lane_entry" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [[ -z "$lane_entry" ]] && continue
+    if [[ ! -d "$cases_dir/$lane_entry" ]]; then
+      echo "eval: lane '$lane' lists unknown case: $lane_entry (no eval/cases/$lane_entry/)" >&2
+      exit 2
+    fi
+    lane_cases+=("$lane_entry")
+  done < "$lane_file"
+  if [[ ${#lane_cases[@]} -eq 0 ]]; then
+    echo "eval: lane '$lane' list has no active entries: $lane_file" >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$results_dir"
 
 # Stamp the binary identity into the results filename so multi-binary
@@ -295,6 +369,9 @@ results_file="$results_dir/${date_stamp}-${version_tag}-${version_rev}.jsonl"
 
 echo "eval: binary  $binary ($version_full)"
 echo "eval: results $results_file"
+if [[ -n "$lane" ]]; then
+  echo "eval: lane    $lane (${#lane_cases[@]} cases from lane-$lane.txt)"
+fi
 echo
 
 # extract_metric NAME JSONL_PATH → integer
@@ -330,6 +407,22 @@ extract_metric() {
       ;;
     list_dir_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="list_dir")] | length' "$path"
+      ;;
+    agent_calls)
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent")] | length' "$path"
+      ;;
+    agent_bg_calls)
+      # agent tool_starts whose parsed args carry run_in_background=true —
+      # the D1 detached-spawn shape (feature-orchestration §4.1). fromjson?
+      # swallows a malformed args blob (event drops out rather than
+      # erroring the metric).
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent" and ((.args // "{}" | fromjson? | .run_in_background) == true))] | length' "$path"
+      ;;
+    agent_continue_calls)
+      # agent tool_starts whose parsed args carry a non-empty session_id —
+      # the P1-b continuation shape (Manager.Continue / ContinueBackground,
+      # the `session_id` field of the agent tool schema).
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent" and (((.args // "{}" | fromjson? | .session_id) // "") != ""))] | length' "$path"
       ;;
     bash_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash")] | length' "$path"
@@ -445,6 +538,23 @@ extract_metric() {
       # each invocation; this metric is how that reaches expect.json.
       # Cases using the default invocation emit no facts → 0.
       $JQ -s '[.[] | select(.type=="runner_fact" and ((.exit_code // 0) != 0))] | length' "$path"
+      ;;
+    bg_started_events|bg_completed_events|bg_notified_events|bg_notified_transcript|bg_resumed_lineage|bg_artifacts_missing)
+      # subagent-bg-resume's disk-side family (eval v2 E4, c_vollxv):
+      # the case's runner.sh reads the ISOLATED SEEK_HOME's project
+      # state after its invocations — projects/*/subagents.jsonl (the
+      # lifecycle event source, internal/subagent/index.go) and the
+      # parent session transcript — and reports counts as
+      # {"type":"runner_fact","check":<metric name>,"value":N} lines,
+      # the file-level siblings of nonzero_exits above. Each metric
+      # takes the MAX value across matching facts, 0 when absent; bind
+      # them only in cases whose runner ALWAYS emits the fact channel
+      # (otherwise a crashed round reads as "unknown metric"). The
+      # runner asserts event SHAPE and FIELDS (event kind, sub_sid
+      # joins, the "[agent: background done sub-sid=<full>]" wire
+      # prefix) — never prose wording. Per-metric meanings live in
+      # eval/README.md's "Metric vocabulary".
+      $JQ -s --arg check "$name" '[.[] | select(.type=="runner_fact" and .check==$check) | (.value // 0)] | max // 0' "$path"
       ;;
     turns)
       $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
@@ -647,6 +757,22 @@ run_one() {
   # vocabulary. We compute the same fixed set every case so historical
   # diffs are comparable across cases. completion_tokens is folded in
   # here (not just recorded) so expect.json can bound it.
+  #
+  # The nine agent/bg keys (E4, c_vollxv) are DATA-GATED: merged only
+  # when this round's stream carries an agent surface (an `agent`
+  # tool_start or a check-bearing runner_fact). This is the same
+  # discipline as the conditional `round` key — the fixed set above is
+  # byte-frozen by scripts/eval-ablate-test.sh's no-env equivalence pin
+  # (its pre-change blob predates every metric addition since), so an
+  # unconditional growth would break that guard for every non-agent
+  # case. Readers must treat an absent agent key as 0; cases binding
+  # these bounds must guarantee the surface (subagent-bg-resume's
+  # runner always emits its fact channel).
+  local has_agent_surface
+  has_agent_surface=$($JQ -s '
+    ( [.[] | select(.type=="tool_start" and .name=="agent")] | length )
+    + ( [.[] | select(.type=="runner_fact" and ((.check // "") != ""))] | length )
+    > 0' "$out_file")
   local metrics
   metrics=$($JQ -n \
     --argjson unknown_field_errors "$(extract_metric unknown_field_errors "$out_file")" \
@@ -656,6 +782,15 @@ run_one() {
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
     --argjson mcp_calls            "$(extract_metric mcp_calls            "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
+    --argjson agent_calls          "$(extract_metric agent_calls          "$out_file")" \
+    --argjson agent_bg_calls       "$(extract_metric agent_bg_calls       "$out_file")" \
+    --argjson agent_continue_calls "$(extract_metric agent_continue_calls "$out_file")" \
+    --argjson bg_started_events       "$(extract_metric bg_started_events       "$out_file")" \
+    --argjson bg_completed_events     "$(extract_metric bg_completed_events     "$out_file")" \
+    --argjson bg_notified_events      "$(extract_metric bg_notified_events      "$out_file")" \
+    --argjson bg_notified_transcript  "$(extract_metric bg_notified_transcript  "$out_file")" \
+    --argjson bg_resumed_lineage      "$(extract_metric bg_resumed_lineage      "$out_file")" \
+    --argjson bg_artifacts_missing    "$(extract_metric bg_artifacts_missing    "$out_file")" \
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
     --argjson bash_git_calls       "$(extract_metric bash_git_calls       "$out_file")" \
@@ -675,7 +810,9 @@ run_one() {
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
+    --argjson has_agent_surface    "$has_agent_surface" \
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}
+     + (if $has_agent_surface then {agent_calls:$agent_calls, agent_bg_calls:$agent_bg_calls, agent_continue_calls:$agent_continue_calls, bg_started_events:$bg_started_events, bg_completed_events:$bg_completed_events, bg_notified_events:$bg_notified_events, bg_notified_transcript:$bg_notified_transcript, bg_resumed_lineage:$bg_resumed_lineage, bg_artifacts_missing:$bg_artifacts_missing} else {} end)')
 
   # Serve-plane metrics (E5 serve-web-stream, card c_lbtdqw): merged in
   # ONLY for streams that actually carry sse_frame rows — a
@@ -924,6 +1061,12 @@ if [[ -n "$case_filter" ]]; then
     exit 2
   fi
   run_case "$case_dir"
+elif [[ -n "$lane" ]]; then
+  # Lane dispatch: the validated list, in file order (cheapest-first
+  # curation reads better in the transcript than an alphabetical glob).
+  for lane_name in "${lane_cases[@]}"; do
+    run_case "$cases_dir/$lane_name"
+  done
 else
   shopt -s nullglob
   for case_dir in "$cases_dir"/*/; do

@@ -262,6 +262,35 @@ func TestACPBackend_AdvertisesImage(t *testing.T) {
 	}
 }
 
+// TestACPBackend_InitializeNegotiatesVersion: protocolVersion is a real
+// negotiation (card c_4pczu3 ①), not an echo. A client asking for a
+// version seek does not speak is answered with the newest one it does,
+// and the downgrade is declared — on the wire (the response IS the
+// declaration) and on stderr (so a human watching `seek acp` can tell).
+func TestACPBackend_InitializeNegotiatesVersion(t *testing.T) {
+	b := &acpBackend{}
+	cases := []struct {
+		requested int
+		want      int
+	}{
+		{1, 1},  // exact match
+		{2, 1},  // newer client → downgrade to the newest we speak
+		{99, 1}, // far-future client → same answer
+		{0, 1},  // absent/garbage field → still a usable handshake
+	}
+	for _, c := range cases {
+		res := b.Initialize(acp.InitializeParams{ProtocolVersion: c.requested})
+		if res.ProtocolVersion != c.want {
+			t.Errorf("initialize(protocolVersion=%d) answered %d, want %d", c.requested, res.ProtocolVersion, c.want)
+		}
+		// Capabilities are declared on every path — a downgrade must not
+		// silently drop image support.
+		if !res.AgentCapabilities.PromptCapabilities.Image {
+			t.Errorf("initialize(protocolVersion=%d) dropped promptCapabilities.image", c.requested)
+		}
+	}
+}
+
 // D-1 (feature-paseo-provider.md §2.2): NewSession must anchor BOTH cwd
 // conventions to p.Cwd and return the project name as sessionId — the
 // deep dispatch-path behaviour is covered in internal/acp; this pins
@@ -378,6 +407,54 @@ func TestBuildACPPromptText(t *testing.T) {
 	// Non-image mimeType → skipped.
 	if got, parts := build(deepseek.ModelV41Flash, txt("keep"), img(png, "application/pdf")); got != "keep" || parts != nil {
 		t.Fatalf("non-image mime must be skipped: %q %v", got, parts)
+	}
+}
+
+// TestBuildACPPromptText_Ordering pins acceptance ④ (card c_4pczu3):
+// a mixed text/image prompt reaches the model with the blocks in wire
+// order — the image marker sits BETWEEN the sentences that surround it,
+// not appended at the end. Also pins that consecutive text blocks still
+// join with a single newline (byte-identical to the pre-Segments shape
+// for text-only prompts, which is what the prefix cache cares about).
+func TestBuildACPPromptText_Ordering(t *testing.T) {
+	vroute := visionRouter{assetsDir: t.TempDir()}
+	froute := fileroute.Router{}
+	png := base64.StdEncoding.EncodeToString([]byte("fake png bytes"))
+
+	p := acp.PromptParams{Prompt: []acp.ContentBlock{
+		{Type: "text", Text: "first sentence"},
+		{Type: "image", Data: png, MimeType: "image/png"},
+		{Type: "text", Text: "second sentence"},
+	}}
+	got, parts, _ := buildACPPromptText(context.Background(), deepseek.ModelV41Flash, p, vroute, froute)
+	if len(parts) != 1 {
+		t.Fatalf("parts = %+v, want the one image attached", parts)
+	}
+	first := strings.Index(got, "first sentence")
+	marker := strings.Index(got, "[image: pasted-image.png — attached natively")
+	second := strings.Index(got, "second sentence")
+	if first < 0 || marker < 0 || second < 0 {
+		t.Fatalf("prompt text lost a piece: %q", got)
+	}
+	if !(first < marker && marker < second) {
+		t.Fatalf("wire order broken — want text/image/text, got %q (idx %d/%d/%d)", got, first, marker, second)
+	}
+	// The marker is its own paragraph, the text either side of it is not
+	// glued together without separation.
+	if !strings.Contains(got, "first sentence\n\n[image: ") {
+		t.Fatalf("marker must start a new paragraph: %q", got)
+	}
+	if !strings.Contains(got, "]\n\nsecond sentence") {
+		t.Fatalf("text after a marker must start a new paragraph: %q", got)
+	}
+
+	// Text-only: two blocks join with exactly one newline (the PromptText
+	// shape every existing transcript was written with).
+	two := acp.PromptParams{Prompt: []acp.ContentBlock{
+		{Type: "text", Text: "a"}, {Type: "text", Text: "b"},
+	}}
+	if got, _, _ := buildACPPromptText(context.Background(), deepseek.ModelV41Flash, two, vroute, froute); got != "a\nb" {
+		t.Fatalf("text-only join = %q, want %q (byte-identical to PromptText)", got, "a\nb")
 	}
 }
 

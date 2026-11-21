@@ -14,19 +14,14 @@
 package methods
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/rpc"
@@ -366,72 +361,10 @@ func mapReadError(sid string, err error) error {
 
 // ---------- list titling ----------
 
-const (
-	titleMaxRunes      = 80
-	firstUserScanLines = 32
-)
-
-// firstUserTitle flattens a session's first user message into a
-// one-line label for session/list (headers carry no title field). The
-// scan reads at most firstUserScanLines message lines — real sessions
-// open with the user's prompt, and one that does not is not worth a
-// whole-file read for a label. Best-effort by design: a missing file,
-// a torn tail (concurrent append) or a corrupt line ends the scan
-// quietly — a list view must never fail because one file is mid-write.
+// firstUserTitle delegates to the store package's derivation (extracted
+// there 2026-11-21 when ACP's session/list needed the same label):
+// titles are a transcript fact, and two list surfaces must not grow two
+// title styles.
 func firstUserTitle(dir, id string) string {
-	f, err := os.Open(filepath.Join(dir, id+".jsonl"))
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	r := bufio.NewReaderSize(f, 16<<10)
-	first := true
-	for scanned := 0; ; {
-		line, rerr := r.ReadBytes('\n')
-		if first {
-			first = false
-			if rerr != nil {
-				return ""
-			}
-			continue
-		}
-		trimmed := bytes.TrimSuffix(line, []byte{'\n'})
-		if len(trimmed) == 0 {
-			if rerr != nil {
-				return ""
-			}
-			continue
-		}
-		if !json.Valid(trimmed) {
-			return "" // torn or corrupt: no label rather than a failed list
-		}
-		scanned++
-		var m struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal(trimmed, &m); err != nil {
-			return ""
-		}
-		if m.Role == deepseek.RoleUser {
-			return oneLineTitle(m.Content)
-		}
-		if rerr != nil || scanned == firstUserScanLines {
-			return ""
-		}
-	}
-}
-
-// oneLineTitle flattens content to its first line, trimmed and capped
-// at titleMaxRunes with an ellipsis.
-func oneLineTitle(content string) string {
-	if i := strings.IndexByte(content, '\n'); i >= 0 {
-		content = content[:i]
-	}
-	content = strings.TrimSpace(content)
-	if utf8.RuneCountInString(content) <= titleMaxRunes {
-		return content
-	}
-	runes := []rune(content)
-	return string(runes[:titleMaxRunes]) + "…"
+	return session.FirstUserTitle(dir, id)
 }
