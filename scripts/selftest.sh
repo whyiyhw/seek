@@ -70,8 +70,6 @@ excluded_reason() {
       echo "手测脚本：无无头分支（浏览器断言只在人眼里），裸跑打印清单等人按 Enter——无人值守无出口（c_kwiajf 核定，2026-11-20）" ;;
     web-stream-manual)
       echo "有无头分支（c_kwiajf 2026-11-20 沙盒实跑全绿），但无头条件不全时仍落到 read：非 TTY 下读空即过、给出无凭据的绿——移出前先补 web-sessions-manual 同款非 TTY exit 3" ;;
-    web-stop-manual)
-      echo "手测/无头验收脚本（c_5m3fm6，2026-11-20 沙盒实跑全绿）：与 web-stream-manual 同款形态——无头条件不全时落到 read 等 Enter，非 TTY 无诚实出口；移出前先补非 TTY exit 3 退路" ;;
     *)
       return 1 ;;
   esac
