@@ -203,8 +203,8 @@ for (let i = 0; i < 100; i++) {
 }
 const base = await snap();
 ck('输入框是 textarea（多行的前提）', base.tag === 'TEXTAREA', `got ${base.tag}`);
-ck('基线 scripts=2（页面脚本 + markdown.js，无新增内联块）',
-  (await evalJS('document.scripts.length')) === 2, '');
+ck('基线 scripts=3（head 主题 bootstrap + 页面脚本 + markdown.js）',
+  (await evalJS('document.scripts.length')) === 3, '');
 ck('基线弹层关闭', !base.menuOpen, JSON.stringify(base));
 await bindProject();
 trace('已绑定桩项目');
