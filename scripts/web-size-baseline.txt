@@ -44,4 +44,17 @@
 # those merges (they claimed headroom instead — c_n37tnr's note). The
 # pin still carries ~1.16MB of go1.25-side slack, so the gate stays
 # green either way; this entry ratchets ONLY this card's delta.
+# 2026-11-21 c_o3osoh: the toolchain-directive route to retire the
+# GOTOOLCHAIN advice above was user-approved (方案 A: go.mod `toolchain
+# go1.25.8`) and measured UNLANDABLE — go.mod left untouched. Three hard
+# rules (full evidence in the pitfalls entry): GOTOOLCHAIN=auto never
+# downgrades (local go1.27.3 stays on the 1.27.3 line); a toolchain
+# line <= the go directive is an illegal shape on this toolchain
+# generation — every go build fails demanding `go mod tidy`, which
+# DELETES the line (zero-dep probe reproduced, so not this repo's
+# go.sum gap); and the dependency floor (charm.land/glamour/v2
+# declares go 1.25.8) blocks lowering the go directive to legalize
+# it. Committing the card's shape would have turned CI red on all
+# three OSes. The GOTOOLCHAIN=go1.25.8 advice above stays the only
+# working mechanism.
 30517907
