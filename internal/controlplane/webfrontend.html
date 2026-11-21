@@ -364,7 +364,8 @@
      上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
      （ap-badge 同款接线，两处共用同一对 token）。 */
   #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
-  /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——红底与录音态同色系（token 对齐） */
+  /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——与录音态共用同一对
+     --seek-rec token（同色系 + 两主题都过对比度，见上条注释） */
   #send.stop { background: var(--seek-rec); color: var(--seek-rec-fg); }
 
   /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
@@ -1161,6 +1162,27 @@ function runBubble(id) {
   return r;
 }
 
+// 幻影 run 收口（c_6mbjfq）：SSE 不回放，run 的收口帧一旦落在断连窗口就永久丢了
+// ——页面这边只剩 runs 表里的一条记录和它的半截气泡，键态于是永远停在 ⏹。
+// 重连本身给不出判据（服务端 /state 不报活跃 run；按 run 龄盲清会截断仍在跑的
+// 气泡，见 docs/pitfalls.md），唯一的自愈信号是：本页为这个 run 发过 /cancel，
+// 回来的却是一条 run-less 应答——服务端都没得中断了，它早结束了，只是收口丢了。
+// 收口沿用 c_5m3fm6 的保留式（半截就是内容）：关流式、尾部标注、从表里删——
+// 键态只跟表走，删掉即走 renderSend 的 runs.size=0 分支回「发送」。
+function closePhantom(id) {
+  const r = runs.get(id);
+  if (!r) return;
+  runs.delete(id);
+  if (lastRun === id) lastRun = '';
+  r.cur = null;                            // 停掉在途的合帧渲染
+  r.el.classList.remove('streaming');
+  const cut = document.createElement('div');
+  cut.className = 'cut';
+  cut.textContent = '—— 已中断 ——';
+  r.el.appendChild(cut);
+  renderSend();
+}
+
 function schedule(r) {
   dirty.add(r);
   if (!raf) raf = requestAnimationFrame(flushRuns);
@@ -1442,7 +1464,19 @@ function listen() {
       renderSend();                    // 收口即键态复位（c_5m3fm6）
     } else if (m.text) {
       addMsg('seek', m.text);   // 指令应答 / 丢帧回退：普通消息路径
-      stopping = '';            // run-less 应答落定（no-op ack 或终态），中断请求收尾
+      // 幻影 run 自愈（c_6mbjfq）：本页为某个 run 发过 /cancel，回来的却是
+      // run-less 应答——服务端已无 run 可中断 = 它早已结束，收口帧落在断连
+      // 窗口里丢了（SSE 不回放）。把那条永不收口的表项按保留式收掉，键态随之
+      // 回「发送」。正常中断里 run-bearing 那条（ack 或终态）先到，stopping
+      // 已被清、此分支空转。
+      // 武装窗口内的其它指令应答（run-less，如 /projects）也会走到这里：那个
+      // run 反正已被本页发出的 /cancel 杀掉，差别只是它的 ack 随后落到普通消息
+      // 路径、多出一条回执气泡——宁可多一条气泡，也不让键永久卡在 ⏹。
+      if (stopping) {
+        const phantom = stopping;
+        stopping = '';
+        closePhantom(phantom);
+      }
     }
     if (m.session_id) {         // W2.3：agent_end 终值——run 收口带 sid
       meter.sid = m.session_id;

@@ -579,6 +579,112 @@ func TestWeb_PageStopButton(t *testing.T) {
 	}
 }
 
+// pageFuncBody returns the source of a top-level JS function in the
+// embedded page: from its declaration line (sig, e.g. "function
+// closePhantom(") to the first "\n}\n" — a closing brace at column 0,
+// which inside this page means the end of a top-level function. Fails
+// when the declaration is gone: a renamed/deleted function is exactly
+// what the pins below exist to catch.
+//
+// Why scope the assertions instead of a page-wide Contains: a page-wide
+// check passes as soon as ANY code in the file spells the token, so a
+// moved or rewritten function keeps the test green while the behaviour
+// it pinned is gone.
+func pageFuncBody(t *testing.T, page, sig string) string {
+	t.Helper()
+	i := strings.Index(page, sig)
+	if i < 0 {
+		t.Fatalf("embedded page lost the %q declaration", sig)
+	}
+	rest := page[i:]
+	if j := strings.Index(rest, "\n}\n"); j > 0 {
+		return rest[:j+2]
+	}
+	t.Fatalf("%q has no closing brace at column 0 — page structure changed shape", sig)
+	return "" // unreachable
+}
+
+// TestWeb_PagePhantomRunResetsStopKey pins c_6mbjfq: the stop key must
+// not stay stuck at ⏹ when a run's close-out frame was lost.
+//
+// The bug: SSE replays nothing, so a run that ends while the page is
+// disconnected leaves the client-side run table holding an entry whose
+// close-out never arrives — renderSend keeps reading runs.size > 0 and
+// the send key stays a stop key forever. Clicking it sends /cancel,
+// which the server answers run-less ("当前没有正在运行的任务。") — and
+// the pre-fix page dropped that answer on the plain-message path
+// without touching the table, so the key never recovered.
+//
+// The fix is client-only and adds no mechanism: reuse the c_5m3fm6
+// "armed run" slot. A /cancel that comes back run-less is proof the
+// server had no run left to interrupt, i.e. the armed run is over and
+// only its close-out is missing — so close that entry the way an
+// interrupted run is closed (keep the partial, mark it) and let
+// renderSend take its runs.size = 0 branch.
+//
+// Rejected alternative (recorded here because the shape recurs): clear
+// the run table on every (re)connect. EventSource reconnects on ANY
+// transient blip, so that would drop the bookkeeping of a genuinely
+// live run mid-stream — its later deltas would open a second bubble and
+// the half already on screen would be orphaned. Age-based pruning needs
+// per-run timestamps plus a sweep, i.e. a new resident mechanism.
+func TestWeb_PagePhantomRunResetsStopKey(t *testing.T) {
+	page := string(webPage)
+
+	// The close helper itself: leaves the table, disarms /cancel at it,
+	// reuses the c_5m3fm6 preserving close, and lets renderSend follow.
+	body := pageFuncBody(t, page, "function closePhantom(")
+	for _, need := range []string{
+		"runs.delete(id)",                  // the phantom leaves the run table
+		"if (lastRun === id) lastRun = ''", // …and stops arming /cancel at it
+		"r.el.classList.remove('streaming')",
+		"—— 已中断 ——",    // a lost close-out is still an interrupted run
+		"renderSend()", // key state follows the table → runs.size = 0 → 发送
+	} {
+		if !strings.Contains(body, need) {
+			t.Errorf("closePhantom lost %q — the phantom run would never leave the table (c_6mbjfq)", need)
+		}
+	}
+
+	// The trigger is the armed /cancel's run-less answer — and only when
+	// a stop was actually armed. Resetting on every run-less reply would
+	// flip the key back to 发送 under a genuinely live run whenever some
+	// other command's ack (commands skip the executor gate) lands
+	// mid-stream.
+	i := strings.Index(page, "} else if (m.text) {")
+	if i < 0 {
+		t.Fatal("page lost the run-less reply branch — the fix has nowhere to fire")
+	}
+	rest := page[i:]
+	j := strings.Index(rest, "if (m.session_id)")
+	if j < 0 {
+		t.Fatal("page lost the session_id fold after the reply branches")
+	}
+	branch := rest[:j]
+	for _, need := range []string{
+		"if (stopping)", // gated on an armed run, never blanket
+		"closePhantom(", // the armed run is closed as a phantom
+		"stopping = ''", // and the arming is spent either way
+	} {
+		if !strings.Contains(branch, need) {
+			t.Errorf("run-less /cancel answer does not reset the key: branch lost %q (c_6mbjfq)", need)
+		}
+	}
+
+	// The rejected fix must stay rejected: a blunt table clear on
+	// (re)connect drops live runs, and the page must carry no such call.
+	if strings.Contains(page, "runs.clear()") {
+		t.Error("page clears the whole run table — EventSource reconnects on any blip, so this orphans genuinely live bubbles (c_6mbjfq)")
+	}
+	// Additivity: the plain message path and the c_5m3fm6 run-bearing
+	// close-out both survive the new branch.
+	for _, keep := range []string{"addMsg('seek', m.text)", "m.run === stopping", "runs.delete(m.run)"} {
+		if !strings.Contains(page, keep) {
+			t.Errorf("embedded page lost the prior close-out piece %q — c_6mbjfq must be additive", keep)
+		}
+	}
+}
+
 // TestWeb_PageMemoryStats pins the W4.5 asset-plane UI contract: the
 // page consumes exactly the W4.3 method set (memory/projects|list|get,
 // stats/cache — plus W4.2's session/list as the stats picker) over the

@@ -106,3 +106,8 @@
 # pin keeps ~1.1MB slack. MarshalIndent→plain-Marshal measured −24B
 # (already linked — not a lever either); the Encoder+Sync save dance
 # costs +0.6KB over WriteFile and buys crash-safe atomicity, kept.
+# 2026-11-20 c_6mbjfq ratchet: −16B (SSE 重连后停止键卡在 ⏹ 的自愈——页面加
+# closePhantom + run-less /cancel 分支的一小段判定；无新 Go)。DELTA-added on
+# the go1.25.8 line (29371894→29371878, measured against this branch's merge
+# commit cf2b9f06 = c_5m3fm6 已并入)。源码净增 ~1.9KB（注释占多数），编译产物
+# 反小 16B（对齐/压缩吸收了）——远在 §13.3 单卡配额内，不另立正 delta。
