@@ -1128,6 +1128,12 @@ func TestAgent_StreamTruncatedMidToolCall(t *testing.T) {
 	if len(res.errors) == 0 {
 		t.Errorf("expected ErrorEvent for truncated stream; events=%v", res.events)
 	}
+	// Card c_7kco3z deliberately left this shape alone: only
+	// finish_reason="length" is salvageable. A hang-up mid-tool-call has
+	// NO known reason, so the turn still dies with the refusal.
+	if len(res.errors) > 0 && !strings.Contains(res.errors[0].Error(), "refusing to commit turn") {
+		t.Errorf("non-length truncation must keep the death sentence, got: %v", res.errors)
+	}
 	assertNoOrphanToolCalls(t, ag.Messages())
 
 	// Follow-up: the agent must still be usable. Build a clean server
@@ -1214,6 +1220,270 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 	res := drainAgent(ag.Prompt(context.Background(), "go"))
 	if len(res.errors) == 0 {
 		t.Errorf("expected ErrorEvent for decode error mid-stream")
+	}
+	// Only finish_reason="length" was made salvageable (card c_7kco3z);
+	// a decode error after the retry budget keeps the refusal.
+	if len(res.errors) > 0 && !strings.Contains(res.errors[0].Error(), "refusing to commit turn") {
+		t.Errorf("decode-error path must keep the death sentence, got: %v", res.errors)
+	}
+	assertNoOrphanToolCalls(t, ag.Messages())
+}
+
+// TestAgent_LengthTruncatedToolCalls_SalvagedAndNudged (card c_7kco3z,
+// defect 1): the stream emitted two tool_call deltas and then closed with
+// finish_reason="length" — the output budget ran out mid-argument (11-21
+// session 628903ab on the flash lane: two big Write calls against the 16K
+// default). Pre-fix that was a turn-level (and in practice session-level)
+// death sentence. Now the unverified calls are dropped, the turn is booked
+// with truncationMarker, the model is nudged to resend smaller, and the
+// loop continues.
+//
+// The assertions are the four from the card: no tool executed, no orphan
+// tool_call_id on disk, the follow-up request is legal (the fake backend
+// answers 400 to any assistant message carrying tool_calls, exactly as the
+// real API does), and the nudge actually rode the continuation.
+func TestAgent_LengthTruncatedToolCalls_SalvagedAndNudged(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	var secondBody atomic.Pointer[string]
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		n := hits.Add(1)
+		// Same 400 the real API returns for an orphaned tool_calls turn.
+		if strings.Contains(string(body), `"tool_calls"`) {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error":{"message":"An assistant message with 'tool_calls' must be followed by tool messages"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		if n == 1 {
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"slow_read","arguments":"{\"p\":\"a\"}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","type":"function","function":{"name":"slow_read","arguments":"{\"p\":\"b\"}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4096,"total_tokens":4105}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+			return
+		}
+		s := string(body)
+		secondBody.Store(&s)
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	tool := &slowReadTool{}
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		Tools:        tools.New().Add(tool),
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "write two big files"))
+
+	// ① Zero tool executions — the calls were truncated, so they are
+	// unverified and must never run.
+	if got := tool.called.Load(); got != 0 {
+		t.Errorf("tool executed %d time(s), want 0 — truncated tool_calls must not dispatch", got)
+	}
+	// The only error is the visible truncation notice, NOT the death
+	// sentence. Exactly one, so the user sees it once.
+	if len(res.errors) != 1 {
+		t.Fatalf("errors = %v, want exactly the one visible truncation notice", res.errors)
+	}
+	msg := res.errors[0].Error()
+	if !strings.Contains(msg, "truncated") || !strings.Contains(msg, "max_tokens=") {
+		t.Errorf("notice should be the finish=length shape (finish_reason=length, max_tokens=N), got: %q", msg)
+	}
+	if strings.Contains(msg, "refusing to commit turn") {
+		t.Errorf("length truncation must no longer take the death-sentence branch: %q", msg)
+	}
+	// ② The transcript carries no orphan tool_call_id, and the dropped
+	// call batch left a visible marker as the assistant content.
+	hist := ag.Messages()
+	assertNoOrphanToolCalls(t, hist)
+	markers := 0
+	for _, m := range hist {
+		if m.Role == deepseek.RoleAssistant && m.Content == truncationMarker {
+			markers++
+			if len(m.ToolCalls) != 0 {
+				t.Errorf("salvaged turn must carry no tool_calls, got %d", len(m.ToolCalls))
+			}
+		}
+	}
+	if markers != 1 {
+		t.Errorf("history holds %d truncation markers, want 1: %+v", markers, hist)
+	}
+	// ③ The loop actually continued and the follow-up was legal (the
+	// backend would have 400'd otherwise): two turns, real recovery.
+	if got := hits.Load(); got != 2 {
+		t.Fatalf("server hits = %d, want 2 (truncated turn + continuation)", got)
+	}
+	if n := strings.Count(strings.Join(res.events, ","), "TurnEnd"); n != 2 {
+		t.Errorf("TurnEnd count = %d, want 2: %v", n, res.events)
+	}
+	if n := len(hist); n == 0 || hist[n-1].Role != deepseek.RoleAssistant || hist[n-1].Content != "recovered" {
+		t.Errorf("history tail = %+v, want the recovered assistant message", hist)
+	}
+	// The corrective nudge rode the continuation: without the "one call at
+	// a time, smaller arguments" signal the self-heal is just padding.
+	body := ""
+	if p := secondBody.Load(); p != nil {
+		body = *p
+	}
+	if !strings.Contains(body, "tool_calls 被输出上限截断") || !strings.Contains(body, "max_tokens=") ||
+		!strings.Contains(body, "一次一个调用") || !strings.Contains(body, "参数拆小") {
+		t.Errorf("continuation request lacks the corrective nudge: %s", body)
+	}
+}
+
+// TestAgent_LengthTruncatedToolCalls_HardStopsAfterTwo: the upstream
+// keeps truncating tool_calls. One salvage is worth self-healing; two in
+// a row means the model cannot fit its next step into the budget at all,
+// so Prompt stops with a clear error instead of padding the transcript
+// forever (same shape as emptyPlaceholderHardStop).
+func TestAgent_LengthTruncatedToolCalls_HardStopsAfterTwo(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"tool_calls"`) {
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, `{"error":{"message":"orphaned tool_calls"}}`)
+			return
+		}
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"slow_read","arguments":"{\"p\":\"a\"}"}}]}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4096,"total_tokens":4105}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	tool := &slowReadTool{}
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		Tools:        tools.New().Add(tool),
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "write"))
+	// Two salvages, then the gate fires on the second.
+	if got := hits.Load(); got != truncationHardStop {
+		t.Errorf("server hits = %d, want %d (the gate fires on the second consecutive truncation)", got, truncationHardStop)
+	}
+	if got := tool.called.Load(); got != 0 {
+		t.Errorf("tool executed %d time(s), want 0", got)
+	}
+	if len(res.errors) == 0 {
+		t.Fatal("expected the consecutive-truncation hard-stop, got none")
+	}
+	last := res.errors[len(res.errors)-1].Error()
+	if !strings.Contains(last, "截断") || !strings.Contains(last, "停止本回合") {
+		t.Errorf("terminal error should be the truncation hard-stop, got: %v", res.errors)
+	}
+	// Both salvaged turns are committed before the gate fires, so the
+	// history stays a valid continuation for whatever the user does next.
+	hist := ag.Messages()
+	assertNoOrphanToolCalls(t, hist)
+	markers := 0
+	for _, m := range hist {
+		if m.Content == truncationMarker {
+			markers++
+		}
+	}
+	if markers != truncationHardStop {
+		t.Errorf("history holds %d truncation markers, want %d", markers, truncationHardStop)
+	}
+}
+
+// TestAgent_LengthTruncatedToolCalls_StreakResetsOnRealTurn: the gate
+// counts CONSECUTIVE truncations. A productive turn in between resets the
+// streak, so a lane that truncates once and then works must not trip it.
+func TestAgent_LengthTruncatedToolCalls_StreakResetsOnRealTurn(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch hits.Add(1) {
+		case 1, 3:
+			// Truncated turn.
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_t","type":"function","function":{"name":"slow_read","arguments":"{}"}}]}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":4096,"total_tokens":4105}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		default:
+			if hits.Load() == 2 {
+				// A real tool-call turn — productive, so the streak resets.
+				io.WriteString(w, strings.Join([]string{
+					`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_ok","type":"function","function":{"name":"slow_read","arguments":"{}"}}]}}]}`,
+					``,
+					`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+					``,
+					`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}`,
+					``,
+					`data: [DONE]`,
+					``,
+				}, "\n"))
+				return
+			}
+			// Finally a plain answer, so the round settles.
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		}
+	}))
+	defer srv.Close()
+
+	tool := &slowReadTool{}
+	ag, _ := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		SystemPrompt: "sys",
+		Tools:        tools.New().Add(tool),
+		MaxTurns:     6,
+	})
+	res := drainAgent(ag.Prompt(context.Background(), "write"))
+	if got := tool.called.Load(); got != 1 {
+		t.Errorf("tool executions = %d, want 1 (only the productive turn dispatches)", got)
+	}
+	// Truncation, productive turn, truncation: no hard-stop — the streak
+	// was reset by the productive turn in the middle.
+	for _, e := range res.errors {
+		if strings.Contains(e.Error(), "停止本回合") {
+			t.Fatalf("a non-consecutive truncation must not hard-stop: %v", res.errors)
+		}
 	}
 	assertNoOrphanToolCalls(t, ag.Messages())
 }
@@ -1514,29 +1784,45 @@ func TestAgent_EmptyResponse_StreakResetsOnRealContent(t *testing.T) {
 	}
 }
 
-// TestAgent_ReasoningOnlyEmpty_NotRetried: reasoning streamed, then the
-// response ended with no content. The partial block is already visible,
-// so the empty guard must surface the error WITHOUT a retry — a retry
-// would render the reasoning twice.
-func TestAgent_ReasoningOnlyEmpty_NotRetried(t *testing.T) {
+// TestAgent_ReasoningOnlyEmpty_SelfHealsWithoutRetry: reasoning streamed,
+// then the response ended with no content. The partial block is already
+// visible, so it must NOT be retried (a retry would render the thinking
+// twice) — but since card c_7kco3z it is no longer a session death
+// sentence either: the marker is booked as the assistant content, the
+// loop nudges a continuation, and exactly ONE MessageStart opens the block
+// (the reasoning's), so the TUI never double-renders.
+func TestAgent_ReasoningOnlyEmpty_SelfHealsWithoutRetry(t *testing.T) {
 	t.Parallel()
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking..."}}]}`+"\n\n")
-		if flusher != nil {
-			flusher.Flush()
+		switch hits.Add(1) {
+		case 1:
+			io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking..."}}]}`+"\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
+		default:
+			io.WriteString(w, strings.Join([]string{
+				`data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"}}]}`,
+				``,
+				`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+				``,
+				`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"))
 		}
-		io.WriteString(w, strings.Join([]string{
-			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-			``,
-			`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
-			``,
-			`data: [DONE]`,
-			``,
-		}, "\n"))
 	}))
 	defer srv.Close()
 
@@ -1545,16 +1831,55 @@ func TestAgent_ReasoningOnlyEmpty_NotRetried(t *testing.T) {
 		SystemPrompt: "sys",
 	})
 	res := drainAgent(ag.Prompt(context.Background(), "hello"))
-	if len(res.errors) == 0 {
-		t.Fatal("expected empty-response error for reasoning-only stream, got none")
+	if len(res.errors) > 0 {
+		t.Fatalf("reasoning-only empty must self-heal, not error: %v", res.errors)
 	}
-	if !strings.Contains(res.errors[0].Error(), "empty response") {
-		t.Errorf("error should mention empty response, got: %v", res.errors[0])
+	// Exactly one request for the reasoning-only turn (no retry), then the
+	// continuation turn: 2 total.
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server hits = %d, want 2 — the reasoning-only turn must NOT be retried (1 + continuation)", got)
 	}
-	if got := hits.Load(); got != 1 {
-		t.Errorf("server hits = %d, want 1 — reasoning-only empty must NOT be retried", got)
+	// The double-render guard, mechanised: the FIRST turn (the reasoning
+	// one) opens exactly one assistant block. The recovery turn opens its
+	// own, which is correct — what must never happen is a second block
+	// carrying the same reasoning.
+	firstTurn := res.events
+	for i, ev := range res.events {
+		if ev == "TurnEnd" {
+			firstTurn = res.events[:i]
+			break
+		}
 	}
-	assertNoOrphanToolCalls(t, ag.Messages())
+	if n := strings.Count(strings.Join(firstTurn, ","), "MessageStart"); n != 1 {
+		t.Errorf("first turn MessageStart count = %d, want 1 — a second block would double-render the reasoning: %v", n, res.events)
+	}
+	// History: the reasoning stays on the message (really billed, already
+	// rendered) and the marker is the content, so the next request is legal.
+	hist := ag.Messages()
+	markerIdx := -1
+	for i, m := range hist {
+		if m.Role == deepseek.RoleAssistant && m.Content == emptyResponseMarker {
+			markerIdx = i
+			if m.ReasoningContent != "thinking..." {
+				t.Errorf("salvaged message lost its reasoning content: %q", m.ReasoningContent)
+			}
+		}
+	}
+	if markerIdx < 0 {
+		t.Fatalf("history holds no marker content: %+v", hist)
+	}
+	// Continuation request must be legal: a user turn follows the marker
+	// (an assistant tail is a 400 upstream), and no contentless assistant
+	// message survives anywhere.
+	for _, m := range hist {
+		if m.Role == deepseek.RoleAssistant && m.Content == "" && len(m.ToolCalls) == 0 && m.ReasoningContent == "" {
+			t.Errorf("history holds a contentless assistant message: %+v", hist)
+		}
+	}
+	assertNoOrphanToolCalls(t, hist)
+	if n := len(hist); n == 0 || hist[n-1].Role != deepseek.RoleAssistant || hist[n-1].Content != "recovered" {
+		t.Errorf("history tail = %+v, want the recovered assistant message", hist)
+	}
 }
 
 // safetyRefusalSSE is the fake refusal response: DeepSeek documents the
@@ -2603,6 +2928,52 @@ func TestRunTurnLLM_UsageCacheMapping(t *testing.T) {
 	}
 	if got.PromptTokens != 1000 || got.CompletionTokens != 40 || got.TotalTokens != 1040 {
 		t.Errorf("token totals = %+v", got)
+	}
+}
+
+// TestRunTurnLLM_StartedEmpty_SelfHeals: the second-tier twin of the
+// reasoning-only case. A provider that opened the assistant block (any
+// TextDelta, even an empty one) and then ended with no content used to
+// return a hand-built hard error — a session death sentence on the
+// reasoning-heavy lanes. Since card c_7kco3z both paths return the same
+// sentinel and Prompt's self-heal gate books the marker, so the loop
+// keeps going until the consecutive-placeholder gate fires.
+func TestRunTurnLLM_StartedEmpty_SelfHeals(t *testing.T) {
+	t.Parallel()
+	prov := &fakeUsageProvider{events: []llm.Event{
+		llm.TextDelta{Delta: ""}, // opens the block, contributes nothing
+		llm.TurnDone{FinishReason: "stop", InputTokens: 10, OutputTokens: 3},
+	}}
+	a, err := New(Config{Provider: prov, Model: "glm-5.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := drainAgent(a.Prompt(context.Background(), "hello"))
+	// The gate that fires is the consecutive-placeholder one — NOT an
+	// immediate hard error from runTurnLLM.
+	if len(res.errors) == 0 {
+		t.Fatalf("the consecutive-placeholder gate must fire, events: %v", res.events)
+	}
+	if msg := res.errors[0].Error(); !strings.Contains(msg, "连续空补全占位") {
+		t.Errorf("first error should be the placeholder hard-stop, got: %v", res.errors)
+	}
+	// One block per salvage: two placeholders → two MessageStarts, never
+	// a second block for the same turn (double-render regression guard).
+	if n := strings.Count(strings.Join(res.events, ","), "MessageStart"); n != emptyPlaceholderHardStop {
+		t.Errorf("MessageStart count = %d, want %d: %v", n, emptyPlaceholderHardStop, res.events)
+	}
+	hist := a.Messages()
+	markers := 0
+	for _, m := range hist {
+		if m.Role == deepseek.RoleAssistant && m.Content == emptyResponseMarker {
+			markers++
+		}
+		if m.Role == deepseek.RoleAssistant && m.Content == "" && len(m.ToolCalls) == 0 {
+			t.Errorf("history holds a contentless assistant message: %+v", hist)
+		}
+	}
+	if markers != emptyPlaceholderHardStop {
+		t.Errorf("history holds %d markers, want %d", markers, emptyPlaceholderHardStop)
 	}
 }
 

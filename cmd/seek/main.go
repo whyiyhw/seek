@@ -70,6 +70,7 @@ import (
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/sysprompt"
+	"github.com/whyiyhw/seek/internal/taskcli"
 	"github.com/whyiyhw/seek/internal/tools"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
@@ -213,6 +214,8 @@ Commands:
   agents       typed-agent definitions (list / check / create / remove)
   hooks        shell hooks (list / check / trust / audit)
   worktree     seek-owned git worktrees (list / gc)
+  task         tasks that outlive seek (run / ps / attach / kill)
+  ps           list task processes (alias of "seek task ps")
   session      export a transcript to markdown (export)
   checkpoint   file checkpoints (list / restore / prune); undo / redo are aliases
   keys         keybinding config (list / check / actions)
@@ -305,6 +308,21 @@ func run() error {
 	// feature-routines.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "cron" {
 		return routinescli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek task ...` + the ps / attach / kill aliases (v8 柱 V1,
+	// docs/prd/feature-task-lifetime.md). Same rationale as cron/worktree:
+	// the management verbs read ~/.seek/tasks/ and nothing else, so they
+	// must work without API keys, sessions, or the agent runtime — and
+	// `seek attach` in particular has to be usable from a shell that never
+	// runs the TUI. `task exec` is the detached wrapper this dispatches
+	// into; it is the process whose lifetime IS the task's.
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "task":
+			return taskcli.Run(os.Args[2:], os.Stdout, os.Stderr)
+		case "ps", "attach", "kill":
+			return taskcli.RunAlias(os.Args[1], os.Args[2:], os.Stdout, os.Stderr)
+		}
 	}
 	// `seek keys ...` — list / check / actions. Same rationale: keymap
 	// queries don't need API keys, sessions, or a project directory.
@@ -605,28 +623,38 @@ func run() error {
 	//
 	// ACP lane (D-2, docs/prd/archive/feature-paseo-provider.md §3.3): flags
 	// NEVER reach it — flag.Parse stops at the "acp" positional — so
-	// --yolo is inexpressible and pref would stay Deny (bash denied
-	// across the board → unattended lanes can't work). The escape
+	// --yolo is inexpressible; pre-P0-2 pref therefore stayed Deny (bash
+	// denied across the board → unattended lanes can't work). The escape
 	// hatch is the SEEK_ACP_YOLO env var, resolved HERE rather than at
 	// the acp short-circuit so sysprompt.Compose's Mode label matches
-	// the gate (a late SetPref would leave "Mode: deny" in the prompt
-	// and the model wouldn't even try bash). Env-scoped and gated on
-	// acpLane: a stray SEEK_ACP_YOLO in the shell must not silently
-	// yolo the TUI. Same "no human to ask" posture as goal/autopilot.
-	// Resolved once, consumed twice: initialPref here, and the
-	// no-remote bash guard further down (goalBash + subagent runner
-	// wiring). The guard is a property of the yolo lane specifically —
-	// a Deny ACP session (Zed) keeps the plain permission gate.
+	// the gate (a late SetPref would leave a stale "Mode: deny" in the
+	// prompt and the model wouldn't even try bash). Env-scoped and
+	// gated on acpLane: a stray SEEK_ACP_YOLO in the shell must not
+	// silently yolo the TUI. Same "no human to ask" posture as
+	// goal/autopilot. Resolved once, consumed twice: initialPref here,
+	// and the no-remote bash guard further down (goalBash + subagent
+	// runner wiring). The guard is a property of the yolo lane
+	// specifically — a non-yolo ACP session (Zed) answers per-action
+	// permission requests instead (P0-2 below).
 	//
 	// W5 c_n37tnr child half: --approval-stdin (--json only) makes print
 	// mode's prompts answerable from stdin, so the pref has to be Ask —
 	// resolved HERE for the same reason SEEK_ACP_YOLO is: the system
 	// prompt's Mode label is composed below and must agree with the gate.
+	//
+	// ACP·P0-2 (backlog ①): the non-yolo ACP lane joins Ask the same
+	// way — its askFn (acp_approval.go) surfaces permission requests as
+	// session/request_permission over the protocol, and EVERY
+	// no-answer ending (timeout / disconnect / client error — e.g.
+	// headless drivers answering -32601) denies, so the previous
+	// Deny-lane posture is the worst case, never a regression. YOLO
+	// keeps priority: it is checked FIRST, and runACP doesn't even
+	// install the askFn on that lane, so no request can be sent.
 	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
 	initialPref := permission.PrefDeny
 	if *yolo || acpYolo {
 		initialPref = permission.PrefYolo
-	} else if *approvalStdin && *jsonOut {
+	} else if (*approvalStdin && *jsonOut) || acpLane {
 		initialPref = permission.PrefAsk
 	}
 	initialWorkflow := permission.WorkflowNone
@@ -1298,6 +1326,11 @@ func run() error {
 			// `agent` tool schema enum is generated from the same
 			// registry at startup (agenttool.CacheTypesSchema above).
 			AgentTypes: agentTypes,
+			// P3-a trigger wiring: subagent_start / subagent_stop
+			// observers fire from the Manager (parent registry — the
+			// child's own copy is a CloneWithout snapshot, so the
+			// lifecycle event fires exactly once per spawn).
+			Hooks: hooksReg,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
 				client:    dsClient,
 				provider:  provider,
@@ -1417,7 +1450,16 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "cron auto-tick: open store:", err)
 				return
 			}
-			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{Webhook: routinescli.WebhookDispatcherFromConfig()}); err != nil {
+			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{
+				Webhook: routinescli.WebhookDispatcherFromConfig(),
+				// Notification observer (feature-orchestration D15):
+				// pillar H's OS notifier is one of the two "surfaced
+				// outside the text plane" points. Wrapping the
+				// platform default reports every popup this process
+				// dispatches to a `notification` hook without
+				// changing delivery — errors still surface as WARN.
+				Notifier: hooks.NotifierObserver(hooksReg, routines.DefaultNotifier),
+			}); err != nil {
 				fmt.Fprintln(os.Stderr, "cron auto-tick:", err)
 			}
 		}()
@@ -1705,7 +1747,9 @@ func run() error {
 	// feature-deepseek-app-api F3: document references in the prompt
 	// text route through the same submit-time file router as the TUI.
 	// Permission posture (incl. SEEK_ACP_YOLO) was already resolved into
-	// initialPref above — nothing to flip here. The model menu is built
+	// initialPref above — nothing to flip here; runACP additionally
+	// installs the session/request_permission askFn on the non-yolo lane
+	// (P0-2, acp_approval.go). The model menu is built
 	// from the startup lane (*model already carries the env pin / loaded
 	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
@@ -1717,6 +1761,7 @@ func run() error {
 			menu:   acpModelMenu(*model, openCatalogRows()),
 			sess:   activeSession,
 			store:  store,
+			yolo:   acpYolo,
 		})
 	}
 
@@ -1972,6 +2017,7 @@ func run() error {
 		Suggester:             predictor,
 		Skills:                skills,
 		AgentTypes:            agentTypes,
+		Hooks:                 hooksReg,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
 		AutoCompactAt:         autoCompactAt,
@@ -2555,6 +2601,10 @@ type acpBackend struct {
 	// session"); anchored by NewSession / LoadSession, checked by
 	// SetConfigOption.
 	sessionID string
+	// ask is the ACP approval lane (acp_approval.go, P0-2): nil on the
+	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
+	// scopes it per-turn so a permission request dies with its turn.
+	ask *acpApproval
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
@@ -2924,18 +2974,56 @@ func imageExtForMime(m string) string {
 }
 
 func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(acp.SessionUpdate)) (acp.PromptResult, error) {
+	// turnStop emits the structured termination frame (c_vfgeam). Exactly
+	// one call per exit path, always immediately before the return — that
+	// invariant is what lets a client treat "no frame and no response" as
+	// "the process died mid-turn". sendU writes under the server's lock,
+	// and the response frame is written after Prompt returns, so ordering
+	// (frame before response) holds by construction.
+	turnStop := func(reason, detail, finish string) {
+		sendU(acp.SessionUpdate{SessionID: p.SessionID, Update: acp.NewTurnStop(reason, detail, finish)})
+	}
+
 	text, images, files := buildACPPromptText(ctx, b.ag.Model(), p, b.route, b.froute)
 	if text == "" {
-		return acp.PromptResult{StopReason: "end_turn"}, nil
+		turnStop(acp.FrameStopEndTurn, "empty prompt: no text after image/file routing", "")
+		return acp.PromptResult{StopReason: acp.StopEndTurn}, nil
+	}
+	// Scope the approval lane to THIS turn before the first tool can
+	// fire: the askFn resolves ctx/sessionID from it, so session/cancel
+	// (which cancels this ctx) also unblocks an in-flight permission
+	// request instead of leaving the agent waiting on a dead turn.
+	if b.ask != nil {
+		b.ask.beginTurn(ctx, p.SessionID)
+		defer b.ask.endTurn()
 	}
 	// cwd makes tool-call locations absolute (schema contract: "the
 	// absolute file path"), resolved once per turn — the session cwd was
 	// anchored at session/new (D-1) so this is the project root.
 	cwd, _ := os.Getwd()
+	var (
+		// pendingErr holds the FIRST ErrorEvent instead of returning on
+		// it: an ErrorEvent is fatal only when the stream closes without
+		// an AgentEnd behind it. The one advisory producer — the
+		// finish_reason=length truncation notice — is followed by
+		// TurnEnd + AgentEnd, and draining to the close costs nothing
+		// (the goroutine returns right after a fatal event). Holding the
+		// error also keeps the turn's streamed content flowing to the
+		// client while classification waits for the stream's verdict.
+		pendingErr error
+		finish     string // AgentEnd.Finish — the final turn's upstream finish reason
+		sawEnd     bool
+	)
 	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
-		if e, ok := ev.(agent.ErrorEvent); ok {
-			b.saveTurn()
-			return acp.PromptResult{}, e.Err
+		switch e := ev.(type) {
+		case agent.ErrorEvent:
+			if pendingErr == nil {
+				pendingErr = e.Err
+			}
+			continue
+		case agent.AgentEnd:
+			sawEnd = true
+			finish = e.Finish
 		}
 		if u, ok := acpUpdate(p.SessionID, cwd, ev); ok {
 			sendU(u)
@@ -2951,11 +3039,62 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 			b.saveTurn()
 		}
 	}
-	b.saveTurn()
-	if ctx.Err() != nil {
-		return acp.PromptResult{StopReason: "cancelled"}, nil
+	// The advisory verdict: an error that the agent itself carried past
+	// (AgentEnd present) AND whose finish says token-limit truncation is
+	// the length notice, not a turn failure. The finish guard is
+	// belt-and-suspenders against a future fatal producer that happens
+	// to emit AgentEnd too — a real failure with a length finish is not
+	// a thing today, and if it becomes one the honest classification is
+	// still "truncated", not "internal error".
+	notice := ""
+	if pendingErr != nil && sawEnd && acp.IsLengthFinish(finish) {
+		notice = pendingErr.Error()
+		pendingErr = nil
 	}
-	return acp.PromptResult{StopReason: "end_turn"}, nil
+	b.saveTurn()
+	switch {
+	case pendingErr != nil:
+		// Fatal turn error. Classification rides the frame; the
+		// spec-side surface stays the JSON-RPC error response (the
+		// spec's error channel — its stopReason enum has no
+		// error/timeout value). A cancel-shaped error answers
+		// cancelled instead, so the client sees one truth.
+		frameReason := acp.FrameStopFromError(pendingErr)
+		turnStop(frameReason, pendingErr.Error(), finish)
+		if frameReason == acp.FrameStopCancelled {
+			return acp.PromptResult{StopReason: acp.StopCancelled}, nil
+		}
+		return acp.PromptResult{}, pendingErr
+	case ctx.Err() != nil:
+		// Drain finished without an error event but the ctx is done:
+		// the agent's gentle-cancel path (AgentEnd, no ErrorEvent).
+		// Canceled → the user hit stop; DeadlineExceeded → a
+		// driver-imposed bound ran out, the closest in-process analogue
+		// of the silent-stall death (frame names it; the spec response
+		// has no timeout value, so it answers cancelled).
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			turnStop(acp.FrameStopSilentTimeout, "turn deadline exceeded before any error surfaced", finish)
+		} else {
+			turnStop(acp.FrameStopCancelled, "client cancelled the turn", "")
+		}
+		return acp.PromptResult{StopReason: acp.StopCancelled}, nil
+	case notice != "":
+		// finish_reason=length family: the turn COMPLETED (partial
+		// answer delivered, transcript saved) — the truncation is
+		// reported, not raised.
+		turnStop(acp.FrameStopMaxTokens, notice, finish)
+		return acp.PromptResult{StopReason: acp.StopMaxTokens}, nil
+	default:
+		detail := "turn completed; finish_reason=" + finish
+		if acp.IsLengthFinish(finish) {
+			// Lanes that truncate without the agent-level notice
+			// (Anthropic passes stop_reason=max_tokens through
+			// verbatim; only "length" gets a notice in pkg/agent).
+			detail = "upstream finish_reason=" + finish + " — output truncated by token limit"
+		}
+		turnStop(acp.FrameStopFromFinish(finish), detail, finish)
+		return acp.PromptResult{StopReason: acp.ResponseStopReason(finish)}, nil
+	}
 }
 
 // saveTurn snapshots the live session to disk. Best-effort: a failed
@@ -3276,6 +3415,10 @@ type acpOptions struct {
 	// loadSession.
 	sess  *session.Session
 	store *session.Store
+	// yolo marks the SEEK_ACP_YOLO lane: PrefYolo, so runACP skips
+	// installing the approval askFn entirely (P0-2's short-circuit
+	// priority — no permission request can ever be sent).
+	yolo bool
 }
 
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
@@ -3302,7 +3445,7 @@ func runACP(ctx context.Context, o acpOptions) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
-	return acp.NewServer(r, w, &acpBackend{
+	b := &acpBackend{
 		ag:     o.ag,
 		route:  o.vroute,
 		froute: o.froute,
@@ -3318,7 +3461,20 @@ func runACP(ctx context.Context, o acpOptions) error {
 		},
 		sess:  o.sess,
 		store: o.store,
-	}).Serve(ctx)
+	}
+	srv := acp.NewServer(r, w, b)
+	// ACP·P0-2: install the approval askFn on the non-yolo lane. The
+	// policy was born PrefAsk (initialPref), so until this lands a
+	// dangerous action would fall to prefGate's deny branch — the
+	// pre-P0-2 posture; nothing runs between here and Serve anyway.
+	// On the yolo lane the askFn stays unset: prefGate never consults
+	// it under PrefYolo and no request can be sent (P0-2 ③).
+	if !o.yolo && o.policy != nil {
+		ask := newACPApproval(srv, o.policy.SetAlwaysAllow, acpPermissionTimeoutFromEnv(os.Getenv))
+		b.ask = ask
+		o.policy.SetAskFn(ask.ask)
+	}
+	return srv.Serve(ctx)
 }
 
 // taggedWriter prefixes each write with tag, for the SEEK_ACP_LOG trace

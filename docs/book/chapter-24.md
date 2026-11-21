@@ -251,13 +251,12 @@ ACP 的传输是 **newline-delimited JSON-RPC 2.0**——和 seek 已有的 MCP 
 
 柱 P 作为 MVP 交付，有几项已知限制：
 
-- 无审批门——ACP 的 `request_permission` 方法还没有路由到 `ask_user`
 - 无 slash 命令——`/plan`、`/review` 等 TUI 命令在 ACP 模式下不可用（见第 23 章 §23.7，这些命令是 TUI 层的）
 - 一个进程 = 一个会话（多 `session/new` 是重锚定已有会话，不新开）
 
 这些限制都是可解的（每一件都是一个中等 PR），但 MVP 的核心交付——握手、流式回复、工具调用渲染——已经跑通并在真 Zed 上验证过。
 
-**已不在限制内**（原列入本节，后续补齐）：`session/load` 会话恢复与 transcript 持久化（2026-11-19，见 [`docs/prd/archive/feature-paseo-provider.md`](../prd/archive/feature-paseo-provider.md) §2.4）——`initialize` 的 `loadSession` 现在按持久化能力如实申报，`session/load` 读回 JSONL、重锚 cwd、把历史回放成 `session/update` 序列后才回响应；ACP 车道同时开始按 turn 落盘。「还剩什么没做」的长期清单以 [`docs/prd/archive/feature-acp.md`](../prd/archive/feature-acp.md) 的状态行为准，本节只做概述。
+**已不在限制内**（原列入本节，后续补齐）：`session/load` 会话恢复与 transcript 持久化（2026-11-19，见 [`docs/prd/archive/feature-paseo-provider.md`](../prd/archive/feature-paseo-provider.md) §2.4）——`initialize` 的 `loadSession` 现在按持久化能力如实申报，`session/load` 读回 JSONL、重锚 cwd、把历史回放成 `session/update` 序列后才回响应；ACP 车道同时开始按 turn 落盘。审批门 `session/request_permission`（2026-11-21，ACP·P0-2）——非 yolo 车道以 `Ask` 姿态把危险动作弹给客户端，`allow_always` 即 TUI 的「[a] always」语义，无应答（超时/断线/无头 driver 回 `-32601`）默认拒；`SEEK_ACP_YOLO=1` 无人值守车道照旧短路放行。「还剩什么没做」的长期清单以 [`docs/prd/archive/feature-acp.md`](../prd/archive/feature-acp.md) 的状态行为准，本节只做概述。
 
 ### 24.4.5 验收
 

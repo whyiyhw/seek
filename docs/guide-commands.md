@@ -97,6 +97,10 @@ seek hooks list                    # List trusted hook scripts
 seek hooks trust <path>            # Trust a hook script
 seek keys list                     # Show active keybindings
 seek worktree gc                   # Garbage-collect stale worktrees
+seek task run "<command>"          # Start a task that outlives this seek process
+seek ps                            # List task processes (alias: seek task ps)
+seek attach <id>                   # Follow a task's output until it ends
+seek kill <id>                     # SIGTERM a task's process group, then SIGKILL
 ```
 
 ---
