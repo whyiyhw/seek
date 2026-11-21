@@ -279,7 +279,7 @@ func (m *Model) maybeAutoCompact(wasCanceled bool) (tea.Cmd, string) {
 		return nil, ""
 	}
 	m.compacting = true
-	return startCompactCmd(m), fmt.Sprintf(
+	return startCompactCmd(m, "auto"), fmt.Sprintf(
 		"ctx %s ≥ auto-compact at %s — compacting (snapshot preserved)…",
 		formatTokensK(used), formatTokensK(at))
 }

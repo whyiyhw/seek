@@ -18,22 +18,29 @@
 #   covered   build → spawn real `seek acp` → newline-JSON-RPC handshake
 #             (initialize) → session/new with a cwd that differs from the
 #             process launch dir → assert the D-1 double anchor actually
-#             moved (sessionId = basename, stderr anchor line carries the
-#             absolute cwd + 16-hex project id) → bad cwd fails loud with
-#             a JSON-RPC error → session/prompt (empty text: terminates
-#             without a key or network) asserts the c_vfgeam structured
-#             termination — exactly one _seek_turn_stop session/update,
-#             stopReason end_turn with a readable detail, preceding the
-#             response and matching its spec-side stopReason → stdin EOF
-#             → clean exit rc=0.
+#             moved (sessionId is the durable transcript id, stderr anchor
+#             line carries the absolute cwd + 16-hex project id) → bad cwd
+#             fails loud with a JSON-RPC error → [P0-2] reply frames (id,
+#             no method) are routed to permission waiters / silently
+#             ignored — never answered with -32601 — and $/cancel_request
+#             for an unknown id is ignored, both WITHOUT killing the read
+#             loop → session/prompt (empty text: terminates without a key
+#             or network) asserts the c_vfgeam structured termination —
+#             exactly one _seek_turn_stop session/update, stopReason
+#             end_turn with a readable detail, preceding the response
+#             and matching its spec-side stopReason → stdin EOF →
+#             clean exit rc=0.
 #   NOT       session/prompt with CONTENT — that needs a real LLM
 #             round-trip (key + network), which is not deterministic
 #             lane material. The content-bearing termination states
 #             (length truncation / cancel / timeout / internal error)
 #             are covered in-process by cmd/seek fixture tests
-#             (TestACPBackend_Prompt_TerminationFixtures) and by manual
-#             real-key smoke when needed. No API call is made here: a
-#             DUMMY DeepSeek key satisfies startup provider resolution
+#             (TestACPBackend_Prompt_TerminationFixtures), and the
+#             session/request_permission APPROVAL LOOP (P0-2) by
+#             cmd/seek's acp_approval_e2e_test.go (real binary × fake
+#             OpenAI-compatible backend, four lanes: allow / reject /
+#             timeout-deny / yolo-never-asks). No API call is made here:
+#             a DUMMY DeepSeek key satisfies startup provider resolution
 #             (env beats config, DeepSeek wins auto-detect), SEEK_HOME
 #             isolates ~/.seek.
 #
@@ -119,9 +126,11 @@ echo "acp-smoke: initialize ok (protocolVersion=1, image capability advertised)"
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":2' 'session/new' 15
-# sessionId is the DURABLE transcript id (session/load contract, guide-zed
-# §5) — the pre-durable assertion ("smoke-ws", the basename) drifted red
-# when that landed; the anchor itself is proven by the stderr line below.
+# sessionId is the DURABLE transcript id (session/load work, 2026-11-19:
+# YYYYMMDD-HHMMSS-16hex) — NOT the project name the smoke used to assert
+# before persistence landed. SID is captured because the prompt step
+# below addresses the session by it; the anchor proof stays in the
+# stderr line.
 SID="$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$OUT" | head -1)"
 echo "$SID" | grep -Eq '^[0-9]{8}-[0-9]{6}-[0-9a-f]{16}$' \
   || fail "session/new: sessionId is not a durable transcript id (got: ${SID:-none}; $(grep '"id":2' "$OUT"))"
@@ -140,7 +149,26 @@ grep '"id":3' "$OUT" | grep -q '"error"'      || fail 'bad cwd: no JSON-RPC erro
 grep '"id":3' "$OUT" | grep -q '\-32000'     || fail 'bad cwd: error code != -32000'
 echo "acp-smoke: bad cwd rejected loud (-32000)"
 
-# --- 3.5 session/prompt termination frame (c_vfgeam) ---------------------------
+# --- 3b. P0-2: reply frames route, never dispatch (approval-lane transport) ---
+# session/request_permission made the server RECEIVE reply frames (id,
+# no method). Two rules the read loop must now honour, asserted against
+# the real binary without an LLM:
+#   a) a stray reply nobody waits for is silently ignored — pre-P0-2 it
+#      fell into dispatch's default case and got ANSWERED with a -32601
+#      error, protocol noise on every permission answer;
+#   b) $/cancel_request for an unknown id is ignored.
+# Both must leave the read loop alive (the initialize probe after proves
+# it) and neither may ever produce a "method not handled" error.
+printf '%s\n' '{"jsonrpc":"2.0","id":"p99","result":{"outcome":{"outcome":"cancelled"}}}' >&3
+printf '%s\n' '{"jsonrpc":"2.0","method":"$/cancel_request","params":{"id":"p1"}}' >&3
+rpc 4 initialize '{"protocolVersion":1}'
+wait_for '"id":4' 'post-stray-frames initialize' 15
+if grep -q 'method not handled' "$OUT"; then
+  fail 'stray reply/cancel frames were dispatched as methods (-32601 noise)'
+fi
+echo "acp-smoke: reply + cancel frames routed/ignored, read loop alive (P0-2)"
+
+# --- 3c. session/prompt termination frame (c_vfgeam) ---------------------------
 # The one prompt shape that terminates deterministically WITHOUT a key
 # or network: an empty text block routes to no text at all, so the
 # backend answers immediately. That is enough to assert the structured
@@ -150,9 +178,9 @@ echo "acp-smoke: bad cwd rejected loud (-32000)"
 # truncation, cancel, timeout, internal error — need an LLM round-trip
 # or a stalled upstream; they are covered by the cmd/seek fixture
 # tests, TestACPBackend_Prompt_TerminationFixtures.)
-rpc 4 session/prompt "{\"sessionId\":\"$SID\",\"prompt\":[{\"type\":\"text\",\"text\":\"\"}]}"
+rpc 5 session/prompt "{\"sessionId\":\"$SID\",\"prompt\":[{\"type\":\"text\",\"text\":\"\"}]}"
 wait_for '_seek_turn_stop' 'session/prompt termination frame' 15
-wait_for '"id":4' 'session/prompt response' 15
+wait_for '"id":5' 'session/prompt response' 15
 # exactly one termination frame per prompt…
 frames=$(grep -c -F '"_seek_turn_stop"' "$OUT")
 [ "$frames" -eq 1 ] || fail "termination frames = $frames, want exactly 1 per session/prompt"
@@ -164,11 +192,11 @@ grep -F '"_seek_turn_stop"' "$OUT" | grep -qF '"detail":' \
 # …and it PRECEDES the response (frame-then-response is the ordering
 # clients rely on to attribute a missing frame to process death).
 frame_line=$(grep -n -F '"_seek_turn_stop"' "$OUT" | head -1 | cut -d: -f1)
-resp_line=$(grep -n -F '"id":4' "$OUT" | head -1 | cut -d: -f1)
+resp_line=$(grep -n -F '"id":5' "$OUT" | head -1 | cut -d: -f1)
 [ "$frame_line" -lt "$resp_line" ] || fail "termination frame (line $frame_line) must precede the response (line $resp_line)"
 # the response keeps the spec-side stopReason in sync with the frame.
-grep -F '"id":4' "$OUT" | grep -qF '"stopReason":"end_turn"' \
-  || fail "response stopReason != end_turn: $(grep -F '"id":4' "$OUT")"
+grep -F '"id":5' "$OUT" | grep -qF '"stopReason":"end_turn"' \
+  || fail "response stopReason != end_turn: $(grep -F '"id":5' "$OUT")"
 echo "acp-smoke: termination frame ok (_seek_turn_stop end_turn, precedes response)"
 
 # --- 4. stdin EOF → clean shutdown --------------------------------------------

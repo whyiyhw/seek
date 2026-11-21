@@ -17,6 +17,8 @@ signal, not proof; trends across versions are what matter.
 eval/
 ├── run.sh          # eval/run.sh [case] [binary]   (defaults: all cases, ./seek)
 ├── ablate.sh       # eval/ablate.sh [case] [binary] — bare-core vs full dual run (below)
+├── lane-release.txt  # release lane case list (eval/run.sh --lane release; "发版前跑什么")
+├── lane-core.txt     # nightly core lane case list (eval/run.sh --lane core; same section)
 ├── cases/
 │   └── <name>/
 │       ├── README.md   # what the case probes + the bug it came from
@@ -43,6 +45,9 @@ eval/run.sh tool-args-hallucination /tmp/seek-baseline
 
 # N-round distribution sampling (see "Judgment" below)
 eval/run.sh --rounds 5 tool-args-hallucination
+
+# A curated case list instead of all cases (see "发版前跑什么" below)
+eval/run.sh --lane release
 ```
 
 The runner appends one row to `results/<UTC-date>-<binary-version>.jsonl`
@@ -131,10 +136,13 @@ rows skip, proving no double-count).
 
 ## Calibration table (E2, 2026-11-21)
 
-One row per existing case under `eval/cases/` — **30 cases**. The PRD's
-"21 例" predates the nine `mcp-semble-routing-*` arms added 2026-11-17/18
-by the MCP D-line (21 + 9 = 30). History columns are computed from the
-372 committed sample rows in `results/` — all-time, plus the window
+One row per existing case under `eval/cases/` — **30 cases** at E2
+time. The PRD's "21 例" predates the nine `mcp-semble-routing-*` arms
+added 2026-11-17/18 by the MCP D-line (21 + 9 = 30); E5's
+`serve-web-stream` (2026-11-21) makes it 31 — its row lives in the
+load-bearing table below, not in this history table (it has no
+pre-landing history by construction). History columns are computed from
+the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
 wherever a repair landed mid-history; the window is the honest basis).
 
@@ -244,24 +252,88 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (placeholders — deliberately not calibrated here)
+### Load-bearing axes (E3/E4 placeholders; E5 backfilled 2026-11-21)
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
 | `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
 | `subagent-bg-resume` (E4) | 5 | baseline 待 E4 回填 |
-| `serve-web-stream` (E5) | 5 | baseline 待 E5 回填 |
+| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
 case measures < 0.6, the fix belongs in the product's prompts, not the
-threshold). This card neither runs nor pre-gates them.
+threshold). E2 neither ran nor pre-gated them.
+
+**`serve-web-stream` baseline (E5, c_lbtdqw)**: landed with the case —
+[`eval/cases/serve-web-stream/`](cases/serve-web-stream/)（README 记
+判分口径与代码锚点）。Fake-key lane（卡面硬规定：无人值守假 key，本地
+`eval/tools/fake_openai_compat.py` 两段 delta）实测 3/3 绿（1 单轮 +
+2 rounds 聚合，`eval/results/2026-11-21-v0.12.2-…jsonl`）+ 六轴构造行
+负验证（换序/帧序倒置/sid 未命中/收口缺 session_id/崩溃形各自单独翻红）。
+**Gate `1.0`**：假 key 车道全链确定性（端点固定两段 delta、serve 排干契约
+0），红即真回归——W5 组再动 `webfrontend_stream/conv/rpc` 任何一处即翻红，
+这正是把 serve/web 平面纳入保护网的目的（PRD §1.2 零覆盖清单）。**真 key
+口径留待 E6 发版道**：同 runner 不清空车道凭证、不设 GLM 假端点即走真车道
+（env-in/env-out 同一接缝），届时按 §2.5 在 5 轮上重标定（真流多 delta 多
+turn，`min_sse_delta_frames: 2` 照常成立；PRD §六.3 的「< 0.6 修产品提示
+不修阈值」规则届时适用）。轮数随 E6 发版道名单定（本卡单轮/多轮均已验通）。
 
 **Live re-measurement**: the expected-pass column is history-derived;
 real-key rounds under this policy (5-round re-runs of the flaky set,
 3-round lanes) are a human/main-session action per the provider-lane
 rule below — this calibration used committed rows plus constructed-row
 verification only.
+
+## 发版前跑什么（lanes, E6）
+
+E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
+§2.2/§2.3、card c_rkoeiy）把两条观测道落成 **lane 名单**：`eval/run.sh
+--lane <name>` 跑 `eval/lane-<name>.txt` 里的用例集（一行一名，`#` 注释
+与空行忽略；名单出现不存在的用例、`--lane` 与显式 `<case-name>` 同给、
+名单无有效条目——都启动 exit 2 零行写入）。名单文件就是车道策略：E2
+标定表的轮数/闸门值是 expect.json 的事实，**谁进哪条道**是名单文件的
+事实，两者都受审进 git。机制由 `scripts/eval-lane-test.sh` 钉死（无
+`--lane` 输出与 E6 前 run.sh 字节等价——git 历史 blob 对照；过滤/顺序/
+畸形 exit 2）。
+
+| lane | 名单 | 用途 |
+|---|---|---|
+| `release` | 承重轴（`serve-web-stream` 已在；`plan-e2e`/`subagent-bg-resume` 注释占位待 E3/E4 落地后取消注释）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
+| `core` | 低成本子集 8 例（便宜单发用例 + 零成本假 key 的 `serve-web-stream`；无 MCP fixture、无整仓 review） | 夜间观测（CI schedule，`--rounds 2`） |
+
+**发版命令**（在 main、干净树）：
+
+```bash
+go build -o seek ./cmd/seek
+eval/run.sh --lane release --rounds 5
+```
+
+- 稳定例按 §2.5 标定在 3 轮（gate 1.0 = 3/3）；发版道统一 5 轮是
+  PRD §五成本表的形状（$1.5–4/次），且是**收紧**不是放松——同一个
+  1.0 闸门在 5 轮上要求 5/5。
+- **判读口径**：任何 FAIL 行先看其 failures 列的 metric 与该例
+  README；稳定例单轮红按 E2 容差原则是**新信号**而非噪声——单发复跑
+  该例 `eval/run.sh --rounds 3 <case>` 区分偶发与持续，持续红 = 阻塞
+  发版。record-only 与已知 flaky 例不在 release 名单：它们的观测归
+  日常 trend（`scripts/eval-trend.sh`），不归发版闸门。
+- **真 key 口径**（`serve-web-stream` 的 E5 留白在此收口）：发版道同
+  runner 不清空车道凭证、不设假端点即走真车道；届时按 §2.5 在 5 轮
+  上重标定（PRD §六.3「< 0.6 修产品提示不修阈值」适用）。
+
+**夜间入口**（只观测、不阻塞 PR）：`.github/workflows/ci.yml` 的
+`eval-nightly` job 仅在 `schedule` 触发时运行（PR / workflow_dispatch
+结构性地跑不到它——ci.yml 的 keyless PR 面不动），执行 `--lane core
+--rounds 2`，行落 actions cache 持久化的独立目录（不进 `eval/results/`、
+不回写 git；cache 逐出会重置计数，方向保守）。失败策略**复用**
+`scripts/eval-trend.sh` 的既有 streak 实现（`streak_failures` 字段 =
+从最新行往回数的连续红行数，本卡零新计数代码）：core 名单内任一用例
+streak ≥ 3 才把 job 判红——夜间每例每晚写 2 行，即第二个连续整红夜过
+阈；中间任一绿行即重置。key 走 `secrets.OPENCODE_API_KEY`（OpenCode
+订阅车道：无人值守不烧计量 key，[`docs/prd/v8.md`](../docs/prd/v8.md)
+§9.1；secret 未配则告警并跳过当晚——观察者不是安全网，缺 key 静默绿
+无害，但跑出全红行是纯噪声）。trend 报告按 PRD §2.3 以 artifact 上传
+（留 30 天）。
 
 ## Isolation: the SEEK_HOME sandbox
 
@@ -333,6 +405,12 @@ the lane block and is lane-independent.
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
 | `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
+| `sse_delta_frames` | serve-web-stream only: `delta` frames on the W1.4 SSE wire — the case's runner.sh pairs captured `event:`/`data:` lines into `sse_frame` rows first; **content-conditional** (merged into the metrics object only when the stream carries `sse_frame` rows, so non-serve rows keep their historical byte shape — see the ablate no-env guard) |
+| `sse_usage_frames` | serve-web-stream only: `usage` frames (turn_end translated server-side, `internal/controlplane/webfrontend_stream.go`) |
+| `sse_frame_order_ok` | serve-web-stream only, 1/0: every `delta`/`usage`/`tool` frame of the close-out's run PRECEDES the close-out default frame — the per-conv `events…reply` wire invariant |
+| `sse_delta_accum_ok` | serve-web-stream only, 1/0: the delta frames' `text` concatenated in wire order equals the close-out frame's `text` (the authoritative replacement) — the fake endpoint ships two deltas so a swap or a drop breaks it |
+| `sse_reply_closeout_ok` | serve-web-stream only, 1/0: the close-out frame carries a non-empty `run` (equal to every delta frame's run) and a non-empty `session_id` |
+| `session_list_hits` | serve-web-stream only: `/rpc session/list` `sessions[].sid` entries matching the close-out frame's `session_id` — the persistence axis (child wrote it under the same `SEEK_HOME` ladder the rpc plane reads through) |
 
 Bounds in `expect.json` use the prefix to declare direction:
 

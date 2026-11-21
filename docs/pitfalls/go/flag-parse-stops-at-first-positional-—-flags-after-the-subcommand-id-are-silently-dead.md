@@ -1,0 +1,7 @@
+### `flag.Parse` stops at the first positional — `seek attach <id> --timeout 30s` silently ignored the flag
+
+- **Saw**: `seek attach t-1 --timeout 30s` against a running task never returned: the follow loop ignored the timeout because `flag.Parse` had stopped at `t-1`. Nothing errored — the flag was simply never read, so the command looked like a hang rather than a usage mistake.
+- **Why**: Go's `flag` package documents "parsing stops just before the first non-flag argument". Every `seek` verb that takes a positional id (`attach <id>`, `kill <id>`) therefore had a second, silent calling convention where all flags after the id were dead. The natural way a user types the command is exactly the broken one.
+- **Fix**: `taskcli.splitPositionals(args, valueFlags)` splits flags from positionals before `fs.Parse`, so a flag works on either side of the id; `valueFlags` names the flags that consume the next argv element so a value like `30s` is not mistaken for a positional. `--` still terminates flag parsing. Card `c_wvd7a7`.
+- **Lesson**: for any verb of the shape `verb <positional> [flags]`, assume the user puts flags last. Test the flag-before-id AND flag-after-id spellings, and prefer an explicit splitter over `flag.Parse`'s stop-at-first-positional behaviour. A silently ignored flag is worse than a rejected one.
+- **Refs**: `internal/taskcli/cmds.go` `splitPositionals`; `internal/taskcli/taskcli_test.go` (`TestAttach_TimeoutLeavesTaskRunning`, `TestKill_GRACE_ESCALATION`).
