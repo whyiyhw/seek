@@ -44,4 +44,16 @@
 # those merges (they claimed headroom instead — c_n37tnr's note). The
 # pin still carries ~1.16MB of go1.25-side slack, so the gate stays
 # green either way; this entry ratchets ONLY this card's delta.
-30517907
+# 2026-11-20 c_6xktw4 ratchet: +13644B (cross-session trend chart —
+# page CSS/markup/JS ~8.2KB embed (JS 6.6KB of hand-drawn SVG renderer
+# + hover + window switcher, CSS 1.1KB, markup 0.5KB) + ~5.4KB Go:
+# stats/trend fold, session/list server-side cost_usd, SessionInfo.Usage).
+# DELTA-added on the go1.25.8 line like every entry above — measured
+# head-vs-worktree with both builds in the same temp tree (29358454 →
+# 29372098); the absolute pin still carries the pre-existing toolchain
+# skew, so don't read it as a build size. Over the §13.3 ≤12KB card quota
+# by ~1.6KB — the overage eats the W5 pack's remaining margin
+# (c_n37tnr/c_oyp2qf precedent: 超在记账、不在 gate); measured
+# comment-trimming of the trend block recovered ~240B, not worth further
+# readability. Gate still has >1.1MB of headroom.
+30531551

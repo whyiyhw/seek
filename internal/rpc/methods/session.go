@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -98,6 +99,11 @@ type sessionSummary struct {
 	Model     string    `json:"model"`
 	ParentID  string    `json:"parent_id,omitempty"`
 	CWD       string    `json:"cwd,omitempty"`
+	// CostUSD is the header Usage priced server-side at the tier in
+	// effect at query time (c_6xktw4: the sidebar's per-session cost
+	// column). Same rule as stats/cache — rate cards live only in
+	// internal/pricing, the page never prices (§2.5).
+	CostUSD float64 `json:"cost_usd"`
 }
 
 type sessionListResult struct {
@@ -117,6 +123,7 @@ func (s *Sessions) list(ctx context.Context, params json.RawMessage) (any, error
 		return nil, err
 	}
 	out := make([]sessionSummary, 0, len(infos))
+	tier := pricing.CurrentTier(time.Now())
 	for _, info := range infos {
 		out = append(out, sessionSummary{
 			SID:       info.ID,
@@ -128,6 +135,7 @@ func (s *Sessions) list(ctx context.Context, params json.RawMessage) (any, error
 			Model:     info.Model,
 			ParentID:  info.ParentID,
 			CWD:       info.CWD,
+			CostUSD:   pricing.Cost(info.Model, tier, info.Usage),
 		})
 	}
 	return sessionListResult{Sessions: out}, nil
