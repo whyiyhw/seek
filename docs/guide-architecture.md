@@ -23,13 +23,15 @@ Code: `internal/memory/` · `internal/memorycli/` · `cmd/seek/main.go` (dream p
 Permission lives on two orthogonal axes — never crammed into a single enum:
 
 - **Preference** (`Deny` / `Ask` / `Yolo`) — your standing posture. "How strict am I." Chosen at startup (`--yolo`, `--no-perm`) or toggled via `/yolo`.
-- **Workflow** (`None` / `PlanAnalyze` / `PlanExecute`) — the ceremony you've entered. "What am I doing." Toggled via `/plan` and the propose-tool flow.
+- **Workflow** (`None` / `PlanAnalyze` / `PlanExecute`) — the ceremony you've entered. "What am I doing." Three entrances: `/plan` (TUI), the propose-tool flow, and ACP `session/set_mode` (protocol lane: mode `plan` ⇄ `default`, between turns — `guide-zed.md` §5.3).
 
 **Workflow trumps Preference where they conflict.** `PrefYolo + WorkflowPlanAnalyze` is still read-only — that's plan mode's raison d'être. The workflow is a user-chosen safety boundary; pref cannot override it.
 
 Permission denials are **tool results, not errors** — the agent sees the denial message and asks the user (or reconsiders), rather than crashing the loop.
 
-Code: `internal/permission/` · see `docs/prd/feature-permission-refactor.md`.
+**One seam, three lanes.** Every dangerous action routes through `Policy.askFn`; lanes only differ in transport — TUI (`approvalCh` → askuser widget), print/web (`--approval-stdin` JSONL cards on stdin, driven by the web hub's `ApprovalRouter`), and ACP (`session/request_permission` agent→client JSON-RPC, `cmd/seek/acp_approval.go`). `allow_always` / `"a"` / the TUI's `[a] always: <kind>` all land on `Policy.SetAlwaysAllow`. No answer (EOF / disconnect / timeout / client `-32601`) denies — never a hang.
+
+Code: `internal/permission/` · `cmd/seek/approval_stdin.go` · `cmd/seek/acp_approval.go` · see `docs/prd/feature-permission-refactor.md`.
 
 ---
 
@@ -38,6 +40,8 @@ Code: `internal/permission/` · see `docs/prd/feature-permission-refactor.md`.
 seek exposes tools to the LLM as JSON schema definitions. Current tools: `read`, `grep`, `list_dir`, `write`, `edit`, `bash`, `git`, `webfetch`, `think`, `fim_complete`, `ask_user`, `agent`, `enter_worktree`, `exit_worktree`, `monitor`, `schedule_wakeup`, `plan`, `propose`, `references`, `Skill`, `skill_fetch`, `skill_commit`, `memory_observe`, `memory_remember`, `memory_amend`, `memory_archive`, `memory_recall`.
 
 **Key constraint**: Tool schemas are `[]byte` constants at package level (built once at init, not at call time). This ensures identical bytes across turns → DeepSeek's prefix cache hits.
+
+- **Failure is an event, never a process death** — a panicking tool degrades to a failed tool call (the model sees the error and retries); a panic in the prompt goroutine becomes an `ErrorEvent` carrying the stack instead of killing the process. `AgentEnd.Finish` carries the final turn's upstream `finish_reason`, so consumers classify *how* a round ended from a typed field rather than from notice text. On the ACP lane the two compose into one guarantee the editor can trust: every round emits exactly one `_seek_turn_stop` frame **before** its response, so "no frame and no response" means the process itself died ([`guide-zed.md`](guide-zed.md) §4.1).
 
 Code: `internal/tools/` · each tool in its own package with a `New(...)` constructor.
 
@@ -84,6 +88,7 @@ Guide: [`docs/guide-sessions.md`](guide-sessions.md).
 - **`done_when` is required** — a `propose` call without completion conditions is rejected with a recovery error, so "what counts as done" is a field rather than prose in the problem statement. `reviewed_by` (optional) names who checks the result from a source that did not produce it.
 - **Plan artifact** — every approve writes a read-only markdown snapshot to `~/.seek/projects/<id>/plans/`, with `## Done when` rendered as a checkbox list between Problem and Steps.
 - **approve_batch** — opt-in fast-path for auto-approve-per-step.
+- **Protocol surface** — the ACP lane drives the same workflow axis via the spec's session modes: `session/new` advertises `modes: {currentModeId, availableModes: [default, plan]}`, `session/set_mode` flips `default ⇄ plan` between turns (`plan` = PlanAnalyze, read-only), confirmed by a `current_mode_update` notification. `plan-execute` has no wire form — its gate (the propose approval picker) is TUI-only. Two-state behavior is pinned by a real-binary e2e (plan: write denied, no disk write; default: the same write lands). `guide-zed.md` §5.3.
 
 Code: `internal/tools/propose/` · `internal/tools/plan/` · `docs/prd/feature-plan-mode.md`.
 
@@ -127,3 +132,28 @@ Run it on demand — it is **not a resident mechanism**: no daemon, no CI job, n
 **No butler-sensitive path is touched.** The lane writes only `eval/results/*.jsonl` (checked-in data), the gitignored `eval/tmp/`, and — because `SEEK_HOME` is pinned to `eval/tmp/seek-home` — seek's own user-data writes land in that sandbox instead of the real `~/.seek`. It never writes `~/.local/bin`, `~/.agents`, or `~/Library/LaunchAgents`, and it makes no butler MCP calls. Mechanism self-tests: `scripts/eval-rounds-test.sh` (rounds/gate/record-only/malformed-input) and `scripts/eval-ablate-test.sh` (no-flag byte equivalence), both auto-discovered by `scripts/selftest.sh`.
 
 PRD: [`docs/prd/feature-eval-v2.md`](prd/feature-eval-v2.md) · Guide: [`eval/README.md`](../eval/README.md).
+
+---
+
+## 11. Task Lifetime — detached from the seek process (v8 柱 V1)
+
+D2's refined reading of "zero daemon" (v8 §3 I2) allows a **task's lifetime** to escape the seek process, and forbids a resident supervisor. Both halves are load-bearing:
+
+- **Detached, not supervised** — `seek task run "<cmd>"` forks a wrapper (`seek task exec`, same binary) that `setsid`s into its own session and runs the command via `/bin/sh -c`, stdout+stderr appending to `~/.seek/tasks/<id>.log`. The task survives the seek process that started it; when it exits, the wrapper appends the exit fact to `~/.seek/tasks/<id>.jsonl`.
+- **Nothing is resident** — `seek ps` / `seek attach` / `seek kill` each read that directory once and exit. No listening socket, no polling loop, no auto-start config.
+- **Facts on disk, status computed** — the record holds facts (pid, start, exit code, killed); `running` / `exited` / `failed` / `killed` / `zombie` / `lost` is folded from them plus one live pid probe. `zombie` is surfaced honestly rather than rounded to `running`; `lost` means the process vanished with no exit fact (OOM, external SIGKILL).
+- **Not bgjob** — `internal/bgjob` (the bash tool's `run_in_background` + `monitor`) stays session-scoped, in-memory, killed by `Shutdown`. The two do not share code: sharing would force bgjob to grow disk/cross-process fields it is deliberately free of. Use `seek task run` when the work must outlive the session.
+
+Not in v1: session-state handover / resume-after-restart (the detach full semantics). Code: `internal/taskproc/` · `internal/taskcli/`. PRD: [`docs/prd/feature-task-lifetime.md`](prd/feature-task-lifetime.md).
+
+---
+
+## 12. Editor / ACP lane (v7 柱 P) / 编辑器车道
+
+`seek acp` speaks the Agent Client Protocol over stdio so editors drive seek like any other agent (Zed today, paseo headless). Three design points that are easy to get wrong later:
+
+- **Capabilities are declared, versions are negotiated.** `initialize` answers with `acp.NegotiateVersion(requested)` — the highest version seek speaks that is ≤ what the client asked for, never an echo — plus a capability object. A downgrade is the response itself (plus a stderr line); the client is the side that closes if it cannot speak the answer.
+- **Capabilities are NOT model-gated.** `promptCapabilities.image` promises "an image content block is accepted", not "this model sees". Models swap mid-session (`session/set_config_option`), so a handshake-time declaration may never depend on the current model; the per-turn router decides each image's fate.
+- **One image seam for three entries.** TUI clipboard paste, `@path` references and ACP image blocks all land on the same `visionRouter` (`cmd/seek/visioninput.go`) → native attach on a vision model, an in-band switch-model note otherwise. ACP adds only the decode step; the wire order of text and image blocks is preserved (`acp.PromptParams.Segments`), so a marker lands between the sentences that surround it.
+
+Code: `internal/acp/` · `cmd/seek/acp_approval.go` · `cmd/seek/visioninput.go` · Guide: [`docs/guide-zed.md`](guide-zed.md).

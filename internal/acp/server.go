@@ -6,26 +6,39 @@
 // Transport is JSON-RPC 2.0 over newline-delimited stdio (same shape as
 // seek's MCP client, pkg/mcp — json.Encoder/Decoder, no Content-Length
 // framing). This file is the transport + dispatch core (M-P.1): it owns
-// the read loop, method routing, response/notification writing, and
-// per-session cancellation. The mapping to seek's agent (session/prompt →
-// Agent.Prompt event stream, request_permission → askuser) is injected as
-// a Backend so this layer is testable with a fake (no real agent).
+// the read loop, method routing, response/notification writing, per-
+// session cancellation, AND the agent→client request lane (Call — the
+// half JSON-RPC gives the server for free but ACP actually needs:
+// session/request_permission, feature-acp.md backlog ①). The mapping to
+// seek's agent (session/prompt → Agent.Prompt event stream) is injected
+// as a Backend so this layer is testable with a fake (no real agent).
 package acp
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"strconv"
 	"sync"
+	"time"
 )
 
 // --- JSON-RPC 2.0 envelope (newline-delimited) ----------------------
 
+// request doubles as the inbound frame: a client message with Method set
+// is a request/notification from the client; one with Method absent and
+// ID present is a RESPONSE to an agent→client Call (Result/Error carry
+// its payload). The two share one decoder, so the read loop peeks Method
+// before routing.
 type request struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"` // absent ⇒ notification
-	Method  string           `json:"method"`
+	Method  string           `json:"method,omitempty"`
 	Params  json.RawMessage  `json:"params,omitempty"`
+	Result  json.RawMessage  `json:"result,omitempty"` // response half
+	Error   *rpcError        `json:"error,omitempty"`  // response half
 }
 
 type rpcError struct {
@@ -44,8 +57,54 @@ type InitializeResult struct {
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 }
 
+// ProtocolVersion is the newest ACP protocol MAJOR version seek
+// implements. ACP versions are a single integer, bumped only on breaking
+// changes; capabilities carry everything else, so "we speak 1" is the
+// whole story until the wire changes.
+const ProtocolVersion = 1
+
+// supportedVersions is every protocol version seek can actually speak,
+// newest first. One row today; the list exists so negotiation stays a
+// lookup rather than an if-chain when a v2 lands.
+var supportedVersions = []int{1}
+
+// NegotiateVersion answers initialize with the highest version BOTH
+// sides speak that is not newer than what the client asked for — the
+// ACP spec's own rule ("If the Agent supports the requested version, it
+// MUST respond with the same version. Otherwise, the Agent MUST respond
+// with the latest version it supports", i.e. the intersection, not an
+// echo).
+//
+// requested == 0 / negative (field absent or a client bug — the spec
+// says the request MUST carry it) has no intersection; ok is false and
+// the caller answers ProtocolVersion, the pre-negotiation behaviour, so
+// a sloppy client still gets a usable handshake instead of a dead one.
+// A client that asked for something seek does NOT speak learns it from
+// the response and is the side that closes the connection (spec: "If
+// the Client does not support the version specified by the Agent … the
+// Client SHOULD close the connection").
+func NegotiateVersion(requested int) (version int, ok bool) {
+	best := 0
+	for _, v := range supportedVersions {
+		if v <= requested && v > best {
+			best = v
+		}
+	}
+	if best == 0 {
+		return ProtocolVersion, false
+	}
+	return best, true
+}
+
 type AgentCapabilities struct {
 	LoadSession bool `json:"loadSession"`
+	// SessionCapabilities advertises the session-lifecycle extras
+	// (sessionCapabilities.list → session/list). Pointer so the whole
+	// object is omitted when nil — in the ACP schema these
+	// sub-capabilities are OBJECTS where presence means "supported"
+	// (supplying {} is the on-state); there is no boolean to set.
+	// Same persistence gate as LoadSession at the call site.
+	SessionCapabilities *SessionCapabilities `json:"sessionCapabilities,omitempty"`
 	// PromptCapabilities tells the client what content types it may put in
 	// a session/prompt. Advertising image lets editors (Zed) offer image
 	// attachment; seek sends those natively to the multimodal lane
@@ -54,9 +113,27 @@ type AgentCapabilities struct {
 	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
 }
 
+// SessionCapabilities is the ACP sessionCapabilities object. Only the
+// list sub-capability is served (session/delete is not — deleting
+// transcripts is a TUI/filesystem action, and advertising it would
+// invite a client to yank history the store still references).
+type SessionCapabilities struct {
+	// List is `sessionCapabilities.list`: nil = not advertised;
+	// non-nil (an empty object on the wire) = session/list is served.
+	List *SessionListCapabilities `json:"list,omitempty"`
+}
+
+// SessionListCapabilities is the ACP schema's list sub-capability —
+// an intentionally EMPTY object (its only schema occupant is _meta,
+// which seek does not use). Presence on the wire is the advertisement.
+type SessionListCapabilities struct{}
+
 // PromptCapabilities is the subset of ACP prompt content types seek
-// accepts. Audio / embedded-context are not handled (seek is text-only;
-// image is OCR'd, not sent as bytes).
+// accepts. Audio / embedded-context are not declared (seek does not
+// parse those blocks, so a client never sends them). Image IS declared:
+// an image content block is always accepted; what it becomes is decided
+// per turn — native attach on a vision model, an in-band switch-model
+// note otherwise (cmd/seek's visionRouter).
 type PromptCapabilities struct {
 	Image bool `json:"image,omitempty"`
 }
@@ -83,9 +160,44 @@ type LoadSessionParams struct {
 
 // LoadSessionResult is session/load's response. Every field is optional
 // in the schema; seek returns the config menu so the client's model
-// dropdown reflects the RESUMED session rather than the process default.
+// dropdown reflects the RESUMED session rather than the process default,
+// and the mode state so a plan-mode session resumes as plan (ACP·P2).
 type LoadSessionResult struct {
-	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
+	Modes         *SessionModeState `json:"modes,omitempty"`
+}
+
+// ListSessionsParams is session/list's request (ACP schema
+// ListSessionsRequest). Cwd, when set, filters to sessions recorded
+// with exactly that working directory (absolute path). Cursor is
+// deliberately NOT decoded: seek returns the whole store in one page
+// and never emits nextCursor, so a compliant client has no cursor to
+// send — one arriving anyway is ignored (same leniency as unknown
+// fields elsewhere; a page request re-listing everything is
+// indistinguishable from page one for a single-page agent).
+type ListSessionsParams struct {
+	Cwd string `json:"cwd,omitempty"`
+}
+
+// ListSessionsResult is session/list's response (ACP schema
+// ListSessionsResponse). Sessions is REQUIRED on the wire and must be
+// an array, not null — an empty store answers `sessions: []`, never
+// `{}` or `null` (JS clients render the array directly). nextCursor is
+// omitted: everything is on one page.
+type ListSessionsResult struct {
+	Sessions []SessionSummary `json:"sessions"`
+}
+
+// SessionSummary is one entry of session/list's response (ACP schema
+// SessionInfo). SessionID + Cwd are required by the schema; Title /
+// UpdatedAt are optional (omitted when the transcript carries nothing
+// usable). UpdatedAt is RFC3339/ISO 8601 UTC — "timestamp of last
+// activity" is the session header's UpdatedAt.
+type SessionSummary struct {
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 type NewSessionResult struct {
@@ -98,6 +210,11 @@ type NewSessionResult struct {
 	// @agentclientprotocol/sdk schema + the zcode-acp-server reference
 	// bridge; see SetConfigOptionParams for the switch direction.
 	ConfigOptions []ConfigOption `json:"configOptions"`
+	// Modes is the session-mode capability advertisement (ACP·P2,
+	// backlog ④): non-nil ⇒ the client may render a mode switcher and
+	// drive it with session/set_mode. Absent ⇒ no mode support (the
+	// backend doesn't implement ModeSwitcher, or the lane has none).
+	Modes *SessionModeState `json:"modes,omitempty"`
 }
 
 // ConfigOption is one entry of the session configuration menu carried on
@@ -153,8 +270,11 @@ type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 	// Data + MimeType carry an image block's bytes (type=="image"): Data is
-	// base64, MimeType e.g. "image/png" (M-P.5). The caller OCRs these to
-	// text — seek never forwards image bytes to the model.
+	// base64, MimeType e.g. "image/png" — the ACP/MCP image block shape.
+	// What happens to the bytes is the backend's call and depends on the
+	// turn's model: a vision model gets them as a native image part, any
+	// other model gets an in-band note instead and the bytes stay home
+	// (cmd/seek's visionRouter).
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
 }
@@ -165,8 +285,12 @@ type PromptParams struct {
 }
 
 // ImageBlocks returns the prompt's image content blocks (type=="image"
-// with non-empty Data), in order. Used by the backend to OCR them into the
-// prompt text. M-P.5.
+// with non-empty Data), in order — the "just the images" projection.
+// NOTE: the prompt path deliberately does NOT use this (card c_4pczu3
+// ④): pulling images out of the block list loses their position among
+// the text blocks, so buildACPPromptText walks Segments instead. Keep
+// this for callers that genuinely want only the images (tests, a
+// protocol trace).
 func (p PromptParams) ImageBlocks() []ContentBlock {
 	var out []ContentBlock
 	for _, c := range p.Prompt {
@@ -177,8 +301,53 @@ func (p PromptParams) ImageBlocks() []ContentBlock {
 	return out
 }
 
+// Segment is one ordered piece of a session/prompt as the backend
+// consumes it. Exactly one field is meaningful: Text for a text block,
+// Image for an image block (the pointer is into p.Prompt, so its Data /
+// MimeType are the wire bytes verbatim).
+//
+// Why this exists (M-P.5 / card c_4pczu3 ④): PromptText() flattens all
+// text blocks into one string, which loses the ORDER relative to image
+// blocks. A prompt like ["look at this", <image>, "and this too"] must
+// reach the model with the image's marker BETWEEN the two sentences, so
+// the consumer needs a view that keeps the sequence. Unknown / empty
+// block types yield no segment (they carry nothing to forward).
+type Segment struct {
+	Text  string
+	Image *ContentBlock
+}
+
+// Segments walks the prompt in wire order, yielding text and image
+// blocks as they were sent. Non-text non-image blocks (audio, embedded
+// context) are dropped: seek declares no capability for them.
+func (p PromptParams) Segments() []Segment {
+	var out []Segment
+	for i := range p.Prompt {
+		c := &p.Prompt[i]
+		switch c.Type {
+		case "text":
+			if c.Text != "" {
+				out = append(out, Segment{Text: c.Text})
+			}
+		case "image":
+			// A payload-less image block carries nothing to decode; dropping
+			// it here keeps the consumer from having to re-check.
+			if c.Data != "" {
+				out = append(out, Segment{Image: c})
+			}
+		}
+	}
+	return out
+}
+
 type PromptResult struct {
-	StopReason string `json:"stopReason"` // "end_turn" | "cancelled" | "refusal"
+	// StopReason is the spec's session/prompt response enum (v1):
+	// end_turn | max_tokens | refusal | cancelled (constants in
+	// stopreason.go). Internal errors do not appear here — they ride
+	// the JSON-RPC error response; the finer-grained classification
+	// (silent_timeout / internal_error) and a readable detail live on
+	// the _seek_turn_stop termination frame instead.
+	StopReason string `json:"stopReason"`
 }
 
 // SessionUpdate is the payload of a session/update notification (agent →
@@ -201,6 +370,12 @@ type Backend interface {
 	// config menu so the client's dropdown reflects the RESUMED lane
 	// rather than the process default.
 	LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
+	// ListSessions enumerates resumable transcripts (session/list).
+	// Read-only: no anchoring, no agent mutation, no in-flight-turn
+	// conflict — unlike load/set_config_option it may run any time.
+	// Data source is the transcript store scan (same store session/load
+	// reads), so a listed id is loadable by construction.
+	ListSessions(p ListSessionsParams) (ListSessionsResult, error)
 	// Prompt runs one turn. It streams progress by calling send (each call
 	// becomes a session/update notification) and returns when the turn
 	// ends or ctx is cancelled.
@@ -220,6 +395,22 @@ type Server struct {
 
 	mu      sync.Mutex // serialises writes + guards cancels
 	cancels map[string]context.CancelFunc
+
+	// Agent→client request lane (Call). waiters is keyed by the string
+	// ids Call mints; a reply frame with a matching id resolves exactly
+	// one waiter. callSeq is under mu too (ids must be unique even when
+	// two turns ask concurrently).
+	waiters map[string]chan callResult
+	callSeq int64
+}
+
+// callResult is one resolved agent→client call: either the reply's
+// Result payload, or the ending error (client JSON-RPC error, or a
+// sentinel — ErrDisconnected / ErrCallCancelled — from the transport's
+// own synthetic resolutions).
+type callResult struct {
+	raw json.RawMessage
+	err error
 }
 
 func NewServer(r io.Reader, w io.Writer, b Backend) *Server {
@@ -228,13 +419,142 @@ func NewServer(r io.Reader, w io.Writer, b Backend) *Server {
 		dec:     json.NewDecoder(r),
 		backend: b,
 		cancels: map[string]context.CancelFunc{},
+		waiters: map[string]chan callResult{},
+	}
+}
+
+// Call errors — each names one way an agent→client request can end
+// without a usable answer. The permission asker treats ALL of them as
+// deny (feature-acp.md backlog ①: unanswered/disconnected defaults to
+// deny, mirroring --approval-stdin's EOF posture).
+var (
+	// ErrCallTimeout: no reply within the caller's deadline. The client
+	// may still be rendering the prompt — but the turn cannot block
+	// forever on a decider that never comes.
+	ErrCallTimeout = errors.New("acp: no reply from client (timeout)")
+	// ErrDisconnected: the read loop exited (client closed stdio / Serve
+	// ctx done) while the call was pending.
+	ErrDisconnected = errors.New("acp: client disconnected")
+	// ErrCallCancelled: caller's ctx was cancelled, or the client sent
+	// $/cancel_request for this id.
+	ErrCallCancelled = errors.New("acp: request cancelled")
+)
+
+// Call sends one agent→client JSON-RPC request and blocks for the reply
+// (the transport half of session/request_permission). method is the wire
+// method ("session/request_permission"); params marshals to its params.
+// The reply's Result is returned raw — the caller owns decoding. Every
+// non-reply ending (timeout, disconnect, cancellation, JSON-RPC error
+// from the client — e.g. a headless driver that doesn't implement the
+// method answering -32601) is an error; none of them block forever.
+//
+// Ids are minted here as strings ("p1", "p2", …): JSON-RPC allows
+// string ids, the client echoes them verbatim, and strings keep the
+// waiter map free of number/string dual keys.
+func (s *Server) Call(ctx context.Context, method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	s.mu.Lock()
+	s.callSeq++
+	id := "p" + strconv.FormatInt(s.callSeq, 10)
+	ch := make(chan callResult, 1)
+	s.waiters[id] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.waiters, id)
+		s.mu.Unlock()
+	}()
+
+	s.mu.Lock()
+	err := s.enc.Encode(struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      string `json:"id"`
+		Method  string `json:"method"`
+		Params  any    `json:"params"`
+	}{"2.0", id, method, params})
+	s.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("acp: send %s: %w", method, err)
+	}
+
+	if timeout <= 0 {
+		timeout = time.Hour // caller said "wait forever"; still bounded
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ErrCallCancelled
+	case <-timer.C:
+		return nil, ErrCallTimeout
+	case r := <-ch:
+		return r.raw, r.err
+	}
+}
+
+// deliverResponse routes one client frame that carries an ID but no
+// method (a reply to a Call) to its waiter. Unknown or unparsable ids
+// are dropped: the agent only ever has its own Calls pending, so an
+// unmatched reply is client noise, not a protocol event.
+func (s *Server) deliverResponse(f *request) {
+	var id string
+	if err := json.Unmarshal(*f.ID, &id); err != nil {
+		return
+	}
+	s.mu.Lock()
+	ch, ok := s.waiters[id]
+	if ok {
+		delete(s.waiters, id)
+	}
+	s.mu.Unlock()
+	if ok {
+		if f.Error != nil {
+			ch <- callResult{err: fmt.Errorf("acp: client error on request %s: %d %s", id, f.Error.Code, f.Error.Message)}
+		} else {
+			ch <- callResult{raw: f.Result}
+		}
+	}
+}
+
+// cancelWaiter resolves one pending Call as ErrCallCancelled ($/
+// cancel_request). Ids arrive as raw JSON (string or number); the string
+// form is what Call mints, anything else matches nothing by design.
+func (s *Server) cancelWaiter(rawID json.RawMessage) {
+	var id string
+	if err := json.Unmarshal(rawID, &id); err != nil {
+		return
+	}
+	s.mu.Lock()
+	ch, ok := s.waiters[id]
+	if ok {
+		delete(s.waiters, id)
+	}
+	s.mu.Unlock()
+	if ok {
+		ch <- callResult{err: ErrCallCancelled}
+	}
+}
+
+// failWaiters resolves every pending Call as disconnected. Called from
+// the read loop's exit paths (EOF, decode error, Serve ctx done): the
+// turn goroutines may be mid-tool inside an askFn, and denying them is
+// what lets the process unwind instead of hanging on a dead client.
+func (s *Server) failWaiters() {
+	s.mu.Lock()
+	pending := s.waiters
+	s.waiters = map[string]chan callResult{}
+	s.mu.Unlock()
+	for _, ch := range pending {
+		ch <- callResult{err: ErrDisconnected}
 	}
 }
 
 // Serve runs the read loop until the client disconnects (EOF) or ctx is
 // done. Each request is dispatched by method; prompts run in their own
-// goroutine so session/cancel can interrupt them.
+// goroutine so session/cancel can interrupt them. Replies to agent→
+// client Calls (id set, no method) are routed to their waiters here —
+// the read loop is the only frame source, so it is the only deliverer.
 func (s *Server) Serve(ctx context.Context) error {
+	defer s.failWaiters()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -245,6 +565,12 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil // client closed — clean shutdown
 			}
 			return err
+		}
+		if req.Method == "" {
+			if req.ID != nil {
+				s.deliverResponse(&req)
+			}
+			continue // no method + no id: junk, ignore
 		}
 		s.dispatch(ctx, req)
 	}
@@ -302,6 +628,25 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 			return
 		}
 		s.reply(req.ID, res)
+	case "session/list":
+		// Read-only inventory, inline in the read loop like
+		// session/new: no cancellation, no locks, safe beside a
+		// running prompt (it snapshots store state, touches nothing).
+		var p ListSessionsParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				s.replyErr(req.ID, -32602, "bad list params: "+err.Error())
+				return
+			}
+		}
+		res, err := s.backend.ListSessions(p)
+		if err != nil {
+			// -32000 not -32601, same distinction as session/load:
+			// the method is served, the listing is what failed.
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		s.reply(req.ID, res)
 	case "session/prompt":
 		// Parse + cancel registration happen SYNCHRONOUSLY here, before
 		// the goroutine is spawned. That ordering is what makes the
@@ -350,12 +695,65 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 			return
 		}
 		s.reply(req.ID, res)
+	case "session/set_mode":
+		// Mode switches are between turns — same rule and same race
+		// argument as set_config_option above: SetMode flips the shared
+		// permission workflow + the agent's mode label, which an
+		// in-flight turn's gate checks would race. (The ACP schema
+		// allows mode changes "at any point"; an error reply is how an
+		// agent declines, and clients retry between turns.)
+		var p SetModeParams
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			s.replyErr(req.ID, -32602, "bad set_mode params: "+err.Error())
+			return
+		}
+		sw, ok := s.backend.(ModeSwitcher)
+		if !ok {
+			// Backend without mode support: the standard unknown-method
+			// answer, not a server error — clients treat it as "this
+			// agent has no modes" and hide their switcher.
+			s.replyErr(req.ID, -32601, "method not handled: session/set_mode (no session modes)")
+			return
+		}
+		s.mu.Lock()
+		busy := len(s.cancels) > 0
+		s.mu.Unlock()
+		if busy {
+			s.replyErr(req.ID, -32000, "mode change rejected: a prompt is in flight (switch modes between turns)")
+			return
+		}
+		if err := sw.SetMode(p); err != nil {
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		// The response itself carries no mode info (schema: _meta only),
+		// so the current_mode_update notification is the client's ONLY
+		// confirmation — sent before the response, same notifications-
+		// then-result ordering session/load uses.
+		s.notify("session/update", SessionUpdate{
+			SessionID: p.SessionID,
+			Update:    CurrentModeUpdate{SessionUpdate: "current_mode_update", CurrentModeID: p.ModeID},
+		})
+		s.reply(req.ID, struct{}{})
 	case "session/cancel":
 		var p struct {
 			SessionID string `json:"sessionId"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		s.cancelSession(p.SessionID)
+	case "$/cancel_request":
+		// JSON-RPC extension ACP inherits (protocol-router names it):
+		// the client withdrawing one of OUR pending requests — e.g. the
+		// user closed the permission prompt. Params carry the echoed id.
+		// A notification (no reply id), so cancelWaiter just fails the
+		// waiter; the pending Call returns ErrCallCancelled → deny.
+		var p struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		if len(p.ID) > 0 {
+			s.cancelWaiter(p.ID)
+		}
 	default:
 		// Unknown method: error if it's a request, ignore if a notification.
 		if req.ID != nil {
@@ -435,8 +833,15 @@ func (s *Server) notify(method string, params any) {
 	}{"2.0", method, params})
 }
 
-// PromptText joins the text content blocks of a prompt — the bridge from
-// ACP's structured prompt to seek's text-only Agent.Prompt.
+// PromptText joins the text content blocks of a prompt — the text-only
+// projection of an ACP prompt.
+//
+// It is NO LONGER the path a prompt takes into seek: buildACPPromptText
+// consumes PromptParams.Segments so image markers keep their wire
+// position (M-P.5 / card c_4pczu3 ④). PromptText survives as the
+// obvious accessor for text-only consumers (fake backends in tests, a
+// protocol trace) — do not add image handling here, it would have no
+// place to put the block order.
 func (p PromptParams) PromptText() string {
 	var b []byte
 	for i, c := range p.Prompt {

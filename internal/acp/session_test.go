@@ -45,6 +45,11 @@ func (b *anchorBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate
 	return LoadSessionResult{}, errors.New("session/load not served by this backend")
 }
 
+// ListSessions is likewise outside the anchor contract.
+func (b *anchorBackend) ListSessions(p ListSessionsParams) (ListSessionsResult, error) {
+	return ListSessionsResult{}, errors.New("session/list not served by this backend")
+}
+
 func (b *anchorBackend) SetConfigOption(p SetConfigOptionParams) (SetConfigOptionResult, error) {
 	// The anchor contract under test has no model menu; refuse like the
 	// real backend would when nothing was served.

@@ -35,6 +35,12 @@ this server and its callers must never touch ~/.seek/opencode-auth.json
 — refresh tokens are single-use, a side refresh invalidates the copy
 seek holds) is documented in eval/README.md § "Provider lane".
 
+DELTAS (E5 serve-web-stream, card c_lbtdqw) overrides the delta text:
+a "|"-separated list — one text-delta chunk per part, so a consumer can
+be pinned on MULTI-delta accumulation (concat order), not just on
+receiving one chunk. Default "LANE OK" = the historical single chunk,
+byte-identical wire.
+
 Stdlib only (http.server); env-steered so one file serves all shapes.
 """
 import json
@@ -44,12 +50,20 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 PORT = int(os.environ.get("PORT", "18081"))
 LOG = os.environ.get("LOG", "")
 
-CHUNKS = [
-    '{"id":"chatcmpl-fake","choices":[{"index":0,"delta":{"role":"assistant","content":"LANE OK"},"finish_reason":null}]}',
-    '{"id":"chatcmpl-fake","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
-    + '"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":0}}}',
-    "[DONE]",
-]
+
+def _chunk(content):
+    return ('{"id":"chatcmpl-fake","choices":[{"index":0,"delta":{"role":"assistant",'
+            + '"content":' + json.dumps(content) + '},"finish_reason":null}]}')
+
+
+CHUNKS = (
+    [_chunk(part) for part in os.environ.get("DELTAS", "LANE OK").split("|")]
+    + [
+        '{"id":"chatcmpl-fake","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],'
+        + '"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":0}}}',
+        "[DONE]",
+    ]
+)
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,0 +1,10 @@
+{
+  "_comment": "ACP session/prompt params, state 1: image-only (no text block). Before M-P.5 this produced text==\"\" and acpBackend.Prompt returned end_turn without ever touching the model. Used by cmd/seek/acp_image_e2e_test.go and scripts/acp-smoke-test.sh.",
+  "prompt": [
+    {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8AAQv8ZYAwAQ84H+VjtZqAAAAAASUVORK5CYII=",
+      "mimeType": "image/png"
+    }
+  ]
+}

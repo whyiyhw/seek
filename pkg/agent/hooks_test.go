@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -86,6 +90,12 @@ func (r *recordingHook) OnPostToolUse(_ context.Context, ev hooks.PostToolUseEve
 	r.record(fmt.Sprintf("post_tool:%s:%s", ev.Name, suffix))
 }
 
+// OnStop records the round-level settle (P3-a trigger wiring). Fires
+// once per Prompt() call, after PostTurn for the last turn.
+func (r *recordingHook) OnStop(_ context.Context, ev hooks.StopEvent) {
+	r.record(fmt.Sprintf("stop:turns=%d:finish=%s", ev.Turns, ev.Finish))
+}
+
 // newHookedAgent wires a recordingHook into a fresh agent talking to the
 // shared two-turn backend. Returns the agent, the backend, and the
 // recorder for assertions.
@@ -130,7 +140,8 @@ func TestAgent_HooksFireInExpectedOrder(t *testing.T) {
 
 	// Turn 0: assistant emits a read tool call → PreToolUse + PostToolUse fire
 	//          inside that turn; PostTurn reports tools=1.
-	// Turn 1: assistant emits text only → PostTurn reports tools=0.
+	// Turn 1: assistant emits text only → PostTurn reports tools=0, then
+	//          the round settles and the Stop observer fires once.
 	want := []string{
 		"pre_prompt:what's in hello.txt?",
 		"pre_turn:0",
@@ -139,6 +150,7 @@ func TestAgent_HooksFireInExpectedOrder(t *testing.T) {
 		"post_turn:0:tools=1:finish=tool_calls",
 		"pre_turn:1",
 		"post_turn:1:tools=0:finish=stop",
+		"stop:turns=2:finish=stop",
 	}
 	got := rec.Events()
 	if !reflect.DeepEqual(got, want) {
@@ -339,5 +351,193 @@ func TestAgent_NilHooksRunsCleanly(t *testing.T) {
 	}
 	if !sawEnd {
 		t.Errorf("expected AgentEnd event with nil Hooks registry")
+	}
+}
+
+// ---- P3-a Stop trigger wiring (feature-orchestration D15) ----
+
+// TestAgent_Stop_FiresOnceOnNaturalAnswer: a plain text round fires
+// exactly one Stop event, with the settled turn count and the model's
+// own finish reason — and it lands BEFORE the event channel closes, so
+// a caller draining `for ev := range ch` can assert on hook state with
+// no synchronisation.
+func TestAgent_Stop_FiresOnceOnNaturalAnswer(t *testing.T) {
+	rec := &recordingHook{}
+	ag, cleanup := newHookedAgent(t, rec, "ok")
+	defer cleanup()
+
+	drainPrompt(ag, "hi")
+
+	var stops []string
+	for _, e := range rec.Events() {
+		if strings.HasPrefix(e, "stop:") {
+			stops = append(stops, e)
+		}
+	}
+	if len(stops) != 1 {
+		t.Fatalf("Stop fired %d times, want exactly 1: %v", len(stops), stops)
+	}
+	// two-turn round (tool call + answer) = 2 settled turns.
+	if stops[0] != "stop:turns=2:finish=stop" {
+		t.Errorf("Stop event = %q, want stop:turns=2:finish=stop", stops[0])
+	}
+}
+
+// TestAgent_Stop_CanceledRoundStillReports: an Esc-cancelled round
+// reports finish=canceled. The observer must still fire — an
+// interrupted round is an outcome, not an absence of one — which is
+// what the context.WithoutCancel in the dispatch guarantees.
+func TestAgent_Stop_CanceledRoundStillReports(t *testing.T) {
+	block := make(chan struct{})
+	defer close(block)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"partial"}}]}`+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+
+	rec := &recordingHook{}
+	hreg := hooks.NewRegistry()
+	hreg.Register(rec)
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV41Flash,
+		Hooks:  hreg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := ag.Prompt(ctx, "long job")
+	sawDelta := make(chan struct{})
+	go func() {
+		for ev := range stream {
+			if d, ok := ev.(MessageDelta); ok && d.Delta != "" {
+				select {
+				case <-sawDelta:
+				default:
+					close(sawDelta)
+				}
+			}
+		}
+	}()
+	select {
+	case <-sawDelta:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("never saw a delta from the blocking server")
+	}
+	cancel()
+	// Drain to completion — Stop must have fired by the time the
+	// channel closes (it is dispatched from a defer registered after
+	// close(out)).
+	for range stream {
+	}
+
+	events := rec.Events()
+	found := false
+	for _, e := range events {
+		if e == "stop:turns=0:finish=canceled" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("missing canceled Stop event; got %v", events)
+	}
+}
+
+// TestAgent_Stop_FatalErrorReportsError: a failing backend still
+// produces exactly one Stop with finish=error (the round settled —
+// badly). Canceled-vs-error are distinct vocabulary on purpose: a hook
+// author distinguishes "user hit Esc" from "the request blew up".
+func TestAgent_Stop_FatalErrorReportsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		io.WriteString(w, `{"error":{"message":"boom"}}`)
+	}))
+	defer srv.Close()
+
+	rec := &recordingHook{}
+	hreg := hooks.NewRegistry()
+	hreg.Register(rec)
+	ag, err := New(Config{
+		Client: deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
+		Model:  deepseek.ModelV41Flash,
+		Hooks:  hreg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	drainPrompt(ag, "hi")
+
+	var stops []string
+	for _, e := range rec.Events() {
+		if strings.HasPrefix(e, "stop:") {
+			stops = append(stops, e)
+		}
+	}
+	if len(stops) != 1 {
+		t.Fatalf("Stop fired %d times, want 1: %v", len(stops), stops)
+	}
+	if !strings.HasSuffix(stops[0], ":finish=error") {
+		t.Errorf("Stop event = %q, want finish=error", stops[0])
+	}
+}
+
+// TestAgent_Stop_MaxTurnsExhausted: a model that keeps emitting tool
+// calls until the turn budget runs out settles with finish=max_turns —
+// the default the defer seeds, which is the point of seeding it rather
+// than defaulting to "".
+func TestAgent_Stop_MaxTurnsExhausted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"path\":\"hello.txt\"}"}}]}}]}`,
+			``,
+			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n"))
+	}))
+	defer srv.Close()
+
+	rec := &recordingHook{}
+	hreg := hooks.NewRegistry()
+	hreg.Register(rec)
+	ag, err := New(Config{
+		Client:   deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(srv.URL)),
+		Model:    deepseek.ModelV41Flash,
+		MaxTurns: 2,
+		Tools:    tools.New().Add(&stubTool{name: "read", schema: `{"type":"object"}`, reply: "x"}),
+		Hooks:    hreg,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	drainPrompt(ag, "loop forever")
+
+	var stops []string
+	for _, e := range rec.Events() {
+		if strings.HasPrefix(e, "stop:") {
+			stops = append(stops, e)
+		}
+	}
+	if len(stops) != 1 {
+		t.Fatalf("Stop fired %d times, want 1: %v", len(stops), stops)
+	}
+	if stops[0] != "stop:turns=2:finish=max_turns" {
+		t.Errorf("Stop event = %q, want stop:turns=2:finish=max_turns", stops[0])
 	}
 }
