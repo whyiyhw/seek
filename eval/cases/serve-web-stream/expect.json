@@ -1,0 +1,11 @@
+{
+  "description": "serve-web-stream 承重轴（eval v2 E5，feature-eval-v2.md §2.2/§三-E5）：真 seek serve --frontend=web 子进程，/msg /bind + 提问驱动执行器派生真 seek 子进程（假 key → 本地假端点，两段 delta），SSE 帧族 + /rpc session/list 双断言。帧序：同一 run 的 delta/usage 帧必须先于带 run+session_id 的收口默认帧（webfrontend_stream.go 的 events…reply 不变量）；累积：delta.text 逐帧拼接 == 收口帧 text；收口替换：收口帧带 run（=delta 帧的 run）与 session_id；落盘：session/list 的 sessions[].sid 命中该 session_id。serve 排干退出码 0 经 runner_fact 上浮。假 key 车道确定性 → 全 exact/min 界，min_pass_rate 缺省 1.0。",
+  "max_turns": 1,
+  "min_sse_delta_frames": 2,
+  "min_sse_usage_frames": 1,
+  "exact_sse_frame_order_ok": 1,
+  "exact_sse_delta_accum_ok": 1,
+  "exact_sse_reply_closeout_ok": 1,
+  "min_session_list_hits": 1,
+  "max_nonzero_exits": 0
+}
