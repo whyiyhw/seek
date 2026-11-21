@@ -17,7 +17,6 @@
 | [`feature-orchestration.md`](feature-orchestration.md) | 📐 设计稿（P1 路由已交付） | 编排承重轴：后台子代理生命周期 + 模型路由（P1 已随 v0.11 交付）+ P2 类型化 agent + P3 hooks 面。|
 | [`feature-hooks-injection.md`](feature-hooks-injection.md) | 📐 设计稿 | hooks 注入面（编排 P3-a）：缓存稳定区与受控注入区分离。v8 D3 拍板延后到第二波之后。|
 | [`feature-memory-skill-bridge.md`](feature-memory-skill-bridge.md) | 📐 设计稿 | memory↔skill 打通：蒸馏落点 + 生命周期对齐（c_5fdsqb 设计已进 main，里程碑见其 §9）。|
-| [`feature-deepseek-app-api.md`](feature-deepseek-app-api.md) | 🚀 ②③④ 已交付（v0.12.0）· ① 判红关闭 | DeepSeek 应用 API 四项评估：②文件输入（F1–F5）/ ③ASR+TTS 客户端 + 语音 frontend（V1a 播报无 CLI 开关，V2 按住说话已通）/ ④`safety_check` 全落地；①`read_url` 因与 function tools 共存性实测为红不接。v8 D3：归档待办。|
 | [`feature-remote-control-plane.md`](feature-remote-control-plane.md) | 🚀 已交付（无剩余排期） | Frontend 端口定义所在——`seek serve` sidecar + 会话绑定路由 + 直连执行。v8「新的端只经 Frontend 端口或 ACP」的参照物，故留活跃区。|
 | [`feature-web-frontend.md`](feature-web-frontend.md) | 📐 设计稿（MVP 已交付） | Web Frontend：MVP 聊天已交付；P2 任务面板 → P3 资产面设计中。|
 | [`feature-slim-loop.md`](feature-slim-loop.md) | 📐 设计稿 | 减法机制 L2 账与刀 / L3 自噬循环；本目录的预算由它看管。|
@@ -66,6 +65,7 @@
 - [`notes-v5-closeout.md`](archive/notes-v5-closeout.md) — v5 收伞三分拍板（不续期）
 - [`feature-image-ocr.md`](archive/feature-image-ocr.md) — 柱 Q 本体（被 feature-vision 取代，代码已移除）
 - [`feature-plan-tasklist.md`](archive/feature-plan-tasklist.md) — 被 feature-plan-mode 取代
+- [`feature-deepseek-app-api.md`](archive/feature-deepseek-app-api.md) — v0.12.0：DeepSeek 应用 API 四项评估收口（文件输入 F1–F5 / ASR+TTS 客户端+语音 frontend / `safety_check` 交付；`read_url` 判红不接）
 
 ## 阅读指引
 

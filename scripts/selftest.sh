@@ -31,6 +31,24 @@
 # 真实 LLM key/网络的、闸语义（超限即红是职责）的、有真实副作用的，
 # 一律进排除表并逐项注理由——排除表非空且每项有理由是硬要求。
 #
+# 排除理由会腐化（c_kwiajf，2026-11-20）：理由描述的是脚本「此刻」的形态。
+# 脚本后来改进——web-sessions-manual 拿到 Chrome+node 无头分支、跑完自己
+# 退出、不再等人按键——原来的「交互阻塞」判据就失效了。同一条理由连续被
+# 三轮验证会话标注可疑（c_n63pat 附注、c_hinacy not-in-lane、c_txz6vz
+# 停卡）不是措辞问题，是判据过时：默认倾向重判进名单，不是润色文案。
+# 改脚本形态（加无头/自测分支）时顺手重读本表。
+#
+# 新增门禁（c_gqo32q，2026-11-20——上面那条纪律只说了「会腐化」，没说
+# 新脚本该怎么写，于是 web-stream/web-md 两撞、web-stop 一撞又照旧）：
+#   1. 新增 *-manual.sh 默认不进排除表。能写出手测脚本就说明它有可判定的
+#      断言面；缺的只是无头通路，那是脚本的活，不是排除表的活。
+#   2. 「有无头分支但缺非 TTY 退路」不再是合法排除理由——这是可修的缺陷
+#      （补 [ ! -t 0 ] → exit 3 三行即可），不是结构性不适宜。凡走进本表
+#      的手测脚本，都必须是「真无无头分支」：浏览器断言只能落在人眼里，
+#      且补不出无头通路（如 web-memory-manual：无对应 *-headless.mjs）。
+#   3. 排除表条目必须是**结构性**理由并注明依据；理由里出现「补 X 后可移
+#      出」这类话即为自证过时，当场重判而不是留着。
+#
 # 用法：bash scripts/selftest.sh <名>    分发跑单个自测脚本（透传退出码）
 #       bash scripts/selftest.sh --list  列发现名单与排除表
 set -u
@@ -45,6 +63,8 @@ name=$1
 
 # 排除表（发现制的另一半，本文件唯一真源）：不适宜自测的脚本 + 逐项理由。
 # 新脚本默认进名单；确不适宜的在此加一行 case 臂，理由写清楚。
+# 手测脚本的进门条件见头注释「新增门禁」（c_gqo32q）：只有「真无无头通路」
+# 这类结构性理由才成立；「缺非 TTY 退路」「补 X 后可移出」都不是理由。
 excluded_reason() {
   case ${1} in
     selftest)
@@ -59,8 +79,8 @@ excluded_reason() {
       echo "体积/零构建链闸：trip 即红是职责（同 verify-doc-budgets 闸语义）+ 每跑一次全量交叉编译 linux/amd64 二进制，重" ;;
     pkg-inventory)
       echo "测量报告工具：全仓 go test -cover 分钟级、且测试失败也不红（|| true 吞掉）——绿无可信度、费时不增值" ;;
-    web-memory-manual|web-sessions-manual|web-stream-manual)
-      echo "手测脚本：起真 serve 后打印手测清单、等人按 Enter 收尾（交互阻塞），浏览器验收是人活" ;;
+    web-memory-manual)
+      echo "结构性：无无头通路——scripts/ 下没有对应的 *-headless.mjs（断言面＝记忆中栏/统计面板的视觉呈现，无可脚本化载体），裸跑打印清单等人按 Enter——无人值守无出口（c_gqo32q 按 c_kwiajf 判据重判，2026-11-20）" ;;
     *)
       return 1 ;;
   esac
@@ -71,6 +91,8 @@ excluded_reason() {
 dispatch_args() {
   case ${1} in
     kernel-deps) echo "--self-test" ;;  # 报告模式恒 exit 0（advisory），自测在 --self-test（c_zcygo2 自带）
+    pitfalls-count) echo "--selftest" ;;  # 裸跑=报表恒 exit 0（advisory），夹具自测在 --selftest（c_554rlg 自带）
+    pitfalls-split) echo "--selftest" ;;  # 裸跑=真实拆分（写文件），夹具自测在 --selftest（c_uxznyn 自带）
     *)           return 1 ;;
   esac
 }

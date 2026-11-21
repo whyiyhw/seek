@@ -316,7 +316,7 @@ Plan Mode 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](
 - **Saw**：`/help` overlay 的文档里写着"按 ? 快速打开帮助"，但 `?` 键没有对应的 handler。
 - **Fix**：在 key handler 中添加对 `?` 的识别，与 Ctrl+H 行为一致。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

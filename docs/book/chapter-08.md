@@ -534,7 +534,7 @@ TUI 稳定化中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../
 - **Why**：`View()` 用 `strings.Repeat("\n", pad)` 每帧填充以将输入固定在终端绝对底部。填充长度来自手动的 `scrollbackLines` 计数器，它与 `tea.ClearScreen`、多行 `tea.Println`、异步窗口调整以及丢弃的 `tea.Println` cmd 失步。
 - **Fix**：第二次迁移回 inline 模式——移除 `tea.WithAltScreen()` 且**不**用地板填充。live 区域高度每帧变化；bubbletea 的标准渲染器通过 cursor-up + EraseScreenBelow 原生处理。欢迎横幅在 `tea.NewProgram` **之前**打印一次到 stdout，因此留在终端 scrollback 中，不再进入重绘循环。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

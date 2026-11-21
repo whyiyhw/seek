@@ -1086,26 +1086,33 @@ func (a *Agent) sessionID() string {
 func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Message, deepseek.Usage, string, error) {
 	// Same attachment station as the DeepSeek path (see
 	// runTurnDeepSeek), in the same order: capability gate → resolve
-	// assets → PrepareMessages → convert. The gate is evaluated here,
+	// assets → PrepareMessages → convert. The gates are evaluated here,
 	// at send time, because /model can swap the model (and ACP the
 	// whole lane) between the submit and this request.
 	prepared := a.messages
 	vision := modelcap.Vision(a.cfg.Model)
+	docs := modelcap.Files(a.cfg.Model)
 	if len(prepared) > 0 && !vision {
 		prepared = deepseek.WithoutImages(prepared)
 	}
 	if a.cfg.ImageLoader != nil {
 		prepared = deepseek.ResolveImages(prepared, a.cfg.ImageLoader)
 	}
+	// Documents on the second-tier path materialise as data: URLs (the
+	// Files API's file_id is DeepSeek-wire-only). The FileResolver's
+	// loader is wired on every lane; its Upload half stays nil here.
+	if docs && a.cfg.FileResolver != nil && a.cfg.FileResolver.Load != nil {
+		prepared = deepseek.ResolveFileData(prepared, a.cfg.FileResolver.Load)
+	}
 	if a.cfg.PrepareMessages != nil {
 		prepared = a.cfg.PrepareMessages(prepared)
 	}
-	// msgsToLLMWithImages is the byte-shape conversion; it shouldn't
+	// msgsToLLMWithAttachments is the byte-shape conversion; it shouldn't
 	// know about calibration semantics — and it must not decide
-	// capability itself (the gate above already did).
+	// capability itself (the gates above already did).
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
-		Messages:  msgsToLLMWithImages(prepared, vision),
+		Messages:  msgsToLLMWithAttachments(prepared, vision, docs),
 		Tools:     toolsToLLM(a.cfg.Tools),
 		MaxTokens: a.cfg.MaxTokens,
 		SessionID: a.sessionID(),

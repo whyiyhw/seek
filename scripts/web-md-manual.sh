@@ -27,7 +27,8 @@
 #   DRY_RUN=1              只打印步骤不动手
 #   KEEP=1                 结束后保留临时目录与 serve 进程（人工续查）
 #
-# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误。
+# 退出码：0 自检+无头断言全绿（或人工清单走完）；1 失败；2 用法错误；
+#         3 无头条件缺且 stdin 非 TTY（无人值守车道：报环境能力缺，不假装绿）。
 # 依赖：go、curl；无头验收另需 Chrome 与 node≥22（缺则退人工清单）。
 set -u
 
@@ -220,6 +221,18 @@ if [ "$HEADLESS" = 1 ]; then
   [ "$rc" = 0 ] || exit 1
   echo "无头验收全绿。现场已清理（KEEP=1 可保留复跑）"
   exit 0
+fi
+
+# 无头条件缺 + 非 TTY = 无人值守车道：人工清单无处可走。read 在这里要么
+# 挂到车道超时，要么 stdin 已关时读空即过——后者会给出无凭据的绿。退 3，
+# 点名缺哪样能力（c_kwiajf 判据，web-sessions-manual.sh:221-230 同款；
+# c_gqo32q 补此块后方移出 selftest 排除表）。
+if [ ! -t 0 ]; then
+  miss=""
+  [ -x "$CHROME_BIN" ] || miss="Chrome（${CHROME_BIN}）"
+  [ -n "$NODE_BIN" ] || miss="${miss:+${miss} + }node"
+  echo "FAIL: 无头验收条件缺（${miss}）且 stdin 非 TTY——无人值守没有人工清单可走。装上缺的组件或 CHROME=<路径> 重跑。" >&2
+  exit 3
 fi
 
 cat <<EOF

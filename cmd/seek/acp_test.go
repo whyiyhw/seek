@@ -383,27 +383,40 @@ func TestBuildACPPromptText(t *testing.T) {
 
 // TestBuildACPPromptText_FileRefs: a document reference typed into the
 // ACP prompt text routes through the file router (feature-deepseek-
-// app-api F3) — here with no client, so the lane note lands in-band
-// and no parts ride.
+// app-api F3). Two contracts: an incapable model gets the switch-model
+// note in-band with no parts; a file-capable model on a second-tier
+// lane (no Files API client) gets the store-and-attach path — the part
+// carries the asset and the send path materialises the bytes.
 func TestBuildACPPromptText_FileRefs(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir()) // butler c_rzsvk5：fileroute.New→ProjectAssets 会写进真实 ~/.seek
 	dir := t.TempDir()
 	doc := filepath.Join(dir, "report.pdf")
 	if err := os.WriteFile(doc, []byte("%PDF-1.4"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	froute := fileroute.Router{} // no client → lane note; assetsDir never reached
+	froute := fileroute.New(nil, dir, nil) // second-tier: no client
 
-	got, images, files := buildACPPromptText(context.Background(), deepseek.ModelV41Flash,
+	got, images, files := buildACPPromptText(context.Background(), "glm-4.7f",
 		acp.PromptParams{Prompt: []acp.ContentBlock{{Type: "text", Text: "read @" + doc}}},
 		visionRouter{assetsDir: t.TempDir()}, froute)
 	if !strings.HasPrefix(got, "read @"+doc) {
 		t.Fatalf("original text must be preserved: %q", got)
 	}
-	if !strings.Contains(got, "[file: report.pdf — 文件输入需 DeepSeek 车道") {
-		t.Fatalf("lane note missing: %q", got)
+	if !strings.Contains(got, "[file: report.pdf — 当前模型不支持文件输入") {
+		t.Fatalf("switch-model note missing: %q", got)
 	}
 	if len(images) != 0 || len(files) != 0 {
-		t.Fatalf("no client → no parts: %+v %+v", images, files)
+		t.Fatalf("incapable model → no parts: %+v %+v", images, files)
+	}
+
+	got, images, files = buildACPPromptText(context.Background(), "gpt-4o",
+		acp.PromptParams{Prompt: []acp.ContentBlock{{Type: "text", Text: "read @" + doc}}},
+		visionRouter{assetsDir: t.TempDir()}, froute)
+	if !strings.Contains(got, "[file: report.pdf — attached · 8 B]") {
+		t.Fatalf("attach marker missing: %q", got)
+	}
+	if len(images) != 0 || len(files) != 1 || files[0].Asset == "" || files[0].FileID != "" {
+		t.Fatalf("second-tier attach must be Asset-only: %+v %+v", images, files)
 	}
 }
 

@@ -28,7 +28,7 @@ import (
 // updates this pin IN THE SAME COMMIT:
 //
 //	shasum -a 256 internal/controlplane/webfrontend.html
-const webPageSHA256 = "e85356265d019b3274d031c06a948902725e6ec8d2180194ea3d37bf47ab7985"
+const webPageSHA256 = "2f0d1f94618af3b89c2eda1aafeebfffc44a593b215c9bf18f165098b490ba1f"
 
 func TestWeb_AssetHashPinned(t *testing.T) {
 	sum := sha256.Sum256(webPage)
@@ -87,6 +87,33 @@ func TestWeb_CSPHeader(t *testing.T) {
 	}
 	if len(toks) == 0 {
 		t.Errorf("single-file page carries inline script/style; CSP %q pins no hashes — both blocks would be blocked", csp)
+	}
+
+	// Independent cross-check (W5 c_ni7mzw): re-derive the block set by
+	// a DIFFERENT route — strip HTML comments, then run UNanchored
+	// regexes — and require every hash to match the policy. The loops
+	// above re-run the production regexes, so a regex that opens a
+	// phantom block inside a comment ("<style>" named in prose) stays
+	// self-consistent and green while the browser refuses the REAL
+	// block; this second derivation can't be fooled the same way, so it
+	// pins the whole class of extraction drift, not one instance.
+	htmlCommentRE := regexp.MustCompile(`(?s)<!--.*?-->`)
+	stripped := htmlCommentRE.ReplaceAll(webPage, nil)
+	for _, probe := range []*regexp.Regexp{
+		regexp.MustCompile(`(?s)<script\b[^>]*>(.*?)</script>`),
+		regexp.MustCompile(`(?s)<style\b[^>]*>(.*?)</style>`),
+	} {
+		for _, m := range probe.FindAllSubmatchIndex(stripped, -1) {
+			content := stripped[m[2]:m[3]]
+			if len(bytes.TrimSpace(content)) == 0 {
+				continue
+			}
+			sum := sha256.Sum256(content)
+			want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+			if !toks[want] {
+				t.Errorf("comment-stripped re-derivation found block hash %s missing from CSP %q — the extraction regexes disagree with a comment-free view of the page", want, csp)
+			}
+		}
 	}
 
 	// The middleware is route-uniform (a future static/ asset inherits

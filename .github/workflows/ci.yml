@@ -72,6 +72,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: verify standing docs stay within budget
         run: scripts/verify-doc-budgets.sh
+      - name: pitfalls ledger entry format check (one file per entry)
+        run: scripts/pitfalls-count.sh --check
 
   web-gate:
     name: web-gate (no build chain + binary size)

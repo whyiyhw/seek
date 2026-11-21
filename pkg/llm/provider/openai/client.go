@@ -113,10 +113,23 @@ type openAIContentPart struct {
 	Type     string          `json:"type"`
 	Text     string          `json:"text,omitempty"`
 	ImageURL *openAIImageURL `json:"image_url,omitempty"`
+	// File carries one document attachment (type:"file" parts). The
+	// Chat-Completions file part is PDF-only per OpenAI's file-inputs
+	// guide; file_data holds the data: URL verbatim, filename rides
+	// alongside (both fields per the API reference's content-part
+	// object).
+	File *openAIFileRef `json:"file,omitempty"`
 }
 
 type openAIImageURL struct {
 	URL string `json:"url"`
+}
+
+// openAIFileRef is the `file` object of a type:"file" content part:
+// "filename": "x.pdf", "file_data": "data:application/pdf;base64,…".
+type openAIFileRef struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data"`
 }
 
 type openAIToolCall struct {
@@ -223,18 +236,19 @@ func convertMessages(msgs []llm.Message) []openAIMessage {
 }
 
 // contentFor renders one message's content: the plain string when
-// there are no images (byte-identical to the pre-vision wire shape, so
-// text-only prompts keep their prefix-cache behaviour), else the
-// array form — text block first, then one image_url block per image.
+// there are no images or files (byte-identical to the pre-vision wire
+// shape, so text-only prompts keep their prefix-cache behaviour), else
+// the array form — text block first, then one image_url block per
+// image, then one file block per document.
 func contentFor(m llm.Message) any {
-	if len(m.Images) == 0 {
+	if len(m.Images) == 0 && len(m.Files) == 0 {
 		return m.Content
 	}
-	parts := make([]openAIContentPart, 0, len(m.Images)+1)
+	parts := make([]openAIContentPart, 0, len(m.Images)+len(m.Files)+1)
 	if m.Content != "" {
 		parts = append(parts, openAIContentPart{Type: "text", Text: m.Content})
 	}
-	images := 0
+	media := 0
 	for _, img := range m.Images {
 		if img.URL == "" {
 			continue
@@ -243,9 +257,19 @@ func contentFor(m llm.Message) any {
 			Type:     "image_url",
 			ImageURL: &openAIImageURL{URL: img.URL},
 		})
-		images++
+		media++
 	}
-	if images == 0 {
+	for _, f := range m.Files {
+		if f.URL == "" {
+			continue
+		}
+		parts = append(parts, openAIContentPart{
+			Type: "file",
+			File: &openAIFileRef{Filename: f.Filename, FileData: f.URL},
+		})
+		media++
+	}
+	if media == 0 {
 		// Nothing sendable — keep the plain-string form rather than an
 		// array holding only text (some gateways reject array-form
 		// content with no media block).

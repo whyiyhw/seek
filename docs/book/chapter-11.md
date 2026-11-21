@@ -459,7 +459,7 @@ Skill 系统实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`
 - **Why**：`go:embed` 的文件顺序取决于文件系统遍历顺序，不保证确定性。
 - **Fix**：在 Wire() 时按文件名排序，确保 manifest 字节稳定。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

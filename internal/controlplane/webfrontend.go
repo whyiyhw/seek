@@ -25,6 +25,11 @@ package controlplane
 //	              (W3.2: "subagents" — see webfrontend_topic.go)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	              (X-Seek-Conversation picks the conv)
+//	POST /attach  one attachment's raw bytes (?name=<filename>) → staged
+//	              under the serve dir; the page turns the path into an
+//	              "@<path>" token in its /msg text, so the child's
+//	              existing image/document routers keep owning capability
+//	              judgement (webfrontend_attach.go)
 //	GET  /state   the requesting conv's binding, for the status line
 //	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1 envelope; the
 //	              session method set registers at servecli assembly —
@@ -136,6 +141,14 @@ type WebConfig struct {
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
+
+	// Settings is the read-only serve-side snapshot the page's settings
+	// panel renders (W5 c_ni7mzw, webfrontend_settings.go). servecli
+	// fills it from the same config.Load result the plane runs off;
+	// nil = a bare frontend (tests/embedders) whose settings/get
+	// answers -32603 and whose page shows "settings unavailable".
+	// controlplane deliberately never reads config.json itself.
+	Settings *ServeSettings
 }
 
 // WebFrontend is the browser-chat Frontend. Safe for concurrent use:
@@ -146,6 +159,12 @@ type WebFrontend struct {
 	cfgErr error // deferred WebConfig resolution failure, if any
 
 	store *BindingStore
+
+	// attachDir is where POST /attach stages uploaded bytes
+	// (webfrontend_attach.go): <ServeDir>/attachments. Derived next to
+	// the token/bindings paths so a test-injected store keeps uploads
+	// in its own temp tree.
+	attachDir string
 
 	// rpcReg serves POST /rpc (W4.1). Built empty in NewWeb, registered
 	// into only before Run — the §3.2 phase contract; handlers dispatch.
@@ -223,6 +242,9 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 			f.cfg.StorePath = filepath.Join(dir, "bindings.json")
 		}
 	}
+	// Attachments live BESIDE the config pair, never at the real
+	// ~/.seek (a test/CLI override moves all three together).
+	f.attachDir = filepath.Join(filepath.Dir(f.cfg.StorePath), attachDirName)
 	// This store handle is read-only (Get for /state); the router's own
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
@@ -283,6 +305,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/static/", f.handleStatic) // W5 asset family (markdown.js — c_x2au4t)
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
+	mux.HandleFunc("/attach", f.handleAttach) // W5: attachment intake (webfrontend_attach.go)
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
@@ -446,10 +469,19 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// project_id is the /rpc families' key (subagent/list & co. take one):
+	// deriving it here keeps the page from hashing paths in JS. Unbound
+	// stays "" — the zero-binding path must not hash an empty string into
+	// a plausible-looking id.
+	projectID := ""
+	if err == nil {
+		projectID = paths.ProjectID(b.ProjectPath)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bound":   err == nil,
-		"project": b.ProjectPath,
-		"session": b.SessionID,
+		"bound":      err == nil,
+		"project":    b.ProjectPath,
+		"project_id": projectID,
+		"session":    b.SessionID,
 	})
 }
 
