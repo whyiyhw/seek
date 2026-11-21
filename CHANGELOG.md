@@ -62,3 +62,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_ni7mzw：web 对齐 dsh·主题切换与设置面板（亮暗+防 FOUC）
 - c_ux7lvk：web 对齐 dsh·工具调用树（可展开参数/结果/耗时）
 - c_gqo32q：信号：手测脚本新增即进 selftest 排除表无闸——UI 验证车道两撞（c_txz6vz/c_5m3fm6）、c_ni7mzw 在途
+- c_a7nfpd：审批卡片·子进程半边：seek -p askFn→approval_request jsonLine→stdin 决定回读（c_n37tnr 拆卡）
