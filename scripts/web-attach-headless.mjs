@@ -325,7 +325,8 @@ try {
   ck("CSP 仍是 'self' 基线 + img-src data:", /^default-src 'self'/.test(csp) && csp.includes("img-src 'self' data:"), csp);
   ck('页面无 HTML 解析 sink', !(await evalJS(`/innerHTML|insertAdjacentHTML|document\\.write/.test(document.documentElement.outerHTML)`)), '');
   const scripts = await evalJS('document.scripts.length');
-  ck('脚本数仍是 2（内联 + static/markdown.js）', scripts === 2, `got ${scripts}`);
+  // 3 = head 主题 bootstrap（c_ni7mzw）+ 页面内联脚本 + static/markdown.js。
+  ck('脚本数仍是 3（head 主题 bootstrap + 内联 + static/markdown.js）', scripts === 3, `got ${scripts}`);
   await sendViaPage('/projects');
   const s = await until('文本指令仍可用', st => st.msgs.some(m => m.txt.includes('候选项目')), 8000);
   ck('纯文本指令零回归（/projects 应答）', s.msgs.some(m => m.txt.includes('候选项目')), '');

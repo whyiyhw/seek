@@ -28,6 +28,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/whyiyhw/seek/internal/buildinfo"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/controlplane"
 	"github.com/whyiyhw/seek/internal/controlplane/fake"
@@ -80,6 +81,10 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		// state (not a disk-backed asset family), so they register on
 		// the frontend itself — still pre-Run, same phase contract.
 		fe.RegisterApprovalMethods(reg)
+		// W5 c_ni7mzw: the settings panel's method is registered here
+		// (frontend-native, like approval/*); its PAYLOAD is filled in
+		// Run via SetSettings once config.Load has produced the snapshot.
+		fe.RegisterSettingsMethods(reg)
 		return fe
 	},
 	// Voice v2 push-to-talk (feature-deepseek-app-api §4.3 V2): rides
@@ -159,9 +164,21 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	// Built AFTER the config load so the serve section reaches the
 	// constructors (web_addr → WebConfig.Addr); a --listen flag folds
 	// over web_addr first (flag > config).
-	srcs, err := buildFrontends(fes, effectiveServe(cfg.Serve, listen))
+	eff := effectiveServe(cfg.Serve, listen)
+	srcs, err := buildFrontends(fes, eff)
 	if err != nil {
 		return badConfig(stderr, err)
+	}
+	// W5 c_ni7mzw: the page's read-only settings/about panel renders
+	// what THIS process actually resolved — the same cfg the plane runs
+	// off, the same effective address the frontend was constructed with
+	// (--listen already folded). Filled here rather than in the
+	// constructor because default_provider / auto_compact are top-level
+	// config fields the frontend registry never sees.
+	for _, fe := range srcs {
+		if w, ok := fe.(*controlplane.WebFrontend); ok {
+			w.SetSettings(webSettings(cfg, eff))
+		}
 	}
 
 	// SIGINT/SIGTERM start the graceful drain; Serve owns the
@@ -174,6 +191,50 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+// webSettings projects the loaded config into the panel's read-only
+// snapshot (W5 c_ni7mzw). Every value is what this process EFFECTIVELY
+// uses, defaults resolved — the panel's whole point over reading
+// ~/.seek/config.json by hand:
+//
+//   - max_concurrency 0/absent → the executor's default (4), read off
+//     controlplane.NewExecutor so the number keeps one home.
+//   - web_addr "" → DefaultWebAddr; eff already carries the --listen
+//     fold, so the panel shows the address this run actually listens on.
+//   - auto_compact 0 → "off"; otherwise the human "at_tokens"/"fraction"
+//     form (the resolver needs a model, so the display stays raw).
+//
+// Model / temperature are deliberately absent: seek has no config knob
+// for either (the serve child runs the lane default the provider picks —
+// cmd/seek's --model is per-invocation, not file config). The page says
+// so in words instead of inventing a value.
+func webSettings(cfg config.Config, eff *config.ServeConfig) controlplane.ServeSettings {
+	ss := controlplane.ServeSettings{
+		Version:         buildinfo.Version(),
+		DefaultProvider: cfg.DefaultProvider,
+		MaxConcurrency:  controlplane.NewExecutor(controlplane.ExecutorConfig{}).MaxParallel(),
+		Yolo:            cfg.ServeYolo(),
+		WebAddr:         controlplane.DefaultWebAddr,
+	}
+	if eff != nil {
+		if eff.MaxConcurrency > 0 {
+			ss.MaxConcurrency = eff.MaxConcurrency
+		}
+		if eff.WebAddr != "" {
+			ss.WebAddr = eff.WebAddr
+		}
+		ss.Projects = append([]string(nil), eff.Projects...)
+	}
+	if cfg.AutoCompact != nil {
+		switch {
+		case cfg.AutoCompact.AtTokens > 0:
+			ss.AutoCompact = fmt.Sprintf("%d tokens", cfg.AutoCompact.AtTokens)
+		case cfg.AutoCompact.AtFraction > 0:
+			ss.AutoCompact = fmt.Sprintf("%.0f%% of the model window", cfg.AutoCompact.AtFraction*100)
+		}
+	}
+	return ss
 }
 
 // effectiveServe folds the --listen flag over the loaded serve

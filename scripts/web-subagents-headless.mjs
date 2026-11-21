@@ -178,7 +178,10 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 const base = await snapshot();
-ck('基线 scripts=2（内联页面脚本 + static/markdown.js）', base.nscript === 2, `got ${base.nscript}`);
+// 基线 scripts=3：head 主题 bootstrap（c_ni7mzw 防 FOUC，必须同步在样式表
+// 之前跑）+ 页面内联脚本 + static/markdown.js。合并 main 时页面多了第一个，
+// 这条计数基线跟着变——XSS 断言读的是「不增」，不是「等于历史值」。
+ck('基线 scripts=3（head 主题 bootstrap + 内联页面脚本 + static/markdown.js）', base.nscript === 3, `got ${base.nscript}`);
 ck('基线在聊天面（未 browsing）', !base.browsing && base.formShown, '');
 
 // 景 0：/bind —— 面板数据源要先有绑定项目。
