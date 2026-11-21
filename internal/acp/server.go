@@ -59,6 +59,13 @@ type InitializeResult struct {
 
 type AgentCapabilities struct {
 	LoadSession bool `json:"loadSession"`
+	// SessionCapabilities advertises the session-lifecycle extras
+	// (sessionCapabilities.list → session/list). Pointer so the whole
+	// object is omitted when nil — in the ACP schema these
+	// sub-capabilities are OBJECTS where presence means "supported"
+	// (supplying {} is the on-state); there is no boolean to set.
+	// Same persistence gate as LoadSession at the call site.
+	SessionCapabilities *SessionCapabilities `json:"sessionCapabilities,omitempty"`
 	// PromptCapabilities tells the client what content types it may put in
 	// a session/prompt. Advertising image lets editors (Zed) offer image
 	// attachment; seek sends those natively to the multimodal lane
@@ -66,6 +73,21 @@ type AgentCapabilities struct {
 	// so a text-only agent stays silent.
 	PromptCapabilities PromptCapabilities `json:"promptCapabilities"`
 }
+
+// SessionCapabilities is the ACP sessionCapabilities object. Only the
+// list sub-capability is served (session/delete is not — deleting
+// transcripts is a TUI/filesystem action, and advertising it would
+// invite a client to yank history the store still references).
+type SessionCapabilities struct {
+	// List is `sessionCapabilities.list`: nil = not advertised;
+	// non-nil (an empty object on the wire) = session/list is served.
+	List *SessionListCapabilities `json:"list,omitempty"`
+}
+
+// SessionListCapabilities is the ACP schema's list sub-capability —
+// an intentionally EMPTY object (its only schema occupant is _meta,
+// which seek does not use). Presence on the wire is the advertisement.
+type SessionListCapabilities struct{}
 
 // PromptCapabilities is the subset of ACP prompt content types seek
 // accepts. Audio / embedded-context are not handled (seek is text-only;
@@ -101,6 +123,39 @@ type LoadSessionParams struct {
 type LoadSessionResult struct {
 	ConfigOptions []ConfigOption    `json:"configOptions,omitempty"`
 	Modes         *SessionModeState `json:"modes,omitempty"`
+}
+
+// ListSessionsParams is session/list's request (ACP schema
+// ListSessionsRequest). Cwd, when set, filters to sessions recorded
+// with exactly that working directory (absolute path). Cursor is
+// deliberately NOT decoded: seek returns the whole store in one page
+// and never emits nextCursor, so a compliant client has no cursor to
+// send — one arriving anyway is ignored (same leniency as unknown
+// fields elsewhere; a page request re-listing everything is
+// indistinguishable from page one for a single-page agent).
+type ListSessionsParams struct {
+	Cwd string `json:"cwd,omitempty"`
+}
+
+// ListSessionsResult is session/list's response (ACP schema
+// ListSessionsResponse). Sessions is REQUIRED on the wire and must be
+// an array, not null — an empty store answers `sessions: []`, never
+// `{}` or `null` (JS clients render the array directly). nextCursor is
+// omitted: everything is on one page.
+type ListSessionsResult struct {
+	Sessions []SessionSummary `json:"sessions"`
+}
+
+// SessionSummary is one entry of session/list's response (ACP schema
+// SessionInfo). SessionID + Cwd are required by the schema; Title /
+// UpdatedAt are optional (omitted when the transcript carries nothing
+// usable). UpdatedAt is RFC3339/ISO 8601 UTC — "timestamp of last
+// activity" is the session header's UpdatedAt.
+type SessionSummary struct {
+	SessionID string `json:"sessionId"`
+	Cwd       string `json:"cwd"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 type NewSessionResult struct {
@@ -227,6 +282,12 @@ type Backend interface {
 	// config menu so the client's dropdown reflects the RESUMED lane
 	// rather than the process default.
 	LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
+	// ListSessions enumerates resumable transcripts (session/list).
+	// Read-only: no anchoring, no agent mutation, no in-flight-turn
+	// conflict — unlike load/set_config_option it may run any time.
+	// Data source is the transcript store scan (same store session/load
+	// reads), so a listed id is loadable by construction.
+	ListSessions(p ListSessionsParams) (ListSessionsResult, error)
 	// Prompt runs one turn. It streams progress by calling send (each call
 	// becomes a session/update notification) and returns when the turn
 	// ends or ctx is cancelled.
@@ -475,6 +536,25 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 			// -32000 (server error) rather than -32601: the method IS
 			// handled; the requested session is what failed. Clients
 			// distinguish "capability missing" from "load refused".
+			s.replyErr(req.ID, -32000, err.Error())
+			return
+		}
+		s.reply(req.ID, res)
+	case "session/list":
+		// Read-only inventory, inline in the read loop like
+		// session/new: no cancellation, no locks, safe beside a
+		// running prompt (it snapshots store state, touches nothing).
+		var p ListSessionsParams
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &p); err != nil {
+				s.replyErr(req.ID, -32602, "bad list params: "+err.Error())
+				return
+			}
+		}
+		res, err := s.backend.ListSessions(p)
+		if err != nil {
+			// -32000 not -32601, same distinction as session/load:
+			// the method is served, the listing is what failed.
 			s.replyErr(req.ID, -32000, err.Error())
 			return
 		}

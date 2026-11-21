@@ -2608,6 +2608,11 @@ type acpBackend struct {
 }
 
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
+	persisted := b.store != nil && b.sess != nil
+	var sessCaps *acp.SessionCapabilities
+	if persisted {
+		sessCaps = &acp.SessionCapabilities{List: &acp.SessionListCapabilities{}}
+	}
 	return acp.InitializeResult{
 		ProtocolVersion: p.ProtocolVersion,
 		AgentCapabilities: acp.AgentCapabilities{
@@ -2617,7 +2622,13 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 			// persistence/continue UX on this one boolean: advertising it
 			// with nothing behind it turns "continue this conversation"
 			// into a hard error at the client.
-			LoadSession: b.store != nil && b.sess != nil,
+			LoadSession: persisted,
+			// sessionCapabilities.list advertises session/list, gated on
+			// the SAME store: listing transcripts no client can then
+			// load would be a menu of dead ends. Shape note: the schema
+			// defines list as an OBJECT where presence = advertised
+			// ({} on the wire), not a boolean.
+			SessionCapabilities: sessCaps,
 			// Advertise image so editors (Zed) offer image attachment;
 			// on a vision model the bytes attach natively, otherwise an
 			// in-band note tells the model to suggest switching.
@@ -2736,6 +2747,43 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	}
 	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
 	return acp.LoadSessionResult{ConfigOptions: b.menu, Modes: acpSessionModes(b.policy.Workflow())}, nil
+}
+
+// ListSessions enumerates the store's transcripts for session/list —
+// the inventory half of the persistence pair (load resumes one of
+// these). Data source is the same Store.Load scan session/load reads
+// (同源 by construction: a listed id is loadable), newest first; the
+// title is the store package's first-user-message derivation (same
+// single source as serve's /rpc session/list — no second title style).
+// Read-only and prompt-safe: no anchoring, no agent mutation, so it
+// runs inline in the read loop without the in-flight checks load and
+// set_config_option need.
+func (b *acpBackend) ListSessions(p acp.ListSessionsParams) (acp.ListSessionsResult, error) {
+	if b.store == nil {
+		return acp.ListSessionsResult{}, errors.New("session/list: persistence is off (--no-save) — no transcripts to list")
+	}
+	infos, loadErrs, err := b.store.List()
+	if err != nil {
+		return acp.ListSessionsResult{}, fmt.Errorf("session/list: %w", err)
+	}
+	// One unreadable transcript must not hide the rest of the store
+	// from a browse view (Store.List's own rule); warn on stderr only.
+	for _, le := range loadErrs {
+		fmt.Fprintf(os.Stderr, "acp: session/list: skipped unreadable session: %v\n", le)
+	}
+	out := make([]acp.SessionSummary, 0, len(infos)) // [] not null when empty
+	for _, info := range infos {
+		if p.Cwd != "" && info.CWD != p.Cwd {
+			continue
+		}
+		out = append(out, acp.SessionSummary{
+			SessionID: info.ID,
+			Cwd:       info.CWD,
+			Title:     session.FirstUserTitle(b.store.Dir(), info.ID),
+			UpdatedAt: info.UpdatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return acp.ListSessionsResult{Sessions: out}, nil
 }
 
 // setMenuCurrent re-points the model dropdown at a model id after a

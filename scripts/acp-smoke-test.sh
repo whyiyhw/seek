@@ -18,8 +18,9 @@
 #   covered   build → spawn real `seek acp` → newline-JSON-RPC handshake
 #             (initialize) → session/new with a cwd that differs from the
 #             process launch dir → assert the D-1 double anchor actually
-#             moved (sessionId is the durable transcript id, stderr anchor
-#             line carries the absolute cwd + 16-hex project id) → bad cwd
+#             moved (sessionId is the durable transcript id; the stderr
+#             anchor line carries the absolute cwd + 16-hex project id +
+#             the SAME transcript id the response handed out) → bad cwd
 #             fails loud with a JSON-RPC error → [P0-2] reply frames (id,
 #             no method) are routed to permission waiters / silently
 #             ignored — never answered with -32601 — and $/cancel_request
@@ -33,8 +34,12 @@
 #             default + availableModes [default, plan]) and
 #             session/set_mode is honoured: current_mode_update
 #             notification BEFORE the {} response, bogus modeId is a
-#             loud -32000 naming the available modes → stdin EOF →
-#             clean exit rc=0.
+#             loud -32000 naming the available modes → session/list:
+#             initialize must advertise sessionCapabilities.list (object
+#             shape {}) and the store scan must return the PRE-SEEDED
+#             transcript (id + first-user-message title + header mtime),
+#             a no-match cwd filter must answer the empty array → stdin
+#             EOF → clean exit rc=0.
 #   NOT       session/prompt with CONTENT — that needs a real LLM
 #             round-trip (key + network), which is not deterministic
 #             lane material. The content-bearing termination states
@@ -97,6 +102,17 @@ echo "acp-smoke: building ./cmd/seek ..."
 # request ever leaves the process. Empty-string env vars neutralise any
 # second-tier keys leaking in from the caller's environment (pitfall:
 # "无头 ACP 车道 provider 只能经 env/config 选择" — here we pin, not probe).
+#
+# Pre-seed one transcript (the has-history state for session/list): a
+# minimal schema-v3 header line + one user message line is all the
+# store's List scan and the title derivation read. The only prompt that
+# runs is the empty-text termination probe (no key, no network) on the
+# rpc-2 session; the seed pins the deterministic title/mtime assertions.
+SEED_ID="20260101-000000-abcdef0123456789"
+mkdir -p "$SMOKE_HOME/sessions"
+{ printf '{"schema_version":3,"id":"%s","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:01Z","model":"deepseek-v4.1-flash","cwd":"%s","turns":1}\n' "$SEED_ID" "$WS"
+  printf '{"role":"user","content":"smoke history question"}\n'
+} > "$SMOKE_HOME/sessions/$SEED_ID.jsonl"
 cd "$LAUNCH" || fail "cd launch dir"
 env SEEK_HOME="$SMOKE_HOME" \
     DEEPSEEK_API_KEY=selftest-dummy \
@@ -126,24 +142,33 @@ wait_for '"id":1' 'initialize' 30
 grep -q '"protocolVersion":1'        "$OUT" || fail 'initialize: protocolVersion != 1'
 grep -q '"agentCapabilities"'        "$OUT" || fail 'initialize: no agentCapabilities'
 grep -q '"image":true'               "$OUT" || fail 'initialize: promptCapabilities.image not advertised'
-echo "acp-smoke: initialize ok (protocolVersion=1, image capability advertised)"
+# sessionCapabilities.list: object shape — `"list":{}` (presence IS the
+# advertisement; a boolean here would be schema-invalid).
+grep -q '"sessionCapabilities":{"list":{}}' "$OUT" \
+  || fail "initialize: sessionCapabilities.list not advertised as {} (got: $(grep '"id":1' "$OUT"))"
+echo "acp-smoke: initialize ok (protocolVersion=1, image + sessionCapabilities.list advertised)"
 
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":2' 'session/new' 15
 # sessionId is the DURABLE transcript id (session/load work, 2026-11-19:
 # YYYYMMDD-HHMMSS-16hex) — NOT the project name the smoke used to assert
-# before persistence landed. SID is captured because the prompt step
-# below addresses the session by it; the anchor proof stays in the
-# stderr line.
+# before persistence landed; that stale assertion sat red until the ACP
+# cards reran this smoke — a wire-contract change must update its
+# real-binary assertion in the same change. SID is captured because the
+# prompt step below addresses the session by it.
 SID="$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$OUT" | head -1)"
 echo "$SID" | grep -Eq '^[0-9]{8}-[0-9]{6}-[0-9a-f]{16}$' \
   || fail "session/new: sessionId is not a durable transcript id (got: ${SID:-none}; $(grep '"id":2' "$OUT"))"
-# stderr anchor line: absolute workspace path + 16-hex project id.
+# stderr anchor line: absolute workspace path + 16-hex project id + the
+# SAME transcript id the response handed out (paseo persists that id —
+# the anchor line is where the two visibly meet).
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" >/dev/null \
   || fail "session/new: anchor line missing cwd=$WS"
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -Eq 'project=[0-9a-f]{16}' \
   || fail "session/new: anchor line project id is not 16-hex"
+grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -qF "id=$SID" \
+  || fail "session/new: anchor line id= does not match the returned sessionId ($SID)"
 echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex, durable id $SID)"
 
 # --- 3. bad cwd fails loud (no silent daemon-dir session) ---------------------
@@ -241,8 +266,28 @@ grep -F '"current_mode_update"' "$OUT" | grep -qF '"currentModeId":"default"' \
   || fail "current_mode_update does not confirm default"
 echo "acp-smoke: session modes ok (advertised default+plan, set_mode honoured + notified, bogus rejected)"
 
+# --- 3e. session/list: the pre-seeded transcript, both store states -----------
+# Has history: the seed comes back with id + first-user-message title
+# + header mtime. (The rpc-2 session may share the cwd filter and also
+# appear — these are contains-assertions on the seed, extras are fine.)
+rpc 9 session/list "{\"cwd\":\"$WS\"}"
+wait_for '"id":9' 'session/list' 15
+grep '"id":9' "$OUT" | grep -q "\"sessionId\":\"$SEED_ID\"" \
+  || fail "session/list: seeded id missing (got: $(grep '"id":9' "$OUT"))"
+grep '"id":9' "$OUT" | grep -q '"title":"smoke history question"' \
+  || fail "session/list: title not derived from the first user message (got: $(grep '"id":9' "$OUT"))"
+grep '"id":9' "$OUT" | grep -q '"updatedAt":"2026-01-01T00:00:01Z"' \
+  || fail "session/list: updatedAt not the header mtime (got: $(grep '"id":9' "$OUT"))"
+# Empty result state: a cwd nothing matches answers the EMPTY ARRAY —
+# the schema requires the array member (never null).
+rpc 10 session/list "{\"cwd\":\"$SANDBOX/no-such-cwd\"}"
+wait_for '"id":10' 'session/list(no match)' 15
+grep '"id":10' "$OUT" | grep -q '"sessions":\[\]' \
+  || fail "session/list: no-match filter must answer sessions:[] (got: $(grep '"id":10' "$OUT"))"
+echo "acp-smoke: session/list ok (seeded transcript listed + title + mtime; empty filter = [])"
+
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
-echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+prompt-term+modes anchor=$WS rc=0"
+echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list anchor=$WS rc=0"

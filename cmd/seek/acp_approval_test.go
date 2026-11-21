@@ -40,6 +40,9 @@ func (nopBackend) Prompt(ctx context.Context, p acp.PromptParams, send func(acp.
 func (nopBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfigOptionResult, error) {
 	return acp.SetConfigOptionResult{}, nil
 }
+func (nopBackend) ListSessions(p acp.ListSessionsParams) (acp.ListSessionsResult, error) {
+	return acp.ListSessionsResult{Sessions: []acp.SessionSummary{}}, nil
+}
 
 // acpApprovalHarness wires asker + server + policy over pipes and
 // scripts the client side.
