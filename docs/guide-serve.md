@@ -21,6 +21,7 @@
  │  去重(EventID) → DirectAt 过滤 → 指令/路由(ConvID→binding) → per-Conv 串行队列        │
  │                                       │                                             │
  │        exec: seek -p '<msg>' --json --no-cron-tick [-resume <sid>] [--yolo]          │
+ │              [--approval-stdin]   ← web 前端：审批卡片决定经 stdin 回注（W5）        │
  │              cmd.Dir = 绑定的项目目录                                                 │
  │                                       │  JSONL: 最终文本 + 末行 agent_end.session_id │
  │        回写 binding.session_id ──► Reply ──► 按 ConvID 前缀找回 frontend → Send() ───┘
@@ -78,7 +79,7 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 
 ## 5. Web frontend：启动、token、tailnet 与安全清单 / The bundled web frontend
 
-内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。布局是**左栏常驻会话侧栏 + 中栏内容**：侧栏按 updated 倒序列出历史会话（当前项高亮、标题子串搜索、30 行一页「加载更多」、＋新建＝`/new` 同款指令），可收成 44px 图标轨且收起状态记在 localStorage（窄屏 <1024px 默认收起）；点一条把中栏切成会话正文（元信息行 + 消息 cursor 分页浏览，50/页），「💬 聊天」收回。聊天面本身：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、顶栏 `/bind` `/projects` `/switch` `/new` `/cancel` 快捷键与绑定状态常显；顶栏另有三个资产视图——**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（cache 命中率 + cost，服务端计价，客户端不算钱）、**🤖 后台**（子代理列表 + transcript 尾读）。
+内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。布局是**左栏常驻会话侧栏 + 中栏内容**：侧栏按 updated 倒序列出历史会话（当前项高亮、标题子串搜索、30 行一页「加载更多」、＋新建＝`/new` 同款指令），可收成 44px 图标轨且收起状态记在 localStorage（窄屏 <1024px 默认收起）；点一条把中栏切成会话正文（元信息行 + 消息 cursor 分页浏览，50/页），「💬 聊天」收回。聊天面本身：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、生成中发送键变**⏹ 停止**键（点击发 `/cancel` 同款指令、草稿不动；中断后半截气泡保留 + 「—— 已中断 ——」标注，收口即键态复位）、顶栏 `/bind` `/projects` `/switch` `/new` `/cancel` 快捷键与绑定状态常显；顶栏另有三个资产视图——**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（cache 命中率 + cost，服务端计价，客户端不算钱）、**🤖 后台**（子代理列表 + transcript 尾读）。
 
 输入区（c_7lsngm）：多行（Enter 发送 / Shift+Enter 换行）+ 一个候选弹层两种候源——`/` 弹指令面板（`CMDS` 注册表驱动，↑↓ 选、Tab/Enter 补全、Esc 关闭）、`@` 弹最近会话（`session/list`，选中即落 `@<sid>` 并发 `/resume <sid>`）。导航键只挂输入框，页面无全局 keydown 监听；≤640px 弹层满宽、条目换行、输入 16px。文件引用（`@` 指文件）仍列远期。
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -46,13 +47,41 @@ var ErrExecTimeout = errors.New("controlplane: seek run timed out")
 // directory. Conv keys the per-conversation serialisation queue (the
 // same value as the inbound's ConvID, as a plain string); SessionID is
 // the binding's stored session — empty means first turn (no -resume);
-// Yolo mirrors the per-binding D-C5 switch (--yolo on the child).
+// Yolo mirrors the per-binding D-C5 switch (--yolo on the child);
+// Approval is the optional decision router (nil → the child keeps print
+// mode's deny-everything default).
 type ExecRequest struct {
 	Conv      string
 	Dir       string
 	SessionID string
 	Message   string
 	Yolo      bool
+
+	// Approval, when non-nil, turns on the child's --approval-stdin
+	// channel (W5 card c_n37tnr): every approval_request line the child
+	// emits is registered here with a delivery handle, and the plane
+	// writes the human's decision back into that child's stdin keyed by
+	// req_id. nil keeps the pre-W5 byte shape of the child's argv AND
+	// its deny-by-default posture — a frontend without an approval
+	// surface (fake) is unaffected.
+	Approval ApprovalRouter
+}
+
+// ApprovalRouter is the exec-side half of the approval round-trip: the
+// per-run object the executor registers request ids on and withdraws
+// leftovers through. The web frontend implements it (webfrontend_approval.go,
+// RunApprovals); the plane's Frontend port stays untouched — this is a
+// sibling interface, upcast at the wiring site like StreamSender.
+type ApprovalRouter interface {
+	// Route installs deliver as the handler for reqID's decision. Called
+	// from the stdout reader BEFORE the same event is emitted, so a card
+	// is never visible without a live delivery handle.
+	Route(reqID string, deliver func(decision string))
+	// Cancel withdraws every card this run filed that nobody decided —
+	// called when an attempt ends (the child is gone; a leftover card
+	// could only be answered into a dead pipe). Idempotent, and it
+	// forgets the ids so a self-heal rerun starts clean.
+	Cancel()
 }
 
 // ExecResult is what one executed message produced.
@@ -226,10 +255,9 @@ type RunEvent struct {
 	// waits on it, the web approval hub files the card under it, the
 	// decision comes back keyed by it); Kind/Summary/Command/Diff
 	// mirror permission.Action's decision-relevant subset plus Display's
-	// rendering hints. No shipped seek emits these yet — the contract
-	// exists so the web side (webfrontend_approval.go) and the sandbox
-	// stubs can speak it; wiring the real child (askFn → event → stdin
-	// decision read-back) is the follow-up card.
+	// rendering hints. The child emits these under `-p --json
+	// --approval-stdin` (cmd/seek/approval_stdin.go); a stub that
+	// speaks the same lines exercises the same path.
 	ReqID   string `json:"req_id,omitempty"`
 	Kind    string `json:"kind,omitempty"`
 	Summary string `json:"summary,omitempty"`
@@ -315,6 +343,15 @@ type attemptOutcome struct {
 // same fold parseSeekJSONL performs — so emit sees lines as they land
 // while the outcome aggregation stays byte-identical to the batch
 // reader. See RunStream for the self-heal policy around its outcomes.
+//
+// With req.Approval set the child also gains --approval-stdin and a
+// stdin PIPE (os.Pipe, not io.Pipe: kernel-buffered writes must not
+// block the plane's RPC handler, and closing the write end on the way
+// out turns a late decision into EPIPE instead of a hung HTTP request).
+// Every approval_request line is registered with the run's router
+// BEFORE it is emitted — the card must never be visible without a live
+// delivery handle — and the handle writes one decision line back keyed
+// by req_id.
 func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool, emit func(RunEvent)) (attemptOutcome, error) {
 	args := []string{"-p", req.Message, "--json", "--no-cron-tick"}
 	if resume && req.SessionID != "" {
@@ -322,6 +359,9 @@ func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool, em
 	}
 	if req.Yolo {
 		args = append(args, "--yolo")
+	}
+	if req.Approval != nil {
+		args = append(args, "--approval-stdin")
 	}
 
 	// Same ctx-derived deadline for caller cancellation (/cancel) and
@@ -345,13 +385,77 @@ func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool, em
 	cmd.Stdout = pw
 	var stderr lockedBuf
 	cmd.Stderr = &stderr
-	cmd.Stdin = nil // /dev/null: -p reads the flag, never stdin
 
-	sink := &streamSink{emit: emit}
+	var (
+		stdinW *os.File // decision line writer; nil without an approval router
+		stdinR *os.File // child's end of that pipe, closed with the attempt
+		decMu  sync.Mutex
+	)
+	closeApprovalPipe := func() {
+		decMu.Lock()
+		defer decMu.Unlock()
+		if stdinW == nil {
+			return
+		}
+		stdinW.Close()
+		stdinR.Close()
+		stdinW, stdinR = nil, nil // a late decision is a no-op, never a double close
+	}
+	if req.Approval != nil {
+		r, w, err := os.Pipe()
+		if err != nil {
+			pr.Close()
+			pw.Close()
+			return attemptOutcome{retryable: false},
+				fmt.Errorf("controlplane: exec: approval pipe: %w", err)
+		}
+		stdinR, stdinW = r, w
+		// A plain *os.File: os/exec hands the fd to the child directly
+		// instead of pumping it from a goroutine.
+		cmd.Stdin = r
+	}
+	writeDecision := func(reqID, decision string) {
+		b, err := json.Marshal(struct {
+			Type     string `json:"type"`
+			ReqID    string `json:"req_id"`
+			Decision string `json:"decision"`
+		}{"approval_decision", reqID, decision})
+		if err != nil {
+			return
+		}
+		decMu.Lock()
+		defer decMu.Unlock()
+		if stdinW == nil { // attempt already settled: the child is gone
+			return
+		}
+		_, _ = stdinW.Write(append(b, '\n'))
+	}
+
+	// Wrap the observer: register the delivery handle first, then pass
+	// the event on. Emit's red line still holds — the wrapped callback
+	// adds side effects, never result state.
+	var obs func(RunEvent)
+	if req.Approval != nil {
+		router := req.Approval
+		obs = func(ev RunEvent) {
+			if ev.Type == "approval_request" && ev.ReqID != "" {
+				id := ev.ReqID
+				router.Route(id, func(d string) { writeDecision(id, d) })
+			}
+			if emit != nil {
+				emit(ev)
+			}
+		}
+	} else {
+		obs = emit
+	}
+
+	sink := &streamSink{emit: obs}
 
 	if startErr := cmd.Start(); startErr != nil {
 		pr.Close()
 		pw.Close()
+		closeApprovalPipe()
 		// Deterministic (binary missing, bad Dir) — a rerun changes
 		// nothing. Named with the seek path so the reply says it.
 		return attemptOutcome{retryable: false}, fmt.Errorf("controlplane: exec %s: %w", e.cfg.SeekPath, startErr)
@@ -378,11 +482,27 @@ func (e *Executor) attempt(ctx context.Context, req ExecRequest, resume bool, em
 	// settle runs once Wait has returned: the child is gone and every
 	// stdout byte is already inside the reader (synchronous pipe), so
 	// closing pw lets the reader see EOF, fold the trailing partial
-	// line if any, and exit before the outcome snapshot.
+	// line if any, and exit before the outcome snapshot. The approval
+	// pipe closes here too — that is what unblocks (with EPIPE) a
+	// decision racing the child's exit, and what lets the parent reap
+	// the fd.
 	settle := func() seekOutcome {
 		pw.Close()
+		closeApprovalPipe()
 		<-readerDone
 		return sink.snapshot()
+	}
+	// One exit path for both success and failure: withdraw the cards
+	// this attempt filed (nobody decided them; the child is gone) so a
+	// browser can never be left with a prompt whose pipe is closed. The
+	// router keeps its own id list, so a plain run never touches it and
+	// a self-heal rerun starts with a clean slate. The pipe teardown is
+	// deferred as well as called from settle: the kill-grace expiry path
+	// walks away without settling, and a leaked fd pair must not outlive
+	// the attempt. Both calls are idempotent (nil-ed under decMu).
+	defer closeApprovalPipe()
+	if req.Approval != nil {
+		defer req.Approval.Cancel()
 	}
 
 	var waitErr error

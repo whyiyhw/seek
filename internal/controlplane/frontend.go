@@ -69,6 +69,22 @@ type StreamSender interface {
 	SendStream(ctx context.Context, conv ConvID, ev RunEvent) error
 }
 
+// ApprovalFrontend is the OPTIONAL approval extension of
+// StreamSender (W5 card c_n37tnr's child half — the same sibling-
+// interface discipline: the port and StreamSender stay untouched, the
+// router upcasts at the send site). A frontend that can put a
+// permission question in front of a human implements it; the router
+// then hands the run an ApprovalRouter, which is what turns
+// `seek -p --approval-stdin` on for the child. Frontends without an
+// approval surface (fake) never implement it, so their child argv and
+// deny-by-default posture stay byte-identical.
+type ApprovalFrontend interface {
+	// ApprovalRoute returns a per-run router. The executor registers
+	// each approval_request's decision sink on it before the event is
+	// emitted and cancels the run's leftovers when the attempt ends.
+	ApprovalRoute() ApprovalRouter
+}
+
 // ConvID is the frontend-agnostic conversation key:
 // "<frontend>:<native-id>", e.g. "feishu:oc_abc". The frontend prefix
 // keeps bindings and serialisation queues from colliding across

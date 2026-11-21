@@ -64,6 +64,20 @@
      for the path argument. Binding status stays pinned in the status
      line: refreshed immediately after a command POST (202) settles on
      the wire, again on every SSE reply, and again on SSE (re)connect.
+     Stop key (c_5m3fm6, dsh InputBar alignment): while a streamed run
+     is live the SEND key becomes the STOP key — the click is forked at
+     the click layer (preventDefault; a submit event names #send as
+     the submitter for Enter's implicit submission too, so click vs
+     Enter cannot be told apart at submit) and sends the SAME /cancel
+     command text as the top bar; Enter with a draft still submits as
+     before (conv-gate queuing is prior semantics, not narrowed here).
+     The armed run's close-out is a PRESERVING one: the ack reply is
+     run-bearing but its text is just a receipt — the accumulated
+     deltas ARE the content of an interrupted run, so a 「—— 已中断 ——」
+     marker is appended instead of the authoritative replace, and the
+     server's terminal 「run 已中断。」 lands run-less as its own
+     bubble. Key state follows the run table: the first stream event
+     flips it, close-out reverts it — no stop key when idle.
      Attachments (W5 c_56yrcj): click 📎 / drag / paste → POST /attach
      (raw bytes), staged progress in a tray, images previewed from
      FileReader data: URLs; on send the staged paths ride the /msg text
@@ -163,7 +177,7 @@
     --seek-inset: #14161a;   /* 页面底/代码块底/输入框底 */
     --seek-panel: #1b1e24;   /* 顶栏/状态栏/侧栏/卡片/表单底 */
     --seek-soft:  #242830;   /* 气泡/统计卡/次级按钮底 */
-    --seek-accent:#2c3d5f;   /* 用户气泡/当前行/主按钮底 */
+    --seek-accent:var(--seek-accent);   /* 用户气泡/当前行/主按钮底 */
     --seek-line:  #2a2e36;   /* 主分隔线/边框 */
     --seek-line-2:#22252c;   /* 列表行分隔线（更淡一档） */
     --seek-line-focus:#4b586b; /* 输入聚焦边框 */
@@ -173,13 +187,13 @@
                                 首版 #858b93 在 soft 上 4.3 红（设置卡/
                                 统计卡的 k 列都长在 soft 上）；accent 底
                                 上的次级文字由组件规则升主文色，不靠这条 */
-    --seek-fg-soft:#9aa0a8;  /* 工具行/徽标/卡片标题 */
+    --seek-fg-soft:var(--seek-fg-soft);  /* 工具行/徽标/卡片标题 */
     --seek-ok:    #7ec699;
-    --seek-warn:  #d8a657;
+    --seek-warn:  var(--seek-warn);
     --seek-warn-bg:#3a3222;  /* 警示条底（SSE 断线提示）——底色与前景分开
                                 成对，亮色主题才好各自调值 */
-    --seek-err:   #d8756f;
-    --seek-link:  #7aa2f7;
+    --seek-err:   var(--seek-err);
+    --seek-link:  var(--seek-ok);
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
     --seek-shadow:0 4px 14px rgba(0,0,0,.45);
@@ -302,6 +316,8 @@
           margin: 2px 0 8px; overflow: auto; white-space: pre-wrap;
           word-break: break-all; max-height: 220px; font: inherit;
           font-size: 12px; color: var(--seek-fg-soft); }
+  /* 中断收口标注（c_5m3fm6）：保留的半截气泡尾部一行灰字，流状态可见地终止 */
+  .msg .cut { color: var(--seek-fg-soft); font-size: 12px; padding-top: 2px; }
   /* 输入区底对齐（c_7lsngm）：按钮跟到多行输入的底边；position:relative
      是候选弹层的定位父级——贴表单上沿、宽度跟表单（窄屏自然满宽）。 */
   form { position: relative; display: flex; gap: 8px; align-items: flex-end;
@@ -348,6 +364,8 @@
      上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
      （ap-badge 同款接线，两处共用同一对 token）。 */
   #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
+  /* 停止键态（c_5m3fm6）：生成中 #send 变停止键——红底与录音态同色系（token 对齐） */
+  #send.stop { background: var(--seek-rec); color: var(--seek-rec-fg); }
 
   /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
   /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
@@ -598,6 +616,21 @@
   #set-theme button { padding: 5px 12px; font-size: 13px; background: var(--seek-soft);
                       border: 1px solid var(--seek-line); }
   #set-theme button.on { background: var(--seek-accent); border-color: var(--seek-line-focus); }
+
+  /* ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）---- */
+  body:not(.hooks-view) #hooks { display: none; }
+  #hk-log { flex: 1; overflow-y: auto; padding: 8px 14px;
+            font: 12px/1.8 ui-monospace, Menlo, Consolas, monospace; }
+  .hk-row { display: flex; gap: 10px; white-space: nowrap; }
+  .hk-row .hk-ts { color: var(--seek-fg-dim); flex: none; }
+  .hk-row .hk-hook { color: var(--seek-ok); flex: none; max-width: 180px;
+                     overflow: hidden; text-overflow: ellipsis; }
+  .hk-row .hk-ev { color: var(--seek-warn); flex: none; }
+  .hk-row .hk-rest { color: var(--seek-fg-soft); overflow: hidden; text-overflow: ellipsis; }
+  .hk-row.denied .hk-rest, .hk-row.denied .hk-ev { color: var(--seek-err); }
+  #hk-cnt { cursor: default; }
+  #hk-cnt.fresh { color: var(--seek-warn); cursor: pointer; }
+  #hk-pause.held { background: var(--seek-accent); }
 </style>
 </head>
 <body>
@@ -619,6 +652,9 @@
   <button id="stat-btn" type="button">📊 统计</button>
   <button id="agents-btn" type="button">🤖 后台</button>
   <button id="set-btn" type="button">⚙ 设置</button>
+  <!-- hooks 实时审计（W5 c_xz2bey）：审计 tail 视图 + /events 的 hooks
+       topic 实时追加。 -->
+  <button id="hk-btn" type="button">🪝 审计</button>
 </nav>
 <!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
      📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
@@ -685,6 +721,18 @@
     <section id="settings" class="pane">
       <div class="pane-head"><span class="cnt">设置 · 只读展示（改配置 = 编辑 ~/.seek/config.json 后重启）</span></div>
       <div id="set-body"></div>
+    </section>
+    <!-- hooks 审计视图（W5 c_xz2bey）：订阅先行的 tail——专用 /events 连接带
+         ?topic=hooks（审计日志是全局的，无需 /bind），快照走 POST /rpc
+         hooks/audit/tail；推送逐行追加，可暂停/按 hook 名过滤。 -->
+    <section id="hooks" class="pane">
+      <div class="pane-head">
+        <input id="hk-filter" type="search" autocomplete="off"
+               placeholder="按 hook 名过滤…" aria-label="按 hook 名过滤审计行">
+        <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）">⏸ 暂停</button>
+        <span class="cnt" id="hk-cnt" title="显示行数"></span>
+      </div>
+      <div id="hk-log"></div>
     </section>
     <form id="form">
       <!-- 多行输入（c_7lsngm）：Enter 发送、Shift+Enter 换行；#menu 是 '/' 指令补全
@@ -1054,8 +1102,20 @@ async function refreshState() {
 // 同一个气泡里；带 run 的 reply 到达时整泡替换成权威终文本——客户端
 // 累积只是预览，丢帧/未见过该 run 的 reply 走普通消息路径，天然幂等。
 const runs = new Map();   // runId → {el, cur, tools}
+let lastRun = '';         // 最新流式 run：/cancel 武装的对象（服务端每 conv 至多一个活跃 run，即最新泡）
+let stopping = '';        // 已发 /cancel 待收口的 run id：它的 run-bearing reply 走保留式中断收口（c_5m3fm6）
 let raf = 0;
 const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧最多渲一次）
+
+// ---- 发送/停止键态（c_5m3fm6，对齐 dsh InputBar 中断语义）----
+// 生成中（本 conv 有活跃 run——首个 delta/tool 事件起、reply 收口止）发送键
+// 变停止键；键态只跟 runs 表走，流事件开、收口关，无生成时恒为发送键。
+function renderSend() {
+  const busy = runs.size > 0;
+  send.textContent = busy ? '⏹ 停止' : '发送';
+  send.classList.toggle('stop', busy);
+  send.title = busy ? '中断当前生成（等同 /cancel）' : '';
+}
 
 function nearBottom() {
   return list.scrollHeight - list.scrollTop - list.clientHeight < 80;
@@ -1075,6 +1135,8 @@ function runBubble(id) {
   el.className = 'msg seek streaming';
   r = { el, cur: null, tools: new Map(), tick: 0 };  // tick: 耗时跳动 interval id
   runs.set(id, r);
+  lastRun = id;
+  renderSend();               // 首个流事件即键态切换（c_5m3fm6）
   appendPinned(list, el);
   return r;
 }
@@ -1340,10 +1402,27 @@ function listen() {
       if (r.tick) { clearInterval(r.tick); r.tick = 0; }   // 停掉耗时跳动
       const pin = nearBottom();
       r.el.classList.remove('streaming');
-      if (m.text) renderBody(r.el, m.text); else r.el.remove();
+      if (m.run === stopping) {
+        // 中断收口（c_5m3fm6）：这份 run-bearing reply 是 /cancel 的 ack——
+        // 文本只是回执，已累积的半截才是被中断 run 的内容。保留气泡 + 尾部
+        // 标注中断，不做权威替换；服务端终态「run 已中断。」随后 run-less
+        // 独立成条。ack/终态谁先带 run 不定（服务端只保「恰一条」），两条
+        // 路径在此同形。
+        stopping = '';
+        const cut = document.createElement('div');
+        cut.className = 'cut';
+        cut.textContent = '—— 已中断 ——';
+        r.el.appendChild(cut);
+      } else if (m.text) {
+        renderBody(r.el, m.text);
+      } else {
+        r.el.remove();
+      }
       if (pin) list.scrollTop = list.scrollHeight;
+      renderSend();                    // 收口即键态复位（c_5m3fm6）
     } else if (m.text) {
       addMsg('seek', m.text);   // 指令应答 / 丢帧回退：普通消息路径
+      stopping = '';            // run-less 应答落定（no-op ack 或终态），中断请求收尾
     }
     if (m.session_id) {         // W2.3：agent_end 终值——run 收口带 sid
       meter.sid = m.session_id;
@@ -1400,6 +1479,10 @@ async function sendText(text, fromInput, atts) {
   const tokens = refs.map(a => '@' + a.path).join('\n');
   const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
   if (!body) return;
+  // /cancel（停止键、顶栏按钮、手打三入口同此一条）：武装被中断的 run——
+  // 它的 run-bearing ack 走保留式收口而非权威替换（c_5m3fm6）。无活跃 run
+  // 时无从武装，ack 自会以普通消息路径给出「当前没有正在运行的任务。」。
+  if (body.trim() === '/cancel') stopping = runs.size ? lastRun : '';
   addMsg('you', text, refs);
   if (fromInput) input.value = '';
   send.disabled = true;
@@ -1647,6 +1730,18 @@ input.addEventListener('keydown', ev => {
     // 唯一的 submit 链，附件门 / '/' 参数规则保持单源。
     form.requestSubmit();
   }
+});
+
+// 生成中的发送键=停止键（c_5m3fm6）：分岔放在 click 层——submit 事件无法
+// 区分按钮点击与回车（Enter 的隐式提交 submitter 同是本键），点击先于
+// submit 触发，preventDefault 吞掉提交后只发 /cancel（草稿不动）。回车带
+// 草稿仍走上面的 submit 原路：conv 闸排队是既有语义，本卡不收窄。
+// （c_7lsngm 的 Enter 走 form.requestSubmit()，不经按钮 click——与这条
+//   停止分岔天然互不触发。）
+send.addEventListener('click', ev => {
+  if (!runs.size) return;            // 非生成中：照常提交（发送）
+  ev.preventDefault();               // 生成中：本次点击=停止，不进 submit
+  if (!send.disabled) sendText('/cancel', false);
 });
 
 // 点击选择（📎）。
@@ -2308,6 +2403,7 @@ let topicProject = null;
 const memBtn = document.getElementById('mem-btn');
 const statBtn = document.getElementById('stat-btn');
 const setBtn = document.getElementById('set-btn');
+const hkBtn = document.getElementById('hk-btn');
 memBtn.addEventListener('click', () => togglePane('memory'));
 statBtn.addEventListener('click', () => togglePane('stats'));
 agentsBtn.addEventListener('click', () => togglePane('agents'));
@@ -2315,13 +2411,14 @@ setBtn.addEventListener('click', () => togglePane('settings'));
 
 // 三面板共用的开合闸（W4.5 的「browsing=隐聊天 + 恰好一个 *-view 亮面板」；
 // W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
-// 会话列表现在是常驻左栏，不再抢中栏。中栏三个面互斥：会话正文
-// （sess-detail）、记忆/统计/后台任选其一、或聊天面（默认）。
+// 会话列表现在是常驻左栏，不再抢中栏。中栏面板互斥：会话正文
+// （sess-detail）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
 const panes = {
   memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',      load: loadMemPane },
   stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',     load: loadStatPane },
   agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view',   load: loadAgentsPane },
   settings: { btn: setBtn,    label: '⚙ 设置',  cls: 'settings-view', load: loadSetPane },
+  hooks:  { btn: hkBtn,     label: '🪝 审计', cls: 'hooks-view', load: loadHooksPane },
 };
 function closePanes() {
   for (const p of Object.values(panes)) {
@@ -2343,6 +2440,7 @@ function togglePane(name) {
   }
   syncTopicStream();
   syncAgentRefresh();
+  syncHooksStream();
 }
 
 // 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
@@ -2543,6 +2641,198 @@ function syncTopicStream() {
   }
   if (!want && topicES) { topicES.close(); topicES = null; topicProject = null; }
 }
+
+// ---- hooks 审计面板（W5 c_xz2bey 实时审计视图）----
+// 消费 /events 的 hooks topic（webfrontend_hookstopic.go：全局审计日志
+// tail-follow，帧=审计行 verbatim）+ /rpc hooks/audit/tail 快照。协议与任务
+// 面板同序：先订阅（锚点在订阅时刻）、再取快照；期间到达的推送先入队，
+// 快照落地后补放（hkSeen 整行去重——审计行没有行内唯一 id，断线重连的
+// 补拉快照与实时推送靠整行相等折叠；真正的全同重复行会被误折，这是
+// method 面契约的边界，不是本视图能修的）。
+// 三交互：滚动追加（贴底自动跟随，上翻不拽回、计数提示，点计数或滚回
+// 贴底即补渲染漏掉的行）、暂停/恢复（冻结渲染不冻结积累，恢复即补齐）、
+// 按 hook 名子串过滤（大小写不敏感）。
+const hkLog = document.getElementById('hk-log');
+const hkFilterEl = document.getElementById('hk-filter');
+const hkPauseBtn = document.getElementById('hk-pause');
+const hkCnt = document.getElementById('hk-cnt');
+const HK_CAP = 500;    // 持有窗口上限（快照/补拉同 limit，与服务端 max 1000 内）
+let hkRows = [];       // 持有行（旧→新）；渲染来源（暂停时渲染 hkFreeze）
+let hkFreeze = null;   // 暂停时刻的行快照：null=未暂停
+let hkSeen = new Set();  // 持有行整行 JSON 键（去重 + 重连补拉折叠）
+let hkLiveQueue = [];  // 快照/补拉在途时缓存的实时推送
+let hkFetchBusy = false;
+let hkSyncChain = Promise.resolve();
+let hooksES = null;    // 面板专用 SSE 连接（面板开着才连；无需绑定项目）
+let hkEverOpened = false;
+let hkUnread = 0;      // 未贴底期间错过渲染的新行数（回贴底清零）
+
+// 一行审计的可视元素：时间/hook/事件/其余元数据，textContent-only 纪律。
+function hkRowEl(r) {
+  const el = document.createElement('div');
+  el.className = 'hk-row' + (r.denied ? ' denied' : '');
+  const ts = document.createElement('span');
+  ts.className = 'hk-ts';
+  ts.textContent = (r.ts || '').replace('T', ' ').slice(5, 19);
+  const hook = document.createElement('span');
+  hook.className = 'hk-hook';
+  hook.textContent = r.hook || '?';
+  const ev = document.createElement('span');
+  ev.className = 'hk-ev';
+  ev.textContent = r.event || '';
+  const rest = document.createElement('span');
+  rest.className = 'hk-rest';
+  const bits = [r.tool || '', (r.duration_ms || 0) + 'ms', 'exit' + (r.exit_code || 0)];
+  if (r.injected_bytes) bits.push('+' + r.injected_bytes + 'B');
+  if (r.denied) bits.push('denied');
+  rest.textContent = bits.filter(Boolean).join(' · ');
+  if (r.reason) el.title = r.reason;  // 超时/static-skip 等原因悬停可读
+  el.appendChild(ts); el.appendChild(hook); el.appendChild(ev); el.appendChild(rest);
+  return el;
+}
+
+function hkMatches(r) {
+  const f = hkFilterEl.value.trim().toLowerCase();
+  return !f || (r.hook || '').toLowerCase().includes(f);
+}
+
+function hkAtBottom() {
+  return hkLog.scrollHeight - hkLog.scrollTop - hkLog.clientHeight < 24;
+}
+
+// 全量重画（≤500 行，面板量级无所谓）。过滤变化/补拉/恢复后走这里；
+// 实时追加在贴底时也走全量重画后回贴底（行数小，简单胜过增量拼接）。
+function hkRender(stick) {
+  const rows = hkFreeze || hkRows;
+  hkLog.replaceChildren();
+  let shown = 0;
+  for (const r of rows) {
+    if (!hkMatches(r)) continue;
+    hkLog.appendChild(hkRowEl(r));
+    shown++;
+  }
+  if (!rows.length) paneHint(hkLog, '（还没有 hooks 审计记录——hooks 在子进程 seek 里执行后落审计日志）');
+  else if (!shown) paneHint(hkLog, '（过滤后无匹配行）');
+  if (stick) { hkLog.scrollTop = hkLog.scrollHeight; hkUnread = 0; }
+  hkUpdateCnt();
+}
+
+// 计数行：显示「匹配/持有 · N 新行」。N = 暂停冻结后的积累，或未贴底时
+// 错过渲染的新行（回贴底自动清零）；fresh 态可点跳底。
+function hkUpdateCnt() {
+  const backlog = hkFreeze ? hkRows.length - hkFreeze.length : hkUnread;
+  const rows = hkFreeze || hkRows;
+  let shown = 0;
+  for (const r of rows) if (hkMatches(r)) shown++;
+  hkCnt.classList.toggle('fresh', backlog > 0);
+  const base = shown === rows.length ? rows.length + ' 行' : shown + '/' + rows.length + ' 行';
+  hkCnt.textContent = base + (backlog ? ' · ' + backlog + ' 新行' : '');
+}
+
+hkCnt.addEventListener('click', () => {  // 有积压时可点跳底（fresh 态才有意义）
+  if ((hkFreeze ? hkRows.length - hkFreeze.length : hkUnread) > 0) hkJump();
+});
+// 跳底必须走补渲染而非只设 scrollTop：上翻期间的新行只入了 hkRows 不在
+// DOM（hkAppend 不贴底不渲染），纯滚到底滚的是旧内容的底，漏行要等下一
+// 次推送才出现。hkRender(true) 从持有行全量补画并贴底（行已在客户端，
+// 无需重拉；冻结态则渲染冻结快照，跳到冻结视图的底，语义不变）。
+function hkJump() { hkRender(true); }
+
+// 追加若干行（推送/快照补放共用）：整行去重入窗，贴底即渲染跟随，否则
+// 只积累并计「新行」数。暂停时不动渲染（积压=冻结差，见 hkUpdateCnt）。
+function hkAppend(rows) {
+  let added = 0;
+  for (const r of rows) {
+    const k = JSON.stringify(r);
+    if (hkSeen.has(k)) continue;
+    hkSeen.add(k);
+    hkRows.push(r);
+    added++;
+  }
+  while (hkRows.length > HK_CAP) hkRows.shift();
+  if (!added) return;
+  if (!hkFreeze && hkAtBottom()) hkRender(true);
+  else {
+    if (!hkFreeze) hkUnread += added;
+    hkUpdateCnt();
+  }
+}
+
+// 快照/补拉落库：整窗替换为服务端 tail（与服务端「锚点后推送」拼起来无
+// 洞无重：见函数尾注释），再补放在途推送。
+function hkSeed(rows) {
+  hkRows = rows.slice(-HK_CAP);
+  hkSeen = new Set(hkRows.map(JSON.stringify));
+  if (!hkFreeze) hkRender(true);
+}
+
+// 取快照并整窗重播（首次打开与断线重连共用——EventSource 的 retry:3000
+// 自动重连后 onopen 再触发一次，补拉即把断线窗口漏掉的行捞回来，验收②
+// 「断线重连不丢行」的页面半边）。在途期间推送入队，落地后 hkAppend 补放：
+// 队里的行要么晚于快照末行（直接追加，序不变），要么已在快照里（整行
+// 去重折叠）——两条路都不乱序不重复。
+function hkSync() {
+  hkFetchBusy = true;
+  hkSyncChain = hkSyncChain.then(async () => {
+    try {
+      const res = await rpc('hooks/audit/tail', { limit: HK_CAP });
+      hkSeed(res.entries || []);
+    } catch (e) {  // 已持有行不因取快照失败而被抹掉；只在空窗时亮错
+      if (!hkRows.length) paneHint(hkLog, 'hooks/audit/tail 失败：' + e.message);
+    }
+    hkFetchBusy = false;
+    const queued = hkLiveQueue; hkLiveQueue = [];
+    hkAppend(queued);
+  });
+  return hkSyncChain;
+}
+
+// 面板专用 SSE 生命周期：面板开着才连（无需绑定项目——审计日志全局），
+// 关掉即断；重开/重连都经 onopen → hkSync 补拉，状态跨面板开合不断档。
+function syncHooksStream() {
+  const want = document.body.classList.contains('hooks-view');
+  if (want && !hooksES) {
+    hooksES = new EventSource(q('/events?conv=' + encodeURIComponent(CONV) + '&topic=hooks'));
+    hooksES.addEventListener('hooks', ev => {
+      try {
+        const row = JSON.parse(ev.data);
+        if (hkFetchBusy) hkLiveQueue.push(row); else hkAppend([row]);
+      } catch (e) { /* 单条坏帧不毁面板 */ }
+    });
+    hooksES.onopen = () => { hkSync(); hkEverOpened = true; };
+    // onerror 不处理：EventSource 自动重连（retry:3000）；面板关闭由 close() 收口。
+  }
+  if (!want && hooksES) { hooksES.close(); hooksES = null; }
+}
+
+function loadHooksPane() {
+  syncHooksStream();
+  if (!hkEverOpened) paneHint(hkLog, '连接中…');
+}
+
+// 暂停/恢复：冻结的是渲染（快照 hkFreeze），不是积累——期间推送照常入
+// hkRows，恢复即全量补齐。上翻浏览不被新行拽走由「不贴底不渲染」承担。
+hkPauseBtn.addEventListener('click', () => {
+  if (hkFreeze) {
+    hkFreeze = null;
+    hkPauseBtn.textContent = '⏸ 暂停';
+    hkPauseBtn.classList.remove('held');
+    hkRender(true);  // 恢复：补齐到最新并回贴底
+  } else {
+    hkFreeze = hkRows.slice();
+    hkPauseBtn.textContent = '▶ 恢复';
+    hkPauseBtn.classList.add('held');
+    hkUpdateCnt();
+  }
+});
+
+hkFilterEl.addEventListener('input', () => hkRender(hkAtBottom()));
+// 手动滚回贴底与点计数跳底同一条纪律：hkUnread>0 即 DOM 缺行，须补渲染
+// （hkRender(true) 渲染后重设 scrollTop 会再触发本监听器，届时 hkUnread
+// 已被清零，无循环）。冻结态不补——恢复按钮才解冻。
+hkLog.addEventListener('scroll', () => {
+  if (hkAtBottom() && !hkFreeze && hkUnread) hkRender(true);
+});
 
 // ---- 记忆浏览器（W4.5 资产面 UI·二）----
 // 消费 W4.3 的 memory/projects|list|get：项目下拉（memory/projects，新→旧）

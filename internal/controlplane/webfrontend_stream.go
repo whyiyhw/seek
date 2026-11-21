@@ -113,14 +113,17 @@ func (f *WebFrontend) SendStream(ctx context.Context, conv ConvID, ev RunEvent) 
 		fr = sseFrame{name: "delta", data: webJSON(webDeltaEvent{Run: run.id, Text: ev.Delta})}
 	case "approval_request":
 		// W5 c_n37tnr: the additive approval seam. The hub broadcasts
-		// the card frame itself; the decide callback is nil here — the
-		// decision's ride back into the child (stdin write) is the
-		// follow-up card, and the hub contract (webfrontend_approval.go)
-		// takes it as a drop-in.
+		// the card frame itself. The decide callback is the run's stdin
+		// writer when the executor filed one (ApprovalRouter.Route ran
+		// just before this emit, off the stdout reader); for a producer
+		// that speaks the event without that seam (sandbox stubs, the
+		// pre-child contract) the callback is nil and the decision
+		// still reads back through approval/decide — it just has no
+		// child to reach.
 		f.RequestApproval(conv, ApprovalPayload{
 			ID: ev.ReqID, Run: run.id, Kind: ev.Kind,
 			Summary: ev.Summary, Command: ev.Command, Diff: ev.Diff,
-		}, nil)
+		}, f.deliverFor(ev.ReqID))
 		return nil
 	case "approval_cancel":
 		f.CancelApproval(ev.ReqID)

@@ -15,7 +15,9 @@
 //             streaming/trow 清零
 //   注入    → 模型吐 <script>/<img onerror>：字面渲染为文本、不执行
 //             （document.scripts 不增、无 img 落地、标记变量 undefined）
-//   卡住+/cancel → 流式气泡被 ack 收口替换 + 「run 已中断。」独立成条
+//   卡住+/cancel → 保留式中断收口（c_5m3fm6 起）：半截气泡保留 + 尾部
+//             「—— 已中断 ——」标注，ack 文本不再整泡替换；服务端终态
+//             「run 已中断。」独立成条，streaming 清零
 //
 // 用法：node scripts/web-stream-headless.mjs <页面URL> <桩项目路径>
 //       [--chrome <chrome 可执行文件>]（默认 CHROME env 或 macOS 标准位）
@@ -218,17 +220,23 @@ try {
   ck('XSS：无 img 元素落地', s.nimg === 0, `got ${s.nimg}`);
 } catch (e) { ck('注入场景', false, e.message); await dump(); }
 
-// 景 3：卡住 + /cancel —— 气泡被 ack 收口，终态回复独立成条（run 幂等）。
+// 景 3：卡住 + /cancel —— 保留式中断收口（c_5m3fm6）：半截保留 + 标注，
+// 终态回复独立成条（run 幂等；ack/终态谁带 run 不定，两形同判）。
+// /cancel 走页面自己的 sendText（不是裸 fetch）：保留式收口以「本页发过
+// /cancel」武装，绕过 sendText 的注入会在该页退回旧替换路径。
 trace('景 3：卡住+/cancel');
 try {
   if ((await send('卡住')) !== 202) throw new Error('POST 非 202');
   await until('流式气泡出现', s => s.nstream > 0, 8000);
-  if ((await send('/cancel')) !== 202) throw new Error('POST /cancel 非 202');
+  await evalJS(`sendText('/cancel', false), 'sent'`);
   const { s } = await until('中断终态', s => s.nstream === 0
-    && s.msgs.some(m => m.txt.includes('已中断 当前 run'))
+    && s.msgs.some(m => m.txt.includes('stuck') && m.txt.includes('—— 已中断 ——'))
     && s.msgs.some(m => m.txt.includes('run 已中断')), 10000);
-  ck('cancel：ack 收口气泡（已中断 当前 run）',
-    s.msgs.some(m => m.txt.includes('已中断 当前 run')), '');
+  ck('cancel：半截气泡保留（stuck 仍在）',
+    s.msgs.some(m => m.txt.includes('stuck') && m.txt.includes('—— 已中断 ——')),
+    JSON.stringify(s.msgs.map(m => m.txt)));
+  ck('cancel：ack 不再整泡替换（气泡内无 ack 文本）',
+    !s.msgs.some(m => m.txt.includes('已中断 当前 run')), '');
   ck('cancel：终态「run 已中断。」独立成条', s.msgs.some(m => m.txt.includes('run 已中断')), '');
   ck('cancel：无残留 streaming 气泡', s.nstream === 0, `got ${s.nstream}`);
 } catch (e) { ck('cancel 场景', false, e.message); await dump(); }
