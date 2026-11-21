@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/whyiyhw/seek/internal/rpc"
+	"github.com/whyiyhw/seek/internal/session"
 )
 
 // validateTitle applies the sidebar's one-line title shape to a
@@ -31,8 +32,8 @@ func validateTitle(title string) (string, error) {
 	if title == "" {
 		return "", rpc.Errorf(rpc.CodeInvalidParams, "title is required")
 	}
-	if utf8.RuneCountInString(title) > titleMaxRunes {
-		return "", rpc.Errorf(rpc.CodeInvalidParams, "title: %d runes, max %d", utf8.RuneCountInString(title), titleMaxRunes)
+	if utf8.RuneCountInString(title) > session.TitleMaxRunes {
+		return "", rpc.Errorf(rpc.CodeInvalidParams, "title: %d runes, max %d", utf8.RuneCountInString(title), session.TitleMaxRunes)
 	}
 	return title, nil
 }
