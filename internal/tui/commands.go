@@ -1812,6 +1812,12 @@ func cmdCompact(m *Model, _ string) cmdResult {
 	if m.streaming {
 		return cmdResult{text: styleMuted.Render("/compact: wait for the current turn to finish")}
 	}
+	// A summariser is already in flight (manual or auto). Starting a
+	// second one would summarise the same history twice and race the two
+	// Reset calls.
+	if m.compacting {
+		return cmdResult{text: styleMuted.Render("/compact: already compacting")}
+	}
 	msgs := m.opts.Agent.Messages()
 	// Anything ≤ 2 is just [system, possibly one user msg] — nothing
 	// useful to compress, and would produce a meaningless summary.
@@ -1819,6 +1825,7 @@ func cmdCompact(m *Model, _ string) cmdResult {
 		return cmdResult{text: styleMuted.Render("/compact: history is already short — nothing to summarise")}
 	}
 
+	m.compacting = true
 	return cmdResult{
 		text:  styleMuted.Render(fmt.Sprintf("compacting %d messages — calling %s …", len(msgs)-1, m.opts.Model)),
 		extra: startCompactCmd(m),

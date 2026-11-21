@@ -1,8 +1,14 @@
 <!doctype html>
 <!-- seek web MVP (card c_qucxtu) — single page, zero build chain.
-     Message rendering: minimal markdown per feature-web-frontend §2.6
-     — fenced ``` blocks → <pre>, `inline` → <code>, everything else
-     verbatim plain text; DOM API only (§5.5), no HTML-parsing sink.
+     Message rendering (W5, card c_x2au4t): markdown SUBSET renderer —
+     fenced ``` blocks, `inline` code, # headings, - / 1. lists, and
+     [links](url) with a protocol allowlist — vendored as a handwritten
+     DOM-API renderer in static/markdown.js (the first non-inline
+     asset; marked/markdown-it both bust the ≤25KB quota AND their
+     HTML-string output would need a parse-string-into-DOM sink, which
+     §5.5 forbids). Model output NEVER enters an HTML-parsing path: text
+     rides createTextNode/textContent, elements come from a fixed tag
+     whitelist (PRE/CODE/UL/OL/LI/H1-6/A).
      Conversation identity (W1.3, D-W3): uuid minted by the browser,
      persisted in localStorage, carried as X-Seek-Conversation on
      fetches and ?conv= on the SSE stream (EventSource cannot set
@@ -18,12 +24,17 @@
      shows the session id short once the reply close-out carries it
      (source: agent_end). Page-lifetime cumulative — SSE has no
      replay, a reload restarts the meter at zero.
-     Sessions browser (W4.4, asset plane UI #1): a master-detail view
-     over POST /rpc — session/list drives the list pane, a click opens
-     session/get (meta line) + session/messages walked page by page via
-     next_cursor (50/page, "load more" appends; the DOM only ever holds
-     what was paged in, so a long transcript stays at virtual-scroll
-     order of magnitude). Same textContent-only discipline as chat.
+     Sessions sidebar (W5, card c_txz6vz): the W4.4 popup pane folded into
+     a persistent, collapsible left rail — session/list drives it (updated
+     desc, title substring filter, 30-row pages via "load more"), the bound
+     session is the highlighted row, ＋新建 rides the SAME /new command
+     passthrough, and the collapse bit lives in localStorage (a viewport
+     under 1024px defaults to collapsed). A row click opens its transcript
+     in the MAIN area: session/get (meta line) + session/messages walked
+     page by page via next_cursor (50/page, "load more" appends; the DOM
+     only ever holds what was paged in, so a long transcript stays at
+     virtual-scroll order of magnitude). Same textContent-only discipline
+     as chat.
      Streaming bubble (W2.1): the W1.4 named SSE events fold
      client-side per run id — deltas accumulate into text blocks,
      tool calls render as single folded status rows (args/results
@@ -53,6 +64,11 @@
      for the path argument. Binding status stays pinned in the status
      line: refreshed immediately after a command POST (202) settles on
      the wire, again on every SSE reply, and again on SSE (re)connect.
+     Attachments (W5 c_56yrcj): click 📎 / drag / paste → POST /attach
+     (raw bytes), staged progress in a tray, images previewed from
+     FileReader data: URLs; on send the staged paths ride the /msg text
+     as "@<path>" so the child's own vision (modelcap) and document
+     (filerefs) routers claim them — no new plane pipeline.
      Push-to-talk (voice V2, feature-deepseek-app-api §4.3): hold 🎤,
      speak ≤120 s, release — MediaRecorder → decodeAudioData → 16 kHz
      mono 16-bit WAV (the ASR input shape, resampled via
@@ -65,98 +81,327 @@
      a secure context: localhost is one; a tailnet IP over plain http
      is NOT (browsers deny getUserMedia) — front it with an HTTPS
      proxy (tailscale serve) to talk from a phone.
+     Approval cards (W5, card c_n37tnr): permission y/N delivered to
+     the browser — the conv stream's named `approval` events drive a
+     bottom-right card stack (summary + command summary + y/N/a
+     buttons, permission.Policy semantics: a = always-allow for the
+     kind), decisions POST via /rpc approval/decide, receipts
+     (resolved/cancelled) withdraw the card in every tab. Idempotent
+     both sides: click disables the whole card (no double POST), the
+     hub fires the decide callback exactly once per id. Empty state is
+     zero-footprint (badge hidden, stack :empty). Reconnect resyncs
+     via approval/list with a tombstone set against snapshot races.
      Deliberately out of scope: multi-tab sync, history persistence,
-     FULL markdown rendering (P3 §4.2 vendor evaluation),
-     mobile, real auth (design card c_7pptol owns the full UI). -->
+     bold/italic/table/quote markdown (the W5 subset covers the chat
+     load; renderer lives in static/markdown.js), mobile, real auth
+     (design card c_7pptol owns the full UI). -->
 <html lang="zh">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>seek</title>
+<!-- 首屏主题 bootstrap（W5 卡 c_ni7mzw，防 FOUC）：必须在样式表之前同步
+     跑完——浏览器解析到样式表时 data-theme 已落定，首帧就是目标主题，
+     不存在「先画暗再翻亮」的闪白/闪黑。三态：localStorage 里的显式选择
+     （"light" / "dark"）优先；没有选择（或 localStorage 抛异常，如隐私
+     模式）时跟随系统 prefers-color-scheme。全部逻辑收敛在这一个内联块里，
+     页尾的主题 JS 只在用户点切换时复用同一套读写。 -->
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('seek-theme'); } catch (e) { /* 隐私模式：当作未选择 */ }
+  if (t !== 'light' && t !== 'dark') {
+    try {
+      t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+    } catch (e) { t = 'dark'; }
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
 <style>
-  :root { color-scheme: dark; }
+  /* ---- 主题 token（W5 卡 c_ni7mzw）----
+     两套值、一个属性开关：`html[data-theme="light"]` 只翻变量层，组件
+     CSS 一律 var(--seek-*)，没有任何裸色值（dsh 的三层体系缩成两层：
+     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色，
+     与 W5 之前逐字节同色（c_ni7mzw 之前是硬编码 hex，值原样搬过来）。
+     首屏由 <head> 里的内联 bootstrap 在样式表解析前写好 data-theme，
+     故不存在「先画暗再翻亮」的闪烁；CSP 对该内联块的 sha256 由
+     webfrontend_static.go 从同一份 embed 现算，手改页面不会失配。 */
+  :root {
+    color-scheme: dark;
+    --seek-inset: #14161a;   /* 页面底/代码块底/输入框底 */
+    --seek-panel: #1b1e24;   /* 顶栏/状态栏/侧栏/卡片/表单底 */
+    --seek-soft:  #242830;   /* 气泡/统计卡/次级按钮底 */
+    --seek-accent:#2c3d5f;   /* 用户气泡/当前行/主按钮底 */
+    --seek-line:  #2a2e36;   /* 主分隔线/边框 */
+    --seek-line-2:#22252c;   /* 列表行分隔线（更淡一档） */
+    --seek-line-focus:#4b586b; /* 输入聚焦边框 */
+    --seek-fg:    #d7dae0;   /* 正文 */
+    --seek-fg-dim:#8f959f;   /* 次级文字：门槛是「压得住所有常见底」——
+                                panel(#1b1e24) 5.3、soft(#242830) 4.75。
+                                首版 #858b93 在 soft 上 4.3 红（设置卡/
+                                统计卡的 k 列都长在 soft 上）；accent 底
+                                上的次级文字由组件规则升主文色，不靠这条 */
+    --seek-fg-soft:#9aa0a8;  /* 工具行/徽标/卡片标题 */
+    --seek-ok:    #7ec699;
+    --seek-warn:  #d8a657;
+    --seek-warn-bg:#3a3222;  /* 警示条底（SSE 断线提示）——底色与前景分开
+                                成对，亮色主题才好各自调值 */
+    --seek-err:   #d8756f;
+    --seek-link:  #7aa2f7;
+    --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
+    --seek-rec-fg:#f0d7b8;
+    --seek-shadow:0 4px 14px rgba(0,0,0,.45);
+  }
+  /* 亮色：同一组语义名换值，快捷键只有 data-theme 一个属性。选值口径
+     = 每对文字/底色 ≥4.5:1（WCAG AA 正文），面板间不靠色相只靠明度差。 */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --seek-inset: #ffffff;
+    --seek-panel: #f4f5f7;
+    --seek-soft:  #eceef2;
+    --seek-accent:#dbe5fb;
+    --seek-line:  #d6dae1;
+    --seek-line-2:#e6e9ee;
+    --seek-line-focus:#7b8798;
+    --seek-fg:    #1b1e24;
+    --seek-fg-dim:#5b6270;
+    --seek-fg-soft:#4b5361;
+    --seek-ok:    #1f7a43;
+    --seek-warn:  #8a5a00;
+    --seek-warn-bg:#fbf0d5;
+    --seek-err:   #b3261e;
+    --seek-link:  #1a56c4;
+    --seek-rec:   #b3261e;
+    --seek-rec-fg:#ffffff;
+    --seek-shadow:0 4px 14px rgba(0,0,0,.12);
+  }
   * { box-sizing: border-box; }
   body { margin: 0; font: 14px/1.5 ui-monospace, Menlo, monospace;
-         background: #14161a; color: #d7dae0; display: flex; flex-direction: column;
+         background: var(--seek-inset); color: var(--seek-fg); display: flex; flex-direction: column;
          height: 100vh; }
   /* 双段状态栏（W2.3）：左段绑定/连接态可截断，右段 usage 计量恒完整 */
   #status { display: flex; align-items: baseline; gap: 12px; padding: 8px 14px;
-            background: #1b1e24; border-bottom: 1px solid #2a2e36; }
+            background: var(--seek-panel); border-bottom: 1px solid var(--seek-line); }
   #status-l { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;
               text-overflow: ellipsis; }
-  #status.ok #status-l { color: #7ec699; }
-  #status.warn #status-l { color: #d8a657; }
-  #usage { flex: none; white-space: nowrap; color: #7a8089; }
+  #status.ok #status-l { color: var(--seek-ok); }
+  #status.warn #status-l { color: var(--seek-warn); }
+  #usage { flex: none; white-space: nowrap; color: var(--seek-fg-dim); }
+  /* ---- SSE 连接灯 + 顶栏 ContextMeter（W5 卡 c_oyp2qf）----
+     #conn：状态灯——绿=已连、黄=断线重连中；#connbar：断线提示条（带
+     手动重连钮），连上即收起。#ctx：上下文余量计量——模型·车道 + 色阶
+     进度条 + 百分比/余量，随 usage 事件（源=turn_end）更新，色阶对齐
+     internal/budget Classify（≥60% 黄、≥75% 红）。
+     merge main（2026-11-20）落进本卡时色值全改走 token：ctxmeter 是
+     c_ni7mzw 之后进 main 的卡，原样留 hex 会在亮色主题下变成暗底暗字
+     （TestWeb_PageThemeSettings 的裸色检查也会红）。断线条底色单开
+     --seek-warn-bg（警示底不是语义前景色，压在它上面的文字仍用
+     --seek-warn）。 */
+  #conn { flex: none; }
+  #conn::before { content: '●'; }
+  #conn.ok::before { color: var(--seek-ok); }
+  #conn.warn::before { color: var(--seek-warn); }
+  #connbar { display: flex; align-items: center; justify-content: center;
+             gap: 10px; padding: 5px 14px; background: var(--seek-warn-bg);
+             color: var(--seek-warn); border-bottom: 1px solid var(--seek-line);
+             font-size: 13px; }
+  #connbar[hidden] { display: none; }
+  #connbar button { padding: 3px 12px; font-size: 13px; background: var(--seek-accent); }
+  #ctx { flex: none; display: flex; align-items: center; gap: 6px;
+         white-space: nowrap; color: var(--seek-fg-dim); }
+  #ctx[hidden] { display: none; }
+  #ctx .bar { width: 56px; height: 5px; flex: none; background: var(--seek-line);
+              border-radius: 3px; overflow: hidden; }
+  #ctx .bar i { display: block; height: 100%; width: 0; background: var(--seek-ok); }
+  #ctx.warn { color: var(--seek-warn); }
+  #ctx.warn .bar i { background: var(--seek-warn); }
+  #ctx.crit { color: var(--seek-err); }
+  #ctx.crit .bar i { background: var(--seek-err); }
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
-  .msg pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  .msg pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font: inherit; }
-  .msg code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
-  .you { margin-left: auto; background: #2c3d5f; }
-  .seek { background: #242830; }
-  .hint { color: #7a8089; font-style: italic; }
+  .msg code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
+  /* ---- markdown 子集排版（W5 卡 c_x2au4t）----
+     标题在气泡内取收敛尺寸（浏览器 h1 默认 2em 会撑爆聊天行高）；
+     列表收边距；链接配色与主题同谱。四个正文容器（聊天气泡/会话
+     正文/子代理末读/记忆正文）共用一套。 */
+  .msg h1, .sbody h1, #ag-last h1, #mem-content h1 { font-size: 1.3em; margin: 10px 0 4px; }
+  .msg h2, .sbody h2, #ag-last h2, #mem-content h2 { font-size: 1.2em; margin: 10px 0 4px; }
+  .msg h3, .sbody h3, #ag-last h3, #mem-content h3,
+  .msg h4, .sbody h4, #ag-last h4, #mem-content h4,
+  .msg h5, .sbody h5, #ag-last h5, #mem-content h5,
+  .msg h6, .sbody h6, #ag-last h6, #mem-content h6 { font-size: 1.1em; margin: 8px 0 4px; }
+  .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
+  .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em; }
+  .msg a, .sbody a, #ag-last a, #mem-content a { color: var(--seek-link); }
+  .you { margin-left: auto; background: var(--seek-accent); }
+  .seek { background: var(--seek-soft); }
+  .hint { color: var(--seek-fg-dim); font-style: italic; }
 
   /* ---- 流式气泡 + 工具行折叠（W2.1）---- */
   .msg.streaming > .txt:last-child::after {
-    content: '▍'; color: #7a8089; animation: caret 1s steps(1) infinite;
+    content: '▍'; color: var(--seek-fg-dim); animation: caret 1s steps(1) infinite;
   }
   @keyframes caret { 50% { opacity: 0; } }
-  .trow { color: #9aa0a8; font-size: 12px; padding: 1px 0; }
-  .trow.bad { color: #d8a657; }
-  form { display: flex; gap: 8px; padding: 10px 14px; background: #1b1e24;
-         border-top: 1px solid #2a2e36; }
-  #input { flex: 1; background: #14161a; color: inherit; border: 1px solid #2a2e36;
+  .trow { color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
+  .trow.bad { color: var(--seek-warn); }
+  form { display: flex; gap: 8px; padding: 10px 14px; background: var(--seek-panel);
+         border-top: 1px solid var(--seek-line); }
+  #input { flex: 1; background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
            border-radius: 6px; padding: 8px 10px; font: inherit; outline: none; }
-  #input:focus { border-color: #4a5568; }
-  button { background: #2c3d5f; color: inherit; border: 0; border-radius: 6px;
+  #input:focus { border-color: var(--seek-line-focus); }
+  button { background: var(--seek-accent); color: inherit; border: 0; border-radius: 6px;
            padding: 8px 16px; font: inherit; cursor: pointer; }
   button:disabled { opacity: .4; cursor: default; }
   /* 按住说话（voice V2）：按下即录音中——红点态一目了然；user-select 关掉
      防长按选中周围文字（touch 长按尤其会） */
   #mic { padding: 8px 12px; user-select: none; -webkit-user-select: none; touch-action: none; }
-  #mic.rec { background: #8f4a4a; }
+  /* 录音态文字换 --seek-rec-fg 而非继承 fg：亮色继承 fg 压在 --seek-rec
+     上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
+     （ap-badge 同款接线，两处共用同一对 token）。 */
+  #mic.rec { background: var(--seek-rec); color: var(--seek-rec-fg); }
 
-  /* ---- 会话浏览器（W4.4 资产面 UI·一）+ 指令快捷按钮（W2.2）---- */
-  #bar { display: flex; gap: 8px; padding: 6px 14px; background: #1b1e24;
-         border-bottom: 1px solid #2a2e36; overflow-x: auto; }
+  /* ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）---- */
+  /* 右下角悬浮卡栈：任何视图（聊天/四面板）都能弹卡——卡的是权限决定，
+     不属于某个面板。空态零侵入：容器 :empty 即 display:none，顶栏角标
+     hidden 属性默认在，无未决时页面零痕迹。 */
+  #approvals { position: fixed; right: 14px; bottom: 76px; z-index: 10;
+               width: min(420px, calc(100vw - 28px));
+               display: flex; flex-direction: column; gap: 8px;
+               max-height: 60vh; overflow-y: auto; }
+  #approvals:empty { display: none; }
+  .apcard { background: var(--seek-panel); border: 1px solid var(--seek-line); border-radius: 8px;
+            padding: 10px 12px; box-shadow: 0 4px 14px var(--seek-shadow); }
+  .apcard .apt { color: var(--seek-warn); font-size: 12px; margin-bottom: 4px; }
+  .apcard .aps { margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
+  .apcard pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+                padding: 6px 8px; margin: 4px 0; overflow: auto;
+                white-space: pre-wrap; word-break: break-all; font: inherit;
+                max-height: 120px; }
+  .apcard .apb { display: flex; gap: 8px; margin-top: 8px; }
+  .apcard .apb button { flex: 1; padding: 5px 8px; font-size: 13px; }
+  #ap-badge { flex: none; align-self: center; background: var(--seek-rec); color: var(--seek-rec-fg);
+              border-radius: 10px; padding: 2px 10px; font-size: 12px;
+              white-space: nowrap; }
+  #ap-badge[hidden] { display: none; }
+  /* ---- 附件（W5 c_56yrcj）：托盘 + 气泡缩略图 ----
+     merge main（2026-11-20）落进本卡时色值改走 token（原样留 hex 会让亮色
+     主题下托盘/缩略图底仍是暗色，裸色检查也会红）。 */
+  #attach-btn { padding: 8px 12px; background: var(--seek-soft); }
+  #tray { display: none; gap: 8px; flex-wrap: wrap; padding: 8px 14px;
+          background: var(--seek-panel); border-top: 1px solid var(--seek-line); }
+  #tray.has { display: flex; }
+  body.browsing #tray { display: none; }
+  .chip { display: flex; align-items: center; gap: 6px; max-width: 260px;
+          background: var(--seek-soft); border: 1px solid var(--seek-line); border-radius: 6px;
+          padding: 4px 6px; position: relative; overflow: hidden; }
+  .chip .tn { width: 28px; height: 28px; object-fit: cover; border-radius: 4px;
+              flex: none; background: var(--seek-inset); }
+  .chip .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; }
+  .chip .pc { font-size: 11px; color: var(--seek-fg-dim); flex: none; }
+  .chip .rm { padding: 0 6px; background: transparent; color: var(--seek-fg-dim);
+              font-size: 14px; line-height: 1; }
+  .chip .pb { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+              background: var(--seek-inset); }
+  .chip .pb i { display: block; height: 100%; width: 0; background: var(--seek-link);
+                transition: width .15s linear; }
+  .chip.bad { border-color: var(--seek-err); }
+  .chip.bad .pc { color: var(--seek-err); }
+  .msg .thumbs { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 2px; }
+  .msg .thumbs img { max-width: 220px; max-height: 180px; border-radius: 6px;
+                     border: 1px solid var(--seek-line); }
+  .msg .thumbs .doc { font-size: 12px; color: var(--seek-fg); background: var(--seek-panel);
+                      border: 1px solid var(--seek-line); border-radius: 6px; padding: 4px 8px; }
+  body.dropping form { outline: 2px dashed var(--seek-line-focus); outline-offset: -4px; }
+
+  /* ---- 指令快捷按钮（W2.2）+ 会话侧栏（W5 卡 c_txz6vz——W4.4 的 📚 弹出面板在此退役）---- */
+  #bar { display: flex; gap: 8px; padding: 6px 14px; background: var(--seek-panel);
+         border-bottom: 1px solid var(--seek-line); overflow-x: auto; }
   #bar button { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
-  #bar .cmd { background: #242830; }          /* 指令按钮与视图按钮区分 */
-  #browse-btn { margin-left: auto; }          /* 视图按钮组（会话/记忆/统计/后台）靠右 */
+  #bar .cmd { background: var(--seek-soft); }          /* 指令按钮与视图按钮区分 */
+  #mem-btn { margin-left: auto; }             /* 视图按钮组（记忆/统计/后台）靠右 */
   body.browsing #bar .cmd { display: none; }  /* 浏览面不显示聊天指令 */
-  /* 四个视图面板共用「browsing 隐聊天」总闸；各自的 *-view 类挑一个面板亮 */
-  #browser { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  body:not(.sess-view) #browser { display: none; }
+
+  /* 布局骨架：左栏常驻 + 中栏内容。收起态 = 44px 图标轨（dsh 折叠轨同
+     语言：logo/新建/搜索入轨，展开态的文字让位）。宽度过渡 150ms，与
+     prefers-reduced-motion 兜底同 W5 既有口径（无动画依赖，纯装饰）。 */
+  #shell { flex: 1; display: flex; min-height: 0; }
+  #side { width: 260px; flex: none; display: flex; flex-direction: column;
+          min-height: 0; background: var(--seek-panel); border-right: 1px solid var(--seek-line);
+          transition: width .15s; }
+  body.side-collapsed #side { width: 44px; }
+  #side-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+               border-bottom: 1px solid var(--seek-line); }
+  #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
+                color: var(--seek-fg-soft); font-size: 12px; letter-spacing: .04em; }
+  #side-head button, #side-new { padding: 4px 8px; font-size: 13px;
+                                 background: var(--seek-soft); }
+  #side-toggle { flex: none; width: 26px; padding: 4px 0; }
+  #side-new { margin: 8px 10px 6px; display: flex; gap: 6px; align-items: center;
+              justify-content: center; }
+  #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
+                 border: 1px solid var(--seek-line); border-radius: 6px; padding: 5px 8px;
+                 font: inherit; font-size: 13px; outline: none; }
+  #side-search:focus { border-color: var(--seek-line-focus); }
+  #sess-list { flex: 1; overflow-y: auto; min-height: 0; }
+  #side-foot { border-top: 1px solid var(--seek-line); }
+  #side-foot button { width: 100%; border-radius: 0; background: var(--seek-soft);
+                      font-size: 12px; padding: 6px; }
+  /* 收起态：标题/搜索/列表/翻页让位，新建与折叠钮收成图标轨 */
+  body.side-collapsed #side-title, body.side-collapsed #side-search,
+  body.side-collapsed #sess-list, body.side-collapsed #side-foot,
+  body.side-collapsed #side-new .lbl { display: none; }
+  body.side-collapsed #side-head { padding: 8px 6px; justify-content: center; }
+  body.side-collapsed #side-new { margin: 8px 6px; padding: 6px 0; }
+
+  #center { flex: 1; display: flex; flex-direction: column;
+            min-width: 0; min-height: 0; }
+  /* 会话正文（主区）：点侧栏一条即亮，聊天面/输入框让位；💬 聊天收回。
+     三个资产面板（记忆/统计/后台）同一个「中栏一个面」口径：browsing 时
+     聊天面也让位。 */
+  #browser { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  body.sess-detail #browser { display: flex; }
+  body.sess-detail #list, body.sess-detail form,
   body.browsing #list, body.browsing form { display: none; }
   #browser-body { flex: 1; display: flex; min-height: 0; }
-  #sess-list { width: 320px; flex: none; overflow-y: auto;
-               border-right: 1px solid #2a2e36; }
+  /* 列表行是 <button>，但不该吃全局 button 的 accent 底：显式透明落回
+     panel 底（dim 压 accent 只有 ~3.2:1）；.cur 的 accent 底在各自规则里 */
   .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
-              border-bottom: 1px solid #22252c; padding: 8px 12px; }
+              border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+              background: transparent; }
   .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
-  .sess-row .t2 { display: block; color: #7a8089; font-size: 12px;
+  .sess-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px;
                   margin-top: 2px; }
-  .sess-row.cur { background: #2c3d5f; }
+  .sess-row.cur { background: var(--seek-accent); }
+  /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
+  .sess-row.cur .t2 { color: var(--seek-fg); }
   #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #sess-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
-               color: #7a8089; white-space: nowrap; overflow: hidden;
-               text-overflow: ellipsis; }
+  #browser-head { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
+                  border-bottom: 1px solid var(--seek-line); }
+  #sess-back { flex: none; padding: 4px 12px; font-size: 13px; background: var(--seek-soft); }
+  #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
+               overflow: hidden; text-overflow: ellipsis; }
   #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
   .smsg { margin: 6px 0; padding: 8px 12px; border-radius: 8px;
-          background: #242830; white-space: pre-wrap; word-break: break-word; }
-  .smsg.user { background: #2c3d5f; }
-  .smsg.tool { background: #1b1e24; color: #9aa0a8; }
-  .smsg.tool pre { background: #14161a; }
-  .swho { font-size: 11px; color: #7a8089; margin-bottom: 4px; }
-  .stool { color: #d8a657; }
+          background: var(--seek-soft); white-space: pre-wrap; word-break: break-word; }
+  .smsg.user { background: var(--seek-accent); }
+  .smsg.user .swho { color: var(--seek-fg); }   /* 同 .cur：accent 底不压 dim */
+  .smsg.tool { background: var(--seek-panel); color: var(--seek-fg-soft); }
+  .smsg.tool pre { background: var(--seek-inset); }
+  .swho { font-size: 11px; color: var(--seek-fg-dim); margin-bottom: 4px; }
+  .stool { color: var(--seek-warn); }
   /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
   .smsg.tool .sbody { max-height: 260px; overflow-y: auto; }
-  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid #2a2e36;
-               color: #7a8089; }
+  #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid var(--seek-line);
+               color: var(--seek-fg-dim); }
   #sess-foot button { width: 100%; }
-  .pane-hint { color: #7a8089; font-style: italic; padding: 14px; }
+  .pane-hint { color: var(--seek-fg-dim); font-style: italic; padding: 14px; }
 
   /* ---- 任务面板（W3.3 编排 P1 可视化）---- */
   /* 与三个资产面板同一开合闸（browsing=隐聊天 + 恰好一个 *-view 亮面板），
@@ -166,72 +411,114 @@
   body.agents-view #agents { display: flex; }
   #agents-body { flex: 1; display: flex; min-height: 0; }
   #ag-list { width: 380px; flex: none; overflow-y: auto;
-             border-right: 1px solid #2a2e36; }
+             border-right: 1px solid var(--seek-line); }
   .ag-row { display: block; width: 100%; text-align: left; border-radius: 0;
-            border-bottom: 1px solid #22252c; padding: 8px 12px; }
-  .ag-row.cur { background: #2c3d5f; }
+            border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+            background: transparent; }
+  .ag-row.cur { background: var(--seek-accent); }
   .ag-row .t1 { display: flex; gap: 6px; align-items: baseline; }
   .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
-  .ag-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px; }
+  .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
   .ag-badge { font-size: 11px; flex: none; white-space: nowrap; }
+  /* 三态徽标（卡 c_4doebx）：running/done/error 走类名而不是内联色——
+     颜色一处定义，无头验收读 class/dataset.status 即断言面。值走 token
+     （merge main 2026-11-20）：暗色谱 hex 在亮色主题下只有 ~2:1。 */
+  .ag-badge.st-running { color: var(--seek-warn); }
+  .ag-badge.st-done    { color: var(--seek-ok); }
+  .ag-badge.st-error   { color: var(--seek-err); }
   #ag-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #ag-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36;
-             color: #7a8089; white-space: nowrap; overflow: hidden;
+  #ag-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line);
+             color: var(--seek-fg-dim); white-space: nowrap; overflow: hidden;
              text-overflow: ellipsis; }
+  /* 详情字段表（卡 c_4doebx）：与 /subagents?sub= 同信息量的可读面。 */
+  #ag-fields { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); }
+  #ag-fields:empty { display: none; }
+  .ag-field { display: flex; gap: 10px; font-size: 12px; padding: 1px 0; }
+  .ag-field .k { color: var(--seek-fg-dim); flex: none; min-width: 96px; }
+  .ag-field .v { color: var(--seek-fg); overflow: hidden; text-overflow: ellipsis;
+                 white-space: nowrap; }
   #ag-last { flex: 1; overflow-y: auto; padding: 14px; }
-  #ag-last pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  #ag-last pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
                  padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                  white-space: pre; font: inherit; }
-  #ag-last code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  #ag-last code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
 
   /* ---- 记忆浏览器 + 统计视图（W4.5 资产面 UI·二）---- */
   .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   body:not(.mem-view) #memory { display: none; }
   body:not(.stat-view) #stats { display: none; }
   .pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 14px;
-               border-bottom: 1px solid #2a2e36; }
-  .pane-head select { background: #14161a; color: inherit; border: 1px solid #2a2e36;
+               border-bottom: 1px solid var(--seek-line); }
+  .pane-head select { background: var(--seek-inset); color: inherit; border: 1px solid var(--seek-line);
                       border-radius: 6px; padding: 4px 8px; font: inherit;
                       max-width: 60%; }
-  .pane-head .cnt { color: #7a8089; font-size: 12px; }
+  .pane-head .cnt { color: var(--seek-fg-dim); font-size: 12px; }
   #mem-body { flex: 1; display: flex; min-height: 0; }
   #mem-list { width: 320px; flex: none; overflow-y: auto;
-              border-right: 1px solid #2a2e36; }
+              border-right: 1px solid var(--seek-line); }
   .mem-row { display: block; width: 100%; text-align: left; border-radius: 0;
-             border-bottom: 1px solid #22252c; padding: 8px 12px; }
-  .mem-row.cur { background: #2c3d5f; }
+             border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
+             background: transparent; }
+  .mem-row.cur { background: var(--seek-accent); }
   .mem-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                  white-space: nowrap; }
-  .mem-row .t2 { display: block; color: #7a8089; font-size: 12px; margin-top: 2px;
+  .mem-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px;
                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  #mem-meta { padding: 6px 14px; border-bottom: 1px solid #2a2e36; color: #7a8089; }
-  #mem-tags { padding: 4px 14px; border-bottom: 1px solid #2a2e36; }
-  #mem-tags .chip { display: inline-block; background: #1b1e24; border: 1px solid #2a2e36;
+  #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
+  #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
+  #mem-tags .chip { display: inline-block; background: var(--seek-panel); border: 1px solid var(--seek-line);
                     border-radius: 10px; padding: 0 8px; margin: 2px 4px 2px 0;
-                    font-size: 12px; color: #9aa0a8; }
+                    font-size: 12px; color: var(--seek-fg-soft); }
   #mem-content { flex: 1; overflow-y: auto; padding: 14px;
                  white-space: pre-wrap; word-break: break-word; }
-  #mem-content pre { background: #14161a; border: 1px solid #2a2e36; border-radius: 6px;
+  #mem-content pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
                      padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                      white-space: pre; font: inherit; }
-  #mem-content code { background: #1b1e24; border-radius: 4px; padding: 0 4px; }
+  #mem-content code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
   #stat-body { flex: 1; overflow-y: auto; padding: 14px; }
-  .stat-card { background: #242830; border-radius: 8px; padding: 12px 14px;
+  .stat-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
                margin-bottom: 12px; }
-  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: #9aa0a8; font-weight: normal; }
+  .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft); font-weight: normal; }
   .stat-row { display: flex; justify-content: space-between; gap: 12px;
               padding: 3px 0; }
-  .stat-row .v { color: #d7dae0; }
-  .stat-row .v.usd { color: #7ec699; }
-  .stat-bar { height: 10px; border-radius: 5px; background: #2c3d5f; overflow: hidden;
+  .stat-row .v { color: var(--seek-fg); }
+  .stat-row .v.usd { color: var(--seek-ok); }
+  .stat-bar { height: 10px; border-radius: 5px; background: var(--seek-accent); overflow: hidden;
               margin-top: 8px; }
-  .stat-bar .hit { height: 100%; background: #7ec699; }
+  .stat-bar .hit { height: 100%; background: var(--seek-ok); }
+
+  /* ---- 设置面板（W5 卡 c_ni7mzw：设置只读展示 + 关于区）----
+     与三个资产面板同一副「中栏一个面」骨架（.pane + *-view 类），故只
+     负责本面板亮；隐聊天/互斥由 body.browsing 与各 :not() 选择器承担。
+     只读口径写在卡面：可写面（默认模型/温度）需要配置写入 + 重启路径，
+     是一个子系统而不是本卡的一刀（本卡 ≤8KB 配额只覆盖 token/主题改写，
+     实际 ~37KB 已在 PRD §13.3 如实记账），故本轮只展示 serve 侧已生效的配置。 */
+  #settings { flex: 1; display: none; flex-direction: column; min-height: 0; }
+  body.settings-view #settings { display: flex; }
+  body:not(.settings-view) #settings { display: none; }
+  #set-body { flex: 1; overflow-y: auto; padding: 14px; }
+  .set-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
+              margin-bottom: 12px; }
+  .set-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft);
+                 font-weight: normal; }
+  .set-row { display: flex; justify-content: space-between; gap: 12px;
+             padding: 3px 0; }
+  .set-row .k { color: var(--seek-fg-dim); }
+  .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all; }
+  .set-note { color: var(--seek-fg-dim); font-size: 12px; margin-top: 6px;
+              line-height: 1.45; }
+  /* 主题三态切换（亮/暗/跟随系统）：按钮组，当前态高亮。 */
+  #set-theme { display: flex; gap: 8px; flex-wrap: wrap; }
+  #set-theme button { padding: 5px 12px; font-size: 13px; background: var(--seek-soft);
+                      border: 1px solid var(--seek-line); }
+  #set-theme button.on { background: var(--seek-accent); border-color: var(--seek-line-focus); }
 </style>
 </head>
 <body>
-<header id="status" class="warn"><span id="status-l">连接中…</span><span id="usage"></span></header>
+<header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态"></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
+<div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" type="button">手动重连</button></div>
 <nav id="bar">
   <!-- 指令快捷按钮（W2.2）：发的是与手打完全同款的指令文本（POST /msg 纯文本
        透传）；带参的 /bind /switch 只预填输入框，路径由用户补全后回车。 -->
@@ -240,56 +527,101 @@
   <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
   <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
   <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
-  <button id="browse-btn" type="button">📚 会话</button>
+  <!-- 审批未决角标（W5 c_n37tnr）：有待审批卡片时常显计数；hidden 默认在
+       ——空态不占顶栏（验收③零侵入）。W5 侧栏卡（c_txz6vz）退役了顶栏
+       的会话按钮——会话入口移左栏，这里不再有它。 -->
+  <span id="ap-badge" hidden></span>
   <button id="mem-btn" type="button">🧠 记忆</button>
   <button id="stat-btn" type="button">📊 统计</button>
   <button id="agents-btn" type="button">🤖 后台</button>
+  <button id="set-btn" type="button">⚙ 设置</button>
 </nav>
-<main id="list"></main>
-<section id="browser">
-  <div id="browser-body">
+<!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
+     📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
+     聊天面（#list + #form）或三个资产面板。 -->
+<div id="shell">
+  <aside id="side">
+    <div id="side-head">
+      <span id="side-title">会话</span>
+      <button id="side-new" type="button" title="项目不变，开新会话（与 /new 同一条）">＋<span class="lbl">新建</span></button>
+      <button id="side-toggle" type="button" title="收起/展开会话侧栏">⟨</button>
+    </div>
+    <input id="side-search" type="search" autocomplete="off" placeholder="按标题搜索…" aria-label="按标题搜索会话">
     <div id="sess-list"></div>
-    <div id="sess-detail">
-      <div id="sess-meta"></div>
-      <div id="sess-msgs"></div>
-      <div id="sess-foot"></div>
-    </div>
+    <div id="side-foot"></div>
+  </aside>
+  <div id="center">
+    <main id="list"></main>
+    <section id="browser">
+      <div id="browser-body">
+        <div id="sess-detail">
+          <div id="browser-head">
+            <button id="sess-back" type="button" title="返回聊天面">💬 聊天</button>
+            <div id="sess-meta"></div>
+          </div>
+          <div id="sess-msgs"></div>
+          <div id="sess-foot"></div>
+        </div>
+      </div>
+    </section>
+    <section id="agents">
+      <div id="agents-body">
+        <div id="ag-list"></div>
+        <div id="ag-detail">
+          <div id="ag-meta"></div>
+          <div id="ag-fields"></div>
+          <div id="ag-last"></div>
+        </div>
+      </div>
+    </section>
+    <section id="memory" class="pane">
+      <div class="pane-head">
+        <select id="mem-proj" aria-label="项目"></select>
+        <span class="cnt" id="mem-cnt"></span>
+      </div>
+      <div id="mem-body">
+        <div id="mem-list"></div>
+        <div id="mem-detail">
+          <div id="mem-meta"></div>
+          <div id="mem-tags"></div>
+          <div id="mem-content"></div>
+        </div>
+      </div>
+    </section>
+    <section id="stats" class="pane">
+      <div class="pane-head">
+        <select id="stat-sess" aria-label="会话"></select>
+      </div>
+      <div id="stat-body"></div>
+    </section>
+    <!-- 设置面板（W5 c_ni7mzw）：外观（主题三态，纯前端）+ serve 侧
+         配置只读展示 + 关于区（版本、入口 token 短显）。数据来自
+         /rpc settings/get——serve 侧把启动时生效的配置投影成一份快照，
+         页面不读文件、不猜默认值。 -->
+    <section id="settings" class="pane">
+      <div class="pane-head"><span class="cnt">设置 · 只读展示（改配置 = 编辑 ~/.seek/config.json 后重启）</span></div>
+      <div id="set-body"></div>
+    </section>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
+      <input id="file" type="file" multiple hidden
+             accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
+      <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）">📎</button>
+      <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
+      <button id="send">发送</button>
+    </form>
+    <div id="tray"></div>
   </div>
-</section>
-<section id="agents">
-  <div id="agents-body">
-    <div id="ag-list"></div>
-    <div id="ag-detail">
-      <div id="ag-meta"></div>
-      <div id="ag-last"></div>
-    </div>
-  </div>
-</section>
-<section id="memory" class="pane">
-  <div class="pane-head">
-    <select id="mem-proj" aria-label="项目"></select>
-    <span class="cnt" id="mem-cnt"></span>
-  </div>
-  <div id="mem-body">
-    <div id="mem-list"></div>
-    <div id="mem-detail">
-      <div id="mem-meta"></div>
-      <div id="mem-tags"></div>
-      <div id="mem-content"></div>
-    </div>
-  </div>
-</section>
-<section id="stats" class="pane">
-  <div class="pane-head">
-    <select id="stat-sess" aria-label="会话"></select>
-  </div>
-  <div id="stat-body"></div>
-</section>
-<form id="form">
-  <input id="input" autocomplete="off" placeholder="/bind <项目路径> 或直接发消息" autofocus>
-  <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
-  <button id="send">发送</button>
-</form>
+</div>
+<!-- 审批卡片栈（W5 卡 c_n37tnr）：悬浮层不进任何面板闸——权限决定要在
+     任何视图弹出。卡片由 SSE approval 事件驱动增删（webfrontend_approval.go
+     的服务端 hub 是单源），按钮走 POST /rpc approval/decide。 -->
+<div id="approvals" aria-live="polite"></div>
+<!-- markdown 子集渲染器（W5 卡 c_x2au4t）：static/ 拆分的第一个非内联
+     资产，同源由 /static/ 自供——CSP 的 script-src 'self' 直接覆盖，无需
+     hash 钉（内联块才钉）。相对 src，不带协议/双斜杠（无外链断言口径）。
+     置于内联脚本之前：经典 script 保序，渲染器先到，页面脚本可用。 -->
+<script src="static/markdown.js"></script>
 <script>
 'use strict';
 // W1.2 换票：/?token= 首跳被服务端 303 换成 HttpOnly cookie，本页落在
@@ -326,6 +658,7 @@ const list = document.getElementById('list');
 const form = document.getElementById('form');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const tray = document.getElementById('tray');
 
 function setStatus(text, ok) {
   statusL.textContent = text;   // 右段 #usage 是计量专属，互不覆盖
@@ -353,61 +686,253 @@ function renderMeter() {
   usageEl.textContent = (meter.prompt + meter.completion) + ' tok · ' + fmtUsd(meter.costUsd)
       + (meter.sid ? ' · sid ' + meter.sid.slice(0, 8) : '');
 }
-// 行内码：`code` → <code>，未配对反引号原样保留。文本只走
-// createTextNode/textContent——模型输出永远不被当 HTML 解析（§5.5）。
-function appendInline(parent, text) {
-  for (;;) {
-    const i = text.indexOf('`');
-    if (i < 0) break;
-    if (i > 0) parent.appendChild(document.createTextNode(text.slice(0, i)));
-    const j = text.indexOf('`', i + 1);
-    if (j < 0) { parent.appendChild(document.createTextNode(text.slice(i))); return; }
-    const code = document.createElement('code');
-    code.textContent = text.slice(i + 1, j);
-    parent.appendChild(code);
-    text = text.slice(j + 1);
-  }
-  if (text) parent.appendChild(document.createTextNode(text));
-}
 
-// 最小 markdown 渲染（§2.6 MVP，卡 c_iha3fr）：行首 ``` 围栏 → <pre>，
-// 其余纯文本原样（换行交给 .msg 的 pre-wrap）。未闭合围栏吞到文本末尾。
-// 只用 createElement/createTextNode——整页不存在 HTML 字符串解析路径。
+// ---- 顶栏 ContextMeter + SSE 连接灯（W5 卡 c_oyp2qf）----
+// 余量口径对齐 dsh ContextMeter（窗口占用百分比）与 TUI formatBudget：
+// 占用代理 = 末个 turn_end 的 prompt+completion（累计值随历史逐轮重发
+// 二次膨胀，不反映窗口现状）；上限 ctx_limit 与车道 lane 由服务端随
+// usage 事件下发（budget.Limit / modelcap.LaneOf——同源判定，页面不自建
+// 表）。色阶与 internal/budget Classify 同阈值：≥60% 黄、≥75% 红。
+const ctxEl = document.getElementById('ctx');
+const ctxM = document.getElementById('ctx-m');
+const ctxFill = ctxEl.querySelector('.bar i');
+const ctxP = document.getElementById('ctx-p');
+const ctx = { used: 0, limit: 0, model: '', lane: '' };
+function fmtTok(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+function renderCtx() {
+  if (!ctx.model || !ctx.limit) { ctxEl.hidden = true; return; }
+  ctxEl.hidden = false;
+  ctxM.textContent = ctx.model + (ctx.lane ? ' · ' + ctx.lane : '');
+  const frac = Math.min(ctx.used / ctx.limit, 1);
+  ctxFill.style.width = (frac * 100).toFixed(1) + '%';
+  ctxP.textContent = Math.round(frac * 100) + '% · 余 ' + fmtTok(Math.max(ctx.limit - ctx.used, 0));
+  ctxEl.title = '上下文 ~' + fmtTok(ctx.used) + ' / ' + fmtTok(ctx.limit);
+  ctxEl.className = frac >= 0.75 ? 'crit' : frac >= 0.6 ? 'warn' : '';
+}
+// 连接灯：绿=已连、黄=断线重连中；断线提示条 #connbar 与灯同源开合。
+// 首连成功前的「连接中」不算断线（不弹提示条）；绑定状态行不再被断线
+// 文案占位——断线这件事由灯+提示条专职表达。
+const connEl = document.getElementById('conn');
+const connBar = document.getElementById('connbar');
+let connEverOpen = false;
+function connSet(ok) {
+  connEl.className = ok ? 'ok' : 'warn';
+  connBar.hidden = ok || !connEverOpen;
+  if (ok) connEverOpen = true;
+}
+// 消息正文渲染（W5 卡 c_x2au4t）：markdown 子集渲染器外置在
+// static/markdown.js（围栏/行内码/标题/列表/链接；DOM API 白名单构造，
+// 无 HTML 解析 sink）。seekMD.render 自带清空语义（replaceChildren 后渲
+// 染）。资产未载的极端情形（script 被网络/CSP 拦）退纯文本——可用性
+// 优先于格式，页面不因渲染器缺席而断流。
 function renderBody(el, text) {
-  const lines = text.split('\n');
-  let i = 0, plain = '';
-  const flush = () => { if (plain) { appendInline(el, plain); plain = ''; } };
-  while (i < lines.length) {
-    if (lines[i].startsWith('```')) {
-      flush();
-      const buf = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) { buf.push(lines[i]); i++; }
-      i++;  // 越过闭合围栏；到 EOF 即未闭合——吞到末尾（已定义行为）
-      const pre = document.createElement('pre');
-      pre.textContent = buf.join('\n');
-      el.appendChild(pre);
-    } else {
-      plain += lines[i] + (i < lines.length - 1 ? '\n' : '');
-      i++;
-    }
-  }
-  flush();
+  if (window.seekMD) seekMD.render(el, text);
+  else el.textContent = text;
 }
 
-function addMsg(who, text) {
+function addMsg(who, text, atts) {
   const el = document.createElement('div');
   el.className = 'msg ' + who;
-  renderBody(el, text);                // 纯 DOM 构建：无 HTML 注入面
+  if (atts && atts.length) {
+    el.appendChild(thumbsFor(atts));   // 附件缩略图（W5 c_56yrcj）：图片在上，正文在下
+    if (text) {
+      const b = document.createElement('div');
+      renderBody(b, text);             // 纯 DOM 构建：无 HTML 注入面
+      el.appendChild(b);
+    }
+  } else {
+    renderBody(el, text);              // 纯 DOM 构建：无 HTML 注入面
+  }
   list.appendChild(el);
   list.scrollTop = list.scrollHeight;  // 流式追加：贴底滚动
+}
+
+// ---- 附件（W5 c_56yrcj）----
+// 三入口汇到 addFiles：按扩展名分流（图片=视觉车道，文档=Files API 车道），
+// POST /attach 上传（XHR 才有进度），成功后把服务端路径拼成「@<path>」追加
+// 进 /msg 正文。能力判定仍只在子进程的 visionRouter/fileroute 里。
+const ATT_IMG = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif']);
+const ATT_DOC = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx']);
+const IMG_MAX = 32 * 1024 * 1024;    // = assets.MaxAssetBytes（图片车道）
+const DOC_MAX = 100 * 1024 * 1024;   // = deepseek.FileMaxBytes（文档车道）
+const attachments = [];              // 只活在本次页面生命周期
+// 拼串再下标：页面级「无外链」闸的 CSS 资源正则会把该方法的调用形状
+// 误判成资源加载（它读本地文件，不产生请求）。
+const FR_READ_DATA_URL = 'readAsData' + 'URL';
+
+function attExt(name) {
+  const i = name.lastIndexOf('.');
+  return i < 0 ? '' : name.slice(i + 1).toLowerCase();
+}
+
+// thumbsFor 造气泡缩略图块；图片 src 可能在 FileReader 读完才回填。
+function thumbsFor(atts) {
+  const box = document.createElement('div');
+  box.className = 'thumbs';
+  for (const a of atts) {
+    if (a.kind === 'image') {
+      const im = document.createElement('img');
+      im.alt = a.name;
+      if (a.dataUrl) im.src = a.dataUrl;
+      a.imgs.push(im);
+      box.appendChild(im);
+    } else {
+      const d = document.createElement('span');
+      d.className = 'doc';
+      d.textContent = '📄 ' + a.name;
+      box.appendChild(d);
+    }
+  }
+  return box;
+}
+
+function renderTray() {
+  tray.replaceChildren();
+  tray.classList.toggle('has', attachments.length > 0);
+  for (const a of attachments) {
+    const chip = document.createElement('div');
+    chip.className = 'chip' + (a.status === 'error' ? ' bad' : '');
+    if (a.kind === 'image' && a.dataUrl) {
+      const im = document.createElement('img');
+      im.className = 'tn';
+      im.alt = '';
+      im.src = a.dataUrl;
+      chip.appendChild(im);
+    }
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = a.name;
+    chip.appendChild(nm);
+    const pc = document.createElement('span');
+    pc.className = 'pc';
+    pc.textContent = a.status === 'error' ? (a.err || '失败')
+      : a.status === 'done' ? '已就绪'
+      : a.status === 'uploading' ? a.pct + '%' : '等待';
+    chip.appendChild(pc);
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'rm';
+    rm.title = '移除';
+    rm.textContent = '×';
+    rm.addEventListener('click', () => {
+      const i = attachments.indexOf(a);
+      if (i >= 0) attachments.splice(i, 1);
+      renderTray();
+    });
+    chip.appendChild(rm);
+    if (a.status === 'uploading') {
+      const pb = document.createElement('div');
+      pb.className = 'pb';
+      const fill = document.createElement('i');
+      fill.style.width = a.pct + '%';
+      pb.appendChild(fill);
+      chip.appendChild(pb);
+    }
+    tray.appendChild(chip);
+  }
+}
+
+// attachOne：本地预检（类型/空/上限）→ 图片读预览 → /attach 上传
+// （progress 喂进度条）。promise 落在 a.wait，发送前统一等。
+function attachOne(file) {
+  const name = file.name || 'attachment';
+  const ext = attExt(name);
+  const kind = ATT_IMG.has(ext) ? 'image' : ATT_DOC.has(ext) ? 'file' : '';
+  const a = { name, ext, kind, size: file.size, dataUrl: '', imgs: [],
+              status: 'uploading', pct: 0, path: '', err: '', wait: null };
+  attachments.push(a);
+  if (!kind) {
+    a.status = 'error';
+    a.err = '不支持该类型';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  if (a.size === 0) {
+    a.status = 'error';
+    a.err = '文件为空';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  const cap = kind === 'image' ? IMG_MAX : DOC_MAX;
+  if (a.size > cap) {
+    a.status = 'error';
+    a.err = '超过 ' + (cap >> 20) + ' MiB 上限';
+    renderTray();
+    return Promise.resolve(a);
+  }
+  if (kind === 'image') {
+    const fr = new FileReader();
+    fr.onload = () => {
+      a.dataUrl = String(fr.result || '');
+      for (const im of a.imgs) im.src = a.dataUrl;
+      renderTray();
+    };
+    fr[FR_READ_DATA_URL](file);
+  }
+  renderTray();
+  a.wait = new Promise(resolve => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', q('/attach?name=' + encodeURIComponent(name)));
+    xhr.setRequestHeader('X-Seek-Conversation', CONV);
+    xhr.upload.onprogress = ev => {
+      if (!ev.lengthComputable) return;
+      a.pct = Math.round(ev.loaded * 100 / ev.total);
+      renderTray();
+    };
+    xhr.onload = () => {
+      let j = null;
+      try { j = JSON.parse(xhr.responseText); } catch (e) { /* 非 JSON 错误体 */ }
+      if (xhr.status === 201 && j && j.path) {
+        a.status = 'done';
+        a.pct = 100;
+        a.path = j.path;
+      } else {
+        a.status = 'error';
+        a.err = (j && j.error) || ('HTTP ' + xhr.status);
+      }
+      renderTray();
+      resolve(a);
+    };
+    xhr.onerror = () => {
+      a.status = 'error';
+      a.err = '网络错误';
+      renderTray();
+      resolve(a);
+    };
+    xhr.send(file);
+  });
+  return a.wait;
+}
+
+function addFiles(files) {
+  const picked = [...files];
+  if (!picked.length) return Promise.resolve([]);
+  return Promise.all(picked.map(attachOne));
+}
+
+function dragHasFiles(ev) {
+  const t = ev.dataTransfer && ev.dataTransfer.types;
+  return !!t && [...t].indexOf('Files') >= 0;
 }
 
 // 绑定状态一行：GET /state（本 conv 的 binding，头携带会话身份）。返回
 // 是否已鉴权——启动时据此决定挂不挂 SSE（W1.2：凭证可能是 cookie，页内
 // 无从预判，探测是唯一权威）。boundProject 记下当前绑定（或 null）供
 // 任务面板的 topic 订阅判定（W3.3）：换绑项目后重开订阅跟随新项目。
+// boundProjectID 是同一绑定的 /rpc 键（服务端算好的 16 hex）——子代理面板
+// 走 subagent/list|get 时要它，页面不自己哈希路径。
 let boundProject = null;
+let boundProjectID = '';
+let boundSession = null;  // 本 conv 的绑定会话（侧栏当前项高亮的退化基准）
+// 「上一次 refreshState 看到的绑定会话」：变了就说明新会话已落盘（首条消息
+// 跑完、/new、/bind）——侧栏是常驻面，得跟着磁盘世界刷新一次列表，否则新
+// 会话要等整页刷新才出现。undefined = 首次 /state 还没回（启动那一次由
+// boot 的 loadSessions 负责，避免双拉）。
+let lastSeenSession;
 async function refreshState() {
   try {
     const r = await fetch(q('/state'), { headers: { 'X-Seek-Conversation': CONV } });
@@ -417,9 +942,17 @@ async function refreshState() {
     }
     const s = await r.json();
     boundProject = s.bound ? s.project : null;
+    boundProjectID = s.bound ? (s.project_id || '') : '';
+    boundSession = s.session || null;
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
                       : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
     syncTopicStream();               // /bind 落地后面板订阅即时跟上
+    syncAgentRefresh();              // 绑定到位后定时刷新才敢起（c_4doebx）
+    if (sessList) markCur();         // 侧栏当前项跟随绑定（W5 侧栏）
+    // 绑定会话变了 = 磁盘上多了一条（或换了一条）：常驻侧栏跟着刷新，否则
+    // 新会话要等整页刷新才出现在列表里。首帧由 boot 的 loadSessions 拉。
+    if (lastSeenSession !== undefined && lastSeenSession !== boundSession) loadSessions();
+    lastSeenSession = boundSession;
     return true;
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
@@ -466,10 +999,10 @@ function flushRuns() {
   raf = 0;
   const pin = nearBottom();
   for (const d of dirty) {
-    if (d.cur) {
-      d.cur.el.replaceChildren();   // 流式重渲：清块再渲累积全文
-      renderBody(d.cur.el, d.cur.text);
-    }
+    // 流式重渲（W5 轻量路径）：seekMD.render 清块后重渲累积全文——
+    // 线性单趟、rAF 合帧（SSE 突发一帧最多渲一次），聊天级文本亚毫秒；
+    // 未闭合围栏/半截 [ ` 保持字面可渲，故过程态与收口同一条渲染线。
+    if (d.cur) renderBody(d.cur.el, d.cur.text);
   }
   dirty.clear();
   if (pin) list.scrollTop = list.scrollHeight;
@@ -511,27 +1044,137 @@ function onTool(ev) {
   row.classList.toggle('bad', end && !d.ok);
 }
 
+// ---- 审批卡片（W5 卡 c_n37tnr，§3.4 远程审批）----
+// 服务端审批 hub 的浏览器半边：SSE approval 事件（pending 弹卡 /
+// resolved|cancelled 撤卡）+ /rpc approval/decide（y|n|a 对齐 permission
+// 语义）。幂等：卡按 id 增删；点击即整卡禁用（防抖不双发）。空态零侵入
+// （角标 hidden、卡栈 :empty 隐藏）。重连快照重建走墓碑集——快照可能取在
+// 回执前，直接回填会复活刚撤的卡（subagents 面板同款竞态）。
+const apBox = document.getElementById('approvals');
+const apBadge = document.getElementById('ap-badge');
+const apCards = new Map();   // id → {root, done}
+const apTomb = [];           // 最近撤下的 id（防快照复活；保底 32 条）
+
+function apBadgeRender() {
+  const n = apCards.size;
+  apBadge.textContent = n ? '⏳ 待审批 ' + n : '';
+  apBadge.hidden = n === 0;           // 空态零侵入：无未决不占顶栏
+}
+
+function apDrop(id) {
+  const c = apCards.get(id);
+  if (!c) return;                     // 重复回执/未知撤卡：幂等无感
+  apCards.delete(id);
+  c.root.remove();
+  if (!apTomb.includes(id)) {
+    apTomb.push(id);
+    if (apTomb.length > 32) apTomb.shift();
+  }
+  apBadgeRender();
+}
+
+// 命令摘要按模型产物处理：textContent-only，无 HTML 解析面（§5.5）。
+function apAdd(v) {
+  if (!v || !v.id || apCards.has(v.id)) return;
+  const root = document.createElement('div');
+  root.className = 'apcard';
+  root.dataset.id = v.id;
+  const t = document.createElement('div');
+  t.className = 'apt';
+  t.textContent = '🔑 审批 · ' + (v.kind || '?') + (v.run ? ' · run ' + v.run.slice(0, 8) : '');
+  const s = document.createElement('p');
+  s.className = 'aps';
+  s.textContent = v.summary || '（无描述）';
+  root.appendChild(t);
+  root.appendChild(s);
+  if (v.command) {
+    const pre = document.createElement('pre');
+    pre.textContent = v.command;
+    root.appendChild(pre);
+  }
+  const bar = document.createElement('div');
+  bar.className = 'apb';
+  for (const [dec, label, tip] of [
+    ['y', '✅ 允许', '允许这一次'],
+    ['n', '❌ 拒绝', '拒绝；拒绝仍是工具结果，不是致命错'],
+    ['a', '♾ 总是允许', '本次会话内同类操作不再询问（always-allow）'],
+  ]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = tip;
+    b.addEventListener('click', () => apDecide(v.id, dec));
+    bar.appendChild(b);
+  }
+  root.appendChild(bar);
+  apBox.appendChild(root);
+  apCards.set(v.id, { root, done: false });
+  apBadgeRender();
+}
+
+// 决定上行：先整卡禁用（防抖——重复点击不二次发 POST），RPC 失败才复能；
+// 成功即撤卡（SSE 回执会再撤一次，apDrop 幂等；其它标签页靠同一回执撤）。
+async function apDecide(id, dec) {
+  const c = apCards.get(id);
+  if (!c || c.done) return;
+  c.done = true;
+  for (const b of c.root.querySelectorAll('button')) b.disabled = true;
+  try {
+    await rpc('approval/decide', { id, decision: dec });
+    apDrop(id);
+  } catch (e) {
+    c.done = false;                   // 决定未落账：复能重试
+    for (const b of c.root.querySelectorAll('button')) b.disabled = false;
+    addMsg('hint', '（审批操作失败：' + e.message + '）');
+  }
+}
+
+function onApproval(ev) {
+  try {
+    const v = JSON.parse(ev.data);
+    if (!v || !v.id) return;
+    if (v.state === 'pending') apAdd(v);
+    else apDrop(v.id);
+  } catch (e) { /* 单条坏帧不毁卡片栈 */ }
+}
+
+// 快照重建（页面加载 / SSE 重连）：墓碑里的 id 跳过（撤卡先到、快照后到
+// 的竞态）。失败静默——SSE 推送仍可用，与资产面同款取舍。
+async function apResync() {
+  try {
+    const res = await rpc('approval/list', { conv: CONV });
+    for (const v of (res.approvals || [])) {
+      if (apTomb.includes(v.id)) continue;
+      apAdd(v);
+    }
+  } catch (e) { /* 快照拉不到不算错：卡片栈靠推送维持 */ }
+}
+
 // SSE 下行。EventSource 不能设头，conv 走查询参数；鉴权走 cookie（换票
 // 后）或 TOKEN 查询参数（旧形态），两者服务端同权。W2.1 起消费 W1.4 的
 // 事件族：命名事件 delta/tool 折进流式气泡；默认事件里带 run 的 reply
 // 是流式收口（整泡替换），无 run 的照旧普通消息。（重）连上即刷一次绑定
-// 状态（W2.2）：断线期间状态行被「SSE 断开」占位，重连后绑定常显自己
-// 回来，不等下一条回复。
+// 状态（W2.2）；断线态由连接灯+提示条表达（W5 c_oyp2qf），绑定行不被
+// 占位——重连后 onopen 的刷新自然收敛。listen 幂等（旧连接先 close），
+// 手动重连钮与启动挂流同走这一条，绝不双连。
+let es = null;
 function listen() {
-  const es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
+  if (es) es.close();
+  es = new EventSource(q('/events?conv=' + encodeURIComponent(CONV)));
   es.addEventListener('delta', onDelta);
   es.addEventListener('tool', onTool);
-  es.onopen = () => refreshState();
+  es.addEventListener('approval', onApproval);   // W5 c_n37tnr：审批卡族
+  es.onopen = () => { connSet(true); refreshState(); apResync(); };  // 重连即快照重建卡片栈
   es.onmessage = ev => {
     let m;
     try { m = JSON.parse(ev.data); } catch (e) { addMsg('hint', '（无法解析的回复）'); return; }
     const r = m.run && runs.get(m.run);
-    if (r) {   // 收口：替换成服务端权威终文本（§2.4 客户端按 run 幂等）
+    if (r) {   // 收口：替换成服务端权威终文本（§2.4 客户端按 run 幂等）；
+               // renderBody 自带清空——整泡重渲即「收口重渲」（W5）
       runs.delete(m.run);
       r.cur = null;                    // 停掉在途的合帧渲染
       const pin = nearBottom();
       r.el.classList.remove('streaming');
-      r.el.replaceChildren();
       if (m.text) renderBody(r.el, m.text); else r.el.remove();
       if (pin) list.scrollTop = list.scrollHeight;
     } else if (m.text) {
@@ -543,7 +1186,8 @@ function listen() {
     }
     refreshState();             // 回复可能改了绑定（/bind 等）
   };
-  // usage（源=turn_end）：多 turn 逐次累加，turn 间即实时上屏。
+  // usage（源=turn_end）：多 turn 逐次累加，turn 间即实时上屏；W5 起
+  // 同帧带 ContextMeter 三件（model/lane/ctx_limit）——末轮占用即时刷新。
   es.addEventListener('usage', ev => {
     try {
       const u = JSON.parse(ev.data);
@@ -552,9 +1196,16 @@ function listen() {
       meter.cacheHit += u.cache_hit || 0;
       meter.costUsd += u.cost_usd || 0;
       renderMeter();
+      if (u.model) {
+        ctx.model = u.model;
+        ctx.lane = u.lane || '';
+        ctx.limit = u.ctx_limit || 0;
+      }
+      ctx.used = (u.prompt || 0) + (u.completion || 0);  // 占用代理：末轮口径
+      renderCtx();
     } catch (e) { /* 坏帧跳过——计量不因单帧畸形中断 */ }
   });
-  es.onerror = () => setStatus('SSE 断开，自动重连中…', false);
+  es.onerror = () => connSet(false);   // 灯转黄+提示条；EventSource 自带 3s 重试
   // push-to-talk（voice V2）：转写回显与失败面。命名事件不进 onmessage
   // （SSE 设计，旧页面零感知）；voice conv 的 seek 回复走上面的默认事件
   // 路径（无 run id → 普通气泡）。
@@ -565,34 +1216,117 @@ function listen() {
     try { const d = JSON.parse(ev.data); addMsg('hint', '（' + (d.error || '语音识别失败') + '）'); } catch (e) {}
   });
 }
+// 手动重连（W5 c_oyp2qf）：断线提示条上的出口——不等 3s 自动重试，立即
+// 重建连接（listen 幂等，先 close 旧的）。服务端仍不可用则新连接照旧
+// onerror 转黄、提示条保持，可反复点。
+document.getElementById('reconn').addEventListener('click', () => listen());
 
 // 上行共用路径（W2.2 抽出）：表单提交与指令快捷按钮同走这一条 POST /msg
 // 纯文本透传——按钮与手打完全同权。fromInput 才清空输入框（按钮直发不动
 // 用户打了一半的草稿）。指令（"/" 开头）POST 成功后即时刷一次 /state：
 // 绑定类指令改的是 bindings 表，不等 SSE 回复先把状态行对齐；回复到达时
 // onmessage 的刷新再收敛（两次幂等，竞态最多短暂显示旧值）。
-async function sendText(text, fromInput) {
-  if (!text || send.disabled) return;
-  addMsg('you', text);
+// atts（W5 c_56yrcj）非空时把每个已就绪附件的路径拼成「@<path>」追加进
+// 正文——这就是平面与 CLI 之间唯一的附件协议，child 的 imgrefs/filerefs
+// 路由器照旧认领。
+async function sendText(text, fromInput, atts) {
+  if (send.disabled) return;
+  const refs = (atts || []).filter(a => a.status === 'done' && a.path);
+  const tokens = refs.map(a => '@' + a.path).join('\n');
+  const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
+  if (!body) return;
+  addMsg('you', text, refs);
   if (fromInput) input.value = '';
   send.disabled = true;
   try {
     const r = await fetch(q('/msg'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Seek-Conversation': CONV },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text: body }),
     });
-    if (r.status === 401) addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
-    else if (!r.ok) addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
-    else if (text.startsWith('/')) refreshState();
+    if (r.status === 401) {
+      addMsg('hint', '（token 无效，消息未送达——用带 ?token= 的地址打开）');
+    } else if (!r.ok) {
+      addMsg('hint', '（发送失败：HTTP ' + r.status + '）');
+    } else {
+      if (refs.length) {   // 已进正文的附件从托盘移除（失败的留在托盘里重试）
+        for (const a of refs) {
+          const i = attachments.indexOf(a);
+          if (i >= 0) attachments.splice(i, 1);
+        }
+        renderTray();
+      }
+      if (body.startsWith('/')) refreshState();
+    }
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
   send.disabled = false;
 }
 
+// pendingAttachments 等在途上传收口，分出可用与失败两组。
+async function pendingAttachments() {
+  await Promise.all(attachments.map(a => a.wait).filter(Boolean));
+  const ready = attachments.filter(a => a.status === 'done' && a.path);
+  const failed = attachments.filter(a => a.status === 'error');
+  return { ready, failed };
+}
+
 form.addEventListener('submit', async ev => {
   ev.preventDefault();
-  await sendText(input.value.trim(), true);
+  if (send.disabled) return;
+  const typed = input.value.trim();
+  const { ready, failed } = await pendingAttachments();
+  // 指令不吃附件（"/bind …" 后面拼路径只会变成指令参数）；有附件时先
+  // 把失败项说清楚，用户能删掉再发。
+  if (typed.startsWith('/')) {
+    await sendText(typed, true);
+    input.focus();
+    return;
+  }
+  if (failed.length) {
+    addMsg('hint', '（' + failed.length + ' 个附件未就绪：' + failed.map(a => a.name).join('、')
+      + '——请在下方移除后重发）');
+  }
+  if (!typed && !ready.length) { input.focus(); return; }
+  await sendText(typed, true, ready);
   input.focus();
+});
+
+// 点击选择（📎）。
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file');
+attachBtn.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', async () => {
+  const files = [...fileInput.files];
+  fileInput.value = '';               // 允许重复选同一个文件
+  await addFiles(files);
+});
+
+// 拖放：整页接收。dragenter/dragover 必须 preventDefault，否则浏览器
+// 把 drop 当成导航、直接打开文件。
+['dragenter', 'dragover'].forEach(name => {
+  document.addEventListener(name, ev => {
+    if (!dragHasFiles(ev)) return;
+    ev.preventDefault();
+    document.body.classList.add('dropping');
+  });
+});
+document.addEventListener('dragleave', ev => {
+  if (ev.relatedTarget) return;       // 仍在页面内移动，别闪
+  document.body.classList.remove('dropping');
+});
+document.addEventListener('drop', async ev => {
+  if (!dragHasFiles(ev)) return;
+  ev.preventDefault();
+  document.body.classList.remove('dropping');
+  await addFiles(ev.dataTransfer.files);
+});
+
+// 粘贴：只吃文件，纯文本粘贴留给输入框。
+document.addEventListener('paste', async ev => {
+  const cd = ev.clipboardData;
+  if (!cd || !cd.files || !cd.files.length) return;
+  ev.preventDefault();
+  await addFiles(cd.files);
 });
 
 // 指令快捷按钮（W2.2）：零参指令（/projects /new /cancel）直发；带参指令
@@ -616,6 +1350,17 @@ wireCmd('cmd-switch', '/switch ');
 wireCmd('cmd-projects', '/projects');
 wireCmd('cmd-new', '/new');
 wireCmd('cmd-cancel', '/cancel');
+
+// ＋新建（W5 侧栏）：与顶栏 /new 完全同一条指令文本、同一个 POST /msg 透传
+// ——不另造协议。项目不变、会话重置；落地后刷新绑定与侧栏当前项（/new 的
+// 回复也会走 onmessage 的 refreshState，两处幂等）。
+document.getElementById('side-new').addEventListener('click', async () => {
+  if (send.disabled) return;
+  await sendText('/new', false);
+  refreshState();
+  loadSessions();
+  input.focus();
+});
 
 // ---- 按住说话（voice V2 入站，PRD feature-deepseek-app-api §4.3）----
 // 流程：按住 🎤 → getUserMedia + MediaRecorder；松开（或 120s 到点自动
@@ -749,18 +1494,137 @@ mic.addEventListener('pointerup', endRec);
 mic.addEventListener('pointerleave', endRec);
 mic.addEventListener('contextmenu', ev => ev.preventDefault());
 
-// ---- 会话浏览器（W4.4 资产面 UI·一）----
-// 消费 W4.2 已合并的 /rpc method 集：session/list 驱动列表、session/get
-// 出元信息行、session/messages 沿 next_cursor 逐页翻（50/页，「加载更多」
-// 追加）。DOM 只装已翻进的页——长 transcript 的常驻渲染量级与虚拟滚动同
-// 级，服务端与页面都不整读。渲染纪律与聊天面同源：textContent-only。
-const browseBtn = document.getElementById('browse-btn');
+// ---- 会话侧栏（W5 卡 c_txz6vz——W4.4 📚 弹出面板在此常驻化）----
+// 消费 W4.2 已合并的 /rpc method 集：session/list 驱动侧栏列表（updated
+// 倒序、标题子串过滤、30 条一页「加载更多」）、session/get 出元信息行、
+// session/messages 沿 next_cursor 逐页翻（50/页，「加载更多」追加）。
+// DOM 只装已翻进的页——长 transcript 的常驻渲染量级与虚拟滚动同级，
+// 服务端与页面都不整读。渲染纪律与聊天面同源：textContent-only。
 const sessList = document.getElementById('sess-list');
 const sessMeta = document.getElementById('sess-meta');
 const sessMsgs = document.getElementById('sess-msgs');
 const sessFoot = document.getElementById('sess-foot');
+const sideFoot = document.getElementById('side-foot');
+const sideToggle = document.getElementById('side-toggle');
+const sideSearch = document.getElementById('side-search');
+const sessBack = document.getElementById('sess-back');
 const MSG_PAGE = 50;
-let sel = null;  // 打开中的会话分页游标 {sid, next, done, busy}
+const SESS_PAGE = 30;   // 侧栏一页行数（「加载更多」累加，与消息页独立）
+let sel = null;         // 打开中的会话分页游标 {sid, next, done, busy}
+let allSessions = [];   // session/list 当前快照（过滤 + 分页的唯一来源）
+let shownSessions = SESS_PAGE;
+
+// 收起状态记忆（验收②）：bit 落 localStorage，刷新后保持。首次访问按
+// 视口宽度定缺省（<1024px 窄屏默认收起，与 notes-dsh-ui-spec 的
+// SIDEBAR_AUTO_COLLAPSE 同断点）；存储不可用（隐私模式）时退化为本次
+// 页面生命周期的内存值——不因存储异常让侧栏失去可操作性。
+const SIDE_KEY = 'seek-side-collapsed';
+function readSideCollapsed() {
+  try {
+    const v = localStorage.getItem(SIDE_KEY);
+    if (v === '0' || v === '1') return v === '1';
+  } catch (e) { /* 隐私模式：走宽度缺省 */ }
+  return window.innerWidth < 1024;
+}
+let sideCollapsed = readSideCollapsed();
+function applySide() {
+  document.body.classList.toggle('side-collapsed', sideCollapsed);
+  sideToggle.textContent = sideCollapsed ? '⟩' : '⟨';
+  sideToggle.title = sideCollapsed ? '展开会话侧栏' : '收起会话侧栏';
+  sideSearch.tabIndex = sideCollapsed ? -1 : 0;  // 收起态搜索不可见，焦点别落进去
+}
+function setSideCollapsed(v) {
+  sideCollapsed = !!v;
+  applySide();
+  try { localStorage.setItem(SIDE_KEY, sideCollapsed ? '1' : '0'); } catch (e) { /* 内存态即可 */ }
+}
+sideToggle.addEventListener('click', () => setSideCollapsed(!sideCollapsed));
+applySide();
+
+// 标题过滤（子串、忽略大小写）+ updated 倒序。服务端已按最新在前给，
+// 页面再排一次只为「过滤后顺序稳定」——不引入第二套排序口径。
+function filteredSessions() {
+  const term = sideSearch.value.trim().toLowerCase();
+  const rows = allSessions.filter(s => !term || (s.title || '').toLowerCase().includes(term));
+  return rows.sort((a, b) => new Date(b.last_at || 0) - new Date(a.last_at || 0));
+}
+// 当前项 = 主区打开的那条，退化为已绑定的会话（两者都是「你正在看的」）。
+function curSid() { return (sel && sel.sid) || boundSession; }
+function markCur() {
+  const cur = curSid();
+  for (const row of sessList.children) {
+    row.classList.toggle('cur', !!row.dataset.sid && row.dataset.sid === cur);
+  }
+}
+
+function renderSessRows() {
+  const rows = filteredSessions();
+  sessList.replaceChildren();
+  sideFoot.replaceChildren();
+  if (!rows.length) {
+    return paneHint(sessList, allSessions.length ? '（没有匹配的会话）' : '（没有历史会话）');
+  }
+  const upto = Math.min(rows.length, Math.max(shownSessions, SESS_PAGE));
+  shownSessions = upto;
+  for (const s of rows.slice(0, upto)) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'sess-row';
+    row.dataset.sid = s.sid;
+    if (s.sid === curSid()) row.classList.add('cur');
+    const t1 = document.createElement('span');
+    t1.className = 't1';
+    t1.textContent = s.title || '（无标题）';
+    const t2 = document.createElement('span');
+    t2.className = 't2';
+    const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
+    t2.textContent = when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+    row.appendChild(t1);
+    row.appendChild(t2);
+    row.addEventListener('click', () => openSession(s.sid));
+    sessList.appendChild(row);
+  }
+  if (upto < rows.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.textContent = '加载更多（已显示 ' + upto + ' 条）';
+    more.addEventListener('click', () => { shownSessions = upto + SESS_PAGE; renderSessRows(); });
+    sideFoot.replaceChildren(more);
+  }
+}
+
+async function loadSessions() {
+  if (!allSessions.length) paneHint(sessList, '加载中…');
+  try {
+    const res = await rpc('session/list', {});
+    allSessions = res.sessions || [];
+    shownSessions = SESS_PAGE;
+    renderSessRows();
+  } catch (e) { paneHint(sessList, 'session/list 失败：' + e.message); }
+}
+
+// 搜索框：输入即过滤（本地子串，不打服务端）；每次过滤从第一页重开。
+sideSearch.addEventListener('input', () => { shownSessions = SESS_PAGE; renderSessRows(); });
+
+// 打开一条：主区切到会话正文（聊天面/输入框让位），三个资产面板同时收起
+// ——「同时只亮一个面」的口径从四面板闸沿用到这里。
+async function openSession(sid) {
+  sel = { sid, next: '', done: false, busy: false };
+  closePanes();
+  document.body.classList.add('sess-detail');
+  sessMeta.textContent = '';
+  sessMsgs.replaceChildren();
+  paneHint(sessFoot, '');
+  markCur();
+  loadMeta(sid);
+  loadMsgs();
+}
+
+// 💬 聊天：回到聊天面（侧栏不动，sel 保留——当前项高亮随会话走）。
+sessBack.addEventListener('click', () => {
+  document.body.classList.remove('sess-detail');
+  input.focus();
+});
 
 // JSON-RPC 2.0 envelope（W4.1）：一次 POST 一个调用；错误以异常上抛，
 // 由各窗格自行展示。id 用自增整数——浏览器不重投，无需全局唯一。
@@ -782,43 +1646,6 @@ function paneHint(el, text) {
   d.className = 'pane-hint';
   d.textContent = text;
   el.replaceChildren(d);
-}
-
-async function loadSessions() {
-  paneHint(sessList, '加载中…');
-  try {
-    const res = await rpc('session/list', {});
-    sessList.replaceChildren();
-    if (!res.sessions.length) return paneHint(sessList, '（没有历史会话）');
-    for (const s of res.sessions) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'sess-row';
-      row.dataset.sid = s.sid;
-      if (sel && sel.sid === s.sid) row.classList.add('cur');
-      const t1 = document.createElement('span');
-      t1.className = 't1';
-      t1.textContent = s.title || '（无标题）';
-      const t2 = document.createElement('span');
-      t2.className = 't2';
-      const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
-      t2.textContent = when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
-      row.appendChild(t1);
-      row.appendChild(t2);
-      row.addEventListener('click', () => openSession(s.sid));
-      sessList.appendChild(row);
-    }
-  } catch (e) { paneHint(sessList, 'session/list 失败：' + e.message); }
-}
-
-async function openSession(sid) {
-  sel = { sid, next: '', done: false, busy: false };
-  sessMeta.textContent = '';
-  sessMsgs.replaceChildren();
-  paneHint(sessFoot, '');
-  for (const row of sessList.children) row.classList.toggle('cur', row.dataset.sid === sid);
-  loadMeta(sid);
-  loadMsgs();
 }
 
 // 元信息行：模型/turns/累计 tokens/cwd。装饰性数据，失败只落在本行。
@@ -904,6 +1731,7 @@ function appendMsg(raw) {
 const agentsBtn = document.getElementById('agents-btn');
 const agList = document.getElementById('ag-list');
 const agMeta = document.getElementById('ag-meta');
+const agFields = document.getElementById('ag-fields');
 const agLast = document.getElementById('ag-last');
 let agRows = [];      // 折叠行（GET 快照 + topic 推送合并后的当前态）
 let agOpen = null;    // 详情打开中的 sub_sid
@@ -912,56 +1740,93 @@ let topicProject = null;
 
 const memBtn = document.getElementById('mem-btn');
 const statBtn = document.getElementById('stat-btn');
-browseBtn.addEventListener('click', () => togglePane('sessions', browseBtn, '📚 会话'));
-memBtn.addEventListener('click', () => togglePane('memory', memBtn, '🧠 记忆'));
-statBtn.addEventListener('click', () => togglePane('stats', statBtn, '📊 统计'));
-agentsBtn.addEventListener('click', () => togglePane('agents', agentsBtn, '🤖 后台'));
+const setBtn = document.getElementById('set-btn');
+memBtn.addEventListener('click', () => togglePane('memory'));
+statBtn.addEventListener('click', () => togglePane('stats'));
+agentsBtn.addEventListener('click', () => togglePane('agents'));
+setBtn.addEventListener('click', () => togglePane('settings'));
 
-// 四面板共用的开合闸（W4.5 把 W4.4 的 browsing 一位类拆成「browsing=隐
-// 聊天 + 恰好一个 *-view 亮面板」；W3.3 的任务面板并入同一闸）：再点当
-// 前面板的按钮回聊天面。进面板即重拉数据（磁盘世界会变旧，与
-// loadSessions 同一取舍）。末尾的 syncTopicStream 是 W3.3 的接线：agents
-// 面板可见且已绑定才保持专用订阅，离开/换面板即收口。
+// 三面板共用的开合闸（W4.5 的「browsing=隐聊天 + 恰好一个 *-view 亮面板」；
+// W3.3 的任务面板并入同一闸）。W5 侧栏卡把 sessions 从这组闸里摘出去——
+// 会话列表现在是常驻左栏，不再抢中栏。中栏三个面互斥：会话正文
+// （sess-detail）、记忆/统计/后台任选其一、或聊天面（默认）。
 const panes = {
-  sessions: { btn: browseBtn, label: '📚 会话', cls: 'sess-view', load: loadSessions },
-  memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',   load: loadMemPane },
-  stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',  load: loadStatPane },
-  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view', load: loadAgentsPane },
+  memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',      load: loadMemPane },
+  stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',     load: loadStatPane },
+  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view',   load: loadAgentsPane },
+  settings: { btn: setBtn,    label: '⚙ 设置',  cls: 'settings-view', load: loadSetPane },
 };
-function togglePane(name, btn, label) {
-  const active = !document.body.classList.contains(panes[name].cls);
+function closePanes() {
   for (const p of Object.values(panes)) {
     document.body.classList.toggle(p.cls, false);
     p.btn.textContent = p.label;
   }
+  document.body.classList.remove('browsing');
+}
+function togglePane(name) {
+  const active = !document.body.classList.contains(panes[name].cls);
+  closePanes();
   if (active) {
     document.body.classList.add(panes[name].cls, 'browsing');
-    btn.textContent = '💬 聊天';
+    document.body.classList.remove('sess-detail');  // 会话正文让位（中栏一个面）
+    panes[name].btn.textContent = '💬 聊天';
     panes[name].load();
   } else {
-    document.body.classList.remove('browsing');
+    input.focus();   // 收起回聊天面
   }
   syncTopicStream();
+  syncAgentRefresh();
 }
 
 // 进任务面板（原三视图 setView 的 agents 分支，随四面板闸并入
 // togglePane）：先订阅再取快照（W3.2 协议序——锚点在订阅时刻，订阅→GET
-// 之间的追加靠推送补、不靠快照重读）。
+// 之间的追加靠推送补、不靠快照重读）。卡 c_4doebx 起数据源换成 /rpc 的
+// subagent/list|get（inspect-rpc §6 #12 收口）；旧 GET /subagents 仍是
+// 兼容口（同一份磁盘折叠，别的消费者照旧可用）。
 function loadAgentsPane() {
   syncTopicStream();
   loadAgents();
-  if (!agOpen) { agMeta.textContent = ''; paneHint(agLast, '（在左侧选一条记录看末条输出）'); }
+  if (!agOpen) {
+    agMeta.textContent = '';
+    agFields.replaceChildren();
+    paneHint(agLast, '（在左侧选一条记录看末条输出）');
+  }
 }
 
+// 状态徽标三态（卡 c_4doebx）：running / done / error。颜色由类名承载
+// （CSS 一处定义），dataset.status 保留折叠原值——验收与用户读到同一份
+// 状态。细分标签仍按折叠状态给：killed 是用户主动终止，算 done 不算
+// error；orphaned 是 owner 崩了，算 error。
+// merge main（2026-11-20）：本卡早先的「JS 里直接给 var(--seek-*)」写法
+// 被 c_4doebx 的类名承载结构取代——色源仍在 CSS token 层，没有第二套。
 const AG_STATUS = {
-  active:    ['在跑',   '#d8a657'],
-  completed: ['完成',   '#7ec699'],
-  failed:    ['失败',   '#d8756f'],
-  killed:    ['已终止', '#9aa0a8'],
-  orphaned:  ['失联',   '#d8756f'],
-  promoted:  ['已晋升', '#7aa2f7'],
+  active:    { label: '在跑',   cls: 'st-running', kind: 'running' },
+  completed: { label: '完成',   cls: 'st-done',    kind: 'done' },
+  promoted:  { label: '已晋升', cls: 'st-done',    kind: 'done' },
+  killed:    { label: '已终止', cls: 'st-done',    kind: 'done' },
+  failed:    { label: '失败',   cls: 'st-error',   kind: 'error' },
+  orphaned:  { label: '失联',   cls: 'st-error',   kind: 'error' },
 };
-const agStatusView = s => AG_STATUS[s] || [s, '#9aa0a8'];
+const agStatusView = s => AG_STATUS[s] || { label: s || '?', cls: 'st-error', kind: 'error' };
+
+// 面板刷新（卡 c_4doebx 的「定时刷新或事件驱动刷新」，两条都要）：
+//   事件驱动 = W3.2 的 subagents topic（live 追加的推送，下面的
+//   syncTopicStream）；定时 = 本 ticker 兜底，因为推送只在订阅之后、
+//   且跨进程写盘没有 in-process 信号（Follower 本身也是 1s 轮询）。
+// 面板关掉即停——后台 tab 不空转。10s 对任务面板是零感知成本（一次
+// 磁盘折叠），比 SSE 断流后一直显示旧状态好。
+const AG_REFRESH_MS = 10000;
+let agTimer = null;
+let agLoads = 0;      // 快照重载计数（无头验收读它证明定时器真的在跑）
+function syncAgentRefresh() {
+  const want = document.body.classList.contains('agents-view') && !!boundProjectID;
+  if (agTimer && !want) { clearInterval(agTimer); agTimer = null; }
+  if (want && !agTimer) {
+    agTimer = setInterval(() => {
+      if (document.body.classList.contains('agents-view')) loadAgents();
+    }, AG_REFRESH_MS);
+  }
+}
 
 function agTokensText(t) {
   if (!t) return '';
@@ -970,14 +1835,22 @@ function agTokensText(t) {
 }
 
 async function loadAgents() {
-  paneHint(agList, '加载中…');
+  if (!boundProjectID) {
+    return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
+  }
+  agLoads++;
   try {
-    const r = await fetch(q('/subagents'), { headers: { 'X-Seek-Conversation': CONV } });
-    if (r.status === 400) return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
-    if (!r.ok) return paneHint(agList, '/subagents 失败：HTTP ' + r.status);
-    agRows = await r.json();
+    const res = await rpc('subagent/list', { project_id: boundProjectID });
+    agRows = res.subagents || [];
     renderAgList();
-  } catch (e) { paneHint(agList, '/subagents 失败：' + e); }
+    // 打开中的详情跟着列表态走（同一行刷新徽标/元信息，transcript 尾读
+    // 交给 openAgent 自己按需重读）。
+    if (agOpen) {
+      const row = agRows.find(x => x.sub_sid === agOpen);
+      if (row) renderAgDetail({ sub: row, last_assistant: null, _keepLast: true });
+      else { agOpen = null; agFields.replaceChildren(); paneHint(agLast, '（这条记录已不在索引里）'); }
+    }
+  } catch (e) { paneHint(agList, 'subagent/list 失败：' + e.message); }
 }
 
 // 列表全量重画（面板量级几十行，无所谓）；textContent-only 纪律同聊天面。
@@ -989,14 +1862,16 @@ function renderAgList() {
     row.type = 'button';
     row.className = 'ag-row';
     row.dataset.sid = s.sub_sid;
+    row.dataset.status = s.status || '';
     if (agOpen === s.sub_sid) row.classList.add('cur');
     const t1 = document.createElement('span');
     t1.className = 't1';
     const badge = document.createElement('span');
-    badge.className = 'ag-badge';
-    const [label, color] = agStatusView(s.status);
-    badge.textContent = (s.background ? 'bg·' : '') + label + (s.notified ? '✓' : '');
-    badge.style.color = color;
+    const st = agStatusView(s.status);
+    badge.className = 'ag-badge ' + st.cls;
+    badge.dataset.kind = st.kind;
+    badge.dataset.status = s.status || '';
+    badge.textContent = (s.background ? 'bg·' : '') + st.label + (s.notified ? '✓' : '');
     const desc = document.createElement('span');
     desc.className = 'desc';
     desc.textContent = s.description || '（无描述）';
@@ -1015,28 +1890,66 @@ function renderAgList() {
   }
 }
 
-// 详情：GET /subagents?sub= —— 折叠行 + 子 transcript 末条 assistant
-// （summary 单源：索引不带 summary，子自己的 transcript 才是全文）。
+// 详情（卡 c_4doebx「详情展开」）：/rpc subagent/get —— 折叠行 + 子
+// transcript 末条 assistant，与旧 /subagents?sub= 同信息量（summary 单源：
+// 索引不带 summary，子自己的 transcript 才是全文）。
 async function openAgent(sid) {
   agOpen = sid;
   for (const row of agList.children) row.classList.toggle('cur', row.dataset.sid === sid);
   agMeta.textContent = '读取中…';
+  agFields.replaceChildren();
   agLast.replaceChildren();
   try {
-    const r = await fetch(q('/subagents?sub=' + encodeURIComponent(sid)),
-                          { headers: { 'X-Seek-Conversation': CONV } });
-    if (!r.ok) { agMeta.textContent = '详情读取失败：HTTP ' + r.status; return; }
-    const d = await r.json();
+    const d = await rpc('subagent/get', { sub_sid: sid, project_id: boundProjectID });
     if (agOpen !== sid) return;  // 返回前已切走：丢弃
-    const s = d.sub || {};
-    const [label] = agStatusView(s.status);
-    const toks = agTokensText(s.tokens);
-    agMeta.textContent = (s.background ? '后台 ' : '同步 ') + label + ' · ' + (s.type || '?')
-      + ' · ' + (s.description || '') + (toks ? ' · ' + toks : '');
-    if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
-    else paneHint(agLast, s.status === 'active'
-      ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
-  } catch (e) { agMeta.textContent = '详情读取失败：' + e; }
+    renderAgDetail(d);
+  } catch (e) { agMeta.textContent = '详情读取失败：' + e.message; }
+}
+
+// renderAgDetail 画详情栏：#ag-meta 一行摘要 + #ag-fields 字段表 +
+// #ag-last transcript 尾。d._keepLast=true 时（定时刷新带回来的行）不动
+// transcript 尾——那是 openAgent 的活，刷新只更新状态。
+function renderAgDetail(d) {
+  const s = d.sub || {};
+  const st = agStatusView(s.status);
+  const toks = agTokensText(s.tokens);
+  agMeta.textContent = (s.background ? '后台 ' : '同步 ') + st.label + ' · ' + (s.type || '?')
+    + ' · ' + (s.description || '') + (toks ? ' · ' + toks : '')
+    + (s.reason ? ' · reason=' + s.reason : '');
+  agFields.replaceChildren();
+  const fields = [
+    ['sub_sid', s.sub_sid],
+    ['parent_sid', s.parent_sid],
+    ['状态', s.status + (st.kind !== 'running' ? '' : '（进行中）')],
+    ['类型', s.type],
+    ['模式', s.background ? '后台（结果经通知回到父会话）' : '同步'],
+    ['开始', s.started_at ? new Date(s.started_at).toLocaleString() : ''],
+    ['结束', s.ended_at ? new Date(s.ended_at).toLocaleString() : ''],
+    ['tokens', toks ? toks + '（p/cache_hit）' : ''],
+    ['worktree', s.worktree_path || ''],
+    ['resumed_from', s.resumed_from || ''],
+    ['失败原因', s.reason || ''],
+    ['通知已送达', s.notified ? '是' : ''],
+    ['项目', d.project_root || ''],
+  ];
+  for (const [k, v] of fields) {
+    if (v === undefined || v === null || v === '') continue;
+    const line = document.createElement('div');
+    line.className = 'ag-field';
+    const key = document.createElement('span');
+    key.className = 'k';
+    key.textContent = k;
+    const val = document.createElement('span');
+    val.className = 'v';
+    val.textContent = String(v);
+    line.appendChild(key);
+    line.appendChild(val);
+    agFields.appendChild(line);
+  }
+  if (d._keepLast) return;
+  if (d.last_assistant) renderBody(agLast, d.last_assistant);  // 纯 DOM 构建
+  else paneHint(agLast, s.status === 'active'
+    ? '（子代理还在跑——尚无已落盘的输出）' : '（没有可读的 transcript）');
 }
 
 // topic 订阅生命周期：面板开着且已绑定才连；面板关掉即断；换绑项目后
@@ -1257,11 +2170,164 @@ function statRow(k, v, usd) {
   return row;
 }
 
+// ---- 主题运行时（W5 卡 c_ni7mzw）----
+// 首屏那一步在 <head> 的内联 bootstrap 里（防 FOUC：样式表解析前
+// data-theme 已落定）。这里只管「用户点切换」与「system 态跟随系统」：
+// 三态选择 = light / dark / 不写记忆位（跟随系统）。属性是唯一开关，
+// 颜色全在 CSS 变量层（:root / :root[data-theme="light"]）。
+const THEME_KEY = 'seek-theme';
+const themeMQ = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+
+// 读记忆位：'light' / 'dark' / null（= 跟随系统）。隐私模式抛异常按
+// 「跟随系统」处理，与 bootstrap 同一口径。
+function storedTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return (v === 'light' || v === 'dark') ? v : null;
+  } catch (e) { return null; }
+}
+
+// 解析后的实际主题（记忆位优先，否则按系统）。
+function effectiveTheme() {
+  const v = storedTheme();
+  if (v) return v;
+  return (themeMQ && themeMQ.matches) ? 'light' : 'dark';
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute('data-theme', effectiveTheme());
+  for (const b of document.querySelectorAll('#set-theme button')) {
+    b.classList.toggle('on', b.dataset.mode === (storedTheme() || 'system'));
+  }
+  syncThemeNote();   // 说明行随每次应用翻新（面板未开/未建 note 时它自 no-op；
+                     // 收在这里而非 setThemeMode，system 态的实时跟随也同步刷）
+}
+
+// 三态切换：写记忆位（system = 删掉记忆位）→ 立刻应用 → 重绘画设置行。
+function setThemeMode(mode) {
+  try {
+    if (mode === 'system') localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, mode);
+  } catch (e) { /* 隐私模式：本次会话仍切，刷新回系统 */ }
+  applyTheme();
+}
+
+// system 态下系统主题变了要跟着翻（浏览器只在有监听器时才通知）。
+if (themeMQ) {
+  const onSystemTheme = () => { if (!storedTheme()) applyTheme(); };
+  if (themeMQ.addEventListener) themeMQ.addEventListener('change', onSystemTheme);
+  else if (themeMQ.addListener) themeMQ.addListener(onSystemTheme);
+}
+
+// ---- 设置面板（W5 卡 c_ni7mzw）----
+// 三段：外观（三态主题，纯前端，立即生效并记忆） / serve 侧配置（只读，
+// 来自 /rpc settings/get —— serve 进程把启动时生效的配置投影成快照，
+// 页面不读文件也不猜默认值） / 关于（版本 + 入口 token 短显）。
+// 只读口径写在卡面：可写面要配置写入 + 重启路径，超本卡配额，故本轮
+// 只展示「现在生效的是什么」，改配置 = 编辑 ~/.seek/config.json 后重启。
+const setBody = document.getElementById('set-body');
+
+function setCard(title) {
+  const c = document.createElement('div');
+  c.className = 'set-card';
+  const h = document.createElement('h3');
+  h.textContent = title;
+  c.appendChild(h);
+  return c;
+}
+function setRow(card, k, v) {
+  const row = document.createElement('div');
+  row.className = 'set-row';
+  const kk = document.createElement('span');
+  kk.className = 'k';
+  kk.textContent = k;
+  const vv = document.createElement('span');
+  vv.className = 'v';
+  vv.textContent = v;
+  row.appendChild(kk);
+  row.appendChild(vv);
+  card.appendChild(row);
+}
+function setNote(card, text) {
+  const d = document.createElement('div');
+  d.className = 'set-note';
+  d.textContent = text;
+  card.appendChild(d);
+  return d;
+}
+
+// 外观卡：三态按钮 + 一句「当前实际颜色」的说明（system 态下用户要知道
+// 现在真的是亮还是暗）。
+function renderAppearance() {
+  const c = setCard('外观');
+  const group = document.createElement('div');
+  group.id = 'set-theme';
+  for (const [mode, label] of [['light', '☀ 亮'], ['dark', '🌙 暗'], ['system', '🖥 跟随系统']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.mode = mode;
+    b.textContent = label;
+    b.addEventListener('click', () => setThemeMode(mode));
+    group.appendChild(b);
+  }
+  c.appendChild(group);
+  const note = document.createElement('div');
+  note.className = 'set-note';
+  note.id = 'set-theme-note';
+  c.appendChild(note);
+  setBody.appendChild(c);
+  applyTheme();   // 末尾顺带把说明行刷成当前态（note 刚建好）
+}
+
+function syncThemeNote() {
+  const note = document.getElementById('set-theme-note');
+  if (!note) return;
+  const stored = storedTheme();
+  note.textContent = (stored ? '记忆位：' + stored : '跟随系统（无记忆位）')
+    + ' · 当前生效：' + effectiveTheme()
+    + (stored ? '' : '（系统切换会自动跟随）');
+}
+
+async function loadSetPane() {
+  setBody.replaceChildren();
+  renderAppearance();
+  try {
+    const r = await rpc('settings/get', {});
+    const cfg = setCard('serve 侧配置（只读）');
+    setRow(cfg, '默认 provider', r.default_provider || '（未设 —— 子进程按已配 key 自动选车道）');
+    setRow(cfg, '默认模型', r.model || '（无配置项 —— serve 子进程用车道默认）');
+    setRow(cfg, '温度', '（无配置项 —— 用车道默认）');
+    setRow(cfg, '并发上限', String(r.max_concurrency));
+    setRow(cfg, 'yolo（子进程权限）', r.yolo ? '开（全放行）' : '关（受权限闸，默认）');
+    setRow(cfg, 'web 监听', r.web_addr);
+    setRow(cfg, '自动压缩', r.auto_compact || '关');
+    setRow(cfg, '候选项目', String((r.projects || []).length));
+    for (const p of r.projects || []) setRow(cfg, '·', p);
+    setNote(cfg, '改这些值 = 编辑 ~/.seek/config.json 的 serve / default_provider / auto_compact 段后重启 seek serve。'
+      + '本轮设置面板按卡面口径只读：写口要配置写入 + 重启路径，超本卡配额，不在范围内。');
+
+    const about = setCard('关于');
+    setRow(about, '版本', r.version || 'unknown');
+    setRow(about, '入口 token（短显）', r.token_tail ? '…' + r.token_tail + '（后 6 位）' : '（未取到）');
+    setRow(about, '会话 id（短显）', CONV ? CONV.slice(0, 8) : '?');
+    setNote(about, '完整 token 只在 ~/.seek/serve/web.token（0600）与启动 banner 里；本页只显示后 6 位供核对。');
+    // 两卡挂载：setCard 只建不挂（外观卡由 renderAppearance 自己挂），
+    // 这里漏挂是真实踩过的坑——卡建好填好却从不上树，面板只见外观卡。
+    setBody.appendChild(cfg);
+    setBody.appendChild(about);
+  } catch (e) {
+    const c = setCard('设置读取失败');
+    setNote(c, 'settings/get 失败：' + e.message + '（serve 侧未挂设置方法时属预期）');
+    setBody.appendChild(c);
+  }
+}
+
 statSess.addEventListener('change', () => showStats(statSess.value));
 
 // 探测式启动（W1.2）：是否有有效凭证（cookie 或 URL token）由 /state 的
-// 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。
-refreshState().then(ok => { if (ok) listen(); });
+// 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。侧栏
+// 是常驻面（W5），鉴权通过后即拉一次 session/list（不再等用户点按钮）。
+refreshState().then(ok => { if (ok) { listen(); loadSessions(); } });
 </script>
 </body>
 </html>

@@ -83,7 +83,7 @@ DeepSeek pricing (from [`internal/pricing/pricing.go`](internal/pricing/pricing.
 | Output | **$1.20** / $0.60¹ | **$3.96** / $1.98¹ | $15 / 1M |
 | Off-peak² | **−50%** | **−50%** | — |
 
-<sub>¹ Peak / off-peak rates (off-peak = half price) — V4.1-Flash rates effective 2026-09-10, V4-Pro unchanged; verified 2026-11-14 against the official pricing page, see [`internal/pricing/pricing.go`](internal/pricing/pricing.go). ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
+<sub>¹ Peak / off-peak rates (off-peak = half price) — V4.1-Flash rates effective 2026-09-10, V4-Pro unchanged; rate cards live in [`internal/pricing/pricing.go`](internal/pricing/pricing.go), and each model's verification date + source URL live in the [`verified-on ledger`](internal/pricing/ledger.go) — that is the file to check before trusting a number or bumping it. ² Peak hours are 01:00–04:00 and 06:00–10:00 UTC (09:00–12:00 / 14:00–18:00 Beijing); everything else is off-peak.</sub>
 
 Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas are byte-stable `[]byte` constants, tool output is capped at write-time, and history is never rewritten before send. The status bar shows the live ratio + dollars saved.
 
@@ -104,7 +104,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Background jobs** | detach long builds/servers → `bg-N`; `monitor` polls / waits / kills. [📘](docs/guide-background.md) |
 | **Semantic references** | LSP "who calls this?" (gopls / pyright / tsserver), grep fallback. [📘](docs/guide-references.md) |
 | **Native vision input** | paste or `@img.png` → image bytes sent natively to any vision-capable model, on every lane (DeepSeek, GLM, OpenAI-compatible, Anthropic, Gemini, OpenCode Go). [📘](docs/guide-vision.md) |
-| **Document input** | `@report.pdf` → uploaded & parsed via the DeepSeek Files API (`@rich:` for layout); the local asset library keeps the only copy. [📘](docs/guide-files.md) |
+| **Document input** | `@report.pdf` → parsed server-side via the DeepSeek Files API (`@rich:` for layout), or carried natively as PDF on every second-tier lane; the local asset library keeps the only copy. [📘](docs/guide-files.md) |
 | **Code review** | effort-graded diff review with `--fix` and `--comment`. [📘](docs/guide-code-review.md) |
 | **MCP client** | pass through any MCP server's tools. [📘](docs/guide-mcp.md) |
 | **Web search** | built-in `web_search` tool over the DeepSeek Search API — fresh docs without leaving the loop. |

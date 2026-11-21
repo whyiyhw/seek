@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -354,20 +355,31 @@ func TestWeb_RunLifecycle(t *testing.T) {
 
 // TestWeb_PageAvoidsHTMLParsingSinks pins the XSS discipline (PRD §5.5,
 // card c_iha3fr acceptance): model output reaches the DOM only via
-// createElement/createTextNode/textContent — the embedded page must
+// createElement/createTextNode/textContent — the embedded page AND its
+// static assets (the markdown renderer is a resident since W5) must
 // contain no HTML-string parsing sink, not even in a comment (a
 // mention is a temptation; the static check is belt and braces).
 func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
-	for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
-		if strings.Contains(string(webPage), sink) {
-			t.Errorf("embedded page references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", sink)
+	srcs := map[string]string{"page": string(webPage)}
+	for _, e := range []string{"markdown.js"} {
+		b, err := webStatic.ReadFile("static/" + e)
+		if err != nil {
+			t.Fatalf("static asset %s missing from embed: %v", e, err)
+		}
+		srcs[e] = string(b)
+	}
+	for name, src := range srcs {
+		for _, sink := range []string{"innerHTML", "insertAdjacentHTML", "document.write"} {
+			if strings.Contains(src, sink) {
+				t.Errorf("%s references %q — text must reach the DOM via textContent/createTextNode only (§5.5)", name, sink)
+			}
 		}
 	}
-	// Positive pin: the §2.6 minimal markdown renderer must exist and
-	// build <pre> through the DOM API (regression guard against a
-	// future "simpler" HTML-string rewrite).
-	if !strings.Contains(string(webPage), "document.createElement('pre')") {
-		t.Error("embedded page lost the fenced-code renderer (document.createElement('pre'))")
+	// Positive pin: the W5 markdown renderer must exist as the first
+	// static asset and build <pre> through the DOM API (regression
+	// guard against a future "simpler" HTML-string rewrite).
+	if !strings.Contains(srcs["markdown.js"], "document.createElement('pre')") {
+		t.Error("static/markdown.js lost the fenced-code renderer (document.createElement('pre'))")
 	}
 }
 
@@ -376,6 +388,8 @@ func TestWeb_PageAvoidsHTMLParsingSinks(t *testing.T) {
 // walks messages by cursor. A method rename on either side strands the
 // browser silently (a dead button, not a crash), so the names are pinned
 // here against the page the same way the renderer is pinned above.
+// (W5 c_txz6vz kept the data plane verbatim — only the chrome moved from
+// a popup pane to the persistent sidebar, so these pins still hold.)
 func TestWeb_PageSessionsBrowser(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
@@ -399,6 +413,105 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 		}
 	}
 }
+
+// TestWeb_PageSessionSidebar pins the W5 sidebar card (c_txz6vz): the
+// sessions list is a PERSISTENT left rail — collapse bit persisted in
+// localStorage with a narrow-viewport default, a ＋新建 that rides the
+// same /new command text, a title filter, and an updated-sorted row list
+// paged SESS_PAGE at a time. It also asserts the retired W4.4 popup left
+// no dead references behind (the card's acceptance ③): no browse button,
+// no sess-view class, no sessions entry in the pane switcher.
+func TestWeb_PageSessionSidebar(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"id=\"side\"",              // the rail itself
+		"id=\"side-toggle\"",       // collapse affordance
+		"id=\"side-search\"",       // title filter input
+		"id=\"side-new\"",          // new-session button
+		"seek-side-collapsed",      // the remembered bit's key
+		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
+		"innerWidth < 1024",        // narrow viewport defaults to collapsed
+		"SESS_PAGE = 30",           // row page size (filter+page are client-side)
+		"sendText('/new', false)",  // ＋新建 is the /new command, not a new protocol
+		"sess-detail",              // main area swaps to a transcript on row click
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz)", need)
+		}
+	}
+	// Acceptance ③ — the 📚 popup code is retired with no dead references.
+	for _, gone := range []string{"browse-btn", "sess-view", "togglePane('sessions'"} {
+		if strings.Contains(page, gone) {
+			t.Errorf("embedded page still carries the retired W4.4 popup piece %q (W5 c_txz6vz must leave no dead reference)", gone)
+		}
+	}
+}
+
+// TestWeb_PageThemeSettings pins the W5 theme/settings card (c_ni7mzw):
+// the two token blocks and the single-attribute switch, the head
+// bootstrap that runs BEFORE the stylesheet (that ordering is the whole
+// anti-FOUC mechanism — a <script> after <style> would flash), the
+// three-state runtime, and the read-only settings panel that consumes
+// the `settings/get` method. Also pins the no-naked-colour rule: the
+// style block must not carry raw hex outside the two token blocks, or a
+// new component would silently stop following the theme.
+func TestWeb_PageThemeSettings(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		":root[data-theme=\"light\"]",       // the light token block exists
+		"--seek-inset",                        // semantic token names, not hex at call sites
+		"localStorage.getItem('seek-theme')",  // remembered choice
+		"localStorage.setItem(THEME_KEY",      // ... written on toggle
+		"localStorage.removeItem(THEME_KEY)",  // system state = no remembered value
+		"prefers-color-scheme: light",         // system follow
+		"dataset.mode",                        // the three-state button group
+		"settings/get",                        // the read-only snapshot method
+		"id=\"set-body\"",                     // settings pane container
+		"id=\"set-btn\"",                      // nav entry
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the theme/settings piece %q (W5 c_ni7mzw)", need)
+		}
+	}
+	// Anti-FOUC ordering: the bootstrap block must come BEFORE <style>.
+	// Anything else means the first paint uses the default theme and the
+	// attribute lands afterwards — exactly the flash this card removes.
+	// (The "<style>" search starts at the tag itself: prose higher in the
+	// <head> names the tag too.)
+	style := strings.Index(page, "\n<style>\n")
+	boot := strings.Index(page, "localStorage.getItem('seek-theme')")
+	if boot < 0 || style < 0 {
+		t.Fatalf("page shape changed: boot=%d style=%d", boot, style)
+	}
+	if boot > style {
+		t.Errorf("theme bootstrap (%d) sits AFTER <style> (%d) — that is the FOUC this card must remove", boot, style)
+	}
+	// Two token blocks, and the light one flips color-scheme too (native
+	// scrollbars/form controls follow it).
+	if strings.Count(page, "color-scheme:") < 2 {
+		t.Errorf("want a color-scheme declaration per theme (dark + light)")
+	}
+	// No naked colour outside the token blocks: component rules must all
+	// go through var(--seek-*), or the next component silently ignores
+	// the theme. The two palette blocks are the exemption (they ARE the
+	// palette), so the check starts after the light block's last line.
+	styleEnd := strings.Index(page, "</style>")
+	palAnchor := strings.Index(page, "--seek-shadow:0 4px 14px rgba(0,0,0,.12);")
+	if styleEnd < 0 || palAnchor < 0 {
+		t.Fatalf("palette shape changed: styleEnd=%d palAnchor=%d", styleEnd, palAnchor)
+	}
+	palEnd := strings.Index(page[palAnchor:], "}")
+	if palEnd < 0 {
+		t.Fatal("light token block unterminated")
+	}
+	rest := page[palAnchor+palEnd : styleEnd]
+	if m := hexColourRE.FindString(rest); m != "" {
+		t.Errorf("component CSS carries a naked colour %q — use a var(--seek-*) token so both themes follow", m)
+	}
+}
+
+// hexColourRE matches #rgb / #rrggbb literals in CSS.
+var hexColourRE = regexp.MustCompile(`#[0-9a-fA-F]{3,8}\b`)
 
 // TestWeb_PageStreamingBubble pins the W2.1 chat increment: the page
 // folds the W1.4 named SSE events into a streaming bubble — deltas
@@ -452,11 +565,13 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 			t.Errorf("embedded page lost the memory/stats piece %q (W4.5)", need)
 		}
 	}
-	// Additivity: chat plane AND the W4.4 sessions browser both survive
-	// the W4.5 panes (the pane switcher hides by class, never unmounts).
+	// Additivity: chat plane AND the sessions browser both survive the
+	// W4.5 panes (the pane switcher hides by class, never unmounts).
+	// W5 c_txz6vz moved the sessions list into the persistent sidebar
+	// (the 📚 popup button retired), so the pin rides the sidebar ids.
 	for _, keep := range []string{
 		"id=\"form\"", "addEventListener('submit'",
-		"id=\"browse-btn\"", "session/messages", "加载更多",
+		"id=\"sess-list\"", "id=\"side-toggle\"", "session/messages", "加载更多",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("embedded page lost the prior-plane piece %q — W4.5 must be additive", keep)

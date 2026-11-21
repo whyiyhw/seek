@@ -17,9 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -98,6 +96,7 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
 	"github.com/whyiyhw/seek/internal/upgrade"
+	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/internal/worktreecli"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -118,46 +117,6 @@ import (
 // docs/prd/archive/feature-subagent.md §3.6.1 specifies the composition rules
 // and the byte-determinism invariant that keeps DeepSeek's prefix
 // cache hot.
-
-// planBridge implements BOTH the propose tool's Sink and the plan
-// tool's Sink. Centralising the wiring here avoids the
-// chicken-and-egg of plan-and-propose sharing batch-mode state across
-// two structs: propose decides whether batch is on (via the user's
-// pick), plan acts on it (flipping the permission gate per step), and
-// the policy is the single source of truth that Check consults.
-//
-// Lifecycle.
-//
-//	user picks "approve" / "approve_batch" → Approved(steps, batch)
-//	    bridge.batch = batch
-//	    plan.Seed(steps)                 // emits PlanStepUpdated
-//	    policy.SetPreApproved(false)     // clean slate
-//	    agent.EmitEvent(PlanProposalApproved{Steps})
-//
-//	model calls plan(action="start",  index=N) → StepChanged(snap, N-1)
-//	    if bridge.batch && currentIdx >= 0 {
-//	        policy.SetPreApproved(true)
-//	    } else {
-//	        policy.SetPreApproved(false)
-//	    }
-//	    agent.EmitEvent(PlanStepUpdated{snap, currentIdx})
-//
-//	model calls plan(action="complete", index=N) → StepChanged(snap, -1)
-//	    policy.SetPreApproved(false)
-//	    agent.EmitEvent(PlanStepUpdated{snap, -1})
-//
-//	user picks "cancel"                      → Cancelled()
-//	    bridge.batch = false
-//	    plan.Clear()                      // emits PlanStepUpdated(nil, -1)
-//	    policy.SetPreApproved(false)
-//	    agent.EmitEvent(PlanProposalCancelled{})
-//
-//	user Esc on the stream / /plan-off       → policy.SetPreApproved(false)
-//	    (called from the TUI cancellation path, not via this bridge)
-//
-// The mutex on `batch` serialises the rare cross-goroutine update:
-// proposeAnswer (Ask goroutine) writes batch; StepChanged (tool
-// dispatch goroutine) reads it.
 
 // ----- v3 checkpoint glue -----
 
@@ -191,626 +150,6 @@ func (h *checkpointHook) OnPreTurn(ctx context.Context, ev hooks.PreTurnEvent) {
 }
 func (h *checkpointHook) OnSessionEnd(ctx context.Context, ev hooks.SessionEndEvent) {
 	h.m.OnSessionEnd(ctx, nil)
-}
-
-type planBridge struct {
-	mu    sync.Mutex
-	batch bool
-	// lastApproved is the step list the user most recently approved
-	// (any flavour). Used by IsDuplicateOfLastApproved to suppress
-	// byte-identical re-proposals — the model occasionally loops and
-	// asks the user the same picker question after an adjust round
-	// resolved nothing.
-	lastApproved []string
-	// lastArtifactPath / lastArtifactErr capture the outcome of the
-	// most recent WriteArtifact call. Read by LastArtifactStatus
-	// (propose.ArtifactReporter) so the tool result can surface the
-	// path on success or a "(note: …)" line on failure. PRD §8.7.
-	lastArtifactPath string
-	lastArtifactErr  error
-	// pendingProblem / pendingWhyNow / pendingDoneWhen /
-	// pendingReviewedBy carry the propose args from the in-flight
-	// Execute call into Approved, which only receives steps and
-	// batch. OnProposeStart + OnProposeCompletion fill them before
-	// sink.Approved fires; Approved clears them after consuming.
-	pendingProblem    string
-	pendingWhyNow     string
-	pendingDoneWhen   []string
-	pendingReviewedBy string
-	getAgent          func() *agent.Agent
-	planTool          *plantool.Tool
-	policy            *permission.Policy
-	// sessionID returns the live session ID (closure so /compact / /reset
-	// rebuilds don't strand a stale value). Returns "" in --no-save
-	// mode; we use that signal to skip artifact writes entirely.
-	sessionID func() string
-	// projectAbs is the resolved CWD at startup. Fixed for the
-	// program's lifetime — /reset doesn't move the project root.
-	projectAbs string
-	// artifactEnabled gates the write. False in --no-save (user
-	// explicitly wants ephemeral; honour that for artifacts too,
-	// even though they live outside the session dir).
-	artifactEnabled bool
-	// now is the clock injected for testability. nil → time.Now.
-	now func() time.Time
-}
-
-func (b *planBridge) Approved(steps []string, batch bool) {
-	b.mu.Lock()
-	b.batch = batch
-	// Snapshot the approved steps for duplicate detection on
-	// subsequent propose calls. We copy so a later mutation by
-	// callers can't shift our reference.
-	b.lastApproved = append(b.lastApproved[:0], steps...)
-	// Consume the in-flight propose context (set by OnProposeStart +
-	// OnProposeCompletion). We hold these only until the next propose,
-	// so consuming here avoids stale data leaking into the next adjust
-	// loop.
-	problem := b.pendingProblem
-	whyNow := b.pendingWhyNow
-	doneWhen := append([]string(nil), b.pendingDoneWhen...)
-	reviewedBy := b.pendingReviewedBy
-	b.pendingProblem = ""
-	b.pendingWhyNow = ""
-	b.pendingDoneWhen = nil
-	b.pendingReviewedBy = ""
-	enabled := b.artifactEnabled
-	projectAbs := b.projectAbs
-	now := b.now
-	sessionFn := b.sessionID
-	b.mu.Unlock()
-
-	// Write artifact (best-effort). Failure path: stash on the
-	// bridge, print to stderr; propose.LastArtifactStatus surfaces
-	// it to the model in the next breath. Success: stash path.
-	if enabled && problem != "" && len(steps) > 0 {
-		if now == nil {
-			now = time.Now
-		}
-		sid := ""
-		if sessionFn != nil {
-			sid = sessionFn()
-		}
-		path, werr := plantool.WriteArtifact(plantool.ArtifactMetadata{
-			Problem:        problem,
-			DoneWhen:       doneWhen,
-			Steps:          steps,
-			WhyNow:         whyNow,
-			ReviewedBy:     reviewedBy,
-			SessionID:      sid,
-			ProjectAbsPath: projectAbs,
-			Batch:          batch,
-			ApprovedAt:     now(),
-		})
-		b.mu.Lock()
-		b.lastArtifactPath = path
-		b.lastArtifactErr = werr
-		b.mu.Unlock()
-		if werr != nil {
-			fmt.Fprintln(os.Stderr, "plan artifact:", werr)
-		}
-	} else {
-		// Either disabled or insufficient context — clear any prior
-		// status so a stale path doesn't get echoed into this turn's
-		// result.
-		b.mu.Lock()
-		b.lastArtifactPath = ""
-		b.lastArtifactErr = nil
-		b.mu.Unlock()
-	}
-
-	if b.policy != nil {
-		b.policy.SetPreApproved(false)
-	}
-	if b.planTool != nil {
-		b.planTool.Seed(steps)
-	}
-	b.getAgent().EmitEvent(agent.PlanProposalApproved{Steps: steps})
-}
-
-// OnProposeStart implements propose.ContextReceiver. Snapshots the
-// in-flight propose args so Approved can stuff them into the artifact
-// write. AdjustRequested / Cancelled / duplicate-short-circuit don't
-// consume them — they get overwritten by the next OnProposeStart or
-// cleared on Cancelled.
-func (b *planBridge) OnProposeStart(problem string, _ []string, whyNow string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pendingProblem = problem
-	b.pendingWhyNow = whyNow
-}
-
-// OnProposeCompletion implements propose.CompletionReceiver — the
-// sibling of ContextReceiver added when done_when/reviewed_by landed.
-// Snapshotting here (rather than widening OnProposeStart) keeps every
-// existing ContextReceiver implementation compiling unchanged.
-func (b *planBridge) OnProposeCompletion(doneWhen []string, reviewedBy string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pendingDoneWhen = append(b.pendingDoneWhen[:0], doneWhen...)
-	b.pendingReviewedBy = reviewedBy
-}
-
-// LastArtifactStatus implements propose.ArtifactReporter. Reset
-// during Approved (either to a real path/err pair or to zeros),
-// returned verbatim here for propose to fold into the tool result.
-func (b *planBridge) LastArtifactStatus() (string, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.lastArtifactPath, b.lastArtifactErr
-}
-
-func (b *planBridge) AdjustRequested(feedback string) {
-	b.getAgent().EmitEvent(agent.PlanProposalAdjustRequested{Feedback: feedback})
-}
-
-func (b *planBridge) Cancelled() {
-	b.mu.Lock()
-	b.batch = false
-	b.lastApproved = nil
-	b.pendingProblem = ""
-	b.pendingWhyNow = ""
-	b.pendingDoneWhen = nil
-	b.pendingReviewedBy = ""
-	// Clear artifact status too — a previous turn's success path
-	// should not leak into the cancel's tool result (currently
-	// cancel doesn't call LastArtifactStatus, but defensive).
-	b.lastArtifactPath = ""
-	b.lastArtifactErr = nil
-	b.mu.Unlock()
-	if b.policy != nil {
-		b.policy.SetPreApproved(false)
-	}
-	if b.planTool != nil {
-		b.planTool.Clear()
-	}
-	b.getAgent().EmitEvent(agent.PlanProposalCancelled{})
-}
-
-// IsDuplicateOfLastApproved implements propose.DuplicateChecker. The
-// comparison is order-sensitive (re-ordering steps IS a real change)
-// and whitespace-trimmed (extra trailing spaces are not). Returns
-// false when no plan has been approved yet — there's nothing to
-// dedupe against, so the first propose always shows the picker.
-func (b *planBridge) IsDuplicateOfLastApproved(steps []string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if len(b.lastApproved) == 0 || len(b.lastApproved) != len(steps) {
-		return false
-	}
-	for i, s := range steps {
-		if strings.TrimSpace(s) != strings.TrimSpace(b.lastApproved[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-// ProgressSummary implements propose.ProgressReporter. Returns a
-// one-line summary of step statuses suitable for embedding in the
-// adjust-path tool result — the model carries this into the next
-// proposal so completed work isn't redone. Empty string when no
-// plan is loaded (nothing to summarise).
-func (b *planBridge) ProgressSummary() string {
-	if b.planTool == nil {
-		return ""
-	}
-	steps, _ := b.planTool.Snapshot()
-	if len(steps) == 0 {
-		return ""
-	}
-	var done, inProgress, pending, skipped []string
-	for i, s := range steps {
-		idx := fmt.Sprintf("%d", i+1)
-		switch s.Status {
-		case plantool.StatusCompleted:
-			done = append(done, idx)
-		case plantool.StatusInProgress:
-			inProgress = append(inProgress, idx)
-		case plantool.StatusSkipped:
-			skipped = append(skipped, idx)
-		default:
-			pending = append(pending, idx)
-		}
-	}
-	parts := []string{}
-	if len(done) > 0 {
-		parts = append(parts, "completed: "+strings.Join(done, ","))
-	}
-	if len(inProgress) > 0 {
-		parts = append(parts, "in_progress: "+strings.Join(inProgress, ","))
-	}
-	if len(skipped) > 0 {
-		parts = append(parts, "skipped: "+strings.Join(skipped, ","))
-	}
-	if len(pending) > 0 {
-		parts = append(parts, "pending: "+strings.Join(pending, ","))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, "; ") + "."
-}
-
-func (b *planBridge) StepChanged(snapshot []plantool.Step, currentIdx int) {
-	b.mu.Lock()
-	batch := b.batch
-	b.mu.Unlock()
-
-	if b.policy != nil {
-		// Gate flips only when batch mode is on. currentIdx >= 0
-		// means a step is in progress; -1 means none. In non-batch
-		// approval the gate stays closed regardless.
-		if batch && currentIdx >= 0 {
-			b.policy.SetPreApproved(true)
-		} else {
-			b.policy.SetPreApproved(false)
-		}
-	}
-
-	out := make([]agent.PlanStep, len(snapshot))
-	for i, st := range snapshot {
-		out[i] = agent.PlanStep{Text: st.Text, Status: string(st.Status)}
-	}
-	b.getAgent().EmitEvent(agent.PlanStepUpdated{Steps: out, CurrentIdx: currentIdx})
-}
-
-// ----- v5 柱 G subagent glue -----
-
-// subagentRunnerOpts captures everything buildSubagentRunner needs
-// to close over. Kept as a named struct (rather than a long
-// parameter list) so future additions don't churn the call site.
-type subagentRunnerOpts struct {
-	client    *deepseek.Client
-	provider  llm.Provider
-	parentReg *tools.Registry
-	// hooksFn resolves the child's hooks Registry per spawn — a
-	// LAZY closure (not a pointer) because the parent's registry
-	// keeps growing after Manager construction (memory hook
-	// registers later), while the child must NEVER see the
-	// background-completion Notifier: a child Prompt runs
-	// ApplyPrePrompt too, and an unscoped Notifier would drain the
-	// parent's pending background notices into the child's
-	// transcript (feature-orchestration §4.1 D2). cmd/seek wires
-	// hooksReg.CloneWithout(notifier). nil = no hooks for children.
-	hooksFn   func() *hooks.Registry
-	maxTokens int
-	maxTurns  int
-	getModel  func() string
-	getEffort func() string
-	// routes maps routing lane names (subagent.ProviderDeepSeek /
-	// ProviderGLM / ProviderOpenCode — validated in
-	// internal/subagent.ResolveRoute) to
-	// the backend a child spawned on that lane should use
-	// (feature-orchestration.md D7). Built once at startup from
-	// config keys: a lane appears here only when its API key exists,
-	// so "named provider without key" fails the spawn with a
-	// structured error at Runner time instead of silently running on
-	// the parent's lane. Nil/empty map = routing params always fail
-	// (tests that don't exercise routing).
-	routes map[string]subagentRoute
-	// bashGuardLane, when non-empty, wraps the child's bash tool with the
-	// no-remote guard bound to that lane (v7 柱 N: autopilot subagents deny
-	// remote ops). "" = no guard. A lane label rather than a plain func so
-	// the refusal names the lane it was actually mounted on (c_ajza7r).
-	bashGuardLane string
-	// bashSandbox, when true, confines the child's bash to its own
-	// worktree via the OS sandbox (v7 柱 O integration; macOS only for
-	// now). Each autopilot subagent thus can't write outside the worktree
-	// it was given.
-	bashSandbox bool
-	// bashEnvKeep carries config.BashEnvPassthrough down to the child's
-	// bash tool. Subagents run the SAME scrub as the parent — an
-	// unattended child is exactly where a leaked credential is least
-	// likely to be noticed, so the default is not relaxed here.
-	bashEnvKeep []string
-	// bgMgr backs the child bash tool's run_in_background. The child's
-	// bash is rebuilt with the child (worktree) policy, so it needs the
-	// background manager re-attached; nil disables background jobs in the
-	// subagent (graceful — run_in_background just errors).
-	bgMgr *bgjob.Manager
-}
-
-// laneGuard binds the no-remote check to the lane it is being mounted on:
-// the shape bash.Tool.WithDeny wants, with the lane named in the refusal
-// (c_ajza7r — a refusal must not claim a posture its lane doesn't have).
-func laneGuard(lane string) func(command string) (bool, string) {
-	return func(command string) (bool, string) {
-		return autopilot.IsRemoteMutatingOnLane(lane, command)
-	}
-}
-
-// subagentRoute is one lane entry in subagentRunnerOpts.routes.
-// Exactly one of client / provider is set, mirroring agent.Config's
-// two-path contract: client = first-class DeepSeek, provider = a
-// pkg/llm lane (GLM rides pkg/llm/compatible with the pinned
-// bigmodel.cn endpoint).
-type subagentRoute struct {
-	client   *deepseek.Client
-	provider llm.Provider
-}
-
-// buildSubagentRoutes constructs the routing table for per-agent
-// model routing (feature-orchestration.md D6/D7): deepseek always
-// (reusing the parent's client when the parent lane IS deepseek, else
-// building one from the config key), glm when GLM_API_KEY /
-// providers.glm is configured, opencode when OPENCODE_API_KEY /
-// providers.opencode is. Explicit names only — no key-probing
-// chain (the "paseo provider 首次无头冒烟" pitfall): a lane is in the
-// table iff its key exists.
-//
-// baseURLFlag is the parent's --base-url: the GLM and OpenCode routes
-// resolve their endpoints through the same <lane>Endpoint precedence as
-// the startup lane, so a Coding Plan preset or a proxy/mirror override
-// (config/env or flag) also governs subagents — otherwise explore/plan
-// children silently bill the wrong endpoint.
-func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[string]subagentRoute {
-	cfg, _ := config.Load()
-	routes := make(map[string]subagentRoute)
-	if parentClient != nil {
-		routes[subagent.ProviderDeepSeek] = subagentRoute{client: parentClient}
-	} else if k := config.KeyFor(cfg, "deepseek"); k != "" {
-		// Parent session runs a second-tier lane; deepseek routing is
-		// still available when its key is configured.
-		routes[subagent.ProviderDeepSeek] = subagentRoute{client: deepseek.New(deepseek.WithAPIKey(k))}
-	}
-	if k := config.KeyFor(cfg, "glm"); k != "" {
-		routes[subagent.ProviderGLM] = subagentRoute{
-			provider: newGLMProvider(cfg, k, baseURLFlag),
-		}
-	}
-	if k := config.KeyFor(cfg, "opencode"); k != "" {
-		routes[subagent.ProviderOpenCode] = subagentRoute{
-			provider: newOpenCodeProvider(cfg, k, baseURLFlag),
-		}
-	} else if p, err := newOpenCodeOAuthProvider(cfg, baseURLFlag); err == nil {
-		// Browser-login credentials count for children too — otherwise a
-		// parent on the OAuth lane couldn't route explore/plan subagents
-		// to it, which is the lane's main cost argument.
-		routes[subagent.ProviderOpenCode] = subagentRoute{provider: p}
-	}
-	return routes
-}
-
-// buildSubagentRunner returns the production subagent.Runner that
-// wires a child pkg/agent.Agent and drains its events into the
-// child cache.Tracker.
-//
-// LIMITATION (M11.0): the child agent reuses the parent's Tool
-// instances by NAME (filtered via the template's ToolNames). Those
-// instances hold the PARENT's permission.Policy at construction,
-// so the child's tightened Policy (per PRD §2.3) is NOT consulted
-// by individual tool Check() calls. Net safety comes from one
-// place: the per-template ToolNames whitelist.
-//
-// Practical consequences (after C.2 narrowing of the plan template
-// in commit <this branch>):
-//
-//   - `explore` subagents are hard-safe (whitelist: read / grep /
-//     list_dir / git / webfetch / think — no mutating tools at
-//     all).
-//   - `plan` subagents are hard-safe via the same whitelist
-//     (after C.2: plan and explore share an identical tool
-//     subset; only the Extra clause framing differs).
-//   - `general-purpose` subagents see the parent's permission
-//     level — which is INTENDED, since they inherit pref+workflow.
-//     No leak.
-//
-// A future commit (v0.6.x dot release) will reconstruct per-spawn
-// Registries with the child Policy threaded through so PRD §2.3
-// monotonic-收紧 promise is hard-enforced at every tool gate —
-// at which point `plan` can re-acquire access to the `propose`
-// tool (currently dropped because propose's sink binds to the
-// parent's session). See feature-subagent.md §9 "v0.6.x dot:
-// per-spawn Registry 重建".
-// writeSubagentTranscript persists the subagent's session
-// JSONL to job.SessionDir/transcript.jsonl per PRD
-// feature-subagent.md §3.3. PRD promised it; M11.0 production
-// wiring missed it (audit G1). Without this `seek -resume
-// <sub-sid>`, the /agents detail view (v0.6.x dot), and
-// feature-inspect-rpc all have nothing to read.
-//
-// Best-effort: a write failure logs to stderr but does NOT
-// fail the spawn. The subagent ran successfully by the time
-// we reach here (Manager.MarkRun has already classified it as
-// completed); losing the transcript shouldn't poison the
-// parent's tool result.
-//
-// Extracted from buildSubagentRunner's closure so unit tests
-// can exercise the file landing without spinning up the full
-// pkg/agent.Agent + DeepSeek client + per-platform
-// subprocess machinery.
-func writeSubagentTranscript(job subagent.RunnerJob, msgs []deepseek.Message, model string, usage deepseek.Usage, turns int) {
-	subSess := session.New(model, job.Policy.Cwd(), job.SystemPrompt, true, false)
-	subSess.ID = job.SubSid
-	subSess.Messages = msgs
-	subSess.Turns = turns
-	subSess.Usage = usage
-	transcriptPath := filepath.Join(job.SessionDir, "transcript.jsonl")
-	if err := session.SaveTo(transcriptPath, subSess); err != nil {
-		fmt.Fprintf(os.Stderr, "subagent transcript save (%s): %v\n", job.SubSid, err)
-	}
-}
-
-func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
-	return func(ctx context.Context, job subagent.RunnerJob) (subagent.RunnerResult, error) {
-		// Per-agent model routing (feature-orchestration.md D7):
-		// job.Provider non-empty → resolve the lane's backend from
-		// the route table; empty → inherit the parent instances and
-		// the live session model (the pre-routing path, unchanged).
-		// The effective model feeds agent.Config, Tracker.Record
-		// (per-lane pricing) and the transcript header alike.
-		client, provider, model := opts.client, opts.provider, opts.getModel()
-		if job.Provider != "" {
-			r, ok := opts.routes[job.Provider]
-			if !ok {
-				return subagent.RunnerResult{}, fmt.Errorf(
-					"provider %q has no configured API key — set its env var / config entry, or omit provider to inherit the parent lane", job.Provider)
-			}
-			client, provider = r.client, r.provider
-			model = job.Model // non-empty by ResolveRoute contract
-		}
-
-		// Filter parent registry by ToolNames. The Filter the
-		// Manager performs already strips `agent` and `ask_user`
-		// universally; here we just project parent's registered
-		// instances onto the survivor name list.
-		// The policy-bearing tools (read/write/edit/bash) MUST be rebuilt
-		// with the CHILD policy — for isolation:"worktree" that policy's
-		// CWD is the worktree, so the subagent's file/shell ops stay inside
-		// it. Reusing the parent's instances (which embed the parent policy
-		// = main tree) silently breaks worktree isolation — found by
-		// autopilot e2e (a subagent's edit hit the MAIN README). Other
-		// tools (grep/think/git/…) are read-only or policy-free, so reusing
-		// the parent instance is fine.
-		childReg := tools.New()
-		// Per-subagent observation set, NOT the parent's. A subagent
-		// works in its own worktree; inheriting the parent's "already
-		// read" set would let it blind-overwrite a same-named file in a
-		// tree it never looked at — the exact isolation bug the child
-		// policy exists to prevent.
-		childObserved := fsobserve.New()
-		for _, name := range job.ToolNames {
-			// D8 provider-compatibility filter (after the template
-			// Filter): think / fim_complete only work against the
-			// first-class DeepSeek client — a child on any llm.Provider
-			// lane (explicitly routed OR inheriting a second-tier
-			// parent) must not see them.
-			if client == nil && subagent.IsDeepSeekOnlyTool(name) {
-				continue
-			}
-			switch name {
-			case "read":
-				childReg.Add(read.New(job.Policy).WithObserver(childObserved))
-			case "write":
-				childReg.Add(write.New(job.Policy).WithObserver(childObserved))
-			case "edit":
-				childReg.Add(edit.New(job.Policy).WithObserver(childObserved))
-			case "bash":
-				// 柱 N: deny remote ops; 柱 O: OS-sandbox to this worktree.
-				bt := bash.New(job.Policy).WithEnvPassthrough(opts.bashEnvKeep)
-				if opts.bgMgr != nil {
-					bt = bt.WithBackground(opts.bgMgr)
-				}
-				if opts.bashGuardLane != "" {
-					// Bind the guard to the lane this run is on so the
-					// refusal names it (c_ajza7r).
-					bt = bt.WithDeny(laneGuard(opts.bashGuardLane))
-				}
-				if opts.bashSandbox {
-					if wt := job.Policy.CWD(); wt != "" && sandbox.Available() {
-						bt = bt.WithSandbox(sandbox.Options{WritableDirs: []string{wt}})
-					}
-				}
-				childReg.Add(bt)
-			default:
-				if t := opts.parentReg.Lookup(name); t != nil {
-					childReg.Add(t)
-				}
-			}
-		}
-
-		// Build child agent. InitialMessages is nil for fresh spawns
-		// (subagent gets a fresh context per PRD §2.1); continuations
-		// (Manager.Continue) seed job.PriorMessages loaded from the
-		// prior run's transcript — context continuity for follow-up
-		// instructions. No PrepareMessages (suggester disabled for
-		// subagents per PRD §3.5). Hooks ARE shared with the parent —
-		// pre_tool deny / post_tool observer / audit log all apply to
-		// subagent tool calls (PRD §5.3) — resolved through hooksFn
-		// so parent-only hooks (the background Notifier) stay
-		// excluded (see subagentRunnerOpts).
-		var childHooks *hooks.Registry
-		if opts.hooksFn != nil {
-			childHooks = opts.hooksFn()
-		}
-		sub, err := agent.New(agent.Config{
-			Client:          client,
-			Provider:        provider,
-			Model:           model,
-			Effort:          opts.getEffort(),
-			SystemPrompt:    job.SystemPrompt,
-			InitialMessages: job.PriorMessages,
-			Tools:           childReg,
-			MaxTokens:       opts.maxTokens,
-			MaxTurns:        opts.maxTurns,
-			Hooks:           childHooks,
-			// The child's conversation identity is its sub-sid (fresh
-			// per run, continuations included) — a subagent on the
-			// OpenCode lane thus gets its own stable x-opencode-session,
-			// distinct from the parent's and from sibling spawns.
-			SessionID: func() string { return job.SubSid },
-		})
-		if err != nil {
-			return subagent.RunnerResult{}, fmt.Errorf("subagent agent.New: %w", err)
-		}
-
-		// Drain events. Per-turn Usage rolls into the child
-		// Tracker, which has already been AdoptChild'd by the
-		// parent — so the cost shows up in the status bar
-		// automatically without further plumbing here.
-		var (
-			totalUsage deepseek.Usage
-			turnCount  int
-			lastErr    error
-		)
-		events := sub.Prompt(ctx, job.UserPrompt)
-		for ev := range events {
-			switch e := ev.(type) {
-			case agent.TurnEnd:
-				// Effective model, not the parent's — a GLM-routed child
-				// prices at the GLM card (pricing.Cost keys off the model
-				// id; NoOffPeakDiscount keeps flat-rate lanes flat).
-				job.Tracker.Record(e.Usage, model, pricing.CurrentTier(time.Now()))
-			case agent.AgentEnd:
-				totalUsage = e.Usage
-				turnCount = e.Turns
-			case agent.ErrorEvent:
-				lastErr = e.Err
-			}
-		}
-		if lastErr != nil {
-			return subagent.RunnerResult{}, lastErr
-		}
-		if ctx.Err() != nil {
-			return subagent.RunnerResult{}, ctx.Err()
-		}
-
-		// Extract summary: the most recent assistant message
-		// without tool calls (i.e. the terminal assistant turn).
-		// pkg/agent.Prompt only ends when this exists (or on
-		// MaxTurns / ctx cancel / error — which we handled
-		// above), so finding nothing here is a contract violation
-		// — surface it as an error so Manager classifies it as
-		// spawn_error rather than wrapping an empty Summary.
-		msgs := sub.Messages()
-		var summary string
-		for _, msg := range slices.Backward(msgs) {
-			if msg.Role == deepseek.RoleAssistant && len(msg.ToolCalls) == 0 {
-				summary = msg.Content
-				break
-			}
-		}
-		if summary == "" {
-			return subagent.RunnerResult{}, fmt.Errorf("subagent produced no terminal assistant message")
-		}
-
-		// G1 fix: persist the subagent's transcript per PRD
-		// feature-subagent.md §3.3. Extracted to a helper so
-		// the persistence logic is unit-testable without
-		// spinning up the full Runner closure.
-		writeSubagentTranscript(job, msgs, model, totalUsage, turnCount)
-
-		return subagent.RunnerResult{
-			Summary: summary,
-			Tokens: subagent.Tokens{
-				Prompt:     totalUsage.PromptTokens,
-				Completion: totalUsage.CompletionTokens,
-				CacheHit:   totalUsage.PromptCacheHitTokens,
-			},
-			Turns: turnCount,
-		}, nil
-	}
 }
 
 func main() {
@@ -2366,7 +1705,15 @@ func run() error {
 	// from the startup lane (*model already carries the env pin / loaded
 	// session's choice at this point); nil = freeform model, no dropdown.
 	if acpLane {
-		return runACP(ctx, ag, newVisionRouter(abs), froute, policy, acpModelMenu(*model, openCatalogRows()))
+		return runACP(ctx, acpOptions{
+			ag:     ag,
+			vroute: newVisionRouter(abs),
+			froute: froute,
+			policy: policy,
+			menu:   acpModelMenu(*model, openCatalogRows()),
+			sess:   activeSession,
+			store:  store,
+		})
 	}
 
 	// `seek goal run "<condition>"` → headless single-agent loop-until-met
@@ -2529,6 +1876,15 @@ func run() error {
 		sessionNotifySeconds = cfg.SessionNotifySecondsOrDefault()
 	}
 
+	// Auto-compact trigger: config's `auto_compact` section (or
+	// $SEEK_AUTO_COMPACT for one launch), resolved per model at call time
+	// so a /model switch moves a fraction-configured trigger with the
+	// window. Loaded once — the section is read at startup like every
+	// other standing posture; the ENV override is re-read on each call so
+	// a shell that exports it always wins.
+	autoCompactCfg, _ := config.Load()
+	autoCompactAt := autoCompactCfg.AutoCompactThreshold
+
 	// /goal judge (M-goal.2): a cheap per-turn "is the condition met?" call.
 	// Uses the session model for now (guaranteed valid); a dedicated cheap
 	// goal.judge_model lands with the headless path. nil on non-DeepSeek
@@ -2593,6 +1949,7 @@ func run() error {
 		Hooks:                 hooksReg,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
+		AutoCompactAt:         autoCompactAt,
 		ProviderName:          provLabel,
 		OpenCodeModels:        openCatalogRows,
 		RefreshOpenCodeModels: refreshOpenCatalog,
@@ -3092,8 +2449,10 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 	dec := autopilot.NewDeepSeekDecomposer(client, model)
 	// model is also the lane the worktree subagents run on (they
 	// inherit the parent session's), so the fleet prices each
-	// outcome's tokens with it (v8 柱 R R1).
-	fleet := autopilot.NewFleet(mgr, wtMgr, model)
+	// outcome's tokens with it (v8 柱 R R1). The same lane judges
+	// each completed task (v8 柱 R R2): the verifier is built here,
+	// on demand for this run — no resident anything.
+	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(client, model))
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
@@ -3117,6 +2476,14 @@ type acpBackend struct {
 	route  visionRouter     // feature-vision: submit-time image router
 	froute fileroute.Router // feature-deepseek-app-api F3: submit-time document router
 	policy *permission.Policy
+	// sess + store are the persistence pair behind session/load and the
+	// sessionId session/new hands out. nil/zero under --no-save, where
+	// loadSession is not advertised. sess is the live session POINTER
+	// main's closures (subagent parent-sid, x-opencode-session, the
+	// checkpoint manager) captured — LoadSession mutates it in place so
+	// those closures keep describing the conversation actually running.
+	sess  *session.Session
+	store *session.Store
 	// menu is the configOptions model select (nil ⇒ the client filters
 	// the dropdown away, pre-C behaviour). Built once at startup from
 	// the startup lane; SetConfigOption rewrites CurrentValue in place.
@@ -3128,7 +2495,8 @@ type acpBackend struct {
 	// source of truth for keys/endpoints/defaults.
 	laneFor func(provider string) (llm.Provider, *deepseek.Client, string, error)
 	// sessionID is the single live session ("one seek process = one
-	// session"); anchored by NewSession, checked by SetConfigOption.
+	// session"); anchored by NewSession / LoadSession, checked by
+	// SetConfigOption.
 	sessionID string
 }
 
@@ -3136,6 +2504,13 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 	return acp.InitializeResult{
 		ProtocolVersion: p.ProtocolVersion,
 		AgentCapabilities: acp.AgentCapabilities{
+			// loadSession is a promise that a sessionId survives the
+			// process, so it is only made when a transcript store exists
+			// (not under --no-save). ACP clients gate their whole
+			// persistence/continue UX on this one boolean: advertising it
+			// with nothing behind it turns "continue this conversation"
+			// into a hard error at the client.
+			LoadSession: b.store != nil && b.sess != nil,
 			// Advertise image so editors (Zed) offer image attachment;
 			// on a vision model the bytes attach natively, otherwise an
 			// in-band note tells the model to suggest switching.
@@ -3149,10 +2524,16 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // spawn seek without a cwd, so the project root only arrives here.
 // acp.AnchorSession chdirs the process AND re-anchors the shared
 // policy, so read/edit/write/bash (policy-anchored) and
-// git/grep/list_dir (process-anchored) all follow. The sessionId
-// becomes the project name (directory base) — the fixed "seek" id
-// pre-D1 carried no information. Empty cwd keeps the current
-// directory (Zed-equivalent, a behavioural no-op under Zed).
+// git/grep/list_dir (process-anchored) all follow.
+//
+// The returned sessionId is seek's DURABLE transcript id, not the
+// project name it used to be: ACP's own contract is that the id a
+// client gets here is what it later hands back to `session/load`
+// ("The ID of the session to load"), and paseo persists exactly this
+// value as its native session id. A project-name id could never be
+// loaded — it names no file and changes when the client opens a
+// different directory. With --no-save there is no durable id, so the
+// project name stays (and Initialize stops advertising loadSession).
 // Since C, the result also carries the model configOptions menu —
 // a non-nil menu is what makes ACP clients render the dropdown.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
@@ -3160,9 +2541,114 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 	if err != nil {
 		return acp.NewSessionResult{}, err
 	}
-	b.sessionID = anchor.Name
-	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s\n", anchor.Abs, anchor.ProjectID)
-	return acp.NewSessionResult{SessionID: anchor.Name, ConfigOptions: b.menu}, nil
+	id := anchor.Name
+	if b.sess != nil {
+		// One seek process = one live session, so a second session/new
+		// re-anchors the existing one rather than minting another. Keep
+		// the transcript's CWD honest when the anchor moved.
+		b.sess.CWD = anchor.Abs
+		if b.sess.ID != "" {
+			id = b.sess.ID
+		}
+	}
+	b.sessionID = id
+	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, id)
+	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu}, nil
+}
+
+// LoadSession resumes a stored session (session/load): load, re-anchor,
+// restore the lane and history, then replay the transcript as the
+// session/update sequence the client would have seen live.
+//
+// The live session pointer is MUTATED IN PLACE (`*b.sess = *loaded`)
+// rather than reassigned: main's closures — the subagent parent-sid, the
+// x-opencode-session id, the checkpoint manager — all captured the
+// original pointer, and reassigning would leave them describing the
+// previous conversation while the agent runs the loaded one.
+func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.SessionUpdate)) (acp.LoadSessionResult, error) {
+	if b.store == nil || b.sess == nil {
+		return acp.LoadSessionResult{}, errors.New("session/load: persistence is off (--no-save) — no transcript to load")
+	}
+	if p.SessionID == "" {
+		return acp.LoadSessionResult{}, errors.New("session/load: empty sessionId")
+	}
+	loaded, err := b.store.Load(p.SessionID)
+	if err != nil {
+		// A missing transcript is the EXPECTED shape for conversations
+		// started before durable ids existed: session/new used to hand
+		// out the project directory name (so paseo holds ids like
+		// "seek" that index no file), and the ACP lane did not persist
+		// at all — there is nothing on disk to resume whatever the id
+		// says. Surface that as guidance; the raw ENOENT reads like a
+		// broken install.
+		if errors.Is(err, os.ErrNotExist) {
+			return acp.LoadSessionResult{}, fmt.Errorf(
+				"session/load %s: no stored transcript. Sessions created before session/load shipped (ids were project names) were never persisted and cannot be resumed — start a new conversation; it will resume fine",
+				p.SessionID)
+		}
+		return acp.LoadSessionResult{}, fmt.Errorf("session/load %s: %w", p.SessionID, err)
+	}
+	// Same repair -resume runs: a transcript cut mid-tool-call would
+	// otherwise 400 the next request and lock the session out.
+	if n := loaded.Repair(); n > 0 {
+		fmt.Fprintf(os.Stderr, "acp: session %s: repaired %d trailing message(s) with orphan tool_calls\n", loaded.ID, n)
+	}
+	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
+	if err != nil {
+		return acp.LoadSessionResult{}, err
+	}
+	// Restore the lane the session was last using. ResolveRoute infers
+	// the provider from the model id (the registry is keyed by wire id);
+	// a freeform id belonging to no lane keeps the current lane and just
+	// re-points the model, which is what `-resume` of such a session does.
+	if loaded.Model != "" && loaded.Model != b.ag.Model() {
+		if route, rerr := subagent.ResolveRoute("", loaded.Model); rerr == nil {
+			provider, dsClient, _, lerr := b.laneFor(route.Provider)
+			if lerr != nil {
+				return acp.LoadSessionResult{}, fmt.Errorf("session/load: restore lane %s: %w", route.Provider, lerr)
+			}
+			b.ag.SetLane(provider, dsClient, loaded.Model)
+		} else {
+			b.ag.SetModel(loaded.Model)
+		}
+		b.setMenuCurrent(loaded.Model)
+	}
+
+	// Swap the live session in place (see the doc comment) and reseed the
+	// agent. Both must happen BEFORE the replay notifications go out: the
+	// client renders the history and may prompt immediately after the
+	// response resolves.
+	*b.sess = *loaded
+	b.sess.CWD = anchor.Abs
+	originalID := loaded.ID
+	b.sessionID = originalID
+	b.ag.Reset(loaded.Messages)
+
+	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
+		sendU(u)
+	}
+	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
+	return acp.LoadSessionResult{ConfigOptions: b.menu}, nil
+}
+
+// setMenuCurrent re-points the model dropdown at a model id after a
+// session/load. Ids are curated-per-lane, so the first option whose model
+// half matches wins; an unlisted model leaves the menu untouched (the
+// dropdown then shows a lane the session isn't on — a lie the client can
+// only avoid by re-reading session/load's configOptions, which is why
+// they are returned).
+func (b *acpBackend) setMenuCurrent(model string) {
+	for _, opt := range b.menu {
+		if opt.ID != "model" {
+			continue
+		}
+		for _, v := range opt.Options {
+			if _, m, ok := strings.Cut(v.Value, ":"); ok && m == model {
+				b.menu[0].CurrentValue = v.Value
+				return
+			}
+		}
+	}
 }
 
 // SetConfigOption applies a model-dropdown pick. configId "model" is
@@ -3391,16 +2877,43 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	cwd, _ := os.Getwd()
 	for ev := range b.ag.PromptFiles(ctx, text, images, files) {
 		if e, ok := ev.(agent.ErrorEvent); ok {
+			b.saveTurn()
 			return acp.PromptResult{}, e.Err
 		}
 		if u, ok := acpUpdate(p.SessionID, cwd, ev); ok {
 			sendU(u)
 		}
+		// Persist per turn, exactly like runPrint: a client that kills
+		// the process mid-conversation (paseo closes stdin on tab close)
+		// must still find everything up to the last completed turn, and
+		// session/load is only meaningful because this happens.
+		// Per-turn, not per-event: the transcript is a whole-file
+		// atomic rewrite, so saving on every delta would rewrite the
+		// file hundreds of times a turn.
+		if _, ok := ev.(agent.TurnEnd); ok {
+			b.saveTurn()
+		}
 	}
+	b.saveTurn()
 	if ctx.Err() != nil {
 		return acp.PromptResult{StopReason: "cancelled"}, nil
 	}
 	return acp.PromptResult{StopReason: "end_turn"}, nil
+}
+
+// saveTurn snapshots the live session to disk. Best-effort: a failed
+// write is a warning, never a turn failure — the answer already went to
+// the client, and losing a transcript must not lose the conversation.
+// No-op under --no-save (either pointer is nil there).
+func (b *acpBackend) saveTurn() {
+	if b.sess == nil || b.store == nil {
+		return
+	}
+	b.sess.Messages = b.ag.Messages()
+	b.sess.Model = b.ag.Model()
+	if err := b.store.Save(b.sess); err != nil {
+		fmt.Fprintf(os.Stderr, "acp: warning: session save failed: %v\n", err)
+	}
 }
 
 // acpUpdate maps one agent event to an ACP session/update payload. ok is
@@ -3692,14 +3205,31 @@ func runGoal(ctx context.Context, ag *agent.Agent, client *deepseek.Client, mode
 	return nil
 }
 
+// acpOptions bundles what runACP needs. A struct rather than another
+// five-argument signature: session/load added the persistence pair, and
+// every field here is "the thing main already owns, handed over once".
+type acpOptions struct {
+	ag     *agent.Agent
+	vroute visionRouter
+	froute fileroute.Router
+	policy *permission.Policy
+	menu   []acp.ConfigOption
+	// sess/store back session/load + the durable sessionId. Both nil
+	// under --no-save, which is what makes Initialize stop advertising
+	// loadSession.
+	sess  *session.Session
+	store *session.Store
+}
+
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
 // editor (Zed, …) can drive seek. stdout is the protocol channel — all
-// logging goes to stderr. pol is the shared permission policy the whole
-// tool registry was built on; session/new re-anchors it to the client's
-// cwd (D-1). menu is the model configOptions select (nil hides the
-// client's model dropdown); session/set_config_option swaps the agent's
-// lane between turns.
-func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fileroute.Router, pol *permission.Policy, menu []acp.ConfigOption) error {
+// logging goes to stderr. The shared permission policy the whole tool
+// registry was built on is re-anchored by session/new to the client's
+// cwd (D-1). A nil menu hides the client's model dropdown;
+// session/set_config_option swaps the agent's lane between turns. When a
+// session store is present the lane also serves session/load, resuming a
+// past conversation by transcript id.
+func runACP(ctx context.Context, o acpOptions) error {
 	var r io.Reader = os.Stdin
 	var w io.Writer = os.Stdout
 	// Opt-in protocol trace for debugging the Zed (or any ACP client)
@@ -3716,11 +3246,11 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fi
 		}
 	}
 	return acp.NewServer(r, w, &acpBackend{
-		ag:     ag,
-		route:  vroute,
-		froute: froute,
-		policy: pol,
-		menu:   menu,
+		ag:     o.ag,
+		route:  o.vroute,
+		froute: o.froute,
+		policy: o.policy,
+		menu:   o.menu,
 		// Same construction path as the startup lane: buildProvider owns
 		// key resolution and per-provider endpoints; "" baseURL keeps the
 		// pinned defaults (a passthrough --base-url can't reach this
@@ -3729,6 +3259,8 @@ func runACP(ctx context.Context, ag *agent.Agent, vroute visionRouter, froute fi
 			p, c, _, modelDefault, err := buildProvider(provider, "", "")
 			return p, c, modelDefault, err
 		},
+		sess:  o.sess,
+		store: o.store,
 	}).Serve(ctx)
 }
 

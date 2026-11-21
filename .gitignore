@@ -29,6 +29,8 @@ eval/tmp/
 .vscode/
 .zed/
 *.swp
+__pycache__/
+*.pyc
 
 # Benchmark output reports
 bench-*.json

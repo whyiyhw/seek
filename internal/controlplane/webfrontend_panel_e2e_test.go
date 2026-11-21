@@ -206,23 +206,36 @@ func writeStubTranscript(t *testing.T, sessionDir string) {
 	}
 }
 
-// TestWeb_PageTaskPanel pins the W3.3 panel's page contract the same
+// TestWeb_PageTaskPanel pins the task panel's page contract the same
 // way TestWeb_PageSessionsBrowser pins W4.4: the surfaces the panel
 // consumes, the topic-only listener discipline, and the chat plane
 // staying mounted (additive growth).
+//
+// c_4doebx re-pinned the data half: the panel now reads /rpc
+// subagent/list|get (the inspect-rpc §6 #12 close-out) instead of GET
+// /subagents — the old endpoint stays mounted as the compatibility口
+// (TestWeb_Subagents* covers it), so its disappearance from the page
+// is a page change, not an endpoint removal.
 func TestWeb_PageTaskPanel(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"/subagents?sub=",              // detail reads the transcript tail
+		"subagent/list",                // list reads the /rpc method
+		"subagent/get",                 // detail reads the /rpc method
 		"topic=subagents",              // the panel's SSE topic opt-in
 		"addEventListener('subagents'", // named-event listener ONLY —
 		// no onmessage on the topic conn
-		"syncTopicStream", // subscribe lifecycle tied to panel + binding
-		"agRows",          // push merge keyed by sub_sid
-		"last_assistant",  // detail field from ?sub=
+		"syncTopicStream",  // subscribe lifecycle tied to panel + binding
+		"syncAgentRefresh", // the polling half of "refresh" (c_4doebx)
+		"AG_REFRESH_MS",    // ... and its interval
+		"agRows",           // push merge keyed by sub_sid
+		"last_assistant",   // detail field from subagent/get
+		"id=\"ag-fields\"", // detail expansion (same info as ?sub=)
+		"st-running",       // three-state badge classes
+		"st-done",
+		"st-error",
 	} {
 		if !strings.Contains(page, need) {
-			t.Errorf("embedded page lost the task-panel piece %q (W3.3)", need)
+			t.Errorf("embedded page lost the task-panel piece %q (W3.3/c_4doebx)", need)
 		}
 	}
 	// The chat plane and sessions browser must survive the panel's
@@ -237,5 +250,10 @@ func TestWeb_PageTaskPanel(t *testing.T) {
 	// SAME connection would double-render every reply.
 	if strings.Contains(page, "topicES.onmessage") {
 		t.Error("topic connection must not set onmessage (chat frames ride it)")
+	}
+	// The panel must not hash paths in JS to build a project_id: the
+	// server hands it over in /state (one authority for the id rule).
+	if strings.Contains(page, "crypto.subtle") {
+		t.Error("page must not hash project paths client-side — /state carries project_id")
 	}
 }

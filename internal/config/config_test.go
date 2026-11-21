@@ -454,3 +454,94 @@ func TestAgentsConfig_AbsentSectionCompat(t *testing.T) {
 		t.Errorf("Agents = %v, want nil for a config without the section", got.Agents)
 	}
 }
+
+// ---- auto_compact ----
+
+// TestAutoCompact_AbsentSectionIsOff: a config without the section
+// (every config written before the feature) must resolve to 0 — off —
+// for any model. Auto-compaction rewrites the conversation, so the
+// default has to be "no".
+func TestAutoCompact_AbsentSectionIsOff(t *testing.T) {
+	withSeekHome(t)
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := got.AutoCompactThreshold("deepseek-flash"); n != 0 {
+		t.Errorf("absent section: threshold = %d, want 0 (off)", n)
+	}
+}
+
+// TestAutoCompact_ThresholdResolution pins the two ways of saying "when"
+// plus the floor: at_tokens is model-independent and wins, at_fraction
+// scales the model's window, and anything under the 1k floor is off.
+func TestAutoCompact_ThresholdResolution(t *testing.T) {
+	t.Setenv("SEEK_AUTO_COMPACT", "") // empty = "nothing here", file's setting stands
+
+	cases := []struct {
+		name  string
+		cfg   AutoCompactConfig
+		model string
+		want  int
+	}{
+		{"tokens", AutoCompactConfig{AtTokens: 350_000}, "deepseek-flash", 350_000},
+		{"fraction of 1M", AutoCompactConfig{AtFraction: 0.35}, "deepseek-flash", 350_000},
+		{"tokens win", AutoCompactConfig{AtTokens: 350_000, AtFraction: 0.5}, "deepseek-flash", 350_000},
+		{"fraction follows window", AutoCompactConfig{AtFraction: 0.35}, "gpt-4o", 44_800},
+		{"both zero = off", AutoCompactConfig{}, "deepseek-flash", 0},
+		{"below the floor = off", AutoCompactConfig{AtTokens: 500}, "deepseek-flash", 0},
+	}
+	for _, c := range cases {
+		cfg := Config{AutoCompact: &c.cfg}
+		if got := cfg.AutoCompactThreshold(c.model); got != c.want {
+			t.Errorf("%s: threshold = %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAutoCompact_EnvOverride: $SEEK_AUTO_COMPACT beats the file for one
+// launch — a dot is a fraction, a plain integer is an absolute count, and
+// "off" / "0" disables. An unparsable value leaves the file's setting
+// standing rather than guessing.
+func TestAutoCompact_EnvOverride(t *testing.T) {
+	cfg := Config{AutoCompact: &AutoCompactConfig{AtTokens: 200_000}}
+
+	cases := []struct {
+		env   string
+		model string
+		want  int
+	}{
+		{"0.35", "deepseek-flash", 350_000},
+		{"350000", "deepseek-flash", 350_000},
+		{"off", "deepseek-flash", 0},
+		{"0", "deepseek-flash", 0},
+		{"not-a-number", "deepseek-flash", 200_000}, // file's setting stands
+	}
+	for _, c := range cases {
+		t.Setenv("SEEK_AUTO_COMPACT", c.env)
+		if got := cfg.AutoCompactThreshold(c.model); got != c.want {
+			t.Errorf("SEEK_AUTO_COMPACT=%q: threshold = %d, want %d", c.env, got, c.want)
+		}
+	}
+}
+
+// TestAutoCompact_RoundTrip: the section survives Save → Load, and an
+// older binary ignoring the key is covered by the omitempty contract
+// (absent section loads as nil, tested above).
+func TestAutoCompact_RoundTrip(t *testing.T) {
+	withSeekHome(t)
+	cfg := Config{AutoCompact: &AutoCompactConfig{AtTokens: 350_000, AtFraction: 0.35}}
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoCompact == nil {
+		t.Fatal("auto_compact section lost on round trip")
+	}
+	if got.AutoCompact.AtTokens != 350_000 || got.AutoCompact.AtFraction != 0.35 {
+		t.Errorf("auto_compact = %+v, want {350000 0.35}", *got.AutoCompact)
+	}
+}

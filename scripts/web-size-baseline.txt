@@ -9,4 +9,39 @@
 # Update this number IN THE SAME COMMIT that intentionally grows the
 # binary: scripts/web-gate.sh --update-baseline (re-measures, rewrites
 # the number, keeps these comments).
-30480715
+#
+# 2026-11-19 c_x2au4t ratchet: +14109B (markdown.js embed 6.3KB +
+# /static/ route + page wiring). Added as a DELTA to the existing pin,
+# NOT via --update-baseline's absolute re-measure — the absolute
+# depends ~MBs on the measuring toolchain: main@2e7ad39 builds at
+# 29105173B under go1.25.8 (CI's line, GOTOOLCHAIN-pinned locally) but
+# 30907349B under the local go1.27.3 default — either side of this pin
+# with zero change. The old pin already carries ~1.37MB of go1.25-side
+# slack (whose toolchain minted it, 202ad58, is unknown); delta-adding
+# keeps every toolchain's margin exactly as it was instead of baking
+# this machine's skew in. Gate runners: pass GOTOOLCHAIN=go1.25.8
+# locally to reproduce CI's numbers. (Pitfall logged in docs/pitfalls.)
+# 2026-11-19 c_txz6vz ratchet: +8192B (persistent collapsible session
+# sidebar — page CSS/markup/JS ~9.3KB source, no new Go). Same rule as
+# the c_x2au4t entry above: DELTA-added, not re-measured. Both
+# toolchains agree on the delta (go1.25.8: 29206864→29215056 =
+# +8192B; go1.27.3: 31017169→31025353 = +8184B), well inside the
+# §13.3 ≤20KB quota for this card. Final go1.25.8 build after the
+# refreshState list-refresh wiring: 29214992B (−64B from first
+# measurement, still +8128B over the pre-card base).
+# 2026-11-20 c_oyp2qf ratchet: +14891B (top-bar ContextMeter — page
+# CSS/markup/JS ~4.4KB embed + modelcap.LaneOf lane table + usage event
+# model/lane/ctx_limit fields). DELTA-added on the go1.25.8 line
+# (29274931→29289822, measured against this branch's merge commit —
+# main@e730098 + the c_txz6vz sidebar; go1.27.3 side: +14575B, the two
+# toolchains agree on the delta). Over the §13.3 ≤6KB card quota — the
+# overage eats the W5 pack's remaining margin (c_n37tnr precedent:
+# 超在记账、不在 gate), compile body of the lane table + embed being
+# the bulk; comment-trimming measured ~0.8KB, not worth the readability.
+# NOTE for reviewers of this branch's gate runs: the merge brought
+# main@e730098 in, whose own growth since the sidebar branch point
+# (~60KB go1.25.8: approval复审 + auto_compact) was never ratcheted by
+# those merges (they claimed headroom instead — c_n37tnr's note). The
+# pin still carries ~1.16MB of go1.25-side slack, so the gate stays
+# green either way; this entry ratchets ONLY this card's delta.
+30517907

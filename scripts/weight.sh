@@ -13,8 +13,8 @@
 #   code  per-package Go LOC (non-test / test) under internal/ and pkg/,
 #         plus go.mod direct/indirect dependency counts
 #   docs  bytes + lines per area: AGENTS.md, docs/prd (active;
-#         docs/prd/archive weighed separately), docs/book, docs/pitfalls.md,
-#         docs/pitfalls-archive.md, CHANGELOG.md
+#         docs/prd/archive weighed separately), docs/book, docs/pitfalls
+#         (one-entry-per-file ledger since 2026-11-20, c_uxznyn), CHANGELOG.md
 #   drift each area vs docs/budget.json — over → SLIM 建议 line
 #
 # Budget baseline (see docs/budget.json): actual bytes +10% headroom,
@@ -67,6 +67,7 @@ doc_files() {
     docs/prd)         find "$ROOT/docs/prd" -maxdepth 1 -name '*.md' ;;
     docs/prd/archive) find "$ROOT/docs/prd/archive" -name '*.md' ;;
     docs/book)        find "$ROOT/docs/book" -name '*.md' ;;
+    docs/pitfalls)    find "$ROOT/docs/pitfalls" -name '*.md' ;;
     *) if [ -f "$ROOT/$1" ]; then printf '%s\n' "$ROOT/$1"; fi ;;
   esac 2>/dev/null | sort
 }
@@ -120,7 +121,7 @@ printf '%-28s %8s %9s\n' "go.mod deps" "$DEP_DIRECT" "$DEP_INDIRECT"
 
 # --- 2. doc side -----------------------------------------------------------
 
-AREAS="AGENTS.md docs/prd docs/prd/archive docs/book docs/pitfalls.md docs/pitfalls-archive.md CHANGELOG.md"
+AREAS="AGENTS.md docs/prd docs/prd/archive docs/book docs/pitfalls CHANGELOG.md"
 
 echo
 echo "weight — docs (bytes / lines vs $(printf '%s' "$BUDGET_FILE") )"

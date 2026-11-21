@@ -312,3 +312,57 @@ func TestWeb_RPCBodyTooLarge(t *testing.T) {
 		t.Errorf("oversized body = %d, want 413", resp.StatusCode)
 	}
 }
+
+// TestWeb_RPCWriteGate: the §5.2 CSRF bar on /rpc (c_n37tnr). /rpc
+// shipped as a read-only data plane and only carried the token gate;
+// approval/decide is the first state-mutating method on it, so the
+// "cookie alone drives nothing" rule now has to hold here too. Same
+// table shape as TestWeb_WriteGate (/msg), same expectations — the
+// two routes must not drift apart.
+func TestWeb_RPCWriteGate(t *testing.T) {
+	srv := newTestRPC(t)
+	tok := "test-token-0123456789abcdef"
+	post := func(cookie, query, origin, xtok string) int {
+		url := srv.URL + "/rpc"
+		if query != "" {
+			url += "?token=" + query
+		}
+		req, _ := http.NewRequest(http.MethodPost, url,
+			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"test/echo","params":{"text":"hi"}}`))
+		if cookie != "" {
+			req.Header.Set("Cookie", webTokenCookie+"="+cookie)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		if xtok != "" {
+			req.Header.Set(webTokenHeader, xtok)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	self := srv.URL // the request's own origin (http://127.0.0.1:<port>)
+
+	for _, tc := range []struct {
+		name           string
+		cookie, query  string
+		origin, xtoken string
+		want           int
+	}{
+		{"cookie alone: no Origin, no X-Seek-Token", tok, "", "", "", http.StatusForbidden},
+		{"cookie + cross-site Origin", tok, "", "http://attacker.example", "", http.StatusForbidden},
+		{"cookie + wrong X-Seek-Token", tok, "", "", "wrong", http.StatusForbidden},
+		{"cookie + same-origin Origin", tok, "", self, "", http.StatusOK},
+		{"cookie + valid X-Seek-Token", tok, "", "", tok, http.StatusOK},
+		{"query token (script face), no Origin", "", tok, "", "", http.StatusOK},
+		{"no credential at all", "", "", "", "", http.StatusUnauthorized},
+	} {
+		if got := post(tc.cookie, tc.query, tc.origin, tc.xtoken); got != tc.want {
+			t.Errorf("%s: status = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

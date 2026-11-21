@@ -3,6 +3,8 @@ package autopilot
 import (
 	"strings"
 	"testing"
+
+	"github.com/whyiyhw/seek/internal/verifier"
 )
 
 func sampleReport() Report {
@@ -72,5 +74,40 @@ func TestReport_BodyEvidence(t *testing.T) {
 		if lines[c.line] != "  "+c.want {
 			t.Fatalf("line %d =\n  %q\nwant\n  %q", c.line, lines[c.line], c.want)
 		}
+	}
+}
+
+// TestReport_BodyVerdicts: v8 柱 R R2 — tasks carrying a verdict get
+// the "· verdict=<v>" suffix on their line, the header carries the
+// pass/doubt/fail counts when verification ran, and verdict-less
+// reports render exactly as before.
+func TestReport_BodyVerdicts(t *testing.T) {
+	rep := sampleReport()
+	rep.Outcomes[0].Verdict = &verifier.Verdict{Overall: verifier.Pass}
+	rep.Outcomes[1].Verdict = &verifier.Verdict{
+		Overall:    verifier.Fail,
+		Invariants: []verifier.InvariantResult{{ID: "S", Name: "scope", Verdict: verifier.Fail, Detail: "main tree drifted"}},
+	}
+	rep.VerifiedPass, rep.VerifiedDoubt, rep.VerifiedFail = 1, 0, 1
+
+	body := rep.Body()
+	lines := strings.Split(body, "\n")
+	if !strings.Contains(lines[0], "verify 1/0/1 pass/doubt/fail") {
+		t.Fatalf("header must carry the verdict counts, got %q", lines[0])
+	}
+	if !strings.Contains(lines[1], "verdict=pass") {
+		t.Fatalf("done task line must carry its verdict, got %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "verdict=fail (scope)") {
+		t.Fatalf("failing verdict must name its cause, got %q", lines[2])
+	}
+	if strings.Contains(lines[3], "verdict=") {
+		t.Fatalf("nil-verdict task must render no suffix, got %q", lines[3])
+	}
+
+	// Regression guard: a verdict-less report renders byte-identically
+	// to the pre-R2 shape (no "verify" in the header).
+	if strings.Contains(sampleReport().Body(), "verify") {
+		t.Fatal("unverified report must not render verdict chrome")
 	}
 }

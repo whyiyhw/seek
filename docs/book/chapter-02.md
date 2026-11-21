@@ -283,7 +283,7 @@ FIM 的端点是 `/beta/completions`，使用的是 OpenAI 的旧版 completions
 - **Saw**：DeepSeek 有时返回 HTTP 5xx 或空的 SSE body，没有有效数据。
 - **Fix**：实现一次重试（500ms backoff），仅在没有收到任何事件时触发。已收到部分事件时不重试——重发已消费的 token 会破坏前缀一致性。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

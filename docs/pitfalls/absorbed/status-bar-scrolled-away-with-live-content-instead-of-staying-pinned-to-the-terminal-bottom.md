@@ -1,0 +1,8 @@
+<!-- pitfalls-absorbed: original-section: - -->
+### [已吸收] Status bar scrolled away with live content instead of staying pinned to the terminal bottom
+- **Saw**: after a few turns, the status bar drifted upward from the terminal's bottom edge. In long sessions it could be several lines above the bottom, making it hard to spot at a glance
+- **Why**: inline mode replaces the previous View() in-place, but `tea.Println` lines accumulate above the live region, pushing the cursor (and thus the View() output) downward. The status bar, rendered at the end of View(), moved with everything else — the comment said "not pinned" but the user expectation was that a status bar stays at the screen edge
+- **Fix**: added `scrollbackLines` counter to Model, incremented at every `tea.Println` call site (counting actual newlines). `View()` now calculates `cursorRow = welcomeFixedLines + scrollbackLines` and adds padding before the status bar to fill the remaining terminal height, pinning it to the bottom. Commit (this one)
+- **Lesson**: "status bar at the bottom" requires knowing where the cursor is in the terminal. In inline bubbletea, `tea.Println` moves the cursor; you must track the cumulative offset to compute remaining vertical space. A `scrollbackLineCount` helper and explicit counting at each print site is verbose but reliable
+- **Refs**: `internal/tui/model.go:scrollbackLines`, `internal/tui/view.go:View()`
+- **已吸收**: the scrollbackLines counter + bottom-padding pin scheme is explicitly banned by the current inline design → `internal/tui/run.go` "CRITICAL invariant" note; `internal/tui/view.go` header note

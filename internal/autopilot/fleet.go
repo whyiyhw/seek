@@ -2,13 +2,16 @@ package autopilot
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -33,15 +36,22 @@ type managerFleet struct {
 	// empty → CostUSD reports 0 (cost we can't attribute is reported
 	// as zero, never guessed).
 	model string
+	// ver judges each completed task against its DoneWhen (v8 柱 R
+	// R2). Nil = verification not wired (tests, or the caller opted
+	// out) — Outcome.Verdict stays nil and the report says so by
+	// omission.
+	ver *verifier.Verifier
 }
 
 // NewFleet builds the production Fleet. A nil wtMgr (non-git project)
 // makes every task fail fast with a clear message rather than running
 // un-isolated. model is the parent session's model id (what the
 // subagents actually run on); pass "" only to explicitly opt out of
-// per-outcome cost accounting.
-func NewFleet(mgr *subagent.Manager, wtMgr *worktree.Manager, model string) Fleet {
-	return &managerFleet{mgr: mgr, wtMgr: wtMgr, typ: subagent.TypeGeneralPurpose, model: model}
+// per-outcome cost accounting. ver (nil = skip verification) is the
+// independent verifier run after each completed task — on-demand per
+// task completion, not a resident loop.
+func NewFleet(mgr *subagent.Manager, wtMgr *worktree.Manager, model string, ver *verifier.Verifier) Fleet {
+	return &managerFleet{mgr: mgr, wtMgr: wtMgr, typ: subagent.TypeGeneralPurpose, model: model, ver: ver}
 }
 
 func (f *managerFleet) Run(ctx context.Context, t Task) Outcome {
@@ -55,6 +65,12 @@ func (f *managerFleet) Run(ctx context.Context, t Task) Outcome {
 	if err != nil {
 		return Outcome{Task: t, Status: "failed", Summary: "worktree create: " + err.Error()}
 	}
+	// Pre-task main-tree snapshot for the scope check (v8 柱 R R2):
+	// the verifier compares the main tree against this baseline to
+	// catch worktree-isolation bypasses — the shape of the historical
+	// "subagent edited the MAIN tree" bug, which green tests never
+	// surfaced (docs/pitfalls.md, fix c21167d).
+	baseline := verifier.MainTreeSnapshot(ctx, f.wtMgr.Root())
 	res := f.mgr.Spawn(ctx, subagent.SpawnArgs{
 		Description:  t.Title,
 		Prompt:       t.Prompt,
@@ -80,8 +96,38 @@ func (f *managerFleet) Run(ctx context.Context, t Task) Outcome {
 	if status == "done" {
 		out.Commit = commitWorktree(ctx, wt.Path, t.Title)
 		out.Files, out.Insertions, out.Deletions = commitDiffstat(ctx, wt.Path, out.Commit)
+		// Independent verification (v8 柱 R R2): fresh-context judge
+		// over the done_when assertions + diff + tests. Observational
+		// for the run — a fail verdict does NOT flip Status; the
+		// morning review reads both. Judge/infra failures land as
+		// doubt inside the verdict, never as a missing verdict.
+		if f.ver != nil {
+			out.Verdict = f.ver.Verify(ctx, verifier.Request{
+				TaskTitle:     t.Title,
+				Assertions:    t.DoneWhen,
+				WorkDir:       wt.Path,
+				Commit:        out.Commit,
+				TestCmds:      detectTestCmds(wt.Path),
+				ScopeRoot:     f.wtMgr.Root(),
+				ScopeBaseline: baseline,
+			})
+		}
 	}
 	return out
+}
+
+// detectTestCmds derives the deterministic test commands for a
+// deliverable dir: "go test ./..." when it carries a go.mod. No model
+// freedom here — the verifier must run the SAME suite the repo
+// defines, not one the worker suggested.
+func detectTestCmds(dir string) []string {
+	if dir == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+		return []string{"go test ./..."}
+	}
+	return nil
 }
 
 // tokenCost prices one subagent's rolled-up token buckets at model.
