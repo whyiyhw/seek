@@ -185,7 +185,7 @@ func TestAskUserRequest_FiresNotification(t *testing.T) {
 
 // TestAskUserBatchRequest_FiresNotification: the v2 batch picker fires
 // the same observer, titled with the question the user is answering
-// first.
+// first plus a "(1/N)" suffix when more questions follow.
 func TestAskUserBatchRequest_FiresNotification(t *testing.T) {
 	rec := &notifyRecorder{}
 	m := emptyModel()
@@ -210,8 +210,28 @@ func TestAskUserBatchRequest_FiresNotification(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("Notification fired %d times, want 1", len(got))
 	}
-	if got[0].Kind != "ask_user" || got[0].Title != "which storage?" {
-		t.Errorf("Notification = %+v, want kind=ask_user title=which storage?", got[0])
+	if got[0].Kind != "ask_user" || got[0].Title != "which storage? (1/2)" {
+		t.Errorf("Notification = %+v, want kind=ask_user title=which storage? (1/2)", got[0])
+	}
+}
+
+// TestBatchNotificationTitle_CountSuffix: the count suffix is the
+// contract the update.go wiring comment promises — a hook reading
+// SEEK_NOTIFY_TITLE can tell a 1-of-1 ask from a batch with more
+// questions queued. 1-of-1 stays bare (a suffix there is noise).
+func TestBatchNotificationTitle_CountSuffix(t *testing.T) {
+	if got := batchNotificationTitle(askuser.Batch{Questions: []askuser.Question{{Question: "only?"}}}); got != "only?" {
+		t.Errorf("1-of-1 title = %q, want no suffix", got)
+	}
+	if got := batchNotificationTitle(askuser.Batch{Questions: []askuser.Question{
+		{Question: "first?"},
+		{Question: "second?"},
+		{Question: "third?"},
+	}}); got != "first? (1/3)" {
+		t.Errorf("1-of-3 title = %q, want (1/3) suffix", got)
+	}
+	if got := batchNotificationTitle(askuser.Batch{}); got != "ask_user" {
+		t.Errorf("empty-batch title = %q, want the generic label", got)
 	}
 }
 

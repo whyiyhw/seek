@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/askuser"
@@ -46,12 +47,21 @@ func askUserNotificationCmd(hreg *hooks.Registry, question string) tea.Cmd {
 
 // batchNotificationTitle renders the Notification title for a v2
 // ask_user batch: the first question — what the user is answering
-// right now, which is what a hook author wants to key on. An empty
-// batch is defensive-only (the tool rejects it); fall back to a
-// generic label rather than an empty Title.
+// right now, which is what a hook author wants to key on — plus a
+// "(1/N)" suffix when the batch has more, so a hook can tell 1-of-1
+// from 1-of-4 (update.go's wiring comment promises exactly this).
+// The suffix rides through the shared notifyTitleMax truncation: a
+// question long enough to hit the cap loses it, which is the same
+// "truncated" signal as any other over-long title. An empty batch is
+// defensive-only (the tool rejects it); fall back to a generic label
+// rather than an empty Title.
 func batchNotificationTitle(b askuser.Batch) string {
 	if len(b.Questions) == 0 {
 		return "ask_user"
 	}
-	return b.Questions[0].Question
+	title := b.Questions[0].Question
+	if len(b.Questions) > 1 {
+		title = fmt.Sprintf("%s (1/%d)", title, len(b.Questions))
+	}
+	return title
 }
