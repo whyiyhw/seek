@@ -38,8 +38,11 @@
 #             initialize must advertise sessionCapabilities.list (object
 #             shape {}) and the store scan must return the PRE-SEEDED
 #             transcript (id + first-user-message title + header mtime),
-#             a no-match cwd filter must answer the empty array → stdin
-#             EOF → clean exit rc=0.
+#             a no-match cwd filter must answer the empty array → [P1-3]
+#             initialize(protocolVersion:2) is answered with the
+#             negotiated 1 (+ a stderr downgrade line), an ACP image
+#             content block is accepted and degrades silently instead of
+#             crashing → stdin EOF → clean exit rc=0.
 #   NOT       session/prompt with CONTENT — that needs a real LLM
 #             round-trip (key + network), which is not deterministic
 #             lane material. The content-bearing termination states
@@ -49,7 +52,10 @@
 #             session/request_permission APPROVAL LOOP (P0-2) by
 #             cmd/seek's acp_approval_e2e_test.go (real binary × fake
 #             OpenAI-compatible backend, four lanes: allow / reject /
-#             timeout-deny / yolo-never-asks). No API call is made here:
+#             timeout-deny / yolo-never-asks), and the P1-3 image path
+#             (real PNG in, marker into the model's request) by
+#             acp_image_e2e_test.go + cmd/seek/testdata/acp-image/*.json
+#             (image-only / text+image+text). No API call is made here:
 #             a DUMMY DeepSeek key satisfies startup provider resolution
 #             (env beats config, DeepSeek wins auto-detect), SEEK_HOME
 #             isolates ~/.seek.
@@ -148,9 +154,29 @@ grep -q '"sessionCapabilities":{"list":{}}' "$OUT" \
   || fail "initialize: sessionCapabilities.list not advertised as {} (got: $(grep '"id":1' "$OUT"))"
 echo "acp-smoke: initialize ok (protocolVersion=1, image + sessionCapabilities.list advertised)"
 
+# --- 1b. P1-3: protocolVersion is NEGOTIATED, not echoed ---------------------
+# Before card c_4pczu3 the server returned whatever integer the client sent,
+# so a client asking for a version seek cannot speak was told "yes" and then
+# tripped over wire differences. The spec's rule (and seek's): the response
+# carries the NEWEST version the agent supports that is ≤ the request. A
+# client asking for 2 must therefore be answered 1 — the downgrade declaration
+# is the response itself.
+rpc 21 initialize '{"protocolVersion":2}'
+wait_for '"id":21' 'initialize(v2 downgrade)' 15
+grep '"id":21' "$OUT" | grep -q '"protocolVersion":1' \
+  || fail "initialize(2): expected a negotiated downgrade to 1, got $(grep '"id":21' "$OUT")"
+grep '"id":21' "$OUT" | grep -q '"image":true' \
+  || fail 'initialize(2): downgrade must not drop promptCapabilities.image'
+grep -F 'acp: initialize negotiated requested=2 answered=1' "$SMOKE_ERR" >/dev/null \
+  || fail 'initialize(2): downgrade not declared on stderr'
+echo "acp-smoke: initialize negotiates (requested 2 → answered 1, downgrade declared)"
+
 # --- 2. session/new anchors cwd (D-1 double anchor) ---------------------------
 rpc 2 session/new "{\"cwd\":\"$WS\"}"
-wait_for '"id":2' 'session/new' 15
+# trailing comma in the pattern: '"id":2' would substring-match the id:21
+# line from the P1-3 negotiate probe above and "pass" before session/new
+# has even answered — then the SID extraction below reads an empty string.
+wait_for '"id":2,' 'session/new' 15
 # sessionId is the DURABLE transcript id (session/load work, 2026-11-19:
 # YYYYMMDD-HHMMSS-16hex) — NOT the project name the smoke used to assert
 # before persistence landed; that stale assertion sat red until the ACP
@@ -286,8 +312,35 @@ grep '"id":10' "$OUT" | grep -q '"sessions":\[\]' \
   || fail "session/list: no-match filter must answer sessions:[] (got: $(grep '"id":10' "$OUT"))"
 echo "acp-smoke: session/list ok (seeded transcript listed + title + mtime; empty filter = [])"
 
+# --- 3f. P1-3: an image content block is accepted, never fatal ----------------
+# ACP image blocks (type:"image" + base64 data + mimeType) must be decoded
+# and handled, not crash the server. This probe is deterministic WITHOUT an
+# LLM: the block's base64 is corrupt, so the block degrades to nothing, the
+# prompt text stays empty, and acpBackend.Prompt answers end_turn immediately
+# (the same short-circuit a pure image prompt used to hit — now reached only
+# after the block has actually been parsed). A crash or a -32000 here means
+# the image block shape regressed. It runs AFTER the termination probe on
+# purpose: every prompt now draws a _seek_turn_stop frame (c_vfgeam), so
+# this second prompt would break the "exactly one frame" count above.
+# (probe id 11: 6-8 are taken by set_mode, 9-10 by session/list — renumber
+# before appending further probes, see the smoke-probe-ids pitfall.)
+# The full path — real PNG in, marker into the model's request — is the
+# fixture e2e: cmd/seek/testdata/acp-image/{image-only,mixed}.json driven by
+# cmd/seek/acp_image_e2e_test.go against the real binary + a fake backend.
+rpc 11 session/prompt '{"sessionId":"smoke","prompt":[{"type":"image","data":"!!!not-base64!!!","mimeType":"image/png"}]}'
+wait_for '"id":11,' 'session/prompt(image block)' 20
+grep '"id":11' "$OUT" | grep -q '"stopReason":"end_turn"' \
+  || fail "image block: expected end_turn, got $(grep '"id":11' "$OUT")"
+grep '"id":11' "$OUT" | grep -q '"error"' \
+  && fail 'image block: corrupt block must degrade silently, not error'
+kill -0 "$SEEKPID" 2>/dev/null || fail 'image block: server died on an image content block'
+if grep -qi 'panic' "$SMOKE_ERR"; then
+  fail 'image block: panic in stderr'
+fi
+echo "acp-smoke: image content block accepted + degraded silently, read loop alive (P1-3)"
+
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
-echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list anchor=$WS rc=0"
+echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list+image-block anchor=$WS rc=0"

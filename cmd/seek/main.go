@@ -2607,14 +2607,49 @@ type acpBackend struct {
 	ask *acpApproval
 }
 
+// Initialize answers the ACP handshake: it negotiates the protocol
+// version (the intersection of what the client asked for and what seek
+// speaks — NOT an echo of the request) and declares seek's capability
+// subset.
+//
+// Version negotiation (backlog ⑤, card c_4pczu3). Until now the server
+// echoed whatever integer the client sent, which is not a negotiation:
+// a client asking for a version seek cannot speak got told "yes" and
+// then tripped over wire differences on the next method. The rule is
+// acp.NegotiateVersion's: highest supported version ≤ requested. When
+// that is not the requested version the answer IS the downgrade
+// declaration — the client sees protocolVersion=N in the response and,
+// per spec, is the side that closes the connection if it cannot speak
+// N. We also say it on stderr so a human watching `seek acp` (or the
+// SEEK_ACP_LOG trace) can tell a downgrade apart from a match.
+//
+// Capabilities are declared unconditionally: promptCapabilities.image is
+// a promise that an image CONTENT BLOCK is accepted without exploding,
+// not a promise that the current model can see. The per-turn router
+// decides what each image becomes — native attach on a vision model
+// (feature-vision), an in-band note the model reads otherwise. Swapping
+// models mid-session (session/set_config_option) must not invalidate a
+// declaration made at handshake time, so this cannot be model-gated.
 func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 	persisted := b.store != nil && b.sess != nil
 	var sessCaps *acp.SessionCapabilities
 	if persisted {
 		sessCaps = &acp.SessionCapabilities{List: &acp.SessionListCapabilities{}}
 	}
+	version, matched := acp.NegotiateVersion(p.ProtocolVersion)
+	if !matched || version != p.ProtocolVersion {
+		// Best-effort trace; stdout is the protocol channel and stays clean.
+		// The downgrade wording is what a human watching `seek acp` needs:
+		// "requested=2 answered=1" alone leaves "did we fail?" open.
+		why := "client sent no usable version"
+		if version < p.ProtocolVersion {
+			why = "downgrade"
+		}
+		fmt.Fprintf(os.Stderr, "acp: initialize negotiated requested=%d answered=%d supported=%d (%s)\n",
+			p.ProtocolVersion, version, acp.ProtocolVersion, why)
+	}
 	return acp.InitializeResult{
-		ProtocolVersion: p.ProtocolVersion,
+		ProtocolVersion: version,
 		AgentCapabilities: acp.AgentCapabilities{
 			// loadSession is a promise that a sessionId survives the
 			// process, so it is only made when a transcript store exists
@@ -3014,37 +3049,60 @@ func acpModelMenu(currentModel string, openCodeRows []pricing.OpenCodeGoModel) [
 }
 
 // buildACPPromptText assembles the prompt seek's agent actually sees from
-// an ACP session/prompt: the text blocks, plus one in-band marker block
-// per image content block — native attach on vision models, a
-// switch-model note otherwise (feature-vision M-V.2, replacing the
-// 柱 Q OCR path). Document references in the text then route through
-// the file router (feature-deepseek-app-api F3) — copy-at-submit +
-// eager upload, every failure in-band. Corrupt base64 / unhandled
-// mimeType degrade silently (the block is skipped). The upload needs
-// a context, so this is the one impure seam; it still touches no agent
-// state and stays unit-testable.
+// an ACP session/prompt: the text blocks interleaved with one in-band
+// marker block per image content block, in the order the client sent
+// them (card c_4pczu3 ④) — native attach on vision models, a switch-model
+// note otherwise (feature-vision M-V.2, replacing the 柱 Q OCR path).
+// Document references in the text then route through the file router
+// (feature-deepseek-app-api F3) — copy-at-submit + eager upload, every
+// failure in-band. Corrupt base64 / unhandled mimeType degrade silently
+// (the block is skipped). The upload needs a context, so this is the one
+// impure seam; it still touches no agent state and stays unit-testable.
+//
+// Ordering: p.Segments() is the wire order. Text segments join with a
+// newline (PromptText's separator, kept identical so text-only prompts
+// produce the exact same bytes as before), and an image marker is
+// appended as its own paragraph (the "[image: …" family prefix is wire
+// format — TUI replay styling + tests pin it).
 func buildACPPromptText(ctx context.Context, model string, p acp.PromptParams, vroute visionRouter, froute fileroute.Router) (string, []deepseek.ImagePart, []deepseek.FilePart) {
-	text := p.PromptText()
+	var b strings.Builder
 	var parts []deepseek.ImagePart
-	for _, blk := range p.ImageBlocks() {
-		data, err := base64.StdEncoding.DecodeString(blk.Data)
-		if err != nil {
+	// Marker blocks are their own paragraphs; consecutive text blocks join
+	// with the single newline PromptText() uses, so a text-only prompt
+	// produces the exact same bytes as before this change.
+	lastWasMarker := false
+	for _, seg := range p.Segments() {
+		if seg.Image == nil {
+			if b.Len() > 0 {
+				if lastWasMarker {
+					b.WriteString("\n\n")
+				} else {
+					b.WriteByte('\n')
+				}
+			}
+			b.WriteString(seg.Text)
+			lastWasMarker = false
 			continue
 		}
-		ext := imageExtForMime(blk.MimeType)
+		data, err := base64.StdEncoding.DecodeString(seg.Image.Data)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		ext := imageExtForMime(seg.Image.MimeType)
 		if ext == "" {
 			continue
 		}
 		block, part := vroute.routeBytes(model, "pasted-image"+ext, data, ext)
-		if text != "" {
-			text += "\n\n"
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
 		}
-		text += block
+		b.WriteString(block)
+		lastWasMarker = true
 		if part.Asset != "" {
 			parts = append(parts, part)
 		}
 	}
-	text, files := froute.Route(ctx, model, text)
+	text, files := froute.Route(ctx, model, b.String())
 	return text, parts, files
 }
 

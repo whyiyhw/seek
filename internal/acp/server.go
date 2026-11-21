@@ -57,6 +57,45 @@ type InitializeResult struct {
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 }
 
+// ProtocolVersion is the newest ACP protocol MAJOR version seek
+// implements. ACP versions are a single integer, bumped only on breaking
+// changes; capabilities carry everything else, so "we speak 1" is the
+// whole story until the wire changes.
+const ProtocolVersion = 1
+
+// supportedVersions is every protocol version seek can actually speak,
+// newest first. One row today; the list exists so negotiation stays a
+// lookup rather than an if-chain when a v2 lands.
+var supportedVersions = []int{1}
+
+// NegotiateVersion answers initialize with the highest version BOTH
+// sides speak that is not newer than what the client asked for — the
+// ACP spec's own rule ("If the Agent supports the requested version, it
+// MUST respond with the same version. Otherwise, the Agent MUST respond
+// with the latest version it supports", i.e. the intersection, not an
+// echo).
+//
+// requested == 0 / negative (field absent or a client bug — the spec
+// says the request MUST carry it) has no intersection; ok is false and
+// the caller answers ProtocolVersion, the pre-negotiation behaviour, so
+// a sloppy client still gets a usable handshake instead of a dead one.
+// A client that asked for something seek does NOT speak learns it from
+// the response and is the side that closes the connection (spec: "If
+// the Client does not support the version specified by the Agent … the
+// Client SHOULD close the connection").
+func NegotiateVersion(requested int) (version int, ok bool) {
+	best := 0
+	for _, v := range supportedVersions {
+		if v <= requested && v > best {
+			best = v
+		}
+	}
+	if best == 0 {
+		return ProtocolVersion, false
+	}
+	return best, true
+}
+
 type AgentCapabilities struct {
 	LoadSession bool `json:"loadSession"`
 	// SessionCapabilities advertises the session-lifecycle extras
@@ -90,8 +129,11 @@ type SessionCapabilities struct {
 type SessionListCapabilities struct{}
 
 // PromptCapabilities is the subset of ACP prompt content types seek
-// accepts. Audio / embedded-context are not handled (seek is text-only;
-// image is OCR'd, not sent as bytes).
+// accepts. Audio / embedded-context are not declared (seek does not
+// parse those blocks, so a client never sends them). Image IS declared:
+// an image content block is always accepted; what it becomes is decided
+// per turn — native attach on a vision model, an in-band switch-model
+// note otherwise (cmd/seek's visionRouter).
 type PromptCapabilities struct {
 	Image bool `json:"image,omitempty"`
 }
@@ -228,8 +270,11 @@ type ContentBlock struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 	// Data + MimeType carry an image block's bytes (type=="image"): Data is
-	// base64, MimeType e.g. "image/png" (M-P.5). The caller OCRs these to
-	// text — seek never forwards image bytes to the model.
+	// base64, MimeType e.g. "image/png" — the ACP/MCP image block shape.
+	// What happens to the bytes is the backend's call and depends on the
+	// turn's model: a vision model gets them as a native image part, any
+	// other model gets an in-band note instead and the bytes stay home
+	// (cmd/seek's visionRouter).
 	Data     string `json:"data,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
 }
@@ -240,13 +285,56 @@ type PromptParams struct {
 }
 
 // ImageBlocks returns the prompt's image content blocks (type=="image"
-// with non-empty Data), in order. Used by the backend to OCR them into the
-// prompt text. M-P.5.
+// with non-empty Data), in order — the "just the images" projection.
+// NOTE: the prompt path deliberately does NOT use this (card c_4pczu3
+// ④): pulling images out of the block list loses their position among
+// the text blocks, so buildACPPromptText walks Segments instead. Keep
+// this for callers that genuinely want only the images (tests, a
+// protocol trace).
 func (p PromptParams) ImageBlocks() []ContentBlock {
 	var out []ContentBlock
 	for _, c := range p.Prompt {
 		if c.Type == "image" && c.Data != "" {
 			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Segment is one ordered piece of a session/prompt as the backend
+// consumes it. Exactly one field is meaningful: Text for a text block,
+// Image for an image block (the pointer is into p.Prompt, so its Data /
+// MimeType are the wire bytes verbatim).
+//
+// Why this exists (M-P.5 / card c_4pczu3 ④): PromptText() flattens all
+// text blocks into one string, which loses the ORDER relative to image
+// blocks. A prompt like ["look at this", <image>, "and this too"] must
+// reach the model with the image's marker BETWEEN the two sentences, so
+// the consumer needs a view that keeps the sequence. Unknown / empty
+// block types yield no segment (they carry nothing to forward).
+type Segment struct {
+	Text  string
+	Image *ContentBlock
+}
+
+// Segments walks the prompt in wire order, yielding text and image
+// blocks as they were sent. Non-text non-image blocks (audio, embedded
+// context) are dropped: seek declares no capability for them.
+func (p PromptParams) Segments() []Segment {
+	var out []Segment
+	for i := range p.Prompt {
+		c := &p.Prompt[i]
+		switch c.Type {
+		case "text":
+			if c.Text != "" {
+				out = append(out, Segment{Text: c.Text})
+			}
+		case "image":
+			// A payload-less image block carries nothing to decode; dropping
+			// it here keeps the consumer from having to re-check.
+			if c.Data != "" {
+				out = append(out, Segment{Image: c})
+			}
 		}
 	}
 	return out
@@ -745,8 +833,15 @@ func (s *Server) notify(method string, params any) {
 	}{"2.0", method, params})
 }
 
-// PromptText joins the text content blocks of a prompt — the bridge from
-// ACP's structured prompt to seek's text-only Agent.Prompt.
+// PromptText joins the text content blocks of a prompt — the text-only
+// projection of an ACP prompt.
+//
+// It is NO LONGER the path a prompt takes into seek: buildACPPromptText
+// consumes PromptParams.Segments so image markers keep their wire
+// position (M-P.5 / card c_4pczu3 ④). PromptText survives as the
+// obvious accessor for text-only consumers (fake backends in tests, a
+// protocol trace) — do not add image handling here, it would have no
+// place to put the block order.
 func (p PromptParams) PromptText() string {
 	var b []byte
 	for i, c := range p.Prompt {

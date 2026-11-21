@@ -145,3 +145,15 @@ D2's refined reading of "zero daemon" (v8 §3 I2) allows a **task's lifetime** t
 - **Not bgjob** — `internal/bgjob` (the bash tool's `run_in_background` + `monitor`) stays session-scoped, in-memory, killed by `Shutdown`. The two do not share code: sharing would force bgjob to grow disk/cross-process fields it is deliberately free of. Use `seek task run` when the work must outlive the session.
 
 Not in v1: session-state handover / resume-after-restart (the detach full semantics). Code: `internal/taskproc/` · `internal/taskcli/`. PRD: [`docs/prd/feature-task-lifetime.md`](prd/feature-task-lifetime.md).
+
+---
+
+## 12. Editor / ACP lane (v7 柱 P) / 编辑器车道
+
+`seek acp` speaks the Agent Client Protocol over stdio so editors drive seek like any other agent (Zed today, paseo headless). Three design points that are easy to get wrong later:
+
+- **Capabilities are declared, versions are negotiated.** `initialize` answers with `acp.NegotiateVersion(requested)` — the highest version seek speaks that is ≤ what the client asked for, never an echo — plus a capability object. A downgrade is the response itself (plus a stderr line); the client is the side that closes if it cannot speak the answer.
+- **Capabilities are NOT model-gated.** `promptCapabilities.image` promises "an image content block is accepted", not "this model sees". Models swap mid-session (`session/set_config_option`), so a handshake-time declaration may never depend on the current model; the per-turn router decides each image's fate.
+- **One image seam for three entries.** TUI clipboard paste, `@path` references and ACP image blocks all land on the same `visionRouter` (`cmd/seek/visioninput.go`) → native attach on a vision model, an in-band switch-model note otherwise. ACP adds only the decode step; the wire order of text and image blocks is preserved (`acp.PromptParams.Segments`), so a marker lands between the sentences that surround it.
+
+Code: `internal/acp/` · `cmd/seek/acp_approval.go` · `cmd/seek/visioninput.go` · Guide: [`docs/guide-zed.md`](guide-zed.md).
