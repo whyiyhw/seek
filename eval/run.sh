@@ -331,6 +331,22 @@ extract_metric() {
     list_dir_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="list_dir")] | length' "$path"
       ;;
+    agent_calls)
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent")] | length' "$path"
+      ;;
+    agent_bg_calls)
+      # agent tool_starts whose parsed args carry run_in_background=true —
+      # the D1 detached-spawn shape (feature-orchestration §4.1). fromjson?
+      # swallows a malformed args blob (event drops out rather than
+      # erroring the metric).
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent" and ((.args // "{}" | fromjson? | .run_in_background) == true))] | length' "$path"
+      ;;
+    agent_continue_calls)
+      # agent tool_starts whose parsed args carry a non-empty session_id —
+      # the P1-b continuation shape (Manager.Continue / ContinueBackground,
+      # the `session_id` field of the agent tool schema).
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="agent" and (((.args // "{}" | fromjson? | .session_id) // "") != ""))] | length' "$path"
+      ;;
     bash_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash")] | length' "$path"
       ;;
@@ -445,6 +461,23 @@ extract_metric() {
       # each invocation; this metric is how that reaches expect.json.
       # Cases using the default invocation emit no facts → 0.
       $JQ -s '[.[] | select(.type=="runner_fact" and ((.exit_code // 0) != 0))] | length' "$path"
+      ;;
+    bg_started_events|bg_completed_events|bg_notified_events|bg_notified_transcript|bg_resumed_lineage|bg_artifacts_missing)
+      # subagent-bg-resume's disk-side family (eval v2 E4, c_vollxv):
+      # the case's runner.sh reads the ISOLATED SEEK_HOME's project
+      # state after its invocations — projects/*/subagents.jsonl (the
+      # lifecycle event source, internal/subagent/index.go) and the
+      # parent session transcript — and reports counts as
+      # {"type":"runner_fact","check":<metric name>,"value":N} lines,
+      # the file-level siblings of nonzero_exits above. Each metric
+      # takes the MAX value across matching facts, 0 when absent; bind
+      # them only in cases whose runner ALWAYS emits the fact channel
+      # (otherwise a crashed round reads as "unknown metric"). The
+      # runner asserts event SHAPE and FIELDS (event kind, sub_sid
+      # joins, the "[agent: background done sub-sid=<full>]" wire
+      # prefix) — never prose wording. Per-metric meanings live in
+      # eval/README.md's "Metric vocabulary".
+      $JQ -s --arg check "$name" '[.[] | select(.type=="runner_fact" and .check==$check) | (.value // 0)] | max // 0' "$path"
       ;;
     turns)
       $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
@@ -583,6 +616,22 @@ run_one() {
   # vocabulary. We compute the same fixed set every case so historical
   # diffs are comparable across cases. completion_tokens is folded in
   # here (not just recorded) so expect.json can bound it.
+  #
+  # The nine agent/bg keys (E4, c_vollxv) are DATA-GATED: merged only
+  # when this round's stream carries an agent surface (an `agent`
+  # tool_start or a check-bearing runner_fact). This is the same
+  # discipline as the conditional `round` key — the fixed set above is
+  # byte-frozen by scripts/eval-ablate-test.sh's no-env equivalence pin
+  # (its pre-change blob predates every metric addition since), so an
+  # unconditional growth would break that guard for every non-agent
+  # case. Readers must treat an absent agent key as 0; cases binding
+  # these bounds must guarantee the surface (subagent-bg-resume's
+  # runner always emits its fact channel).
+  local has_agent_surface
+  has_agent_surface=$($JQ -s '
+    ( [.[] | select(.type=="tool_start" and .name=="agent")] | length )
+    + ( [.[] | select(.type=="runner_fact" and ((.check // "") != ""))] | length )
+    > 0' "$out_file")
   local metrics
   metrics=$($JQ -n \
     --argjson unknown_field_errors "$(extract_metric unknown_field_errors "$out_file")" \
@@ -592,6 +641,15 @@ run_one() {
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
     --argjson mcp_calls            "$(extract_metric mcp_calls            "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
+    --argjson agent_calls          "$(extract_metric agent_calls          "$out_file")" \
+    --argjson agent_bg_calls       "$(extract_metric agent_bg_calls       "$out_file")" \
+    --argjson agent_continue_calls "$(extract_metric agent_continue_calls "$out_file")" \
+    --argjson bg_started_events       "$(extract_metric bg_started_events       "$out_file")" \
+    --argjson bg_completed_events     "$(extract_metric bg_completed_events     "$out_file")" \
+    --argjson bg_notified_events      "$(extract_metric bg_notified_events      "$out_file")" \
+    --argjson bg_notified_transcript  "$(extract_metric bg_notified_transcript  "$out_file")" \
+    --argjson bg_resumed_lineage      "$(extract_metric bg_resumed_lineage      "$out_file")" \
+    --argjson bg_artifacts_missing    "$(extract_metric bg_artifacts_missing    "$out_file")" \
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
     --argjson bash_git_calls       "$(extract_metric bash_git_calls       "$out_file")" \
@@ -611,7 +669,9 @@ run_one() {
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
+    --argjson has_agent_surface    "$has_agent_surface" \
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}
+     + (if $has_agent_surface then {agent_calls:$agent_calls, agent_bg_calls:$agent_bg_calls, agent_continue_calls:$agent_continue_calls, bg_started_events:$bg_started_events, bg_completed_events:$bg_completed_events, bg_notified_events:$bg_notified_events, bg_notified_transcript:$bg_notified_transcript, bg_resumed_lineage:$bg_resumed_lineage, bg_artifacts_missing:$bg_artifacts_missing} else {} end)')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

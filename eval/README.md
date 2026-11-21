@@ -244,18 +244,20 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (placeholders — deliberately not calibrated here)
+### Load-bearing axes
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
 | `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
-| `subagent-bg-resume` (E4) | 5 | baseline 待 E4 回填 |
+| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
 | `serve-web-stream` (E5) | 5 | baseline 待 E5 回填 |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
 case measures < 0.6, the fix belongs in the product's prompts, not the
-threshold). This card neither runs nor pre-gates them.
+threshold). E2 neither ran nor pre-gated them; E4's 0.6 is the doctrine
+floor pending its own real-key baseline (a release-lane,
+human/main-session action per the provider-lane rule).
 
 **Live re-measurement**: the expected-pass column is history-derived;
 real-key rounds under this policy (5-round re-runs of the flaky set,
@@ -316,6 +318,9 @@ the lane block and is lane-independent.
 | `grep_calls` | `tool_start` events with `name=grep` |
 | `mcp_calls` | `tool_start` events whose tool name contains the `__` infix — MCP bridge tools register as `<server>__<tool>` (D1 default prefix, `internal/tools/mcptool/bridge.go`); no built-in name contains `__`. Reads 0 before D1 landed (the bridge prefixed only on conflicts then), even when MCP tools are used — the metric assumes D1's naming (`docs/prd/feature-mcp-client.md` §5.2) |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
+| `agent_calls` | `tool_start` events with `name=agent` — subagent spawns + continuations (`internal/tools/agent`) |
+| `agent_bg_calls` | `agent` tool_starts whose parsed args carry `run_in_background=true` — the D1 detached-spawn shape; the E4 model-side assertion that the spawn was actually background |
+| `agent_continue_calls` | `agent` tool_starts whose parsed args carry a non-empty `session_id` — the P1-b continuation shape; the E4 model-side assertion that the follow-up quoted the lineage |
 | `bash_chains` | `tool_start` events for `bash` whose raw args contain `;` or `&&` — the multi-command-chaining anti-pattern. `;` isn't even a separator on cmd.exe (Windows), so a POSIX-style chain fails wholesale; `&&` is legal on cmd but still the anti-pattern (target shape: one command per call, or parallel dedicated-tool calls). `|` deliberately NOT counted — pipelines and grep alternations are legitimate |
 | `bash_git_calls` | `tool_start` events for `bash` whose raw args contain a `git` invocation (`\bgit\b`) — read-only git belongs in the dedicated git tool (whitelist + auto-fix); mutating git (commit/push) legitimately lives in bash, so bind this metric only in read-only prompts |
 | `bash_before_dedicated` | `bash` tool_starts occurring BEFORE the first `grep`/`read`/`list_dir` tool_start — bash as FIRST resort. Ordering is the honest anti-pattern signal when a case's task legitimately forces shell recovery later (e.g. `read` elided an over-1024-byte line so verbatim text needs awk): a total `bash_calls` bound cannot tell recovery from overreach, this can. A run with no dedicated call at all counts every bash call (`list_dir` joined the set 2026-11-18 — adding a tool can only lower the metric, so no existing bound tightens) |
@@ -329,6 +334,23 @@ the lane block and is lane-independent.
 | `session_id_missing` | `agent_end` events without `session_id` (`cmd/seek/main.go` `jsonLine.SessionID`, stable contract; `--no-save` legitimately omits it — only bind this in cases that save) |
 | `session_id_distinct` | distinct `session_id` values across `agent_end` events — a fresh run plus `-resume` of that session must report the same id → 1 |
 | `nonzero_exits` | `runner_fact` lines with `exit_code != 0` — a runner.sh's channel for process-level results (exit codes aren't in the JSONL stream); 0 for default-invocation cases |
+| `bg_started_events` | E4 disk-side family: `runner_fact` lines with `check=bg_started_events` (max `value`) — background `started` events in the isolated SEEK_HOME's `projects/*/subagents.jsonl`, reported by subagent-bg-resume's runner after its invocations |
+| `bg_completed_events` | `completed` terminals joined to those background sub_sids — the child finished before parent-process teardown cancelled it (a cancelled child folds to `failed reason=canceled` and is excluded) |
+| `bg_notified_events` | `notified` consumption markers joined to the **completed** background set — the completion notice specifically (`internal/subagent` Notifier write-side, feature-orchestration §4.1 D3/D5); a failure-notice marker does not count |
+| `bg_notified_transcript` | parent-session transcript rows that are user-role `<context>` messages carrying the `[agent: background done sub-sid=<full>]` wire prefix for a background child — the "notice entered the main session stream" surface itself; prefix + sub_sid only, never the summary prose |
+| `bg_resumed_lineage` | `started` events whose `resumed_from` is non-empty AND names a sub_sid present in the index — the continuation run's lineage link |
+| `bg_artifacts_missing` | completed runs whose `transcript.jsonl` is absent from `projects/<pid>/sessions/<parent-sid>/subagents/<sub-sid>/` (`paths.SubagentSessionDir`) — 0 is the pass state |
+
+The nine agent/bg keys are **data-gated** in the result row: they appear
+only when the round's stream carries an agent surface (an `agent`
+tool_start or a check-bearing `runner_fact`), so rows of non-agent cases
+keep their exact historical bytes — the same discipline as the
+`round`-field gate, and load-bearing for
+[`scripts/eval-ablate-test.sh`](../scripts/eval-ablate-test.sh)'s no-env
+byte-equivalence pin. Readers must treat an absent agent key as 0; a
+case binding these bounds must guarantee the surface (subagent-bg-resume's
+runner emits its fact channel unconditionally, so even a failed round
+has the keys — a red always names its metric, never "unknown metric").
 | `turns` | `turn_end` events |
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
