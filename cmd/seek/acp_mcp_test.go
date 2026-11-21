@@ -339,6 +339,62 @@ func TestACPMCP_RosterAfterWireIsRefused(t *testing.T) {
 	}
 }
 
+// Acceptance ③ (leaktest): repeated session/new → session-end cycles must
+// not accumulate anything — neither child processes nor goroutines.
+//
+// pkg/mcp starts no goroutines of its own (its calls are synchronous), so
+// the only goroutine a connect/close pair touches is os/exec's ctx
+// watchdog, which ends with the child. A warmed-up baseline keeps the
+// one-time runtime/exec noise out of the count; the poll absorbs the
+// scheduler, the same caliber as the web SSE leaktests.
+func TestACPMCP_ConnectCloseCyclesDoNotLeak(t *testing.T) {
+	srv, pidFile := stubRoster(t, "butler")
+	decl := []acp.MCPServer{{Name: srv.Name, Command: srv.Command, Args: srv.Args,
+		Env: []acp.MCPEnvVar{{Name: "ACP_MCP_STUB_PIDFILE", Value: strings.TrimPrefix(srv.Env[0], "ACP_MCP_STUB_PIDFILE=")}}}}
+
+	cycle := func() int {
+		reg := tools.New()
+		b := &acpBackend{reg: reg}
+		b.connectMCP(decl)
+		if _, err := os.Stat(pidFile); err != nil {
+			t.Fatalf("cycle: child never started: %v", err)
+		}
+		_ = os.Remove(pidFile)
+		pid := 0
+		if pidText, rerr := os.ReadFile(pidFile); rerr == nil {
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(pidText)))
+		}
+		if err := b.closeMCP(); err != nil {
+			t.Fatalf("cycle close: %v", err)
+		}
+		if len(reg.Names()) != 0 {
+			t.Fatalf("cycle: registry should be empty before connecting, got %v", reg.Names())
+		}
+		return pid
+	}
+
+	// Warm-up: absorbs first-use runtime/exec allocation.
+	cycle()
+	baseline := runtime.NumGoroutine()
+
+	for i := range 3 {
+		cycle()
+		_ = i
+	}
+
+	// Goroutines settle back to the warmed-up baseline.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if n := runtime.NumGoroutine(); n <= baseline {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("goroutines %d → %d after 3 connect/close cycles — leaked", baseline, runtime.NumGoroutine())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 type namedTool struct{ name string }
 
 func (n *namedTool) Name() string            { return n.name }
