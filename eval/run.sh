@@ -7,6 +7,8 @@
 #   eval/run.sh <case-name> <binary-path>    # one case, named binary
 #   eval/run.sh '' <binary-path>             # all cases, named binary
 #   eval/run.sh --rounds 5 <case-name>       # N-round distribution sampling
+#   eval/run.sh --lane release               # curated case list (E6)
+#   eval/run.sh --lane core --rounds 2       # lane + rounds compose
 #
 # Each case appends one JSON row PER ROUND to:
 #   eval/results/<UTC-date>-<binary-version>.jsonl
@@ -20,6 +22,19 @@
 # INCLUSIVE `>=`); `record_only: true` cases are recorded, never gated.
 # Cost warning: rounds multiply API spend — see the cost table in
 # eval/README.md before raising N on the full case set.
+#
+# --lane NAME (eval v2 E6, docs/prd/feature-eval-v2.md §2.3/§三): run the
+# curated case list in eval/lane-<name>.txt instead of all cases — one
+# case name per line, '#' comments and blank lines ignored. Every entry
+# must name an existing eval/cases/<name>/ dir (a name with no case dir
+# exits 2 at startup, before any case runs — the list is policy, a typo
+# in it must fail loud, not skip silently). Mutually exclusive with an
+# explicit <case-name> positional. Shipped lanes (eval/README.md §
+# "发版前跑什么"): release = load-bearing axes + calibration-stable
+# cases (the pre-release human gate), core = the low-cost nightly
+# subset. No --lane = all cases, byte for byte the historical behaviour
+# (guard: scripts/eval-lane-test.sh pins the no-flag output against the
+# pre-E6 run.sh blob from git history).
 #
 # Env knobs (ablation lane steering, see eval/ablate.sh + eval/README.md
 # § Ablation; both UNSET = historical behaviour, byte for byte):
@@ -223,14 +238,15 @@ if [ "$seek_eval_provider" != deepseek ]; then
 fi
 export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
 
-# --- --rounds flag parsing (E1) ------------------------------------------
+# --- --rounds / --lane flag parsing (E1 / E6) ----------------------------
 # Positional interface (<case> <binary>) is unchanged; flags are stripped
-# wherever they appear in argv before the positional reads. rounds=1 is
-# the historical behaviour, byte for byte (guard test:
-# scripts/eval-rounds-test.sh, sibling of eval-ablate-test's no-env
-# equivalence pin). Malformed values exit 2 at startup — never silently
-# degrade to 1 (same doctrine as min_pass_rate below).
+# wherever they appear in argv before the positional reads. rounds=1 and
+# lane="" are the historical behaviour, byte for byte (guard tests:
+# scripts/eval-rounds-test.sh + scripts/eval-lane-test.sh, siblings of
+# eval-ablate-test's no-env equivalence pin). Malformed values exit 2 at
+# startup — never silently degrade (same doctrine as min_pass_rate below).
 rounds=1
+lane=""
 positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -252,6 +268,29 @@ while [[ $# -gt 0 ]]; do
       esac
       echo "eval: --rounds needs an integer >= 1 (got: $arg_rounds)" >&2
       exit 2
+      ;;
+    --lane)
+      # Charset gate [a-z0-9-] doubles as the path-safety gate: '/' and
+      # '.' are outside it, so no --lane value can escape eval/lane-*.txt.
+      # Any name with a matching lane file is valid (release/core are the
+      # shipped two, not a hardcoded pair).
+      case "${2-}" in
+        ''|*[!a-z0-9-]*)
+          echo "eval: --lane needs a lane name [a-z0-9-], e.g. release | core (got: ${2-<missing>})" >&2
+          exit 2
+          ;;
+        *) lane=$2; shift 2; continue ;;
+      esac
+      ;;
+    --lane=*)
+      arg_lane=${1#--lane=}
+      case "$arg_lane" in
+        ''|*[!a-z0-9-]*)
+          echo "eval: --lane needs a lane name [a-z0-9-], e.g. release | core (got: $arg_lane)" >&2
+          exit 2
+          ;;
+        *) lane=$arg_lane; shift; continue ;;
+      esac
       ;;
     *)
       positional+=("$1")
@@ -282,6 +321,41 @@ else
   JQ=jq.exe
 fi
 
+# --- lane list loading (E6) ------------------------------------------------
+# Read + validate the WHOLE list before running anything: a lane entry
+# naming a nonexistent case, a --lane paired with an explicit case name,
+# or an effectively empty list all exit 2 here, before mkdir/results side
+# effects — same startup-rejection doctrine as malformed --rounds /
+# min_pass_rate. Lane files always resolve against the REPO's eval/ dir
+# ($eval_root), never against a redirected SEEK_EVAL_RESULTS_DIR: the
+# list is lane policy (repo content), the results dir is data.
+lane_cases=()
+if [[ -n "$lane" ]]; then
+  if [[ -n "$case_filter" ]]; then
+    echo "eval: --lane and an explicit case name are mutually exclusive (the lane runs its whole list)" >&2
+    exit 2
+  fi
+  lane_file="$eval_root/lane-$lane.txt"
+  if [[ ! -f "$lane_file" ]]; then
+    echo "eval: no such lane file: $lane_file (see eval/README.md for the lane list format)" >&2
+    exit 2
+  fi
+  while read -r lane_raw || [[ -n "$lane_raw" ]]; do
+    lane_entry=${lane_raw%%#*}
+    lane_entry=$(printf '%s' "$lane_entry" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [[ -z "$lane_entry" ]] && continue
+    if [[ ! -d "$cases_dir/$lane_entry" ]]; then
+      echo "eval: lane '$lane' lists unknown case: $lane_entry (no eval/cases/$lane_entry/)" >&2
+      exit 2
+    fi
+    lane_cases+=("$lane_entry")
+  done < "$lane_file"
+  if [[ ${#lane_cases[@]} -eq 0 ]]; then
+    echo "eval: lane '$lane' list has no active entries: $lane_file" >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$results_dir"
 
 # Stamp the binary identity into the results filename so multi-binary
@@ -295,6 +369,9 @@ results_file="$results_dir/${date_stamp}-${version_tag}-${version_rev}.jsonl"
 
 echo "eval: binary  $binary ($version_full)"
 echo "eval: results $results_file"
+if [[ -n "$lane" ]]; then
+  echo "eval: lane    $lane (${#lane_cases[@]} cases from lane-$lane.txt)"
+fi
 echo
 
 # extract_metric NAME JSONL_PATH → integer
@@ -924,6 +1001,12 @@ if [[ -n "$case_filter" ]]; then
     exit 2
   fi
   run_case "$case_dir"
+elif [[ -n "$lane" ]]; then
+  # Lane dispatch: the validated list, in file order (cheapest-first
+  # curation reads better in the transcript than an alphabetical glob).
+  for lane_name in "${lane_cases[@]}"; do
+    run_case "$cases_dir/$lane_name"
+  done
 else
   shopt -s nullglob
   for case_dir in "$cases_dir"/*/; do

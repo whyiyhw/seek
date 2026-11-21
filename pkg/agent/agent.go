@@ -648,6 +648,10 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// emptyResponseMarker. Any turn that produces real content
 			// resets it (see the reset below the retry loop).
 			emptyPlaceholders int
+			// truncationStreak counts CONSECUTIVE turns whose tool_calls
+			// were salvaged after a finish_reason="length" cut. Any turn
+			// that was not truncated resets it (same rule).
+			truncationStreak int
 		)
 
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
@@ -681,6 +685,10 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				usage     deepseek.Usage
 				finish    string
 				err       error
+				// truncatedCalls is set by the finish=length salvage
+				// below and read by the settle branch, so the nudge can
+				// name how many calls were dropped.
+				truncatedCalls int
 			)
 
 			for attempt := 0; attempt <= agentStreamRetries; attempt++ {
@@ -735,18 +743,30 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			//     marker as a delta (the TUI commits deltas, not
 			//     MessageEnd's content, same as safetyRefusalMarker).
 			placeholderTurn := false
-			if err != nil && errors.Is(err, errEmptyResponse) && ctx.Err() == nil {
-				assistant = deepseek.Message{
-					Role:    deepseek.RoleAssistant,
-					Content: emptyResponseMarker,
+			reasoningOnly := err != nil && errors.Is(err, errReasoningOnlyEmpty)
+			if err != nil && ctx.Err() == nil &&
+				(errors.Is(err, errEmptyResponse) || reasoningOnly) {
+				// Reasoning-only (card c_7kco3z, defect 2): the thinking
+				// block already streamed and was really billed, so
+				// runTurn has ALREADY booked the marker as the content
+				// and emitted the delta (it is the only place that
+				// knows whether the block was open — same shape as
+				// safetyRefusalMarker). Here we only do the loop
+				// bookkeeping: no MessageStart, or the TUI would render
+				// a second assistant block.
+				if !reasoningOnly {
+					assistant = deepseek.Message{
+						Role:    deepseek.RoleAssistant,
+						Content: emptyResponseMarker,
+					}
+					out <- MessageStart{Message: assistant}
+					out <- MessageDelta{Delta: emptyResponseMarker}
 				}
 				// Keep usage (it was really billed) but the response is
 				// complete-as-far-as-it-goes: finish=stop, no error.
 				finish = "stop"
 				err = nil
 				placeholderTurn = true
-				out <- MessageStart{Message: assistant}
-				out <- MessageDelta{Delta: emptyResponseMarker}
 			}
 			if placeholderTurn {
 				emptyPlaceholders++
@@ -792,12 +812,39 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// surfaced because the user already knows they hit Esc);
 			// this branch handles every other path to the same bad
 			// state (including exhausted retries).
+			//
+			// finish_reason="length" is the ONE salvageable variant (card
+			// c_7kco3z): the stream ended cleanly and the API told us why
+			// — the output budget ran out mid-tool-call (11-21 session
+			// 628903ab on the flash lane: two big Write calls hit the 16K
+			// default). The unverified calls are still dropped (invariant
+			// unchanged), but the turn is booked with a marker and the
+			// loop nudges the model to resend smaller instead of killing
+			// the session. Every other mismatched finish (stop/hang-up/
+			// decode error) keeps the original death sentence.
+			truncationSalvage := false
 			if len(assistant.ToolCalls) > 0 && finish != "tool_calls" {
-				stopFinish = "error"
-				out <- ErrorEvent{Err: fmt.Errorf(
-					"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
-					len(assistant.ToolCalls), finish)}
-				return
+				if finish != "length" {
+					stopFinish = "error"
+					out <- ErrorEvent{Err: fmt.Errorf(
+						"agent: refusing to commit turn — assistant emitted %d tool_call(s) but stream ended with finish_reason=%q",
+						len(assistant.ToolCalls), finish)}
+					return
+				}
+				truncationSalvage = true
+				truncatedCalls = len(assistant.ToolCalls)
+				// Drop the unverified calls, keep the text that really
+				// streamed; if the budget went entirely into arguments
+				// the block is open but blank, so stamp the in-band
+				// marker (wire format, same discipline as
+				// emptyResponseMarker) and stream it as a delta —
+				// MessageStart already fired on the first tool_call
+				// delta, so re-opening it would double the block.
+				assistant.ToolCalls = nil
+				if assistant.Content == "" {
+					assistant.Content = truncationMarker
+					out <- MessageDelta{Delta: truncationMarker}
+				}
 			}
 
 			a.appendMessage(assistant)
@@ -822,6 +869,39 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 					Finish:    finish,
 				})
 				settledTurns++
+				// Truncated-tool_calls salvage (card c_7kco3z, defect 1):
+				// the marker (or the text that did stream) is already
+				// committed, so history is a legal continuation. Nudge
+				// the model instead of dying: the point of the self-heal
+				// is the corrective signal ("resend, one call at a time,
+				// smaller arguments"), not carrying on silently. Two in
+				// a row means the model can't fit its plan into the
+				// budget at all — stop loudly rather than pad forever.
+				if truncationSalvage {
+					truncationStreak++
+					if truncationStreak >= truncationHardStop {
+						out <- ErrorEvent{Err: fmt.Errorf(
+							"agent: 连续 %d 次 tool_calls 被输出上限截断（max_tokens=%d，已丢弃未确认调用并按 %s 记账）—— 输出预算不足以承载工具调用，停止本回合",
+							truncationStreak, a.turnMaxTokens(), truncationMarker)}
+						return
+					}
+					if turn < a.cfg.MaxTurns-1 {
+						a.appendMessage(deepseek.Message{
+							Role: deepseek.RoleUser,
+							Content: fmt.Sprintf(
+								"上回合 tool_calls 被输出上限截断（max_tokens=%d），共 %d 个调用未被执行。重发时一次一个调用、参数拆小（大文件分块写、大 JSON 分段提交），不要在同一条回复里堆多个大参数调用。",
+								a.turnMaxTokens(), truncatedCalls) + modeReminder(a.cfg.ModeLabel),
+						})
+					}
+					continue
+				}
+				if !placeholderTurn {
+					// A turn that produced real text resets the streak; a
+					// placeholder turn is not productive output, so
+					// truncation → placeholder → truncation still counts
+					// as two consecutive truncations upstream.
+					truncationStreak = 0
+				}
 				// Placeholder turn: the marker is already committed above,
 				// so history is non-empty and the next request is legal.
 				// Keep going without asking the user — the point of the
@@ -873,6 +953,9 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			}
 
 			totalToolCalls += toolCount
+			// A real tool-call turn is a normal productive turn: the
+			// truncation streak is about CONSECUTIVE cuts.
+			truncationStreak = 0
 
 			// Partitioned dispatch: read-only calls run concurrently
 			// (one goroutine each, writing its own index) while every
@@ -942,11 +1025,23 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 // retry cannot duplicate visible output.
 //
 // The reasoning-only variant (thinking streamed, then the response ended
-// with no content) is deliberately NOT this sentinel — the partial block
-// is already visible, and a retry would render it twice. finish=length
-// is excluded too: the budget was the problem, and an identical retry
-// would be deterministic waste.
+// with no content) has its own sentinel, errReasoningOnlyEmpty: same text,
+// separate identity, so the retry loop keeps re-issuing ONLY the clean
+// variant (nothing was rendered, a retry can't duplicate) while Prompt's
+// self-heal gate accepts both. finish=length is excluded from both: the
+// budget was the problem, and an identical retry would be deterministic
+// waste.
 var errEmptyResponse = errors.New("agent: model returned an empty response (no content and no tool calls)")
+
+// errReasoningOnlyEmpty marks the sibling shape: thinking streamed (so the
+// UI block is already open and the tokens were really billed) and then the
+// response ended with no content and no tool calls. Same sentinel text as
+// errEmptyResponse, deliberately NOT retried — a retry would render the
+// reasoning twice (card c_geyjoo: the flash lane's natural failure pose;
+// it used to be a hard error, i.e. a session death sentence). Prompt's
+// self-heal gate accepts it alongside errEmptyResponse and books
+// emptyResponseMarker as the content.
+var errReasoningOnlyEmpty = errors.New("agent: model returned an empty response (no content and no tool calls)")
 
 // emptyResponseMarker is the in-band assistant content recorded when the
 // clean-empty retry budget is exhausted and the upstream still returns
@@ -964,6 +1059,20 @@ const emptyResponseMarker = "[empty: 上游空补全，已重试1次]"
 // through; two in a row means the upstream is not flaking, and padding the
 // transcript with markers indefinitely only hides a broken lane.
 const emptyPlaceholderHardStop = 2
+
+// truncationMarker is the in-band assistant content recorded when a turn
+// ended with finish_reason="length" mid-tool_call and no text had
+// streamed before the cut. Same wire-format discipline as
+// emptyResponseMarker: it lands in the transcript, so change the text
+// only with a migration in mind. Its job is to keep the assistant
+// message non-empty ("content or tool_calls must be set") and to make
+// the truncation visible in the transcript rather than implicit.
+const truncationMarker = "[truncated: 输出上限截断，未确认的 tool_calls 已丢弃]"
+
+// truncationHardStop is the number of CONSECUTIVE finish=length salvages
+// allowed before Prompt gives up. Signalled upstream triage; two in a
+// row means the model cannot fit its next step into the budget at all.
+const truncationHardStop = 2
 
 // runTurn routes to the DeepSeek or second-tier path depending on which
 // provider was configured.
@@ -1187,10 +1296,28 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 	//     retry loop re-issues the request, and since attempt 1 emitted
 	//     no events there is nothing to duplicate on screen;
 	//   - reasoning streamed, then silence → the partial block is
-	//     already visible; a retry would double-render it. Hard error.
+	//     already visible, so it is NOT retried (a retry would
+	//     double-render the thinking). Since card c_7kco3z it is no
+	//     longer a hard error either: it returns errReasoningOnlyEmpty
+	//     after booking emptyResponseMarker as the content, which
+	//     Prompt's self-heal gate treats like the clean-empty case. The
+	//     reasoning_content stays on the message (it was really billed
+	//     and already rendered; the send path strips it, so no wire
+	//     cost). The marker delta goes out HERE, next to the block that
+	//     is open — emitting a MessageStart would open a second
+	//     assistant block in the TUI.
 	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
 		if !started && (finish == "" || finish == "stop") {
 			return assistant, usage, finish, errEmptyResponse
+		}
+		// Only the STARTED shape is the reasoning-only salvage. A
+		// !started empty with some other finish (e.g. "length") emitted
+		// nothing at all — there is no visible block to keep and the
+		// old hard error is still the right diagnostic.
+		if started {
+			assistant.Content = emptyResponseMarker
+			out <- MessageDelta{Delta: emptyResponseMarker}
+			return assistant, usage, finish, errReasoningOnlyEmpty
 		}
 		return assistant, usage, finish,
 			errors.New("agent: model returned an empty response (no content and no tool calls)")
@@ -1307,11 +1434,20 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 
 	// Empty-response guard: same rationale AND same two-shape split as
 	// runTurnDeepSeek — a clean empty returns the retryable sentinel
-	// (nothing was emitted), a reasoning-only empty does not (the
-	// partial block is already visible).
+	// (nothing was emitted); the started-but-empty shape is not retried
+	// and, since card c_7kco3z, returns errReasoningOnlyEmpty with the
+	// marker booked as content so Prompt self-heals instead of dying.
 	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
 		if !started && (finish == "" || finish == "stop") {
 			return assistant, deepseek.Usage{}, finish, errEmptyResponse
+		}
+		// Same two-shape split as runTurnDeepSeek: only a STARTED block
+		// is salvageable; a stream that emitted nothing at all with an
+		// odd finish keeps the original hard error.
+		if started {
+			assistant.Content = emptyResponseMarker
+			out <- MessageDelta{Delta: emptyResponseMarker}
+			return assistant, deepseek.Usage{}, finish, errReasoningOnlyEmpty
 		}
 		return assistant, deepseek.Usage{}, finish,
 			errors.New("agent: model returned an empty response (no content and no tool calls)")

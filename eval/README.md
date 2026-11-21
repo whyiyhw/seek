@@ -17,6 +17,8 @@ signal, not proof; trends across versions are what matter.
 eval/
 ├── run.sh          # eval/run.sh [case] [binary]   (defaults: all cases, ./seek)
 ├── ablate.sh       # eval/ablate.sh [case] [binary] — bare-core vs full dual run (below)
+├── lane-release.txt  # release lane case list (eval/run.sh --lane release; "发版前跑什么")
+├── lane-core.txt     # nightly core lane case list (eval/run.sh --lane core; same section)
 ├── cases/
 │   └── <name>/
 │       ├── README.md   # what the case probes + the bug it came from
@@ -43,6 +45,9 @@ eval/run.sh tool-args-hallucination /tmp/seek-baseline
 
 # N-round distribution sampling (see "Judgment" below)
 eval/run.sh --rounds 5 tool-args-hallucination
+
+# A curated case list instead of all cases (see "发版前跑什么" below)
+eval/run.sh --lane release
 ```
 
 The runner appends one row to `results/<UTC-date>-<binary-version>.jsonl`
@@ -279,6 +284,56 @@ real-key rounds under this policy (5-round re-runs of the flaky set,
 3-round lanes) are a human/main-session action per the provider-lane
 rule below — this calibration used committed rows plus constructed-row
 verification only.
+
+## 发版前跑什么（lanes, E6）
+
+E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
+§2.2/§2.3、card c_rkoeiy）把两条观测道落成 **lane 名单**：`eval/run.sh
+--lane <name>` 跑 `eval/lane-<name>.txt` 里的用例集（一行一名，`#` 注释
+与空行忽略；名单出现不存在的用例、`--lane` 与显式 `<case-name>` 同给、
+名单无有效条目——都启动 exit 2 零行写入）。名单文件就是车道策略：E2
+标定表的轮数/闸门值是 expect.json 的事实，**谁进哪条道**是名单文件的
+事实，两者都受审进 git。机制由 `scripts/eval-lane-test.sh` 钉死（无
+`--lane` 输出与 E6 前 run.sh 字节等价——git 历史 blob 对照；过滤/顺序/
+畸形 exit 2）。
+
+| lane | 名单 | 用途 |
+|---|---|---|
+| `release` | 承重轴（`serve-web-stream` 已在；`plan-e2e`/`subagent-bg-resume` 注释占位待 E3/E4 落地后取消注释）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
+| `core` | 低成本子集 8 例（便宜单发用例 + 零成本假 key 的 `serve-web-stream`；无 MCP fixture、无整仓 review） | 夜间观测（CI schedule，`--rounds 2`） |
+
+**发版命令**（在 main、干净树）：
+
+```bash
+go build -o seek ./cmd/seek
+eval/run.sh --lane release --rounds 5
+```
+
+- 稳定例按 §2.5 标定在 3 轮（gate 1.0 = 3/3）；发版道统一 5 轮是
+  PRD §五成本表的形状（$1.5–4/次），且是**收紧**不是放松——同一个
+  1.0 闸门在 5 轮上要求 5/5。
+- **判读口径**：任何 FAIL 行先看其 failures 列的 metric 与该例
+  README；稳定例单轮红按 E2 容差原则是**新信号**而非噪声——单发复跑
+  该例 `eval/run.sh --rounds 3 <case>` 区分偶发与持续，持续红 = 阻塞
+  发版。record-only 与已知 flaky 例不在 release 名单：它们的观测归
+  日常 trend（`scripts/eval-trend.sh`），不归发版闸门。
+- **真 key 口径**（`serve-web-stream` 的 E5 留白在此收口）：发版道同
+  runner 不清空车道凭证、不设假端点即走真车道；届时按 §2.5 在 5 轮
+  上重标定（PRD §六.3「< 0.6 修产品提示不修阈值」适用）。
+
+**夜间入口**（只观测、不阻塞 PR）：`.github/workflows/ci.yml` 的
+`eval-nightly` job 仅在 `schedule` 触发时运行（PR / workflow_dispatch
+结构性地跑不到它——ci.yml 的 keyless PR 面不动），执行 `--lane core
+--rounds 2`，行落 actions cache 持久化的独立目录（不进 `eval/results/`、
+不回写 git；cache 逐出会重置计数，方向保守）。失败策略**复用**
+`scripts/eval-trend.sh` 的既有 streak 实现（`streak_failures` 字段 =
+从最新行往回数的连续红行数，本卡零新计数代码）：core 名单内任一用例
+streak ≥ 3 才把 job 判红——夜间每例每晚写 2 行，即第二个连续整红夜过
+阈；中间任一绿行即重置。key 走 `secrets.OPENCODE_API_KEY`（OpenCode
+订阅车道：无人值守不烧计量 key，[`docs/prd/v8.md`](../docs/prd/v8.md)
+§9.1；secret 未配则告警并跳过当晚——观察者不是安全网，缺 key 静默绿
+无害，但跑出全红行是纯噪声）。trend 报告按 PRD §2.3 以 artifact 上传
+（留 30 天）。
 
 ## Isolation: the SEEK_HOME sandbox
 

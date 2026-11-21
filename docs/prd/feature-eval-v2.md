@@ -115,7 +115,7 @@ GitHub Actions `schedule` 跑 **core 子集**（约 8 例低成本 + 2 轮），
 | **E3 plan-e2e** | 承重轴用例之一：propose→批准→执行→改需求→resume | 批准前零写入断言；resume 不重跑已完成步骤；用例 README 记录 baseline 与判分口径 |
 | **E4 subagent-bg-resume** | 承重轴用例之二：后台子代理完成通知 + 续话血统 | 完成通知进主流；续话 run 带 `resumed_from`；产物路径断言 |
 | **E5 serve-web-stream** | 承重轴用例之三：`/rpc` → SSE → 会话落盘 | 事件序列与 `session/list` 双断言；复用 `serve-smoke-test.sh` 的启动/收尾。**已落地**（c_lbtdqw，2026-11-21；事件序列按 main 现状断言 W1.4 帧族——delta/usage/收口默认帧，见状态⑤；假 key 车道 3/3 绿 + 构造行负验证；E2 表位已回填） |
-| **E6 release lane + 夜间入口** | `--lane release|core` 读名单；`ci.yml` 加 schedule 跑 core（2 轮，连续 3 次同向失败才 fail）；发版流程写进 CHANGELOG 前的检查单 | release lane 只含承重轴 3 例 + 已知稳定用例；nightly 失败策略用 `eval-trend.sh` 的 streak 口径；README 有「发版前跑什么」一节 |
+| **E6 release lane + 夜间入口** | `--lane release|core` 读名单；`ci.yml` 加 schedule 跑 core（2 轮，连续 3 次同向失败才 fail）；发版流程写进 CHANGELOG 前的检查单 | release lane 只含承重轴 3 例 + 已知稳定用例；nightly 失败策略用 `eval-trend.sh` 的 streak 口径；README 有「发版前跑什么」一节。**已落地**（c_rkoeiy，2026-11-21；--lane 为文件驱动任意名（`eval/lane-<name>.txt`），release 名单 = 已落地承重轴 1 例（E3/E4 两例注释占位）+ 标定表 gate-1.0 稳定例 22；nightly streak 阈值落在 eval-trend 既有 `streak_failures` 的行级口径上（2 行/夜 → 第二个连续整红夜过阈），构造行七场景仿真验证；「发版前跑什么」节即检查单，CHANGELOG E6 条目提行） |
 | **E7 D 项清点** | 「不由 eval 保证」栏 + 五类缺口的「已有测试/需补」结论 | 每条检查有归属；发现真缺口则开独立卡，不在本卡内顺手补 |
 
 **建议顺序**：E1 → E2（先把口径立住，否则后面所有用例都在旧口径下白标定）→ E3/E4/E5（可并行）→ E6 → E7。
