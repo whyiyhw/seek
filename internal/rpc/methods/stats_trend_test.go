@@ -88,7 +88,7 @@ func TestStatsTrendAggregates(t *testing.T) {
 		}
 		want := deepseek.Usage{
 			PromptTokens: 1000 * (i + 1), CompletionTokens: 100 * (i + 1),
-			TotalTokens: 1100 * (i + 1),
+			TotalTokens:          1100 * (i + 1),
 			PromptCacheHitTokens: 100 * i, PromptCacheMissTokens: 1000,
 		}
 		if p.PromptTokens != want.PromptTokens || p.CompTokens != want.CompletionTokens ||

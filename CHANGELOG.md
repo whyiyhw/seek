@@ -66,6 +66,7 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_yhpfsp：pitfalls 台账分流 triage：255 live / 0 absorbed——一轮「坑→修复卡/eval/吸收」全量分流
 - c_4doebx：web 对齐 dsh·子代理面板升级（/rpc 挂 subagent/*，收口 inspect-rpc #12）
 - c_nqvbdu：CHANGELOG 裁剪清单消费：三条机器写超长条目按 notes-changelog-trim-2026-11-20 清单裁剪
+- c_6xktw4：web 对齐 dsh·统计趋势（stats/trend 聚合 + 手绘 SVG 折线/悬停/窗口切换 + 侧栏 per-session cost 列）
 - c_3vct6k：read 截断参数调优：按 transcript-stats 基线（修订版）重新评估调参对象
 - c_ni7mzw：web 对齐 dsh·主题切换与设置面板（亮暗+防 FOUC）
 - c_ux7lvk：web 对齐 dsh·工具调用树（可展开参数/结果/耗时）
@@ -81,4 +82,3 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_lxe3lz：webfrontend.html 结构守卫：标签配平+id 唯一断言进 static 测试——合并语义冲突止血（af1be012 吞 /section、5b57c1ba 丢 import 两例背景）
 - c_347nnh：eval v2·E2：通过率标定表——历史行+每例实测产出闸门取值与 record-only 名单，落 eval/README.md
 - c_xt6ql7：hooks 五观察点触发接线：agent Prompt 落定 / subagent 起终态 / TUI cmdCompact / Notifier 四调用点补接
-- c_cy7q2v：AGENTS.md 词预算超线 40 词处置：起草压缩 diff 或调线方案呈用户（c_6mbjfq 悬项承接）验收：①产出二选一方案——压缩 diff（≥40 词、零语义损失、逐条可核）或调线 3200→3300 一行（含理由）；②AGE…

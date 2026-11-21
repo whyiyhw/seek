@@ -235,7 +235,11 @@ if (MODE === 'multi') {
 
 if (MODE === 'single') {
   try {
-    const s = await until('单点渲染', x => x.hasSvg && x.n === 1, 10000);
+    // until 条件与下面的断言同口径：趋势点先到、快照卡片后到（两张卡的
+    // 数据源是两次 /rpc，页面并发拉），只等 SVG 就断言 cardText 是
+    // 「跑两次挂一次」的竞态——断言口径缺陷，不是实现缺陷。
+    const s = await until('单点渲染 + 快照卡就绪',
+      x => x.hasSvg && x.n === 1 && x.cardText.includes('前缀缓存'), 10000);
     ck('单会话：SVG 一个点、无折线', s.n === 1 && s.polylines === 0, `n=${s.n} lines=${s.polylines}`);
     ck('单会话：文案「折线需要 ≥2 个点」', s.plotText.includes('折线需要 ≥2 个点'), s.plotText);
     ck('单会话：不是空态', !s.plotText.includes('还没有历史会话'), s.plotText);
@@ -245,7 +249,10 @@ if (MODE === 'single') {
 
 if (MODE === 'empty') {
   try {
-    const s = await until('空态文案', x => x.plotText.includes('还没有历史会话'), 10000);
+    // 同 single 景：until 口径覆盖下面每条断言用到的快照字段，否则
+    // 「空态文案到了、快照区还在加载中」就是一次假红。
+    const s = await until('空态文案 + 快照区空文案',
+      x => x.plotText.includes('还没有历史会话') && x.cardText.includes('没有历史会话'), 10000);
     ck('空 store：趋势卡空态文案', s.plotText.includes('还没有历史会话'), s.plotText);
     ck('空 store：不渲染 SVG（没有 point 可画）', !s.hasSvg, `hasSvg=${s.hasSvg}`);
     ck('空 store：快照区同口径空文案（不报错）',
