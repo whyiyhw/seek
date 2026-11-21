@@ -56,3 +56,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_yhpfsp：pitfalls 台账分流 triage：255 live / 0 absorbed——一轮「坑→修复卡/eval/吸收」全量分流
 - c_4doebx：web 对齐 dsh·子代理面板升级（/rpc 挂 subagent/*，收口 inspect-rpc #12）
 - c_nqvbdu：CHANGELOG 裁剪清单消费：三条机器写超长条目按 notes-changelog-trim-2026-11-20 清单裁剪
+- c_3vct6k：read 截断参数调优：按 transcript-stats 基线（修订版）重新评估调参对象
