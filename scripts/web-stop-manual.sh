@@ -113,6 +113,16 @@ case "$MSG" in
     em '{"type":"text_delta","delta":"这段不该出现。"}'
     sleep 60
     ;;
+  丢收口)
+    # c_6mbjfq：页面趁断连把 run 跑完——收口帧没人订阅，永久丢失。
+    # 首段后留 1.0s：给浏览器「看到 ⏹ → 关 EventSource」留足窗口，慢机器
+    # 也不会抢在关连接前收口（抢到就退化成正常收口，景 3 会直接红）。
+    em '{"type":"agent_start","model":"deepseek-chat"}'
+    em '{"type":"text_delta","delta":"丢收口半截。"}'
+    sleep 1
+    em '{"type":"text_delta","delta":"第二段。"}'
+    em '{"type":"agent_end","turns":1,"session_id":"SLOST"}'
+    ;;
   *)
     em '{"type":"agent_start","model":"deepseek-chat"}'
     em '{"type":"text_delta","delta":"桩应答："}'
