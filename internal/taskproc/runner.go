@@ -151,6 +151,19 @@ func (r *Runner) Kill(id string, grace time.Duration) (Task, error) {
 	if t.Status.Terminal() || t.Status == StatusZombie {
 		return t, nil
 	}
+	// Between the spawner's start fact and the wrapper's pid fact there is
+	// a window (microseconds, but reachable from a script that backgrounds
+	// `seek task run` and kills immediately). Signalling pid 0 is
+	// meaningless, and recording `killed` there would be a lie the operator
+	// cannot recover from: the task would keep running while `ps` reports
+	// it killed. Refuse instead — the caller retries a moment later. The
+	// hint names the escape hatch for the wedged case (a wrapper that died
+	// before it could report a pid leaves no process to signal and no
+	// terminal fact — GC is out of scope, PRD §5).
+	if t.PID == 0 {
+		return t, fmt.Errorf("taskproc: task %s is still starting (no pid recorded yet); retry in a moment — "+
+			"if it stays that way the wrapper never ran, and %s can be removed", id, r.Store.RecordPath(id))
+	}
 	if grace <= 0 {
 		grace = DefaultKillGrace
 	}

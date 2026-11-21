@@ -76,6 +76,8 @@ seek task run "<command>"  spawn（--cwd 指定工作目录）；打印 tid + at
 
 退出码：`ps`/`attach`/`kill` 成功 0；未知 id / 坏参数 1（`kill` 对已终结任务是 0 + 说明，不算错误）。
 
+**`kill` 的起始窗口**：记录里还没有 pid 时（spawner 已写 start 事实、wrapper 尚未报告 pid，窗口是微秒级但仍可从脚本里撞上）`kill` **拒绝执行并原样返回错误**，不写 `killed` 事实——给 pid 0 发信号是空操作，而写下的 `killed` 会让 `ps` 报「已杀」而任务还在跑，这是操作者无法补救的那个方向。重试即可。
+
 ## 5. 明确不在本卡（接缝已留）
 
 - **detach 全语义**：会话状态移交（任务跑在哪个 session、transcript 归属）、断连续跑（`seek task run` 重启后接回同一条任务流）。本卡的 `start` 事实只有 `session` / `project` 两个**信息字段**（供将来看，不参与任何状态判定）。

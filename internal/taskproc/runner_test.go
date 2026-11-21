@@ -186,6 +186,33 @@ func TestRunner_KillZombieIsNoOp(t *testing.T) {
 	}
 }
 
+// TestRunner_KillDuringStartWindowRefuses: between the start fact and the
+// wrapper's pid fact there is nothing to signal. Recording `killed` there
+// would leave the real task running while `ps` claimed it was dead — the
+// one lie an operator cannot recover from — so Kill must refuse and leave
+// the record untouched for a retry.
+func TestRunner_KillDuringStartWindowRefuses(t *testing.T) {
+	s := newStore(t)
+	fp := newFakeProc()
+	if _, err := appendStart(t, s, Event{ID: "t-1", Command: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Store: s, Probe: fp.probe, Signal: fp.signal, Now: time.Now, Sleep: func(time.Duration) {}}
+	if _, err := r.Kill("t-1", time.Second); err == nil || !strings.Contains(err.Error(), "still starting") {
+		t.Fatalf("want a still-starting error, got %v", err)
+	}
+	if sigs := fp.sent(); len(sigs) != 0 {
+		t.Errorf("signalled pid 0: %v", sigs)
+	}
+	got, err := s.Read("t-1", ProbeGoneFunc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusStarting {
+		t.Errorf("status = %q, want starting (no killed fact written)", got.Status)
+	}
+}
+
 func TestRunner_KillUnknownTask(t *testing.T) {
 	s := newStore(t)
 	r := &Runner{Store: s, Probe: ProbeGoneFunc, Now: time.Now, Sleep: func(time.Duration) {}}
