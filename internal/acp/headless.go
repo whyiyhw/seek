@@ -14,11 +14,15 @@ import (
 )
 
 // YoloEnvVar is the opt-in switch that elevates the headless ACP lane
-// from PrefDeny to PrefYolo. Default (unset / non-truthy) keeps Deny —
-// interactive clients (Zed) stay safe until ACP
-// session/request_permission lands (feature-acp.md backlog ①). Truthy
-// set: 1 / true / yes / on (case-insensitive, whitespace-trimmed) —
-// same set as cmd/seek's envBoolTrue.
+// from the default approval posture (PrefAsk — session/request_
+// permission, since backlog ① / acp_approval.go) to PrefYolo. Default
+// (unset / non-truthy): every dangerous action is asked over the
+// protocol, and a client that doesn't answer (headless drivers,
+// disconnect, timeout) DENIES — the pre-① bash-denied posture as the
+// worst case, so interactive clients (Zed) get their native permission
+// UI and unattended ones fail safe. Truthy set: 1 / true / yes / on
+// (case-insensitive, whitespace-trimmed) — same set as cmd/seek's
+// envBoolTrue.
 //
 // ⚠️ Trusted local headless ONLY (paseo/drive unattended lanes, where
 // there is no human to answer y/N). Yolo permits every action the

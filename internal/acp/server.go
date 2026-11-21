@@ -6,26 +6,39 @@
 // Transport is JSON-RPC 2.0 over newline-delimited stdio (same shape as
 // seek's MCP client, pkg/mcp — json.Encoder/Decoder, no Content-Length
 // framing). This file is the transport + dispatch core (M-P.1): it owns
-// the read loop, method routing, response/notification writing, and
-// per-session cancellation. The mapping to seek's agent (session/prompt →
-// Agent.Prompt event stream, request_permission → askuser) is injected as
-// a Backend so this layer is testable with a fake (no real agent).
+// the read loop, method routing, response/notification writing, per-
+// session cancellation, AND the agent→client request lane (Call — the
+// half JSON-RPC gives the server for free but ACP actually needs:
+// session/request_permission, feature-acp.md backlog ①). The mapping to
+// seek's agent (session/prompt → Agent.Prompt event stream) is injected
+// as a Backend so this layer is testable with a fake (no real agent).
 package acp
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"strconv"
 	"sync"
+	"time"
 )
 
 // --- JSON-RPC 2.0 envelope (newline-delimited) ----------------------
 
+// request doubles as the inbound frame: a client message with Method set
+// is a request/notification from the client; one with Method absent and
+// ID present is a RESPONSE to an agent→client Call (Result/Error carry
+// its payload). The two share one decoder, so the read loop peeks Method
+// before routing.
 type request struct {
 	JSONRPC string           `json:"jsonrpc"`
 	ID      *json.RawMessage `json:"id,omitempty"` // absent ⇒ notification
-	Method  string           `json:"method"`
+	Method  string           `json:"method,omitempty"`
 	Params  json.RawMessage  `json:"params,omitempty"`
+	Result  json.RawMessage  `json:"result,omitempty"` // response half
+	Error   *rpcError        `json:"error,omitempty"`  // response half
 }
 
 type rpcError struct {
@@ -220,6 +233,22 @@ type Server struct {
 
 	mu      sync.Mutex // serialises writes + guards cancels
 	cancels map[string]context.CancelFunc
+
+	// Agent→client request lane (Call). waiters is keyed by the string
+	// ids Call mints; a reply frame with a matching id resolves exactly
+	// one waiter. callSeq is under mu too (ids must be unique even when
+	// two turns ask concurrently).
+	waiters map[string]chan callResult
+	callSeq int64
+}
+
+// callResult is one resolved agent→client call: either the reply's
+// Result payload, or the ending error (client JSON-RPC error, or a
+// sentinel — ErrDisconnected / ErrCallCancelled — from the transport's
+// own synthetic resolutions).
+type callResult struct {
+	raw json.RawMessage
+	err error
 }
 
 func NewServer(r io.Reader, w io.Writer, b Backend) *Server {
@@ -228,13 +257,142 @@ func NewServer(r io.Reader, w io.Writer, b Backend) *Server {
 		dec:     json.NewDecoder(r),
 		backend: b,
 		cancels: map[string]context.CancelFunc{},
+		waiters: map[string]chan callResult{},
+	}
+}
+
+// Call errors — each names one way an agent→client request can end
+// without a usable answer. The permission asker treats ALL of them as
+// deny (feature-acp.md backlog ①: unanswered/disconnected defaults to
+// deny, mirroring --approval-stdin's EOF posture).
+var (
+	// ErrCallTimeout: no reply within the caller's deadline. The client
+	// may still be rendering the prompt — but the turn cannot block
+	// forever on a decider that never comes.
+	ErrCallTimeout = errors.New("acp: no reply from client (timeout)")
+	// ErrDisconnected: the read loop exited (client closed stdio / Serve
+	// ctx done) while the call was pending.
+	ErrDisconnected = errors.New("acp: client disconnected")
+	// ErrCallCancelled: caller's ctx was cancelled, or the client sent
+	// $/cancel_request for this id.
+	ErrCallCancelled = errors.New("acp: request cancelled")
+)
+
+// Call sends one agent→client JSON-RPC request and blocks for the reply
+// (the transport half of session/request_permission). method is the wire
+// method ("session/request_permission"); params marshals to its params.
+// The reply's Result is returned raw — the caller owns decoding. Every
+// non-reply ending (timeout, disconnect, cancellation, JSON-RPC error
+// from the client — e.g. a headless driver that doesn't implement the
+// method answering -32601) is an error; none of them block forever.
+//
+// Ids are minted here as strings ("p1", "p2", …): JSON-RPC allows
+// string ids, the client echoes them verbatim, and strings keep the
+// waiter map free of number/string dual keys.
+func (s *Server) Call(ctx context.Context, method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	s.mu.Lock()
+	s.callSeq++
+	id := "p" + strconv.FormatInt(s.callSeq, 10)
+	ch := make(chan callResult, 1)
+	s.waiters[id] = ch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.waiters, id)
+		s.mu.Unlock()
+	}()
+
+	s.mu.Lock()
+	err := s.enc.Encode(struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      string `json:"id"`
+		Method  string `json:"method"`
+		Params  any    `json:"params"`
+	}{"2.0", id, method, params})
+	s.mu.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("acp: send %s: %w", method, err)
+	}
+
+	if timeout <= 0 {
+		timeout = time.Hour // caller said "wait forever"; still bounded
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ErrCallCancelled
+	case <-timer.C:
+		return nil, ErrCallTimeout
+	case r := <-ch:
+		return r.raw, r.err
+	}
+}
+
+// deliverResponse routes one client frame that carries an ID but no
+// method (a reply to a Call) to its waiter. Unknown or unparsable ids
+// are dropped: the agent only ever has its own Calls pending, so an
+// unmatched reply is client noise, not a protocol event.
+func (s *Server) deliverResponse(f *request) {
+	var id string
+	if err := json.Unmarshal(*f.ID, &id); err != nil {
+		return
+	}
+	s.mu.Lock()
+	ch, ok := s.waiters[id]
+	if ok {
+		delete(s.waiters, id)
+	}
+	s.mu.Unlock()
+	if ok {
+		if f.Error != nil {
+			ch <- callResult{err: fmt.Errorf("acp: client error on request %s: %d %s", id, f.Error.Code, f.Error.Message)}
+		} else {
+			ch <- callResult{raw: f.Result}
+		}
+	}
+}
+
+// cancelWaiter resolves one pending Call as ErrCallCancelled ($/
+// cancel_request). Ids arrive as raw JSON (string or number); the string
+// form is what Call mints, anything else matches nothing by design.
+func (s *Server) cancelWaiter(rawID json.RawMessage) {
+	var id string
+	if err := json.Unmarshal(rawID, &id); err != nil {
+		return
+	}
+	s.mu.Lock()
+	ch, ok := s.waiters[id]
+	if ok {
+		delete(s.waiters, id)
+	}
+	s.mu.Unlock()
+	if ok {
+		ch <- callResult{err: ErrCallCancelled}
+	}
+}
+
+// failWaiters resolves every pending Call as disconnected. Called from
+// the read loop's exit paths (EOF, decode error, Serve ctx done): the
+// turn goroutines may be mid-tool inside an askFn, and denying them is
+// what lets the process unwind instead of hanging on a dead client.
+func (s *Server) failWaiters() {
+	s.mu.Lock()
+	pending := s.waiters
+	s.waiters = map[string]chan callResult{}
+	s.mu.Unlock()
+	for _, ch := range pending {
+		ch <- callResult{err: ErrDisconnected}
 	}
 }
 
 // Serve runs the read loop until the client disconnects (EOF) or ctx is
 // done. Each request is dispatched by method; prompts run in their own
-// goroutine so session/cancel can interrupt them.
+// goroutine so session/cancel can interrupt them. Replies to agent→
+// client Calls (id set, no method) are routed to their waiters here —
+// the read loop is the only frame source, so it is the only deliverer.
 func (s *Server) Serve(ctx context.Context) error {
+	defer s.failWaiters()
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -245,6 +403,12 @@ func (s *Server) Serve(ctx context.Context) error {
 				return nil // client closed — clean shutdown
 			}
 			return err
+		}
+		if req.Method == "" {
+			if req.ID != nil {
+				s.deliverResponse(&req)
+			}
+			continue // no method + no id: junk, ignore
 		}
 		s.dispatch(ctx, req)
 	}
@@ -356,6 +520,19 @@ func (s *Server) dispatch(ctx context.Context, req request) {
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		s.cancelSession(p.SessionID)
+	case "$/cancel_request":
+		// JSON-RPC extension ACP inherits (protocol-router names it):
+		// the client withdrawing one of OUR pending requests — e.g. the
+		// user closed the permission prompt. Params carry the echoed id.
+		// A notification (no reply id), so cancelWaiter just fails the
+		// waiter; the pending Call returns ErrCallCancelled → deny.
+		var p struct {
+			ID json.RawMessage `json:"id"`
+		}
+		_ = json.Unmarshal(req.Params, &p)
+		if len(p.ID) > 0 {
+			s.cancelWaiter(p.ID)
+		}
 	default:
 		// Unknown method: error if it's a request, ignore if a notification.
 		if req.ID != nil {
