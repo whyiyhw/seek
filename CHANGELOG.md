@@ -60,3 +60,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_ni7mzw：web 对齐 dsh·主题切换与设置面板（亮暗+防 FOUC）
 - c_ux7lvk：web 对齐 dsh·工具调用树（可展开参数/结果/耗时）
 - c_gqo32q：信号：手测脚本新增即进 selftest 排除表无闸——UI 验证车道两撞（c_txz6vz/c_5m3fm6）、c_ni7mzw 在途
+- c_jdel6u：空补全重试穷尽后不再杀会话——合成 `[empty: 上游空补全，已重试1次]` assistant 消息续跑（reasoning-only/length 分支不动），连续 2 次占位硬停（文案「连续空补全占位 N 次」）
