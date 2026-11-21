@@ -350,7 +350,7 @@ TUI 实现中遇到的具体问题，以下是来自 [`docs/pitfalls.md`](../pit
 
 - 两次反转：最初移除 `tea.WithMouseCellMotion()` 恢复原生选择→用户失去滚轮→重新启用→drag 失效。最终方案：alt-screen 模式下启用滚轮，并提供修饰键（Option）作为原生选择的逃逸口。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

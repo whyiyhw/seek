@@ -2,7 +2,9 @@ package fileroute
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -162,7 +164,7 @@ func TestRoute_RichPrefix(t *testing.T) {
 	textDoc := writePDF(t, "text.pdf", 8)
 	richDoc := writePDF(t, "figures.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "compare @rich:"+richDoc+" with "+textDoc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "compare @rich:"+richDoc+" with "+textDoc)
 	if len(parts) != 2 {
 		t.Fatalf("parts = %+v", parts)
 	}
@@ -185,7 +187,7 @@ func TestRoute_OversizeDegradesNotFatal(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: 32}
 	big := writePDF(t, "huge.pdf", 64)
 
-	got, parts := r.Route(context.Background(), "m", "read @rich:"+big)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "read @rich:"+big)
 	if !strings.Contains(got, "[file: huge.pdf — 超过单文档 32 B 上限]") {
 		t.Fatalf("oversize note = %q", got)
 	}
@@ -213,7 +215,7 @@ func TestRoute_UploadFailKeepsAsset(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 16)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
 	if !strings.Contains(got, "[file: report.pdf — 上传失败: boom 500]") {
 		t.Fatalf("upload-fail note = %q", got)
 	}
@@ -225,18 +227,96 @@ func TestRoute_UploadFailKeepsAsset(t *testing.T) {
 	}
 }
 
-func TestRoute_NoClientLaneNote(t *testing.T) {
-	// GLM/opencode lanes have no Files API client — degrade with a
-	// note, upload nothing.
+// TestRoute_IncapableModelNote: on a second-tier lane (client nil) a
+// model outside modelcap's Files axis (unknown id, or a lane whose
+// endpoint has no document input — GLM) gets the switch-model note,
+// before any stat/read/store/upload work.
+func TestRoute_IncapableModelNote(t *testing.T) {
 	r := Router{assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
-	if !strings.Contains(got, "[file: report.pdf — 文件输入需 DeepSeek 车道") {
-		t.Fatalf("lane note = %q", got)
+	got, parts := r.Route(context.Background(), "glm-5.3", "@"+doc)
+	if !strings.Contains(got, "[file: report.pdf — 当前模型不支持文件输入") {
+		t.Fatalf("switch-model note = %q", got)
 	}
 	if len(parts) != 0 {
-		t.Fatalf("non-DeepSeek lane must not attach: %+v", parts)
+		t.Fatalf("incapable model must not attach: %+v", parts)
+	}
+	if ents, _ := os.ReadDir(r.assetsDir); len(ents) != 0 {
+		t.Fatalf("incapable model must not store, got %d entries", len(ents))
+	}
+}
+
+// TestRoute_DeepSeekLaneIgnoresModelTable: file input on the DeepSeek
+// lane is account-level (the Files API parses server-side), so an id the
+// modelcap table has never heard of — deepseek-v4-pro, or a freeform id
+// — must still upload. Gating this lane on a per-id table is exactly the
+// regression the vision allow-list taught (docs/pitfalls.md): a capable
+// model silently answered "unsupported".
+func TestRoute_DeepSeekLaneIgnoresModelTable(t *testing.T) {
+	for _, model := range []string{deepseek.ModelV41Flash, "deepseek-v4-pro", "some-freeform-id", ""} {
+		up := &fakeUploader{obj: okObj()}
+		r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+		doc := writePDF(t, "report.pdf", 8)
+
+		got, parts := r.Route(context.Background(), model, "@"+doc)
+		if !strings.Contains(got, "— uploaded · text") {
+			t.Fatalf("model %q: marker = %q", model, got)
+		}
+		if len(parts) != 1 || parts[0].FileID == "" {
+			t.Fatalf("model %q: parts = %+v", model, parts)
+		}
+		if up.calls() != 1 {
+			t.Fatalf("model %q: uploads = %d, want 1", model, up.calls())
+		}
+	}
+}
+
+// TestRoute_SecondTierAttaches: no Files API client, but the model is
+// file-capable (modelcap) — the PDF is stored and attached Asset-only;
+// nothing is uploaded, no parse fee is recorded. The send path owns
+// materialisation (deepseek.ResolveFileData).
+func TestRoute_SecondTierAttaches(t *testing.T) {
+	cs := &costSink{}
+	r := Router{assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "report.pdf", 8)
+
+	got, parts := r.Route(context.Background(), "gpt-4o", "@"+doc)
+	if !strings.Contains(got, "[file: report.pdf — attached · 8 B]") {
+		t.Fatalf("attach marker = %q", got)
+	}
+	if len(parts) != 1 || parts[0].Asset == "" || parts[0].FileID != "" {
+		t.Fatalf("second-tier part must be Asset-only: %+v", parts)
+	}
+	if _, err := os.Stat(filepath.Join(r.assetsDir, parts[0].Asset)); err != nil {
+		t.Fatalf("asset not stored: %v", err)
+	}
+	if cs.total() != 0 {
+		t.Fatalf("second-tier attach must bill no parse fee, got %v", cs.total())
+	}
+}
+
+// TestRoute_SecondTierPDFOnly: Word/PPT have no second-tier wire
+// format (pkg/llm's transport set is PDF-only) — the router says so at
+// submit time and attaches nothing, so the transcript never gains an
+// "attached" marker a later send would have to walk back.
+func TestRoute_SecondTierPDFOnly(t *testing.T) {
+	r := Router{assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
+	dir := t.TempDir()
+	docx := filepath.Join(dir, "spec.docx")
+	if err := os.WriteFile(docx, []byte("PK\x03\x04docx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, parts := r.Route(context.Background(), "claude-sonnet-4-20250514", "@"+docx)
+	if !strings.Contains(got, "[file: spec.docx — 二线车道仅支持 PDF 附件") {
+		t.Fatalf("format note = %q", got)
+	}
+	if len(parts) != 0 {
+		t.Fatalf("docx must not attach on a second-tier lane: %+v", parts)
+	}
+	if ents, _ := os.ReadDir(r.assetsDir); len(ents) != 0 {
+		t.Fatalf("docx must not be stored on a second-tier lane, got %d entries", len(ents))
 	}
 }
 
@@ -250,7 +330,7 @@ func TestRoute_StatGateNoFalsePositive(t *testing.T) {
 		`if strings.HasSuffix(name, ".pdf") { parse(name) }`,
 		"plain text, no refs",
 	} {
-		got, parts := r.Route(context.Background(), "m", text)
+		got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, text)
 		if got != text || len(parts) != 0 || up.calls() != 0 {
 			t.Fatalf("false positive on %q: %q %+v", text, got, parts)
 		}
@@ -263,13 +343,15 @@ func TestRoute_StatGateNoFalsePositive(t *testing.T) {
 // AFTER the family prefix (AGENTS.md wire-format rule).
 func TestMarker_Family(t *testing.T) {
 	markers := []string{
-		laneNote("x.pdf"),
+		switchModelNote("x.pdf"),
+		formatNote("x.docx"),
 		oversizeNote("x.pdf", deepseek.FileMaxBytes),
-		attachMarker("x.pdf", deepseek.PurposeTextRecognition, okObj()),
-		attachMarker("x.pdf", deepseek.PurposeRichLayoutRecognition, &deepseek.FileObject{ID: "file-api-y"}),
+		attachMarker("x.pdf", deepseek.PurposeTextRecognition, okObj(), 34, false),
+		attachMarker("x.pdf", deepseek.PurposeRichLayoutRecognition, &deepseek.FileObject{ID: "file-api-y"}, 2, true),
 		fmtMarkerReadFail(),
 		fmtMarkerStoreFail(),
 		fmtMarkerUploadFail(),
+		fmtMarkerAttached(),
 	}
 	for _, m := range markers {
 		if !strings.HasPrefix(m, "[file: ") {
@@ -283,6 +365,7 @@ func TestMarker_Family(t *testing.T) {
 func fmtMarkerReadFail() string   { return readFailNote("x.pdf", errors.New("e")) }
 func fmtMarkerStoreFail() string  { return storeFailNote("x.pdf", errors.New("e")) }
 func fmtMarkerUploadFail() string { return uploadFailNote("x.pdf", errors.New("e")) }
+func fmtMarkerAttached() string   { r := Router{}; m, _ := r.routeAttach("x.pdf", ""); return m }
 
 // TestRoute_NeverErrors: no input combination may panic or block the
 // submit — every failure lands in-band (mirrors the vision router's
@@ -309,7 +392,7 @@ func TestRoute_CtxCancel(t *testing.T) {
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(ctx, "m", "@"+doc)
+	got, parts := r.Route(ctx, deepseek.ModelV41Flash, "@"+doc)
 	if !strings.Contains(got, "[file: report.pdf — 上传失败: context canceled") {
 		t.Fatalf("cancel note = %q", got)
 	}
@@ -324,28 +407,44 @@ func TestRoute_CostSinkOptional(t *testing.T) {
 	up := &fakeUploader{obj: okObj()}
 	r := Router{client: up, assetsDir: t.TempDir(), maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
-	if _, parts := r.Route(context.Background(), "m", "@"+doc); len(parts) != 1 {
+	if _, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc); len(parts) != 1 {
 		t.Fatalf("parts = %+v", parts)
 	}
 }
 
-// TestRoute_ZeroPagesNoCost: server omitted the page count → no parse
-// fee billed ("按上传返回页数" — never off "an upload was attempted").
-func TestRoute_ZeroPagesNoCost(t *testing.T) {
+// TestRoute_MissingPageCountFallsBackToEstimate: the live API omits
+// page_count (docs/pitfalls.md) — the router must NOT bill a flat $0
+// for a parse that really happened; it records the flagged size
+// estimate instead (card c_y2akdi, 口径 in pricing.EstimateParsePages).
+// The upload-failure path still bills nothing: only a returned id
+// means a parse ran.
+func TestRoute_MissingPageCountFallsBackToEstimate(t *testing.T) {
 	up := &fakeUploader{obj: &deepseek.FileObject{ID: "file-api-nopg"}}
 	cs := &costSink{}
 	r := Router{client: up, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
 	doc := writePDF(t, "report.pdf", 8)
 
-	got, parts := r.Route(context.Background(), "m", "@"+doc)
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
 	if len(parts) != 1 {
 		t.Fatalf("parts = %+v", parts)
 	}
-	if cs.total() != 0 {
-		t.Fatalf("zero pages must bill nothing, got %v", cs.total())
+	wantPages := pricing.EstimateParsePages(8) // 8 B fixture → 1 page
+	if wantPages != 1 {
+		t.Fatalf("fixture sanity: EstimateParsePages(8) = %d, want 1", wantPages)
 	}
-	if strings.Contains(got, "pages") {
-		t.Fatalf("absent page count must not render: %q", got)
+	if want := pricing.ParseCost(wantPages); cs.total() != want {
+		t.Fatalf("estimated cost = %v, want %v (no more flat $0)", cs.total(), want)
+	}
+	if cs.total() <= 0 {
+		t.Fatalf("missing page_count must still bill: %v", cs.total())
+	}
+	// The observation record flags the estimate on BOTH surfaces: the
+	// marker (human/transcript) and the FilePart (machine/JSONL).
+	if !strings.Contains(got, "· ~1 pages·估 · file-api-nopg") {
+		t.Fatalf("marker = %q", got)
+	}
+	if parts[0].Pages != 1 || !parts[0].PagesEstimated {
+		t.Fatalf("part observation fields = %+v", parts[0])
 	}
 }
 
@@ -391,10 +490,184 @@ func TestRoute_RealClientIntegration(t *testing.T) {
 	if len(parts) != 1 || parts[0].FileID != "file-api-int1" {
 		t.Fatalf("parts = %+v", parts)
 	}
+	// Exact state (acceptance ①'s other half): a returned page_count
+	// bills precisely and the observation record reads it as exact.
+	if parts[0].Pages != 12 || parts[0].PagesEstimated {
+		t.Fatalf("exact-state observation fields = %+v", parts[0])
+	}
 	if !strings.Contains(got, "12 pages · file-api-int1") {
 		t.Fatalf("marker = %q", got)
 	}
 	if want := pricing.ParseCost(12); cs.total() != want {
 		t.Fatalf("cost = %v, want %v", cs.total(), want)
+	}
+}
+
+// TestRoute_RealClient_PageCountFallback is acceptance ①'s missing-
+// count state on a REAL *deepseek.Client behind httptest: the live
+// API shape (id/bytes/filename/purpose, no page_count) must bill the
+// flagged size estimate, never the old flat $0. The exact state is
+// pinned by TestRoute_RealClientIntegration (page_count=12 →
+// ParseCost(12)); together the two tests are the two-state assertion.
+func TestRoute_RealClient_PageCountFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/files" || r.Method != http.MethodPost {
+			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, 400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// Live-API response shape (2026-11-18 finding): no page_count,
+		// no expires_at — bytes/created_at/filename/purpose only.
+		_, _ = w.Write([]byte(`{"id":"file-api-live1","object":"file","bytes":4096,` +
+			`"created_at":1764000000,"filename":"report.pdf",` +
+			`"purpose":"text_recognition"}`))
+	}))
+	defer srv.Close()
+
+	client := deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL))
+	cs := &costSink{}
+	r := Router{client: client, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "report.pdf", 4096)
+
+	got, parts := r.Route(context.Background(), deepseek.ModelV41Flash, "@"+doc)
+	if len(parts) != 1 || parts[0].FileID != "file-api-live1" {
+		t.Fatalf("parts = %+v", parts)
+	}
+	// Estimated state: cost off the size estimate, flagged everywhere.
+	if want := pricing.ParseCost(pricing.EstimateParsePages(4096)); cs.total() != want || cs.total() <= 0 {
+		t.Fatalf("cost = %v, want estimated %v (not $0)", cs.total(), want)
+	}
+	if parts[0].Pages != pricing.EstimateParsePages(4096) || !parts[0].PagesEstimated {
+		t.Fatalf("part observation fields = %+v", parts[0])
+	}
+	if !strings.Contains(got, "[file: report.pdf — uploaded · text · ~1 pages·估 · file-api-live1]") {
+		t.Fatalf("marker = %q", got)
+	}
+}
+
+// seqUploader hands out one FileObject per call in order — the shape
+// the observation fixture needs: same document submitted twice, two
+// distinct file ids (what the live API mints per upload).
+type seqUploader struct {
+	mu   sync.Mutex
+	objs []*deepseek.FileObject
+	i    int
+}
+
+func (s *seqUploader) UploadFile(ctx context.Context, req *deepseek.FileUploadRequest) (*deepseek.FileObject, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.i >= len(s.objs) {
+		return nil, errors.New("fake: no more objects")
+	}
+	o := s.objs[s.i]
+	s.i++
+	return o, nil
+}
+
+// TestRoute_ObservationRecordReconcilable is acceptance ②: the
+// transcript's parse-observation records must (a) carry the whole
+// client-side assertion material — file id + claimed pages + the
+// estimate flag — through the session JSONL round-trip, and (b) make
+// the post-hoc reconciliation computable from the records alone:
+// recorded dollars re-derive from ParseCost(pages), and the
+// same-document-twice uploads of the pitfall pair up by their shared
+// content-addressed asset. (The API side offers nothing to reconcile
+// against: GET /files/{id} is metadata-only and parse results are not
+// downloadable — checked 2026-11-19 — so the runtime usage rows /
+// smoke test are the other half, out of this file.)
+func TestRoute_ObservationRecordReconcilable(t *testing.T) {
+	// Three submits: the same PDF twice with the live-API response
+	// shape (no page_count → estimated), then a different document
+	// whose server DOES return a count (exact reading; a different
+	// file so its content-addressed asset is its own).
+	up := &seqUploader{objs: []*deepseek.FileObject{
+		{ID: "file-api-a", Bytes: 8192, Purpose: deepseek.PurposeTextRecognition},
+		{ID: "file-api-b", Bytes: 8192, Purpose: deepseek.PurposeTextRecognition},
+		okObj(), // exact: PageCount 34
+	}}
+	cs := &costSink{}
+	r := Router{client: up, assetsDir: t.TempDir(), cost: cs, maxBytes: deepseek.FileMaxBytes}
+	doc := writePDF(t, "twice.pdf", 8192)
+	other := writePDF(t, "exact.pdf", 64)
+
+	var session []deepseek.Message // what session JSONL lines 2..N hold
+	for _, d := range []string{doc, doc, other} {
+		got, parts := r.Route(context.Background(), "m", "@"+d)
+		if len(parts) != 1 {
+			t.Fatalf("parts = %+v", parts)
+		}
+		if !strings.Contains(got, parts[0].FileID) {
+			t.Fatalf("marker %q does not carry the id", got)
+		}
+		session = append(session, deepseek.Message{Role: deepseek.RoleUser, Content: got, Files: parts})
+	}
+
+	// (a) Record shape survives the JSONL round-trip with the estimate
+	// flag on exactly the estimated parts.
+	var reloaded []deepseek.Message
+	for _, m := range session {
+		line, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back deepseek.Message
+		if err := json.Unmarshal(line, &back); err != nil {
+			t.Fatal(err)
+		}
+		reloaded = append(reloaded, back)
+		raw := string(line)
+		if i := len(reloaded) - 1; i < 2 { // the two live-API-shape uploads
+			p := reloaded[i].Files[0]
+			if p.FileID == "" || p.Pages != pricing.EstimateParsePages(8192) || !p.PagesEstimated {
+				t.Fatalf("estimated record %d lost its shape: %+v", i, p)
+			}
+			if !strings.Contains(raw, `"pages_est":true`) {
+				t.Fatalf("estimated record %d must persist the flag: %s", i, raw)
+			}
+		} else { // exact reading
+			p := reloaded[i].Files[0]
+			if p.Pages != 34 || p.PagesEstimated {
+				t.Fatalf("exact record lost its shape: %+v", p)
+			}
+			if strings.Contains(raw, "pages_est") {
+				t.Fatalf("exact record must not carry an estimate flag: %s", raw)
+			}
+		}
+	}
+
+	// (b1) Dollars re-derive from the records alone: recorded flat
+	// costs == Σ ParseCost(recorded pages).
+	var fromRecords float64
+	for _, m := range reloaded {
+		for _, p := range m.Files {
+			fromRecords += pricing.ParseCost(p.Pages)
+		}
+	}
+	if math.Abs(fromRecords-cs.total()) > 1e-15 {
+		t.Fatalf("reconciled cost %v != recorded %v", fromRecords, cs.total())
+	}
+
+	// (b2) The pitfall's scenario — same document parsed twice — pairs
+	// up by the content-addressed asset: two ids, one asset, one
+	// claimed-pages pair to diff against the runtime usage rows.
+	byAsset := map[string][]deepseek.FilePart{}
+	for _, m := range reloaded {
+		for _, p := range m.Files {
+			byAsset[p.Asset] = append(byAsset[p.Asset], p)
+		}
+	}
+	paired := 0
+	for asset, recs := range byAsset {
+		if len(recs) == 1 {
+			continue // the exact-reading document, its own asset
+		}
+		if len(recs) != 2 || recs[0].FileID == recs[1].FileID {
+			t.Fatalf("asset %q: want two distinct upload ids, got %+v", asset, recs)
+		}
+		paired++
+	}
+	if paired != 1 {
+		t.Fatalf("want exactly one twice-parsed asset pairing, got %d", paired)
 	}
 }

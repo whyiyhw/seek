@@ -22,9 +22,15 @@ package controlplane
 //	GET  /events  SSE downstream: Send broadcast to the conv's tabs
 //	              (?conv= — EventSource cannot set headers); ?topic=
 //	              opts the connection into a topic stream alongside
-//	              (W3.2: "subagents" — see webfrontend_topic.go)
+//	              (W3.2: "subagents" — webfrontend_topic.go; W5 c_xz2bey:
+//	              "hooks" — webfrontend_hookstopic.go)
 //	POST /msg     upstream: {"text":"..."} → one Inbound into the plane
 //	              (X-Seek-Conversation picks the conv)
+//	POST /attach  one attachment's raw bytes (?name=<filename>) → staged
+//	              under the serve dir; the page turns the path into an
+//	              "@<path>" token in its /msg text, so the child's
+//	              existing image/document routers keep owning capability
+//	              judgement (webfrontend_attach.go)
 //	GET  /state   the requesting conv's binding, for the status line
 //	POST /rpc     JSON-RPC 2.0 asset-plane calls (W4.1 envelope; the
 //	              session method set registers at servecli assembly —
@@ -136,6 +142,14 @@ type WebConfig struct {
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
+
+	// Settings is the read-only serve-side snapshot the page's settings
+	// panel renders (W5 c_ni7mzw, webfrontend_settings.go). servecli
+	// fills it from the same config.Load result the plane runs off;
+	// nil = a bare frontend (tests/embedders) whose settings/get
+	// answers -32603 and whose page shows "settings unavailable".
+	// controlplane deliberately never reads config.json itself.
+	Settings *ServeSettings
 }
 
 // WebFrontend is the browser-chat Frontend. Safe for concurrent use:
@@ -146,6 +160,12 @@ type WebFrontend struct {
 	cfgErr error // deferred WebConfig resolution failure, if any
 
 	store *BindingStore
+
+	// attachDir is where POST /attach stages uploaded bytes
+	// (webfrontend_attach.go): <ServeDir>/attachments. Derived next to
+	// the token/bindings paths so a test-injected store keeps uploads
+	// in its own temp tree.
+	attachDir string
 
 	// rpcReg serves POST /rpc (W4.1). Built empty in NewWeb, registered
 	// into only before Run — the §3.2 phase contract; handlers dispatch.
@@ -173,8 +193,14 @@ type WebFrontend struct {
 	// recently-terminal cards keyed by request id, plus the terminal
 	// eviction FIFO. Guarded by mu like subs/runs — the hub is hub
 	// state.
-	approvals   map[string]*webApproval
+	approvals    map[string]*webApproval
 	approvalDone []string
+	// approvalDeliver holds the live run's stdin writers keyed by
+	// req_id (child half): the executor's ApprovalRouter.Route files
+	// one per approval_request it sees, SendStream consumes it when it
+	// turns the event into a card, and approval/decide calls it with
+	// the human's answer. Guarded by mu.
+	approvalDeliver map[string]func(decision string)
 
 	// Topic dimension (W3.2, webfrontend_topic.go): the same /events
 	// connections' second channel (drop-oldest buffer) hung on the
@@ -223,6 +249,9 @@ func NewWeb(cfg WebConfig) *WebFrontend {
 			f.cfg.StorePath = filepath.Join(dir, "bindings.json")
 		}
 	}
+	// Attachments live BESIDE the config pair, never at the real
+	// ~/.seek (a test/CLI override moves all three together).
+	f.attachDir = filepath.Join(filepath.Dir(f.cfg.StorePath), attachDirName)
 	// This store handle is read-only (Get for /state); the router's own
 	// handle owns all writes. Same process, atomic renames on Put — a
 	// reader can at worst see the previous snapshot.
@@ -283,6 +312,7 @@ func (f *WebFrontend) handler() http.Handler {
 	mux.HandleFunc("/static/", f.handleStatic) // W5 asset family (markdown.js — c_x2au4t)
 	mux.HandleFunc("/events", f.handleEvents)
 	mux.HandleFunc("/msg", f.handleMsg)
+	mux.HandleFunc("/attach", f.handleAttach) // W5: attachment intake (webfrontend_attach.go)
 	mux.HandleFunc("/state", f.handleState)
 	mux.HandleFunc("/rpc", f.handleRPC)
 	mux.HandleFunc("/subagents", f.handleSubagents)
@@ -446,10 +476,19 @@ func (f *WebFrontend) handleState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// project_id is the /rpc families' key (subagent/list & co. take one):
+	// deriving it here keeps the page from hashing paths in JS. Unbound
+	// stays "" — the zero-binding path must not hash an empty string into
+	// a plausible-looking id.
+	projectID := ""
+	if err == nil {
+		projectID = paths.ProjectID(b.ProjectPath)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bound":   err == nil,
-		"project": b.ProjectPath,
-		"session": b.SessionID,
+		"bound":      err == nil,
+		"project":    b.ProjectPath,
+		"project_id": projectID,
+		"session":    b.SessionID,
 	})
 }
 
@@ -477,26 +516,37 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// Topic dimension (W3.2): ?topic= opts this connection into a
 	// topic stream alongside the conv stream. Validated and resolved
 	// BEFORE the SSE headers so a bad topic or unbound conv answers
-	// plain 400/500 JSON, never a broken event-stream.
+	// plain 400/500 JSON, never a broken event-stream. `subagents`
+	// resolves the conv's bound-project index (W3.2); `hooks` resolves
+	// the GLOBAL audit log (W5 c_xz2bey) — no binding needed, the file
+	// is machine-global.
 	topic := r.URL.Query().Get("topic")
-	var indexPath string
+	var indexPath, auditPath string
 	if topic != "" {
-		if topic != topicSubagents {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown topic " + topic + " (only \"subagents\" exists)"})
-			return
-		}
-		b, err := f.store.Get(conv)
-		if err != nil {
-			if errors.Is(err, ErrBindingNotFound) {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation not bound to a project (send /bind <path> first)"})
+		switch topic {
+		case topicSubagents:
+			b, err := f.store.Get(conv)
+			if err != nil {
+				if errors.Is(err, ErrBindingNotFound) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conversation not bound to a project (send /bind <path> first)"})
+					return
+				}
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		indexPath, err = paths.SubagentsIndex(b.ProjectPath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			indexPath, err = paths.SubagentsIndex(b.ProjectPath)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		case topicHooks:
+			var err error
+			if auditPath, err = paths.HooksAuditLog(); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown topic " + topic + " (only \"subagents\" and \"hooks\" exist)"})
 			return
 		}
 	}
@@ -519,9 +569,12 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 		tch   chan string // nil without a topic: a nil chan blocks forever, one select serves both paths
 		unsub func()
 	)
-	if topic != "" {
+	switch topic {
+	case topicHooks:
+		ch, tch, unsub = f.subscribeHooksTopic(conv, auditPath)
+	case topicSubagents:
 		ch, tch, unsub = f.subscribeTopic(conv, indexPath)
-	} else {
+	default:
 		ch, unsub = f.subscribe(conv)
 	}
 	defer unsub()
@@ -541,7 +594,9 @@ func (f *WebFrontend) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			fl.Flush()
 		case ev := <-tch:
-			if _, err := io.WriteString(w, "event: "+topicSubagents+"\ndata: "+ev+"\n\n"); err != nil {
+			// The event name is the connection's topic ("subagents" /
+			// "hooks" — tch is nil, this case dead, without one).
+			if _, err := io.WriteString(w, "event: "+topic+"\ndata: "+ev+"\n\n"); err != nil {
 				return
 			}
 			fl.Flush()

@@ -185,10 +185,12 @@ A pending entry carries three things and nothing else:
 **Measurements that fail do not count as passing.** "No data" defaults to withdraw, not to keep.
 
 This section exists because the repo already has the anti-pattern it prevents:
-`docs/pitfalls.md` holds 249 live entries and **0 closed** — an integrator that only takes input.
-Before adding entry #249, ask whether it is a rule worth its maintenance cost or a pending entry
-that expires. `docs/budget.json` + `scripts/weight.sh` is the good precedent in the same repo: a
-budget that reports overrun and ratchets down, instead of a list that only grows.
+`docs/pitfalls.md` is append-mostly and every entry in it is live — an integrator that only takes
+input. The count is not repeated here (a second copy is a number that silently expires); the file's
+own header states it, generated from the body by `scripts/pitfalls-count.sh`. Before adding another
+entry, ask whether it is a rule worth its maintenance cost or a pending entry that expires.
+`docs/budget.json` + `scripts/weight.sh` is the good precedent in the same repo: a budget that
+reports overrun and ratchets down, instead of a list that only grows.
 
 Rules and gates are debts. When maintaining one costs more than the incident it prevents, delete
 it. Two readiness numbers tell you whether a rule is alive: how many times it is cited (a rule

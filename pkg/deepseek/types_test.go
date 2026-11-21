@@ -18,7 +18,7 @@ func textOnlyRequest() ChatRequest {
 }
 
 // TestChatRequest_TextOnlyBytesUnchanged is the prefix-cache guard for
-// SC1 (safety_check, docs/prd/feature-deepseek-app-api.md §5): adding an
+// SC1 (safety_check, docs/prd/archive/feature-deepseek-app-api.md §5): adding an
 // optional request field must NOT perturb the marshalled bytes of an
 // ordinary text-only request. Key order here comes from ChatRequest's
 // custom MarshalJSON (vision.go), which forces `messages` last — the

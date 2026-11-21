@@ -439,7 +439,7 @@ agent 不知道 memory 存在;memory 不修改 agent。中间只有 `internal/ho
 - **Saw**：`memory_observe` 的自动过滤错误地将含 API key 的命令行参数判定为敏感信息。
 - **Fix**：调整分类器规则，区分"泄露秘密"和"合法使用含 key 的命令"。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。
 
 ---
 

@@ -378,8 +378,8 @@ func TestChatRequest_WireForm_Files(t *testing.T) {
 				Content: "read these",
 				Images:  []ImagePart{{Asset: "a.png", URL: "data:image/png;base64,QUJD"}},
 				Files: []FilePart{
-					{Asset: "r1.pdf", FileID: "file-api-1"},
-					{FileID: "file-api-2"},
+					{Asset: "r1.pdf", FileID: "file-api-1", Pages: 12},
+					{FileID: "file-api-2", Pages: 3, PagesEstimated: true},
 				},
 			},
 		},
@@ -424,8 +424,11 @@ func TestChatRequest_WireForm_Files(t *testing.T) {
 	if _, leak := parts[2]["asset"]; leak {
 		t.Errorf("file part leaked asset ref: %v", parts[2])
 	}
-	// Persistence-only fields must never cross the API boundary.
-	for _, banned := range []string{`"files"`, `"asset"`, `"predicted_next"`} {
+	// Persistence-only fields must never cross the API boundary — that
+	// now includes the parse-observation pair (pages / pages_est, card
+	// c_y2akdi): the wire form is {"type":"file","file_id":…} and the
+	// claimed page count stays a transcript-side record.
+	for _, banned := range []string{`"files"`, `"asset"`, `"predicted_next"`, `"pages"`, `"pages_est"`} {
 		if strings.Contains(string(buf), banned) {
 			t.Errorf("wire form leaked %s: %s", banned, buf)
 		}

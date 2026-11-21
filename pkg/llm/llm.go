@@ -12,6 +12,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Provider is the interface every second-tier backend must satisfy.
@@ -62,6 +63,13 @@ type Message struct {
 	// keeps the plain-string `content` it always had. Legal on user
 	// messages only — providers 400 on images anywhere else.
 	Images []Image
+	// Files are the user message's document attachments (PDF), the
+	// sibling of Images: already materialised as data: URLs, one per
+	// document, re-encoded by each adapter into its own wire shape. A
+	// message with no Files (and no Images) keeps the plain-string
+	// `content` it always had — the prefix-cache contract. Legal on user
+	// messages only, same constraint as Images.
+	Files []File
 	// ToolCallID and ToolName are set on role="tool" result messages.
 	ToolCallID string
 	ToolName   string
@@ -72,6 +80,59 @@ type Message struct {
 // https URL.
 type Image struct {
 	URL string
+}
+
+// File is one document attachment in its sendable form: a data: URL
+// ("data:application/pdf;base64,…") carrying the document's true media
+// type. Filename is the original name (it rides the wire where the
+// format has a slot) and is display-only elsewhere.
+type File struct {
+	Filename string
+	URL      string
+}
+
+// The document media types the second-tier wire formats accept, per
+// each lane's official docs (checked 2026-11-19):
+//
+//   - OpenAI Chat Completions: the `file` content part takes
+//     PDF only — "for other file types, read the file in your
+//     application and send its text" (developers.openai.com/api/docs/
+//     guides/file-inputs).
+//   - Anthropic Messages: the `document` block's base64 source accepts
+//     media_type application/pdf only (platform.claude.com/docs/en/
+//     build-with-claude/pdf-support).
+//   - Gemini generateContent: document understanding reads
+//     inline/application/pdf (aistudio.google.com/docs/document-
+//     processing).
+//
+// application/pdf is the intersection, hence the whole set. Word/PPT
+// ride ONLY on the DeepSeek lane (its Files API parses them
+// server-side); on second-tier lanes they degrade to the in-band note.
+var fileMediaTypes = map[string]bool{
+	"application/pdf": true,
+}
+
+// SendableFileMediaType reports whether media type is one the
+// second-tier transports can encode. The submit-time document router
+// (internal/fileroute) asks this before attaching, so a .docx never
+// gains an "attached" marker it can't ride on.
+func SendableFileMediaType(mediaType string) bool {
+	return fileMediaTypes[mediaType]
+}
+
+// Sendable reports whether File can ride a second-tier wire: a base64
+// data: URL whose media type the transports accept.
+func (f File) Sendable() bool {
+	const prefix = "data:"
+	if !strings.HasPrefix(f.URL, prefix) {
+		return false
+	}
+	rest := f.URL[len(prefix):]
+	comma := strings.Index(rest, ",")
+	if comma < 0 || !strings.HasSuffix(rest[:comma], ";base64") {
+		return false
+	}
+	return SendableFileMediaType(strings.TrimSuffix(rest[:comma], ";base64"))
 }
 
 // ToolCall is a single function-call request issued by the assistant.

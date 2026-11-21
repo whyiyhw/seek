@@ -13,6 +13,7 @@ package controlplane
 // Same re-exec idiom as internal/sandbox/sandbox_linux_test.go.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -182,6 +183,40 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"text_delta","delta":"stuck"}`)
 		time.Sleep(60 * time.Second)
 		return 0
+	case "approval_roundtrip":
+		// W5 c_n37tnr child-half acceptance: exactly the real child's
+		// shape — emit an approval_request, BLOCK reading one decision
+		// line off stdin (the executor's pipe), echo it back as a
+		// text_delta so the parent can prove the line really arrived,
+		// then finish. Without --approval-stdin the real child would
+		// never emit the request, but the stub keys off the env only:
+		// the executor's argv is asserted separately in the test.
+		reqID := os.Getenv("CP_STUB_REQID")
+		if reqID == "" {
+			reqID = "ap-stub-1"
+		}
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Printf("{\"type\":\"approval_request\",\"req_id\":%q,\"kind\":\"bash\",\"summary\":\"在桩项目里跑一次全量测试\",\"command\":\"go test ./...\"}\n", reqID)
+		sc := bufio.NewScanner(os.Stdin)
+		decision := ""
+		if sc.Scan() {
+			decision = sc.Text()
+		}
+		if decision == "" {
+			fmt.Println(`{"type":"error","error":"no decision line on stdin"}`)
+			return 1
+		}
+		fmt.Printf("{\"type\":\"text_delta\",\"delta\":%q}\n", "decision:"+decision)
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SAP"}`)
+		return 0
+	case "approval_leftover":
+		// The run ends while a card is still pending: emit the request,
+		// never read stdin, finish. Proves the attempt-end Cancel
+		// withdraws the browser card.
+		fmt.Println(`{"type":"agent_start","model":"deepseek-flash"}`)
+		fmt.Printf("{\"type\":\"approval_request\",\"req_id\":%q,\"kind\":\"bash\",\"summary\":\"没人回答就结束\"}\n", os.Getenv("CP_STUB_REQID"))
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SAL"}`)
+		return 0
 	case "web_multi_turn":
 		// W2.3 usage-meter e2e: ONE run, TWO turns — turn_end fires per
 		// turn, so the page's meter must ADD across turns (1000/200/800
@@ -200,6 +235,23 @@ func stubBehaviour(mode, dir, msg, sid string, n int, sleep time.Duration) int {
 		fmt.Println(`{"type":"text_delta","delta":"more"}`)
 		fmt.Println(`{"type":"turn_end","index":1,"prompt_tokens":1200,"completion_tokens":150,"cache_hit_tokens":1100,"tool_calls":1}`)
 		fmt.Println(`{"type":"agent_end","turns":2,"session_id":"SW2"}`)
+		return 0
+	case "web_lane":
+		// W5 c_oyp2qf ContextMeter e2e: agent_start.model comes from
+		// CP_STUB_MODEL so one stub shape serves BOTH lane samples —
+		// the direct-API id and the Go-gateway id of the same model
+		// family. One turn; usage is tiny (1M windows make sane
+		// percentages need big numbers, so the page-side drill uses the
+		// manual stub instead).
+		model := os.Getenv("CP_STUB_MODEL")
+		if model == "" {
+			model = "deepseek-flash"
+		}
+		fmt.Printf("{\"type\":\"agent_start\",\"model\":%q}\n", model)
+		fmt.Println(`{"type":"turn_start","index":0}`)
+		fmt.Println(`{"type":"text_delta","delta":"lane check"}`)
+		fmt.Println(`{"type":"turn_end","index":0,"prompt_tokens":600000,"completion_tokens":50000,"cache_hit_tokens":100000,"tool_calls":0}`)
+		fmt.Println(`{"type":"agent_end","turns":1,"session_id":"SWL"}`)
 		return 0
 	default: // happy
 		if sleep > 0 {

@@ -16,17 +16,21 @@ package controlplane
 // applied:false, never touches the callback); a producer retry with a
 // known id never resurrects a resolved card.
 //
-// Follow-up card (child-side wiring, split out as >2h): seek -p gains
-// the askFn → approval_request jsonLine → stdin decision read-back
-// path; the decide callback here (nil today for stream-sourced cards)
-// becomes that stdin write — this file changes zero. Wire contract:
-// §13.1's c_n37tnr row in feature-web-frontend.md. "a" maps to
-// permission's always-allow, denial stays a tool result.
+// Child half (landed with this card): `seek -p … --json
+// --approval-stdin` registers an askFn that emits approval_request
+// jsonLines and blocks on the decision line its host writes to stdin
+// (cmd/seek/approval_stdin.go). The plane's executor passes the flag,
+// holds the child's stdin pipe and routes each hub decision into it
+// keyed by req_id (executor.go's ApprovalRouter seam) — the decide
+// callback installed here is that stdin write. "a" maps to
+// permission's always-allow, denial stays a tool result. Wire contract:
+// §13.1's c_n37tnr row in feature-web-frontend.md.
 
 import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 
 	"github.com/whyiyhw/seek/internal/rpc"
 )
@@ -250,6 +254,78 @@ func (f *WebFrontend) broadcastApproval(e *webApproval) {
 	f.broadcast(e.conv, sseFrame{name: "approval", data: webJSON(e.view())})
 }
 
+// ---- child-half wiring (the executor's ApprovalRouter seam) ----
+
+// approvalDeliver is one run's decision sink, keyed by req_id: the
+// executor's stdin-write closure for a child awaiting that id. The
+// map is hub state (guarded by f.mu) and holds only ids of a LIVE run
+// — Route adds, the decision or the run's Cancel removes. Two runs
+// never collide on a key: the executor's per-conv gate means one live
+// run per conv, and req_ids are child-minted per process.
+type runApprovals struct {
+	f    *WebFrontend
+	mu   sync.Mutex
+	ids  []string
+	seen map[string]bool
+}
+
+// ApprovalRoute returns a per-run ApprovalRouter for the executor
+// (controlplane.ApprovalRouter): Route registers the child's stdin
+// writer, Cancel withdraws the run's leftover cards. Called by the
+// plane's router for a frontend that implements ApprovalFrontend.
+func (f *WebFrontend) ApprovalRoute() ApprovalRouter {
+	return &runApprovals{f: f, seen: make(map[string]bool)}
+}
+
+// Route implements ApprovalRouter. Registration happens from the
+// stdout reader BEFORE the same event is fanned into SendStream, so
+// the card is always filed with a live delivery callback.
+func (r *runApprovals) Route(reqID string, deliver func(decision string)) {
+	r.f.mu.Lock()
+	if r.f.approvalDeliver == nil {
+		r.f.approvalDeliver = make(map[string]func(string))
+	}
+	r.f.approvalDeliver[reqID] = deliver
+	r.f.mu.Unlock()
+
+	r.mu.Lock()
+	if !r.seen[reqID] {
+		r.seen[reqID] = true
+		r.ids = append(r.ids, reqID)
+	}
+	r.mu.Unlock()
+}
+
+// Cancel implements ApprovalRouter: withdraw every card this run filed
+// and forget its delivery sinks. Resolved/cancelled cards are no-ops
+// inside CancelApproval, so this is safe for a run that ended cleanly
+// after the human answered.
+func (r *runApprovals) Cancel() {
+	r.mu.Lock()
+	ids := r.ids
+	r.ids = nil
+	r.seen = make(map[string]bool)
+	r.mu.Unlock()
+	for _, id := range ids {
+		r.f.mu.Lock()
+		delete(r.f.approvalDeliver, id)
+		r.f.mu.Unlock()
+		r.f.CancelApproval(id)
+	}
+}
+
+// deliverFor returns the delivery sink filed for reqID (nil when the
+// run has none — a producer that speaks the event without the executor
+// seam, e.g. the sandbox stub). Not consumed on read: a duplicate
+// approval_request for the same id must not orphan the child's sink.
+// Entries live until the run's Cancel or the next run's registration —
+// per-conv serialisation means no two live runs share a conv.
+func (f *WebFrontend) deliverFor(reqID string) func(string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.approvalDeliver[reqID]
+}
+
 // RegisterApprovalMethods hangs the two approval methods on reg (the
 // servecli web constructor calls it pre-Run, same §3.2 phase contract
 // as the asset families — the hub is frontend-native state, so the
@@ -260,7 +336,9 @@ func (f *WebFrontend) broadcastApproval(e *webApproval) {
 //	                → {id, state, decision, applied} (applied=false = replay)
 func (f *WebFrontend) RegisterApprovalMethods(reg *rpc.Registry) {
 	reg.Register("approval/list", func(_ context.Context, params json.RawMessage) (any, error) {
-		var p struct{ Conv string `json:"conv"` }
+		var p struct {
+			Conv string `json:"conv"`
+		}
 		if len(params) > 0 {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, rpc.Errorf(rpc.CodeInvalidParams, "invalid params: %v", err)

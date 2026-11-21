@@ -1,0 +1,5 @@
+### getUserMedia needs a secure context — the documented tailnet `--tcp` forward cannot record push-to-talk
+- **Saw**: the voice V2 🎤 button works on `http://127.0.0.1:8790` but arrives disabled on a phone reaching the same serve over `tailscale serve --tcp` (tailnet IP, plain http).
+- **Why**: browsers gate `getUserMedia` (and `crypto.randomUUID`'s absence already forced the page's manual uuid fallback) behind a secure context — localhost is one by definition, a `100.x.y.z` host over http is not; `--tcp` forwarding never terminates TLS.
+- **Fix**: the page detects it (`micAvailable()`) and disables the button with the reason; deployment note in `seek serve --help` + PRD §4.3: remote mic needs an HTTPS front (`tailscale serve` proxy mode), not `--tcp`; commit with card `c_f6ayyg`.
+- **Lesson**: browser-capability surfaces (mic/camera/notifications) die silently on non-localhost plain http — when the documented remote-access posture is a TCP forward, the same feature needs an https-front variant or a visible "unavailable here" state, never a mystery.

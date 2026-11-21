@@ -12,11 +12,14 @@ package methods
 // entry with its reason — the two views compose instead of duplicating
 // the check.
 //
-// hooks/audit/tail is one-shot only: follow=true answers -32602 with
-// a message naming the SSE topic as future work (inspect-rpc §6 #6/#7
-// stay open until /events grows a hooks topic). Rejecting beats
-// silently ignoring — a follow client would sit waiting for events a
-// snapshot reply never brings.
+// hooks/audit/tail is one-shot only: follow=true answers -32602
+// pointing at the delivered follow surface — the web /events SSE
+// `hooks` topic (W5 c_xz2bey; inspect-rpc §6 #6/#7 thereby closed).
+// Rejecting beats silently ignoring — a follow client would sit
+// waiting for events a snapshot reply never brings. POST /rpc stays
+// one-shot by design; the follow lives on the GET /events?topic=hooks
+// stream, whose frames carry the audit line verbatim (same rows this
+// method returns).
 
 import (
 	"context"
@@ -191,7 +194,7 @@ func (h *Hooks) auditTail(ctx context.Context, params json.RawMessage) (any, err
 	}
 	if p.Follow != nil && *p.Follow {
 		return nil, rpc.Errorf(rpc.CodeInvalidParams,
-			"follow=true is not implemented on this host: /rpc is one-shot, the SSE hooks topic is future work (inspect-rpc §6 #6)")
+			"follow=true is not implemented on this host: /rpc is one-shot — follow the SSE hooks topic instead (GET /events?topic=hooks; inspect-rpc §6 #6 closed by W5 c_xz2bey)")
 	}
 	var cutoff time.Time
 	if p.FromTS != "" {

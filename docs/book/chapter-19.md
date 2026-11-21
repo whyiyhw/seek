@@ -40,4 +40,4 @@
 - **Saw**：`os.Rename` 跨文件系统挂载点时返回 "cross-device link" 错误。
 - **Lesson**：原子写模式必须确保 tmp 文件与目标在同一挂载点。
 
-详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——130+ 条持续更新的踩坑记录。
+详见 [`docs/pitfalls.md`](../pitfalls.md) 全文——持续更新的踩坑记录（条目数以该文件头为准）。

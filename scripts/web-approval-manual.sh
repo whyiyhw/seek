@@ -78,8 +78,11 @@ echo "== build =="
 (cd "$REPO" && go build -o "$TMP/seek" ./cmd/seek) || exit 1
 
 # ---- 2. 桩 seek + 桩项目 ----
-# 桩按 -p 消息切场景：「审批」吐一条 approval_request（req_id 带本桩进程
-# PID，跨消息唯一——重复决定/复活卡的场景由幂等路径自己验）再照常收尾。
+# 桩按 -p 消息切场景吐 JSONL，并且**说子进程的真契约**（c_n37tnr 子进程
+# 半边，cmd/seek/approval_stdin.go）：认出 --approval-stdin 后吐
+# approval_request 并**阻塞读 stdin 决定行**，读到就把那一行原样回吐成
+# text_delta——这样「决定真进了子进程」是从子进程自己的输出断言的，不是
+# 平面的记账。「审批挂起」场景则吐出请求立刻收尾，验 run 终止撤卡。
 echo "== stub =="
 mkdir -p "$TMP/bin" "$TMP/proj"
 cat > "$TMP/bin/seek" <<'STUB'
@@ -87,20 +90,43 @@ cat > "$TMP/bin/seek" <<'STUB'
 # W5 c_n37tnr 手测桩：按 -p 消息切场景吐 JSONL。非场景消息走默认应答。
 set -u
 MSG=""
+APPROVAL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -p) MSG="${2:-}"; shift 2 ;;
+    --approval-stdin) APPROVAL=1; shift ;;
     *) shift ;;
   esac
 done
 em() { printf '%s\n' "$1"; }
 case "$MSG" in
+  审批挂起)
+    # run 在卡还没人答时就结束 → 平面必须撤卡。
+    em '{"type":"agent_start","model":"deepseek-chat"}'
+    em "{\"type\":\"approval_request\",\"req_id\":\"ap-hang-$$-$RANDOM\",\"kind\":\"bash\",\"summary\":\"没人回答就结束\",\"command\":\"sleep 1\"}"
+    em '{"type":"agent_end","turns":1,"session_id":"SAPH"}'
+    ;;
   审批)
     APID="ap-e2e-$$-$RANDOM"
     em '{"type":"agent_start","model":"deepseek-chat"}'
-    em "{\"type\":\"approval_request\",\"req_id\":\"$APID\",\"kind\":\"bash\",\"summary\":\"在桩项目里跑一次全量测试\",\"command\":\"go test ./... -count=1\"}"
-    sleep 1
-    em '{"type":"text_delta","delta":"审批请求已送出（桩不等待决定——回注是后续卡）。"}'
+    if [ "$APPROVAL" = 1 ]; then
+      em "{\"type\":\"approval_request\",\"req_id\":\"$APID\",\"kind\":\"bash\",\"summary\":\"在桩项目里跑一次全量测试\",\"command\":\"go test ./... -count=1\"}"
+      # 真子进程在这里阻塞：最多等 30s 一行决定。
+      LINE=""
+      IFS= read -r -t 30 LINE || LINE=""
+      if [ -z "$LINE" ]; then
+        em '{"type":"approval_cancel","req_id":"'"$APID"'"}'
+        em '{"type":"text_delta","delta":"没收到决定（stdin 关闭/超时），按拒绝处理。"}'
+      else
+        em '{"type":"text_delta","delta":"子进程收到决定行："}'
+        em "$(printf '{"type":"text_delta","delta":%s}' "$(printf '%s' "$LINE" | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$/"/')")"
+      fi
+    else
+      # 没有 --approval-stdin：老行为（吐请求就走，说明回注未接）。
+      em "{\"type\":\"approval_request\",\"req_id\":\"$APID\",\"kind\":\"bash\",\"summary\":\"在桩项目里跑一次全量测试\",\"command\":\"go test ./... -count=1\"}"
+      sleep 1
+      em '{"type":"text_delta","delta":"桩未接 --approval-stdin（老行为）。"}'
+    fi
     em '{"type":"agent_end","turns":1,"session_id":"SAP1"}'
     ;;
   *)
@@ -199,6 +225,17 @@ echo "  （审批 id=${APID}）"
 
 dec1=$(rpcq approval/decide "{\"id\":\"$APID\",\"decision\":\"y\"}")
 ck "① decide 成功 applied=true" "yes" "$(needAll "$dec1" '"applied":true' '"state":"resolved"' '"decision":"y"')"
+# 子进程半边：决定行要真写进子进程 stdin。桩读到后把那一行原样回吐成
+# text_delta——等它在同一条 SSE 流里出现（这是「点→子进程真收到」的证据）。
+ECHO_OK=no
+for _ in $(seq 1 80); do
+  if grep -qF "\"decision\":\"y\"" "$TMP/sse.log" 2>/dev/null &&
+     grep -qF 'approval_decision' "$TMP/sse.log" 2>/dev/null; then
+    ECHO_OK=yes; break
+  fi
+  sleep 0.25
+done
+ck "① 决定行真进了子进程（子进程回吐含 approval_decision 的 delta）" "yes" "$ECHO_OK"
 sleep 1     # 等回执帧写进同一条订阅流
 kill "$SSE_PID" 2>/dev/null; wait "$SSE_PID" 2>/dev/null; SSE_PID=""
 sse=$(cat "$TMP/sse.log")
@@ -217,6 +254,26 @@ ck "② 未知 id → -32602" "yes" "$(needAll "$decn" '"code":-32602')"
 decm=$(rpcq approval/decide "{\"id\":\"$APID\",\"decision\":\"maybe\"}")
 ck "② 坏决定 → -32602" "yes" "$(needAll "$decm" '"code":-32602')"
 ck "① 撤卡后 list 不再列" "yes" "$(has "$(rpcq approval/list '{"conv":"curlconv"}')" '"approvals":[]')"
+
+# ④ run 终止撤卡：桩吐请求后立刻收尾（没人答），平面必须在 run 结束时
+# 调 CancelApproval——浏览器收到 cancelled 帧、list 不再列。
+: > "$TMP/sse2.log"
+curl -sN "$BASE/events?conv=hangconv&token=$TOK" > "$TMP/sse2.log" &
+SSE_PID=$!
+sleep 0.5
+curl -s -X POST "$BASE/msg?token=$TOK" -H 'X-Seek-Conversation: hangconv' \
+  -H 'Content-Type: application/json' -d "{\"text\":\"/bind $PROJ\"}" > /dev/null
+sleep 0.5
+curl -s -X POST "$BASE/msg?token=$TOK" -H 'X-Seek-Conversation: hangconv' \
+  -H 'Content-Type: application/json' -d '{"text":"审批挂起"}' > /dev/null
+CAN_OK=no
+for _ in $(seq 1 60); do
+  if grep -qF '"state":"cancelled"' "$TMP/sse2.log" 2>/dev/null; then CAN_OK=yes; break; fi
+  sleep 0.25
+done
+kill "$SSE_PID" 2>/dev/null; wait "$SSE_PID" 2>/dev/null; SSE_PID=""
+ck "④ run 终止撤卡：SSE 收到 cancelled 帧" "yes" "$CAN_OK"
+ck "④ run 终止撤卡后 list 空" "yes" "$(has "$(rpcq approval/list '{"conv":"hangconv"}')" '"approvals":[]')"
 
 [ "$fail" = 0 ] || { echo "自检有 FAIL——浏览器验收前先修"; exit 1; }
 

@@ -8,13 +8,15 @@ package controlplane
 // topic rides a SECOND channel on the same connection (nil-chan-
 // blocks-forever lets handleEvents select over both uniformly).
 //
-// Today's only topic is `subagents` — the task panel's lifecycle
-// pushes (started / terminal transitions). The producer is a shared
-// tail-follow of the conv's bound-project subagents.jsonl (the W3.1
-// reader's file; subagent.Follower folds with the same applyEvent
-// core as ListProject, so list and push are one projection). The
-// panel protocol is subscribe-FIRST, then GET /subagents for the
-// snapshot: pushes patch it, history never replays.
+// Today's topics are `subagents` (the task panel's lifecycle pushes —
+// started / terminal transitions; the producer is a shared tail-follow
+// of the conv's bound-project subagents.jsonl, the W3.1 reader's file,
+// where subagent.Follower folds with the same applyEvent core as
+// ListProject, so list and push are one projection) and `hooks` (the
+// audit tail — W5 c_xz2bey, webfrontend_hookstopic.go, same mechanics
+// with a global follow and verbatim lines). The panel protocol is
+// subscribe-FIRST, then the one-shot snapshot for the list: pushes
+// patch it, history never replays.
 //
 // The fanout unit is the FOLLOW, not the topic name: subscriber
 // channels live on the per-index-path topicFollow, and followLoop
@@ -39,7 +41,7 @@ import (
 
 // topicSubagents names the subagents lifecycle topic — the SSE
 // `event:` field AND the envelope's "topic" value. A constant so a
-// future topic (the W4 family) extends the set deliberately.
+// future topic extends the set deliberately (hooks did, W5 c_xz2bey).
 const topicSubagents = "subagents"
 
 // topicChanBuf is the per-client topic buffer: 256 queued events with
@@ -55,7 +57,11 @@ const topicChanBuf = 256
 // subagents.jsonl are seek child processes in other processes — no
 // in-process signal exists and stdlib has no watcher, so the follow is
 // stat+read polling. Lifecycle events are sparse; 1s is invisible
-// latency for a task panel at ~zero CPU. A var so tests tighten it.
+// latency for a task panel at ~zero CPU. A var so tests tighten it —
+// but read it ONLY in subscribeTopic (the handler goroutine): the
+// follower reads its interval as a parameter, so a test's t.Cleanup
+// restore can never race a follower goroutine that started late (see
+// pitfalls.md; hooksTopicPoll learned this the hard way).
 var subagentsTopicPoll = time.Second
 
 // topicEvent is the SSE envelope of one topic push. No "conv" field:
@@ -114,23 +120,36 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, indexPath string) (ch chan sse
 	if fl == nil {
 		fl = &topicFollow{stop: make(chan struct{}), subs: make(map[int]chan string)}
 		f.follows[indexPath] = fl
-		go f.followLoop(fo, fl)
+		// Read the interval HERE, not in the loop: this runs on the
+		// handler goroutine (joined by httptest.Server.Close before
+		// t.Cleanup restores the var), so both of a test's swap and
+		// restore are happens-before-ordered against this read. The
+		// spawned goroutine itself may outlive the handler with no
+		// ordering edge to the cleanup write.
+		poll := subagentsTopicPoll
+		go f.followLoop(fo, fl, poll)
 	}
 	fl.subs[id] = tch
 
-	return ch, tch, func() {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		delete(f.subs[conv], id)
-		if len(f.subs[conv]) == 0 {
-			delete(f.subs, conv)
-		}
-		if fl := f.follows[indexPath]; fl != nil {
-			delete(fl.subs, id)
-			if len(fl.subs) == 0 {
-				delete(f.follows, indexPath)
-				close(fl.stop)
-			}
+	return ch, tch, func() { f.dropTopicSub(conv, id, indexPath) }
+}
+
+// dropTopicSub is the unsub body shared by every topic subscribe
+// (subagents and hooks): drop the conv channel, drop the follow
+// membership, and stop the follow with its last subscriber — len(subs)
+// IS the refcount, so a client disconnect can never strand one.
+func (f *WebFrontend) dropTopicSub(conv ConvID, id int, path string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.subs[conv], id)
+	if len(f.subs[conv]) == 0 {
+		delete(f.subs, conv)
+	}
+	if fl := f.follows[path]; fl != nil {
+		delete(fl.subs, id)
+		if len(fl.subs) == 0 {
+			delete(f.follows, path)
+			close(fl.stop)
 		}
 	}
 }
@@ -140,9 +159,11 @@ func (f *WebFrontend) subscribeTopic(conv ConvID, indexPath string) (ch chan sse
 // nothing else stops it, and it stops nothing else (pushFollow is
 // best-effort). Per-tick Poll failures are already tolerated inside
 // Follower.Poll (nothing consumed, nothing lost); the loop itself has
-// no failure path that outlives stop.
-func (f *WebFrontend) followLoop(fo *subagent.Follower, fl *topicFollow) {
-	tick := time.NewTicker(subagentsTopicPoll)
+// no failure path that outlives stop. poll arrives as a parameter
+// (captured by the handler goroutine at spawn time) — this goroutine
+// never reads the package var.
+func (f *WebFrontend) followLoop(fo *subagent.Follower, fl *topicFollow, poll time.Duration) {
+	tick := time.NewTicker(poll)
 	defer tick.Stop()
 	for {
 		select {

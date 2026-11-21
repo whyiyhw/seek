@@ -1,0 +1,8 @@
+<!-- pitfalls-absorbed: original-section: - -->
+### [已吸收] Programmatic submissions bypass `consumeArm` — skill-arm must be inline in the injected prompt
+- **Saw**: building `/code-review`, the natural move was to set `m.pendingSkill = "code-review"` so the model would call the Skill tool next turn (mirroring `/skill use`). It would have silently mis-fired.
+- **Why**: `m.pendingSkill` is only consumed by `consumeArm`, which runs at the two **user-typed** submission sites (non-streaming submit, streaming queue/steer). Programmatic submissions (`/review`, `/code-review`) call `submit()` directly and **bypass** `consumeArm` — so the arm survives the programmatic message and wrongly prepends "Please use the X skill" to the user's **next hand-typed** message.
+- **Fix**: bake the `Please use the "code-review" skill` instruction directly into the injected prompt text (`codeReviewPrompt`'s first line); never touch `m.pendingSkill` from a slash command. Commit (this one).
+- **Lesson**: `m.pendingSkill` is for *user-initiated* arming only. A slash command that wants the model to use a skill must put the instruction in the prompt it submits, because the arm-wrapper does not run on the programmatic path.
+- **Refs**: `internal/tui/model.go:consumeArm` (doc comment spells out the "programmatic submissions … go through submit() directly without this wrapper" contract), `internal/tui/commands.go:codeReviewPrompt`, `docs/prd/archive/feature-code-review.md` §5.3
+- **已吸收**: the skill arm / `consumeArm` wrapper was removed entirely — /skill fires immediately now → commit `d208986` ("remove skill arm mechanism, fire immediately on /skill use")

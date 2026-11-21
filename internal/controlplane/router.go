@@ -58,6 +58,12 @@ type RouterConfig struct {
 	// speaker owns its own per-conv throttle; its failures are logged
 	// and dropped, the plane's universal best-effort posture.
 	Speaker *Speaker
+	// LookupSession is the OPTIONAL read seam /resume uses to validate a
+	// session id and learn the project it lived in (a resume switches the
+	// binding there — the web page's "@ reference" pick rides this). nil →
+	// the id is taken on trust and the current project kept (fresh routers).
+	// servecli wires it to the same session store the /rpc plane reads.
+	LookupSession func(id string) (cwd string, err error)
 }
 
 // Router is the plane's inbound handler: hand it to Serve as `handle`
@@ -169,8 +175,10 @@ func (r *Router) handleCommand(ctx context.Context, m Inbound, cmd, rest string)
 		r.cmdProjects(ctx, m)
 	case "cancel":
 		r.cmdCancel(ctx, m)
+	case "resume":
+		r.cmdResume(ctx, m, rest)
 	default:
-		r.reply(ctx, m.Conv, fmt.Sprintf("未知指令 /%s。可用：/bind <项目路径> · /projects · /switch <项目路径> · /new · /cancel", cmd))
+		r.reply(ctx, m.Conv, fmt.Sprintf("未知指令 /%s。可用：/bind <项目路径> · /projects · /switch <项目路径> · /new · /resume <会话 id> · /cancel", cmd))
 	}
 }
 
@@ -284,6 +292,47 @@ func (r *Router) cmdSwitch(ctx context.Context, m Inbound, rawPath string) {
 // /new so every "you need a binding first" reply reads the same.
 const unboundHint = "该会话还没绑定项目。先发 /bind <项目路径>（目录必须存在），或 /projects 看候选。"
 
+// cmdResume: /resume <会话 id> — point the conversation at an EXISTING
+// session instead of a fresh one: the next message resumes that transcript
+// (`seek -resume <sid>`). This is the "continue that conversation" half of
+// the web page's @ reference (the pick inserts the id and sends this).
+//
+// Project: a stored session carries the cwd it ran in; when the seam knows
+// it, the binding follows — that is what makes "@ this session" mean
+// "continue it where it lived". Without the seam the id is taken on trust
+// and a bad one self-heals on the next message (executor's -resume retry).
+func (r *Router) cmdResume(ctx context.Context, m Inbound, rawID string) {
+	id := strings.TrimSpace(rawID)
+	if id == "" {
+		r.reply(ctx, m.Conv, "用法：/resume <会话 id>（/rpc session/list 或页面 @ 引用可取 id）")
+		return
+	}
+	if strings.ContainsAny(id, "/\\.") || strings.Contains(id, " ") {
+		r.reply(ctx, m.Conv, fmt.Sprintf("会话 id 不合法：%q", id))
+		return
+	}
+	old, ok := r.existingBinding(m.Conv)
+	if !ok {
+		r.reply(ctx, m.Conv, unboundHint)
+		return
+	}
+	if r.cfg.LookupSession != nil {
+		cwd, err := r.cfg.LookupSession(id)
+		if err != nil {
+			r.reply(ctx, m.Conv, fmt.Sprintf("找不到会话 %s：%v", id, err))
+			return
+		}
+		if cwd != "" {
+			old.ProjectPath = cwd // 会话自带的项目优先（空 cwd 的老 transcript 忽略）
+		}
+	}
+	old.SessionID = id
+	if !r.putBinding(ctx, m, old) {
+		return
+	}
+	r.reply(ctx, m.Conv, fmt.Sprintf("已续接会话 %s（项目：%s）。下一条消息接着那条历史跑。", id, old.ProjectPath))
+}
+
 // cmdNew: /new — keep the project, drop the session. The next message
 // starts a fresh seek conversation in the same directory.
 func (r *Router) cmdNew(ctx context.Context, m Inbound) {
@@ -392,8 +441,16 @@ func (r *Router) handlePrompt(ctx context.Context, m Inbound) {
 		Message:   m.Text,
 		Yolo:      r.cfg.Yolo || b.Yolo,
 	}
+	fe := r.fronts[m.Conv.FrontendName()]
+	// Approval seam (W5 c_n37tnr child half): a frontend with an
+	// approval surface gets a per-run router, which turns on the child's
+	// --approval-stdin channel. A frontend without one leaves Approval
+	// nil — the child's argv and deny-by-default posture are unchanged.
+	if af, ok := fe.(ApprovalFrontend); ok {
+		req.Approval = af.ApprovalRoute()
+	}
 	var res ExecResult
-	if ss, ok := r.fronts[m.Conv.FrontendName()].(StreamSender); ok {
+	if ss, ok := fe.(StreamSender); ok {
 		res, err = r.exec.RunStream(runCtx, req, func(ev RunEvent) {
 			if serr := ss.SendStream(ctx, m.Conv, ev); serr != nil {
 				fmt.Fprintf(os.Stderr, "controlplane: router: stream send to %s failed: %v\n", m.Conv, serr)

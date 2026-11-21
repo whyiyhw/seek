@@ -7,7 +7,7 @@
 //   注入   → 模型吐 <script>/<div onclick>/<a href=javascript:>/[x](javascript:)
 //            全部字面渲染为文本：属性选择器 [onclick]/[onerror] 零命中、
 //            javascript: href 零命中、window.__xss* undefined、
-//            document.scripts 恒 2（内联 + static/markdown.js）
+//            document.scripts 恒 3（head 主题 bootstrap + 页面内联 + static/markdown.js）
 //   流式   → 过程不闪烁：气泡同一元素贯穿（标记法）、文本单调不缩（构造
 //            只追加的 delta 序列）、streaming 态可见；收口整泡重渲成
 //            权威 md 形状（标题/列表/围栏俱全）
@@ -41,6 +41,10 @@ if (typeof WebSocket !== 'function') {
   console.error('need Node ≥22 (global WebSocket) — 或改跑人工清单');
   process.exit(1);
 }
+// BASE_SCRIPTS：页面基线脚本数。W5 c_ni7mzw 的 head 主题 bootstrap 是第三个
+// 内联块（防 FOUC 必须在样式表前同步跑），与 markdown.js、页面脚本并列。
+// XSS 断言拿它当基线：渲染管线不许再增一个 script。
+const BASE_SCRIPTS = 3;
 const WATCHDOG_MS = 120_000;
 const watchdog = setTimeout(() => {
   console.error(`FAIL: watchdog ${WATCHDOG_MS}ms——驱动卡死（见上面最后一条 trace）`);
@@ -161,7 +165,7 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 const base = await snapshot();
-ck('基线 scripts=2（内联页面脚本 + static/markdown.js）', base.nscript === 2, `got ${base.nscript}`);
+ck('基线 scripts=3（head 主题 bootstrap + 内联页面脚本 + static/markdown.js）', base.nscript === BASE_SCRIPTS, `got ${base.nscript}`);
 ck('渲染器已载（window.seekMD）', await evalJS('typeof window.seekMD') === 'object',
   await evalJS('typeof window.seekMD'));
 
@@ -226,7 +230,7 @@ try {
   ck('XSS：脚本未执行（__xss/2/3 全 undefined）',
     s.xss1 === 'undefined' && s.xss2 === 'undefined' && s.xss3 === 'undefined',
     `${s.xss1}/${s.xss2}/${s.xss3}`);
-  ck('XSS：document.scripts 不增（仍 2）', s.nscript === 2, `got ${s.nscript}`);
+  ck('XSS：document.scripts 不增（仍 ' + BASE_SCRIPTS + '）', s.nscript === BASE_SCRIPTS, `got ${s.nscript}`);
   ck('XSS：无 img 元素落地', s.nimg === 0, `got ${s.nimg}`);
 } catch (e) { ck('注入场景', false, e.message); await dump(); }
 

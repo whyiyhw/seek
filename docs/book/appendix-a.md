@@ -2,7 +2,7 @@
 
 这本书正文里编号到 **#1–#16** 的"坑"是 callout 形式的方框，标出最值得记的一类细节——一个 LLM 协议层面或 Go 语言层面的、做对要靠经验、做错要靠运气的事情。第 23–24 章（v6–v7）的坑位分布在仓库 [`docs/pitfalls.md`](../pitfalls.md) 的对应段落中，正文中不再重复编号。
 
-仓库根的 [`docs/pitfalls.md`](../pitfalls.md) 是更全的版本——所有在开发中浮现过的非显然问题都记一条，本书写作时已超过 130 条且持续增长；当前条目数以该文件为准，本索引不复述计数（避免第二处定义静默过期）。两份内容**重叠但不相等**：
+仓库根的 [`docs/pitfalls.md`](../pitfalls.md) 是更全的版本——所有在开发中浮现过的非显然问题都记一条，且持续增长；当前条目数以该文件为准（文件头的数字由 `scripts/pitfalls-count.sh` 从正文算出），本索引不复述计数（避免第二处定义静默过期）。两份内容**重叠但不相等**：
 
 - **书中编号的 16 条**：每条都有教学价值（能从中提炼出一条普适规则），且通常出现在前后两个章节里互相引用
 - **pitfalls.md 的其余条目**：包括很多"修了一次就不再讨论"的具体 bug、tooling 怪癖、依赖问题——重要但不教学性
@@ -130,7 +130,7 @@
 | ch13 §13.5（延伸） | "DeepSeek HTTP 5xx and empty SSE bodies are transient — retry once before failing" |
 | ch18（隐含，无缝继续） | 回复语言跟随用户输入（已移除 `/lang` / `--lang`；见 pitfalls「Explicit `/lang` removed」） |
 
-### 来自 Filesystem / concurrency（Ch 19 Checkpoint · Ch 9 会话持久化）
+### 来自 Filesystem（Ch 19 Checkpoint · Ch 9 会话持久化）
 
 | 书中位置 | pitfalls.md 条目 |
 |---|---|
@@ -138,7 +138,7 @@
 | ch9 §9.3 | "Atomic self-replace requires same-filesystem temp file" |
 | ch16（隐含） | "ObserveEnqueue goroutine captures entry parameter by reference" |
 
-### 来自 Testing / CI
+### 来自 Testing
 
 | 书中位置 | pitfalls.md 条目 |
 |---|---|
@@ -206,7 +206,7 @@
 | ch18（隐含） | "`[plan: approved]` is a load-bearing wire-format prefix shared between propose and the plan reconstructor" |
 | ch18（隐含） | "Plan artifact write needs context BEFORE Sink.Approved fires — added a separate ContextReceiver interface" |
 
-### 来自 Tooling / environment
+### 来自 Tooling
 
 | 书中位置 | pitfalls.md 条目 |
 |---|---|
@@ -222,7 +222,7 @@
 [`docs/pitfalls.md`](../pitfalls.md) 顶部有一个 "Reading order for newcomers" 段落——按它列的三步走：
 
 1. **DeepSeek API** 一节先读完。这是 seek 优化的目标面，所有"为什么这么设计"的原因在这里
-2. **TUI / terminal**——用户可见的 polish 大部分在这里
+2. **TUI**——用户可见的 polish 大部分在这里
 3. **Go / tooling**——撞到才看，提前看记不住
 
 每条都按统一格式（**Saw / Why / Fix / Lesson / Refs**），符号短而可扫。建议每次写一个新模块之前花 3 分钟扫一遍——很多 footgun 已经替你试过了。
