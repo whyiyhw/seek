@@ -370,6 +370,23 @@ func CronTriggers() (string, error) {
 	return filepath.Join(dir, "triggers"), nil
 }
 
+// TasksDir returns ~/.seek/tasks/ — the registry for lifetime-detached
+// task processes (v8 柱 V1, docs/prd/feature-task-lifetime.md). One
+// `<id>.jsonl` fact log + one `<id>.log` output file per task. Does NOT
+// create the directory; the task store MkdirAlls on first append.
+//
+// Why user-level and not per-project: `seek ps` is a host-wide question
+// ("what did I leave running on this machine"), and a task id must stay
+// resolvable from a shell cd'd anywhere. Project attribution is a field
+// inside each record, not a directory dimension.
+func TasksDir() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "tasks"), nil
+}
+
 // ServeDir returns ~/.seek/serve/ — the root for the remote control
 // plane's persistent state (feature-remote-control-plane.md M1):
 // bindings.json (ConvID ↔ project ↔ session) and env (frontend

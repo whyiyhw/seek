@@ -127,3 +127,16 @@ Run it on demand — it is **not a resident mechanism**: no daemon, no CI job, n
 **No butler-sensitive path is touched.** The lane writes only `eval/results/*.jsonl` (checked-in data), the gitignored `eval/tmp/`, and — because `SEEK_HOME` is pinned to `eval/tmp/seek-home` — seek's own user-data writes land in that sandbox instead of the real `~/.seek`. It never writes `~/.local/bin`, `~/.agents`, or `~/Library/LaunchAgents`, and it makes no butler MCP calls. Mechanism self-tests: `scripts/eval-rounds-test.sh` (rounds/gate/record-only/malformed-input) and `scripts/eval-ablate-test.sh` (no-flag byte equivalence), both auto-discovered by `scripts/selftest.sh`.
 
 PRD: [`docs/prd/feature-eval-v2.md`](prd/feature-eval-v2.md) · Guide: [`eval/README.md`](../eval/README.md).
+
+---
+
+## 11. Task Lifetime — detached from the seek process (v8 柱 V1)
+
+D2's refined reading of "zero daemon" (v8 §3 I2) allows a **task's lifetime** to escape the seek process, and forbids a resident supervisor. Both halves are load-bearing:
+
+- **Detached, not supervised** — `seek task run "<cmd>"` forks a wrapper (`seek task exec`, same binary) that `setsid`s into its own session and runs the command via `/bin/sh -c`, stdout+stderr appending to `~/.seek/tasks/<id>.log`. The task survives the seek process that started it; when it exits, the wrapper appends the exit fact to `~/.seek/tasks/<id>.jsonl`.
+- **Nothing is resident** — `seek ps` / `seek attach` / `seek kill` each read that directory once and exit. No listening socket, no polling loop, no auto-start config.
+- **Facts on disk, status computed** — the record holds facts (pid, start, exit code, killed); `running` / `exited` / `failed` / `killed` / `zombie` / `lost` is folded from them plus one live pid probe. `zombie` is surfaced honestly rather than rounded to `running`; `lost` means the process vanished with no exit fact (OOM, external SIGKILL).
+- **Not bgjob** — `internal/bgjob` (the bash tool's `run_in_background` + `monitor`) stays session-scoped, in-memory, killed by `Shutdown`. The two do not share code: sharing would force bgjob to grow disk/cross-process fields it is deliberately free of. Use `seek task run` when the work must outlive the session.
+
+Not in v1: session-state handover / resume-after-restart (the detach full semantics). Code: `internal/taskproc/` · `internal/taskcli/`. PRD: [`docs/prd/feature-task-lifetime.md`](prd/feature-task-lifetime.md).

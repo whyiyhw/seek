@@ -21,6 +21,7 @@
 | [`feature-web-frontend.md`](feature-web-frontend.md) | 📐 设计稿（MVP 已交付） | Web Frontend：MVP 聊天已交付；P2 任务面板 → P3 资产面设计中。|
 | [`feature-slim-loop.md`](feature-slim-loop.md) | 📐 设计稿 | 减法机制 L2 账与刀 / L3 自噬循环；本目录的预算由它看管。|
 | [`feature-eval-v2.md`](feature-eval-v2.md) | 📐 设计稿（2026-11-19） | eval 判定口径重做：单次抽样 → `--rounds` + `min_pass_rate`；补 plan / 后台子代理 / serve-web 三条承重轴；发版 release lane + 夜间 core 入口；能确定化的检查移回 Go 单测。|
+| [`feature-task-lifetime.md`](feature-task-lifetime.md) | 📐 v1 最小面已交付（2026-11-21） | v8 柱 V1：任务寿命脱离 seek 进程 + `seek ps/attach/kill`；detach 全语义（会话移交 / 断连续跑）仍留待。|
 | [`feature-mcp-client.md`](feature-mcp-client.md) | 📐 深度集成设计完成（可开卡） | MCP 客户端 infra 已于 M5.4 交付。深度集成设计（2026-11-16）以 Semble 为第一验证目标：引导三层落点（工具 schema / sysprompt MCPSection / AGENTS.md）+ 路由决策（默认 `server__tool` 前缀、grep 结果内 hint 后手、否决调度层拦截）+ 三臂对照评估口径，拆 D1–D5 五张 2h 卡。|
 | [`feature-skill-distill.md`](feature-skill-distill.md) | 🚀 一~三期已交付 | Skill 自动蒸馏（S→K）：四层新颖性漏斗 + `.drafts/` 草稿区 + 人审 install 铁律。AGENTS.md 架构节引用。|
 | [`feature-plan-mode.md`](feature-plan-mode.md) | 🚀 已交付 | Plan 模式 v2：analyze → propose → execute 闭环 + event-sourcing resume。AGENTS.md 权限节引用。|
