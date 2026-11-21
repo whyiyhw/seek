@@ -68,3 +68,8 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_gqo32q：信号：手测脚本新增即进 selftest 排除表无闸——UI 验证车道两撞（c_txz6vz/c_5m3fm6）、c_ni7mzw 在途
 - c_a7nfpd：审批卡片·子进程半边：seek -p askFn→approval_request jsonLine→stdin 决定回读（c_n37tnr 拆卡）
 - c_5m3fm6：web 对齐 dsh·生成中停止按钮（/cancel 按钮化）
+- c_f734of：修 selftest 基线红：eval-home-isolation-test 稳定红转绿（c_pdqymy 放行尾巴）
+- c_jdel6u：空补全重试穷尽后不再杀会话——合成 `[empty: 上游空补全，已重试1次]` assistant 消息续跑（reasoning-only/length 分支不动），连续 2 次占位硬停（文案「连续空补全占位 N 次」）drive/c_jdel6u
+- c_5257qr：CONTRIBUTING.md 对齐 pitfalls 一条一文件新布局（清 ~14 处旧追加流程措辞）
+- c_o3osoh：seek 工具链单一源：全线迁移 go1.27.3 线 + web-gate 基线重铸（用户 2026-11-21 重拍方案 B；方案 A 实测死路留档 54e3ea4b）
+- c_2vst75：修 flaky：TestWeb_ApprovalRunEndWithdrawsCard 全套高负载下确定性红（TempDir 清理竞态）验收：①根因定位=哪个异步写手在测试结束后仍写其 TempDir /001（goroutine/子进程泄…

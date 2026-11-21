@@ -103,6 +103,17 @@ func TestWeb_ApprovalRunEndWithdrawsCard(t *testing.T) {
 	if !strings.Contains(res, `"applied":false`) || !strings.Contains(res, `"state":"cancelled"`) {
 		t.Errorf("late decide reply = %s, want applied:false state:cancelled", env)
 	}
+
+	// Wait out the run's close-out before returning (c_2vst75): the
+	// cancelled frame fires from the attempt's deferred Cancel, but the
+	// per-message goroutine still owes the D-C3 session writeback
+	// (store.Put → CreateTemp+rename inside this test's first TempDir)
+	// and this reply. Returning without waiting let that write race
+	// t.TempDir's RemoveAll — under load it landed mid-removal and
+	// failed cleanup with "unlinkat …/001: directory not empty". The
+	// close-out is handlePrompt's LAST act, so observing it puts the
+	// writeback happens-before the cleanup (same idiom as ① above).
+	wantFrame(t, tap, "", `"conv":"web:default"`, `"session_id":"SAL"`)
 }
 
 // TestWeb_ApprovalFrontendImplementsSeam pins the upcast the router

@@ -28,6 +28,22 @@
 #     docs/prd/v8.md §9.1），真端点 401 秒败、零成本。断言不看用例
 #     PASS/FAIL（假 key 下 FAIL 本就是预期），只看写入落点。
 #
+#     B 臂为什么把 provider 车道显式钉成 deepseek（card c_f734of，2026-11-21）：
+#     run.sh 的缺省车道自 2026-11-20 起是 opencode 订阅车道（61fa29de），而
+#     非 deepseek 车道会把 DEEPSEEK_API_KEY 从子进程环境里擦掉（计量 key
+#     零外泄，见 run.sh 的车道块）。本测试的 runner.sh 只按缺省形状调 seek、
+#     不带车道参数，于是钉车道这一步对 B 臂的后果是：子 seek 一个凭证都
+#     没有 → 在首启设置向导处退出，用户态写入一条都不发生。B1/B2 断言的是
+#     「写入落在沙盒 / 自带目录」，而零写入的读数和「隔离失效」完全一样
+#     （实测红面：B1「sandbox received no writes」+ B2「caller-provided
+#     SEEK_HOME received no writes」，金丝雀与沙盒两边都空）。
+#     隔离本身与车道无关——SEEK_HOME 在车道块之前就导出给同一个子进程；
+#     钉回 deepseek 只是让 B0/B1/B2 保持同一调用形状（无 -provider 旗标、
+#     DEEPSEEK_API_KEY 原样可见），唯一变量仍然只有「是否经 run.sh」。
+#     缺省车道下的隔离另有覆盖：eval-provider-test.sh 钉车道实现，人工探针
+#     （本卡写回记录）证明缺省车道下写入同样只落 eval/tmp/seek-home。
+#     详见 docs/pitfalls/eval/eval-home-isolation-test-的-b-臂零写入-run-sh-缺省-opencode-车道擦掉了-deepseek_api_key.md
+#
 # macOS bash 3.2 兼容（selftest 通道全仓口径）：无 mapfile / 关联数组；
 # 默认值展开一律 :- 形态。产物只落 mktemp 沙盒、z 前缀合成用例目录与
 # eval/tmp/seek-home（mtime 守卫清理——预存的人肉 eval 数据分毫不动）。
@@ -162,7 +178,14 @@ ls "$tmp/results-a/"*.jsonl >/dev/null 2>&1 \
 # 无人值守规矩（docs/prd/v8.md §9.1）：本测试自身就是无人值守车道，一律
 # 假 key——真端点 401 秒败、零成本，且顺带证明 env-key 解析不依赖沙盒
 # 外的 config.json。
+#
+# 车道钉死（card c_f734of）：B 臂一律 SEEK_EVAL_PROVIDER=deepseek ——
+# 理由见文件头「B 臂为什么把 provider 车道显式钉成 deepseek」。其余三个
+# 车道旋钮必须一起 -u：继承来的 SEEK_EVAL_MODEL/BASE_URL/API_KEY 会让
+# 假 key 之外的形状漏进来，B 臂就测不到它要测的东西。
 FAKEKEY=sk-fake-eval-home-isolation-selftest
+LANE_ENV="SEEK_EVAL_PROVIDER=deepseek"
+LANE_UNSET="-u SEEK_EVAL_MODEL -u SEEK_EVAL_BASE_URL -u SEEK_EVAL_API_KEY"
 go build -o "$tmp/seek-real" ./cmd/seek \
   || { echo "eval-home-isolation selftest: go build failed" >&2; exit 2; }
 
@@ -186,8 +209,8 @@ fi
 # B1 隔离组：同形调用经 run.sh —— 金丝雀分毫不动，写入落沙盒。
 b1="$tmp/b1-home"
 mkdir -p "$b1"
-env -u SEEK_HOME -u SEEK_SESSIONS_DIR \
-  HOME="$b1" $(up_env "$b1") DEEPSEEK_API_KEY="$FAKEKEY" \
+env -u SEEK_HOME -u SEEK_SESSIONS_DIR $LANE_UNSET \
+  HOME="$b1" $(up_env "$b1") DEEPSEEK_API_KEY="$FAKEKEY" $LANE_ENV \
   SEEK_EVAL_RESULTS_DIR="$tmp/results-b1" \
   bash eval/run.sh "$CASE" "$tmp/seek-real" >/dev/null 2>&1
 if [ -e "$b1/.seek" ]; then
@@ -195,7 +218,7 @@ if [ -e "$b1/.seek" ]; then
 fi
 n=$(count_newer "$SANDBOX" "$marker")
 if [ "$n" -lt 1 ]; then
-  fail "B1: sandbox $SANDBOX received no writes — redirect did not engage (or seek stopped writing user state at all)"
+  fail "B1: sandbox $SANDBOX received no writes — redirect did not engage, or seek never got credentials for the active lane and died before writing any user state (see the lane pin above)"
 fi
 ls "$tmp/results-b1/"*.jsonl >/dev/null 2>&1 \
   || fail "B1: no results row — run.sh did not complete"
@@ -204,8 +227,8 @@ ls "$tmp/results-b1/"*.jsonl >/dev/null 2>&1 \
 : > "$tmp/marker2"   # 在 B1 之后取戳：B1 的文件不晚于它，B2 的才晚于它
 b2="$tmp/b2-home"; b2canary="$tmp/b2-canary"
 mkdir -p "$b2" "$b2canary"
-env -u SEEK_SESSIONS_DIR \
-  HOME="$b2canary" $(up_env "$b2canary") SEEK_HOME="$b2" DEEPSEEK_API_KEY="$FAKEKEY" \
+env -u SEEK_SESSIONS_DIR $LANE_UNSET \
+  HOME="$b2canary" $(up_env "$b2canary") SEEK_HOME="$b2" DEEPSEEK_API_KEY="$FAKEKEY" $LANE_ENV \
   SEEK_EVAL_RESULTS_DIR="$tmp/results-b2" \
   bash eval/run.sh "$CASE" "$tmp/seek-real" >/dev/null 2>&1
 n=$(count_files "$b2")
