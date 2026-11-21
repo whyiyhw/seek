@@ -23,7 +23,7 @@ Code: `internal/memory/` · `internal/memorycli/` · `cmd/seek/main.go` (dream p
 Permission lives on two orthogonal axes — never crammed into a single enum:
 
 - **Preference** (`Deny` / `Ask` / `Yolo`) — your standing posture. "How strict am I." Chosen at startup (`--yolo`, `--no-perm`) or toggled via `/yolo`.
-- **Workflow** (`None` / `PlanAnalyze` / `PlanExecute`) — the ceremony you've entered. "What am I doing." Toggled via `/plan` and the propose-tool flow.
+- **Workflow** (`None` / `PlanAnalyze` / `PlanExecute`) — the ceremony you've entered. "What am I doing." Three entrances: `/plan` (TUI), the propose-tool flow, and ACP `session/set_mode` (protocol lane: mode `plan` ⇄ `default`, between turns — `guide-zed.md` §5.3).
 
 **Workflow trumps Preference where they conflict.** `PrefYolo + WorkflowPlanAnalyze` is still read-only — that's plan mode's raison d'être. The workflow is a user-chosen safety boundary; pref cannot override it.
 
@@ -88,6 +88,7 @@ Guide: [`docs/guide-sessions.md`](guide-sessions.md).
 - **`done_when` is required** — a `propose` call without completion conditions is rejected with a recovery error, so "what counts as done" is a field rather than prose in the problem statement. `reviewed_by` (optional) names who checks the result from a source that did not produce it.
 - **Plan artifact** — every approve writes a read-only markdown snapshot to `~/.seek/projects/<id>/plans/`, with `## Done when` rendered as a checkbox list between Problem and Steps.
 - **approve_batch** — opt-in fast-path for auto-approve-per-step.
+- **Protocol surface** — the ACP lane drives the same workflow axis via the spec's session modes: `session/new` advertises `modes: {currentModeId, availableModes: [default, plan]}`, `session/set_mode` flips `default ⇄ plan` between turns (`plan` = PlanAnalyze, read-only), confirmed by a `current_mode_update` notification. `plan-execute` has no wire form — its gate (the propose approval picker) is TUI-only. Two-state behavior is pinned by a real-binary e2e (plan: write denied, no disk write; default: the same write lands). `guide-zed.md` §5.3.
 
 Code: `internal/tools/propose/` · `internal/tools/plan/` · `docs/prd/feature-plan-mode.md`.
 

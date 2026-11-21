@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——审批门、slash 命令等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session、MCP 透传等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -120,7 +120,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **审批门 / approval** | **已修（P0-2）**：非 yolo 的 ACP 车道权限姿态为 `Ask`，危险动作经 `session/request_permission` 弹到客户端原生权限 UI（"允许 seek 运行 X?"），三选项 allow_once / allow_always / reject_once；`allow_always` 即 TUI 的「[a] always: \<kind\>」语义（同 Kind 本会话不再问）。**无应答默认拒**：客户端断线、超时（默认 10 分钟，`SEEK_ACP_PERMISSION_TIMEOUT` 秒数可调）、或无头 driver 回 `-32601`，一律拒绝并照常完成回合——不会卡死。无头无人值守场景仍用 `SEEK_ACP_YOLO=1` 直接放行（§5.1，优先级高于审批门）。 | Zed 客户端面板较旧、暂不渲染权限弹窗的实机验证；`reject_always`（协议有、Policy 无 per-Kind 拒绝清单）未接——目前不提供也不接受该选项。 |
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | 唯一缺口：`sessionCapabilities.list`（paseo 的"列出历史会话"）仍未申报。 |
 | **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
-| **slash 命令** | `/plan`、`/model` 等 **TUI-only**，ACP 下无效。 | 设计 ACP 下可表达的子集（如 plan 模式经 capability 暴露）。模型选择已有协议通道替代（§5.2）。 |
+| **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
 | **capabilities** | 只报最简 `agentCapabilities`；`initialize` 仅回显 `protocolVersion`。 | 加 `promptCapabilities`（图片/embedded context）、做真正的版本协商。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
@@ -165,6 +165,38 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 两个都可选、可单用；`SEEK_ACP_PROVIDER` 同时压掉首启向导（无头进程不该进交互式贴 key 提示）。只影响 `seek acp` 车道，shell 里残留的值对 TUI / print 模式无影响。paseo 侧典型用法：复制一个 provider 条目（如 `seek-glm`）写上 env，同一台机器 DeepSeek / GLM 两条入口并存——与 zcode 桥的 `ZCODE_PROVIDER`/`ZCODE_MODEL` 钉法同款。
 
 wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.4（C 落地记录）。
+
+### 5.3 会话模式 / Session modes（/plan 的协议通道，P2）
+
+`/plan` 不再是 TUI 专属：plan 模式经 ACP 规范自己的 **session modes** 语义暴露（agentclientprotocol.com/protocol/session-modes）——不是自创扩展。
+
+**能力申报**（capability 半边）：`session/new` 与 `session/load` 的结果带 `modes` 字段：
+
+```json
+"modes": {
+  "currentModeId": "default",
+  "availableModes": [
+    {"id": "default", "name": "Default", "description": "…"},
+    {"id": "plan",    "name": "Plan",    "description": "…"}
+  ]
+}
+```
+
+客户端（paseo / 未来 Zed）据此渲染模式切换器；老客户端把未知字段当普通 JSON 忽略，无副作用。
+
+**切换通道**（mode 半边）：`session/set_mode {sessionId, modeId}`——`modeId` 必须是 `availableModes` 里申报过的。seek 受理后先发一条 `session/update`（`current_mode_update` + 新 `currentModeId`）**再**回 `{}` 响应（响应本身不带 mode 信息，通知就是确认）；未知 mode 回 `-32000` 并点名可用值；**prompt 进行中回 `-32000` 拒绝**（与 §5.2 换模型同规则：模式翻转共享权限工作流状态，回合间才安全——规范允许任意时刻发起，seek 诚实地拒绝并让客户端回合作间重试）。
+
+**语义映射**：`plan` == plan 模式的 analyze 子态（`WorkflowPlanAnalyze`，只读门：write/edit/bash 全拒，拒绝文案指向 propose）；`default` == 退出 plan（`WorkflowNone`）。切换同时更新**下一轮** user message 的 mode 提醒词（prefix-cache 安全，不改系统提示——TUI `/plan` 同款机制）。`plan-execute` 子态（propose 被人工批准后）**不是**第三个 wire mode：它的入口是 propose 审批 picker，ACP 车道暂无该承载（见上行 backlog），两态表面保持 default/plan 一进一出。
+
+**边界（诚实清单）**：plan 态模型被提醒词指示走 `propose`，但 propose 的人工审批门（TUI picker 四选项）在 ACP 车道无协议承载——ACP 下 plan 态的现实用途是**只读分析 + 计划文本产出**，人审后切回 `default` 执行。plan 态两态行为差异有真二进制 e2e 钉死（`cmd/seek/acp_mode_e2e_test.go`：plan 态 write 被拒不落盘 + 提醒词在轮内；default 态同一 write 落盘 + 提醒词消失）。
+
+**①选型：为什么首批只协议化 /plan、其余维持 TUI-only**：
+
+- `/model` —— 已有协议通道（§5.2 configOptions 下拉 + `session/set_config_option`），不重复造。
+- `/yolo` —— 车道姿态，启动期 env `SEEK_ACP_YOLO` 表达（§5.1）。不做会话中翻转：pref 与烤进系统提示的 Mode 标签必须一致（P0-2 的脱钩教训），会话中翻转会把「prompt 说的姿态」和「门实际姿态」拆开。
+- `/compact`、`/reset`、`/new`、`/resume`、`/clear` —— 会话/上下文生命周期在 ACP 下归**客户端**管（`session/new`、`session/load` 就是客户端的动词），band 内再造一套等于一个会话两个主人。
+- `/lang`、`/skill`、`/agents`、`/distill` 等 —— TUI 本地 UI/会话状态或人审门（skill 安装铁律），没有客户端可消费的协议形态；真需要时逐个立卡。
+- 原则：**ACP 车道不做「prompt 里伪 slash 解析」**——模型不该看到 slash；凡是「模式/配置」类语义走协议方法（modes / configOptions），凡是「会话生命周期」类语义留在客户端。
 
 ---
 

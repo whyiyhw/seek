@@ -28,7 +28,12 @@
 #             or network) asserts the c_vfgeam structured termination —
 #             exactly one _seek_turn_stop session/update, stopReason
 #             end_turn with a readable detail, preceding the response
-#             and matching its spec-side stopReason → stdin EOF →
+#             and matching its spec-side stopReason → [P2] session/new
+#             advertises the two-mode table (modes.currentModeId
+#             default + availableModes [default, plan]) and
+#             session/set_mode is honoured: current_mode_update
+#             notification BEFORE the {} response, bogus modeId is a
+#             loud -32000 naming the available modes → stdin EOF →
 #             clean exit rc=0.
 #   NOT       session/prompt with CONTENT — that needs a real LLM
 #             round-trip (key + network), which is not deterministic
@@ -199,8 +204,45 @@ grep -F '"id":5' "$OUT" | grep -qF '"stopReason":"end_turn"' \
   || fail "response stopReason != end_turn: $(grep -F '"id":5' "$OUT")"
 echo "acp-smoke: termination frame ok (_seek_turn_stop end_turn, precedes response)"
 
+# --- 3d. session modes: advertisement + set_mode (c_cotikz, ACP·P2) -------------
+# The plan-mode protocol channel, asserted on the real binary without
+# an LLM: session/new advertised the two-mode table (currentModeId
+# default + available [default, plan]); set_mode plan is honoured with
+# a current_mode_update notification BEFORE the {} response (the
+# response itself carries no mode info); an unknown modeId is a loud
+# -32000 naming the available modes; switching back confirms default.
+grep '"id":2' "$OUT" | grep -q '"modes":{"currentModeId":"default"' \
+  || fail "session/new: no modes advertisement: $(grep '"id":2' "$OUT")"
+grep '"id":2' "$OUT" | grep -q '"availableModes":\[{"id":"default","name":"Default"' \
+  || fail "session/new: availableModes missing default entry"
+grep '"id":2' "$OUT" | grep -q '"id":"plan","name":"Plan"' \
+  || fail "session/new: availableModes missing plan entry"
+rpc 6 session/set_mode "{\"sessionId\":\"$SID\",\"modeId\":\"plan\"}"
+wait_for 'current_mode_update' 'set_mode(plan) notification' 15
+grep -F '"current_mode_update"' "$OUT" | grep -qF '"currentModeId":"plan"' \
+  || fail "current_mode_update does not name plan"
+# notification precedes the response (same ordering contract as
+# _seek_turn_stop above).
+mode_notif_line=$(grep -n -F '"current_mode_update"' "$OUT" | head -1 | cut -d: -f1)
+mode_resp_line=$(grep -n -F '"id":6' "$OUT" | head -1 | cut -d: -f1)
+[ "$mode_notif_line" -lt "$mode_resp_line" ] \
+  || fail "current_mode_update (line $mode_notif_line) must precede the set_mode response (line $mode_resp_line)"
+grep -F '"id":6' "$OUT" | grep -qF '"result":{}' \
+  || fail "set_mode result is not {} (schema response is _meta-only): $(grep -F '"id":6' "$OUT")"
+rpc 7 session/set_mode "{\"sessionId\":\"$SID\",\"modeId\":\"bogus\"}"
+wait_for '"id":7' 'set_mode(bogus) response' 15
+grep -F '"id":7' "$OUT" | grep -q '\-32000' \
+  || fail "bogus modeId not rejected with -32000"
+grep -F '"id":7' "$OUT" | grep -q 'available' \
+  || fail "bogus modeId error does not name the available modes"
+rpc 8 session/set_mode "{\"sessionId\":\"$SID\",\"modeId\":\"default\"}"
+wait_for '"id":8' 'set_mode(default) response' 15
+grep -F '"current_mode_update"' "$OUT" | grep -qF '"currentModeId":"default"' \
+  || fail "current_mode_update does not confirm default"
+echo "acp-smoke: session modes ok (advertised default+plan, set_mode honoured + notified, bogus rejected)"
+
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
-echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+prompt-term anchor=$WS rc=0"
+echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+prompt-term+modes anchor=$WS rc=0"
