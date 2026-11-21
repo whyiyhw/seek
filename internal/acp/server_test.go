@@ -15,6 +15,8 @@ type fakeBackend struct {
 	setConfig func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
 	load      func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
 	list      func(p ListSessionsParams) (ListSessionsResult, error)
+	modes     *SessionModeState           // returned by NewSession (nil default)
+	setMode   func(p SetModeParams) error // nil default = canned success
 }
 
 func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
@@ -24,7 +26,7 @@ func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
 	}}
 }
 func (f fakeBackend) NewSession(p NewSessionParams) (NewSessionResult, error) {
-	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu}, nil
+	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu, Modes: f.modes}, nil
 }
 func (f fakeBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {
 	if f.load != nil {

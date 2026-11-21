@@ -129,3 +129,28 @@ monitor(job="bg-1", action=wait)                              # 最后阻塞等�
 | 用途 | "这条命令跑得久，我先干别的" | "每天 9 点跑一次"、"30 秒后回来看 CI" |
 
 需要"睡觉时也在跑"或"跨会话定时"——用 [`seek cron`](./guide-cron.md)。需要"这一轮里把长命令丢后台"——用 `run_in_background` + `monitor`。
+
+---
+
+## 7. 第三种：任务寿命脱离 seek / Tasks that outlive seek（v8 柱 V1）
+
+后台 bash 有个天花板：**会话一退就收摊**。想要"关掉 seek 也跑完"，用 `seek task run`——它在终端里是独立的 CLI 面，不是模型工具：
+
+```
+seek task run "go test ./..."      # 起任务，立刻打印 id
+seek ps                            # 谁在跑、谁跑完了、谁变僵尸/丢了
+seek attach <id> [--timeout 30s]   # 从头重放 + 尾随输出（超时只停止观察，不杀任务）
+seek kill <id> [--grace 3s]        # SIGTERM 整进程组 → 超时升 SIGKILL
+```
+
+| | `run_in_background` + `monitor` | `seek task run` + `ps/attach/kill` |
+|---|---|---|
+| 谁发起 | **模型**（turn 内） | **人**（终端） |
+| 生命周期 | 随 seek 会话（`Shutdown` 全杀） | **脱离**：seek 退出/崩溃都照跑 |
+| 状态存哪 | 内存 | `~/.seek/tasks/<id>.jsonl` 事实日志 |
+| 输出 | 内存 ring（64 KiB） | `~/.seek/tasks/<id>.log` 文件 |
+| 常驻机制 | 无 | **同样无**——三个子命令各读一遍目录就退出 |
+
+状态是折叠出来的：`starting` / `running` / `exited` / `failed` / `killed` / `zombie` / `lost`。`zombie` 表示进程已死但父进程还没 reap（如实显示，不假装 running）；`lost` 表示进程消失且没留下退出码（OOM 或外部 SIGKILL）。设计见 [`docs/prd/feature-task-lifetime.md`](./prd/feature-task-lifetime.md)。
+
+`starting` 是 spawn 与 wrapper 报告 pid 之间那一瞬（微秒级）。在这窗口里 `kill` 会**拒绝并报错**、不落 `killed` 事实——给 pid 0 发信号是空操作，写下的「已杀」会让 `ps` 撒谎而任务还在跑；重试即可。

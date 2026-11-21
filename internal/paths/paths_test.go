@@ -61,6 +61,7 @@ func TestSubdirs_ComposeUnderHome(t *testing.T) {
 	}{
 		{"Sessions", Sessions, filepath.Join(override, "sessions")},
 		{"ServeDir", ServeDir, filepath.Join(override, "serve")},
+		{"TasksDir", TasksDir, filepath.Join(override, "tasks")},
 		{"MCPConfig", MCPConfig, filepath.Join(override, "mcp.json")},
 		{"UserSkills", UserSkills, filepath.Join(override, "skills")},
 		{"UserAgents", UserAgents, filepath.Join(override, "agents")},
