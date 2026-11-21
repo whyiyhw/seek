@@ -41,6 +41,8 @@ seek exposes tools to the LLM as JSON schema definitions. Current tools: `read`,
 
 **Key constraint**: Tool schemas are `[]byte` constants at package level (built once at init, not at call time). This ensures identical bytes across turns → DeepSeek's prefix cache hits.
 
+- **Failure is an event, never a process death** — a panicking tool degrades to a failed tool call (the model sees the error and retries); a panic in the prompt goroutine becomes an `ErrorEvent` carrying the stack instead of killing the process. `AgentEnd.Finish` carries the final turn's upstream `finish_reason`, so consumers classify *how* a round ended from a typed field rather than from notice text. On the ACP lane the two compose into one guarantee the editor can trust: every round emits exactly one `_seek_turn_stop` frame **before** its response, so "no frame and no response" means the process itself died ([`guide-zed.md`](guide-zed.md) §4.1).
+
 Code: `internal/tools/` · each tool in its own package with a `New(...)` constructor.
 
 ---
