@@ -1298,6 +1298,11 @@ func run() error {
 			// `agent` tool schema enum is generated from the same
 			// registry at startup (agenttool.CacheTypesSchema above).
 			AgentTypes: agentTypes,
+			// P3-a trigger wiring: subagent_start / subagent_stop
+			// observers fire from the Manager (parent registry — the
+			// child's own copy is a CloneWithout snapshot, so the
+			// lifecycle event fires exactly once per spawn).
+			Hooks: hooksReg,
 			Runner: buildSubagentRunner(subagentRunnerOpts{
 				client:    dsClient,
 				provider:  provider,
@@ -1417,7 +1422,16 @@ func run() error {
 				fmt.Fprintln(os.Stderr, "cron auto-tick: open store:", err)
 				return
 			}
-			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{Webhook: routinescli.WebhookDispatcherFromConfig()}); err != nil {
+			if _, err := routines.Tick(ctx, cronStore, routines.TickOptions{
+				Webhook: routinescli.WebhookDispatcherFromConfig(),
+				// Notification observer (feature-orchestration D15):
+				// pillar H's OS notifier is one of the two "surfaced
+				// outside the text plane" points. Wrapping the
+				// platform default reports every popup this process
+				// dispatches to a `notification` hook without
+				// changing delivery — errors still surface as WARN.
+				Notifier: hooks.NotifierObserver(hooksReg, routines.DefaultNotifier),
+			}); err != nil {
 				fmt.Fprintln(os.Stderr, "cron auto-tick:", err)
 			}
 		}()
@@ -1972,6 +1986,7 @@ func run() error {
 		Suggester:             predictor,
 		Skills:                skills,
 		AgentTypes:            agentTypes,
+		Hooks:                 hooksReg,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
 		SessionNotifySeconds:  sessionNotifySeconds,
 		AutoCompactAt:         autoCompactAt,
