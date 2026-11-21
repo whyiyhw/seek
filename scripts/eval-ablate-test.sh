@@ -204,6 +204,11 @@ new_rc=$?
 # 归一化：沙盒根（old/new 各自归 ROOT）、tmp 公共前缀、ran_at 时间戳、
 # 结果文件名日期戳、PASS 行耗时、行内 elapsed_s —— 全部是同一脚本连跑
 # 两次也会变的字段；其余字节必须一致。
+# 例外：metric vocabulary 的 append-only 扩展。锚点 pre 固定在 c_w3vhcm
+# 之前的 blob，任何新增 metric 键都会让结果行多一个字段——那是合法演
+# 进，不是行为回归。只剥新键的【默认 0 值】（新键清单 = 锚点之后加入
+# vocabulary 的键）：值非 0 时不剥，diff 照样红——守护面不因此弱化。
+# 2026-11-21 起清单：runner_assert_failures（E3 plan-e2e，c_c5wwey）。
 norm() {
   sed -E \
     -e "s|$tmp/$1|ROOT|g" \
@@ -211,7 +216,8 @@ norm() {
     -e 's|20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z|TS|g' \
     -e 's|20[0-9]{2}-[0-9]{2}-[0-9]{2}-v9\.9\.9-deadbee|DATE-v9.9.9-deadbee|g' \
     -e 's|\([0-9]+s,|(Xs,|g' \
-    -e 's|elapsed_s":[0-9]+|elapsed_s":E|g'
+    -e 's|elapsed_s":[0-9]+|elapsed_s":E|g' \
+    -e 's|,"runner_assert_failures":0||g'
 }
 for side in old new; do
   set -- "$tmp/$side/eval/results/"*.jsonl

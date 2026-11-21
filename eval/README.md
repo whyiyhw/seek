@@ -196,6 +196,7 @@ the lane block and is lane-independent.
 | `session_id_missing` | `agent_end` events without `session_id` (`cmd/seek/main.go` `jsonLine.SessionID`, stable contract; `--no-save` legitimately omits it — only bind this in cases that save) |
 | `session_id_distinct` | distinct `session_id` values across `agent_end` events — a fresh run plus `-resume` of that session must report the same id → 1 |
 | `nonzero_exits` | `runner_fact` lines with `exit_code != 0` — a runner.sh's channel for process-level results (exit codes aren't in the JSONL stream); 0 for default-invocation cases |
+| `runner_assert_failures` | `runner_fact` lines with `failed == true` — a runner.sh's channel for mechanical judgement assertions (task-level scoring; first user: plan-e2e's A1–A10, see "Load-bearing axis cases" below). Generic: any runner may emit failed-facts |
 | `turns` | `turn_end` events |
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
@@ -408,8 +409,31 @@ While the opencode/compatible lane is active, `run.sh` **scrubs `DEEPSEEK_API_KE
 
 Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
 
+## Load-bearing axis cases (eval v2 E3+, `docs/prd/feature-eval-v2.md` §2.2 B)
+
+Task-level cases for the v0.11–0.12 surface that grew fastest with zero eval
+coverage (plan state machine, subagent lifecycle, serve/web plane). Judging is
+a per-case mechanical scorer (no LLM, no prose matching): wire-format PREFIX
+assertions on tool results + message-order facts + filesystem recomputation,
+emitted as `runner_fact` lines and counted by `runner_assert_failures`.
+
+- **`plan-e2e`** (E3, c_c5wwey, 2026-11-21) — the full plan chain
+  propose(done_when+reviewed_by) → approval → plan(start) echo → write →
+  plan(complete) → `/exit` → `-resume` fold probe, driven through a REAL TUI
+  on a pty (`eval/tools/plan-e2e-drive.py`; the approval picker is
+  TUI-only — print mode has no askuser callback) against a scripted local
+  model (`fake_plan_endpoint.py`, fake key, $0 API). Asserts A1–A10 +
+  resume_same_session; **measures the toolchain, not model choice**.
+  `record_only: true` until E2's calibration lands; joins the release lane
+  at E6. Baseline + judging detail + the resume-fold bug its first run
+  caught: `eval/cases/plan-e2e/README.md`.
+- E4 `subagent-bg-resume` and E5 `serve-web-stream` follow on their own cards
+  (same judging pattern: `runner_fact{failed}` + this metric).
+
 ## Cost
 
 Each pass is one full `seek` invocation. On the default lane (since 2026-11-20: the OpenCode Go subscription's `deepseek-v4.1-flash`) it bills the subscription, not the metered API. On the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback it is one metered DeepSeek call — budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out (full 3-case suite well under $0.20).
 
 Rows also carry `cache_hit_tokens` (for cost accounting — see `docs/test-plan-read-tool.md` §3.3) and `final_text` (joined assistant text, capped at 2000 chars, for offline gold-answer scoring).
+
+Load-bearing axis cases are the exception on both lanes: their model is a local scripted fixture (fake key), so a full plan-e2e round costs **$0 API and ~18s wall** (measured 2026-11-21); the $0.1–0.3/example estimate applies only when the release lane re-runs them against a real model (PRD §2.2 B, E6's budget — not the daily core subset).

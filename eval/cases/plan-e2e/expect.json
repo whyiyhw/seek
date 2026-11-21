@@ -1,0 +1,7 @@
+{
+  "description": "eval v2 E3 承重轴首例（c_c5wwey）：真实走 plan 工具链全链——propose(带 done_when 断言列表+reviewed_by) → 用户批准(approve_batch) → plan(start) 执行期回显 → write → plan(complete) → /exit → -resume 折叠探针。判分全部机械（eval/tools/plan-e2e-judge.py，A1-A10 + resume_same_session）：wire-format 前缀断言（[plan: approved]/[plan: step N …]）、消息序事实（批准前零 write/edit、resume 段零重写）、文件系统对照（done_when 的 file_check/content_check 复算）。模型是本地 scripted fixture（fake key，零 API 费）——测的是工具链不是模型选择。record_only: E2 标定未落，先记录不闸门；E6 release lane 接管后转正。",
+  "max_turns": 8,
+  "max_runner_assert_failures": 0,
+  "max_nonzero_exits": 0,
+  "record_only": true
+}

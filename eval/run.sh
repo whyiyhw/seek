@@ -446,6 +446,15 @@ extract_metric() {
       # Cases using the default invocation emit no facts → 0.
       $JQ -s '[.[] | select(.type=="runner_fact" and ((.exit_code // 0) != 0))] | length' "$path"
       ;;
+    runner_assert_failures)
+      # runner_fact lines flagging a FAILED judgement assertion
+      # ({"failed":true}) from a case's mechanical scorer — the
+      # task-level judging pattern of eval v2's load-bearing axis
+      # (plan-e2e's A1..A10, docs/prd/feature-eval-v2.md §2.2 B).
+      # Generic on purpose: any runner.sh may emit failed-facts; the
+      # assertions themselves live in the case's scorer, not here.
+      $JQ -s '[.[] | select(.type=="runner_fact" and ((.failed // false) == true))] | length' "$path"
+      ;;
     turns)
       $JQ -s '[.[] | select(.type=="turn_end")] | length' "$path"
       ;;
@@ -607,11 +616,12 @@ run_one() {
     --argjson session_id_missing   "$(extract_metric session_id_missing   "$out_file")" \
     --argjson session_id_distinct  "$(extract_metric session_id_distinct  "$out_file")" \
     --argjson nonzero_exits        "$(extract_metric nonzero_exits        "$out_file")" \
+    --argjson runner_assert_failures "$(extract_metric runner_assert_failures "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, runner_assert_failures:$runner_assert_failures, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}')
 
   # Check each bound from expect.json against the metric of the same
   # name. failures is an array of "metric: expected ≤/≥/= bound, got

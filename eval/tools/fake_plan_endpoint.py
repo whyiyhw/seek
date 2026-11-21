@@ -118,9 +118,18 @@ def decide(msgs):
     if resume_lane:
         # The fold probe. On a lane whose plan state folded correctly,
         # this is a no-op complete on an already-completed step and the
-        # result says "2/2 done"; with no folded plan it errors.
-        if not any(n == "plan" and "step 2 complete" in c for n, c in tools):
-            if not any(n == "plan" and c.startswith("[plan: step 2") for n, c in tools):
+        # result says "2/2 done"; with no folded plan it errors
+        # ("no active plan"). Match on the wire-format PREFIX — the
+        # marker is the contract (plan.go), the prose after it is not.
+        # The probe is capped at 3 attempts: on a broken fold the real
+        # tool keeps erroring, and without a cap the scripted model
+        # would retry forever (observed: 204 turns in the first smoke
+        # run). Giving up emits the done text so the driver exits
+        # cleanly and the JUDGE flags the fold from the transcript.
+        errors = sum(1 for n, c in tools
+                     if n == "plan" and "no active plan" in c)
+        if not any(n == "plan" and c.startswith("[plan: step 2 complete") for n, c in tools):
+            if errors < 3:
                 return _chunks("c-fold", "plan", {"action": "complete", "index": 2})
         return _text("RESUME-E2E-DONE")
 
