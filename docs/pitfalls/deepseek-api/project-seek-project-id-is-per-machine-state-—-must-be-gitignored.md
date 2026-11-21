@@ -1,0 +1,6 @@
+### `<project>/.seek/project-id` is per-machine state — must be gitignored
+- **Saw**: `git status` in seek's own repo showed `.seek/` untracked. If committed, every clone would pick up the original author's `sha256("/Users/alice/code/seek")[:16]` as their project-id and route their own per-machine M under `~/.seek/projects/<alice's hash>/`. Not data-corrupting (each user's M still lives under their own home), but the directory name becomes a "shared but meaningless" string with no relation to any local path
+- **Why**: `LoadOrCreate` writes `.seek/project-id` best-effort on every run to support single-user "project moved" recovery — the pointer travels with the project tree so a `mv` doesn't lose M history. That recovery use case is per-user; cross-user propagation was never intended
+- **Fix**: `.seek/project-id` added to repo `.gitignore`. Pattern is narrow (just the file) rather than `.seek/` because `<project>/.seek/skills/` is meant to be team-shared
+- **Lesson**: auto-generated per-machine pointer files MUST be gitignored at creation — adding "we'll gitignore it later" is exactly when it slips into a `git add .`. If a file is written best-effort on first run, its gitignore entry needs to ship in the same commit
+- **Refs**: `internal/memory/project.go:writeProjectPointer`, `.gitignore`

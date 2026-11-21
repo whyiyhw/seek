@@ -141,6 +141,14 @@ type WebConfig struct {
 	TokenPath string    // token file; "" → <ServeDir>/web.token
 	StorePath string    // binding store path; "" → <ServeDir>/bindings.json
 	Banner    io.Writer // startup line ("web up: <url>"); nil → os.Stderr
+
+	// Settings is the read-only serve-side snapshot the page's settings
+	// panel renders (W5 c_ni7mzw, webfrontend_settings.go). servecli
+	// fills it from the same config.Load result the plane runs off;
+	// nil = a bare frontend (tests/embedders) whose settings/get
+	// answers -32603 and whose page shows "settings unavailable".
+	// controlplane deliberately never reads config.json itself.
+	Settings *ServeSettings
 }
 
 // WebFrontend is the browser-chat Frontend. Safe for concurrent use:

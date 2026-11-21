@@ -1,0 +1,6 @@
+### `reasoning_effort` values are `high|max` on DeepSeek V4 — not OpenAI's `low|medium|high`
+- **Saw**: while wiring the `/effort` TUI command, the existing comment on `ChatRequest.ReasoningEffort` claimed `"low"|"medium"|"high"` (an OpenAI o-series carry-over). Building a 3-rung picker against that surface would have exposed values DeepSeek may silently ignore or reject
+- **Why**: DeepSeek V4 documents only two `reasoning_effort` levels — `high` and `max` — alongside the `thinking.type` toggle. The earlier OpenAI-style trio looked correct because the field name matches, but the value sets are not interchangeable
+- **Fix**: corrected `pkg/deepseek/types.go:103` comment to document `high|max`; `/effort` exposes `off|high|max` only; `internal/tools/think` keeps `high` as its baseline and bumps to `max` when the session is already at `high`. Wire pins in `TestAgent_EffortOverridesThinking` and `TestThink_BumpEffort`
+- **Lesson**: when a Go field's name matches a sibling provider's parameter, the **value enum is not** part of the name match. Re-read the vendor's doc page for the value set every time, even when the field looks "the same"
+- **Refs**: `pkg/deepseek/types.go`, `internal/tools/think/think.go:bumpEffort`, `internal/tui/commands.go:effortChoices`

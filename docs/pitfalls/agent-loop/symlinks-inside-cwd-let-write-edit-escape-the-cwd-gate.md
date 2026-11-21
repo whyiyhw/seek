@@ -1,0 +1,6 @@
+### Symlinks inside CWD let `write`/`edit` escape the CWD gate
+- **Saw**: a symlink `<cwd>/escape → /tmp/other` accepts writes via `Check(KindWrite, Path: "<cwd>/escape/x")` even in `ModeDeny`. The file lands at `/tmp/other/x` — outside the working directory the policy is supposed to protect
+- **Why**: `permission.isWithin` works on path strings (filepath.Abs + filepath.Rel). It does NOT resolve symlinks via `filepath.EvalSymlinks` before comparing, so the policy sees "this path starts with cwd → allow". The subsequent `os.WriteFile` follows the symlink and writes outside
+- **Fix**: NOT fixed in this commit — pinned by `permission.TestIsWithin_SymlinkInsideCWDPointingOutsideIsAllowed` and `write.TestWrite_SymlinkInsideCWDLetsContentEscape`. Rationale: seek's threat model is single-user local tool (a user who wanted to write outside cwd could run `bash` directly anyway), AND symlinked vendor/build/cache dirs are legitimate workflows that EvalSymlinks would break
+- **Lesson**: path-based access control sees a graph different from what the filesystem layer below it walks. For a hardened multi-tenant tool this would be a CVE; for seek it's a documented limitation. Either way, pin the current behaviour so any tightening is deliberate
+- **Refs**: `internal/permission/permission.go:isWithin`; test cross-references above

@@ -1,83 +1,73 @@
 #!/usr/bin/env bash
 #
-# pitfalls-count.sh — 把 docs/pitfalls.md 的派生计数从「手写」改成「算出来」
-# （卡 c_554rlg）。
+# pitfalls-count.sh — 从 docs/pitfalls/ 目录**现算**台账计数（卡 c_uxznyn，
+# 2026-11-20 拆分后取代旧「生成块 + --write」机制，c_554rlg）。
 #
-# 为什么要有这个脚本：文件头 Status 段里的三处派生量——live 条目总数、
-# Per-section 表、四桶 rollup——以前是手抄的散文，复核靠人眼，于是必然漂移。
-# 2026-11-20 实测：表合计 264 / 实数 268、「Total」行 255、rollup 34·35·43·143
-# 全是旧值，三段明细（Tooling 24/25、LLM 10/11、Web 15/17）也各差一条。
-# 现在这三处是**生成块**：块内只由正文算出，`--write` 重算、`--check` 校验，
-# 漂移从「人手复核」降级成「红灯」。
+# 为什么现算：旧机制把派生计数写进 docs/pitfalls.md 头部生成块，任意两个
+# 分支各加一条 → 头部必冲突（拆分动机的三层成因之一）。一条目一文件后
+# 计数天然可从目录数出来，入库即负资产：已删除 --write 与生成块。
 #
-# 计数口径（唯一真源）：
-#   - 跳过 ``` 围栏内的内容（文件头模板里的 `### Short symptom title` 不算）；
-#   - `^## ` 切段，`^### ` 计条目；
-#   - `^### [已吸收]` 计 absorbed，其余计 live；
-#   - 0 条目的段是散文（Format / Policy / Reading order …），不进表。
+# 口径（与拆分前一致，唯一真源）：
+#   - live 条目 = docs/pitfalls/<section>/*.md 的文件数（absorbed/ 除外）；
+#   - absorbed 条目 = docs/pitfalls/absorbed/*.md 的文件数；
+#   - 有条目的段 = 至少含一个 .md 的段目录；
+#   - 四桶 rollup 按段目录名归桶（等价于旧按段名前缀）：
+#       tui → TUI；deepseek-api / llm-provider-quirks* / feishu* → API；
+#       go / go-language → Go；其余 → tooling & engineering。
 #
 # 用法：
 #   scripts/pitfalls-count.sh              # 报表（advisory，恒 exit 0）
-#   scripts/pitfalls-count.sh --check      # 与生成块对账，不符即红
-#   scripts/pitfalls-count.sh --write      # 重写生成块（幂等）
-#   scripts/pitfalls-count.sh --selftest   # 夹具自测（bash scripts/selftest.sh pitfalls-count）
-#   任一模式后可再跟一个文件路径（默认 docs/pitfalls.md）
+#   scripts/pitfalls-count.sh --check      # 格式校验：每文件有 ### 标题与
+#                                          #   Saw/Why/Fix/Lesson 字段、目录名
+#                                          #   合法、无重复 slug、absorbed 带
+#                                          #   已吸收指针、旧桩未被追加条目
+#   scripts/pitfalls-count.sh --selftest   # 夹具自测
+#                （bash scripts/selftest.sh pitfalls-count）
+#   任一模式后可再跟一个目录路径（默认 docs/pitfalls）
 #
-# `--check` 的失败面三类，都指名道姓：
-#   ① 数字与正文不符（diff 逐行给出「文件现在写的」对「从正文算出的」）；
-#   ② 生成块缺失或缺一边标记（提示先跑 --write）；
-#   ③ 同前缀段：`TUI / terminal` + `TUI / session stats` 这种一个前缀两段——
-#      合并后必须归零，否则新段会再长回来。
+# --check 的失败面，都指名道姓：
+#   ① 条目文件缺 `### ` 标题行或缺 Saw/Why/Fix/Lesson 任一字段
+#      （字段行前缀 `- **Saw` 等，允许 `- **Fix (variant):` 这类变体标签）；
+#   ② 目录名不合法（须为小写 kebab / CJK，无空格下划线大写点号）；
+#   ③ 同 slug 出现在两个目录（grep 指路会有歧义）；
+#   ④ absorbed/ 文件缺 `- **已吸收**` 指针行；
+#   ⑤ docs/pitfalls.md 桩里混进了 `### ` 条目（该跑 pitfalls-split.sh）。
+#
+# 旧机制的「同前缀段」检查（TUI / terminal + TUI / session stats）随段结构
+# 一起退役：目录化后新段是显式决定，不再从散文里长回来。
 #
 # bash 3.2 compatible（macOS 自带 3.2；不用 mapfile / 关联数组）。
 
 set -uo pipefail
 
-BEGIN_MARK='<!-- pitfalls-count: BEGIN'
-END_MARK='<!-- pitfalls-count: END'
-
 usage() {
-  sed -n '19,30p' "$0" | sed 's/^#\{1,\} \{0,1\}//' >&2
+  sed -n '/^# 用法：/,/^# --check 的失败面/p' "$0" | sed 's/^#\{1,\} \{0,1\}//' | sed '$d' >&2
   exit 2
 }
 
 script_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || script_dir="."
 repo_root=$(cd "$script_dir/.." 2>/dev/null && pwd) || repo_root="."
 
-# --- 计数 ---------------------------------------------------------------
+# --- 计数（现算） ---------------------------------------------------------
 
-# stats_tsv <file> → TSV：段名<TAB>live<TAB>absorbed（保持文件顺序）
-stats_tsv() {
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence        { next }
-    /^## /       { sec = substr($0, 4); order[++n] = sec; next }
-    /^### /      {
-                    if (sec == "") next
-                    if ($0 ~ /^### \[已吸收\]/) abs[sec]++
-                    else                       live[sec]++
-                  }
-    END          {
-                    for (i = 1; i <= n; i++) {
-                      s = order[i]
-                      printf "%s\t%d\t%d\n", s, live[s] + 0, abs[s] + 0
-                    }
-                  }
-  ' "$1"
+# section_tsv <dir> → TSV：段目录<TAB>live（按目录名排序；absorbed 不进表）
+section_tsv() {
+  local d
+  find "$1" -mindepth 1 -maxdepth 1 -type d ! -name absorbed 2>/dev/null | sort \
+    | while IFS= read -r d; do
+        printf '%s\t%s\n' "$(basename "$d")" "$(find "$d" -name '*.md' | wc -l | tr -d ' ')"
+      done
 }
 
-sum_col() { # sum_col <tsv> <2|3>
-  awk -F'\t' -v c="$2" '{ s += $c } END { print s + 0 }' "$1"
+absorbed_count() {
+  find "$1/absorbed" -name '*.md' 2>/dev/null | wc -l | tr -d ' '
 }
 
-# 四桶口径：TUI / API / Go 各自是一组「同一件事」的段（合并前是
-# `TUI / terminal` + `TUI / session stats` 这种并列段），其余归 tooling。
-# 段名按前缀匹配，所以合并成裸 `TUI` 之后照旧命中。
-rollup_col() { # rollup_col <tsv> <tui|api|go|rest>
+rollup() { # rollup <tsv> <tui|api|go|rest>
   awk -F'\t' -v b="$2" '
-    function is_tui(n) { return (n == "TUI" || n ~ /^TUI \//) }
-    function is_api(n) { return (n == "DeepSeek API" || n ~ /^LLM provider quirks/ || n ~ /^Feishu/) }
-    function is_go(n)  { return (n == "Go" || n ~ /^Go language/) }
+    function is_tui(n) { return n == "tui" }
+    function is_api(n) { return n == "deepseek-api" || n ~ /^llm-provider-quirks/ || n ~ /^feishu/ }
+    function is_go(n)  { return n == "go" || n == "go-language" }
     {
       n = $1
       if (b == "tui"  &&  is_tui(n)) s += $2
@@ -89,289 +79,194 @@ rollup_col() { # rollup_col <tsv> <tui|api|go|rest>
   ' "$1"
 }
 
-# 同前缀段：段名取第一个 " / " 之前的部分；一个前缀出现两段即告警。
-prefix_warnings() {
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence        { next }
-    /^## /       {
-                    s = substr($0, 4)
-                    p = s; sub(/ \/.*$/, "", p)
-                    if (p in first) printf "同前缀段：%s（已有 %s）——并成一段\n", s, first[p]
-                    else first[p] = s
-                  }
-  ' "$1"
-}
+# --- 报表 -----------------------------------------------------------------
 
-# 完全同名的段（复检：`## TUI` 出现两次这种）
-dup_warnings() {
-  awk '
-    /^[ \t]*```/ { fence = !fence; next }
-    fence        { next }
-    /^## /       { s = substr($0, 4); if (s in seen) print "重复段名：" s; seen[s] = 1 }
-  ' "$1"
-}
-
-# --- 生成块 -------------------------------------------------------------
-
-emit_block() { # emit_block <tsv> → stdout（含首尾标记行）
-  local tsv=$1 total absn
-  total=$(sum_col "$tsv" 2)
-  absn=$(sum_col "$tsv" 3)
-
-  printf '%s (generated by scripts/pitfalls-count.sh --write — do not hand-edit; --check fails on drift) -->\n' "$BEGIN_MARK"
-  printf '**%s live entries, %s absorbed in this file.**\n\n' "$total" "$absn"
-  printf 'Per-section distribution (live entries; sections with no entries are prose and are not listed):\n\n'
-  printf '| Section | Live |\n'
-  printf '|---|---:|\n'
-  awk -F'\t' '$2 > 0 { printf "| %s | %d |\n", $1, $2 }' "$tsv"
-  printf '| **Total** | **%s** |\n\n' "$total"
-  printf 'Coarse four-bucket rollup — **TUI**: %s live · **API**: %s live · **Go**: %s live · **tooling & engineering**: %s.\n' \
-    "$(rollup_col "$tsv" tui)" "$(rollup_col "$tsv" api)" "$(rollup_col "$tsv" go)" "$(rollup_col "$tsv" rest)"
-  printf '%s -->\n' "$END_MARK"
-}
-
-# extract_block <file> → stdout：两标记之间（含标记行）；缺标记则不输出。
-extract_block() {
-  awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
-    inside && index($0, e) == 1 { print; inside = 0; next }
-    inside       { print; next }
-    index($0, b) == 1 { print; inside = 1 }
-  ' "$1"
-}
-
-# 标记行必须是**整行**（不是子串）：散文里引用标记名（比如本文件的历史条目、
-# 或一封解释这条机制的邮件被粘进文档）不该让脚本把正文当块、把块当正文。
-# 而且必须各恰好一次——两次 BEGIN 意味着块边界有歧义，宁可拒绝也不猜。
-marker_count() { # marker_count <file> <begin|end>
-  local pat
-  case "$2" in
-    begin) pat="$BEGIN_MARK" ;;
-    end)   pat="$END_MARK" ;;
-  esac
-  awk -v p="$pat" 'index($0, p) == 1 && $0 ~ /-->[[:space:]]*$/ { n++ } END { print n + 0 }' "$1"
-}
-
-has_block() {
-  [ "$(marker_count "$1" begin)" = 1 ] && [ "$(marker_count "$1" end)" = 1 ]
-}
-
-# --- 三个模式 -----------------------------------------------------------
-
-cmd_report() { # cmd_report <file> —— advisory，恒 exit 0
-  local tsv
+cmd_report() { # cmd_report <dir> —— advisory，恒 exit 0
+  local tsv live absn secs
+  [ -d "$1" ] || { echo "pitfalls-count: 目录不存在：$1" >&2; return 0; }
   tsv=$(mktemp) || return 0
-  stats_tsv "$1" >"$tsv"
-  printf 'live=%s absorbed=%s sections_with_entries=%s\n' \
-    "$(sum_col "$tsv" 2)" "$(sum_col "$tsv" 3)" \
-    "$(awk -F'\t' '$2 > 0' "$tsv" | wc -l | tr -d ' ')"
+  section_tsv "$1" >"$tsv"
+  live=$(awk -F'\t' '{ s += $2 } END { print s + 0 }' "$tsv")
+  absn=$(absorbed_count "$1")
+  secs=$(awk -F'\t' '$2 > 0' "$tsv" | wc -l | tr -d ' ')
+  printf 'live=%s absorbed=%s sections_with_entries=%s\n' "$live" "$absn" "$secs"
   printf 'rollup: TUI=%s API=%s Go=%s rest=%s\n' \
-    "$(rollup_col "$tsv" tui)" "$(rollup_col "$tsv" api)" "$(rollup_col "$tsv" go)" "$(rollup_col "$tsv" rest)"
-  local w
-  w=$(prefix_warnings "$1"); [ -n "$w" ] && printf '%s\n' "$w"
+    "$(rollup "$tsv" tui)" "$(rollup "$tsv" api)" "$(rollup "$tsv" go)" "$(rollup "$tsv" rest)"
+  awk -F'\t' '{ printf "  %-40s %s\n", $1, $2 }' "$tsv"
   rm -f "$tsv"
   return 0
 }
 
-cmd_check() { # cmd_check <file>
-  local file=$1 tsv cur want rc=0 w
-  if ! has_block "$file"; then
-    echo "✗ ${file}：生成块标记缺失（$BEGIN_MARK … ${END_MARK}）——先跑 scripts/pitfalls-count.sh --write" >&2
-    return 1
-  fi
+# --- 格式校验 -------------------------------------------------------------
+
+errln() { printf '✗ %s\n' "$*" >&2; }
+
+cmd_check() { # cmd_check <dir>
+  local dir=$1 rc=0 d f first title
+  [ -d "$dir" ] || { errln "${dir}：目录不存在"; return 1; }
+  local tsv
   tsv=$(mktemp) || return 3
-  cur=$(mktemp) || { rm -f "$tsv"; return 3; }
-  want=$(mktemp) || { rm -f "$tsv" "$cur"; return 3; }
+  section_tsv "$dir" >"$tsv"
 
-  stats_tsv "$file" >"$tsv"
-  emit_block "$tsv" >"$want"
-  extract_block "$file" >"$cur"
+  # ② 目录名合法（小写 kebab / CJK；删掉合法字节集后还有剩余即非法）+ 空目录
+  while IFS= read -r d; do
+    if [ -n "$(printf '%s' "$(basename "$d")" | LC_ALL=C tr -d 'a-z0-9\200-\377-')" ]; then
+      errln "目录名不合法（须小写 kebab/CJK，无空格下划线大写点号）：$(basename "$d")"
+      rc=1
+    fi
+    [ "$(find "$d" -name '*.md' | wc -l | tr -d ' ')" = 0 ] \
+      && { errln "空段目录：$(basename "$d")"; rc=1; }
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 
-  if ! cmp -s "$cur" "$want"; then
-    echo "✗ ${file}：生成块与正文不符（漂移）——「-」是文件里现在写的，「+」是从正文算出来的：" >&2
-    diff -u "$cur" "$want" | sed -e '1,2d' -e 's/^-/  - /' -e 's/^+/  + /' >&2
-    echo "  修法：scripts/pitfalls-count.sh --write（别手改数字）" >&2
+  # 非 .md 文件只该出现在根 README.md；根下其它文件告警
+  while IFS= read -r f; do
+    errln "docs/pitfalls/ 根下只该有 README.md，发现：$f"
+    rc=1
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name README.md ! -type d 2>/dev/null)
+  while IFS= read -r f; do
+    [ "$(basename "$f")" = README.md ] && continue
+    errln "段目录里只该有 .md 文件：$f"
+    rc=1
+  done < <(find "$dir" -mindepth 2 -type f ! -name '*.md' 2>/dev/null)
+
+  # ③ 重复 slug（跨目录同 basename）
+  find "$dir" -name '*.md' ! -name README.md 2>/dev/null \
+    | awk -F/ '{ if (cnt[$NF]++) print $NF }' | sort -u \
+    | while IFS= read -r f; do errln "重复 slug（多目录同名文件）：$f"; done >"$tsv.dup" 2>&1
+  #（上面 while 在子 shell 里，改走文件收集）
+  if [ -s "$tsv.dup" ]; then cat "$tsv.dup" >&2; rc=1; fi
+
+  # ① 每文件：首行 `### ` 标题 + 四字段；④ absorbed 另需已吸收指针
+  while IFS= read -r f; do
+    # absorbed 文件首行是元数据注释行，跳过它再取标题
+    case $f in
+      */absorbed/*) first=$(sed '/^<!-- pitfalls-absorbed: .* -->$/d' "$f" | sed -n '/./{p;q;}') ;;
+      *)           first=$(sed -n '/./{p;q;}' "$f") ;;
+    esac
+    case $first in
+      '### '*) : ;;
+      *) errln "${f}：首行应为 \`### <标题>\`（现为：${first:0:50}…）"; rc=1 ;;
+    esac
+    local k
+    for k in Saw Why Fix Lesson; do
+      grep -q "^- \*\*$k" "$f" || { errln "${f}：缺 \`- **${k}…\` 字段行"; rc=1; }
+    done
+    case $f in
+      */absorbed/*)
+        grep -q '^- \*\*已吸收\*\*' "$f" \
+          || { errln "${f}：absorbed 条目缺 \`- **已吸收**\` 指针行"; rc=1; }
+        head -1 "$f" | grep -q '^<!-- pitfalls-absorbed: original-section: .* -->$' \
+          || { errln "${f}：absorbed 条目缺首行元数据注释"; rc=1; }
+        ;;
+    esac
+  done < <(find "$dir" -name '*.md' ! -name README.md 2>/dev/null | sort)
+
+  # ⑤ 旧桩不得再有条目
+  local stub=$dir/../pitfalls.md
+  if [ -f "$stub" ] && grep -q '^### ' "$stub"; then
+    errln "${stub}：静态桩里出现 \`### \` 条目——先跑 scripts/pitfalls-split.sh 转成文件"
     rc=1
   fi
 
-  w=$(prefix_warnings "$file")
-  if [ -n "$w" ]; then
-    echo "✗ ${file}：同前缀段未合并（一个前缀只该有一段）：" >&2
-    printf '%s\n' "$w" >&2
-    rc=1
-  fi
-  w=$(dup_warnings "$file")
-  if [ -n "$w" ]; then
-    echo "✗ ${file}：重复段名：" >&2
-    printf '%s\n' "$w" >&2
-    rc=1
-  fi
-
+  rm -f "$tsv" "$tsv.dup"
   if [ "$rc" -eq 0 ]; then
-    # 成功时把三数与正文一起回显：验收要能一眼对账「文件里的数字 == 算出的数字」。
-    printf 'pitfalls-count: OK（%s）\n' "$file"
-    printf '  live=%s absorbed=%s sections_with_entries=%s\n' \
-      "$(sum_col "$tsv" 2)" "$(sum_col "$tsv" 3)" \
-      "$(awk -F'\t' '$2 > 0' "$tsv" | wc -l | tr -d ' ')"
-    printf '  rollup: TUI=%s API=%s Go=%s rest=%s\n' \
-      "$(rollup_col "$tsv" tui)" "$(rollup_col "$tsv" api)" \
-      "$(rollup_col "$tsv" go)" "$(rollup_col "$tsv" rest)"
+    printf 'pitfalls-count: OK（%s）\n' "$dir"
+    cmd_report "$dir" | sed -n '1,2p'
   fi
-  rm -f "$tsv" "$cur" "$want"
   return "$rc"
 }
 
-cmd_write() { # cmd_write <file>
-  local file=$1 tsv block tmp
-  if ! has_block "$file"; then
-    echo "✗ ${file}：生成块标记缺失（$BEGIN_MARK … ${END_MARK}）——块被删了，先放回一对标记" >&2
-    return 1
-  fi
-  tsv=$(mktemp) || return 3
-  block=$(mktemp) || { rm -f "$tsv"; return 3; }
-  tmp=$(mktemp) || { rm -f "$tsv" "$block"; return 3; }
+# --- 自测（夹具） ---------------------------------------------------------
 
-  stats_tsv "$file" >"$tsv"
-  emit_block "$tsv" >"$block"
-
-  # 读-写分离（BSD awk 没有 inplace）：块外的行原样抄，块内整段换成新生成的。
-  if awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v bf="$block" '
-    BEGIN { while ((getline l < bf) > 0) blk = blk l "\n" }
-    inside && index($0, e) == 1 { inside = 0; next }
-    inside { next }
-    index($0, b) == 1 { printf "%s", blk; inside = 1; next }
-    { print }
-  ' "$file" >"$tmp"; then
-    cat "$tmp" >"$file"   # 就地覆盖：保留权限与 inode（mv 会换 inode）
-    rm -f "$tsv" "$block" "$tmp"
-    return 0
-  fi
-  rm -f "$tsv" "$block" "$tmp"
-  echo "✗ 重写 $file 失败" >&2
-  return 3
-}
-
-# --- 自测（夹具） -------------------------------------------------------
-
-# fixture <path> <section-a-count> <section-b-count>：最小但形状完整——
-# 围栏里的 `### ` 不算条目，生成块先塞占位符。
-fixture() {
-  local i
-  cat >"$1" <<EOF
-# fixture
-
-\`\`\`markdown
-### not an entry (inside a fence)
-\`\`\`
-
-## Status
-$BEGIN_MARK (generated) -->
-**PLACEHOLDER**
-$END_MARK -->
-
-## Alpha / one
-EOF
-  i=0
-  while [ "$i" -lt "$2" ]; do i=$((i + 1)); printf '\n### alpha %s\n- x\n' "$i" >>"$1"; done
-  printf '\n## Beta\n' >>"$1"
-  i=0
-  while [ "$i" -lt "$3" ]; do i=$((i + 1)); printf '\n### beta %s\n- y\n' "$i" >>"$1"; done
+mk_entry() { # mk_entry <path> <title> [missing:Saw|Fix|Lesson]
+  mkdir -p "$(dirname "$1")"
+  {
+    printf '### %s\n' "$2"
+    [ "${3:-}" = missing:Saw ]    || printf -- '- **Saw**: s\n'
+    printf -- '- **Why**: w\n'
+    [ "${3:-}" = missing:Fix ]    || printf -- '- **Fix** (variant ok): f\n'
+    [ "${3:-}" = missing:Lesson ] || printf -- '- **Lesson**: l\n'
+  } >"$1"
 }
 
 cmd_selftest() {
-  local d rc=0
+  local d rc=0 dir
   d=$(mktemp -d) || return 3
+  dir=$d/pitfalls
+  mkdir -p "$dir"
 
-  # 1) 正确文件：--write 后 --check 绿，三处派生量与正文一致。
-  fixture "$d/ok.md" 3 2
-  bash "$0" --write "$d/ok.md" || { echo "✗ 自测1：--write 失败"; rc=1; }
-  if bash "$0" --check "$d/ok.md" >"$d/check.out" 2>&1; then
-    echo "  ✓ 正确文件 → exit 0"
-  else
-    echo "  ✗ 自测1：--write 后 --check 应绿"; sed 's/^/      /' "$d/check.out"; rc=1
-  fi
-  grep -q '^\*\*5 live entries, 0 absorbed' "$d/ok.md" \
-    || { echo "✗ 自测1：合计应为 5（围栏内 ### 不计）"; rc=1; }
-  grep -q '^| Alpha / one | 3 |$' "$d/ok.md" || { echo "✗ 自测1：Alpha 段应为 3"; rc=1; }
-  grep -q 'tooling & engineering\*\*: 5' "$d/ok.md" || { echo "✗ 自测1：rollup 应为 5"; rc=1; }
+  # 1) 报表：目录现算——live=absorbed=段数=rollup 全对。
+  mk_entry "$dir/tui/a.md" "A" ; mk_entry "$dir/tui/b.md" "B"
+  mk_entry "$dir/deepseek-api/c.md" "C"
+  mk_entry "$dir/go-language/d.md" "D"
+  mk_entry "$dir/tooling/e.md" "E"
+  mk_entry "$dir/llm-provider-quirks-m6/f.md" "F"
+  mkdir -p "$dir/absorbed"
+  { printf '<!-- pitfalls-absorbed: original-section: TUI -->\n### [已吸收] G\n'
+    printf -- '- **Saw**: s\n- **Why**: w\n- **Fix**: f\n- **Lesson**: l\n- **已吸收**: gone → x\n'; } >"$dir/absorbed/g.md"
+  local out
+  out=$(bash "$0" "$dir")
+  echo "$out" | grep -q 'live=6 absorbed=1 sections_with_entries=5' \
+    || { echo "✗ 自测1：报表合计不符"; echo "$out" | sed 's/^/      /'; rc=1; }
+  echo "$out" | grep -q 'rollup: TUI=2 API=2 Go=1 rest=1' \
+    || { echo "✗ 自测1：rollup 不符"; echo "$out" | sed 's/^/      /'; rc=1; }
+  bash "$0" "$dir" >/dev/null 2>&1 || { echo "✗ 自测1：报表应恒 exit 0"; rc=1; }
 
-  # 2) 幂等：再跑一次 --write 不动文件。
-  cp "$d/ok.md" "$d/ok.before"
-  bash "$0" --write "$d/ok.md" >/dev/null
-  cmp -s "$d/ok.md" "$d/ok.before" || { echo "✗ 自测2：--write 不幂等"; rc=1; }
+  # 2) --check 绿：形状完整的目录过。
+  bash "$0" --check "$dir" >"$d/o2" 2>&1 \
+    || { echo "✗ 自测2：完整目录 --check 应绿"; sed 's/^/      /' "$d/o2"; rc=1; }
 
-  # 3) 人为改错一段的数字：--check 红，且指名哪一段。
-  sed 's/^| Alpha \/ one | 3 |$/| Alpha \/ one | 9 |/' "$d/ok.md" >"$d/drift-sec.md"
-  if bash "$0" --check "$d/drift-sec.md" >"$d/o" 2>&1; then
-    echo "✗ 自测3：改错段数字后 --check 应红"; rc=1
-  else
-    grep -q 'Alpha / one' "$d/o" && echo "  ✓ 段数字改错 → 非零 + 指名该段" \
-      || { echo "✗ 自测3：报错应指名 Alpha 段"; sed 's/^/      /' "$d/o"; rc=1; }
-  fi
+  # 3) 缺字段 → 红且指名。
+  mk_entry "$dir/tooling/bad.md" "Bad" missing:Lesson
+  bash "$0" --check "$dir" >"$d/o3" 2>&1 \
+    && { echo "✗ 自测3：缺 Lesson 应红"; rc=1; }
+  grep -qF 'bad.md' "$d/o3" && grep -qF 'Lesson' "$d/o3" \
+    || { echo "✗ 自测3：报错应指名文件与字段"; sed 's/^/      /' "$d/o3"; rc=1; }
+  rm "$dir/tooling/bad.md"
 
-  # 4) 合计改错 → 红。
-  sed 's/^\*\*5 live entries/**4 live entries/' "$d/ok.md" >"$d/drift-tot.md"
-  if bash "$0" --check "$d/drift-tot.md" >"$d/o" 2>&1; then
-    echo "✗ 自测4：合计改错后 --check 应红"; rc=1
-  else
-    grep -q 'live entries' "$d/o" && echo "  ✓ 合计改错 → 非零" \
-      || { echo "✗ 自测4：报错应指出合计行"; rc=1; }
-  fi
+  # 4) 重复 slug（跨目录同 basename）→ 红。
+  mk_entry "$dir/go-language/e.md" "E again"
+  bash "$0" --check "$dir" >"$d/o4" 2>&1 \
+    && { echo "✗ 自测4：重复 slug 应红"; rc=1; }
+  grep -q '重复 slug' "$d/o4" || { echo "✗ 自测4：报错应提重复 slug"; sed 's/^/      /' "$d/o4"; rc=1; }
+  rm "$dir/go-language/e.md"
 
-  # 5) rollup 改错 → 红。
-  sed 's/tooling & engineering\*\*: 5/tooling \& engineering**: 8/' "$d/ok.md" >"$d/drift-roll.md"
-  if bash "$0" --check "$d/drift-roll.md" >"$d/o" 2>&1; then
-    echo "✗ 自测5：rollup 改错后 --check 应红"; rc=1
-  else
-    grep -q 'rollup' "$d/o" && echo "  ✓ rollup 改错 → 非零" \
-      || { echo "✗ 自测5：报错应指出 rollup 行"; rc=1; }
-  fi
+  # 5) 目录名不合法 → 红。
+  mk_entry "$dir/Bad_Dir/x.md" "X"
+  bash "$0" --check "$dir" >"$d/o5" 2>&1 \
+    && { echo "✗ 自测5：目录名不合法应红"; rc=1; }
+  grep -q '目录名不合法' "$d/o5" || { echo "✗ 自测5：报错应提目录名"; sed 's/^/      /' "$d/o5"; rc=1; }
+  rm -rf "$dir/Bad_Dir"
 
-  # 6) 同前缀段：--check 红并告警（合并前的旧形态、以及复发的新段）。
-  fixture "$d/dup.md" 2 2
-  printf '\n## Alpha / two\n\n### alpha deep\n- z\n' >>"$d/dup.md"
-  bash "$0" --write "$d/dup.md" >/dev/null 2>&1
-  if bash "$0" --check "$d/dup.md" >"$d/o" 2>&1; then
-    echo "✗ 自测6：同前缀段应让 --check 红"; rc=1
-  else
-    grep -q '同前缀段' "$d/o" && echo "  ✓ 同前缀段 → 非零 + 告警" \
-      || { echo "✗ 自测6：报错应提「同前缀段」"; rc=1; }
-  fi
+  # 6) 首行不是 ### 标题 → 红。
+  printf 'just prose\n' >"$dir/tooling/prose.md"
+  bash "$0" --check "$dir" >"$d/o6" 2>&1 \
+    && { echo "✗ 自测6：无标题文件应红"; rc=1; }
+  grep -q '首行应为' "$d/o6" || { echo "✗ 自测6：报错应提标题行"; sed 's/^/      /' "$d/o6"; rc=1; }
+  rm "$dir/tooling/prose.md"
 
-  # 7) 缺标记：--check 与 --write 都必须拒，不许静默成功。
-  printf '# no markers\n\n## A\n\n### a\n' >"$d/nomark.md"
-  if bash "$0" --check "$d/nomark.md" >"$d/o" 2>&1; then
-    echo "✗ 自测7：缺标记时 --check 应拒"; rc=1
-  else
-    grep -q '标记' "$d/o" && echo "  ✓ 缺标记 → --check 拒 + 提示标记" \
-      || { echo "✗ 自测7：报错应提标记"; rc=1; }
-  fi
-  bash "$0" --write "$d/nomark.md" >/dev/null 2>&1 \
-    && { echo "✗ 自测7：缺标记时 --write 应拒"; rc=1; }
+  # 7) absorbed 缺已吸收指针 → 红。
+  mk_entry "$dir/absorbed/no-pointer.md" "[已吸收] NoPtr"
+  bash "$0" --check "$dir" >"$d/o7" 2>&1 \
+    && { echo "✗ 自测7：absorbed 缺指针应红"; rc=1; }
+  grep -q '已吸收.*指针' "$d/o7" || { echo "✗ 自测7：报错应提已吸收指针"; sed 's/^/      /' "$d/o7"; rc=1; }
+  rm "$dir/absorbed/no-pointer.md"
 
-  # 8) 正文里"提到"标记名（不是整行标记）不能被当成块边界——否则 --write 会把
-  #    块重复注入、把正文当块删掉（这条自测就是那次事故的回归锁）。
-  fixture "$d/mention.md" 1 1
-  printf '\n### an entry that quotes "$BEGIN_MARK" inline\n- x\n' >>"$d/mention.md"
-  bash "$0" --write "$d/mention.md" >/dev/null 2>&1
-  if bash "$0" --check "$d/mention.md" >"$d/o" 2>&1 \
-     && [ "$(grep -c 'an entry that quotes' "$d/mention.md")" = 1 ] \
-     && [ "$(grep -c '^\*\*[0-9]* live entries' "$d/mention.md")" = 1 ]; then
-    echo "  ✓ 正文里的标记名不破坏块边界（无重复注入、条目未丢）"
-  else
-    echo "✗ 自测8：正文提到标记名时 --write/--check 出问题"; sed 's/^/      /' "$d/o"; rc=1
-  fi
+  # 8) 旧桩里被追加条目 → 红 + 提示跑 split。
+  printf '# stub\n\n### sneaky entry\n- **Saw**: s\n' >"$d/pitfalls.md"
+  bash "$0" --check "$dir" >"$d/o8" 2>&1 \
+    && { echo "✗ 自测8：桩内条目应红"; rc=1; }
+  grep -q 'pitfalls-split' "$d/o8" || { echo "✗ 自测8：报错应提示跑 split"; sed 's/^/      /' "$d/o8"; rc=1; }
+  printf '# stub, clean\n' >"$d/pitfalls.md"
 
-  # 9) --report 恒 0（advisory）。
-  if bash "$0" "$d/ok.md" >/dev/null 2>&1; then
-    echo "  ✓ --report 恒 exit 0"
-  else
-    echo "✗ 自测9：--report 不该失败"; rc=1
-  fi
+  # 9) 变体字段标签（- **Fix** (variant ok):）算有字段（自测2 已隐含，单列防回归）。
+  mk_entry "$dir/tooling/variant.md" "Variant"
+  bash "$0" --check "$dir" >"$d/o9" 2>&1 \
+    || { echo "✗ 自测9：变体 Fix 标签应算字段"; sed 's/^/      /' "$d/o9"; rc=1; }
 
   rm -rf "$d"
   if [ "$rc" -eq 0 ]; then
-    echo "pitfalls-count selftest: PASS（写/查/幂等/段漂移/合计漂移/rollup/同前缀/缺标记/标记名提及）"
+    echo "pitfalls-count selftest: PASS（报表/绿/缺字段/重复slug/坏目录名/无标题/absorbed指针/桩内条目/变体标签）"
   else
     echo "pitfalls-count selftest: FAIL" >&2
   fi
@@ -384,7 +279,6 @@ mode=report
 if [ "$#" -gt 0 ]; then
   case "$1" in
     --check)    mode=check;    shift ;;
-    --write)    mode='write';  shift ;;
     --selftest) mode=selftest; shift ;;
     --report)   mode=report;   shift ;;
     -h|--help)  usage ;;
@@ -397,19 +291,10 @@ if [ "$mode" = selftest ]; then
   exit $?
 fi
 
-case "$mode" in
-  check)  file=${1:-$repo_root/docs/pitfalls.md} ;;
-  *)      file=${1:-$repo_root/docs/pitfalls.md} ;;
-esac
-
-if [ ! -f "$file" ]; then
-  echo "pitfalls-count: 文件不存在：$file" >&2
-  exit 2
-fi
+dir=${1:-$repo_root/docs/pitfalls}
 
 case "$mode" in
-  report) cmd_report "$file"; exit 0 ;;
-  write)  cmd_write  "$file"; exit $? ;;
-  check)  cmd_check  "$file"; exit $? ;;
+  report) cmd_report "$dir"; exit 0 ;;
+  check)  cmd_check  "$dir"; exit $? ;;
   *)      usage ;;
 esac

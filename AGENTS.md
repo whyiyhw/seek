@@ -6,9 +6,9 @@ Auto-loaded by **seek** at startup (and other `AGENTS.md`-convention tools) — 
 
 When you fix a non-obvious bug, discover an undocumented API constraint, or find a surprising piece of behaviour:
 
-1. **Append an entry to [`docs/pitfalls.md`](docs/pitfalls.md)** using the template at the top of that file. Categorise it (TUI / DeepSeek API / Go / Tooling / etc.); keep it terse — symptom, root cause, fix, lesson, refs. The counts in that file's header are a **generated block** — run `bash scripts/pitfalls-count.sh --write` afterwards (`--check` fails on drift; one prefix = one section).
+1. **Create one file per entry: `docs/pitfalls/<section>/<slug>.md`** (template in [`docs/pitfalls/README.md`](docs/pitfalls/README.md)). `<section>` is the kebab-case category directory — TUI / DeepSeek API / Go / Tooling / etc.; reuse an existing one when it fits. Keep it terse — symptom, root cause, fix, lesson, refs. No counts to maintain: `scripts/pitfalls-count.sh` computes them live; `--check` validates entry format.
 2. **Add a `Pitfall: <one-line summary>` trailer** to the commit message. Multiple pitfalls in one commit = multiple trailers.
-3. The trailer is what `scripts/extract-pitfalls.sh` reads — it's the redundant signal so `docs/pitfalls.md` can be regenerated if it ever falls out of sync.
+3. The trailer is what `scripts/extract-pitfalls.sh` reads — it's the redundant signal so the pitfalls ledger can be rebuilt if it ever falls out of sync.
 
 What counts as "non-obvious":
 - A behaviour that surprised you (or the user) for more than a minute.
@@ -81,7 +81,7 @@ DeepSeek charges ~10× less per token on cache hits. The cache key is an **exact
 
 ## When a tool fails or returns unexpected content
 
-Self-recovery first — "ask the user" is the LAST resort. Read the error (the hints are usually IN it), try alternative tools/paths, and prefer the repo (plus source code) over the internet; only when truly blocked, ask via `ask_user` with a 2–4 option picker, not free-form. Full playbook with examples: `docs/pitfalls.md` § "Tool-failure self-recovery".
+Self-recovery first — "ask the user" is the LAST resort. Read the error (the hints are usually IN it), try alternative tools/paths, and prefer the repo (plus source code) over the internet; only when truly blocked, ask via `ask_user` with a 2–4 option picker, not free-form. Full playbook with examples: `docs/pitfalls/README.md` § "Tool-failure self-recovery".
 
 ## Code conventions
 
