@@ -447,7 +447,7 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 |---|---|---|---|
 | **c_x2au4t** markdown 渲染 | `ui-renderer`（渲染 slot 装配 + 应用根）+ `ui-chat`（会话节点渲染器/细节面） | `renderBody`/`appendInline` 最小渲染已落（代码围栏 + 行内码，c_iha3fr）；DOM 全程 createElement/textContent，页面无 HTML 解析 sink（§5.5 纪律） | checked-in vendor 单文件渲染器 ≤25KB（§4.2 先例）；渲染输出仍走 DOM-api 白名单构造（不 innerHTML），XSS 面不扩；**static/ 拆分随本卡落**（§4.3 预写路径，渲染器为第一个非内联资产，CSP 退回裸 `'self'` 的条件就位） |
 | **c_ux7lvk** 工具调用树 | `ui-tool`（tool call-tree 渲染器 + 按 tool key 的展示 slot——**精确对应**） | 直播流单行折叠工具行（W2.1 `⚙ read …`）；`tool` SSE 事件只带 name/phase/ok（§2.5 刻意不传 args/result——`tool_end.result` 可能很大）；sessions 浏览器 tool_calls 平铺显示 | 服务端 `tool` 事件载荷 additive 扩展（args 摘要 + result 截断，钉输出上限——工具输出限额在工具侧的既有纪律）+ 可展开调用树 UI；W2.1 折叠行为保持兼容（默认仍单行，展开是加法） |
-| **c_5m3fm6** 停止按钮 | `ui-conversation`（composer/queue/view 导航承载停止控制——dsh 无独立 stop 包） | `/cancel` 顶栏按钮已有（W2.2，平面指令→执行器 kill，含流收口 W1.4 `TestWeb_StreamCancelClosesRun`） | 输入区运行态切换：有活跃 run 时「发送」变「停止」直发 /cancel——客户端已知 run 生命周期（W1.4 run id），纯 UX 增量、零服务端改动 |
+| **c_5m3fm6** 停止按钮 | `ui-conversation`（composer/queue/view 导航承载停止控制——dsh 无独立 stop 包） | `/cancel` 顶栏按钮已有（W2.2，平面指令→执行器 kill，含流收口 W1.4 `TestWeb_StreamCancelClosesRun`） | 输入区运行态切换：有活跃 run 时「发送」变「停止」直发 /cancel——客户端已知 run 生命周期（W1.4 run id），纯 UX 增量、零服务端改动。**本卡已交付（2026-11-20）**：键态跟 `runs` 表走（首个流事件翻、收口复位）；分岔在 click 层（submitter 区分不了按钮点击与回车，见 pitfalls）；中断收口改保留式——不整泡替换 ack，半截气泡留 + 「—— 已中断 ——」标注；html 净增 +4072B（§13.3 配额 ≤3KB 超约 1KB，记账见下）；验收 `scripts/web-stop-manual.sh` + `-headless.mjs`（沙盒实跑全绿，已退出 selftest 排除表、非 TTY 退 3） |
 | **c_7lsngm** 输入增强 | `ui-input-trigger`（'/'与'@' 触发管线 + 候选菜单 + pick 路由）+ `ui-commands`（命令面三种 UI 形态——**精确对应**） | 纯文本输入框 + 五个指令快捷按钮（W2.2，全部走同一条 sendText 透传）；无补全无历史 | '/' 触发候选菜单（候源=平面指令集 + 输入历史）；'@' 文件/会话引用（dsh `ui-reference` 形态）列远期、不在本卡 |
 | **c_56yrcj** 附件上传 | `ui-attachment`（输入区/消息/轨迹三处图片 slot——**精确对应**） | 能力面已就位：`internal/modelcap.Vision` 判定 + `llm.Message.Images` 透传（124b6f4），TUI/print/ACP 三入口已有；web 二进制上传 seam 有现成先例（`POST /voice` + 自定义头，c_f6ayyg） | 图片粘贴/拖入/选择 → data URL → 上行（/voice 同款二进制端点或 /msg 扩展，实现卡定）→ **平面缝**：Inbound 可选附件字段（sibling 加法）+ 执行器转发 CLI vision 入口；非图片文件维持「不透传」提示（CHANGELOG 既有口径） |
 | **c_txz6vz** 会话侧栏 | `ui-sidebar`（会话多级树/搜索/分组/状态点）+ `ui-session`（Session Controller 适配）——**精确对应** | 四面板 togglePane 全屏覆盖（sessions/memory/stats/agents，W4.4/W4.5/W3.3）；会话切换=conv-uuid localStorage（W1.3）+ `/new`；sessions 浏览器能看不能切。**已交付**（c_txz6vz，drive/c_txz6vz）——侧栏常驻化 | 常驻可折叠左栏：当前 web 会话（conv 列表）+ 从 sessions 面板一键续接既有 session（`-resume` 语义走绑定面）；页面骨架重排——**后续三卡（重命名/主题/计量）的挂点**（§13.5） |
@@ -476,7 +476,7 @@ seek 现状一律指 W4 完工面（本卡开工时 main 的实况）；「精�
 |---|---|---|
 | c_x2au4t markdown 渲染 | ≤30KB | **大头先占位**：vendor 渲染器 ≤25KB + 接线/样式 ~5KB；static/ 拆分的目录/embed 骨架也计在本卡 |
 | c_ux7lvk 工具调用树 | ≤15KB | tool 事件载荷扩展（服务端）+ 树 UI |
-| c_5m3fm6 停止按钮 | ≤3KB | 纯 composer UX |
+| c_5m3fm6 停止按钮 | ≤3KB | 纯 composer UX。**实际 +4072B**（go1.25.8 口径，2026-11-20 交付）：页面 CSS/JS/markup ~4.7KB source（键态渲染 + click 分岔 + 保留式中断收口）；超约 1KB，按 c_n37tnr/c_oyp2qf 先例吃 W5 包余量、超在记账不在 gate |
 | c_7lsngm 输入增强 | ≤10KB | '/' 触发候选菜单 |
 | c_56yrcj 附件上传 | ≤20KB | 平面缝 + 前端预览 |
 | c_txz6vz 会话侧栏 | ≤20KB | 布局骨架 + 会话树 |
