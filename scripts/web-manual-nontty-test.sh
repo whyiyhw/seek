@@ -17,8 +17,10 @@
 #      效果：/tmp 下对应前缀无**新增**残留目录、serve 端口无监听残留。
 # 全程不碰真实 ~/.seek 与生产 8790（子脚本自带临时 SEEK_HOME 与独立端口）。
 #
-# Env: 无（子脚本 ADDR 用各自默认 18791/18795；跑前查端口空闲，被占即
-#      FAIL 并跳过该臂——避免把别人的现场误判成清理失败）。
+# Env: 无。子脚本的 ADDR 由本脚本注入（两条区间基准 18820 / 18900，各加
+#      $$ 散列偏移后在 16 宽内取第一个空闲口）——同机并行跑多份本自测不会
+#      互相误判成「清理失败」；落点全在 18820–18978，避开既有手测脚本的
+#      18790–18797 与生产 8790。
 #
 # 退出码：0 全部断言过；1 断言失败或环境冲突；2 用法错误。
 # 依赖：go、curl（经子脚本）；本脚本自身不依赖 Chrome/node——被测的
@@ -46,8 +48,15 @@ ck() { # ck <名字> <期望> <实际>
 }
 has() { printf '%s' "$1" | grep -qF "$2" && echo yes || echo no; }
 
-port_listening() { # port_listening <端口> → yes/no（lsof 无匹配退 1，正常）
-  [ -n "$(lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null)" ] && echo yes || echo no
+# port_listening <端口> → yes/no。优先 lsof（只认 LISTEN）；环境里没有 lsof 时
+# 退 bash /dev/tcp 探测——但绝不静默返回 no：那会把「端口无监听残留」两条断言
+# 变成空断言（本卡整条纪律针对的就是这种无凭据的绿）。两条路径都实探。
+port_listening() {
+  if command -v lsof >/dev/null 2>&1; then
+    [ -n "$(lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null)" ] && echo yes || echo no
+    return
+  fi
+  if (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; then echo yes; else echo no; fi
 }
 
 new_leftover() { # new_leftover <glob> <跑前快照>：打印跑后新增路径（空=无残留）
@@ -56,22 +65,37 @@ new_leftover() { # new_leftover <glob> <跑前快照>：打印跑后新增路径
   comm -13 <(printf '%s\n' "$2" | sort) <(printf '%s\n' "$post" | sort)
 }
 
-# check_one <基名> <端口> <tmp 前缀 glob>：一臂三断言 + 清理两查。
+# free_port <起点> <跨度>：在 [起点, 起点+跨度) 里返回第一个无监听的端口，找不到退 1。
+free_port() {
+  local p=$1 end=$(( $1 + $2 ))
+  while [ "$p" -lt "$end" ]; do
+    if [ "$(port_listening "$p")" = "no" ]; then echo "$p"; return 0; fi
+    p=$(( p + 1 ))
+  done
+  return 1
+}
+
+# check_one <基名> <端口起点> <端口跨度> <tmp 前缀 glob>：一臂三断言 + 清理两查。
+# 端口不写死：从起点往上找一个无监听的（ADDR 透传给子脚本），跑完再查它是否
+# 还留着监听。这样同机并行跑多份自测不会互相误判成「清理失败」。注意这里没有
+# 「端口被占就跳过该臂」的分支——跳过＝那两条清理断言变成不存在的断言，
+# 与本卡整条纪律（不许无凭据的绿）相悖；腾不出端口就让它红。
 check_one() {
-  local base=$1 port=$2 prefix_glob=$3
+  local base=$1 hint=$2 span=$3 prefix_glob=$4
   local script="$HERE/${base}.sh"
   echo "== ${base}：CHROME=/nonexistent/nope + stdin </dev/null =="
-  if [ "$(port_listening "$port")" = "yes" ]; then
-    echo "  FAIL ${base}：端口 ${port} 跑前已被占——先把占者清走再自测（避免误判清理）"
+  local port
+  if ! port=$(free_port "$hint" "$span"); then
+    echo "  FAIL ${base}：${hint}–$(( hint + span - 1 )) 全被占——腾一个端口再自测"
     fail=1
     return
   fi
   local pre out err rc errtext
   pre=$(ls -d ${prefix_glob} 2>/dev/null || true)
   out=$(mktemp) || { echo "  FAIL ${base}：mktemp 失败" >&2; fail=1; return; }
-  err=$(mktemp) || { echo "  FAIL ${base}：mktemp 失败" >&2; rm -f "$out"; fail=1; return; }
+  err=$(mktemp) || { echo "  FAIL ${base}：mktemp 失败" >&2; fail=1; rm -f "$out"; return; }
   # env 前缀在脚本内部：车道白名单只见 bash scripts/selftest.sh <本名>。
-  CHROME=/nonexistent/nope bash "$script" </dev/null >"$out" 2>"$err"
+  ADDR="127.0.0.1:${port}" CHROME=/nonexistent/nope bash "$script" </dev/null >"$out" 2>"$err"
   rc=$?
   errtext=$(cat "$err")
   rm -f "$out" "$err"
@@ -82,8 +106,11 @@ check_one() {
   ck "${base}：跑后端口 ${port} 无监听残留" "no" "$(port_listening "$port")"
 }
 
-check_one web-stream-manual 18791 '/tmp/seek-w21-manual.*'
-check_one web-md-manual    18795 '/tmp/seek-w5md-manual.*'
+# 端口落点：两条区间各自 [基准, 基准+64) 取第一个空闲口、跨度 16，
+#   基准 = 18820 / 18900 + $$ % 64 —— 全部 > 既有手测脚本的 18790–18797，
+#   两区间相隔 80 宽永不交叠，也远离生产 8790。
+check_one web-stream-manual $(( 18820 + $$ % 64 )) 16 '/tmp/seek-w21-manual.*'
+check_one web-md-manual    $(( 18900 + $$ % 64 )) 16 '/tmp/seek-w5md-manual.*'
 
 if [ "$fail" = 0 ]; then
   echo "非 TTY 退路自测全绿（两脚本 rc=3 + 点名 Chrome 路径 + 现场清理）。"
