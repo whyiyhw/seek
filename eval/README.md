@@ -318,9 +318,6 @@ the lane block and is lane-independent.
 | `grep_calls` | `tool_start` events with `name=grep` |
 | `mcp_calls` | `tool_start` events whose tool name contains the `__` infix — MCP bridge tools register as `<server>__<tool>` (D1 default prefix, `internal/tools/mcptool/bridge.go`); no built-in name contains `__`. Reads 0 before D1 landed (the bridge prefixed only on conflicts then), even when MCP tools are used — the metric assumes D1's naming (`docs/prd/feature-mcp-client.md` §5.2) |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
-| `agent_calls` | `tool_start` events with `name=agent` — subagent spawns + continuations (`internal/tools/agent`) |
-| `agent_bg_calls` | `agent` tool_starts whose parsed args carry `run_in_background=true` — the D1 detached-spawn shape; the E4 model-side assertion that the spawn was actually background |
-| `agent_continue_calls` | `agent` tool_starts whose parsed args carry a non-empty `session_id` — the P1-b continuation shape; the E4 model-side assertion that the follow-up quoted the lineage |
 | `bash_chains` | `tool_start` events for `bash` whose raw args contain `;` or `&&` — the multi-command-chaining anti-pattern. `;` isn't even a separator on cmd.exe (Windows), so a POSIX-style chain fails wholesale; `&&` is legal on cmd but still the anti-pattern (target shape: one command per call, or parallel dedicated-tool calls). `|` deliberately NOT counted — pipelines and grep alternations are legitimate |
 | `bash_git_calls` | `tool_start` events for `bash` whose raw args contain a `git` invocation (`\bgit\b`) — read-only git belongs in the dedicated git tool (whitelist + auto-fix); mutating git (commit/push) legitimately lives in bash, so bind this metric only in read-only prompts |
 | `bash_before_dedicated` | `bash` tool_starts occurring BEFORE the first `grep`/`read`/`list_dir` tool_start — bash as FIRST resort. Ordering is the honest anti-pattern signal when a case's task legitimately forces shell recovery later (e.g. `read` elided an over-1024-byte line so verbatim text needs awk): a total `bash_calls` bound cannot tell recovery from overreach, this can. A run with no dedicated call at all counts every bash call (`list_dir` joined the set 2026-11-18 — adding a tool can only lower the metric, so no existing bound tightens) |
@@ -334,6 +331,13 @@ the lane block and is lane-independent.
 | `session_id_missing` | `agent_end` events without `session_id` (`cmd/seek/main.go` `jsonLine.SessionID`, stable contract; `--no-save` legitimately omits it — only bind this in cases that save) |
 | `session_id_distinct` | distinct `session_id` values across `agent_end` events — a fresh run plus `-resume` of that session must report the same id → 1 |
 | `nonzero_exits` | `runner_fact` lines with `exit_code != 0` — a runner.sh's channel for process-level results (exit codes aren't in the JSONL stream); 0 for default-invocation cases |
+| `turns` | `turn_end` events |
+| `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
+| `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
+| `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
+| `agent_calls` | `tool_start` events with `name=agent` — subagent spawns + continuations (`internal/tools/agent`) |
+| `agent_bg_calls` | `agent` tool_starts whose parsed args carry `run_in_background=true` — the D1 detached-spawn shape; the E4 model-side assertion that the spawn was actually background |
+| `agent_continue_calls` | `agent` tool_starts whose parsed args carry a non-empty `session_id` — the P1-b continuation shape; the E4 model-side assertion that the follow-up quoted the lineage |
 | `bg_started_events` | E4 disk-side family: `runner_fact` lines with `check=bg_started_events` (max `value`) — background `started` events in the isolated SEEK_HOME's `projects/*/subagents.jsonl`, reported by subagent-bg-resume's runner after its invocations |
 | `bg_completed_events` | `completed` terminals joined to those background sub_sids — the child finished before parent-process teardown cancelled it (a cancelled child folds to `failed reason=canceled` and is excluded) |
 | `bg_notified_events` | `notified` consumption markers joined to the **completed** background set — the completion notice specifically (`internal/subagent` Notifier write-side, feature-orchestration §4.1 D3/D5); a failure-notice marker does not count |
@@ -351,10 +355,6 @@ byte-equivalence pin. Readers must treat an absent agent key as 0; a
 case binding these bounds must guarantee the surface (subagent-bg-resume's
 runner emits its fact channel unconditionally, so even a failed round
 has the keys — a red always names its metric, never "unknown metric").
-| `turns` | `turn_end` events |
-| `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
-| `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
-| `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
 
 Bounds in `expect.json` use the prefix to declare direction:
 
