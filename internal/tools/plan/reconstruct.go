@@ -41,6 +41,31 @@ const (
 	approvedMarker = "[plan: approved]"
 )
 
+// toolNameAt resolves the tool name for the tool-role message at
+// index i. Persisted tool messages carry NO `name` field: on the
+// DeepSeek/OpenAI wire the name lives only in the assistant
+// tool_call (keyed by tool_call_id), and Message.Name is omitempty —
+// the agent loop leaves it empty when appending tool results, so the
+// saved JSONL rows have content+tool_call_id only. Matching on
+// m.Name alone therefore missed every real transcript (found by the
+// plan-e2e eval lane: resume always answered "no active plan" while
+// unit fixtures stayed green because they hand-filled Name). When
+// Name is blank we recover it from the matching assistant call.
+func toolNameAt(msgs []deepseek.Message, i int) string {
+	if msgs[i].Name != "" {
+		return msgs[i].Name
+	}
+	id := msgs[i].ToolCallID
+	for j := i - 1; j >= 0; j-- {
+		for _, tc := range msgs[j].ToolCalls {
+			if tc.ID == id {
+				return tc.Function.Name
+			}
+		}
+	}
+	return ""
+}
+
 // ReconstructFromTranscript scans the given messages and returns the
 // plan state implied by the most recent approval and any subsequent
 // plan tool calls. Returns (nil, -1) when no approved plan is present
@@ -51,10 +76,14 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 	// approval if multiple exist (re-propose flow).
 	approvalIdx := -1
 	for i, m := range slices.Backward(msgs) {
-		if m.Role == deepseek.RoleTool && m.Name == "propose" && strings.HasPrefix(m.Content, approvedMarker) {
-			approvalIdx = i
-			break
+		if m.Role != deepseek.RoleTool {
+			continue
 		}
+		if toolNameAt(msgs, i) != "propose" || !strings.HasPrefix(m.Content, approvedMarker) {
+			continue
+		}
+		approvalIdx = i
+		break
 	}
 	if approvalIdx < 0 {
 		return nil, -1
@@ -86,7 +115,7 @@ func ReconstructFromTranscript(msgs []deepseek.Message) ([]Step, int) {
 	// is human-readable — parsing args is more reliable.
 	for i := approvalIdx + 1; i < len(msgs); i++ {
 		m := msgs[i]
-		if m.Role != deepseek.RoleTool || m.Name != toolName {
+		if m.Role != deepseek.RoleTool || toolNameAt(msgs, i) != toolName {
 			continue
 		}
 		action, idx, ok := extractPlanCall(msgs[:i], m.ToolCallID)

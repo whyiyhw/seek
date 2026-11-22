@@ -123,6 +123,41 @@ func TestReconstruct_ApprovedThenStartAndComplete(t *testing.T) {
 	}
 }
 
+// TestReconstruct_PersistedWireShapeNoToolName is the real-transcript
+// regression found by the plan-e2e eval lane (2026-11-21): saved tool
+// rows carry NO `name` field (Message.Name is omitempty and empty at
+// save time for tool results — the name lives in the assistant
+// tool_call), so every Name==… gate above missed real transcripts and
+// resume answered "no active plan" while these unit fixtures stayed
+// green. Same chain as ApprovedThenStartAndComplete, Name blanked.
+func TestReconstruct_PersistedWireShapeNoToolName(t *testing.T) {
+	t.Parallel()
+	var msgs []deepseek.Message
+	msgs = append(msgs, proposeMsgPair("c1", []string{"a", "b"}, true)...)
+	msgs = append(msgs, planMsgPair("c2", "start", 1)...)
+	msgs = append(msgs, planMsgPair("c3", "complete", 1)...)
+	// Blank the persisted names — exactly what Save writes to JSONL.
+	for i := range msgs {
+		if msgs[i].Role == deepseek.RoleTool {
+			msgs[i].Name = ""
+		}
+	}
+
+	steps, cur := ReconstructFromTranscript(msgs)
+	if len(steps) != 2 {
+		t.Fatalf("len(steps) = %d, want 2 (nil means approval not found — the bug this pins)", len(steps))
+	}
+	if steps[0].Status != StatusCompleted {
+		t.Fatalf("step 0 = %q, want completed", steps[0].Status)
+	}
+	if steps[1].Status != StatusPending {
+		t.Fatalf("step 1 = %q, want pending", steps[1].Status)
+	}
+	if cur != -1 {
+		t.Fatalf("cur = %d, want -1", cur)
+	}
+}
+
 func TestReconstruct_MultipleApprovalsKeepLatest(t *testing.T) {
 	t.Parallel()
 	var msgs []deepseek.Message
