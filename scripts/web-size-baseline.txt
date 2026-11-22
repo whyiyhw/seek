@@ -93,25 +93,34 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
-# 2026-11-21 c_6xktw4 ratchet: 31332461→31528587 (+196126B total; the
-# branch tip vs the old pin was +196126B — inside the 200KB gate but
-# with only 8.7KB left, so this ratchet restores the budget's meaning).
-# Card's own delta: +26664B (same-tree comparison on the 1.27.3 line,
-# main@1d921d45 31501923 → branch 31528587; the first-merge reading was
-# +17520B — the second main absorption's session.go→title.go refactor
+# 2026-11-21 c_6xktw4 delta: +26664B (same-tree comparison on the 1.27.3
+# line, main@1d921d45 31501923 → branch 31528587; the first-merge reading
+# was +17520B — the second main absorption's session.go→title.go refactor
 # grew the cross-package interaction by ~9KB without any new card code):
 # stats/trend fold + session/list server-side pricing + SessionInfo.Usage
 # compile body + ~8.2KB page embed (JS 6.6KB hand-drawn SVG/hover/window
 # switch, CSS 1.1KB, markup 0.5KB). Over the §13.3 ≤12KB card quota —
 # B 案「超在记账、不在 gate」(main session's 2026-11-21 proxy decision,
-# c_n37tnr/c_oyp2qf/c_rqcuaa/c_xz2bey precedent). The remaining +169462B
-# of this ratchet is NOT this card: it is main's own un-ratcheted growth
-# since the pin (31501923−31332461 — ACP P0-2/P1-3/P2, v8-V1 task
-# lifetime, eval E6 lane, session title split: the 35 commits absorbed
-# by this branch's second merge), ratcheted here per the c_rqcuaa
-# precedent (随本合并同步棘轮至实测值) so the 200KB gate measures real
-# headroom instead of silently burning down on other cards' merges.
-31528587
+# c_n37tnr/c_oyp2qf/c_rqcuaa/c_xz2bey precedent).
+#
+# PIN NOT RATCHETED (user decision 2026-11-22, option B). This card leaves
+# the pin at 31332461 instead of ratcheting to its branch tip. The
+# +196126B between pin and tip is +26664B of this card plus +169462B of
+# main's OWN un-ratcheted growth since the pin (31501923−31332461 — ACP
+# P0-2/P1-3/P2, v8-V1 task lifetime, eval E6 lane, session title split:
+# the 35 commits this branch's second merge absorbed). Folding another 35
+# commits' growth into a ≤12KB feature card's ledger makes this card's
+# number meaningless — whoever grows the binary should ratchet for it.
+# c_rqcuaa's 「随本合并同步棘轮」 precedent was invoked to justify the
+# opposite; its own ratchet (+53096B) WAS its own delta, which is why it
+# does not reach here.
+#
+# KNOWN CONSEQUENCE (measured, not estimated): the gate now reads
+# 31528587−31332461 = 196126B against a 204800B budget — still PASS, with
+# 8674B nominal headroom. That headroom is thin by design under this
+# option: the next merge that grows the binary must ratchet
+# (`scripts/web-gate.sh --update-baseline`) instead of discovering the wall.
+31332461
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
