@@ -20,25 +20,33 @@
 #             process launch dir → assert the D-1 double anchor actually
 #             moved (sessionId is the durable transcript id; the stderr
 #             anchor line carries the absolute cwd + 16-hex project id +
-#             the SAME transcript id the response handed out) → bad cwd
-#             fails loud with a JSON-RPC error → [P0-2] reply frames (id,
-#             no method) are routed to permission waiters / silently
-#             ignored — never answered with -32601 — and $/cancel_request
-#             for an unknown id is ignored, both WITHOUT killing the read
-#             loop → session/prompt (empty text: terminates without a key
-#             or network) asserts the c_vfgeam structured termination —
-#             exactly one _seek_turn_stop session/update, stopReason
-#             end_turn with a readable detail, preceding the response
-#             and matching its spec-side stopReason → [P2] session/new
-#             advertises the two-mode table (modes.currentModeId
-#             default + availableModes [default, plan]) and
-#             session/set_mode is honoured: current_mode_update
-#             notification BEFORE the {} response, bogus modeId is a
-#             loud -32000 naming the available modes → session/list:
-#             initialize must advertise sessionCapabilities.list (object
-#             shape {}) and the store scan must return the PRE-SEEDED
-#             transcript (id + first-user-message title + header mtime),
-#             a no-match cwd filter must answer the empty array → [P1-3]
+#             the SAME transcript id the response handed out) → [backlog ⑦,
+#             c_oyt6ft] the MCP passthrough TWO-STATE fixture: session/new
+#             WITHOUT mcpServers is a byte-identical no-op (no `acp: mcp:`
+#             stderr line at all), session/new WITH mcpServers declaring a
+#             real stdio server (a shell stub) is connected via the same
+#             client stack mcp.json uses, its tools registered as
+#             `mcp__<server>__<tool>`, the child pid proven live — and
+#             stdin EOF reaps it (pid probe, the shell-side leaktest) →
+#             bad cwd fails loud with a JSON-RPC error → [P0-2] reply
+#             frames (id, no method) are routed to permission waiters /
+#             silently ignored — never answered with -32601 — and
+#             $/cancel_request for an unknown id is ignored, both WITHOUT
+#             killing the read loop → session/prompt (empty text:
+#             terminates without a key or network) asserts the c_vfgeam
+#             structured termination — exactly one _seek_turn_stop
+#             session/update, stopReason end_turn with a readable detail,
+#             preceding the response and matching its spec-side
+#             stopReason → [P2] session/new advertises the two-mode table
+#             (modes.currentModeId default + availableModes [default,
+#             plan]) and session/set_mode is honoured:
+#             current_mode_update notification BEFORE the {} response,
+#             bogus modeId is a loud -32000 naming the available modes →
+#             session/list: initialize must advertise
+#             sessionCapabilities.list (object shape {}) and the store
+#             scan must return the PRE-SEEDED transcript (id +
+#             first-user-message title + header mtime), a no-match cwd
+#             filter must answer the empty array → [P1-3]
 #             initialize(protocolVersion:2) is answered with the
 #             negotiated 1 (+ a stderr downgrade line), an ACP image
 #             content block is accepted and degrades silently instead of
@@ -65,7 +73,7 @@
 #             isolates ~/.seek.
 #
 # Marker on success: ACP-NDJSON-SMOKE-OK (echoes the D1-SMOKE-OK lineage
-# from c_bnjrw5's hand-run smoke).
+# from c_bnjrw5's hand-run smoke) + ACP-MCP-SMOKE-OK.
 #
 # Usage: scripts/acp-smoke-test.sh   (exit 0 = all green, 1 = failure)
 # Env:   none required; everything is built under a mktemp sandbox that
@@ -200,6 +208,83 @@ grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -Eq 'projec
 grep -F "acp: session anchored cwd=$WS project=" "$SMOKE_ERR" | grep -qF "id=$SID" \
   || fail "session/new: anchor line id= does not match the returned sessionId ($SID)"
 echo "acp-smoke: session/new ok (anchored to $WS, project id 16-hex, durable id $SID)"
+
+# --- 2b. state A: NO mcpServers ⇒ zero passthrough -----------------------------
+# The card's "不带 mcpServers 行为零变化" half. Asserted from the outside:
+# the only stderr line the passthrough can emit is `acp: mcp: …`, so its
+# absence IS the no-op — no child spawned, no tool registered, no log
+# line the pre-passthrough binary would not have produced.
+if grep -q '^acp: mcp' "$SMOKE_ERR"; then
+  fail "session/new without mcpServers must not touch the MCP lane (got: $(grep '^acp: mcp' "$SMOKE_ERR"))"
+fi
+echo "acp-smoke: session/new without mcpServers is a no-op (no acp: mcp line)"
+
+# --- 2c. state B: mcpServers declaring a stdio server is connected --------------
+# A real stdio MCP server, written into the sandbox: POSIX sh, no jq, no
+# python. It records its pid (proving seek actually spawned it) and answers
+# initialize / tools/list / tools/call. One tool is deliberately dotted —
+# MCP allows `card.read`, the model APIs do not, so this also proves the
+# name folding.
+STUB="$SANDBOX/mcp-stub.sh"
+MCPPID="$SANDBOX/mcp-stub.pid"
+cat > "$STUB" <<'STUB_EOF'
+#!/bin/sh
+printf '%s' "$$" > "$ACP_SMOKE_MCP_PIDFILE"
+while IFS= read -r line; do
+  case "$line" in
+    *'"id"'*) ;;                 # request
+    *) continue ;;               # notification (notifications/initialized)
+  esac
+  id=$(printf '%s' "$line" | sed 's/.*"id":\([0-9][0-9]*\).*/\1/')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"acp-smoke-stub","version":"0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"echo the card id","inputSchema":{"type":"object","properties":{"card":{"type":"string"}}}},{"name":"card.read","description":"dotted tool name","inputSchema":{"type":"object"}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"stub"}]}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+  esac
+done
+STUB_EOF
+chmod +x "$STUB" || fail "chmod stub"
+
+# Probe id 14 (1-13 and 21 are taken by the probes below and further
+# down — 12/13 now belong to the P1-2 two-session probes; renumber from
+# the next free id before appending, see the smoke-probe-ids pitfall).
+# Trailing comma in wait_for: '"id":14' keeps the match prefix-free
+# against future 14x ids.
+# This MUST run before the first session/prompt (probe 5): a turn freezes
+# the tools array (tools.Registry.Wire), and a roster arriving after the
+# freeze is refused by design — state B would silently become state A.
+# Under P1-2 multi-session this session/new MINTS the second session
+# (record-only anchor) — its stderr anchor line is why 3g below counts 3.
+rpc 14 session/new "{\"cwd\":\"$WS\",\"mcpServers\":[{\"name\":\"butler\",\"command\":\"$STUB\",\"args\":[],\"env\":[{\"name\":\"ACP_SMOKE_MCP_PIDFILE\",\"value\":\"$MCPPID\"}]}]}"
+wait_for '"id":14,' 'session/new(mcpServers)' 20
+grep '"id":14' "$OUT" | grep -q '"sessionId"' \
+  || fail "session/new with mcpServers must still answer: $(grep '"id":14' "$OUT")"
+
+# The declaration was connected and its tools landed under the three-segment
+# prefix. Both assertions are on seek's own log line, i.e. on the same path
+# the model's tools array takes.
+grep -q 'acp: mcp: registered 2 tool(s)' "$SMOKE_ERR" \
+  || fail "mcpServers: no registration line (got: $(grep '^acp: mcp' "$SMOKE_ERR"))"
+grep -q 'mcp__butler__echo' "$SMOKE_ERR" \
+  || fail "mcpServers: tool not registered as mcp__butler__echo (got: $(grep '^acp: mcp' "$SMOKE_ERR"))"
+grep -q 'mcp__butler__card_read' "$SMOKE_ERR" \
+  || fail "mcpServers: dotted tool name was not folded to mcp__butler__card_read"
+
+# The child really exists (spawned with the declared env, which is the only
+# way an injected server gets any credential — seek scrubs the parent env).
+[ -f "$MCPPID" ] || fail "mcpServers: declared server never started"
+CHILD=$(cat "$MCPPID")
+kill -0 "$CHILD" 2>/dev/null || fail "mcpServers: child pid $CHILD is not alive"
+echo "acp-smoke: session/new with mcpServers ok (child pid $CHILD, tools mcp__butler__*)"
 
 # --- 3. bad cwd fails loud (no silent daemon-dir session) ---------------------
 BAD="$SANDBOX/no-such-dir"
@@ -350,8 +435,8 @@ echo "acp-smoke: image content block accepted + degraded silently, read loop ali
 # activates it (the "session switched" stderr line) and answers with a
 # termination frame tagged with ITS sessionId. No key / no network: the
 # empty-text prompt is the same deterministic termination shape probe 5
-# used. (probe ids 12+: 1-10 + 21 and 11 are taken — see the
-# smoke-probe-ids pitfall.)
+# used. (probe ids 12/13 — the MCP passthrough probe took 14 upstream;
+# see the smoke-probe-ids pitfall.)
 rpc 12 session/new "{\"cwd\":\"$WS\"}"
 wait_for '"id":12,' 'session/new(second)' 15
 SID2="$(grep '"id":12,' "$OUT" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' | head -1)"
@@ -360,8 +445,8 @@ echo "$SID2" | grep -Eq '^[0-9]{8}-[0-9]{6}-[0-9a-f]{16}$' \
 [ "$SID2" != "$SID" ] \
   || fail "second session/new returned the SAME id $SID — must mint a new session"
 anchored_lines=$(grep -c -F 'acp: session anchored' "$SMOKE_ERR")
-[ "$anchored_lines" -eq 2 ] \
-  || fail "anchor lines = $anchored_lines, want 2 (one per session)"
+[ "$anchored_lines" -eq 3 ] \
+  || fail "anchor lines = $anchored_lines, want 3 (rpc 2 + the MCP-passthrough session + this one)"
 grep -F "acp: session anchored cwd=$WS" "$SMOKE_ERR" | grep -qF "id=$SID2" \
   || fail "second session's anchor line missing id=$SID2"
 echo "acp-smoke: second session/new ok (new durable id $SID2 ≠ $SID, anchor line present)"
@@ -383,4 +468,20 @@ echo "acp-smoke: two-session process ok (activation + per-session termination fr
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
+
+# The leaktest half of card c_oyt6ft: session end must reap the
+# client-injected child. seek's teardown kills the exec context and
+# Waits, so the pid is gone when the process returns; poll briefly for
+# the kernel to finish.
+left=0
+while [ "$left" -lt 50 ]; do
+  kill -0 "$CHILD" 2>/dev/null || break
+  sleep 0.1; left=$((left + 1))
+done
+kill -0 "$CHILD" 2>/dev/null && fail "MCP child $CHILD survived session end (leak)"
+grep -q 'acp: mcp closed 1 server(s)' "$SMOKE_ERR" \
+  || fail "session end: teardown line missing (got: $(grep '^acp: mcp' "$SMOKE_ERR"))"
+echo "acp-smoke: session end reaped the MCP child (pid $CHILD gone)"
+
 echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list+image-block+two-session anchor=$WS rc=0"
+echo "ACP-MCP-SMOKE-OK two-state=no-roster/noop+roster/connected tools=mcp__butler__* child=$CHILD reaped"
