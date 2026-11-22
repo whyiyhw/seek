@@ -29,7 +29,7 @@ import (
 // AND the route table in cmd/seek in lock-step.
 const (
 	// ProviderDeepSeek is the first-class DeepSeek lane (pkg/deepseek
-	// client, FIM + cache metadata + think tool).
+	// client, cache metadata + think tool).
 	ProviderDeepSeek = "deepseek"
 	// ProviderGLM is Zhipu's GLM lane (pkg/llm/compatible on the
 	// pinned bigmodel.cn endpoint, default glm-5.3).
@@ -140,14 +140,12 @@ func joinModels(models []string) string {
 
 // deepSeekOnlyTools lists tool names that only work against the
 // first-class DeepSeek client (D8). `think` reads DeepSeek's reasoner
-// semantics; `fim_complete` hits the DeepSeek FIM endpoint. A child
-// routed to any llm.Provider lane must not see them in its Registry —
-// the call would fail at runtime at best and mislead the model at
-// worst. Filtered by the Runner (which knows the child's effective
-// backend), AFTER the template Filter.
+// semantics. A child routed to any llm.Provider lane must not see it
+// in its Registry — the call would fail at runtime at best and
+// mislead the model at worst. Filtered by the Runner (which knows the
+// child's effective backend), AFTER the template Filter.
 var deepSeekOnlyTools = map[string]bool{
-	"think":        true,
-	"fim_complete": true,
+	"think": true,
 }
 
 // IsDeepSeekOnlyTool reports whether a tool name requires the

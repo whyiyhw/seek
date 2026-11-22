@@ -1,10 +1,9 @@
 // Package main contains the seek CLI entrypoint. This file implements the
 // --benchmark flag: a self-hosting benchmark that runs seek against its own
-// codebase and reports cache hit ratio, FIM usage ratio, and timing metrics.
+// codebase and reports cache hit ratio and timing metrics.
 //
 // Design (PRD §v1.0):
 //   - "自举 benchmark — 让 seek 自己读、改、运行自己的仓库，验证缓存命中率 ≥ 60%"
-//   - "FIM 快路径：模型在需要小范围补丁时调用 fim_complete 的比例 ≥ 50%（需 benchmark）"
 //
 // The benchmark reuses the same agent loop as runPrint/runJSON, consuming
 // the event stream to record per-turn Usage (cache hit/miss) and tool
@@ -32,23 +31,10 @@ import (
 // ---------------------------------------------------------------------------
 
 // benchmarkTask describes one predefined benchmark task.
-//
-// FIMMinCalls is the per-task acceptance threshold for fim_complete
-// invocations. A ratio (FIM / total tool calls) is unsound: total tool
-// calls includes read/bash/grep which can't use FIM, AND each FIM call
-// must be paired with an edit to write its output to disk (see ch6
-// §6.5), bounding any ratio metric to ~50%. Asking "did the model
-// take the FIM path at least N times in a task that's supposed to
-// exercise FIM" is the metric this actually measures. PRD §6 was
-// updated alongside this code to record the same finding.
-//
-// FIMMinCalls = 0 means "this task doesn't exercise FIM" — pass is
-// automatic regardless of fim_complete usage.
 type benchmarkTask struct {
 	Name        string
 	Description string
 	Prompt      string
-	FIMMinCalls int
 }
 
 // benchmarkPresets is the registry of recognised --benchmark task names.
@@ -57,13 +43,11 @@ var benchmarkPresets = map[string]benchmarkTask{
 		Name:        "self-hosting",
 		Description: "Read internal/cache/cache.go, add GetHitRatio(), run go test",
 		Prompt:      `Read internal/cache/cache.go. Add a new exported method GetHitRatio() float64 that returns the cumulative prefix-cache hit ratio across all recorded turns (it should delegate to t.Cumulative().HitRatio()). Then run go test ./internal/cache/ to verify the code compiles and tests pass. After the tests pass, revert your change so the workspace is clean (use 'git checkout -- internal/cache/cache.go').`,
-		FIMMinCalls: 0, // self-hosting is a cache-prefix test; FIM not required
 	},
 	"fim-patch": {
 		Name:        "fim-patch",
-		Description: "Read pkg/deepseek/types.go, add a String() method to Usage via FIM, run go vet",
-		Prompt:      `Read pkg/deepseek/types.go. The Usage struct has a HitRatio() method. Add a String() method to Usage that returns a human-readable summary like 'prompt=100 hit=80 miss=20 ratio=80.0%'. Place it directly after the HitRatio() method body. Use fim_complete to fill in the gap if the edit is small and well-defined. Then run 'go vet ./pkg/deepseek/' to verify the code compiles. Finally, revert your changes with 'git checkout -- pkg/deepseek/types.go'.`,
-		FIMMinCalls: 1, // one small edit; one FIM call = FIM path traversed
+		Description: "Read pkg/deepseek/types.go, add a String() method to Usage, run go vet",
+		Prompt:      `Read pkg/deepseek/types.go. The Usage struct has a HitRatio() method. Add a String() method to Usage that returns a human-readable summary like 'prompt=100 hit=80 miss=20 ratio=80.0%'. Place it directly after the HitRatio() method body. Then run 'go vet ./pkg/deepseek/' to verify the code compiles. Finally, revert your changes with 'git checkout -- pkg/deepseek/types.go'.`,
 	},
 }
 
@@ -72,16 +56,8 @@ var benchmarkPresets = map[string]benchmarkTask{
 // ---------------------------------------------------------------------------
 
 // benchmarkThresholds encodes the acceptance criteria for a benchmark run.
-//
-// FIMMinCalls replaces the original FIMUsageMin ratio: a ratio against
-// total tool calls is unsound because non-editable tools (read, bash,
-// grep, list_dir) dilute the denominator, and FIM calls must be paired
-// with edits (ch6 §6.5) which bounds any FIM/edit ratio to ~50%.
-// Per-task absolute call count is the metric that actually answers
-// "did the FIM path get exercised".
 type benchmarkThresholds struct {
 	CacheHitRatioMin float64 `json:"cache_hit_ratio_min"` // e.g. 0.60
-	FIMMinCalls      int     `json:"fim_min_calls"`       // 0 = N/A
 }
 
 // benchmarkReport is the top-level JSON output.
@@ -94,8 +70,6 @@ type benchmarkReport struct {
 	ElapsedSec         float64             `json:"elapsed_sec"`
 	CacheHitRatio      float64             `json:"cache_hit_ratio"`
 	CacheHitAfterTurn5 float64             `json:"cache_hit_ratio_after_turn_5"`
-	FIMUsageRatio      float64             `json:"fim_usage_ratio"`
-	FIMCalls           int                 `json:"fim_calls"`
 	TotalToolCalls     int                 `json:"total_tool_calls"`
 	PromptTokens       int                 `json:"prompt_tokens"`
 	CompletionTokens   int                 `json:"completion_tokens"`
@@ -114,7 +88,6 @@ type benchmarkReport struct {
 type turnSnapshot struct {
 	Turn      int
 	Usage     deepseek.Usage
-	FIMCalls  int
 	ToolCalls int
 }
 
@@ -147,7 +120,6 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 	var (
 		turns        int
 		toolCalls    int
-		fimCalls     int
 		snapshots    []turnSnapshot
 		runErrors    []string
 		usageAtTurn5 deepseek.Usage // cumulative usage after turn 5
@@ -158,9 +130,6 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 		switch e := ev.(type) {
 
 		case agent.ToolExecStart:
-			if e.Name == "fim_complete" {
-				fimCalls++
-			}
 			toolCalls++
 
 		case agent.TurnEnd:
@@ -171,7 +140,6 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 			snapshots = append(snapshots, turnSnapshot{
 				Turn:      turns,
 				Usage:     cum,
-				FIMCalls:  fimCalls,
 				ToolCalls: toolCalls,
 			})
 			if turns >= 5 && !savedAt5 {
@@ -212,25 +180,12 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 		}
 	}
 
-	// --- Compute FIM usage ratio ---
-	// FIM usage ratio = FIM calls / total tool calls.
-	// If totalToolCalls is 0, ratio is 0.
-	var fimRatio float64
-	if toolCalls > 0 {
-		fimRatio = float64(fimCalls) / float64(toolCalls)
-	}
-
 	// --- Thresholds ---
-	// FIM threshold is per-task absolute call count; the per-run ratio
-	// is still reported for visibility but no longer used in the
-	// pass/fail verdict (see benchmarkTask.FIMMinCalls doc comment).
 	thresholds := benchmarkThresholds{
 		CacheHitRatioMin: 0.60,
-		FIMMinCalls:      task.FIMMinCalls,
 	}
 	cachePass := finalUsage.HitRatio() >= thresholds.CacheHitRatioMin
-	fimPass := fimCalls >= thresholds.FIMMinCalls
-	thresholdsMet := cachePass && fimPass
+	thresholdsMet := cachePass
 
 	// --- Build report ---
 	report := benchmarkReport{
@@ -242,8 +197,6 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 		ElapsedSec:         elapsed.Seconds(),
 		CacheHitRatio:      finalUsage.HitRatio(),
 		CacheHitAfterTurn5: cacheHitAfterTurn5,
-		FIMUsageRatio:      fimRatio,
-		FIMCalls:           fimCalls,
 		TotalToolCalls:     toolCalls,
 		PromptTokens:       finalUsage.PromptTokens,
 		CompletionTokens:   finalUsage.CompletionTokens,
@@ -270,9 +223,7 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 		fmt.Fprintf(os.Stderr, "cache ratio (turn 6+): %.1f%% (threshold: ≥%.0f%%)\n",
 			cacheHitAfterTurn5*100, thresholds.CacheHitRatioMin*100)
 	}
-	fmt.Fprintf(os.Stderr, "FIM calls:       %d / %d tool calls (ratio %.1f%%, threshold: ≥%d call%s)\n",
-		fimCalls, toolCalls, fimRatio*100,
-		thresholds.FIMMinCalls, plural(thresholds.FIMMinCalls))
+	fmt.Fprintf(os.Stderr, "tool calls:      %d\n", toolCalls)
 	fmt.Fprintf(os.Stderr, "thresholds met:  %v\n", thresholdsMet)
 
 	// --- Write JSON report ---
@@ -291,18 +242,8 @@ func runBenchmark(ctx context.Context, taskName, outputPath string,
 	}
 
 	if !thresholdsMet {
-		return fmt.Errorf("benchmark: thresholds not met (cache: %.1f%% ≥ %.0f%% = %v, FIM: %d ≥ %d = %v)",
-			finalUsage.HitRatio()*100, thresholds.CacheHitRatioMin*100, cachePass,
-			fimCalls, thresholds.FIMMinCalls, fimPass)
+		return fmt.Errorf("benchmark: thresholds not met (cache: %.1f%% ≥ %.0f%% = %v)",
+			finalUsage.HitRatio()*100, thresholds.CacheHitRatioMin*100, cachePass)
 	}
 	return nil
-}
-
-// plural returns "" for 1, "s" otherwise — small helper for the human-
-// readable summary line so we don't print "1 calls".
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

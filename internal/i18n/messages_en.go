@@ -12,7 +12,7 @@ var messagesEn = map[string]string{
 	// view.go — pre-sizing hint, provider banner, streaming label,
 	// queue hint.
 	"view.starting":        "starting…",
-	"view.provider_banner": "⚠ Provider: %s — FIM / cache stats / Reasoner disabled",
+	"view.provider_banner": "⚠ Provider: %s — cache stats / Reasoner disabled",
 	"view.thinking":        "thinking…",
 	"view.thinking_s":      "thinking… %ds",
 	"view.thinking_ms":     "thinking… %dm%ds",

@@ -30,3 +30,6 @@ v0.12.3 — **Zed 面成形**的一版：feature-acp 在册缺口全清（backlo
 
 ## 已进 main、未部署
 - c_cv5dge：docs 账：budget.json 的 docs/prd/archive 线 653500→728500 重锚（actual 662240 +10%）——补 3d6f4895 归档 feature-deepseek-app-api.md（+46948B）时漏做的同 change 调线 + 活 PRD 在库加深（feature-acp 等）；摘要化否决（v0/v1 承载活引用）；上调已经人拍板（2026-11-22 凌晨，批），随合并生效
+
+## 未发版（分支 drive/c_qjaksw 在途）
+- c_qjaksw：**subtraction**——退役 fim_complete 工具链。删 `internal/tools/fimcomplete/`、`pkg/deepseek` FIM client（fim.go / fim_test.go / endpointFIM）、sysprompt 工具文档行、D8 deepseekOnly 表项（think 保留独扛过滤测试）、benchmark FIM 指标（FIMMinCalls 与 fim 比率；`fim-patch` 任务保留、prompt 去 fim_complete 指引）、i18n provider banner 的 FIM 字样；文档同步（dual-model / comparison / guide-architecture / book ch5+ch14 / pitfalls-triage #629 标注已退役 / feature-orchestration D8 / examples 两页 / 双 README）。依据：实测 FIM 调用比率 0%/11%（`docs/pitfalls/deepseek-api/fim-usage-ratio-is-inherently-low-—-model-prefers-edit-write-over-fim-complete.md`）——模型不用，快路径名存实亡，删净比养着便宜。

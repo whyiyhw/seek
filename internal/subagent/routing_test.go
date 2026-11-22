@@ -217,7 +217,7 @@ func TestSpawn_RejectsInvalidRoute(t *testing.T) {
 // stripped from any child not running on the first-class DeepSeek
 // client.
 func TestIsDeepSeekOnlyTool(t *testing.T) {
-	for _, name := range []string{"think", "fim_complete"} {
+	for _, name := range []string{"think"} {
 		if !IsDeepSeekOnlyTool(name) {
 			t.Errorf("IsDeepSeekOnlyTool(%q) = false, want true", name)
 		}

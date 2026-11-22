@@ -13,7 +13,7 @@ package i18n
 // LLM prompt path (see i18n.go's scope note).
 var messagesZh = map[string]string{
 	"view.starting":        "启动中…",
-	"view.provider_banner": "⚠ 提供方：%s — FIM / 缓存统计 / Reasoner 已禁用",
+	"view.provider_banner": "⚠ 提供方：%s — 缓存统计 / Reasoner 已禁用",
 	"view.thinking":        "思考中…",
 	"view.thinking_s":      "思考中… %d 秒",
 	"view.thinking_ms":     "思考中… %d 分 %d 秒",

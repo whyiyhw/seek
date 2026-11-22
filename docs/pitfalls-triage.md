@@ -192,7 +192,7 @@ main 的 `f05d23cc`（卡 c_554rlg）把台账 Status 节的三个派生量（li
 | 608 | DeepSeek API | Empty tool result + `omitempty` on `Message.Content` → "missing field `content`" from DeepSeek | 3 | W1 | — |
 | 615 | DeepSeek API | `reasoning_effort` values are `high\|max` on DeepSeek V4 — not OpenAI's `low\|medium\|high` | 0 | W1 | — |
 | 622 | DeepSeek API | FIM endpoint is at `/beta/completions` with legacy OpenAI shape | 4 | W1 | — |
-| 629 | DeepSeek API | FIM usage ratio is inherently low — model prefers edit/write over fim_complete | 6 | FC | FIM 比率指标设计 deferred v1.1（见 §2 FC-5） |
+| 629 | DeepSeek API | FIM usage ratio is inherently low — model prefers edit/write over fim_complete | 6 | FC | **已退役**（2026-11-22 c_qjaksw）：该工具链整体移除（实测比率 0%/11%，模型不用），FIM 指标随删 |
 | 636 | DeepSeek API | Streamed tool calls arrive as deltas keyed by `index` | 0 | W1 | — |
 | 642 | DeepSeek API | "Respond with JSON only" instructions to the reasoner are unreliable | 4 | W1 | — |
 | 649 | DeepSeek API | `deepseek-reasoner` without `Thinking` parameter silently behaves like fast-chat | 2 | W1n | 边缘 absorbed 候补（§4）：别名已死常量已扫，但建议仍不误导——下次 pass 人判 |

@@ -25,12 +25,9 @@ func TestBenchmarkThresholds_Pass(t *testing.T) {
 		Status:         "pass",
 		Turns:          8,
 		CacheHitRatio:  0.72,
-		FIMUsageRatio:  0.55,
-		FIMCalls:       5,
 		TotalToolCalls: 9,
 		Thresholds: benchmarkThresholds{
 			CacheHitRatioMin: 0.60,
-			FIMMinCalls:      1,
 		},
 		ThresholdsMet: true,
 	}
@@ -43,19 +40,16 @@ func TestBenchmarkThresholds_Pass(t *testing.T) {
 }
 
 func TestBenchmarkThresholds_Fail(t *testing.T) {
-	// All thresholds fail: low cache hit, low FIM, runtime errors.
+	// All thresholds fail: low cache hit, runtime errors.
 	r := benchmarkReport{
 		Task:           "self-hosting",
 		Description:    "test",
 		Status:         "fail",
 		Turns:          4,
 		CacheHitRatio:  0.20, // below 0.60
-		FIMUsageRatio:  0.0,  // below 0.50
-		FIMCalls:       0,
 		TotalToolCalls: 10,
 		Thresholds: benchmarkThresholds{
 			CacheHitRatioMin: 0.60,
-			FIMMinCalls:      1,
 		},
 		ThresholdsMet: false,
 		Errors:        []string{"tool exec failed"},
@@ -81,8 +75,6 @@ func TestBenchmarkReport_JSONRoundTrip(t *testing.T) {
 		ElapsedSec:         90.0,
 		CacheHitRatio:      0.72,
 		CacheHitAfterTurn5: 0.85,
-		FIMUsageRatio:      0.60,
-		FIMCalls:           3,
 		TotalToolCalls:     5,
 		PromptTokens:       15000,
 		CompletionTokens:   4000,
@@ -91,7 +83,6 @@ func TestBenchmarkReport_JSONRoundTrip(t *testing.T) {
 		CacheMissTokens:    4200,
 		Thresholds: benchmarkThresholds{
 			CacheHitRatioMin: 0.60,
-			FIMMinCalls:      1,
 		},
 		ThresholdsMet: true,
 	}
@@ -105,7 +96,7 @@ func TestBenchmarkReport_JSONRoundTrip(t *testing.T) {
 	jsonStr := string(b)
 	for _, key := range []string{
 		`"task"`, `"cache_hit_ratio"`, `"cache_hit_ratio_after_turn_5"`,
-		`"fim_usage_ratio"`, `"fim_calls"`, `"total_tool_calls"`,
+		`"total_tool_calls"`,
 		`"cache_hit_tokens"`, `"cache_miss_tokens"`,
 		`"thresholds"`, `"thresholds_met"`,
 	} {
@@ -140,13 +131,11 @@ func TestBenchmarkEdgeCases(t *testing.T) {
 		{
 			name: "zero tokens",
 			report: benchmarkReport{
-				Task:     "self-hosting",
-				Status:   "fail",
-				Turns:    0,
-				FIMCalls: 0,
+				Task:   "self-hosting",
+				Status: "fail",
+				Turns:  0,
 				Thresholds: benchmarkThresholds{
 					CacheHitRatioMin: 0.60,
-					FIMMinCalls:      1,
 				},
 			},
 		},
@@ -159,8 +148,6 @@ func TestBenchmarkEdgeCases(t *testing.T) {
 				ElapsedSec:         120.5,
 				CacheHitRatio:      0.91,
 				CacheHitAfterTurn5: 0.93,
-				FIMUsageRatio:      0.75,
-				FIMCalls:           30,
 				TotalToolCalls:     40,
 				PromptTokens:       100000,
 				CompletionTokens:   30000,
@@ -168,7 +155,6 @@ func TestBenchmarkEdgeCases(t *testing.T) {
 				CacheMissTokens:    10000,
 				Thresholds: benchmarkThresholds{
 					CacheHitRatioMin: 0.60,
-					FIMMinCalls:      1,
 				},
 				ThresholdsMet: true,
 			},
@@ -181,7 +167,6 @@ func TestBenchmarkEdgeCases(t *testing.T) {
 				Turns:  2,
 				Thresholds: benchmarkThresholds{
 					CacheHitRatioMin: 0.60,
-					FIMMinCalls:      1,
 				},
 			},
 		},
@@ -244,31 +229,5 @@ func TestBenchmarkAfterTurn5Delta(t *testing.T) {
 	wantOverall := 2300.0 / 3000.0 // 0.7667
 	if overallRatio != wantOverall {
 		t.Errorf("overall ratio = %.4f, want %.4f", overallRatio, wantOverall)
-	}
-}
-
-// TestBenchmarkZeroTotalToolCalls checks that FIM ratio is 0 when
-// there are no tool calls (avoiding division by zero).
-func TestBenchmarkZeroTotalToolCalls(t *testing.T) {
-	var fimRatio float64
-	toolCalls := 0
-	fimCalls := 0
-	if toolCalls > 0 {
-		fimRatio = float64(fimCalls) / float64(toolCalls)
-	}
-	if fimRatio != 0 {
-		t.Errorf("fimRatio = %v, want 0", fimRatio)
-	}
-
-	// Also test with some FIM calls but zero total (shouldn't happen
-	// in practice, but guard against it).
-	toolCalls2 := 0
-	fimCalls2 := 5
-	var fimRatio2 float64
-	if toolCalls2 > 0 {
-		fimRatio2 = float64(fimCalls2) / float64(toolCalls2)
-	}
-	if fimRatio2 != 0 {
-		t.Errorf("fimRatio2 = %v, want 0", fimRatio2)
 	}
 }
