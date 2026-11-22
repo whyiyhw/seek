@@ -352,34 +352,33 @@ func TestACPMCP_ConnectCloseCyclesDoNotLeak(t *testing.T) {
 	decl := []acp.MCPServer{{Name: srv.Name, Command: srv.Command, Args: srv.Args,
 		Env: []acp.MCPEnvVar{{Name: "ACP_MCP_STUB_PIDFILE", Value: strings.TrimPrefix(srv.Env[0], "ACP_MCP_STUB_PIDFILE=")}}}}
 
-	cycle := func() int {
+	// Each cycle asserts BOTH halves of "no leak": the child pid disappears
+	// on close (process half) and — see the goroutine poll below — nothing
+	// accumulates in the runtime. The registry is deliberately NOT asserted
+	// empty after close: closeMCP only reaps the children, it does not
+	// unregister tools, because one process is one session and the registry
+	// dies with it; each cycle builds a fresh registry anyway, so cross-cycle
+	// accumulation would show up in the pid/goroutine checks, not here.
+	cycle := func() {
+		_ = os.Remove(pidFile) // a stale pid from the previous cycle must not pass for this one's
 		reg := tools.New()
 		b := &acpBackend{reg: reg}
 		b.connectMCP(decl)
-		if _, err := os.Stat(pidFile); err != nil {
-			t.Fatalf("cycle: child never started: %v", err)
-		}
-		_ = os.Remove(pidFile)
-		pid := 0
-		if pidText, rerr := os.ReadFile(pidFile); rerr == nil {
-			pid, _ = strconv.Atoi(strings.TrimSpace(string(pidText)))
-		}
+		pid := waitForPid(t, pidFile)
 		if err := b.closeMCP(); err != nil {
 			t.Fatalf("cycle close: %v", err)
 		}
-		if len(reg.Names()) != 0 {
-			t.Fatalf("cycle: registry should be empty before connecting, got %v", reg.Names())
+		if !waitProcessGone(pid, 10*time.Second) {
+			t.Fatalf("cycle: child pid %d survived close — leaked", pid)
 		}
-		return pid
 	}
 
 	// Warm-up: absorbs first-use runtime/exec allocation.
 	cycle()
 	baseline := runtime.NumGoroutine()
 
-	for i := range 3 {
+	for range 3 {
 		cycle()
-		_ = i
 	}
 
 	// Goroutines settle back to the warmed-up baseline.
