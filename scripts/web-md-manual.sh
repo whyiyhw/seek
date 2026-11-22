@@ -5,7 +5,7 @@
 # 过程不闪烁。
 #
 # 干什么：临时 SEEK_HOME + 桩 seek（PATH 前置劫持，场景：渲染/注入/流式/
-# 其它默认）+ 桩项目目录，起 `seek serve --frontend=web`；先跑服务端自检
+# 富格式/其它默认）+ 桩项目目录，起 `seek serve --frontend=web`；先跑服务端自检
 # （curl：/static/markdown.js 资产面 + 页面无 HTML 解析 sink + SSE 事件族），
 # 再走浏览器验收：
 #   - 本机有 Chrome + node≥22 → scripts/web-md-headless.mjs 无头跑全部
@@ -126,6 +126,11 @@ case "$MSG" in
     sleep 0.3
     em '{"type":"agent_end","turns":1,"session_id":"SW5MDC"}'
     ;;
+  富格式)
+    em '{"type":"agent_start","model":"deepseek-chat"}'
+    em '{"type":"text_delta","delta":"| 列 | 说明 |\n|---|:-:|\n| a | 表格行甲 |\n| b | 表格行乙 |\n\n> 引用一行\n> 引用二行\n\n第一段文字。\n\n第二段文字。\n\n- 长列表项第一行，这一行刻意写得非常长非常长非常长非常长非常长，看折行后的样子\n  续行折叠进条目，不该断列顶格。\n- 第二项\n\n```go\nfunc wide() { aVeryLongSingleLineCallThatMustScrollNotClipOnNarrowScreens(\"p1\", 12345) }\n```\n\n收尾。"}'
+    em '{"type":"agent_end","turns":1,"session_id":"SW5MDE"}'
+    ;;
   *)
     em '{"type":"agent_start","model":"deepseek-chat"}'
     em '{"type":"text_delta","delta":"桩应答："}'
@@ -245,6 +250,8 @@ cat <<EOF
   3. 发「注入」：<script>/<div onclick>/javascript: 链全部字面纯文本，
      无脚本执行痕迹
   4. 发「流式」：▍气泡逐步增长无跳变闪烁；收口整泡重渲成 md 形状
+  5. 发「富格式」（c_k3pnlw）：表格成表（无裸竖线）、> 引用成条、两段
+     各自 <p>、长列表项续行折进条目不顶格、代码块有背景圆角可横滚
 
 按 Enter 结束并清理（KEEP=1 保留现场）…
 EOF

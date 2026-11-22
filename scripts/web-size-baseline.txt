@@ -93,7 +93,18 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
-31332461
+31578473
+# 2026-11-22 c_k3pnlw ratchet（W5 后返工·markdown 渲染补齐）：pin
+# 31332461→31578473（+245,012B），其中【非单卡漂移】+225,396B =
+# HEAD@269f682a 干净树实测 31,557,857B 与 pin 的差——f8117389（eval 观测
+# 指标）/54c56fc1（bash·grep 提示降噪）/0c801629（FIM 退役）三次合并
+# 从未棘轮（沿 c_oyp2qf 条目记录过的「合并方只吃余量不抬 pin」形状），
+# c_rqcuaa 之后余量收窄到 200KB 档，漂移首次顶穿门禁——按本卡验收口径
+# 「超预算按既有棘轮口径抬 pin 并在卡面记账，注明非单卡漂移」同步入 pin。
+# 本卡自身 delta 仅 +20,616B（同树 HEAD vs 分支同线实测：markdown.js
+# +5.5KB / webfrontend.html +1.5KB embed + 表格·引用·段落渲染器本体；
+# scripts/ 验收脚本不进 embed 不计入）。绝对值口径 = c_rqcuaa 先例
+# （1.27.3 单线后同机同线重测，无跨线偏差可混）。
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
