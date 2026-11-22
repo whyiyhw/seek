@@ -6,7 +6,9 @@ package mcptool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 
@@ -81,12 +83,53 @@ type ServerConfig struct {
 	// falls back to the prefixed form — the bare name is simply not
 	// available. Zero value (false) = prefix on, the default.
 	NoPrefix bool
+	// NamePrefix overrides the registration prefix, whose default is
+	// "<server>__". Set only by callers that need a roster to land in a
+	// namespace of its own: the ACP lane registers client-injected
+	// servers as "mcp__<server>__<tool>" so an editor-supplied server is
+	// distinguishable from the user's mcp.json roster in the tools
+	// array. Ignored when NoPrefix keeps a bare, uncontested name.
+	NamePrefix string
 }
 
-// LoadResult holds the Bridges and per-server Errors from LoadServers.
+// LoadResult holds the Bridges, per-server Errors and the live clients
+// from LoadServers.
+//
+// Clients exists for the callers that OWN the servers' lifetime: the
+// mcp.json path leaks them deliberately (they live until the process
+// exits, chapter-12 §12.7), while the ACP passthrough (session/new's
+// mcpServers) must close them when the session ends — a client is the
+// only handle on a spawned child process. One client per server that
+// connected; bridges of the same server share it.
 type LoadResult struct {
 	Bridges []*Bridge
 	Errors  []error
+	Clients []*mcp.Client
+}
+
+// Close terminates every connected server (SIGKILL the child, then
+// reap it). Safe on a zero-width result; safe to call once per result.
+// The first REAL error is returned, the remaining ones are still
+// attempted — partial teardown beats leaking a child because a
+// neighbour failed.
+//
+// A child that exited non-zero is NOT an error here: Close kills it by
+// design (pkg/mcp cancels the exec context, then Waits), so *exec.ExitError
+// is the normal outcome of a deliberate teardown. Only failures of the
+// reaping machinery itself surface.
+func (lr LoadResult) Close() error {
+	var first error
+	for _, c := range lr.Clients {
+		if c == nil {
+			continue
+		}
+		err := c.Close()
+		var exitErr *exec.ExitError
+		if err != nil && !errors.As(err, &exitErr) && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // LoadServers starts each MCP server, runs the initialize handshake,
@@ -121,7 +164,7 @@ func loadServers(ctx context.Context, servers map[string]ServerConfig, existingN
 
 	var result LoadResult
 	for _, serverName := range names {
-		bridges, err := loadOne(ctx, serverName, servers[serverName], existingNames, connect)
+		bridges, client, err := loadOne(ctx, serverName, servers[serverName], existingNames, connect)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("mcp server %q: %w", serverName, err))
 			continue
@@ -130,25 +173,30 @@ func loadServers(ctx context.Context, servers map[string]ServerConfig, existingN
 			existingNames[b.effectName] = true
 		}
 		result.Bridges = append(result.Bridges, bridges...)
+		// A server that connected but exposed zero tools still owns a
+		// child process — record its client so Close can reap it.
+		if client != nil {
+			result.Clients = append(result.Clients, client)
+		}
 	}
 	return result
 }
 
-func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing map[string]bool, connect connectFn) ([]*Bridge, error) {
+func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing map[string]bool, connect connectFn) ([]*Bridge, *mcp.Client, error) {
 	client, err := connect(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if _, err := client.Initialize(ctx); err != nil {
 		_ = client.Close()
-		return nil, fmt.Errorf("initialize: %w", err)
+		return nil, nil, fmt.Errorf("initialize: %w", err)
 	}
 
 	defs, err := client.ListTools(ctx)
 	if err != nil {
 		_ = client.Close()
-		return nil, fmt.Errorf("list tools: %w", err)
+		return nil, nil, fmt.Errorf("list tools: %w", err)
 	}
 
 	bridges := make([]*Bridge, 0, len(defs))
@@ -158,13 +206,66 @@ func loadOne(ctx context.Context, serverName string, cfg ServerConfig, existing 
 		// collisions impossible. NoPrefix (mcp.json's "prefix": false
 		// escape hatch) keeps the bare name when it is free, falling
 		// back to the prefixed form when something already holds it.
-		effectName := serverName + "__" + def.Name
+		// NamePrefix swaps the leading segment (the ACP lane's
+		// "mcp__<server>__"), leaving the shape identical.
+		prefix := serverName + "__"
+		if cfg.NamePrefix != "" {
+			prefix = cfg.NamePrefix
+		}
+		effectName := prefix + def.Name
+		if cfg.NamePrefix != "" {
+			// A caller that asked for its own namespace (the ACP lane's
+			// "mcp__<server>__") is naming tools for a model API, so the
+			// WHOLE candidate is folded into ^[a-zA-Z0-9_-]{1,64}$: MCP
+			// allows dots in server and tool names, the model APIs do
+			// not, and a rejected name kills the session's first request.
+			// Rosters registered the default way keep their exact bytes.
+			effectName = safeToolName(effectName)
+			if effectName == prefix {
+				// Every rune of the tool's name folded away (e.g. a name
+				// made only of punctuation). Keep the tool callable
+				// instead of registering a bare prefix.
+				effectName = prefix + "tool"
+			}
+		}
 		if cfg.NoPrefix && !existing[def.Name] {
 			effectName = def.Name
 		}
 		bridges = append(bridges, New(client, serverName, def, effectName))
 	}
-	return bridges, nil
+	return bridges, client, nil
+}
+
+// maxToolName is the provider ceiling on tools[].function.name
+// (^[a-zA-Z0-9_-]{1,64}$ — DeepSeek, OpenAI, Anthropic agree). A longer
+// name is not a cosmetic problem: the first request 400s and the whole
+// session is dead. Names short enough pass through byte-identically, so
+// every existing roster is unaffected.
+const maxToolName = 64
+
+// safeToolName folds a registration name into the provider alphabet and
+// truncates it to the ceiling. Used only when a caller takes
+// responsibility for naming tools itself (NamePrefix): the default
+// "<server>__<tool>" path is left byte-identical, because mcp.json
+// rosters are a shipped contract and a user's server may legitimately
+// rely on an exotic name working today.
+func safeToolName(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if len(out) > maxToolName {
+		out = out[:maxToolName]
+	}
+	return out
 }
 
 // EnvMapToSlice converts a map[string]string into "KEY=VALUE" pairs

@@ -271,9 +271,11 @@ func New(cwd string, pref Preference) (*Policy, error) {
 // whitelist follow the session cwd without rebuilding the registry.
 //
 // Prefer New/Spawn for everything else: those keep the "cwd fixed at
-// construction" invariant that the rest of the codebase assumes. Call
-// Reanchor BEFORE the first prompt — one seek process serves one ACP
-// session (MVP), so in practice this runs exactly once, handshake-time.
+// construction" invariant that the rest of the codebase assumes. ACP
+// callers re-anchor at session boundaries: the first session/new, each
+// session/load, and (since ACP·P1-2) each cross-session turn switch —
+// always between the tool calls of other sessions, under the backend's
+// turn gate.
 func (p *Policy) Reanchor(cwd string) error {
 	if p == nil {
 		return fmt.Errorf("permission: Reanchor on nil policy")
@@ -439,6 +441,45 @@ func (p *Policy) AlwaysAllowed(k Kind) bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.alwaysAllow[k]
+}
+
+// AlwaysAllowKinds snapshots the currently granted kinds (ACP·P1-2: the
+// multi-session backend pulls the per-Kind allowlist off the shared
+// policy at turn end, so each session's grants ride its own session
+// state instead of leaking into whichever session runs next). Order is
+// unspecified; callers treat it as a set.
+func (p *Policy) AlwaysAllowKinds() []Kind {
+	if p == nil {
+		return nil
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	kinds := make([]Kind, 0, len(p.alwaysAllow))
+	for k := range p.alwaysAllow {
+		kinds = append(kinds, k)
+	}
+	return kinds
+}
+
+// RestoreAlwaysAllow replaces the per-Kind allowlist with kinds. The
+// counterpart of AlwaysAllowKinds: ACP session activation replays the
+// switched-in session's grants after the SetWorkflow transition (which
+// clears them — see the field doc) has run. A nil/empty slice clears.
+// Not a general-purpose setter: outside the ACP switch path, grants
+// only grow via SetAlwaysAllow and die on posture/workflow changes.
+func (p *Policy) RestoreAlwaysAllow(kinds []Kind) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.alwaysAllow = nil
+	for _, k := range kinds {
+		if p.alwaysAllow == nil {
+			p.alwaysAllow = make(map[Kind]bool, len(kinds))
+		}
+		p.alwaysAllow[k] = true
+	}
 }
 
 // Cwd returns the policy's working directory (set at construction;

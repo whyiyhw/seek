@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -88,6 +89,11 @@ type Registry struct {
 
 	once   sync.Once
 	frozen []deepseek.Tool
+	// wired records that Wire() has run at least once, i.e. the tool list
+	// has already been handed to a provider and is frozen. Derived from
+	// the freeze itself (no parallel bookkeeping): the ACP passthrough
+	// uses it to warn when a roster arrives too late to reach the model.
+	wired atomic.Bool
 }
 
 // New returns an empty registry. Use Add to insert tools.
@@ -114,6 +120,7 @@ func (r *Registry) Lookup(name string) Tool { return r.byName[name] }
 // the wire bytes are deterministic regardless of Add() order.
 func (r *Registry) Wire() []deepseek.Tool {
 	r.once.Do(func() {
+		r.wired.Store(true)
 		sorted := make([]Tool, len(r.tools))
 		copy(sorted, r.tools)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name() < sorted[j].Name() })
@@ -132,6 +139,15 @@ func (r *Registry) Wire() []deepseek.Tool {
 	})
 	return r.frozen
 }
+
+// Wired reports whether the wire list has been frozen by a first Wire()
+// call — i.e. whether a provider has already been told which tools exist.
+// A tool added after that point is dispatchable but never OFFERED, so
+// callers that register tools late (the ACP lane's session/new MCP
+// passthrough) use this to say so instead of leaving the user guessing.
+// Race-free by construction: the flag is set inside the same Once that
+// builds the frozen list.
+func (r *Registry) Wired() bool { return r.wired.Load() }
 
 // Whitelist narrows the registry to only the named tools (v8·T1
 // `-tools` bare-core flag). Names not currently registered are

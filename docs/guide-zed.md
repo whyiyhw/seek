@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session、MCP 透传等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** + **多会话复用进程** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session 的完善等见 §5 的优化清单（MCP 透传已于 c_oyt6ft 落地，见 §5.5）。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -65,7 +65,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 真 Zed（1.4.x）端到端验证过：
 
 - ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。协议版本是**真协商**（P1-3）：响应带的是「客户端请求的版本」与「seek 支持的版本」的交集里最高的那个，不是回显——客户端报 2 会拿到 1，降级在响应里申报，seek 侧另在 stderr 记一行（§5）。
-- ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.3）。
+- ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.4）。
 - ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 与 `think` 工具的实时输出都会出现；代价：CoT 会进客户端侧日志）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
@@ -120,11 +120,11 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 |---|---|---|
 | **审批门 / approval** | **已修（P0-2）**：非 yolo 的 ACP 车道权限姿态为 `Ask`，危险动作经 `session/request_permission` 弹到客户端原生权限 UI（"允许 seek 运行 X?"），三选项 allow_once / allow_always / reject_once；`allow_always` 即 TUI 的「[a] always: \<kind\>」语义（同 Kind 本会话不再问）。**无应答默认拒**：客户端断线、超时（默认 10 分钟，`SEEK_ACP_PERMISSION_TIMEOUT` 秒数可调）、或无头 driver 回 `-32601`，一律拒绝并照常完成回合——不会卡死。无头无人值守场景仍用 `SEEK_ACP_YOLO=1` 直接放行（§5.1，优先级高于审批门）。 | Zed 客户端面板较旧、暂不渲染权限弹窗的实机验证；`reject_always`（协议有、Policy 无 per-Kind 拒绝清单）未接——目前不提供也不接受该选项。 |
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | **已修**（c_chzxgg，2026-11-21）：initialize 现在同时申报 `sessionCapabilities.list`（schema 形状是对象 `{}`，在场即"支持"，不是布尔；与 loadSession 同一道持久化闸），`session/list` 扫 transcript 存储返回 `{sessions:[{sessionId,cwd,title,updatedAt}]}`——数据源与 `session/load` 同一个 store（列出的 id 必可 load），标题取首条 user message 首行（80 rune 截断，与 serve `/rpc session/list` 同一派生），mtime 是 header 的 UpdatedAt（RFC3339）。空仓答 `sessions:[]`（数组恒在，不是 null）；`cwd` 过滤可选；不分页（单页全量，不回 nextCursor）。**未申报 `sessionCapabilities.delete`**——删 transcript 走 TUI/文件系统，不在协议上开口。 |
-| **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
+| **会话数** | **已修（P1-2，backlog ③）**：一个 `seek` 进程可同时服务 **N 个会话**——`session/new` 第二次调用**新开一会话**（新的持久 transcript id，首个完成的回合后落盘），不再重锚定已有会话；第一个会话仍延续启动时的 transcript（单会话行为不变）。**per-session 各自独立的是四根轴**：cwd 锚（每次该会话的回合把进程+权限策略锚到它的目录）、权限策略的会话轴（plan 模式 + `[a]` 常许清单，各会话互不影响）、历史栈（各写各的 transcript）、模型车道（一个会话换模型不动另一个）。实现是**回合级时间复用**：agent/工具注册表/进程 cwd 是一台共享机器，跨会话的回合在 turn 闸上排队串行（两会话并发 prompt 不串扰，但不同时跑）；`session/set_config_option` / `set_mode` / `session/load` 的「回合间才受理」窗口相应变为「任一会话无回合在跑时」。**仍是进程级（非 per-session）的**：系统提示/memory/skills/checkpoint 子代理挂载——都按启动目录焊死，与会话 cwd 无关（单会话时代即如此）。ACP v1 无 session/delete，会话状态随进程存亡。 | 并行回合（每会话独立 agent+注册表）需要把 1700 行启动接线按会话重建，收益是跨会话真并发——当前回合串行对 Zed/paseo 的人机节奏无感，若出现跨会话长回合互等的真实场景再立卡。 |
 | **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
 | **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
-| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
-| **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
+| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。多会话下（P1-2）cwd 是**会话轴**：每个会话的回合把两半锚（进程 chdir + policy reanchor）切到自己的目录，回合间不漂移（见 §5 会话数行）。 | — |
+| **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.5）。 | 多 session 各自一套 roster（现多会话已落地但 roster 仍进程级共享，声明变化只告警不热换）。 |
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch
 
@@ -211,6 +211,36 @@ wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`
 **纯图 prompt** 也成一回合（旧行为是 `text==""` 直接 `end_turn`、什么都不做）。
 
 不申报的东西：`embeddedContext`（编辑器选中的代码上下文）——seek 不处理该块类型，客户端因此不会发。真 Zed 附图的人工实机验证仍待补（沙盒里能证的是"块被收下、标记按序进了请求"：`cmd/seek/testdata/acp-image/*.json` + `cmd/seek/acp_image_e2e_test.go` 驱动真二进制对假端点断言）。
+
+### 5.5 MCP 透传 / MCP passthrough（session/new 的 `mcpServers`）
+
+ACP 客户端可以在 `session/new`（和 `session/load`）里带一份 MCP roster，seek 会**按声明**把这些 server 接进会话——这是 backlog ⑦，也是"把任意工具面喂进 seek 会话"的通道（butler 卡面 MCP 这类跨系统组合）。
+
+**声明 → 起连 → 进工具面 → 随会话清理**，四步各自落点：
+
+| 步 | 做什么 | 代码 |
+|---|---|---|
+| 声明 | 解 `mcpServers` 数组；只认 `stdio`（`pkg/mcp` 就是 stdio 传输），`http`/`sse`/`acp` 跳过并在 stderr 说明 | `internal/acp/mcp.go` |
+| 起连 | **复用 `~/.seek/mcp.json` 那一套客户端栈**：`mcptool.LoadServers` → `pkg/mcp.StartServer`（握手 + `tools/list`，无第二套实现） | `internal/tools/mcptool`、`cmd/seek/acp_mcp.go` |
+| 进工具面 | 注册进同一个 registry，名字 **`mcp__<server>__<tool>`** | `cmd/seek/acp_mcp.go` |
+| 随会话清理 | 会话结束（stdin EOF / 进程退出）→ 关客户端 → 子进程被 kill + 回收 | `cmd/seek` 的 `runACP` defer |
+
+几点必须知道的边界：
+
+- **名字是 `mcp__<server>__<tool>`，不是 `mcp.<server>.<tool>`。** 点号过不了模型 API 的函数名约束（`^[a-zA-Z0-9_-]{1,64}$`，DeepSeek / OpenAI / Anthropic 一致），首个请求就会 400。三段式把客户端注入的 server 与 `mcp.json` 的 `<server>__<tool>` 分开；server 名与工具名都会折进上面那个安全字母表（`card.read` → `mcp__butler__card_read`）。
+- **声明里给的 `env` 是子进程拿到凭据的唯一途径。** seek 先按 `internal/childenv` 擦掉父环境里的凭据形状变量（`*_API_KEY`、`*_TOKEN`、`SEEK_*` …），再叠加声明里的 `env`——所以 server 需要 key 就明写在声明里。
+- **坏声明不失败。** 起不来的 server / 不支持的传输只写 stderr，`session/new` 照常回 `sessionId`；会话照常能用，只是少了那批工具。
+- **一个进程 = 一个 session = 一份 roster。** 重复的 `session/new` 带同一份声明是幂等 no-op（paseo 重锚时会重发）；带**不同**声明只告警、不热换（registry 无法遗忘已注册的工具，换 roster 请重开 `seek acp`）。
+- **不进 system prompt。** `MCPSection` 在启动时组装并冻结（前缀缓存纪律），注入的 server 只出现在 tools 数组里。模型靠工具名与 description 认它。
+- **roster 必须在会话首轮之前到。** tools 数组在首轮就冻结（`Registry.Wire`），此后再来的 roster 会被拒并打一行说明——那些工具模型根本看不到，起了子进程也没人调；重开 `seek acp` 即可。实践中客户端在 `session/new` 就带上，所以不会撞到。
+- **不带 `mcpServers` 时零变化**：不起子进程、不动 registry、stderr 一行 `acp: mcp:` 都不会多出来（`scripts/acp-smoke-test.sh` 的两态断言之一）。
+
+调试就看 stderr 的 `acp: mcp:` 行——连接/注册/回收各一行，工具名会原样列出：
+
+```
+acp: mcp: registered 2 tool(s) from 1 server(s): mcp__butler__card_read mcp__butler__echo
+acp: mcp closed 1 server(s)
+```
 
 ---
 

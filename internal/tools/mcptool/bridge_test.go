@@ -391,3 +391,76 @@ func TestFormatErrors_Multiple(t *testing.T) {
 		t.Errorf("missing errors in output: %q", got)
 	}
 }
+
+// ---------- NamePrefix / safeToolName (ACP passthrough) ----------
+
+// TestLoadServers_NamePrefix pins the ACP lane's namespace: the same
+// roster registered under "mcp__<server>__" gets the three-segment form,
+// with the server name AND the tool name folded into the provider
+// alphabet (MCP permits dots; ^[a-zA-Z0-9_-]{1,64}$ does not, and a
+// rejected name kills the session's first request).
+func TestLoadServers_NamePrefix(t *testing.T) {
+	toolsByCommand := map[string][]mcp.ToolDef{
+		"ok:butler": {
+			{Name: "echo", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "card.read", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+	}
+	servers := map[string]ServerConfig{
+		"butler.card": {Command: "ok:butler", NamePrefix: "mcp__butler_card__"},
+	}
+	lr := loadServers(context.Background(), servers, freshExisting(nil), fakeConnect(t, toolsByCommand))
+	if len(lr.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", lr.Errors)
+	}
+	want := "mcp__butler_card__echo\nmcp__butler_card__card_read\n"
+	if got := rosterOf(lr); got != want {
+		t.Errorf("roster:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// The default path must stay byte-identical: mcp.json rosters are a
+// shipped contract, so a dotted tool name registered the default way
+// keeps its dot (whatever the provider does with it is not this change's
+// business).
+func TestLoadServers_DefaultPrefixIsUnfolded(t *testing.T) {
+	toolsByCommand := map[string][]mcp.ToolDef{
+		"ok:x": {{Name: "card.read", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}
+	lr := loadServers(context.Background(), map[string]ServerConfig{"x": {Command: "ok:x"}},
+		freshExisting(nil), fakeConnect(t, toolsByCommand))
+	if got, want := rosterOf(lr), "x__card.read\n"; got != want {
+		t.Errorf("default roster = %q, want %q (unchanged bytes)", got, want)
+	}
+}
+
+func TestSafeToolName(t *testing.T) {
+	cases := map[string]string{
+		"mcp__srv__ok":          "mcp__srv__ok",
+		"mcp__srv__card.read":   "mcp__srv__card_read",
+		"mcp__my.tools__a/b c":  "mcp__my_tools__a_b_c",
+		"工具":                    "__",
+		strings.Repeat("a", 70): strings.Repeat("a", maxToolName),
+	}
+	for in, want := range cases {
+		if got := safeToolName(in); got != want {
+			t.Errorf("safeToolName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// LoadResult.Close must reap the clients it reports and keep going after
+// a failure — one wedged server cannot leave its neighbours running.
+func TestLoadResult_CloseReapsEveryClientAndIsIdempotentOnZero(t *testing.T) {
+	// Clients built over pipes have no subprocess: Close is a no-op that
+	// must not panic, which is the shape every fake in this suite uses.
+	c1 := mcp.NewClient(strings.NewReader(""), io.Discard)
+	c2 := mcp.NewClient(strings.NewReader(""), io.Discard)
+	lr := LoadResult{Clients: []*mcp.Client{c1, nil, c2}}
+	if err := lr.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := (LoadResult{}).Close(); err != nil {
+		t.Fatalf("empty Close: %v", err)
+	}
+}

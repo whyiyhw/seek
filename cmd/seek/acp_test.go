@@ -329,7 +329,11 @@ func TestACPBackend_NewSessionAnchorsCwd(t *testing.T) {
 		t.Fatalf("default policy cwd = %q, want %q", got, old)
 	}
 
-	// Explicit cwd: both anchors move, sessionId = project name.
+	// Explicit cwd on a SECOND session/new (P1-2: a new session is
+	// minted, not a re-anchor of the live one). The new session is
+	// record-only: its anchor (both halves) takes effect at its first
+	// turn — anchoring here would yank the cwd out from under the
+	// installed session.
 	res, err = b.NewSession(acp.NewSessionParams{Cwd: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -337,11 +341,14 @@ func TestACPBackend_NewSessionAnchorsCwd(t *testing.T) {
 	if want := filepath.Base(dir); res.SessionID != want {
 		t.Fatalf("sessionId = %q, want project name %q", res.SessionID, want)
 	}
-	if got := pol.Cwd(); got != dir {
-		t.Fatalf("policy cwd = %q, want %q", got, dir)
+	if len(b.sessions) != 2 {
+		t.Fatalf("sessions = %d entries, want 2", len(b.sessions))
 	}
-	if got, _ := os.Getwd(); got != dir {
-		t.Fatalf("process cwd = %q, want %q", got, dir)
+	if got := pol.Cwd(); got != old {
+		t.Fatalf("policy cwd = %q, want the FIRST session's %q (second new is record-only)", got, old)
+	}
+	if got, _ := os.Getwd(); got != old {
+		t.Fatalf("process cwd = %q, want the FIRST session's %q (second new is record-only)", got, old)
 	}
 }
 
@@ -525,7 +532,10 @@ func acpTestMenu() []acp.ConfigOption {
 // newSwitchTestBackend builds an acpBackend wired for lane-switch
 // assertions: a real agent on the DeepSeek lane (dummy key, no network
 // at construction), the standard test menu, and a laneFor stub that
-// hands out the two lanes the menu advertises.
+// hands out the two lanes the menu advertises. Since P1-2 the state
+// model carries a session table, so the harness registers one live
+// session by hand (id sess-1, installed) — the state NewSession would
+// have built, minus the anchoring side effects these tests don't want.
 func newSwitchTestBackend(t *testing.T) *acpBackend {
 	t.Helper()
 	ag, err := agent.New(agent.Config{
@@ -536,10 +546,18 @@ func newSwitchTestBackend(t *testing.T) *acpBackend {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cwd, _ := os.Getwd()
+	st := &acpSession{
+		id:        "sess-1",
+		cwd:       cwd,
+		menuValue: "deepseek:deepseek-flash",
+	}
 	return &acpBackend{
 		ag:        ag,
 		menu:      acpTestMenu(),
 		sessionID: "sess-1",
+		sessions:  map[string]*acpSession{"sess-1": st},
+		installed: st,
 		laneFor: func(provider string) (llm.Provider, *deepseek.Client, string, error) {
 			switch provider {
 			case "deepseek":
@@ -564,6 +582,9 @@ func TestACPBackend_NewSessionServesMenu(t *testing.T) {
 	}
 	b := newSwitchTestBackend(t)
 	b.policy = pol
+	// This test drives the fresh-session flow, not the pre-seeded one:
+	// clear the harness's table so session/new is the FIRST session.
+	b.sessions, b.installed, b.sessionID = nil, nil, ""
 
 	res, err := b.NewSession(acp.NewSessionParams{})
 	if err != nil {
@@ -618,6 +639,8 @@ func TestACPBackend_SetConfigOption_Rejections(t *testing.T) {
 		{"no session yet", func(t *testing.T) *acpBackend {
 			b := newSwitchTestBackend(t)
 			b.sessionID = ""
+			b.sessions = nil
+			b.installed = nil
 			return b
 		}, acp.SetConfigOptionParams{SessionID: "sess-1", ConfigID: "model", Value: "glm:glm-5.3"}},
 		{"unknown session", func(t *testing.T) *acpBackend {

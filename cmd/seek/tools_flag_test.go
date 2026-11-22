@@ -219,6 +219,14 @@ var (
 // otherwise clean it up from under the next test), so it lands in its
 // own temp dir removed when the whole test binary exits.
 func TestMain(m *testing.M) {
+	// The ACP MCP passthrough tests re-enter this binary as a fake MCP
+	// server over stdio (cmd/seek/acp_mcp_test.go: stubMCPMain). Mirrors
+	// internal/controlplane's `-p` stub dispatch: intercept before
+	// m.Run() so the real flag parser never sees the stub argument.
+	if len(os.Args) > 1 && os.Args[1] == "-acp-mcp-stub" {
+		stubMCPMain()
+		os.Exit(0)
+	}
 	code := m.Run()
 	if seekBinDir != "" {
 		_ = os.RemoveAll(seekBinDir)

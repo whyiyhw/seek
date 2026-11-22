@@ -23,7 +23,7 @@
 |---|---|---|
 | provider 注册 | spawn 一个**探测进程**，发 `initialize`（`clientInfo: paseo`，10s 超时），读回 `agentCapabilities` 后关闭该进程 | ✅ `initialize` 回显 protocolVersion + `loadSession:true`（有持久化时）+ `promptCapabilities.image:true`。**2026-11-19 起** `loadSession` 不再恒 false |
 | 能力折算 | `loadSession:true` → session.persistence；`sessionCapabilities.list` → session.list；`promptCapabilities.image` → prompt.image | seek 报 `loadSession:true` → paseo 开 session.persistence 并调 `session/load`（**2026-11-19 已实现**，见 §2.4）；不报 list → **不**调 `session/list` |
-| 每个会话 | **再 spawn 一个独立进程**，`session/new {cwd, mcpServers, _meta._paseo{…}}` → `session.ready` | ✅ 处理（D-1 已修：cwd 生效，见 §2.2） |
+| 每个会话 | **再 spawn 一个独立进程**，`session/new {cwd, mcpServers, _meta._paseo{…}}` → `session.ready` | ✅ 处理（D-1 已修：cwd 生效，见 §2.2；**2026-11-21 起 `mcpServers` 也已生效**，stdio 条目按声明起连、工具以 `mcp__<server>__<tool>` 进会话，卡 c_oyt6ft / guide-zed §5.5） |
 | 对话轮 | `session/prompt {sessionId, prompt[]}`，串行排队（promptLane），收 `session/update` 流，等 `stopReason`；打断 = `session/cancel` | ✅ 全支持（Zed 已验证同一路径） |
 | 进程退出 | stdin 关闭 → seek rc=0 退出；会话中异常退出 → `session.runtime_failed` | ✅ EOF 干净退出（e2e 有测） |
 
@@ -33,7 +33,7 @@
 - **传输同形**：paseo 用官方 SDK 的 `ndJsonStream`（newline JSON-RPC，无 Content-Length），与 `internal/acp` 完全同帧。`PROTOCOL_VERSION = 1`，seek 回显客户端版本。
 - **一次 paseo 会话 = 一个 seek 进程**（外加注册时一个短命探测进程）。seek 的"一进程一 session"MVP 与此天然匹配，无多 session 并发问题（feature-acp.md backlog ③ 在此场景不构成缺口）。
 - **env**：`spawnProcess` 用 `{...launch.env, ...provider.env}` 合并——config 里 provider 块的 `env` 逐字注入子进程（zcode 先例实证）。
-- **丢弃的字段**（知悉即可，非缺口）：`session/new` 的 `mcpServers`（paseo 侧 MCP 透传不达 seek，MVP 无需）；`_meta._paseo.systemPrompt/providerOptions/toolPolicy`（paseo 级系统提示词不生效——seek 用自己的 sysprompt；drive 场景卡面 prompt 走用户消息，**这正是想要的**语义）。paseo 会话建立后按返回的 `modes`/`configOptions` 决定是否发 `set_config_option` 类调用；seek 两者皆空 → paseo 把 session.configure 能力过滤掉、UI 不给这个 provider 出模型选择。注意：**不要**在 paseo 里给 seek provider 配 providerOptions，否则可能触发对 seek 的设置调用（回 -32601，理论无害但没必要试）。
+- **不再丢弃的字段**：`session/new` / `session/load` 的 `mcpServers`（2026-11-21 接通，见 §2.1 表与 `docs/guide-zed.md` §5.5）。仍丢弃：`_meta._paseo.systemPrompt/providerOptions/toolPolicy`（paseo 级系统提示词不生效——seek 用自己的 sysprompt；drive 场景卡面 prompt 走用户消息，**这正是想要的**语义）。paseo 会话建立后按返回的 `modes`/`configOptions` 决定是否发 `set_config_option` 类调用；seek 两者皆空 → paseo 把 session.configure 能力过滤掉、UI 不给这个 provider 出模型选择。注意：**不要**在 paseo 里给 seek provider 配 providerOptions，否则可能触发对 seek 的设置调用（回 -32601，理论无害但没必要试）。
 
 ### 2.2 D-1（必做缺口）：`session/new` 的 cwd 必须生效
 
@@ -152,6 +152,6 @@ paseo 侧行为（asar 实证）：`initialize` 探测到 `loadSession:true` 才
 
 ## 7. 与其它 PRD 的关系
 
-- **[`feature-acp.md`](feature-acp.md)**：本卡是其续篇——backlog ⑥（per-session cwd）从"优化项"升格为 paseo 场景**必做**（§2.2）；backlog ①（request_permission 审批）与 ③（多 session）维持不动；backlog ⑦（Zed mcpServers 透传）在 paseo 场景同构存在、同样不做。
+- **[`feature-acp.md`](feature-acp.md)**：本卡是其续篇——backlog ⑥（per-session cwd）从"优化项"升格为 paseo 场景**必做**（§2.2）；backlog ①（request_permission 审批）与 ③（多 session）维持不动；backlog ⑦（Zed mcpServers 透传）**2026-11-21 已落地（卡 c_oyt6ft）**——paseo 场景同构存在，两条车道共用同一实现（`internal/acp/mcp.go` + `cmd/seek/acp_mcp.go`），见 §2.1 表。
 - **[`feature-remote-control-plane.md`](../feature-remote-control-plane.md)**：两条平行的"外部驱动 seek"路径——本卡走 **ACP/stdio**（paseo 当 ACP client，每会话一个直连子进程），控制平面走 **Frontend 端口**（`seek serve` sidecar，收发分离）。不共享代码，共享"零 daemon、直连子进程、核心 agent loop 不动"的哲学；paseo 车道落地不依赖控制平面任何部分。
 - **架构约束继承**：`internal/acp` 不引入新依赖；协议字节确定性（prefix-cache）不受影响（ACP 是外层传输，不动消息历史）；工具 schema 零改动。
