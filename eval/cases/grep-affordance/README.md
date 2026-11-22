@@ -61,40 +61,52 @@ disk (the answers are read out of the row's `final_text`).
 
 - ≥2 `grep` tool calls, ≤1 bash call that runs grep
 - `bash_before_dedicated = 0` — never shell first
-- ≤8 tool calls, ≤12 turns
+- ≤12 tool calls, ≤12 turns
 
-## Baseline (recorded 2026-11-22, `--rounds 3`, deepseek lane, `b7c1bb5`)
+## A/B (2026-11-22, `--rounds 5` each side, deepseek lane)
 
-Measured on the tree that has only `pattern` / `path` / `context_lines` /
-`fixed` / `ignore_case` / `max_matches` — exactly the "before" side of
-the A/B this case exists for. **3/3 red**, and red for the intended
-reason:
+Both sides ran the SAME `expect.json` against two binaries: `b7c1bb5`
+(before the grep extension) and the extension build.
 
-| round | total calls | grep calls | bash calls | `bash_grep_calls` | failure |
-|---|---|---|---|---|---|
-| r1 | 8 | 2 | 2 | 2 | `bash_grep_calls` >1 |
-| r2 | 9 | 2 | 6 | 6 | `total_tool_calls`, `bash_calls`, `bash_grep_calls` |
-| r3 | 9 | 4 | 4 | 4 | `total_tool_calls`, `bash_calls`, `bash_grep_calls` |
+| side | passes | `bash_grep_calls` (sum over 5) | `grep_calls` (sum) | answers correct |
+|---|---|---|---|---|
+| before (`b7c1bb5`) | **1/5** | 12 | 11 | 5/5 |
+| after (extension) | **5/5** | 2 | 18 | 5/5 |
 
-Every round reached for `bash`—`grep` for the exact-count question
-(r1 also paged `read` three times trying to make the arithmetic work by
-hand; r3 got there with four `grep` calls and still needed the shell).
-`grep_calls` was 2–4 in every round: the tool was used, just not for the
-part of the question it could not express. **Do not delete these red
-rows as failing tests**: they are the baseline, and they are why
-`record_only` is true until the grep extension lands.
+Read the middle two columns together, not separately:
 
-## Why `record_only: true`
+- `bash_grep_calls` fell 12 → 2, and the two survivors are one round's
+  single fallback — exactly the budget the bound allows.
+- `grep_calls` rose 10 → 18 because the extension spreads the work over
+  more, narrower tool calls (one `include`-filtered `files_only`, one
+  `invert`, one `count_only`) instead of one shell pipeline. That is the
+  intended shape, and it is why `max_total_tool_calls` is 12 rather than
+  the pre-extension 8: **a call-count bound calibrated before the
+  extension punished the very shape the case asks for.** The first
+  post-extension run (3/3 red, all on `total_tool_calls`) was the case
+  mis-specified, not the model regressing — the model was correct in
+  all six rounds.
+- Answers were correct on both sides in every round. This case scores
+  the ROUTE, not the answer; the answer gate is
+  [`grep-refine-not-flood`](../grep-refine-not-flood/README.md).
 
-The case is red by construction on today's tree. Gating a known-red case
-would make `eval/run.sh` exit 1 for work that has not shipped yet
-(E2 doctrine: gate what a record has calibrated, not what it has
-observed). Flip to `min_pass_rate: 0.6` in the change that adds
-`include` / `invert` / `count_only` — and delete this paragraph when you
-do, so the next reader is not told a landed case is unlanded.
+The before-side detail (3 rounds at the earlier bound) is preserved in
+`eval/results/2026-11-22-v0.12.2-*.jsonl`; the A/B rows are in
+`eval/results/2026-11-22-v0.12.4-*.jsonl`. **Do not delete the red
+before-side rows**: they are the measurement that justifies the
+extension.
+
+## Why `min_pass_rate: 0.6`
+
+5/5 on the after side is a clean record, but Q3 is answerable two ways
+(one `count_only`, or a filtered `read`) and the prompt allows either.
+0.6 = 3/5 keeps the gate live while tolerating two rounds of legitimate
+route variance. Tighten to 1.0 after a second 5/5 record if the route
+stays this stable.
 
 ## Not in a lane
 
 Deliberately absent from `eval/lane-core.txt` and `eval/lane-release.txt`
-until it goes green. A red case in a release lane would gate every
-release on work that has not landed yet.
+for one more version: promote it after a second record, so the lane
+entry is backed by two observations rather than one.
+

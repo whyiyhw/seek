@@ -81,12 +81,12 @@ func TestBash_PinsWorkingDirectoryToPolicy(t *testing.T) {
 	}
 }
 
-// TestBash_AppendsAdvisoryOnDedicatedToolPattern is the end-to-end
-// regression test for the success-path advisory mechanism. When the
-// model uses bash for something a dedicated tool does better
-// (`ls`/`cat`/`git`/etc.), the result must carry a `[hint: …]`
-// trailer so the model learns the preferred shape on the next turn.
-func TestBash_AppendsAdvisoryOnDedicatedToolPattern(t *testing.T) {
+// TestBash_AdvisoryOnlyForShippedClasses is the end-to-end regression
+// test for the success-path advisory trailer. The measured outcome
+// (hint.go's table) deleted the grep / git / list_dir / find classes, so
+// `ls` must now run SILENT, and only the two survivors (`cat`→read,
+// `cd`-prefix) may append a `[hint: …]` line.
+func TestBash_AdvisoryOnlyForShippedClasses(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only smoke")
 	}
@@ -94,18 +94,99 @@ func TestBash_AppendsAdvisoryOnDedicatedToolPattern(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[hint:") {
-		t.Errorf("advisory missing — ls(1) should suggest list_dir: %s", out)
+	if strings.Contains(out, "[hint:") {
+		t.Errorf("list_dir class was deleted 2026-11-22 — `ls` must not carry a hint: %s", out)
 	}
-	if !strings.Contains(out, "list_dir") {
-		t.Errorf("advisory should mention list_dir, got: %s", out)
+
+	out, err = run(t, yolo(t), Args{Command: "cat /etc/hostname"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "[hint:") || !strings.Contains(out, "`read` tool") {
+		t.Errorf("cat should still suggest the read tool, got: %s", out)
+	}
+}
+
+// TestBash_AdvisoryFiresOncePerSession pins the cost cap end-to-end: the
+// limiter lives on Tool, so two calls through the SAME tool share it and
+// only the first carries the trailer.
+func TestBash_AdvisoryFiresOncePerSession(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	tool := yolo(t)
+	first, err := run(t, tool, Args{Command: "cat /etc/hostname"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first, "[hint:") {
+		t.Fatalf("first cat call should carry the advisory: %s", first)
+	}
+	second, err := run(t, tool, Args{Command: "cat /etc/hostname"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(second, "[hint:") {
+		t.Errorf("second call in the same session must be silent: %s", second)
+	}
+}
+
+// TestBash_StripsRedundantCDPrefix is the end-to-end guard for
+// stripcd.go: the shell must receive the command WITHOUT the leading
+// `cd <cwd> &&`, while the header echo keeps exactly what the model
+// wrote (the transcript has to show the model's own text).
+func TestBash_StripsRedundantCDPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	dir := t.TempDir()
+	p, _ := permission.New(dir, permission.PrefYolo)
+	tool := New(p)
+
+	cmd := "cd " + dir + " && pwd"
+	out, err := run(t, tool, Args{Command: cmd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "$ "+cmd) {
+		t.Errorf("header must echo the model's original command, got: %s", out)
+	}
+	if !strings.Contains(out, "ran without the redundant `cd` prefix") {
+		t.Errorf("header must say the prefix was dropped, got: %s", out)
+	}
+	// pwd's output must still be the session cwd — i.e. the command ran
+	// somewhere, just without the cd.
+	if !strings.Contains(out, dir) {
+		t.Errorf("command output missing after strip: %s", out)
+	}
+}
+
+// TestBash_KeepsForeignCDPrefix: a cd into another directory is the
+// model deliberately changing directory and must reach the shell intact.
+func TestBash_KeepsForeignCDPrefix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX-only smoke")
+	}
+	dir := t.TempDir()
+	other := t.TempDir()
+	p, _ := permission.New(dir, permission.PrefYolo)
+	tool := New(p)
+
+	out, err := run(t, tool, Args{Command: "cd " + other + " && pwd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "ran without the redundant `cd` prefix") {
+		t.Errorf("a foreign cd must not be stripped: %s", out)
+	}
+	if !strings.Contains(out, other) {
+		t.Errorf("the command should have run inside %q: %s", other, out)
 	}
 }
 
 // TestBash_NoAdvisoryForOpaqueCommands verifies the inverse — commands
-// that don't match a dedicated-tool pattern must not pollute the
-// result with a [hint] line. echo / go vet / arbitrary scripts run
-// silently.
+// that don't match a shipped pattern must not pollute the result with a
+// [hint] line. echo / go vet / arbitrary scripts run silently.
 func TestBash_NoAdvisoryForOpaqueCommands(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX-only smoke")

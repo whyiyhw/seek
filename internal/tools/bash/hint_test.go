@@ -166,15 +166,16 @@ func TestHintGitViaBash_StandaloneVsSubword(t *testing.T) {
 	}
 }
 
-// --- bashAdvisory (success-path teaching) -----------------------------
+// --- bashAdvisory (success-path nudge) --------------------------------
+//
+// The comment block in hint.go carries the measurement that deleted four
+// of the six classes. These tests pin the SHIPPED set, so re-adding a
+// deleted class (grep / git / list_dir / find) is a visible decision that
+// has to update a test with a name saying it is gone.
 
-func TestBashAdvisory_LsSuggestsListDir(t *testing.T) {
-	t.Parallel()
-	got := bashAdvisory("ls docs/prd/")
-	if !strings.Contains(got, "list_dir") {
-		t.Errorf("expected list_dir suggestion, got: %s", got)
-	}
-}
+// unlimited is the nil limiter: every class is allowed, no per-session
+// state. Class-shape tests use it; the cap has its own tests below.
+func unlimited() *advisoryLimiter { return nil }
 
 func TestBashAdvisory_CatSuggestsRead(t *testing.T) {
 	t.Parallel()
@@ -182,9 +183,10 @@ func TestBashAdvisory_CatSuggestsRead(t *testing.T) {
 		"cat README.md",
 		"head -20 main.go",
 		"tail -100 logs/app.log",
+		"cd /repo && cat foo.go",
 	} {
 		t.Run(cmd, func(t *testing.T) {
-			got := bashAdvisory(cmd)
+			got := bashAdvisory(cmd, unlimited())
 			if !strings.Contains(got, "`read` tool") {
 				t.Errorf("expected read suggestion for %q, got: %s", cmd, got)
 			}
@@ -192,55 +194,73 @@ func TestBashAdvisory_CatSuggestsRead(t *testing.T) {
 	}
 }
 
-func TestBashAdvisory_GrepSuggestsGrepTool(t *testing.T) {
+func TestBashAdvisory_CDPrefixFlagged(t *testing.T) {
 	t.Parallel()
-	for _, cmd := range []string{
-		"grep -r foo .",
-		"rg foo",
-		"ag foo",
-	} {
-		t.Run(cmd, func(t *testing.T) {
-			got := bashAdvisory(cmd)
-			if !strings.Contains(got, "`grep` tool") {
-				t.Errorf("expected grep tool suggestion for %q, got: %s", cmd, got)
-			}
-		})
-	}
-}
-
-func TestBashAdvisory_GitSuggestsGitTool(t *testing.T) {
-	t.Parallel()
-	for _, cmd := range []string{
-		"git log --oneline",
-		"git status",
-		"cd /repo && git diff HEAD",
-	} {
-		t.Run(cmd, func(t *testing.T) {
-			got := bashAdvisory(cmd)
-			if !strings.Contains(got, "`git` tool") {
-				t.Errorf("expected git tool suggestion for %q, got: %s", cmd, got)
-			}
-		})
-	}
-}
-
-func TestBashAdvisory_FindSuggestsGrepOrListDir(t *testing.T) {
-	t.Parallel()
-	got := bashAdvisory("find . -name '*.go'")
-	if !strings.Contains(got, "`grep`") || !strings.Contains(got, "`list_dir`") {
-		t.Errorf("expected grep/list_dir suggestion, got: %s", got)
-	}
-}
-
-func TestBashAdvisory_CDPrefixAlwaysFlagged(t *testing.T) {
-	t.Parallel()
-	got := bashAdvisory("cd /repo && ls foo/")
-	// Both the ls suggestion AND the cd suggestion should fire.
-	if !strings.Contains(got, "list_dir") {
-		t.Errorf("missing list_dir for cd && ls: %s", got)
-	}
+	got := bashAdvisory("cd /repo && ls foo/", unlimited())
 	if !strings.Contains(got, "drop the `cd` prefix") {
 		t.Errorf("missing cd suggestion for cd && ls: %s", got)
+	}
+}
+
+// TestBashAdvisory_DeletedClassesStayDeleted pins the measurement's
+// outcome. Each of these classes fired thousands of times across the
+// 40-session baseline and moved the hinted behaviour by ~0pp; the
+// advisory for them is gone. If one comes back, this test fails and the
+// re-adder has to bring a new measurement with it.
+func TestBashAdvisory_DeletedClassesStayDeleted(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		"grep -rn foo .",      // was: use the grep tool        (1,447 firings)
+		"rg foo",              //   ditto                       (same class)
+		"ag foo",              //   ditto                       (same class)
+		"git log --oneline",   // was: use the git tool        (841 firings)
+		"git status",          //   ditto
+		"ls docs/prd/",        // was: use the list_dir tool   (291 firings)
+		"find . -name '*.go'", // was: use grep/list_dir     (14 firings)
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			if got := bashAdvisory(cmd, unlimited()); got != "" {
+				t.Errorf("%q must produce NO advisory (class deleted 2026-11-22); got: %s", cmd, got)
+			}
+		})
+	}
+}
+
+// TestBashAdvisory_CappedOncePerClassPerSession is the cost cap. One
+// session in the baseline fired the cd advisory 574 times; a nudge that
+// fires every call is transcript bytes on every later request.
+func TestBashAdvisory_CappedOncePerClassPerSession(t *testing.T) {
+	t.Parallel()
+	l := &advisoryLimiter{}
+
+	if got := bashAdvisory("cat a.go", l); !strings.Contains(got, "`read` tool") {
+		t.Fatalf("first read-class firing should carry the advice, got: %q", got)
+	}
+	if got := bashAdvisory("cat b.go", l); got != "" {
+		t.Errorf("second read-class firing in the same session must be silent, got: %q", got)
+	}
+
+	// A different class has its own budget.
+	if got := bashAdvisory("cd /elsewhere && ls", l); !strings.Contains(got, "drop the `cd` prefix") {
+		t.Errorf("cd class must fire independently of the read class, got: %q", got)
+	}
+	if got := bashAdvisory("cd /another && pwd", l); got != "" {
+		t.Errorf("second cd-class firing must be silent, got: %q", got)
+	}
+
+	if n := len(l.firedClasses()); n != 2 {
+		t.Errorf("firedClasses = %d, want 2 (one per class)", n)
+	}
+}
+
+// TestBashAdvisory_NilLimiterIsUncapped documents the zero-value Tool
+// path: a Tool{} built in a test has no limiter, and must not nil-panic.
+func TestBashAdvisory_NilLimiterIsUncapped(t *testing.T) {
+	t.Parallel()
+	for range 3 {
+		if got := bashAdvisory("cat a.go", nil); !strings.Contains(got, "`read` tool") {
+			t.Fatalf("nil limiter must allow every firing, got: %q", got)
+		}
 	}
 }
 
@@ -254,9 +274,10 @@ func TestBashAdvisory_NoSuggestionForOpaqueCommands(t *testing.T) {
 		"docker run alpine",
 		"./my-script.sh",
 		"echo hello",
+		"bazel build //...",
 	} {
 		t.Run(cmd, func(t *testing.T) {
-			if got := bashAdvisory(cmd); got != "" {
+			if got := bashAdvisory(cmd, unlimited()); got != "" {
 				t.Errorf("opaque command %q should produce empty advisory, got: %s", cmd, got)
 			}
 		})
@@ -265,10 +286,10 @@ func TestBashAdvisory_NoSuggestionForOpaqueCommands(t *testing.T) {
 
 func TestBashAdvisory_EmptyCommand(t *testing.T) {
 	t.Parallel()
-	if got := bashAdvisory(""); got != "" {
+	if got := bashAdvisory("", unlimited()); got != "" {
 		t.Errorf("empty command → empty advisory, got: %q", got)
 	}
-	if got := bashAdvisory("   "); got != "" {
+	if got := bashAdvisory("   ", unlimited()); got != "" {
 		t.Errorf("whitespace-only → empty advisory, got: %q", got)
 	}
 }

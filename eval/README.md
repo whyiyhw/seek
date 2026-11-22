@@ -145,7 +145,9 @@ pre-landing history by construction). Three cases added 2026-11-22
 alongside the shell-as-search metrics (`grep-affordance`,
 `parallel-fanout`, `references-trigger`) make it 34; all three are
 rows in this table from their first record, with the baseline noted in
-the history column rather than reconstructed. History columns are
+the history column rather than reconstructed. `grep-affordance` is the
+one that has already moved: 1/5 before the grep-tool extension, 5/5
+after, same bounds both sides (case README). History columns are
 computed from
 the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
@@ -177,7 +179,7 @@ point of having a gate.
 | git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
 | git-subcommand-shape | 24/25 → 9/9 (lone red 2026-08-18) | 1.0 | 3 | 1.0 | no |
 | glm-lane-contract | 1/7 → env-bimodal | env | 5 | — | **yes** |
-| grep-affordance | 0/3 — red by construction, see case README | ~0 pre-extension | 3 | — | **yes** |
+| grep-affordance | 1/5 pre-extension → 5/5 post (A/B 2026-11-22, case README) | ~0.2 → 1.0 | 5 | **0.6** | no |
 | grep-refine-not-flood | 8/11 → 7/10 | ~0.7 | 5 | **0.6** | no |
 | instruction-following | 11/11 → 10/10 | 1.0 | 3 | 1.0 | no |
 | mcp-semble-routing-a1-mixed | 10/10 | 1.0 | 3 | 1.0 | no |
@@ -207,7 +209,7 @@ Gate semantics at the chosen round counts: `1.0` = 3/3 (or 5/5), zero
 tolerance; `0.6 @ 3` = 2/3 (tolerate 1 red); `0.6 @ 5` = 3/5 (tolerate
 2); `0.8 @ 5` = 4/5 (tolerate 1). The `expect.json` files carry exactly
 these values (`min_pass_rate` written only where ≠ 1.0; `record_only:
-true` on the six marked rows); expect.json remains the per-case
+true` on the five marked rows); expect.json remains the per-case
 judgement authority — this table is the calibration record, not a
 second source the runner reads.
 

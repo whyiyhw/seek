@@ -1,17 +1,25 @@
 // hint.go — context-aware error annotations for bash commands denied
-// in plan-analyze. The base "permission denied" message from the
-// permission package is generic; this layer inspects the actual
-// command string and points the model at the specific fix.
+// in plan-analyze, plus the success-path advisory trailer.
+//
+// Two mechanisms live here and they are NOT the same thing:
+//
+//  1. planAnalyzeBashHint — fires on a DENIAL. The command did not run,
+//     so the model MUST do something different. Load-bearing: without it
+//     a denied `git log` retries the same shape, or does not retry at
+//     all.
+//
+//  2. bashAdvisory — fires on SUCCESS. The command worked; the hint is a
+//     nudge about a better future shape. Measured 2026-11-22 on 40
+//     sessions (6,474 tool calls) and it does not work: see the
+//     per-class table on bashAdvisory below. Four of its six classes are
+//     now gone; what remains is capped to one firing per class per
+//     session.
 //
 // Why here and not in permission.go: the hint logic is bash-specific
 // (it knows about `cd && X`, git-via-bash, `go test`, shell metachars
 // — none of which the permission package should care about). The
 // permission package returns a vanilla ErrDenied; bash.Execute wraps
 // it with this hint at the tool boundary.
-//
-// Triggers ONLY for plan-analyze denials. Other workflows (Ask/Yolo
-// with --no-yolo, outside-cwd, etc.) have their own deny reasons
-// where these hints don't apply.
 
 package bash
 
@@ -75,9 +83,9 @@ func hintCDPrefix(lower string) bool {
 }
 
 // hintGitViaBash matches `git` as the first command token, or as the
-// first token of a sub-command after a shell sequencing operator. The
-// metachar separately makes the call illegal in plan-analyze, but the
-// hint about using the git tool is the more useful nudge for the
+// first token of a sub-command after a shell sequencing operator.
+// The metachar separately makes the call illegal in plan-analyze, but
+// the hint about using the git tool is the more useful nudge for the
 // model — it converts a habit (`bash("git log")`) into a tool choice.
 func hintGitViaBash(cmd string) bool {
 	fields := strings.Fields(cmd)
@@ -112,32 +120,56 @@ func hintGoTest(lower string) bool {
 	return false
 }
 
-// bashAdvisory is the **success-path** counterpart to
-// planAnalyzeBashHint. The hint above fires only when a command is
-// DENIED in plan-analyze — but in Ask mode the user often approves
-// `bash("ls foo")` / `bash("cd /x && git log")` / etc., the command
-// runs, and the model never learns that a dedicated tool would have
-// been more efficient (no quoting, no shell escaping, structured
-// output).
+// --- success-path advisory -------------------------------------------
+
+// advisory classes still shipped. Each is a phrase the model sees, and
+// firing one costs transcript bytes on every later request (the result
+// is history). The set is deliberately small: a nudge that does not
+// change behaviour is pure cost.
 //
-// bashAdvisory inspects the command at success-time and returns a
-// short suggestion when a clear "should have used <tool>" pattern
-// matches. bash.Execute appends it to the result as a [hint: …]
-// trailer; the model reads it on the next turn and (gradually)
-// internalises the right tool. Empty string = no advisory.
+// MEASURED 2026-11-22 (40 sessions, 6,474 tool calls, ~/.seek/sessions/
+// 202611*.jsonl). Two different controls, because "did the next call
+// comply" alone is confounded by task locality:
 //
-// Detected patterns:
-//   - `ls`  → use list_dir tool
-//   - `cat` / `head` / `tail` → use read tool
-//   - `grep` → use grep tool
-//   - `find` → use grep / list_dir
-//   - `git`  → use git tool
-//   - `cd ` prefix → drop it (orthogonal; combined with above)
+//	A. next-tool-call compliance (within 2 calls) vs the no-hint base rate
+//	B. within-session before/after: hinted behaviour over the 5 tool
+//	   calls BEFORE each firing vs the 5 AFTER (same stretch of work)
 //
-// The advisory fires regardless of workflow/pref since the model's
-// habit is workflow-independent. Yolo-mode bash users see it too;
-// the noise is bounded (single line at result tail).
-func bashAdvisory(command string) string {
+//	class      fired   A: after hint / base   B: before → after
+//	grep        1447      0.6% /  —             1.0% → 0.3%  (-0.7pp)
+//	git          841      1.3% /  —             0.7% → 0.5%  (-0.2pp)
+//	list_dir     291      0.0% /  —             0.7% → 0.1%  (-0.6pp)
+//	read         255     13.3% / 12.7%          7.6% → 7.4%  (-0.2pp)
+//	find          14      0.0% /  —              — (too few)
+//	cd          1023     18.6% /  —            19.4% → 20.8% (+1.4pp)
+//
+// `read` is the tell: it "complies" at 13.3% — but the base rate of the
+// next call being `read` when NO hint fired is 12.7%, so the hint moves
+// the needle by 0.6pp. And control B is flat-negative for every class
+// including read. The `cd` +1.4pp is inside the noise of a 5-call window.
+//
+// Conclusion: the success-path advisory does not teach. grep/git/
+// list_dir/find are deleted outright — 2,593 of 3,871 firings (67%) for
+// no measurable benefit, and the fingerprint of the whole mechanism is
+// 410,967 bytes = 3.1% of all tool-result bytes, re-sent on every
+// subsequent request. The two survivors (read, cd) are kept because the
+// deletion of an entire teaching surface on one measurement is a bigger
+// call than this change should make, and because `cd` was the ONLY class
+// whose within-session delta was positive; both are now capped to one
+// firing per class per session (one session measured 574 cd firings).
+// If a future record still shows no effect for them, delete those too.
+//
+// The denial path above is untouched: a denied command MUST change, so
+// its hint has a forced audience. That distinction — denial hint is
+// load-bearing, success advisory is a nudge — is the whole lesson.
+
+// bashAdvisory is the success-path nudge. Returns a phrase when the
+// command hit one of the two remaining classes AND that class has not
+// fired yet in this session; empty otherwise.
+//
+// limit may be nil (a Tool built without New, e.g. a bare Tool{} in a
+// test): the guards still fire, just without the once-per-session cap.
+func bashAdvisory(command string, limit *advisoryLimiter) string {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
 		return ""
@@ -151,22 +183,18 @@ func bashAdvisory(command string) string {
 
 	// Pick the "effective" first token — if the command starts with
 	// `cd <path> &&`, the meaningful command comes after.
-	target := firstTokenAfterCD(fields)
-	switch target {
-	case "ls":
-		advisories = append(advisories, "for listing files use the `list_dir` tool — it handles globs natively and avoids shell quoting / metachar issues")
+	switch target := firstTokenAfterCD(fields); target {
 	case "cat", "head", "tail":
-		advisories = append(advisories, "for reading file contents use the `read` tool — paginated output with line numbers, no shell quoting needed")
-	case "grep", "rg", "ag":
-		advisories = append(advisories, "for searching use the `grep` tool — preserves match metadata in the transcript, supports max_matches cap")
-	case "find":
-		advisories = append(advisories, "for finding files use the `grep` or `list_dir` tool — `find` via bash is fragile to escape correctly")
-	case "git":
-		advisories = append(advisories, "for git operations use the `git` tool — subcommand-whitelisted and plan-mode allowed (works inside `/plan` too)")
+		if limit.allow(advisoryRead) {
+			advisories = append(advisories, "for reading file contents use the `read` tool — paginated output with line numbers, no shell quoting needed")
+		}
 	}
 
-	// Orthogonal: cd-prefix waste.
-	if hintCDPrefix(strings.ToLower(trimmed)) {
+	// Orthogonal: cd-prefix waste. Only meaningful when the tool could
+	// NOT strip the prefix automatically (Execute strips `cd <session
+	// cwd> &&` before running, so the hint is reserved for the cds we
+	// deliberately left alone).
+	if hintCDPrefix(strings.ToLower(trimmed)) && limit.allow(advisoryCD) {
 		advisories = append(advisories, "drop the `cd` prefix — seek's bash tool already runs from the project root")
 	}
 
