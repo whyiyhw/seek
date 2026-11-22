@@ -2619,6 +2619,16 @@ type acpBackend struct {
 	// MCP children are bound to it, so a signalled process reaps them even
 	// if the deferred close is skipped. nil in tests.
 	runCtx context.Context
+	// ctxMeter emits the lane's context-window usage_update frames
+	// (c_uzlczr) and remembers the last turn's severity so the alert
+	// frame fires only on a threshold CROSSING, not on every turn above
+	// the line. Its alerts switch comes from SEEK_ACP_CTX_ALERT; the ACP
+	// lane consumes no flags, and that is a startup posture, not a
+	// per-turn knob. Only the prompt goroutine and the session/load path
+	// touch it — turns are serial on this lane (dispatch rejects a second
+	// prompt while one is registered; load is rejected mid-turn), so no
+	// lock.
+	ctxMeter acpCtxMeter
 	// ask is the ACP approval lane (acp_approval.go, P0-2): nil on the
 	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
 	// scopes it per-turn so a permission request dies with its turn.
@@ -2962,6 +2972,11 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	b.installed = st
 	b.sessionID = originalID
 	b.mu.Unlock()
+	// The resumed conversation is a different session object: forget the
+	// previous one's severity so its first over-threshold turn fires its
+	// own alert (and so a load never leaves a stale "already warned"
+	// state behind).
+	b.ctxMeter.reset()
 
 	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
 		sendU(u)
@@ -3485,7 +3500,19 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 		// Per-turn, not per-event: the transcript is a whole-file
 		// atomic rewrite, so saving on every delta would rewrite the
 		// file hundreds of times a turn.
-		if _, ok := ev.(agent.TurnEnd); ok {
+		if e, ok := ev.(agent.TurnEnd); ok {
+			// Context-window frame (c_uzlczr): one usage_update per
+			// completed model turn, carrying used/size in the ACP shape
+			// plus seek's percent/severity (and the threshold marker at
+			// the warn point). Same source as the TUI/Web meters — the
+			// model's window from budget and THIS turn's prompt+
+			// completion. Sent before the save so a client that reads
+			// the frame and immediately asks for more sees the meter
+			// move first; both are on the same goroutine, so the wire
+			// order is deterministic.
+			for _, u := range b.ctxMeter.update(p.SessionID, b.ag.Model(), e.Usage) {
+				sendU(u)
+			}
 			b.saveTurn()
 		}
 	}
@@ -4021,6 +4048,11 @@ func runACP(ctx context.Context, o acpOptions) error {
 		},
 		sess:  o.sess,
 		store: o.store,
+		// Context-window alert switch (c_uzlczr). Resolved here, once,
+		// from env — flags cannot reach this lane (flag.Parse stops at the
+		// "acp" positional), same reason SEEK_ACP_YOLO is read as env a
+		// few hundred lines above.
+		ctxMeter: acpCtxMeter{alerts: acp.CtxAlertFromEnv(os.Getenv)},
 	}
 	// Session end = transport end (stdin EOF, or the process ctx being
 	// cancelled). Client-injected MCP children are reaped HERE, not at
