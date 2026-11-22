@@ -2626,7 +2626,18 @@ type acpBackend struct {
 	// sessions (a turn in flight queues the next session's turn), which
 	// is the same "between turns" boundary the transport already
 	// enforces for set_config_option / set_mode / load.
-	mu sync.Mutex // guards sessions + installed + turnSlot (short sections only)
+	mu sync.Mutex // guards sessions + installed + turnSlot + the live session slot's field accesses (short sections only)
+	// The slot invariant (why mu reaches into b.sess, which the turn
+	// side already serialises via the gate): session/new is dispatched
+	// INLINE in the read loop without the turn gate, so its reads of
+	// b.sess — and the first branch's CWD write — are the one slot
+	// traffic the gate never orders. Every cross-gate slot access
+	// (NewSession's block, saveTurn's writes, activate's whole-struct
+	// write, deactivate's pull-back read) therefore takes mu on BOTH
+	// sides; gate-held writers still take it because a mutex only
+	// excludes when everyone participates. LoadSession needs no mu:
+	// the transport rejects it while any prompt is in flight and the
+	// read loop is serial, so it overlaps neither a turn nor a new.
 	// sessions maps ACP sessionId (= durable transcript id) → state.
 	// Entries live for the process lifetime: ACP v1 has no
 	// session/delete (seek deliberately does not advertise it), so
@@ -2782,6 +2793,19 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 		workflow:  permission.WorkflowNone,
 		menuValue: b.menuValue(),
 	}
+	// The session-slot block runs under mu, together with the table
+	// insert: session/new is served inline in the read loop WITHOUT the
+	// turn gate (opening a second panel must not queue behind the first
+	// conversation's turn), so these reads — and the first branch's CWD
+	// write — can interleave with the turn goroutine's slot writes
+	// (saveTurn per TurnEnd, activate's whole-struct write on switch).
+	// The gate only orders turn-side traffic; mu is the one edge both
+	// sides share. A construction-time TEMPLATE snapshot would also be
+	// race-free but silently changes semantics: the fresh branch
+	// inherits the INSTALLED session's lane (a model switch in panel A
+	// carries into panel B), which a startup-time snapshot would revert
+	// to the launch lane.
+	b.mu.Lock()
 	if b.sess != nil {
 		if first {
 			// Today's rule for the one live session: keep the startup
@@ -2817,7 +2841,6 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 		// past the "acp" positional).
 		st.id = anchor.Name
 	}
-	b.mu.Lock()
 	if b.sessions == nil {
 		b.sessions = make(map[string]*acpSession)
 	}
@@ -3535,7 +3558,11 @@ func (b *acpBackend) activate(st *acpSession) error {
 		if err := b.applyLane(st.sess.Model); err != nil {
 			return fmt.Errorf("activate session %s: %w", st.id, err)
 		}
+		// mu for the slot write: session/new may be reading the slot
+		// from the read loop while this switch runs under the gate.
+		b.mu.Lock()
 		*b.sess = *st.sess
+		b.mu.Unlock()
 		history = st.sess.Messages
 	}
 	// Reset ALWAYS runs on a switch — a nil sess (--no-save) means the
@@ -3554,12 +3581,16 @@ func (b *acpBackend) activate(st *acpSession) error {
 // the durable session object (messages/model landed there via saveTurn's
 // slot write) plus the two permission axes a turn can move (the plan
 // tool flips workflow inside a turn; allow_always grows the grants).
-// Runs with the turn gate still held, so the read is race-free by
-// construction. modeLabel needs no pull-back: only SetMode writes it,
-// and SetMode records st directly.
+// Runs with the turn gate still held; the slot read is ADDITIONALLY
+// mu-guarded because the gate is no edge at all for the read loop —
+// session/new touches the slot mid-turn without taking the gate.
+// modeLabel needs no pull-back: only SetMode writes it, and SetMode
+// records st directly.
 func (b *acpBackend) deactivate(st *acpSession) {
 	if st.sess != nil && b.sess != nil {
+		b.mu.Lock()
 		*st.sess = *b.sess
+		b.mu.Unlock()
 	}
 	st.workflow = b.policy.Workflow()
 	st.grants = b.policy.AlwaysAllowKinds()
@@ -3589,14 +3620,20 @@ func (b *acpBackend) applyLane(model string) error {
 // saveTurn snapshots the live session to disk. Best-effort: a failed
 // write is a warning, never a turn failure — the answer already went to
 // the client, and losing a transcript must not lose the conversation.
-// No-op under --no-save (either pointer is nil there).
+// No-op under --no-save (either pointer is nil there). The slot writes
+// are mu-guarded because session/new reads the slot from the read loop
+// without the turn gate; the disk write runs on a private copy OUTSIDE
+// mu so the lock never spans I/O.
 func (b *acpBackend) saveTurn() {
 	if b.sess == nil || b.store == nil {
 		return
 	}
+	b.mu.Lock()
 	b.sess.Messages = b.ag.Messages()
 	b.sess.Model = b.ag.Model()
-	if err := b.store.Save(b.sess); err != nil {
+	c := *b.sess
+	b.mu.Unlock()
+	if err := b.store.Save(&c); err != nil {
 		fmt.Fprintf(os.Stderr, "acp: warning: session save failed: %v\n", err)
 	}
 }

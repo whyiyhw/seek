@@ -409,6 +409,115 @@ func TestACPBackend_MultiSession_QueuedPromptCancelsCleanly(t *testing.T) {
 	<-gate // release for the cleanup chdir-back
 }
 
+// ② the data-race half the round-1 suite missed: session/new is served
+// INLINE in the read loop by design (a client opening a second panel
+// while another conversation thinks must not queue behind that turn),
+// so NewSession reads the shared session slot with neither the turn
+// gate nor — before the mu fix — any lock, while the turn goroutine
+// writes the same slot (activate's whole-struct write on switch,
+// saveTurn's field writes per TurnEnd, deactivate's pull-back read).
+// That is a Go memory-model data race — a torn string header on Model
+// is real possible damage — and it was invisible to the round-1 tests
+// because every one of them called session/new while idle, so the
+// accesses were ordered by plain program order. -race's vector clocks
+// don't need wall-clock overlap: with no happens-before edge between
+// the two goroutines' slot accesses, the pair is reported however far
+// apart in time it executes. The turn goroutine here cycles
+// activate/saveTurn/deactivate under the gate while the test goroutine
+// mints sessions as fast as it can.
+func TestACPBackend_MultiSession_NewDuringTurnFreshBranchNoRace(t *testing.T) {
+	b := multiBackend(t, multiSSE(t).URL)
+	dirA, dirB, dirC := multiDir(t), multiDir(t), multiDir(t)
+	resA, _ := b.NewSession(acp.NewSessionParams{Cwd: dirA})
+	resB, _ := b.NewSession(acp.NewSessionParams{Cwd: dirB})
+	stB := b.sessions[resB.SessionID] // captured before concurrency starts
+
+	done := make(chan struct{})
+	go func() {
+		// The turn goroutine: holds the gate (a real turn in flight),
+		// then cycles the three slot-touching phases of a switching
+		// turn. activate on an already-installed entry re-runs the
+		// anchor/lane machinery — harmless, and it keeps the slot write
+		// in the loop.
+		defer close(done)
+		gate := b.turnGate()
+		gate <- struct{}{}
+		defer func() { <-gate }()
+		for i := 0; i < 200; i++ {
+			if err := b.activate(stB); err != nil {
+				t.Errorf("activate: %v", err)
+				return
+			}
+			b.saveTurn()
+			b.deactivate(stB)
+		}
+	}()
+	defer func() { <-done }() // join on every exit path (done is closed)
+	// The read loop's session/new: mints fresh sessions (the template
+	// reads in the fresh branch) until the turn goroutine finishes. The
+	// cap only bounds a slow-disk run: -race needs no wall-clock
+	// overlap, one unordered pair per side suffices.
+	minted := 0
+	for minted < 5000 {
+		select {
+		case <-done:
+		default:
+			if _, err := b.NewSession(acp.NewSessionParams{Cwd: dirC}); err != nil {
+				t.Fatal(err)
+			}
+			minted++
+			continue
+		}
+		break
+	}
+	if minted == 0 {
+		t.Fatal("session/new never ran alongside the turn's slot writes")
+	}
+	// Sanity: the crossing left both original sessions intact.
+	if resA.SessionID == "" || b.sessions[resB.SessionID] != stB {
+		t.Fatal("the original session entries were disturbed by the crossing")
+	}
+}
+
+// The first-branch sibling of the race above: a turn running with NO
+// session table yet (the prompt-falls-back-to-startup shape — the
+// acp-smoke-test "smoke" probe prompts without a session/new) while the
+// FIRST session/new arrives. The first branch WRITES the live slot (the
+// CWD anchor) and copies the whole struct — against the turn's saveTurn
+// writes. Same mu discipline, same -race verdict.
+func TestACPBackend_MultiSession_NewDuringTurnFirstBranchNoRace(t *testing.T) {
+	b := multiBackend(t, multiSSE(t).URL)
+	dir := multiDir(t)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gate := b.turnGate()
+		gate <- struct{}{}
+		defer func() { <-gate }()
+		for i := 0; i < 200; i++ {
+			b.saveTurn() // the turn goroutine's slot writes
+		}
+	}()
+	defer func() { <-done }() // join on every exit path (done is closed)
+	res, err := b.NewSession(acp.NewSessionParams{Cwd: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-done // ordered join: the assertions below read post-turn state
+	// First-branch semantics survive the fix: the startup transcript's
+	// id is the session id and the entry is installed.
+	if res.SessionID != b.sess.ID {
+		t.Fatalf("first session id = %q, want the startup transcript id %q", res.SessionID, b.sess.ID)
+	}
+	b.mu.Lock()
+	installed := b.installed
+	b.mu.Unlock()
+	if installed == nil || installed.id != res.SessionID {
+		t.Fatalf("installed = %+v, want the first session", installed)
+	}
+}
+
 // ④ the resource surface: sessions live for the process lifetime BY
 // DESIGN (ACP v1 has no session/delete; seek does not advertise one),
 // so "session end" is the process ending — what must NOT leak is
