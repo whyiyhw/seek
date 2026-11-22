@@ -30,6 +30,9 @@ v0.12.3 — **Zed 面成形**的一版：feature-acp 在册缺口全清（backlo
 
 ## 已进 main、未部署
 - c_cv5dge：docs 账：budget.json 的 docs/prd/archive 线 653500→728500 重锚（actual 662240 +10%）——补 3d6f4895 归档 feature-deepseek-app-api.md（+46948B）时漏做的同 change 调线 + 活 PRD 在库加深（feature-acp 等）；摘要化否决（v0/v1 承载活引用）；上调已经人拍板（2026-11-22 凌晨，批），随合并生效
+- c_lnsdvu：seek web：/bind 项目候选可点选（project/list ∪ serve.projects → 点行发 /bind <路径>，零新 method）
 
 ## 未发版（分支 drive/c_qjaksw 在途）
 - c_qjaksw：**subtraction**——退役 fim_complete 工具链。删 `internal/tools/fimcomplete/`、`pkg/deepseek` FIM client（fim.go / fim_test.go / endpointFIM）、sysprompt 工具文档行、D8 deepseekOnly 表项（think 保留独扛过滤测试）、benchmark FIM 指标（FIMMinCalls 与 fim 比率；`fim-patch` 任务保留、prompt 去 fim_complete 指引）、i18n provider banner 的 FIM 字样；文档同步（dual-model / comparison / guide-architecture / book ch5+ch14 / pitfalls-triage #629 标注已退役 / feature-orchestration D8 / examples 两页 / 双 README）。依据：实测 FIM 调用比率 0%/11%（`docs/pitfalls/deepseek-api/fim-usage-ratio-is-inherently-low-—-model-prefers-edit-write-over-fim-complete.md`）——模型不用，快路径名存实亡，删净比养着便宜。
+- c_6xktw4：web 对齐 dsh·统计趋势（stats/trend 聚合 + 手绘 SVG 折线/悬停/窗口切换 + 侧栏 per-session cost 列）
+- c_lnsdvu：web 端 /bind 项目候选点选（行为变更）。顶栏 `/bind` 与 `/projects` 两钮从「预填 `/bind ` 等手补路径 / 直发 `/projects` 文本回复」改为开项目点选弹层——复用 `/`、`@` 同一个 #menu 候选弹层与同一条 pick 路径：候选 = `/rpc project/list` 的 root ∪ `/rpc settings/get` 的 projects（config `serve.projects` 配了但 seek 尚未打开过的目录），clean 后绝对路径去重；行显 basename（同名补父目录消歧）+ 绝对路径 + N 个会话/未开过，当前绑定行标「← 当前」；点行/Enter = 发送同款 `/bind <root>` 指令文本（已绑定态也合法且总是重置会话，统一走 /bind 不引 /switch 分叉），弹层头行固定告知「点选会重置当前会话（/bind 语义）；路径也可手打」；空态/取数失败各一行提示不静默。**零新 RPC method、零写面**；`/projects` 聊天文本回复字节不变（手打仍可看）；点选不预检目录存在性——已移动/删除的 root 点了拿 Router「绑定失败：目录不存在」应答如实透传。页面源 +6.2KB；验收 = 页面钉子显式改写 + 沙盒 E2E 双脚本（`scripts/web-bindpick-manual.sh` + `-headless.mjs`，curl 字节钉 + 无头七景）全绿。fs/list 类任意目录下钻不做（新只读 method 另开卡过 inspect-rpc 纪律）。
