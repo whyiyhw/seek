@@ -364,6 +364,19 @@
   #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
                   text-overflow: ellipsis; white-space: nowrap; }
   #menu .mi .sid { color: var(--seek-fg-dim); font-size: 12px; margin-left: auto; }
+  /* ---- /bind 目录浏览器层头（c_heffj3）：路径 + ↑ 上一级 + 选这个目录 + 过滤框；
+     行复用上面的 .mi 样式（渲染进 .dirrows 容器）。---- */
+  #menu .dirhead { padding: 8px 12px 6px; border-bottom: 1px solid var(--seek-line);
+                   display: flex; flex-direction: column; gap: 6px; }
+  #menu .dirtop { display: flex; gap: 8px; align-items: center; }
+  #menu .dirtop .dirpath { flex: 1; min-width: 0; overflow: hidden;
+                           text-overflow: ellipsis; white-space: nowrap;
+                           color: var(--seek-fg-dim); font-size: 12px; }
+  #menu .dirtop button { flex: none; padding: 3px 10px; font-size: 12px; }
+  #menu .dirfilter { width: 100%; box-sizing: border-box; padding: 4px 8px;
+                     border: 1px solid var(--seek-line); border-radius: 6px;
+                     background: var(--seek-inset); color: var(--seek-fg); font-size: 12px; }
+  #menu .dirfilter:focus { border-color: var(--seek-line-focus); outline: none; }
   /* 弹层头行（c_lnsdvu 项目点选候源专用）：固定告知文案，不是可点行 */
   #menu .mh { padding: 6px 12px; color: var(--seek-fg-dim); font-size: 12px;
               line-height: 1.5; border-bottom: 1px solid var(--seek-line); }
@@ -1687,13 +1700,18 @@ function closeMenu() {
   menu.replaceChildren();
   menuItems = [];
   menuHl = -1;
+  dirMode = null;     // 目录模式随层一起关（c_heffj3）
   bindOpen = false;   // 点选候源随弹层一起关（含在途拉取落地时的补渲自查）
   menuHead = '';
 }
 
 function renderMenu() {
-  menu.replaceChildren();
-  if (menuHead) {                     // 头行是告知文案，不是可点行、不占高亮序
+  // 目录模式（c_heffj3）：层头与行容器分离——层头不随行重绘整体重建，
+  // 否则 ↑↓ 一次就把过滤框的焦点打飞；这里只清行容器，普通模式照旧
+  //（c_lnsdvu 的告知头行同理：只在整层重建时进，不是可点行）。
+  const scope = menu.querySelector('.dirrows') || menu;
+  scope.replaceChildren();
+  if (scope === menu && menuHead) {    // 头行是告知文案，不是可点行、不占高亮序
     const head = document.createElement('div');
     head.className = 'mh';
     head.textContent = menuHead;
@@ -1713,7 +1731,7 @@ function renderMenu() {
     }
     // mousedown 而非 click：click 前 textarea 会先 blur 丢掉弹层局部态。
     row.addEventListener('mousedown', ev => { ev.preventDefault(); pick(i); });
-    menu.appendChild(row);
+    scope.appendChild(row);
   });
 }
 
@@ -1721,7 +1739,7 @@ function moveHl(dir) {
   if (!menuItems.length) return;
   menuHl = (menuHl + dir + menuItems.length) % menuItems.length;
   renderMenu();
-  const hl = menu.querySelectorAll('.mi')[menuHl];   // 头行不是 .mi：按类取免错位
+  const hl = menu.querySelectorAll('.mi')[menuHl];   // 头行/目录层头都不是 .mi：按类取免错位
   if (hl && hl.scrollIntoView) hl.scrollIntoView({ block: 'nearest' });
 }
 
@@ -1815,6 +1833,175 @@ function applyAt(sid) {
   sendText('/resume ' + sid, false);
 }
 
+// ---- /bind 目录浏览器（c_heffj3：fs/list 只读口 + 逐级下钻）----
+// '/bind ' 参数期弹出的入口（片 1 c_lnsdvu 的候选行落同一上下文、插在
+// 本入口之前——两卡在 bindArgHits 的返回数组处合并）。目录模式复用
+// 同一个 #menu 弹层与 ↑↓/Enter/Esc/Tab 导航：层头（路径 + ↑ 上一级 +
+// 选这个目录 + 过滤框）是 .dirhead，行渲染进 .dirrows 仍走
+// menuItems/pick 机制；不新增任何全局键盘监听（过滤框的导航键是
+// 元素级监听，与输入框 keydown 同一套语义）。
+let dirMode = null;   // {path, parent, dirs, filter, err, pending, el}
+let dirSeq = 0;       // 异步竞态闸：只认最后一次 loadDir
+
+function bindArgHits() {
+  const v = input.value;
+  if (!/^\/bind\s/.test(v)) return null;
+  return [{
+    label: '📁 浏览目录…',
+    desc: '下钻可浏览根内的任意目录后绑定',
+    apply: () => openDirPicker(),
+  }];
+}
+
+function openDirPicker() {
+  dirMode = { path: '', parent: '', dirs: [], filter: '', err: '', pending: false, el: null };
+  showDirLayer();
+  loadDir('');
+}
+
+// 层骨架（幂等）：层头 + 行容器。pick() 会先 closeMenu 再 apply，行
+// 点击的 enterDir 要从这里重建。
+function showDirLayer() {
+  if (!menu.querySelector('.dirhead')) {
+    menu.replaceChildren();
+    menu.appendChild(buildDirHead());
+    const rows = document.createElement('div');
+    rows.className = 'dirrows';
+    menu.appendChild(rows);
+  }
+  menu.hidden = false;
+}
+
+function buildDirHead() {
+  const h = document.createElement('div');
+  h.className = 'dirhead';
+  const top = document.createElement('div');
+  top.className = 'dirtop';
+  const p = document.createElement('span');
+  p.className = 'dirpath';
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.textContent = '↑ 上一级';
+  up.title = '去父目录（在可浏览根上时不可再上）';
+  up.addEventListener('click', () => { if (dirMode && dirMode.parent) loadDir(dirMode.parent); });
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.textContent = '选这个目录';
+  pickBtn.title = '绑定当前目录（/bind，会话重置）';
+  pickBtn.addEventListener('click', () => {
+    if (!dirMode || !dirMode.path) return;
+    const path = dirMode.path;
+    closeMenu();
+    input.value = '';               // 草稿里的 '/bind ' 已被目录选择取代
+    menuCtx = '';                   // 清了草稿就要同步作废 ctx 闸：否则同款
+                                     // '/bind ' 再打一次会被「ctx 未变」误判
+                                     // 成弹层已开（closeMenu 特意不重置它，
+                                     // 是为 Esc 后 keyup 不复弹——两难在这拆）
+    grow();
+    sendText('/bind ' + path, false);
+  });
+  top.append(p, up, pickBtn);
+  const filter = document.createElement('input');
+  filter.type = 'search';
+  filter.className = 'dirfilter';
+  filter.placeholder = '目录名过滤';
+  filter.setAttribute('aria-label', '目录名过滤');
+  filter.addEventListener('input', () => {
+    if (!dirMode) return;
+    dirMode.filter = filter.value;
+    dirApplyFilter();
+  });
+  filter.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') { ev.preventDefault(); closeMenu(); return; }
+    if (menu.hidden || !menuItems.length) return;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); moveHl(1); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); moveHl(-1); }
+    else if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing)) {
+      ev.preventDefault();
+      pick(menuHl);
+    }
+  });
+  h.append(top, filter);
+  dirMode.el = { path: p, up, pick: pickBtn, filter };
+  return h;
+}
+
+function enterDir(path) {
+  if (!dirMode) dirMode = { path: '', parent: '', dirs: [], filter: '', err: '', pending: false, el: null };
+  showDirLayer();
+  loadDir(path);
+}
+
+async function loadDir(path) {
+  const seq = ++dirSeq;
+  const dm = dirMode;
+  if (!dm) return;
+  dm.pending = true;
+  dm.err = '';
+  renderDirState();
+  try {
+    const r = await rpc('fs/list', { path });
+    if (!dirMode || dirMode !== dm || seq !== dirSeq) return;   // 被更新的导航/关层取代
+    dm.pending = false;
+    dm.path = r.path || path;
+    dm.parent = r.parent || '';
+    dm.dirs = (r.entries || []).filter(e => e.is_dir);
+  } catch (e) {
+    if (!dirMode || dirMode !== dm || seq !== dirSeq) return;
+    dm.pending = false;
+    dm.err = e.message || String(e);
+  }
+  renderDirState();
+}
+
+function renderDirState() {
+  const dm = dirMode;
+  if (!dm || !dm.el) return;
+  dm.el.path.textContent = leftEllipsis(dm.path || '…', 64);
+  dm.el.path.title = dm.path || '';
+  dm.el.up.disabled = !dm.parent;
+  dm.el.pick.disabled = !dm.path;
+  dirApplyFilter();
+}
+
+// 失败（-32602 根外 / 目录消失等）在弹层内一行提示：不外抛、不白屏。
+function dirApplyFilter() {
+  const dm = dirMode;
+  if (!dm) return;
+  if (dm.pending) {
+    setDirRows([{ label: '（读取中…）', desc: '', apply: () => {} }]);
+    return;
+  }
+  if (dm.err) {
+    setDirRows([{ label: '（' + dm.err + '）', desc: 'Esc 关闭', apply: () => {} }]);
+    return;
+  }
+  const q = (dm.filter || '').toLowerCase();
+  const hits = dm.dirs.filter(d => !q || d.name.toLowerCase().includes(q));
+  if (!hits.length) {
+    setDirRows([{ label: dm.filter ? '（没有匹配的子目录）' : '（没有子目录）',
+                  desc: 'Esc 关闭', apply: () => {} }]);
+    return;
+  }
+  setDirRows(hits.map(d => ({
+    label: '📁 ' + d.name,
+    desc: '',
+    apply: () => enterDir(d.path),
+  })));
+}
+
+function setDirRows(items) {
+  menuItems = items;
+  menuHl = 0;
+  renderMenu();
+  menu.hidden = false;
+}
+
+// 层头路径过长从左侧省略：保尾部（目录名一端信息密度最高）。
+function leftEllipsis(s, max) {
+  return s.length > max ? '…' + s.slice(s.length - max) : s;
+}
+
 // ---- 项目点选候源（c_lnsdvu）----
 // #cmd-bind / #cmd-projects 点按开出，与 '/'、'@' 同一个 #menu、同一条
 // pick 路径。候选 = project/list 的 root（W4.3，带会话数）∪ settings/get
@@ -1896,17 +2083,20 @@ function baseOf(root) {
 function ctxNow() {
   if (bindOpen) return 'bind';
   if (slashHits()) return 'slash|' + input.value;
+  if (bindArgHits()) return 'bind|' + input.value;   // '/bind ' 参数期（c_heffj3）
   const at = atToken();
   return at ? 'at|' + at.start + '|' + at.query : '';
 }
 
 function updateMenu() {
+  if (dirMode) return;   // 目录模式独占弹层：'/' '@' 触发不抢；Esc/点别处照旧关
   let items = null;
   if (bindOpen) {
     items = bindHits();
     if (items === null) return;   // 候选在途：不动现状，拉取落地时补渲
   }
   if (items === null) items = slashHits();
+  if (items === null) items = bindArgHits();   // '/bind ' 参数期：目录浏览入口（c_heffj3）
   if (items === null) items = atToken() ? atHits() : null;
   const ctx = items ? ctxNow() : '';
   if (ctx === menuCtx) return;
@@ -1925,7 +2115,11 @@ function updateMenu() {
 input.addEventListener('input', () => { grow(); bindOpen = false; updateMenu(); });
 input.addEventListener('keyup', () => updateMenu());
 input.addEventListener('click', () => updateMenu());
-input.addEventListener('blur', () => setTimeout(closeMenu, 0));  // 点别处才关
+input.addEventListener('blur', ev => {
+  // 焦点移进弹层内（目录过滤框/层头按钮，c_heffj3）不关层；点别处的旧语义不变
+  if (ev.relatedTarget && menu.contains(ev.relatedTarget)) return;
+  setTimeout(closeMenu, 0);
+});
 
 input.addEventListener('keydown', ev => {
   if (!menu.hidden && menuItems.length) {   // 导航键只作用于弹层

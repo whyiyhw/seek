@@ -321,6 +321,7 @@ func TestServeConfig_RoundTrip(t *testing.T) {
 	cfg := Config{
 		Serve: &ServeConfig{
 			Projects:       []string{"/Users/me/code/seek", "/Users/me/code/butler"},
+			ProjectRoots:   []string{"/srv/code"}, // c_heffj3: picker reach widens via this line
 			MaxConcurrency: 8,
 			Yolo:           true,
 			WebAddr:        "100.80.25.74:8790",
@@ -347,6 +348,9 @@ func TestServeConfig_RoundTrip(t *testing.T) {
 	}
 	if got.Serve.WebAddr != "100.80.25.74:8790" {
 		t.Errorf("web_addr round-trip: %q", got.Serve.WebAddr)
+	}
+	if len(got.Serve.ProjectRoots) != 1 || got.Serve.ProjectRoots[0] != "/srv/code" {
+		t.Errorf("project_roots round-trip: %+v", got.Serve.ProjectRoots)
 	}
 }
 

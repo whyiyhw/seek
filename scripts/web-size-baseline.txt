@@ -173,3 +173,12 @@
 # 构建把构建目录绝对路径编进 PC 表，/tmp/seek-base 与本 worktree 同源同
 # toolchain 量出 +21048B，同 worktree stash 往返量才是 +8200B。delta 记账
 # 一律 same-path。
+# 2026-11-22 c_heffj3 fs/list 目录浏览器（只记账，不棘轮——数字未动）：
+# +38033B（go1.27.3 线，linux/amd64：main 269f682a 构建 31557849B → 本分支
+# 31595882B；其中页面 embed 源 +7878B[webfrontend.html 161590→169468B，
+# 注释占大头] + fs.go/config/servecli 编译本体）。分支时点对旧 pin 31332461
+# 的 +225388B 欠棘轮，其后已由 c_vxh4ro 棘轮至 31557490 吸收（见上）——
+# 合并注记（c_heffj3 并 main 时，解 c_lnsdvu 冲突后实测）：本合并树 gate
+# built 31618050B，对现 pin 31557490 总 delta +60560B（= c_6xktw4 +21912B +
+# c_lnsdvu +8200B + c_heffj3 +38033B 的合并实测，含解冲突后页面合并体的
+# 少量重排），远在 204800B 预算内、gate 绿——无需棘轮，pin 不动。

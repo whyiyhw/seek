@@ -278,3 +278,40 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		}
 	}
 }
+
+// TestWeb_PageDirPicker (c_heffj3 acceptance ②): the /bind directory
+// picker's browser-side pieces, pinned the W4.4 way (page strings
+// against the embedded page) — the fs/list call, the entry row shown
+// in the '/bind ' args context (piece 1 c_lnsdvu's candidate rows
+// merge in front of it), the pick action riding the ONE sendText
+// passthrough, the layer header, and the in-layer error branch. Also
+// pins the no-new-global-keydown discipline: the picker's nav keys
+// live on the textarea and the filter input, never on document/window.
+func TestWeb_PageDirPicker(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"rpc('fs/list'",                     // the ONE new read-only method the picker rides
+		"📁 浏览目录…",                        // 目录模式入口（片 1 候选列表尾行）
+		"/^\\/bind\\s/",                     // '/bind ' 参数期触发
+		"sendText('/bind ' + path, false)",  // 选这个目录 → 既有 /bind 透传，零新写面
+		"↑ 上一级",
+		"选这个目录",
+		"目录名过滤",
+		"label: '（' + dm.err + '）'",        // 失败在弹层内一行提示，不外抛不白屏
+		"if (dirMode) return;",              // 目录模式独占弹层
+		"menu.contains(ev.relatedTarget)",   // 焦点进弹层（过滤框）不关层
+		"leftEllipsis",                      // 层头路径过长从左侧省略
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the dir-picker piece %q", need)
+		}
+	}
+	for _, banned := range []string{
+		"document.addEventListener('keydown'", // 不新增全局键盘监听（c_7lsngm 纪律）
+		"window.addEventListener('keydown'",
+	} {
+		if strings.Contains(page, banned) {
+			t.Errorf("embedded page grew a global keydown listener: %q", banned)
+		}
+	}
+}
