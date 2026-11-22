@@ -225,6 +225,13 @@ func TestWeb_CommandE2E(t *testing.T) {
 // crash): five buttons, the shared passthrough, arg-prefill vs verbatim
 // send, the post-command /state refresh and the SSE-reconnect binding
 // restore. Chat-plane keep-pins live in TestWeb_PageSessionsBrowser.
+//
+// c_lnsdvu rewrote TWO of the five behaviors: #cmd-bind / #cmd-projects no
+// longer prefill '/bind ' / send '/projects' — both open the project picker
+// (third #menu source: project/list ∪ settings/get, click-a-row sends
+// '/bind <root>'). The pins below assert the NEW wiring explicitly and the
+// banned list below THAT asserts the old wireCmd shapes are gone — a
+// behavior change must be rewritten in the test, never just deleted.
 func TestWeb_PageCommandButtons(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
@@ -233,19 +240,41 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		`id="cmd-switch"`,
 		`id="cmd-new"`,
 		`id="cmd-cancel"`,
-		"sendText(typed, true, ready)",  // the form still rides the shared passthrough
-		"sendText(text, false)",         // …and so do the buttons
-		"wireCmd('cmd-bind', '/bind ')", // arg commands prefill…
-		"wireCmd('cmd-switch', '/switch ')",
-		"wireCmd('cmd-projects', '/projects')", // …zero-arg send verbatim
-		"wireCmd('cmd-new', '/new')",
+		"sendText(typed, true, ready)", // the form still rides the shared passthrough
+		"sendText(text, false)",        // …and so do the buttons
+		"wireCmd('cmd-switch', '/switch ')", // remaining arg command still prefills…
+		"wireCmd('cmd-new', '/new')",        // …zero-arg still sends verbatim
 		"wireCmd('cmd-cancel', '/cancel')",
+		// c_lnsdvu project picker: both trigger buttons ride openBindPicker…
+		"document.getElementById('cmd-bind').addEventListener('click', openBindPicker)",
+		"document.getElementById('cmd-projects').addEventListener('click', openBindPicker)",
+		// …candidates come from the two read-only rpc sources (no new method)…
+		"rpc('project/list', {})",
+		"rpc('settings/get', {})",
+		// …a picked row sends the same wire a hand-typed /bind would…
+		"sendText('/bind ' + e.root, false)",
+		// …with the reset warning as the popup's fixed head line, the
+		// current binding marked, and the both-sources-empty wording.
+		"点选会重置当前会话（/bind 语义）；路径也可手打",
+		"'← 当前'",
+		"没有可选项目：config serve.projects 未配置、本机也还没有 seek 会话记录——直接手打 /bind <路径>",
 		"typed.startsWith('/')", // command POST → immediate /state refresh
 		"body.startsWith('/')",
 		"es.onopen = () => { connSet(true); refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr) + the conn light (W5 c_oyp2qf)
 	} {
 		if !strings.Contains(page, need) {
-			t.Errorf("embedded page lost the W2.2 command-UI piece %q", need)
+			t.Errorf("embedded page lost the command-UI piece %q", need)
+		}
+	}
+	// The retired behaviors, pinned ABSENT: the old wireCmd prefill/direct-
+	// send for the two picker buttons must not sneak back beside the new
+	// wiring (both handlers on one button = the silent one wins).
+	for _, banned := range []string{
+		"wireCmd('cmd-bind'",
+		"wireCmd('cmd-projects'",
+	} {
+		if strings.Contains(page, banned) {
+			t.Errorf("embedded page still wires the retired behavior %q — c_lnsdvu replaced it with openBindPicker", banned)
 		}
 	}
 }

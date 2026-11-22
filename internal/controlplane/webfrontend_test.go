@@ -725,6 +725,43 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 	}
 }
 
+// TestWeb_PageStatsTrend pins the cross-session trend card (c_6xktw4):
+// the page consumes stats/trend over the same /rpc route, draws with
+// hand-written SVG (document.createElementNS, zero vendor — §4.2), keeps
+// the hover readout + window switcher, carries an empty-state hint, and
+// still never prices anything itself (§2.5).
+func TestWeb_PageStatsTrend(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"stats/trend",                   // the aggregation method
+		"createElementNS",               // hand-drawn SVG, no chart library
+		"id=\"trend-plot\"",             // the plot host
+		"id=\"trend-tools\"",            // window switcher + legend live here
+		"trend-tip",                     // hover readout (built at render time)
+		"pointermove",                   // hover interaction
+		"TREND_WINDOWS",                 // time-window switching
+		"还没有历史会话",                       // empty-state copy
+		"折线需要 ≥2 个点",                    // one-point boundary copy
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)
+		}
+	}
+	// Zero-vendor (§4.2): no chart library may sneak in as an asset.
+	for _, gone := range []string{"chart.js", "d3.min", "echarts", "plotly"} {
+		if strings.Contains(strings.ToLower(page), gone) {
+			t.Errorf("page references a chart vendor %q — the trend line is hand-drawn SVG (zero build chain)", gone)
+		}
+	}
+	// The sidebar cost column is formatted server-priced data, never a rate.
+	if !strings.Contains(page, "t2c") {
+		t.Error("sidebar row lost its per-session cost cell (c_6xktw4)")
+	}
+	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing.") {
+		t.Error("page carries pricing vocabulary — cost_usd is read server-priced (§2.5)")
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.
@@ -896,9 +933,12 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	// through the ONE passthrough, and the quick buttons stay wired.
 	// Enter does not grow a second send path — it calls form.requestSubmit(),
 	// so the attachment gate / "/" argument rule stay single-sourced.
+	// (c_lnsdvu rewired #cmd-bind to open the project picker instead of
+	// prefilled '/bind ' — the picker is pinned in TestWeb_PageCommandButtons;
+	// this guard keeps only the SHARED passthrough pieces.)
 	for _, keep := range []string{
 		`id="form"`, "sendText(typed, true, ready)", "form.requestSubmit()",
-		"wireCmd('cmd-bind', '/bind ')",
+		"wireCmd('cmd-switch', '/switch ')",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("input enhancement must be additive — lost %q", keep)
