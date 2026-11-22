@@ -933,9 +933,12 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	// through the ONE passthrough, and the quick buttons stay wired.
 	// Enter does not grow a second send path — it calls form.requestSubmit(),
 	// so the attachment gate / "/" argument rule stay single-sourced.
+	// (c_lnsdvu rewired #cmd-bind to open the project picker instead of
+	// prefilled '/bind ' — the picker is pinned in TestWeb_PageCommandButtons;
+	// this guard keeps only the SHARED passthrough pieces.)
 	for _, keep := range []string{
 		`id="form"`, "sendText(typed, true, ready)", "form.requestSubmit()",
-		"wireCmd('cmd-bind', '/bind ')",
+		"wireCmd('cmd-switch', '/switch ')",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("input enhancement must be additive — lost %q", keep)
