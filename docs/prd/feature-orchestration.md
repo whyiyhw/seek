@@ -184,7 +184,7 @@ main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；d
 
 #### D8 — DeepSeek-only 工具按 provider 过滤（坑，必须在 P1 处理）
 
-`think` / `fim_complete` 是 DeepSeek 专属工具。路由到 GLM 的 type，其工具白名单在派生子 Registry 时**剔除 DeepSeek-only 工具**（模板 Filter 之后追加一道 provider 兼容过滤），子 system prompt 的 skill manifest 若引用 dual-model 类 DeepSeek-only 流程，风险留提示级（不阻断）。不做反向检测——provider 能力表写死在代码常量（`map[string]set[string]`），不运行时探测。
+`think` 是 DeepSeek 专属工具（FIM 补全工具曾同列，2026-11-22 退役——实测模型不用，工具链整体移除）。路由到 GLM 的 type，其工具白名单在派生子 Registry 时**剔除 DeepSeek-only 工具**（模板 Filter 之后追加一道 provider 兼容过滤），子 system prompt 的 skill manifest 若引用 dual-model 类 DeepSeek-only 流程，风险留提示级（不阻断）。不做反向检测——provider 能力表写死在代码常量（`map[string]set[string]`），不运行时探测。
 
 #### D9 — 成本/预算/定价打通（几乎零改动，验收要钉死）
 
@@ -204,7 +204,7 @@ main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；d
 | 6 | 崩溃复活：手造 started-无终态索引 → 新进程扫描写 `orphaned`（现有）；resume 父会话首turn 注入「completed 且未 notified」子的 summary（读子 transcript 末条 assistant），`orphaned` 子只注入一行状态 | 集成测试（伪造索引+transcript 文件） |
 | 7 | 注入消费回写 `notified` 事件；重复 resume 不重复注入 | 单元测试 |
 | 8 | 路由：config `explore→glm` 时子 `agent.Config.Provider` 为 compatible 实例、model `glm-5.3`；无配置时与现状字节同路径 | 单元测试（ProviderRegistry stub） |
-| 9 | GLM 路由的 type 工具白名单不含 `think`/`fim_complete`；deepseek 路由不变 | 单元测试（模板 Filter + provider 过滤表驱动） |
+| 9 | GLM 路由的 type 工具白名单不含 `think`；deepseek 路由不变 | 单元测试（模板 Filter + provider 过滤表驱动） |
 | 10 | 混合车队成本：父 deepseek + 子 glm 完成后 `CumulativeCost()` == 父 deepseek 费用 + 子 GLM 费用（各按三口价，off-peak 只折 deepseek） | 单元测试（fake Usage + pricing.Cost 交叉） |
 | 11 | 命名 provider 无 key：启动警告 + 回退继承父，不 panic 不硬拒 | 单元测试 |
 | 12 | `budget.Limit("glm-5.3") == 1_000_000` | 单元测试（一行） |

@@ -166,7 +166,7 @@ func TestACPUpdate_ToolKind(t *testing.T) {
 	for name, want := range map[string]string{
 		"read": "read", "list_dir": "read", "references": "read",
 		"grep": "search",
-		"edit": "edit", "write": "edit", "fim_complete": "edit",
+		"edit": "edit", "write": "edit",
 		"bash": "execute", "git": "execute", "monitor": "execute",
 		"think": "think", "plan": "think", "propose": "think",
 		"webfetch":       "fetch",

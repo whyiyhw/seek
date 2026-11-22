@@ -22,8 +22,8 @@ import (
 //     the frontmatter is just one more source for it;
 //   - provider/model validity via ResolveRoute (D8's provider filter
 //     then applies downstream in the Runner over job.ToolNames, same
-//     as for built-ins — think/fim_complete vanish on non-DeepSeek
-//     lanes automatically).
+//     as for built-ins — think vanishes on non-DeepSeek lanes
+//     automatically).
 //
 // The gate re-validates shapes agenttypes.Parse already rejects for
 // files on purpose: the Set can also be populated by hand (tests) or

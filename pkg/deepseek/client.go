@@ -1,8 +1,8 @@
 // Package deepseek is the first-class DeepSeek API client for seek.
 //
 // It intentionally does NOT implement the generic pkg/llm.Provider interface:
-// DeepSeek-specific features (prefix-cache metadata, FIM endpoint, the
-// reasoner's separate code path) lose information when squeezed through a
+// DeepSeek-specific features (prefix-cache metadata, the reasoner's
+// separate code path) lose information when squeezed through a
 // lowest-common-denominator abstraction. Callers that want optimisation type-
 // assert *deepseek.Client; callers that just want chat use the unified
 // pkg/llm.Provider for Anthropic/OpenAI/Gemini.
@@ -23,12 +23,9 @@ const (
 	DefaultBaseURL = "https://api.deepseek.com"
 
 	endpointChat = "/chat/completions"
-	// endpointFIM is the fill-in-the-middle endpoint — used by the `edit`
-	// tool's fast path. Wired up in a later milestone.
-	endpointFIM = "/beta/completions"
 )
 
-// Client is a DeepSeek API client. Construct via New, then call Chat, ChatStream, or FIM.
+// Client is a DeepSeek API client. Construct via New, then call Chat or ChatStream.
 type Client struct {
 	apiKey  string
 	baseURL string

@@ -96,7 +96,7 @@ func (m Model) View() tea.View {
 	}
 
 	// Second-tier provider banner: warn that DeepSeek-exclusive features
-	// (cache stats, FIM, Reasoner) are disabled.
+	// (cache stats, Reasoner) are disabled.
 	if m.opts.ProviderName != "" {
 		banner := lipgloss.NewStyle().
 			Foreground(colourTool).

@@ -78,7 +78,6 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/enterworktree"
 	"github.com/whyiyhw/seek/internal/tools/exitworktree"
-	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	gittool "github.com/whyiyhw/seek/internal/tools/git"
 	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
@@ -996,11 +995,10 @@ func run() error {
 		reg.Add(guarded(webfetch.New(wfOpts)))
 	}
 
-	// DeepSeek-exclusive tools: FIM and Reasoner are only available
-	// when using the DeepSeek client directly.
+	// DeepSeek-exclusive tools: the reasoner-backed think tool is only
+	// available when using the DeepSeek client directly.
 	if dsClient != nil {
-		reg.Add(fimcomplete.New(dsClient, *model)).
-			Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
+		reg.Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
 		// web_search rides the standalone Search API — same DeepSeek
 		// key / base URL as chat (config.KeyFor deepseek), billed per
 		// successful call into the tracker so the status bar's $ total
@@ -1025,9 +1023,9 @@ func run() error {
 	// still register, only the guidance segment goes away (the A2 eval
 	// arm). Note: the -tools whitelist narrows the registry later and
 	// may drop MCP tools this section still names — same static-prose
-	// posture as rootTpl (which documents fim_complete even on non-
-	// DeepSeek providers); the section describes what loaded, the
-	// request's tools array is the callable truth.
+	// posture as rootTpl (which documents think even on non-DeepSeek
+	// providers); the section describes what loaded, the request's
+	// tools array is the callable truth.
 	var mcpSection string
 	if mcpCfg, err := mcpconfig.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp config:", err)
@@ -1631,7 +1629,7 @@ func run() error {
 	// P2-b D13 startup gate + P2-c config layer: validate every
 	// non-built-in definition against the FINAL parent registry —
 	// plan/propose land above, MCP / env-gated tools (webfetch,
-	// fim_complete, think…) vary the registry earlier, so this pass
+	// think…) vary the registry earlier, so this pass
 	// must run after the last reg.Add. File-scope types
 	// (project/user) get the full D13 check — unknown tool names are
 	// config errors: warn here (the loud half of D13); at spawn the
@@ -3826,7 +3824,7 @@ func acpToolTitle(name, args string) string {
 	}
 	var what string
 	switch name {
-	case "read", "list_dir", "write", "edit", "fim_complete":
+	case "read", "list_dir", "write", "edit":
 		what = arg("path")
 	case "grep":
 		if p := arg("pattern"); p != "" {
@@ -3864,7 +3862,7 @@ func acpToolKind(name string) string {
 		return "read"
 	case "grep":
 		return "search"
-	case "edit", "write", "fim_complete":
+	case "edit", "write":
 		return "edit"
 	case "bash", "git", "monitor":
 		return "execute"
@@ -4291,8 +4289,8 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		// /api/coding/paas/v4: a coding-plan key pointed at the default
 		// /api/paas/v4 path charges the recharge balance (or fails with
 		// error 1113 「余额不足或无可用资源包」). Expected degradation vs
-		// DeepSeek: no FIM, no cache metadata, reasoning_content deltas
-		// are silently skipped by the openai client's wire types.
+		// DeepSeek: no cache metadata, reasoning_content deltas are
+		// silently skipped by the openai client's wire types.
 		apiKey := config.KeyFor(cfg, "glm")
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no GLM API key — set GLM_API_KEY or add providers.glm.api_key to ~/.seek/config.json")

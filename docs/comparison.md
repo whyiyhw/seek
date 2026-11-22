@@ -36,8 +36,7 @@
 
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
-| 基础工具循环（读/写/bash/edit 等） | ✅ | ✅ | **对等** | Seek：`read`、`write`、`edit`、`bash`、`grep`、`list_dir`、`git`、`think`、`fim_complete`，另有 `ask_user` 选择器 |
-| FIM / 自动补全 | ✅ | ✅ | **对等** | Seek：通过 DeepSeek FIM 端点提供 `fim_complete` 工具（小范围编辑比 chat 便宜） |
+| 基础工具循环（读/写/bash/edit 等） | ✅ | ✅ | **对等** | Seek：`read`、`write`、`edit`、`bash`、`grep`、`list_dir`、`git`、`think`，另有 `ask_user` 选择器 |
 | Think / 反思 | ✅ | ✅ | **对等** | Seek：`think` 工具调用 DeepSeek reasoner；内置 `dual-model` skill 实现 reasoner→执行→反思闭环 |
 | LSP 工具（结构化符号/引用） | ✅ | 🔶 **等效替代** | — | v6 柱 L（瘦身版）：`references` 工具走 gopls/pyright/tsserver 拿**语义引用**（grep 替代不了的硬赢）。definition/hover/symbols **故意不做**——Go 里被 grep+`go build` 覆盖，ROI 低（见 `feature-lsp.md` §动机）。会话级 server、零 daemon |
 | Notebook 编辑 | ✅ | ❌ **缺失** | — | Claude Code 有 `NotebookEdit` 原生编辑 Jupyter `.ipynb`；Seek 无 |
@@ -177,7 +176,7 @@
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
 | 多提供商支持 | ❌（仅 Anthropic） | ✅ | **Seek 优势** | DeepSeek、Anthropic、OpenAI、Gemini、OpenAI 兼容端点 |
-| DeepSeek 专属能力 | ❌ | ✅ | **Seek 优势** | V4 推理模式、FIM 端点、错峰 5 折、前缀缓存追踪 |
+| DeepSeek 专属能力 | ❌ | ✅ | **Seek 优势** | V4 推理模式、错峰 5 折、前缀缓存追踪 |
 | 费用追踪（每会话） | ✅ | ✅ | **对等** | Seek：累计 + 每轮费用，状态栏实时显示 |
 | 缓存命中率显示 | ✅ | ✅ | **对等** | Seek：实时命中率 + 节省 token 数 |
 | 错峰折扣倒计时 | ❌ | ✅ | **Seek 优势** | 状态栏显示 5 折时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰，2026-08-16 起） |
@@ -282,7 +281,6 @@
 |---|---|
 | **多 LLM 提供商** | DeepSeek、Anthropic、OpenAI、Gemini、OpenAI 兼容端点——不绑定单一厂商 |
 | **DeepSeek 单价 + 前缀缓存** | DeepSeek 基础单价已显著低于 Anthropic；叠加 95.7% 实测缓存命中后，同等任务量级下 token 成本远低于 Claude Code 默认链路 |
-| **FIM 端点** | 通过 DeepSeek FIM 提供小范围原地编辑工具，比 chat 模式更便宜 |
 | **错峰 5 折** | DeepSeek 错峰时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰）半价；Seek 状态栏内置计时器和自动费用计算 |
 | **单二进制 ~5 MB** | 零运行时依赖，`go install` 或 `curl \| tar` 即用 |
 | **`think` + `dual-model` skill** | reasoner→chat→reflect 推理闭环 |
@@ -306,7 +304,7 @@
 
 4. **v0.4–v0.6 已补齐的差距**：v0.4.x 补齐 Workflow 层（git checkpoint、undo/redo、hooks、Tab 补全、自定义键位）；v0.6.x 补齐 Agent 编排层（子代理、worktree、cron / wakeup / triggers）。三档全部对齐 Claude Code 后剩 P1/P2 的"单点"。
 
-5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/FIM/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。（2026-11-17 v8 D2 精确化：agent 进程是一次性的、状态不在进程里；常驻只做监听/路由/拉起——任务寿命的脱离进程在此口径下放行。）
+5. **独特优势 + 架构选择**：多 LLM 支持 + DeepSeek 单价/缓存/错峰 + 单二进制 + 零遥测 + **零常驻 daemon 的本地调度**（v0.6.1 新）+ **文件桥触发**（无需 webhook server）。其中零 daemon 是与 Claude Code 云模型最不一样的架构表达，trade-off 是失去"睡觉时也在跑"的可靠性。（2026-11-17 v8 D2 精确化：agent 进程是一次性的、状态不在进程里；常驻只做监听/路由/拉起——任务寿命的脱离进程在此口径下放行。）
 
 6. **明确边界（2026-11-12 #2575 起重划）**：原表述「Seek 定位为单用户本地 CLI 工具，而非平台 / 框架 / 多端产品」**已失效**——定位变更为自我进化的本地 agent 平台后，**多端进入目标**（Frontend 端口 + sidecar 路线，飞书第一个，见「平台化验收口径」）。维持出界的是：企业管理（SSO、用量分析、Managed MCP）、SDK（seek 是 agent 不是框架）；另按 #2575，公开跑分竞赛明确不做。CC 的桌面/Web/Chrome 形态不逐项复刻——多端验收以 Frontend 端口可驱动为准。
 
@@ -322,7 +320,7 @@
 |---|---|---|
 | **多端** | 任何 Frontend 端口（飞书第一个）都能驱动本机 seek 干活 | remote control plane M1–M7 落地；**飞书真实会话可驱动本机 seek 跑完一个多轮任务** |
 | **自进化** | 失败 → eval → 修复 → 发布的闭环，dogfood 飞轮转起来 | pitfall→eval 管道产出用例进 **CI 口径回归集**；周度过夜 goal run 实战成功率**可追趋势**；seek 接入 paseo 成为 butler 执行车道，dogfood 飞轮（seek 干活→失败沉淀→seek 变强）**至少转满一轮** |
-| **成本** | DeepSeek-first：CC 同级能力、断崖级更低单位成本 | 常用编码路径能力对 CC 保持对等（**本文对照表即「能力不回退」的守成基线**）；DeepSeek 单价 + 前缀缓存（实测 95.7%）+ 错峰 5 折 + FIM 组合下，同等任务 token 成本显著低于 CC 默认链路 |
+| **成本** | DeepSeek-first：CC 同级能力、断崖级更低单位成本 | 常用编码路径能力对 CC 保持对等（**本文对照表即「能力不回退」的守成基线**）；DeepSeek 单价 + 前缀缓存（实测 95.7%）+ 错峰 5 折组合下，同等任务 token 成本显著低于 CC 默认链路 |
 
 **与本文其余部分的关系**：
 
@@ -366,12 +364,12 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 | **桌面 / 远程** | webhook push（单向通知） | Tauri 桌面（预发布）+ QQ 双向远程 | Reasonix |
 | **Web search** | ✅ `web_search`（DeepSeek 原生 Search API，按次计费）+ webfetch 单页 | 多 provider（Bing/Baidu/SearXNG/Tavily/Perplexity） | **≈ 对等**（seek 单 provider 但零配置——同 DeepSeek key） |
 | **Memory 模型** | L/M/S 三层 + `seek -dream` 跨项目蒸馏 + decay GC | 四分类（user/feedback/project/reference） | 路线不同 |
-| **DeepSeek 深度** | FIM 端点 + 错峰 5 折倒计时 + V4 `think` | billing/balance（**未见** FIM/错峰） | seek 略深 |
+| **DeepSeek 深度** | 错峰 5 折倒计时 + V4 `think` | billing/balance（**未见**错峰） | seek 略深 |
 | **规模/心智份额** | 新/小 | **14.9k stars / 870 forks** | **Reasonix（碾压）** |
 
 ## R.3 各自赢的（源码校正后）
 
-- **seek 干净领先的仍有两轴**：(1) 子代理**并行 + git worktree 隔离**（Reasonix 子代理故意串行、无隔离）；(2) **时序自治**（cron/wakeup/触发/手机 push；Reasonix 源码零调度）。外加 **Autopilot 无人值守编排**（柱 N，seek 独有）+ DeepSeek FIM/错峰的边角深度。
+- **seek 干净领先的仍有两轴**：(1) 子代理**并行 + git worktree 隔离**（Reasonix 子代理故意串行、无隔离）；(2) **时序自治**（cron/wakeup/触发/手机 push；Reasonix 源码零调度）。外加 **Autopilot 无人值守编排**（柱 N，seek 独有）+ DeepSeek 错峰的边角深度。
 - **已追平**：ACP 编辑器集成（柱 P，seek 现已支持）· OS 沙箱（柱 O，seek 双平台 macOS seatbelt + Linux landlock，零依赖）。
 - **Reasonix 仍赢**：规模碾压（14.9k、435M token 战测）· `codegraph` 语义索引 · 生产级 web 前端 · 多 provider 搜索 · QQ 双向远程。
 - **大面积对等（读源码后比 README 印象更趋同）**：后台任务、编辑安全网/rewind、plan、skills、memory、MCP、hooks、权限、session、headless——这些都不是差异点。

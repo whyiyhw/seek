@@ -1,7 +1,7 @@
 // Package edit implements the `edit` tool: exact-substring replacement in
 // a file. The Claude Code / pi convention — old_string must match
 // uniquely (or expected_replacements times exactly), new_string=""
-// deletes. FIM lives in the separate fim_complete tool, not here.
+// deletes.
 //
 // Matching has three tiers, all transparent to the caller:
 //  1. Exact byte match (preserves file bytes 1:1).

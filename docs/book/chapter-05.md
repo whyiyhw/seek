@@ -24,7 +24,7 @@ type Tool interface {
 }
 ```
 
-**`Name()`**：工具名，全小写，下划线分隔（`read`、`list_dir`、`fim_complete`）。这个名字会出现在模型的工具调用里。
+**`Name()`**：工具名，全小写，下划线分隔（`read`、`list_dir`、`schedule_wakeup`）。这个名字会出现在模型的工具调用里。
 
 **`Description()`**：自然语言描述，给模型看的。这是影响模型"什么时候调用这个工具"行为最直接的地方。描述写得好，模型就会在正确的时机调用；描述含糊，模型就会猜错，浪费一轮推理。
 
@@ -121,7 +121,6 @@ reg := tools.New().
     Add(write.New(policy)).
     Add(edit.New(policy)).
     Add(bash.New(policy)).
-    Add(fimcomplete.New(client, model)).
     Add(think.New(client)).
     Add(skilltool.New(skills))
 ```

@@ -15,7 +15,7 @@ import (
 
 // Retry policy for transient DeepSeek stream failures lives in retry.go
 // (maxRetries / retryBackoff / retryCall) — shared with the non-streaming
-// Chat and FIM paths.
+// Chat path.
 
 // StreamEventType discriminates the events emitted by ChatStream.
 type StreamEventType string

@@ -5,7 +5,7 @@
 //
 // pkg/agent routes between *deepseek.Client (first-class) and
 // llm.Provider (second-tier) using a type switch. DeepSeek-specific
-// features (cache stats, FIM, reasoner) are never exposed through this
+// features (cache stats, reasoner) are never exposed through this
 // interface so the abstraction does not dilute them.
 package llm
 
