@@ -346,6 +346,9 @@
   #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
                   text-overflow: ellipsis; white-space: nowrap; }
   #menu .mi .sid { color: var(--seek-fg-dim); font-size: 12px; margin-left: auto; }
+  /* 弹层头行（c_lnsdvu 项目点选候源专用）：固定告知文案，不是可点行 */
+  #menu .mh { padding: 6px 12px; color: var(--seek-fg-dim); font-size: 12px;
+              line-height: 1.5; border-bottom: 1px solid var(--seek-line); }
   /* 窄屏降级（验收 ③）：弹层满宽、条目换行、输入 16px 防 iOS 聚焦缩放 */
   @media (max-width: 640px) {
     #menu { left: 0; right: 0; bottom: 100%; border-radius: 8px 8px 0 0; }
@@ -657,10 +660,12 @@
 <header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态"></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
 <div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" type="button">手动重连</button></div>
 <nav id="bar">
-  <!-- 指令快捷按钮（W2.2）：发的是与手打完全同款的指令文本（POST /msg 纯文本
-       透传）；带参的 /bind /switch 只预填输入框，路径由用户补全后回车。 -->
-  <button id="cmd-bind" class="cmd" type="button" title="绑定/重绑项目，会话重置（需补路径）">/bind</button>
-  <button id="cmd-projects" class="cmd" type="button" title="列出候选项目与当前绑定">/projects</button>
+  <!-- 指令快捷按钮（W2.2；c_lnsdvu 改制两钮）：/bind 与 /projects 点按改为开
+       项目点选弹层（project/list ∪ serve.projects 候选，点行 = 发同款
+       '/bind <路径>' 指令文本）；/switch /new /cancel 三钮仍是「发送同款
+       指令文本」的快捷方式，不另造协议。 -->
+  <button id="cmd-bind" class="cmd" type="button" title="绑定/重绑项目（点选候选；会话重置）">/bind</button>
+  <button id="cmd-projects" class="cmd" type="button" title="点选项目（发 /bind <路径>，会话重置）">/projects</button>
   <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
   <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
   <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
@@ -756,8 +761,9 @@
       <div id="hk-log"></div>
     </section>
     <form id="form">
-      <!-- 多行输入（c_7lsngm）：Enter 发送、Shift+Enter 换行；#menu 是 '/' 指令补全
-           与 '@' 会话引用共用的候选弹层（一行 DOM，两种候源），贴着表单上沿。 -->
+      <!-- 多行输入（c_7lsngm）：Enter 发送、Shift+Enter 换行；#menu 是 '/' 指令补全、
+           '@' 会话引用与项目点选（c_lnsdvu）共用的候选弹层（一行 DOM，三种候源），
+           贴着表单上沿。 -->
       <textarea id="input" autocomplete="off" rows="1" spellcheck="false"
                 placeholder="/bind <项目路径>，/ 看指令，@ 引用会话，或直接发消息" autofocus></textarea>
       <div id="menu" role="listbox" aria-label="候选" hidden></div>
@@ -1598,7 +1604,9 @@ form.addEventListener('submit', async ev => {
 // ---- 输入增强（c_7lsngm；对齐 dsh ui-input-trigger + ui-commands）----
 // 全挂在输入框这条 input/keydown 线上，不碰全局键：Enter 发送 /
 // Shift+Enter 原生换行；'/' 指令补全（候源 = 下面这张注册表）；
-// '@' 最近会话（session/list），选中落 @<sid> 并发 /resume <sid>。
+// '@' 最近会话（session/list），选中落 @<sid> 并发 /resume <sid>；
+// 项目点选（c_lnsdvu，project/list ∪ serve.projects）由顶栏 /bind 与
+// /projects 两钮触发，点行发 '/bind <root>'——同为这条线上的候源。
 // 弹层开着时导航键就地消化，关掉即全部放行（Esc 不劫持页面）。
 const CMDS = [
   { name: '/bind',     args: true,  desc: '绑定/重绑项目（会话重置，需补路径）' },
@@ -1611,16 +1619,26 @@ const CMDS = [
 
 const menu = document.getElementById('menu');
 let menuItems = [], menuHl = -1, menuCtx = null;  // 候选 / 高亮 / 上次判定的上下文
+let menuHead = '';    // 弹层头行文案（'' = 无；项目点选候源的固定告知）
+let bindOpen = false; // 项目点选候源开着（c_lnsdvu）：updateMenu 的优先级依据
 
 function closeMenu() {
   menu.hidden = true;
   menu.replaceChildren();
   menuItems = [];
   menuHl = -1;
+  bindOpen = false;   // 点选候源随弹层一起关（含在途拉取落地时的补渲自查）
+  menuHead = '';
 }
 
 function renderMenu() {
   menu.replaceChildren();
+  if (menuHead) {                     // 头行是告知文案，不是可点行、不占高亮序
+    const head = document.createElement('div');
+    head.className = 'mh';
+    head.textContent = menuHead;
+    menu.appendChild(head);
+  }
   menuItems.forEach((it, i) => {
     const row = document.createElement('div');
     row.className = 'mi' + (i === menuHl ? ' hl' : '');
@@ -1643,7 +1661,7 @@ function moveHl(dir) {
   if (!menuItems.length) return;
   menuHl = (menuHl + dir + menuItems.length) % menuItems.length;
   renderMenu();
-  const hl = menu.children[menuHl];
+  const hl = menu.querySelectorAll('.mi')[menuHl];   // 头行不是 .mi：按类取免错位
   if (hl && hl.scrollIntoView) hl.scrollIntoView({ block: 'nearest' });
 }
 
@@ -1737,30 +1755,114 @@ function applyAt(sid) {
   sendText('/resume ' + sid, false);
 }
 
+// ---- 项目点选候源（c_lnsdvu）----
+// #cmd-bind / #cmd-projects 点按开出，与 '/'、'@' 同一个 #menu、同一条
+// pick 路径。候选 = project/list 的 root（W4.3，带会话数）∪ settings/get
+// 的 projects（config serve.projects——配了但 seek 尚未打开过的目录），按
+// clean 后的绝对路径去重。点行 = 发 '/bind <root>'：/bind 在已绑定态也
+// 合法且总是重置会话（D-C2「start over here」），统一走 /bind、不引
+// /switch 分叉；点选后的状态行/侧栏刷新走指令应答既有 refreshState 链。
+// 目录存在性不预检（页面无 stat）：project/list 的 root 是 manifest 的
+// last_seen 位置，可能已移动/删除——点了由 Router 的「绑定失败：目录不
+// 存在：<abs>」应答如实透传到聊天面。候源同 '@'：首次触发拉一次并缓存
+// （失败也缓存，atErr 同款形状）；失败/空各给一行提示，不静默无弹层。
+let bindData = null, bindErr = null, bindPending = false;
+
+// 去重键：清尾随斜杠与空白。页面做不了绝对化/展开（无 stat、不知 home），
+// '~/x' 与展开后的路径不去重是接受的边（点了也能绑，Router 会展开）。
+function cleanRoot(p) {
+  return String(p || '').trim().replace(/\/+$/, '');
+}
+
+async function loadBindCandidates() {
+  if (bindData !== null || bindPending) return;
+  bindPending = true;
+  try {
+    const [pl, st] = await Promise.all([
+      rpc('project/list', {}),
+      rpc('settings/get', {}),
+    ]);
+    const byRoot = new Map();   // project/list 先占位（审计序），config 补差集
+    for (const p of (pl.projects || [])) {
+      const root = cleanRoot(p.root);
+      if (root && !byRoot.has(root)) byRoot.set(root, { root, sessions: p.sessions || 0 });
+    }
+    for (const raw of (st.projects || [])) {
+      const root = cleanRoot(raw);
+      if (root && !byRoot.has(root)) byRoot.set(root, { root, sessions: 0 });  // 未开过
+    }
+    bindData = [...byRoot.values()];
+    bindErr = null;
+  } catch (e) {
+    bindData = [];
+    bindErr = e.message || String(e);
+  }
+  bindPending = false;
+  if (bindOpen) updateMenu();   // 拉回来时弹层还该开着：补上候选
+}
+
+function bindHits() {
+  if (bindData === null && !bindErr) { loadBindCandidates(); return null; }
+  const notice = text => [{ label: text, desc: 'Esc 关闭', apply: () => {} }];
+  if (bindErr) return notice('（项目候选取不到：' + bindErr + '）');
+  if (!bindData.length) {
+    return notice('没有可选项目：config serve.projects 未配置、本机也还没有 seek 会话记录——直接手打 /bind <路径>');
+  }
+  const bases = {};             // basename 计数：同名行补父目录尾段消歧
+  for (const e of bindData) {
+    const b = baseOf(e.root);
+    bases[b] = (bases[b] || 0) + 1;
+  }
+  return bindData.map(e => {
+    const seg = e.root.split('/').filter(Boolean);
+    const b = seg[seg.length - 1] || e.root;
+    return {
+      label: bases[b] > 1 ? (seg[seg.length - 2] || '') + '/' + b : b,
+      desc: e.root + (e.sessions >= 1 ? ' · ' + e.sessions + ' 个会话' : ' · 未开过'),
+      meta: (boundProject && cleanRoot(boundProject) === e.root) ? '← 当前' : '',
+      apply: () => sendText('/bind ' + e.root, false),
+    };
+  });
+}
+
+function baseOf(root) {
+  const seg = String(root).split('/').filter(Boolean);
+  return seg[seg.length - 1] || root;
+}
+
 // 候选上下文（触发位 + 查询词）：没变就不动现状——保 ↑↓ 高亮，也保 Esc
-// 关掉后不被同一按键的 keyup 立刻重新弹开。
+// 关掉后不被同一按键的 keyup 立刻重新弹开。bindOpen 是第三候源的上下文：
+// 点按开的意图优先于草稿里恰有的 '/'、'@' 触发（点了按钮就要出项目候选）。
 function ctxNow() {
+  if (bindOpen) return 'bind';
   if (slashHits()) return 'slash|' + input.value;
   const at = atToken();
   return at ? 'at|' + at.start + '|' + at.query : '';
 }
 
 function updateMenu() {
-  let items = slashHits();
-  if (!items) items = atToken() ? atHits() : null;
+  let items = null;
+  if (bindOpen) {
+    items = bindHits();
+    if (items === null) return;   // 候选在途：不动现状，拉取落地时补渲
+  }
+  if (items === null) items = slashHits();
+  if (items === null) items = atToken() ? atHits() : null;
   const ctx = items ? ctxNow() : '';
   if (ctx === menuCtx) return;
   menuCtx = ctx;
   if (!items) { closeMenu(); return; }
   menuItems = items;
   menuHl = 0;
+  menuHead = bindOpen ? '点选会重置当前会话（/bind 语义）；路径也可手打' : '';
   renderMenu();
   menu.hidden = false;
 }
 
 // keyup/click 必须包一层空箭头——直接挂 updateMenu 会把 Event 当实参，
-// 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。
-input.addEventListener('input', () => { grow(); updateMenu(); });
+// 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。编辑动作先收掉点选
+// 候源（c_lnsdvu）：弹层头行说了「路径也可手打」——开始打字就该让位。
+input.addEventListener('input', () => { grow(); bindOpen = false; updateMenu(); });
 input.addEventListener('keyup', () => updateMenu());
 input.addEventListener('click', () => updateMenu());
 input.addEventListener('blur', () => setTimeout(closeMenu, 0));  // 点别处才关
@@ -1836,9 +1938,11 @@ document.addEventListener('paste', async ev => {
   await addFiles(cd.files);
 });
 
-// 指令快捷按钮（W2.2）：零参指令（/projects /new /cancel）直发；带参指令
-// （/bind /switch）预填输入框并聚焦等路径——按钮只是「发送同款指令文本」
-// 的快捷方式，不另造协议。
+// 指令快捷按钮（W2.2）：零参指令（/new /cancel）直发；带参指令（/switch）
+// 预填输入框并聚焦等路径——按钮只是「发送同款指令文本」的快捷方式，不另
+// 造协议。/bind 与 /projects 两钮已由 c_lnsdvu 改制为开项目点选弹层（见
+// openBindPicker）——发送的仍是同款 '/bind <路径>' 指令文本，只是路径来自
+// 点选候选而不是手敲；/projects 的聊天文本回复形态不变（手打仍可看）。
 function wireCmd(id, text) {
   document.getElementById(id).addEventListener('click', () => {
     if (send.disabled) return;
@@ -1853,11 +1957,23 @@ function wireCmd(id, text) {
     input.focus();
   });
 }
-wireCmd('cmd-bind', '/bind ');
 wireCmd('cmd-switch', '/switch ');
-wireCmd('cmd-projects', '/projects');
 wireCmd('cmd-new', '/new');
 wireCmd('cmd-cancel', '/cancel');
+
+// 项目点选（c_lnsdvu）：点按钮 = 开第三个候源弹层（#cmd-bind 与
+// #cmd-projects 两个触发点同一入口），点行发 '/bind <root>'——apply 在
+// bindHits 里，与 '@' 候源选行发 /resume 同款。聚焦输入框是刻意的：
+// 键盘导航（↑↓/Enter/Tab）、Esc 关、点别处关（blur）全部沿用输入框这条
+// 既有事件线，不新增全局监听；开始打字则由 input 监听收掉候源让位。
+function openBindPicker() {
+  if (send.disabled) return;
+  bindOpen = true;
+  input.focus();
+  updateMenu();
+}
+document.getElementById('cmd-bind').addEventListener('click', openBindPicker);
+document.getElementById('cmd-projects').addEventListener('click', openBindPicker);
 
 // ＋新建（W5 侧栏）：与顶栏 /new 完全同一条指令文本、同一个 POST /msg 透传
 // ——不另造协议。项目不变、会话重置；落地后刷新绑定与侧栏当前项（/new 的

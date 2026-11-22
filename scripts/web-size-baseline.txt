@@ -111,3 +111,16 @@
 # the go1.25.8 line (29371894→29371878, measured against this branch's merge
 # commit cf2b9f06 = c_5m3fm6 已并入)。源码净增 ~1.9KB（注释占多数），编译产物
 # 反小 16B（对齐/压缩吸收了）——远在 §13.3 单卡配额内，不另立正 delta。
+# 2026-11-22 c_lnsdvu（项目点选弹层）：same-path 实测 +8200B（页面源 +6193B：
+# #menu 头行 + 第三候源 JS + 两钮改制；无新 Go）。按卡面口径只记注释、不动
+# 数字——棘轮与否留合并时主会话定。NOTE for this branch's gate runs: the
+# gate ALSO trips on PRE-EXISTING un-ratcheted growth — base 269f682a
+# measures 31570457B same-path (+237996B over this pin) from cards merged
+# after the c_rqcuaa re-forge (c_qjaksw 退役 / eval 观测 / bash-grep 提示
+# 降噪都声称了余量、无人棘轮，c_oyp2qf 行尾 NOTE 的同款形状); 本卡自身
+# 只有上面的 +8200B。合并时决策：棘轮至 31578657B 或重锚线——属主会话，
+# 不属本卡。
+# 测量口径 pitfall（本次新撞）：跨目录对比会污染读数——不带 -trimpath 的
+# 构建把构建目录绝对路径编进 PC 表，/tmp/seek-base 与本 worktree 同源同
+# toolchain 量出 +21048B，同 worktree stash 往返量才是 +8200B。delta 记账
+# 一律 same-path。
