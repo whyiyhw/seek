@@ -249,6 +249,15 @@ type ServeConfig struct {
 	// time. Empty = a plane with no pre-declared candidates.
 	Projects []string `json:"projects,omitempty"`
 
+	// ProjectRoots widens the web directory picker's browsable root set
+	// (fs/list, card c_heffj3): the /bind picker may drill into any
+	// directory under these roots. Non-empty also suppresses the
+	// implicit HOME root — an explicit list is the whole reach. The
+	// roots ∪ serve.projects ∪ known memory project roots are always
+	// reachable regardless, so binding existing projects never locks
+	// out. A /srv-style deployment adds reach with this one line.
+	ProjectRoots []string `json:"project_roots,omitempty"`
+
 	// MaxConcurrency caps globally concurrent seek subprocesses across
 	// ALL conversations (PRD D-C4). <= 0 / absent = the executor's own
 	// default (mirrored by controlplane.NewExecutor — the zero value is

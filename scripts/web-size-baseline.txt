@@ -111,3 +111,10 @@
 # the go1.25.8 line (29371894→29371878, measured against this branch's merge
 # commit cf2b9f06 = c_5m3fm6 已并入)。源码净增 ~1.9KB（注释占多数），编译产物
 # 反小 16B（对齐/压缩吸收了）——远在 §13.3 单卡配额内，不另立正 delta。
+# 2026-11-22 c_heffj3 fs/list 目录浏览器（只记账，不棘轮——数字未动）：
+# +38033B（go1.27.3 线，linux/amd64：main 269f682a 构建 31557849B → 本分支
+# 31595882B；其中页面 embed 源 +7878B[webfrontend.html 161590→169468B，
+# 注释占大头] + fs.go/config/servecli 编译本体）。注意：本分支跑 gate 会
+# trip，但 trip 点是 main 既有的 +225388B 欠棘轮（c_o3osoh 紧钉
+# 31332461 之后的主干合并未记账），非本卡增量；本卡 +38KB 在 200KB 预算
+# 内。棘轮取舍留合并时主会话定（卡面明写：只加注释条目）。
