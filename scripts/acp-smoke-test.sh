@@ -42,7 +42,11 @@
 #             initialize(protocolVersion:2) is answered with the
 #             negotiated 1 (+ a stderr downgrade line), an ACP image
 #             content block is accepted and degrades silently instead of
-#             crashing → stdin EOF → clean exit rc=0.
+#             crashing → [P1-2] a SECOND session/new mints a NEW durable
+#             session id (one process, N conversations), its anchor line
+#             lands on stderr, and its first prompt activates it (the
+#             stderr switch line) and terminates with a frame tagged by
+#             ITS sessionId → stdin EOF → clean exit rc=0.
 #   NOT       session/prompt with CONTENT — that needs a real LLM
 #             round-trip (key + network), which is not deterministic
 #             lane material. The content-bearing termination states
@@ -339,8 +343,44 @@ if grep -qi 'panic' "$SMOKE_ERR"; then
 fi
 echo "acp-smoke: image content block accepted + degraded silently, read loop alive (P1-3)"
 
+# --- 3g. P1-2: a second session/new mints a NEW session (backlog ③) ----
+# One seek process now serves N conversations: the second session/new
+# must return a DIFFERENT durable transcript id (not re-anchor the live
+# one), the anchor line lands on stderr for it too, and its first prompt
+# activates it (the "session switched" stderr line) and answers with a
+# termination frame tagged with ITS sessionId. No key / no network: the
+# empty-text prompt is the same deterministic termination shape probe 5
+# used. (probe ids 12+: 1-10 + 21 and 11 are taken — see the
+# smoke-probe-ids pitfall.)
+rpc 12 session/new "{\"cwd\":\"$WS\"}"
+wait_for '"id":12,' 'session/new(second)' 15
+SID2="$(grep '"id":12,' "$OUT" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' | head -1)"
+echo "$SID2" | grep -Eq '^[0-9]{8}-[0-9]{6}-[0-9a-f]{16}$' \
+  || fail "second session/new: sessionId is not a durable id (got: ${SID2:-none}; $(grep '"id":12,' "$OUT"))"
+[ "$SID2" != "$SID" ] \
+  || fail "second session/new returned the SAME id $SID — must mint a new session"
+anchored_lines=$(grep -c -F 'acp: session anchored' "$SMOKE_ERR")
+[ "$anchored_lines" -eq 2 ] \
+  || fail "anchor lines = $anchored_lines, want 2 (one per session)"
+grep -F "acp: session anchored cwd=$WS" "$SMOKE_ERR" | grep -qF "id=$SID2" \
+  || fail "second session's anchor line missing id=$SID2"
+echo "acp-smoke: second session/new ok (new durable id $SID2 ≠ $SID, anchor line present)"
+
+# Its first prompt activates the session (per-session cwd/state install)
+# and terminates cleanly — the frame is tagged with THIS session's id.
+rpc 13 session/prompt "{\"sessionId\":\"$SID2\",\"prompt\":[{\"type\":\"text\",\"text\":\"\"}]}"
+wait_for '"id":13,' 'session/prompt(second session)' 15
+grep -F '_seek_turn_stop' "$OUT" | grep -qF "\"sessionId\":\"$SID2\"" \
+  || fail "second session's termination frame not tagged with its id"
+grep -F '"id":13' "$OUT" | grep -qF '"stopReason":"end_turn"' \
+  || fail "second session's prompt response != end_turn: $(grep '"id":13' "$OUT")"
+grep -qF "acp: session switched id=$SID2" "$SMOKE_ERR" \
+  || fail "second session's first prompt did not activate it (no switch line)"
+kill -0 "$SEEKPID" 2>/dev/null || fail 'second session: server died'
+echo "acp-smoke: two-session process ok (activation + per-session termination frame, read loop alive)"
+
 # --- 4. stdin EOF → clean shutdown --------------------------------------------
 exec 3>&-
 wait "$SEEKPID"; rc=$?
 [ "$rc" -eq 0 ] || fail "seek acp exited rc=$rc on EOF (want 0)"
-echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list+image-block anchor=$WS rc=0"
+echo "ACP-NDJSON-SMOKE-OK binary=real handshake=initialize+session/new+reply-routing+prompt-term+modes+session-list+image-block+two-session anchor=$WS rc=0"

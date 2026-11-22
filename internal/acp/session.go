@@ -44,8 +44,33 @@ type Anchor struct {
 	// ~/.seek/projects/ that archives project-scoped state.
 	ProjectID string
 	// Name is filepath.Base(Abs) — the human-facing project name, used
-	// as the ACP sessionId (one seek process = one session, MVP).
+	// as the ACP sessionId only under --no-save (no durable id there).
 	Name string
+}
+
+// ResolveAnchor validates a session cwd WITHOUT touching the process or
+// the policy — the record-only half of AnchorSession for the SECOND and
+// later sessions (ACP·P1-2, backlog ③): anchoring the live process per
+// session/new would yank the cwd out from under whichever session's turn
+// is running (session/new has no in-flight check, by design). The
+// recorded anchor becomes effective at that session's next turn — the
+// backend's activate runs the full AnchorSession there, under the turn
+// gate. Failure contract matches AnchorSession's: a cwd that cannot be
+// used fails loud at session/new time, so no session starts pointing at
+// a directory that isn't there.
+func ResolveAnchor(cwd string) (Anchor, error) {
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return Anchor{}, fmt.Errorf("acp: resolve session cwd %q: %w", cwd, err)
+	}
+	fi, serr := os.Stat(abs)
+	if serr != nil {
+		return Anchor{}, fmt.Errorf("acp: session cwd %q: %w", abs, serr)
+	}
+	if !fi.IsDir() {
+		return Anchor{}, fmt.Errorf("acp: session cwd %q: not a directory", abs)
+	}
+	return Anchor{Abs: abs, ProjectID: paths.ProjectID(abs), Name: filepath.Base(abs)}, nil
 }
 
 // AnchorSession resolves session/new's cwd parameter into an Anchor

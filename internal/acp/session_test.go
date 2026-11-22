@@ -217,3 +217,62 @@ func TestAnchorSession_BadCwdFailsLoud(t *testing.T) {
 		t.Fatalf("error = %d %q, want -32000 naming the bad cwd", e.Code, e.Message)
 	}
 }
+
+// TestResolveAnchor_ValidatesWithoutAnchoring pins the record-only half
+// (ACP·P1-2): a second session's cwd is validated at session/new time
+// but must NOT chdir the process or re-anchor the policy — that would
+// yank the cwd out from under the installed session's running turn.
+// Anchoring happens at that session's first turn (activate).
+func TestResolveAnchor_ValidatesWithoutAnchoring(t *testing.T) {
+	oldCwd := keepCwd(t)
+	pol, err := permission.New(oldCwd, permission.PrefDeny)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+
+	a, err := ResolveAnchor(dir)
+	if err != nil {
+		t.Fatalf("ResolveAnchor(%q): %v", dir, err)
+	}
+	if a.Abs != dir || a.Name != filepath.Base(dir) {
+		t.Fatalf("anchor = %+v, want abs %q name %q", a, dir, filepath.Base(dir))
+	}
+	if a.ProjectID != paths.ProjectID(dir) {
+		t.Fatalf("ProjectID = %q, want %q", a.ProjectID, paths.ProjectID(dir))
+	}
+	// Neither anchor half moved.
+	if got := pol.Cwd(); got != oldCwd {
+		t.Fatalf("policy cwd = %q, want unchanged %q", got, oldCwd)
+	}
+	if got, _ := os.Getwd(); got != oldCwd {
+		t.Fatalf("process cwd = %q, want unchanged %q", got, oldCwd)
+	}
+	// Empty cwd resolves to the CURRENT directory (same default as
+	// AnchorSession).
+	if a, err := ResolveAnchor(""); err != nil || a.Abs != oldCwd {
+		t.Fatalf("ResolveAnchor(\"\") = %+v, %v — want the current dir", a, err)
+	}
+}
+
+// TestResolveAnchor_BadCwdFailsLoud: the same fail-loud contract as
+// AnchorSession — a missing dir or a plain file rejects the session at
+// session/new time with the error naming the path.
+func TestResolveAnchor_BadCwdFailsLoud(t *testing.T) {
+	keepCwd(t)
+	missing := filepath.Join(t.TempDir(), "no-such-dir")
+	if _, err := ResolveAnchor(missing); err == nil {
+		t.Fatal("ResolveAnchor on a missing dir must fail loud")
+	} else if !strings.Contains(err.Error(), "no-such-dir") {
+		t.Fatalf("err = %v, want it to name the bad cwd", err)
+	}
+	file := filepath.Join(t.TempDir(), "plain.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveAnchor(file); err == nil {
+		t.Fatal("ResolveAnchor on a plain file must fail loud")
+	} else if !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("err = %v, want the not-a-directory reason", err)
+	}
+}

@@ -2572,8 +2572,9 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 }
 
 // acpBackend adapts seek's agent to the Agent Client Protocol (v7 柱 P).
-// One seek process = one ACP session (MVP); Prompt streams the agent's
-// event channel out as ACP session/update notifications.
+// Since ACP·P1-2 (backlog ③) one seek process serves N concurrent ACP
+// sessions: every session/new mints a fresh session and Prompt streams
+// the agent's event channel out as ACP session/update notifications.
 type acpBackend struct {
 	ag     *agent.Agent
 	route  visionRouter     // feature-vision: submit-time image router
@@ -2589,22 +2590,91 @@ type acpBackend struct {
 	store *session.Store
 	// menu is the configOptions model select (nil ⇒ the client filters
 	// the dropdown away, pre-C behaviour). Built once at startup from
-	// the startup lane; SetConfigOption rewrites CurrentValue in place.
-	// Only touched from the transport's serial read loop (dispatch), so
-	// no lock — prompt goroutines never read it.
+	// the startup lane; CurrentValue is served PER SESSION (menuFor —
+	// the shared slice is never mutated in place any more, so sessions
+	// can't read each other's model pick). Only touched from the
+	// transport's serial read loop (dispatch), so no lock — prompt
+	// goroutines never read it.
 	menu []acp.ConfigOption
 	// laneFor builds a provider lane on demand — a closure over
 	// buildProvider so the switch path and the startup path share one
 	// source of truth for keys/endpoints/defaults.
 	laneFor func(provider string) (llm.Provider, *deepseek.Client, string, error)
-	// sessionID is the single live session ("one seek process = one
-	// session"); anchored by NewSession / LoadSession, checked by
-	// SetConfigOption.
+	// sessionID is the id of the session currently installed in the
+	// live machinery (kept in step with b.installed.id; the field
+	// survives for error messages and tests).
 	sessionID string
 	// ask is the ACP approval lane (acp_approval.go, P0-2): nil on the
 	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
 	// scopes it per-turn so a permission request dies with its turn.
 	ask *acpApproval
+
+	// --- multi-session state (ACP·P1-2, backlog ③) -------------------
+	//
+	// Design in one breath: the agent, the policy, the tool registry
+	// and the process cwd are ONE shared machine that cannot be rebuilt
+	// per session (the registry's tools capture the *Policy at
+	// construction; the wiring behind them — memory, skills, subagents,
+	// checkpoints — is 1700 lines of startup). So the machine is
+	// TIME-MULTIPLEXED at turn granularity instead: each session's
+	// state (cwd anchor, permission axes, history, model lane, menu
+	// pick) lives in its acpSession entry; Prompt acquires the
+	// single-slot turn gate, activates the target session into the
+	// shared machine, runs the turn, and pulls the mutations back into
+	// the entry. Sessions therefore never share mutable state — they
+	// share a register. The cost is that turns SERIALISE across
+	// sessions (a turn in flight queues the next session's turn), which
+	// is the same "between turns" boundary the transport already
+	// enforces for set_config_option / set_mode / load.
+	mu sync.Mutex // guards sessions + installed + turnSlot + the live session slot's field accesses (short sections only)
+	// The slot invariant (why mu reaches into b.sess, which the turn
+	// side already serialises via the gate): session/new is dispatched
+	// INLINE in the read loop without the turn gate, so its reads of
+	// b.sess — and the first branch's CWD write — are the one slot
+	// traffic the gate never orders. Every cross-gate slot access
+	// (NewSession's block, saveTurn's writes, activate's whole-struct
+	// write, deactivate's pull-back read) therefore takes mu on BOTH
+	// sides; gate-held writers still take it because a mutex only
+	// excludes when everyone participates. LoadSession needs no mu:
+	// the transport rejects it while any prompt is in flight and the
+	// read loop is serial, so it overlaps neither a turn nor a new.
+	// sessions maps ACP sessionId (= durable transcript id) → state.
+	// Entries live for the process lifetime: ACP v1 has no
+	// session/delete (seek deliberately does not advertise it), so
+	// "session end" is the process ending — the table is bounded by
+	// however many conversations the client opens, each a few structs.
+	sessions map[string]*acpSession
+	// installed is the session whose state currently sits in the shared
+	// machine. nil until the first session/new / session/load (or in
+	// --no-save tests that never create one — Prompt then runs bare, on
+	// the startup state, exactly the pre-P1-2 shape).
+	installed *acpSession
+	// turnSlot is the cross-session turn gate (buffered chan, cap 1 —
+	// cancellable acquire, unlike a sync.Mutex). Lazy-initialised
+	// under mu by turnGate so every construction path (runACP's literal
+	// AND the test harnesses' literals) works unchanged.
+	turnSlot chan struct{}
+}
+
+// acpSession is one live ACP session's per-session state — everything
+// the acceptance calls the "four axes": cwd anchor, permission
+// workflow/grants, the history stack, and the model lane. The
+// session.Session object is the durable half (transcript); the rest is
+// runtime state that — exactly like the TUI's — dies with the process
+// and is never persisted.
+type acpSession struct {
+	id   string // ACP sessionId == durable transcript id
+	cwd  string // anchored absolute working directory
+	sess *session.Session
+	// workflow + grants are the session-scoped permission axes the
+	// shared policy carries while this session is installed (pref,
+	// askFn and the checkpoint hook are process-level services and
+	// deliberately NOT per session).
+	workflow  permission.Workflow
+	grants    []permission.Kind // alwaysAllow snapshot (nil = none)
+	modeLabel string            // agent per-message mode reminder
+	// menuValue is this session's configOptions pick ("<provider>:<model>").
+	menuValue string
 }
 
 // Initialize answers the ACP handshake: it negotiates the protocol
@@ -2689,24 +2759,99 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 // project name stays (and Initialize stops advertising loadSession).
 // Since C, the result also carries the model configOptions menu —
 // a non-nil menu is what makes ACP clients render the dropdown.
+//
+// ACP·P1-2 (backlog ③): a second session/new MINTS a new session
+// instead of re-anchoring the live one — one seek process now serves
+// N conversations. Anchoring discipline: only the FIRST session
+// anchors the live process at new-time (the pre-P1-2 behaviour,
+// byte-for-byte); every later session is record-only
+// (acp.ResolveAnchor validates the cwd without touching the process —
+// a chdir here would yank the cwd out from under whichever session's
+// turn is running, since session/new has no in-flight check). The
+// recorded anchor becomes effective at that session's first Prompt
+// (activate runs the full AnchorSession then). The first session also
+// keeps the startup transcript's id (the pre-P1-2 rule), so the
+// single-session wire behaviour is unchanged.
 func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, error) {
-	anchor, err := acp.AnchorSession(p.Cwd, b.policy)
+	b.mu.Lock()
+	first := b.installed == nil && len(b.sessions) == 0
+	b.mu.Unlock()
+	var (
+		anchor acp.Anchor
+		err    error
+	)
+	if first {
+		anchor, err = acp.AnchorSession(p.Cwd, b.policy)
+	} else {
+		anchor, err = acp.ResolveAnchor(p.Cwd)
+	}
 	if err != nil {
 		return acp.NewSessionResult{}, err
 	}
-	id := anchor.Name
-	if b.sess != nil {
-		// One seek process = one live session, so a second session/new
-		// re-anchors the existing one rather than minting another. Keep
-		// the transcript's CWD honest when the anchor moved.
-		b.sess.CWD = anchor.Abs
-		if b.sess.ID != "" {
-			id = b.sess.ID
-		}
+	st := &acpSession{
+		cwd:       anchor.Abs,
+		workflow:  permission.WorkflowNone,
+		menuValue: b.menuValue(),
 	}
-	b.sessionID = id
-	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, id)
-	return acp.NewSessionResult{SessionID: id, ConfigOptions: b.menu, Modes: acpSessionModes(b.policy.Workflow())}, nil
+	// The session-slot block runs under mu, together with the table
+	// insert: session/new is served inline in the read loop WITHOUT the
+	// turn gate (opening a second panel must not queue behind the first
+	// conversation's turn), so these reads — and the first branch's CWD
+	// write — can interleave with the turn goroutine's slot writes
+	// (saveTurn per TurnEnd, activate's whole-struct write on switch).
+	// The gate only orders turn-side traffic; mu is the one edge both
+	// sides share. A construction-time TEMPLATE snapshot would also be
+	// race-free but silently changes semantics: the fresh branch
+	// inherits the INSTALLED session's lane (a model switch in panel A
+	// carries into panel B), which a startup-time snapshot would revert
+	// to the launch lane.
+	b.mu.Lock()
+	if b.sess != nil {
+		if first {
+			// Today's rule for the one live session: keep the startup
+			// transcript (its id is what the client may have persisted
+			// before), keep its CWD honest when the anchor moved. The
+			// state entry gets a PRIVATE copy of the session object so
+			// a later install of another session (which overwrites the
+			// shared slot in place) cannot clobber this session's
+			// recorded state.
+			b.sess.CWD = anchor.Abs
+			c := *b.sess
+			st.sess = &c
+			st.id = anchor.Name
+			if b.sess.ID != "" {
+				st.id = b.sess.ID
+			}
+			st.workflow = b.policy.Workflow()
+		} else {
+			// A genuinely new conversation: fresh durable id, fresh
+			// transcript (written by saveTurn on the first completed
+			// turn), inheriting the startup lane + system prompt. The
+			// sysprompt/memory/skills stay launch-scoped — per-session
+			// is exactly the four axes (cwd/policy/history/lane).
+			fresh := session.New(b.sess.Model, anchor.Abs, b.sess.SystemPrompt, b.sess.Yolo, b.sess.Plan)
+			fresh.Effort = b.sess.Effort
+			st.sess = fresh
+			st.id = fresh.ID
+		}
+	} else {
+		// --no-save: no durable id, the project name is the session id
+		// (degenerate for multi-session — same dir means same id; the
+		// lane is unreachable from the CLI anyway, flags don't parse
+		// past the "acp" positional).
+		st.id = anchor.Name
+	}
+	if b.sessions == nil {
+		b.sessions = make(map[string]*acpSession)
+	}
+	b.sessions[st.id] = st
+	if first {
+		b.installed = st
+		b.sessionID = st.id
+	}
+	b.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "acp: session anchored cwd=%s project=%s id=%s\n", anchor.Abs, anchor.ProjectID, st.id)
+	return acp.NewSessionResult{SessionID: st.id, ConfigOptions: b.menuFor(st), Modes: acpSessionModes(st.workflow)}, nil
 }
 
 // LoadSession resumes a stored session (session/load): load, re-anchor,
@@ -2718,6 +2863,13 @@ func (b *acpBackend) NewSession(p acp.NewSessionParams) (acp.NewSessionResult, e
 // x-opencode-session id, the checkpoint manager — all captured the
 // original pointer, and reassigning would leave them describing the
 // previous conversation while the agent runs the loaded one.
+//
+// ACP·P1-2: the loaded conversation is also RECORDED as its session
+// table entry and INSTALLED as the live one — load swaps which session
+// the machinery runs, exactly as it did when the process held only one
+// (semantics unchanged; the transport still rejects load while any
+// prompt is in flight, so the swap races nothing). A load of an id that
+// is already live re-reads the transcript and re-seeds, same as before.
 func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.SessionUpdate)) (acp.LoadSessionResult, error) {
 	if b.store == nil || b.sess == nil {
 		return acp.LoadSessionResult{}, errors.New("session/load: persistence is off (--no-save) — no transcript to load")
@@ -2750,21 +2902,26 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	if err != nil {
 		return acp.LoadSessionResult{}, err
 	}
-	// Restore the lane the session was last using. ResolveRoute infers
-	// the provider from the model id (the registry is keyed by wire id);
-	// a freeform id belonging to no lane keeps the current lane and just
-	// re-points the model, which is what `-resume` of such a session does.
-	if loaded.Model != "" && loaded.Model != b.ag.Model() {
-		if route, rerr := subagent.ResolveRoute("", loaded.Model); rerr == nil {
-			provider, dsClient, _, lerr := b.laneFor(route.Provider)
-			if lerr != nil {
-				return acp.LoadSessionResult{}, fmt.Errorf("session/load: restore lane %s: %w", route.Provider, lerr)
-			}
-			b.ag.SetLane(provider, dsClient, loaded.Model)
-		} else {
-			b.ag.SetModel(loaded.Model)
-		}
-		b.setMenuCurrent(loaded.Model)
+	// Restore the lane the session was last using (applyLane: ResolveRoute
+	// infers the provider from the model id — the registry is keyed by
+	// wire id; a freeform id belonging to no lane keeps the current lane
+	// and just re-points the model, which is what `-resume` of such a
+	// session does).
+	if err := b.applyLane(loaded.Model); err != nil {
+		return acp.LoadSessionResult{}, fmt.Errorf("session/load: %w", err)
+	}
+	loadedCopy := *loaded // the table entry's private object (slot swaps must not clobber it)
+	st := &acpSession{
+		id:        loaded.ID,
+		cwd:       anchor.Abs,
+		sess:      &loadedCopy,
+		workflow:  b.policy.Workflow(),
+		grants:    b.policy.AlwaysAllowKinds(),
+		modeLabel: "",
+		menuValue: b.menuValue(),
+	}
+	if v := b.menuValueForModel(loaded.Model); v != "" {
+		st.menuValue = v
 	}
 
 	// Swap the live session in place (see the doc comment) and reseed the
@@ -2774,14 +2931,21 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	*b.sess = *loaded
 	b.sess.CWD = anchor.Abs
 	originalID := loaded.ID
-	b.sessionID = originalID
 	b.ag.Reset(loaded.Messages)
+	b.mu.Lock()
+	if b.sessions == nil {
+		b.sessions = make(map[string]*acpSession)
+	}
+	b.sessions[originalID] = st
+	b.installed = st
+	b.sessionID = originalID
+	b.mu.Unlock()
 
 	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
 		sendU(u)
 	}
 	fmt.Fprintf(os.Stderr, "acp: session loaded id=%s messages=%d cwd=%s\n", originalID, len(loaded.Messages), anchor.Abs)
-	return acp.LoadSessionResult{ConfigOptions: b.menu, Modes: acpSessionModes(b.policy.Workflow())}, nil
+	return acp.LoadSessionResult{ConfigOptions: b.menuFor(st), Modes: acpSessionModes(b.policy.Workflow())}, nil
 }
 
 // ListSessions enumerates the store's transcripts for session/list —
@@ -2821,24 +2985,50 @@ func (b *acpBackend) ListSessions(p acp.ListSessionsParams) (acp.ListSessionsRes
 	return acp.ListSessionsResult{Sessions: out}, nil
 }
 
-// setMenuCurrent re-points the model dropdown at a model id after a
+// menuValue is the shared menu's current pick — the seed a new
+// acpSession's menuValue starts from (the startup lane).
+func (b *acpBackend) menuValue() string {
+	if len(b.menu) > 0 {
+		return b.menu[0].CurrentValue
+	}
+	return ""
+}
+
+// menuValueForModel re-points the model dropdown at a model id after a
 // session/load. Ids are curated-per-lane, so the first option whose model
-// half matches wins; an unlisted model leaves the menu untouched (the
-// dropdown then shows a lane the session isn't on — a lie the client can
-// only avoid by re-reading session/load's configOptions, which is why
-// they are returned).
-func (b *acpBackend) setMenuCurrent(model string) {
+// half matches wins; an unlisted model yields "" (the dropdown then shows
+// a lane the session isn't on — a lie the client can only avoid by
+// re-reading session/load's configOptions, which is why they are
+// returned).
+func (b *acpBackend) menuValueForModel(model string) string {
 	for _, opt := range b.menu {
 		if opt.ID != "model" {
 			continue
 		}
 		for _, v := range opt.Options {
 			if _, m, ok := strings.Cut(v.Value, ":"); ok && m == model {
-				b.menu[0].CurrentValue = v.Value
-				return
+				return v.Value
 			}
 		}
 	}
+	return ""
+}
+
+// menuFor serves the config menu with THIS session's current value —
+// a copy, never the shared slice: mutating b.menu in place (the
+// pre-P1-2 shape) would leak one session's model pick into every other
+// session's dropdown. A nil menu serves nil (the no-dropdown wire
+// shape); a session with no recorded pick shows the startup value.
+func (b *acpBackend) menuFor(st *acpSession) []acp.ConfigOption {
+	if len(b.menu) == 0 {
+		return b.menu
+	}
+	menu := make([]acp.ConfigOption, len(b.menu))
+	copy(menu, b.menu)
+	if st != nil && st.menuValue != "" {
+		menu[0].CurrentValue = st.menuValue
+	}
+	return menu
 }
 
 // SetConfigOption applies a model-dropdown pick. configId "model" is
@@ -2846,8 +3036,18 @@ func (b *acpBackend) setMenuCurrent(model string) {
 // (acpModelMenu). The transport rejects the request while a prompt is
 // in flight (internal/acp dispatch — see the happens-before note
 // there), so the lane swap below races nothing.
+//
+// ACP·P1-2: the pick lands in the TARGET session's state; the live
+// agent is swapped only when that session is the installed one (the
+// single-session behaviour, byte-for-byte). A backgrounded session's
+// pick is applied by activate at its next turn — the lane state lives
+// in the session entry, the live agent is a register.
 func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfigOptionResult, error) {
-	if b.sessionID == "" || p.SessionID != b.sessionID {
+	b.mu.Lock()
+	st := b.sessions[p.SessionID]
+	installed := b.installed != nil && b.installed == st
+	b.mu.Unlock()
+	if st == nil {
 		return acp.SetConfigOptionResult{}, fmt.Errorf("unknown session %q", p.SessionID)
 	}
 	if p.ConfigID != "model" {
@@ -2877,10 +3077,15 @@ func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfig
 	if err != nil {
 		return acp.SetConfigOptionResult{}, fmt.Errorf("switch to %s: %w", prov, err)
 	}
-	b.ag.SetLane(provider, dsClient, model)
-	b.menu[0].CurrentValue = p.Value
+	st.menuValue = p.Value
+	if st.sess != nil {
+		st.sess.Model = model
+	}
+	if installed {
+		b.ag.SetLane(provider, dsClient, model)
+	}
 	fmt.Fprintf(os.Stderr, "acp: model switched provider=%s model=%s\n", prov, model)
-	return acp.SetConfigOptionResult{ConfigOptions: b.menu}, nil
+	return acp.SetConfigOptionResult{ConfigOptions: b.menuFor(st)}, nil
 }
 
 // SetMode is session/set_mode's backend half (ACP·P2, backlog ④): the
@@ -2891,19 +3096,35 @@ func (b *acpBackend) SetConfigOption(p acp.SetConfigOptionParams) (acp.SetConfig
 // baked label is never rewritten mid-session, the P0-2 desync lesson).
 // Only called between turns (transport rejects in-flight prompts), so
 // the unlocked policy flip races nothing.
+//
+// ACP·P1-2: the flip lands in the TARGET session's state; the shared
+// policy + live agent flip only when that session is installed (the
+// single-session behaviour, byte-for-byte). Mode is thus a per-session
+// axis — one session sitting in plan does not read-only another.
 func (b *acpBackend) SetMode(p acp.SetModeParams) error {
-	if b.sessionID == "" || p.SessionID != b.sessionID {
+	b.mu.Lock()
+	st := b.sessions[p.SessionID]
+	installed := b.installed != nil && b.installed == st
+	b.mu.Unlock()
+	if st == nil {
 		return fmt.Errorf("unknown session %q", p.SessionID)
 	}
 	switch p.ModeID {
 	case acp.ModePlan:
-		b.policy.SetWorkflow(permission.WorkflowPlanAnalyze)
-		b.ag.SetModeLabel("plan-analyze")
+		st.workflow = permission.WorkflowPlanAnalyze
+		st.modeLabel = "plan-analyze"
 	case acp.ModeDefault:
-		b.policy.SetWorkflow(permission.WorkflowNone)
-		b.ag.SetModeLabel("")
+		st.workflow = permission.WorkflowNone
+		st.modeLabel = ""
 	default:
 		return fmt.Errorf("unknown mode %q (available: %s, %s)", p.ModeID, acp.ModeDefault, acp.ModePlan)
+	}
+	// Grants die on every workflow transition (the policy's own
+	// invariant, mirrored here for the backgrounded-session case).
+	st.grants = nil
+	if installed {
+		b.policy.SetWorkflow(st.workflow)
+		b.ag.SetModeLabel(st.modeLabel)
 	}
 	fmt.Fprintf(os.Stderr, "acp: mode set %s\n", p.ModeID)
 	return nil
@@ -3141,6 +3362,51 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 		sendU(acp.SessionUpdate{SessionID: p.SessionID, Update: acp.NewTurnStop(reason, detail, finish)})
 	}
 
+	// ACP·P1-2: the cross-session turn gate. The shared machine (agent,
+	// policy, process cwd) serves ONE turn at a time; a prompt for
+	// another session waits here — cancelled cleanly if its ctx dies
+	// while queued (a channel, not a Mutex, precisely because Mutex
+	// acquisition cannot observe ctx cancellation). This is the whole
+	// concurrency story: sessions interleave at turn granularity and
+	// share no mutable state, they share a register.
+	gate := b.turnGate()
+	select {
+	case gate <- struct{}{}:
+		defer func() { <-gate }()
+	case <-ctx.Done():
+		turnStop(acp.FrameStopCancelled, "client cancelled the turn before it started", "")
+		return acp.PromptResult{StopReason: acp.StopCancelled}, nil
+	}
+	// Unknown ids fall back to the installed session — the pre-P1-2
+	// semantics where every prompt runs on the one live session (probe
+	// "smoke" in acp-smoke-test.sh rides this). Known ids switch the
+	// machine first.
+	b.mu.Lock()
+	st := b.sessions[p.SessionID]
+	if st == nil {
+		st = b.installed
+	}
+	switching := st != nil && st != b.installed
+	b.mu.Unlock()
+	if switching {
+		if err := b.activate(st); err != nil {
+			frameReason := acp.FrameStopFromError(err)
+			turnStop(frameReason, err.Error(), "")
+			return acp.PromptResult{}, err
+		}
+	}
+	// Pull the turn's mutations back into the session entry (history
+	// lands there via saveTurn's slot write; workflow/grants may have
+	// moved inside the turn). Registered AFTER the gate-release defer,
+	// so it runs BEFORE the gate opens — another session's activate
+	// must not be able to interleave between the turn and the pull-back
+	// and have its slot contents land in the wrong entry.
+	defer func() {
+		if st != nil {
+			b.deactivate(st)
+		}
+	}()
+
 	text, images, files := buildACPPromptText(ctx, b.ag.Model(), p, b.route, b.froute)
 	if text == "" {
 		turnStop(acp.FrameStopEndTurn, "empty prompt: no text after image/file routing", "")
@@ -3254,17 +3520,120 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	}
 }
 
+// turnGate lazily initialises and returns the cross-session turn gate.
+// Lazy (under mu) so every construction path works unchanged — runACP's
+// literal and the test harnesses' literals never mention it.
+func (b *acpBackend) turnGate() chan struct{} {
+	b.mu.Lock()
+	if b.turnSlot == nil {
+		b.turnSlot = make(chan struct{}, 1)
+	}
+	ch := b.turnSlot
+	b.mu.Unlock()
+	return ch
+}
+
+// activate installs st's state into the shared machine: process+policy
+// anchor, permission axes, mode label, model lane, history, and the
+// live session slot (in-place, so main's closures — subagent parent-sid,
+// x-opencode-session, checkpoints — describe the conversation actually
+// about to run, the same trick session/load has always used). Only ever
+// called with the turn gate held, and only when st is not already the
+// installed session (the fast path — st == installed — runs zero
+// activation machinery, which is what keeps a single-session process
+// byte-for-byte on the pre-P1-2 code path).
+func (b *acpBackend) activate(st *acpSession) error {
+	if _, err := acp.AnchorSession(st.cwd, b.policy); err != nil {
+		return fmt.Errorf("activate session %s: %w", st.id, err)
+	}
+	// SetWorkflow clears grants + exec state — the right reset for a
+	// switch — then this session's grants replay on top.
+	b.policy.SetWorkflow(st.workflow)
+	if len(st.grants) > 0 {
+		b.policy.RestoreAlwaysAllow(st.grants)
+	}
+	b.ag.SetModeLabel(st.modeLabel)
+	var history []deepseek.Message
+	if st.sess != nil {
+		if err := b.applyLane(st.sess.Model); err != nil {
+			return fmt.Errorf("activate session %s: %w", st.id, err)
+		}
+		// mu for the slot write: session/new may be reading the slot
+		// from the read loop while this switch runs under the gate.
+		b.mu.Lock()
+		*b.sess = *st.sess
+		b.mu.Unlock()
+		history = st.sess.Messages
+	}
+	// Reset ALWAYS runs on a switch — a nil sess (--no-save) means the
+	// history is "fresh", not "whatever the previous session left in
+	// the agent".
+	b.ag.Reset(history)
+	b.mu.Lock()
+	b.installed = st
+	b.sessionID = st.id
+	b.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "acp: session switched id=%s cwd=%s\n", st.id, st.cwd)
+	return nil
+}
+
+// deactivate pulls the machine's post-turn state back into st's entry:
+// the durable session object (messages/model landed there via saveTurn's
+// slot write) plus the two permission axes a turn can move (the plan
+// tool flips workflow inside a turn; allow_always grows the grants).
+// Runs with the turn gate still held; the slot read is ADDITIONALLY
+// mu-guarded because the gate is no edge at all for the read loop —
+// session/new touches the slot mid-turn without taking the gate.
+// modeLabel needs no pull-back: only SetMode writes it, and SetMode
+// records st directly.
+func (b *acpBackend) deactivate(st *acpSession) {
+	if st.sess != nil && b.sess != nil {
+		b.mu.Lock()
+		*st.sess = *b.sess
+		b.mu.Unlock()
+	}
+	st.workflow = b.policy.Workflow()
+	st.grants = b.policy.AlwaysAllowKinds()
+}
+
+// applyLane points the agent at model — the lane-restore half
+// session/load has always run, extracted so activate can replay a
+// switched-in session's lane from its recorded model. ResolveRoute
+// infers the provider from the model id; a freeform id belonging to no
+// lane keeps the current lane and just re-points the model.
+func (b *acpBackend) applyLane(model string) error {
+	if model == "" || model == b.ag.Model() {
+		return nil
+	}
+	if route, rerr := subagent.ResolveRoute("", model); rerr == nil {
+		provider, dsClient, _, lerr := b.laneFor(route.Provider)
+		if lerr != nil {
+			return fmt.Errorf("restore lane %s: %w", route.Provider, lerr)
+		}
+		b.ag.SetLane(provider, dsClient, model)
+	} else {
+		b.ag.SetModel(model)
+	}
+	return nil
+}
+
 // saveTurn snapshots the live session to disk. Best-effort: a failed
 // write is a warning, never a turn failure — the answer already went to
 // the client, and losing a transcript must not lose the conversation.
-// No-op under --no-save (either pointer is nil there).
+// No-op under --no-save (either pointer is nil there). The slot writes
+// are mu-guarded because session/new reads the slot from the read loop
+// without the turn gate; the disk write runs on a private copy OUTSIDE
+// mu so the lock never spans I/O.
 func (b *acpBackend) saveTurn() {
 	if b.sess == nil || b.store == nil {
 		return
 	}
+	b.mu.Lock()
 	b.sess.Messages = b.ag.Messages()
 	b.sess.Model = b.ag.Model()
-	if err := b.store.Save(b.sess); err != nil {
+	c := *b.sess
+	b.mu.Unlock()
+	if err := b.store.Save(&c); err != nil {
 		fmt.Fprintf(os.Stderr, "acp: warning: session save failed: %v\n", err)
 	}
 }
