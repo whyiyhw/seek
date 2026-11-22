@@ -93,7 +93,50 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
-31332461
+# 2026-11-21 c_6xktw4 delta: +26664B (same-tree comparison on the 1.27.3
+# line, main@1d921d45 31501923 → branch 31528587; the first-merge reading
+# was +17520B — the second main absorption's session.go→title.go refactor
+# grew the cross-package interaction by ~9KB without any new card code):
+# stats/trend fold + session/list server-side pricing + SessionInfo.Usage
+# compile body + ~8.2KB page embed (JS 6.6KB hand-drawn SVG/hover/window
+# switch, CSS 1.1KB, markup 0.5KB). Over the §13.3 ≤12KB card quota —
+# B 案「超在记账、不在 gate」(main session's 2026-11-21 proxy decision,
+# c_n37tnr/c_oyp2qf/c_rqcuaa/c_xz2bey precedent).
+#
+#
+# PIN NOT RATCHETED (user decision 2026-11-22, option B). The card leaves
+# the pin alone instead of ratcheting to its branch tip (pin was 31332461
+# at decision time; c_vxh4ro has since moved it — see below). The
+# +196126B then between pin and tip was +26664B of this card plus +169462B of
+# main's OWN un-ratcheted growth since the pin (31501923−31332461 — ACP
+# P0-2/P1-3/P2, v8-V1 task lifetime, eval E6 lane, session title split:
+# the 35 commits this branch's second merge absorbed). Folding another 35
+# commits' growth into a ≤12KB feature card's ledger makes this card's
+# number meaningless — whoever grows the binary should ratchet for it.
+# c_rqcuaa's 「随本合并同步棘轮」 precedent was invoked to justify the
+# opposite; its own ratchet (+53096B) WAS its own delta, which is why it
+# does not reach here.
+#
+#
+# RESOLVED 2026-11-22 (merge, main session): the flagged main-side drift has
+# since been ratcheted by c_vxh4ro (block below, pin now 31557490). This card
+# rides that pin and ratchets nothing itself; its own contribution against
+# the new pin is +21912B (branch 31579402 − 31557490), well inside the
+# 204800B budget. The pre-ratchet "196126B / 8674B headroom" reading (replaced by
+# this note) is obsolete.
+# 2026-11-22 c_vxh4ro：+225029B（main 实测 31557490 − pin 31332461）。这次
+# 抬的是 62 个提交的累积漂移，非任何单卡——pin 上次落在 f9e5dfc2（11-21）
+# 后，62 个提交（133 文件 +14845/-376）无一次合并闸 ratchet（butler 合并闸
+# 只跑 go test，三道 CI 闸在 PR 面 keyless 慢车道上静默累积一周）。本卡同时
+# 把三道 CI 闸归位进合并闸（butler 仓 .butler/merge-gates.json 声明机制），
+# 此后漂移在合并点被拦。
+# 实测锚：main@f45d4069、2026-11-22、go1.27.3（go.mod 同线），在该主检出跑
+# bash scripts/web-gate.sh 输出 built 31557490B（冷 GOCACHE 重编同值）——与
+# 卡面 main 实测值逐字节一致；卡面备选的 31579402 是 c_6xktw4 分支尖
+#（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
+# 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
+# 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
+31557490
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).

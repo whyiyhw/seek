@@ -468,6 +468,12 @@ type SessionInfo struct {
 	// that bucket sessions by project hash it with paths.ProjectID
 	// (skill auto-distillation's batch scan, M-SD2).
 	CWD string
+	// Usage is the header's cumulative usage — the same block
+	// stats/cache serves. It rides SessionInfo because loadMeta already
+	// decodes the whole header object: the asset plane's cost column
+	// (session/list) and per-session trend points (stats/trend) get it
+	// with no second read per session.
+	Usage deepseek.Usage
 }
 
 // List returns metadata for every session in the store, newest first.
@@ -547,6 +553,7 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		ToolCalls: sess.ToolCalls,
 		ParentID:  sess.ParentID,
 		CWD:       sess.CWD,
+		Usage:     sess.Usage,
 	}, nil
 }
 

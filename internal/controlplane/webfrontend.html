@@ -177,7 +177,7 @@
     --seek-inset: #14161a;   /* 页面底/代码块底/输入框底 */
     --seek-panel: #1b1e24;   /* 顶栏/状态栏/侧栏/卡片/表单底 */
     --seek-soft:  #242830;   /* 气泡/统计卡/次级按钮底 */
-    --seek-accent:var(--seek-accent);   /* 用户气泡/当前行/主按钮底 */
+    --seek-accent:#2c3d5f;   /* 用户气泡/当前行/主按钮底 */
     --seek-line:  #2a2e36;   /* 主分隔线/边框 */
     --seek-line-2:#22252c;   /* 列表行分隔线（更淡一档） */
     --seek-line-focus:#4b586b; /* 输入聚焦边框 */
@@ -187,12 +187,12 @@
                                 首版 #858b93 在 soft 上 4.3 红（设置卡/
                                 统计卡的 k 列都长在 soft 上）；accent 底
                                 上的次级文字由组件规则升主文色，不靠这条 */
-    --seek-fg-soft:var(--seek-fg-soft);  /* 工具行/徽标/卡片标题 */
+    --seek-fg-soft:#9aa0a8;  /* 工具行/徽标/卡片标题 */
     --seek-ok:    #7ec699;
-    --seek-warn:  var(--seek-warn);
+    --seek-warn:  #d8a657;
     --seek-warn-bg:#3a3222;  /* 警示条底（SSE 断线提示）——底色与前景分开
                                 成对，亮色主题才好各自调值 */
-    --seek-err:   var(--seek-err);
+    --seek-err:   #d8756f;
     --seek-link:  var(--seek-ok);
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
@@ -486,11 +486,16 @@
               background: transparent; cursor: pointer; position: relative; }
   .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
-  .sess-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px;
-                  margin-top: 2px; }
+  /* t2 行是两段（左=时间/轮次/模型，右=per-session cost 列，c_6xktw4）：
+     flex 让 cost 右贴不换行，左段自己省略。 */
+  .sess-row .t2 { display: flex; gap: 8px; justify-content: space-between;
+                  color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
+  .sess-row .t2l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sess-row .t2c { flex: none; color: var(--seek-ok); }
   .sess-row.cur { background: var(--seek-accent); }
   /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
   .sess-row.cur .t2 { color: var(--seek-fg); }
+  .sess-row.cur .t2c { color: var(--seek-fg); }
   .sess-row.arch { opacity: .55; }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
   /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
@@ -613,6 +618,33 @@
   .stat-bar { height: 10px; border-radius: 5px; background: var(--seek-accent); overflow: hidden;
               margin-top: 8px; }
   .stat-bar .hit { height: 100%; background: var(--seek-ok); }
+
+  /* ---- 跨会话趋势图（W5 卡 c_6xktw4）----
+     三条曲线共用一条 x 轴，但各自归一到自己那一行；颜色全部走
+     --seek-* token（两主题同一组语义名换值，裸 hex 会破亮色主题）：
+     $ = ok 绿（与 .usd 同义），tokens = fg 中性，缓存 = warn 琥珀。 */
+  #trend-tools { display: flex; gap: 12px; flex-wrap: wrap; }
+  .tseg { display: inline-flex; gap: 4px; }
+  .tbtn { background: var(--seek-panel); color: var(--seek-fg-soft);
+          border: 1px solid var(--seek-line);
+          border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; }
+  .tbtn.on { color: var(--seek-fg); border-color: var(--seek-line-focus);
+             background: var(--seek-accent); }
+  #trend-plot { position: relative; min-height: 96px; margin-top: 8px; }
+  #trend-plot svg { display: block; width: 100%; height: 96px; }
+  .axis { stroke: var(--seek-line); stroke-width: 1; }
+  .tline { fill: none; stroke: var(--seek-ok); stroke-width: 1.6; }
+  .tline.tokens { stroke: var(--seek-fg); }
+  .tline.cache { stroke: var(--seek-warn); }
+  .tdot { fill: var(--seek-ok); }
+  .tdot.tokens { fill: var(--seek-fg); }
+  .tdot.cache { fill: var(--seek-warn); }
+  .tguide { stroke: var(--seek-fg-dim); stroke-width: 1; stroke-dasharray: 2 2; }
+  .tlab { fill: var(--seek-fg-dim); font-size: 9px; }
+  #trend-tip { position: absolute; z-index: 2; background: var(--seek-inset);
+               border: 1px solid var(--seek-line); border-radius: 6px; padding: 4px 8px;
+               font-size: 12px; color: var(--seek-fg); pointer-events: none;
+               white-space: nowrap; }
 
   /* ---- 设置面板（W5 卡 c_ni7mzw：设置只读展示 + 关于区）----
      与三个资产面板同一副「中栏一个面」骨架（.pane + *-view 类），故只
@@ -738,7 +770,17 @@
       <div class="pane-head">
         <select id="stat-sess" aria-label="会话"></select>
       </div>
-      <div id="stat-body"></div>
+      <div id="stat-body">
+        <!-- 跨会话趋势（W5 卡 c_6xktw4）：近 N 会话的 tokens/$ 曲线 + cache
+             命中趋势，手绘 SVG（零 vendor，§4.2）。窗口切换与图例在这里，
+             单会话快照卡片落在 #stat-cards（showStats 只重写那一块）。 -->
+        <div id="trend-card" class="stat-card">
+          <h3>跨会话趋势</h3>
+          <div id="trend-tools"></div>
+          <div id="trend-plot"></div>
+        </div>
+        <div id="stat-cards"></div>
+      </div>
     </section>
     <!-- 设置面板（W5 c_ni7mzw）：外观（主题三态，纯前端）+ serve 侧
          配置只读展示 + 关于区（版本、入口 token 短显）。数据来自
@@ -2241,7 +2283,17 @@ function renderSessRows() {
     const t2 = document.createElement('span');
     t2.className = 't2';
     const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
-    t2.textContent = (s.archived ? '已归档 · ' : '') + when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+    const t2l = document.createElement('span');
+    t2l.className = 't2l';
+    t2l.textContent = (s.archived ? '已归档 · ' : '')
+      + when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+    // per-session cost 列（c_6xktw4）：cost_usd 服务端算好的，页面只排版
+    // （§2.5 client never prices）。
+    const t2c = document.createElement('span');
+    t2c.className = 't2c';
+    t2c.textContent = fmtUSD(s.cost_usd);
+    t2.appendChild(t2l);
+    t2.appendChild(t2c);
     row.appendChild(t1);
     row.appendChild(t2);
     const acts = document.createElement('span');
@@ -3204,7 +3256,9 @@ memProj.addEventListener('change', () => loadMemList(memProj.value));
 // 命中率条宽经 CSSOM（el.style.width）设置——style 属性才归 CSP 管，
 // CSSOM 不受 style-src 限制，且宽度只可能是数字。
 const statSess = document.getElementById('stat-sess');
-const statBody = document.getElementById('stat-body');
+const statCards = document.getElementById('stat-cards');
+const trendPlot = document.getElementById('trend-plot');
+const trendTools = document.getElementById('trend-tools');
 
 // 与服务端成本展示同刻度的格式化（只排版数值，不携带任何费率——费率
 // 只住在服务端的费率表里）：
@@ -3217,12 +3271,14 @@ function fmtUSD(c) {
 }
 
 async function loadStatPane() {
-  paneHint(statBody, '加载中…');
+  loadTrend();
+  statSess.replaceChildren();
+  paneHint(statCards, '加载中…');
   try {
     const res = await rpc('session/list', {});
     statSess.replaceChildren();
     if (!res.sessions.length) {
-      return paneHint(statBody, '（没有历史会话——先在终端里用 seek 跑一阵）');
+      return paneHint(statCards, '（没有历史会话——先在终端里用 seek 跑一阵）');
     }
     for (const s of res.sessions) {
       const opt = document.createElement('option');
@@ -3232,18 +3288,18 @@ async function loadStatPane() {
       statSess.appendChild(opt);
     }
     showStats(statSess.value);
-  } catch (e) { paneHint(statBody, 'session/list 失败：' + e.message); }
+  } catch (e) { paneHint(statCards, 'session/list 失败：' + e.message); }
 }
 
 async function showStats(sid) {
   if (!sid) return;
   const me = sid;
-  paneHint(statBody, '读取中…');
+  paneHint(statCards, '读取中…');
   try {
     const r = await rpc('stats/cache', { sid });
     if (statSess.value !== me) return;  // 响应回来前已切走：丢弃
     const u = r.usage || {};
-    statBody.replaceChildren();
+    statCards.replaceChildren();
 
     const cache = document.createElement('div');
     cache.className = 'stat-card';
@@ -3260,7 +3316,7 @@ async function showStats(sid) {
     fill.style.width = (Math.min(1, Math.max(0, ratio)) * 100).toFixed(1) + '%';
     bar.appendChild(fill);
     cache.appendChild(bar);
-    statBody.appendChild(cache);
+    statCards.appendChild(cache);
 
     const tok = document.createElement('div');
     tok.className = 'stat-card';
@@ -3268,14 +3324,14 @@ async function showStats(sid) {
     tok.appendChild(statRow('输入（prompt）', prompt.toLocaleString()));
     tok.appendChild(statRow('输出（completion）', (u.completion_tokens || 0).toLocaleString()));
     tok.appendChild(statRow('合计', (u.total_tokens || prompt + (u.completion_tokens || 0)).toLocaleString()));
-    statBody.appendChild(tok);
+    statCards.appendChild(tok);
 
     const cost = document.createElement('div');
     cost.className = 'stat-card';
     cost.appendChild(cardTitle('成本（按当前时段费率估算）'));
     cost.appendChild(statRow('累计花费', fmtUSD(r.cost_usd), true));
-    statBody.appendChild(cost);
-  } catch (e) { paneHint(statBody, 'stats/cache 失败：' + e.message); }
+    statCards.appendChild(cost);
+  } catch (e) { paneHint(statCards, 'stats/cache 失败：' + e.message); }
 }
 
 function cardTitle(text) {
@@ -3449,6 +3505,170 @@ async function loadSetPane() {
 }
 
 statSess.addEventListener('change', () => showStats(statSess.value));
+
+// ---- 跨会话趋势图（W5 卡 c_6xktw4）----
+// 数据源 = stats/trend（近 N 会话的 header fold，服务端算 cost_usd——页面
+// 仍然永不计价）；绘图 = 手绘 SVG，零 vendor、无 canvas（§4.2 零构建链）。
+// 三行小图共用一条 x 轴：tokens（prompt+completion）/ $ / cache 命中率。
+// 三条曲线量纲不同，各占一行、各自归一到自己的行——不硬塞进同一根 y 轴
+// （那会让「$ 曲线」在 token 量级下压成一条贴底的直线）。悬停=最近点
+// guide 线 + tooltip（指针事件挂在一层透明 rect 上，索引按 x 反算）。
+const TREND_WINDOWS = [10, 20, 50];
+const trend = { win: 20, data: null, busy: false };
+
+function renderTrendTools() {
+  trendTools.replaceChildren();
+  const lab = document.createElement('span');
+  lab.className = 'cnt';
+  lab.textContent = '窗口';
+  trendTools.appendChild(lab);
+  const seg = document.createElement('span');
+  seg.className = 'tseg';
+  for (const w of TREND_WINDOWS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tbtn' + (w === trend.win ? ' on' : '');
+    b.dataset.win = String(w);
+    b.textContent = '近 ' + w + ' 会话';
+    b.addEventListener('click', () => { trend.win = w; loadTrend(); });
+    seg.appendChild(b);
+  }
+  trendTools.appendChild(seg);
+}
+
+async function loadTrend() {
+  renderTrendTools();
+  if (trend.busy) return;   // 连点窗口切换：在途的一次作数，回来按当前窗口重拉
+  trend.busy = true;
+  const win = trend.win;
+  try {
+    const r = await rpc('stats/trend', { limit: win });
+    trend.data = r.points || [];
+    renderTrend();
+  } catch (e) {
+    trend.data = null;
+    paneHint(trendPlot, 'stats/trend 失败：' + e.message);
+  } finally {
+    trend.busy = false;
+    if (trend.win !== win) loadTrend();   // 期间换过窗口：补拉一次
+  }
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function renderTrend() {
+  const pts = trend.data || [];
+  trendPlot.replaceChildren();
+  if (!pts.length) {
+    return paneHint(trendPlot, '（还没有历史会话——先在终端里跑几个会话）');
+  }
+  const H = 96, L = 30, R = 8, T = 4, B = 12;
+  const W = Math.max(trendPlot.clientWidth || 300, 160);
+  const plotW = W - L - R;
+  const band = (H - T - B) / 3;
+  const x = i => (pts.length === 1 ? L + plotW / 2 : L + (plotW * i) / (pts.length - 1));
+  const rows = [
+    { cls: 'tokens', label: 'tok', v: p => (p.prompt_tokens || 0) + (p.completion_tokens || 0), f: fmtTok },
+    { cls: '', label: '$', v: p => p.cost_usd || 0, f: fmtUSD },
+    { cls: 'cache', label: '缓存', v: p => (p.hit_ratio || 0) * 100, f: v => v.toFixed(0) + '%' },
+  ];
+  const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H,
+    role: 'img', 'aria-label': '近 ' + pts.length + ' 个会话的 tokens / 成本 / 缓存命中趋势' });
+  const guides = [];
+  rows.forEach((row, ri) => {
+    const y0 = T + band * ri, y1 = y0 + band - 8;
+    const vals = pts.map(row.v);
+    let max = row.cls === 'cache' ? 100 : Math.max.apply(null, vals);
+    if (!(max > 0)) max = 1;
+    const y = v => y1 - ((y1 - y0) * Math.min(Math.max(v, 0), max)) / max;
+    svg.appendChild(svgEl('line', { x1: L, y1: y1, x2: W - R, y2: y1, class: 'axis' }));
+    const name = svgEl('text', { x: 2, y: y0 + 9, class: 'tlab' });
+    name.textContent = row.label + ' ' + row.f(Math.max.apply(null, vals));
+    svg.appendChild(name);
+    const d = pts.map((p, i) => x(i) + ',' + y(row.v(p))).join(' ');
+    if (pts.length > 1) {
+      svg.appendChild(svgEl('polyline', { points: d, class: 'tline ' + row.cls }));
+    }
+    if (pts.length <= 60) {
+      pts.forEach((p, i) => {
+        svg.appendChild(svgEl('circle', { cx: x(i), cy: y(row.v(p)), r: 1.8,
+          class: 'tdot ' + row.cls }));
+      });
+    }
+    guides.push(svgEl('line', { x1: x(0), y1: y0, x2: x(0), y2: y1, class: 'tguide',
+      visibility: 'hidden' }));
+    svg.appendChild(guides[guides.length - 1]);
+  });
+  // x 轴两端的时间（中间点靠 tooltip 说）。
+  const day = t => (t ? new Date(t).toLocaleDateString() : '');
+  const xl = svgEl('text', { x: L, y: H - 2, class: 'tlab' });
+  xl.textContent = day(pts[0].at);
+  svg.appendChild(xl);
+  if (pts.length > 1) {
+    const xr = svgEl('text', { x: W - R, y: H - 2, class: 'tlab', 'text-anchor': 'end' });
+    xr.textContent = day(pts[pts.length - 1].at);
+    svg.appendChild(xr);
+  }
+  if (pts.length === 1) {
+    const one = svgEl('text', { x: L + plotW / 2, y: H - 2, class: 'tlab', 'text-anchor': 'middle' });
+    one.textContent = '（只有 1 个会话——折线需要 ≥2 个点）';
+    svg.appendChild(one);
+  }
+
+  // 悬停层：透明 rect + 最近点反算；guide 线与 tooltip 同步。data-cur 是
+  // 交付给无头验收的观察位（命中索引），绘制细节不靠它。
+  const tip = document.createElement('div');
+  tip.id = 'trend-tip';
+  tip.hidden = true;
+  const hit = svgEl('rect', { x: L, y: T, width: plotW, height: H - T - B,
+    fill: 'transparent' });
+  const show = i => {
+    const p = pts[i];
+    const when = new Date(p.at).toLocaleString();
+    tip.textContent = (p.sid || '').slice(0, 8) + ' · ' + when + ' · '
+      + rows.map(r => r.label + ' ' + r.f(r.v(p))).join(' · ');
+    tip.hidden = false;
+    const left = Math.min(Math.max(x(i) - 40, 0), Math.max(W - 210, 0));
+    tip.style.left = left + 'px';
+    tip.style.top = '2px';
+    guides.forEach(g => {
+      g.setAttribute('x1', x(i));
+      g.setAttribute('x2', x(i));
+      g.setAttribute('visibility', 'visible');
+    });
+    svg.setAttribute('data-cur', String(i));
+  };
+  hit.addEventListener('pointermove', ev => {
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (W / (rect.width || W));
+    let best = 0;
+    for (let i = 1; i < pts.length; i++) {
+      if (Math.abs(x(i) - px) < Math.abs(x(best) - px)) best = i;
+    }
+    show(best);
+  });
+  hit.addEventListener('pointerleave', () => {
+    tip.hidden = true;
+    guides.forEach(g => g.setAttribute('visibility', 'hidden'));
+    svg.setAttribute('data-cur', '-1');
+  });
+  svg.setAttribute('data-n', String(pts.length));
+  svg.setAttribute('data-cur', '-1');
+  svg.appendChild(hit);
+  trendPlot.appendChild(tip);
+  trendPlot.appendChild(svg);
+}
+
+// 侧栏收起/展开会改中栏宽度：重画一次（只用已取到的数据，不打服务端）。
+// 面板没亮时不画——隐藏元素的 clientWidth 是 0，此时画出来的图会窄成 300px
+// 直到下一次 resize，打开面板就会看到一张挤扁的图。
+window.addEventListener('resize', () => {
+  if (trend.data && document.body.classList.contains('stat-view')) renderTrend();
+});
 
 // 探测式启动（W1.2）：是否有有效凭证（cookie 或 URL token）由 /state 的
 // 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。侧栏
