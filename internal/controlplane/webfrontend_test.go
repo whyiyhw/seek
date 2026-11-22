@@ -876,6 +876,7 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 		"flex-wrap: wrap",                      // command bar wraps, nothing unreachable
 		".msg pre, .smsg pre",                  // code-block h-scroll covers ALL body containers
 		"--seek-scrim",                         // scrim colour is a themed token
+		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the mobile-responsive piece %q (c_lqtt2m)", need)

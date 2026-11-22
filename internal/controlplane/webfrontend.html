@@ -467,8 +467,14 @@
   body.side-collapsed #side-title, body.side-collapsed #side-search,
   body.side-collapsed #sess-list, body.side-collapsed #side-foot,
   body.side-collapsed #side-new .lbl { display: none; }
-  body.side-collapsed #side-head { padding: 8px 6px; justify-content: center; }
-  body.side-collapsed #side-new { margin: 8px 6px; padding: 6px 0; }
+  /* 图标轨竖排（c_lqtt2m 返工轮）：44px 宽 − 两侧 6px padding = 32px 内宽。
+     横排时两个 26px 宽的 🗄 / ⟩ 加 8px gap 就已 60px+，必然溢出轨右缘、压到
+     中栏——会话详情页与设置页下 ⟩ 被相邻列的「💬 聊天」/标题行盖住，只露出
+     一角（rect 断言看不见，元素级 hit-test 才红）。竖排后 ＋/🗄/⟩ 三个图标
+     钮各自 26px 全部落在轨内、互不重叠。 */
+  body.side-collapsed #side-head { flex-direction: column; gap: 6px;
+                                   padding: 8px 6px; justify-content: flex-start; }
+  body.side-collapsed #side-new { margin: 0; width: 26px; padding: 4px 0; }
   /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
      点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
   #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;

@@ -102,7 +102,13 @@
 # 未记账；迁移后 pin 是紧口径（见上「no inherited MB-scale headroom」），
 # 债务立即显形。本次 re-baseline = 本卡 delta + 清算合并债，此后 200KB
 # 预算重新从紧测量（卡面口径：超预算按棘轮口径抬 pin 记账）。
-31574681
+# 2026-11-22 c_lqtt2m 返工轮：+24B（收起轨图标钮竖排——44px 轨装不下横排
+# 的 🗄+⟩，overflow 压到中栏把 ⟩ 盖住；一条 flex-direction 规则 + 一处
+# #side-new 收窄，无新 Go）。31574681 → 31574705，同线同工具链实测。
+# 一次抬过 main 侧未棘轮漂移 +17291B（31557490→31574681：c_6xktw4 趋势图
+# + c_lnsdvu 弹层在 pin 31557490 落定后合入，各自 delta 31.8K/35.8K 在预算
+# 内未棘轮——归因记此，非本卡增量）。代 commit 主会话补注。
+31574705
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).

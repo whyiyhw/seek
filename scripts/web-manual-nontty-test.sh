@@ -8,19 +8,20 @@
 # scripts/web-md-manual.sh` 这种 env 前缀形态必被 don't-ask mode 拒。
 # 于是「CHROME 指向不存在路径 + stdin </dev/null 时 rc=3」这半条验收在
 # 车道里没有可表达的入口，上一轮提交信息里的「沙盒实跑 rc=3」无从复核。
-# 本脚本把该形态收进脚本内部：对 web-stream-manual.sh 与 web-md-manual.sh
-# 各跑一次完整脚本（CHROME 指向不存在路径、stdin 接 /dev/null），断言
+# 本脚本把该形态收进脚本内部：对 web-stream-manual.sh / web-md-manual.sh /
+# web-mobile-manual.sh（c_lqtt2m 起新增的第三条）各跑一次完整脚本
+# （CHROME 指向不存在路径、stdin 接 /dev/null），断言
 #   1. rc=3（无人值守车道报环境能力缺，不假装绿）；
 #   2. stderr 含「FAIL: 无头验收条件缺（Chrome」且点名 CHROME 给的路径
 #      （证明 miss 计算走的是 env 而非默认位）；
-#   3. 现场清理干净——两个 manual 脚本各自 trap cleanup EXIT 的可观测
+#   3. 现场清理干净——各 manual 脚本自己 trap cleanup EXIT 的可观测
 #      效果：/tmp 下对应前缀无**新增**残留目录、serve 端口无监听残留。
 # 全程不碰真实 ~/.seek 与生产 8790（子脚本自带临时 SEEK_HOME 与独立端口）。
 #
-# Env: 无。子脚本的 ADDR 由本脚本注入（两条区间基准 18820 / 18900，各加
-#      $$ 散列偏移后在 16 宽内取第一个空闲口）——同机并行跑多份本自测不会
-#      互相误判成「清理失败」；落点全在 18820–18978，避开既有手测脚本的
-#      18790–18797 与生产 8790。
+# Env: 无。子脚本的 ADDR 由本脚本注入（三条区间基准 18820 / 18900 / 18980，
+#      各加 $$ 散列偏移后在 16 宽内取第一个空闲口）——同机并行跑多份本自测
+#      不会互相误判成「清理失败」；落点全在 18820–19059，避开既有手测脚本的
+#      18790–18797/18811 与生产 8790。
 #
 # 退出码：0 全部断言过；1 断言失败或环境冲突；2 用法错误。
 # 依赖：go、curl（经子脚本）；本脚本自身不依赖 Chrome/node——被测的
@@ -38,6 +39,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: CHROME=/nonexistent/nope bash scripts/web-stream-manual.sh </dev/null → rc=3 + stderr 点名 + 清理"
   echo "DRY_RUN: CHROME=/nonexistent/nope bash scripts/web-md-manual.sh    </dev/null → rc=3 + stderr 点名 + 清理"
+  echo "DRY_RUN: CHROME=/nonexistent/nope bash scripts/web-mobile-manual.sh </dev/null → rc=3 + stderr 点名 + 清理"
   exit 0
 fi
 
@@ -106,14 +108,15 @@ check_one() {
   ck "${base}：跑后端口 ${port} 无监听残留" "no" "$(port_listening "$port")"
 }
 
-# 端口落点：两条区间各自 [基准, 基准+64) 取第一个空闲口、跨度 16，
-#   基准 = 18820 / 18900 + $$ % 64 —— 全部 > 既有手测脚本的 18790–18797，
-#   两区间相隔 80 宽永不交叠，也远离生产 8790。
+# 端口落点：三条区间各自 [基准, 基准+64) 取第一个空闲口、跨度 16，
+#   基准 = 18820 / 18900 / 18980 + $$ % 64 —— 全部避开既有手测脚本占用的
+#   18790–18797 与新脚本自身的 18811，三区间相隔 80 宽永不交叠，也远离生产 8790。
 check_one web-stream-manual $(( 18820 + $$ % 64 )) 16 '/tmp/seek-w21-manual.*'
 check_one web-md-manual    $(( 18900 + $$ % 64 )) 16 '/tmp/seek-w5md-manual.*'
+check_one web-mobile-manual $(( 18980 + $$ % 64 )) 16 '/tmp/seek-w5mobile-manual.*'
 
 if [ "$fail" = 0 ]; then
-  echo "非 TTY 退路自测全绿（两脚本 rc=3 + 点名 Chrome 路径 + 现场清理）。"
+  echo "非 TTY 退路自测全绿（三脚本 rc=3 + 点名 Chrome 路径 + 现场清理）。"
   exit 0
 fi
 echo "有 FAIL——见上" >&2
