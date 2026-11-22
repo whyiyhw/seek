@@ -196,6 +196,7 @@
     --seek-link:  var(--seek-ok);
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
+    --seek-scrim: rgba(0,0,0,.5);   /* 窄屏抽屉遮罩（c_lqtt2m） */
     --seek-shadow:0 4px 14px rgba(0,0,0,.45);
   }
   /* 亮色：同一组语义名换值，快捷键只有 data-theme 一个属性。选值口径
@@ -219,6 +220,7 @@
     --seek-link:  #1a56c4;
     --seek-rec:   #b3261e;
     --seek-rec-fg:#ffffff;
+    --seek-scrim: rgba(15,17,21,.28);
     --seek-shadow:0 4px 14px rgba(0,0,0,.12);
   }
   * { box-sizing: border-box; }
@@ -266,7 +268,11 @@
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
-  .msg pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+  /* pre 的横滚/配色四个正文容器同款——.smsg pre 是 c_lqtt2m 补的：
+     markdown 卡（c_x2au4t）给会话正文也上了围栏渲染，但 overflow 规则
+     只给了 .msg/#ag-last/#mem-content 三处，会话正文里的长代码行越出
+     气泡被硬裁（390px 目检抓到；桌面同样越界）。 */
+  .msg pre, .smsg pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font: inherit; }
   .msg code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
@@ -463,6 +469,10 @@
   body.side-collapsed #side-new .lbl { display: none; }
   body.side-collapsed #side-head { padding: 8px 6px; justify-content: center; }
   body.side-collapsed #side-new { margin: 8px 6px; padding: 6px 0; }
+  /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
+     点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
+  #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;
+                background: var(--seek-scrim); }
 
   #center { flex: 1; display: flex; flex-direction: column;
             min-width: 0; min-height: 0; }
@@ -651,6 +661,48 @@
   #hk-cnt { cursor: default; }
   #hk-cnt.fresh { color: var(--seek-warn); cursor: pointer; }
   #hk-pause.held { background: var(--seek-accent); }
+
+  /* ---- 390px 手机宽响应式（W5 卡 c_lqtt2m）----
+     单一 ≤480px 断点管全部窄屏降级（640px 块只管输入弹层，互不吞）。
+     口径=「无不可达入口/不可读裁切」：双栏折叠单栏（侧栏抽屉化——展开态
+     absolute 覆盖中栏 + 遮罩点击关，聊天列恒满宽；收起态 44px 图标轨
+     原样，side-toggle 仍常在）、按钮组换行全显、长串按 ellipsis 折、
+     设置面板 label/value 上下堆叠。缺省收起沿用 <1024 宽度判定
+     （readSideCollapsed，dsh SIDEBAR_AUTO_COLLAPSE 同款断点），本块
+     只管「展开时不挤中栏」。 */
+  @media (max-width: 480px) {
+    /* 状态条：计量右段允许收缩成 ellipsis（「恒完整」是桌面口径，窄屏
+       让位给可读）；ctx 计量藏型号名保「条+百分比」——全名 ⚙设置 可读 */
+    #usage { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    #ctx-m { display: none; }
+    #ctx .bar { width: 36px; }
+    /* 按钮组：换行全显代替横滚——所有入口常显可达（指令组/视图组各一
+       行，390px 实测）；极端字体下装不下仍可横滚兜底（基线的 auto） */
+    #bar { flex-wrap: wrap; gap: 6px; padding: 6px 8px; }
+    #bar button { padding: 4px 8px; font-size: 12px; }
+    #mem-btn { margin-left: 0; }
+    /* 双栏→单栏：展开态抽屉化（脱离文档流覆盖中栏），收起态 44px 轨
+       保持原样；遮罩同态翻出（基线 display:none） */
+    #shell { position: relative; }
+    body:not(.side-collapsed) #side {
+      position: absolute; top: 0; bottom: 0; left: 0; z-index: 30;
+      width: min(300px, 84vw); box-shadow: var(--seek-shadow);
+    }
+    body:not(.side-collapsed) #side-scrim { display: block; }
+    /* 资产面板同款单栏化：记忆/后台的列表列（320/380px 定宽）在 390px
+       会把详情列挤没——上下堆叠：列表 ≤38vh、详情占余，各自可滚 */
+    #mem-body, #agents-body { flex-direction: column; }
+    #mem-list, #ag-list { width: auto; flex: none; max-height: 38vh;
+                          border-right: 0; border-bottom: 1px solid var(--seek-line); }
+    /* 气泡放宽一档：单栏下代码块（pre 本就 overflow-x:auto，markdown
+       卡同容器）多一截横向空间 */
+    .msg { max-width: 94%; }
+    /* 设置面板：label 上 value 下堆叠，value 满宽按 ellipsis 折——路径
+       /hash 不再硬裁或碎行（全文悬停 title 可见，见 setRow） */
+    .set-row { flex-direction: column; gap: 1px; padding: 5px 0; }
+    .set-row .v { text-align: left; white-space: nowrap; overflow: hidden;
+                  text-overflow: ellipsis; }
+  }
 </style>
 </head>
 <body>
@@ -680,6 +732,7 @@
      📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
      聊天面（#list + #form）或三个资产面板。 -->
 <div id="shell">
+  <div id="side-scrim"></div>
   <aside id="side">
     <div id="side-head">
       <span id="side-title">会话</span>
@@ -2066,6 +2119,15 @@ function setSideCollapsed(v) {
 sideToggle.addEventListener('click', () => setSideCollapsed(!sideCollapsed));
 applySide();
 
+// 窄屏抽屉化（c_lqtt2m）：≤480px 展开态是覆盖式抽屉（样式表断点块），
+// 遮罩点击、选中会话都要收抽屉——否则抽屉盖住刚打开的正文。断点数值
+// 与样式表的 max-width 保持同一个 480，别各写各的数。
+const sideMQ = window.matchMedia ? window.matchMedia('(max-width: 480px)') : null;
+document.getElementById('side-scrim').addEventListener('click', () => setSideCollapsed(true));
+function drawerClose() {
+  if (sideMQ && sideMQ.matches && !sideCollapsed) setSideCollapsed(true);
+}
+
 // 🗄 归档可见切换（c_rqcuaa）：头部图标钮——侧栏脚留给「加载更多」
 // （c_txz6vz 无头断言探的就是 #side-foot button，别占位）。点按翻转
 // showArchived 并整表重拉（include_archived 走服务端过滤口径）。
@@ -2228,6 +2290,7 @@ async function openSession(sid) {
   treeResults.clear();
   closePanes();
   document.body.classList.add('sess-detail');
+  drawerClose();   // 窄屏抽屉态下选中会话即收抽屉，正文才露出来（c_lqtt2m）
   sessMeta.textContent = '';
   sessMsgs.replaceChildren();
   paneHint(sessFoot, '');
@@ -3254,6 +3317,9 @@ function setRow(card, k, v) {
   const vv = document.createElement('span');
   vv.className = 'v';
   vv.textContent = v;
+  // 长值带全文 title（c_lqtt2m）：窄屏 value 按 ellipsis 折（断点块），
+  // 悬停提示里全文仍可读——路径/版本 hash 不因折叠丢信息
+  if (v.length > 24) vv.title = v;
   row.appendChild(kk);
   row.appendChild(vv);
   card.appendChild(row);

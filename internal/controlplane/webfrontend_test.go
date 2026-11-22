@@ -856,6 +856,45 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 	}
 }
 
+// TestWeb_PageMobileResponsive pins the c_lqtt2m 390px card: one ≤480px
+// breakpoint owns every narrow-screen degradation — drawer-ised sidebar
+// (expanded state overlays the centre column; collapsed keeps the 44px
+// rail so side-toggle stays reachable), wrapping command bar, ellipsis
+// for the status tail and long setting values, stacked label/value rows,
+// and the column-stacked asset panes. The .smsg pre pairing is the
+// markdown-card gap this card closed (see the pitfalls entry): a fenced
+// block in a session transcript must ride the same horizontal-scroll
+// rule as .msg pre. All additive strings — a rename strands the
+// behaviour silently, so they are pinned the way W5's other cards are.
+func TestWeb_PageMobileResponsive(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"@media (max-width: 480px)",            // the one narrow breakpoint
+		"side-scrim",                           // drawer dismiss layer (element + rules)
+		"matchMedia('(max-width: 480px)')",     // JS breakpoint == CSS breakpoint
+		"drawerClose()",                        // row pick closes the drawer
+		"flex-wrap: wrap",                      // command bar wraps, nothing unreachable
+		".msg pre, .smsg pre",                  // code-block h-scroll covers ALL body containers
+		"--seek-scrim",                         // scrim colour is a themed token
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the mobile-responsive piece %q (c_lqtt2m)", need)
+		}
+	}
+	// The scrim must be inert at desktop widths: base display:none with
+	// the flip living INSIDE the breakpoint block, or desktop gains a
+	// click-swallowing full-viewport layer.
+	scrim := strings.Index(page, "side-scrim")
+	block := strings.Index(page, "@media (max-width: 480px)")
+	baseFlip := strings.Index(page, "#side-scrim { display: none;")
+	if scrim < 0 || block < 0 || baseFlip < 0 {
+		t.Fatalf("page shape changed: scrim=%d block=%d baseFlip=%d", scrim, block, baseFlip)
+	}
+	if baseFlip > block {
+		t.Errorf("scrim base rule must stay display:none OUTSIDE the breakpoint (got baseFlip=%d inside block=%d)", baseFlip, block)
+	}
+}
+
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
 // multi-line input that sends on Enter and newlines on Shift+Enter, a
 // registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'

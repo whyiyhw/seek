@@ -93,7 +93,16 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
-31332461
+# 2026-11-22 c_lqtt2m ratchet: +4152B own delta（390px 手机宽响应式——
+# 页面 CSS/JS ~5.2KB 源码：≤480px 断点块 + 抽屉遮罩 + .smsg pre 横滚
+# 补漏；无新 Go）。ISOLATED 测量：stash 本卡两文件后 31570529B →
+# 恢复后 31574681B（embed 原样进二进制）。抬到绝对值 31574681 还吸收
+# 了 f9e5dfc2（c_6mbjfq，上一条棘轮）以来 +238068B 未棘轮合并债——
+# 那些卡（fim 退役/bash·grep 降噪/eval 观测/ACP 系列）走了 headroom
+# 未记账；迁移后 pin 是紧口径（见上「no inherited MB-scale headroom」），
+# 债务立即显形。本次 re-baseline = 本卡 delta + 清算合并债，此后 200KB
+# 预算重新从紧测量（卡面口径：超预算按棘轮口径抬 pin 记账）。
+31574681
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
