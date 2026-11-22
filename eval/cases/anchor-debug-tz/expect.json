@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：按症状描述定位并修一个方向反转 bug（含跨日/跨月/闰年边界用例）。判分 = check.sh 五个 fixture 输出 diff 黄金。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

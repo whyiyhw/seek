@@ -1,0 +1,1 @@
+convert.py has a bug described in BUGS.md. Fix it so every file in cases/ converts correctly (`python3 convert.py cases/<name>.txt` prints the timestamp shifted by the offset in the file). Do not modify cases/, the golden behavior is the plain arithmetic reading of the file (ts + offset hours, same ISO format).

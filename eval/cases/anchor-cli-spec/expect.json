@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：按书面规格从零实现一个小 CLI（argparse 语义、过滤谓词、字符串排序输出契约）。判分 = check.sh 三组调用 diff 黄金 stdout。",
+  "max_turns": 25,
+  "min_turns": 1,
+  "record_only": true
+}
