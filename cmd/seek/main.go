@@ -78,7 +78,6 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/edit"
 	"github.com/whyiyhw/seek/internal/tools/enterworktree"
 	"github.com/whyiyhw/seek/internal/tools/exitworktree"
-	"github.com/whyiyhw/seek/internal/tools/fimcomplete"
 	gittool "github.com/whyiyhw/seek/internal/tools/git"
 	"github.com/whyiyhw/seek/internal/tools/grep"
 	"github.com/whyiyhw/seek/internal/tools/listdir"
@@ -996,11 +995,10 @@ func run() error {
 		reg.Add(guarded(webfetch.New(wfOpts)))
 	}
 
-	// DeepSeek-exclusive tools: FIM and Reasoner are only available
-	// when using the DeepSeek client directly.
+	// DeepSeek-exclusive tools: the reasoner-backed think tool is only
+	// available when using the DeepSeek client directly.
 	if dsClient != nil {
-		reg.Add(fimcomplete.New(dsClient, *model)).
-			Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
+		reg.Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
 		// web_search rides the standalone Search API — same DeepSeek
 		// key / base URL as chat (config.KeyFor deepseek), billed per
 		// successful call into the tracker so the status bar's $ total
@@ -1025,9 +1023,9 @@ func run() error {
 	// still register, only the guidance segment goes away (the A2 eval
 	// arm). Note: the -tools whitelist narrows the registry later and
 	// may drop MCP tools this section still names — same static-prose
-	// posture as rootTpl (which documents fim_complete even on non-
-	// DeepSeek providers); the section describes what loaded, the
-	// request's tools array is the callable truth.
+	// posture as rootTpl (which documents think even on non-DeepSeek
+	// providers); the section describes what loaded, the request's
+	// tools array is the callable truth.
 	var mcpSection string
 	if mcpCfg, err := mcpconfig.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp config:", err)
@@ -1631,7 +1629,7 @@ func run() error {
 	// P2-b D13 startup gate + P2-c config layer: validate every
 	// non-built-in definition against the FINAL parent registry —
 	// plan/propose land above, MCP / env-gated tools (webfetch,
-	// fim_complete, think…) vary the registry earlier, so this pass
+	// think…) vary the registry earlier, so this pass
 	// must run after the last reg.Add. File-scope types
 	// (project/user) get the full D13 check — unknown tool names are
 	// config errors: warn here (the loud half of D13); at spawn the
@@ -2619,6 +2617,16 @@ type acpBackend struct {
 	// MCP children are bound to it, so a signalled process reaps them even
 	// if the deferred close is skipped. nil in tests.
 	runCtx context.Context
+	// ctxMeter emits the lane's context-window usage_update frames
+	// (c_uzlczr) and remembers the last turn's severity so the alert
+	// frame fires only on a threshold CROSSING, not on every turn above
+	// the line. Its alerts switch comes from SEEK_ACP_CTX_ALERT; the ACP
+	// lane consumes no flags, and that is a startup posture, not a
+	// per-turn knob. Only the prompt goroutine and the session/load path
+	// touch it — turns are serial on this lane (dispatch rejects a second
+	// prompt while one is registered; load is rejected mid-turn), so no
+	// lock.
+	ctxMeter acpCtxMeter
 	// ask is the ACP approval lane (acp_approval.go, P0-2): nil on the
 	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
 	// scopes it per-turn so a permission request dies with its turn.
@@ -2962,6 +2970,11 @@ func (b *acpBackend) LoadSession(p acp.LoadSessionParams, sendU func(acp.Session
 	b.installed = st
 	b.sessionID = originalID
 	b.mu.Unlock()
+	// The resumed conversation is a different session object: forget the
+	// previous one's severity so its first over-threshold turn fires its
+	// own alert (and so a load never leaves a stale "already warned"
+	// state behind).
+	b.ctxMeter.reset()
 
 	for _, u := range acpReplayUpdates(originalID, loaded.Messages, anchor.Abs) {
 		sendU(u)
@@ -3485,7 +3498,19 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 		// Per-turn, not per-event: the transcript is a whole-file
 		// atomic rewrite, so saving on every delta would rewrite the
 		// file hundreds of times a turn.
-		if _, ok := ev.(agent.TurnEnd); ok {
+		if e, ok := ev.(agent.TurnEnd); ok {
+			// Context-window frame (c_uzlczr): one usage_update per
+			// completed model turn, carrying used/size in the ACP shape
+			// plus seek's percent/severity (and the threshold marker at
+			// the warn point). Same source as the TUI/Web meters — the
+			// model's window from budget and THIS turn's prompt+
+			// completion. Sent before the save so a client that reads
+			// the frame and immediately asks for more sees the meter
+			// move first; both are on the same goroutine, so the wire
+			// order is deterministic.
+			for _, u := range b.ctxMeter.update(p.SessionID, b.ag.Model(), e.Usage) {
+				sendU(u)
+			}
 			b.saveTurn()
 		}
 	}
@@ -3799,7 +3824,7 @@ func acpToolTitle(name, args string) string {
 	}
 	var what string
 	switch name {
-	case "read", "list_dir", "write", "edit", "fim_complete":
+	case "read", "list_dir", "write", "edit":
 		what = arg("path")
 	case "grep":
 		if p := arg("pattern"); p != "" {
@@ -3837,7 +3862,7 @@ func acpToolKind(name string) string {
 		return "read"
 	case "grep":
 		return "search"
-	case "edit", "write", "fim_complete":
+	case "edit", "write":
 		return "edit"
 	case "bash", "git", "monitor":
 		return "execute"
@@ -4021,6 +4046,11 @@ func runACP(ctx context.Context, o acpOptions) error {
 		},
 		sess:  o.sess,
 		store: o.store,
+		// Context-window alert switch (c_uzlczr). Resolved here, once,
+		// from env — flags cannot reach this lane (flag.Parse stops at the
+		// "acp" positional), same reason SEEK_ACP_YOLO is read as env a
+		// few hundred lines above.
+		ctxMeter: acpCtxMeter{alerts: acp.CtxAlertFromEnv(os.Getenv)},
 	}
 	// Session end = transport end (stdin EOF, or the process ctx being
 	// cancelled). Client-injected MCP children are reaped HERE, not at
@@ -4259,8 +4289,8 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		// /api/coding/paas/v4: a coding-plan key pointed at the default
 		// /api/paas/v4 path charges the recharge balance (or fails with
 		// error 1113 「余额不足或无可用资源包」). Expected degradation vs
-		// DeepSeek: no FIM, no cache metadata, reasoning_content deltas
-		// are silently skipped by the openai client's wire types.
+		// DeepSeek: no cache metadata, reasoning_content deltas are
+		// silently skipped by the openai client's wire types.
 		apiKey := config.KeyFor(cfg, "glm")
 		if apiKey == "" {
 			return nil, nil, "", "", fmt.Errorf("no GLM API key — set GLM_API_KEY or add providers.glm.api_key to ~/.seek/config.json")

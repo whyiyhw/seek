@@ -71,6 +71,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。
 - ✅ **终止可观测**（2026-11-21，c_vfgeam）：每轮 `session/prompt` 结束时，seek 在响应帧**之前**发一条结构化终止通知，`stopReason` 五值枚举 + 可读 detail + 原始 `finishReason`——断流/静默死亡不再无声，见 §4.1。
+- ✅ **上下文余量上报（2026-11-21，卡 c_uzlczr）**：每个完成的模型回合通过 `session/update` 发一帧 ACP 的 `usage_update`，客户端据此显示余量条/百分比。字段是**协议自己的**（[RFC/RFD "Session Context Size and Cost"](https://agentclientprotocol.com/rfds/session-usage)）：`used`（当前上下文占用量）+ `size`（该模型窗口大小），余量与百分比由客户端自己算（`size - used` / `used/size`）。seek 额外把 `percent` / `severity` 放在协议预留的 `_meta.seek.ctx` 里，近阈值那一帧再多 `alert` + 一句 `notice`（详见 §5.6）。数字口径与 TUI 状态栏 `formatBudget`、Web 顶栏 ctxmeter **同源**：占用 = **末个回合**的 prompt+completion（累计值会随历史逐轮重发二次膨胀），窗口 = `internal/budget.Limit(model)`，阈值 = `budget.Classify` 的 0.60/0.75。零新数据源、零新表。
 
 ---
 
@@ -241,6 +242,30 @@ ACP 客户端可以在 `session/new`（和 `session/load`）里带一份 MCP ros
 acp: mcp: registered 2 tool(s) from 1 server(s): mcp__butler__card_read mcp__butler__echo
 acp: mcp closed 1 server(s)
 ```
+
+### 5.6 上下文余量 `usage_update` / Context-window reporting（P0-4）
+
+**每一轮的形状**（走 `session/update`，不是新 method）：
+
+```json
+{"jsonrpc":"2.0","method":"session/update","params":{
+  "sessionId":"20261121-160406-…",
+  "update":{
+    "sessionUpdate":"usage_update",
+    "used":800012,
+    "size":1000000,
+    "_meta":{"seek":{"ctx":{"percent":80,"severity":"critical"}}}
+  }}}
+```
+
+- `used` / `size` 是 **ACP 协议字段**（RFD "Session Context Size and Cost"，ACP 1.2 起进 schema；paseo 的 `zUsageUpdate` 正是 `z.object({used, size})`）。协议里**没有** percent 字段——客户端自己除。所以 seek 不自造字段名，把补充信息放进协议预留的 `_meta`（"Implementations MUST NOT make assumptions about values at these keys"）。
+- `_meta.seek.ctx.percent`：取整的占用百分比，与 TUI 状态栏那个 `ctx NN%` 是同一个数。
+- `_meta.seek.ctx.severity`：`ok` / `warn` / `critical`，三档对应 `budget.Classify`。
+- **告警帧**：只在**跨过阈值的那一帧**额外发一帧（同一 used/size），多带 `alert`（= 该档 severity）与 `notice`（`warn` → `"ctx 70%"`，`critical` → `"ctx 80% — /compact soon"`，措辞照抄 `formatBudget`）。为什么不把 alert 挂在每一帧上：每次 arrival 都会被客户端渲染成一次仪表更新，每轮重复告警是噪声；只报"刚跨过"才是一条真正的信号。落回阈值以下、或 `session/load` 换进来一个会话，跨越记忆会重置。
+- **开关**：`SEEK_ACP_CTX_ALERT=0`（或 `false`/`no`/`off`，大小写不敏感）关掉告警帧，普通 `usage_update` 照常每轮发——余量条不会因此消失。默认**开**。ACP 车道不吃任何 flag（同 §5.1 的理由），所以只能走 env。
+- **阈值的边界**：这里用 `budget.Classify`（编译期 0.60 / 0.75），与 Web 顶栏 ctxmeter 的色阶一致。TUI 的 `formatBudget` 在**配了 `auto_compact`** 时会把红色点挪到触发点的 80%（`ClassifyAt`）——ACP 不跟这个会话级配置走：余量条是客户端自己的 UI，阈值该是协议面上稳定的常量，会话级自定义属于客户端侧。
+- **不发的情形**：窗口大小不可用（`budget.Limit` ≤ 0）。RFD 明确没有 `size: null` 这种状态，协议自己也说"无法给出有意义的窗口就干脆不要发"。
+- **`session/load` 之后**：回放的是历史消息帧（`user_message_chunk` / `agent_message_chunk` / `tool_call*`），**不含** `usage_update`——transcript 里只有累计用量，没有"上一回合的 prompt+completion"这个口径值，硬凑一个就是新造数据源。所以恢复会话后余量条从**下一回合**开始显示（客户端在收到第一帧前不渲染这个部件即可）。
 
 ---
 

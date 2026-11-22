@@ -405,15 +405,16 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 // internal/tui/view.go
 if m.opts.ProviderName != "" {
     banner := styleBannerWarn.
-        Render("⚠ Provider: " + m.opts.ProviderName + " — FIM / cache stats / Reasoner disabled")
+        Render("⚠ Provider: " + m.opts.ProviderName + " — cache stats / Reasoner disabled")
 }
 ```
 
 `ProviderName == ""` 是 DeepSeek（不显示 banner），非空是第二公民。banner 内容明确告诉用户**哪些能力不可用**：
 
-- **FIM**：`fim_complete` 工具只在 DeepSeek 下注册（main.go 里 `if dsClient != nil { reg.Add(fimcomplete.New(...)) }`）
 - **Cache stats**：状态栏的 "saved Xk" 在第二公民下永远 0，因为 `llm.TurnDone` 没有缓存字段
-- **Reasoner**：`think` 工具同上，只在 DeepSeek 下注册
+- **Reasoner**：`think` 工具只在 DeepSeek 下注册
+
+（FIM 补全工具曾是第三个 DeepSeek-only 能力，2026-11-22 退役——实测模型几乎不调用，工具链整体移除。）
 
 这一行 banner 是给用户的**明确预期管理**——而不是悄悄降级让用户以后才发现 `/think` 命令不存在。把降级公开化是"诚实 > 神秘"原则的延伸（第 13 章的状态栏诚实度）。
 
@@ -485,7 +486,7 @@ case "glm":
 
 - **表是代码常量**：provider → 合法 model id 列表，`ResolveRoute` 只做查表 + 默认值填充（provider 缺省给车道默认模型、model 单独给时反推车道），不运行时探测、不嗅探 key。
 - **车道表里没有探测链**。14.8 的 env 自动探测在无人值守环境撞过实坑：daemon 继承的残留 `ANTHROPIC_API_KEY` 顺位上位，"进程起来了"但模型不对。路由表在启动时构建：**key 在，车道才在表里**；点名一条没有 key 的车道，spawn 带结构化错误失败——工具描述里写死了 "never silently falls back"。
-- **DeepSeek-only 工具按 provider 过滤**：`think` / `fim_complete` 从 GLM 子代理的注册表里剔除（模板 Filter 之后再过一道 provider 兼容滤网）——工具 schema 里看得见、调用必失败的工具是最坏形态。
+- **DeepSeek-only 工具按 provider 过滤**：`think` 从 GLM 子代理的注册表里剔除（模板 Filter 之后再过一道 provider 兼容滤网）——工具 schema 里看得见、调用必失败的工具是最坏形态。
 - **成本沿各自车道归集**：`Tracker.Record(u, model, tier)` 按 record 归因模型，混合车队（父 deepseek + 子 glm）的状态栏合计自动正确，off-peak 折扣只折该折的。
 
 > 路由的配置契约（config `agents` 段、类型化 agent 的 frontmatter 形态、优先级栈）以 [`docs/prd/feature-orchestration.md`](../prd/feature-orchestration.md) §4.2/§5 为权威；GLM 计价数值以 `internal/pricing/pricing.go` 为权威——本节不复述。

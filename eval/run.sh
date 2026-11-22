@@ -394,6 +394,15 @@ extract_metric() {
     grep_calls)
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="grep")] | length' "$path"
       ;;
+    references_calls)
+      # tool_start events for the semantic `references` tool (internal/
+      # tools/references, the LSP lane). Landed 2026-11-21 with the
+      # 40-session baseline that motivated it: 0 calls across 6,474,
+      # while grep/git were reached for ~2,100 times from bash. The 0 is
+      # the measurement this metric exists to make visible — the tool is
+      # capable (gopls was on PATH) and simply never got a trigger.
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="references")] | length' "$path"
+      ;;
     mcp_calls)
       # tool_start events whose tool name CONTAINS the "__" infix —
       # MCP bridge tools register under "<server>__<tool>" (D1's
@@ -463,6 +472,52 @@ extract_metric() {
       # Mutating git (commit/push) legitimately belongs in bash, but this
       # eval's prompts are read-only, so 0 is the correct target there.
       $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash" and ((.args // "") | test("(^|[;&|[:space:]\"])git([[:space:]]|$)")))] | length' "$path"
+      ;;
+    bash_grep_calls)
+      # A bash call that runs grep / rg / ag in COMMAND POSITION — start
+      # of the command, or after a sequencing operator (; && | newline) or
+      # a subshell opener ( ), optionally behind env assignments and
+      # `command`/`exec`. This is the "shell used as the search tool"
+      # signal; it is NOT the same thing as bash_calls, because 51% of the
+      # measured bash-grep commands were real multi-command chains the
+      # grep tool genuinely cannot express (aggregation pipelines, build
+      # + filter). Deliberately command-position rather than the looser
+      # whitespace-delimited `\bgit\b`-style pattern bash_git_calls uses:
+      # measured on 5,015 bash calls that form reports 19 extra hits, and
+      # every one was a false positive (`git grep`, heredoc bodies in
+      # `git commit -F -`, Python source inside a heredoc). The loose form
+      # misses 7 for `do grep` / `case` bodies. Command position is the
+      # cheap correct side of that trade.
+      #
+      # Calibrated 2026-11-21 against the 40-session baseline: 2,095 of
+      # 5,015 bash calls (41.8%) — none of them replacable by the grep
+      # tool as it stood then (only 16.6% were single-search shapes).
+      # Pair with grep_calls when binding: the ratio is the story.
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash") | ((.args // "{}") | fromjson? // {}) | (.command // "") | select(test("(^|[;&|]|\\n|\\()\\s*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*(command[[:space:]]+|exec[[:space:]]+)?(grep|rg|ag)([[:space:]]|$)"))] | length' "$path"
+      ;;
+    bash_cd_prefix_calls)
+      # A bash call whose command STARTS with `cd ` — the state-free-shell
+      # tax. seek's bash tool already runs from the project root, so a
+      # leading `cd <project root>` is pure noise and a leading `cd
+      # /elsewhere` is the model rebuilding "where am I" every call.
+      # Measured 2026-11-21: 926 of 4,980 bash calls (18.6%), of which 322
+      # (6.4% of all bash) cd'd into the SESSION'S OWN cwd — exactly what
+      # the tool contract already guarantees. Only the leading form counts;
+      # a `cd` in the middle of a chain is a legit `cd /tmp && …` scratch
+      # dance.
+      $JQ -s '[.[] | select(.type=="tool_start" and .name=="bash") | ((.args // "{}") | fromjson? // {}) | (.command // "") | select(test("^[[:space:]]*cd[[:space:]]+"))] | length' "$path"
+      ;;
+    parallel_turns)
+      # turn_end events whose model response issued ≥2 tool calls in ONE
+      # turn — the parallel read-only batch (pkg/agent dispatches
+      # ReadOnlyTool calls concurrently, so a fan-out is free wall-clock
+      # and free round trips). Measured 2026-11-21: 36.0% of tool-bearing
+      # turns were parallel, but 98% of those were exactly 2 and only 0.2%
+      # were ≥3 — the shape a prompt nudge could move. This metric counts
+      # the ≥2 population so a case can bind `min_parallel_turns`; a
+      # tighter future case can bind an exact count instead once the
+      # distribution earns it.
+      $JQ -s '[.[] | select(.type=="turn_end" and ((.tool_calls // 0) >= 2))] | length' "$path"
       ;;
     bash_before_dedicated)
       # Bash calls made BEFORE the first dedicated inspection call —
@@ -538,6 +593,15 @@ extract_metric() {
       # each invocation; this metric is how that reaches expect.json.
       # Cases using the default invocation emit no facts → 0.
       $JQ -s '[.[] | select(.type=="runner_fact" and ((.exit_code // 0) != 0))] | length' "$path"
+      ;;
+    runner_assert_failures)
+      # runner_fact lines flagging a FAILED judgement assertion
+      # ({"failed":true}) from a case's mechanical scorer — the
+      # task-level judging pattern of eval v2's load-bearing axis
+      # (plan-e2e's A1..A10, docs/prd/feature-eval-v2.md §2.2 B).
+      # Generic on purpose: any runner.sh may emit failed-facts; the
+      # assertions themselves live in the case's scorer, not here.
+      $JQ -s '[.[] | select(.type=="runner_fact" and ((.failed // false) == true))] | length' "$path"
       ;;
     bg_started_events|bg_completed_events|bg_notified_events|bg_notified_transcript|bg_resumed_lineage|bg_artifacts_missing)
       # subagent-bg-resume's disk-side family (eval v2 E4, c_vollxv):
@@ -780,6 +844,7 @@ run_one() {
     --argjson total_tool_calls     "$(extract_metric total_tool_calls     "$out_file")" \
     --argjson read_calls           "$(extract_metric read_calls           "$out_file")" \
     --argjson grep_calls           "$(extract_metric grep_calls           "$out_file")" \
+    --argjson references_calls     "$(extract_metric references_calls     "$out_file")" \
     --argjson mcp_calls            "$(extract_metric mcp_calls            "$out_file")" \
     --argjson list_dir_calls       "$(extract_metric list_dir_calls       "$out_file")" \
     --argjson agent_calls          "$(extract_metric agent_calls          "$out_file")" \
@@ -794,6 +859,9 @@ run_one() {
     --argjson bash_calls           "$(extract_metric bash_calls           "$out_file")" \
     --argjson bash_chains          "$(extract_metric bash_chains          "$out_file")" \
     --argjson bash_git_calls       "$(extract_metric bash_git_calls       "$out_file")" \
+    --argjson bash_grep_calls      "$(extract_metric bash_grep_calls      "$out_file")" \
+    --argjson bash_cd_prefix_calls "$(extract_metric bash_cd_prefix_calls "$out_file")" \
+    --argjson parallel_turns       "$(extract_metric parallel_turns       "$out_file")" \
     --argjson bash_before_dedicated "$(extract_metric bash_before_dedicated "$out_file")" \
     --argjson edit_calls           "$(extract_metric edit_calls           "$out_file")" \
     --argjson git_calls            "$(extract_metric git_calls            "$out_file")" \
@@ -806,12 +874,13 @@ run_one() {
     --argjson session_id_missing   "$(extract_metric session_id_missing   "$out_file")" \
     --argjson session_id_distinct  "$(extract_metric session_id_distinct  "$out_file")" \
     --argjson nonzero_exits        "$(extract_metric nonzero_exits        "$out_file")" \
+    --argjson runner_assert_failures "$(extract_metric runner_assert_failures "$out_file")" \
     --argjson turns                "$(extract_metric turns                "$out_file")" \
     --argjson review_line_refs     "$(extract_metric review_line_refs     "$out_file")" \
     --argjson completion_tokens    "$completion_tokens" \
     --argjson cache_hit_tokens     "$cache_hit_tokens" \
     --argjson has_agent_surface    "$has_agent_surface" \
-    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}
+    '{unknown_field_errors:$unknown_field_errors, think_calls:$think_calls, total_tool_calls:$total_tool_calls, read_calls:$read_calls, grep_calls:$grep_calls, references_calls:$references_calls, mcp_calls:$mcp_calls, list_dir_calls:$list_dir_calls, bash_calls:$bash_calls, bash_chains:$bash_chains, bash_git_calls:$bash_git_calls, bash_grep_calls:$bash_grep_calls, bash_cd_prefix_calls:$bash_cd_prefix_calls, parallel_turns:$parallel_turns, bash_before_dedicated:$bash_before_dedicated, edit_calls:$edit_calls, git_calls:$git_calls, git_subcommand_dupes:$git_subcommand_dupes, probe_reads:$probe_reads, write_refusals:$write_refusals, write_ok:$write_ok, denied_tool_ends:$denied_tool_ends, agent_ends:$agent_ends, session_id_missing:$session_id_missing, session_id_distinct:$session_id_distinct, nonzero_exits:$nonzero_exits, runner_assert_failures:$runner_assert_failures, turns:$turns, review_line_refs:$review_line_refs, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens}
      + (if $has_agent_surface then {agent_calls:$agent_calls, agent_bg_calls:$agent_bg_calls, agent_continue_calls:$agent_continue_calls, bg_started_events:$bg_started_events, bg_completed_events:$bg_completed_events, bg_notified_events:$bg_notified_events, bg_notified_transcript:$bg_notified_transcript, bg_resumed_lineage:$bg_resumed_lineage, bg_artifacts_missing:$bg_artifacts_missing} else {} end)')
 
   # Serve-plane metrics (E5 serve-web-stream, card c_lbtdqw): merged in

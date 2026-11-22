@@ -394,3 +394,203 @@ func tail(s string, n int) string {
 	}
 	return "…" + s[len(s)-n:]
 }
+
+// --- 2026-11-22 argument extension ------------------------------------
+//
+// These five arguments exist because the 40-session baseline reached for
+// bash 2,104 times to express things the tool could not: --include
+// (11.3%), -v (9.6%), -c (9.7%), -l (4.4%), asymmetric -A/-B (10.3%).
+// One test per argument, each pinning the shape the shell form produced.
+
+func TestGrep_IncludeFiltersByExtension(t *testing.T) {
+	root := setup(t)
+	// "func Foo" appears in a.go, b.go (as a call), sub/c.go, .hidden/d.go.
+	out, err := run(t, Args{Pattern: "func Foo", Path: root, Include: "*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf("include=*.go must keep a.go: %s", out)
+	}
+	// And a non-matching include excludes everything.
+	out, err = run(t, Args{Pattern: "func Foo", Path: root, Include: "*.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "no matches") {
+		t.Errorf("include=*.md over a Go-only tree must report no matches: %s", out)
+	}
+}
+
+func TestGrep_IncludeAcceptsDoubleStarPrefix(t *testing.T) {
+	root := setup(t)
+	// `**/*.go` is what a model writes after reading the docs; it must
+	// behave as `*.go`, not silently match nothing.
+	out, err := run(t, Args{Pattern: "func Foo", Path: root, Include: "**/*.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf("include=**/*.go must behave as *.go: %s", out)
+	}
+}
+
+func TestGrep_InvertReturnsNonMatchingLines(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "mix.txt")
+	content := "keep one\nDROP me\nkeep two\nDROP me too\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, Args{Pattern: "DROP", Path: p, Invert: true, ContextLines: new(int)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "keep one") || !strings.Contains(out, "keep two") {
+		t.Errorf("invert must return the non-matching lines: %s", out)
+	}
+	// Inverted lines ARE the matches, so they carry the '>' marker —
+	// that is the point of the flag, not a leak of the dropped ones.
+	if strings.Contains(out, "DROP me") {
+		t.Errorf("inverted run must not echo the matching lines at all: %s", out)
+	}
+}
+
+func TestGrep_CountOnlyIsExactAndUncapped(t *testing.T) {
+	root := t.TempDir()
+	// 250 matches in one file — above maxAllowedMatches (200), so a
+	// capped implementation would report 200 and be wrong.
+	var sb strings.Builder
+	for i := range 250 {
+		fmt.Fprintf(&sb, "HIT-%03d\n", i)
+	}
+	p := filepath.Join(root, "many.txt")
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, Args{Pattern: "HIT-", Path: p, CountOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "250 match(es)") {
+		t.Errorf("count_only must report the TRUE total (250), got: %s", out)
+	}
+	if !strings.Contains(out, "250  "+p) && !strings.Contains(out, "    250  "+p) {
+		t.Errorf("per-file row should carry 250, got: %s", out)
+	}
+}
+
+func TestGrep_CountOnlyAcrossFiles(t *testing.T) {
+	root := setup(t)
+	out, err := run(t, Args{Pattern: "package main", Path: root, CountOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a.go and b.go both open with "package main"; sub/c.go declares
+	// "package sub", and .hidden/d.go is skipped by the walk.
+	if !strings.Contains(out, "2 match(es) across 2 file(s)") {
+		t.Errorf("expected 2 matches across 2 files, got: %s", out)
+	}
+}
+
+func TestGrep_FilesOnlyListsPaths(t *testing.T) {
+	root := setup(t)
+	// Two matches in a.go must NOT consume the budget twice and hide the
+	// second file: files_only counts FILES.
+	out, err := run(t, Args{Pattern: "Foo", Path: root, FilesOnly: true, MaxMatches: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "a.go") || !strings.Contains(out, "b.go") {
+		t.Errorf("files_only must list every matching file regardless of max_matches: %s", out)
+	}
+	if strings.Contains(out, "> ") {
+		t.Errorf("files_only must print paths only, no match lines: %s", out)
+	}
+}
+
+func TestGrep_FilesOnlyAndCountOnlyAreMutuallyExclusive(t *testing.T) {
+	root := setup(t)
+	_, err := run(t, Args{Pattern: "Foo", Path: root, FilesOnly: true, CountOnly: true})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected a mutual-exclusion error, got: %v", err)
+	}
+}
+
+func TestGrep_AsymmetricContextBefore(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "ctx.txt")
+	// Line 5 is the only match; 2 lines before, 0 after.
+	var sb strings.Builder
+	for i := 1; i <= 9; i++ {
+		if i == 5 {
+			sb.WriteString("THE_MATCH\n")
+			continue
+		}
+		fmt.Fprintf(&sb, "filler %d\n", i)
+	}
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zero, two := 0, 2
+	out, err := run(t, Args{Pattern: "THE_MATCH", Path: p, Before: &two, After: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "filler 3") || !strings.Contains(out, "filler 4") {
+		t.Errorf("before=2 must show the two preceding lines: %s", out)
+	}
+	if strings.Contains(out, "filler 6") {
+		t.Errorf("after=0 must show no trailing context: %s", out)
+	}
+}
+
+func TestGrep_BeforeAfterOverrideContextLines(t *testing.T) {
+	root := t.TempDir()
+	p := filepath.Join(root, "ctx.txt")
+	var sb strings.Builder
+	for i := 1; i <= 9; i++ {
+		if i == 5 {
+			sb.WriteString("THE_MATCH\n")
+			continue
+		}
+		fmt.Fprintf(&sb, "filler %d\n", i)
+	}
+	if err := os.WriteFile(p, []byte(sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	one, three := 1, 3
+	out, err := run(t, Args{Pattern: "THE_MATCH", Path: p, Before: &one, After: &three})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "filler 4") {
+		t.Errorf("before=1 must include line 4: %s", out)
+	}
+	if strings.Contains(out, "filler 3") {
+		t.Errorf("before=1 must exclude line 3: %s", out)
+	}
+	if !strings.Contains(out, "filler 8") {
+		t.Errorf("after=3 must include line 8: %s", out)
+	}
+	if strings.Contains(out, "filler 9") {
+		t.Errorf("after=3 must exclude line 9: %s", out)
+	}
+}
+
+// TestGrep_SchemaIsStableBytes pins the prefix-cache invariant: the
+// schema is a package-level constant, so two calls must produce
+// identical bytes. It also fails loudly if a future edit swaps the
+// constant for a builder.
+func TestGrep_SchemaIsStableBytes(t *testing.T) {
+	a := string(New().Schema())
+	b := string(New().Schema())
+	if a != b {
+		t.Error("schema bytes differ across calls — a schema built at call time breaks the prefix cache")
+	}
+	for _, field := range []string{"include", "invert", "files_only", "count_only", "before", "after"} {
+		if !strings.Contains(a, `"`+field+`"`) {
+			t.Errorf("schema lost the %q argument", field)
+		}
+	}
+}

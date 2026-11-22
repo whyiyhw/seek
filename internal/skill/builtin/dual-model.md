@@ -34,7 +34,7 @@ The reasoner returns a structured plan ending with `Answer:`. Treat its output a
 
 ### Step 2 — Execute the plan
 
-Work the plan one step at a time using `read` / `list_dir` / `write` / `edit` / `bash` / `fim_complete`. Don't re-call `think` for each individual step — that defeats the purpose. If you hit something the plan didn't anticipate AND it's load-bearing for the next steps, that's the only time to call `think` mid-execution.
+Work the plan one step at a time using `read` / `list_dir` / `write` / `edit` / `bash`. Don't re-call `think` for each individual step — that defeats the purpose. If you hit something the plan didn't anticipate AND it's load-bearing for the next steps, that's the only time to call `think` mid-execution.
 
 Commit cadence: don't commit unless the user asked. If they did, follow the project's commit conventions exactly.
 

@@ -1,0 +1,10 @@
+{
+  "description": "Three-restriction search over a mixed-extension directory: extension filter, negation, true occurrence count. Target shape is the grep tool alone (include / invert+files_only / count_only); bash-grep is the anti-pattern. max_total_tool_calls is 12, not 8: the extension converts one bash-grep into two-to-four narrow grep calls, so a call-count bound calibrated pre-extension punished the shape the case asks for. A/B in README.",
+  "max_turns": 12,
+  "max_total_tool_calls": 12,
+  "max_bash_calls": 2,
+  "max_bash_grep_calls": 1,
+  "max_bash_before_dedicated": 0,
+  "min_grep_calls": 2,
+  "min_pass_rate": 0.6
+}

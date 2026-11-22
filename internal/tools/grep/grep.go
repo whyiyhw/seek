@@ -24,16 +24,22 @@ var schemaBytes = []byte(`{
   "properties": {
     "pattern":       {"type": "string",  "description": "Regular expression to search for. Use fixed=true for a literal string match."},
     "path":          {"type": "string",  "description": "File path, directory (searched recursively), or glob (e.g. 'internal/**/*.go'). Relative paths are resolved from the working directory."},
+    "include":       {"type": "string",  "description": "Only search files whose name, or whose path, matches this glob (e.g. '*.go', '*_test.go'). Applied after path expansion. '**' is not supported here — express deep paths with the path argument instead. Use this instead of a shell --include flag."},
+    "invert":        {"type": "boolean", "description": "Return lines that do NOT match, like grep -v. Combine with count_only to count non-matching lines."},
+    "files_only":    {"type": "boolean", "description": "Return only the paths of files containing at least one match (grep -l). Mutually exclusive with count_only."},
+    "count_only":    {"type": "boolean", "description": "Return one count per file plus a true total (grep -c). The count is NOT capped by max_matches — this is the argument to reach for when the question is 'how many', which paging matches can never answer. Mutually exclusive with files_only."},
     "context_lines": {"type": "integer", "description": "Lines of context before and after each match. Default 3, max 10.", "minimum": 0, "maximum": 10},
+    "before":        {"type": "integer", "description": "Context lines before each match; overrides context_lines for that side. Use with after for an asymmetric window.", "minimum": 0, "maximum": 10},
+    "after":         {"type": "integer", "description": "Context lines after each match; overrides context_lines for that side.", "minimum": 0, "maximum": 10},
     "fixed":         {"type": "boolean", "description": "Treat pattern as a literal string, not a regex. Default false."},
     "ignore_case":   {"type": "boolean", "description": "Case-insensitive matching. Default false."},
-    "max_matches":   {"type": "integer", "description": "Stop after this many matches. Default 20, max 200. Increase only when a broad pattern returns too few results.", "minimum": 1, "maximum": 200}
+    "max_matches":   {"type": "integer", "description": "Stop after this many matches. Default 20, max 200. Increase only when a broad pattern returns too few results. Ignored by count_only.", "minimum": 1, "maximum": 200}
   },
   "required": ["pattern", "path"],
   "additionalProperties": false
 }`)
 
-const description = "Search for a regex (or literal string) across a file, directory, or glob. Returns matching lines with surrounding context and line numbers. Dot-prefixed (hidden) entries are skipped when walking a directory — name a hidden path explicitly to search inside it. Use this to locate a symbol or pattern, then follow up with read(offset, limit) to extract the precise range — avoids reading entire files into context."
+const description = "Search for a regex (or literal string) across a file, directory, or glob. Returns matching lines with surrounding context and line numbers. Dot-prefixed (hidden) entries are skipped when walking a directory — name a hidden path explicitly to search inside it. Use this to locate a symbol or pattern, then follow up with read(offset, limit) to extract the precise range — avoids reading entire files into context. Reach for this BEFORE bash grep/rg: `include` covers --include, `invert` covers -v, `files_only` covers -l, and `count_only` covers -c — including the aggregate questions (how many matches, which files) that paging max_matches can never answer exactly, because the count is not capped."
 
 // Args is the decoded argument struct.
 // ContextLines is a pointer so we can distinguish "not provided" (nil → use
@@ -41,10 +47,23 @@ const description = "Search for a regex (or literal string) across a file, direc
 type Args struct {
 	Pattern      string `json:"pattern"`
 	Path         string `json:"path"`
+	Include      string `json:"include,omitempty"`
+	Invert       bool   `json:"invert,omitempty"`
+	FilesOnly    bool   `json:"files_only,omitempty"`
+	CountOnly    bool   `json:"count_only,omitempty"`
 	ContextLines *int   `json:"context_lines,omitempty"`
+	Before       *int   `json:"before,omitempty"`
+	After        *int   `json:"after,omitempty"`
 	Fixed        bool   `json:"fixed,omitempty"`
 	IgnoreCase   bool   `json:"ignore_case,omitempty"`
 	MaxMatches   int    `json:"max_matches,omitempty"`
+}
+
+// validFields is the strict-decode whitelist AND the field list the
+// missing-field errors advertise. One slice so the two can never drift.
+var validFields = []string{
+	"pattern", "path", "include", "invert", "files_only", "count_only",
+	"context_lines", "before", "after", "fixed", "ignore_case", "max_matches",
 }
 
 const (
@@ -87,23 +106,34 @@ func (Tool) ReadOnly() bool          { return true }
 
 func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	var a Args
-	if err := tools.UnmarshalStrict("grep", raw, &a,
-		"pattern", "path", "context_lines", "fixed", "ignore_case", "max_matches"); err != nil {
+	if err := tools.UnmarshalStrict("grep", raw, &a, validFields...); err != nil {
 		return "", err
 	}
 	if a.Pattern == "" {
-		return "", tools.MissingField("grep", "pattern", raw,
-			"pattern", "path", "context_lines", "fixed", "ignore_case", "max_matches")
+		return "", tools.MissingField("grep", "pattern", raw, validFields...)
 	}
 	if a.Path == "" {
-		return "", tools.MissingField("grep", "path", raw,
-			"pattern", "path", "context_lines", "fixed", "ignore_case", "max_matches")
+		return "", tools.MissingField("grep", "path", raw, validFields...)
+	}
+	if a.FilesOnly && a.CountOnly {
+		return "", fmt.Errorf("grep: files_only and count_only are mutually exclusive (files_only lists paths, count_only counts matches)")
 	}
 
-	contextLines := defaultContextLines
+	// Symmetric context comes from context_lines; before/after override
+	// one side each. Both are optional so the common call never mentions
+	// them.
+	before, after := defaultContextLines, defaultContextLines
 	if a.ContextLines != nil {
-		contextLines = max(*a.ContextLines, 0)
+		before = max(*a.ContextLines, 0)
+		after = before
 	}
+	if a.Before != nil {
+		before = max(*a.Before, 0)
+	}
+	if a.After != nil {
+		after = max(*a.After, 0)
+	}
+
 	if a.MaxMatches <= 0 {
 		a.MaxMatches = defaultMaxMatches
 	}
@@ -127,6 +157,29 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("grep: %w", err)
 	}
+	if a.Include != "" {
+		files = filterInclude(files, a.Include)
+	}
+
+	// count_only answers "how many" exactly. It deliberately does NOT
+	// honour max_matches: the whole point is that a capped count is a
+	// wrong count, and max_matches' cap notice reports the TRUNCATED
+	// number (see eval/cases/grep-refine-not-flood). The output is one
+	// line per file, so the budget is bounded by the file row cap below,
+	// not by match count.
+	if a.CountOnly {
+		return countResults(a.Pattern, a.Path, files, re, a.Invert), nil
+	}
+
+	// files_only is grep -l: "which files contain at least one match".
+	// It must NOT be capped by max_matches (that is a MATCH budget; a
+	// file with three hits would eat three slots before the next file is
+	// even opened). Its own bound is maxAllowedMatches FILES, which keeps
+	// the row count and the byte size bounded for the same reason
+	// count_only bounds its breakdown.
+	if a.FilesOnly {
+		return filesOnlyResults(a.Pattern, a.Path, files, re, a.Invert), nil
+	}
 
 	var (
 		results   []fileResult
@@ -139,7 +192,7 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 			capped = true
 			break
 		}
-		blocks, err := searchFile(f, re, contextLines, a.MaxMatches-totalHits)
+		blocks, err := searchFile(f, re, before, after, a.MaxMatches-totalHits, a.Invert)
 		if err != nil || len(blocks) == 0 {
 			continue
 		}
@@ -166,6 +219,147 @@ func (Tool) Execute(_ context.Context, raw json.RawMessage) (string, error) {
 		out = truncateOutput(out)
 	}
 	return out, nil
+}
+
+// maxCountRows bounds the per-file rows in count_only output. The TOTAL
+// is always exact; only the breakdown is capped, sorted desc so the
+// biggest contributors survive. Without this a count over a big tree
+// would silently lose its tail to the byte clamp — and a truncated list
+// of counts reads as a complete one.
+const maxCountRows = 40
+
+// countResults renders grep -c: exact total plus per-file counts. A file
+// with zero matches is omitted (grep -c prints it; we do not, because the
+// model asking "how many" does not need 3,000 zero rows).
+func countResults(pattern, path string, files []string, re *regexp.Regexp, invert bool) string {
+	type row struct {
+		path string
+		n    int
+	}
+	var (
+		rows  []row
+		total int
+	)
+	for _, f := range files {
+		n, err := countFileHits(f, re, invert)
+		if err != nil || n == 0 {
+			continue
+		}
+		total += n
+		rows = append(rows, row{f, n})
+	}
+	if total == 0 {
+		return fmt.Sprintf("grep: %q — no matches in %s\n", pattern, path)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].n != rows[j].n {
+			return rows[i].n > rows[j].n
+		}
+		return rows[i].path < rows[j].path
+	})
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "grep: %q — %d match(es) across %d file(s)\n", pattern, total, len(rows))
+	shown := len(rows)
+	if shown > maxCountRows {
+		shown = maxCountRows
+	}
+	for _, r := range rows[:shown] {
+		fmt.Fprintf(&sb, "%7d  %s\n", r.n, r.path)
+	}
+	if len(rows) > shown {
+		fmt.Fprintf(&sb, "… %d more file(s) with matches not listed (total above is exact) …\n", len(rows)-shown)
+	}
+	return sb.String()
+}
+
+// countFileHits returns how many lines in path satisfy the pattern —
+// the exact number, uncapped. Same file guards as searchFile (size,
+// binary) so a count never disagrees with a listing about what counts as
+// a readable file.
+func countFileHits(path string, re *regexp.Regexp, invert bool) (int, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	if info.Size() > maxFileSizeBytes {
+		return 0, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if isBinary(data) {
+		return 0, nil
+	}
+	n := 0
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if re.MatchString(line) != invert {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// filesOnlyResults renders grep -l: just the paths, uncapped by
+// max_matches (see the call site). Capped at maxAllowedMatches files so
+// a search over a huge tree still fits the byte budget; the notice says
+// how many were left out so a truncated list never reads as complete.
+func filesOnlyResults(pattern, path string, files []string, re *regexp.Regexp, invert bool) string {
+	var hits []string
+	for _, f := range files {
+		n, err := countFileHits(f, re, invert)
+		if err != nil || n == 0 {
+			continue
+		}
+		hits = append(hits, f)
+	}
+	if len(hits) == 0 {
+		return fmt.Sprintf("grep: %q — no matches in %s\n", pattern, path)
+	}
+	var sb strings.Builder
+	fileWord := "file"
+	if len(hits) != 1 {
+		fileWord = "files"
+	}
+	shown := len(hits)
+	if shown > maxAllowedMatches {
+		shown = maxAllowedMatches
+	}
+	fmt.Fprintf(&sb, "grep: %q — %d %s contain matches\n", pattern, len(hits), fileWord)
+	for _, h := range hits[:shown] {
+		sb.WriteString(h)
+		sb.WriteByte('\n')
+	}
+	if len(hits) > shown {
+		fmt.Fprintf(&sb, "… %d more file(s) not listed (refine path/include to narrow) …\n", len(hits)-shown)
+	}
+	return sb.String()
+}
+
+// filterInclude keeps files whose base name OR path matches the glob.
+// `**` is accepted and stripped so `**/*.go` behaves as `*.go` — the
+// docs say to express deep paths with `path` instead, but silently
+// returning zero matches for the documented-as-unsupported form would be
+// a trap.
+func filterInclude(files []string, include string) []string {
+	glob := strings.TrimPrefix(include, "**/")
+	glob = strings.TrimPrefix(glob, "./")
+	if glob == "" {
+		return files
+	}
+	out := files[:0:0]
+	for _, f := range files {
+		if ok, _ := filepath.Match(glob, filepath.Base(f)); ok {
+			out = append(out, f)
+			continue
+		}
+		// Nested globs like `internal/*/*.go` match the whole path.
+		if ok, _ := filepath.Match(glob, filepath.ToSlash(f)); ok {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // truncateOutput trims out to fit maxOutputBytes and replaces the tail
@@ -202,7 +396,7 @@ type matchBlock struct {
 	matchLines map[int]bool // 1-based absolute line numbers that matched
 }
 
-func searchFile(path string, re *regexp.Regexp, ctx, maxHits int) ([]matchBlock, error) {
+func searchFile(path string, re *regexp.Regexp, before, after, maxHits int, invert bool) ([]matchBlock, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -225,10 +419,11 @@ func searchFile(path string, re *regexp.Regexp, ctx, maxHits int) ([]matchBlock,
 		fileLines = fileLines[:len(fileLines)-1]
 	}
 
-	// Collect 1-based line numbers of all matches.
+	// Collect 1-based line numbers of matches. invert flips the
+	// predicate — the same loop serves grep -v with no second pass.
 	var hitLines []int
 	for i, line := range fileLines {
-		if re.MatchString(line) {
+		if re.MatchString(line) != invert {
 			hitLines = append(hitLines, i+1)
 			if len(hitLines) >= maxHits {
 				break
@@ -243,8 +438,8 @@ func searchFile(path string, re *regexp.Regexp, ctx, maxHits int) ([]matchBlock,
 	type interval struct{ lo, hi int }
 	var intervals []interval
 	for _, ln := range hitLines {
-		lo := max1(1, ln-ctx)
-		hi := min1(len(fileLines), ln+ctx)
+		lo := max1(1, ln-before)
+		hi := min1(len(fileLines), ln+after)
 		if len(intervals) > 0 && lo <= intervals[len(intervals)-1].hi+1 {
 			intervals[len(intervals)-1].hi = max1(intervals[len(intervals)-1].hi, hi)
 		} else {

@@ -143,6 +143,12 @@ type Args struct {
 	Command         string `json:"command"`
 	TimeoutMS       int    `json:"timeout_ms,omitempty"`
 	RunInBackground bool   `json:"run_in_background,omitempty"`
+
+	// strippedCD is not JSON. It records that Execute dropped a redundant
+	// leading `cd <cwd> && ` (see stripcd.go) so the result header can
+	// say so — the model sees what it wrote plus a note, never a silent
+	// rewrite.
+	strippedCD bool
 }
 
 type Tool struct {
@@ -151,6 +157,9 @@ type Tool struct {
 	deny    func(command string) (bool, string)
 	sandbox *sandbox.Options
 	envKeep []string
+	// advisory caps the success-path [hint:] trailer to one firing per
+	// class per session. Nil in a zero-value Tool (tests) → uncapped.
+	advisory *advisoryLimiter
 }
 
 // WithEnvPassthrough names variables that survive the credential scrub
@@ -208,7 +217,7 @@ func (t Tool) shellArgv(command string) (string, []string) {
 }
 
 // New returns a bash tool gated by the given permission policy.
-func New(p *permission.Policy) Tool { return Tool{policy: p} }
+func New(p *permission.Policy) Tool { return Tool{policy: p, advisory: &advisoryLimiter{}} }
 
 // WithDeny installs a command guard checked before permission/exec. When
 // the guard returns true, the command is refused with a model-visible
@@ -288,7 +297,17 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	// gate). Detach and return a handle immediately — never block the turn,
 	// never bind the process to the turn ctx (PRD §4 D5).
 	if a.RunInBackground {
-		return t.runBackground(a.Command)
+		execCmd, stripped := stripRedundantCD(a.Command, t.policy.CWD())
+		return t.runBackground(execCmd, a.Command, stripped)
+	}
+
+	// Permission above saw the model's ORIGINAL command (the approval text
+	// must be what the model asked for); from here on the shell gets the
+	// stripped form. See stripcd.go for why this is narrower than "remove
+	// cd", and for why the echo below keeps the original.
+	execCommand, stripped := stripRedundantCD(a.Command, t.policy.CWD())
+	if stripped {
+		a.strippedCD = true
 	}
 
 	timeout := a.TimeoutMS
@@ -302,7 +321,7 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond)
 	defer cancel()
 
-	shell, shArgs := t.shellArgv(a.Command)
+	shell, shArgs := t.shellArgv(execCommand)
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(cctx, shell, shArgs...)
@@ -398,14 +417,17 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 	if elidedBytes > 0 {
 		header += fmt.Sprintf(", %d bytes elided mid-output (head+tail kept)", elidedBytes)
 	}
+	if a.strippedCD {
+		header += ", ran without the redundant `cd` prefix"
+	}
 	header += ")\n"
 	result := header + string(output)
-	// Success-path advisory: if the command had a clearly-better
-	// dedicated-tool alternative (ls → list_dir, git → git tool,
-	// cd-prefix waste, etc.), append a [hint: …] line so the model
-	// learns the preferred shape on the next turn. Doesn't block
-	// execution and doesn't affect non-matching commands.
-	if advisory := bashAdvisory(a.Command); advisory != "" {
+	// Success-path advisory: a nudge about a better shape for NEXT time.
+	// Measured 2026-11-22 and cut down to two classes capped at one
+	// firing each per session — see hint.go for the table and the
+	// reasoning. Denials are a different mechanism (the command did not
+	// run, so the model must change): planAnalyzeBashHint above.
+	if advisory := bashAdvisory(execCommand, t.advisory); advisory != "" {
 		result += "\n[hint: " + advisory + "]\n"
 	}
 	// Sandbox attribution: a jail denial is indistinguishable from an
@@ -424,16 +446,16 @@ func (t Tool) Execute(ctx context.Context, raw json.RawMessage) (string, error) 
 // turn ctx, no timeout ctx): a background job must outlive the turn that
 // started it (PRD §4 D5). Cleanup is via the monitor tool's kill or the
 // manager's Shutdown at session end — never via turn cancellation.
-func (t Tool) runBackground(command string) (string, error) {
+func (t Tool) runBackground(execCommand, shownCommand string, strippedCD bool) (string, error) {
 	if t.bgMgr == nil {
 		return "", errors.New("bash: background execution is unavailable in this session (run_in_background not supported here)")
 	}
-	job, err := t.bgMgr.Launch(command)
+	job, err := t.bgMgr.Launch(execCommand)
 	if err != nil {
 		return "", err // concurrency cap reached — message is already actionable
 	}
 
-	shell, shArgs := t.shellArgv(command)
+	shell, shArgs := t.shellArgv(execCommand)
 	cmd := exec.Command(shell, shArgs...)
 	if cwd := t.policy.CWD(); cwd != "" {
 		cmd.Dir = cwd
@@ -458,7 +480,11 @@ func (t Tool) runBackground(command string) (string, error) {
 		job.Finish(exitCodeOf(cmd.Wait()))
 	}()
 
-	return fmt.Sprintf("[bg: started %s] $ %s\nTrack with the monitor tool: monitor(job=%q, action=poll|wait|kill).", job.ID, command, job.ID), nil
+	note := ""
+	if strippedCD {
+		note = " (ran without the redundant `cd` prefix)\n"
+	}
+	return fmt.Sprintf("[bg: started %s] $ %s\n%sTrack with the monitor tool: monitor(job=%q, action=poll|wait|kill).", job.ID, shownCommand, note, job.ID), nil
 }
 
 // exitCodeOf extracts a process exit code from cmd.Wait's error: 0 on

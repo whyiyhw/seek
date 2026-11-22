@@ -19,7 +19,7 @@ import (
 // though the parent has them.
 var customParentTools = []string{
 	"read", "grep", "list_dir", "git", "webfetch", "think",
-	"agent", "ask_user", "bash", "write", "edit", "fim_complete",
+	"agent", "ask_user", "bash", "write", "edit",
 }
 
 // generalPurposeSet is what a nil-Tools (or degraded) custom type

@@ -141,7 +141,14 @@ time. The PRD's "21 例" predates the nine `mcp-semble-routing-*` arms
 added 2026-11-17/18 by the MCP D-line (21 + 9 = 30); E5's
 `serve-web-stream` (2026-11-21) makes it 31 — its row lives in the
 load-bearing table below, not in this history table (it has no
-pre-landing history by construction). History columns are computed from
+pre-landing history by construction). Three cases added 2026-11-22
+alongside the shell-as-search metrics (`grep-affordance`,
+`parallel-fanout`, `references-trigger`) make it 34; all three are
+rows in this table from their first record, with the baseline noted in
+the history column rather than reconstructed. `grep-affordance` is the
+one that has already moved: 1/5 before the grep-tool extension, 5/5
+after, same bounds both sides (case README). History columns are
+computed from
 the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
 wherever a repair landed mid-history; the window is the honest basis).
@@ -172,6 +179,7 @@ point of having a gate.
 | git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
 | git-subcommand-shape | 24/25 → 9/9 (lone red 2026-08-18) | 1.0 | 3 | 1.0 | no |
 | glm-lane-contract | 1/7 → env-bimodal | env | 5 | — | **yes** |
+| grep-affordance | 1/5 pre-extension → 5/5 post (A/B 2026-11-22, case README) | ~0.2 → 1.0 | 5 | **0.6** | no |
 | grep-refine-not-flood | 8/11 → 7/10 | ~0.7 | 5 | **0.6** | no |
 | instruction-following | 11/11 → 10/10 | 1.0 | 3 | 1.0 | no |
 | mcp-semble-routing-a1-mixed | 10/10 | 1.0 | 3 | 1.0 | no |
@@ -183,10 +191,12 @@ point of having a gate.
 | mcp-semble-routing-a3-mixed | 5/5 | 1.0 | 3 | 1.0 | no |
 | mcp-semble-routing-a3-nl | 0/5 — by design (see below) | ~0 | 3 | — | **yes** |
 | mcp-semble-routing-a3-symbol | 5/5 | 1.0 | 3 | 1.0 | no |
+| parallel-fanout | 3/3 (first record 2026-11-22) | 1.0 | 3 | **0.6** | no |
 | print-deny-semantics | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | read-eof-blind | 14/19 → 9/9 (red mass pre 2026-11-13) | 1.0 | 3 | 1.0 | no |
 | read-tail-fact | 17/19 → 9/9 | 1.0 | 3 | 1.0 | no |
 | read-whole-file | 14/19 → 9/9 | 1.0 | 3 | 1.0 | no |
+| references-trigger | 3/3 real calls — first observation 2026-11-22 | unmeasured (baseline: 0/6,474) | 3 | — | **yes** |
 | redundant-tool-calls | 12/12 → 10/10 | 1.0 | 3 | 1.0 | no |
 | session-id-contract | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | tool-args-hallucination | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
@@ -199,7 +209,7 @@ Gate semantics at the chosen round counts: `1.0` = 3/3 (or 5/5), zero
 tolerance; `0.6 @ 3` = 2/3 (tolerate 1 red); `0.6 @ 5` = 3/5 (tolerate
 2); `0.8 @ 5` = 4/5 (tolerate 1). The `expect.json` files carry exactly
 these values (`min_pass_rate` written only where ≠ 1.0; `record_only:
-true` on the four marked rows); expect.json remains the per-case
+true` on the five marked rows); expect.json remains the per-case
 judgement authority — this table is the calibration record, not a
 second source the runner reads.
 
@@ -256,7 +266,7 @@ in a 9/10 window).
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
-| `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
+| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true` 挂账至 E2 标定 / E6 release lane 接管（真二进制 real-key baseline 未测——无人值守车道假 key 纪律，且三态实跑入口 `eval/run.sh` 不在验证车道白名单、默认写正式 `eval/results`）；机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段） |
 | `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
 | `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
 
@@ -388,10 +398,14 @@ the lane block and is lane-independent.
 | `total_tool_calls` | every `tool_start` event |
 | `read_calls` | `tool_start` events with `name=read` |
 | `grep_calls` | `tool_start` events with `name=grep` |
+| `references_calls` | `tool_start` events with `name=references` — the semantic LSP lane (`internal/tools/references`, gopls / pyright / typescript-language-server). Landed 2026-11-21 with the 40-session baseline that motivated it: 0 calls across 6,474 events while `bash_grep_calls` stood at ~2,100 — the tool was capable and simply never got a trigger |
 | `mcp_calls` | `tool_start` events whose tool name contains the `__` infix — MCP bridge tools register as `<server>__<tool>` (D1 default prefix, `internal/tools/mcptool/bridge.go`); no built-in name contains `__`. Reads 0 before D1 landed (the bridge prefixed only on conflicts then), even when MCP tools are used — the metric assumes D1's naming (`docs/prd/feature-mcp-client.md` §5.2) |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
 | `bash_chains` | `tool_start` events for `bash` whose raw args contain `;` or `&&` — the multi-command-chaining anti-pattern. `;` isn't even a separator on cmd.exe (Windows), so a POSIX-style chain fails wholesale; `&&` is legal on cmd but still the anti-pattern (target shape: one command per call, or parallel dedicated-tool calls). `|` deliberately NOT counted — pipelines and grep alternations are legitimate |
 | `bash_git_calls` | `tool_start` events for `bash` whose raw args contain a `git` invocation (`\bgit\b`) — read-only git belongs in the dedicated git tool (whitelist + auto-fix); mutating git (commit/push) legitimately lives in bash, so bind this metric only in read-only prompts |
+| `bash_grep_calls` | `tool_start` events for `bash` that run `grep`/`rg`/`ag` in COMMAND POSITION (command start, or after `;`/`&&`/`\|`/newline/`(`, optionally behind env assignments and `command`/`exec`) — shell used as the search tool. Deliberately not the looser whitespace-delimited form `bash_git_calls` uses: on the 40-session baseline (5,015 bash calls) the loose form adds 19 hits and all 19 are false positives (`git grep`, heredoc bodies in `git commit -F -`, Python inside a heredoc), while command position misses 7 (`do grep` / `case` bodies). Baseline value 2,095 (41.8% of bash). Read it against `grep_calls`, not alone: 51% of those commands were real multi-command chains the grep tool cannot express, so this is a floor on shell-as-search, not a count of avoidable calls |
+| `bash_cd_prefix_calls` | `tool_start` events for `bash` whose command STARTS with `cd ` — the state-free-shell tax. The bash tool already runs from the project root, so a leading `cd <root>` is noise and a leading `cd /elsewhere` is the model rebuilding "where am I" every call. Baseline 926/4,980 (18.6%), of which 322 (6.4%) cd'd into the session's own cwd. Middle-of-chain `cd /tmp && …` does not count |
+| `parallel_turns` | `turn_end` events whose response issued ≥2 tool calls in one turn — the parallel read-only batch (`pkg/agent` dispatches `ReadOnlyTool` calls concurrently). Baseline: 36.0% of tool-bearing turns, but 98% of those were exactly 2 and only 0.2% were ≥3. Counts the ≥2 population so a case can bind `min_parallel_turns` |
 | `bash_before_dedicated` | `bash` tool_starts occurring BEFORE the first `grep`/`read`/`list_dir` tool_start — bash as FIRST resort. Ordering is the honest anti-pattern signal when a case's task legitimately forces shell recovery later (e.g. `read` elided an over-1024-byte line so verbatim text needs awk): a total `bash_calls` bound cannot tell recovery from overreach, this can. A run with no dedicated call at all counts every bash call (`list_dir` joined the set 2026-11-18 — adding a tool can only lower the metric, so no existing bound tightens) |
 | `git_calls` | `tool_start` events with `name=git` |
 | `git_subcommand_dupes` | `tool_end` events for `git` whose result contains `repeated from args` — the model repeated the subcommand as `args[0]` and the tool auto-fixed it; counts the construction mistake at zero behavioral cost (see `eval/cases/git-subcommand-shape/README.md`) |
@@ -403,6 +417,7 @@ the lane block and is lane-independent.
 | `session_id_missing` | `agent_end` events without `session_id` (`cmd/seek/main.go` `jsonLine.SessionID`, stable contract; `--no-save` legitimately omits it — only bind this in cases that save) |
 | `session_id_distinct` | distinct `session_id` values across `agent_end` events — a fresh run plus `-resume` of that session must report the same id → 1 |
 | `nonzero_exits` | `runner_fact` lines with `exit_code != 0` — a runner.sh's channel for process-level results (exit codes aren't in the JSONL stream); 0 for default-invocation cases |
+| `runner_assert_failures` | `runner_fact` lines with `failed == true` — a runner.sh's channel for mechanical judgement assertions (task-level scoring; first user: plan-e2e's A1–A10, see "Load-bearing axis cases" below). Generic: any runner may emit failed-facts |
 | `turns` | `turn_end` events |
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
@@ -641,8 +656,40 @@ While the opencode/compatible lane is active, `run.sh` **scrubs `DEEPSEEK_API_KE
 
 Cost note: rows on a provider lane carry no model id, so cross-lane cost comparisons read the ratios, not the absolute `$` (same caution as the ablation table).
 
+## Load-bearing axis cases (eval v2 E3+, `docs/prd/feature-eval-v2.md` §2.2 B)
+
+Task-level cases for the v0.11–0.12 surface that grew fastest with zero eval
+coverage (plan state machine, subagent lifecycle, serve/web plane). Judging is
+a per-case mechanical scorer (no LLM, no prose matching): wire-format PREFIX
+assertions on tool results + message-order facts + filesystem recomputation,
+emitted as `runner_fact` lines and counted by `runner_assert_failures`.
+
+- **`plan-e2e`** (E3, c_c5wwey, 2026-11-21) — the full plan chain
+  propose(done_when+reviewed_by) → approval → plan(start) echo → write →
+  plan(complete) → `/exit` → `-resume` fold probe, driven through a REAL TUI
+  on a pty (`eval/tools/plan-e2e-drive.py`; the approval picker is
+  TUI-only — print mode has no askuser callback) against a scripted local
+  model (`fake_plan_endpoint.py`, fake key, $0 API). Asserts A1–A10 +
+  resume_same_session; **measures the toolchain, not model choice**.
+  `record_only: true` until E2's calibration lands; joins the release lane
+  at E6. Baseline + judging detail + the resume-fold bug its first run
+  caught: `eval/cases/plan-e2e/README.md`. The judging/gate mechanics are
+  pinned headless by `scripts/eval-e3-case-test.sh` (selftest lane, name
+  `eval-e3-case-test`, ~2 min): the REAL runner/drive(pty)/endpoint/judge
+  run as-is with only the binary swapped for a scripted fake that speaks
+  the same argv + wire contracts — all-green row, four named-red flavors
+  (fold / no-write / premature-write / approval-marker), record-only,
+  and E1 `--rounds` aggregate compatibility. The real-binary real-TUI
+  full-chain run stays with the release lane (its `eval/run.sh` entry is
+  outside the verification lane's `selftest.sh`-only whitelist and its
+  default sink is the formal `eval/results/`).
+- E4 `subagent-bg-resume` and E5 `serve-web-stream` follow on their own cards
+  (same judging pattern: `runner_fact{failed}` + this metric).
+
 ## Cost
 
 Each pass is one full `seek` invocation. On the default lane (since 2026-11-20: the OpenCode Go subscription's `deepseek-v4.1-flash`) it bills the subscription, not the metered API. On the explicit `SEEK_EVAL_PROVIDER=deepseek` fallback it is one metered DeepSeek call — budget roughly **$0.02–0.05 per case** depending on prompt length and tool-call fan-out (full 3-case suite well under $0.20).
 
 Rows also carry `cache_hit_tokens` (for cost accounting — see `docs/test-plan-read-tool.md` §3.3) and `final_text` (joined assistant text, capped at 2000 chars, for offline gold-answer scoring).
+
+Load-bearing axis cases are the exception on both lanes: their model is a local scripted fixture (fake key), so a full plan-e2e round costs **$0 API and ~18s wall** (measured 2026-11-21); the $0.1–0.3/example estimate applies only when the release lane re-runs them against a real model (PRD §2.2 B, E6's budget — not the daily core subset).

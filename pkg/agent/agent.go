@@ -6,7 +6,7 @@
 //     with cache stats, reasoner stripping, and streaming tool-call assembly.
 //   - Second-tier via llm.Provider: Config.Provider != nil → translates
 //     deepseek.Message ↔ llm.Message and drives the generic ChatStream API.
-//     DeepSeek-exclusive features (cache hit ratio, FIM, Reasoner) are not
+//     DeepSeek-exclusive features (cache hit ratio, Reasoner) are not
 //     available on this path; the TUI renders a banner to make that clear.
 package agent
 

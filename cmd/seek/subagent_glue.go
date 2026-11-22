@@ -244,10 +244,10 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		childObserved := fsobserve.New()
 		for _, name := range job.ToolNames {
 			// D8 provider-compatibility filter (after the template
-			// Filter): think / fim_complete only work against the
-			// first-class DeepSeek client — a child on any llm.Provider
-			// lane (explicitly routed OR inheriting a second-tier
-			// parent) must not see them.
+			// Filter): think only works against the first-class
+			// DeepSeek client — a child on any llm.Provider lane
+			// (explicitly routed OR inheriting a second-tier parent)
+			// must not see it.
 			if client == nil && subagent.IsDeepSeekOnlyTool(name) {
 				continue
 			}

@@ -12,6 +12,13 @@
 #      stderr+结果行；归一化只动同一脚本连跑两次也会变的字段）。
 #      与 eval-rounds-test 的「--rounds 1 ≡ 无 flag」、eval-ablate-test
 #      的「无 env ≡ c_w3vhcm 前 blob」同族——三测合起来：无 flag ≡ 历史。
+#      例外：metric vocabulary 的 append-only 扩展与 ablate 自测同款白名
+#      单（norm 剥新键默认 0 值，值非 0 不剥、diff 照样红——守护面不弱
+#      化）。2026-11-21 起清单：runner_assert_failures（E3 plan-e2e，
+#      c_c5wwey；本测出生时锚点 blob 取自 main 系 E5 版，E3 并回后基线
+#      对象带上该键，需同规则吸收）。2026-11-21 第二批：references_calls /
+#      bash_grep_calls / bash_cd_prefix_calls / parallel_turns（40 会话
+#      基线指标，ablate 同批同款）。
 #   ② --lane 只跑名单内用例：判定行与结果行的用例集合 == 名单、顺序 ==
 #      名单顺序（含 # 整行注释、行尾注释、缩进、空行的解析）；名单外
 #      用例零出现；stdout 有 lane 头行。
@@ -108,7 +115,12 @@ norm() { # norm SUBDIR —— 只动「同一脚本连跑两次也会变」的�
     -e 's|20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z|TS|g' \
     -e 's|20[0-9]{2}-[0-9]{2}-[0-9]{2}-v9\.9\.9-lanecafe|DATEFILE|g' \
     -e 's|\([0-9]+s,|(Xs,|g' \
-    -e 's|elapsed_s":[0-9]+|elapsed_s":E|g'
+    -e 's|elapsed_s":[0-9]+|elapsed_s":E|g' \
+    -e 's|,"runner_assert_failures":0||g' \
+    -e 's|,"references_calls":0||g' \
+    -e 's|,"bash_grep_calls":0||g' \
+    -e 's|,"bash_cd_prefix_calls":0||g' \
+    -e 's|,"parallel_turns":0||g'
 }
 for side in old new; do
   set -- "$tmp/$side/eval/results/"*.jsonl
