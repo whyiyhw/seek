@@ -68,7 +68,7 @@ seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 bu
   跑通即验收，之后纳入常规调度池。剩余 backlog：session 多路复用；**MCP 透传已落地
   （c_oyt6ft，2026-11-21）**——`session/new`/`session/load` 的 `mcpServers` 按声明起
   stdio 子进程、复用 mcp.json 的客户端栈、工具以 `mcp__<server>__<tool>` 进会话，
-  会话结束即回收（`docs/guide-zed.md` §5.3）。`session/load` 恢复已于 2026-11-19 落地
+  会话结束即回收（`docs/guide-zed.md` §5.5）。`session/load` 恢复已于 2026-11-19 落地
   （`cmd/seek/acp_replay.go` + `acpBackend.LoadSession`，ACP 车道同时开始按 turn 落盘）。
 - **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
   eval 用例随每次 dogfood 失败持续扩容。

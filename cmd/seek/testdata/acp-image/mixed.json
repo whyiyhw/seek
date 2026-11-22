@@ -1,0 +1,12 @@
+{
+  "_comment": "ACP session/prompt params, state 2: text + image + text. The marker for the image must land BETWEEN the two text blocks in the request seek actually sends — this is acceptance ④ of card c_4pczu3, and it is the shape a real Zed prompt has when you paste a screenshot mid-sentence.",
+  "prompt": [
+    { "type": "text", "text": "first part" },
+    {
+      "type": "image",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8AAQv8ZYAwAQ84H+VjtZqAAAAAASUVORK5CYII=",
+      "mimeType": "image/png"
+    },
+    { "type": "text", "text": "second part" }
+  ]
+}

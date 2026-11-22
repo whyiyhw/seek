@@ -252,18 +252,20 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (E3/E4 placeholders; E5 backfilled 2026-11-21)
+### Load-bearing axes (E3 placeholder; E4/E5 backfilled 2026-11-21)
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
 | `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
-| `subagent-bg-resume` (E4) | 5 | baseline 待 E4 回填 |
+| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
 | `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
 case measures < 0.6, the fix belongs in the product's prompts, not the
-threshold). E2 neither ran nor pre-gated them.
+threshold). E2 neither ran nor pre-gated them; E4's 0.6 is the doctrine
+floor pending its own real-key baseline (a release-lane,
+human/main-session action per the provider-lane rule).
 
 **`serve-web-stream` baseline (E5, c_lbtdqw)**: landed with the case —
 [`eval/cases/serve-web-stream/`](cases/serve-web-stream/)（README 记
@@ -405,12 +407,32 @@ the lane block and is lane-independent.
 | `completion_tokens` | cumulative generated tokens (`agent_end.completion_tokens`) — verbosity/thoroughness proxy |
 | `cache_hit_tokens` | MAX `agent_end.cache_hit_tokens` across the stream (not the first event) — in a runner-chained fresh+resume case the hit lands on the resume run, whose re-sent prefix finds the provider's server cache warm; 0 means the provider's cache detail never reached `agent_end` at all (see `eval/cases/glm-lane-contract/`) |
 | `review_line_refs` | count of `line N` / `LN` references in the assistant's text — rough "how many findings" proxy (deliberately ignores severity words so it doesn't echo the effort vocabulary) |
+| `agent_calls` | `tool_start` events with `name=agent` — subagent spawns + continuations (`internal/tools/agent`) |
+| `agent_bg_calls` | `agent` tool_starts whose parsed args carry `run_in_background=true` — the D1 detached-spawn shape; the E4 model-side assertion that the spawn was actually background |
+| `agent_continue_calls` | `agent` tool_starts whose parsed args carry a non-empty `session_id` — the P1-b continuation shape; the E4 model-side assertion that the follow-up quoted the lineage |
+| `bg_started_events` | E4 disk-side family: `runner_fact` lines with `check=bg_started_events` (max `value`) — background `started` events in the isolated SEEK_HOME's `projects/*/subagents.jsonl`, reported by subagent-bg-resume's runner after its invocations |
+| `bg_completed_events` | `completed` terminals joined to those background sub_sids — the child finished before parent-process teardown cancelled it (a cancelled child folds to `failed reason=canceled` and is excluded) |
+| `bg_notified_events` | `notified` consumption markers joined to the **completed** background set — the completion notice specifically (`internal/subagent` Notifier write-side, feature-orchestration §4.1 D3/D5); a failure-notice marker does not count |
+| `bg_notified_transcript` | parent-session transcript rows that are user-role `<context>` messages carrying the `[agent: background done sub-sid=<full>]` wire prefix for a background child — the "notice entered the main session stream" surface itself; prefix + sub_sid only, never the summary prose |
+| `bg_resumed_lineage` | `started` events whose `resumed_from` is non-empty AND names a sub_sid present in the index — the continuation run's lineage link |
+| `bg_artifacts_missing` | completed runs whose `transcript.jsonl` is absent from `projects/<pid>/sessions/<parent-sid>/subagents/<sub-sid>/` (`paths.SubagentSessionDir`) — 0 is the pass state |
 | `sse_delta_frames` | serve-web-stream only: `delta` frames on the W1.4 SSE wire — the case's runner.sh pairs captured `event:`/`data:` lines into `sse_frame` rows first; **content-conditional** (merged into the metrics object only when the stream carries `sse_frame` rows, so non-serve rows keep their historical byte shape — see the ablate no-env guard) |
 | `sse_usage_frames` | serve-web-stream only: `usage` frames (turn_end translated server-side, `internal/controlplane/webfrontend_stream.go`) |
 | `sse_frame_order_ok` | serve-web-stream only, 1/0: every `delta`/`usage`/`tool` frame of the close-out's run PRECEDES the close-out default frame — the per-conv `events…reply` wire invariant |
 | `sse_delta_accum_ok` | serve-web-stream only, 1/0: the delta frames' `text` concatenated in wire order equals the close-out frame's `text` (the authoritative replacement) — the fake endpoint ships two deltas so a swap or a drop breaks it |
 | `sse_reply_closeout_ok` | serve-web-stream only, 1/0: the close-out frame carries a non-empty `run` (equal to every delta frame's run) and a non-empty `session_id` |
 | `session_list_hits` | serve-web-stream only: `/rpc session/list` `sessions[].sid` entries matching the close-out frame's `session_id` — the persistence axis (child wrote it under the same `SEEK_HOME` ladder the rpc plane reads through) |
+
+The nine agent/bg keys are **data-gated** in the result row: they appear
+only when the round's stream carries an agent surface (an `agent`
+tool_start or a check-bearing `runner_fact`), so rows of non-agent cases
+keep their exact historical bytes — the same discipline as the
+`round`-field gate, and load-bearing for
+[`scripts/eval-ablate-test.sh`](../scripts/eval-ablate-test.sh)'s no-env
+byte-equivalence pin. Readers must treat an absent agent key as 0; a
+case binding these bounds must guarantee the surface (subagent-bg-resume's
+runner emits its fact channel unconditionally, so even a failed round
+has the keys — a red always names its metric, never "unknown metric").
 
 Bounds in `expect.json` use the prefix to declare direction:
 

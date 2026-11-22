@@ -144,8 +144,8 @@ func TestSessionListTruncatesLongTitles(t *testing.T) {
 	if err := st.Save(sess); err != nil {
 		t.Fatal(err)
 	}
-	if got := firstUserTitle(st.Dir(), sess.ID); len([]rune(got)) != titleMaxRunes+1 || !strings.HasSuffix(got, "…") {
-		t.Errorf("long title not capped at %d runes + ellipsis: %d runes %q", titleMaxRunes, len([]rune(got)), got)
+	if got := session.FirstUserTitle(st.Dir(), sess.ID); len([]rune(got)) != session.TitleMaxRunes+1 || !strings.HasSuffix(got, "…") {
+		t.Errorf("long title not capped at %d runes + ellipsis: %d runes %q", session.TitleMaxRunes, len([]rune(got)), got)
 	}
 }
 
