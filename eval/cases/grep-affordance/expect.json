@@ -1,0 +1,10 @@
+{
+  "description": "Three-restriction search over a mixed-extension directory: extension filter, negation, and occurrence count. The target shape is the grep tool (include=*.go, invert/files_only) plus one narrow count pass; bash-grep is the anti-pattern this case exists to measure. record_only until the grep-tool extension lands — at that point flip to min_pass_rate 0.6 and bind max_bash_grep_calls as a gate.",
+  "max_turns": 12,
+  "max_total_tool_calls": 8,
+  "max_bash_calls": 2,
+  "max_bash_grep_calls": 1,
+  "max_bash_before_dedicated": 0,
+  "min_grep_calls": 2,
+  "record_only": true
+}

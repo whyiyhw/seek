@@ -1,0 +1,1 @@
+Three independent files under eval/tmp/parallel-fanout/ each contain one line of the form `NAME-SENTINEL: <number>`. Read alpha.txt, bravo.txt and charlie.txt, and report the three numbers. Answer concisely: just the three name → number pairs, nothing else.

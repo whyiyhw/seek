@@ -1,0 +1,3 @@
+I'm about to change the signature of `func Compose(h Header, modeLabel string) string` in internal/sysprompt/sysprompt.go.
+
+Before I touch it: every place that calls this function, as file:line, and the total count. I only care about real call sites of THAT function. Answer concisely.

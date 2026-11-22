@@ -141,7 +141,12 @@ time. The PRD's "21 例" predates the nine `mcp-semble-routing-*` arms
 added 2026-11-17/18 by the MCP D-line (21 + 9 = 30); E5's
 `serve-web-stream` (2026-11-21) makes it 31 — its row lives in the
 load-bearing table below, not in this history table (it has no
-pre-landing history by construction). History columns are computed from
+pre-landing history by construction). Three cases added 2026-11-22
+alongside the shell-as-search metrics (`grep-affordance`,
+`parallel-fanout`, `references-trigger`) make it 34; all three are
+rows in this table from their first record, with the baseline noted in
+the history column rather than reconstructed. History columns are
+computed from
 the 372 committed sample rows in `results/` — all-time, plus the window
 since each case's last bound/prompt repair (all-time is contaminated
 wherever a repair landed mid-history; the window is the honest basis).
@@ -172,6 +177,7 @@ point of having a gate.
 | git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
 | git-subcommand-shape | 24/25 → 9/9 (lone red 2026-08-18) | 1.0 | 3 | 1.0 | no |
 | glm-lane-contract | 1/7 → env-bimodal | env | 5 | — | **yes** |
+| grep-affordance | 0/3 — red by construction, see case README | ~0 pre-extension | 3 | — | **yes** |
 | grep-refine-not-flood | 8/11 → 7/10 | ~0.7 | 5 | **0.6** | no |
 | instruction-following | 11/11 → 10/10 | 1.0 | 3 | 1.0 | no |
 | mcp-semble-routing-a1-mixed | 10/10 | 1.0 | 3 | 1.0 | no |
@@ -183,10 +189,12 @@ point of having a gate.
 | mcp-semble-routing-a3-mixed | 5/5 | 1.0 | 3 | 1.0 | no |
 | mcp-semble-routing-a3-nl | 0/5 — by design (see below) | ~0 | 3 | — | **yes** |
 | mcp-semble-routing-a3-symbol | 5/5 | 1.0 | 3 | 1.0 | no |
+| parallel-fanout | 3/3 (first record 2026-11-22) | 1.0 | 3 | **0.6** | no |
 | print-deny-semantics | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | read-eof-blind | 14/19 → 9/9 (red mass pre 2026-11-13) | 1.0 | 3 | 1.0 | no |
 | read-tail-fact | 17/19 → 9/9 | 1.0 | 3 | 1.0 | no |
 | read-whole-file | 14/19 → 9/9 | 1.0 | 3 | 1.0 | no |
+| references-trigger | 3/3 real calls — first observation 2026-11-22 | unmeasured (baseline: 0/6,474) | 3 | — | **yes** |
 | redundant-tool-calls | 12/12 → 10/10 | 1.0 | 3 | 1.0 | no |
 | session-id-contract | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | tool-args-hallucination | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
@@ -199,7 +207,7 @@ Gate semantics at the chosen round counts: `1.0` = 3/3 (or 5/5), zero
 tolerance; `0.6 @ 3` = 2/3 (tolerate 1 red); `0.6 @ 5` = 3/5 (tolerate
 2); `0.8 @ 5` = 4/5 (tolerate 1). The `expect.json` files carry exactly
 these values (`min_pass_rate` written only where ≠ 1.0; `record_only:
-true` on the four marked rows); expect.json remains the per-case
+true` on the six marked rows); expect.json remains the per-case
 judgement authority — this table is the calibration record, not a
 second source the runner reads.
 
@@ -388,10 +396,14 @@ the lane block and is lane-independent.
 | `total_tool_calls` | every `tool_start` event |
 | `read_calls` | `tool_start` events with `name=read` |
 | `grep_calls` | `tool_start` events with `name=grep` |
+| `references_calls` | `tool_start` events with `name=references` — the semantic LSP lane (`internal/tools/references`, gopls / pyright / typescript-language-server). Landed 2026-11-21 with the 40-session baseline that motivated it: 0 calls across 6,474 events while `bash_grep_calls` stood at ~2,100 — the tool was capable and simply never got a trigger |
 | `mcp_calls` | `tool_start` events whose tool name contains the `__` infix — MCP bridge tools register as `<server>__<tool>` (D1 default prefix, `internal/tools/mcptool/bridge.go`); no built-in name contains `__`. Reads 0 before D1 landed (the bridge prefixed only on conflicts then), even when MCP tools are used — the metric assumes D1's naming (`docs/prd/feature-mcp-client.md` §5.2) |
 | `list_dir_calls` | `tool_start` events with `name=list_dir` |
 | `bash_chains` | `tool_start` events for `bash` whose raw args contain `;` or `&&` — the multi-command-chaining anti-pattern. `;` isn't even a separator on cmd.exe (Windows), so a POSIX-style chain fails wholesale; `&&` is legal on cmd but still the anti-pattern (target shape: one command per call, or parallel dedicated-tool calls). `|` deliberately NOT counted — pipelines and grep alternations are legitimate |
 | `bash_git_calls` | `tool_start` events for `bash` whose raw args contain a `git` invocation (`\bgit\b`) — read-only git belongs in the dedicated git tool (whitelist + auto-fix); mutating git (commit/push) legitimately lives in bash, so bind this metric only in read-only prompts |
+| `bash_grep_calls` | `tool_start` events for `bash` that run `grep`/`rg`/`ag` in COMMAND POSITION (command start, or after `;`/`&&`/`\|`/newline/`(`, optionally behind env assignments and `command`/`exec`) — shell used as the search tool. Deliberately not the looser whitespace-delimited form `bash_git_calls` uses: on the 40-session baseline (5,015 bash calls) the loose form adds 19 hits and all 19 are false positives (`git grep`, heredoc bodies in `git commit -F -`, Python inside a heredoc), while command position misses 7 (`do grep` / `case` bodies). Baseline value 2,095 (41.8% of bash). Read it against `grep_calls`, not alone: 51% of those commands were real multi-command chains the grep tool cannot express, so this is a floor on shell-as-search, not a count of avoidable calls |
+| `bash_cd_prefix_calls` | `tool_start` events for `bash` whose command STARTS with `cd ` — the state-free-shell tax. The bash tool already runs from the project root, so a leading `cd <root>` is noise and a leading `cd /elsewhere` is the model rebuilding "where am I" every call. Baseline 926/4,980 (18.6%), of which 322 (6.4%) cd'd into the session's own cwd. Middle-of-chain `cd /tmp && …` does not count |
+| `parallel_turns` | `turn_end` events whose response issued ≥2 tool calls in one turn — the parallel read-only batch (`pkg/agent` dispatches `ReadOnlyTool` calls concurrently). Baseline: 36.0% of tool-bearing turns, but 98% of those were exactly 2 and only 0.2% were ≥3. Counts the ≥2 population so a case can bind `min_parallel_turns` |
 | `bash_before_dedicated` | `bash` tool_starts occurring BEFORE the first `grep`/`read`/`list_dir` tool_start — bash as FIRST resort. Ordering is the honest anti-pattern signal when a case's task legitimately forces shell recovery later (e.g. `read` elided an over-1024-byte line so verbatim text needs awk): a total `bash_calls` bound cannot tell recovery from overreach, this can. A run with no dedicated call at all counts every bash call (`list_dir` joined the set 2026-11-18 — adding a tool can only lower the metric, so no existing bound tightens) |
 | `git_calls` | `tool_start` events with `name=git` |
 | `git_subcommand_dupes` | `tool_end` events for `git` whose result contains `repeated from args` — the model repeated the subcommand as `args[0]` and the tool auto-fixed it; counts the construction mistake at zero behavioral cost (see `eval/cases/git-subcommand-shape/README.md`) |

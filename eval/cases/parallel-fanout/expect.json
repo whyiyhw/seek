@@ -1,0 +1,8 @@
+{
+  "description": "Three files, three independent facts, no dependency between them — the healthy shape is ONE turn issuing three reads (pkg/agent dispatches ReadOnlyTool calls as a concurrent batch). Regression guard: 3/3 green on the first record 2026-11-22 (see README — the aggregate 0.2% ≥3-call baseline turned out to describe organic work, not a prompt that names three files).",
+  "max_turns": 8,
+  "max_total_tool_calls": 6,
+  "min_read_calls": 3,
+  "min_parallel_turns": 1,
+  "min_pass_rate": 0.6
+}

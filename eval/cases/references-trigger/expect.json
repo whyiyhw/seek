@@ -1,0 +1,8 @@
+{
+  "description": "Signature-change question on seek's own tree: the correct first move is the semantic references tool (who calls this?), not a name grep. Skips itself (runner_fact failed=false + no assertions) when gopls is absent from PATH, so CI machines without a Go LSP do not manufacture a red. record_only: 0 real calls across the 40-session baseline means there is no distribution to gate on yet — steal two versions of observation first.",
+  "max_turns": 10,
+  "max_total_tool_calls": 6,
+  "min_references_calls": 1,
+  "max_bash_grep_calls": 1,
+  "record_only": true
+}

@@ -208,7 +208,10 @@ new_rc=$?
 # 之前的 blob，任何新增 metric 键都会让结果行多一个字段——那是合法演
 # 进，不是行为回归。只剥新键的【默认 0 值】（新键清单 = 锚点之后加入
 # vocabulary 的键）：值非 0 时不剥，diff 照样红——守护面不因此弱化。
-# 2026-11-21 起清单：runner_assert_failures（E3 plan-e2e，c_c5wwey）。
+# 2026-11-21 起清单：runner_assert_failures（E3 plan-e2e，c_c5wwey）；
+# 2026-11-21 第二批：references_calls / bash_grep_calls /
+# bash_cd_prefix_calls / parallel_turns（40 会话基线，见 eval/README.md
+# 指标表与 docs/pitfalls/eval/ 的同名坑条）。
 norm() {
   sed -E \
     -e "s|$tmp/$1|ROOT|g" \
@@ -217,7 +220,11 @@ norm() {
     -e 's|20[0-9]{2}-[0-9]{2}-[0-9]{2}-v9\.9\.9-deadbee|DATE-v9.9.9-deadbee|g' \
     -e 's|\([0-9]+s,|(Xs,|g' \
     -e 's|elapsed_s":[0-9]+|elapsed_s":E|g' \
-    -e 's|,"runner_assert_failures":0||g'
+    -e 's|,"runner_assert_failures":0||g' \
+    -e 's|,"references_calls":0||g' \
+    -e 's|,"bash_grep_calls":0||g' \
+    -e 's|,"bash_cd_prefix_calls":0||g' \
+    -e 's|,"parallel_turns":0||g'
 }
 for side in old new; do
   set -- "$tmp/$side/eval/results/"*.jsonl

@@ -1,0 +1,8 @@
+The directory eval/tmp/grep-affordance/src holds a small synthetic tree: three hand-written `.go` files, two non-Go files (`.md` and `.txt`), and a `gen/` subdirectory of six generated `.go` files. Answer four things:
+
+1. How many `.go` files directly in `src/` (not in `src/gen/`) contain the string `MarkerALPHA`?
+2. Of those, which ones do NOT contain `MarkerBETA`? List their filenames.
+3. What is the total number of `MarkerGAMMA` occurrences across ALL `.go` files under `src/` (including `src/gen/`)?
+4. Of that total, how many occur in `src/gen/` alone?
+
+Answer concisely: four numbers/filenames, nothing else.
