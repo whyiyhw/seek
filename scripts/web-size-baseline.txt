@@ -93,6 +93,12 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
+# 2026-11-22 c_k3pnlw（W5 后返工·markdown 渲染补齐）：本卡自身 delta
+# +20,616B（同树同线实测：markdown.js +5.5KB / webfrontend.html +1.5KB
+# embed / 表格·引用·段落渲染器本体；scripts/ 验收脚本不进 embed 不计）。
+# 分支内原棘轮 31332461→31578473 系 c_vxh4ro 抬 pin（31557490）落地前的
+# 旧口径，所认领 +225,396B 漂移与 c_vxh4ro 块重叠——作废以 main 账本为准；
+# 对现 pin 31557490 本卡随合并入账、余量内不另棘轮。
 # 2026-11-21 c_6xktw4 delta: +26664B (same-tree comparison on the 1.27.3
 # line, main@1d921d45 31501923 → branch 31528587; the first-merge reading
 # was +17520B — the second main absorption's session.go→title.go refactor

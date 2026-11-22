@@ -129,6 +129,13 @@ const snapshot = () => evalJS(`(() => {
     ol: bubble ? bubble.querySelectorAll('ol').length : 0,
     lis: bubble ? [...bubble.querySelectorAll('li')].map(l => l.textContent) : [],
     pres: bubble ? [...bubble.querySelectorAll('pre')].map(p => p.textContent) : [],
+    preOv: bubble ? (bubble.querySelector('pre') ? getComputedStyle(bubble.querySelector('pre')).overflowX : '') : '',
+    tbls: bubble ? [...bubble.querySelectorAll('table')].map(t => ({
+             heads: [...t.querySelectorAll('thead th')].map(c => c.textContent),
+             rows: t.querySelectorAll('tbody tr').length })) : [],
+    align: bubble ? [...bubble.querySelectorAll('th,td')].filter(c => c.style.textAlign).map(c => c.style.textAlign) : [],
+    bqs: bubble ? [...bubble.querySelectorAll('blockquote')].map(b => b.textContent) : [],
+    ps: bubble ? [...bubble.querySelectorAll('p')].map(p => p.textContent) : [],
     codes: bubble ? [...bubble.querySelectorAll('code')].map(c => c.textContent) : [],
     links: bubble ? [...bubble.querySelectorAll('a')].map(a => ({ href: a.href, rel: a.rel, target: a.target, text: a.textContent })) : [],
     nstream: document.querySelectorAll('.msg.streaming').length,
@@ -259,6 +266,31 @@ try {
     JSON.stringify({ heads: s.heads, lis: s.lis, pres: s.pres }));
   ck('收口：权威文本完整', s.txt.includes('流式正文第一段。') && s.txt.includes('流式完结。'), '');
 } catch (e) { ck('流式场景', false, e.message); await dump(); }
+
+// 景 4：富格式 —— c_k3pnlw 返工面（GFM 表格/blockquote/段落/列表续行
+// 折叠/代码块容器）。样例与 web-md-manual.sh 桩「富格式」场景同源。
+trace('景 4：富格式');
+try {
+  if ((await send('富格式')) !== 202) throw new Error('POST 非 202');
+  const { s } = await until('富格式收口', s => s.nstream === 0 && s.txt.includes('收尾'), 15000);
+  ck('表格：table/thead 就位、表头列名与行数齐',
+    s.tbls.length === 1 && s.tbls[0].heads.join(',') === '列,说明' && s.tbls[0].rows === 2,
+    JSON.stringify(s.tbls));
+  ck('表格：对齐走 CSSOM（:-: → center）', s.align.includes('center'), JSON.stringify(s.align));
+  ck('表格：竖线不进正文（DOM 而非裸文本）',
+    !s.txt.includes('|---|') && !s.txt.includes('| a |'), '');
+  ck('引用：blockquote 就位、> 前缀剥掉',
+    s.bqs.length === 1 && s.bqs[0].includes('引用一行') && s.bqs[0].includes('引用二行')
+    && !s.txt.includes('> 引用'), JSON.stringify(s.bqs));
+  ck('段落：两段各自 <p>',
+    s.ps.filter(p => p.includes('第一段文字') || p.includes('第二段文字')).length === 2,
+    JSON.stringify(s.ps));
+  ck('列表：续行折叠进条目不断列（1 个 ul、恰 2 项）',
+    s.ul === 1 && s.lis.length === 2
+    && s.lis[0].includes('长列表项第一行') && s.lis[0].includes('续行折叠进条目'),
+    JSON.stringify(s.lis));
+  ck('代码块：容器横滚 overflow-x:auto', s.preOv === 'auto', s.preOv);
+} catch (e) { ck('富格式场景', false, e.message); await dump(); }
 
 console.log(fails.length ? `\n${fails.length} 项断言失败` : '\n全部断言通过（W5 markdown 无头验收）');
 process.exit(fails.length ? 1 : 0);
