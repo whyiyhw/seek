@@ -93,7 +93,19 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
-31332461
+# 2026-11-22 c_vxh4ro：+225029B（main 实测 31557490 − pin 31332461）。这次
+# 抬的是 62 个提交的累积漂移，非任何单卡——pin 上次落在 f9e5dfc2（11-21）
+# 后，62 个提交（133 文件 +14845/-376）无一次合并闸 ratchet（butler 合并闸
+# 只跑 go test，三道 CI 闸在 PR 面 keyless 慢车道上静默累积一周）。本卡同时
+# 把三道 CI 闸归位进合并闸（butler 仓 .butler/merge-gates.json 声明机制），
+# 此后漂移在合并点被拦。
+# 实测锚：main@f45d4069、2026-11-22、go1.27.3（go.mod 同线），在该主检出跑
+# bash scripts/web-gate.sh 输出 built 31557490B（冷 GOCACHE 重编同值）——与
+# 卡面 main 实测值逐字节一致；卡面备选的 31579402 是 c_6xktw4 分支尖
+#（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
+# 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
+# 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
+31557490
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
