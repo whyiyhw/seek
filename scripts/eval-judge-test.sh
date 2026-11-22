@@ -90,11 +90,13 @@ if [ "${1:-}" = "-version" ]; then
   echo "v9.9.9 · judgebeef"
   exit 0
 fi
-echo "$*" >> "$FAKELOG"
+echo "$*" >> "${FAKELOG:-/dev/null}"
 model=""
+p=""
 prev=""
 for a in "$@"; do
   if [ "$prev" = "-model" ]; then model=$a; fi
+  if [ "$prev" = "-p" ]; then p=$a; fi
   prev=$a
 done
 case "$model" in
@@ -111,6 +113,22 @@ EOF
 {"type":"turn_end"}
 {"type":"agent_end","prompt_tokens":50,"completion_tokens":9,"cache_hit_tokens":0,"session_id":"judge-r"}
 EOF
+    ;;
+  zj-dynamic)
+    # ⑧ calibrate 腿：按 prompt 内嵌标记分流（judge prompt 含 final_text 原文）
+    case "$p" in
+      *CALIB-PASS-MARKER*)
+        printf '%s\n' '{"type":"text_delta","delta":"{\"pass\": true, \"reason\": \"canned pass\"}","reasoning":false}'
+        ;;
+      *CALIB-NOISE-MARKER*)
+        printf '%s\n' '{"type":"text_delta","delta":"definitely looks right to me, no further notes.","reasoning":false}'
+        ;;
+      *)
+        printf '%s\n' '{"type":"text_delta","delta":"{\"pass\": false, \"reason\": \"canned fail\"}","reasoning":false}'
+        ;;
+    esac
+    printf '%s\n' '{"type":"turn_end"}'
+    printf '%s\n' '{"type":"agent_end","prompt_tokens":50,"completion_tokens":9,"cache_hit_tokens":0,"session_id":"judge-r"}'
     ;;
   *)
     cat <<'EOF'
@@ -230,11 +248,34 @@ else
   echo "eval-judge selftest: WARN: go missing — skipping ⑦ (real-binary wire leg)" >&2
 fi
 
+# ---- ⑧ calibrate 机制：3 行迷你校准集走真 judge.py + 假二进制 ------------
+# 分流按 final_text 内嵌标记（judge prompt 含 final_text 原文）：PASS 标记→
+# 判 pass、NOISE 标记→非 JSON（doubt）、无标记→判 fail。三行标签
+# pass/fail/pass → agree=2、label-pass→doubt 一例、false-pass=0、
+# agreement=0.67 → gate-eligible=no（阈值逻辑走真路径）。
+caldir="$tmp/calib"
+mkdir -p "$caldir"
+# 行序：1=pass（PASS 标记→判 pass）、2=pass（NOISE 标记→非 JSON doubt）、3=fail（无标记→判 fail）
+jq -cn --argjson id 1 --arg label pass '{id:$id, case:"zcalib-a", origin:"real", ran_at:"", label:$label, label_note:"", rubric:"answer must be correct", prompt:"q", final_text:"CALIB-PASS-MARKER good answer"}' > "$caldir/fixtures.jsonl"
+jq -cn --argjson id 2 --arg label pass '{id:$id, case:"zcalib-b", origin:"real", ran_at:"", label:$label, label_note:"", rubric:"answer must be correct", prompt:"q", final_text:"CALIB-NOISE-MARKER unverifiable hedging"}' >> "$caldir/fixtures.jsonl"
+jq -cn --argjson id 3 --arg label fail '{id:$id, case:"zcalib-c", origin:"real", ran_at:"", label:$label, label_note:"", rubric:"answer must be correct", prompt:"q", final_text:"a wrong answer"}' >> "$caldir/fixtures.jsonl"
+SEEK_EVAL_BINARY="$fake" SEEK_EVAL_JUDGE_MODEL=zj-dynamic FAKELOG="$FAKELOG" \
+  bash eval/tools/judge-calibrate.sh "$caldir/fixtures.jsonl" > "$tmp/calib.out" 2>"$tmp/calib.err"; rc=$?
+[ "$rc" -eq 0 ] || fail "⑧ calibrate exited ${rc} (want 0): $(tail -3 "$tmp/calib.err")"
+[ "$(wc -l < "$caldir/verdicts.jsonl" | tr -d ' ')" = "3" ] || fail "⑧ verdicts not 3 rows"
+[ "$(jq -s 'map(select(.agree)) | length' "$caldir/verdicts.jsonl")" = "2" ] || fail "⑧ agree count not 2"
+[ "$(jq -s 'map(select(.label=="fail" and .verdict=="pass")) | length' "$caldir/verdicts.jsonl")" = "0" ] || fail "⑧ false-pass not 0"
+v_noise=$(jq -r 'select(.label=="pass") | select(.verdict=="doubt") | .verdict' "$caldir/verdicts.jsonl" | head -1)
+[ "$v_noise" = "doubt" ] || fail "⑧ noise row not folded to doubt"
+grep -q 'gate-eligible no\|gate-eligible  *no' "$caldir/report.md" || grep -q 'gate eligibility.*no' "$caldir/report.md" \
+  || fail "⑧ report missing the not-eligible verdict (agreement 0.67 + false-pass 0)"
+grep -q 'agreement: 0\.67' "$caldir/report.md" || fail "⑧ report agreement not 0.67"
+
 results_after=$(find eval/results 2>/dev/null | sort)
 [ "$results_before" = "$results_after" ] || fail "eval/results polluted by the selftest"
 
 if [ "$fails" -eq 0 ]; then
-  echo "eval-judge selftest: PASS (7 legs)"
+  echo "eval-judge selftest: PASS (8 legs)"
   exit 0
 fi
 echo "eval-judge selftest: FAIL (${fails} failures)" >&2
