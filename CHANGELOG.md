@@ -99,3 +99,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_7kco3z：agent 循环会话死刑降级×2：length 截断 tool_calls 自愈 + reasoning-only 空响应并入自愈（c_jdel6u 同款）
 - c_2aymtn：v8·R2 落地后复测：verifier 产线触发实况 + §9.1 同口径存疑率复测（基线 24.3%）+ R3 收件箱开缓判定
 - c_vollxv：eval v2·E4：承重轴 subagent-bg-resume——后台子代理完成通知+续话血统（feature-eval-v2.md :108）验收：①case 覆盖 PRD 三断言——完成通知进主流（notified 事件）、续话 r…
+- c_c5wwey：eval v2·E3：承重轴首例 plan-e2e——真 TUI+假 key 全链判分（propose done_when→批准→plan(start) 回显→write→complete→-resume 折叠探针，A1–A10 全机械 wire 前缀断言）；首跑抓出 resume 折叠真 bug（落盘 tool 消息无 name，reconstruct 恒 no active plan）并修 toolNameAt 配对；返工 C 案补 `scripts/eval-e3-case-test.sh` 只读自测（真 runner/drive/endpoint/judge 全参与、只换假二进制：全绿行+四具名红+record-only+rounds 聚合，~2min）——三态实跑入口 eval/run.sh 不在验证车道白名单且默认写正式 eval/results，真二进制 PTY 全链归 release lane

@@ -91,6 +91,11 @@ assistant tool_call 里；单测 fixture 手工填了 Name 所以常年绿）。
 - 本 case 的三个 python 脚本（endpoint 343 行 / drive ~230 / judge ~210）是
   **测试资产不是机制**：只在 case 跑时存在，不退役（同 E4 卡面口径：机制账
   本只记常驻检查项）。
+- 返工 C 案（2026-11-21）补的 `scripts/eval-e3-case-test.sh`（~340 行，含内
+  嵌假二进制）同属测试资产：selftest 发现制零登记、无 cron/CI/常驻状态，
+  产物全落 mktemp 沙盒 + `SEEK_EVAL_RESULTS_DIR` 重定向；其唯一机制性影响
+  是 `eval-lane-test` norm 白名单补一行（吸收平行分支 metric 键的既有纪律，
+  见 docs/pitfalls/eval/byte-equivalence-selftests-…）。
 
 ## 架构页
 

@@ -256,7 +256,7 @@ in a 9/10 window).
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
-| `plan-e2e` (E3) | 5 | baseline 待 E3 回填 |
+| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true` 挂账至 E2 标定 / E6 release lane 接管（真二进制 real-key baseline 未测——无人值守车道假 key 纪律，且三态实跑入口 `eval/run.sh` 不在验证车道白名单、默认写正式 `eval/results`）；机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段） |
 | `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
 | `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
 
@@ -659,7 +659,16 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
   resume_same_session; **measures the toolchain, not model choice**.
   `record_only: true` until E2's calibration lands; joins the release lane
   at E6. Baseline + judging detail + the resume-fold bug its first run
-  caught: `eval/cases/plan-e2e/README.md`.
+  caught: `eval/cases/plan-e2e/README.md`. The judging/gate mechanics are
+  pinned headless by `scripts/eval-e3-case-test.sh` (selftest lane, name
+  `eval-e3-case-test`, ~2 min): the REAL runner/drive(pty)/endpoint/judge
+  run as-is with only the binary swapped for a scripted fake that speaks
+  the same argv + wire contracts — all-green row, four named-red flavors
+  (fold / no-write / premature-write / approval-marker), record-only,
+  and E1 `--rounds` aggregate compatibility. The real-binary real-TUI
+  full-chain run stays with the release lane (its `eval/run.sh` entry is
+  outside the verification lane's `selftest.sh`-only whitelist and its
+  default sink is the formal `eval/results/`).
 - E4 `subagent-bg-resume` and E5 `serve-web-stream` follow on their own cards
   (same judging pattern: `runner_fact{failed}` + this metric).
 
