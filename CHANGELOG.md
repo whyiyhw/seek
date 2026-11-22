@@ -29,3 +29,4 @@ v0.12.3 — **Zed 面成形**的一版：feature-acp 在册缺口全清（backlo
 更早的版本见 [GitHub Releases](https://github.com/whyiyhw/seek/releases)——每个 release body 与其 annotated tag 同文。本文件只保留当前版本，历史版本查 git 历史（`git show vX.Y.Z:CHANGELOG.md`）。
 
 ## 已进 main、未部署
+- c_cv5dge：docs 账：budget.json 的 docs/prd/archive 线 653500→728500 重锚（actual 662240 +10%）——补 3d6f4895 归档 feature-deepseek-app-api.md（+46948B）时漏做的同 change 调线 + 活 PRD 在库加深（feature-acp 等）；摘要化否决（v0/v1 承载活引用）；上调已经人拍板（2026-11-22 凌晨，批），随合并生效
