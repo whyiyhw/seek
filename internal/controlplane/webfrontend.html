@@ -1,14 +1,16 @@
 <!doctype html>
 <!-- seek web MVP (card c_qucxtu) — single page, zero build chain.
-     Message rendering (W5, card c_x2au4t): markdown SUBSET renderer —
-     fenced ``` blocks, `inline` code, # headings, - / 1. lists, and
-     [links](url) with a protocol allowlist — vendored as a handwritten
-     DOM-API renderer in static/markdown.js (the first non-inline
-     asset; marked/markdown-it both bust the ≤25KB quota AND their
-     HTML-string output would need a parse-string-into-DOM sink, which
-     §5.5 forbids). Model output NEVER enters an HTML-parsing path: text
-     rides createTextNode/textContent, elements come from a fixed tag
-     whitelist (PRE/CODE/UL/OL/LI/H1-6/A).
+     Message rendering (W5, card c_x2au4t; rework c_k3pnlw added tables/
+     quotes/paragraphs): markdown SUBSET renderer — fenced ``` blocks,
+     `inline` code, # headings, - / 1. lists (with lazy continuation),
+     GFM tables, > quotes, paragraphs, and [links](url) with a protocol
+     allowlist — vendored as a handwritten DOM-API renderer in
+     static/markdown.js (the first non-inline asset; marked/markdown-it
+     both bust the ≤25KB quota AND their HTML-string output would need
+     a parse-string-into-DOM sink, which §5.5 forbids). Model output
+     NEVER enters an HTML-parsing path: text rides
+     createTextNode/textContent, elements come from a fixed tag
+     whitelist (PRE/CODE/UL/OL/LI/H1-6/A/BLOCKQUOTE/DIV/TABLE-family).
      Conversation identity (W1.3, D-W3): uuid minted by the browser,
      persisted in localStorage, carried as X-Seek-Conversation on
      fetches and ?conv= on the SSE stream (EventSource cannot set
@@ -137,8 +139,9 @@
      folded rendering → （消息渲染失败） placeholder — never a blank
      page; the live tree degrades to the pre-tree single-line row.
      Deliberately out of scope: multi-tab sync, history persistence,
-     bold/italic/table/quote markdown (the W5 subset covers the chat
-     load; renderer lives in static/markdown.js), mobile, real auth
+     bold/italic markdown (the W5 subset — tables/quotes/paragraphs
+     added by rework c_k3pnlw — covers the chat load; renderer lives
+     in static/markdown.js), mobile, real auth
      (design card c_7pptol owns the full UI). -->
 <html lang="zh">
 <head>
@@ -266,14 +269,28 @@
   #list { flex: 1; overflow-y: auto; padding: 14px; }
   .msg { max-width: 86%; margin: 4px 0; padding: 8px 12px; border-radius: 8px;
          white-space: pre-wrap; word-break: break-word; }
-  .msg pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
+  .msg pre, .sbody pre { background: var(--seek-inset); border: 1px solid var(--seek-line); border-radius: 6px;
              padding: 8px 10px; margin: 6px 0; overflow-x: auto;
              white-space: pre; font: inherit; }
-  .msg code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
-  /* ---- markdown 子集排版（W5 卡 c_x2au4t）----
+  .msg code, .sbody code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
+  /* ---- markdown 子集排版（W5 卡 c_x2au4t；c_k3pnlw 返工补段落/引用/表格/悬挂缩进）----
      标题在气泡内取收敛尺寸（浏览器 h1 默认 2em 会撑爆聊天行高）；
-     列表收边距；链接配色与主题同谱。四个正文容器（聊天气泡/会话
-     正文/子代理末读/记忆正文）共用一套。 */
+     段落 <p> 出薄边距、首末段贴泡边；引用条对齐 dsh 视觉（左竖条 +
+     次级文字色）；表格横滚容器 + 行底分隔线（无竖线，窄屏不裁切）；
+     列表收边距、outside 钉死悬挂缩进（UA 默认即如此——显式写出防
+     漂移）；链接配色与主题同谱。四个正文容器（聊天气泡/会话正文/
+     子代理末读/记忆正文）共用一套。 */
+  .msg p, .sbody p, #ag-last p, #mem-content p { margin: 6px 0; }
+  .msg p:first-child, .sbody p:first-child, #ag-last p:first-child, #mem-content p:first-child,
+  .msg p:last-child, .sbody p:last-child, #ag-last p:last-child, #mem-content p:last-child { margin: 0; }
+  .msg blockquote, .sbody blockquote, #ag-last blockquote, #mem-content blockquote {
+    margin: 6px 0; padding: 2px 0 2px 12px;
+    border-left: 3px solid var(--seek-line-focus); color: var(--seek-fg-soft); }
+  .md-tbl { max-width: 100%; overflow-x: auto; margin: 6px 0; }
+  .md-tbl table { border-collapse: collapse; font-size: .95em; }
+  .md-tbl th, .md-tbl td { padding: 4px 10px; text-align: left; vertical-align: top;
+    border-bottom: 1px solid var(--seek-line); white-space: normal; overflow-wrap: anywhere; }
+  .md-tbl th { border-bottom-color: var(--seek-line-focus); color: var(--seek-fg-soft); font-weight: 600; }
   .msg h1, .sbody h1, #ag-last h1, #mem-content h1 { font-size: 1.3em; margin: 10px 0 4px; }
   .msg h2, .sbody h2, #ag-last h2, #mem-content h2 { font-size: 1.2em; margin: 10px 0 4px; }
   .msg h3, .sbody h3, #ag-last h3, #mem-content h3,
@@ -281,7 +298,8 @@
   .msg h5, .sbody h5, #ag-last h5, #mem-content h5,
   .msg h6, .sbody h6, #ag-last h6, #mem-content h6 { font-size: 1.1em; margin: 8px 0 4px; }
   .msg ul, .sbody ul, #ag-last ul, #mem-content ul,
-  .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em; }
+  .msg ol, .sbody ol, #ag-last ol, #mem-content ol { margin: 4px 0; padding-left: 1.6em;
+    list-style-position: outside; }
   .msg a, .sbody a, #ag-last a, #mem-content a { color: var(--seek-link); }
   .you { margin-left: auto; background: var(--seek-accent); }
   .seek { background: var(--seek-soft); }
@@ -942,11 +960,11 @@ function connSet(ok) {
   connBar.hidden = ok || !connEverOpen;
   if (ok) connEverOpen = true;
 }
-// 消息正文渲染（W5 卡 c_x2au4t）：markdown 子集渲染器外置在
-// static/markdown.js（围栏/行内码/标题/列表/链接；DOM API 白名单构造，
-// 无 HTML 解析 sink）。seekMD.render 自带清空语义（replaceChildren 后渲
-// 染）。资产未载的极端情形（script 被网络/CSP 拦）退纯文本——可用性
-// 优先于格式，页面不因渲染器缺席而断流。
+// 消息正文渲染（W5 卡 c_x2au4t；c_k3pnlw 返工扩表格/引用/段落）：markdown
+// 子集渲染器外置在 static/markdown.js（围栏/行内码/标题/列表/GFM 表格/
+// blockquote/段落；DOM API 白名单构造，无 HTML 解析 sink）。seekMD.render
+// 自带清空语义（replaceChildren 后渲染）。资产未载的极端情形（script 被
+// 网络/CSP 拦）退纯文本——可用性优先于格式，页面不因渲染器缺席而断流。
 function renderBody(el, text) {
   if (window.seekMD) seekMD.render(el, text);
   else el.textContent = text;
