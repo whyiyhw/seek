@@ -104,3 +104,4 @@ v0.12.1 — 一次只动内核的小发行：**`propose` 多了一格必填**。
 - c_2aymtn：v8·R2 落地后复测：verifier 产线触发实况 + §9.1 同口径存疑率复测（基线 24.3%）+ R3 收件箱开缓判定
 - c_vollxv：eval v2·E4：承重轴 subagent-bg-resume——后台子代理完成通知+续话血统（feature-eval-v2.md :108）验收：①case 覆盖 PRD 三断言——完成通知进主流（notified 事件）、续话 r…
 - c_x5hpbn：v8·W 前置：试验田人审晋升闸（I4）闭环设计——docs-only，等 R2 复测数放行本体
+- c_hamnpf：pitfall 台账：恢复被拆分脚本写空的 loadSessions 条目（--check 5 红归零）
