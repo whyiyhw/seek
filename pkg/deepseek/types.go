@@ -137,7 +137,7 @@ type ChatRequest struct {
 	// expensive. Empty = model default. (The TUI's /effort command
 	// only exposes "high"/"max" — the older OpenAI-style "low"/"medium"
 	// values are not documented for V4 and may be silently ignored;
-	// internal callers like the `think` tool also stick to high/max.)
+	// internal callers also stick to high/max.)
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
 	// SafetyCheck opts this request into DeepSeek's model safety check

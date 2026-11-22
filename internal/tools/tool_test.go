@@ -318,13 +318,13 @@ func TestWire_ConcurrentReads(t *testing.T) {
 func TestInterfaceContractsSurviveRegistry(t *testing.T) {
 	t.Parallel()
 	reg := New()
-	st := &fakeStreamingTool{fakeTool: fakeTool{name: "think"}}
+	st := &fakeStreamingTool{fakeTool: fakeTool{name: "streamprobe"}}
 	ro := &fakeReadOnlyTool{fakeTool: fakeTool{name: "read"}}
 	reg.Add(st).Add(ro)
 
-	gotSt := reg.Lookup("think")
+	gotSt := reg.Lookup("streamprobe")
 	if _, ok := gotSt.(StreamingTool); !ok {
-		t.Error("Lookup(think) lost the StreamingTool interface — agent dispatchTool would fall back to Execute")
+		t.Error("Lookup(streamprobe) lost the StreamingTool interface — agent dispatchTool would fall back to Execute")
 	}
 	gotRo := reg.Lookup("read")
 	if _, ok := gotRo.(ReadOnlyTool); !ok {

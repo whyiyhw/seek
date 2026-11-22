@@ -36,8 +36,8 @@
 
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
-| 基础工具循环（读/写/bash/edit 等） | ✅ | ✅ | **对等** | Seek：`read`、`write`、`edit`、`bash`、`grep`、`list_dir`、`git`、`think`，另有 `ask_user` 选择器 |
-| Think / 反思 | ✅ | ✅ | **对等** | Seek：`think` 工具调用 DeepSeek reasoner；内置 `dual-model` skill 实现 reasoner→执行→反思闭环 |
+| 基础工具循环（读/写/bash/edit 等） | ✅ | ✅ | **对等** | Seek：`read`、`write`、`edit`、`bash`、`grep`、`list_dir`、`git`，另有 `ask_user` 选择器 |
+| Think / 反思 | ✅ | ❌ **缺失** | — | Seek 的 `think` 工具与 `dual-model` skill 已于 2026-11-22 退役：109 个真实项目会话仅 2 次调用，强引导无效——模型不绕弯，reasoner 语义直接由主会话 thinking 模式承载 |
 | LSP 工具（结构化符号/引用） | ✅ | 🔶 **等效替代** | — | v6 柱 L（瘦身版）：`references` 工具走 gopls/pyright/tsserver 拿**语义引用**（grep 替代不了的硬赢）。definition/hover/symbols **故意不做**——Go 里被 grep+`go build` 覆盖，ROI 低（见 `feature-lsp.md` §动机）。会话级 server、零 daemon |
 | Notebook 编辑 | ✅ | ❌ **缺失** | — | Claude Code 有 `NotebookEdit` 原生编辑 Jupyter `.ipynb`；Seek 无 |
 | 后台 bash + 流式监听 | ✅ | ✅ | — | 双方均支持 `run_in_background` + `monitor`（poll/wait/kill）跟踪后台 job。seek 为会话级（随会话生死、零 daemon），v6 柱 K |
@@ -283,7 +283,6 @@
 | **DeepSeek 单价 + 前缀缓存** | DeepSeek 基础单价已显著低于 Anthropic；叠加 95.7% 实测缓存命中后，同等任务量级下 token 成本远低于 Claude Code 默认链路 |
 | **错峰 5 折** | DeepSeek 错峰时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰）半价；Seek 状态栏内置计时器和自动费用计算 |
 | **单二进制 ~5 MB** | 零运行时依赖，`go install` 或 `curl \| tar` 即用 |
-| **`think` + `dual-model` skill** | reasoner→chat→reflect 推理闭环 |
 | **三层记忆 + `-dream`** | `seek -dream` 做跨项目用户偏好归纳，decay-score GC 自动遗忘 |
 | **零遥测** | 隐私优先，无数据收集 |
 | **无地区限制** | 全球可用 |
@@ -364,7 +363,7 @@ DeepSeek 原生 + **prefix-cache 字节稳定**（seek 95-97% / Reasonix 99.82% 
 | **桌面 / 远程** | webhook push（单向通知） | Tauri 桌面（预发布）+ QQ 双向远程 | Reasonix |
 | **Web search** | ✅ `web_search`（DeepSeek 原生 Search API，按次计费）+ webfetch 单页 | 多 provider（Bing/Baidu/SearXNG/Tavily/Perplexity） | **≈ 对等**（seek 单 provider 但零配置——同 DeepSeek key） |
 | **Memory 模型** | L/M/S 三层 + `seek -dream` 跨项目蒸馏 + decay GC | 四分类（user/feedback/project/reference） | 路线不同 |
-| **DeepSeek 深度** | 错峰 5 折倒计时 + V4 `think` | billing/balance（**未见**错峰） | seek 略深 |
+| **DeepSeek 深度** | 错峰 5 折倒计时 + 逐模型成本追踪 | billing/balance（**未见**错峰） | seek 略深 |
 | **规模/心智份额** | 新/小 | **14.9k stars / 870 forks** | **Reasonix（碾压）** |
 
 ## R.3 各自赢的（源码校正后）

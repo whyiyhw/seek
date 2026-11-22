@@ -60,7 +60,7 @@ type ToolExecStart struct {
 }
 
 // ToolDelta is an intermediate output chunk from a long-running
-// streaming tool (currently only `think`). The CallID and Name match
+// streaming tool. The CallID and Name match
 // the surrounding ToolExecStart/ToolExecEnd pair so the TUI can route
 // deltas to the right live region. Reasoning=true means the delta is
 // chain-of-thought (foldable); false means it's the tool's actual

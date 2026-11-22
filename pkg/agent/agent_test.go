@@ -783,7 +783,7 @@ func TestAgent_CancelDuringToolCallStreamDoesNotPoisonHistory(t *testing.T) {
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"think","arguments":"{\"task\":\""}}]}}]}`+"\n\n")
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_x","type":"function","function":{"name":"edit","arguments":"{\"path\":\""}}]}}]}`+"\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -1111,7 +1111,7 @@ func TestAgent_StreamTruncatedMidToolCall(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
-		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_t","type":"function","function":{"name":"think","arguments":"{\"task\":\"x\"}"}}]}}]}`+"\n\n")
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_t","type":"function","function":{"name":"edit","arguments":"{\"path\":\"x\"}"}}]}}]}`+"\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -1161,7 +1161,7 @@ func TestAgent_FinishReasonMismatch_DropsOrphanToolCalls(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, strings.Join([]string{
 			// Tool-call delta…
-			`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_m","type":"function","function":{"name":"think","arguments":"{}"}}]}}]}`,
+			`data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_m","type":"function","function":{"name":"edit","arguments":"{}"}}]}}]}`,
 			``,
 			// …but finish_reason says "stop", not "tool_calls".
 			`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
@@ -1203,7 +1203,7 @@ func TestAgent_DecodeErrorMidStream_DropsTurn(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher, _ := w.(http.Flusher)
 		// Valid tool_call delta first…
-		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_d","type":"function","function":{"name":"think","arguments":"{}"}}]}}]}`+"\n\n")
+		io.WriteString(w, `data: {"choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_d","type":"function","function":{"name":"edit","arguments":"{}"}}]}}]}`+"\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}

@@ -47,7 +47,7 @@ const (
 	TypeGeneralPurpose Type = "general-purpose"
 
 	// TypeExplore is the research-only subagent type — read /
-	// grep / list_dir / git / webfetch / think tool subset, forced
+	// grep / list_dir / git / webfetch tool subset, forced
 	// into WorkflowPlanAnalyze regardless of parent. Used for
 	// parallel investigation that must not mutate the workspace.
 	TypeExplore Type = "explore"

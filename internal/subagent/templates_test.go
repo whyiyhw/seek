@@ -24,7 +24,7 @@ func TestBuiltinTemplatesByteIdentical(t *testing.T) {
 	}
 
 	explore, _ := TemplateFor(TypeExplore)
-	wantExploreTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	wantExploreTools := []string{"read", "grep", "list_dir", "git", "webfetch"}
 	if !slices.Equal(explore.ToolNames, wantExploreTools) {
 		t.Errorf("explore.ToolNames = %v, want %v", explore.ToolNames, wantExploreTools)
 	}
@@ -119,7 +119,7 @@ func TestTemplate_GeneralPurposeInherits(t *testing.T) {
 func TestTemplate_FilterExcludesAgentAndAskUser(t *testing.T) {
 	parent := []string{
 		"read", "grep", "write", "edit", "bash", "git",
-		"agent", "ask_user", "think", "webfetch", "list_dir",
+		"agent", "ask_user", "webfetch", "list_dir",
 	}
 	for _, ty := range []Type{TypeGeneralPurpose, TypeExplore, TypePlan} {
 		t.Run(string(ty), func(t *testing.T) {
@@ -152,11 +152,11 @@ func TestTemplate_FilterInheritsForGeneralPurpose(t *testing.T) {
 // parent doesn't have all named tools).
 func TestTemplate_FilterIntersectsWhitelistForExplore(t *testing.T) {
 	tmpl, _ := TemplateFor(TypeExplore)
-	parent := []string{"read", "grep", "list_dir", "think"} // no webfetch, no git
+	parent := []string{"read", "grep", "list_dir"} // no webfetch, no git
 	got := tmpl.Filter(parent)
-	// Template lists read/grep/list_dir/git/webfetch/think;
-	// parent has read/grep/list_dir/think; intersection is those 4.
-	want := []string{"read", "grep", "list_dir", "think"}
+	// Template lists read/grep/list_dir/git/webfetch;
+	// parent has read/grep/list_dir; intersection is those 3.
+	want := []string{"read", "grep", "list_dir"}
 	if !slices.Equal(got, want) {
 		t.Errorf("Filter explore = %v, want %v", got, want)
 	}
@@ -174,7 +174,7 @@ func TestTemplate_FilterIntersectsWhitelistForExplore(t *testing.T) {
 func TestTemplate_FilterPlanIsReadOnly(t *testing.T) {
 	tmpl, _ := TemplateFor(TypePlan)
 	parent := []string{
-		"read", "grep", "list_dir", "git", "webfetch", "think",
+		"read", "grep", "list_dir", "git", "webfetch",
 		"write", "edit", "bash", // mutating — MUST be filtered out
 		"propose", "plan", // parent-session-bound — MUST be filtered out
 		"agent", "ask_user", // universally excluded
@@ -191,8 +191,8 @@ func TestTemplate_FilterPlanIsReadOnly(t *testing.T) {
 			t.Errorf("plan template includes parent-bound tool %q — would pollute parent's plan panel", name)
 		}
 	}
-	// Positive: the standard read-only six must be present.
-	want := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	// Positive: the standard read-only five must be present.
+	want := []string{"read", "grep", "list_dir", "git", "webfetch"}
 	if !slices.Equal(got, want) {
 		t.Errorf("Filter plan = %v, want %v", got, want)
 	}

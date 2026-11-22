@@ -247,7 +247,6 @@ Each skill describes when it should be applied. To use one, call the `Skill` too
 
 - fix-bug-first-test: Use when the user asks to fix a bug...
 - review-pr: Use when reviewing a PR diff...
-- dual-model: Use for complex multi-step tasks needing planning then execution.
 ```
 
 10 个 skill ≈ 1 KB，可以舒服地塞进 system prompt 不污染缓存前缀。
@@ -295,7 +294,7 @@ if sk == nil {
 var builtinFS embed.FS
 ```
 
-内置 skill 直接编进二进制。`builtin/dual-model.md` 和 `builtin/go-test-runner.md` 是 seek 本身预置的两个示例 skill——分发时不需要单独的资源文件，`go install` 一条命令拿到所有东西。
+内置 skill 直接编进二进制。`builtin/go-test-runner.md`、`builtin/plan-mode.md` 等是 seek 本身预置的示例 skill——分发时不需要单独的资源文件，`go install` 一条命令拿到所有东西。（曾预置的 `dual-model.md` 已随 `think` 工具于 2026-11-22 退役。）
 
 加载时 `embed.FS` 当一个普通文件系统读：
 
@@ -311,7 +310,7 @@ func loadEmbedded(set *Set) (int, []error) {
 }
 ```
 
-`Source` 字段标成 `"builtin:dual-model"` 而非文件路径——`/skills` 列出时用户能看到"这条是内置的"，无歧义。
+`Source` 字段标成 `"builtin:go-test-runner"` 而非文件路径——`/skills` 列出时用户能看到"这条是内置的"，无歧义。
 
 `embed.FS` 是 Go 1.16+ 的标准库特性，零外部依赖。这跟 `pkg/deepseek` 不引第三方库是同一个理由：每个能用 stdlib 解决的事情都用 stdlib，依赖只在没有 stdlib 替代时才引。
 

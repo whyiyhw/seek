@@ -142,8 +142,8 @@ func reminderFor(name string, raw json.RawMessage, count int) string {
 // this is four types instead of one: pkg/agent upcasts every tool
 // (agent.go dispatches ReadOnlyTool batches concurrently and prefers
 // StreamingTool's ExecuteStream), and a decorator that silently dropped
-// those would turn parallel reads sequential and kill live output from
-// the think tool — with no error anywhere to explain why.
+// those would turn parallel reads sequential and kill a streaming
+// tool's live output — with no error anywhere to explain why.
 func WithRepeatGuard(t Tool, g *RepeatGuard) Tool {
 	if g == nil {
 		return t

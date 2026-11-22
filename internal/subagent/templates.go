@@ -131,7 +131,7 @@ func (t Template) Role(description string) sysprompt.SubagentRole {
 //
 //   - ToolNames != nil → strict whitelist intersected with parent
 //     names (parent might not have every name in our hardcoded
-//     list; e.g. think isn't in every registry).
+//     list; not every parent registry carries every named tool).
 //   - ToolNames == nil → inherit all parent names except the
 //     universal exclusions.
 //

@@ -121,7 +121,6 @@ reg := tools.New().
     Add(write.New(policy)).
     Add(edit.New(policy)).
     Add(bash.New(policy)).
-    Add(think.New(client)).
     Add(skilltool.New(skills))
 ```
 

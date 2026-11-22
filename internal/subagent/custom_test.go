@@ -18,7 +18,7 @@ import (
 // (agent, ask_user) so the tests prove the gate refuses them even
 // though the parent has them.
 var customParentTools = []string{
-	"read", "grep", "list_dir", "git", "webfetch", "think",
+	"read", "grep", "list_dir", "git", "webfetch",
 	"agent", "ask_user", "bash", "write", "edit",
 }
 
@@ -563,7 +563,7 @@ func TestSpawn_ConfigOverrideRoutesBuiltin(t *testing.T) {
 	}
 
 	// Parent registry WITHOUT webfetch — proves intersect vs degrade.
-	noWebfetch := []string{"read", "grep", "list_dir", "git", "think",
+	noWebfetch := []string{"read", "grep", "list_dir", "git",
 		"agent", "ask_user", "bash", "write", "edit"}
 	var job RunnerJob
 	mgr := newCustomManagerWithTools(t, func(_ context.Context, j RunnerJob) (RunnerResult, error) {
@@ -580,7 +580,7 @@ func TestSpawn_ConfigOverrideRoutesBuiltin(t *testing.T) {
 	if job.Provider != "glm" || job.Model != "glm-5.3" {
 		t.Errorf("route = %q/%q, want glm/glm-5.3 from the config override", job.Provider, job.Model)
 	}
-	want := []string{"read", "grep", "list_dir", "git", "think"}
+	want := []string{"read", "grep", "list_dir", "git"}
 	if !reflect.DeepEqual(job.ToolNames, want) {
 		t.Errorf("ToolNames = %v, want intersect %v (webfetch dropped, NOT degraded to the general-purpose set)", job.ToolNames, want)
 	}

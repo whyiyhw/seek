@@ -73,8 +73,8 @@ func (fl *fakeLane) requests() (models [][]string, toolSets [][]string) {
 }
 
 // stubParentTool is a minimal tools.Tool so parentReg can back names
-// the runner reuses verbatim (think in the D8 filter test — the
-// runner's default branch needs a non-nil Lookup hit).
+// the runner reuses verbatim (the runner's default branch needs a
+// non-nil Lookup hit).
 type stubParentTool struct{ name string }
 
 func (s stubParentTool) Name() string            { return s.name }
@@ -109,7 +109,7 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 	glmLane := newFakeLane(t, glmSSE)
 
 	parentReg := tools.New()
-	parentReg.Add(stubParentTool{name: "think"})
+	parentReg.Add(stubParentTool{name: "grep"})
 
 	runner := buildSubagentRunner(subagentRunnerOpts{
 		client:    deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL(dsLane.srv.URL)),
@@ -138,9 +138,7 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 			SessionDir:   t.TempDir(),
 			Tracker:      child,
 			Policy:       policy,
-			// Includes the D8 DeepSeek-only name plus a normal tool
-			// so the filter assertion has signal in both directions.
-			ToolNames: []string{"read", "think"},
+			ToolNames: []string{"read"},
 			Provider:  provider,
 			Model:     map[string]string{"": "", "glm": pricing.ModelGLM53}[provider],
 		})
@@ -166,13 +164,14 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 		t.Errorf("glm lane models = %v, want [[glm-5.3]] (routed lane default)", glmModels)
 	}
 
-	// D8: DeepSeek-only tools ride the DeepSeek lane but are stripped
-	// from the GLM child's registry.
-	if len(dsTools) != 1 || strings.Join(dsTools[0], ",") != "read,think" {
-		t.Errorf("deepseek lane tools = %v, want [read think]", dsTools)
+	// Both lanes carry the same tool set — the D8 deepseek-only filter
+	// was retired with the think tool (2026-11-22); no tool today is
+	// lane-exclusive.
+	if len(dsTools) != 1 || strings.Join(dsTools[0], ",") != "read" {
+		t.Errorf("deepseek lane tools = %v, want [read]", dsTools)
 	}
 	if len(glmTools) != 1 || strings.Join(glmTools[0], ",") != "read" {
-		t.Errorf("glm lane tools = %v, want [read] — think must be filtered", glmTools)
+		t.Errorf("glm lane tools = %v, want [read]", glmTools)
 	}
 
 	// Cost aggregation: each child priced at its own card. The

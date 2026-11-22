@@ -9,7 +9,7 @@ Plan mode is a **gated workflow**, not a verbosity setting. The user enters it w
 
 You will see one of two **substate reminders** appended to user turns while plan mode is on:
 
-- `[Mode: plan-analyze — ...]` — read-only. You can use `read`, `grep`, `list_dir`, `git`, `think`, `ask_user`, `webfetch`. **You cannot** call `write` or `edit`. `bash` is *narrowly* allowed for whitelisted read-only inspectors (`go vet`, `go list`, `go env`, `go mod download|graph|verify|why`, `go build -n`, `go doc`, `go version`, `npm ls`, `pnpm ls`, `yarn list`, `make -n`, `which`, `type`, `command -v`). Any other bash, or any command with shell metacharacters (`;`, `&&`, `|`, `>`, `` ` ``, `$(`, `${`, newline, `(`, `)`), is denied — including `go vet; rm test.go`. Use these to quickly verify "does this still build?" before proposing. For external docs (API spec, library README, RFC, blog post), use `webfetch(url=...)` — it's the **only** way to pull public-net content in plan-analyze; do NOT try `curl`/`wget` via bash.
+- `[Mode: plan-analyze — ...]` — read-only. You can use `read`, `grep`, `list_dir`, `git`, `ask_user`, `webfetch`. **You cannot** call `write` or `edit`. `bash` is *narrowly* allowed for whitelisted read-only inspectors (`go vet`, `go list`, `go env`, `go mod download|graph|verify|why`, `go build -n`, `go doc`, `go version`, `npm ls`, `pnpm ls`, `yarn list`, `make -n`, `which`, `type`, `command -v`). Any other bash, or any command with shell metacharacters (`;`, `&&`, `|`, `>`, `` ` ``, `$(`, `${`, newline, `(`, `)`), is denied — including `go vet; rm test.go`. Use these to quickly verify "does this still build?" before proposing. For external docs (API spec, library README, RFC, blog post), use `webfetch(url=...)` — it's the **only** way to pull public-net content in plan-analyze; do NOT try `curl`/`wget` via bash.
 - `[Mode: plan-execute — ...]` — the user has approved your plan. Writes are unlocked. The two approval flavours differ:
   - **`[plan: approved]`** (default) — every write / edit / bash call still prompts for per-call y/N.
   - **`[plan: approved] (auto-approve-per-step)`** — between `plan(action="start", index=N)` and `plan(action="complete", index=N)`, writes / edits / bash inside that step **auto-pass** with no y/N prompt. Esc revokes the gate; the next write goes back to per-call until you re-arm via `plan(start=N)`.
@@ -40,7 +40,6 @@ Gather context until you can write a self-contained problem statement and a conc
 
 - `read` / `grep` / `list_dir` the relevant code.
 - `git` for history if the task is about a recent change.
-- `think` for non-trivial planning — same rules as the dual-model skill (`docs/prd/feature-plan-mode.md` cross-references it).
 - `ask_user` **when you have a genuine ambiguity** that you can't resolve from reading (e.g. "you said 'auth refactor' — do you mean the middleware or the token store?"). Use the picker shape — 2–4 options — and only when the tool's three-part test passes: discrete options; picking wrong costs real work to undo; you genuinely cannot decide from context. Do not use `ask_user` for free-form "what do you want?" — those are signs you haven't read enough yet.
 
 When you can answer "what's the problem?" and "what's the plan?" without hedging, you're ready for Step 2.
@@ -57,9 +56,9 @@ What makes a good proposal:
 - **Why now** (optional): use to surface hidden assumptions ("this assumes #234 is merged", "skipping mobile because it's frozen until March 5").
 - **Reviewed by** (`reviewed_by`, optional): who checks the *result*, from a source that did not produce it, and with what material. Name it whenever a step is irreversible or the output nobody reads item by item.
 
-Example translation from a `think` reasoner output to a `propose` call:
+Example translation from your analysis to a `propose` call:
 
-> reasoner Answer: "Refactor auth middleware to a per-request token store, including interface design, migration, and tests."
+> analysis conclusion: "Refactor auth middleware to a per-request token store, including interface design, migration, and tests."
 
 ```
 propose(

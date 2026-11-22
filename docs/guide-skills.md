@@ -1,6 +1,6 @@
 # Skills
 
-Skills are reusable instruction sets stored as Markdown files. The agent can fetch a skill's body on demand via the `Skill` tool, then follow its steps. Think of them as named workflows: "run Go tests", "do a dual-model review", etc.
+Skills are reusable instruction sets stored as Markdown files. The agent can fetch a skill's body on demand via the `Skill` tool, then follow its steps. Think of them as named workflows: "run Go tests", "do a structured review", etc.
 
 ## Search order
 
@@ -21,7 +21,6 @@ A project skill shadows a user skill of the same name. Built-ins are always lowe
 | Name | When to use |
 |---|---|
 | `code-review` | Structured diff review — checks current working-tree changes for correctness bugs and cleanup opportunities. Quick (precision-first, blocking only) or thorough (exhaustive). `/code-review` (alias `/review`) |
-| `dual-model` | Non-trivial multi-step tasks — plans first with V4 reasoning mode (`Thinking.Type=enabled, ReasoningEffort=high`), executes with regular chat, then reviews |
 | `go-test-runner` | Running, debugging, or analyzing Go test failures |
 | `plan-contract` | What a plan must *contain*: completion conditions as checkable assertions, where a gate belongs (irreversible / unread output), routing decisions to 检 script / 查 different-source agent / 定 human, and how a lesson becomes a dated pending entry instead of another permanent rule. Auto-read before `propose` on non-trivial work |
 | `plan-mode` | Explains the analyze → propose → execute → report loop. Auto-read when the mode reminder says `plan-analyze` or `plan-execute`, or user types `/plan` |
@@ -57,7 +56,7 @@ The body is plain Markdown. Keep it concise — it gets injected into the agent'
 The agent picks up skills automatically based on the `description` field. You can also trigger one explicitly:
 
 ```
-Use the dual-model skill to plan this refactor.
+Use the plan-contract skill before proposing this refactor.
 ```
 
 ## Directory-package format (v2)

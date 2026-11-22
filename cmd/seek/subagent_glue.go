@@ -159,7 +159,7 @@ func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[
 // in commit <this branch>):
 //
 //   - `explore` subagents are hard-safe (whitelist: read / grep /
-//     list_dir / git / webfetch / think — no mutating tools at
+//     list_dir / git / webfetch — no mutating tools at
 //     all).
 //   - `plan` subagents are hard-safe via the same whitelist
 //     (after C.2: plan and explore share an identical tool
@@ -233,7 +233,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// it. Reusing the parent's instances (which embed the parent policy
 		// = main tree) silently breaks worktree isolation — found by
 		// autopilot e2e (a subagent's edit hit the MAIN README). Other
-		// tools (grep/think/git/…) are read-only or policy-free, so reusing
+		// tools (grep/git/…) are read-only or policy-free, so reusing
 		// the parent instance is fine.
 		childReg := tools.New()
 		// Per-subagent observation set, NOT the parent's. A subagent
@@ -243,14 +243,6 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 		// policy exists to prevent.
 		childObserved := fsobserve.New()
 		for _, name := range job.ToolNames {
-			// D8 provider-compatibility filter (after the template
-			// Filter): think only works against the first-class
-			// DeepSeek client — a child on any llm.Provider lane
-			// (explicitly routed OR inheriting a second-tier parent)
-			// must not see it.
-			if client == nil && subagent.IsDeepSeekOnlyTool(name) {
-				continue
-			}
 			switch name {
 			case "read":
 				childReg.Add(read.New(job.Policy).WithObserver(childObserved))

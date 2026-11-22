@@ -213,22 +213,6 @@ func TestSpawn_RejectsInvalidRoute(t *testing.T) {
 	}
 }
 
-// TestIsDeepSeekOnlyTool pins the D8 filter set: these names must be
-// stripped from any child not running on the first-class DeepSeek
-// client.
-func TestIsDeepSeekOnlyTool(t *testing.T) {
-	for _, name := range []string{"think"} {
-		if !IsDeepSeekOnlyTool(name) {
-			t.Errorf("IsDeepSeekOnlyTool(%q) = false, want true", name)
-		}
-	}
-	for _, name := range []string{"read", "bash", "grep", "agent", ""} {
-		if IsDeepSeekOnlyTool(name) {
-			t.Errorf("IsDeepSeekOnlyTool(%q) = true, want false", name)
-		}
-	}
-}
-
 // TestSpawnBackground_RoutePlumbedToRunnerJob pins the P1-a × P1-c
 // merge point (card c_bickfj 二次收口): SpawnBackground runs the same
 // begin-step-1 ResolveRoute as sync Spawn, and the resolved route
