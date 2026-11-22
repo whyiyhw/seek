@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session、MCP 透传等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session 等见 §5 的优化清单（MCP 透传已于 c_oyt6ft 落地，见 §5.5）。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -124,7 +124,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
 | **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
-| **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.3）。 | 多 session 各自一套 roster（当前一进程一 session，roster 变更只告警不热换）。 |
+| **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.5）。 | 多 session 各自一套 roster（当前一进程一 session，roster 变更只告警不热换）。 |
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch
 

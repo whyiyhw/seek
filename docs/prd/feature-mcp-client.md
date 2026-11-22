@@ -13,7 +13,7 @@
 | `pkg/mcp/` | client.go, types.go | JSON-RPC 2.0 over stdio，含 initialize / list_tools / call_tool | ✅ `45c71af` |
 | `internal/mcpconfig/` | config.go | 从 `~/.seek/mcp.json` 加载配置，兼容 Claude Code 格式 | ✅ `45c71af` |
 | `internal/tools/mcptool/` | bridge.go | MCP Tool → seek Tool 适配，含冲突时前缀（`server__tool`） | ✅ `398448e` |
-| `internal/acp/` + `cmd/seek/acp_mcp.go` | mcp.go, acp_mcp.go | ACP `session/new`/`session/load` 的 `mcpServers` 透传：复用本表第 1/3 行的客户端栈，工具注册为 `mcp__<server>__<tool>`，随会话回收 | ✅ `c_oyt6ft`（2026-11-21，见 [`guide-zed.md`](../guide-zed.md) §5.3） |
+| `internal/acp/` + `cmd/seek/acp_mcp.go` | mcp.go, acp_mcp.go | ACP `session/new`/`session/load` 的 `mcpServers` 透传：复用本表第 1/3 行的客户端栈，工具注册为 `mcp__<server>__<tool>`，随会话回收 | ✅ `c_oyt6ft`（2026-11-21，见 [`guide-zed.md`](../guide-zed.md) §5.5） |
 | `cmd/seek/main.go` | L1413–1440 | 启动时调用 LoadServers 注册 MCP 工具到 Registry | ✅ 已集成 |
 | `docs/book/chapter-12.md` | — | 完整的设计文档 | ✅ `b55aede` |
 
