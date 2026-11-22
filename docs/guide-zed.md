@@ -4,7 +4,7 @@ seek 实现了 **Agent Client Protocol (ACP)**，可作为一个**自定义 agen
 
 > seek speaks the Agent Client Protocol, so it plugs into Zed as a **custom agent** — chat with seek in Zed's Agent Panel; its tool calls render as native step cards.
 
-> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——多 session、MCP 透传等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
+> **定位**：这是 **MVP**。握手 + 流式回复 + 工具调用映射 + **session resume** + 审批门 + 模型选择 + **plan 模式（session modes）** + **多会话复用进程** 已跑通（真 Zed 验证 / 真 stdio e2e），但还简陋——MCP 透传等见 §5 的优化清单。设计见 [`docs/prd/archive/feature-acp.md`](./prd/archive/feature-acp.md)。
 
 ---
 
@@ -120,10 +120,10 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 |---|---|---|
 | **审批门 / approval** | **已修（P0-2）**：非 yolo 的 ACP 车道权限姿态为 `Ask`，危险动作经 `session/request_permission` 弹到客户端原生权限 UI（"允许 seek 运行 X?"），三选项 allow_once / allow_always / reject_once；`allow_always` 即 TUI 的「[a] always: \<kind\>」语义（同 Kind 本会话不再问）。**无应答默认拒**：客户端断线、超时（默认 10 分钟，`SEEK_ACP_PERMISSION_TIMEOUT` 秒数可调）、或无头 driver 回 `-32601`，一律拒绝并照常完成回合——不会卡死。无头无人值守场景仍用 `SEEK_ACP_YOLO=1` 直接放行（§5.1，优先级高于审批门）。 | Zed 客户端面板较旧、暂不渲染权限弹窗的实机验证；`reject_always`（协议有、Policy 无 per-Kind 拒绝清单）未接——目前不提供也不接受该选项。 |
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | **已修**（c_chzxgg，2026-11-21）：initialize 现在同时申报 `sessionCapabilities.list`（schema 形状是对象 `{}`，在场即"支持"，不是布尔；与 loadSession 同一道持久化闸），`session/list` 扫 transcript 存储返回 `{sessions:[{sessionId,cwd,title,updatedAt}]}`——数据源与 `session/load` 同一个 store（列出的 id 必可 load），标题取首条 user message 首行（80 rune 截断，与 serve `/rpc session/list` 同一派生），mtime 是 header 的 UpdatedAt（RFC3339）。空仓答 `sessions:[]`（数组恒在，不是 null）；`cwd` 过滤可选；不分页（单页全量，不回 nextCursor）。**未申报 `sessionCapabilities.delete`**——删 transcript 走 TUI/文件系统，不在协议上开口。 |
-| **会话数** | 一个 `seek` 进程 = 一个会话（MVP）；`session/new` 第二次调用是重锚定已有会话，不新开。 | 支持多 `session/new` 复用同进程。 |
+| **会话数** | **已修（P1-2，backlog ③）**：一个 `seek` 进程可同时服务 **N 个会话**——`session/new` 第二次调用**新开一会话**（新的持久 transcript id，首个完成的回合后落盘），不再重锚定已有会话；第一个会话仍延续启动时的 transcript（单会话行为不变）。**per-session 各自独立的是四根轴**：cwd 锚（每次该会话的回合把进程+权限策略锚到它的目录）、权限策略的会话轴（plan 模式 + `[a]` 常许清单，各会话互不影响）、历史栈（各写各的 transcript）、模型车道（一个会话换模型不动另一个）。实现是**回合级时间复用**：agent/工具注册表/进程 cwd 是一台共享机器，跨会话的回合在 turn 闸上排队串行（两会话并发 prompt 不串扰，但不同时跑）；`session/set_config_option` / `set_mode` / `session/load` 的「回合间才受理」窗口相应变为「任一会话无回合在跑时」。**仍是进程级（非 per-session）的**：系统提示/memory/skills/checkpoint 子代理挂载——都按启动目录焊死，与会话 cwd 无关（单会话时代即如此）。ACP v1 无 session/delete，会话状态随进程存亡。 | 并行回合（每会话独立 agent+注册表）需要把 1700 行启动接线按会话重建，收益是跨会话真并发——当前回合串行对 Zed/paseo 的人机节奏无感，若出现跨会话长回合互等的真实场景再立卡。 |
 | **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
 | **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
-| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。 | 多 session 各持独立栈（见 backlog ③）。 |
+| **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。多会话下（P1-2）cwd 是**会话轴**：每个会话的回合把两半锚（进程 chdir + policy reanchor）切到自己的目录，回合间不漂移（见 §5 会话数行）。 | — |
 | **MCP 透传** | Zed 在 `session/new` 发 `mcpServers`，seek 暂未透传。 | 把 Zed 给的 MCP server 接进 seek 的 MCP 客户端。 |
 
 ### 5.1 无头权限开关 `SEEK_ACP_YOLO` / Headless permission switch

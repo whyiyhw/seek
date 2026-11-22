@@ -139,3 +139,51 @@ func TestAlwaysAllow_ConcurrentGrantAndCheck(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// Snapshot/Restore is the ACP·P1-2 multi-session pair: the backend pulls
+// the grant set off the shared policy at turn end and replays it after
+// the next SetWorkflow transition (which clears grants by design). The
+// round trip must preserve exactly the granted set, and nil/empty must
+// clear — a stale grant surviving a session switch would be one session
+// approving another session's actions.
+func TestAlwaysAllow_SnapshotRestoreRoundTrip(t *testing.T) {
+	p, _ := New(t.TempDir(), PrefAsk)
+	p.SetAlwaysAllow(KindEdit)
+	p.SetAlwaysAllow(KindBash)
+
+	kinds := p.AlwaysAllowKinds()
+	if len(kinds) != 2 {
+		t.Fatalf("snapshot = %v, want both granted kinds", kinds)
+	}
+
+	p.SetWorkflow(WorkflowPlanAnalyze) // clears (the real switch path)
+	p.RestoreAlwaysAllow(kinds)
+	if !p.AlwaysAllowed(KindEdit) || !p.AlwaysAllowed(KindBash) {
+		t.Fatal("restore lost a granted kind")
+	}
+	if p.AlwaysAllowed(KindWrite) {
+		t.Fatal("restore invented a grant")
+	}
+
+	// Clearing: nil and empty both mean "no grants".
+	p.RestoreAlwaysAllow(nil)
+	if p.AlwaysAllowed(KindEdit) || len(p.AlwaysAllowKinds()) != 0 {
+		t.Fatal("nil restore must clear the allowlist")
+	}
+	p.SetAlwaysAllow(KindEdit)
+	p.RestoreAlwaysAllow([]Kind{})
+	if p.AlwaysAllowed(KindEdit) {
+		t.Fatal("empty restore must clear the allowlist")
+	}
+
+	// A snapshot of a fresh policy is empty, not nil-crashing.
+	fresh, _ := New(t.TempDir(), PrefAsk)
+	if got := fresh.AlwaysAllowKinds(); len(got) != 0 {
+		t.Fatalf("fresh policy snapshot = %v, want empty", got)
+	}
+	var nilP *Policy
+	nilP.RestoreAlwaysAllow([]Kind{KindEdit}) // must not panic
+	if nilP.AlwaysAllowKinds() != nil {
+		t.Error("nil policy snapshot must be nil")
+	}
+}
