@@ -1,0 +1,7 @@
+Use the agent tool exactly once, with run_in_background=true, to spawn ONE general-purpose background subagent. Give it this prompt verbatim as its entire task:
+
+"Reply with exactly the single word marlowe. Do not use any tools."
+
+While the background subagent runs, keep working yourself: read the file go.mod in this repository and note the module name declared on its first line.
+
+Do NOT wait for the background subagent, do NOT poll for its result, and do NOT spawn any other subagent. The background result will arrive as a notification on a later turn or after a resume — never fabricate or predict it yourself. Finish your reply once you have read go.mod.

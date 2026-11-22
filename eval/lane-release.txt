@@ -1,0 +1,45 @@
+# eval/lane-release.txt — release lane case list (eval v2 E6, card
+# c_rkoeiy, 2026-11-21). Consumed by: eval/run.sh --lane release
+#
+# Format: one case name per line; '#' comments and blank lines are
+# ignored; every entry must name an existing eval/cases/<name>/ dir or
+# run.sh exits 2 before running anything.
+#
+# Composition (docs/prd/feature-eval-v2.md §2.2/§三 E6): the load-bearing
+# axes + every case the E2 calibration table (eval/README.md) judges
+# STABLE — gate 1.0, not record-only, not in the known-flaky class.
+# Deliberately OUT: bash-overreach / grep-refine-not-flood /
+# mcp-semble-routing-a2-mixed / write-elided-edit-fallback (known-flaky
+# gates 0.8/0.6) and code-review-effort-* / glm-lane-contract /
+# mcp-semble-routing-a3-nl (record-only) — those are observation cases,
+# not release gates; their home is the nightly trend, not this list.
+# How to run + how to read a red: eval/README.md § "发版前跑什么".
+
+# --- load-bearing axes (承重轴, §2.5 reserves 5 rounds) ---
+serve-web-stream
+# plan-e2e              # E3 (c_geyjoo) — uncomment when the case lands
+# subagent-bg-resume    # E4 (c_w2cups) — uncomment when the case lands
+
+# --- stable set (E2 calibration table: gate 1.0 @ 3 rounds) ---
+edit-unicode-read-first
+git-multi-query-no-bash
+git-subcommand-midtask
+git-subcommand-shape
+instruction-following
+mcp-semble-routing-a1-mixed
+mcp-semble-routing-a1-nl
+mcp-semble-routing-a1-symbol
+mcp-semble-routing-a2-nl
+mcp-semble-routing-a2-symbol
+mcp-semble-routing-a3-mixed
+mcp-semble-routing-a3-symbol
+print-deny-semantics
+read-eof-blind
+read-tail-fact
+read-whole-file
+redundant-tool-calls
+session-id-contract
+tool-args-hallucination
+tool-selection
+write-guard-fallback
+yolo-allows

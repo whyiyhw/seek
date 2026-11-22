@@ -14,19 +14,31 @@ type fakeBackend struct {
 	menu      []ConfigOption                                               // returned by NewSession (nil default)
 	setConfig func(p SetConfigOptionParams) (SetConfigOptionResult, error) // nil default = canned success
 	load      func(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error)
+	list      func(p ListSessionsParams) (ListSessionsResult, error)
+	modes     *SessionModeState           // returned by NewSession (nil default)
+	setMode   func(p SetModeParams) error // nil default = canned success
 }
 
 func (f fakeBackend) Initialize(p InitializeParams) InitializeResult {
-	return InitializeResult{ProtocolVersion: p.ProtocolVersion, AgentCapabilities: AgentCapabilities{LoadSession: true}}
+	return InitializeResult{ProtocolVersion: p.ProtocolVersion, AgentCapabilities: AgentCapabilities{
+		LoadSession:         true,
+		SessionCapabilities: &SessionCapabilities{List: &SessionListCapabilities{}},
+	}}
 }
 func (f fakeBackend) NewSession(p NewSessionParams) (NewSessionResult, error) {
-	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu}, nil
+	return NewSessionResult{SessionID: "sess-1", ConfigOptions: f.menu, Modes: f.modes}, nil
 }
 func (f fakeBackend) LoadSession(p LoadSessionParams, send func(SessionUpdate)) (LoadSessionResult, error) {
 	if f.load != nil {
 		return f.load(p, send)
 	}
 	return LoadSessionResult{ConfigOptions: f.menu}, nil
+}
+func (f fakeBackend) ListSessions(p ListSessionsParams) (ListSessionsResult, error) {
+	if f.list != nil {
+		return f.list(p)
+	}
+	return ListSessionsResult{Sessions: []SessionSummary{}}, nil
 }
 func (f fakeBackend) Prompt(ctx context.Context, p PromptParams, send func(SessionUpdate)) (PromptResult, error) {
 	return f.prompt(ctx, p, send)
@@ -104,6 +116,74 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 	if res.ProtocolVersion != 1 || !res.AgentCapabilities.LoadSession {
 		t.Fatalf("bad initialize result: %+v", res)
+	}
+}
+
+// TestServer_Initialize_SessionCapabilitiesWireShape pins the
+// advertisement the ACP schema actually defines: sessionCapabilities
+// is an OBJECT whose `list` member is an empty object — presence is
+// the on-state, there is no boolean (a `"list":true` on the wire would
+// be schema-invalid; clients check member presence, not truthiness).
+func TestServer_Initialize_SessionCapabilitiesWireShape(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 1, "initialize", InitializeParams{ProtocolVersion: 1})
+	msg := readMsg(t, dec)
+	var res InitializeResult
+	if err := json.Unmarshal(msg["result"], &res); err != nil {
+		t.Fatalf("no result: %v (%v)", err, msg)
+	}
+	if res.AgentCapabilities.SessionCapabilities == nil || res.AgentCapabilities.SessionCapabilities.List == nil {
+		t.Fatalf("sessionCapabilities.list must be advertised: %+v", res.AgentCapabilities)
+	}
+	// Raw bytes: `list` decodes into a struct — unmarshaling a bare
+	// `true` into it would fail, so this pins the object shape.
+	var raw struct {
+		AgentCapabilities struct {
+			SessionCapabilities *struct {
+				List *struct{} `json:"list"`
+			} `json:"sessionCapabilities"`
+		} `json:"agentCapabilities"`
+	}
+	if err := json.Unmarshal(msg["result"], &raw); err != nil {
+		t.Fatal(err)
+	}
+	if raw.AgentCapabilities.SessionCapabilities == nil || raw.AgentCapabilities.SessionCapabilities.List == nil {
+		t.Fatalf("wire sessionCapabilities.list absent: %s", msg["result"])
+	}
+}
+
+// TestNegotiateVersion pins the negotiation table (backlog ⑤ / M-P.5):
+// the answer is the highest version BOTH sides speak, never an echo of
+// whatever the client sent. A newer client gets the newest supported
+// (the downgrade declaration); an equal request is answered verbatim;
+// a request with no intersection reports ok=false so the caller can say
+// so out loud while still answering something usable.
+func TestNegotiateVersion(t *testing.T) {
+	cases := []struct {
+		name      string
+		requested int
+		want      int
+		wantOK    bool
+	}{
+		{"current", 1, 1, true},
+		{"newer client downgrades", 2, 1, true},
+		{"much newer client downgrades", 99, 1, true},
+		{"older client", 0, ProtocolVersion, false},
+		{"negative", -3, ProtocolVersion, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := NegotiateVersion(c.requested)
+			if got != c.want || ok != c.wantOK {
+				t.Errorf("NegotiateVersion(%d) = (%d, %v), want (%d, %v)", c.requested, got, ok, c.want, c.wantOK)
+			}
+		})
+	}
+	// The supported set must contain the advertised newest version —
+	// otherwise "answer ProtocolVersion" would name something we can't
+	// speak.
+	if _, ok := NegotiateVersion(ProtocolVersion); !ok {
+		t.Fatalf("supportedVersions does not contain ProtocolVersion=%d", ProtocolVersion)
 	}
 }
 
@@ -223,6 +303,46 @@ func TestPromptParams_ImageBlocks(t *testing.T) {
 	// PromptText must still ignore image blocks (text-only).
 	if got := p.PromptText(); got != "look at this" {
 		t.Fatalf("PromptText should only return text blocks, got %q", got)
+	}
+}
+
+// TestPromptParams_Segments pins wire order (card c_4pczu3 ④): text and
+// image blocks come out interleaved exactly as sent, so a backend can
+// place each image's marker between the sentences that surround it.
+// Blocks with no payload (empty text, empty image data) and block types
+// seek declares no capability for are dropped — they carry nothing to
+// forward, and forwarding an empty text block would insert a stray
+// newline.
+func TestPromptParams_Segments(t *testing.T) {
+	p := PromptParams{Prompt: []ContentBlock{
+		{Type: "text", Text: "before"},
+		{Type: "image", Data: "Zm9v", MimeType: "image/png"},
+		{Type: "text", Text: "   "},
+		{Type: "text", Text: "after"},
+		{Type: "audio", Data: "zzz"},                     // no capability → dropped
+		{Type: "image", Data: "", MimeType: "image/png"}, // payload-less → kept out
+		{Type: "resource_link", Text: "x"},               // unknown kind → dropped
+	}}
+	segs := p.Segments()
+	want := []string{"text:before", "image:image/png", "text:   ", "text:after"}
+	if len(segs) != len(want) {
+		t.Fatalf("segments = %d, want %d: %+v", len(segs), len(want), segs)
+	}
+	for i, w := range want {
+		var got string
+		if segs[i].Image != nil {
+			got = "image:" + segs[i].Image.MimeType
+		} else {
+			got = "text:" + segs[i].Text
+		}
+		if got != w {
+			t.Fatalf("segment %d = %q, want %q", i, got, w)
+		}
+	}
+	// The image segment must point AT the prompt's own block (the backend
+	// reads Data off it), not at a copy.
+	if segs[1].Image != &p.Prompt[1] {
+		t.Fatal("image segment must alias the prompt block")
 	}
 }
 
@@ -369,6 +489,95 @@ func TestServer_SetConfigOption_RejectedWhilePromptInFlight(t *testing.T) {
 	json.Unmarshal(readMsg(t, dec)["result"], &res)
 	if res.StopReason != "cancelled" {
 		t.Fatalf("stop reason = %q, want cancelled", res.StopReason)
+	}
+}
+
+// TestServer_ListSessions_Dispatch is the transport-level round trip:
+// params reach the backend, the summary set comes back with the schema
+// field names (sessionId/cwd/title/updatedAt).
+func TestServer_ListSessions_Dispatch(t *testing.T) {
+	var got ListSessionsParams
+	b := fakeBackend{list: func(p ListSessionsParams) (ListSessionsResult, error) {
+		got = p
+		return ListSessionsResult{Sessions: []SessionSummary{{
+			SessionID: "20260101-000000-abcdef0123456789",
+			Cwd:       "/proj",
+			Title:     "first question",
+			UpdatedAt: "2026-01-01T00:00:01Z",
+		}}}, nil
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 40, "session/list", ListSessionsParams{Cwd: "/proj"})
+	msg := readMsg(t, dec)
+	var res ListSessionsResult
+	if err := json.Unmarshal(msg["result"], &res); err != nil {
+		t.Fatalf("no result: %v (%v)", err, msg)
+	}
+	if got.Cwd != "/proj" {
+		t.Fatalf("backend saw cwd=%q", got.Cwd)
+	}
+	if len(res.Sessions) != 1 {
+		t.Fatalf("sessions = %+v", res.Sessions)
+	}
+	s := res.Sessions[0]
+	if s.SessionID != "20260101-000000-abcdef0123456789" || s.Cwd != "/proj" || s.Title != "first question" || s.UpdatedAt != "2026-01-01T00:00:01Z" {
+		t.Fatalf("summary = %+v", s)
+	}
+}
+
+// TestServer_ListSessions_EmptyStoreIsArrayNotNull: an empty listing
+// must serialise as `"sessions":[]` — the schema requires the array,
+// and a JS client rendering `null.length` would throw.
+func TestServer_ListSessions_EmptyStoreIsArrayNotNull(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 41, "session/list", map[string]any{})
+	msg := readMsg(t, dec)
+	if string(msg["result"]) != `{"sessions":[]}` {
+		t.Fatalf("empty listing must be exactly sessions:[], got %s", msg["result"])
+	}
+}
+
+// TestServer_ListSessions_BadParams: a malformed payload fails loudly
+// (-32602) instead of listing something arbitrary.
+func TestServer_ListSessions_BadParams(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 42, "session/list", map[string]any{"cwd": 42})
+	var e rpcError
+	if err := json.Unmarshal(readMsg(t, dec)["error"], &e); err != nil {
+		t.Fatalf("expected an error: %v", err)
+	}
+	if e.Code != -32602 {
+		t.Fatalf("code = %d, want -32602", e.Code)
+	}
+}
+
+// TestServer_ListSessions_BackendErrorIsNotMethodNotFound: same
+// distinction as session/load — a failed listing is -32000 (served
+// method, failed operation), never -32601.
+func TestServer_ListSessions_BackendErrorIsNotMethodNotFound(t *testing.T) {
+	b := fakeBackend{list: func(ListSessionsParams) (ListSessionsResult, error) {
+		return ListSessionsResult{}, io.ErrUnexpectedEOF
+	}}
+	enc, dec := startServer(t, b)
+	send(t, enc, 43, "session/list", map[string]any{})
+	var e rpcError
+	if err := json.Unmarshal(readMsg(t, dec)["error"], &e); err != nil {
+		t.Fatalf("expected an error: %v", err)
+	}
+	if e.Code != -32000 {
+		t.Fatalf("code = %d, want -32000", e.Code)
+	}
+}
+
+// TestServer_ListSessions_NoParamsFrame: a request with no params
+// member at all (legal JSON-RPC) lists with the zero filter rather
+// than tripping the -32602 unmarshal-on-nil path.
+func TestServer_ListSessions_NoParamsFrame(t *testing.T) {
+	enc, dec := startServer(t, fakeBackend{})
+	send(t, enc, 44, "session/list", nil)
+	msg := readMsg(t, dec)
+	if _, isResult := msg["result"]; !isResult {
+		t.Fatalf("params-less list must answer, got %v", msg)
 	}
 }
 
