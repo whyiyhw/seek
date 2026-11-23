@@ -470,6 +470,13 @@ func (m Model) renderQueueHint() string {
 	case m.queuedText != "":
 		preview := truncateOneLine(m.queuedText, 60)
 		return styleMuted.Render(i18n.T("view.queue.queued")) + styleMuted.Render(preview)
+	case m.injectedPreview != "":
+		// The agent accepted a boundary injection and has not committed
+		// it yet. Rendered below the queue/steer states because those
+		// describe text the user is still holding; this one is already
+		// in the agent's hands.
+		preview := truncateOneLine(m.injectedPreview, 60)
+		return styleMuted.Render(i18n.T("view.queue.injected")) + styleMuted.Render(preview)
 	}
 	return ""
 }

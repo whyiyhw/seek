@@ -90,6 +90,24 @@ type ToolExecEnd struct {
 // still be closed after the event is delivered.
 type ErrorEvent struct{ Err error }
 
+// InjectedMessage reports that a user message queued via
+// Agent.QueueUserMessage was committed to history at a turn boundary —
+// i.e. between two LLM calls of the SAME Prompt round, not at its end.
+//
+// Consumers use it to show the user their text actually landed mid-round
+// (the TUI prints one `↪ inserted` line), and to distinguish an injected
+// turn boundary from the ordinary queue/steer path, which fires only
+// after the whole round returns.
+//
+// Index is the turn the message was inserted BEFORE: the next LLM call
+// will be turn Index. Message is the committed message verbatim (its
+// Content already carries the mode reminder suffix, like every other
+// user turn).
+type InjectedMessage struct {
+	Index   int
+	Message deepseek.Message
+}
+
 // PlanProposalApproved fires when the propose tool returns and the user
 // picked "approve". TUI consumers MUST switch permission policy to
 // ModeAsk and update the mode reminder label to "plan-execute".
@@ -145,6 +163,7 @@ func (ToolExecStart) isEvent()               {}
 func (ToolDelta) isEvent()                   {}
 func (ToolExecEnd) isEvent()                 {}
 func (ErrorEvent) isEvent()                  {}
+func (InjectedMessage) isEvent()             {}
 func (PlanProposalApproved) isEvent()        {}
 func (PlanProposalAdjustRequested) isEvent() {}
 func (PlanProposalCancelled) isEvent()       {}
