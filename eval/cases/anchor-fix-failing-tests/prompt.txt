@@ -1,0 +1,1 @@
+The Go module in the current directory has failing tests. Make `go test ./...` pass by fixing the implementation in mathutil/mathutil.go. The tests are the specification — you may NOT modify mathutil_test.go, and you may not create new files or change go.mod.

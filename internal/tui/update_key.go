@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
 )
 
@@ -435,6 +436,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.queuedText = ""
 			}
 			m.pendingSteerText = ""
+			// Mid-turn injections accepted by the agent are dropped with
+			// the round: the agent's own beginTurnSession clears its
+			// queue per round, and this field is only the UI echo.
+			m.injectedPreview = ""
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
 			// the next cancel within the same race window double-cancels.
@@ -548,11 +553,25 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			if action == keymap.ActionSteer {
-				// Steer: cancel current stream and stash text for
+				// Steer first tries the boundary injection: dropping the
+				// in-flight turn is the expensive meaning, so it is now
+				// the fallback (no mid-turn support, or a cap tripped).
+				if m.tryMidTurnInject(text) {
+					return m, (&m).appendHistory(styleMuted.Render(
+						"  " + i18n.T("view.queue.injected") + truncateOneLine(text, 60)))
+				}
+				// Fallback: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
 				steerStream(&m, text)
 			} else {
-				// Queue: stash text; streamEndMsg auto-submits when the
+				// Queue: try the boundary injection first — the text
+				// lands at the next tool-batch boundary instead of
+				// waiting for the whole round to return.
+				if m.tryMidTurnInject(text) {
+					return m, (&m).appendHistory(styleMuted.Render(
+						"  " + i18n.T("view.queue.injected") + truncateOneLine(text, 60)))
+				}
+				// Fallback: stash text; streamEndMsg auto-submits when the
 				// agent loop reaches its natural end (not userCanceled).
 				// Second submit during the same stream replaces — last
 				// thing you said is what you meant.

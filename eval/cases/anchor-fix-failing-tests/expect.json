@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题（Terminal-Bench-lite）：修一个微型 Go 仓的整数除法/取整 bug 使测试通过。判分 = check.sh 里 go test ./... 退出码（record_only 起步，首轮基线后按区分度定 gate）。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

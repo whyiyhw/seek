@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -762,5 +763,21 @@ func TestLoadFrom_ArbitraryPathRoundtrip(t *testing.T) {
 	// Empty path: programmer error.
 	if _, err := LoadFrom(""); err == nil {
 		t.Error("LoadFrom empty path must error")
+	}
+}
+
+// EphemeralID: the --no-save wire id (OpenCode gateway's x-opencode-session
+// routing header 400s without it on the subscription lane). Shape must match
+// generateID's contract and two draws must differ.
+func TestEphemeralID(t *testing.T) {
+	re := regexp.MustCompile(`^\d{8}-\d{6}-[0-9a-f]{16}$`)
+	for i := 0; i < 50; i++ {
+		id := EphemeralID()
+		if !re.MatchString(id) {
+			t.Fatalf("EphemeralID shape wrong: %q", id)
+		}
+	}
+	if EphemeralID() == EphemeralID() {
+		t.Fatal("EphemeralID collided on consecutive draws")
 	}
 }

@@ -108,6 +108,10 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↰ interrupted")))
 		m.userCanceled = false
 	}
+	// Any injection the agent accepted but the round ended before
+	// committing dies here too: the agent's endTurnSession already
+	// cleared its queue, so this is only the UI echo.
+	m.injectedPreview = ""
 	// 柱 M interactive extension: ping the configured push webhook when a
 	// long interactive turn finishes (you walked away → phone buzzes).
 	// Best-effort, off the UI thread; skipped on Esc-cancel and short turns.
@@ -427,6 +431,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.curContent = ""
 		m.curReasoning = ""
 		m.chunked = false
+
+	case agent.InjectedMessage:
+		// A user message queued via QueueUserMessage just landed at a
+		// turn boundary inside the CURRENT round (pkg/agent/inject.go).
+		// Commit the block to scrollback so the transcript shows where
+		// the user intervened — the same rendering as a submitted prompt,
+		// minus the round-boundary bookkeeping (this is not a new turn
+		// from the user's point of view, the round is still running).
+		m.injectedPreview = ""
+		cmds = append(cmds, m.appendHistory(renderUserBlock(e.Message.Content, m.width)))
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ inserted at turn boundary "+fmt.Sprint(e.Index))))
 
 	case agent.MessageDelta:
 		// First token of the turn — the time-to-first-byte signal.

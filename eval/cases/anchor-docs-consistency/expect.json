@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：多文件一致性调和——以单一真源为准清三处漂移值、保持行文自然。判分 = check.sh grep 不变式（stale 零出现、canonical 在位）。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

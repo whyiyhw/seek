@@ -1,0 +1,1 @@
+`history.bundle` is a git bundle of a small project's history. Clone it (`git clone history.bundle repo`), then find the FULL 40-char SHA of the commit that introduced the string `MAGIC_TOKEN_7f3a9c` (it was added exactly once and never removed). Write that SHA as the single line of `answer.txt` in the current directory.

@@ -19,13 +19,16 @@ eval/
 ├── ablate.sh       # eval/ablate.sh [case] [binary] — bare-core vs full dual run (below)
 ├── lane-release.txt  # release lane case list (eval/run.sh --lane release; "发版前跑什么")
 ├── lane-core.txt     # nightly core lane case list (eval/run.sh --lane core; same section)
+├── lane-anchor.txt   # 外部锚任务集车道（eval/run.sh --lane anchor; eval v3 A, below）
 ├── cases/
 │   └── <name>/
 │       ├── README.md   # what the case probes + the bug it came from
 │       ├── prompt.txt  # exact text passed via `seek -p`
 │       └── expect.json # PASS/FAIL bounds; see "Metric vocabulary" below
 ├── results/        # checked-in JSONL of each pass; one row per case
-├── tools/          # shared case engines/scorers (mcp-arm-*, mcp-semble-score, mcp-first-gold-read, …)
+├── tools/          # shared case engines/scorers (mcp-arm-*, mcp-semble-score, mcp-first-gold-read, judge.py, anchor-runner.sh, …)
+├── judge-calibration/  # J-line calibration fixtures + agreement reports (below)
+├── anchor/         # cross-harness comparison artifacts (eval v3 A3; NEVER in results/, #2575 private)
 ├── ablation/       # dual-run lanes + comparison tables (NOT trend data)
 ├── transcript-baseline/  # offline transcript snapshots (see "transcript-stats 与口径")
 └── fixtures/       # synthetic transcripts for scripts/transcript-stats --selftest
@@ -465,6 +468,7 @@ Bounds in `expect.json` use the prefix to declare direction:
 | `max_turns` | passed to `seek -max-turns` (NB it also rides the `max_` prefix scan, so it doubles as a turns ceiling — pre-existing behaviour) |
 | `min_pass_rate` | gate threshold over the round set, `0 < m <= 1`, default 1.0, INCLUSIVE `>=` — see "Judgment" above (E2 calibrates; validated, exit 2 on malformed) |
 | `record_only` | boolean, default false — record the case, never gate it (see "Judgment" above) |
+| `judge` | optional object `{"rubric": str, "mode": "record"\|"gate" (default record), "model": str (optional)}` — the LLM-as-judge opt-in (eval v3 J, next section); validated in `read_gate_config`, malformed → exit 2 |
 
 ## Adding a case
 
@@ -685,6 +689,66 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
   default sink is the formal `eval/results/`).
 - E4 `subagent-bg-resume` and E5 `serve-web-stream` follow on their own cards
   (same judging pattern: `runner_fact{failed}` + this metric).
+
+## Judge 层：LLM-as-judge over final_text（eval v3 J，2026-11-22）
+
+修订 eval-v2 §2.5 的「❌ 不做 LLM-as-judge」（修订依据与边界见
+[`docs/prd/feature-eval-v3.md`](../docs/prd/feature-eval-v3.md) 状态头）：
+确定性优先不变——judge 只补**复算不可能的面**（答案对不对、是否答非所问），
+可复算性落点移到**校准层**（标注集 + agreement 报告入库）。机械指标与判分层
+刻意正交：2026-11-13 的 effort-max 行机械绿但只交付过程叙述、a3-nl 机械红但
+答案完整——判分层存在的理由正是这些行。
+
+- **opt-in**：`expect.json` 的 `judge` 块（键表见上）。全局 kill-switch
+  `SEEK_EVAL_JUDGE=0`；`final_text` 为空跳过判分（键不出现）。
+- **调用**：`eval/tools/judge.py` 一次 fresh-context 单发（同 provider 车道、
+  自带判分模型——默认**跨家族** `kimi-k3.1-pro`，`SEEK_EVAL_JUDGE_MODEL`
+  可换，per-case `judge.model` 再优先；`SEEK_EVAL_JUDGE_TIMEOUT` 默认 120s）。
+  final_text 以 DATA 围栏入 prompt（防注入）；`-max-turns 1` 约束工具面。
+- **判决契约** `pass | fail | doubt`——一切失败形态（null 判决、非 JSON、
+  超时、judge 崩溃）折叠为 doubt，**永不假绿**（`internal/verifier` 的
+  no-JSON=never-green 同款）。
+- **行上三键 data-gated**：`judge_verdict` / `judge_reason`（截 300 码点）/
+  `judge_model`，只在判分实际发生时并入——不判分的行字节不变（与 agent/bg、
+  sse 两族同一纪律，字节 pin 自测不需动）。`elapsed_s` 只量被测调用。
+- **染色**：`mode=gate` 且 verdict=fail 才进 `failures`（`"judge: <reason>"`）；
+  doubt 与 record 模式永不染色。gate 下 judge 基建故障 = fail-open（doubt +
+  响亮记录）——v1 口径，PRD §六.1 挂账。
+- **校准（开 gate 的资格）**：`eval/judge-calibration/fixtures.jsonl`（34 条
+  = 27 真实行按 (case, ran_at) 从 results 重抽 + 7 构造扰动，标签为代标初稿
+  待用户抽查）× `eval/tools/judge-calibrate.sh` → `report.md`。门槛：
+  **agreement ≥ 0.85 且 false-pass = 0**。标定通过前一切接线 record 模式；
+  首批接线 `code-review-effort-low` 与 `read-tail-fact`。
+- **机制自测**：`scripts/eval-judge-test.sh`（8 腿：record 不染色 / gate
+  翻红 / 非 JSON doubt / 无块零键 / 畸形 exit 2 / kill-switch / 真二进制×
+  假端点的线上模型分离——一次 run 两条 POST，SUT 走车道缺省模型、judge 走
+  判分模型 / calibrate 聚合）。
+
+## 外部锚：Terminal-Bench-lite 私有任务集（eval v3 A，2026-11-22）
+
+34 条行为用例全答「自己相对自己没退步」；锚点任务集答「这个 harness 在固定
+任务上能不能干活」。**#2575 边界：仅私有校准，任何数字永不发布。**
+
+- **8 题**（`eval/cases/anchor-*/`，`--lane anchor`，全 record_only 起步）：
+  修失败测试(Go) / CSV 字节精确报表 / 按规格实现 CLI / 约束重构 /
+  症状驱动调试 / 多文件文档调和 / 配置迁移 / git 考古。全 hermetic 无网络
+  无 Docker（只用 go/python3/bash/jq/git）；难度目标 = 解得出一部分、解不全。
+- **机制**：每题 `runner.sh` 是两行 shim，公共隔离住在
+  `eval/tools/anchor-runner.sh`——私有 scratch（`eval/tmp/<case>/{home,ws}`，
+  独立 SEEK_HOME）、workspace fixture 复制进 ws、agent 以 ws 为 cwd。
+  判分纯机械：`check.sh` 从 agent 世界**外**重算（黄金在 `golden/`，ws 里
+  没有）；未解出 → `runner_fact{assert:"anchor_solved",failed:true}` →
+  既有 `max_runner_assert_failures` 闸门；崩溃 → `nonzero_exits`。rounds /
+  车道 / trend / streak 全部白拿。
+- **任务自验**：8/8 原始态 check 红、8/8 参考解 check 绿（落地时逐题验证）。
+  首轮真 key 基线后按区分度调题——**修题不修阈值**（同 E2 容差原则）。
+- **跨 harness 对照**：`eval/anchor/`（与 ablation 同纪律，**永不进
+  `eval/results/`**）+ `eval/tools/anchor-crossharness.sh`——同任务同模型
+  驱动另一 harness（默认 opencode CLI；缺席时响亮降级为手工协议）。唯一被
+  隔离变量是 harness；check.sh 两侧同一份。
+- **机制自测**：`scripts/eval-anchor-test.sh`（4 腿：解出绿 / 不解红指名
+  anchor_solved / 隔离（pwd=ws、SEEK_HOME=scratch home、fixture 在位）/
+  崩溃计入 nonzero_exits）。
 
 ## Cost
 

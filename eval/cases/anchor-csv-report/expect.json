@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：按精确规格做数据聚合并产出字节精确的报表（排序规则、两位小数、制表符分隔）。判分 = check.sh 里 diff 黄金 report.tsv。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

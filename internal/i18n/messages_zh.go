@@ -19,6 +19,7 @@ var messagesZh = map[string]string{
 	"view.thinking_ms":     "思考中… %d 分 %d 秒",
 	"view.queue.steering":  "↪ 转向中：",
 	"view.queue.queued":    "↰ 已排队：",
+	"view.queue.injected":  "⤵ 已在下一个边界插入：",
 
 	"menu.hint.simple": "  ↑/↓ 移动 · Enter 采纳 · Esc 取消",
 	"menu.hint.toggle": "  ↑/↓ 移动 · Space 勾选 · Enter 确认 · Esc 取消",
