@@ -325,6 +325,21 @@ while [[ $# -gt 0 ]]; do
 done
 case_filter=${positional[0]-}
 binary=${positional[1]-$repo_root/seek}
+# Canonicalise to ABSOLUTE: runner.sh cases (plan-e2e, subagent-bg-resume,
+# anchor-*) re-launch "$SEEK_EVAL_BINARY" from inside their own scratch
+# workspaces — a relative path like ./seek (the documented lane-anchor
+# invocation) resolves against the scratch dir there and dies with 127.
+# Resolving here fixes every runner at the one seam; the default
+# ($repo_root/seek) is already absolute, so only explicit relatives move.
+case "$binary" in
+  /*) ;;
+ *)
+    binary_dir=$(cd "$(dirname "$binary")" 2>/dev/null && pwd)
+    if [[ -n "$binary_dir" ]]; then
+      binary="$binary_dir/$(basename "$binary")"
+    fi
+    ;;
+esac
 
 if [[ ! -x "$binary" ]]; then
   echo "eval: binary not found or not executable: $binary" >&2

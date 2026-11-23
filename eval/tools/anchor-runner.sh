@@ -49,8 +49,13 @@ prompt=$(cat "$SEEK_EVAL_PROMPT_FILE")
 sut_rc=$?
 
 # Mechanical verdict — from OUTSIDE the agent's world, so a "fixed" ws
-# is judged by recomputation, never by the agent's claims.
-( cd "$ws" && bash "$case_dir/check.sh" )
+# is judged by recomputation, never by the agent's claims. check.sh's
+# STDOUT IS REDIRECTED: this runner's stdout is the metric stream
+# (pitfall: a check that diffs to stdout poisons every downstream jq -s
+# — anchor-debug-tz shipped exactly that, one empty-metrics row per
+# lane run); failure detail rides the failed fact below, stderr is
+# already discarded by run.sh's runner capture.
+( cd "$ws" && bash "$case_dir/check.sh" ) >/dev/null
 check_rc=$?
 
 [ "$sut_rc" -eq 0 ] || printf '{"type":"runner_fact","exit_code":%d}\n' "$sut_rc"
