@@ -102,6 +102,8 @@ Self-recovery first — "ask the user" is the LAST resort. Read the error (the h
 
   Why it's a discipline and not a refactor: dsh gets this structurally — every model request is derived from its append-only log (`deriveMessages()`), so state *cannot* drift from the record. seek is not rewriting to that model; the cost/benefit doesn't hold for a single-binary local CLI. Applying the question per feature captures most of the value at none of the cost. See [`docs/dsh-analysis.md`](docs/dsh-analysis.md) §2 and §9.2.
 
+- **`.butler/` (merge-gate declaration) is machine-local — never commit.** butler reads it from the checkout's disk, so tracked-or-not never affects the gates; clones lacking it lenient-skip (user decision 2026-11-22, c_t7vdgs).
+
 ## Testing (load-bearing)
 
 Tests are how seek stays trustworthy. Treat coverage of failure paths as part of the deliverable, not a follow-up.
