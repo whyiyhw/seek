@@ -32,7 +32,7 @@ seek --no-save -p "scratch work"
 | `/effort` | Set DeepSeek reasoning effort: `off`, `high`, or `max` |
 | `/yolo` | Toggle `--yolo` (bypass permission prompts) for this session |
 | `/plan` | Toggle plan mode (read-only exploration) for this session |
-| `/steer`, `/s` | Mid-stream steer: `/steer <text>` lines up text to send right after current response; bare `/steer` promotes a queued message to steer (Mac-friendly Alt+Enter alternative) |
+| `/steer`, `/s` | Mid-stream steer. With text: `/steer <text>` injects at the next turn boundary (see below); bare `/steer` promotes a queued message to a steer (Mac-friendly Alt+Enter alternative) |
 | `/review` | Code review working-tree changes — no arg opens a picker, or pass a branch |
 | `/branch` | Fork this session — new ID, parent link, copy of history |
 | `/compact` | Summarise prior history into one message to free up context |
@@ -43,6 +43,21 @@ seek --no-save -p "scratch work"
 | `/setup` | Re-run the API-key configuration wizard |
 | `/upgrade` | Download the latest release and replace the binary in place |
 | `/exit`, `/quit`, `/q` | Quit seek |
+
+## Injecting text mid-stream
+
+While a turn is streaming you can type — the input box stays live. What happens to your text depends on whether the agent can take it *inside the current round*:
+
+| Key | Behaviour |
+|---|---|
+| **Enter** | Injects at the next turn boundary: after the current tool batch's results land, before the model's next call. No cancellation, no lost work. |
+| **Alt+Enter** (or `/steer <text>`) | Same injection first; only if the agent can't take one does it fall back to cancelling the round and resending. |
+| **Enter on an empty box** | Withdraws a pending injection / queued message. |
+| **Esc** | Stops everything, injections included. |
+
+Three states are visually distinct above the input box: `⤵ inserted at next boundary` (accepted by the agent, waiting for the boundary), `↰ queued` (waiting for the whole round to end — the fallback), `↪ steering` (about to cancel the round). When an injection lands you get a `▌ you` block plus an `↪ inserted at turn boundary N` line in scrollback, so the transcript shows exactly where you cut in.
+
+Caps: one injected message ≤ 8 KiB, at most 4 pending per turn — rejected at keystroke time rather than silently truncated, because injected text becomes permanent history and is re-sent on every later request.
 
 ## Response language
 

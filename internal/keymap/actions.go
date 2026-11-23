@@ -56,7 +56,7 @@ type ActionInfo struct {
 // dispatch logic in internal/tui/update_key.go.
 func AllActions() []ActionInfo {
 	return []ActionInfo{
-		{ActionSubmit, "enter", "Submit the current input (or queue while streaming)"},
+		{ActionSubmit, "enter", "Submit the current input (or inject it at the next turn boundary while streaming)"},
 		{ActionSteer, "alt+enter", "Interrupt the current stream and inject the input as a steer"},
 		{ActionInterrupt, "ctrl+c", "Quit seek (saves the session first)"},
 		{ActionCancel, "esc", "Cancel: stream / review-entry / setup-wizard / open picker"},
