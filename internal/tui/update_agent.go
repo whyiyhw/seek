@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -157,6 +158,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		text := m.pendingSteerText
 		m.pendingSteerText = ""
 		m.queuedText = "" // a steer supersedes any queue
+		m.traceEvent(uitrace.EventDeliver, "steer", len(text))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ steered")))
 		newM, cmd := m.submit(text)
 		cmds = append(cmds, cmd)
@@ -164,6 +166,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	case m.queuedText != "":
 		text := m.queuedText
 		m.queuedText = ""
+		m.traceEvent(uitrace.EventDeliver, "queue", len(text))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
 		newM, cmd := m.submit(text)
 		cmds = append(cmds, cmd)
@@ -880,6 +883,11 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
 			msg.usage.PromptTokens, msg.usage.CompletionTokens)
 	}
+	// Trace the compaction as a fact: how often history gets rewritten is
+	// one half of "is the context budget tuned right", and the prompt-token
+	// count is what makes the answer numeric instead of anecdotal. Detail
+	// names the trigger so auto vs manual stays separable.
+	m.traceEventDur(uitrace.EventCompact, msg.trigger, 0, msg.usage.PromptTokens, 0)
 	return []tea.Cmd{m.appendHistory(styleMuted.Render(notice))}
 }
 

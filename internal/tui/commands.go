@@ -30,6 +30,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
@@ -1430,6 +1431,7 @@ func gatherBranchDiff(cwd, target string) (string, bool) {
 // Shared helper used by cmdReview and the Alt+Enter path in update.go.
 func steerStream(m *Model, text string) {
 	m.pendingSteerText = text
+	m.traceEvent(uitrace.EventSteer, "", len(text))
 	if m.cancelStream != nil {
 		m.userCanceled = false
 		m.cancelStream()
@@ -1459,6 +1461,7 @@ func (m *Model) tryMidTurnInject(text string) bool {
 		return false
 	}
 	m.injectedPreview = text
+	m.traceEvent(uitrace.EventInject, "", len(text))
 	return true
 }
 
@@ -2022,7 +2025,7 @@ func startCompactCmd(m *Model, trigger string) tea.Cmd {
 		// "manual" (/compact) or "auto" (maybeAutoCompact).
 		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: trigger})
 		summary, usage, err := ag.Summarise(ctx)
-		return compactDoneMsg{summary: summary, usage: usage, err: err}
+		return compactDoneMsg{summary: summary, usage: usage, trigger: trigger, err: err}
 	}
 }
 

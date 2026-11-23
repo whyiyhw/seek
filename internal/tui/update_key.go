@@ -11,6 +11,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
+	"github.com/whyiyhw/seek/internal/uitrace"
 )
 
 // beepCmd emits a terminal bell (BEL, \a). Written to os.Stderr so it
@@ -417,6 +418,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// claim it for their own purposes.
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
+			m.traceEvent(uitrace.EventCancel, "", 0)
 			m.cancelStream()
 			// Revoke any plan-execute batch pre-approval. The user
 			// pressing cancel means "stop, give me back per-call
@@ -531,8 +533,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				// agent is already 30 seconds into a useful turn.
 				if m.queuedText != "" || m.pendingSteerText != "" {
 					wasSteer := m.pendingSteerText != ""
+					n := len(m.queuedText)
+					detail := "queue"
+					if wasSteer {
+						n = len(m.pendingSteerText)
+						detail = "steer"
+					}
 					m.queuedText = ""
 					m.pendingSteerText = ""
+					m.traceEvent(uitrace.EventWithdraw, detail, n)
 					label := "↰ withdrew queued message"
 					if wasSteer {
 						label = "↰ withdrew pending steer"
@@ -576,6 +585,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				// Second submit during the same stream replaces — last
 				// thing you said is what you meant.
 				m.queuedText = text
+				m.traceEvent(uitrace.EventQueue, "", len(text))
 			}
 			return m, nil
 		}

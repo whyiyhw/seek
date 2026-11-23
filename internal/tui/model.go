@@ -50,6 +50,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -191,6 +192,16 @@ type Options struct {
 	// The TUI uses it to back /checkpoints, /restore, /undo, /redo
 	// without re-resolving the session each call.
 	Checkpoint *checkpoint.Manager
+
+	// UITrace, when non-nil, records one JSONL row per user-interaction
+	// fact (boundary injection, queue, steer, withdraw, Esc, compact,
+	// goal verdict) to ~/.seek/ui-trace.jsonl. nil = tracing off
+	// (--no-save, tests, embedders that don't want local telemetry).
+	//
+	// Local-only: seek never uploads it. See internal/uitrace for why
+	// this data can't be folded from the transcript — a steered message
+	// and an injected one are byte-identical `user` rows on disk.
+	UITrace *uitrace.Writer
 
 	// Subagents is the v5 柱 G orchestrator (PRD docs/prd/
 	// feature-subagent.md). nil in --no-save mode or when

@@ -96,6 +96,8 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/websearch"
 	"github.com/whyiyhw/seek/internal/tools/write"
 	"github.com/whyiyhw/seek/internal/tui"
+	"github.com/whyiyhw/seek/internal/uitrace"
+	"github.com/whyiyhw/seek/internal/uitracecli"
 	"github.com/whyiyhw/seek/internal/upgrade"
 	"github.com/whyiyhw/seek/internal/verifier"
 	"github.com/whyiyhw/seek/internal/worktree"
@@ -283,6 +285,13 @@ func run() error {
 	}
 	if len(os.Args) >= 2 && os.Args[1] == "redo" {
 		return checkpointcli.RunRedo(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek ui-trace ...` — read side of ~/.seek/ui-trace.jsonl (the
+	// local user-interaction trace). Same rationale as hooks: no API
+	// keys, no session, no project needed, so it short-circuits ahead of
+	// flag.Parse and works from a plain shell.
+	if len(os.Args) >= 2 && os.Args[1] == "ui-trace" {
+		return uitracecli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
 	// `seek hooks ...` — list / check / trust / audit. Dispatched
 	// before global flag parse for the same reason as `skill`:
@@ -1977,6 +1986,25 @@ func run() error {
 	if activeSession != nil {
 		resumeGoal = activeSession.Goal
 	}
+	// User-interaction trace (internal/uitrace): one JSONL row per
+	// interaction fact — boundary injection, queued message, steer,
+	// withdraw, Esc, compact, goal verdict. Local-only; nil under
+	// --no-save (an ephemeral run has no session id to attribute rows
+	// to, and the file's whole purpose is cross-session ratios).
+	//
+	// Why the TUI writes this rather than a fold over the transcript:
+	// an injected message and a steered one are byte-identical `user`
+	// rows on disk, and a withdrawn queue leaves nothing at all. See
+	// internal/uitrace's package doc.
+	var uiTrace *uitrace.Writer
+	if !*noSave {
+		if tracePath, terr := paths.UITraceLog(); terr != nil {
+			fmt.Fprintln(os.Stderr, "ui-trace:", terr)
+		} else {
+			uiTrace = uitrace.New(tracePath)
+		}
+	}
+
 	// Clipboard image paste (M-imgpaste.2): Ctrl+V grabs an image off the OS
 	// clipboard to a temp PNG, which the vision input router then attaches
 	// natively (feature-vision; the OCR-era pipeline is gone). The grabber
@@ -2018,6 +2046,7 @@ func run() error {
 		AskUserBatchCh:        askBatchCh,
 		Session:               activeSession,
 		Store:                 store,
+		UITrace:               uiTrace,
 		Checkpoint:            ckMgr,
 		Subagents:             subagentMgr,
 		Worktrees:             wtMgr,

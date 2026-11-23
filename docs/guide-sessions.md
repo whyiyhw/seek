@@ -59,6 +59,19 @@ Three states are visually distinct above the input box: `⤵ inserted at next bo
 
 Caps: one injected message ≤ 8 KiB, at most 4 pending per turn — rejected at keystroke time rather than silently truncated, because injected text becomes permanent history and is re-sent on every later request.
 
+### The interaction trace
+
+Each of these interactions writes one line to `~/.seek/ui-trace.jsonl` (local only; nothing is uploaded, and `--no-save` disables it). The file records *that* you intervened and *how*, plus text length — never the text itself:
+
+```bash
+seek ui-trace                     # folded summary: intervened / delivered / withdrawn / cancelled
+seek ui-trace --rows --since 24h  # raw rows, newest first
+seek ui-trace --json              # machine-readable (jq-friendly)
+```
+
+Why a separate file rather than reading the sessions: an injected message and a steered one are byte-identical `user` rows in a transcript, and a withdrawn queue writes nothing at all. Without this ledger those three mechanisms are indistinguishable after the fact.
+
+
 ## Response language
 
 seek replies in the **same language you write in** — there is no `/lang` command and no `--lang` flag. The system prompt instructs the model to match your input language (Chinese prompt → Chinese reply; English prompt → English reply).
