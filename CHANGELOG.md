@@ -35,6 +35,7 @@ v0.12.3 — **Zed 面成形**的一版：feature-acp 在册缺口全清（backlo
 - c_heffj3：seek web：/bind 目录浏览器（fs/list 只读 method，project_roots∪projects∪memory 根内可下钻；页面 /bind 参数期弹 📁 浏览目录，复用 #menu 弹层）
 - c_xphkui：PRD §13 补「设计规范双 skill 必读」节：把 .seek/skills 两份规范接进 web 卡口径源（修 skill 发现断点）
 - c_lqtt2m：web 整备·390px 手机宽响应式：单栏折叠/按钮组换行/ellipsis/设置面板堆叠
+- c_mglkox：seek：v8 §9.1 同口径复测（R2 落地后窗口）——决定 R3 与第三波止损读数
 
 ## 未发版（在途分支）
 - c_qjaksw：**subtraction**——退役 fim_complete 工具链。删 `internal/tools/fimcomplete/`、`pkg/deepseek` FIM client（fim.go / fim_test.go / endpointFIM）、sysprompt 工具文档行、D8 deepseekOnly 表项（think 保留独扛过滤测试）、benchmark FIM 指标（FIMMinCalls 与 fim 比率；`fim-patch` 任务保留、prompt 去 fim_complete 指引）、i18n provider banner 的 FIM 字样；文档同步（dual-model / comparison / guide-architecture / book ch5+ch14 / pitfalls-triage #629 标注已退役 / feature-orchestration D8 / examples 两页 / 双 README）。依据：实测 FIM 调用比率 0%/11%（`docs/pitfalls/deepseek-api/fim-usage-ratio-is-inherently-low-—-model-prefers-edit-write-over-fim-complete.md`）——模型不用，快路径名存实亡，删净比养着便宜。
