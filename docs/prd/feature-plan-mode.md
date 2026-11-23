@@ -65,6 +65,8 @@
 └──────────────────────┘
 ```
 
+> **退役注记（2026-11-22）**：图里 ANALYZE 子态的工具清单含 `think`、且 adjust 分支写「重新 think」——`think` 工具已于 2026-11-22 退役（卡 c_cs4dw6，真实会话几乎不用）。现行的 ANALYZE 只读面是 read / grep / list_dir / git / webfetch / references 等只读工具（permission 层只做闸门，不再有 think）；「重新 think」今天的含义是模型在 ANALYZE 里重新读上下文再调 propose。图按当时设计原样保留。
+
 ### 1.2 与现有 `/plan` 的关系：扩展，不替换
 
 现有 `/plan`（`internal/tui/commands.go:722`）是单向 toggle，进入后 `permission.ModePlan` 锁住 write/edit/bash，模型的"plan"就是文字输出。v2 不改这个入口：
@@ -159,7 +161,7 @@ user feedback: "step 3 should be split — interface first, store change separat
 proposal: cancelled by user — exit plan mode
 ```
 
-**权限**：propose 不写 fs、不跑 shell，**无需 `permission.Policy` 注入**——和 `think`、`ask_user` 同级。但它**有副作用**（emit 改变 mode 的事件），所以工具构造时需要持有 `agent.EventSink` 或等价回调（实现细节，待 P1 落地时定）。
+**权限**：propose 不写 fs、不跑 shell，**无需 `permission.Policy` 注入**——和当时的 `think`（2026-11-22 退役）、`ask_user` 同级。但它**有副作用**（emit 改变 mode 的事件），所以工具构造时需要持有 `agent.EventSink` 或等价回调（实现细节，待 P1 落地时定）。
 
 ### 2.3 新 agent.Event 类型
 
@@ -231,7 +233,7 @@ v1 用 mode reminder 引导模型，不做结构化注入：
 
 - `plan-execute` 子态的 reminder 末尾已经写明 "If the user disagrees, **summarize what's done** in chat, then call propose() again to re-plan."
 - 模型按引导先 chat 输出 "已完成：A、B；进行中：C；未开始：D、E"，**这段 chat 自然进 transcript**
-- 模型紧接着调 propose 时，transcript 里就有这段事实，下一轮 reasoner（如果用了 dual-model）或者本轮模型自己能读到
+- 模型紧接着调 propose 时，transcript 里就有这段事实，下一轮 reasoner（当时若用了 `dual-model` skill——该 skill 已随 think 于 2026-11-22 退役）或者本轮模型自己能读到
 
 **为什么不做结构化注入：** v1 范围外。v2 加 task list 后，propose 工具可以接受可选的 `prior_completed: []string`，TUI 从 task list state 自动填，那时再做。v1 走"模型自觉"路线，工作量近零、行为可观察、不达标再加。
 
@@ -295,7 +297,7 @@ PROPOSE 阶段用户 approve 的是**整个方向**（"我同意你按这 5 步�
 | P2 | `pkg/agent/events.go` 新增三个事件类型 + propose 工具的 event sink 注入 | ~50 行 + 测 ~30 行 |
 | P3 | `pkg/agent/agent.go` `modeReminder` 扩展支持 `plan-analyze` / `plan-execute` | ~30 行 + 测 ~30 行 |
 | P4 | TUI 联动：`tui.Model.opts.SetPlanSubstate` 回调、update.go 识别三个事件、statusbar 显示子态 | ~120 行 + view test ~80 行 |
-| P5 | 新增或扩展 skill 描述 plan 模式工作流（dual-model.md 或独立 `/plan-flow.md`） | ~80 行 |
+| P5 | 新增或扩展 skill 描述 plan 模式工作流（当时设想的 `dual-model.md` 已于 2026-11-22 退役；实际落地是 `plan-mode.md` + `plan-contract.md`） | ~80 行 |
 | P6 | 端到端验证：ANALYZE → propose → approve → EXECUTE 全跑、adjust 分支、cancel 分支、Ctrl-C 中断 resume | 半天 |
 
 **总计：~1 天。** 先 P1+P2+P3 合一个 PR（工具 + 事件 + reminder），再 P4 合一个 PR（TUI 联动），最后 P5 切换 skill。三个 PR，每个独立可验证。
@@ -505,7 +507,7 @@ artifact **不替代** transcript。adjust / re-propose / cancel / duplicate 都
 
 - `internal/tools/propose/` — propose 工具实现
 - `internal/tools/askuser/askuser.go` — propose 内部复用 `askuser.Policy`
-- `internal/tools/think/think.go` — 同样"无 permission gating"的工具范例
+- `internal/tools/plan/plan.go` — 同样"无 permission gating"的工具范例（本条原指 `internal/tools/think/think.go`；think 工具 2026-11-22 退役、该文件已删，plan 是现存的零 gating 工具）
 - `pkg/agent/events.go` — `Plan*` 事件类型（含 v2.x 新增的 `PlanStepUpdated`）
 - `pkg/agent/agent.go:modeReminder` — 子态 reminder 多态
 - `internal/permission/permission.go` — `ModePlan` / `ModeAsk` 切换 + v2.x 的 `preApproved` 字段 + `Action.ReadOnly`

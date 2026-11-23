@@ -28,7 +28,7 @@ Subagents let the parent agent spawn child agents — each with its own session,
 | Type | Tools | Workflow | Use case |
 |------|-------|----------|----------|
 | **general-purpose** | Full tools (minus agent/ask_user) | Inherits parent permissions | General sub-tasks |
-| **explore** | Read-only (read/grep/list_dir/git/webfetch/think) | Plan-analyze | Parallel research |
+| **explore** | Read-only (read/grep/list_dir/git/webfetch) | Plan-analyze | Parallel research |
 | **plan** | Same read-only set as explore | Plan-analyze, output is numbered action plan | Structuring a plan |
 
 ### 2.1 自定义类型 / Custom Types（P2-a）

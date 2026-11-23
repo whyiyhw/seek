@@ -54,8 +54,12 @@ The runner appends one row to `results/<UTC-date>-<binary-version>.jsonl`
 per case it executed, e.g.:
 
 ```json
-{"case":"tool-args-hallucination","pass":true,"metrics":{"unknown_field_errors":0,"think_calls":1,"turns":4},"prompt_tokens":12834,"completion_tokens":612,"elapsed_s":21}
+{"case":"tool-args-hallucination","pass":true,"metrics":{"unknown_field_errors":0,"turns":4},"prompt_tokens":12834,"completion_tokens":612,"elapsed_s":21}
 ```
+
+> Rows recorded before 2026-11-22 also carry `think_calls` — the metric
+> was retired with the `think` tool (card c_cs4dw6); historical results
+> files keep it, new rows don't.
 
 ## Judgment: single sample vs N rounds (E1)
 
@@ -199,7 +203,7 @@ point of having a gate.
 | references-trigger | 3/3 real calls — first observation 2026-11-22 | unmeasured (baseline: 0/6,474) | 3 | — | **yes** |
 | redundant-tool-calls | 12/12 → 10/10 | 1.0 | 3 | 1.0 | no |
 | session-id-contract | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
-| tool-args-hallucination | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
+| tool-args-hallucination | 10/10 → 9/9, then **rewritten 2026-11-22** (subject moved off the retired `think` tool to a multi-tool audit run; binding `min_total_tool_calls: 5` so it can't pass vacuously) | 1.0 | 3 | 1.0 | no |
 | tool-selection | 10/14 → 8/8 since the 11-13 repair | 1.0 | 3 | 1.0 | no |
 | write-elided-edit-fallback | 9/10 (one unexplained red 11-16) | ~0.9 | 3 | **0.6** | no |
 | write-guard-fallback | 19/19 → 9/9 | 1.0 | 3 | 1.0 | no |
@@ -394,7 +398,6 @@ the lane block and is lane-independent.
 | Metric | What it counts |
 |---|---|
 | `unknown_field_errors` | `tool_end` events whose `error` contains `unknown field` |
-| `think_calls` | `tool_start` events with `name=think` |
 | `total_tool_calls` | every `tool_start` event |
 | `read_calls` | `tool_start` events with `name=read` |
 | `grep_calls` | `tool_start` events with `name=grep` |
