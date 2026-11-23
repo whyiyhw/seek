@@ -57,7 +57,12 @@ RUBRICS = {
         "categorised findings including BOTH critical bugs: (1) nil map "
         "assignment panic on first Record (New() leaves sizes nil), (2) nil "
         "FileInfo dereference because os.Open/Stat errors are discarded. "
-        "Working-process narration with no delivered findings is a fail."
+        "Working-process narration with no delivered findings is a fail. "
+        "CAP NOTE: the stored answer may be truncated by a 2000-character "
+        "cap — judge only the delivered portion: pass if the visible text "
+        "contains BOTH critical findings (more findings may have been cut "
+        "off); fail only on criticals missing from the visible text; null "
+        "if you cannot tell what was cut."
     ),
     "code-review-effort-max": (
         "A read-only review of the pasted sizecache Go snippet at max effort "
@@ -65,7 +70,11 @@ RUBRICS = {
         "categorised findings including BOTH criticals from the low-effort "
         "rubric (nil map panic; nil FileInfo deref on discarded errors) plus "
         "additional findings. Mid-process narration with no delivered review "
-        "is a fail."
+        "is a fail. CAP NOTE: the stored answer may be truncated by a "
+        "2000-character cap — judge only the delivered portion: pass if the "
+        "visible text contains BOTH critical findings (more may have been "
+        "cut off); fail only on criticals missing from the visible text; "
+        "null if you cannot tell what was cut."
     ),
     "tool-selection": (
         "The task asks to quote three `const description` strings verbatim "
@@ -73,7 +82,11 @@ RUBRICS = {
         "a count. A correct answer quotes ALL THREE strings and names bash "
         "as the longest with a specific integer word count (the exact count "
         "varies by version — judge the triple quote+bash+integer, not the "
-        "number). Missing quotes or no final concise answer is a fail."
+        "number). Missing quotes or no final concise answer is a fail. "
+        "CAP NOTE: the stored answer may be truncated at 2000 characters — "
+        "a trailing incomplete quote is not by itself a fail; pass when "
+        "bash is named longest with a specific word count and verbatim "
+        "quoting is visibly delivered; judge the visible portion only."
     ),
     "instruction-following": (
         "The task asks where the session file is written to disk. A correct "
@@ -161,12 +174,14 @@ REAL = [
     ("code-review-effort-low", "2026-11-19T05:40:34Z", "pass", ""),
     ("code-review-effort-low", "2026-11-13T20:19:26Z", "pass", ""),
     ("code-review-effort-low", "2026-11-16T18:00:03Z", "pass", ""),
-    ("code-review-effort-max", "2026-11-19T05:52:16Z", "pass", ""),
+    ("code-review-effort-max", "2026-11-19T05:52:16Z", "fail",
+     "relabeled 2026-11-23: visible 2000 chars contain only C1 (nil-map) + mutex finding; the nil-FileInfo critical is cut off — draft pass was labeled from a truncated preview"),
     ("code-review-effort-max", "2026-11-13T15:52:00Z", "fail",
      "mid-process narration only — no review delivered (mechanically green; the exact mismatch the judge layer exists to catch)"),
-    ("tool-selection", "2026-11-22T12:16:33Z", "fail",
-     "partial mid-work text: announces reading, delivers only the bash fragment — no three verbatim quotes, no final concise answer"),
-    ("tool-selection", "2026-11-17T02:38:26Z", "pass", ""),
+    ("tool-selection", "2026-11-22T12:16:33Z", "pass",
+     "relabeled 2026-11-23: full text DOES deliver bash—186 words + edit—58 + git—113 with verbatim quotes; draft fail was labeled from a 600-char preview — the calibration caught the labeler, not the judge"),
+    ("tool-selection", "2026-11-17T02:38:26Z", "fail",
+     "relabeled 2026-11-23: full text has no integer word count anywhere — rubric requires one; draft pass was preview-truncated"),
     ("instruction-following", "2026-11-22T12:18:09Z", "pass", ""),
     ("instruction-following", "2026-11-16T18:10:06Z", "pass", ""),
     ("git-multi-query-no-bash", "2026-11-19T05:42:17Z", "pass", ""),

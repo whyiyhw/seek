@@ -236,7 +236,20 @@ def main():
         print(f"judge.py: bad --input: {e}", file=sys.stderr)
         return 2
 
-    argv = [os.path.abspath(args.seek_binary), "-yolo", "-no-save", "-max-turns", "1", "-json"]
+    # Judge invocation shaping (first calibration, 2026-11-23):
+    # - -tools grep: whitelist the single read-only grep tool — shrinks
+    #   the schema payload AND removes any write/exec surface. (think/
+    #   agent/memory register AFTER whitelist validation, so they cannot
+    #   be named here — seek quirk, probed via -tools zzz.)
+    # - -max-turns 6: kimi "verifies it myself" with grep before judging
+    #   (relative tool paths resolve into the seek repo — the scratch
+    #   cwd does not hide it); observed verification chains of 2–5
+    #   rounds; smaller budgets left no text for the verdict (doubt
+    #   ×7 / ×5 / ×3 across three calibration runs — the tail thins
+    #   as the budget grows). Six turns absorb the observed chain;
+    #   residual overrun folds to doubt, which stays honest.
+    argv = [os.path.abspath(args.seek_binary), "-yolo", "-no-save",
+            "-max-turns", "6", "-tools", "grep", "-json"]
     argv += shlex.split(args.lane_args)
     argv += ["-model", args.model, "-p", build_prompt(rubric, prompt, final_text)]
 
@@ -244,6 +257,15 @@ def main():
     # judge its own scratch HOME+cwd so a hallucinated write is harmless.
     home = tempfile.mkdtemp(prefix="seek-judge-home.")
     cwd = tempfile.mkdtemp(prefix="seek-judge-cwd.")
+    # git init the scratch cwd: seek's tool layer resolves relative paths
+    # against the detected project root, and a bare tempdir falls back to
+    # the BINARY's repo — which let the judge "verify" answers against
+    # the live seek checkout (helpful for repo facts, poison for runtime
+    # artifacts: calibration run 4 failed a correct answer because
+    # eval/tmp/... "does not exist in the judge workspace"). An empty git
+    # root makes every verification grep come back empty, so the judge
+    # grades the TEXT it was given.
+    subprocess.run(["git", "init", "-q"], cwd=cwd, capture_output=True)
     env = dict(os.environ)
     env.setdefault("SEEK_HOME", home)
     env.pop("SEEK_SESSIONS_DIR", None)
