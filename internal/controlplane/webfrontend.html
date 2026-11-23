@@ -248,10 +248,18 @@
      （TestWeb_PageThemeSettings 的裸色检查也会红）。断线条底色单开
      --seek-warn-bg（警示底不是语义前景色，压在它上面的文字仍用
      --seek-warn）。 */
-  #conn { flex: none; }
-  #conn::before { content: '●'; }
-  #conn.ok::before { color: var(--seek-ok); }
-  #conn.warn::before { color: var(--seek-warn); }
+  /* #conn 状态灯（c_25d2ey）：●字符换真 CSS 圆点（8px 圆，字形跨平台
+     大小/基线不一致的结构性问题同 emoji）+ 可见文字标签——裸色点无
+     标签无 title 是旧审查的明确扣分项。文字随态切换（connSet），
+     title 与 aria-label 同步。 */
+  #conn { flex: none; display: inline-flex; align-items: center; gap: 5px;
+          color: var(--seek-fg-dim); font-size: 12px; }
+  #conn .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+               background: var(--seek-fg-dim); }
+  #conn.ok .dot { background: var(--seek-ok); }
+  #conn.warn .dot { background: var(--seek-warn); }
+  #conn.ok #conn-t { color: var(--seek-ok); }
+  #conn.warn #conn-t { color: var(--seek-warn); }
   #connbar { display: flex; align-items: center; justify-content: center;
              gap: 10px; padding: 5px 14px; background: var(--seek-warn-bg);
              color: var(--seek-warn); border-bottom: 1px solid var(--seek-line);
@@ -316,8 +324,11 @@
     content: '▍'; color: var(--seek-fg-dim); animation: caret 1s steps(1) infinite;
   }
   @keyframes caret { 50% { opacity: 0; } }
-  .trow { color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
+  .trow { display: flex; align-items: center; gap: 4px; min-width: 0;
+          color: var(--seek-fg-soft); font-size: 12px; padding: 1px 0; }
+  .trow .tt { min-width: 0; word-break: break-word; }
   .trow.bad { color: var(--seek-warn); }
+  .trow.bad .ic { color: var(--seek-err); }
   /* ---- 会话浏览器调用树（c_ux7lvk，dsh 对齐）----
      行=名称+参数摘要+结果规模；点行展开 .tdetail 看参数/结果摘要（超长
      截断进限高滚动 pre，「复制全文」从 JS 闭包取整串——DOM 只装摘要）。 */
@@ -327,7 +338,8 @@
            border-radius: 6px; padding: 4px 10px; font: inherit;
            font-size: 12px; color: var(--seek-fg-soft); cursor: pointer; }
   .tnode:hover { border-color: var(--seek-line-focus); }
-  .tnode .nm { flex: none; color: var(--seek-warn); }
+  .tnode .nm { flex: none; display: inline-flex; align-items: center; gap: 3px;
+               color: var(--seek-warn); }
   .tnode .sm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
                white-space: nowrap; }
   .tnode .rs { flex: none; color: var(--seek-fg-dim); white-space: nowrap; }
@@ -394,12 +406,26 @@
     #input { font-size: 16px; }
     form { padding: 8px; }
   }
+  /* 按钮三档规范见 body 顶 sprite 注释（c_25d2ey）：主操作 accent /
+     次操作 soft / 图标钮 26×26。基线规则是主操作档；次操作/图标钮在
+     各自选择器里覆写底色。inline-flex 让图标与文字统一基线对齐
+     （纯文字按钮不受影响）。 */
   button { background: var(--seek-accent); color: inherit; border: 0; border-radius: 6px;
-           padding: 8px 16px; font: inherit; cursor: pointer; }
+           padding: 8px 16px; font: inherit; cursor: pointer;
+           display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   button:disabled { opacity: .4; cursor: default; }
+  /* 图标通用（c_25d2ey）：.ic = <use> 引 sprite 的 svg，尺寸两档——
+     按钮内 14px（配 13px 字号），图标钮内 16px（配 26px 方框）。
+     stroke=currentColor（symbol 上定义），色随所在按钮文字色走。 */
+  .sprite { display: none; }
+  .ic { width: 14px; height: 14px; flex: none; vertical-align: middle; }
+  /* 流式工具行里的 12px 小图标（loader/check/x 前缀）随行字号缩一档 */
+  .trow .ic, .stool .ic, .tnode .ic { width: 12px; height: 12px; }
   /* 按住说话（voice V2）：按下即录音中——红点态一目了然；user-select 关掉
-     防长按选中周围文字（touch 长按尤其会） */
-  #mic { padding: 8px 12px; user-select: none; -webkit-user-select: none; touch-action: none; }
+     防长按选中周围文字（touch 长按尤其会）。底色归 soft（c_25d2ey 图标
+     钮档）：录音前与 📎 同款，不再一个深底一个浅底两套语言 */
+  #mic { padding: 8px 12px; background: var(--seek-soft); user-select: none;
+         -webkit-user-select: none; touch-action: none; }
   /* 录音态文字换 --seek-rec-fg 而非继承 fg：亮色继承 fg 压在 --seek-rec
      上只有 ~2.6:1（两主题对比度抽查红）；接上专用前景后两主题 ≥4.5:1
      （ap-badge 同款接线，两处共用同一对 token）。 */
@@ -478,16 +504,22 @@
           min-height: 0; background: var(--seek-panel); border-right: 1px solid var(--seek-line);
           transition: width .15s; }
   body.side-collapsed #side { width: 44px; }
-  #side-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  /* 侧栏头部（c_25d2ey 间距节奏修正）：＋新建/🗄/⟩ 三钮同高同 gap（6px），
+     原版 #side-new 自带 8px/10px/6px 三向 margin 在 flex 行内造成上下
+     不齐——头部内的钮一律 margin 0，垂直节奏由容器 padding 统一。
+     图标钮统一 26×26 视觉框（16px 图标 + 5px 上下 padding），展开态
+     ＋新建 是「图标+文字」胶囊、其余纯图标钮。 */
+  #side-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px;
                border-bottom: 1px solid var(--seek-line); }
   #side-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap;
                 color: var(--seek-fg-soft); font-size: 12px; letter-spacing: .04em; }
   #side-head button, #side-new { padding: 4px 8px; font-size: 13px;
                                  background: var(--seek-soft); }
-  #side-toggle { flex: none; width: 26px; padding: 4px 0; }
-  #side-arch { flex: none; width: 26px; padding: 4px 0; background: var(--seek-soft); }
+  #side-head .ic { width: 16px; height: 16px; }
+  #side-toggle { flex: none; width: 26px; padding: 5px 0; }
+  #side-arch { flex: none; width: 26px; padding: 5px 0; background: var(--seek-soft); }
   #side-arch.on { background: var(--seek-accent); }  /* 归档可见位：高亮记开关态 */
-  #side-new { margin: 8px 10px 6px; display: flex; gap: 6px; align-items: center;
+  #side-new { margin: 0; display: flex; gap: 6px; align-items: center;
               justify-content: center; }
   #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
                  border: 1px solid var(--seek-line); border-radius: 6px; padding: 5px 8px;
@@ -508,7 +540,7 @@
      钮各自 26px 全部落在轨内、互不重叠。 */
   body.side-collapsed #side-head { flex-direction: column; gap: 6px;
                                    padding: 8px 6px; justify-content: flex-start; }
-  body.side-collapsed #side-new { margin: 0; width: 26px; padding: 4px 0; }
+  body.side-collapsed #side-new { margin: 0; width: 26px; padding: 5px 0; }
   /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
      点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
   #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;
@@ -550,7 +582,8 @@
                transform: translateY(-50%); display: none; gap: 2px;
                background: var(--seek-panel); padding: 2px; border-radius: 6px; }
   .sess-row:hover .sess-acts, .sess-row:focus-within .sess-acts { display: flex; }
-  .sess-acts button { padding: 2px 7px; font-size: 12px; background: var(--seek-soft); }
+  .sess-acts button { padding: 3px 5px; font-size: 12px; background: var(--seek-soft); }
+  .sess-acts .ic { width: 13px; height: 13px; }
   /* 行内改名：编辑态下标题/操作让位给输入框（Enter 提交 / Esc 取消） */
   .sess-edit { display: none; width: calc(100% - 16px); background: var(--seek-inset);
                color: inherit; border: 1px solid var(--seek-line-focus); border-radius: 6px;
@@ -572,7 +605,8 @@
   .smsg.tool { background: var(--seek-panel); color: var(--seek-fg-soft); }
   .smsg.tool pre { background: var(--seek-inset); }
   .swho { font-size: 11px; color: var(--seek-fg-dim); margin-bottom: 4px; }
-  .stool { color: var(--seek-warn); }
+  .stool { display: flex; align-items: center; gap: 4px; min-width: 0;
+           word-break: break-word; color: var(--seek-warn); }
   /* 工具结果限高：单条大输出不把整页 paint 撑爆（分页外的第二道界） */
   .smsg.tool .sbody { max-height: 260px; overflow-y: auto; }
   #sess-foot { padding: 8px 14px; text-align: center; border-top: 1px solid var(--seek-line);
@@ -778,7 +812,56 @@
 </style>
 </head>
 <body>
-<header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态"></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
+<!-- ==== UI 图标 sprite（card c_25d2ey：图标与按钮体系统一）====
+     全页 UI 图标 = 内联 SVG，<symbol> 每图标定义一次、<use> 复用。
+     path 数据 vendored 自 Lucide（https://lucide.dev，ISC License，
+     https://raw.githubusercontent.com/lucide-icons/lucide/main/LICENSE），
+     沿 2026-11-18「搬开源片段记来源」口径；不引运行时图标库/CDN/图标
+     字体（CSP default-src 'self' + 单文件零构建 + 离线可用三约束）。
+     规格统一：viewBox 24×24、stroke=currentColor、stroke-width=2、
+     fill=none、round cap/join——全页一套线宽（ui-ux-pro-max
+     icon-style-consistent）。消息正文里的 emoji 是用户/模型内容，不属于
+     本 sprite 管辖。图标随文字色走 currentColor：底色深浅由所在按钮档位
+     决定，不另设图标色 token。
+     ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言）====
+       1. 主操作  accent 实底——每屏唯一主 CTA：#send（生成中变 .stop
+          停止键）、#reconn 手动重连、审批卡 y。不加图标（文字即语义）。
+       2. 次操作  soft 底文字钮——顶栏指令组/视图组、主题三选、
+          #hk-pause、加载更多、#sess-back、审批 n/a。图标 14px+文字。
+       3. 图标钮  soft 底方形（26×26 视觉框）——侧栏 ＋/🗄/⟩、行内
+          ✏/🗄/⤴、📎、🎤；SVG 16px 居中，title+aria-label 双挂
+          （icon-only button 必须 aria-label，ui-ux-pro-max aria-labels）。
+          开关态用 .on / .rec 高亮底（accent / rec），不换图标语义。 -->
+<svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+    <symbol id="i-tasks" viewBox="0 0 24 24"><rect x="3" y="5" width="6" height="6" rx="1"/><path d="m3 17 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-panel-close" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></symbol>
+    <symbol id="i-panel-open" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-archive-restore" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="m10 12 2-2 2 2"/><path d="M12 10v4"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></symbol>
+    <symbol id="i-square" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+    <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="M4.9 19.1 7.8 16.2"/><path d="M2 12h4"/><path d="M4.9 4.9 7.8 7.8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  </defs>
+</svg>
+<header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态：连接中"><span class="dot" aria-hidden="true"></span><span id="conn-t">连接中</span></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
 <div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" type="button">手动重连</button></div>
 <nav id="bar">
   <!-- 指令快捷按钮（W2.2；c_lnsdvu 改制两钮）：/bind 与 /projects 点按改为开
@@ -794,13 +877,13 @@
        ——空态不占顶栏（验收③零侵入）。W5 侧栏卡（c_txz6vz）退役了顶栏
        的会话按钮——会话入口移左栏，这里不再有它。 -->
   <span id="ap-badge" hidden></span>
-  <button id="mem-btn" type="button">🧠 记忆</button>
-  <button id="stat-btn" type="button">📊 统计</button>
-  <button id="agents-btn" type="button">🤖 后台</button>
-  <button id="set-btn" type="button">⚙ 设置</button>
+  <button id="mem-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-brain"/></svg><span>记忆</span></button>
+  <button id="stat-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg><span>统计</span></button>
+  <button id="agents-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-tasks"/></svg><span>后台</span></button>
+  <button id="set-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-settings"/></svg><span>设置</span></button>
   <!-- hooks 实时审计（W5 c_xz2bey）：审计 tail 视图 + /events 的 hooks
-       topic 实时追加。 -->
-  <button id="hk-btn" type="button">🪝 审计</button>
+       topic 实时追加。图标 = activity 脉冲线（实时事件流语义）。 -->
+  <button id="hk-btn" type="button"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg><span>审计</span></button>
 </nav>
 <!-- 布局骨架（W5 卡 c_txz6vz）：左栏常驻会话侧栏 + 中栏内容。W4.4 的
      📚 弹出面板在此退役——会话列表不再抢占整页，只是左栏；中栏仍归
@@ -810,9 +893,9 @@
   <aside id="side">
     <div id="side-head">
       <span id="side-title">会话</span>
-      <button id="side-new" type="button" title="项目不变，开新会话（与 /new 同一条）">＋<span class="lbl">新建</span></button>
-      <button id="side-arch" type="button" title="显示归档会话">🗄</button>
-      <button id="side-toggle" type="button" title="收起/展开会话侧栏">⟨</button>
+      <button id="side-new" type="button" title="项目不变，开新会话（与 /new 同一条）"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span class="lbl">新建</span></button>
+      <button id="side-arch" type="button" title="显示归档会话" aria-label="显示归档会话"><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg></button>
+      <button id="side-toggle" type="button" title="收起/展开会话侧栏" aria-label="收起会话侧栏"><svg class="ic" aria-hidden="true"><use href="#i-panel-close"/></svg></button>
     </div>
     <input id="side-search" type="search" autocomplete="off" placeholder="按标题搜索…" aria-label="按标题搜索会话">
     <div id="sess-list"></div>
@@ -824,7 +907,7 @@
       <div id="browser-body">
         <div id="sess-detail">
           <div id="browser-head">
-            <button id="sess-back" type="button" title="返回聊天面">💬 聊天</button>
+            <button id="sess-back" type="button" title="返回聊天面"><svg class="ic" aria-hidden="true"><use href="#i-chat"/></svg><span>聊天</span></button>
             <div id="sess-meta"></div>
           </div>
           <div id="sess-msgs"></div>
@@ -887,7 +970,7 @@
       <div class="pane-head">
         <input id="hk-filter" type="search" autocomplete="off"
                placeholder="按 hook 名过滤…" aria-label="按 hook 名过滤审计行">
-        <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）">⏸ 暂停</button>
+        <button id="hk-pause" type="button" title="暂停/恢复实时追加（暂停期间仍积累，恢复时补齐）"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg><span>暂停</span></button>
         <span class="cnt" id="hk-cnt" title="显示行数"></span>
       </div>
       <div id="hk-log"></div>
@@ -901,8 +984,8 @@
       <div id="menu" role="listbox" aria-label="候选" hidden></div>
       <input id="file" type="file" multiple hidden
              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
-      <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）">📎</button>
-      <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）">🎤</button>
+      <button id="attach-btn" type="button" title="添加附件（也可直接拖入或粘贴）" aria-label="添加附件"><svg class="ic" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
+      <button id="mic" type="button" title="按住说话，松开发送（≤120 秒）" aria-label="按住说话"><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg></button>
       <button id="send">发送</button>
     </form>
     <div id="tray"></div>
@@ -924,6 +1007,35 @@
 // 同源自带）。仍读 URL 是给未换票直开的形态兜底（能读到的只会是错 token）。
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const q = s => s + (s.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN);
+
+// ---- UI 图标 helpers（card c_25d2ey）----
+// body 顶的 <symbol> sprite（Lucide vendored，来源/许可证注释在彼处），
+// 这三个函数是 JS 动态面引用它的唯一入口。iconEl 建 <svg><use>；
+// setBtnIcon/setBtn 重排按钮内容（图标钮 / 图标+文字钮）——按钮内容的
+// 换装统一走这两个函数，别再手拼 textContent（会把 <svg> 洗掉）。
+const SVGNS = 'http://www.w3.org/2000/svg';
+function iconEl(id) {
+  const svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVGNS, 'use');
+  use.setAttribute('href', '#i-' + id);
+  svg.appendChild(use);
+  return svg;
+}
+function setBtnIcon(btn, id) {
+  btn.replaceChildren(iconEl(id));
+}
+function setBtn(btn, id, text) {
+  const t = document.createElement('span');
+  t.textContent = text;
+  btn.replaceChildren(iconEl(id), t);
+}
+// 已有图标钮换图标（不重建节点，仅改 <use href>）——侧栏折叠钮两态用。
+function swapIcon(el, id) {
+  const use = el.querySelector('use');
+  if (use) use.setAttribute('href', '#i-' + id);
+}
 
 // 会话身份（W1.3，D-W3）：uuid 浏览器自铸、localStorage 持久；服务端
 // 零会话状态——它只是 bindings 表的键（web:<uuid>）。localStorage 不可
@@ -1012,10 +1124,17 @@ function renderCtx() {
 // 首连成功前的「连接中」不算断线（不弹提示条）；绑定状态行不再被断线
 // 文案占位——断线这件事由灯+提示条专职表达。
 const connEl = document.getElementById('conn');
+const connT = document.getElementById('conn-t');
 const connBar = document.getElementById('connbar');
 let connEverOpen = false;
 function connSet(ok) {
   connEl.className = ok ? 'ok' : 'warn';
+  // 状态灯文字标签（c_25d2ey）：裸色点无标签无 title 是旧审查扣分项；
+  // title 与 aria-label 同步文字（color-not-only：颜色不单独承载语义）。
+  const label = ok ? '已连接' : '重连中';
+  connT.textContent = label;
+  connEl.title = 'SSE 连接状态：' + label;
+  connEl.setAttribute('aria-label', 'SSE 连接状态：' + label);
   connBar.hidden = ok || !connEverOpen;
   if (ok) connEverOpen = true;
 }
@@ -1385,7 +1504,10 @@ function trowPaint(n, now) {
     const ms = (end ? n.t1 : (now || performance.now())) - n.t0;
     if (ms >= 0) dur = ' · ' + fmtDur(ms);
   }
-  n.el.textContent = (end ? (n.ok ? '✔ ' : '✘ ') : '⚙ ') + n.name + (end ? '' : ' …') + dur;
+  // 状态前缀走 sprite 图标（c_25d2ey）：在途 loader / 成功 check / 失败 x，
+  // 结构在行创建时装好（iconEl + .tt span），这里只换 href 与文本。
+  swapIcon(n.el, end ? (n.ok ? 'check' : 'x') : 'loader');
+  n.el.querySelector('.tt').textContent = n.name + (end ? '' : ' …') + dur;
   n.el.classList.toggle('bad', end && !n.ok);
 }
 
@@ -1399,6 +1521,9 @@ function toolTreeRow(d) {
     const el = document.createElement('div');
     el.className = 'trow';
     if (depth > 0) el.style.marginLeft = depth * 16 + 'px';   // CSSOM：数值宽度
+    const tt = document.createElement('span');
+    tt.className = 'tt';
+    el.replaceChildren(iconEl('loader'), tt);
     appendPinned(r.el, el);
     n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
     r.tools.set(d.id, n);
@@ -1441,12 +1566,16 @@ function toolPlainRow(d) {
   if (!n) {
     const el = document.createElement('div');
     el.className = 'trow';
+    const tt = document.createElement('span');
+    tt.className = 'tt';
+    el.replaceChildren(iconEl('loader'), tt);
     appendPinned(r.el, el);
     n = { el, name: d.name, phase: '', ok: true, t0: 0, t1: 0 };
     r.tools.set(d.id, n);
   }
   const end = d.phase === 'end';
-  n.el.textContent = (end ? (d.ok === true ? '✔ ' : '✘ ') : '⚙ ') + d.name + (end ? '' : ' …');
+  swapIcon(n.el, end ? (d.ok === true ? 'check' : 'x') : 'loader');
+  n.el.querySelector('.tt').textContent = d.name + (end ? '' : ' …');
   n.el.classList.toggle('bad', end && d.ok !== true);   // omitempty：失败帧无 ok 键
 }
 
@@ -1781,6 +1910,7 @@ function renderMenu() {
     row.className = 'mi' + (i === menuHl ? ' hl' : '');
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', i === menuHl ? 'true' : 'false');
+    if (it.icon) row.appendChild(iconEl(it.icon));   // 行首图标（c_25d2ey：📁 → folder）
     for (const [cls, text] of [['nm', it.label], ['ds', it.desc], ['sid', it.meta]]) {
       if (!text) continue;
       const span = document.createElement('span');
@@ -1906,7 +2036,7 @@ function bindArgHits() {
   const v = input.value;
   if (!/^\/bind\s/.test(v)) return null;
   return [{
-    label: '📁 浏览目录…',
+    label: '浏览目录…', icon: 'folder',
     desc: '下钻可浏览根内的任意目录后绑定',
     apply: () => openDirPicker(),
   }];
@@ -1940,7 +2070,7 @@ function buildDirHead() {
   p.className = 'dirpath';
   const up = document.createElement('button');
   up.type = 'button';
-  up.textContent = '↑ 上一级';
+  setBtn(up, 'arrow-up', '上一级');
   up.title = '去父目录（在可浏览根上时不可再上）';
   up.addEventListener('click', () => { if (dirMode && dirMode.parent) loadDir(dirMode.parent); });
   const pickBtn = document.createElement('button');
@@ -2043,7 +2173,7 @@ function dirApplyFilter() {
     return;
   }
   setDirRows(hits.map(d => ({
-    label: '📁 ' + d.name,
+    label: d.name, icon: 'folder',
     desc: '',
     apply: () => enterDir(d.path),
   })));
@@ -2340,7 +2470,8 @@ async function startRec() {
     const timer = setTimeout(stopRec, 120000);  // ASR 硬上限：到点等同松开
     rec = { mr, chunks, stopped, timer, stream };
     mic.classList.add('rec');
-    mic.textContent = '⏺';
+    setBtnIcon(mic, 'square');   // 录音中换「停」方块（c_25d2ey 图标语义化）
+    mic.setAttribute('aria-label', '录音中，松开发送');
   } catch (e) {
     addMsg('hint', '（麦克风不可用：' + e + '）');
   }
@@ -2357,7 +2488,8 @@ async function endRec() {
   const s = rec;
   rec = null;
   mic.classList.remove('rec');
-  mic.textContent = '🎤';
+  setBtnIcon(mic, 'mic');
+  mic.setAttribute('aria-label', '按住说话');
   s.stream.getTracks().forEach(t => t.stop());
   await s.stopped;
   if (!s.chunks.length) return;
@@ -2483,8 +2615,13 @@ function readSideCollapsed() {
 let sideCollapsed = readSideCollapsed();
 function applySide() {
   document.body.classList.toggle('side-collapsed', sideCollapsed);
-  sideToggle.textContent = sideCollapsed ? '⟩' : '⟨';
-  sideToggle.title = sideCollapsed ? '展开会话侧栏' : '收起会话侧栏';
+  // 折叠钮图标随态换（c_25d2ey）：panel-left-close/open 取代 ⟩/⟨ 文字
+  // 符号——字形符号跨平台渲染不一（⟩ 在部分字体栈里缺字成「(」，旧
+  // 审查的残形图标），sprite 图标无此问题。aria-label 与 title 同步。
+  const label = sideCollapsed ? '展开会话侧栏' : '收起会话侧栏';
+  swapIcon(sideToggle, sideCollapsed ? 'panel-open' : 'panel-close');
+  sideToggle.title = label;
+  sideToggle.setAttribute('aria-label', label);
   sideSearch.tabIndex = sideCollapsed ? -1 : 0;  // 收起态搜索不可见，焦点别落进去
 }
 function setSideCollapsed(v) {
@@ -2581,12 +2718,13 @@ function renderSessRows() {
     const ren = document.createElement('button');
     ren.type = 'button';
     ren.title = '重命名（Enter 提交，Esc 取消）';
-    ren.textContent = '✏';
+    ren.setAttribute('aria-label', '重命名会话');
+    setBtnIcon(ren, 'pencil');
     ren.addEventListener('click', ev => { ev.stopPropagation(); startRename(row, s); });
     const arc = document.createElement('button');
     arc.type = 'button';
-    if (s.archived) { arc.title = '取消归档'; arc.textContent = '⤴'; }
-    else { arc.title = '归档（列表隐藏，不删文件）'; arc.textContent = '🗄'; }
+    if (s.archived) { arc.title = '取消归档'; arc.setAttribute('aria-label', '取消归档'); setBtnIcon(arc, 'archive-restore'); }
+    else { arc.title = '归档（列表隐藏，不删文件）'; arc.setAttribute('aria-label', '归档会话'); setBtnIcon(arc, 'archive'); }
     arc.addEventListener('click', ev => {
       ev.stopPropagation();
       rpc('session/archive', { sid: s.sid, archived: !s.archived })
@@ -2792,7 +2930,9 @@ function appendMsgPlain(raw) {
       const fn = tc.function || {};
       let args = fn.arguments || '';
       if (args.length > 120) args = args.slice(0, 120) + '…';
-      t.textContent = '⚙ ' + (fn.name || '?') + '(' + args + ')';
+      const sname = document.createElement('span');
+      sname.textContent = (fn.name || '?') + '(' + args + ')';
+      t.replaceChildren(iconEl('settings'), sname);
       el.appendChild(t);
     }
   }
@@ -2869,7 +3009,8 @@ function callNode(tc) {
   row.className = 'tnode';
   const nm = document.createElement('span');
   nm.className = 'nm';
-  nm.textContent = '⚙ ' + name;
+  nm.replaceChildren(iconEl('settings'), Object.assign(document.createElement('span'),
+    { textContent: ' ' + name }));
   const sm = document.createElement('span');
   sm.className = 'sm';
   sm.textContent = clipOneLine(args, 72) || '（无参数）';
@@ -3016,16 +3157,16 @@ setBtn.addEventListener('click', () => togglePane('settings'));
 // 会话列表现在是常驻左栏，不再抢中栏。中栏面板互斥：会话正文
 // （sess-detail）、记忆/统计/后台/审计任选其一、或聊天面（默认）。
 const panes = {
-  memory:   { btn: memBtn,    label: '🧠 记忆', cls: 'mem-view',      load: loadMemPane },
-  stats:    { btn: statBtn,   label: '📊 统计', cls: 'stat-view',     load: loadStatPane },
-  agents:   { btn: agentsBtn, label: '🤖 后台', cls: 'agents-view',   load: loadAgentsPane },
-  settings: { btn: setBtn,    label: '⚙ 设置',  cls: 'settings-view', load: loadSetPane },
-  hooks:  { btn: hkBtn,     label: '🪝 审计', cls: 'hooks-view', load: loadHooksPane },
+  memory:   { btn: memBtn,    icon: 'brain',    label: '记忆', cls: 'mem-view',      load: loadMemPane },
+  stats:    { btn: statBtn,   icon: 'chart',    label: '统计', cls: 'stat-view',     load: loadStatPane },
+  agents:   { btn: agentsBtn, icon: 'tasks',    label: '后台', cls: 'agents-view',   load: loadAgentsPane },
+  settings: { btn: setBtn,    icon: 'settings', label: '设置', cls: 'settings-view', load: loadSetPane },
+  hooks:    { btn: hkBtn,     icon: 'activity', label: '审计', cls: 'hooks-view',    load: loadHooksPane },
 };
 function closePanes() {
   for (const p of Object.values(panes)) {
     document.body.classList.toggle(p.cls, false);
-    p.btn.textContent = p.label;
+    setBtn(p.btn, p.icon, p.label);
   }
   document.body.classList.remove('browsing');
 }
@@ -3035,7 +3176,7 @@ function togglePane(name) {
   if (active) {
     document.body.classList.add(panes[name].cls, 'browsing');
     document.body.classList.remove('sess-detail');  // 会话正文让位（中栏一个面）
-    panes[name].btn.textContent = '💬 聊天';
+    setBtn(panes[name].btn, 'chat', '聊天');
     panes[name].load();
   } else {
     input.focus();   // 收起回聊天面
@@ -3417,12 +3558,12 @@ function loadHooksPane() {
 hkPauseBtn.addEventListener('click', () => {
   if (hkFreeze) {
     hkFreeze = null;
-    hkPauseBtn.textContent = '⏸ 暂停';
+    setBtn(hkPauseBtn, 'pause', '暂停');
     hkPauseBtn.classList.remove('held');
     hkRender(true);  // 恢复：补齐到最新并回贴底
   } else {
     hkFreeze = hkRows.slice();
-    hkPauseBtn.textContent = '▶ 恢复';
+    setBtn(hkPauseBtn, 'play', '恢复');
     hkPauseBtn.classList.add('held');
     hkUpdateCnt();
   }
@@ -3728,11 +3869,13 @@ function renderAppearance() {
   const c = setCard('外观');
   const group = document.createElement('div');
   group.id = 'set-theme';
-  for (const [mode, label] of [['light', '☀ 亮'], ['dark', '🌙 暗'], ['system', '🖥 跟随系统']]) {
+  // 主题三选（c_25d2ey）：sun/moon/monitor 三枚 sprite 图标同一线宽
+  // 同一尺寸——取代 ✱/🌙/🖥 文字符号两套视觉重量的旧形态。
+  for (const [mode, icon, label] of [['light', 'sun', '亮'], ['dark', 'moon', '暗'], ['system', 'monitor', '跟随系统']]) {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.mode = mode;
-    b.textContent = label;
+    setBtn(b, icon, label);
     b.addEventListener('click', () => setThemeMode(mode));
     group.appendChild(b);
   }
