@@ -235,14 +235,21 @@ try {
     JSON.stringify(tr.tnodes.map(t => t.nm)));
   ck('行内参数摘要（read 带 path）', !!readRow && readRow.sm.includes('pkg/agent/agent.go'),
     readRow && readRow.sm);
+  // c_jf3grt：行内给「首键=值 + 其余键计数」，不再裸出 JSON 原文；
+  // 全文在展开面板的参数节（下面「展开：参数全文」断言）。
+  ck('参数摘要化：首键=值（+N 计余键，无 JSON 花括号/引号）',
+    !!readRow && /^path=pkg\/agent\/agent\.go \+1$/.test(readRow.sm)
+    && !readRow.sm.includes('{'),
+    readRow && readRow.sm);
   ck('结果并入行：read 行尾 5008 字符', !!readRow && readRow.rs.includes('5008'),
     readRow && readRow.rs);
   ck('结果并入行：bash 行尾规模（登记进表）', !!bashRow && /字符/.test(bashRow.rs),
     bashRow && bashRow.rs);
   ck('tool 消息全数成泡（W4.4 逐条渲染零回归，4 个）', tr.ntoolBubble === 4,
     `got ${tr.ntoolBubble}`);
-  ck('XSS：args 字面渲染、未执行',
-    !!xssRow && xssRow.sm.includes('<script>') && tr.xssTree === 'undefined'
+  ck('XSS：args 字面渲染、未执行（摘要=payload=… 同样字面）',
+    !!xssRow && xssRow.sm.startsWith('payload=') && xssRow.sm.includes('<script>')
+    && tr.xssTree === 'undefined'
     && tr.nscript === 3,  // 2 → 3：main 主题切换的 <head> 防 FOUC 内联块（c_ni7mzw）
     JSON.stringify(xssRow) + ` xssTree=${tr.xssTree} nscript=${tr.nscript}`);
 
