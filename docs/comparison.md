@@ -204,7 +204,7 @@
 
 | 功能 | Claude Code | Seek | 状态 | 说明 |
 |---|---|---|---|---|
-| 单二进制（零运行时依赖） | ❌（Node/npm） | ✅ | **Seek 优势** | ~5 MB Go 二进制，零依赖 |
+| 单二进制（零运行时依赖） | ❌（Node/npm） | ✅ | **Seek 优势** | Go 单二进制，零依赖（体积以构建产物为准） |
 | 跨平台（macOS/Linux/Windows） | ✅ | ✅ | **对等** | 三平台全部支持 |
 | 自托管部署 | ✅ | ❌ **缺失** | — | Claude Code 可在自有基础设施上自托管 |
 | Devcontainer 检测 | ✅ | ❌ **缺失** | — | 自动检测并在 dev container 中运行 |
@@ -282,7 +282,7 @@
 | **多 LLM 提供商** | DeepSeek、Anthropic、OpenAI、Gemini、OpenAI 兼容端点——不绑定单一厂商 |
 | **DeepSeek 单价 + 前缀缓存** | DeepSeek 基础单价已显著低于 Anthropic；叠加 95.7% 实测缓存命中后，同等任务量级下 token 成本远低于 Claude Code 默认链路 |
 | **错峰 5 折** | DeepSeek 错峰时段（高峰 = 北京 09:00–12:00 / 14:00–18:00，其余全部错峰）半价；Seek 状态栏内置计时器和自动费用计算 |
-| **单二进制 ~5 MB** | 零运行时依赖，`go install` 或 `curl \| tar` 即用 |
+| **单二进制** | 零运行时依赖，`go install` 或 `curl \| tar` 即用 |
 | **`think` + `dual-model` skill** | reasoner→chat→reflect 推理闭环 |
 | **三层记忆 + `-dream`** | `seek -dream` 做跨项目用户偏好归纳，decay-score GC 自动遗忘 |
 | **零遥测** | 隐私优先，无数据收集 |

@@ -32,7 +32,7 @@ seek 长期路线图（用户口述）：**未来要做应用**——桌面 / �
 1. **方法名即契约**——一旦 ship，破坏性 rename 需 minor 版本 bump 和 deprecation 通道；新增方法是非破坏。`agent/info` 响应内带 `methods` 清单 + 版本号，应用阶段做 capability negotiation 用。
 2. **transport 与 method 解耦**——所有 method 在 transport-agnostic 的 registry 里注册一次，stdio / HTTP 共享同一份 dispatch。新加 method 同时供两条 transport 用。
 3. **零常驻 daemon**（继承 v5 §2.5）—— `--rpc-listen` 只在用户显式启动时存在，进程退出即停；与 TUI 同一进程生命周期。
-4. **Web 面板不进主 binary**——静态资源单独发布 tarball；用户解压后浏览器打开 `index.html`，通过 fetch+SSE 连本地 `seek --rpc-listen`。保住 "5 MB 单二进制" 卖点。
+4. **Web 面板不进主 binary**——静态资源单独发布 tarball；用户解压后浏览器打开 `index.html`，通过 fetch+SSE 连本地 `seek --rpc-listen`。保住 "单二进制" 卖点（体积以构建产物为准）。
 5. **本地优先 + 默认安全**——HTTP transport 默认 bind 127.0.0.1；非 localhost 监听需显式 `--rpc-bind 0.0.0.0` 且自动启用 token 鉴权。
 6. **失败降级**——session 文件被主进程独占写时 RPC 仍能读（RW 锁或快照读）；hooks observer SSE 客户端断开不影响 hooks 自身。
 
@@ -203,7 +203,7 @@ seek-panel-v0.6.x/
 
 **总体积**：解压后 < 500 KB；用户从 GitHub Releases 下 `seek-panel-v0.6.x.tar.gz`，与 `seek` binary 并列发布。
 
-**为什么不嵌主 binary**：保住 CLI 用户 "5 MB 单二进制" 体验。需要嵌入的用户走 build tag `panel`：`go build -tags panel ./cmd/seek` 编译出 `seek-with-panel`，启动多一个 `--panel` flag 直接 serve 静态站点。这条路 v0.7.0 之后再做。
+**为什么不嵌主 binary**：保住 CLI 用户 "单二进制" 体验。需要嵌入的用户走 build tag `panel`：`go build -tags panel ./cmd/seek` 编译出 `seek-with-panel`，启动多一个 `--panel` flag 直接 serve 静态站点。这条路 v0.7.0 之后再做。
 
 ### 4.2 SSE 推送：`/sse?topics=...`
 
