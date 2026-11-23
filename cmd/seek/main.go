@@ -766,6 +766,12 @@ func run() error {
 	// empty strings, which skillstats omits from the JSONL anyway.
 	var memProject *memory.Project
 	var activeSession *session.Session
+	// Ephemeral per-run session id, minted only under --no-save (no
+	// activeSession exists): the OpenCode gateway REQUIRES the
+	// x-opencode-session routing header on the subscription lane, so ""
+	// turns every headless one-shot into a 400 MissingSessionID. The id
+	// rides the header only — never persisted, never in agent_end.
+	var ephemeralSID string
 
 	// Wire the skill call-stats writer (PRD v2 §4.3). Failure to
 	// resolve the path is non-fatal — we just disable stats for this
@@ -1114,6 +1120,9 @@ func run() error {
 	// bind a stable session id. In that case we just back-fill
 	// the SystemPrompt that wasn't known at construction time.
 	var initialMsgs []deepseek.Message
+	if *noSave {
+		ephemeralSID = session.EphemeralID()
+	}
 	if !*noSave {
 		if loaded != nil {
 			activeSession = loaded
@@ -1472,7 +1481,7 @@ func run() error {
 	// --no-save (no session) sends no header.
 	sessionIDFn := func() string {
 		if activeSession == nil {
-			return ""
+			return ephemeralSID
 		}
 		return activeSession.ID
 	}
