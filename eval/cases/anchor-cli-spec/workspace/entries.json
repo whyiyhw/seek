@@ -1,0 +1,139 @@
+[
+ {
+  "id": "svc-000",
+  "score": 5,
+  "tags": [
+   "gamma"
+  ]
+ },
+ {
+  "id": "svc-001",
+  "score": 30,
+  "tags": [
+   "beta"
+  ]
+ },
+ {
+  "id": "svc-002",
+  "score": 5,
+  "tags": [
+   "alpha",
+   "gamma",
+   "beta"
+  ]
+ },
+ {
+  "id": "svc-003",
+  "score": 0,
+  "tags": [
+   "alpha"
+  ]
+ },
+ {
+  "id": "svc-004",
+  "score": 30,
+  "tags": [
+   "alpha"
+  ]
+ },
+ {
+  "id": "svc-005",
+  "score": 91,
+  "tags": [
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-006",
+  "score": 30,
+  "tags": [
+   "gamma",
+   "alpha"
+  ]
+ },
+ {
+  "id": "svc-007",
+  "score": 17.5,
+  "tags": [
+   "legacy",
+   "beta",
+   "gamma"
+  ]
+ },
+ {
+  "id": "svc-008",
+  "score": 17.5,
+  "tags": [
+   "gamma"
+  ]
+ },
+ {
+  "id": "svc-009",
+  "score": 5,
+  "tags": [
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-010",
+  "score": 5,
+  "tags": [
+   "gamma",
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-011",
+  "score": 42,
+  "tags": [
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-012",
+  "score": 91,
+  "tags": [
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-013",
+  "score": 5,
+  "tags": [
+   "gamma",
+   "legacy",
+   "beta"
+  ]
+ },
+ {
+  "id": "svc-014",
+  "score": 100,
+  "tags": [
+   "alpha"
+  ]
+ },
+ {
+  "id": "svc-015",
+  "score": 0,
+  "tags": [
+   "beta",
+   "legacy",
+   "alpha"
+  ]
+ },
+ {
+  "id": "svc-016",
+  "score": 30,
+  "tags": [
+   "legacy"
+  ]
+ },
+ {
+  "id": "svc-017",
+  "score": 42,
+  "tags": [
+   "gamma",
+   "alpha"
+  ]
+ }
+]

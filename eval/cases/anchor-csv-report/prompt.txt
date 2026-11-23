@@ -1,0 +1,6 @@
+Write a file `report.tsv` in the current directory summarizing `data.csv` (columns: region,product,units,revenue):
+
+- one line per region present in data.csv
+- columns, TAB-separated: region, total_units (integer), total_revenue (exactly two decimals, e.g. 1234.50)
+- sort by total_revenue DESCENDING; break ties by region name ASCENDING
+- no header row, one final newline at the end of the file

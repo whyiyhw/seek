@@ -1,0 +1,1 @@
+Implement `filter_entries.py` in the current directory exactly per SPEC.md. The file entries.json is already present; do not modify it or SPEC.md. The grading runs your CLI three times with different flags and byte-compares stdout.

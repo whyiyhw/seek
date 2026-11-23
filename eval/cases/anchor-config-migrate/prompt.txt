@@ -1,0 +1,1 @@
+Apply MIGRATION.md: write `v2.json` in the current directory migrated from `v1.conf`. Do not modify v1.conf or MIGRATION.md. The grading asserts exact paths, types, values and key order with jq.
