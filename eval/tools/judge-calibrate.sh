@@ -126,6 +126,17 @@ agg=$(jq -s '
 agreement=$(jq -r 'if .n > 0 then (.agree / .n * 100 | round / 100) else 0 end' <<<"$agg")
 false_pass=$(jq -r '.false_pass' <<<"$agg")
 eligible=$([ "$(jq -r '.n > 0 and (.agree / .n) >= 0.85 and .false_pass == 0' <<<"$agg")" = true ] && echo yes || echo no)
+# Lane-outage suspect (first stability night, 2026-11-23: a 4/34 run was
+# 32× "judge error: seek exited 1" — the OpenCode request-window quota
+# closing mid-run, the glm-429 family on the opencode lane). A run whose
+# doubt mass is mostly judge ERRORS measures lane availability, not judge
+# quality; mark it so nobody reads 0.12 as a judge regression.
+judge_err_doubts=$(grep -c 'judge error' "$verdicts" || true)
+outage_suspect=no
+if [ "$judge_err_doubts" -gt $(( $(jq -r '.n' <<<"$agg") / 2 )) ]; then
+  outage_suspect=yes
+  eligible="no (lane-outage suspect — ${judge_err_doubts} judge-error doubts)"
+fi
 
 {
   echo "# Judge calibration report"
@@ -135,6 +146,7 @@ eligible=$([ "$(jq -r '.n > 0 and (.agree / .n) >= 0.85 and .false_pass == 0' <<
   echo "- judge model: \`$judge_model\` on the \`$seek_eval_provider\` lane"
   echo "- **agreement: ${agreement}** ($(jq -r '.agree' <<<"$agg")/$(jq -r '.n' <<<"$agg"))"
   echo "- **false-pass (label fail → verdict pass): $false_pass** — the danger direction"
+  echo "- lane-outage suspect (judge-error doubts > half the rows): $outage_suspect"
   echo "- false-fail (label pass → verdict fail): $(jq -r '.false_fail' <<<"$agg")"
   echo "- label pass → doubt: $(jq -r '.label_pass_verdict_doubt' <<<"$agg"); label fail → doubt: $(jq -r '.label_fail_verdict_doubt' <<<"$agg")"
   echo "- label doubt → pass/fail (overreach): $(jq -r '.label_doubt_verdict_pass + .label_doubt_verdict_fail' <<<"$agg")"
