@@ -93,6 +93,25 @@
 # budget now measures against a tight same-line pin — no inherited
 # MB-scale headroom.
 # c_rqcuaa 会话重命名/归档增量新线（1.27.3）重测：+126715B（旧线记账 +49024B 系分支合并时点差异）；随本合并同步棘轮至实测值。
+# 2026-11-22 c_lqtt2m ratchet: +4152B own delta（390px 手机宽响应式——
+# 页面 CSS/JS ~5.2KB 源码：≤480px 断点块 + 抽屉遮罩 + .smsg pre 横滚
+# 补漏；无新 Go）。ISOLATED 测量：stash 本卡两文件后 31570529B →
+# 恢复后 31574681B（embed 原样进二进制）。抬到绝对值 31574681 还吸收
+# 了 f9e5dfc2（c_6mbjfq，上一条棘轮）以来 +238068B 未棘轮合并债——
+# 那些卡（fim 退役/bash·grep 降噪/eval 观测/ACP 系列）走了 headroom
+# 未记账；迁移后 pin 是紧口径（见上「no inherited MB-scale headroom」），
+# 债务立即显形。本次 re-baseline = 本卡 delta + 清算合并债，此后 200KB
+# 预算重新从紧测量（卡面口径：超预算按棘轮口径抬 pin 记账）。
+# 2026-11-22 c_lqtt2m 返工轮：+24B（收起轨图标钮竖排——44px 轨装不下横排
+# 的 🗄+⟩，overflow 压到中栏把 ⟩ 盖住；一条 flex-direction 规则 + 一处
+# #side-new 收窄，无新 Go）。31574681 → 31574705，同线同工具链实测。
+# 一次抬过 main 侧未棘轮漂移 +17291B（31557490→31574681：c_6xktw4 趋势图
+# + c_lnsdvu 弹层在 pin 31557490 落定后合入，各自 delta 31.8K/35.8K 在预算
+# 内未棘轮——归因记此，非本卡增量）。代 commit 主会话补注。
+#
+# 合并裁定（c_lqtt2m 并 main）：pin 取 main 侧 31557490——合并树实测 31642564B，
+# delta +85074B 仍在 204800B 预算内，本次不棘轮（分支侧那条 31574705 是它在旧基点上
+# 单独抬的，含 main 侧当时未棘轮漂移，合并后不再成立）。
 # 2026-11-22 c_k3pnlw（W5 后返工·markdown 渲染补齐）：本卡自身 delta
 # +20,616B（同树同线实测：markdown.js +5.5KB / webfrontend.html +1.5KB
 # embed / 表格·引用·段落渲染器本体；scripts/ 验收脚本不进 embed 不计）。
