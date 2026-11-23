@@ -84,12 +84,83 @@ def build_prompt(rubric, prompt, final_text):
     )
 
 
+def _repair_in_string_controls(span):
+    """Escape raw control chars that appear INSIDE JSON string literals.
+
+    Streaming judges (observed on kimi-k3.1-pro, 2026-11-22) emit literal
+    newlines mid-string — illegal JSON per spec, so json.loads rejects a
+    verdict that is semantically fine. Walk the span tracking in-string
+    state (respecting backslash escapes) and escape \\n \\r \\t there;
+    control chars BETWEEN tokens are left alone (already legal).
+    """
+    out = []
+    in_string = False
+    i = 0
+    while i < len(span):
+        c = span[i]
+        if in_string and c == "\\" and i + 1 < len(span):
+            out.append(c)
+            out.append(span[i + 1])
+            i += 2
+            continue
+        if c == '"':
+            in_string = not in_string
+            out.append(c)
+        elif in_string and c in "\n\r\t":
+            out.append("\\n" if c == "\n" else ("\\r" if c == "\r" else "\\t"))
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _verdict_from(obj):
+    """Normalize a parsed judge object → (verdict, reason) or None.
+
+    Contract key is "pass" (true/false/null), but streaming judges have
+    been observed paraphrasing the KEY too (kimi-k3.1-pro wrote
+    {"verdict": "pass"} verbatim, 2026-11-22) — accept "verdict"/"result"
+    with boolean or pass/fail-string values. Anything ambiguous is
+    doubt, never a green.
+    """
+    def norm(v):
+        if isinstance(v, str):
+            v = v.strip().lower()  # streaming judges pad values with newlines
+        if v is True or v == "pass" or v == "yes":
+            return "pass"
+        if v is False or v == "fail" or v == "no":
+            return "fail"
+        return None
+
+    verdict = None
+    for key in ("pass", "verdict", "result"):
+        if key in obj:
+            verdict = norm(obj[key])
+            break
+    if verdict is None:
+        # An explicitly-null pass IS a doubt with a reason worth keeping.
+        if "pass" in obj and obj["pass"] is None:
+            reason = obj.get("reason", "")
+            return "doubt", (reason if isinstance(reason, str) and reason else "judge returned null")
+        return None
+    reason = obj.get("reason", "")
+    reason = reason if isinstance(reason, str) else json.dumps(reason)
+    if verdict == "pass" and not reason:
+        reason = "rubric satisfied"
+    if verdict == "fail" and not reason:
+        reason = "rubric not satisfied"
+    return verdict, reason
+
+
 def extract_verdict(text):
     """Tolerant JSON extraction → ("pass"|"fail"|"doubt", reason).
 
     Strips fences, then scans for the first balanced {...} whose parsed
-    object has a "pass" key. Mirrors verifier's parseJudgement posture:
-    anything that isn't an unambiguous true/false is doubt.
+    object has a "pass" key; a span that fails json.loads gets one
+    repair pass (control chars inside strings — see
+    _repair_in_string_controls) before giving up on it. Mirrors
+    verifier's parseJudgement posture: anything that isn't an
+    unambiguous true/false is doubt.
     """
     if not text or not text.strip():
         return "doubt", "judge produced no text"
@@ -102,19 +173,18 @@ def extract_verdict(text):
             elif cleaned[i] == "}":
                 depth -= 1
                 if depth == 0:
-                    try:
-                        obj = json.loads(cleaned[m.start() : i + 1])
-                    except ValueError:
-                        break
-                    if isinstance(obj, dict) and "pass" in obj:
-                        p = obj["pass"]
-                        reason = obj.get("reason", "")
-                        reason = reason if isinstance(reason, str) else json.dumps(reason)
-                        if p is True:
-                            return "pass", (reason or "rubric satisfied")
-                        if p is False:
-                            return "fail", (reason or "rubric not satisfied")
-                        return "doubt", (reason or "judge returned null")
+                    span = cleaned[m.start() : i + 1]
+                    obj = None
+                    for candidate in (span, _repair_in_string_controls(span)):
+                        try:
+                            obj = json.loads(candidate)
+                            break
+                        except ValueError:
+                            continue
+                    if isinstance(obj, dict):
+                        verdict = _verdict_from(obj)
+                        if verdict is not None:
+                            return verdict
                     break
         continue
     return "doubt", "judge output had no {\"pass\": ...} object"
@@ -166,7 +236,7 @@ def main():
         print(f"judge.py: bad --input: {e}", file=sys.stderr)
         return 2
 
-    argv = [args.seek_binary, "-yolo", "-no-save", "-max-turns", "1", "-json"]
+    argv = [os.path.abspath(args.seek_binary), "-yolo", "-no-save", "-max-turns", "1", "-json"]
     argv += shlex.split(args.lane_args)
     argv += ["-model", args.model, "-p", build_prompt(rubric, prompt, final_text)]
 
