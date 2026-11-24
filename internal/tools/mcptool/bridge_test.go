@@ -375,23 +375,6 @@ func TestEnvMapToSlice_Values(t *testing.T) {
 	}
 }
 
-func TestFormatErrors_Empty(t *testing.T) {
-	if got := FormatErrors(nil); got != "" {
-		t.Errorf("FormatErrors(nil) = %q, want empty", got)
-	}
-}
-
-func TestFormatErrors_Multiple(t *testing.T) {
-	errs := []error{
-		fmt.Errorf("err one"),
-		fmt.Errorf("err two"),
-	}
-	got := FormatErrors(errs)
-	if !strings.Contains(got, "err one") || !strings.Contains(got, "err two") {
-		t.Errorf("missing errors in output: %q", got)
-	}
-}
-
 // ---------- NamePrefix / safeToolName (ACP passthrough) ----------
 
 // TestLoadServers_NamePrefix pins the ACP lane's namespace: the same

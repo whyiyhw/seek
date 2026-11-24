@@ -188,15 +188,3 @@ func Sha256Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
-
-// Sha256File reads the file at path and returns Sha256Hex of its
-// contents. ENOENT returns ("", os.ErrNotExist) — the caller decides
-// whether that's a normal state (project has no hooks.toml: no trust
-// check needed) or an error.
-func Sha256File(path string) (string, error) {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return Sha256Hex(body), nil
-}

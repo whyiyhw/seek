@@ -170,34 +170,3 @@ func Scrub(env []string, keep ...string) []string {
 func Sanitized(keep ...string) []string {
 	return Scrub(os.Environ(), keep...)
 }
-
-// Withheld returns the sorted NAMES (never values) that Scrub would drop
-// from env. It exists for diagnostics — `seek doctor` output, a debug
-// log line, a test asserting a specific variable is covered. Values are
-// never returned, so the result is safe to print.
-func Withheld(env []string, keep ...string) []string {
-	kept := make(map[string]struct{}, len(env))
-	for _, e := range Scrub(env, keep...) {
-		if eq := strings.IndexByte(e, '='); eq > 0 {
-			kept[e[:eq]] = struct{}{}
-		}
-	}
-	var out []string
-	seen := make(map[string]struct{}, len(env))
-	for _, e := range env {
-		eq := strings.IndexByte(e, '=')
-		if eq <= 0 {
-			continue
-		}
-		name := e[:eq]
-		if _, ok := kept[name]; ok {
-			continue
-		}
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}

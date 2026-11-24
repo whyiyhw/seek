@@ -60,20 +60,3 @@ func (l *advisoryLimiter) allow(c advisoryClass) bool {
 	l.fired[c] = true
 	return true
 }
-
-// firedClasses reports which classes have fired — for tests that need
-// to assert the cap without reaching into the bitmask.
-func (l *advisoryLimiter) firedClasses() []advisoryClass {
-	if l == nil {
-		return nil
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []advisoryClass
-	for c := range advisoryClassCount {
-		if l.fired[c] {
-			out = append(out, advisoryClass(c))
-		}
-	}
-	return out
-}

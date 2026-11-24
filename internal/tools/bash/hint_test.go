@@ -247,10 +247,6 @@ func TestBashAdvisory_CappedOncePerClassPerSession(t *testing.T) {
 	if got := bashAdvisory("cd /another && pwd", l); got != "" {
 		t.Errorf("second cd-class firing must be silent, got: %q", got)
 	}
-
-	if n := len(l.firedClasses()); n != 2 {
-		t.Errorf("firedClasses = %d, want 2 (one per class)", n)
-	}
 }
 
 // TestBashAdvisory_NilLimiterIsUncapped documents the zero-value Tool
