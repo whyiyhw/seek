@@ -51,11 +51,11 @@ type StreamDelta struct {
 }
 
 // StreamingTool is an opt-in extension to Tool for tools whose
-// execution takes long enough that intermediate output is valuable
-// (think: V4 thinking-mode calls, which routinely take 10-60s before
-// returning anything from Execute). The agent prefers ExecuteStream
-// when the tool implements this interface and falls back to Execute
-// otherwise.
+// execution takes long enough that intermediate output is valuable —
+// a slow build, a multi-page fetch, or a remote call that routinely
+// needs 10-60s before returning anything from Execute. The agent
+// prefers ExecuteStream when the tool implements this interface and
+// falls back to Execute otherwise.
 //
 // ExecuteStream pushes StreamDelta values via the supplied `push`
 // callback. push returns a non-nil error when the agent's context has
