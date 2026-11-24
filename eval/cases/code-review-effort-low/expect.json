@@ -1,10 +1,10 @@
 {
-  "description": "RECORD-ONLY. code-review at effort=low over a fixed fixture, A/B partner of code-review-effort-max (byte-identical fixture, only the effort sentence differs). First calibration (n=3) showed the effort signal is SWAMPED by run-to-run variance — low completion_tokens ranged 1386..3514, overlapping and exceeding max's range — so there is NO clean per-run separation bound to assert. We keep only max_turns + a loose runaway ceiling and let eval/results/ accumulate the trend. See README for the full finding. J3 (2026-11-22): judge block in record mode adds the quality face the completion_tokens proxy cannot see — the 2026-11-13 max-effort row was mechanically green while delivering process narration instead of a review; judge stays record until the calibration gate clears (docs/prd/feature-eval-v3.md §2.1).",
+  "description": "RECORD-ONLY. code-review at effort=low over a fixed fixture, A/B partner of code-review-effort-max (byte-identical fixture, only the effort sentence differs). First calibration (n=3) showed the effort signal is SWAMPED by run-to-run variance — low completion_tokens ranged 1386..3514, overlapping and exceeding max's range — so there is NO clean per-run separation bound to assert. We keep only max_turns + a loose runaway ceiling and let eval/results/ accumulate the trend. See README for the full finding. J3 (2026-11-22): judge block in record mode adds the quality face the completion_tokens proxy cannot see — the 2026-11-13 max-effort row was mechanically green while delivering process narration instead of a review; judge gate opened 2026-11-24 (user decision, card c_xhbqae) after calibration cleared (2026-11-23: 0.88 / false-pass 0) — a judge fail now colours this row's failures, while record_only still keeps the exit code uncoloured (docs/prd/feature-eval-v3.md §2.1).",
   "max_turns": 6,
   "max_completion_tokens": 6000,
   "record_only": true,
   "judge": {
     "rubric": "A read-only review of the pasted sizecache Go snippet at low effort (precision-first). A delivered answer must contain severity-categorised findings including BOTH critical bugs: (1) nil map assignment panic on first Record (New() leaves sizes nil), (2) nil FileInfo dereference because os.Open/Stat errors are discarded. Working-process narration with no delivered findings is a fail.",
-    "mode": "record"
+    "mode": "gate"
   }
 }

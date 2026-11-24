@@ -340,7 +340,7 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 | 第二梯队 provider 的 wire 形状（Anthropic / OpenAI / Gemini / GLM-compatible） | 已有测试 | `pkg/llm/provider/{anthropic,openai,gemini}/client_test.go`（httptest 假端点）+ `scripts/eval-provider-test.sh`（车道选择/凭证清洗机制，假端点） |
 | 第二梯队车道上的**模型行为** | 接受不保证 | eval 只测当前配置车道的选择倾向；跨车道取样成本与额度不可控（`glm-lane-contract` 仅 record-only 观测，E2 处置）。车道 wire 契约由上一行负责 |
 | 环境类失败（429、额度窗、登录过期） | 接受不保证 | 环境不是被测对象：`glm-lane-contract` 整窗 429 时阈值无解，record-only（E2 known-flaky 处置）；判红只会训练人忽略红。token 规则见 §Provider lane（harness 永不读/刷 `opencode-auth.json`） |
-| 答案质量（`final_text` 对不对） | 已有测试（v3 J，分工明确的有限面） | `scripts/eval-judge-test.sh` 钉接线（record 不染色 / gate 翻红 / doubt 两模式不染色 / 畸形 exit 2 / kill-switch）；judge 与人判 agreement 0.88、false-pass 0（`eval/judge-calibration/report.md`）。余量照 v3 §2.1：judge 只对校准过的分布负责，rubric 外仍是盲区；gate 开关（record → gating）归卡 c_xhbqae，不在 E7 范围 |
+| 答案质量（`final_text` 对不对） | 已有测试（v3 J，分工明确的有限面） | `scripts/eval-judge-test.sh` 钉接线（record 不染色 / gate 翻红 / doubt 两模式不染色 / 畸形 exit 2 / kill-switch）；judge 与人判 agreement 0.88、false-pass 0（`eval/judge-calibration/report.md`）。余量照 v3 §2.1：judge 只对校准过的分布负责，rubric 外仍是盲区；gate 已于 2026-11-24 开启（用户拍板，卡 c_xhbqae——两例 `judge.mode=gate`，`SEEK_EVAL_JUDGE=0` 一行关回） |
 
 ### C3 并发与竞态
 
@@ -783,7 +783,8 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
 - **调用**：`eval/tools/judge.py` 一次 fresh-context 单发（同 provider 车道、
   自带判分模型——默认**跨家族** `kimi-k3.1-pro`，`SEEK_EVAL_JUDGE_MODEL`
   可换，per-case `judge.model` 再优先；`SEEK_EVAL_JUDGE_TIMEOUT` 默认 120s）。
-  final_text 以 DATA 围栏入 prompt（防注入）；`-max-turns 1` 约束工具面。
+  final_text 以 DATA 围栏入 prompt（防注入）；`-tools grep` + `-max-turns 6`
+  约束工具面（2026-11-23 标定实测：kimi 会先 grep 自证，1 轮预算烧光无文本）。
 - **判决契约** `pass | fail | doubt`——一切失败形态（null 判决、非 JSON、
   超时、judge 崩溃）折叠为 doubt，**永不假绿**（`internal/verifier` 的
   no-JSON=never-green 同款）。
@@ -798,6 +799,22 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
   待用户抽查）× `eval/tools/judge-calibrate.sh` → `report.md`。门槛：
   **agreement ≥ 0.85 且 false-pass = 0**。标定通过前一切接线 record 模式；
   首批接线 `code-review-effort-low` 与 `read-tail-fact`。
+- **gate 状态：已开（2026-11-24，用户拍板，卡 c_xhbqae）**。两例
+  `expect.json` 的 `judge.mode` 由 `record` 切到 `gate`——**开关就是这个
+  per-case 字段**（`read_gate_config` 校验），没有也不加全局 env 开关；
+  `judge_verdict`/`judge_reason`/`judge_model` 三键的行上口径不变。
+  开启时两个已知保留理由（照旧成立，非清零）：①**单轮余量薄**——
+  30/34 = 0.88，少一条同意行 29/34 = 0.853 已贴 0.85 门槛，再少一条
+  0.824 即跌破；②**凭证路径非正式**——标定跑的是登录透传
+  （`SEEK_HOME` 里的 opencode 登录态，本机无 `OPENCODE_API_KEY`），
+  与官方 key 重跑口径的差异是已知留白。
+  **一行关回**：`SEEK_EVAL_JUDGE=0 bash eval/run.sh <case> <binary>`
+  （或对整轮 export）——judge 不调用、零 judge 键、不染色，行回到
+  judge 层引入前的字节形状（`scripts/eval-judge-test.sh` ⑥ 钉死）。
+  注意 `record_only: true` 的 `code-review-effort-low`：gate 下 judge 判红
+  会染进该行 `failures`（`pass:false`），但 record-only 语义不变、
+  **不染 exit code**——端到端拦截只见于 `read-tail-fact` 这类非
+  record-only 用例。
 - **机制自测**：`scripts/eval-judge-test.sh`（8 腿：record 不染色 / gate
   翻红 / 非 JSON doubt / 无块零键 / 畸形 exit 2 / kill-switch / 真二进制×
   假端点的线上模型分离——一次 run 两条 POST，SUT 走车道缺省模型、judge 走
