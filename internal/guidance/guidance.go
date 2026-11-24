@@ -30,9 +30,20 @@
 //	              because the previous failure is thousands of tokens back
 //	failure-run   several consecutive tool calls failed, possibly
 //	              different ones — no single result shows the pattern
-//	silence-run   several consecutive turns ran tools and said nothing
-//	              — the operator cannot see progress, and the model
-//	              cannot see that it has been silent
+//
+// Two rules, not three. A silence-run rule ("N turns of tools with no
+// prose") was written, shipped, and DELETED after backtesting against
+// 390 real session transcripts (35,644 tool calls): it fired in 272 of
+// them — 70% — and the sample firings were healthy exploration (read
+// eight different files, list eight directories, grep-then-read). Worse,
+// its premise was simply false: the TUI renders every tool call live
+// (`↳ read(…) → N bytes` in internal/tui), so the operator already sees
+// progress and the rule had no audience. That is the bash-advisory
+// lesson reproducing itself: a nudge needs someone who is actually in
+// the dark. Both surviving rules pass the stricter test — they fire
+// only on shapes that are invisible BOTH to the model (the failure is
+// thousands of tokens back) and to the user (the model did see the
+// error, it just has no memory of it).
 //
 // # Rate limiting is part of the contract, not a refinement
 //
@@ -57,7 +68,6 @@ import (
 const (
 	RuleRetryLoop  = "retry-loop"
 	RuleFailureRun = "failure-run"
-	RuleSilenceRun = "silence-run"
 )
 
 // Thresholds. Each is the point where the pattern stops being plausible
@@ -68,8 +78,6 @@ const (
 	retryLoopAt = 3
 	// failureRunAt: this many consecutive failed calls (any tool).
 	failureRunAt = 3
-	// silenceRunAt: this many consecutive turns with tools and no prose.
-	silenceRunAt = 4
 	// cooldownTurns between firings of the SAME rule.
 	cooldownTurns = 4
 	// maxFiringsPerRule caps each rule's lifetime output. Two is enough
@@ -90,8 +98,6 @@ type Guide struct {
 	callFails map[string]int
 	// failRun is the current run of consecutive failed calls.
 	failRun int
-	// silentRun is the current run of consecutive tool-only turns.
-	silentRun int
 	// lastTurn is the last turn index examined (guard against the same
 	// turn being advised twice — the loop can consult at two boundaries
 	// in one iteration when a settle-point drain fires).
@@ -164,11 +170,6 @@ func (g *Guide) observe(b agent.TurnBrief) {
 		g.failRun = 0
 		delete(g.callFails, t.Name+"\x00"+canonical(t.Args))
 	}
-	if len(b.Tools) > 0 && b.TextChars == 0 {
-		g.silentRun++
-	} else if b.TextChars > 0 {
-		g.silentRun = 0
-	}
 }
 
 // pick returns the first rule willing to speak this turn, in a fixed
@@ -204,16 +205,6 @@ func (g *Guide) pick(b agent.TurnBrief) (string, string) {
 			"The last %d tool calls all failed. That is usually a sign the current approach is wrong, "+
 				"not that the next attempt will differ. Summarise what you have learned and change strategy — "+
 				"or ask the user with ask_user if the blocker is outside the repository.", n), RuleFailureRun
-	}
-
-	// silence-run: tools happening, nothing said.
-	if g.silentRun >= silenceRunAt && g.allow(RuleSilenceRun, b.Index) {
-		n := g.silentRun
-		g.silentRun = 0
-		return fmt.Sprintf(
-			"You have run tools for %d turns in a row without telling the user anything. "+
-				"Write one short sentence now about what you are doing and what you have found so far, "+
-				"then continue.", n), RuleSilenceRun
 	}
 
 	return "", ""
