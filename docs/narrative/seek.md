@@ -1,76 +1,91 @@
 # whyiyhw/seek 项目叙事稿
 
-> 数据截至 2026-11-17（北京）；负责人会话（agent，2026-11-12 用户全权移交）。
+> 数据截至 2026-11-24T16:30Z（北京 11-25 00:30）；负责人会话（agent，2026-11-12 用户全权移交）。
 > 模板与写作纪律见 butler 仓 `docs/narrative/README.md`；事件 `#N` 指 butler 事件 id（memory_search 可查）。
 
 ## 目标
 
-**以 projects 表为准**（`project_get whyiyhw/seek`；2026-11-17 v8 D1 拍板改写，拿掉
-「能力对标 Claude Code」）：把 seek 从终端 coding agent 核心迭代成**能自我进化的本地
-agent 平台**，形态走 v8 论题——**薄内核 + 外围按需 + 用证据筛形态**（内核只留边界/
-记录/裁判/缓存拼装与基础工具，其余外置；每个零件可度量、可拆掉对照）：① 成本断崖
-（DeepSeek-first）；② 多端通用（`Frontend` 端口，飞书第一个）；③ 自进化闭环
-（失败 → eval → 修复 → 发布）。完成标准（v8 口径）：一次过率 / 每任务花费 / 人审
-分钟有基线；有裸核对照表；内核违例数可追（`scripts/kernel-deps.sh`）。治理层是 butler（卡片/派发/验证/合并），
-seek 是执行与产品层；seek 自身也通过 paseo provider 车道回到 butler 的调度池。
-**不做公开跑分竞赛**（用户拍板 #2575：无意义；eval 降位为内部回归工具）。
+**以 projects 表为准**（`project_get whyiyhw/seek`；2026-11-17 v8 D1 拍板改写 #7859，拿掉
+「能力对标 Claude Code」）：把 seek 从终端 coding agent 核心迭代成**能自我进化的本地 agent 平台**，
+形态走 v8 论题——**薄内核 + 外围按需 + 用证据筛形态**（内核只留边界/记录/裁判/缓存拼装与基础工具，
+其余外置；每个零件可度量、可拆掉对照）：① 成本断崖（DeepSeek-first）；② 多端通用（`Frontend`
+端口）；③ 自进化闭环（失败 → eval → 修复 → 发布）。完成标准（同表）：一次过率 / 每任务花费 /
+人审分钟有基线；有裸核/完整对照表；内核违例数可追（`scripts/kernel-deps.sh`）。止损线见
+`docs/prd/v8.md` §9（第二波无改善不开第三波）。**不做公开跑分**（#2575：eval 降位内部回归，
+#14002 的外部锚只做私有校准、永不外发）。治理层是 butler（卡片/派发/验证/合并），seek 是执行与
+产品层；seek 自身也经 paseo 车道回到调度池。
 
 ## 现状
 
-- **一夜平台化落地（11-12 夜至 11-13 晨，事件 #2618/#2660）**：control-plane 装配线
-  M1a→M1b→M2→M3→M6a→M7a **全部交付进 main**（类型层/bindings、serve 骨架、路由指令、
-  执行器含自愈、生命周期与 build-tag 隔离、guide 文档 + Telegram 纸面验证）。
-  **M4/M5（飞书 adapter）2026-11-13 用户拍板撤销**：不绑定具体渠道，Frontend 端口
-  已是资产，首个 frontend 选型开放（web/HTTP 或任意聊天渠道按端口后续加）。
-  与 CC 对照的 roadmap 驱动已降级为参考（comparison.md 改造完成）。
-- **token 三车道落地**：GLM 订阅车道进 main（provider 注册 + pricing 三口价），
-  真 key 烟测全链通且 **cache_hit_tokens=10944**——GLM 前缀缓存与 seek 缓存纪律咬合
-  （#2897）；DeepSeek 关键点验证口径不变。
-- **自进化内环首轮收成**：eval 14→20 例（3 契约回归 + 3 pitfall 衍生，pitfall→eval
-  管道落地）；skill 自动蒸馏设计稿就绪（feature-skill-distill.md，四层新颖性漏斗 +
-  人审闸）；dsh 事件溯源评估结论=approval 全量 fold 不值得、resume 缝隙部分做
-  （notes-event-sourcing-adoption.md）。
-- **butler 侧**：验证车道坑 8 越界问题修复（c_jnyf3y，机械面收进调度器）、Stop hook
-  多仓误报修复（c_f3wwqq）、go vet 清零；剩余一张 c_hi3lv5（验证 verdict 口径改造）
-  拟人判 ask_human 等用户拍板。
-- 顺手修掉：permission symlink CWD 误判（c_uh2x4q）。
+- **第二波已按止损线收口，路线不动、堵点移位**（#13073，`v8.md` §9.8，c_mglkox）：R2 merge 后
+  2.46 天窗口一次过率 32.1% vs 基线 64.3%、人审中位 181′ vs 113′，两数均无改善 → **第三波
+  （U3 本体 / T3 例行消融 / W 试验田）不开**，R3 不开、S2 缓开。归因：台阶在 11-18 治理层口径收紧，
+  验收主体多数已过——是**堵点移位，不是交付质量崩塌**；堵点清单 = 坑 8 归因缺口 + 验收/归因载体 +
+  人拍板队列。样本薄（2.46 天 / 56 卡），5–7 天后同口径复测定趋势。
+- **自进化内环四段都有物，但「量」未起**：证据——R2 独立 verifier 已进 main（42f821f8 / merge
+  6c25bd24）却**零触发**，接线卡未建；评测——用例库 36 例 + 8 题外部锚，v2 E1–E7 收口
+  （E7 = 6f2b7166），v3 判分层 J1–J3 与外部锚 A1–A3 全落地（#14002/#14018），judge 真车道标定
+  30/34 = 0.88、false-pass = 0，开 gate 的 c_xhbqae 因会话异常终止卡在 blocked；减法——第 5/6 刀
+  已进 main（#15050/#15082，deadcode 52 / `-test` 4），fim_complete 与 think 按实测退役
+  （#13687/#13725）；记忆——M-index 注入即计有效使用（#15102）。
+- **内核清单可追**：23 包、违例 1（`pkg/agent → internal/hooks`，定性见 `v8.md` §9.6）；pitfalls
+  362 条活条目；AGENTS.md 3189 词 / 3200 上限（frozen）。
+- **对外形态**：v0.12.3 已发（#13591：ACP 全清 + V1 任务寿命 + eval v2 E2–E6 + web W5）；此后 main
+  积压未发版，v0.13 卡 c_evmhdn 在 review——减法第 6 刀已合并、前置满足，剩**对外发布的放行**。
+- **车道与成本**：无人值守 eval 缺省走 OpenCode Go 订阅、回计量 key 须显式（#9336）；OpenDesign
+  Cloud 车道 c_raxldd 在 review——真 key 冒烟未做，与 opencode 共享 wire id 的四处展示缺口
+  （成本卡 / 车道 chip / 子代理路由 / `-resume`）待用户认（#15199/#15203，未合并）。
+- **看板近空**：seek 在册 6 张（3 blocked / 2 review / 1 doing=本稿），瓶颈从「卡不够」变成
+  「人拍板 + 归因」。
 
 ## 关键决策
 
-- **平台化取代跑分对标**（#2575，2026-11-12 用户拍板）：目标=自我进化平台 + CC 能力
-  + 更便宜 + 多端；eval 只做内部回归。
-- **移交 agent 全权管理**（#2575）：butler 当治理层，开发走卡片/派发/验证流程；
-  本仓 AGENTS.md 纪律（pitfalls、doc-budget、eval-first）不变。
-- **参考 dsh 不照抄**（`docs/dsh-analysis.md` §0/§8）：取「事件溯源 ⇒ 前缀缓存稳定」
-  的不变量思想与可替换缝；弃 226 包 monorepo 与运行时组装复杂度——
-  seek 的优势正是编译期纪律 + 单二进制。
-- **多端走 sidecar 不动核心**（feature-remote-control-plane.md D-C1）：
-  常驻只活在 `seek serve`，对零-daemon 铁律做有意、隔离的偏离。
+- **目标改写为 v8 论题**（#7859，2026-11-17 用户拍板 D1）：拿掉「能力对标 Claude Code」，改成
+  薄内核 + 外围按需 + 用证据筛形态；完成标准收敛为三基线 + 裸核对照表 + 违例可追。
+- **按数据止损，不硬开第三波**（#13073）：两数无改善即触发 §9 止损线；把「堵点在哪」与
+  「要不要再来」分开判——止损是堵点移位，不是路线证伪。
+- **判分的「可复算」从单次判决移到校准层**（#14002/#14018，2026-11-22 用户拍板）：judge 只补
+  复算不可能的面，标注集与 agreement 报告入库可复算；没有校准证据不开 gate。
+- **无人值守测试默认不烧计量 key**（#9336）：eval 缺省走 OpenCode Go 订阅道，回计量 key 必须显式
+  `SEEK_EVAL_PROVIDER=deepseek`——每次计量消耗都可归因到一个人工决定。
+- **工具按实测调用率退役**（#13687 fim_complete 调用比率 0%/11%；#13725 think 109 个项目仅 2 次）：
+  减法是常规动作不是例外；退役连同死代码一起删，历史文档只增不改。
+- **注入即计有效使用**（#15102）：新开 `LastInjectedAt` 而非复用 `LastRecalledAt`，保住 recall
+  语义、旧数据公式逐字节不变；保鲜自限靠 born-stale / 预算挤出 / 项目停用三通道（已记 pitfall）。
+- **合并闸声明是机器本地文件**（#14385）：闸是本机合并点的质量门，不是仓库对外契约；
+  `git rm --cached` + ignore，克隆缺声明则宽容跳过。
+- **pitfalls 一条目一文件**（#11009）：11-13 起 46 次合并冲突 31 次涉同一文件——按「段/slug」拆分、
+  计数现算不入库，冲突面结构性消失（现 362 条活条目）。
+- **验证车道不重跑合并闸**（#14759）：web-gate 的权威读数只能在合并点同线取；卡面统一标
+  `{not-in-lane：合并闸+测量线}` + 合并后动作，不让验证车道制造第二条读数线。
+- **ACP 走规范而不是自创扩展**（#12845 审批门 / #13171 `/plan` 走 session-modes / #13315 多会话
+  回合级时间复用）：从「能连上」到「完整协作」的能力全落在协议面，单会话 wire 字节不变。
 
 ## 否掉的方案
 
-- **跑分超越作为目标**：用户否（#2575）——没有意义。
-- **无脑抄 dsh 插件框架**：dsh-analysis.md 结论——两条赛道（官方云 harness vs 本地
-  单机开发者），编译期注册是 seek 的护城河不是债。
-- **把常驻塞进核心 agent loop**：feature-remote-control-plane.md §1.4，违背 v5 零-daemon。
-- **记分牌式同题对跑（公开口径）**：#2573 待拍版方案的核心卖点，#2575 拍板后降位为
-  内部回归，不对外宣传。
+- **跑分超越作为目标**：#2575 用户否——没有意义；外部锚只做私有校准（#14002）。
+- **无脑抄 dsh 插件框架**：`docs/dsh-analysis.md` §0/§8——两条赛道，编译期注册是护城河不是债；
+  前端同理「抄皮不抄骨」（#8533）。
+- **把常驻塞进核心 agent loop**：`feature-remote-control-plane.md` §1.4，违背零-daemon 精确化（v8 D2）。
+- **现在开第三波 / R3 / S2**：#13073——止损线触发；R3 的治具对象结构性为零，S1 摩擦数据零消费、
+  第一堵点不在工具面。
+- **体积基线随本卡棘轮**：#13370——main 侧别人的增长不能记进一张 ≤12KB 卡的账；pin 不动、超配额认账。
+- **用计量 key 跑无人值守 eval**：#9336 + `v8.md` §9.1——无人值守不得烧按量 key。
+- **为 OpenDesign 建车道级注册表**：#15199——只按模型 id 索引的表会同 id 互相覆盖、按 id 反推车道
+  还会因 map 遍历而不确定；改为共享 id + 四条展示缺口写文档（整车 c_raxldd 待人认，未合并 #15203）。
+- **web-gate 登记进验证白名单**：#14759——跨目录/跨机读数不同线，登记只会复现「存疑」。
 
 ## 下一步
 
-- **多端**：M4/M5 已撤销（不绑飞书）；首个 frontend 选型开放——候选自建 web/HTTP
-  最小 frontend（零外部依赖），未排期；新 adapter 按端口另开卡。
-- **paseo 车道**：两缺口已落地进 main——`session/new` cwd 锚定（c_bnjrw5：`os.Chdir`
-  + `Policy.Reanchor` 双锚定，工具层两条 cwd 约定一起切）、`SEEK_ACP_YOLO` 无头权限
-  开关（c_rewul5：ACP 车道 flag 全不解析，env 在 sysprompt 之前并进 `initialPref`）；
-  paseo provider 块已接通并冒烟，butler drive `--provider seek` 可派单。**本卡
-  （c_vv2mde）即车道首单**——worktree→干活→commit→`.butler-commit.md` 写回全流程
-  跑通即验收，之后纳入常规调度池。剩余 backlog：session 多路复用；**MCP 透传已落地
-  （c_oyt6ft，2026-11-21）**——`session/new`/`session/load` 的 `mcpServers` 按声明起
-  stdio 子进程、复用 mcp.json 的客户端栈、工具以 `mcp__<server>__<tool>` 进会话，
-  会话结束即回收（`docs/guide-zed.md` §5.5）。`session/load` 恢复已于 2026-11-19 落地
-  （`cmd/seek/acp_replay.go` + `acpBackend.LoadSession`，ACP 车道同时开始按 turn 落盘）。
-- **自进化**：skill-distill 从设计转实现（开卡时机：飞书线或 paseo 线任一收口后）；
-  eval 用例随每次 dogfood 失败持续扩容。
-- **治理**：c_hi3lv5 已拍板（改，#2977），实现卡 c_gk6cb2 在飞；paseo 两缺口卡
-  （c_bnjrw5/c_rewul5）已随 paseo 车道落地进 main。
+- **等人拍板（对外 / 需求裁决，agent 不自判）**：① c_evmhdn v0.13——前置已满足，剩发布顺序
+  （`gh release edit` 而非 `create`）与对外发布放行；② c_raxldd OpenDesign——真 key 冒烟
+  （`OPENDESIGN_API_KEY=… seek --provider=opendesign -p "hi" --no-save`）+ 共享 id 四条缺口取舍；
+  ③ c_xhbqae judge gate——用户已拍板开，卡因会话异常终止 blocked，重派即可。
+- **堵点治理**（#13073 §9.8 清单）：坑 8 归因缺口、验收/归因载体、人拍板队列；R2 接线两卡仍未建；
+  样本攒足 5–7 天后按同口径再复测一次定趋势。
+- **评测口径收尾**：A 线 anchor 首基线、judge-calibrate 复认需 OpenCode 凭证（人 / 主会话跑）；
+  release lane 承重轴成员资格（E3/E4）归属仍无人（`eval/README.md` E7 遗留项）。
+- **工程债（blocked 在册）**：c_n72agp（hooks/audit SSE 实时流）、c_z2eibv（孤儿扫描 workdir 指主
+  检出，根因 #14122）。
+- **方向待定**：第三波与 W 试验田都不开、看板剩 5 张（本卡收工后）——下一批卡的方向由主会话 /
+  用户定，本稿不越权排期。
