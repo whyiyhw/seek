@@ -201,3 +201,10 @@
 # built 31618050B，对现 pin 31557490 总 delta +60560B（= c_6xktw4 +21912B +
 # c_lnsdvu +8200B + c_heffj3 +38033B 的合并实测，含解冲突后页面合并体的
 # 少量重排），远在 204800B 预算内、gate 绿——无需棘轮，pin 不动。
+# 2026-11-23 c_25d2ey 图标/按钮体系统一（只记账，不棘轮——数字未动）：
+# 本卡自身页面 embed 源 +4993B（webfrontend.html 205603→210596B：Lucide
+# <symbol> sprite 30 枚 + 按钮三档 CSS/状态类 + 动态面图标接线），无新 Go；
+# 远低于卡面 +8~15KB 预估。分支 gate 实测 built 31696345B 对 pin 31557490B
+# 总 delta +138855B < 204800B——其中本卡 ~4.4KB，其余为分支吸收的既有
+# 未棘轮合并债（c_ufw6jv/c_vcnacz 等合并卡声称余量）；gate 绿，pin 不动。
+# 验收脚本（web-theme/web-page-review/web-*.mjs）不进 embed，不计入。

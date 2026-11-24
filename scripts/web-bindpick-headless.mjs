@@ -10,9 +10,9 @@
 // 断言景（主 URL：proj-alpha 带 manifest+会话 / proj-beta 仅 config）：
 //   基线   → 弹层初始关
 //   景 1   → 点 #cmd-bind：弹层开；头行「点选会重置当前会话…」；两行候选
-//            （alpha=N 个会话 / beta=未开过）；未绑定 → 无 ← 当前
+//            （alpha=N 个会话 / beta=未开过）；未绑定 → 无 当前
 //   景 2   → Esc 关；手打 /bind alpha + /resume sid → /state 会话 = sid
-//   景 3   → 点 #cmd-projects：alpha 行带 ← 当前；点 beta 行（mousedown）→
+//   景 3   → 点 #cmd-projects：alpha 行带 当前；点 beta 行（mousedown）→
 //            /state project = beta 且 session 清空（/bind 语义 = start over）
 //   景 4   → 手打 /bind <不存在路径> → 聊天面「绑定失败：目录不存在：…」
 //   景 5   → 键盘：↑↓ 移高亮 + Enter 点选（同一条 pick 路径）
@@ -217,7 +217,7 @@ try {
   const alpha = s.rows.find(r => r.nm === 'proj-alpha'), beta = s.rows.find(r => r.nm === 'proj-beta');
   ck('proj-alpha 行：绝对路径 + 1 个会话', !!alpha && alpha.ds.includes(PROJ_A) && alpha.ds.includes('1 个会话'), alpha && alpha.ds);
   ck('proj-beta 行：绝对路径 + 未开过', !!beta && beta.ds.includes(PROJ_B) && beta.ds.includes('未开过'), beta && beta.ds);
-  ck('未绑定 → 无 ← 当前', s.rows.every(r => r.sid === ''), JSON.stringify(s.rows.map(r => r.sid)));
+  ck('未绑定 → 无 当前', s.rows.every(r => r.sid === ''), JSON.stringify(s.rows.map(r => r.sid)));
   ck('首行高亮（Enter 直选语义）', s.hlIdx === 0, String(s.hlIdx));
 } catch (e) { ck('#cmd-bind 弹层', false, e.message); await dump(); }
 
@@ -242,17 +242,17 @@ try {
     JSON.stringify({ bound: st.bound, project: st.project, session: st.session }));
 } catch (e) { ck('Esc + 手打链', false, e.message); await dump(); }
 
-// 景 3：点 #cmd-projects（第二个触发点）→ alpha 行 ← 当前 → 点 beta 行 →
+// 景 3：点 #cmd-projects（第二个触发点）→ alpha 行 当前 → 点 beta 行 →
 // /state project = beta 且 session 清空。
 trace('景 3：#cmd-projects + 点行换绑');
 try {
   await clickSel('#cmd-projects');
-  let s = await until('弹层开且 alpha 带 ← 当前', s => !s.menuHidden
-    && s.rows.some(r => r.nm === 'proj-alpha' && r.sid === '← 当前'), 10000);
+  let s = await until('弹层开且 alpha 带 当前', s => !s.menuHidden
+    && s.rows.some(r => r.nm === 'proj-alpha' && r.sid === '当前'), 10000);
   ck('#cmd-projects 同样开弹层', s.rows.length === 2, JSON.stringify(s.rows.map(r => r.nm)));
-  ck('当前绑定行标 ← 当前（且仅一行）',
-    s.rows.filter(r => r.sid === '← 当前').length === 1
-      && s.rows.find(r => r.nm === 'proj-alpha').sid === '← 当前',
+  ck('当前绑定行标 当前（且仅一行）',
+    s.rows.filter(r => r.sid === '当前').length === 1
+      && s.rows.find(r => r.nm === 'proj-alpha').sid === '当前',
     JSON.stringify(s.rows.map(r => r.nm + '|' + r.sid)));
   const betaIdx = s.rows.findIndex(r => r.nm === 'proj-beta');
   await mousedownRow(betaIdx);

@@ -8,7 +8,7 @@
 // mousedown，el.click() 只发 click 不行）、层头按钮用 .click()。
 //
 // 断言景：
-//   入口 → 输入框打「/bind 」弹「📁 浏览目录…」；点它进目录模式
+//   入口 → 输入框打「/bind 」弹「浏览目录…」（folder sprite + 文字）；点它进目录模式
 //   层头 → 路径=首个可浏览根（project_roots[0]）；↑ 在根上禁用
 //   过滤 → 过滤框打字收窄行；清空恢复
 //   下钻 → proja → sub1 两级；路径/行随层更新
@@ -193,12 +193,12 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 
-// 景 0：入口 —— 「/bind 」参数期弹「📁 浏览目录…」。
+// 景 0：入口 —— 「/bind 」参数期弹「浏览目录…」（folder sprite + 文字）。
 trace('景 0：入口');
 try {
   await setDraft('/bind ');
-  let s = await until('入口行出现', s => s.menuOpen && s.rows.includes('📁 浏览目录…'), 8000);
-  ck('「/bind 」参数期弹目录浏览入口', s.rows.includes('📁 浏览目录…'), JSON.stringify(s.rows));
+  let s = await until('入口行出现', s => s.menuOpen && s.rows.includes('浏览目录…'), 8000);
+  ck('「/bind 」参数期弹目录浏览入口', s.rows.includes('浏览目录…'), JSON.stringify(s.rows));
   let st = await state();
   ck('基线未绑定', !st.bound && st.project === '', JSON.stringify(st));
 } catch (e) { ck('入口', false, e.message); await dump(); }
@@ -206,13 +206,13 @@ try {
 // 景 1：进目录模式 —— 层头路径=首个可浏览根；根上 ↑ 禁用；行=子目录。
 trace('景 1：目录模式层头');
 try {
-  await clickRow('📁 浏览目录…');
+  await clickRow('浏览目录…');
   let s = await until('首层读取落定', s => s.head && s.head.path.endsWith('/dirpick')
     && !s.rows.includes('（读取中…）') && s.rows.length === 2, 8000);
   ck('层头路径=首个可浏览根', s.head.path.endsWith('/dirpick'), s.head.path);
   ck('根上「↑ 上一级」禁用', s.head.upDisabled, JSON.stringify(s.head));
   ck('行=子目录（proja/probj，文件与点条目被滤）',
-    s.rows.includes('📁 proja') && s.rows.includes('📁 probj') && s.rows.length === 2,
+    s.rows.includes('proja') && s.rows.includes('probj') && s.rows.length === 2,
     JSON.stringify(s.rows));
 } catch (e) { ck('目录模式层头', false, e.message); await dump(); }
 
@@ -221,7 +221,7 @@ trace('景 2：过滤');
 try {
   await setFilter('proja');
   let s = await snapshot();
-  ck('过滤收窄到一行', s.rows.length === 1 && s.rows[0] === '📁 proja', JSON.stringify(s.rows));
+  ck('过滤收窄到一行', s.rows.length === 1 && s.rows[0] === 'proja', JSON.stringify(s.rows));
   await setFilter('');
   s = await snapshot();
   ck('清空过滤恢复两行', s.rows.length === 2, JSON.stringify(s.rows));
@@ -230,11 +230,11 @@ try {
 // 景 3：下钻两级（proja → sub1）。
 trace('景 3：下钻');
 try {
-  await clickRow('📁 proja');
+  await clickRow('proja');
   let s = await until('进 proja', s => s.head && s.head.path.endsWith('/proja'), 8000);
-  await until('proja 行落定', s => s.rows.includes('📁 sub1') && s.rows.includes('📁 vanish'), 8000);
+  await until('proja 行落定', s => s.rows.includes('sub1') && s.rows.includes('vanish'), 8000);
   ck('proja 行=sub1/sub2/vanish', s.rows.length === 3, JSON.stringify(s.rows));
-  await clickRow('📁 sub1');
+  await clickRow('sub1');
   s = await until('进 sub1', s => s.head && s.head.path.endsWith('/sub1'), 8000);
   ck('下钻两级到 sub1', s.head.path.endsWith('/proja/sub1'), s.head.path);
   ck('深层「↑ 上一级」可用', !s.head.upDisabled, JSON.stringify(s.head));
@@ -270,14 +270,14 @@ try {
 trace('景 6：目录消失');
 try {
   await setDraft('/bind ');
-  await until('入口行再现', s => s.menuOpen && s.rows.includes('📁 浏览目录…'), 8000);
-  await clickRow('📁 浏览目录…');
+  await until('入口行再现', s => s.menuOpen && s.rows.includes('浏览目录…'), 8000);
+  await clickRow('浏览目录…');
   await until('首层读取落定', s => s.head && s.head.path.endsWith('/dirpick')
     && !s.rows.includes('（读取中…）') && s.rows.length === 2, 8000);
-  await clickRow('📁 proja');
-  await until('proja 行落定', s => s.rows.includes('📁 vanish'), 8000);
+  await clickRow('proja');
+  await until('proja 行落定', s => s.rows.includes('vanish'), 8000);
   rmSync(ROOT + '/dirpick/proja/vanish', { recursive: true, force: true });
-  await clickRow('📁 vanish');
+  await clickRow('vanish');
   const s = await until('层内错误提示', s => s.rows.length === 1
     && s.rows[0].startsWith('（') && !s.rows[0].includes('读取中'), 8000);
   ck('目录消失 → 层内一行错误', s.rows[0].includes('不是目录或目录不存在'), s.rows[0]);

@@ -240,8 +240,8 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		`id="cmd-switch"`,
 		`id="cmd-new"`,
 		`id="cmd-cancel"`,
-		"sendText(typed, true, ready)", // the form still rides the shared passthrough
-		"sendText(text, false)",        // …and so do the buttons
+		"sendText(typed, true, ready)",      // the form still rides the shared passthrough
+		"sendText(text, false)",             // …and so do the buttons
 		"wireCmd('cmd-switch', '/switch ')", // remaining arg command still prefills…
 		"wireCmd('cmd-new', '/new')",        // …zero-arg still sends verbatim
 		"wireCmd('cmd-cancel', '/cancel')",
@@ -256,7 +256,7 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 		// …with the reset warning as the popup's fixed head line, the
 		// current binding marked, and the both-sources-empty wording.
 		"点选会重置当前会话（/bind 语义）；路径也可手打",
-		"'← 当前'",
+		"meta: (boundProject && cleanRoot(boundProject) === e.root) ? '当前' : ''",
 		"没有可选项目：config serve.projects 未配置、本机也还没有 seek 会话记录——直接手打 /bind <路径>",
 		"typed.startsWith('/')", // command POST → immediate /state refresh
 		"body.startsWith('/')",
@@ -290,17 +290,17 @@ func TestWeb_PageCommandButtons(t *testing.T) {
 func TestWeb_PageDirPicker(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"rpc('fs/list'",                     // the ONE new read-only method the picker rides
-		"📁 浏览目录…",                        // 目录模式入口（片 1 候选列表尾行）
-		"/^\\/bind\\s/",                     // '/bind ' 参数期触发
-		"sendText('/bind ' + path, false)",  // 选这个目录 → 既有 /bind 透传，零新写面
-		"↑ 上一级",
+		"rpc('fs/list'", // the ONE new read-only method the picker rides
+		"label: '浏览目录…', icon: 'folder'", // 目录模式入口（片 1 候选列表尾行；c_25d2ey 换 folder sprite）
+		"/^\\/bind\\s/",                    // '/bind ' 参数期触发
+		"sendText('/bind ' + path, false)", // 选这个目录 → 既有 /bind 透传，零新写面
+		"setBtn(up, 'arrow-up', '上一级')",    // c_25d2ey：↑ 字符换成 sprite 图标
 		"选这个目录",
 		"目录名过滤",
-		"label: '（' + dm.err + '）'",        // 失败在弹层内一行提示，不外抛不白屏
-		"if (dirMode) return;",              // 目录模式独占弹层
-		"menu.contains(ev.relatedTarget)",   // 焦点进弹层（过滤框）不关层
-		"leftEllipsis",                      // 层头路径过长从左侧省略
+		"label: '（' + dm.err + '）'",       // 失败在弹层内一行提示，不外抛不白屏
+		"if (dirMode) return;",            // 目录模式独占弹层
+		"menu.contains(ev.relatedTarget)", // 焦点进弹层（过滤框）不关层
+		"leftEllipsis",                    // 层头路径过长从左侧省略
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the dir-picker piece %q", need)

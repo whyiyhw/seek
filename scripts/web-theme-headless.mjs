@@ -175,13 +175,19 @@ const SAMPLE_JS = `(rootSel) => {
     const cs = getComputedStyle(e);
     if (cs.display === 'none' || cs.visibility === 'hidden') continue;
     const hasText = [...e.childNodes].some(n => n.nodeType===3 && n.textContent.trim());
-    if (!hasText) continue;
-    const fg = cs.color, bg = effBg(e);
+    // 图标钮（c_25d2ey）：内容只有 svg.ic，没有文字——按非文本对比度
+    // （WCAG 1.4.11，3:1）采样 stroke；currentColor 已由 computed 解析。
+    const ic = e.matches('svg.ic') ? e : e.querySelector(':scope > svg.ic');
+    if (!hasText && !ic) continue;
+    const isIcon = !hasText;
+    const fg = isIcon ? getComputedStyle(ic).stroke : cs.color;
+    const bg = effBg(e);
     if (!fg || !bg) continue;
     const who = e.tagName.toLowerCase() + (e.id ? '#'+e.id : '')
-      + (e.className && typeof e.className==='string' ? '.'+e.className.trim().split(/\\s+/).join('.') : '');
+      + (e.className && typeof e.className==='string' ? '.'+e.className.trim().split(/\\s+/).join('.') : '')
+      + (isIcon ? '[icon]' : '');
     const ratio = Math.round(contrast(fg, bg)*100)/100;
-    if (!out.some(o => o.fg===fg && o.bg===bg && o.who===who)) out.push({ fg, bg, who, ratio });
+    if (!out.some(o => o.fg===fg && o.bg===bg && o.who===who)) out.push({ fg, bg, who, ratio, icon: isIcon });
   }
   return { missing: false, pairs: out };
 }`;
@@ -263,6 +269,43 @@ await until('初始跟随系统 light', `document.documentElement.getAttribute('
   ck('初始亮色底(#ffffff)', s.bg === 'rgb(255, 255, 255)', s.bg);
 }
 
+// ============ 景 1b：UI 图标体系（c_25d2ey）============
+// 全页 UI 图标 = 内联 <symbol> sprite + <use> 复用；来源/许可证注释在场；
+// 可见 UI 文本里无 emoji（消息正文容器是用户/模型内容，排除）。
+trace('景 1b：图标体系');
+{
+  const icon = await evalJS(`(() => {
+    const syms = [...document.querySelectorAll('svg.sprite symbol')].map(s => s.id);
+    const svgs = [...document.querySelectorAll('svg.ic')];
+    const uses = new Set(svgs.map(s => (s.querySelector('use')?.getAttribute('href') || '')));
+    const isEmoji = c => { const p = c.codePointAt(0);
+      return (p >= 0x1F000 && p <= 0x1FAFF) || (p >= 0x2600 && p <= 0x27BF)
+          || (p >= 0x2B00 && p <= 0x2BFF) || p === 0xFE0F; };
+    const skip = '.msg, .smsg, .sbody, #mem-content, #ag-last, pre, code, script, style';
+    const hits = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (w.nextNode()) {
+      const n = w.currentNode, el = n.parentElement;
+      if (!el || el.closest(skip)) continue;
+      if ([...n.nodeValue].some(isEmoji)) hits.push(n.nodeValue.trim().slice(0, 24));
+    }
+    const first = svgs[0] ? getComputedStyle(svgs[0]) : null;
+    const box = svgs[0] ? svgs[0].getBoundingClientRect() : null;
+    return { syms: syms.length, icons: svgs.length, uses: uses.size,
+      hits: hits.slice(0, 8), stroke: first ? first.stroke : '',
+      fill: first ? first.fill : '', w: box ? box.width : 0, h: box ? box.height : 0,
+      src: document.documentElement.outerHTML.includes('Lucide')
+        && document.documentElement.outerHTML.includes('ISC License') };
+  })()`);
+  ck('sprite：<symbol> 定义 ≥24 枚', icon.syms >= 24, `syms=${icon.syms}`);
+  ck('图标走 <use> 复用（非每处内联 path）', icon.icons >= 8 && icon.uses >= 8, JSON.stringify(icon));
+  ck('图标线宽继承：stroke 非 none（currentColor）', !!icon.stroke && icon.stroke !== 'none', icon.stroke);
+  ck('图标为线性轮廓：fill=none 且尺寸非零', icon.fill === 'none' && icon.w > 0 && icon.h > 0,
+    `fill=${icon.fill} ${icon.w}x${icon.h}`);
+  ck('可见 UI 无 emoji（正文容器除外）', icon.hits.length === 0, JSON.stringify(icon.hits));
+  ck('sprite 注释带来源与许可证（Lucide / ISC）', icon.src === true, '');
+}
+
 // ============ 景 2：防 FOUC——两方向刷新，首帧即目标主题 ============
 trace('景 2：防 FOUC');
 // light 方向：记忆位=light → reload → 首帧 light + 白底。
@@ -340,12 +383,15 @@ if (!await openSettings()) ck('设置面板再开', false, 'set-body 未落定')
 // ============ 景 4：两主题 × 八面采样，全对 ≥4.5:1 ============
 trace('景 4：对比度');
 const AA = 4.5;
+const iconAA = 3;   // 非文本图形对比度（WCAG 1.4.11）
 const checkFace = async (theme, face, sel) => {
   const s = await sample(sel);
   if (s.missing) { ck(`${theme}·${face} 可见`, false, `${sel} 不可见`); return; }
-  if (s.pairs.length === 0) { ck(`${theme}·${face} 有可采文字`, false, `${sel} 空`); return; }
-  const bad = s.pairs.filter(p => p.ratio < AA);
-  ck(`${theme}·${face} ≥${AA}（${s.pairs.length} 对，最低 ${Math.min(...s.pairs.map(p => p.ratio))}）`,
+  if (s.pairs.length === 0) { ck(`${theme}·${face} 有可采样元素`, false, `${sel} 空`); return; }
+  const need = p => p.icon ? iconAA : AA;
+  const bad = s.pairs.filter(p => p.ratio < need(p));
+  const min = Math.min(...s.pairs.map(p => p.ratio));
+  ck(`${theme}·${face} 对比度达标（文字≥${AA}/图标≥${iconAA}；${s.pairs.length} 对，最低 ${min}）`,
     bad.length === 0, bad.map(p => `${p.who} ${p.fg} on ${p.bg}=${p.ratio}`).join('；'));
 };
 // 面板开关全走真实按钮：openPane 点未开面板（togglePane 互斥关上一个），
