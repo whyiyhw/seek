@@ -23,3 +23,4 @@ v0.13.0 — **回合控制、判分层、web 收边**的一版。人第一次能
 - c_ff4pcp：seek memory：主动策展第一刀——tagline 注入即计有效使用（active-memory 最小切片）
 - c_evmhdn：seek v0.13 发版：CHANGELOG 收口 + annotated tag + GitHub Release（捆绑减法第 6 刀）
 - c_myz47s：叙事稿提炼：seek
+- c_n72agp：seek web：hooks/audit SSE 实时流——补 inspect-rpc §6 #6/#7（tail follow 的既定分流承接）

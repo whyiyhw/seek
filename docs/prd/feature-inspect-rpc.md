@@ -219,6 +219,8 @@ seek-panel-v0.6.x/
 
 **背压**：每客户端缓冲 channel 256 条；满则**丢老的**（前端 UI 显示 "stream lagged, refresh to resync" 提示），不阻塞 observer 主路径——这与 v3 §2.5 "失败降级而非阻断"一致。
 
+**交付注记（2026-11-24，c_n72agp 核对；交付 2026-11-20 W5 c_xz2bey）**——本节是设计时形状，实际 ship 的 hooks 流按下面三点对：①路由不是 `/sse?topics=a,b` 而是 `GET /events?topic=hooks`——`seek serve` 的单一常开 SSE 口，topic 是**每连接一个**的查询维（与 `?topic=subagents` 同 hub、同 `follows`/`pushFollow` 机制），多 topic 一次订阅不在本版。选这个维度而非把审计行挂进主连接的命名事件族（`delta`/`tool`/`usage`/`approval`）：审计流是可选的、可关闭的、可整窗重拉的，独立连接让「关面板=断流=最后一个订阅者释放 follow」不需要任何额外协议；②帧=`event: hooks` + `data: <审计行 JSON>`，**无** `{"jsonrpc":…,"method":"hooks/event"}` 通知信封——审计行本身即 v3 §3.6 的对外 wire 格式（第三方工具 tail 同一文件），与 `hooks/audit/tail` 返回行字节同形，页面一条合并路径；③`?topic=hooks` **无需 `/bind`**：审计日志是机器全局的，subagents topic 的绑定是「选哪个索引文件」的手段，此处没有对应物；坏 topic / 未绑定 conv 都在 SSE 头之前答 400，不开半死的 event-stream。**页面侧闸**沿用 `syncTopicStream` 形状（`togglePane` → `syncHooksStream`，面板钮关闭即 `close()`），判据只剩「面板开」——审计流没有 bind 维度、未绑定 conv 也照连：先例的「面板开+已绑定才连」在此退化为「面板开即连」，否则全局审计面在未 `/bind` 的会话里永远空白。`hooks/audit/tail` 的 `follow:true` 仍答 -32602，错误文案指路本 topic——§6 #6/#7 由此收口。
+
 ### 4.3 启动方式
 
 用户视角的最简流程：
@@ -267,6 +269,8 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 
 `hooks.Registry` 早就有 Observer 接口（v3 柱 B 已交付）；M12.0 在其上挂一个 `RpcObserver`，把事件 fan-out 到 SSE 客户端。observer 注册路径与现有 audit log observer 同栈，互不影响。
 
+**交付注记（2026-11-24，c_n72agp 核对）**——实际推送源**不是** `hooks.Registry` observer：`seek serve` 与执行 hook 的 seek 是两个进程，observer 只活在后者的内存里；web 面只能 tail 落盘产物——`internal/hooksconfig/follow.go`（`AuditFollower`，锚点=订阅时刻的文件末尾）stat/read 全局审计 JSONL，`internal/controlplane/webfrontend_hookstopic.go` 把新增行逐行 verbatim 推给 `?topic=hooks` 的订阅者。「互不影响」仍成立：跟读不注册 observer、不执行 hook、不跑 trust gate。
+
 ### 5.4 与 v3 checkpoint 的集成
 
 `checkpoint/list` 走 `internal/checkpoint.List(sid)`（已有 API），M12.2 接入。
@@ -304,8 +308,8 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 | 3 | ❌ 随 IDE 线关闭（2026-11-16）——stdio 冻结为 3-method 遗留面，两 transport 各自为已 ship 契约（`session/list` 两形状并存即此结果），不再追求一致 | c_np5gzu |
 | 4 | ✅ `session/messages` 分页遍历=全文件顺序（cursor=消息行 offset，追加稳定） | W4.2 表驱动钉死 |
 | 5 | 替代——web 侧为跨进程磁盘读（append-only JSONL + 行级 parse，尾读不锁）；§3.4 RWMutex 是 TUI 进程内问题，web 面不需要 | §3.3 caveat（feature-web-frontend）；`-race` 全量绿 |
-| 6 | ✅ 收口（2026-11-20，W5 c_xz2bey）——follow 面=serve `/events` SSE `hooks` topic（全局审计 JSONL tail-follow，帧=审计行 verbatim，无需 conv 绑定）；断连后 follow 随最后一个订阅者关闭、handler/follower goroutine 退出（leaktest 同 W3.2 口径：`TestWeb_TopicHooksSharedRefcountAndLeak`）；`follow:true` 仍 -32602 但指路该 topic | W5 c_xz2bey（webfrontend_hookstopic.go + hooksconfig/follow.go） |
-| 7 | ✅ 收口（2026-11-20，W5 c_xz2bey）——hooks topic 接入同一 hub（`pushFollow` 满丢老不阻塞同栈，`TestWeb_PushTopicDropsOldest` 语义共用）；面板的「N 新行」计数即 lagged 提示，点计数或手动滚回贴底即补渲染积累的行（上翻期间新行只积累不渲染，行已在客户端持有，补渲染即可、无需重拉） | W3.2 + W5 c_xz2bey |
+| 6 | ✅ 收口（2026-11-20，W5 c_xz2bey）——follow 面=serve `/events` SSE `hooks` topic（全局审计 JSONL tail-follow，帧=审计行 verbatim，无需 conv 绑定）；断连后 follow 随最后一个订阅者关闭、handler/follower goroutine 退出（leaktest 同 W3.2 口径：`TestWeb_TopicHooksSharedRefcountAndLeak`）；`follow:true` 仍 -32602 但指路该 topic；**2026-11-24 c_n72agp 实机复核**（分支 drive/c_n72agp）：`scripts/web-hooksaudit-manual.sh` 全绿——curl 自检九项（verbatim 帧 / retry:3000 / 15s 心跳 / 未知 topic 双名 / follow 指路）+ 无头六景（快照/实时追加/过滤/暂停恢复/上翻/断线补拉），`go test -race ./internal/controlplane/` 69.9s 绿 | W5 c_xz2bey（webfrontend_hookstopic.go + hooksconfig/follow.go） |
+| 7 | ✅ 收口（2026-11-20，W5 c_xz2bey）——hooks topic 接入同一 hub（`pushFollow` 满丢老不阻塞同栈，`TestWeb_PushTopicDropsOldest` 语义共用）；面板的「N 新行」计数即 lagged 提示，点计数或手动滚回贴底即补渲染积累的行（上翻期间新行只积累不渲染，行已在客户端持有，补渲染即可、无需重拉）；**同日复核**：web-gate 过（built 31 698 692B vs baseline 31 557 490B，delta +141 202B / 预算 204 800B）；`scripts/web-page-review.sh` 32/32 镜头，审计面亮/暗 × 1440/390 四张实拍含五行审计（OCR 可读，见 c_n72agp 写回） | W3.2 + W5 c_xz2bey |
 | 8 | 替代（更严）——web_addr scope 闸：非 loopback/tailnet-CGNAT 一律拒启 exit-2 | `TestWeb_AddrScope` / `TestWeb_RunForbiddenAddr` / `TestServePlane_BadWebAddrFails` |
 | 9 | ✅（更严）——web 面全状态路由一律 token（401 家族），不分是否 loopback | W1.2 鉴权族测试 |
 | 10 | 取消替代——tarball 被 go:embed 取代；体积由 CI web-gate 守（净增 <200KB） | W1.5（c_ph2zax） |
