@@ -30,6 +30,7 @@
 | [`feature-webfetch.md`](feature-webfetch.md) | 🚀 已交付 | WebFetch SSRF 防御外部读取。AGENTS.md 架构节引用。|
 | [`feature-active-memory.md`](feature-active-memory.md) | 🚀 已交付 | 主动记忆整理。AGENTS.md 架构节引用。|
 | [`feature-i18n.md`](feature-i18n.md) | 🚀 已交付 | i18n view 层目录 + 奇偶校验。AGENTS.md 架构节引用。|
+| [`feature-judge-engine.md`](feature-judge-engine.md) | 📐 设计稿（2026-11-24） | 判读引擎：`seek judge` 结构化判读面（JSONL in/out + 三值 verdict + 成本硬顶），供外部程序把 seek 当批处理推理引擎用。四个缺口：`--tools=none` 哨兵 / `--no-save`×`--memory` 解耦 / `--isolated`（skills+MCP 无关闭开关）/ `ResponseFormat` 已定义未使用。第一条消费线为信息流产品 winnow。|
 
 ## 归档区 [`archive/`](archive/)
 
