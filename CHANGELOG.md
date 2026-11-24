@@ -43,6 +43,7 @@ v0.12.3 — **Zed 面成形**的一版：feature-acp 在册缺口全清（backlo
 - c_nkkyqf：seek web 审查补视觉计数 + 审查口径换成可检查条目（抄 craft 三份，标豁免项）
 - c_5qrafk：信号：web-gate 验证车道声明错配两例（c_25d2ey 跳过补证、c_lbys7d 存疑）——selftest 登记或统一 not-in-lane 口径
 - c_lbys7d：seek web 暗色三处次级文字压在 accent 底 3.59:1 + 归档行 opacity .55 掉到 2.29:1
+- c_okmkfl：seek eval E7 收口：「不由 eval 保证」清点——五类缺口逐条归属
 
 ## 未发版（在途分支）
 - c_qjaksw：**subtraction**——退役 fim_complete 工具链。删 `internal/tools/fimcomplete/`、`pkg/deepseek` FIM client（fim.go / fim_test.go / endpointFIM）、sysprompt 工具文档行、D8 deepseekOnly 表项（think 保留独扛过滤测试）、benchmark FIM 指标（FIMMinCalls 与 fim 比率；`fim-patch` 任务保留、prompt 去 fim_complete 指引）、i18n provider banner 的 FIM 字样；文档同步（dual-model / comparison / guide-architecture / book ch5+ch14 / pitfalls-triage #629 标注已退役 / feature-orchestration D8 / examples 两页 / 双 README）。依据：实测 FIM 调用比率 0%/11%（`docs/pitfalls/deepseek-api/fim-usage-ratio-is-inherently-low-—-model-prefers-edit-write-over-fim-complete.md`）——模型不用，快路径名存实亡，删净比养着便宜。

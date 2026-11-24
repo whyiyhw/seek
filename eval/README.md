@@ -304,6 +304,82 @@ real-key rounds under this policy (5-round re-runs of the flaky set,
 rule below — this calibration used committed rows plus constructed-row
 verification only.
 
+## 不由 eval 保证（E7，2026-11-24，c_okmkfl）
+
+`docs/prd/feature-eval-v2.md` E7 的交付面：eval 的判分面只有一件事——
+**模型在给定 schema/prompt 下的选择倾向**（v2 §1.1 第三层）。下列五类行为面
+**不在判分覆盖内**，每条检查在这里有且只有一个归属，三态闭集：
+
+- **已有测试** — 写明测试名与所在车道（`go test -race` CI 三 OS /
+  `e2e.yml` 每日真 key / `bash scripts/selftest.sh <name>` 验证车道 /
+  人工无头脚本）。
+- **需补** — 真缺口，收在文末「待开卡清单」；**E7 卡内不顺手补**
+  （v2 §三 E7 验收原文）。
+- **接受不保证** — 写明为什么：测不了 / 测了必 flaky / 已有替代观测面。
+
+判据（v2 §2.4）：一条检查若能在**没有模型参与**时断言，就不该出现在 eval 里。
+
+### C1 确定性契约（无模型参与可断言）
+
+v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
+
+| 检查 | 归属 | 证据 / 理由 |
+|---|---|---|
+| `-tools` 白名单冻结 + 未知名 exit 2 | 已有测试 | `cmd/seek/tools_flag_test.go`：`TestToolsFlagE2E_WhitelistFiveToolsDeterministic`、`TestToolsFlagE2E_UnknownNameExits2`、`TestApplyToolsWhitelist_UnknownNameErrToolsUsage`、`TestApplyToolsWhitelist_ResumeWarnsOnChangedSet`（`go test -race`，CI 三 OS） |
+| ACP `tool_call` 帧形态 + thinking chunk | 已有测试 | `cmd/seek/acp_test.go`：`TestACPUpdate_Mapping`（reasoning / streaming CoT / streaming answer delta 三者都落 `agent_thought_chunk`；tool_call kind/locations/content）、`TestACPUpdate_ToolKind`、`TestACPUpdate_Locations`、`TestACPUpdate_Content`；全链在 `cmd/seek/acp_*_e2e_test.go`（审批/模式/多会话） |
+| MCP `server__tool` 前缀 + 撞名回退 | 已有测试 | `internal/tools/mcptool/bridge_test.go`：`TestLoadServers_PrefixPolicy`（默认 `srv__tool`；`NoPrefix` 撞内置名回退成 `<server>__<tool>`）、`TestLoadServers_NamePrefix`、`TestLoadServers_DefaultPrefixIsUnfolded`、`TestSafeToolName`、`TestLoadServers_DeterministicRoster` |
+| session JSONL 头 / `schema_version` / repair | 已有测试 | `internal/session/session_test.go`：`TestSaveLoad_Roundtrip`、`TestRepair_DropsTrailingOrphanToolCalls`、`TestRepair_PartialMultiCallStillCountsAsOrphan`、`TestRepair_BackfillsEmptyToolContent`、`TestRepair_LeavesValidHistoryAlone`；读路径 `internal/session/readpath_test.go`：`TestReadMessagesPageTornTail`、`TestReadMessagesPageCorruptLine`。**注**：legacy `.json`（schema_version ≤ 1）迁移已随 `65a31d50` 删除（`Load`/`LoadFrom` 只开 `.jsonl`），故无迁移测试可写；AGENTS.md 同一句仍称「migrated on next Save」且写 `schema_version=2`（代码 `CurrentSchemaVersion = 3`），两处漂移见待开卡 #2 |
+| 工具输出 write-time 上限（schema 参数不得绕过） | 已有测试 | `read`：`TestRead_LimitParamValidation` / `TestRead_DefaultLimitTruncatesLargeFile` / `TestRead_ByteCapElidesLongLines`；`grep`：`TestGrep_DefaultMaxMatchesCapsAt20` / `TestGrep_HardBytesCap`；`bash`：`TestClampOutput_UnderBudgetIsUntouched` / `TestClampOutput_ExactlyAtBudget`；`git`：`TestExecute_DefaultLineCapIs100`；`webfetch`：`TestExecute_RejectsMaxBytesAboveCap`；`references`：`TestRefs_OutputCap` |
+
+### C2 真 API / 外部服务
+
+| 检查 | 归属 | 证据 / 理由 |
+|---|---|---|
+| prefix cache 真命中（字节稳定性是约定，只有真端点能证） | 已有测试 | `pkg/agent/cache_e2e_test.go` `TestPrefixCache_RealAPI`；`.github/workflows/e2e.yml` 每日 00:17Z 真 key 跑 `go test ./... -run RealAPI`，且 preflight 必须见到 `--- PASS: TestPrefixCache_RealAPI`——缺 key 判红，不静默跳过 |
+| Files 上传/引用/resume/cache；ASR/TTS | 已有测试 | `pkg/deepseek/files_smoke_test.go` `TestFiles_RealAPI_UploadReferenceResumeCache`、`TestASR_RealAPIRoundtrip`、`TestTTS_RealAPIStella100`（同 e2e 车道，key-gated，`-short` 跳过） |
+| 第二梯队 provider 的 wire 形状（Anthropic / OpenAI / Gemini / GLM-compatible） | 已有测试 | `pkg/llm/provider/{anthropic,openai,gemini}/client_test.go`（httptest 假端点）+ `scripts/eval-provider-test.sh`（车道选择/凭证清洗机制，假端点） |
+| 第二梯队车道上的**模型行为** | 接受不保证 | eval 只测当前配置车道的选择倾向；跨车道取样成本与额度不可控（`glm-lane-contract` 仅 record-only 观测，E2 处置）。车道 wire 契约由上一行负责 |
+| 环境类失败（429、额度窗、登录过期） | 接受不保证 | 环境不是被测对象：`glm-lane-contract` 整窗 429 时阈值无解，record-only（E2 known-flaky 处置）；判红只会训练人忽略红。token 规则见 §Provider lane（harness 永不读/刷 `opencode-auth.json`） |
+| 答案质量（`final_text` 对不对） | 已有测试（v3 J，分工明确的有限面） | `scripts/eval-judge-test.sh` 钉接线（record 不染色 / gate 翻红 / doubt 两模式不染色 / 畸形 exit 2 / kill-switch）；judge 与人判 agreement 0.88、false-pass 0（`eval/judge-calibration/report.md`）。余量照 v3 §2.1：judge 只对校准过的分布负责，rubric 外仍是盲区；gate 开关（record → gating）归卡 c_xhbqae，不在 E7 范围 |
+
+### C3 并发与竞态
+
+| 检查 | 归属 | 证据 / 理由 |
+|---|---|---|
+| 数据竞争 / 并发正确性 | 已有测试 | CI 三 OS `go test -race ./...`；点例：`TestACPBackend_MultiSession_ConcurrentPromptsNoCrossTalk`（acp）、`TestPolicy_ConcurrentAskAndSetMode`（askuser）、`TestConcurrentExecute`（plan）、`TestTracker_ConcurrentSafe` / `TestTracker_AdoptChild_ConcurrentCumulativeDoesNotDeadlock`（cache）、`TestConcurrentWrites`（sessmeta）、`TestSessionLookupConcurrent`（servecli）、`TestWriteGuarded_ExclusiveCreateRefusesRaceWinner`（write） |
+| eval 自身多进程同写 `results/*.jsonl` | **需补** → 待开卡 #1 | v2 §四「并发」明列「两个进程各写 100 行验证」；`scripts/eval-rounds-test.sh` 未实现该断言。`run.sh` 目前只靠单行 `echo "$row" >> "$results_file"`（1078 / 1249 行）的 O_APPEND 约定，无钉死测试 |
+| Ctrl-C 中途中断不产生半行 JSONL | 接受不保证（结构替代信号注入） | 已完成轮次的落盘由结构保证：每轮完成后单行 `echo` 追加。`scripts/eval-rounds-test.sh` 头注释 34–36 行显式记录「信号注入测试故意不做；若未来改行写入方式，先回来补」——这是计划过的取舍，不是缺口 |
+| 崩溃轮（无 `agent_end`）计入分母 | 已有测试 | `scripts/eval-rounds-test.sh` ②（前 3 轮好、后 2 轮崩溃 → 3/5 对 0.6 绿、对 0.7 红）与 @rounds=3 边界；口径见 §Judgment |
+
+### C4 平台与前端差异
+
+| 检查 | 归属 | 证据 / 理由 |
+|---|---|---|
+| OS / 架构差异（路径、换行、子进程） | 已有测试 | `ci.yml` matrix 三 OS 跑 `go vet` + `go test -race` + `go build`；`cross-build` 六目标（linux/darwin/windows × amd64/arm64） |
+| eval 结果行的平台/车道归属 | 接受不保证 | 行上没有 OS / model / lane 字段（字段集见 `run.sh` 行构造），eval 单机采样。被测面是模型选择倾向，与 OS 无关；OS 敏感层归 C1 与 CI 三平台。跨车道成本只能读比值（§Provider lane 已记） |
+| TUI 视图 / 键位 / 状态机 | 已有测试 | `internal/tui/*_test.go`（含 `approval_test.go`、`mode_test.go`、`plan_render_test.go`、`render_test.go`） |
+| TUI 其余真终端交互（ANSI / 宽度 / 粘贴 / resize） | 接受不保证 | Go 侧无 pty 依赖（stdlib-first），自动化 PTY 仅 E3 `eval/cases/plan-e2e` 的审批链一处（Python `eval/tools/plan-e2e-drive.py`）；其余靠人工/合并处验收 |
+| Web 面板交互（会话、流、审批、移动、ctxmeter…） | 已有测试（人工无头车道） | `scripts/web-*-manual.sh` + `*-headless.mjs`（真实 CDP 驱动 headless Chrome，断言走真实 UI 路径）；不进 CI 是零构建链 doctrine（`scripts/web-gate.sh` 只钉「仓根无 node 构建链」+ 二进制体积） |
+| Web 记忆面板视觉呈现 | 接受不保证 | 无可脚本化载体（无对应 `*-headless.mjs`），`scripts/selftest.sh` 的 `web-memory-manual` 条目已记结构性（c_gqo32q / c_kwiajf 判据） |
+| serve / RPC 平面 | 已有测试 | `internal/rpc/registry_test.go`、`internal/servecli/*_test.go`、`scripts/serve-smoke-test.sh`；**唯一进了 eval 的 web 面**是 `serve-web-stream`（E5，假 key 全链 + 六轴构造行负验证） |
+
+### C5 性能、延迟与成本
+
+| 检查 | 归属 | 证据 / 理由 |
+|---|---|---|
+| 运行延迟 / 吞吐 | 接受不保证 | 全仓无延迟断言：`elapsed_s` 只落行观测（eval 行 / ablate 表），`scripts/weight.sh` 量的是代码与文档体量，不是运行时。理由：wall-clock 由 provider 排队与本机负载决定，历史行同例跨度可达数倍（`code-review-effort-max` 25–96s、`code-review-effort-low` 14–70s、`git-subcommand-shape` 4–43s），闸门必 flaky；趋势面归 `scripts/eval-trend.sh` |
+| 成本 / token 效率 | 接受不保证（观测面齐） | eval 行自带 `prompt_tokens` / `completion_tokens` / `cache_hit_tokens`；ablate 表出 F/B 比；`seek -benchmark self-hosting` 有 cache 命中率阈值报告，但真跑是人工真 key 动作，阈值逻辑由 `cmd/seek/benchmark_test.go` 钉死。无闸门 = 有意（同一原因：阈值随模型/车道/机器漂移） |
+| 二进制体积 | 已有测试 | `scripts/web-gate.sh`（+200KB 对 pin，合并三闸之一）+ CI `web-gate` job |
+| 代码 / 文档体量（减法尺度） | 已有测试 | `scripts/verify-doc-budgets.sh`（AGENTS.md 字面硬闸，CI `doc-budgets` job）+ `scripts/weight.sh`（软建议，`docs/budget.json` 只读、永不进 CI gate） |
+
+### 待开卡清单（E7 发现的真缺口；不在本卡补）
+
+| # | 建议标题 | 为什么是真缺口 | 证据 |
+|---|---|---|---|
+| 1 | eval 并发写结果行自测：PRD §四 计划项未实现 | v2 §四把「两个进程各写 100 行」写成测试计划，仓库里没有对应断言；当前原子性只靠单行 `echo >>` 的 O_APPEND 约定，改写入方式即无保护 | `docs/prd/feature-eval-v2.md` §四「并发」；`scripts/eval-rounds-test.sh` 无并发场景；`eval/run.sh:1078,1249` |
+| 2 | AGENTS.md 会话存储句校正：legacy `.json` 迁移已删 + `schema_version` 写的是 2 | 同一句两处与代码不符：①「Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`」——`65a31d50` 之后 `Load`/`LoadFrom` 只开 `.jsonl`，无迁移路径；②写 `schema_version=2`，代码是 `CurrentSchemaVersion = 3`。照文档写测试会测到不存在的路径 | `git show 65a31d50`（"seek hasn't shipped, so there are no schema-v1 single-file JSON sessions in the wild"）；`internal/session/session.go` 的 `Load` / `LoadFrom` / `CurrentSchemaVersion`；`AGENTS.md:94` |
+| 3 | E3 / E4 承重轴的 release lane 成员资格定案 | 两例 2026-11-21 均已落地（`plan-e2e` record_only、`subagent-bg-resume` gate 0.6），`lane-release.txt` 仍是注释占位、注释里的卡号还是旧的，README lane 表仍写「待 E3/E4 落地后取消注释」——E6 验收「release lane 只含承重轴 3 例」实际只有 1 例在册，归属无人 | `eval/lane-release.txt:19-21`；`eval/cases/plan-e2e/expect.json`（注「E6 release lane 接管后转正」）；`eval/cases/subagent-bg-resume/expect.json`；本文 §发版前跑什么 的 lane 表 |
+
 ## 发版前跑什么（lanes, E6）
 
 E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
