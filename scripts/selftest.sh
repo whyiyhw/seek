@@ -31,6 +31,13 @@
 # 真实 LLM key/网络的、闸语义（超限即红是职责）的、有真实副作用的，
 # 一律进排除表并逐项注理由——排除表非空且每项有理由是硬要求。
 #
+# 卡面车道声明口径（c_5qrafk，2026-11-24）：只有本入口能分发到的名字才可
+# 在卡面标 {车道可跑：bash scripts/selftest.sh <名>}；排除表内的名字是
+# 「白名单结构性拒跑」，卡面只能标 {not-in-lane：<为什么>} 并预填合并后动作
+# （butler steward c_gk6cb2 口径）。web-gate 的补证点在合并处：它是合并三闸
+# 之一（doc-budgets / pitfalls-count / web-gate，c_vxh4ro 归位进合并闸），
+# 合并点必跑、验证车道不重复。
+#
 # 排除理由会腐化（c_kwiajf，2026-11-20）：理由描述的是脚本「此刻」的形态。
 # 脚本后来改进——web-sessions-manual 拿到 Chrome+node 无头分支、跑完自己
 # 退出、不再等人按键——原来的「交互阻塞」判据就失效了。同一条理由连续被
@@ -76,7 +83,7 @@ excluded_reason() {
     verify-doc-budgets)
       echo "文档预算闸：超限即红是它的职责，进「跑全绿」入口语义打架（c_i2cyb7 既定排除口径）" ;;
     web-gate)
-      echo "体积/零构建链闸：trip 即红是职责（同 verify-doc-budgets 闸语义）+ 每跑一次全量交叉编译 linux/amd64 二进制，重" ;;
+      echo "合并闸语义 + 测量线依赖（结构性，c_5qrafk 2026-11-24 重判）：web-gate 是合并三闸之一（doc-budgets/pitfalls-count/web-gate，c_vxh4ro 归位进合并闸），合并点必跑、车道不重复；判据=绝对字节数对 pin，读数随工具链线（基线条目实证 1.25.8→1.27.3 差 +1.8MB）与构建目录（跨路径实测 +21KB）漂移，跨目录/跨机的红绿不可当验收判据。构建成本不是理由：本机实测 2.2s 暖 / 5.9s 冷 GOCACHE。卡面标 {not-in-lane：合并闸+测量线}，合并后动作=主会话看三闸结果补证" ;;
     pkg-inventory)
       echo "测量报告工具：全仓 go test -cover 分钟级、且测试失败也不红（|| true 吞掉）——绿无可信度、费时不增值" ;;
     web-memory-manual)
