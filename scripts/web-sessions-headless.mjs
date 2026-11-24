@@ -149,6 +149,7 @@ const snapshot = () => evalJS(`(() => {
     listShown: vis(list),
     rows: [...document.querySelectorAll('#sess-list .sess-row')].map(r => ({
       sid: r.dataset.sid, t1: r.querySelector('.t1').textContent,
+      t2: (r.querySelector('.t2l') || {}).textContent || '',
       cur: r.classList.contains('cur'),
     })),
     sideFoot: document.getElementById('side-foot').textContent,
@@ -232,6 +233,12 @@ try {
     JSON.stringify(s.rows.slice(0, 3).map(r => r.sid)));
   ck('长会话标题=首条用户消息首行', s.rows[0].t1.includes('第 1 条：请读一下这段代码并解释。'), s.rows[0].t1);
   ck('短会话标题=首条用户消息', s.rows[1].t1.includes('tiny fixture：你好'), s.rows[1].t1);
+  // c_jf3grt 文案口径：侧栏行 = 短日期（MM-DD HH:mm，无秒、不吃 locale）
+  // + 「N 轮」（中文无量词单复数，不再有 "1 turns"）。
+  ck('侧栏行：日期短格式 + 「N 轮」（无 "turns"）',
+    /\d{2}-\d{2} \d{2}:\d{2}/.test(s.rows[0].t2) && s.rows[0].t2.includes('617 轮')
+    && !s.rows[0].t2.includes('turns') && s.rows[1].t2.includes('1 轮'),
+    JSON.stringify([s.rows[0].t2, s.rows[1].t2]));
   ck('聊天面/输入框原样可见（零回归）', s.chatShown && s.formShown && !s.detail, '');
   ck('原 📚 弹出按钮已退役（DOM 无 browse-btn）', !s.browseBtn, '');
   // 加载更多：30 → 32 行（夹具总数），按钮随后消失。
@@ -249,8 +256,8 @@ try {
   ck('点行切中栏正文（聊天面/输入框让位，侧栏不动）',
     s.detail && s.browserShown && !s.chatShown && !s.formShown && s.listShown, '');
   ck('首页恰 50 条（不整读 1234）', s.nmsgs === 50, `got ${s.nmsgs}`);
-  ck('元信息行 model/turns/tokens/cwd',
-    s.meta.includes('deepseek-chat') && s.meta.includes('617 turns')
+  ck('元信息行 model/轮次/tokens/cwd',
+    s.meta.includes('deepseek-chat') && s.meta.includes('617 轮')
     && s.meta.includes('270000 tokens') && s.meta.includes('/tmp/w44-fixture'), s.meta);
   ck('foot「加载更多（已显示 50 条）」', s.foot.includes('已显示 50 条'), s.foot);
   ck('首条是第 1 条用户消息', s.firstMsg.includes('user') && s.firstMsg.includes('第 1 条'), s.firstMsg);

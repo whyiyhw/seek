@@ -138,6 +138,26 @@
      Per-message degradation: tree render throws → legacy
      folded rendering → （消息渲染失败） placeholder — never a blank
      page; the live tree degrades to the pre-tree single-line row.
+     Copy & panel details (card c_jf3grt): ONE date formatter pair
+     (fmtWhen MM-DD HH:mm / fmtDay MM-DD, year only across years) —
+     the page never calls toLocaleString again, because the browser
+     locale is environment state and had rendered English long dates
+     («11/20/2026, 7:00:00 PM») inside a Chinese UI; turns read
+     「N 轮」 instead of "N turns" (no plural to get wrong in
+     Chinese). The chat plane gets an empty state (unbound → /bind
+     guidance + the same project picker as the top bar; bound → a
+     welcome line), removed on the first message so nothing but .msg
+     children ever ride #list. The send key is disabled while the
+     draft is empty (and re-enabled by typing/attachments; the stop
+     key while a run is live is always clickable) — the in-flight
+     POST guard moved to `posting` so the command buttons that share
+     sendText never inherit the draft-based disabled state. Stats
+     pane: session options truncate the title and carry the short
+     date, cards form an auto-fit grid with one container-owned gap
+     rhythm, and money gets its own token (seek-usd) so the cost
+     number can no longer read as the green hit-ratio/health colour.
+     Tree rows summarise args as first key=value (+N) instead of raw
+     JSON; the exact args stay in the expand panel and the row title.
      Deliberately out of scope: multi-tab sync, history persistence,
      bold/italic markdown (the W5 subset — tables/quotes/paragraphs
      added by rework c_k3pnlw — covers the chat load; renderer lives
@@ -199,6 +219,11 @@
     --seek-link:  var(--seek-ok);
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
     --seek-rec-fg:#f0d7b8;
+    /* 成本数字专用色（c_jf3grt）：$ 与命中率/健康度是两套语义，早先
+       共用 --seek-ok 绿——同屏一张卡里「花了多少钱」和「缓存命中多好」
+       同色，读起来像同一种好坏。选信息蓝：与 ok/warn/err 三色语义不撞，
+       压 soft(#242830) 6.8:1、panel(#1b1e24) 7.7:1（AA 正文有余）。 */
+    --seek-usd:   #8fb3e0;
     --seek-scrim: rgba(0,0,0,.5);   /* 窄屏抽屉遮罩（c_lqtt2m） */
     --seek-shadow:0 4px 14px rgba(0,0,0,.45);
   }
@@ -223,6 +248,8 @@
     --seek-link:  #1a56c4;
     --seek-rec:   #b3261e;
     --seek-rec-fg:#ffffff;
+    /* 同暗色：成本走信息蓝，亮底 5.8:1（soft #eceef2）——与 ok 绿分流 */
+    --seek-usd:   #1f5ba8;
     --seek-scrim: rgba(15,17,21,.28);
     --seek-shadow:0 4px 14px rgba(0,0,0,.12);
   }
@@ -588,11 +615,12 @@
   .sess-row .t1 { display: block; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
   /* t2 行是两段（左=时间/轮次/模型，右=per-session cost 列，c_6xktw4）：
-     flex 让 cost 右贴不换行，左段自己省略。 */
+     flex 让 cost 右贴不换行，左段自己省略。cost 走 --seek-usd（c_jf3grt：
+     成本不是健康度，别和绿撞语义）；数字用等宽数字列，改名/翻页时不抖。 */
   .sess-row .t2 { display: flex; gap: 8px; justify-content: space-between;
                   color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
   .sess-row .t2l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sess-row .t2c { flex: none; color: var(--seek-ok); }
+  .sess-row .t2c { flex: none; color: var(--seek-usd); font-variant-numeric: tabular-nums; }
   .sess-row.cur { background: var(--seek-accent); }
   /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
   .sess-row.cur .t2 { color: var(--seek-fg); }
@@ -730,22 +758,47 @@
                      padding: 8px 10px; margin: 6px 0; overflow-x: auto;
                      white-space: pre; font: inherit; }
   #mem-content code { background: var(--seek-panel); border-radius: 4px; padding: 0 4px; }
-  #stat-body { flex: 1; overflow-y: auto; padding: 14px; }
-  .stat-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px;
-               margin-bottom: 12px; }
+  /* 统计面板节奏（c_jf3grt）：卡片间距/内边距原本靠每张卡 12px margin 堆，
+     末卡还多一截尾巴、三张快照卡竖排到 1/3 屏以下。改成「容器管间隙、
+     卡不管外边距」的单一节奏（column gap 12 + 面板 padding 14，与设置面板
+     同刻），三张快照卡用 auto-fit 网格——宽屏一行排开、390px 自然落回
+     单列（minmax 下限 220px）。 */
+  #stat-body { flex: 1; overflow-y: auto; padding: 14px;
+               display: flex; flex-direction: column; gap: 12px; }
+  .stat-card { background: var(--seek-soft); border-radius: 8px; padding: 12px 14px; }
+  #stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 12px; align-items: start; }
+  #stat-cards > .pane-hint { grid-column: 1 / -1; padding: 0 2px; }
   .stat-card h3 { margin: 0 0 8px; font-size: 13px; color: var(--seek-fg-soft); font-weight: normal; }
   .stat-row { display: flex; justify-content: space-between; gap: 12px;
               padding: 3px 0; }
-  .stat-row .v { color: var(--seek-fg); }
-  .stat-row .v.usd { color: var(--seek-ok); }
+  .stat-row .v { color: var(--seek-fg); font-variant-numeric: tabular-nums; }
+  /* 成本数字走 --seek-usd（c_jf3grt）：命中率条/趋势的绿是「健康度」，
+     钱不是健康度——同色会让「花了 $3」读成「缓存命得好」。 */
+  .stat-row .v.usd { color: var(--seek-usd); }
   .stat-bar { height: 10px; border-radius: 5px; background: var(--seek-accent); overflow: hidden;
               margin-top: 8px; }
   .stat-bar .hit { height: 100%; background: var(--seek-ok); }
+  /* ---- 主区空态（c_jf3grt）----
+     未绑定/新会话时主区原本整片空白：给一块居中的引导（标题 + 一行操作
+     说明 + 未绑定时一个点选按钮）。只在 #list 真的空着时出场——消息落地
+     即摘除（JS dropChatEmpty），不占消息列表的任何选择器口径。 */
+  .chat-empty { display: flex; flex-direction: column; align-items: center;
+                justify-content: center; gap: 10px; min-height: 100%;
+                padding: 24px 16px; text-align: center; }
+  .chat-empty .ce-t { color: var(--seek-fg-soft); font-size: 15px; }
+  .chat-empty .ce-x { color: var(--seek-fg-dim); font-size: 13px; line-height: 1.7;
+                      max-width: 46ch; }
+  .chat-empty .ce-x code { background: var(--seek-panel); border: 1px solid var(--seek-line);
+                           border-radius: 4px; padding: 0 4px; color: var(--seek-fg-soft); }
+  .chat-empty .ce-acts { margin-top: 2px; }
+  .chat-empty .ce-acts button { font-size: 13px; padding: 6px 14px; }
 
   /* ---- 跨会话趋势图（W5 卡 c_6xktw4）----
      三条曲线共用一条 x 轴，但各自归一到自己那一行；颜色全部走
      --seek-* token（两主题同一组语义名换值，裸 hex 会破亮色主题）：
-     $ = ok 绿（与 .usd 同义），tokens = fg 中性，缓存 = warn 琥珀。 */
+     $ = --seek-usd（与 .usd 同源，c_jf3grt 起资金不再是绿），
+     tokens = fg 中性，缓存 = warn 琥珀。 */
   #trend-tools { display: flex; gap: 12px; flex-wrap: wrap; }
   .tseg { display: inline-flex; gap: 4px; }
   /* 窗口钮长在软底统计卡内：同 #set-theme，取 panel 一档留边界。 */
@@ -755,10 +808,10 @@
   #trend-plot { position: relative; min-height: 96px; margin-top: 8px; }
   #trend-plot svg { display: block; width: 100%; height: 96px; }
   .axis { stroke: var(--seek-line); stroke-width: 1; }
-  .tline { fill: none; stroke: var(--seek-ok); stroke-width: 1.6; }
+  .tline { fill: none; stroke: var(--seek-usd); stroke-width: 1.6; }
   .tline.tokens { stroke: var(--seek-fg); }
   .tline.cache { stroke: var(--seek-warn); }
-  .tdot { fill: var(--seek-ok); }
+  .tdot { fill: var(--seek-usd); }
   .tdot.tokens { fill: var(--seek-fg); }
   .tdot.cache { fill: var(--seek-warn); }
   .tguide { stroke: var(--seek-fg-dim); stroke-width: 1; stroke-dasharray: 2 2; }
@@ -1039,7 +1092,10 @@
              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
       <button id="attach-btn" class="btn-icon" type="button" title="添加附件（也可直接拖入或粘贴）" aria-label="添加附件"><svg class="ic" aria-hidden="true"><use href="#i-paperclip"/></svg></button>
       <button id="mic" class="btn-icon" type="button" title="按住说话，松开发送（≤120 秒）" aria-label="按住说话"><svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg></button>
-      <button id="send" class="btn-primary">发送</button>
+      <!-- 发送键缺省禁用（c_jf3grt）：空草稿无可发送——禁用属性写在
+           静态标记上，首帧就不会出现「可点的空发送」；syncSend 随
+           输入/附件/流态改写。生成中它是停止键，恒可点。 -->
+      <button id="send" class="btn-primary" disabled>发送</button>
     </form>
     <div id="tray"></div>
   </div>
@@ -1089,6 +1145,31 @@ function swapIcon(el, id) {
   const use = el.querySelector('use');
   if (use) use.setAttribute('href', '#i-' + id);
 }
+
+// ---- 时间/计数口径（c_jf3grt）----
+// 全页日期统一走这两个函数，不再用 toLocaleString/toLocaleDateString：
+// 浏览器 locale 是环境态（系统语言/无头 --lang/语言包），同一份页面在
+// 中文界面里能渲染出「11/20/2026, 7:00:00 PM」——既长、秒无用、还混语。
+// 手拼格式 = 输出与 locale 无关：MM-DD HH:mm（跨年才补 YYYY-）。秒一律
+// 不出现（会话粒度的时间线，秒是噪声）。
+function fmtWhen(t) {
+  const d = t ? new Date(t) : null;
+  if (!d || isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  const md = p(d.getMonth() + 1) + '-' + p(d.getDate());
+  return (d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + '-' + md)
+    + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+// 只需要日期的位置（记忆列表、趋势 x 轴）：MM-DD，跨年补年。
+function fmtDay(t) {
+  const d = t ? new Date(t) : null;
+  if (!d || isNaN(d.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  const md = p(d.getMonth() + 1) + '-' + p(d.getDate());
+  return d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + '-' + md;
+}
+// 「N 轮」：中文没有量词单复数，英文 "1 turns" 的复数错随本函数退休。
+function fmtTurns(n) { return (n || 0) + ' 轮'; }
 
 // 会话身份（W1.3，D-W3）：uuid 浏览器自铸、localStorage 持久；服务端
 // 零会话状态——它只是 bindings 表的键（web:<uuid>）。localStorage 不可
@@ -1202,6 +1283,7 @@ function renderBody(el, text) {
 }
 
 function addMsg(who, text, atts) {
+  dropChatEmpty();                   // 第一条消息落地：空态让位（c_jf3grt）
   const el = document.createElement('div');
   el.className = 'msg ' + who;
   if (atts && atts.length) {
@@ -1306,6 +1388,7 @@ function renderTray() {
     }
     tray.appendChild(chip);
   }
+  syncSend();   // 附件进出/就绪改动「可否发送」（c_jf3grt：无正文也能发附件）
 }
 
 // attachOne：本地预检（类型/空/上限）→ 图片读预览 → /attach 上传
@@ -1405,6 +1488,57 @@ let boundSession = null;  // 本 conv 的绑定会话（侧栏当前项高亮的
 // 会话要等整页刷新才出现。undefined = 首次 /state 还没回（启动那一次由
 // boot 的 loadSessions 负责，避免双拉）。
 let lastSeenSession;
+
+// ---- 主区空态（c_jf3grt）----
+// 聊天面空着时给引导，不留一大片无字区：未绑定 → /bind 路径说明 + 点选
+// 按钮（复用 openBindPicker，与顶栏 /bind 同一条候源）；已绑定 → 欢迎语
+// 与输入提示。空态块是 #list 的直接子节点里唯一非 .msg 的一项，消息落地
+// 即摘（dropChatEmpty）；只在真的空列表上渲染，绝不挤占历史消息。
+let chatEmptyKind = '';   // 在场空态的形态（unbound/bound）；'' = 无
+function dropChatEmpty() {
+  const old = list.querySelector('.chat-empty');
+  if (old) old.remove();
+  chatEmptyKind = '';
+}
+
+function renderChatEmpty() {
+  if (list.children.length) { chatEmptyKind = ''; return; }
+  const kind = boundProject ? 'bound' : 'unbound';
+  if (chatEmptyKind === kind) return;   // 同形态已在场：不重建（免闪）
+  list.replaceChildren();
+  const box = document.createElement('div');
+  box.className = 'chat-empty';
+  const t = document.createElement('div');
+  t.className = 'ce-t';
+  const x = document.createElement('div');
+  x.className = 'ce-x';
+  if (!boundProject) {
+    t.textContent = '还没有绑定项目';
+    x.appendChild(document.createTextNode('用 '));
+    const c = document.createElement('code');
+    c.textContent = '/bind <项目路径>';
+    x.appendChild(c);
+    x.appendChild(document.createTextNode(' 绑定一个项目，或直接点下面的按钮从候选里选。'));
+    const acts = document.createElement('div');
+    acts.className = 'ce-acts';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = '选择项目…';
+    b.addEventListener('click', () => openBindPicker());
+    acts.appendChild(b);
+    box.appendChild(t);
+    box.appendChild(x);
+    box.appendChild(acts);
+  } else {
+    t.textContent = '开始新的对话';
+    x.textContent = '直接输入消息开始；输入 / 看指令，@ 引用历史会话。';
+    box.appendChild(t);
+    box.appendChild(x);
+  }
+  list.appendChild(box);
+  chatEmptyKind = kind;
+}
+
 async function refreshState() {
   try {
     const r = await fetch(q('/state'), { headers: { 'X-Seek-Conversation': CONV } });
@@ -1425,6 +1559,7 @@ async function refreshState() {
     // 新会话要等整页刷新才出现在列表里。首帧由 boot 的 loadSessions 拉。
     if (lastSeenSession !== undefined && lastSeenSession !== boundSession) loadSessions();
     lastSeenSession = boundSession;
+    renderChatEmpty();               // 空态跟随绑定态（未绑定 / 已绑定欢迎语）
     return true;
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
 }
@@ -1446,6 +1581,21 @@ const dirty = new Set();  // 本帧待重渲的 run（SSE 突发合帧，一帧�
 // ---- 发送/停止键态（c_5m3fm6，对齐 dsh InputBar 中断语义）----
 // 生成中（本 conv 有活跃 run——首个 delta/tool 事件起、reply 收口止）发送键
 // 变停止键；键态只跟 runs 表走，流事件开、收口关，无生成时恒为发送键。
+//
+// 空草稿禁用（c_jf3grt）：非生成态下「发送」只在有内容可发时可点——草稿
+// 非空白，或托盘里有还没失败的附件（附件可以不带正文直接发）。停止键
+// 不受这条约束：生成中永远要给出一条中断出口。
+// posting 是在途 POST /msg 的防重入位，与「可否发送」解耦——早先两者共用
+// send.disabled，键一禁用就把 /new、/bind 选择器这些同走 sendText 的入口
+// 一并锁死（按钮不吃输入框的草稿）。
+let posting = false;
+function draftReady() {
+  return input.value.trim() !== '' || attachments.some(a => a.status !== 'error');
+}
+function syncSend() {
+  if (runs.size > 0) { send.disabled = false; return; }
+  send.disabled = posting || !draftReady();
+}
 function renderSend() {
   const busy = runs.size > 0;
   // 文案不带 emoji/字符图标（c_25d2ey）：主操作档不加图标，红底 .stop
@@ -1453,6 +1603,7 @@ function renderSend() {
   send.textContent = busy ? '停止' : '发送';
   send.classList.toggle('stop', busy);
   send.title = busy ? '中断当前生成（等同 /cancel）' : '';
+  syncSend();
 }
 
 function nearBottom() {
@@ -1475,6 +1626,7 @@ function runBubble(id) {
   runs.set(id, r);
   lastRun = id;
   renderSend();               // 首个流事件即键态切换（c_5m3fm6）
+  dropChatEmpty();            // 流式泡也是消息：空态让位（c_jf3grt）
   appendPinned(list, el);
   return r;
 }
@@ -1858,7 +2010,7 @@ document.getElementById('reconn').addEventListener('click', () => listen());
 // 正文——这就是平面与 CLI 之间唯一的附件协议，child 的 imgrefs/filerefs
 // 路由器照旧认领。
 async function sendText(text, fromInput, atts) {
-  if (send.disabled) return;
+  if (posting) return;   // 在途重入闸（c_jf3grt：与「空草稿禁用」解耦）
   const refs = (atts || []).filter(a => a.status === 'done' && a.path);
   const tokens = refs.map(a => '@' + a.path).join('\n');
   const body = text ? (tokens ? text + '\n' + tokens : text) : tokens;
@@ -1869,7 +2021,8 @@ async function sendText(text, fromInput, atts) {
   if (body.trim() === '/cancel') stopping = runs.size ? lastRun : '';
   addMsg('you', text, refs);
   if (fromInput) input.value = '';
-  send.disabled = true;
+  posting = true;
+  syncSend();
   try {
     const r = await fetch(q('/msg'), {
       method: 'POST',
@@ -1891,7 +2044,8 @@ async function sendText(text, fromInput, atts) {
       if (body.startsWith('/')) refreshState();
     }
   } catch (e) { addMsg('hint', '（发送失败：' + e + '）'); }
-  send.disabled = false;
+  posting = false;
+  syncSend();          // 收口回「发送」；草稿空则保持禁用（c_jf3grt）
 }
 
 // pendingAttachments 等在途上传收口，分出可用与失败两组。
@@ -1904,7 +2058,7 @@ async function pendingAttachments() {
 
 form.addEventListener('submit', async ev => {
   ev.preventDefault();
-  if (send.disabled) return;
+  if (posting) return;
   const typed = input.value.trim();
   const { ready, failed } = await pendingAttachments();
   // 指令不吃附件（"/bind …" 后面拼路径只会变成指令参数）；有附件时先
@@ -2065,7 +2219,7 @@ function atHits() {
   if (!rows.length) return notice('（没有匹配的会话）');
   return rows.slice(0, 8).map(s => ({
     label: s.title || s.sid.slice(0, 8),
-    desc: s.last_at ? new Date(s.last_at).toLocaleString() : '',
+    desc: fmtWhen(s.last_at),
     meta: s.sid.slice(0, 8),
     apply: () => applyAt(s.sid),
   }));
@@ -2364,7 +2518,7 @@ function updateMenu() {
 // keyup/click 必须包一层空箭头——直接挂 updateMenu 会把 Event 当实参，
 // 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。编辑动作先收掉点选
 // 候源（c_lnsdvu）：弹层头行说了「路径也可手打」——开始打字就该让位。
-input.addEventListener('input', () => { grow(); bindOpen = false; updateMenu(); });
+input.addEventListener('input', () => { grow(); bindOpen = false; updateMenu(); syncSend(); });
 input.addEventListener('keyup', () => updateMenu());
 input.addEventListener('click', () => updateMenu());
 input.addEventListener('blur', ev => {
@@ -2403,7 +2557,7 @@ input.addEventListener('keydown', ev => {
 send.addEventListener('click', ev => {
   if (!runs.size) return;            // 非生成中：照常提交（发送）
   ev.preventDefault();               // 生成中：本次点击=停止，不进 submit
-  if (!send.disabled) sendText('/cancel', false);
+  if (!posting) sendText('/cancel', false);   // 停止键恒可点，只在途闸挡重入
 });
 
 // 点击选择（附件钮）。
@@ -2451,7 +2605,7 @@ document.addEventListener('paste', async ev => {
 // 点选候选而不是手敲；/projects 的聊天文本回复形态不变（手打仍可看）。
 function wireCmd(id, text) {
   document.getElementById(id).addEventListener('click', () => {
-    if (send.disabled) return;
+    if (posting) return;   // 指令入口不吃草稿禁用态（c_jf3grt：闸只认在途 POST）
     if (text.endsWith(' ')) {           // 带参指令：预填，光标移到末尾
       input.value = text;
       input.setSelectionRange(text.length, text.length);
@@ -2473,7 +2627,7 @@ wireCmd('cmd-cancel', '/cancel');
 // 键盘导航（↑↓/Enter/Tab）、Esc 关、点别处关（blur）全部沿用输入框这条
 // 既有事件线，不新增全局监听；开始打字则由 input 监听收掉候源让位。
 function openBindPicker() {
-  if (send.disabled) return;
+  if (posting) return;
   bindOpen = true;
   input.focus();
   updateMenu();
@@ -2485,7 +2639,7 @@ document.getElementById('cmd-projects').addEventListener('click', openBindPicker
 // ——不另造协议。项目不变、会话重置；落地后刷新绑定与侧栏当前项（/new 的
 // 回复也会走 onmessage 的 refreshState，两处幂等）。
 document.getElementById('side-new').addEventListener('click', async () => {
-  if (send.disabled) return;
+  if (posting) return;
   await sendText('/new', false);
   refreshState();
   loadSessions();
@@ -2762,11 +2916,16 @@ function renderSessRows() {
     t1.textContent = s.title || '（无标题）';
     const t2 = document.createElement('span');
     t2.className = 't2';
-    const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
+    const when = fmtWhen(s.last_at);
     const t2l = document.createElement('span');
     t2l.className = 't2l';
-    t2l.textContent = (s.archived ? '已归档 · ' : '')
-      + when + ' · ' + s.turns + ' turns · ' + (s.model || '?');
+    // 日期短格式 + 「N 轮」（c_jf3grt）：英文 locale 长日期与 "1 turns" 的
+    // 残留在此归零；空值不上「·」分隔（无 last_at 时不留孤儿分隔符）。
+    const bits = [];
+    if (s.archived) bits.push('已归档');
+    if (when) bits.push(when);
+    bits.push(fmtTurns(s.turns), s.model || '?');
+    t2l.textContent = bits.join(' · ');
     // per-session cost 列（c_6xktw4）：cost_usd 服务端算好的，页面只排版
     // （§2.5 client never prices）。
     const t2c = document.createElement('span');
@@ -2922,7 +3081,7 @@ async function loadMeta(sid) {
     const g = await rpc('session/get', { sid });
     if (!sel || sel.sid !== sid) return;  // 返回前已切走：丢弃
     const u = g.cumulative_usage || {};
-    sessMeta.textContent = (g.header.model || '?') + ' · ' + g.turns + ' turns · '
+    sessMeta.textContent = (g.header.model || '?') + ' · ' + fmtTurns(g.turns) + ' · '
       + ((u.prompt_tokens || 0) + (u.completion_tokens || 0)) + ' tokens · '
       + (g.header.cwd || '');
   } catch (e) { sessMeta.textContent = 'session/get 失败：' + e.message; }
@@ -3078,7 +3237,10 @@ function callNode(tc) {
     { textContent: name }));
   const sm = document.createElement('span');
   sm.className = 'sm';
-  sm.textContent = clipOneLine(args, 72) || '（无参数）';
+  sm.textContent = argSummary(args);
+  // 悬停给参数原文（截断策略：行内省略号 + 完整文本另有可达处）；格式化
+  // 全文仍在展开面板的「参数」节（buildTreeDetail）。
+  if (args) row.title = name + ' ' + clipOneLine(args, 200);
   const rs = document.createElement('span');
   rs.className = 'rs';
   row.appendChild(nm);
@@ -3150,6 +3312,27 @@ function clipOneLine(text, max) {
   if (typeof text !== 'string' || !text) return '';
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length <= max ? t : t.slice(0, max) + '…';
+}
+
+// 参数摘要（c_jf3grt）：树行只给「首个键=值」，其余键折成 +N——原始 JSON
+// 直出（{"path":"…","offset":100}）在行里既噪又吃宽度，读者要的是「读了
+// 哪个文件」不是序列化形态。首值是嵌套对象/数组时改出键名列表（值的形状
+// 塞进摘要没有信息量）；解析失败退回单行原文。JSON.parse 必须 try：参数
+// 是模型产物，畸形串不是异常面（行还得照常渲染）。全文见展开面板。
+function argSummary(args) {
+  if (!args) return '（无参数）';
+  let obj;
+  try { obj = JSON.parse(args); } catch (e) { return clipOneLine(args, 72); }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return clipOneLine(args, 72);
+  const keys = Object.keys(obj);
+  if (!keys.length) return '（无参数）';
+  const first = obj[keys[0]];
+  if (first === null || typeof first !== 'object') {
+    const val = typeof first === 'string' ? first : String(first);
+    return keys[0] + '=' + clipOneLine(val, 56)
+      + (keys.length > 1 ? ' +' + (keys.length - 1) : '');
+  }
+  return clipOneLine(keys.join(', '), 72);
 }
 
 // 复制全文：secure context 走 clipboard API；tailnet 明文 http 不是
@@ -3363,7 +3546,7 @@ function renderAgList() {
     t2.className = 't2';
     const toks = agTokensText(s.tokens);
     t2.textContent = (s.type || '?') + ' · '
-      + (s.started_at ? new Date(s.started_at).toLocaleString() : '')
+      + fmtWhen(s.started_at)
       + (toks ? ' · ' + toks : '');
     row.appendChild(t1);
     row.appendChild(t2);
@@ -3405,8 +3588,8 @@ function renderAgDetail(d) {
     ['状态', s.status + (st.kind !== 'running' ? '' : '（进行中）')],
     ['类型', s.type],
     ['模式', s.background ? '后台（结果经通知回到父会话）' : '同步'],
-    ['开始', s.started_at ? new Date(s.started_at).toLocaleString() : ''],
-    ['结束', s.ended_at ? new Date(s.ended_at).toLocaleString() : ''],
+    ['开始', fmtWhen(s.started_at)],
+    ['结束', fmtWhen(s.ended_at)],
     ['tokens', toks ? toks + '（p/cache_hit）' : ''],
     ['worktree', s.worktree_path || ''],
     ['resumed_from', s.resumed_from || ''],
@@ -3679,7 +3862,7 @@ async function loadMemPane() {
       const opt = document.createElement('option');
       opt.value = p.project_id;
       opt.textContent = p.project_id.slice(0, 8) + ' · ' + p.memories + ' 条 · '
-        + new Date(p.last_active_at).toLocaleDateString();
+        + fmtDay(p.last_active_at);
       memProj.appendChild(opt);
     }
     loadMemList(memProj.value);
@@ -3713,7 +3896,7 @@ async function loadMemList(proj) {
       const tx = document.createElement('span');
       tx.className = 'tx';
       tx.textContent = (m.stale ? '过期 · ' : '') + (m.tagline || '')
-        + ' · ' + new Date(m.updated_at).toLocaleDateString();
+        + ' · ' + fmtDay(m.updated_at);
       t2.appendChild(tx);
       row.appendChild(t1);
       row.appendChild(t2);
@@ -3733,8 +3916,8 @@ async function openMem(proj, name) {
     const m = await rpc('memory/get', { project_id: proj, name });
     if (!memSel || memSel.proj !== proj || memSel.name !== name) return;  // 已切走：丢弃
     const bits = [m.name, m.tagline || ''];
-    bits.push('建于 ' + new Date(m.created_at).toLocaleString());
-    bits.push('更新 ' + new Date(m.updated_at).toLocaleString());
+    bits.push('建于 ' + fmtWhen(m.created_at));
+    bits.push('更新 ' + fmtWhen(m.updated_at));
     bits.push('召回 ' + m.recall_count + ' 次');
     if (m.pinned) bits.push('常驻');
     if (m.stale) bits.push('过期待回收');
@@ -3787,8 +3970,10 @@ async function loadStatPane() {
     for (const s of res.sessions) {
       const opt = document.createElement('option');
       opt.value = s.sid;
-      const when = s.last_at ? new Date(s.last_at).toLocaleString() : '';
-      opt.textContent = (s.title || s.sid.slice(0, 8)) + (when ? ' · ' + when : '');
+      // 标题截断 + 短日期（c_jf3grt）：option 没有 ellipsis，整段用户消息
+      // 原文会把下拉撑爆、日期反被裁掉；截到一行可读长度，全文仍在侧栏。
+      const when = fmtWhen(s.last_at);
+      opt.textContent = clipOneLine(s.title || s.sid.slice(0, 8), 28) + (when ? ' · ' + when : '');
       statSess.appendChild(opt);
     }
     showStats(statSess.value);
@@ -4112,8 +4297,9 @@ function renderTrend() {
       visibility: 'hidden' }));
     svg.appendChild(guides[guides.length - 1]);
   });
-  // x 轴两端的时间（中间点靠 tooltip 说）。
-  const day = t => (t ? new Date(t).toLocaleDateString() : '');
+  // x 轴两端的时间（中间点靠 tooltip 说）：MM-DD 手拼，不吃 locale
+  // （c_jf3grt：toLocaleDateString 在窄图里可能挤成无分隔的一串数字）。
+  const day = fmtDay;
   const xl = svgEl('text', { x: L, y: H - 2, class: 'tlab' });
   xl.textContent = day(pts[0].at);
   svg.appendChild(xl);
@@ -4137,7 +4323,7 @@ function renderTrend() {
     fill: 'transparent' });
   const show = i => {
     const p = pts[i];
-    const when = new Date(p.at).toLocaleString();
+    const when = fmtWhen(p.at);
     tip.textContent = (p.sid || '').slice(0, 8) + ' · ' + when + ' · '
       + rows.map(r => r.label + ' ' + r.f(r.v(p))).join(' · ');
     tip.hidden = false;

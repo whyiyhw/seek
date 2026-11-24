@@ -156,6 +156,9 @@ const snap = () => evalJS(`(() => {
       hl: x.classList.contains('hl'),
     })) : [],
     bubbles: document.querySelectorAll('#list > .msg').length,
+    sendDisabled: document.getElementById('send')
+      ? document.getElementById('send').disabled : null,
+    chatEmpty: (document.querySelector('#list .chat-empty') || {}).textContent || '',
     status: document.getElementById('status-l').textContent,
     tag: i ? i.tagName : '',
     focused: document.activeElement ? document.activeElement.id : '',
@@ -206,11 +209,31 @@ ck('输入框是 textarea（多行的前提）', base.tag === 'TEXTAREA', `got $
 ck('基线 scripts=3（head 主题 bootstrap + 页面脚本 + markdown.js）',
   (await evalJS('document.scripts.length')) === 3, '');
 ck('基线弹层关闭', !base.menuOpen, JSON.stringify(base));
+// ---- 主区空态 + 发送禁用态（c_jf3grt）----
+// 未绑定的空聊天面给 /bind 引导（含点选按钮），空草稿时发送键禁用；
+// 有草稿即可点，清空回到禁用。这两条是「页面不许给死气/可点的空操作」
+// 的可见证据。
+ck('主区空态（未绑定）：/bind 引导 + 选择项目按钮',
+  base.chatEmpty.includes('还没有绑定项目')
+  && base.chatEmpty.includes('/bind <项目路径>')
+  && (await evalJS(`!!document.querySelector('#list .chat-empty .ce-acts button')`)),
+  JSON.stringify(base.chatEmpty));
+ck('发送键：空草稿缺省禁用（静态标记 + syncSend）',
+  base.sendDisabled === true, `disabled=${base.sendDisabled}`);
+await evalJS(`document.getElementById('input').focus()`);
+await typeText('草稿');
+let stDraft = await snap();
+ck('发送键：有草稿即可点', stDraft.sendDisabled === false, `disabled=${stDraft.sendDisabled}`);
+await clearInput();
+stDraft = await snap();
+ck('发送键：清空草稿回到禁用', stDraft.sendDisabled === true, `disabled=${stDraft.sendDisabled}`);
 await bindProject();
 trace('已绑定桩项目');
 // /bind 的 ack 自己也是一条气泡：基线必须在它落地之后再取，否则「不清空/
 // 不发送」这类断言会把它算成新消息。
 base.bubbles = (await snap()).bubbles;
+ck('消息落地后空态让位（#list 只剩 .msg）',
+  (await snap()).chatEmpty === '', (await snap()).chatEmpty);
 
 // 全局键不劫持的探针：document 级监听记录「最后一个键是否被 preventDefault」。
 // 本页的弹层按键全部挂在 input 上并且只在开着时 preventDefault——关掉即
