@@ -25,3 +25,4 @@ v0.13.0 — **回合控制、判分层、web 收边**的一版。人第一次能
 - c_myz47s：叙事稿提炼：seek
 - c_n72agp：seek web：hooks/audit SSE 实时流——补 inspect-rpc §6 #6/#7（tail follow 的既定分流承接）
 - c_xhbqae：seek eval：judge gate 开启（record → gating）——用户拍板，kill-switch 在位可逆
+- c_sd3x7o：叙事稿提炼：seek
