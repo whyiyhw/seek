@@ -49,6 +49,12 @@ if (typeof WebSocket !== 'function') {
   process.exit(1);
 }
 
+// ---- 视觉趋势计数的阈值常量（manifest.visual）----
+// 与 butler 仓 scripts/page-review.mjs 同值，两侧各一份不共享库（跨仓共享
+// 模块成本 > 收益）。五项计数只记录不判失败：它们是「页面长什么样」的逐轮
+// 旁证，退出码仍只看 32/32 镜头是否拍齐。
+const VISUAL_THRESHOLDS = { minContrast: 4.5 };   // WCAG 2.2 AA 正文对比度
+
 // 面板矩阵：8 面板 × 2 主题 × 2 视口 = 32 镜头。聊天空态必须拍在 /bind
 // 之前（绑定应答泡会污染空态），所以它是 Phase A 独立拍；其余 7 面板在
 // Phase C（/bind 后）按 主题→视口→面板 巡拍。
@@ -354,6 +360,112 @@ for (const theme of THEMES) {
   }
 }
 
+// ---- 6.5 视觉趋势计数：五项指标（只记录不判失败）----
+// 读的是「serve 出去的页面源」而不是渲染后的 DOM：要数的是源里的 <style>
+// 与 :root token，渲染态会把 var() 展开成计算值、趋势就失真了。采集失败
+// 只记 manifest.visual.error，绝不折损退出码。
+const CONTRAST_FGS = ['fg', 'fg-dim', 'fg-soft', 'ok', 'warn', 'err', 'link'];
+const CONTRAST_BGS = ['inset', 'panel', 'soft', 'accent'];
+
+async function fetchPageSource() {
+  const r = await fetch(pageUrl, { signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) throw new Error(`GET 页面源 ${r.status}`);
+  return r.text();
+}
+
+// WCAG 2.2 相对亮度比：(L亮 + .05) / (L暗 + .05)
+const srgbToLinear = c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+const relLuminance = hex => {
+  const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
+};
+const contrastRatio = (a, b) => {
+  const [x, y] = [relLuminance(a), relLuminance(b)];
+  return +(((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)).toFixed(2));
+};
+
+function visualMetrics(html) {
+  // 先剥 HTML 注释再抽 <style>：页面上方的注释正文里提过 "<style>" 字样，
+  // 不剥会把注释到真 </style> 之间整段吞成幻影块（webfrontend_static.go 的
+  // styleBlockRE 注释记过同款坑——那边靠行锚定解决，这里两道都上）。
+  const doc = html.replace(/<!--[\s\S]*?-->/g, '');
+  const styleBlocks = [...doc.matchAll(/^<style\b[^>]*>([\s\S]*?)<\/style>/gim)].map(m => m[1]);
+  // 注释里的「样例色 / 示例字号」不是真用法，CSS/JS 块注释统一剥掉。
+  const css = styleBlocks.join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // :root 两套 token：暗 = 裸 :root，亮 = :root[data-theme="light"]。
+  const tokenSets = {};
+  for (const m of css.matchAll(/:root\s*(\[[^\]]*\])?\s*\{([^}]*)\}/g)) {
+    const theme = m[1] && m[1].includes('light') ? 'light' : 'dark';
+    const toks = {};
+    for (const d of m[2].matchAll(/--seek-([a-z0-9-]+)\s*:\s*([^;]+);/gi)) toks[d[1]] = d[2].trim();
+    tokenSets[theme] = toks;
+  }
+  // 一层别名解析（暗色 --seek-link: var(--seek-ok)）；解析后不是 #rrggbb 的跳过。
+  const resolve = (toks, name) => {
+    let v = toks[name];
+    for (let i = 0; v !== undefined && i < 3; i++) {
+      const ref = v.match(/^var\(--seek-([a-z0-9-]+)\)$/i);
+      if (!ref) break;
+      v = toks[ref[1]];
+    }
+    return v && /^#[0-9a-f]{6}$/i.test(v) ? v : null;
+  };
+
+  const lowContrast = {
+    threshold: VISUAL_THRESHOLDS.minContrast,
+    checked_pairs: CONTRAST_FGS.length * CONTRAST_BGS.length,
+  };
+  for (const theme of ['dark', 'light']) {
+    const toks = tokenSets[theme];
+    if (!toks || !Object.keys(toks).length) {
+      lowContrast[theme] = { error: '--seek-* token 未解析到' };
+      continue;
+    }
+    const pairs = [];
+    for (const fg of CONTRAST_FGS) for (const bg of CONTRAST_BGS) {
+      const f = resolve(toks, fg), b = resolve(toks, bg);
+      if (!f || !b) continue;
+      const ratio = contrastRatio(f, b);
+      if (ratio < VISUAL_THRESHOLDS.minContrast) {
+        pairs.push({ fg: `--seek-${fg}`, bg: `--seek-${bg}`, ratio });
+      }
+    }
+    pairs.sort((a, b) => a.ratio - b.ratio);
+    lowContrast[theme] = { count: pairs.length, pairs };
+  }
+
+  const values = re => [...new Set([...css.matchAll(re)].map(m => m[1]))];
+  const numeric = vs => vs.map(Number).sort((a, b) => a - b);
+  const fontSizes = numeric(values(/font-size:\s*([\d.]+)px/gi));
+  const fontWeights = values(/font-weight:\s*([\w.]+)/gi).sort();
+  const radii = numeric(values(/border-radius:\s*([\d.]+)px/gi));
+
+  // :root 外 hex：剥掉两套 token 块后剩余的字面量（去重）。2026-11-24 基线
+  // 表记的 31 是「全文件去重数」——当时 31 个 hex 恰好全住在 :root 里，故本
+  // 指标按字面算法得 0；两个数都落盘，免得被读成「31 处硬编码散落全文件」。
+  // 这里不剥 CSS 注释：注释里点名的色值也算「字面量」（31 里就含一个）。
+  const hexes = txt => [...new Set([...txt.matchAll(/#[0-9a-fA-F]{6}\b/g)].map(m => m[0].toLowerCase()))];
+  const hexOutside = hexes(doc.replace(/:root\s*(?:\[[^\]]*\])?\s*\{[^}]*\}/g, ''));
+
+  return {
+    low_contrast_pairs: lowContrast,
+    font_sizes_px: { count: fontSizes.length, values: fontSizes },
+    font_weights: { count: fontWeights.length, values: fontWeights },
+    hex_outside_root: { count: hexOutside.length, values: hexOutside,
+      distinct_in_file: hexes(doc).length },
+    border_radii_px: { count: radii.length, values: radii },
+  };
+}
+
+let visual;
+try {
+  visual = visualMetrics(await fetchPageSource());
+} catch (e) {
+  visual = { error: String((e && e.message) || e) };
+  console.log(`  warn  visual 计数失败（不影响退出码）：${visual.error}`);
+}
+
 // ---- 7. 产物：console.txt + manifest.json ----
 writeFileSync(path.join(outDir, 'console.txt'),
   consoleLog.length === 0 ? '（全程零 console 输出/异常/资源错误）\n'
@@ -379,9 +491,16 @@ writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify({
   capture_failures: shotMeta.filter(s => !s.ok).length,
   console_entries: consoleLog.length,
   dom_dump: domDumped ? 'dom-chat-rich.html' : null,
+  visual,
   reading_note: 'console 与 navError 是审查证据不是脚本失败：坏页面正是本工具要抓的东西；'
-    + '退出码只看镜头是否拍齐（32/32）。',
+    + '退出码只看镜头是否拍齐（32/32）。visual 五项是趋势指标，只记录不拦。',
 }, null, 2) + '\n');
+
+if (visual.error) console.log(`\nvisual: 采集失败（${visual.error}）——不影响退出码`);
+else console.log('\nvisual: '
+  + `低对比 暗${visual.low_contrast_pairs.dark.count ?? '?'}/亮${visual.low_contrast_pairs.light.count ?? '?'} 对`
+  + ` · 字号 ${visual.font_sizes_px.count} 档 · 字重 ${visual.font_weights.count} 档`
+  + ` · :root 外 hex ${visual.hex_outside_root.count} · 圆角 ${visual.border_radii_px.count} 档`);
 
 const ok = shotMeta.length === 32 && shotMeta.every(s => s.ok);
 console.log(ok ? '\n32 镜头拍齐（证据包齐：manifest + PNG + console + DOM dump）'
