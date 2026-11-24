@@ -38,6 +38,14 @@ func (m *Model) traceEvent(event, detail string, chars int) {
 	})
 }
 
+// traceGuidance records a machine-authored hint. Separate entry point so
+// the rule name is impossible to forget — a guidance row without its rule
+// is useless for the only question it answers ("which rule earns its
+// tokens?").
+func (m *Model) traceGuidance(rule string, chars int) {
+	m.traceEvent(uitrace.EventGuidance, rule, chars)
+}
+
 // traceEventDur is traceEvent plus a duration and a token magnitude, for
 // the operations where elapsed time and context size are the interesting
 // numbers (compact, goal).

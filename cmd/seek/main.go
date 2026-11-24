@@ -38,6 +38,7 @@ import (
 	"github.com/whyiyhw/seek/internal/fileroute"
 	"github.com/whyiyhw/seek/internal/fsobserve"
 	"github.com/whyiyhw/seek/internal/goal"
+	"github.com/whyiyhw/seek/internal/guidance"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/hookscli"
 	"github.com/whyiyhw/seek/internal/hooksconfig"
@@ -937,6 +938,17 @@ func run() error {
 		goalBash = goalBash.WithDeny(laneGuard(lane))
 	}
 
+	// Deterministic turn-boundary guidance. One Guide per session (its
+	// counters are per-conversation). Off when $SEEK_GUIDANCE is
+	// explicitly falsy; unset = on (the rules are inert until a failure
+	// shape actually appears, so the default costs nothing).
+	guidanceFor := func() agent.Guidance {
+		if v := strings.ToLower(strings.TrimSpace(os.Getenv("SEEK_GUIDANCE"))); v == "0" || v == "false" || v == "off" || v == "no" {
+			return nil
+		}
+		return guidance.New()
+	}
+
 	// Repeat-call guard (one counter per session). Wrapped around the
 	// tools whose repetition is both common and expensive: a failing
 	// command re-run unchanged, or the same file re-read after it fell
@@ -1511,6 +1523,13 @@ func run() error {
 		// feature-deepseek-app-api F4: the document sibling — lazy
 		// upload / expiry re-upload of file_id from the asset library.
 		FileResolver: fileResolver(abs, dsClient),
+		// Deterministic turn-boundary guidance (internal/guidance):
+		// retry-loop / failure-run / silence-run, each capped and
+		// cooling down. Opt-OUT via $SEEK_GUIDANCE=0 — on by default
+		// because the rules only fire on failure shapes the model
+		// cannot see from inside a single tool result, and the trace
+		// (seek ui-trace) is what decides whether that bet was right.
+		Guidance: guidanceFor(),
 	})
 	if err != nil {
 		return err

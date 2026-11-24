@@ -103,9 +103,29 @@ type ErrorEvent struct{ Err error }
 // will be turn Index. Message is the committed message verbatim (its
 // Content already carries the mode reminder suffix, like every other
 // user turn).
+//
+// Source says who authored it (InjectedSourceUser or
+// InjectedSourceGuidance) — wire format for the TUI's rendering and for
+// a trace report splitting human break-ins from machine hints.
+const (
+	// InjectedSourceUser is text the human queued mid-round.
+	InjectedSourceUser = "user"
+	// InjectedSourceGuidance is a deterministic hint from
+	// Agent.Config.Guidance (pkg/agent/guidance.go).
+	InjectedSourceGuidance = "guidance"
+)
+
 type InjectedMessage struct {
 	Index   int
 	Message deepseek.Message
+	// Source is InjectedSourceUser or InjectedSourceGuidance. Empty on
+	// events from before the field existed — readers must treat it as
+	// InjectedSourceUser.
+	Source string
+	// Rule names the guidance rule that spoke (GuidanceNamer), empty for
+	// user injections and for nameless guidance implementations. Wire
+	// format for per-rule firing counts.
+	Rule string
 }
 
 // PlanProposalApproved fires when the propose tool returns and the user

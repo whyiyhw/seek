@@ -438,12 +438,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.chunked = false
 
 	case agent.InjectedMessage:
-		// A user message queued via QueueUserMessage just landed at a
-		// turn boundary inside the CURRENT round (pkg/agent/inject.go).
-		// Commit the block to scrollback so the transcript shows where
-		// the user intervened — the same rendering as a submitted prompt,
-		// minus the round-boundary bookkeeping (this is not a new turn
-		// from the user's point of view, the round is still running).
+		// Something landed at a turn boundary inside the CURRENT round
+		// (pkg/agent/inject.go, guidance.go). Source decides the
+		// rendering: a human break-in deserves the same `▌ you` block a
+		// submitted prompt gets; a machine hint is a muted one-liner, not
+		// something that looks like the user typed it.
+		if e.Source == agent.InjectedSourceGuidance {
+			m.traceGuidance(e.Rule, len(e.Message.Content))
+			cmds = append(cmds, m.appendHistory(styleMuted.Render(
+				"  ⚙ guidance: "+truncateOneLine(e.Message.Content, 100))))
+			break
+		}
 		m.injectedPreview = ""
 		cmds = append(cmds, m.appendHistory(renderUserBlock(e.Message.Content, m.width)))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ inserted at turn boundary "+fmt.Sprint(e.Index))))

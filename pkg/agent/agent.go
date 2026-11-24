@@ -142,6 +142,23 @@ type Config struct {
 	// unchanged is a valid no-op; must not mutate the input slice
 	// (caller may reuse it later).
 	PrepareMessages func([]deepseek.Message) []deepseek.Message
+
+	// Guidance, when non-nil, is consulted once per settled turn for a
+	// deterministic hint to inject at the next turn boundary
+	// (pkg/agent/guidance.go, internal/guidance). nil = off.
+	//
+	// It runs on the agent's goroutine between turns and must not
+	// block. Returning "" is the normal case. A hint lands as a
+	// user-role message at the tail, so the prefix cache keeps hitting;
+	// a real user injection (QueueUserMessage) supersedes it in the
+	// same boundary — the human's text is always the more specific
+	// instruction.
+	//
+	// The interface is deliberately narrow (one call, one string): the
+	// decision of WHEN a hint is worth saying is internal/guidance's,
+	// and keeping it out of this package is what lets that judgement be
+	// retuned against measured trace data without touching the loop.
+	Guidance Guidance
 }
 
 // Completion-token budgets. defaultMaxTokens is the historical cap
@@ -688,6 +705,11 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// were salvaged after a finish_reason="length" cut. Any turn
 			// that was not truncated resets it (same rule).
 			truncationStreak int
+			// lastBrief is the shape of the most recently settled turn,
+			// handed to cfg.Guidance at the next boundary (guidance.go).
+			// Zero until the first turn settles.
+			lastBrief TurnBrief
+			haveBrief bool
 		)
 
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
@@ -697,10 +719,14 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// turn begins after a tool batch has been committed, which is
 			// the boundary where a user message is legal (assistant
 			// tool_calls are already paired with their tool results).
-			if turn > 0 && a.commitInjected(turn, out) {
-				// Emitted InjectedMessage events tell the UI the text
-				// landed mid-round; history now ends with a user turn,
-				// exactly what the next request needs.
+			if turn > 0 {
+				// A human break-in supersedes a machine hint: the user's
+				// text is the more specific instruction, and saying both
+				// in one breath dilutes the human one. Guidance only
+				// gets the boundary when nothing was injected.
+				if !a.commitInjected(turn, out) && haveBrief {
+					a.commitGuidance(turn, lastBrief, out)
+				}
 			}
 			out <- TurnStart{Index: turn}
 			a.cfg.Hooks.NotifyPreTurn(ctx, hooks.PreTurnEvent{
@@ -994,6 +1020,13 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				// turn" is the whole point — dropping the text silently
 				// would make the API's false return and the TUI's
 				// "queue" feel identical to a lost message.
+				// Guidance deliberately does NOT get the settle point.
+				// A machine hint must never extend a round: the model
+				// just decided it was done, and an infinite loop is
+				// exactly what happens when a hint keeps answering
+				// "not yet" — every extra turn produces a fresh brief
+				// that qualifies again. Only a HUMAN injection earns
+				// one more turn (the user asked for something).
 				if turn < a.cfg.MaxTurns-1 && a.commitInjected(turn+1, out) {
 					continue
 				}
@@ -1027,6 +1060,11 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			// from the concurrent set and the TUI's shared live
 			// buffers always have at most one writer.
 			toolMsgs := make([]deepseek.Message, len(assistant.ToolCalls))
+			// toolErrs parallels toolMsgs for the guidance seam: the
+			// message content carries the error text (buildToolResultMsg
+			// folds it in with ToolErrorPrefix), but a rule that wants to
+			// count failures should not re-parse strings.
+			toolErrs := make([]error, len(assistant.ToolCalls))
 			partitioned := len(assistant.ToolCalls) >= 2
 			var seqIdx []int
 			var wg sync.WaitGroup
@@ -1037,6 +1075,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 						defer wg.Done()
 						result, terr := a.dispatchTool(ctx, tc, out)
 						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
+						toolErrs[i] = terr
 					}(i, tc)
 				} else {
 					seqIdx = append(seqIdx, i)
@@ -1048,6 +1087,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 						tc := assistant.ToolCalls[i]
 						result, terr := a.dispatchTool(ctx, tc, out)
 						toolMsgs[i] = buildToolResultMsg(tc.ID, result, terr)
+						toolErrs[i] = terr
 					}
 				})
 			}
@@ -1057,6 +1097,26 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				a.appendMessage(msg)
 				out <- MessageEnd{Message: msg}
 			}
+
+			// Record this turn's shape for the guidance seam. ToolBrief
+			// keeps the raw args (a rule needing canonical form calls
+			// tools.CanonicalArgs itself) and the result text as the
+			// model will see it, reminder suffixes included.
+			lastBrief.Tools = lastBrief.Tools[:0]
+			for i, tc := range assistant.ToolCalls {
+				if i >= len(toolMsgs) {
+					break
+				}
+				lastBrief.Tools = append(lastBrief.Tools, ToolBrief{
+					Name:   tc.Function.Name,
+					Args:   tc.Function.Arguments,
+					Result: toolMsgs[i].Content,
+					Err:    toolErrs[i],
+				})
+			}
+			lastBrief.TextChars = len(assistant.Content)
+			lastBrief.Index = turn
+			haveBrief = true
 
 			lastFinish = finish
 			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}

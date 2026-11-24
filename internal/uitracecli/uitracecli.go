@@ -112,6 +112,12 @@ func printSummary(w io.Writer, path string, s uitrace.Summary) {
 	if n := s.ByEvent[uitrace.EventGoal]; n > 0 {
 		fmt.Fprintf(w, "goal verdicts %d\n", n)
 	}
+	if n := s.ByEvent[uitrace.EventGuidance]; n > 0 {
+		// Guidance is machine-authored: it shares the intervention
+		// denominator with human break-ins, so it is reported
+		// separately rather than folded into "intervened".
+		fmt.Fprintf(w, "guidance hints %d\n", n)
+	}
 }
 
 func printRows(w io.Writer, events []uitrace.Event, limit int) {
