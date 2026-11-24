@@ -379,6 +379,10 @@
   #menu .mi:last-child { border-bottom: 0; }
   #menu .mi .ic { width: 15px; height: 15px; align-self: center; flex: none; }
   #menu .mi.hl { background: var(--seek-accent); }
+  /* 高亮行的次级文字升主文色（c_lbys7d）：accent 底压 fg-dim 只有 3.59:1、
+     fg-soft 4.11:1（暗侧），主文色 7.73——同 .sess-row.cur 的口径；亮色侧
+     本已 4.85/6.13，一并对齐只会更稳。 */
+  #menu .mi.hl .nm, #menu .mi.hl .ds, #menu .mi.hl .sid { color: var(--seek-fg); }
   #menu .mi .nm { color: var(--seek-fg-soft); white-space: nowrap; }
   #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
                   text-overflow: ellipsis; white-space: nowrap; }
@@ -593,7 +597,14 @@
   /* 选中行的 t2 升主文色：accent 底压 dim 只有 ~3.2:1（暗侧），fg 上 7.6 */
   .sess-row.cur .t2 { color: var(--seek-fg); }
   .sess-row.cur .t2c { color: var(--seek-fg); }
-  .sess-row.arch { opacity: .55; }
+  /* 归档行（c_lbys7d）：不再用整行 opacity——.55 叠在 panel 上合成后 t2
+     只剩 2.61（暗）/2.29（亮）、t1 也掉到 4.51/3.68，整行读不动。改底色
+     降一档（inset 是「页面底」那一档，暗更暗、亮更白，两个方向都表示
+     「非活动面」），文字保持 fg/fg-dim：t1 12.9/16.7、t2 6.0/6.1。归档态
+     另由 t2 的「已归档 ·」前缀与行内归档钮表达，不靠整体透明度。
+     :not(.cur) 是让「归档 + 选中」仍吃 accent 底（.cur 与 .arch 同特异
+     性，本规则在其后，不排除会盖掉选中底）。 */
+  .sess-row.arch:not(.cur) { background: var(--seek-inset); }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
   /* 悬停/聚焦才亮的行内操作组：底色取侧栏底，盖住底下文字避免叠字 */
   .sess-acts { position: absolute; right: 6px; top: 50%;
@@ -649,6 +660,9 @@
   .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
   .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
+  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——accent 底压 dim
+     只有 3.59:1（暗侧），fg 上 7.73；亮色侧 4.85 一并对齐（13.2）。 */
+  .ag-row.cur .t2 { color: var(--seek-fg); }
   .ag-badge { display: inline-flex; align-items: center; gap: 2px;
               font-size: 11px; flex: none; white-space: nowrap; }
   .ag-badge .ic { width: 10px; height: 10px; }
@@ -700,6 +714,10 @@
                  font-size: 12px; margin-top: 2px; min-width: 0; }
   .mem-row .t2 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mem-row .t2 .ic { width: 12px; height: 12px; color: var(--seek-warn); flex: none; }
+  /* 选中行 t2 升主文色（c_lbys7d）：accent 底压 dim 只有 3.59:1（暗侧），
+     fg 上 7.73。.t2 .ic 的 warn 是图标位（4.9:1，1.4.11 的 3:1 门槛），
+     它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
+  .mem-row.cur .t2 { color: var(--seek-fg); }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #mem-meta { padding: 6px 14px; border-bottom: 1px solid var(--seek-line); color: var(--seek-fg-dim); }
   #mem-tags { padding: 4px 14px; border-bottom: 1px solid var(--seek-line); }
@@ -744,7 +762,9 @@
   .tdot.tokens { fill: var(--seek-fg); }
   .tdot.cache { fill: var(--seek-warn); }
   .tguide { stroke: var(--seek-fg-dim); stroke-width: 1; stroke-dasharray: 2 2; }
-  .tlab { fill: var(--seek-fg-dim); font-size: 9px; }
+  /* 轴标签（c_lbys7d）：9px 是全文件最小字号，任何 DPR 下都读不动；
+     11px 与 .tlabel（工具详情的字段标签）同档，是次级文字的最小可读档。 */
+  .tlab { fill: var(--seek-fg-dim); font-size: 11px; }
   #trend-tip { position: absolute; z-index: 2; background: var(--seek-inset);
                border: 1px solid var(--seek-line); border-radius: 6px; padding: 4px 8px;
                font-size: 12px; color: var(--seek-fg); pointer-events: none;
