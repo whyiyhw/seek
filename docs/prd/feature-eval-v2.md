@@ -31,7 +31,11 @@ main 现状不可观测——W1.4 的 `SendStream` 把这三者消费为 run 元
 收口默认帧（events…reply 不变量），本例即按此断言（卡面背景同款指令：SSE 帧契约
 以 main 现状为准）。假 key 车道（无人值守纪律）确定性 3/3 绿 + 六轴构造行负验证；
 真 key 发版道重标定归 E6。**E6 已落地**（c_rkoeiy，2026-11-21，注记见 §三表格）。
-其余里程碑（E3、E7）未动工。
+**E3 用例已落地**（c_c5wwey，2026-11-21）：仍 `record_only` 挂账，发版道转正未定——见 §三 E3 行与
+`eval/README.md` 待开卡 #3。**E7 已收口**（c_okmkfl，2026-11-24，纯文档）：五类「不由 eval 保证」
+缺口逐条归属落 `eval/README.md` §「不由 eval 保证（E7）」——三态闭集、零未知态、零代码改动；
+真缺口三条进该节待开卡清单（eval 并发写结果行自测 / AGENTS.md 会话 legacy 迁移句过期 /
+E3+E4 未进 release lane）。`go vet ./...` 绿；纯文档卡无代码改动，未跑全量 `go test`（验收口径如此）。
 
 **前置阅读**：[`eval/README.md`](../../eval/README.md)（判分机制与 metric 词表）、[`feature-slim-loop.md`](feature-slim-loop.md) §3（「单次红是 signal 不是 proof，判回归须双轮」——本文把它从纪律变成机制）、[`v8.md`](v8.md) 柱 T（裸核/完整消融，本文的 `--lane` 与之共用结果目录隔离）、[`../../AGENTS.md`](../../AGENTS.md) 测试节（failure-mode 清单）。
 
@@ -106,6 +110,10 @@ GitHub Actions `schedule` 跑 **core 子集**（约 8 例低成本 + 2 轮），
 
 判据：一条检查若能在**没有模型参与**的情况下断言，就不该出现在 eval 里。
 
+**E7 收口（2026-11-24，c_okmkfl）**：清单与逐项三态归属已落 `eval/README.md` §「不由 eval 保证（E7）」
+（C1 确定性契约 / C2 真 API / C3 并发 / C4 平台与前端 / C5 性能·成本，零未知态）；
+真缺口不在那里顺手补，收在同节文末「待开卡清单」。
+
 ### 2.5 范围之外
 
 - ❌ 不做「全量 21 例 × 5 轮」的日常门禁——成本 $2–5/次且边际信息低；5 轮只给**已知 flaky 与承重轴**用例
@@ -119,11 +127,11 @@ GitHub Actions `schedule` 跑 **core 子集**（约 8 例低成本 + 2 轮），
 |---|---|---|
 | **E1 判定口径** | `run.sh --rounds N` + `expect.json: min_pass_rate / record_only` + 行内 `round` 字段 + 汇总分列 gate/record | 不传 flag 时输出与结果行字节等价（守护测试）；`--rounds 5` 写 5 行，`min_pass_rate: 0.6` 在 3/5 时判绿（含边界，≥ 口径——原文「判红」按字面与 §2.1「取 2/3」矛盾，随实现修正）、3/5 对 0.7 判红。**已落地**（c_ennnwa） |
 | **E2 标定表** | 用 `eval/results/` 历史行 + 每例 5 轮实测，产出「每例 预期通过率 / 闸门取值 / 是否 record-only」表落 `eval/README.md`；三个已知 flaky 明确处置 | 表覆盖全部 21 例；`bash-overreach` 取到能抓住「开局即 bash」的界；`code-review-effort-*` 标 record-only。**已落地**（c_347nnh，2026-11-21；表覆盖实存 30 例 = 21 + 9 mcp 臂，5 轮实测按 §2.5 改为 flaky/承重轴专用，标定以历史行 + 构造行验证；承重轴三例留表位待 E3/E4/E5 回填） |
-| **E3 plan-e2e** | 承重轴用例之一：propose→批准→执行→改需求→resume | 批准前零写入断言；resume 不重跑已完成步骤；用例 README 记录 baseline 与判分口径 |
+| **E3 plan-e2e** | 承重轴用例之一：propose→批准→执行→改需求→resume | 批准前零写入断言；resume 不重跑已完成步骤；用例 README 记录 baseline 与判分口径。**case 已落地**（c_c5wwey，2026-11-21；判分全机械，真 TUI PTY + 假 key 驱动；仍 `record_only` 挂账，发版道转正见 `eval/README.md` 待开卡 #3） |
 | **E4 subagent-bg-resume** | 承重轴用例之二：后台子代理完成通知 + 续话血统 | 完成通知进主流；续话 run 带 `resumed_from`；产物路径断言。**已落地**（c_vollxv，2026-11-21；三断言全部形状/字段级断言——`notified` 事件 join 到 completed 集、`[agent: background done sub-sid=<full>]` wire 前缀、`resumed_from` 引用有效性、transcript.jsonl 落位，零散文断言；机制经假二进制自测钉死，real-key baseline 留发版道） |
 | **E5 serve-web-stream** | 承重轴用例之三：`/rpc` → SSE → 会话落盘 | 事件序列与 `session/list` 双断言；复用 `serve-smoke-test.sh` 的启动/收尾。**已落地**（c_lbtdqw，2026-11-21；事件序列按 main 现状断言 W1.4 帧族——delta/usage/收口默认帧，见状态⑤；假 key 车道 3/3 绿 + 构造行负验证；E2 表位已回填） |
 | **E6 release lane + 夜间入口** | `--lane release|core` 读名单；`ci.yml` 加 schedule 跑 core（2 轮，连续 3 次同向失败才 fail）；发版流程写进 CHANGELOG 前的检查单 | release lane 只含承重轴 3 例 + 已知稳定用例；nightly 失败策略用 `eval-trend.sh` 的 streak 口径；README 有「发版前跑什么」一节。**已落地**（c_rkoeiy，2026-11-21；--lane 为文件驱动任意名（`eval/lane-<name>.txt`），release 名单 = 已落地承重轴 1 例（E3/E4 两例注释占位）+ 标定表 gate-1.0 稳定例 22；nightly streak 阈值落在 eval-trend 既有 `streak_failures` 的行级口径上（2 行/夜 → 第二个连续整红夜过阈），构造行七场景仿真验证；「发版前跑什么」节即检查单，CHANGELOG E6 条目提行） |
-| **E7 D 项清点** | 「不由 eval 保证」栏 + 五类缺口的「已有测试/需补」结论 | 每条检查有归属；发现真缺口则开独立卡，不在本卡内顺手补 |
+| **E7 D 项清点** | 「不由 eval 保证」栏 + 五类缺口的「已有测试/需补」结论 | 每条检查有归属；发现真缺口则开独立卡，不在本卡内顺手补。**已收口**（c_okmkfl，2026-11-24，纯文档）：五类（C1 确定性契约 / C2 真 API / C3 并发 / C4 平台与前端 / C5 性能·成本）逐条三态归属落 `eval/README.md` §「不由 eval 保证（E7）」，零未知态；真缺口 3 条收同节「待开卡清单」（不在本卡补），零代码改动；`go vet ./...` 绿，纯文档卡未跑全量 test |
 
 **建议顺序**：E1 → E2（先把口径立住，否则后面所有用例都在旧口径下白标定）→ E3/E4/E5（可并行）→ E6 → E7。
 
