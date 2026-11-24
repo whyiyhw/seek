@@ -235,8 +235,8 @@ func (a *Agent) SetEffort(effort string) {
 }
 
 // Effort returns the current reasoning_effort override ("" when none).
-// Exposed so adjacent components (e.g. the think tool) can mirror the
-// session-level setting without holding a second copy of the state.
+// Exposed so adjacent components can mirror the session-level setting
+// without holding a second copy of the state.
 func (a *Agent) Effort() string {
 	return a.cfg.Effort
 }

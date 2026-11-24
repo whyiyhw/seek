@@ -37,7 +37,7 @@ Code: `internal/permission/` · `cmd/seek/approval_stdin.go` · `cmd/seek/acp_ap
 
 ## 3. Tool System / 工具系统
 
-seek exposes tools to the LLM as JSON schema definitions. Current tools: `read`, `grep`, `list_dir`, `write`, `edit`, `bash`, `git`, `webfetch`, `think`, `ask_user`, `agent`, `enter_worktree`, `exit_worktree`, `monitor`, `schedule_wakeup`, `plan`, `propose`, `references`, `Skill`, `skill_fetch`, `skill_commit`, `memory_observe`, `memory_remember`, `memory_amend`, `memory_archive`, `memory_recall`.
+seek exposes tools to the LLM as JSON schema definitions. Current tools: `read`, `grep`, `list_dir`, `write`, `edit`, `bash`, `git`, `webfetch`, `ask_user`, `agent`, `enter_worktree`, `exit_worktree`, `monitor`, `schedule_wakeup`, `plan`, `propose`, `references`, `Skill`, `skill_fetch`, `skill_commit`, `memory_observe`, `memory_remember`, `memory_amend`, `memory_archive`, `memory_recall`.
 
 **Two ways external tools join the same registry** — both through one MCP client stack (`pkg/mcp` stdio transport + handshake + `tools/list`, bridged by `internal/tools/mcptool`), never a second implementation: `~/.seek/mcp.json` at startup (tools named `<server>__<tool>`, live until process exit) and an ACP client's `session/new`/`session/load` `mcpServers` (named `mcp__<server>__<tool>`, reaped when the session's transport ends). Names are folded into the provider alphabet `^[a-zA-Z0-9_-]{1,64}$` on the injected path — MCP allows dots, model APIs do not. `internal/acp` stays transport-only (it does not import `internal/tools`); the wiring lives in `cmd/seek/acp_mcp.go`.
 

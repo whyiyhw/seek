@@ -66,7 +66,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 - ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。协议版本是**真协商**（P1-3）：响应带的是「客户端请求的版本」与「seek 支持的版本」的交集里最高的那个，不是回显——客户端报 2 会拿到 1，降级在响应里申报，seek 侧另在 stderr 记一行（§5）。
 - ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.4）。
-- ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 与 `think` 工具的实时输出都会出现；代价：CoT 会进客户端侧日志）。
+- ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 会出现；代价：CoT 会进客户端侧日志）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。

@@ -1,6 +1,6 @@
 {
-  "description": "think tool must not be called with unknown fields (depth/levels/steps); strict-decode rejects them and a healthy model recovers on the next call.",
+  "description": "Multi-tool audit run must produce zero strict-decode rejections (a healthy model never invents tool parameters) AND actually exercise the tools — the liveness floor is what keeps max_unknown_field_errors from passing vacuously on a run that calls nothing.",
   "max_turns": 15,
   "max_unknown_field_errors": 0,
-  "min_think_calls": 1
+  "min_total_tool_calls": 5
 }

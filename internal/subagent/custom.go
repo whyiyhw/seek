@@ -20,10 +20,10 @@ import (
 //     "plan-execute" or any loosening is a config error — the hard
 //     door stays permission.Policy.Spawn's Restriction monotonicity;
 //     the frontmatter is just one more source for it;
-//   - provider/model validity via ResolveRoute (D8's provider filter
-//     then applies downstream in the Runner over job.ToolNames, same
-//     as for built-ins — think vanishes on non-DeepSeek lanes
-//     automatically).
+//   - provider/model validity via ResolveRoute (routing only; the D8
+//     deepseek-only filter was retired with the think tool on
+//     2026-11-22 — no tool is lane-exclusive today, reintroduce a
+//     provider filter in the Runner if that ever changes again).
 //
 // The gate re-validates shapes agenttypes.Parse already rejects for
 // files on purpose: the Set can also be populated by hand (tests) or

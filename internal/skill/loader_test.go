@@ -64,27 +64,14 @@ func TestLoad_BuiltinAlwaysAvailable(t *testing.T) {
 	if set.Get("go-test-runner") == nil {
 		t.Errorf("builtin go-test-runner not present; loaded: %v", listNames(set))
 	}
-	// dual-model is PRD §4.8.2 Level 2 — its presence is an
-	// acceptance criterion for v1.0, so a deletion or rename must
-	// trip a test, not just a code review.
-	dm := set.Get("dual-model")
-	if dm == nil {
-		t.Fatalf("builtin dual-model not present; loaded: %v", listNames(set))
-	}
-	// Description copy is load-bearing: the model only sees this
-	// line in the system prompt manifest, so it has to mention
-	// triggering conditions (when to invoke). If someone shortens
-	// the description to a generic "use for planning", the skill
-	// will fire on every trivial task — exactly the PRD §7 risk we
-	// flagged.
-	if !strings.Contains(dm.Description, "non-trivial") &&
-		!strings.Contains(dm.Description, "multi-step") {
-		t.Errorf("dual-model description should signal trigger conditions; got %q", dm.Description)
-	}
+	// dual-model was retired 2026-11-22 with the think tool — its whole
+	// loop (think → execute → think(reflect)) orbited a tool real
+	// sessions called twice in 109 projects. Do NOT re-add a
+	// reasoner-pairing skill without a fresh usage case.
 
 	// plan-mode (PRD docs/prd/feature-plan-mode.md, P5) describes the
 	// analyze → propose → execute loop the propose tool participates
-	// in. Same load-bearing test as dual-model: presence + trigger
+	// in. Same load-bearing pattern: presence + trigger
 	// keywords in the description.
 	pm := set.Get("plan-mode")
 	if pm == nil {

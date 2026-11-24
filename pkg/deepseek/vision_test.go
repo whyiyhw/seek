@@ -29,8 +29,8 @@ func TestMessageWire_TextOnly_Bytes(t *testing.T) {
 		},
 		{
 			// ReasoningContent replay for tool-call assistant turns survives.
-			Message{Role: RoleAssistant, ReasoningContent: "think", ToolCalls: []ToolCall{{Function: ToolCallFunc{Name: "grep"}}}},
-			`{"role":"assistant","tool_calls":[{"function":{"name":"grep","arguments":""}}],"reasoning_content":"think"}`,
+			Message{Role: RoleAssistant, ReasoningContent: "musing", ToolCalls: []ToolCall{{Function: ToolCallFunc{Name: "grep"}}}},
+			`{"role":"assistant","tool_calls":[{"function":{"name":"grep","arguments":""}}],"reasoning_content":"musing"}`,
 		},
 	}
 	for _, c := range cases {

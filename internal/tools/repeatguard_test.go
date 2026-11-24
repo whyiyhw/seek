@@ -292,7 +292,7 @@ func TestWithRepeatGuard_PreservesReadOnly(t *testing.T) {
 }
 
 func TestWithRepeatGuard_PreservesStreaming(t *testing.T) {
-	wrapped := WithRepeatGuard(rgStreaming{&rgTool{name: "think", result: "done"}}, NewRepeatGuard())
+	wrapped := WithRepeatGuard(rgStreaming{&rgTool{name: "streamprobe", result: "done"}}, NewRepeatGuard())
 	st, ok := wrapped.(StreamingTool)
 	if !ok {
 		t.Fatal("wrapped tool no longer implements StreamingTool — live output would silently stop")
@@ -350,7 +350,7 @@ func TestWithRepeatGuard_ForwardsIdentity(t *testing.T) {
 
 func TestRepeatGuard_StreamingPathCounts(t *testing.T) {
 	g := NewRepeatGuard()
-	wrapped := WithRepeatGuard(rgStreaming{&rgTool{name: "think", result: "done"}}, g)
+	wrapped := WithRepeatGuard(rgStreaming{&rgTool{name: "streamprobe", result: "done"}}, g)
 	st := wrapped.(StreamingTool)
 
 	var out string

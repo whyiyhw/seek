@@ -112,7 +112,7 @@ Measured **95–97% prefix-cache hit** — discipline, not luck: tool schemas ar
 | **Push to phone** | cron / autopilot / long-turn completions → webhook. [📘](docs/guide-webhooks.md) |
 | **Dual-axis permissions** | Preference (Deny / Ask / Yolo) × Workflow (None / Plan-analyze / Plan-execute). |
 
-Plus shell hooks, a JSON-RPC 2.0 server mode, and DeepSeek extras (V4 reasoning via `think`, off-peak countdown).
+Plus shell hooks, a JSON-RPC 2.0 server mode, and DeepSeek extras (off-peak countdown, per-model cost tracking).
 
 ---
 

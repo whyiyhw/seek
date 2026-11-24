@@ -51,15 +51,15 @@ func TestACPUpdate_Mapping(t *testing.T) {
 	if c, _ := m["content"].(map[string]any); c["text"] != "hmm…" {
 		t.Fatalf("thought text lost: %v", m)
 	}
-	// the think tool's live stream (CoT and answer alike) is thought
+	// a streaming tool's live stream (CoT and answer alike) is thought
 	// material — the process is the point
-	m = upd(agent.ToolDelta{CallID: "c9", Name: "think", Delta: "step 1…", Reasoning: true})
+	m = upd(agent.ToolDelta{CallID: "c9", Name: "deepquery", Delta: "step 1…", Reasoning: true})
 	if m["sessionUpdate"] != "agent_thought_chunk" {
-		t.Fatalf("think CoT delta → %v, want agent_thought_chunk", m)
+		t.Fatalf("streaming CoT delta → %v, want agent_thought_chunk", m)
 	}
-	m = upd(agent.ToolDelta{CallID: "c9", Name: "think", Delta: "the answer is…"})
+	m = upd(agent.ToolDelta{CallID: "c9", Name: "deepquery", Delta: "the answer is…"})
 	if m["sessionUpdate"] != "agent_thought_chunk" {
-		t.Fatalf("think answer delta → %v, want agent_thought_chunk", m)
+		t.Fatalf("streaming answer delta → %v, want agent_thought_chunk", m)
 	}
 
 	// tool call start: full protocol surface — name, kind, locations,
@@ -128,7 +128,6 @@ func TestACPToolTitle(t *testing.T) {
 		{"read", `{"path":"notes.txt"}`, "read notes.txt"},
 		{"edit", `{"path":"a.go","old_string":"x","new_string":"y"}`, "edit a.go"},
 		{"bash", `{"command":"go test ./..."}`, "bash go test ./..."},
-		{"think", `{"task":"plan the migration"}`, "think plan the migration"},
 		{"grep", `{"pattern":"foo","path":"."}`, "grep foo"},
 		{"bash", `{bad json`, "bash"},
 		{"memory_observe", `{}`, "memory_observe"},
@@ -168,7 +167,7 @@ func TestACPUpdate_ToolKind(t *testing.T) {
 		"grep": "search",
 		"edit": "edit", "write": "edit",
 		"bash": "execute", "git": "execute", "monitor": "execute",
-		"think": "think", "plan": "think", "propose": "think",
+		"plan": "think", "propose": "think",
 		"webfetch":       "fetch",
 		"memory_observe": "other", "agent": "other", "totally-new-tool": "other",
 	} {

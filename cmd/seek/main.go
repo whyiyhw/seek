@@ -1,9 +1,8 @@
 // Command seek is the DeepSeek-first coding agent CLI.
 //
-// M3 wires in cache.Tracker (session-level prefix-cache stats), pricing
-// (off-peak tier awareness + per-call cost), and the Think tool that
-// bridges the chat loop into V4-Flash thinking mode. Interactive TUI lands
-// in M4; full think-then-chat skill arrives with skill loading in M5.
+// M3 wires in cache.Tracker (session-level prefix-cache stats) and pricing
+// (off-peak tier awareness + per-call cost). Interactive TUI lands in M4;
+// skills arrive with skill loading in M5.
 package main
 
 import (
@@ -90,7 +89,6 @@ import (
 	"github.com/whyiyhw/seek/internal/tools/references"
 	"github.com/whyiyhw/seek/internal/tools/skillinstall"
 	"github.com/whyiyhw/seek/internal/tools/skilltool"
-	"github.com/whyiyhw/seek/internal/tools/think"
 	"github.com/whyiyhw/seek/internal/tools/wakeup"
 	"github.com/whyiyhw/seek/internal/tools/webfetch"
 	"github.com/whyiyhw/seek/internal/tools/websearch"
@@ -697,9 +695,8 @@ func run() error {
 	sessionModel := *model
 	// sessionEffort mirrors session.Effort: "" (model default) | "high" |
 	// "max". The /effort TUI command updates it through SetEffort below;
-	// the think tool reads it through its effortFunc closure so its
-	// bumped-by-one-level rule (see think.bumpEffort) reflects the
-	// session-level choice at call time.
+	// agent.Config reads it when building requests, so the session-level
+	// choice applies to the very next call.
 	// Default is "max" — the deepest reasoning level.
 	var sessionEffort = "max"
 	tracker := cache.New()
@@ -1010,15 +1007,12 @@ func run() error {
 		reg.Add(guarded(webfetch.New(wfOpts)))
 	}
 
-	// DeepSeek-exclusive tools: the reasoner-backed think tool is only
-	// available when using the DeepSeek client directly.
+	// DeepSeek-exclusive tool: web_search rides the standalone Search
+	// API — same DeepSeek key / base URL as chat (config.KeyFor
+	// deepseek), billed per successful call into the tracker so the
+	// status bar's $ total grows without a token turn. Opt-out mirrors
+	// SEEK_NO_WEBFETCH for air-gapped / privacy-sensitive sessions.
 	if dsClient != nil {
-		reg.Add(think.New(dsClient, func() string { return sessionModel }, func() string { return sessionEffort }))
-		// web_search rides the standalone Search API — same DeepSeek
-		// key / base URL as chat (config.KeyFor deepseek), billed per
-		// successful call into the tracker so the status bar's $ total
-		// grows without a token turn. Opt-out mirrors SEEK_NO_WEBFETCH
-		// for air-gapped / privacy-sensitive sessions.
 		if !envBoolTrue("SEEK_NO_WEBSEARCH") {
 			reg.Add(guarded(websearch.New(dsClient, tracker)))
 		}
@@ -1038,9 +1032,8 @@ func run() error {
 	// still register, only the guidance segment goes away (the A2 eval
 	// arm). Note: the -tools whitelist narrows the registry later and
 	// may drop MCP tools this section still names — same static-prose
-	// posture as rootTpl (which documents think even on non-DeepSeek
-	// providers); the section describes what loaded, the request's
-	// tools array is the callable truth.
+	// posture as rootTpl; the section describes what loaded, the
+	// request's tools array is the callable truth.
 	var mcpSection string
 	if mcpCfg, err := mcpconfig.Load(); err != nil {
 		fmt.Fprintln(os.Stderr, "mcp config:", err)
@@ -1646,8 +1639,8 @@ func run() error {
 
 	// P2-b D13 startup gate + P2-c config layer: validate every
 	// non-built-in definition against the FINAL parent registry —
-	// plan/propose land above, MCP / env-gated tools (webfetch,
-	// think…) vary the registry earlier, so this pass
+	// plan/propose land above, MCP / env-gated tools (webfetch…)
+	// vary the registry earlier, so this pass
 	// must run after the last reg.Add. File-scope types
 	// (project/user) get the full D13 check — unknown tool names are
 	// config errors: warn here (the loud half of D13); at spawn the
@@ -2117,10 +2110,10 @@ func run() error {
 		},
 		SetModel: func(m string) { sessionModel = m },
 		SetEffort: func(e string) {
-			// Mirror into the closures the think tool and agent.Config
-			// builds read from. The TUI separately calls Agent.SetEffort
-			// on the live agent so the change is visible on the very
-			// next prompt without a /reset / RebuildAgent.
+			// Mirror into the closure agent.Config builds read from.
+			// The TUI separately calls Agent.SetEffort on the live
+			// agent so the change is visible on the very next prompt
+			// without a /reset / RebuildAgent.
 			sessionEffort = e
 		},
 		SetYolo: func(y bool) {
@@ -2312,7 +2305,7 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 //	text_delta       — incremental assistant text; delta is the new chunk
 //	reasoning_delta  — incremental CoT text from thinking-mode responses
 //	tool_start       — a tool call is about to execute; id/name/args set
-//	tool_delta       — intermediate output from a streaming tool (think)
+//	tool_delta       — intermediate output from a streaming tool
 //	tool_end         — tool finished; result set on success, error on failure
 //	turn_end         — LLM call settled; token counts + tool_calls count
 //	agent_end        — run complete; cumulative stats; session_id if saved
@@ -3762,7 +3755,7 @@ func acpUpdate(sessionID, cwd string, ev agent.Event) (acp.SessionUpdate, bool) 
 			"content":       map[string]any{"type": "text", "text": e.Delta},
 		}}, true
 	case agent.ToolDelta:
-		// The think tool streams both its chain-of-thought (Reasoning)
+		// A streaming tool pushes both its chain-of-thought (Reasoning)
 		// and its answer text — both are thought-channel material: the
 		// process is the point ("过程"), and the final answer already
 		// lands in the tool call's rawOutput when it completes.
@@ -3874,8 +3867,6 @@ func acpToolTitle(name, args string) string {
 		if s := arg("subcommand"); s != "" {
 			what = s
 		}
-	case "think":
-		what = arg("task")
 	case "webfetch":
 		what = arg("url")
 	case "monitor":
@@ -3904,7 +3895,7 @@ func acpToolKind(name string) string {
 		return "edit"
 	case "bash", "git", "monitor":
 		return "execute"
-	case "think", "plan", "propose":
+	case "plan", "propose":
 		return "think"
 	case "webfetch":
 		return "fetch"
@@ -3917,7 +3908,7 @@ func acpToolKind(name string) string {
 // args: any tool carrying a "path" (read/edit/write/list_dir/grep/…)
 // gets one entry, made absolute against cwd (schema: "the absolute
 // file path"); read's "offset" (1-based line) rides as the line hint.
-// Args without a path (bash, think, …) and unparseable args get nil —
+// Args without a path (bash, propose, …) and unparseable args get nil —
 // fail-soft, the location is UX sugar, never correctness.
 func acpToolLocations(args, cwd string) []map[string]any {
 	var a struct {

@@ -1,3 +1,3 @@
-我们改了很多代码，现在的 docs/PRD.md 是否能跟代码对得上？请用 think 工具规划一下要查哪些点，再去交叉验证。
+我们改了很多代码，现在的 docs/prd/README.md 里的状态声明还能不能跟代码对得上？先用 grep/read 把它的现状和其中的状态条目读出来，再抽查至少 3 条说法，逐条与对应代码或文档交叉核对。
 
 [Workflow rule: before asserting any fact about code behaviour or values, grep/read the source to confirm. Do not rely on memory from earlier turns. No grep/read evidence → label it a guess.]

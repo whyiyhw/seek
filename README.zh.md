@@ -110,7 +110,7 @@ DeepSeek 价格（源 [`internal/pricing/pricing.go`](internal/pricing/pricing.g
 | **推送到手机** | cron / autopilot / 长回合完成 → webhook。[📘](docs/guide-webhooks.md) |
 | **双轴权限** | Preference（Deny / Ask / Yolo）× Workflow（None / Plan-analyze / Plan-execute）。 |
 
-外加 shell hooks、JSON-RPC 2.0 server 模式、以及 DeepSeek 专属能力（`think` 调 V4 推理、错峰倒计时）。
+外加 shell hooks、JSON-RPC 2.0 server 模式、以及 DeepSeek 专属能力（错峰倒计时、逐模型成本追踪）。
 
 ---
 

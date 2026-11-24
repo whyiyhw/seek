@@ -534,7 +534,7 @@ func newCmdTestSubagentMgr(t *testing.T, runner subagent.Runner) (*subagent.Mana
 			return subagent.RunnerResult{}, nil
 		}
 	}
-	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think"}
+	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch"}
 	parentSid := "20260601-100000-test"
 	mgr, err := subagent.NewManager(subagent.ManagerOpts{
 		ProjectAbsPath:    cwd,
