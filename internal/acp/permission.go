@@ -20,7 +20,6 @@ package acp
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // Permission option kinds — the vocabulary both sides speak. seek
@@ -144,19 +143,5 @@ func classifyOptionID(id string) PermissionDecision {
 		return DecisionReject
 	default:
 		return DecisionReject // unknown echo: deny (see doc comment)
-	}
-}
-
-// String keeps test failures readable.
-func (d PermissionDecision) String() string {
-	switch d {
-	case DecisionAllowOnce:
-		return "allow_once"
-	case DecisionAllowAlways:
-		return "allow_always"
-	case DecisionReject:
-		return "reject"
-	default:
-		return fmt.Sprintf("cancelled(%d)", int(d))
 	}
 }

@@ -223,35 +223,3 @@ func TestSanitized_KeepListReachesProcessEnv(t *testing.T) {
 		t.Error("Sanitized(keep) did not retain the explicitly allowed variable")
 	}
 }
-
-func TestWithheld_ReturnsNamesNotValues(t *testing.T) {
-	env := []string{"PATH=/usr/bin", "GH_TOKEN=ghp_secret", "DEEPSEEK_API_KEY=sk-secret"}
-	got := Withheld(env)
-	want := []string{"GH_TOKEN", "DEEPSEEK_API_KEY"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("Withheld() = %v, want %v", got, want)
-	}
-	for _, name := range got {
-		if strings.ContainsAny(name, "=") {
-			t.Errorf("Withheld() returned an entry with a value: %q", name)
-		}
-		if strings.Contains(name, "secret") {
-			t.Errorf("Withheld() leaked a value: %q", name)
-		}
-	}
-}
-
-func TestWithheld_RespectsKeepList(t *testing.T) {
-	env := []string{"GH_TOKEN=a", "DEEPSEEK_API_KEY=b"}
-	got := Withheld(env, "GH_TOKEN")
-	want := []string{"DEEPSEEK_API_KEY"}
-	if !slices.Equal(got, want) {
-		t.Errorf("Withheld(keep=GH_TOKEN) = %v, want %v", got, want)
-	}
-}
-
-func TestWithheld_EmptyWhenNothingSensitive(t *testing.T) {
-	if got := Withheld([]string{"PATH=/usr/bin", "HOME=/h"}); len(got) != 0 {
-		t.Errorf("Withheld() = %v, want empty", got)
-	}
-}

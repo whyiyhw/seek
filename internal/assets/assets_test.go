@@ -97,22 +97,6 @@ func TestPath_TraversalGuard(t *testing.T) {
 	}
 }
 
-// TestStoreFile: the route-time entry point reads then stores.
-func TestStoreFile(t *testing.T) {
-	src := filepath.Join(t.TempDir(), "in.png")
-	if err := os.WriteFile(src, []byte("bytes"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	name, err := StoreFile(dir, src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestStoreDoc mirrors the image Store suite for the document sibling
 // (feature-deepseek-app-api F3): same library, same content
 // addressing, doc extension table, doc size cap.

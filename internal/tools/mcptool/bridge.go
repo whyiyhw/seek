@@ -280,16 +280,3 @@ func EnvMapToSlice(m map[string]string) []string {
 	}
 	return out
 }
-
-// FormatErrors joins a slice of errors into a multi-line string for
-// stderr startup output.
-func FormatErrors(errs []error) string {
-	if len(errs) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(errs))
-	for _, e := range errs {
-		lines = append(lines, "  "+e.Error())
-	}
-	return strings.Join(lines, "\n")
-}

@@ -174,13 +174,6 @@ func TestSha256Hex_Stable(t *testing.T) {
 	}
 }
 
-func TestSha256File_MissingReturnsENOENT(t *testing.T) {
-	_, err := Sha256File(filepath.Join(t.TempDir(), "nope"))
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("want ENOENT, got %v", err)
-	}
-}
-
 // ---- TrustStore ----
 
 func TestTrustStore_FreshIsEmpty(t *testing.T) {

@@ -92,15 +92,6 @@ func Store(dir, origName string, data []byte) (string, error) {
 	return name, nil
 }
 
-// StoreFile reads src and hands it to Store.
-func StoreFile(dir, src string) (string, error) {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return "", err
-	}
-	return Store(dir, filepath.Base(src), data)
-}
-
 // StoreDoc writes a document under dir under its content-addressed
 // name and returns that name — the document sibling of Store, SAME
 // library (feature-deepseek-app-api §3.1 同库复用), same atomic
