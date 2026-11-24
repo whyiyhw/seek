@@ -263,9 +263,10 @@ async function navigate(panel) {
   }
   // pane 型：已开则不点（togglePane 是开关，二连点会关掉）。按钮点了但
   // 面板类 2.5s 内没挂上 = 按钮没接线（2026-11-22 首跑实测：hkBtn 缺 click
-  // 监听，webfrontend.html:2560-2563 只接了另外四个）——驱动直接挂类 +
+  // 监听；c_25d2ey 已补回并加 hooksaudit 无头回归）——驱动仍直接挂类 +
   // 调 load 函数把面板本体强制亮出来保住「面板可审」，按钮失效作为
-  // navError 记进 manifest（审查发现，不是驱动故障）。
+  // navError 记进 manifest（审查发现，不是驱动故障）；这条 fallback 只
+  // 用于取证，不当作绿灯。
   const open = await evalJS(`document.body.classList.contains('${panel.cls}')`);
   if (!open) await evalJS(`${$id(panel.btn)}.click()`);
   let navErr = null;

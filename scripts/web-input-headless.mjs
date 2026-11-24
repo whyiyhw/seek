@@ -279,13 +279,13 @@ const bubblesNow = (await snap()).bubbles;
   await press('Tab');
   s = await snap();
   ck('Tab 补全首项为「/bind 」', s.val === '/bind ' && s.menuOpen
-    && s.items.some(i => i.label === '📁 浏览目录…'), JSON.stringify(s));
+    && s.items.some(i => i.label === '浏览目录…'), JSON.stringify(s));
   ck('Tab 被 preventDefault（焦点不跳出输入框）',
     (await lastKey()).prevented && s.focused === 'input', JSON.stringify(await lastKey()));
 
   // 补全后带空格 → 参数期弹目录浏览入口（不再是无面板）
   ck('带参阶段弹目录浏览入口', s.menuOpen
-    && s.items.every(i => i.label === '📁 浏览目录…'), JSON.stringify(s));
+    && s.items.every(i => i.label === '浏览目录…'), JSON.stringify(s));
 
   // Esc：先重开面板，再 Esc 关闭，且 document 看到的 defaultPrevented=真；
   // 关闭态再按一次 Esc，则 false（不劫持）。
@@ -389,7 +389,7 @@ await delay(150);
   await press('Tab');
   s = await snap();
   ck('窄屏下 Tab 仍能补全', s.val === '/bind ' && s.menuOpen
-    && s.items.some(i => i.label === '📁 浏览目录…'), JSON.stringify(s)); // c_heffj3：参数期弹目录浏览入口
+    && s.items.some(i => i.label === '浏览目录…'), JSON.stringify(s)); // c_heffj3：参数期弹目录浏览入口
 }
 await call('Emulation.clearDeviceMetricsOverride');
 

@@ -6,8 +6,8 @@
 //
 // 断言（卡面验收的浏览器半边）：
 //   ③ 空态零侵入：启动后角标 hidden、卡栈空（:empty 隐藏）
-//   ① 全流转：发「审批」→ 卡弹出（描述+命令摘要+三按钮）+ 角标 ⏳ 待审批 1
-//      → 点 ✅ 允许 → 按钮同步禁用（防抖）→ 卡消失、角标隐没
+//   ① 全流转：发「审批」→ 卡弹出（描述+命令摘要+三按钮）+ 角标「待审批 1」
+//      → 点「允许」（check sprite + 文字）→ 按钮同步禁用（防抖）→ 卡消失、角标隐没
 //   ② 幂等：再触发一卡 → 用页面 rpc() 连发两次 decide → 第一次
 //      applied=true、第二次 applied=false（决定不双发），回执撤卡
 //
@@ -182,10 +182,10 @@ try {
     card.txt.includes('在桩项目里跑一次全量测试')
       && card.cmd === 'go test ./... -count=1' && card.nbtn === 3,
     JSON.stringify(card));
-  ck('① 角标：⏳ 待审批 1 常显', s.badgeHidden === false && s.badgeText.includes('1'), JSON.stringify(s));
+  ck('① 角标：待审批 1 常显', s.badgeHidden === false && s.badgeText.includes('待审批') && s.badgeText.includes('1'), JSON.stringify(s));
   ck('① 卡片 id 进 dataset（幂等键）', /^ap-e2e-/.test(card.id), card.id);
 
-  ck('① 点击 ✅ 允许（按钮真在）', (await clickBtn('✅ 允许')) === true, '');
+  ck('① 点击「允许」（按钮真在）', (await clickBtn('允许')) === true, '');
   const dis = await until('按钮禁用（防抖）', s => s.cards.length === 0
     || s.cards[0].btnDisabled.every(Boolean), 3000);
   ck('① 防抖：点击后按钮同步禁用',

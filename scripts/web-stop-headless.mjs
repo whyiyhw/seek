@@ -10,14 +10,14 @@
 //
 // 断言四景（桩 seek 按 -p 消息文本切场景，见 web-stop-manual.sh）：
 //   /bind   → 空态：发送键恒「发送」、无 stop 态（③前半）
-//   慢速    → 生成中：键变「⏹ 停止」红底（①）；输入框留草稿后点停止：
+//   慢速    → 生成中：键变「停止」红底（①）；输入框留草稿后点停止：
 //             草稿不动、点击以 /cancel 指令透传（you 气泡 '/cancel'）、
 //             半截气泡保留 + 尾部「—— 已中断 ——」、无 ack 整泡替换、
 //             「run 已中断。」独立成条、streaming 清零（②）
 //   继续    → 中断后发新消息：正常流式收口（②后半）；键回「发送」、
 //             无 stop 态（③后半）
 //   慢速#2  → 丢收口（c_6mbjfq）：生成中把 EventSource 关掉、趁断连发
-//             /cancel 让 run 收口帧全落空，再重连——键仍停在 ⏹（缺陷
+//             /cancel 让 run 收口帧全落空，再重连——键仍停在停止态（缺陷
 //             现场）；此时点停止拿到 run-less 应答，键必须回「发送」，
 //             半截气泡保留 + 标注，不留 streaming 残态。
 //
@@ -188,7 +188,7 @@ trace('景 1：慢速+点停止');
 try {
   if ((await send('慢速')) !== 202) throw new Error('POST 非 202');
   const { s: live } = await until('停止键出现', s => s.sendStop && s.nstream > 0, 8000);
-  ck('①生成中：发送键变「⏹ 停止」', live.sendLabel === '⏹ 停止' && live.sendStop,
+  ck('①生成中：发送键变「停止」', live.sendLabel === '停止' && live.sendStop,
     `label=${live.sendLabel} stop=${live.sendStop}`);
   ck('①生成中：半截已上屏（流确实在跑）',
     live.msgs.some(m => m.cls.includes('streaming') && m.txt.includes('半截')), '');
@@ -233,7 +233,7 @@ try {
 } catch (e) { ck('中断后再发场景', false, e.message); await dump(); }
 
 // 景 3：丢收口 → 幻影 run（c_6mbjfq）。现场在「重连之后」才可见：run 结束
-// 时没人订阅，收口帧永久丢失，页面表里留一条永不收口的记录，键停在 ⏹。
+// 时没人订阅，收口帧永久丢失，页面表里留一条永不收口的记录，键停在停止态。
 // 修法的判据是「本页发过 /cancel、回来的却是 run-less 应答」——所以这一景
 // 必须在重连后再点一次停止，让页面拿到服务端「没有正在运行的任务」这句话。
 trace('景 3：丢收口 + 幻影 run 复位');
@@ -249,8 +249,8 @@ try {
   await evalJS('listen(), "listening"');  // 重连：页面照旧不碰 runs 表
   await delay(1000);
   const stuck = await snapshot();
-  ck('景3 复现：重连后键仍停在 ⏹（幻影 run 留在表里）',
-    stuck.sendStop && stuck.sendLabel === '⏹ 停止',
+  ck('景3 复现：重连后键仍停在停止态（幻影 run 留在表里）',
+    stuck.sendStop && stuck.sendLabel === '停止',
     `label=${stuck.sendLabel} stop=${stuck.sendStop}`);
   ck('景3 现场：半截气泡还在（断连期间的累积没有权威终文本可替换）',
     stuck.msgs.some(m => m.txt.includes('丢收口半截')), JSON.stringify(stuck.msgs.map(m => m.txt)));
@@ -258,7 +258,7 @@ try {
   // 点停止：/cancel 得到 run-less 应答 = 服务端没有 run 可中断了 → 幻影收口。
   await clickStop();
   const { s } = await until('幻影 run 复位', s => !s.sendStop && s.nstream === 0, 8000);
-  ck('景3 修复：run-less /cancel 应答后键回「发送」（不再卡 ⏹）',
+  ck('景3 修复：run-less /cancel 应答后键回「发送」（不再卡停止态）',
     s.sendLabel === '发送' && !s.sendStop, `label=${s.sendLabel} stop=${s.sendStop}`);
   ck('景3 修复：run-less 应答独立成条（服务端那句「没有正在运行的任务」在）',
     s.msgs.some(m => m.txt.includes('当前没有正在运行的任务')),
