@@ -414,6 +414,60 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 	}
 }
 
+// TestWeb_PageIconSystem pins the c_25d2ey icon/button language: every
+// UI icon is an inline <symbol> in ONE sprite (vendored paths with the
+// source + licence comment), call sites reuse it through <use>, the
+// three button tiers exist as classes, and no emoji survives anywhere in
+// the page source. Message content (user/model text) is runtime data and
+// can still carry emoji — it never lives in this file.
+func TestWeb_PageIconSystem(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"vendored 自 Lucide",                // source comment
+		"ISC License",                      // licence comment
+		`<symbol id="i-tasks"`,             // jobs/tasks semantics for the 后台 entry
+		`<use href="#i-tasks"/>`,           // the nav button reuses it
+		`<use href="#i-paperclip"/>`,       // attach icon
+		`<use href="#i-mic"/>`,             // voice icon
+		".btn-primary",                     // primary tier
+		".btn-icon",                        // icon-button tier
+		"fill: none; stroke: currentColor", // vendored d-only paths need the shell
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the icon-system piece %q (c_25d2ey)", need)
+		}
+	}
+	if n := strings.Count(page, `<symbol id="i-`); n < 24 {
+		t.Errorf("sprite has %d <symbol>s, want >= 24 (one definition per UI icon)", n)
+	}
+	// UI icons are SVG, not emoji/text glyphs. The page source carries no
+	// message content, so any emoji here is an icon regression.
+	emoji := regexp.MustCompile(`[\x{1F000}-\x{1FAFF}\x{2600}-\x{27BF}\x{2B00}-\x{2BFF}\x{FE0F}]`)
+	if m := emoji.FindString(page); m != "" {
+		t.Errorf("embedded page still carries emoji %q — UI icons must be sprite SVG (c_25d2ey)", m)
+	}
+}
+
+// TestWeb_PagePaneEntriesWired pins the five top-bar pane entries' click
+// wiring. The audit entry lost its listener in a merge (the `panes.hooks`
+// table kept the button, so every table-shaped pin stayed green) and only
+// a real-browser hooksaudit run caught it — c_25d2ey. A string pin per
+// entry is cheap; a missing line here is a dead entry.
+func TestWeb_PagePaneEntriesWired(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"memBtn.addEventListener('click', () => togglePane('memory'))",
+		"statBtn.addEventListener('click', () => togglePane('stats'))",
+		"agentsBtn.addEventListener('click', () => togglePane('agents'))",
+		"settingsBtn.addEventListener('click', () => togglePane('settings'))",
+		"hkBtn.addEventListener('click', () => togglePane('hooks'))",
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("pane entry lost its click wiring: %q (a dead top-bar entry)", need)
+		}
+	}
+}
+
 // TestWeb_PageSessionSidebar pins the W5 sidebar card (c_txz6vz): the
 // sessions list is a PERSISTENT left rail — collapse bit persisted in
 // localStorage with a narrow-viewport default, a ＋新建 that rides the
@@ -424,16 +478,16 @@ func TestWeb_PageSessionsBrowser(t *testing.T) {
 func TestWeb_PageSessionSidebar(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"id=\"side\"",              // the rail itself
-		"id=\"side-toggle\"",       // collapse affordance
-		"id=\"side-search\"",       // title filter input
-		"id=\"side-new\"",          // new-session button
-		"seek-side-collapsed",      // the remembered bit's key
+		"id=\"side\"",                   // the rail itself
+		"id=\"side-toggle\"",            // collapse affordance
+		"id=\"side-search\"",            // title filter input
+		"id=\"side-new\"",               // new-session button
+		"seek-side-collapsed",           // the remembered bit's key
 		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
-		"innerWidth < 1024",        // narrow viewport defaults to collapsed
-		"SESS_PAGE = 30",           // row page size (filter+page are client-side)
-		"sendText('/new', false)",  // ＋新建 is the /new command, not a new protocol
-		"sess-detail",              // main area swaps to a transcript on row click
+		"innerWidth < 1024",             // narrow viewport defaults to collapsed
+		"SESS_PAGE = 30",                // row page size (filter+page are client-side)
+		"sendText('/new', false)",       // ＋新建 is the /new command, not a new protocol
+		"sess-detail",                   // main area swaps to a transcript on row click
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz)", need)
@@ -458,16 +512,16 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 func TestWeb_PageThemeSettings(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		":root[data-theme=\"light\"]",       // the light token block exists
-		"--seek-inset",                        // semantic token names, not hex at call sites
-		"localStorage.getItem('seek-theme')",  // remembered choice
-		"localStorage.setItem(THEME_KEY",      // ... written on toggle
-		"localStorage.removeItem(THEME_KEY)",  // system state = no remembered value
-		"prefers-color-scheme: light",         // system follow
-		"dataset.mode",                        // the three-state button group
-		"settings/get",                        // the read-only snapshot method
-		"id=\"set-body\"",                     // settings pane container
-		"id=\"set-btn\"",                      // nav entry
+		":root[data-theme=\"light\"]",        // the light token block exists
+		"--seek-inset",                       // semantic token names, not hex at call sites
+		"localStorage.getItem('seek-theme')", // remembered choice
+		"localStorage.setItem(THEME_KEY",     // ... written on toggle
+		"localStorage.removeItem(THEME_KEY)", // system state = no remembered value
+		"prefers-color-scheme: light",        // system follow
+		"dataset.mode",                       // the three-state button group
+		"settings/get",                       // the read-only snapshot method
+		"id=\"set-body\"",                    // settings pane container
+		"id=\"set-btn\"",                     // nav entry
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the theme/settings piece %q (W5 c_ni7mzw)", need)
@@ -558,13 +612,13 @@ func TestWeb_PageStreamingBubble(t *testing.T) {
 func TestWeb_PageStopButton(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"renderSend()",                 // key state is a function of the run table
-		"runs.size > 0",                // busy = a live streamed run
-		"classList.toggle('stop'",      // the visual stop state
+		"renderSend()",                  // key state is a function of the run table
+		"runs.size > 0",                 // busy = a live streamed run
+		"classList.toggle('stop'",       // the visual stop state
 		"send.addEventListener('click'", // the fork sits at click, before submit
-		"sendText('/cancel', false)",   // stop click = the /cancel command text
-		"m.run === stopping",           // interrupted close keys the armed run
-		"—— 已中断 ——",                  // the cut marker keeps the partial
+		"sendText('/cancel', false)",    // stop click = the /cancel command text
+		"m.run === stopping",            // interrupted close keys the armed run
+		"—— 已中断 ——",                     // the cut marker keeps the partial
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the stop-button piece %q (c_5m3fm6)", need)
@@ -733,15 +787,15 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 func TestWeb_PageStatsTrend(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"stats/trend",                   // the aggregation method
-		"createElementNS",               // hand-drawn SVG, no chart library
-		"id=\"trend-plot\"",             // the plot host
-		"id=\"trend-tools\"",            // window switcher + legend live here
-		"trend-tip",                     // hover readout (built at render time)
-		"pointermove",                   // hover interaction
-		"TREND_WINDOWS",                 // time-window switching
-		"还没有历史会话",                       // empty-state copy
-		"折线需要 ≥2 个点",                    // one-point boundary copy
+		"stats/trend",        // the aggregation method
+		"createElementNS",    // hand-drawn SVG, no chart library
+		"id=\"trend-plot\"",  // the plot host
+		"id=\"trend-tools\"", // window switcher + legend live here
+		"trend-tip",          // hover readout (built at render time)
+		"pointermove",        // hover interaction
+		"TREND_WINDOWS",      // time-window switching
+		"还没有历史会话",            // empty-state copy
+		"折线需要 ≥2 个点",         // one-point boundary copy
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)
@@ -909,13 +963,13 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 func TestWeb_PageMobileResponsive(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"@media (max-width: 480px)",            // the one narrow breakpoint
-		"side-scrim",                           // drawer dismiss layer (element + rules)
-		"matchMedia('(max-width: 480px)')",     // JS breakpoint == CSS breakpoint
-		"drawerClose()",                        // row pick closes the drawer
-		"flex-wrap: wrap",                      // command bar wraps, nothing unreachable
-		".msg pre, .sbody pre",                  // code-block h-scroll covers ALL body containers
-		"--seek-scrim",                         // scrim colour is a themed token
+		"@media (max-width: 480px)",        // the one narrow breakpoint
+		"side-scrim",                       // drawer dismiss layer (element + rules)
+		"matchMedia('(max-width: 480px)')", // JS breakpoint == CSS breakpoint
+		"drawerClose()",                    // row pick closes the drawer
+		"flex-wrap: wrap",                  // command bar wraps, nothing unreachable
+		".msg pre, .sbody pre",             // code-block h-scroll covers ALL body containers
+		"--seek-scrim",                     // scrim colour is a themed token
 		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
 	} {
 		if !strings.Contains(page, need) {

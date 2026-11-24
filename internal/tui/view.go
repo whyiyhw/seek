@@ -96,7 +96,7 @@ func (m Model) View() tea.View {
 	}
 
 	// Second-tier provider banner: warn that DeepSeek-exclusive features
-	// (cache stats, Reasoner) are disabled.
+	// (cache stats) are disabled.
 	if m.opts.ProviderName != "" {
 		banner := lipgloss.NewStyle().
 			Foreground(colourTool).
@@ -220,8 +220,8 @@ func (m Model) View() tea.View {
 			// Hidden-reasoning placeholder. Spinner + elapsed makes the
 			// "still working" state visible — a static line reads as
 			// frozen, and reasoning can be the longest silent gap in a
-			// turn (10-90s on /distill, seconds on normal think tool
-			// calls). Same pattern as the thinking… line above and the
+			// turn (10-90s on /distill). Same pattern as the
+			// thinking… line above and the
 			// active-tool slots.
 			label := "reasoning…"
 			if !m.streamStartTime.IsZero() {

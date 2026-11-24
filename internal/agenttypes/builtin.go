@@ -41,9 +41,9 @@ var builtinDefs = []*Definition{
 	},
 	{
 		Name:        "explore",
-		Description: "Read-only parallel research (read/grep/list_dir/git/webfetch/think) forced into plan-analyze; returns bulleted findings.",
+		Description: "Read-only parallel research (read/grep/list_dir/git/webfetch) forced into plan-analyze; returns bulleted findings.",
 		Tools: []string{
-			"read", "grep", "list_dir", "git", "webfetch", "think",
+			"read", "grep", "list_dir", "git", "webfetch",
 		},
 		Workflow: "plan-analyze",
 		Body:     "You are in research-only mode. You cannot write, edit, or run mutating commands. Return findings as bulleted summary.",
@@ -54,7 +54,7 @@ var builtinDefs = []*Definition{
 		Name:        "plan",
 		Description: "Read-only investigation that returns a numbered, structured action plan the parent (or a human reviewer) can execute step by step.",
 		Tools: []string{
-			"read", "grep", "list_dir", "git", "webfetch", "think",
+			"read", "grep", "list_dir", "git", "webfetch",
 		},
 		Workflow: "plan-analyze",
 		Body:     "You are in plan-analyze mode. Investigate the task and return a numbered, structured plan in your final summary — explicit steps the parent (or a human reviewer) can execute. You cannot run mutating tools yourself.",

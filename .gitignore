@@ -58,3 +58,8 @@ bench-*.json
 
 # video-agent-kit local cache marker — machine-specific path, never commit
 /.video_agent/
+
+# butler merge-gate declaration — machine-local by design (user 2026-11-22):
+# butler reads it from the checkout's disk at merge time, so tracked or not
+# never affects the gates; a fresh clone simply lenient-skips. Never commit.
+.butler/

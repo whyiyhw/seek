@@ -182,9 +182,9 @@ schema `properties` **末尾**追加（一次性失效 prefix cache，同柱 K D
 
 main 构造一次 `map[string]resolvedProvider`（仅含有 key 的 provider；deepseek 永在首位），注入 `subagentRunnerOpts`。`RunnerJob` 增加 `Provider string / Model string / Effort string`（Manager 从 type 配置解析后填入）。`buildSubagentRunner` 按 `job.Provider` 取 client/Provider 构造子 `agent.Config`；缺省 = 父实例（现状路径零变化）。GLM 车道 = `pkg/llm/compatible`（现有 pinned 端点 + 默认 `glm-5.3`）。
 
-#### D8 — DeepSeek-only 工具按 provider 过滤（坑，必须在 P1 处理）
+#### D8 — DeepSeek-only 工具按 provider 过滤（已随 think 退役而移除）
 
-`think` 是 DeepSeek 专属工具（FIM 补全工具曾同列，2026-11-22 退役——实测模型不用，工具链整体移除）。路由到 GLM 的 type，其工具白名单在派生子 Registry 时**剔除 DeepSeek-only 工具**（模板 Filter 之后追加一道 provider 兼容过滤），子 system prompt 的 skill manifest 若引用 dual-model 类 DeepSeek-only 流程，风险留提示级（不阻断）。不做反向检测——provider 能力表写死在代码常量（`map[string]set[string]`），不运行时探测。
+D8 机制（deepseekOnly 表 + Runner 在模板 Filter 之后追加的 provider 兼容滤网）已于 2026-11-22 随 `think` 工具退役整体删除：`think` 退役后表空，空表+空滤网是死代码。历史口径（P1 时代）：`think` / `fim_complete` 是 DeepSeek 专属工具，路由到 llm.Provider 车道的子代理在派生 Registry 时剔除之——工具 schema 里看得见、调用必失败的工具是最坏形态。今后再出现车道专属工具时按同思路重建（表写死在代码常量，不运行时探测）；skill manifest 引用车道专属流程的风险仍留提示级。
 
 #### D9 — 成本/预算/定价打通（几乎零改动，验收要钉死）
 
@@ -274,7 +274,7 @@ You are a test verifier subagent. …（body = 角色 prompt，替换内置模�
 
 - `tools` ⊆ 父注册表 ∩ 非禁注（`agent`/`ask_user` 永不，嵌套防线不破）；未知工具名 = 配置错误，启动警告 + 该 type 降级为 general-purpose 工具集（不静默收窄——白名单拼错不能意外放大）。
 - `workflow: plan-analyze` 允许（收紧）；`plan-execute`/放宽 pref 一律拒绝（配置错误）——`Policy.Spawn` 的 Restriction 单调性是硬门，frontmatter 只是它的又一个来源。
-- D8 的 provider 过滤照常作用于自定义 type。
+- D8 的 provider 过滤（已随 think 退役移除，2026-11-22）在其存续期照常作用于自定义 type。
 - 校验器全量单测：每个非法形状（放宽 pref、未知工具、未知 provider、无 name）都有明确错误。
 
 #### D14 — 与 P1 config 段的关系
@@ -370,7 +370,7 @@ max_bytes = 2048                                   # 而不是每次现场生成
 | `notified` 事件与 resume fold 的时序洞（注入后崩溃，notified 未写） | 注入取队时**先写 `notified` 再 Prepend**——最坏丢一次注入（下次 resume 重灌），绝不重复灌 |
 | 模型在等后台结果时空转 poll（反复发消息催） | 工具 description 明示"notification arrives on your next turn; do not wait idly"；CC 同款契约原句语义 |
 | GLM 车道限流叠加 MaxConcurrent=3 并发放大 | 路由不放宽容量门；config 段可加 `max_turns` 收紧；实战反馈再调 |
-| per-type 路由 + DeepSeek-only 工具（think）静默失败 | D8 启动期过滤 + 验收 #9 |
+| per-type 路由 + 车道专属工具静默失败 | D8 启动期过滤（think 退役后机制移除；复现时按 D8 思路重建）|
 | 动态 enum 后 schema 膨胀（type 描述过长） | D12 描述上限 + schema hash 测试钉字节 |
 | frontmatter `tools` 拼错静默放大到全集 | D13 未知工具名 = 配置错误：启动警告 + 该 type 降级 general-purpose 工具集（响亮且不静默收窄，P2-b 实现） |
 | `pre_prompt_inject` 被滥用改写历史 | 三区模型 + 验收 #3/#5 hash 守护；UserText/system prompt 改写显式否决 |

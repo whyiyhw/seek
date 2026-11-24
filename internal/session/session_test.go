@@ -381,7 +381,7 @@ func TestRepair_DropsTrailingOrphanToolCalls(t *testing.T) {
 		{
 			Role: deepseek.RoleAssistant,
 			ToolCalls: []deepseek.ToolCall{
-				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "think", Arguments: `{"task":"x"}`}},
+				{ID: "call_1", Function: deepseek.ToolCallFunc{Name: "edit", Arguments: `{"path":"x"}`}},
 			},
 		},
 		// ↑ orphan: no matching tool message follows.

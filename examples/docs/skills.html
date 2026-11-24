@@ -131,8 +131,8 @@
   </div>
 
   <div class="reveal">
-    <p data-lang="en">Skills are reusable instruction sets stored as Markdown files. The agent can fetch a skill's body on demand via the <code>Skill</code> tool, then follow its steps. Think of them as named workflows: "run Go tests", "do a dual-model review", etc.</p>
-    <p data-lang="zh" hidden">Skill 是以 Markdown 文件存储的可复用指令集。agent 可以通过 <code>Skill</code> 工具按需获取技能内容并执行步骤。可以理解为命名的工作流：「运行 Go 测试」、「进行双模型审查」等。</p>
+    <p data-lang="en">Skills are reusable instruction sets stored as Markdown files. The agent can fetch a skill's body on demand via the <code>Skill</code> tool, then follow its steps. Think of them as named workflows: "run Go tests", "review the current diff", etc.</p>
+    <p data-lang="zh" hidden">Skill 是以 Markdown 文件存储的可复用指令集。agent 可以通过 <code>Skill</code> 工具按需获取技能内容并执行步骤。可以理解为命名的工作流：「运行 Go 测试」、「审查当前 diff」等。</p>
 
     <h2 data-lang="en">Search Order</h2>
     <h2 data-lang="zh" hidden">搜索顺序</h2>
@@ -160,8 +160,10 @@
           <tr><th data-lang="en">Name</th><th data-lang="zh" hidden">名称</th><th data-lang="en">When to use</th><th data-lang="zh" hidden">使用时机</th></tr>
         </thead>
         <tbody>
-          <tr><td class="cmd">dual-model</td><td data-lang="en">Non-trivial multi-step tasks — plans with V4 reasoning, executes with chat, then reviews</td><td data-lang="zh" hidden">非平凡多步骤任务——先用 V4 推理规划，再用聊天执行，最后审查</td></tr>
+          <tr><td class="cmd">code-review</td><td data-lang="en">Structured diff review at a chosen effort level — quick (blocking bugs only) or thorough (exhaustive)</td><td data-lang="zh" hidden">按选定力度审查当前 diff——quick（只看阻塞性缺陷）或 thorough（穷尽式）</td></tr>
           <tr><td class="cmd">go-test-runner</td><td data-lang="en">Running, debugging, or analyzing Go test failures</td><td data-lang="zh" hidden">运行、调试或分析 Go 测试失败</td></tr>
+          <tr><td class="cmd">plan-contract</td><td data-lang="en">What a plan must contain before <code>propose</code> — checkable completion conditions, where a gate belongs</td><td data-lang="zh" hidden">调 <code>propose</code> 前计划必须写清什么——可核对的完成条件、门设在哪</td></tr>
+          <tr><td class="cmd">plan-mode</td><td data-lang="en">The analyze → propose → execute → report loop; auto-read when the mode reminder says plan-analyze / plan-execute</td><td data-lang="zh" hidden">analyze → propose → execute → report 闭环；模式提醒为 plan-analyze / plan-execute 时自动读取</td></tr>
         </tbody>
       </table>
     </div>

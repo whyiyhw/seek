@@ -73,6 +73,11 @@ const (
 	EventCompact = "compact"
 	// EventGoal: a /goal verdict landed (the loop continues or stops).
 	EventGoal = "goal"
+	// EventGuidance: a deterministic turn-boundary hint was injected
+	// (internal/guidance). Detail names the rule
+	// (retry-loop / failure-run / silence-run) so a report can ask
+	// "which rule fires, and does firing it reduce steer counts?".
+	EventGuidance = "guidance"
 )
 
 // Event is one JSONL row. Field set is kept minimal on purpose: every

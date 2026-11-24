@@ -92,7 +92,7 @@ func newHookWiredManager(t *testing.T, runner Runner, rec *lifecycleRecorder, ba
 		ProjectSectionFn: func() string { return "" },
 		SkillManifestFn:  func() string { return "" },
 		ParentToolNamesFn: func() []string {
-			return []string{"read", "grep", "list_dir", "git", "webfetch", "think", "agent", "ask_user", "bash", "write", "edit"}
+			return []string{"read", "grep", "list_dir", "git", "webfetch", "agent", "ask_user", "bash", "write", "edit"}
 		},
 		MaxConcurrent: 3,
 		Runner:        runner,

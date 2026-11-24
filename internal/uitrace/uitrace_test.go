@@ -247,6 +247,7 @@ func TestEventNamesAreWireFormat(t *testing.T) {
 		"cancel":   EventCancel,
 		"compact":  EventCompact,
 		"goal":     EventGoal,
+		"guidance": EventGuidance,
 	}
 	for literal, got := range want {
 		if got != literal {

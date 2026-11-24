@@ -1,7 +1,9 @@
 # 第 6 章：M3 — 推理增强
 
-> 对应代码：`internal/tools/think/`、`internal/tools/fimcomplete/`
+> 对应代码：`internal/tools/think/`、`internal/tools/fimcomplete/`（两工具均已退役——FIM 于 2026-11-22 早班、think 同日晚班；本章按当时的设计演化讲述，历史原样保留）
 > 起点：基础工具可用。终点：模型可以在复杂问题上调用 reasoner，可以用 FIM 做代码填空。
+
+> **退役注记（2026-11-22）**：`think` 工具与围绕它的 `dual-model` 内置 skill 整体退役。依据与 FIM 同源——真实会话 109 个项目仅 2 次调用，sysprompt 两条强引导仍几乎不被使用：模型不绕弯，深度推理由主会话自己的 thinking 模式（`/effort`）承载更直接。本章讲的流式工具、完全隔离历史、bumpEffort 这些设计模式仍是后续工具的参照。
 
 ---
 

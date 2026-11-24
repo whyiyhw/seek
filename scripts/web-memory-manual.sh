@@ -14,8 +14,8 @@
 #
 # 手测清单（脚本会原样打印）：
 #   1. 「🧠 记忆」进面板：项目下拉两行、缺省落在 beta（最新）→「（这个
-#      项目还没有记忆）」；切到 alpha：列表两条，📌 前缀与 ⚠ 过期标记在位
-#   2. 点「zzz-keep-forever」：详情 meta（创建/更新/召回次数/📌/auto）、
+#      项目还没有记忆）」；切到 alpha：列表两条，pin 图标与 alert「过期」标记在位
+#   2. 点「zzz-keep-forever」：详情 meta（创建/更新/召回次数/常驻/auto）、
 #      #infra 标签章、正文代码围栏按 <pre> 渲染（textContent-only）
 #   3. 「📊 统计」进面板：会话下拉缺省最新；命中率 60.0% + 双色条、
 #      hit/miss 600/400、累计 tokens、成本卡片 $（服务端算的 cost_usd）
@@ -47,7 +47,7 @@ SID="20261116-100000-w45statfix01"
 if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: go build ./cmd/seek → \$TMP/seek"
   echo "DRY_RUN: 造夹具 \$TMP/projects/{$ALPHA_ID,$BETA_ID}/{manifest.json,memory.jsonl}"
-  echo "DRY_RUN:   （alpha 两记忆：📌+围栏正文 / ⚠ stale；beta 零记忆、LastSeen 最新）"
+  echo "DRY_RUN:   （alpha 两记忆：pin+围栏正文 / alert stale；beta 零记忆、LastSeen 最新）"
   echo "DRY_RUN: 造 \$TMP/sessions/$SID.jsonl（usage 600 命中/400 未命中）"
   echo "DRY_RUN: 写 \$TMP/config.json {\"serve\":{\"web_addr\":\"$ADDR\"}}"
   echo "DRY_RUN: SEEK_HOME=\$TMP \$TMP/seek serve --frontend=web &（stderr 抓 banner URL）"
@@ -89,7 +89,7 @@ printf '{"schema_version":1,"project_id":"%s","abs_path":"/tmp/w45-fixture/alpha
 printf '{"schema_version":1,"project_id":"%s","abs_path":"/tmp/w45-fixture/beta","first_seen":"2026-11-14T09:00:00+08:00","last_seen":"2026-11-15T09:00:00+08:00"}\n' \
   "$BETA_ID" > "$BETA_DIR/manifest.json"
 
-# alpha 的两条记忆：📌 常驻（正文带 ```go 围栏）+ ⚠ stale 待回收。
+# alpha 的两条记忆：pin 常驻（正文带 ```go 围栏）+ alert stale 待回收。
 # JSONL 一行一条 Entry（W4.3 测试夹具 writeProjectFixture 同构）。
 {
   printf '{"schema_version":1,"name":"zzz-keep-forever","tagline":"load-bearing","content":"the body with\\ntwo lines\\n```go\\nfunc main() { println(\\"ok\\") }\\n```","tags":["infra"],"created_at":"2026-11-01T09:00:00+08:00","updated_at":"2026-11-10T09:00:00+08:00","last_recalled_at":"2026-11-10T09:00:00+08:00","recall_count":7,"pinned":true,"auto_sourced":true}\n'
@@ -153,8 +153,8 @@ ck "memory/list 缺省=beta 空" "0" "$(entry_count "$dflt")"
 
 alpha=$(rpcc memory/list "{\"project_id\":\"$ALPHA_ID\"}")
 ck "memory/list alpha 两条" "2" "$(entry_count "$alpha")"
-ck "alpha 含 📌 常驻条目" "yes" "$(printf '%s' "$alpha" | grep -q '"pinned":true' && echo yes || echo no)"
-ck "alpha 含 ⚠ stale 标记" "yes" "$(printf '%s' "$alpha" | grep -q '"stale":true' && echo yes || echo no)"
+ck "alpha 含常驻条目" "yes" "$(printf '%s' "$alpha" | grep -q '"pinned":true' && echo yes || echo no)"
+ck "alpha 含 stale 标记" "yes" "$(printf '%s' "$alpha" | grep -q '"stale":true' && echo yes || echo no)"
 
 got=$(rpcc memory/get "{\"project_id\":\"$ALPHA_ID\",\"name\":\"zzz-keep-forever\"}")
 ck "memory/get 围栏正文" "yes" "$(printf '%s' "$got" | grep -q 'func main' && echo yes || echo no)"
@@ -179,9 +179,9 @@ cat <<EOF
 == 手测清单（浏览器）==
   打开：$URL
   1. 点「🧠 记忆」→ 项目下拉两行、缺省 beta（最新）→ 列表「（这个项目还没有
-     记忆）」；下拉切 alpha：两条，「zzz-keep-forever」带 📌 前缀、
-     「aaa-old-decision」带 ⚠ 过期 · 字样
-  2. 点「zzz-keep-forever」：meta 行（建于/更新/召回 7 次/📌 常驻/auto）、
+     记忆）」；下拉切 alpha：两条，「zzz-keep-forever」带 pin 图标、
+     「aaa-old-decision」带 alert 图标 + 过期 · 字样
+  2. 点「zzz-keep-forever」：meta 行（建于/更新/召回 7 次/常驻/auto）、
      #infra 标签章、正文里 go 代码围栏成 <pre> 块（与聊天面同一渲染器）
   3. 点「📊 统计」→ 会话下拉缺省 w45 fixture：命中率 60.0% + 绿色进度条、
      命中/未命中 600/400、累计 tokens（1,000/200/1,200）、成本卡片 \$（服务端

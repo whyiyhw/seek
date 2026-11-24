@@ -44,7 +44,7 @@ func newBackgroundManager(t *testing.T, runner Runner) (*Manager, context.Cancel
 		t.Fatal(err)
 	}
 	sessionCtx, sessionCancel := context.WithCancel(context.Background())
-	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "think", "agent", "ask_user", "bash", "write", "edit"}
+	parentTools := []string{"read", "grep", "list_dir", "git", "webfetch", "agent", "ask_user", "bash", "write", "edit"}
 	mgr, err := NewManager(ManagerOpts{
 		ProjectAbsPath:    parentCwd,
 		ParentSidFn:       func() string { return "20260601-100000-parent" },

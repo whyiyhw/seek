@@ -1,7 +1,0 @@
-{
-  "gates": [
-    {"name": "doc-budgets", "cmd": "bash scripts/verify-doc-budgets.sh"},
-    {"name": "pitfalls-count", "cmd": "bash scripts/pitfalls-count.sh --check"},
-    {"name": "web-gate", "cmd": "bash scripts/web-gate.sh"}
-  ]
-}

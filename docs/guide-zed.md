@@ -66,7 +66,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 
 - ✅ **握手 + 会话**：`initialize` → `session/new`（cwd = 你打开的项目，**生效**：工具相对路径、bash/git 工作目录都锚到它）→ `session/prompt`。协议版本是**真协商**（P1-3）：响应带的是「客户端请求的版本」与「seek 支持的版本」的交集里最高的那个，不是回显——客户端报 2 会拿到 1，降级在响应里申报，seek 侧另在 stderr 记一行（§5）。
 - ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.4）。
-- ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 与 `think` 工具的实时输出都会出现；代价：CoT 会进客户端侧日志）。
+- ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 会出现；代价：CoT 会进客户端侧日志）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。
@@ -191,6 +191,12 @@ wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`
 **语义映射**：`plan` == plan 模式的 analyze 子态（`WorkflowPlanAnalyze`，只读门：write/edit/bash 全拒，拒绝文案指向 propose）；`default` == 退出 plan（`WorkflowNone`）。切换同时更新**下一轮** user message 的 mode 提醒词（prefix-cache 安全，不改系统提示——TUI `/plan` 同款机制）。`plan-execute` 子态（propose 被人工批准后）**不是**第三个 wire mode：它的入口是 propose 审批 picker，ACP 车道暂无该承载（见上行 backlog），两态表面保持 default/plan 一进一出。
 
 **边界（诚实清单）**：plan 态模型被提醒词指示走 `propose`，但 propose 的人工审批门（TUI picker 四选项）在 ACP 车道无协议承载——ACP 下 plan 态的现实用途是**只读分析 + 计划文本产出**，人审后切回 `default` 执行。plan 态两态行为差异有真二进制 e2e 钉死（`cmd/seek/acp_mode_e2e_test.go`：plan 态 write 被拒不落盘 + 提醒词在轮内；default 态同一 write 落盘 + 提醒词消失）。
+
+**`ask_user` 在 ACP 车道不存在**（同一条边界的另一半，2026-11-23 补记）。`ask_user` 要的是 2–4 个任意选项 + 自由文本 + 多题 batch，而 ACP v1 只给 agent 一个请求型方法 `session/request_permission`，语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题）。硬塞会把它渲染成「是否允许」而不是「你选哪个」，且需要客户端实现一个自创请求型扩展才能工作——请求型扩展与通知型（`_seek_turn_stop`）的兼容性风险不是一个量级：客户端不实现就挂到超时。协议面因此**不开口**。
+
+行为是可预期的：ACP 车道里 `ask_user` / `propose` 返回 **`ErrDisabled`** ——「interactive question not available in this mode — rephrase as a plain-text question in your reply」，模型据此把问题改写进正文，回合照常完成。这条文案是有意的指令面（不是日志），2026-11-23 之前这里报的是 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用；现在 `askPolicy` 出生即 `ModeDisabled`，只有 TUI 那条路在自己入口显式 `SetMode(ModeAsk)`，新加的车道默认继承正确姿态。钉死用例：`cmd/seek/askuser_lane_test.go`（print 与 ACP 两条车道各一）。
+
+真要在编辑器里给人做选择题，需要的是协议层的答案：要么等 ACP 出现 elicitation 类方法，要么客户端把 `request_permission` 的 `toolCall.content` 自行渲染成选择器——两者都不在 seek 单侧可达范围内，故 backlog 里不立卡。
 
 **①选型：为什么首批只协议化 /plan、其余维持 TUI-only**：
 

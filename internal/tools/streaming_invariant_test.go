@@ -5,12 +5,31 @@
 package tools_test
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/whyiyhw/seek/internal/tools"
-	"github.com/whyiyhw/seek/internal/tools/think"
-	"github.com/whyiyhw/seek/pkg/deepseek"
 )
+
+// fakeStreamTool is the local stand-in for a concrete StreamingTool.
+// The last real one (think) was retired 2026-11-22 — until a new
+// streaming tool ships, this table only pins the invariant's shape,
+// so add real tools back to streamingTools the moment they land.
+type fakeStreamTool struct{ name string }
+
+func (f fakeStreamTool) Name() string            { return f.name }
+func (f fakeStreamTool) Description() string     { return "fake " + f.name }
+func (f fakeStreamTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (f fakeStreamTool) Execute(context.Context, json.RawMessage) (string, error) {
+	return "fake", nil
+}
+func (f fakeStreamTool) ExecuteStream(ctx context.Context, raw json.RawMessage, push func(tools.StreamDelta) error) (string, error) {
+	if err := push(tools.StreamDelta{Delta: "fake"}); err != nil {
+		return "", err
+	}
+	return "fake", nil
+}
 
 // TestNoToolStreamsAndIsReadOnly pins the invariant the TUI's ToolDelta
 // routing relies on: a tool may implement StreamingTool (per-delta live
@@ -30,9 +49,8 @@ import (
 // genuinely needs both, the TUI must move ToolDelta routing to a
 // per-CallID live region first (see the NOTE in update_agent.go).
 func TestNoToolStreamsAndIsReadOnly(t *testing.T) {
-	ds := deepseek.New(deepseek.WithAPIKey("t"))
 	streamingTools := []tools.Tool{
-		think.New(ds, func() string { return "" }, nil),
+		fakeStreamTool{name: "fake-stream"},
 	}
 	for _, tool := range streamingTools {
 		if _, streams := tool.(tools.StreamingTool); !streams {

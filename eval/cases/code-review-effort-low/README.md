@@ -74,7 +74,7 @@ can be as verbose as `max`, and both levels catch every blocking bug. As pure pr
    body. The framing text in *these* prompts is unchanged, so `low` here ≈ the `quick` framing
    and `max` ≈ the `thorough` framing — the cases remain a valid 2-level A/B.
 2. **Not done — give `thorough` mechanical teeth** so the gradation isn't fakeable by
-   verbosity: force the reasoner on (`/effort`/think), or fan out a subagent per review
+   verbosity: force the reasoner on (`/effort`), or fan out a subagent per review
    dimension (v5 柱 G). Only worth it if 2 levels also prove too noisy. Re-run this A/B after
    and expect real separation.
 

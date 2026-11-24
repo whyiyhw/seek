@@ -112,7 +112,7 @@ func (a *Agent) commitInjected(turn int, out chan<- Event) bool {
 	for _, text := range pending {
 		msg := deepseek.Message{Role: deepseek.RoleUser, Content: text + modeReminder(a.cfg.ModeLabel)}
 		a.appendMessage(msg)
-		out <- InjectedMessage{Index: turn, Message: msg}
+		out <- InjectedMessage{Index: turn, Message: msg, Source: InjectedSourceUser}
 	}
 	return true
 }

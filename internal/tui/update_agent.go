@@ -15,13 +15,15 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
-// completionRe extracts "completion <number>" from think tool result text.
-// formatResult in internal/tools/think produces:
+// completionRe extracts "completion <number>" from a tool's result
+// text. It originated with the think tool (retired 2026-11-22), whose
+// formatResult produced:
 //
 //	usage: prompt 956, completion 2345, cache hit 0 / miss 956
 //
-// This is a TUI-level coupling to the think tool's output format — keep in
-// sync if formatResult changes.
+// No shipped tool emits that line today; the parse stays because the
+// completion-token display path is generic (harmless no-op on other
+// results) — subtraction candidate if nothing re-adopts the format.
 var completionRe = regexp.MustCompile(`completion (\d+)`)
 
 // handleStreamEnd is the streamEndMsg case lifted out of Update(). It
@@ -436,12 +438,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.chunked = false
 
 	case agent.InjectedMessage:
-		// A user message queued via QueueUserMessage just landed at a
-		// turn boundary inside the CURRENT round (pkg/agent/inject.go).
-		// Commit the block to scrollback so the transcript shows where
-		// the user intervened — the same rendering as a submitted prompt,
-		// minus the round-boundary bookkeeping (this is not a new turn
-		// from the user's point of view, the round is still running).
+		// Something landed at a turn boundary inside the CURRENT round
+		// (pkg/agent/inject.go, guidance.go). Source decides the
+		// rendering: a human break-in deserves the same `▌ you` block a
+		// submitted prompt gets; a machine hint is a muted one-liner, not
+		// something that looks like the user typed it.
+		if e.Source == agent.InjectedSourceGuidance {
+			m.traceGuidance(e.Rule, len(e.Message.Content))
+			cmds = append(cmds, m.appendHistory(styleMuted.Render(
+				"  ⚙ guidance: "+truncateOneLine(e.Message.Content, 100))))
+			break
+		}
 		m.injectedPreview = ""
 		cmds = append(cmds, m.appendHistory(renderUserBlock(e.Message.Content, m.width)))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ inserted at turn boundary "+fmt.Sprint(e.Index))))
@@ -530,8 +537,9 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		})
 
 	case agent.ToolDelta:
-		// Streaming output from a long-running tool (currently only
-		// `think`). Routed into the same live-region buffers the
+		// Streaming output from a long-running tool (none shipped
+		// today — think, the last one, retired 2026-11-22). Routed
+		// into the same live-region buffers the
 		// chat model uses — the PARTITIONED agent dispatch keeps the
 		// aliasing safe:
 		//   1. chat model streams content → MessageEnd commits +
@@ -553,7 +561,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		} else {
 			m.curContent += e.Delta
 			// Same long-output guard as chat content: tool-streamed
-			// output (think's final answer) grows the live block
+			// output (the streaming tool's final answer) grows the live block
 			// row-for-row like a chat reply, and the inline-renderer
 			// freeze doesn't care whose delta filled the buffer.
 			if m.shouldChunkCommit() {
@@ -562,7 +570,7 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		}
 
 	case agent.ToolExecEnd:
-		// If this was a streaming tool (only `think` today), the live
+		// If this was a streaming tool, the live
 		// buffers hold what we showed during execution; the tool's
 		// full result is about to land in scrollback as a single
 		// committed line, so the live preview is now stale and would

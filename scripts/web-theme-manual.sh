@@ -21,16 +21,17 @@
 # 打印人工清单等人按 Enter。全程不碰真实 ~/.seek 与生产 8790。
 #
 # 手测清单（无头不可用时脚本原样打印）：
-#   1. 打开 URL → 顶栏有「⚙ 设置」；页面是暗色（缺省跟随系统）
-#   2. 点⚙ 设置 → 外观三行（亮/暗/跟随系统）；点「☀ 亮」整页立即变亮，
-#      刷新后仍是亮、且刷新瞬间不闪白/不闪黑
-#   3. 点「🌙 暗」→ 变暗；刷新仍是暗。点「🖥 跟随系统」→ 记忆位清空，跟着
+#   1. 打开 URL → 顶栏有「设置」（齿轮 sprite + 文字）；页面是暗色（缺省跟随系统）
+#   2. 点「设置」→ 外观三行（亮/暗/跟随系统，各带 sun/moon/monitor sprite）；
+#      点「亮」整页立即变亮，刷新后仍是亮、且刷新瞬间不闪白/不闪黑
+#   3. 点「暗」→ 变暗；刷新仍是暗。点「跟随系统」→ 记忆位清空，跟着
 #      系统设置走（改系统外观，页面即时跟随）
 #   4. 设置面板下半部：serve 侧配置（provider/模型/温度/并发/yolo/监听/
 #      自动压缩/候选项目）+ 关于（版本、入口 token 后 6 位）。全是只读文本，
 #      没有输入框——卡面口径：写口超配额，本轮只读展示
-#   5. 两个主题下依次点开 会话/记忆/统计/后台/🎤：文字与底色都清楚
-#      （会话侧栏、消息气泡、统计卡、子代理行、录音按钮）
+#   5. 两个主题下依次点开 会话/记忆/统计/后台/麦克风：文字与底色都清楚
+#      （会话侧栏、消息气泡、统计卡、子代理行、录音按钮）；全页图标是
+#      同一套线性 SVG，无 emoji/文字符号
 #
 # Env:
 #   ADDR=127.0.0.1:18796  监听地址（写进临时 config.json 的 serve.web_addr）
@@ -148,6 +149,16 @@ ck "GET / 带主题 token 块（暗）" "yes" "$(has "$page" '--seek-inset: #141
 ck "GET / 带主题 token 块（亮）" "yes" "$(has "$page" ':root[data-theme="light"]')"
 ck "GET / 带设置面板骨架" "yes" "$(has "$page" 'id="set-body"')"
 ck "GET / 设置入口按钮" "yes" "$(has "$page" 'id="set-btn"')"
+# 图标体系（c_25d2ey）：内联 <symbol> sprite + 来源/许可证注释，UI 图标
+# 不再用 emoji/文字符号；正文消息是运行时内容，不在源面。
+ck "GET / 图标 sprite 注释带来源（Lucide）" "yes" "$(has "$page" 'vendored 自 Lucide')"
+ck "GET / 图标 sprite 注释带许可证（ISC）" "yes" "$(has "$page" 'ISC License')"
+ck "GET / 顶栏图标走 <use> 复用 sprite" "yes" \
+  "$(has "$page" '<use href="#i-brain"/>')"
+if command -v python3 >/dev/null 2>&1; then
+  ck "GET / 页面源无 UI emoji 字符（正文除外）" "0" \
+    "$(printf '%s' "$page" | python3 -c 'import sys,re; s=sys.stdin.read(); print(len(re.findall("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", s)))')"
+fi
 ck "GET / 无裸色逃逸（组件层零 hex）" "0" \
   "$(printf '%s' "$page" | sed -n '/<style>/,/<\/style>/p' | sed -n '/--seek-shadow:0 4px 14px rgba(0,0,0,.12);/,$p' | grep -cE '#[0-9a-fA-F]{6}')"
 
@@ -197,15 +208,15 @@ cat <<EOF
 
 == 无头条件缺（Chrome/node）——人工手测清单（浏览器）==
   打开：$URL
-  1. 顶栏有「⚙ 设置」；初始是暗色（无记忆位时跟随系统外观）
-  2. 点⚙ → 外观「☀ 亮 / 🌙 暗 / 🖥 跟随系统」。点亮：整页立即变亮，
+  1. 顶栏有「设置」（齿轮 sprite）；初始是暗色（无记忆位时跟随系统外观）
+  2. 点设置 → 外观「亮 / 暗 / 跟随系统」（sun/moon/monitor sprite）。点亮：整页立即变亮，
      刷新后仍亮，且刷新那一瞬不闪白/不闪黑（首帧就是亮）
   3. 点暗：变暗、刷新仍暗；点跟随系统：记忆位清空，改系统外观页面即时跟随
   4. 设置面板下半部「serve 侧配置（只读）」：默认 provider=deepseek、
      默认模型/温度=「无配置项」、并发上限=6、yolo=开、web 监听=$ADDR、
      自动压缩=350000 tokens、候选项目=1 条；「关于」=版本文本 + token
      …$TOK_TAIL。全页没有任何输入框（本轮只读口径）
-  5. 两个主题下依次点开 记忆 / 统计 / 后台 / 会话侧栏一条 / 按住 🎤：
+  5. 两个主题下依次点开 记忆 / 统计 / 后台 / 会话侧栏一条 / 按住麦克风：
      文字与底色都清楚可读
 
 按 Enter 结束并清理（KEEP=1 保留现场）…
