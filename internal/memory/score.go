@@ -77,7 +77,15 @@ func HalfLifeFromEnv() time.Duration {
 // Score returns the decay-weighted recall score per PRD §6:
 //
 //	score = (recall_count + 1) * exp(-(now - last_active_at) / half_life)
-//	last_active_at = max(created_at, updated_at, last_recalled_at)
+//	last_active_at = max(created_at, updated_at, last_recalled_at,
+//	                     last_injected_at)
+//
+// last_injected_at (active-memory first slice) makes "its tagline is
+// in the prompt right now" count as use — entries that are
+// continuously injected stay fresh, entries that fall out of the
+// index stop refreshing and decay on the remaining anchors. The zero
+// value (legacy entries, never-injected) never wins the max, so the
+// pre-injection formula is unchanged for old data.
 //
 // The +1 baseline keeps brand-new entries (recall_count=0) competitive
 // with old ones that have been recalled once recently — without it,
@@ -92,6 +100,9 @@ func Score(e Entry, now time.Time, halfLife time.Duration) float64 {
 	}
 	if e.CreatedAt.After(lastActive) {
 		lastActive = e.CreatedAt
+	}
+	if e.LastInjectedAt.After(lastActive) {
+		lastActive = e.LastInjectedAt
 	}
 	age := max(now.Sub(lastActive), 0)
 	decay := math.Exp(-float64(age) / float64(halfLife))
