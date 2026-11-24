@@ -44,6 +44,17 @@ type Entry struct {
 	RecallCount    int       `json:"recall_count"`
 	Pinned         bool      `json:"pinned,omitempty"`
 	Stale          bool      `json:"stale,omitempty"`
+	// LastInjectedAt is refreshed every time this entry's tagline is
+	// actually injected into a prompt via the M-index snapshot
+	// (active-memory first slice: injection IS effective use — the
+	// use path tagline→prompt→behaviour never shows up as a recall,
+	// see docs/prd/feature-active-memory.md §1.1). It joins the
+	// max(...) anchor in Score() so continuously-injected entries
+	// don't go stale, while entries squeezed out of the index (token
+	// budget) or in dead projects stop refreshing and decay normally.
+	// Zero on legacy entries and entries never injected; Score()
+	// naturally ignores the zero value (it never wins the max).
+	LastInjectedAt time.Time `json:"last_injected_at,omitzero"`
 	// StaleSince is the timestamp at which Stale was first flipped to
 	// true by GC. Used by the archive rule (PRD §6) to require the
 	// entry has been continuously stale for archiveStalePersistence

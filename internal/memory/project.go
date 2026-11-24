@@ -23,7 +23,8 @@ import (
 // The embedded sync.RWMutex guards entries and order against the async
 // memory_observe goroutine (ObserveEnqueue) racing with OnPrePrompt or
 // OnSessionStart (RunGC). Read paths (Index, Get, Entries) take RLock;
-// write paths (Add, Remove, TouchRecall, RunGC) take Lock.
+// write paths (Add, Remove, TouchRecall, TouchInjections, RunGC) take
+// Lock.
 type Project struct {
 	mu sync.RWMutex
 
@@ -398,6 +399,40 @@ func (p *Project) TouchRecall(name string, t time.Time) error {
 		e.AutoSourced = false
 	}
 	p.entries[name] = e
+	return p.writeEntries()
+}
+
+// TouchInjections refreshes last_injected_at for the named entries in
+// one lock + one write (active-memory first slice: the M-index snapshot
+// injection counts as effective use, so continuously-injected entries
+// don't decay to stale — docs/prd/feature-active-memory.md §1.1).
+//
+// Missing names are silently skipped rather than erroring: the caller
+// passes the name set it computed moments ago from Entries(), and a
+// concurrent Remove can only shrink that set — failing the whole batch
+// over a lost race would drop the freshness signal for every other
+// entry. This differs from TouchRecall's ErrNotFound contract because
+// TouchRecall serves a model-issued explicit call (a typo is signal
+// there), while TouchInjections is an internal system bookkeeping pass.
+//
+// A no-op batch (no names resolved) does NOT rewrite memory.jsonl —
+// same disk-I/O-proportional-to-change discipline as RunGC.
+func (p *Project) TouchInjections(names []string, t time.Time) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	touched := false
+	for _, name := range names {
+		e, ok := p.entries[name]
+		if !ok {
+			continue
+		}
+		e.LastInjectedAt = t.UTC()
+		p.entries[name] = e
+		touched = true
+	}
+	if !touched {
+		return nil
+	}
 	return p.writeEntries()
 }
 

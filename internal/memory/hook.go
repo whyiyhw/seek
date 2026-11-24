@@ -218,6 +218,23 @@ func (h *Hook) injectSnapshot() (hooks.PrePromptOut, error) {
 			prepend = append(prepend, *msg)
 		}
 		h.snapshotEntryNames = names
+		// Active-memory first slice: entries whose taglines just landed
+		// in the prompt count as effectively used. The injected byte
+		// stream carries no timestamps, so touching after buildMIndex
+		// cannot change this (or any later) turn's injected bytes —
+		// prefix cache is unaffected. Best-effort: a failed touch
+		// degrades to one session of normal decay for these entries.
+		if len(names) > 0 {
+			now := time.Now().UTC()
+			if h.Now != nil {
+				now = h.Now()
+			}
+			injected := make([]string, 0, len(names))
+			for name := range names {
+				injected = append(injected, name)
+			}
+			_ = h.Project.TouchInjections(injected, now)
+		}
 	}
 
 	h.snapshotInjected = true

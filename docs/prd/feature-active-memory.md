@@ -4,6 +4,8 @@
 
 **状态**：📐 设计稿，未实施。本 PRD 记录设计推演、踩坑路径、阶段决策。
 
+> 2026-11-24 更新：最小切片已落地（card c_ff4pcp，用户拍板「注入即计有效使用」，比 §4.2 阶段 1 的 heuristic 匹配更简单的一刀）——M-index snapshot 注入的条目批量刷新 `LastInjectedAt`，该时间戳进入 `Score()` 的 max 锚，GC 的 stale 判定从此不再只看 recall。§4.2 的 heuristic 关键词匹配（更精确的「使用」信号）、阶段 2/3 LLM 评估、方案 C 兜底均未实施。注：本切片走的是 §3.1 方案 A 的语义（注入即续命）但形态不同——无 SessionEnd 状态机，注入点当场批量 touch；「间接证据续命」的顾虑由自限通道兜住（token-budget 挤出 / 项目停用后恢复衰减，见 `docs/pitfalls/hook-memory/injection-freshness-is-only-self-limiting-while-injections-can-stop.md`）。
+
 ## 一、问题陈述
 
 ### 1.1 决定性的洞察
