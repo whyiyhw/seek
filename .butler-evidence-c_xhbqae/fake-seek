@@ -1,0 +1,25 @@
+#!/bin/bash
+# Deterministic stand-in for the seek binary: SUT call (no -model) emits a
+# wrong-but-plausible answer; judge call (-model …) emits a fail verdict.
+set -u
+if [ "${1:-}" = "-version" ]; then
+  echo "v9.9.9 · gatebeef"
+  exit 0
+fi
+model=""; saw_model=0; prev=""
+for a in "$@"; do
+  if [ "$prev" = "-model" ]; then model=$a; saw_model=1; fi
+  prev=$a
+done
+if [ "$saw_model" = "1" ]; then
+  printf '%s\n' '{"type":"text_delta","delta":"{\"pass\": false, \"reason\": \"constructed judge-red: answer names the wrong constant\"}","reasoning":false}'
+  printf '%s\n' '{"type":"turn_end"}'
+  printf '%s\n' '{"type":"agent_end","prompt_tokens":120,"completion_tokens":12,"cache_hit_tokens":0,"session_id":"judge-r"}'
+else
+  printf '%s\n' '{"type":"tool_start","name":"read","args":"{}"}'
+  printf '%s\n' '{"type":"tool_end","name":"read","result":"ok"}'
+  printf '%s\n' '{"type":"text_delta","delta":"The constant is Timeout but the value is \"30s\" (constructed wrong answer).","reasoning":false}'
+  printf '%s\n' '{"type":"turn_end"}'
+  printf '%s\n' '{"type":"agent_end","prompt_tokens":900,"completion_tokens":40,"cache_hit_tokens":300,"session_id":"sut-r"}'
+fi
+exit 0

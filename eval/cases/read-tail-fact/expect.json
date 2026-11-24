@@ -1,10 +1,10 @@
 {
-  "description": "read 必须能取到第 118 行的尾部事实（超出 50 行 cap 的窗口之外）；改进后（I1+I2）一次到位，read_calls <= 3。金标（离线判定）：最终答案含 45s。J3（2026-11-22）：judge record 模式补质量面——机械绿只证读到尾部，不证报的常量名与值是对的；校准闸未清前不染色（docs/prd/feature-eval-v3.md §2.1）。",
+  "description": "read 必须能取到第 118 行的尾部事实（超出 50 行 cap 的窗口之外）；改进后（I1+I2）一次到位，read_calls <= 3。金标（离线判定）：最终答案含 45s。J3（2026-11-22）：judge record 模式补质量面——机械绿只证读到尾部，不证报的常量名与值是对的；校准已过（2026-11-23：0.88 / false-pass 0），2026-11-24 用户拍板开 gate（卡 c_xhbqae）——judge 判红染进 failures 并拦 exit，doubt 不染色（docs/prd/feature-eval-v3.md §2.1）。",
   "max_turns": 8,
   "max_read_calls": 3,
   "max_grep_calls": 0,
   "judge": {
     "rubric": "The task asks for the timeout config constant in eval/cases/read-tail-fact/testdata/app.go. A correct answer names the constant `Timeout` AND its value `\"45s\"` (a string constant, around line 118). Line numbers are a plus, not required. A different name or a different value is a fail; a hedged value the answer itself calls unverified is a doubt.",
-    "mode": "record"
+    "mode": "gate"
   }
 }
