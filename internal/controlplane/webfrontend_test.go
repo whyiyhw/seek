@@ -725,6 +725,43 @@ func TestWeb_PageMemoryStats(t *testing.T) {
 	}
 }
 
+// TestWeb_PageStatsTrend pins the cross-session trend card (c_6xktw4):
+// the page consumes stats/trend over the same /rpc route, draws with
+// hand-written SVG (document.createElementNS, zero vendor — §4.2), keeps
+// the hover readout + window switcher, carries an empty-state hint, and
+// still never prices anything itself (§2.5).
+func TestWeb_PageStatsTrend(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"stats/trend",                   // the aggregation method
+		"createElementNS",               // hand-drawn SVG, no chart library
+		"id=\"trend-plot\"",             // the plot host
+		"id=\"trend-tools\"",            // window switcher + legend live here
+		"trend-tip",                     // hover readout (built at render time)
+		"pointermove",                   // hover interaction
+		"TREND_WINDOWS",                 // time-window switching
+		"还没有历史会话",                       // empty-state copy
+		"折线需要 ≥2 个点",                    // one-point boundary copy
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the trend-chart piece %q (c_6xktw4)", need)
+		}
+	}
+	// Zero-vendor (§4.2): no chart library may sneak in as an asset.
+	for _, gone := range []string{"chart.js", "d3.min", "echarts", "plotly"} {
+		if strings.Contains(strings.ToLower(page), gone) {
+			t.Errorf("page references a chart vendor %q — the trend line is hand-drawn SVG (zero build chain)", gone)
+		}
+	}
+	// The sidebar cost column is formatted server-priced data, never a rate.
+	if !strings.Contains(page, "t2c") {
+		t.Error("sidebar row lost its per-session cost cell (c_6xktw4)")
+	}
+	if strings.Contains(page, "PerMTok") || strings.Contains(page, "pricing.") {
+		t.Error("page carries pricing vocabulary — cost_usd is read server-priced (§2.5)")
+	}
+}
+
 // freeAddr grabs an OS-assigned loopback port and gives it back. The
 // classic listen-close-reuse race is accepted: test-only, retry-free,
 // and collisions on loopback within one test binary are near-zero.
@@ -856,6 +893,49 @@ func TestWeb_RunForbiddenAddr(t *testing.T) {
 	}
 }
 
+// TestWeb_PageMobileResponsive pins the c_lqtt2m 390px card: one ≤480px
+// breakpoint owns every narrow-screen degradation — drawer-ised sidebar
+// (expanded state overlays the centre column; collapsed keeps the 44px
+// rail so side-toggle stays reachable), wrapping command bar, ellipsis
+// for the status tail and long setting values, stacked label/value rows,
+// and the column-stacked asset panes. The pre selector pairing is the
+// markdown-card gap this card closed (see the pitfalls entry): a fenced
+// block in a session transcript must ride the same horizontal-scroll
+// rule as .msg pre — that container is .sbody (the card first wrote
+// .smsg, which the merge narrowed: .sbody covers the same nodes with
+// lower specificity, leaving the tool-tree .tpre rules intact).
+// All additive strings — a rename strands the
+// behaviour silently, so they are pinned the way W5's other cards are.
+func TestWeb_PageMobileResponsive(t *testing.T) {
+	page := string(webPage)
+	for _, need := range []string{
+		"@media (max-width: 480px)",            // the one narrow breakpoint
+		"side-scrim",                           // drawer dismiss layer (element + rules)
+		"matchMedia('(max-width: 480px)')",     // JS breakpoint == CSS breakpoint
+		"drawerClose()",                        // row pick closes the drawer
+		"flex-wrap: wrap",                      // command bar wraps, nothing unreachable
+		".msg pre, .sbody pre",                  // code-block h-scroll covers ALL body containers
+		"--seek-scrim",                         // scrim colour is a themed token
+		"body.side-collapsed #side-head { flex-direction: column", // 44px rail stacks its icons
+	} {
+		if !strings.Contains(page, need) {
+			t.Errorf("embedded page lost the mobile-responsive piece %q (c_lqtt2m)", need)
+		}
+	}
+	// The scrim must be inert at desktop widths: base display:none with
+	// the flip living INSIDE the breakpoint block, or desktop gains a
+	// click-swallowing full-viewport layer.
+	scrim := strings.Index(page, "side-scrim")
+	block := strings.Index(page, "@media (max-width: 480px)")
+	baseFlip := strings.Index(page, "#side-scrim { display: none;")
+	if scrim < 0 || block < 0 || baseFlip < 0 {
+		t.Fatalf("page shape changed: scrim=%d block=%d baseFlip=%d", scrim, block, baseFlip)
+	}
+	if baseFlip > block {
+		t.Errorf("scrim base rule must stay display:none OUTSIDE the breakpoint (got baseFlip=%d inside block=%d)", baseFlip, block)
+	}
+}
+
 // TestWeb_PageInputEnhancements pins the c_7lsngm input contract: a
 // multi-line input that sends on Enter and newlines on Shift+Enter, a
 // registry-driven '/' command menu (↑↓ / Tab / Enter / Esc), and an '@'
@@ -896,9 +976,12 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	// through the ONE passthrough, and the quick buttons stay wired.
 	// Enter does not grow a second send path — it calls form.requestSubmit(),
 	// so the attachment gate / "/" argument rule stay single-sourced.
+	// (c_lnsdvu rewired #cmd-bind to open the project picker instead of
+	// prefilled '/bind ' — the picker is pinned in TestWeb_PageCommandButtons;
+	// this guard keeps only the SHARED passthrough pieces.)
 	for _, keep := range []string{
 		`id="form"`, "sendText(typed, true, ready)", "form.requestSubmit()",
-		"wireCmd('cmd-bind', '/bind ')",
+		"wireCmd('cmd-switch', '/switch ')",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("input enhancement must be additive — lost %q", keep)

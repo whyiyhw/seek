@@ -462,3 +462,21 @@ func HooksAuditLog() (string, error) {
 	}
 	return filepath.Join(root, "hooks-audit.jsonl"), nil
 }
+
+// UITraceLog returns the path to the append-only user-interaction
+// trace JSONL (~/.seek/ui-trace.jsonl). One line per interaction fact
+// in the TUI: a boundary injection, a queued message, a steer, an
+// Esc, a compact, a goal verdict. See internal/uitrace for why this
+// data cannot be folded from the transcript and why the file is
+// global rather than per-session.
+//
+// Local-only by design: seek never uploads it. The file exists so a
+// tuning pass can answer "how often does the user intervene, and by
+// which mechanism?" with jq, offline.
+func UITraceLog() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "ui-trace.jsonl"), nil
+}

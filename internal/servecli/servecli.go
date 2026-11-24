@@ -74,6 +74,15 @@ var frontends = map[string]func(*config.ServeConfig) controlplane.Frontend{
 		methods.NewProjectsFromEnv().RegisterAll(reg)
 		methods.NewStatsFromEnv().RegisterAll(reg)
 		methods.NewHooksFromEnv().RegisterAll(reg)
+		// c_heffj3: fs/list — the /bind picker's read-only directory
+		// enumeration. Reach is the browsable root set (project_roots ∪
+		// projects ∪ memory roots, + HOME while project_roots is empty);
+		// nil serve section passes nil slices — HOME-only reach.
+		fsProjectRoots, fsProjects := []string(nil), []string(nil)
+		if sc != nil {
+			fsProjectRoots, fsProjects = sc.ProjectRoots, sc.Projects
+		}
+		methods.NewFs(fsProjectRoots, fsProjects).RegisterAll(reg)
 		// inspect-rpc §6 #12 close-out: subagent/list|get on the /rpc
 		// plane (the M12.1 rows). GET /subagents stays as the panel's
 		// compatibility口 — both read the same disk fold.

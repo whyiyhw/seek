@@ -238,6 +238,31 @@ if [ "$seek_eval_provider" != deepseek ]; then
 fi
 export SEEK_EVAL_PROVIDER_ARGS="$provider_args"
 
+# --- Judge lane args (eval v3 J1, docs/prd/feature-eval-v3.md §2.1) ------
+# The judge rides the SAME provider lane (credentials, base-url override,
+# scrub rules above) but always with its OWN model — the cross-family
+# default (kimi-k3.1-pro) judges deepseek-flash output from outside the
+# family; SEEK_EVAL_JUDGE_MODEL overrides, per-case expect.json judge.model
+# outranks both. Never inherits SEEK_EVAL_MODEL: picking the SUT default
+# as judge would recreate the self-preference the cross-family choice
+# exists to avoid. Cases opt in via the judge block (validated in
+# read_gate_config); SEEK_EVAL_JUDGE=0 is the global kill-switch (a
+# judged round costs one extra subscription call).
+seek_eval_judge_model=${SEEK_EVAL_JUDGE_MODEL:-kimi-k3.1-pro}
+export SEEK_EVAL_JUDGE_MODEL="$seek_eval_judge_model"
+seek_eval_judge_lane_args=""
+if [ "$seek_eval_provider" != deepseek ]; then
+  seek_eval_judge_lane_args="-provider $seek_eval_provider"
+fi
+if [ -n "$seek_eval_base_url" ]; then
+  seek_eval_judge_lane_args="$seek_eval_judge_lane_args -base-url $seek_eval_base_url"
+fi
+export SEEK_EVAL_JUDGE_LANE_ARGS="$seek_eval_judge_lane_args"
+seek_eval_judge_enabled=1
+if [ "${SEEK_EVAL_JUDGE-1}" = "0" ]; then
+  seek_eval_judge_enabled=0
+fi
+
 # --- --rounds / --lane flag parsing (E1 / E6) ----------------------------
 # Positional interface (<case> <binary>) is unchanged; flags are stripped
 # wherever they appear in argv before the positional reads. rounds=1 and
@@ -300,6 +325,21 @@ while [[ $# -gt 0 ]]; do
 done
 case_filter=${positional[0]-}
 binary=${positional[1]-$repo_root/seek}
+# Canonicalise to ABSOLUTE: runner.sh cases (plan-e2e, subagent-bg-resume,
+# anchor-*) re-launch "$SEEK_EVAL_BINARY" from inside their own scratch
+# workspaces — a relative path like ./seek (the documented lane-anchor
+# invocation) resolves against the scratch dir there and dies with 127.
+# Resolving here fixes every runner at the one seam; the default
+# ($repo_root/seek) is already absolute, so only explicit relatives move.
+case "$binary" in
+  /*) ;;
+ *)
+    binary_dir=$(cd "$(dirname "$binary")" 2>/dev/null && pwd)
+    if [[ -n "$binary_dir" ]]; then
+      binary="$binary_dir/$(basename "$binary")"
+    fi
+    ;;
+esac
 
 if [[ ! -x "$binary" ]]; then
   echo "eval: binary not found or not executable: $binary" >&2
@@ -814,6 +854,63 @@ run_one() {
     | .[0:2000]
   ' "$out_file")
 
+  # --- eval v3 J1: LLM-as-judge over final_text --------------------------
+  # Opt-in via expect.json's judge block (validated in read_gate_config);
+  # the global kill-switch SEEK_EVAL_JUDGE=0 skips even cases that declare
+  # it, and an empty final_text skips judging (no verdict from nothing).
+  # Runs AFTER elapsed is captured above, so elapsed_s stays a SUT-only
+  # figure. The judge is one fresh-context seek invocation on the same
+  # provider lane with its own (cross-family) model — eval/tools/judge.py
+  # holds the contract; every judge failure mode folds to doubt
+  # (internal/verifier/judge.go precedent: no JSON = never a green).
+  # Colouring happens below the failures scan: only mode=gate + fail
+  # enters failures; doubt and record never colour. The three row keys
+  # are data-gated — absent when judging didn't run, so non-judged rows
+  # keep their exact historical bytes (the agent/bg/sse discipline).
+  local judge_verdict="" judge_reason="" judge_model_used="" judge_mode="record"
+  local judge_ran=0
+  if (( seek_eval_judge_enabled )) && [[ -n "$final_text" ]] \
+     && $JQ -e '(.judge // null) != null' "$expect_file" >/dev/null 2>&1; then
+    local judge_rubric
+    judge_rubric=$($JQ -r '.judge.rubric' "$expect_file")
+    judge_mode=$($JQ -r '.judge.mode // "record"' "$expect_file")
+    judge_model_used=$($JQ -r '.judge.model // ""' "$expect_file")
+    if [[ -z "$judge_model_used" ]]; then
+      judge_model_used=$SEEK_EVAL_JUDGE_MODEL
+    fi
+    local judge_in judge_out
+    judge_in=$(mktemp -t "seek-eval-judgein-${case_name}.XXXXXX")
+    judge_out=$(mktemp -t "seek-eval-judgeout-${case_name}.XXXXXX")
+    # Same jq.exe/MSYS compatibility as out_file above.
+    if command -v cygpath >/dev/null 2>&1; then
+      judge_in=$(cygpath -m "$judge_in")
+      judge_out=$(cygpath -m "$judge_out")
+    fi
+    $JQ -n \
+      --arg rubric "$judge_rubric" \
+      --arg prompt "$prompt" \
+      --arg final_text "$final_text" \
+      '{rubric:$rubric, prompt:$prompt, final_text:$final_text}' > "$judge_in"
+    if python3 "$eval_root/tools/judge.py" \
+        --seek-binary "$binary" \
+        --lane-args "${SEEK_EVAL_JUDGE_LANE_ARGS-}" \
+        --model "$judge_model_used" \
+        --input "$judge_in" \
+        --out "$judge_out" >/dev/null 2>&1; then
+      judge_verdict=$($JQ -r '.verdict // "doubt"' "$judge_out" 2>/dev/null)
+      judge_reason=$($JQ -r '.reason // ""' "$judge_out" 2>/dev/null)
+    else
+      judge_verdict="doubt"
+      judge_reason="judge error: judge.py exited nonzero"
+    fi
+    # Belt and braces: a verdict outside the vocabulary is a doubt.
+    if [[ "$judge_verdict" != "pass" && "$judge_verdict" != "fail" && "$judge_verdict" != "doubt" ]]; then
+      judge_verdict="doubt"
+    fi
+    judge_ran=1
+    rm -f "$judge_in" "$judge_out"
+  fi
+
   # Build a metrics object: extract one entry per metric in the
   # vocabulary. We compute the same fixed set every case so historical
   # diffs are comparable across cases. completion_tokens is folded in
@@ -929,6 +1026,16 @@ run_one() {
     ]
   ' "$expect_file")
 
+  # Judge colouring (eval v3 J1): gate mode + a fail verdict is the ONLY
+  # combination that colours — a doubt (or a record-mode case) records,
+  # never gates. Fail-open on judge infra trouble is the v1 stance
+  # (PRD §六.1); a gated case that keeps failing the judge measurably
+  # shows up in the judge_verdict distribution, not in silence.
+  if [[ "$judge_verdict" == "fail" && "$judge_mode" == "gate" ]]; then
+    failures=$($JQ -n --argjson f "$failures" --arg m "$judge_reason" \
+      '$f + [$m | .[0:200] | "judge: \(.)"]')
+  fi
+
   local pass="true"
   if [[ "$failures" != "[]" ]]; then
     pass="false"
@@ -960,7 +1067,12 @@ run_one() {
     --arg ran_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson round "$round_no" \
     --argjson emit_round "$emit_round" \
+    --argjson judge_ran "$judge_ran" \
+    --arg judge_verdict "$judge_verdict" \
+    --arg judge_reason "$judge_reason" \
+    --arg judge_model "$judge_model_used" \
     '{case:$case, pass:$pass, metrics:$metrics, prompt_tokens:$prompt_tokens, completion_tokens:$completion_tokens, cache_hit_tokens:$cache_hit_tokens, elapsed_s:$elapsed_s, failures:$failures, binary_version:$version, final_text:$final_text, ran_at:$ran_at}
+     + (if $judge_ran == 1 then {judge_verdict:$judge_verdict, judge_reason:($judge_reason | .[0:300]), judge_model:$judge_model} else {} end)
      + (if $emit_round == 1 then {round:$round} else {} end)')
 
   echo "$row" >> "$results_file"
@@ -968,6 +1080,9 @@ run_one() {
   local round_tag=""
   if (( rounds > 1 )); then
     round_tag="  r${round_no}/${rounds}"
+  fi
+  if (( judge_ran )); then
+    round_tag="${round_tag}  [judge: ${judge_verdict}]"
   fi
   if [[ "$pass" == "true" ]]; then
     round_pass=1
@@ -1016,6 +1131,26 @@ read_gate_config() {
       echo "eval: $expect_file: min_pass_rate must satisfy 0 < m <= 1 (got: $min_pass_rate)" >&2
       exit 2
     fi
+  fi
+  # eval v3 J1: optional judge block — validated at case start with the
+  # same exit-2-on-malformed doctrine, so a typo'd block can never run a
+  # case unjudged (or silently un-gated). Shape: {"judge": {"rubric":
+  # <non-empty string>, "mode": "record"|"gate" (default record),
+  # "model": <non-empty string, optional>}}. The judgement authority
+  # stays in expect.json — no second config file to drift.
+  local judge_err
+  judge_err=$($JQ -r '
+    if .judge == null then ""
+    elif (.judge | type) != "object" then "judge must be an object"
+    else .judge as $j
+      | if (($j.rubric // "") | type) != "string" or ($j.rubric // "") == "" then "judge.rubric must be a non-empty string"
+      elif ($j.mode // "record") != "record" and ($j.mode // "record") != "gate" then "judge.mode must be \"record\" or \"gate\""
+      elif ($j.model != null) and ((($j.model | type) != "string") or $j.model == "") then "judge.model must be a non-empty string"
+      else "" end
+    end' "$expect_file" 2>/dev/null) || judge_err="ERR"
+  if [[ -n "$judge_err" ]]; then
+    echo "eval: $expect_file: $judge_err" >&2
+    exit 2
   fi
 }
 

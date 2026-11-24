@@ -30,6 +30,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/skillstats"
 	"github.com/whyiyhw/seek/internal/subagent"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/internal/upgrade"
 )
 
@@ -1430,17 +1431,53 @@ func gatherBranchDiff(cwd, target string) (string, bool) {
 // Shared helper used by cmdReview and the Alt+Enter path in update.go.
 func steerStream(m *Model, text string) {
 	m.pendingSteerText = text
+	m.traceEvent(uitrace.EventSteer, "", len(text))
 	if m.cancelStream != nil {
 		m.userCanceled = false
 		m.cancelStream()
 	}
 }
 
+// tryMidTurnInject offers text to the agent's turn-boundary injection
+// queue (pkg/agent/inject.go). Returns true when the agent took it —
+// the text will land after the current tool batch, inside the SAME
+// round, with no cancellation and no extra user turn.
+//
+// Returns false for every "can't" case, all of which are the caller's
+// cue to fall back to the pre-injection behaviour:
+//   - the agent doesn't implement midTurnInjector (fakes in tests, and
+//     any lane that hasn't opted in) — the optional-sibling pattern;
+//   - no Prompt is actually in flight (QueueUserMessage reports false);
+//   - a cap would be exceeded (message too big, or too many already
+//     queued for this turn).
+//
+// On success the pending text is recorded in injectedPreview so the
+// queue hint can show it until agent.InjectedMessage confirms the
+// commit. The text is NOT put in queuedText: it is already accepted,
+// and leaving it there would re-send it at stream end.
+func (m *Model) tryMidTurnInject(text string) bool {
+	inj, ok := m.opts.Agent.(midTurnInjector)
+	if !ok || !inj.QueueUserMessage(text) {
+		return false
+	}
+	m.injectedPreview = text
+	m.traceEvent(uitrace.EventInject, "", len(text))
+	return true
+}
+
 // submitOrSteer submits a prompt directly (if not streaming) or stashes
 // it as a steer text (if streaming). Shared helper used by cmdReview and
 // any future one-shot commands that need to submit text.
+//
+// Streaming + an injectable agent delivers at the next boundary instead
+// of cancelling the round (see tryMidTurnInject); the steer path stays
+// the fallback so the command still works everywhere.
 func submitOrSteer(m *Model, prompt string) cmdResult {
 	if m.streaming {
+		if m.tryMidTurnInject(prompt) {
+			return cmdResult{extra: m.appendHistory(styleMuted.Render(
+				"  " + i18n.T("view.queue.injected") + truncateOneLine(prompt, 60)))}
+		}
 		steerStream(m, prompt)
 		return cmdResult{}
 	}
@@ -1988,7 +2025,7 @@ func startCompactCmd(m *Model, trigger string) tea.Cmd {
 		// "manual" (/compact) or "auto" (maybeAutoCompact).
 		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: trigger})
 		summary, usage, err := ag.Summarise(ctx)
-		return compactDoneMsg{summary: summary, usage: usage, err: err}
+		return compactDoneMsg{summary: summary, usage: usage, trigger: trigger, err: err}
 	}
 }
 

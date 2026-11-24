@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：按迁移规则做配置变换（嵌套、改名、补默认值、数字类型、键序）。判分 = check.sh 的 jq 精确断言。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

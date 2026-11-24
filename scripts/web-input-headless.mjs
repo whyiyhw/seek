@@ -274,15 +274,18 @@ const bubblesNow = (await snap()).bubbles;
   s = await snap();
   ck('↑ 回到首项（循环边界）', s.items[0] && s.items[0].hl, JSON.stringify(s.items));
 
-  // Tab 补全首项：/bind 带参 → 落「/bind 」并留空格
+  // Tab 补全首项：/bind 带参 → 落「/bind 」并留空格；参数期弹层换成
+  // 目录浏览入口（c_heffj3；候选行待 c_lnsdvu 落在它前面）
   await press('Tab');
   s = await snap();
-  ck('Tab 补全首项为「/bind 」', s.val === '/bind ' && !s.menuOpen, JSON.stringify(s));
+  ck('Tab 补全首项为「/bind 」', s.val === '/bind ' && s.menuOpen
+    && s.items.some(i => i.label === '📁 浏览目录…'), JSON.stringify(s));
   ck('Tab 被 preventDefault（焦点不跳出输入框）',
     (await lastKey()).prevented && s.focused === 'input', JSON.stringify(await lastKey()));
 
-  // 补全后带空格 → 面板不再弹（已在打参数）
-  ck('带参阶段不再弹面板', !s.menuOpen, JSON.stringify(s));
+  // 补全后带空格 → 参数期弹目录浏览入口（不再是无面板）
+  ck('带参阶段弹目录浏览入口', s.menuOpen
+    && s.items.every(i => i.label === '📁 浏览目录…'), JSON.stringify(s));
 
   // Esc：先重开面板，再 Esc 关闭，且 document 看到的 defaultPrevented=真；
   // 关闭态再按一次 Esc，则 false（不劫持）。
@@ -385,7 +388,8 @@ await delay(150);
   ck('条目可换行（窄屏不挤成一行）', box.wrap === 'wrap', JSON.stringify(box));
   await press('Tab');
   s = await snap();
-  ck('窄屏下 Tab 仍能补全', s.val === '/bind ' && !s.menuOpen, JSON.stringify(s));
+  ck('窄屏下 Tab 仍能补全', s.val === '/bind ' && s.menuOpen
+    && s.items.some(i => i.label === '📁 浏览目录…'), JSON.stringify(s)); // c_heffj3：参数期弹目录浏览入口
 }
 await call('Emulation.clearDeviceMetricsOverride');
 

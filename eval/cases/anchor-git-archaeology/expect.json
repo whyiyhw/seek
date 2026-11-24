@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：git 考古——clone bundle、log -S 定位引入串的提交、按全 SHA 作答。判分 = check.sh 独立重算 SHA 比对 answer.txt。",
+  "max_turns": 20,
+  "min_turns": 1,
+  "record_only": true
+}

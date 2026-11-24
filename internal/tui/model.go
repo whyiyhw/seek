@@ -50,6 +50,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -93,6 +94,22 @@ type predictionAttacher interface {
 // *agent.Agent satisfies this structurally.
 type filePrompter interface {
 	PromptFiles(ctx context.Context, text string, images []deepseek.ImagePart, files []deepseek.FilePart) <-chan agent.Event
+}
+
+// midTurnInjector is the OPTIONAL sibling interface for delivering a
+// user message at the NEXT inference boundary of the in-flight round
+// instead of waiting for the whole round to return (pkg/agent/inject.go).
+//
+// Sibling, not a new AgentClient method: the fake agents in tests are
+// numerous and none of them care about injection — with the optional
+// shape they keep compiling and simply take the queuedText fallback,
+// which is exactly the pre-feature behaviour. *agent.Agent satisfies
+// this structurally.
+type midTurnInjector interface {
+	// QueueUserMessage reports false when nothing is in flight or a cap
+	// would be exceeded; the caller then falls back to queuedText /
+	// steerStream rather than dropping the text.
+	QueueUserMessage(text string) bool
 }
 
 // Options bundles everything cmd/seek hands the TUI. Hooks let in-app
@@ -175,6 +192,16 @@ type Options struct {
 	// The TUI uses it to back /checkpoints, /restore, /undo, /redo
 	// without re-resolving the session each call.
 	Checkpoint *checkpoint.Manager
+
+	// UITrace, when non-nil, records one JSONL row per user-interaction
+	// fact (boundary injection, queue, steer, withdraw, Esc, compact,
+	// goal verdict) to ~/.seek/ui-trace.jsonl. nil = tracing off
+	// (--no-save, tests, embedders that don't want local telemetry).
+	//
+	// Local-only: seek never uploads it. See internal/uitrace for why
+	// this data can't be folded from the transcript — a steered message
+	// and an injected one are byte-identical `user` rows on disk.
+	UITrace *uitrace.Writer
 
 	// Subagents is the v5 柱 G orchestrator (PRD docs/prd/
 	// feature-subagent.md). nil in --no-save mode or when
@@ -455,13 +482,30 @@ type Model struct {
 	// reaches finish_reason=stop (i.e. streamEndMsg fires WITHOUT
 	// userCanceled). Cleared by Esc, by being sent, or by being
 	// overwritten by a subsequent Enter during the same stream.
+	//
+	// Since the mid-turn injection path landed (inject.go), Enter while
+	// streaming first tries Agent.QueueUserMessage: if the agent accepts
+	// it the text lands at the next tool-batch boundary and this field
+	// is never touched. It remains the fallback for agents without that
+	// capability (fakes, and any lane that doesn't implement it).
 	queuedText string
 	// pendingSteerText holds a user message submitted via Alt+Enter
 	// while a stream is in flight. Triggers cancelStream() immediately;
 	// streamEndMsg then submits this text as the next prompt — i.e.
 	// the current turn is dropped (Repair() cleans any orphan tool_calls
 	// in the agent's history) and the steer message replaces it.
+	//
+	// Alt+Enter ALSO tries the injection path first: steering by
+	// discarding the turn is the expensive meaning, so it is now the
+	// fallback for when the agent can't take an injection.
 	pendingSteerText string
+
+	// injectedPreview remembers the last mid-turn injection that the
+	// agent accepted but has not yet reported committing. The queue hint
+	// renders it so the user sees "your text is on its way in" between
+	// the keystroke and the boundary. Cleared when agent.InjectedMessage
+	// arrives (the text is now in history) or on Esc (abandoned).
+	injectedPreview string
 
 	// --- /goal loop state (M-goal.2) -------------------------------------
 	// When goalActive, after each turn ends naturally the judge assesses

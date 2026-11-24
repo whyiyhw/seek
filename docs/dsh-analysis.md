@@ -232,7 +232,7 @@ tool/call 落日志 → presentCall → pre-execute → guard → approval
 | 子代理 | 6 provider，可委托 Claude Code/Codex/ACP，无隔离 | 并行 + **git worktree 隔离** | 混合 | 各有千秋 |
 | 时序自治 | session-local schedule（`after`/`at`/`every≥300s`，无 cron） | 跨会话 cron/wakeup/OS 通知/autopilot | 产品形态 | **seek** |
 | skill 管理 | 只发现不安装（分发单位是 bundle） | 安装/更新/卸载/调用统计 | 产品形态 | **seek** |
-| 部署 | Node + pnpm + Web 服务（226 包） | 单二进制 ~5MB 零依赖 | 产品形态 | **seek** |
+| 部署 | Node + pnpm + Web 服务（226 包） | 单二进制零依赖 | 产品形态 | **seek** |
 | 成熟度 | developer preview，破坏性变更明示 | v7 已交付，74 包测试全绿 | 阶段 | **seek** |
 
 **读法**：架构能力 5 行 → dsh 拿下 3 行、2 行分歧；产品形态 4 行 → seek 全取，但那是赛道不是优势。

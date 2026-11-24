@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/whyiyhw/seek/internal/goal"
+	"github.com/whyiyhw/seek/internal/uitrace"
 )
 
 // cmdGoal handles `/goal [<condition> | clear]` (M-goal.2). With a
@@ -86,7 +87,11 @@ func (m Model) handleGoalVerdict(msg goalVerdictMsg) (tea.Model, tea.Cmd) {
 		v = goal.Verdict{Met: false, Reason: "judge error: " + msg.err.Error()}
 	}
 
-	stop := func(line string) (tea.Model, tea.Cmd) {
+	stop := func(line string, detail string) (tea.Model, tea.Cmd) {
+		// Trace before clearing state: the goal loop's own parameters
+		// (turns run, why it stopped) are exactly what a "/goal is too
+		// eager/too lax" judgement needs, and they vanish with clearGoal.
+		(&m).traceEventDur(uitrace.EventGoal, detail, m.goalTurns, 0, int64(time.Since(m.goalStart).Milliseconds()))
 		(&m).clearGoal()
 		(&m).persistSession() // clear Goal on disk so -resume won't re-arm
 		return m, m.appendHistory(styleMuted.Render(line))
@@ -94,15 +99,15 @@ func (m Model) handleGoalVerdict(msg goalVerdictMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case v.Met:
-		return stop(fmt.Sprintf("  ✓ goal met after %d turn(s): %s", m.goalTurns, v.Reason))
+		return stop(fmt.Sprintf("  ✓ goal met after %d turn(s): %s", m.goalTurns, v.Reason), "met")
 	case m.goalTurns >= m.goalCaps.MaxTurns:
-		return stop(fmt.Sprintf("  ■ goal stopped: hit max turns (%d). last: %s", m.goalCaps.MaxTurns, v.Reason))
+		return stop(fmt.Sprintf("  ■ goal stopped: hit max turns (%d). last: %s", m.goalCaps.MaxTurns, v.Reason), "max_turns")
 	}
 
 	if m.goalLastTurnTools == 0 {
 		m.goalStalls++
 		if m.goalStalls >= m.goalCaps.StallLimit {
-			return stop(fmt.Sprintf("  ■ goal stopped: no progress for %d turns. last: %s", m.goalStalls, v.Reason))
+			return stop(fmt.Sprintf("  ■ goal stopped: no progress for %d turns. last: %s", m.goalStalls, v.Reason), "stalled")
 		}
 	} else {
 		m.goalStalls = 0
@@ -110,6 +115,7 @@ func (m Model) handleGoalVerdict(msg goalVerdictMsg) (tea.Model, tea.Cmd) {
 
 	// Continue: append-only continuation as the next prompt (same byte
 	// stability rules as the headless Driver via the shared Continuation).
+	m.traceEvent(uitrace.EventGoal, "continue", m.goalTurns)
 	m.goalToolsBase = m.toolCalls
 	return m.submit(goal.Continuation(m.goalCond, v))
 }

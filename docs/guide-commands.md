@@ -95,6 +95,8 @@ seek memory list                   # List project memory entries
 seek memory search <query>         # Search memory entries
 seek hooks list                    # List trusted hook scripts
 seek hooks trust <path>            # Trust a hook script
+seek ui-trace                      # Folded summary of local interaction trace (~/.seek/ui-trace.jsonl)
+seek ui-trace --rows --since 24h   # Raw rows (newest first) from the last day
 seek keys list                     # Show active keybindings
 seek worktree gc                   # Garbage-collect stale worktrees
 seek task run "<command>"          # Start a task that outlives this seek process

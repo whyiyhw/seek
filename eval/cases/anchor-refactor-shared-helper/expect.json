@@ -1,0 +1,6 @@
+{
+  "description": "外部锚·任务题：约束重构——去重进共享 helper、行为不变（测试即规范）。判分 = check.sh：go test + func sharedNormalize 存在。",
+  "max_turns": 25,
+  "min_turns": 1,
+  "record_only": true
+}

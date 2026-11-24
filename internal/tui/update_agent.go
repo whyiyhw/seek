@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -110,6 +111,10 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↰ interrupted")))
 		m.userCanceled = false
 	}
+	// Any injection the agent accepted but the round ended before
+	// committing dies here too: the agent's endTurnSession already
+	// cleared its queue, so this is only the UI echo.
+	m.injectedPreview = ""
 	// 柱 M interactive extension: ping the configured push webhook when a
 	// long interactive turn finishes (you walked away → phone buzzes).
 	// Best-effort, off the UI thread; skipped on Esc-cancel and short turns.
@@ -155,6 +160,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		text := m.pendingSteerText
 		m.pendingSteerText = ""
 		m.queuedText = "" // a steer supersedes any queue
+		m.traceEvent(uitrace.EventDeliver, "steer", len(text))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ steered")))
 		newM, cmd := m.submit(text)
 		cmds = append(cmds, cmd)
@@ -162,6 +168,7 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 	case m.queuedText != "":
 		text := m.queuedText
 		m.queuedText = ""
+		m.traceEvent(uitrace.EventDeliver, "queue", len(text))
 		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ "+truncateOneLine(text, 60))))
 		newM, cmd := m.submit(text)
 		cmds = append(cmds, cmd)
@@ -429,6 +436,17 @@ func (m *Model) applyAgentEvent(ev agent.Event) []tea.Cmd {
 		m.curContent = ""
 		m.curReasoning = ""
 		m.chunked = false
+
+	case agent.InjectedMessage:
+		// A user message queued via QueueUserMessage just landed at a
+		// turn boundary inside the CURRENT round (pkg/agent/inject.go).
+		// Commit the block to scrollback so the transcript shows where
+		// the user intervened — the same rendering as a submitted prompt,
+		// minus the round-boundary bookkeeping (this is not a new turn
+		// from the user's point of view, the round is still running).
+		m.injectedPreview = ""
+		cmds = append(cmds, m.appendHistory(renderUserBlock(e.Message.Content, m.width)))
+		cmds = append(cmds, m.appendHistory(styleMuted.Render("  ↪ inserted at turn boundary "+fmt.Sprint(e.Index))))
 
 	case agent.MessageDelta:
 		// First token of the turn — the time-to-first-byte signal.
@@ -868,6 +886,11 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 			"compacted: history replaced with summary (%d prompt + %d completion tokens)",
 			msg.usage.PromptTokens, msg.usage.CompletionTokens)
 	}
+	// Trace the compaction as a fact: how often history gets rewritten is
+	// one half of "is the context budget tuned right", and the prompt-token
+	// count is what makes the answer numeric instead of anecdotal. Detail
+	// names the trigger so auto vs manual stays separable.
+	m.traceEventDur(uitrace.EventCompact, msg.trigger, 0, msg.usage.PromptTokens, 0)
 	return []tea.Cmd{m.appendHistory(styleMuted.Render(notice))}
 }
 

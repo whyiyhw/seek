@@ -3,7 +3,8 @@
 **所属版本**：v0.6.x dot release（M12.0 并行于 v5；M12.1/M12.2 依赖 v5 数据）
 **前置阅读**：[PRD v0](archive/v0.md) §4.5（JSON-RPC 服务模式）、[PRD v5 umbrella](archive/v5.md) §2.5（零常驻进程约束）、[`internal/rpc/server.go`](../../internal/rpc/server.go)（已有 method 集）
 **状态**：🗄️ **已归档（2026-11-16，c_np5gzu）** · 数据面 **并入 [`feature-web-frontend.md`](feature-web-frontend.md)（2026-11-13）并已交付**——§3.1 method 集/§3.5 错误码/命名稳定性纪律原样并入其 P3 资产面（W4.1–W4.6）；§3.3 HTTP+SSE transport 换宿主（TUI 进程 `--rpc-listen` → `seek serve` web frontend 进程）；§4 独立 tarball 面板**取消**（go:embed 进单二进制取代）。**IDE 线（stdio transport + Registry 采纳）2026-11-16 关线归档**，理由见「交付实况」末段。数据面权威设计以 feature-web-frontend.md §3.3 为准。
-**交付实况（2026-11-16 核对，资产面 W4.1–W4.6 已并 main；2026-11-20 增补 #6/#7 收口）**：数据面随 web 资产面落地——`POST /rpc` envelope + `internal/rpc/registry.go`（§3.2 形状的 Registry 即两 transport 共享位；stdio `server.go` 保留自身 switch、尚未改挂）+ §3.5 错误码（W4.1，c_c4cs4a）；session / memory / project / stats / hooks 五族 method 在 `internal/rpc/methods/`（W4.2 c_zam44t · W4.3 c_ydglne · W4.6 c_igze7m）。**§6 #6/#7 已收口（2026-11-20，W5 c_xz2bey）**：`seek serve` 的 `/events` 增 `hooks` topic（`internal/controlplane/webfrontend_hookstopic.go` + `internal/hooksconfig/follow.go`——全局审计 JSONL 的 tail-follow，帧=审计行 verbatim，`?topic=hooks` 无需 conv 绑定），follow 面即此 topic：`hooks/audit/tail` 的 `follow:true` 仍答 -32602 但指路 `/events?topic=hooks`。仍未交付：`agent/info` 的 `methods` 清单与两 transport 字节一致（§6 #1/#3，随 IDE 线关闭不作）。口径被取代的两项：§3.4 RWMutex 改造（web 侧是跨进程磁盘读，append-only + 行级 parse 已够，§6 #5 相应改写）；「非 loopback 强制 token」（§6 #8）被更严的 web_addr scope 闸取代（2026-11-15 拍板，非 loopback/tailnet-CGNAT 一律拒启）。
+**交付实况（2026-11-16 核对，资产面 W4.1–W4.6 已并 main；2026-11-20 增补 #6/#7 收口）**：数据面随 web 资产面落地——`POST /rpc` envelope + `internal/rpc/registry.go`（§3.2 形状的 Registry 即两 transport 共享位；stdio `server.go` 保留自身 switch、尚未改挂）+ §3.5 错误码（W4.1，c_c4cs4a）；session / memory / project / stats / hooks 五族 method 在 `internal/rpc/methods/`（W4.2 c_zam44t · W4.3 c_ydglne · W4.6 c_igze7m）。**§6 #6/#7 已收口（2026-11-20，W5 c_xz2bey）**：`seek serve` 的 `/events` 增 `hooks` topic（`internal/controlplane/webfrontend_hookstopic.go` + `internal/hooksconfig/follow.go`——全局审计 JSONL 的 tail-follow，帧=审计行 verbatim，`?topic=hooks` 无需 conv 绑定），follow 面即此 topic：`hooks/audit/tail` 的 `follow:true` 仍答 -32602 但指路 `/events?topic=hooks`。**fs/list 已落 web 面**（2026-11-22，W5 后增补卡 c_heffj3）：`internal/rpc/methods/fs.go` 经 registry 注册进 `seek serve` 的 `POST /rpc`（/bind 目录浏览器的只读枚举口，可达根集收敛见 feature-web-frontend §13.1 该行）——数据面 method 唯一权威仍在 registry，`--rpc` stdio 三 method 依旧冻结、永不扩。
+仍未交付：`agent/info` 的 `methods` 清单与两 transport 字节一致（§6 #1/#3，随 IDE 线关闭不作）。口径被取代的两项：§3.4 RWMutex 改造（web 侧是跨进程磁盘读，append-only + 行级 parse 已够，§6 #5 相应改写）；「非 loopback 强制 token」（§6 #8）被更严的 web_addr scope 闸取代（2026-11-15 拍板，非 loopback/tailnet-CGNAT 一律拒启）。
 
 **IDE 线关线决策（2026-11-16，c_np5gzu）**——前置问题「ACP（柱 P）已覆盖 IDE 集成主路径，Zed 外 IDE 还需要 `--rpc` stdio 吗？」答案**否**：① IDE 驱动面的标准是 ACP（`seek acp`，[`feature-acp.md`](archive/feature-acp.md)，真 Zed GUI 验证）——ACP 自身即 stdio JSON-RPC，且是 Zed/VS Code 等编辑器驱动 agent 的标准协议（book ch.24 明言 `-rpc` 是自定协议、无工具链支持）；为自定三 method 方言扩 method 集买不到生态兼容，任何 bespoke 客户端不如直接说 ACP。② 数据面唯一权威已落地：共享 `internal/rpc/registry.go` + `seek serve POST /rpc`（五族 method），HTTP 比 stdio 更可消费（curl/任意语言/浏览器），stdio 复刻同一 registry 没有消费者。③ `--rpc` stdio 自 M7 交付以来零已知增量消费者（仓库无 IDE 扩展、文档无用户证据；comparison.md R.2 IDE 集成行已按 ACP 计分）。处置：`--rpc` stdio 三 method（agent/prompt、agent/info、session/list）**冻结保留**——自有 switch、永不挂 registry、永不扩 method（§6 #2 已验证零回归）；`internal/rpc/registry.go` 是数据面 method 唯一权威（新 read-only method 只进 registry/serve 面）；IDE 驱动需求一律指 `seek acp`。§6 #1/#3 随线关闭；M12.1/M12.2 method 增量归 web-frontend P3/P2；#6/#7（hooks follow/SSE topic）宿主定为 web `/events` topic hub——**已做（2026-11-20，W5 c_xz2bey）**。
 **目标里程碑**：M12.0 + M12.1 + M12.2
@@ -31,7 +32,7 @@ seek 长期路线图（用户口述）：**未来要做应用**——桌面 / �
 1. **方法名即契约**——一旦 ship，破坏性 rename 需 minor 版本 bump 和 deprecation 通道；新增方法是非破坏。`agent/info` 响应内带 `methods` 清单 + 版本号，应用阶段做 capability negotiation 用。
 2. **transport 与 method 解耦**——所有 method 在 transport-agnostic 的 registry 里注册一次，stdio / HTTP 共享同一份 dispatch。新加 method 同时供两条 transport 用。
 3. **零常驻 daemon**（继承 v5 §2.5）—— `--rpc-listen` 只在用户显式启动时存在，进程退出即停；与 TUI 同一进程生命周期。
-4. **Web 面板不进主 binary**——静态资源单独发布 tarball；用户解压后浏览器打开 `index.html`，通过 fetch+SSE 连本地 `seek --rpc-listen`。保住 "5 MB 单二进制" 卖点。
+4. **Web 面板不进主 binary**——静态资源单独发布 tarball；用户解压后浏览器打开 `index.html`，通过 fetch+SSE 连本地 `seek --rpc-listen`。保住 "单二进制" 卖点（体积以构建产物为准）。
 5. **本地优先 + 默认安全**——HTTP transport 默认 bind 127.0.0.1；非 localhost 监听需显式 `--rpc-bind 0.0.0.0` 且自动启用 token 鉴权。
 6. **失败降级**——session 文件被主进程独占写时 RPC 仍能读（RW 锁或快照读）；hooks observer SSE 客户端断开不影响 hooks 自身。
 
@@ -202,7 +203,7 @@ seek-panel-v0.6.x/
 
 **总体积**：解压后 < 500 KB；用户从 GitHub Releases 下 `seek-panel-v0.6.x.tar.gz`，与 `seek` binary 并列发布。
 
-**为什么不嵌主 binary**：保住 CLI 用户 "5 MB 单二进制" 体验。需要嵌入的用户走 build tag `panel`：`go build -tags panel ./cmd/seek` 编译出 `seek-with-panel`，启动多一个 `--panel` flag 直接 serve 静态站点。这条路 v0.7.0 之后再做。
+**为什么不嵌主 binary**：保住 CLI 用户 "单二进制" 体验。需要嵌入的用户走 build tag `panel`：`go build -tags panel ./cmd/seek` 编译出 `seek-with-panel`，启动多一个 `--panel` flag 直接 serve 静态站点。这条路 v0.7.0 之后再做。
 
 ### 4.2 SSE 推送：`/sse?topics=...`
 

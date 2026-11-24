@@ -183,6 +183,15 @@ type Agent struct {
 	// one that dispatches tools and therefore the same one that calls
 	// EmitEvent. No mutex needed.
 	currentEvents chan<- Event
+
+	// injectMu guards the mid-turn injection queue (inject.go). It is
+	// the ONE field written from another goroutine than Prompt's — the
+	// TUI calls QueueUserMessage while a turn streams. The rest of the
+	// struct keeps the single-threaded contract; keeping this narrow is
+	// what lets that contract stay true.
+	injectMu     sync.Mutex
+	injectQueue  []string
+	injectActive bool
 }
 
 // SetModel changes the active model. Safe to call between (not during) turns.
@@ -572,8 +581,16 @@ func (a *Agent) Prompt(ctx context.Context, userText string, images ...deepseek.
 func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deepseek.ImagePart, files []deepseek.FilePart) <-chan Event {
 	out := make(chan Event, 32)
 
+	// Mark the round in flight BEFORE spawning, so a QueueUserMessage
+	// racing this call lands in this round or is rejected — it can never
+	// leak into the next one.
+	a.beginTurnSession()
+
 	go func() {
 		defer close(out)
+		// Clears the in-flight flag so a late QueueUserMessage reports
+		// false instead of queueing into a dead round.
+		defer a.endTurnSession()
 		// Stop observer (feature-orchestration D15): fires ONCE per
 		// Prompt() round after the reply fully settles — final answer,
 		// max turns, ctx cancel, or fatal error. Distinct granularity
@@ -675,6 +692,16 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 		for turn := 0; turn < a.cfg.MaxTurns; turn++ {
 			turns = turn + 1
+			// Mid-turn injection drain (inject.go). Turn 0 is the user's
+			// own prompt, so nothing injected may preempt it; every later
+			// turn begins after a tool batch has been committed, which is
+			// the boundary where a user message is legal (assistant
+			// tool_calls are already paired with their tool results).
+			if turn > 0 && a.commitInjected(turn, out) {
+				// Emitted InjectedMessage events tell the UI the text
+				// landed mid-round; history now ends with a user turn,
+				// exactly what the next request needs.
+			}
 			out <- TurnStart{Index: turn}
 			a.cfg.Hooks.NotifyPreTurn(ctx, hooks.PreTurnEvent{
 				Index:   turn,
@@ -959,6 +986,15 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 						Role:    deepseek.RoleUser,
 						Content: "continue" + modeReminder(a.cfg.ModeLabel),
 					})
+					continue
+				}
+				// Settle-point drain (inject.go): a message queued while
+				// this turn streamed arrives here when the model wanted
+				// to stop. Turning "about to return" into "one more
+				// turn" is the whole point — dropping the text silently
+				// would make the API's false return and the TUI's
+				// "queue" feel identical to a lost message.
+				if turn < a.cfg.MaxTurns-1 && a.commitInjected(turn+1, out) {
 					continue
 				}
 				// The round settles HERE: this turn produced no tool

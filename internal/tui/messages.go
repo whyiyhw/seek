@@ -72,6 +72,11 @@ type bannerTickMsg struct{}
 type compactDoneMsg struct {
 	summary string
 	usage   deepseek.Usage
+	// trigger distinguishes who asked: "manual" (/compact) or "auto"
+	// (maybeAutoCompact). Carried through so the ui-trace row can say
+	// which one fired — the auto trigger's hit rate is exactly the
+	// number a context-budget tuning pass needs.
+	trigger string
 	err     error
 }
 

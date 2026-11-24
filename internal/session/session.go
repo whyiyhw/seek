@@ -96,6 +96,16 @@ type Session struct {
 	Tools []string `json:"tools,omitempty"`
 }
 
+// EphemeralID returns a fresh session-shaped id for runs that never
+// persist a session (--no-save) but still need a stable per-run id on
+// the wire: the OpenCode Go gateway 400s with MissingSessionID when the
+// x-opencode-session routing header is absent on the subscription lane
+// (found by the eval judge smoke, 2026-11-22). Same shape as New's IDs
+// (sortable timestamp + 64-bit suffix); never written to disk and never
+// resolvable through a Store — callers must not treat it as a session
+// handle.
+func EphemeralID() string { return generateID(time.Now().UTC()) }
+
 // New constructs a fresh Session with a timestamp-based ID.
 func New(model, cwd, systemPrompt string, yolo, plan bool) *Session {
 	now := time.Now().UTC()
@@ -468,6 +478,12 @@ type SessionInfo struct {
 	// that bucket sessions by project hash it with paths.ProjectID
 	// (skill auto-distillation's batch scan, M-SD2).
 	CWD string
+	// Usage is the header's cumulative usage — the same block
+	// stats/cache serves. It rides SessionInfo because loadMeta already
+	// decodes the whole header object: the asset plane's cost column
+	// (session/list) and per-session trend points (stats/trend) get it
+	// with no second read per session.
+	Usage deepseek.Usage
 }
 
 // List returns metadata for every session in the store, newest first.
@@ -547,6 +563,7 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		ToolCalls: sess.ToolCalls,
 		ParentID:  sess.ParentID,
 		CWD:       sess.CWD,
+		Usage:     sess.Usage,
 	}, nil
 }
 

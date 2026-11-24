@@ -9,7 +9,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/whyiyhw/seek/internal/i18n"
 	"github.com/whyiyhw/seek/internal/keymap"
+	"github.com/whyiyhw/seek/internal/uitrace"
 )
 
 // beepCmd emits a terminal bell (BEL, \a). Written to os.Stderr so it
@@ -416,6 +418,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// claim it for their own purposes.
 		if m.streaming && m.cancelStream != nil {
 			m.userCanceled = true
+			m.traceEvent(uitrace.EventCancel, "", 0)
 			m.cancelStream()
 			// Revoke any plan-execute batch pre-approval. The user
 			// pressing cancel means "stop, give me back per-call
@@ -435,6 +438,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.queuedText = ""
 			}
 			m.pendingSteerText = ""
+			// Mid-turn injections accepted by the agent are dropped with
+			// the round: the agent's own beginTurnSession clears its
+			// queue per round, and this field is only the UI echo.
+			m.injectedPreview = ""
 			// Don't clear m.cancelStream here — streamEndMsg will do
 			// it after the stream channel actually drains, otherwise
 			// the next cancel within the same race window double-cancels.
@@ -526,8 +533,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				// agent is already 30 seconds into a useful turn.
 				if m.queuedText != "" || m.pendingSteerText != "" {
 					wasSteer := m.pendingSteerText != ""
+					n := len(m.queuedText)
+					detail := "queue"
+					if wasSteer {
+						n = len(m.pendingSteerText)
+						detail = "steer"
+					}
 					m.queuedText = ""
 					m.pendingSteerText = ""
+					m.traceEvent(uitrace.EventWithdraw, detail, n)
 					label := "↰ withdrew queued message"
 					if wasSteer {
 						label = "↰ withdrew pending steer"
@@ -548,15 +562,30 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			if action == keymap.ActionSteer {
-				// Steer: cancel current stream and stash text for
+				// Steer first tries the boundary injection: dropping the
+				// in-flight turn is the expensive meaning, so it is now
+				// the fallback (no mid-turn support, or a cap tripped).
+				if m.tryMidTurnInject(text) {
+					return m, (&m).appendHistory(styleMuted.Render(
+						"  " + i18n.T("view.queue.injected") + truncateOneLine(text, 60)))
+				}
+				// Fallback: cancel current stream and stash text for
 				// streamEndMsg to submit once the channel drains.
 				steerStream(&m, text)
 			} else {
-				// Queue: stash text; streamEndMsg auto-submits when the
+				// Queue: try the boundary injection first — the text
+				// lands at the next tool-batch boundary instead of
+				// waiting for the whole round to return.
+				if m.tryMidTurnInject(text) {
+					return m, (&m).appendHistory(styleMuted.Render(
+						"  " + i18n.T("view.queue.injected") + truncateOneLine(text, 60)))
+				}
+				// Fallback: stash text; streamEndMsg auto-submits when the
 				// agent loop reaches its natural end (not userCanceled).
 				// Second submit during the same stream replaces — last
 				// thing you said is what you meant.
 				m.queuedText = text
+				m.traceEvent(uitrace.EventQueue, "", len(text))
 			}
 			return m, nil
 		}

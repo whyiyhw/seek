@@ -18,6 +18,10 @@ var messagesEn = map[string]string{
 	"view.thinking_ms":     "thinking… %dm%ds",
 	"view.queue.steering":  "↪ steering: ",
 	"view.queue.queued":    "↰ queued: ",
+	// Mid-turn injection (pkg/agent.QueueUserMessage): the text is
+	// already in the agent's boundary queue, not waiting for the round
+	// to end. Distinct word so the user can tell the two apart.
+	"view.queue.injected": "⤵ inserted at next boundary: ",
 
 	// view.go — popup menu footer hints.
 	"menu.hint.simple": "  ↑/↓ navigate · Enter accept · Esc cancel",
