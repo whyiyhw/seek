@@ -192,6 +192,12 @@ wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`
 
 **边界（诚实清单）**：plan 态模型被提醒词指示走 `propose`，但 propose 的人工审批门（TUI picker 四选项）在 ACP 车道无协议承载——ACP 下 plan 态的现实用途是**只读分析 + 计划文本产出**，人审后切回 `default` 执行。plan 态两态行为差异有真二进制 e2e 钉死（`cmd/seek/acp_mode_e2e_test.go`：plan 态 write 被拒不落盘 + 提醒词在轮内；default 态同一 write 落盘 + 提醒词消失）。
 
+**`ask_user` 在 ACP 车道不存在**（同一条边界的另一半，2026-11-23 补记）。`ask_user` 要的是 2–4 个任意选项 + 自由文本 + 多题 batch，而 ACP v1 只给 agent 一个请求型方法 `session/request_permission`，语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题）。硬塞会把它渲染成「是否允许」而不是「你选哪个」，且需要客户端实现一个自创请求型扩展才能工作——请求型扩展与通知型（`_seek_turn_stop`）的兼容性风险不是一个量级：客户端不实现就挂到超时。协议面因此**不开口**。
+
+行为是可预期的：ACP 车道里 `ask_user` / `propose` 返回 **`ErrDisabled`** ——「interactive question not available in this mode — rephrase as a plain-text question in your reply」，模型据此把问题改写进正文，回合照常完成。这条文案是有意的指令面（不是日志），2026-11-23 之前这里报的是 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用；现在 `askPolicy` 出生即 `ModeDisabled`，只有 TUI 那条路在自己入口显式 `SetMode(ModeAsk)`，新加的车道默认继承正确姿态。钉死用例：`cmd/seek/askuser_lane_test.go`（print 与 ACP 两条车道各一）。
+
+真要在编辑器里给人做选择题，需要的是协议层的答案：要么等 ACP 出现 elicitation 类方法，要么客户端把 `request_permission` 的 `toolCall.content` 自行渲染成选择器——两者都不在 seek 单侧可达范围内，故 backlog 里不立卡。
+
 **①选型：为什么首批只协议化 /plan、其余维持 TUI-only**：
 
 - `/model` —— 已有协议通道（§5.2 configOptions 下拉 + `session/set_config_option`），不重复造。

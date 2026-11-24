@@ -805,7 +805,18 @@ func run() error {
 	// (before tool registration) so askusertool.New can capture it;
 	// the actual channel + SetAskFn wiring happens later once ctx
 	// and the TUI options are ready.
-	askPolicy := askuser.New(askuser.ModeAsk)
+	//
+	// Born ModeDisabled, NOT ModeAsk: only the TUI path has a picker to
+	// render, and it opts in explicitly at the "we're entering the TUI"
+	// block below. Every headless lane (print/json, rpc, acp, goal,
+	// autopilot, benchmark — and any lane added later) then gets
+	// ErrDisabled from ask_user/propose, whose text tells the model to
+	// rephrase as prose. The previous ModeAsk default made those lanes
+	// answer ErrNoCallback — "(programming error)" — which is both wrong
+	// (nothing is miswired; there is simply no human) and an invitation
+	// to retry the same call. Inverted default means a new lane inherits
+	// the correct posture instead of the bug.
+	askPolicy := askuser.New(askuser.ModeDisabled)
 
 	// Resolve the absolute project root early — the checkpoint
 	// Manager (constructed next) needs it, and downstream code
@@ -1893,6 +1904,12 @@ func run() error {
 	// itself was constructed earlier (before tool registration) so
 	// the askuser tool could capture it; SetAskFn registers the
 	// real callback here, now that ctx + askUserCh are in scope.
+	//
+	// Enable the policy HERE and not earlier: reaching this line means
+	// we are the TUI (every headless lane returned above), which is the
+	// only lane with a picker to render. askPolicy was born
+	// ModeDisabled for exactly this reason — see its construction site.
+	askPolicy.SetMode(askuser.ModeAsk)
 	askUserCh := make(chan askuser.Request, 4)
 	askPolicy.SetAskFn(func(q askuser.Question) askuser.Answer {
 		resp := make(chan askuser.Answer, 1)
