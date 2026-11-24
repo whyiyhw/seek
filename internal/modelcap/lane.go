@@ -16,8 +16,19 @@ package modelcap
 //     tie-break internal/opencatalog's directLaneIDs makes for pricing);
 //   - then the Go pool (pricing.OpenCodeGoModels — the lane's menu, the
 //     one authoritative list; no second table here);
+//   - then the OpenDesign pool (pricing.OpenDesignModels), for the ids it
+//     does not share with the Go lane;
 //   - then vendor prefixes for the curated second-tier defaults;
 //   - anything else is unknown (""), and the display surface hides.
+//
+// KNOWN AMBIGUITY: the two subscription gateways share most of their
+// menu (deepseek-v4.1-flash, glm-5.3-flash, kimi-k2.7-code, …), and the
+// wire id is the only key a display surface has. Shared ids resolve to
+// the Go lane, which is the OLDER claim and keeps this function's
+// existing answers byte-identical; a session actually running on
+// --provider=opendesign with a shared id therefore shows the wrong lane
+// chip. Telling them apart needs the provider name threaded into the
+// event, not a smarter table here.
 
 import "github.com/whyiyhw/seek/internal/pricing"
 
@@ -50,6 +61,17 @@ var goPoolIDs = func() map[string]bool {
 	return m
 }()
 
+// openDesignIDs is the OpenDesign Cloud lane's menu, indexed once at
+// init. Checked AFTER goPoolIDs so a shared id keeps resolving to the Go
+// lane (see the known-ambiguity note above).
+var openDesignIDs = func() map[string]bool {
+	m := make(map[string]bool, len(pricing.OpenDesignModels))
+	for _, row := range pricing.OpenDesignModels {
+		m[row.ID] = true
+	}
+	return m
+}()
+
 // LaneOf reports the provider lane speaking model's wire id and its
 // display label. Both are "" for an unknown id (or empty model) — callers
 // hide the lane surface rather than guess.
@@ -62,6 +84,9 @@ func LaneOf(model string) (lane, label string) {
 	}
 	if goPoolIDs[model] {
 		return "opencode", "OpenCode 网关"
+	}
+	if openDesignIDs[model] {
+		return "opendesign", "OpenDesign 网关"
 	}
 	for _, l := range laneLabels {
 		if len(model) > len(l.prefix) && model[:len(l.prefix)] == l.prefix {

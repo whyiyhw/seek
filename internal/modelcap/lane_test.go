@@ -63,3 +63,34 @@ func TestLaneOf_PoolCoversMenu(t *testing.T) {
 		}
 	}
 }
+
+// TestLaneOf_OpenDesignCoversMenu is the OpenDesign half: an id offered
+// ONLY on that lane must resolve to it, and an id the Go lane also
+// carries must keep resolving to opencode — the documented tie-break
+// that keeps this function's older answers byte-identical.
+func TestLaneOf_OpenDesignCoversMenu(t *testing.T) {
+	goRows := make(map[string]bool, len(pricing.OpenCodeGoModels))
+	for _, row := range pricing.OpenCodeGoModels {
+		goRows[row.ID] = true
+	}
+	exclusive := 0
+	for _, row := range pricing.OpenDesignModels {
+		lane, label := LaneOf(row.ID)
+		switch {
+		case sharedFirstTier[row.ID] != "":
+			continue // first-tier lane wins over both pools
+		case goRows[row.ID]:
+			if lane != "opencode" {
+				t.Errorf("%s: shared with the Go lane, resolves to %q; the documented tie-break says opencode", row.ID, lane)
+			}
+		default:
+			exclusive++
+			if lane != "opendesign" || label != "OpenDesign 网关" {
+				t.Errorf("opendesign-only row %q resolves to %q/%q, want opendesign — the menu and LaneOf drifted", row.ID, lane, label)
+			}
+		}
+	}
+	if exclusive == 0 {
+		t.Error("no OpenDesign-exclusive ids — openDesignIDs is doing nothing; re-check the menus")
+	}
+}

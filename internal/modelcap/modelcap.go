@@ -96,6 +96,8 @@ var visionModels = map[string]bool{
 	"deepseek-flash": true,
 	// The same model addressed on the OpenCode Go gateway — a different
 	// wire id string, hence its own row (pricing.ModelOpenCodeV41Flash).
+	// The OpenDesign Cloud lane uses the same id string for the same
+	// model, so this row covers both.
 	"deepseek-v4.1-flash": true,
 	// The second-tier lanes' curated defaults and their picker siblings
 	// (internal/tui commands.go knownModelsForProvider, cmd/seek
@@ -106,6 +108,24 @@ var visionModels = map[string]bool{
 	"gpt-4o-mini":                true,
 	"gemini-2.0-flash":           true,
 	"gemini-1.5-pro":             true,
+	// OpenDesign Cloud lane (pricing.OpenDesignModels). Every row below
+	// was probed 2026-11-24 with a real sk-amr key: a 1×1 PNG went in as
+	// an `image_url` data URL and the reply described the pixel. Note
+	// deepseek-v4.1-flash-eco is here DESPITE the gateway's own
+	// `architecture.input_modalities` saying text-only — it answered the
+	// image anyway (the same catalogue gap the OpenCode lane's plugin
+	// documents: "the catalog left image out of DeepSeek V4.1 Flash Eco,
+	// which takes images"). Measured beats declared when the two
+	// disagree and the measurement is a 200 with a correct answer.
+	"deepseek-v4.1-flash-eco": true,
+	"glm-5.3-flash":           true,
+	"glm-5.3-flashx":          true,
+	"claude-haiku-5.5":        true,
+	"gpt-6-luna":              true,
+	"kimi-k2.7-code":          true,
+	"minimax-m3.1-flash":      true,
+	"mimo-v2.6-flash":         true,
+	"mimo-v2.6-pro":           true,
 }
 
 // fileModels is the compiled document-input table — same id set as
@@ -126,6 +146,23 @@ var fileModels = map[string]bool{
 	"gpt-4o-mini":                true,
 	"gemini-2.0-flash":           true,
 	"gemini-1.5-pro":             true,
+	// OpenDesign Cloud lane: the ids whose gateway metadata declares the
+	// `file` input modality AND which read a real PDF back coherently in
+	// the 2026-11-24 probe.
+	//
+	// KNOWN LIMITATION on the shared id: deepseek-v4.1-flash is already
+	// true above for the OpenCode lane (which does pass documents), but
+	// the OpenDesign gateway silently DROPS the `file` part on that same
+	// id — the probe answered "no PDF is attached" with a 200. The table
+	// is keyed by wire id alone, so one lane's "yes" wins; a document
+	// pasted on --provider=opendesign/deepseek-v4.1-flash therefore
+	// reaches the model as nothing rather than as an in-band note. Fixing
+	// it needs a lane-aware capability key, the same surface
+	// pricing.ModelPricing deliberately does not have (see its
+	// "display-only artifact" note). Recorded in docs/pitfalls.
+	"claude-haiku-5.5": true,
+	"glm-5.3-flashx":   true,
+	"gpt-6-luna":       true,
 }
 
 var (

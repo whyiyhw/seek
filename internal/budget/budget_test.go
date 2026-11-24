@@ -59,6 +59,22 @@ func TestLimit_OpenCodeGoCatalogue(t *testing.T) {
 	}
 }
 
+// TestLimit_OpenDesignCatalogue is the OpenDesign half of the same
+// invariant: every id its menus offer must have an explicit window, or
+// /compact nags at Default (128K) — an eighth of the real one.
+func TestLimit_OpenDesignCatalogue(t *testing.T) {
+	for _, m := range pricing.OpenDesignModels {
+		got, ok := contextLimits[m.ID]
+		if !ok {
+			t.Errorf("%s: no explicit context limit (would fall to Default %d)", m.ID, Default)
+			continue
+		}
+		if got <= Default {
+			t.Errorf("%s = %d, want > Default %d", m.ID, got, Default)
+		}
+	}
+}
+
 func TestClassify_Boundaries(t *testing.T) {
 	m := "deepseek-v4-flash"
 	limit := Limit(m) // 1M after V4

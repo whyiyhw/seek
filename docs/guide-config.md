@@ -64,8 +64,9 @@ API 密钥的查找优先级从高到低：
 | Gemini | `GEMINI_API_KEY` | `gemini` |
 | GLM（智谱 bigmodel.cn） | `GLM_API_KEY` | `glm` |
 | OpenCode（Go 订阅） | `OPENCODE_API_KEY` | `opencode` |
+| OpenDesign（Cloud 订阅） | `OPENDESIGN_API_KEY` | `opendesign` |
 
-GLM 与 OpenCode 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
+GLM、OpenCode 与 OpenDesign 无需手编 config.json——首启向导（§4）可直接选中并粘贴 key。
 
 ### GLM Coding Plan 订阅端点（`--provider=glm`）
 
@@ -125,6 +126,30 @@ seek --provider glm
 - **隐私**：Go 计划默认屏蔽「用请求训练模型」的付费端点（详见官方文档）。
 
 注意：状态栏里该车道显示的美元成本是按官方 per-token 牌价的**估算展示**（订阅本身不按 token 计费）。
+
+### OpenDesign Cloud 订阅车道（`--provider=opendesign`）
+
+[OpenDesign](https://open-design.ai/pricing/) Go 档是 $10/月（首月 $8）的订阅，额度按月**发放**、与桌面端共用：**每月最高 $120**，同时压着 **7 天 $30** 与 **5 小时 $10** 两个窗口——和 OpenCode Go 一样不按 token 扣费，扣的是「等值牌价 × 扣减倍率」。
+
+- **Key 获取**：登录 [open-design.ai/cloud/api-keys](https://open-design.ai/cloud/api-keys) 建一把 key（形状固定为 `sk-amr-` + 32 位 + `-`）。注意**不是** `~/.amr/config.json` 里那份（那是桌面端 `vela login` 的机器凭证，`vela_ctrl_…`，走的是另一个域名 `amr-api`，管套餐/钱包/额度窗口，seek 不碰）。`export OPENDESIGN_API_KEY=...` 或写 `providers.opendesign.api_key`，首启向导也可直接选。
+- **端点**：`https://amr-link.open-design.ai/v1/chat/completions`（OpenAI Chat Completions 协议；`OPENDESIGN_BASE_URL` / `providers.opendesign.base_url` > `--base-url` > 默认，优先级 env·config > flag）。同一个 base 还提供 `/responses`（OpenAI Responses）与 `/messages`（Anthropic Messages）三种协议，**每个模型三种都支持**（实测逐个 POST 过）；seek 只走 Chat Completions，因为兼容适配器只说这一种。请求头只需 `Authorization: Bearer sk-amr-…`——**没有** `x-opencode-session` 这类路由头要求。
+- **默认模型**：`deepseek-v4.1-flash`（1M ctx · vision；扣减倍率 **0.5×**，即 $1 牌价用量吃 $0.5 额度）。想更省额度用 `deepseek-v4.1-flash-eco`（倍率 **0.27×**，厂商说效果无损、只是速度可能慢，适合批处理），`/model deepseek-v4.1-flash-eco` 直接切。
+- **可选模型**：`pricing.OpenDesignModels` 是唯一名单，TUI `/model` 与 ACP `session/new` 下拉都渲染它，共 12 个：deepseek-v4.1-flash / v4.1-flash-eco / v4-pro、glm-5.3-flash / flashx、claude-haiku-5.5、gpt-6-luna、kimi-k2.7-code、minimax-m3.1-flash、mimo-v2.6-flash / pro、hy4-preview。名单来自**用 key 读到的** `GET https://amr-link.open-design.ai/v1/models`（14 行，等于该账户所在档位实际可调的模型），并逐个真发过一次完成请求。**没进来**的两类：①`deepseek-v4-flash` / `deepseek-v4-flash-vision-exp` —— 网关仍列、但牌价 $0.44/$1.32 与 V4.1 Flash 不同，而 seek 的价目表按 wire id 索引、这两 id 已钉在 Flash 卡上（`/model <id>` 仍可手切，只是菜单不展示一个说不准的价格）；②旗舰专属模型（claude-opus-5.5、gpt-6.2-astra、gemini-4-*、grok-4.7、qwen4-max 等）—— 公开价目表有、Go 档的模型列表里没有，摆进菜单只会变成地雷。
+- **额度扣减倍率**（只影响「吃掉多少 $120」，不影响 seek 显示的成本估算）：DeepSeek V4.1 Flash 0.5×（限时谷价期 0.25×）、V4.1 Flash Eco 0.27×、其余多为 1×、MiMo V2.6 Flash/Pro 4×。状态栏的美元数是**按牌价算的等值展示**，和 OpenCode 车道同口径。
+- **图片**：v4.1-flash / -eco、glm-5.3-flash(x)、claude-haiku-5.5、gpt-6-luna、kimi-k2.7-code、minimax-m3.1-flash、mimo-v2.6-flash/pro 都实测能吃 `image_url` data URL（**注意** `deepseek-v4.1-flash-eco` 的网关 metadata 把 `input_modalities` 写成 text-only，实测却正常识图——以实测为准，`modelcap.Vision` 已收录）。
+- **文档（PDF）**：claude-haiku-5.5 / glm-5.3-flashx / gpt-6-luna 实测能读 `file` part；`deepseek-v4.1-flash` **会静默丢弃** `file` part（回一个 200 但答"没有附件"）。seek 的能力表按 wire id 索引，该 id 在 OpenCode 车道是真支持文档的，因此这里共享了那条「是」——这是已知车道歧义，见 `docs/pitfalls/llm-provider-quirks-m6/`。
+- **与 OpenCode 车道的 id 冲突**：两条订阅车道的菜单高度重叠（deepseek-v4.1-flash、glm-5.3-flash、kimi-k2.7-code、mimo-v2.6-* 等），wire id 相同。seek 的价目/上下文/能力表都按 wire id 索引，只能复用一张卡：2026-11-24 逐 id 核对后，共享 id 的牌价基本一致，唯一偏差是 `glm-5.3-flash`——编译卡是 OpenCode 车道的 2× 峰时价，OpenDesign 列表价是它的一半，即成本显示高估 2×（订阅本身不按 token 计费，与其它防御性牌价同姿势）。另一个已知瑕疵在显示层：`modelcap.LaneOf` 会把共享 id 判给 OpenCode（旧主张优先），所以 `--provider=opendesign` 跑共享 id 时 web 顶栏的车道 chip 显示 OpenCode。
+- **子代理路由**：本切片**没有**把 `opendesign` 加进 `agent` 工具的 provider 枚举（`internal/subagent/routing.go` 的路由表按 id 反查 provider，两条车道共用 id 会退化成 map 遍历顺序）。父会话可跑，子代理路由留后续卡。
+
+**症状对照 / symptom → fix**
+
+| 症状 | 根因 | 修法 |
+|---|---|---|
+| `401 {"code":"invalid_api_key"}` | key 打错了 / 用的是 `vela_ctrl_…` 控制面 key | 回 [api-keys](https://open-design.ai/cloud/api-keys) 重建 `sk-amr-…` |
+| `401 {"code":"missing_api_key"}` | 没带 `Authorization` 头（key 没解析出来） | 检查 `OPENDESIGN_API_KEY` / `providers.opendesign.api_key` |
+| 回 200 但模型答"没有附件"/忽略图片 | PDF `file` part 在 `deepseek-v4.1-flash` 上被网关静默丢弃 | 换 `claude-haiku-5.5` / `gpt-6-luna` / `glm-5.3-flashx` 处理文档 |
+| 403/404 且响应里像 HTML | 打到 `open-design.ai` 官网或 `amr-api` 控制面了 | 端点必须是 `amr-link.open-design.ai/v1/chat/completions` |
+| 额度消耗比预期快 | 0.5× 倍率是按**牌价等值**扣的，$120 额度 ≈ $240 牌价用量 | 换 `deepseek-v4.1-flash-eco`（0.27×）做批处理 |
 
 ### 切换默认 Provider
 

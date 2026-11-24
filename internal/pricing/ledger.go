@@ -37,12 +37,16 @@ package pricing
 // verified like any other: $0 is also a price that can change.
 var verifiedOn = map[string]verification{
 	"beam-free":               {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
+	"claude-haiku-5.5":        {VerifiedOn: "2026-11-24", SourceURL: "https://amr-api.open-design.ai/api/v1/public/model-prices", Currency: "USD"},
 	"deepseek-flash":          {VerifiedOn: "2026-11-20", SourceURL: "https://api-docs.deepseek.com/quick_start/pricing", Currency: "USD"},
 	"deepseek-v4-pro":         {VerifiedOn: "2026-11-20", SourceURL: "https://api-docs.deepseek.com/quick_start/pricing", Currency: "USD"},
 	"deepseek-v4.1-flash":     {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
+	"deepseek-v4.1-flash-eco": {VerifiedOn: "2026-11-24", SourceURL: "https://amr-api.open-design.ai/api/v1/public/model-prices", Currency: "USD"},
 	"glm-5.2":                 {VerifiedOn: "2026-11-18", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
 	"glm-5.3":                 {VerifiedOn: "2026-11-20", SourceURL: "https://docs.bigmodel.cn/cn/guide/start/pricing", Currency: "CNY"},
 	"glm-5.3-flash":           {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
+	"glm-5.3-flashx":          {VerifiedOn: "2026-11-24", SourceURL: "https://amr-api.open-design.ai/api/v1/public/model-prices", Currency: "USD"},
+	"gpt-6-luna":              {VerifiedOn: "2026-11-24", SourceURL: "https://amr-api.open-design.ai/api/v1/public/model-prices", Currency: "USD"},
 	"hy3":                     {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
 	"hy4":                     {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},
 	"hy4-flash-free":          {VerifiedOn: "2026-11-20", SourceURL: "https://opencode.ai/inference/go/v1/models", Currency: "USD"},

@@ -22,19 +22,21 @@ seek 支持把图片**原样**发给多模态模型：剪贴板截图、本地�
 - **限制**：单图 ≤ 32 MiB；JPEG/PNG/GIF/WebP；图片只进 user 消息。
 - **回放**：图片消息渲染为折叠标记 `[image: 名字 · 尺寸 · 大小]`（暗色），原文路径保留在 transcript 里，可自行用看图器打开。
 
-## 二线 provider（Anthropic / OpenAI / Gemini / GLM / OpenCode Go）
+## 二线 provider（Anthropic / OpenAI / Gemini / GLM / OpenCode Go / OpenDesign）
 
 **图片照常透传**（feature-vision M-V.4，2026-11-19 交付）。每个 adapter 用自己协议的编码：
 
-- OpenAI 兼容车道（含 GLM、OpenCode Go）：数组形 `content`，`{"type":"image_url","image_url":{"url":"data:…"}}`；纯文本消息仍是纯字符串，字节与改动前一致。
+- OpenAI 兼容车道（含 GLM、OpenCode Go、OpenDesign Cloud）：数组形 `content`，`{"type":"image_url","image_url":{"url":"data:…"}}`；纯文本消息仍是纯字符串，字节与改动前一致。
 - Anthropic：`{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` block。
 - Gemini：`{"inlineData":{"mimeType":…,"data":…}}` part。
 
 **能力判定只有一处**：`internal/modelcap.Vision(model)`。两层来源——
 
-1. 编译期静态表：各车道的默认模型（`deepseek-flash` / OpenCode 的 `deepseek-v4.1-flash` / `claude-*` / `gpt-4o*` / `gemini-*`）。
-2. 运行时 grant：OpenCode Go 的目录刷新（`internal/opencatalog`）按网关自己声明的 `modalities.input` 装进来——所以该车道里任何标了 `vision` 的模型（`kimi-k3`、`glm-5.3-flash`、`hy4`…）开箱可用，不用等 seek 发版。grant 只做**升级**不做降级（旧缓存里根本没有这个字段，缺席不能当成"不支持"）。
+1. 编译期静态表：各车道的默认模型（`deepseek-flash` / OpenCode 与 OpenDesign 的 `deepseek-v4.1-flash` / `claude-*` / `gpt-4o*` / `gemini-*`），外加 OpenDesign 菜单里每个实测能收图的 id（见 [guide-config.md](guide-config.md) §3）。
+2. 运行时 grant：OpenCode Go 的目录刷新（`internal/opencatalog`）按网关自己声明的 `modalities.input` 装进来——所以该车道里任何标了 `vision` 的模型（`kimi-k3`、`glm-5.3-flash`、`hy4`…）开箱可用，不用等 seek 发版。grant 只做**升级**不做降级（旧缓存里根本没有这个字段，缺席不能当成"不支持"）。OpenDesign 车道**没有**动态刷新，它的能力全部落在静态表里。
 
 未知模型按"不支持"处理（宁可一条 in-band 提示，也不要一个 400 毁掉整回合）。让某个自定义 id 收图：若它在 OpenCode 目录里，刷新即生效；否则等静态表补行。
+
+> **声明不等于能力**：OpenDesign 的 `deepseek-v4.1-flash-eco` 在网关 metadata 里写的是 text-only，实测收图正常；反过来 `deepseek-v4.1-flash` 声明能收 `file`，网关却静默丢弃该 part。静态表的取舍在 [`docs/pitfalls/llm-provider-quirks-m6/`](pitfalls/llm-provider-quirks-m6/) 有据可查——一律以「真发一次、答案依赖附件」为准。
 
 **文件**（PDF）同样透传（2026-11-19，按图片先例）：二线车道的三份官方文档都只收 PDF（OpenAI 兼容 `file` 块 / Anthropic `document` 块 / Gemini `inlineData`），所以 Word/PPT 在二线车道提交期就降级成 `[file: … 仅支持 PDF]` 提示；DeepSeek 车道仍走 Files API，三种格式都收。详见 [guide-files.md](guide-files.md)。

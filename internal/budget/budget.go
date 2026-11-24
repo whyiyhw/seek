@@ -73,6 +73,19 @@ var contextLimits = map[string]int{
 	"hy4-flash-free":          1_048_576,
 	"longcat-2.5-free":        1_000_000,
 	"iceman-contributor-free": 262_144,
+	// OpenDesign Cloud lane (--provider=opendesign). The gateway reports
+	// `metadata.context_limit` per model on its account-scoped
+	// GET /v1/models (checked 2026-11-24 with a real key); the rows below
+	// are the ones pricing.OpenDesignModels offers. Values are the
+	// gateway's own numbers, which differ slightly from the Go lane's for
+	// the shared ids (1_048_000 vs 1_000_000) — the larger of the two is
+	// NOT used: a wrong-by-48K window only shifts /compact by ~4%, while
+	// copying the wrong lane's number would be an unexplained magic
+	// constant. Shared ids therefore keep their existing entry.
+	"deepseek-v4.1-flash-eco": 1_048_000,
+	"glm-5.3-flashx":          1_000_000,
+	"claude-haiku-5.5":        1_000_000,
+	"gpt-6-luna":              1_050_000,
 }
 
 // Default is returned when an unknown model is queried. Since most

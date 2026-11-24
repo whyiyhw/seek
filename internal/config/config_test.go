@@ -168,6 +168,45 @@ func TestBaseURLFor_GLMPrecedence(t *testing.T) {
 	}
 }
 
+// TestKeyFor_OpenDesignEnvVar mirrors the GLM case for the OpenDesign
+// Cloud lane: OPENDESIGN_API_KEY beats providers.opendesign.api_key. The
+// env var name is a wire contract (docs/guide-config.md + the setup
+// wizard's mirror table), so it gets pinned like every other lane's.
+func TestKeyFor_OpenDesignEnvVar(t *testing.T) {
+	withSeekHome(t)
+	t.Setenv("OPENDESIGN_API_KEY", "")
+	cfg := Config{Providers: map[string]ProviderConfig{
+		"opendesign": {APIKey: "sk-amr-from-config"},
+	}}
+	if got := KeyFor(cfg, "opendesign"); got != "sk-amr-from-config" {
+		t.Errorf("opendesign config fallback failed, got %q", got)
+	}
+	t.Setenv("OPENDESIGN_API_KEY", "sk-amr-from-env")
+	if got := KeyFor(cfg, "opendesign"); got != "sk-amr-from-env" {
+		t.Errorf("opendesign env should win, got %q", got)
+	}
+}
+
+// TestBaseURLFor_OpenDesignPrecedence: the lane ships a pinned default
+// endpoint, so it needs the same env > config escape hatch as glm and
+// opencode (a proxy/mirror front is the stated reason). Pinned here so
+// the lane can't silently lose the override the way opencode's children
+// once did.
+func TestBaseURLFor_OpenDesignPrecedence(t *testing.T) {
+	withSeekHome(t)
+	t.Setenv("OPENDESIGN_BASE_URL", "")
+	cfg := Config{Providers: map[string]ProviderConfig{
+		"opendesign": {APIKey: "k", BaseURL: "https://from-config.example/v1/chat/completions"},
+	}}
+	if got := BaseURLFor(cfg, "opendesign"); got != "https://from-config.example/v1/chat/completions" {
+		t.Errorf("opendesign config override failed, got %q", got)
+	}
+	t.Setenv("OPENDESIGN_BASE_URL", "https://from-env.example/v1/chat/completions")
+	if got := BaseURLFor(cfg, "opendesign"); got != "https://from-env.example/v1/chat/completions" {
+		t.Errorf("opendesign env override should win, got %q", got)
+	}
+}
+
 func TestBaseURLFor_NoOverride(t *testing.T) {
 	// Empty means "no override": the lane's compiled default applies.
 	// A key-only provider block must not read as a URL, and unknown

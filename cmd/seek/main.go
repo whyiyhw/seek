@@ -378,8 +378,8 @@ func run() error {
 		approvalStdin = flag.Bool("approval-stdin", false, "print mode (--json) only: surface permission prompts as approval_request lines on stdout and read the decision lines from stdin (the remote control plane's approval channel)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
-		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | compatible")
-		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode")
+		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | opendesign | compatible")
+		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode / --provider=opendesign")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
 		themeFlag     = flag.String("theme", "auto", "color theme: auto|dark|light")
 		rpcMode       = flag.Bool("rpc", false, "run as a JSON-RPC 2.0 server over stdio (for IDE integrations)")
@@ -3291,7 +3291,8 @@ var acpLaneModels = []struct {
 	{"glm", []struct{ id, label string }{
 		{pricing.ModelGLM53, "glm-5.3 (GLM)"},
 	}},
-	{"opencode", opencodeACPMenuModels(pricing.OpenCodeGoModels)},
+	{"opencode", opencodeACPMenuModels(pricing.OpenCodeGoModels, "OpenCode Go")},
+	{"opendesign", opencodeACPMenuModels(pricing.OpenDesignModels, "OpenDesign")},
 }
 
 // laneHasCredential reports whether a curated lane has anything to
@@ -3316,10 +3317,16 @@ func laneHasCredential(cfg config.Config, provider string) bool {
 // lanes' labels the same way. Callers pass the live rows when the
 // catalogue has refreshed (see acpModelMenu) or pricing.OpenCodeGoModels
 // for the compiled baseline.
-func opencodeACPMenuModels(rows []pricing.OpenCodeGoModel) []struct{ id, label string } {
+//
+// suffix is the lane's display name in parentheses. It became a
+// parameter when the second subscription lane (opendesign) landed with
+// the SAME rows: two dropdown entries reading "(OpenCode Go)" for an
+// OpenDesign model would be actively misleading, and the value prefix
+// ("opendesign:<id>") already differs, so the label must too.
+func opencodeACPMenuModels(rows []pricing.LaneModel, suffix string) []struct{ id, label string } {
 	out := make([]struct{ id, label string }, 0, len(rows))
 	for _, m := range rows {
-		out = append(out, struct{ id, label string }{m.ID, m.ID + " (OpenCode Go)"})
+		out = append(out, struct{ id, label string }{m.ID, m.ID + " (" + suffix + ")"})
 	}
 	return out
 }
@@ -3351,7 +3358,7 @@ func acpModelMenu(currentModel string, openCodeRows []pricing.OpenCodeGoModel) [
 		}
 		models := lane.models
 		if lane.provider == "opencode" && len(openCodeRows) > 0 {
-			models = opencodeACPMenuModels(openCodeRows)
+			models = opencodeACPMenuModels(openCodeRows, "OpenCode Go")
 		}
 		for _, m := range models {
 			opts = append(opts, acp.ConfigSelectOption{
@@ -4308,6 +4315,8 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 			provFlag = "gemini"
 		case config.KeyFor(cfg, "glm") != "":
 			provFlag = "glm"
+		case config.KeyFor(cfg, "opendesign") != "":
+			provFlag = "opendesign"
 		case cfg.DefaultProvider != "":
 			provFlag = cfg.DefaultProvider
 		default:
@@ -4397,6 +4406,35 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		}
 		return provider, nil, "OpenCode", "deepseek-v4.1-flash", nil
 
+	case "opendesign":
+		// OpenDesign Cloud lane (amr-link.open-design.ai/v1): a
+		// subscription gateway over a mixed model pool, billed against a
+		// monthly allowance ($120/mo on the Go tier, with 7-day and
+		// 5-hour windows) — never per token, exactly like the OpenCode Go
+		// lane next door, which is why the two ride the same compatible
+		// adapter and share rate cards for the ids they have in common.
+		//
+		// Wire: one host serves all three chat standards (Chat
+		// Completions / Responses / Anthropic Messages) on the same base
+		// path; seek speaks Chat Completions because that is what the
+		// compatible adapter implements, and the gateway answers every
+		// model on it (verified 2026-11-24 with a live POST per id).
+		// Requests are signed `Authorization: Bearer sk-amr-…`.
+		//
+		// No x-opencode-session equivalent: the gateway needs no routing
+		// header, so a request carries only UA + bearer. The session id
+		// still rides ChatRequest.SessionID — inert here, as on every
+		// non-OpenCode lane.
+		//
+		// Endpoint precedence matches glm/opencode:
+		// OPENDESIGN_BASE_URL / providers.opendesign.base_url >
+		// --base-url > opendesignBaseURL.
+		apiKey := config.KeyFor(cfg, "opendesign")
+		if apiKey == "" {
+			return nil, nil, "", "", fmt.Errorf("no OpenDesign API key — set OPENDESIGN_API_KEY or add providers.opendesign.api_key to ~/.seek/config.json (create one at https://open-design.ai/cloud/api-keys)")
+		}
+		return newOpenDesignProvider(cfg, apiKey, baseURLFlag), nil, "OpenDesign", pricing.ModelOpenDesignV41Flash, nil
+
 	case "compatible":
 		// Compatible endpoints don't have a canonical env var, so we
 		// accept OPENAI_API_KEY or DEEPSEEK_API_KEY (common shapes for
@@ -4415,7 +4453,7 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 		return compatible.New(apiKey, baseURLFlag, provName), nil, provName, "", nil
 
 	default:
-		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | opencode | compatible", provFlag)
+		return nil, nil, "", "", fmt.Errorf("unknown --provider %q; valid: deepseek | anthropic | openai | gemini | glm | opencode | opendesign | compatible", provFlag)
 	}
 }
 
@@ -4597,6 +4635,43 @@ func opencodeEndpoint(cfg config.Config, baseURLFlag string) string {
 // can't apply to a parent and miss its children.
 func newOpenCodeProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider {
 	return compatible.New(apiKey, opencodeEndpoint(cfg, baseURLFlag), "OpenCode")
+}
+
+// opendesignBaseURL is the default endpoint for --provider=opendesign:
+// the OpenDesign Cloud gateway's Chat Completions target, OpenAI-
+// compatible, full POST URL like every other pinned lane. Verified
+// 2026-11-24: `GET https://amr-link.open-design.ai/v1/models` with a
+// real sk-amr key answers 14 rows; `POST /v1/chat/completions` streams
+// for all of them. The same base also serves /responses and /messages —
+// seek uses /chat/completions only, because that is the compatible
+// adapter's wire.
+//
+// The control plane (plan, wallet, allowance windows) is a DIFFERENT
+// host, amr-api.open-design.ai, and a different credential kind
+// (vela_ctrl_…). seek never touches it: the lane needs inference, and a
+// usage bar for this subscription is not wired yet.
+const opendesignBaseURL = "https://amr-link.open-design.ai/v1/chat/completions"
+
+// opendesignEndpoint resolves the lane's POST target with the same
+// precedence as glmEndpoint / opencodeEndpoint: env
+// (OPENDESIGN_BASE_URL) / providers.opendesign.base_url > --base-url >
+// the compiled default. Routed through one function so a proxy/mirror
+// override can't apply to the parent session and miss a child.
+func opendesignEndpoint(cfg config.Config, baseURLFlag string) string {
+	base := opendesignBaseURL
+	if baseURLFlag != "" {
+		base = baseURLFlag
+	}
+	if override := config.BaseURLFor(cfg, "opendesign"); override != "" {
+		base = override
+	}
+	return base
+}
+
+// newOpenDesignProvider is the single construction point for the
+// OpenDesign lane, same contract as newGLMProvider / newOpenCodeProvider.
+func newOpenDesignProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider {
+	return compatible.New(apiKey, opendesignEndpoint(cfg, baseURLFlag), "OpenDesign")
 }
 
 // mcpSectionFromBridges assembles the sysprompt MCPSection content (the

@@ -151,13 +151,14 @@ func TestPromptAPIKey_EmptyReprompts(t *testing.T) {
 func TestEnvVarFor_KnownProviders(t *testing.T) {
 	// Sanity-check the table — easy to silently typo "DEEPSEEK_API_KEY".
 	cases := map[string]string{
-		"deepseek":  "DEEPSEEK_API_KEY",
-		"anthropic": "ANTHROPIC_API_KEY",
-		"openai":    "OPENAI_API_KEY",
-		"gemini":    "GEMINI_API_KEY",
-		"glm":       "GLM_API_KEY",
-		"opencode":  "OPENCODE_API_KEY",
-		"unknown":   "",
+		"deepseek":   "DEEPSEEK_API_KEY",
+		"anthropic":  "ANTHROPIC_API_KEY",
+		"openai":     "OPENAI_API_KEY",
+		"gemini":     "GEMINI_API_KEY",
+		"glm":        "GLM_API_KEY",
+		"opencode":   "OPENCODE_API_KEY",
+		"opendesign": "OPENDESIGN_API_KEY",
+		"unknown":    "",
 	}
 	for provider, want := range cases {
 		if got := envVarFor(provider); got != want {
@@ -183,8 +184,8 @@ func TestPromptProvider_MenuRendersAllOptions(t *testing.T) {
 			t.Errorf("menu missing row %d (%s); got menu:\n%s", i+1, p.id, out)
 		}
 	}
-	if n := len(providerOptions); n != 6 {
-		t.Errorf("providerOptions has %d entries, want 6 (wizard menu row count)", n)
+	if n := len(providerOptions); n != 7 {
+		t.Errorf("providerOptions has %d entries, want 7 (wizard menu row count)", n)
 	}
 }
 

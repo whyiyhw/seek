@@ -621,6 +621,132 @@ func TestACPMenu_OpenCodeCatalogue(t *testing.T) {
 	}
 }
 
+// TestOpenDesignEndpoint_Precedence mirrors the OpenCode guard for the
+// second subscription lane: OPENDESIGN_BASE_URL / providers.opendesign
+// .base_url > --base-url > compiled default. Same shape was missed once
+// on opencode (children hardcoded the endpoint), so the new lane gets the
+// test at the same time it gets the resolver.
+func TestOpenDesignEndpoint_Precedence(t *testing.T) {
+	t.Setenv("OPENDESIGN_BASE_URL", "")
+	const (
+		wantDefault = "https://amr-link.open-design.ai/v1/chat/completions"
+		flagURL     = "http://localhost:9/from-flag"
+		cfgURL      = "http://localhost:9/from-config"
+	)
+	if got := opendesignEndpoint(config.Config{}, ""); got != wantDefault {
+		t.Errorf("default layer = %q, want %q", got, wantDefault)
+	}
+	if got := opendesignEndpoint(config.Config{}, flagURL); got != flagURL {
+		t.Errorf("flag layer = %q, want %q", got, flagURL)
+	}
+	cfg := config.Config{Providers: map[string]config.ProviderConfig{
+		"opendesign": {APIKey: "sk-amr-k", BaseURL: cfgURL},
+	}}
+	if got := opendesignEndpoint(cfg, flagURL); got != cfgURL {
+		t.Errorf("config layer must beat the flag, got %q", got)
+	}
+	t.Setenv("OPENDESIGN_BASE_URL", "https://from-env.example/v1/chat/completions")
+	if got := opendesignEndpoint(cfg, flagURL); got != "https://from-env.example/v1/chat/completions" {
+		t.Errorf("OPENDESIGN_BASE_URL must beat the config file, got %q", got)
+	}
+}
+
+// TestBuildProvider_OpenDesign pins the lane's construction: label,
+// default model, and the "no key" error naming the env var + where to
+// mint one. A lane that builds but sends the wrong default model is the
+// failure class this catches.
+func TestBuildProvider_OpenDesign(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	for _, env := range []string{
+		"DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+		"GEMINI_API_KEY", "GLM_API_KEY", "OPENCODE_API_KEY",
+	} {
+		t.Setenv(env, "")
+	}
+	t.Setenv("OPENDESIGN_API_KEY", "")
+
+	if _, _, _, _, err := buildProvider("opendesign", "", ""); err == nil ||
+		!strings.Contains(err.Error(), "OPENDESIGN_API_KEY") {
+		t.Fatalf("no-key build = %v, want an error naming OPENDESIGN_API_KEY", err)
+	}
+
+	t.Setenv("OPENDESIGN_API_KEY", "sk-amr-k")
+	provider, dsClient, label, modelDefault, err := buildProvider("opendesign", "", "")
+	if err != nil {
+		t.Fatalf("buildProvider with key: %v", err)
+	}
+	if dsClient != nil || provider == nil {
+		t.Errorf("provider=%v ds=%v, want a compatible client and no deepseek client", provider, dsClient)
+	}
+	if label != "OpenDesign" {
+		t.Errorf("label = %q, want \"OpenDesign\"", label)
+	}
+	if modelDefault != pricing.ModelOpenDesignV41Flash {
+		t.Errorf("modelDefault = %q, want %q", modelDefault, pricing.ModelOpenDesignV41Flash)
+	}
+	if provider.Name() != "OpenDesign" {
+		t.Errorf("provider.Name() = %q, want \"OpenDesign\"", provider.Name())
+	}
+}
+
+// TestACPMenu_OpenDesignCatalogue is the OpenDesign half of the Go-lane
+// dropdown guard: every row of pricing.OpenDesignModels must appear with
+// the "opendesign:" value prefix and an "(OpenDesign)" label. The label
+// matters — the ids are largely the SAME strings the Go lane offers, so a
+// shared suffix would make two dropdown rows indistinguishable.
+func TestACPMenu_OpenDesignCatalogue(t *testing.T) {
+	for _, env := range []string{
+		"DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+		"GEMINI_API_KEY", "GLM_API_KEY", "OPENCODE_API_KEY",
+	} {
+		t.Setenv(env, "")
+	}
+	t.Setenv("OPENDESIGN_API_KEY", "sk-amr-k")
+	t.Setenv("SEEK_HOME", t.TempDir())
+
+	menu := acpModelMenu(pricing.ModelOpenDesignV41Flash, nil)
+	if len(menu) != 1 {
+		t.Fatalf("menu = %+v, want exactly the model select", menu)
+	}
+	opts := menu[0].Options
+	if len(opts) != len(pricing.OpenDesignModels) {
+		t.Fatalf("dropdown rows = %d, catalogue = %d", len(opts), len(pricing.OpenDesignModels))
+	}
+	for i, m := range pricing.OpenDesignModels {
+		wantValue := "opendesign:" + m.ID
+		if opts[i].Value != wantValue {
+			t.Errorf("row %d value = %q, want %q", i, opts[i].Value, wantValue)
+		}
+		if wantName := m.ID + " (OpenDesign)"; opts[i].Name != wantName {
+			t.Errorf("row %d name = %q, want %q", i, opts[i].Name, wantName)
+		}
+	}
+	if want := "opendesign:" + pricing.ModelOpenDesignV41Flash; menu[0].CurrentValue != want {
+		t.Errorf("currentValue = %q, want %q", menu[0].CurrentValue, want)
+	}
+
+	// Both subscription lanes credentialed: shared ids must appear twice,
+	// once per lane, distinguishable by value prefix AND by label.
+	t.Setenv("OPENCODE_API_KEY", "k")
+	both := acpModelMenu(pricing.ModelOpenDesignV41Flash, nil)
+	if len(both) != 1 {
+		t.Fatalf("both-lanes menu = %+v, want exactly the model select", both)
+	}
+	seen := map[string]string{}
+	for _, o := range both[0].Options {
+		seen[o.Value] = o.Name
+	}
+	if _, ok := seen["opendesign:"+pricing.ModelOpenDesignV41Flash]; !ok {
+		t.Error("opendesign row missing when both lanes are credentialed")
+	}
+	if _, ok := seen["opencode:"+pricing.ModelOpenCodeV41Flash]; !ok {
+		t.Error("opencode row missing when both lanes are credentialed")
+	}
+	if seen["opendesign:"+pricing.ModelOpenDesignV41Flash] == seen["opencode:"+pricing.ModelOpenCodeV41Flash] {
+		t.Error("the two lanes' rows for the same wire id render the same label")
+	}
+}
+
 // TestInitOpenCatalog_OffKeepsBaseline pins the failure posture: with the
 // switch off (or no cache, no key) the compiled rows are what the menus
 // see, and nothing reaches the network.

@@ -430,6 +430,8 @@ func envVarFor(providerName string) string {
 		return "GLM_API_KEY"
 	case "opencode":
 		return "OPENCODE_API_KEY"
+	case "opendesign":
+		return "OPENDESIGN_API_KEY"
 	}
 	return ""
 }
@@ -527,13 +529,17 @@ func KeyFor(cfg Config, providerName string) string {
 // provider's endpoint override, mirroring envVarFor for keys. glm needs
 // one for the Coding Plan / pay-as-you-go split (docs/guide-config.md
 // §3); opencode has one so a proxy/mirror can front the Go gateway
-// without editing config.json.
+// without editing config.json; opendesign has one for the same reason
+// (the Cloud API is a single pinned host, but a corporate proxy or a
+// regional relay is a legitimate front).
 func baseURLEnvFor(providerName string) string {
 	switch providerName {
 	case "glm":
 		return "GLM_BASE_URL"
 	case "opencode":
 		return "OPENCODE_BASE_URL"
+	case "opendesign":
+		return "OPENDESIGN_BASE_URL"
 	}
 	return ""
 }

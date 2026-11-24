@@ -442,6 +442,17 @@ func knownModelsForProvider(providerName string) []modelChoice {
 			models = append(models, modelChoice{m.ID, m.Label})
 		}
 		return models
+	case "opendesign":
+		// Same one-slice-N-surfaces rule as the Go lane: the compiled
+		// baseline IS the whole menu here — the OpenDesign gateway has no
+		// live-catalogue refresh wired (its /v1/models needs the key and
+		// the list churns far more slowly than the Go pool's), so this
+		// branch and ACP's dropdown both render pricing.OpenDesignModels.
+		models := make([]modelChoice, 0, len(pricing.OpenDesignModels))
+		for _, m := range pricing.OpenDesignModels {
+			models = append(models, modelChoice{m.ID, m.Label})
+		}
+		return models
 	default:
 		return nil
 	}

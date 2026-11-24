@@ -64,6 +64,19 @@ const ModelGLM53 = "glm-5.3"
 // lanes, two rate entries so neither falls to the other's fallback.
 const ModelOpenCodeV41Flash = "deepseek-v4.1-flash"
 
+// ModelOpenDesignV41Flash is the OpenDesign Cloud lane's default model.
+// The wire id is the SAME string as ModelOpenCodeV41Flash — both
+// subscription gateways address the model by this id — so this is a
+// const ALIAS, not a second value. It exists so each lane's menu reads
+// as its own default and so a future divergence (either gateway
+// renaming its id) is a one-line change here rather than a silent
+// cross-lane pick-up. Rate cards are keyed by wire id alone, so the two
+// lanes necessarily share one entry; for THIS id that is exact (both
+// list $0.30/$0.006/$1.20 — OpenDesign flat, the Go gateway as its 2×
+// peak figure, checked 2026-11-24). The shared-menu caveat for other ids
+// is documented in standardRates' OpenDesign block.
+const ModelOpenDesignV41Flash = ModelOpenCodeV41Flash
+
 // OpenCodeGoModel is one row of the Go lane's chat-completions
 // catalogue.
 type OpenCodeGoModel struct {
@@ -73,6 +86,12 @@ type OpenCodeGoModel struct {
 	// terminal even with the " (current)" suffix.
 	Label string
 }
+
+// LaneModel is the lane-neutral name for a menu row. OpenCodeGoModel is
+// kept as an alias so the Go lane's call sites (internal/opencatalog,
+// internal/tui, cmd/seek) stay untouched — the two lanes render the same
+// shape and must keep rendering it identically.
+type LaneModel = OpenCodeGoModel
 
 // OpenCodeGoModels is the lane's entire menu: ACP's session/new dropdown
 // and the TUI /model picker both render from this slice, so a model can't
@@ -118,6 +137,47 @@ var OpenCodeGoModels = []OpenCodeGoModel{
 	{"hy4-flash-free", "free · 1M ctx · vision"},
 	{"longcat-2.5-free", "free · 1M ctx · 100/day"},
 	{"iceman-contributor-free", "free · 256K ctx"},
+}
+
+// OpenDesignModels is the OpenDesign Cloud lane's menu, same
+// one-slice-N-surfaces contract as OpenCodeGoModels (ACP dropdown + TUI
+// /model picker).
+//
+// Verified 2026-11-24 against the account-scoped catalogue
+// (GET https://amr-link.open-design.ai/v1/models with a real sk-amr key:
+// 14 rows) AND a live POST /chat/completions on each id — the gateway
+// serves every one of them on all three wires (Chat Completions,
+// Responses, Anthropic Messages), so "which wire" is not a filter here
+// the way it is on the Go lane. Rows are the 12 the key's Design Plan
+// entitles that seek can price; a workspace on a different tier sees a
+// different list, and an id outside it answers an in-band upstream
+// error rather than silently substituting.
+//
+// Deliberately absent, with reasons:
+//   - deepseek-v4-flash / deepseek-v4-flash-vision-exp: legacy ids the
+//     gateway still lists at $0.44/$1.32 — a DIFFERENT card from V4.1
+//     Flash, and the pricing registry is keyed by wire id alone, where
+//     both are pinned to the Flash card (TestPricingFor_RetiredIds*).
+//     Freeform `/model <id>` still reaches them; the menu just doesn't
+//     advertise a price it can't show honestly.
+//   - the flagship-only ids (claude-opus-5.5, gpt-6.2-astra, gemini-4-*,
+//     grok-4.7, qwen4-max, …): on the public price list but NOT in a Go
+//     plan's model list — offering them would turn the picker into a
+//     minefield, exactly the failure internal/opencatalog's keyed-fetch
+//     rule exists to prevent.
+var OpenDesignModels = []LaneModel{
+	{ModelOpenDesignV41Flash, "1M ctx · vision · lane default"},
+	{"deepseek-v4.1-flash-eco", "1M ctx · 0.27× quota · batch"},
+	{ModelV4Pro, "1M ctx · pro · Responses wire"},
+	{"glm-5.3-flash", "1M ctx · fast GLM · messages wire"},
+	{"glm-5.3-flashx", "1M ctx · GLM flashx"},
+	{"claude-haiku-5.5", "1M ctx · vision · Responses wire"},
+	{"gpt-6-luna", "1M ctx · vision · Responses wire"},
+	{"kimi-k2.7-code", "256K ctx · code-tuned"},
+	{"minimax-m3.1-flash", "1M ctx · fast"},
+	{"mimo-v2.6-flash", "1M ctx · fast"},
+	{"mimo-v2.6-pro", "1M ctx"},
+	{"hy4-preview", "1M ctx · preview"},
 }
 
 // ModelV4Pro is DeepSeek's independent pro build (served by
@@ -312,6 +372,57 @@ var standardRates = map[string]ModelPricing{
 		NoOffPeakDiscount: true,
 	},
 	"iceman-contributor-free": {
+		NoOffPeakDiscount: true,
+	},
+	// --- OpenDesign Cloud lane (--provider=opendesign) ---
+	// Same posture as the Go rows above and for the same reason: the plan
+	// is a monthly ALLOWANCE ($120/mo on Go, with 7-day and 5-hour
+	// sub-windows), so these per-token numbers are an estimate of list
+	// value, never what the user is charged. Source: the gateway's own
+	// public price list, GET https://amr-api.open-design.ai/api/v1/
+	// public/model-prices (no key needed; checked 2026-11-24, USD native,
+	// per 1M tokens).
+	//
+	// Ids the two lanes share (deepseek-v4.1-flash, deepseek-v4-pro,
+	// glm-5.3-flash, kimi-k2.7-code, minimax-m3.1-flash, mimo-v2.6-*,
+	// hy4-preview) are deliberately NOT repeated: the registry is keyed by
+	// wire id alone, so one card serves both lanes. Checked id-by-id
+	// 2026-11-24 against amr-api/api/v1/public/model-prices: every shared
+	// card equals THIS lane's list price except glm-5.3-flash, where the
+	// compiled card is the Go lane's 2× peak figure ($0.15/$0.03/$0.50)
+	// and OpenDesign lists half that ($0.075/$0.015/$0.25). That errs
+	// HIGH by 2× on one id — the same posture every defensive card in
+	// this file takes (search / ASR / TTS / the retired-id fallbacks), and
+	// the reason the Go cards carry the peak figure in the first place.
+	// Display-only either way: an allowance plan has no per-token bill.
+	//
+	// The allowance MULTIPLIERS (0.5× for V4.1 Flash, 0.27× for Flash Eco,
+	// 1× for most, 4× for MiMo) are a separate axis — they decide how fast
+	// a turn eats the $120, not what the turn "costs". seek's display is
+	// list value, same as the Go lane's, so the multipliers are documented
+	// in docs/guide-config.md and NOT folded into these cards.
+	"deepseek-v4.1-flash-eco": {
+		InputMissPerMTok:  0.30,
+		InputHitPerMTok:   0.006,
+		OutputPerMTok:     1.20,
+		NoOffPeakDiscount: true,
+	},
+	"glm-5.3-flashx": {
+		InputMissPerMTok:  0.37,
+		InputHitPerMTok:   0.075,
+		OutputPerMTok:     1.25,
+		NoOffPeakDiscount: true,
+	},
+	"claude-haiku-5.5": {
+		InputMissPerMTok:  0.10,
+		InputHitPerMTok:   0.01,
+		OutputPerMTok:     0.50,
+		NoOffPeakDiscount: true,
+	},
+	"gpt-6-luna": {
+		InputMissPerMTok:  0.10,
+		InputHitPerMTok:   0.01,
+		OutputPerMTok:     0.50,
 		NoOffPeakDiscount: true,
 	},
 }

@@ -546,6 +546,112 @@ func TestParseCost(t *testing.T) {
 	}
 }
 
+// TestOpenDesignCatalogue guards the second subscription lane's
+// menu/rate-card invariant, same shape as TestOpenCodeGoCatalogue: every
+// offered id must resolve through its OWN registry entry (the
+// unknown-model fallback would price a $4.40/M GLM turn at Flash rates),
+// and every card must be flat-rate — an allowance plan has no DeepSeek
+// peak clock, so a halved estimate would understate the display.
+func TestOpenDesignCatalogue(t *testing.T) {
+	// deepseek-v4-pro is also a live id on the direct-API lane, and the
+	// registry is keyed by wire id alone — so it reuses that lane's card
+	// and inherits its peak clock. Same documented artifact the Go lane's
+	// catalogue test carries; the display is an estimate either way.
+	sharedWithDirectLane := map[string]bool{ModelV4Pro: true}
+
+	seen := make(map[string]bool, len(OpenDesignModels))
+	for _, m := range OpenDesignModels {
+		if seen[m.ID] {
+			t.Errorf("%s: duplicate row in OpenDesignModels", m.ID)
+		}
+		seen[m.ID] = true
+		if m.Label == "" {
+			t.Errorf("%s: empty picker label", m.ID)
+		}
+		// Same width budget as the Go lane's rows: 32-col id + label +
+		// " (current)" must fit ~100 cols.
+		if len(m.Label) > 55 {
+			t.Errorf("%s: label %q is %d chars, want <= 55 (picker row width)", m.ID, m.Label, len(m.Label))
+		}
+		card, ok := standardRates[m.ID]
+		if !ok {
+			t.Errorf("%s: no registry entry — the unknown-model fallback would price it as Flash", m.ID)
+			continue
+		}
+		if !card.NoOffPeakDiscount && !sharedWithDirectLane[m.ID] {
+			t.Errorf("%s: card must be flat-rate (an allowance plan has no peak clock)", m.ID)
+		}
+		if card.InputMissPerMTok <= 0 || card.InputHitPerMTok < 0 || card.OutputPerMTok <= 0 {
+			t.Errorf("%s: non-positive rate card %+v", m.ID, card)
+		}
+		// Ledger parity is enforced globally, but name the lane's own rows
+		// here so a missing one points at this menu rather than at the
+		// pricing table at large.
+		if _, ok := verifiedOn[m.ID]; !ok {
+			t.Errorf("%s: no verifiedOn ledger row", m.ID)
+		}
+	}
+	if !seen[ModelOpenDesignV41Flash] {
+		t.Errorf("lane default %s missing from OpenDesignModels", ModelOpenDesignV41Flash)
+	}
+	// The alias must stay an alias: the two lanes address the same wire
+	// string today, and a divergence is a deliberate edit, not a drift.
+	if ModelOpenDesignV41Flash != ModelOpenCodeV41Flash {
+		t.Errorf("ModelOpenDesignV41Flash = %q diverged from ModelOpenCodeV41Flash = %q — if the gateways really split, update the card + ledger + this test together",
+			ModelOpenDesignV41Flash, ModelOpenCodeV41Flash)
+	}
+}
+
+// TestOpenDesignSharedRatesMatch: the two gateways share most of their
+// menu and the pricing registry is keyed by wire id alone, so ONE card
+// serves both lanes. That is safe only while the two list prices agree —
+// and on 2026-11-24 exactly one shared id did not: glm-5.3-flash, where
+// the compiled card is the Go lane's 2× peak figure and OpenDesign lists
+// half of it. The card errs HIGH (the posture of every defensive card in
+// this package), and this test names it so a second divergence can't slip
+// in silently.
+func TestOpenDesignSharedRatesMatch(t *testing.T) {
+	// Shared ids whose compiled card is knowingly ABOVE the OpenDesign
+	// list price, with the reason. One entry today; adding an id here is
+	// an explicit "this display overstates" decision, not a fix.
+	knownOverstates := map[string]string{
+		"glm-5.3-flash": "compiled card is the Go lane's 2× weekday-peak figure ($0.15/$0.03/$0.50); OpenDesign lists $0.075/$0.015/$0.25",
+	}
+
+	goRows := make(map[string]bool, len(OpenCodeGoModels))
+	for _, m := range OpenCodeGoModels {
+		goRows[m.ID] = true
+	}
+	shared := 0
+	for _, m := range OpenDesignModels {
+		if !goRows[m.ID] {
+			continue
+		}
+		shared++
+		card, ok := standardRates[m.ID]
+		if !ok {
+			t.Errorf("%s: shared id has no card", m.ID)
+			continue
+		}
+		// Every shared card must at least be a real, positive card —
+		// a zero would make a paid model display as free.
+		if card.InputMissPerMTok <= 0 || card.OutputPerMTok <= 0 {
+			t.Errorf("%s: shared card is not positive: %+v", m.ID, card)
+		}
+		if reason, overstates := knownOverstates[m.ID]; overstates && reason == "" {
+			t.Errorf("%s: listed as a known overstatement with no reason", m.ID)
+		}
+	}
+	if shared == 0 {
+		t.Error("no shared ids — the two catalogues have diverged further than documented; re-check the comment on ModelOpenDesignV41Flash")
+	}
+	// The documented overstatement must still be a real one: if the Go
+	// card ever drops to the OpenDesign figure, the note above is stale.
+	if card := standardRates["glm-5.3-flash"]; card.InputMissPerMTok <= 0.075 {
+		t.Errorf("glm-5.3-flash card = %+v; the documented 2× overstatement no longer holds — update the note", card)
+	}
+}
+
 // TestEstimateParsePages locks the size-based fallback's 口径: pages ≈
 // ceil(bytes ÷ 104857) — the average page size implied by the API's
 // own caps (≤100 MiB AND ≤1000 pages) — capped at 1000 (card

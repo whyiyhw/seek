@@ -108,6 +108,16 @@ func runSetupWizard(ctx context.Context, in io.Reader, out io.Writer) (provider 
 		fmt.Fprintf(out, "       GLM_BASE_URL=%s seek\n", glmCodingPlanBaseURL)
 		fmt.Fprintln(out, "  or add \"base_url\" under providers.glm in ~/.seek/config.json.")
 	}
+	if provider == "opendesign" {
+		// The one fact a new user can't discover from the key alone: this
+		// key bills a shared allowance, not a wallet. Say it here, and
+		// name the default model so the first turn isn't a guess.
+		fmt.Fprintln(out, "")
+		fmt.Fprintln(out, "  OpenDesign Cloud keys draw on the SAME monthly allowance as the desktop app")
+		fmt.Fprintln(out, "  (Go: $120/mo, capped at $30/7d and $10/5h). Default model is")
+		fmt.Fprintln(out, "  deepseek-v4.1-flash, which spends 0.5× its list price in allowance;")
+		fmt.Fprintln(out, "  switch with /model (deepseek-v4.1-flash-eco is 0.27×, for batch work).")
+	}
 	fmt.Fprintln(out, "")
 	return provider, nil
 }
@@ -131,6 +141,12 @@ var providerOptions = []providerOption{
 	// than a literal prefix — Zhipu keys have no fixed leading chars.
 	{"opencode", "OpenCode Go (subscription — open-weight models)", "", "https://console.opencode.ai"},
 	{"glm", "Zhipu GLM", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.", "https://open.bigmodel.cn/usercenter/apikeys"},
+	// keyHint is a real prefix here: every Cloud key is minted as
+	// `sk-amr-` + 32 base62 chars + `-` (checked 2026-11-24). Say so —
+	// it is the one lane where a pasted key's shape is a usable check,
+	// and it also helps the user notice they grabbed a `vela_ctrl_…`
+	// control-plane key by mistake.
+	{"opendesign", "OpenDesign Cloud (subscription — $120/mo allowance)", "sk-amr-", "https://open-design.ai/cloud/api-keys"},
 }
 
 func promptProvider(out io.Writer, scanner *bufio.Scanner) (string, error) {
@@ -226,6 +242,8 @@ func envVarFor(provider string) string {
 		return "GLM_API_KEY"
 	case "opencode":
 		return "OPENCODE_API_KEY"
+	case "opendesign":
+		return "OPENDESIGN_API_KEY"
 	}
 	return ""
 }
