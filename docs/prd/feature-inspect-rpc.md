@@ -219,6 +219,8 @@ seek-panel-v0.6.x/
 
 **背压**：每客户端缓冲 channel 256 条；满则**丢老的**（前端 UI 显示 "stream lagged, refresh to resync" 提示），不阻塞 observer 主路径——这与 v3 §2.5 "失败降级而非阻断"一致。
 
+**交付注记（2026-11-24，c_n72agp 核对；交付 2026-11-20 W5 c_xz2bey）**——本节是设计时形状，实际 ship 的 hooks 流按下面三点对：①路由不是 `/sse?topics=a,b` 而是 `GET /events?topic=hooks`——`seek serve` 的单一常开 SSE 口，topic 是**每连接一个**的查询维（与 `?topic=subagents` 同 hub、同 `follows`/`pushFollow` 机制），多 topic 一次订阅不在本版。选这个维度而非把审计行挂进主连接的命名事件族（`delta`/`tool`/`usage`/`approval`）：审计流是可选的、可关闭的、可整窗重拉的，独立连接让「关面板=断流=最后一个订阅者释放 follow」不需要任何额外协议；②帧=`event: hooks` + `data: <审计行 JSON>`，**无** `{"jsonrpc":…,"method":"hooks/event"}` 通知信封——审计行本身即 v3 §3.6 的对外 wire 格式（第三方工具 tail 同一文件），与 `hooks/audit/tail` 返回行字节同形，页面一条合并路径；③`?topic=hooks` **无需 `/bind`**：审计日志是机器全局的，subagents topic 的绑定是「选哪个索引文件」的手段，此处没有对应物；坏 topic / 未绑定 conv 都在 SSE 头之前答 400，不开半死的 event-stream。`hooks/audit/tail` 的 `follow:true` 仍答 -32602，错误文案指路本 topic——§6 #6/#7 由此收口。
+
 ### 4.3 启动方式
 
 用户视角的最简流程：
@@ -266,6 +268,8 @@ M12.1 等 v5 M11.0 ship 后启动——`internal/subagent` 暴露 `List(filter) 
 ### 5.3 与 v3 hooks 的集成
 
 `hooks.Registry` 早就有 Observer 接口（v3 柱 B 已交付）；M12.0 在其上挂一个 `RpcObserver`，把事件 fan-out 到 SSE 客户端。observer 注册路径与现有 audit log observer 同栈，互不影响。
+
+**交付注记（2026-11-24，c_n72agp 核对）**——实际推送源**不是** `hooks.Registry` observer：`seek serve` 与执行 hook 的 seek 是两个进程，observer 只活在后者的内存里；web 面只能 tail 落盘产物——`internal/hooksconfig/follow.go`（`AuditFollower`，锚点=订阅时刻的文件末尾）stat/read 全局审计 JSONL，`internal/controlplane/webfrontend_hookstopic.go` 把新增行逐行 verbatim 推给 `?topic=hooks` 的订阅者。「互不影响」仍成立：跟读不注册 observer、不执行 hook、不跑 trust gate。
 
 ### 5.4 与 v3 checkpoint 的集成
 
