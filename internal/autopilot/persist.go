@@ -116,10 +116,14 @@ func (r Report) Line(model string, ts time.Time) ReportLine {
 		ln.Files += o.Files
 		ln.Insertions += o.Insertions
 		ln.Deletions += o.Deletions
-		if o.Verdict != nil && o.Verdict.JudgeError != "" {
-			if len(ln.JudgeErrors) >= capJudgeErrs {
-				break
-			}
+		if o.Verdict != nil && o.Verdict.JudgeError != "" && len(ln.JudgeErrors) < capJudgeErrs {
+			// `continue`-shaped by construction: the cap bounds HOW MANY
+			// judge errors ride on one row, never how much git Δ gets
+			// folded. An early `break` here would silently truncate
+			// files/insertions/deletions for every outcome past the 9th
+			// judge error (unreachable at the default MaxTasks=8, but
+			// MaxTasks is caller-configurable — see
+			// TestLine_JudgeErrCapDoesNotStopDeltaFold).
 			ln.JudgeErrors = append(ln.JudgeErrors, capRunes(o.Verdict.JudgeError, capJudgeErrRunes))
 		}
 	}

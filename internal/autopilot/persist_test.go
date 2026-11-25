@@ -260,3 +260,29 @@ func TestLine_CapsBoundRowSize(t *testing.T) {
 		t.Fatalf("judge errors must cap at %d, got %d", capJudgeErrs, len(row.JudgeErrors))
 	}
 }
+
+// TestLine_JudgeErrCapDoesNotStopDeltaFold pins a real bug the first
+// review pass found: JudgeError cap and git-Δ fold share one loop, so
+// an early `break` at the cap also stopped folding files/insertions/
+// deletions for every remaining outcome — the row then under-reports
+// its own footprint while `tasks` stays truthful. Unreachable at the
+// default Caps.MaxTasks=8 (the 9th judge error is out of range), so
+// the cap and the fold must be exercised independently.
+func TestLine_JudgeErrCapDoesNotStopDeltaFold(t *testing.T) {
+	const n = capJudgeErrs + 2 // every outcome has a judge error AND Δ
+	rep := Report{Goal: "g"}
+	for i := 0; i < n; i++ {
+		rep.Outcomes = append(rep.Outcomes, Outcome{
+			Status: "done", Files: 1, Insertions: 2, Deletions: 1,
+			Verdict: &verifier.Verdict{Overall: verifier.Doubt, JudgeError: fmt.Sprintf("judge err %d", i)},
+		})
+	}
+	ln := rep.Line("m", time.Now())
+	if len(ln.JudgeErrors) != capJudgeErrs {
+		t.Errorf("judge errors must cap at %d, got %d", capJudgeErrs, len(ln.JudgeErrors))
+	}
+	if ln.Files != n || ln.Insertions != 2*n || ln.Deletions != n {
+		t.Fatalf("git Δ must fold over ALL %d outcomes (cap bounds judge errors, not the fold): got files=%d insertions=%d deletions=%d",
+			n, ln.Files, ln.Insertions, ln.Deletions)
+	}
+}
