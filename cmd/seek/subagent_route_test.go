@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -138,9 +139,9 @@ func TestBuildSubagentRunner_MixedFleetCostRollup(t *testing.T) {
 			SessionDir:   t.TempDir(),
 			Tracker:      child,
 			Policy:       policy,
-			ToolNames: []string{"read"},
-			Provider:  provider,
-			Model:     map[string]string{"": "", "glm": pricing.ModelGLM53}[provider],
+			ToolNames:    []string{"read"},
+			Provider:     provider,
+			Model:        map[string]string{"": "", "glm": pricing.ModelGLM53}[provider],
 		})
 		if err != nil {
 			t.Fatalf("runner(provider=%q): %v", provider, err)
@@ -227,5 +228,102 @@ func TestBuildSubagentRunner_RouteWithoutKeyFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "glm") {
 		t.Errorf("error %q missing lane name", err)
+	}
+}
+
+// openDesignSSE is the OpenDesign gateway's single-turn reply shape — the
+// same OpenAI Chat Completions SSE the compatible adapter speaks, tagged
+// with text a test can assert on.
+const openDesignSSE = "data: {\"choices\":[{\"delta\":{\"content\":\"OpenDesign says hi.\"},\"finish_reason\":null}]}\n\n" +
+	"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":7000,\"completion_tokens\":150}}\n\n" +
+	"data: [DONE]\n\n"
+
+// TestBuildSubagentRoutes_OpenDesign is c_dxrjjl's acceptance ②, routing
+// half: the OpenDesign lane must appear in the subagent table (so an
+// explicit provider="opendesign" spawn is routable at all — before this
+// card it died as `unknown provider`), and its endpoint must resolve
+// through the same providers.opendesign.base_url override the startup lane
+// honours (a proxied parent must not leave its children on the pinned host).
+func TestBuildSubagentRoutes_OpenDesign(t *testing.T) {
+	t.Setenv("OPENDESIGN_API_KEY", "sk-amr-k")
+	t.Setenv("OPENDESIGN_BASE_URL", "")
+	home := t.TempDir()
+	t.Setenv("SEEK_HOME", home)
+
+	gateway := newFakeLane(t, openDesignSSE)
+	cfgJSON := `{"providers": {"opendesign": {"api_key": "sk-amr-k", "base_url": "` + gateway.srv.URL + `"}}}`
+	if err := os.WriteFile(home+"/config.json", []byte(cfgJSON), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	route, ok := buildSubagentRoutes(nil, "")[subagent.ProviderOpenDesign]
+	if !ok || route.provider == nil {
+		t.Fatalf("opendesign route missing from subagent table: %+v", route)
+	}
+	if route.client != nil {
+		t.Error("the opendesign route must ride the llm.Provider path, not a deepseek client")
+	}
+	if got := route.provider.Name(); got != "OpenDesign" {
+		t.Errorf("route provider name = %q, want OpenDesign", got)
+	}
+
+	// Absent key ⇒ absent route (explicit names only, no key probing):
+	// "named provider without key" is a structured spawn error, never a
+	// silent fallback to the parent's lane.
+	t.Setenv("OPENDESIGN_API_KEY", "")
+	t.Setenv("SEEK_HOME", t.TempDir())
+	if _, ok := buildSubagentRoutes(nil, "")[subagent.ProviderOpenDesign]; ok {
+		t.Error("opendesign route present without a key — key probing crept back in")
+	}
+}
+
+// TestBuildSubagentRunner_OpenDesignSpawn is acceptance ②'s runner half:
+// a spawn routed to provider=opendesign reaches the (fake) gateway with
+// the eco model id and returns its reply — the exact path butler's
+// verification children wanted. Zero real keys, zero network.
+func TestBuildSubagentRunner_OpenDesignSpawn(t *testing.T) {
+	const eco = "deepseek-v4.1-flash-eco"
+	gateway := newFakeLane(t, openDesignSSE)
+
+	parentReg := tools.New()
+	parentReg.Add(stubParentTool{name: "grep"})
+
+	runner := buildSubagentRunner(subagentRunnerOpts{
+		// Parent on the first-class DeepSeek lane: the routed child must
+		// NOT inherit it.
+		client:    deepseek.New(deepseek.WithAPIKey("test"), deepseek.WithBaseURL("http://unused.invalid")),
+		parentReg: parentReg,
+		hooksFn:   func() *hooks.Registry { return hooks.NewRegistry() },
+		getModel:  func() string { return deepseek.ModelV41Flash },
+		getEffort: func() string { return "" },
+		routes: map[string]subagentRoute{
+			subagent.ProviderOpenDesign: {provider: compatible.New("sk-amr-test", gateway.srv.URL, "OpenDesign")},
+		},
+	})
+
+	policy, err := permission.New(t.TempDir(), permission.PrefYolo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runner(context.Background(), subagent.RunnerJob{
+		SubSid:       "20261125-120000-od",
+		SystemPrompt: "you are a subagent",
+		UserPrompt:   "say hi",
+		SessionDir:   t.TempDir(),
+		Tracker:      cache.New(),
+		Policy:       policy,
+		ToolNames:    []string{"read"},
+		Provider:     subagent.ProviderOpenDesign,
+		Model:        eco,
+	})
+	if err != nil {
+		t.Fatalf("runner(provider=opendesign): %v", err)
+	}
+	if res.Summary != "OpenDesign says hi." {
+		t.Errorf("summary = %q, want the gateway's reply (the parent's DeepSeek lane must not answer)", res.Summary)
+	}
+	models, _ := gateway.requests()
+	if len(models) != 1 || len(models[0]) != 1 || models[0][0] != eco {
+		t.Errorf("gateway saw models %v, want [[%s]]", models, eco)
 	}
 }

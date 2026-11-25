@@ -141,6 +141,17 @@ func buildSubagentRoutes(parentClient *deepseek.Client, baseURLFlag string) map[
 		// to it, which is the lane's main cost argument.
 		routes[subagent.ProviderOpenCode] = subagentRoute{provider: p}
 	}
+	// OpenDesign Cloud lane (c_dxrjjl). Same one-line shape as GLM /
+	// OpenCode and the same endpoint resolver the startup lane uses —
+	// newOpenDesignProvider owns the OPENDESIGN_BASE_URL > --base-url >
+	// pinned-default precedence, so a proxied parent doesn't leave its
+	// children on the pinned host. No OAuth analogue: the lane has one
+	// credential kind (sk-amr-…).
+	if k := config.KeyFor(cfg, "opendesign"); k != "" {
+		routes[subagent.ProviderOpenDesign] = subagentRoute{
+			provider: newOpenDesignProvider(cfg, k, baseURLFlag),
+		}
+	}
 	return routes
 }
 

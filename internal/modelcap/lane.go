@@ -32,6 +32,18 @@ package modelcap
 
 import "github.com/whyiyhw/seek/internal/pricing"
 
+// Lane ids for the two subscription-gateway lanes. Exported because a
+// caller that only has a model id must be able to ask "does this id carry
+// a gateway lane?" without re-spelling the strings: c_dxrjjl's ACP startup
+// gate and internal/subagent's cross-lane refusal both compare against
+// these. The ids are the config provider names (--provider values).
+const (
+	// LaneOpenCode is the OpenCode Go subscription lane.
+	LaneOpenCode = "opencode"
+	// LaneOpenDesign is the OpenDesign Cloud subscription lane.
+	LaneOpenDesign = "opendesign"
+)
+
 // laneLabels pairs each lane id (the config provider name) with the
 // human-readable label display surfaces render. Chinese labels match the
 // web page's language; ids stay ASCII for any future keyed consumer.
@@ -83,10 +95,10 @@ func LaneOf(model string) (lane, label string) {
 		return id, laneLabel(id)
 	}
 	if goPoolIDs[model] {
-		return "opencode", "OpenCode 网关"
+		return LaneOpenCode, "OpenCode 网关"
 	}
 	if openDesignIDs[model] {
-		return "opendesign", "OpenDesign 网关"
+		return LaneOpenDesign, "OpenDesign 网关"
 	}
 	for _, l := range laneLabels {
 		if len(model) > len(l.prefix) && model[:len(l.prefix)] == l.prefix {
@@ -94,6 +106,36 @@ func LaneOf(model string) (lane, label string) {
 		}
 	}
 	return "", ""
+}
+
+// Serves reports whether the lane's own MENU carries model — the
+// routing companion to LaneOf. The two questions are different, and the
+// difference is load-bearing for c_dxrjjl:
+//
+//   - LaneOf answers "which lane OWNS this wire id?" and resolves shared
+//     ids to their older claim (opencode), because a display surface only
+//     has the id;
+//   - Serves answers "can this lane actually address it?" — both
+//     subscription gateways carry deepseek-v4.1-flash / deepseek-v4-pro /
+//     kimi-k2.7-code / …, so an OpenDesign session on a shared id is
+//     perfectly valid even though LaneOf names the Go lane.
+//
+// A startup gate must use this, not LaneOf alone: refusing
+// --provider=opendesign + deepseek-v4.1-flash would reject the OpenDesign
+// lane's own default model. First-tier lanes resolve false — their menus
+// live in their provider packages, and a gateway id sent there is exactly
+// the mismatch worth refusing.
+func Serves(lane, model string) bool {
+	if lane == "" || model == "" {
+		return false
+	}
+	switch lane {
+	case LaneOpenCode:
+		return goPoolIDs[model]
+	case LaneOpenDesign:
+		return openDesignIDs[model]
+	}
+	return false
 }
 
 // laneLabel resolves a lane id to its display label ("" when unknown).

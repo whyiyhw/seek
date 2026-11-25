@@ -507,6 +507,16 @@ func run() error {
 				*model = m
 			}
 		}
+		// c_dxrjjl: model×lane consistency BEFORE anything is built. A host
+		// that passes only a model name (paseo does) leaves the lane to
+		// buildProvider's auto-detect, so an OpenDesign gateway wire id can
+		// land on the DeepSeek first-class client and 400 upstream. The
+		// gate refuses that startup instead of handing the mismatched id to
+		// a lane that cannot serve it (see acp_lane_gate.go for the full
+		// evidence and the tolerated escape hatches).
+		if err := acpStartupLaneGate(*model, *providerFlag, loadGateConfig()); err != nil {
+			return err
+		}
 	}
 
 	// First-run setup wizard. Only fires when there's truly no auth
@@ -4307,6 +4317,51 @@ func runUpgradeCheck() error {
 	return nil
 }
 
+// loadGateConfig reads ~/.seek/config.json for the gate. A parse error is
+// IGNORED here (the gate only needs key presence + default_provider; a
+// corrupted file is buildProvider/Save's problem to report moments later),
+// matching buildProvider's own `cfg, _ := config.Load()` posture.
+func loadGateConfig() config.Config {
+	cfg, _ := config.Load()
+	return cfg
+}
+
+// resolveProviderName returns the provider buildProvider would actually
+// construct for the given flag value: the explicit flag wins; otherwise
+// auto-detect runs in the documented priority order (DeepSeek key first,
+// then the second-tier lanes' keys, then cfg.DefaultProvider, then
+// "deepseek" as the last resort). Extracted so the ACP startup gate
+// (acpStartupLaneGate, c_dxrjjl) can ask "which lane will this process
+// land on?" BEFORE buildProvider builds anything — the gate must see the
+// auto-detect outcome, not just the pin, because the misrouting this
+// guards against happens exactly when a host passes a model id alone.
+//
+// cfg is passed in rather than loaded here so the two callers share one
+// config read (a malformed file degrades to env-only for both).
+func resolveProviderName(provFlag string, cfg config.Config) string {
+	if provFlag != "" {
+		return provFlag
+	}
+	switch {
+	case config.KeyFor(cfg, "deepseek") != "":
+		return "deepseek"
+	case config.KeyFor(cfg, "anthropic") != "":
+		return "anthropic"
+	case config.KeyFor(cfg, "openai") != "":
+		return "openai"
+	case config.KeyFor(cfg, "gemini") != "":
+		return "gemini"
+	case config.KeyFor(cfg, "glm") != "":
+		return "glm"
+	case config.KeyFor(cfg, "opendesign") != "":
+		return "opendesign"
+	case cfg.DefaultProvider != "":
+		return cfg.DefaultProvider
+	default:
+		return "deepseek"
+	}
+}
+
 // buildProvider selects and constructs the LLM provider based on the
 // --provider flag, env vars, and ~/.seek/config.json (in that order).
 // Returns:
@@ -4328,33 +4383,11 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 	// the place that aggressively reports config issues.)
 	cfg, _ := config.Load()
 
-	// Determine effective provider name. Order:
-	//   1. --provider flag (explicit user intent)
-	//   2. DeepSeek if its key is anywhere (env or config)
-	//   3. Second-tier whose key is set, if no DeepSeek key
-	//   4. cfg.DefaultProvider (the setup wizard writes this)
-	//   5. "deepseek" as final fallback (errors out later if no key)
-	if provFlag == "" {
-		deepseekHas := config.KeyFor(cfg, "deepseek") != ""
-		switch {
-		case deepseekHas:
-			provFlag = "deepseek"
-		case config.KeyFor(cfg, "anthropic") != "":
-			provFlag = "anthropic"
-		case config.KeyFor(cfg, "openai") != "":
-			provFlag = "openai"
-		case config.KeyFor(cfg, "gemini") != "":
-			provFlag = "gemini"
-		case config.KeyFor(cfg, "glm") != "":
-			provFlag = "glm"
-		case config.KeyFor(cfg, "opendesign") != "":
-			provFlag = "opendesign"
-		case cfg.DefaultProvider != "":
-			provFlag = cfg.DefaultProvider
-		default:
-			provFlag = "deepseek"
-		}
-	}
+	// Effective provider name. The resolution order (flag > DeepSeek key >
+	// second-tier keys > cfg.DefaultProvider > "deepseek") lives in
+	// resolveProviderName so the ACP startup gate can share it — a second
+	// copy here would let the gate and the built lane disagree.
+	provFlag = resolveProviderName(provFlag, cfg)
 
 	switch provFlag {
 	case "deepseek":

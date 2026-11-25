@@ -118,12 +118,12 @@ const schemaTmpl = `{
     },
     "provider": {
       "type": "string",
-      "enum": ["deepseek", "glm", "opencode"],
-      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); opencode = OpenCode Go subscription lane (opencode.ai/inference/go, flat request-window plan over an open-weight pool, requires OPENCODE_API_KEY; per-token cost display is indicative only); deepseek = first-class DeepSeek. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
+      "enum": ["deepseek", "glm", "opencode", "opendesign"],
+      "description": "Route this subagent to a different LLM provider lane instead of inheriting the parent session's provider. glm = Zhipu GLM (open.bigmodel.cn, requires GLM_API_KEY); opencode = OpenCode Go subscription lane (opencode.ai/inference/go, flat request-window plan over an open-weight pool, requires OPENCODE_API_KEY or a browser login); opendesign = OpenDesign Cloud subscription lane (amr-link.open-design.ai, monthly allowance; per-token cost display is indicative only, requires OPENDESIGN_API_KEY); deepseek = first-class DeepSeek. The two subscription lanes share several wire ids (deepseek-v4.1-flash, deepseek-v4-pro, kimi-k2.7-code, …) — naming provider is what selects the gateway, so pass both when the gateway matters. The named provider must have its API key configured or the spawn fails with a structured error — never silently falls back."
     },
     "model": {
       "type": "string",
-      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3; opencode: deepseek-v4.1-flash), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
+      "description": "Model id for the subagent. Default: the provider's lane default when provider is given (deepseek: deepseek-flash; glm: glm-5.3; opencode: deepseek-v4.1-flash; opendesign: deepseek-v4.1-flash), or the parent session's model when both are omitted. Provider is inferred from a bare model id. Model ids that belong to no lane fail the spawn. Costs roll up per the routed model's own pricing."
     }
   },
   "required": ["description", "prompt"],

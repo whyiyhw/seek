@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
@@ -69,10 +70,54 @@ func TestResolveRoute(t *testing.T) {
 			wantRoute: Route{Provider: ProviderOpenCode, Model: "deepseek-v4.1-flash"},
 		},
 		{
+			// c_dxrjjl: the OpenDesign lane's own default, used by menu ids
+			// whose only claim is that lane (pricing.OpenDesignModels).
+			name:      "opendesign provider only takes lane default",
+			provider:  ProviderOpenDesign,
+			model:     "",
+			wantRoute: Route{Provider: ProviderOpenDesign, Model: pricing.ModelOpenDesignV41Flash},
+		},
+		{
+			// The eco id is the card's whole reason for existing: an
+			// OpenDesign-exclusive wire id that used to die as "unknown
+			// provider" on an explicit opendesign spawn.
+			name:      "opendesign provider + eco model accepted",
+			provider:  ProviderOpenDesign,
+			model:     "deepseek-v4.1-flash-eco",
+			wantRoute: Route{Provider: ProviderOpenDesign, Model: "deepseek-v4.1-flash-eco"},
+		},
+		{
+			name:      "model only eco id infers opendesign",
+			provider:  "",
+			model:     "deepseek-v4.1-flash-eco",
+			wantRoute: Route{Provider: ProviderOpenDesign, Model: "deepseek-v4.1-flash-eco"},
+		},
+		{
+			name:      "openDesign shared id routable on that lane too",
+			provider:  ProviderOpenDesign,
+			model:     pricing.ModelOpenDesignV41Flash,
+			wantRoute: Route{Provider: ProviderOpenDesign, Model: pricing.ModelOpenDesignV41Flash},
+		},
+		{
 			name:     "unknown provider rejected",
 			provider: "anthropic",
 			model:    "",
 			wantErr:  `unknown provider "anthropic"`,
+		},
+		{
+			// Acceptance ② of c_dxrjjl (routing half): the DeepSeek lane
+			// receiving the eco id must fail HERE, structurally, naming the
+			// lane — never hand it to api.deepseek.com for a 400.
+			name:     "deepseek lane refuses the eco id and names the lane",
+			provider: ProviderDeepSeek,
+			model:    "deepseek-v4.1-flash-eco",
+			wantErr:  `does not belong to provider "deepseek"`,
+		},
+		{
+			name:     "deepseek lane refuses the eco id and points at opendesign",
+			provider: ProviderDeepSeek,
+			model:    "deepseek-v4.1-flash-eco",
+			wantErr:  `belongs to lane "opendesign"`,
 		},
 		{
 			name:     "cross-lane model rejected",
@@ -294,5 +339,52 @@ func TestSpawnBackground_RejectsInvalidRoute(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("index has %d events after rejected background spawn, want 0", len(got))
+	}
+}
+
+// TestResolveRoute_ModelOnlyAgreesWithLaneOf is the drift guard for the two
+// lane authorities (c_dxrjjl): the routing table's providerOrder inference
+// and modelcap.LaneOf must name the SAME lane for every menu id, otherwise a
+// spawn that passes only a model would land somewhere the ACP startup gate
+// (and the web lane chip) disagree with. Both derive from pricing's menus —
+// this test is what keeps it that way.
+func TestResolveRoute_ModelOnlyAgreesWithLaneOf(t *testing.T) {
+	check := func(id string) {
+		wantLane, _ := modelcap.LaneOf(id)
+		if wantLane == "" {
+			t.Fatalf("%q has no lane — the menus and LaneOf drifted", id)
+		}
+		got, err := ResolveRoute("", id)
+		if err != nil {
+			t.Errorf("ResolveRoute(model-only %q): %v (LaneOf says %q)", id, err, wantLane)
+			return
+		}
+		if got.Provider != wantLane {
+			t.Errorf("model-only inference of %q = %q, LaneOf says %q", id, got.Provider, wantLane)
+		}
+	}
+	for _, row := range pricing.OpenCodeGoModels {
+		if pricing.ModelGLM53 == row.ID || pricing.ModelV4Pro == row.ID {
+			continue // shared first-tier ids: both authorities name the first tier
+		}
+		check(row.ID)
+	}
+	check(pricing.ModelGLM53)
+	check(pricing.ModelV4Pro)
+	check(deepseek.ModelV41Flash)
+	check("deepseek-v4.1-flash-eco")
+	check(pricing.ModelOpenDesignV41Flash)
+}
+
+// TestResolveRoute_ModelOnlyStaysBounded pins the EDGE of the LaneOf-first
+// inference: an id whose lane has no route entry in this process (openai /
+// anthropic / gemini children are not routed at all) must still be refused,
+// not silently mapped onto some lane. Widening inference to "any lane the id
+// looks like" would let a typo spawn on the wrong gateway.
+func TestResolveRoute_ModelOnlyStaysBounded(t *testing.T) {
+	for _, model := range []string{"gpt-4o", "claude-opus-9", "gemini-2.0-flash", "totally-unknown"} {
+		if _, err := ResolveRoute("", model); err == nil {
+			t.Errorf("model-only %q resolved to a lane this process cannot route", model)
+		}
 	}
 }
