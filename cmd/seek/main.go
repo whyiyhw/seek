@@ -430,6 +430,24 @@ func run() error {
 		return fmt.Errorf("--yolo and --plan are mutually exclusive")
 	}
 
+	// The unattended `autopilot` lane is detected HERE, right after
+	// flag.Parse, for the same reason the ACP pins moved to the top of
+	// the shared init: its permission posture has to be resolved before
+	// initialPref (a late SetPref would leave "Mode: deny" in the system
+	// prompt while the gate was already yolo — the model then never even
+	// tries bash, exactly the SEEK_ACP_YOLO trap). Detection reads
+	// flag.Args() (the positionals after flag.Parse stopped), not
+	// os.Args[1], because `seek --yolo autopilot run "<goal>"` puts a
+	// flag ahead of the subcommand — the one shape a human can actually
+	// type to opt into yolo explicitly (c_skczdu).
+	autopilotLane, parsedAutopilotGoal, autopilotArgErr := autopilotInvocation(flag.Args(), func(name string) bool {
+		return flag.CommandLine.Lookup(name) != nil
+	})
+	if autopilotArgErr != nil {
+		return autopilotArgErr
+	}
+	autopilotGoal := parsedAutopilotGoal
+
 	// --approval-stdin belongs to the JSONL print lane only: it turns the
 	// child's stdout into an event stream carrying approval_request lines
 	// and its stdin into the decision channel (W5 c_n37tnr). Asking for it
@@ -658,12 +676,26 @@ func run() error {
 	// keeps priority: it is checked FIRST, and runACP doesn't even
 	// install the askFn on that lane, so no request can be sent.
 	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
-	initialPref := permission.PrefDeny
-	if *yolo || acpYolo {
-		initialPref = permission.PrefYolo
-	} else if (*approvalStdin && *jsonOut) || acpLane {
-		initialPref = permission.PrefAsk
-	}
+	initialPref := initialPreference(prefInputs{
+		flagYolo:      *yolo,
+		acpYolo:       acpYolo,
+		acpLane:       acpLane,
+		approvalStdin: *approvalStdin && *jsonOut,
+		autopilotLane: autopilotLane,
+	})
+	// Yolo/Ask/Deny precedence lives in initialPreference (autopilot_lane.go)
+	// so the whole decision surface — including the autopilot lane — is
+	// unit-tested without booting the CLI (c_skczdu). The autopilot lane
+	// is yolo because nobody is there to answer an ask, and a PrefDeny
+	// gate here is not "safe" — it is exactly the bug in
+	// docs/pitfalls/typed-agents-orchestration/autopilot-lane-never-
+	// elevates-preference…: every worker's bash is denied, so the fleet
+	// can edit files but never run go test, and "done" means "I didn't
+	// verify". The no-remote guard (LaneAutopilot) still blocks push/PR,
+	// so yolo here opens LOCAL edit/shell only — the same posture as
+	// goalMode. `--yolo` is ALSO accepted on this lane (it is the explicit
+	// opt-in a human can type, and `seek --yolo autopilot run …` is the
+	// shape that works); it just cannot make the lane looser.
 	initialWorkflow := permission.WorkflowNone
 	if *plan {
 		initialWorkflow = permission.WorkflowPlanAnalyze
@@ -1293,23 +1325,21 @@ func run() error {
 	// below can pass the same pointer (or nil) without scoping
 	// gymnastics. /agents handler nil-checks it.
 	// v7 柱 N: `seek autopilot run "<goal>"` — unattended orchestration.
-	// Detected here (after the full agent/subagent/worktree wiring is
-	// available) rather than as a cheap early subcommand. In this mode
-	// every subagent gets the no-remote bash guard for the whole run.
+	// autopilotLane/autopilotGoal were resolved right after flag.Parse
+	// (the pref posture has to be known before initialPref); everything
+	// below that is lane-specific lives here, after the full
+	// agent/subagent/worktree wiring is available. In this lane every
+	// subagent gets the no-remote bash guard for the whole run.
 	// The SEEK_ACP_YOLO lane shares the guard: subagents spawnable
 	// there must not push either (PRD paseo §3.3).
-	autopilotMode := len(os.Args) >= 2 && os.Args[1] == "autopilot"
-	autopilotGoal := ""
-	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
-		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
-	}
+	autopilotMode := autopilotLane
 	// Lane label for the no-remote guard mounted on every subagent bash in
 	// this run; "" = no guard. A label rather than a func so the child
 	// wiring passes the REAL lane into the refusal (c_ajza7r: under
 	// SEEK_ACP_YOLO the old wording claimed "autopilot runs unattended"
 	// while a human was present and had asked for the push). ACP first —
-	// the two modes are mutually exclusive today (argv[1]), order makes
-	// the precedence explicit rather than accidental.
+	// the two modes are mutually exclusive today, order makes the
+	// precedence explicit rather than accidental.
 	autopilotGuardLane := ""
 	if acpYolo {
 		autopilotGuardLane = autopilot.LaneACP

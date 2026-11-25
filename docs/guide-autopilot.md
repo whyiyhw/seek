@@ -76,6 +76,7 @@ Autopilot 的**默认安全姿态是保守的**：
 
 ```bash
 seek autopilot run "<goal>"           # 执行一个目标
+seek --yolo autopilot run "<goal>"    # 同上（自动等价：车道自升 yolo，见下）
 ```
 
 | 参数 | 说明 |
@@ -83,6 +84,14 @@ seek autopilot run "<goal>"           # 执行一个目标
 | `"<goal>"` | 用引号包裹的自然语言目标。越具体越好。例：`"为 README 添加安装指南的 macOS 截图"` |
 
 当前为 MVP，暂无可选 flags。未来会添加 `--model`、`--max-tasks`、`--open-pr` 等扩展。
+
+**flag 位置**：Go 的 `flag.Parse` 在第一个位置参数处停止，`autopilot` 就是位置参数 —— 所以**所有 flag 必须写在子命令之前**。车道探测读的是 `flag.Parse` 之后剩下的位置参数（不是 `argv[1]`），因此 `seek --yolo autopilot run "<goal>"` 可用。
+
+```bash
+seek autopilot run "g" --yolo     # ✗ 会报错并指出正确形状（flag 不能被折进 goal）
+```
+
+**权限姿态**：autopilot 车道**自动升到 yolo**（无人可问，且 no-remote 堡 `LaneAutopilot` 仍拒 `git push` / PR 类远程变更，只放行本地 edit/bash）。所以 worker 能跑 `go test ./...`，「done」才可能是"自己验过"的 done。历史缺陷（pref 停在 deny，worker bash 全拒）见 [`docs/pitfalls/typed-agents-orchestration/autopilot-lane-never-elevates-preference…`](pitfalls/typed-agents-orchestration/autopilot-lane-never-elevates-preference-so-every-worker-bash-is-denied-and-yolo-has-nowhere-to-go.md)。
 
 也可以在 cron 中使用：
 
