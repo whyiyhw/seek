@@ -633,3 +633,29 @@ func runSeekSaveE2E(t *testing.T, backendURL, workDir string, extra ...string) (
 	}
 	return outBuf.String(), errBuf.String(), code
 }
+
+// Help is the discovery surface for the sentinel: a published contract
+// with no mention in `-h` is a contract nobody finds. Asserted against
+// the built binary so the text that ships is the text checked.
+func TestToolsFlagHelp_DocumentsNoneSentinel(t *testing.T) {
+	bin := buildSeekBin(t)
+	cmd := exec.Command(bin, "-h")
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	// flag.ExitOnError sends -h's text to stderr and the usage printer
+	// may take either stream; accept both.
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("seek -h: %v\n%s", err, errBuf.String())
+	}
+	text := out.String() + errBuf.String()
+	for _, want := range []string{
+		`"none" = zero tools`,
+		"Empty or absent = full default registry",
+		"must be the only value",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help is missing %q:\n%s", want, text)
+		}
+	}
+}
