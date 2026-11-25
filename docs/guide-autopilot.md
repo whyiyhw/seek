@@ -151,6 +151,7 @@ Autopilot 与 seek 的时序子系统天然集成：
 
 - **cron 定时触发**：`seek cron create --name auto-refactor --at @daily --autopilot "清理过期 TODO"`
 - **完成后通知**：autopilot 使用 cron 的推送通知通道，可 push 到手机 / Slack（见 [`guide-webhooks.md`](guide-webhooks.md)）
+- **verdict 台账**：每次 run 结束在 `SEEK_HOME/autopilot/reports.jsonl` 追加一行 JSON（时间戳 / goal / run 级 verdict / pass-doubt-fail 计数 / model / token 与成本 / git Δ / judge 错误），可积累、可脚本化统计。写失败只进 stderr，不影响 run 结果
 
 ---
 
