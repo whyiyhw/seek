@@ -9,16 +9,26 @@ import (
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
+// DecomposeClient is the subset of *deepseek.Client the decomposer
+// needs — the same narrowing as verifier.JudgeClient. *deepseek.Client
+// satisfies it directly; the cron lane's subscription provider
+// satisfies it through cmd/seek's llmChatClient adapter (c_kdblc4: an
+// unattended run must ride a flat-rate lane, and the DeepSeek API key
+// is metered).
+type DecomposeClient interface {
+	Chat(ctx context.Context, req *deepseek.ChatRequest) (*deepseek.ChatResponse, error)
+}
+
 // DeepSeekDecomposer is the production Decomposer: one chat call asks the
 // model to split a goal into ≤max independent, worktree-isolatable tasks,
 // returned as a JSON array. It is the ONLY model freedom in an autopilot
 // run's control flow (PRD §4 D1); everything after is deterministic Go.
 type DeepSeekDecomposer struct {
-	client *deepseek.Client
+	client DecomposeClient
 	model  string
 }
 
-func NewDeepSeekDecomposer(c *deepseek.Client, model string) DeepSeekDecomposer {
+func NewDeepSeekDecomposer(c DecomposeClient, model string) DeepSeekDecomposer {
 	return DeepSeekDecomposer{client: c, model: model}
 }
 

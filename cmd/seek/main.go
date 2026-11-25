@@ -509,6 +509,31 @@ func run() error {
 		}
 	}
 
+	// Cron-fired autopilot lane pins (v8 §9.5③1, c_kdblc4) — resolved
+	// in the same spot as the ACP pins for the same two reasons: they
+	// must land BEFORE buildProvider (the pin wins over auto-detect, so
+	// a DEEPSEEK_API_KEY in the scheduler's env can't silently bill a
+	// metered lane), and flag.Parse stops at the "autopilot" positional
+	// so env is the only channel. The gate refusal returns BEFORE any
+	// key is read or any client built — a refused run is a failed run,
+	// loudly. Like the ACP pin, a pinned provider suppresses the
+	// first-run wizard: the cron child is a headless spawn.
+	autopilotLane := resolveAutopilotCronLane(os.Getenv)
+	if len(os.Args) >= 2 && os.Args[1] == "autopilot" {
+		if err := autopilotLane.GateErr(); err != nil {
+			return err
+		}
+		if p := autopilotLane.PinProvider(); p != "" && *providerFlag == "" {
+			*providerFlag = p
+		}
+		if m := autopilotLane.PinModel(); m != "" && *model == "" {
+			*model = m
+		}
+		if line := autopilotLane.LogLine(); line != "" {
+			fmt.Fprintln(os.Stderr, line)
+		}
+	}
+
 	// First-run setup wizard. Only fires when there's truly no auth
 	// anywhere (env + config both empty) AND stdin is a TTY (otherwise
 	// scripts get an honest error instead of a hung interactive prompt).
@@ -1444,7 +1469,7 @@ func run() error {
 		if mdl == "" {
 			mdl = modelDefault
 		}
-		return runAutopilot(ctx, dsClient, mdl, subagentMgr, wtMgr, autopilotGoal)
+		return runAutopilot(ctx, dsClient, provider, mdl, subagentMgr, wtMgr, autopilotGoal)
 	}
 
 	// v5 柱 H auto-tick: fire any due cron jobs as a side effect
@@ -2617,23 +2642,35 @@ func fileResolver(projectAbs string, client *deepseek.Client) *deepseek.FileReso
 // summary. The subagents are already guarded (bashGuardLane set on their
 // manager for the whole autopilot process), so they produce LOCAL commits
 // only — the user reviews + pushes in the morning.
-func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {
+func runAutopilot(ctx context.Context, client *deepseek.Client, provider llm.Provider, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {
 	if goal == "" {
 		return fmt.Errorf("usage: seek autopilot run \"<goal>\"")
 	}
-	if client == nil {
+	// The decomposer + judge need exactly one chat surface. The
+	// first-class DeepSeek client when the session rides it; the
+	// llmChatClient adapter when the cron lane pinned a subscription
+	// provider (c_kdblc4 — the DeepSeek API key is metered, an
+	// unattended run defaults to opencode and must be able to actually
+	// RUN there, not just be pinned to it).
+	var chat autopilot.DecomposeClient
+	if client != nil {
+		chat = client
+	} else if provider != nil {
+		chat = llmChatClient{p: provider}
+	}
+	if chat == nil {
 		return fmt.Errorf("autopilot requires a model provider — set an API key (seek setup)")
 	}
 	if mgr == nil {
 		return fmt.Errorf("autopilot requires a saved session in a git repo (unavailable with --no-save or outside a git project)")
 	}
-	dec := autopilot.NewDeepSeekDecomposer(client, model)
+	dec := autopilot.NewDeepSeekDecomposer(chat, model)
 	// model is also the lane the worktree subagents run on (they
 	// inherit the parent session's), so the fleet prices each
 	// outcome's tokens with it (v8 柱 R R1). The same lane judges
 	// each completed task (v8 柱 R R2): the verifier is built here,
 	// on demand for this run — no resident anything.
-	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(client, model))
+	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(chat, model))
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)

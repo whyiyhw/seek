@@ -34,6 +34,42 @@ seek cron run ci-watch   # 立刻跑一次，绕过调度
 
 ---
 
+## 1b. 无人值守 autopilot 任务 / Unattended autopilot jobs（v8 §9.5③1）
+
+`--autopilot` 让到期的 job 拉起整条无人值守编排链（`seek autopilot run <goal>`：分解 → worktree 舰队 → 独立裁判 → Report 落账）：
+
+```bash
+seek cron create --name nightly-tidy --at @daily --autopilot \
+  --cwd ~/code/myproj \
+  'tidy the repo: run gofmt, fix vet warnings, commit locally'
+```
+
+**billing 纪律（硬约束，v8 §9.1 / #9336）**：cron 拉起的 autopilot 子进程带 `SEEK_AUTOPILOT_CRON=1` 标记（tick 自动盖，人手敲 `seek autopilot run` 不带），标记触发两条规则：
+
+1. **默认订阅道**——车道钉死为 OpenCode Go 订阅道（flat-rate，永不按 token 计费）。这个钉子**压过** buildProvider 的自动探测：调度器 env 里就算躺着一把 `DEEPSEEK_API_KEY`，也绝不会拿去烧。
+2. **计量 key 必须写明谁批**——想跑按 token 计费的车道（deepseek / anthropic / openai / gemini / glm），必须在 `~/.seek/cron/env` 里显式写审批人，run 启动时 stderr 会留痕：
+
+```bash
+# ~/.seek/cron/env —— 换车道 / 批计量 key 都在这里（生产配置 = 人工交接项）
+SEEK_AUTOPILOT_PROVIDER=deepseek              # 可选：钉车道（默认 opencode；opendesign 也是订阅道）
+SEEK_AUTOPILOT_MODEL=deepseek-chat            # 可选：钉模型（默认取车道默认）
+SEEK_AUTOPILOT_ALLOW_METERED=approved-by:c_kdblc4   # 用计量 key 前必须写明谁批
+```
+
+不写 `ALLOW_METERED` 而钉了计量道 → 子进程**立刻失败**（exit 1，拒绝理由进 run record），不烧一分钱。
+
+其余细节：裁判/分解器在订阅道上经 cmd/seek 的 `llmChatClient` 适配器跑（无 cache 元数据——二线车道的既有降级）；每轮 Report 追加进 `~/.seek/autopilot/reports.jsonl`（§9.5③3 verdict ledger）；worktree 舰队照旧 no-remote guard + OS 沙盒，本地 commit 留给晨审。
+
+**全链路自测**（假 key + 临时 SEEK_HOME + 本地假 OpenAI 端点，不碰真实 key / 真实 ~/.seek）：
+
+```bash
+scripts/autopilot-cron-e2e.sh   # ~4 分钟：正链（cron 到期→autopilot→ledger 落账）+ 计量闸拒绝路径
+```
+
+> `--autopilot` fires the full unattended chain on schedule. The cron marker pins the flat-rate OpenCode lane by default (a stray DEEPSEEK_API_KEY in the scheduler env is never picked up); a metered lane additionally requires `SEEK_AUTOPILOT_ALLOW_METERED=approved-by:<who>` in `~/.seek/cron/env` or the child refuses to run. Full-chain self-test: `scripts/autopilot-cron-e2e.sh`.
+
+---
+
 ## 2. 接 OS 调度器 / Wire up the OS scheduler
 
 ### macOS — launchd
