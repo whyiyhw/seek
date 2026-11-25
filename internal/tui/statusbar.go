@@ -284,6 +284,12 @@ func leftSegments(s StatusSnapshot) []statusSegment {
 	// cost premium visible at a glance, mirroring how a /compact
 	// warning escalates on the right side.
 	switch s.Effort {
+	case "low":
+		// Reachable only via `seek --effort low` (the TUI picker stays
+		// off|high|max): the cheapest reasoning rung, which batch callers
+		// pin. Muted like "high" — it is the CHEAP end, so it must not
+		// read as a cost warning.
+		out = append(out, statusSegment{styleMuted.Render("effort:low"), prioLow})
 	case "high":
 		out = append(out, statusSegment{styleMuted.Render("effort:high"), prioLow})
 	case "max":

@@ -377,7 +377,7 @@ func run() error {
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
 		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → effort-linked default (16k; 64k under /effort max), clamped to the model's own output ceiling")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
-		effortFlag    = flag.String("effort", "", "reasoning effort for this session: off | high | max; absent keeps the built-in default (max). 'max' also raises the derived completion cap to 64k (clamped to the model); an explicit --max-tokens still wins")
+		effortFlag    = flag.String("effort", "", "reasoning effort for this session: off | low | high | max; absent keeps the built-in default (max). 'max' also raises the derived completion cap to 64k (clamped to the model); an explicit --max-tokens still wins")
 		temperature   = flag.String("temperature", "", "sampling temperature, 0..2 (e.g. 0 for the judge lane's determinism pin). Absent = the provider's own default and NO temperature key on the wire, i.e. byte-identical to a pre-knob request (prefix-cache discipline)")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		plan          = flag.Bool("plan", false, "read-only exploration: no bash/writes/edits; produce a plan to review before executing")
@@ -457,6 +457,13 @@ func run() error {
 		fmt.Fprintln(os.Stderr, "seek:", err)
 		return errFlagUsage
 	}
+	// An explicitly-passed EMPTY value (`--effort=` / `--effort ""`) is
+	// "absent", not "off" — the same contract `-tools ""` already keeps
+	// (TestToolsFlagE2E_EmptyEqualsAbsent). Scripts that interpolate a
+	// possibly-unset variable must not silently drop the session from the
+	// historical max default to a 16K cap, nor clobber a resumed session's
+	// saved effort.
+	effortSet := visited["effort"] && strings.TrimSpace(*effortFlag) != ""
 
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
@@ -738,7 +745,7 @@ func run() error {
 	// on one-line classifications (measured 3.2× on output tokens, card
 	// c_trrsn7 / docs/notes/2026-11-24-judge-format-baseline.md §4).
 	var sessionEffort = "max"
-	if visited["effort"] {
+	if effortSet {
 		sessionEffort = effortValue
 	}
 	tracker := cache.New()
@@ -1219,7 +1226,7 @@ func run() error {
 		// non-nil (either loaded or a fresh session.New), so checking it
 		// would overwrite the "max" default with the empty string from a
 		// brand-new session (see commit <fill>).
-		if loaded != nil && !visited["effort"] {
+		if loaded != nil && !effortSet {
 			sessionEffort = activeSession.Effort
 		}
 
@@ -4826,21 +4833,27 @@ var errFlagUsage = errors.New("flag usage")
 // i.e. the model's own default) — the same normalization the TUI's
 // /effort uses, so a CLI run and a TUI session land on identical bytes.
 //
-// Deliberately only three rungs: DeepSeek V4 documents reasoning_effort
-// as high|max, and the whole point of `off` here is not to spell the
-// vendor's levels but to say "don't override" (docs/pitfalls/
-// deepseek-api/reasoning-effort-values-are-high-max-...).
+// Four rungs, one more than the TUI's /effort picker: DeepSeek's
+// current create-chat-completion reference documents
+// `reasoning_effort: none | low | high | max` (medium/xhigh are compat
+// aliases mapping to high; 2026-11-24 re-read of the vendor docs). The
+// CLI takes `low` because a one-shot judge batch wants the cheapest
+// REASONING rung, and that rung exists on the wire — the TUI keeps its
+// three-rung surface so an interactive session can't silently pin a
+// depth nobody picked (docs/pitfalls/deepseek-api/
+// reasoning-effort-values-are-high-max-... records the earlier reading).
 var effortLevels = map[string]string{
 	"off":  "",
-	"none": "", // accepted alias, mirrors /effort
+	"none": "", // accepted alias, mirrors the TUI's /effort off|none
+	"low":  "low",
 	"high": "high",
 	"max":  "max",
 }
 
 // parseEffortFlag validates the --effort value and returns the wire
-// form ("" = no override). An absent flag yields "" plus a nil error;
-// callers distinguish absent from `--effort off` via flag.Visit, never
-// via this return value.
+// form ("" = no override). An absent (or explicitly empty) flag yields ""
+// plus a nil error; callers distinguish absent from `--effort off` via
+// flag.Visit, never via this return value.
 func parseEffortFlag(v string) (string, error) {
 	tok := strings.ToLower(strings.TrimSpace(v))
 	if tok == "" {
@@ -4848,7 +4861,7 @@ func parseEffortFlag(v string) (string, error) {
 	}
 	level, ok := effortLevels[tok]
 	if !ok {
-		return "", fmt.Errorf("--effort: unknown level %q — try off|high|max", v)
+		return "", fmt.Errorf("--effort: unknown level %q — try off|low|high|max", v)
 	}
 	return level, nil
 }
@@ -4860,11 +4873,12 @@ func parseEffortFlag(v string) (string, error) {
 // an explicit `--temperature 0`, which is a real, different request
 // (it is the determinism pin the judge lane wants).
 //
-// Range is 0..2, the intersection of the documented ranges that all
-// three second-tier lanes accept (Gemini 0..2, OpenAI 0..2, Anthropic
-// 0..1 — a 2 on Anthropic is answered by its own 400 rather than
-// silently clamped here; clamping would make "the vendor rejected the
-// value" look like "seek quietly rewrote it").
+// Range is 0..2 — the ENVELOPE of the documented ranges, not their
+// intersection: Gemini 0..2, OpenAI 0..2, Anthropic 0..1. seek does not
+// narrow to the tightest vendor, because a 2 on Anthropic then gets that
+// vendor's own honest 400 instead of a silently clamped number (clamping
+// would make "the vendor rejected the value" look like "seek quietly
+// rewrote it").
 func parseTemperatureFlag(v string) (*float64, error) {
 	tok := strings.TrimSpace(v)
 	if tok == "" {

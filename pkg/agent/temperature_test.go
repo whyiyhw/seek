@@ -157,3 +157,55 @@ func ptrTo(f float64) *float64 { return &f }
 // the field this file asserts on (a rename would otherwise fail confusingly
 // inside a subtest).
 var _ = llm.ChatRequest{}.Temperature
+
+// TestSummarise_DoesNotInheritTemperature pins the side-channel boundary:
+// the compact/Summarise call is a mechanical compression task, so it must
+// keep its pre-knob request bytes even when the session pins a
+// temperature. Without this assertion, a later "forward the knob
+// everywhere" refactor would silently change /compact's request shape —
+// and a determinism pin meant for the main conversation would be applied
+// to a summariser whose job is to compress, not to classify.
+func TestSummarise_DoesNotInheritTemperature(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var bodies [][]byte
+	// Summarise goes through the NON-streaming Chat endpoint, so the fake
+	// upstream has to answer with a JSON body (captureWire's SSE shape is
+	// for runTurn*).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, raw)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"x","object":"chat.completion","created":0,"model":"m",`+
+			`"choices":[{"index":0,"message":{"role":"assistant","content":"SUMMARY"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	ag, err := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:        "rescue-fixture-model",
+		SystemPrompt: "sys",
+		Temperature:  ptrTo(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ag.Reset([]deepseek.Message{
+		{Role: deepseek.RoleUser, Content: "hello"},
+		{Role: deepseek.RoleAssistant, Content: "hi"},
+	})
+
+	if _, _, err := ag.Summarise(context.Background()); err != nil {
+		t.Fatalf("Summarise: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) == 0 {
+		t.Fatal("summariser made no request")
+	}
+	if strings.Contains(string(bodies[0]), `"temperature"`) {
+		t.Errorf("summariser inherited the session temperature:\n%s", bodies[0])
+	}
+}

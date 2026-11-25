@@ -1,20 +1,24 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
 // effort_temperature_flag_test.go covers card c_trrsn7 (judge precondition
-// ①: cost 3.2×). It pins three things the flag exists for:
+// ①: cost 3.2×). It pins four things the flag exists for:
 //
 //  1. parseEffortFlag / parseTemperatureFlag's accepted surface.
-//  2. The wire consequence on a print-mode run — `--effort off` drops the
-//     derived completion cap to 16K (this lane's real money lever, since
-//     reasoning_effort itself is DeepSeek-only), and `--temperature 0`
+//  2. The wire consequence on a print-mode run — `--effort off`/`low` drop
+//     the derived completion cap to 16K (this lane's real money lever,
+//     since reasoning_effort itself is DeepSeek-only), and `--temperature 0`
 //     emits the key while its absence emits nothing.
-//  3. Resume precedence: a saved session's effort is inherited ONLY when
+//  3. Regression: with no flag the body is byte-identical to the
+//     pre-flag shape, and an explicit `--effort max` (the historical
+//     default) doesn't perturb it either.
+//  4. Resume precedence: a saved session's effort is inherited ONLY when
 //     the flag was not passed — the same rule --model/--yolo/--plan follow.
 
 func TestParseEffortFlag(t *testing.T) {
@@ -29,8 +33,12 @@ func TestParseEffortFlag(t *testing.T) {
 		{"OFF", "", false},  // case-insensitive
 		{" high ", "high", false},
 		{"max", "max", false},
-		{"low", "", true},    // not a V4 level
-		{"medium", "", true}, // deliberately absent (OpenAI's trio)
+		// low is the rung the judge lane actually wants (cheapest
+		// REASONING level — measured 3.2× cheaper than max on output).
+		// The CLI takes it even though the TUI picker stays off|high|max.
+		{"low", "low", false},
+		{"LOW", "low", false},
+		{"medium", "", true}, // compat alias for high; not spelled here
 		{"turbo", "", true},
 	}
 	for _, c := range cases {
@@ -83,7 +91,7 @@ func TestParseTemperatureFlag(t *testing.T) {
 
 func ptrFloat(f float64) *float64 { return &f }
 
-// bodyField decodes the first captured request body and reports the raw
+// bodyKey decodes the first captured request body and reports the raw
 // presence + value of a top-level key. Raw presence (not the decoded
 // value) is what the prefix-cache contract turns on: `"temperature":null`
 // would decode to nil and silently pass a value-only assertion.
@@ -95,6 +103,39 @@ func bodyKey(t *testing.T, body []byte, key string) (present bool, raw json.RawM
 	}
 	v, ok := m[key]
 	return ok, v
+}
+
+// TestEffortTemperatureFlagE2E_DefaultBodyUnchanged is acceptance ②:
+// with neither flag the request bytes must be exactly what a pre-flag
+// build sent. Two shapes pin it:
+//
+//   - the default body carries NO "temperature" key at all (a
+//     present-but-null key would still move the prefix-cache bytes);
+//   - explicitly passing the historical default (`--effort max`) is
+//     byte-identical to passing nothing, and so is an explicitly empty
+//     `--effort ""` — the flag being present must not perturb the body.
+func TestEffortTemperatureFlagE2E_DefaultBodyUnchanged(t *testing.T) {
+	workDir := t.TempDir()
+
+	run := func(extra ...string) []byte {
+		b := newE2EBackend(t)
+		stdout, stderr, code := runSeekE2E(t, b.srv.URL, workDir, extra...)
+		if code != 0 {
+			t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		return b.firstBody(t)
+	}
+
+	base := run()
+	if strings.Contains(string(base), `"temperature"`) {
+		t.Errorf("default body must not carry a temperature key:\n%s", base)
+	}
+	if got := run("--effort", "max"); !bytes.Equal(got, base) {
+		t.Errorf("--effort max (the historical default) changed the body:\n%s\n---\n%s", base, got)
+	}
+	if got := run("--effort", ""); !bytes.Equal(got, base) {
+		t.Errorf("--effort \"\" (absent) changed the body:\n%s\n---\n%s", base, got)
+	}
 }
 
 // TestEffortFlagE2E_OffDropsDerivedCap is the money assertion: the default
@@ -112,9 +153,14 @@ func TestEffortFlagE2E_OffDropsDerivedCap(t *testing.T) {
 	}{
 		{"default (max) → 64k", nil, 65536},
 		{"--effort off → 16k", []string{"--effort", "off"}, 16384},
+		{"--effort low → 16k", []string{"--effort", "low"}, 16384},
 		{"--effort high → 16k", []string{"--effort", "high"}, 16384},
 		{"--effort max → 64k", []string{"--effort", "max"}, 65536},
 		{"--effort off + explicit --max-tokens wins", []string{"--effort", "off", "--max-tokens", "9000"}, 9000},
+		// An explicitly EMPTY value is "absent", not "off" — the same
+		// contract `-tools ""` keeps. Scripts interpolating a maybe-unset
+		// variable must not silently drop the default to 16K.
+		{"--effort \"\" (empty) = absent → 64k", []string{"--effort", ""}, 65536},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := newE2EBackend(t)

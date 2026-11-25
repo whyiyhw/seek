@@ -51,13 +51,13 @@ seek 维护了一份各模型的上下文窗口大小硬编码表（来源：各
 
 | 旗标 | 取值 | 语义 |
 |---|---|---|
-| `--effort` | `off` \| `high` \| `max` | **缺省 = `max`**（历史行为不变）。`off` 等同 `reasoning_effort` 键不出现在请求体（模型自己的默认），并把推导上限落回 16k；`high`/`max` 与 TUI `/effort` 同义 |
+| `--effort` | `off` \| `low` \| `high` \| `max`（别名 `none`，同 TUI `/effort`） | **缺省 = `max`**（历史行为不变）。`off` 等同 `reasoning_effort` 键不出现在请求体（模型自己的默认），并把推导上限落回 16k；`low` 是 DeepSeek 官方档位里最便宜的**推理**档（`medium` 是 `high` 的兼容别名，seek 不接受），一次判读要的就是它；`high`/`max` 与 TUI `/effort` 同义 |
 | `--temperature` | `0..2` | **缺省 = 不发这个键**（厂商默认，字节与改动前完全相同 → 前缀缓存照常命中）。显式 `0` 是判读车道要的确定性钉；`2` 在 Anthropic（只收 0..1）上由厂商自己 400，seek 不静默钳 |
 
 三条刻意的取舍：
 
 - **`nil` 与 `0` 是两个不同的线上状态**，所以字段是 `*float64` 而不是 `float64`：普通 float 配 `omitempty` 会把「显式 0」吃成「没设」，正是判读车道最需要的那个值。
-- **`off` 走 `flag.Visit` 判定，不靠默认值**：`--effort off` 与「没传」解析出来都是空串，只有 flag 包知道用户到底敲了哪个。同一个 visited 表让它和 `--resume` 的继承关系变成「显式旗标赢」，与 `--model`/`--yolo`/`--plan` 一致。
+- **`off` 走 `flag.Visit` 判定，不靠默认值**：`--effort off` 与「没传」解析出来都是空串，只有 flag 包知道用户到底敲了哪个。同一个 visited 表让它和 `--resume` 的继承关系变成「显式旗标赢」，与 `--model`/`--yolo`/`--plan` 一致。**但显式传空值（`--effort ""` / `--effort=`）仍算「没传」**——同 `-tools ""` 的 EmptyEqualsAbsent 口径，脚本插值一个可能没设的变量不该把默认从 max 悄悄掉到 16k。
 - **坏值 exit 2，且在任何 provider 握手之前**：`--effort turbo` / `--temperature 3` 属用法错误（同 `-tools` 未知名的通道），不烧一次 API 调用。
 
 子代理继承 `--temperature`（启动期定值，不像 `/effort` 会被中途改写）；`--effort` 经既有的 `getEffort` 闭包继承。

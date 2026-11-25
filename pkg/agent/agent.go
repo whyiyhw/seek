@@ -49,10 +49,12 @@ type Config struct {
 	// Effort, when non-empty, overrides the per-request
 	// reasoning_effort sent to DeepSeek and force-enables Thinking
 	// regardless of ShouldEnableThinking(Model). Values: "" (no
-	// override) | "high" | "max". Sourced from the session header
-	// so a /effort selection persists across resume. Only honoured
-	// on the DeepSeek path (Client != nil) — second-tier providers
-	// expose their own thinking knobs out of band.
+	// override) | "low" | "high" | "max". Sourced from the session
+	// header so a /effort selection persists across resume (the CLI's
+	// --effort can set "low", which the TUI picker doesn't offer —
+	// card c_trrsn7). Only honoured on the DeepSeek path
+	// (Client != nil) — second-tier providers expose their own
+	// thinking knobs out of band.
 	Effort string
 
 	// Temperature, when non-nil, is the sampling temperature on every

@@ -81,9 +81,11 @@ type Session struct {
 	// Effort overrides the reasoning_effort sent to DeepSeek. Empty
 	// (the on-disk default) means "do not override" — the agent falls
 	// back to ShouldEnableThinking() on the active model. Values: "" |
-	// "high" | "max". Persists per-session so a one-off escalation
-	// doesn't silently leak to future sessions; omitempty keeps the
-	// JSONL header tidy for the common no-override case.
+	// "low" | "high" | "max" ("low" arrives only via `seek --effort
+	// low`; the TUI's /effort picker stays off|high|max). Persists
+	// per-session so a one-off escalation doesn't silently leak to
+	// future sessions; omitempty keeps the JSONL header tidy for the
+	// common no-override case.
 	Effort string `json:"effort,omitempty"`
 	// Tools records the sorted tool-name set this session runs with
 	// (v8·T1 `-tools` whitelist; the full default registry when the
