@@ -1687,13 +1687,24 @@ func run() error {
 	// from the model see the correct in-memory state. Reconstruction
 	// is a pure-read scan — no events emitted (no agent Prompt active
 	// yet, EmitEvent would no-op anyway).
+	//
+	// The reconstructed batch flag is installed BEFORE Restore on
+	// purpose: Restore routes through bridge.StepChanged, and that
+	// single path re-arms preApproved when batch mode is on with a
+	// step still in flight (cur >= 0). Skipping this line was the
+	// resume half of the c_n2k6qi gap — the approval mode lives only
+	// in the transcript's "(auto-approve-per-step)" suffix, so a
+	// prefix-only read downgraded every resumed batch plan to per-call
+	// y/N and the "plan(start) re-arms the gate" contract propose
+	// teaches the model stopped holding.
 	var (
 		restoredPlanSteps  []agent.PlanStep
 		restoredPlanCurIdx = -1
 	)
 	if loaded != nil && len(initialMsgs) > 0 {
-		steps, cur := plantool.ReconstructFromTranscript(initialMsgs)
+		steps, cur, batch := plantool.ReconstructFromTranscript(initialMsgs)
 		if len(steps) > 0 {
+			bridge.RestoreApprovalMode(batch)
 			planTool.Restore(steps, cur)
 			restoredPlanSteps = make([]agent.PlanStep, len(steps))
 			for i, st := range steps {
