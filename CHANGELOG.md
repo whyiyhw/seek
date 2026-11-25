@@ -4,6 +4,7 @@
 
 - c_wjo6wy：R2 verdict 持久化落点：autopilot Report 落盘为可积累 JSONL（§9.5③3）
 - c_jxwsfz：--json 空返回的机器可判定信号（judge 前置②：静默空返回 exit 0 陷阱）
+- c_lh6tlq：--tools=none 哨兵：零工具面（judge 前置③：安全边界）
 
 ## v0.13.1（2026-11-24）
 

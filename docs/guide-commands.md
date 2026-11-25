@@ -68,6 +68,8 @@ seek --provider <name>      # Override provider (deepseek/anthropic/openai/gemin
 seek --yolo                 # Bypass permission prompts
 seek --plan                 # Start in plan mode
 seek --no-save              # Ephemeral session (no persistence)
+seek --tools read,grep      # Freeze the tool surface to a whitelist (v8·T1 bare-core lane)
+seek --tools none           # Zero tools: empty registry, the request carries no `tools` field at all (judge/pipe isolation)
 seek --keep-checkpoints     # Preserve checkpoint blobs across session end
 seek --install              # Add seek to PATH (Windows)
 seek --upgrade              # Download latest release and replace binary

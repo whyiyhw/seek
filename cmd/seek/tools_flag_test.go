@@ -112,6 +112,59 @@ func TestApplyToolsWhitelist_UnknownNameErrToolsUsage(t *testing.T) {
 	}
 }
 
+// The `none` sentinel empties the registry outright — the zero-tool
+// surface a program consumer (judge/pipe) needs. Wire() must then carry
+// nothing, so no `tools` field can reach the model.
+func TestApplyToolsWhitelist_NoneEmptiesRegistry(t *testing.T) {
+	for _, v := range []string{"none", " none ", "none,"} {
+		t.Run(v, func(t *testing.T) {
+			reg := newWhitelistTestRegistry()
+			active := session.New("m", "/tmp", "sp", false, false)
+
+			if err := applyToolsWhitelist(v, reg, nil, active); err != nil {
+				t.Fatalf("applyToolsWhitelist(%q): %v", v, err)
+			}
+			if got := reg.Names(); len(got) != 0 {
+				t.Errorf("reg.Names() = %v, want empty after the zero-tool sentinel", got)
+			}
+			if reg.Lookup("read") != nil {
+				t.Error("Lookup(read) survived the zero-tool sentinel")
+			}
+			if wire := reg.Wire(); len(wire) != 0 {
+				t.Errorf("Wire() = %v, want no tools", wire)
+			}
+			if len(active.Tools) != 0 {
+				t.Errorf("active.Tools = %v, want empty (saved sessions must record the empty set)", active.Tools)
+			}
+		})
+	}
+}
+
+// The sentinel is not a tool name: mixing it with names is a usage
+// error (exit 2), and the registry stays untouched so nothing half-applies.
+func TestApplyToolsWhitelist_NoneMixedWithNamesErrToolsUsage(t *testing.T) {
+	for _, v := range []string{"none,read", "read,none", "none,read,edit"} {
+		t.Run(v, func(t *testing.T) {
+			reg := newWhitelistTestRegistry()
+			before := reg.Names()
+
+			var err error
+			stderr := captureStderr(t, func() {
+				err = applyToolsWhitelist(v, reg, nil, nil)
+			})
+			if !errors.Is(err, errToolsUsage) {
+				t.Fatalf("applyToolsWhitelist(%q) err = %v, want errToolsUsage", v, err)
+			}
+			if !strings.Contains(stderr, "sentinel") {
+				t.Errorf("stderr = %q, want it to explain that none is a sentinel", stderr)
+			}
+			if got := reg.Names(); !reflect.DeepEqual(got, before) {
+				t.Errorf("registry mutated on rejection: %v, want %v", got, before)
+			}
+		})
+	}
+}
+
 func TestApplyToolsWhitelist_NoSaveSessionNilIsFine(t *testing.T) {
 	reg := newWhitelistTestRegistry()
 	if err := applyToolsWhitelist("read", reg, nil, nil); err != nil {
@@ -465,6 +518,54 @@ func TestToolsFlagE2E_EmptyEqualsAbsent(t *testing.T) {
 	}
 }
 
+// Acceptance ① of the zero-tool sentinel: `-tools none` empties the
+// registry, so the model request body carries NO tools field at all —
+// not an empty array, absent. Asserted on raw bytes (the same shape the
+// prefix cache and the second-tier adapters see).
+func TestToolsFlagE2E_NoneSendsNoToolsField(t *testing.T) {
+	workDir := t.TempDir()
+
+	b := newE2EBackend(t)
+	stdout, stderr, code := runSeekE2E(t, b.srv.URL, workDir, "-tools", "none")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	body := b.firstBody(t)
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal request body: %v\n%s", err, body)
+	}
+	if _, present := raw["tools"]; present {
+		t.Errorf("request body still carries a tools field:\n%s", body)
+	}
+	if got := toolNamesFromBody(t, body); len(got) != 0 {
+		t.Errorf("tools = %v, want none", got)
+	}
+	// Belt and braces on the bytes: no `"tools"` key anywhere in the body.
+	if bytes.Contains(body, []byte(`"tools":`)) {
+		t.Errorf("raw body mentions a tools key:\n%s", body)
+	}
+}
+
+// Acceptance ③: the sentinel does not eat lists — `-tools none,read`
+// exits 2 before any prompt reaches the backend, and says why.
+func TestToolsFlagE2E_NoneMixedExits2(t *testing.T) {
+	workDir := t.TempDir()
+	b := newE2EBackend(t)
+
+	_, stderr, code := runSeekE2E(t, b.srv.URL, workDir, "-tools", "none,read")
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2\nstderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "sentinel") {
+		t.Errorf("stderr misses the sentinel explanation:\n%s", stderr)
+	}
+	if n := b.requestCount(); n != 0 {
+		t.Errorf("backend saw %d requests, want 0 (no prompt before the flag dies)", n)
+	}
+}
+
 // Resume lane: a session saved under one whitelist, resumed under
 // another, runs fine (exit 0) and warns exactly once on stderr.
 func TestToolsFlagE2E_ResumeChangedSetWarns(t *testing.T) {
@@ -531,4 +632,30 @@ func runSeekSaveE2E(t *testing.T, backendURL, workDir string, extra ...string) (
 		t.Fatalf("run seek (save): %v\nstderr:\n%s", err, errBuf.String())
 	}
 	return outBuf.String(), errBuf.String(), code
+}
+
+// Help is the discovery surface for the sentinel: a published contract
+// with no mention in `-h` is a contract nobody finds. Asserted against
+// the built binary so the text that ships is the text checked.
+func TestToolsFlagHelp_DocumentsNoneSentinel(t *testing.T) {
+	bin := buildSeekBin(t)
+	cmd := exec.Command(bin, "-h")
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	// flag.ExitOnError sends -h's text to stderr and the usage printer
+	// may take either stream; accept both.
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("seek -h: %v\n%s", err, errBuf.String())
+	}
+	text := out.String() + errBuf.String()
+	for _, want := range []string{
+		`"none" = zero tools`,
+		"Empty or absent = full default registry",
+		"must be the only value",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("help is missing %q:\n%s", want, text)
+		}
+	}
 }
