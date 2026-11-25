@@ -38,6 +38,19 @@ type ChatRequest struct {
 	Tools     []ToolDef
 	MaxTokens int // completion token cap; 0 = provider default
 
+	// Temperature, when non-nil, is the sampling temperature for this
+	// request. nil (the default) sends NO temperature key — a request
+	// without it must stay byte-identical to its pre-knob shape, so the
+	// prefix cache keeps hitting. A pointer rather than a float because
+	// explicit 0 and "absent" are different wire states (0 is the
+	// determinism knob the judge lane pins).
+	//
+	// Range validation is the caller's (cmd/seek accepts 0..2); each
+	// adapter forwards the number verbatim, so a lane with a narrower
+	// range (Anthropic: 0..1) answers with its own 400 rather than a
+	// silently clamped value.
+	Temperature *float64
+
 	// SessionID, when non-empty, identifies the conversation this
 	// request belongs to. The openai client sends it as an
 	// x-opencode-session header — the OpenCode Go lane's client

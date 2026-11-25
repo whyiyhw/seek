@@ -49,11 +49,27 @@ type Config struct {
 	// Effort, when non-empty, overrides the per-request
 	// reasoning_effort sent to DeepSeek and force-enables Thinking
 	// regardless of ShouldEnableThinking(Model). Values: "" (no
-	// override) | "high" | "max". Sourced from the session header
-	// so a /effort selection persists across resume. Only honoured
-	// on the DeepSeek path (Client != nil) — second-tier providers
-	// expose their own thinking knobs out of band.
+	// override) | "low" | "high" | "max". Sourced from the session
+	// header so a /effort selection persists across resume (the CLI's
+	// --effort can set "low", which the TUI picker doesn't offer —
+	// card c_trrsn7). Only honoured on the DeepSeek path
+	// (Client != nil) — second-tier providers expose their own
+	// thinking knobs out of band.
 	Effort string
+
+	// Temperature, when non-nil, is the sampling temperature on every
+	// request, both lanes. nil = the provider's own default and NO
+	// temperature key on the wire, which is what keeps a session that
+	// never sets it byte-identical to its pre-knob form (prefix-cache
+	// discipline). A pointer, not a float: explicit 0 and "absent" are
+	// different requests (0 is the determinism pin the judge lane wants,
+	// and it must survive the zero-value collapse).
+	//
+	// Range validation lives at the boundary that accepts user input
+	// (cmd/seek --temperature checks 0..2); the agent forwards verbatim
+	// so a lane with a narrower range (Anthropic: 0..1) answers with the
+	// vendor's own 400 instead of a silently clamped number.
+	Temperature *float64
 
 	// SafetyCheck, when non-empty, is sent as
 	// deepseek.ChatRequest.SafetyCheck on every DeepSeek-lane request
@@ -523,6 +539,10 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 	// resolving — image bytes or document ids.
 	msgs := deepseek.WithoutFiles(deepseek.WithoutImages(deepseek.StripReasoningContent(history)))
 	budgetTokens := rescueBudget(a.cfg.Model, a.cfg.MaxTokens)
+	// Temperature is deliberately NOT inherited here: the summariser is a
+	// mechanical compression task and the session knob describes the
+	// user's main conversation, not this side channel. Same posture for
+	// every other side-channel caller (goal judge, distill).
 	req := &deepseek.ChatRequest{
 		Model:    a.cfg.Model,
 		Messages: prepareSummariseMessages(msgs, budgetTokens),
@@ -1338,9 +1358,10 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		msgs = a.cfg.PrepareMessages(msgs)
 	}
 	req := &deepseek.ChatRequest{
-		Model:     a.cfg.Model,
-		Messages:  msgs,
-		MaxTokens: a.turnMaxTokens(),
+		Model:       a.cfg.Model,
+		Messages:    msgs,
+		MaxTokens:   a.turnMaxTokens(),
+		Temperature: a.cfg.Temperature,
 	}
 	// V4 shipped Thinking as a request parameter rather than a separate
 	// model id. Pre-V4, DeepSeek routed the "deepseek-reasoner" alias
@@ -1595,7 +1616,11 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		// second-tier turn at 16K: /effort max could not raise it, and
 		// the value was never clamped to the model's real ceiling either.
 		MaxTokens: a.turnMaxTokens(),
-		SessionID: a.sessionID(),
+		// Same single-source discipline as MaxTokens: the session's
+		// temperature knob, forwarded on every second-tier lane too.
+		// nil = key absent = the pre-knob bytes.
+		Temperature: a.cfg.Temperature,
+		SessionID:   a.sessionID(),
 	}
 
 	stream, err := a.cfg.Provider.ChatStream(ctx, req)

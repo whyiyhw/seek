@@ -132,12 +132,16 @@ type ChatRequest struct {
 	Thinking *ThinkingMode `json:"thinking,omitempty"`
 
 	// ReasoningEffort tunes how hard the model thinks when Thinking is
-	// enabled. DeepSeek V4 documents two levels: "high" and "max".
+	// enabled. DeepSeek's create-chat-completion reference (re-read
+	// 2026-11-24) documents `none | low | high | max`, with medium /
+	// xhigh accepted as compatibility aliases that map to "high".
 	// Higher = more reasoning tokens = higher quality / slower / more
 	// expensive. Empty = model default. (The TUI's /effort command
-	// only exposes "high"/"max" — the older OpenAI-style "low"/"medium"
-	// values are not documented for V4 and may be silently ignored;
-	// internal callers also stick to high/max.)
+	// exposes "high"/"max" only — an interactive session can't pin a
+	// depth nobody picked; the CLI's --effort additionally accepts
+	// "low", which is what a one-shot judge batch wants because output
+	// tokens are ~92% of its cost. See docs/pitfalls/deepseek-api/
+	// reasoning-effort-values-are-high-max-... for the earlier reading.)
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
 	// SafetyCheck opts this request into DeepSeek's model safety check

@@ -50,6 +50,11 @@ type subagentRunnerOpts struct {
 	maxTurns  int
 	getModel  func() string
 	getEffort func() string
+	// temperature is the session's --temperature value, inherited by
+	// children. A plain field rather than a getter: unlike effort (which
+	// /effort rewrites mid-session) the temperature is a startup flag and
+	// cannot change while the process lives. nil = key absent on the wire.
+	temperature *float64
 	// routes maps routing lane names (subagent.ProviderDeepSeek /
 	// ProviderGLM / ProviderOpenCode — validated in
 	// internal/subagent.ResolveRoute) to
@@ -293,6 +298,7 @@ func buildSubagentRunner(opts subagentRunnerOpts) subagent.Runner {
 			Provider:        provider,
 			Model:           model,
 			Effort:          opts.getEffort(),
+			Temperature:     opts.temperature,
 			SystemPrompt:    job.SystemPrompt,
 			InitialMessages: job.PriorMessages,
 			Tools:           childReg,

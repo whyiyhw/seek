@@ -257,7 +257,7 @@ L2 零新机制——`applyToolsWhitelist` 现成。
 
 | 序 | 项 | 落点 | 工作量 | 依据 |
 |---|---|---|---|---|
-| 1 | `--effort` / `--temperature` 旗标 | `cmd/seek/main.go`（`:702` 写死 `sessionEffort = "max"`，`-p` 无旗标） | 0.5 天 | 实测 §8.1-3：成本 3.2× |
+| 1 | `--effort` / `--temperature` 旗标 | **已落地**（c_trrsn7）：`cmd/seek/main.go` 加两个旗标 + `flag.Visit` 区分「没传 / `--effort off`」；`pkg/agent.Config.Temperature *float64` 下到两条车道；三个二线适配器（openai / anthropic / gemini）的线格式各带一个指针字段 | 0.5 天 | 实测 §8.1-3：成本 3.2× |
 | 2 | 空返回的机器可判定信号 | `--json` 事件流加 `finish_reason` 或 error 事件（`pkg/agent/agent.go` 的 `placeholderTurn` 自愈闸 / `emptyResponseMarker`、`budgetExhaustedMarker` 两个常量——按符号找，行号会漂） | 0.5 天 | 实测 §8.1-2：静默空返回 exit 0 |
 | 3 | `--tools=none` 哨兵 | `applyToolsWhitelist` 分支（不改空串契约） | 0.5 天 | 实测 §8.1-5：安全边界 |
 | 4 | 参数校验先于 MCP fork | `cmd/seek/main.go` 启动段（内建名预校验；「MCP 名校验依赖加载完成」的冲突显式解决） | 1 天 | 实测 §8.1-5：缺口③加重 |

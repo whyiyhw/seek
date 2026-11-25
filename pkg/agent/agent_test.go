@@ -583,6 +583,10 @@ func TestAgent_EffortOverridesThinking(t *testing.T) {
 		{"empty effort on flash → thinking on, no effort", deepseek.ModelV41Flash, "", true, ""},
 		{"empty effort on retired id → no thinking (unknown model)", "deepseek-v4-pro", "", false, ""},
 		{"high on flash → thinking on, effort=high", deepseek.ModelV41Flash, "high", true, "high"},
+		// "low" is the cheapest reasoning rung and the one a one-shot
+		// judge batch pins (cmd/seek --effort low, card c_trrsn7). It
+		// must reach the wire verbatim, like every other explicit level.
+		{"low on flash → thinking on, effort=low", deepseek.ModelV41Flash, "low", true, "low"},
 		{"max on flash → thinking on, effort=max", deepseek.ModelV41Flash, "max", true, "max"},
 		{"max on retired id → effort still forces thinking", "deepseek-v4-pro", "max", true, "max"},
 	}
