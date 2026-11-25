@@ -161,7 +161,7 @@
 #（+246941B）不是 main，勿混。web-gate 不带 -trimpath，绝对路径进产物，换
 # 目录重编有 ±9KB 量级抖动（实测两处独立 clone 分别 −8960B / +72B）——远在
 # 200KB 预算余量内，不改闸判据；主会话在自己检出重跑复核即同线。
-31557490
+31807109
 # 2026-11-20 c_rqcuaa ratchet: +53096B (session rename/archive —
 # internal/sessmeta state+audit pair, session/rename|archive methods +
 # list override/filter, sidebar inline-rename/archive UI ~6.7KB embed).
