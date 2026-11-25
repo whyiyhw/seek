@@ -58,7 +58,7 @@ SEEK_AUTOPILOT_ALLOW_METERED=approved-by:c_kdblc4   # 用计量 key 前必须写
 
 不写 `ALLOW_METERED` 而钉了计量道 → 子进程**立刻失败**（exit 1，拒绝理由进 run record），不烧一分钱。
 
-其余细节：裁判/分解器在订阅道上经 cmd/seek 的 `llmChatClient` 适配器跑（无 cache 元数据——二线车道的既有降级）；每轮 Report 追加进 `~/.seek/autopilot/reports.jsonl`（§9.5③3 verdict ledger）；worktree 舰队照旧 no-remote guard + OS 沙盒，本地 commit 留给晨审。
+其余细节：裁判/分解器在订阅道上经 cmd/seek 的 `llmChatClient` 适配器跑（无 cache 元数据——二线车道的既有降级）；**该适配器每次 run 生成一个稳定的 session id 并写进 `llm.ChatRequest.SessionID`**——OpenCode Go 端点在缺 `x-opencode-session` 头时直接 400（MissingSessionID），分解/裁判是 run 的头两次调用，漏了这个头整条订阅道在生产上根本跑不起来（沙盒假端点已改成同样 400，防止回归）。每轮 Report 追加进 `~/.seek/autopilot/reports.jsonl`（§9.5③3 verdict ledger）；worktree 舰队照旧 no-remote guard + OS 沙盒，本地 commit 留给晨审。
 
 **全链路自测**（假 key + 临时 SEEK_HOME + 本地假 OpenAI 端点，不碰真实 key / 真实 ~/.seek）：
 
@@ -66,7 +66,7 @@ SEEK_AUTOPILOT_ALLOW_METERED=approved-by:c_kdblc4   # 用计量 key 前必须写
 scripts/autopilot-cron-e2e.sh   # ~4 分钟：正链（cron 到期→autopilot→ledger 落账）+ 计量闸拒绝路径
 ```
 
-> `--autopilot` fires the full unattended chain on schedule. The cron marker pins the flat-rate OpenCode lane by default (a stray DEEPSEEK_API_KEY in the scheduler env is never picked up); a metered lane additionally requires `SEEK_AUTOPILOT_ALLOW_METERED=approved-by:<who>` in `~/.seek/cron/env` or the child refuses to run. Full-chain self-test: `scripts/autopilot-cron-e2e.sh`.
+> `--autopilot` fires the full unattended chain on schedule. The cron marker pins the flat-rate OpenCode lane by default (a stray DEEPSEEK_API_KEY in the scheduler env is never picked up); a metered lane additionally requires `SEEK_AUTOPILOT_ALLOW_METERED=approved-by:<who>` in `~/.seek/cron/env` or the child refuses to run. The decompose/judge adapter sends a per-run `x-opencode-session` id (the Go endpoint 400s without it — the sandbox fake endpoint enforces the same). Full-chain self-test: `scripts/autopilot-cron-e2e.sh`.
 
 ---
 

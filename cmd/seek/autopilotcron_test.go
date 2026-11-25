@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/internal/routines"
@@ -145,17 +146,44 @@ func TestResolveAutopilotCronLane_TrimsEnvValues(t *testing.T) {
 type stubProvider struct {
 	events []llm.Event
 	calls  int
+	// reqs records every request the adapter handed downstream —
+	// the wire-shape assertions (SessionID presence + stability)
+	// read this, not the stub's own memory.
+	reqs []llm.ChatRequest
 }
 
 func (s *stubProvider) Name() string { return "stub" }
 
 func (s *stubProvider) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Event, error) {
 	s.calls++
+	s.reqs = append(s.reqs, req)
 	ch := make(chan llm.Event, len(s.events))
 	for _, e := range s.events {
 		ch <- e
 	}
 	close(ch)
+	return ch, nil
+}
+
+// blockingProvider emits a scripted prefix then blocks until ctx is
+// done — the cancellation shape (AGENTS.md testing discipline). The
+// adapter must return ctx.Err() rather than hang or claim an empty
+// reply.
+type blockingProvider struct {
+	reqs []llm.ChatRequest
+}
+
+func (b *blockingProvider) Name() string { return "blocking" }
+
+func (b *blockingProvider) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Event, error) {
+	b.reqs = append(b.reqs, req)
+	ch := make(chan llm.Event, 1)
+	ch <- llm.TextDelta{Delta: "partial"}
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+		ch <- llm.ErrorEvent{Err: ctx.Err()}
+	}()
 	return ch, nil
 }
 
@@ -188,6 +216,55 @@ func TestLlmChatClient_AssemblesTextAndUsage(t *testing.T) {
 	}
 }
 
+// The OpenCode Go lane 400s with MissingSessionID when
+// x-opencode-session is absent — the openai client only sets the
+// header when ChatRequest.SessionID is non-empty. The decomposer/judge
+// are the FIRST calls of a cron run, so an empty id there makes a
+// pinned lane unrunnable (the whole point of c_kdblc4's rework round).
+// Pinned here at the adapter's own boundary: non-empty, and identical
+// across the run's calls (decompose + judge = one conversation).
+func TestLlmChatClient_CarriesStableSessionID(t *testing.T) {
+	p := &stubProvider{events: []llm.Event{
+		llm.TextDelta{Delta: "ok"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 3, OutputTokens: 1},
+	}}
+	c := llmChatClient{p: p, sessionID: "run-session-abc"}
+	for i := 0; i < 2; i++ { // once as decomposer, once as judge
+		if _, err := c.Chat(context.Background(), &deepseek.ChatRequest{Model: "m"}); err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	if len(p.reqs) != 2 {
+		t.Fatalf("expected 2 downstream requests, got %d", len(p.reqs))
+	}
+	for i, r := range p.reqs {
+		if r.SessionID == "" {
+			t.Fatalf("request %d carried an empty SessionID — the real OpenCode endpoint would 400 MissingSessionID", i)
+		}
+		if r.SessionID != "run-session-abc" {
+			t.Fatalf("request %d SessionID = %q, want the run's stable id", i, r.SessionID)
+		}
+	}
+}
+
+// An empty run id must not be silently invented per call: the adapter
+// forwards exactly what the run gave it. (runAutopilot is responsible
+// for minting the id; this pins the "don't fabricate" half so a future
+// edit can't quietly drop back to "" and re-open the 400.)
+func TestLlmChatClient_EmptySessionIDIsNotFabricated(t *testing.T) {
+	p := &stubProvider{events: []llm.Event{
+		llm.TextDelta{Delta: "ok"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 3, OutputTokens: 1},
+	}}
+	c := llmChatClient{p: p}
+	if _, err := c.Chat(context.Background(), &deepseek.ChatRequest{Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.reqs[0].SessionID; got != "" {
+		t.Fatalf("adapter invented a session id %q — minting belongs to runAutopilot", got)
+	}
+}
+
 func TestLlmChatClient_StreamErrorPropagates(t *testing.T) {
 	p := &stubProvider{events: []llm.Event{
 		llm.TextDelta{Delta: "par"},
@@ -196,6 +273,65 @@ func TestLlmChatClient_StreamErrorPropagates(t *testing.T) {
 	c := llmChatClient{p: p}
 	if _, err := c.Chat(context.Background(), &deepseek.ChatRequest{Model: "m"}); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("stream error must propagate, got %v", err)
+	}
+}
+
+// A provider that keeps emitting AFTER its terminal error must not
+// block: the adapter drains to close and reports the FIRST error.
+// (Before the rework it returned on ErrorEvent, leaving the rest of
+// the channel unread — the provider's send side then blocks once the
+// 16-slot buffer fills, leaking the goroutine. Regression guard for
+// that shape: the scripted stream here is longer than 16 events.)
+func TestLlmChatClient_DrainsAfterStreamError(t *testing.T) {
+	events := []llm.Event{llm.ErrorEvent{Err: errors.New("first")}}
+	for i := 0; i < 40; i++ {
+		events = append(events, llm.TextDelta{Delta: "x"})
+	}
+	events = append(events, llm.TurnDone{FinishReason: "stop"})
+	p := &stubProvider{events: events}
+	c := llmChatClient{p: p}
+	err := make(chan error, 1)
+	go func() {
+		_, e := c.Chat(context.Background(), &deepseek.ChatRequest{Model: "m"})
+		err <- e
+	}()
+	select {
+	case e := <-err:
+		if e == nil || !strings.Contains(e.Error(), "first") {
+			t.Fatalf("first stream error must win, got %v", e)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("adapter blocked draining a stream after ErrorEvent — provider goroutine would leak")
+	}
+}
+
+// Cancellation (AGENTS.md testing discipline): a cancelled run must
+// surface ctx.Err(), not hang and not masquerade as an empty reply.
+func TestLlmChatClient_ContextCancel(t *testing.T) {
+	b := &blockingProvider{}
+	c := llmChatClient{p: b, sessionID: "run-session-abc"}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, e := c.Chat(ctx, &deepseek.ChatRequest{Model: "m"})
+		done <- e
+	}()
+	// Let the adapter get into the drain loop, then cancel.
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case e := <-done:
+		if !errors.Is(e, context.Canceled) {
+			t.Fatalf("cancelled run must return ctx.Err(), got %v", e)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("adapter did not return after ctx cancel")
+	}
+	// The cancelled request still carried the run's session id (a
+	// header-less first call would 400 before cancellation ever
+	// mattered).
+	if len(b.reqs) != 1 || b.reqs[0].SessionID != "run-session-abc" {
+		t.Fatalf("session id not on the cancelled call: %+v", b.reqs)
 	}
 }
 

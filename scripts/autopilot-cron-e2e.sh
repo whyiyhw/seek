@@ -72,6 +72,24 @@ class H(BaseHTTPRequestHandler):
         sysmsg = " ".join(m.get("content", "") for m in req.get("messages", [])
                           if m.get("role") == "system")
         auth = self.headers.get("authorization", "")
+        # The real OpenCode Go endpoint 400s with MissingSessionID when
+        # x-opencode-session is absent (verified 2026-11-18). Enforce it
+        # here too: without this the sandbox stays green while the
+        # production run dies on its FIRST decompose call (the
+        # c_kdblc4 rework-round defect).
+        sid = self.headers.get("x-opencode-session", "")
+        if not sid:
+            body = json.dumps({"error": {"type": "MissingSessionID",
+                                         "message": "x-opencode-session header is required"}}).encode()
+            LOG.write(json.dumps({"class": "missing-session",
+                                  "auth": auth, "session": sid,
+                                  "model": req.get("model", "")}) + "\n")
+            self.send_response(400)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if "planner for an autonomous" in sysmsg:
             cls = "decompose"
             reply = json.dumps([{"title": "greet",
@@ -85,7 +103,11 @@ class H(BaseHTTPRequestHandler):
         else:
             cls = "worker"
             reply = "DONE"
+        # `session` rides the log so the lane proof can assert the
+        # header was present (and shared by decompose+judge) instead of
+        # trusting that the adapter filled it.
         LOG.write(json.dumps({"class": cls, "auth": auth,
+                              "session": sid,
                               "model": req.get("model", "")}) + "\n")
         out = sse(reply, req.get("model", "")).encode()
         self.send_response(200)
@@ -182,15 +204,30 @@ import json, sys
 rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
 posts = [r for r in rows]
 assert posts, "server saw no chat calls"
+# The opencode lane's client contract: every call must carry
+# x-opencode-session (the fake server now 400s without it, so a
+# missing-session row would also break the chain — assert anyway so
+# the failure names the cause instead of "no decompose call").
+missing = [r for r in posts if not r.get("session")]
+assert not missing, f"calls without x-opencode-session: {missing}"
 bad = [r for r in posts if "sk-fake-deepseek" in r["auth"]]
 assert not bad, f"deepseek key was used: {bad}"
 assert all("sk-fake-opencode" in r["auth"] for r in posts), "non-opencode auth seen"
 cls = [r["class"] for r in posts]
 for want in ("decompose", "worker", "judge"):
     assert want in cls, f"chain incomplete, no {want} call: {cls}"
-print(f"[e2e] lane proof OK: {len(posts)} calls {[c for c in cls]} — all opencode key")
+# decompose + judge are ONE conversation (the adapter mints the id
+# once per run) — a per-call rotation would silently split the rerun's
+# routing/cache affinity. Workers carry their own sub-sid, which is
+# exactly why only these two are compared.
+by_cls = {}
+for r in posts:
+    by_cls.setdefault(r["class"], []).append(r["session"])
+sids = by_cls.get("decompose", []) + by_cls.get("judge", [])
+assert len(set(sids)) == 1, f"decompose/judge session ids diverged (not one run): {by_cls}"
+print(f"[e2e] lane proof OK: {len(posts)} calls {cls} — all opencode key; session header on every call, decompose+judge share one id")
 PY
-then :; else fail "lane proof failed (deepseek key used or chain incomplete)"; fi
+then :; else fail "lane proof failed (deepseek key used, missing session header, or chain incomplete)"; fi
 
 "$SEEK" cron delete e2e-positive >/dev/null
 

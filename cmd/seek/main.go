@@ -2652,11 +2652,21 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, provider llm.Pro
 	// provider (c_kdblc4 — the DeepSeek API key is metered, an
 	// unattended run defaults to opencode and must be able to actually
 	// RUN there, not just be pinned to it).
+	//
+	// The adapter also needs a wire identity: the OpenCode Go endpoint
+	// 400s (MissingSessionID) when x-opencode-session is absent, and
+	// the decomposer is the FIRST call of the run — so a nil id would
+	// kill the cron lane before any work happened. Minted once per
+	// run (not per call: decompose and judge are one conversation)
+	// via session.EphemeralID — the --no-save wire id, never persisted
+	// and never a session handle (the autopilot run saves no
+	// transcript of its orchestration turns). Workers get their own
+	// per-spawn sub-sid further down the chain.
 	var chat autopilot.DecomposeClient
 	if client != nil {
 		chat = client
 	} else if provider != nil {
-		chat = llmChatClient{p: provider}
+		chat = llmChatClient{p: provider, sessionID: session.EphemeralID()}
 	}
 	if chat == nil {
 		return fmt.Errorf("autopilot requires a model provider — set an API key (seek setup)")

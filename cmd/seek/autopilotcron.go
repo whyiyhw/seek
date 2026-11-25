@@ -148,6 +148,25 @@ func (l autopilotCronLane) LogLine() string {
 // second-tier lanes (the documented degradation) and reports as zero.
 type llmChatClient struct {
 	p llm.Provider
+
+	// sessionID is the run's conversation identity on the wire. It
+	// MUST be non-empty on the OpenCode Go lane: an absent
+	// x-opencode-session header is a hard 400 MissingSessionID
+	// (verified 2026-11-18, main.go's opencode buildProvider case),
+	// so a cron-fired run whose decomposer/judge omit it dies at the
+	// FIRST call — the lane would be pinned but unrunnable (the
+	// pitfall this adapter already closed once, docs/pitfalls/
+	// typed-agents-orchestration/autopilot-lane-pinned-but-unrunnable.md).
+	//
+	// One value per autopilot run, not per Chat call: the decomposer
+	// and the judge are two exchanges of the SAME run, and rotating
+	// the id per call would present each step as a new conversation
+	// (routing + prompt-cache affinity are per-conversation). The
+	// workers get their own ids further down the chain — the fleet
+	// spawns each subagent with its own sub-sid (cmd/seek/
+	// subagent_glue.go), so this value covers exactly the two calls
+	// this adapter makes.
+	sessionID string
 }
 
 // Chat runs one non-interactive exchange over the provider's stream.
@@ -166,18 +185,34 @@ func (c llmChatClient) Chat(ctx context.Context, req *deepseek.ChatRequest) (*de
 		Model:     req.Model,
 		Messages:  msgs,
 		MaxTokens: req.MaxTokens,
+		// The OpenCode Go lane's client contract: without this the
+		// real endpoint 400s (MissingSessionID) before any token is
+		// produced — see the field comment. Stable across the run's
+		// two exchanges, so decompose and judge look like one
+		// conversation.
+		SessionID: c.sessionID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	var sb strings.Builder
 	resp := &deepseek.ChatResponse{}
+	var streamErr error
 	for ev := range ch {
 		switch e := ev.(type) {
 		case llm.TextDelta:
 			sb.WriteString(e.Delta)
 		case llm.ErrorEvent:
-			return nil, fmt.Errorf("provider stream: %w", e.Err)
+			// Do NOT return here: a provider that emits a terminal
+			// error and then more events would block on an unread
+			// channel's buffer (and on the other providers' ctx-aware
+			// send) until the stream goroutine is reaped. Drain to
+			// close instead, remembering the first error — the
+			// provider's channel is documented as closing right
+			// after, so this is one short loop, not a hang.
+			if streamErr == nil {
+				streamErr = e.Err
+			}
 		case llm.TurnDone:
 			resp.Usage = deepseek.Usage{
 				PromptTokens:     e.InputTokens,
@@ -185,6 +220,14 @@ func (c llmChatClient) Chat(ctx context.Context, req *deepseek.ChatRequest) (*de
 				TotalTokens:      e.InputTokens + e.OutputTokens,
 			}
 		}
+	}
+	if streamErr != nil {
+		return nil, fmt.Errorf("provider stream: %w", streamErr)
+	}
+	// Same posture as pkg/agent's drain loops: a cancelled ctx is the
+	// caller's answer, not "the provider returned nothing".
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	content := sb.String()
 	if content == "" && resp.Usage.TotalTokens == 0 {
