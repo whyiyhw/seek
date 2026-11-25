@@ -91,6 +91,10 @@ type openAIRequest struct {
 	Tools         []openAITool    `json:"tools,omitempty"`
 	Stream        bool            `json:"stream"`
 	StreamOptions *streamOptions  `json:"stream_options,omitempty"`
+	// Temperature is a pointer so "absent" (nil) and explicit 0 are
+	// different wires: nil omits the key, keeping text-only requests
+	// byte-identical to their pre-knob form (prefix-cache contract).
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 type streamOptions struct {
@@ -297,6 +301,7 @@ func (c *Client) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan ll
 	buf, err := json.Marshal(openAIRequest{
 		Model: req.Model, Messages: convertMessages(req.Messages),
 		MaxTokens: req.MaxTokens, Tools: convertTools(req.Tools),
+		Temperature:   req.Temperature,
 		Stream:        true,
 		StreamOptions: &streamOptions{IncludeUsage: true},
 	})

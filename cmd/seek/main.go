@@ -13,9 +13,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -160,6 +162,14 @@ func main() {
 	// no config load, no flag parse. No-op on every other invocation/OS.
 	sandbox.RunTrampolineIfRequested()
 	if err := run(); err != nil {
+		// Bad flag VALUE (as opposed to a malformed flag): the complaint
+		// was already printed to stderr at the validation site, so exit 2
+		// without the "seek:" prefix — CI needs to tell "bad flag value"
+		// from "system failure", same contract as `seek keys`
+		// (keyscli.ErrUsage) and -tools below.
+		if errors.Is(err, errFlagUsage) {
+			os.Exit(2)
+		}
 		// -tools with unknown names: the error text (unknown list +
 		// available list) was already printed to stderr by
 		// applyToolsWhitelist; exit 2 without the "seek:" prefix so CI
@@ -367,6 +377,8 @@ func run() error {
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
 		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → effort-linked default (16k; 64k under /effort max), clamped to the model's own output ceiling")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
+		effortFlag    = flag.String("effort", "", "reasoning effort for this session: off | high | max; absent keeps the built-in default (max). 'max' also raises the derived completion cap to 64k (clamped to the model); an explicit --max-tokens still wins")
+		temperature   = flag.String("temperature", "", "sampling temperature, 0..2 (e.g. 0 for the judge lane's determinism pin). Absent = the provider's own default and NO temperature key on the wire, i.e. byte-identical to a pre-knob request (prefix-cache discipline)")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		plan          = flag.Bool("plan", false, "read-only exploration: no bash/writes/edits; produce a plan to review before executing")
 		jsonOut       = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
@@ -424,6 +436,27 @@ func run() error {
 	// helpRequested branch above already took it to stdout.
 	flag.Usage = func() { printUsage(flag.CommandLine.Output()) }
 	flag.Parse()
+
+	// Which flags the user actually typed. Resume stickiness (below)
+	// inherits saved session state unless the flag was passed explicitly,
+	// and that distinction only exists here — flag defaults look identical
+	// to a deliberate `--effort off`.
+	visited := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+	// --effort / --temperature validation happens BEFORE any provider
+	// probe: a bad value must die with the usage contract (exit 2), not
+	// after burning an API handshake.
+	effortValue, err := parseEffortFlag(*effortFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seek:", err)
+		return errFlagUsage
+	}
+	temperatureValue, err := parseTemperatureFlag(*temperature)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seek:", err)
+		return errFlagUsage
+	}
 
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
@@ -698,8 +731,16 @@ func run() error {
 	// "max". The /effort TUI command updates it through SetEffort below;
 	// agent.Config reads it when building requests, so the session-level
 	// choice applies to the very next call.
-	// Default is "max" — the deepest reasoning level.
+	// Default is "max" — the deepest reasoning level — but an explicit
+	// --effort (including `--effort off`, which maps to "") wins. The
+	// flag exists because print mode had no way to pick a cheaper level:
+	// every -p run, judge batches included, paid for max-depth reasoning
+	// on one-line classifications (measured 3.2× on output tokens, card
+	// c_trrsn7 / docs/notes/2026-11-24-judge-format-baseline.md §4).
 	var sessionEffort = "max"
+	if visited["effort"] {
+		sessionEffort = effortValue
+	}
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -1171,12 +1212,14 @@ func run() error {
 		}
 		// A resumed session may carry an /effort selection from the prior
 		// run — restore it before the agent is built so the very first
-		// turn after --continue honours the user's choice.
+		// turn after --continue honours the user's choice. An explicit
+		// --effort wins (same "flags set after -resume win" rule the
+		// model/yolo/plan inheritance above follows).
 		// NB: guard on loaded, not activeSession — activeSession is always
 		// non-nil (either loaded or a fresh session.New), so checking it
 		// would overwrite the "max" default with the empty string from a
 		// brand-new session (see commit <fill>).
-		if loaded != nil {
+		if loaded != nil && !visited["effort"] {
 			sessionEffort = activeSession.Effort
 		}
 
@@ -1378,6 +1421,7 @@ func run() error {
 				maxTurns:      *maxTurns,
 				getModel:      func() string { return sessionModel },
 				getEffort:     func() string { return sessionEffort },
+				temperature:   temperatureValue,
 				routes:        buildSubagentRoutes(dsClient, *baseURL),
 				bashGuardLane: autopilotGuardLane,
 				bashSandbox:   autopilotMode,
@@ -1516,6 +1560,7 @@ func run() error {
 		Provider:        provider,
 		Model:           *model,
 		Effort:          sessionEffort,
+		Temperature:     temperatureValue,
 		SafetyCheck:     safetyCheck,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
@@ -2124,6 +2169,7 @@ func run() error {
 				Provider:     provider,
 				Model:        sessionModel,
 				Effort:       sessionEffort,
+				Temperature:  temperatureValue,
 				SafetyCheck:  safetyCheck,
 				SystemPrompt: sp,
 				Tools:        reg,
@@ -4766,6 +4812,73 @@ func cronAutoTickEnabled(noCronTickFlag, acpLane bool) bool {
 // routes it straight to os.Exit(2) without the "seek:" prefix — same
 // shape as keyscli.ErrUsage.
 var errToolsUsage = errors.New("tools usage")
+
+// errFlagUsage is the sentinel behind exit code 2 for a bad flag VALUE
+// (--effort=turbo, --temperature=abc). The human-readable complaint is
+// printed to stderr by the validation site before returning this, so
+// main() routes it straight to os.Exit(2) — the same "usage error" lane
+// errToolsUsage and keyscli.ErrUsage use, so a CI caller can tell a typo
+// from a runtime failure.
+var errFlagUsage = errors.New("flag usage")
+
+// effortLevels are the wire values --effort accepts, keyed by the token
+// the user types. "off" maps to "" (no reasoning_effort key at all,
+// i.e. the model's own default) — the same normalization the TUI's
+// /effort uses, so a CLI run and a TUI session land on identical bytes.
+//
+// Deliberately only three rungs: DeepSeek V4 documents reasoning_effort
+// as high|max, and the whole point of `off` here is not to spell the
+// vendor's levels but to say "don't override" (docs/pitfalls/
+// deepseek-api/reasoning-effort-values-are-high-max-...).
+var effortLevels = map[string]string{
+	"off":  "",
+	"none": "", // accepted alias, mirrors /effort
+	"high": "high",
+	"max":  "max",
+}
+
+// parseEffortFlag validates the --effort value and returns the wire
+// form ("" = no override). An absent flag yields "" plus a nil error;
+// callers distinguish absent from `--effort off` via flag.Visit, never
+// via this return value.
+func parseEffortFlag(v string) (string, error) {
+	tok := strings.ToLower(strings.TrimSpace(v))
+	if tok == "" {
+		return "", nil
+	}
+	level, ok := effortLevels[tok]
+	if !ok {
+		return "", fmt.Errorf("--effort: unknown level %q — try off|high|max", v)
+	}
+	return level, nil
+}
+
+// parseTemperatureFlag validates --temperature and returns the pointer
+// the request builders want: nil for absent (no temperature key on the
+// wire — a request that never sets it stays byte-identical to its
+// pre-knob form, so the prefix cache keeps hitting), a pointer to 0 for
+// an explicit `--temperature 0`, which is a real, different request
+// (it is the determinism pin the judge lane wants).
+//
+// Range is 0..2, the intersection of the documented ranges that all
+// three second-tier lanes accept (Gemini 0..2, OpenAI 0..2, Anthropic
+// 0..1 — a 2 on Anthropic is answered by its own 400 rather than
+// silently clamped here; clamping would make "the vendor rejected the
+// value" look like "seek quietly rewrote it").
+func parseTemperatureFlag(v string) (*float64, error) {
+	tok := strings.TrimSpace(v)
+	if tok == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(tok, 64)
+	if err != nil {
+		return nil, fmt.Errorf("--temperature: %q is not a number (range 0..2)", v)
+	}
+	if math.IsNaN(f) || f < 0 || f > 2 {
+		return nil, fmt.Errorf("--temperature: %v out of range (0..2)", f)
+	}
+	return &f, nil
+}
 
 // parseToolsFlag splits the comma-separated -tools value into clean
 // tool names: surrounding whitespace trimmed, empty segments dropped,

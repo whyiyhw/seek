@@ -573,3 +573,38 @@ func TestBuildRequest_TextOnlyWireBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildRequest_Temperature pins the knob on the Anthropic wire (card
+// c_trrsn7): nil keeps the key out of the body so the streaming prefix
+// stays byte-identical, and an explicit 0 rides as a real number (the
+// judge lane's determinism pin — omitempty on a plain float would erase it).
+func TestBuildRequest_Temperature(t *testing.T) {
+	zero := 0.0
+	for _, c := range []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "absent → no key",
+			req: llm.ChatRequest{Model: "m", MaxTokens: 8,
+				Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"model":"m","max_tokens":8,"messages":[{"role":"user","content":"hi"}],"stream":true}`,
+		},
+		{
+			name: "explicit zero → key present",
+			req: llm.ChatRequest{Model: "m", MaxTokens: 8, Temperature: &zero,
+				Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"model":"m","max_tokens":8,"messages":[{"role":"user","content":"hi"}],` +
+				`"temperature":0,"stream":true}`,
+		},
+	} {
+		b, err := json.Marshal(buildRequest(c.req))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(b) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, b, c.want)
+		}
+	}
+}

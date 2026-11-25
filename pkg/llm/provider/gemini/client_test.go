@@ -393,3 +393,47 @@ func TestBuildRequest_TextOnlyWireBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildRequest_Temperature pins the knob inside generationConfig
+// (card c_trrsn7): with no temperature the generationConfig block keeps
+// its previous shape (only maxOutputTokens), and an explicit 0 adds the
+// key without dropping the token cap.
+func TestBuildRequest_Temperature(t *testing.T) {
+	zero := 0.0
+	cases := []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "absent → no key",
+			req: llm.ChatRequest{Model: "m", MaxTokens: 128,
+				Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],` +
+				`"generationConfig":{"maxOutputTokens":128}}`,
+		},
+		{
+			name: "explicit zero → key present",
+			req: llm.ChatRequest{Model: "m", MaxTokens: 128, Temperature: &zero,
+				Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],` +
+				`"generationConfig":{"maxOutputTokens":128,"temperature":0}}`,
+		},
+		{
+			name: "temperature only (no token cap) → config block appears",
+			req: llm.ChatRequest{Model: "m", Temperature: &zero,
+				Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"contents":[{"role":"user","parts":[{"text":"hi"}]}],` +
+				`"generationConfig":{"temperature":0}}`,
+		},
+	}
+	for _, c := range cases {
+		b, err := buildRequest(c.req)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if string(b) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, b, c.want)
+		}
+	}
+}
