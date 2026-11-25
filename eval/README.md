@@ -624,6 +624,10 @@ offset 步长 `+50` 991 次）。
 | `reread_rate` | Σ 同会话同文件 (`read 次数 − 1`) / read 总数 —— 多余调用口径 |
 | `pagination_share` | 被重读文件里 offset 出现过 >1 个不同值的比例（offset 缺省视作 1） |
 | `offset_steps` | 同会话同文件 offset 集合**去重后升序**相邻差（跳页步长分布，top5） |
+| `chains.children` / `parents_found` / `orphans` | 派生会话数（有 `parent_id`）/ 其中父会话也在扫描范围内 / 父缺失的断链数。断链单列，**不当 0 压缩比** |
+| `chains.compression_mean` | 子会话首条**非 system** 消息的 content 字节（扣掉 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**）。两处「不含 system」都承重——session JSONL 的 message 区以 system 开头（实测 461/461），算进分母会让比值恒等于 system 占比。分母也不含 `tool_calls.arguments`（那是给工具消费的指令，重复计入会让比值失真） |
+| `chains.child_head_rate` | 子会话前 `CHAIN_WINDOW_CALLS`(=10) 个 tool_call 里、参数路径命中「父会话读过的文件集合」的 read 数 / 同期 read 数。压缩的代价是信息丢失，最先表现为「刚读过的又读一遍」 |
+| `chains.baseline` | 参照系：同 cwd、无 `parent_id`、**且不是任何链的父会话**的聚合 `Σ(次数−1)/read`。父会话不算——它本身就是被压缩掉的那段历史 |
 | 分组 | 指标同时按 `model × created_at[:7]` 汇总——5 月 v0.x 时代占 82% 的调用量，不分组会把版本混杂读成趋势 |
 
 读取侧纪律：权限受限文件跳过并计数（`skipped_files`）；解析失败行计数

@@ -98,6 +98,15 @@ Run `/compact` before a long task if you're near your context limit.
 
 **Auto-compact** (`auto_compact` in `~/.seek/config.json`, or `$SEEK_AUTO_COMPACT` for one launch) runs the same thing by itself when the context crosses a configured point — `{"at_tokens": 350000}` or `{"at_fraction": 0.35}`. It fires only at rest (no queued message, no pending steer, no `/goal` loop, not after Esc), and inherits the fork-snapshot behaviour: the pre-compact history stays on disk, `--resume <old-id>` still reaches it. See [guide-budget.md](guide-budget.md) §2.5.
 
+### Measuring whether compaction helped
+
+Two instruments, all local, none requiring a real key:
+
+| Question | Instrument |
+|---|---|
+| When does it fire, and what did it cost? | `seek ui-trace` — the `compact` row carries the trigger (`manual`/`auto`) in `detail`, the pre-compact prompt tokens in `tokens`, and the wall-clock wait in `dur_ms`. The folded summary prints the token total plus duration total/average |
+| Over real history: how much gets compressed, and what does the child re-read? | `scripts/transcript-stats` — its `compact 链` section builds `parent_id` chains and reports the compression ratio and the child's first-K known re-reads against a no-compaction baseline |
+
 ## Distilling with /distill
 
 `/distill` scans the current session's conversation history and uses the DeepSeek reasoning model to propose ≤3 project-level decisions worth remembering. Each candidate is presented for y/n/e review before being written to project memory (M layer).

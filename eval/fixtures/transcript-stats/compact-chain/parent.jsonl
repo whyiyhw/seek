@@ -1,0 +1,8 @@
+{"schema_version": 3, "id": "20261120-100000-parent", "created_at": "2026-11-20T10:00:00.000000Z", "updated_at": "2026-11-20T10:05:00.000000Z", "model": "deepseek-v4-flash", "yolo": true, "cwd": "/tmp/fixture", "system_prompt": "fixture", "turns": 3, "tool_calls": 2, "usage": {"prompt_tokens": 90000, "completion_tokens": 900, "total_tokens": 90900}}
+{"role": "system", "content": "You are seek, a DeepSeek-powered coding agent. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. "}
+{"role": "user", "content": "read a.md and b.md so we know what is in them"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/w/a.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "c1", "content": "a.md body, 200 lines"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/w/b.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "c2", "content": "b.md body, 120 lines"}
+{"role": "assistant", "content": "Both files describe the fixture layout: a.md is the entry point, b.md lists the modules."}

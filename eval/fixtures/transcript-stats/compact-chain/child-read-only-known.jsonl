@@ -1,0 +1,6 @@
+{"schema_version": 3, "id": "20261120-101800-child-clean", "created_at": "2026-11-20T10:18:00.000000Z", "updated_at": "2026-11-20T10:22:00.000000Z", "model": "deepseek-v4-flash", "yolo": true, "cwd": "/tmp/fixture", "system_prompt": "fixture", "parent_id": "20261120-100000-parent", "turns": 1, "tool_calls": 1, "usage": {"prompt_tokens": 400, "completion_tokens": 20, "total_tokens": 420}}
+{"role": "user", "content": "Here is a summary of our earlier conversation. Continue from this context:\n\nBRIEFING: we read /w/a.md (entry point) and /w/b.md (module list)."}
+{"role": "assistant", "content": "Understood — I have the context. Ready to continue."}
+{"role": "user", "content": "summarise the module list"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "e1", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/w/b.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "e1", "content": "b.md body, 120 lines"}
