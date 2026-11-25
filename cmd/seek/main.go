@@ -1057,10 +1057,22 @@ func run() error {
 	// may drop MCP tools this section still names — same static-prose
 	// posture as rootTpl; the section describes what loaded, the
 	// request's tools array is the callable truth.
+	//
+	// (judge 前置④, c_xujwvq) The config now loads BEFORE any child
+	// forks and feeds checkToolsWhitelistPreMCP: every -tools name that
+	// is provably invalid here (not a built-in, not a later built-in,
+	// and no configured MCP server could supply it) exits 2 without
+	// paying a single subprocess — judge/CI lanes used to fork all
+	// configured servers only to die in applyToolsWhitelist afterwards.
 	var mcpSection string
-	if mcpCfg, err := mcpconfig.Load(); err != nil {
-		fmt.Fprintln(os.Stderr, "mcp config:", err)
-	} else if len(mcpCfg.MCPServers) > 0 {
+	mcpCfg, mcpCfgErr := mcpconfig.Load()
+	if mcpCfgErr != nil {
+		fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+	}
+	if err := checkToolsWhitelistPreMCP(*toolsFlag, reg, mcpCfg); err != nil {
+		return err
+	}
+	if mcpCfgErr == nil && len(mcpCfg.MCPServers) > 0 {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{

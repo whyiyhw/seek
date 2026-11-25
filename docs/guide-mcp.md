@@ -55,6 +55,8 @@ The current MCP integration is a thin bridge: tools are available but the agent 
 
 seek connects to all configured servers at startup. A server that fails to start or initialize is reported on stderr but does not prevent seek from running — the remaining servers and all built-in tools are still available.
 
+If you pass `--tools`, seek checks the listed names **before** starting any server and exits 2 without spawning anything when no configured server could possibly supply one (a typo, a built-in you misspelled). Names that only the server itself can confirm — anything under a configured server's `<server>__` prefix, or any bare name while a server is configured with `"prefix": false` — are still validated after the tools are listed.
+
 ## Example: filesystem server
 
 ```json

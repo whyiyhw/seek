@@ -109,6 +109,22 @@ ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 
 **修法**：接上 `{"type":"json_object"}`（DeepSeek 支持的最低要求面），**不做 JSON Schema**（见 §4 D4）。
 
+#### 前置 ④：`-tools` 校验排在 MCP fork 之后（错误路径比正常路径贵）
+
+2026-11-24 实测：配了 MCP 的机器上，`seek --tools nosuch` 先 fork 全部 server（`mcp: loaded 9 tool(s)`）才报 exit 2；`--tools read` 同样白付 fork，只在提示词省 244 tok。
+
+**根因**：唯一一次校验在 `applyToolsWhitelist`，它必须排在最后一个 `reg.Add` 之后（MCP 工具名只有 `ListTools` 之后才存在），而 `LoadServers` 就在它前面——校验天然晚于它要拦的副作用。
+
+**修法**（已交付 2026-11-25，card c_xujwvq）：`checkToolsWhitelistPreMCP`（`cmd/seek/tools_precheck.go`）在 `LoadServers` 之前跑，读同一份 `mcpconfig.Config` 做三分判定：
+
+| 判定 | 条件 | 动作 |
+|---|---|---|
+| 已成立 | 已注册内建名，或 `postMCPTBuiltInTools`（MCP 之后才注册的内建） | 放行 |
+| 可证明不可能 | 非内建，且**没有任何**已配置 server 能提供它 | 当场 exit 2（同一 stderr 措辞，零 subprocess） |
+| 推迟 | 命中已配置 server 的 `<server>__` 前缀，或存在 `"prefix": false` 的 server（可注册任意裸名） | 放行到加载后校验 |
+
+「MCP 提供的名字必须加载后才能校验」不复存在：**前缀可判定就前置拒，不可判定的显式推迟**。推迟不是漏洞而是契约的一部分——`TestCheckToolsWhitelistPreMCP_Table` 三分表锁死，E2E 用子进程 pid 文件证明「拒绝时零 fork」（`TestToolsPrecheckE2E_UnknownNameSpawnsNoMCPServer`）。判读/CI 车道的错误路径从此不再付 9 个 server 的启动延迟。
+
 ---
 
 ## 3. 接口契约
