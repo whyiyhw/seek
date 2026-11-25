@@ -4,11 +4,11 @@ import "testing"
 
 func TestKeepAlpha(t *testing.T) {
 	cases := map[string]string{
-		"a1b2c3":     "abc",
+		"a1b2c3":      "abc",
 		"HELLO-World": "HELLOWorld",
 		"你好ok":        "ok",
-		"":           "",
-		"123!!":      "",
+		"":            "",
+		"123!!":       "",
 	}
 	for in, want := range cases {
 		if got := KeepAlpha(in); got != want {
@@ -19,7 +19,7 @@ func TestKeepAlpha(t *testing.T) {
 
 func TestLowerASCII(t *testing.T) {
 	cases := map[string]string{
-		"AbC":    "abc",
+		"AbC":     "abc",
 		"Ünïcode": "Ünïcode",
 		"mixed42": "mixed42",
 	}
