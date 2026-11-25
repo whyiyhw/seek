@@ -47,8 +47,8 @@ const (
 	// rescueOutputReserve is subtracted from the window for the summary
 	// itself. The summariser asks for ≤ ~400 words ≈ 600 tokens; 4096
 	// covers it plus wire overhead with margin. Some APIs also validate
-	// input + max_tokens ≤ window, so the reserve never goes below
-	// cfg.MaxTokens (rescueBudget applies that).
+	// input + max_tokens ≤ window, so the reserve never goes below the
+	// request's own max_tokens (rescueBudget applies that).
 	rescueOutputReserve = 4096
 )
 
@@ -59,10 +59,11 @@ const rescueNote = "\n\n[Context rescue: the conversation above is INCOMPLETE �
 
 // rescueBudget returns the input-token budget for a summariser request
 // on the given model: the model's window minus a reserve for the
-// summary output (never below cfg.MaxTokens). Unknown models get
-// budget.Default — conservative for a 1M-context model (it trims a
-// summary's oldest material needlessly) but correct for a small one,
-// and the reactive retry covers the opposite error.
+// summary output (never below the request's own max_tokens, which the
+// caller passes in). Unknown models get budget.Default — conservative
+// for a 1M-context model (it trims a summary's oldest material
+// needlessly) but correct for a small one, and the reactive retry covers
+// the opposite error.
 func rescueBudget(model string, maxTokens int) int {
 	reserve := rescueOutputReserve
 	if maxTokens > reserve {

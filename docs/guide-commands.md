@@ -12,7 +12,7 @@ All slash commands, key bindings, and CLI flags.
 | `/hooks` | | List active shell hooks (user + project) |
 | `/clear` | `/new` | Start a fresh conversation (saves current session, opens new one, clears screen). Ctrl+L clears display only |
 | `/model` | `/model [id]` | Switch model — no arg opens a picker |
-| `/effort` | `/effort [off\|high\|max]` | Set DeepSeek reasoning effort |
+| `/effort` | `/effort [off\|high\|max]` | Set DeepSeek reasoning effort; under the default `--max-tokens`, `max` also raises the per-call completion cap to 64k, clamped to the model's own output ceiling |
 | `/yolo` | | Toggle --yolo (bypass permission prompts) |
 | `/plan` | | Toggle plan mode (read-only exploration → propose → execute) |
 | `/review` | `/review [branch]` | Code review working-tree changes (shorthand for /code-review quick) |

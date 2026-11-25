@@ -148,6 +148,86 @@ func Limit(model string) int {
 	return Default
 }
 
+// outputLimits is the completion-token ceiling per model — the second
+// model-keyed number table in this package, and deliberately the same
+// shape as contextLimits (compiled floor + catalogue override).
+//
+// Why it lives here and not in pkg/agent: it is a MODEL fact, and the
+// effort-linked budget in pkg/agent is only allowed to ASK for a number.
+// pkg/agent's own default (16K, or 64K under /effort max) is a
+// DeepSeek-calibrated guess; on a lane whose model caps output lower,
+// sending it is a hard 400 on the very first turn. The two lanes never
+// disagreed about this — the second-tier path simply ignored the effort
+// linkage, so it always sent 16K and the mismatch stayed hidden
+// (card c_rnhce7).
+//
+// Values are the vendor's published max completion tokens ("output" in
+// the OpenCode catalogue's limit block). A model absent here is
+// UNKNOWN, not zero: unknown means "no ceiling claimed", and callers
+// must keep their own budget rather than clamp to a made-up number
+// (card c_rnhce7 — the effort-linked cap in pkg/agent asks this table).
+var outputLimits = map[string]int{
+	// DeepSeek V4.1 Flash — "1M context / 384K max output"
+	// (pkg/deepseek/types.go's model comment, api-docs.deepseek.com).
+	// Same number on the OpenCode Go gateway's own row.
+	"deepseek-flash":      384_000,
+	"deepseek-v4.1-flash": 384_000,
+	"deepseek-v4-pro":     384_000,
+	// Curated second-tier defaults. These are the rows that actually
+	// bite: each caps output BELOW pkg/agent's 64K effort budget, so
+	// without an entry /effort max would 400 them.
+	"claude-sonnet-4-20250514":   64_000,
+	"claude-3-5-sonnet-20241022": 8_192,
+	"gpt-4o":                     16_384,
+	"gpt-4o-mini":                16_384,
+	"gemini-2.0-flash":           8_192,
+	"gemini-1.5-pro":             8_192,
+	// OpenDesign Cloud lane rows whose caps are below 64K.
+	"claude-haiku-5.5": 64_000,
+}
+
+// overrideOutputs, when non-nil, wins over outputLimits. Installed once
+// per session by the OpenCode catalogue refresh (internal/opencatalog),
+// which carries each row's real `limit.output` — same sanctioned-caller
+// contract as SetLimits.
+var (
+	outputMu       sync.RWMutex
+	overrideOutput map[string]int
+)
+
+// SetOutputLimits installs a runtime completion-cap override; nil clears
+// it. Sanctioned caller: internal/opencatalog. Values <= 0 are dropped
+// (an absent cap and a zero cap must not be confused).
+func SetOutputLimits(m map[string]int) {
+	clean := make(map[string]int, len(m))
+	for id, v := range m {
+		if v > 0 {
+			clean[id] = v
+		}
+	}
+	outputMu.Lock()
+	defer outputMu.Unlock()
+	if len(clean) == 0 {
+		overrideOutput = nil
+		return
+	}
+	overrideOutput = clean
+}
+
+// OutputLimit returns the completion-token ceiling for a model and
+// whether it is KNOWN at all (override first, then the compiled table).
+// No default: callers that get false must keep their own budget — a
+// guessed ceiling is exactly the failure mode this table prevents.
+func OutputLimit(model string) (int, bool) {
+	outputMu.RLock()
+	defer outputMu.RUnlock()
+	if v, ok := overrideOutput[model]; ok {
+		return v, true
+	}
+	v, ok := outputLimits[model]
+	return v, ok
+}
+
 // Severity describes how worried seek should be about a given token
 // usage relative to the model's context window.
 type Severity int

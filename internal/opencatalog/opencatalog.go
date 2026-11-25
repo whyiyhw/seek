@@ -71,13 +71,19 @@ const (
 
 // Model is one normalised catalogue row.
 type Model struct {
-	ID      string  `json:"id"`
-	Label   string  `json:"label"`
-	Context int     `json:"context"`
-	Input   float64 `json:"input_per_mtok"`
-	Hit     float64 `json:"hit_per_mtok"`
-	Output  float64 `json:"output_per_mtok"`
-	Free    bool    `json:"free"`
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Context int    `json:"context"`
+	// OutputLimit is the endpoint's `limit.output` — the model's max
+	// completion tokens. Installed into internal/budget's output table so
+	// the effort-linked cap in pkg/agent can be clamped to a number the
+	// model actually accepts (card c_rnhce7). 0 = the endpoint didn't say,
+	// which leaves whatever compiled value is in force.
+	OutputLimit int     `json:"output_limit,omitempty"`
+	Input       float64 `json:"input_per_mtok"`
+	Hit         float64 `json:"hit_per_mtok"`
+	Output      float64 `json:"output_per_mtok"`
+	Free        bool    `json:"free"`
 	// Vision mirrors the endpoint's `modalities.input`: true when the
 	// model accepts image content parts. It is the lane's authoritative
 	// answer for ids the compiled table (internal/modelcap) has never
@@ -134,6 +140,7 @@ var directLaneIDs = map[string]bool{
 func (s Snapshot) Install() {
 	rates := make(map[string]pricing.ModelPricing, len(s.Models))
 	limits := make(map[string]int, len(s.Models))
+	outputs := make(map[string]int, len(s.Models))
 	vision := make(map[string]bool, len(s.Models))
 	files := make(map[string]bool, len(s.Models))
 	for _, m := range s.Models {
@@ -142,6 +149,14 @@ func (s Snapshot) Install() {
 		}
 		vision[m.ID] = m.Vision
 		files[m.ID] = m.Files
+		// The output ceiling is installed even for directLaneIDs: the
+		// pricing skip below exists because a shared id's RATE CARD
+		// belongs to its other lane, but max-completion-tokens is a
+		// property of the model, not of who bills it (same reasoning as
+		// the vision/files grants just above).
+		if m.OutputLimit > 0 {
+			outputs[m.ID] = m.OutputLimit
+		}
 		if directLaneIDs[m.ID] {
 			continue
 		}
@@ -156,6 +171,7 @@ func (s Snapshot) Install() {
 	}
 	pricing.SetModelRates(rates)
 	budget.SetLimits(limits)
+	budget.SetOutputLimits(outputs)
 	modelcap.SetVision(vision)
 	modelcap.SetFiles(files)
 }
@@ -209,6 +225,9 @@ func Embedded() Snapshot {
 		}
 		if w, ok := budget.Known(row.ID); ok {
 			m.Context = w
+		}
+		if o, ok := budget.OutputLimit(row.ID); ok {
+			m.OutputLimit = o
 		}
 		if card, ok := pricing.LookupRate(row.ID); ok {
 			m.Input, m.Hit, m.Output = card.InputMissPerMTok, card.InputHitPerMTok, card.OutputPerMTok
@@ -315,6 +334,10 @@ type wireModel struct {
 	} `json:"cost"`
 	Limit struct {
 		Context int `json:"context"`
+		// Output is the model's max completion tokens — the ceiling
+		// pkg/agent's effort-linked budget gets clamped to (card
+		// c_rnhce7). Absent/0 on rows that don't publish it.
+		Output int `json:"output"`
 	} `json:"limit"`
 	Modalities struct {
 		Input []string `json:"input"`
@@ -412,15 +435,16 @@ func Parse(body []byte, now time.Time) (Snapshot, error) {
 		}
 		free := w.Cost.Text.Input.Price == 0 && w.Cost.Text.Output.Price == 0
 		snap.Models = append(snap.Models, Model{
-			ID:      w.ID,
-			Label:   labelFor(w, free),
-			Context: w.Limit.Context,
-			Input:   w.Cost.Text.Input.Price * factor,
-			Hit:     w.Cost.Text.Input.Cache.Read * factor,
-			Output:  w.Cost.Text.Output.Price * factor,
-			Free:    free,
-			Vision:  acceptsImages(w.Modalities.Input),
-			Files:   acceptsFiles(w.Modalities.Input),
+			ID:          w.ID,
+			Label:       labelFor(w, free),
+			Context:     w.Limit.Context,
+			OutputLimit: w.Limit.Output,
+			Input:       w.Cost.Text.Input.Price * factor,
+			Hit:         w.Cost.Text.Input.Cache.Read * factor,
+			Output:      w.Cost.Text.Output.Price * factor,
+			Free:        free,
+			Vision:      acceptsImages(w.Modalities.Input),
+			Files:       acceptsFiles(w.Modalities.Input),
 		})
 	}
 	if len(snap.Models) == 0 {

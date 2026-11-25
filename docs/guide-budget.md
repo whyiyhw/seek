@@ -24,6 +24,27 @@ seek 维护了一份各模型的上下文窗口大小硬编码表（来源：各
 
 > 表格是硬编码的，**不自动探测**。vendor 发布新限制时手动更新——过时的表安全地少报容量（fallback 到保守值），比运行时探测引入的 OSC-11 / TTY 问题要好。
 
+### 1.1 单次补全上限 / Completion cap per call
+
+第二张模型键表：每个模型**单次调用最多能输出多少 token**。它不是给状态栏看的，而是给**请求参数**用的——`max_tokens` 送超过模型自身上限就是硬 400。
+
+| 模型 | 单次补全上限 |
+|------|-------------|
+| `deepseek-flash` / `deepseek-v4.1-flash` / `deepseek-v4-pro` | 384,000 |
+| `claude-sonnet-4-20250514` | 64,000 |
+| `claude-3-5-sonnet-20241022` | 8,192 |
+| `gpt-4o` / `gpt-4o-mini` | 16,384 |
+| `gemini-2.0-flash` / `gemini-1.5-pro` | 8,192 |
+| `claude-haiku-5.5` | 64,000 |
+| 其它模型 | 未知 = 不钳制 |
+
+规则（`pkg/agent.turnMaxTokens`）：
+
+- **推导出来的**预算会被钳到这张表。默认 16k；`/effort max` 抬到 64k——但 gpt-4o 只收 16k、gemini 只收 8k，不钳制就是第一轮 400。我们自己编的数字不能把请求打挂。
+- **显式 `--max-tokens` 不钳制**。表可能过时（这张表和上下文表同一纪律：过时只许少报），静默削掉用户明确给的数字会把"表过期"伪装成"神秘截断"；照发则拿到厂商自己那句清晰的 "max_tokens too large"。
+- **未知模型不钳制**（`budget.OutputLimit` 返回 `ok=false`，不是 0——把未知当 0 会把每个请求打成零输出）。
+- OpenCode / OpenDesign 车道的目录里带 `limit.output` 的，运行时覆盖这张表（`internal/opencatalog` 的既有安装通道）。
+
 ---
 
 ## 2. 预算警告 / Budget warnings

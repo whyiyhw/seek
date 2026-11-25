@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -410,11 +411,21 @@ func streamBody(ctx context.Context, r io.Reader, out chan<- llm.Event) {
 		}
 	}
 
-	for i := 0; i < len(accum); i++ {
+	// Emit assembled calls in index order. The indices are NOT
+	// guaranteed to be contiguous: a gateway that dropped or coalesced
+	// one delta (or a strict-schema provider that renumbers after a
+	// retry) leaves a hole, and the previous `if a == nil { break }`
+	// then discarded every call AFTER the hole — silently, because
+	// nothing was ever emitted, which made the turn look like an empty
+	// completion (card c_lh6tlq). Sort the keys instead of assuming
+	// 0..n-1.
+	idx := make([]int, 0, len(accum))
+	for i := range accum {
+		idx = append(idx, i)
+	}
+	sort.Ints(idx)
+	for _, i := range idx {
 		a := accum[i]
-		if a == nil {
-			break
-		}
 		out <- llm.ToolCallDone{ID: a.id, Name: a.name, Arguments: a.args.String()}
 	}
 	out <- llm.TurnDone{FinishReason: lastFinish, InputTokens: inputTokens, OutputTokens: outputTokens, CachedInputTokens: cachedTokens}

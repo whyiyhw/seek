@@ -145,6 +145,42 @@ func TestChatStream_MultipleToolCalls(t *testing.T) {
 	}
 }
 
+// TestChatStream_SparseToolCallIndices: the `index` field is a stream
+// cursor, NOT a promise that the set is contiguous 0..n-1. A gateway
+// that coalesces or drops one delta (or renumbers after an internal
+// retry) leaves a hole. The assembler used `if a == nil { break }`,
+// which silently discarded every call AFTER the hole — nothing was
+// emitted, so the turn looked like an empty completion and (pre
+// c_lh6tlq) killed the session on the second-tier lanes.
+func TestChatStream_SparseToolCallIndices(t *testing.T) {
+	srv := sseServer(t, []string{
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"a","arguments":"{}"}}]},"finish_reason":null}]}`,
+		// index 1 never arrives — the hole.
+		`{"choices":[{"delta":{"tool_calls":[{"index":2,"id":"c3","type":"function","function":{"name":"c","arguments":"{}"}}]},"finish_reason":null}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4}}`,
+		`[DONE]`,
+	})
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tcds []llm.ToolCallDone
+	for _, e := range drain(ch) {
+		if d, ok := e.(llm.ToolCallDone); ok {
+			tcds = append(tcds, d)
+		}
+	}
+	if len(tcds) != 2 {
+		t.Fatalf("got %d ToolCallDone, want 2 (a hole at index 1 must not drop index 2): %+v", len(tcds), tcds)
+	}
+	// Emitted in ascending index order, not map order.
+	if tcds[0].ID != "c1" || tcds[1].ID != "c3" {
+		t.Errorf("calls = %q,%q, want c1,c3 (ascending index order)", tcds[0].ID, tcds[1].ID)
+	}
+}
+
 // 4. Cancelled context closes channel.
 func TestChatStream_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

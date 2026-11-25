@@ -2834,6 +2834,92 @@ func TestTurnMaxTokens_EffortLinkage(t *testing.T) {
 	}
 }
 
+// TestTurnMaxTokens_EffortLinkage_SecondTier is the c_rnhce7 half of the
+// cap contract: runTurnLLM used to read cfg.MaxTokens directly, so
+// /effort max never reached the wire on any second-tier lane and the
+// value was never clamped to the model's real ceiling either. Both
+// halves are asserted here, at the wire (the ChatRequest actually built):
+//
+//   - the effort linkage now applies to this lane too;
+//   - the derived base is clamped to internal/budget's OutputLimit, so a
+//     model that caps output at 8K/16K never receives 64K (a hard 400);
+//   - an explicit --max-tokens still wins verbatim, because it is the
+//     user's deliberate choice and overriding it would be a surprise.
+func TestTurnMaxTokens_EffortLinkage_SecondTier(t *testing.T) {
+	t.Parallel()
+	// A script that closes cleanly so Prompt returns after one turn.
+	clean := []llm.Event{
+		llm.TextDelta{Delta: "ok"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 1, OutputTokens: 1},
+	}
+	cases := []struct {
+		name        string
+		model       string
+		effort      string
+		explicitCap int // 0 = leave MaxTokens unset
+		want        int
+	}{
+		// Unlocked model: the effort linkage is what it always was.
+		{"unlocked model, no effort", "glm-5.3", "", 0, 16384},
+		{"unlocked model, effort max", "glm-5.3", "max", 0, 65536},
+		// Clamped models: raising the base must not exceed the ceiling.
+		{"gpt-4o caps at 16k", "gpt-4o", "max", 0, 16384},
+		{"gemini caps at 8k", "gemini-2.0-flash", "max", 0, 8192},
+		{"claude-3.5 caps at 8k", "claude-3-5-sonnet-20241022", "max", 0, 8192},
+		// A ceiling above the base changes nothing.
+		{"deepseek v4.1 flash 384k ceiling", "deepseek-v4.1-flash", "max", 0, 65536},
+		// Explicit --max-tokens keeps winning (documented contract) —
+		// including when it EXCEEDS the ceiling: our table may be stale,
+		// so the vendor's own rejection beats a silent shave.
+		{"explicit cap untouched", "gpt-4o", "max", 4096, 4096},
+		{"explicit cap above ceiling not shaved", "gpt-4o", "max", 100_000, 100_000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			prov := &fakeUsageProvider{events: clean}
+			cfg := Config{Provider: prov, Model: c.model, Effort: c.effort}
+			if c.explicitCap > 0 {
+				cfg.MaxTokens = c.explicitCap
+			}
+			ag, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range ag.Prompt(context.Background(), "hi") {
+			}
+			req := prov.lastReq.Load()
+			if req == nil {
+				t.Fatal("provider was never called")
+			}
+			if req.MaxTokens != c.want {
+				t.Errorf("model=%q effort=%q explicit=%d: max_tokens sent = %d, want %d",
+					c.model, c.effort, c.explicitCap, req.MaxTokens, c.want)
+			}
+		})
+	}
+}
+
+// TestTurnMaxTokens_UnknownModelNotClamped pins the absence rule: a model
+// with NO known ceiling must keep the derived base. Reporting "0" for
+// unknown would zero every request on a lane the table hasn't heard of.
+func TestTurnMaxTokens_UnknownModelNotClamped(t *testing.T) {
+	t.Parallel()
+	prov := &fakeUsageProvider{events: []llm.Event{
+		llm.TextDelta{Delta: "ok"},
+		llm.TurnDone{FinishReason: "stop", InputTokens: 1, OutputTokens: 1},
+	}}
+	ag, err := New(Config{Provider: prov, Model: "totally-unknown-model", Effort: "max"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ag.Prompt(context.Background(), "hi") {
+	}
+	if req := prov.lastReq.Load(); req == nil || req.MaxTokens != 65536 {
+		t.Errorf("unknown model must keep the effort base (65536), got %+v", req)
+	}
+}
+
 // TestSetEffort_CapTakesEffectNextPrompt pins the mid-session
 // semantics: switching to /effort max between turns raises the cap on
 // the NEXT request (SetEffort's documented between-turns contract).
@@ -2889,9 +2975,17 @@ func TestSetEffort_CapTakesEffectNextPrompt(t *testing.T) {
 // inspect the Usage it synthesises.
 type fakeUsageProvider struct {
 	events []llm.Event
+	// calls counts ChatStream invocations, so tests can assert the
+	// "refusals / budget-exhausted empties are never retried" contract.
+	calls atomic.Int32
+	// lastReq records the most recent ChatRequest, so tests can assert
+	// on the wire-level knobs (max_tokens above all) this path sets.
+	lastReq atomic.Pointer[llm.ChatRequest]
 }
 
 func (f *fakeUsageProvider) ChatStream(ctx context.Context, req llm.ChatRequest) (<-chan llm.Event, error) {
+	f.calls.Add(1)
+	f.lastReq.Store(&req)
 	ch := make(chan llm.Event, len(f.events))
 	for _, e := range f.events {
 		ch <- e
@@ -2974,6 +3068,157 @@ func TestRunTurnLLM_StartedEmpty_SelfHeals(t *testing.T) {
 	}
 	if markers != emptyPlaceholderHardStop {
 		t.Errorf("history holds %d markers, want %d", markers, emptyPlaceholderHardStop)
+	}
+}
+
+// TestRunTurnLLM_BudgetExhaustedEmpty_SelfHeals is the card c_lh6tlq
+// regression: the second-tier lanes have NO reasoning channel at all
+// (pkg/llm carries text and tool calls only), so a turn whose whole
+// completion budget goes into hidden thinking arrives as "zero deltas +
+// finish_reason=length". That means `started` is false, the
+// reasoning-only salvage cannot match, and the guard used to return a
+// hand-built errors.New — an identity no errors.Is could match. Prompt's
+// self-heal gate missed it and the session died with
+// `internal_error: agent: model returned an empty response`.
+//
+// Post-fix: the dedicated sentinel is booked with budgetExhaustedMarker
+// (NOT emptyResponseMarker — this shape is never retried, so the
+// "已重试1次" claim would be a lie) and the loop keeps going until the
+// consecutive-placeholder gate fires.
+func TestRunTurnLLM_BudgetExhaustedEmpty_SelfHeals(t *testing.T) {
+	t.Parallel()
+	prov := &fakeUsageProvider{events: []llm.Event{
+		// Nothing streams: the budget went to reasoning the client
+		// cannot see. Usage is still reported (the tokens were billed).
+		llm.TurnDone{FinishReason: "length", InputTokens: 900, OutputTokens: 16384},
+	}}
+	a, err := New(Config{Provider: prov, Model: "opencode:deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := drainAgent(a.Prompt(context.Background(), "hello"))
+	if len(res.errors) == 0 {
+		t.Fatalf("the consecutive-placeholder gate must fire, events: %v", res.events)
+	}
+	if msg := res.errors[0].Error(); !strings.Contains(msg, "连续空补全占位") {
+		t.Errorf("first error should be the placeholder hard-stop, not an immediate turn death, got: %v", res.errors)
+	}
+	joined := strings.Join(res.events, ",")
+	// One MessageStart per salvage — the marker goes through the loop's
+	// normal booking path (nothing was open, unlike the reasoning-only
+	// shape).
+	if n := strings.Count(joined, "MessageStart"); n != emptyPlaceholderHardStop {
+		t.Errorf("MessageStart count = %d, want %d: %v", n, emptyPlaceholderHardStop, res.events)
+	}
+	hist := a.Messages()
+	budgetMarkers, cleanMarkers := 0, 0
+	for _, m := range hist {
+		if m.Role != deepseek.RoleAssistant {
+			continue
+		}
+		switch m.Content {
+		case budgetExhaustedMarker:
+			budgetMarkers++
+		case emptyResponseMarker:
+			cleanMarkers++
+		}
+		if m.Content == "" && len(m.ToolCalls) == 0 {
+			t.Errorf("history holds a contentless assistant message: %+v", hist)
+		}
+	}
+	if budgetMarkers != emptyPlaceholderHardStop {
+		t.Errorf("history holds %d budget-exhausted markers, want %d: %+v", budgetMarkers, emptyPlaceholderHardStop, hist)
+	}
+	if cleanMarkers != 0 {
+		t.Errorf("a never-retried shape must not be booked as %q (it claims a retry): %+v", emptyResponseMarker, hist)
+	}
+}
+
+// TestRunTurnLLM_CleanEmpty_RetriesThenBooks is the !started + stop
+// shape on the second-tier path: the provider streams nothing at all and
+// closes with finish_reason=stop. That is the RETRYABLE sentinel, so the
+// turn is re-issued once (nothing was rendered, a retry cannot duplicate
+// anything on screen) and only then booked with emptyResponseMarker —
+// which is the one marker that honestly claims a retry happened.
+func TestRunTurnLLM_CleanEmpty_RetriesThenBooks(t *testing.T) {
+	t.Parallel()
+	prov := &fakeUsageProvider{events: []llm.Event{
+		llm.TurnDone{FinishReason: "stop", InputTokens: 30, OutputTokens: 0},
+	}}
+	a, err := New(Config{Provider: prov, Model: "glm-5.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := drainAgent(a.Prompt(context.Background(), "hello"))
+	if len(res.errors) == 0 {
+		t.Fatalf("the consecutive-placeholder gate must fire, events: %v", res.events)
+	}
+	if msg := res.errors[0].Error(); !strings.Contains(msg, "连续空补全占位") {
+		t.Errorf("first error should be the placeholder hard-stop, got: %v", res.errors)
+	}
+	// 2 turns × 2 attempts: the retry budget is spent per turn.
+	if got := prov.calls.Load(); got != 2*emptyPlaceholderHardStop {
+		t.Errorf("provider calls = %d, want %d (one retry per turn, two placeholder turns)",
+			got, 2*emptyPlaceholderHardStop)
+	}
+	hist := a.Messages()
+	budgetMarkers, cleanMarkers := 0, 0
+	for _, m := range hist {
+		if m.Role != deepseek.RoleAssistant {
+			continue
+		}
+		switch m.Content {
+		case budgetExhaustedMarker:
+			budgetMarkers++
+		case emptyResponseMarker:
+			cleanMarkers++
+		}
+	}
+	if cleanMarkers != emptyPlaceholderHardStop {
+		t.Errorf("history holds %d clean-empty markers, want %d: %+v", cleanMarkers, emptyPlaceholderHardStop, hist)
+	}
+	if budgetMarkers != 0 {
+		t.Errorf("the retryable shape must not be booked as the never-retried marker: %+v", hist)
+	}
+}
+
+// TestRunTurnLLM_Refusal_IsTerminalNotEmpty pins the second half of card
+// c_lh6tlq: the second-tier path never called isSafetyRefusal, so a
+// deliberate refusal (Anthropic's stop_reason="refusal", an
+// OpenAI-compatible "content_filter") fell through to the empty guard and
+// killed the session. A refusal is a documented terminal outcome — book
+// the marker, no retry, no error.
+func TestRunTurnLLM_Refusal_IsTerminalNotEmpty(t *testing.T) {
+	t.Parallel()
+	for _, finish := range []string{"refusal", "content_filter"} {
+		finish := finish
+		t.Run(finish, func(t *testing.T) {
+			t.Parallel()
+			prov := &fakeUsageProvider{events: []llm.Event{
+				llm.TurnDone{FinishReason: finish, InputTokens: 20, OutputTokens: 0},
+			}}
+			a, err := New(Config{Provider: prov, Model: "claude-x"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := drainAgent(a.Prompt(context.Background(), "hello"))
+			if len(res.errors) > 0 {
+				t.Fatalf("a refusal is terminal, not an error: %v", res.errors)
+			}
+			// No retry: the refusal is the answer, re-sending just
+			// re-triggers the filter.
+			if got := prov.calls.Load(); got != 1 {
+				t.Errorf("provider called %d time(s), want 1 — refusals are never retried", got)
+			}
+			hist := a.Messages()
+			if n := len(hist); n == 0 || hist[n-1].Role != deepseek.RoleAssistant ||
+				hist[n-1].Content != safetyRefusalMarker {
+				t.Fatalf("history tail = %+v, want the refusal marker", hist)
+			}
+			if len(hist[len(hist)-1].ToolCalls) != 0 {
+				t.Errorf("a refusal must carry no tool_calls")
+			}
+		})
 	}
 }
 

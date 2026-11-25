@@ -75,6 +75,67 @@ func TestLimit_OpenDesignCatalogue(t *testing.T) {
 	}
 }
 
+// TestOutputLimit_Table pins the completion-cap table and its
+// override/absence semantics. The load-bearing property is the ZERO
+// value: an unknown model must report ok=false, never 0, because a
+// caller that clamps to 0 sends no tokens at all (card c_rnhce7).
+func TestOutputLimit_Table(t *testing.T) {
+	cases := []struct {
+		model  string
+		want   int
+		wantOK bool
+	}{
+		{"deepseek-flash", 384_000, true},
+		{"deepseek-v4.1-flash", 384_000, true},
+		{"gpt-4o", 16_384, true},
+		{"gemini-2.0-flash", 8_192, true},
+		{"claude-3-5-sonnet-20241022", 8_192, true},
+		{"claude-sonnet-4-20250514", 64_000, true},
+		{"some-unlisted-model", 0, false},
+		{"", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := OutputLimit(c.model)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("OutputLimit(%q) = %d,%v want %d,%v", c.model, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+// TestOutputLimit_OverrideWins: the catalogue refresh installs the
+// endpoint's own `limit.output`, which must beat the compiled row and
+// must be clearable back to it.
+func TestOutputLimit_OverrideWins(t *testing.T) {
+	t.Cleanup(func() { SetOutputLimits(nil) })
+	SetOutputLimits(map[string]int{
+		"gpt-4o":              99_000,
+		"brand-new-model":     32_000,
+		"zero-is-dropped":     0,
+		"negative-is-dropped": -5,
+	})
+	if v, ok := OutputLimit("gpt-4o"); !ok || v != 99_000 {
+		t.Errorf("override gpt-4o = %d,%v want 99000,true", v, ok)
+	}
+	if v, ok := OutputLimit("brand-new-model"); !ok || v != 32_000 {
+		t.Errorf("override brand-new-model = %d,%v want 32000,true", v, ok)
+	}
+	// A non-positive value is not a ceiling — it must not be installed.
+	if _, ok := OutputLimit("zero-is-dropped"); ok {
+		t.Error("a 0 override must be dropped, not installed as a ceiling")
+	}
+	if _, ok := OutputLimit("negative-is-dropped"); ok {
+		t.Error("a negative override must be dropped")
+	}
+	// An override that doesn't mention a compiled id leaves it in force.
+	if v, ok := OutputLimit("deepseek-flash"); !ok || v != 384_000 {
+		t.Errorf("unmentioned compiled id = %d,%v want 384000,true", v, ok)
+	}
+	SetOutputLimits(nil)
+	if v, ok := OutputLimit("gpt-4o"); !ok || v != 16_384 {
+		t.Errorf("after clearing, gpt-4o = %d,%v want 16384,true (compiled floor)", v, ok)
+	}
+}
+
 func TestClassify_Boundaries(t *testing.T) {
 	m := "deepseek-v4-flash"
 	limit := Limit(m) // 1M after V4

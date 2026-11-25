@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/whyiyhw/seek/internal/budget"
 	"github.com/whyiyhw/seek/internal/hooks"
 	"github.com/whyiyhw/seek/internal/modelcap"
 	"github.com/whyiyhw/seek/internal/tools"
@@ -258,20 +259,56 @@ func (a *Agent) Effort() string {
 	return a.cfg.Effort
 }
 
-// turnMaxTokens returns the completion cap for a DeepSeek turn request.
-// An explicit --max-tokens wins unchanged; otherwise the cap tracks the
-// reasoning effort — /effort max gets the 64K thinking budget DeepSeek
-// itself would apply when max_tokens is omitted, every other effort
-// state keeps the historical 16K default. Read inside the request-
-// building block under the same between-turns contract as SetEffort.
+// turnMaxTokens returns the completion cap for a turn request — the ONE
+// authority, for BOTH lanes. It used to be DeepSeek-only: runTurnLLM read
+// cfg.MaxTokens directly, so `/effort max` never raised the second-tier
+// cap and every second-tier turn went out at a flat 16K regardless of the
+// model's real ceiling (card c_rnhce7).
+//
+// Two steps:
+//  1. the effort-linked base — an explicit --max-tokens wins unchanged
+//     (it is a user's deliberate choice, and it already beats the effort
+//     linkage by documented contract); otherwise /effort max gets the 64K
+//     thinking budget DeepSeek itself would apply when max_tokens is
+//     omitted, every other effort state keeps the historical 16K;
+//  2. clamp ONLY the DERIVED base to the model's known output ceiling
+//     (internal/budget — a model-keyed fact, same table shape as the
+//     context window). 16K/64K are DeepSeek-calibrated numbers; on a lane
+//     whose model caps output lower (gpt-4o 16K, gemini 8K, claude-3.5
+//     8K) sending 64K is a hard 400 on the first turn — a number WE
+//     invented must never be able to fail a request.
+//
+// An explicit --max-tokens is deliberately NOT clamped. Our ceiling table
+// can be stale and under-report (the budget package accepts that: a
+// conservative table is the safe direction for CONTEXT warnings). Silently
+// shaving an explicit number would then hide a stale entry behind a
+// mysterious truncation, while sending it produces the vendor's own
+// clear "max_tokens too large" rejection the user can act on. An UNKNOWN
+// model claims no ceiling either way and keeps the base untouched.
+//
+// Read inside the request-building block under the same between-turns
+// contract as SetEffort.
 func (a *Agent) turnMaxTokens() int {
 	if a.explicitMaxTokens {
 		return a.cfg.MaxTokens
 	}
+	base := defaultMaxTokens
 	if a.cfg.Effort == "max" {
-		return effortMaxMaxTokens
+		base = effortMaxMaxTokens
 	}
-	return defaultMaxTokens
+	return a.clampToModelLimit(base)
+}
+
+// clampToModelLimit caps a completion budget we DERIVED at the model's own
+// advertised ceiling (internal/budget.OutputLimit). Unknown models claim no
+// ceiling and pass through untouched — reporting 0 for "unknown" would zero
+// the request. Never applied to an explicit --max-tokens: see turnMaxTokens
+// for why a stale table must not silently shave a user's number.
+func (a *Agent) clampToModelLimit(n int) int {
+	if ceiling, ok := budget.OutputLimit(a.cfg.Model); ok && ceiling > 0 && n > ceiling {
+		return ceiling
+	}
+	return n
 }
 
 // SetModeLabel sets the per-message mode reminder label. Safe between
@@ -517,12 +554,12 @@ func (a *Agent) Summarise(ctx context.Context) (string, deepseek.Usage, error) {
 func (a *Agent) summariseLLM(ctx context.Context) (string, deepseek.Usage, error) {
 	src := append([]deepseek.Message{}, a.messages...)
 	src = append(src, deepseek.Message{Role: deepseek.RoleUser, Content: summariserPrompt})
-	budgetTokens := rescueBudget(a.cfg.Model, a.cfg.MaxTokens)
+	budgetTokens := rescueBudget(a.cfg.Model, a.turnMaxTokens())
 
 	req := llm.ChatRequest{
 		Model:     a.cfg.Model,
 		Messages:  msgsToLLM(prepareSummariseMessages(src, budgetTokens)),
-		MaxTokens: a.cfg.MaxTokens,
+		MaxTokens: a.turnMaxTokens(),
 		SessionID: a.sessionID(),
 	}
 	summary, usage, err := drainSummariseStream(ctx, a.cfg.Provider, req)
@@ -814,10 +851,22 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			//     so the UI block was never opened — open it and emit the
 			//     marker as a delta (the TUI commits deltas, not
 			//     MessageEnd's content, same as safetyRefusalMarker).
+			//
+			// Third member of the family (card c_lh6tlq):
+			// errBudgetExhaustedEmpty — nothing streamed AND finish was
+			// not stop (in practice "length": the whole completion budget
+			// went into hidden reasoning). It is booked with its own
+			// marker, because emptyResponseMarker asserts a retry that
+			// this shape never gets.
 			placeholderTurn := false
 			reasoningOnly := err != nil && errors.Is(err, errReasoningOnlyEmpty)
+			budgetEmpty := err != nil && errors.Is(err, errBudgetExhaustedEmpty)
+			bookedMarker := emptyResponseMarker
 			if err != nil && ctx.Err() == nil &&
-				(errors.Is(err, errEmptyResponse) || reasoningOnly) {
+				(errors.Is(err, errEmptyResponse) || reasoningOnly || budgetEmpty) {
+				if budgetEmpty {
+					bookedMarker = budgetExhaustedMarker
+				}
 				// Reasoning-only (card c_7kco3z, defect 2): the thinking
 				// block already streamed and was really billed, so
 				// runTurn has ALREADY booked the marker as the content
@@ -829,10 +878,10 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 				if !reasoningOnly {
 					assistant = deepseek.Message{
 						Role:    deepseek.RoleAssistant,
-						Content: emptyResponseMarker,
+						Content: bookedMarker,
 					}
 					out <- MessageStart{Message: assistant}
-					out <- MessageDelta{Delta: emptyResponseMarker}
+					out <- MessageDelta{Delta: bookedMarker}
 				}
 				// Keep usage (it was really billed) but the response is
 				// complete-as-far-as-it-goes: finish=stop, no error.
@@ -987,7 +1036,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 					if emptyPlaceholders >= emptyPlaceholderHardStop {
 						out <- ErrorEvent{Err: fmt.Errorf(
 							"agent: 连续空补全占位 %d 次 —— 上游持续返回空补全（已按 %s 记账），停止本回合",
-							emptyPlaceholders, emptyResponseMarker)}
+							emptyPlaceholders, bookedMarker)}
 						return
 					}
 					// The placeholder is an assistant message, so history
@@ -1159,6 +1208,36 @@ var errEmptyResponse = errors.New("agent: model returned an empty response (no c
 // self-heal gate accepts it alongside errEmptyResponse and books
 // emptyResponseMarker as the content.
 var errReasoningOnlyEmpty = errors.New("agent: model returned an empty response (no content and no tool calls)")
+
+// errBudgetExhaustedEmpty marks the third empty shape: nothing streamed
+// (the UI block was never opened) AND the response closed with a
+// non-stop finish reason. In practice that is finish_reason="length"
+// with zero deltas — every completion token went into the provider's
+// hidden reasoning, which the second-tier lanes cannot see at all
+// (pkg/llm has no reasoning channel, so `started` stays false and the
+// reasoning-only salvage above never matches).
+//
+// Same sentinel TEXT as its siblings on purpose: it is the same user-
+// visible failure. Separate IDENTITY because both the retry decision and
+// the marker differ — an identical retry is deterministic waste (the
+// budget was the problem), and pricing it as "已重试1次" would lie.
+//
+// Before card c_lh6tlq this shape hit the `errors.New` fallback below,
+// which no errors.Is could match: Prompt's self-heal gate missed it and
+// the whole session died with `internal_error` (opencode:deepseek-v4.1-flash,
+// 11-20 ×8+, 11-24 ×2, 11-25 c_trrsn7).
+var errBudgetExhaustedEmpty = errors.New("agent: model returned an empty response (no content and no tool calls)")
+
+// budgetExhaustedMarker is the in-band booking for errBudgetExhaustedEmpty.
+// Wire format, same discipline as emptyResponseMarker — it lands in the
+// transcript and the next request carries it as ordinary assistant text.
+// Deliberately says WHICH shape this was: the clean-empty marker claims a
+// retry happened ("已重试1次"), and this shape is never retried, so reusing
+// it would misreport the transcript to every later reader (resume, judge,
+// --json consumers). No finish reason is baked in on purpose — the sentinel
+// covers any non-stop finish, and hardcoding "length" would lie whenever it
+// is another one.
+const budgetExhaustedMarker = "[empty: 上游结束原因非 stop 且零内容（多为输出预算耗尽于隐藏思考），未重试]"
 
 // emptyResponseMarker is the in-band assistant content recorded when the
 // clean-empty retry budget is exhausted and the upstream still returns
@@ -1429,15 +1508,19 @@ func (a *Agent) runTurnDeepSeek(ctx context.Context, out chan<- Event) (deepseek
 		}
 		// Only the STARTED shape is the reasoning-only salvage. A
 		// !started empty with some other finish (e.g. "length") emitted
-		// nothing at all — there is no visible block to keep and the
-		// old hard error is still the right diagnostic.
+		// nothing at all, so there is no open block to keep — but it is
+		// still not a session death sentence: the budget went into
+		// hidden reasoning the client cannot see. Return the dedicated
+		// sentinel and let Prompt book budgetExhaustedMarker via the
+		// normal MessageStart path. (Card c_lh6tlq: this used to be a
+		// hand-built errors.New, which no errors.Is could match, so the
+		// self-heal gate missed it and the session died.)
 		if started {
 			assistant.Content = emptyResponseMarker
 			out <- MessageDelta{Delta: emptyResponseMarker}
 			return assistant, usage, finish, errReasoningOnlyEmpty
 		}
-		return assistant, usage, finish,
-			errors.New("agent: model returned an empty response (no content and no tool calls)")
+		return assistant, usage, finish, errBudgetExhaustedEmpty
 	}
 
 	if !started {
@@ -1493,10 +1576,14 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 	// know about calibration semantics — and it must not decide
 	// capability itself (the gates above already did).
 	req := llm.ChatRequest{
-		Model:     a.cfg.Model,
-		Messages:  msgsToLLMWithAttachments(prepared, vision, docs),
-		Tools:     toolsToLLM(a.cfg.Tools),
-		MaxTokens: a.cfg.MaxTokens,
+		Model:    a.cfg.Model,
+		Messages: msgsToLLMWithAttachments(prepared, vision, docs),
+		Tools:    toolsToLLM(a.cfg.Tools),
+		// Same cap authority as the DeepSeek path (card c_rnhce7). This
+		// used to read cfg.MaxTokens, which silently pinned every
+		// second-tier turn at 16K: /effort max could not raise it, and
+		// the value was never clamped to the model's real ceiling either.
+		MaxTokens: a.turnMaxTokens(),
 		SessionID: a.sessionID(),
 	}
 
@@ -1549,25 +1636,43 @@ func (a *Agent) runTurnLLM(ctx context.Context, out chan<- Event) (deepseek.Mess
 		return assistant, deepseek.Usage{}, finish, ctx.Err()
 	}
 
-	// Empty-response guard: same rationale AND same two-shape split as
+	// Safety refusal: same terminal outcome as the DeepSeek path, and the
+	// same placement rule — BEFORE the empty guard, or a contentless
+	// refusal gets mistaken for a silent upstream. The second-tier lanes
+	// pass provider stop reasons through verbatim ("refusal" from
+	// Anthropic, "content_filter" from OpenAI-compatible backends), so
+	// this branch is reachable on every one of them; leaving it out made
+	// a deliberate refusal a session death sentence (card c_lh6tlq).
+	if isSafetyRefusal(finish) {
+		assistant.Content = safetyRefusalMarker
+		assistant.ToolCalls = nil
+		if !started {
+			out <- MessageStart{Message: assistant}
+			started = true
+		}
+		out <- MessageDelta{Delta: safetyRefusalMarker}
+	}
+
+	// Empty-response guard: same rationale AND same three-shape split as
 	// runTurnDeepSeek — a clean empty returns the retryable sentinel
 	// (nothing was emitted); the started-but-empty shape is not retried
 	// and, since card c_7kco3z, returns errReasoningOnlyEmpty with the
-	// marker booked as content so Prompt self-heals instead of dying.
+	// marker booked as content so Prompt self-heals instead of dying; the
+	// !started + odd-finish shape is errBudgetExhaustedEmpty, which books
+	// budgetExhaustedMarker through the loop's MessageStart path (card
+	// c_lh6tlq — on this lane it is the COMMON shape, because pkg/llm has
+	// no reasoning channel at all: hidden thinking burns the budget, no
+	// delta ever arrives, `started` stays false, and finish is "length").
 	if assistant.Content == "" && len(assistant.ToolCalls) == 0 {
 		if !started && (finish == "" || finish == "stop") {
 			return assistant, deepseek.Usage{}, finish, errEmptyResponse
 		}
-		// Same two-shape split as runTurnDeepSeek: only a STARTED block
-		// is salvageable; a stream that emitted nothing at all with an
-		// odd finish keeps the original hard error.
 		if started {
 			assistant.Content = emptyResponseMarker
 			out <- MessageDelta{Delta: emptyResponseMarker}
 			return assistant, deepseek.Usage{}, finish, errReasoningOnlyEmpty
 		}
-		return assistant, deepseek.Usage{}, finish,
-			errors.New("agent: model returned an empty response (no content and no tool calls)")
+		return assistant, deepseek.Usage{}, finish, errBudgetExhaustedEmpty
 	}
 
 	if !started {

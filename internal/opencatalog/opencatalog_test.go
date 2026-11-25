@@ -23,6 +23,7 @@ func resetOverrides(t *testing.T) {
 	t.Cleanup(func() {
 		pricing.SetModelRates(nil)
 		budget.SetLimits(nil)
+		budget.SetOutputLimits(nil)
 		modelcap.SetVision(nil)
 		modelcap.SetFiles(nil)
 	})
@@ -460,6 +461,43 @@ func TestCatalogue_ConcurrentReadsDuringInstall(t *testing.T) {
 	wg.Wait()
 }
 
+// TestInstall_OutputLimits: the catalogue's `limit.output` is the ceiling
+// pkg/agent clamps its effort-linked budget to (card c_rnhce7). It must
+// reach internal/budget for rows the compiled table has never heard of,
+// and it must be installed even for direct-lane ids — a model's max
+// completion tokens is a property of the model, not of who bills it (the
+// price-card skip must not protect this axis, same rule as vision/files).
+func TestInstall_OutputLimits(t *testing.T) {
+	resetOverrides(t)
+	if _, ok := budget.OutputLimit("brand-new-model"); ok {
+		t.Fatal("brand-new-model must have no ceiling before the catalogue installs")
+	}
+	snap, err := Parse([]byte(samplePayload), time.Now())
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	New().Install(snap)
+
+	// samplePayload's deepseek-v4.1-flash row declares limit.output=384000.
+	if v, ok := budget.OutputLimit("deepseek-v4.1-flash"); !ok || v != 384_000 {
+		t.Errorf("deepseek-v4.1-flash ceiling = %d,%v want 384000,true", v, ok)
+	}
+	// A row with no `limit.output` installs nothing — the compiled value
+	// (or its absence) must survive untouched.
+	if _, ok := budget.OutputLimit("brand-new-model"); ok {
+		t.Error("a row without limit.output must not install a ceiling")
+	}
+	// Clearing the layer returns the compiled floor.
+	budget.SetOutputLimits(nil)
+	if v, ok := budget.OutputLimit("deepseek-v4.1-flash"); !ok || v != 384_000 {
+		t.Errorf("after clearing, compiled floor = %d,%v want 384000,true", v, ok)
+	}
+}
+
+// TestEmbedded_MatchesCompiledTables: the compiled baseline must round-
+// trip through the Snapshot shape — including the output ceiling, which
+// has no per-model Option in pricing.OpenCodeGoModel and therefore has to
+// come from budget.OutputLimit.
 func TestEmbedded_MatchesCompiledTables(t *testing.T) {
 	resetOverrides(t)
 	snap := Embedded()
