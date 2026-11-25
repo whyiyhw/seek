@@ -109,6 +109,58 @@ func TestPrompt_AgentEndFinishCarriesSecondTierVocabulary(t *testing.T) {
 	}
 }
 
+// TestPrompt_PlaceholderTurnCarriesEmptyFinish: the per-turn classification
+// (card c_jxwsfz) — a turn whose only content is the in-band placeholder
+// marker reports FinishEmptyResponse on TurnEnd while AgentEnd.Finish keeps
+// the upstream vocabulary ("stop"), so the ACP stopReason mapping and the
+// hooks' PostTurn contract are untouched.
+func TestPrompt_PlaceholderTurnCarriesEmptyFinish(t *testing.T) {
+	srv := sseServer(t,
+		// reasoning streamed, then the response ends with no content: the
+		// reasoning-only shape the card reproduces with a small max-tokens.
+		`data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"thinking..."}}]}`,
+		``,
+		`data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		``,
+		`data: {"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	)
+	ag, err := New(Config{
+		Client:       deepseek.New(deepseek.WithAPIKey("t"), deepseek.WithBaseURL(srv.URL)),
+		Model:        deepseek.ModelV41Flash,
+		SystemPrompt: "sys",
+		MaxTurns:     1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		turnEnds []TurnEnd
+		end      AgentEnd
+	)
+	for ev := range ag.Prompt(context.Background(), "hi") {
+		switch e := ev.(type) {
+		case ErrorEvent:
+			t.Fatalf("placeholder turn must self-heal, not error: %v", e.Err)
+		case TurnEnd:
+			turnEnds = append(turnEnds, e)
+		case AgentEnd:
+			end = e
+		}
+	}
+	if len(turnEnds) != 1 {
+		t.Fatalf("TurnEnd count = %d, want 1: %+v", len(turnEnds), turnEnds)
+	}
+	if turnEnds[0].Finish != FinishEmptyResponse {
+		t.Errorf("TurnEnd.Finish = %q, want %q", turnEnds[0].Finish, FinishEmptyResponse)
+	}
+	if end.Finish != "stop" {
+		t.Errorf("AgentEnd.Finish = %q, want the upstream %q (agent-level vocabulary unchanged)", end.Finish, "stop")
+	}
+}
+
 // panickingTool explodes mid-Execute — the contained path under test.
 type panickingTool struct{ name string }
 

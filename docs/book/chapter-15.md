@@ -66,6 +66,9 @@ seek -p 'find all TODOs' -json \
 //  tool_delta       — intermediate output from a streaming tool (think)
 //  tool_end         — tool finished; result set on success, error on failure
 //  turn_end         — LLM call settled; token counts + tool_calls count
+//                     + finish_reason ("empty_response" = upstream
+//                     produced no content; the only text_delta was the
+//                     in-band placeholder marker)
 //  agent_end        — run complete; cumulative stats; session_id if saved
 //  error            — fatal error; message is the error string
 ```

@@ -159,7 +159,7 @@ All messages are JSON objects, one per line. Requests follow JSON-RPC 2.0.
 | `tool_start` | `id`, `name`, `args` | Tool about to execute |
 | `tool_delta` | `id`, `name`, `delta` | Intermediate output from streaming tool |
 | `tool_end` | `id`, `name`, `result`/`error`, `bytes` | Tool finished |
-| `turn_end` | `index`, `prompt_tokens`, `completion_tokens`, `cache_hit_tokens`, `tool_calls` | LLM call settled |
+| `turn_end` | `index`, `prompt_tokens`, `completion_tokens`, `cache_hit_tokens`, `tool_calls`, `finish_reason` | LLM call settled (`finish_reason="empty_response"` = upstream returned no content; the only delta was the in-band placeholder marker) |
 
 ### Combining with --resume
 

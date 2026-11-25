@@ -2343,7 +2343,11 @@ func runPrint(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, mode
 //	tool_start       — a tool call is about to execute; id/name/args set
 //	tool_delta       — intermediate output from a streaming tool
 //	tool_end         — tool finished; result set on success, error on failure
-//	turn_end         — LLM call settled; token counts + tool_calls count
+//	turn_end         — LLM call settled; token counts + tool_calls count +
+//	                   finish_reason (the per-turn classification; value
+//	                   "empty_response" means the upstream produced no
+//	                   content and the turn's only text_delta was the
+//	                   in-band placeholder marker — card c_jxwsfz)
 //	agent_end        — run complete; cumulative stats; session_id if saved
 //	error            — fatal error; message is the error string
 //	approval_request — a gated action awaits a human decision; req_id keys
@@ -2373,6 +2377,13 @@ type jsonLine struct {
 	CompletionTokens int `json:"completion_tokens,omitempty"`
 	CacheHitTokens   int `json:"cache_hit_tokens,omitempty"`
 	ToolCalls        int `json:"tool_calls,omitempty"`
+	// turn_end only: how this turn actually ended. Normally the upstream
+	// finish_reason ("stop"/"tool_calls"/"length"/"refusal"/…);
+	// "empty_response" when the upstream produced no content and the turn
+	// was booked with the in-band placeholder marker (card c_jxwsfz) —
+	// the machine-checkable signal that a `text_delta` carrying Chinese
+	// marker prose is NOT an answer. Absent (omitted) on every other line.
+	FinishReason string `json:"finish_reason,omitempty"`
 	// agent_end only
 	Turns     int    `json:"turns,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
@@ -2483,6 +2494,7 @@ func runJSON(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model
 				CompletionTokens: e.Usage.CompletionTokens,
 				CacheHitTokens:   e.Usage.PromptCacheHitTokens,
 				ToolCalls:        e.ToolCalls,
+				FinishReason:     e.Finish,
 			})
 			saveTurn()
 

@@ -30,12 +30,29 @@ type AgentEnd struct {
 // TurnStart begins a single LLM call iteration. Turns are zero-indexed.
 type TurnStart struct{ Index int }
 
+// FinishEmptyResponse is the seek-side turn classification for a turn
+// where the upstream returned no content at all (reasoning-only or
+// completely empty). It is NOT an upstream finish_reason — the wire
+// reason was "stop" — but the turn's assistant content is the in-band
+// emptyResponseMarker placeholder, not an answer (card c_jxwsfz). Wire
+// format: `--json` surfaces it as turn_end.finish_reason so programmatic
+// consumers branch on a value instead of matching the Chinese marker
+// text.
+const FinishEmptyResponse = "empty_response"
+
 // TurnEnd terminates a turn after the LLM response (and any tool calls)
 // have settled. Usage is just this turn's; sum yourself if you want total.
 type TurnEnd struct {
 	Index     int
 	Usage     deepseek.Usage
 	ToolCalls int
+	// Finish classifies how THIS turn ended. Normally the upstream
+	// finish_reason ("stop" / "tool_calls" / "length" / "refusal" …,
+	// same vocabulary as AgentEnd.Finish); FinishEmptyResponse when the
+	// upstream produced no content and the turn was booked with the
+	// in-band placeholder marker. Consumers that only need the run's
+	// overall outcome keep reading AgentEnd.Finish.
+	Finish string
 }
 
 // MessageStart announces the start of a new assistant or tool-result message.

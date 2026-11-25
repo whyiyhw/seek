@@ -933,8 +933,19 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 
 			toolCount := len(assistant.ToolCalls)
 			if toolCount == 0 || finish != "tool_calls" {
+				// turnFinish is the PER-TURN classification (card
+				// c_jxwsfz): a placeholder turn's only content is the
+				// in-band emptyResponseMarker, so reporting the upstream
+				// "stop" would make "the model answered" and "the model
+				// said nothing" indistinguishable to a program. lastFinish
+				// keeps the upstream vocabulary for AgentEnd.Finish (the
+				// ACP stopReason mapping and hooks consume that one).
+				turnFinish := finish
+				if placeholderTurn {
+					turnFinish = FinishEmptyResponse
+				}
 				lastFinish = finish
-				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0}
+				out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: 0, Finish: turnFinish}
 				a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
 					Index:     turn,
 					Usage:     usage,
@@ -1119,7 +1130,7 @@ func (a *Agent) PromptFiles(ctx context.Context, userText string, images []deeps
 			haveBrief = true
 
 			lastFinish = finish
-			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount}
+			out <- TurnEnd{Index: turn, Usage: usage, ToolCalls: toolCount, Finish: finish}
 			a.cfg.Hooks.NotifyPostTurn(ctx, hooks.PostTurnEvent{
 				Index:     turn,
 				Usage:     usage,
