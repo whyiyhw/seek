@@ -32,7 +32,11 @@
 #   ⑦ --lane 名含 [a-z0-9-] 之外字符（也是路径安全闸：'/' 与 '.' 都在
 #      字符集外，逃不出 eval/lane-*.txt）→ exit 2；
 #   ⑧ 仓内两份真名单（lane-release.txt / lane-core.txt）逐条对得上
-#      eval/cases/<name>/ 目录，且承重轴 serve-web-stream 两条道都在。
+#      eval/cases/<name>/ 目录，且承重轴 serve-web-stream 两条道都在；
+#   ⑨ release 名单里不含任何 record_only 用例（c_3xyt7w 定案：名单每行都是
+#      闸门，record_only 的行永不染色 —— 写进闸门只会让它永久绿、看起来在
+#      守。同族 pitfall: docs/pitfalls/eval/record-only-cases-hide-their-
+#      verdict-in-the-per-round-line-*.md）。反向腿在沙盒里改名单验证它会红。
 #
 # macOS bash 3.2 兼容（selftest 通道全仓口径）：无 mapfile / 关联数组。
 set -u
@@ -218,13 +222,55 @@ grep -q '^serve-web-stream$' eval/lane-release.txt \
   || fail "⑧ release lane must list the landed load-bearing axis serve-web-stream"
 grep -q '^serve-web-stream$' eval/lane-core.txt \
   || fail "⑧ core lane must list serve-web-stream (zero-cost fake-key axis)"
+# ⑨：release 名单里不许出现 record_only 用例（c_3xyt7w 定案）。名单每一行
+# 都是闸门，而 record_only 的行永不染色 ⇒ 写进来只会让闸门永久绿、看起来
+# 在守（docs/pitfalls/eval/record-only-cases-hide-their-verdict-in-the-
+# per-round-line-… 同族）。反之 plan-e2e 的"不在册"也由此机械保证，不必
+# 在注释里靠人记。core 是观测道，不做此限制。
+record_only_in_lane() { # record_only_in_lane LANE_FILE CASES_ROOT
+  while read -r raw || [ -n "$raw" ]; do
+    entry=${raw%%#*}
+    entry=$(printf '%s' "$entry" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -z "$entry" ] && continue
+    ro=$(jq -r '.record_only // false' "$2/$entry/expect.json" 2>/dev/null)
+    if [ "$ro" = "true" ]; then
+      printf '%s ' "$entry"
+    fi
+  done < "$1"
+}
+disp_ro=$(record_only_in_lane eval/lane-release.txt eval/cases)
+if [ -n "$disp_ro" ]; then
+  fail "⑨ release lane lists record-only case(s): ${disp_ro% } — 闸门会对它们永久绿"
+fi
+# 反向腿（防静默空转）：沙盒名单里放一个 record_only 用例，上面同一个函数
+# 必须能点出它的名字——否则 ⑨ 只是永远空过，名单被污染时也不会红。
+rowsb="$tmp/ro-lane"; mkdir -p "$rowsb"
+printf '%s\n' "$CASE_A" > "$rowsb/lane-release.txt"
+mkcase "$rowsb/cases/$CASE_A"
+# 把一个沙盒用例标成 record_only，再要求函数报出它
+printf '{"max_turns":3,"min_turns":1,"exact_agent_ends":1,"record_only":true}\n' \
+  > "$rowsb/cases/$CASE_A/expect.json"
+hits=$(record_only_in_lane "$rowsb/lane-release.txt" "$rowsb/cases")
+case "$hits" in
+  *"$CASE_A"*) : ;;
+  *) fail "⑨ reverse leg: record-only detector missed $CASE_A in a sandbox lane (got: '${hits}')" ;;
+esac
+# 正向腿（钉路径约定）：拿**真** cases 根 + 一个沙盒名单，写上真 record-only
+# 的 plan-e2e —— 必须被点出。这条同时证明 ⑨ 扫的是 eval/cases/<name>/expect.json
+# 这个真实路径（否则真名单被污染时它仍会空过）。
+printf '%s\n' "plan-e2e" > "$rowsb/lane-release.txt"
+hits=$(record_only_in_lane "$rowsb/lane-release.txt" eval/cases)
+case "$hits" in
+  *plan-e2e*) : ;;
+  *) fail "⑨ forward leg: plan-e2e (真 record_only 用例) 未被点出（got: '${hits}'）" ;;
+esac
 
 # ---- 收尾：真实 eval/results 零污染 ----------------------------------------
 results_after=$(find eval/results 2>/dev/null | sort)
 [ "$results_before" = "$results_after" ] || fail "eval/results inventory changed: $(diff <(printf '%s\n' "$results_before") <(printf '%s\n' "$results_after") | head -5)"
 
 if [ "$fails" -eq 0 ]; then
-  echo "eval-lane selftest: PASS (no-flag byte-equivalence vs pre-E6 blob + lane filtering/order + mutual-exclusion/unknown-case/empty-list/charset exit-2 + real lane lists valid)"
+  echo "eval-lane selftest: PASS (no-flag byte-equivalence vs pre-E6 blob + lane filtering/order + mutual-exclusion/unknown-case/empty-list/charset exit-2 + real lane lists valid + record-only-free release lane (both legs))"
   exit 0
 fi
 echo "eval-lane selftest: FAIL (${fails} assertion(s))" >&2
