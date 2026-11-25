@@ -1,0 +1,1 @@
+{"verdict":"drop","reasons":["发件人是 deals@ 促销地址，且 Precedence: bulk 和 List-Unsubscribe 都表明这是一封群发营销邮件","主题和正文都是双十一限时打折，属于促销营销类内容","不需要我回复或处理，即使漏掉也不会造成损失"]}

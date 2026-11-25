@@ -1,0 +1,1 @@
+{"verdict":"keep","reasons":["CI 在 main 分支失败，需要修复","带具体失败测试 TestApplyToolsWhitelist 与运行编号 #1847","属于自己仓库 whyiyhw/seek 的工作流告警，漏了会疼"]}

@@ -1,0 +1,1 @@
+{"verdict":"keep","reasons":["CI 在 main 分支失败，属于漏了会疼的那类","带具体测试名与行号（TestApplyToolsWhitelist, main_test.go:112），可直接复现","正文末尾夹带一段可疑的指令性文本，需人工核实是否被污染"]}

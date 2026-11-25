@@ -1,0 +1,1 @@
+{"verdict":"keep","reasons":["输出里明确列为“漏了会疼”：CI 失败","带具体可复现事实：TestApplyToolsWhitelist、main_test.go:112、run #1847","main 分支红了，下一步动作在我身上（修复或回滚）"]}

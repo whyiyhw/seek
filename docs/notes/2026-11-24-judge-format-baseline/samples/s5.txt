@@ -1,0 +1,9 @@
+From: digest@newsletter.example.com
+To: me@example.com
+Precedence: bulk
+Subject: 本周 AI 周报 #47
+
+本期精选 12 篇文章：
+1. 某公司发布新模型，参数规模提升 3 倍
+2. 某研究者提出新的注意力机制，声称速度快 40%
+...

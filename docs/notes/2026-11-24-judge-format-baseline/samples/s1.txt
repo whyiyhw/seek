@@ -1,0 +1,11 @@
+From: GitHub <noreply@github.com>
+To: me@example.com
+Subject: [whyiyhw/seek] CI failed on main
+
+Your workflow "go test" run #1847 failed.
+
+Failed step: go test ./...
+--- FAIL: TestApplyToolsWhitelist (0.42s)
+    main_test.go:112: expected nil, got errToolsUsage
+
+View run: https://github.com/whyiyhw/seek/actions/runs/1847

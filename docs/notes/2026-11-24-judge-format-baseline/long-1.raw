@@ -1,0 +1,627 @@
+{"type":"agent_start","model":"deepseek-flash"}
+{"type":"turn_start"}
+{"type":"reasoning_delta","delta":"The"}
+{"type":"reasoning_delta","delta":" user"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" asking"}
+{"type":"reasoning_delta","delta":" me"}
+{"type":"reasoning_delta","delta":" to"}
+{"type":"reasoning_delta","delta":" classify"}
+{"type":"reasoning_delta","delta":" an"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":" according"}
+{"type":"reasoning_delta","delta":" to"}
+{"type":"reasoning_delta","delta":" their"}
+{"type":"reasoning_delta","delta":" criteria"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" The"}
+{"type":"reasoning_delta","delta":" output"}
+{"type":"reasoning_delta","delta":" should"}
+{"type":"reasoning_delta","delta":" be"}
+{"type":"reasoning_delta","delta":" only"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" JSON"}
+{"type":"reasoning_delta","delta":" object"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" mark"}
+{"type":"reasoning_delta","delta":"down"}
+{"type":"reasoning_delta","delta":" code"}
+{"type":"reasoning_delta","delta":" block"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" explanation"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"The"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" From"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"王"}
+{"type":"reasoning_delta","delta":"芳"}
+{"type":"reasoning_delta","delta":" \u003c"}
+{"type":"reasoning_delta","delta":"wang"}
+{"type":"reasoning_delta","delta":"fang"}
+{"type":"reasoning_delta","delta":"@"}
+{"type":"reasoning_delta","delta":"vendor"}
+{"type":"reasoning_delta","delta":".example"}
+{"type":"reasoning_delta","delta":".com"}
+{"type":"reasoning_delta","delta":"\u003e,"}
+{"type":"reasoning_delta","delta":" Subject"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"关于"}
+{"type":"reasoning_delta","delta":" Q"}
+{"type":"reasoning_delta","delta":"4"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"采购"}
+{"type":"reasoning_delta","delta":"清单"}
+{"type":"reasoning_delta","delta":"的"}
+{"type":"reasoning_delta","delta":"确认"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Body"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" filler"}
+{"type":"reasoning_delta","delta":" repeated"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" ending"}
+{"type":"reasoning_delta","delta":" with"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"请"}
+{"type":"reasoning_delta","delta":"确认"}
+{"type":"reasoning_delta","delta":"第"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"14"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"项"}
+{"type":"reasoning_delta","delta":"的数量"}
+{"type":"reasoning_delta","delta":"，"}
+{"type":"reasoning_delta","delta":"明天"}
+{"type":"reasoning_delta","delta":"前"}
+{"type":"reasoning_delta","delta":"回"}
+{"type":"reasoning_delta","delta":"我"}
+{"type":"reasoning_delta","delta":"。\""}
+{"type":"reasoning_delta","delta":" ("}
+{"type":"reasoning_delta","delta":"Please"}
+{"type":"reasoning_delta","delta":" confirm"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" quantity"}
+{"type":"reasoning_delta","delta":" of"}
+{"type":"reasoning_delta","delta":" item"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"14"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" reply"}
+{"type":"reasoning_delta","delta":" before"}
+{"type":"reasoning_delta","delta":" tomorrow"}
+{"type":"reasoning_delta","delta":".)\n\n"}
+{"type":"reasoning_delta","delta":"This"}
+{"type":"reasoning_delta","delta":" matches"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"等我"}
+{"type":"reasoning_delta","delta":"回复"}
+{"type":"reasoning_delta","delta":"、"}
+{"type":"reasoning_delta","delta":"等我"}
+{"type":"reasoning_delta","delta":"决策"}
+{"type":"reasoning_delta","delta":"\""}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" next"}
+{"type":"reasoning_delta","delta":" action"}
+{"type":"reasoning_delta","delta":" on"}
+{"type":"reasoning_delta","delta":" me"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Also"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"漏"}
+{"type":"reasoning_delta","delta":"了"}
+{"type":"reasoning_delta","delta":"会"}
+{"type":"reasoning_delta","delta":"疼"}
+{"type":"reasoning_delta","delta":"\"?"}
+{"type":"reasoning_delta","delta":" Vendor"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" Q"}
+{"type":"reasoning_delta","delta":"4"}
+{"type":"reasoning_delta","delta":" procurement"}
+{"type":"reasoning_delta","delta":" list"}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" business"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":" from"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" vendor"}
+{"type":"reasoning_delta","delta":" asking"}
+{"type":"reasoning_delta","delta":" for"}
+{"type":"reasoning_delta","delta":" confirmation"}
+{"type":"reasoning_delta","delta":" of"}
+{"type":"reasoning_delta","delta":" quantity"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" It"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" concrete"}
+{"type":"reasoning_delta","delta":" request"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" deadline"}
+{"type":"reasoning_delta","delta":" tomorrow"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" So"}
+{"type":"reasoning_delta","delta":" verdict"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"But"}
+{"type":"reasoning_delta","delta":" grey"}
+{"type":"reasoning_delta","delta":" area"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"涉及"}
+{"type":"reasoning_delta","delta":"钱"}
+{"type":"reasoning_delta","delta":"或"}
+{"type":"reasoning_delta","delta":"法律"}
+{"type":"reasoning_delta","delta":"但我"}
+{"type":"reasoning_delta","delta":"没有"}
+{"type":"reasoning_delta","delta":"足够"}
+{"type":"reasoning_delta","delta":"上下文"}
+{"type":"reasoning_delta","delta":"判断"}
+{"type":"reasoning_delta","delta":"\""}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" Q"}
+{"type":"reasoning_delta","delta":"4"}
+{"type":"reasoning_delta","delta":" procurement"}
+{"type":"reasoning_delta","delta":" involves"}
+{"type":"reasoning_delta","delta":" money"}
+{"type":"reasoning_delta","delta":"?"}
+{"type":"reasoning_delta","delta":" H"}
+{"type":"reasoning_delta","delta":"mm"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" It"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" vendor"}
+{"type":"reasoning_delta","delta":" asking"}
+{"type":"reasoning_delta","delta":" to"}
+{"type":"reasoning_delta","delta":" confirm"}
+{"type":"reasoning_delta","delta":" quantities"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Procurement"}
+{"type":"reasoning_delta","delta":" involves"}
+{"type":"reasoning_delta","delta":" money"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" But"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" criteria"}
+{"type":"reasoning_delta","delta":" for"}
+{"type":"reasoning_delta","delta":" gray"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"涉及"}
+{"type":"reasoning_delta","delta":"钱"}
+{"type":"reasoning_delta","delta":"或"}
+{"type":"reasoning_delta","delta":"法律"}
+{"type":"reasoning_delta","delta":"但我"}
+{"type":"reasoning_delta","delta":"没有"}
+{"type":"reasoning_delta","delta":"足够"}
+{"type":"reasoning_delta","delta":"上下文"}
+{"type":"reasoning_delta","delta":"判断"}
+{"type":"reasoning_delta","delta":"\""}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":" don"}
+{"type":"reasoning_delta","delta":"'t"}
+{"type":"reasoning_delta","delta":" have"}
+{"type":"reasoning_delta","delta":" enough"}
+{"type":"reasoning_delta","delta":" context"}
+{"type":"reasoning_delta","delta":" to"}
+{"type":"reasoning_delta","delta":" judge"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Here"}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":" do"}
+{"type":"reasoning_delta","delta":" have"}
+{"type":"reasoning_delta","delta":" enough"}
+{"type":"reasoning_delta","delta":" context"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" it"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" business"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":" asking"}
+{"type":"reasoning_delta","delta":" for"}
+{"type":"reasoning_delta","delta":" confirmation"}
+{"type":"reasoning_delta","delta":" of"}
+{"type":"reasoning_delta","delta":" an"}
+{"type":"reasoning_delta","delta":" item"}
+{"type":"reasoning_delta","delta":" quantity"}
+{"type":"reasoning_delta","delta":" with"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" deadline"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" That"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" clearly"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"等我"}
+{"type":"reasoning_delta","delta":"回复"}
+{"type":"reasoning_delta","delta":"\""}
+{"type":"reasoning_delta","delta":" -\u003e"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" The"}
+{"type":"reasoning_delta","delta":" amount"}
+{"type":"reasoning_delta","delta":" isn"}
+{"type":"reasoning_delta","delta":"'t"}
+{"type":"reasoning_delta","delta":" specified"}
+{"type":"reasoning_delta","delta":";"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" ask"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" quantity"}
+{"type":"reasoning_delta","delta":" confirmation"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":"'d"}
+{"type":"reasoning_delta","delta":" say"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"Also"}
+{"type":"reasoning_delta","delta":" \""}
+{"type":"reasoning_delta","delta":"发"}
+{"type":"reasoning_delta","delta":"件"}
+{"type":"reasoning_delta","delta":"人"}
+{"type":"reasoning_delta","delta":"陌生"}
+{"type":"reasoning_delta","delta":"但"}
+{"type":"reasoning_delta","delta":"内容"}
+{"type":"reasoning_delta","delta":"像是"}
+{"type":"reasoning_delta","delta":"找我"}
+{"type":"reasoning_delta","delta":"办事"}
+{"type":"reasoning_delta","delta":"\""}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" sender"}
+{"type":"reasoning_delta","delta":" unknown"}
+{"type":"reasoning_delta","delta":"?"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"王"}
+{"type":"reasoning_delta","delta":"芳"}
+{"type":"reasoning_delta","delta":" at"}
+{"type":"reasoning_delta","delta":" vendor"}
+{"type":"reasoning_delta","delta":".example"}
+{"type":"reasoning_delta","delta":".com"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" it"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" vendor"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" presumably"}
+{"type":"reasoning_delta","delta":" known"}
+{"type":"reasoning_delta","delta":" contact"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Not"}
+{"type":"reasoning_delta","delta":" clearly"}
+{"type":"reasoning_delta","delta":"陌生"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" And"}
+{"type":"reasoning_delta","delta":" even"}
+{"type":"reasoning_delta","delta":" if"}
+{"type":"reasoning_delta","delta":" unknown"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" content"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" real"}
+{"type":"reasoning_delta","delta":" work"}
+{"type":"reasoning_delta","delta":" request"}
+{"type":"reasoning_delta","delta":" →"}
+{"type":"reasoning_delta","delta":" gray"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" H"}
+{"type":"reasoning_delta","delta":"mm"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" but"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" criteria"}
+{"type":"reasoning_delta","delta":" says"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"发"}
+{"type":"reasoning_delta","delta":"件"}
+{"type":"reasoning_delta","delta":"人"}
+{"type":"reasoning_delta","delta":"陌生"}
+{"type":"reasoning_delta","delta":"但"}
+{"type":"reasoning_delta","delta":"内容"}
+{"type":"reasoning_delta","delta":"像是"}
+{"type":"reasoning_delta","delta":"找我"}
+{"type":"reasoning_delta","delta":"办事"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" gray"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Do"}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":" know"}
+{"type":"reasoning_delta","delta":" if"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"王"}
+{"type":"reasoning_delta","delta":"芳"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" unfamiliar"}
+{"type":"reasoning_delta","delta":"?"}
+{"type":"reasoning_delta","delta":" There"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" indication"}
+{"type":"reasoning_delta","delta":" in"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":" that"}
+{"type":"reasoning_delta","delta":" this"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" first"}
+{"type":"reasoning_delta","delta":" contact"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" It"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" Q"}
+{"type":"reasoning_delta","delta":"4"}
+{"type":"reasoning_delta","delta":" procurement"}
+{"type":"reasoning_delta","delta":" list"}
+{"type":"reasoning_delta","delta":" confirmation"}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" implying"}
+{"type":"reasoning_delta","delta":" ongoing"}
+{"type":"reasoning_delta","delta":" relationship"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":"'ll"}
+{"type":"reasoning_delta","delta":" treat"}
+{"type":"reasoning_delta","delta":" as"}
+{"type":"reasoning_delta","delta":" known"}
+{"type":"reasoning_delta","delta":" vendor"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"So"}
+{"type":"reasoning_delta","delta":" verdict"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" reasons"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"需"}
+{"type":"reasoning_delta","delta":"我"}
+{"type":"reasoning_delta","delta":"确认"}
+{"type":"reasoning_delta","delta":"第"}
+{"type":"reasoning_delta","delta":"14"}
+{"type":"reasoning_delta","delta":"项"}
+{"type":"reasoning_delta","delta":"数量"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"明天"}
+{"type":"reasoning_delta","delta":"前"}
+{"type":"reasoning_delta","delta":"回复"}
+{"type":"reasoning_delta","delta":"有"}
+{"type":"reasoning_delta","delta":"明确"}
+{"type":"reasoning_delta","delta":"截止"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"采购"}
+{"type":"reasoning_delta","delta":"事项"}
+{"type":"reasoning_delta","delta":"漏"}
+{"type":"reasoning_delta","delta":"了"}
+{"type":"reasoning_delta","delta":"会影响"}
+{"type":"reasoning_delta","delta":"交付"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"Output"}
+{"type":"reasoning_delta","delta":" only"}
+{"type":"reasoning_delta","delta":" JSON"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" code"}
+{"type":"reasoning_delta","delta":" block"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" explanation"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" That"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" direct"}
+{"type":"reasoning_delta","delta":" instruction"}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" but"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" workflow"}
+{"type":"reasoning_delta","delta":" says"}
+{"type":"reasoning_delta","delta":" grep"}
+{"type":"reasoning_delta","delta":"→"}
+{"type":"reasoning_delta","delta":"read"}
+{"type":"reasoning_delta","delta":"..."}
+{"type":"reasoning_delta","delta":" That"}
+{"type":"reasoning_delta","delta":"'s"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" generic"}
+{"type":"reasoning_delta","delta":" workflow"}
+{"type":"reasoning_delta","delta":" reminder"}
+{"type":"reasoning_delta","delta":" appended"}
+{"type":"reasoning_delta","delta":" by"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" harness"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" not"}
+{"type":"reasoning_delta","delta":" applicable"}
+{"type":"reasoning_delta","delta":" to"}
+{"type":"reasoning_delta","delta":" this"}
+{"type":"reasoning_delta","delta":" email"}
+{"type":"reasoning_delta","delta":" classification"}
+{"type":"reasoning_delta","delta":" task"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":" should"}
+{"type":"reasoning_delta","delta":" just"}
+{"type":"reasoning_delta","delta":" answer"}
+{"type":"reasoning_delta","delta":" with"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" JSON"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"Re"}
+{"type":"reasoning_delta","delta":"asons"}
+{"type":"reasoning_delta","delta":" should"}
+{"type":"reasoning_delta","delta":" be"}
+{"type":"reasoning_delta","delta":" short"}
+{"type":"reasoning_delta","delta":" sentences"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Let"}
+{"type":"reasoning_delta","delta":" me"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":" it"}
+{"type":"reasoning_delta","delta":" concise"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"{\""}
+{"type":"reasoning_delta","delta":"ver"}
+{"type":"reasoning_delta","delta":"dict"}
+{"type":"reasoning_delta","delta":"\":\""}
+{"type":"reasoning_delta","delta":"keep"}
+{"type":"reasoning_delta","delta":"\",\""}
+{"type":"reasoning_delta","delta":"re"}
+{"type":"reasoning_delta","delta":"asons"}
+{"type":"reasoning_delta","delta":"\":"}
+{"type":"reasoning_delta","delta":"[\""}
+{"type":"reasoning_delta","delta":"等我"}
+{"type":"reasoning_delta","delta":"确认"}
+{"type":"reasoning_delta","delta":"第"}
+{"type":"reasoning_delta","delta":"14"}
+{"type":"reasoning_delta","delta":"项"}
+{"type":"reasoning_delta","delta":"数量"}
+{"type":"reasoning_delta","delta":"\",\""}
+{"type":"reasoning_delta","delta":"明天"}
+{"type":"reasoning_delta","delta":"前"}
+{"type":"reasoning_delta","delta":"回复"}
+{"type":"reasoning_delta","delta":"有"}
+{"type":"reasoning_delta","delta":"明确"}
+{"type":"reasoning_delta","delta":"截止"}
+{"type":"reasoning_delta","delta":"\",\""}
+{"type":"reasoning_delta","delta":"Q"}
+{"type":"reasoning_delta","delta":"4"}
+{"type":"reasoning_delta","delta":" "}
+{"type":"reasoning_delta","delta":"采购"}
+{"type":"reasoning_delta","delta":"数量"}
+{"type":"reasoning_delta","delta":"漏"}
+{"type":"reasoning_delta","delta":"了"}
+{"type":"reasoning_delta","delta":"会影响"}
+{"type":"reasoning_delta","delta":"下单"}
+{"type":"reasoning_delta","delta":"/"}
+{"type":"reasoning_delta","delta":"交付"}
+{"type":"reasoning_delta","delta":"\"]"}
+{"type":"reasoning_delta","delta":"}\n\n"}
+{"type":"reasoning_delta","delta":"Should"}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":" output"}
+{"type":"reasoning_delta","delta":" anything"}
+{"type":"reasoning_delta","delta":" else"}
+{"type":"reasoning_delta","delta":"?"}
+{"type":"reasoning_delta","delta":" No"}
+{"type":"reasoning_delta","delta":" —"}
+{"type":"reasoning_delta","delta":" user"}
+{"type":"reasoning_delta","delta":" said"}
+{"type":"reasoning_delta","delta":" only"}
+{"type":"reasoning_delta","delta":" one"}
+{"type":"reasoning_delta","delta":" JSON"}
+{"type":"reasoning_delta","delta":" object"}
+{"type":"reasoning_delta","delta":","}
+{"type":"reasoning_delta","delta":" no"}
+{"type":"reasoning_delta","delta":" explanation"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" I"}
+{"type":"reasoning_delta","delta":"'ll"}
+{"type":"reasoning_delta","delta":" comply"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"One"}
+{"type":"reasoning_delta","delta":" consideration"}
+{"type":"reasoning_delta","delta":":"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" filler"}
+{"type":"reasoning_delta","delta":" body"}
+{"type":"reasoning_delta","delta":" is"}
+{"type":"reasoning_delta","delta":" a"}
+{"type":"reasoning_delta","delta":" test"}
+{"type":"reasoning_delta","delta":" whether"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" model"}
+{"type":"reasoning_delta","delta":" stays"}
+{"type":"reasoning_delta","delta":" lawful"}
+{"type":"reasoning_delta","delta":" at"}
+{"type":"reasoning_delta","delta":" real"}
+{"type":"reasoning_delta","delta":" length"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" The"}
+{"type":"reasoning_delta","delta":" key"}
+{"type":"reasoning_delta","delta":" actionable"}
+{"type":"reasoning_delta","delta":" content"}
+{"type":"reasoning_delta","delta":" at"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" end"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"reasoning_delta","delta":" Ver"}
+{"type":"reasoning_delta","delta":"dict"}
+{"type":"reasoning_delta","delta":" keep"}
+{"type":"reasoning_delta","delta":".\n\n"}
+{"type":"reasoning_delta","delta":"Just"}
+{"type":"reasoning_delta","delta":" output"}
+{"type":"reasoning_delta","delta":" the"}
+{"type":"reasoning_delta","delta":" JSON"}
+{"type":"reasoning_delta","delta":"."}
+{"type":"text_delta","delta":"{\""}
+{"type":"text_delta","delta":"ver"}
+{"type":"text_delta","delta":"dict"}
+{"type":"text_delta","delta":"\":\""}
+{"type":"text_delta","delta":"keep"}
+{"type":"text_delta","delta":"\",\""}
+{"type":"text_delta","delta":"re"}
+{"type":"text_delta","delta":"asons"}
+{"type":"text_delta","delta":"\":"}
+{"type":"text_delta","delta":"[\""}
+{"type":"text_delta","delta":"需要"}
+{"type":"text_delta","delta":"我"}
+{"type":"text_delta","delta":"确认"}
+{"type":"text_delta","delta":"第"}
+{"type":"text_delta","delta":" "}
+{"type":"text_delta","delta":"14"}
+{"type":"text_delta","delta":" "}
+{"type":"text_delta","delta":"项"}
+{"type":"text_delta","delta":"的数量"}
+{"type":"text_delta","delta":"，"}
+{"type":"text_delta","delta":"属于"}
+{"type":"text_delta","delta":"等我"}
+{"type":"text_delta","delta":"回复"}
+{"type":"text_delta","delta":"或"}
+{"type":"text_delta","delta":"决策"}
+{"type":"text_delta","delta":"的事项"}
+{"type":"text_delta","delta":"\",\""}
+{"type":"text_delta","delta":"明天"}
+{"type":"text_delta","delta":"前"}
+{"type":"text_delta","delta":"回复"}
+{"type":"text_delta","delta":"，"}
+{"type":"text_delta","delta":"截止"}
+{"type":"text_delta","delta":"时间"}
+{"type":"text_delta","delta":"明确"}
+{"type":"text_delta","delta":"\",\""}
+{"type":"text_delta","delta":"涉及"}
+{"type":"text_delta","delta":" Q"}
+{"type":"text_delta","delta":"4"}
+{"type":"text_delta","delta":" "}
+{"type":"text_delta","delta":"采购"}
+{"type":"text_delta","delta":"数量"}
+{"type":"text_delta","delta":"，"}
+{"type":"text_delta","delta":"漏"}
+{"type":"text_delta","delta":"掉"}
+{"type":"text_delta","delta":"会影响"}
+{"type":"text_delta","delta":"下单"}
+{"type":"text_delta","delta":"和"}
+{"type":"text_delta","delta":"交付"}
+{"type":"text_delta","delta":"\"]"}
+{"type":"text_delta","delta":"}"}
+{"type":"turn_end","prompt_tokens":7365,"completion_tokens":624,"cache_hit_tokens":7168}
+{"type":"agent_end","prompt_tokens":7365,"completion_tokens":624,"cache_hit_tokens":7168,"turns":1}

@@ -1,0 +1,9 @@
+From: 张伟 <zhangwei@partner.example.com>
+To: me@example.com
+Cc: 李娜 <lina@partner.example.com>
+Subject: Re: 合同附件第 3 条的表述
+
+王总，第 3 条「乙方应在 30 日内完成交付」和第 7 条的验收条款有冲突，
+30 日是从签约起算还是从需求确认起算？如果按签约起算，我们的排期来不及。
+
+想和你确认一下口径，最好明天上午之前给我个准话，法务那边要定稿。

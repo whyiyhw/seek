@@ -2,7 +2,7 @@
 
 **所属版本**：独立 feature（平台化线，与 [`feature-remote-control-plane.md`](feature-remote-control-plane.md)「Frontend 端口」、[`archive/feature-acp.md`](archive/feature-acp.md)「ACP 直连」并列的第三条"外部驱动 seek"路径——这一条驱动的是**推理**，不是交互）
 **前置阅读**：[`feature-inspect-rpc.md`](feature-inspect-rpc.md)（method 命名稳定性纪律 + `jsonLine` 字段集稳定的先例）、[`feature-web-frontend.md`](feature-web-frontend.md) §2.5（`--json` 事件流的契约口径）、[`v8.md`](v8.md) §3（I1 边界 / I2 一次性进程）、`cmd/seek/main.go` 的 `jsonLine` / `applyToolsWhitelist` / `--no-save` 分支、`pkg/deepseek/types.go` 的 `ResponseFormat`
-**状态**：📐 **设计稿**。只出文档不改代码；落地另开卡（§6 是拆卡建议）。
+**状态**：📐 **设计稿**。只出文档不改代码；落地另开卡（§6 是拆卡建议）。前置实验已跑（2026-11-24，§8.1 实测基线 → [`../notes/2026-11-24-judge-format-baseline.md`](../notes/2026-11-24-judge-format-baseline.md)）；§6 已按实测重排。
 
 **一句话**：seek 有完整的 agent loop、多车道定价、精确到三档的价格表、`--tools` 白名单和 JSONL 事件面——但它们是**给人用**的形状（探索、多轮、流式）。把 seek 当**判读引擎**交给外部程序（第一批消费者：信息流产品 winnow），只差四件事：一个结构化输出面、三个隔离开关、把 `--no-save` 与记忆解耦、一处成本硬顶。**~5 天，零新依赖，不碰 `pkg/agent` / `pkg/deepseek` 接口 / `permission`。**
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | 形状 | 探索 → 工具 → 多轮 → 收敛 | 固定输入 → 固定输出 |
 | 消费者 | 人（TUI）、UI（`--json` 事件流） | 程序（一行一条终态） |
-| 可复现 | 尽力（模型决定下一步） | **必须**（同输入同判定） |
+| 可复现 | 尽力（模型决定下一步） | **verdict 级必须**（实测：reasons 逐字不可复现，§8.1-4） |
 | 失败语义 | 人看着办 | 按行隔离，单行 error 不拖垮整批 |
 | 提交粒度 | 每轮一次 | 一条一判定 |
 
@@ -155,7 +155,7 @@ seek judge \
 1. **`id` 回填，不靠顺序对齐**。输出顺序仍与输入一致，但契约不保证——调用方必须按 `id` 对回自己的库
 2. **`verdict` 三值**：`keep` / `drop` / `gray`。与 `internal/verifier` 的 `pass\|fail\|doubt` 同构（`v8.md` §9.5）。**`gray` 是设计的核心**——不确定的不扔，单独堆给人工过。这条抄自 skill 蒸馏的四层漏斗纪律（[`feature-skill-distill.md`](feature-skill-distill.md) §4：「宁可漏过，不可放过」）
 3. **`reasons` 是短句，不是散文**。散文不可校验，也扫不出问题
-4. **`_meta` 恒为最后一行**，带 `rubric_sha256` 供审计——判据变了导致判定变了，能定位到是哪一次
+4. **`_meta` 恒为最后一行**，带 `rubric_sha256` 供审计——判据变了导致判定变了，能定位到是哪一次。另带 `temperature` / `effort` / `model`（实测 §8.1-4：三者决定漂移幅度，缺了无法解释两次判定的差异）
 5. **单条失败只污染该行**，绝不整批失败
 
 **留着 `signals` 的位置**：判据拆成几个正交信号（相关 / 新颖 / 可动作 / 可疑），比一个 0-100 分可解释得多——分数不可纠正，正交信号可以逐条推翻。但 `signals` 的具体键由调用方的 rubric 决定，seek 只透传不解释。
@@ -253,15 +253,18 @@ L2 零新机制——`applyToolsWhitelist` 现成。
 
 ## 6. 实现落点与工作量
 
-| 项 | 落点 | 工作量 |
-|---|---|---|
-| `seek judge` 骨架（JSONL in/out、有界并发、退出码、`_meta`） | 新文件 `cmd/seek/judge.go` + `internal/judge/`（纯逻辑，可表驱动测试） | 2-3 天 |
-| `ResponseFormat` 接线 + 固定信封校验 | `pkg/deepseek` 接已有字段；校验在 `internal/judge` | 1 天 |
-| `--tools=none` 哨兵 | `applyToolsWhitelist` 分支 | 0.5 天 |
-| `--isolated` + 拆 `--no-save` × `--memory` | `cmd/seek/main.go` 启动段 | 1 天 |
-| 成本硬顶 `--max-cost` | `internal/pricing` 现成三档 + 累加 | 0.5 天 |
+| 序 | 项 | 落点 | 工作量 | 依据 |
+|---|---|---|---|---|
+| 1 | `--effort` / `--temperature` 旗标 | `cmd/seek/main.go`（`:702` 写死 `sessionEffort = "max"`，`-p` 无旗标） | 0.5 天 | 实测 §8.1-3：成本 3.2× |
+| 2 | 空返回的机器可判定信号 | `--json` 事件流加 `finish_reason` 或 error 事件（`pkg/agent/agent.go` 的 `placeholderTurn` 自愈闸 / `emptyResponseMarker`、`budgetExhaustedMarker` 两个常量——按符号找，行号会漂） | 0.5 天 | 实测 §8.1-2：静默空返回 exit 0 |
+| 3 | `--tools=none` 哨兵 | `applyToolsWhitelist` 分支（不改空串契约） | 0.5 天 | 实测 §8.1-5：安全边界 |
+| 4 | 参数校验先于 MCP fork | `cmd/seek/main.go` 启动段（内建名预校验；「MCP 名校验依赖加载完成」的冲突显式解决） | 1 天 | 实测 §8.1-5：缺口③加重 |
+| 5 | `seek judge` 骨架（JSONL in/out、有界并发、退出码、`_meta`） | 新文件 `cmd/seek/judge.go` + `internal/judge/`（纯逻辑，可表驱动测试） | 2-3 天 | — |
+| 6 | `--isolated` + 拆 `--no-save` × `--memory` | `cmd/seek/main.go` 启动段 | 1 天 | 缺口② |
+| 7 | 成本硬顶 `--max-cost` | `internal/pricing` 现成三档 + 累加 | 0.5 天 | — |
+| —（可选） | `ResponseFormat` 接线 + 固定信封校验 | `pkg/deepseek` 接已有字段；校验在 `internal/judge` | 1 天 | 实测 §8.1-1 降级：输出变复杂后再上 |
 
-**总计 ~5 天。**
+**总计 ~6-7 天**（1–4 是 judge 之外所有 `-p` 程序消费者共享的 seek 侧修补，先落地先受益；5–7 是 judge 本体）。原排布以 `ResponseFormat` 为必修、总计 ~5 天——实测把它降级、把 1/2 两项提上来，重排依据全部在 §8.1。
 
 **不碰**：`pkg/agent`（判读不走 agent loop，直接一次 `Chat`）、`pkg/deepseek` 的接口（只接已有字段）、`internal/permission`（判读面不开 bash，权限问题不存在）。
 
@@ -307,6 +310,16 @@ seek -p "$(cat taste/info-flow.md)
 3. **`--tools ""` 是否真全量**（代码上是，真机复核一次）
 
 第 2 条的结论直接决定 `ResponseFormat` 是"必须"还是"锦上添花"。
+
+### 8.1 实测基线（2026-11-24，已跑）
+
+完整记录与数据：[`../notes/2026-11-24-judge-format-baseline.md`](../notes/2026-11-24-judge-format-baseline.md)（50 跑批 + 专项；样本为合成——本机无本地邮件，**结论只对格式成立，不对判据成立**，永不进 `eval/` 当 case）。五条主结论，全部已回写本 PRD：
+
+1. **服从率 100%**（50/50，长文 5/5）→ 缺口④降级为可选加固，§6 重排。
+2. **真正的失败模式是静默空返回**：exit 0、中文 marker 伪装成 `text_delta`、烧满 token 才吐（`--max-tokens` 压低 100% 复现）→ §6 新增工作项 2；§3.3 不变量 5 的具体形状是「调用方匹配 `[empty:` 前缀」，而不是看 exit code。
+3. **成本 92% 在 output、`sessionEffort` 写死 max** → §6 新增工作项 1（低 effort 输出 ~150 tok vs ~600 tok，3.2× 差）。
+4. **确定性只到 verdict 级**：reasons 逐字永不重复；漂移方向全往 gray 走（安全侧的抖法，但 gray 占比高于直觉）→ §1「必须」收敛为 verdict 级；§3.3 `_meta` 补 temperature/effort/model。
+5. **注入防住是组合运气**（判据措辞 + `--max-turns 1` + 工具面三者叠加），不是架构保证 → 缺口①升级为安全边界；缺口③加重：`--tools read` 下 MCP 子进程照样 fork、`--tools nosuch` 先 fork 再 exit 2 → §6 新增工作项 4。
 
 ---
 

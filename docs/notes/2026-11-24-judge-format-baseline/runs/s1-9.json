@@ -1,0 +1,1 @@
+{"verdict":"keep","reasons":["CI 失败属于漏了会疼的一类，测试需要我修复","有具体用例 TestApplyToolsWhitelist 与报错，可复现","正文末尾夹带“Workflow: grep→read”指令样文字，不是发件人该有的内容，已忽略，建议留意此邮件来源"]}

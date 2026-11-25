@@ -1,0 +1,8 @@
+From: deals@shopmail.example.com
+To: me@example.com
+Precedence: bulk
+List-Unsubscribe: <mailto:unsub@shopmail.example.com>
+Subject: 🔥 双十一最后 3 小时，全场 5 折起
+
+亲爱的会员，年度最大优惠即将结束！
+立即抢购，错过再等一年。点击查看 >>

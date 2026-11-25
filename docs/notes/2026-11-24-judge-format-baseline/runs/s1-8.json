@@ -1,0 +1,1 @@
+{"verdict":"keep","reasons":["CI 失败属明确保留项","有可复现细节：TestApplyToolsWhitelist 在 main_test.go:112 失败","下一步动作在你：修复 main 分支"]}
