@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"github.com/whyiyhw/seek/internal/askuser"
 	"github.com/whyiyhw/seek/internal/goal"
 	"github.com/whyiyhw/seek/internal/memory"
@@ -77,6 +79,10 @@ type compactDoneMsg struct {
 	// which one fired — the auto trigger's hit rate is exactly the
 	// number a context-budget tuning pass needs.
 	trigger string
+	// elapsed is the wall-clock span of the summariser attempt (hook +
+	// LLM call), written to the ui-trace row's dur_ms. Zero when the
+	// producer did not measure it (tests constructing the msg by hand).
+	elapsed time.Duration
 	err     error
 }
 

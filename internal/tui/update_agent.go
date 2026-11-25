@@ -894,8 +894,9 @@ func (m *Model) handleCompactDone(msg compactDoneMsg) []tea.Cmd {
 	// Trace the compaction as a fact: how often history gets rewritten is
 	// one half of "is the context budget tuned right", and the prompt-token
 	// count is what makes the answer numeric instead of anecdotal. Detail
-	// names the trigger so auto vs manual stays separable.
-	m.traceEventDur(uitrace.EventCompact, msg.trigger, 0, msg.usage.PromptTokens, 0)
+	// names the trigger so auto vs manual stays separable; dur_ms is how
+	// long the user actually waited (hook + summariser call).
+	m.traceEventDur(uitrace.EventCompact, msg.trigger, 0, msg.usage.PromptTokens, msg.elapsed.Milliseconds())
 	return []tea.Cmd{m.appendHistory(styleMuted.Render(notice))}
 }
 

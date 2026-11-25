@@ -182,7 +182,7 @@ func TestFold_Counters(t *testing.T) {
 		{TS: "2026-11-23T00:00:04Z", Event: EventDeliver, Chars: 20},
 		{TS: "2026-11-23T00:00:03Z", Event: EventWithdraw, Chars: 5},
 		{TS: "2026-11-23T00:00:06Z", Event: EventCancel},
-		{TS: "2026-11-23T00:00:07Z", Event: EventCompact, Tokens: 1234},
+		{TS: "2026-11-23T00:00:07Z", Event: EventCompact, Tokens: 1234, DurMS: 90000},
 	}
 	s := Fold(rows)
 
@@ -214,6 +214,10 @@ func TestFold_Counters(t *testing.T) {
 	if s.CharsByEvent[EventCompact] != 0 {
 		t.Errorf("CharsByEvent[compact] = %d, want 0", s.CharsByEvent[EventCompact])
 	}
+	// DurMS is a third axis: it sums the wait, independently of tokens.
+	if got := s.DurMSByEvent[EventCompact]; got != 90000 {
+		t.Errorf("DurMSByEvent[compact] = %d, want 90000", got)
+	}
 	// First/Last must be min/max, not slice order (rows could be
 	// assembled by hand).
 	if s.FirstTS != "2026-11-23T00:00:01Z" || s.LastTS != "2026-11-23T00:00:07Z" {
@@ -228,7 +232,7 @@ func TestFold_EmptyIsZeroValue(t *testing.T) {
 		t.Errorf("empty fold = %+v, want zero", s)
 	}
 	// Maps must be non-nil so a JSON consumer sees {} not null.
-	if s.ByEvent == nil || s.CharsByEvent == nil || s.TokensByEvent == nil {
+	if s.ByEvent == nil || s.CharsByEvent == nil || s.TokensByEvent == nil || s.DurMSByEvent == nil {
 		t.Error("fold must return initialised maps")
 	}
 }

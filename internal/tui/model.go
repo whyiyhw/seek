@@ -624,6 +624,13 @@ type Model struct {
 	ready         bool
 	now           time.Time
 
+	// clockFn, when non-nil, replaces time.Now for measurements the
+	// tests must pin exactly (currently the compact duration written to
+	// ui-trace). nil in production — clockNow() falls back to time.Now.
+	// A field rather than a package var so stubbing stays local to one
+	// test's Model and t.Parallel keeps working.
+	clockFn func() time.Time
+
 	showReasoning bool
 
 	// bannerFrame drives the welcome-banner letter-reveal animation.

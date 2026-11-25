@@ -12,7 +12,23 @@ package tui
 // Every call site is on a keystroke path, so traceEvent is best-effort
 // by construction: a broken trace must never break typing.
 
-import "github.com/whyiyhw/seek/internal/uitrace"
+import (
+	"time"
+
+	"github.com/whyiyhw/seek/internal/uitrace"
+)
+
+// clockNow is the Model's time source for measurements a test must
+// pin exactly. Production leaves clockFn nil → time.Now. The indirection
+// exists because a duration asserted with `> 0` would otherwise need
+// a real sleep (Windows returns exactly 0 across sub-tick gaps —
+// see summary_test.go's note), which is both slow and flaky.
+func (m *Model) clockNow() time.Time {
+	if m.clockFn != nil {
+		return m.clockFn()
+	}
+	return time.Now()
+}
 
 // traceEvent appends one row. nil-safe (m.opts.UITrace == nil is the
 // normal case for tests, --no-save, and embedders), and it swallows the

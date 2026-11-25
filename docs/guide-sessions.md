@@ -69,6 +69,8 @@ seek ui-trace --rows --since 24h  # raw rows, newest first
 seek ui-trace --json              # machine-readable (jq-friendly)
 ```
 
+`/compact` and auto-compact also write a row (`event: "compact"`). It carries the trigger in `detail` (`manual` / `auto`), the **pre-compact** prompt-token count in `tokens`, and the wall-clock wait in `dur_ms` — the folded summary reports both the token total and the duration total/average, which is what a "is auto-compact firing too early, and does it cost too much time?" pass reads.
+
 Why a separate file rather than reading the sessions: an injected message and a steered one are byte-identical `user` rows in a transcript, and a withdrawn queue writes nothing at all. Without this ledger those three mechanisms are indistinguishable after the fact.
 
 

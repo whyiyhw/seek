@@ -204,6 +204,47 @@ func TestRun_JSONEmptyWindowHasEmptyArray(t *testing.T) {
 	}
 }
 
+// TestRun_CompactLineCarriesDuration: the folded compact line must report
+// the wait as well as the tokens. Two shapes are pinned: with durations
+// recorded it prints total+mean (a sum alone can't distinguish one 60s
+// stall from ten fast runs); with none recorded it falls back to the old
+// token-only wording so pre-existing trace files still read correctly.
+func TestRun_CompactLineCarriesDuration(t *testing.T) {
+	withTrace(t,
+		uitrace.Event{Event: uitrace.EventCompact, Tokens: 1000, DurMS: 5000},
+		uitrace.Event{Event: uitrace.EventCompact, Tokens: 2000, DurMS: 15000},
+		// A goal row after the compactions: the compact block must not
+		// swallow it via an early return.
+		uitrace.Event{Event: uitrace.EventGoal, Detail: "met"},
+	)
+	out, _ := run(t)
+	for _, want := range []string{
+		"compactions 2",
+		"3000 prompt tokens rewritten",
+		"20000ms total",
+		"10000ms mean",
+		"goal verdicts 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("out missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRun_CompactLineWithoutDurations: rows written before the duration
+// was measured (DurMS 0) must not render "0ms mean" — an unmeasured
+// number reading as a measurement is worse than the old wording.
+func TestRun_CompactLineWithoutDurations(t *testing.T) {
+	withTrace(t, uitrace.Event{Event: uitrace.EventCompact, Tokens: 1234})
+	out, _ := run(t)
+	if !strings.Contains(out, "compactions 1") || !strings.Contains(out, "1234 prompt tokens rewritten") {
+		t.Errorf("out = %q", out)
+	}
+	if strings.Contains(out, "mean") {
+		t.Errorf("unmeasured durations must not print a mean:\n%s", out)
+	}
+}
+
 func TestRun_BadFlagReturnsError(t *testing.T) {
 	withTrace(t)
 	var out, errb bytes.Buffer
