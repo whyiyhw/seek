@@ -1,0 +1,1 @@
+eval-e3-case selftest: PASS (all-green row + 4 named-red flavors + record-only + rounds aggregate compatibility — via real runner/drive/endpoint/judge, fake binary only)

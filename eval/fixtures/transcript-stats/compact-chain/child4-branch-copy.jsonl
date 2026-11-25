@@ -1,0 +1,7 @@
+{"schema_version": 3, "id": "20261120-121500-child4-branch", "created_at": "2026-11-20T12:15:00.000000Z", "updated_at": "2026-11-20T12:16:00.000000Z", "model": "deepseek-v4-flash", "yolo": true, "cwd": "/tmp/fixture2", "system_prompt": "fixture", "parent_id": "20261120-120000-parent4-branch", "turns": 2, "tool_calls": 1, "usage": {"prompt_tokens": 1200, "completion_tokens": 30, "total_tokens": 1230}}
+{"role": "user", "content": "read z.md"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "k1", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/w/z.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "k1", "content": "z.md body"}
+{"role": "assistant", "content": "z.md read."}
+{"role": "user", "content": "now summarise it"}
+{"role": "assistant", "content": "It is a short body."}

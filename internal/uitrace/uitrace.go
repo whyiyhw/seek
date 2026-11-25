@@ -108,8 +108,9 @@ type Event struct {
 	// took). 0 = not measured.
 	DurMS int64 `json:"dur_ms,omitempty"`
 	// Detail is a short machine-readable discriminator: "queue"/"steer"
-	// on a withdraw, the stop reason on a goal verdict, token counts on
-	// a compact. Free-form but should stay short enough to grep.
+	// on a withdraw, the stop reason on a goal verdict, "manual"/"auto"
+	// on a compact (who asked). Free-form but should stay short enough
+	// to grep.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -235,6 +236,11 @@ type Summary struct {
 	// CharsByEvent because the two measure different things (text vs
 	// context size); merging them would make the number meaningless.
 	TokensByEvent map[string]int `json:"tokens_by_event"`
+	// DurMSByEvent sums DurMS per event name — the "how long did this
+	// cost me" axis (currently compact). A sum, not a mean, so the report
+	// keeps exactly one definition per field; a caller wanting the average
+	// divides by ByEvent.
+	DurMSByEvent map[string]int64 `json:"dur_ms_by_event"`
 	// Intervened is inject+queue+steer: how many times the user tried
 	// to say something while a round was running. The numerator of the
 	// headline ratio.
@@ -261,12 +267,14 @@ func Fold(events []Event) Summary {
 		ByEvent:       map[string]int{},
 		CharsByEvent:  map[string]int{},
 		TokensByEvent: map[string]int{},
+		DurMSByEvent:  map[string]int64{},
 	}
 	for _, e := range events {
 		s.Rows++
 		s.ByEvent[e.Event]++
 		s.CharsByEvent[e.Event] += e.Chars
 		s.TokensByEvent[e.Event] += e.Tokens
+		s.DurMSByEvent[e.Event] += e.DurMS
 		switch e.Event {
 		case EventInject, EventQueue, EventSteer:
 			s.Intervened++

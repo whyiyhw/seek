@@ -1,0 +1,3 @@
+Answer from the conversation you already received — do NOT read any files.
+Name the exporter file, the output path it writes, and its flush timeout.
+If the conversation no longer contains those facts, say NO-FACTS-AVAILABLE.

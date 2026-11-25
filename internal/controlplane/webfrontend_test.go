@@ -468,29 +468,35 @@ func TestWeb_PagePaneEntriesWired(t *testing.T) {
 	}
 }
 
-// TestWeb_PageSessionSidebar pins the W5 sidebar card (c_txz6vz): the
-// sessions list is a PERSISTENT left rail — collapse bit persisted in
-// localStorage with a narrow-viewport default, a ＋新建 that rides the
-// same /new command text, a title filter, and an updated-sorted row list
-// paged SESS_PAGE at a time. It also asserts the retired W4.4 popup left
-// no dead references behind (the card's acceptance ③): no browse button,
+// TestWeb_PageSessionSidebar pins the left rail: the W5 card (c_txz6vz)
+// made it persistent, and the workspace-tree card turned it into a
+// TWO-LEVEL tree (workspace headers over session rows). What survives
+// verbatim from W5 is pinned here — the rail, the collapse affordance
+// with its localStorage bit and narrow-viewport default, the search box,
+// the row paging, and the transcript swap on row click. The ＋新建 that
+// used to live in the header moved onto each workspace header (its wire
+// text is pinned in TestWeb_PageCommandSurface). It also asserts the
+// retired W4.4 popup left no dead references behind: no browse button,
 // no sess-view class, no sessions entry in the pane switcher.
 func TestWeb_PageSessionSidebar(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
 		"id=\"side\"",                   // the rail itself
 		"id=\"side-toggle\"",            // collapse affordance
-		"id=\"side-search\"",            // title filter input
-		"id=\"side-new\"",               // new-session button
+		"id=\"side-search\"",            // title/workspace filter input
+		"id=\"side-ws-new\"",            // 新建工作区 (the tree's complement)
 		"seek-side-collapsed",           // the remembered bit's key
 		"localStorage.setItem(SIDE_KEY", // ... written back on toggle
 		"innerWidth < 1024",             // narrow viewport defaults to collapsed
 		"SESS_PAGE = 30",                // row page size (filter+page are client-side)
-		"sendText('/new', false)",       // ＋新建 is the /new command, not a new protocol
 		"sess-detail",                   // main area swaps to a transcript on row click
+		// the tree itself: groups, collapsed-group memory, the two gestures
+		"wsGroups", "ws-head", "WS_CLOSED_KEY", "treeBind", "treeNewSession",
+		// browse vs continue are deliberately two actions
+		`id="sess-continue"`,
 	} {
 		if !strings.Contains(page, need) {
-			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz)", need)
+			t.Errorf("embedded page lost the sidebar piece %q (W5 c_txz6vz / workspace tree)", need)
 		}
 	}
 	// Acceptance ③ — the 📚 popup code is retired with no dead references.
@@ -498,6 +504,11 @@ func TestWeb_PageSessionSidebar(t *testing.T) {
 		if strings.Contains(page, gone) {
 			t.Errorf("embedded page still carries the retired W4.4 popup piece %q (W5 c_txz6vz must leave no dead reference)", gone)
 		}
+	}
+	// The header ＋新建 that W5 shipped is retired in favour of per-header ＋
+	// (a click on the old id would now be a no-op button — silently dead).
+	if strings.Contains(page, `id="side-new"`) {
+		t.Error("embedded page still carries #side-new — the workspace headers own the new-session action now")
 	}
 }
 
@@ -1005,9 +1016,12 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 		"ev.key === 'Enter' && !ev.shiftKey",
 		"Shift+Enter",     // the comment stating the contract
 		"function grow()", // height follows content
-		// ② '/' command menu: registry + filter + keyboard navigation
+		// ② '/' command menu: registry + filter + keyboard navigation.
+		// The registry is a RESIDUE list now: the workspace tree owns
+		// project/session navigation, so only the two gestures the tree
+		// has no equivalent for stay typeable (/resume, /cancel).
 		"const CMDS = [",
-		"'/bind'", "'/projects'", "'/switch'", "'/new'", "'/cancel'",
+		"'/resume'", "'/cancel'",
 		"function slashHits()",
 		"ev.key === 'ArrowDown'",
 		"ev.key === 'ArrowUp'",
@@ -1030,12 +1044,11 @@ func TestWeb_PageInputEnhancements(t *testing.T) {
 	// through the ONE passthrough, and the quick buttons stay wired.
 	// Enter does not grow a second send path — it calls form.requestSubmit(),
 	// so the attachment gate / "/" argument rule stay single-sourced.
-	// (c_lnsdvu rewired #cmd-bind to open the project picker instead of
-	// prefilled '/bind ' — the picker is pinned in TestWeb_PageCommandButtons;
-	// this guard keeps only the SHARED passthrough pieces.)
+	// (The top-bar command buttons are retired — the workspace tree carries
+	// project/session navigation, pinned in TestWeb_PageCommandSurface; this
+	// guard keeps only the SHARED passthrough pieces.)
 	for _, keep := range []string{
 		`id="form"`, "sendText(typed, true, ready)", "form.requestSubmit()",
-		"wireCmd('cmd-switch', '/switch ')",
 	} {
 		if !strings.Contains(page, keep) {
 			t.Errorf("input enhancement must be additive — lost %q", keep)

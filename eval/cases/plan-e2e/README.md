@@ -60,9 +60,16 @@ write → plan(complete) → /exit → `-resume` 状态折叠**。判分全部�
   （本 case 全部 bound 是 max_ 形，min_pass_rate 语义由 E1 框架保证，
   `scripts/eval-rounds-test.sh` 已钉）。
 
-**record_only 现状**：E2 标定未落（PRD 建议顺序 E1→E2→E3，本卡因排期先于 E2
-落地），先按 E4 同口径 record_only 记录不闸门；E6 release lane 接管后转正
-（`record_only` 移除、判分进发版门禁）。
+**record_only 现状（转正路径定案 c_3xyt7w, 2026-11-25）**：仍是
+`record_only: true`。转正 = 两步，缺一不可：① **主会话/人**用真 key 在发版道
+跑 `eval/run.sh --rounds 5 plan-e2e` 取 baseline（无人值守道按
+`docs/prd/v8.md` §9.1 一律假 key——本卡纪律，不是疏漏）；② E2 标定表把 gate
+记进 `eval/README.md` 的承重轴表，同时 `expect.json` 改
+`record_only: false` + `lane-release.txt` 取消本行注释。**在此之前不进
+release lane**：名单每一行都当闸门读，把 record-only 案例写进闸门只会让闸门
+永久绿。本表 2026-11-25 的假 key 5 轮复跑（5/5 绿，`RECORD … record-only`，
+证据 `.butler-evidence-c_3xyt7w/plan-e2e-5round-run.log`）证明 fixture 侧确定性，
+**不是**真 key baseline。
 
 ## 首跑即抓到真 bug（baseline 的意义）
 

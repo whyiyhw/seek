@@ -301,6 +301,13 @@ const unboundHint = "该会话还没绑定项目。先发 /bind <项目路径>�
 // it, the binding follows — that is what makes "@ this session" mean
 // "continue it where it lived". Without the seam the id is taken on trust
 // and a bad one self-heals on the next message (executor's -resume retry).
+//
+// Unbound conversations: the workspace tree's "go to that workspace" gesture
+// rides /resume from a fresh page, where there is no binding yet. When the
+// seam can name the session's cwd, that IS the binding — creating it here is
+// the same fact /bind would record, minus the "start over" reset (so a
+// resume never needs a throwaway /bind first). Without a known cwd the
+// unbound hint stands: there is no directory to run in.
 func (r *Router) cmdResume(ctx context.Context, m Inbound, rawID string) {
 	id := strings.TrimSpace(rawID)
 	if id == "" {
@@ -312,10 +319,6 @@ func (r *Router) cmdResume(ctx context.Context, m Inbound, rawID string) {
 		return
 	}
 	old, ok := r.existingBinding(m.Conv)
-	if !ok {
-		r.reply(ctx, m.Conv, unboundHint)
-		return
-	}
 	if r.cfg.LookupSession != nil {
 		cwd, err := r.cfg.LookupSession(id)
 		if err != nil {
@@ -323,8 +326,18 @@ func (r *Router) cmdResume(ctx context.Context, m Inbound, rawID string) {
 			return
 		}
 		if cwd != "" {
+			if !ok {
+				// Unbound + known cwd: the session's own directory becomes
+				// the binding (a tree click from a fresh page).
+				old = Binding{ConvID: m.Conv}
+				ok = true
+			}
 			old.ProjectPath = cwd // 会话自带的项目优先（空 cwd 的老 transcript 忽略）
 		}
+	}
+	if !ok {
+		r.reply(ctx, m.Conv, unboundHint)
+		return
 	}
 	old.SessionID = id
 	if !r.putBinding(ctx, m, old) {

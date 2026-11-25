@@ -1,0 +1,10 @@
+{"schema_version": 3, "id": "20261120-110000-parent2", "created_at": "2026-11-20T11:00:00.000000Z", "updated_at": "2026-11-20T11:05:00.000000Z", "model": "deepseek-v4-flash", "yolo": true, "cwd": "/tmp/fixture2", "system_prompt": "fixture", "turns": 3, "tool_calls": 3, "usage": {"prompt_tokens": 50000, "completion_tokens": 500, "total_tokens": 50500}}
+{"role": "system", "content": "You are seek, a DeepSeek-powered coding agent. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. tool-description padding. "}
+{"role": "user", "content": "look at x.md, run the tests, and find the needle"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "g1", "type": "function", "function": {"name": "read", "arguments": "{\"path\":\"/w/x.md\",\"offset\":1}"}}]}
+{"role": "tool", "tool_call_id": "g1", "content": "x.md body"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "g2", "type": "function", "function": {"name": "bash", "arguments": "{\"command\":\"go test ./...\"}"}}]}
+{"role": "tool", "tool_call_id": "g2", "content": "ok   pkg/a 0.3s"}
+{"role": "assistant", "content": null, "tool_calls": [{"id": "g3", "type": "function", "function": {"name": "grep", "arguments": "{\"pattern\":\"patternNeedle\",\"path\":\".\"}"}}]}
+{"role": "tool", "tool_call_id": "g3", "content": "a.go:12 patternNeedle"}
+{"role": "assistant", "content": "Tests pass; patternNeedle lives in a.go:12."}

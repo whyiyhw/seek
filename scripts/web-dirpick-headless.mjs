@@ -8,7 +8,8 @@
 // mousedown，el.click() 只发 click 不行）、层头按钮用 .click()。
 //
 // 断言景：
-//   入口 → 输入框打「/bind 」弹「浏览目录…」（folder sprite + 文字）；点它进目录模式
+//   入口 → 侧栏头「工作区」钮（#side-ws-new）直接进目录模式；树只列有痕迹的
+//          工作区，第一个工作区必然没痕迹，所以这枚钮是树的补集
 //   层头 → 路径=首个可浏览根（project_roots[0]）；↑ 在根上禁用
 //   过滤 → 过滤框打字收窄行；清空恢复
 //   下钻 → proja → sub1 两级；路径/行随层更新
@@ -145,6 +146,7 @@ const clickRow = label => evalJS(`(() => {
   row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   return 'ok';
 })()`);
+const clickSel = sel => evalJS(`(document.querySelector(${JSON.stringify(sel)})||{click(){}}).click(),'ok'`);
 const clickHeadBtn = i => evalJS(`(() => {
   const b = document.querySelectorAll('#menu .dirhead .dirtop button')[${i}];
   if (!b) return 'no-btn';
@@ -193,12 +195,14 @@ for (let i = 0; i < 100; i++) {
   if (i === 99) { console.error('FAIL: 15s 页面未就绪'); process.exit(1); }
 }
 
-// 景 0：入口 —— 「/bind 」参数期弹「浏览目录…」（folder sprite + 文字）。
-trace('景 0：入口');
+// 景 0：入口 —— 侧栏头的「工作区」钮直接开目录模式（工作区树卡：入口
+// 从「手打 /bind 的参数期」搬到了这枚钮，树只列有痕迹的工作区，第一个
+// 工作区必然没痕迹，所以这枚钮是树的补集）。
+trace('景 0：入口（#side-ws-new）');
 try {
-  await setDraft('/bind ');
-  let s = await until('入口行出现', s => s.menuOpen && s.rows.includes('浏览目录…'), 8000);
-  ck('「/bind 」参数期弹目录浏览入口', s.rows.includes('浏览目录…'), JSON.stringify(s.rows));
+  await clickSel('#side-ws-new');
+  let s = await until('目录层打开', s => s.head !== null, 8000);
+  ck('#side-ws-new 直接开目录模式（无「浏览目录…」中转行）', s.head !== null, JSON.stringify(s));
   let st = await state();
   ck('基线未绑定', !st.bound && st.project === '', JSON.stringify(st));
 } catch (e) { ck('入口', false, e.message); await dump(); }
@@ -206,7 +210,6 @@ try {
 // 景 1：进目录模式 —— 层头路径=首个可浏览根；根上 ↑ 禁用；行=子目录。
 trace('景 1：目录模式层头');
 try {
-  await clickRow('浏览目录…');
   let s = await until('首层读取落定', s => s.head && s.head.path.endsWith('/dirpick')
     && !s.rows.includes('（读取中…）') && s.rows.length === 2, 8000);
   ck('层头路径=首个可浏览根', s.head.path.endsWith('/dirpick'), s.head.path);
@@ -269,9 +272,7 @@ try {
 // 景 6：失败分支 —— 先列后删 vanish，点行 → 层内一行错误，不白屏。
 trace('景 6：目录消失');
 try {
-  await setDraft('/bind ');
-  await until('入口行再现', s => s.menuOpen && s.rows.includes('浏览目录…'), 8000);
-  await clickRow('浏览目录…');
+  await clickSel('#side-ws-new');
   await until('首层读取落定', s => s.head && s.head.path.endsWith('/dirpick')
     && !s.rows.includes('（读取中…）') && s.rows.length === 2, 8000);
   await clickRow('proja');

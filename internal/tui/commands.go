@@ -2022,7 +2022,12 @@ func startCompactCmd(m *Model, trigger string) tea.Cmd {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
+	clockNow := m.clockNow
 	return func() tea.Msg {
+		// The span starts here (not when the caller built the Cmd): what
+		// the user waits for is hook + summariser, and the trace row's
+		// dur_ms is the only place that number is recorded.
+		start := clockNow()
 		// 60s ceiling on the summariser. Ctrl+C at the TUI level
 		// applies via parent ctx cancellation if the user hits Ctrl+C.
 		ctx, cancel := context.WithTimeout(parentCtx, 60*time.Second)
@@ -2036,7 +2041,13 @@ func startCompactCmd(m *Model, trigger string) tea.Cmd {
 		// "manual" (/compact) or "auto" (maybeAutoCompact).
 		hreg.NotifyPreCompact(ctx, hooks.PreCompactEvent{Trigger: trigger})
 		summary, usage, err := ag.Summarise(ctx)
-		return compactDoneMsg{summary: summary, usage: usage, trigger: trigger, err: err}
+		return compactDoneMsg{
+			summary: summary,
+			usage:   usage,
+			trigger: trigger,
+			err:     err,
+			elapsed: clockNow().Sub(start),
+		}
 	}
 }
 

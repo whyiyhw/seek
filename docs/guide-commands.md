@@ -65,9 +65,13 @@ seek --resume <id>          # Resume a saved session by ID (see seek -list)
 seek --continue             # Resume the most-recently-updated session
 seek --model <name>         # Override model selection
 seek --provider <name>      # Override provider (deepseek/anthropic/openai/gemini/glm)
+seek --effort off|low|high|max   # Reasoning effort for this session (default: max; `none` = alias of off). `off` = no reasoning_effort override and the 16k completion cap; `low` is the cheapest documented reasoning rung (batch/judge lane); `max` raises the derived cap to 64k (clamped to the model). An explicit --max-tokens still wins
+seek --temperature <0..2>   # Sampling temperature (absent = provider default, NO key on the wire). 0 is the determinism pin the judge lane wants
 seek --yolo                 # Bypass permission prompts
 seek --plan                 # Start in plan mode
 seek --no-save              # Ephemeral session (no persistence)
+seek --tools read,grep      # Freeze the tool surface to a whitelist (v8·T1 bare-core lane)
+seek --tools none           # Zero tools: empty registry, the request carries no `tools` field at all (judge/pipe isolation)
 seek --keep-checkpoints     # Preserve checkpoint blobs across session end
 seek --install              # Add seek to PATH (Windows)
 seek --upgrade              # Download latest release and replace binary

@@ -57,7 +57,13 @@ type anthropicRequest struct {
 	System    string             `json:"system,omitempty"`
 	Messages  []anthropicMessage `json:"messages"`
 	Tools     []anthropicTool    `json:"tools,omitempty"`
-	Stream    bool               `json:"stream"`
+	// Temperature is a pointer so absent (nil) omits the key entirely —
+	// text-only requests keep their pre-knob bytes (prefix-cache
+	// contract). Anthropic's documented range is 0..1; a wider value is
+	// forwarded verbatim and answered by the API's own 400 rather than
+	// silently clamped here.
+	Temperature *float64 `json:"temperature,omitempty"`
+	Stream      bool     `json:"stream"`
 }
 
 type anthropicMessage struct {
@@ -108,6 +114,8 @@ func buildRequest(req llm.ChatRequest) anthropicRequest {
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 		Stream:    true,
+		// nil stays nil → key absent (byte-identical pre-knob body).
+		Temperature: req.Temperature,
 	}
 
 	msgs := req.Messages

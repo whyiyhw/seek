@@ -152,7 +152,10 @@ pre-landing history by construction). Three cases added 2026-11-22
 alongside the shell-as-search metrics (`grep-affordance`,
 `parallel-fanout`, `references-trigger`) make it 34; all three are
 rows in this table from their first record, with the baseline noted in
-the history column rather than reconstructed. `grep-affordance` is the
+the history column rather than reconstructed. `compact-ab`
+(2026-11-25, card c_qjb5mq) makes it 35 — record_only from day one,
+because the fake-key lane cannot carry an LLM judge for a case whose
+"model" is this repo's own scripted endpoint. `grep-affordance` is the
 one that has already moved: 1/5 before the grep-tool extension, 5/5
 after, same bounds both sides (case README). History columns are
 computed from
@@ -181,6 +184,7 @@ point of having a gate.
 | bash-overreach | 4/15 → post-recal study: 5/5 replay + 1/6 live true-overreach | ~0.83 | 5 | **0.8** | no |
 | code-review-effort-low | 11/12 → 9/9 | ~1.0 | 5 | — | **yes** |
 | code-review-effort-max | 6/14 → 3/11 under the old 6000 ceiling | ~0.9 | 5 | — | **yes** |
+| compact-ab | 首个记录 2026-11-25（record-only，机械断言 3 条） | ~1.0 | 3 | — | **yes** |
 | edit-unicode-read-first | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | git-multi-query-no-bash | 23/31 → 10/10 | 1.0 | 3 | 1.0 | no |
 | git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
@@ -256,7 +260,14 @@ forced:
    would be permanently red until the guidance changes; the go/no-go
    belongs to the MCP D-line (D5), which reads recorded rows either
    way.
-5. **`grep-refine-not-flood` — promoted to the flaky class**
+5. **`compact-ab` — record_only (new case, 2026-11-25)**. Its judgement
+   is mechanical (`runner_fact` assertions: does each arm's answer carry
+   the golden facts, and is arm B really the summary pair), so there is
+   nothing for a judge to add on the fake-key lane; gating waits for
+   the E2 calibration of a real-key lane or an explicit E6 decision.
+   The negative leg is checked in as `scripts/eval-compact-ab-test.sh`,
+   not as a gate.
+6. **`grep-refine-not-flood` — promoted to the flaky class**
    (`min_pass_rate 0.6` @ 5): 7/10 in the current window and every red
    is the same shape (7–12 total tool calls vs the 6 bound —
    exploration variance), not drift. Bounds stay first-pass; a
@@ -269,13 +280,13 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (E3 placeholder; E4/E5 backfilled 2026-11-21)
+### Load-bearing axes (all three landed; lane membership decided c_3xyt7w 2026-11-25)
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
-| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true` 挂账至 E2 标定 / E6 release lane 接管（真二进制 real-key baseline 未测——无人值守车道假 key 纪律，且三态实跑入口 `eval/run.sh` 不在验证车道白名单、默认写正式 `eval/results`）；机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段） |
-| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
-| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
+| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true`。**Release lane 成员资格：仍不在 `lane-release.txt` 名单内**（名单=闸门，record_only 进闸门等于把闸门关掉——同 `code-review-effort-*` 的处置）。转正路径（c_3xyt7w 定案，两步、缺一不可）：① 主会话/人用**真 key** 在发版道跑 `eval/run.sh --rounds 5 plan-e2e` 拿到 baseline（无人值守道假 key 纪律，见 § Isolation）；② E2 标定表把 gate 记进本表并在 `expect.json` 改 `record_only: false`，同时取消 `lane-release.txt` 里本行注释。归属：**主会话/人**——①未做前不得翻标志。机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段）。**2026-11-25 假 key 5 轮复跑 5/5 绿**（`RECORD plan-e2e (5/5 rounds, record-only)`，证据 `.butler-evidence-c_3xyt7w/plan-e2e-5round-run.log`）——说明 fixture 侧确定性成立，但这不是真 key baseline |
+| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律）。**Release lane 成员资格：在册**（c_3xyt7w，2026-11-25，`lane-release.txt` 的承重轴块）——gate 0.6 @ 5 轮本就是 doctrine 定下的发版界，闸门语义完整，不需要先有真 key baseline 才能进名册；真 key baseline 仍属发版道人工动作，届时按 §六.3 校准/收紧 0.6。机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。**2026-11-25 假 key 车道实测**：单例 `PASS subagent-bg-resume`（9 个 bg_*/agent_* 指标全对）+ `--lane release --rounds 1` 里该例 `PASS`（fixture `eval/tools/fake_subagent_endpoint.py`；证据 `.butler-evidence-c_3xyt7w/`）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
+| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下）。**Release lane 成员资格：在册**（E6 落地时即在） |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
@@ -283,6 +294,15 @@ case measures < 0.6, the fix belongs in the product's prompts, not the
 threshold). E2 neither ran nor pre-gated them; E4's 0.6 is the doctrine
 floor pending its own real-key baseline (a release-lane,
 human/main-session action per the provider-lane rule).
+
+**Release lane 名册口径 (c_3xyt7w, 2026-11-25)**: 承重轴三例里 **两例在册**
+（`serve-web-stream` E5 + `subagent-bg-resume` E4），`plan-e2e` (E3) 因
+`record_only: true` 留在名单外——**名单里的每一行都是闸门**，把 record-only
+案例写进发版闸门只会让闸门永久绿而看起来在守（`docs/pitfalls/eval/
+record-only-cases-hide-their-verdict-in-the-per-round-line-reading-the-record-line-passes-anything.md`
+的同族错误）。E6 验收的「release lane 只含承重轴 3 例」按**闸门语义**读作
+「承重轴三例中所有可闸门者都进名册」，E3 的缺位是 `record_only` 的后果、由
+本表记明的转正路径负责收口，不是名单遗漏。名单注释里的旧占位卡号（E3/E4 立项卡之前写的）已随本卡作废。
 
 **`serve-web-stream` baseline (E5, c_lbtdqw)**: landed with the case —
 [`eval/cases/serve-web-stream/`](cases/serve-web-stream/)（README 记
@@ -325,7 +345,7 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 
 | 检查 | 归属 | 证据 / 理由 |
 |---|---|---|
-| `-tools` 白名单冻结 + 未知名 exit 2 | 已有测试 | `cmd/seek/tools_flag_test.go`：`TestToolsFlagE2E_WhitelistFiveToolsDeterministic`、`TestToolsFlagE2E_UnknownNameExits2`、`TestApplyToolsWhitelist_UnknownNameErrToolsUsage`、`TestApplyToolsWhitelist_ResumeWarnsOnChangedSet`（`go test -race`，CI 三 OS） |
+| `-tools` 白名单冻结 + 未知名 exit 2 | 已有测试 | `cmd/seek/tools_flag_test.go`：`TestToolsFlagE2E_WhitelistFiveToolsDeterministic`、`TestToolsFlagE2E_UnknownNameExits2`、`TestApplyToolsWhitelist_UnknownNameErrToolsUsage`、`TestApplyToolsWhitelist_ResumeWarnsOnChangedSet`（`go test -race`，CI 三 OS）。**前置校验 + fork 顺序**（c_xujwvq）：`cmd/seek/tools_precheck_test.go` 的三分表（内建 / 可证明不可能 / 推迟）+ `TestToolsPrecheckE2E_UnknownNameSpawnsNoMCPServer`（未知名的拒绝以**子进程 pid 文件缺席**取证，不是日志行） |
 | ACP `tool_call` 帧形态 + thinking chunk | 已有测试 | `cmd/seek/acp_test.go`：`TestACPUpdate_Mapping`（reasoning / streaming CoT / streaming answer delta 三者都落 `agent_thought_chunk`；tool_call kind/locations/content）、`TestACPUpdate_ToolKind`、`TestACPUpdate_Locations`、`TestACPUpdate_Content`；全链在 `cmd/seek/acp_*_e2e_test.go`（审批/模式/多会话） |
 | MCP `server__tool` 前缀 + 撞名回退 | 已有测试 | `internal/tools/mcptool/bridge_test.go`：`TestLoadServers_PrefixPolicy`（默认 `srv__tool`；`NoPrefix` 撞内置名回退成 `<server>__<tool>`）、`TestLoadServers_NamePrefix`、`TestLoadServers_DefaultPrefixIsUnfolded`、`TestSafeToolName`、`TestLoadServers_DeterministicRoster` |
 | session JSONL 头 / `schema_version` / repair | 已有测试 | `internal/session/session_test.go`：`TestSaveLoad_Roundtrip`、`TestRepair_DropsTrailingOrphanToolCalls`、`TestRepair_PartialMultiCallStillCountsAsOrphan`、`TestRepair_BackfillsEmptyToolContent`、`TestRepair_LeavesValidHistoryAlone`；读路径 `internal/session/readpath_test.go`：`TestReadMessagesPageTornTail`、`TestReadMessagesPageCorruptLine`。**注**：legacy `.json`（schema_version ≤ 1）迁移已随 `65a31d50` 删除（`Load`/`LoadFrom` 只开 `.jsonl`），故无迁移测试可写；AGENTS.md 同一句仍称「migrated on next Save」且写 `schema_version=2`（代码 `CurrentSchemaVersion = 3`），两处漂移见待开卡 #2 |
@@ -378,7 +398,7 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 |---|---|---|---|
 | 1 | eval 并发写结果行自测：PRD §四 计划项未实现 | v2 §四把「两个进程各写 100 行」写成测试计划，仓库里没有对应断言；当前原子性只靠单行 `echo >>` 的 O_APPEND 约定，改写入方式即无保护 | `docs/prd/feature-eval-v2.md` §四「并发」；`scripts/eval-rounds-test.sh` 无并发场景；`eval/run.sh:1078,1249` |
 | 2 | AGENTS.md 会话存储句校正：legacy `.json` 迁移已删 + `schema_version` 写的是 2 | 同一句两处与代码不符：①「Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`」——`65a31d50` 之后 `Load`/`LoadFrom` 只开 `.jsonl`，无迁移路径；②写 `schema_version=2`，代码是 `CurrentSchemaVersion = 3`。照文档写测试会测到不存在的路径 | `git show 65a31d50`（"seek hasn't shipped, so there are no schema-v1 single-file JSON sessions in the wild"）；`internal/session/session.go` 的 `Load` / `LoadFrom` / `CurrentSchemaVersion`；`AGENTS.md:94` |
-| 3 | E3 / E4 承重轴的 release lane 成员资格定案 | 两例 2026-11-21 均已落地（`plan-e2e` record_only、`subagent-bg-resume` gate 0.6），`lane-release.txt` 仍是注释占位、注释里的卡号还是旧的，README lane 表仍写「待 E3/E4 落地后取消注释」——E6 验收「release lane 只含承重轴 3 例」实际只有 1 例在册，归属无人 | `eval/lane-release.txt:19-21`；`eval/cases/plan-e2e/expect.json`（注「E6 release lane 接管后转正」）；`eval/cases/subagent-bg-resume/expect.json`；本文 §发版前跑什么 的 lane 表 |
+| 3 | ~~E3 / E4 承重轴的 release lane 成员资格定案~~ **已收口**（c_3xyt7w，2026-11-25） | 定案结果：E4 `subagent-bg-resume` **在册**（`lane-release.txt` 的承重轴块；gate 0.6 @ 5 轮是 §六.3 的 doctrine 下限，闸门语义完整）；E3 `plan-e2e` **不进名单**（`record_only: true` ⇒ 写进闸门只会让闸门永久绿），转正路径（主会话真 key 5 轮 baseline → E2 记 gate → 翻 `record_only` + 取消注释）落在 § Load-bearing axes 表的 E3 行与 `eval/cases/plan-e2e/README.md`；旧占位卡号已作废，README lane 表与名单一致 | `eval/lane-release.txt` 的承重轴块（在册项 `subagent-bg-resume`）＋§ Load-bearing axes 表；`eval/cases/plan-e2e/README.md` §record_only 现状 |
 
 ## 发版前跑什么（lanes, E6）
 
@@ -394,7 +414,7 @@ E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
 
 | lane | 名单 | 用途 |
 |---|---|---|
-| `release` | 承重轴（`serve-web-stream` 已在；`plan-e2e`/`subagent-bg-resume` 注释占位待 E3/E4 落地后取消注释）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
+| `release` | 承重轴 **2/3 在册**（`serve-web-stream` E5 + `subagent-bg-resume` E4；`plan-e2e` E3 因 `record_only: true` 不在册，转正路径见 § Load-bearing axes 表）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
 | `core` | 低成本子集 8 例（便宜单发用例 + 零成本假 key 的 `serve-web-stream`；无 MCP fixture、无整仓 review） | 夜间观测（CI schedule，`--rounds 2`） |
 
 **发版命令**（在 main、干净树）：
@@ -513,6 +533,7 @@ the lane block and is lane-independent.
 | `bg_notified_transcript` | parent-session transcript rows that are user-role `<context>` messages carrying the `[agent: background done sub-sid=<full>]` wire prefix for a background child — the "notice entered the main session stream" surface itself; prefix + sub_sid only, never the summary prose |
 | `bg_resumed_lineage` | `started` events whose `resumed_from` is non-empty AND names a sub_sid present in the index — the continuation run's lineage link |
 | `bg_artifacts_missing` | completed runs whose `transcript.jsonl` is absent from `projects/<pid>/sessions/<parent-sid>/subagents/<sub-sid>/` (`paths.SubagentSessionDir`) — 0 is the pass state |
+| `arm_a_keeps_facts` / `arm_b_keeps_facts` / `arm_b_negative_loses_facts` / `arm_b_is_summary_pair` | compact-ab: `runner_fact` assertions (generic `runner_assert_failures` metric counts them). Arms A/B answer the same prompt over the same scripted endpoint; the only difference is the history (full vs `/compact` summary pair). The negative variant inverts the arm-B assertion, so a summary that dropped the facts turns RED when it should. See the case README |
 | `sse_delta_frames` | serve-web-stream only: `delta` frames on the W1.4 SSE wire — the case's runner.sh pairs captured `event:`/`data:` lines into `sse_frame` rows first; **content-conditional** (merged into the metrics object only when the stream carries `sse_frame` rows, so non-serve rows keep their historical byte shape — see the ablate no-env guard) |
 | `sse_usage_frames` | serve-web-stream only: `usage` frames (turn_end translated server-side, `internal/controlplane/webfrontend_stream.go`) |
 | `sse_frame_order_ok` | serve-web-stream only, 1/0: every `delta`/`usage`/`tool` frame of the close-out's run PRECEDES the close-out default frame — the per-conv `events…reply` wire invariant |
@@ -624,6 +645,13 @@ offset 步长 `+50` 991 次）。
 | `reread_rate` | Σ 同会话同文件 (`read 次数 − 1`) / read 总数 —— 多余调用口径 |
 | `pagination_share` | 被重读文件里 offset 出现过 >1 个不同值的比例（offset 缺省视作 1） |
 | `offset_steps` | 同会话同文件 offset 集合**去重后升序**相邻差（跳页步长分布，top5） |
+| `chains.children` / `parents_found` / `orphans` | 派生会话数（有 `parent_id`）/ 其中父会话也在扫描范围内 / 父缺失的断链数。断链单列，**不当 0 压缩比** |
+| `chains.compression_mean` | 仅 compact 链：子会话首条**非 system** 消息的 content 字节（扣掉 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**）。两处「不含 system」都承重——session JSONL 的 message 区以 system 开头（实测 461/461），算进分母会让比值恒等于 system 占比。分母也不含 `tool_calls.arguments`（那是给工具消费的指令，重复计入会让比值失真） |
+| `chains.kind` | `compact`（首条非 system 消息以 `SUMMARY_MARKER` 开头）vs `branch`（其余，历史是父的副本）。branch 子会话没有摘要，**不进**压缩比与召回；混进来会造出 ≈1.0 的假样本 |
+| `chains.recall` | 实体召回：父会话 tool_call 里的路径（read/edit/write）、bash 命令、grep pattern 出现在子会话摘要里的比例。**plain 桶是头条**；附件链（父历史含 `[image: `/`[file: `）单列 `attachment` 桶且不进总分——`Summarise` 走 `WithoutImages`/`WithoutFiles`，附件正文从来不进摘要视野 |
+| `chains.rescue` | **不做分桶**：`rescueNote` 只追加到 summariser 的请求 prompt（`pkg/agent/compact_rescue.go`），不落 transcript，所以「这条链走过救援」无法从落盘数据机械判定。报告改打印 `parent_bytes` 让人看出溢出量级 |
+| `chains.child_head_rate` | 子会话前 `CHAIN_WINDOW_CALLS`(=10) 个 tool_call 里、参数路径命中「父会话读过的文件集合」的 read 数 / 同期 read 数。压缩的代价是信息丢失，最先表现为「刚读过的又读一遍」 |
+| `chains.baseline` | 参照系：同 cwd、无 `parent_id`、**且不是任何链的父会话**的聚合 `Σ(次数−1)/read`。父会话不算——它本身就是被压缩掉的那段历史 |
 | 分组 | 指标同时按 `model × created_at[:7]` 汇总——5 月 v0.x 时代占 82% 的调用量，不分组会把版本混杂读成趋势 |
 
 读取侧纪律：权限受限文件跳过并计数（`skipped_files`）；解析失败行计数
@@ -754,8 +782,11 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
   TUI-only — print mode has no askuser callback) against a scripted local
   model (`fake_plan_endpoint.py`, fake key, $0 API). Asserts A1–A10 +
   resume_same_session; **measures the toolchain, not model choice**.
-  `record_only: true` until E2's calibration lands; joins the release lane
-  at E6. Baseline + judging detail + the resume-fold bug its first run
+  `record_only: true` — release-lane membership is the decided OUT (card
+  c_3xyt7w, 2026-11-25): promotion needs a human/main-session real-key
+  5-round baseline first, then an E2 gate entry, then flipping
+  `record_only` + uncommenting its `lane-release.txt` line. Baseline +
+  judging detail + the resume-fold bug its first run
   caught: `eval/cases/plan-e2e/README.md`. The judging/gate mechanics are
   pinned headless by `scripts/eval-e3-case-test.sh` (selftest lane, name
   `eval-e3-case-test`, ~2 min): the REAL runner/drive(pty)/endpoint/judge

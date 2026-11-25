@@ -155,6 +155,14 @@ const snapshot = () => evalJS(`(() => {
     sideFoot: document.getElementById('side-foot').textContent,
     sideFootBtn: !!document.querySelector('#side-foot button'),
     sideHint: document.getElementById('sess-list').textContent,
+    // 工作区树：组头（名字/会话数/当前态）
+    groups: [...document.querySelectorAll('#sess-list .ws-head')].map(h => ({
+      root: h.dataset.root,
+      name: (h.querySelector('.ws-name') || {}).textContent || '',
+      cnt: (h.querySelector('.ws-cnt') || {}).textContent || '',
+      cur: h.classList.contains('cur'),
+      addBtn: !!h.querySelector('.ws-acts button'),
+    })),
     searchVal: document.getElementById('side-search').value,
     detail: document.body.classList.contains('sess-detail'),
     browserShown: vis(document.getElementById('browser')),
@@ -328,7 +336,7 @@ try {
   ck('清空搜索恢复首屏 30 行', all.rows.length === SESS_PAGE, `got ${all.rows.length}`);
   await typeSearch('zzz-no-such-title');
   const none = await until('无匹配', s => s.rows.length === 0, 5000);
-  ck('无匹配显示提示而非空列表', none.sideHint.includes('没有匹配的会话'), none.sideHint);
+  ck('无匹配显示提示而非空列表', none.sideHint.includes('没有匹配的'), none.sideHint);
   await typeSearch('');
 } catch (e) { ck('标题搜索', false, e.message); await dump(); }
 
@@ -362,15 +370,30 @@ try {
   ck('展开位已写回 localStorage', stored2 === '0', `got ${stored2}`);
 } catch (e) { ck('收起展开 + 刷新保持', false, e.message); await dump(); }
 
-// 景 6：＋新建 —— 与 /new 同一条指令（夹具未绑定 → 得未绑定提示）。
-trace('景 6：＋新建');
+// 景 6：组头 = 「去这个工作区」（工作区树卡）。夹具里 32 条会话同属一个
+// 工作区（cwd 都是 /tmp/w44-fixture），未绑定状态下点组头 → 该组有会话，
+// 所以发的是 /resume <最新一条>（绑定跟着会话自记的 cwd 走，上下文不丢），
+// 而不是 /bind（/bind 会重置会话——点一下组头就清掉正在进行的对话是错的）。
+trace('景 6：点组头 = 去这个工作区');
 try {
-  await clickSel('#side-new');
-  const s = await until('新建指令回执', s => s.chatText.includes('/new')
-    && s.chatText.includes('还没绑定'), 10000);
-  ck('＋新建发出 /new 并收到未绑定提示（同一条指令面）',
-    s.chatText.includes('/new') && s.chatText.includes('/bind'), '');
-} catch (e) { ck('＋新建', false, e.message); await dump(); }
+  const base = await until('树上有组头', s => s.groups.length >= 1, 10000);
+  ck('侧栏是两级树：恰一个工作区组头，会话数 32',
+    base.groups.length === 1 && base.groups[0].cnt === String(N_ALL),
+    JSON.stringify(base.groups));
+  ck('组头名 = cwd 的 basename', base.groups[0].name === 'w44-fixture', base.groups[0].name);
+  ck('组头带 ＋（在该工作区开新会话）', base.groups[0].addBtn, JSON.stringify(base.groups));
+  await clickSel('#sess-list .ws-head');
+  const s = await until('续接回执', s => s.chatText.includes('已续接会话'), 10000);
+  ck('点组头 → 发 /resume（不是 /bind：不重置上下文）',
+    s.chatText.includes('已续接会话 ' + LONG_SID), s.chatText.slice(-160));
+  const st = await evalJS(`fetch('/state', {headers: {'X-Seek-Conversation':
+    localStorage.getItem('seek-web-conv') || ''}}).then(r => r.json())`);
+  ck('绑定会话翻成组内最新一条', st.session === LONG_SID, JSON.stringify(st.session));
+  ck('绑定项目跟到会话自记的 cwd', st.project === '/tmp/w44-fixture', String(st.project));
+  const after = await until('组头标当前', s => s.groups.some(g => g.cur), 8000);
+  ck('当前工作区的组头高亮（左缘 accent 条）', after.groups.find(g => g.cur)?.name === 'w44-fixture',
+    JSON.stringify(after.groups.map(g => g.name + '|' + g.cur)));
+} catch (e) { ck('组头去工作区', false, e.message); await dump(); }
 
 // 景 7：回聊天 —— 会话正文收起，聊天面/输入框原样（侧栏是加法，零回归）。
 trace('景 7：回聊天');

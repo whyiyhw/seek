@@ -4,6 +4,11 @@
 
 - c_wjo6wy：R2 verdict 持久化落点：autopilot Report 落盘为可积累 JSONL（§9.5③3）
 - c_jxwsfz：--json 空返回的机器可判定信号（judge 前置②：静默空返回 exit 0 陷阱）
+- c_lh6tlq：--tools=none 哨兵：零工具面（judge 前置③：安全边界）
+- c_kdblc4：R2 无人调度：给 autopilot 挂真触发器（§9.5③1；前置=前两卡合并）
+- c_3xyt7w：E3/E4 承重轴 release lane 成员资格定案（E7 待开卡清单#3）
+- c_trrsn7：`-p` 车道补 `--effort` / `--temperature` 旗标（judge 前置①：成本 3.2×）
+- c_xujwvq：参数校验先于 MCP fork：--tools nosuch 不该先加载 9 个 MCP 工具（judge 前置④）
 
 ## v0.13.1（2026-11-24）
 

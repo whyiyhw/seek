@@ -32,6 +32,52 @@
                       （跳页步长；同 offset 的重复由 dup 口径覆盖，所以
                       先集合去重再求差，不重复计同一跳）。
 
+compact 链（/compact 与 /branch 都会给子会话写 parent_id）
+    chain             一条 parent_id 指向父会话 id 的会话记录。父不在本次
+                      扫描范围（被归档/删除）时记 parent_found=false ——
+                      断链单独计数，绝不把「父缺失」当成「压缩比 0」。
+    compression ratio 子会话第一条**非 system** 消息的 content 字节（扣掉
+                      我们加的 SUMMARY_PREFIX 样板）/ parent 全历史 Σcontent
+                      字节（**不含 system**）。口径是**字节**不是 token（离线
+                      不调 tokenizer；两侧同口径相除，比值仍有意义）。
+                      /compact 的 fork 把摘要写成子会话的第一条真实消息。
+                      两个「不含 system」都承重：session JSONL 的 message 区
+                      以 system 开头（461/461 实测），把 system 算进分母会让
+                      压缩比恒等于 system 占比，读起来像「压缩无效」。
+    child known-reread 子会话**前 K 个 tool_call** 里、参数路径命中
+                      「父会话读过的文件集合」的 read 次数。K 写死为
+                      CHAIN_WINDOW_CALLS（10）并渲染出来 —— 压缩的代价是
+                      信息丢失，而信息丢失最先表现为「刚读过的文件又读一遍」。
+    base_reread      cwd 相同的**没有 parent_id** 的会话的聚合重读率
+                      （与 read 段同口径：Σ 次数-1 / read 总数）。它是
+                      「同一项目里不压缩的会话长什么样」，没有它，子会话
+                      的重读率没有参照系。
+
+compact 链的实体召回（同一段，回答「摘要丢没丢关键信息」）
+    kind             子会话分两类，**机械可判**：compact（第一条非 system
+                      消息以 SUMMARY_MARKER 开头 = /compact 的 fork）vs branch
+                      （其余 = /branch 的 fork，历史是父的副本，不是摘要）。
+                      branch 子会话有 parent_id 但**没有压缩**，所以压缩比
+                      与召回率只统计 compact 类；混在一起会让「压缩比」出现
+                      ≈1.0 的假样本。
+    entity           parent 全历史 tool_call 参数里抽出的「关键实体」：
+                      read/edit/write 的路径、bash 的完整命令（空白归一、
+                      截 80 字符）、grep 的 pattern。按 (类, 值) 去重。
+    entity hit       实体值出现在子会话摘要文本里 = 命中。路径实体额外接受
+                      其 basename 命中（模型在简报里通常写文件名不写全路径；
+                      只认全路径会把「写了」误判成「没写」）。
+    recall           该链命中实体数 / 父会话实体数。父会话没有实体时记
+                      None（不造 0/0）。
+    bucket           plain（父历史干净）与 attachment（父历史带附件）。附件
+                      链**不进 aggregate**：Summarise 走 WithoutImages/
+                      WithoutFiles（pkg/agent/agent.go），附件正文本来就
+                      不在摘要视野里，把它的低召回记到摘要质量上是归因错误。
+    rescue           不做分桶，原因写在 render 段：rescueNote 只追加到
+                      **summariser 的请求 prompt**（pkg/agent/compact_rescue.go
+                      prepareSummariseMessages），不落 transcript，所以「这条
+                      链走过救援」无法从落盘数据机械判定。报告改为逐链打印
+                      parent_bytes，让人直接看出溢出量级。
+
 用法
     scripts/transcript-stats                        # 扫 $SEEK_HOME/sessions 或 ~/.seek/sessions
     scripts/transcript-stats --sessions-dir DIR     # 参数化数据源（fixture / 归档用）
@@ -55,6 +101,40 @@ import tempfile
 READ_PATH_KEYS = ("path", "file_path", "file")
 NAIVE_BUCKET = "<naive-bucket>"
 READ_KEY_MODES = ("auto", "path-only", "naive-bucket")
+# CHAIN_WINDOW_CALLS is how many leading tool calls of a compacted child
+# count as "did it immediately re-read what the summary should have
+# covered". Ten is ~one post-compact exchange; a cap is needed because
+# a long child session would otherwise drift toward the baseline and
+# erase the signal the number exists to carry.
+CHAIN_WINDOW_CALLS = 10
+
+# SUMMARY_PREFIX is the exact string handleCompactDone prepends to the
+# summary when it builds the compacted child's first user turn
+# (internal/tui/update_agent.go). It is stripped before measuring the
+# summary's size: the boilerplate is ours, not the model's output, and
+# including it would inflate every compression ratio by a constant.
+SUMMARY_PREFIX = ("Here is a summary of our earlier conversation. "
+                  "Continue from this context:\n\n")
+
+# SUMMARY_MARKER is the stable first sentence used to RECOGNISE a compact
+# fork. Detection uses the marker (not the full prefix) so a future
+# rewording of the second sentence cannot silently reclassify every
+# compacted session as a /branch copy.
+SUMMARY_MARKER = "Here is a summary of our earlier conversation."
+
+# Attachment markers: the in-band "[image: " / "[file: " family that the
+# submit-time routers leave in Content (feature-vision, F3/F5). A parent
+# history containing one is an ATTACHMENT chain — Summarise strips the
+# parts (WithoutImages/WithoutFiles) so the briefing never saw the
+# attachment body, and its recall is structurally lower.
+ATTACHMENT_MARKERS = ("[image: ", "[file: ")
+
+# Entities are truncated at this width before matching so a huge bash
+# heredoc cannot turn the recall metric into "did the summary repeat
+# the whole script".
+ENTITY_MAX = 80
+# Tool names whose `path`/`file_path` argument is a key entity.
+PATH_TOOLS = ("read", "edit", "write")
 
 
 # ---------------------------------------------------------------- 读取
@@ -70,6 +150,19 @@ def load_sessions(paths):
 
     权限不足 / 读不动的文件计入 skipped（跳过并计数，不是失败）；
     解析不了的行计入 malformed，不中断（老 session 里有手改/截断行）。
+
+    每条 session 额外保留 compact 链口径需要的度量（见 docstring 顶部
+    「compact 链」两节）：
+      content_bytes   全历史 Σ len(content)，**不含 system 角色** —— 压缩比的
+                      分母。system prompt 每次都会重新下发、不参与压缩，
+                      把它算进分母会让压缩比恒等于「system 占比」。
+      head_text       第一条**非 system** 消息的 content（已剥 SUMMARY_PREFIX）
+                      —— compact 子会话的摘要就是这一条。
+      head_raw        同一条消息的原始 content —— 用来识别 compact fork
+                      （样板剥掉后前缀就没了）。
+      head_bytes      head_text 去掉 SUMMARY_PREFIX 样板后的字节 —— 压缩比
+                      分子（样板是我们加的，不是模型输出）。
+      has_attachment  历史里是否出现过 "[image: "/"[file: " 标记。
     """
     sessions, skipped, malformed = [], [], 0
     for path in paths:
@@ -79,6 +172,9 @@ def load_sessions(paths):
             skipped.append(path)
             continue
         header, calls = None, []
+        content_bytes = 0
+        head_text = None
+        has_attachment = False
         with fh:
             for i, line in enumerate(fh):
                 line = line.strip()
@@ -98,6 +194,17 @@ def load_sessions(paths):
                 if not isinstance(obj, dict):
                     malformed += 1
                     continue
+                # 字节口径用 len(content)，不含 tool_calls 的 arguments：
+                # 分母要的是「模型看见的对话正文」，tool_call 参数是被工具
+                # 消费的指令，重复计入会让压缩比失真。
+                c = obj.get("content")
+                n = len(c) if isinstance(c, str) else 0
+                if obj.get("role") != "system":
+                    content_bytes += n
+                    if head_text is None:
+                        head_text = c if isinstance(c, str) else ""
+                if isinstance(c, str) and any(mk in c for mk in ATTACHMENT_MARKERS):
+                    has_attachment = True
                 for tc in obj.get("tool_calls") or []:
                     fn = (tc or {}).get("function") or {}
                     name = fn.get("name")
@@ -108,7 +215,14 @@ def load_sessions(paths):
         if header is None:
             malformed += 1
             continue
-        sessions.append({"file": path, "header": header, "calls": calls})
+        head_raw = head_text or ""
+        head = head_raw
+        if head.startswith(SUMMARY_PREFIX):
+            head = head[len(SUMMARY_PREFIX):]
+        sessions.append({"file": path, "header": header, "calls": calls,
+                         "content_bytes": content_bytes, "head_text": head,
+                         "head_raw": head_raw,
+                         "head_bytes": len(head), "has_attachment": has_attachment})
     return sessions, skipped, malformed
 
 
@@ -163,6 +277,277 @@ def _new_group(model, month):
     return {"model": model, "month": month, "sessions": 0, "calls": 0,
             "dup_extra": 0, "dup_repeated": 0, "read_calls": 0,
             "reread_extra": 0, "reread_files": 0, "paginated_files": 0}
+
+
+def _read_files_of(calls, mode):
+    """会话读过的文件集合（同 read 段口径，用于 chain 的已知重读判定）。"""
+    out = set()
+    for c in calls:
+        if c["name"] != "read":
+            continue
+        args = parse_args(c["raw"])
+        if args is None:
+            continue
+        fp = read_path(args, mode)
+        if fp is not None:
+            out.add(fp)
+    return out
+
+
+def _head_read_files(calls, mode, limit):
+    """前 limit 个 tool_call 里的 read 路径列表（顺序保留，用于计数）。"""
+    out = []
+    seen = 0
+    for c in calls:
+        if seen >= limit:
+            break
+        seen += 1
+        if c["name"] != "read":
+            continue
+        args = parse_args(c["raw"])
+        if args is None:
+            continue
+        fp = read_path(args, mode)
+        if fp is not None:
+            out.append(fp)
+    return out
+
+
+def _norm_ws(s):
+    return " ".join(s.split())
+
+
+def _entities_of_calls(calls, mode):
+    """父会话的关键实体集合：{kind: set(values)}。
+
+    口径见文件头「实体召回」：路径（read/edit/write）、bash 完整命令、
+    grep pattern。全部空白归一化并截 ENTITY_MAX 字符 —— 匹配的是「摘要里
+    提没提这个东西」，不是逐字节重现。
+    """
+    ents = {"path": set(), "bash": set(), "grep": set()}
+    for c in calls:
+        args = parse_args(c["raw"])
+        if args is None:
+            continue
+        name = c["name"]
+        if name in PATH_TOOLS:
+            fp = read_path(args, mode)
+            if fp:
+                ents["path"].add(_norm_ws(fp)[:ENTITY_MAX])
+            continue
+        if name == "bash":
+            cmd = args.get("command")
+            if isinstance(cmd, str) and cmd.strip():
+                ents["bash"].add(_norm_ws(cmd)[:ENTITY_MAX])
+            continue
+        if name == "grep":
+            pat = args.get("pattern")
+            if isinstance(pat, str) and pat.strip():
+                ents["grep"].add(_norm_ws(pat)[:ENTITY_MAX])
+    return ents
+
+
+def _entity_hits(ents, summary_text):
+    """摘要文本里出现了的实体数。路径额外接受 basename 命中。"""
+    if not summary_text:
+        return 0
+    hay = summary_text
+    hits = 0
+    for kind, vals in ents.items():
+        for v in vals:
+            if v and v in hay:
+                hits += 1
+            elif kind == "path" and v:
+                # 简报里通常只写文件名不写全路径；只认全路径会把「写了」
+                # 误判成「没写」。basename 太短（如 "a.md"）仍有风险，
+                # 但反例宁愿是假阳性——召回率偏高的结论比偏低的更容易
+                # 被其他证据否决。
+                base = v.replace("\\", "/").rsplit("/", 1)[-1]
+                if base and base != v and base in hay:
+                    hits += 1
+    return hits
+
+
+def analyse_chains(sessions, read_key_mode="auto", window=CHAIN_WINDOW_CALLS):
+    """compact 链指标（口径见文件头「compact 链」两节）。
+
+    返回 dict：
+      children          派生会话数（有 parent_id 的行）
+      branch_children   其中 /branch 派生的（无摘要标记 → 没压缩）
+      compact_children  其中 /compact 派生的（可算压缩比与召回）
+      parents_found / orphans  父会话在扫描范围内 / 断链（单列，不当 0）
+      compression       每条 compact 链明细 {child, parent, kind, bucket,
+                        parent_bytes, summary_bytes, ratio, entities, hits,
+                        recall}
+      compression_mean  compact 链的平均压缩比（无链时 0）
+      window            判定「刚压完就重读」的前 K 个 tool_call
+      known_reread / child_head_reads / child_head_rate
+                        compact 子会话前 K 个调用里命中父已读文件集的 read
+                        （branch 子会话不计——它带着全历史，没有信息丢失）
+      recall            聚合召回：plain 桶与 attachment 桶分开。
+                        attachment 不进 aggregate（见文件头）。
+      baseline          参照系 {sessions, read_calls, reread_extra, rate}
+    """
+    by_id = {s["header"].get("id"): s for s in sessions if s["header"].get("id")}
+
+    children, branch_children, compact_children = 0, 0, 0
+    parents_found, orphans = 0, 0
+    chains = []
+    known_reread = 0
+    child_head_reads = 0
+    parent_ids = set()
+    for sess in sessions:
+        pid = sess["header"].get("parent_id")
+        if not pid:
+            continue
+        children += 1
+        parent_ids.add(pid)
+
+    # 参照系：同 cwd、**既没有 parent_id、也不是任何链的父会话**的聚合
+    # 重读率（read 段同口径）。把父会话也算进来会稀释参照系——父会话自己
+    # 就是被压缩掉的那段历史，它的 read 不属于「没压缩的会话长什么样」。
+    base_by_cwd = {}
+    for sess in sessions:
+        header = sess["header"]
+        if header.get("parent_id"):
+            continue
+        if header.get("id") in parent_ids:
+            continue
+        cwd = header.get("cwd") or "?"
+        b = base_by_cwd.setdefault(cwd, {"sessions": 0, "read_calls": 0, "reread_extra": 0})
+        b["sessions"] += 1
+        per_file = {}
+        for c in sess["calls"]:
+            if c["name"] != "read":
+                continue
+            b["read_calls"] += 1
+            args = parse_args(c["raw"])
+            if args is None:
+                continue
+            fp = read_path(args, read_key_mode)
+            if fp is None:
+                continue
+            per_file[fp] = per_file.get(fp, 0) + 1
+        for n in per_file.values():
+            if n > 1:
+                b["reread_extra"] += n - 1
+
+    # 聚合召回：按桶累加，attachment 桶只报不进总分。
+    agg = {"plain": {"entities": 0, "hits": 0, "chains": 0, "with_entities": 0},
+           "attachment": {"entities": 0, "hits": 0, "chains": 0, "with_entities": 0}}
+
+    for sess in sessions:
+        header = sess["header"]
+        parent_id = header.get("parent_id")
+        if not parent_id:
+            continue
+
+        # /compact 的 fork 用固定前缀写摘要；其余（/branch）历史是父的副本。
+        is_compact = sess["head_raw"].startswith(SUMMARY_MARKER)
+        if is_compact:
+            compact_children += 1
+        else:
+            branch_children += 1
+
+        if is_compact:
+            head = _head_read_files(sess["calls"], read_key_mode, window)
+            child_head_reads += len(head)
+
+        parent = by_id.get(parent_id)
+        if parent is None:
+            orphans += 1      # 断链：父不在扫描范围，压缩比无从谈起
+            continue
+        parents_found += 1
+
+        if is_compact:
+            parent_reads = _read_files_of(parent["calls"], read_key_mode)
+            known_reread += sum(1 for fp in head if fp in parent_reads)
+
+        pbytes = parent["content_bytes"]
+        sbytes = sess["head_bytes"]
+        # 分母为 0（父会话没有正文，例如全工具调用）：无意义的比值，
+        # 记 None 而不是造一个 0 或 inf 出来。
+        ratio = round(sbytes / pbytes, 4) if pbytes else None
+
+        ents = _entities_of_calls(parent["calls"], read_key_mode)
+        n_ents = sum(len(v) for v in ents.values())
+        bucket = "attachment" if parent["has_attachment"] else "plain"
+        hits = _entity_hits(ents, sess["head_text"]) if is_compact else 0
+        recall = round(hits / n_ents, 4) if (is_compact and n_ents) else None
+
+        if is_compact:
+            a = agg[bucket]
+            a["chains"] += 1
+            a["entities"] += n_ents
+            a["hits"] += hits
+            if n_ents:
+                a["with_entities"] += 1
+
+        chains.append({"child": header.get("id"), "parent": parent_id,
+                       "kind": "compact" if is_compact else "branch",
+                       "bucket": bucket,
+                       "parent_bytes": pbytes, "summary_bytes": sbytes,
+                       "ratio": ratio, "entities": n_ents, "hits": hits,
+                       "recall": recall})
+
+    # 压缩比只统计 compact 链：/branch 的子会话历史是父的副本，比值 ≈1.0
+    # 会把「平均压缩比」拉向 1，读起来像「压缩无效」。
+    ratios = [c["ratio"] for c in chains
+              if c["kind"] == "compact" and c["ratio"] is not None]
+    compression_mean = round(sum(ratios) / len(ratios), 4) if ratios else 0
+
+    def _bucket_rate(a):
+        return round(_pct(a["hits"], a["entities"]), 2) if a["entities"] else None
+
+    recall = {
+        "buckets": {
+            "plain": {"chains": agg["plain"]["chains"],
+                      "with_entities": agg["plain"]["with_entities"],
+                      "entities": agg["plain"]["entities"],
+                      "hits": agg["plain"]["hits"],
+                      "rate": _bucket_rate(agg["plain"])},
+            "attachment": {"chains": agg["attachment"]["chains"],
+                           "with_entities": agg["attachment"]["with_entities"],
+                           "entities": agg["attachment"]["entities"],
+                           "hits": agg["attachment"]["hits"],
+                           "rate": _bucket_rate(agg["attachment"])},
+        },
+        # The headline is the plain bucket ONLY — attachment chains are
+        # structurally lossy (Summarise strips the parts) and folding them
+        # in would blame the summariser for a design decision.
+        "rate": _bucket_rate(agg["plain"]),
+        "entities": agg["plain"]["entities"],
+        "hits": agg["plain"]["hits"],
+    }
+
+    # 参照系按子会话所在的 cwd 取（子会话继承了父的 cwd）；没有就整体算。
+    base_cwds = {by_id[pid]["header"].get("cwd") or "?"
+                 for pid in parent_ids if pid in by_id}
+    base = {"sessions": 0, "read_calls": 0, "reread_extra": 0}
+    for cwd, b in base_by_cwd.items():
+        # 没有任何可算链时报整体口径（诊断「这个仓里有没有压缩」）；有链时
+        # 只取子会话 cwd 的那一组，否则参照系会被别的项目稀释。
+        if base_cwds and cwd not in base_cwds:
+            continue
+        for k in base:
+            base[k] += b[k]
+    base["rate"] = round(_pct(base["reread_extra"], base["read_calls"]), 2)
+
+    return {
+        "children": children,
+        "branch_children": branch_children,
+        "compact_children": compact_children,
+        "parents_found": parents_found,
+        "orphans": orphans,
+        "compression": chains,
+        "compression_mean": compression_mean,
+        "window": window,
+        "known_reread": known_reread,
+        "child_head_reads": child_head_reads,
+        "child_head_rate": round(_pct(known_reread, child_head_reads), 2),
+        "recall": recall,
+        "baseline": base,
+    }
 
 
 def analyse(sessions, skipped, malformed, read_key_mode="auto"):
@@ -323,6 +708,7 @@ def analyse(sessions, skipped, malformed, read_key_mode="auto"):
                          "top": [{"delta": d, "count": n} for d, n in top_steps[:5]],
                          "all": [{"delta": d, "count": n} for d, n in top_steps]},
         "groups": groups,
+        "chains": analyse_chains(sessions, read_key_mode),
     }
 
 
@@ -407,6 +793,71 @@ def render(res, top_n=5):
              g["pagination_share"]))
     w("")
     w("schema_version 分布：%s" % json.dumps(res["schema_versions"], sort_keys=True))
+    w("")
+    ch = res["chains"]
+    w("## compact 链：压缩比 / 子会话已知重读 / 无压缩参照系")
+    w("")
+    if not ch["children"]:
+        w("本次扫描没有 parent_id 派生会话（没发生过 /compact 或 /branch）——")
+        w("无法评估压缩效果；需要用含 fork 的会话样本（含归档）重跑。")
+        w("")
+        return "\n".join(out)
+    w("| 指标 | 值 |")
+    w("|---|---|")
+    w("| 派生会话数（有 parent_id） | %d（compact %d / branch %d） |"
+      % (ch["children"], ch["compact_children"], ch["branch_children"]))
+    w("| 其中父会话在扫描范围内 | %d |" % ch["parents_found"])
+    w("| 断链（父不在扫描范围，单列不并桶） | %d |" % ch["orphans"])
+    w("| **平均压缩比**（仅 compact 链） | **%.4f** |" % ch["compression_mean"])
+    rc = ch["recall"]
+    plain = rc["buckets"]["plain"]
+    att = rc["buckets"]["attachment"]
+    rate = "n/a" if rc["rate"] is None else "%.2f%%" % rc["rate"]
+    w("| **实体召回率**（plain 桶，摘要提到父会话实体的比例） | **%s**（%d/%d） |"
+      % (rate, rc["hits"], rc["entities"]))
+    w("| plain 桶：链数 / 其中父有实体的 | %d / %d |"
+      % (plain["chains"], plain["with_entities"]))
+    att_rate = "n/a" if att["rate"] is None else "%.2f%%" % att["rate"]
+    w("| attachment 桶（**不进总分**）：链数 / 召回 | %d / %s |"
+      % (att["chains"], att_rate))
+    w("| compact 子会话前 %d 个调用里的 read 次数 | %d |"
+      % (ch["window"], ch["child_head_reads"]))
+    w("| 其中「父已读过的同一文件」重读次数 | %d |" % ch["known_reread"])
+    w("| **已知重读率** = 已知重读 / 前 %d 调用里的 read | **%.2f%%** |"
+      % (ch["window"], ch["child_head_rate"]))
+    b = ch["baseline"]
+    w("| 参照系：同 cwd 无 parent_id 会话的重读率 | %.2f%%（%d 会话 / %d read） |"
+      % (b["rate"], b["sessions"], b["read_calls"]))
+    w("")
+    if ch["compression"]:
+        w("| child | kind | bucket | parent 字节 | 摘要字节 | 压缩比 | 实体 | 命中 | 召回 |")
+        w("|---|---|---|---|---|---|---|---|---|")
+        for c in ch["compression"][:top_n]:
+            ratio = "n/a" if c["ratio"] is None else "%.4f" % c["ratio"]
+            recall = "n/a" if c["recall"] is None else "%.2f" % c["recall"]
+            w("| %s | %s | %s | %d | %d | %s | %d | %d | %s |"
+              % (c["child"], c["kind"], c["bucket"], c["parent_bytes"],
+                 c["summary_bytes"], ratio, c["entities"], c["hits"], recall))
+        if len(ch["compression"]) > top_n:
+            w("| (其余 %d 条略) | | | | | | | | |" % (len(ch["compression"]) - top_n))
+        w("")
+    w("读法：**已知重读率**高于**参照系**，说明摘要没把父会话读过的东西带过来；")
+    w("低于参照系则压缩是净收益。两者口径同为「同文件多次 read 的多余次数」，")
+    w("但子会话只数前 %d 个调用（压缩后的第一段工作才是信息丢失的直接代价）。"
+      % ch["window"])
+    w("")
+    w("**召回率**读 plain 桶：实体是父会话 tool_call 里的路径 / bash 命令 / grep")
+    w("pattern，命中指这些值出现在子会话摘要文本里（路径接受 basename）。")
+    w("低召回本身不是结论——还要看哪些实体丢了（逐链表），高频路径丢了才算")
+    w("真损失。")
+    w("")
+    w("**attachment 桶不进总分**：Summarise 走 WithoutImages/WithoutFiles，附件")
+    w("正文从来不在摘要视野里，把它的低召回记到摘要质量上是归因错误。")
+    w("")
+    w("**rescue 不做分桶**：rescueNote 只追加到 summariser 的请求 prompt")
+    w("（pkg/agent/compact_rescue.go），不落 transcript，所以「这条链走过救援」")
+    w("无法从落盘数据机械判定。上表的 parent 字节数是可读的替代信号：超过模型")
+    w("窗口的链才可能走过救援。")
     w("")
     return "\n".join(out)
 
@@ -547,6 +998,123 @@ def _selftest():
         if "read 同文件重读" not in text:
             fails.append("render: 输出缺 read 段")
         json.dumps(res)
+
+        # --- compact 链（口径见文件头）。四形态样本里没有任何 parent_id，
+        #     所以这一段必须是「没有链」的形状：children=0 且渲染给出的是
+        #     空态说明，而不是一个 0 压缩比冒充测量值。
+        check("chains.children.empty", res["chains"]["children"], 0)
+        check("chains.parents_found.empty", res["chains"]["parents_found"], 0)
+        if "本次扫描没有 parent_id 派生会话" not in text:
+            fails.append("render: 无链时应给空态说明")
+
+        # --- compact 链 fixture（独立子目录，四形态断言不受影响）。
+        #     11 条会话 = 5 条链（4 compact + 1 branch）+ 4 条作为链父的会话
+        #     + 2 条同 cwd 的无 fork 参照系样本（plain-no-fork / plain-no-fork2）。
+        chain_dir = os.path.join(FIXTURE_DIR, "compact-chain")
+        if os.path.isdir(chain_dir):
+            cpaths = sorted(glob.glob(os.path.join(chain_dir, "*.jsonl")))
+            csess, cskip, cmal = load_sessions(cpaths)
+            cres = analyse(csess, cskip, cmal, read_key_mode="auto")
+            ch = cres["chains"]
+            check("chain.children", ch["children"], 5)          # 4 compact + 1 branch
+            check("chain.parents_found", ch["parents_found"], 5)
+            check("chain.orphans", ch["orphans"], 0)
+            check("chain.window", ch["window"], CHAIN_WINDOW_CALLS)
+            # 压缩比：child-read-reread / child-read-only-known 的摘要 66 字节
+            # （142 字节含 76 字节 SUMMARY_PREFIX 样板，已剥掉）vs 173 字节
+            # 父历史 → 0.3815。分母不含 system 角色。
+            check("chain.compression.count", len(ch["compression"]), 5)
+            checkf("chain.compression.ratio0", ch["compression"][0]["ratio"], 0.3815)
+            # 已知重读只数 compact 子会话：child-read-reread 前 10 个调用读了
+            # a.md（父读过）与 c.md（父没读过）；child-read-only-known 读了
+            # b.md（父读过）。→ 2 次已知重读 / 3 次 head read = 66.67%。
+            check("chain.known_reread", ch["known_reread"], 2)
+            check("chain.child_head_reads", ch["child_head_reads"], 3)
+            checkf("chain.child_head_rate", ch["child_head_rate"], 66.67)
+            checkf("chain.baseline.rate", ch["baseline"]["rate"], 50.0)
+            ctext = render(cres)
+            if "compact 链" not in ctext:
+                fails.append("render: 链样本输出缺 compact 段")
+            if "0.3815" not in ctext:
+                fails.append("render: 链样本输出缺压缩比")
+            if "66.67%" not in ctext:
+                fails.append("render: 链样本输出缺已知重读率")
+
+            # --- 实体召回（口径见文件头「compact 链的实体召回」）。
+            #     fixture 现在有 4 条 compact 链 + 1 条 branch 链：
+            #       child-read-reread / child-read-only-known → plain，父实体
+            #         {a.md, b.md}，摘要里两个都提到 → 2/2；
+            #       child2-missed-entities → plain，父实体
+            #         {x.md, "go test ./...", patternNeedle}，摘要一个没提 →
+            #         0/3；
+            #       child3-attachment → attachment 桶（父历史带 [image: ），
+            #         召回 0/1 但不进总分；
+            #       child4-branch-copy → branch（首条非 system 消息不以 SUMMARY_MARKER
+            #         开头），没有压缩，不出现在压缩比/召回分母里。
+            check("chain.compact_children", ch["compact_children"], 4)
+            check("chain.branch_children", ch["branch_children"], 1)
+            rc = ch["recall"]
+            check("chain.recall.headline", rc["rate"], 57.14)   # 4/7
+            check("chain.recall.entities", rc["entities"], 7)
+            check("chain.recall.hits", rc["hits"], 4)
+            check("chain.recall.plain.chains", rc["buckets"]["plain"]["chains"], 3)
+            check("chain.recall.attachment.chains",
+                  rc["buckets"]["attachment"]["chains"], 1)
+            # attachment 桶单列：算出来 0%，但绝不能进 headline（headline 是
+            # 4/7 而不是 4/8——后者就是「把设计决定记成摘要质量问题」）。
+            check("chain.recall.attachment.rate",
+                  rc["buckets"]["attachment"]["rate"], 0.0)
+            checkf("chain.recall.plain.rate", rc["buckets"]["plain"]["rate"], 57.14)
+            # branch 链的比值 0.3214 必须被排除在均值外：均值是四条 compact
+            # 链的 (0.3815+0.3815+0.4485+0.4276)/4 = 0.4098。
+            checkf("chain.compression_mean.compact_only", ch["compression_mean"], 0.4098)
+            kinds = {c["kind"] for c in ch["compression"]}
+            check("chain.kinds", kinds, {"compact", "branch"})
+            # 参照系扩到两条无 fork 的 plain 会话：d.md 两遍（1 extra / 2 read）
+            # + m,n 各两遍（2 extra / 4 read）→ 3 / 6 = 50.00%。数字恰好
+            # 与单条时相同，所以另断言分母，防止「sample 没进来」蒙混过关。
+            check("chain.baseline.sessions", ch["baseline"]["sessions"], 2)
+            check("chain.baseline.read_calls", ch["baseline"]["read_calls"], 6)
+            check("chain.baseline.reread_extra", ch["baseline"]["reread_extra"], 3)
+            checkf("chain.baseline.rate", ch["baseline"]["rate"], 50.0)
+            # 实体抽取本身的单元级断言：三类各一，空白归一 + 截断口径。
+            mixed = [{"name": "read", "raw": '{"path":"/w/x.md","offset":1}'},
+                     {"name": "bash", "raw": '{"command":"go  test\\n./..."}'},
+                     {"name": "grep", "raw": '{"pattern":"patternNeedle","path":"."}'}]
+            ents = _entities_of_calls(mixed, "auto")
+            check("entity.path", ents["path"], {"/w/x.md"})
+            check("entity.bash", ents["bash"], {"go test ./..."})
+            check("entity.grep", ents["grep"], {"patternNeedle"})
+            # basename 兜底：摘要只写文件名也算命中；全路径未出现时不能判 miss。
+            check("entity.hits.basename",
+                  _entity_hits({"path": {"/w/x.md"}, "bash": set(), "grep": set()},
+                               "we read x.md earlier"), 1)
+            check("entity.hits.full", 
+                  _entity_hits({"path": {"/w/x.md"}, "bash": set(), "grep": set()},
+                               "we read /w/x.md earlier"), 1)
+            check("entity.hits.none",
+                  _entity_hits({"path": {"/w/x.md"}, "bash": set(), "grep": set()},
+                               "we read some file"), 0)
+
+            # --- 断链：父不在扫描范围（归档/删除）时必须单列，不能算成
+            #     「压缩比 0」——那会把「我们不知道」伪装成「压到零字节」。
+            orphan_sess = [{
+                "header": {"id": "20261121-000000-orphan",
+                           "parent_id": "20261121-000000-gone",
+                           "cwd": "/tmp/fixture",
+                           "schema_version": 3},
+                "calls": [], "content_bytes": 0, "head_bytes": 0,
+                "head_text": "", "head_raw": SUMMARY_MARKER + " gone",
+                "has_attachment": False,
+            }]
+            och = analyse_chains(orphan_sess, "auto")
+            check("chain.orphan.children", och["children"], 1)
+            check("chain.orphan.parents_found", och["parents_found"], 0)
+            check("chain.orphan.orphans", och["orphans"], 1)
+            check("chain.orphan.compression", len(och["compression"]), 0)
+            check("chain.orphan.mean", och["compression_mean"], 0)
+        else:
+            print("selftest: SKIP compact 链断言（缺 compact-chain fixture 目录）")
 
         # --- 基线报告与快照 JSON 一致（报告引用的四个数字可机械复算）。
         #     只在本仓有该批文件时检查；缺失则 SKIP（不阻塞 fixture 断言）。

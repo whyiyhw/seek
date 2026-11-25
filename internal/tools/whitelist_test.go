@@ -105,6 +105,27 @@ func TestWhitelist_DuplicateKeepEntries(t *testing.T) {
 	}
 }
 
+// Clear is the `-tools=none` sentinel's registry half: zero tools, and
+// Wire() carries nothing (the request then has no `tools` field at all).
+// Kept distinct from Whitelist's empty-keep no-op on purpose — the two
+// contracts ("absent = full registry" vs "none = zero tools") must never
+// collapse into each other.
+func TestClear_EmptiesRegistryAndWire(t *testing.T) {
+	reg := newTestRegistry("read", "edit", "bash")
+
+	reg.Clear()
+
+	if got := reg.Names(); len(got) != 0 {
+		t.Fatalf("Names() after Clear = %v, want empty", got)
+	}
+	if reg.Lookup("read") != nil {
+		t.Error("Lookup(read) after Clear = non-nil, want nil")
+	}
+	if wire := reg.Wire(); len(wire) != 0 {
+		t.Fatalf("Wire() after Clear = %v, want empty", wire)
+	}
+}
+
 // Filtering down to a single tool and then Wiring must produce exactly
 // one entry — the degenerate "bare core of one tool" lane.
 func TestWhitelist_SingleSurvivor(t *testing.T) {

@@ -629,3 +629,64 @@ func TestChatStream_TextOnlyWireBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestChatStream_TemperatureWire pins the temperature knob's two states
+// on the OpenAI-compatible wire (card c_trrsn7):
+//
+//   - nil → the key is ABSENT. Byte-identity matters more than the field
+//     itself: every existing caller streams this body on every turn, and
+//     an added `"temperature":null` would miss the prefix cache (~10×
+//     input price) for users who never asked for the knob.
+//   - explicit 0 → the key is PRESENT with 0. This is the value the judge
+//     lane pins, and the one a non-pointer field would lose to omitempty.
+func TestChatStream_TemperatureWire(t *testing.T) {
+	zero := 0.0
+	half := 0.5
+	for _, c := range []struct {
+		name string
+		req  llm.ChatRequest
+		want string
+	}{
+		{
+			name: "absent → no key",
+			req:  llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "hi"}}},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true,` +
+				`"stream_options":{"include_usage":true}}`,
+		},
+		{
+			name: "explicit zero → key present",
+			req: llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "hi"}},
+				Temperature: &zero},
+			// Temperature is the LAST field in openAIRequest, so a
+			// non-nil value appends the key and never reorders the
+			// existing body — the cache contract for every caller that
+			// does not set the knob.
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true,` +
+				`"stream_options":{"include_usage":true},"temperature":0}`,
+		},
+		{
+			name: "0.5 → key present",
+			req: llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "hi"}},
+				Temperature: &half},
+			want: `{"model":"m","messages":[{"role":"user","content":"hi"}],"stream":true,` +
+				`"stream_options":{"include_usage":true},"temperature":0.5}`,
+		},
+	} {
+		var body []byte
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+		}))
+		ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), c.req)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		drain(ch)
+		srv.Close()
+		if string(body) != c.want {
+			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, body, c.want)
+		}
+	}
+}

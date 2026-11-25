@@ -13,9 +13,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -160,6 +163,14 @@ func main() {
 	// no config load, no flag parse. No-op on every other invocation/OS.
 	sandbox.RunTrampolineIfRequested()
 	if err := run(); err != nil {
+		// Bad flag VALUE (as opposed to a malformed flag): the complaint
+		// was already printed to stderr at the validation site, so exit 2
+		// without the "seek:" prefix — CI needs to tell "bad flag value"
+		// from "system failure", same contract as `seek keys`
+		// (keyscli.ErrUsage) and -tools below.
+		if errors.Is(err, errFlagUsage) {
+			os.Exit(2)
+		}
 		// -tools with unknown names: the error text (unknown list +
 		// available list) was already printed to stderr by
 		// applyToolsWhitelist; exit 2 without the "seek:" prefix so CI
@@ -367,6 +378,8 @@ func run() error {
 		maxTurns      = flag.Int("max-turns", 200, "safety bound on agent loop iterations")
 		maxTokens     = flag.Int("max-tokens", 0, "completion token cap per call; 0 → effort-linked default (16k; 64k under /effort max), clamped to the model's own output ceiling")
 		autoContinue  = flag.Bool("auto-continue", false, "inject 'continue' on text-only turns so the model resumes mid-task without user input")
+		effortFlag    = flag.String("effort", "", "reasoning effort for this session: off | low | high | max; absent keeps the built-in default (max). 'max' also raises the derived completion cap to 64k (clamped to the model); an explicit --max-tokens still wins")
+		temperature   = flag.String("temperature", "", "sampling temperature, 0..2 (e.g. 0 for the judge lane's determinism pin). Absent = the provider's own default and NO temperature key on the wire, i.e. byte-identical to a pre-knob request (prefix-cache discipline)")
 		yolo          = flag.Bool("yolo", false, "allow bash + writes outside CWD without prompting")
 		plan          = flag.Bool("plan", false, "read-only exploration: no bash/writes/edits; produce a plan to review before executing")
 		jsonOut       = flag.Bool("json", false, "emit agent events as JSONL on stdout (implies print mode)")
@@ -401,7 +414,10 @@ func run() error {
 		// v8·T1 bare-core comparison lane: freeze the session to an
 		// explicit tool whitelist. Read once here; the tools array is
 		// part of the request prefix, so it cannot change mid-session.
-		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
+		// The `none` sentinel (judge-engine PRD §2.2 缺口①) empties the
+		// registry outright — the hard zero-tool surface a program
+		// consumer needs; it is a sentinel, so it must stand alone.
+		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. The literal value \"none\" = zero tools (no tools array on the wire; it must be the only value — mixing it with names exits 2). Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
 	)
 
 	// Top-level help runs BEFORE flag.Parse but AFTER the flag set is
@@ -424,6 +440,34 @@ func run() error {
 	// helpRequested branch above already took it to stdout.
 	flag.Usage = func() { printUsage(flag.CommandLine.Output()) }
 	flag.Parse()
+
+	// Which flags the user actually typed. Resume stickiness (below)
+	// inherits saved session state unless the flag was passed explicitly,
+	// and that distinction only exists here — flag defaults look identical
+	// to a deliberate `--effort off`.
+	visited := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+	// --effort / --temperature validation happens BEFORE any provider
+	// probe: a bad value must die with the usage contract (exit 2), not
+	// after burning an API handshake.
+	effortValue, err := parseEffortFlag(*effortFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seek:", err)
+		return errFlagUsage
+	}
+	temperatureValue, err := parseTemperatureFlag(*temperature)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "seek:", err)
+		return errFlagUsage
+	}
+	// An explicitly-passed EMPTY value (`--effort=` / `--effort ""`) is
+	// "absent", not "off" — the same contract `-tools ""` already keeps
+	// (TestToolsFlagE2E_EmptyEqualsAbsent). Scripts that interpolate a
+	// possibly-unset variable must not silently drop the session from the
+	// historical max default to a 16K cap, nor clobber a resumed session's
+	// saved effort.
+	effortSet := visited["effort"] && strings.TrimSpace(*effortFlag) != ""
 
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
@@ -524,6 +568,31 @@ func run() error {
 			if _, m := acp.ProviderModelFromEnv(os.Getenv); m != "" {
 				*model = m
 			}
+		}
+	}
+
+	// Cron-fired autopilot lane pins (v8 §9.5③1, c_kdblc4) — resolved
+	// in the same spot as the ACP pins for the same two reasons: they
+	// must land BEFORE buildProvider (the pin wins over auto-detect, so
+	// a DEEPSEEK_API_KEY in the scheduler's env can't silently bill a
+	// metered lane), and flag.Parse stops at the "autopilot" positional
+	// so env is the only channel. The gate refusal returns BEFORE any
+	// key is read or any client built — a refused run is a failed run,
+	// loudly. Like the ACP pin, a pinned provider suppresses the
+	// first-run wizard: the cron child is a headless spawn.
+	autopilotLane := resolveAutopilotCronLane(os.Getenv)
+	if len(os.Args) >= 2 && os.Args[1] == "autopilot" {
+		if err := autopilotLane.GateErr(); err != nil {
+			return err
+		}
+		if p := autopilotLane.PinProvider(); p != "" && *providerFlag == "" {
+			*providerFlag = p
+		}
+		if m := autopilotLane.PinModel(); m != "" && *model == "" {
+			*model = m
+		}
+		if line := autopilotLane.LogLine(); line != "" {
+			fmt.Fprintln(os.Stderr, line)
 		}
 	}
 
@@ -730,8 +799,16 @@ func run() error {
 	// "max". The /effort TUI command updates it through SetEffort below;
 	// agent.Config reads it when building requests, so the session-level
 	// choice applies to the very next call.
-	// Default is "max" — the deepest reasoning level.
+	// Default is "max" — the deepest reasoning level — but an explicit
+	// --effort (including `--effort off`, which maps to "") wins. The
+	// flag exists because print mode had no way to pick a cheaper level:
+	// every -p run, judge batches included, paid for max-depth reasoning
+	// on one-line classifications (measured 3.2× on output tokens, card
+	// c_trrsn7 / docs/notes/2026-11-24-judge-format-baseline.md §4).
 	var sessionEffort = "max"
+	if effortSet {
+		sessionEffort = effortValue
+	}
 	tracker := cache.New()
 
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
@@ -1089,10 +1166,22 @@ func run() error {
 	// may drop MCP tools this section still names — same static-prose
 	// posture as rootTpl; the section describes what loaded, the
 	// request's tools array is the callable truth.
+	//
+	// (judge 前置④, c_xujwvq) The config now loads BEFORE any child
+	// forks and feeds checkToolsWhitelistPreMCP: every -tools name that
+	// is provably invalid here (not a built-in, not a later built-in,
+	// and no configured MCP server could supply it) exits 2 without
+	// paying a single subprocess — judge/CI lanes used to fork all
+	// configured servers only to die in applyToolsWhitelist afterwards.
 	var mcpSection string
-	if mcpCfg, err := mcpconfig.Load(); err != nil {
-		fmt.Fprintln(os.Stderr, "mcp config:", err)
-	} else if len(mcpCfg.MCPServers) > 0 {
+	mcpCfg, mcpCfgErr := mcpconfig.Load()
+	if mcpCfgErr != nil {
+		fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+	}
+	if err := checkToolsWhitelistPreMCP(*toolsFlag, reg, mcpCfg); err != nil {
+		return err
+	}
+	if mcpCfgErr == nil && len(mcpCfg.MCPServers) > 0 {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{
@@ -1203,12 +1292,14 @@ func run() error {
 		}
 		// A resumed session may carry an /effort selection from the prior
 		// run — restore it before the agent is built so the very first
-		// turn after --continue honours the user's choice.
+		// turn after --continue honours the user's choice. An explicit
+		// --effort wins (same "flags set after -resume win" rule the
+		// model/yolo/plan inheritance above follows).
 		// NB: guard on loaded, not activeSession — activeSession is always
 		// non-nil (either loaded or a fresh session.New), so checking it
 		// would overwrite the "max" default with the empty string from a
 		// brand-new session (see commit <fill>).
-		if loaded != nil {
+		if loaded != nil && !effortSet {
 			sessionEffort = activeSession.Effort
 		}
 
@@ -1408,6 +1499,7 @@ func run() error {
 				maxTurns:      *maxTurns,
 				getModel:      func() string { return sessionModel },
 				getEffort:     func() string { return sessionEffort },
+				temperature:   temperatureValue,
 				routes:        buildSubagentRoutes(dsClient, *baseURL),
 				bashGuardLane: autopilotGuardLane,
 				bashSandbox:   autopilotMode,
@@ -1474,7 +1566,7 @@ func run() error {
 		if mdl == "" {
 			mdl = modelDefault
 		}
-		return runAutopilot(ctx, dsClient, mdl, subagentMgr, wtMgr, autopilotGoal)
+		return runAutopilot(ctx, dsClient, provider, mdl, subagentMgr, wtMgr, autopilotGoal)
 	}
 
 	// v5 柱 H auto-tick: fire any due cron jobs as a side effect
@@ -1546,6 +1638,7 @@ func run() error {
 		Provider:        provider,
 		Model:           *model,
 		Effort:          sessionEffort,
+		Temperature:     temperatureValue,
 		SafetyCheck:     safetyCheck,
 		SystemPrompt:    systemPrompt,
 		Tools:           reg,
@@ -2154,6 +2247,7 @@ func run() error {
 				Provider:     provider,
 				Model:        sessionModel,
 				Effort:       sessionEffort,
+				Temperature:  temperatureValue,
 				SafetyCheck:  safetyCheck,
 				SystemPrompt: sp,
 				Tools:        reg,
@@ -2647,23 +2741,45 @@ func fileResolver(projectAbs string, client *deepseek.Client) *deepseek.FileReso
 // summary. The subagents are already guarded (bashGuardLane set on their
 // manager for the whole autopilot process), so they produce LOCAL commits
 // only — the user reviews + pushes in the morning.
-func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {
+func runAutopilot(ctx context.Context, client *deepseek.Client, provider llm.Provider, model string, mgr *subagent.Manager, wtMgr *worktree.Manager, goal string) error {
 	if goal == "" {
 		return fmt.Errorf("usage: seek autopilot run \"<goal>\"")
 	}
-	if client == nil {
+	// The decomposer + judge need exactly one chat surface. The
+	// first-class DeepSeek client when the session rides it; the
+	// llmChatClient adapter when the cron lane pinned a subscription
+	// provider (c_kdblc4 — the DeepSeek API key is metered, an
+	// unattended run defaults to opencode and must be able to actually
+	// RUN there, not just be pinned to it).
+	//
+	// The adapter also needs a wire identity: the OpenCode Go endpoint
+	// 400s (MissingSessionID) when x-opencode-session is absent, and
+	// the decomposer is the FIRST call of the run — so a nil id would
+	// kill the cron lane before any work happened. Minted once per
+	// run (not per call: decompose and judge are one conversation)
+	// via session.EphemeralID — the --no-save wire id, never persisted
+	// and never a session handle (the autopilot run saves no
+	// transcript of its orchestration turns). Workers get their own
+	// per-spawn sub-sid further down the chain.
+	var chat autopilot.DecomposeClient
+	if client != nil {
+		chat = client
+	} else if provider != nil {
+		chat = llmChatClient{p: provider, sessionID: session.EphemeralID()}
+	}
+	if chat == nil {
 		return fmt.Errorf("autopilot requires a model provider — set an API key (seek setup)")
 	}
 	if mgr == nil {
 		return fmt.Errorf("autopilot requires a saved session in a git repo (unavailable with --no-save or outside a git project)")
 	}
-	dec := autopilot.NewDeepSeekDecomposer(client, model)
+	dec := autopilot.NewDeepSeekDecomposer(chat, model)
 	// model is also the lane the worktree subagents run on (they
 	// inherit the parent session's), so the fleet prices each
 	// outcome's tokens with it (v8 柱 R R1). The same lane judges
 	// each completed task (v8 柱 R R2): the verifier is built here,
 	// on demand for this run — no resident anything.
-	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(client, model))
+	fleet := autopilot.NewFleet(mgr, wtMgr, model, verifier.New(chat, model))
 	drv := autopilot.New(dec, fleet, autopilot.Caps{Timeout: 30 * time.Minute})
 
 	fmt.Fprintf(os.Stderr, "autopilot: planning + fanning out for %q …\n", goal)
@@ -4797,6 +4913,80 @@ func cronAutoTickEnabled(noCronTickFlag, acpLane bool) bool {
 // shape as keyscli.ErrUsage.
 var errToolsUsage = errors.New("tools usage")
 
+// errFlagUsage is the sentinel behind exit code 2 for a bad flag VALUE
+// (--effort=turbo, --temperature=abc). The human-readable complaint is
+// printed to stderr by the validation site before returning this, so
+// main() routes it straight to os.Exit(2) — the same "usage error" lane
+// errToolsUsage and keyscli.ErrUsage use, so a CI caller can tell a typo
+// from a runtime failure.
+var errFlagUsage = errors.New("flag usage")
+
+// effortLevels are the wire values --effort accepts, keyed by the token
+// the user types. "off" maps to "" (no reasoning_effort key at all,
+// i.e. the model's own default) — the same normalization the TUI's
+// /effort uses, so a CLI run and a TUI session land on identical bytes.
+//
+// Four rungs, one more than the TUI's /effort picker: DeepSeek's
+// current create-chat-completion reference documents
+// `reasoning_effort: none | low | high | max` (medium/xhigh are compat
+// aliases mapping to high; 2026-11-24 re-read of the vendor docs). The
+// CLI takes `low` because a one-shot judge batch wants the cheapest
+// REASONING rung, and that rung exists on the wire — the TUI keeps its
+// three-rung surface so an interactive session can't silently pin a
+// depth nobody picked (docs/pitfalls/deepseek-api/
+// reasoning-effort-values-are-high-max-... records the earlier reading).
+var effortLevels = map[string]string{
+	"off":  "",
+	"none": "", // accepted alias, mirrors the TUI's /effort off|none
+	"low":  "low",
+	"high": "high",
+	"max":  "max",
+}
+
+// parseEffortFlag validates the --effort value and returns the wire
+// form ("" = no override). An absent (or explicitly empty) flag yields ""
+// plus a nil error; callers distinguish absent from `--effort off` via
+// flag.Visit, never via this return value.
+func parseEffortFlag(v string) (string, error) {
+	tok := strings.ToLower(strings.TrimSpace(v))
+	if tok == "" {
+		return "", nil
+	}
+	level, ok := effortLevels[tok]
+	if !ok {
+		return "", fmt.Errorf("--effort: unknown level %q — try off|low|high|max", v)
+	}
+	return level, nil
+}
+
+// parseTemperatureFlag validates --temperature and returns the pointer
+// the request builders want: nil for absent (no temperature key on the
+// wire — a request that never sets it stays byte-identical to its
+// pre-knob form, so the prefix cache keeps hitting), a pointer to 0 for
+// an explicit `--temperature 0`, which is a real, different request
+// (it is the determinism pin the judge lane wants).
+//
+// Range is 0..2 — the ENVELOPE of the documented ranges, not their
+// intersection: Gemini 0..2, OpenAI 0..2, Anthropic 0..1. seek does not
+// narrow to the tightest vendor, because a 2 on Anthropic then gets that
+// vendor's own honest 400 instead of a silently clamped number (clamping
+// would make "the vendor rejected the value" look like "seek quietly
+// rewrote it").
+func parseTemperatureFlag(v string) (*float64, error) {
+	tok := strings.TrimSpace(v)
+	if tok == "" {
+		return nil, nil
+	}
+	f, err := strconv.ParseFloat(tok, 64)
+	if err != nil {
+		return nil, fmt.Errorf("--temperature: %q is not a number (range 0..2)", v)
+	}
+	if math.IsNaN(f) || f < 0 || f > 2 {
+		return nil, fmt.Errorf("--temperature: %v out of range (0..2)", f)
+	}
+	return &f, nil
+}
+
 // parseToolsFlag splits the comma-separated -tools value into clean
 // tool names: surrounding whitespace trimmed, empty segments dropped,
 // duplicates collapsed (first occurrence keeps order). Empty input
@@ -4816,8 +5006,22 @@ func parseToolsFlag(v string) []string {
 	return out
 }
 
+// toolsNoneSentinel is the one `-tools` value that means "zero tools".
+// It is a sentinel, not a tool name: the registry is emptied outright,
+// so the model request carries no `tools` field at all (judge-engine
+// PRD §2.2 缺口① — a program consumer needs a HARD empty tool surface).
+// Empty/absent keeps meaning "full default registry": that is a
+// published contract (flag help says so, the v8·T1 bare-core ablation
+// lane depends on it), so only this explicit word empties anything.
+const toolsNoneSentinel = "none"
+
 // applyToolsWhitelist implements the v8·T1 `-tools` flag against the
 // FINAL registry composition (call it after the last reg.Add):
+//
+//   - toolsNoneSentinel ("none") alone: the whole registry is cleared →
+//     the request carries no tools array. Combined with any tool name it
+//     is a usage error (exit 2): the sentinel decides the whole value,
+//     it must never be silently folded into or out of a list.
 //
 //   - non-empty value: every listed name must be registered (MCP tools
 //     validate by their registered name); unknown names print the
@@ -4836,7 +5040,19 @@ func parseToolsFlag(v string) []string {
 //     it. Under --no-save there is no session to record — nothing to do.
 func applyToolsWhitelist(flagVal string, reg *tools.Registry, resumed, active *session.Session) error {
 	names := parseToolsFlag(flagVal)
-	if len(names) > 0 {
+	// Zero-tool sentinel (judge-engine PRD §2.2 缺口①). It decides the
+	// WHOLE value: `none` alone empties the registry; `none,read` is a
+	// caller error, not a whitelist that happens to contain "none" — the
+	// point of a sentinel is that no tool-shaped parsing can dilute it.
+	if slices.Contains(names, toolsNoneSentinel) {
+		if len(names) > 1 {
+			fmt.Fprintf(os.Stderr, "-tools: %q is a sentinel, not a tool — it must be the only value (got %q)\n",
+				toolsNoneSentinel, flagVal)
+			return errToolsUsage
+		}
+		reg.Clear()
+	}
+	if len(names) > 0 && !slices.Contains(names, toolsNoneSentinel) {
 		avail := reg.Names()
 		known := make(map[string]bool, len(avail))
 		for _, n := range avail {

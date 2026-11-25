@@ -116,6 +116,19 @@ func DefaultSubprocess(ctx context.Context, job Job, runID string) (*exec.Cmd, e
 		return nil, fmt.Errorf("routines: load env overlay: %w", err)
 	}
 	cmd.Env = MergeEnv(os.Environ(), overlay)
+	// Autopilot children additionally carry the cron marker (v8
+	// §9.5③1, c_kdblc4): the ONLY thing the spawner contributes to the
+	// lane contract. cmd/seek's resolver turns it into the provider
+	// pin + the metered-key gate — a scheduler env polluted with a
+	// stray DEEPSEEK_API_KEY can't bill the run. Stamped through
+	// MergeEnv like the overlay itself (last-wins via cmd.Env
+	// semantics), so the tick's "1" beats any marker value that
+	// arrived via the overlay file. Only autopilot jobs: a human
+	// typing `seek autopilot run` never passes through here and keeps
+	// the ungated behaviour.
+	if job.Autopilot {
+		cmd.Env = MergeEnv(cmd.Env, map[string]string{EnvAutopilotCron: "1"})
+	}
 	return cmd, nil
 }
 

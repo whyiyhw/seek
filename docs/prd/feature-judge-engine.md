@@ -59,6 +59,8 @@ if len(names) > 0 {          // ← 空 slice 时不白名单
 
 **修法**：新增哨兵值（`--tools=none`）或独立 flag。**不要改空串语义**——那是已发布的契约，`v8` T1 的裸核对照实验依赖它。
 
+> ✅ **已交付**（2026-11-25，card c_lh6tlq）：`-tools none` → `tools.Registry.Clear()`，注册表清空、请求体不带 `tools` 字段（E2E 断言原始字节）；哨兵整值生效，`none,read` 混用 exit 2 并说明「sentinel, not a tool」；`-tools ""` / 缺省仍逐字节等同全量注册表（原 E2E 回归不变）。
+
 #### 缺口 ②：`--no-save` 连带关掉记忆链
 
 ```go
@@ -108,6 +110,22 @@ ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 所以今天的结构化输出只能靠提示词约束 + 祈祷，再加一层正则容错。
 
 **修法**：接上 `{"type":"json_object"}`（DeepSeek 支持的最低要求面），**不做 JSON Schema**（见 §4 D4）。
+
+#### 前置 ④：`-tools` 校验排在 MCP fork 之后（错误路径比正常路径贵）
+
+2026-11-24 实测：配了 MCP 的机器上，`seek --tools nosuch` 先 fork 全部 server（`mcp: loaded 9 tool(s)`）才报 exit 2；`--tools read` 同样白付 fork，只在提示词省 244 tok。
+
+**根因**：唯一一次校验在 `applyToolsWhitelist`，它必须排在最后一个 `reg.Add` 之后（MCP 工具名只有 `ListTools` 之后才存在），而 `LoadServers` 就在它前面——校验天然晚于它要拦的副作用。
+
+**修法**（已交付 2026-11-25，card c_xujwvq）：`checkToolsWhitelistPreMCP`（`cmd/seek/tools_precheck.go`）在 `LoadServers` 之前跑，读同一份 `mcpconfig.Config` 做三分判定：
+
+| 判定 | 条件 | 动作 |
+|---|---|---|
+| 已成立 | 已注册内建名，或 `postMCPTBuiltInTools`（MCP 之后才注册的内建） | 放行 |
+| 可证明不可能 | 非内建，且**没有任何**已配置 server 能提供它 | 当场 exit 2（同一 stderr 措辞，零 subprocess） |
+| 推迟 | 命中已配置 server 的 `<server>__` 前缀，或存在 `"prefix": false` 的 server（可注册任意裸名） | 放行到加载后校验 |
+
+「MCP 提供的名字必须加载后才能校验」不复存在：**前缀可判定就前置拒，不可判定的显式推迟**。推迟不是漏洞而是契约的一部分——`TestCheckToolsWhitelistPreMCP_Table` 三分表锁死，E2E 用子进程 pid 文件证明「拒绝时零 fork」（`TestToolsPrecheckE2E_UnknownNameSpawnsNoMCPServer`）。判读/CI 车道的错误路径从此不再付 9 个 server 的启动延迟。
 
 ---
 
@@ -255,7 +273,7 @@ L2 零新机制——`applyToolsWhitelist` 现成。
 
 | 序 | 项 | 落点 | 工作量 | 依据 |
 |---|---|---|---|---|
-| 1 | `--effort` / `--temperature` 旗标 | `cmd/seek/main.go`（`:702` 写死 `sessionEffort = "max"`，`-p` 无旗标） | 0.5 天 | 实测 §8.1-3：成本 3.2× |
+| 1 | `--effort` / `--temperature` 旗标 | **已落地**（c_trrsn7）：`cmd/seek/main.go` 加两个旗标 + `flag.Visit` 区分「没传 / `--effort off`」；`pkg/agent.Config.Temperature *float64` 下到两条车道；三个二线适配器（openai / anthropic / gemini）的线格式各带一个指针字段 | 0.5 天 | 实测 §8.1-3：成本 3.2× |
 | 2 | 空返回的机器可判定信号 | `--json` 事件流加 `finish_reason` 或 error 事件（`pkg/agent/agent.go` 的 `placeholderTurn` 自愈闸 / `emptyResponseMarker`、`budgetExhaustedMarker` 两个常量——按符号找，行号会漂） | 0.5 天 | 实测 §8.1-2：静默空返回 exit 0 |
 | 3 | `--tools=none` 哨兵 | `applyToolsWhitelist` 分支（不改空串契约） | 0.5 天 | 实测 §8.1-5：安全边界 |
 | 4 | 参数校验先于 MCP fork | `cmd/seek/main.go` 启动段（内建名预校验；「MCP 名校验依赖加载完成」的冲突显式解决） | 1 天 | 实测 §8.1-5：缺口③加重 |

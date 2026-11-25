@@ -20,6 +20,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -212,6 +213,88 @@ func TestTrace_CompactRowCarriesTrigger(t *testing.T) {
 	}
 	if rows[0].Chars != 0 {
 		t.Errorf("chars = %d, want 0 (a compact row measures context, not text)", rows[0].Chars)
+	}
+}
+
+// TestTrace_CompactRowCarriesDuration: dur_ms is how long the user waited
+// for the summarsiser. It used to be hard-coded 0, which left "is compact
+// slow?" unanswerable from the ledger — the exact question a budget pass
+// asks. Asserted from an explicit elapsed value rather than a sleep: a
+// real-time span is exactly 0 across sub-tick gaps on Windows.
+func TestTrace_CompactRowCarriesDuration(t *testing.T) {
+	t.Parallel()
+	m, path := tracedModel(t, false, false)
+	m.opts.Agent = newFakeAgent()
+
+	m.handleCompactDone(compactDoneMsg{
+		summary: "summary text",
+		usage:   deepseek.Usage{PromptTokens: 1234},
+		trigger: "manual",
+		elapsed: 2500 * time.Millisecond,
+	})
+
+	rows := readTrace(t, path)
+	if len(rows) != 1 || rows[0].Event != uitrace.EventCompact {
+		t.Fatalf("rows = %+v, want one compact row", rows)
+	}
+	if rows[0].DurMS != 2500 {
+		t.Errorf("dur_ms = %d, want 2500 (the measured span)", rows[0].DurMS)
+	}
+}
+
+// TestCompactDone_FailureWritesNoCompactRow: a failed summariser is not a
+// compaction. The row's tokens carry the pre-compact context size and its
+// duration carries the wait — recording either on a 400 would inflate the
+// "how often does history get rewritten" count with attempts.
+func TestCompactDone_FailureWritesNoCompactRow(t *testing.T) {
+	t.Parallel()
+	m, path := tracedModel(t, false, false)
+	m.opts.Agent = newFakeAgent()
+
+	m.handleCompactDone(compactDoneMsg{
+		usage:   deepseek.Usage{PromptTokens: 999},
+		trigger: "auto",
+		elapsed: 30 * time.Second,
+		err:     errors.New("summariser 400"),
+	})
+
+	if rows := readTrace(t, path); len(rows) != 0 {
+		t.Fatalf("rows = %+v, want none (a failure is not a compaction)", rows)
+	}
+}
+
+// TestStartCompactCmd_MeasuresElapsedFromTheCmdRun: the span must start
+// inside the tea.Cmd (that is when the hook + summariser actually run),
+// not when the caller built it — otherwise the number includes UI idle
+// time. clockFn pins both ends, so no sleep is involved and the assertion
+// is exact under -race and on every platform.
+func TestStartCompactCmd_MeasuresElapsedFromTheCmdRun(t *testing.T) {
+	t.Parallel()
+	fa := newFakeAgent()
+	m := emptyModel()
+	m.opts.Agent = fa
+
+	// First call = the Cmd's start, second = its end. Anything the
+	// production path would do between them is irrelevant here.
+	calls := 0
+	base := time.Date(2026, time.November, 24, 12, 0, 0, 0, time.UTC)
+	m.clockFn = func() time.Time {
+		calls++
+		if calls == 1 {
+			return base
+		}
+		return base.Add(3 * time.Second)
+	}
+
+	msg, ok := startCompactCmd(m, "manual")().(compactDoneMsg)
+	if !ok {
+		t.Fatalf("cmd produced %T, want compactDoneMsg", msg)
+	}
+	if msg.elapsed != 3*time.Second {
+		t.Errorf("elapsed = %v, want 3s", msg.elapsed)
+	}
+	if msg.trigger != "manual" {
+		t.Errorf("trigger = %q, want manual", msg.trigger)
 	}
 }
 

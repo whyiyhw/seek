@@ -26,17 +26,24 @@
      shows the session id short once the reply close-out carries it
      (source: agent_end). Page-lifetime cumulative — SSE has no
      replay, a reload restarts the meter at zero.
-     Sessions sidebar (W5, card c_txz6vz): the W4.4 popup pane folded into
-     a persistent, collapsible left rail — session/list drives it (updated
-     desc, title substring filter, 30-row pages via "load more"), the bound
-     session is the highlighted row, ＋新建 rides the SAME /new command
-     passthrough, and the collapse bit lives in localStorage (a viewport
-     under 1024px defaults to collapsed). A row click opens its transcript
-     in the MAIN area: session/get (meta line) + session/messages walked
-     page by page via next_cursor (50/page, "load more" appends; the DOM
-     only ever holds what was paged in, so a long transcript stays at
-     virtual-scroll order of magnitude). Same textContent-only discipline
-     as chat.
+     Workspace tree (W5 follow-up card, supersedes c_txz6vz's flat list): the
+     left rail is a TWO-LEVEL tree — workspace group headers over per-session
+     rows. Groups come from project/list roots ∪ serve.projects (the same
+     two read-only sources c_lnsdvu's picker shipped, now rendered in place
+     instead of behind a modal), plus every cwd seen in session/list so a
+     session whose manifest went missing is never orphaned. Clicking a group
+     header BINDS there (a picked row sends the SAME '/bind <root>' text a
+     hand-typed command would); the ＋ on a header resets the session inside
+     it; clicking a row resumes/opens (row = openSession, "continue here" =
+     /resume). session/list drives the rows (updated desc, title substring
+     search, 30-row pages via "load more"), the bound session is the
+     highlighted row, and the collapse bit lives in localStorage (a viewport
+     under 1024px defaults to collapsed). Group open/closed state also lives
+     in localStorage. A row click opens its transcript in the MAIN area:
+     session/get (meta line) + session/messages walked page by page via
+     next_cursor (50/page, "load more" appends; the DOM only ever holds what
+     was paged in, so a long transcript stays at virtual-scroll order of
+     magnitude). Same textContent-only discipline as chat.
      Streaming bubble (W2.1): the W1.4 named SSE events fold
      client-side per run id — deltas accumulate into text blocks,
      tool calls render as single folded status rows (args/results
@@ -60,12 +67,16 @@
      view rides stats/cache (session picker from session/list) — the
      cache/cost card shows hit ratio + cost_usd, priced SERVER-side
      (the client never prices; §2.5).
-     Command quick buttons (W2.2): /bind /projects /switch /new /cancel
-     in the top bar — zero-arg ones send the SAME command text through
-     the shared POST /msg passthrough; /bind /switch prefill the input
-     for the path argument. Binding status stays pinned in the status
-     line: refreshed immediately after a command POST (202) settles on
-     the wire, again on every SSE reply, and again on SSE (re)connect.
+     Command surface (W2.2, retired by the workspace-tree card): the top bar
+     no longer carries /bind /projects /switch /new /cancel buttons — the
+     tree owns project selection and session creation, the send key forks to
+     STOP while a run is live. The COMMANDS themselves stay: /bind /switch /
+     /new /cancel /resume /projects are still plane commands (router.go) and
+     still reachable by typing them (Telegram/Feishu rely on that, and the
+     '/' completion menu lists them) — the page simply stops asking anyone to
+     type one. Binding status stays pinned in the status line: refreshed
+     immediately after a command POST (202) settles on the wire, again on
+     every SSE reply, and again on SSE (re)connect.
      Stop key (c_5m3fm6, dsh InputBar alignment): while a streamed run
      is live the SEND key becomes the STOP key — the click is forked at
      the click layer (preventDefault; a submit event names #send as
@@ -569,7 +580,7 @@
   #side-head .btn-icon { width: 26px; padding: 0; }
   #side-head .ic { width: 16px; height: 16px; }
   #side-arch.on { background: var(--seek-accent); }  /* 归档可见位：高亮记开关态 */
-  #side-new { margin: 0; display: flex; gap: 6px; align-items: center;
+  #side-ws-new { margin: 0; display: flex; gap: 6px; align-items: center;
               justify-content: center; }
   #side-search { margin: 0 10px 8px; background: var(--seek-inset); color: inherit;
                  border: 1px solid var(--seek-line); border-radius: 6px; padding: 5px 8px;
@@ -581,7 +592,7 @@
   /* 收起态：标题/搜索/列表/翻页让位，新建与折叠钮收成图标轨 */
   body.side-collapsed #side-title, body.side-collapsed #side-search,
   body.side-collapsed #sess-list, body.side-collapsed #side-foot,
-  body.side-collapsed #side-new .lbl { display: none; }
+  body.side-collapsed #side-ws-new .lbl { display: none; }
   /* 图标轨竖排（c_lqtt2m 返工轮）：44px 宽 − 两侧 6px padding = 32px 内宽。
      横排时两个 26px 宽的归档/折叠钮加 8px gap 就已 60px+，必然溢出轨右缘、压到
      中栏——会话详情页与设置页下 ⟩ 被相邻列的「聊天」/标题行盖住，只露出
@@ -589,7 +600,7 @@
      钮各自 26px 全部落在轨内、互不重叠。 */
   body.side-collapsed #side-head { flex-direction: column; gap: 6px;
                                    padding: 8px 6px; justify-content: flex-start; }
-  body.side-collapsed #side-new { margin: 0; width: 26px; height: 26px; padding: 0; }
+  body.side-collapsed #side-ws-new { margin: 0; width: 26px; height: 26px; padding: 0; }
   /* 抽屉遮罩（c_lqtt2m）：默认不出场；≤480px 展开态翻成 block（断点块），
      点击关抽屉。z 在 #side（30）之下、盖住中栏。 */
   #side-scrim { display: none; position: absolute; inset: 0; z-index: 20;
@@ -648,10 +659,33 @@
   .sess-row.editing .sess-edit { display: block; }
   .sess-row.editing .t1, .sess-row.editing .t2,
   .sess-row.editing .sess-acts { display: none; }
+  /* ---- 工作区树（两级：组头 + 组内会话行）----
+     组头一行承载「选这个工作区」（点字面 = 把本会话绑过去），折叠是独立的
+     箭头钮（点箭头 = 收/展，两件事不混）。组内行沿用 .sess-row，只缩进一档。
+     组头底取 --seek-inset（「非活动面」那一档），与会话行分两层视觉。 */
+  .ws-group { display: block; }
+  .ws-head { display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 2px;
+             background: var(--seek-inset); cursor: pointer;
+             border-bottom: 1px solid var(--seek-line-2); }
+  .ws-head.cur { box-shadow: inset 2px 0 0 var(--seek-accent); }
+  .ws-head .ws-caret { display: inline-flex; flex: none; padding: 2px; background: transparent; border-radius: 4px; }
+  .ws-head .ic { width: 14px; height: 14px; flex: none; color: var(--seek-fg-dim); }
+  .ws-head .ws-caret .ic { width: 13px; height: 13px; }
+  .ws-head .ws-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; color: var(--seek-fg-soft); font-size: 12px;
+                      letter-spacing: .02em; }
+  .ws-head .ws-cnt { flex: none; color: var(--seek-fg-dim); font-size: 11px;
+                     font-variant-numeric: tabular-nums; }
+  .ws-head .ws-acts { flex: none; display: none; gap: 2px; }
+  .ws-head:hover .ws-acts, .ws-head:focus-within .ws-acts { display: flex; }
+  .ws-head .ws-acts .btn-icon.sm { width: 20px; height: 20px; }
+  .ws-head .ws-acts .ic { width: 12px; height: 12px; }
+  .ws-group .sess-row { padding-left: 24px; }
   #sess-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #browser-head { display: flex; gap: 10px; align-items: center; padding: 6px 10px;
                   border-bottom: 1px solid var(--seek-line); }
-  #sess-back { flex: none; padding: 4px 12px; font-size: 13px; background: var(--seek-soft); }
+  #sess-back, #sess-continue { flex: none; padding: 4px 12px; font-size: 13px;
+                               background: var(--seek-soft); }
   #sess-meta { flex: 1; min-width: 0; color: var(--seek-fg-dim); white-space: nowrap;
                overflow: hidden; text-overflow: ellipsis; }
   #sess-msgs { flex: 1; overflow-y: auto; padding: 14px; }
@@ -945,6 +979,9 @@
     <symbol id="i-panel-open" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></symbol>
     <symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
     <symbol id="i-archive-restore" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="m10 12 2-2 2 2"/><path d="M12 10v4"/></symbol>
     <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
@@ -970,15 +1007,10 @@
 <header id="status" class="warn"><span id="status-l">连接中…</span><span id="conn" class="warn" role="status" aria-label="SSE 连接状态：连接中"><span class="dot" aria-hidden="true"></span><span id="conn-t">连接中</span></span><span id="ctx" hidden><span id="ctx-m"></span><span class="bar"><i></i></span><span id="ctx-p"></span></span><span id="usage"></span></header>
 <div id="connbar" hidden><span>SSE 已断开——正在自动重连…</span><button id="reconn" class="btn-primary" type="button">手动重连</button></div>
 <nav id="bar">
-  <!-- 指令快捷按钮（W2.2；c_lnsdvu 改制两钮）：/bind 与 /projects 点按改为开
-       项目点选弹层（project/list ∪ serve.projects 候选，点行 = 发同款
-       '/bind <路径>' 指令文本）；/switch /new /cancel 三钮仍是「发送同款
-       指令文本」的快捷方式，不另造协议。 -->
-  <button id="cmd-bind" class="cmd" type="button" title="绑定/重绑项目（点选候选；会话重置）">/bind</button>
-  <button id="cmd-projects" class="cmd" type="button" title="点选项目（发 /bind <路径>，会话重置）">/projects</button>
-  <button id="cmd-switch" class="cmd" type="button" title="切换到另一项目（需补路径）">/switch</button>
-  <button id="cmd-new" class="cmd" type="button" title="项目不变，开新会话">/new</button>
-  <button id="cmd-cancel" class="cmd" type="button" title="中断本会话运行中的任务">/cancel</button>
+  <!-- 指令快捷钮退役（工作区树卡）：dsh 的顶栏没有斜杠指令组，工作区/会话
+       的导航全在左栏两级树里。原来的 /bind /projects /switch /new /cancel
+       五钮整体撤掉——绑定=点组头、换绑=点另一个组头、新会话=组头 ＋、
+       中断=发送键在生成中自己变「停止」。页面不再要求任何人手打 /bind。 -->
   <!-- 审批未决角标（W5 c_n37tnr）：有待审批卡片时常显计数；hidden 默认在
        ——空态不占顶栏（验收③零侵入）。W5 侧栏卡（c_txz6vz）退役了顶栏
        的会话按钮——会话入口移左栏，这里不再有它。 -->
@@ -998,12 +1030,12 @@
   <div id="side-scrim"></div>
   <aside id="side">
     <div id="side-head">
-      <span id="side-title">会话</span>
-      <button id="side-new" type="button" title="项目不变，开新会话（与 /new 同一条）"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span class="lbl">新建</span></button>
+      <span id="side-title">工作区</span>
+      <button id="side-ws-new" type="button" title="新建工作区：从可浏览目录里选一个绑定（同名工作区直接切换）"><svg class="ic" aria-hidden="true"><use href="#i-folder-plus"/></svg><span class="lbl">新建</span></button>
       <button id="side-arch" class="btn-icon" type="button" title="显示归档会话" aria-label="显示归档会话"><svg class="ic" aria-hidden="true"><use href="#i-archive"/></svg></button>
-      <button id="side-toggle" class="btn-icon" type="button" title="收起/展开会话侧栏" aria-label="收起会话侧栏"><svg class="ic" aria-hidden="true"><use href="#i-panel-close"/></svg></button>
+      <button id="side-toggle" class="btn-icon" type="button" title="收起/展开工作区侧栏" aria-label="收起工作区侧栏"><svg class="ic" aria-hidden="true"><use href="#i-panel-close"/></svg></button>
     </div>
-    <input id="side-search" type="search" autocomplete="off" placeholder="按标题搜索…" aria-label="按标题搜索会话">
+    <input id="side-search" type="search" autocomplete="off" placeholder="搜索工作区或会话标题…" aria-label="搜索工作区或会话标题">
     <div id="sess-list"></div>
     <div id="side-foot"></div>
   </aside>
@@ -1014,6 +1046,7 @@
         <div id="sess-detail">
           <div id="browser-head">
             <button id="sess-back" type="button" title="返回聊天面"><svg class="ic" aria-hidden="true"><use href="#i-chat"/></svg><span>聊天</span></button>
+            <button id="sess-continue" type="button" title="把当前会话切到这条历史（/resume：接着它的上下文继续跑）"><svg class="ic" aria-hidden="true"><use href="#i-play"/></svg><span>继续此会话</span></button>
             <div id="sess-meta"></div>
           </div>
           <div id="sess-msgs"></div>
@@ -1086,7 +1119,7 @@
            '@' 会话引用与项目点选（c_lnsdvu）共用的候选弹层（一行 DOM，三种候源），
            贴着表单上沿。 -->
       <textarea id="input" autocomplete="off" rows="1" spellcheck="false"
-                placeholder="/bind <项目路径>，/ 看指令，@ 引用会话，或直接发消息" autofocus></textarea>
+                placeholder="直接发消息；/ 看指令，@ 引用历史会话" autofocus></textarea>
       <div id="menu" role="listbox" aria-label="候选" hidden></div>
       <input id="file" type="file" multiple hidden
              accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.doc,.docx,.ppt,.pptx">
@@ -1488,11 +1521,14 @@ let boundSession = null;  // 本 conv 的绑定会话（侧栏当前项高亮的
 // 会话要等整页刷新才出现。undefined = 首次 /state 还没回（启动那一次由
 // boot 的 loadSessions 负责，避免双拉）。
 let lastSeenSession;
+// 同理的绑定项目游标：变了就把组候选缓存作废重拉（刚绑的目录第一次得靠
+// boundProject 兜底，且没有 last_active_at）。undefined = 首帧。
+let lastSeenProject;
 
 // ---- 主区空态（c_jf3grt）----
-// 聊天面空着时给引导，不留一大片无字区：未绑定 → /bind 路径说明 + 点选
-// 按钮（复用 openBindPicker，与顶栏 /bind 同一条候源）；已绑定 → 欢迎语
-// 与输入提示。空态块是 #list 的直接子节点里唯一非 .msg 的一项，消息落地
+// 聊天面空着时给引导，不留一大片无字区：未绑定 → 「点左栏的工作区」+
+// 「选择目录…」按钮（fs/list 目录浏览器）；已绑定 → 欢迎语与输入提示。
+// 空态块是 #list 的直接子节点里唯一非 .msg 的一项，消息落地
 // 即摘（dropChatEmpty）；只在真的空列表上渲染，绝不挤占历史消息。
 let chatEmptyKind = '';   // 在场空态的形态（unbound/bound）；'' = 无
 function dropChatEmpty() {
@@ -1513,18 +1549,14 @@ function renderChatEmpty() {
   const x = document.createElement('div');
   x.className = 'ce-x';
   if (!boundProject) {
-    t.textContent = '还没有绑定项目';
-    x.appendChild(document.createTextNode('用 '));
-    const c = document.createElement('code');
-    c.textContent = '/bind <项目路径>';
-    x.appendChild(c);
-    x.appendChild(document.createTextNode(' 绑定一个项目，或直接点下面的按钮从候选里选。'));
+    t.textContent = '还没有工作区';
+    x.textContent = '点左栏头的「新建」选一个目录：绑定后这里就能开始对话。左栏也会自动列出你已经用过的工作区。';
     const acts = document.createElement('div');
     acts.className = 'ce-acts';
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = '选择项目…';
-    b.addEventListener('click', () => openBindPicker());
+    b.textContent = '选择目录…';
+    b.addEventListener('click', () => openDirPicker());
     acts.appendChild(b);
     box.appendChild(t);
     box.appendChild(x);
@@ -1551,7 +1583,7 @@ async function refreshState() {
     boundProjectID = s.bound ? (s.project_id || '') : '';
     boundSession = s.session || null;
     setStatus(s.bound ? '已绑定 ' + s.project + (s.session ? ' · 会话 ' + s.session.slice(0, 8) : '')
-                      : '未绑定——发 /bind <项目路径>（或 /projects 看候选）', s.bound);
+                      : '未绑定——点左栏的「新建」选一个目录', s.bound);
     syncTopicStream();               // /bind 落地后面板订阅即时跟上
     syncAgentRefresh();              // 绑定到位后定时刷新才敢起（c_4doebx）
     if (sessList) markCur();         // 侧栏当前项跟随绑定（W5 侧栏）
@@ -1559,6 +1591,10 @@ async function refreshState() {
     // 新会话要等整页刷新才出现在列表里。首帧由 boot 的 loadSessions 拉。
     if (lastSeenSession !== undefined && lastSeenSession !== boundSession) loadSessions();
     lastSeenSession = boundSession;
+    // 绑定项目变了 = 候选里可能多了一个（或换了一个）：组来源缓存作废重拉，
+    // 否则刚绑的目录第一次只能靠 boundProject 兜底、且没有 last_active_at。
+    if (lastSeenProject !== undefined && lastSeenProject !== boundProject) { bindData = null; loadProjects(); }
+    lastSeenProject = boundProject;
     renderChatEmpty();               // 空态跟随绑定态（未绑定 / 已绑定欢迎语）
     return true;
   } catch (e) { setStatus('连不上 /state：' + e, false); return false; }
@@ -2082,23 +2118,20 @@ form.addEventListener('submit', async ev => {
 // ---- 输入增强（c_7lsngm；对齐 dsh ui-input-trigger + ui-commands）----
 // 全挂在输入框这条 input/keydown 线上，不碰全局键：Enter 发送 /
 // Shift+Enter 原生换行；'/' 指令补全（候源 = 下面这张注册表）；
-// '@' 最近会话（session/list），选中落 @<sid> 并发 /resume <sid>；
-// 项目点选（c_lnsdvu，project/list ∪ serve.projects）由顶栏 /bind 与
-// /projects 两钮触发，点行发 '/bind <root>'——同为这条线上的候源。
+// '@' 最近会话（session/list），选中落 @<sid> 并发 /resume <sid>。
+// 工作区/项目的选择已经整体搬进左栏两级树（见「工作区树」一节），
+// 所以这张注册表只剩「树里没有对应手势」的两条：/resume（历史会话的
+// 显式续接，@ 引用也走它）与 /cancel（键盘党的中断）。/bind /projects /
+// /switch /new 仍是平面指令（router.go，Telegram/飞书靠它们说话），只是
+// 页面不再列出、也不再提供任何入口——树就是它们的 UI。
 // 弹层开着时导航键就地消化，关掉即全部放行（Esc 不劫持页面）。
 const CMDS = [
-  { name: '/bind',     args: true,  desc: '绑定/重绑项目（会话重置，需补路径）' },
-  { name: '/projects', args: false, desc: '列出候选项目与当前绑定' },
-  { name: '/switch',   args: true,  desc: '切换到另一项目（需补路径）' },
-  { name: '/new',      args: false, desc: '项目不变，开新会话' },
-  { name: '/cancel',   args: false, desc: '中断本会话运行中的任务' },
-  { name: '/resume',   args: true,  desc: '续到某个历史会话（@ 引用用它）' },
+  { name: '/resume', args: true,  desc: '续到某个历史会话（@ 引用也是它）' },
+  { name: '/cancel', args: false, desc: '中断本会话运行中的任务' },
 ];
 
 const menu = document.getElementById('menu');
 let menuItems = [], menuHl = -1, menuCtx = null;  // 候选 / 高亮 / 上次判定的上下文
-let menuHead = '';    // 弹层头行文案（'' = 无；项目点选候源的固定告知）
-let bindOpen = false; // 项目点选候源开着（c_lnsdvu）：updateMenu 的优先级依据
 
 function closeMenu() {
   menu.hidden = true;
@@ -2106,22 +2139,13 @@ function closeMenu() {
   menuItems = [];
   menuHl = -1;
   dirMode = null;     // 目录模式随层一起关（c_heffj3）
-  bindOpen = false;   // 点选候源随弹层一起关（含在途拉取落地时的补渲自查）
-  menuHead = '';
 }
 
 function renderMenu() {
   // 目录模式（c_heffj3）：层头与行容器分离——层头不随行重绘整体重建，
-  // 否则 ↑↓ 一次就把过滤框的焦点打飞；这里只清行容器，普通模式照旧
-  //（c_lnsdvu 的告知头行同理：只在整层重建时进，不是可点行）。
+  // 否则 ↑↓ 一次就把过滤框的焦点打飞；这里只清行容器。
   const scope = menu.querySelector('.dirrows') || menu;
   scope.replaceChildren();
-  if (scope === menu && menuHead) {    // 头行是告知文案，不是可点行、不占高亮序
-    const head = document.createElement('div');
-    head.className = 'mh';
-    head.textContent = menuHead;
-    menu.appendChild(head);
-  }
   menuItems.forEach((it, i) => {
     const row = document.createElement('div');
     row.className = 'mi' + (i === menuHl ? ' hl' : '');
@@ -2239,25 +2263,17 @@ function applyAt(sid) {
   sendText('/resume ' + sid, false);
 }
 
-// ---- /bind 目录浏览器（c_heffj3：fs/list 只读口 + 逐级下钻）----
-// '/bind ' 参数期弹出的入口（片 1 c_lnsdvu 的候选行落同一上下文、插在
-// 本入口之前——两卡在 bindArgHits 的返回数组处合并）。目录模式复用
-// 同一个 #menu 弹层与 ↑↓/Enter/Esc/Tab 导航：层头（路径 + ↑ 上一级 +
-// 选这个目录 + 过滤框）是 .dirhead，行渲染进 .dirrows 仍走
-// menuItems/pick 机制；不新增任何全局键盘监听（过滤框的导航键是
-// 元素级监听，与输入框 keydown 同一套语义）。
+// ---- 新建工作区：目录浏览器（原 c_heffj3 的 fs/list 入口）----
+// 入口已从「手打 /bind 后的参数期」改成侧栏头的「工作区」钮（工作区树卡）：
+// 树只列**已经有痕迹**的工作区（project/list ∪ serve.projects ∪ session cwd），
+// 而「第一个工作区」必然还没痕迹——这枚钮是树的补集，不是树的重复。
+// 目录模式复用同一个 #menu 弹层与 ↑↓/Enter/Esc/Tab 导航：层头（路径 + ↑
+// 上一级 + 选这个目录 + 过滤框）是 .dirhead，行渲染进 .dirrows 仍走
+// menuItems/pick 机制；不新增任何全局键盘监听（过滤框的导航键是元素级监听）。
+// 「选这个目录」发的仍是 /bind <path> 指令文本——平面只有这一条写绑定路径，
+// 页面只是不再让任何人手打它。
 let dirMode = null;   // {path, parent, dirs, filter, err, pending, el}
 let dirSeq = 0;       // 异步竞态闸：只认最后一次 loadDir
-
-function bindArgHits() {
-  const v = input.value;
-  if (!/^\/bind\s/.test(v)) return null;
-  return [{
-    label: '浏览目录…', icon: 'folder',
-    desc: '下钻可浏览根内的任意目录后绑定',
-    apply: () => openDirPicker(),
-  }];
-}
 
 function openDirPicker() {
   dirMode = { path: '', parent: '', dirs: [], filter: '', err: '', pending: false, el: null };
@@ -2408,26 +2424,26 @@ function leftEllipsis(s, max) {
   return s.length > max ? '…' + s.slice(s.length - max) : s;
 }
 
-// ---- 项目点选候源（c_lnsdvu）----
-// #cmd-bind / #cmd-projects 点按开出，与 '/'、'@' 同一个 #menu、同一条
-// pick 路径。候选 = project/list 的 root（W4.3，带会话数）∪ settings/get
-// 的 projects（config serve.projects——配了但 seek 尚未打开过的目录），按
-// clean 后的绝对路径去重。点行 = 发 '/bind <root>'：/bind 在已绑定态也
-// 合法且总是重置会话（D-C2「start over here」），统一走 /bind、不引
-// /switch 分叉；点选后的状态行/侧栏刷新走指令应答既有 refreshState 链。
+// ---- 工作区候选（原 c_lnsdvu 的两个只读候源，现在喂树而不是弹层）----
+// 组 = project/list 的 root（W4.3，带会话数）∪ settings/get 的 projects
+// （config serve.projects——配了但 seek 尚未打开过的目录），按 clean 后的
+// 绝对路径去重；树另外把 session/list 的 cwd 并进来（第三个来源，见
+// wsGroups——manifest 丢了的老会话不该沦为孤儿）。
 // 目录存在性不预检（页面无 stat）：project/list 的 root 是 manifest 的
 // last_seen 位置，可能已移动/删除——点了由 Router 的「绑定失败：目录不
-// 存在：<abs>」应答如实透传到聊天面。候源同 '@'：首次触发拉一次并缓存
-// （失败也缓存，atErr 同款形状）；失败/空各给一行提示，不静默无弹层。
+// 存在：<abs>」应答如实透传到聊天面。
 let bindData = null, bindErr = null, bindPending = false;
 
-// 去重键：清尾随斜杠与空白。页面做不了绝对化/展开（无 stat、不知 home），
-// '~/x' 与展开后的路径不去重是接受的边（点了也能绑，Router 会展开）。
+// 去重键：清尾随斜杠与空白，并把连续分隔符并成一个（`T//proj` 与 `T/proj`
+// 是同一个目录——manifest 的 abs_path 可能带 `//` 而 session 的 cwd 不带；
+// 不归一就会出现两个同名组头、各挂一半会话）。页面做不了绝对化/展开
+// （无 stat、不知 home），'~/x' 与展开后的路径不去重是接受的边（点了也能
+// 绑，Router 会展开）。
 function cleanRoot(p) {
-  return String(p || '').trim().replace(/\/+$/, '');
+  return String(p || '').trim().replace(/\/{2,}/g, '/').replace(/\/+$/, '');
 }
 
-async function loadBindCandidates() {
+async function loadProjects() {
   if (bindData !== null || bindPending) return;
   bindPending = true;
   try {
@@ -2438,11 +2454,13 @@ async function loadBindCandidates() {
     const byRoot = new Map();   // project/list 先占位（审计序），config 补差集
     for (const p of (pl.projects || [])) {
       const root = cleanRoot(p.root);
-      if (root && !byRoot.has(root)) byRoot.set(root, { root, sessions: p.sessions || 0 });
+      if (root && !byRoot.has(root)) {
+        byRoot.set(root, { root, sessions: p.sessions || 0, last: p.last_active_at || '' });
+      }
     }
     for (const raw of (st.projects || [])) {
       const root = cleanRoot(raw);
-      if (root && !byRoot.has(root)) byRoot.set(root, { root, sessions: 0 });  // 未开过
+      if (root && !byRoot.has(root)) byRoot.set(root, { root, sessions: 0, last: '' });  // 未开过
     }
     bindData = [...byRoot.values()];
     bindErr = null;
@@ -2451,31 +2469,7 @@ async function loadBindCandidates() {
     bindErr = e.message || String(e);
   }
   bindPending = false;
-  if (bindOpen) updateMenu();   // 拉回来时弹层还该开着：补上候选
-}
-
-function bindHits() {
-  if (bindData === null && !bindErr) { loadBindCandidates(); return null; }
-  const notice = text => [{ label: text, desc: 'Esc 关闭', apply: () => {} }];
-  if (bindErr) return notice('（项目候选取不到：' + bindErr + '）');
-  if (!bindData.length) {
-    return notice('没有可选项目：config serve.projects 未配置、本机也还没有 seek 会话记录——直接手打 /bind <路径>');
-  }
-  const bases = {};             // basename 计数：同名行补父目录尾段消歧
-  for (const e of bindData) {
-    const b = baseOf(e.root);
-    bases[b] = (bases[b] || 0) + 1;
-  }
-  return bindData.map(e => {
-    const seg = e.root.split('/').filter(Boolean);
-    const b = seg[seg.length - 1] || e.root;
-    return {
-      label: bases[b] > 1 ? (seg[seg.length - 2] || '') + '/' + b : b,
-      desc: e.root + (e.sessions >= 1 ? ' · ' + e.sessions + ' 个会话' : ' · 未开过'),
-      meta: (boundProject && cleanRoot(boundProject) === e.root) ? '当前' : '',
-      apply: () => sendText('/bind ' + e.root, false),
-    };
-  });
+  renderSessRows();   // 候选落地：树补上空工作区的组头
 }
 
 function baseOf(root) {
@@ -2484,25 +2478,16 @@ function baseOf(root) {
 }
 
 // 候选上下文（触发位 + 查询词）：没变就不动现状——保 ↑↓ 高亮，也保 Esc
-// 关掉后不被同一按键的 keyup 立刻重新弹开。bindOpen 是第三候源的上下文：
-// 点按开的意图优先于草稿里恰有的 '/'、'@' 触发（点了按钮就要出项目候选）。
+// 关掉后不被同一按键的 keyup 立刻重新弹开。
 function ctxNow() {
-  if (bindOpen) return 'bind';
   if (slashHits()) return 'slash|' + input.value;
-  if (bindArgHits()) return 'bind|' + input.value;   // '/bind ' 参数期（c_heffj3）
   const at = atToken();
   return at ? 'at|' + at.start + '|' + at.query : '';
 }
 
 function updateMenu() {
   if (dirMode) return;   // 目录模式独占弹层：'/' '@' 触发不抢；Esc/点别处照旧关
-  let items = null;
-  if (bindOpen) {
-    items = bindHits();
-    if (items === null) return;   // 候选在途：不动现状，拉取落地时补渲
-  }
-  if (items === null) items = slashHits();
-  if (items === null) items = bindArgHits();   // '/bind ' 参数期：目录浏览入口（c_heffj3）
+  let items = slashHits();
   if (items === null) items = atToken() ? atHits() : null;
   const ctx = items ? ctxNow() : '';
   if (ctx === menuCtx) return;
@@ -2510,15 +2495,13 @@ function updateMenu() {
   if (!items) { closeMenu(); return; }
   menuItems = items;
   menuHl = 0;
-  menuHead = bindOpen ? '点选会重置当前会话（/bind 语义）；路径也可手打' : '';
   renderMenu();
   menu.hidden = false;
 }
 
 // keyup/click 必须包一层空箭头——直接挂 updateMenu 会把 Event 当实参，
-// 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。编辑动作先收掉点选
-// 候源（c_lnsdvu）：弹层头行说了「路径也可手打」——开始打字就该让位。
-input.addEventListener('input', () => { grow(); bindOpen = false; updateMenu(); syncSend(); });
+// 每次按键重开弹层，↑↓ 高亮与 Esc 关闭立刻被抹掉。
+input.addEventListener('input', () => { grow(); updateMenu(); syncSend(); });
 input.addEventListener('keyup', () => updateMenu());
 input.addEventListener('click', () => updateMenu());
 input.addEventListener('blur', ev => {
@@ -2598,52 +2581,21 @@ document.addEventListener('paste', async ev => {
   await addFiles(cd.files);
 });
 
-// 指令快捷按钮（W2.2）：零参指令（/new /cancel）直发；带参指令（/switch）
-// 预填输入框并聚焦等路径——按钮只是「发送同款指令文本」的快捷方式，不另
-// 造协议。/bind 与 /projects 两钮已由 c_lnsdvu 改制为开项目点选弹层（见
-// openBindPicker）——发送的仍是同款 '/bind <路径>' 指令文本，只是路径来自
-// 点选候选而不是手敲；/projects 的聊天文本回复形态不变（手打仍可看）。
-function wireCmd(id, text) {
-  document.getElementById(id).addEventListener('click', () => {
-    if (posting) return;   // 指令入口不吃草稿禁用态（c_jf3grt：闸只认在途 POST）
-    if (text.endsWith(' ')) {           // 带参指令：预填，光标移到末尾
-      input.value = text;
-      input.setSelectionRange(text.length, text.length);
-      grow();                           // 多行输入（c_7lsngm）：预填后高度回落到一行
-      input.focus();
-      return;
-    }
-    sendText(text, false);
-    input.focus();
-  });
-}
-wireCmd('cmd-switch', '/switch ');
-wireCmd('cmd-new', '/new');
-wireCmd('cmd-cancel', '/cancel');
+// 指令快捷钮退役（工作区树卡）：顶栏原来那五个斜杠钮（/bind /projects
+// /switch /new /cancel）连同 wireCmd 一起撤掉——工作区=点组头、换绑=点
+// 另一个组头、新会话=组头 ＋、中断=生成中的发送键变「停止」。页面不再
+// 提供任何「发送斜杠指令」的按钮，只剩 '#' 补全菜单里的 /resume /cancel
+// 两条，是给**想打字的人**留的入口，不是给不学指令的人准备的替代路。
+// 面（见 buildWorkspaceGroup / treeBind / treeNewSession）。
 
-// 项目点选（c_lnsdvu）：点按钮 = 开第三个候源弹层（#cmd-bind 与
-// #cmd-projects 两个触发点同一入口），点行发 '/bind <root>'——apply 在
-// bindHits 里，与 '@' 候源选行发 /resume 同款。聚焦输入框是刻意的：
-// 键盘导航（↑↓/Enter/Tab）、Esc 关、点别处关（blur）全部沿用输入框这条
-// 既有事件线，不新增全局监听；开始打字则由 input 监听收掉候源让位。
-function openBindPicker() {
+// 侧栏头的「＋ 工作区」：树只列已经有痕迹的工作区（project/list ∪
+// serve.projects ∪ session cwd），而第一个工作区必然还没痕迹——这枚钮是
+// 树的补集。开的是 fs/list 目录浏览器（openDirPicker，逐级下钻），
+// 「选这个目录」发的仍是 /bind <path> 指令文本。
+document.getElementById('side-ws-new').addEventListener('click', () => {
   if (posting) return;
-  bindOpen = true;
   input.focus();
-  updateMenu();
-}
-document.getElementById('cmd-bind').addEventListener('click', openBindPicker);
-document.getElementById('cmd-projects').addEventListener('click', openBindPicker);
-
-// ＋新建（W5 侧栏）：与顶栏 /new 完全同一条指令文本、同一个 POST /msg 透传
-// ——不另造协议。项目不变、会话重置；落地后刷新绑定与侧栏当前项（/new 的
-// 回复也会走 onmessage 的 refreshState，两处幂等）。
-document.getElementById('side-new').addEventListener('click', async () => {
-  if (posting) return;
-  await sendText('/new', false);
-  refreshState();
-  loadSessions();
-  input.focus();
+  openDirPicker();
 });
 
 // ---- 按住说话（voice V2 入站，PRD feature-deepseek-app-api §4.3）----
@@ -2874,105 +2826,313 @@ sideArch.addEventListener('click', () => {
 });
 applyArchBtn();
 
-// 标题过滤（子串、忽略大小写）+ updated 倒序。服务端已按最新在前给，
-// 页面再排一次只为「过滤后顺序稳定」——不引入第二套排序口径。归档行
-// （仅在「显示归档」开时由服务端带回）同序过滤后沉底——活跃会话永远
-// 占视口上部。
-function filteredSessions() {
+// ---- 工作区树 ----
+// 两级：组头（工作区）+ 组内会话行。组 = project/list 的 root ∪ serve.projects
+// ∪ 本机 session 的 cwd ∪ 当前绑定（最后这个保证「刚绑的工作区立刻在树上」）。
+// 会话行沿用 W4.4/W5 的行渲染（标题 / 时间 · 轮数 · 模型 / $ 列 / 改名 / 归档），
+// 只是缩进一档并挂在组下。
+//
+// 两个手势的语义（这是整棵树最容易被抄错的一处，写在代码里）：
+//   · 点组头 = 「去那个工作区」：当前已在该组 → 空操作（绝不能再发 /bind，
+//     /bind 的语义是 start over，会当场清掉你正在进行的对话）；该组有会话
+//     → 发 /resume <最新一条>（cmdResume 会把绑定跟到该会话的 cwd，等价于
+//     「回到我在那儿的地方」）；该组还空 → 发 /bind <root>（新工作区第一次
+//     绑定，本来就没有上下文可丢）。
+//   · 组头的 ＋ = 「在该工作区开新会话」：绑定在别处 → /bind <root>（自然是
+//     新会话）；已在该组 → /new（项目不变、会话重置，与旧 ＋新建 同一条）。
+// 会话行点击仍是 openSession（中栏只读浏览）；要「接着这条继续」由会话正文
+// 头上的「继续此会话」发 /resume <sid>——浏览和接续不该是同一个点击。
+//
+// 折叠位（哪些组收起了）与归档可见位同款：localStorage，刷新保持，隐私模式
+// 退化为内存值。分页（30 条一页的「加载更多」）改成**全树合计**的行数帽，
+// 组头不受影响——切工作区不需要先翻页。
+
+const WS_CLOSED_KEY = 'seek-ws-closed';
+function readWsClosed() {
+  try {
+    const v = JSON.parse(localStorage.getItem(WS_CLOSED_KEY) || '[]');
+    return new Set(Array.isArray(v) ? v : []);
+  } catch (e) { return new Set(); }   // 隐私模式/坏 JSON：全展开
+}
+let wsClosed = readWsClosed();
+function toggleWs(root) {
+  if (wsClosed.has(root)) wsClosed.delete(root); else wsClosed.add(root);
+  try { localStorage.setItem(WS_CLOSED_KEY, JSON.stringify([...wsClosed])); } catch (e) { /* 内存态即可 */ }
+  renderSessRows();
+}
+
+// 组名的消歧口径与旧候选弹层同源：basename，同名就补父目录尾段。
+function wsLabels(roots) {
+  const bases = {};
+  for (const r of roots) {
+    const b = baseOf(r);
+    bases[b] = (bases[b] || 0) + 1;
+  }
+  const out = new Map();
+  for (const r of roots) {
+    const seg = String(r).split('/').filter(Boolean);
+    const b = seg[seg.length - 1] || r;
+    out.set(r, bases[b] > 1 ? (seg[seg.length - 2] || '') + '/' + b : b);
+  }
+  return out;
+}
+
+// 空 cwd 的老会话（schema_version 早于 cwd 落地、或从别处搬来的）不能
+// 沦为孤儿：单独一个「未记录目录」组，只可浏览/续接，不可绑定（绑定必须
+// 有真实目录，Router 会拒空路径）。
+const NO_ROOT = '\u0000no-root';
+
+// 全量组：{root, sessions[]}。排序 = 当前绑定组第一，其余按组内最新活动
+// 倒序（没有会话的组沉底、按名字排）——「最近在哪儿干活」永远在顶部。
+function wsGroups() {
+  const byRoot = new Map();   // root → {root, last}
+  const add = (root, last) => {
+    const key = cleanRoot(root);
+    if (!key) return;
+    const g = byRoot.get(key);
+    if (!g) byRoot.set(key, { root: key, last: last || '' });
+    else if (!g.last && last) g.last = last;
+  };
+  for (const e of (bindData || [])) add(e.root, e.last);
+  for (const s of allSessions) if (s.cwd) add(s.cwd, s.last_at);
+  if (boundProject) add(boundProject, '');
+  const sessions = sortedSessions();
+  const orphan = sessions.filter(s => !s.cwd);
+  const groups = [];
+  for (const g of byRoot.values()) {
+    const mine = sessions.filter(s => cleanRoot(s.cwd || '') === g.root);
+    const newest = mine.length ? mine[0].last_at : '';
+    groups.push({ root: g.root, name: '', sessions: mine,
+                  last: newest || g.last || '', bound: !!boundProject && cleanRoot(boundProject) === g.root });
+  }
+  if (orphan.length) {
+    groups.push({ root: NO_ROOT, name: '未记录目录', sessions: orphan,
+                  last: orphan[0].last_at || '', bound: false, noBind: true });
+  }
+  // 搜索：组名命中 → 整组留（组内不再过滤）；否则只留标题命中的会话。
   const term = sideSearch.value.trim().toLowerCase();
-  const rows = allSessions.filter(s => !term || (s.title || '').toLowerCase().includes(term));
+  const labels = wsLabels([...byRoot.keys()]);
+  const kept = [];
+  for (const g of groups) {
+    g.name = g.noBind ? g.name : (labels.get(g.root) || baseOf(g.root));
+    if (term && !g.name.toLowerCase().includes(term)) {
+      const hits = g.sessions.filter(s => (s.title || '').toLowerCase().includes(term));
+      if (!hits.length) continue;     // 组名、会话标题都没命中 → 整组不出现
+      g.sessions = hits;
+    }
+    kept.push(g);
+  }
+  kept.sort((a, b) => {
+    if (a.bound !== b.bound) return a.bound ? -1 : 1;      // 当前工作区恒在最顶
+    const at = new Date(a.last || 0) - new Date(b.last || 0);
+    if (at) return -at;                                    // 最近活动倒序
+    return a.name.localeCompare(b.name);
+  });
+  return kept;
+}
+
+// 会话排序口径（全树唯一一份）：updated 倒序，归档沉底。
+function sortedSessions() {
+  const rows = allSessions.slice();
   rows.sort((a, b) => new Date(b.last_at || 0) - new Date(a.last_at || 0));
   return rows.filter(s => !s.archived).concat(rows.filter(s => s.archived));
 }
+// 兼容旧名（趋势卡/统计面板里只读 allSessions，不经过这里）。
+function filteredSessions() { return sortedSessions(); }
+
 // 当前项 = 主区打开的那条，退化为已绑定的会话（两者都是「你正在看的」）。
 function curSid() { return (sel && sel.sid) || boundSession; }
 function markCur() {
   const cur = curSid();
-  for (const row of sessList.children) {
+  const boundRoot = boundProject ? cleanRoot(boundProject) : '';
+  for (const row of sessList.querySelectorAll('.sess-row')) {
     row.classList.toggle('cur', !!row.dataset.sid && row.dataset.sid === cur);
+  }
+  for (const head of sessList.querySelectorAll('.ws-head')) {
+    head.classList.toggle('cur', !!head.dataset.root && head.dataset.root === boundRoot);
   }
 }
 
+// 组头：折叠箭头 + 文件夹 + 名字 + 会话数 + 悬停操作（＋新会话）。
+function buildWsHead(g) {
+  const head = document.createElement('div');
+  head.className = 'ws-head';
+  head.dataset.root = g.root;
+  head.tabIndex = 0;
+  const collapsed = wsClosed.has(g.root);
+  const caret = document.createElement('button');
+  caret.type = 'button';
+  caret.className = 'ws-caret';
+  caret.title = collapsed ? '展开这个工作区' : '收起这个工作区';
+  caret.setAttribute('aria-label', caret.title);
+  caret.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  setBtnIcon(caret, collapsed ? 'chevron-right' : 'chevron-down');
+  caret.addEventListener('click', ev => { ev.stopPropagation(); toggleWs(g.root); });
+  head.appendChild(caret);
+  head.appendChild(iconEl(g.noBind ? 'alert' : 'folder'));
+  const name = document.createElement('span');
+  name.className = 'ws-name';
+  name.textContent = g.name;
+  name.title = g.noBind ? '这些会话的 header 没有记下 cwd——可浏览可续接，不能绑定' : g.root;
+  head.appendChild(name);
+  const cnt = document.createElement('span');
+  cnt.className = 'ws-cnt';
+  cnt.textContent = String(g.sessions.length);
+  head.appendChild(cnt);
+  const acts = document.createElement('span');
+  acts.className = 'ws-acts';
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn-icon sm';
+  addBtn.title = g.noBind ? '没有目录，无法在这里开会话' : '在这个工作区开新会话';
+  addBtn.setAttribute('aria-label', addBtn.title);
+  setBtnIcon(addBtn, 'plus');
+  if (g.noBind) addBtn.disabled = true;
+  else addBtn.addEventListener('click', ev => { ev.stopPropagation(); treeNewSession(g.root); });
+  acts.appendChild(addBtn);
+  head.appendChild(acts);
+  // 点字面 = 去这个工作区（语义见本节头注释；空组也走这条）。
+  const go = () => { if (!g.noBind) treeBind(g.root); };
+  head.addEventListener('click', go);
+  head.addEventListener('keydown', ev => {
+    if (ev.target !== head || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+    ev.preventDefault();
+    go();
+  });
+  return head;
+}
+
+// 「去这个工作区」。已在该组 → 空操作（不能发 /bind：它会重置会话）。
+// 该组有会话 → /resume 最新一条（绑定跟着会话自己记的 cwd 走，上下文不丢）。
+// 空组 → /bind（第一次进来，本来就无上下文可丢）。
+function treeBind(root) {
+  if (posting) return;
+  const here = boundProject ? cleanRoot(boundProject) : '';
+  if (here === root) { input.focus(); return; }
+  const g = wsGroups().find(x => x.root === root);
+  const pick = g && g.sessions.find(s => !s.archived);
+  if (pick) sendText('/resume ' + pick.sid, false);
+  else sendText('/bind ' + root, false);
+  input.focus();
+}
+
+// 组头的 ＋：已在该组 → /new（项目不变、会话重置）；不在 → /bind（自然是新会话）。
+function treeNewSession(root) {
+  if (posting) return;
+  const here = boundProject ? cleanRoot(boundProject) : '';
+  sendText(here === root ? '/new' : '/bind ' + root, false);
+  input.focus();
+}
+
 function renderSessRows() {
-  const rows = filteredSessions();
   sessList.replaceChildren();
   sideFoot.replaceChildren();
-  if (!rows.length) {
-    paneHint(sessList, allSessions.length ? '（没有匹配的会话）' : '（没有历史会话）');
+  const groups = wsGroups();
+  if (!groups.length) {
+    paneHint(sessList, allSessions.length || (bindData && bindData.length)
+      ? '（没有匹配的工作区或会话）'
+      : '（还没有工作区）点侧栏头的「新建」选一个目录开始。');
     return;
   }
-  const upto = Math.min(rows.length, Math.max(shownSessions, SESS_PAGE));
-  shownSessions = upto;
-  for (const s of rows.slice(0, upto)) {
-    // div 承载（CSS 注）：行内要装操作钮/输入框，button 嵌套不合法；
-    // 键盘路径 Enter/Space 开会话，与 click 同一条 openSession。
-    const row = document.createElement('div');
-    row.className = 'sess-row' + (s.archived ? ' arch' : '');
-    row.dataset.sid = s.sid;
-    row.tabIndex = 0;
-    if (s.sid === curSid()) row.classList.add('cur');
-    const t1 = document.createElement('span');
-    t1.className = 't1';
-    t1.textContent = s.title || '（无标题）';
-    const t2 = document.createElement('span');
-    t2.className = 't2';
-    const when = fmtWhen(s.last_at);
-    const t2l = document.createElement('span');
-    t2l.className = 't2l';
-    // 日期短格式 + 「N 轮」（c_jf3grt）：英文 locale 长日期与 "1 turns" 的
-    // 残留在此归零；空值不上「·」分隔（无 last_at 时不留孤儿分隔符）。
-    const bits = [];
-    if (s.archived) bits.push('已归档');
-    if (when) bits.push(when);
-    bits.push(fmtTurns(s.turns), s.model || '?');
-    t2l.textContent = bits.join(' · ');
-    // per-session cost 列（c_6xktw4）：cost_usd 服务端算好的，页面只排版
-    // （§2.5 client never prices）。
-    const t2c = document.createElement('span');
-    t2c.className = 't2c';
-    t2c.textContent = fmtUSD(s.cost_usd);
-    t2.appendChild(t2l);
-    t2.appendChild(t2c);
-    row.appendChild(t1);
-    row.appendChild(t2);
-    const acts = document.createElement('span');
-    acts.className = 'sess-acts';
-    const ren = document.createElement('button');
-    ren.type = 'button';
-    ren.className = 'btn-icon sm';
-    ren.title = '重命名（Enter 提交，Esc 取消）';
-    ren.setAttribute('aria-label', '重命名会话');
-    setBtnIcon(ren, 'pencil');
-    ren.addEventListener('click', ev => { ev.stopPropagation(); startRename(row, s); });
-    const arc = document.createElement('button');
-    arc.type = 'button';
-    arc.className = 'btn-icon sm';
-    if (s.archived) { arc.title = '取消归档'; arc.setAttribute('aria-label', '取消归档'); setBtnIcon(arc, 'archive-restore'); }
-    else { arc.title = '归档（列表隐藏，不删文件）'; arc.setAttribute('aria-label', '归档会话'); setBtnIcon(arc, 'archive'); }
-    arc.addEventListener('click', ev => {
-      ev.stopPropagation();
-      rpc('session/archive', { sid: s.sid, archived: !s.archived })
-        .then(() => loadSessions())
-        .catch(e => sideErr((s.archived ? '取消归档' : '归档') + '失败：' + e.message));
-    });
-    acts.appendChild(ren);
-    acts.appendChild(arc);
-    row.appendChild(acts);
-    row.addEventListener('click', () => openSession(s.sid));
-    row.addEventListener('keydown', ev => {
-      if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return;
-      ev.preventDefault();
-      openSession(s.sid);
-    });
-    sessList.appendChild(row);
+  // 全树行数帽：组头恒显，会话行按 30 条一页累加（跨组共享一个帽子，
+  // 「加载更多」一次多给一页，不按组各算各的）。
+  let allow = Math.max(shownSessions, SESS_PAGE);
+  let rendered = 0;
+  let visible = 0;
+  for (const g of groups) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ws-group';
+    wrap.dataset.root = g.root;
+    wrap.appendChild(buildWsHead(g));
+    const collapsed = wsClosed.has(g.root);
+    if (!collapsed) visible += g.sessions.length;
+    if (!collapsed && allow > 0) {
+      const rows = g.sessions.slice(0, allow);
+      allow -= rows.length;
+      rendered += rows.length;
+      for (const s of rows) wrap.appendChild(buildSessRow(s));
+    }
+    if (!collapsed && !g.sessions.length && !g.noBind) {
+      const hint = document.createElement('div');
+      hint.className = 'pane-hint ws-empty';
+      hint.textContent = '还没有会话——点组头的 ＋ 开始';
+      wrap.appendChild(hint);
+    }
+    sessList.appendChild(wrap);
   }
-  if (upto < rows.length) {
+  if (rendered < visible) {
     const more = document.createElement('button');
     more.type = 'button';
-    more.textContent = '加载更多（已显示 ' + upto + ' 条）';
-    more.addEventListener('click', () => { shownSessions = upto + SESS_PAGE; renderSessRows(); });
+    more.textContent = '加载更多（已显示 ' + rendered + ' 条 / 共 ' + visible + ' 条）';
+    more.addEventListener('click', () => { shownSessions = rendered + SESS_PAGE; renderSessRows(); });
     sideFoot.appendChild(more);
   }
+  markCur();
+}
+
+// 单条会话行（原 renderSessRows 的行体，原样搬出来只加“挂在组下”这一层）。
+function buildSessRow(s) {
+  // div 承载（CSS 注）：行内要装操作钮/输入框，button 嵌套不合法；
+  // 键盘路径 Enter/Space 开会话，与 click 同一条 openSession。
+  const row = document.createElement('div');
+  row.className = 'sess-row' + (s.archived ? ' arch' : '');
+  row.dataset.sid = s.sid;
+  row.tabIndex = 0;
+  if (s.sid === curSid()) row.classList.add('cur');
+  const t1 = document.createElement('span');
+  t1.className = 't1';
+  t1.textContent = s.title || '（无标题）';
+  const t2 = document.createElement('span');
+  t2.className = 't2';
+  const when = fmtWhen(s.last_at);
+  const t2l = document.createElement('span');
+  t2l.className = 't2l';
+  // 日期短格式 + 「N 轮」（c_jf3grt）：英文 locale 长日期与 "1 turns" 的
+  // 残留在此归零；空值不上「·」分隔（无 last_at 时不留孤儿分隔符）。
+  const bits = [];
+  if (s.archived) bits.push('已归档');
+  if (when) bits.push(when);
+  bits.push(fmtTurns(s.turns), s.model || '?');
+  t2l.textContent = bits.join(' · ');
+  // per-session cost 列（c_6xktw4）：cost_usd 服务端算好的，页面只排版
+  // （§2.5 client never prices）。
+  const t2c = document.createElement('span');
+  t2c.className = 't2c';
+  t2c.textContent = fmtUSD(s.cost_usd);
+  t2.appendChild(t2l);
+  t2.appendChild(t2c);
+  row.appendChild(t1);
+  row.appendChild(t2);
+  const acts = document.createElement('span');
+  acts.className = 'sess-acts';
+  const ren = document.createElement('button');
+  ren.type = 'button';
+  ren.className = 'btn-icon sm';
+  ren.title = '重命名（Enter 提交，Esc 取消）';
+  ren.setAttribute('aria-label', '重命名会话');
+  setBtnIcon(ren, 'pencil');
+  ren.addEventListener('click', ev => { ev.stopPropagation(); startRename(row, s); });
+  const arc = document.createElement('button');
+  arc.type = 'button';
+  arc.className = 'btn-icon sm';
+  if (s.archived) { arc.title = '取消归档'; arc.setAttribute('aria-label', '取消归档'); setBtnIcon(arc, 'archive-restore'); }
+  else { arc.title = '归档（列表隐藏，不删文件）'; arc.setAttribute('aria-label', '归档会话'); setBtnIcon(arc, 'archive'); }
+  arc.addEventListener('click', ev => {
+    ev.stopPropagation();
+    rpc('session/archive', { sid: s.sid, archived: !s.archived })
+      .then(() => loadSessions())
+      .catch(e => sideErr((s.archived ? '取消归档' : '归档') + '失败：' + e.message));
+  });
+  acts.appendChild(ren);
+  acts.appendChild(arc);
+  row.appendChild(acts);
+  row.addEventListener('click', () => openSession(s.sid));
+  row.addEventListener('keydown', ev => {
+    if (ev.target !== row || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+    ev.preventDefault();
+    openSession(s.sid);
+  });
+  return row;
 }
 
 // 侧栏写面错误位：落在侧栏脚（下一次渲染自然清空），不动列表本体。
@@ -3050,6 +3210,19 @@ async function openSession(sid) {
 // 聊天钮：回到聊天面（侧栏不动，sel 保留——当前项高亮随会话走）。
 sessBack.addEventListener('click', () => {
   document.body.classList.remove('sess-detail');
+  input.focus();
+});
+
+// 继续此会话：把**当前**对话绑定到正在浏览的这条历史（/resume——平面按
+// 会话自记的 cwd 同步切项目）。浏览和接续分成两个动作是刻意的：点行只
+// 看，点这枚钮才动绑定（点行就 resume 的话，随便翻一眼历史就会把正在
+// 进行的对话换掉）。
+const sessContinue = document.getElementById('sess-continue');
+sessContinue.addEventListener('click', () => {
+  if (posting || !sel) return;
+  const sid = sel.sid;
+  document.body.classList.remove('sess-detail');
+  sendText('/resume ' + sid, false);
   input.focus();
 });
 
@@ -3496,7 +3669,7 @@ function agTokensText(t) {
 
 async function loadAgents() {
   if (!boundProjectID) {
-    return paneHint(agList, '未绑定项目——聊天里发 /bind <项目路径> 后再来');
+    return paneHint(agList, '还没绑定工作区——点左栏的「新建」选一个目录后再来');
   }
   agLoads++;
   try {
@@ -4367,8 +4540,9 @@ window.addEventListener('resize', () => {
 
 // 探测式启动（W1.2）：是否有有效凭证（cookie 或 URL token）由 /state 的
 // 响应判定；未鉴权就不挂 SSE——EventSource 对 401 会无限重连刷屏。侧栏
-// 是常驻面（W5），鉴权通过后即拉一次 session/list（不再等用户点按钮）。
-refreshState().then(ok => { if (ok) { listen(); loadSessions(); } });
+// 是常驻面（W5），鉴权通过后即拉一次 session/list 与项目候选（后者让
+// 「空工作区」也有组头；不再等用户点按钮）。
+refreshState().then(ok => { if (ok) { listen(); loadSessions(); loadProjects(); } });
 </script>
 </body>
 </html>

@@ -97,6 +97,18 @@ compatibility. **Real-key baseline: NOT measured** — unattended lanes
 run fake-key by rule (`docs/prd/v8.md` §9.1); the 5-round baseline and
 any gate tightening are a human/main-session action on a release lane.
 
+**Release lane membership: IN** (decided 2026-11-25, card c_3xyt7w —
+`eval/lane-release.txt`, load-bearing block). The gate `0.6 @ 5` is the
+PRD §六.3 doctrine floor, so the case gates as-is; a real-key baseline
+calibrates (narrows or confirms) the same number later, but it was never
+a precondition for membership. Fake-key verification of the lane path
+(same date, evidence in `.butler-evidence-c_3xyt7w/`):
+`eval/tools/fake_subagent_endpoint.py` as the scripted model, then
+`eval/run.sh --lane release --rounds 1` → `PASS  subagent-bg-resume`
+with all nine `bg_*`/`agent_*` metrics correct (the other 9 red rows in
+that redirected results dir are other cases answering the scripted
+endpoint's plain "ok" — expected, see the endpoint's docstring).
+
 ## Mechanism budget (一进一出)
 
 Zero new resident machinery: the disk-side channel rides the existing

@@ -107,7 +107,16 @@ func printSummary(w io.Writer, path string, s uitrace.Summary) {
 	if n := s.ByEvent[uitrace.EventCompact]; n > 0 {
 		// The token total is the pre-compact context sizes summed — the
 		// number a "is auto-compact firing too early?" pass looks at.
-		fmt.Fprintf(w, "compactions %d  (%d prompt tokens rewritten)\n", n, s.TokensByEvent[uitrace.EventCompact])
+		// The duration total is the wait it cost; printing the mean
+		// alongside keeps "one 60s stall" distinguishable from "ten
+		// fast compactions" (a sum alone can't tell them apart). No
+		// early return here: the goal/guidance lines below must still print.
+		if total := s.DurMSByEvent[uitrace.EventCompact]; total > 0 {
+			fmt.Fprintf(w, "compactions %d  (%d prompt tokens rewritten, %dms total / %dms mean)\n",
+				n, s.TokensByEvent[uitrace.EventCompact], total, total/int64(n))
+		} else {
+			fmt.Fprintf(w, "compactions %d  (%d prompt tokens rewritten)\n", n, s.TokensByEvent[uitrace.EventCompact])
+		}
 	}
 	if n := s.ByEvent[uitrace.EventGoal]; n > 0 {
 		fmt.Fprintf(w, "goal verdicts %d\n", n)

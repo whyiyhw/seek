@@ -148,6 +148,29 @@ func TestStatusBar_CronBadge(t *testing.T) {
 	}
 }
 
+// TestStatusBar_EffortBadge pins the effort segment across the three
+// levels an interactive session can reach plus "low", which only a
+// `seek --effort low` batch run can pin (card c_trrsn7: print mode had
+// no way to leave the max default). Empty = no segment at all — the
+// bar must not claim an effort nobody chose.
+func TestStatusBar_EffortBadge(t *testing.T) {
+	bar := func(effort string) string {
+		return stripANSI(RenderStatusBar(StatusSnapshot{
+			Model:  "deepseek-flash",
+			Effort: effort,
+			Width:  120,
+		}))
+	}
+	for _, want := range []string{"effort:low", "effort:high", "effort:max"} {
+		if got := bar(strings.TrimPrefix(want, "effort:")); !strings.Contains(got, want) {
+			t.Errorf("effort badge %q missing from bar: %q", want, got)
+		}
+	}
+	if got := bar(""); strings.Contains(got, "effort:") {
+		t.Errorf("empty effort must render no badge: %q", got)
+	}
+}
+
 // TestStatusBar_UpgradeAvailable verifies the "new <tag>" segment lands
 // in the bar when a newer release was detected at startup. Empty
 // UpgradeAvailable must produce no upgrade segment — otherwise we'd

@@ -213,9 +213,9 @@ ck('基线弹层关闭', !base.menuOpen, JSON.stringify(base));
 // 未绑定的空聊天面给 /bind 引导（含点选按钮），空草稿时发送键禁用；
 // 有草稿即可点，清空回到禁用。这两条是「页面不许给死气/可点的空操作」
 // 的可见证据。
-ck('主区空态（未绑定）：/bind 引导 + 选择项目按钮',
-  base.chatEmpty.includes('还没有绑定项目')
-  && base.chatEmpty.includes('/bind <项目路径>')
+ck('主区空态（未绑定）：工作区引导 + 选择目录按钮',
+  base.chatEmpty.includes('还没有工作区')
+  && base.chatEmpty.includes('工作区')
   && (await evalJS(`!!document.querySelector('#list .chat-empty .ce-acts button')`)),
   JSON.stringify(base.chatEmpty));
 ck('发送键：空草稿缺省禁用（静态标记 + syncSend）',
@@ -283,9 +283,14 @@ const bubblesNow = (await snap()).bubbles;
   await typeText('/');
   s = await snap();
   const labels = s.items.map(i => i.label);
-  ck("'/' 弹命令面板", s.menuOpen && labels.length >= 5, JSON.stringify(s.items));
-  ck(' 面板含 /bind /projects /switch /new /cancel',
-    ['/bind', '/projects', '/switch', '/new', '/cancel'].every(n => labels.includes(n)),
+  // 注册表是残差表（工作区树卡）：项目/会话导航搬进左栏两级树，只剩树上
+  // 没有对应手势的两条。/bind /projects /switch /new 仍是平面指令，但页面
+  // 不再列出、也不再提供入口——面板里多出它们就是入口回流。
+  ck("'/' 弹命令面板", s.menuOpen && labels.length === 2, JSON.stringify(s.items));
+  ck(' 面板恰含 /resume + /cancel', labels.includes('/resume') && labels.includes('/cancel'),
+    JSON.stringify(labels));
+  ck(' 面板不再列 /bind /projects /switch /new',
+    !['/bind', '/projects', '/switch', '/new'].some(n => labels.includes(n)),
     JSON.stringify(labels));
   ck(' 首项默认高亮', s.items[0] && s.items[0].hl, JSON.stringify(s.items));
   await press('ArrowDown');
@@ -297,18 +302,13 @@ const bubblesNow = (await snap()).bubbles;
   s = await snap();
   ck('↑ 回到首项（循环边界）', s.items[0] && s.items[0].hl, JSON.stringify(s.items));
 
-  // Tab 补全首项：/bind 带参 → 落「/bind 」并留空格；参数期弹层换成
-  // 目录浏览入口（c_heffj3；候选行待 c_lnsdvu 落在它前面）
+  // Tab 补全首项：/resume 带参 → 落「/resume 」并留空格；参数期不再有
+  // 目录浏览入口（那已经搬去侧栏头的「工作区」钮），所以面板关掉。
   await press('Tab');
   s = await snap();
-  ck('Tab 补全首项为「/bind 」', s.val === '/bind ' && s.menuOpen
-    && s.items.some(i => i.label === '浏览目录…'), JSON.stringify(s));
+  ck('Tab 补全首项为「/resume 」', s.val === '/resume ', JSON.stringify(s));
   ck('Tab 被 preventDefault（焦点不跳出输入框）',
     (await lastKey()).prevented && s.focused === 'input', JSON.stringify(await lastKey()));
-
-  // 补全后带空格 → 参数期弹目录浏览入口（不再是无面板）
-  ck('带参阶段弹目录浏览入口', s.menuOpen
-    && s.items.every(i => i.label === '浏览目录…'), JSON.stringify(s));
 
   // Esc：先重开面板，再 Esc 关闭，且 document 看到的 defaultPrevented=真；
   // 关闭态再按一次 Esc，则 false（不劫持）。
@@ -396,7 +396,7 @@ await delay(150);
   await clearInput();
   await typeText('/');
   s = await snap();
-  ck('窄屏下 / 面板照常弹出', s.menuOpen && s.items.length >= 5, JSON.stringify(s));
+  ck('窄屏下 / 面板照常弹出', s.menuOpen && s.items.length === 2, JSON.stringify(s));
   const box = await evalJS(`(() => {
     const m = document.getElementById('menu');
     const i = document.getElementById('input');
@@ -411,8 +411,7 @@ await delay(150);
   ck('条目可换行（窄屏不挤成一行）', box.wrap === 'wrap', JSON.stringify(box));
   await press('Tab');
   s = await snap();
-  ck('窄屏下 Tab 仍能补全', s.val === '/bind ' && s.menuOpen
-    && s.items.some(i => i.label === '浏览目录…'), JSON.stringify(s)); // c_heffj3：参数期弹目录浏览入口
+  ck('窄屏下 Tab 仍能补全', s.val === '/resume ' && s.caret === 8, JSON.stringify(s));
 }
 await call('Emulation.clearDeviceMetricsOverride');
 

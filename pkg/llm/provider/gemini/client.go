@@ -49,6 +49,10 @@ type geminiRequest struct {
 
 type geminiGenConfig struct {
 	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	// Temperature is a pointer so absent (nil) omits the key — a
+	// text-only request keeps its pre-knob generationConfig bytes
+	// (prefix-cache contract). Gemini's documented range is 0..2.
+	Temperature *float64 `json:"temperature,omitempty"`
 }
 
 type geminiContent struct {
@@ -181,8 +185,11 @@ func buildRequest(req llm.ChatRequest) ([]byte, error) {
 		}
 		gr.Tools = []geminiToolList{{FunctionDeclarations: decls}}
 	}
-	if req.MaxTokens > 0 {
-		gr.GenerationConfig = &geminiGenConfig{MaxOutputTokens: req.MaxTokens}
+	if req.MaxTokens > 0 || req.Temperature != nil {
+		gr.GenerationConfig = &geminiGenConfig{
+			MaxOutputTokens: req.MaxTokens,
+			Temperature:     req.Temperature,
+		}
 	}
 	return json.Marshal(gr)
 }

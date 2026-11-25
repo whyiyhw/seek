@@ -17,9 +17,11 @@ import (
 
 // JudgeClient is the subset of *deepseek.Client the judge needs.
 // Narrowed so tests can record or fail the call without a real
-// backend (and so this package never grows a second provider path —
-// v8 §3: the judge rides the same first-class DeepSeek lane the
-// decomposer does).
+// backend (and so this package never grows a second provider path).
+// The interactive lane passes the first-class DeepSeek client; the
+// cron-fired autopilot lane passes cmd/seek's llmChatClient adapter
+// over its subscription provider (c_kdblc4 — an unattended run must
+// not bill a metered key).
 type JudgeClient interface {
 	Chat(ctx context.Context, req *deepseek.ChatRequest) (*deepseek.ChatResponse, error)
 }
