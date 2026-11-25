@@ -28,7 +28,6 @@ package controlplane
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -207,7 +206,7 @@ func NewSpeaker(cfg SpeakerConfig) (*Speaker, error) {
 			dir = filepath.Join(serveDir, "voice")
 		}
 		if usage == "" {
-			usage = filepath.Join(serveDir, "voice-usage.jsonl")
+			usage = filepath.Join(serveDir, voiceUsageFile)
 		}
 	}
 	maxPer := cfg.MaxPerConvPerMin
@@ -348,39 +347,28 @@ func speakNameSafe(c ConvID) string {
 
 // voiceUsageLine is one row of voice-usage.jsonl — the §6 serve-side
 // bookkeeping: the serve process has no session Tracker, so TTS spend
-// is tallied locally instead of forced into session cost.
-type voiceUsageLine struct {
-	TS            time.Time `json:"ts"`
-	Conv          string    `json:"conv"`
-	BillableChars int       `json:"billable_chars"`
-	CostUSD       float64   `json:"cost_usd"`
-	Outcome       string    `json:"outcome"`
-}
+// is tallied locally instead of forced into session cost. The row shape
+// (and the ASR sibling that shares the file) lives in voiceusage.go.
 
 // logUsage appends one billed-broadcast row. Best-effort by contract:
 // an open/write failure WARNs to stderr and never fails the broadcast
 // that already happened.
 func (s *Speaker) logUsage(conv ConvID, text, outcome string) {
 	chars := deepseek.TTSBillableChars(text)
-	line, err := json.Marshal(voiceUsageLine{
+	row := voiceUsageLine{
 		TS:            s.now().UTC(),
+		Kind:          voiceKindTTS,
 		Conv:          string(conv),
 		BillableChars: chars,
 		CostUSD:       pricing.TTSCost(chars),
 		Outcome:       outcome,
-	})
-	if err != nil {
-		return // unreachable for these field types
 	}
+	// The mutex serialises this speaker's own appends (concurrent speaks
+	// land rows in mint order); the cross-writer ordering with the voice
+	// frontend is O_APPEND's business, not ours.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	f, err := os.OpenFile(s.usage, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "controlplane: speaker: usage log: %v\n", err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	if err := appendVoiceUsageLine(s.usage, row); err != nil {
 		fmt.Fprintf(os.Stderr, "controlplane: speaker: usage log: %v\n", err)
 	}
 }
