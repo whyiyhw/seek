@@ -401,6 +401,37 @@ func ServeDir() (string, error) {
 	return filepath.Join(root, "serve"), nil
 }
 
+// AutopilotDir returns ~/.seek/autopilot/ — the unattended-run ledger
+// root (v8 §9.5③3 wiring: R2 verdict persistence). Houses
+// reports.jsonl, one JSON line per completed autopilot run. Does NOT
+// create the directory; the append path MkdirAlls on first write.
+//
+// User-level, not per-project, for the same reason TasksDir is: the
+// ledger answers "what did unattended runs conclude on this machine"
+// across projects — §9.1-style doubt-rate recomputation reads it
+// host-wide, and project attribution lives inside each row's fields.
+func AutopilotDir() (string, error) {
+	root, err := Home()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "autopilot"), nil
+}
+
+// AutopilotReports returns ~/.seek/autopilot/reports.jsonl — the
+// append-only verdict ledger (v8 §9.5③3). One line per completed
+// `seek autopilot run`: ts/goal/verdict/pass/doubt/fail/model/tokens/
+// cost/git Δ/judge_errors. Written O_APPEND single-Write by
+// internal/autopilot.AppendReportLine; may not exist yet (no run
+// completed on this machine — callers treat ENOENT as empty).
+func AutopilotReports() (string, error) {
+	dir, err := AutopilotDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "reports.jsonl"), nil
+}
+
 // UserKeybindings returns the user-level keybindings file
 // (~/.seek/keybindings.toml). May not exist — that's the common case
 // for users who never customise; callers (internal/keymap.Load)

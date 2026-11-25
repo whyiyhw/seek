@@ -2630,11 +2630,31 @@ func runAutopilot(ctx context.Context, client *deepseek.Client, model string, mg
 		return fmt.Errorf("autopilot: %w", err)
 	}
 	fmt.Println(rep.Body())
+	// Verdict ledger (v8 §9.5③3 wiring): persist the run as one JSONL
+	// row under SEEK_HOME so R2's verdicts finally accumulate. LOCAL
+	// only — seek holds no butler credentials and writes nothing
+	// remote; how the §9.1 pipeline later reads this row is a
+	// butler-side concern. Best-effort AFTER the report has printed:
+	// a lost ledger row must not fail an otherwise-completed run.
+	if perr := persistAutopilotReport(rep, model); perr != nil {
+		fmt.Fprintf(os.Stderr, "autopilot: report ledger write skipped: %v\n", perr)
+	}
 	// Best-effort mobile push (柱 M reuse) so an unattended run reaches you.
 	if dispatch := routinescli.WebhookDispatcherFromConfig(); dispatch != nil {
 		dispatch(ctx, rep.Event(), rep.Title(), rep.Body())
 	}
 	return nil
+}
+
+// persistAutopilotReport appends the run's Report as one JSON line to
+// SEEK_HOME/autopilot/reports.jsonl (v8 §9.5③3 — the R2 verdict
+// 持久化落点). Error is returned for stderr logging, never fatal.
+func persistAutopilotReport(rep autopilot.Report, model string) error {
+	path, err := paths.AutopilotReports()
+	if err != nil {
+		return fmt.Errorf("resolve ledger path: %w", err)
+	}
+	return autopilot.AppendReportLine(path, rep.Line(model, time.Now().UTC()))
 }
 
 // acpBackend adapts seek's agent to the Agent Client Protocol (v7 柱 P).

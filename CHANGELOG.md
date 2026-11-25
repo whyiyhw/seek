@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## 已进 main、未部署
+
+- c_wjo6wy：R2 verdict 持久化落点：autopilot Report 落盘为可积累 JSONL（§9.5③3）
+
 ## v0.13.1（2026-11-24）
 
 v0.13.1 — 一次只修一条死路的补丁版。二线车道（`pkg/llm` 那侧：Anthropic / OpenAI / Gemini / OpenCode Go）上的空补全不再判死整轮：四条独立根因都收敛到同一句 `_seek_turn_stop internal_error: agent: model returned an empty response`，11-20 起在 `opencode:deepseek-v4.1-flash` 上撞了十几次，每次零产出。同一版把 `max_tokens` 的读法归一：`/effort max` 在二线车道此前完全无效，且我们推导的 base 从不钳模型自己的输出上限。无工具 schema / sysprompt 改动，前缀缓存跨版本照常命中。
