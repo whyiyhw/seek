@@ -59,6 +59,8 @@ if len(names) > 0 {          // ← 空 slice 时不白名单
 
 **修法**：新增哨兵值（`--tools=none`）或独立 flag。**不要改空串语义**——那是已发布的契约，`v8` T1 的裸核对照实验依赖它。
 
+> ✅ **已交付**（2026-11-25，card c_lh6tlq）：`-tools none` → `tools.Registry.Clear()`，注册表清空、请求体不带 `tools` 字段（E2E 断言原始字节）；哨兵整值生效，`none,read` 混用 exit 2 并说明「sentinel, not a tool」；`-tools ""` / 缺省仍逐字节等同全量注册表（原 E2E 回归不变）。
+
 #### 缺口 ②：`--no-save` 连带关掉记忆链
 
 ```go

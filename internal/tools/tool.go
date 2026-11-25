@@ -180,6 +180,25 @@ func (r *Registry) Whitelist(keep []string) *Registry {
 	return r
 }
 
+// Clear empties the registry — the `-tools=none` zero-tool sentinel
+// (judge-engine PRD §2.2 缺口①: a program consumer needs a HARD empty
+// tool surface, not "the smallest useful one"). Deliberately a separate
+// method from Whitelist: an empty keep list there is a documented NO-OP
+// (the flag's "empty or absent = full default registry" contract, which
+// v8·T1's bare-core lane depends on). Conflating the two would either
+// break that contract or leave the sentinel unreachable.
+//
+// After Clear, Wire() yields zero tools, so the provider request carries
+// no `tools` field at all (deepseek.ChatRequest / the second-tier
+// adapters both gate on len). Dispatch of any model-invented call fails
+// with ErrUnknownTool — the intended wall. Must run before the first
+// Wire(), like every other pre-freeze registry mutation.
+func (r *Registry) Clear() *Registry {
+	r.tools = nil
+	r.byName = map[string]Tool{}
+	return r
+}
+
 // Names returns registered tool names in sorted order.
 func (r *Registry) Names() []string {
 	out := make([]string, 0, len(r.byName))

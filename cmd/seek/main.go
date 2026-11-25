@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -401,7 +402,10 @@ func run() error {
 		// v8·T1 bare-core comparison lane: freeze the session to an
 		// explicit tool whitelist. Read once here; the tools array is
 		// part of the request prefix, so it cannot change mid-session.
-		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
+		// The `none` sentinel (judge-engine PRD §2.2 缺口①) empties the
+		// registry outright — the hard zero-tool surface a program
+		// consumer needs; it is a sentinel, so it must stand alone.
+		toolsFlag = flag.String("tools", "", "comma-separated tool-name whitelist (e.g. read,edit,write,bash,grep); MCP tools attach only when listed by registered name. The literal value \"none\" = zero tools (no tools array on the wire; it must be the only value — mixing it with names exits 2). Empty or absent = full default registry. Unknown names exit 2 with the available list. Frozen at startup")
 	)
 
 	// Top-level help runs BEFORE flag.Parse but AFTER the flag set is
@@ -4786,8 +4790,22 @@ func parseToolsFlag(v string) []string {
 	return out
 }
 
+// toolsNoneSentinel is the one `-tools` value that means "zero tools".
+// It is a sentinel, not a tool name: the registry is emptied outright,
+// so the model request carries no `tools` field at all (judge-engine
+// PRD §2.2 缺口① — a program consumer needs a HARD empty tool surface).
+// Empty/absent keeps meaning "full default registry": that is a
+// published contract (flag help says so, the v8·T1 bare-core ablation
+// lane depends on it), so only this explicit word empties anything.
+const toolsNoneSentinel = "none"
+
 // applyToolsWhitelist implements the v8·T1 `-tools` flag against the
 // FINAL registry composition (call it after the last reg.Add):
+//
+//   - toolsNoneSentinel ("none") alone: the whole registry is cleared →
+//     the request carries no tools array. Combined with any tool name it
+//     is a usage error (exit 2): the sentinel decides the whole value,
+//     it must never be silently folded into or out of a list.
 //
 //   - non-empty value: every listed name must be registered (MCP tools
 //     validate by their registered name); unknown names print the
@@ -4806,7 +4824,19 @@ func parseToolsFlag(v string) []string {
 //     it. Under --no-save there is no session to record — nothing to do.
 func applyToolsWhitelist(flagVal string, reg *tools.Registry, resumed, active *session.Session) error {
 	names := parseToolsFlag(flagVal)
-	if len(names) > 0 {
+	// Zero-tool sentinel (judge-engine PRD §2.2 缺口①). It decides the
+	// WHOLE value: `none` alone empties the registry; `none,read` is a
+	// caller error, not a whitelist that happens to contain "none" — the
+	// point of a sentinel is that no tool-shaped parsing can dilute it.
+	if slices.Contains(names, toolsNoneSentinel) {
+		if len(names) > 1 {
+			fmt.Fprintf(os.Stderr, "-tools: %q is a sentinel, not a tool — it must be the only value (got %q)\n",
+				toolsNoneSentinel, flagVal)
+			return errToolsUsage
+		}
+		reg.Clear()
+	}
+	if len(names) > 0 && !slices.Contains(names, toolsNoneSentinel) {
 		avail := reg.Names()
 		known := make(map[string]bool, len(avail))
 		for _, n := range avail {
