@@ -280,13 +280,13 @@ a single transient should not colour a 3-round gate) and
 `write-elided-edit-fallback` (`0.6 @ 3`; one unexplained red 2026-11-16
 in a 9/10 window).
 
-### Load-bearing axes (E3 placeholder; E4/E5 backfilled 2026-11-21)
+### Load-bearing axes (all three landed; lane membership decided c_3xyt7w 2026-11-25)
 
 | planned case | rounds | gate / baseline |
 |---|---|---|
-| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true` 挂账至 E2 标定 / E6 release lane 接管（真二进制 real-key baseline 未测——无人值守车道假 key 纪律，且三态实跑入口 `eval/run.sh` 不在验证车道白名单、默认写正式 `eval/results`）；机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段） |
-| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate 先取 **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律），机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
-| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下） |
+| `plan-e2e` (E3) | 5 | **case 已落地**（c_c5wwey，2026-11-21）：`record_only: true`。**Release lane 成员资格：仍不在 `lane-release.txt` 名单内**（名单=闸门，record_only 进闸门等于把闸门关掉——同 `code-review-effort-*` 的处置）。转正路径（c_3xyt7w 定案，两步、缺一不可）：① 主会话/人用**真 key** 在发版道跑 `eval/run.sh --rounds 5 plan-e2e` 拿到 baseline（无人值守道假 key 纪律，见 § Isolation）；② E2 标定表把 gate 记进本表并在 `expect.json` 改 `record_only: false`，同时取消 `lane-release.txt` 里本行注释。归属：**主会话/人**——①未做前不得翻标志。机制面由 `scripts/eval-e3-case-test.sh` 假二进制钉死（真 runner/drive/endpoint/judge 全参与、只换二进制：全绿行 + 四种具名红 + record-only + rounds 聚合兼容）。首跑已抓出 resume 折叠真 bug（落盘 tool 消息无 name 字段）。**2026-11-25 假 key 5 轮复跑 5/5 绿**（`RECORD plan-e2e (5/5 rounds, record-only)`，证据 `.butler-evidence-c_3xyt7w/plan-e2e-5round-run.log`）——说明 fixture 侧确定性成立，但这不是真 key baseline |
+| `subagent-bg-resume` (E4) | 5 | **case 已落地**（c_vollxv，2026-11-21）：gate **0.6**（PRD §六.3 的 doctrine 下限——承重轴实测 < 0.6 时修产品提示而非放界）；**real-key baseline 未测**（无人值守车道假 key 纪律）。**Release lane 成员资格：在册**（c_3xyt7w，2026-11-25，`lane-release.txt` 的承重轴块）——gate 0.6 @ 5 轮本就是 doctrine 定下的发版界，闸门语义完整，不需要先有真 key baseline 才能进名册；真 key baseline 仍属发版道人工动作，届时按 §六.3 校准/收紧 0.6。机制面由 `scripts/eval-e4-case-test.sh` 假二进制钉死（全绿行 + 五种具名红 + record-only + rounds 聚合兼容）。**2026-11-25 假 key 车道实测**：单例 `PASS subagent-bg-resume`（9 个 bg_*/agent_* 指标全对）+ `--lane release --rounds 1` 里该例 `PASS`（fixture `eval/tools/fake_subagent_endpoint.py`；证据 `.butler-evidence-c_3xyt7w/`）。已知噪声源：run 1 的「子代须先于父进程退出跑完」竞态（无 agent 侧 wait 原语），标定后若实测通过率显著低于预期，先核该形态再动界 |
+| `serve-web-stream` (E5) | 5 | **已回填**（c_lbtdqw，2026-11-21，见下）。**Release lane 成员资格：在册**（E6 落地时即在） |
 
 Rounds reserved per §2.5 (承重轴); the gate values are those cards' to
 calibrate against their own baselines (PRD §六.3: if a load-bearing
@@ -294,6 +294,15 @@ case measures < 0.6, the fix belongs in the product's prompts, not the
 threshold). E2 neither ran nor pre-gated them; E4's 0.6 is the doctrine
 floor pending its own real-key baseline (a release-lane,
 human/main-session action per the provider-lane rule).
+
+**Release lane 名册口径 (c_3xyt7w, 2026-11-25)**: 承重轴三例里 **两例在册**
+（`serve-web-stream` E5 + `subagent-bg-resume` E4），`plan-e2e` (E3) 因
+`record_only: true` 留在名单外——**名单里的每一行都是闸门**，把 record-only
+案例写进发版闸门只会让闸门永久绿而看起来在守（`docs/pitfalls/eval/
+record-only-cases-hide-their-verdict-in-the-per-round-line-reading-the-record-line-passes-anything.md`
+的同族错误）。E6 验收的「release lane 只含承重轴 3 例」按**闸门语义**读作
+「承重轴三例中所有可闸门者都进名册」，E3 的缺位是 `record_only` 的后果、由
+本表记明的转正路径负责收口，不是名单遗漏。名单注释里的旧占位卡号（E3/E4 立项卡之前写的）已随本卡作废。
 
 **`serve-web-stream` baseline (E5, c_lbtdqw)**: landed with the case —
 [`eval/cases/serve-web-stream/`](cases/serve-web-stream/)（README 记
@@ -389,7 +398,7 @@ v2 §2.4 点名的五项「移回 Go 单测」清单，逐项归属：
 |---|---|---|---|
 | 1 | eval 并发写结果行自测：PRD §四 计划项未实现 | v2 §四把「两个进程各写 100 行」写成测试计划，仓库里没有对应断言；当前原子性只靠单行 `echo >>` 的 O_APPEND 约定，改写入方式即无保护 | `docs/prd/feature-eval-v2.md` §四「并发」；`scripts/eval-rounds-test.sh` 无并发场景；`eval/run.sh:1078,1249` |
 | 2 | AGENTS.md 会话存储句校正：legacy `.json` 迁移已删 + `schema_version` 写的是 2 | 同一句两处与代码不符：①「Legacy `.json` files (schema_version ≤ 1) are migrated on next `Save`」——`65a31d50` 之后 `Load`/`LoadFrom` 只开 `.jsonl`，无迁移路径；②写 `schema_version=2`，代码是 `CurrentSchemaVersion = 3`。照文档写测试会测到不存在的路径 | `git show 65a31d50`（"seek hasn't shipped, so there are no schema-v1 single-file JSON sessions in the wild"）；`internal/session/session.go` 的 `Load` / `LoadFrom` / `CurrentSchemaVersion`；`AGENTS.md:94` |
-| 3 | E3 / E4 承重轴的 release lane 成员资格定案 | 两例 2026-11-21 均已落地（`plan-e2e` record_only、`subagent-bg-resume` gate 0.6），`lane-release.txt` 仍是注释占位、注释里的卡号还是旧的，README lane 表仍写「待 E3/E4 落地后取消注释」——E6 验收「release lane 只含承重轴 3 例」实际只有 1 例在册，归属无人 | `eval/lane-release.txt:19-21`；`eval/cases/plan-e2e/expect.json`（注「E6 release lane 接管后转正」）；`eval/cases/subagent-bg-resume/expect.json`；本文 §发版前跑什么 的 lane 表 |
+| 3 | ~~E3 / E4 承重轴的 release lane 成员资格定案~~ **已收口**（c_3xyt7w，2026-11-25） | 定案结果：E4 `subagent-bg-resume` **在册**（`lane-release.txt` 的承重轴块；gate 0.6 @ 5 轮是 §六.3 的 doctrine 下限，闸门语义完整）；E3 `plan-e2e` **不进名单**（`record_only: true` ⇒ 写进闸门只会让闸门永久绿），转正路径（主会话真 key 5 轮 baseline → E2 记 gate → 翻 `record_only` + 取消注释）落在 § Load-bearing axes 表的 E3 行与 `eval/cases/plan-e2e/README.md`；旧占位卡号已作废，README lane 表与名单一致 | `eval/lane-release.txt` 的承重轴块（在册项 `subagent-bg-resume`）＋§ Load-bearing axes 表；`eval/cases/plan-e2e/README.md` §record_only 现状 |
 
 ## 发版前跑什么（lanes, E6）
 
@@ -405,7 +414,7 @@ E6（[`docs/prd/feature-eval-v2.md`](../docs/prd/feature-eval-v2.md)
 
 | lane | 名单 | 用途 |
 |---|---|---|
-| `release` | 承重轴（`serve-web-stream` 已在；`plan-e2e`/`subagent-bg-resume` 注释占位待 E3/E4 落地后取消注释）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
+| `release` | 承重轴 **2/3 在册**（`serve-web-stream` E5 + `subagent-bg-resume` E4；`plan-e2e` E3 因 `record_only: true` 不在册，转正路径见 § Load-bearing axes 表）+ E2 标定表判稳定例（gate 1.0 的 22 例；已知 flaky 与 record-only 刻意不进） | 发版前人工闸门 |
 | `core` | 低成本子集 8 例（便宜单发用例 + 零成本假 key 的 `serve-web-stream`；无 MCP fixture、无整仓 review） | 夜间观测（CI schedule，`--rounds 2`） |
 
 **发版命令**（在 main、干净树）：
@@ -773,8 +782,11 @@ emitted as `runner_fact` lines and counted by `runner_assert_failures`.
   TUI-only — print mode has no askuser callback) against a scripted local
   model (`fake_plan_endpoint.py`, fake key, $0 API). Asserts A1–A10 +
   resume_same_session; **measures the toolchain, not model choice**.
-  `record_only: true` until E2's calibration lands; joins the release lane
-  at E6. Baseline + judging detail + the resume-fold bug its first run
+  `record_only: true` — release-lane membership is the decided OUT (card
+  c_3xyt7w, 2026-11-25): promotion needs a human/main-session real-key
+  5-round baseline first, then an E2 gate entry, then flipping
+  `record_only` + uncommenting its `lane-release.txt` line. Baseline +
+  judging detail + the resume-fold bug its first run
   caught: `eval/cases/plan-e2e/README.md`. The judging/gate mechanics are
   pinned headless by `scripts/eval-e3-case-test.sh` (selftest lane, name
   `eval-e3-case-test`, ~2 min): the REAL runner/drive(pty)/endpoint/judge

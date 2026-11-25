@@ -11,14 +11,31 @@
 # Deliberately OUT: bash-overreach / grep-refine-not-flood /
 # mcp-semble-routing-a2-mixed / write-elided-edit-fallback (known-flaky
 # gates 0.8/0.6) and code-review-effort-* / glm-lane-contract /
-# mcp-semble-routing-a3-nl (record-only) — those are observation cases,
-# not release gates; their home is the nightly trend, not this list.
+# mcp-semble-routing-a3-nl / plan-e2e (record-only) — those are
+# observation cases, not release gates; their home is the nightly trend,
+# not this list. plan-e2e's promotion path is spelled out below.
 # How to run + how to read a red: eval/README.md § "发版前跑什么".
 
 # --- load-bearing axes (承重轴, §2.5 reserves 5 rounds) ---
+# Membership decided 2026-11-25 (card c_3xyt7w): 2 of 3 axes are in this
+# list. E5 serve-web-stream and E4 subagent-bg-resume below; E3 plan-e2e
+# stays OUT because expect.json still says record_only: true — a
+# record-only row never colours the exit code, so listing it here would
+# make the gate permanently green while looking guarded (same family as
+# docs/pitfalls/eval/record-only-cases-hide-their-verdict-…). This
+# invariant is mechanically pinned by scripts/eval-lane-test.sh ⑨ (both
+# legs), so a record-only case cannot slip into this list unnoticed.
 serve-web-stream
-# plan-e2e              # E3 (c_geyjoo) — uncomment when the case lands
-# subagent-bg-resume    # E4 (c_w2cups) — uncomment when the case lands
+subagent-bg-resume
+# plan-e2e — E3 (landed c_c5wwey; membership decided c_3xyt7w): stays OUT
+# while expect.json has record_only: true. Promotion path (one edit, but
+# the baseline first): a human/main-session REAL-KEY 5-round run of
+# `eval/run.sh --rounds 5 plan-e2e` (unattended lanes are fake-key by
+# rule, docs/prd/v8.md §9.1), then E2 calibration records the gate into
+# eval/README.md § Load-bearing axes, then flip record_only AND list the
+# name here in the SAME change. Until then its observation home is
+# ad-hoc record-only rows in eval/results (trend), same as the other
+# record-only cases.
 
 # --- stable set (E2 calibration table: gate 1.0 @ 3 rounds) ---
 edit-unicode-read-first
