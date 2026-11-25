@@ -152,7 +152,10 @@ pre-landing history by construction). Three cases added 2026-11-22
 alongside the shell-as-search metrics (`grep-affordance`,
 `parallel-fanout`, `references-trigger`) make it 34; all three are
 rows in this table from their first record, with the baseline noted in
-the history column rather than reconstructed. `grep-affordance` is the
+the history column rather than reconstructed. `compact-ab`
+(2026-11-25, card c_qjb5mq) makes it 35 — record_only from day one,
+because the fake-key lane cannot carry an LLM judge for a case whose
+"model" is this repo's own scripted endpoint. `grep-affordance` is the
 one that has already moved: 1/5 before the grep-tool extension, 5/5
 after, same bounds both sides (case README). History columns are
 computed from
@@ -181,6 +184,7 @@ point of having a gate.
 | bash-overreach | 4/15 → post-recal study: 5/5 replay + 1/6 live true-overreach | ~0.83 | 5 | **0.8** | no |
 | code-review-effort-low | 11/12 → 9/9 | ~1.0 | 5 | — | **yes** |
 | code-review-effort-max | 6/14 → 3/11 under the old 6000 ceiling | ~0.9 | 5 | — | **yes** |
+| compact-ab | 首个记录 2026-11-25（record-only，机械断言 3 条） | ~1.0 | 3 | — | **yes** |
 | edit-unicode-read-first | 10/10 → 9/9 | 1.0 | 3 | 1.0 | no |
 | git-multi-query-no-bash | 23/31 → 10/10 | 1.0 | 3 | 1.0 | no |
 | git-subcommand-midtask | 23/23 → 9/9 | 1.0 | 3 | 1.0 | no |
@@ -256,7 +260,14 @@ forced:
    would be permanently red until the guidance changes; the go/no-go
    belongs to the MCP D-line (D5), which reads recorded rows either
    way.
-5. **`grep-refine-not-flood` — promoted to the flaky class**
+5. **`compact-ab` — record_only (new case, 2026-11-25)**. Its judgement
+   is mechanical (`runner_fact` assertions: does each arm's answer carry
+   the golden facts, and is arm B really the summary pair), so there is
+   nothing for a judge to add on the fake-key lane; gating waits for
+   the E2 calibration of a real-key lane or an explicit E6 decision.
+   The negative leg is checked in as `scripts/eval-compact-ab-test.sh`,
+   not as a gate.
+6. **`grep-refine-not-flood` — promoted to the flaky class**
    (`min_pass_rate 0.6` @ 5): 7/10 in the current window and every red
    is the same shape (7–12 total tool calls vs the 6 bound —
    exploration variance), not drift. Bounds stay first-pass; a
@@ -513,6 +524,7 @@ the lane block and is lane-independent.
 | `bg_notified_transcript` | parent-session transcript rows that are user-role `<context>` messages carrying the `[agent: background done sub-sid=<full>]` wire prefix for a background child — the "notice entered the main session stream" surface itself; prefix + sub_sid only, never the summary prose |
 | `bg_resumed_lineage` | `started` events whose `resumed_from` is non-empty AND names a sub_sid present in the index — the continuation run's lineage link |
 | `bg_artifacts_missing` | completed runs whose `transcript.jsonl` is absent from `projects/<pid>/sessions/<parent-sid>/subagents/<sub-sid>/` (`paths.SubagentSessionDir`) — 0 is the pass state |
+| `arm_a_keeps_facts` / `arm_b_keeps_facts` / `arm_b_negative_loses_facts` / `arm_b_is_summary_pair` | compact-ab: `runner_fact` assertions (generic `runner_assert_failures` metric counts them). Arms A/B answer the same prompt over the same scripted endpoint; the only difference is the history (full vs `/compact` summary pair). The negative variant inverts the arm-B assertion, so a summary that dropped the facts turns RED when it should. See the case README |
 | `sse_delta_frames` | serve-web-stream only: `delta` frames on the W1.4 SSE wire — the case's runner.sh pairs captured `event:`/`data:` lines into `sse_frame` rows first; **content-conditional** (merged into the metrics object only when the stream carries `sse_frame` rows, so non-serve rows keep their historical byte shape — see the ablate no-env guard) |
 | `sse_usage_frames` | serve-web-stream only: `usage` frames (turn_end translated server-side, `internal/controlplane/webfrontend_stream.go`) |
 | `sse_frame_order_ok` | serve-web-stream only, 1/0: every `delta`/`usage`/`tool` frame of the close-out's run PRECEDES the close-out default frame — the per-conv `events…reply` wire invariant |
@@ -625,7 +637,10 @@ offset 步长 `+50` 991 次）。
 | `pagination_share` | 被重读文件里 offset 出现过 >1 个不同值的比例（offset 缺省视作 1） |
 | `offset_steps` | 同会话同文件 offset 集合**去重后升序**相邻差（跳页步长分布，top5） |
 | `chains.children` / `parents_found` / `orphans` | 派生会话数（有 `parent_id`）/ 其中父会话也在扫描范围内 / 父缺失的断链数。断链单列，**不当 0 压缩比** |
-| `chains.compression_mean` | 子会话首条**非 system** 消息的 content 字节（扣掉 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**）。两处「不含 system」都承重——session JSONL 的 message 区以 system 开头（实测 461/461），算进分母会让比值恒等于 system 占比。分母也不含 `tool_calls.arguments`（那是给工具消费的指令，重复计入会让比值失真） |
+| `chains.compression_mean` | 仅 compact 链：子会话首条**非 system** 消息的 content 字节（扣掉 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**）。两处「不含 system」都承重——session JSONL 的 message 区以 system 开头（实测 461/461），算进分母会让比值恒等于 system 占比。分母也不含 `tool_calls.arguments`（那是给工具消费的指令，重复计入会让比值失真） |
+| `chains.kind` | `compact`（首条非 system 消息以 `SUMMARY_MARKER` 开头）vs `branch`（其余，历史是父的副本）。branch 子会话没有摘要，**不进**压缩比与召回；混进来会造出 ≈1.0 的假样本 |
+| `chains.recall` | 实体召回：父会话 tool_call 里的路径（read/edit/write）、bash 命令、grep pattern 出现在子会话摘要里的比例。**plain 桶是头条**；附件链（父历史含 `[image: `/`[file: `）单列 `attachment` 桶且不进总分——`Summarise` 走 `WithoutImages`/`WithoutFiles`，附件正文从来不进摘要视野 |
+| `chains.rescue` | **不做分桶**：`rescueNote` 只追加到 summariser 的请求 prompt（`pkg/agent/compact_rescue.go`），不落 transcript，所以「这条链走过救援」无法从落盘数据机械判定。报告改打印 `parent_bytes` 让人看出溢出量级 |
 | `chains.child_head_rate` | 子会话前 `CHAIN_WINDOW_CALLS`(=10) 个 tool_call 里、参数路径命中「父会话读过的文件集合」的 read 数 / 同期 read 数。压缩的代价是信息丢失，最先表现为「刚读过的又读一遍」 |
 | `chains.baseline` | 参照系：同 cwd、无 `parent_id`、**且不是任何链的父会话**的聚合 `Σ(次数−1)/read`。父会话不算——它本身就是被压缩掉的那段历史 |
 | 分组 | 指标同时按 `model × created_at[:7]` 汇总——5 月 v0.x 时代占 82% 的调用量，不分组会把版本混杂读成趋势 |

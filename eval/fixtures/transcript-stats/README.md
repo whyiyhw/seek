@@ -41,31 +41,43 @@ mktemp 目录再跑，退出即删）。
 
 `compact-chain/` 是**独立子目录**（`--selftest` 对它单独跑一遍 `analyse`），
 因为上面两个文件构成「四形态」的封闭断言组，混进链样本会改动那四个数字。
-四条会话覆盖三件必须互不相同的东西：
+
+11 条会话 = 5 条链（4 compact + 1 branch）+ 4 条作为链父的会话 + 2 条同 cwd 的
+无 fork 参照系样本：
 
 | 文件 | 形状 | 覆盖的断言 |
 |---|---|---|
-| `parent.jsonl` | 无 `parent_id`；**带一条 567B 的 system 消息**；读 `/w/a.md`+`/w/b.md` | 压缩比的分母（锁「分母不含 system」）、已知重读的文件集合来源 |
-| `child-read-reread.jsonl` | `parent_id` → parent，摘要 66B，前 10 调用读了 a.md（父读过）+ c.md（父没读过） | 压缩比分子；已知重读命中 |
-| `child-read-only-known.jsonl` | 同上，前 10 调用只读 b.md（父读过） | 已知重读命中的第二条 |
-| `plain-no-fork.jsonl` | 同 cwd，无 `parent_id`，**也不是任何链的父**，d.md 读两遍 | 参照系重读率 50.00% |
+| `parent.jsonl` | 无 `parent_id`，读 `/w/a.md`+`/w/b.md` | 压缩比分母、已知重读的文件集合来源 |
+| `child-read-reread.jsonl` | `parent_id` → parent；前 10 调用读了 a.md（父读过）+ c.md（父没读过） | 压缩比分子；已知重读命中；召回受试者 |
+| `child-read-only-known.jsonl` | 同上，前 10 调用只读 b.md（父读过） | 第二条已知重读 / 第二条召回 |
+| `parent2-mixed.jsonl` | 带 **system 消息**（567B）；tool_call 覆盖 read + bash + grep | 「分母不含 system」的口径锁；三类实体抽取 |
+| `child2-missed-entities.jsonl` | `parent_id` → parent2，摘要**一个实体都没提** | 召回 0% 的负样本（否则断言只能证明「没崩」） |
+| `parent3-attachment.jsonl` | 历史含 `[image: shot.png …]` 标记 | attachment 分桶 |
+| `child3-attachment.jsonl` | 摘要不提附件相关的任何东西 | attachment 桶召回 0%，且**不进总分** |
+| `parent4-branch.jsonl` / `child4-branch-copy.jsonl` | 子会话历史是父的副本（首条非 system 消息不是摘要） | branch 识别；分支链不进压缩比均值 |
+| `plain-no-fork.jsonl` / `plain-no-fork2.jsonl` | 同 cwd，无 `parent_id`，**也不是任何链的父** | 参照系（3 extra / 6 read = 50.00%） |
 
 期望数字（`--selftest` 逐项断言）：
 
 | 指标 | 值 | 口径 |
 |---|---|---|
-| `children` / `parents_found` / `orphans` | 2 / 2 / 0 | 有 `parent_id` 的会话数 / 父在扫描范围内 / 断链 |
-| 压缩比 | 66 / 173 = **0.3815** | 子会话首条**非 system** 消息 content（扣 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**） |
-| 已知重读率 | 2 / 3 = **66.67%** | 子会话前 10 个 tool_call 里命中父已读文件集合的 read 数 / 同期 read 数 |
-| 参照系重读率 | 1 / 2 = **50.00%** | 同 cwd、无 `parent_id`、且不是链父会话的会话聚合 Σ(次数-1)/read |
+| `children` / `compact` / `branch` | 5 / 4 / 1 | `parent_id` 非空的会话数，按首条非 system 消息是否以 `SUMMARY_MARKER` 开头分类 |
+| 压缩比（均值） | **0.4098** | 子会话首条非 system 消息 content（扣 76B `SUMMARY_PREFIX` 样板）/ 父历史 Σcontent（**不含 system**） |
+| 实体召回率（plain 桶） | 4 / 7 = **57.14%** | 父会话 tool_call 里的路径/bash/grep pattern 出现在摘要里的比例；attachment 桶单列不进总分 |
+| 已知重读率 | 2 / 3 = **66.67%** | compact 子会话前 10 个 tool_call 里命中父已读文件集合的 read 数 / 同期 read 数 |
+| 参照系重读率 | 3 / 6 = **50.00%** | 同 cwd、无 `parent_id`、且不是链父会话的会话聚合 Σ(次数-1)/read |
 
-三数**必须互不相同**：它们塌成一个数就意味着某条口径被并进了另一条。
-反向验证做过两次（每条都确认断言转红再改回来）：
+四个数字**必须互不相同**：它们塌成一个数就意味着某条口径被并进了另一条。
+
+反向验证（每条都实际做过一次，确认断言转红再改回来）：
 
 | 改动 | 转红的断言 | 说明 |
 |---|---|---|
-| 压缩比分子改用子会话全历史 `content_bytes` | `ratio0` 0.3815 → 1.3757 | 分子必须是摘要，不是整个子会话 |
-| 分母不排除 system 角色 | `chain.compression.mean` 0.3815 → 0.3194 | 真实 session 的 message 区以 system 开头（461/461 实测），算进去会让比值恒等于 system 占比 |
+| 压缩比分子改用 `content_bytes`（子会话全历史） | `ratio0` 0.3815 → 1.3757 | 分子必须是摘要，不是整个子会话 |
+| 分母不排除 system 角色 | `compression_mean` 0.4098 → 0.3194 | 真实 session 的 message 区以 system 开头，算进去会让比值恒等于 system 占比 |
+| 不剥 `SUMMARY_PREFIX` 样板 | `ratio0` 0.3815 → 0.8208 | 76 字节样板是我们加的，不是模型输出 |
+| `is_compact` 恒为真（不识别 branch） | 13 项，含 `kinds` / `recall.headline` | branch 子会话没有摘要，混进来会造出假压缩比 |
+| 分桶恒为 `plain`（不分附件） | 6 项，含 `attachment.chains` | 附件链召回结构性偏低，混进总分等于把设计决定记成质量问题 |
 
 **父会话不算参照系**，这是踩过一次的口径错误：把 `parent.jsonl` 也算进
 baseline 会让参照系变成 25.00%，因为父会话本身就是被压缩掉的那段历史，
