@@ -55,6 +55,7 @@ func captureLinesJSON(t *testing.T, model string, events []agent.Event) []jsonLi
 				CompletionTokens: e.Usage.CompletionTokens,
 				CacheHitTokens:   e.Usage.PromptCacheHitTokens,
 				ToolCalls:        e.ToolCalls,
+				FinishReason:     e.Finish,
 			})
 		case agent.ErrorEvent:
 			emit(jsonLine{Type: "error", Error: e.Err.Error()})

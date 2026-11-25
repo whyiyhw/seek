@@ -246,6 +246,12 @@ type RunEvent struct {
 	CompletionTokens int `json:"completion_tokens,omitempty"`
 	CacheHitTokens   int `json:"cache_hit_tokens,omitempty"`
 	ToolCalls        int `json:"tool_calls,omitempty"`
+	// turn_end only: per-turn classification, mirroring jsonLine's
+	// finish_reason. "empty_response" means the upstream produced no
+	// content and the turn's only text_delta was the in-band placeholder
+	// marker — the machine-checkable "this is not an answer" signal
+	// (card c_jxwsfz, additive to the §2.5 field set).
+	FinishReason string `json:"finish_reason,omitempty"`
 	// agent_end only
 	Turns     int    `json:"turns,omitempty"`
 	SessionID string `json:"session_id,omitempty"`

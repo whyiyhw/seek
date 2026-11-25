@@ -74,6 +74,32 @@ seek --upgrade              # Download latest release and replace binary
 seek --version              # Print version and exit
 ```
 
+### `--json` 事件流契约 / `--json` event stream contract
+
+`seek -p … --json` writes one JSON object per line to stdout (JSONL; human-readable diagnostics go to stderr). Event types are a stable contract — adding a type or a field is a minor change, removing or repurposing one is a major break.
+
+| `type` | Extra fields | Meaning |
+|---|---|---|
+| `agent_start` | `model` | Run begins; the model bound to it |
+| `turn_start` | `index` | One LLM call begins |
+| `text_delta` / `reasoning_delta` | `delta` | Incremental assistant text (`reasoning_delta` = CoT from thinking-mode responses) |
+| `tool_start` / `tool_delta` / `tool_end` | `id`, `name`, `args` / `delta` / `result` \| `error`, `bytes` | Tool lifecycle |
+| `turn_end` | `index`, `prompt_tokens`, `completion_tokens`, `cache_hit_tokens`, `tool_calls`, `finish_reason` | One LLM call settled |
+| `agent_end` | `turns`, `tool_calls`, token totals, `session_id` | Run complete |
+| `error` | `error` | Fatal error |
+| `approval_request` / `approval_cancel` | `req_id`, `kind`, `summary`, `command`, `diff` | `--approval-stdin` only |
+
+**Empty completions are a machine-checkable signal, not prose.** When the upstream burns its whole completion budget without producing content (e.g. reasoning-only, reproducible with a small `--max-tokens`), seek self-heals: it books an in-band placeholder marker as the assistant text and keeps the run alive. That marker (`[empty: …]`) also rides the stream as an ordinary `text_delta`, so a consumer that just concatenates deltas would report it as the answer. Branch on `turn_end.finish_reason` instead:
+
+- normally the upstream finish reason (`stop`, `tool_calls`, `length`, `refusal`, …);
+- **`empty_response`** — the turn produced no content; any `text_delta` on that turn is the placeholder marker, not an answer.
+
+`finish_reason` is optional (`omitempty`): on lines that carry no classification the key is absent, so existing parsers are unaffected.
+
+```bash
+seek -p '…' --json | jq -c 'select(.type=="turn_end" and .finish_reason=="empty_response")'
+```
+
 ### Subcommands
 
 ```bash
