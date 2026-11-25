@@ -52,7 +52,7 @@ func autopilotInvocation(args []string, lookup func(string) bool) (bool, string,
 			continue
 		}
 		return true, "", fmt.Errorf(
-			"seek autopilot run: %q is a flag, but flag parsing stops at the `autopilot` subcommand — put it BEFORE the subcommand: `seek --yolo autopilot run \"<goal>\"`", tok)
+			"seek autopilot run: %q is a flag, but flag parsing stops at the `autopilot` subcommand — put it BEFORE the subcommand: `seek %s autopilot run \"<goal>\"`", tok, tok)
 	}
 	return true, strings.TrimSpace(strings.Join(rest, " ")), nil
 }

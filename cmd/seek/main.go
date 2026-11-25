@@ -580,18 +580,26 @@ func run() error {
 	// key is read or any client built — a refused run is a failed run,
 	// loudly. Like the ACP pin, a pinned provider suppresses the
 	// first-run wizard: the cron child is a headless spawn.
-	autopilotLane := resolveAutopilotCronLane(os.Getenv)
-	if len(os.Args) >= 2 && os.Args[1] == "autopilot" {
-		if err := autopilotLane.GateErr(); err != nil {
+	//
+	// Keyed off autopilotLane (flag.Args()-derived), NOT os.Args[1]: the
+	// gate has to fire on `seek --yolo autopilot run "g"` too, and that
+	// shape has a flag in argv[1] — the exact trap autopilotInvocation
+	// exists to close (c_skczdu). A cron child is spawned with no
+	// leading flags (routines/tick.go builds ["autopilot","run",prompt]),
+	// so this can only ever ADD coverage, never lose it.
+	// TestAutopilotCronGate_E2EFiresOnFlagLedShape pins that claim.
+	cronLane := resolveAutopilotCronLane(os.Getenv)
+	if autopilotLane {
+		if err := cronLane.GateErr(); err != nil {
 			return err
 		}
-		if p := autopilotLane.PinProvider(); p != "" && *providerFlag == "" {
+		if p := cronLane.PinProvider(); p != "" && *providerFlag == "" {
 			*providerFlag = p
 		}
-		if m := autopilotLane.PinModel(); m != "" && *model == "" {
+		if m := cronLane.PinModel(); m != "" && *model == "" {
 			*model = m
 		}
-		if line := autopilotLane.LogLine(); line != "" {
+		if line := cronLane.LogLine(); line != "" {
 			fmt.Fprintln(os.Stderr, line)
 		}
 	}
