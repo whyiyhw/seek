@@ -430,13 +430,52 @@ func TestRouter_ResumeWithoutLookupKeepsProject(t *testing.T) {
 	}
 }
 
-// Unbound conversation: /resume answers the shared /bind hint, like
-// /new and /switch do.
+// Unbound conversation WITHOUT a usable cwd: /resume answers the shared
+// /bind hint, like /new and /switch do (there is no directory to run in).
 func TestRouter_ResumeUnboundHintsBind(t *testing.T) {
 	r, fe, _, _ := newTestRouter(t, nil, RouterConfig{})
 	r.Handle(context.Background(), inbound("/resume SOME-SID", "e1"))
 	if s := fe.sends(); len(s) != 1 || !strings.Contains(s[0].Text, "/bind") {
 		t.Fatalf("unbound /resume should hint /bind: %+v", s)
+	}
+}
+
+// Unbound conversation WITH a known cwd: /resume creates the binding from
+// the session's own directory instead of demanding a throwaway /bind first.
+// That is what makes the workspace tree's "go to that workspace" gesture a
+// single click on a fresh page — and why it must NOT go through /bind, whose
+// D-C2 semantics ("start over here") would drop the context that resume
+// exists to keep.
+func TestRouter_ResumeUnboundAdoptsSessionCWD(t *testing.T) {
+	proj := t.TempDir()
+	r, fe, store, _ := newTestRouter(t, nil, RouterConfig{
+		LookupSession: func(id string) (string, error) {
+			if id == "OLD-SESSION" {
+				return proj, nil
+			}
+			return "", errors.New("no such session")
+		},
+	})
+
+	r.Handle(context.Background(), inbound("/resume OLD-SESSION", "e1"))
+	b, err := store.Get(conv1)
+	if err != nil {
+		t.Fatalf("unbound /resume with a known cwd must create the binding: %v", err)
+	}
+	if b.SessionID != "OLD-SESSION" || b.ProjectPath != proj {
+		t.Fatalf("/resume adopted %+v, want sid OLD-SESSION in project %q", b, proj)
+	}
+	if s := fe.sends(); len(s) != 1 || !strings.Contains(s[0].Text, "已续接会话") {
+		t.Errorf("/resume ack = %+v", s)
+	}
+
+	// An unknown id on an unbound conversation still refuses (no stray row).
+	r.Handle(context.Background(), inbound("/resume NO-SUCH", "e2"))
+	if s := fe.sends(); len(s) != 2 || !strings.Contains(s[1].Text, "找不到会话") {
+		t.Fatalf("unknown id reply = %+v", s)
+	}
+	if _, err := store.Get(conv1); err != nil {
+		t.Fatalf("a failed /resume must not have touched the binding: %v", err)
 	}
 }
 

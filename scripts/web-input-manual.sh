@@ -146,10 +146,14 @@ ck "GET / 200+页面" "yes" "$(has "$page" 'id="form"')"
 ck "多行输入：textarea#input" "yes" "$(has "$page" '<textarea id="input"')"
 ck "候选弹层：#menu" "yes" "$(has "$page" 'id="menu"')"
 ck "'/' 指令注册表" "yes" "$(has "$page" 'const CMDS = [')"
-ck "注册表含五指令 + /resume" "yes" \
-  "$([ "$(printf '%s' "$page" | grep -c "name: '/bind'")" -gt 0 ] \
-     && [ "$(printf '%s' "$page" | grep -c "name: '/cancel'")" -gt 0 ] \
-     && [ "$(printf '%s' "$page" | grep -c "name: '/resume'")" -gt 0 ] && echo yes || echo no)"
+# 工作区树卡之后，注册表是残差表：项目/会话导航归左栏两级树，只剩树上
+# 没有对应手势的两条（/resume、/cancel）。/bind /projects /switch /new
+# 仍是平面指令（Telegram/飞书用），但页面不再列出、也不再提供入口。
+ck "注册表含 /resume + /cancel（导航已归工作区树）" "yes" \
+  "$([ "$(printf '%s' "$page" | grep -c "name: '/resume'")" -gt 0 ] \
+     && [ "$(printf '%s' "$page" | grep -c "name: '/cancel'")" -gt 0 ] && echo yes || echo no)"
+ck "注册表不再列 /bind /projects /switch /new" "yes" \
+  "$(printf '%s' "$page" | grep -cE "name: '/(bind|projects|switch|new)'" | grep -q '^0$' && echo yes || echo no)"
 ck "'@' 候源 = session/list" "yes" "$(has "$page" "rpc('session/list', {})")"
 ck "无全局 keydown 监听（Esc 不劫持）" "0" \
   "$(printf '%s' "$page" | grep -cE "document\.addEventListener\('keydown'|window\.addEventListener\('keydown'")"

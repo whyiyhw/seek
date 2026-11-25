@@ -220,80 +220,75 @@ func TestWeb_CommandE2E(t *testing.T) {
 	}
 }
 
-// TestWeb_PageCommandButtons pins the W2.2 page contract (a rename or a
-// "simpler" rewrite strands the feature silently — a dead button, not a
-// crash): five buttons, the shared passthrough, arg-prefill vs verbatim
-// send, the post-command /state refresh and the SSE-reconnect binding
-// restore. Chat-plane keep-pins live in TestWeb_PageSessionsBrowser.
+// TestWeb_PageCommandSurface pins the W2.2 page contract as REWRITTEN by
+// the workspace-tree card: the top bar's five slash buttons (/bind
+// /projects /switch /new /cancel) are GONE, and the navigation they
+// carried now lives in the two-level left rail. A behavior change is
+// rewritten in the test, never just deleted: the pins below assert the
+// NEW wiring, and the banned list asserts the retired shapes stay
+// retired (a resurrected button would be a silent second entry point
+// into the binding store).
 //
-// c_lnsdvu rewrote TWO of the five behaviors: #cmd-bind / #cmd-projects no
-// longer prefill '/bind ' / send '/projects' — both open the project picker
-// (third #menu source: project/list ∪ settings/get, click-a-row sends
-// '/bind <root>'). The pins below assert the NEW wiring explicitly and the
-// banned list below THAT asserts the old wireCmd shapes are gone — a
-// behavior change must be rewritten in the test, never just deleted.
-func TestWeb_PageCommandButtons(t *testing.T) {
+// What MUST survive verbatim: the shared sendText passthrough, the
+// post-command /state refresh, the SSE-reconnect binding restore, and
+// the two read-only candidate sources — they now feed the tree's
+// workspace headers instead of a modal.
+func TestWeb_PageCommandSurface(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		`id="cmd-bind"`,
-		`id="cmd-projects"`,
-		`id="cmd-switch"`,
-		`id="cmd-new"`,
-		`id="cmd-cancel"`,
-		"sendText(typed, true, ready)",      // the form still rides the shared passthrough
-		"sendText(text, false)",             // …and so do the buttons
-		"wireCmd('cmd-switch', '/switch ')", // remaining arg command still prefills…
-		"wireCmd('cmd-new', '/new')",        // …zero-arg still sends verbatim
-		"wireCmd('cmd-cancel', '/cancel')",
-		// c_lnsdvu project picker: both trigger buttons ride openBindPicker…
-		"document.getElementById('cmd-bind').addEventListener('click', openBindPicker)",
-		"document.getElementById('cmd-projects').addEventListener('click', openBindPicker)",
-		// …candidates come from the two read-only rpc sources (no new method)…
+		"sendText(typed, true, ready)", // the form still rides the shared passthrough
+		"sendText('/cancel', false)",   // …and so do the tree's / stop-key gestures
+		// Workspace headers come from the SAME two read-only rpc sources
+		// c_lnsdvu's picker used (no new method, no new write path)…
 		"rpc('project/list', {})",
 		"rpc('settings/get', {})",
-		// …a picked row sends the same wire a hand-typed /bind would…
-		"sendText('/bind ' + e.root, false)",
-		// …with the reset warning as the popup's fixed head line, the
-		// current binding marked, and the both-sources-empty wording.
-		"点选会重置当前会话（/bind 语义）；路径也可手打",
-		"meta: (boundProject && cleanRoot(boundProject) === e.root) ? '当前' : ''",
-		"没有可选项目：config serve.projects 未配置、本机也还没有 seek 会话记录——直接手打 /bind <路径>",
+		// …a header click binds by sending the same wire a hand-typed
+		// /bind would; a session row's continue control resumes…
+		"sendText('/bind ' + root, false)",
+		"sendText('/resume ' + sid, false)",
+		// …and a header's ＋ resets the session inside the project.
+		"sendText(here === root ? '/new' : '/bind ' + root, false)",
 		"typed.startsWith('/')", // command POST → immediate /state refresh
 		"body.startsWith('/')",
 		"es.onopen = () => { connSet(true); refreshState(); apResync(); };", // reconnect restores the binding display + the approval card stack (W5 c_n37tnr) + the conn light (W5 c_oyp2qf)
 	} {
 		if !strings.Contains(page, need) {
-			t.Errorf("embedded page lost the command-UI piece %q", need)
+			t.Errorf("embedded page lost the command-surface piece %q", need)
 		}
 	}
-	// The retired behaviors, pinned ABSENT: the old wireCmd prefill/direct-
-	// send for the two picker buttons must not sneak back beside the new
-	// wiring (both handlers on one button = the silent one wins).
+	// The retired top-bar buttons and their wireCmd helper, pinned ABSENT:
+	// with the tree in place these would be a second, unlabelled way into
+	// the binding store.
 	for _, banned := range []string{
-		"wireCmd('cmd-bind'",
-		"wireCmd('cmd-projects'",
+		`id="cmd-bind"`, `id="cmd-projects"`, `id="cmd-switch"`,
+		`id="cmd-new"`, `id="cmd-cancel"`,
+		"function wireCmd(",
+		"openBindPicker",
 	} {
 		if strings.Contains(page, banned) {
-			t.Errorf("embedded page still wires the retired behavior %q — c_lnsdvu replaced it with openBindPicker", banned)
+			t.Errorf("embedded page still carries the retired command button %q — the workspace tree owns project selection now", banned)
 		}
 	}
 }
 
-// TestWeb_PageDirPicker (c_heffj3 acceptance ②): the /bind directory
-// picker's browser-side pieces, pinned the W4.4 way (page strings
-// against the embedded page) — the fs/list call, the entry row shown
-// in the '/bind ' args context (piece 1 c_lnsdvu's candidate rows
-// merge in front of it), the pick action riding the ONE sendText
-// passthrough, the layer header, and the in-layer error branch. Also
-// pins the no-new-global-keydown discipline: the picker's nav keys
-// live on the textarea and the filter input, never on document/window.
+// TestWeb_PageDirPicker: the directory browser's browser-side pieces,
+// pinned the W4.4 way (page strings against the embedded page). The
+// ENTRY moved with the workspace-tree card — it used to hang off the
+// '/bind ' args context (a modal row), and now it is the sidebar
+// header's 「工作区」 button: the tree only lists workspaces that already
+// left a trace, and a first workspace has none, so the picker is the
+// tree's complement rather than a duplicate of it. What did NOT move:
+// the fs/list call, the layer header, the pick riding the ONE sendText
+// passthrough, and the in-layer error branch. Also pins the
+// no-new-global-keydown discipline: the picker's nav keys live on the
+// filter input, never on document/window.
 func TestWeb_PageDirPicker(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
-		"rpc('fs/list'", // the ONE new read-only method the picker rides
-		"label: '浏览目录…', icon: 'folder'", // 目录模式入口（片 1 候选列表尾行；c_25d2ey 换 folder sprite）
-		"/^\\/bind\\s/",                    // '/bind ' 参数期触发
-		"sendText('/bind ' + path, false)", // 选这个目录 → 既有 /bind 透传，零新写面
+		"rpc('fs/list'",                    // the ONE read-only method the picker rides
+		`id="side-ws-new"`,                 // the entry point (sidebar header, not an input trigger)
+		"openDirPicker();",                 // …wired from that button
+		"sendText('/bind ' + path, false)", // 选这个目录 → the /bind passthrough, zero new write path
 		"setBtn(up, 'arrow-up', '上一级')",    // c_25d2ey：↑ 字符换成 sprite 图标
 		"选这个目录",
 		"目录名过滤",
@@ -304,6 +299,17 @@ func TestWeb_PageDirPicker(t *testing.T) {
 	} {
 		if !strings.Contains(page, need) {
 			t.Errorf("embedded page lost the dir-picker piece %q", need)
+		}
+	}
+	// The retired input-context entry, pinned ABSENT: with the sidebar
+	// header owning it, a '/bind ' trigger would be a second way to open
+	// the same layer from a command the page no longer advertises.
+	for _, banned := range []string{
+		"/^\\/bind\\s/", // the old args-context regex
+		"function bindArgHits(",
+	} {
+		if strings.Contains(page, banned) {
+			t.Errorf("embedded page still carries the retired '/bind ' args entry %q", banned)
 		}
 	}
 	for _, banned := range []string{

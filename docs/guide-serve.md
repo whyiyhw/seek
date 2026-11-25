@@ -53,7 +53,7 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 | `/projects` | 列出候选项目与当前绑定 |
 | `/switch <项目路径>` | 改绑 + 清 session |
 | `/new` | 留项目 + 清 session（开新话题） |
-| `/resume <会话 id>` | 续接既有 transcript（绑定指向该 id；会话自带的 cwd 优先——web 页 `@` 引用的去处） |
+| `/resume <会话 id>` | 续接既有 transcript（绑定指向该 id；会话自带的 cwd 优先，未绑定时直接用该 cwd 建绑定——web 页 `@` 引用与工作区树「去这个工作区」的去处） |
 | `/cancel` | 中断当前 run（kill 子进程） |
 
 未绑定的会话发普通消息 → 回提示先 `/bind`。
@@ -79,7 +79,7 @@ seek serve --frontend=web --frontend=<chat>        # 多 frontend 扇入同一�
 
 ## 5. Web frontend：启动、token、tailnet 与安全清单 / The bundled web frontend
 
-内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。布局是**左栏常驻会话侧栏 + 中栏内容**：侧栏按 updated 倒序列出历史会话（当前项高亮、标题子串搜索、30 行一页「加载更多」、＋新建＝`/new` 同款指令），可收成 44px 图标轨且收起状态记在 localStorage（窄屏 <1024px 默认收起）；点一条把中栏切成会话正文（元信息行 + 消息 cursor 分页浏览，50/页），「💬 聊天」收回。聊天面本身：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、生成中发送键变**⏹ 停止**键（点击发 `/cancel` 同款指令、草稿不动；中断后半截气泡保留 + 「—— 已中断 ——」标注，收口即键态复位；SSE 不回放，收口帧若落在断连窗口，键态靠「本页发过 /cancel 却收到 run-less 应答」这一信号自愈，不会永久卡在 ⏹）、顶栏 `/bind` `/projects` `/switch` `/new` `/cancel` 快捷键与绑定状态常显；顶栏另有三个资产视图——**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（近 N 会话的 tokens/$/cache 命中趋势折线——手绘 SVG、悬停读数、10/20/50 会话窗口切换；下方单会话 cache 命中率 + cost 快照，服务端计价，客户端不算钱）、**🤖 后台**（子代理列表 + transcript 尾读）。
+内置浏览器工作台，单文件 vanilla JS 经 `go:embed` 进单二进制（零构建链，repo 无 package.json；体积由 CI `web-gate` 对 baseline 钉死）。布局是**左栏两级工作区树 + 中栏内容**：组头 = 工作区（`project/list` ∪ `serve.projects` ∪ 本机 session 的 cwd），组内是会话行（updated 倒序、标题/组名子串搜索、30 行一页「加载更多」）；当前绑定工作区恒在最顶且左缘高亮，组头可折叠（折叠位记 localStorage）；点组头 = 去那个工作区（已在该组 → 空操作；该组有会话 → `/resume` 最新一条，绑定跟着会话自记的 cwd 走；空组 → `/bind`），组头的 ＋ = 在该工作区开新会话；侧栏头的「新建」钮开 `fs/list` 目录浏览器，绑一个候选列表之外的目录；侧栏可收成 44px 图标轨且收起状态记在 localStorage（窄屏 <1024px 默认收起）；点一条把中栏切成会话正文（元信息行 + 消息 cursor 分页浏览，50/页），「聊天」收回；正文头的「继续此会话」发 `/resume`（浏览与接续是两个动作——随便翻一眼历史不该换掉正在进行的对话）。聊天面本身：SSE 流式气泡（delta 累积→reply 收口）、工具行折叠、状态栏实时 tokens/$（turn_end 累积 + session id 短显）、生成中发送键变**⏹ 停止**键（点击发 `/cancel` 同款指令、草稿不动；中断后半截气泡保留 + 「—— 已中断 ——」标注，收口即键态复位；SSE 不回放，收口帧若落在断连窗口，键态靠「本页发过 /cancel 却收到 run-less 应答」这一信号自愈，不会永久卡在 ⏹）、顶栏不再有斜杠指令钮（工作区树接管了项目/会话导航）、绑定状态常显；顶栏另有三个资产视图——**🧠 记忆**（memory 项目/条目/详情）、**📊 统计**（近 N 会话的 tokens/$/cache 命中趋势折线——手绘 SVG、悬停读数、10/20/50 会话窗口切换；下方单会话 cache 命中率 + cost 快照，服务端计价，客户端不算钱）、**🤖 后台**（子代理列表 + transcript 尾读）。
 
 API 面（一律过 §5.2 的 token 认证）：`POST /msg`（发消息）、`GET /state`（本会话绑定状态）、`GET /events`（SSE 流）、`POST /rpc`（JSON-RPC 2.0 方法集：`session/list|get|messages`、`memory/list|get|projects`、`project/list|get`、`stats/cache|friction|trend`、`hooks/list`、`hooks/audit/tail`）、`GET /subagents`（后台子代理只读投影）。
 
