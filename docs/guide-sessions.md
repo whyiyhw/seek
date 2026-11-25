@@ -92,20 +92,23 @@ seek prints the new session ID. Use `--resume <id>` to switch between branches.
 
 ## Compacting with /compact
 
-Long sessions accumulate token cost. `/compact` summarises the older portion of the history into a single assistant message, then continues. The summary is appended to the session — the original turns are gone after a save.
+Long sessions accumulate token cost. `/compact` summarises the history into one briefing, then continues. The pre-compact history is **not lost**: `handleCompactDone` writes the full transcript to the current session (`<old-id>`, the "snapshot") and forks a child (`<new-id>`, `parent_id` → snapshot) holding only the summary pair. `--resume <old-id>` still reaches the original.
 
 Run `/compact` before a long task if you're near your context limit.
 
-**Auto-compact** (`auto_compact` in `~/.seek/config.json`, or `$SEEK_AUTO_COMPACT` for one launch) runs the same thing by itself when the context crosses a configured point — `{"at_tokens": 350000}` or `{"at_fraction": 0.35}`. It fires only at rest (no queued message, no pending steer, no `/goal` loop, not after Esc), and inherits the fork-snapshot behaviour: the pre-compact history stays on disk, `--resume <old-id>` still reaches it. See [guide-budget.md](guide-budget.md) §2.5.
+**Auto-compact** (`auto_compact` in `~/.seek/config.json`, or `$SEEK_AUTO_COMPACT` for one launch) runs the same thing by itself when the context crosses a configured point — `{"at_tokens": 350000}` or `{"at_fraction": 0.35}`. It fires only at rest (no queued message, no pending steer, no `/goal` loop, not after Esc), and inherits the fork-snapshot behaviour. See [guide-budget.md](guide-budget.md) §2.5.
 
 ### Measuring whether compaction helped
 
-Two instruments, all local, none requiring a real key:
+Three instruments, all local, none requiring a real key:
 
 | Question | Instrument |
 |---|---|
 | When does it fire, and what did it cost? | `seek ui-trace` — the `compact` row carries the trigger (`manual`/`auto`) in `detail`, the pre-compact prompt tokens in `tokens`, and the wall-clock wait in `dur_ms`. The folded summary prints the token total plus duration total/average |
 | Over real history: how much gets compressed, and what does the child re-read? | `scripts/transcript-stats` — its `compact 链` section builds `parent_id` chains and reports compression ratio, entity recall, and the child's first-K known re-reads against a no-compaction baseline |
+| Does a *specific* summary still carry the facts a task needs? | `eval/cases/compact-ab` — same prompt over full history vs the summary pair; the scripted endpoint answers extractively, so "answered the facts" can only come from the history |
+
+`/compact` runs only in the interactive TUI (auto-compact likewise), so `seek -p` has no compact command — that is why the eval case is built from seeded session files rather than a live compaction.
 
 ## Distilling with /distill
 
