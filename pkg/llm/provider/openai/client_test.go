@@ -1,12 +1,15 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/whyiyhw/seek/pkg/llm"
@@ -627,5 +630,371 @@ func TestChatStream_TextOnlyWireBytes(t *testing.T) {
 		if string(body) != c.want {
 			t.Errorf("%s: wire bytes drifted\n got %s\nwant %s", c.name, body, c.want)
 		}
+	}
+}
+
+// --- retry / mid-stream-break coverage (card c_koutux) -----------------
+//
+// The transport shapes below are the ones an HTTP/2 stream reset
+// actually produces against a Go client:
+//   - no response at all (connection closed before the status line) →
+//     c.http.Do returns an error (the OPEN-phase failure);
+//   - headers + a partial body, then the socket dies → the body read
+//     fails with "unexpected EOF" AFTER whatever already arrived (the
+//     mid-stream break).
+// Both are produced by hijacking the connection and closing it, which is
+// as close to a peer RST as httptest can get.
+
+// abortBeforeHeaders closes the connection without writing a status
+// line, so the client's Do() fails with a transport error.
+func abortBeforeHeaders(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	c, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		t.Fatalf("hijack: %v", err)
+	}
+	_ = c.Close()
+}
+
+// abortAfter writes body (SSE bytes) as a chunked 200 and then kills the
+// connection — the mid-stream break shape.
+func abortAfter(t *testing.T, w http.ResponseWriter, body string) {
+	t.Helper()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.WriteHeader(http.StatusOK)
+	if body != "" {
+		_, _ = w.Write([]byte(body))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+	c, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		t.Fatalf("hijack: %v", err)
+	}
+	_ = c.Close()
+}
+
+func textOf(events []llm.Event) string {
+	var b strings.Builder
+	for _, e := range events {
+		if d, ok := e.(llm.TextDelta); ok {
+			b.WriteString(d.Delta)
+		}
+	}
+	return b.String()
+}
+
+func countErrors(events []llm.Event) []error {
+	var errs []error
+	for _, e := range events {
+		if ee, ok := e.(llm.ErrorEvent); ok {
+			errs = append(errs, ee.Err)
+		}
+	}
+	return errs
+}
+
+const stopThenDone = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"},\"finish_reason\":null}]}\n\n" +
+	"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+	"data: [DONE]\n\n"
+
+// TestChatStream_OpenFailure_RetriedOnce: the FIRST attempt dies before
+// a status line (the HTTP/2 PROTOCOL_ERROR shape that killed unattended
+// rounds), the second streams normally. One retry must make it
+// invisible: two attempts on the wire, a complete event stream, no
+// ErrorEvent.
+func TestChatStream_OpenFailure_RetriedOnce(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			abortBeforeHeaders(t, w)
+			return
+		}
+		_, _ = w.Write([]byte(stopThenDone))
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream returned an error after a recoverable open failure: %v", err)
+	}
+	events := drain(ch)
+
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server saw %d attempts, want 2 (one retry)", got)
+	}
+	if errs := countErrors(events); len(errs) != 0 {
+		t.Errorf("recovered retry must not surface an error, got %v", errs)
+	}
+	if text := textOf(events); text != "Hello" {
+		t.Errorf("text = %q, want %q", text, "Hello")
+	}
+	if done := findTurnDone(t, events); done.FinishReason != "stop" {
+		t.Errorf("finish_reason = %q, want stop", done.FinishReason)
+	}
+}
+
+// TestChatStream_OpenFailure_Exhausted: every attempt dies before a
+// status line. The error must be annotated with the attempt count so an
+// operator can tell "one blip, retried" from "endpoint stayed down".
+func TestChatStream_OpenFailure_Exhausted(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		abortBeforeHeaders(t, w)
+	}))
+	defer srv.Close()
+
+	_, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{})
+	if err == nil {
+		t.Fatal("expected an error once the retry budget is spent")
+	}
+	if !strings.Contains(err.Error(), "after 2 attempts") {
+		t.Errorf("error = %q, want it to carry \"after 2 attempts\"", err)
+	}
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server saw %d attempts, want 2", got)
+	}
+}
+
+// TestChatStream_RetryStatus: 5xx and 429 are transient (retried once);
+// any other 4xx is a configuration problem and must fail immediately —
+// retrying a 401 just wastes a round.
+func TestChatStream_RetryStatus(t *testing.T) {
+	cases := []struct {
+		name         string
+		status       int
+		wantTries    int32
+		wantErrAnnot bool
+	}{
+		{"500", http.StatusInternalServerError, 2, true},
+		{"429", http.StatusTooManyRequests, 2, true},
+		{"401", http.StatusUnauthorized, 1, false},
+		{"400", http.StatusBadRequest, 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				w.WriteHeader(c.status)
+				_, _ = w.Write([]byte(`{"error":{"message":"nope"}}`))
+			}))
+			defer srv.Close()
+
+			_, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{})
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := hits.Load(); got != c.wantTries {
+				t.Errorf("server saw %d attempts, want %d", got, c.wantTries)
+			}
+			if c.wantErrAnnot && !strings.Contains(err.Error(), "after 2 attempts") {
+				t.Errorf("error = %q, want it annotated with the attempt count", err)
+			}
+			if !c.wantErrAnnot && strings.Contains(err.Error(), "attempts") {
+				t.Errorf("non-transient %d must not be retried, error = %q", c.status, err)
+			}
+		})
+	}
+}
+
+// TestChatStream_BreakAfterFirstDelta_NotReopened: once a character
+// reached the caller the stream is committed. The break must NOT trigger
+// a re-open (that would duplicate visible text), and the truncation must
+// be visible as the "stream_error:" sentinel finish rather than a
+// silently empty turn — the bug that made a real transport error vanish.
+func TestChatStream_BreakAfterFirstDelta_NotReopened(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		abortAfter(t, w, "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":null}]}\n\n")
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	events := drain(ch)
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("server saw %d attempts, want 1 (a partial stream must not be re-opened)", got)
+	}
+	if text := textOf(events); text != "Hi" {
+		t.Errorf("text = %q, want %q exactly once (no duplication)", text, "Hi")
+	}
+	done := findTurnDone(t, events)
+	if !strings.HasPrefix(done.FinishReason, "stream_error:") {
+		t.Errorf("finish_reason = %q, want the stream_error: sentinel (the break must be visible)", done.FinishReason)
+	}
+	if errs := countErrors(events); len(errs) != 0 {
+		t.Errorf("a committed partial turn reports via TurnDone, not ErrorEvent; got %v", errs)
+	}
+}
+
+// TestChatStream_BreakMidToolCall_SentinelAndCalls: the shape agent.go's
+// canRetry predicate needs — the stream died while tool calls were
+// streaming. The assembled calls must be emitted (so runTurnLLM sees
+// ToolCalls > 0) and the finish must carry the sentinel prefix, or a
+// retry at the agent layer is impossible and the turn dies.
+func TestChatStream_BreakMidToolCall_SentinelAndCalls(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		abortAfter(t, w, "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"read\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}]},\"finish_reason\":null}]}\n\n")
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: "user", Content: "go"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	events := drain(ch)
+
+	if got := hits.Load(); got != 1 {
+		t.Errorf("server saw %d attempts, want 1 (call fragments were already buffered)", got)
+	}
+	var calls []llm.ToolCallDone
+	for _, e := range events {
+		if d, ok := e.(llm.ToolCallDone); ok {
+			calls = append(calls, d)
+		}
+	}
+	if len(calls) != 1 || calls[0].ID != "c1" {
+		t.Fatalf("ToolCallDone = %+v, want the buffered c1 call (canRetry needs ToolCalls>0)", calls)
+	}
+	done := findTurnDone(t, events)
+	if !strings.HasPrefix(done.FinishReason, "stream_error:") {
+		t.Errorf("finish_reason = %q, want a stream_error: sentinel", done.FinishReason)
+	}
+	if done.FinishReason == "tool_calls" {
+		t.Error("finish must not claim tool_calls — the ids are unverified")
+	}
+}
+
+// TestChatStream_ReopenWhenBodyBreaksBeforeAnyEvent: headers arrived,
+// the body died before a single delta — nothing is visible, so the
+// client re-opens once and the turn completes as if it never happened.
+func TestChatStream_ReopenWhenBodyBreaksBeforeAnyEvent(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			abortAfter(t, w, "")
+			return
+		}
+		_, _ = w.Write([]byte(stopThenDone))
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	events := drain(ch)
+
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server saw %d attempts, want 2 (an eventless break is safe to re-open)", got)
+	}
+	if errs := countErrors(events); len(errs) != 0 {
+		t.Errorf("recovered re-open must not surface an error, got %v", errs)
+	}
+	if text := textOf(events); text != "Hello" {
+		t.Errorf("text = %q, want Hello", text)
+	}
+}
+
+// TestChatStream_ReopenExhausted_BreakBeforeAnyEvent: both attempts' bodies
+// break before any event. Nothing reached the caller, so the break is
+// reported as the stream_error: sentinel on TurnDone (the DeepSeek lane's
+// shape) — never as a silently empty finish, and never as an ErrorEvent
+// (which would end the agent's whole round instead of letting its
+// empty-with-odd-finish self-heal book a placeholder and continue).
+func TestChatStream_ReopenExhausted_BreakBeforeAnyEvent(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		abortAfter(t, w, "")
+	}))
+	defer srv.Close()
+
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	events := drain(ch)
+
+	if got := hits.Load(); got != 2 {
+		t.Errorf("server saw %d attempts, want 2", got)
+	}
+	if errs := countErrors(events); len(errs) != 0 {
+		t.Errorf("an eventless break must not surface an ErrorEvent (it kills the round); got %v", errs)
+	}
+	if got := textOf(events); got != "" {
+		t.Errorf("text = %q, want nothing (no attempt produced an event)", got)
+	}
+	done := findTurnDone(t, events)
+	if !strings.HasPrefix(done.FinishReason, "stream_error:") {
+		t.Errorf("finish_reason = %q, want the stream_error: sentinel", done.FinishReason)
+	}
+	if !strings.Contains(done.FinishReason, "after 2 attempts") {
+		t.Errorf("finish_reason = %q, want the attempt-count annotation", done.FinishReason)
+	}
+}
+
+// TestChatStream_RetryBodyByteIdentical pins the prefix-cache contract on
+// the retry path: the second attempt must re-send exactly the bytes the
+// first one did. Re-marshalling, or reusing a consumed reader, would
+// shift bytes and miss the gateway's prompt cache on every retried turn.
+func TestChatStream_RetryBodyByteIdentical(t *testing.T) {
+	var (
+		hits   atomic.Int32
+		mu     sync.Mutex
+		bodies [][]byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, b)
+		mu.Unlock()
+		if hits.Add(1) == 1 {
+			abortBeforeHeaders(t, w)
+			return
+		}
+		_, _ = w.Write([]byte(stopThenDone))
+	}))
+	defer srv.Close()
+
+	req := llm.ChatRequest{
+		Model:     "m",
+		MaxTokens: 64,
+		Messages: []llm.Message{
+			{Role: "system", Content: "sys"},
+			{Role: "user", Content: "hi"},
+		},
+		Tools: []llm.ToolDef{{Name: "read", Description: "r", Schema: []byte(`{"type":"object"}`)}},
+	}
+	ch, err := NewCompatible("k", srv.URL).ChatStream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	drain(ch)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("recorded %d request bodies, want 2", len(bodies))
+	}
+	if !bytes.Equal(bodies[0], bodies[1]) {
+		t.Errorf("retry body drifted from the first attempt:\n got %s\nwant %s", bodies[1], bodies[0])
 	}
 }

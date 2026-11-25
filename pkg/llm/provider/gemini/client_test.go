@@ -393,3 +393,61 @@ func TestBuildRequest_TextOnlyWireBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestChatStream_MidStreamBreak_SurfacesError: a transport break mid-body
+// must not be laundered into a clean TurnDone. Before card c_koutux,
+// parseStream never checked sc.Err(), so an HTTP/2 reset looked exactly
+// like a normal EOF and the real error vanished — the turn appeared to
+// be a clean (empty) completion.
+func TestChatStream_MidStreamBreak_SurfacesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: "+`{"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]}}]}`+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		c, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = c.Close()
+	}))
+	defer srv.Close()
+
+	ch, err := newWithBase("k", srv.URL).ChatStream(context.Background(), llm.ChatRequest{
+		Model: "gemini-pro", Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+
+	var (
+		text    string
+		sawErr  bool
+		sawDone bool
+	)
+	for _, ev := range drain(ch) {
+		switch e := ev.(type) {
+		case llm.TextDelta:
+			text += e.Delta
+		case llm.ErrorEvent:
+			sawErr = true
+			if !strings.Contains(e.Err.Error(), "stream read") {
+				t.Errorf("error = %q, want a stream read failure", e.Err)
+			}
+		case llm.TurnDone:
+			sawDone = true
+		}
+	}
+	if text != "Hi" {
+		t.Errorf("text = %q, want the bytes that did arrive", text)
+	}
+	if !sawErr {
+		t.Error("a mid-body transport break must surface an ErrorEvent")
+	}
+	if sawDone {
+		t.Error("a broken stream must not also report a clean TurnDone")
+	}
+}

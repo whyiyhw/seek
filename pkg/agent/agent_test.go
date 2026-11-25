@@ -3274,3 +3274,132 @@ func TestAttachPredictedNextWritesThroughIndex(t *testing.T) {
 		t.Errorf("PredictedNext leaked onto the tool-call assistant message: %q", msgs[1].PredictedNext)
 	}
 }
+
+// scriptedProvider is a second-tier llm.Provider that replays ONE
+// canned event script per ChatStream call (the last script repeats), so a
+// test can model "attempt 1 broke, attempt 2 was fine".
+type scriptedProvider struct {
+	mu      sync.Mutex
+	scripts [][]llm.Event
+	calls   int
+}
+
+func (s *scriptedProvider) Name() string { return "scripted" }
+
+func (s *scriptedProvider) ChatStream(_ context.Context, _ llm.ChatRequest) (<-chan llm.Event, error) {
+	s.mu.Lock()
+	i := s.calls
+	s.calls++
+	s.mu.Unlock()
+	if i >= len(s.scripts) {
+		i = len(s.scripts) - 1
+	}
+	ch := make(chan llm.Event, len(s.scripts[i]))
+	for _, e := range s.scripts[i] {
+		ch <- e
+	}
+	close(ch)
+	return ch, nil
+}
+
+func (s *scriptedProvider) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+// TestRunTurnLLM_StreamBreakBeforeAnyEvent_SelfHeals is the second-tier
+// half of card c_koutux's fix: the openai client now reports an eventless
+// transport break as TurnDone{FinishReason:"stream_error:…"} (the DeepSeek
+// lane's vocabulary). runTurnLLM must fold that into
+// errBudgetExhaustedEmpty so Prompt books the in-band placeholder and
+// nudges the model to continue — NOT surface an ErrorEvent, which is what
+// used to kill an entire unattended round on one HTTP/2 reset.
+func TestRunTurnLLM_StreamBreakBeforeAnyEvent_SelfHeals(t *testing.T) {
+	t.Parallel()
+	prov := &scriptedProvider{scripts: [][]llm.Event{
+		{llm.TurnDone{FinishReason: "stream_error: http: stream error (after 2 attempts)"}},
+		{llm.TextDelta{Delta: "recovered"}, llm.TurnDone{FinishReason: "stop"}},
+	}}
+	a, err := New(Config{Provider: prov, Model: "opencode:deepseek-v4.1-flash"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := drainAgent(a.Prompt(context.Background(), "hello"))
+
+	if len(res.errors) != 0 {
+		t.Errorf("a recoverable stream break must not surface an ErrorEvent, got %v", res.errors)
+	}
+	if got := prov.count(); got != 2 {
+		t.Errorf("provider calls = %d, want 2 (placeholder nudge continues the round)", got)
+	}
+	joined := strings.Join(res.events, ",")
+	if !strings.Contains(joined, "TurnEnd") {
+		t.Errorf("the round must settle with a TurnEnd, events: %v", res.events)
+	}
+	if !strings.Contains(joined, "MessageDelta") {
+		t.Errorf("the recovery turn's text must reach the UI, events: %v", res.events)
+	}
+
+	// History must carry the budget-exhausted marker (the break was
+	// never retried inside the client budget, so it is NOT
+	// emptyResponseMarker's "已重试1次" claim) — and no contentless
+	// assistant message, which the API would reject on the next request.
+	var sawMarker bool
+	for _, m := range a.Messages() {
+		if m.Role == deepseek.RoleAssistant && m.Content == budgetExhaustedMarker {
+			sawMarker = true
+		}
+		if m.Role == deepseek.RoleAssistant && m.Content == "" && len(m.ToolCalls) == 0 {
+			t.Errorf("history holds a contentless assistant message: %+v", a.Messages())
+		}
+	}
+	if !sawMarker {
+		t.Errorf("history must book the budget-exhausted marker, history: %+v", a.Messages())
+	}
+}
+
+// TestRunTurnLLM_StreamBreakMidToolCalls_AgentRetries pins the other
+// half: a break AFTER tool-call fragments streamed arrives as
+// ToolCallDone events plus a "stream_error:" finish (and never
+// finish_reason="tool_calls"). agent.go's canRetry must recognise that
+// shape and re-issue the turn — otherwise the retry ability added to the
+// client is pointless, because the unverified calls would kill the turn.
+func TestRunTurnLLM_StreamBreakMidToolCalls_AgentRetries(t *testing.T) {
+	t.Parallel()
+	prov := &scriptedProvider{scripts: [][]llm.Event{
+		{
+			llm.ToolCallDone{ID: "c1", Name: "read", Arguments: `{"path":"a"}`},
+			llm.TurnDone{FinishReason: "stream_error: stream read: unexpected EOF"},
+		},
+		{
+			llm.ToolCallDone{ID: "c2", Name: "read", Arguments: `{"path":"a"}`},
+			llm.TurnDone{FinishReason: "tool_calls"},
+		},
+		{
+			llm.TextDelta{Delta: "done"},
+			llm.TurnDone{FinishReason: "stop"},
+		},
+	}}
+	a, err := New(Config{
+		Provider: prov,
+		Model:    "glm-5.3",
+		Tools:    tools.New().Add(&stubTool{name: "read", schema: `{"type":"object"}`, reply: "ok"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := drainAgent(a.Prompt(context.Background(), "go"))
+
+	// Turn 1 (break) → retried; turn 2 (complete tool_calls) → tool runs;
+	// turn 3 (plain answer) → round settles. Never more, and never an
+	// ErrorEvent: the whole point is that the half-streamed turn is
+	// re-issued instead of refused.
+	if got := prov.count(); got != 3 {
+		t.Fatalf("provider calls = %d, want 3 (break → retry → tool turn → answer)", got)
+	}
+	assertNoOrphanToolCalls(t, a.Messages())
+	if len(res.errors) != 0 {
+		t.Errorf("a retried turn must not surface an ErrorEvent, got %v", res.errors)
+	}
+}

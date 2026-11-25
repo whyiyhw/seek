@@ -264,6 +264,13 @@ func assistantParts(m llm.Message) []geminiPart {
 }
 
 // parseStream reads an SSE body and sends Events to out until EOF or error.
+//
+// The trailing sc.Err() check is load-bearing (card c_koutux): without
+// it a mid-body transport break (an HTTP/2 stream reset, a dropped TLS
+// connection) is indistinguishable from a normal EOF, and the turn was
+// reported as a clean completion whose real error vanished. anthropic's
+// client has always checked it; the openai client had the same hole and
+// now does too.
 func parseStream(ctx context.Context, body io.Reader, out chan<- llm.Event) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -315,6 +322,17 @@ func parseStream(ctx context.Context, body io.Reader, out chan<- llm.Event) {
 				}
 			}
 		}
+	}
+
+	// A read failure must not be laundered into a clean TurnDone. There
+	// is no error channel on the return path, so report it as an
+	// ErrorEvent — the same shape anthropic uses. Nothing about the
+	// partial answer is retried (gemini's client has no retry policy),
+	// but at least the failure is visible instead of looking like the
+	// model said nothing.
+	if err := sc.Err(); err != nil && ctx.Err() == nil {
+		out <- llm.ErrorEvent{Err: fmt.Errorf("gemini: stream read: %w", err)}
+		return
 	}
 
 	var inTok, outTok int
