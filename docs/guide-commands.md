@@ -82,7 +82,7 @@ seek --version              # Print version and exit
 |---|---|---|
 | `agent_start` | `model` | Run begins; the model bound to it |
 | `turn_start` | `index` | One LLM call begins |
-| `text_delta` | `delta`, `reasoning` | Incremental assistant text (`reasoning:true` = CoT) |
+| `text_delta` / `reasoning_delta` | `delta` | Incremental assistant text (`reasoning_delta` = CoT from thinking-mode responses) |
 | `tool_start` / `tool_delta` / `tool_end` | `id`, `name`, `args` / `delta` / `result` \| `error`, `bytes` | Tool lifecycle |
 | `turn_end` | `index`, `prompt_tokens`, `completion_tokens`, `cache_hit_tokens`, `tool_calls`, `finish_reason` | One LLM call settled |
 | `agent_end` | `turns`, `tool_calls`, token totals, `session_id` | Run complete |
