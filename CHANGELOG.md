@@ -13,6 +13,7 @@
 - c_skczdu：autopilot 车道 pref 升 YOLO + flag 解析形状（R2 接线前置，§9.5③2）
 - c_yc2thl：ASR 计费链路接线：pricing.ASRCost 至今零调用方，照 TTSCost 接线点对称接上
 - c_idinaj：resume 两断点：reconstruct 丢 `[plan: approved] (auto-approve-per-step)` 后缀、persistSession 不回写 Session.Plan
+- c_7vpiz5：测试 HOME 泄漏：acp_test/webfrontend_attach_test 未隔离 SEEK_HOME，PDF 落进真实 ~/.seek/projects（坑8 反复停卡疑似根因）
 
 ## v0.13.1（2026-11-24）
 

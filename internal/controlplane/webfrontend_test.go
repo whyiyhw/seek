@@ -28,8 +28,20 @@ import (
 
 // newTestWeb builds a WebFrontend wired to temp paths and a known
 // token, with the inbox channel a test drains manually.
+//
+// SEEK_HOME is isolated here for the whole web surface (butler c_7vpiz5,
+// 坑8). Today /attach stages under the serve dir derived from StorePath —
+// no path resolver reaches ~/.seek — so this is belt-and-braces rather
+// than a fix for a live leak: it keeps any FUTURE paths.* call in a web
+// handler from landing in the developer's real ~/.seek (the ACP
+// fileroute leak shape, cmd/seek/acp_test.go).
 func newTestWeb(t *testing.T) (*WebFrontend, chan Inbound, string) {
 	t.Helper()
+	// Default (not override): a test that already pinned SEEK_HOME to a
+	// dir it also hand-writes fixtures into keeps its own home.
+	if os.Getenv("SEEK_HOME") == "" {
+		t.Setenv("SEEK_HOME", t.TempDir())
+	}
 	dir := t.TempDir()
 	tokenPath := filepath.Join(dir, "web.token")
 	if err := os.WriteFile(tokenPath, []byte("test-token-0123456789abcdef"), 0o600); err != nil {

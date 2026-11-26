@@ -13,6 +13,7 @@ import (
 	"github.com/whyiyhw/seek/internal/acp"
 	"github.com/whyiyhw/seek/internal/config"
 	"github.com/whyiyhw/seek/internal/fileroute"
+	"github.com/whyiyhw/seek/internal/paths"
 	"github.com/whyiyhw/seek/internal/permission"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -500,6 +501,32 @@ func TestBuildACPPromptText_FileRefs(t *testing.T) {
 	}
 	if len(images) != 0 || len(files) != 1 || files[0].Asset == "" || files[0].FileID != "" {
 		t.Fatalf("second-tier attach must be Asset-only: %+v %+v", images, files)
+	}
+
+	// The store-and-attach write is content-addressed into
+	// ~/.seek/projects/<id>/assets/ — the exact shape 坑8 keeps tripping
+	// over (butler c_7vpiz5): with the isolation missing, this test seeds
+	// a NEW project dir under the developer's real ~/.seek on every run
+	// and nothing above notices (every marker assertion still passes).
+	// Two assertions make it mechanical instead of a comment: the store
+	// resolves under the isolated SEEK_HOME, and that home is a temp dir,
+	// not the real ~/.seek.
+	home, err := paths.Home()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realHome, err := os.UserHomeDir(); err == nil && home == filepath.Join(realHome, ".seek") {
+		t.Fatalf("SEEK_HOME isolation missing — the store would write into the real %s", home)
+	}
+	isoAssets, err := paths.ProjectAssets(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(isoAssets, home) {
+		t.Fatalf("document store %q escaped SEEK_HOME (%q) — the 坑8 leak shape", isoAssets, home)
+	}
+	if _, err := os.Stat(filepath.Join(isoAssets, files[0].Asset)); err != nil {
+		t.Fatalf("document asset is not in the isolated project store: %v", err)
 	}
 }
 
