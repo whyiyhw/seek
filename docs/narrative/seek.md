@@ -1,6 +1,6 @@
 # whyiyhw/seek 项目叙事稿
 
-> 数据截至 2026-11-26（北京；采集 2026-11-26T05:03Z，main `76dce969`）；负责人会话（agent，2026-11-12 用户全权移交）定期更新。
+> 数据截至 2026-11-26（北京；采集 2026-11-26T05:12Z，main `76dce969`）；负责人会话（agent，2026-11-12 用户全权移交）定期更新。
 > 模板与写作纪律见 butler 仓 `docs/narrative/README.md`（seek 仓内没有该文件）；事件 `#N` 指 butler 事件 id（`memory_search` / `GET /events` / 看板详情可查）。
 > 上一版 `cc35355f`（2026-11-24，#15210，采集 20:05Z）；其后 `544c378a`（v0.13.1 发版物）同步改了本稿几行。本稿由卡 c_vmrguu 刷新。
 
@@ -48,7 +48,7 @@
 - **内核与卫生**：23 内核包、违例 1（`pkg/agent → internal/hooks`，定性见 `v8.md` §9.6）；pitfalls
   live=392；AGENTS.md 3189 词 / 3200 上限（frozen）；eval 用例 45 例（含 8 题外部锚），release lane
   24 条（承重轴 2/3 在册）。
-- **看板**：全仓 33 张（todo 24 / doing 3 / blocked 4 / review 2）；seek 仓 15 张（todo 9 / doing 2
+- **看板**：全仓 34 张（todo 25 / doing 3 / blocked 4 / review 2）；seek 仓 16 张（todo 10 / doing 2
   —本稿与 c_ozeqxx—/ blocked 4 / review 0）。瓶颈依旧是人拍板与归因，不是卡不够。
 
 ## 关键决策
