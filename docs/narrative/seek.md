@@ -34,10 +34,10 @@
   （#17027）、c_qjuags（`--max-cost`）同因（#17161），两卡 blocked。
 - **验证读数仍由「人核 + 归因」主导**：本窗口 seek 合并 18 张卡，verdict 分布 pass 8 / doubt 6 /
   未验证 3 / 人工改判 1。doubt 六张里：三张是同一批 `~/.seek` 写入事件（serve 18:07:51Z 与
-  projects worktrees 17:17:30Z，一次人核可解 c_skczdu/c_yc2thl/c_idinaj，见 #16905/#16933）、
-  一张是 c_7vpiz5 自报反向实验写进真实 `~/.seek` 再删除（#16888）、两张各一处枚举缺口
-  （c_3xyt7w 的 projects/*/sessions、c_lh6tlq 的 projects/*/worktrees）。这不是代码质量崩塌，
-  是**存疑归因缺机器闸**。
+  projects worktrees 17:17:30Z，一次人核可解 c_skczdu/c_yc2thl/c_idinaj，见
+  #16892/#16893/#16894）；一张是 c_7vpiz5 自报反向实验写进真实 `~/.seek` 再删除（#16888）；
+  两张各一处枚举缺口（c_3xyt7w 的 `projects/*/sessions` #16473、c_lh6tlq 的
+  `projects/*/worktrees` #16385）。这不是代码质量崩塌，是**存疑归因缺机器闸**。
 - **状态控制三卡已拍板、零落地**（#17344/#17363）：非额度三态死亡仍一律落 blocked「需人工检查」；
   11-26 03:37Z 三张（c_pozbmd / c_jobprc / c_osfttl）在同一拍以「session 正常结束但未写回」死亡
   （#17407、#17408、#17413）。
