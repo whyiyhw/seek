@@ -110,8 +110,10 @@
 ## 下一步
 
 - **主线一 · judge 本体**：内核已进 main；c_jdo7rp（CLI 接线 JSONL in/out + 有界并发 + 退出码
-  0/1/2）与 c_qjuags（`--max-cost` + exit 3）两卡 blocked（均 90 分钟机制杀、零残值），需翻 todo
-  复用续做（勿重做内核）；之后才是 release lane 接入（`eval/README.md` §E7）。另有两张新卡：c_tnzudu
+  0/1/2）与 c_qjuags（`--max-cost` + exit 3）两卡均被 90 分钟机制杀（#17027 / #17161），但两个
+  worktree 都留有未提交 WIP（`cmd/seek/judge.go` 443 / 492 行 + `judge.go`/`row.go`/`main.go` 改动）
+  ——翻 todo 走**同分支续做**（复用不重做，勿重做内核）；之后才是 release lane 接入
+  （`eval/README.md` §E7）。另有两张新卡：c_tnzudu
   （路由表与推断口径对齐，c_dxrjjl 复审发现的死胡同提示）、c_ozeqxx（自动会话标题落 header 的
   additive `title` 字段，#17579）。
 - **主线二 · web W6 九卡链**（口径源 `docs/notes-web-w6-dsh-shell.md` + dsh 中文实拍四图
