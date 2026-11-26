@@ -67,7 +67,7 @@ doc_files() {
     docs/prd)         find "$ROOT/docs/prd" -maxdepth 1 -name '*.md' ;;
     docs/prd/archive) find "$ROOT/docs/prd/archive" -name '*.md' ;;
     docs/book)        find "$ROOT/docs/book" -name '*.md' ;;
-    docs/pitfalls)    find "$ROOT/docs/pitfalls" -name '*.md' ;;
+    docs/pitfalls)    find "$ROOT/docs/pitfalls" -name '*.md' -not -path "$ROOT/docs/pitfalls/absorbed/*" ;;  # absorbed/ 是冻结归档层，不称重（c_bohzri ③c，人已拍板；理由见 budget.json why）
     *) if [ -f "$ROOT/$1" ]; then printf '%s\n' "$ROOT/$1"; fi ;;
   esac 2>/dev/null | sort
 }

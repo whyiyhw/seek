@@ -1,6 +1,6 @@
 ### eval-home-isolation-test 的 B 臂零写入——run.sh 缺省 opencode 车道擦掉了 DEEPSEEK_API_KEY
-- **Saw**: `bash scripts/selftest.sh eval-home-isolation-test` 稳定红两条：`B1: sandbox eval/tmp/seek-home received no writes` + `B2: caller-provided SEEK_HOME received no writes`。金丝雀 HOME 和沙盒**两边都空**——看着像「沙盒重定向失效」，其实一条用户态写入都没发生。
-- **Why**: `run.sh` 的 provider 车道缺省值 2026-11-20 由 deepseek 翻成 opencode（`61fa29de`），非 deepseek 车道会把 `DEEPSEEK_API_KEY` 从子进程环境里擦掉（计量 key 零外泄，那是刻意的）。自测的 `runner.sh` 按「缺省形状」调 seek、不带 `-provider`，于是子 seek 继承 `-provider opencode` 却只剩假 `DEEPSEEK_API_KEY` → 没有任何车道凭证 → 在首启设置向导处退出（`seek: setup: aborted at provider selection`，或已存在的确证形态里 `no OpenCode credentials`），dream-state / projects/manifest / cron/tick.lock 一条都不写。「零写入」与「隔离失效」在断言层面读数完全相同，所以红面把根因指向了错误的一侧。缺省车道翻默认那卡的自测（`eval-provider-test`）只钉车道实现，没有一个断言要求 B 臂必须产生写入。
-- **Fix**: 卡 `c_f734of`：自测自身把车道钉回 `SEEK_EVAL_PROVIDER=deepseek`（并 `-u` 掉其余三个 `SEEK_EVAL_*` 车道旋钮），B0/B1/B2 恢复同一调用形状，唯一变量仍是「是否经 run.sh」；`SEEK_HOME` 的导出在 run.sh 车道块之**前**，隔离语义与车道无关，所以钉车道不影响被测对象。B1 的失败文案补上「或子进程根本没拿到车道凭证」这一分支。
-- **Lesson**: 一条自测的「对照组必须产生效果」之外，还要有「实验组的效果非空」断言——B1 的「沙盒收到写入」本来就是，但它把「零写入」的两种成因（隔离失效 / 子进程提前退出）写进了同一句话，红面里没人能区分。上游默认值翻面时，凡是靠空环境形状跑真二进制的自测都要重新问一遍「这个子进程还拿得到凭证吗」。
-- **Refs**: `eval/run.sh`（车道块 + `DEEPSEEK_API_KEY` scrub）、`scripts/eval-home-isolation-test.sh`（`LANE_ENV`/`LANE_UNSET`）、`scripts/eval-provider-test.sh`（车道默认钉死处）、提交 `61fa29de`、卡 `c_pdqymy`（发现）/ `c_f734of`（修复）
+- **Saw**: `bash scripts/selftest.sh eval-home-isolation-test` 稳定红两条：`B1: sandbox eval/tmp/seek-home received no writes` + `B2: caller-provided SEEK_HOME received no writes`——金丝雀 HOME 与沙盒两边全空，实无一条用户态写入。
+- **Why**: `run.sh` 车道缺省 2026-11-20 由 deepseek 翻成 opencode（`61fa29de`）；非 deepseek 车道把 `DEEPSEEK_API_KEY` 从子进程环境擦掉（刻意防外泄）。自测 `runner.sh` 不带 `-provider`，子 seek 继承 opencode 只剩假 key → 无车道凭证 → 首启向导退出（`seek: setup: aborted at provider selection` / `no OpenCode credentials`），dream-state/manifest/cron/tick.lock 全不写。零写入与隔离失效在断言层读数相同，红面指向错侧。
+- **Fix**: 卡 `c_f734of`：钉回 `SEEK_EVAL_PROVIDER=deepseek` 并 `-u` 其余三个 `SEEK_EVAL_*`；`SEEK_HOME` 导出在车道块之前，隔离语义与车道无关。B1 文案补「或子进程没拿到车道凭证」分支。
+- **Lesson**: 零写入有两成因（隔离失效/子进程提前退出），断言须可区分；上游默认翻面后，空环境形状跑真二进制的自测要重问子进程凭证。
+- **Refs**: `eval/run.sh`、`scripts/eval-home-isolation-test.sh`、`scripts/eval-provider-test.sh`、提交 `61fa29de`、卡 `c_pdqymy`/`c_f734of`
