@@ -17,6 +17,7 @@
 - c_koutux：二线车道开流零重试 + 吞 sc.Err：opencode HTTPS/2 PROTOCOL_ERROR 一次打死整轮（openai client，覆盖 opencode/glm/opendesign/compatible 四车道）
 - c_fpnlir：卫生两件：gofmt 4 文件新漂移归位 + 落「多 GOOS 仓 deadcode 单平台误报」pitfall 条目
 - c_42a7rf：seek judge 本体·上：internal/judge 纯逻辑内核——单条判读一次 Chat、verdict 三值解析、_meta 聚合（judge §6-5 前半）
+- c_dxrjjl：模型×lane 一致性闸 + opendesign 子代理路由：宿主只回传模型名时网关 wire id（eco）落官方 DeepSeek 车道 400——启动闸点名该钉的 lane（resolveProviderName 单源）；modelcap.Serves/LaneOf 分权 + providerOrder 修 map 随机序
 
 ## v0.13.1（2026-11-24）
 
