@@ -2,7 +2,7 @@
 
 > 数据截至 2026-11-26（北京；采集 2026-11-26T05:12Z，main `76dce969`）；负责人会话（agent，2026-11-12 用户全权移交）定期更新。
 > 模板与写作纪律见 butler 仓 `docs/narrative/README.md`（seek 仓内没有该文件）；事件 `#N` 指 butler 事件 id（`memory_search` / `GET /events` / 看板详情可查）。
-> 上一版 `cc35355f`（2026-11-24，#15210，采集 20:05Z）；其后 `544c378a`（v0.13.1 发版物）同步改了本稿几行。本稿由卡 c_vmrguu 刷新。
+> 上一版 `10dad572`（保险提交，采集 2026-11-24T20:05Z；当时的刷新提交是 `cc35355f`，#15210）；`544c378a`（v0.13.1 发版物）之后又同步改了本稿几行。本稿由卡 c_vmrguu 刷新。
 
 ## 目标
 
@@ -33,11 +33,11 @@
   理由——单轮余量薄、凭证路径非正式——留档未清零）。**CLI 接线仍是断点**：c_jdo7rp 90 分钟被杀
   （#17027）、c_qjuags（`--max-cost`）同因（#17161），两卡 blocked。
 - **验证读数仍由「人核 + 归因」主导**：本窗口 seek 合并 18 张卡，verdict 分布 pass 8 / doubt 6 /
-  未验证 3 / 人工改判 1。doubt 六张里：三张是同一批 `~/.seek` 写入事件（serve 18:07:51Z 与
-  projects worktrees 17:17:30Z，一次人核可解 c_skczdu/c_yc2thl/c_idinaj，见
-  #16892/#16893/#16894）；一张是 c_7vpiz5 自报反向实验写进真实 `~/.seek` 再删除（#16888）；
-  两张各一处枚举缺口（c_3xyt7w 的 `projects/*/sessions` #16473、c_lh6tlq 的
-  `projects/*/worktrees` #16385）。这不是代码质量崩塌，是**存疑归因缺机器闸**。
+  未验证 3 / 人工改判 1。doubt 六张里：三张是同一批 `~/.seek` 写入事件（autopilot
+  `reports.jsonl` 17:12:58Z 与 projects `worktrees` 17:17:30Z 同一 mtime，一次人核可解
+  c_skczdu/c_yc2thl/c_idinaj，见 #16892/#16893/#16894）；一张是 c_7vpiz5 自报反向实验写进真实
+  `~/.seek` 再删除（#16888）；两张各一处枚举缺口（c_3xyt7w 的 `projects/*/sessions` #16473、
+  c_lh6tlq 的 `projects/*/worktrees` #16385）。这不是代码质量崩塌，是**存疑归因缺机器闸**。
 - **状态控制三卡已拍板、零落地**（#17344/#17363）：非额度三态死亡仍一律落 blocked「需人工检查」；
   11-26 03:37Z 三张（c_pozbmd / c_jobprc / c_osfttl）在同一拍以「session 正常结束但未写回」死亡
   （#17407、#17408、#17413）。
@@ -111,9 +111,9 @@
 
 - **主线一 · judge 本体**：内核已进 main；c_jdo7rp（CLI 接线 JSONL in/out + 有界并发 + 退出码
   0/1/2）与 c_qjuags（`--max-cost` + exit 3）两卡均被 90 分钟机制杀（#17027 / #17161），但两个
-  worktree 都留有未提交 WIP（`cmd/seek/judge.go` 443 / 492 行 + `judge.go`/`row.go`/`main.go` 改动）
-  ——翻 todo 走**同分支续做**（复用不重做，勿重做内核）；之后才是 release lane 接入
-  （`eval/README.md` §E7）。另有两张新卡：c_tnzudu
+  worktree 都留有未提交 WIP（采集时刻读数：`cmd/seek/judge.go` 443 / 492 行，外加
+  `judge.go`/`row.go`/`main.go` 改动）——翻 todo 走**同分支续做**（复用不重做，勿重做内核）；
+  之后才是 release lane 接入（`eval/README.md` §E7）。另有两张新卡：c_tnzudu
   （路由表与推断口径对齐，c_dxrjjl 复审发现的死胡同提示）、c_ozeqxx（自动会话标题落 header 的
   additive `title` 字段，#17579）。
 - **主线二 · web W6 九卡链**（口径源 `docs/notes-web-w6-dsh-shell.md` + dsh 中文实拍四图
