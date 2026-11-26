@@ -145,7 +145,7 @@ jget() { # jget <json> <field> — 只取顶层标量/字符串（够用的最�
 }
 
 page=$(curl -s "$BASE/")
-ck "GET / 带主题 token 块（暗）" "yes" "$(has "$page" '--seek-inset: #14161a')"
+ck "GET / 带主题 token 块（暗）" "yes" "$(has "$page" '--seek-inset: #151517')"
 ck "GET / 带主题 token 块（亮）" "yes" "$(has "$page" ':root[data-theme="light"]')"
 ck "GET / 带设置面板骨架" "yes" "$(has "$page" 'id="set-body"')"
 ck "GET / 设置入口按钮" "yes" "$(has "$page" 'id="set-btn"')"
