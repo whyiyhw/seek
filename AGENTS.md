@@ -2,6 +2,10 @@
 
 Auto-loaded by **seek** at startup (and other `AGENTS.md`-convention tools) — the canonical agent instructions for this repo live here. Treat them as mandatory project conventions.
 
+## Development checkout (worktree-first, non-negotiable)
+
+Never edit in the `main` checkout — it is shared: `git status` listing paths you never touched means another session writes there now, and two sessions' staged sets sweep each other's commits (`87a9c5af`). Work via `enter_worktree` / `exit_worktree` or a `drive/<card>` branch; landing on main is the merge step's job (`butler drive merge`). Dirty by accident: `git commit --only <paths>` once `git diff --cached --stat` shows nothing foreign. Precedents: `docs/pitfalls/tooling/` "git add 只加不清…" / "…没开 worktree…".
+
 ## Pitfall recording (load-bearing — read this)
 
 When you fix a non-obvious bug, discover an undocumented API constraint, or find a surprising piece of behaviour:
@@ -42,16 +46,10 @@ When exploring code, follow this order — skipping steps costs tokens and break
 3. `read`'s `limit` defaults to 200 (values above error; files ≤ 32 KiB always come back whole).
 4. `grep` caps at 20 matches by default (`max_matches` can be raised, but rarely should be).
 
-Never page through a whole file to answer a question grep can answer — the rule targets needless full reads of larger files; the cache cost is "Token & prefix-cache constraints", below.
+Never page through a whole file to answer what grep can answer — cache cost: "Token & prefix-cache constraints", below.
 
 5. **read before edit** — `read(offset=N, path=...)` the target lines first to capture the `old_string`'s **exact whitespace** (preserved byte-for-byte; never guess tab depth). One read costs less than the mismatched-`old_string` error-fix loop.
 6. **Git queries: one per git-tool call** — never chain, never bash read-only git; several queries = parallel calls. Rationale: `docs/test-plan-git-tool-shape.md`.
-
-## Tool descriptions: the highest-leverage behavioural lever
-
-> **Audience: maintainers, not the running agent.** Development guidance for tuning the shipped tool descriptions — not a behavioural rule.
-
-The `const description` inside each `internal/tools/<name>/` shapes behaviour ~10× better than a sentence here: it rides every tool schema, so the model MUST read it to build a valid `tool_call` — unlike this file, which weaker/faster models may skim (schemas sit closest to the generation step). Tuning pattern (eval case → baseline → edit → compare) + this repo's tuning-history table: [`eval/README.md`](eval/README.md).
 
 ## Token & prefix-cache constraints (non-negotiable)
 
@@ -89,6 +87,7 @@ Self-recovery first — "ask the user" is the LAST resort. Read the error (the h
 - **Tool JSON schemas are package-level `[]byte` constants**, not built at call time. Identical bytes across turns is what lets DeepSeek's prefix cache hit (`PRD §4.8.1`).
 - **Tool schemas must not expose parameters that let the model bypass output size limits.** Examples: `read`'s `limit` (default/max 200); `grep` has `max_matches` defaulting to 20; `propose` has `maxItems: 20` on `steps` (`maxSteps` const); the `plan` tool's `index` is `minimum: 1` and runtime-checked against the active plan's step count. If a limit is safety-critical, reject values above the max with a clear error.
 - **New tools** live at `internal/tools/<name>/` with a `New(...)` constructor. If the tool can mutate the filesystem or shell, inject a `*permission.Policy`. If the tool wants user choice (picker / approval), inject `*askuser.Policy`.
+- **Tool descriptions** ride every schema (the model must read them): tuning loop + history in [`eval/README.md`](eval/README.md).
 - **Sink interfaces: don't break the main contract — add OPTIONAL sibling interfaces.** When a new feature needs more context flowing into a tool's Sink, do NOT add parameters to the existing Sink method (every fake / recording sink in tests breaks). Define a sibling interface (`type FooReporter interface { Foo() ... }`) and upcast at the call site: `if r, ok := sink.(FooReporter); ok { r.Foo() }`. The propose tool carries four such optional interfaces (`DuplicateChecker`, `ProgressReporter`, `ContextReceiver`, `ArtifactReporter`); none required a Sink signature change. See `docs/pitfalls.md` "Plan artifact write needs context BEFORE Sink.Approved fires".
 - **Wire-format strings are contracts when something parses them.** A tool result string like `[plan: approved]` looks like prose, but `internal/tools/plan/reconstruct.go` scans for that prefix verbatim to seed plan-state on resume. Once a marker has a parser, the marker is wire format — additions go AFTER the closing token (`[plan: approved] (auto-approve-per-step)`), never inside it (`[plan: approved batch]` would silently break reconstruction). When introducing a new variant of an already-parsed result, add a test that asserts on `HasPrefix(out, "<marker>")` so future variants can't slip past.
 - **Session format is JSONL** (`schema_version=3`, `.jsonl` extension): line 1 is the header (all scalar metadata), lines 2..N are one `deepseek.Message` per line. `Load`/`LoadFrom` decode JSONL only; legacy `.json` is never read or migrated. `loadMeta()` reads only line 1 — do not call `Load()` when you only need metadata.
