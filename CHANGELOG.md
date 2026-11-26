@@ -16,6 +16,7 @@
 - c_7vpiz5：测试 HOME 泄漏：acp_test/webfrontend_attach_test 未隔离 SEEK_HOME，PDF 落进真实 ~/.seek/projects（坑8 反复停卡疑似根因）
 - c_koutux：二线车道开流零重试 + 吞 sc.Err：opencode HTTPS/2 PROTOCOL_ERROR 一次打死整轮（openai client，覆盖 opencode/glm/opendesign/compatible 四车道）
 - c_fpnlir：卫生两件：gofmt 4 文件新漂移归位 + 落「多 GOOS 仓 deadcode 单平台误报」pitfall 条目
+- c_42a7rf：seek judge 本体·上：internal/judge 纯逻辑内核——单条判读一次 Chat、verdict 三值解析、_meta 聚合（judge §6-5 前半）
 
 ## v0.13.1（2026-11-24）
 
