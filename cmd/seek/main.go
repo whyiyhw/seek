@@ -4758,9 +4758,24 @@ func loadGateConfig() config.Config {
 //
 // cfg is passed in rather than loaded here so the two callers share one
 // config read (a malformed file degrades to env-only for both).
+// resolveProviderName maps the startup inputs to the provider lane to
+// build. Order (c_tnujb6): flag > cfg.DefaultProvider > key-presence
+// auto-detect > "deepseek". An explicit default_provider used to sit
+// BELOW key-presence detection, which meant that with any key saved —
+// and a normal ~/.seek/config.json saves several — the field could
+// never fire: the operator's declared default was permanently shadowed
+// by whichever key happened to be on disk, and interactive sessions
+// kept billing the per-token DeepSeek lane after the default moved to
+// a subscription lane. A default_provider naming a keyless or unknown
+// provider now fails loud in buildProvider's key check instead of
+// silently falling back onto a different lane — an explicit choice
+// that can't be honored is an error, not a guess.
 func resolveProviderName(provFlag string, cfg config.Config) string {
 	if provFlag != "" {
 		return provFlag
+	}
+	if cfg.DefaultProvider != "" {
+		return cfg.DefaultProvider
 	}
 	switch {
 	case config.KeyFor(cfg, "deepseek") != "":
@@ -4775,8 +4790,6 @@ func resolveProviderName(provFlag string, cfg config.Config) string {
 		return "glm"
 	case config.KeyFor(cfg, "opendesign") != "":
 		return "opendesign"
-	case cfg.DefaultProvider != "":
-		return cfg.DefaultProvider
 	default:
 		return "deepseek"
 	}
@@ -4803,10 +4816,11 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 	// the place that aggressively reports config issues.)
 	cfg, _ := config.Load()
 
-	// Effective provider name. The resolution order (flag > DeepSeek key >
-	// second-tier keys > cfg.DefaultProvider > "deepseek") lives in
-	// resolveProviderName so the ACP startup gate can share it — a second
-	// copy here would let the gate and the built lane disagree.
+	// Effective provider name. The resolution order (flag >
+	// cfg.DefaultProvider > key-presence auto-detect > "deepseek")
+	// lives in resolveProviderName so the ACP startup gate can share
+	// it — a second copy here would let the gate and the built lane
+	// disagree.
 	provFlag = resolveProviderName(provFlag, cfg)
 
 	switch provFlag {
