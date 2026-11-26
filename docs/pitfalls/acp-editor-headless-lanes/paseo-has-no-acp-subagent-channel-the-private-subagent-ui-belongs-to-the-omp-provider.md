@@ -1,0 +1,7 @@
+### Paseo has no ACP subagent channel — the private subagent UI belongs to the OMP provider
+
+- **Saw**: wanted to stream subagent progress into paseo's subagent cards over ACP. The cards exist in the UI, but a seek (`extends:"acp"`) provider could not produce them; only a plain `agent` tool card showed.
+- **Why**: reverse-engineering `Paseo.app/Contents/Resources/app.asar` showed `translateSessionUpdate` handles 11 fixed standard variants and silently drops everything else (`default` branch); `subagent_update` appears zero times. The rich cards are driven by `subagent_lifecycle`/`subagent_progress`/`subagent_event` runtime events from the Oh-My-OpenCode (OMP) provider's private JSON-RPC channel (`OmpSubagentCardTracker` with `parentToolCallId`), unreachable from the ACP wire.
+- **Fix**: stream child text as standard `agent_thought_chunk` frames (paseo renders them in the reasoning region), prefixed with `[<sub-sid>]` for attribution. A per-turn context sink rides the sync subagent's runCtx; no `StreamingTool`/`EmitEvent` (those would break the streaming×readonly dispatch invariant).
+- **Lesson**: before designing a client-side feature, check whether the client's nice UI is fed by the protocol you actually speak. Extension frames a strict client drops are a dead end; prefer the standard variants it demonstrably renders. ACP v2's `subagent_update` draft does not help a v1-negotiated ACP provider.
+- **Refs**: `cmd/seek/subagent_progress.go`, `cmd/seek/main.go` (`acpBackend.Prompt`), `cmd/seek/subagent_glue.go`, `docs/guide-zed.md` §5.

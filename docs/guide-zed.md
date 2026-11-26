@@ -68,6 +68,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 - ✅ **图片输入（P1-3）**：Zed 里给 seek 线程附图，seek 收下 ACP 的 image content block（`type:"image"` + base64 `data` + `mimeType`），**视觉模型原生看图**；非视觉模型则该图不发送、行内注一行「当前模型不支持图片输入，用 /model 选一个支持视觉的模型」，回合照常完成。坏 base64 / 非图 mimeType 静默跳过那一块，不崩（§5.4）。
 - ✅ **流式回复**：文本逐 chunk 推送；**思考流走 `agent_thought_chunk` 独立通道**（2026-11-19 用户拍板开放，客户端渲染为可折叠思考区——主模型的 CoT 会出现；代价：CoT 会进客户端侧日志）。
 - ✅ **工具调用渲染**：`read` / `grep` / `list_dir` / `git` / `edit` 等映射成 ACP 的 `tool_call` 卡片，含 in_progress → completed/failed 状态，且走**全协议字段**（2026-11-18）：`name` + `kind`（客户端图标/呈现分类）、`locations`（绝对文件路径 + 行号，客户端 follow-along）、`rawInput`/`rawOutput`（可折叠原始输入/输出，16KB 截断）、`content`——`edit` 发协议 diff 块（old/new 即改即视），其余工具发结果文本块（4KB 截断）。
+- ✅ **子代理过程实时可见**（2026-11-26）：同步 subagent 的文字进展与工具步骤（`→ read` / `→ grep` 等）经 `agent_thought_chunk` 流到客户端的可折叠思考区，每行带 `[<sub-sid>]` 前缀以便并发子代理可分辨；最终汇总仍落在 `agent` 工具卡片的 `rawOutput`。**只覆盖同步子代理**——后台子代理的生命周期在父回合之后，结果仍走下一轮的 `<context>` 通知。这是标准 ACP v1 帧，不是 paseo 私有 subagent 卡片（那条通道属于 OMP provider，acp 型 provider 够不到）。
 - ✅ **真实编辑工作区**：seek 直接改你打开的项目文件（实测在 `.gitignore` 加了一行成功）。
 - ✅ **取消**：Zed 中断一轮 → seek 收到 `session/cancel`，干净停。
 - ✅ **终止可观测**（2026-11-21，c_vfgeam）：每轮 `session/prompt` 结束时，seek 在响应帧**之前**发一条结构化终止通知，`stopReason` 五值枚举 + 可读 detail + 原始 `finishReason`——断流/静默死亡不再无声，见 §4.1。

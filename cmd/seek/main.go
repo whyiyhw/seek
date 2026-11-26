@@ -3954,6 +3954,18 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 	// absolute file path"), resolved once per turn — the session cwd was
 	// anchored at session/new (D-1) so this is the project root.
 	cwd, _ := os.Getwd()
+	// Subagent progress bridge: install a per-turn sink that streams a
+	// running child's condensed progress into paseo's reasoning region
+	// as standard agent_thought_chunk frames (the ONLY process-text
+	// variant paseo renders from ACP). The sink rides the turn ctx into
+	// the sync subagent's runCtx; background children derive from
+	// SessionCtx and never see it. sendU serialises under the server
+	// mutex, so concurrent sibling spawns cannot interleave mid-frame.
+	// Every frame uses p.SessionID — the child's own id never leaks into
+	// the parent's stream. The sink captures turnCtx so a cancelled turn
+	// drops any late progress flush instead of writing a frame after the
+	// termination/response frames (frame-before-response invariant).
+	ctx = withSubagentProgress(ctx, newACPProgressSink(ctx, p.SessionID, sendU))
 	var (
 		// pendingErr holds the FIRST ErrorEvent instead of returning on
 		// it: an ErrorEvent is fatal only when the stream closes without
