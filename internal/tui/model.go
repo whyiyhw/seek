@@ -50,6 +50,7 @@ import (
 	"github.com/whyiyhw/seek/internal/skilldistill"
 	"github.com/whyiyhw/seek/internal/subagent"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/titlesug"
 	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/internal/worktree"
 	"github.com/whyiyhw/seek/pkg/agent"
@@ -245,9 +246,24 @@ type Options struct {
 	// prediction integration is opt-in by Options not by default.
 	Suggester *suggester.Predictor
 
+	// TitleSuggester, when non-nil, names the session after its first
+	// natural turn with ONE cheap side-channel call; the result is
+	// persisted in the session header (human rename still wins). nil =
+	// auto-title off (--no-title / auto_title:false / non-DeepSeek lane).
+	// A func, not a *deepseek.Client, so tests inject a counting fake
+	// and cmd/seek wires it to titlesug.Generate.
+	TitleSuggester func(ctx context.Context, history []deepseek.Message) string
+
 	// Skills is the loaded skill registry — used by /skills to print
 	// the inventory. nil = no skills available; /skills handles that.
 	Skills *skill.Set
+
+	// SkillsDisabled freezes the skill surface for the session
+	// (`seek --isolated`, judge-engine 缺口③). When true, /clear must
+	// not hot-reload skills: the whole point of the switch is that no
+	// skill file on this machine reaches the prompt or the registry,
+	// and a reload would quietly undo it mid-session.
+	SkillsDisabled bool
 
 	// AgentTypes is the typed-agent definition registry
 	// (feature-orchestration.md P2), loaded once at session start by
@@ -453,6 +469,13 @@ type Model struct {
 	// targets — used by Update to drop late-arriving predictions
 	// when the user has already moved past that turn.
 	suggestedReplyTurn int
+
+	// titleRequested gates the one-shot auto-title: once a generation
+	// Cmd has been scheduled for the current session, no later streamEnd
+	// (or resumed-session Init) schedules another. Cleared when the
+	// session actually changes (/clear, /branch, /compact fork) via
+	// resetSessionCounters so a genuinely new session can be named.
+	titleRequested bool
 
 	stream    <-chan agent.Event
 	streaming bool
@@ -978,12 +1001,45 @@ func (m Model) Init() tea.Cmd {
 			func() tea.Msg { return goalStartMsg{} },
 		)
 	}
+	// Resumed session with history but no generated title: name it once
+	// on startup (same side-channel as a fresh turn's stream-end). The
+	// one-shot gate is set here so a later stream-end can't double-fire;
+	// the result handler writes the header and persists. No-op on a
+	// fresh session (turns==0) or when auto-title is off.
+	if cmd := m.scheduleResumeTitle(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	// Resume replay happens BEFORE tea.NewProgram in Run() — see
 	// renderReplayHistory + the Run() call site. Doing it from inside
 	// Update via tea.Println triggers one redraw per message and floods
 	// the screen at startup for long sessions; the pre-tea stdout
 	// write lands the whole history in scrollback as one batch.
 	return tea.Batch(cmds...)
+}
+
+// scheduleResumeTitle names a resumed session that has history (at least
+// one assistant turn) but no generated title yet. A fresh session starts
+// with turns==0 and is named on its first natural stream-end instead.
+func (m *Model) scheduleResumeTitle() tea.Cmd {
+	if m.opts.TitleSuggester == nil || m.opts.Session == nil || m.opts.Store == nil || m.opts.Agent == nil {
+		return nil
+	}
+	if m.turns == 0 || m.opts.Session.Title != "" || m.titleRequested {
+		return nil
+	}
+	history := m.opts.Agent.Messages()
+	if len(history) == 0 {
+		return nil
+	}
+	m.titleRequested = true
+	gen := m.opts.TitleSuggester
+	root := m.opts.Ctx
+	sid := m.opts.Session.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(root, titlesug.GenerateTimeout)
+		defer cancel()
+		return titleReadyMsg{SID: sid, Title: gen(ctx, history)}
+	}
 }
 
 // waitForApproval pulls one approval request off the channel and
@@ -1126,4 +1182,7 @@ func (m *Model) resetSessionCounters() {
 	m.curContent = ""
 	m.curReasoning = ""
 	m.activeTools = nil
+	// A compact/branch/clear fork is a new session header with no title
+	// yet — forget the one-shot gate so it can be named afresh.
+	m.titleRequested = false
 }

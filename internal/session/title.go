@@ -30,6 +30,27 @@ const (
 	firstUserScanLines = 32
 )
 
+// ResolveTitle applies the title fallback chain shared by every list
+// surface (serve /rpc, ACP, `seek -list`):
+//
+//	human override (sessmeta rename) > generated header Title > derived first user line
+//
+// It is a pure function: callers supply the override they own (serve
+// reads sessmeta, the CLI reads it best-effort, a browse-only embedder
+// passes "") and this package — the single authority on first-user
+// derivation — decides the precedence. Empty override + empty header
+// title degrade to the exact derivation that existed before generated
+// titles, so every old fixture keeps its label byte-for-byte.
+func ResolveTitle(dir, id, headerTitle, override string) string {
+	if override != "" {
+		return override
+	}
+	if headerTitle != "" {
+		return headerTitle
+	}
+	return FirstUserTitle(dir, id)
+}
+
 // FirstUserTitle flattens a session's first user message into a
 // one-line label. Best-effort by design: a missing file, a torn tail
 // (concurrent append) or a corrupt line ends the scan quietly — a list

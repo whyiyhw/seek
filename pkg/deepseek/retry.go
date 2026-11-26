@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 )
 
@@ -13,13 +14,35 @@ import (
 // genuinely down. Safe because every re-sent body is byte-identical
 // (prefix cache stays hot) and retry only fires before any caller-
 // visible state is committed.
+//
+// The backoff is failure-class-dependent, mirroring
+// pkg/llm/provider/openai/client.go's policy (the two packages keep
+// identical retry shapes — pkg/deepseek may not import pkg/llm, so the
+// rule is duplicated by hand, not shared). A fast rejection (reset, EOF,
+// 5xx body) is a blip: 500ms. A TIMEOUT — net.Error whose Timeout() is
+// true, which is what a stalled TLS handshake or a dead proxy reports —
+// consumed its whole budget producing nothing, so retrying 500ms later
+// walks back into the same stall; it gets a longer wait instead.
 const (
 	maxRetries   = 1
 	retryBackoff = 500 * time.Millisecond
+	// timeoutBackoff follows a TIMED-OUT attempt. See above.
+	timeoutBackoff = 3 * time.Second
 )
 
+// backoffFor picks the wait before the next attempt: a timeout gets the
+// long one, everything else the fixed short blip backoff.
+func backoffFor(lastErr error) time.Duration {
+	var ne net.Error
+	if errors.As(lastErr, &ne) && ne.Timeout() {
+		return timeoutBackoff
+	}
+	return retryBackoff
+}
+
 // retryCall runs op until it succeeds, retrying transient failures once
-// with a fixed backoff. On exhaustion the returned error is annotated
+// with a class-dependent backoff (see backoffFor). On exhaustion the
+// returned error is annotated
 // with the number of attempts made ("… (after N attempts)") so callers
 // can tell a one-shot upstream blip from an endpoint that stayed down
 // across every attempt. ctx cancellation aborts immediately and
@@ -31,7 +54,7 @@ func retryCall[T any](ctx context.Context, op func() (T, error)) (T, error) {
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		attempts++
 		if attempt > 0 {
-			if err := sleepCtx(ctx, retryBackoff); err != nil {
+			if err := sleepCtx(ctx, backoffFor(lastErr)); err != nil {
 				return zero, err
 			}
 		}

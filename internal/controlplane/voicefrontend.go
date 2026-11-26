@@ -34,9 +34,13 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/whyiyhw/seek/internal/paths"
+	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -100,6 +104,14 @@ type VoiceFrontend struct {
 
 	uploads chan voiceUpload // /voice handler → Run loop
 
+	usage string // append-JSONL cost log, resolved in Run when empty
+	now   func() time.Time
+
+	// usageOff is set when the default ledger path could not be resolved:
+	// the frontend keeps transcribing, the bookkeeping is off (already
+	// warned once at Run — a per-call warn would spam the serve log).
+	usageOff bool
+
 	inboxMu sync.RWMutex
 	inbox   chan<- Inbound // set by Run; the handler never touches it
 
@@ -119,11 +131,25 @@ type voiceUpload struct {
 var _ Frontend = (*VoiceFrontend)(nil)
 
 // NewVoice builds the frontend around one ASR implementation. It is
-// inert until Attach hosts it on a web frontend.
+// inert until Attach hosts it on a web frontend. Billing rows land in
+// <serve>/voice-usage.jsonl (the speaker's file — one ledger, both
+// directions of the voice lane).
 func NewVoice(asr VoiceASR) *VoiceFrontend {
+	return newVoice(asr, "")
+}
+
+// NewVoiceAt builds the frontend with an explicit usage-log path — the
+// test / injection seam that avoids the host-global paths.ServeDir, the
+// same "At" shape as OpenBindingStoreAt (and SpeakerConfig.UsagePath).
+func NewVoiceAt(asr VoiceASR, usagePath string) *VoiceFrontend {
+	return newVoice(asr, usagePath)
+}
+
+func newVoice(asr VoiceASR, usagePath string) *VoiceFrontend {
 	return &VoiceFrontend{
 		asr:     asr,
 		uploads: make(chan voiceUpload, voiceQueueDepth),
+		usage:   usagePath,
 	}
 }
 
@@ -151,6 +177,22 @@ func (v *VoiceFrontend) Run(ctx context.Context, in chan<- Inbound) error {
 	}
 	if v.asr == nil {
 		return errors.New("voice: no ASR client configured")
+	}
+	// Cost ledger resolution happens HERE (the Run boundary), the same
+	// laziness as the speaker's: paths.ServeDir only computes a path, and
+	// a host with no resolvable home loses the bookkeeping, never the
+	// frontend (best-effort by contract).
+	if v.now == nil {
+		v.now = time.Now
+	}
+	if v.usage == "" {
+		serveDir, err := paths.ServeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "controlplane: voice: usage log disabled (resolve serve dir): %v\n", err)
+			v.usageOff = true
+		} else {
+			v.usage = filepath.Join(serveDir, voiceUsageFile)
+		}
 	}
 	v.inboxMu.Lock()
 	v.inbox = in
@@ -184,6 +226,16 @@ func (v *VoiceFrontend) deliver(ctx context.Context, up voiceUpload, in chan<- I
 		return
 	}
 	fmt.Fprintf(os.Stderr, "controlplane: voice: transcribed event %s: %dms, %d chars\n", up.event, durMS, len([]rune(text)))
+	// Billed BEFORE the empty-transcript early-out: a 2xx transcription
+	// costs money whether or not it recognised anything (the ASR client's
+	// contract — only 2xx is billable, and this one was). Same posture as
+	// the speaker's logUsage: the row is bookkeeping, the frame below is
+	// the user's answer.
+	outcome := voiceOutcomeTranscribed
+	if strings.TrimSpace(text) == "" {
+		outcome = voiceOutcomeEmpty
+	}
+	v.logUsage(up.device, durMS, outcome)
 	if strings.TrimSpace(text) == "" {
 		v.notify(up.webConv, "voice-error", webJSON(voiceErrorEvent{Error: "（未识别到语音内容）"}))
 		return
@@ -223,6 +275,29 @@ func (v *VoiceFrontend) deliver(ctx context.Context, up voiceUpload, in chan<- I
 // notify frames one named SSE event to the page's own web conv.
 func (v *VoiceFrontend) notify(webConv ConvID, name, data string) {
 	v.web.broadcast(webConv, sseFrame{name: name, data: data})
+}
+
+// logUsage appends one billed-transcription row to the voice ledger —
+// the ASR half of the §6 serve-side bookkeeping the speaker's TTS rows
+// live in. Pricing basis is the SERVER-reported duration_ms (the ASR
+// response's own number, not the uploaded container's), passed raw to
+// pricing.ASRCost which ceils to whole seconds. Best-effort: a failed
+// append WARNs and never disturbs the inbound path (the money was
+// already spent; losing the row loses only the tally).
+func (v *VoiceFrontend) logUsage(device string, durationMS int64, outcome string) {
+	if v.usage == "" || v.usageOff {
+		return // resolution failed (already warned at Run) or not yet run
+	}
+	if err := appendVoiceUsageLine(v.usage, voiceUsageLine{
+		TS:         v.now().UTC(),
+		Kind:       voiceKindASR,
+		Conv:       string(NewConvID("voice", device)),
+		DurationMS: durationMS,
+		CostUSD:    pricing.ASRCost(float64(durationMS) / 1000),
+		Outcome:    outcome,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "controlplane: voice: usage log: %v\n", err)
+	}
 }
 
 // Send implements the Frontend port: deliver one reply to the PAGE

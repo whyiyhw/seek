@@ -139,7 +139,7 @@ seek --provider glm
 - **图片**：v4.1-flash / -eco、glm-5.3-flash(x)、claude-haiku-5.5、gpt-6-luna、kimi-k2.7-code、minimax-m3.1-flash、mimo-v2.6-flash/pro 都实测能吃 `image_url` data URL（**注意** `deepseek-v4.1-flash-eco` 的网关 metadata 把 `input_modalities` 写成 text-only，实测却正常识图——以实测为准，`modelcap.Vision` 已收录）。
 - **文档（PDF）**：claude-haiku-5.5 / glm-5.3-flashx / gpt-6-luna 实测能读 `file` part；`deepseek-v4.1-flash` **会静默丢弃** `file` part（回一个 200 但答"没有附件"）。seek 的能力表按 wire id 索引，该 id 在 OpenCode 车道是真支持文档的，因此这里共享了那条「是」——这是已知车道歧义，见 `docs/pitfalls/llm-provider-quirks-m6/`。
 - **与 OpenCode 车道的 id 冲突**：两条订阅车道的菜单高度重叠（deepseek-v4.1-flash、glm-5.3-flash、kimi-k2.7-code、mimo-v2.6-* 等），wire id 相同。seek 的价目/上下文/能力表都按 wire id 索引，只能复用一张卡：2026-11-24 逐 id 核对后，共享 id 的牌价基本一致，唯一偏差是 `glm-5.3-flash`——编译卡是 OpenCode 车道的 2× 峰时价，OpenDesign 列表价是它的一半，即成本显示高估 2×（订阅本身不按 token 计费，与其它防御性牌价同姿势）。另一个已知瑕疵在显示层：`modelcap.LaneOf` 会把共享 id 判给 OpenCode（旧主张优先），所以 `--provider=opendesign` 跑共享 id 时 web 顶栏的车道 chip 显示 OpenCode。
-- **子代理路由**：本切片**没有**把 `opendesign` 加进 `agent` 工具的 provider 枚举（`internal/subagent/routing.go` 的路由表按 id 反查 provider，两条车道共用 id 会退化成 map 遍历顺序）。父会话可跑，子代理路由留后续卡。
+- **子代理路由**：`opendesign` **已**进 `agent` 工具的 provider 枚举（`internal/subagent/routing.go` 的 `ProviderOpenDesign`，菜单条目直接来自 `pricing.OpenDesignModels`）。两条车道共用多个 wire id（deepseek-v4.1-flash、deepseek-v4-pro、kimi-k2.7-code 等），因此路由校验的是 **(provider, model) 这一对**：同一 id 在两条车道条目下都合法，点名 provider 才决定走哪个网关。只给模型名时的推断先问 `modelcap.LaneOf`（唯一车道权威，共享 id 按旧主张判给先有的那条车道，显示面与路由同一答案），再退回路由表（显式顺序 deepseek → glm → opencode → opendesign，不受 map 遍历顺序影响）。缺 key 的车道不会出现在表里（"显式命名 + key 存在"才路由），命名了却没 key 时 spawn 报结构化错误，绝不静默回落到父车道；跨车道点名时报错会直接指出该 id 属于哪条车道。配置示例：`{"agents": {"explore": {"provider": "opendesign", "model": "deepseek-v4.1-flash-eco"}}}`。
 
 **症状对照 / symptom → fix**
 
@@ -228,7 +228,21 @@ seek --provider anthropic
 - 优先级：内置默认 < config 段 < `agents/*.md`（同名时文件层直接压过 config）。未知键名启动时警告并忽略（前向兼容）。
 - `seek agents list` 可查看合并后的注册表（project > user > config > builtin）。
 
+### 跨机器可复现（`--isolated` / `--memory`）
 
+同一命令在两台机器上请求字节不同，来源是四样机器本地状态渗进 system prompt：skills、MCP servers、项目 AGENTS.md、记忆（M/L）。两个开关把它们管起来（judge-engine PRD §2.2 缺口②③）：
+
+```bash
+seek --isolated                    # 一把关：skills + MCP + AGENTS.md + memory 全不加载（蕴含 --memory=off）
+seek --memory=off                  # 只关记忆（M/L 不加载、无 memory 工具）
+seek --memory=ro                   # 只读记忆：L+M 照常进提示词、memory_recall 可用，零写回
+seek --memory=rw                   # 默认，历史行为不变
+seek --no-save --memory=ro         # judge 车道典型配置：不留会话垃圾，但带上口味记忆
+```
+
+- **`--isolated` 与 `--memory=ro|rw` 互斥**（exit 2）：隔离的意义就是没有环境状态进提示词，不能与加载记忆的模式同用。
+- `--no-save` 已收窄为**只管 transcript 落盘**，不再连带关记忆链。
+- 所有默认值不变（不加开关 = 行为与历史逐字节等价）；标志细节见 [guide-commands.md](guide-commands.md)。
 
 ## 6. CLI 参考 / CLI reference
 

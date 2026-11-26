@@ -78,6 +78,14 @@ type Session struct {
 	// ParentID is set for sessions created by /branch or /compact —
 	// points at the session this one was forked from.
 	ParentID string `json:"parent_id,omitempty"`
+	// Title is the LLM-derived one-line label written once after the
+	// first natural turn (internal/titlesug). Empty = no generated title
+	// yet, and list surfaces fall back to FirstUserTitle's derivation.
+	// Additive like Effort/Tools — old readers ignore the unknown key,
+	// so schema_version stays 3. The header never enters an API request
+	// body (messages are separate JSONL lines), so this costs no prefix
+	// cache. A human rename (sessmeta) still overrides this everywhere.
+	Title string `json:"title,omitempty"`
 	// Effort overrides the reasoning_effort sent to DeepSeek. Empty
 	// (the on-disk default) means "do not override" — the agent falls
 	// back to ShouldEnableThinking() on the active model. Values: "" |
@@ -476,6 +484,10 @@ type SessionInfo struct {
 	Turns     int
 	ToolCalls int
 	ParentID  string
+	// Title is the header's generated label, if any. loadMeta reads the
+	// whole header anyway, so exposing this costs no second file read.
+	// Empty means list surfaces should fall back to FirstUserTitle.
+	Title string
 	// CWD is the working directory recorded in the header. Consumers
 	// that bucket sessions by project hash it with paths.ProjectID
 	// (skill auto-distillation's batch scan, M-SD2).
@@ -564,6 +576,7 @@ func (s *Store) loadMeta(id string) (SessionInfo, error) {
 		Turns:     sess.Turns,
 		ToolCalls: sess.ToolCalls,
 		ParentID:  sess.ParentID,
+		Title:     sess.Title,
 		CWD:       sess.CWD,
 		Usage:     sess.Usage,
 	}, nil

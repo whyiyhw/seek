@@ -94,3 +94,48 @@ func TestLaneOf_OpenDesignCoversMenu(t *testing.T) {
 		t.Error("no OpenDesign-exclusive ids — openDesignIDs is doing nothing; re-check the menus")
 	}
 }
+
+// TestServes pins the routing companion's contract (c_dxrjjl): the lane
+// MENU, not LaneOf's ownership answer. Shared ids are the crux — LaneOf
+// resolves them to the older Go claim while BOTH gateways carry them, and
+// a startup gate that reasoned from LaneOf alone would refuse the
+// OpenDesign lane's own default model.
+func TestServes(t *testing.T) {
+	cases := []struct {
+		lane, model string
+		want        bool
+	}{
+		{LaneOpenDesign, "deepseek-v4.1-flash-eco", true}, // OpenDesign-exclusive
+		{LaneOpenCode, "deepseek-v4.1-flash-eco", false},
+		{LaneOpenDesign, pricing.ModelOpenDesignV41Flash, true}, // shared default
+		{LaneOpenCode, pricing.ModelOpenDesignV41Flash, true},   // …served by the Go lane too
+		{LaneOpenDesign, "kimi-k3", false},                      // Go-only id
+		{LaneOpenCode, "kimi-k3", true},
+		{LaneOpenDesign, "deepseek-flash", false}, // first-tier id
+		{LaneOpenCode, "deepseek-flash", false},
+		{"deepseek", "deepseek-v4.1-flash-eco", false}, // no gateway menu
+		{"", "deepseek-v4.1-flash-eco", false},
+		{LaneOpenDesign, "", false},
+	}
+	for _, c := range cases {
+		if got := Serves(c.lane, c.model); got != c.want {
+			t.Errorf("Serves(%q, %q) = %v, want %v", c.lane, c.model, got, c.want)
+		}
+	}
+}
+
+// TestServes_MenuCompleteness is the "no second table" guard from the
+// routing side: every row either menu carries must be served by its own
+// lane, and every exclusive row of one menu must be refused by the other.
+func TestServes_MenuCompleteness(t *testing.T) {
+	for _, row := range pricing.OpenDesignModels {
+		if !Serves(LaneOpenDesign, row.ID) {
+			t.Errorf("OpenDesign menu row %q is not served by its own lane", row.ID)
+		}
+	}
+	for _, row := range pricing.OpenCodeGoModels {
+		if !Serves(LaneOpenCode, row.ID) {
+			t.Errorf("Go menu row %q is not served by its own lane", row.ID)
+		}
+	}
+}

@@ -45,7 +45,7 @@ Put a Markdown file with YAML frontmatter in an `agents/` directory to define yo
 name: verifier                      # optional — falls back to the filename
 description: Runs the test suite and reports failures.
 tools: [read, grep, list_dir, git, bash]   # subset of the parent registry; omitted = full set
-provider: glm                       # optional lane override (deepseek | glm)
+provider: glm                       # optional lane override (deepseek | glm | opencode | opendesign)
 model: glm-5.3                      # optional
 effort: low                         # optional (low | medium | high)
 workflow: plan-analyze              # optional, tighten-only

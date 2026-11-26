@@ -140,3 +140,60 @@ func TestPersistSession_HappyPathRoundtrip(t *testing.T) {
 			loaded.Turns, loaded.ToolCalls)
 	}
 }
+
+// TestPersistSession_PlanRoundtrips pins acceptance ② of c_idinaj: the
+// /plan toggle must reach the session header. Before the fix persistSession
+// wrote Yolo but not Plan, so `-resume` inherited a stale value — a session
+// that entered /plan mid-run came back with plan off even though the plan
+// tool's transcript-reconstructed task list was restored (the header
+// projection of the workflow axis never reflected runtime changes,
+// c_n2k6qi §1.1).
+func TestPersistSession_PlanRoundtrips(t *testing.T) {
+	store := persistSessionTestFixture(t)
+	sess := session.New("deepseek-v4-flash", t.TempDir(), "", false, false)
+
+	m := testModel().WithAgent(newFakeAgent()).WithStore(store).WithCustomState(func(m *Model) {
+		m.opts.Session = sess
+		// /plan entered mid-session — the header started at false.
+		m.opts.Plan = true
+	}).BuildPtr()
+
+	m.persistSession()
+
+	loaded, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !loaded.Plan {
+		t.Errorf("loaded.Plan = false after persistSession with opts.Plan=true — the toggle never reached the header")
+	}
+	if loaded.Plan != m.opts.Session.Plan {
+		t.Errorf("on-disk Plan (%v) != in-memory Session.Plan (%v)", loaded.Plan, m.opts.Session.Plan)
+	}
+}
+
+// TestPersistSession_PlanOffClearsOnReload is the other direction: toggling
+// /plan off must clear the header bit, otherwise a resumed session would
+// silently re-enter plan-analyze (read-only) against the user's last state.
+func TestPersistSession_PlanOffClearsOnReload(t *testing.T) {
+	store := persistSessionTestFixture(t)
+	sess := session.New("deepseek-v4-flash", t.TempDir(), "", false, true) // started in plan
+
+	m := testModel().WithAgent(newFakeAgent()).WithStore(store).WithCustomState(func(m *Model) {
+		m.opts.Session = sess
+		m.opts.Plan = false // /plan toggled off mid-session
+	}).BuildPtr()
+
+	m.persistSession()
+
+	loaded, err := store.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Plan {
+		t.Errorf("loaded.Plan = true after /plan-off; resume would re-enter plan mode")
+	}
+	if m.opts.Session.Plan != false {
+		t.Errorf("in-memory Session.Plan = %v, want false", m.opts.Session.Plan)
+	}
+}

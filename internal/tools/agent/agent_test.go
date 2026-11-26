@@ -807,3 +807,55 @@ func TestTool_Execute_ContinueMissingPrompt(t *testing.T) {
 		t.Errorf("error missing field name: %v", err)
 	}
 }
+
+// TestTool_SchemaProviderEnumIncludesOpenDesign is c_dxrjjl acceptance ③:
+// the provider enum must offer the lane internal/subagent can now route
+// (ProviderOpenDesign), and its description must say so. The enum is
+// advisory at decode time (strict unmarshal only rejects unknown FIELDS),
+// so the assertion is on the published schema text — the surface the model
+// reads when choosing where to send a child.
+func TestTool_SchemaProviderEnumIncludesOpenDesign(t *testing.T) {
+	tl := newToolWithStubRunner(t, func(ctx context.Context, j subagent.RunnerJob) (subagent.RunnerResult, error) {
+		return subagent.RunnerResult{Summary: "ok"}, nil
+	})
+	var schema struct {
+		Properties map[string]struct {
+			Enum        []string `json:"enum"`
+			Description string   `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(tl.Schema(), &schema); err != nil {
+		t.Fatalf("schema unmarshal: %v", err)
+	}
+	prov, ok := schema.Properties["provider"]
+	if !ok {
+		t.Fatal("schema has no provider property")
+	}
+	want := []string{
+		subagent.ProviderDeepSeek,
+		subagent.ProviderGLM,
+		subagent.ProviderOpenCode,
+		subagent.ProviderOpenDesign,
+	}
+	if len(prov.Enum) != len(want) {
+		t.Fatalf("provider enum = %v, want %v", prov.Enum, want)
+	}
+	for i, w := range want {
+		if prov.Enum[i] != w {
+			t.Errorf("provider enum[%d] = %q, want %q (order is part of the schema bytes)", i, prov.Enum[i], w)
+		}
+	}
+	for _, must := range []string{"opendesign", "OPENDESIGN_API_KEY", "share several wire ids"} {
+		if !strings.Contains(prov.Description, must) {
+			t.Errorf("provider description lacks %q:\n%s", must, prov.Description)
+		}
+	}
+	// Every enum value must be routable — an enum entry the routing table
+	// rejects is worse than a missing one (the model would pick it and eat
+	// a spawn_error).
+	for _, v := range prov.Enum {
+		if _, err := subagent.ResolveRoute(v, ""); err != nil {
+			t.Errorf("enum value %q is not routable: %v", v, err)
+		}
+	}
+}

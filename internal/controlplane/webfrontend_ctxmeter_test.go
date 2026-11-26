@@ -111,10 +111,10 @@ func TestWeb_PageCtxMeter(t *testing.T) {
 	page := string(webPage)
 	for _, need := range []string{
 		// ContextMeter: consumes the W5 usage additions verbatim
-		"u.ctx_limit",                    // window from budget, server-side
-		"u.lane",                         // lane label from modelcap, server-side
+		"u.ctx_limit", // window from budget, server-side
+		"u.lane",      // lane label from modelcap, server-side
 		"ctx.used = (u.prompt || 0) + (u.completion || 0);", // LAST turn, not meter.prompt+meter.completion (cumulative)
-		"renderCtx()",                    // usage listener repaints the meter
+		"renderCtx()", // usage listener repaints the meter
 		// colour grades at budget.Classify's thresholds (0.60/0.75)
 		"frac >= 0.75 ? 'crit' : frac >= 0.6 ? 'warn' : ''",
 		// remaining-tokens readout (已用/余量 both present)

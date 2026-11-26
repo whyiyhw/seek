@@ -241,7 +241,7 @@ func (s *Set) Len() int { return len(s.order) }
 // Returns "" when the set is empty so cmd/seek can decide whether to
 // append the section at all.
 func (s *Set) Manifest() string {
-	if s.Len() == 0 {
+	if s == nil || s.Len() == 0 {
 		return ""
 	}
 	var b strings.Builder

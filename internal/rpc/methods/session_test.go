@@ -27,6 +27,7 @@ import (
 
 	"github.com/whyiyhw/seek/internal/rpc"
 	"github.com/whyiyhw/seek/internal/session"
+	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/pkg/deepseek"
 )
 
@@ -130,6 +131,58 @@ func TestSessionList(t *testing.T) {
 		if _, err := reg.Dispatch(context.Background(), "session/list", json.RawMessage(params)); err != nil {
 			t.Errorf("params %q: %v", params, err)
 		}
+	}
+}
+
+// TestSessionListTitleFallbackChain pins the three-level precedence at
+// the RPC read surface: sessmeta rename > generated header title >
+// derived first user line. The header-title leg is written directly
+// into a fixture session so no generator/LLM is involved.
+func TestSessionListTitleFallbackChain(t *testing.T) {
+	st, err := session.NewStoreAt(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := session.New("m", "/tmp", "", false, false)
+	sess.Title = "生成的标题"
+	sess.Messages = []deepseek.Message{{Role: deepseek.RoleUser, Content: "原始首行"}}
+	if err := st.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	meta := sessmeta.OpenAt(filepath.Join(t.TempDir(), "meta.json"), "")
+	reg := rpc.NewRegistry()
+	NewSessionsWithMeta(st, meta).RegisterAll(reg)
+
+	list := func() string {
+		t.Helper()
+		res, err := reg.Dispatch(context.Background(), "session/list", json.RawMessage(`{}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := res.(sessionListResult).Sessions
+		if len(rows) != 1 {
+			t.Fatalf("rows = %d, want 1", len(rows))
+		}
+		return rows[0].Title
+	}
+
+	// No override → header title wins over derived first user line.
+	if got := list(); got != "生成的标题" {
+		t.Fatalf("header title = %q, want 生成的标题", got)
+	}
+	// Human rename overrides the generated header title.
+	if _, err := meta.SetTitle(sess.ID, "人工改名"); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got != "人工改名" {
+		t.Fatalf("override = %q, want 人工改名", got)
+	}
+	// Clear the override → header title comes back.
+	if _, err := meta.SetTitle(sess.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got != "生成的标题" {
+		t.Fatalf("after override clear = %q, want 生成的标题", got)
 	}
 }
 

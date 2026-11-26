@@ -228,7 +228,7 @@ func TestWeb_ApprovalEmptyState(t *testing.T) {
 
 	page := string(webPage)
 	for _, want := range []string{
-		`id="ap-badge" hidden`,         // badge ships hidden
+		`id="ap-badge" hidden`,                // badge ships hidden
 		`#approvals:empty { display: none; }`, // stack hides when empty
 	} {
 		if !strings.Contains(page, want) {

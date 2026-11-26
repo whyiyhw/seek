@@ -10,6 +10,18 @@
 - c_trrsn7：`-p` 车道补 `--effort` / `--temperature` 旗标（judge 前置①：成本 3.2×）
 - c_xujwvq：参数校验先于 MCP fork：--tools nosuch 不该先加载 9 个 MCP 工具（judge 前置④）
 - c_sozboy：AGENTS.md 会话存储句漂移：legacy .json 迁移已删（65a31d50）+ schema_version 实为 3，文档仍写「migrated on next Save / =2」（eval E7 待开卡 #2，纯文档）
+- c_skczdu：autopilot 车道 pref 升 YOLO + flag 解析形状（R2 接线前置，§9.5③2）
+- c_yc2thl：ASR 计费链路接线：pricing.ASRCost 至今零调用方，照 TTSCost 接线点对称接上
+- c_idinaj：resume 两断点：reconstruct 丢 `[plan: approved] (auto-approve-per-step)` 后缀、persistSession 不回写 Session.Plan
+- c_7vpiz5：测试 HOME 泄漏：acp_test/webfrontend_attach_test 未隔离 SEEK_HOME，PDF 落进真实 ~/.seek/projects（坑8 反复停卡疑似根因）
+- c_koutux：二线车道开流零重试 + 吞 sc.Err：opencode HTTPS/2 PROTOCOL_ERROR 一次打死整轮（openai client，覆盖 opencode/glm/opendesign/compatible 四车道）
+- c_fpnlir：卫生两件：gofmt 4 文件新漂移归位 + 落「多 GOOS 仓 deadcode 单平台误报」pitfall 条目
+- c_42a7rf：seek judge 本体·上：internal/judge 纯逻辑内核——单条判读一次 Chat、verdict 三值解析、_meta 聚合（judge §6-5 前半）
+- c_dxrjjl：模型×lane 一致性闸 + opendesign 子代理路由：宿主只回传模型名时网关 wire id（eco）落官方 DeepSeek 车道 400——启动闸点名该钉的 lane（resolveProviderName 单源）；modelcap.Serves/LaneOf 分权 + providerOrder 修 map 随机序
+- c_4rp2py：--no-save 连带关记忆链：拆 --memory=off|ro|rw 正交开关 + --isolated 一把关（judge 前置缺口②③，§6-6）
+- c_3j2ovf：握手预算：车道继承 stdlib 10s TLS 握手超时、超时类失败又与瞬时 reset 共用 500ms 退避，opendesign 一轮死在 `TLS handshake timeout (after 2 attempts)`。改共享 20s transport（克隆 DefaultTransport，proxy/HTTP2 原样）+ 按失败类别退避（`net.Error.Timeout()` → 3s），覆盖 openai/compatible、anthropic、gemini 与 DeepSeek 一线
+- c_qjuags：seek judge 本体·下：--max-cost 成本硬顶——pricing 累加、预算尽停派新条、exit 3（judge §6-7）
+- c_vmrguu：叙事稿开首稿：seek
 
 ## v0.13.1（2026-11-24）
 

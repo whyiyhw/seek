@@ -65,6 +65,7 @@ import (
 	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/sessioncli"
+	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skilldistill"
@@ -74,6 +75,7 @@ import (
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/sysprompt"
 	"github.com/whyiyhw/seek/internal/taskcli"
+	"github.com/whyiyhw/seek/internal/titlesug"
 	"github.com/whyiyhw/seek/internal/tools"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
@@ -179,6 +181,20 @@ func main() {
 		if errors.Is(err, errToolsUsage) {
 			os.Exit(2)
 		}
+		// `seek judge` splits failure by KIND (PRD §3.4, card c_jdo7rp):
+		// the message was already printed by the validation site / the
+		// lane, so these two exit silently. 2 = "you wrote the command
+		// wrong, do not retry"; 1 = "the file is complete but some rows
+		// carry an error" — CI reads the error rows from the JSONL.
+		if errors.Is(err, errJudgeUsage) {
+			os.Exit(2)
+		}
+		if errors.Is(err, errJudgeBudget) {
+			os.Exit(3)
+		}
+		if errors.Is(err, errJudgePartial) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "seek:", err)
 		os.Exit(1)
 	}
@@ -233,6 +249,7 @@ Commands:
   auth         browser login for a provider lane (opencode)
   goal         unattended main-agent loop:   seek goal run "<goal>"
   autopilot    unattended orchestration:     seek autopilot run "<goal>"
+  judge        judge a JSONL batch against a caller-owned rubric ("seek judge help")
 
 Flags:
 `)
@@ -327,6 +344,30 @@ func run() error {
 	if len(os.Args) >= 2 && os.Args[1] == "cron" {
 		return routinescli.Run(os.Args[2:], os.Stdout, os.Stderr)
 	}
+	// `seek judge ...` — the judging engine (PRD
+	// docs/prd/feature-judge-engine.md §6-5, card c_jdo7rp). Dispatched
+	// ahead of flag.Parse for the same two reasons as the verbs above:
+	// it needs no session, no project, and no TUI, and it must NOT load
+	// the tool registry or fork any MCP server (c_xujwvq's precedent:
+	// argument validation before any fork). The lane owns its own flag
+	// set — flag.Parse stops at the first positional, which is exactly
+	// the trap that folded `--yolo` into autopilot's goal string; here
+	// the positional case is rejected as usage instead.
+	if len(os.Args) >= 2 && os.Args[1] == "judge" {
+		if err := runJudge(os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			if errors.Is(err, errJudgeUsage) {
+				os.Exit(2)
+			}
+			if errors.Is(err, errJudgeBudget) {
+				os.Exit(3)
+			}
+			if errors.Is(err, errJudgePartial) {
+				os.Exit(1)
+			}
+			return err
+		}
+		return nil
+	}
 	// `seek task ...` + the ps / attach / kill aliases (v8 柱 V1,
 	// docs/prd/feature-task-lifetime.md). Same rationale as cron/worktree:
 	// the management verbs read ~/.seek/tasks/ and nothing else, so they
@@ -387,10 +428,13 @@ func run() error {
 		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
 		noSuggest     = flag.Bool("no-suggest", false, "disable v4 柱 D suggested-reply (predictor + UI placeholder + calibration injection); equivalent to suggest_reply=false in ~/.seek/config.json")
+		noTitle       = flag.Bool("no-title", false, "disable automatic session naming (one cheap Flash call after the first turn); equivalent to auto_title=false in ~/.seek/config.json")
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		approvalStdin = flag.Bool("approval-stdin", false, "print mode (--json) only: surface permission prompts as approval_request lines on stdout and read the decision lines from stdin (the remote control plane's approval channel)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
 		noProj        = flag.Bool("no-project-md", false, "do not auto-load AGENTS.md from the project tree")
+		memoryFlag    = flag.String("memory", "", "memory access for this session: `off|ro|rw`. rw (default) = load M/L memory, inject it, and allow writes (the historical behaviour). ro = load + inject + memory_recall only, NOTHING is written back (no recall-count touch, no GC flips, no auto-dream). off = do not load memory at all. Orthogonal to --no-save (which owns the transcript only) — --no-save --memory=ro is the judge lane")
+		isolatedFlag  = flag.Bool("isolated", false, "one switch that pins the environment out of the prompt: no skills, no MCP servers, no project AGENTS.md, no memory (implies --memory=off). Makes the same command byte-identical across machines. Off by default — TUI users see no change")
 		providerFlag  = flag.String("provider", "", "LLM provider: deepseek (default) | anthropic | openai | gemini | glm | opencode | opendesign | compatible")
 		baseURL       = flag.String("base-url", "", "base URL for --provider=compatible; overrides the default endpoint for --provider=glm / --provider=opencode / --provider=opendesign")
 		providerName  = flag.String("provider-name", "Compatible", "display name for --provider=compatible")
@@ -469,10 +513,56 @@ func run() error {
 	// saved effort.
 	effortSet := visited["effort"] && strings.TrimSpace(*effortFlag) != ""
 
+	// --memory / --isolated (judge-engine PRD §2.2 缺口②③, card
+	// c_4rp2py). Both default to the historical behaviour: absent
+	// --memory == rw, absent --isolated == false. Validated here,
+	// before any provider probe, so a bad value dies with exit 2.
+	memoryModeValue, memErr := resolveMemoryMode(
+		*memoryFlag, visited["memory"] && strings.TrimSpace(*memoryFlag) != "", *isolatedFlag)
+	if memErr != nil {
+		fmt.Fprintln(os.Stderr, "seek:", memErr)
+		return errFlagUsage
+	}
+	// memLoad: M/L are read from disk and injected into the prompt.
+	// memWrite: the model may write memory back (tools + hook writers).
+	// In ro the read half is on and the write half is off — a Project
+	// opened by OpenReadOnly refuses writes at the storage layer too,
+	// so this is belt and braces rather than the only guard.
+	memLoad := memoryModeValue != memoryOff
+	memWrite := memoryModeValue == memoryReadWrite
+
+	// --isolated: one switch that takes every machine-local source out
+	// of the prompt (skills, MCP servers, project AGENTS.md, memory).
+	// Expressed as the flag itself plus the folded memory/AGENTS
+	// decisions; the individual gates below read these two values, so
+	// the isolation is one place to audit.
+	isolated := *isolatedFlag
+	if isolated {
+		memLoad, memWrite = false, false
+	}
+
 	// --yolo and --plan are mutually exclusive.
 	if *yolo && *plan {
 		return fmt.Errorf("--yolo and --plan are mutually exclusive")
 	}
+
+	// The unattended `autopilot` lane is detected HERE, right after
+	// flag.Parse, for the same reason the ACP pins moved to the top of
+	// the shared init: its permission posture has to be resolved before
+	// initialPref (a late SetPref would leave "Mode: deny" in the system
+	// prompt while the gate was already yolo — the model then never even
+	// tries bash, exactly the SEEK_ACP_YOLO trap). Detection reads
+	// flag.Args() (the positionals after flag.Parse stopped), not
+	// os.Args[1], because `seek --yolo autopilot run "<goal>"` puts a
+	// flag ahead of the subcommand — the one shape a human can actually
+	// type to opt into yolo explicitly (c_skczdu).
+	autopilotLane, parsedAutopilotGoal, autopilotArgErr := autopilotInvocation(flag.Args(), func(name string) bool {
+		return flag.CommandLine.Lookup(name) != nil
+	})
+	if autopilotArgErr != nil {
+		return autopilotArgErr
+	}
+	autopilotGoal := parsedAutopilotGoal
 
 	// --approval-stdin belongs to the JSONL print lane only: it turns the
 	// child's stdout into an event stream carrying approval_request lines
@@ -551,6 +641,16 @@ func run() error {
 				*model = m
 			}
 		}
+		// c_dxrjjl: model×lane consistency BEFORE anything is built. A host
+		// that passes only a model name (paseo does) leaves the lane to
+		// buildProvider's auto-detect, so an OpenDesign gateway wire id can
+		// land on the DeepSeek first-class client and 400 upstream. The
+		// gate refuses that startup instead of handing the mismatched id to
+		// a lane that cannot serve it (see acp_lane_gate.go for the full
+		// evidence and the tolerated escape hatches).
+		if err := acpStartupLaneGate(*model, *providerFlag, loadGateConfig()); err != nil {
+			return err
+		}
 	}
 
 	// Cron-fired autopilot lane pins (v8 §9.5③1, c_kdblc4) — resolved
@@ -562,18 +662,26 @@ func run() error {
 	// key is read or any client built — a refused run is a failed run,
 	// loudly. Like the ACP pin, a pinned provider suppresses the
 	// first-run wizard: the cron child is a headless spawn.
-	autopilotLane := resolveAutopilotCronLane(os.Getenv)
-	if len(os.Args) >= 2 && os.Args[1] == "autopilot" {
-		if err := autopilotLane.GateErr(); err != nil {
+	//
+	// Keyed off autopilotLane (flag.Args()-derived), NOT os.Args[1]: the
+	// gate has to fire on `seek --yolo autopilot run "g"` too, and that
+	// shape has a flag in argv[1] — the exact trap autopilotInvocation
+	// exists to close (c_skczdu). A cron child is spawned with no
+	// leading flags (routines/tick.go builds ["autopilot","run",prompt]),
+	// so this can only ever ADD coverage, never lose it.
+	// TestAutopilotCronGate_E2EFiresOnFlagLedShape pins that claim.
+	cronLane := resolveAutopilotCronLane(os.Getenv)
+	if autopilotLane {
+		if err := cronLane.GateErr(); err != nil {
 			return err
 		}
-		if p := autopilotLane.PinProvider(); p != "" && *providerFlag == "" {
+		if p := cronLane.PinProvider(); p != "" && *providerFlag == "" {
 			*providerFlag = p
 		}
-		if m := autopilotLane.PinModel(); m != "" && *model == "" {
+		if m := cronLane.PinModel(); m != "" && *model == "" {
 			*model = m
 		}
-		if line := autopilotLane.LogLine(); line != "" {
+		if line := cronLane.LogLine(); line != "" {
 			fmt.Fprintln(os.Stderr, line)
 		}
 	}
@@ -727,12 +835,26 @@ func run() error {
 	// keeps priority: it is checked FIRST, and runACP doesn't even
 	// install the askFn on that lane, so no request can be sent.
 	acpYolo := acpLane && acp.YoloFromEnv(os.Getenv)
-	initialPref := permission.PrefDeny
-	if *yolo || acpYolo {
-		initialPref = permission.PrefYolo
-	} else if (*approvalStdin && *jsonOut) || acpLane {
-		initialPref = permission.PrefAsk
-	}
+	initialPref := initialPreference(prefInputs{
+		flagYolo:      *yolo,
+		acpYolo:       acpYolo,
+		acpLane:       acpLane,
+		approvalStdin: *approvalStdin && *jsonOut,
+		autopilotLane: autopilotLane,
+	})
+	// Yolo/Ask/Deny precedence lives in initialPreference (autopilot_lane.go)
+	// so the whole decision surface — including the autopilot lane — is
+	// unit-tested without booting the CLI (c_skczdu). The autopilot lane
+	// is yolo because nobody is there to answer an ask, and a PrefDeny
+	// gate here is not "safe" — it is exactly the bug in
+	// docs/pitfalls/typed-agents-orchestration/autopilot-lane-never-
+	// elevates-preference…: every worker's bash is denied, so the fleet
+	// can edit files but never run go test, and "done" means "I didn't
+	// verify". The no-remote guard (LaneAutopilot) still blocks push/PR,
+	// so yolo here opens LOCAL edit/shell only — the same posture as
+	// goalMode. `--yolo` is ALSO accepted on this lane (it is the explicit
+	// opt-in a human can type, and `seek --yolo autopilot run …` is the
+	// shape that works); it just cannot make the lane looser.
 	initialWorkflow := permission.WorkflowNone
 	if *plan {
 		initialWorkflow = permission.WorkflowPlanAnalyze
@@ -782,8 +904,9 @@ func run() error {
 	// Project-level AGENTS.md, if present. Walks up from cwd. Failures
 	// (permission denied on a real file) are reported but non-fatal —
 	// the rest of seek still works without project instructions.
+	// --isolated subsumes --no-project-md: one switch, one audit point.
 	var projMD projectmd.Result
-	if !*noProj {
+	if !*noProj && !isolated {
 		pm, perr := projectmd.Load(cwd)
 		if perr != nil {
 			fmt.Fprintln(os.Stderr, "project-md:", perr)
@@ -794,12 +917,23 @@ func run() error {
 	// Load skills before the system prompt is rendered — the manifest
 	// is appended below. Errors are non-fatal: a malformed user skill
 	// shouldn't lock the agent out of running.
-	skills, skillStats, _ := skill.Load(skill.LoadOptions{ProjectDir: cwd})
-	for _, err := range skillStats.Errors {
-		fmt.Fprintln(os.Stderr, "skills:", err)
-	}
-	if summary := skillStats.FormatLoadSummary(); summary != "" {
-		fmt.Fprintln(os.Stderr, summary)
+	//
+	// --isolated skips the load entirely (not just the manifest): a
+	// skill file read is already machine-local I/O, and the Skill tool
+	// over an empty set is a cleaner zero than the tool over a
+	// silently-hidden set. skills stays nil, which every downstream
+	// consumer (Compose's SkillManifest, the Skill tool, /skills,
+	// auto-distill) already treats as "nothing loaded".
+	var skills *skill.Set
+	if !isolated {
+		var skillStats skill.LoadStats
+		skills, skillStats, _ = skill.Load(skill.LoadOptions{ProjectDir: cwd})
+		for _, err := range skillStats.Errors {
+			fmt.Fprintln(os.Stderr, "skills:", err)
+		}
+		if summary := skillStats.FormatLoadSummary(); summary != "" {
+			fmt.Fprintln(os.Stderr, summary)
+		}
 	}
 
 	// Typed agent definitions (feature-orchestration.md P2-a + P2-c):
@@ -1065,10 +1199,18 @@ func run() error {
 		Add(guarded(goalBash)).
 		Add(monitor.New(bgMgr)).
 		Add(guarded(gittool.New())).
-		Add(skilltool.NewWithStats(skills, statsWriter, statsEnv)).
 		Add(skillinstall.NewFetch()).
 		Add(skillinstall.NewCommit(policy)).
 		Add(askusertool.New(askPolicy))
+
+	// The Skill tool is registered only when a set was actually loaded.
+	// Default runs always have one (skill.Load returns a Set even from
+	// an empty tree); --isolated leaves it nil, and a Skill tool whose
+	// every call answers "no skills are loaded in this session" is
+	// noise in the schema, not a surface (judge-engine 缺口③).
+	if skills != nil {
+		reg.Add(skilltool.NewWithStats(skills, statsWriter, statsEnv))
+	}
 
 	// v5 柱 G worktree tools — only register when Manager
 	// constructed successfully. nil Manager would force the
@@ -1141,15 +1283,27 @@ func run() error {
 	// and no configured MCP server could supply it) exits 2 without
 	// paying a single subprocess — judge/CI lanes used to fork all
 	// configured servers only to die in applyToolsWhitelist afterwards.
+	//
+	// --isolated (judge-engine 缺口③, c_4rp2py) skips the config read
+	// AND the fork entirely: no server is started, no tool schema
+	// enters the prefix, no `mcp:` line on stderr. The precheck still
+	// runs against an EMPTY config, so `--isolated -tools x__y` fails
+	// fast with the same unknown-tool exit 2 instead of silently
+	// deferring to a load that will never happen.
 	var mcpSection string
-	mcpCfg, mcpCfgErr := mcpconfig.Load()
-	if mcpCfgErr != nil {
-		fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+	mcpCfg := mcpconfig.Config{}
+	if !isolated {
+		var mcpCfgErr error
+		mcpCfg, mcpCfgErr = mcpconfig.Load()
+		if mcpCfgErr != nil {
+			fmt.Fprintln(os.Stderr, "mcp config:", mcpCfgErr)
+			mcpCfg = mcpconfig.Config{} // a broken file supplies nothing
+		}
 	}
 	if err := checkToolsWhitelistPreMCP(*toolsFlag, reg, mcpCfg); err != nil {
 		return err
 	}
-	if mcpCfgErr == nil && len(mcpCfg.MCPServers) > 0 {
+	if len(mcpCfg.MCPServers) > 0 {
 		servers := make(map[string]mcptool.ServerConfig, len(mcpCfg.MCPServers))
 		for name, e := range mcpCfg.MCPServers {
 			servers[name] = mcptool.ServerConfig{
@@ -1176,16 +1330,32 @@ func run() error {
 		}
 	}
 
-	// M layer + L layer. Without session persistence (--no-save) we
-	// also skip memory persistence — they share the "this is a
-	// throwaway run" intent. Load failures are non-fatal: a broken
-	// or read-only ~/.seek/projects/ degrades the session (no memory
-	// injection, no recall, no remember) but should not block startup.
-	// memProject is forward-declared above (the Skill stats env fn
-	// captures it by reference); only the assignment lives here.
+	// M layer + L layer, now on their own axis (judge-engine 缺口②,
+	// c_4rp2py). --no-save no longer decides this; --memory does:
+	//
+	//   off → nothing loaded, no memory tool, no hook.
+	//   ro  → L + M read through memory.OpenReadOnly (no directory
+	//         creation, no manifest bump, no pointer write) and
+	//         memory_recall only; every mutator refuses at the storage
+	//         layer, so "read the taste, leave no trace" is structurally
+	//         true rather than a promise about the tools we happened to
+	//         register.
+	//   rw  → the historical path (LoadOrCreate + the four tools).
+	//
+	// Load failures are non-fatal: a broken or read-only
+	// ~/.seek/projects/ degrades the session (no memory injection, no
+	// recall, no remember) but should not block startup. memProject is
+	// forward-declared above (the Skill stats env fn captures it by
+	// reference); only the assignment lives here.
 	var memSoul *memory.Soul
-	if !*noSave {
-		if proj, err := memory.LoadOrCreate(abs); err != nil {
+	if memLoad {
+		if memWrite {
+			if proj, err := memory.LoadOrCreate(abs); err != nil {
+				fmt.Fprintln(os.Stderr, "memory:", err)
+			} else {
+				memProject = proj
+			}
+		} else if proj, err := memory.OpenReadOnly(abs); err != nil {
 			fmt.Fprintln(os.Stderr, "memory:", err)
 		} else {
 			memProject = proj
@@ -1195,10 +1365,12 @@ func run() error {
 		} else {
 			memSoul = soul
 		}
-		reg.Add(memorytool.NewRecall(memProject)).
-			Add(memorytool.NewRemember(memProject, policy)).
-			Add(memorytool.NewArchive(memProject)).
-			Add(memorytool.NewAmend(memProject))
+		reg.Add(memorytool.NewRecall(memProject))
+		if memWrite {
+			reg.Add(memorytool.NewRemember(memProject, policy)).
+				Add(memorytool.NewArchive(memProject)).
+				Add(memorytool.NewAmend(memProject))
+		}
 	}
 
 	// sessionDate is computed ONCE here and threaded through every
@@ -1368,6 +1540,19 @@ func run() error {
 		prepareMessages = suggester.InjectCalibration
 	}
 
+	// Auto session title: one cheap side-channel call after the first
+	// natural turn. Same switch shape as suggested-reply (CLI flag >
+	// config, default on) and DeepSeek-only — the generator needs the
+	// non-streaming Chat the first-tier client exposes. Wired as a func
+	// so the TUI tests can inject a counting fake without an HTTP server.
+	autoTitleEnabled := !*noTitle && appCfg.AutoTitleEnabled() && dsClient != nil
+	var titleSuggester func(context.Context, []deepseek.Message) string
+	if autoTitleEnabled {
+		titleSuggester = func(ctx context.Context, history []deepseek.Message) string {
+			return titlesug.Generate(ctx, dsClient, history)
+		}
+	}
+
 	// v5 柱 G subagent orchestrator (feature-subagent PRD §3.7).
 	// Subagent persistence (index + transcript dir) needs an
 	// activeSession; in --no-save we skip subagent wiring entirely
@@ -1384,23 +1569,21 @@ func run() error {
 	// below can pass the same pointer (or nil) without scoping
 	// gymnastics. /agents handler nil-checks it.
 	// v7 柱 N: `seek autopilot run "<goal>"` — unattended orchestration.
-	// Detected here (after the full agent/subagent/worktree wiring is
-	// available) rather than as a cheap early subcommand. In this mode
-	// every subagent gets the no-remote bash guard for the whole run.
+	// autopilotLane/autopilotGoal were resolved right after flag.Parse
+	// (the pref posture has to be known before initialPref); everything
+	// below that is lane-specific lives here, after the full
+	// agent/subagent/worktree wiring is available. In this lane every
+	// subagent gets the no-remote bash guard for the whole run.
 	// The SEEK_ACP_YOLO lane shares the guard: subagents spawnable
 	// there must not push either (PRD paseo §3.3).
-	autopilotMode := len(os.Args) >= 2 && os.Args[1] == "autopilot"
-	autopilotGoal := ""
-	if autopilotMode && len(os.Args) >= 3 && os.Args[2] == "run" {
-		autopilotGoal = strings.TrimSpace(strings.Join(os.Args[3:], " "))
-	}
+	autopilotMode := autopilotLane
 	// Lane label for the no-remote guard mounted on every subagent bash in
 	// this run; "" = no guard. A label rather than a func so the child
 	// wiring passes the REAL lane into the refusal (c_ajza7r: under
 	// SEEK_ACP_YOLO the old wording claimed "autopilot runs unattended"
 	// while a human was present and had asked for the push). ACP first —
-	// the two modes are mutually exclusive today (argv[1]), order makes
-	// the precedence explicit rather than accidental.
+	// the two modes are mutually exclusive today, order makes the
+	// precedence explicit rather than accidental.
 	autopilotGuardLane := ""
 	if acpYolo {
 		autopilotGuardLane = autopilot.LaneACP
@@ -1687,13 +1870,24 @@ func run() error {
 	// from the model see the correct in-memory state. Reconstruction
 	// is a pure-read scan — no events emitted (no agent Prompt active
 	// yet, EmitEvent would no-op anyway).
+	//
+	// The reconstructed batch flag is installed BEFORE Restore on
+	// purpose: Restore routes through bridge.StepChanged, and that
+	// single path re-arms preApproved when batch mode is on with a
+	// step still in flight (cur >= 0). Skipping this line was the
+	// resume half of the c_n2k6qi gap — the approval mode lives only
+	// in the transcript's "(auto-approve-per-step)" suffix, so a
+	// prefix-only read downgraded every resumed batch plan to per-call
+	// y/N and the "plan(start) re-arms the gate" contract propose
+	// teaches the model stopped holding.
 	var (
 		restoredPlanSteps  []agent.PlanStep
 		restoredPlanCurIdx = -1
 	)
 	if loaded != nil && len(initialMsgs) > 0 {
-		steps, cur := plantool.ReconstructFromTranscript(initialMsgs)
+		steps, cur, batch := plantool.ReconstructFromTranscript(initialMsgs)
 		if len(steps) > 0 {
+			bridge.RestoreApprovalMode(batch)
 			planTool.Restore(steps, cur)
 			restoredPlanSteps = make([]agent.PlanStep, len(steps))
 			for i, st := range steps {
@@ -1708,6 +1902,14 @@ func run() error {
 	// pointer and dispatches at call-time, so deferring registration
 	// past agent.New is safe — no events fire until NotifySessionStart
 	// below.
+	//
+	// --memory=ro registers the hook WITHOUT any write-side collaborator
+	// (Distiller / Dreamer / HistoryProvider): the prompt still gets the
+	// L+M snapshot, but no observe filter, no memory_observe tool, and
+	// no auto-dream can start a write. The storage layer refuses the
+	// writes too (memory.ErrReadOnly) — two independent guards, because
+	// the hook's writers each reach a different file (M JSONL, soul.md,
+	// observe-stats.json).
 	var memHook *memory.Hook
 	if memProject != nil || memSoul != nil {
 		memHook = &memory.Hook{
@@ -1715,7 +1917,7 @@ func run() error {
 			Soul:       memSoul,
 			ResultChan: make(chan memory.ObserveResult, 20),
 		}
-		if memProject != nil && dsClient != nil {
+		if memWrite && memProject != nil && dsClient != nil {
 			memHook.Distiller = &memory.Distiller{Client: dsClient}
 			memHook.HistoryProvider = ag.Messages
 			memHook.Dreamer = &memory.Dreamer{Client: dsClient}
@@ -2067,8 +2269,13 @@ func run() error {
 	// constructible when we have a DeepSeek client — second-tier
 	// providers don't currently expose a Chat method on the same
 	// interface, so /distill is DeepSeek-only for now.
+	//
+	// --memory=ro leaves it nil: /distill's whole output is a memory
+	// write, so offering it in a read-only session would be a button
+	// that always fails. nil is the TUI's documented "unavailable"
+	// signal (commands.go: "记忆不可用").
 	var distiller *memory.Distiller
-	if memProject != nil && dsClient != nil {
+	if memWrite && memProject != nil && dsClient != nil {
 		distiller = &memory.Distiller{Client: dsClient}
 	}
 
@@ -2178,7 +2385,9 @@ func run() error {
 		Worktrees:             wtMgr,
 		Keymap:                userKeymap,
 		Suggester:             predictor,
+		TitleSuggester:        titleSuggester,
 		Skills:                skills,
+		SkillsDisabled:        isolated,
 		AgentTypes:            agentTypes,
 		Hooks:                 hooksReg,
 		Webhook:               routinescli.WebhookDispatcherFromConfig(),
@@ -2206,8 +2415,14 @@ func run() error {
 			// Skills, however, ARE hot-reloaded here so that newly
 			// installed skills (via skill_commit) appear in the system
 			// prompt manifest after /new without requiring a full restart.
-			if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
-				skills = freshSkills
+			// --isolated keeps skills nil for the process lifetime: the
+			// whole point of the switch is that no skill file is read
+			// (judge-engine 缺口③, c_4rp2py), and a rebuild must not
+			// quietly reintroduce the machine-local manifest.
+			if !isolated {
+				if freshSkills, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: cwd}); lerr == nil && freshSkills != nil {
+					skills = freshSkills
+				}
 			}
 			sp := sysprompt.Compose(sysprompt.Header{
 				Cwd:            abs,
@@ -2630,7 +2845,8 @@ func runRPC(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model 
 
 // printSessionList renders the saved-sessions inventory to stdout
 // for -list. Tabular but plain-text (no lipgloss) so it pipes cleanly
-// into grep / awk.
+// into grep / awk. TITLE is last so a long label never shifts the
+// fixed-width columns before it.
 func printSessionList(store *session.Store) error {
 	infos, loadErrs, err := store.List()
 	if err != nil {
@@ -2643,20 +2859,34 @@ func printSessionList(store *session.Store) error {
 		fmt.Println("no saved sessions in", store.Dir())
 		return nil
 	}
-	fmt.Printf("%-25s  %-22s  %-10s  %5s  %5s  %s\n",
-		"ID", "UPDATED (UTC)", "MODEL", "TURNS", "TOOLS", "PARENT")
+	// Human renames live in the serve-owned sessmeta store. Read them
+	// best-effort (never write — that's the serve process's job) so a
+	// damaged/missing side file can't break `seek -list`; a human rename
+	// still wins over the generated header title on this surface.
+	overrides := map[string]sessmeta.Entry{}
+	if meta, mErr := sessmeta.Open(); mErr == nil {
+		overrides, _ = meta.All()
+	}
+	fmt.Printf("%-25s  %-22s  %-10s  %5s  %5s  %s  %s\n",
+		"ID", "UPDATED (UTC)", "MODEL", "TURNS", "TOOLS", "PARENT", "TITLE")
 	for _, s := range infos {
 		parent := "-"
 		if s.ParentID != "" {
 			parent = s.ParentID
 		}
-		fmt.Printf("%-25s  %-22s  %-10s  %5d  %5d  %s\n",
+		override := ""
+		if e, ok := overrides[s.ID]; ok {
+			override = e.Title
+		}
+		title := session.ResolveTitle(store.Dir(), s.ID, s.Title, override)
+		fmt.Printf("%-25s  %-22s  %-10s  %5d  %5d  %s  %s\n",
 			s.ID,
 			s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			truncate(s.Model, 10),
 			s.Turns,
 			s.ToolCalls,
-			parent)
+			parent,
+			title)
 	}
 	return nil
 }
@@ -3262,7 +3492,9 @@ func (b *acpBackend) ListSessions(p acp.ListSessionsParams) (acp.ListSessionsRes
 		out = append(out, acp.SessionSummary{
 			SessionID: info.ID,
 			Cwd:       info.CWD,
-			Title:     session.FirstUserTitle(b.store.Dir(), info.ID),
+			// Same chain as serve's /rpc session/list (no sessmeta
+			// override on the ACP lane: renames are a serve-side UI fact).
+			Title:     session.ResolveTitle(b.store.Dir(), info.ID, info.Title, ""),
 			UpdatedAt: info.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
@@ -4479,6 +4711,51 @@ func runUpgradeCheck() error {
 	return nil
 }
 
+// loadGateConfig reads ~/.seek/config.json for the gate. A parse error is
+// IGNORED here (the gate only needs key presence + default_provider; a
+// corrupted file is buildProvider/Save's problem to report moments later),
+// matching buildProvider's own `cfg, _ := config.Load()` posture.
+func loadGateConfig() config.Config {
+	cfg, _ := config.Load()
+	return cfg
+}
+
+// resolveProviderName returns the provider buildProvider would actually
+// construct for the given flag value: the explicit flag wins; otherwise
+// auto-detect runs in the documented priority order (DeepSeek key first,
+// then the second-tier lanes' keys, then cfg.DefaultProvider, then
+// "deepseek" as the last resort). Extracted so the ACP startup gate
+// (acpStartupLaneGate, c_dxrjjl) can ask "which lane will this process
+// land on?" BEFORE buildProvider builds anything — the gate must see the
+// auto-detect outcome, not just the pin, because the misrouting this
+// guards against happens exactly when a host passes a model id alone.
+//
+// cfg is passed in rather than loaded here so the two callers share one
+// config read (a malformed file degrades to env-only for both).
+func resolveProviderName(provFlag string, cfg config.Config) string {
+	if provFlag != "" {
+		return provFlag
+	}
+	switch {
+	case config.KeyFor(cfg, "deepseek") != "":
+		return "deepseek"
+	case config.KeyFor(cfg, "anthropic") != "":
+		return "anthropic"
+	case config.KeyFor(cfg, "openai") != "":
+		return "openai"
+	case config.KeyFor(cfg, "gemini") != "":
+		return "gemini"
+	case config.KeyFor(cfg, "glm") != "":
+		return "glm"
+	case config.KeyFor(cfg, "opendesign") != "":
+		return "opendesign"
+	case cfg.DefaultProvider != "":
+		return cfg.DefaultProvider
+	default:
+		return "deepseek"
+	}
+}
+
 // buildProvider selects and constructs the LLM provider based on the
 // --provider flag, env vars, and ~/.seek/config.json (in that order).
 // Returns:
@@ -4500,33 +4777,11 @@ func buildProvider(provFlag, baseURLFlag, provName string) (
 	// the place that aggressively reports config issues.)
 	cfg, _ := config.Load()
 
-	// Determine effective provider name. Order:
-	//   1. --provider flag (explicit user intent)
-	//   2. DeepSeek if its key is anywhere (env or config)
-	//   3. Second-tier whose key is set, if no DeepSeek key
-	//   4. cfg.DefaultProvider (the setup wizard writes this)
-	//   5. "deepseek" as final fallback (errors out later if no key)
-	if provFlag == "" {
-		deepseekHas := config.KeyFor(cfg, "deepseek") != ""
-		switch {
-		case deepseekHas:
-			provFlag = "deepseek"
-		case config.KeyFor(cfg, "anthropic") != "":
-			provFlag = "anthropic"
-		case config.KeyFor(cfg, "openai") != "":
-			provFlag = "openai"
-		case config.KeyFor(cfg, "gemini") != "":
-			provFlag = "gemini"
-		case config.KeyFor(cfg, "glm") != "":
-			provFlag = "glm"
-		case config.KeyFor(cfg, "opendesign") != "":
-			provFlag = "opendesign"
-		case cfg.DefaultProvider != "":
-			provFlag = cfg.DefaultProvider
-		default:
-			provFlag = "deepseek"
-		}
-	}
+	// Effective provider name. The resolution order (flag > DeepSeek key >
+	// second-tier keys > cfg.DefaultProvider > "deepseek") lives in
+	// resolveProviderName so the ACP startup gate can share it — a second
+	// copy here would let the gate and the built lane disagree.
+	provFlag = resolveProviderName(provFlag, cfg)
 
 	switch provFlag {
 	case "deepseek":

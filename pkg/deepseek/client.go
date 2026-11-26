@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -42,13 +43,38 @@ func WithAPIKey(k string) Option { return func(c *Client) { c.apiKey = k } }
 // WithBaseURL returns an Option that overrides the default API base URL.
 func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
 
+// WithHTTPClient returns an Option that replaces the client's
+// *http.Client. Same seam internal/upgrade and the second-tier adapters
+// use: tests inject a short handshake timeout, production never passes
+// one. A caller supplying its own client owns its transport settings —
+// including TLSHandshakeTimeout.
+func WithHTTPClient(hc *http.Client) Option { return func(c *Client) { c.http = hc } }
+
+// handshakeTimeout is the TLS-handshake budget for the first-tier lane,
+// identical to pkg/llm/provider/openai's (the two lanes must not disagree
+// about what counts as "the endpoint is down"). The stdlib default is 10s
+// — a general-purpose web number that a proxied streaming POST outgrows
+// the moment the tunnel is cold or the gateway stalls. See that constant
+// for the full argument and the card trail (c_3j2ovf / c_koutux).
+const handshakeTimeout = 20 * time.Second
+
+// transport is the process-wide http.Transport for this package, cloned
+// from http.DefaultTransport so proxy-from-environment and HTTP/2 attempt
+// stay the stdlib's; only the handshake budget differs.
+var transport = sync.OnceValue(func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSHandshakeTimeout = handshakeTimeout
+	return t
+})
+
 // New returns a Client with the given functional options.
-// Defaults: baseURL = DefaultBaseURL (DeepSeek production), HTTP timeout = 5 minutes.
+// Defaults: baseURL = DefaultBaseURL (DeepSeek production), HTTP timeout = 5 minutes,
+// TLS handshake budget = 20s (see handshakeTimeout).
 // At minimum, WithAPIKey or DEEPSEEK_API_KEY must be set before making requests.
 func New(opts ...Option) *Client {
 	c := &Client{
 		baseURL: DefaultBaseURL,
-		http:    &http.Client{Timeout: 5 * time.Minute},
+		http:    &http.Client{Timeout: 5 * time.Minute, Transport: transport()},
 	}
 	for _, o := range opts {
 		o(c)

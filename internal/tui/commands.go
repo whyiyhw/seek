@@ -342,7 +342,9 @@ func cmdNew(m *Model, _ string) cmdResult {
 	// Reload skills so /skills shows any newly installed skills.
 	// RebuildAgent already reloads skills for the system prompt, but
 	// opts.Skills is a separate reference that cmdSkills reads from.
-	if m.opts.CWD != "" {
+	// SkillsDisabled (seek --isolated) skips the reload — see that
+	// field's doc; the host already keeps RebuildAgent from reloading.
+	if m.opts.CWD != "" && !m.opts.SkillsDisabled {
 		if reloaded, _, lerr := skill.Load(skill.LoadOptions{ProjectDir: m.opts.CWD}); lerr == nil && reloaded != nil {
 			m.opts.Skills = reloaded
 		}

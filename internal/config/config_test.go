@@ -498,6 +498,58 @@ func TestAgentsConfig_AbsentSectionCompat(t *testing.T) {
 	}
 }
 
+// ---- auto_title ----
+
+// TestAutoTitleEnabled_DefaultOn pins the default-on pointer policy: a
+// config written before auto_title existed (field absent) keeps the
+// generator enabled; an explicit false turns it off.
+func TestAutoTitleEnabled_DefaultOn(t *testing.T) {
+	var c Config
+	if !c.AutoTitleEnabled() {
+		t.Error("absent auto_title must default on")
+	}
+	f := false
+	c.AutoTitle = &f
+	if c.AutoTitleEnabled() {
+		t.Error("auto_title:false must disable the generator")
+	}
+	tr := true
+	c.AutoTitle = &tr
+	if !c.AutoTitleEnabled() {
+		t.Error("auto_title:true must enable the generator")
+	}
+}
+
+// TestAutoTitle_RoundTrip: the hand-editable key survives Save/Load; a
+// config with no key loads as absent → default-on (backward compat).
+func TestAutoTitle_RoundTrip(t *testing.T) {
+	withSeekHome(t)
+	f := false
+	if err := Save(Config{AutoTitle: &f}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoTitle == nil || *got.AutoTitle {
+		t.Fatalf("auto_title:false round-trip: %+v", got.AutoTitle)
+	}
+
+	dir := withSeekHome(t)
+	pre := `{"default_provider": "deepseek", "providers": {"deepseek": {"api_key": "sk-x"}}}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(pre), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := Load()
+	if err != nil {
+		t.Fatalf("pre-auto_title config must load clean: %v", err)
+	}
+	if old.AutoTitle != nil || !old.AutoTitleEnabled() {
+		t.Errorf("absent auto_title must read as default-on, got %+v", old.AutoTitle)
+	}
+}
+
 // ---- auto_compact ----
 
 // TestAutoCompact_AbsentSectionIsOff: a config without the section

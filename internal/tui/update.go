@@ -113,6 +113,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case titleReadyMsg:
+		// One-shot auto-title landed off the UI thread. Drop stale results
+		// (a /clear /branch /compact swapped the session while the call was
+		// in flight) and empty results (generator failed / refused — the
+		// derived first-user-line label stays). Otherwise write the header
+		// and persist via the session's single write path.
+		if msg.Title == "" || m.opts.Session == nil || m.opts.Session.ID != msg.SID {
+			return m, nil
+		}
+		// A human rename (serve-side sessmeta) can't be observed from here,
+		// but the header title is what this process owns — write it once.
+		m.opts.Session.Title = msg.Title
+		m.persistSession()
+		return m, nil
+
 	case statusTickMsg:
 		m.now = time.Now()
 		// A minute passed — off-peak window may have just opened or

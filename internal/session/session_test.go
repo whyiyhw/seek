@@ -634,6 +634,60 @@ func TestSaveLoad_PreservesGoal(t *testing.T) {
 	}
 }
 
+// TestSaveLoad_PreservesTitle covers the generated-title header field:
+// non-empty values round-trip through Save/Load/List, and an empty Title
+// must not leak a "title" key into the header bytes (omitempty, same
+// contract as Effort/Goal — old sessions stay byte-identical).
+func TestSaveLoad_PreservesTitle(t *testing.T) {
+	for _, want := range []string{"", "修复 WebSocket 重连"} {
+		t.Run("title="+want, func(t *testing.T) {
+			store := newStoreIn(t)
+			sess := New("deepseek-v4-flash", "/tmp", "", false, false)
+			sess.Title = want
+			if err := store.Save(sess); err != nil {
+				t.Fatal(err)
+			}
+			got, err := store.Load(sess.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Title != want {
+				t.Errorf("Title round-trip: got %q, want %q", got.Title, want)
+			}
+			raw, err := os.ReadFile(filepath.Join(store.Dir(), sess.ID+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			header, _, _ := strings.Cut(string(raw), "\n")
+			if hasKey := strings.Contains(header, `"title"`); (want == "") == hasKey {
+				t.Errorf("header title key mismatch (want=%q, hasKey=%v): %s", want, hasKey, header)
+			}
+			// List's cheap metadata view must surface the title too —
+			// every list surface consumes SessionInfo, not Load.
+			infos, _, err := store.List()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(infos) != 1 || infos[0].Title != want {
+				t.Errorf("List title: got %+v, want %q", infos, want)
+			}
+		})
+	}
+}
+
+// TestFork_DoesNotInheritTitle pins that a /branch child starts without
+// its parent's generated label — the fork is a new conversation whose
+// title must be derived (or generated afresh), never copied.
+func TestFork_DoesNotInheritTitle(t *testing.T) {
+	t.Parallel()
+	parent := New("m", ".", "", false, false)
+	parent.Title = "父会话标题"
+	child := parent.Fork()
+	if child.Title != "" {
+		t.Errorf("fork inherited parent title: %q", child.Title)
+	}
+}
+
 // TestSaveLoad_Roundtrip_Images: feature-vision — image-bearing user
 // messages must survive the JSONL round-trip with their durable Asset
 // references (and no data URLs), so -resume can re-materialise them.

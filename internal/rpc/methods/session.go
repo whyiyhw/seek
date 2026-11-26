@@ -190,14 +190,16 @@ func (s *Sessions) list(ctx context.Context, params json.RawMessage) (any, error
 	out := make([]sessionSummary, 0, len(infos))
 	tier := pricing.CurrentTier(time.Now())
 	for _, info := range infos {
-		title := firstUserTitle(store.Dir(), info.ID)
+		// Fallback chain: human rename (sessmeta) > generated header
+		// title > derived first user line. ResolveTitle lives with the
+		// store so every list surface shares one precedence rule.
+		override := ""
 		archived := false
 		if e, ok := meta[info.ID]; ok {
-			if e.Title != "" {
-				title = e.Title
-			}
+			override = e.Title
 			archived = e.Archived
 		}
+		title := session.ResolveTitle(store.Dir(), info.ID, info.Title, override)
 		if archived && !p.IncludeArchived {
 			continue
 		}
@@ -360,11 +362,9 @@ func mapReadError(sid string, err error) error {
 }
 
 // ---------- list titling ----------
-
-// firstUserTitle delegates to the store package's derivation (extracted
-// there 2026-11-21 when ACP's session/list needed the same label):
-// titles are a transcript fact, and two list surfaces must not grow two
-// title styles.
-func firstUserTitle(dir, id string) string {
-	return session.FirstUserTitle(dir, id)
-}
+//
+// Title derivation + precedence live in internal/session.ResolveTitle;
+// this family used to carry a firstUserTitle wrapper, but the generated
+// header title made the fallback chain shared across three surfaces,
+// so the chain moved to the store package (same single-source reason
+// the derivation was extracted here in the first place).

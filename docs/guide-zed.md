@@ -149,7 +149,7 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 
 ### 5.2 模型选择 / Model selection（configOptions + env 钉定）
 
-`session/new` 现在会返回 `configOptions`（一个 `id:"model"` 的 select 型下拉）：凡 key 可解析的 provider（deepseek / anthropic / openai / gemini / glm / opencode）各带自己的型号入列。**ACP 客户端（paseo）据此渲染模型下拉**；选择后客户端发 `session/set_config_option`，seek 在**回合之间**把整条车道（provider 客户端 + model）一次换掉——下一个 `session/prompt` 就用新模型。Zed 侧暂不渲染 configOptions 下拉（其 ACP 面较旧），但换挡机制对任何实现了该协议的客户端一致。
+`session/new` 现在会返回 `configOptions`（一个 `id:"model"` 的 select 型下拉）：凡 key 可解析的 provider（deepseek / anthropic / openai / gemini / glm / opencode / opendesign）各带自己的型号入列。**ACP 客户端（paseo）据此渲染模型下拉**；选择后客户端发 `session/set_config_option`，seek 在**回合之间**把整条车道（provider 客户端 + model）一次换掉——下一个 `session/prompt` 就用新模型。Zed 侧暂不渲染 configOptions 下拉（其 ACP 面较旧），但换挡机制对任何实现了该协议的客户端一致。
 
 限制（都刻意的）：
 
@@ -165,6 +165,15 @@ yolo 放开的只是**本地**操作：与 goal / autopilot 同款 no-remote 守
 ```
 
 两个都可选、可单用；`SEEK_ACP_PROVIDER` 同时压掉首启向导（无头进程不该进交互式贴 key 提示）。只影响 `seek acp` 车道，shell 里残留的值对 TUI / print 模式无影响。paseo 侧典型用法：复制一个 provider 条目（如 `seek-glm`）写上 env，同一台机器 DeepSeek / GLM 两条入口并存——与 zcode 桥的 `ZCODE_PROVIDER`/`ZCODE_MODEL` 钉法同款。
+
+**模型 × 车道一致性闸**（2026-11-25，c_dxrjjl）：只钉 `SEEK_ACP_MODEL` 而不钉 provider 时，车道由 auto-detect 决定，而宿主传下来的可能是一条网关 wire id（如 `deepseek-v4.1-flash-eco`）。启动前会过 `internal/modelcap.LaneOf`：若该 id 只属于某条订阅网关车道（opencode / opendesign）而生效车道不是它，进程**启动即报错**并点名该钉哪条：
+
+```
+acp startup: model "deepseek-v4.1-flash-eco" belongs to lane "opendesign" (OpenDesign 网关)
+but this session would start on lane "deepseek" — set SEEK_ACP_PROVIDER=opendesign (plus OPENDESIGN_API_KEY) …
+```
+
+这是刻意的：错配 id 打到官方 DeepSeek 会回 `invalid_request_error: The supported API model names are deepseek-flash, deepseek-v4-pro`，那个错误出现在对话中段，模型与用户都无从修正。闸门**放行**的情形——同一 id 另一条订阅车道也收录（两条网关共享 deepseek-v4.1-flash / deepseek-v4-pro / kimi-k2.7-code 等，判据是 `modelcap.Serves`，共享 id 走哪条车道都对）、`LaneOf` 判不出的自定义 id（`--provider=compatible` 自建端点）、以及与 provider 同厂前缀的第一梯队 id（`glm-5.3-flash` 之于 GLM）——它不猜别人的命名空间。
 
 wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`](./prd/archive/feature-paseo-provider.md) §3.4（C 落地记录）。
 

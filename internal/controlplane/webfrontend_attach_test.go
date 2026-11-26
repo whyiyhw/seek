@@ -172,6 +172,19 @@ func TestWeb_AttachStagesUsableReference(t *testing.T) {
 	if !got.OK || got.Kind != "image" || got.Bytes == 0 {
 		t.Fatalf("image response = %+v, want ok image with bytes", got)
 	}
+	// Staging must stay inside the frontend's own staging root (which
+	// newTestWeb derives from a temp StorePath) — and that root must not
+	// be the machine's real ~/.seek. A frontend that resolved its attach
+	// dir off the real home would pass every assertion below while seeding
+	// files on the developer's machine (butler c_7vpiz5, 坑8).
+	if !strings.HasPrefix(got.Path, fe.attachDir+string(filepath.Separator)) {
+		t.Fatalf("staged %q escaped the staging root %q", got.Path, fe.attachDir)
+	}
+	if realHome, err := os.UserHomeDir(); err == nil {
+		if real := filepath.Join(realHome, ".seek"); strings.HasPrefix(fe.attachDir, real) {
+			t.Fatalf("staging root %q is inside the real %s — the fixture lost its temp StorePath", fe.attachDir, real)
+		}
+	}
 	if strings.ContainsAny(got.Path, " \t\r\n") {
 		t.Fatalf("staged path %q carries whitespace — the @-reference cannot survive tokenisation", got.Path)
 	}
