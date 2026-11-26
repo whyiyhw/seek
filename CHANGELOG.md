@@ -10,6 +10,7 @@
 - c_trrsn7：`-p` 车道补 `--effort` / `--temperature` 旗标（judge 前置①：成本 3.2×）
 - c_xujwvq：参数校验先于 MCP fork：--tools nosuch 不该先加载 9 个 MCP 工具（judge 前置④）
 - c_sozboy：AGENTS.md 会话存储句漂移：legacy .json 迁移已删（65a31d50）+ schema_version 实为 3，文档仍写「migrated on next Save / =2」（eval E7 待开卡 #2，纯文档）
+- c_skczdu：autopilot 车道 pref 升 YOLO + flag 解析形状（R2 接线前置，§9.5③2）
 
 ## v0.13.1（2026-11-24）
 
