@@ -181,6 +181,20 @@ func main() {
 		if errors.Is(err, errToolsUsage) {
 			os.Exit(2)
 		}
+		// `seek judge` splits failure by KIND (PRD §3.4, card c_jdo7rp):
+		// the message was already printed by the validation site / the
+		// lane, so these two exit silently. 2 = "you wrote the command
+		// wrong, do not retry"; 1 = "the file is complete but some rows
+		// carry an error" — CI reads the error rows from the JSONL.
+		if errors.Is(err, errJudgeUsage) {
+			os.Exit(2)
+		}
+		if errors.Is(err, errJudgeBudget) {
+			os.Exit(3)
+		}
+		if errors.Is(err, errJudgePartial) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, "seek:", err)
 		os.Exit(1)
 	}
@@ -235,6 +249,7 @@ Commands:
   auth         browser login for a provider lane (opencode)
   goal         unattended main-agent loop:   seek goal run "<goal>"
   autopilot    unattended orchestration:     seek autopilot run "<goal>"
+  judge        judge a JSONL batch against a caller-owned rubric ("seek judge help")
 
 Flags:
 `)
@@ -328,6 +343,30 @@ func run() error {
 	// feature-routines.md §4.1.
 	if len(os.Args) >= 2 && os.Args[1] == "cron" {
 		return routinescli.Run(os.Args[2:], os.Stdout, os.Stderr)
+	}
+	// `seek judge ...` — the judging engine (PRD
+	// docs/prd/feature-judge-engine.md §6-5, card c_jdo7rp). Dispatched
+	// ahead of flag.Parse for the same two reasons as the verbs above:
+	// it needs no session, no project, and no TUI, and it must NOT load
+	// the tool registry or fork any MCP server (c_xujwvq's precedent:
+	// argument validation before any fork). The lane owns its own flag
+	// set — flag.Parse stops at the first positional, which is exactly
+	// the trap that folded `--yolo` into autopilot's goal string; here
+	// the positional case is rejected as usage instead.
+	if len(os.Args) >= 2 && os.Args[1] == "judge" {
+		if err := runJudge(os.Args[2:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			if errors.Is(err, errJudgeUsage) {
+				os.Exit(2)
+			}
+			if errors.Is(err, errJudgeBudget) {
+				os.Exit(3)
+			}
+			if errors.Is(err, errJudgePartial) {
+				os.Exit(1)
+			}
+			return err
+		}
+		return nil
 	}
 	// `seek task ...` + the ps / attach / kill aliases (v8 柱 V1,
 	// docs/prd/feature-task-lifetime.md). Same rationale as cron/worktree:

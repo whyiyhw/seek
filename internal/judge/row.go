@@ -89,22 +89,36 @@ func (r *Result) Errors() int {
 func (r *Result) JSONL() ([]byte, error) {
 	var b strings.Builder
 	for i, row := range r.Rows {
-		line, err := marshalCompact(row)
+		line, err := MarshalRow(row)
 		if err != nil {
 			return nil, fmt.Errorf("judge: marshal row %d: %w", i, err)
 		}
 		b.Write(line)
 		b.WriteByte('\n')
 	}
-	line, err := marshalCompact(struct {
-		Meta Meta `json:"_meta"`
-	}{Meta: r.Meta})
+	line, err := MarshalMeta(r.Meta)
 	if err != nil {
 		return nil, fmt.Errorf("judge: marshal _meta: %w", err)
 	}
 	b.Write(line)
 	b.WriteByte('\n')
 	return []byte(b.String()), nil
+}
+
+// MarshalRow renders one row's line, WITHOUT the trailing newline — the
+// byte shape JSONL emits for the same row. Exported for the streaming
+// CLI (cmd/seek/judge.go), whose ordered emitter writes rows as they
+// become contiguous instead of buffering a whole Result: one marshaling
+// authority, so a file written streaming and a file written by JSONL()
+// are byte-identical for the same rows.
+func MarshalRow(r Row) ([]byte, error) { return marshalCompact(r) }
+
+// MarshalMeta renders the trailing `_meta` line (again without the
+// newline). Same rationale as MarshalRow.
+func MarshalMeta(m Meta) ([]byte, error) {
+	return marshalCompact(struct {
+		Meta Meta `json:"_meta"`
+	}{Meta: m})
 }
 
 func marshalCompact(v any) ([]byte, error) {
