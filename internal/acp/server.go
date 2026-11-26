@@ -50,6 +50,22 @@ type rpcError struct {
 
 type InitializeParams struct {
 	ProtocolVersion int `json:"protocolVersion"`
+	// ClientCapabilities is what the CLIENT can do (schema:
+	// InitializeRequest.clientCapabilities). seek reads exactly one thing
+	// out of it — `elicitation.form`, the gate on whether the ask_user
+	// lane can reach this human (see elicitation.go). Pointer so an
+	// absent field marshals as absent (a client that declares nothing is
+	// the common case) and so the nil-safe accessor below is the only way
+	// to read it.
+	ClientCapabilities *ClientCapabilities `json:"clientCapabilities,omitempty"`
+}
+
+// SupportsElicitationForm is the nil-safe gate the ACP lane reads to
+// decide whether ask_user can reach this human (acp_askuser.go). A
+// client that declares no capabilities answers false — the pre-existing
+// behaviour.
+func (p InitializeParams) SupportsElicitationForm() bool {
+	return p.ClientCapabilities != nil && p.ClientCapabilities.SupportsElicitationForm()
 }
 
 type InitializeResult struct {

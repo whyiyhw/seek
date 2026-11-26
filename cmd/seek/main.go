@@ -1895,6 +1895,10 @@ func run() error {
 			sess:   activeSession,
 			store:  store,
 			yolo:   acpYolo,
+			// askPolicy is armed by the lane only if the client can render
+			// a form (acp_askuser.go) — every other headless lane keeps it
+			// Disabled and answers ErrDisabled.
+			askPolicy: askPolicy,
 		})
 	}
 
@@ -2846,6 +2850,17 @@ type acpBackend struct {
 	// SEEK_ACP_YOLO lane and everywhere the policy isn't Ask. Prompt
 	// scopes it per-turn so a permission request dies with its turn.
 	ask *acpApproval
+	// askUser is the ACP question lane (acp_askuser.go): non-nil only when
+	// the client advertised `clientCapabilities.elicitation.form` at
+	// initialize. nil keeps ask_user/propose on ErrDisabled — the correct
+	// answer for a client that cannot render a form. Prompt scopes it
+	// per-turn for the same reason as ask.
+	askUser *acpAskUser
+	// askPolicy is the shared askuser policy the tools captured at
+	// registration. The lane flips it to ModeAsk when the client can
+	// render a form; leaving it Disabled is what keeps every other
+	// headless lane honest.
+	askPolicy *askuser.Policy
 
 	// --- multi-session state (ACP·P1-2, backlog ③) -------------------
 	//
@@ -2955,6 +2970,20 @@ func (b *acpBackend) Initialize(p acp.InitializeParams) acp.InitializeResult {
 		}
 		fmt.Fprintf(os.Stderr, "acp: initialize negotiated requested=%d answered=%d supported=%d (%s)\n",
 			p.ProtocolVersion, version, acp.ProtocolVersion, why)
+	}
+	// Ask lane (acp_askuser.go): the ONE place a headless lane may opt the
+	// shared askpolicy into ModeAsk, and only when the client promised it
+	// can render a form. Everything else (print / rpc / goal / autopilot /
+	// benchmark) leaves the policy Disabled — there is no human and
+	// ErrDisabled's "rephrase as plain text" is the right instruction.
+	// A client that advertises nothing keeps the old behaviour byte for
+	// byte, which is why the pre-existing ACP lane test (no capabilities
+	// declared) still sees ErrDisabled.
+	if p.SupportsElicitationForm() && b.askUser != nil && b.askPolicy != nil {
+		b.askPolicy.SetMode(askuser.ModeAsk)
+		b.askPolicy.SetAskFn(b.askUser.ask)
+		b.askPolicy.SetAskBatchFn(b.askUser.askBatch)
+		fmt.Fprintln(os.Stderr, "acp: ask_user lane enabled (client advertises elicitation.form)")
 	}
 	return acp.InitializeResult{
 		ProtocolVersion: version,
@@ -3682,6 +3711,13 @@ func (b *acpBackend) Prompt(ctx context.Context, p acp.PromptParams, sendU func(
 		b.ask.beginTurn(ctx, p.SessionID)
 		defer b.ask.endTurn()
 	}
+	// Same scope for the question lane (acp_askuser.go): a form can only
+	// be raised while a turn runs, and its pending elicitation must die
+	// with the turn's ctx rather than outliving it.
+	if b.askUser != nil {
+		b.askUser.beginTurn(ctx, p.SessionID)
+		defer b.askUser.endTurn()
+	}
 	// cwd makes tool-call locations absolute (schema contract: "the
 	// absolute file path"), resolved once per turn — the session cwd was
 	// anchored at session/new (D-1) so this is the project root.
@@ -4222,6 +4258,10 @@ type acpOptions struct {
 	// installing the approval askFn entirely (P0-2's short-circuit
 	// priority — no permission request can ever be sent).
 	yolo bool
+	// askPolicy is the askuser policy the tools were built with. The lane
+	// switches it to ModeAsk only when the client advertises form
+	// elicitation (see runACP); nil in tests that don't exercise ask_user.
+	askPolicy *askuser.Policy
 }
 
 // runACP serves the Agent Client Protocol over stdio (v7 柱 P) so any ACP
@@ -4248,6 +4288,10 @@ func runACP(ctx context.Context, o acpOptions) error {
 			w = io.MultiWriter(os.Stdout, &taggedWriter{w: f, tag: ">> "})
 		}
 	}
+	// The server is built first so the ask lane can hold a reference to it
+	// (its Call lane is how a question reaches the editor). backend is
+	// filled in below and handed to the server via Serve-time wiring —
+	// NewServer takes it eagerly, so the pointer is what matters.
 	b := &acpBackend{
 		ag:     o.ag,
 		route:  o.vroute,
@@ -4271,13 +4315,25 @@ func runACP(ctx context.Context, o acpOptions) error {
 		// "acp" positional), same reason SEEK_ACP_YOLO is read as env a
 		// few hundred lines above.
 		ctxMeter: acpCtxMeter{alerts: acp.CtxAlertFromEnv(os.Getenv)},
+		// Ask lane (acp_askuser.go). Constructed unconditionally but only
+		// ARMED at initialize, and only for a client that advertises form
+		// elicitation — Initialize owns that decision because the
+		// capability arrives on the handshake.
+		askUser:   newACPAskUser(nil, acpAskTimeoutFromEnv(os.Getenv)),
+		askPolicy: o.askPolicy,
+	}
+	srv := acp.NewServer(r, w, b)
+	// Hand the ask lane its transport now that the server exists. Doing it
+	// here (rather than passing srv into the literal) keeps one
+	// construction order: backend → server → backend's outbound lane.
+	if b.askUser != nil {
+		b.askUser.srv = srv
 	}
 	// Session end = transport end (stdin EOF, or the process ctx being
 	// cancelled). Client-injected MCP children are reaped HERE, not at
 	// process exit: they belong to the session, which is why this is a
 	// defer rather than the mcp.json path's live-forever posture.
 	defer func() { _ = b.closeMCP() }()
-	srv := acp.NewServer(r, w, b)
 	// ACP·P0-2: install the approval askFn on the non-yolo lane. The
 	// policy was born PrefAsk (initialPref), so until this lands a
 	// dangerous action would fall to prefGate's deny branch — the

@@ -123,7 +123,7 @@ seek 出现在 **Agent 面板**里，不在 Extensions：
 | **session resume** | **已修**：`agentCapabilities.loadSession=true`（有持久化时），`session/load` 会读出那份 JSONL transcript、重新锚定 cwd、恢复会话模型车道、把整段历史按 `user_message_chunk` / `agent_message_chunk` / `tool_call(_update)` 回放给客户端，并在回放**之后**才回响应。`session/new` 返回的 `sessionId` 现在是**持久 transcript id**（客户端存下来才能继续；这也是 paseo 存 native session id 的依据）。paseo 据此开启 session.persistence。`--no-save` 在 ACP 车道够不到（flag 停在 `acp` 位置参数），所以实际部署里 `loadSession` 恒为 true；无持久化的兜底路径会退回项目名并申报 false。 | **已修**（c_chzxgg，2026-11-21）：initialize 现在同时申报 `sessionCapabilities.list`（schema 形状是对象 `{}`，在场即"支持"，不是布尔；与 loadSession 同一道持久化闸），`session/list` 扫 transcript 存储返回 `{sessions:[{sessionId,cwd,title,updatedAt}]}`——数据源与 `session/load` 同一个 store（列出的 id 必可 load），标题取首条 user message 首行（80 rune 截断，与 serve `/rpc session/list` 同一派生），mtime 是 header 的 UpdatedAt（RFC3339）。空仓答 `sessions:[]`（数组恒在，不是 null）；`cwd` 过滤可选；不分页（单页全量，不回 nextCursor）。**未申报 `sessionCapabilities.delete`**——删 transcript 走 TUI/文件系统，不在协议上开口。 |
 | **会话数** | **已修（P1-2，backlog ③）**：一个 `seek` 进程可同时服务 **N 个会话**——`session/new` 第二次调用**新开一会话**（新的持久 transcript id，首个完成的回合后落盘），不再重锚定已有会话；第一个会话仍延续启动时的 transcript（单会话行为不变）。**per-session 各自独立的是四根轴**：cwd 锚（每次该会话的回合把进程+权限策略锚到它的目录）、权限策略的会话轴（plan 模式 + `[a]` 常许清单，各会话互不影响）、历史栈（各写各的 transcript）、模型车道（一个会话换模型不动另一个）。实现是**回合级时间复用**：agent/工具注册表/进程 cwd 是一台共享机器，跨会话的回合在 turn 闸上排队串行（两会话并发 prompt 不串扰，但不同时跑）；`session/set_config_option` / `set_mode` / `session/load` 的「回合间才受理」窗口相应变为「任一会话无回合在跑时」。**仍是进程级（非 per-session）的**：系统提示/memory/skills/checkpoint 子代理挂载——都按启动目录焊死，与会话 cwd 无关（单会话时代即如此）。ACP v1 无 session/delete，会话状态随进程存亡。 | 并行回合（每会话独立 agent+注册表）需要把 1700 行启动接线按会话重建，收益是跨会话真并发——当前回合串行对 Zed/paseo 的人机节奏无感，若出现跨会话长回合互等的真实场景再立卡。 |
 | **slash 命令** | **已修（P2，backlog ④）**：`/plan` 经 **session mode 通道**协议化——`session/new`/`session/load` 回 `modes` 能力（`currentModeId` + `availableModes: [default, plan]`），客户端用 `session/set_mode` 切换，成功后 `current_mode_update` 通知先于 `{}` 响应（§5.3）。**其余 slash 维持 TUI-only**（选型理由逐条列在 §5.3）。模型选择早已有协议通道（§5.2 configOptions）。 | 后续若接 propose 的人工审批门（plan 态 propose→approve 的协议承载），plan-execute 子态才有 ACP 形态；当前 ACP 下 plan 态 = 只读分析 + 计划文本，执行需切回 default。 |
-| **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
+| **capabilities** | **已修（P1-3）**：`initialize` 申报 `promptCapabilities.image=true` + `agentCapabilities.loadSession`（按持久化能力申报），并做**真正的版本协商**——响应带「客户端请求 ∩ seek 支持」里的最高版（现状只有 1），请求更高版则降级申报（响应即申报，stderr 另记一行 `acp: initialize negotiated requested=N answered=1 (downgrade)`）。embedded context 仍未申报（seek 不处理该块类型）。**读侧**：`initialize` 现在也解 `clientCapabilities`，只读 `elicitation.form`——它是 ask_user 车道能否可达的唯一开关（§5.7）。 | embedded-context 块（编辑器选中的代码片段）若要支持，另加 capability + 解析分支。 |
 | **per-session cwd** | **已修**：`session/new` 的 `cwd` 生效——进程与权限策略一起切到该目录（Zed 传的就是启动目录，行为不变）。多会话下（P1-2）cwd 是**会话轴**：每个会话的回合把两半锚（进程 chdir + policy reanchor）切到自己的目录，回合间不漂移（见 §5 会话数行）。 | — |
 | **MCP 透传** | **已修**：`session/new`（以及 `session/load`）的 `mcpServers` 现在生效——stdio 条目按声明起子进程、接进 seek 的 MCP 客户端栈（与 `~/.seek/mcp.json` 同一套 `pkg/mcp` 传输 + 握手 + `tools/list`），工具以 **`mcp__<server>__<tool>`** 进会话工具面（三段式，与 mcp.json 的 `<server>__<tool>` 可区分）；会话结束（stdin EOF / 进程退出）即断连回收子进程。http/sse/acp 变体跳过并在 stderr 说原因，**不**让 `session/new` 失败。不带 `mcpServers` 时零变化（见 §5.5）。 | 多 session 各自一套 roster（现多会话已落地但 roster 仍进程级共享，声明变化只告警不热换）。 |
 
@@ -192,11 +192,11 @@ wire 形状与参照实现出处：[`docs/prd/archive/feature-paseo-provider.md`
 
 **边界（诚实清单）**：plan 态模型被提醒词指示走 `propose`，但 propose 的人工审批门（TUI picker 四选项）在 ACP 车道无协议承载——ACP 下 plan 态的现实用途是**只读分析 + 计划文本产出**，人审后切回 `default` 执行。plan 态两态行为差异有真二进制 e2e 钉死（`cmd/seek/acp_mode_e2e_test.go`：plan 态 write 被拒不落盘 + 提醒词在轮内；default 态同一 write 落盘 + 提醒词消失）。
 
-**`ask_user` 在 ACP 车道不存在**（同一条边界的另一半，2026-11-23 补记）。`ask_user` 要的是 2–4 个任意选项 + 自由文本 + 多题 batch，而 ACP v1 只给 agent 一个请求型方法 `session/request_permission`，语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题）。硬塞会把它渲染成「是否允许」而不是「你选哪个」，且需要客户端实现一个自创请求型扩展才能工作——请求型扩展与通知型（`_seek_turn_stop`）的兼容性风险不是一个量级：客户端不实现就挂到超时。协议面因此**不开口**。
+**`ask_user` / `propose` 在 ACP 车道**（2026-11-25 更新：从「不存在」变成「客户端申报才存在」）。要点：**协议有自己的方法**——`elicitation/create`（form 模式），由 `initialize` 的 `clientCapabilities.elicitation.form` 门控。seek 现在就用它：客户端在握手里申报了 form elicitation，`askPolicy` 才在这一条车道上被点成 `ModeAsk`，`ask_user` / `propose` 的 2–4 选项（含 batch 多题、自由文本）渲染成客户端的表单；没申报的客户端**逐字节维持旧行为**（`ErrDisabled`）。§5.7 是完整说明。
 
-行为是可预期的：ACP 车道里 `ask_user` / `propose` 返回 **`ErrDisabled`** ——「interactive question not available in this mode — rephrase as a plain-text question in your reply」，模型据此把问题改写进正文，回合照常完成。这条文案是有意的指令面（不是日志），2026-11-23 之前这里报的是 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用；现在 `askPolicy` 出生即 `ModeDisabled`，只有 TUI 那条路在自己入口显式 `SetMode(ModeAsk)`，新加的车道默认继承正确姿态。钉死用例：`cmd/seek/askuser_lane_test.go`（print 与 ACP 两条车道各一）。
+为什么不再走 `session/request_permission`：那个方法的语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题），硬塞会把它渲染成「是否允许」而不是「你选哪个」。`elicitation/create` 是协议为此设计的请求型方法，形状（属性名 / enum / 多选数组）由 seek 的 schema 决定，客户端只负责渲染。
 
-真要在编辑器里给人做选择题，需要的是协议层的答案：要么等 ACP 出现 elicitation 类方法，要么客户端把 `request_permission` 的 `toolCall.content` 自行渲染成选择器——两者都不在 seek 单侧可达范围内，故 backlog 里不立卡。
+没申报 elicitation 的客户端（含 Paseo 0.17.3 的默认基线、以及所有现有测试的假客户端）行为是可预期的：`ask_user` / `propose` 返回 **`ErrDisabled`** ——「interactive question not available in this mode — rephrase as a plain-text question in your reply」，模型据此把问题改写进正文，回合照常完成。这条文案是有意的指令面（不是日志），2026-11-23 之前这里报的是 `ErrNoCallback`（"... (programming error)"），模型读到"程序错误"会重试同一个调用；现在 `askPolicy` 出生即 `ModeDisabled`，TUI 与申报了 elicitation 的 ACP 客户端各自在自己入口显式 `SetMode(ModeAsk)`，新加的车道默认继承正确姿态。钉死用例：`cmd/seek/askuser_lane_test.go`（print 与「不申报的 ACP」两条车道）+ `cmd/seek/acp_askuser_e2e_test.go`（申报的 ACP，四条 lane：答题 / 拒答 / 超时 / 不申报）。
 
 **①选型：为什么首批只协议化 /plan、其余维持 TUI-only**：
 
@@ -272,6 +272,94 @@ acp: mcp closed 1 server(s)
 - **阈值的边界**：这里用 `budget.Classify`（编译期 0.60 / 0.75），与 Web 顶栏 ctxmeter 的色阶一致。TUI 的 `formatBudget` 在**配了 `auto_compact`** 时会把红色点挪到触发点的 80%（`ClassifyAt`）——ACP 不跟这个会话级配置走：余量条是客户端自己的 UI，阈值该是协议面上稳定的常量，会话级自定义属于客户端侧。
 - **不发的情形**：窗口大小不可用（`budget.Limit` ≤ 0）。RFD 明确没有 `size: null` 这种状态，协议自己也说"无法给出有意义的窗口就干脆不要发"。
 - **`session/load` 之后**：回放的是历史消息帧（`user_message_chunk` / `agent_message_chunk` / `tool_call*`），**不含** `usage_update`——transcript 里只有累计用量，没有"上一回合的 prompt+completion"这个口径值，硬凑一个就是新造数据源。所以恢复会话后余量条从**下一回合**开始显示（客户端在收到第一帧前不渲染这个部件即可）。
+
+---
+
+### 5.7 `ask_user` / `propose` 的协议承载 `elicitation/create`
+
+**一句话**：客户端在 `initialize` 里申报 `clientCapabilities.elicitation.form`，ask_user/propose 就在这条车道上可达；不申报就维持 `ErrDisabled`。门控在能力上，不在车道名上。
+
+**握手（客户端 → seek）**：
+
+```json
+{"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+  "protocolVersion":1,
+  "clientCapabilities":{
+    "fs":{"readTextFile":false,"writeTextFile":false},
+    "terminal":true,
+    "elicitation":{"form":{}}
+  },
+  "clientInfo":{"name":"Zed","version":"…"}}}
+```
+
+`elicitation.form` 是**对象在场即支持**（`{}` 就是开），与 `sessionCapabilities.list` 同一套 schema 约定；`null` 与省略等价，都算不支持。seek 只读这一个字段（`internal/acp/elicitation.go` 的 `ClientCapabilities.SupportsElicitationForm`）。
+
+**请求（seek → 客户端）**：
+
+```json
+{"jsonrpc":"2.0","id":"p1","method":"elicitation/create","params":{
+  "sessionId":"20261125-…",
+  "mode":"form",
+  "message":"The assistant needs an answer before it can continue.",
+  "requestedSchema":{
+    "type":"object",
+    "title":"seek asks",
+    "properties":{
+      "q1":{"type":"string","title":"Which scope?",
+            "oneOf":[{"const":"user","title":"user","description":"private"},
+                     {"const":"project","title":"project"}]},
+      "q1_other":{"type":"string","title":"Which scope? (or type your own answer)"}
+    }}}}
+```
+
+形状约定：
+
+- **单选**用 `oneOf`（带 title → 客户端渲染标签而不是裸 id），不用 `enum`。
+- **多选**（`multi_select:true`）用 `type:"array"` + `items:{type:"string",enum:[…]}`，`minItems:1` / `maxItems:len`。数组属性**没有** per-item title，所以选项标签 + 描述折进字段的 `description`（换行分隔）。
+- **batch**（1–4 题）是**一张表单的多个字段**：第 i 题占 `q<i>`（枚举）与 `q<i>_other`（自由文本）。
+- **`required` 恒为空**：`_other` 是枚举的替代品，强制任何一边都会让另一边无法作答。
+- **`toolCallId` 省略**：askuser 触发点上没有 ACP 可见的 tool-call id，schema 里它是可选的。
+
+**响应（客户端 → seek）**：
+
+```json
+{"jsonrpc":"2.0","id":"p1","result":{"action":"accept","content":{"q1":"project"}}}
+```
+
+`action` 三值：`accept`（带 content）/ `decline`（有意的拒绝）/ `cancel`（用户退出）。seek 把后两者都映射成 `Answer{Cancelled:true}` —— askuser 的 Answer 只有一位"没答"，但线上保留区别，客户端自己的 UX 可以不同。
+
+映射细节（`cmd/seek/acp_askuser.go` 的 `answersFromElicitation`）：
+
+- `q<i>` 的 id **必须**在提供的选项里；不在就是客户端 bug，丢弃该题（同 `ParsePermissionOutcome` 的"闭合菜单"姿态），不新造选项。
+- 某题两个字段都空 → 该题 `Answer{Cancelled:true}`，**其余题不受影响**（per-index 契约）。
+- **自由文本压过枚举选择**：`q<i>_other` 非空时 `q<i>` 被丢弃 —— 与 TUI picker 的互斥规则一致（选「Other」会清空已勾选行），因为 Answer 的回复 schema 是"二选一"。
+- 多选里非字符串元素被丢弃而不是整题失败——部分可读仍比全丢有用。
+
+**非应答收尾**（全部落到 `Cancelled`，绝不挂死回合）：
+
+| 情形 | 结果 | stderr |
+|---|---|---|
+| 客户端回 `decline` / `cancel` | 整批 Cancelled | — |
+| 超时（`SEEK_ACP_ASK_TIMEOUT` 秒，默认 600） | 整批 Cancelled | `acp: ask_user unanswered: acp: no reply from client (timeout)` |
+| 客户端回 `-32601`（申报了但没实现） | 整批 Cancelled | 同上，带 JSON-RPC 错误文本 |
+| 断线 / turn 被 `session/cancel` | 整批 Cancelled | `acp: ask_user unanswered: …` |
+| 回合外被调用（不该发生） | 整批 Cancelled | `acp: ask_user not delivered: no active turn to ask in` |
+
+**为什么不是 `session/request_permission`**：那个方法的语义被权限钉死（三选项 allow_once / allow_always / reject_once，无 free-text，无多题）。`elicitation/create` 是协议为此设计的请求型方法，语义由 seek 的 schema 决定。
+
+**客户端现状（2026-11-25 实测，写下来免得下次重查）**：
+
+- **Paseo 0.17.3 默认不申报**。它的客户端能力基线是写死的常量 `{fs:{readTextFile:false,writeTextFile:false},terminal:true}`（`app.asar` 里的 `BASE_ACP_CLIENT_CAPABILITIES`），`/tmp/seek-acp.log` 里 4552 次真实握手全部是这个形状。它的 provider 定义支持 `clientCapabilities` 覆盖（`providerOptions.clientCapabilities ?? this.clientCapabilities`），所以 `~/.paseo/config.json` 的 `agents.providers.seek` 可加：
+
+  ```jsonc
+  "seek": {
+    "extends": "acp",
+    "clientCapabilities": { "elicitation": { "form": {} } }
+  }
+  ```
+
+  ⚠️ 但 Paseo 是否真的实现了 `elicitation/create` 的 handler **未实测**；如果它只声明不处理，请求会走上面的超时路径（工具结果仍是可读的 cancelled，回合不判死），表单不会出现。**先在编辑器里试一次**，用 `SEEK_ACP_LOG` 看 `>> "method":"elicitation/create"` 之后有没有 `<< "result"`。
+- **zcode bridge 已实现同一条判断**（`zcode-acp-server/dist/server.js:1313` 的 `supportsElicitationForm()`，注释自述"When true, AskUserQuestion / ExitPlanMode can use the richer elicitation/create form UI; otherwise they fall back to session/request_permission"）——证明这条路在本机生态里是活的，不是纸面协议。
 
 ---
 
