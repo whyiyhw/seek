@@ -66,6 +66,14 @@ type Config struct {
 	// default to false for any config file written before v4.
 	SuggestReply *bool `json:"suggest_reply,omitempty"`
 
+	// AutoTitle gates the automatic session-title generator: after the
+	// first natural turn, one cheap Flash call names the conversation
+	// and the result is persisted in the session header (resolve order:
+	// human rename > generated title > derived first user line). Pointer
+	// so "field absent → default on" is distinct from an explicit false;
+	// a plain bool would silently default old configs off.
+	AutoTitle *bool `json:"auto_title,omitempty"`
+
 	// PushWebhooks are the v6 柱 M mobile-push targets: cron / trigger
 	// terminal events are POSTed to each (in ADDITION to the OS desktop
 	// notification) so the user is reachable away from the machine.
@@ -396,6 +404,17 @@ func (c *Config) SuggestReplyEnabled() bool {
 		return true
 	}
 	return *c.SuggestReply
+}
+
+// AutoTitleEnabled reports whether the automatic session-title generator
+// should run, defaulting to true when the config field is absent. Same
+// pointer-default-on shape as SuggestReplyEnabled — an old config with no
+// auto_title key keeps the feature on.
+func (c *Config) AutoTitleEnabled() bool {
+	if c == nil || c.AutoTitle == nil {
+		return true
+	}
+	return *c.AutoTitle
 }
 
 // ProviderConfig holds the per-provider state. APIKey and BaseURL are

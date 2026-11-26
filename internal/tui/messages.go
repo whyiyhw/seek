@@ -137,3 +137,12 @@ type suggestionReadyMsg struct {
 	// callback firing, Turn won't match the current head and we skip.
 	Turn int
 }
+
+// titleReadyMsg carries the one-shot auto-title result back into Update.
+// Title="" means the generator failed/returned junk — the session keeps
+// its derived first-user-line label. SID/Title guards against a stale
+// result landing after /clear or /branch swapped the session underneath.
+type titleReadyMsg struct {
+	SID   string
+	Title string
+}

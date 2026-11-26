@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/whyiyhw/seek/internal/pricing"
 	"github.com/whyiyhw/seek/internal/suggester"
+	"github.com/whyiyhw/seek/internal/titlesug"
 	"github.com/whyiyhw/seek/internal/uitrace"
 	"github.com/whyiyhw/seek/pkg/agent"
 	"github.com/whyiyhw/seek/pkg/deepseek"
@@ -213,8 +214,50 @@ func (m Model) handleStreamEnd(msg streamEndMsg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Auto-title: once per session, on the first NATURAL stream end
+	// (never on Esc — the user stopped mid-task, the opening intent may
+	// be all we have but the turn wasn't completed). Fires at "at rest"
+	// like the suggestion, after queue/steer/goal/auto-compact have had
+	// their chance to return early. Best-effort, off the UI thread.
+	if cmd := m.scheduleTitle(wasCanceled); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
 	_ = msg
 	return m, tea.Batch(cmds...)
+}
+
+// scheduleTitle builds the one-shot auto-title Cmd. Returns nil when:
+//
+//   - auto-title is off (no TitleSuggester wired)
+//   - no session/store to persist into (--no-save)
+//   - the session already carries a generated title (fresh one-shot)
+//   - a generation is already in flight (titleRequested gate)
+//   - the turn was Esc-cancelled (no completed turn to name)
+//   - the transcript has no user message yet
+//
+// The gate is set HERE (scheduling time), not in the result handler, so
+// two streamEndMsg before the first result lands cannot double-fire.
+func (m *Model) scheduleTitle(wasCanceled bool) tea.Cmd {
+	if m.opts.TitleSuggester == nil || m.opts.Session == nil || m.opts.Store == nil || m.opts.Agent == nil {
+		return nil
+	}
+	if wasCanceled || m.titleRequested || m.opts.Session.Title != "" {
+		return nil
+	}
+	history := m.opts.Agent.Messages()
+	if len(history) == 0 {
+		return nil
+	}
+	m.titleRequested = true // set before returning the Cmd — one per session
+	gen := m.opts.TitleSuggester
+	root := m.opts.Ctx
+	sid := m.opts.Session.ID
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(root, titlesug.GenerateTimeout)
+		defer cancel()
+		return titleReadyMsg{SID: sid, Title: gen(ctx, history)}
+	}
 }
 
 // autoCompactAt resolves the configured trigger for the LIVE model (a

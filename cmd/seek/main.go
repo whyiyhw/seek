@@ -65,6 +65,7 @@ import (
 	"github.com/whyiyhw/seek/internal/servecli"
 	"github.com/whyiyhw/seek/internal/session"
 	"github.com/whyiyhw/seek/internal/sessioncli"
+	"github.com/whyiyhw/seek/internal/sessmeta"
 	"github.com/whyiyhw/seek/internal/skill"
 	"github.com/whyiyhw/seek/internal/skillcli"
 	"github.com/whyiyhw/seek/internal/skilldistill"
@@ -74,6 +75,7 @@ import (
 	"github.com/whyiyhw/seek/internal/suggester"
 	"github.com/whyiyhw/seek/internal/sysprompt"
 	"github.com/whyiyhw/seek/internal/taskcli"
+	"github.com/whyiyhw/seek/internal/titlesug"
 	"github.com/whyiyhw/seek/internal/tools"
 	agenttool "github.com/whyiyhw/seek/internal/tools/agent"
 	askusertool "github.com/whyiyhw/seek/internal/tools/askuser"
@@ -387,6 +389,7 @@ func run() error {
 		cont          = flag.Bool("continue", false, "load the most-recently-updated session")
 		noSave        = flag.Bool("no-save", false, "do not persist this session to disk")
 		noSuggest     = flag.Bool("no-suggest", false, "disable v4 柱 D suggested-reply (predictor + UI placeholder + calibration injection); equivalent to suggest_reply=false in ~/.seek/config.json")
+		noTitle       = flag.Bool("no-title", false, "disable automatic session naming (one cheap Flash call after the first turn); equivalent to auto_title=false in ~/.seek/config.json")
 		noCronTick    = flag.Bool("no-cron-tick", false, "skip the startup cron auto-tick (cron jobs still fire via `seek cron tick` or OS scheduler)")
 		approvalStdin = flag.Bool("approval-stdin", false, "print mode (--json) only: surface permission prompts as approval_request lines on stdout and read the decision lines from stdin (the remote control plane's approval channel)")
 		list          = flag.Bool("list", false, "list saved sessions and exit")
@@ -1498,6 +1501,19 @@ func run() error {
 		prepareMessages = suggester.InjectCalibration
 	}
 
+	// Auto session title: one cheap side-channel call after the first
+	// natural turn. Same switch shape as suggested-reply (CLI flag >
+	// config, default on) and DeepSeek-only — the generator needs the
+	// non-streaming Chat the first-tier client exposes. Wired as a func
+	// so the TUI tests can inject a counting fake without an HTTP server.
+	autoTitleEnabled := !*noTitle && appCfg.AutoTitleEnabled() && dsClient != nil
+	var titleSuggester func(context.Context, []deepseek.Message) string
+	if autoTitleEnabled {
+		titleSuggester = func(ctx context.Context, history []deepseek.Message) string {
+			return titlesug.Generate(ctx, dsClient, history)
+		}
+	}
+
 	// v5 柱 G subagent orchestrator (feature-subagent PRD §3.7).
 	// Subagent persistence (index + transcript dir) needs an
 	// activeSession; in --no-save we skip subagent wiring entirely
@@ -2330,6 +2346,7 @@ func run() error {
 		Worktrees:             wtMgr,
 		Keymap:                userKeymap,
 		Suggester:             predictor,
+		TitleSuggester:        titleSuggester,
 		Skills:                skills,
 		SkillsDisabled:        isolated,
 		AgentTypes:            agentTypes,
@@ -2789,7 +2806,8 @@ func runRPC(ctx context.Context, ag *agent.Agent, tracker *cache.Tracker, model 
 
 // printSessionList renders the saved-sessions inventory to stdout
 // for -list. Tabular but plain-text (no lipgloss) so it pipes cleanly
-// into grep / awk.
+// into grep / awk. TITLE is last so a long label never shifts the
+// fixed-width columns before it.
 func printSessionList(store *session.Store) error {
 	infos, loadErrs, err := store.List()
 	if err != nil {
@@ -2802,20 +2820,34 @@ func printSessionList(store *session.Store) error {
 		fmt.Println("no saved sessions in", store.Dir())
 		return nil
 	}
-	fmt.Printf("%-25s  %-22s  %-10s  %5s  %5s  %s\n",
-		"ID", "UPDATED (UTC)", "MODEL", "TURNS", "TOOLS", "PARENT")
+	// Human renames live in the serve-owned sessmeta store. Read them
+	// best-effort (never write — that's the serve process's job) so a
+	// damaged/missing side file can't break `seek -list`; a human rename
+	// still wins over the generated header title on this surface.
+	overrides := map[string]sessmeta.Entry{}
+	if meta, mErr := sessmeta.Open(); mErr == nil {
+		overrides, _ = meta.All()
+	}
+	fmt.Printf("%-25s  %-22s  %-10s  %5s  %5s  %s  %s\n",
+		"ID", "UPDATED (UTC)", "MODEL", "TURNS", "TOOLS", "PARENT", "TITLE")
 	for _, s := range infos {
 		parent := "-"
 		if s.ParentID != "" {
 			parent = s.ParentID
 		}
-		fmt.Printf("%-25s  %-22s  %-10s  %5d  %5d  %s\n",
+		override := ""
+		if e, ok := overrides[s.ID]; ok {
+			override = e.Title
+		}
+		title := session.ResolveTitle(store.Dir(), s.ID, s.Title, override)
+		fmt.Printf("%-25s  %-22s  %-10s  %5d  %5d  %s  %s\n",
 			s.ID,
 			s.UpdatedAt.Format("2006-01-02 15:04:05"),
 			truncate(s.Model, 10),
 			s.Turns,
 			s.ToolCalls,
-			parent)
+			parent,
+			title)
 	}
 	return nil
 }
@@ -3421,7 +3453,9 @@ func (b *acpBackend) ListSessions(p acp.ListSessionsParams) (acp.ListSessionsRes
 		out = append(out, acp.SessionSummary{
 			SessionID: info.ID,
 			Cwd:       info.CWD,
-			Title:     session.FirstUserTitle(b.store.Dir(), info.ID),
+			// Same chain as serve's /rpc session/list (no sessmeta
+			// override on the ACP lane: renames are a serve-side UI fact).
+			Title:     session.ResolveTitle(b.store.Dir(), info.ID, info.Title, ""),
 			UpdatedAt: info.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}

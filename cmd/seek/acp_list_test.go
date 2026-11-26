@@ -90,6 +90,30 @@ func TestACPBackend_ListSessions_HasHistory(t *testing.T) {
 	}
 }
 
+// TestACPBackend_ListSessions_HeaderTitle: the generated header title
+// wins over the derived first user line on the ACP lane too (no sessmeta
+// override there — renames are a serve-side UI fact).
+func TestACPBackend_ListSessions_HeaderTitle(t *testing.T) {
+	b, store := loadTestBackend(t)
+	cwd := mustGetwd(t)
+	sess := session.New(deepseek.ModelV41Flash, cwd, "sys", false, false)
+	sess.Title = "生成的 ACP 标题"
+	sess.Messages = []deepseek.Message{{Role: deepseek.RoleUser, Content: "原始首行"}}
+	if err := store.Save(sess); err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.ListSessions(acp.ListSessionsParams{Cwd: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Sessions) != 1 {
+		t.Fatalf("sessions = %+v, want 1", res.Sessions)
+	}
+	if got := res.Sessions[0].Title; got != "生成的 ACP 标题" {
+		t.Fatalf("title = %q, want generated header title", got)
+	}
+}
+
 // TestACPBackend_ListSessions_CwdFilter: with p.Cwd set, only
 // transcripts recorded for that directory are listed; a cwd nothing
 // matches yields the EMPTY ARRAY (not null, not an error).
