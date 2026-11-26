@@ -872,15 +872,18 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// -dream short-circuits before session / agent / TUI setup. Needs a
-	// DeepSeek client only (the thinking-mode call uses the Chat API);
-	// second-tier providers don't currently expose a non-streaming Chat
-	// on the llm.Provider interface, so -dream is DeepSeek-only for now.
+	// -dream short-circuits before session / agent / TUI setup. It rides
+	// the background memory lane (c_eha42g): the DeepSeek-shaped client
+	// pointed at the subscription gateway by default — second-tier
+	// providers still don't expose a non-streaming Chat on the
+	// llm.Provider interface, but the gateway speaks the same wire.
 	if *dreamFlag {
-		if dsClient == nil {
-			return fmt.Errorf("-dream requires a DeepSeek API key (DEEPSEEK_API_KEY); set one or use --provider=deepseek explicitly")
+		dreamCfg, _ := config.Load()
+		memClient := memoryLaneClient(dreamCfg, acpLane)
+		if memClient == nil {
+			return fmt.Errorf("-dream requires a memory-lane API key (providers.memory/opendesign.api_key, or SEEK_MEMORY_BASE_URL + a configured key)")
 		}
-		return runDream(ctx, dsClient, *dreamWrite)
+		return runDream(ctx, memClient, memoryLaneModel(), *dreamWrite)
 	}
 
 	if *model == "" {
@@ -1912,6 +1915,15 @@ func run() error {
 	// writes too (memory.ErrReadOnly) — two independent guards, because
 	// the hook's writers each reach a different file (M JSONL, soul.md,
 	// observe-stats.json).
+	// Background memory lane (c_eha42g): dream/distill/observe ride
+	// the subscription gateway regardless of the chat lane, so the
+	// pipeline survives default_provider moving off deepseek. ACP
+	// lanes get nil here — bot sessions stay write-silent. Resolved
+	// once, before every consumer below (memHook writers, skill
+	// auto-distill, the /distill TUI commands).
+	memLaneClient := memoryLaneClient(appCfg, acpLane)
+	memLaneModel := memoryLaneModel()
+
 	var memHook *memory.Hook
 	if memProject != nil || memSoul != nil {
 		memHook = &memory.Hook{
@@ -1919,10 +1931,10 @@ func run() error {
 			Soul:       memSoul,
 			ResultChan: make(chan memory.ObserveResult, 20),
 		}
-		if memWrite && memProject != nil && dsClient != nil {
-			memHook.Distiller = &memory.Distiller{Client: dsClient}
+		if memWrite && memProject != nil && memLaneClient != nil {
+			memHook.Distiller = &memory.Distiller{Client: memLaneClient, Model: memLaneModel}
 			memHook.HistoryProvider = ag.Messages
-			memHook.Dreamer = &memory.Dreamer{Client: dsClient}
+			memHook.Dreamer = &memory.Dreamer{Client: memLaneClient, Model: memLaneModel}
 
 			// Register memory_observe tool gated on $SEEK_AUTO_DISTILL.
 			// Default (unset / 1/true/yes/on) → registered so the model
@@ -2015,8 +2027,8 @@ func run() error {
 	// reasoner half exists (DeepSeek client + loaded skills); a nil-ish
 	// hook would no-op anyway, but keeping the Registry's Stack honest
 	// about what COULD run is worth the branch.
-	if dsClient != nil && skills != nil {
-		autoDistiller := &skilldistill.Distiller{Client: dsClient}
+	if memLaneClient != nil && skills != nil {
+		autoDistiller := &skilldistill.Distiller{Client: memLaneClient, Model: memLaneModel}
 		if v := os.Getenv(skilldistill.EnvSkillDistillModel); v != "" {
 			autoDistiller.Model = v // PRD §7: unattended quality-first switch to Pro
 		}
@@ -2267,27 +2279,27 @@ func run() error {
 	}
 
 	// /distill needs both the Project (where saved candidates land)
-	// and a Distiller (the thinking-mode round-trip). The Distiller is only
-	// constructible when we have a DeepSeek client — second-tier
-	// providers don't currently expose a Chat method on the same
-	// interface, so /distill is DeepSeek-only for now.
+	// and a Distiller (the thinking-mode round-trip). The Distiller is
+	// constructible whenever the background memory lane resolved a
+	// client (c_eha42g) — the subscription gateway speaks the same
+	// chat-completions wire the DeepSeek-shaped client needs.
 	//
 	// --memory=ro leaves it nil: /distill's whole output is a memory
 	// write, so offering it in a read-only session would be a button
 	// that always fails. nil is the TUI's documented "unavailable"
 	// signal (commands.go: "记忆不可用").
 	var distiller *memory.Distiller
-	if memWrite && memProject != nil && dsClient != nil {
-		distiller = &memory.Distiller{Client: dsClient}
+	if memWrite && memProject != nil && memLaneClient != nil {
+		distiller = &memory.Distiller{Client: memLaneClient, Model: memLaneModel}
 	}
 
 	// The skill segment of /distill (feature-skill-distill M-SD1) is
-	// same-shaped: needs the DeepSeek client for extraction and the
-	// loaded skill registry for the L0/L2 dedup context. nil on
-	// second-tier providers → /distill silently stays M-only.
+	// same-shaped: needs the memory-lane client for extraction and the
+	// loaded skill registry for the L0/L2 dedup context. nil lane →
+	// /distill silently stays M-only.
 	var skillDistiller *skilldistill.Distiller
-	if dsClient != nil && skills != nil {
-		skillDistiller = &skilldistill.Distiller{Client: dsClient}
+	if memLaneClient != nil && skills != nil {
+		skillDistiller = &skilldistill.Distiller{Client: memLaneClient, Model: memLaneModel}
 	}
 
 	// 柱 M interactive push: notify a configured webhook when a long
