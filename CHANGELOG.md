@@ -14,6 +14,7 @@
 - c_yc2thl：ASR 计费链路接线：pricing.ASRCost 至今零调用方，照 TTSCost 接线点对称接上
 - c_idinaj：resume 两断点：reconstruct 丢 `[plan: approved] (auto-approve-per-step)` 后缀、persistSession 不回写 Session.Plan
 - c_7vpiz5：测试 HOME 泄漏：acp_test/webfrontend_attach_test 未隔离 SEEK_HOME，PDF 落进真实 ~/.seek/projects（坑8 反复停卡疑似根因）
+- c_koutux：二线车道开流零重试 + 吞 sc.Err：opencode HTTPS/2 PROTOCOL_ERROR 一次打死整轮（openai client，覆盖 opencode/glm/opendesign/compatible 四车道）
 
 ## v0.13.1（2026-11-24）
 
