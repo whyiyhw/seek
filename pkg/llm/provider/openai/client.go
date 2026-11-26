@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime/debug"
@@ -54,14 +55,33 @@ type Client struct {
 	headers map[string]string
 }
 
+// newHTTPClient builds the client every constructor uses. The transport
+// itself lives in pkg/llm (llm.NewHTTPClient), so OpenAI / Anthropic /
+// Gemini adapters all share one handshake budget and one connection pool;
+// pkg/deepseek keeps an identical copy because it may not import pkg/llm
+// (CI layer-lint). Tests substitute a client with a short handshake
+// deadline via newWithClient.
+func newHTTPClient() *http.Client {
+	return llm.NewHTTPClient()
+}
+
 // New returns a Client pointed at the official OpenAI endpoint.
 func New(apiKey string) *Client {
-	return &Client{apiKey: apiKey, baseURL: defaultBaseURL, http: &http.Client{Timeout: 5 * time.Minute}}
+	return &Client{apiKey: apiKey, baseURL: defaultBaseURL, http: newHTTPClient()}
 }
 
 // NewCompatible returns a Client pointed at an OpenAI-compatible endpoint.
+// Every second-tier lane (OpenCode Go, GLM, OpenDesign Cloud, --provider=
+// compatible) arrives here through pkg/llm/compatible.
 func NewCompatible(apiKey, baseURL string) *Client {
-	return &Client{apiKey: apiKey, baseURL: baseURL, http: &http.Client{Timeout: 5 * time.Minute}}
+	return &Client{apiKey: apiKey, baseURL: baseURL, http: newHTTPClient()}
+}
+
+// newWithClient is the constructor seam for tests: everything a real client
+// does, over a caller-supplied http.Client (a short TLSHandshakeTimeout,
+// say). Production code has no reason to reach for it.
+func newWithClient(apiKey, baseURL string, hc *http.Client) *Client {
+	return &Client{apiKey: apiKey, baseURL: baseURL, http: hc}
 }
 
 // SetTokenSource replaces the static apiKey with a per-request credential
@@ -304,8 +324,8 @@ func convertTools(tools []llm.ToolDef) []openAITool {
 //
 //   - openStream retries a transient OPEN failure — transport errors
 //     (connection reset, EOF before a status line, HTTP/2
-//     PROTOCOL_ERROR), 5xx and 429 — once with a fixed backoff. Other 4xx
-//     are configuration problems retrying cannot fix.
+//     PROTOCOL_ERROR), 5xx and 429 — once. Other 4xx are configuration
+//     problems retrying cannot fix.
 //   - pumpStream re-opens the stream once when a body that DID open
 //     breaks (or ends cleanly) before producing a single event. Nothing
 //     reached the caller, so the re-open is invisible — the same shape
@@ -316,10 +336,33 @@ func convertTools(tools []llm.ToolDef) []openAITool {
 // which costs ~10× the tokens of a hit. Upstream may have billed the
 // discarded half-generation; that is the same trade the first-tier lane
 // makes, and one retry bounds it.
+//
+// The backoff is failure-class-dependent. A fast rejection (reset, EOF, a
+// 5xx body) is a blip: 500ms lets the upstream recover and costs nothing.
+// A TIMEOUT — net.Error with Timeout()==true, which is what a stalled TLS
+// handshake, a hung CONNECT or a dead proxy reports — means the path took
+// its whole budget and produced nothing. Retrying that 500ms later walks
+// straight back into the same stall; it needs a multiple of the time that
+// just elapsed to have any chance. Same rule in pkg/deepseek/retry.go
+// (that package cannot import pkg/llm; keep the two in step by hand).
 const (
 	maxRetries   = 1
 	retryBackoff = 500 * time.Millisecond
+	// timeoutBackoff backs off a retry whose previous attempt TIMED OUT.
+	// 3s is the shortest wait that both (a) clears a typical proxy/TLS
+	// stall and (b) stays inside a caller's patience for one turn.
+	timeoutBackoff = 3 * time.Second
 )
+
+// backoffFor picks the wait before the next attempt: a timeout gets the
+// long one, everything else the fixed short blip backoff.
+func backoffFor(lastErr error) time.Duration {
+	var ne net.Error
+	if errors.As(lastErr, &ne) && ne.Timeout() {
+		return timeoutBackoff
+	}
+	return retryBackoff
+}
 
 // ChatStream implements llm.Provider. The returned channel is always closed.
 //
@@ -397,7 +440,7 @@ func (c *Client) openStream(ctx context.Context, newRequest func() (*http.Reques
 		attempts++
 		if attempt > 0 {
 			traceRetry("open", attempts, lastErr)
-			if err := sleepCtx(ctx, retryBackoff); err != nil {
+			if err := sleepCtx(ctx, backoffFor(lastErr)); err != nil {
 				return nil, err
 			}
 		}
@@ -450,7 +493,7 @@ func (c *Client) pumpStream(ctx context.Context, initial *http.Response, newRequ
 			return
 		}
 
-		if err := sleepCtx(ctx, retryBackoff); err != nil {
+		if err := sleepCtx(ctx, backoffFor(readFailure(res))); err != nil {
 			emitTerminal(ctx, out, res, nil, attempts)
 			return
 		}

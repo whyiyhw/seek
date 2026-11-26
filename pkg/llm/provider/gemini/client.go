@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/whyiyhw/seek/pkg/llm"
 )
@@ -30,7 +29,7 @@ func New(apiKey string) *Client { return newWithBase(apiKey, defaultBaseURL) }
 
 // newWithBase is used by tests to inject a fake server URL.
 func newWithBase(apiKey, baseURL string) *Client {
-	return &Client{apiKey: apiKey, baseURL: baseURL, http: &http.Client{Timeout: 5 * time.Minute}}
+	return &Client{apiKey: apiKey, baseURL: baseURL, http: llm.NewHTTPClient()}
 }
 
 // Name implements llm.Provider.

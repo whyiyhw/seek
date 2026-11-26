@@ -140,7 +140,7 @@ func (c *Client) pumpChatStream(ctx context.Context, req *ChatRequest, initial *
 			return
 		}
 
-		if err := sleepCtx(ctx, retryBackoff); err != nil {
+		if err := sleepCtx(ctx, backoffFor(result.streamErr)); err != nil {
 			emitTerminalDone(out, result, nil)
 			return
 		}

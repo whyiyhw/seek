@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/whyiyhw/seek/pkg/llm"
 )
@@ -40,7 +39,7 @@ func newWithBase(apiKey, baseURL string) *Client {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		http:    &http.Client{Timeout: 5 * time.Minute},
+		http:    llm.NewHTTPClient(),
 	}
 }
 

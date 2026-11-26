@@ -19,6 +19,7 @@
 - c_42a7rf：seek judge 本体·上：internal/judge 纯逻辑内核——单条判读一次 Chat、verdict 三值解析、_meta 聚合（judge §6-5 前半）
 - c_dxrjjl：模型×lane 一致性闸 + opendesign 子代理路由：宿主只回传模型名时网关 wire id（eco）落官方 DeepSeek 车道 400——启动闸点名该钉的 lane（resolveProviderName 单源）；modelcap.Serves/LaneOf 分权 + providerOrder 修 map 随机序
 - c_4rp2py：--no-save 连带关记忆链：拆 --memory=off|ro|rw 正交开关 + --isolated 一把关（judge 前置缺口②③，§6-6）
+- c_3j2ovf：握手预算：车道继承 stdlib 10s TLS 握手超时、超时类失败又与瞬时 reset 共用 500ms 退避，opendesign 一轮死在 `TLS handshake timeout (after 2 attempts)`。改共享 20s transport（克隆 DefaultTransport，proxy/HTTP2 原样）+ 按失败类别退避（`net.Error.Timeout()` → 3s），覆盖 openai/compatible、anthropic、gemini 与 DeepSeek 一线
 
 ## v0.13.1（2026-11-24）
 
