@@ -215,6 +215,49 @@ func TestACPStartupLaneGate_AutoDetectMatchesBuildProvider(t *testing.T) {
 	}
 }
 
+// TestResolveProviderName_DefaultProviderShadowsKeys pins the c_tnujb6
+// order: an explicit default_provider declaration beats key-presence
+// auto-detection. The old order put the field BELOW the switch, so with
+// a normal multi-key config it could never fire — the declared default
+// was permanently shadowed by whichever key sat on disk.
+func TestResolveProviderName_DefaultProviderShadowsKeys(t *testing.T) {
+	t.Setenv("SEEK_HOME", t.TempDir())
+	t.Setenv("DEEPSEEK_API_KEY", "k")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("GLM_API_KEY", "")
+	t.Setenv("OPENCODE_API_KEY", "")
+	t.Setenv("OPENDESIGN_API_KEY", "sk-amr-k")
+
+	// No default_provider on disk → historical key-presence chain
+	// (deepseek first). The field's absence must keep old behavior.
+	cfg := loadGateConfig()
+	if cfg.DefaultProvider != "" {
+		t.Fatalf("fixture expects no default_provider, got %q", cfg.DefaultProvider)
+	}
+	if got := resolveProviderName("", cfg); got != "deepseek" {
+		t.Fatalf("no default_provider → key-presence order, want deepseek, got %q", got)
+	}
+
+	// Explicit default_provider wins over EVERY saved key…
+	cfg.DefaultProvider = "opendesign"
+	if got := resolveProviderName("", cfg); got != "opendesign" {
+		t.Fatalf("default_provider must shadow the deepseek key, got %q", got)
+	}
+	// …and the shared gate predicts the same lane: the eco id that the
+	// deepseek auto-detect refused two tests up is legal again — the
+	// exact shadowing this card closes, from the gate's seat.
+	if err := acpStartupLaneGate("deepseek-v4.1-flash-eco", "", cfg); err != nil {
+		t.Fatalf("default_provider=opendesign legalizes eco despite deepseek key: %v", err)
+	}
+
+	// The --provider flag still outranks the config default.
+	if got := resolveProviderName("glm", cfg); got != "glm" {
+		t.Fatalf("flag must outrank default_provider, got %q", got)
+	}
+}
+
 // TestACPStartupLaneGate_OpenDesignLaneServesEco is ACCEPTANCE ②'s
 // construction-level half: with SEEK_ACP_PROVIDER=opendesign + the eco
 // model, the lane that gets built is the OpenDesign gateway and the

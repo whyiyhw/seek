@@ -2,6 +2,7 @@
 
 ## 已进 main、未部署
 
+- c_tnujb6：resolveProviderName 优先级修复：default_provider 显式声明压过 key 存在性探测（旧行 flag > key 探测 > default_provider，多 key config 里字段永远轮不到、被磁盘上的 key 永久遮蔽）；声明缺 key/未知 provider 启动时报错而非静默换道；--provider 旗标仍最高；guide-config.md 字段说明同步
 - c_eha42g：后台记忆管线换车道：dream/distill/memory_observe/skill-distill/-dream 改走后台记忆车道（默认 opendesign 订阅网关 + deepseek-v4.1-flash-eco，env SEEK_MEMORY_BASE_URL/MODEL 与 providers.memory 可覆盖），不再计费自有 DeepSeek per-token key；ACP 车道保持写静默（bot 会话不写 soul）；管线不再依附 dsClient——聊天车道离开 deepseek 后记忆功能继续可用
 - c_wjo6wy：R2 verdict 持久化落点：autopilot Report 落盘为可积累 JSONL（§9.5③3）
 - c_jxwsfz：--json 空返回的机器可判定信号（judge 前置②：静默空返回 exit 0 陷阱）

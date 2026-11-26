@@ -38,7 +38,7 @@ API 密钥的查找优先级从高到低：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm` / `opencode`）。空字符串 = 不指定，走自动检测 |
+| `default_provider` | string | 默认使用的 provider（`deepseek` / `anthropic` / `openai` / `gemini` / `glm` / `opencode` / `opendesign`）。**显式声明压过 key 存在性自动检测**（c_tnujb6）：设了就走这条车道，`--provider` 旗标仍最高；空字符串 = 不指定，走自动检测（有哪个 key 就用哪个，deepseek 最先）。声明的 provider 缺 key 会在启动时报错，而不是悄悄换车道 |
 | `providers` | object | 各 provider 的凭证配置，key 为 provider 名 |
 | `providers.<name>.api_key` | string | API 密钥 |
 | `providers.<name>.base_url` | string | 可选端点覆盖（**完整 POST URL**，不会自动补 `/chat/completions`）。当前用于 `glm`：Coding Plan 订阅必须指向 `/api/coding/paas/v4`，见 §3 |
