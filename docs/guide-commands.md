@@ -149,3 +149,4 @@ seek kill <id>                     # SIGTERM a task's process group, then SIGKIL
 | `GLM_BASE_URL` | GLM endpoint override — Coding Plan subscriptions must use `https://open.bigmodel.cn/api/coding/paas/v4/chat/completions` (see [guide-config.md](guide-config.md) §3) |
 | `SEEK_HOME` | Override `~/.seek/` location |
 | `SEEK_WEBFETCH_ALLOW_HTTP=1` | Allow http:// URLs in webfetch (dev only) |
+| `SEEK_LLM_TRACE=1` | One stderr line per second-tier stream retry (openai/opencode/glm/opendesign/compatible). Silent recovery is undebuggable otherwise; off by default so the wire stays byte-identical |
