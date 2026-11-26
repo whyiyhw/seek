@@ -1015,7 +1015,7 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 
 // TestWeb_PageVisualBase pins the W6-1 card (c_pozbmd): the page's whole
 // visual base moves to dsh's measured shell values, with the type stack
-// as the load-bearing piece. Three assertions, each structural:
+// as the load-bearing piece. Four assertions, each structural:
 //
 //  1. the BODY rule carries no monospace family — the old
 //     `font: 14px/1.5 ui-monospace, Menlo, monospace` is what made the
@@ -1025,10 +1025,13 @@ func TestWeb_PageMobileResponsive(t *testing.T) {
 //     `monospace` appears ZERO times and `Menlo` exactly ONCE, on the
 //     --seek-mono declaration: the code stack deliberately has no bare
 //     `monospace` tail (Windows CJK drops to SimSun, spec §b);
-//  3. the design-scale tokens are converged: font sizes come from the
+//  3. `ui-monospace` is gone from the page entirely — the old body
+//     shorthand was its only home, and the token stack deliberately
+//     starts at SF Mono instead;
+//  4. the design-scale tokens are converged: font sizes come from the
 //     14/13/12 + 21/19/18 title ladder (16px is the documented iOS
 //     input-zoom guard inside the ≤640px block), weights from
-//     400/500/600/700, radii from 8/22/24/999.
+//     400/500/600/700, radii from 8/12/22/999.
 //
 // Raw-hex discipline is pinned by TestWeb_PageThemeSettings; this test
 // only guards the places W6-1 rewrote, so a later card cannot quietly
@@ -1076,6 +1079,13 @@ func TestWeb_PageVisualBase(t *testing.T) {
 	if !strings.Contains(stripped, `--seek-mono: "SF Mono", "JetBrains Mono", Menlo, Consolas;`) {
 		t.Errorf("--seek-mono is missing or its stack changed — pre/code/kbd/.mono all ride this token")
 	}
+	// ③ `ui-monospace` must be gone from the page: it was the old body
+	// shorthand's family, and the token stack starts at SF Mono instead.
+	// (The comments (already stripped above) name the old rule while
+	// explaining the fix, which is why this checks `stripped`.)
+	if n := strings.Count(stripped, "ui-monospace"); n != 0 {
+		t.Errorf("ui-monospace appears %d time(s) — the page's mono face is --seek-mono only (W6-1 §2)", n)
+	}
 	// Mono may only be reached through the token: a literal family anywhere
 	// else means a second stack sneaked in beside the token.
 	for _, line := range strings.Split(stripped, "\n") {
@@ -1088,7 +1098,7 @@ func TestWeb_PageVisualBase(t *testing.T) {
 		t.Errorf("literal font-family outside the token layer: %q", strings.TrimSpace(line))
 	}
 
-	// ③ the design scale is converged (the ladder the manifest counts).
+	// ④ the design scale is converged (the ladder the manifest counts).
 	allowedSize := map[string]bool{"12": true, "13": true, "14": true, "16": true, "18": true, "19": true, "21": true}
 	for _, m := range reFontSize.FindAllStringSubmatch(stripped, -1) {
 		if !allowedSize[m[1]] {

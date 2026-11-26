@@ -201,8 +201,8 @@
   /* ---- 主题 token（W5 卡 c_ni7mzw）----
      两套值、一个属性开关：`html[data-theme="light"]` 只翻变量层，组件
      CSS 一律 var(--seek-*)，没有任何裸色值（dsh 的三层体系缩成两层：
-     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色，
-     与 W5 之前逐字节同色（c_ni7mzw 之前是硬编码 hex，值原样搬过来）。
+     静态色板与语义别名在 seek 这个体量上合成一层就够）。缺省=暗色；
+     色值自 W6-1（c_pozbmd）起按 dsh 页面实测重定，不再是 W5 之前的旧值。
      首屏由 <head> 里的内联 bootstrap 在样式表解析前写好 data-theme，
      故不存在「先画暗再翻亮」的闪烁；CSP 对该内联块的 sha256 由
      webfrontend_static.go 从同一份 embed 现算，手改页面不会失配。 */
@@ -232,14 +232,14 @@
     --seek-line-focus:#4b586b; /* 输入聚焦边框 */
     --seek-fg:    #f9fafb;   /* 正文（dsh bluish-50；inset 17.5:1） */
     /* 次级/三级：dsh 暗列 bluish-300/400 档，逐对压 inset/panel/soft/accent
-       均 ≥4.5:1（soft #2c2c2e 上 7.3 / 5.1）。 */
+       均 ≥4.5:1（soft #232324 上 7.3 / 5.1）。 */
     --seek-fg-soft:#b6bcc4;  /* 次级：工具行/徽标/卡片标题 */
     --seek-fg-dim:#979da6;   /* 三级：元信息/字段名 */
     --seek-ok:    #22c55e;   /* green-500 */
     --seek-warn:  #f59e0b;   /* amber-500 */
     --seek-warn-bg:#3a3222;  /* 警示条底（SSE 断线提示）——底色与前景分开
                                 成对，亮色主题才好各自调值 */
-    --seek-err:   #fb7575;   /* red-400 提亮一档：red-500 #f25a5a 在 soft
+    --seek-err:   #fb7575;   /* red-400 提亮一档：red-500 #f25a5a 在行内码底
                                 (#2c2c2e) 只有 4.24，卡片上的错误色不达 AA */
     --seek-link:  #679efe;   /* 链接=品牌蓝（与 --seek-brand 同值） */
     --seek-rec:   #8f4a4a;   /* 录音中按钮底 */
@@ -275,8 +275,11 @@
     --seek-line-2:rgba(0,0,0,.04);
     --seek-line-focus:#7b8798;
     --seek-fg:    #0f1115;
-    --seek-fg-soft:#5c636d;
-    --seek-fg-dim: #5f666f;
+    /* 次级取 §2 亮列 #61666b（白/panel/soft/accent 四底最低 4.98:1）。三级
+       的实测值 #81858c 在四个亮底上只有 3.2–3.7（AA 正文不达标），故取
+       仍比次级浅一档、但四底都 ≥4.5 的 #666b71（最低 4.62，soft 上）。 */
+    --seek-fg-soft:#61666b;
+    --seek-fg-dim: #666b71;
     --seek-ok:    #14703c;
     --seek-warn:  #8a5a00;
     --seek-warn-bg:#fbf0d5;
@@ -460,9 +463,8 @@
   #menu .mi:last-child { border-bottom: 0; }
   #menu .mi .ic { width: 15px; height: 15px; align-self: center; flex: none; }
   #menu .mi.hl { background: var(--seek-sel); }
-  /* 高亮行的次级文字升主文色（c_lbys7d）：accent 底压 fg-dim 只有 3.59:1、
-     fg-soft 4.11:1（暗侧），主文色 7.73——同 .sess-row.cur 的口径；亮色侧
-     本已 4.85/6.13，一并对齐只会更稳。 */
+  /* 高亮行的次级文字升主文色（c_lbys7d）：选中层压 fg-dim 的余量本来就薄，
+     升到主文色后同 .sess-row.cur 的口径；dsh 的菜单高亮行同款做法。 */
   #menu .mi.hl .nm, #menu .mi.hl .ds, #menu .mi.hl .sid { color: var(--seek-fg); }
   #menu .mi .nm { color: var(--seek-fg-soft); white-space: nowrap; }
   #menu .mi .ds { color: var(--seek-fg-dim); font-size: 12px; overflow: hidden;
@@ -666,8 +668,8 @@
   #browser-body { flex: 1; display: flex; min-height: 0; }
   /* 行元素是 div（role=button）：行内还要装改名/归档操作钮与改名输入框，
      button 套 button/input 是非法嵌套，div 承载才装得下（W5 c_rqcuaa）。
-     底色仍显式透明落回 panel（别吃全局 button 的 accent 底）；
-     .cur 的 accent 底在各自规则里。 */
+     底色仍显式透明落回 panel（别吃全局 button 的软底）；
+     .cur 的选中底在各自规则里。 */
   .sess-row { display: block; width: 100%; text-align: left; border-radius: 0;
               border-bottom: 1px solid var(--seek-line-2); padding: 8px 12px;
               background: transparent; cursor: pointer; position: relative; }
@@ -675,12 +677,17 @@
                   white-space: nowrap; }
   /* t2 行是两段（左=时间/轮次/模型，右=per-session cost 列，c_6xktw4）：
      flex 让 cost 右贴不换行，左段自己省略。cost 走 --seek-usd（c_jf3grt：
-     成本不是健康度，别和绿撞语义）；数字用等宽数字列，改名/翻页时不抖。 */
+     成本不是健康度，别和绿撞语义）；数字用 tabular-nums 保列宽，但字族
+     跟着 body 的无衬线走（W6-1：会话列表元信息是 UI 文本，不是代码）。 */
   .sess-row .t2 { display: flex; gap: 8px; justify-content: space-between;
                   color: var(--seek-fg-dim); font-size: 13px; line-height: 20px; margin-top: 2px; }
   .sess-row .t2l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sess-row .t2c { flex: none; color: var(--seek-usd); font-family: var(--seek-mono);
+  .sess-row .t2c { flex: none; color: var(--seek-usd);
                    font-variant-numeric: tabular-nums; }
+  /* 悬停行（W6-1，dsh interactive-bg-hover）：列表行悬停提一档底色。
+     排在 .cur 之前：选中行自己的 --seek-sel 更亮，悬停不该把它盖掉；
+     .arch:not(.cur) 在更后面，归档行悬停也不翻回 normal 底。 */
+  .sess-row:hover:not(.cur) { background: var(--seek-hover); }
   .sess-row.cur { background: var(--seek-sel); }
   /* 选中行仍升主文色：选中层是 alpha 叠层（不是实色），升到 fg 后两主题都
      留足余量（暗 13.3、亮 15.9）；dsh 的选中行同款做法。 */
@@ -691,7 +698,7 @@
      降一档（inset 是「页面底」那一档，暗更暗、亮更白，两个方向都表示
      「非活动面」），文字保持 fg/fg-dim：t1 12.9/16.7、t2 6.0/6.1。归档态
      另由 t2 的「已归档 ·」前缀与行内归档钮表达，不靠整体透明度。
-     :not(.cur) 是让「归档 + 选中」仍吃 accent 底（.cur 与 .arch 同特异
+     :not(.cur) 是让「归档 + 选中」仍吃选中底（.cur 与 .arch 同特异
      性，本规则在其后，不排除会盖掉选中底）。 */
   .sess-row.arch:not(.cur) { background: var(--seek-inset); }
   .sess-row:focus-visible { outline: 1px solid var(--seek-line-focus); }
@@ -772,8 +779,8 @@
   .ag-row .desc { flex: 1; overflow: hidden; text-overflow: ellipsis;
                   white-space: nowrap; }
   .ag-row .t2 { display: block; color: var(--seek-fg-dim); font-size: 12px; margin-top: 2px; }
-  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——accent 底压 dim
-     只有 3.59:1（暗侧），fg 上 7.73；亮色侧 4.85 一并对齐（13.2）。 */
+  /* 选中行的 t2 升主文色（c_lbys7d）：同 .sess-row.cur——选中层压 dim 的余量
+     薄，升到主文色后两主题都留足。 */
   .ag-row.cur .t2 { color: var(--seek-fg); }
   .ag-badge { display: inline-flex; align-items: center; gap: 2px;
               font-size: 12px; flex: none; white-space: nowrap; }
@@ -822,8 +829,8 @@
                  font-size: 12px; margin-top: 2px; min-width: 0; }
   .mem-row .t2 .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mem-row .t2 .ic { width: 12px; height: 12px; color: var(--seek-warn); flex: none; }
-  /* 选中行 t2 升主文色（c_lbys7d）：accent 底压 dim 只有 3.59:1（暗侧），
-     fg 上 7.73。.t2 .ic 的 warn 是图标位（4.9:1，1.4.11 的 3:1 门槛），
+  /* 选中行 t2 升主文色（c_lbys7d）：选中层压 dim 的余量薄，升到主文色同
+     .sess-row.cur。.t2 .ic 的 warn 是图标位（1.4.11 的 3:1 门槛），
      它直接声明在 svg 上，不受父级这条 color 影响，语义色保留。 */
   .mem-row.cur .t2 { color: var(--seek-fg); }
   #mem-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -916,9 +923,11 @@
   .set-row { display: flex; justify-content: space-between; gap: 12px;
              padding: 3px 0; }
   .set-row .k { color: var(--seek-fg-dim); }
-  /* 设置行的值多为路径/模型 id/数字——§2 的等宽场景，走 --seek-mono。 */
+  /* 设置行的值（W6-1 口径）：这是 UI 文本行——provider 名、开关态、tokens
+     数、路径混排，整块读的是「配置长什么样」而不是代码，故跟 body 的无衬线
+     走，只有数字列用 tabular-nums 对齐。等宽只留给 pre/code/kbd/显式 .mono。 */
   .set-row .v { color: var(--seek-fg); text-align: right; word-break: break-all;
-                font-family: var(--seek-mono); font-size: 13px; }
+                font-variant-numeric: tabular-nums; }
   .set-note { color: var(--seek-fg-dim); font-size: 13px; margin-top: 6px;
               line-height: 20px; }
   /* 主题三态切换（亮/暗/跟随系统）：按钮组，当前态高亮。次操作钮
@@ -999,18 +1008,19 @@
      icon-style-consistent）。消息正文里的 emoji 是用户/模型内容，不属于
      本 sprite 管辖。图标随文字色走 currentColor：底色深浅由所在按钮档位
      决定，不另设图标色 token。
-     ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言）====
+     ==== 按钮三档（card c_25d2ey 收敛口径，全页一套语言；W6-1 改主 CTA 配色）====
        0. 缺省 = 次操作：soft 底（--seek-soft）文字钮——顶栏指令组/视图组、
           主题三选、加载更多、#sess-back、#hk-pause、审批卡 n/a、目录
           浏览器。图标 14px + 文字。CSS 基线即此档，各钮不再自造底色。
-       1. 主操作：.btn-primary（accent 实底）——每屏唯一主 CTA：#send
-          （生成中变 .stop 停止键）、#reconn 手动重连、审批卡「允许」。
-          不加图标（文字即语义）。
+       1. 主操作：.btn-primary（单色，--seek-primary/--seek-primary-fg）——
+          亮=近黑底白字、暗=近白底黑字；每屏唯一主 CTA：#reconn 手动重连、
+          审批卡「允许」。#send 是品牌蓝实底（--seek-cta，全页唯一蓝按钮），
+          生成中变 .stop 停止键。不加图标（文字即语义）。
        2. 图标钮：.btn-icon（soft 底 26×26 方框，.sm=22×22 行内档）——
           侧栏 新建/归档/折叠、会话行 改名/归档、附件、麦克风。SVG 16px
           居中，title+aria-label 双挂（icon-only button 必须 aria-label，
           ui-ux-pro-max aria-labels）。开关态用 .on / .rec / .stop 高亮底
-          （accent / rec），不换图标语义。 -->
+          （--seek-sel / --seek-rec），不换图标语义。 -->
 <svg class="sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
   <defs>
     <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></symbol>
