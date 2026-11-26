@@ -721,16 +721,18 @@ func run() error {
 		return err
 	}
 
-	// OpenCode Go lane: seed the model catalogue from the disk cache and
-	// kick a background refresh. Both are best-effort — every failure
-	// path leaves the compiled baseline (pricing.OpenCodeGoModels, already
+	// OpenCode Go catalogue: seed from the disk cache and kick one
+	// background refresh. Both are best-effort — every failure path
+	// leaves the compiled baseline (pricing.OpenCodeGoModels, already
 	// installed as Rows()) in place, and the goroutine never blocks
 	// startup or an inference call. The catalogue feeds menus, the cost
-	// display and the /compact threshold only; it is not part of the
-	// system prompt, so a refresh can't disturb the prefix cache.
-	if provLabel == "OpenCode" {
-		initOpenCatalog()
-	}
+	// display, the /compact threshold AND the modelcap vision/files
+	// grants; it is not part of the system prompt, so a refresh can't
+	// disturb the prefix cache.
+	//
+	// Gate: this machine's OpenCode CREDENTIAL, never the lane this
+	// process launched on — see initCatalogueAtStartup (card c_nfeloo).
+	initCatalogueAtStartup(loadGateConfig())
 
 	// Resolve which session we're operating on. Priority:
 	//   -resume <id>  → load that session (error if missing)
@@ -4978,12 +4980,65 @@ func newGLMProvider(cfg config.Config, apiKey, baseURLFlag string) llm.Provider 
 // against. --base-url overrides.
 const opencodeBaseURL = "https://opencode.ai/inference/go/openai/v1/chat/completions"
 
-// openCatalog is the OpenCode lane's live model catalogue: the compiled
-// baseline (pricing.OpenCodeGoModels) unless a cache or a refresh says
-// otherwise. nil for every other lane — readers must treat nil as "use
-// the compiled list". Populated once by initOpenCatalog; the background
-// refresh installs new snapshots under the catalogue's own lock.
+// openCatalog is the OpenCode Go gateway's live model catalogue: the
+// compiled baseline (pricing.OpenCodeGoModels) unless a cache or a
+// refresh says otherwise. nil when this machine carries no OpenCode
+// credential at all (nothing could ever refresh it) — readers must treat
+// nil as "use the compiled list". Populated once by initOpenCatalog; the
+// background refresh installs new snapshots under the catalogue's own
+// lock.
 var openCatalog *opencatalog.Catalogue
+
+// openCatalogRefresh is the background fetch, split out as a seam: any
+// test that exercises the startup gate WILL have a credential and
+// therefore reach here, and a unit test must never spawn a real request
+// to opencode.ai (nor leave a goroutine racing the package globals).
+// Production assigns the goroutine exactly as it always did.
+var openCatalogRefresh = func(c *opencatalog.Catalogue) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = c.Refresh(ctx, opencatalog.DefaultClient())
+	}()
+}
+
+// initCatalogueAtStartup answers ONE question at startup: should this
+// process install the OpenCode Go catalogue now?
+//
+// The answer is "yes iff this MACHINE has an OpenCode credential" —
+// deliberately not "iff this process launched on the OpenCode lane"
+// (card c_nfeloo). The catalogue is not a lane decoration: Snapshot.
+// Install pushes the gateway's own catalogue into the pricing/budget
+// tables AND into modelcap's vision/files grants (opencatalog.go), and
+// modelcap's static table only covers each lane's DEFAULT models. Catalogue
+// -only ids (hy4-flash-free, hungerg-free, longcat-2.5, …) are vision-
+// capable solely because of those grants, and modelcap answers
+// deny-by-default for ids it has never heard of. Gating the install on
+// the launch lane therefore meant: launch on deepseek, switch the
+// session onto opencode:hy4-flash-free (exactly what ACP hosts do
+// through session/set_config_option), paste a screenshot → a
+// "当前模型不支持图片输入" note instead of the image. Same gate also
+// left the ACP dropdown's opencode rows nil (compiled baseline only), so
+// catalogue-only ids never appeared in it.
+//
+// Why not initialise lazily on lane switch: that would put a synchronous
+// disk read + a background HTTP refresh on SetConfigOption's request
+// path, and the TUI's /model picker (which switches models inside one
+// lane) would still miss it.
+//
+// cfg is the caller's already-loaded config (main's loadGateConfig) so
+// the gate does not add a config read of its own; initOpenCatalog still
+// re-reads it on its own best-effort path.
+func initCatalogueAtStartup(cfg config.Config) {
+	if !laneHasCredential(cfg, "opencode") {
+		// No key and no stored browser login: no refresh is possible,
+		// and installing the cached snapshot would advertise models this
+		// process could never call. Behaviour is exactly what it was
+		// before this gate: compiled baseline, static capability table.
+		return
+	}
+	initOpenCatalog()
+}
 
 // initOpenCatalog seeds the process-wide catalogue at startup: a usable
 // disk snapshot first (so a warm start is offline-complete), then one
@@ -5011,16 +5066,13 @@ func initOpenCatalog() {
 	} else {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = openCatalog.Refresh(ctx, opencatalog.DefaultClient())
-	}()
+	openCatalogRefresh(openCatalog)
 }
 
 // openCatalogRows is the single reader the ACP dropdown and the TUI
-// picker share. nil (lane inactive) means "fall back to the compiled
-// list", which both surfaces already do.
+// picker share. nil (no OpenCode credential on this machine — see
+// initCatalogueAtStartup) means "fall back to the compiled list", which
+// both surfaces already do.
 func openCatalogRows() []pricing.OpenCodeGoModel {
 	if openCatalog == nil {
 		return nil
@@ -5035,7 +5087,7 @@ func openCatalogRows() []pricing.OpenCodeGoModel {
 func refreshOpenCatalog(ctx context.Context) (int, error) {
 	switch {
 	case openCatalog == nil:
-		return 0, fmt.Errorf("opencode catalogue: lane not active")
+		return 0, fmt.Errorf("opencode catalogue: not active — no OpenCode credential on this machine (run `seek auth opencode` or set OPENCODE_API_KEY)")
 	case !opencatalog.Enabled():
 		return 0, fmt.Errorf("opencode catalogue: disabled by SEEK_OPENCODE_CATALOG")
 	case openCatalog.APIKey == "" && openCatalog.Bearer == nil:

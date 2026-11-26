@@ -327,6 +327,11 @@ func runJudgeE2E(t *testing.T, backendURL, workDir string, stdinData string, ext
 		"SEEK_HOME="+workDir,
 		"HOME="+workDir,
 		"OPENAI_API_KEY=e2e-key",
+		// Same seam as startACPChild: the startup catalogue gate keys off
+		// the OpenCode CREDENTIAL (c_nfeloo), so an ambient
+		// OPENCODE_API_KEY in the developer's shell must not make these
+		// children fetch the catalogue from opencode.ai.
+		"OPENCODE_API_KEY=",
 		"SEEK_NO_WEBFETCH=1",
 		"SEEK_NO_WEBSEARCH=1",
 		"SEEK_AUTO_DISTILL=0",
